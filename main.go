@@ -828,7 +828,7 @@ func normalizeGopkgInURL(packageName string) string {
 	// gopkg.in URLs can have different formats:
 	// 1. gopkg.in/user/repo.vN -> github.com/user/repo
 	// 2. gopkg.in/repo.vN -> github.com/go-pkg/repo (for go-pkg namespace)
-	
+
 	if len(parts) == 1 {
 		// Format: gopkg.in/repo.vN
 		repoWithVersion := parts[0]
@@ -853,12 +853,12 @@ func normalizeGopkgInURL(packageName string) string {
 	} else if len(parts) >= 2 {
 		// Format: gopkg.in/user/repo.vN or gopkg.in/user/repo/subpkg.vN
 		user := parts[0]
-		
+
 		// Find which part has the version suffix
 		var repoWithVersion string
 		var repoIndex int
 		var hasVersionSuffix bool
-		
+
 		// Check each part for a version suffix (.vN)
 		for i := 1; i < len(parts); i++ {
 			part := parts[i]
@@ -885,7 +885,7 @@ func normalizeGopkgInURL(packageName string) string {
 				break
 			}
 		}
-		
+
 		if hasVersionSuffix {
 			// Find the version suffix in the identified part
 			for i := len(repoWithVersion) - 1; i >= 0; i-- {
@@ -901,10 +901,10 @@ func normalizeGopkgInURL(packageName string) string {
 					}
 					if isNumeric {
 						partWithoutVersion := repoWithVersion[:i]
-						
+
 						// Build the GitHub URL
 						result := "github.com/" + user
-						
+
 						// Add the repo name (if repoIndex == 1, it's the repo part)
 						if repoIndex == 1 {
 							result += "/" + partWithoutVersion
@@ -912,22 +912,22 @@ func normalizeGopkgInURL(packageName string) string {
 							// It's a subpackage with version, keep the repo part as-is
 							result += "/" + parts[1]
 						}
-						
+
 						// Add any path components before the versioned part
 						for j := 2; j < repoIndex; j++ {
 							result += "/" + parts[j]
 						}
-						
+
 						// Add the versioned part without the version
 						if repoIndex > 1 {
 							result += "/" + partWithoutVersion
 						}
-						
+
 						// Add any remaining path components
 						if repoIndex+1 < len(parts) {
 							result += "/" + strings.Join(parts[repoIndex+1:], "/")
 						}
-						
+
 						return result
 					}
 				}
@@ -945,7 +945,7 @@ func normalizeGopkgInURL(packageName string) string {
 func extractCanonicalPackageName(packageName string) string {
 	// First, normalize gopkg.in URLs
 	normalized := normalizeGopkgInURL(packageName)
-	
+
 	// Then check if the package has a major version suffix (/v2, /v3, etc.)
 	// This pattern matches Go module major version suffixes
 	parts := strings.Split(normalized, "/")
@@ -993,11 +993,11 @@ type GoPackageInfo struct {
 func parseGoPackage(pkg *extractor.Package) GoPackageInfo {
 	// Normalize gopkg.in URLs for canonical comparison
 	normalizedName := normalizeGopkgInURL(pkg.Name)
-	
+
 	info := GoPackageInfo{
-		OriginalName:  pkg.Name,                                 // Keep original for display
-		FullName:      normalizedName,                           // Normalized for comparison
-		CanonicalName: extractCanonicalPackageName(pkg.Name),    // This will handle gopkg.in normalization internally
+		OriginalName:  pkg.Name,                              // Keep original for display
+		FullName:      normalizedName,                        // Normalized for comparison
+		CanonicalName: extractCanonicalPackageName(pkg.Name), // This will handle gopkg.in normalization internally
 		Version:       pkg.Version,
 		MajorVersion:  1, // Default to v1 if no suffix
 	}

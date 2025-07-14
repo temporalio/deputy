@@ -21,7 +21,7 @@ func TestExtractCanonicalPackageName(t *testing.T) {
 		{"github.com/example/pkg/v1", "github.com/example/pkg/v1"}, // v1 doesn't get stripped
 		{"github.com/example/pkg/v0", "github.com/example/pkg/v0"}, // v0 doesn't get stripped
 		{"github.com/example/something", "github.com/example/something"},
-		
+
 		// gopkg.in URL tests
 		{"gopkg.in/go-jose/go-jose.v2", "github.com/go-jose/go-jose"},
 		{"gopkg.in/go-jose/go-jose.v3", "github.com/go-jose/go-jose"},
@@ -30,10 +30,10 @@ func TestExtractCanonicalPackageName(t *testing.T) {
 		{"gopkg.in/check.v1", "github.com/go-check/check"},
 		{"gopkg.in/user/repo.v4", "github.com/user/repo"},
 		{"gopkg.in/user/repo/subpkg.v2", "github.com/user/repo/subpkg"},
-		
+
 		// Edge cases
-		{"gopkg.in/invalid", "gopkg.in/invalid"}, // No version suffix
-		{"gopkg.in/", "gopkg.in/"},               // Empty after prefix
+		{"gopkg.in/invalid", "gopkg.in/invalid"},                        // No version suffix
+		{"gopkg.in/", "gopkg.in/"},                                      // Empty after prefix
 		{"github.com/go-jose/go-jose/v4", "github.com/go-jose/go-jose"}, // Regular GitHub URL with version
 	}
 
@@ -59,12 +59,12 @@ func TestNormalizeGopkgInURL(t *testing.T) {
 		{"gopkg.in/check.v1", "github.com/go-check/check"},
 		{"gopkg.in/user/repo.v4", "github.com/user/repo"},
 		{"gopkg.in/user/repo/subpkg.v2", "github.com/user/repo/subpkg"},
-		
+
 		// URLs that should not be changed
 		{"github.com/go-jose/go-jose/v4", "github.com/go-jose/go-jose/v4"},
 		{"modernc.org/cc/v3", "modernc.org/cc/v3"},
 		{"example.com/pkg", "example.com/pkg"},
-		
+
 		// Edge cases
 		{"gopkg.in/invalid", "gopkg.in/invalid"}, // No version suffix
 		{"gopkg.in/", "gopkg.in/"},               // Empty after prefix
@@ -91,7 +91,7 @@ func TestParseGoPackage(t *testing.T) {
 		{"modernc.org/cc/v4", "4.24.4", "modernc.org/cc", 4},
 		{"modernc.org/cc", "1.0.0", "modernc.org/cc", 1},
 		{"github.com/example/pkg/v2", "2.1.0", "github.com/example/pkg", 2},
-		
+
 		// gopkg.in URL tests
 		{"gopkg.in/go-jose/go-jose.v2", "2.6.3", "github.com/go-jose/go-jose", 2},
 		{"gopkg.in/go-jose/go-jose.v3", "3.0.0", "github.com/go-jose/go-jose", 3},
