@@ -1,14 +1,19 @@
 package main
 
 import (
+	"bufio"
+	"bytes"
 	"context"
 	"crypto/x509"
+	"encoding/json"
 	"fmt"
+	"net/http"
 	"os"
 	"os/signal"
 	"path/filepath"
 	"slices"
 	"strings"
+	"time"
 
 	pb "deps.dev/api/v3"
 	"github.com/charmbracelet/fang"
@@ -20,7 +25,6 @@ import (
 	"github.com/google/osv-scalibr/log"
 	pl "github.com/google/osv-scalibr/plugin/list"
 	"github.com/spf13/cobra"
-	"golang.org/x/mod/module"
 	"golang.org/x/mod/semver"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
@@ -64,10 +68,106 @@ const (
 // PackageChange represents a change to a package between references
 type PackageChange struct {
 	Name          string
+	OldName       string // Original package name (for major version path changes)
 	TargetVersion string // Version in the target reference
 	BaseVersion   string // Version in the base reference
 	ChangeType    PackageChangeType
 	Ecosystem     string // The package ecosystem (go, npm, pip, etc.)
+	IsDirect      bool   // Whether this is a direct dependency
+}
+
+// OSV API structures for vulnerability scanning
+type OSVQuery struct {
+	Package *OSVPackage `json:"package,omitempty"`
+	Version string      `json:"version,omitempty"`
+}
+
+type OSVPackage struct {
+	Name      string `json:"name"`
+	Ecosystem string `json:"ecosystem"`
+}
+
+type OSVBatchRequest struct {
+	Queries []OSVQuery `json:"queries"`
+}
+
+type OSVBatchResponse struct {
+	Results []OSVResult `json:"results"`
+}
+
+type OSVResult struct {
+	Vulns []OSVVulnerability `json:"vulns"`
+}
+
+type OSVVulnerability struct {
+	ID         string         `json:"id"`
+	Summary    string         `json:"summary,omitempty"`
+	Details    string         `json:"details,omitempty"`
+	Aliases    []string       `json:"aliases,omitempty"`
+	Severity   []Severity     `json:"severity,omitempty"`
+	Published  string         `json:"published,omitempty"`
+	Modified   string         `json:"modified,omitempty"`
+	References []OSVReference `json:"references,omitempty"`
+	Affected   []OSVAffected  `json:"affected,omitempty"`
+}
+
+type OSVReference struct {
+	Type string `json:"type,omitempty"`
+	URL  string `json:"url"`
+}
+
+type OSVAffected struct {
+	Package           OSVPackage     `json:"package"`
+	Ranges            []OSVRange     `json:"ranges,omitempty"`
+	Versions          []string       `json:"versions,omitempty"`
+	EcosystemSpecific map[string]any `json:"ecosystem_specific,omitempty"`
+}
+
+type OSVRange struct {
+	Type   string     `json:"type"`
+	Events []OSVEvent `json:"events"`
+}
+
+type OSVEvent struct {
+	Introduced string `json:"introduced,omitempty"`
+	Fixed      string `json:"fixed,omitempty"`
+}
+
+type Severity struct {
+	Type  string `json:"type"`
+	Score string `json:"score"`
+}
+
+// Vulnerability represents a vulnerability found in a package
+type Vulnerability struct {
+	ID            string
+	Aliases       []string
+	Summary       string
+	Details       string
+	CVE           string   // Primary CVE if available
+	Severity      string   // CVSS score or severity level
+	SeverityType  string   // Type of severity (CVSS_V3, CVSS_V2, etc.)
+	Package       string   // Package name
+	Version       string   // Affected version
+	IsDirect      bool     // Whether this is a direct dependency
+	Published     string   // When the vulnerability was published
+	Modified      string   // When the vulnerability was last modified
+	References    []string // URLs to references
+	FixedVersions []string // Versions where this is fixed
+}
+
+// VulnerabilityStats tracks vulnerability statistics
+type VulnerabilityStats struct {
+	TotalVulns   int
+	CVECount     int
+	HighSeverity int
+	MedSeverity  int
+	LowSeverity  int
+	UnknownSev   int
+	DirectDeps   int // Vulnerabilities in direct dependencies
+	IndirectDeps int // Vulnerabilities in indirect dependencies
+	CriticalSev  int // Critical severity (9.0-10.0)
+	FixAvailable int // Vulnerabilities with fixes available
 }
 
 // EcosystemType represents different package management ecosystems
@@ -129,6 +229,421 @@ func (*scalibrNullLogger) Info(args ...any)                  {}
 func (*scalibrNullLogger) Infof(format string, args ...any)  {}
 func (*scalibrNullLogger) Warn(args ...any)                  {}
 func (*scalibrNullLogger) Warnf(format string, args ...any)  {}
+
+// queryOSVBatch performs a batch vulnerability query to the OSV API
+func queryOSVBatch(ctx context.Context, packages []PackageChange) ([]Vulnerability, error) {
+	if len(packages) == 0 {
+		return nil, nil
+	}
+
+	// Prepare batch queries
+	queries := make([]OSVQuery, 0, len(packages))
+	packageMeta := make([]PackageChange, 0, len(packages)) // Track metadata for each query
+
+	for _, pkg := range packages {
+		// Only query for packages that exist in the target (added or updated)
+		version := pkg.TargetVersion
+		if pkg.ChangeType == Removed || version == "" {
+			continue
+		}
+
+		// Normalize version for OSV API
+		if !strings.HasPrefix(version, "v") {
+			version = "v" + version
+		}
+
+		queries = append(queries, OSVQuery{
+			Package: &OSVPackage{
+				Name:      pkg.Name,
+				Ecosystem: "Go", // OSV uses "Go" not "go"
+			},
+			Version: version,
+		})
+		packageMeta = append(packageMeta, pkg)
+	}
+
+	if len(queries) == 0 {
+		return nil, nil
+	}
+
+	batchReq := OSVBatchRequest{Queries: queries}
+	reqBody, err := json.Marshal(batchReq)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal batch request: %w", err)
+	}
+
+	// Create HTTP request with timeout
+	client := &http.Client{
+		Timeout: 30 * time.Second,
+	}
+
+	req, err := http.NewRequestWithContext(ctx, "POST", "https://api.osv.dev/v1/querybatch", bytes.NewBuffer(reqBody))
+	if err != nil {
+		return nil, fmt.Errorf("failed to create HTTP request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query OSV API: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("OSV API returned status %d", resp.StatusCode)
+	}
+
+	var batchResp OSVBatchResponse
+	if err := json.NewDecoder(resp.Body).Decode(&batchResp); err != nil {
+		return nil, fmt.Errorf("failed to decode OSV response: %w", err)
+	}
+
+	// Process results and extract vulnerabilities
+	var vulnerabilities []Vulnerability
+	for i, result := range batchResp.Results {
+		if i >= len(queries) || i >= len(packageMeta) {
+			break // Safety check
+		}
+
+		packageName := queries[i].Package.Name
+		version := queries[i].Version
+		isDirect := packageMeta[i].IsDirect
+
+		for _, vuln := range result.Vulns {
+			vulnerability := processOSVVulnerability(vuln, packageName, version, isDirect)
+			vulnerabilities = append(vulnerabilities, vulnerability)
+		}
+	}
+
+	return vulnerabilities, nil
+}
+
+// processOSVVulnerability processes an OSV vulnerability and extracts relevant information
+func processOSVVulnerability(vuln OSVVulnerability, packageName, version string, isDirect bool) Vulnerability {
+	v := Vulnerability{
+		ID:        vuln.ID,
+		Aliases:   vuln.Aliases,
+		Summary:   vuln.Summary,
+		Details:   vuln.Details,
+		Package:   packageName,
+		Version:   version,
+		IsDirect:  isDirect,
+		Published: vuln.Published,
+		Modified:  vuln.Modified,
+	}
+
+	// Extract CVE from aliases, prioritizing CVE over other identifiers
+	for _, alias := range vuln.Aliases {
+		if strings.HasPrefix(alias, "CVE-") {
+			v.CVE = alias
+			break
+		}
+	}
+
+	// If no CVE found, use GO- or GHSA- identifiers
+	if v.CVE == "" {
+		for _, alias := range vuln.Aliases {
+			if strings.HasPrefix(alias, "GO-") || strings.HasPrefix(alias, "GHSA-") {
+				v.CVE = alias
+				break
+			}
+		}
+	}
+
+	// Extract severity information
+	for _, severity := range vuln.Severity {
+		if severity.Type == "CVSS_V3" || severity.Type == "CVSS_V2" {
+			v.Severity = severity.Score
+			v.SeverityType = severity.Type
+			break
+		}
+	}
+
+	// Extract references
+	for _, ref := range vuln.References {
+		if ref.URL != "" {
+			v.References = append(v.References, ref.URL)
+		}
+	}
+
+	// Extract fixed versions from affected ranges
+	for _, affected := range vuln.Affected {
+		for _, r := range affected.Ranges {
+			for _, event := range r.Events {
+				if event.Fixed != "" {
+					v.FixedVersions = append(v.FixedVersions, event.Fixed)
+				}
+			}
+		}
+	}
+
+	return v
+}
+
+// categorizeVulnerabilities categorizes vulnerabilities by severity
+func categorizeVulnerabilities(vulns []Vulnerability) VulnerabilityStats {
+	stats := VulnerabilityStats{
+		TotalVulns: len(vulns),
+	}
+
+	for _, vuln := range vulns {
+		// Count CVEs
+		if strings.HasPrefix(vuln.CVE, "CVE-") {
+			stats.CVECount++
+		}
+
+		// Count direct vs indirect dependencies
+		if vuln.IsDirect {
+			stats.DirectDeps++
+		} else {
+			stats.IndirectDeps++
+		}
+
+		// Count vulnerabilities with fixes available
+		if len(vuln.FixedVersions) > 0 {
+			stats.FixAvailable++
+		}
+
+		// Categorize by severity with more precise CVSS parsing
+		if vuln.Severity != "" {
+			score := parseCVSSScore(vuln.Severity)
+			if score >= 9.0 {
+				stats.CriticalSev++
+			} else if score >= 7.0 {
+				stats.HighSeverity++
+			} else if score >= 4.0 {
+				stats.MedSeverity++
+			} else if score >= 0.0 {
+				stats.LowSeverity++
+			} else {
+				stats.UnknownSev++
+			}
+		} else {
+			stats.UnknownSev++
+		}
+	}
+
+	return stats
+}
+
+// parseCVSSScore extracts numeric CVSS score from severity string
+func parseCVSSScore(severity string) float64 {
+	// Try to extract a numeric score from the severity string
+	// Handle formats like "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H" with base score
+	// or simple numeric scores like "7.5"
+
+	// Look for base score in CVSS vector
+	if strings.Contains(severity, "/") {
+		parts := strings.Split(severity, "/")
+		for _, part := range parts {
+			if strings.HasPrefix(part, "Base:") || strings.HasPrefix(part, "base:") {
+				scoreStr := strings.TrimPrefix(strings.TrimPrefix(part, "Base:"), "base:")
+				if score := parseFloat(scoreStr); score >= 0 {
+					return score
+				}
+			}
+		}
+	}
+
+	// Try to parse as direct numeric value
+	if score := parseFloat(severity); score >= 0 {
+		return score
+	}
+
+	// Handle common severity levels
+	switch strings.ToLower(severity) {
+	case "critical":
+		return 9.5
+	case "high":
+		return 7.5
+	case "medium", "moderate":
+		return 5.5
+	case "low":
+		return 2.5
+	default:
+		return -1.0 // Unknown
+	}
+}
+
+// parseFloat safely parses a string to float64, returns -1 on error
+func parseFloat(s string) float64 {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return -1
+	}
+
+	// Simple float parsing for CVSS scores (0.0-10.0)
+	var result float64
+	var decimal float64 = 1
+	var foundDot bool
+
+	for _, r := range s {
+		if r >= '0' && r <= '9' {
+			digit := float64(r - '0')
+			if foundDot {
+				decimal *= 0.1
+				result += digit * decimal
+			} else {
+				result = result*10 + digit
+			}
+		} else if r == '.' && !foundDot {
+			foundDot = true
+		} else {
+			break // Stop at first non-numeric character
+		}
+	}
+
+	// Validate CVSS range
+	if result >= 0.0 && result <= 10.0 {
+		return result
+	}
+
+	return -1
+}
+
+// displayVulnerabilities shows vulnerability information in a user-friendly format
+func displayVulnerabilities(vulns []Vulnerability) {
+	if len(vulns) == 0 {
+		fmt.Printf("\n%s✓ No vulnerabilities found%s\n", colorAdded, colorReset)
+		return
+	}
+
+	stats := categorizeVulnerabilities(vulns)
+
+	fmt.Printf("\n%s⚠ Vulnerabilities Found:%s\n", colorHeader, colorReset)
+
+	// Group vulnerabilities by package for cleaner display
+	vulnsByPackage := make(map[string][]Vulnerability)
+	for _, vuln := range vulns {
+		vulnsByPackage[vuln.Package] = append(vulnsByPackage[vuln.Package], vuln)
+	}
+
+	for packageName, packageVulns := range vulnsByPackage {
+		// Determine if this package has any direct dependencies
+		hasDirectDep := false
+		for _, vuln := range packageVulns {
+			if vuln.IsDirect {
+				hasDirectDep = true
+				break
+			}
+		}
+
+		depType := ""
+		if hasDirectDep {
+			depType = fmt.Sprintf(" %s[direct]%s", colorLicense, colorReset)
+		} else {
+			depType = fmt.Sprintf(" %s[indirect]%s", colorDim, colorReset)
+		}
+
+		fmt.Printf("\n  %s%s%s @%s%s%s%s:\n",
+			colorBold, packageName, colorReset,
+			colorVersion, packageVulns[0].Version, colorReset,
+			depType)
+
+		for _, vuln := range packageVulns {
+			// Determine color based on severity
+			score := parseCVSSScore(vuln.Severity)
+			var sevColor, severityLabel string
+
+			if score >= 9.0 {
+				sevColor = "\033[1;35m" // Magenta for critical
+				severityLabel = "CRITICAL"
+			} else if score >= 7.0 {
+				sevColor = colorRemoved // Red for high severity
+				severityLabel = "HIGH"
+			} else if score >= 4.0 {
+				sevColor = colorDowngraded // Yellow for medium severity
+				severityLabel = "MEDIUM"
+			} else if score >= 0.0 {
+				sevColor = colorNeutral // White for low severity
+				severityLabel = "LOW"
+			} else {
+				sevColor = colorDim // Dim for unknown
+				severityLabel = "UNKNOWN"
+			}
+
+			// Use CVE if available, otherwise use the main ID
+			displayID := vuln.CVE
+			if displayID == "" {
+				displayID = vuln.ID
+			}
+
+			severityInfo := ""
+			if vuln.Severity != "" {
+				if score >= 0 {
+					severityInfo = fmt.Sprintf(" %s[%s %.1f]%s", colorLicense, severityLabel, score, colorReset)
+				} else {
+					severityInfo = fmt.Sprintf(" %s[%s]%s", colorLicense, vuln.Severity, colorReset)
+				}
+			}
+
+			fixInfo := ""
+			if len(vuln.FixedVersions) > 0 {
+				fixInfo = fmt.Sprintf(" %s(fix: %s)%s", colorAdded, vuln.FixedVersions[0], colorReset)
+			}
+
+			fmt.Printf("    %s•%s %s%s%s%s%s\n",
+				sevColor, colorReset,
+				colorBold, displayID, colorReset,
+				severityInfo, fixInfo)
+
+			// Show summary if available and not too long
+			if vuln.Summary != "" && len(vuln.Summary) < 120 {
+				fmt.Printf("      %s%s%s\n", colorDim, vuln.Summary, colorReset)
+			}
+
+			// Show publication date if recent (within last year)
+			if vuln.Published != "" {
+				fmt.Printf("      %sPublished: %s%s\n", colorDim, vuln.Published[:10], colorReset) // Show just date part
+			}
+		}
+	}
+
+	// Display enhanced vulnerability statistics
+	fmt.Printf("\n%sVulnerability Summary:%s\n", colorHeader, colorReset)
+	fmt.Printf("  %s•%s %s%d%s total vulnerabilities\n",
+		colorSymbol, colorReset, colorBold, stats.TotalVulns, colorReset)
+
+	if stats.CVECount > 0 {
+		fmt.Printf("  %s•%s %s%d%s CVE identifiers\n",
+			colorSymbol, colorReset, colorBold, stats.CVECount, colorReset)
+	}
+
+	if stats.DirectDeps > 0 {
+		fmt.Printf("  %s•%s %s%d%s in direct dependencies\n",
+			colorSymbol+colorRemoved, colorReset, colorBold, stats.DirectDeps, colorReset)
+	}
+
+	if stats.IndirectDeps > 0 {
+		fmt.Printf("  %s•%s %s%d%s in indirect dependencies\n",
+			colorSymbol+colorDim, colorReset, colorBold, stats.IndirectDeps, colorReset)
+	}
+
+	if stats.CriticalSev > 0 {
+		fmt.Printf("  %s•%s %s%d%s critical severity (9.0+)\n",
+			"\033[1;35m•", colorReset, colorBold, stats.CriticalSev, colorReset)
+	}
+
+	if stats.HighSeverity > 0 {
+		fmt.Printf("  %s•%s %s%d%s high severity (7.0-8.9)\n",
+			colorSymbol+colorRemoved, colorReset, colorBold, stats.HighSeverity, colorReset)
+	}
+
+	if stats.MedSeverity > 0 {
+		fmt.Printf("  %s•%s %s%d%s medium severity (4.0-6.9)\n",
+			colorSymbol+colorDowngraded, colorReset, colorBold, stats.MedSeverity, colorReset)
+	}
+
+	if stats.LowSeverity > 0 {
+		fmt.Printf("  %s•%s %s%d%s low severity (0.0-3.9)\n",
+			colorSymbol+colorNeutral, colorReset, colorBold, stats.LowSeverity, colorReset)
+	}
+
+	if stats.FixAvailable > 0 {
+		fmt.Printf("  %s•%s %s%d%s with fixes available\n",
+			colorSymbol+colorAdded, colorReset, colorBold, stats.FixAvailable, colorReset)
+	}
+}
 
 func checkFilesChanged(repoPath string, baseRef string, prRef string) ([]string, error) {
 	repo, err := git.PlainOpen(repoPath)
@@ -295,75 +810,378 @@ func scanPackages(ctx context.Context, repoPath string, commitHash plumbing.Hash
 	return results.Inventory.Packages, nil
 }
 
-// canonicalPackages takes a list of packages and returns a map with the canonical version for each package name.
-// The canonical version is determined by selecting the most frequently occurring version for each package.
-func canonicalPackages(pkgs []*extractor.Package) map[string]string {
-	// Group packages by name and count version occurrences
-	versionCounts := make(map[string]map[string]int)
-	for _, pkg := range pkgs {
-		if _, exists := versionCounts[pkg.Name]; !exists {
-			versionCounts[pkg.Name] = make(map[string]int)
-		}
-		versionCounts[pkg.Name][pkg.Version]++
+// normalizeGopkgInURL converts gopkg.in URLs to their canonical GitHub repository names
+// For example: "gopkg.in/go-jose/go-jose.v2" -> "github.com/go-jose/go-jose"
+func normalizeGopkgInURL(packageName string) string {
+	if !strings.HasPrefix(packageName, "gopkg.in/") {
+		return packageName
 	}
 
-	// Find the most frequently occurring version for each package
-	result := make(map[string]string)
-	for pkgName, versions := range versionCounts {
-		var maxCount int
-		var canonicalVersion string
-		for version, count := range versions {
-			if count > maxCount {
-				maxCount = count
-				canonicalVersion = version
+	// Remove the "gopkg.in/" prefix
+	remainder := strings.TrimPrefix(packageName, "gopkg.in/")
+	parts := strings.Split(remainder, "/")
+
+	if len(parts) == 0 {
+		return packageName
+	}
+
+	// gopkg.in URLs can have different formats:
+	// 1. gopkg.in/user/repo.vN -> github.com/user/repo
+	// 2. gopkg.in/repo.vN -> github.com/go-pkg/repo (for go-pkg namespace)
+	
+	if len(parts) == 1 {
+		// Format: gopkg.in/repo.vN
+		repoWithVersion := parts[0]
+		// Find the last dot followed by 'v' and a number
+		for i := len(repoWithVersion) - 1; i >= 0; i-- {
+			if repoWithVersion[i] == '.' && i+1 < len(repoWithVersion) && repoWithVersion[i+1] == 'v' {
+				// Check if what follows 'v' is numeric
+				versionPart := repoWithVersion[i+2:]
+				isNumeric := len(versionPart) > 0
+				for _, r := range versionPart {
+					if r < '0' || r > '9' {
+						isNumeric = false
+						break
+					}
+				}
+				if isNumeric {
+					repo := repoWithVersion[:i]
+					return "github.com/go-" + repo + "/" + repo
+				}
 			}
 		}
-		result[pkgName] = canonicalVersion
+	} else if len(parts) >= 2 {
+		// Format: gopkg.in/user/repo.vN or gopkg.in/user/repo/subpkg.vN
+		user := parts[0]
+		
+		// Find which part has the version suffix
+		var repoWithVersion string
+		var repoIndex int
+		var hasVersionSuffix bool
+		
+		// Check each part for a version suffix (.vN)
+		for i := 1; i < len(parts); i++ {
+			part := parts[i]
+			for j := len(part) - 1; j >= 0; j-- {
+				if part[j] == '.' && j+1 < len(part) && part[j+1] == 'v' {
+					// Check if what follows 'v' is numeric
+					versionPart := part[j+2:]
+					isNumeric := len(versionPart) > 0
+					for _, r := range versionPart {
+						if r < '0' || r > '9' {
+							isNumeric = false
+							break
+						}
+					}
+					if isNumeric {
+						repoWithVersion = part
+						repoIndex = i
+						hasVersionSuffix = true
+						break
+					}
+				}
+			}
+			if hasVersionSuffix {
+				break
+			}
+		}
+		
+		if hasVersionSuffix {
+			// Find the version suffix in the identified part
+			for i := len(repoWithVersion) - 1; i >= 0; i-- {
+				if repoWithVersion[i] == '.' && i+1 < len(repoWithVersion) && repoWithVersion[i+1] == 'v' {
+					// Check if what follows 'v' is numeric
+					versionPart := repoWithVersion[i+2:]
+					isNumeric := len(versionPart) > 0
+					for _, r := range versionPart {
+						if r < '0' || r > '9' {
+							isNumeric = false
+							break
+						}
+					}
+					if isNumeric {
+						partWithoutVersion := repoWithVersion[:i]
+						
+						// Build the GitHub URL
+						result := "github.com/" + user
+						
+						// Add the repo name (if repoIndex == 1, it's the repo part)
+						if repoIndex == 1 {
+							result += "/" + partWithoutVersion
+						} else {
+							// It's a subpackage with version, keep the repo part as-is
+							result += "/" + parts[1]
+						}
+						
+						// Add any path components before the versioned part
+						for j := 2; j < repoIndex; j++ {
+							result += "/" + parts[j]
+						}
+						
+						// Add the versioned part without the version
+						if repoIndex > 1 {
+							result += "/" + partWithoutVersion
+						}
+						
+						// Add any remaining path components
+						if repoIndex+1 < len(parts) {
+							result += "/" + strings.Join(parts[repoIndex+1:], "/")
+						}
+						
+						return result
+					}
+				}
+			}
+		}
 	}
 
-	return result
+	// If we couldn't parse the version, return the original
+	return packageName
+}
+
+// extractCanonicalPackageName extracts the base package name without major version suffix
+// For example: "modernc.org/cc/v3" -> "modernc.org/cc"
+// Also normalizes gopkg.in URLs: "gopkg.in/go-jose/go-jose.v2" -> "github.com/go-jose/go-jose"
+func extractCanonicalPackageName(packageName string) string {
+	// First, normalize gopkg.in URLs
+	normalized := normalizeGopkgInURL(packageName)
+	
+	// Then check if the package has a major version suffix (/v2, /v3, etc.)
+	// This pattern matches Go module major version suffixes
+	parts := strings.Split(normalized, "/")
+	if len(parts) == 0 {
+		return normalized
+	}
+
+	lastPart := parts[len(parts)-1]
+
+	// Check if the last part is a major version (v2, v3, v4, etc.)
+	// Note: v0 and v1 don't typically use suffixes in Go modules
+	if len(lastPart) >= 2 && lastPart[0] == 'v' && len(lastPart) > 1 {
+		// Check if the rest is a number >= 2
+		versionPart := lastPart[1:]
+		if len(versionPart) > 0 {
+			// Simple check for numeric version (could be more sophisticated)
+			isNumeric := true
+			for _, r := range versionPart {
+				if r < '0' || r > '9' {
+					isNumeric = false
+					break
+				}
+			}
+
+			if isNumeric && versionPart != "0" && versionPart != "1" {
+				// This looks like a major version suffix, remove it
+				return strings.Join(parts[:len(parts)-1], "/")
+			}
+		}
+	}
+
+	return normalized
+}
+
+// GoPackageInfo represents information about a Go package including version metadata
+type GoPackageInfo struct {
+	OriginalName  string // Original package name as it appears in go.mod (e.g., "gopkg.in/go-jose/go-jose.v2")
+	FullName      string // Normalized full package name with version suffix (e.g., "github.com/go-jose/go-jose")
+	CanonicalName string // Package name without version suffix (e.g., "github.com/go-jose/go-jose")
+	Version       string // Actual version (e.g., "3.41.0")
+	MajorVersion  int    // Major version from path suffix (e.g., 3 from /v3)
+}
+
+// parseGoPackage extracts Go-specific package information
+func parseGoPackage(pkg *extractor.Package) GoPackageInfo {
+	// Normalize gopkg.in URLs for canonical comparison
+	normalizedName := normalizeGopkgInURL(pkg.Name)
+	
+	info := GoPackageInfo{
+		OriginalName:  pkg.Name,                                 // Keep original for display
+		FullName:      normalizedName,                           // Normalized for comparison
+		CanonicalName: extractCanonicalPackageName(pkg.Name),    // This will handle gopkg.in normalization internally
+		Version:       pkg.Version,
+		MajorVersion:  1, // Default to v1 if no suffix
+	}
+
+	// Extract major version from path suffix (try normalized name first)
+	if info.FullName != info.CanonicalName {
+		// Package has a version suffix
+		parts := strings.Split(info.FullName, "/")
+		lastPart := parts[len(parts)-1]
+		if len(lastPart) > 1 && lastPart[0] == 'v' {
+			versionStr := lastPart[1:]
+			// Simple integer parsing (could use strconv.Atoi for robustness)
+			majorVer := 0
+			for _, r := range versionStr {
+				if r >= '0' && r <= '9' {
+					majorVer = majorVer*10 + int(r-'0')
+				} else {
+					break
+				}
+			}
+			if majorVer > 0 {
+				info.MajorVersion = majorVer
+			}
+		}
+	} else if strings.HasPrefix(pkg.Name, "gopkg.in/") {
+		// For gopkg.in URLs, extract major version from the original URL
+		// Example: gopkg.in/go-jose/go-jose.v2 -> major version 2
+		for i := len(pkg.Name) - 1; i >= 0; i-- {
+			if pkg.Name[i] == '.' && i+1 < len(pkg.Name) && pkg.Name[i+1] == 'v' {
+				versionPart := pkg.Name[i+2:]
+				isNumeric := len(versionPart) > 0
+				for _, r := range versionPart {
+					if r < '0' || r > '9' {
+						isNumeric = false
+						break
+					}
+				}
+				if isNumeric {
+					majorVer := 0
+					for _, r := range versionPart {
+						if r >= '0' && r <= '9' {
+							majorVer = majorVer*10 + int(r-'0')
+						} else {
+							break
+						}
+					}
+					if majorVer > 0 {
+						info.MajorVersion = majorVer
+					}
+				}
+				break
+			}
+		}
+	}
+
+	return info
 }
 
 func comparePackages(oldPkgs, newPkgs []*extractor.Package) []PackageChange {
 	var changes []PackageChange
 
-	// Get canonical versions for old and new packages
-	oldCanonical := canonicalPackages(oldPkgs)
-	newCanonical := canonicalPackages(newPkgs)
+	// Parse package information for old and new packages
+	oldPackageInfos := make(map[string][]GoPackageInfo) // canonical name -> package infos
+	newPackageInfos := make(map[string][]GoPackageInfo)
 
-	// Find updated and removed packages
-	for pkgName, oldVersion := range oldCanonical {
-		if newVersion, exists := newCanonical[pkgName]; exists {
-			if oldVersion != newVersion {
+	for _, pkg := range oldPkgs {
+		info := parseGoPackage(pkg)
+		oldPackageInfos[info.CanonicalName] = append(oldPackageInfos[info.CanonicalName], info)
+	}
+
+	for _, pkg := range newPkgs {
+		info := parseGoPackage(pkg)
+		newPackageInfos[info.CanonicalName] = append(newPackageInfos[info.CanonicalName], info)
+	}
+
+	// Get direct dependencies from go.mod (if it exists in current working directory)
+	directDeps := getDirectDependencies()
+
+	// Get all canonical package names
+	allCanonicalNames := make(map[string]bool)
+	for name := range oldPackageInfos {
+		allCanonicalNames[name] = true
+	}
+	for name := range newPackageInfos {
+		allCanonicalNames[name] = true
+	}
+
+	// Compare packages by canonical name
+	for canonicalName := range allCanonicalNames {
+		oldInfos := oldPackageInfos[canonicalName]
+		newInfos := newPackageInfos[canonicalName]
+
+		if len(oldInfos) == 0 {
+			// Package was added - but check if we have multiple major versions
+			if len(newInfos) > 1 {
+				// Multiple new major versions - show as upgrade to the highest version
+				newBest := findBestPackageInfo(newInfos)
+
+				// Find the lowest version as the "base" for a more meaningful display
+				newLowest := newInfos[0]
+				for _, info := range newInfos[1:] {
+					if info.MajorVersion < newLowest.MajorVersion {
+						newLowest = info
+					}
+				}
+
+				// If we have a version progression (e.g., v2 and v3), show as upgrade
+				if newBest.MajorVersion > newLowest.MajorVersion {
+					changes = append(changes, PackageChange{
+						Name:          newBest.OriginalName,
+						OldName:       newLowest.OriginalName,
+						BaseVersion:   newLowest.Version,
+						TargetVersion: newBest.Version,
+						ChangeType:    Updated, // Treat as upgrade, not addition
+						Ecosystem:     "go",
+						IsDirect:      directDeps[newBest.OriginalName] || directDeps[newLowest.OriginalName] || directDeps[canonicalName],
+					})
+				} else {
+					// No clear progression, show the best one as added
+					changes = append(changes, PackageChange{
+						Name:          newBest.OriginalName,
+						OldName:       "",
+						BaseVersion:   "",
+						TargetVersion: newBest.Version,
+						ChangeType:    Added,
+						Ecosystem:     "go",
+						IsDirect:      directDeps[newBest.OriginalName] || directDeps[canonicalName],
+					})
+				}
+			} else {
+				// Single new package - straightforward addition
+				newInfo := newInfos[0]
 				changes = append(changes, PackageChange{
-					Name:          pkgName,
-					BaseVersion:   oldVersion, // Base/old version
-					TargetVersion: newVersion, // Target/new version
-					ChangeType:    Updated,
-					Ecosystem:     "go", // For now, hardcode as Go
+					Name:          newInfo.OriginalName,
+					OldName:       "", // No old name for added packages
+					BaseVersion:   "",
+					TargetVersion: newInfo.Version,
+					ChangeType:    Added,
+					Ecosystem:     "go",
+					IsDirect:      directDeps[newInfo.OriginalName] || directDeps[canonicalName],
+				})
+			}
+		} else if len(newInfos) == 0 {
+			// Package was removed
+			for _, oldInfo := range oldInfos {
+				changes = append(changes, PackageChange{
+					Name:          oldInfo.OriginalName,
+					OldName:       "", // OldName same as Name for removed packages
+					BaseVersion:   oldInfo.Version,
+					TargetVersion: "",
+					ChangeType:    Removed,
+					Ecosystem:     "go",
+					IsDirect:      directDeps[oldInfo.OriginalName] || directDeps[canonicalName],
 				})
 			}
 		} else {
-			changes = append(changes, PackageChange{
-				Name:          pkgName,
-				BaseVersion:   oldVersion,
-				TargetVersion: "", // No target version as it was removed
-				ChangeType:    Removed,
-				Ecosystem:     "go", // For now, hardcode as Go
-			})
-		}
-	}
+			// Package exists in both, check for changes
+			// Find the best old and new representatives
+			oldBest := findBestPackageInfo(oldInfos)
+			newBest := findBestPackageInfo(newInfos)
 
-	// Find added packages
-	for pkgName, newVersion := range newCanonical {
-		if _, exists := oldCanonical[pkgName]; !exists {
-			changes = append(changes, PackageChange{
-				Name:          pkgName,
-				BaseVersion:   "",         // No base version as it was added
-				TargetVersion: newVersion, // Target has the new version
-				ChangeType:    Added,
-				Ecosystem:     "go", // For now, hardcode as Go
-			})
+			// Check if there's a meaningful change
+			if oldBest.FullName != newBest.FullName || oldBest.Version != newBest.Version {
+				// Determine if this is an upgrade or update
+				changeType := Updated
+				displayName := newBest.OriginalName
+				oldDisplayName := oldBest.OriginalName
+
+				// If the major version changed in the path, prefer showing the newer path
+				if oldBest.MajorVersion != newBest.MajorVersion {
+					// Major version upgrade - this is what we want to detect!
+					displayName = newBest.OriginalName
+				}
+
+				changes = append(changes, PackageChange{
+					Name:          displayName,
+					OldName:       oldDisplayName, // Track the original name for display
+					BaseVersion:   oldBest.Version,
+					TargetVersion: newBest.Version,
+					ChangeType:    changeType,
+					Ecosystem:     "go",
+					IsDirect:      directDeps[oldBest.OriginalName] || directDeps[newBest.OriginalName] || directDeps[canonicalName],
+				})
+			}
 		}
 	}
 
@@ -375,22 +1193,154 @@ func comparePackages(oldPkgs, newPkgs []*extractor.Package) []PackageChange {
 	return changes
 }
 
-// compareVersionsForEcosystem compares versions using ecosystem-specific logic
-// Returns: 1 for upgrade, -1 for downgrade, 0 for unclear/equal
-//
-// This lightweight approach makes it easy to add support for other ecosystems:
-// - npm: add case for "npm" with npm-specific semver logic
-// - pip: add case for "pip" with PEP 440 version comparison
-// - maven: add case for "maven" with Maven version ordering
-// - etc.
-func compareVersionsForEcosystem(oldVersion, newVersion, ecosystem string) int {
-	switch ecosystem {
-	case "go", "golang":
-		return compareGoVersions(oldVersion, newVersion)
-	default:
-		// Fallback to basic semantic version comparison
-		return compareGoVersions(oldVersion, newVersion) // Re-use Go logic as default
+// findBestPackageInfo selects the best representative from multiple package infos
+// Prioritizes higher major versions
+func findBestPackageInfo(infos []GoPackageInfo) GoPackageInfo {
+	if len(infos) == 0 {
+		return GoPackageInfo{}
 	}
+
+	best := infos[0]
+	for _, info := range infos[1:] {
+		// Prefer higher major version
+		if info.MajorVersion > best.MajorVersion {
+			best = info
+		} else if info.MajorVersion == best.MajorVersion {
+			// Same major version, prefer lexicographically later version (rough heuristic)
+			if semver.Compare(normalizeGoVersion(info.Version), normalizeGoVersion(best.Version)) > 0 {
+				best = info
+			}
+		}
+	}
+
+	return best
+}
+
+// getDirectDependencies reads go.mod file and returns a map of direct dependencies
+func getDirectDependencies() map[string]bool {
+	directDeps := make(map[string]bool)
+
+	// Standard library packages are always direct
+	directDeps["stdlib"] = true
+
+	// Try to read go.mod from current directory
+	file, err := os.Open("go.mod")
+	if err != nil {
+		return directDeps // Return map with stdlib if go.mod doesn't exist
+	}
+	defer file.Close()
+
+	scanner := bufio.NewScanner(file)
+	inRequireBlock := false
+
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+
+		// Start of require block
+		if strings.HasPrefix(line, "require (") {
+			inRequireBlock = true
+			continue
+		}
+
+		// End of require block
+		if inRequireBlock && line == ")" {
+			inRequireBlock = false
+			continue
+		}
+
+		// Single line require
+		if strings.HasPrefix(line, "require ") {
+			parts := strings.Fields(line)
+			if len(parts) >= 3 {
+				pkgName := parts[1]
+				// Check if it's not marked as indirect
+				isIndirect := false
+				for _, part := range parts[3:] {
+					if strings.Contains(part, "indirect") {
+						isIndirect = true
+						break
+					}
+				}
+				if !isIndirect {
+					directDeps[pkgName] = true
+				}
+			}
+			continue
+		}
+
+		// Inside require block
+		if inRequireBlock && line != "" && !strings.HasPrefix(line, "//") {
+			parts := strings.Fields(line)
+			if len(parts) >= 2 {
+				pkgName := parts[0]
+				// Check if it's not marked as indirect
+				isIndirect := false
+				for _, part := range parts[2:] {
+					if strings.Contains(part, "indirect") {
+						isIndirect = true
+						break
+					}
+				}
+				if !isIndirect {
+					directDeps[pkgName] = true
+				}
+			}
+		}
+	}
+
+	return directDeps
+}
+
+// compareGoPackageVersions compares two package changes considering major version changes
+// This is used when we have additional context about package names
+func compareGoPackageVersions(pkg PackageChange) int {
+	// If old and new names are different, extract major version info
+	if pkg.OldName != "" && pkg.OldName != pkg.Name {
+		oldInfo := GoPackageInfo{
+			FullName:      pkg.OldName,
+			CanonicalName: extractCanonicalPackageName(pkg.OldName),
+			Version:       pkg.BaseVersion,
+		}
+		oldInfo.MajorVersion = extractMajorVersionFromPath(pkg.OldName)
+
+		newInfo := GoPackageInfo{
+			FullName:      pkg.Name,
+			CanonicalName: extractCanonicalPackageName(pkg.Name),
+			Version:       pkg.TargetVersion,
+		}
+		newInfo.MajorVersion = extractMajorVersionFromPath(pkg.Name)
+
+		return compareGoPackageChanges(oldInfo, newInfo)
+	}
+
+	// Fallback to regular version comparison
+	return compareGoVersions(pkg.BaseVersion, pkg.TargetVersion)
+}
+
+// extractMajorVersionFromPath extracts the major version number from a package path
+func extractMajorVersionFromPath(packagePath string) int {
+	parts := strings.Split(packagePath, "/")
+	if len(parts) == 0 {
+		return 1 // Default to v1
+	}
+
+	lastPart := parts[len(parts)-1]
+	if len(lastPart) >= 2 && lastPart[0] == 'v' {
+		versionStr := lastPart[1:]
+		majorVer := 0
+		for _, r := range versionStr {
+			if r >= '0' && r <= '9' {
+				majorVer = majorVer*10 + int(r-'0')
+			} else {
+				break
+			}
+		}
+		if majorVer > 0 {
+			return majorVer
+		}
+	}
+
+	return 1 // Default to v1 if no version suffix
 }
 
 // compareGoVersions attempts to determine if a version change is an upgrade or downgrade using Go module semantics
@@ -416,6 +1366,22 @@ func compareGoVersions(oldVersion, newVersion string) int {
 	return -result
 }
 
+// compareGoPackageChanges compares package changes considering major version path changes
+// This is specifically for Go modules where major versions can appear in import paths
+func compareGoPackageChanges(oldPkg, newPkg GoPackageInfo) int {
+	// If major versions are different, this is definitely an upgrade/downgrade
+	if oldPkg.MajorVersion != newPkg.MajorVersion {
+		if newPkg.MajorVersion > oldPkg.MajorVersion {
+			return 1 // Major version upgrade
+		} else {
+			return -1 // Major version downgrade
+		}
+	}
+
+	// Same major version, compare the actual version strings
+	return compareGoVersions(oldPkg.Version, newPkg.Version)
+}
+
 // normalizeGoVersion ensures a version string is in the format expected by Go's semver package
 func normalizeGoVersion(version string) string {
 	if version == "" {
@@ -429,80 +1395,6 @@ func normalizeGoVersion(version string) string {
 
 	// Add 'v' prefix
 	return "v" + version
-}
-
-// isPseudoVersion checks if a version string is a Go pseudo-version
-func isPseudoVersion(version string) bool {
-	normalized := normalizeGoVersion(version)
-	return module.IsPseudoVersion(normalized)
-}
-
-// getPseudoVersionInfo extracts information from a pseudo-version
-func getPseudoVersionInfo(version string) (base, timestamp, hash string, err error) {
-	normalized := normalizeGoVersion(version)
-	if !module.IsPseudoVersion(normalized) {
-		return "", "", "", fmt.Errorf("not a pseudo-version: %s", version)
-	}
-
-	base, err = module.PseudoVersionBase(normalized)
-	if err != nil {
-		return "", "", "", fmt.Errorf("error extracting base: %w", err)
-	}
-
-	timeVal, err := module.PseudoVersionTime(normalized)
-	if err != nil {
-		return "", "", "", fmt.Errorf("error extracting time: %w", err)
-	}
-
-	hash, err = module.PseudoVersionRev(normalized)
-	if err != nil {
-		return "", "", "", fmt.Errorf("error extracting revision: %w", err)
-	}
-
-	return base, timeVal.Format("2006-01-02T15:04:05Z"), hash, nil
-}
-
-// parseVersion extracts numeric parts from a version string
-func parseVersion(version string) []int {
-	// Remove common prefixes
-	version = strings.TrimPrefix(version, "v")
-	version = strings.TrimPrefix(version, "V")
-
-	// Split by dots and extract numbers
-	parts := strings.Split(version, ".")
-	var nums []int
-
-	for _, part := range parts {
-		// Extract leading numbers from each part (handles cases like "1.2.3-alpha")
-		var numStr string
-		for _, r := range part {
-			if r >= '0' && r <= '9' {
-				numStr += string(r)
-			} else {
-				break
-			}
-		}
-
-		if numStr != "" {
-			if num := parseInt(numStr); num >= 0 {
-				nums = append(nums, num)
-			}
-		}
-	}
-
-	return nums
-}
-
-// parseInt safely converts a string to int, returns -1 on error
-func parseInt(s string) int {
-	result := 0
-	for _, r := range s {
-		if r < '0' || r > '9' {
-			return -1
-		}
-		result = result*10 + int(r-'0')
-	}
-	return result
 }
 
 // validateReference checks if a Git reference is valid and provides helpful error messages
@@ -891,6 +1783,7 @@ func listAvailableReferences(repoPath string) error {
 func main() {
 	var repoPath string
 	var listRefs bool
+	var skipVulnScan bool
 
 	cwd, err := os.Getwd()
 	if err != nil {
@@ -924,7 +1817,14 @@ The tool automatically detects the repository's default branch by checking:
 
 DEPENDENCY DETECTION:
 Only analyzes changes when go.mod or go.sum files are modified between references.
-Provides license information for changed packages via the deps.dev API.`,
+Provides license information for changed packages via the deps.dev API.
+Includes vulnerability scanning using the OSV (Open Source Vulnerabilities) database.
+
+VULNERABILITY SCANNING:
+Automatically scans added and updated packages for known vulnerabilities.
+Reports CVE identifiers when available, otherwise shows GO- or GHSA- identifiers.
+Uses batch queries to the OSV API for efficient scanning.
+Can be disabled with --skip-vuln-scan for faster execution.`,
 		Args: cobra.MaximumNArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			// Handle list-refs flag
@@ -936,13 +1836,14 @@ Provides license information for changed packages via the deps.dev API.`,
 			if err != nil {
 				return err
 			}
-			return runDepDelta(repoPath, baseRef, targetRef)
+			return runDepDelta(repoPath, baseRef, targetRef, !skipVulnScan)
 		},
 	}
 
 	// Add flags
 	rootCmd.Flags().StringVarP(&repoPath, "repo", "r", cwd, "Path to the repository")
 	rootCmd.Flags().BoolVarP(&listRefs, "list-refs", "l", false, "List all available Git references (branches, tags, remotes)")
+	rootCmd.Flags().BoolVarP(&skipVulnScan, "skip-vuln-scan", "s", false, "Skip vulnerability scanning (faster execution)")
 
 	// Add comprehensive examples for all user types
 	rootCmd.Example = `BASIC USAGE:
@@ -1013,7 +1914,7 @@ and provide guidance on supported reference types.`
 	fang.Execute(ctx, rootCmd)
 }
 
-func runDepDelta(repoPath, baseRef, targetRef string) error {
+func runDepDelta(repoPath, baseRef, targetRef string, enableVulnScan bool) error {
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, os.Kill)
 	defer cancel()
 
@@ -1169,8 +2070,8 @@ func runDepDelta(repoPath, baseRef, targetRef string) error {
 				colorVersion, pkg.BaseVersion, colorReset)
 			removed++
 		case Updated:
-			// Determine if this is an upgrade or downgrade
-			versionChange := compareVersionsForEcosystem(pkg.BaseVersion, pkg.TargetVersion, pkg.Ecosystem)
+			// Determine if this is an upgrade or downgrade using Go-aware comparison
+			versionChange := compareGoPackageVersions(pkg)
 			var symbol, symbolColor string
 
 			switch versionChange {
@@ -1194,8 +2095,16 @@ func runDepDelta(repoPath, baseRef, targetRef string) error {
 				targetVersionDisplay = fmt.Sprintf("%s%s%s", colorBold, pkg.TargetVersion, colorReset)
 			}
 
-			fmt.Printf("  %s%s%s %s %s%s%s %s→%s %s%s%s%s\n",
+			// Show old package name if it's different (major version upgrade case)
+			oldPackageDisplay := ""
+			if pkg.OldName != "" && pkg.OldName != pkg.Name {
+				oldPackageDisplay = fmt.Sprintf("%s%s%s %s→%s ",
+					colorDim, pkg.OldName, colorReset, colorArrow, colorReset)
+			}
+
+			fmt.Printf("  %s%s%s %s%s @%s%s%s %s→%s %s%s%s%s\n",
 				symbolColor, symbol, colorReset,
+				oldPackageDisplay,
 				packageDisplay,
 				colorVersion, pkg.BaseVersion, colorReset,
 				colorArrow, colorReset,
@@ -1266,6 +2175,17 @@ func runDepDelta(repoPath, baseRef, targetRef string) error {
 						return "s"
 					}
 				}())
+		}
+	}
+
+	// Perform vulnerability scanning on changed packages if enabled
+	if enableVulnScan {
+		fmt.Printf("\nScanning for vulnerabilities...\n")
+		vulnerabilities, err := queryOSVBatch(ctx, changedPackages)
+		if err != nil {
+			fmt.Printf("Warning: Vulnerability scanning failed: %v\n", err)
+		} else {
+			displayVulnerabilities(vulnerabilities)
 		}
 	}
 
