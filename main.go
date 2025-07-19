@@ -14,6 +14,7 @@ import (
 
 	pb "deps.dev/api/v3"
 	"github.com/charmbracelet/fang"
+	"github.com/charmbracelet/lipgloss"
 	"github.com/go-git/go-git/v5"
 	"github.com/go-git/go-git/v5/plumbing"
 	scalibr "github.com/google/osv-scalibr"
@@ -33,26 +34,28 @@ func init() {
 	log.SetLogger(&scalibrNullLogger{})
 }
 
-// ANSI color codes
-const (
-	colorReset = "\033[0m"
-	colorBold  = "\033[1m"
-	colorDim   = "\033[2m"
+// Lipgloss styles for semantic colors and formatting
+var (
+	styleAdded      = lipgloss.NewStyle().Foreground(lipgloss.Color("#32CD32")).Bold(true) // Green, bold
+	styleRemoved    = lipgloss.NewStyle().Foreground(lipgloss.Color("#FF5555")).Bold(true) // Red, bold
+	styleHeader     = lipgloss.NewStyle().Foreground(lipgloss.Color("#00BFFF")).Bold(true)
+	styleDim        = lipgloss.NewStyle().Foreground(lipgloss.Color("#444444"))
+	styleAlias      = lipgloss.NewStyle().Foreground(lipgloss.Color("#BBBBBB")).Bold(true)   // Medium gray, bold for CVE aliases
+	styleAliasOther = lipgloss.NewStyle().Foreground(lipgloss.Color("#CCCCCC")).Bold(true)   // Light gray, bold for non-CVE aliases
+	styleMeta       = lipgloss.NewStyle().Foreground(lipgloss.Color("#A0A0A0")).Italic(true) // Subtle, readable metadata
+	styleAliasLabel = lipgloss.NewStyle().Foreground(lipgloss.Color("#A0A0A0")).Italic(true) // Match metadata style for 'Aliases:' label
+	styleBold       = lipgloss.NewStyle().Bold(true)
+	styleReset      = lipgloss.NewStyle()                                                  // No effect, just for compatibility
+	styleUpgraded   = lipgloss.NewStyle().Foreground(lipgloss.Color("#00CED1")).Bold(true) // Cyan, bold
+	styleDowngraded = lipgloss.NewStyle().Foreground(lipgloss.Color("#FFD700")).Bold(true) // Yellow, bold
+	styleNeutral    = lipgloss.NewStyle().Foreground(lipgloss.Color("#FFFFFF")).Bold(true) // White, bold
 
-	// Semantic colors - thoughtful and meaningful
-	colorAdded      = "\033[1;32m" // Bold Green - positive, something new
-	colorRemoved    = "\033[1;31m" // Bold Red - negative, something lost
-	colorUpgraded   = "\033[1;36m" // Bold Cyan - neutral positive, forward movement
-	colorDowngraded = "\033[1;33m" // Bold Yellow - caution, potential concern
-	colorNeutral    = "\033[1;37m" // Bold White - neutral change
-
-	// UI elements - subtle and supportive
-	colorPackageName = "\033[0m"    // Default color for package names
-	colorVersion     = "\033[90m"   // Gray for version numbers (less important)
-	colorLicense     = "\033[2;90m" // Dim gray for license info (least important)
-	colorArrow       = "\033[2;36m" // Dim cyan for arrows - subtle but visible
-	colorHeader      = "\033[1;94m" // Bold bright blue for headers
-	colorSymbol      = "\033[1m"    // Bold for symbols
+	stylePackageName = lipgloss.NewStyle().Foreground(lipgloss.Color("#FFFFFF"))
+	styleVersion     = lipgloss.NewStyle().Foreground(lipgloss.Color("#A9A9A9")).Faint(true)
+	styleLicense     = lipgloss.NewStyle().Foreground(lipgloss.Color("#A9A9A9")).Faint(true)
+	styleArrow       = lipgloss.NewStyle().Foreground(lipgloss.Color("#00CED1")).Faint(true)
+	// styleHeader already defined above, remove this duplicate
+	styleSymbol = lipgloss.NewStyle().Bold(true)
 )
 
 // PackageChangeType represents the type of change for a package
@@ -890,7 +893,7 @@ func parseIntSafe(s string) int {
 // displayVulnerabilities shows vulnerability information in a user-friendly format
 func displayVulnerabilities(vulns []Vulnerability) {
 	if len(vulns) == 0 {
-		fmt.Printf("\n%s✓ No vulnerabilities found%s\n", colorAdded, colorReset)
+		fmt.Println("\n" + styleAdded.Render("✓ No vulnerabilities found"))
 		return
 	}
 
@@ -898,7 +901,7 @@ func displayVulnerabilities(vulns []Vulnerability) {
 	consolidated := consolidateVulnerabilities(vulns)
 	stats := categorizeVulnerabilities(vulns)
 
-	fmt.Printf("\n%s⚠%s %sVulnerabilities Found:%s\n", colorDowngraded, colorReset, colorHeader, colorReset)
+	fmt.Println("\n" + styleDowngraded.Render("⚠ ") + styleHeader.Render("Vulnerabilities Found:"))
 
 	// Group consolidated vulnerabilities by package for cleaner display
 	vulnsByPackage := make(map[string][]ConsolidatedVulnerability)
@@ -918,74 +921,60 @@ func displayVulnerabilities(vulns []Vulnerability) {
 
 		depType := ""
 		if hasDirectDep {
-			depType = fmt.Sprintf(" %s[direct]%s", colorBold+colorUpgraded, colorReset)
+			depType = styleUpgraded.Render("[direct]")
 		} else {
-			depType = fmt.Sprintf(" %s[indirect]%s", colorDim, colorReset)
+			depType = styleVersion.Render("[indirect]")
 		}
 
-		fmt.Printf("\n%s%s%s %s@%s%s%s:\n",
-			colorBold, packageName, colorReset,
-			colorDim, packageVulns[0].Version, colorReset,
+		fmt.Printf("\n%s %s %s:\n",
+			stylePackageName.Render(packageName),
+			styleVersion.Render(packageVulns[0].Version),
 			depType)
 
 		for _, vuln := range packageVulns {
 			// Determine color and display based on severity
-			var sevColor, severityDisplay string
+			var severityDisplay string
 
 			// Handle GHSA textual severity specially
 			if vuln.SeverityType == "GHSA" {
 				severityUpper := strings.ToUpper(vuln.Severity)
 				switch severityUpper {
 				case "CRITICAL":
-					sevColor = "\033[1;35m" // Magenta for critical
-					severityDisplay = fmt.Sprintf(" %s[CRITICAL]%s", sevColor, colorReset)
+					severityDisplay = lipgloss.NewStyle().Foreground(lipgloss.Color("#FF00FF")).Bold(true).Render("[CRITICAL]")
 				case "HIGH":
-					sevColor = colorRemoved // Red for high severity
-					severityDisplay = fmt.Sprintf(" %s[HIGH]%s", sevColor, colorReset)
+					severityDisplay = styleRemoved.Render("[HIGH]")
 				case "MEDIUM", "MODERATE":
-					sevColor = colorDowngraded // Yellow for medium severity
-					severityDisplay = fmt.Sprintf(" %s[MED]%s", sevColor, colorReset)
+					severityDisplay = styleDowngraded.Render("[MED]")
 				case "LOW":
-					sevColor = colorDim // Dim for low severity
-					severityDisplay = fmt.Sprintf(" %s[LOW]%s", sevColor, colorReset)
+					severityDisplay = styleVersion.Render("[LOW]")
 				default:
 					// Fall back to numeric parsing
 					score := parseCVSSScore(vuln.Severity)
 					if score >= 9.0 {
-						sevColor = "\033[1;35m"
-						severityDisplay = fmt.Sprintf(" %s[CRITICAL %.1f]%s", sevColor, score, colorReset)
+						severityDisplay = lipgloss.NewStyle().Foreground(lipgloss.Color("#FF00FF")).Bold(true).Render(fmt.Sprintf("[CRITICAL %.1f]", score))
 					} else if score >= 7.0 {
-						sevColor = colorRemoved
-						severityDisplay = fmt.Sprintf(" %s[HIGH %.1f]%s", sevColor, score, colorReset)
+						severityDisplay = styleRemoved.Render(fmt.Sprintf("[HIGH %.1f]", score))
 					} else if score >= 4.0 {
-						sevColor = colorDowngraded
-						severityDisplay = fmt.Sprintf(" %s[MED %.1f]%s", sevColor, score, colorReset)
+						severityDisplay = styleDowngraded.Render(fmt.Sprintf("[MED %.1f]", score))
 					} else if score >= 0.0 {
-						sevColor = colorDim
-						severityDisplay = fmt.Sprintf(" %s[LOW %.1f]%s", sevColor, score, colorReset)
+						severityDisplay = styleVersion.Render(fmt.Sprintf("[LOW %.1f]", score))
 					} else {
-						sevColor = colorDim
-						severityDisplay = ""
+						severityDisplay = styleVersion.Render("[UNKNOWN]")
 					}
 				}
 			} else {
 				// Handle numeric CVSS scores
 				score := parseCVSSScore(vuln.Severity)
 				if score >= 9.0 {
-					sevColor = "\033[1;35m" // Magenta for critical
-					severityDisplay = fmt.Sprintf(" %s[CRITICAL %.1f]%s", sevColor, score, colorReset)
+					severityDisplay = lipgloss.NewStyle().Foreground(lipgloss.Color("#FF00FF")).Bold(true).Render(fmt.Sprintf("[CRITICAL %.1f]", score))
 				} else if score >= 7.0 {
-					sevColor = colorRemoved // Red for high severity
-					severityDisplay = fmt.Sprintf(" %s[HIGH %.1f]%s", sevColor, score, colorReset)
+					severityDisplay = styleRemoved.Render(fmt.Sprintf("[HIGH %.1f]", score))
 				} else if score >= 4.0 {
-					sevColor = colorDowngraded // Yellow for medium severity
-					severityDisplay = fmt.Sprintf(" %s[MED %.1f]%s", sevColor, score, colorReset)
+					severityDisplay = styleDowngraded.Render(fmt.Sprintf("[MED %.1f]", score))
 				} else if score >= 0.0 {
-					sevColor = colorDim // Dim for low severity
-					severityDisplay = fmt.Sprintf(" %s[LOW %.1f]%s", sevColor, score, colorReset)
+					severityDisplay = styleVersion.Render(fmt.Sprintf("[LOW %.1f]", score))
 				} else {
-					sevColor = colorDim // Dim for unknown
-					severityDisplay = ""
+					severityDisplay = styleVersion.Render("[UNKNOWN]")
 				}
 			}
 
@@ -993,93 +982,87 @@ func displayVulnerabilities(vulns []Vulnerability) {
 			fixInfo := ""
 			if len(vuln.FixedVersions) > 0 {
 				bestFix := findBestFixedVersion(vuln.FixedVersions, vuln.Version)
-				fixInfo = fmt.Sprintf(" %s(↑ %s)%s", colorUpgraded, bestFix, colorReset)
+				fixInfo = styleUpgraded.Render(fmt.Sprintf("(↑ %s)", bestFix))
 			}
 
 			// Show consolidation info if multiple IDs were found
 			consolidationInfo := ""
 			if vuln.RelatedCount > 1 {
-				consolidationInfo = fmt.Sprintf(" %s[%d related]%s", colorDim, vuln.RelatedCount, colorReset)
+				consolidationInfo = styleVersion.Render(fmt.Sprintf("[%d related]", vuln.RelatedCount))
 			}
 
-			fmt.Printf("  %s•%s %s%s%s%s%s%s\n",
-				colorDim, colorReset,
-				colorBold, vuln.PrimaryID, colorReset,
-				severityDisplay, fixInfo, consolidationInfo)
+			fmt.Println("  " + styleVersion.Render("• ") + styleSymbol.Render(vuln.PrimaryID) + " " + severityDisplay + " " + fixInfo + " " + consolidationInfo)
 
 			// Show summary if available and not too long
 			if vuln.Summary != "" && len(vuln.Summary) < 120 {
-				// Clean up summary by removing redundant package references
 				cleanSummary := cleanSummaryText(vuln.Summary, packageName)
-				fmt.Printf("    %s%s%s\n", colorBold, cleanSummary, colorReset)
+				fmt.Println("    " + styleSymbol.Render(cleanSummary))
 			}
 
 			// Show related IDs if there are any significant ones (limited to most important)
 			if len(vuln.SecondaryIDs) > 0 {
 				relevantSecondary := filterRelevantSecondaryIDs(vuln.SecondaryIDs, vuln.PrimaryID)
 				if len(relevantSecondary) > 0 {
-					fmt.Printf("    %sAliases: %s%s\n", colorDim, strings.Join(relevantSecondary, ", "), colorReset)
+					aliasDisplay := make([]string, len(relevantSecondary))
+					for i, alias := range relevantSecondary {
+						if strings.HasPrefix(alias, "CVE-") {
+							aliasDisplay[i] = styleAlias.Render(alias)
+						} else {
+							aliasDisplay[i] = styleAliasOther.Render(alias)
+						}
+					}
+					fmt.Println("    " + styleMeta.Render("Aliases:") + " " + strings.Join(aliasDisplay, ", "))
 				}
 			}
 
 			// Show publication date if recent (within last year)
 			if vuln.Published != "" && len(vuln.Published) >= 10 {
-				fmt.Printf("    %sPublished: %s%s\n", colorDim, vuln.Published[:10], colorReset)
+				fmt.Println("    " + styleMeta.Render("Published:") + " " + styleMeta.Render(vuln.Published[:10]))
 			}
 		}
 	}
 
 	// Display enhanced vulnerability statistics with consolidation info
-	fmt.Printf("\n%sVulnerability Summary:%s\n", colorHeader, colorReset)
+	fmt.Println("\n" + styleHeader.Render("Vulnerability Summary:"))
 
 	// Lead with the most important info - what needs action
 	highPriority := stats.CriticalSev + stats.HighSeverity
 	if highPriority > 0 {
-		fmt.Printf("  %s!%s %s%d%s require immediate attention %s(critical/high severity)%s\n",
-			colorSymbol+colorRemoved, colorReset, colorBold, highPriority, colorReset,
-			colorRemoved, colorReset)
+		fmt.Println("  " + styleSymbol.Render(styleRemoved.Render("!")) + " " + styleSymbol.Render(fmt.Sprintf("%d require immediate attention ", highPriority)) + styleRemoved.Render("(critical/high severity)"))
 	}
 
 	// Show actionable fix information prominently
 	if stats.FixAvailable > 0 {
-		fmt.Printf("  %s↑%s %s%d%s can be fixed by upgrading\n",
-			colorSymbol+colorUpgraded, colorReset, colorBold, stats.FixAvailable, colorReset)
+		fmt.Println("  " + styleSymbol.Render(styleUpgraded.Render("↑")) + " " + styleSymbol.Render(fmt.Sprintf("%d can be fixed by upgrading", stats.FixAvailable)))
 	}
 
 	unfixed := stats.UniqueVulns - stats.FixAvailable
 	if unfixed > 0 {
-		fmt.Printf("  %s-%s %s%d%s have no fix available yet\n",
-			colorSymbol+colorRemoved, colorReset, colorBold, unfixed, colorReset)
+		fmt.Println("  " + styleSymbol.Render(styleRemoved.Render("-")) + " " + styleSymbol.Render(fmt.Sprintf("%d have no fix available yet", unfixed)))
 	}
 
 	// Total with deduplication context (less prominent)
 	fmt.Println() // Separator
-	if stats.DuplicatesFound > 0 {
-		fmt.Printf("  %s%d%s total vulnerabilities\n",
-			colorBold, stats.UniqueVulns, colorReset)
-	} else {
-		fmt.Printf("  %s%d%s total vulnerabilities\n",
-			colorBold, stats.UniqueVulns, colorReset)
-	}
+	fmt.Println("  " + styleSymbol.Render(fmt.Sprintf("%d total vulnerabilities", stats.UniqueVulns)))
 
 	// Severity breakdown - only show significant ones
 	severityParts := []string{}
 	if stats.CriticalSev > 0 {
-		severityParts = append(severityParts, fmt.Sprintf("%s%d critical%s", colorRemoved, stats.CriticalSev, colorReset))
+		severityParts = append(severityParts, styleRemoved.Render(fmt.Sprintf("%d critical", stats.CriticalSev)))
 	}
 	if stats.HighSeverity > 0 {
-		severityParts = append(severityParts, fmt.Sprintf("%s%d high%s", colorRemoved, stats.HighSeverity, colorReset))
+		severityParts = append(severityParts, styleRemoved.Render(fmt.Sprintf("%d high", stats.HighSeverity)))
 	}
 	if stats.MedSeverity > 0 {
-		severityParts = append(severityParts, fmt.Sprintf("%s%d medium%s", colorDowngraded, stats.MedSeverity, colorReset))
+		severityParts = append(severityParts, styleDowngraded.Render(fmt.Sprintf("%d medium", stats.MedSeverity)))
 	}
 	if stats.LowSeverity > 0 {
-		severityParts = append(severityParts, fmt.Sprintf("%s%d low%s", colorDim, stats.LowSeverity, colorReset))
+		severityParts = append(severityParts, styleVersion.Render(fmt.Sprintf("%d low", stats.LowSeverity)))
 	}
 
 	unknownSev := stats.UniqueVulns - (stats.CriticalSev + stats.HighSeverity + stats.MedSeverity + stats.LowSeverity)
 	if unknownSev > 0 {
-		severityParts = append(severityParts, fmt.Sprintf("%s%d unscored%s", colorDim, unknownSev, colorReset))
+		severityParts = append(severityParts, styleVersion.Render(fmt.Sprintf("%d unscored", unknownSev)))
 	}
 
 	if len(severityParts) > 0 {
@@ -1088,29 +1071,29 @@ func displayVulnerabilities(vulns []Vulnerability) {
 
 	// Dependency context - only if there's a mix
 	if stats.DirectDeps > 0 && stats.IndirectDeps > 0 {
-		fmt.Printf("  Dependencies: %s%d direct%s, %s%d indirect%s\n",
-			colorBold, stats.DirectDeps, colorReset,
-			colorDim, stats.IndirectDeps, colorReset)
+		fmt.Printf("  Dependencies: %s, %s\n",
+			styleBold.Render(fmt.Sprintf("%d direct", stats.DirectDeps)),
+			styleDim.Render(fmt.Sprintf("%d indirect", stats.IndirectDeps)))
 	} else if stats.DirectDeps > 0 {
 		fmt.Printf("  All in %sdirect%s dependencies (can upgrade directly)\n",
-			colorBold, colorReset)
+			styleBold.Render(""), "")
 	} else if stats.IndirectDeps > 0 {
 		fmt.Printf("  All in %sindirect%s dependencies (check dependency tree)\n",
-			colorDim, colorReset)
+			styleDim.Render(""), "")
 	}
 
 	// Action-oriented next steps
-	fmt.Printf("\n%sRecommended Actions:%s\n", colorHeader, colorReset)
+	fmt.Printf("\n%s\n", styleHeader.Render("Recommended Actions:"))
 
 	if stats.FixAvailable > 0 {
 		if highPriority > 0 {
-			fmt.Printf("  %s1.%s %sUpgrade packages immediately%s - critical/high severity fixes available\n",
-				colorSymbol+colorRemoved, colorReset, colorBold, colorReset)
+			fmt.Printf("  %s %sUpgrade packages immediately%s - critical/high severity fixes available\n",
+				styleSymbol.Render("1."), styleBold.Render(""), "")
 		} else {
-			fmt.Printf("  %s1.%s %sUpgrade packages%s with available fixes\n",
-				colorSymbol+colorAdded, colorReset, colorBold, colorReset)
+			fmt.Printf("  %s %sUpgrade packages%s with available fixes\n",
+				styleSymbol.Render("1."), styleBold.Render(""), "")
 		}
-		fmt.Printf("      %sgo get -u%s\n", colorVersion, colorReset)
+		fmt.Printf("      %s\n", styleVersion.Render("go get -u"))
 	}
 
 	if unfixed > 0 {
@@ -1118,8 +1101,8 @@ func displayVulnerabilities(vulns []Vulnerability) {
 		if stats.FixAvailable > 0 {
 			actionNum = 2
 		}
-		fmt.Printf("  %s%d.%s %sInvestigate unfixed vulnerabilities%s - review manually or consider alternatives\n",
-			colorSymbol+colorNeutral, actionNum, colorReset, colorBold, colorReset)
+		fmt.Printf("  %s %sInvestigate unfixed vulnerabilities%s - review manually or consider alternatives\n",
+			styleSymbol.Render(fmt.Sprintf("%d.", actionNum)), styleBold.Render(""), "")
 	}
 }
 
@@ -2264,11 +2247,11 @@ func listAvailableReferences(repoPath string) error {
 	// Show default branch
 	defaultBranch, err := getDefaultBranch(repo)
 	if err == nil {
-		fmt.Printf("%sDefault branch:%s %s\n\n", colorHeader, colorReset, defaultBranch)
+		fmt.Printf("%s %s\n\n", styleHeader.Render("Default branch:"), defaultBranch)
 	}
 
 	// List local branches
-	fmt.Printf("%sLocal branches:%s\n", colorHeader, colorReset)
+	fmt.Printf("%s\n", styleHeader.Render("Local branches:"))
 	branches, err := repo.Branches()
 	if err != nil {
 		fmt.Printf("  Error listing branches: %v\n", err)
@@ -2290,7 +2273,7 @@ func listAvailableReferences(repoPath string) error {
 	}
 
 	// List tags
-	fmt.Printf("\n%sTags:%s\n", colorHeader, colorReset)
+	fmt.Printf("\n%s\n", styleHeader.Render("Tags:"))
 	tags, err := repo.Tags()
 	if err != nil {
 		fmt.Printf("  Error listing tags: %v\n", err)
@@ -2307,7 +2290,7 @@ func listAvailableReferences(repoPath string) error {
 	}
 
 	// List remotes and their branches
-	fmt.Printf("\n%sRemote branches:%s\n", colorHeader, colorReset)
+	fmt.Printf("\n%s\n", styleHeader.Render("Remote branches:"))
 	remotes, err := repo.Remotes()
 	if err != nil {
 		fmt.Printf("  Error listing remotes: %v\n", err)
@@ -2342,7 +2325,7 @@ func listAvailableReferences(repoPath string) error {
 	}
 
 	// Show usage examples
-	fmt.Printf("\n%sUsage examples:%s\n", colorHeader, colorReset)
+	fmt.Printf("\n%s\n", styleHeader.Render("Usage examples:"))
 	fmt.Println("  deputy                    # Compare HEAD with default branch")
 	fmt.Println("  deputy feature-branch     # Compare default branch with feature-branch")
 	if defaultBranch != "" {
@@ -2609,7 +2592,7 @@ func runDepDelta(repoPath, baseRef, targetRef string, enableVulnScan bool) error
 	}
 	client := pb.NewInsightsClient(conn)
 
-	fmt.Printf("\n%sDependency Changes:%s\n", colorHeader, colorReset)
+	fmt.Printf("\n%s\n", styleHeader.Render("Dependency Changes:"))
 
 	var added, removed, updated, upgraded, downgraded int
 
@@ -2629,75 +2612,56 @@ func runDepDelta(repoPath, baseRef, targetRef string, enableVulnScan bool) error
 		// Format license info with subtle styling
 		licenseStr := ""
 		if len(licenses) > 0 && licenses[0] != "?" {
-			licenseStr = fmt.Sprintf(" %s[%s]%s", colorLicense, strings.Join(licenses, ", "), colorReset)
+			licenseStr = styleLicense.Render(fmt.Sprintf("[%s]", strings.Join(licenses, ", ")))
 		}
 
 		switch pkg.ChangeType {
 		case Added:
-			fmt.Printf("  %s+ %s%s%s @%s%s%s%s\n",
-				colorSymbol+colorAdded,
-				colorBold, pkg.Name, colorReset,
-				colorVersion, pkg.TargetVersion, colorReset,
-				licenseStr)
+			fmt.Printf("  %s %s @%s %s\n",
+				styleSymbol.Render("+"), styleAdded.Render(pkg.Name), styleVersion.Render(pkg.TargetVersion), licenseStr)
 			added++
 		case Removed:
-			fmt.Printf("  %s- %s%s%s @%s%s%s\n",
-				colorSymbol+colorRemoved,
-				colorBold+colorDim, pkg.Name, colorReset,
-				colorVersion, pkg.BaseVersion, colorReset)
+			fmt.Printf("  %s %s @%s\n",
+				styleSymbol.Render("-"), styleRemoved.Render(pkg.Name), styleVersion.Render(pkg.BaseVersion))
 			removed++
 		case Updated:
-			// Determine if this is an upgrade or downgrade using Go-aware comparison
 			versionChange := compareGoPackageVersions(pkg)
-			var symbol, symbolColor string
-
+			var symbol string
+			var symbolColor lipgloss.Style
 			switch versionChange {
-			case 1: // Upgrade
+			case 1:
 				symbol = "↑"
-				symbolColor = colorSymbol + colorUpgraded
+				symbolColor = styleUpgraded
 				upgraded++
-			case -1: // Downgrade
+			case -1:
 				symbol = "↓"
-				symbolColor = colorSymbol + colorDowngraded
+				symbolColor = styleDowngraded
 				downgraded++
-			default: // Unclear or lateral change
+			default:
 				symbol = "~"
-				symbolColor = colorSymbol + colorNeutral
+				symbolColor = styleNeutral
 			}
-
-			// Make package name bold for updates, and target version bold for upgrades
-			packageDisplay := fmt.Sprintf("%s%s%s", colorBold, pkg.Name, colorReset)
+			packageDisplay := styleBold.Render(pkg.Name)
 			targetVersionDisplay := pkg.TargetVersion
-			if versionChange == 1 { // Upgrade - make target version bold
-				targetVersionDisplay = fmt.Sprintf("%s%s%s", colorBold, pkg.TargetVersion, colorReset)
+			if versionChange == 1 {
+				targetVersionDisplay = styleBold.Render(pkg.TargetVersion)
 			}
-
-			// Show old package name if it's different (major version upgrade case)
 			oldPackageDisplay := ""
 			if pkg.OldName != "" && pkg.OldName != pkg.Name {
-				oldPackageDisplay = fmt.Sprintf("%s%s%s %s→%s ",
-					colorDim, pkg.OldName, colorReset, colorArrow, colorReset)
+				oldPackageDisplay = fmt.Sprintf("%s %s→ ", styleDim.Render(pkg.OldName), styleArrow.Render("→"))
 			}
-
-			fmt.Printf("  %s%s%s %s%s @%s%s%s %s→%s %s%s%s%s\n",
-				symbolColor, symbol, colorReset,
-				oldPackageDisplay,
-				packageDisplay,
-				colorVersion, pkg.BaseVersion, colorReset,
-				colorArrow, colorReset,
-				colorVersion, targetVersionDisplay, colorReset,
-				licenseStr)
+			fmt.Printf("  %s %s%s @%s %s%s %s\n",
+				symbolColor.Render(symbol), oldPackageDisplay, packageDisplay, styleVersion.Render(pkg.BaseVersion), styleArrow.Render("→"), styleVersion.Render(targetVersionDisplay), licenseStr)
 			updated++
 		}
 	}
 
 	// Clean summary without visual noise
-	fmt.Printf("\n%sSummary:%s\n", colorHeader, colorReset)
+	fmt.Printf("\n%s\n", styleHeader.Render("Summary:"))
 
 	if added > 0 {
-		fmt.Printf("  %s+ %s%d%s package%s added\n",
-			colorSymbol+colorAdded, colorBold, added, colorReset,
-			func() string {
+		fmt.Printf("  %s %d package%s added\n",
+			styleAdded.Render("+"), added, func() string {
 				if added == 1 {
 					return ""
 				} else {
@@ -2707,9 +2671,8 @@ func runDepDelta(repoPath, baseRef, targetRef string, enableVulnScan bool) error
 	}
 
 	if removed > 0 {
-		fmt.Printf("  %s- %s%d%s package%s removed\n",
-			colorSymbol+colorRemoved, colorBold, removed, colorReset,
-			func() string {
+		fmt.Printf("  %s %d package%s removed\n",
+			styleRemoved.Render("-"), removed, func() string {
 				if removed == 1 {
 					return ""
 				} else {
@@ -2720,9 +2683,8 @@ func runDepDelta(repoPath, baseRef, targetRef string, enableVulnScan bool) error
 
 	if updated > 0 {
 		if upgraded > 0 {
-			fmt.Printf("  %s↑ %s%d%s package%s upgraded\n",
-				colorSymbol+colorUpgraded, colorBold, upgraded, colorReset,
-				func() string {
+			fmt.Printf("  %s %d package%s upgraded\n",
+				styleUpgraded.Render("↑"), upgraded, func() string {
 					if upgraded == 1 {
 						return ""
 					} else {
@@ -2731,9 +2693,8 @@ func runDepDelta(repoPath, baseRef, targetRef string, enableVulnScan bool) error
 				}())
 		}
 		if downgraded > 0 {
-			fmt.Printf("  %s↓ %s%d%s package%s downgraded\n",
-				colorSymbol+colorDowngraded, colorBold, downgraded, colorReset,
-				func() string {
+			fmt.Printf("  %s %d package%s downgraded\n",
+				styleDowngraded.Render("↓"), downgraded, func() string {
 					if downgraded == 1 {
 						return ""
 					} else {
@@ -2743,9 +2704,8 @@ func runDepDelta(repoPath, baseRef, targetRef string, enableVulnScan bool) error
 		}
 		otherChanges := updated - (upgraded + downgraded)
 		if otherChanges > 0 {
-			fmt.Printf("  %s~ %s%d%s package%s changed\n",
-				colorSymbol+colorNeutral, colorBold, otherChanges, colorReset,
-				func() string {
+			fmt.Printf("  %s %d package%s changed\n",
+				styleNeutral.Render("~"), otherChanges, func() string {
 					if otherChanges == 1 {
 						return ""
 					} else {
