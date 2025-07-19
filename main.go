@@ -2,12 +2,9 @@ package main
 
 import (
 	"bufio"
-	"bytes"
 	"context"
 	"crypto/x509"
-	"encoding/json"
 	"fmt"
-	"net/http"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -24,10 +21,12 @@ import (
 	scalibrfs "github.com/google/osv-scalibr/fs"
 	"github.com/google/osv-scalibr/log"
 	pl "github.com/google/osv-scalibr/plugin/list"
+	"github.com/ossf/osv-schema/bindings/go/osvschema"
 	"github.com/spf13/cobra"
 	"golang.org/x/mod/semver"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
+	"osv.dev/bindings/go/osvdev"
 )
 
 func init() {
@@ -76,68 +75,6 @@ type PackageChange struct {
 	IsDirect      bool   // Whether this is a direct dependency
 }
 
-// OSV API structures for vulnerability scanning
-type OSVQuery struct {
-	Package *OSVPackage `json:"package,omitempty"`
-	Version string      `json:"version,omitempty"`
-}
-
-type OSVPackage struct {
-	Name      string `json:"name"`
-	Ecosystem string `json:"ecosystem"`
-}
-
-type OSVBatchRequest struct {
-	Queries []OSVQuery `json:"queries"`
-}
-
-type OSVBatchResponse struct {
-	Results []OSVResult `json:"results"`
-}
-
-type OSVResult struct {
-	Vulns []OSVVulnerability `json:"vulns"`
-}
-
-type OSVVulnerability struct {
-	ID         string         `json:"id"`
-	Summary    string         `json:"summary,omitempty"`
-	Details    string         `json:"details,omitempty"`
-	Aliases    []string       `json:"aliases,omitempty"`
-	Severity   []Severity     `json:"severity,omitempty"`
-	Published  string         `json:"published,omitempty"`
-	Modified   string         `json:"modified,omitempty"`
-	References []OSVReference `json:"references,omitempty"`
-	Affected   []OSVAffected  `json:"affected,omitempty"`
-}
-
-type OSVReference struct {
-	Type string `json:"type,omitempty"`
-	URL  string `json:"url"`
-}
-
-type OSVAffected struct {
-	Package           OSVPackage     `json:"package"`
-	Ranges            []OSVRange     `json:"ranges,omitempty"`
-	Versions          []string       `json:"versions,omitempty"`
-	EcosystemSpecific map[string]any `json:"ecosystem_specific,omitempty"`
-}
-
-type OSVRange struct {
-	Type   string     `json:"type"`
-	Events []OSVEvent `json:"events"`
-}
-
-type OSVEvent struct {
-	Introduced string `json:"introduced,omitempty"`
-	Fixed      string `json:"fixed,omitempty"`
-}
-
-type Severity struct {
-	Type  string `json:"type"`
-	Score string `json:"score"`
-}
-
 // Vulnerability represents a vulnerability found in a package
 type Vulnerability struct {
 	ID            string
@@ -156,18 +93,39 @@ type Vulnerability struct {
 	FixedVersions []string // Versions where this is fixed
 }
 
+// ConsolidatedVulnerability represents a deduplicated vulnerability with primary and secondary IDs
+type ConsolidatedVulnerability struct {
+	PrimaryID     string   // CVE if available, otherwise most recognizable ID
+	SecondaryIDs  []string // Other related IDs (GHSA, GO, etc.)
+	AllIDs        []string // All original IDs for this vulnerability
+	Summary       string
+	Details       string
+	Severity      string
+	SeverityType  string
+	Package       string
+	Version       string
+	IsDirect      bool
+	Published     string
+	Modified      string
+	References    []string
+	FixedVersions []string
+	RelatedCount  int // Number of original vulnerabilities this represents
+}
+
 // VulnerabilityStats tracks vulnerability statistics
 type VulnerabilityStats struct {
-	TotalVulns   int
-	CVECount     int
-	HighSeverity int
-	MedSeverity  int
-	LowSeverity  int
-	UnknownSev   int
-	DirectDeps   int // Vulnerabilities in direct dependencies
-	IndirectDeps int // Vulnerabilities in indirect dependencies
-	CriticalSev  int // Critical severity (9.0-10.0)
-	FixAvailable int // Vulnerabilities with fixes available
+	TotalVulns      int
+	UniqueVulns     int // After deduplication
+	CVECount        int
+	HighSeverity    int
+	MedSeverity     int
+	LowSeverity     int
+	UnknownSev      int
+	DirectDeps      int // Vulnerabilities in direct dependencies
+	IndirectDeps    int // Vulnerabilities in indirect dependencies
+	CriticalSev     int // Critical severity (9.0-10.0)
+	FixAvailable    int // Vulnerabilities with fixes available
+	DuplicatesFound int // Number of duplicate/related vulnerabilities found
 }
 
 // EcosystemType represents different package management ecosystems
@@ -230,14 +188,17 @@ func (*scalibrNullLogger) Infof(format string, args ...any)  {}
 func (*scalibrNullLogger) Warn(args ...any)                  {}
 func (*scalibrNullLogger) Warnf(format string, args ...any)  {}
 
-// queryOSVBatch performs a batch vulnerability query to the OSV API
+// queryOSVBatch performs a batch vulnerability query to the OSV API using the official client
 func queryOSVBatch(ctx context.Context, packages []PackageChange) ([]Vulnerability, error) {
 	if len(packages) == 0 {
 		return nil, nil
 	}
 
+	// Create OSV client
+	client := osvdev.DefaultClient()
+
 	// Prepare batch queries
-	queries := make([]OSVQuery, 0, len(packages))
+	queries := make([]*osvdev.Query, 0, len(packages))
 	packageMeta := make([]PackageChange, 0, len(packages)) // Track metadata for each query
 
 	for _, pkg := range packages {
@@ -252,8 +213,8 @@ func queryOSVBatch(ctx context.Context, packages []PackageChange) ([]Vulnerabili
 			version = "v" + version
 		}
 
-		queries = append(queries, OSVQuery{
-			Package: &OSVPackage{
+		queries = append(queries, &osvdev.Query{
+			Package: osvdev.Package{
 				Name:      pkg.Name,
 				Ecosystem: "Go", // OSV uses "Go" not "go"
 			},
@@ -266,36 +227,10 @@ func queryOSVBatch(ctx context.Context, packages []PackageChange) ([]Vulnerabili
 		return nil, nil
 	}
 
-	batchReq := OSVBatchRequest{Queries: queries}
-	reqBody, err := json.Marshal(batchReq)
-	if err != nil {
-		return nil, fmt.Errorf("failed to marshal batch request: %w", err)
-	}
-
-	// Create HTTP request with timeout
-	client := &http.Client{
-		Timeout: 30 * time.Second,
-	}
-
-	req, err := http.NewRequestWithContext(ctx, "POST", "https://api.osv.dev/v1/querybatch", bytes.NewBuffer(reqBody))
-	if err != nil {
-		return nil, fmt.Errorf("failed to create HTTP request: %w", err)
-	}
-	req.Header.Set("Content-Type", "application/json")
-
-	resp, err := client.Do(req)
+	// Make batch request using the official client
+	batchResp, err := client.QueryBatch(ctx, queries)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query OSV API: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("OSV API returned status %d", resp.StatusCode)
-	}
-
-	var batchResp OSVBatchResponse
-	if err := json.NewDecoder(resp.Body).Decode(&batchResp); err != nil {
-		return nil, fmt.Errorf("failed to decode OSV response: %w", err)
 	}
 
 	// Process results and extract vulnerabilities
@@ -309,8 +244,17 @@ func queryOSVBatch(ctx context.Context, packages []PackageChange) ([]Vulnerabili
 		version := queries[i].Version
 		isDirect := packageMeta[i].IsDirect
 
-		for _, vuln := range result.Vulns {
-			vulnerability := processOSVVulnerability(vuln, packageName, version, isDirect)
+		// For each minimal vulnerability, get the full details
+		for _, minVuln := range result.Vulns {
+			// Get full vulnerability details by ID
+			fullVuln, err := client.GetVulnByID(ctx, minVuln.ID)
+			if err != nil {
+				// Log the error but continue with other vulnerabilities
+				fmt.Printf("Warning: failed to get details for vulnerability %s: %v\n", minVuln.ID, err)
+				continue
+			}
+
+			vulnerability := processOSVVulnerability(*fullVuln, packageName, version, isDirect)
 			vulnerabilities = append(vulnerabilities, vulnerability)
 		}
 	}
@@ -319,21 +263,32 @@ func queryOSVBatch(ctx context.Context, packages []PackageChange) ([]Vulnerabili
 }
 
 // processOSVVulnerability processes an OSV vulnerability and extracts relevant information
-func processOSVVulnerability(vuln OSVVulnerability, packageName, version string, isDirect bool) Vulnerability {
+func processOSVVulnerability(vuln osvschema.Vulnerability, packageName, version string, isDirect bool) Vulnerability {
 	v := Vulnerability{
-		ID:        vuln.ID,
-		Aliases:   vuln.Aliases,
-		Summary:   vuln.Summary,
-		Details:   vuln.Details,
-		Package:   packageName,
-		Version:   version,
-		IsDirect:  isDirect,
-		Published: vuln.Published,
-		Modified:  vuln.Modified,
+		ID:       vuln.ID,
+		Summary:  vuln.Summary,
+		Details:  vuln.Details,
+		Package:  packageName,
+		Version:  version,
+		IsDirect: isDirect,
+	}
+
+	// Convert time.Time to string
+	if !vuln.Published.IsZero() {
+		v.Published = vuln.Published.Format(time.RFC3339)
+	}
+	if !vuln.Modified.IsZero() {
+		v.Modified = vuln.Modified.Format(time.RFC3339)
+	}
+
+	// Copy aliases
+	if vuln.Aliases != nil {
+		v.Aliases = make([]string, len(vuln.Aliases))
+		copy(v.Aliases, vuln.Aliases)
 	}
 
 	// Extract CVE from aliases, prioritizing CVE over other identifiers
-	for _, alias := range vuln.Aliases {
+	for _, alias := range v.Aliases {
 		if strings.HasPrefix(alias, "CVE-") {
 			v.CVE = alias
 			break
@@ -342,7 +297,7 @@ func processOSVVulnerability(vuln OSVVulnerability, packageName, version string,
 
 	// If no CVE found, use GO- or GHSA- identifiers
 	if v.CVE == "" {
-		for _, alias := range vuln.Aliases {
+		for _, alias := range v.Aliases {
 			if strings.HasPrefix(alias, "GO-") || strings.HasPrefix(alias, "GHSA-") {
 				v.CVE = alias
 				break
@@ -350,28 +305,53 @@ func processOSVVulnerability(vuln OSVVulnerability, packageName, version string,
 		}
 	}
 
-	// Extract severity information
-	for _, severity := range vuln.Severity {
-		if severity.Type == "CVSS_V3" || severity.Type == "CVSS_V2" {
-			v.Severity = severity.Score
-			v.SeverityType = severity.Type
-			break
+	// Extract severity information - prioritize CVSS scores but also check database_specific
+	if vuln.Severity != nil {
+		for _, severity := range vuln.Severity {
+			if severity.Type == "CVSS_V3" || severity.Type == "CVSS_V2" {
+				v.Severity = severity.Score
+				v.SeverityType = string(severity.Type)
+				break
+			}
+		}
+	}
+
+	// Also check database_specific field for GitHub/GHSA severity information
+	if vuln.DatabaseSpecific != nil {
+		// Try to extract severity from database_specific (common in GHSA entries)
+		if severityVal, exists := vuln.DatabaseSpecific["severity"]; exists {
+			if severityStr, ok := severityVal.(string); ok && severityStr != "" {
+				// If we don't have a CVSS score yet, or if this is a GHSA entry, use this severity
+				isGHSA := strings.HasPrefix(vuln.ID, "GHSA-")
+				if v.Severity == "" || isGHSA {
+					v.Severity = severityStr
+					v.SeverityType = "GHSA"
+				}
+			}
 		}
 	}
 
 	// Extract references
-	for _, ref := range vuln.References {
-		if ref.URL != "" {
-			v.References = append(v.References, ref.URL)
+	if vuln.References != nil {
+		for _, ref := range vuln.References {
+			if ref.URL != "" {
+				v.References = append(v.References, ref.URL)
+			}
 		}
 	}
 
 	// Extract fixed versions from affected ranges
-	for _, affected := range vuln.Affected {
-		for _, r := range affected.Ranges {
-			for _, event := range r.Events {
-				if event.Fixed != "" {
-					v.FixedVersions = append(v.FixedVersions, event.Fixed)
+	if vuln.Affected != nil {
+		for _, affected := range vuln.Affected {
+			if affected.Ranges != nil {
+				for _, r := range affected.Ranges {
+					if r.Events != nil {
+						for _, event := range r.Events {
+							if event.Fixed != "" {
+								v.FixedVersions = append(v.FixedVersions, event.Fixed)
+							}
+						}
+					}
 				}
 			}
 		}
@@ -380,15 +360,314 @@ func processOSVVulnerability(vuln OSVVulnerability, packageName, version string,
 	return v
 }
 
-// categorizeVulnerabilities categorizes vulnerabilities by severity
-func categorizeVulnerabilities(vulns []Vulnerability) VulnerabilityStats {
-	stats := VulnerabilityStats{
-		TotalVulns: len(vulns),
+// consolidateVulnerabilities groups related vulnerabilities using alias information
+func consolidateVulnerabilities(vulns []Vulnerability) []ConsolidatedVulnerability {
+	if len(vulns) == 0 {
+		return nil
 	}
 
+	// Create a union-find like structure to group related vulnerabilities
+	processed := make(map[string]bool)
+	var groups [][]Vulnerability
+
 	for _, vuln := range vulns {
+		if processed[vuln.ID] {
+			continue
+		}
+
+		// Start a new group with this vulnerability
+		group := []Vulnerability{vuln}
+		processed[vuln.ID] = true
+
+		// Get all aliases for this vulnerability (including the ID itself)
+		vulnAliases := append([]string{vuln.ID}, vuln.Aliases...)
+
+		// Look for other unprocessed vulnerabilities that share any alias
+		for _, otherVuln := range vulns {
+			if processed[otherVuln.ID] {
+				continue
+			}
+
+			// Get all aliases for the other vulnerability
+			otherAliases := append([]string{otherVuln.ID}, otherVuln.Aliases...)
+
+			// Check if there's any overlap in aliases
+			if hasCommonAlias(vulnAliases, otherAliases) {
+				group = append(group, otherVuln)
+				processed[otherVuln.ID] = true
+
+				// Add the new vulnerability's aliases to our search set for potential transitive matches
+				vulnAliases = append(vulnAliases, otherAliases...)
+			}
+		}
+
+		groups = append(groups, group)
+	}
+
+	// Convert groups to consolidated vulnerabilities
+	var consolidated []ConsolidatedVulnerability
+	for _, group := range groups {
+		// Find the best primary ID from all vulnerabilities in the group
+		primaryID := findBestPrimaryIDFromGroup(group)
+		consolidated = append(consolidated, createConsolidatedVulnerability(primaryID, group))
+	}
+
+	return consolidated
+}
+
+// findBestPrimaryIDFromGroup finds the best primary ID from a group of related vulnerabilities
+func findBestPrimaryIDFromGroup(vulns []Vulnerability) string {
+	var allIDs []string
+
+	// Collect all IDs and aliases from all vulnerabilities in the group
+	for _, vuln := range vulns {
+		allIDs = append(allIDs, vuln.ID)
+		allIDs = append(allIDs, vuln.Aliases...)
+	}
+
+	// Remove duplicates
+	idSet := make(map[string]bool)
+	var uniqueIDs []string
+	for _, id := range allIDs {
+		if !idSet[id] {
+			idSet[id] = true
+			uniqueIDs = append(uniqueIDs, id)
+		}
+	}
+
+	// Find the best ID according to our priority: CVE > GO- > GHSA- > others
+	var bestID string
+	priority := 999
+
+	for _, id := range uniqueIDs {
+		currentPriority := getIDPriority(id)
+		if currentPriority < priority {
+			priority = currentPriority
+			bestID = id
+		}
+	}
+
+	// Fallback to first vulnerability's ID if no good match
+	if bestID == "" && len(vulns) > 0 {
+		bestID = vulns[0].ID
+	}
+
+	return bestID
+}
+
+// getIDPriority returns the priority of an ID type (lower is better)
+func getIDPriority(id string) int {
+	if strings.HasPrefix(id, "CVE-") {
+		return 1 // Highest priority
+	}
+	if strings.HasPrefix(id, "GO-") {
+		return 2
+	}
+	if strings.HasPrefix(id, "GHSA-") {
+		return 3
+	}
+	return 4 // Lowest priority for other types
+}
+
+// hasCommonAlias checks if two sets of aliases have any common elements
+func hasCommonAlias(aliases1, aliases2 []string) bool {
+	aliasSet := make(map[string]bool)
+	for _, alias := range aliases1 {
+		aliasSet[alias] = true
+	}
+
+	for _, alias := range aliases2 {
+		if aliasSet[alias] {
+			return true
+		}
+	}
+
+	return false
+}
+
+// findBestSeverity finds the most reliable severity information from a group of vulnerabilities
+// Priority: GHSA with database_specific severity > CVSS scores > other sources
+func findBestSeverity(vulns []Vulnerability) (string, string) {
+	if len(vulns) == 0 {
+		return "", ""
+	}
+
+	var bestSeverity, bestSeverityType string
+	bestScore := -1.0
+
+	// First pass: look for the highest numeric CVSS score
+	for _, vuln := range vulns {
+		if vuln.Severity != "" {
+			score := parseCVSSScore(vuln.Severity)
+			if score > bestScore {
+				bestScore = score
+				bestSeverity = vuln.Severity
+				bestSeverityType = vuln.SeverityType
+			}
+		}
+	}
+
+	// Second pass: check for GHSA database_specific severity which is often more accurate
+	// This is typically stored in the severity field for GHSA entries
+	for _, vuln := range vulns {
+		// If this vulnerability has a GHSA ID and severity info, it might be better
+		hasGHSA := false
+		if strings.HasPrefix(vuln.ID, "GHSA-") {
+			hasGHSA = true
+		} else {
+			for _, alias := range vuln.Aliases {
+				if strings.HasPrefix(alias, "GHSA-") {
+					hasGHSA = true
+					break
+				}
+			}
+		}
+
+		if hasGHSA && vuln.Severity != "" {
+			// Check if this is a textual severity (HIGH, MEDIUM, LOW, CRITICAL)
+			severityUpper := strings.ToUpper(vuln.Severity)
+			if severityUpper == "CRITICAL" || severityUpper == "HIGH" ||
+				severityUpper == "MEDIUM" || severityUpper == "LOW" {
+				// Convert to numeric for comparison
+				var ghsaScore float64
+				switch severityUpper {
+				case "CRITICAL":
+					ghsaScore = 9.5
+				case "HIGH":
+					ghsaScore = 7.5
+				case "MEDIUM":
+					ghsaScore = 5.5
+				case "LOW":
+					ghsaScore = 2.5
+				}
+
+				// Use GHSA severity if it's higher or if we don't have a good numeric score
+				if ghsaScore > bestScore || bestScore < 0 {
+					bestSeverity = vuln.Severity
+					bestSeverityType = vuln.SeverityType
+					bestScore = ghsaScore
+				}
+			}
+		}
+	}
+
+	return bestSeverity, bestSeverityType
+}
+
+// findBestSummary finds the most informative summary from a group of vulnerabilities
+func findBestSummary(vulns []Vulnerability) string {
+	if len(vulns) == 0 {
+		return ""
+	}
+
+	var bestSummary string
+	maxLength := 0
+
+	// Pick the longest non-empty summary as it's likely most informative
+	for _, vuln := range vulns {
+		if vuln.Summary != "" && len(vuln.Summary) > maxLength {
+			maxLength = len(vuln.Summary)
+			bestSummary = vuln.Summary
+		}
+	}
+
+	// If no summary found, return the first one
+	if bestSummary == "" && len(vulns) > 0 {
+		bestSummary = vulns[0].Summary
+	}
+
+	return bestSummary
+}
+
+// createConsolidatedVulnerability creates a consolidated vulnerability from a group
+func createConsolidatedVulnerability(primaryID string, vulns []Vulnerability) ConsolidatedVulnerability {
+	if len(vulns) == 0 {
+		return ConsolidatedVulnerability{}
+	}
+
+	// Use the first vulnerability as the base, but with the primary ID
+	base := vulns[0]
+
+	// Collect all unique IDs and aliases
+	allIDsMap := make(map[string]bool)
+
+	for _, vuln := range vulns {
+		allIDsMap[vuln.ID] = true
+		for _, alias := range vuln.Aliases {
+			allIDsMap[alias] = true
+		}
+	}
+
+	// Build lists
+	var allIDs, secondaryIDs []string
+	for id := range allIDsMap {
+		allIDs = append(allIDs, id)
+		if id != primaryID {
+			secondaryIDs = append(secondaryIDs, id)
+		}
+	}
+
+	// Merge fixed versions
+	fixedVersionsMap := make(map[string]bool)
+	for _, vuln := range vulns {
+		for _, fix := range vuln.FixedVersions {
+			fixedVersionsMap[fix] = true
+		}
+	}
+	var fixedVersions []string
+	for fix := range fixedVersionsMap {
+		fixedVersions = append(fixedVersions, fix)
+	}
+
+	// Merge references
+	referencesMap := make(map[string]bool)
+	for _, vuln := range vulns {
+		for _, ref := range vuln.References {
+			referencesMap[ref] = true
+		}
+	}
+	var references []string
+	for ref := range referencesMap {
+		references = append(references, ref)
+	}
+
+	// Find the best severity and summary information from all vulnerabilities
+	bestSeverity, bestSeverityType := findBestSeverity(vulns)
+	bestSummary := findBestSummary(vulns)
+
+	return ConsolidatedVulnerability{
+		PrimaryID:     primaryID,
+		SecondaryIDs:  secondaryIDs,
+		AllIDs:        allIDs,
+		Summary:       bestSummary,
+		Details:       base.Details,
+		Severity:      bestSeverity,
+		SeverityType:  bestSeverityType,
+		Package:       base.Package,
+		Version:       base.Version,
+		IsDirect:      base.IsDirect,
+		Published:     base.Published,
+		Modified:      base.Modified,
+		References:    references,
+		FixedVersions: fixedVersions,
+		RelatedCount:  len(vulns),
+	}
+}
+
+// categorizeVulnerabilities categorizes vulnerabilities by severity
+func categorizeVulnerabilities(vulns []Vulnerability) VulnerabilityStats {
+	// First consolidate to remove duplicates
+	consolidated := consolidateVulnerabilities(vulns)
+
+	stats := VulnerabilityStats{
+		TotalVulns:      len(vulns),
+		UniqueVulns:     len(consolidated),
+		DuplicatesFound: len(vulns) - len(consolidated),
+	}
+
+	for _, vuln := range consolidated {
 		// Count CVEs
-		if strings.HasPrefix(vuln.CVE, "CVE-") {
+		if strings.HasPrefix(vuln.PrimaryID, "CVE-") {
 			stats.CVECount++
 		}
 
@@ -404,19 +683,49 @@ func categorizeVulnerabilities(vulns []Vulnerability) VulnerabilityStats {
 			stats.FixAvailable++
 		}
 
-		// Categorize by severity with more precise CVSS parsing
+		// Categorize by severity - handle both GHSA textual and numeric CVSS scores
 		if vuln.Severity != "" {
-			score := parseCVSSScore(vuln.Severity)
-			if score >= 9.0 {
-				stats.CriticalSev++
-			} else if score >= 7.0 {
-				stats.HighSeverity++
-			} else if score >= 4.0 {
-				stats.MedSeverity++
-			} else if score >= 0.0 {
-				stats.LowSeverity++
+			// Handle GHSA textual severity specially (same logic as display)
+			if vuln.SeverityType == "GHSA" {
+				severityUpper := strings.ToUpper(vuln.Severity)
+				switch severityUpper {
+				case "CRITICAL":
+					stats.CriticalSev++
+				case "HIGH":
+					stats.HighSeverity++
+				case "MEDIUM", "MODERATE":
+					stats.MedSeverity++
+				case "LOW":
+					stats.LowSeverity++
+				default:
+					// Fall back to numeric parsing for unknown GHSA values
+					score := parseCVSSScore(vuln.Severity)
+					if score >= 9.0 {
+						stats.CriticalSev++
+					} else if score >= 7.0 {
+						stats.HighSeverity++
+					} else if score >= 4.0 {
+						stats.MedSeverity++
+					} else if score >= 0.0 {
+						stats.LowSeverity++
+					} else {
+						stats.UnknownSev++
+					}
+				}
 			} else {
-				stats.UnknownSev++
+				// Handle numeric CVSS scores
+				score := parseCVSSScore(vuln.Severity)
+				if score >= 9.0 {
+					stats.CriticalSev++
+				} else if score >= 7.0 {
+					stats.HighSeverity++
+				} else if score >= 4.0 {
+					stats.MedSeverity++
+				} else if score >= 0.0 {
+					stats.LowSeverity++
+				} else {
+					stats.UnknownSev++
+				}
 			}
 		} else {
 			stats.UnknownSev++
@@ -501,6 +810,83 @@ func parseFloat(s string) float64 {
 	return -1
 }
 
+// findBestFixedVersion finds the most appropriate fixed version for the current package version
+// It prioritizes versions within the same major version, then the lowest suitable version
+func findBestFixedVersion(fixedVersions []string, currentVersion string) string {
+	if len(fixedVersions) == 0 {
+		return ""
+	}
+
+	// Normalize current version for comparison
+	currentVersion = normalizeGoVersion(currentVersion)
+
+	// Extract major version from current version using semver
+	currentMajor := extractMajorFromSemver(currentVersion)
+
+	var sameMajorVersions []string
+	var otherVersions []string
+
+	for _, fix := range fixedVersions {
+		normalizedFix := normalizeGoVersion(fix)
+		fixMajor := extractMajorFromSemver(normalizedFix)
+
+		if fixMajor == currentMajor {
+			// This is a fix within the same major version
+			sameMajorVersions = append(sameMajorVersions, fix)
+		} else {
+			otherVersions = append(otherVersions, fix)
+		}
+	}
+
+	// Prefer same major version fixes
+	if len(sameMajorVersions) > 0 {
+		// Sort and return the earliest available fix in the same major version
+		// For simplicity, return the first one for now
+		return sameMajorVersions[0]
+	}
+
+	// If no same-major version fix, return the first available fix
+	return fixedVersions[0]
+}
+
+// extractMajorFromSemver extracts major version from a semantic version string
+func extractMajorFromSemver(version string) int {
+	version = normalizeGoVersion(version)
+	if !strings.HasPrefix(version, "v") {
+		return 1
+	}
+
+	versionPart := strings.TrimPrefix(version, "v")
+	dotIndex := strings.Index(versionPart, ".")
+	if dotIndex == -1 {
+		// No dot found, try to parse the whole thing as major version
+		if major := parseIntSafe(versionPart); major > 0 {
+			return major
+		}
+		return 1
+	}
+
+	majorStr := versionPart[:dotIndex]
+	if major := parseIntSafe(majorStr); major > 0 {
+		return major
+	}
+
+	return 1
+}
+
+// parseIntSafe safely parses a string to int, returns 0 on error
+func parseIntSafe(s string) int {
+	result := 0
+	for _, r := range s {
+		if r >= '0' && r <= '9' {
+			result = result*10 + int(r-'0')
+		} else {
+			return 0 // Invalid character
+		}
+	}
+	return result
+}
+
 // displayVulnerabilities shows vulnerability information in a user-friendly format
 func displayVulnerabilities(vulns []Vulnerability) {
 	if len(vulns) == 0 {
@@ -508,13 +894,15 @@ func displayVulnerabilities(vulns []Vulnerability) {
 		return
 	}
 
+	// Consolidate vulnerabilities to remove duplicates
+	consolidated := consolidateVulnerabilities(vulns)
 	stats := categorizeVulnerabilities(vulns)
 
-	fmt.Printf("\n%s⚠ Vulnerabilities Found:%s\n", colorHeader, colorReset)
+	fmt.Printf("\n%s⚠%s %sVulnerabilities Found:%s\n", colorDowngraded, colorReset, colorHeader, colorReset)
 
-	// Group vulnerabilities by package for cleaner display
-	vulnsByPackage := make(map[string][]Vulnerability)
-	for _, vuln := range vulns {
+	// Group consolidated vulnerabilities by package for cleaner display
+	vulnsByPackage := make(map[string][]ConsolidatedVulnerability)
+	for _, vuln := range consolidated {
 		vulnsByPackage[vuln.Package] = append(vulnsByPackage[vuln.Package], vuln)
 	}
 
@@ -530,119 +918,308 @@ func displayVulnerabilities(vulns []Vulnerability) {
 
 		depType := ""
 		if hasDirectDep {
-			depType = fmt.Sprintf(" %s[direct]%s", colorLicense, colorReset)
+			depType = fmt.Sprintf(" %s[direct]%s", colorBold+colorUpgraded, colorReset)
 		} else {
 			depType = fmt.Sprintf(" %s[indirect]%s", colorDim, colorReset)
 		}
 
-		fmt.Printf("\n  %s%s%s @%s%s%s%s:\n",
+		fmt.Printf("\n%s%s%s %s@%s%s%s:\n",
 			colorBold, packageName, colorReset,
-			colorVersion, packageVulns[0].Version, colorReset,
+			colorDim, packageVulns[0].Version, colorReset,
 			depType)
 
 		for _, vuln := range packageVulns {
-			// Determine color based on severity
-			score := parseCVSSScore(vuln.Severity)
-			var sevColor, severityLabel string
+			// Determine color and display based on severity
+			var sevColor, severityDisplay string
 
-			if score >= 9.0 {
-				sevColor = "\033[1;35m" // Magenta for critical
-				severityLabel = "CRITICAL"
-			} else if score >= 7.0 {
-				sevColor = colorRemoved // Red for high severity
-				severityLabel = "HIGH"
-			} else if score >= 4.0 {
-				sevColor = colorDowngraded // Yellow for medium severity
-				severityLabel = "MEDIUM"
-			} else if score >= 0.0 {
-				sevColor = colorNeutral // White for low severity
-				severityLabel = "LOW"
+			// Handle GHSA textual severity specially
+			if vuln.SeverityType == "GHSA" {
+				severityUpper := strings.ToUpper(vuln.Severity)
+				switch severityUpper {
+				case "CRITICAL":
+					sevColor = "\033[1;35m" // Magenta for critical
+					severityDisplay = fmt.Sprintf(" %s[CRITICAL]%s", sevColor, colorReset)
+				case "HIGH":
+					sevColor = colorRemoved // Red for high severity
+					severityDisplay = fmt.Sprintf(" %s[HIGH]%s", sevColor, colorReset)
+				case "MEDIUM", "MODERATE":
+					sevColor = colorDowngraded // Yellow for medium severity
+					severityDisplay = fmt.Sprintf(" %s[MED]%s", sevColor, colorReset)
+				case "LOW":
+					sevColor = colorDim // Dim for low severity
+					severityDisplay = fmt.Sprintf(" %s[LOW]%s", sevColor, colorReset)
+				default:
+					// Fall back to numeric parsing
+					score := parseCVSSScore(vuln.Severity)
+					if score >= 9.0 {
+						sevColor = "\033[1;35m"
+						severityDisplay = fmt.Sprintf(" %s[CRITICAL %.1f]%s", sevColor, score, colorReset)
+					} else if score >= 7.0 {
+						sevColor = colorRemoved
+						severityDisplay = fmt.Sprintf(" %s[HIGH %.1f]%s", sevColor, score, colorReset)
+					} else if score >= 4.0 {
+						sevColor = colorDowngraded
+						severityDisplay = fmt.Sprintf(" %s[MED %.1f]%s", sevColor, score, colorReset)
+					} else if score >= 0.0 {
+						sevColor = colorDim
+						severityDisplay = fmt.Sprintf(" %s[LOW %.1f]%s", sevColor, score, colorReset)
+					} else {
+						sevColor = colorDim
+						severityDisplay = ""
+					}
+				}
 			} else {
-				sevColor = colorDim // Dim for unknown
-				severityLabel = "UNKNOWN"
-			}
-
-			// Use CVE if available, otherwise use the main ID
-			displayID := vuln.CVE
-			if displayID == "" {
-				displayID = vuln.ID
-			}
-
-			severityInfo := ""
-			if vuln.Severity != "" {
-				if score >= 0 {
-					severityInfo = fmt.Sprintf(" %s[%s %.1f]%s", colorLicense, severityLabel, score, colorReset)
+				// Handle numeric CVSS scores
+				score := parseCVSSScore(vuln.Severity)
+				if score >= 9.0 {
+					sevColor = "\033[1;35m" // Magenta for critical
+					severityDisplay = fmt.Sprintf(" %s[CRITICAL %.1f]%s", sevColor, score, colorReset)
+				} else if score >= 7.0 {
+					sevColor = colorRemoved // Red for high severity
+					severityDisplay = fmt.Sprintf(" %s[HIGH %.1f]%s", sevColor, score, colorReset)
+				} else if score >= 4.0 {
+					sevColor = colorDowngraded // Yellow for medium severity
+					severityDisplay = fmt.Sprintf(" %s[MED %.1f]%s", sevColor, score, colorReset)
+				} else if score >= 0.0 {
+					sevColor = colorDim // Dim for low severity
+					severityDisplay = fmt.Sprintf(" %s[LOW %.1f]%s", sevColor, score, colorReset)
 				} else {
-					severityInfo = fmt.Sprintf(" %s[%s]%s", colorLicense, vuln.Severity, colorReset)
+					sevColor = colorDim // Dim for unknown
+					severityDisplay = ""
 				}
 			}
 
+			// Fix availability - most important info
 			fixInfo := ""
 			if len(vuln.FixedVersions) > 0 {
-				fixInfo = fmt.Sprintf(" %s(fix: %s)%s", colorAdded, vuln.FixedVersions[0], colorReset)
+				bestFix := findBestFixedVersion(vuln.FixedVersions, vuln.Version)
+				fixInfo = fmt.Sprintf(" %s(↑ %s)%s", colorUpgraded, bestFix, colorReset)
 			}
 
-			fmt.Printf("    %s•%s %s%s%s%s%s\n",
-				sevColor, colorReset,
-				colorBold, displayID, colorReset,
-				severityInfo, fixInfo)
+			// Show consolidation info if multiple IDs were found
+			consolidationInfo := ""
+			if vuln.RelatedCount > 1 {
+				consolidationInfo = fmt.Sprintf(" %s[%d related]%s", colorDim, vuln.RelatedCount, colorReset)
+			}
+
+			fmt.Printf("  %s•%s %s%s%s%s%s%s\n",
+				colorDim, colorReset,
+				colorBold, vuln.PrimaryID, colorReset,
+				severityDisplay, fixInfo, consolidationInfo)
 
 			// Show summary if available and not too long
 			if vuln.Summary != "" && len(vuln.Summary) < 120 {
-				fmt.Printf("      %s%s%s\n", colorDim, vuln.Summary, colorReset)
+				// Clean up summary by removing redundant package references
+				cleanSummary := cleanSummaryText(vuln.Summary, packageName)
+				fmt.Printf("    %s%s%s\n", colorBold, cleanSummary, colorReset)
+			}
+
+			// Show related IDs if there are any significant ones (limited to most important)
+			if len(vuln.SecondaryIDs) > 0 {
+				relevantSecondary := filterRelevantSecondaryIDs(vuln.SecondaryIDs, vuln.PrimaryID)
+				if len(relevantSecondary) > 0 {
+					fmt.Printf("    %sAliases: %s%s\n", colorDim, strings.Join(relevantSecondary, ", "), colorReset)
+				}
 			}
 
 			// Show publication date if recent (within last year)
-			if vuln.Published != "" {
-				fmt.Printf("      %sPublished: %s%s\n", colorDim, vuln.Published[:10], colorReset) // Show just date part
+			if vuln.Published != "" && len(vuln.Published) >= 10 {
+				fmt.Printf("    %sPublished: %s%s\n", colorDim, vuln.Published[:10], colorReset)
 			}
 		}
 	}
 
-	// Display enhanced vulnerability statistics
+	// Display enhanced vulnerability statistics with consolidation info
 	fmt.Printf("\n%sVulnerability Summary:%s\n", colorHeader, colorReset)
-	fmt.Printf("  %s•%s %s%d%s total vulnerabilities\n",
-		colorSymbol, colorReset, colorBold, stats.TotalVulns, colorReset)
 
-	if stats.CVECount > 0 {
-		fmt.Printf("  %s•%s %s%d%s CVE identifiers\n",
-			colorSymbol, colorReset, colorBold, stats.CVECount, colorReset)
+	// Lead with the most important info - what needs action
+	highPriority := stats.CriticalSev + stats.HighSeverity
+	if highPriority > 0 {
+		fmt.Printf("  %s!%s %s%d%s require immediate attention %s(critical/high severity)%s\n",
+			colorSymbol+colorRemoved, colorReset, colorBold, highPriority, colorReset,
+			colorRemoved, colorReset)
 	}
 
-	if stats.DirectDeps > 0 {
-		fmt.Printf("  %s•%s %s%d%s in direct dependencies\n",
-			colorSymbol+colorRemoved, colorReset, colorBold, stats.DirectDeps, colorReset)
+	// Show actionable fix information prominently
+	if stats.FixAvailable > 0 {
+		fmt.Printf("  %s↑%s %s%d%s can be fixed by upgrading\n",
+			colorSymbol+colorUpgraded, colorReset, colorBold, stats.FixAvailable, colorReset)
 	}
 
-	if stats.IndirectDeps > 0 {
-		fmt.Printf("  %s•%s %s%d%s in indirect dependencies\n",
-			colorSymbol+colorDim, colorReset, colorBold, stats.IndirectDeps, colorReset)
+	unfixed := stats.UniqueVulns - stats.FixAvailable
+	if unfixed > 0 {
+		fmt.Printf("  %s-%s %s%d%s have no fix available yet\n",
+			colorSymbol+colorRemoved, colorReset, colorBold, unfixed, colorReset)
 	}
 
+	// Total with deduplication context (less prominent)
+	fmt.Println() // Separator
+	if stats.DuplicatesFound > 0 {
+		fmt.Printf("  %s%d%s total vulnerabilities\n",
+			colorBold, stats.UniqueVulns, colorReset)
+	} else {
+		fmt.Printf("  %s%d%s total vulnerabilities\n",
+			colorBold, stats.UniqueVulns, colorReset)
+	}
+
+	// Severity breakdown - only show significant ones
+	severityParts := []string{}
 	if stats.CriticalSev > 0 {
-		fmt.Printf("  %s•%s %s%d%s critical severity (9.0+)\n",
-			"\033[1;35m•", colorReset, colorBold, stats.CriticalSev, colorReset)
+		severityParts = append(severityParts, fmt.Sprintf("%s%d critical%s", colorRemoved, stats.CriticalSev, colorReset))
 	}
-
 	if stats.HighSeverity > 0 {
-		fmt.Printf("  %s•%s %s%d%s high severity (7.0-8.9)\n",
-			colorSymbol+colorRemoved, colorReset, colorBold, stats.HighSeverity, colorReset)
+		severityParts = append(severityParts, fmt.Sprintf("%s%d high%s", colorRemoved, stats.HighSeverity, colorReset))
 	}
-
 	if stats.MedSeverity > 0 {
-		fmt.Printf("  %s•%s %s%d%s medium severity (4.0-6.9)\n",
-			colorSymbol+colorDowngraded, colorReset, colorBold, stats.MedSeverity, colorReset)
+		severityParts = append(severityParts, fmt.Sprintf("%s%d medium%s", colorDowngraded, stats.MedSeverity, colorReset))
+	}
+	if stats.LowSeverity > 0 {
+		severityParts = append(severityParts, fmt.Sprintf("%s%d low%s", colorDim, stats.LowSeverity, colorReset))
 	}
 
-	if stats.LowSeverity > 0 {
-		fmt.Printf("  %s•%s %s%d%s low severity (0.0-3.9)\n",
-			colorSymbol+colorNeutral, colorReset, colorBold, stats.LowSeverity, colorReset)
+	unknownSev := stats.UniqueVulns - (stats.CriticalSev + stats.HighSeverity + stats.MedSeverity + stats.LowSeverity)
+	if unknownSev > 0 {
+		severityParts = append(severityParts, fmt.Sprintf("%s%d unscored%s", colorDim, unknownSev, colorReset))
 	}
+
+	if len(severityParts) > 0 {
+		fmt.Printf("  Severity: %s\n", strings.Join(severityParts, ", "))
+	}
+
+	// Dependency context - only if there's a mix
+	if stats.DirectDeps > 0 && stats.IndirectDeps > 0 {
+		fmt.Printf("  Dependencies: %s%d direct%s, %s%d indirect%s\n",
+			colorBold, stats.DirectDeps, colorReset,
+			colorDim, stats.IndirectDeps, colorReset)
+	} else if stats.DirectDeps > 0 {
+		fmt.Printf("  All in %sdirect%s dependencies (can upgrade directly)\n",
+			colorBold, colorReset)
+	} else if stats.IndirectDeps > 0 {
+		fmt.Printf("  All in %sindirect%s dependencies (check dependency tree)\n",
+			colorDim, colorReset)
+	}
+
+	// Action-oriented next steps
+	fmt.Printf("\n%sRecommended Actions:%s\n", colorHeader, colorReset)
 
 	if stats.FixAvailable > 0 {
-		fmt.Printf("  %s•%s %s%d%s with fixes available\n",
-			colorSymbol+colorAdded, colorReset, colorBold, stats.FixAvailable, colorReset)
+		if highPriority > 0 {
+			fmt.Printf("  %s1.%s %sUpgrade packages immediately%s - critical/high severity fixes available\n",
+				colorSymbol+colorRemoved, colorReset, colorBold, colorReset)
+		} else {
+			fmt.Printf("  %s1.%s %sUpgrade packages%s with available fixes\n",
+				colorSymbol+colorAdded, colorReset, colorBold, colorReset)
+		}
+		fmt.Printf("      %sgo get -u%s\n", colorVersion, colorReset)
 	}
+
+	if unfixed > 0 {
+		actionNum := 1
+		if stats.FixAvailable > 0 {
+			actionNum = 2
+		}
+		fmt.Printf("  %s%d.%s %sInvestigate unfixed vulnerabilities%s - review manually or consider alternatives\n",
+			colorSymbol+colorNeutral, actionNum, colorReset, colorBold, colorReset)
+	}
+}
+
+// filterRelevantSecondaryIDs filters secondary IDs to show only the most relevant ones
+func filterRelevantSecondaryIDs(secondaryIDs []string, primaryID string) []string {
+	var relevant []string
+
+	// If primary is CVE, show GO- and GHSA- equivalents
+	if strings.HasPrefix(primaryID, "CVE-") {
+		for _, id := range secondaryIDs {
+			if strings.HasPrefix(id, "GO-") || strings.HasPrefix(id, "GHSA-") {
+				relevant = append(relevant, id)
+			}
+		}
+	} else if strings.HasPrefix(primaryID, "GO-") {
+		// If primary is GO-, show CVE and GHSA- equivalents
+		for _, id := range secondaryIDs {
+			if strings.HasPrefix(id, "CVE-") || strings.HasPrefix(id, "GHSA-") {
+				relevant = append(relevant, id)
+			}
+		}
+	} else if strings.HasPrefix(primaryID, "GHSA-") {
+		// If primary is GHSA-, show CVE and GO- equivalents
+		for _, id := range secondaryIDs {
+			if strings.HasPrefix(id, "CVE-") || strings.HasPrefix(id, "GO-") {
+				relevant = append(relevant, id)
+			}
+		}
+	}
+
+	// Limit to 3 most relevant secondary IDs to avoid clutter
+	if len(relevant) > 3 {
+		relevant = relevant[:3]
+	}
+
+	return relevant
+}
+
+// cleanSummaryText removes redundant package references from vulnerability summaries
+func cleanSummaryText(summary, packageName string) string {
+	if summary == "" {
+		return summary
+	}
+
+	// Extract the base package name without version suffixes for better matching
+	basePackageName := packageName
+	if idx := strings.LastIndex(basePackageName, "/v"); idx != -1 {
+		basePackageName = basePackageName[:idx]
+	}
+
+	// List of patterns to clean up (case insensitive)
+	patterns := []string{
+		" in " + packageName,
+		" in " + basePackageName,
+		" for " + packageName,
+		" for " + basePackageName,
+		" of " + packageName,
+		" of " + basePackageName,
+		packageName + " ",
+		basePackageName + " ",
+	}
+
+	cleanedSummary := summary
+	lowerSummary := strings.ToLower(summary)
+
+	for _, pattern := range patterns {
+		lowerPattern := strings.ToLower(pattern)
+		if strings.Contains(lowerSummary, lowerPattern) {
+			// Find the actual case in the original string and replace it
+			idx := strings.Index(lowerSummary, lowerPattern)
+			if idx != -1 {
+				// Replace the actual text, preserving case where it doesn't match the pattern
+				originalPattern := cleanedSummary[idx : idx+len(pattern)]
+
+				// If the pattern starts/ends with space, preserve those spaces
+				replacement := ""
+				if strings.HasPrefix(pattern, " ") && strings.HasSuffix(pattern, " ") {
+					replacement = " "
+				} else if strings.HasPrefix(pattern, " ") {
+					replacement = " "
+				} else if strings.HasSuffix(pattern, " ") {
+					replacement = " "
+				}
+
+				cleanedSummary = cleanedSummary[:idx] + replacement + cleanedSummary[idx+len(originalPattern):]
+				lowerSummary = strings.ToLower(cleanedSummary) // Update for next iteration
+			}
+		}
+	}
+
+	// Clean up any double spaces and trim
+	cleanedSummary = strings.ReplaceAll(cleanedSummary, "  ", " ")
+	cleanedSummary = strings.TrimSpace(cleanedSummary)
+
+	// Capitalize first letter if it got lowercased
+	if len(cleanedSummary) > 0 && cleanedSummary[0] >= 'a' && cleanedSummary[0] <= 'z' {
+		cleanedSummary = strings.ToUpper(string(cleanedSummary[0])) + cleanedSummary[1:]
+	}
+
+	return cleanedSummary
 }
 
 func checkFilesChanged(repoPath string, baseRef string, prRef string) ([]string, error) {
