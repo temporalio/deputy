@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bufio"
 	"context"
 	"crypto/x509"
 	"fmt"
@@ -24,6 +23,7 @@ import (
 	pl "github.com/google/osv-scalibr/plugin/list"
 	"github.com/ossf/osv-schema/bindings/go/osvschema"
 	"github.com/spf13/cobra"
+	"golang.org/x/mod/modfile"
 	"golang.org/x/mod/semver"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
@@ -50,10 +50,11 @@ var (
 	styleDowngraded = lipgloss.NewStyle().Foreground(lipgloss.Color("#FFD700")).Bold(true) // Yellow, bold
 	styleNeutral    = lipgloss.NewStyle().Foreground(lipgloss.Color("#FFFFFF")).Bold(true) // White, bold
 
-	stylePackageName = lipgloss.NewStyle().Foreground(lipgloss.Color("#FFFFFF"))
-	styleVersion     = lipgloss.NewStyle().Foreground(lipgloss.Color("#A9A9A9")).Faint(true)
-	styleLicense     = lipgloss.NewStyle().Foreground(lipgloss.Color("#A9A9A9")).Faint(true)
-	styleArrow       = lipgloss.NewStyle().Foreground(lipgloss.Color("#00CED1")).Faint(true)
+	stylePackageName    = lipgloss.NewStyle().Foreground(lipgloss.Color("#FFFFFF"))
+	styleVersion        = lipgloss.NewStyle().Foreground(lipgloss.Color("#A9A9A9")).Faint(true)
+	styleLicense        = lipgloss.NewStyle().Foreground(lipgloss.Color("#A9A9A9")).Faint(true)
+	styleUpdateArrow    = lipgloss.NewStyle().Foreground(lipgloss.Color("#00CED1")).Faint(true)
+	styleDowngradeArrow = lipgloss.NewStyle().Foreground(lipgloss.Color("#FFD700")).Faint(true)
 	// styleHeader already defined above, remove this duplicate
 	styleSymbol = lipgloss.NewStyle().Bold(true)
 )
@@ -959,7 +960,7 @@ func displayVulnerabilities(vulns []Vulnerability) {
 					} else if score >= 0.0 {
 						severityDisplay = styleVersion.Render(fmt.Sprintf("[LOW %.1f]", score))
 					} else {
-						severityDisplay = styleVersion.Render("[UNKNOWN]")
+						severityDisplay = styleVersion.Render("[?]")
 					}
 				}
 			} else {
@@ -974,7 +975,7 @@ func displayVulnerabilities(vulns []Vulnerability) {
 				} else if score >= 0.0 {
 					severityDisplay = styleVersion.Render(fmt.Sprintf("[LOW %.1f]", score))
 				} else {
-					severityDisplay = styleVersion.Render("[UNKNOWN]")
+					severityDisplay = styleVersion.Render("[?]")
 				}
 			}
 
@@ -1003,21 +1004,31 @@ func displayVulnerabilities(vulns []Vulnerability) {
 			if len(vuln.SecondaryIDs) > 0 {
 				relevantSecondary := filterRelevantSecondaryIDs(vuln.SecondaryIDs, vuln.PrimaryID)
 				if len(relevantSecondary) > 0 {
-					aliasDisplay := make([]string, len(relevantSecondary))
-					for i, alias := range relevantSecondary {
+					var aliasBlocks []string
+					for _, alias := range relevantSecondary {
+						var aliasStyle lipgloss.Style
 						if strings.HasPrefix(alias, "CVE-") {
-							aliasDisplay[i] = styleAlias.Render(alias)
+							aliasStyle = styleAlias
 						} else {
-							aliasDisplay[i] = styleAliasOther.Render(alias)
+							aliasStyle = styleAliasOther
 						}
+						aliasBlocks = append(aliasBlocks, aliasStyle.Render(alias))
 					}
-					fmt.Println("    " + styleMeta.Render("Aliases:") + " " + strings.Join(aliasDisplay, ", "))
+					aliasRow := lipgloss.JoinHorizontal(lipgloss.Top,
+						styleAliasLabel.Render("Aliases:"),
+						lipgloss.NewStyle().MarginLeft(1).Render(strings.Join(aliasBlocks, ", ")),
+					)
+					fmt.Println("    " + aliasRow)
 				}
 			}
 
 			// Show publication date if recent (within last year)
 			if vuln.Published != "" && len(vuln.Published) >= 10 {
-				fmt.Println("    " + styleMeta.Render("Published:") + " " + styleMeta.Render(vuln.Published[:10]))
+				metaBlock := lipgloss.JoinHorizontal(lipgloss.Top,
+					styleMeta.Render("Published:"),
+					lipgloss.NewStyle().MarginLeft(1).Faint(true).Render(vuln.Published[:10]),
+				)
+				fmt.Println("    " + metaBlock)
 			}
 		}
 	}
@@ -1779,72 +1790,21 @@ func findBestPackageInfo(infos []GoPackageInfo) GoPackageInfo {
 // getDirectDependencies reads go.mod file and returns a map of direct dependencies
 func getDirectDependencies() map[string]bool {
 	directDeps := make(map[string]bool)
-
-	// Standard library packages are always direct
 	directDeps["stdlib"] = true
 
-	// Try to read go.mod from current directory
-	file, err := os.Open("go.mod")
+	data, err := os.ReadFile("go.mod")
 	if err != nil {
 		return directDeps // Return map with stdlib if go.mod doesn't exist
 	}
-	defer file.Close()
 
-	scanner := bufio.NewScanner(file)
-	inRequireBlock := false
+	mf, err := modfile.Parse("go.mod", data, nil)
+	if err != nil {
+		return directDeps // Return map with stdlib if go.mod is malformed
+	}
 
-	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
-
-		// Start of require block
-		if strings.HasPrefix(line, "require (") {
-			inRequireBlock = true
-			continue
-		}
-
-		// End of require block
-		if inRequireBlock && line == ")" {
-			inRequireBlock = false
-			continue
-		}
-
-		// Single line require
-		if strings.HasPrefix(line, "require ") {
-			parts := strings.Fields(line)
-			if len(parts) >= 3 {
-				pkgName := parts[1]
-				// Check if it's not marked as indirect
-				isIndirect := false
-				for _, part := range parts[3:] {
-					if strings.Contains(part, "indirect") {
-						isIndirect = true
-						break
-					}
-				}
-				if !isIndirect {
-					directDeps[pkgName] = true
-				}
-			}
-			continue
-		}
-
-		// Inside require block
-		if inRequireBlock && line != "" && !strings.HasPrefix(line, "//") {
-			parts := strings.Fields(line)
-			if len(parts) >= 2 {
-				pkgName := parts[0]
-				// Check if it's not marked as indirect
-				isIndirect := false
-				for _, part := range parts[2:] {
-					if strings.Contains(part, "indirect") {
-						isIndirect = true
-						break
-					}
-				}
-				if !isIndirect {
-					directDeps[pkgName] = true
-				}
-			}
+	for _, req := range mf.Require {
+		if !req.Indirect {
+			directDeps[req.Mod.Path] = true
 		}
 	}
 
@@ -2617,12 +2577,12 @@ func runDepDelta(repoPath, baseRef, targetRef string, enableVulnScan bool) error
 
 		switch pkg.ChangeType {
 		case Added:
-			fmt.Printf("  %s %s @%s %s\n",
-				styleSymbol.Render("+"), styleAdded.Render(pkg.Name), styleVersion.Render(pkg.TargetVersion), licenseStr)
+			fmt.Printf("  %s %s @ %s %s\n",
+				styleAdded.Render("+"), styleAdded.Render(pkg.Name), styleVersion.Render(pkg.TargetVersion), licenseStr)
 			added++
 		case Removed:
-			fmt.Printf("  %s %s @%s\n",
-				styleSymbol.Render("-"), styleRemoved.Render(pkg.Name), styleVersion.Render(pkg.BaseVersion))
+			fmt.Printf("  %s %s @ %s\n",
+				styleRemoved.Render("-"), styleRemoved.Render(pkg.Name), styleVersion.Render(pkg.BaseVersion))
 			removed++
 		case Updated:
 			versionChange := compareGoPackageVersions(pkg)
@@ -2648,10 +2608,19 @@ func runDepDelta(repoPath, baseRef, targetRef string, enableVulnScan bool) error
 			}
 			oldPackageDisplay := ""
 			if pkg.OldName != "" && pkg.OldName != pkg.Name {
-				oldPackageDisplay = fmt.Sprintf("%s %s→ ", styleDim.Render(pkg.OldName), styleArrow.Render("→"))
+				if versionChange == -1 {
+					oldPackageDisplay = fmt.Sprintf("%s %s ", styleDim.Render(pkg.OldName), styleDowngradeArrow.Render("→"))
+				} else {
+					oldPackageDisplay = fmt.Sprintf("%s %s ", styleDim.Render(pkg.OldName), styleUpdateArrow.Render("→"))
+				}
 			}
-			fmt.Printf("  %s %s%s @%s %s%s %s\n",
-				symbolColor.Render(symbol), oldPackageDisplay, packageDisplay, styleVersion.Render(pkg.BaseVersion), styleArrow.Render("→"), styleVersion.Render(targetVersionDisplay), licenseStr)
+			if versionChange == -1 {
+				fmt.Printf("  %s %s%s @ %s %s%s %s\n",
+					symbolColor.Render(symbol), oldPackageDisplay, packageDisplay, styleVersion.Render(pkg.BaseVersion), styleDowngradeArrow.Render("→ "), styleVersion.Render(targetVersionDisplay), licenseStr)
+			} else {
+				fmt.Printf("  %s %s%s @ %s %s%s %s\n",
+					symbolColor.Render(symbol), oldPackageDisplay, packageDisplay, styleVersion.Render(pkg.BaseVersion), styleUpdateArrow.Render("→ "), styleVersion.Render(targetVersionDisplay), licenseStr)
+			}
 			updated++
 		}
 	}
