@@ -7,7 +7,7 @@ import (
 	"github.com/google/osv-scalibr/extractor"
 )
 
-func TestExtractCanonicalPackageName(t *testing.T) {
+func Test_extractCanonicalPackageName(t *testing.T) {
 	tests := []struct {
 		input    string
 		expected string
@@ -46,7 +46,7 @@ func TestExtractCanonicalPackageName(t *testing.T) {
 	}
 }
 
-func TestNormalizeGopkgInURL(t *testing.T) {
+func Test_normalizeGopkgInURL(t *testing.T) {
 	tests := []struct {
 		input    string
 		expected string
@@ -80,7 +80,7 @@ func TestNormalizeGopkgInURL(t *testing.T) {
 	}
 }
 
-func TestParseGoPackage(t *testing.T) {
+func Test_parseGoPackage(t *testing.T) {
 	tests := []struct {
 		name              string
 		version           string
@@ -125,7 +125,7 @@ func TestParseGoPackage(t *testing.T) {
 	}
 }
 
-func TestCompareGoPackageChanges(t *testing.T) {
+func Test_compareGoPackageChanges(t *testing.T) {
 	tests := []struct {
 		oldPkg   GoPackageInfo
 		newPkg   GoPackageInfo

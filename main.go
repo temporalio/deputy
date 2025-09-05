@@ -2435,7 +2435,7 @@ and provide guidance on supported reference types.`
 }
 
 func runDepDelta(repoPath, baseRef, targetRef string, enableVulnScan bool) error {
-	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, os.Kill)
+	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer cancel()
 
 	// Display what we're comparing for better UX
@@ -2550,6 +2550,8 @@ func runDepDelta(repoPath, baseRef, targetRef string, enableVulnScan bool) error
 	if err != nil {
 		return fmt.Errorf("failed to connect to gRPC server: %w", err)
 	}
+	defer conn.Close()
+
 	client := pb.NewInsightsClient(conn)
 
 	fmt.Printf("\n%s\n", styleHeader.Render("Dependency Changes:"))
