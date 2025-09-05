@@ -239,16 +239,10 @@ func fetchLicensesForPackage(ctx context.Context, client depsClient, pkg Package
 	return raw.Licenses
 }
 
-// pkg-level client variable to allow injection during tests. Defaults to the real client.
-// var osvClientFactory = func() osvClient { return osvdev.DefaultClient() }
-
 func queryOSVBatch(ctx context.Context, client osvClient, packages []PackageChange) ([]Vulnerability, error) {
 	if len(packages) == 0 {
 		return nil, nil
 	}
-
-	// Create OSV client (can be faked in tests)
-	// client := osvClientFactory()
 
 	// Prepare batch queries
 	queries := make([]*osvdev.Query, 0, len(packages))
@@ -269,7 +263,7 @@ func queryOSVBatch(ctx context.Context, client osvClient, packages []PackageChan
 		queries = append(queries, &osvdev.Query{
 			Package: osvdev.Package{
 				Name:      pkg.Name,
-				Ecosystem: "Go", // OSV uses "Go" not "go"
+				Ecosystem: "Go",
 			},
 			Version: version,
 		})
