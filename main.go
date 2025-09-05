@@ -45,7 +45,6 @@ var (
 	styleMeta       = lipgloss.NewStyle().Foreground(lipgloss.Color("#A0A0A0")).Italic(true) // Subtle, readable metadata
 	styleAliasLabel = lipgloss.NewStyle().Foreground(lipgloss.Color("#A0A0A0")).Italic(true) // Match metadata style for 'Aliases:' label
 	styleBold       = lipgloss.NewStyle().Bold(true)
-	styleReset      = lipgloss.NewStyle()                                                  // No effect, just for compatibility
 	styleUpgraded   = lipgloss.NewStyle().Foreground(lipgloss.Color("#00CED1")).Bold(true) // Cyan, bold
 	styleDowngraded = lipgloss.NewStyle().Foreground(lipgloss.Color("#FFD700")).Bold(true) // Yellow, bold
 	styleNeutral    = lipgloss.NewStyle().Foreground(lipgloss.Color("#FFFFFF")).Bold(true) // White, bold
@@ -193,13 +192,63 @@ func (*scalibrNullLogger) Warn(args ...any)                  {}
 func (*scalibrNullLogger) Warnf(format string, args ...any)  {}
 
 // queryOSVBatch performs a batch vulnerability query to the OSV API using the official client
-func queryOSVBatch(ctx context.Context, packages []PackageChange) ([]Vulnerability, error) {
+// osvClient is a thin interface used so tests can inject a fake client.
+type osvClient interface {
+	QueryBatch(ctx context.Context, queries []*osvdev.Query) (*osvdev.BatchedResponse, error)
+	GetVulnByID(ctx context.Context, id string) (*osvschema.Vulnerability, error)
+}
+
+// depsClient abstracts the deps.dev gRPC client so tests can inject a fake implementation.
+type depsClient interface {
+	// GetVersion returns the raw response as an empty interface so tests and
+	// lightweight adapters don't need to import generated types. Caller may
+	// type-assert to the expected generated type to extract licenses.
+	GetVersion(ctx context.Context, req *pb.GetVersionRequest) (*pb.Version, error)
+}
+
+// pbInsightsAdapter adapts the generated pb.InsightsClient to our depsClient interface.
+type pbInsightsAdapter struct{ client pb.InsightsClient }
+
+func (p *pbInsightsAdapter) GetVersion(ctx context.Context, req *pb.GetVersionRequest) (*pb.Version, error) {
+	return p.client.GetVersion(ctx, req)
+}
+
+// fetchLicensesForPackage queries deps.dev for license information for a single package.
+// Returns ["?"] when no data is available or on error to preserve existing UX.
+func fetchLicensesForPackage(ctx context.Context, client depsClient, pkg PackageChange) []string {
+	// If no target version present, return unknown
+	if pkg.TargetVersion == "" {
+		return []string{"?"}
+	}
+
+	version := pkg.TargetVersion
+	if !strings.HasPrefix(version, "v") {
+		version = "v" + version
+	}
+
+	raw, err := client.GetVersion(ctx, &pb.GetVersionRequest{
+		VersionKey: &pb.VersionKey{
+			System:  pb.System_GO,
+			Name:    pkg.Name,
+			Version: version,
+		},
+	})
+	if err != nil || raw == nil || len(raw.Licenses) == 0 {
+		return []string{"?"}
+	}
+	return raw.Licenses
+}
+
+// pkg-level client variable to allow injection during tests. Defaults to the real client.
+// var osvClientFactory = func() osvClient { return osvdev.DefaultClient() }
+
+func queryOSVBatch(ctx context.Context, client osvClient, packages []PackageChange) ([]Vulnerability, error) {
 	if len(packages) == 0 {
 		return nil, nil
 	}
 
-	// Create OSV client
-	client := osvdev.DefaultClient()
+	// Create OSV client (can be faked in tests)
+	// client := osvClientFactory()
 
 	// Prepare batch queries
 	queries := make([]*osvdev.Query, 0, len(packages))
@@ -789,9 +838,11 @@ func parseFloat(s string) float64 {
 	var result float64
 	var decimal float64 = 1
 	var foundDot bool
+	var digitsFound bool
 
 	for _, r := range s {
 		if r >= '0' && r <= '9' {
+			digitsFound = true
 			digit := float64(r - '0')
 			if foundDot {
 				decimal *= 0.1
@@ -804,6 +855,11 @@ func parseFloat(s string) float64 {
 		} else {
 			break // Stop at first non-numeric character
 		}
+	}
+
+	// If we didn't parse any digits, return -1 to indicate failure
+	if !digitsFound {
+		return -1
 	}
 
 	// Validate CVSS range
@@ -835,21 +891,35 @@ func findBestFixedVersion(fixedVersions []string, currentVersion string) string 
 		fixMajor := extractMajorFromSemver(normalizedFix)
 
 		if fixMajor == currentMajor {
-			// This is a fix within the same major version
-			sameMajorVersions = append(sameMajorVersions, fix)
+			// This is a fix within the same major version; store the normalized form
+			sameMajorVersions = append(sameMajorVersions, normalizedFix)
 		} else {
-			otherVersions = append(otherVersions, fix)
+			// Store normalized versions so subsequent comparisons/sorts operate on consistent values
+			otherVersions = append(otherVersions, normalizedFix)
 		}
 	}
 
 	// Prefer same major version fixes
 	if len(sameMajorVersions) > 0 {
-		// Sort and return the earliest available fix in the same major version
-		// For simplicity, return the first one for now
+		// Sort ascending (earliest/smallest first) and return the earliest available fix in the same major version
+		slices.SortFunc(sameMajorVersions, func(a, b string) int {
+			return semver.Compare(normalizeGoVersion(a), normalizeGoVersion(b))
+		})
 		return sameMajorVersions[0]
 	}
 
-	// If no same-major version fix, return the first available fix
+	// If no same-major version fix, prefer the lowest suitable fix from other major versions
+	if len(otherVersions) > 0 {
+		slices.SortFunc(otherVersions, func(a, b string) int {
+			return semver.Compare(normalizeGoVersion(a), normalizeGoVersion(b))
+		})
+		return otherVersions[0]
+	}
+
+	// As a last resort, sort all provided fixed versions and return the earliest one
+	slices.SortFunc(fixedVersions, func(a, b string) int {
+		return semver.Compare(normalizeGoVersion(a), normalizeGoVersion(b))
+	})
 	return fixedVersions[0]
 }
 
@@ -1994,10 +2064,7 @@ func calculateSimilarity(a, b string) float64 {
 	}
 
 	// Simple similarity: ratio of common characters
-	maxLen := len(a)
-	if len(b) > maxLen {
-		maxLen = len(b)
-	}
+	maxLen := max(len(b), len(a))
 	if maxLen == 0 {
 		return 0
 	}
@@ -2187,12 +2254,7 @@ func findLocalDefaultBranch(repo *git.Repository) string {
 // isLikelyDefaultBranch checks if a branch name looks like a default branch
 func isLikelyDefaultBranch(branchName string) bool {
 	defaultPatterns := []string{"main", "master", "develop", "development", "trunk", "default"}
-	for _, pattern := range defaultPatterns {
-		if branchName == pattern {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(defaultPatterns, branchName)
 }
 
 // listAvailableReferences displays all available Git references in a user-friendly format
@@ -2552,7 +2614,9 @@ func runDepDelta(repoPath, baseRef, targetRef string, enableVulnScan bool) error
 	}
 	defer conn.Close()
 
-	client := pb.NewInsightsClient(conn)
+	// Wrap the generated client in our adapter so production code uses depsClient.
+	genClient := pb.NewInsightsClient(conn)
+	clientAdapter := &pbInsightsAdapter{client: genClient}
 
 	fmt.Printf("\n%s\n", styleHeader.Render("Dependency Changes:"))
 
@@ -2560,15 +2624,16 @@ func runDepDelta(repoPath, baseRef, targetRef string, enableVulnScan bool) error
 
 	for _, pkg := range changedPackages {
 		licenses := []string{"?"}
-		versionInfo, err := client.GetVersion(ctx, &pb.GetVersionRequest{
+		// Use the adapter which implements depsClient
+		versionRaw, err := clientAdapter.GetVersion(ctx, &pb.GetVersionRequest{
 			VersionKey: &pb.VersionKey{
 				System:  pb.System_GO,
 				Name:    pkg.Name,
 				Version: "v" + pkg.TargetVersion,
 			},
 		})
-		if err == nil {
-			licenses = versionInfo.GetLicenses()
+		if err == nil && versionRaw != nil {
+			licenses = versionRaw.GetLicenses()
 		}
 
 		// Format license info with subtle styling
@@ -2689,7 +2754,7 @@ func runDepDelta(repoPath, baseRef, targetRef string, enableVulnScan bool) error
 	// Perform vulnerability scanning on changed packages if enabled
 	if enableVulnScan {
 		fmt.Printf("\nScanning for vulnerabilities...\n")
-		vulnerabilities, err := queryOSVBatch(ctx, changedPackages)
+		vulnerabilities, err := queryOSVBatch(ctx, osvdev.DefaultClient(), changedPackages)
 		if err != nil {
 			fmt.Printf("Warning: Vulnerability scanning failed: %v\n", err)
 		} else {
