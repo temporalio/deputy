@@ -575,23 +575,20 @@ func deriveDisplayName(origName, purlStr string) string {
 
 // collectInventoryAtRef redefined here to avoid build tag issues linking stub.
 func collectInventorySBOM(ctx context.Context, repoPath, gitRef string, ecos []string) ([]*extractor.Package, error) {
-	// Plugin selection honors --ecosystems; default to "all", then fallback to "go".
+	// Plugin selection honors --ecosystems; default to "default".
 	var (
 		plugins []scalplugin.Plugin
 		err     error
 	)
 	if len(ecos) == 0 {
-		plugins, err = pl.FromNames([]string{"all"})
+		plugins, err = pl.FromNames([]string{"default"})
 		if err != nil {
-			plugins, err = pl.FromNames([]string{"go"})
-			if err != nil {
-				return nil, fmt.Errorf("load plugins: %w", err)
-			}
+			return nil, fmt.Errorf("failed to load default plugins: %w", err)
 		}
 	} else {
 		plugins, err = pl.FromNames(ecos)
 		if err != nil {
-			return nil, fmt.Errorf("load plugins for %v: %w", ecos, err)
+			return nil, fmt.Errorf("failed to load plugins for %v: %w", ecos, err)
 		}
 	}
 
