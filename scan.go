@@ -131,11 +131,39 @@ func addScanSubcommand(root *cobra.Command) {
 
 			// Resolve the commit hash for display/reference
 			commitHash := ""
+			originURL := ""
 			if repo, err := git.PlainOpen(localRepoPath); err == nil {
 				if h, herr := repo.ResolveRevision(plumbing.Revision(refOrHEAD(ref))); herr == nil && h != nil {
 					commitHash = h.String()
 				} else if headRef, herr2 := repo.Head(); herr2 == nil {
 					commitHash = headRef.Hash().String()
+				}
+				// Attempt to read upstream origin URL for context
+				if r, rerr := repo.Remote("origin"); rerr == nil && r != nil && r.Config() != nil && len(r.Config().URLs) > 0 {
+					u := strings.TrimSpace(r.Config().URLs[0])
+					if u != "" {
+						// Normalize common SSH forms to https for readability
+						if strings.HasPrefix(u, "git@github.com:") {
+							p := strings.TrimPrefix(u, "git@github.com:")
+							if !strings.HasSuffix(p, ".git") {
+								p += ".git"
+							}
+							originURL = "https://github.com/" + p
+						} else if strings.HasPrefix(u, "ssh://git@github.com/") {
+							p := strings.TrimPrefix(u, "ssh://git@github.com/")
+							if !strings.HasSuffix(p, ".git") {
+								p += ".git"
+							}
+							originURL = "https://github.com/" + p
+						} else {
+							// Handle https and bare github.com forms
+							if n := toHTTPSGitURL(u); n != "" {
+								originURL = n
+							} else {
+								originURL = u
+							}
+						}
+					}
 				}
 			}
 			shortRef := shortGitRef(refOrHEAD(ref))
@@ -146,7 +174,11 @@ func addScanSubcommand(root *cobra.Command) {
 
 			switch strings.ToLower(format) {
 			case "", "text":
-				fmt.Printf("\nScanned %s @ %s (%s)\n\n", repoPath, shortRef, shortHash)
+				// Print scan context with consistent spacing: one blank line above and below
+				fmt.Printf("\nScanned %s @ %s (%s)\n", repoPath, shortRef, shortHash)
+				if originURL != "" {
+					fmt.Println("  " + styleMeta.Render("Origin: ") + originURL)
+				}
 				displayVulnerabilities(vulns)
 				// Detect and print module deprecations (known set)
 				if deps := detectModuleDeprecations(pkgs); len(deps) > 0 {
