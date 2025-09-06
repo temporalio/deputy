@@ -188,7 +188,7 @@ func addSBOMSubcommand(root *cobra.Command) {
 				shortRef := shortGitRef(ref)
 				shortHash := ""
 				if repo, err := git.PlainOpen(localRepoPath); err == nil {
-					if h, herr := repo.ResolveRevision(plumbing.Revision(ref)); herr == nil && h != nil {
+					if h, herr := resolveRevisionEnhanced(repo, ref); herr == nil && h != nil {
 						sh := h.String()
 						if len(sh) > 7 {
 							shortHash = sh[:7]
@@ -562,7 +562,7 @@ func collectInventoryAtRef(ctx context.Context, repoPath, gitRef string, ecos []
 	}
 
 	// Resolve ref to hash
-	hash, err := repo.ResolveRevision(plumbing.Revision(gitRef))
+	hash, err := resolveRevisionEnhanced(repo, gitRef)
 	if err != nil {
 		return nil, fmt.Errorf("resolve ref %q: %w", gitRef, err)
 	}

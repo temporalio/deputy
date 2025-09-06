@@ -9,7 +9,6 @@ import (
 	"time"
 
 	git "github.com/go-git/go-git/v5"
-	"github.com/go-git/go-git/v5/plumbing"
 	"github.com/google/osv-scalibr/extractor"
 	"github.com/spf13/cobra"
 	"osv.dev/bindings/go/osvdev"
@@ -133,7 +132,7 @@ func addScanSubcommand(root *cobra.Command) {
 			commitHash := ""
 			originURL := ""
 			if repo, err := git.PlainOpen(localRepoPath); err == nil {
-				if h, herr := repo.ResolveRevision(plumbing.Revision(refOrHEAD(ref))); herr == nil && h != nil {
+				if h, herr := resolveRevisionEnhanced(repo, refOrHEAD(ref)); herr == nil && h != nil {
 					commitHash = h.String()
 				} else if headRef, herr2 := repo.Head(); herr2 == nil {
 					commitHash = headRef.Hash().String()

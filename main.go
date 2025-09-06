@@ -30,6 +30,7 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 	"osv.dev/bindings/go/osvdev"
+	"strconv"
 )
 
 func init() {
@@ -1374,12 +1375,12 @@ func checkFilesChanged(repoPath string, baseRef string, prRef string) ([]string,
 		return nil, fmt.Errorf("error opening repository: %w", err)
 	}
 
-	baseHash, err := repo.ResolveRevision(plumbing.Revision(baseRef))
+	baseHash, err := resolveRevisionEnhanced(repo, baseRef)
 	if err != nil {
 		return nil, fmt.Errorf("error resolving base reference '%s': %w", baseRef, err)
 	}
 
-	prHash, err := repo.ResolveRevision(plumbing.Revision(prRef))
+	prHash, err := resolveRevisionEnhanced(repo, prRef)
 	if err != nil {
 		return nil, fmt.Errorf("error resolving PR reference '%s': %w", prRef, err)
 	}
@@ -2136,6 +2137,172 @@ func normalizeGoVersion(version string) string {
 	return "v" + version
 }
 
+// normalizeGitRefForGoGit converts common time shorthands within Git revision
+// expressions into ISO-8601 timestamps accepted by go-git. For example:
+//
+//	HEAD@{yesterday}      -> HEAD@{2006-01-02T15:04:05Z}
+//	main@{1.week.ago}     -> main@{2006-01-02T15:04:05Z}
+//
+// If no recognizable shorthand is present, the input is returned unchanged.
+func normalizeGitRefForGoGit(ref string) string {
+	r := strings.TrimSpace(ref)
+	i := strings.Index(r, "@{")
+	if i < 0 {
+		return r
+	}
+	jrel := strings.Index(r[i+2:], "}")
+	if jrel < 0 {
+		return r
+	}
+	j := i + 2 + jrel
+	inner := strings.TrimSpace(r[i+2 : j])
+	if iso := parseTimeShorthandToISO(inner); iso != "" {
+		return r[:i+2] + iso + r[j:]
+	}
+	return r
+}
+
+// parseTimeShorthandToISO parses simple time shorthands and returns an RFC3339 UTC timestamp.
+// Supported forms:
+// - "now"
+// - "yesterday"
+// - "<n>.<unit>.ago" where unit in {second(s), minute(s), hour(s), day(s), week(s)}
+func parseTimeShorthandToISO(expr string) string {
+	s := strings.ToLower(strings.TrimSpace(expr))
+	now := time.Now().UTC()
+	switch s {
+	case "now":
+		return now.Format(time.RFC3339)
+	case "yesterday":
+		return now.Add(-24 * time.Hour).Format(time.RFC3339)
+	}
+	if strings.HasSuffix(s, ".ago") {
+		core := strings.TrimSuffix(s, ".ago")
+		core = strings.TrimSuffix(core, ".") // tolerate trailing dot
+		parts := strings.Split(core, ".")
+		if len(parts) == 2 {
+			nStr := strings.TrimSpace(parts[0])
+			unit := strings.TrimSpace(parts[1])
+			if n, err := strconv.Atoi(nStr); err == nil && n > 0 {
+				// Handle calendar units via AddDate for months/years
+				switch unit {
+				// seconds/minutes/hours/days/weeks: use durations
+				case "s", "sec", "secs", "second", "seconds":
+					return now.Add(-time.Duration(n) * time.Second).Format(time.RFC3339)
+				case "m", "min", "mins", "minute", "minutes":
+					return now.Add(-time.Duration(n) * time.Minute).Format(time.RFC3339)
+				case "h", "hr", "hrs", "hour", "hours":
+					return now.Add(-time.Duration(n) * time.Hour).Format(time.RFC3339)
+				case "d", "day", "days":
+					return now.Add(-time.Duration(n) * 24 * time.Hour).Format(time.RFC3339)
+				case "w", "wk", "wks", "week", "weeks":
+					return now.Add(-time.Duration(n) * 7 * 24 * time.Hour).Format(time.RFC3339)
+				// months/years: calendar-aware subtraction
+				case "mo", "mon", "month", "months":
+					return now.AddDate(0, -n, 0).Format(time.RFC3339)
+				case "y", "yr", "yrs", "year", "years":
+					return now.AddDate(-n, 0, 0).Format(time.RFC3339)
+				}
+			}
+		}
+	}
+	return ""
+}
+
+// resolveRevisionEnhanced resolves Git revisions with support for time-based selectors
+// of the form "<ref>@{<timestamp>}" where <timestamp> is either RFC3339 or one of
+// the supported shorthands handled by parseTimeShorthandToISO. If a time selector
+// is present, the function walks the commit history from <ref> backwards to find
+// the newest commit whose commit time is <= the timestamp, and returns its hash.
+// If no time selector is present, this defers to go-git's ResolveRevision.
+func resolveRevisionEnhanced(repo *git.Repository, ref string) (*plumbing.Hash, error) {
+	r := strings.TrimSpace(ref)
+	i := strings.Index(r, "@{")
+	if i < 0 {
+		// No time selector: normalize any supported shorthand and delegate
+		rn := normalizeGitRefForGoGit(r)
+		return repo.ResolveRevision(plumbing.Revision(rn))
+	}
+
+	// Extract base and inner time expression
+	jrel := strings.Index(r[i+2:], "}")
+	if jrel < 0 {
+		rn := normalizeGitRefForGoGit(r)
+		return repo.ResolveRevision(plumbing.Revision(rn))
+	}
+	j := i + 2 + jrel
+	base := strings.TrimSpace(r[:i])
+	inner := strings.TrimSpace(r[i+2 : j])
+
+	// Parse timestamp
+	var ts time.Time
+	if iso := parseTimeShorthandToISO(inner); iso != "" {
+		t, err := time.Parse(time.RFC3339, iso)
+		if err == nil {
+			ts = t
+		}
+	}
+	if ts.IsZero() {
+		// Try direct RFC3339 parse
+		if t, err := time.Parse(time.RFC3339, inner); err == nil {
+			ts = t
+		}
+	}
+	if ts.IsZero() {
+		// Fallback to default resolution
+		rn := normalizeGitRefForGoGit(r)
+		return repo.ResolveRevision(plumbing.Revision(rn))
+	}
+
+	// Resolve base ref without time selector
+	baseRef := strings.TrimSpace(base)
+	if baseRef == "" {
+		baseRef = "HEAD"
+	}
+	bh, err := repo.ResolveRevision(plumbing.Revision(baseRef))
+	if err != nil {
+		return nil, err
+	}
+	start, err := repo.CommitObject(*bh)
+	if err != nil {
+		return nil, err
+	}
+
+	// Walk commits; choose the newest commit with Committer.When <= ts
+	var best *object.Commit
+	seen := map[string]struct{}{}
+	iter := object.NewCommitPreorderIter(start, nil, nil)
+	_ = iter.ForEach(func(c *object.Commit) error {
+		if _, ok := seen[c.Hash.String()]; ok {
+			return nil
+		}
+		seen[c.Hash.String()] = struct{}{}
+		if !c.Committer.When.After(ts) {
+			if best == nil || c.Committer.When.After(best.Committer.When) {
+				best = c
+			}
+		}
+		return nil
+	})
+	if best != nil {
+		h := best.Hash
+		return &h, nil
+	}
+	// If ts is before entire history, pick the oldest reachable commit
+	var last *object.Commit
+	iter2 := object.NewCommitPreorderIter(start, nil, nil)
+	_ = iter2.ForEach(func(c *object.Commit) error {
+		last = c
+		return nil
+	})
+	if last != nil {
+		h := last.Hash
+		return &h, nil
+	}
+	// Fallback to base
+	return bh, nil
+}
+
 // validateReference checks if a Git reference is valid and provides helpful error messages
 func validateReference(repo *git.Repository, ref string) error {
 	// Accept special pseudo-ref for working tree comparison
@@ -2143,8 +2310,8 @@ func validateReference(repo *git.Repository, ref string) error {
 	if upper == "WORKING" || upper == "WORKTREE" || upper == "WT" || strings.TrimSpace(ref) == "." {
 		return nil
 	}
-	// Try to resolve the reference
-	_, err := repo.ResolveRevision(plumbing.Revision(ref))
+	// Try to resolve the reference (supporting friendly time shorthands)
+	_, err := resolveRevisionEnhanced(repo, ref)
 	if err == nil {
 		return nil // Reference is valid
 	}
@@ -2162,7 +2329,7 @@ func validateReference(repo *git.Repository, ref string) error {
 		"  • Tags: v1.0.0, release-2023\n"+
 		"  • Commit SHAs: 1a2b3c4, 1a2b3c4d5e6f7890abcdef\n"+
 		"  • Remote refs: origin/main, upstream/develop\n"+
-		"  • Git expressions: HEAD~3, main^, HEAD@{yesterday}\n"+
+		"  • Git expressions: HEAD~3, main^, HEAD@{yesterday}, HEAD@{1.week.ago}, HEAD@{1.month.ago}, HEAD@{1.year.ago}\n"+
 		"Use 'git branch -a' and 'git tag' to see available references", err)
 }
 
@@ -2560,6 +2727,7 @@ SUPPORTED REFERENCE TYPES:
 • Commit SHAs: 1a2b3c4, 1a2b3c4d5e6f7890abcdef123456789
 • Remote references: origin/main, upstream/develop, fork/feature
 • Git revision expressions: HEAD~3, main^, HEAD@{yesterday}, @{upstream}
+• Time-based refs supported: HEAD@{N.second.ago}, HEAD@{N.minute.ago}, HEAD@{N.hour.ago}, HEAD@{N.day.ago}, HEAD@{N.week.ago}, HEAD@{N.month.ago}, HEAD@{N.year.ago}
 • Relative references: HEAD~1, main~5, tag^{tree}
 
 USAGE PATTERNS:
@@ -2657,6 +2825,8 @@ ADVANCED GIT EXPRESSIONS:
   # Time-based comparisons
   deputy "HEAD@{yesterday}" HEAD
   deputy "main@{1.week.ago}" main
+  deputy "main@{3.month.ago}" main
+  deputy "HEAD@{1.year.ago}" HEAD
 
   # Compare with upstream
   deputy @{upstream} HEAD
@@ -2724,7 +2894,7 @@ func runDepDelta(repoPath, baseRef, targetRef string, enableVulnScan bool) error
 	// Base refs are scanned via temporary snapshots, and the target WORKING tree
 	// is read directly. This avoids any need to save/restore git state here.
 
-	baseHash, err := repo.ResolveRevision(plumbing.Revision(baseRef))
+	baseHash, err := resolveRevisionEnhanced(repo, baseRef)
 	if err != nil {
 		// Provide helpful error message with suggestions
 		suggestions := getReferenceSuggestions(repo, baseRef)
@@ -2746,7 +2916,7 @@ func runDepDelta(repoPath, baseRef, targetRef string, enableVulnScan bool) error
 		}
 		targetPackages = tp
 	} else {
-		th, err := repo.ResolveRevision(plumbing.Revision(targetRef))
+		th, err := resolveRevisionEnhanced(repo, targetRef)
 		if err != nil {
 			// Provide helpful error message with suggestions
 			suggestions := getReferenceSuggestions(repo, targetRef)
