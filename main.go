@@ -2705,6 +2705,63 @@ func listAvailableReferences(repoPath string) error {
 	return nil
 }
 
+// addDiffSubcommand registers the diff subcommand to explicitly compare dependency changes between refs.
+func addDiffSubcommand(root *cobra.Command) {
+	var (
+		repoPath     string
+		skipVulnScan bool
+	)
+
+	cmd := &cobra.Command{
+		Use:   "diff [base] [target]",
+		Short: "Compare dependency changes between Git references",
+		Long:  "Explicitly compare dependency changes between Git references (branches, tags, SHAs, and expressions). Mirrors the default behavior when running 'deputy' without a subcommand.",
+		Args:  cobra.MaximumNArgs(2),
+		Example: strings.TrimSpace(`
+          # Compare default branch → HEAD (or → WORKING if uncommitted go.mod/go.sum changes)
+          deputy diff
+
+          # Compare default branch → a ref
+          deputy diff feature-branch
+
+          # Compare two explicit refs
+          deputy diff v1.27.0 v1.28.0
+          deputy diff origin/main feature/user-auth
+
+          # Use time-based refs
+          deputy diff "HEAD@{yesterday}" HEAD
+          deputy diff "main@{1.week.ago}" main
+
+          # Specify a repository path
+          deputy diff --repo=./some/repo v1.2.0 v1.3.0
+
+          # Speed up by skipping vulnerability scanning
+          deputy diff --skip-vuln-scan
+        `),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			// Parse references the same way as the root command
+			repo := repoPath
+			if repo == "" {
+				var err error
+				repo, err = os.Getwd()
+				if err != nil {
+					return err
+				}
+			}
+			baseRef, targetRef, err := parseReferences(repo, args)
+			if err != nil {
+				return err
+			}
+			return runDepDelta(repo, baseRef, targetRef, !skipVulnScan)
+		},
+	}
+
+	cmd.Flags().StringVarP(&repoPath, "repo", "r", "", "Path to the repository (defaults to current directory)")
+	cmd.Flags().BoolVarP(&skipVulnScan, "skip-vuln-scan", "s", false, "Skip vulnerability scanning (faster execution)")
+
+	root.AddCommand(cmd)
+}
+
 func main() {
 	var repoPath string
 	var listRefs bool
@@ -2718,7 +2775,7 @@ func main() {
 
 	rootCmd := &cobra.Command{
 		Use:   "deputy [base] [target]",
-		Short: "Analyze dependency changes between Git references",
+		Short: "Analyze dependency changes between Git references (see 'deputy diff')",
 		Long: `deputy analyzes dependency changes between Git references with comprehensive support for all Git reference types.
 
 SUPPORTED REFERENCE TYPES:
@@ -2775,11 +2832,14 @@ Can be disabled with --skip-vuln-scan for faster execution.`,
 	// Register subcommands
 	addSBOMSubcommand(rootCmd)
 	addScanSubcommand(rootCmd)
+	addDiffSubcommand(rootCmd)
 
 	// Add comprehensive examples for all user types
 	rootCmd.Example = `BASIC USAGE:
   # Compare current work with default branch (beginner-friendly)
   deputy
+
+  # Tip: 'deputy diff' runs the same comparison explicitly
 
   # Compare default branch with a feature branch
   deputy feature-branch

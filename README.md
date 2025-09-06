@@ -5,6 +5,38 @@ $ deputy HEAD~1500 HEAD
 ...
 ```
 
+## Dependency Diff
+
+Explicitly compare dependency changes between Git references. This mirrors the default behavior when running `deputy` without a subcommand, but provides a dedicated, intuitive entrypoint alongside `scan` and `sbom`.
+
+Examples:
+
+```console
+# Default: Compare default branch → HEAD (or → WORKING if go.mod/go.sum have uncommitted changes)
+$ deputy diff
+
+# Compare default branch → a ref
+$ deputy diff feature-branch
+
+# Compare two explicit refs
+$ deputy diff v1.27.0 v1.28.0
+$ deputy diff origin/main feature/user-auth
+
+# Time-based refs
+$ deputy diff "HEAD@{yesterday}" HEAD
+$ deputy diff "main@{1.week.ago}" main
+
+# Specify a repository path
+$ deputy diff --repo=./path/to/repo v1.2.0 v1.3.0
+
+# Speed up by skipping vulnerability scanning
+$ deputy diff --skip-vuln-scan
+```
+
+Notes:
+- Supports branches, tags, SHAs, remote refs, and time-based refs (e.g., `HEAD@{1.week.ago}`).
+- Uses non-destructive snapshots; your working tree isn’t modified.
+
 ## SBOM Generation
 
 Generate an SBOM for a specific ref/tag/commit using Protobom as the intermediary model. Outputs CycloneDX JSON, SPDX 2.3 JSON, or the raw Protobom JSON.
