@@ -1,12 +1,12 @@
 package main
 
 import (
-    "context"
-    "crypto/x509"
-    "io"
-    "fmt"
-    "os"
-    "os/signal"
+	"context"
+	"crypto/x509"
+	"fmt"
+	"io"
+	"os"
+	"os/signal"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -389,26 +389,26 @@ func processOSVVulnerability(vuln osvschema.Vulnerability, packageName, version 
 		}
 	}
 
-    // Extract fixed versions from affected ranges for THIS package only
-    if vuln.Affected != nil {
-        for _, affected := range vuln.Affected {
-            // Only consider fixes that apply to the specific package queried
-            if affected.Package.Name != "" && !strings.EqualFold(affected.Package.Name, packageName) {
-                continue
-            }
-            if affected.Ranges != nil {
-                for _, r := range affected.Ranges {
-                    if r.Events != nil {
-                        for _, event := range r.Events {
-                            if event.Fixed != "" {
-                                v.FixedVersions = append(v.FixedVersions, event.Fixed)
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
+	// Extract fixed versions from affected ranges for THIS package only
+	if vuln.Affected != nil {
+		for _, affected := range vuln.Affected {
+			// Only consider fixes that apply to the specific package queried
+			if affected.Package.Name != "" && !strings.EqualFold(affected.Package.Name, packageName) {
+				continue
+			}
+			if affected.Ranges != nil {
+				for _, r := range affected.Ranges {
+					if r.Events != nil {
+						for _, event := range r.Events {
+							if event.Fixed != "" {
+								v.FixedVersions = append(v.FixedVersions, event.Fixed)
+							}
+						}
+					}
+				}
+			}
+		}
+	}
 
 	return v
 }
@@ -718,7 +718,7 @@ func categorizeVulnerabilities(vulns []Vulnerability) VulnerabilityStats {
 		DuplicatesFound: len(vulns) - len(consolidated),
 	}
 
-    for _, vuln := range consolidated {
+	for _, vuln := range consolidated {
 		// Count CVEs
 		if strings.HasPrefix(vuln.PrimaryID, "CVE-") {
 			stats.CVECount++
@@ -731,12 +731,12 @@ func categorizeVulnerabilities(vulns []Vulnerability) VulnerabilityStats {
 			stats.IndirectDeps++
 		}
 
-        // Count vulnerabilities with applicable fixes (avoid suggesting downgrades)
-        if len(vuln.FixedVersions) > 0 {
-            if findBestFixedVersion(vuln.FixedVersions, vuln.Version) != "" {
-                stats.FixAvailable++
-            }
-        }
+		// Count vulnerabilities with applicable fixes (avoid suggesting downgrades)
+		if len(vuln.FixedVersions) > 0 {
+			if findBestFixedVersion(vuln.FixedVersions, vuln.Version) != "" {
+				stats.FixAvailable++
+			}
+		}
 
 		// Categorize by severity - handle both GHSA textual and numeric CVSS scores
 		if vuln.Severity != "" {
@@ -875,25 +875,25 @@ func parseFloat(s string) float64 {
 // findBestFixedVersion finds the most appropriate fixed version for the current package version
 // It prioritizes versions within the same major version, then the lowest suitable version
 func findBestFixedVersion(fixedVersions []string, currentVersion string) string {
-    if len(fixedVersions) == 0 {
-        return ""
-    }
-    cur := normalizeGoVersion(currentVersion)
-    // Collect only fixes >= current (prefer strictly greater; if equal, it's fine)
-    var candidates []string
-    for _, fix := range fixedVersions {
-        nf := normalizeGoVersion(fix)
-        if semver.Compare(nf, cur) >= 0 {
-            candidates = append(candidates, nf)
-        }
-    }
-    if len(candidates) == 0 {
-        // No applicable upgrade in this line; don't recommend downgrades
-        return ""
-    }
-    // Choose the smallest applicable fix
-    slices.SortFunc(candidates, func(a, b string) int { return semver.Compare(a, b) })
-    return candidates[0]
+	if len(fixedVersions) == 0 {
+		return ""
+	}
+	cur := normalizeGoVersion(currentVersion)
+	// Collect only fixes >= current (prefer strictly greater; if equal, it's fine)
+	var candidates []string
+	for _, fix := range fixedVersions {
+		nf := normalizeGoVersion(fix)
+		if semver.Compare(nf, cur) >= 0 {
+			candidates = append(candidates, nf)
+		}
+	}
+	if len(candidates) == 0 {
+		// No applicable upgrade in this line; don't recommend downgrades
+		return ""
+	}
+	// Choose the smallest applicable fix
+	slices.SortFunc(candidates, func(a, b string) int { return semver.Compare(a, b) })
+	return candidates[0]
 }
 
 // extractMajorFromSemver extracts major version from a semantic version string
@@ -1024,12 +1024,12 @@ func displayVulnerabilities(vulns []Vulnerability) {
 
 			// Fix availability - most important info
 			fixInfo := ""
-            if len(vuln.FixedVersions) > 0 {
-                bestFix := findBestFixedVersion(vuln.FixedVersions, vuln.Version)
-                if bestFix != "" {
-                    fixInfo = styleUpgraded.Render(fmt.Sprintf("(↑ %s)", bestFix))
-                }
-            }
+			if len(vuln.FixedVersions) > 0 {
+				bestFix := findBestFixedVersion(vuln.FixedVersions, vuln.Version)
+				if bestFix != "" {
+					fixInfo = styleUpgraded.Render(fmt.Sprintf("(↑ %s)", bestFix))
+				}
+			}
 
 			// Show consolidation info if multiple IDs were found
 			consolidationInfo := ""
@@ -1078,8 +1078,8 @@ func displayVulnerabilities(vulns []Vulnerability) {
 		}
 	}
 
-    // Display enhanced vulnerability statistics with consolidation info
-    fmt.Println("\n" + styleHeader.Render("Vulnerability Summary:"))
+	// Display enhanced vulnerability statistics with consolidation info
+	fmt.Println("\n" + styleHeader.Render("Vulnerability Summary:"))
 
 	// Lead with the most important info - what needs action
 	highPriority := stats.CriticalSev + stats.HighSeverity
@@ -1138,129 +1138,135 @@ func displayVulnerabilities(vulns []Vulnerability) {
 			styleDim.Render(""), "")
 	}
 
-    // Action-oriented next steps
-    fmt.Printf("\n%s\n", styleHeader.Render("Recommended Actions:"))
+	// Action-oriented next steps
+	fmt.Printf("\n%s\n", styleHeader.Render("Recommended Actions:"))
 
-    // Compute precise upgrade recommendations per package (fixes all issues for that package)
-    upgrades, stdlibRec := buildUpgradeRecommendations(consolidated)
+	// Compute precise upgrade recommendations per package (fixes all issues for that package)
+	upgrades, stdlibRec := buildUpgradeRecommendations(consolidated)
 
-    actionIdx := 1
-    // Recommend toolchain upgrade if stdlib is affected
-    if stdlibRec != "" {
-        minor := goMinorFromVersion(stdlibRec)
-        fmt.Printf("  %s %sUpgrade Go toolchain to %s%s %s\n",
-            styleSymbol.Render(fmt.Sprintf("%d.", actionIdx)),
-            styleBold.Render(""),
-            styleVersion.Render(stdlibRec),
-            styleBold.Render(""),
-            styleDim.Render(fmt.Sprintf("(and set 'go %s' in go.mod)", minor)))
-        actionIdx++
-    }
+	actionIdx := 1
+	// Recommend toolchain upgrade if stdlib is affected
+	if stdlibRec != "" {
+		minor := goMinorFromVersion(stdlibRec)
+		fmt.Printf("  %s %sUpgrade Go toolchain to %s%s %s\n",
+			styleSymbol.Render(fmt.Sprintf("%d.", actionIdx)),
+			styleBold.Render(""),
+			styleVersion.Render(stdlibRec),
+			styleBold.Render(""),
+			styleDim.Render(fmt.Sprintf("(and set 'go %s' in go.mod)", minor)))
+		actionIdx++
+	}
 
-    if len(upgrades) > 0 {
-        // Print exact go get commands
-        header := "Upgrade modules to fixed versions"
-        if highPriority > 0 {
-            header = "Upgrade modules immediately (critical/high)"
-        }
-        fmt.Printf("  %s %s%s\n",
-            styleSymbol.Render(fmt.Sprintf("%d.", actionIdx)), styleBold.Render(""), header)
-        for _, u := range upgrades {
-            fmt.Println("      " + styleVersion.Render("• ") +
-                "go get " + styleBold.Render(u.Name) + "@" + styleVersion.Render(u.Recommended))
-        }
-        // Hint to clean up go.mod/go.sum after upgrades, styled as a bullet for consistency
-        fmt.Println("      " + styleVersion.Render("• ") + "go mod tidy")
-        actionIdx++
-    }
+	if len(upgrades) > 0 {
+		// Print exact go get commands
+		header := "Upgrade modules to fixed versions"
+		if highPriority > 0 {
+			header = "Upgrade modules immediately (critical/high)"
+		}
+		fmt.Printf("  %s %s%s\n",
+			styleSymbol.Render(fmt.Sprintf("%d.", actionIdx)), styleBold.Render(""), header)
+		for _, u := range upgrades {
+			fmt.Println("      " + styleVersion.Render("• ") +
+				"go get " + styleBold.Render(u.Name) + "@" + styleVersion.Render(u.Recommended))
+		}
+		// Hint to clean up go.mod/go.sum after upgrades, styled as a bullet for consistency
+		fmt.Println("      " + styleVersion.Render("• ") + "go mod tidy")
+		actionIdx++
+	}
 
-    if unfixed > 0 {
-        fmt.Printf("  %s %sInvestigate unfixed vulnerabilities%s - review manually or consider alternatives\n",
-            styleSymbol.Render(fmt.Sprintf("%d.", actionIdx)), styleBold.Render(""), "")
-    }
+	if unfixed > 0 {
+		fmt.Printf("  %s %sInvestigate unfixed vulnerabilities%s - review manually or consider alternatives\n",
+			styleSymbol.Render(fmt.Sprintf("%d.", actionIdx)), styleBold.Render(""), "")
+	}
 }
 
 // packageUpgrade represents a recommended upgrade for a module/package
 type packageUpgrade struct {
-    Name        string
-    Current     string
-    Recommended string
-    IsDirect    bool
+	Name        string
+	Current     string
+	Recommended string
+	IsDirect    bool
 }
 
 // buildUpgradeRecommendations chooses, per package, the smallest version that fixes all found issues.
 // For Go stdlib, returns the recommended toolchain version via stdlibRec.
 func buildUpgradeRecommendations(vulns []ConsolidatedVulnerability) ([]packageUpgrade, string) {
-    if len(vulns) == 0 {
-        return nil, ""
-    }
-    // Group by package
-    type agg struct {
-        current string
-        isDirect bool
-        rec string
-    }
-    byPkg := map[string]*agg{}
-    var stdlibRec string
-    for _, v := range vulns {
-        if v.Package == "" {
-            continue
-        }
-        a := byPkg[v.Package]
-        if a == nil {
-            a = &agg{current: v.Version, isDirect: v.IsDirect}
-            byPkg[v.Package] = a
-        } else if v.IsDirect {
-            a.isDirect = true
-        }
-        // pick best fix for this vulnerability relative to current
-        fix := findBestFixedVersion(v.FixedVersions, v.Version)
-        if fix == "" {
-            continue
-        }
-        // track the highest recommended across all vulns for this package
-        if a.rec == "" || semver.Compare(normalizeGoVersion(fix), normalizeGoVersion(a.rec)) > 0 {
-            a.rec = fix
-        }
-    }
-    // Convert to slice and sort: direct first, then name
-    var out []packageUpgrade
-    for name, a := range byPkg {
-        if a.rec == "" {
-            continue
-        }
-        if name == "stdlib" {
-            // stdlib recommendation is toolchain upgrade
-            if stdlibRec == "" || semver.Compare(normalizeGoVersion(a.rec), normalizeGoVersion(stdlibRec)) > 0 {
-                stdlibRec = a.rec
-            }
-            continue
-        }
-        out = append(out, packageUpgrade{Name: name, Current: a.current, Recommended: a.rec, IsDirect: a.isDirect})
-    }
-    slices.SortFunc(out, func(a, b packageUpgrade) int {
-        if a.IsDirect != b.IsDirect {
-            if a.IsDirect { return -1 }
-            return 1
-        }
-        if a.Name < b.Name { return -1 }
-        if a.Name > b.Name { return 1 }
-        return 0
-    })
-    return out, stdlibRec
+	if len(vulns) == 0 {
+		return nil, ""
+	}
+	// Group by package
+	type agg struct {
+		current  string
+		isDirect bool
+		rec      string
+	}
+	byPkg := map[string]*agg{}
+	var stdlibRec string
+	for _, v := range vulns {
+		if v.Package == "" {
+			continue
+		}
+		a := byPkg[v.Package]
+		if a == nil {
+			a = &agg{current: v.Version, isDirect: v.IsDirect}
+			byPkg[v.Package] = a
+		} else if v.IsDirect {
+			a.isDirect = true
+		}
+		// pick best fix for this vulnerability relative to current
+		fix := findBestFixedVersion(v.FixedVersions, v.Version)
+		if fix == "" {
+			continue
+		}
+		// track the highest recommended across all vulns for this package
+		if a.rec == "" || semver.Compare(normalizeGoVersion(fix), normalizeGoVersion(a.rec)) > 0 {
+			a.rec = fix
+		}
+	}
+	// Convert to slice and sort: direct first, then name
+	var out []packageUpgrade
+	for name, a := range byPkg {
+		if a.rec == "" {
+			continue
+		}
+		if name == "stdlib" {
+			// stdlib recommendation is toolchain upgrade
+			if stdlibRec == "" || semver.Compare(normalizeGoVersion(a.rec), normalizeGoVersion(stdlibRec)) > 0 {
+				stdlibRec = a.rec
+			}
+			continue
+		}
+		out = append(out, packageUpgrade{Name: name, Current: a.current, Recommended: a.rec, IsDirect: a.isDirect})
+	}
+	slices.SortFunc(out, func(a, b packageUpgrade) int {
+		if a.IsDirect != b.IsDirect {
+			if a.IsDirect {
+				return -1
+			}
+			return 1
+		}
+		if a.Name < b.Name {
+			return -1
+		}
+		if a.Name > b.Name {
+			return 1
+		}
+		return 0
+	})
+	return out, stdlibRec
 }
 
 // goMinorFromVersion extracts the Go minor line from a semver like v1.23.12 -> 1.23
 func goMinorFromVersion(v string) string {
-    s := strings.TrimPrefix(v, "v")
-    parts := strings.SplitN(s, ".", 3)
-    if len(parts) >= 2 {
-        return parts[0] + "." + parts[1]
-    }
-    if len(parts) == 1 {
-        return parts[0]
-    }
-    return s
+	s := strings.TrimPrefix(v, "v")
+	parts := strings.SplitN(s, ".", 3)
+	if len(parts) >= 2 {
+		return parts[0] + "." + parts[1]
+	}
+	if len(parts) == 1 {
+		return parts[0]
+	}
+	return s
 }
 
 // filterRelevantSecondaryIDs filters secondary IDs to show only the most relevant ones
@@ -1529,54 +1535,69 @@ func scanPackages(ctx context.Context, repoPath string, commitHash plumbing.Hash
 
 // scanPackagesAtCommitSnapshot scans package inventory by materializing a commit to a temp dir (non-destructive)
 func scanPackagesAtCommitSnapshot(ctx context.Context, repoPath string, commitHash plumbing.Hash) ([]*extractor.Package, error) {
-    repo, err := git.PlainOpen(repoPath)
-    if err != nil {
-        return nil, fmt.Errorf("error opening repository: %w", err)
-    }
-    commit, err := repo.CommitObject(commitHash)
-    if err != nil {
-        return nil, fmt.Errorf("error getting commit: %w", err)
-    }
-    tree, err := commit.Tree()
-    if err != nil {
-        return nil, fmt.Errorf("error getting tree: %w", err)
-    }
-    dir, err := os.MkdirTemp("", "deputy-scan-commit-*")
-    if err != nil { return nil, err }
-    // Materialize files
-    err = tree.Files().ForEach(func(f *object.File) error {
-        // Skip .git directory entries
-        if f.Name == ".git" || strings.HasPrefix(f.Name, ".git/") { return nil }
-        target := filepath.Join(dir, f.Name)
-        if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil { return err }
-        r, err := f.Blob.Reader()
-        if err != nil { return err }
-        defer r.Close()
-        b, err := io.ReadAll(r)
-        if err != nil { return err }
-        return os.WriteFile(target, b, 0o644)
-    })
-    if err != nil {
-        _ = os.RemoveAll(dir)
-        return nil, err
-    }
-    // Scan temp dir
-    plugins, err := pl.FromNames([]string{"go"})
-    if err != nil { _ = os.RemoveAll(dir); return nil, fmt.Errorf("error creating plugins: %w", err) }
-    cfg := &scalibr.ScanConfig{ScanRoots: scalibrfs.RealFSScanRoots(dir), Plugins: plugins}
-    results := scalibr.New().Scan(ctx, cfg)
-    // Cleanup temp dir
-    _ = os.RemoveAll(dir)
-    return results.Inventory.Packages, nil
+	repo, err := git.PlainOpen(repoPath)
+	if err != nil {
+		return nil, fmt.Errorf("error opening repository: %w", err)
+	}
+	commit, err := repo.CommitObject(commitHash)
+	if err != nil {
+		return nil, fmt.Errorf("error getting commit: %w", err)
+	}
+	tree, err := commit.Tree()
+	if err != nil {
+		return nil, fmt.Errorf("error getting tree: %w", err)
+	}
+	dir, err := os.MkdirTemp("", "deputy-scan-commit-*")
+	if err != nil {
+		return nil, err
+	}
+	// Materialize files
+	err = tree.Files().ForEach(func(f *object.File) error {
+		// Skip .git directory entries
+		if f.Name == ".git" || strings.HasPrefix(f.Name, ".git/") {
+			return nil
+		}
+		target := filepath.Join(dir, f.Name)
+		if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+			return err
+		}
+		r, err := f.Blob.Reader()
+		if err != nil {
+			return err
+		}
+		defer r.Close()
+		b, err := io.ReadAll(r)
+		if err != nil {
+			return err
+		}
+		return os.WriteFile(target, b, 0o644)
+	})
+	if err != nil {
+		_ = os.RemoveAll(dir)
+		return nil, err
+	}
+	// Scan temp dir
+	plugins, err := pl.FromNames([]string{"go"})
+	if err != nil {
+		_ = os.RemoveAll(dir)
+		return nil, fmt.Errorf("error creating plugins: %w", err)
+	}
+	cfg := &scalibr.ScanConfig{ScanRoots: scalibrfs.RealFSScanRoots(dir), Plugins: plugins}
+	results := scalibr.New().Scan(ctx, cfg)
+	// Cleanup temp dir
+	_ = os.RemoveAll(dir)
+	return results.Inventory.Packages, nil
 }
 
 // scanPackagesWorking scans the current working directory without changing git state
 func scanPackagesWorking(ctx context.Context, repoPath string) ([]*extractor.Package, error) {
-    plugins, err := pl.FromNames([]string{"go"})
-    if err != nil { return nil, fmt.Errorf("error creating plugins: %w", err) }
-    cfg := &scalibr.ScanConfig{ScanRoots: scalibrfs.RealFSScanRoots(repoPath), Plugins: plugins}
-    results := scalibr.New().Scan(ctx, cfg)
-    return results.Inventory.Packages, nil
+	plugins, err := pl.FromNames([]string{"go"})
+	if err != nil {
+		return nil, fmt.Errorf("error creating plugins: %w", err)
+	}
+	cfg := &scalibr.ScanConfig{ScanRoots: scalibrfs.RealFSScanRoots(repoPath), Plugins: plugins}
+	results := scalibr.New().Scan(ctx, cfg)
+	return results.Inventory.Packages, nil
 }
 
 // normalizeGopkgInURL converts gopkg.in URLs to their canonical GitHub repository names
@@ -2117,13 +2138,13 @@ func normalizeGoVersion(version string) string {
 
 // validateReference checks if a Git reference is valid and provides helpful error messages
 func validateReference(repo *git.Repository, ref string) error {
-    // Accept special pseudo-ref for working tree comparison
-    upper := strings.ToUpper(strings.TrimSpace(ref))
-    if upper == "WORKING" || upper == "WORKTREE" || upper == "WT" {
-        return nil
-    }
-    // Try to resolve the reference
-    _, err := repo.ResolveRevision(plumbing.Revision(ref))
+	// Accept special pseudo-ref for working tree comparison
+	upper := strings.ToUpper(strings.TrimSpace(ref))
+	if upper == "WORKING" || upper == "WORKTREE" || upper == "WT" || strings.TrimSpace(ref) == "." {
+		return nil
+	}
+	// Try to resolve the reference
+	_, err := repo.ResolveRevision(plumbing.Revision(ref))
 	if err == nil {
 		return nil // Reference is valid
 	}
@@ -2215,10 +2236,10 @@ func calculateSimilarity(a, b string) float64 {
 // parseReferences intelligently parses command line arguments to determine base and target references
 // It supports all Git reference types: branches, tags, commits, remote refs, and Git revision expressions
 func parseReferences(repoPath string, args []string) (baseRef, targetRef string, err error) {
-    repo, err := git.PlainOpen(repoPath)
-    if err != nil {
-        return "", "", fmt.Errorf("error opening Git repository at %s: %w", repoPath, err)
-    }
+	repo, err := git.PlainOpen(repoPath)
+	if err != nil {
+		return "", "", fmt.Errorf("error opening Git repository at %s: %w", repoPath, err)
+	}
 
 	// Find the default branch (main, master, or current HEAD)
 	defaultBranch, err := getDefaultBranch(repo)
@@ -2226,14 +2247,14 @@ func parseReferences(repoPath string, args []string) (baseRef, targetRef string,
 		return "", "", fmt.Errorf("error determining default branch: %w", err)
 	}
 
-    switch len(args) {
-    case 0:
-        // No arguments: compare default branch with HEAD by default.
-        // If working tree has dependency changes, compare default branch with WORKING tree.
-        if ok, _ := hasWorkingDependencyChanges(repo); ok {
-            return defaultBranch, "WORKING", nil
-        }
-        return defaultBranch, "HEAD", nil
+	switch len(args) {
+	case 0:
+		// No arguments: compare default branch with HEAD by default.
+		// If working tree has dependency changes, compare default branch with WORKING tree.
+		if ok, _ := hasWorkingDependencyChanges(repo); ok {
+			return defaultBranch, "WORKING", nil
+		}
+		return defaultBranch, "HEAD", nil
 	case 1:
 		// One argument: compare default branch with provided reference
 		// Validate the provided reference
@@ -2258,13 +2279,21 @@ func parseReferences(repoPath string, args []string) (baseRef, targetRef string,
 
 // hasWorkingDependencyChanges reports if go.mod or go.sum have uncommitted changes
 func hasWorkingDependencyChanges(repo *git.Repository) (bool, error) {
-    wt, err := repo.Worktree()
-    if err != nil { return false, err }
-    st, err := wt.Status()
-    if err != nil { return false, err }
-    if s, ok := st["go.mod"]; ok && s.Worktree != git.Unmodified { return true, nil }
-    if s, ok := st["go.sum"]; ok && s.Worktree != git.Unmodified { return true, nil }
-    return false, nil
+	wt, err := repo.Worktree()
+	if err != nil {
+		return false, err
+	}
+	st, err := wt.Status()
+	if err != nil {
+		return false, err
+	}
+	if s, ok := st["go.mod"]; ok && s.Worktree != git.Unmodified {
+		return true, nil
+	}
+	if s, ok := st["go.sum"]; ok && s.Worktree != git.Unmodified {
+		return true, nil
+	}
+	return false, nil
 }
 
 // getDefaultBranch attempts to find the repository's default branch using multiple strategies
@@ -2534,9 +2563,10 @@ SUPPORTED REFERENCE TYPES:
 • Relative references: HEAD~1, main~5, tag^{tree}
 
 USAGE PATTERNS:
-• No arguments: Compare current HEAD with default branch (auto-detected)
-• One argument: Compare default branch with the specified reference  
-• Two arguments: Compare first reference (base) with second reference (target)
+• No arguments: Compare default branch → HEAD (auto-detected)
+  If go.mod/go.sum have uncommitted changes, compares default branch → WORKING
+• One argument: Compare default branch → <ref>
+• Two arguments: Compare <base> → <target>
 
 The tool automatically detects the repository's default branch by checking:
 1. Remote HEAD symref (most reliable for GitHub/GitLab repos)
@@ -2574,9 +2604,9 @@ Can be disabled with --skip-vuln-scan for faster execution.`,
 	rootCmd.Flags().BoolVarP(&listRefs, "list-refs", "l", false, "List all available Git references (branches, tags, remotes)")
 	rootCmd.Flags().BoolVarP(&skipVulnScan, "skip-vuln-scan", "s", false, "Skip vulnerability scanning (faster execution)")
 
-    // Register subcommands
-    addSBOMSubcommand(rootCmd)
-    addScanSubcommand(rootCmd)
+	// Register subcommands
+	addSBOMSubcommand(rootCmd)
+	addScanSubcommand(rootCmd)
 
 	// Add comprehensive examples for all user types
 	rootCmd.Example = `BASIC USAGE:
@@ -2586,6 +2616,13 @@ Can be disabled with --skip-vuln-scan for faster execution.`,
   # Compare default branch with a feature branch
   deputy feature-branch
   deputy my-awesome-feature
+
+  # Compare your current work with another branch
+  # (Base is the branch, target is your work)
+  deputy main WORKING
+  deputy main .
+  deputy feature-branch WORKING
+  deputy feature-branch .
 
 BRANCH COMPARISONS:
   # Compare two specific branches
@@ -2651,43 +2688,43 @@ func runDepDelta(repoPath, baseRef, targetRef string, enableVulnScan bool) error
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer cancel()
 
-    // Display what we're comparing for better UX
-    dispTarget := targetRef
-    if strings.EqualFold(targetRef, "WORKING") || strings.EqualFold(targetRef, "WORKTREE") || strings.EqualFold(targetRef, "WT") {
-        dispTarget = "WORKING"
-    }
-    fmt.Printf("Comparing dependencies: %s → %s\n", baseRef, dispTarget)
+	// Display what we're comparing for better UX
+	dispTarget := targetRef
+	if isWorkingPseudoRef(targetRef) {
+		dispTarget = "WORKING"
+	}
+	fmt.Printf("Comparing dependencies: %s → %s\n", baseRef, dispTarget)
 
-    if !(strings.EqualFold(targetRef, "WORKING") || strings.EqualFold(targetRef, "WORKTREE") || strings.EqualFold(targetRef, "WT")) {
-        changesFiles, err := checkFilesChanged(repoPath, baseRef, targetRef)
-        if err != nil {
-            return fmt.Errorf("error checking files changed: %w", err)
-        }
+	if !isWorkingPseudoRef(targetRef) {
+		changesFiles, err := checkFilesChanged(repoPath, baseRef, targetRef)
+		if err != nil {
+			return fmt.Errorf("error checking files changed: %w", err)
+		}
 
-        containsDepChanges := slices.ContainsFunc(changesFiles, func(fileName string) bool {
-            switch filepath.Base(fileName) {
-            case "go.mod", "go.sum":
-                return true
-            }
-            return false
-        })
+		containsDepChanges := slices.ContainsFunc(changesFiles, func(fileName string) bool {
+			switch filepath.Base(fileName) {
+			case "go.mod", "go.sum":
+				return true
+			}
+			return false
+		})
 
-        if !containsDepChanges {
-            fmt.Println("No dependency changes detected.")
-            return nil
-        }
-    }
+		if !containsDepChanges {
+			fmt.Println("No dependency changes detected.")
+			return nil
+		}
+	}
 
 	repo, err := git.PlainOpen(repoPath)
 	if err != nil {
 		return fmt.Errorf("error opening Git repository at %s: %w\nMake sure you're running this from within a valid Git repository", repoPath, err)
 	}
 
-    // Note: We no longer modify the working tree for scanning.
-    // Base refs are scanned via temporary snapshots, and the target WORKING tree
-    // is read directly. This avoids any need to save/restore git state here.
+	// Note: We no longer modify the working tree for scanning.
+	// Base refs are scanned via temporary snapshots, and the target WORKING tree
+	// is read directly. This avoids any need to save/restore git state here.
 
-    baseHash, err := repo.ResolveRevision(plumbing.Revision(baseRef))
+	baseHash, err := repo.ResolveRevision(plumbing.Revision(baseRef))
 	if err != nil {
 		// Provide helpful error message with suggestions
 		suggestions := getReferenceSuggestions(repo, baseRef)
@@ -2699,44 +2736,44 @@ func runDepDelta(repoPath, baseRef, targetRef string, enableVulnScan bool) error
 			baseRef, err)
 	}
 
-    var targetPackages []*extractor.Package
-    var targetHash *plumbing.Hash
-    if strings.EqualFold(targetRef, "WORKING") || strings.EqualFold(targetRef, "WORKTREE") || strings.EqualFold(targetRef, "WT") {
-        fmt.Println("Scanning packages in working tree ...")
-        tp, err := scanPackagesWorking(ctx, repoPath)
-        if err != nil {
-            return fmt.Errorf("error scanning working tree packages: %w", err)
-        }
-        targetPackages = tp
-    } else {
-        th, err := repo.ResolveRevision(plumbing.Revision(targetRef))
-        if err != nil {
-            // Provide helpful error message with suggestions
-            suggestions := getReferenceSuggestions(repo, targetRef)
-            if len(suggestions) > 0 {
-                return fmt.Errorf("error resolving target reference %q: %v\nDid you mean one of these?\n  %s",
-                    targetRef, err, strings.Join(suggestions, "\n  "))
-            }
-            return fmt.Errorf("error resolving target reference %q: %v\nUse 'git branch -a' to see available branches or 'git tag' to see available tags",
-                targetRef, err)
-        }
-        targetHash = th
-    }
+	var targetPackages []*extractor.Package
+	var targetHash *plumbing.Hash
+	if isWorkingPseudoRef(targetRef) {
+		fmt.Println("Scanning packages in working tree ...")
+		tp, err := scanPackagesWorking(ctx, repoPath)
+		if err != nil {
+			return fmt.Errorf("error scanning working tree packages: %w", err)
+		}
+		targetPackages = tp
+	} else {
+		th, err := repo.ResolveRevision(plumbing.Revision(targetRef))
+		if err != nil {
+			// Provide helpful error message with suggestions
+			suggestions := getReferenceSuggestions(repo, targetRef)
+			if len(suggestions) > 0 {
+				return fmt.Errorf("error resolving target reference %q: %v\nDid you mean one of these?\n  %s",
+					targetRef, err, strings.Join(suggestions, "\n  "))
+			}
+			return fmt.Errorf("error resolving target reference %q: %v\nUse 'git branch -a' to see available branches or 'git tag' to see available tags",
+				targetRef, err)
+		}
+		targetHash = th
+	}
 
-    fmt.Println("Scanning packages in base reference", baseHash.String()[:8], "...")
-    basePackages, err := scanPackagesAtCommitSnapshot(ctx, repoPath, *baseHash)
-    if err != nil {
-        return fmt.Errorf("error scanning base reference packages: %w", err)
-    }
+	fmt.Println("Scanning packages in base reference", baseHash.String()[:8], "...")
+	basePackages, err := scanPackagesAtCommitSnapshot(ctx, repoPath, *baseHash)
+	if err != nil {
+		return fmt.Errorf("error scanning base reference packages: %w", err)
+	}
 
-    if targetPackages == nil && targetHash != nil {
-        fmt.Println("Scanning packages in target reference", targetHash.String()[:8], "...")
-        tp, err := scanPackagesAtCommitSnapshot(ctx, repoPath, *targetHash)
-        if err != nil {
-            return fmt.Errorf("error scanning target reference packages: %w", err)
-        }
-        targetPackages = tp
-    }
+	if targetPackages == nil && targetHash != nil {
+		fmt.Println("Scanning packages in target reference", targetHash.String()[:8], "...")
+		tp, err := scanPackagesAtCommitSnapshot(ctx, repoPath, *targetHash)
+		if err != nil {
+			return fmt.Errorf("error scanning target reference packages: %w", err)
+		}
+		targetPackages = tp
+	}
 
 	// Call comparePackages with correct parameter order: base is old, target is new
 	changedPackages := comparePackages(basePackages, targetPackages)
@@ -2911,8 +2948,29 @@ func runDepDelta(repoPath, baseRef, targetRef string, enableVulnScan bool) error
 			fmt.Printf("Warning: Vulnerability scanning failed: %v\n", err)
 		} else {
 			displayVulnerabilities(vulnerabilities)
+			// Also surface known module deprecations present in the target inventory
+			if deps := detectModuleDeprecations(targetPackages); len(deps) > 0 {
+				fmt.Printf("\n%s\n", styleHeader.Render("Module Deprecations:"))
+				for _, d := range deps {
+					line := fmt.Sprintf("  %s %s -> %s", styleVersion.Render("•"), styleBold.Render(d.Module), styleVersion.Render(d.Suggest))
+					if d.URL != "" {
+						line += " " + styleDim.Render("("+d.URL+")")
+					}
+					fmt.Println(line)
+				}
+			}
 		}
 	}
 
 	return nil
+}
+
+// isWorkingPseudoRef reports whether s refers to the working tree pseudo-ref
+func isWorkingPseudoRef(s string) bool {
+	t := strings.TrimSpace(s)
+	if t == "." {
+		return true
+	}
+	u := strings.ToUpper(t)
+	return u == "WORKING" || u == "WORKTREE" || u == "WT"
 }

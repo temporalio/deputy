@@ -64,6 +64,7 @@ Comparing dependencies: main → WORKING
 ```
 
 You can also be explicit: `deputy main WORKING`.
+Shorthand: you can use a single dot for the working tree: `deputy main .`.
 
 ## Vulnerability Scan
 

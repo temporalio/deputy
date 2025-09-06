@@ -45,24 +45,24 @@ import (
 
 // addSBOMSubcommand registers the sbom subcommand with Protobom-backed writers.
 func addSBOMSubcommand(root *cobra.Command) {
-    var (
-        repoPath       string
-        ref            string
-        format         string
-        outPath        string
-        ecos           []string
-        name           string
-        enrichLicenses bool
-        licenseSource  string
-        showContext    bool
-    )
+	var (
+		repoPath       string
+		ref            string
+		format         string
+		outPath        string
+		ecos           []string
+		name           string
+		enrichLicenses bool
+		licenseSource  string
+		showContext    bool
+	)
 
-    cmd := &cobra.Command{
-        Use:   "sbom [repo]",
-        Short: "Generate an SBOM (Protobom intermediary) for a given ref",
-        Long:  "Generate an SBOM for the repository at the specified Git ref using Protobom as the intermediary representation. Supports CycloneDX JSON, SPDX 2.3 JSON, and Protobom JSON.",
-        Args:  cobra.MaximumNArgs(1),
-        Example: strings.TrimSpace(`
+	cmd := &cobra.Command{
+		Use:   "sbom [repo]",
+		Short: "Generate an SBOM (Protobom intermediary) for a given ref",
+		Long:  "Generate an SBOM for the repository at the specified Git ref using Protobom as the intermediary representation. Supports CycloneDX JSON, SPDX 2.3 JSON, and Protobom JSON.",
+		Args:  cobra.MaximumNArgs(1),
+		Example: strings.TrimSpace(`
           # Quick start (stdout)
           deputy sbom --format spdx-json
           deputy sbom -f spdx-json
@@ -88,17 +88,17 @@ func addSBOMSubcommand(root *cobra.Command) {
 		  # Write Protobom (intermediary) JSON
 		  deputy sbom --ref=v1.16.0 --format=protobom-json --output=sbom.protobom.json
 		`),
-        RunE: func(cmd *cobra.Command, args []string) error {
-            // Optional positional argument [repo] overrides --repo if provided
-            if len(args) > 0 && strings.TrimSpace(args[0]) != "" {
-                repoPath = args[0]
-            }
-            if repoPath == "" {
-                var err error
-                repoPath, err = os.Getwd()
-                if err != nil {
-                    return err
-                }
+		RunE: func(cmd *cobra.Command, args []string) error {
+			// Optional positional argument [repo] overrides --repo if provided
+			if len(args) > 0 && strings.TrimSpace(args[0]) != "" {
+				repoPath = args[0]
+			}
+			if repoPath == "" {
+				var err error
+				repoPath, err = os.Getwd()
+				if err != nil {
+					return err
+				}
 			}
 			if ref == "" {
 				ref = "HEAD"
@@ -108,11 +108,11 @@ func addSBOMSubcommand(root *cobra.Command) {
 			localRepoPath := repoPath
 			var cleanup func()
 			if !isExistingDir(repoPath) {
-                // Treat as remote repo reference
-                u := toHTTPSGitURL(repoPath)
-                if u == "" {
-                    fmt.Printf("Warning: could not interpret repo %q as local path or remote URL\n", repoPath)
-                } else {
+				// Treat as remote repo reference
+				u := toHTTPSGitURL(repoPath)
+				if u == "" {
+					fmt.Printf("Warning: could not interpret repo %q as local path or remote URL\n", repoPath)
+				} else {
 					// Resolve auth and ref name
 					auth := authForURL(u)
 					rn, derr := resolveReferenceName(cmd.Context(), u, auth, ref)
@@ -182,30 +182,34 @@ func addSBOMSubcommand(root *cobra.Command) {
 				}
 			}
 
-            // Optional context header (to stderr) for human-friendly context
-            if showContext {
-                // Resolve commit hash for the selected ref
-                shortRef := shortGitRef(ref)
-                shortHash := ""
-                if repo, err := git.PlainOpen(localRepoPath); err == nil {
-                    if h, herr := repo.ResolveRevision(plumbing.Revision(ref)); herr == nil && h != nil {
-                        sh := h.String()
-                        if len(sh) > 7 { shortHash = sh[:7] } else { shortHash = sh }
-                    }
-                }
-                fmt.Fprintf(cmd.ErrOrStderr(), "\nGenerated SBOM for %s @ %s (%s) → %s\n\n", repoPath, shortRef, shortHash, strings.ToUpper(format))
-            }
+			// Optional context header (to stderr) for human-friendly context
+			if showContext {
+				// Resolve commit hash for the selected ref
+				shortRef := shortGitRef(ref)
+				shortHash := ""
+				if repo, err := git.PlainOpen(localRepoPath); err == nil {
+					if h, herr := repo.ResolveRevision(plumbing.Revision(ref)); herr == nil && h != nil {
+						sh := h.String()
+						if len(sh) > 7 {
+							shortHash = sh[:7]
+						} else {
+							shortHash = sh
+						}
+					}
+				}
+				fmt.Fprintf(cmd.ErrOrStderr(), "\nGenerated SBOM for %s @ %s (%s) → %s\n\n", repoPath, shortRef, shortHash, strings.ToUpper(format))
+			}
 
-            // Choose output
-            var w io.Writer = os.Stdout
-            if outPath != "" && outPath != "-" {
-                f, err := os.Create(outPath)
-                if err != nil {
-                    return err
-                }
-                defer f.Close()
-                w = f
-            }
+			// Choose output
+			var w io.Writer = os.Stdout
+			if outPath != "" && outPath != "-" {
+				f, err := os.Create(outPath)
+				if err != nil {
+					return err
+				}
+				defer f.Close()
+				w = f
+			}
 
 			switch strings.ToLower(format) {
 			case "cyclonedx-json", "cyclonedx":
@@ -226,14 +230,14 @@ func addSBOMSubcommand(root *cobra.Command) {
 		},
 	}
 
-    cmd.Flags().StringVar(&ref, "ref", "HEAD", "Git reference (commit, tag, branch)")
-    cmd.Flags().StringVarP(&format, "format", "f", "cyclonedx-json", "SBOM format: cyclonedx-json | spdx-json | protobom-json")
-    cmd.Flags().StringVarP(&outPath, "output", "o", "-", "Output file path or '-' for stdout")
-    cmd.Flags().StringSliceVar(&ecos, "ecosystems", nil, "Limit to specific ecosystems (e.g., go,npm,pip). Defaults to auto-detect.")
-    cmd.Flags().StringVar(&name, "name", "", "Optional document name (defaults to repo@ref)")
-    cmd.Flags().BoolVar(&enrichLicenses, "enrich-licenses", false, "Enrich SBOM nodes with licenses (optional)")
-    cmd.Flags().StringVar(&licenseSource, "license-source", "depsdev", "License enrichment source: depsdev | scan | both")
-    cmd.Flags().BoolVar(&showContext, "show-context", false, "Print a context header to stderr with repo, ref, and commit hash")
+	cmd.Flags().StringVar(&ref, "ref", "HEAD", "Git reference (commit, tag, branch)")
+	cmd.Flags().StringVarP(&format, "format", "f", "cyclonedx-json", "SBOM format: cyclonedx-json | spdx-json | protobom-json")
+	cmd.Flags().StringVarP(&outPath, "output", "o", "-", "Output file path or '-' for stdout")
+	cmd.Flags().StringSliceVar(&ecos, "ecosystems", nil, "Limit to specific ecosystems (e.g., go,npm,pip). Defaults to auto-detect.")
+	cmd.Flags().StringVar(&name, "name", "", "Optional document name (defaults to repo@ref)")
+	cmd.Flags().BoolVar(&enrichLicenses, "enrich-licenses", false, "Enrich SBOM nodes with licenses (optional)")
+	cmd.Flags().StringVar(&licenseSource, "license-source", "depsdev", "License enrichment source: depsdev | scan | both")
+	cmd.Flags().BoolVar(&showContext, "show-context", false, "Print a context header to stderr with repo, ref, and commit hash")
 
 	root.AddCommand(cmd)
 }
@@ -284,38 +288,44 @@ func authForURL(rawurl string) transport.AuthMethod {
 // resolveReferenceName determines the reference name to use for cloning.
 // If refStr is empty, attempts to discover the default branch.
 func resolveReferenceName(ctx context.Context, remoteURL string, auth transport.AuthMethod, refStr string) (plumbing.ReferenceName, error) {
-    r := strings.TrimSpace(refStr)
-    // Treat empty or HEAD as: use remote default branch
-    if r == "" || strings.EqualFold(r, "HEAD") {
-        if br := discoverDefaultBranch(ctx, remoteURL, auth); br != "" {
-            return plumbing.ReferenceName(br), nil
-        }
-        return "", fmt.Errorf("could not discover default branch")
-    }
-    if strings.HasPrefix(r, "refs/") {
-        return plumbing.ReferenceName(r), nil
-    }
-    // Heuristic: version-like tokens are tags (e.g., v1.2.3). Otherwise treat as branch.
-    if looksLikeTag(r) {
-        return plumbing.ReferenceName("refs/tags/" + r), nil
-    }
-    return plumbing.ReferenceName("refs/heads/" + r), nil
+	r := strings.TrimSpace(refStr)
+	// Treat empty or HEAD as: use remote default branch
+	if r == "" || strings.EqualFold(r, "HEAD") {
+		if br := discoverDefaultBranch(ctx, remoteURL, auth); br != "" {
+			return plumbing.ReferenceName(br), nil
+		}
+		return "", fmt.Errorf("could not discover default branch")
+	}
+	if strings.HasPrefix(r, "refs/") {
+		return plumbing.ReferenceName(r), nil
+	}
+	// Heuristic: version-like tokens are tags (e.g., v1.2.3). Otherwise treat as branch.
+	if looksLikeTag(r) {
+		return plumbing.ReferenceName("refs/tags/" + r), nil
+	}
+	return plumbing.ReferenceName("refs/heads/" + r), nil
 }
 
 // looksLikeTag returns true for common tag names such as v1.2.3
 func looksLikeTag(s string) bool {
-    if s == "" { return false }
-    // Very light heuristic: starts with 'v' followed by a digit, or contains two dots and digits
-    if (s[0] == 'v' || s[0] == 'V') && len(s) > 1 && s[1] >= '0' && s[1] <= '9' {
-        return true
-    }
-    dot := 0
-    digit := false
-    for _, r := range s {
-        if r == '.' { dot++ }
-        if r >= '0' && r <= '9' { digit = true }
-    }
-    return dot >= 1 && digit
+	if s == "" {
+		return false
+	}
+	// Very light heuristic: starts with 'v' followed by a digit, or contains two dots and digits
+	if (s[0] == 'v' || s[0] == 'V') && len(s) > 1 && s[1] >= '0' && s[1] <= '9' {
+		return true
+	}
+	dot := 0
+	digit := false
+	for _, r := range s {
+		if r == '.' {
+			dot++
+		}
+		if r >= '0' && r <= '9' {
+			digit = true
+		}
+	}
+	return dot >= 1 && digit
 }
 
 // cloneRepoToTemp clones a repository shallowly into a temporary directory.
