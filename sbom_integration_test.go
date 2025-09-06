@@ -72,7 +72,7 @@ func Test_SBOM_Integration_LocalRepo(t *testing.T) {
 	}
 
 	// Collect inventory at HEAD
-	pkgs, err := collectInventoryAtRef(ctx, dir, "HEAD", []string{"go"})
+	pkgs, err := collectInventoryForScan(ctx, dir, "HEAD", []string{"go"})
 	if err != nil {
 		t.Fatalf("collect inventory: %v", err)
 	}
