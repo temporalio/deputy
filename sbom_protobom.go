@@ -18,6 +18,7 @@ import (
 	"github.com/go-git/go-git/v5"
 	"github.com/go-git/go-git/v5/config"
 	"github.com/go-git/go-git/v5/plumbing"
+	"github.com/go-git/go-git/v5/plumbing/object"
 	"github.com/go-git/go-git/v5/plumbing/transport"
 	transportclient "github.com/go-git/go-git/v5/plumbing/transport/client"
 	"github.com/go-git/go-git/v5/plumbing/transport/http"
@@ -80,6 +81,10 @@ func addSBOMSubcommand(root *cobra.Command) {
           # Limit to specific ecosystems (auto-detects by default)
           deputy sbom --ref=HEAD --ecosystems=go,npm --format=spdx-json
 
+          # Notes:
+          # - Without --ref, HEAD uses the working tree (includes uncommitted changes)
+          # - Use --ref=HEAD to capture the exact last commit
+
           # Enrich licenses via deps.dev, local scan, or both
 		  deputy sbom --ref=v1.16.0 --enrich-licenses --license-source=depsdev --format=spdx-json
 		  deputy sbom --ref=v1.16.0 --enrich-licenses --license-source=scan    --format=spdx-json
@@ -137,7 +142,17 @@ func addSBOMSubcommand(root *cobra.Command) {
 				}
 			}
 
-			pkgs, err := collectInventoryAtRef(cmd.Context(), localRepoPath, ref, ecos)
+			// Inventory packages using a non-destructive strategy:
+			// - For HEAD on a local repo, scan the working tree (includes uncommitted changes)
+			// - For other refs or remotes, scan a read-only snapshot of the commit
+			// Decide effective ref for inventory: if user explicitly set --ref=HEAD, honor exact commit via HEAD~0; otherwise use working tree for HEAD
+			effRef := refOrHEAD(ref)
+			if strings.EqualFold(effRef, "HEAD") {
+				if cmd.Flags().Changed("ref") {
+					effRef = "HEAD~0"
+				}
+			}
+			pkgs, err := collectInventorySBOM(cmd.Context(), localRepoPath, effRef, ecos)
 			if err != nil {
 				return err
 			}
@@ -194,6 +209,14 @@ func addSBOMSubcommand(root *cobra.Command) {
 							shortHash = sh[:7]
 						} else {
 							shortHash = sh
+						}
+					}
+					// If scanning the working tree at HEAD with local changes, reflect that in the display
+					if strings.EqualFold(refOrHEAD(ref), "HEAD") {
+						if wt, werr := repo.Worktree(); werr == nil {
+							if st, serr := wt.Status(); serr == nil && !st.IsClean() {
+								shortRef = "WORKING"
+							}
 						}
 					}
 				}
@@ -551,34 +574,12 @@ func deriveDisplayName(origName, purlStr string) string {
 }
 
 // collectInventoryAtRef redefined here to avoid build tag issues linking stub.
-func collectInventoryAtRef(ctx context.Context, repoPath, gitRef string, ecos []string) ([]*extractor.Package, error) {
-	repo, err := git.PlainOpen(repoPath)
-	if err != nil {
-		return nil, fmt.Errorf("open repo: %w", err)
-	}
-	wt, err := repo.Worktree()
-	if err != nil {
-		return nil, fmt.Errorf("worktree: %w", err)
-	}
-
-	// Resolve ref to hash
-	hash, err := resolveRevisionEnhanced(repo, gitRef)
-	if err != nil {
-		return nil, fmt.Errorf("resolve ref %q: %w", gitRef, err)
-	}
-
-	// Save and restore state
-	orig, err := saveGitState(repo, wt)
-	if err != nil {
-		return nil, fmt.Errorf("save git state: %w", err)
-	}
-	defer func() { _ = restoreGitState(wt, orig) }()
-
-	if err := wt.Checkout(&git.CheckoutOptions{Hash: *hash, Force: true}); err != nil {
-		return nil, fmt.Errorf("checkout: %w", err)
-	}
-
-	var plugins []scalplugin.Plugin
+func collectInventorySBOM(ctx context.Context, repoPath, gitRef string, ecos []string) ([]*extractor.Package, error) {
+	// Plugin selection honors --ecosystems; default to "all", then fallback to "go".
+	var (
+		plugins []scalplugin.Plugin
+		err     error
+	)
 	if len(ecos) == 0 {
 		plugins, err = pl.FromNames([]string{"all"})
 		if err != nil {
@@ -594,11 +595,71 @@ func collectInventoryAtRef(ctx context.Context, repoPath, gitRef string, ecos []
 		}
 	}
 
-	cfg := &scalibr.ScanConfig{
-		ScanRoots: scalibrfs.RealFSScanRoots(repoPath),
-		Plugins:   plugins,
+	// Treat empty as HEAD
+	ref := refOrHEAD(gitRef)
+
+	// If HEAD on a local repo, scan the working tree (non-destructive, includes uncommitted changes)
+	if strings.EqualFold(ref, "HEAD") {
+		if _, err := git.PlainOpen(repoPath); err == nil {
+			cfg := &scalibr.ScanConfig{ScanRoots: scalibrfs.RealFSScanRoots(repoPath), Plugins: plugins}
+			results := scalibr.New().Scan(ctx, cfg)
+			return results.Inventory.Packages, nil
+		}
+		// If not a git repo (shouldn't happen for cloned remotes), still scan filesystem
+		cfg := &scalibr.ScanConfig{ScanRoots: scalibrfs.RealFSScanRoots(repoPath), Plugins: plugins}
+		results := scalibr.New().Scan(ctx, cfg)
+		return results.Inventory.Packages, nil
 	}
+
+	// For other refs, create a read-only snapshot of the commit into a temp dir and scan it
+	repo, err := git.PlainOpen(repoPath)
+	if err != nil {
+		return nil, fmt.Errorf("open repo: %w", err)
+	}
+	h, err := resolveRevisionEnhanced(repo, ref)
+	if err != nil {
+		return nil, fmt.Errorf("resolve ref %q: %w", ref, err)
+	}
+	commit, err := repo.CommitObject(*h)
+	if err != nil {
+		return nil, fmt.Errorf("get commit: %w", err)
+	}
+	tree, err := commit.Tree()
+	if err != nil {
+		return nil, fmt.Errorf("get tree: %w", err)
+	}
+	dir, err := os.MkdirTemp("", "deputy-sbom-snap-*")
+	if err != nil {
+		return nil, err
+	}
+	// Materialize tree files into temp dir
+	err = tree.Files().ForEach(func(f *object.File) error {
+		if f.Name == ".git" || strings.HasPrefix(f.Name, ".git/") {
+			return nil
+		}
+		target := filepath.Join(dir, f.Name)
+		if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+			return err
+		}
+		r, err := f.Blob.Reader()
+		if err != nil {
+			return err
+		}
+		defer r.Close()
+		b, err := io.ReadAll(r)
+		if err != nil {
+			return err
+		}
+		return os.WriteFile(target, b, 0o644)
+	})
+	if err != nil {
+		_ = os.RemoveAll(dir)
+		return nil, err
+	}
+	// Scan the snapshot dir
+	cfg := &scalibr.ScanConfig{ScanRoots: scalibrfs.RealFSScanRoots(dir), Plugins: plugins}
 	results := scalibr.New().Scan(ctx, cfg)
+	_ = os.RemoveAll(dir)
 	return results.Inventory.Packages, nil
 }
 

@@ -40,6 +40,7 @@ $ deputy sbom --ref=v1.28.0 --enrich-licenses --license-source=both    --format=
 
 Notes:
 - SBOMs can be generated for any valid Git ref: branches, tags, SHAs, or expressions like `HEAD~3`.
+- When `--ref` is omitted or set to `HEAD`, the SBOM uses the local working tree if available (includes uncommitted changes). Use `--ref=HEAD` to capture the exact last commit.
 - Multi-ecosystem inventory is powered by `osv-scalibr` plugins; by default it scans all supported ecosystems.
 - For GitHub, setting `GITHUB_TOKEN` can improve rate limits and enables authenticated fetching during license enrichment of dependencies.
 - Document names prefer the Go module path (e.g., `github.com/hashicorp/vault@v1.16.0`) and Go PURLs are normalized (e.g., `pkg:golang/github.com/hashicorp/vault/sdk@...`).
@@ -120,11 +121,16 @@ $ deputy scan github.com/hashicorp/vault --ref=v1.16.0
 
 # JSON output (machine-readable)
 $ deputy scan --format=json > report.vulns.json
+
+# Reduce noise by ignoring unfixed vulnerabilities (like Trivy)
+$ deputy scan --ignore-unfixed
 ```
 
 Notes:
 - Output formats: `text` (default) or `json`.
 - Currently focuses OSV lookups for Go module ecosystem.
+- Scanning without `--ref` uses the working tree when on HEAD (includes uncommitted changes). Use `--ref=HEAD` to scan the exact last commit.
+- `--ignore-unfixed` filters out vulnerabilities without a known fixed version. Module deprecations are still shown (e.g., migrate `github.com/aws/aws-sdk-go` → `github.com/aws/aws-sdk-go-v2`).
 - Network is required for OSV queries; failures are reported as warnings and do not stop SBOM generation or scanning.
 - Known module deprecations may be highlighted with suggested replacements (e.g., `github.com/aws/aws-sdk-go` → `github.com/aws/aws-sdk-go-v2`).
 

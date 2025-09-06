@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"context"
 	git "github.com/go-git/go-git/v5"
 	"github.com/google/osv-scalibr/extractor"
 	"github.com/spf13/cobra"
@@ -15,15 +16,16 @@ import (
 )
 
 // indirection points for tests
-var collectInventoryForScan = collectInventoryAtRef
+var collectInventoryForScan = collectInventoryScan
 
 // addScanSubcommand registers the scan subcommand to perform vulnerability scanning at a ref.
 func addScanSubcommand(root *cobra.Command) {
 	var (
-		ref     string
-		ecos    []string
-		outPath string
-		format  string // text | json
+		ref           string
+		ecos          []string
+		outPath       string
+		format        string // text | json
+		ignoreUnfixed bool   // omit vulnerabilities without a known fixed version
 	)
 
 	cmd := &cobra.Command{
@@ -35,6 +37,8 @@ func addScanSubcommand(root *cobra.Command) {
           # Scan current repository (HEAD) and print a human-friendly report
           deputy scan
           deputy scan --ref=main
+          # Note: with no --ref, HEAD uses the working tree (includes uncommitted changes).
+          #       Use --ref=HEAD to scan the exact last commit.
 
           # Scan a specific local path
           deputy scan ./path/to/repo
@@ -47,6 +51,9 @@ func addScanSubcommand(root *cobra.Command) {
 
           # JSON output (machine-readable)
           deputy scan --format=json > report.vulns.json
+
+          # Reduce noise by ignoring unfixed vulnerabilities (like Trivy)
+          deputy scan --ignore-unfixed
         `),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			// Resolve repo path or remote
@@ -89,8 +96,16 @@ func addScanSubcommand(root *cobra.Command) {
 				}()
 			}
 
-			// Inventory packages at ref
-			pkgs, err := collectInventoryForScan(cmd.Context(), localRepoPath, refOrHEAD(ref), ecos)
+			// Decide effective ref for inventory: if user explicitly set --ref=HEAD, honor HEAD commit via HEAD~0; otherwise scan working when HEAD.
+			effRef := refOrHEAD(ref)
+			if strings.EqualFold(effRef, "HEAD") {
+				if cmd.Flags().Changed("ref") {
+					// User explicitly asked for HEAD: treat as exact commit
+					effRef = "HEAD~0"
+				}
+			}
+			// Inventory packages at ref or working tree (non-destructive for local repos)
+			pkgs, err := collectInventoryForScan(cmd.Context(), localRepoPath, effRef, ecos)
 			if err != nil {
 				return err
 			}
@@ -171,6 +186,17 @@ func addScanSubcommand(root *cobra.Command) {
 				shortHash = shortHash[:7]
 			}
 
+			// If scanning the local working tree (HEAD requested and uncommitted changes present), reflect that in display
+			if localRepoPath == repoPath && strings.EqualFold(refOrHEAD(ref), "HEAD") {
+				if repo, err := git.PlainOpen(localRepoPath); err == nil {
+					if wt, err := repo.Worktree(); err == nil {
+						if st, err := wt.Status(); err == nil && !st.IsClean() {
+							shortRef = "WORKING"
+						}
+					}
+				}
+			}
+
 			switch strings.ToLower(format) {
 			case "", "text":
 				// Print scan context with consistent spacing: one blank line above and below
@@ -178,7 +204,12 @@ func addScanSubcommand(root *cobra.Command) {
 				if originURL != "" {
 					fmt.Println("  " + styleMeta.Render("Origin: ") + originURL)
 				}
-				displayVulnerabilities(vulns)
+				vulnsEff := vulns
+				if ignoreUnfixed {
+					vulnsEff = filterUnfixedVulns(vulns)
+					fmt.Println("  " + styleMeta.Render("Note: ignoring unfixed vulnerabilities (--ignore-unfixed)"))
+				}
+				displayVulnerabilities(vulnsEff)
 				// Detect and print module deprecations (known set)
 				if deps := detectModuleDeprecations(pkgs); len(deps) > 0 {
 					fmt.Printf("\n%s\n", styleHeader.Render("Module Deprecations:"))
@@ -192,7 +223,11 @@ func addScanSubcommand(root *cobra.Command) {
 				}
 				return nil
 			case "json":
-				rep := buildScanReport(repoPath, refOrHEAD(ref), shortHash, vulns, len(pkgs))
+				vulnsEff := vulns
+				if ignoreUnfixed {
+					vulnsEff = filterUnfixedVulns(vulns)
+				}
+				rep := buildScanReport(repoPath, refOrHEAD(ref), shortHash, vulnsEff, len(pkgs))
 				enc := json.NewEncoder(w)
 				enc.SetIndent("", "  ")
 				return enc.Encode(rep)
@@ -206,8 +241,54 @@ func addScanSubcommand(root *cobra.Command) {
 	cmd.Flags().StringSliceVar(&ecos, "ecosystems", nil, "Limit to specific ecosystems (e.g., go,npm,pip). Defaults to auto-detect.")
 	cmd.Flags().StringVarP(&outPath, "output", "o", "-", "Output file path or '-' for stdout")
 	cmd.Flags().StringVarP(&format, "format", "f", "text", "Output format: text | json")
+	cmd.Flags().BoolVar(&ignoreUnfixed, "ignore-unfixed", false, "Ignore vulnerabilities without a known fixed version (reduces noise)")
 
 	root.AddCommand(cmd)
+}
+
+// collectInventoryScan inventories packages for scan:
+// - For HEAD on a local repo, scans the working tree (includes uncommitted changes).
+// - For other refs (or remotes), scans a read-only snapshot of the commit (no checkout).
+func collectInventoryScan(ctx context.Context, repoPath, gitRef string, ecos []string) ([]*extractor.Package, error) {
+	// Treat empty ref as HEAD
+	ref := refOrHEAD(gitRef)
+	// Prefer working tree scan for local HEAD to include developer changes
+	if strings.EqualFold(ref, "HEAD") {
+		// If repo opens, just scan the filesystem at repoPath (works for remotes too; repo is clean)
+		if _, err := git.PlainOpen(repoPath); err == nil {
+			return scanPackagesWorking(ctx, repoPath)
+		}
+		// Fallback to snapshot-less scan of the directory
+		return scanPackagesWorking(ctx, repoPath)
+	}
+	// Resolve ref and scan a temporary snapshot
+	repo, err := git.PlainOpen(repoPath)
+	if err != nil {
+		return nil, err
+	}
+	h, err := resolveRevisionEnhanced(repo, ref)
+	if err != nil {
+		return nil, err
+	}
+	return scanPackagesAtCommitSnapshot(ctx, repoPath, *h)
+}
+
+// filterUnfixedVulns returns only vulnerabilities that have a viable fixed version.
+// Uses findBestFixedVersion to ensure the fix makes sense for the current version.
+func filterUnfixedVulns(vs []Vulnerability) []Vulnerability {
+	if len(vs) == 0 {
+		return vs
+	}
+	out := make([]Vulnerability, 0, len(vs))
+	for _, v := range vs {
+		if len(v.FixedVersions) == 0 {
+			continue
+		}
+		if fix := findBestFixedVersion(v.FixedVersions, v.Version); fix != "" {
+			out = append(out, v)
+		}
+	}
+	return out
 }
 
 // refOrHEAD normalizes empty ref to HEAD
