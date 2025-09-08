@@ -1,0 +1,267 @@
+package git
+
+import (
+	"fmt"
+	"slices"
+	"strings"
+
+	git "github.com/go-git/go-git/v5"
+	"github.com/go-git/go-git/v5/plumbing"
+)
+
+// ParseReferences intelligently parses command line arguments to determine base and target references.
+// It supports all Git reference types: branches, tags, commits, remote refs, and Git revision expressions.
+func ParseReferences(repoPath string, args []string) (baseRef, targetRef string, err error) {
+	repo, err := git.PlainOpen(repoPath)
+	if err != nil {
+		return "", "", fmt.Errorf("error opening Git repository at %s: %w", repoPath, err)
+	}
+
+	// Find the default branch (main, master, or current HEAD)
+	defaultBranch, err := GetDefaultBranch(repo)
+	if err != nil {
+		return "", "", fmt.Errorf("error determining default branch: %w", err)
+	}
+
+	switch len(args) {
+	case 0:
+		// No arguments: compare default branch with HEAD by default.
+		// If working tree has dependency changes, compare default branch with WORKING tree.
+		if ok, _ := hasWorkingDependencyChanges(repo); ok {
+			return defaultBranch, "WORKING", nil
+		}
+		return defaultBranch, "HEAD", nil
+	case 1:
+		// One argument: compare default branch with provided reference
+		// Validate the provided reference
+		if err := validateReference(repo, args[0]); err != nil {
+			return "", "", fmt.Errorf("invalid target reference %q: %w", args[0], err)
+		}
+		return defaultBranch, args[0], nil
+	case 2:
+		// Two arguments: first is base, second is target
+		if err := validateReference(repo, args[0]); err != nil {
+			return "", "", fmt.Errorf("invalid base reference %q: %w", args[0], err)
+		}
+		if err := validateReference(repo, args[1]); err != nil {
+			return "", "", fmt.Errorf("invalid target reference %q: %w", args[1], err)
+		}
+		return args[0], args[1], nil
+	default:
+		return "", "", fmt.Errorf("too many arguments provided (maximum 2)")
+	}
+}
+
+// hasWorkingDependencyChanges reports if go.mod or go.sum have uncommitted changes.
+func hasWorkingDependencyChanges(repo *git.Repository) (bool, error) {
+	wt, err := repo.Worktree()
+	if err != nil {
+		return false, err
+	}
+	st, err := wt.Status()
+	if err != nil {
+		return false, err
+	}
+	if s, ok := st["go.mod"]; ok && s.Worktree != git.Unmodified {
+		return true, nil
+	}
+	if s, ok := st["go.sum"]; ok && s.Worktree != git.Unmodified {
+		return true, nil
+	}
+	return false, nil
+}
+
+// GetDefaultBranch attempts to find the repository's default branch using multiple strategies.
+func GetDefaultBranch(repo *git.Repository) (string, error) {
+	// Strategy 1: Try to get the remote HEAD symref (most reliable for GitHub/GitLab)
+	if defaultBranch := getRemoteDefaultBranch(repo); defaultBranch != "" {
+		return defaultBranch, nil
+	}
+	// Strategy 2: Check if we're currently on a reasonable default branch
+	if head, err := repo.Head(); err == nil && head.Name().IsBranch() {
+		currentBranch := head.Name().Short()
+		if isLikelyDefaultBranch(currentBranch) {
+			return currentBranch, nil
+		}
+	}
+	// Strategy 3: Look for common default branch names in local branches
+	if defaultBranch := findLocalDefaultBranch(repo); defaultBranch != "" {
+		return defaultBranch, nil
+	}
+	// Strategy 4: Try to find any branch that looks like a default
+	branches, err := repo.Branches()
+	if err == nil {
+		var anyBranch string
+		_ = branches.ForEach(func(ref *plumbing.Reference) error {
+			name := ref.Name().Short()
+			if isLikelyDefaultBranch(name) {
+				anyBranch = name
+				return fmt.Errorf("stop")
+			}
+			if anyBranch == "" {
+				anyBranch = name
+			}
+			return nil
+		})
+		if anyBranch != "" {
+			return anyBranch, nil
+		}
+	}
+	// Fallback to HEAD if nothing else
+	return "HEAD", nil
+}
+
+// getRemoteDefaultBranch tries to determine the default branch from remote HEAD symref.
+func getRemoteDefaultBranch(repo *git.Repository) string {
+	remotes, err := repo.Remotes()
+	if err != nil || len(remotes) == 0 {
+		return ""
+	}
+	remoteOrder := []string{"origin", "upstream"}
+	for _, remoteName := range remoteOrder {
+		for _, remote := range remotes {
+			if remote.Config().Name == remoteName {
+				if branch := getRemoteHeadBranch(remote); branch != "" {
+					return branch
+				}
+			}
+		}
+	}
+	for _, remote := range remotes {
+		if branch := getRemoteHeadBranch(remote); branch != "" {
+			return branch
+		}
+	}
+	return ""
+}
+
+func getRemoteHeadBranch(remote *git.Remote) string {
+	refs, err := remote.List(&git.ListOptions{})
+	if err != nil {
+		return ""
+	}
+	var headSymref *plumbing.Reference
+	for _, ref := range refs {
+		if ref.Name().String() == fmt.Sprintf("refs/remotes/%s/HEAD", remote.Config().Name) {
+			headSymref = ref
+			break
+		}
+	}
+	if headSymref != nil && headSymref.Type() == plumbing.SymbolicReference {
+		target := headSymref.Target().String()
+		if after, ok := strings.CutPrefix(target, fmt.Sprintf("refs/remotes/%s/", remote.Config().Name)); ok {
+			return after
+		}
+	}
+	return ""
+}
+
+var defaultBranchPatterns = []string{"main", "master", "trunk", "default"}
+
+// findLocalDefaultBranch looks for common default branch names in local branches.
+func findLocalDefaultBranch(repo *git.Repository) string {
+	branches, err := repo.Branches()
+	if err != nil {
+		return ""
+	}
+	for _, candidate := range defaultBranchPatterns {
+		var found bool
+		branches.ForEach(func(ref *plumbing.Reference) error {
+			if ref.Name().Short() == candidate {
+				found = true
+				return fmt.Errorf("stop")
+			}
+			return nil
+		})
+		if found {
+			return candidate
+		}
+	}
+	return ""
+}
+
+// isLikelyDefaultBranch checks if a branch name looks like a default branch.
+func isLikelyDefaultBranch(branchName string) bool {
+	defaultPatterns := []string{"main", "master", "trunk", "default"}
+	return slices.Contains(defaultPatterns, branchName)
+}
+
+// validateReference checks if a Git reference is valid and provides helpful error messages.
+func validateReference(repo *git.Repository, ref string) error {
+	upper := strings.ToUpper(strings.TrimSpace(ref))
+	if upper == "WORKING" || upper == "WORKTREE" || upper == "WT" || strings.TrimSpace(ref) == "." {
+		return nil
+	}
+	if _, err := ResolveRevisionEnhanced(repo, ref); err == nil {
+		return nil
+	}
+	suggestions := GetReferenceSuggestions(repo, ref)
+	if len(suggestions) > 0 {
+		return fmt.Errorf("invalid reference %q\nDid you mean one of these?\n  %s", ref, strings.Join(suggestions, "\n  "))
+	}
+	return fmt.Errorf("invalid reference %q", ref)
+}
+
+// GetReferenceSuggestions provides helpful suggestions for similar reference names.
+func GetReferenceSuggestions(repo *git.Repository, invalidRef string) []string {
+	var suggestions []string
+	// Branches
+	if branches, err := repo.Branches(); err == nil {
+		_ = branches.ForEach(func(ref *plumbing.Reference) error {
+			name := ref.Name().Short()
+			if calculateSimilarity(name, invalidRef) > 0.6 {
+				suggestions = append(suggestions, name)
+			}
+			return nil
+		})
+	}
+	// Tags
+	if tags, err := repo.Tags(); err == nil {
+		_ = tags.ForEach(func(ref *plumbing.Reference) error {
+			name := strings.TrimPrefix(ref.Name().String(), "refs/tags/")
+			if calculateSimilarity(name, invalidRef) > 0.6 {
+				suggestions = append(suggestions, name)
+			}
+			return nil
+		})
+	}
+	// Remotes
+	if remotes, err := repo.Remotes(); err == nil {
+		for _, remote := range remotes {
+			remoteName := remote.Config().Name
+			candidate := fmt.Sprintf("%s/%s", remoteName, invalidRef)
+			if _, err := repo.ResolveRevision(plumbing.Revision(candidate)); err == nil {
+				suggestions = append(suggestions, candidate)
+			}
+		}
+	}
+	if len(suggestions) > 5 {
+		suggestions = suggestions[:5]
+	}
+	return suggestions
+}
+
+// calculateSimilarity returns a simple similarity score between two strings.
+func calculateSimilarity(a, b string) float64 {
+	if a == b {
+		return 1.0
+	}
+	maxLen := max(len(b), len(a))
+	if maxLen == 0 {
+		return 0
+	}
+	common := 0
+	for i := 0; i < len(a) && i < len(b); i++ {
+		if a[i] == b[i] {
+			common++
+		}
+	}
+	return float64(common) / float64(maxLen)
+}
+
+func max(a, b int) int {
+	if a > b {
+		return a
+	}
+	return b
+}

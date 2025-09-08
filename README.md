@@ -156,6 +156,13 @@ $ deputy scan --format=json > report.vulns.json
 
 # Reduce noise by ignoring unfixed vulnerabilities (like Trivy)
 $ deputy scan --ignore-unfixed
+
+# Historical / Time-filtered views
+$ deputy scan --as-of=2024-12-31           # What was known up to end of 2024
+$ deputy scan --published-after=2025        # Vulns first published in 2025 or later
+$ deputy scan --published-after=2025-02 --published-before=2025-03   # February 2025 window
+$ deputy scan --as-of=2023 --ignore-unfixed # State of known, fixable vulns at end of 2023
+$ deputy diff v1.0.0 v2.0.0 --as-of=2022-12-31 # Changes considering knowledge available by 2022 year end
 ```
 
 Notes:
@@ -319,7 +326,7 @@ Summary:
 
 Scanning for vulnerabilities...
 
-⚠ Vulnerabilities Found:
+∴ Vulnerabilities Found:
 
 github.com/aws/aws-sdk-go v1.55.6 [direct]:
   • CVE-2020-8912 [?]  
@@ -351,7 +358,7 @@ $ deputy scan github.com/hashicorp/go-getter
 Scanned github.com/hashicorp/go-getter @ main (d879f88)
   Origin: https://github.com/hashicorp/go-getter.git
 
-⚠ Vulnerabilities Found:
+∴ Vulnerabilities Found:
 
 github.com/ulikunitz/xz v0.5.14 [indirect]:
   • CVE-2025-58058 [MED] (↑ v0.5.15) 

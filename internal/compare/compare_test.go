@@ -1,0 +1,136 @@
+package compare
+
+import (
+	"os"
+	"testing"
+
+	"github.com/google/osv-scalibr/extractor"
+)
+
+func Test_getModuleRoot(t *testing.T) {
+	cases := []struct{ in, want string }{
+		{"github.com/user/repo/sub/pkg", "github.com/user/repo"},
+		{"github.com/user/repo", "github.com/user/repo"},
+		{"github.com/user/repo/", "github.com/user/repo"}, // trailing slash handled by split/join logic implicitly
+		{"example.com/mod/sub", "example.com/mod"},
+		{"example.com/mod", "example.com/mod"},
+		{"single", "single"},
+		{"", ""},
+	}
+	for _, c := range cases {
+		if got := getModuleRoot(c.in); got != c.want {
+			t.Fatalf("getModuleRoot(%q)=%q want %q", c.in, got, c.want)
+		}
+	}
+}
+
+func Test_normalizeGoVersion(t *testing.T) {
+	cases := []struct{ in, want string }{
+		{"", ""},
+		{"v1.2.3", "v1.2.3"},
+		{"1.2.3", "v1.2.3"},
+		{"v0.0.0", "v0.0.0"},
+	}
+	for _, c := range cases {
+		if got := normalizeGoVersion(c.in); got != c.want {
+			t.Fatalf("normalizeGoVersion(%q)=%q want %q", c.in, got, c.want)
+		}
+	}
+}
+
+func Test_allDigits(t *testing.T) {
+	cases := []struct {
+		in   string
+		want bool
+	}{
+		{"", true}, // empty treated as true by current implementation
+		{"0", true},
+		{"12345", true},
+		{"12a45", false},
+		{"abc", false},
+	}
+	for _, c := range cases {
+		if got := allDigits(c.in); got != c.want {
+			t.Fatalf("allDigits(%q)=%v want %v", c.in, got, c.want)
+		}
+	}
+}
+
+func Test_getDirectDependencies(t *testing.T) {
+	dir := t.TempDir()
+	oldWd, _ := os.Getwd()
+	defer os.Chdir(oldWd)
+	os.Chdir(dir)
+
+	goMod := `module example.com/app
+
+require (
+    github.com/a/b v1.2.3
+    github.com/c/d v0.0.1 // indirect
+    github.com/e/f v2.0.0
+)`
+	if err := os.WriteFile("go.mod", []byte(goMod), 0o644); err != nil {
+		t.Fatalf("write go.mod: %v", err)
+	}
+	deps := getDirectDependencies()
+	if !deps["github.com/a/b"] || !deps["github.com/e/f"] {
+		t.Fatalf("expected direct deps present: %v", deps)
+	}
+	if deps["github.com/c/d"] {
+		t.Fatalf("indirect dep erroneously marked direct")
+	}
+}
+
+func Test_ComparePackages_basic(t *testing.T) {
+	// Prepare working directory with go.mod for direct dependency detection
+	dir := t.TempDir()
+	oldWd, _ := os.Getwd()
+	defer os.Chdir(oldWd)
+	os.Chdir(dir)
+	goMod := `module example.com/app
+
+require (
+    github.com/new/added v1.0.0
+    github.com/keep/updated v1.1.0
+)`
+	if err := os.WriteFile("go.mod", []byte(goMod), 0o644); err != nil {
+		t.Fatalf("write go.mod: %v", err)
+	}
+
+	oldPkgs := []*extractor.Package{
+		{Name: "github.com/keep/updated", Version: "v1.0.0"},
+		{Name: "github.com/old/removed", Version: "v0.9.0"},
+	}
+	newPkgs := []*extractor.Package{
+		{Name: "github.com/keep/updated", Version: "v1.1.0"}, // updated
+		{Name: "github.com/new/added", Version: "v1.0.0"},    // added
+	}
+	changes := ComparePackages(oldPkgs, newPkgs)
+	if len(changes) != 3 {
+		t.Fatalf("expected 3 changes got %d: %+v", len(changes), changes)
+	}
+
+	var added, removed, updated bool
+	for _, c := range changes {
+		switch c.ChangeType {
+		case Added:
+			if c.Name != "github.com/new/added" || c.TargetVersion != "v1.0.0" || !c.IsDirect {
+				t.Fatalf("bad added: %+v", c)
+			}
+			added = true
+		case Removed:
+			if c.Name != "github.com/old/removed" || c.BaseVersion != "v0.9.0" {
+				t.Fatalf("bad removed: %+v", c)
+			}
+			removed = true
+		case Updated:
+			if c.Name != "github.com/keep/updated" || c.BaseVersion != "v1.0.0" || c.TargetVersion != "v1.1.0" || !c.IsDirect {
+				t.Fatalf("bad updated: %+v", c)
+			}
+			updated = true
+		}
+	}
+	if !added || !removed || !updated {
+		t.Fatalf("missing change types: added=%v removed=%v updated=%v", added, removed, updated)
+	}
+}
