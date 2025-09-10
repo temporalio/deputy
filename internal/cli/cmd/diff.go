@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	pb "deps.dev/api/v3"
@@ -19,6 +20,7 @@ import (
 	inv "github.com/picatz/deputy/internal/inventory"
 	ui "github.com/picatz/deputy/internal/ui"
 	"github.com/spf13/cobra"
+	"golang.org/x/sync/errgroup"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 	"osv.dev/bindings/go/osvdev"
@@ -395,6 +397,32 @@ func displayDetailedDependencyChanges(ctx context.Context, changes []cmp.Change,
 		}
 	}
 
+	// Pre-fetch deps.dev licenses in parallel when requested
+	type pkgKey struct{ name, version string }
+	licMap := map[pkgKey][]string{}
+	if client != nil && enrich && (licenseSource == "depsdev" || licenseSource == "both") {
+		var mu sync.Mutex
+		g, gctx := errgroup.WithContext(ctx)
+		for _, c := range changes {
+			if c.ChangeType == cmp.Removed || c.TargetVersion == "" {
+				continue
+			}
+			pk := pkgKey{c.Name, c.TargetVersion}
+			if _, ok := licMap[pk]; ok {
+				continue
+			}
+			pkCopy := pk
+			g.Go(func() error {
+				l := analysis.FetchLicensesForPackage(gctx, depsClient{client}, pkCopy.name, pkCopy.version)
+				mu.Lock()
+				licMap[pkCopy] = l
+				mu.Unlock()
+				return nil
+			})
+		}
+		_ = g.Wait()
+	}
+
 	// Counters
 	var addedN, removedN, updatedN, upgradedN, downgradedN int
 
@@ -404,23 +432,14 @@ func displayDetailedDependencyChanges(ctx context.Context, changes []cmp.Change,
 			depType = ui.StyleUpgraded.Render("[direct]")
 		}
 
-		// License lookup only for target version (added / updated not removed)
 		licenses := []string{"?"}
-		if client != nil && c.ChangeType != cmp.Removed && c.TargetVersion != "" && (enrich && (licenseSource == "depsdev" || licenseSource == "both")) {
-			v := c.TargetVersion
-			if !strings.HasPrefix(v, "v") {
-				v = "v" + v
-			}
-			if resp, err := client.GetVersion(ctx, &pb.GetVersionRequest{VersionKey: &pb.VersionKey{System: pb.System_GO, Name: c.Name, Version: v}}); err == nil && resp != nil && len(resp.Licenses) > 0 {
-				licenses = resp.Licenses
-			}
+		if l, ok := licMap[pkgKey{c.Name, c.TargetVersion}]; ok && len(l) > 0 {
+			licenses = l
 		}
 		if c.ChangeType != cmp.Removed && c.TargetVersion != "" && enrich && (licenseSource == "scan" || licenseSource == "both") {
-			// Local repo scan (once) – assume current working directory is project root.
 			if lc := analysis.LocalRepoLicenseScan("."); lc != nil {
 				licenses = analysis.MergeLicenseSources(licenses, lc)
 			}
-			// Remote repository scan (best effort)
 			if rc := analysis.RemoteModuleLicenseScan(ctx, c.Name, c.TargetVersion); rc != nil {
 				licenses = analysis.MergeLicenseSources(licenses, rc)
 			}
@@ -483,6 +502,13 @@ func displayDetailedDependencyChanges(ctx context.Context, changes []cmp.Change,
 			fmt.Printf("  %s %d package%s changed\n", ui.StyleNeutral.Render("~"), other, plural(other))
 		}
 	}
+}
+
+// depsClient adapts a deps.dev InsightsClient to the internal analysis.DepsClient interface.
+type depsClient struct{ pb.InsightsClient }
+
+func (d depsClient) GetVersion(ctx context.Context, req *pb.GetVersionRequest) (*pb.Version, error) {
+	return d.InsightsClient.GetVersion(ctx, req)
 }
 
 func plural(n int) string {

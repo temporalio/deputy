@@ -33,10 +33,16 @@ func FetchLicensesForPackage(ctx context.Context, client DepsClient, name, versi
 	if !strings.HasPrefix(v, "v") {
 		v = "v" + v
 	}
+	key := name + "@" + v
+	var cached []string
+	if readCache("depsdev", key, &cached) && len(cached) > 0 {
+		return cached
+	}
 	raw, err := client.GetVersion(ctx, &pb.GetVersionRequest{VersionKey: &pb.VersionKey{System: pb.System_GO, Name: name, Version: v}})
 	if err != nil || raw == nil || len(raw.Licenses) == 0 {
 		return []string{"?"}
 	}
+	writeCache("depsdev", key, raw.Licenses)
 	return raw.Licenses
 }
 

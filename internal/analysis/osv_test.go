@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/ossf/osv-schema/bindings/go/osvschema"
@@ -31,6 +32,9 @@ func (f *fakeOSVClient) GetVulnByID(ctx context.Context, id string) (*osvschema.
 }
 
 func Test_QueryOSVBatch_ok(t *testing.T) {
+	cacheDirOnce = sync.Once{}
+	cacheDirPath = ""
+	t.Setenv("DEPUTY_CACHE_DIR", t.TempDir())
 	client := &fakeOSVClient{}
 	vulns, err := QueryOSVBatch(context.Background(), client, []PkgInput{{Name: "github.com/example/pkg", Version: "1.2.3", IsDirect: true}})
 	if err != nil {
@@ -54,6 +58,9 @@ func (f *fakeOSVClientQueryErr) GetVulnByID(ctx context.Context, id string) (*os
 }
 
 func Test_QueryOSVBatch_query_error(t *testing.T) {
+	cacheDirOnce = sync.Once{}
+	cacheDirPath = ""
+	t.Setenv("DEPUTY_CACHE_DIR", t.TempDir())
 	client := &fakeOSVClientQueryErr{}
 	_, err := QueryOSVBatch(context.Background(), client, []PkgInput{{Name: "n", Version: "1", IsDirect: true}})
 	if err == nil {
@@ -71,6 +78,9 @@ func (f *fakeOSVClientGetErr) GetVulnByID(ctx context.Context, id string) (*osvs
 }
 
 func Test_QueryOSVBatch_getvuln_error(t *testing.T) {
+	cacheDirOnce = sync.Once{}
+	cacheDirPath = ""
+	t.Setenv("DEPUTY_CACHE_DIR", t.TempDir())
 	client := &fakeOSVClientGetErr{}
 	vulns, err := QueryOSVBatch(context.Background(), client, []PkgInput{{Name: "n", Version: "1", IsDirect: true}})
 	if err != nil {
@@ -101,6 +111,9 @@ func (f *fakeOSVClientFixed) GetVulnByID(ctx context.Context, id string) (*osvsc
 }
 
 func Test_QueryOSVBatch_skips_fixed_version(t *testing.T) {
+	cacheDirOnce = sync.Once{}
+	cacheDirPath = ""
+	t.Setenv("DEPUTY_CACHE_DIR", t.TempDir())
 	client := &fakeOSVClientFixed{}
 	vulns, err := QueryOSVBatch(context.Background(), client, []PkgInput{{Name: "github.com/example/pkg", Version: "1.55.6", IsDirect: true}})
 	if err != nil {
@@ -200,6 +213,9 @@ func (f *fakeOSVClientAlias) GetVulnByID(ctx context.Context, id string) (*osvsc
 }
 
 func Test_QueryOSVBatch_aliasWithoutRange(t *testing.T) {
+	cacheDirOnce = sync.Once{}
+	cacheDirPath = ""
+	t.Setenv("DEPUTY_CACHE_DIR", t.TempDir())
 	client := &fakeOSVClientAlias{}
 	vulns, err := QueryOSVBatch(context.Background(), client, []PkgInput{{Name: "github.com/example/pkg", Version: "1.2.3", IsDirect: true}})
 	if err != nil {
@@ -207,5 +223,40 @@ func Test_QueryOSVBatch_aliasWithoutRange(t *testing.T) {
 	}
 	if len(vulns) != 1 {
 		t.Fatalf("expected 1 vulnerability, got %d", len(vulns))
+	}
+}
+
+type countingOSVClient struct{ calls int }
+
+func (c *countingOSVClient) QueryBatch(ctx context.Context, queries []*osvdev.Query) (*osvdev.BatchedResponse, error) {
+	return &osvdev.BatchedResponse{Results: []osvdev.MinimalResponse{{Vulns: []osvdev.MinimalVulnerability{{ID: "V-cache"}}}}}, nil
+}
+
+func (c *countingOSVClient) GetVulnByID(ctx context.Context, id string) (*osvschema.Vulnerability, error) {
+	c.calls++
+	return &osvschema.Vulnerability{
+		ID: id,
+		Affected: []osvschema.Affected{{
+			Package: osvschema.Package{Name: "github.com/example/pkg"},
+			Ranges:  []osvschema.Range{{Type: osvschema.RangeSemVer, Events: []osvschema.Event{{Introduced: "0"}}}},
+		}},
+	}, nil
+}
+
+func Test_QueryOSVBatch_cache(t *testing.T) {
+	cacheDirOnce = sync.Once{}
+	cacheDirPath = ""
+	tmp := t.TempDir()
+	t.Setenv("DEPUTY_CACHE_DIR", tmp)
+	client := &countingOSVClient{}
+	pkgs := []PkgInput{{Name: "github.com/example/pkg", Version: "1.0.0"}}
+	if _, err := QueryOSVBatch(context.Background(), client, pkgs); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if _, err := QueryOSVBatch(context.Background(), client, pkgs); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if client.calls != 1 {
+		t.Fatalf("expected 1 GetVulnByID call, got %d", client.calls)
 	}
 }

@@ -4,9 +4,11 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"sync"
 
 	"github.com/ossf/osv-schema/bindings/go/osvschema"
 	"golang.org/x/mod/semver"
+	"golang.org/x/sync/errgroup"
 	"osv.dev/bindings/go/osvdev"
 )
 
@@ -25,6 +27,22 @@ type PkgInput struct {
 	Name     string
 	Version  string
 	IsDirect bool
+}
+
+// getCachedVuln retrieves a vulnerability by ID using the provided client,
+// consulting a local on-disk cache when available to avoid redundant network
+// requests. Successful responses are cached for future lookups.
+func getCachedVuln(ctx context.Context, client OSVClient, id string) (*osvschema.Vulnerability, error) {
+	var v osvschema.Vulnerability
+	if readCache("osv", id, &v) {
+		return &v, nil
+	}
+	res, err := client.GetVulnByID(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	writeCache("osv", id, res)
+	return res, nil
 }
 
 // QueryOSVBatch performs a batched OSV vulnerability lookup for the provided
@@ -57,89 +75,103 @@ func QueryOSVBatch(ctx context.Context, client OSVClient, pkgs []PkgInput) ([]Vu
 		return nil, fmt.Errorf("failed to query OSV API: %w", err)
 	}
 	var out []Vulnerability
-	aliasCache := map[string]*osvschema.Vulnerability{}
+	var mu sync.Mutex
+	var aliasCache sync.Map
+	g, ctx := errgroup.WithContext(ctx)
+	g.SetLimit(10)
 	for i, res := range resp.Results {
 		if i >= len(queries) || i >= len(meta) {
 			break
 		}
-		pkgName := queries[i].Package.Name
-		ver := queries[i].Version
-		isDirect := meta[i].IsDirect
-		for _, mv := range res.Vulns {
-			full, err := client.GetVulnByID(ctx, mv.ID)
-			if err != nil {
-				continue
-			}
-			if !isVersionAffected(*full, pkgName, ver) {
-				continue
-			}
-			base := ProcessOSVVulnerability(*full, pkgName, ver, isDirect)
-			base.Affected = true
-			var extras []Vulnerability
-			skip := false
-			for _, alias := range full.Aliases {
-				var aliasV *osvschema.Vulnerability
-				if cached, ok := aliasCache[alias]; ok {
-					aliasV = cached
-				} else {
-					aliasV, err = client.GetVulnByID(ctx, alias)
-					if err != nil {
-						continue
-					}
-					aliasCache[alias] = aliasV
-				}
-				// If the alias has affected ranges for this package and the current
-				// version is outside those ranges, treat the vulnerability as fixed
-				// and skip it entirely. This handles cases where a GO- record lacks
-				// fixed version data but an alias (e.g. GHSA) provides it.
-				hasPkg := false
-				for _, a := range aliasV.Affected {
-					if a.Package.Name != "" && strings.EqualFold(a.Package.Name, pkgName) {
-						hasPkg = true
-						break
-					}
-				}
-				if hasPkg && !isVersionAffected(*aliasV, pkgName, ver) {
-					skip = true
-					break
-				}
-				pv := ProcessOSVVulnerability(*aliasV, pkgName, ver, isDirect)
-				extras = append(extras, pv)
-			}
-			if skip {
-				continue
-			}
-			// merge severity and fixes
-			all := append([]Vulnerability{base}, extras...)
-			if sev, typ := FindBestSeverity(all); sev != "" {
-				base.Severity, base.SeverityType = sev, typ
-			}
-			fixSet := map[string]struct{}{}
-			for _, v := range all {
-				for _, f := range v.FixedVersions {
-					fixSet[f] = struct{}{}
-				}
-				base.Aliases = append(base.Aliases, v.Aliases...)
-			}
-			aliasSet := map[string]struct{}{}
-			uniqAliases := make([]string, 0, len(base.Aliases))
-			for _, a := range append([]string{base.ID}, base.Aliases...) {
-				if _, ok := aliasSet[a]; ok {
+		i, res := i, res
+		g.Go(func() error {
+			pkgName := queries[i].Package.Name
+			ver := queries[i].Version
+			isDirect := meta[i].IsDirect
+			var local []Vulnerability
+			for _, mv := range res.Vulns {
+				full, err := getCachedVuln(ctx, client, mv.ID)
+				if err != nil {
 					continue
 				}
-				aliasSet[a] = struct{}{}
-				if a != base.ID {
-					uniqAliases = append(uniqAliases, a)
+				if !isVersionAffected(*full, pkgName, ver) {
+					continue
 				}
+				base := ProcessOSVVulnerability(*full, pkgName, ver, isDirect)
+				base.Affected = true
+				var extras []Vulnerability
+				skip := false
+				for _, alias := range full.Aliases {
+					var aliasV *osvschema.Vulnerability
+					if cached, ok := aliasCache.Load(alias); ok {
+						aliasV = cached.(*osvschema.Vulnerability)
+					} else {
+						aliasV, err = getCachedVuln(ctx, client, alias)
+						if err != nil {
+							continue
+						}
+						aliasCache.Store(alias, aliasV)
+					}
+					// If the alias has affected ranges for this package and the current
+					// version is outside those ranges, treat the vulnerability as fixed
+					// and skip it entirely. This handles cases where a GO- record lacks
+					// fixed version data but an alias (e.g. GHSA) provides it.
+					hasPkg := false
+					for _, a := range aliasV.Affected {
+						if a.Package.Name != "" && strings.EqualFold(a.Package.Name, pkgName) {
+							hasPkg = true
+							break
+						}
+					}
+					if hasPkg && !isVersionAffected(*aliasV, pkgName, ver) {
+						skip = true
+						break
+					}
+					pv := ProcessOSVVulnerability(*aliasV, pkgName, ver, isDirect)
+					extras = append(extras, pv)
+				}
+				if skip {
+					continue
+				}
+				// merge severity and fixes
+				all := append([]Vulnerability{base}, extras...)
+				if sev, typ := FindBestSeverity(all); sev != "" {
+					base.Severity, base.SeverityType = sev, typ
+				}
+				fixSet := map[string]struct{}{}
+				for _, v := range all {
+					for _, f := range v.FixedVersions {
+						fixSet[f] = struct{}{}
+					}
+					base.Aliases = append(base.Aliases, v.Aliases...)
+				}
+				aliasSet := map[string]struct{}{}
+				uniqAliases := make([]string, 0, len(base.Aliases))
+				for _, a := range append([]string{base.ID}, base.Aliases...) {
+					if _, ok := aliasSet[a]; ok {
+						continue
+					}
+					aliasSet[a] = struct{}{}
+					if a != base.ID {
+						uniqAliases = append(uniqAliases, a)
+					}
+				}
+				base.Aliases = uniqAliases
+				base.FixedVersions = base.FixedVersions[:0]
+				for f := range fixSet {
+					base.FixedVersions = append(base.FixedVersions, f)
+				}
+				local = append(local, base)
 			}
-			base.Aliases = uniqAliases
-			base.FixedVersions = base.FixedVersions[:0]
-			for f := range fixSet {
-				base.FixedVersions = append(base.FixedVersions, f)
+			if len(local) > 0 {
+				mu.Lock()
+				out = append(out, local...)
+				mu.Unlock()
 			}
-			out = append(out, base)
-		}
+			return nil
+		})
 	}
+	_ = g.Wait()
 	return out, nil
 }
 
