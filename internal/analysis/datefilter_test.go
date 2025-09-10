@@ -28,7 +28,7 @@ func TestParseFlexibleDate(t *testing.T) {
 	}
 }
 
-func mkV(id, pub string) Vulnerability { return Vulnerability{ID: id, Published: pub} }
+func mkV(id, pub string) Vulnerability { return Vulnerability{ID: id, Published: pub, Affected: true} }
 
 func TestFilterVulnerabilitiesByPublished(t *testing.T) {
 	vs := []Vulnerability{

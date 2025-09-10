@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/ossf/osv-schema/bindings/go/osvschema"
+	"golang.org/x/mod/semver"
 	"osv.dev/bindings/go/osvdev"
 )
 
@@ -56,6 +57,7 @@ func QueryOSVBatch(ctx context.Context, client OSVClient, pkgs []PkgInput) ([]Vu
 		return nil, fmt.Errorf("failed to query OSV API: %w", err)
 	}
 	var out []Vulnerability
+	aliasCache := map[string]*osvschema.Vulnerability{}
 	for i, res := range resp.Results {
 		if i >= len(queries) || i >= len(meta) {
 			break
@@ -68,8 +70,112 @@ func QueryOSVBatch(ctx context.Context, client OSVClient, pkgs []PkgInput) ([]Vu
 			if err != nil {
 				continue
 			}
-			out = append(out, ProcessOSVVulnerability(*full, pkgName, ver, isDirect))
+			if !isVersionAffected(*full, pkgName, ver) {
+				continue
+			}
+			base := ProcessOSVVulnerability(*full, pkgName, ver, isDirect)
+			base.Affected = true
+			var extras []Vulnerability
+			skip := false
+			for _, alias := range full.Aliases {
+				var aliasV *osvschema.Vulnerability
+				if cached, ok := aliasCache[alias]; ok {
+					aliasV = cached
+				} else {
+					aliasV, err = client.GetVulnByID(ctx, alias)
+					if err != nil {
+						continue
+					}
+					aliasCache[alias] = aliasV
+				}
+				// If the alias has affected ranges for this package and the current
+				// version is outside those ranges, treat the vulnerability as fixed
+				// and skip it entirely. This handles cases where a GO- record lacks
+				// fixed version data but an alias (e.g. GHSA) provides it.
+				hasPkg := false
+				for _, a := range aliasV.Affected {
+					if a.Package.Name != "" && strings.EqualFold(a.Package.Name, pkgName) {
+						hasPkg = true
+						break
+					}
+				}
+				if hasPkg && !isVersionAffected(*aliasV, pkgName, ver) {
+					skip = true
+					break
+				}
+				pv := ProcessOSVVulnerability(*aliasV, pkgName, ver, isDirect)
+				extras = append(extras, pv)
+			}
+			if skip {
+				continue
+			}
+			// merge severity and fixes
+			all := append([]Vulnerability{base}, extras...)
+			if sev, typ := FindBestSeverity(all); sev != "" {
+				base.Severity, base.SeverityType = sev, typ
+			}
+			fixSet := map[string]struct{}{}
+			for _, v := range all {
+				for _, f := range v.FixedVersions {
+					fixSet[f] = struct{}{}
+				}
+				base.Aliases = append(base.Aliases, v.Aliases...)
+			}
+			aliasSet := map[string]struct{}{}
+			uniqAliases := make([]string, 0, len(base.Aliases))
+			for _, a := range append([]string{base.ID}, base.Aliases...) {
+				if _, ok := aliasSet[a]; ok {
+					continue
+				}
+				aliasSet[a] = struct{}{}
+				if a != base.ID {
+					uniqAliases = append(uniqAliases, a)
+				}
+			}
+			base.Aliases = uniqAliases
+			base.FixedVersions = base.FixedVersions[:0]
+			for f := range fixSet {
+				base.FixedVersions = append(base.FixedVersions, f)
+			}
+			out = append(out, base)
 		}
 	}
 	return out, nil
+}
+
+// isVersionAffected reports whether version ver of package pkgName is within any
+// affected range of the provided vulnerability. It defensively evaluates the
+// ranges returned from OSV, skipping vulnerabilities that the API may
+// mistakenly associate with already-fixed versions.
+func isVersionAffected(v osvschema.Vulnerability, pkgName, ver string) bool {
+	cur := normalizeGoVersion(ver)
+	for _, a := range v.Affected {
+		if a.Package.Name != "" && !strings.EqualFold(a.Package.Name, pkgName) {
+			continue
+		}
+		for _, r := range a.Ranges {
+			if strings.ToUpper(string(r.Type)) != "SEMVER" {
+				continue
+			}
+			introduced := "v0.0.0"
+			for _, e := range r.Events {
+				if e.Introduced != "" {
+					introduced = normalizeGoVersion(e.Introduced)
+				}
+				if e.Fixed != "" {
+					fixed := normalizeGoVersion(e.Fixed)
+					if semver.Compare(cur, introduced) >= 0 && semver.Compare(cur, fixed) < 0 {
+						return true
+					}
+					introduced = "v0.0.0"
+				}
+			}
+			if introduced != "v0.0.0" {
+				if semver.Compare(cur, introduced) >= 0 {
+					return true
+				}
+			}
+		}
+	}
+	return false
 }

@@ -12,14 +12,14 @@ import (
 
 // DisplayVulnerabilities renders a styled vulnerability report to stdout.
 func DisplayVulnerabilities(vulns []analysis.Vulnerability) {
-	if len(vulns) == 0 {
-		fmt.Println("\n" + ui.StyleAdded.Render("✓ No vulnerabilities found"))
-		return
-	}
-	consolidated := analysis.CategorizeVulnerabilities(vulns)
-	cons := analysis.ConsolidateVulnerabilities(vulns)
+        cons := analysis.ConsolidateVulnerabilities(vulns)
+        if len(cons) == 0 {
+                fmt.Println("\n" + ui.StyleAdded.Render("✓ No vulnerabilities found"))
+                return
+        }
+        consolidated := analysis.CategorizeVulnerabilities(vulns)
 
-	fmt.Println("\n" + ui.StyleDowngraded.Render("∴ ") + ui.StyleHeader.Render("Vulnerabilities Found:"))
+        fmt.Println("\n" + ui.StyleDowngraded.Render("∴ ") + ui.StyleHeader.Render("Vulnerabilities Found:"))
 
 	byPkg := map[string][]analysis.ConsolidatedVulnerability{}
 	for _, v := range cons {

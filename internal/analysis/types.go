@@ -16,6 +16,7 @@ type Vulnerability struct {
     Modified      string
     References    []string
     FixedVersions []string
+    Affected      bool
 }
 
 // ConsolidatedVulnerability represents a deduplicated vulnerability with primary/secondary IDs.

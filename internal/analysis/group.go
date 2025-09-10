@@ -107,6 +107,16 @@ func ConsolidateVulnerabilities(vulns []Vulnerability) []ConsolidatedVulnerabili
     }
     out := make([]ConsolidatedVulnerability, 0, len(groups))
     for _, g := range groups {
+        allAffected := true
+        for _, v := range g {
+            if !v.Affected {
+                allAffected = false
+                break
+            }
+        }
+        if !allAffected {
+            continue
+        }
         pid := findBestPrimaryIDFromGroup(g)
         out = append(out, createConsolidatedVulnerability(pid, g))
     }
@@ -137,7 +147,7 @@ func FindBestSeverity(vulns []Vulnerability) (string, string) {
 // CategorizeVulnerabilities computes stats after consolidating by alias.
 func CategorizeVulnerabilities(vs []Vulnerability) VulnerabilityStats {
     cons := ConsolidateVulnerabilities(vs)
-    stats := VulnerabilityStats{ TotalVulns: len(vs), UniqueVulns: len(cons), DuplicatesFound: len(vs) - len(cons) }
+    stats := VulnerabilityStats{ TotalVulns: len(cons), UniqueVulns: len(cons), DuplicatesFound: len(vs) - len(cons) }
     for _, v := range cons {
         if strings.HasPrefix(v.PrimaryID, "CVE-") { stats.CVECount++ }
         if v.IsDirect { stats.DirectDeps++ } else { stats.IndirectDeps++ }

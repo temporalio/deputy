@@ -58,17 +58,18 @@ func ProcessOSVVulnerability(vuln osvschema.Vulnerability, packageName, version 
 			}
 		}
 	}
-	if vuln.DatabaseSpecific != nil {
-		if sevVal, ok := vuln.DatabaseSpecific["severity"]; ok {
-			if sevStr, ok := sevVal.(string); ok && sevStr != "" {
-				isGHSA := strings.HasPrefix(vuln.ID, "GHSA-")
-				if v.Severity == "" || isGHSA {
-					v.Severity = sevStr
-					v.SeverityType = "GHSA"
-				}
-			}
-		}
-	}
+        if vuln.DatabaseSpecific != nil {
+                if sevVal, ok := vuln.DatabaseSpecific["severity"]; ok {
+                        if sevStr, ok := sevVal.(string); ok && sevStr != "" {
+                                isGHSA := strings.HasPrefix(vuln.ID, "GHSA-")
+                                sevUp := strings.ToUpper(sevStr)
+                                if v.Severity == "" || (isGHSA && (sevUp == "CRITICAL" || sevUp == "HIGH")) {
+                                        v.Severity = sevStr
+                                        v.SeverityType = "GHSA"
+                                }
+                        }
+                }
+        }
 
 	// References
 	if vuln.References != nil {
