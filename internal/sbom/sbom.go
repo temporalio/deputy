@@ -352,6 +352,7 @@ func CloneRepoToTemp(ctx context.Context, remoteURL string, auth transport.AuthM
 		URL:          remoteURL,
 		Depth:        1,
 		SingleBranch: true,
+		Tags:         git.NoTags,
 		Auth:         auth,
 	}
 	if ref.String() != "" {
