@@ -30,12 +30,15 @@ import (
 // inventories between two Git references (or working tree) and optionally
 // performs vulnerability scanning on changed modules.
 func AddDiffCommand(root *cobra.Command) {
-	var repoPath string
-	var skipVulnScan bool
-	var useLicenseCheck bool
-	var enrichLicenses bool
-	var licenseSource string
-	var publishedBeforeStr, publishedAfterStr, asOfStr string
+    var repoPath string
+    var skipVulnScan bool
+    var useLicenseCheck bool
+    var enrichLicenses bool
+    var licenseSource string
+    var publishedBeforeStr, publishedAfterStr, asOfStr string
+    var ignoreUnfixed bool
+    var showUnchanged bool
+    var unchangedThreshold string
 
 	cmd := &cobra.Command{
 		Use:   "diff [base] [target]",
@@ -90,8 +93,8 @@ Can be disabled with --skip-vuln-scan for faster execution.`,
 			if err != nil {
 				return fmt.Errorf("failed to parse references: %w", err)
 			}
-			return runDiffAnalysis(cmd.Context(), repo, baseRef, targetRef, !skipVulnScan, useLicenseCheck, enrichLicenses, licenseSource, publishedAfterStr, publishedBeforeStr, asOfStr)
-		},
+            return runDiffAnalysis(cmd.Context(), repo, baseRef, targetRef, !skipVulnScan, useLicenseCheck, enrichLicenses, licenseSource, publishedAfterStr, publishedBeforeStr, asOfStr, ignoreUnfixed, showUnchanged, unchangedThreshold)
+        },
 		Example: `BASIC USAGE:
   # Compare current work with default branch (beginner-friendly)
   deputy diff
@@ -191,10 +194,13 @@ PERFORMANCE TIPS:
 	cmd.Flags().BoolVarP(&skipVulnScan, "skip-vuln-scan", "s", false, "Skip vulnerability scanning (faster execution)")
 	cmd.Flags().BoolVar(&useLicenseCheck, "use-licensecheck", false, "(Deprecated) Alias for --enrich-licenses --license-source=scan")
 	cmd.Flags().BoolVar(&enrichLicenses, "enrich-licenses", false, "Enrich changed modules with licenses (deps.dev, scan, or both)")
-	cmd.Flags().StringVar(&licenseSource, "license-source", "depsdev", "License enrichment source: depsdev | scan | both")
-	cmd.Flags().StringVar(&publishedBeforeStr, "published-before", "", "Only include vulnerabilities published before this date (YYYY, YYYY-MM, YYYY-MM-DD, or RFC3339)")
-	cmd.Flags().StringVar(&publishedAfterStr, "published-after", "", "Only include vulnerabilities published on/after this date (YYYY, YYYY-MM, YYYY-MM-DD, or RFC3339)")
-	cmd.Flags().StringVar(&asOfStr, "as-of", "", "Historical view: show vulnerabilities known up to and including this date (implies --published-before)")
+    cmd.Flags().StringVar(&licenseSource, "license-source", "depsdev", "License enrichment source: depsdev | scan | both")
+    cmd.Flags().StringVar(&publishedBeforeStr, "published-before", "", "Only include vulnerabilities published before this date (YYYY, YYYY-MM, YYYY-MM-DD, or RFC3339)")
+    cmd.Flags().StringVar(&publishedAfterStr, "published-after", "", "Only include vulnerabilities published on/after this date (YYYY, YYYY-MM, YYYY-MM-DD, or RFC3339)")
+    cmd.Flags().StringVar(&asOfStr, "as-of", "", "Historical view: show vulnerabilities known up to and including this date (implies --published-before)")
+    cmd.Flags().BoolVar(&ignoreUnfixed, "ignore-unfixed", false, "Ignore vulnerabilities without fixes in diff scan output")
+    cmd.Flags().BoolVar(&showUnchanged, "show-unchanged", false, "Always show vulnerabilities in unchanged dependencies (overrides quiet behavior)")
+    cmd.Flags().StringVar(&unchangedThreshold, "unchanged-threshold", "critical", "Auto-show unchanged vulns at or above this severity: none|low|med|high|critical|any")
 
 	root.AddCommand(cmd)
 }
@@ -207,7 +213,7 @@ func mustGetwd() string {
 // runDiffAnalysis orchestrates dependency inventory collection for the base and
 // target references, computes a dependency diff, and optionally queries OSV to
 // enrich added/updated modules with vulnerability data.
-func runDiffAnalysis(ctx context.Context, repoPath, baseRef, targetRef string, enableVulnScan bool, useLicenseCheck bool, enrichLicenses bool, licenseSource string, publishedAfterStr, publishedBeforeStr, asOfStr string) error {
+func runDiffAnalysis(ctx context.Context, repoPath, baseRef, targetRef string, enableVulnScan bool, useLicenseCheck bool, enrichLicenses bool, licenseSource string, publishedAfterStr, publishedBeforeStr, asOfStr string, ignoreUnfixed bool, showUnchanged bool, unchangedThreshold string) error {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
@@ -278,7 +284,7 @@ func runDiffAnalysis(ctx context.Context, repoPath, baseRef, targetRef string, e
 	}
 
 	// Scan base packages
-	fmt.Printf("Scanning packages in base reference %s...\n", baseHash.String()[:8])
+	fmt.Printf("Scanning packages in base reference %s...\n", baseHash.String()[:7])
 	basePackages, err := inv.ScanPackagesAtCommitSnapshot(ctx, repoPath, *baseHash)
 	if err != nil {
 		return fmt.Errorf("error scanning base reference packages: %w", err)
@@ -286,7 +292,7 @@ func runDiffAnalysis(ctx context.Context, repoPath, baseRef, targetRef string, e
 
 	// Scan target packages if not already done
 	if targetPackages == nil && targetHash != nil {
-		fmt.Printf("Scanning packages in target reference %s...\n", targetHash.String()[:8])
+		fmt.Printf("Scanning packages in target reference %s...\n", targetHash.String()[:7])
 		tp, err := inv.ScanPackagesAtCommitSnapshot(ctx, repoPath, *targetHash)
 		if err != nil {
 			return fmt.Errorf("error scanning target reference packages: %w", err)
@@ -294,8 +300,22 @@ func runDiffAnalysis(ctx context.Context, repoPath, baseRef, targetRef string, e
 		targetPackages = tp
 	}
 
+	// Determine direct dependencies from target go.mod for accurate classification
+	var goModData []byte
+	if isWorkingPseudoRef(targetRef) {
+		b, err := os.ReadFile(filepath.Join(repoPath, "go.mod"))
+		if err == nil {
+			goModData = b
+		}
+	} else if targetHash != nil {
+		if b, err := gitx.ReadFileAtCommit(repo, *targetHash, "go.mod"); err == nil {
+			goModData = b
+		}
+	}
+	deps := cmp.GetDirectDependenciesFromGoMod(goModData)
+
 	// Compare packages
-	changes := cmp.ComparePackages(basePackages, targetPackages)
+	changes := cmp.ComparePackages(basePackages, targetPackages, deps)
 	if len(changes) == 0 {
 		fmt.Println("No package changes detected.")
 		return nil
@@ -315,18 +335,9 @@ func runDiffAnalysis(ctx context.Context, repoPath, baseRef, targetRef string, e
 	// Scan for vulnerabilities if enabled
 	var vulns []analysis.Vulnerability
 	if enableVulnScan {
-		fmt.Printf("\nScanning for vulnerabilities...\n")
-		inputs := make([]analysis.PkgInput, 0, len(changes))
-		for _, c := range changes {
-			if c.ChangeType != cmp.Removed && c.TargetVersion != "" {
-				inputs = append(inputs, analysis.PkgInput{
-					Name:     c.Name,
-					Version:  c.TargetVersion,
-					IsDirect: c.IsDirect,
-				})
-			}
-		}
+		fmt.Printf("\nScanning dependencies for vulnerabilities...\n")
 
+		inputs := packagesToInputs(targetPackages, deps)
 		vv, err := analysis.QueryOSVBatch(ctx, osvdev.DefaultClient(), inputs)
 		if err != nil {
 			fmt.Printf("Warning: Vulnerability scanning failed: %v\n", err)
@@ -360,9 +371,63 @@ func runDiffAnalysis(ctx context.Context, repoPath, baseRef, targetRef string, e
 		if !beforeT.IsZero() || !afterT.IsZero() {
 			vulns = analysis.FilterVulnerabilitiesByPublished(vulns, afterT, beforeT)
 		}
-	}
 
-	// Display results
+        changedVulns, unchangedVulns := splitVulnsByChange(vulns, changes)
+
+        // Optional: ignore unfixed across both sets
+        if ignoreUnfixed {
+            changedVulns = filterUnfixed(changedVulns)
+            unchangedVulns = filterUnfixed(unchangedVulns)
+            fmt.Printf("  %s\n", ui.StyleMeta.Render("Note: ignoring unfixed vulnerabilities (--ignore-unfixed)"))
+        }
+
+        // Decide whether to show unchanged set based on threshold
+        showUnchangedEff := showUnchanged
+        reason := ""
+        if !showUnchangedEff {
+            stats := analysis.CategorizeVulnerabilities(unchangedVulns)
+            thr := strings.ToLower(strings.TrimSpace(unchangedThreshold))
+            switch thr {
+            case "", "critical":
+                if stats.CriticalSev > 0 { showUnchangedEff = true; reason = "Critical severity present" }
+            case "high":
+                if stats.CriticalSev+stats.HighSeverity > 0 { showUnchangedEff = true; reason = ">= High severity present" }
+            case "med", "medium", "moderate":
+                if stats.CriticalSev+stats.HighSeverity+stats.MedSeverity > 0 { showUnchangedEff = true; reason = ">= Medium severity present" }
+            case "low":
+                if stats.CriticalSev+stats.HighSeverity+stats.MedSeverity+stats.LowSeverity > 0 { showUnchangedEff = true; reason = ">= Low severity present" }
+            case "any", "all":
+                if stats.UniqueVulns > 0 { showUnchangedEff = true; reason = "Vulnerabilities present" }
+            case "none", "off", "never":
+                // never auto-show
+            default:
+                // fallback to critical if unknown value
+                if stats.CriticalSev > 0 { showUnchangedEff = true; reason = "Critical severity present" }
+            }
+        }
+
+        // Combined cohesive output
+        fmt.Println("\n" + ui.StyleDowngraded.Render("∴ ") + ui.StyleHeader.Render("Vulnerabilities"))
+        RenderVulnerabilityList(changedVulns)
+        if showUnchangedEff && len(unchangedVulns) > 0 {
+            // Visual separator for unchanged dependencies, include reason if any
+            title := "Unchanged dependencies"
+            if reason != "" {
+                title += " (" + reason + ")"
+            }
+            sep := ui.StyleDim.Render(strings.Repeat("─", 3) + " " + title + " " + strings.Repeat("─", 3))
+            fmt.Println("\n" + sep)
+            RenderVulnerabilityList(unchangedVulns)
+        }
+        all := append([]analysis.Vulnerability{}, changedVulns...)
+        if showUnchangedEff {
+            all = append(all, unchangedVulns...)
+        }
+        RenderVulnerabilitySummaryAndActions(all)
+        return nil
+    }
+
+	// Display results (no vulnerabilities scanned)
 	DisplayVulnerabilities(vulns)
 	return nil
 }
@@ -502,6 +567,32 @@ func displayDetailedDependencyChanges(ctx context.Context, changes []cmp.Change,
 			fmt.Printf("  %s %d package%s changed\n", ui.StyleNeutral.Render("~"), other, plural(other))
 		}
 	}
+}
+
+// splitVulnsByChange partitions vulnerabilities into those affecting changed
+// dependencies versus those in unchanged modules. Changes marked as Added or
+// Updated are considered "changed" for classification purposes.
+func splitVulnsByChange(vulns []analysis.Vulnerability, changes []cmp.Change) (changed, unchanged []analysis.Vulnerability) {
+	if len(vulns) == 0 {
+		return nil, nil
+	}
+	changedSet := map[string]bool{}
+	for _, c := range changes {
+		if c.ChangeType != cmp.Added && c.ChangeType != cmp.Updated {
+			continue
+		}
+		info := cmp.ParseGoPackage(&extractor.Package{Name: c.Name})
+		changedSet[info.CanonicalName] = true
+	}
+	for _, v := range vulns {
+		info := cmp.ParseGoPackage(&extractor.Package{Name: v.Package})
+		if changedSet[info.CanonicalName] {
+			changed = append(changed, v)
+		} else {
+			unchanged = append(unchanged, v)
+		}
+	}
+	return changed, unchanged
 }
 
 // depsClient adapts a deps.dev InsightsClient to the internal analysis.DepsClient interface.

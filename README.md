@@ -37,6 +37,54 @@ Notes:
 - Supports branches, tags, SHAs, remote refs, and time-based refs (e.g., `HEAD@{1.week.ago}`).
 - Uses non-destructive snapshots; your working tree isn’t modified.
 
+### Vulnerabilities in Diff
+
+The diff view performs an OSV scan of the target dependency set and renders a cohesive report:
+
+- Single header for vulnerabilities, with changed dependencies first
+- Unchanged dependencies are hidden by default unless they contain CRITICAL vulnerabilities
+- A dim divider separates unchanged dependencies with a short reason when auto-shown
+- A combined summary and recommended actions section covers everything that’s displayed
+
+Flags:
+
+```console
+# Always show unchanged vulnerabilities
+$ deputy diff v1.27.0 v1.28.0 --show-unchanged
+
+# Hide unfixed vulnerabilities (mirrors scan)
+$ deputy diff v1.27.0 v1.28.0 --ignore-unfixed
+
+# Control threshold for auto-showing unchanged vulns
+# Options: none | low | med | high | critical | any (default: critical)
+$ deputy diff v1.27.0 v1.28.0 --unchanged-threshold high
+```
+
+Examples (condensed):
+
+```text
+∴ Vulnerabilities
+
+stdlib v1.24.1 [direct]:
+  • CVE-2025-22871 [CRITICAL] (↑ v1.24.2)
+  • CVE-2025-22874 [HIGH] (↑ v1.24.4)
+
+─── Unchanged dependencies (Critical severity present) ───
+
+github.com/golang-jwt/jwt/v4 v4.5.1 [direct]:
+  • CVE-2025-30204 [HIGH] (↑ v4.5.2) [2 related]
+
+Vulnerability Summary:
+  ! 4 require immediate attention (critical/high severity)
+  ↑ 6 can be fixed by upgrading
+
+Recommended Actions:
+  1. Upgrade Go toolchain to v1.24.6 (update 'go' directive in go.mod)
+  2. Upgrade critical/high modules first
+       • go get github.com/golang-jwt/jwt/v4@v4.5.2
+       • go mod tidy
+```
+
 ## SBOM Generation
 
 Generate an SBOM for a specific ref/tag/commit using Protobom as the intermediary model. Outputs CycloneDX JSON, SPDX 2.3 JSON, or the raw Protobom JSON.

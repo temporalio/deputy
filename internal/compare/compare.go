@@ -55,8 +55,9 @@ type GoPackageInfo struct {
 	MajorVersion  int    // parsed major version (defaults to 1)
 }
 
-// getModuleRoot safely extracts the module root from a canonical package name
-// getModuleRoot derives a module root approximation from a canonical import
+// GetModuleRoot safely extracts the module root from a canonical package name
+//
+// GetModuleRoot derives a module root approximation from a canonical import
 // path. It attempts to return a stable identifier suitable for determining
 // direct vs indirect status by mapping import paths like
 //
@@ -64,7 +65,7 @@ type GoPackageInfo struct {
 //
 // to the module root github.com/user/repo. For non GitHub style hosts it
 // returns the first two path segments when available.
-func getModuleRoot(canonicalName string) string {
+func GetModuleRoot(canonicalName string) string {
 	parts := strings.Split(canonicalName, "/")
 	if len(parts) == 0 {
 		return canonicalName
@@ -266,18 +267,14 @@ func CompareGoPackageVersions(c Change) int {
 	return semver.Compare(newV, oldV)
 }
 
-// getDirectDependencies reads go.mod in cwd and returns direct module roots.
-// getDirectDependencies parses go.mod in the current working directory and
-// returns a set keyed by module path for direct dependencies (i.e. those
-// without the "// indirect" annotation). If go.mod cannot be read a set
-// containing only "stdlib" is returned.
-func getDirectDependencies() map[string]bool {
+// GetDirectDependenciesFromGoMod parses a go.mod file and returns module roots
+// for direct dependencies (those without "// indirect"). The returned set
+// always includes "stdlib".
+func GetDirectDependenciesFromGoMod(data []byte) map[string]bool {
 	deps := map[string]bool{"stdlib": true}
-	data, err := os.ReadFile("go.mod")
-	if err != nil {
+	if len(data) == 0 {
 		return deps
 	}
-	// naive parse: lines with no "// indirect"
 	lines := strings.Split(string(data), "\n")
 	for _, ln := range lines {
 		ln = strings.TrimSpace(ln)
@@ -287,13 +284,23 @@ func getDirectDependencies() map[string]bool {
 		if strings.Contains(ln, "// indirect") {
 			continue
 		}
-		// e.g., github.com/foo/bar v1.2.3
 		fields := strings.Fields(ln)
 		if len(fields) >= 2 && strings.Contains(fields[0], "/") {
-			deps[fields[0]] = true
+			info := ParseGoPackage(&extractor.Package{Name: fields[0]})
+			deps[GetModuleRoot(info.CanonicalName)] = true
 		}
 	}
 	return deps
+}
+
+// GetDirectDependencies reads go.mod in cwd and returns direct module roots.
+// If go.mod cannot be read, only "stdlib" is returned.
+func GetDirectDependencies() map[string]bool {
+	data, err := os.ReadFile("go.mod")
+	if err != nil {
+		return map[string]bool{"stdlib": true}
+	}
+	return GetDirectDependenciesFromGoMod(data)
 }
 
 // ComparePackages computes changes between old and new package inventories.
@@ -301,7 +308,9 @@ func getDirectDependencies() map[string]bool {
 // It indexes each slice by canonical import path and classifies additions,
 // removals, and updates while also tagging whether each resulting Change is a
 // direct dependency in the target workspace.
-func ComparePackages(oldPkgs, newPkgs []*extractor.Package) []Change {
+//
+// If deps is nil, GetDirectDependencies() is used.
+func ComparePackages(oldPkgs, newPkgs []*extractor.Package, deps map[string]bool) []Change {
 	if len(oldPkgs) == 0 && len(newPkgs) == 0 {
 		return nil
 	}
@@ -321,23 +330,25 @@ func ComparePackages(oldPkgs, newPkgs []*extractor.Package) []Change {
 		}
 	}
 
-	deps := getDirectDependencies()
+	if deps == nil {
+		deps = GetDirectDependencies()
+	}
 	var changes []Change
 	// Removed or updated
 	for canon, op := range oldMap {
 		np, ok := newMap[canon]
 		if !ok {
-			changes = append(changes, Change{Name: op.Name, BaseVersion: op.Version, ChangeType: Removed, Ecosystem: "go", IsDirect: deps[getModuleRoot(canon)]})
+			changes = append(changes, Change{Name: op.Name, BaseVersion: op.Version, ChangeType: Removed, Ecosystem: "go", IsDirect: deps[GetModuleRoot(canon)]})
 			continue
 		}
 		if op.Version != np.Version || op.Name != np.Name {
-			changes = append(changes, Change{Name: np.Name, OldName: op.Name, BaseVersion: op.Version, TargetVersion: np.Version, ChangeType: Updated, Ecosystem: "go", IsDirect: deps[getModuleRoot(canon)]})
+			changes = append(changes, Change{Name: np.Name, OldName: op.Name, BaseVersion: op.Version, TargetVersion: np.Version, ChangeType: Updated, Ecosystem: "go", IsDirect: deps[GetModuleRoot(canon)]})
 		}
 	}
 	// Added
 	for canon, np := range newMap {
 		if _, ok := oldMap[canon]; !ok {
-			changes = append(changes, Change{Name: np.Name, TargetVersion: np.Version, ChangeType: Added, Ecosystem: "go", IsDirect: deps[getModuleRoot(canon)]})
+			changes = append(changes, Change{Name: np.Name, TargetVersion: np.Version, ChangeType: Added, Ecosystem: "go", IsDirect: deps[GetModuleRoot(canon)]})
 		}
 	}
 	return changes

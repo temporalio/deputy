@@ -7,7 +7,7 @@ import (
 	"github.com/google/osv-scalibr/extractor"
 )
 
-func Test_getModuleRoot(t *testing.T) {
+func TestGetModuleRoot(t *testing.T) {
 	cases := []struct{ in, want string }{
 		{"github.com/user/repo/sub/pkg", "github.com/user/repo"},
 		{"github.com/user/repo", "github.com/user/repo"},
@@ -18,8 +18,8 @@ func Test_getModuleRoot(t *testing.T) {
 		{"", ""},
 	}
 	for _, c := range cases {
-		if got := getModuleRoot(c.in); got != c.want {
-			t.Fatalf("getModuleRoot(%q)=%q want %q", c.in, got, c.want)
+		if got := GetModuleRoot(c.in); got != c.want {
+			t.Fatalf("GetModuleRoot(%q)=%q want %q", c.in, got, c.want)
 		}
 	}
 }
@@ -56,7 +56,7 @@ func Test_allDigits(t *testing.T) {
 	}
 }
 
-func Test_getDirectDependencies(t *testing.T) {
+func TestGetDirectDependencies(t *testing.T) {
 	dir := t.TempDir()
 	oldWd, _ := os.Getwd()
 	defer os.Chdir(oldWd)
@@ -72,12 +72,28 @@ require (
 	if err := os.WriteFile("go.mod", []byte(goMod), 0o644); err != nil {
 		t.Fatalf("write go.mod: %v", err)
 	}
-	deps := getDirectDependencies()
+	deps := GetDirectDependencies()
 	if !deps["github.com/a/b"] || !deps["github.com/e/f"] {
 		t.Fatalf("expected direct deps present: %v", deps)
 	}
 	if deps["github.com/c/d"] {
 		t.Fatalf("indirect dep erroneously marked direct")
+	}
+}
+
+func TestGetDirectDependenciesFromGoMod_GopkgIn(t *testing.T) {
+	goMod := `module example.com/app
+
+require (
+    gopkg.in/yaml.v3 v3.0.1
+    gopkg.in/indirect.v3 v3.0.0 // indirect
+)`
+	deps := GetDirectDependenciesFromGoMod([]byte(goMod))
+	if !deps["github.com/go-yaml/yaml"] {
+		t.Fatalf("expected canonical root for yaml: %+v", deps)
+	}
+	if deps["gopkg.in/indirect.v3"] {
+		t.Fatalf("indirect dependency erroneously marked direct")
 	}
 }
 
@@ -105,7 +121,8 @@ require (
 		{Name: "github.com/keep/updated", Version: "v1.1.0"}, // updated
 		{Name: "github.com/new/added", Version: "v1.0.0"},    // added
 	}
-	changes := ComparePackages(oldPkgs, newPkgs)
+	deps := GetDirectDependencies()
+	changes := ComparePackages(oldPkgs, newPkgs, deps)
 	if len(changes) != 3 {
 		t.Fatalf("expected 3 changes got %d: %+v", len(changes), changes)
 	}

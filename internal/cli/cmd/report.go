@@ -10,131 +10,23 @@ import (
 	"golang.org/x/mod/semver"
 )
 
-// DisplayVulnerabilities renders a styled vulnerability report to stdout.
+// DisplayVulnerabilities renders a styled vulnerability report with the default heading.
 func DisplayVulnerabilities(vulns []analysis.Vulnerability) {
-        cons := analysis.ConsolidateVulnerabilities(vulns)
-        if len(cons) == 0 {
-                fmt.Println("\n" + ui.StyleAdded.Render("✓ No vulnerabilities found"))
-                return
-        }
-        consolidated := analysis.CategorizeVulnerabilities(vulns)
+    DisplayVulnerabilitiesWithHeader(vulns, "Vulnerabilities Found:")
+}
 
-        fmt.Println("\n" + ui.StyleDowngraded.Render("∴ ") + ui.StyleHeader.Render("Vulnerabilities Found:"))
+// DisplayVulnerabilitiesWithHeader renders a styled vulnerability report to stdout using the provided heading.
+func DisplayVulnerabilitiesWithHeader(vulns []analysis.Vulnerability, heading string) {
+    cons := analysis.ConsolidateVulnerabilities(vulns)
+    if len(cons) == 0 {
+        fmt.Println("\n" + ui.StyleAdded.Render("✓ No vulnerabilities found"))
+        return
+    }
+    fmt.Println("\n" + ui.StyleDowngraded.Render("∴ ") + ui.StyleHeader.Render(heading))
 
-	byPkg := map[string][]analysis.ConsolidatedVulnerability{}
-	for _, v := range cons {
-		byPkg[v.Package] = append(byPkg[v.Package], v)
-	}
+    RenderVulnerabilityList(vulns)
 
-	for pkg, list := range byPkg {
-		hasDirect := false
-		for _, v := range list {
-			if v.IsDirect {
-				hasDirect = true
-				break
-			}
-		}
-		depType := ui.StyleVersion.Render("[indirect]")
-		if hasDirect {
-			depType = ui.StyleUpgraded.Render("[direct]")
-		}
-		fmt.Printf("\n%s %s %s:\n", ui.StylePackageName.Render(pkg), ui.StyleVersion.Render(list[0].Version), depType)
-		for _, v := range list {
-			var sevDisp string
-			if v.SeverityType == "GHSA" {
-				up := strings.ToUpper(v.Severity)
-				switch up {
-				case "CRITICAL":
-					sevDisp = lipgloss.NewStyle().Foreground(lipgloss.Color("#FF00FF")).Bold(true).Render("[CRITICAL]")
-				case "HIGH":
-					sevDisp = ui.StyleRemoved.Render("[HIGH]")
-				case "MEDIUM", "MODERATE":
-					sevDisp = ui.StyleDowngraded.Render("[MED]")
-				case "LOW":
-					sevDisp = ui.StyleVersion.Render("[LOW]")
-				default:
-					score := analysis.ParseCVSSScore(v.Severity)
-					sevDisp = scoreLabel(score)
-				}
-			} else {
-				sevDisp = scoreLabel(analysis.ParseCVSSScore(v.Severity))
-			}
-			fixInfo := ""
-			if len(v.FixedVersions) > 0 {
-				if best := analysis.FindBestFixedVersion(v.FixedVersions, v.Version); best != "" {
-					fixInfo = ui.StyleUpgraded.Render(fmt.Sprintf("(↑ %s)", best))
-				}
-			}
-			consInfo := ""
-			if v.RelatedCount > 1 {
-				consInfo = ui.StyleVersion.Render(fmt.Sprintf("[%d related]", v.RelatedCount))
-			}
-			fmt.Println("  " + ui.StyleVersion.Render("• ") + ui.StyleSymbol.Render(v.PrimaryID) + " " + sevDisp + " " + fixInfo + " " + consInfo)
-			if v.Summary != "" && len(v.Summary) < 120 {
-				fmt.Println("    " + ui.StyleSymbol.Render(v.Summary))
-			}
-			if len(v.SecondaryIDs) > 0 {
-				aliasBlocks := []string{}
-				for _, a := range v.SecondaryIDs {
-					st := ui.StyleAliasOther
-					if strings.HasPrefix(a, "CVE-") {
-						st = ui.StyleAlias
-					}
-					aliasBlocks = append(aliasBlocks, st.Render(a))
-				}
-				aliasRow := lipgloss.JoinHorizontal(lipgloss.Top, ui.StyleMeta.Render("Aliases:"), lipgloss.NewStyle().MarginLeft(1).Render(strings.Join(aliasBlocks, ", ")))
-				fmt.Println("    " + aliasRow)
-			}
-			if v.Published != "" && len(v.Published) >= 10 {
-				metaBlock := lipgloss.JoinHorizontal(lipgloss.Top, ui.StyleMeta.Render("Published:"), lipgloss.NewStyle().MarginLeft(1).Faint(true).Render(v.Published[:10]))
-				fmt.Println("    " + metaBlock)
-			}
-		}
-	}
-
-	fmt.Println("\n" + ui.StyleHeader.Render("Vulnerability Summary:"))
-	high := consolidated.CriticalSev + consolidated.HighSeverity
-	if high > 0 {
-		fmt.Println("  " + ui.StyleSymbol.Render(ui.StyleRemoved.Render("!")) + " " + ui.StyleSymbol.Render(fmt.Sprintf("%d require immediate attention ", high)) + ui.StyleRemoved.Render("(critical/high severity)"))
-	}
-	if consolidated.FixAvailable > 0 {
-		fmt.Println("  " + ui.StyleSymbol.Render(ui.StyleUpgraded.Render("↑")) + " " + ui.StyleSymbol.Render(fmt.Sprintf("%d can be fixed by upgrading", consolidated.FixAvailable)))
-	}
-	unfixed := consolidated.UniqueVulns - consolidated.FixAvailable
-	if unfixed > 0 {
-		fmt.Println("  " + ui.StyleSymbol.Render(ui.StyleRemoved.Render("-")) + " " + ui.StyleSymbol.Render(fmt.Sprintf("%d have no fix available yet", unfixed)))
-	}
-
-	// Recommended actions section (restores legacy remediation guidance)
-	upgrades, stdlibRec := buildUpgradeRecommendations(cons)
-	if consolidated.FixAvailable > 0 || stdlibRec != "" || unfixed > 0 {
-		fmt.Println("\n" + ui.StyleHeader.Render("Recommended Actions:"))
-		step := 1
-		if stdlibRec != "" {
-			fmt.Printf("  %d. %s %s %s\n", step, ui.StyleBold.Render("Upgrade Go toolchain to"), ui.StyleUpgraded.Render(stdlibRec), ui.StyleVersion.Render("(update 'go' directive in go.mod)"))
-			step++
-		}
-		if len(upgrades) > 0 {
-			high := consolidated.CriticalSev + consolidated.HighSeverity
-			header := "Upgrade affected modules"
-			if high > 0 {
-				header = "Upgrade critical/high modules first"
-			}
-			fmt.Printf("  %d. %s\n", step, ui.StyleBold.Render(header))
-			for _, u := range upgrades {
-				marker := ui.StyleVersion.Render("•")
-				if u.IsDirect {
-					marker = ui.StyleUpgraded.Render("•")
-				}
-				fmt.Printf("       %s go get %s@%s\n", marker, ui.StylePackageName.Render(u.Name), ui.StyleVersion.Render(u.Recommended))
-			}
-			fmt.Println("       " + ui.StyleVersion.Render("•") + " go mod tidy")
-			step++
-		}
-		if unfixed > 0 {
-			fmt.Printf("  %d. %s %s\n", step, ui.StyleBold.Render("Investigate remaining unfixed vulnerabilities"), ui.StyleVersion.Render("(monitor upstream / consider alternatives)"))
-		}
-	}
+    RenderVulnerabilitySummaryAndActions(vulns)
 }
 
 func scoreLabel(score float64) string {
@@ -219,4 +111,138 @@ func normalizeGoVersion(v string) string {
 		return v
 	}
 	return "v" + v
+}
+
+// RenderVulnerabilityList prints only the per-package vulnerability details
+// without headings or summary. Used by diff to compose combined views.
+func RenderVulnerabilityList(vulns []analysis.Vulnerability) {
+    cons := analysis.ConsolidateVulnerabilities(vulns)
+    if len(cons) == 0 {
+        return
+    }
+
+    byPkg := map[string][]analysis.ConsolidatedVulnerability{}
+    for _, v := range cons {
+        byPkg[v.Package] = append(byPkg[v.Package], v)
+    }
+
+    for pkg, list := range byPkg {
+        hasDirect := false
+        for _, v := range list {
+            if v.IsDirect {
+                hasDirect = true
+                break
+            }
+        }
+        depType := ui.StyleVersion.Render("[indirect]")
+        if hasDirect {
+            depType = ui.StyleUpgraded.Render("[direct]")
+        }
+        fmt.Printf("\n%s %s %s:\n", ui.StylePackageName.Render(pkg), ui.StyleVersion.Render(list[0].Version), depType)
+        for _, v := range list {
+            var sevDisp string
+            if v.SeverityType == "GHSA" {
+                up := strings.ToUpper(v.Severity)
+                switch up {
+                case "CRITICAL":
+                    sevDisp = lipgloss.NewStyle().Foreground(lipgloss.Color("#FF00FF")).Bold(true).Render("[CRITICAL]")
+                case "HIGH":
+                    sevDisp = ui.StyleRemoved.Render("[HIGH]")
+                case "MEDIUM", "MODERATE":
+                    sevDisp = ui.StyleDowngraded.Render("[MED]")
+                case "LOW":
+                    sevDisp = ui.StyleVersion.Render("[LOW]")
+                default:
+                    score := analysis.ParseCVSSScore(v.Severity)
+                    sevDisp = scoreLabel(score)
+                }
+            } else {
+                sevDisp = scoreLabel(analysis.ParseCVSSScore(v.Severity))
+            }
+            fixInfo := ""
+            if len(v.FixedVersions) > 0 {
+                if best := analysis.FindBestFixedVersion(v.FixedVersions, v.Version); best != "" {
+                    fixInfo = ui.StyleUpgraded.Render(fmt.Sprintf("(↑ %s)", best))
+                }
+            }
+            consInfo := ""
+            if v.RelatedCount > 1 {
+                consInfo = ui.StyleVersion.Render(fmt.Sprintf("[%d related]", v.RelatedCount))
+            }
+            fmt.Println("  " + ui.StyleVersion.Render("• ") + ui.StyleSymbol.Render(v.PrimaryID) + " " + sevDisp + " " + fixInfo + " " + consInfo)
+            if v.Summary != "" && len(v.Summary) < 120 {
+                fmt.Println("    " + ui.StyleSymbol.Render(v.Summary))
+            }
+            if len(v.SecondaryIDs) > 0 {
+                aliasBlocks := []string{}
+                for _, a := range v.SecondaryIDs {
+                    st := ui.StyleAliasOther
+                    if strings.HasPrefix(a, "CVE-") {
+                        st = ui.StyleAlias
+                    }
+                    aliasBlocks = append(aliasBlocks, st.Render(a))
+                }
+                aliasRow := lipgloss.JoinHorizontal(lipgloss.Top, ui.StyleMeta.Render("Aliases:"), lipgloss.NewStyle().MarginLeft(1).Render(strings.Join(aliasBlocks, ", ")))
+                fmt.Println("    " + aliasRow)
+            }
+            if v.Published != "" && len(v.Published) >= 10 {
+                metaBlock := lipgloss.JoinHorizontal(lipgloss.Top, ui.StyleMeta.Render("Published:"), lipgloss.NewStyle().MarginLeft(1).Faint(true).Render(v.Published[:10]))
+                fmt.Println("    " + metaBlock)
+            }
+        }
+    }
+}
+
+// RenderVulnerabilitySummaryAndActions prints the summary and recommended
+// actions for a set of vulnerabilities without reprinting the list header.
+func RenderVulnerabilitySummaryAndActions(vulns []analysis.Vulnerability) {
+    cons := analysis.ConsolidateVulnerabilities(vulns)
+    if len(cons) == 0 {
+        fmt.Println("\n" + ui.StyleAdded.Render("✓ No vulnerabilities found"))
+        return
+    }
+    consolidated := analysis.CategorizeVulnerabilities(vulns)
+
+    fmt.Println("\n" + ui.StyleHeader.Render("Vulnerability Summary:"))
+    high := consolidated.CriticalSev + consolidated.HighSeverity
+    if high > 0 {
+        fmt.Println("  " + ui.StyleSymbol.Render(ui.StyleRemoved.Render("!")) + " " + ui.StyleSymbol.Render(fmt.Sprintf("%d require immediate attention ", high)) + ui.StyleRemoved.Render("(critical/high severity)"))
+    }
+    if consolidated.FixAvailable > 0 {
+        fmt.Println("  " + ui.StyleSymbol.Render(ui.StyleUpgraded.Render("↑")) + " " + ui.StyleSymbol.Render(fmt.Sprintf("%d can be fixed by upgrading", consolidated.FixAvailable)))
+    }
+    unfixed := consolidated.UniqueVulns - consolidated.FixAvailable
+    if unfixed > 0 {
+        fmt.Println("  " + ui.StyleSymbol.Render(ui.StyleRemoved.Render("-")) + " " + ui.StyleSymbol.Render(fmt.Sprintf("%d have no fix available yet", unfixed)))
+    }
+
+    upgrades, stdlibRec := buildUpgradeRecommendations(cons)
+    if consolidated.FixAvailable > 0 || stdlibRec != "" || unfixed > 0 {
+        fmt.Println("\n" + ui.StyleHeader.Render("Recommended Actions:"))
+        step := 1
+        if stdlibRec != "" {
+            fmt.Printf("  %d. %s %s %s\n", step, ui.StyleBold.Render("Upgrade Go toolchain to"), ui.StyleUpgraded.Render(stdlibRec), ui.StyleVersion.Render("(update 'go' directive in go.mod)"))
+            step++
+        }
+        if len(upgrades) > 0 {
+            high := consolidated.CriticalSev + consolidated.HighSeverity
+            header := "Upgrade affected modules"
+            if high > 0 {
+                header = "Upgrade critical/high modules first"
+            }
+            fmt.Printf("  %d. %s\n", step, ui.StyleBold.Render(header))
+            for _, u := range upgrades {
+                marker := ui.StyleVersion.Render("•")
+                if u.IsDirect {
+                    marker = ui.StyleUpgraded.Render("•")
+                }
+                fmt.Printf("       %s go get %s@%s\n", marker, ui.StylePackageName.Render(u.Name), ui.StyleVersion.Render(u.Recommended))
+            }
+            fmt.Println("       " + ui.StyleVersion.Render("•") + " go mod tidy")
+            step++
+        }
+        if unfixed > 0 {
+            fmt.Printf("  %d. %s %s\n", step, ui.StyleBold.Render("Investigate remaining unfixed vulnerabilities"), ui.StyleVersion.Render("(monitor upstream / consider alternatives)"))
+        }
+    }
 }

@@ -6,14 +6,14 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
 	git "github.com/go-git/go-git/v5"
 	"github.com/google/osv-scalibr/extractor"
-	"github.com/ossf/osv-schema/bindings/go/osvschema"
 	analysis "github.com/picatz/deputy/internal/analysis"
-	"github.com/picatz/deputy/internal/compare"
+	cmp "github.com/picatz/deputy/internal/compare"
 	gitx "github.com/picatz/deputy/internal/git"
 	inv "github.com/picatz/deputy/internal/inventory"
 	sbomx "github.com/picatz/deputy/internal/sbom"
@@ -23,14 +23,6 @@ import (
 	"google.golang.org/protobuf/encoding/protojson"
 	"osv.dev/bindings/go/osvdev"
 )
-
-// PackageChange represents a change to a package for vulnerability analysis
-type PackageChange struct {
-	Name          string
-	TargetVersion string
-	ChangeType    compare.ChangeType
-	Ecosystem     string
-}
 
 // ScanResult is the structured output of a vulnerability scan suitable for
 // serialization to JSON or further aggregation.
@@ -374,22 +366,25 @@ func (s *Scanner) runScan(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to collect inventory: %w", err)
 	}
 
-	changes := make([]PackageChange, 0, len(pkgs))
-	for _, p := range pkgs {
-		if p != nil && p.Name != "" {
-			changes = append(changes, PackageChange{
-				Name:          p.Name,
-				TargetVersion: p.Version,
-				ChangeType:    compare.Added,
-				Ecosystem:     string(osvschema.EcosystemGo),
-			})
+	// Determine direct dependencies from go.mod at the specified reference
+	var goModData []byte
+	if strings.EqualFold(effRef, "HEAD") || strings.EqualFold(effRef, "HEAD~0") {
+		b, err := os.ReadFile(filepath.Join(localRepoPath, "go.mod"))
+		if err == nil {
+			goModData = b
+		}
+	} else {
+		if repo, err := git.PlainOpen(localRepoPath); err == nil {
+			if h, err := gitx.ResolveRevisionEnhanced(repo, effRef); err == nil && h != nil {
+				if b, err := gitx.ReadFileAtCommit(repo, *h, "go.mod"); err == nil {
+					goModData = b
+				}
+			}
 		}
 	}
+	deps := cmp.GetDirectDependenciesFromGoMod(goModData)
 
-	inputs := make([]analysis.PkgInput, 0, len(changes))
-	for _, c := range changes {
-		inputs = append(inputs, analysis.PkgInput{Name: c.Name, Version: c.TargetVersion})
-	}
+	inputs := packagesToInputs(pkgs, deps)
 
 	vulns, err := analysis.QueryOSVBatch(ctx, osvdev.DefaultClient(), inputs)
 	if err != nil {
@@ -465,22 +460,13 @@ func (s *Scanner) runScanDir(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to scan packages: %w", err)
 	}
 
-	changes := make([]PackageChange, 0, len(pkgs))
-	for _, p := range pkgs {
-		if p != nil && p.Name != "" {
-			changes = append(changes, PackageChange{
-				Name:          p.Name,
-				TargetVersion: p.Version,
-				ChangeType:    compare.Added,
-				Ecosystem:     string(osvschema.EcosystemGo),
-			})
-		}
+	var goModData []byte
+	if b, err := os.ReadFile(filepath.Join(path, "go.mod")); err == nil {
+		goModData = b
 	}
+	deps := cmp.GetDirectDependenciesFromGoMod(goModData)
 
-	inputs := make([]analysis.PkgInput, 0, len(changes))
-	for _, c := range changes {
-		inputs = append(inputs, analysis.PkgInput{Name: c.Name, Version: c.TargetVersion})
-	}
+	inputs := packagesToInputs(pkgs, deps)
 
 	vulns, err := analysis.QueryOSVBatch(ctx, osvdev.DefaultClient(), inputs)
 	if err != nil {
@@ -569,22 +555,7 @@ func (s *Scanner) runScanSBOM(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to parse SBOM: %w", err)
 	}
 
-	changes := make([]PackageChange, 0, len(pkgs))
-	for _, p := range pkgs {
-		if p != nil && p.Name != "" {
-			changes = append(changes, PackageChange{
-				Name:          p.Name,
-				TargetVersion: p.Version,
-				ChangeType:    compare.Added,
-				Ecosystem:     string(osvschema.EcosystemGo),
-			})
-		}
-	}
-
-	inputs := make([]analysis.PkgInput, 0, len(changes))
-	for _, c := range changes {
-		inputs = append(inputs, analysis.PkgInput{Name: c.Name, Version: c.TargetVersion})
-	}
+	inputs := packagesToInputs(pkgs, nil)
 
 	vulns, err := analysis.QueryOSVBatch(ctx, osvdev.DefaultClient(), inputs)
 	if err != nil {
