@@ -23,6 +23,7 @@ import (
 	scalibrfs "github.com/google/osv-scalibr/fs"
 	pl "github.com/google/osv-scalibr/plugin/list"
 	packageurl "github.com/package-url/packageurl-go"
+	gitx "github.com/picatz/deputy/internal/git"
 	"github.com/protobom/protobom/pkg/formats"
 	pbsbom "github.com/protobom/protobom/pkg/sbom"
 	"github.com/protobom/protobom/pkg/writer"
@@ -358,12 +359,12 @@ func CloneRepoToTemp(ctx context.Context, remoteURL string, auth transport.AuthM
 	if ref.String() != "" {
 		cloneOpts.ReferenceName = ref
 	}
-	// Try cloning with provided ref first
-	if _, err = git.PlainCloneContext(ctx, dir, false, cloneOpts); err != nil {
+	var closeStorer func()
+	if _, closeStorer, err = gitx.CloneContext(ctx, dir, cloneOpts); err != nil {
 		// If the specified ref failed, retry without ReferenceName to let server default
 		if ref.String() != "" {
 			cloneOpts.ReferenceName = ""
-			if _, err2 := git.PlainCloneContext(ctx, dir, false, cloneOpts); err2 != nil {
+			if _, closeStorer, err = gitx.CloneContext(ctx, dir, cloneOpts); err != nil {
 				_ = os.RemoveAll(dir)
 				return "", nil, err // return original error for clarity
 			}
@@ -372,7 +373,12 @@ func CloneRepoToTemp(ctx context.Context, remoteURL string, auth transport.AuthM
 			return "", nil, err
 		}
 	}
-	return dir, func() { _ = os.RemoveAll(dir) }, nil
+	return dir, func() {
+		if closeStorer != nil {
+			closeStorer()
+		}
+		_ = os.RemoveAll(dir)
+	}, nil
 }
 
 // PURL helpers

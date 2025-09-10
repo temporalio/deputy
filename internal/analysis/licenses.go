@@ -16,6 +16,7 @@ import (
 	"github.com/go-git/go-git/v5/plumbing"
 	"github.com/go-git/go-git/v5/plumbing/transport/http"
 	"github.com/google/licensecheck"
+	gitx "github.com/picatz/deputy/internal/git"
 )
 
 // DepsClient abstracts deps.dev client method GetVersion.
@@ -202,7 +203,7 @@ func RemoteModuleLicenseScan(ctx context.Context, modulePath, version string) []
 	if err != nil {
 		return nil
 	}
-	defer os.RemoveAll(dir)
+	var closeStorer func()
 	opts := &git.CloneOptions{URL: repoURL, Depth: 1, SingleBranch: true, Tags: git.NoTags}
 	// Attempt to pick ref from version (tag) if present
 	if version != "" {
@@ -216,9 +217,16 @@ func RemoteModuleLicenseScan(ctx context.Context, modulePath, version string) []
 	if tok := os.Getenv("GITHUB_TOKEN"); tok != "" {
 		opts.Auth = &http.BasicAuth{Username: "oauth2", Password: tok}
 	}
-	if _, err := git.PlainCloneContext(ctx, dir, false, opts); err != nil {
+	if _, closeStorer, err = gitx.CloneContext(ctx, dir, opts); err != nil {
+		os.RemoveAll(dir)
 		return nil
 	}
+	defer func() {
+		if closeStorer != nil {
+			closeStorer()
+		}
+		os.RemoveAll(dir)
+	}()
 	return scanLocalLicenseFiles(dir)
 }
 
