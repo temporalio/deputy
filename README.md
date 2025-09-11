@@ -128,6 +128,58 @@ Notes:
 - Optional: add a human-friendly context header with `--show-context` (printed to stderr; does not affect JSON):
   `deputy sbom --ref=v1.28.0 --format=spdx-json --show-context`
 
+## Dependency List
+
+List the dependency inventory as normalized PURLs (Package URLs) suitable for grepping and jq.
+This mirrors what the SBOM command discovers: one entry per discovered package (no dedup), with
+direct/indirect classification derived from go.mod.
+
+Examples:
+
+```console
+# Current repository at HEAD (uses working tree when applicable)
+$ deputy list
+
+# Specific ref/commit/tag
+$ deputy list --ref main
+$ deputy list --ref v1.2.3
+
+# TSV for pipelines: purl<TAB>direct
+$ deputy list --format tsv | cut -f1
+
+# JSON for jq
+$ deputy list --format json | jq '.items[] | {purl: .purl, direct: .isDirect}'
+
+# Only direct dependencies (from go.mod without // indirect)
+$ deputy list --only-direct
+
+# Remote repository
+$ deputy list github.com/gin-gonic/gin --ref v1.9.0
+```
+
+Output formats:
+
+- text: aligned, colored columns `PURL` and `DIRECT` (indirect is dimmed)
+- tsv: `purl\tdirect` (use `--no-header` to omit header)
+- json: structured, includes fields for `ecosystem`, `name`, `version`, `module`, `isDirect`, `purl`
+
+Notes:
+
+- No dedup: every discovered package is emitted, similar to SBOM output.
+- Sorting: results are sorted by PURL for stable output.
+- Directness: computed using exact module paths in go.mod with a longest-prefix check against the package import path.
+- When `--ref` is omitted or set to `HEAD`, the inventory uses the working tree if available. Use `--ref=HEAD` to capture the last commit exactly.
+
+Example (text, condensed):
+
+```text
+PURL                                                  DIRECT
+pkg:golang/github.com/gorilla/mux@1.8.1              direct
+pkg:golang/github.com/google/uuid@1.6.0              direct
+pkg:golang/golang.org/x/net@0.39.0                   indirect
+pkg:golang/cloud.google.com/go/storage@1.51.0        direct
+```
+
 ## Working Tree Compare
 
 When run with no arguments, deputy compares the default branch with your current state:
