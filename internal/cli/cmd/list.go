@@ -20,8 +20,8 @@ import (
 	sbomx "github.com/picatz/deputy/internal/sbom"
 	ui "github.com/picatz/deputy/internal/ui"
 	"github.com/spf13/cobra"
-    "golang.org/x/mod/modfile"
-    "golang.org/x/mod/semver"
+	"golang.org/x/mod/modfile"
+	"golang.org/x/mod/semver"
 )
 
 // ListItem represents a single dependency entry for output.
@@ -48,8 +48,8 @@ type ListResult struct {
 func AddListCommand(root *cobra.Command) {
 	var ref, format, outPath, level string
 	var ecos []string
-    var noHeader bool
-    var onlyDirect bool
+	var noHeader bool
+	var onlyDirect bool
 
 	cmd := &cobra.Command{
 		Use:     "list [repo]",
@@ -78,7 +78,7 @@ with a direct/indirect classification.`,
 				ref = "HEAD"
 			}
 
-            items, commitHash, _, err := collectListItems(ctx, repoPath, ref, ecos, level)
+			items, commitHash, _, err := collectListItems(ctx, repoPath, ref, ecos, level)
 			if err != nil {
 				return err
 			}
@@ -94,16 +94,16 @@ with a direct/indirect classification.`,
 			}
 
 			switch strings.ToLower(format) {
-            case "", "text":
-                if onlyDirect {
-                    items = filterOnlyDirect(items)
-                }
-                return writeListText(w, items, !noHeader)
-            case "tsv":
-                if onlyDirect {
-                    items = filterOnlyDirect(items)
-                }
-                return writeListTSV(w, items, !noHeader)
+			case "", "text":
+				if onlyDirect {
+					items = filterOnlyDirect(items)
+				}
+				return writeListText(w, items, !noHeader)
+			case "tsv":
+				if onlyDirect {
+					items = filterOnlyDirect(items)
+				}
+				return writeListTSV(w, items, !noHeader)
 			case "json":
 				result := ListResult{
 					Repo:      repoPath,
@@ -142,10 +142,10 @@ REMOTE REPOSITORIES:
 	cmd.Flags().StringVar(&ref, "ref", "HEAD", "Git reference (commit, tag, branch)")
 	cmd.Flags().StringSliceVar(&ecos, "ecosystems", []string{"go"}, "Ecosystems to include (e.g., go)")
 	cmd.Flags().StringVarP(&format, "format", "f", "text", "Output format: text | tsv | json")
-    cmd.Flags().StringVar(&level, "level", "package", "(Reserved) Output granularity; currently always emits package-level entries")
+	cmd.Flags().StringVar(&level, "level", "package", "(Reserved) Output granularity; currently always emits package-level entries")
 	cmd.Flags().StringVarP(&outPath, "output", "o", "-", "Output file path or '-' for stdout")
 	cmd.Flags().BoolVar(&noHeader, "no-header", false, "Omit header row for text/tsv formats")
-    cmd.Flags().BoolVar(&onlyDirect, "only-direct", false, "Only include direct dependencies")
+	cmd.Flags().BoolVar(&onlyDirect, "only-direct", false, "Only include direct dependencies")
 
 	root.AddCommand(cmd)
 }
@@ -223,18 +223,18 @@ func collectListItems(ctx context.Context, repoPath, ref string, _ []string, lev
 	depsLoose := cmp.GetDirectDependenciesFromGoMod(goModData)
 	depsExact := directModulesFromGoMod(goModData)
 
-    items := toListItems(localRepoPath, pkgs, depsLoose, depsExact, level)
-    sort.Slice(items, func(i, j int) bool {
-        // Sort by PURL for stable output
-        if items[i].PURL == items[j].PURL {
-            if items[i].IsDirect == items[j].IsDirect {
-                return items[i].Name < items[j].Name
-            }
-            // direct first
-            return items[i].IsDirect && !items[j].IsDirect
-        }
-        return items[i].PURL < items[j].PURL
-    })
+	items := toListItems(localRepoPath, pkgs, depsLoose, depsExact, level)
+	sort.Slice(items, func(i, j int) bool {
+		// Sort by PURL for stable output
+		if items[i].PURL == items[j].PURL {
+			if items[i].IsDirect == items[j].IsDirect {
+				return items[i].Name < items[j].Name
+			}
+			// direct first
+			return items[i].IsDirect && !items[j].IsDirect
+		}
+		return items[i].PURL < items[j].PURL
+	})
 
 	// Repo metadata
 	commitHash, _ := getRepoMetadata(localRepoPath, ref)
@@ -244,38 +244,44 @@ func collectListItems(ctx context.Context, repoPath, ref string, _ []string, lev
 // toListItems converts extractor packages into unique list entries based on level.
 // level: "module" or "package".
 func toListItems(repoPath string, pkgs []*extractor.Package, depsLoose map[string]bool, depsExact map[string]bool, _ string) []ListItem {
-    if depsLoose == nil {
-        depsLoose = cmp.GetDirectDependencies()
-    }
-    if depsExact == nil {
-        depsExact = map[string]bool{"stdlib": true}
-    }
-    out := make([]ListItem, 0, len(pkgs))
-    for _, p := range pkgs {
-        if p == nil || p.Name == "" || p.Version == "" {
-            continue
-        }
-        info := cmp.ParseGoPackage(p)
-        module := bestModuleForPackage(p.Name, depsExact)
-        if module == "" {
-            module = cmp.GetModuleRoot(info.CanonicalName)
-        }
-        li := ListItem{
-            Ecosystem: "go",
-            Name:      info.CanonicalName,
-            Version:   p.Version,
-            Module:    module,
-            IsDirect:  isDirectForPackage(p.Name, depsExact),
-        }
-        if pu := p.PURL(); pu != nil {
-            li.PURL = normalizeGolangPURLLikeSBOM(pu.String(), repoPath)
-        } else {
-            // Fallback: construct a basic golang PURL
-            li.PURL = "pkg:golang/" + info.CanonicalName + "@" + p.Version
-        }
-        out = append(out, li)
-    }
-    return out
+	if depsLoose == nil {
+		depsLoose = cmp.GetDirectDependencies()
+	}
+	if depsExact == nil {
+		depsExact = map[string]bool{"stdlib": true}
+	}
+	out := make([]ListItem, 0, len(pkgs))
+	for _, p := range pkgs {
+		if p == nil || p.Name == "" || p.Version == "" {
+			continue
+		}
+		info := cmp.ParseGoPackage(p)
+		module := bestModuleForPackage(p.Name, depsExact)
+		if module == "" {
+			module = cmp.GetModuleRoot(info.CanonicalName)
+		}
+		li := ListItem{
+			Ecosystem: "go",
+			Name:      p.Name,
+			Version:   p.Version,
+			Module:    module,
+			IsDirect:  isDirectForPackage(p.Name, depsExact),
+		}
+		if pu := p.PURL(); pu != nil {
+			li.PURL = normalizeGolangPURLLikeSBOM(pu.String(), repoPath)
+		} else {
+			full := info.CanonicalName
+			ns := ""
+			name := full
+			if idx := strings.LastIndex(full, "/"); idx >= 0 {
+				ns = full[:idx]
+				name = full[idx+1:]
+			}
+			li.PURL = scalpurl.PackageURL{Type: scalpurl.TypeGolang, Namespace: ns, Name: name, Version: p.Version}.String()
+		}
+		out = append(out, li)
+	}
+	return out
 }
 
 // semverCompareGo compares two Go module versions; returns 1 if a>b, -1 if a<b, 0 if equal.
@@ -293,40 +299,56 @@ func semverCompareGo(a, b string) int {
 
 // writeListText prints a simple space-separated table (with optional header).
 func writeListText(w io.Writer, items []ListItem, header bool) error {
-    // PURL + DIRECT only
-    purlH, dirH := "PURL", "DIRECT"
-    purlW := len(purlH)
-    dirW := len(dirH)
-    for _, it := range items {
-        if l := len(it.PURL); l > purlW { purlW = l }
-        d := "indirect"
-        if it.IsDirect { d = "direct" }
-        if l := len(d); l > dirW { dirW = l }
-    }
-    pad := func(n int) string { if n <= 0 { return "" }; return strings.Repeat(" ", n) }
-    if header {
-        fmt.Fprintf(w, "%s%s%s\n", ui.StyleHeader.Render(purlH), pad(purlW-len(purlH)+2), ui.StyleHeader.Render(dirH))
-    }
-    for _, it := range items {
-        d := "indirect"
-        dStyled := ui.StyleDim.Render(d)
-        if it.IsDirect { d = "direct"; dStyled = ui.StyleUpgraded.Render(d) }
-        fmt.Fprintf(w, "%s%s%s\n", it.PURL, pad(purlW-len(it.PURL)+2), dStyled)
-    }
-    return nil
+	// PURL + DIRECT only
+	purlH, dirH := "PURL", "DIRECT"
+	purlW := len(purlH)
+	dirW := len(dirH)
+	for _, it := range items {
+		if l := len(it.PURL); l > purlW {
+			purlW = l
+		}
+		d := "indirect"
+		if it.IsDirect {
+			d = "direct"
+		}
+		if l := len(d); l > dirW {
+			dirW = l
+		}
+	}
+	pad := func(n int) string {
+		if n <= 0 {
+			return ""
+		}
+		return strings.Repeat(" ", n)
+	}
+	if header {
+		fmt.Fprintf(w, "%s%s%s\n", ui.StyleHeader.Render(purlH), pad(purlW-len(purlH)+2), ui.StyleHeader.Render(dirH))
+	}
+	for _, it := range items {
+		d := "indirect"
+		dStyled := ui.StyleDim.Render(d)
+		if it.IsDirect {
+			d = "direct"
+			dStyled = ui.StyleUpgraded.Render(d)
+		}
+		fmt.Fprintf(w, "%s%s%s\n", it.PURL, pad(purlW-len(it.PURL)+2), dStyled)
+	}
+	return nil
 }
 
 // writeListTSV prints a tab-separated list (with optional header).
 func writeListTSV(w io.Writer, items []ListItem, header bool) error {
-    if header {
-        fmt.Fprintln(w, "purl\tdirect")
-    }
-    for _, it := range items {
-        direct := "false"
-        if it.IsDirect { direct = "true" }
-        fmt.Fprintf(w, "%s\t%s\n", it.PURL, direct)
-    }
-    return nil
+	if header {
+		fmt.Fprintln(w, "purl\tdirect")
+	}
+	for _, it := range items {
+		direct := "false"
+		if it.IsDirect {
+			direct = "true"
+		}
+		fmt.Fprintf(w, "%s\t%s\n", it.PURL, direct)
+	}
+	return nil
 }
 
 // directModulesFromGoMod extracts exact module paths from go.mod for direct deps.
@@ -386,69 +408,70 @@ func bestModuleForPackage(pkg string, direct map[string]bool) string {
 
 // rewriteGolangPURLName best-effort replacement of name and version in a golang purl string.
 func rewriteGolangPURLName(purlStr, name, version string) string {
-	if !strings.HasPrefix(purlStr, "pkg:golang/") {
+	pp, err := scalpurl.FromString(purlStr)
+	if err != nil || pp.Type != scalpurl.TypeGolang {
 		return purlStr
 	}
-	base := strings.TrimPrefix(purlStr, "pkg:golang/")
-	at := strings.IndexByte(base, '@')
-	if at >= 0 {
-		return "pkg:golang/" + name + "@" + version
+	if idx := strings.LastIndex(name, "/"); idx >= 0 {
+		pp.Namespace = name[:idx]
+		pp.Name = name[idx+1:]
+	} else {
+		pp.Namespace = ""
+		pp.Name = name
 	}
-	if version != "" {
-		return "pkg:golang/" + name + "@" + version
-	}
-	return "pkg:golang/" + name
+	pp.Version = version
+	return pp.String()
 }
 
 // normalizeGolangPURLLikeSBOM mirrors the SBOM normalization for Golang PURLs.
 // It expands relative names (., ./sub) to the module path read from go.mod.
 func normalizeGolangPURLLikeSBOM(purlStr, repoPath string) string {
-    if purlStr == "" {
-        return purlStr
-    }
-    pp, err := scalpurl.FromString(purlStr)
-    if err != nil || pp.Type != scalpurl.TypeGolang {
-        return purlStr
-    }
-    // Build full path from current namespace/name
-    full := pp.Name
-    if pp.Namespace != "" {
-        full = pp.Namespace + "/" + pp.Name
-    }
-    // Expand relative names to module path
-    if full == "." || strings.HasPrefix(full, "./") {
-        if modPath := readModulePathLocal(repoPath); modPath != "" {
-            rel := strings.TrimPrefix(full, "./")
-            if rel == "." {
-                rel = ""
-            }
-            full = modPath
-            if rel != "" {
-                full = modPath + "/" + rel
-            }
-        }
-    }
-    // Normalize to namespace + name by splitting at last '/'
-    ns := ""
-    nm := full
-    if idx := strings.LastIndex(full, "/"); idx > 0 {
-        ns = full[:idx]
-        nm = full[idx+1:]
-    }
-    pp.Namespace = ns
-    pp.Name = nm
-    return pp.String()
+	if purlStr == "" {
+		return purlStr
+	}
+	pp, err := scalpurl.FromString(purlStr)
+	if err != nil || pp.Type != scalpurl.TypeGolang {
+		return purlStr
+	}
+	// Build full path from current namespace/name
+	full := pp.Name
+	if pp.Namespace != "" {
+		full = pp.Namespace + "/" + pp.Name
+	}
+	// Expand relative names to module path
+	if full == "." || strings.HasPrefix(full, "./") {
+		if modPath := readModulePathLocal(repoPath); modPath != "" {
+			rel := strings.TrimPrefix(full, "./")
+			if rel == "." {
+				rel = ""
+			}
+			full = modPath
+			if rel != "" {
+				full = modPath + "/" + rel
+			}
+		}
+	}
+	// Normalize to namespace + name by splitting at last '/'
+	ns := ""
+	nm := full
+	if idx := strings.LastIndex(full, "/"); idx > 0 {
+		ns = full[:idx]
+		nm = full[idx+1:]
+	}
+	pp.Namespace = ns
+	pp.Name = nm
+	return pp.String()
 }
 
 func readModulePathLocal(repoPath string) string {
-    b, err := os.ReadFile(filepath.Join(repoPath, "go.mod"))
-    if err != nil {
-        return ""
-    }
-    if mf, err := modfile.Parse("go.mod", b, nil); err == nil && mf != nil && mf.Module != nil {
-        return mf.Module.Mod.Path
-    }
-    return ""
+	b, err := os.ReadFile(filepath.Join(repoPath, "go.mod"))
+	if err != nil {
+		return ""
+	}
+	if mf, err := modfile.Parse("go.mod", b, nil); err == nil && mf != nil && mf.Module != nil {
+		return mf.Module.Mod.Path
+	}
+	return ""
 }
 
 func filterOnlyDirect(items []ListItem) []ListItem {

@@ -22,7 +22,7 @@ import (
 	"github.com/google/osv-scalibr/extractor"
 	scalibrfs "github.com/google/osv-scalibr/fs"
 	pl "github.com/google/osv-scalibr/plugin/list"
-	packageurl "github.com/package-url/packageurl-go"
+	scalpurl "github.com/google/osv-scalibr/purl"
 	gitx "github.com/picatz/deputy/internal/git"
 	"github.com/protobom/protobom/pkg/formats"
 	pbsbom "github.com/protobom/protobom/pkg/sbom"
@@ -383,35 +383,39 @@ func CloneRepoToTemp(ctx context.Context, remoteURL string, auth transport.AuthM
 
 // PURL helpers
 func normalizeGolangPURLString(purlStr, repoPath string) string {
-	if purlStr == "" || !strings.HasPrefix(purlStr, "pkg:golang/") {
+	if purlStr == "" {
 		return purlStr
 	}
-	rest := strings.TrimPrefix(purlStr, "pkg:golang/")
-	namePart := rest
-	verPart := ""
-	if i := strings.IndexByte(rest, '@'); i >= 0 {
-		namePart = rest[:i]
-		verPart = rest[i+1:]
+	pp, err := scalpurl.FromString(purlStr)
+	if err != nil || pp.Type != scalpurl.TypeGolang {
+		return purlStr
 	}
-	if namePart == "." || strings.HasPrefix(namePart, "./") {
+	full := pp.Name
+	if pp.Namespace != "" {
+		full = pp.Namespace + "/" + pp.Name
+	}
+	if full == "." || strings.HasPrefix(full, "./") {
 		modPath := readModulePath(repoPath)
 		if modPath == "" {
 			return purlStr
 		}
-		rel := strings.TrimPrefix(namePart, "./")
+		rel := strings.TrimPrefix(full, "./")
 		if rel == "." {
 			rel = ""
 		}
-		full := modPath
+		full = modPath
 		if rel != "" {
 			full = modPath + "/" + rel
 		}
-		if verPart != "" {
-			return "pkg:golang/" + full + "@" + verPart
-		}
-		return "pkg:golang/" + full
 	}
-	return purlStr
+	if idx := strings.LastIndex(full, "/"); idx >= 0 {
+		pp.Namespace = full[:idx]
+		pp.Name = full[idx+1:]
+	} else {
+		pp.Namespace = ""
+		pp.Name = full
+	}
+	return pp.String()
 }
 
 func readModulePath(repoPath string) string {
@@ -427,7 +431,7 @@ func readModulePath(repoPath string) string {
 
 func deriveDisplayName(name, purl string) string {
 	if purl != "" {
-		if pu, err := packageurl.FromString(purl); err == nil {
+		if pu, err := scalpurl.FromString(purl); err == nil {
 			return pu.Name
 		}
 	}
