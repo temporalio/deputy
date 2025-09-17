@@ -44,19 +44,36 @@ type ModuleDeprecation struct {
 	URL     string `json:"url,omitempty"`
 }
 
-// Scanner encapsulates dependency inventory collection strategy allowing tests
-// to substitute alternative collectors (e.g. fixture data) without invoking
-// full filesystem scans.
+// Scanner orchestrates vulnerability scans by combining inventory collection
+// (scalibr), OSV lookups, and presentation helpers. The collaborators are
+// fields so tests can inject deterministic doubles instead of hitting the
+// network or filesystem.
 type Scanner struct {
-	collectInventory func(ctx context.Context, repoPath, gitRef string, ecos []string) ([]*extractor.Package, error)
+	collectInventory     func(ctx context.Context, repoPath, gitRef string, ecos []string) ([]*extractor.Package, error)
+	queryVulnerabilities func(ctx context.Context, client analysis.OSVClient, pkgs []analysis.PkgInput) ([]analysis.Vulnerability, error)
+	osvClient            analysis.OSVClient
 }
 
 // NewScanner returns a Scanner configured with the default inventory collection
 // implementation.
 func NewScanner() *Scanner {
 	return &Scanner{
-		collectInventory: collectInventory,
+		collectInventory:     collectInventory,
+		queryVulnerabilities: analysis.QueryOSVBatch,
+		osvClient:            osvdev.DefaultClient(),
 	}
+}
+
+func (s *Scanner) queryOSV(ctx context.Context, inputs []analysis.PkgInput) ([]analysis.Vulnerability, error) {
+	query := s.queryVulnerabilities
+	if query == nil {
+		query = analysis.QueryOSVBatch
+	}
+	client := s.osvClient
+	if client == nil {
+		client = osvdev.DefaultClient()
+	}
+	return query(ctx, client, inputs)
 }
 
 // AddScanCommand registers the scan subcommand
@@ -386,7 +403,7 @@ func (s *Scanner) runScan(cmd *cobra.Command, args []string) error {
 
 	inputs := packagesToInputs(pkgs, deps)
 
-	vulns, err := analysis.QueryOSVBatch(ctx, osvdev.DefaultClient(), inputs)
+	vulns, err := s.queryOSV(ctx, inputs)
 	if err != nil {
 		fmt.Fprintf(cmd.ErrOrStderr(), "Warning: OSV query failed: %v\n", err)
 	}
@@ -468,7 +485,7 @@ func (s *Scanner) runScanDir(cmd *cobra.Command, args []string) error {
 
 	inputs := packagesToInputs(pkgs, deps)
 
-	vulns, err := analysis.QueryOSVBatch(ctx, osvdev.DefaultClient(), inputs)
+	vulns, err := s.queryOSV(ctx, inputs)
 	if err != nil {
 		fmt.Fprintf(cmd.ErrOrStderr(), "Warning: OSV query failed: %v\n", err)
 	}
@@ -557,7 +574,7 @@ func (s *Scanner) runScanSBOM(cmd *cobra.Command, args []string) error {
 
 	inputs := packagesToInputs(pkgs, nil)
 
-	vulns, err := analysis.QueryOSVBatch(ctx, osvdev.DefaultClient(), inputs)
+	vulns, err := s.queryOSV(ctx, inputs)
 	if err != nil {
 		fmt.Fprintf(cmd.ErrOrStderr(), "Warning: OSV query failed: %v\n", err)
 	}
@@ -776,6 +793,8 @@ func (s *Scanner) outputJSON(w io.Writer, repo, ref, commit string, vulns []anal
 	return enc.Encode(result)
 }
 
+// parseSBOMPackages converts protobom JSON documents (or future formats) into
+// the package tuples expected by osv-scalibr / OSV queries.
 func parseSBOMPackages(data []byte, inFmt string) ([]*extractor.Package, error) {
 	useProto := strings.EqualFold(inFmt, "protobom-json") || strings.EqualFold(inFmt, "auto")
 	var pkgs []*extractor.Package
