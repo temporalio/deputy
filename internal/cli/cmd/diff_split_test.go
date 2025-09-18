@@ -24,6 +24,18 @@ func TestSplitVulnsByChange(t *testing.T) {
 	}
 }
 
+func TestSplitVulnsByChange_Downgrade(t *testing.T) {
+	vulns := []analysis.Vulnerability{{Package: "github.com/example/down", Version: "v1.0.0"}}
+	changes := []cmp.Change{{Name: "github.com/example/down", ChangeType: cmp.Downgraded}}
+	changed, unchanged := splitVulnsByChange(vulns, changes)
+	if len(changed) != 1 || changed[0].Package != "github.com/example/down" {
+		t.Fatalf("downgraded package should be marked changed: changed=%#v", changed)
+	}
+	if len(unchanged) != 0 {
+		t.Fatalf("expected no unchanged vulns, got %#v", unchanged)
+	}
+}
+
 // Ensure splitVulnsByChange handles gopkg.in to GitHub path transitions.
 func TestSplitVulnsByChange_GopkgInCanonical(t *testing.T) {
 	vulns := []analysis.Vulnerability{{Package: "gopkg.in/go-jose/go-jose.v4", Version: "v4.0.5"}}

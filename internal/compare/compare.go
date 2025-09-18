@@ -1,16 +1,17 @@
 package compare
 
 import (
-	"os"
 	"strings"
 
 	"github.com/google/osv-scalibr/extractor"
 	"golang.org/x/mod/semver"
+
+	"github.com/picatz/deputy/internal/workspace"
 )
 
 // ChangeType classifies the kind of dependency transition observed between two
-// inventories. A dependency may be newly Added, Removed, or Updated (version
-// change and/or path canonicalization difference).
+// inventories. A dependency may be newly Added, Removed, Upgraded, Downgraded,
+// or Updated (non-semver change such as an import path canonicalization).
 type ChangeType int
 
 const (
@@ -20,9 +21,16 @@ const (
 	// Removed indicates the dependency existed in the base inventory but is
 	// absent from the target inventory.
 	Removed
-	// Updated indicates the dependency exists in both inventories but the
-	// version and/or import path changed.
+	// Updated indicates the dependency exists in both inventories but changed in
+	// a way that does not amount to a semantic version upgrade or downgrade—most
+	// commonly an import path canonicalization.
 	Updated
+	// Upgraded indicates the dependency exists in both inventories and the
+	// target version is semantically greater than the base version.
+	Upgraded
+	// Downgraded indicates the dependency exists in both inventories and the
+	// target version is semantically lower than the base version.
+	Downgraded
 )
 
 // Change captures a single dependency delta between two scans. For Added
@@ -267,6 +275,24 @@ func CompareGoPackageVersions(c Change) int {
 	return semver.Compare(newV, oldV)
 }
 
+// classifyChangeType derives a ChangeType based on semantic version ordering.
+// When semantic versions are unavailable or equal it returns Updated to signal
+// a non-version change.
+func classifyChangeType(baseVersion, targetVersion string) ChangeType {
+	if baseVersion == "" || targetVersion == "" {
+		return Updated
+	}
+	cmp := CompareGoPackageVersions(Change{BaseVersion: baseVersion, TargetVersion: targetVersion})
+	switch {
+	case cmp > 0:
+		return Upgraded
+	case cmp < 0:
+		return Downgraded
+	default:
+		return Updated
+	}
+}
+
 // GetDirectDependenciesFromGoMod parses a go.mod file and returns module roots
 // for direct dependencies (those without "// indirect"). The returned set
 // always includes "stdlib".
@@ -293,10 +319,14 @@ func GetDirectDependenciesFromGoMod(data []byte) map[string]bool {
 	return deps
 }
 
-// GetDirectDependencies reads go.mod in cwd and returns direct module roots.
-// If go.mod cannot be read, only "stdlib" is returned.
-func GetDirectDependencies() map[string]bool {
-	data, err := os.ReadFile("go.mod")
+// GetDirectDependencies reads go.mod from the provided workspace and returns
+// direct module roots. If go.mod cannot be read (missing or workspace nil)
+// the returned set only contains "stdlib".
+func GetDirectDependencies(ws workspace.Reader) map[string]bool {
+	if ws == nil {
+		return map[string]bool{"stdlib": true}
+	}
+	data, err := ws.ReadFile("go.mod")
 	if err != nil {
 		return map[string]bool{"stdlib": true}
 	}
@@ -306,11 +336,12 @@ func GetDirectDependencies() map[string]bool {
 // ComparePackages computes changes between old and new package inventories.
 // ComparePackages computes the dependency delta between two package slices.
 // It indexes each slice by canonical import path and classifies additions,
-// removals, and updates while also tagging whether each resulting Change is a
-// direct dependency in the target workspace.
+// removals, upgrades, downgrades, and other updates while also tagging whether
+// each resulting Change is a direct dependency in the target workspace.
 //
-// If deps is nil, GetDirectDependencies() is used.
-func ComparePackages(oldPkgs, newPkgs []*extractor.Package, deps map[string]bool) []Change {
+// If deps is nil, direct dependencies are inferred from go.mod in the supplied
+// workspace.
+func ComparePackages(oldPkgs, newPkgs []*extractor.Package, deps map[string]bool, ws workspace.Reader) []Change {
 	if len(oldPkgs) == 0 && len(newPkgs) == 0 {
 		return nil
 	}
@@ -331,7 +362,7 @@ func ComparePackages(oldPkgs, newPkgs []*extractor.Package, deps map[string]bool
 	}
 
 	if deps == nil {
-		deps = GetDirectDependencies()
+		deps = GetDirectDependencies(ws)
 	}
 	var changes []Change
 	// Removed or updated
@@ -342,7 +373,8 @@ func ComparePackages(oldPkgs, newPkgs []*extractor.Package, deps map[string]bool
 			continue
 		}
 		if op.Version != np.Version || op.Name != np.Name {
-			changes = append(changes, Change{Name: np.Name, OldName: op.Name, BaseVersion: op.Version, TargetVersion: np.Version, ChangeType: Updated, Ecosystem: "go", IsDirect: deps[GetModuleRoot(canon)]})
+			changeType := classifyChangeType(op.Version, np.Version)
+			changes = append(changes, Change{Name: np.Name, OldName: op.Name, BaseVersion: op.Version, TargetVersion: np.Version, ChangeType: changeType, Ecosystem: "go", IsDirect: deps[GetModuleRoot(canon)]})
 		}
 	}
 	// Added

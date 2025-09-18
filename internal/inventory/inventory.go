@@ -4,38 +4,37 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"os"
-	"path/filepath"
+	"io/fs"
+	"path"
 	"strings"
 
 	git "github.com/go-git/go-git/v5"
 	"github.com/go-git/go-git/v5/plumbing"
+	"github.com/go-git/go-git/v5/plumbing/filemode"
 	"github.com/go-git/go-git/v5/plumbing/object"
 	scalibr "github.com/google/osv-scalibr"
 	"github.com/google/osv-scalibr/extractor"
-	scalibrfs "github.com/google/osv-scalibr/fs"
 	pl "github.com/google/osv-scalibr/plugin/list"
+
+	"github.com/picatz/deputy/internal/workspace"
 )
 
-// ScanPackagesWorking scans the current working directory (including
-// uncommitted changes) and returns the discovered package inventory.
-func ScanPackagesWorking(ctx context.Context, repoPath string) ([]*extractor.Package, error) {
-	plugins, err := pl.FromNames([]string{"go"})
-	if err != nil {
-		return nil, fmt.Errorf("error creating plugins: %w", err)
+// ScanPackagesWorking scans the provided workspace and returns the discovered
+// package inventory. The workspace may be backed by the host filesystem or be a
+// virtual in-memory filesystem.
+func ScanPackagesWorking(ctx context.Context, ws workspace.Workspace) ([]*extractor.Package, error) {
+	if ws == nil {
+		return nil, fmt.Errorf("workspace is required")
 	}
-	cfg := &scalibr.ScanConfig{ScanRoots: scalibrfs.RealFSScanRoots(repoPath), Plugins: plugins}
-	results := scalibr.New().Scan(ctx, cfg)
-	return results.Inventory.Packages, nil
+	return scanWorkspace(ctx, ws)
 }
 
-// ScanPackagesAtCommitSnapshot scans the package inventory for a historical
-// commit by materializing its tree into a temporary directory (non-destructive
-// to the repository) and invoking the scanner on that snapshot.
-func ScanPackagesAtCommitSnapshot(ctx context.Context, repoPath string, commitHash plumbing.Hash) ([]*extractor.Package, error) {
-	repo, err := git.PlainOpen(repoPath)
-	if err != nil {
-		return nil, fmt.Errorf("error opening repository: %w", err)
+// ScanPackagesAtCommitSnapshot materializes the tree for commitHash from repo
+// into an ephemeral in-memory workspace and scans it for packages. The workspace
+// is discarded after scanning.
+func ScanPackagesAtCommitSnapshot(ctx context.Context, repo *git.Repository, commitHash plumbing.Hash) ([]*extractor.Package, error) {
+	if repo == nil {
+		return nil, fmt.Errorf("git repository is required")
 	}
 	commit, err := repo.CommitObject(commitHash)
 	if err != nil {
@@ -45,43 +44,66 @@ func ScanPackagesAtCommitSnapshot(ctx context.Context, repoPath string, commitHa
 	if err != nil {
 		return nil, fmt.Errorf("error getting tree: %w", err)
 	}
-	dir, err := os.MkdirTemp("", "deputy-scan-commit-*")
-	if err != nil {
+	ws := workspace.NewMemory()
+	if err := populateWorkspaceFromTree(ws, tree); err != nil {
+		_ = ws.Close()
 		return nil, err
 	}
-	// Materialize files
-	err = tree.Files().ForEach(func(f *object.File) error {
-		// Skip .git directory entries
+	defer ws.Close()
+	return scanWorkspace(ctx, ws)
+}
+
+func scanWorkspace(ctx context.Context, ws workspace.Workspace) ([]*extractor.Package, error) {
+	plugins, err := pl.FromNames([]string{"go"})
+	if err != nil {
+		return nil, fmt.Errorf("error creating plugins: %w", err)
+	}
+	cfg := &scalibr.ScanConfig{ScanRoots: ws.ScalibrRoots(), Plugins: plugins}
+	results := scalibr.New().Scan(ctx, cfg)
+	return results.Inventory.Packages, nil
+}
+
+func populateWorkspaceFromTree(ws workspace.Workspace, tree *object.Tree) error {
+	if tree == nil {
+		return fmt.Errorf("nil tree")
+	}
+	return tree.Files().ForEach(func(f *object.File) error {
+		if f == nil {
+			return nil
+		}
 		if f.Name == ".git" || strings.HasPrefix(f.Name, ".git/") {
 			return nil
 		}
-		target := filepath.Join(dir, f.Name)
-		if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
-			return err
+		switch f.Mode {
+		case filemode.Dir, filemode.Submodule, filemode.Symlink:
+			return nil
 		}
-		r, err := f.Blob.Reader()
+		dir := path.Dir(f.Name)
+		if dir != "." && dir != "" {
+			if err := ws.MkdirAll(dir, 0o755); err != nil {
+				return err
+			}
+		}
+		reader, err := f.Reader()
 		if err != nil {
 			return err
 		}
-		defer r.Close()
-		b, err := io.ReadAll(r)
+		data, err := io.ReadAll(reader)
+		closeErr := reader.Close()
 		if err != nil {
 			return err
 		}
-		return os.WriteFile(target, b, 0o644)
+		if closeErr != nil {
+			return closeErr
+		}
+		perm := fileModeToPerm(f.Mode)
+		return ws.WriteFile(f.Name, data, perm)
 	})
-	if err != nil {
-		_ = os.RemoveAll(dir)
-		return nil, err
+}
+
+func fileModeToPerm(mode filemode.FileMode) fs.FileMode {
+	if mode == filemode.Executable {
+		return 0o755
 	}
-	// Scan temp dir
-	plugins, err := pl.FromNames([]string{"go"})
-	if err != nil {
-		_ = os.RemoveAll(dir)
-		return nil, fmt.Errorf("error creating plugins: %w", err)
-	}
-	cfg := &scalibr.ScanConfig{ScanRoots: scalibrfs.RealFSScanRoots(dir), Plugins: plugins}
-	results := scalibr.New().Scan(ctx, cfg)
-	_ = os.RemoveAll(dir)
-	return results.Inventory.Packages, nil
+	return 0o644
 }

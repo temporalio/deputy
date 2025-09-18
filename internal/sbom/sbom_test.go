@@ -10,6 +10,7 @@ import (
 	git "github.com/go-git/go-git/v5"
 	"github.com/go-git/go-git/v5/plumbing"
 	"github.com/go-git/go-git/v5/plumbing/object"
+	"github.com/picatz/deputy/internal/workspace"
 )
 
 // helper to create a temporary git repo with an initial commit and optional branches
@@ -104,31 +105,6 @@ func Test_LooksLikeTag(t *testing.T) {
 	}
 }
 
-func Test_CloneRepoToTemp_Invalid(t *testing.T) {
-	ctx := t.Context()
-	if _, _, err := CloneRepoToTemp(ctx, "https://github.com/this/org/does-not-exist-xyz-abcdef.git", nil, plumbing.ReferenceName("refs/heads/main")); err == nil {
-		t.Fatalf("expected error for invalid repo")
-	}
-}
-
-func Test_CloneRepoToTemp_LocalFile(t *testing.T) {
-	ctx := t.Context()
-	dir, _ := newTempGitRepo(t)
-	// Cloning a local path should succeed; verify .git metadata present
-	cloned, cleanup, err := CloneRepoToTemp(ctx, dir, nil, plumbing.ReferenceName(""))
-	if err != nil {
-		t.Fatalf("unexpected error cloning local path: %v", err)
-	}
-	defer func() {
-		if cleanup != nil {
-			cleanup()
-		}
-	}()
-	if _, err := os.Stat(filepath.Join(cloned, ".git")); err != nil {
-		t.Fatalf("expected .git directory in cloned repo: %v", err)
-	}
-}
-
 func Test_DiscoverDefaultBranch_Fallback(t *testing.T) {
 	ctx := t.Context()
 	got := discoverDefaultBranch(ctx, "https://github.com/example/nonexistent-one-two-three.git", nil)
@@ -149,8 +125,13 @@ func Test_NormalizeGolangPURLString(t *testing.T) {
 		{"pkg:golang/.@v1.2.3", "pkg:golang/github.com/example/project@v1.2.3"},
 		{"pkg:golang/./sub@v0.0.1", "pkg:golang/github.com/example/project/sub@v0.0.1"},
 	}
+	ws, err := workspace.NewDir(dir)
+	if err != nil {
+		t.Fatalf("workspace: %v", err)
+	}
+	defer ws.Close()
 	for _, c := range cases {
-		if got := normalizeGolangPURLString(c.in, dir); got != c.want {
+		if got := normalizeGolangPURLString(c.in, ws); got != c.want {
 			t.Errorf("normalizeGolangPURLString(%q)=%q want %q", c.in, got, c.want)
 		}
 	}
@@ -158,13 +139,18 @@ func Test_NormalizeGolangPURLString(t *testing.T) {
 
 func Test_ReadModulePath(t *testing.T) {
 	dir := t.TempDir()
-	if p := readModulePath(dir); p != "" {
+	ws, err := workspace.NewDir(dir)
+	if err != nil {
+		t.Fatalf("workspace: %v", err)
+	}
+	defer ws.Close()
+	if p := readModulePath(ws); p != "" {
 		t.Errorf("expected empty without go.mod got %q", p)
 	}
 	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module example.com/xyz\n\n go 1.23\n"), 0o644); err != nil {
 		t.Fatalf("write go.mod: %v", err)
 	}
-	if p := readModulePath(dir); p != "example.com/xyz" {
+	if p := readModulePath(ws); p != "example.com/xyz" {
 		t.Errorf("readModulePath got %q want example.com/xyz", p)
 	}
 }

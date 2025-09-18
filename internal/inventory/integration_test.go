@@ -45,15 +45,15 @@ func Test_Integration_CompareTags(t *testing.T) {
 			if err != nil {
 				t.Fatalf("resolve target: %v", err)
 			}
-			basePkgs, err := ScanPackagesAtCommitSnapshot(ctx, repoDir, *baseRev)
+			basePkgs, err := ScanPackagesAtCommitSnapshot(ctx, repo, *baseRev)
 			if err != nil {
 				t.Fatalf("scan base: %v", err)
 			}
-			targetPkgs, err := ScanPackagesAtCommitSnapshot(ctx, repoDir, *targetRev)
+			targetPkgs, err := ScanPackagesAtCommitSnapshot(ctx, repo, *targetRev)
 			if err != nil {
 				t.Fatalf("scan target: %v", err)
 			}
-			changes := cmp.ComparePackages(basePkgs, targetPkgs, nil)
+			changes := cmp.ComparePackages(basePkgs, targetPkgs, nil, nil)
 			if len(basePkgs) == 0 && len(targetPkgs) == 0 {
 				if changes != nil {
 					t.Fatalf("changes should be nil for empty inputs")

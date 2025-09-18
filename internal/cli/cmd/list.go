@@ -6,19 +6,21 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"path/filepath"
 	"sort"
 	"strings"
 	"time"
 
 	git "github.com/go-git/go-git/v5"
+	"github.com/go-git/go-git/v5/plumbing"
 	"github.com/google/osv-scalibr/extractor"
 	scalpurl "github.com/google/osv-scalibr/purl"
 	cmp "github.com/picatz/deputy/internal/compare"
 	gitx "github.com/picatz/deputy/internal/git"
 	inv "github.com/picatz/deputy/internal/inventory"
+	"github.com/picatz/deputy/internal/repository"
 	sbomx "github.com/picatz/deputy/internal/sbom"
 	ui "github.com/picatz/deputy/internal/ui"
+	"github.com/picatz/deputy/internal/workspace"
 	"github.com/spf13/cobra"
 	"golang.org/x/mod/modfile"
 	"golang.org/x/mod/semver"
@@ -152,78 +154,81 @@ REMOTE REPOSITORIES:
 
 // collectListItems gathers packages for repo/ref (supporting remote clone) and converts to ListItem set.
 func collectListItems(ctx context.Context, repoPath, ref string, _ []string, level string) ([]ListItem, string, string, error) {
-	localRepoPath := repoPath
-	var cleanup func()
-
-	// Handle remote repositories
-	if _, err := os.Stat(repoPath); err != nil {
+	var (
+		src *repository.Source
+		err error
+	)
+	if fi, statErr := os.Stat(repoPath); statErr == nil && fi.IsDir() {
+		src, err = repository.Open(repoPath)
+		if err != nil {
+			return nil, "", "", err
+		}
+	} else {
 		u := sbomx.ToHTTPSGitURL(repoPath)
 		if u == "" {
 			return nil, "", "", fmt.Errorf("could not interpret repo %q as local path or remote URL", repoPath)
 		}
 		auth := sbomx.AuthForURL(u)
-		rn, err := sbomx.ResolveReferenceName(ctx, u, auth, ref)
-		if err == nil {
+		rn, resolveErr := sbomx.ResolveReferenceName(ctx, u, auth, ref)
+		if resolveErr == nil && rn.String() != "" {
 			ref = rn.String()
 		}
-		path, cf, err := sbomx.CloneRepoToTemp(ctx, u, auth, rn)
+		cloneOpts := &git.CloneOptions{
+			URL:          u,
+			Depth:        1,
+			SingleBranch: true,
+			Tags:         git.NoTags,
+			Auth:         auth,
+		}
+		if rn.String() != "" {
+			cloneOpts.ReferenceName = rn
+		}
+		src, err = repository.Clone(ctx, cloneOpts, true)
+		if err != nil && cloneOpts.ReferenceName != "" {
+			cloneOpts.ReferenceName = ""
+			src, err = repository.Clone(ctx, cloneOpts, true)
+		}
 		if err != nil {
 			return nil, "", "", fmt.Errorf("failed to clone remote repo %s: %w", u, err)
 		}
-		localRepoPath = path
-		cleanup = cf
-		defer func() {
-			if cleanup != nil {
-				cleanup()
-			}
-		}()
 	}
+	defer src.Close()
+
+	repo := src.Repo
+	ws := src.Workspace
 
 	effRef := refOrHEAD(ref)
+	var (
+		pkgs       []*extractor.Package
+		targetHash *plumbing.Hash
+	)
 	if strings.EqualFold(effRef, "HEAD") {
-		// If user explicitly set --ref HEAD, use HEAD~0 to include working tree state like other commands
-		// but only when the flag was explicitly set (not detectable here). Follow scan's behavior: prefer HEAD~0 when --ref changed.
-		// We approximate that when ref was explicitly "HEAD" we keep HEAD; otherwise callers can pass HEAD~0.
-	}
-
-	var pkgs []*extractor.Package
-	var err error
-	if strings.EqualFold(effRef, "HEAD") {
-		pkgs, err = inv.ScanPackagesWorking(ctx, localRepoPath)
+		pkgs, err = inv.ScanPackagesWorking(ctx, ws)
 	} else {
-		repo, e := git.PlainOpen(localRepoPath)
-		if e != nil {
-			return nil, "", "", e
+		targetHash, err = gitx.ResolveRevisionEnhanced(repo, effRef)
+		if err != nil {
+			return nil, "", "", err
 		}
-		h, e := gitx.ResolveRevisionEnhanced(repo, effRef)
-		if e != nil {
-			return nil, "", "", e
-		}
-		pkgs, err = inv.ScanPackagesAtCommitSnapshot(ctx, localRepoPath, *h)
+		pkgs, err = inv.ScanPackagesAtCommitSnapshot(ctx, repo, *targetHash)
 	}
 	if err != nil {
 		return nil, "", "", fmt.Errorf("failed to collect inventory: %w", err)
 	}
 
-	// Determine direct dependencies from go.mod at the specified reference
 	var goModData []byte
 	if strings.EqualFold(effRef, "HEAD") || strings.EqualFold(effRef, "HEAD~0") {
-		if b, e := os.ReadFile(filepath.Join(localRepoPath, "go.mod")); e == nil {
+		if b, e := ws.ReadFile("go.mod"); e == nil {
 			goModData = b
 		}
-	} else {
-		if repo, e := git.PlainOpen(localRepoPath); e == nil {
-			if h, e := gitx.ResolveRevisionEnhanced(repo, effRef); e == nil && h != nil {
-				if b, e := gitx.ReadFileAtCommit(repo, *h, "go.mod"); e == nil {
-					goModData = b
-				}
-			}
+	} else if targetHash != nil {
+		if b, e := gitx.ReadFileAtCommit(repo, *targetHash, "go.mod"); e == nil {
+			goModData = b
 		}
 	}
 	depsLoose := cmp.GetDirectDependenciesFromGoMod(goModData)
 	depsExact := directModulesFromGoMod(goModData)
 
-	items := toListItems(localRepoPath, pkgs, depsLoose, depsExact, level)
+	items := toListItems(ws, pkgs, depsLoose, depsExact)
 	sort.Slice(items, func(i, j int) bool {
 		// Sort by PURL for stable output
 		if items[i].PURL == items[j].PURL {
@@ -237,15 +242,21 @@ func collectListItems(ctx context.Context, repoPath, ref string, _ []string, lev
 	})
 
 	// Repo metadata
-	commitHash, _ := getRepoMetadata(localRepoPath, ref)
+	commitHash := ""
+	if strings.EqualFold(effRef, "HEAD") {
+		if head, err := repo.Head(); err == nil {
+			commitHash = head.Hash().String()
+		}
+	} else if targetHash != nil {
+		commitHash = targetHash.String()
+	}
 	return items, commitHash, "", nil
 }
 
-// toListItems converts extractor packages into unique list entries based on level.
-// level: "module" or "package".
-func toListItems(repoPath string, pkgs []*extractor.Package, depsLoose map[string]bool, depsExact map[string]bool, _ string) []ListItem {
+// toListItems converts extractor packages into unique list entries.
+func toListItems(ws workspace.Workspace, pkgs []*extractor.Package, depsLoose map[string]bool, depsExact map[string]bool) []ListItem {
 	if depsLoose == nil {
-		depsLoose = cmp.GetDirectDependencies()
+		depsLoose = cmp.GetDirectDependencies(ws)
 	}
 	if depsExact == nil {
 		depsExact = map[string]bool{"stdlib": true}
@@ -268,7 +279,7 @@ func toListItems(repoPath string, pkgs []*extractor.Package, depsLoose map[strin
 			IsDirect:  isDirectForPackage(p.Name, depsExact),
 		}
 		if pu := p.PURL(); pu != nil {
-			li.PURL = normalizeGolangPURLLikeSBOM(pu.String(), repoPath)
+			li.PURL = normalizeGolangPURLLikeSBOM(pu.String(), ws)
 		} else {
 			full := info.CanonicalName
 			ns := ""
@@ -425,7 +436,7 @@ func rewriteGolangPURLName(purlStr, name, version string) string {
 
 // normalizeGolangPURLLikeSBOM mirrors the SBOM normalization for Golang PURLs.
 // It expands relative names (., ./sub) to the module path read from go.mod.
-func normalizeGolangPURLLikeSBOM(purlStr, repoPath string) string {
+func normalizeGolangPURLLikeSBOM(purlStr string, ws workspace.Reader) string {
 	if purlStr == "" {
 		return purlStr
 	}
@@ -440,7 +451,7 @@ func normalizeGolangPURLLikeSBOM(purlStr, repoPath string) string {
 	}
 	// Expand relative names to module path
 	if full == "." || strings.HasPrefix(full, "./") {
-		if modPath := readModulePathLocal(repoPath); modPath != "" {
+		if modPath := readModulePathWorkspace(ws); modPath != "" {
 			rel := strings.TrimPrefix(full, "./")
 			if rel == "." {
 				rel = ""
@@ -463,8 +474,11 @@ func normalizeGolangPURLLikeSBOM(purlStr, repoPath string) string {
 	return pp.String()
 }
 
-func readModulePathLocal(repoPath string) string {
-	b, err := os.ReadFile(filepath.Join(repoPath, "go.mod"))
+func readModulePathWorkspace(ws workspace.Reader) string {
+	if ws == nil {
+		return ""
+	}
+	b, err := ws.ReadFile("go.mod")
 	if err != nil {
 		return ""
 	}

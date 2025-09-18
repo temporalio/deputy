@@ -11,13 +11,16 @@ import (
 	"time"
 
 	git "github.com/go-git/go-git/v5"
+	"github.com/go-git/go-git/v5/plumbing"
 	"github.com/google/osv-scalibr/extractor"
 	analysis "github.com/picatz/deputy/internal/analysis"
 	cmp "github.com/picatz/deputy/internal/compare"
 	gitx "github.com/picatz/deputy/internal/git"
 	inv "github.com/picatz/deputy/internal/inventory"
+	"github.com/picatz/deputy/internal/repository"
 	sbomx "github.com/picatz/deputy/internal/sbom"
 	ui "github.com/picatz/deputy/internal/ui"
+	"github.com/picatz/deputy/internal/workspace"
 	"github.com/protobom/protobom/pkg/sbom"
 	"github.com/spf13/cobra"
 	"google.golang.org/protobuf/encoding/protojson"
@@ -342,7 +345,7 @@ func (s *Scanner) runScan(cmd *cobra.Command, args []string) error {
 	}
 
 	localRepoPath := repoPath
-	var cleanup func()
+	var repoSrc *repository.Source
 
 	// Handle remote repositories
 	if _, err := os.Stat(repoPath); err != nil {
@@ -357,18 +360,26 @@ func (s *Scanner) runScan(cmd *cobra.Command, args []string) error {
 			ref = rn.String()
 		}
 
-		path, cf, err := sbomx.CloneRepoToTemp(ctx, u, auth, rn)
+		cloneOpts := &git.CloneOptions{
+			URL:          u,
+			Depth:        1,
+			SingleBranch: true,
+			Tags:         git.NoTags,
+			Auth:         auth,
+		}
+		if rn.String() != "" {
+			cloneOpts.ReferenceName = rn
+		}
+		repoSrc, err = repository.Clone(ctx, cloneOpts, false)
+		if err != nil && cloneOpts.ReferenceName != "" {
+			cloneOpts.ReferenceName = ""
+			repoSrc, err = repository.Clone(ctx, cloneOpts, false)
+		}
 		if err != nil {
 			return fmt.Errorf("failed to clone remote repo %s: %w", u, err)
 		}
-
-		localRepoPath = path
-		cleanup = cf
-		defer func() {
-			if cleanup != nil {
-				cleanup()
-			}
-		}()
+		localRepoPath = repoSrc.Workspace.RootPath()
+		defer repoSrc.Close()
 	}
 
 	effRef := refOrHEAD(ref)
@@ -472,7 +483,7 @@ func (s *Scanner) runScanDir(cmd *cobra.Command, args []string) error {
 	publishedAfterStr, _ := cmd.Flags().GetString("published-after")
 	asOfStr, _ := cmd.Flags().GetString("as-of")
 
-	pkgs, err := inv.ScanPackagesWorking(ctx, path)
+	pkgs, err := scanPackagesWorkingAtPath(ctx, path)
 	if err != nil {
 		return fmt.Errorf("failed to scan packages: %w", err)
 	}
@@ -637,9 +648,9 @@ func collectInventory(ctx context.Context, repoPath, gitRef string, ecos []strin
 	ref := refOrHEAD(gitRef)
 	if strings.EqualFold(ref, "HEAD") {
 		if _, err := git.PlainOpen(repoPath); err == nil {
-			return inv.ScanPackagesWorking(ctx, repoPath)
+			return scanPackagesWorkingAtPath(ctx, repoPath)
 		}
-		return inv.ScanPackagesWorking(ctx, repoPath)
+		return scanPackagesWorkingAtPath(ctx, repoPath)
 	}
 
 	repo, err := git.PlainOpen(repoPath)
@@ -652,7 +663,24 @@ func collectInventory(ctx context.Context, repoPath, gitRef string, ecos []strin
 		return nil, err
 	}
 
-	return inv.ScanPackagesAtCommitSnapshot(ctx, repoPath, *h)
+	return scanPackagesAtCommit(ctx, repoPath, *h)
+}
+
+func scanPackagesWorkingAtPath(ctx context.Context, path string) ([]*extractor.Package, error) {
+	ws, err := workspace.NewDir(path)
+	if err != nil {
+		return nil, err
+	}
+	defer ws.Close()
+	return inv.ScanPackagesWorking(ctx, ws)
+}
+
+func scanPackagesAtCommit(ctx context.Context, path string, hash plumbing.Hash) ([]*extractor.Package, error) {
+	repo, err := git.PlainOpen(path)
+	if err != nil {
+		return nil, err
+	}
+	return inv.ScanPackagesAtCommitSnapshot(ctx, repo, hash)
 }
 
 func refOrHEAD(r string) string {

@@ -1,10 +1,10 @@
 package compare
 
 import (
-	"os"
 	"testing"
 
 	"github.com/google/osv-scalibr/extractor"
+	"github.com/picatz/deputy/internal/workspace"
 )
 
 func TestGetModuleRoot(t *testing.T) {
@@ -57,10 +57,11 @@ func Test_allDigits(t *testing.T) {
 }
 
 func TestGetDirectDependencies(t *testing.T) {
-	dir := t.TempDir()
-	oldWd, _ := os.Getwd()
-	defer os.Chdir(oldWd)
-	os.Chdir(dir)
+	ws, err := workspace.NewTempDir("cmp-go-mod")
+	if err != nil {
+		t.Fatalf("new workspace: %v", err)
+	}
+	defer ws.Close()
 
 	goMod := `module example.com/app
 
@@ -69,10 +70,10 @@ require (
     github.com/c/d v0.0.1 // indirect
     github.com/e/f v2.0.0
 )`
-	if err := os.WriteFile("go.mod", []byte(goMod), 0o644); err != nil {
+	if err := ws.WriteFile("go.mod", []byte(goMod), 0o644); err != nil {
 		t.Fatalf("write go.mod: %v", err)
 	}
-	deps := GetDirectDependencies()
+	deps := GetDirectDependencies(ws)
 	if !deps["github.com/a/b"] || !deps["github.com/e/f"] {
 		t.Fatalf("expected direct deps present: %v", deps)
 	}
@@ -98,18 +99,18 @@ require (
 }
 
 func Test_ComparePackages_basic(t *testing.T) {
-	// Prepare working directory with go.mod for direct dependency detection
-	dir := t.TempDir()
-	oldWd, _ := os.Getwd()
-	defer os.Chdir(oldWd)
-	os.Chdir(dir)
+	ws, err := workspace.NewTempDir("cmp-compare")
+	if err != nil {
+		t.Fatalf("new workspace: %v", err)
+	}
+	defer ws.Close()
 	goMod := `module example.com/app
 
 require (
     github.com/new/added v1.0.0
     github.com/keep/updated v1.1.0
 )`
-	if err := os.WriteFile("go.mod", []byte(goMod), 0o644); err != nil {
+	if err := ws.WriteFile("go.mod", []byte(goMod), 0o644); err != nil {
 		t.Fatalf("write go.mod: %v", err)
 	}
 
@@ -121,13 +122,13 @@ require (
 		{Name: "github.com/keep/updated", Version: "v1.1.0"}, // updated
 		{Name: "github.com/new/added", Version: "v1.0.0"},    // added
 	}
-	deps := GetDirectDependencies()
-	changes := ComparePackages(oldPkgs, newPkgs, deps)
+	deps := GetDirectDependencies(ws)
+	changes := ComparePackages(oldPkgs, newPkgs, deps, ws)
 	if len(changes) != 3 {
 		t.Fatalf("expected 3 changes got %d: %+v", len(changes), changes)
 	}
 
-	var added, removed, updated bool
+	var added, removed, upgraded bool
 	for _, c := range changes {
 		switch c.ChangeType {
 		case Added:
@@ -140,14 +141,53 @@ require (
 				t.Fatalf("bad removed: %+v", c)
 			}
 			removed = true
-		case Updated:
+		case Upgraded:
 			if c.Name != "github.com/keep/updated" || c.BaseVersion != "v1.0.0" || c.TargetVersion != "v1.1.0" || !c.IsDirect {
-				t.Fatalf("bad updated: %+v", c)
+				t.Fatalf("bad upgraded: %+v", c)
 			}
-			updated = true
+			upgraded = true
 		}
 	}
-	if !added || !removed || !updated {
-		t.Fatalf("missing change types: added=%v removed=%v updated=%v", added, removed, updated)
+	if !added || !removed || !upgraded {
+		t.Fatalf("missing change types: added=%v removed=%v upgraded=%v", added, removed, upgraded)
+	}
+}
+
+func TestComparePackages_DowngradeAndRename(t *testing.T) {
+	oldPkgs := []*extractor.Package{
+		{Name: "github.com/example/down", Version: "v1.2.0"},
+		{Name: "github.com/example/rename", Version: "v1.0.0"},
+	}
+	newPkgs := []*extractor.Package{
+		{Name: "github.com/example/down", Version: "v1.1.0"},
+		{Name: "github.com/example/rename/v2", Version: "v1.0.0"},
+	}
+	deps := map[string]bool{
+		"github.com/example/down":   true,
+		"github.com/example/rename": true,
+	}
+	changes := ComparePackages(oldPkgs, newPkgs, deps, nil)
+	if len(changes) != 2 {
+		t.Fatalf("expected 2 changes got %d: %+v", len(changes), changes)
+	}
+	seen := map[ChangeType]bool{}
+	for _, c := range changes {
+		switch c.ChangeType {
+		case Downgraded:
+			seen[Downgraded] = true
+			if c.Name != "github.com/example/down" || c.BaseVersion != "v1.2.0" || c.TargetVersion != "v1.1.0" {
+				t.Fatalf("unexpected downgrade change: %+v", c)
+			}
+		case Updated:
+			seen[Updated] = true
+			if c.Name != "github.com/example/rename/v2" || c.OldName != "github.com/example/rename" {
+				t.Fatalf("unexpected rename change: %+v", c)
+			}
+		default:
+			t.Fatalf("unexpected change type %v", c.ChangeType)
+		}
+	}
+	if !seen[Downgraded] || !seen[Updated] {
+		t.Fatalf("missing expected change types: %+v", seen)
 	}
 }

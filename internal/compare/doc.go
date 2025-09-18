@@ -5,9 +5,9 @@
 // translation of historical gopkg.in vanity hosts to their GitHub equivalents.
 //
 // The core entry point, ComparePackages, produces a set of Change records that
-// categorize dependency transitions as Added, Removed, or Updated, while
-// preserving whether a dependency is direct (appears explicitly in go.mod) or
-// indirect. Helper functions handle:
+// categorize dependency transitions as Added, Removed, Upgraded, Downgraded,
+// or Updated (non-semver changes) while preserving whether a dependency is
+// direct (appears explicitly in go.mod) or indirect. Helper functions handle:
 //   - Path canonicalization (NormalizeGopkgInURL, ExtractCanonicalPackageName)
 //   - Parsing import paths into structured GoPackageInfo (ParseGoPackage)
 //   - Semantic version comparison with proper v-prefix handling
