@@ -30,7 +30,7 @@ type ListItem struct {
 	Ecosystem string `json:"ecosystem"`
 	Name      string `json:"name"` // package or module, depending on level
 	Version   string `json:"version"`
-	Module    string `json:"module"` // module root (always populated for Go)
+	Module    string `json:"module"` // module root when applicable (Go modules)
 	IsDirect  bool   `json:"isDirect"`
 	PURL      string `json:"purl,omitempty"`
 }
@@ -141,7 +141,7 @@ REMOTE REPOSITORIES:
 	}
 
 	cmd.Flags().StringVar(&ref, "ref", "HEAD", "Git reference (commit, tag, branch)")
-	cmd.Flags().StringSliceVar(&ecos, "ecosystems", []string{"go"}, "Ecosystems to include (e.g., go)")
+	cmd.Flags().StringSliceVar(&ecos, "ecosystems", []string{"all"}, "Ecosystems to include (e.g., go,npm,python). Defaults to all supported.")
 	cmd.Flags().StringVarP(&format, "format", "f", "text", "Output format: text | tsv | json")
 	cmd.Flags().StringVar(&level, "level", "package", "(Reserved) Output granularity; currently always emits package-level entries")
 	cmd.Flags().StringVarP(&outPath, "output", "o", "-", "Output file path or '-' for stdout")
@@ -152,7 +152,7 @@ REMOTE REPOSITORIES:
 }
 
 // collectListItems gathers packages for repo/ref (supporting remote clone) and converts to ListItem set.
-func collectListItems(ctx context.Context, repoPath, ref string, _ []string) ([]ListItem, string, string, error) {
+func collectListItems(ctx context.Context, repoPath, ref string, ecosystems []string) ([]ListItem, string, string, error) {
 	var (
 		src *repository.Source
 		err error
@@ -201,33 +201,30 @@ func collectListItems(ctx context.Context, repoPath, ref string, _ []string) ([]
 		pkgs       []*extractor.Package
 		targetHash *plumbing.Hash
 	)
+	scanOpts := inv.ScanOptions{Ecosystems: ecosystems}
 	if strings.EqualFold(effRef, "HEAD") {
-		pkgs, err = inv.ScanPackagesWorking(ctx, ws)
+		pkgs, err = inv.ScanPackagesWorking(ctx, ws, scanOpts)
 	} else {
 		targetHash, err = gitx.ResolveRevisionEnhanced(repo, effRef)
 		if err != nil {
 			return nil, "", "", err
 		}
-		pkgs, err = inv.ScanPackagesAtCommitSnapshot(ctx, repo, *targetHash)
+		pkgs, err = inv.ScanPackagesAtCommitSnapshot(ctx, repo, *targetHash, scanOpts)
 	}
 	if err != nil {
 		return nil, "", "", fmt.Errorf("failed to collect inventory: %w", err)
 	}
 
-	var goModData []byte
+	goDirect := map[string]bool{"stdlib": true}
 	if strings.EqualFold(effRef, "HEAD") || strings.EqualFold(effRef, "HEAD~0") {
-		if b, e := ws.ReadFile("go.mod"); e == nil {
-			goModData = b
-		}
+		goDirect = cmp.CollectGoDirectModulesFromWorkspace(ws)
 	} else if targetHash != nil {
-		if b, e := gitx.ReadFileAtCommit(repo, *targetHash, "go.mod"); e == nil {
-			goModData = b
+		if direct, err := cmp.CollectGoDirectModulesFromCommit(repo, *targetHash); err == nil {
+			goDirect = direct
 		}
 	}
-	depsLoose := cmp.GetDirectDependenciesFromGoMod(goModData)
-	depsExact := directModulesFromGoMod(goModData)
 
-	items := toListItems(ws, pkgs, depsLoose, depsExact)
+	items := toListItems(ws, pkgs, goDirect)
 	sort.Slice(items, func(i, j int) bool {
 		// Sort by PURL for stable output
 		if items[i].PURL == items[j].PURL {
@@ -253,45 +250,73 @@ func collectListItems(ctx context.Context, repoPath, ref string, _ []string) ([]
 }
 
 // toListItems converts extractor packages into unique list entries.
-func toListItems(ws workspace.FS, pkgs []*extractor.Package, _ map[string]bool, depsExact map[string]bool) []ListItem {
-	// if depsLoose == nil {
-	// 	depsLoose = cmp.GetDirectDependencies(ws)
-	// }
-	if depsExact == nil {
-		depsExact = map[string]bool{"stdlib": true}
+func toListItems(ws workspace.FS, pkgs []*extractor.Package, goDirect map[string]bool) []ListItem {
+	if goDirect == nil {
+		goDirect = map[string]bool{}
 	}
 	out := make([]ListItem, 0, len(pkgs))
 	for _, p := range pkgs {
 		if p == nil || p.Name == "" || p.Version == "" {
 			continue
 		}
-		info := cmp.ParseGoPackage(p)
-		module := bestModuleForPackage(p.Name, depsExact)
-		if module == "" {
-			module = cmp.GetModuleRoot(info.CanonicalName)
+		ecos := strings.TrimSpace(p.Ecosystem())
+		if ecos == "" && p.PURLType != "" {
+			ecos = p.PURLType
 		}
 		li := ListItem{
-			Ecosystem: "go",
+			Ecosystem: ecos,
 			Name:      p.Name,
 			Version:   p.Version,
-			Module:    module,
-			IsDirect:  isDirectForPackage(p.Name, depsExact),
 		}
 		if pu := p.PURL(); pu != nil {
-			li.PURL = normalizeGolangPURLLikeSBOM(pu.String(), ws)
-		} else {
-			full := info.CanonicalName
-			ns := ""
-			name := full
-			if idx := strings.LastIndex(full, "/"); idx >= 0 {
-				ns = full[:idx]
-				name = full[idx+1:]
+			li.PURL = pu.String()
+		}
+		if strings.EqualFold(ecos, "Go") || strings.EqualFold(p.PURLType, scalpurl.TypeGolang) {
+			info := cmp.ParseGoPackage(p)
+			module := bestModuleForPackage(info.CanonicalName, goDirect)
+			if module == "" {
+				module = bestModuleForPackage(p.Name, goDirect)
 			}
-			li.PURL = scalpurl.PackageURL{Type: scalpurl.TypeGolang, Namespace: ns, Name: name, Version: p.Version}.String()
+			if module == "" {
+				module = cmp.GetModuleRoot(info.CanonicalName)
+			}
+			li.Module = module
+			li.IsDirect = goDirect[module]
+			if pu := p.PURL(); pu != nil {
+				li.PURL = normalizeGolangPURLLikeSBOM(pu.String(), ws)
+			} else {
+				full := info.CanonicalName
+				ns := ""
+				name := full
+				if idx := strings.LastIndex(full, "/"); idx >= 0 {
+					ns = full[:idx]
+					name = full[idx+1:]
+				}
+				li.PURL = scalpurl.PackageURL{Type: scalpurl.TypeGolang, Namespace: ns, Name: name, Version: p.Version}.String()
+			}
+		} else {
+			if li.PURL == "" && p.PURLType != "" {
+				li.PURL = scalpurl.PackageURL{Type: p.PURLType, Name: p.Name, Version: p.Version}.String()
+			}
 		}
 		out = append(out, li)
 	}
 	return out
+}
+
+func bestModuleForPackage(pkg string, direct map[string]bool) string {
+	best := ""
+	for mod := range direct {
+		if mod == "stdlib" {
+			continue
+		}
+		if pkg == mod || strings.HasPrefix(pkg, mod+"/") {
+			if len(mod) > len(best) {
+				best = mod
+			}
+		}
+	}
+	return best
 }
 
 // writeListText prints a simple space-separated table (with optional header).
@@ -346,61 +371,6 @@ func writeListTSV(w io.Writer, items []ListItem, header bool) error {
 		fmt.Fprintf(w, "%s\t%s\n", it.PURL, direct)
 	}
 	return nil
-}
-
-// directModulesFromGoMod extracts exact module paths from go.mod for direct deps.
-func directModulesFromGoMod(data []byte) map[string]bool {
-	m := map[string]bool{"stdlib": true}
-	if len(data) == 0 {
-		return m
-	}
-	lines := strings.Split(string(data), "\n")
-	for _, ln := range lines {
-		ln = strings.TrimSpace(ln)
-		if ln == "" || strings.HasPrefix(ln, "//") {
-			continue
-		}
-		if strings.Contains(ln, "// indirect") {
-			continue
-		}
-		fields := strings.Fields(ln)
-		if len(fields) >= 2 && strings.Contains(fields[0], "/") {
-			m[fields[0]] = true
-		}
-	}
-	return m
-}
-
-// isDirectForPackage checks if any exact direct module path prefixes the package name.
-func isDirectForPackage(pkg string, direct map[string]bool) bool {
-	if direct == nil {
-		return false
-	}
-	for mod := range direct {
-		if mod == "stdlib" {
-			continue
-		}
-		if pkg == mod || strings.HasPrefix(pkg, mod+"/") {
-			return true
-		}
-	}
-	return false
-}
-
-// bestModuleForPackage returns the longest direct module prefix of a package name if any.
-func bestModuleForPackage(pkg string, direct map[string]bool) string {
-	best := ""
-	for mod := range direct {
-		if mod == "stdlib" {
-			continue
-		}
-		if pkg == mod || strings.HasPrefix(pkg, mod+"/") {
-			if len(mod) > len(best) {
-				best = mod
-			}
-		}
-	}
-	return best
 }
 
 // normalizeGolangPURLLikeSBOM mirrors the SBOM normalization for Golang PURLs.

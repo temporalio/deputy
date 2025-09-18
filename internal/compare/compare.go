@@ -46,8 +46,8 @@ type Change struct {
 	TargetVersion string     // version in target inventory (for Added/Updated)
 	BaseVersion   string     // version in base inventory (for Removed/Updated)
 	ChangeType    ChangeType // classification of the change
-	Ecosystem     string     // e.g. "go"
-	IsDirect      bool       // true if a direct dependency in target go.mod
+	Ecosystem     string     // e.g. "Go", "npm"
+	IsDirect      bool       // true if a direct dependency when known (currently Go)
 }
 
 // GoPackageInfo represents a parsed interpretation of an import path possibly
@@ -275,10 +275,9 @@ func CompareGoPackageVersions(c Change) int {
 	return semver.Compare(newV, oldV)
 }
 
-// classifyChangeType derives a ChangeType based on semantic version ordering.
-// When semantic versions are unavailable or equal it returns Updated to signal
-// a non-version change.
-func classifyChangeType(baseVersion, targetVersion string) ChangeType {
+// classifyGoChangeType derives a ChangeType based on Go semantic version ordering.
+// When versions cannot be compared it falls back to Updated.
+func classifyGoChangeType(baseVersion, targetVersion string) ChangeType {
 	if baseVersion == "" || targetVersion == "" {
 		return Updated
 	}
@@ -291,6 +290,16 @@ func classifyChangeType(baseVersion, targetVersion string) ChangeType {
 	default:
 		return Updated
 	}
+}
+
+func selectChangeType(ecosystem, baseVersion, targetVersion string) ChangeType {
+	if strings.EqualFold(ecosystem, "Go") {
+		return classifyGoChangeType(baseVersion, targetVersion)
+	}
+	if baseVersion == targetVersion {
+		return Updated
+	}
+	return Updated
 }
 
 // GetDirectDependenciesFromGoMod parses a go.mod file and returns module roots
@@ -310,8 +319,15 @@ func GetDirectDependenciesFromGoMod(data []byte) map[string]bool {
 			continue
 		}
 		fields := strings.Fields(ln)
-		if len(fields) >= 2 && strings.Contains(fields[0], "/") {
-			info := ParseGoPackage(&extractor.Package{Name: fields[0]})
+		if len(fields) < 2 {
+			continue
+		}
+		candidate := fields[0]
+		if candidate == "require" && len(fields) >= 3 {
+			candidate = fields[1]
+		}
+		if strings.Contains(candidate, "/") {
+			info := ParseGoPackage(&extractor.Package{Name: candidate})
 			deps[GetModuleRoot(info.CanonicalName)] = true
 		}
 	}
@@ -340,47 +356,114 @@ func GetDirectDependencies(ws workspace.FileReader) map[string]bool {
 //
 // If deps is nil, direct dependencies are inferred from go.mod in the supplied
 // workspace.
+type pkgSummary struct {
+	pkg       *extractor.Package
+	ecosystem string
+	canonical string
+	module    string
+}
+
+func summarizePackage(p *extractor.Package) (string, pkgSummary) {
+	if p == nil || p.Name == "" {
+		return "", pkgSummary{}
+	}
+	ecos := strings.TrimSpace(p.Ecosystem())
+	if ecos == "" && p.PURLType != "" {
+		ecos = p.PURLType
+	}
+	meta := pkgSummary{pkg: p, ecosystem: ecos}
+	if strings.EqualFold(ecos, "Go") {
+		info := ParseGoPackage(p)
+		meta.canonical = strings.ToLower(info.CanonicalName)
+		meta.module = GetModuleRoot(info.CanonicalName)
+		if meta.module == "" {
+			meta.module = GetModuleRoot(p.Name)
+		}
+		return "go|" + meta.canonical, meta
+	}
+	name := strings.ToLower(p.Name)
+	meta.canonical = name
+	if ecos == "" {
+		return name, meta
+	}
+	return strings.ToLower(ecos) + "|" + name, meta
+}
+
+func (s pkgSummary) ecosystemName() string {
+	if strings.TrimSpace(s.ecosystem) != "" {
+		return s.ecosystem
+	}
+	return "unknown"
+}
+
 func ComparePackages(oldPkgs, newPkgs []*extractor.Package, deps map[string]bool, ws workspace.FileReader) []Change {
 	if len(oldPkgs) == 0 && len(newPkgs) == 0 {
 		return nil
 	}
-	// Index by canonical name -> latest (by version)
-	oldMap := map[string]*extractor.Package{}
-	newMap := map[string]*extractor.Package{}
+	oldMap := map[string]pkgSummary{}
+	newMap := map[string]pkgSummary{}
 	for _, p := range oldPkgs {
-		if p != nil && p.Name != "" {
-			info := ParseGoPackage(p)
-			oldMap[info.CanonicalName] = p
+		if key, meta := summarizePackage(p); key != "" {
+			oldMap[key] = meta
 		}
 	}
 	for _, p := range newPkgs {
-		if p != nil && p.Name != "" {
-			info := ParseGoPackage(p)
-			newMap[info.CanonicalName] = p
+		if key, meta := summarizePackage(p); key != "" {
+			newMap[key] = meta
 		}
 	}
-
 	if deps == nil {
 		deps = GetDirectDependencies(ws)
 	}
 	var changes []Change
-	// Removed or updated
-	for canon, op := range oldMap {
-		np, ok := newMap[canon]
+	for key, oldMeta := range oldMap {
+		newMeta, ok := newMap[key]
 		if !ok {
-			changes = append(changes, Change{Name: op.Name, BaseVersion: op.Version, ChangeType: Removed, Ecosystem: "go", IsDirect: deps[GetModuleRoot(canon)]})
+			changes = append(changes, Change{
+				Name:        oldMeta.pkg.Name,
+				BaseVersion: oldMeta.pkg.Version,
+				ChangeType:  Removed,
+				Ecosystem:   oldMeta.ecosystemName(),
+				IsDirect:    isDirectForSummary(oldMeta, deps),
+			})
 			continue
 		}
-		if op.Version != np.Version || op.Name != np.Name {
-			changeType := classifyChangeType(op.Version, np.Version)
-			changes = append(changes, Change{Name: np.Name, OldName: op.Name, BaseVersion: op.Version, TargetVersion: np.Version, ChangeType: changeType, Ecosystem: "go", IsDirect: deps[GetModuleRoot(canon)]})
+		if oldMeta.pkg.Version != newMeta.pkg.Version || oldMeta.pkg.Name != newMeta.pkg.Name {
+			changes = append(changes, Change{
+				Name:          newMeta.pkg.Name,
+				OldName:       oldMeta.pkg.Name,
+				BaseVersion:   oldMeta.pkg.Version,
+				TargetVersion: newMeta.pkg.Version,
+				ChangeType:    selectChangeType(newMeta.ecosystemName(), oldMeta.pkg.Version, newMeta.pkg.Version),
+				Ecosystem:     newMeta.ecosystemName(),
+				IsDirect:      isDirectForSummary(newMeta, deps),
+			})
 		}
 	}
-	// Added
-	for canon, np := range newMap {
-		if _, ok := oldMap[canon]; !ok {
-			changes = append(changes, Change{Name: np.Name, TargetVersion: np.Version, ChangeType: Added, Ecosystem: "go", IsDirect: deps[GetModuleRoot(canon)]})
+	for key, newMeta := range newMap {
+		if _, ok := oldMap[key]; ok {
+			continue
 		}
+		changes = append(changes, Change{
+			Name:          newMeta.pkg.Name,
+			TargetVersion: newMeta.pkg.Version,
+			ChangeType:    Added,
+			Ecosystem:     newMeta.ecosystemName(),
+			IsDirect:      isDirectForSummary(newMeta, deps),
+		})
 	}
 	return changes
+}
+
+func isDirectForSummary(meta pkgSummary, deps map[string]bool) bool {
+	if deps == nil {
+		return false
+	}
+	if !strings.EqualFold(meta.ecosystem, "Go") {
+		return false
+	}
+	if meta.module == "" {
+		return false
+	}
+	return deps[meta.module]
 }

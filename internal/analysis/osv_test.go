@@ -36,7 +36,7 @@ func Test_QueryOSVBatch_ok(t *testing.T) {
 	cacheDirPath = ""
 	t.Setenv("DEPUTY_CACHE_DIR", t.TempDir())
 	client := &fakeOSVClient{}
-	vulns, err := QueryOSVBatch(context.Background(), client, []PkgInput{{Name: "github.com/example/pkg", Version: "1.2.3", IsDirect: true}})
+	vulns, err := QueryOSVBatch(context.Background(), client, []PkgInput{{Name: "github.com/example/pkg", Version: "1.2.3", Ecosystem: "Go", IsDirect: true}})
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
@@ -62,7 +62,7 @@ func Test_QueryOSVBatch_query_error(t *testing.T) {
 	cacheDirPath = ""
 	t.Setenv("DEPUTY_CACHE_DIR", t.TempDir())
 	client := &fakeOSVClientQueryErr{}
-	_, err := QueryOSVBatch(context.Background(), client, []PkgInput{{Name: "n", Version: "1", IsDirect: true}})
+	_, err := QueryOSVBatch(context.Background(), client, []PkgInput{{Name: "n", Version: "1", Ecosystem: "Go", IsDirect: true}})
 	if err == nil {
 		t.Fatalf("expected error")
 	}
@@ -82,7 +82,7 @@ func Test_QueryOSVBatch_getvuln_error(t *testing.T) {
 	cacheDirPath = ""
 	t.Setenv("DEPUTY_CACHE_DIR", t.TempDir())
 	client := &fakeOSVClientGetErr{}
-	vulns, err := QueryOSVBatch(context.Background(), client, []PkgInput{{Name: "n", Version: "1", IsDirect: true}})
+	vulns, err := QueryOSVBatch(context.Background(), client, []PkgInput{{Name: "n", Version: "1", Ecosystem: "Go", IsDirect: true}})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -115,7 +115,7 @@ func Test_QueryOSVBatch_skips_fixed_version(t *testing.T) {
 	cacheDirPath = ""
 	t.Setenv("DEPUTY_CACHE_DIR", t.TempDir())
 	client := &fakeOSVClientFixed{}
-	vulns, err := QueryOSVBatch(context.Background(), client, []PkgInput{{Name: "github.com/example/pkg", Version: "1.55.6", IsDirect: true}})
+	vulns, err := QueryOSVBatch(context.Background(), client, []PkgInput{{Name: "github.com/example/pkg", Version: "1.55.6", Ecosystem: "Go", IsDirect: true}})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -157,7 +157,7 @@ func (f *fakeOSVClientAWS) GetVulnByID(ctx context.Context, id string) (*osvsche
 
 func Test_QueryOSVBatch_awssdkv1(t *testing.T) {
 	client := &fakeOSVClientAWS{}
-	vulns, err := QueryOSVBatch(context.Background(), client, []PkgInput{{Name: "github.com/aws/aws-sdk-go", Version: "1.55.6", IsDirect: true}})
+	vulns, err := QueryOSVBatch(context.Background(), client, []PkgInput{{Name: "github.com/aws/aws-sdk-go", Version: "1.55.6", Ecosystem: "Go", IsDirect: true}})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -165,7 +165,7 @@ func Test_QueryOSVBatch_awssdkv1(t *testing.T) {
 		t.Fatalf("expected no vulns for fixed version, got %d", len(cons))
 	}
 
-	vulns, err = QueryOSVBatch(context.Background(), client, []PkgInput{{Name: "github.com/aws/aws-sdk-go", Version: "1.33.0", IsDirect: true}})
+	vulns, err = QueryOSVBatch(context.Background(), client, []PkgInput{{Name: "github.com/aws/aws-sdk-go", Version: "1.33.0", Ecosystem: "Go", IsDirect: true}})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -217,7 +217,7 @@ func Test_QueryOSVBatch_aliasWithoutRange(t *testing.T) {
 	cacheDirPath = ""
 	t.Setenv("DEPUTY_CACHE_DIR", t.TempDir())
 	client := &fakeOSVClientAlias{}
-	vulns, err := QueryOSVBatch(context.Background(), client, []PkgInput{{Name: "github.com/example/pkg", Version: "1.2.3", IsDirect: true}})
+	vulns, err := QueryOSVBatch(context.Background(), client, []PkgInput{{Name: "github.com/example/pkg", Version: "1.2.3", Ecosystem: "Go", IsDirect: true}})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -249,7 +249,7 @@ func Test_QueryOSVBatch_cache(t *testing.T) {
 	tmp := t.TempDir()
 	t.Setenv("DEPUTY_CACHE_DIR", tmp)
 	client := &countingOSVClient{}
-	pkgs := []PkgInput{{Name: "github.com/example/pkg", Version: "1.0.0"}}
+	pkgs := []PkgInput{{Name: "github.com/example/pkg", Version: "1.0.0", Ecosystem: "Go"}}
 	if _, err := QueryOSVBatch(context.Background(), client, pkgs); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

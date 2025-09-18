@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -52,7 +51,7 @@ type ModuleDeprecation struct {
 // fields so tests can inject deterministic doubles instead of hitting the
 // network or filesystem.
 type Scanner struct {
-	collectInventory     func(ctx context.Context, repoPath, gitRef string, ecos []string) ([]*extractor.Package, error)
+	collectInventory     func(ctx context.Context, repoPath, gitRef string, opts inv.ScanOptions) ([]*extractor.Package, error)
 	queryVulnerabilities func(ctx context.Context, client analysis.OSVClient, pkgs []analysis.PkgInput) ([]analysis.Vulnerability, error)
 	osvClient            analysis.OSVClient
 }
@@ -94,8 +93,9 @@ data from multiple sources including CVE, GitHub Security Advisories, Go vulnera
 database, and others. Provides comprehensive coverage for Go ecosystem packages.
 
 SUPPORTED ECOSYSTEMS:
-Currently supports Go packages with plans to expand to other ecosystems.
-Uses OSV-Scalibr for reliable package detection and vulnerability matching.
+Supports all ecosystems exposed by OSV-Scalibr (Go modules, npm, PyPI, Maven,
+RubyGems, containers, operating system packages, and more).
+Use --ecosystems to limit scanning to specific sets when you don't need the full inventory.
 
 OUTPUT FORMATS:
 • text: Human-readable colored output with severity indicators and fix suggestions
@@ -152,7 +152,7 @@ FILTERING OPTIONS:
   # Ignore vulnerabilities without available fixes
   deputy scan --ignore-unfixed
 
-  # Focus on specific ecosystems (future expansion)
+  # Focus on specific ecosystems
   deputy scan --ecosystems go
 
 REMOTE REPOSITORY SCANNING:
@@ -188,7 +188,7 @@ WORKFLOW EXAMPLES:
 	}
 
 	scanCmd.Flags().StringP("ref", "r", "HEAD", "Git reference to scan (branch, tag, or commit)")
-	scanCmd.Flags().StringSliceP("ecosystems", "e", []string{"go"}, "Ecosystems to scan (go)")
+	scanCmd.PersistentFlags().StringSliceP("ecosystems", "e", []string{"all"}, "Ecosystems to scan (default: all supported)")
 	scanCmd.Flags().StringP("output", "o", "", "Output file (default: stdout)")
 	scanCmd.Flags().StringP("format", "f", "text", "Output format (text, json)")
 	scanCmd.Flags().Bool("ignore-unfixed", false, "Ignore vulnerabilities without fixes")
@@ -325,6 +325,7 @@ func (s *Scanner) runScan(cmd *cobra.Command, args []string) error {
 
 	ref, _ := cmd.Flags().GetString("ref")
 	ecos, _ := cmd.Flags().GetStringSlice("ecosystems")
+	scanOpts := inv.ScanOptions{Ecosystems: ecos}
 	outPath, _ := cmd.Flags().GetString("output")
 	format, _ := cmd.Flags().GetString("format")
 	ignoreUnfixed, _ := cmd.Flags().GetBool("ignore-unfixed")
@@ -389,30 +390,28 @@ func (s *Scanner) runScan(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	pkgs, err := s.collectInventory(ctx, localRepoPath, effRef, ecos)
+	pkgs, err := s.collectInventory(ctx, localRepoPath, effRef, scanOpts)
 	if err != nil {
 		return fmt.Errorf("failed to collect inventory: %w", err)
 	}
 
 	// Determine direct dependencies from go.mod at the specified reference
-	var goModData []byte
+	goDirect := map[string]bool{"stdlib": true}
+	resolver := osManifestResolver(localRepoPath)
 	if strings.EqualFold(effRef, "HEAD") || strings.EqualFold(effRef, "HEAD~0") {
-		b, err := os.ReadFile(filepath.Join(localRepoPath, "go.mod"))
-		if err == nil {
-			goModData = b
-		}
+		goDirect = cmp.CollectGoDirectModulesFromDisk(localRepoPath)
 	} else {
 		if repo, err := git.PlainOpen(localRepoPath); err == nil {
 			if h, err := gitx.ResolveRevisionEnhanced(repo, effRef); err == nil && h != nil {
-				if b, err := gitx.ReadFileAtCommit(repo, *h, "go.mod"); err == nil {
-					goModData = b
+				if direct, derr := cmp.CollectGoDirectModulesFromCommit(repo, *h); derr == nil {
+					goDirect = direct
 				}
+				resolver = gitManifestResolver{repo: repo, hash: *h}
 			}
 		}
 	}
-	deps := cmp.GetDirectDependenciesFromGoMod(goModData)
 
-	inputs := packagesToInputs(pkgs, deps)
+	inputs := packagesToInputs(pkgs, packageInputOptions{GoDirect: goDirect, Resolver: resolver})
 
 	vulns, err := s.queryOSV(ctx, inputs)
 	if err != nil {
@@ -483,18 +482,15 @@ func (s *Scanner) runScanDir(cmd *cobra.Command, args []string) error {
 	publishedAfterStr, _ := cmd.Flags().GetString("published-after")
 	asOfStr, _ := cmd.Flags().GetString("as-of")
 
-	pkgs, err := scanPackagesWorkingAtPath(ctx, path)
+	ecos, _ := cmd.Flags().GetStringSlice("ecosystems")
+	scanOpts := inv.ScanOptions{Ecosystems: ecos}
+	pkgs, err := scanPackagesWorkingAtPath(ctx, path, scanOpts)
 	if err != nil {
 		return fmt.Errorf("failed to scan packages: %w", err)
 	}
 
-	var goModData []byte
-	if b, err := os.ReadFile(filepath.Join(path, "go.mod")); err == nil {
-		goModData = b
-	}
-	deps := cmp.GetDirectDependenciesFromGoMod(goModData)
-
-	inputs := packagesToInputs(pkgs, deps)
+	goDirect := cmp.CollectGoDirectModulesFromDisk(path)
+	inputs := packagesToInputs(pkgs, packageInputOptions{GoDirect: goDirect, Resolver: osManifestResolver(path)})
 
 	vulns, err := s.queryOSV(ctx, inputs)
 	if err != nil {
@@ -583,7 +579,7 @@ func (s *Scanner) runScanSBOM(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to parse SBOM: %w", err)
 	}
 
-	inputs := packagesToInputs(pkgs, nil)
+	inputs := packagesToInputs(pkgs, packageInputOptions{})
 
 	vulns, err := s.queryOSV(ctx, inputs)
 	if err != nil {
@@ -644,13 +640,13 @@ func (s *Scanner) runScanSBOM(cmd *cobra.Command, args []string) error {
 
 // Helper functions
 
-func collectInventory(ctx context.Context, repoPath, gitRef string, ecos []string) ([]*extractor.Package, error) {
+func collectInventory(ctx context.Context, repoPath, gitRef string, opts inv.ScanOptions) ([]*extractor.Package, error) {
 	ref := refOrHEAD(gitRef)
 	if strings.EqualFold(ref, "HEAD") {
 		if _, err := git.PlainOpen(repoPath); err == nil {
-			return scanPackagesWorkingAtPath(ctx, repoPath)
+			return scanPackagesWorkingAtPath(ctx, repoPath, opts)
 		}
-		return scanPackagesWorkingAtPath(ctx, repoPath)
+		return scanPackagesWorkingAtPath(ctx, repoPath, opts)
 	}
 
 	repo, err := git.PlainOpen(repoPath)
@@ -663,24 +659,23 @@ func collectInventory(ctx context.Context, repoPath, gitRef string, ecos []strin
 		return nil, err
 	}
 
-	return scanPackagesAtCommit(ctx, repoPath, *h)
+	return scanPackagesAtCommit(ctx, repoPath, *h, opts)
 }
-
-func scanPackagesWorkingAtPath(ctx context.Context, path string) ([]*extractor.Package, error) {
+func scanPackagesWorkingAtPath(ctx context.Context, path string, opts inv.ScanOptions) ([]*extractor.Package, error) {
 	ws, err := workspace.NewDir(path)
 	if err != nil {
 		return nil, err
 	}
 	defer ws.Close()
-	return inv.ScanPackagesWorking(ctx, ws)
+	return inv.ScanPackagesWorking(ctx, ws, opts)
 }
 
-func scanPackagesAtCommit(ctx context.Context, path string, hash plumbing.Hash) ([]*extractor.Package, error) {
+func scanPackagesAtCommit(ctx context.Context, path string, hash plumbing.Hash, opts inv.ScanOptions) ([]*extractor.Package, error) {
 	repo, err := git.PlainOpen(path)
 	if err != nil {
 		return nil, err
 	}
-	return inv.ScanPackagesAtCommitSnapshot(ctx, repo, hash)
+	return inv.ScanPackagesAtCommitSnapshot(ctx, repo, hash, opts)
 }
 
 func refOrHEAD(r string) string {

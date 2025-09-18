@@ -7,6 +7,7 @@ import (
 	"sync"
 
 	"github.com/ossf/osv-schema/bindings/go/osvschema"
+	packageurl "github.com/package-url/packageurl-go"
 	"golang.org/x/mod/semver"
 	"golang.org/x/sync/errgroup"
 	"osv.dev/bindings/go/osvdev"
@@ -24,9 +25,13 @@ type OSVClient interface {
 // dependency is direct (appears explicitly in go.mod). Directness influences
 // downstream prioritization but not query mechanics.
 type PkgInput struct {
-	Name     string
-	Version  string
-	IsDirect bool
+	Name         string
+	Version      string
+	Ecosystem    string
+	PURL         string
+	IsDirect     bool
+	Locations    []string
+	ManifestRefs []ManifestReference
 }
 
 // getCachedVuln retrieves a vulnerability by ID using the provided client,
@@ -57,15 +62,48 @@ func QueryOSVBatch(ctx context.Context, client OSVClient, pkgs []PkgInput) ([]Vu
 	queries := make([]*osvdev.Query, 0, len(pkgs))
 	meta := make([]PkgInput, 0, len(pkgs))
 	for _, p := range pkgs {
-		v := p.Version
-		if v == "" {
+		version := strings.TrimSpace(p.Version)
+		if version == "" {
 			continue
 		}
-		if !strings.HasPrefix(v, "v") {
-			v = "v" + v
+		normalized := p
+		normalized.Name = strings.TrimSpace(normalized.Name)
+		normalized.Ecosystem = strings.TrimSpace(normalized.Ecosystem)
+		normalized.PURL = strings.TrimSpace(normalized.PURL)
+		normalized.Version = version
+		if strings.EqualFold(normalized.Ecosystem, "go") {
+			normalized.Version = normalizeGoVersion(normalized.Version)
 		}
-		queries = append(queries, &osvdev.Query{Package: osvdev.Package{Name: p.Name, Ecosystem: "Go"}, Version: v})
-		meta = append(meta, p)
+		pkgQuery := osvdev.Package{}
+		var queryVersion string
+		if normalized.PURL != "" {
+			pkgQuery.PURL = normalized.PURL
+			if pu, err := packageurl.FromString(normalized.PURL); err == nil {
+				queryVersion = pu.Version
+				pu.Version = ""
+				pkgQuery.PURL = pu.ToString()
+			}
+		}
+		if pkgQuery.PURL == "" {
+			pkgQuery.Name = normalized.Name
+			pkgQuery.Ecosystem = normalized.Ecosystem
+			queryVersion = normalized.Version
+		}
+		if pkgQuery.Name == "" && pkgQuery.PURL == "" {
+			continue
+		}
+		if queryVersion == "" {
+			queryVersion = normalized.Version
+		}
+		if strings.EqualFold(normalized.Ecosystem, "go") {
+			queryVersion = normalizeGoVersion(queryVersion)
+		}
+		query := &osvdev.Query{Package: pkgQuery}
+		if queryVersion != "" {
+			query.Version = queryVersion
+		}
+		queries = append(queries, query)
+		meta = append(meta, normalized)
 	}
 	if len(queries) == 0 {
 		return nil, nil
@@ -85,19 +123,23 @@ func QueryOSVBatch(ctx context.Context, client OSVClient, pkgs []PkgInput) ([]Vu
 		}
 		i, res := i, res
 		g.Go(func() error {
-			pkgName := queries[i].Package.Name
+			pkgMeta := meta[i]
 			ver := queries[i].Version
-			isDirect := meta[i].IsDirect
+			displayVersion := pkgMeta.Version
+			if ver != "" {
+				displayVersion = ver
+			}
 			var local []Vulnerability
 			for _, mv := range res.Vulns {
 				full, err := getCachedVuln(ctx, client, mv.ID)
 				if err != nil {
 					continue
 				}
-				if !isVersionAffected(*full, pkgName, ver) {
+				if !isVersionAffected(*full, pkgMeta) {
 					continue
 				}
-				base := ProcessOSVVulnerability(*full, pkgName, ver, isDirect)
+				pkgMeta.Version = displayVersion
+				base := ProcessOSVVulnerability(*full, pkgMeta)
 				base.Affected = true
 				var extras []Vulnerability
 				skip := false
@@ -112,28 +154,24 @@ func QueryOSVBatch(ctx context.Context, client OSVClient, pkgs []PkgInput) ([]Vu
 						}
 						aliasCache.Store(alias, aliasV)
 					}
-					// If the alias has affected ranges for this package and the current
-					// version is outside those ranges, treat the vulnerability as fixed
-					// and skip it entirely. This handles cases where a GO- record lacks
-					// fixed version data but an alias (e.g. GHSA) provides it.
 					hasPkg := false
 					for _, a := range aliasV.Affected {
-						if a.Package.Name != "" && strings.EqualFold(a.Package.Name, pkgName) {
+						if matchesPackage(a.Package, pkgMeta) {
 							hasPkg = true
 							break
 						}
 					}
-					if hasPkg && !isVersionAffected(*aliasV, pkgName, ver) {
+					if hasPkg && !isVersionAffected(*aliasV, pkgMeta) {
 						skip = true
 						break
 					}
-					pv := ProcessOSVVulnerability(*aliasV, pkgName, ver, isDirect)
+					pkgMeta.Version = displayVersion
+					pv := ProcessOSVVulnerability(*aliasV, pkgMeta)
 					extras = append(extras, pv)
 				}
 				if skip {
 					continue
 				}
-				// merge severity and fixes
 				all := append([]Vulnerability{base}, extras...)
 				if sev, typ := FindBestSeverity(all); sev != "" {
 					base.Severity, base.SeverityType = sev, typ
@@ -175,14 +213,58 @@ func QueryOSVBatch(ctx context.Context, client OSVClient, pkgs []PkgInput) ([]Vu
 	return out, nil
 }
 
-// isVersionAffected reports whether version ver of package pkgName is within any
-// affected range of the provided vulnerability. It defensively evaluates the
-// ranges returned from OSV, skipping vulnerabilities that the API may
-// mistakenly associate with already-fixed versions.
-func isVersionAffected(v osvschema.Vulnerability, pkgName, ver string) bool {
-	cur := normalizeGoVersion(ver)
+func matchesPackage(pkg osvschema.Package, target PkgInput) bool {
+	if pkg.Purl != "" && target.PURL != "" {
+		if equivalentPURL(pkg.Purl, target.PURL) {
+			return true
+		}
+		return false
+	}
+	if pkg.Name != "" && target.Name != "" && !strings.EqualFold(pkg.Name, target.Name) {
+		return false
+	}
+	if pkg.Ecosystem != "" && target.Ecosystem != "" && !strings.EqualFold(pkg.Ecosystem, target.Ecosystem) {
+		return false
+	}
+	if pkg.Purl == "" && pkg.Name == "" {
+		return false
+	}
+	return true
+}
+
+func equivalentPURL(a, b string) bool {
+	pa, errA := packageurl.FromString(a)
+	pb, errB := packageurl.FromString(b)
+	if errA != nil || errB != nil {
+		return strings.EqualFold(a, b)
+	}
+	if !strings.EqualFold(pa.Type, pb.Type) {
+		return false
+	}
+	if !strings.EqualFold(pa.Namespace, pb.Namespace) {
+		return false
+	}
+	if !strings.EqualFold(pa.Name, pb.Name) {
+		return false
+	}
+	return true
+}
+
+// isVersionAffected reports whether the package metadata and version fall within
+// any affected range of the provided vulnerability. For ecosystems other than Go
+// we currently rely on OSV's matching and only ensure the package identity aligns.
+func isVersionAffected(v osvschema.Vulnerability, pkg PkgInput) bool {
+	if !strings.EqualFold(pkg.Ecosystem, "Go") {
+		for _, a := range v.Affected {
+			if matchesPackage(a.Package, pkg) {
+				return true
+			}
+		}
+		return true
+	}
+	cur := normalizeGoVersion(pkg.Version)
 	for _, a := range v.Affected {
-		if a.Package.Name != "" && !strings.EqualFold(a.Package.Name, pkgName) {
+		if !matchesPackage(a.Package, pkg) {
 			continue
 		}
 		for _, r := range a.Ranges {
@@ -202,10 +284,8 @@ func isVersionAffected(v osvschema.Vulnerability, pkgName, ver string) bool {
 					introduced = "v0.0.0"
 				}
 			}
-			if introduced != "v0.0.0" {
-				if semver.Compare(cur, introduced) >= 0 {
-					return true
-				}
+			if introduced != "v0.0.0" && semver.Compare(cur, introduced) >= 0 {
+				return true
 			}
 		}
 	}

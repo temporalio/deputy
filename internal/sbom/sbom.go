@@ -94,7 +94,7 @@ func Generate(ctx context.Context, repoRef string, opts Options) (*sbom.Document
 		effRef = "HEAD~0"
 	}
 
-	pkgs, err := collectInventorySBOM(ctx, src.Repo, effRef, opts.Ecosystems)
+	pkgs, err := collectInventorySBOM(ctx, src.Repo, effRef, inventory.ScanOptions{Ecosystems: opts.Ecosystems})
 	if err != nil {
 		return nil, err
 	}
@@ -138,7 +138,7 @@ func Generate(ctx context.Context, repoRef string, opts Options) (*sbom.Document
 }
 
 // collectInventorySBOM scans the repository at a specific commit snapshot.
-func collectInventorySBOM(ctx context.Context, repo *git.Repository, gitRef string, _ []string) ([]*extractor.Package, error) {
+func collectInventorySBOM(ctx context.Context, repo *git.Repository, gitRef string, opts inventory.ScanOptions) ([]*extractor.Package, error) {
 	if repo == nil {
 		return nil, fmt.Errorf("repository is required")
 	}
@@ -146,7 +146,7 @@ func collectInventorySBOM(ctx context.Context, repo *git.Repository, gitRef stri
 	if err != nil {
 		return nil, err
 	}
-	return inventory.ScanPackagesAtCommitSnapshot(ctx, repo, *h)
+	return inventory.ScanPackagesAtCommitSnapshot(ctx, repo, *h, opts)
 }
 
 // buildProtobomDocument converts the scalibr packages into a Protobom doc.

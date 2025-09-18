@@ -42,6 +42,7 @@ func AddDiffCommand(root *cobra.Command) {
 	var ignoreUnfixed bool
 	var showUnchanged bool
 	var unchangedThreshold string
+	var ecosystems []string
 
 	cmd := &cobra.Command{
 		Use:   "diff [base] [target]",
@@ -96,7 +97,7 @@ Can be disabled with --skip-vuln-scan for faster execution.`,
 			if err != nil {
 				return fmt.Errorf("failed to parse references: %w", err)
 			}
-			return runDiffAnalysis(cmd.Context(), repo, baseRef, targetRef, !skipVulnScan, useLicenseCheck, enrichLicenses, licenseSource, publishedAfterStr, publishedBeforeStr, asOfStr, ignoreUnfixed, showUnchanged, unchangedThreshold)
+			return runDiffAnalysis(cmd.Context(), repo, baseRef, targetRef, !skipVulnScan, useLicenseCheck, enrichLicenses, licenseSource, publishedAfterStr, publishedBeforeStr, asOfStr, ignoreUnfixed, showUnchanged, unchangedThreshold, ecosystems)
 		},
 		Example: `BASIC USAGE:
   # Compare current work with default branch (beginner-friendly)
@@ -208,6 +209,7 @@ PERFORMANCE TIPS:
 	cmd.Flags().BoolVar(&ignoreUnfixed, "ignore-unfixed", false, "Ignore vulnerabilities without fixes in diff scan output")
 	cmd.Flags().BoolVar(&showUnchanged, "show-unchanged", false, "Always show vulnerabilities in unchanged dependencies (overrides quiet behavior)")
 	cmd.Flags().StringVar(&unchangedThreshold, "unchanged-threshold", "critical", "Auto-show unchanged vulns at or above this severity: none|low|med|high|critical|any")
+	cmd.Flags().StringSliceVar(&ecosystems, "ecosystems", []string{"all"}, "Ecosystems to include when scanning (default: all supported)")
 
 	root.AddCommand(cmd)
 }
@@ -220,9 +222,10 @@ func mustGetwd() string {
 // runDiffAnalysis orchestrates dependency inventory collection for the base and
 // target references, computes a dependency diff, and optionally queries OSV to
 // enrich added/updated modules with vulnerability data.
-func runDiffAnalysis(ctx context.Context, repoPath, baseRef, targetRef string, enableVulnScan bool, useLicenseCheck bool, enrichLicenses bool, licenseSource string, publishedAfterStr, publishedBeforeStr, asOfStr string, ignoreUnfixed bool, showUnchanged bool, unchangedThreshold string) error {
+func runDiffAnalysis(ctx context.Context, repoPath, baseRef, targetRef string, enableVulnScan bool, useLicenseCheck bool, enrichLicenses bool, licenseSource string, publishedAfterStr, publishedBeforeStr, asOfStr string, ignoreUnfixed bool, showUnchanged bool, unchangedThreshold string, ecosystems []string) error {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
+	scanOpts := inv.ScanOptions{Ecosystems: ecosystems}
 
 	dispTarget := targetRef
 	if isWorkingPseudoRef(targetRef) {
@@ -275,7 +278,7 @@ func runDiffAnalysis(ctx context.Context, repoPath, baseRef, targetRef string, e
 
 	if isWorkingPseudoRef(targetRef) {
 		fmt.Println("Scanning packages in working tree...")
-		tp, err := inv.ScanPackagesWorking(ctx, repoSrc.Workspace)
+		tp, err := inv.ScanPackagesWorking(ctx, repoSrc.Workspace, scanOpts)
 		if err != nil {
 			return fmt.Errorf("error scanning working tree packages: %w", err)
 		}
@@ -294,7 +297,7 @@ func runDiffAnalysis(ctx context.Context, repoPath, baseRef, targetRef string, e
 
 	// Scan base packages
 	fmt.Printf("Scanning packages in base reference %s...\n", baseHash.String()[:7])
-	basePackages, err := inv.ScanPackagesAtCommitSnapshot(ctx, repo, *baseHash)
+	basePackages, err := inv.ScanPackagesAtCommitSnapshot(ctx, repo, *baseHash, scanOpts)
 	if err != nil {
 		return fmt.Errorf("error scanning base reference packages: %w", err)
 	}
@@ -302,7 +305,7 @@ func runDiffAnalysis(ctx context.Context, repoPath, baseRef, targetRef string, e
 	// Scan target packages if not already done
 	if targetPackages == nil && targetHash != nil {
 		fmt.Printf("Scanning packages in target reference %s...\n", targetHash.String()[:7])
-		tp, err := inv.ScanPackagesAtCommitSnapshot(ctx, repo, *targetHash)
+		tp, err := inv.ScanPackagesAtCommitSnapshot(ctx, repo, *targetHash, scanOpts)
 		if err != nil {
 			return fmt.Errorf("error scanning target reference packages: %w", err)
 		}
@@ -310,20 +313,27 @@ func runDiffAnalysis(ctx context.Context, repoPath, baseRef, targetRef string, e
 	}
 
 	// Determine direct dependencies from target go.mod for accurate classification
-	var goModData []byte
+	goDirect := map[string]bool{"stdlib": true}
+	var manifestRes manifestResolver
 	if isWorkingPseudoRef(targetRef) {
-		if b, err := repoSrc.Workspace.ReadFile("go.mod"); err == nil {
-			goModData = b
+		if repoSrc != nil {
+			goDirect = cmp.CollectGoDirectModulesFromWorkspace(repoSrc.Workspace)
+			manifestRes = workspaceManifestResolver{ws: repoSrc.Workspace}
+		} else {
+			goDirect = cmp.CollectGoDirectModulesFromDisk(repoPath)
+			manifestRes = osManifestResolver(repoPath)
 		}
 	} else if targetHash != nil {
-		if b, err := gitx.ReadFileAtCommit(repo, *targetHash, "go.mod"); err == nil {
-			goModData = b
+		if direct, err := cmp.CollectGoDirectModulesFromCommit(repo, *targetHash); err == nil {
+			goDirect = direct
 		}
+		manifestRes = gitManifestResolver{repo: repo, hash: *targetHash}
+	} else {
+		manifestRes = osManifestResolver(repoPath)
 	}
-	deps := cmp.GetDirectDependenciesFromGoMod(goModData)
 
 	// Compare packages
-	changes := cmp.ComparePackages(basePackages, targetPackages, deps, nil)
+	changes := cmp.ComparePackages(basePackages, targetPackages, goDirect, nil)
 	if len(changes) == 0 {
 		fmt.Println("No package changes detected.")
 		return nil
@@ -345,7 +355,7 @@ func runDiffAnalysis(ctx context.Context, repoPath, baseRef, targetRef string, e
 	if enableVulnScan {
 		fmt.Printf("\nScanning dependencies for vulnerabilities...\n")
 
-		inputs := packagesToInputs(targetPackages, deps)
+		inputs := packagesToInputs(targetPackages, packageInputOptions{GoDirect: goDirect, Resolver: manifestRes})
 		vv, err := analysis.QueryOSVBatch(ctx, osvdev.DefaultClient(), inputs)
 		if err != nil {
 			fmt.Printf("Warning: Vulnerability scanning failed: %v\n", err)

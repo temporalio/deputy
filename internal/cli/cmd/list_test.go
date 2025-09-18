@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/google/osv-scalibr/extractor"
+	scalpurl "github.com/google/osv-scalibr/purl"
 	cmp "github.com/picatz/deputy/internal/compare"
 	"github.com/picatz/deputy/internal/repository/workspace"
 )
@@ -18,19 +19,18 @@ require (
     github.com/acme/foo v1.0.0
     gopkg.in/yaml.v3 v3.0.1
 )`
-	deps := cmp.GetDirectDependenciesFromGoMod([]byte(goMod))
-	dx := directModulesFromGoMod([]byte(goMod))
+	goDirect := cmp.GetDirectDependenciesFromGoMod([]byte(goMod))
 
 	pkgs := []*extractor.Package{
-		{Name: "github.com/acme/foo", Version: "v1.0.0"},
-		{Name: "github.com/acme/foo/subpkg", Version: "v1.0.0"}, // same module, should dedup at module level
-		{Name: "gopkg.in/yaml.v3", Version: "v3.0.1"},
+		{Name: "github.com/acme/foo", Version: "v1.0.0", PURLType: scalpurl.TypeGolang},
+		{Name: "github.com/acme/foo/subpkg", Version: "v1.0.0", PURLType: scalpurl.TypeGolang}, // same module, should dedup at module level
+		{Name: "gopkg.in/yaml.v3", Version: "v3.0.1", PURLType: scalpurl.TypeGolang},
 	}
 
 	ws := workspace.NewMemory()
 	defer ws.Close()
 
-	items := toListItems(ws, pkgs, deps, dx)
+	items := toListItems(ws, pkgs, goDirect)
 	if len(items) != 3 {
 		t.Fatalf("expected 3 items (no dedup), got %d: %+v", len(items), items)
 	}
@@ -70,19 +70,18 @@ require (
     github.com/acme/foo v1.0.0
     gopkg.in/yaml.v3 v3.0.1
 )`
-	deps := cmp.GetDirectDependenciesFromGoMod([]byte(goMod))
-	dx := directModulesFromGoMod([]byte(goMod))
+	goDirect := cmp.GetDirectDependenciesFromGoMod([]byte(goMod))
 
 	pkgs := []*extractor.Package{
-		{Name: "github.com/acme/foo", Version: "v1.0.0"},
-		{Name: "github.com/acme/foo/subpkg", Version: "v1.0.0"},
-		{Name: "gopkg.in/yaml.v3", Version: "v3.0.1"},
+		{Name: "github.com/acme/foo", Version: "v1.0.0", PURLType: scalpurl.TypeGolang},
+		{Name: "github.com/acme/foo/subpkg", Version: "v1.0.0", PURLType: scalpurl.TypeGolang},
+		{Name: "gopkg.in/yaml.v3", Version: "v3.0.1", PURLType: scalpurl.TypeGolang},
 	}
 
 	ws := workspace.NewMemory()
 	defer ws.Close()
 
-	items := toListItems(ws, pkgs, deps, dx)
+	items := toListItems(ws, pkgs, goDirect)
 	if len(items) != 3 {
 		t.Fatalf("expected 3 package-level items, got %d: %+v", len(items), items)
 	}
@@ -114,7 +113,7 @@ require (
 }
 
 func TestWriteListTSV_NoHeader_PURLOnly(t *testing.T) {
-	items := []ListItem{{Ecosystem: "go", Name: "github.com/acme/foo", Version: "v1.0.0", Module: "github.com/acme/foo", IsDirect: true, PURL: "pkg:golang/github.com/acme/foo@v1.0.0"}}
+	items := []ListItem{{Ecosystem: "Go", Name: "github.com/acme/foo", Version: "v1.0.0", Module: "github.com/acme/foo", IsDirect: true, PURL: "pkg:golang/github.com/acme/foo@v1.0.0"}}
 	var buf bytes.Buffer
 	if err := writeListTSV(&buf, items, false); err != nil {
 		t.Fatalf("writeListTSV: %v", err)
@@ -134,18 +133,17 @@ func TestToListItems_DedupeHighestVersion(t *testing.T) {
 require (
     cloud.google.com/go v1.24.1
 )`
-	deps := cmp.GetDirectDependenciesFromGoMod([]byte(goMod))
-	dx := directModulesFromGoMod([]byte(goMod))
+	goDirect := cmp.GetDirectDependenciesFromGoMod([]byte(goMod))
 
 	pkgs := []*extractor.Package{
-		{Name: "cloud.google.com/go", Version: "v0.6.0"},
-		{Name: "cloud.google.com/go", Version: "v1.24.1"},
-		{Name: "cloud.google.com/go", Version: "0.2.7"}, // missing v prefix
+		{Name: "cloud.google.com/go", Version: "v0.6.0", PURLType: scalpurl.TypeGolang},
+		{Name: "cloud.google.com/go", Version: "v1.24.1", PURLType: scalpurl.TypeGolang},
+		{Name: "cloud.google.com/go", Version: "0.2.7", PURLType: scalpurl.TypeGolang}, // missing v prefix
 	}
 	ws := workspace.NewMemory()
 	defer ws.Close()
 
-	items := toListItems(ws, pkgs, deps, dx)
+	items := toListItems(ws, pkgs, goDirect)
 	if len(items) != 3 {
 		t.Fatalf("expected 3 items (no dedup), got %d: %+v", len(items), items)
 	}
