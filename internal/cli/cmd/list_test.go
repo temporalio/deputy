@@ -7,7 +7,7 @@ import (
 
 	"github.com/google/osv-scalibr/extractor"
 	cmp "github.com/picatz/deputy/internal/compare"
-	"github.com/picatz/deputy/internal/workspace"
+	"github.com/picatz/deputy/internal/repository/workspace"
 )
 
 func TestToListItems_ListAll_NoDedup(t *testing.T) {

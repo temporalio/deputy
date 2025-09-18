@@ -6,7 +6,7 @@ import (
 	"github.com/google/osv-scalibr/extractor"
 	"golang.org/x/mod/semver"
 
-	"github.com/picatz/deputy/internal/workspace"
+	"github.com/picatz/deputy/internal/repository/workspace"
 )
 
 // ChangeType classifies the kind of dependency transition observed between two
@@ -301,8 +301,7 @@ func GetDirectDependenciesFromGoMod(data []byte) map[string]bool {
 	if len(data) == 0 {
 		return deps
 	}
-	lines := strings.Split(string(data), "\n")
-	for _, ln := range lines {
+	for ln := range strings.SplitSeq(string(data), "\n") {
 		ln = strings.TrimSpace(ln)
 		if ln == "" || strings.HasPrefix(ln, "//") {
 			continue
@@ -322,7 +321,7 @@ func GetDirectDependenciesFromGoMod(data []byte) map[string]bool {
 // GetDirectDependencies reads go.mod from the provided workspace and returns
 // direct module roots. If go.mod cannot be read (missing or workspace nil)
 // the returned set only contains "stdlib".
-func GetDirectDependencies(ws workspace.Reader) map[string]bool {
+func GetDirectDependencies(ws workspace.FileReader) map[string]bool {
 	if ws == nil {
 		return map[string]bool{"stdlib": true}
 	}
@@ -341,7 +340,7 @@ func GetDirectDependencies(ws workspace.Reader) map[string]bool {
 //
 // If deps is nil, direct dependencies are inferred from go.mod in the supplied
 // workspace.
-func ComparePackages(oldPkgs, newPkgs []*extractor.Package, deps map[string]bool, ws workspace.Reader) []Change {
+func ComparePackages(oldPkgs, newPkgs []*extractor.Package, deps map[string]bool, ws workspace.FileReader) []Change {
 	if len(oldPkgs) == 0 && len(newPkgs) == 0 {
 		return nil
 	}

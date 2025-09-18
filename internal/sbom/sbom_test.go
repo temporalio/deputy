@@ -7,10 +7,10 @@ import (
 	"testing"
 	"time"
 
-	git "github.com/go-git/go-git/v5"
+	"github.com/go-git/go-git/v5"
 	"github.com/go-git/go-git/v5/plumbing"
 	"github.com/go-git/go-git/v5/plumbing/object"
-	"github.com/picatz/deputy/internal/workspace"
+	"github.com/picatz/deputy/internal/repository/workspace"
 )
 
 // helper to create a temporary git repo with an initial commit and optional branches

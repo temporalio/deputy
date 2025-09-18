@@ -11,10 +11,10 @@ import (
 	scalibrfs "github.com/google/osv-scalibr/fs"
 )
 
-// DirWorkspace implements Workspace backed by a directory on the host
+// LocalDirectory implements Workspace backed by a directory on the host
 // filesystem. It uses os.Root to guard against path traversal to ancestors and
 // exposes the directory as a scalibr ScanRoot.
-type DirWorkspace struct {
+type LocalDirectory struct {
 	mu            sync.RWMutex
 	base          string
 	root          *os.Root
@@ -26,7 +26,7 @@ type DirWorkspace struct {
 // NewDir returns a workspace rooted at the provided path. The path must exist
 // and refer to a directory. Call Close when finished to release underlying OS
 // resources (it will not remove the directory).
-func NewDir(path string) (*DirWorkspace, error) {
+func NewDir(path string) (*LocalDirectory, error) {
 	if path == "" {
 		path = "."
 	}
@@ -46,7 +46,7 @@ func NewDir(path string) (*DirWorkspace, error) {
 		return nil, err
 	}
 	fsys := scalibrfs.DirFS(abs)
-	return &DirWorkspace{
+	return &LocalDirectory{
 		base:      abs,
 		root:      root,
 		fsys:      fsys,
@@ -56,7 +56,7 @@ func NewDir(path string) (*DirWorkspace, error) {
 
 // NewTempDir creates a temporary workspace on disk using os.MkdirTemp. The
 // returned workspace removes the directory during Close.
-func NewTempDir(prefix string) (*DirWorkspace, error) {
+func NewTempDir(prefix string) (*LocalDirectory, error) {
 	dir, err := os.MkdirTemp("", prefix)
 	if err != nil {
 		return nil, err
@@ -70,7 +70,7 @@ func NewTempDir(prefix string) (*DirWorkspace, error) {
 	return ws, nil
 }
 
-func (w *DirWorkspace) ensureOpen() error {
+func (w *LocalDirectory) ensureOpen() error {
 	w.mu.RLock()
 	defer w.mu.RUnlock()
 	if w.root == nil {
@@ -79,7 +79,7 @@ func (w *DirWorkspace) ensureOpen() error {
 	return nil
 }
 
-func (w *DirWorkspace) ReadFile(name string) ([]byte, error) {
+func (w *LocalDirectory) ReadFile(name string) ([]byte, error) {
 	rel, err := cleanPath(name)
 	if err != nil {
 		return nil, err
@@ -90,7 +90,7 @@ func (w *DirWorkspace) ReadFile(name string) ([]byte, error) {
 	return fs.ReadFile(w.fsys, rel)
 }
 
-func (w *DirWorkspace) Open(name string) (fs.File, error) {
+func (w *LocalDirectory) Open(name string) (fs.File, error) {
 	rel, err := cleanPath(name)
 	if err != nil {
 		return nil, err
@@ -98,7 +98,7 @@ func (w *DirWorkspace) Open(name string) (fs.File, error) {
 	return w.fsys.Open(rel)
 }
 
-func (w *DirWorkspace) ReadDir(name string) ([]fs.DirEntry, error) {
+func (w *LocalDirectory) ReadDir(name string) ([]fs.DirEntry, error) {
 	rel, err := cleanPath(name)
 	if err != nil {
 		return nil, err
@@ -109,7 +109,7 @@ func (w *DirWorkspace) ReadDir(name string) ([]fs.DirEntry, error) {
 	return w.fsys.ReadDir(rel)
 }
 
-func (w *DirWorkspace) Stat(name string) (fs.FileInfo, error) {
+func (w *LocalDirectory) Stat(name string) (fs.FileInfo, error) {
 	rel, err := cleanPath(name)
 	if err != nil {
 		return nil, err
@@ -120,7 +120,7 @@ func (w *DirWorkspace) Stat(name string) (fs.FileInfo, error) {
 	return w.fsys.Stat(rel)
 }
 
-func (w *DirWorkspace) WriteFile(name string, data []byte, perm fs.FileMode) error {
+func (w *LocalDirectory) WriteFile(name string, data []byte, perm fs.FileMode) error {
 	rel, err := cleanPath(name)
 	if err != nil {
 		return err
@@ -137,7 +137,7 @@ func (w *DirWorkspace) WriteFile(name string, data []byte, perm fs.FileMode) err
 	return err
 }
 
-func (w *DirWorkspace) MkdirAll(path string, perm fs.FileMode) error {
+func (w *LocalDirectory) MkdirAll(path string, perm fs.FileMode) error {
 	rel, err := cleanPath(path)
 	if err != nil {
 		return err
@@ -151,7 +151,7 @@ func (w *DirWorkspace) MkdirAll(path string, perm fs.FileMode) error {
 	return w.root.MkdirAll(rel, os.FileMode(perm))
 }
 
-func (w *DirWorkspace) Remove(path string) error {
+func (w *LocalDirectory) Remove(path string) error {
 	rel, err := cleanPath(path)
 	if err != nil {
 		return err
@@ -165,7 +165,7 @@ func (w *DirWorkspace) Remove(path string) error {
 	return w.root.Remove(rel)
 }
 
-func (w *DirWorkspace) RemoveAll(path string) error {
+func (w *LocalDirectory) RemoveAll(path string) error {
 	rel, err := cleanPath(path)
 	if err != nil {
 		return err
@@ -179,21 +179,21 @@ func (w *DirWorkspace) RemoveAll(path string) error {
 	return w.root.RemoveAll(rel)
 }
 
-func (w *DirWorkspace) ScalibrRoots() []*scalibrfs.ScanRoot {
+func (w *LocalDirectory) ScalibrRoots() []*scalibrfs.ScanRoot {
 	w.mu.RLock()
 	defer w.mu.RUnlock()
 	return w.scanRoots
 }
 
-func (w *DirWorkspace) RootPath() string {
+func (w *LocalDirectory) RootPath() string {
 	w.mu.RLock()
 	defer w.mu.RUnlock()
 	return w.base
 }
 
-func (w *DirWorkspace) IsVirtual() bool { return false }
+func (w *LocalDirectory) IsVirtual() bool { return false }
 
-func (w *DirWorkspace) Close() error {
+func (w *LocalDirectory) Close() error {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	if w.root == nil {
@@ -209,4 +209,4 @@ func (w *DirWorkspace) Close() error {
 	return err
 }
 
-var _ Workspace = (*DirWorkspace)(nil)
+var _ FS = (*LocalDirectory)(nil)

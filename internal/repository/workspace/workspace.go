@@ -17,19 +17,18 @@ var (
 	ErrReadOnly         = errors.New("workspace: workspace is read-only")
 )
 
-// Reader captures the minimal contract needed to read files from a workspace.
-type Reader interface {
+// FileReader captures the minimal contract needed to read files from a workspace.
+type FileReader interface {
 	ReadFile(path string) ([]byte, error)
 }
 
-// Workspace represents a repository/target filesystem that can be backed by the
+// FS represents a target filesystem (e.g., git repository) that can be backed by the
 // OS filesystem, go-git billy implementations, or any future virtual storage.
 //
 // Paths supplied to the methods are always interpreted relative to the
-// workspace root. Implementations must apply appropriate sanitisation to prevent
-// directory traversal outside of the root (see cleanPath).
-type Workspace interface {
-	Reader
+// workspace root.
+type FS interface {
+	FileReader
 	fs.ReadDirFS
 	fs.StatFS
 
@@ -45,12 +44,12 @@ type Workspace interface {
 	Close() error
 }
 
-// MutableWorkspace extends Workspace with the guarantee that write operations
+// Mutable extends Workspace with the guarantee that write operations
 // succeed. Implementations that are read-only can return ErrReadOnly for write
-// methods; callers can use a type assertion to MutableWorkspace when mutation
+// methods; callers can use a type assertion to Mutable when mutation
 // is required.
-type MutableWorkspace interface {
-	Workspace
+type Mutable interface {
+	FS
 }
 
 // cleanPath normalises a potentially OS-specific path into a slash-separated
@@ -91,7 +90,7 @@ func validPath(name string) bool {
 	if name == "" {
 		return false
 	}
-	for _, elem := range strings.Split(name, "/") {
+	for elem := range strings.SplitSeq(name, "/") {
 		if elem == "" || elem == "." || elem == ".." {
 			return false
 		}

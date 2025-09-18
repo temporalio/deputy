@@ -10,19 +10,19 @@ import (
 
 	neturl "net/url"
 
-	git "github.com/go-git/go-git/v5"
+	"github.com/go-git/go-git/v5"
 	"github.com/go-git/go-git/v5/config"
 	"github.com/go-git/go-git/v5/plumbing"
 	"github.com/go-git/go-git/v5/plumbing/transport"
 	"github.com/go-git/go-git/v5/plumbing/transport/http"
 	"github.com/go-git/go-git/v5/storage/memory"
 	"github.com/google/osv-scalibr/extractor"
-	scalpurl "github.com/google/osv-scalibr/purl"
+	"github.com/google/osv-scalibr/purl"
 	"github.com/picatz/deputy/internal/inventory"
 	"github.com/picatz/deputy/internal/repository"
-	"github.com/picatz/deputy/internal/workspace"
+	"github.com/picatz/deputy/internal/repository/workspace"
 	"github.com/protobom/protobom/pkg/formats"
-	pbsbom "github.com/protobom/protobom/pkg/sbom"
+	"github.com/protobom/protobom/pkg/sbom"
 	"github.com/protobom/protobom/pkg/writer"
 	"golang.org/x/mod/modfile"
 	"google.golang.org/protobuf/encoding/protojson"
@@ -42,7 +42,7 @@ type Options struct {
 // Generate produces a Protobom SBOM document for the supplied repository path
 // (local path or remote reference). Remote repositories are shallow cloned
 // (depth 1) to a temporary directory and cleaned up automatically.
-func Generate(ctx context.Context, repoRef string, opts Options) (*pbsbom.Document, error) {
+func Generate(ctx context.Context, repoRef string, opts Options) (*sbom.Document, error) {
 	if opts.Ref == "" {
 		opts.Ref = "HEAD"
 	}
@@ -151,18 +151,18 @@ func collectInventorySBOM(ctx context.Context, repo *git.Repository, gitRef stri
 
 // buildProtobomDocument converts the scalibr packages into a Protobom doc.
 // buildProtobomDocument converts the scalibr packages into a Protobom doc.
-func buildProtobomDocument(ws workspace.Workspace, repoRef, ref, name string, pkgs []*extractor.Package) (*pbsbom.Document, error) {
+func buildProtobomDocument(ws workspace.FS, repoRef, ref, name string, pkgs []*extractor.Package) (*sbom.Document, error) {
 	if name == "" {
 		name = fmt.Sprintf("%s@%s", repoRef, ref)
 	}
 
-	d := pbsbom.NewDocument()
+	d := sbom.NewDocument()
 	d.Metadata.Name = name
 	d.Metadata.Date = timestamppb.New(time.Now())
 
-	app := pbsbom.NewNode()
+	app := sbom.NewNode()
 	app.Id = "application:root"
-	app.Type = pbsbom.Node_PACKAGE
+	app.Type = sbom.Node_PACKAGE
 	app.Name = name
 	d.NodeList.Nodes = append(d.NodeList.Nodes, app)
 	d.NodeList.RootElements = append(d.NodeList.RootElements, app.Id)
@@ -171,7 +171,7 @@ func buildProtobomDocument(ws workspace.Workspace, repoRef, ref, name string, pk
 		if p == nil || p.Name == "" {
 			continue
 		}
-		n := pbsbom.NewNode()
+		n := sbom.NewNode()
 		var purlStr string
 		if pu := p.PURL(); pu != nil {
 			purlStr = normalizeGolangPURLString(pu.String(), ws)
@@ -181,18 +181,18 @@ func buildProtobomDocument(ws workspace.Workspace, repoRef, ref, name string, pk
 		} else {
 			n.Id = fmt.Sprintf("pkg:%s@%s", p.Name, p.Version)
 		}
-		n.Type = pbsbom.Node_PACKAGE
+		n.Type = sbom.Node_PACKAGE
 		n.Name = deriveDisplayName(p.Name, purlStr)
 		n.Version = p.Version
 		if purlStr != "" {
 			if n.Identifiers == nil {
 				n.Identifiers = map[int32]string{}
 			}
-			n.Identifiers[int32(pbsbom.SoftwareIdentifierType_PURL)] = purlStr
+			n.Identifiers[int32(sbom.SoftwareIdentifierType_PURL)] = purlStr
 		}
 		d.NodeList.Nodes = append(d.NodeList.Nodes, n)
-		d.NodeList.Edges = append(d.NodeList.Edges, &pbsbom.Edge{
-			Type: pbsbom.Edge_contains,
+		d.NodeList.Edges = append(d.NodeList.Edges, &sbom.Edge{
+			Type: sbom.Edge_contains,
 			From: app.Id,
 			To:   []string{n.Id},
 		})
@@ -201,14 +201,14 @@ func buildProtobomDocument(ws workspace.Workspace, repoRef, ref, name string, pk
 }
 
 // License enrichment helpers — currently stubs.
-func enrichProtobomLicensesDepsDev(_ context.Context, _ *pbsbom.Document) error { return nil }
-func enrichProtobomLicensesScanLocal(_ context.Context, _ *pbsbom.Document, _ workspace.Workspace) error {
+func enrichProtobomLicensesDepsDev(_ context.Context, _ *sbom.Document) error { return nil }
+func enrichProtobomLicensesScanLocal(_ context.Context, _ *sbom.Document, _ workspace.FS) error {
 	return nil
 }
 
 type remoteFetcher struct{ Timeout time.Duration }
 
-func enrichProtobomLicensesScanWithFetcher(_ context.Context, _ *pbsbom.Document, _ *remoteFetcher) error {
+func enrichProtobomLicensesScanWithFetcher(_ context.Context, _ *sbom.Document, _ *remoteFetcher) error {
 	return nil
 }
 
@@ -301,12 +301,12 @@ func discoverDefaultBranch(ctx context.Context, remoteURL string, auth transport
 }
 
 // PURL helpers
-func normalizeGolangPURLString(purlStr string, ws workspace.Reader) string {
+func normalizeGolangPURLString(purlStr string, ws workspace.FileReader) string {
 	if purlStr == "" {
 		return purlStr
 	}
-	pp, err := scalpurl.FromString(purlStr)
-	if err != nil || pp.Type != scalpurl.TypeGolang {
+	pp, err := purl.FromString(purlStr)
+	if err != nil || pp.Type != purl.TypeGolang {
 		return purlStr
 	}
 	full := pp.Name
@@ -337,7 +337,7 @@ func normalizeGolangPURLString(purlStr string, ws workspace.Reader) string {
 	return pp.String()
 }
 
-func readModulePath(ws workspace.Reader) string {
+func readModulePath(ws workspace.FileReader) string {
 	if ws == nil {
 		return ""
 	}
@@ -351,9 +351,9 @@ func readModulePath(ws workspace.Reader) string {
 	return ""
 }
 
-func deriveDisplayName(name, purl string) string {
-	if purl != "" {
-		if pu, err := scalpurl.FromString(purl); err == nil {
+func deriveDisplayName(name, purlStr string) string {
+	if purlStr != "" {
+		if pu, err := purl.FromString(purlStr); err == nil {
 			return pu.Name
 		}
 	}
@@ -391,15 +391,15 @@ func sanitizeForSPDXID(s string) string {
 // shortGitRef removed (unused)
 
 // Writers
-func WriteCycloneDXJSON(doc *pbsbom.Document, w io.Writer) error {
+func WriteCycloneDXJSON(doc *sbom.Document, w io.Writer) error {
 	return writer.New(writer.WithFormat(formats.CDX16JSON)).WriteStream(doc, w)
 }
 
-func WriteSPDXJSON(doc *pbsbom.Document, w io.Writer) error {
+func WriteSPDXJSON(doc *sbom.Document, w io.Writer) error {
 	return writer.New(writer.WithFormat(formats.SPDX23JSON)).WriteStream(doc, w)
 }
 
-func WriteProtobomJSON(doc *pbsbom.Document, w io.Writer) error {
+func WriteProtobomJSON(doc *sbom.Document, w io.Writer) error {
 	enc := protojson.MarshalOptions{Indent: "  ", UseEnumNumbers: false, EmitUnpopulated: false}
 	b, err := enc.Marshal(doc)
 	if err != nil {

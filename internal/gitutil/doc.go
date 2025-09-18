@@ -9,4 +9,4 @@
 //
 // The functions are side‑effect free (except repository reads) and suitable for
 // reuse in other analysis workflows.
-package git
+package gitutil

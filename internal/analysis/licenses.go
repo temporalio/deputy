@@ -16,7 +16,7 @@ import (
 	"github.com/go-git/go-git/v5/plumbing"
 	"github.com/go-git/go-git/v5/plumbing/transport/http"
 	"github.com/google/licensecheck"
-	gitx "github.com/picatz/deputy/internal/git"
+	gitx "github.com/picatz/deputy/internal/gitutil"
 )
 
 // DepsClient abstracts deps.dev client method GetVersion.

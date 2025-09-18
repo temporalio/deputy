@@ -13,7 +13,7 @@ import (
 	scalibrfs "github.com/google/osv-scalibr/fs"
 )
 
-type MemoryWorkspace struct {
+type Memory struct {
 	mu        sync.RWMutex
 	fsys      billy.Filesystem
 	adapter   scalibrfs.FS
@@ -22,12 +22,12 @@ type MemoryWorkspace struct {
 }
 
 // NewMemory constructs an in-memory workspace using go-billy's memfs implementation.
-func NewMemory() *MemoryWorkspace {
-	return NewMemoryFromFS(memfs.New())
+func NewMemory() *Memory {
+	return NewMemoryFromBillyFS(memfs.New())
 }
 
-// NewMemoryFromFS wraps an existing billy filesystem (for example a go-git worktree) as a Workspace.
-func NewMemoryFromFS(fs billy.Filesystem) *MemoryWorkspace {
+// NewMemoryFromBillyFS wraps an existing billy filesystem (for example a go-git worktree) as a Workspace.
+func NewMemoryFromBillyFS(fs billy.Filesystem) *Memory {
 	adapter := iofs.New(fs)
 	scalibrAdapter, ok := adapter.(scalibrfs.FS)
 	if !ok {
@@ -37,7 +37,7 @@ func NewMemoryFromFS(fs billy.Filesystem) *MemoryWorkspace {
 			stat: iofs.NewStatFS(fs),
 		}
 	}
-	return &MemoryWorkspace{
+	return &Memory{
 		fsys:    fs,
 		adapter: scalibrAdapter,
 		scanRoots: []*scalibrfs.ScanRoot{{
@@ -47,7 +47,7 @@ func NewMemoryFromFS(fs billy.Filesystem) *MemoryWorkspace {
 	}
 }
 
-func (m *MemoryWorkspace) ensureOpen() error {
+func (m *Memory) ensureOpen() error {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	if m.closed {
@@ -56,7 +56,7 @@ func (m *MemoryWorkspace) ensureOpen() error {
 	return nil
 }
 
-func (m *MemoryWorkspace) ReadFile(name string) ([]byte, error) {
+func (m *Memory) ReadFile(name string) ([]byte, error) {
 	if err := m.ensureOpen(); err != nil {
 		return nil, err
 	}
@@ -70,7 +70,7 @@ func (m *MemoryWorkspace) ReadFile(name string) ([]byte, error) {
 	return fs.ReadFile(m.adapter, rel)
 }
 
-func (m *MemoryWorkspace) Open(name string) (fs.File, error) {
+func (m *Memory) Open(name string) (fs.File, error) {
 	if err := m.ensureOpen(); err != nil {
 		return nil, err
 	}
@@ -81,7 +81,7 @@ func (m *MemoryWorkspace) Open(name string) (fs.File, error) {
 	return m.adapter.Open(rel)
 }
 
-func (m *MemoryWorkspace) ReadDir(name string) ([]fs.DirEntry, error) {
+func (m *Memory) ReadDir(name string) ([]fs.DirEntry, error) {
 	if err := m.ensureOpen(); err != nil {
 		return nil, err
 	}
@@ -95,7 +95,7 @@ func (m *MemoryWorkspace) ReadDir(name string) ([]fs.DirEntry, error) {
 	return m.adapter.ReadDir(rel)
 }
 
-func (m *MemoryWorkspace) Stat(name string) (fs.FileInfo, error) {
+func (m *Memory) Stat(name string) (fs.FileInfo, error) {
 	if err := m.ensureOpen(); err != nil {
 		return nil, err
 	}
@@ -109,7 +109,7 @@ func (m *MemoryWorkspace) Stat(name string) (fs.FileInfo, error) {
 	return m.adapter.Stat(rel)
 }
 
-func (m *MemoryWorkspace) WriteFile(name string, data []byte, perm fs.FileMode) error {
+func (m *Memory) WriteFile(name string, data []byte, perm fs.FileMode) error {
 	if err := m.ensureOpen(); err != nil {
 		return err
 	}
@@ -120,7 +120,7 @@ func (m *MemoryWorkspace) WriteFile(name string, data []byte, perm fs.FileMode) 
 	return billyutil.WriteFile(m.fsys, rel, data, os.FileMode(perm))
 }
 
-func (m *MemoryWorkspace) MkdirAll(path string, perm fs.FileMode) error {
+func (m *Memory) MkdirAll(path string, perm fs.FileMode) error {
 	if err := m.ensureOpen(); err != nil {
 		return err
 	}
@@ -134,7 +134,7 @@ func (m *MemoryWorkspace) MkdirAll(path string, perm fs.FileMode) error {
 	return m.fsys.MkdirAll(rel, os.FileMode(perm))
 }
 
-func (m *MemoryWorkspace) Remove(path string) error {
+func (m *Memory) Remove(path string) error {
 	if err := m.ensureOpen(); err != nil {
 		return err
 	}
@@ -148,7 +148,7 @@ func (m *MemoryWorkspace) Remove(path string) error {
 	return m.fsys.Remove(rel)
 }
 
-func (m *MemoryWorkspace) RemoveAll(path string) error {
+func (m *Memory) RemoveAll(path string) error {
 	if err := m.ensureOpen(); err != nil {
 		return err
 	}
@@ -162,24 +162,24 @@ func (m *MemoryWorkspace) RemoveAll(path string) error {
 	return billyutil.RemoveAll(m.fsys, rel)
 }
 
-func (m *MemoryWorkspace) ScalibrRoots() []*scalibrfs.ScanRoot {
+func (m *Memory) ScalibrRoots() []*scalibrfs.ScanRoot {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	return m.scanRoots
 }
 
-func (m *MemoryWorkspace) RootPath() string { return "" }
+func (m *Memory) RootPath() string { return "" }
 
-func (m *MemoryWorkspace) IsVirtual() bool { return true }
+func (m *Memory) IsVirtual() bool { return true }
 
-func (m *MemoryWorkspace) Close() error {
+func (m *Memory) Close() error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.closed = true
 	return nil
 }
 
-var _ Workspace = (*MemoryWorkspace)(nil)
+var _ FS = (*Memory)(nil)
 
 // billyAdapter adapts separate FS/ReadDirFS/StatFS values into a single structure implementing scalibrfs.FS.
 type billyAdapter struct {

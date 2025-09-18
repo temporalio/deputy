@@ -15,7 +15,7 @@ import (
 	"github.com/google/osv-scalibr/extractor"
 	analysis "github.com/picatz/deputy/internal/analysis"
 	cmp "github.com/picatz/deputy/internal/compare"
-	gitx "github.com/picatz/deputy/internal/git"
+	gitx "github.com/picatz/deputy/internal/gitutil"
 	inv "github.com/picatz/deputy/internal/inventory"
 	"github.com/picatz/deputy/internal/repository"
 	ui "github.com/picatz/deputy/internal/ui"

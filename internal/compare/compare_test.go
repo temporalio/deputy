@@ -4,7 +4,7 @@ import (
 	"testing"
 
 	"github.com/google/osv-scalibr/extractor"
-	"github.com/picatz/deputy/internal/workspace"
+	"github.com/picatz/deputy/internal/repository/workspace"
 )
 
 func TestGetModuleRoot(t *testing.T) {

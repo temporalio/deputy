@@ -8,8 +8,8 @@ import (
 	"github.com/go-git/go-billy/v5/memfs"
 	"github.com/go-git/go-git/v5"
 	"github.com/go-git/go-git/v5/storage/memory"
-	gitx "github.com/picatz/deputy/internal/git"
-	"github.com/picatz/deputy/internal/workspace"
+	gitx "github.com/picatz/deputy/internal/gitutil"
+	"github.com/picatz/deputy/internal/repository/workspace"
 )
 
 // Source represents a Git repository together with the workspace containing its
@@ -17,7 +17,7 @@ import (
 // purely virtual in memory.
 type Source struct {
 	Repo      *git.Repository
-	Workspace workspace.Workspace
+	Workspace workspace.FS
 
 	cleanup   func() error
 	closeOnce sync.Once
@@ -81,7 +81,7 @@ func CloneInMemory(ctx context.Context, opts *git.CloneOptions) (*Source, error)
 	if err != nil {
 		return nil, err
 	}
-	ws := workspace.NewMemoryFromFS(fsys)
+	ws := workspace.NewMemoryFromBillyFS(fsys)
 	src := &Source{
 		Repo:      repo,
 		Workspace: ws,
@@ -131,6 +131,6 @@ func Clone(ctx context.Context, opts *git.CloneOptions, inMemory bool) (*Source,
 
 // WithExistingWorkspace constructs a Source from pre-existing repo/workspace components.
 // The cleanup function is called during Close.
-func WithExistingWorkspace(repo *git.Repository, ws workspace.Workspace, cleanup func() error) *Source {
+func WithExistingWorkspace(repo *git.Repository, ws workspace.FS, cleanup func() error) *Source {
 	return &Source{Repo: repo, Workspace: ws, cleanup: cleanup}
 }

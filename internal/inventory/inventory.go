@@ -16,13 +16,13 @@ import (
 	"github.com/google/osv-scalibr/extractor"
 	pl "github.com/google/osv-scalibr/plugin/list"
 
-	"github.com/picatz/deputy/internal/workspace"
+	"github.com/picatz/deputy/internal/repository/workspace"
 )
 
 // ScanPackagesWorking scans the provided workspace and returns the discovered
 // package inventory. The workspace may be backed by the host filesystem or be a
 // virtual in-memory filesystem.
-func ScanPackagesWorking(ctx context.Context, ws workspace.Workspace) ([]*extractor.Package, error) {
+func ScanPackagesWorking(ctx context.Context, ws workspace.FS) ([]*extractor.Package, error) {
 	if ws == nil {
 		return nil, fmt.Errorf("workspace is required")
 	}
@@ -53,7 +53,7 @@ func ScanPackagesAtCommitSnapshot(ctx context.Context, repo *git.Repository, com
 	return scanWorkspace(ctx, ws)
 }
 
-func scanWorkspace(ctx context.Context, ws workspace.Workspace) ([]*extractor.Package, error) {
+func scanWorkspace(ctx context.Context, ws workspace.FS) ([]*extractor.Package, error) {
 	plugins, err := pl.FromNames([]string{"go"})
 	if err != nil {
 		return nil, fmt.Errorf("error creating plugins: %w", err)
@@ -63,7 +63,7 @@ func scanWorkspace(ctx context.Context, ws workspace.Workspace) ([]*extractor.Pa
 	return results.Inventory.Packages, nil
 }
 
-func populateWorkspaceFromTree(ws workspace.Workspace, tree *object.Tree) error {
+func populateWorkspaceFromTree(ws workspace.FS, tree *object.Tree) error {
 	if tree == nil {
 		return fmt.Errorf("nil tree")
 	}

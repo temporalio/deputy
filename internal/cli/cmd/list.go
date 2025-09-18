@@ -15,15 +15,14 @@ import (
 	"github.com/google/osv-scalibr/extractor"
 	scalpurl "github.com/google/osv-scalibr/purl"
 	cmp "github.com/picatz/deputy/internal/compare"
-	gitx "github.com/picatz/deputy/internal/git"
+	gitx "github.com/picatz/deputy/internal/gitutil"
 	inv "github.com/picatz/deputy/internal/inventory"
 	"github.com/picatz/deputy/internal/repository"
+	"github.com/picatz/deputy/internal/repository/workspace"
 	sbomx "github.com/picatz/deputy/internal/sbom"
 	ui "github.com/picatz/deputy/internal/ui"
-	"github.com/picatz/deputy/internal/workspace"
 	"github.com/spf13/cobra"
 	"golang.org/x/mod/modfile"
-	"golang.org/x/mod/semver"
 )
 
 // ListItem represents a single dependency entry for output.
@@ -80,7 +79,7 @@ with a direct/indirect classification.`,
 				ref = "HEAD"
 			}
 
-			items, commitHash, _, err := collectListItems(ctx, repoPath, ref, ecos, level)
+			items, commitHash, _, err := collectListItems(ctx, repoPath, ref, ecos)
 			if err != nil {
 				return err
 			}
@@ -153,7 +152,7 @@ REMOTE REPOSITORIES:
 }
 
 // collectListItems gathers packages for repo/ref (supporting remote clone) and converts to ListItem set.
-func collectListItems(ctx context.Context, repoPath, ref string, _ []string, level string) ([]ListItem, string, string, error) {
+func collectListItems(ctx context.Context, repoPath, ref string, _ []string) ([]ListItem, string, string, error) {
 	var (
 		src *repository.Source
 		err error
@@ -254,10 +253,10 @@ func collectListItems(ctx context.Context, repoPath, ref string, _ []string, lev
 }
 
 // toListItems converts extractor packages into unique list entries.
-func toListItems(ws workspace.Workspace, pkgs []*extractor.Package, depsLoose map[string]bool, depsExact map[string]bool) []ListItem {
-	if depsLoose == nil {
-		depsLoose = cmp.GetDirectDependencies(ws)
-	}
+func toListItems(ws workspace.FS, pkgs []*extractor.Package, _ map[string]bool, depsExact map[string]bool) []ListItem {
+	// if depsLoose == nil {
+	// 	depsLoose = cmp.GetDirectDependencies(ws)
+	// }
 	if depsExact == nil {
 		depsExact = map[string]bool{"stdlib": true}
 	}
@@ -293,19 +292,6 @@ func toListItems(ws workspace.Workspace, pkgs []*extractor.Package, depsLoose ma
 		out = append(out, li)
 	}
 	return out
-}
-
-// semverCompareGo compares two Go module versions; returns 1 if a>b, -1 if a<b, 0 if equal.
-func semverCompareGo(a, b string) int {
-	aa := a
-	bb := b
-	if aa != "" && aa[0] != 'v' {
-		aa = "v" + aa
-	}
-	if bb != "" && bb[0] != 'v' {
-		bb = "v" + bb
-	}
-	return semver.Compare(aa, bb)
 }
 
 // writeListText prints a simple space-separated table (with optional header).
@@ -417,26 +403,9 @@ func bestModuleForPackage(pkg string, direct map[string]bool) string {
 	return best
 }
 
-// rewriteGolangPURLName best-effort replacement of name and version in a golang purl string.
-func rewriteGolangPURLName(purlStr, name, version string) string {
-	pp, err := scalpurl.FromString(purlStr)
-	if err != nil || pp.Type != scalpurl.TypeGolang {
-		return purlStr
-	}
-	if idx := strings.LastIndex(name, "/"); idx >= 0 {
-		pp.Namespace = name[:idx]
-		pp.Name = name[idx+1:]
-	} else {
-		pp.Namespace = ""
-		pp.Name = name
-	}
-	pp.Version = version
-	return pp.String()
-}
-
 // normalizeGolangPURLLikeSBOM mirrors the SBOM normalization for Golang PURLs.
 // It expands relative names (., ./sub) to the module path read from go.mod.
-func normalizeGolangPURLLikeSBOM(purlStr string, ws workspace.Reader) string {
+func normalizeGolangPURLLikeSBOM(purlStr string, ws workspace.FileReader) string {
 	if purlStr == "" {
 		return purlStr
 	}
@@ -474,7 +443,7 @@ func normalizeGolangPURLLikeSBOM(purlStr string, ws workspace.Reader) string {
 	return pp.String()
 }
 
-func readModulePathWorkspace(ws workspace.Reader) string {
+func readModulePathWorkspace(ws workspace.FileReader) string {
 	if ws == nil {
 		return ""
 	}
