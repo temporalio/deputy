@@ -4,20 +4,33 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"io/fs"
+	nethttp "net/http"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
 	"sync"
+	"time"
 
 	pb "deps.dev/api/v3"
 	git "github.com/go-git/go-git/v5"
 	"github.com/go-git/go-git/v5/plumbing"
-	"github.com/go-git/go-git/v5/plumbing/transport/http"
+	githttp "github.com/go-git/go-git/v5/plumbing/transport/http"
 	"github.com/google/licensecheck"
-	gitx "github.com/picatz/deputy/internal/gitutil"
+	"github.com/picatz/deputy/internal/repository"
+	"github.com/picatz/deputy/internal/repository/workspace"
+	"golang.org/x/sync/singleflight"
 )
+
+var defaultLicenseFilenames = []string{
+	"LICENSE",
+	"LICENSE.txt",
+	"LICENSE.md",
+	"COPYING",
+	"COPYING.txt",
+	"COPYRIGHT",
+	"UNLICENSE",
+}
 
 // DepsClient abstracts deps.dev client method GetVersion.
 type DepsClient interface {
@@ -47,52 +60,55 @@ func FetchLicensesForPackage(ctx context.Context, client DepsClient, name, versi
 	return raw.Licenses
 }
 
-// LocalRepoLicenseScan scans a local repository directory (root + limited depth)
+// LocalRepoLicenseScan inspects a workspace-backed repository (depth-limited)
 // for license-looking files and returns detected SPDX identifiers (best effort).
-// Depth limit keeps performance bounded. Hidden directories (like .git) skipped.
-func LocalRepoLicenseScan(root string) []string {
-	if root == "" {
+// Hidden directories (like .git) are skipped and the traversal stays shallow
+// to keep performance bounded regardless of backend storage.
+func LocalRepoLicenseScan(ws workspace.FS) []string {
+	if ws == nil {
 		return nil
 	}
-	info, err := os.Stat(root)
-	if err != nil || !info.IsDir() {
-		return nil
-	}
+	const maxSeparatorCount = 2
 	var candidates []string
-	// First pass: root-level typical filenames
-	baseNames := []string{"LICENSE", "LICENSE.txt", "LICENSE.md", "COPYING", "COPYING.txt", "COPYRIGHT", "UNLICENSE"}
-	for _, n := range baseNames {
-		p := filepath.Join(root, n)
-		if fi, err := os.Stat(p); err == nil && !fi.IsDir() {
-			candidates = append(candidates, p)
+	for _, name := range defaultLicenseFilenames {
+		if fi, err := ws.Stat(name); err == nil && !fi.IsDir() {
+			candidates = append(candidates, name)
 		}
 	}
-	// Second pass: walk depth<=2 collecting additional license-like files
-	_ = filepath.WalkDir(root, func(p string, d fs.DirEntry, err error) error {
+	stack := []string{"."}
+	for len(stack) > 0 {
+		idx := len(stack) - 1
+		current := stack[idx]
+		stack = stack[:idx]
+		entries, err := ws.ReadDir(current)
 		if err != nil {
-			return nil
+			continue
 		}
-		if d.IsDir() {
-			if strings.HasPrefix(d.Name(), ".") && d.Name() != "." { // skip hidden dirs
-				return filepath.SkipDir
+		for _, entry := range entries {
+			name := entry.Name()
+			rel := name
+			if current != "." {
+				rel = filepath.Join(current, name)
+			}
+			if entry.IsDir() {
+				if strings.HasPrefix(name, ".") && name != "." {
+					continue
+				}
+				if strings.Count(rel, string(os.PathSeparator)) > maxSeparatorCount {
+					continue
+				}
+				stack = append(stack, rel)
+				continue
+			}
+			if strings.Count(rel, string(os.PathSeparator)) > maxSeparatorCount {
+				continue
+			}
+			lower := strings.ToLower(name)
+			if strings.HasPrefix(lower, "license") || strings.HasPrefix(lower, "copying") || lower == "copyright" || lower == "unlicense" || strings.HasPrefix(lower, "licence") {
+				candidates = append(candidates, rel)
 			}
 		}
-		rel, _ := filepath.Rel(root, p)
-		if rel == "." {
-			return nil
-		}
-		if strings.Count(rel, string(os.PathSeparator)) > 2 {
-			return filepath.SkipDir
-		}
-		if d.IsDir() {
-			return nil
-		}
-		name := strings.ToLower(d.Name())
-		if strings.HasPrefix(name, "license") || strings.HasPrefix(name, "copying") || name == "copyright" || name == "unlicense" || strings.HasPrefix(name, "licence") {
-			candidates = append(candidates, p)
-		}
-		return nil
-	})
+	}
 	if len(candidates) == 0 {
 		return nil
 	}
@@ -104,7 +120,7 @@ func LocalRepoLicenseScan(root string) []string {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			data, err := os.ReadFile(f)
+			data, err := ws.ReadFile(f)
 			if err != nil {
 				return
 			}
@@ -130,7 +146,12 @@ func LocalRepoLicenseScan(root string) []string {
 	return out
 }
 
-// (deprecated) defaultGOPATH helper removed with module cache scanning approach.
+var (
+	remoteLicenseMemo    sync.Map // string -> []string
+	remoteLicenseGroup   singleflight.Group
+	githubHTTPClientOnce sync.Once
+	githubHTTPClient     *nethttp.Client
+)
 
 // MergeLicenseSources merges deps.dev licenses (primary) with locally scanned
 // ones (secondary). Returns '?' if both empty. Removes duplicates.
@@ -197,52 +218,126 @@ func RemoteModuleLicenseScan(ctx context.Context, modulePath, version string) []
 	if len(parts) < 3 {
 		return nil
 	}
-	repoURL := fmt.Sprintf("https://github.com/%s/%s.git", parts[1], parts[2])
-	// Shallow clone into temp dir
-	dir, err := os.MkdirTemp("", "deputy-lic-remote-*")
+	key := modulePath + "@" + version
+	if cached, ok := remoteLicenseMemo.Load(key); ok {
+		return cloneStrings(cached.([]string))
+	}
+	var diskCached []string
+	if version != "" && readCache("license-scan", key, &diskCached) && len(diskCached) > 0 {
+		remoteLicenseMemo.Store(key, cloneStrings(diskCached))
+		return cloneStrings(diskCached)
+	}
+	result, err, _ := remoteLicenseGroup.Do(key, func() (interface{}, error) {
+		if cached, ok := remoteLicenseMemo.Load(key); ok {
+			return cloneStrings(cached.([]string)), nil
+		}
+		if version != "" && len(diskCached) > 0 {
+			return cloneStrings(diskCached), nil
+		}
+		if ids, err := fetchLicensesFromGitHubRaw(ctx, parts[1], parts[2], version); err == nil && len(ids) > 0 {
+			if version != "" {
+				writeCache("license-scan", key, ids)
+			}
+			remoteLicenseMemo.Store(key, cloneStrings(ids))
+			return ids, nil
+		}
+		repoURL := fmt.Sprintf("https://github.com/%s/%s.git", parts[1], parts[2])
+		opts := &git.CloneOptions{URL: repoURL, Depth: 1, SingleBranch: true, Tags: git.NoTags}
+		// Attempt to pick ref from version (tag) if present
+		if version != "" {
+			v := version
+			if !strings.HasPrefix(v, "v") {
+				v = "v" + v
+			}
+			opts.ReferenceName = plumbing.ReferenceName("refs/tags/" + v)
+		}
+		// Optional GitHub token for rate limits
+		if tok := os.Getenv("GITHUB_TOKEN"); tok != "" {
+			opts.Auth = &githttp.BasicAuth{Username: "oauth2", Password: tok}
+		}
+		src, err := repository.CloneInMemory(ctx, opts)
+		if err != nil {
+			return nil, err
+		}
+		defer src.Close()
+		ids := LocalRepoLicenseScan(src.Workspace)
+		if version != "" && len(ids) > 0 {
+			writeCache("license-scan", key, ids)
+		}
+		remoteLicenseMemo.Store(key, cloneStrings(ids))
+		return ids, nil
+	})
 	if err != nil {
 		return nil
 	}
-	var closeStorer func()
-	opts := &git.CloneOptions{URL: repoURL, Depth: 1, SingleBranch: true, Tags: git.NoTags}
-	// Attempt to pick ref from version (tag) if present
-	if version != "" {
-		v := version
-		if !strings.HasPrefix(v, "v") {
-			v = "v" + v
-		}
-		opts.ReferenceName = plumbing.ReferenceName("refs/tags/" + v)
+	if ids, ok := result.([]string); ok {
+		return cloneStrings(ids)
 	}
-	// Optional GitHub token for rate limits
-	if tok := os.Getenv("GITHUB_TOKEN"); tok != "" {
-		opts.Auth = &http.BasicAuth{Username: "oauth2", Password: tok}
-	}
-	if _, closeStorer, err = gitx.CloneContext(ctx, dir, opts); err != nil {
-		os.RemoveAll(dir)
-		return nil
-	}
-	defer func() {
-		if closeStorer != nil {
-			closeStorer()
-		}
-		os.RemoveAll(dir)
-	}()
-	return scanLocalLicenseFiles(dir)
+	return nil
 }
 
-// scanLocalLicenseFiles returns detected license IDs for standard candidate filenames.
-func scanLocalLicenseFiles(root string) []string {
-	candidates := []string{"LICENSE", "LICENSE.txt", "LICENSE.md", "COPYING", "COPYING.txt", "COPYRIGHT"}
+// ExtractLicensesFromReader allows tests to exercise detection on arbitrary content.
+func ExtractLicensesFromReader(r io.Reader) []string {
+	b, _ := io.ReadAll(r)
+	return DetectLicenseIDs(b)
+}
+
+func cloneStrings(src []string) []string {
+	if src == nil {
+		return nil
+	}
+	out := make([]string, len(src))
+	copy(out, src)
+	return out
+}
+
+func getGitHubHTTPClient() *nethttp.Client {
+	githubHTTPClientOnce.Do(func() {
+		githubHTTPClient = &nethttp.Client{Timeout: 10 * time.Second}
+	})
+	return githubHTTPClient
+}
+
+func fetchLicensesFromGitHubRaw(ctx context.Context, owner, repo, version string) ([]string, error) {
+	ref := deriveGitRef(version)
+	if ref == "" {
+		return nil, fmt.Errorf("unable to derive git ref")
+	}
+	client := getGitHubHTTPClient()
+	token := strings.TrimSpace(os.Getenv("GITHUB_TOKEN"))
 	seen := map[string]struct{}{}
 	var out []string
-	for _, c := range candidates {
-		p := filepath.Join(root, c)
-		data, err := os.ReadFile(p)
+	for _, name := range defaultLicenseFilenames {
+		url := fmt.Sprintf("https://raw.githubusercontent.com/%s/%s/%s/%s", owner, repo, ref, name)
+		req, err := nethttp.NewRequestWithContext(ctx, nethttp.MethodGet, url, nil)
+		if err != nil {
+			return nil, err
+		}
+		req.Header.Set("User-Agent", "deputy-license-scan")
+		if token != "" {
+			req.Header.Set("Authorization", "Bearer "+token)
+		}
+		resp, err := client.Do(req)
+		if err != nil {
+			return nil, err
+		}
+		if resp.StatusCode == nethttp.StatusNotFound {
+			resp.Body.Close()
+			continue
+		}
+		if resp.StatusCode != nethttp.StatusOK {
+			resp.Body.Close()
+			continue
+		}
+		data, err := io.ReadAll(resp.Body)
+		resp.Body.Close()
 		if err != nil || len(data) == 0 {
 			continue
 		}
-		ids := DetectLicenseIDs(data)
-		for _, id := range ids {
+		for _, id := range DetectLicenseIDs(data) {
+			if id == "" {
+				continue
+			}
 			if _, ok := seen[id]; ok {
 				continue
 			}
@@ -250,11 +345,44 @@ func scanLocalLicenseFiles(root string) []string {
 			out = append(out, id)
 		}
 	}
-	return out
+	if len(out) == 0 {
+		return nil, fmt.Errorf("no license files via raw")
+	}
+	sort.Strings(out)
+	return out, nil
 }
 
-// ExtractLicensesFromReader allows tests to exercise detection on arbitrary content.
-func ExtractLicensesFromReader(r io.Reader) []string {
-	b, _ := io.ReadAll(r)
-	return DetectLicenseIDs(b)
+func deriveGitRef(version string) string {
+	if version == "" {
+		return ""
+	}
+	v := version
+	if idx := strings.Index(v, "+"); idx != -1 {
+		v = v[:idx]
+	}
+	if commit := pseudoVersionCommit(v); commit != "" {
+		return commit
+	}
+	if !strings.HasPrefix(v, "v") {
+		v = "v" + v
+	}
+	return v
+}
+
+func pseudoVersionCommit(version string) string {
+	parts := strings.Split(version, "-")
+	if len(parts) < 3 {
+		return ""
+	}
+	commit := parts[len(parts)-1]
+	if len(commit) < 7 || len(commit) > 40 {
+		return ""
+	}
+	commit = strings.ToLower(commit)
+	for _, r := range commit {
+		if (r < '0' || r > '9') && (r < 'a' || r > 'f') {
+			return ""
+		}
+	}
+	return commit
 }

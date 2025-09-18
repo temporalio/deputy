@@ -5,12 +5,12 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/picatz/deputy/internal/repository/workspace"
 )
 
 func Test_LocalRepoLicenseScan_detectsMIT(t *testing.T) {
-	tmp := t.TempDir()
-	// create a fake repo root with a LICENSE file
-	mit := `MIT License
+	licenseText := `MIT License
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -29,22 +29,43 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.`
-	if err := os.WriteFile(filepath.Join(tmp, "LICENSE"), []byte(mit), 0o644); err != nil {
-		t.Fatalf("write: %v", err)
-	}
-	ids := LocalRepoLicenseScan(tmp)
+
+	t.Run("disk workspace", func(t *testing.T) {
+		tmp := t.TempDir()
+		if err := os.WriteFile(filepath.Join(tmp, "LICENSE"), []byte(licenseText), 0o644); err != nil {
+			t.Fatalf("write: %v", err)
+		}
+		ws, err := workspace.NewDir(tmp)
+		if err != nil {
+			t.Fatalf("workspace: %v", err)
+		}
+		t.Cleanup(func() { _ = ws.Close() })
+		ids := LocalRepoLicenseScan(ws)
+		assertContainsMIT(t, ids)
+	})
+
+	t.Run("memory workspace", func(t *testing.T) {
+		ws := workspace.NewMemory()
+		t.Cleanup(func() { _ = ws.Close() })
+		if err := ws.WriteFile("LICENSE", []byte(licenseText), 0o644); err != nil {
+			t.Fatalf("write: %v", err)
+		}
+		ids := LocalRepoLicenseScan(ws)
+		assertContainsMIT(t, ids)
+	})
+}
+
+func assertContainsMIT(t *testing.T, ids []string) {
+	t.Helper()
 	if len(ids) == 0 {
 		t.Fatalf("expected at least one id")
 	}
-	foundMIT := false
 	for _, id := range ids {
 		if strings.Contains(strings.ToUpper(id), "MIT") {
-			foundMIT = true
+			return
 		}
 	}
-	if !foundMIT {
-		t.Fatalf("expected MIT in %v", ids)
-	}
+	t.Fatalf("expected MIT in %v", ids)
 }
 
 func Test_MergeLicenseSources(t *testing.T) {
@@ -55,7 +76,15 @@ func Test_MergeLicenseSources(t *testing.T) {
 }
 
 func Test_LocalRepoLicenseScan_missing_returns_nil(t *testing.T) {
-	if got := LocalRepoLicenseScan(filepath.Join(t.TempDir(), "does-not-exist")); got != nil {
-		t.Fatalf("expected nil for missing dir, got %v", got)
+	ws := workspace.NewMemory()
+	t.Cleanup(func() { _ = ws.Close() })
+	if got := LocalRepoLicenseScan(ws); got != nil {
+		t.Fatalf("expected nil for empty workspace, got %v", got)
+	}
+}
+
+func Test_LocalRepoLicenseScan_nilWorkspace_returnsNil(t *testing.T) {
+	if got := LocalRepoLicenseScan(nil); got != nil {
+		t.Fatalf("expected nil for nil workspace, got %v", got)
 	}
 }

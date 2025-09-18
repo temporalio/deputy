@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -18,6 +20,7 @@ import (
 	gitx "github.com/picatz/deputy/internal/gitutil"
 	inv "github.com/picatz/deputy/internal/inventory"
 	"github.com/picatz/deputy/internal/repository"
+	"github.com/picatz/deputy/internal/repository/workspace"
 	ui "github.com/picatz/deputy/internal/ui"
 	"github.com/spf13/cobra"
 	"golang.org/x/sync/errgroup"
@@ -335,7 +338,7 @@ func runDiffAnalysis(ctx context.Context, repoPath, baseRef, targetRef string, e
 	}
 
 	// Detailed dependency change rendering (legacy style) with optional enrichment
-	displayDetailedDependencyChanges(ctx, changes, enrichLicenses, licenseSource)
+	displayDetailedDependencyChanges(ctx, repoSrc.Workspace, changes, enrichLicenses, licenseSource)
 
 	// Scan for vulnerabilities if enabled
 	var vulns []analysis.Vulnerability
@@ -467,9 +470,31 @@ func isWorkingPseudoRef(s string) bool {
 	return u == "WORKING" || u == "WORKTREE" || u == "WT"
 }
 
+func licenseScanConcurrency(total int) int {
+	if total <= 0 {
+		return 1
+	}
+	if v := strings.TrimSpace(os.Getenv("DEPUTY_LICENSE_SCAN_CONCURRENCY")); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			if n > total {
+				n = total
+			}
+			return n
+		}
+	}
+	parallel := runtime.NumCPU() * 4
+	if parallel < 8 {
+		parallel = 8
+	}
+	if parallel > total {
+		parallel = total
+	}
+	return parallel
+}
+
 // displayDetailedDependencyChanges renders dependency changes with symbols, arrows,
 // license lookups via deps.dev and a concise summary similar to the original tool output.
-func displayDetailedDependencyChanges(ctx context.Context, changes []cmp.Change, enrich bool, licenseSource string) {
+func displayDetailedDependencyChanges(ctx context.Context, ws workspace.FS, changes []cmp.Change, enrich bool, licenseSource string) {
 	if len(changes) == 0 {
 		return
 	}
@@ -511,6 +536,79 @@ func displayDetailedDependencyChanges(ctx context.Context, changes []cmp.Change,
 		_ = g.Wait()
 	}
 
+	var localScan []string
+	if enrich && (licenseSource == "scan" || licenseSource == "both") {
+		localScan = analysis.LocalRepoLicenseScan(ws)
+	}
+
+	var remoteFetchers map[pkgKey]chan []string
+	var remoteCache map[pkgKey][]string
+	var remoteTasks []struct {
+		pk      pkgKey
+		name    string
+		version string
+	}
+	if enrich && (licenseSource == "scan" || licenseSource == "both") {
+		required := map[pkgKey]struct{}{}
+		for _, c := range changes {
+			if c.ChangeType == cmp.Removed || c.TargetVersion == "" {
+				continue
+			}
+			pk := pkgKey{c.Name, c.TargetVersion}
+			if _, ok := required[pk]; ok {
+				continue
+			}
+			required[pk] = struct{}{}
+		}
+		if len(required) > 0 {
+			remoteFetchers = make(map[pkgKey]chan []string, len(required))
+			remoteCache = make(map[pkgKey][]string, len(required))
+			remoteTasks = make([]struct {
+				pk      pkgKey
+				name    string
+				version string
+			}, 0, len(required))
+			seen := map[pkgKey]struct{}{}
+			for _, c := range changes {
+				if c.ChangeType == cmp.Removed || c.TargetVersion == "" {
+					continue
+				}
+				pk := pkgKey{c.Name, c.TargetVersion}
+				if _, ok := seen[pk]; ok {
+					continue
+				}
+				seen[pk] = struct{}{}
+				ch := make(chan []string, 1)
+				remoteFetchers[pk] = ch
+				remoteTasks = append(remoteTasks, struct {
+					pk      pkgKey
+					name    string
+					version string
+				}{pk: pk, name: c.Name, version: c.TargetVersion})
+			}
+			concurrency := licenseScanConcurrency(len(remoteTasks))
+			if concurrency < 1 {
+				concurrency = 1
+			}
+			sem := make(chan struct{}, concurrency)
+			for _, task := range remoteTasks {
+				t := task
+				ch := remoteFetchers[t.pk]
+				go func() {
+					defer close(ch)
+					select {
+					case sem <- struct{}{}:
+					case <-ctx.Done():
+						return
+					}
+					defer func() { <-sem }()
+					lics := analysis.RemoteModuleLicenseScan(ctx, t.name, t.version)
+					ch <- lics
+				}()
+			}
+		}
+	}
+
 	// Counters
 	var addedN, removedN, updatedN, upgradedN, downgradedN int
 
@@ -521,11 +619,28 @@ func displayDetailedDependencyChanges(ctx context.Context, changes []cmp.Change,
 			licenses = l
 		}
 		if c.ChangeType != cmp.Removed && c.TargetVersion != "" && enrich && (licenseSource == "scan" || licenseSource == "both") {
-			if lc := analysis.LocalRepoLicenseScan("."); lc != nil {
-				licenses = analysis.MergeLicenseSources(licenses, lc)
+			if len(localScan) > 0 {
+				licenses = analysis.MergeLicenseSources(licenses, localScan)
 			}
-			if rc := analysis.RemoteModuleLicenseScan(ctx, c.Name, c.TargetVersion); rc != nil {
-				licenses = analysis.MergeLicenseSources(licenses, rc)
+			if remoteFetchers != nil {
+				pk := pkgKey{c.Name, c.TargetVersion}
+				if rc, ok := remoteCache[pk]; ok {
+					if len(rc) > 0 {
+						licenses = analysis.MergeLicenseSources(licenses, rc)
+					}
+				} else if ch, ok := remoteFetchers[pk]; ok {
+					select {
+					case rc, ok := <-ch:
+						if ok && len(rc) > 0 {
+							remoteCache[pk] = rc
+							licenses = analysis.MergeLicenseSources(licenses, rc)
+						} else {
+							remoteCache[pk] = nil
+						}
+					case <-ctx.Done():
+						remoteCache[pk] = nil
+					}
+				}
 			}
 		}
 
