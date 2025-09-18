@@ -76,7 +76,7 @@ The tool automatically detects the repository's default branch by checking:
 
 OPTIMIZATION:
 Only analyzes changes when go.mod or go.sum files are modified between references.
-Provides license information for changed packages via the deps.dev API.
+License information can be included with --licenses flag via deps.dev API or local scanning.
 
 VULNERABILITY SCANNING:
 Automatically scans added and updated packages for known vulnerabilities using OSV.
@@ -161,6 +161,10 @@ REPOSITORY OPTIONS:
   deputy diff --skip-vuln-scan main feature
   deputy diff --skip-vuln-scan HEAD~5 HEAD
 
+  # Include license information for dependencies
+  deputy diff --licenses main feature
+  deputy diff --licenses --license-source=both v1.0.0 v2.0.0
+
 WORKFLOW EXAMPLES:
   # Before merging a PR
   deputy diff main feature/user-auth
@@ -192,9 +196,9 @@ PERFORMANCE TIPS:
 
 	cmd.Flags().StringVarP(&repoPath, "repo", "r", "", "Path to the repository (defaults to current directory)")
 	cmd.Flags().BoolVarP(&skipVulnScan, "skip-vuln-scan", "s", false, "Skip vulnerability scanning (faster execution)")
-	cmd.Flags().BoolVar(&useLicenseCheck, "use-licensecheck", false, "(Deprecated) Alias for --enrich-licenses --license-source=scan")
-	cmd.Flags().BoolVar(&enrichLicenses, "enrich-licenses", false, "Enrich changed modules with licenses (deps.dev, scan, or both)")
-	cmd.Flags().StringVar(&licenseSource, "license-source", "depsdev", "License enrichment source: depsdev | scan | both")
+	cmd.Flags().BoolVar(&useLicenseCheck, "use-licensecheck", false, "(Deprecated) Alias for --licenses --license-source=scan")
+	cmd.Flags().BoolVar(&enrichLicenses, "licenses", false, "Include license information for changed dependencies")
+	cmd.Flags().StringVar(&licenseSource, "license-source", "depsdev", "License information source: depsdev | scan | both")
 	cmd.Flags().StringVar(&publishedBeforeStr, "published-before", "", "Only include vulnerabilities published before this date (YYYY, YYYY-MM, YYYY-MM-DD, or RFC3339)")
 	cmd.Flags().StringVar(&publishedAfterStr, "published-after", "", "Only include vulnerabilities published on/after this date (YYYY, YYYY-MM, YYYY-MM-DD, or RFC3339)")
 	cmd.Flags().StringVar(&asOfStr, "as-of", "", "Historical view: show vulnerabilities known up to and including this date (implies --published-before)")
@@ -511,11 +515,7 @@ func displayDetailedDependencyChanges(ctx context.Context, changes []cmp.Change,
 	var addedN, removedN, updatedN, upgradedN, downgradedN int
 
 	for _, c := range changes {
-		depType := ui.StyleVersion.Render("[indirect]")
-		if c.IsDirect {
-			depType = ui.StyleUpgraded.Render("[direct]")
-		}
-
+		// Build the license and direct/indirect annotation in the new format: [License1, License2] (direct/indirect)
 		licenses := []string{"?"}
 		if l, ok := licMap[pkgKey{c.Name, c.TargetVersion}]; ok && len(l) > 0 {
 			licenses = l
@@ -528,17 +528,33 @@ func displayDetailedDependencyChanges(ctx context.Context, changes []cmp.Change,
 				licenses = analysis.MergeLicenseSources(licenses, rc)
 			}
 		}
-		licStr := ""
+
+		// Format the combined license and direct/indirect annotation
+		var licAndDepStr string
+		directness := "(indirect)"
+		if c.IsDirect {
+			directness = "(direct)"
+		}
+
 		if len(licenses) > 0 && licenses[0] != "?" {
-			licStr = ui.StyleLicense.Render("[" + strings.Join(licenses, ", ") + "]")
+			licenseStr := strings.Join(licenses, ", ")
+			licAndDepStr = ui.StyleLicense.Render("["+licenseStr+"]") + " " + ui.StyleVersion.Render(directness)
+		} else {
+			// If no licenses are available, just show the directness
+			licAndDepStr = ui.StyleVersion.Render(directness)
 		}
 
 		switch c.ChangeType {
 		case cmp.Added:
-			fmt.Printf("  %s %s @ %s %s %s\n", ui.StyleAdded.Render("+"), ui.StyleAdded.Render(c.Name), ui.StyleVersion.Render(c.TargetVersion), depType, licStr)
+			fmt.Printf("  %s %s @ %s %s\n", ui.StyleAdded.Render("+"), ui.StyleAdded.Render(c.Name), ui.StyleVersion.Render(c.TargetVersion), licAndDepStr)
 			addedN++
 		case cmp.Removed:
-			fmt.Printf("  %s %s @ %s %s\n", ui.StyleRemoved.Render("-"), ui.StyleRemoved.Render(c.Name), ui.StyleVersion.Render(c.BaseVersion), depType)
+			// For removed dependencies, we don't have target version license info, so just show directness
+			removedDirectness := "(indirect)"
+			if c.IsDirect {
+				removedDirectness = "(direct)"
+			}
+			fmt.Printf("  %s %s @ %s %s\n", ui.StyleRemoved.Render("-"), ui.StyleRemoved.Render(c.Name), ui.StyleVersion.Render(c.BaseVersion), ui.StyleVersion.Render(removedDirectness))
 			removedN++
 		case cmp.Upgraded:
 			updatedN++
@@ -547,7 +563,7 @@ func displayDetailedDependencyChanges(ctx context.Context, changes []cmp.Change,
 			if c.OldName != "" && c.OldName != c.Name {
 				oldNamePart = ui.StyleDim.Render(c.OldName) + " " + ui.StyleUpdateArrow.Render("→ ")
 			}
-			fmt.Printf("  %s %s%s @ %s %s %s %s %s\n", ui.StyleUpgraded.Render("↑"), oldNamePart, ui.StyleBold.Render(c.Name), ui.StyleVersion.Render(c.BaseVersion), ui.StyleUpdateArrow.Render("→"), ui.StyleVersion.Render(c.TargetVersion), depType, licStr)
+			fmt.Printf("  %s %s%s @ %s %s %s %s\n", ui.StyleUpgraded.Render("↑"), oldNamePart, ui.StyleBold.Render(c.Name), ui.StyleVersion.Render(c.BaseVersion), ui.StyleUpdateArrow.Render("→"), ui.StyleVersion.Render(c.TargetVersion), licAndDepStr)
 		case cmp.Downgraded:
 			updatedN++
 			downgradedN++
@@ -555,7 +571,7 @@ func displayDetailedDependencyChanges(ctx context.Context, changes []cmp.Change,
 			if c.OldName != "" && c.OldName != c.Name {
 				oldNamePart = ui.StyleDim.Render(c.OldName) + " " + ui.StyleDowngradeArrow.Render("→ ")
 			}
-			fmt.Printf("  %s %s%s @ %s %s %s %s %s\n", ui.StyleDowngraded.Render("↓"), oldNamePart, ui.StyleBold.Render(c.Name), ui.StyleVersion.Render(c.BaseVersion), ui.StyleDowngradeArrow.Render("→"), ui.StyleVersion.Render(c.TargetVersion), depType, licStr)
+			fmt.Printf("  %s %s%s @ %s %s %s %s\n", ui.StyleDowngraded.Render("↓"), oldNamePart, ui.StyleBold.Render(c.Name), ui.StyleVersion.Render(c.BaseVersion), ui.StyleDowngradeArrow.Render("→"), ui.StyleVersion.Render(c.TargetVersion), licAndDepStr)
 		case cmp.Updated:
 			updatedN++
 			arrowStyle := ui.StyleUpdateArrow
@@ -564,7 +580,7 @@ func displayDetailedDependencyChanges(ctx context.Context, changes []cmp.Change,
 			if c.OldName != "" && c.OldName != c.Name {
 				oldNamePart = ui.StyleDim.Render(c.OldName) + " " + arrowStyle.Render("→ ")
 			}
-			fmt.Printf("  %s %s%s @ %s %s %s %s %s\n", symbol, oldNamePart, ui.StyleBold.Render(c.Name), ui.StyleVersion.Render(c.BaseVersion), arrowStyle.Render("→"), ui.StyleVersion.Render(c.TargetVersion), depType, licStr)
+			fmt.Printf("  %s %s%s @ %s %s %s %s\n", symbol, oldNamePart, ui.StyleBold.Render(c.Name), ui.StyleVersion.Render(c.BaseVersion), arrowStyle.Render("→"), ui.StyleVersion.Render(c.TargetVersion), licAndDepStr)
 		}
 	}
 
