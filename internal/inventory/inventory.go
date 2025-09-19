@@ -6,6 +6,7 @@ import (
 	"io"
 	"io/fs"
 	"path"
+	"runtime"
 	"slices"
 	"strings"
 
@@ -15,6 +16,7 @@ import (
 	"github.com/go-git/go-git/v5/plumbing/object"
 	scalibr "github.com/google/osv-scalibr"
 	"github.com/google/osv-scalibr/extractor"
+	fsx "github.com/google/osv-scalibr/extractor/filesystem"
 	"github.com/google/osv-scalibr/plugin"
 	pl "github.com/google/osv-scalibr/plugin/list"
 
@@ -61,25 +63,142 @@ func ScanPackagesAtCommitSnapshot(ctx context.Context, repo *git.Repository, com
 }
 
 func scanWorkspace(ctx context.Context, ws workspace.FS, opts ScanOptions) ([]*extractor.Package, error) {
-	plugins, err := resolvePlugins(opts)
+	cap := defaultCapabilities(ws)
+	plugins, err := resolvePlugins(opts, cap)
 	if err != nil {
 		return nil, err
 	}
-	cfg := &scalibr.ScanConfig{ScanRoots: ws.ScalibrRoots(), Plugins: plugins}
+	plugins = filterInventoryPlugins(plugins)
+	cfg := &scalibr.ScanConfig{ScanRoots: ws.ScalibrRoots(), Plugins: plugins, Capabilities: cap}
 	results := scalibr.New().Scan(ctx, cfg)
-	return results.Inventory.Packages, nil
+	pkgs := results.Inventory.Packages
+	if scanErr := summarizeScanFailures(results); scanErr != nil {
+		if len(pkgs) > 0 {
+			return pkgs, scanErr
+		}
+		return nil, scanErr
+	}
+	return pkgs, nil
 }
 
-func resolvePlugins(opts ScanOptions) ([]plugin.Plugin, error) {
+func defaultCapabilities(ws workspace.FS) *plugin.Capabilities {
+	cap := &plugin.Capabilities{OS: hostOS(), Network: plugin.NetworkOffline}
+	if ws != nil && !ws.IsVirtual() {
+		cap.DirectFS = true
+	}
+	return cap
+}
+
+func hostOS() plugin.OS {
+	switch runtime.GOOS {
+	case "linux":
+		return plugin.OSLinux
+	case "windows":
+		return plugin.OSWindows
+	case "darwin":
+		return plugin.OSMac
+	default:
+		return plugin.OSUnknown
+	}
+}
+
+func summarizeScanFailures(res *scalibr.ScanResult) error {
+	if res == nil {
+		return nil
+	}
+
+	failures := make([]string, 0, len(res.PluginStatus))
+	for _, st := range res.PluginStatus {
+		if st == nil || st.Status == nil {
+			continue
+		}
+		if st.Status.Status != plugin.ScanStatusFailed {
+			continue
+		}
+		reason := st.Status.FailureReason
+		if reason == "" {
+			reason = "unknown error"
+		}
+		failures = append(failures, fmt.Sprintf("%s: %s", st.Name, reason))
+	}
+	if len(failures) > 0 {
+		return fmt.Errorf("plugin failures: %s", strings.Join(failures, "; "))
+	}
+
+	if res.Status == nil {
+		return nil
+	}
+
+	switch res.Status.Status {
+	case plugin.ScanStatusSucceeded:
+		return nil
+	case plugin.ScanStatusFailed:
+		if res.Status.FailureReason != "" {
+			return fmt.Errorf("scan failed: %s", res.Status.FailureReason)
+		}
+		return fmt.Errorf("scan failed")
+	case plugin.ScanStatusPartiallySucceeded:
+		if res.Status.FailureReason != "" {
+			return fmt.Errorf("scan partially succeeded: %s", res.Status.FailureReason)
+		}
+	}
+	return nil
+}
+
+func resolvePlugins(opts ScanOptions, cap *plugin.Capabilities) ([]plugin.Plugin, error) {
 	names := normalizeEcosystems(opts.Ecosystems)
 	if len(names) == 0 {
-		return pl.All(), nil
+		return pl.FromCapabilities(cap), nil
 	}
 	plugins, err := pl.FromNames(names)
 	if err != nil {
 		return nil, fmt.Errorf("error creating plugins: %w", err)
 	}
-	return plugins, nil
+	return plugin.FilterByCapabilities(plugins, cap), nil
+}
+
+func filterInventoryPlugins(plugins []plugin.Plugin) []plugin.Plugin {
+	if len(plugins) == 0 {
+		return plugins
+	}
+	allowedSegments := map[string]struct{}{
+		"javascript": {},
+		"golang":     {},
+		"python":     {},
+		"ruby":       {},
+		"rust":       {},
+		"php":        {},
+		"java":       {},
+		"dotnet":     {},
+		"haskell":    {},
+		"dart":       {},
+		"elixir":     {},
+		"erlang":     {},
+		"swift":      {},
+		"r":          {},
+		"cpp":        {},
+	}
+	excluded := map[string]struct{}{
+		"rust/cargoauditable": {},
+	}
+	out := make([]plugin.Plugin, 0, len(plugins))
+	for _, p := range plugins {
+		if _, ok := p.(fsx.Extractor); !ok {
+			continue
+		}
+		if _, banned := excluded[p.Name()]; banned {
+			continue
+		}
+		seg := p.Name()
+		if idx := strings.IndexRune(seg, '/'); idx != -1 {
+			seg = seg[:idx]
+		}
+		if _, ok := allowedSegments[seg]; !ok {
+			continue
+		}
+		out = append(out, p)
+	}
+	return out
 }
 
 func normalizeEcosystems(names []string) []string {
