@@ -23,4 +23,6 @@ var (
 	StyleUpdateArrow    = lipgloss.NewStyle().Foreground(lipgloss.Color("#00CED1")).Faint(true)
 	StyleDowngradeArrow = lipgloss.NewStyle().Foreground(lipgloss.Color("#FFD700")).Faint(true)
 	StyleSymbol         = lipgloss.NewStyle().Bold(true)
+	StylePath           = lipgloss.NewStyle().Foreground(lipgloss.Color("#E6E6FA"))
+	StyleManager        = lipgloss.NewStyle().Foreground(lipgloss.Color("#7FDBFF")).Faint(true)
 )
