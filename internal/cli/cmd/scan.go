@@ -460,7 +460,7 @@ func (s *Scanner) runScan(cmd *cobra.Command, args []string) error {
 
 	switch strings.ToLower(format) {
 	case "", "text":
-		return s.outputText(w, cmd.ErrOrStderr(), repoPath, ref, commitHash, originURL, pkgs, vulns, ignoreUnfixed)
+		return s.outputText(w, cmd.ErrOrStderr(), repoPath, ref, commitHash, originURL, pkgs, goDirect, vulns, ignoreUnfixed)
 	case "json":
 		return s.outputJSON(w, repoPath, ref, commitHash, vulns, len(pkgs), ignoreUnfixed)
 	default:
@@ -746,7 +746,7 @@ func getRepoMetadata(localRepoPath, ref string) (string, string) {
 	return commitHash, originURL
 }
 
-func (s *Scanner) outputText(w io.Writer, errW io.Writer, repoPath, ref, commitHash, originURL string, pkgs []*extractor.Package, vulns []analysis.Vulnerability, ignoreUnfixed bool) error {
+func (s *Scanner) outputText(w io.Writer, errW io.Writer, repoPath, ref, commitHash, originURL string, pkgs []*extractor.Package, goDirect map[string]bool, vulns []analysis.Vulnerability, ignoreUnfixed bool) error {
 	shortRef := shortGitRef(refOrHEAD(ref))
 	shortHash := commitHash
 	if len(shortHash) > 7 {
@@ -776,7 +776,7 @@ func (s *Scanner) outputText(w io.Writer, errW io.Writer, repoPath, ref, commitH
 	DisplayVulnerabilities(vulnsEff)
 
 	// Show module deprecations
-	if deps := detectModuleDeprecations(pkgs); len(deps) > 0 {
+	if deps := detectModuleDeprecations(pkgs, goDirect); len(deps) > 0 {
 		fmt.Fprintf(w, "\n%s\n", ui.StyleHeader.Render("Module Deprecations:"))
 		for _, d := range deps {
 			line := fmt.Sprintf("  %s %s -> %s", ui.StyleVersion.Render("•"), ui.StyleBold.Render(d.Module), ui.StyleVersion.Render(d.Suggest))
@@ -863,9 +863,12 @@ var knownDeprecations = []ModuleDeprecation{
 	{Module: "github.com/aws/aws-sdk-go", Suggest: "github.com/aws/aws-sdk-go-v2", URL: "https://github.com/aws/aws-sdk-go-v2"},
 }
 
-func detectModuleDeprecations(pkgs []*extractor.Package) []ModuleDeprecation {
+func detectModuleDeprecations(pkgs []*extractor.Package, direct map[string]bool) []ModuleDeprecation {
 	if len(pkgs) == 0 {
 		return nil
+	}
+	if direct == nil {
+		direct = map[string]bool{}
 	}
 
 	// Build a set of present module roots by inferring module path from package path
@@ -888,6 +891,9 @@ func detectModuleDeprecations(pkgs []*extractor.Package) []ModuleDeprecation {
 	var out []ModuleDeprecation
 	seen := map[string]struct{}{}
 	for _, d := range knownDeprecations {
+		if !moduleIsDirect(d.Module, direct) {
+			continue
+		}
 		// match by exact or prefix
 		if _, ok := present[d.Module]; ok {
 			if _, dup := seen[d.Module]; !dup {
@@ -908,6 +914,24 @@ func detectModuleDeprecations(pkgs []*extractor.Package) []ModuleDeprecation {
 		}
 	}
 	return out
+}
+
+func moduleIsDirect(module string, direct map[string]bool) bool {
+	if len(direct) == 0 {
+		return false
+	}
+	if direct[module] {
+		return true
+	}
+	for mod, directDep := range direct {
+		if !directDep || mod == "stdlib" {
+			continue
+		}
+		if strings.HasPrefix(mod, module+"/") {
+			return true
+		}
+	}
+	return false
 }
 
 func shortGitRef(ref string) string {

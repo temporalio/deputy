@@ -162,8 +162,9 @@ func filterInventoryPlugins(plugins []plugin.Plugin) []plugin.Plugin {
 		return plugins
 	}
 	allowedSegments := map[string]struct{}{
-		"javascript": {},
+		"go":         {},
 		"golang":     {},
+		"javascript": {},
 		"python":     {},
 		"ruby":       {},
 		"rust":       {},

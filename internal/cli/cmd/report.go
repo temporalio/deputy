@@ -346,7 +346,17 @@ func RenderVulnerabilityList(vulns []analysis.Vulnerability) {
 					}
 					aliasBlocks = append(aliasBlocks, st.Render(a))
 				}
+				if v.HiddenAliasCount > 0 {
+					aliasBlocks = append(aliasBlocks, ui.StyleMeta.Render(fmt.Sprintf("(+%d more)", v.HiddenAliasCount)))
+				}
 				aliasRow := lipgloss.JoinHorizontal(lipgloss.Top, ui.StyleMeta.Render("Aliases:"), lipgloss.NewStyle().MarginLeft(1).Render(strings.Join(aliasBlocks, ", ")))
+				fmt.Println("    " + aliasRow)
+			} else if v.HiddenAliasCount > 0 {
+				aliasRow := lipgloss.JoinHorizontal(
+					lipgloss.Top,
+					ui.StyleMeta.Render("Aliases:"),
+					lipgloss.NewStyle().MarginLeft(1).Render(ui.StyleMeta.Render(fmt.Sprintf("(+%d more)", v.HiddenAliasCount))),
+				)
 				fmt.Println("    " + aliasRow)
 			}
 			if v.Published != "" && len(v.Published) >= 10 {

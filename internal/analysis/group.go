@@ -7,6 +7,17 @@ import (
 	"golang.org/x/mod/semver"
 )
 
+var trustedAliasPrefixes = []string{
+	"CVE-",
+	"GO-",
+	"GHSA-",
+	"PYSEC-",
+	"RUBYSEC-",
+	"RUSTSEC-",
+	"MSRC-",
+	"GSD-",
+}
+
 // HasCommonAlias reports if two alias sets intersect.
 func HasCommonAlias(a1, a2 []string) bool {
 	set := make(map[string]struct{}, len(a1))
@@ -32,6 +43,35 @@ func getIDPriority(id string) int {
 		return 3
 	}
 	return 4
+}
+
+func isTrustedAlias(id string) bool {
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return false
+	}
+	upper := strings.ToUpper(id)
+	for _, prefix := range trustedAliasPrefixes {
+		if strings.HasPrefix(upper, prefix) {
+			return true
+		}
+	}
+	return false
+}
+
+func filterTrustedAliases(ids []string) (preferred []string, hidden int) {
+	if len(ids) == 0 {
+		return nil, 0
+	}
+	preferred = make([]string, 0, len(ids))
+	for _, id := range ids {
+		if isTrustedAlias(id) {
+			preferred = append(preferred, id)
+			continue
+		}
+		hidden++
+	}
+	return preferred, hidden
 }
 
 func findBestPrimaryIDFromGroup(vs []Vulnerability) string {
@@ -95,6 +135,8 @@ func createConsolidatedVulnerability(primaryID string, vulns []Vulnerability) Co
 			seen[id] = struct{}{}
 		}
 	}
+
+	preferredSecondaries, hiddenAliases := filterTrustedAliases(secondaries)
 
 	// Merge fixed versions
 	fixSet := map[string]struct{}{}
@@ -170,25 +212,26 @@ func createConsolidatedVulnerability(primaryID string, vulns []Vulnerability) Co
 	})
 
 	return ConsolidatedVulnerability{
-		PrimaryID:     primaryID,
-		SecondaryIDs:  secondaries,
-		AllIDs:        uniqAll,
-		Summary:       base.Summary,
-		Details:       base.Details,
-		Severity:      bestSev,
-		SeverityType:  bestSevType,
-		Package:       base.Package,
-		Version:       base.Version,
-		IsDirect:      base.IsDirect,
-		Ecosystem:     base.Ecosystem,
-		PURL:          base.PURL,
-		Published:     base.Published,
-		Modified:      base.Modified,
-		References:    refs,
-		FixedVersions: fixed,
-		RelatedCount:  len(vulns),
-		Locations:     locations,
-		ManifestRefs:  manifestRefs,
+		PrimaryID:        primaryID,
+		SecondaryIDs:     preferredSecondaries,
+		AllIDs:           uniqAll,
+		HiddenAliasCount: hiddenAliases,
+		Summary:          base.Summary,
+		Details:          base.Details,
+		Severity:         bestSev,
+		SeverityType:     bestSevType,
+		Package:          base.Package,
+		Version:          base.Version,
+		IsDirect:         base.IsDirect,
+		Ecosystem:        base.Ecosystem,
+		PURL:             base.PURL,
+		Published:        base.Published,
+		Modified:         base.Modified,
+		References:       refs,
+		FixedVersions:    fixed,
+		RelatedCount:     len(vulns),
+		Locations:        locations,
+		ManifestRefs:     manifestRefs,
 	}
 }
 

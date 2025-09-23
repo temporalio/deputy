@@ -25,25 +25,26 @@ type Vulnerability struct {
 
 // ConsolidatedVulnerability represents a deduplicated vulnerability with primary/secondary IDs.
 type ConsolidatedVulnerability struct {
-	PrimaryID     string
-	SecondaryIDs  []string
-	AllIDs        []string
-	Summary       string
-	Details       string
-	Severity      string
-	SeverityType  string
-	Package       string
-	Version       string
-	IsDirect      bool
-	Ecosystem     string
-	PURL          string
-	Published     string
-	Modified      string
-	References    []string
-	FixedVersions []string
-	RelatedCount  int
-	Locations     []string
-	ManifestRefs  []ManifestReference
+	PrimaryID        string
+	SecondaryIDs     []string
+	AllIDs           []string
+	HiddenAliasCount int
+	Summary          string
+	Details          string
+	Severity         string
+	SeverityType     string
+	Package          string
+	Version          string
+	IsDirect         bool
+	Ecosystem        string
+	PURL             string
+	Published        string
+	Modified         string
+	References       []string
+	FixedVersions    []string
+	RelatedCount     int
+	Locations        []string
+	ManifestRefs     []ManifestReference
 }
 
 // ManifestReference describes the manifest/lockfile context for a dependency.
