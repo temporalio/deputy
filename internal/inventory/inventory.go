@@ -6,6 +6,7 @@ import (
 	"io"
 	"io/fs"
 	"path"
+	"path/filepath"
 	"runtime"
 	"slices"
 	"strings"
@@ -19,8 +20,10 @@ import (
 	fsx "github.com/google/osv-scalibr/extractor/filesystem"
 	"github.com/google/osv-scalibr/plugin"
 	pl "github.com/google/osv-scalibr/plugin/list"
+	"github.com/google/osv-scalibr/purl"
 
 	"github.com/picatz/deputy/internal/repository/workspace"
+	"github.com/picatz/deputy/internal/scalibr/java/gradlewrapper"
 )
 
 // ScanOptions configures how scalibr scans a workspace.
@@ -31,6 +34,14 @@ type ScanOptions struct {
 // ScanPackagesWorking scans the provided workspace and returns the discovered
 // package inventory. The workspace may be backed by the host filesystem or be a
 // virtual in-memory filesystem.
+
+const (
+	// gradleWrapperPackageName is the canonical name emitted for the enriched wrapper package.
+	gradleWrapperPackageName = "org.gradle:gradle-wrapper"
+	// gradleWrapperJarSuffix matches the legacy archive location emitted by the default Java extractor.
+	gradleWrapperJarSuffix = "gradle-wrapper.jar"
+)
+
 func ScanPackagesWorking(ctx context.Context, ws workspace.FS, opts ScanOptions) ([]*extractor.Package, error) {
 	if ws == nil {
 		return nil, fmt.Errorf("workspace is required")
@@ -68,10 +79,11 @@ func scanWorkspace(ctx context.Context, ws workspace.FS, opts ScanOptions) ([]*e
 	if err != nil {
 		return nil, err
 	}
+	plugins = appendDeputyInventoryPlugins(plugins, cap)
 	plugins = filterInventoryPlugins(plugins)
 	cfg := &scalibr.ScanConfig{ScanRoots: ws.ScalibrRoots(), Plugins: plugins, Capabilities: cap}
 	results := scalibr.New().Scan(ctx, cfg)
-	pkgs := results.Inventory.Packages
+	pkgs := postProcessPackages(results.Inventory.Packages)
 	if scanErr := summarizeScanFailures(results); scanErr != nil {
 		if len(pkgs) > 0 {
 			return pkgs, scanErr
@@ -157,49 +169,126 @@ func resolvePlugins(opts ScanOptions, cap *plugin.Capabilities) ([]plugin.Plugin
 	return plugin.FilterByCapabilities(plugins, cap), nil
 }
 
-func filterInventoryPlugins(plugins []plugin.Plugin) []plugin.Plugin {
-	if len(plugins) == 0 {
-		return plugins
+// postProcessPackages applies Deputy-specific cleanup to Scalibr results, allowing
+// supplemental extractors to remove noisy duplicates while keeping upstream defaults intact.
+func postProcessPackages(pkgs []*extractor.Package) []*extractor.Package {
+	if len(pkgs) == 0 {
+		return pkgs
 	}
-	allowedSegments := map[string]struct{}{
-		"go":         {},
-		"golang":     {},
-		"javascript": {},
-		"python":     {},
-		"ruby":       {},
-		"rust":       {},
-		"php":        {},
-		"java":       {},
-		"dotnet":     {},
-		"haskell":    {},
-		"dart":       {},
-		"elixir":     {},
-		"erlang":     {},
-		"swift":      {},
-		"r":          {},
-		"cpp":        {},
-	}
-	excluded := map[string]struct{}{
-		"rust/cargoauditable": {},
-	}
-	out := make([]plugin.Plugin, 0, len(plugins))
-	for _, p := range plugins {
-		if _, ok := p.(fsx.Extractor); !ok {
+	out := make([]*extractor.Package, 0, len(pkgs))
+	rules := defaultPostProcessRules()
+	for _, pkg := range pkgs {
+		if pkg == nil {
 			continue
 		}
-		if _, banned := excluded[p.Name()]; banned {
+		if shouldDropPackage(pkg, pkgs, rules) {
 			continue
 		}
-		seg := p.Name()
-		if idx := strings.IndexRune(seg, '/'); idx != -1 {
-			seg = seg[:idx]
-		}
-		if _, ok := allowedSegments[seg]; !ok {
-			continue
-		}
-		out = append(out, p)
+		out = append(out, pkg)
 	}
 	return out
+}
+
+// defaultPostProcessRules returns the built-in cleanup rules provided by Deputy.
+func defaultPostProcessRules() []postProcessRule {
+	return []postProcessRule{
+		gradleWrapperRule{},
+	}
+}
+
+// postProcessRule decides whether a package should be dropped during cleanup.
+type postProcessRule interface {
+	shouldDrop(pkg *extractor.Package, all []*extractor.Package) bool
+}
+
+// shouldDropPackage evaluates a package against all configured rules and reports whether it should be removed.
+func shouldDropPackage(pkg *extractor.Package, all []*extractor.Package, rules []postProcessRule) bool {
+	for _, rule := range rules {
+		if rule.shouldDrop(pkg, all) {
+			return true
+		}
+	}
+	return false
+}
+
+// gradleWrapperRule removes the fallback archive record when the enriched wrapper is present.
+// gradleWrapperRule suppresses the duplicate archive record emitted for gradle-wrapper.jar when the enriched wrapper package is present.
+type gradleWrapperRule struct{}
+
+func (gradleWrapperRule) shouldDrop(pkg *extractor.Package, all []*extractor.Package) bool {
+	if !isGradleWrapperFallback(pkg) {
+		return false
+	}
+	for _, other := range all {
+		if isGradleWrapperPrimary(other) {
+			return true
+		}
+	}
+	return false
+}
+
+func hasGradleWrapperPrimary(pkgs []*extractor.Package) bool {
+	for _, pkg := range pkgs {
+		if isGradleWrapperPrimary(pkg) {
+			return true
+		}
+	}
+	return false
+}
+
+// isGradleWrapperPrimary reports whether pkg corresponds to the enriched Gradle wrapper package provided by the Deputy extractor.
+func isGradleWrapperPrimary(pkg *extractor.Package) bool {
+	if pkg == nil {
+		return false
+	}
+	if pkg.Name != gradleWrapperPackageName {
+		return false
+	}
+	if p := pkg.PURL(); p == nil || p.Type != purl.TypeMaven {
+		return false
+	}
+	return true
+}
+
+// isGradleWrapperFallback reports whether pkg looks like the legacy archive-based wrapper record produced by Scalibr.
+func isGradleWrapperFallback(pkg *extractor.Package) bool {
+	if pkg == nil {
+		return false
+	}
+	if isGradleWrapperPrimary(pkg) {
+		return false
+	}
+	p := pkg.PURL()
+	if p == nil || p.Type != purl.TypeMaven {
+		return false
+	}
+	if len(pkg.Locations) == 0 {
+		return false
+	}
+	name := strings.ToLower(pkg.Name)
+	isNameGeneric := name == "" || name == "unknown" || strings.Contains(name, "gradle-wrapper")
+	if !isNameGeneric {
+		return false
+	}
+	for _, loc := range pkg.Locations {
+		if strings.HasSuffix(filepath.ToSlash(loc), gradleWrapperJarSuffix) {
+			return true
+		}
+	}
+	return false
+}
+
+func appendDeputyInventoryPlugins(pls []plugin.Plugin, cap *plugin.Capabilities) []plugin.Plugin {
+	wrapper := gradlewrapper.New()
+	if plugin.ValidateRequirements(wrapper, cap) != nil {
+		return pls
+	}
+	for _, existing := range pls {
+		if existing.Name() == wrapper.Name() {
+			return pls
+		}
+	}
+	return append(pls, wrapper)
 }
 
 func normalizeEcosystems(names []string) []string {
@@ -272,4 +361,49 @@ func fileModeToPerm(mode filemode.FileMode) fs.FileMode {
 		return 0o755
 	}
 	return 0o644
+}
+
+func filterInventoryPlugins(plugins []plugin.Plugin) []plugin.Plugin {
+	if len(plugins) == 0 {
+		return plugins
+	}
+	allowedSegments := map[string]struct{}{
+		"go":         {},
+		"golang":     {},
+		"javascript": {},
+		"python":     {},
+		"ruby":       {},
+		"rust":       {},
+		"php":        {},
+		"java":       {},
+		"dotnet":     {},
+		"haskell":    {},
+		"dart":       {},
+		"elixir":     {},
+		"erlang":     {},
+		"swift":      {},
+		"r":          {},
+		"cpp":        {},
+	}
+	excluded := map[string]struct{}{
+		"rust/cargoauditable": {},
+	}
+	out := make([]plugin.Plugin, 0, len(plugins))
+	for _, p := range plugins {
+		if _, ok := p.(fsx.Extractor); !ok {
+			continue
+		}
+		if _, banned := excluded[p.Name()]; banned {
+			continue
+		}
+		seg := p.Name()
+		if idx := strings.IndexRune(seg, '/'); idx != -1 {
+			seg = seg[:idx]
+		}
+		if _, ok := allowedSegments[seg]; !ok {
+			continue
+		}
+		out = append(out, p)
+	}
+	return out
 }
