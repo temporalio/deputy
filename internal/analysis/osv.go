@@ -6,8 +6,8 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/google/osv-scalibr/purl"
 	"github.com/ossf/osv-schema/bindings/go/osvschema"
-	packageurl "github.com/package-url/packageurl-go"
 	"golang.org/x/mod/semver"
 	"golang.org/x/sync/errgroup"
 	"osv.dev/bindings/go/osvdev"
@@ -78,10 +78,10 @@ func QueryOSVBatch(ctx context.Context, client OSVClient, pkgs []PkgInput) ([]Vu
 		var queryVersion string
 		if normalized.PURL != "" {
 			pkgQuery.PURL = normalized.PURL
-			if pu, err := packageurl.FromString(normalized.PURL); err == nil {
+			if pu, err := purl.FromString(normalized.PURL); err == nil {
 				queryVersion = pu.Version
 				pu.Version = ""
-				pkgQuery.PURL = pu.ToString()
+				pkgQuery.PURL = pu.String()
 			}
 		}
 		if pkgQuery.PURL == "" {
@@ -233,8 +233,8 @@ func matchesPackage(pkg osvschema.Package, target PkgInput) bool {
 }
 
 func equivalentPURL(a, b string) bool {
-	pa, errA := packageurl.FromString(a)
-	pb, errB := packageurl.FromString(b)
+	pa, errA := purl.FromString(a)
+	pb, errB := purl.FromString(b)
 	if errA != nil || errB != nil {
 		return strings.EqualFold(a, b)
 	}
