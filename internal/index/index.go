@@ -22,6 +22,7 @@ import (
 	"errors"
 	"fmt"
 	"iter"
+	"strings"
 	"time"
 
 	"github.com/cockroachdb/pebble/v2"
@@ -91,14 +92,14 @@ type Relationship struct {
 // Artifact represents any piece of analysis data with flexible schema.
 type Artifact struct {
 	Namespace     string            `json:"namespace"`               // Analysis domain (security, quality, etc.)
-	Type          string            `json:"type"`                    // Artifact type within namespace
-	ID            string            `json:"id"`                      // Unique identifier within type
-	Entity        Entity            `json:"entity"`                  // Subject being analyzed
-	Timestamp     time.Time         `json:"timestamp"`               // When observed/created
-	Data          map[string]any    `json:"data"`                    // Artifact-specific data
-	Relationships []Relationship    `json:"relationships,omitempty"` // Related artifacts/entities
-	Context       map[string]any    `json:"context,omitempty"`       // Environmental metadata
-	Dimensions    map[string]string `json:"dimensions,omitempty"`    // Additional indexable dimensions
+	Type          string            `json:"type"`                    // Artifact type within namespace (vulnerability, dependency, etc.)
+	ID            string            `json:"id"`                      // Unique identifier within type (e.g., CVE ID)
+	Entity        Entity            `json:"entity"`                  // Subject being analyzed (e.g, repo, package, file)
+	Timestamp     time.Time         `json:"timestamp"`               // When observed/created (UTC)
+	Data          map[string]any    `json:"data"`                    // Artifact-specific data (flexible schema)
+	Relationships []Relationship    `json:"relationships,omitempty"` // Related artifacts/entities (graph edges)
+	Context       map[string]any    `json:"context,omitempty"`       // Environmental metadata (e.g., branch, commit, tool)
+	Dimensions    map[string]string `json:"dimensions,omitempty"`    // Additional indexable dimensions (e.g., severity, language)
 }
 
 // TimeRange represents a time window for filtering queries.
@@ -200,7 +201,7 @@ func initializeCELEnvironment() (*cel.Env, error) {
 
 // severityToLevel converts severity strings to numeric levels for comparison.
 func severityToLevel(severity string) int {
-	switch severity {
+	switch strings.ToUpper(severity) {
 	case "LOW":
 		return 1
 	case "MEDIUM":

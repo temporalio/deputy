@@ -83,19 +83,6 @@ func TestTemporalSDKSecurityIntelligence(t *testing.T) {
 
 		tagName := ref.Name().Short()
 
-		// Checkout the tag
-		// worktree, err := repo.Worktree()
-		// if err != nil {
-		// 	t.Fatalf("Failed to get worktree: %v", err)
-		// }
-		// err = worktree.Checkout(&git.CheckoutOptions{
-		// 	Hash:  ref.Hash(),
-		// 	Force: true,
-		// })
-		// if err != nil {
-		// 	t.Fatalf("Failed to checkout tag %s: %v", tagName, err)
-		// }
-
 		commit, err := repo.CommitObject(ref.Hash())
 		if err != nil && err != plumbing.ErrObjectNotFound {
 			log.Fatal(err)
@@ -104,7 +91,6 @@ func TestTemporalSDKSecurityIntelligence(t *testing.T) {
 			return nil
 		}
 
-		// if the commit has happened in the last year, included it, otherwise, skip it
 		// if commit.Author.When.Year() <= 2023 {
 		// if commit.Author.When.Year() < 2025 {
 
@@ -123,7 +109,7 @@ func TestTemporalSDKSecurityIntelligence(t *testing.T) {
 			t.Fatalf("Failed to scan packages at tag %s: %v", tagName, err)
 		}
 
-		for i, pkg := range pkgs {
+		for _, pkg := range pkgs {
 			if pkg == nil {
 				continue
 			}
@@ -134,27 +120,16 @@ func TestTemporalSDKSecurityIntelligence(t *testing.T) {
 			}
 
 			purl := pkg.PURL()
-			purlStr := ""
-			if purl != nil {
-				purlStr = purl.String()
-			}
+			entityID := purl.String()
 
 			ecosystem := pkg.Ecosystem()
-			entityID := purlStr
-			if entityID == "" {
-				entityID = pkg.Name
-				if pkg.Version != "" {
-					entityID = fmt.Sprintf("%s@%s", entityID, pkg.Version)
-				}
-			}
-			if entityID == "" {
-				entityID = fmt.Sprintf("temporal-sdk-go:%s:%d", commit.Hash.String(), i)
-			}
 
 			artifactID := fmt.Sprintf("%s:%s", commit.Hash.String(), entityID)
 
 			entityMetadata := map[string]any{
 				"repository": "github.com/temporalio/sdk-go",
+				"ecosystem":  pkg.Ecosystem(),
+				"purl":       purl.String(),
 			}
 			if pkg.Name != "" {
 				entityMetadata["name"] = pkg.Name
@@ -164,9 +139,6 @@ func TestTemporalSDKSecurityIntelligence(t *testing.T) {
 			}
 			if ecosystem != "" {
 				entityMetadata["ecosystem"] = ecosystem
-			}
-			if purlStr != "" {
-				entityMetadata["purl"] = purlStr
 			}
 			if pkg.SourceCode != nil {
 				entityMetadata["source_code"] = map[string]any{
@@ -215,7 +187,10 @@ func TestTemporalSDKSecurityIntelligence(t *testing.T) {
 				Timestamp: commit.Author.When.UTC(),
 				Data:      data,
 				Relationships: []Relationship{
-					{Type: "derived_from", Target: "repo:github.com/temporalio/sdk-go"},
+					{
+						Type:   "derived_from",
+						Target: "repo:github.com/temporalio/sdk-go",
+					},
 				},
 				Context: map[string]any{
 					"repository": "github.com/temporalio/sdk-go",
@@ -227,11 +202,6 @@ func TestTemporalSDKSecurityIntelligence(t *testing.T) {
 			if err := testIndex.PutArtifact(ctx, artifact); err != nil {
 				t.Fatalf("Failed to store artifact for package %q: %v", entityID, err)
 			}
-
-			// worktree.Reset(&git.ResetOptions{
-			// 	Mode:   git.HardReset,
-			// 	Commit: ref.Hash(),
-			// })
 		}
 		return nil
 	})
