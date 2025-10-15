@@ -34,7 +34,15 @@ func newDetailPanel() detailPanelModel {
     return detailPanelModel{ vp: vp, tab: tabSummary }
 }
 
-func (m *detailPanelModel) SetSize(w, h int) { m.outW, m.outH = w, h; m.vp.SetWidth(paneInnerWidth(w)); m.vp.SetHeight(paneInnerHeight(h)); m.applyStyle() }
+func (m *detailPanelModel) SetSize(w, h int) {
+    m.outW, m.outH = w, h
+    m.vp.SetWidth(w)
+    m.vp.SetHeight(h)
+    m.applyStyle()
+    // Re-render content to recalculate wrapping at the new width/height.
+    // This prevents partial-scroll issues when switching between layouts.
+    m.render()
+}
 func (m *detailPanelModel) Focus() { m.focused = true; m.applyStyle() }
 func (m *detailPanelModel) Blur()  { m.focused = false; m.applyStyle() }
 func (m *detailPanelModel) SetCompact(c bool) { m.compact = c; m.applyStyle() }

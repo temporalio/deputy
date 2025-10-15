@@ -28,8 +28,8 @@ func newFacetTree(ch chan event) facetTreeModel {
 
 func (m *facetTreeModel) SetSize(w, h int) {
     m.outW, m.outH = w, h
-    m.vp.SetWidth(paneInnerWidth(w))
-    m.vp.SetHeight(paneInnerHeight(h))
+    m.vp.SetWidth(w)
+    m.vp.SetHeight(h)
     m.applyStyle()
 }
 func (m *facetTreeModel) Focus() { m.focused = true; m.applyStyle() }

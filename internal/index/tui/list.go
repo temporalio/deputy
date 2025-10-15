@@ -28,8 +28,8 @@ func newArtifactList(ch chan event) artifactListModel {
 
 func (m *artifactListModel) SetSize(w, h int) {
     m.outW, m.outH = w, h
-    m.vp.SetWidth(paneInnerWidth(w))
-    m.vp.SetHeight(paneInnerHeight(h))
+    m.vp.SetWidth(w)
+    m.vp.SetHeight(h)
     m.applyStyle()
 }
 func (m *artifactListModel) Focus() { m.focused = true; m.applyStyle() }

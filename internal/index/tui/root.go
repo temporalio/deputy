@@ -654,11 +654,15 @@ func (m *rootModel) reflow() {
     cfg := m.computeLayout(m.width, bodyH)
     m.filter.SetWidth(m.width)
     compact := m.width < 90 || m.height < 22
-    if m.showTree { m.facets.SetSize(cfg.treeWidth, cfg.treeHeight); m.facets.SetCompact(compact) }
+    if m.showTree { m.facets.SetSize(cfg.treeWidth, cfg.treeHeight); m.facets.SetCompact(compact); m.facets.vp.YPosition = 1 }
     m.list.SetSize(cfg.listWidth, cfg.listHeight)
     m.list.SetDense(compact)
     m.list.SetCompact(compact)
-    if m.showDetail { m.detail.SetSize(cfg.detailsWidth, cfg.detailsHeight); m.detail.SetCompact(compact) }
+    m.list.vp.YPosition = 1
+    if m.showDetail {
+        m.detail.SetSize(cfg.detailsWidth, cfg.detailsHeight); m.detail.SetCompact(compact)
+        if cfg.detailsBelow { m.detail.vp.YPosition = 1 + cfg.listHeight } else { m.detail.vp.YPosition = 1 }
+    }
     m.updateFocus()
 }
 
