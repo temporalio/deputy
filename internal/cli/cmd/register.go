@@ -6,8 +6,9 @@ import "github.com/spf13/cobra"
 // Cobra command. It centralizes subcommand registration for use by both the
 // CLI entry point and tests.
 func RegisterCommands(root *cobra.Command) {
-    AddScanCommand(root)
-    AddSBOMCommand(root)
-    AddDiffCommand(root)
-    AddListCommand(root)
+	AddScanCommand(root)
+	AddSBOMCommand(root)
+	AddDiffCommand(root)
+	AddListCommand(root)
+	AddIndexCommand(root)
 }

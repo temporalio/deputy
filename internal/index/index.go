@@ -153,8 +153,15 @@ func defaultPebbleOptions() *pebble.Options {
 	return &pebble.Options{
 		FS:           vfs.Default,
 		MaxOpenFiles: defaultMaxOpenFiles,
+		Logger:       noopPebbleLogger{},
 	}
 }
+
+type noopPebbleLogger struct{}
+
+func (noopPebbleLogger) Infof(string, ...interface{})  {}
+func (noopPebbleLogger) Errorf(string, ...interface{}) {}
+func (noopPebbleLogger) Fatalf(string, ...interface{}) {}
 
 // initializeCELEnvironment creates a CEL environment with artifact-specific types and functions.
 func initializeCELEnvironment() (*cel.Env, error) {
@@ -723,6 +730,34 @@ func (idx *Index) PutArtifact(ctx context.Context, artifact Artifact) error {
 
 	// Store the key-value pair without syncing to disk immediately for performance
 	return idx.db.Set(key, value, pebble.NoSync)
+}
+
+// DeleteArtifact removes an artifact from the index using its identifying fields.
+// The artifact provided must have the same namespace, type, entity, timestamp,
+// and ID as the stored record. Additional fields are ignored for the purposes of
+// deletion.
+func (idx *Index) DeleteArtifact(ctx context.Context, artifact Artifact) error {
+	if idx == nil || idx.db == nil {
+		return errors.New("index: nil index")
+	}
+
+	if err := checkCtx(ctx); err != nil {
+		return err
+	}
+
+	if err := validateArtifact(artifact); err != nil {
+		return err
+	}
+
+	key := makeArtifactKey(
+		artifact.Namespace,
+		artifact.Type,
+		artifact.Entity.ID,
+		artifact.Timestamp.Format(timeEncoding),
+		artifact.ID,
+	)
+
+	return idx.db.Delete(key, pebble.NoSync)
 }
 
 // Helper functions for key construction

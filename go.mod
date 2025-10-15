@@ -4,6 +4,7 @@ go 1.24.6
 
 require (
 	deps.dev/api/v3 v3.0.0-20250903005441-604c45d5b44b
+	github.com/charmbracelet/bubbletea/v2 v2.0.0-beta.4
 	github.com/charmbracelet/fang v0.4.0
 	github.com/charmbracelet/lipgloss v1.1.0
 	github.com/cockroachdb/pebble/v2 v2.1.0
@@ -47,17 +48,22 @@ require (
 	github.com/agext/levenshtein v1.2.3 // indirect
 	github.com/anchore/go-struct-converter v0.0.0-20250211213226-cce56d595160 // indirect
 	github.com/antlr4-go/antlr/v4 v4.13.0 // indirect
+	github.com/atotto/clipboard v0.1.4 // indirect
 	github.com/aymanbagabas/go-osc52/v2 v2.0.1 // indirect
 	github.com/beorn7/perks v1.0.1 // indirect
 	github.com/blang/semver/v4 v4.0.0 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
+	github.com/charmbracelet/bubbles v0.21.0 // indirect
+	github.com/charmbracelet/bubbles/v2 v2.0.0-beta.1 // indirect
 	github.com/charmbracelet/colorprofile v0.3.2 // indirect
 	github.com/charmbracelet/lipgloss/v2 v2.0.0-beta1 // indirect
 	github.com/charmbracelet/x/ansi v0.10.1 // indirect
-	github.com/charmbracelet/x/cellbuf v0.0.13 // indirect
+	github.com/charmbracelet/x/cellbuf v0.0.14-0.20250505150409-97991a1f17d1 // indirect
 	github.com/charmbracelet/x/exp/charmtone v0.0.0-20250904123553-b4e2667e5ad5 // indirect
 	github.com/charmbracelet/x/exp/color v0.0.0-20250904123553-b4e2667e5ad5 // indirect
+	github.com/charmbracelet/x/input v0.3.7 // indirect
 	github.com/charmbracelet/x/term v0.2.1 // indirect
+	github.com/charmbracelet/x/windows v0.2.1 // indirect
 	github.com/cloudflare/circl v1.6.1 // indirect
 	github.com/cockroachdb/crlib v0.0.0-20241112164430-1264a2edc35b // indirect
 	github.com/cockroachdb/errors v1.11.3 // indirect
