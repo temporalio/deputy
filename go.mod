@@ -11,6 +11,7 @@ require (
 	github.com/google/licensecheck v0.3.1
 	github.com/google/osv-scalibr v0.3.2
 	github.com/ossf/osv-schema/bindings/go v0.0.0-20250902063920-695987a6b7da
+	github.com/package-url/packageurl-go v0.1.3
 	github.com/pandatix/go-cvss v0.6.2
 	github.com/pjbgf/sha1cd v0.5.0
 	github.com/protobom/protobom v0.5.4
@@ -51,7 +52,7 @@ require (
 	github.com/cloudflare/circl v1.6.1 // indirect
 	github.com/common-nighthawk/go-figure v0.0.0-20210622060536-734e95fb86be // indirect
 	github.com/containerd/cgroups/v3 v3.0.5 // indirect
-	github.com/containerd/containerd v1.7.28 // indirect
+	github.com/containerd/containerd v1.7.29 // indirect
 	github.com/containerd/containerd/api v1.9.0 // indirect
 	github.com/containerd/continuity v0.4.5 // indirect
 	github.com/containerd/errdefs v1.0.0 // indirect
@@ -123,7 +124,6 @@ require (
 	github.com/opencontainers/image-spec v1.1.1 // indirect
 	github.com/opencontainers/runtime-spec v1.2.1 // indirect
 	github.com/opencontainers/selinux v1.12.0 // indirect
-	github.com/package-url/packageurl-go v0.1.3 // indirect
 	github.com/pkg/errors v0.9.1 // indirect
 	github.com/planetscale/vtprotobuf v0.6.1-0.20240319094008-0393e58bdf10 // indirect
 	github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec // indirect
