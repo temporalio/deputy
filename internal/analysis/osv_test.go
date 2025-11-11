@@ -82,12 +82,9 @@ func Test_QueryOSVBatch_getvuln_error(t *testing.T) {
 	cacheDirPath = ""
 	t.Setenv("DEPUTY_CACHE_DIR", t.TempDir())
 	client := &fakeOSVClientGetErr{}
-	vulns, err := QueryOSVBatch(context.Background(), client, []PkgInput{{Name: "n", Version: "1", Ecosystem: "Go", IsDirect: true}})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if len(vulns) != 0 {
-		t.Fatalf("expected 0 vulns, got %d", len(vulns))
+	_, err := QueryOSVBatch(context.Background(), client, []PkgInput{{Name: "n", Version: "1", Ecosystem: "Go", IsDirect: true}})
+	if err == nil {
+		t.Fatalf("expected error when GetVulnByID fails")
 	}
 }
 

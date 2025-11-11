@@ -7,11 +7,13 @@ import (
 
 	git "github.com/go-git/go-git/v5"
 	"github.com/go-git/go-git/v5/plumbing"
+	inv "github.com/picatz/deputy/internal/inventory"
 )
 
 // ParseReferences intelligently parses command line arguments to determine base and target references.
 // It supports all Git reference types: branches, tags, commits, remote refs, and Git revision expressions.
-func ParseReferences(repoPath string, args []string) (baseRef, targetRef string, err error) {
+// Dependency-related decisions (e.g., whether to compare with WORKING) are aided by the provided matcher.
+func ParseReferences(repoPath string, args []string, matcher *inv.DependencyMatcher) (baseRef, targetRef string, err error) {
 	repo, err := git.PlainOpen(repoPath)
 	if err != nil {
 		return "", "", fmt.Errorf("error opening Git repository at %s: %w", repoPath, err)
@@ -22,12 +24,11 @@ func ParseReferences(repoPath string, args []string) (baseRef, targetRef string,
 	if err != nil {
 		return "", "", fmt.Errorf("error determining default branch: %w", err)
 	}
-
 	switch len(args) {
 	case 0:
 		// No arguments: compare default branch with HEAD by default.
 		// If working tree has dependency changes, compare default branch with WORKING tree.
-		if ok, _ := hasWorkingDependencyChanges(repo); ok {
+		if ok, _ := hasWorkingDependencyChanges(repo, matcher); ok {
 			return defaultBranch, "WORKING", nil
 		}
 		return defaultBranch, "HEAD", nil
@@ -52,8 +53,11 @@ func ParseReferences(repoPath string, args []string) (baseRef, targetRef string,
 	}
 }
 
-// hasWorkingDependencyChanges reports if go.mod or go.sum have uncommitted changes.
-func hasWorkingDependencyChanges(repo *git.Repository) (bool, error) {
+// hasWorkingDependencyChanges reports if dependency manifest/lock files have uncommitted changes.
+func hasWorkingDependencyChanges(repo *git.Repository, matcher *inv.DependencyMatcher) (bool, error) {
+	if matcher == nil {
+		return false, nil
+	}
 	wt, err := repo.Worktree()
 	if err != nil {
 		return false, err
@@ -62,11 +66,13 @@ func hasWorkingDependencyChanges(repo *git.Repository) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	if s, ok := st["go.mod"]; ok && s.Worktree != git.Unmodified {
-		return true, nil
-	}
-	if s, ok := st["go.sum"]; ok && s.Worktree != git.Unmodified {
-		return true, nil
+	for path, stat := range st {
+		if stat.Worktree == git.Unmodified && stat.Staging == git.Unmodified {
+			continue
+		}
+		if matcher.Matches(path) {
+			return true, nil
+		}
 	}
 	return false, nil
 }

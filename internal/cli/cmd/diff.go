@@ -5,7 +5,6 @@ import (
 	"crypto/x509"
 	"fmt"
 	"os"
-	"path/filepath"
 	"runtime"
 	"strconv"
 	"strings"
@@ -93,11 +92,16 @@ Can be disabled with --skip-vuln-scan for faster execution.`,
 			if repo == "" {
 				repo = mustGetwd()
 			}
-			baseRef, targetRef, err := gitx.ParseReferences(repo, args)
+			scanOpts := inv.ScanOptions{Ecosystems: ecosystems}
+			matcher, matcherErr := inv.NewDependencyMatcher(scanOpts)
+			if matcherErr != nil {
+				fmt.Fprintf(cmd.ErrOrStderr(), "Warning: dependency matcher unavailable, falling back to full scans: %v\n", matcherErr)
+			}
+			baseRef, targetRef, err := gitx.ParseReferences(repo, args, matcher)
 			if err != nil {
 				return fmt.Errorf("failed to parse references: %w", err)
 			}
-			return runDiffAnalysis(cmd.Context(), repo, baseRef, targetRef, !skipVulnScan, useLicenseCheck, enrichLicenses, licenseSource, publishedAfterStr, publishedBeforeStr, asOfStr, ignoreUnfixed, showUnchanged, unchangedThreshold, ecosystems)
+			return runDiffAnalysis(cmd.Context(), repo, baseRef, targetRef, !skipVulnScan, useLicenseCheck, enrichLicenses, licenseSource, publishedAfterStr, publishedBeforeStr, asOfStr, ignoreUnfixed, showUnchanged, unchangedThreshold, scanOpts, matcher)
 		},
 		Example: `BASIC USAGE:
   # Compare current work with default branch (beginner-friendly)
@@ -222,10 +226,9 @@ func mustGetwd() string {
 // runDiffAnalysis orchestrates dependency inventory collection for the base and
 // target references, computes a dependency diff, and optionally queries OSV to
 // enrich added/updated modules with vulnerability data.
-func runDiffAnalysis(ctx context.Context, repoPath, baseRef, targetRef string, enableVulnScan bool, useLicenseCheck bool, enrichLicenses bool, licenseSource string, publishedAfterStr, publishedBeforeStr, asOfStr string, ignoreUnfixed bool, showUnchanged bool, unchangedThreshold string, ecosystems []string) error {
+func runDiffAnalysis(ctx context.Context, repoPath, baseRef, targetRef string, enableVulnScan bool, useLicenseCheck bool, enrichLicenses bool, licenseSource string, publishedAfterStr, publishedBeforeStr, asOfStr string, ignoreUnfixed bool, showUnchanged bool, unchangedThreshold string, scanOpts inv.ScanOptions, matcher *inv.DependencyMatcher) error {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	scanOpts := inv.ScanOptions{Ecosystems: ecosystems}
 
 	dispTarget := targetRef
 	if isWorkingPseudoRef(targetRef) {
@@ -240,16 +243,7 @@ func runDiffAnalysis(ctx context.Context, repoPath, baseRef, targetRef string, e
 			return fmt.Errorf("error checking files changed: %w", err)
 		}
 
-		containsDepChanges := false
-		for _, f := range changedFiles {
-			b := filepath.Base(f)
-			if b == "go.mod" || b == "go.sum" {
-				containsDepChanges = true
-				break
-			}
-		}
-
-		if !containsDepChanges {
+		if matcher != nil && !matcher.AnyMatch(changedFiles) {
 			fmt.Println("No dependency changes detected.")
 			return nil
 		}

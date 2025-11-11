@@ -133,7 +133,7 @@ func QueryOSVBatch(ctx context.Context, client OSVClient, pkgs []PkgInput) ([]Vu
 			for _, mv := range res.Vulns {
 				full, err := getCachedVuln(ctx, client, mv.ID)
 				if err != nil {
-					continue
+					return fmt.Errorf("expand vulnerability %s: %w", mv.ID, err)
 				}
 				if !isVersionAffected(*full, pkgMeta) {
 					continue
@@ -209,7 +209,9 @@ func QueryOSVBatch(ctx context.Context, client OSVClient, pkgs []PkgInput) ([]Vu
 			return nil
 		})
 	}
-	_ = g.Wait()
+	if err := g.Wait(); err != nil {
+		return nil, err
+	}
 	return out, nil
 }
 
@@ -260,7 +262,7 @@ func isVersionAffected(v osvschema.Vulnerability, pkg PkgInput) bool {
 				return true
 			}
 		}
-		return true
+		return false
 	}
 	cur := normalizeGoVersion(pkg.Version)
 	for _, a := range v.Affected {

@@ -147,8 +147,8 @@ func TestPackagesToInputs_NPMDirectDetection(t *testing.T) {
 	if !containsGroup(lookup["react"].ManifestRefs[0].Groups, "dependencies") {
 		t.Fatalf("react expected dependencies group: %+v", lookup["react"].ManifestRefs[0].Groups)
 	}
-	if !lookup["typescript"].IsDirect {
-		t.Fatalf("typescript should be direct (dev dependency)")
+	if lookup["typescript"].IsDirect {
+		t.Fatalf("typescript dev dependency should be indirect")
 	}
 	if !containsGroup(lookup["typescript"].ManifestRefs[0].Groups, "devDependencies") {
 		t.Fatalf("typescript expected devDependencies group: %+v", lookup["typescript"].ManifestRefs[0].Groups)

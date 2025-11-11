@@ -167,7 +167,9 @@ func packagesToInputs(pkgs []*extractor.Package, opts packageInputOptions) []ana
 					groups, err := cache.groupsForPackage(manifestPath, name)
 					if err == nil && len(groups) > 0 {
 						ref.Groups = groups
-						entry.IsDirect = true
+						if hasRuntimeDependencyGroup(groups) {
+							entry.IsDirect = true
+						}
 					}
 				}
 			}
@@ -319,4 +321,13 @@ func sortAndUniqueManifestRefs(refs []analysis.ManifestReference) []analysis.Man
 		return out[i].Manager < out[j].Manager
 	})
 	return out
+}
+
+func hasRuntimeDependencyGroup(groups []string) bool {
+	for _, g := range groups {
+		if strings.EqualFold(strings.TrimSpace(g), "dependencies") {
+			return true
+		}
+	}
+	return false
 }

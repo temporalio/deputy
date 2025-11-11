@@ -2,6 +2,7 @@ package sbomx
 
 import (
 	"context"
+	"crypto/x509"
 	"fmt"
 	"io"
 	"os"
@@ -10,6 +11,7 @@ import (
 
 	neturl "net/url"
 
+	pb "deps.dev/api/v3"
 	"github.com/go-git/go-git/v5"
 	"github.com/go-git/go-git/v5/config"
 	"github.com/go-git/go-git/v5/plumbing"
@@ -18,6 +20,8 @@ import (
 	"github.com/go-git/go-git/v5/storage/memory"
 	"github.com/google/osv-scalibr/extractor"
 	"github.com/google/osv-scalibr/purl"
+	packageurl "github.com/package-url/packageurl-go"
+	analysis "github.com/picatz/deputy/internal/analysis"
 	"github.com/picatz/deputy/internal/inventory"
 	"github.com/picatz/deputy/internal/repository"
 	"github.com/picatz/deputy/internal/repository/workspace"
@@ -25,6 +29,8 @@ import (
 	"github.com/protobom/protobom/pkg/sbom"
 	"github.com/protobom/protobom/pkg/writer"
 	"golang.org/x/mod/modfile"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials"
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
@@ -200,15 +206,219 @@ func buildProtobomDocument(ws workspace.FS, repoRef, ref, name string, pkgs []*e
 	return d, nil
 }
 
-// License enrichment helpers — currently stubs.
-func enrichProtobomLicensesDepsDev(_ context.Context, _ *sbom.Document) error { return nil }
-func enrichProtobomLicensesScanLocal(_ context.Context, _ *sbom.Document, _ workspace.FS) error {
+type remoteFetcher struct{ Timeout time.Duration }
+
+// License enrichment helpers.
+func enrichProtobomLicensesDepsDev(ctx context.Context, doc *sbom.Document) error {
+	if doc == nil || doc.NodeList == nil || len(doc.NodeList.Nodes) == 0 {
+		return nil
+	}
+	certPool, err := x509.SystemCertPool()
+	if err != nil {
+		return fmt.Errorf("deps.dev trust store: %w", err)
+	}
+	conn, err := grpc.NewClient("api.deps.dev:443", grpc.WithTransportCredentials(credentials.NewClientTLSFromCert(certPool, "")))
+	if err != nil {
+		return fmt.Errorf("deps.dev dial: %w", err)
+	}
+	defer conn.Close()
+	client := pb.NewInsightsClient(conn)
+
+	cache := map[string][]string{}
+	for _, node := range doc.NodeList.Nodes {
+		if node == nil || len(node.GetLicenses()) > 0 {
+			continue
+		}
+		pu := nodePackageURL(node)
+		if pu == nil {
+			continue
+		}
+		sys := systemFromPURL(pu)
+		if sys == pb.System_SYSTEM_UNSPECIFIED {
+			continue
+		}
+		name := packageNameForSystem(pu, sys)
+		version := normalizeVersionForSystem(sys, strings.TrimSpace(pu.Version))
+		if name == "" || version == "" {
+			continue
+		}
+		key := fmt.Sprintf("%d|%s|%s", sys, name, version)
+		if cached, ok := cache[key]; ok {
+			node.Licenses = appendUniqueLicenses(node.Licenses, cached)
+			continue
+		}
+		resp, err := client.GetVersion(ctx, &pb.GetVersionRequest{VersionKey: &pb.VersionKey{System: sys, Name: name, Version: version}})
+		if err != nil || resp == nil || len(resp.Licenses) == 0 {
+			continue
+		}
+		cache[key] = resp.Licenses
+		node.Licenses = appendUniqueLicenses(node.Licenses, resp.Licenses)
+	}
 	return nil
 }
 
-type remoteFetcher struct{ Timeout time.Duration }
+func enrichProtobomLicensesScanLocal(_ context.Context, doc *sbom.Document, ws workspace.FS) error {
+	if doc == nil || ws == nil {
+		return nil
+	}
+	root := rootNode(doc)
+	if root == nil {
+		return nil
+	}
+	ids := analysis.LocalRepoLicenseScan(ws)
+	if len(ids) == 0 {
+		return nil
+	}
+	root.Licenses = appendUniqueLicenses(root.Licenses, ids)
+	return nil
+}
 
-func enrichProtobomLicensesScanWithFetcher(_ context.Context, _ *sbom.Document, _ *remoteFetcher) error {
+func enrichProtobomLicensesScanWithFetcher(ctx context.Context, doc *sbom.Document, fetcher *remoteFetcher) error {
+	if doc == nil || fetcher == nil {
+		return nil
+	}
+	if fetcher.Timeout > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, fetcher.Timeout)
+		defer cancel()
+	}
+	for _, node := range doc.NodeList.Nodes {
+		if node == nil || len(node.GetLicenses()) > 0 {
+			continue
+		}
+		pu := nodePackageURL(node)
+		if pu == nil || pu.Type != packageurl.TypeGolang {
+			continue
+		}
+		module := goModuleFromPURL(pu)
+		version := strings.TrimSpace(pu.Version)
+		if module == "" || version == "" {
+			continue
+		}
+		if ids := analysis.RemoteModuleLicenseScan(ctx, module, version); len(ids) > 0 {
+			node.Licenses = appendUniqueLicenses(node.Licenses, ids)
+		}
+	}
+	return nil
+}
+
+func nodePackageURL(n *sbom.Node) *packageurl.PackageURL {
+	if n == nil || len(n.Identifiers) == 0 {
+		return nil
+	}
+	val, ok := n.Identifiers[int32(sbom.SoftwareIdentifierType_PURL)]
+	if !ok || strings.TrimSpace(val) == "" {
+		return nil
+	}
+	pu, err := packageurl.FromString(strings.TrimSpace(val))
+	if err != nil {
+		return nil
+	}
+	return &pu
+}
+
+func systemFromPURL(pu *packageurl.PackageURL) pb.System {
+	if pu == nil {
+		return pb.System_SYSTEM_UNSPECIFIED
+	}
+	switch strings.ToLower(pu.Type) {
+	case packageurl.TypeGolang:
+		return pb.System_GO
+	case packageurl.TypeNPM:
+		return pb.System_NPM
+	case packageurl.TypeCargo:
+		return pb.System_CARGO
+	case packageurl.TypePyPi:
+		return pb.System_PYPI
+	case packageurl.TypeGem:
+		return pb.System_RUBYGEMS
+	case packageurl.TypeMaven:
+		return pb.System_MAVEN
+	case packageurl.TypeNuget:
+		return pb.System_NUGET
+	default:
+		return pb.System_SYSTEM_UNSPECIFIED
+	}
+}
+
+func packageNameForSystem(pu *packageurl.PackageURL, sys pb.System) string {
+	if pu == nil {
+		return ""
+	}
+	switch sys {
+	case pb.System_GO:
+		return goModuleFromPURL(pu)
+	case pb.System_NPM:
+		if pu.Namespace != "" {
+			return "@" + pu.Namespace + "/" + pu.Name
+		}
+	case pb.System_RUBYGEMS, pb.System_CARGO, pb.System_PYPI, pb.System_NUGET:
+		if pu.Namespace != "" {
+			return pu.Namespace + "/" + pu.Name
+		}
+	default:
+		if pu.Namespace != "" {
+			return pu.Namespace + "/" + pu.Name
+		}
+	}
+	return pu.Name
+}
+
+func normalizeVersionForSystem(sys pb.System, version string) string {
+	v := strings.TrimSpace(version)
+	if v == "" {
+		return ""
+	}
+	if sys == pb.System_GO && !strings.HasPrefix(v, "v") {
+		return "v" + v
+	}
+	return v
+}
+
+func goModuleFromPURL(pu *packageurl.PackageURL) string {
+	if pu == nil {
+		return ""
+	}
+	switch {
+	case pu.Namespace != "":
+		return strings.TrimSuffix(pu.Namespace, "/") + "/" + pu.Name
+	default:
+		return pu.Name
+	}
+}
+
+func appendUniqueLicenses(dst []string, src []string) []string {
+	if len(src) == 0 {
+		return dst
+	}
+	seen := map[string]struct{}{}
+	for _, existing := range dst {
+		seen[existing] = struct{}{}
+	}
+	for _, candidate := range src {
+		candidate = strings.TrimSpace(candidate)
+		if candidate == "" {
+			continue
+		}
+		if _, ok := seen[candidate]; ok {
+			continue
+		}
+		seen[candidate] = struct{}{}
+		dst = append(dst, candidate)
+	}
+	return dst
+}
+
+func rootNode(doc *sbom.Document) *sbom.Node {
+	if doc == nil || doc.NodeList == nil || len(doc.NodeList.RootElements) == 0 {
+		return nil
+	}
+	target := doc.NodeList.RootElements[0]
+	for _, node := range doc.NodeList.Nodes {
+		if node != nil && node.Id == target {
+			return node
+		}
+	}
 	return nil
 }
 
