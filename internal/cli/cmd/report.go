@@ -9,8 +9,8 @@ import (
 
 	"github.com/charmbracelet/lipgloss"
 	analysis "github.com/picatz/deputy/internal/analysis"
+	remediation "github.com/picatz/deputy/internal/remediation"
 	ui "github.com/picatz/deputy/internal/ui"
-	"golang.org/x/mod/semver"
 )
 
 // DisplayVulnerabilities renders a styled vulnerability report with the default heading.
@@ -95,151 +95,6 @@ func managerRank(name string) int {
 	default:
 		return 100
 	}
-}
-
-type packageUpgrade struct {
-	Name               string
-	Current            string
-	Recommended        string
-	IsDirect           bool
-	Ecosystem          string
-	References         []analysis.ManifestReference
-	Locations          []string
-	PrimaryManager     string
-	PrimaryManagerRank int
-}
-
-type commandRecommendation struct {
-	Manager     string
-	ManagerRank int
-	IsDirect    bool
-	Command     string
-	Path        string
-	Groups      []string
-	Hint        string
-}
-
-func buildUpgradeRecommendations(vulns []analysis.ConsolidatedVulnerability) ([]packageUpgrade, string) {
-	if len(vulns) == 0 {
-		return nil, ""
-	}
-	type agg struct {
-		current   string
-		isDirect  bool
-		rec       string
-		ecosystem string
-		refs      map[manifestRefKey]analysis.ManifestReference
-		locations map[string]struct{}
-	}
-	byPkg := map[string]*agg{}
-	var stdlibRec string
-	for _, v := range vulns {
-		if v.Package == "" {
-			continue
-		}
-		a := byPkg[v.Package]
-		if a == nil {
-			a = &agg{
-				current:   v.Version,
-				isDirect:  v.IsDirect,
-				ecosystem: v.Ecosystem,
-				refs:      map[manifestRefKey]analysis.ManifestReference{},
-				locations: map[string]struct{}{},
-			}
-			byPkg[v.Package] = a
-		} else if v.IsDirect {
-			a.isDirect = true
-		}
-		fix := analysis.FindBestFixedVersion(v.FixedVersions, v.Version)
-		if fix == "" {
-			continue
-		}
-		if a.rec == "" || semver.Compare(normalizeGoVersion(fix), normalizeGoVersion(a.rec)) > 0 {
-			a.rec = fix
-		}
-		for _, ref := range v.ManifestRefs {
-			key := manifestRefKey{manager: ref.Manager, path: ref.Path}
-			existing := a.refs[key]
-			existing.Manager = ref.Manager
-			existing.Path = ref.Path
-			existing.Groups = mergeGroupNames(existing.Groups, ref.Groups)
-			a.refs[key] = existing
-		}
-		for _, loc := range v.Locations {
-			if loc == "" {
-				continue
-			}
-			a.locations[loc] = struct{}{}
-		}
-	}
-	var out []packageUpgrade
-	for name, a := range byPkg {
-		if a.rec == "" {
-			continue
-		}
-		if name == "stdlib" {
-			if stdlibRec == "" || semver.Compare(normalizeGoVersion(a.rec), normalizeGoVersion(stdlibRec)) > 0 {
-				stdlibRec = a.rec
-			}
-			continue
-		}
-		refs := make([]analysis.ManifestReference, 0, len(a.refs))
-		for _, ref := range a.refs {
-			ref.Groups = uniqueSortedStrings(ref.Groups)
-			refs = append(refs, ref)
-		}
-		sort.Slice(refs, func(i, j int) bool {
-			ri, rj := managerRank(refs[i].Manager), managerRank(refs[j].Manager)
-			if ri != rj {
-				return ri < rj
-			}
-			if refs[i].Manager != refs[j].Manager {
-				return refs[i].Manager < refs[j].Manager
-			}
-			return refs[i].Path < refs[j].Path
-		})
-		locs := make([]string, 0, len(a.locations))
-		for loc := range a.locations {
-			locs = append(locs, loc)
-		}
-		sort.Strings(locs)
-		primaryManager := ""
-		primaryRank := 1 << 30
-		for _, ref := range refs {
-			rank := managerRank(ref.Manager)
-			if rank < primaryRank || (rank == primaryRank && ref.Manager < primaryManager) {
-				primaryRank = rank
-				primaryManager = ref.Manager
-			}
-		}
-		out = append(out, packageUpgrade{
-			Name:               name,
-			Current:            a.current,
-			Recommended:        a.rec,
-			IsDirect:           a.isDirect,
-			Ecosystem:          a.ecosystem,
-			References:         refs,
-			Locations:          locs,
-			PrimaryManager:     primaryManager,
-			PrimaryManagerRank: primaryRank,
-		})
-	}
-	sort.Slice(out, func(i, j int) bool {
-		if out[i].IsDirect != out[j].IsDirect {
-			return out[i].IsDirect
-		}
-		if out[i].PrimaryManagerRank != out[j].PrimaryManagerRank {
-			return out[i].PrimaryManagerRank < out[j].PrimaryManagerRank
-		}
-		if out[i].PrimaryManager != out[j].PrimaryManager {
-			return out[i].PrimaryManager < out[j].PrimaryManager
-		}
-		if out[i].Name != out[j].Name {
-			return out[i].Name < out[j].Name
-		}
-		return out[i].Recommended < out[j].Recommended
-	})
-	return out, stdlibRec
 }
 
 func normalizeGoVersion(v string) string {
@@ -630,103 +485,6 @@ func renderManifestContext(list []analysis.ConsolidatedVulnerability) {
 	}
 }
 
-func recommendCommand(manager, path, pkg, version string, groups []string) (string, string) {
-	switch strings.ToLower(manager) {
-	case "go":
-		return fmt.Sprintf("go get %s@%s", pkg, version), ""
-	case "npm":
-		flag := npmFlag(groups)
-		cmd := fmt.Sprintf("npm install %s@%s", pkg, version)
-		if flag != "" {
-			cmd = fmt.Sprintf("%s %s", cmd, flag)
-		}
-		return cmd, ""
-	case "yarn":
-		flag := yarnFlag(groups)
-		cmd := fmt.Sprintf("yarn add %s@%s", pkg, version)
-		if flag != "" {
-			cmd = fmt.Sprintf("%s %s", cmd, flag)
-		}
-		return cmd, ""
-	case "pnpm":
-		flag := npmFlag(groups)
-		cmd := fmt.Sprintf("pnpm add %s@%s", pkg, version)
-		if flag != "" {
-			cmd = fmt.Sprintf("%s %s", cmd, flag)
-		}
-		return cmd, ""
-	case "pip":
-		return fmt.Sprintf("pip install --upgrade %s==%s", pkg, version), ""
-	case "pipenv":
-		return fmt.Sprintf("pipenv install %s==%s", pkg, version), ""
-	case "poetry":
-		return fmt.Sprintf("poetry add %s@%s", pkg, version), ""
-	case "gem":
-		base := strings.ToLower(pathpkg.Base(path))
-		switch {
-		case base == "gemfile.lock" || base == "gems.locked":
-			return fmt.Sprintf("bundle update %s", pkg), ""
-		case base == "gemfile":
-			return fmt.Sprintf("Edit Gemfile to require %s >= %s", pkg, version), "run bundle install afterwards"
-		case strings.HasSuffix(strings.ToLower(path), ".gemspec"):
-			return fmt.Sprintf("Edit %s to require %s >= %s", pathpkg.Base(path), pkg, version), ""
-		default:
-			return fmt.Sprintf("Update Ruby dependency for %s to %s", pkg, version), ""
-		}
-	case "composer":
-		return fmt.Sprintf("composer require %s:%s", pkg, version), ""
-	case "cargo":
-		return fmt.Sprintf("cargo update -p %s --precise %s", pkg, version), ""
-	case "maven":
-		return fmt.Sprintf("mvn versions:use-dep-version -Dincludes=%s -DdepVersion=%s", pkg, version), "consider running mvn versions:commit afterwards"
-	case "gradle":
-		return "", "update dependency declaration in build.gradle"
-	}
-	return "", ""
-}
-
-func npmFlag(groups []string) string {
-	if hasGroup(groups, "dev", "devdependencies") {
-		return "--save-dev"
-	}
-	if hasGroup(groups, "optional", "optionaldependencies") {
-		return "--save-optional"
-	}
-	if hasGroup(groups, "peer", "peerdependencies") {
-		return "--save-peer"
-	}
-	return ""
-}
-
-func yarnFlag(groups []string) string {
-	if hasGroup(groups, "dev", "devdependencies") {
-		return "--dev"
-	}
-	if hasGroup(groups, "optional", "optionaldependencies") {
-		return "--optional"
-	}
-	if hasGroup(groups, "peer", "peerdependencies") {
-		return "--peer"
-	}
-	return ""
-}
-
-func hasGroup(groups []string, candidates ...string) bool {
-	if len(groups) == 0 {
-		return false
-	}
-	lookup := map[string]struct{}{}
-	for _, g := range groups {
-		lookup[strings.ToLower(g)] = struct{}{}
-	}
-	for _, c := range candidates {
-		if _, ok := lookup[strings.ToLower(c)]; ok {
-			return true
-		}
-	}
-	return false
-}
-
 func mergeGroupNames(base []string, extra []string) []string {
 	set := map[string]struct{}{}
 	for _, g := range base {
@@ -787,163 +545,22 @@ func RenderVulnerabilitySummaryAndActions(vulns []analysis.Vulnerability) {
 		fmt.Println("  " + ui.StyleSymbol.Render(ui.StyleRemoved.Render("-")) + " " + ui.StyleSymbol.Render(fmt.Sprintf("%d have no fix available yet", unfixed)))
 	}
 
-	upgrades, stdlibRec := buildUpgradeRecommendations(cons)
-	if consolidated.FixAvailable > 0 || stdlibRec != "" || unfixed > 0 {
+	commands, stdlibRec := remediation.CommandsFromVulnerabilities(vulns)
+	if len(commands) > 0 || stdlibRec != "" || unfixed > 0 {
 		fmt.Println("\n" + ui.StyleHeader.Render("Recommended Actions:"))
 		step := 1
 		if stdlibRec != "" {
 			fmt.Printf("  %d. %s %s %s\n", step, ui.StyleBold.Render("Upgrade Go toolchain to"), ui.StyleUpgraded.Render(stdlibRec), ui.StyleVersion.Render("(update 'go' directive in go.mod)"))
 			step++
 		}
-		if len(upgrades) > 0 {
+		if len(commands) > 0 {
 			high := consolidated.CriticalSev + consolidated.HighSeverity
 			header := "Upgrade affected modules"
 			if high > 0 {
 				header = "Upgrade critical/high modules first"
 			}
 			fmt.Printf("  %d. %s\n", step, ui.StyleBold.Render(header))
-			var commands []commandRecommendation
-			seen := map[string]struct{}{}
-			goManagerPresent := false
-			goPaths := map[string]struct{}{}
-			for _, u := range upgrades {
-				for _, ref := range u.References {
-					cmd, hint := recommendCommand(ref.Manager, ref.Path, u.Name, u.Recommended, ref.Groups)
-					if cmd == "" {
-						cmd = fmt.Sprintf("Update %s to %s", u.Name, u.Recommended)
-					}
-					path := strings.TrimSpace(ref.Path)
-					groups := uniqueSortedStrings(append([]string(nil), ref.Groups...))
-					groupsKey := strings.Join(groups, ",")
-					key := strings.Join([]string{
-						strings.ToLower(strings.TrimSpace(ref.Manager)),
-						cmd,
-						path,
-						groupsKey,
-						hint,
-						fmt.Sprintf("%t", u.IsDirect),
-					}, "|")
-					if _, ok := seen[key]; ok {
-						continue
-					}
-					seen[key] = struct{}{}
-					manager := strings.TrimSpace(ref.Manager)
-					commands = append(commands, commandRecommendation{
-						Manager:     manager,
-						ManagerRank: managerRank(manager),
-						IsDirect:    u.IsDirect,
-						Command:     cmd,
-						Path:        path,
-						Groups:      groups,
-						Hint:        hint,
-					})
-					if strings.EqualFold(manager, "go") {
-						goManagerPresent = true
-						if path != "" {
-							goPaths[path] = struct{}{}
-						}
-					}
-				}
-			}
-			if len(goPaths) > 0 {
-				pathList := make([]string, 0, len(goPaths))
-				for path := range goPaths {
-					pathList = append(pathList, path)
-				}
-				sort.Strings(pathList)
-				for _, path := range pathList {
-					key := strings.Join([]string{"go", "go mod tidy", path, "", "", "false"}, "|")
-					if _, ok := seen[key]; ok {
-						continue
-					}
-					seen[key] = struct{}{}
-					commands = append(commands, commandRecommendation{
-						Manager:     "go",
-						ManagerRank: managerRank("go"),
-						Command:     "go mod tidy",
-						Path:        path,
-					})
-				}
-			} else if goManagerPresent {
-				key := strings.Join([]string{"go", "go mod tidy", "", "", "", "false"}, "|")
-				if _, ok := seen[key]; !ok {
-					seen[key] = struct{}{}
-					commands = append(commands, commandRecommendation{
-						Manager:     "go",
-						ManagerRank: managerRank("go"),
-						Command:     "go mod tidy",
-					})
-				}
-			}
-			sort.SliceStable(commands, func(i, j int) bool {
-				if commands[i].ManagerRank != commands[j].ManagerRank {
-					return commands[i].ManagerRank < commands[j].ManagerRank
-				}
-				if commands[i].IsDirect != commands[j].IsDirect {
-					return commands[i].IsDirect && !commands[j].IsDirect
-				}
-				if commands[i].Path != commands[j].Path {
-					return commands[i].Path < commands[j].Path
-				}
-				if commands[i].Command != commands[j].Command {
-					return commands[i].Command < commands[j].Command
-				}
-				groupsI := strings.Join(commands[i].Groups, ",")
-				groupsJ := strings.Join(commands[j].Groups, ",")
-				if groupsI != groupsJ {
-					return groupsI < groupsJ
-				}
-				return commands[i].Hint < commands[j].Hint
-			})
-			pathOrder := []string{}
-			grouped := map[string][]commandRecommendation{}
-			groupIsPath := map[string]bool{}
-			for _, rec := range commands {
-				label := strings.TrimSpace(rec.Path)
-				isPath := true
-				if label == "" {
-					label = strings.TrimSpace(rec.Manager)
-					isPath = false
-					if label == "" {
-						label = "other"
-					}
-				}
-				if _, ok := grouped[label]; !ok {
-					pathOrder = append(pathOrder, label)
-					groupIsPath[label] = isPath
-				}
-				grouped[label] = append(grouped[label], rec)
-			}
-			for _, label := range pathOrder {
-				if groupIsPath[label] {
-					fmt.Println("       " + ui.StylePath.Render(label) + ":")
-				} else {
-					fmt.Println("       " + ui.StyleManager.Render(label) + ":")
-				}
-				for _, rec := range grouped[label] {
-					symbol := "›"
-					if rec.Command == "go mod tidy" {
-						symbol = "↻"
-					}
-					style := ui.StyleVersion
-					if rec.IsDirect {
-						style = ui.StyleUpgraded
-					}
-					marker := style.Render(symbol)
-					contexts := []string{}
-					if len(rec.Groups) > 0 {
-						contexts = append(contexts, strings.Join(rec.Groups, ","))
-					}
-					if rec.Hint != "" {
-						contexts = append(contexts, rec.Hint)
-					}
-					suffix := ""
-					if len(contexts) > 0 {
-						suffix = ui.StyleDim.Render("  # " + strings.Join(contexts, "; "))
-					}
-					fmt.Printf("         %s %s%s\n", marker, rec.Command, suffix)
-				}
-			}
+			renderRemediationCommands(commands, "       ", "         ")
 			step++
 		}
 		if unfixed > 0 {

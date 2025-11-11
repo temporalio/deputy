@@ -2,6 +2,10 @@ package cli
 
 import (
 	"context"
+	"fmt"
+	"log/slog"
+	"os"
+	"strings"
 
 	"github.com/charmbracelet/fang"
 	"github.com/go-git/go-git/v5"
@@ -17,6 +21,9 @@ func Run(ctx context.Context) error {
 
 // newRoot returns the root command with all subcommands attached.
 func newRoot() *cobra.Command {
+	var logLevel = defaultLogLevel()
+	var logFormat = defaultLogFormat()
+
 	rootCmd := &cobra.Command{
 		Use:   "deputy",
 		Short: "Analyze dependencies, diff refs, and scan for vulns",
@@ -124,6 +131,12 @@ ADVANCED WORKFLOWS:
   # Historical vulnerability analysis
   deputy scan --ref "main@{3.month.ago}"`,
 	}
+
+	rootCmd.PersistentFlags().StringVar(&logLevel, "log-level", logLevel, "Logging level (debug, info, warn, error). Override with DEPUTY_LOG_LEVEL")
+	rootCmd.PersistentFlags().StringVar(&logFormat, "log-format", logFormat, "Logging format (text, json). Override with DEPUTY_LOG_FORMAT")
+	rootCmd.PersistentPreRunE = func(cmd *cobra.Command, args []string) error {
+		return configureLogging(logLevel, logFormat)
+	}
 	cmd.RegisterCommands(rootCmd)
 	return rootCmd
 }
@@ -132,4 +145,51 @@ func isInGitRepo() bool {
 	// Use the internal git package to check if we're in a Git repository.
 	_, err := git.PlainOpen(".")
 	return err == nil
+}
+
+func defaultLogLevel() string {
+	if v := strings.TrimSpace(os.Getenv("DEPUTY_LOG_LEVEL")); v != "" {
+		return v
+	}
+	return "info"
+}
+
+func defaultLogFormat() string {
+	if v := strings.TrimSpace(os.Getenv("DEPUTY_LOG_FORMAT")); v != "" {
+		return v
+	}
+	return "text"
+}
+
+func configureLogging(levelStr, format string) error {
+	level, err := parseLogLevel(levelStr)
+	if err != nil {
+		return err
+	}
+	var handler slog.Handler
+	switch strings.ToLower(strings.TrimSpace(format)) {
+	case "", "text":
+		handler = slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: level})
+	case "json":
+		handler = slog.NewJSONHandler(os.Stderr, &slog.HandlerOptions{Level: level})
+	default:
+		return fmt.Errorf("unknown log format %q", format)
+	}
+	slog.SetDefault(slog.New(handler))
+	return nil
+}
+
+func parseLogLevel(value string) (slog.Leveler, error) {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "debug":
+		return slog.LevelDebug, nil
+	case "", "info":
+		return slog.LevelInfo, nil
+	case "warn", "warning":
+		return slog.LevelWarn, nil
+	case "error":
+		return slog.LevelError, nil
+	default:
+		return nil, fmt.Errorf("unknown log level %q", value)
+	}
 }

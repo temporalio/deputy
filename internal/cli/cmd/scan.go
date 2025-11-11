@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -56,6 +57,26 @@ type Scanner struct {
 	osvClient            analysis.OSVClient
 }
 
+type scanExecution struct {
+	displayPath    string
+	localRepoPath  string
+	requestedRef   string
+	effectiveRef   string
+	packages       []*extractor.Package
+	goDirect       map[string]bool
+	vulnerabilities []analysis.Vulnerability
+	commitHash     string
+	originURL      string
+	cloned         bool
+	cleanup        func()
+}
+
+func (se *scanExecution) Close() {
+	if se != nil && se.cleanup != nil {
+		se.cleanup()
+	}
+}
+
 // NewScanner returns a Scanner configured with the default inventory collection
 // implementation.
 func NewScanner() *Scanner {
@@ -76,6 +97,118 @@ func (s *Scanner) queryOSV(ctx context.Context, inputs []analysis.PkgInput) ([]a
 		client = osvdev.DefaultClient()
 	}
 	return query(ctx, client, inputs)
+}
+
+func (s *Scanner) executeScan(ctx context.Context, repoArg, ref string, refProvided bool, scanOpts inv.ScanOptions, beforeT, afterT time.Time, errW io.Writer) (*scanExecution, error) {
+	displayPath := strings.TrimSpace(repoArg)
+	if displayPath == "" {
+		wd, err := os.Getwd()
+		if err != nil {
+			return nil, fmt.Errorf("failed to get current directory: %w", err)
+		}
+		displayPath = wd
+	}
+	scanPath := displayPath
+	var repoSrc *repository.Source
+	var cleanup func()
+	cleanup = func() {}
+	cloned := false
+	if _, err := os.Stat(scanPath); err != nil {
+		u := sbomx.ToHTTPSGitURL(scanPath)
+		if u == "" {
+			return nil, fmt.Errorf("could not interpret repo %q as local path or remote URL", scanPath)
+		}
+		cloned = true
+
+		auth := sbomx.AuthForURL(u)
+		rn, err := sbomx.ResolveReferenceName(ctx, u, auth, ref)
+		if err == nil {
+			ref = rn.String()
+		}
+
+		cloneOpts := &git.CloneOptions{
+			URL:          u,
+			Depth:        1,
+			SingleBranch: true,
+			Tags:         git.NoTags,
+			Auth:         auth,
+		}
+		if rn.String() != "" {
+			cloneOpts.ReferenceName = rn
+		}
+		repoSrc, err = repository.Clone(ctx, cloneOpts, false)
+		if err != nil && cloneOpts.ReferenceName != "" {
+			cloneOpts.ReferenceName = ""
+			repoSrc, err = repository.Clone(ctx, cloneOpts, false)
+		}
+		if err != nil {
+			return nil, fmt.Errorf("failed to clone remote repo %s: %w", u, err)
+		}
+		scanPath = repoSrc.Workspace.RootPath()
+		rs := repoSrc
+		cleanup = func() {
+			if rs != nil {
+				rs.Close()
+				rs = nil
+			}
+		}
+	}
+
+	localRepoPath := scanPath
+	if abs, err := filepath.Abs(localRepoPath); err == nil {
+		localRepoPath = abs
+	}
+
+	effRef := refOrHEAD(ref)
+	if strings.EqualFold(effRef, "HEAD") && refProvided {
+		effRef = "HEAD~0"
+	}
+
+	pkgs, err := s.collectInventory(ctx, localRepoPath, effRef, scanOpts)
+	if err != nil {
+		cleanup()
+		return nil, fmt.Errorf("failed to collect inventory: %w", err)
+	}
+
+	goDirect := map[string]bool{"stdlib": true}
+	resolver := osManifestResolver(localRepoPath)
+	if strings.EqualFold(effRef, "HEAD") || strings.EqualFold(effRef, "HEAD~0") {
+		goDirect = cmp.CollectGoDirectModulesFromDisk(localRepoPath)
+	} else {
+		if repo, err := git.PlainOpen(localRepoPath); err == nil {
+			if h, err := gitx.ResolveRevisionEnhanced(repo, effRef); err == nil && h != nil {
+				if direct, derr := cmp.CollectGoDirectModulesFromCommit(repo, *h); derr == nil {
+					goDirect = direct
+				}
+				resolver = gitManifestResolver{repo: repo, hash: *h}
+			}
+		}
+	}
+
+	inputs := packagesToInputs(pkgs, packageInputOptions{GoDirect: goDirect, Resolver: resolver})
+	vulns, queryErr := s.queryOSV(ctx, inputs)
+	if queryErr != nil {
+		fmt.Fprintf(errW, "Warning: OSV query failed: %v\n", queryErr)
+	}
+	if !beforeT.IsZero() || !afterT.IsZero() {
+		vulns = analysis.FilterVulnerabilitiesByPublished(vulns, afterT, beforeT)
+	}
+
+	commitHash, originURL := getRepoMetadata(localRepoPath, ref)
+
+	return &scanExecution{
+		displayPath:     displayPath,
+		localRepoPath:   localRepoPath,
+		requestedRef:    ref,
+		effectiveRef:    effRef,
+		packages:        pkgs,
+		goDirect:        goDirect,
+		vulnerabilities: vulns,
+		commitHash:      commitHash,
+		originURL:       originURL,
+		cloned:          cloned,
+		cleanup:         cleanup,
+	}, nil
 }
 
 // AddScanCommand registers the scan subcommand
@@ -333,117 +466,20 @@ func (s *Scanner) runScan(cmd *cobra.Command, args []string) error {
 	publishedAfterStr, _ := cmd.Flags().GetString("published-after")
 	asOfStr, _ := cmd.Flags().GetString("as-of")
 
-	repoPath := ""
+	repoArg := ""
 	if len(args) > 0 {
-		repoPath = strings.TrimSpace(args[0])
+		repoArg = strings.TrimSpace(args[0])
 	}
-	if repoPath == "" {
-		var err error
-		repoPath, err = os.Getwd()
-		if err != nil {
-			return fmt.Errorf("failed to get current directory: %w", err)
-		}
-	}
-
-	localRepoPath := repoPath
-	var repoSrc *repository.Source
-
-	// Handle remote repositories
-	if _, err := os.Stat(repoPath); err != nil {
-		u := sbomx.ToHTTPSGitURL(repoPath)
-		if u == "" {
-			return fmt.Errorf("could not interpret repo %q as local path or remote URL", repoPath)
-		}
-
-		auth := sbomx.AuthForURL(u)
-		rn, err := sbomx.ResolveReferenceName(ctx, u, auth, ref)
-		if err == nil {
-			ref = rn.String()
-		}
-
-		cloneOpts := &git.CloneOptions{
-			URL:          u,
-			Depth:        1,
-			SingleBranch: true,
-			Tags:         git.NoTags,
-			Auth:         auth,
-		}
-		if rn.String() != "" {
-			cloneOpts.ReferenceName = rn
-		}
-		repoSrc, err = repository.Clone(ctx, cloneOpts, false)
-		if err != nil && cloneOpts.ReferenceName != "" {
-			cloneOpts.ReferenceName = ""
-			repoSrc, err = repository.Clone(ctx, cloneOpts, false)
-		}
-		if err != nil {
-			return fmt.Errorf("failed to clone remote repo %s: %w", u, err)
-		}
-		localRepoPath = repoSrc.Workspace.RootPath()
-		defer repoSrc.Close()
-	}
-
-	effRef := refOrHEAD(ref)
-	if strings.EqualFold(effRef, "HEAD") {
-		if cmd.Flags().Changed("ref") {
-			effRef = "HEAD~0"
-		}
-	}
-
-	pkgs, err := s.collectInventory(ctx, localRepoPath, effRef, scanOpts)
+	beforeT, afterT := parsePublishedFilters(cmd.ErrOrStderr(), asOfStr, publishedBeforeStr, publishedAfterStr)
+	exec, err := s.executeScan(ctx, repoArg, ref, cmd.Flags().Changed("ref"), scanOpts, beforeT, afterT, cmd.ErrOrStderr())
 	if err != nil {
-		return fmt.Errorf("failed to collect inventory: %w", err)
+		return err
 	}
+	defer exec.Close()
 
-	// Determine direct dependencies from go.mod at the specified reference
-	goDirect := map[string]bool{"stdlib": true}
-	resolver := osManifestResolver(localRepoPath)
-	if strings.EqualFold(effRef, "HEAD") || strings.EqualFold(effRef, "HEAD~0") {
-		goDirect = cmp.CollectGoDirectModulesFromDisk(localRepoPath)
-	} else {
-		if repo, err := git.PlainOpen(localRepoPath); err == nil {
-			if h, err := gitx.ResolveRevisionEnhanced(repo, effRef); err == nil && h != nil {
-				if direct, derr := cmp.CollectGoDirectModulesFromCommit(repo, *h); derr == nil {
-					goDirect = direct
-				}
-				resolver = gitManifestResolver{repo: repo, hash: *h}
-			}
-		}
-	}
-
-	inputs := packagesToInputs(pkgs, packageInputOptions{GoDirect: goDirect, Resolver: resolver})
-
-	vulns, err := s.queryOSV(ctx, inputs)
-	if err != nil {
-		fmt.Fprintf(cmd.ErrOrStderr(), "Warning: OSV query failed: %v\n", err)
-	}
-
-	// Historical filtering
-	var beforeT, afterT time.Time
-	if asOfStr != "" {
-		if t, err := analysis.ParseFlexibleDate(asOfStr, "asof"); err == nil {
-			beforeT = t
-		} else {
-			fmt.Fprintf(cmd.ErrOrStderr(), "Warning: could not parse --as-of date %q: %v\n", asOfStr, err)
-		}
-	}
-	if publishedBeforeStr != "" && beforeT.IsZero() { // as-of takes precedence
-		if t, err := analysis.ParseFlexibleDate(publishedBeforeStr, "before"); err == nil {
-			beforeT = t
-		} else {
-			fmt.Fprintf(cmd.ErrOrStderr(), "Warning: could not parse --published-before %q: %v\n", publishedBeforeStr, err)
-		}
-	}
-	if publishedAfterStr != "" {
-		if t, err := analysis.ParseFlexibleDate(publishedAfterStr, "after"); err == nil {
-			afterT = t
-		} else {
-			fmt.Fprintf(cmd.ErrOrStderr(), "Warning: could not parse --published-after %q: %v\n", publishedAfterStr, err)
-		}
-	}
-	if !beforeT.IsZero() || !afterT.IsZero() {
-		vulns = analysis.FilterVulnerabilitiesByPublished(vulns, afterT, beforeT)
-	}
+	vulns := exec.vulnerabilities
+	pkgs := exec.packages
+	goDirect := exec.goDirect
 
 	var w io.Writer = os.Stdout
 	if outPath != "" && outPath != "-" {
@@ -455,14 +491,11 @@ func (s *Scanner) runScan(cmd *cobra.Command, args []string) error {
 		w = f
 	}
 
-	// Get repository metadata
-	commitHash, originURL := getRepoMetadata(localRepoPath, ref)
-
 	switch strings.ToLower(format) {
 	case "", "text":
-		return s.outputText(w, cmd.ErrOrStderr(), repoPath, ref, commitHash, originURL, pkgs, goDirect, vulns, ignoreUnfixed)
+		return s.outputText(w, cmd.ErrOrStderr(), exec.displayPath, ref, exec.commitHash, exec.originURL, pkgs, goDirect, vulns, ignoreUnfixed)
 	case "json":
-		return s.outputJSON(w, repoPath, ref, commitHash, vulns, len(pkgs), ignoreUnfixed)
+		return s.outputJSON(w, exec.displayPath, ref, exec.commitHash, vulns, len(pkgs), ignoreUnfixed)
 	default:
 		return fmt.Errorf("unsupported --format %q (use text|json)", format)
 	}
@@ -683,6 +716,32 @@ func refOrHEAD(r string) string {
 		return "HEAD"
 	}
 	return r
+}
+
+func parsePublishedFilters(errW io.Writer, asOfStr, beforeStr, afterStr string) (time.Time, time.Time) {
+	var beforeT, afterT time.Time
+	if asOfStr != "" {
+		if t, err := analysis.ParseFlexibleDate(asOfStr, "asof"); err == nil {
+			beforeT = t
+		} else {
+			fmt.Fprintf(errW, "Warning: could not parse --as-of date %q: %v\n", asOfStr, err)
+		}
+	}
+	if beforeStr != "" && beforeT.IsZero() {
+		if t, err := analysis.ParseFlexibleDate(beforeStr, "before"); err == nil {
+			beforeT = t
+		} else {
+			fmt.Fprintf(errW, "Warning: could not parse --published-before %q: %v\n", beforeStr, err)
+		}
+	}
+	if afterStr != "" {
+		if t, err := analysis.ParseFlexibleDate(afterStr, "after"); err == nil {
+			afterT = t
+		} else {
+			fmt.Fprintf(errW, "Warning: could not parse --published-after %q: %v\n", afterStr, err)
+		}
+	}
+	return beforeT, afterT
 }
 
 func filterUnfixed(vs []analysis.Vulnerability) []analysis.Vulnerability {

@@ -5,6 +5,30 @@ $ deputy HEAD~1500 HEAD
 ...
 ```
 
+## At a Glance
+
+| Command | Purpose |
+| --- | --- |
+| `deputy diff` | Compare dependency sets between refs (default when no subcommand is provided). |
+| `deputy scan` | Inventory dependencies and query OSV for known vulnerabilities (repos, dirs, or SBOMs). |
+| `deputy sbom` | Emit CycloneDX/SPDX/Protobom SBOMs for any Git ref (with optional license enrichment). |
+| `deputy list` | Dump normalized PURLs (text/TSV/JSON) for quick auditing or scripting. |
+| `deputy fix` | Turn scan results into upgrade commands/plan JSON, optionally apply them or delegate to an AI agent. |
+| `deputy triage` | Summarize vulnerability hotspots and prioritize remediation (text or JSON, with optional AI analysis). |
+
+All commands honor the global logging flags (`--log-level`, `--log-format`) so you can switch between human-readable output and structured logs for CI/CD.
+
+## Agents & Automation
+
+Deputy can hand remediation plans or triage summaries to external agents when you need help parsing large reports or editing code automatically.
+
+- `deputy fix --agent codex …` launches the Codex CLI in your repository and lets it run commands/edit files according to the remediation plan. Require `CODEX_API_KEY` and (optionally) `--agent-model`, `--agent-sandbox`, `--agent-thread`, etc.
+- `deputy fix --agent claude …` or `deputy triage --agent claude …` streams the JSON summary to Anthropic's Messages API (`ANTHROPIC_API_KEY`), returning prioritized guidance without granting shell access.
+- Both subcommands accept `--plan plan.json` (saved via `deputy fix --format json`) so you can review a plan once and reapply or re-analyze it later.
+- Use `--agent-sandbox read-only` when you only want the agent to reason about code, and `--agent-sandbox workspace-write` or `danger-full-access` when Codex needs to touch files.
+
+If you prefer a manual workflow, you can skip `--agent` entirely and run the recommended upgrade commands yourself.
+
 ## Dependency Diff
 
 Explicitly compare dependency changes between Git references. This mirrors the default behavior when running `deputy` without a subcommand, but provides a dedicated, intuitive entrypoint alongside `scan` and `sbom`.
@@ -178,6 +202,125 @@ pkg:golang/github.com/gorilla/mux@1.8.1              direct
 pkg:golang/github.com/google/uuid@1.6.0              direct
 pkg:golang/golang.org/x/net@0.39.0                   indirect
 pkg:golang/cloud.google.com/go/storage@1.51.0        direct
+```
+
+## Remediation Plans
+
+Turn vulnerability scan results into actionable upgrade commands with `deputy fix`.
+When run without `--report`, the command performs the same multi-ecosystem scan as
+`deputy scan`, summarizes required upgrades, and groups the recommended commands by
+manifest. You can also feed it the JSON output from `deputy scan --format json` if
+you already have scan results from CI.
+
+Examples:
+
+```console
+# Scan the current repository and show remediation steps
+$ deputy fix
+
+# Target a remote repository directly
+$ deputy fix github.com/hashicorp/vagrant --ignore-unfixed
+
+# Reuse an existing JSON report
+$ deputy scan --format json --output scan.json
+$ deputy fix --report scan.json
+
+# Pipe a report directly
+$ deputy scan --format json --output - | deputy fix --report -
+
+# Reuse a saved remediation plan
+$ deputy fix --plan plan.json
+
+# Emit a machine-readable remediation plan
+$ deputy fix --format json > plan.json
+
+# Apply runnable commands (e.g., go get / npm install) in place
+$ deputy fix --apply
+
+# Apply commands from a saved plan in the current repository
+$ deputy fix --plan plan.json --apply .
+
+# Let Codex implement manual steps automatically
+$ CODEX_API_KEY=sk-... deputy fix --plan plan.json --agent codex --agent-model gpt-4.1
+```
+
+Notes:
+- `--ref`, `--ecosystems`, and the published-date filters mirror the `scan` flags.
+- `--apply` executes only the commands flagged as runnable (e.g., `go get`, `npm install`) and
+  runs them from the manifest directory. Manual steps (Gemfile edits, etc.) are still shown but
+  not executed.
+- `--plan PATH` replays a previously generated remediation plan (via `--format json`); pair it
+  with a repository path argument when using `--apply` so commands run in the correct directory.
+- `--report` continues to accept JSON output from `deputy scan --format json`; use `--plan` for
+  remediation plans.
+- `--format json` emits the full remediation plan (target metadata, stdlib upgrades, and
+  remediation commands) for CI/CD automation.
+- `--agent codex` streams the plan to the Codex CLI so it can edit files, run commands, and finish
+  the remediation autonomously; set `CODEX_API_KEY` (and optionally `--agent-model`, `--agent-sandbox`,
+  or `--agent-thread`) before enabling this mode.
+- `--agent claude` sends the plan to the Anthropic Messages API (set `ANTHROPIC_API_KEY`) and streams
+  the textual guidance back to the terminal—useful when you want prioritized advice without granting
+  an agent direct access to your repo.
+
+### Global logging flags
+
+All commands accept two global logging flags (or the equivalent environment variables):
+
+| Flag | Env Var | Description |
+| ---- | ------- | ----------- |
+| `--log-level {debug,info,warn,error}` | `DEPUTY_LOG_LEVEL` | Controls verbosity (default: `info`). |
+| `--log-format {text,json}` | `DEPUTY_LOG_FORMAT` | Selects human-readable vs structured logs (default: `text`). |
+
+Example:
+
+```console
+$ DEPUTY_LOG_LEVEL=debug DEPUTY_LOG_FORMAT=json deputy scan --ref main --ignore-unfixed
+```
+
+## Vulnerability Triage
+
+`deputy triage` analyzes a repository (or a saved `deputy scan --format json` report) and produces a
+prioritized view of the vulnerabilities affecting it. Use this command when you want to understand
+which findings are most urgent before diving into remediation.
+
+Examples:
+
+```console
+# Quick triage of the current repo
+$ deputy triage
+
+# Triage a remote repository and ignore unfixed issues
+$ deputy triage github.com/hashicorp/vagrant --ignore-unfixed
+
+# Triage an existing scan report
+$ deputy triage --report scan.json --format json
+
+# Ask Codex to prioritize the results and suggest next steps
+$ CODEX_API_KEY=sk-... deputy triage --agent codex --agent-model gpt-4.1
+```
+
+Notes:
+- Triaging without `--report` performs the same multi-ecosystem scan as `deputy scan`.
+- `--format json` emits the structured summary (target metadata, severity stats, and the top
+  impacted packages) so CI systems can archive or diff the triage output.
+- `--agent codex` sends the summary JSON to Codex so it can highlight the risks that matter most and
+  propose remediation/testing plans. Provide a repository path argument (or run inside the repo) so
+  the agent can inspect the code if needed. `--agent claude` is also supported for text-only
+  prioritization when you prefer to keep the repo read-only.
+
+Typical output (condensed):
+
+```text
+Remediation Plan:
+  Target: github.com/hashicorp/vagrant@main
+  Commit: 1a2b3c4
+  • Upgrade Go toolchain to v1.22.2 (update 'go' directive in go.mod)
+  • Apply dependency upgrades (4 total, 3 runnable)
+       go.mod:
+         ↑ go get github.com/hashicorp/vagrant-plugin-sdk@v1.0.5
+         ↻ go mod tidy  # locks
+       vagrant.gemspec:
+         › Edit vagrant.gemspec to require rexml >= v3.3.9  # manual edit
 ```
 
 ## Working Tree Compare
