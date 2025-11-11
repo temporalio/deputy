@@ -36,13 +36,13 @@ func DisplayVulnerabilitiesWithHeader(vulns []analysis.Vulnerability, heading st
 func scoreLabel(score float64) string {
 	switch {
 	case score >= 9.0:
-		return lipgloss.NewStyle().Foreground(lipgloss.Color("#FF00FF")).Bold(true).Render(fmt.Sprintf("[CRITICAL %.1f]", score))
+		return lipgloss.NewStyle().Foreground(lipgloss.Color("#FF00FF")).Bold(true).Render("[CRITICAL]")
 	case score >= 7.0:
-		return ui.StyleRemoved.Render(fmt.Sprintf("[HIGH %.1f]", score))
+		return ui.StyleRemoved.Render("[HIGH]")
 	case score >= 4.0:
-		return ui.StyleDowngraded.Render(fmt.Sprintf("[MED %.1f]", score))
+		return ui.StyleDowngraded.Render("[MED]")
 	case score >= 0.0:
-		return ui.StyleVersion.Render(fmt.Sprintf("[LOW %.1f]", score))
+		return ui.StyleVersion.Render("[LOW]")
 	default:
 		return ui.StyleVersion.Render("[?]")
 	}
@@ -78,7 +78,7 @@ func managerRank(name string) int {
 		return 3
 	case "composer":
 		return 4
-	case "bundler":
+	case "gem":
 		return 5
 	case "cargo":
 		return 6
@@ -630,7 +630,7 @@ func renderManifestContext(list []analysis.ConsolidatedVulnerability) {
 	}
 }
 
-func recommendCommand(manager, pkg, version string, groups []string) (string, string) {
+func recommendCommand(manager, path, pkg, version string, groups []string) (string, string) {
 	switch strings.ToLower(manager) {
 	case "go":
 		return fmt.Sprintf("go get %s@%s", pkg, version), ""
@@ -661,8 +661,18 @@ func recommendCommand(manager, pkg, version string, groups []string) (string, st
 		return fmt.Sprintf("pipenv install %s==%s", pkg, version), ""
 	case "poetry":
 		return fmt.Sprintf("poetry add %s@%s", pkg, version), ""
-	case "bundler":
-		return fmt.Sprintf("bundle update %s", pkg), ""
+	case "gem":
+		base := strings.ToLower(pathpkg.Base(path))
+		switch {
+		case base == "gemfile.lock" || base == "gems.locked":
+			return fmt.Sprintf("bundle update %s", pkg), ""
+		case base == "gemfile":
+			return fmt.Sprintf("Edit Gemfile to require %s >= %s", pkg, version), "run bundle install afterwards"
+		case strings.HasSuffix(strings.ToLower(path), ".gemspec"):
+			return fmt.Sprintf("Edit %s to require %s >= %s", pathpkg.Base(path), pkg, version), ""
+		default:
+			return fmt.Sprintf("Update Ruby dependency for %s to %s", pkg, version), ""
+		}
 	case "composer":
 		return fmt.Sprintf("composer require %s:%s", pkg, version), ""
 	case "cargo":
@@ -798,7 +808,7 @@ func RenderVulnerabilitySummaryAndActions(vulns []analysis.Vulnerability) {
 			goPaths := map[string]struct{}{}
 			for _, u := range upgrades {
 				for _, ref := range u.References {
-					cmd, hint := recommendCommand(ref.Manager, u.Name, u.Recommended, ref.Groups)
+					cmd, hint := recommendCommand(ref.Manager, ref.Path, u.Name, u.Recommended, ref.Groups)
 					if cmd == "" {
 						cmd = fmt.Sprintf("Update %s to %s", u.Name, u.Recommended)
 					}
@@ -929,7 +939,7 @@ func RenderVulnerabilitySummaryAndActions(vulns []analysis.Vulnerability) {
 					}
 					suffix := ""
 					if len(contexts) > 0 {
-						suffix = "  # " + strings.Join(contexts, "; ")
+						suffix = ui.StyleDim.Render("  # " + strings.Join(contexts, "; "))
 					}
 					fmt.Printf("         %s %s%s\n", marker, rec.Command, suffix)
 				}

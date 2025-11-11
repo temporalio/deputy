@@ -30,7 +30,7 @@ require (
 	ws := workspace.NewMemory()
 	defer ws.Close()
 
-	items := toListItems(ws, pkgs, goDirect)
+	items := toListItems(ws, pkgs, goDirect, nil, nil, false)
 	if len(items) != 3 {
 		t.Fatalf("expected 3 items (no dedup), got %d: %+v", len(items), items)
 	}
@@ -81,7 +81,7 @@ require (
 	ws := workspace.NewMemory()
 	defer ws.Close()
 
-	items := toListItems(ws, pkgs, goDirect)
+	items := toListItems(ws, pkgs, goDirect, nil, nil, false)
 	if len(items) != 3 {
 		t.Fatalf("expected 3 package-level items, got %d: %+v", len(items), items)
 	}
@@ -115,7 +115,7 @@ require (
 func TestWriteListTSV_NoHeader_PURLOnly(t *testing.T) {
 	items := []ListItem{{Ecosystem: "Go", Name: "github.com/acme/foo", Version: "v1.0.0", Module: "github.com/acme/foo", IsDirect: true, PURL: "pkg:golang/github.com/acme/foo@v1.0.0"}}
 	var buf bytes.Buffer
-	if err := writeListTSV(&buf, items, false); err != nil {
+	if err := writeListTSV(&buf, items, false, false); err != nil {
 		t.Fatalf("writeListTSV: %v", err)
 	}
 	out := buf.String()
@@ -143,7 +143,7 @@ require (
 	ws := workspace.NewMemory()
 	defer ws.Close()
 
-	items := toListItems(ws, pkgs, goDirect)
+	items := toListItems(ws, pkgs, goDirect, nil, nil, false)
 	if len(items) != 3 {
 		t.Fatalf("expected 3 items (no dedup), got %d: %+v", len(items), items)
 	}

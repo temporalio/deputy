@@ -33,6 +33,7 @@ type ListItem struct {
 	Module    string `json:"module"` // module root when applicable (Go modules)
 	IsDirect  bool   `json:"isDirect"`
 	PURL      string `json:"purl,omitempty"`
+	Sources   string `json:"sources,omitempty"`
 }
 
 // ListResult captures list command output for machine consumption.
@@ -51,6 +52,7 @@ func AddListCommand(root *cobra.Command) {
 	var ecos []string
 	var noHeader bool
 	var onlyDirect bool
+	var showSources bool
 
 	cmd := &cobra.Command{
 		Use:     "list [repo]",
@@ -79,7 +81,7 @@ with a direct/indirect classification.`,
 				ref = "HEAD"
 			}
 
-			items, commitHash, _, err := collectListItems(ctx, repoPath, ref, ecos)
+			items, commitHash, _, err := collectListItems(ctx, repoPath, ref, ecos, showSources)
 			if err != nil {
 				return err
 			}
@@ -99,12 +101,12 @@ with a direct/indirect classification.`,
 				if onlyDirect {
 					items = filterOnlyDirect(items)
 				}
-				return writeListText(w, items, !noHeader)
+				return writeListText(w, items, !noHeader, showSources)
 			case "tsv":
 				if onlyDirect {
 					items = filterOnlyDirect(items)
 				}
-				return writeListTSV(w, items, !noHeader)
+				return writeListTSV(w, items, !noHeader, showSources)
 			case "json":
 				result := ListResult{
 					Repo:      repoPath,
@@ -147,12 +149,13 @@ REMOTE REPOSITORIES:
 	cmd.Flags().StringVarP(&outPath, "output", "o", "-", "Output file path or '-' for stdout")
 	cmd.Flags().BoolVar(&noHeader, "no-header", false, "Omit header row for text/tsv formats")
 	cmd.Flags().BoolVar(&onlyDirect, "only-direct", false, "Only include direct dependencies")
+	cmd.Flags().BoolVar(&showSources, "show-sources", false, "Show manifest/lockfile sources where dependencies were found")
 
 	root.AddCommand(cmd)
 }
 
 // collectListItems gathers packages for repo/ref (supporting remote clone) and converts to ListItem set.
-func collectListItems(ctx context.Context, repoPath, ref string, ecosystems []string) ([]ListItem, string, string, error) {
+func collectListItems(ctx context.Context, repoPath, ref string, ecosystems []string, showSources bool) ([]ListItem, string, string, error) {
 	var (
 		src *repository.Source
 		err error
@@ -216,15 +219,24 @@ func collectListItems(ctx context.Context, repoPath, ref string, ecosystems []st
 	}
 
 	goDirect := map[string]bool{"stdlib": true}
+	var manifestRes manifestResolver
 	if strings.EqualFold(effRef, "HEAD") || strings.EqualFold(effRef, "HEAD~0") {
 		goDirect = cmp.CollectGoDirectModulesFromWorkspace(ws)
+		manifestRes = workspaceManifestResolver{ws: ws}
 	} else if targetHash != nil {
 		if direct, err := cmp.CollectGoDirectModulesFromCommit(repo, *targetHash); err == nil {
 			goDirect = direct
 		}
+		manifestRes = gitManifestResolver{repo: repo, hash: *targetHash}
+	} else {
+		manifestRes = osManifestResolver(repoPath)
 	}
 
-	items := toListItems(ws, pkgs, goDirect)
+	pkgInputs := packagesToInputs(pkgs, packageInputOptions{GoDirect: goDirect, Resolver: manifestRes})
+	pkgDirect := buildPackageDirectMap(pkgInputs)
+	pkgSources := buildPackageSources(pkgInputs)
+
+	items := toListItems(ws, pkgs, goDirect, pkgDirect, pkgSources, showSources)
 	sort.Slice(items, func(i, j int) bool {
 		// Sort by PURL for stable output
 		if items[i].PURL == items[j].PURL {
@@ -250,13 +262,14 @@ func collectListItems(ctx context.Context, repoPath, ref string, ecosystems []st
 }
 
 // toListItems converts extractor packages into unique list entries.
-func toListItems(ws workspace.FS, pkgs []*extractor.Package, goDirect map[string]bool) []ListItem {
+func toListItems(ws workspace.FS, pkgs []*extractor.Package, goDirect map[string]bool, pkgDirect map[string]bool, pkgSources map[string][]string, showSources bool) []ListItem {
 	if goDirect == nil {
 		goDirect = map[string]bool{}
 	}
-	out := make([]ListItem, 0, len(pkgs))
+	entries := make(map[string]*ListItem)
+	order := make([]string, 0, len(pkgs))
 	for _, p := range pkgs {
-		if p == nil || p.Name == "" || p.Version == "" {
+		if p == nil || p.Name == "" {
 			continue
 		}
 		ecos := strings.TrimSpace(p.Ecosystem())
@@ -267,6 +280,15 @@ func toListItems(ws workspace.FS, pkgs []*extractor.Package, goDirect map[string
 			Ecosystem: ecos,
 			Name:      p.Name,
 			Version:   p.Version,
+		}
+		key := packageKeyFromExtractor(p)
+		if showSources && pkgSources != nil && key != "" {
+			li.Sources = formatSources(pkgSources[key])
+		}
+		if pkgDirect != nil && key != "" {
+			if pkgDirect[key] {
+				li.IsDirect = true
+			}
 		}
 		if pu := p.PURL(); pu != nil {
 			li.PURL = pu.String()
@@ -281,7 +303,9 @@ func toListItems(ws workspace.FS, pkgs []*extractor.Package, goDirect map[string
 				module = cmp.GetModuleRoot(info.CanonicalName)
 			}
 			li.Module = module
-			li.IsDirect = goDirect[module]
+			if goDirect[module] {
+				li.IsDirect = true
+			}
 			if pu := p.PURL(); pu != nil {
 				li.PURL = normalizeGolangPURLLikeSBOM(pu.String(), ws)
 			} else {
@@ -299,7 +323,28 @@ func toListItems(ws workspace.FS, pkgs []*extractor.Package, goDirect map[string
 				li.PURL = scalpurl.PackageURL{Type: p.PURLType, Name: p.Name, Version: p.Version}.String()
 			}
 		}
-		out = append(out, li)
+		if key == "" {
+			key = strings.ToLower(li.PURL)
+		}
+		if key == "" {
+			key = fmt.Sprintf("%s|%s|%s", strings.ToLower(li.Ecosystem), strings.ToLower(li.Name), li.Version)
+		}
+		if existing, ok := entries[key]; ok {
+			if li.IsDirect && !existing.IsDirect {
+				existing.IsDirect = true
+			}
+			if showSources && existing.Sources == "" && li.Sources != "" {
+				existing.Sources = li.Sources
+			}
+			continue
+		}
+		copied := li
+		entries[key] = &copied
+		order = append(order, key)
+	}
+	out := make([]ListItem, 0, len(entries))
+	for _, key := range order {
+		out = append(out, *entries[key])
 	}
 	return out
 }
@@ -319,12 +364,53 @@ func bestModuleForPackage(pkg string, direct map[string]bool) string {
 	return best
 }
 
+func packageKeyFromExtractor(p *extractor.Package) string {
+	if p == nil || p.Name == "" {
+		return ""
+	}
+	version := strings.ToLower(strings.TrimSpace(p.Version))
+	ecos := strings.TrimSpace(p.Ecosystem())
+	if ecos == "" && p.PURLType != "" {
+		ecos = p.PURLType
+	}
+	name := strings.TrimSpace(p.Name)
+	if name == "" {
+		return ""
+	}
+	if strings.EqualFold(ecos, "Go") || strings.EqualFold(p.PURLType, scalpurl.TypeGolang) {
+		info := cmp.ParseGoPackage(p)
+		canonical := strings.ToLower(info.CanonicalName)
+		if canonical == "" {
+			canonical = strings.ToLower(name)
+		}
+		return fmt.Sprintf("go|%s|%s", canonical, version)
+	}
+	lowerName := strings.ToLower(name)
+	if ecos == "" {
+		return fmt.Sprintf("%s|%s", lowerName, version)
+	}
+	return fmt.Sprintf("%s|%s|%s", strings.ToLower(ecos), lowerName, version)
+}
+
+func formatSources(sources []string) string {
+	if len(sources) == 0 {
+		return ""
+	}
+	const max = 3
+	if len(sources) <= max {
+		return strings.Join(sources, ", ")
+	}
+	return strings.Join(sources[:max], ", ") + fmt.Sprintf(", +%d more", len(sources)-max)
+}
+
 // writeListText prints a simple space-separated table (with optional header).
-func writeListText(w io.Writer, items []ListItem, header bool) error {
+func writeListText(w io.Writer, items []ListItem, header bool, showSources bool) error {
 	// PURL + DIRECT only
 	purlH, dirH := "PURL", "DIRECT"
 	purlW := len(purlH)
 	dirW := len(dirH)
+	sourcesH := "SOURCES"
+	sourcesW := len(sourcesH)
 	for _, it := range items {
 		if l := len(it.PURL); l > purlW {
 			purlW = l
@@ -336,6 +422,11 @@ func writeListText(w io.Writer, items []ListItem, header bool) error {
 		if l := len(d); l > dirW {
 			dirW = l
 		}
+		if showSources {
+			if l := len(it.Sources); l > sourcesW {
+				sourcesW = l
+			}
+		}
 	}
 	pad := func(n int) string {
 		if n <= 0 {
@@ -344,7 +435,17 @@ func writeListText(w io.Writer, items []ListItem, header bool) error {
 		return strings.Repeat(" ", n)
 	}
 	if header {
-		fmt.Fprintf(w, "%s%s%s\n", ui.StyleHeader.Render(purlH), pad(purlW-len(purlH)+2), ui.StyleHeader.Render(dirH))
+		if showSources {
+			fmt.Fprintf(w, "%s%s%s%s%s%s\n",
+				ui.StyleHeader.Render(purlH),
+				pad(purlW-len(purlH)+2),
+				ui.StyleHeader.Render(dirH),
+				pad(dirW-len(dirH)+2),
+				ui.StyleHeader.Render(sourcesH),
+				pad(sourcesW-len(sourcesH)))
+		} else {
+			fmt.Fprintf(w, "%s%s%s\n", ui.StyleHeader.Render(purlH), pad(purlW-len(purlH)+2), ui.StyleHeader.Render(dirH))
+		}
 	}
 	for _, it := range items {
 		d := "indirect"
@@ -353,22 +454,41 @@ func writeListText(w io.Writer, items []ListItem, header bool) error {
 			d = "direct"
 			dStyled = ui.StyleUpgraded.Render(d)
 		}
-		fmt.Fprintf(w, "%s%s%s\n", it.PURL, pad(purlW-len(it.PURL)+2), dStyled)
+		if showSources {
+			src := it.Sources
+			fmt.Fprintf(w, "%s%s%s%s%s%s\n",
+				it.PURL,
+				pad(purlW-len(it.PURL)+2),
+				dStyled,
+				pad(dirW-len(d)+2),
+				src,
+				pad(sourcesW-len(src)))
+		} else {
+			fmt.Fprintf(w, "%s%s%s\n", it.PURL, pad(purlW-len(it.PURL)+2), dStyled)
+		}
 	}
 	return nil
 }
 
 // writeListTSV prints a tab-separated list (with optional header).
-func writeListTSV(w io.Writer, items []ListItem, header bool) error {
+func writeListTSV(w io.Writer, items []ListItem, header bool, showSources bool) error {
 	if header {
-		fmt.Fprintln(w, "purl\tdirect")
+		if showSources {
+			fmt.Fprintln(w, "purl\tdirect\tsources")
+		} else {
+			fmt.Fprintln(w, "purl\tdirect")
+		}
 	}
 	for _, it := range items {
 		direct := "false"
 		if it.IsDirect {
 			direct = "true"
 		}
-		fmt.Fprintf(w, "%s\t%s\n", it.PURL, direct)
+		if showSources {
+			fmt.Fprintf(w, "%s\t%s\t%s\n", it.PURL, direct, it.Sources)
+		} else {
+			fmt.Fprintf(w, "%s\t%s\n", it.PURL, direct)
+		}
 	}
 	return nil
 }

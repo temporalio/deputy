@@ -12,9 +12,10 @@ import (
 	"github.com/picatz/deputy/internal/repository/workspace"
 )
 
-// Source represents a Git repository together with the workspace containing its
+// Source pairs a go-git repository handle with the workspace containing its
 // checked out files. Workspaces may be backed by the host filesystem or remain
-// purely virtual in memory.
+// purely virtual in memory, and Source.Close tears them down when the caller is
+// done (removing temporary directories or releasing in-memory scratch space).
 type Source struct {
 	Repo      *git.Repository
 	Workspace workspace.FS

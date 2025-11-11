@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"log"
 	"path"
 	"runtime"
 	"slices"
@@ -20,6 +21,7 @@ import (
 	"github.com/google/osv-scalibr/plugin"
 	pl "github.com/google/osv-scalibr/plugin/list"
 
+	rubygemspec "github.com/picatz/deputy/internal/inventory/plugins/ruby/gemspecx"
 	"github.com/picatz/deputy/internal/repository/workspace"
 )
 
@@ -72,6 +74,11 @@ func scanWorkspace(ctx context.Context, ws workspace.FS, opts ScanOptions) ([]*e
 	cfg := &scalibr.ScanConfig{ScanRoots: ws.ScalibrRoots(), Plugins: plugins, Capabilities: cap}
 	results := scalibr.New().Scan(ctx, cfg)
 	pkgs := results.Inventory.Packages
+	if extras, err := collectGemfilePackages(ws); err != nil {
+		log.Printf("inventory: scan gemfile extras: %v", err)
+	} else if len(extras) > 0 {
+		pkgs = append(pkgs, extras...)
+	}
 	if scanErr := summarizeScanFailures(results); scanErr != nil {
 		if len(pkgs) > 0 {
 			return pkgs, scanErr
@@ -185,6 +192,10 @@ func filterInventoryPlugins(plugins []plugin.Plugin) []plugin.Plugin {
 	out := make([]plugin.Plugin, 0, len(plugins))
 	for _, p := range plugins {
 		if _, ok := p.(fsx.Extractor); !ok {
+			continue
+		}
+		if p.Name() == rubygemspec.Name {
+			out = append(out, rubygemspec.New())
 			continue
 		}
 		if _, banned := excluded[p.Name()]; banned {

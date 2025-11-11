@@ -20,7 +20,6 @@ import (
 	"github.com/go-git/go-git/v5/storage/memory"
 	"github.com/google/osv-scalibr/extractor"
 	"github.com/google/osv-scalibr/purl"
-	packageurl "github.com/package-url/packageurl-go"
 	analysis "github.com/picatz/deputy/internal/analysis"
 	"github.com/picatz/deputy/internal/inventory"
 	"github.com/picatz/deputy/internal/repository"
@@ -287,7 +286,7 @@ func enrichProtobomLicensesScanWithFetcher(ctx context.Context, doc *sbom.Docume
 			continue
 		}
 		pu := nodePackageURL(node)
-		if pu == nil || pu.Type != packageurl.TypeGolang {
+		if pu == nil || pu.Type != purl.TypeGolang {
 			continue
 		}
 		module := goModuleFromPURL(pu)
@@ -302,7 +301,7 @@ func enrichProtobomLicensesScanWithFetcher(ctx context.Context, doc *sbom.Docume
 	return nil
 }
 
-func nodePackageURL(n *sbom.Node) *packageurl.PackageURL {
+func nodePackageURL(n *sbom.Node) *purl.PackageURL {
 	if n == nil || len(n.Identifiers) == 0 {
 		return nil
 	}
@@ -310,38 +309,38 @@ func nodePackageURL(n *sbom.Node) *packageurl.PackageURL {
 	if !ok || strings.TrimSpace(val) == "" {
 		return nil
 	}
-	pu, err := packageurl.FromString(strings.TrimSpace(val))
+	pu, err := purl.FromString(strings.TrimSpace(val))
 	if err != nil {
 		return nil
 	}
 	return &pu
 }
 
-func systemFromPURL(pu *packageurl.PackageURL) pb.System {
+func systemFromPURL(pu *purl.PackageURL) pb.System {
 	if pu == nil {
 		return pb.System_SYSTEM_UNSPECIFIED
 	}
 	switch strings.ToLower(pu.Type) {
-	case packageurl.TypeGolang:
+	case purl.TypeGolang:
 		return pb.System_GO
-	case packageurl.TypeNPM:
+	case purl.TypeNPM:
 		return pb.System_NPM
-	case packageurl.TypeCargo:
+	case purl.TypeCargo:
 		return pb.System_CARGO
-	case packageurl.TypePyPi:
+	case purl.TypePyPi:
 		return pb.System_PYPI
-	case packageurl.TypeGem:
+	case purl.TypeGem:
 		return pb.System_RUBYGEMS
-	case packageurl.TypeMaven:
+	case purl.TypeMaven:
 		return pb.System_MAVEN
-	case packageurl.TypeNuget:
+	case purl.TypeNuget:
 		return pb.System_NUGET
 	default:
 		return pb.System_SYSTEM_UNSPECIFIED
 	}
 }
 
-func packageNameForSystem(pu *packageurl.PackageURL, sys pb.System) string {
+func packageNameForSystem(pu *purl.PackageURL, sys pb.System) string {
 	if pu == nil {
 		return ""
 	}
@@ -375,7 +374,7 @@ func normalizeVersionForSystem(sys pb.System, version string) string {
 	return v
 }
 
-func goModuleFromPURL(pu *packageurl.PackageURL) string {
+func goModuleFromPURL(pu *purl.PackageURL) string {
 	if pu == nil {
 		return ""
 	}

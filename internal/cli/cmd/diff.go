@@ -315,6 +315,7 @@ func runDiffAnalysis(ctx context.Context, repoPath, baseRef, targetRef string, e
 	// Determine direct dependencies from target go.mod for accurate classification
 	goDirect := map[string]bool{"stdlib": true}
 	var manifestRes manifestResolver
+	var pkgInputs []analysis.PkgInput
 	if isWorkingPseudoRef(targetRef) {
 		if repoSrc != nil {
 			goDirect = cmp.CollectGoDirectModulesFromWorkspace(repoSrc.Workspace)
@@ -332,8 +333,11 @@ func runDiffAnalysis(ctx context.Context, repoPath, baseRef, targetRef string, e
 		manifestRes = osManifestResolver(repoPath)
 	}
 
+	pkgInputs = packagesToInputs(targetPackages, packageInputOptions{GoDirect: goDirect, Resolver: manifestRes})
+	pkgDirect := buildPackageDirectMap(pkgInputs)
+
 	// Compare packages
-	changes := cmp.ComparePackages(basePackages, targetPackages, goDirect, nil)
+	changes := cmp.ComparePackages(basePackages, targetPackages, goDirect, pkgDirect, nil)
 	if len(changes) == 0 {
 		fmt.Println("No package changes detected.")
 		return nil
@@ -355,7 +359,10 @@ func runDiffAnalysis(ctx context.Context, repoPath, baseRef, targetRef string, e
 	if enableVulnScan {
 		fmt.Printf("\nScanning dependencies for vulnerabilities...\n")
 
-		inputs := packagesToInputs(targetPackages, packageInputOptions{GoDirect: goDirect, Resolver: manifestRes})
+		inputs := pkgInputs
+		if inputs == nil {
+			inputs = packagesToInputs(targetPackages, packageInputOptions{GoDirect: goDirect, Resolver: manifestRes})
+		}
 		vv, err := analysis.QueryOSVBatch(ctx, osvdev.DefaultClient(), inputs)
 		if err != nil {
 			fmt.Printf("Warning: Vulnerability scanning failed: %v\n", err)

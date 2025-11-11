@@ -8,6 +8,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/BurntSushi/toml"
 	"github.com/google/osv-scalibr/extractor"
 	analysis "github.com/picatz/deputy/internal/analysis"
 	cmp "github.com/picatz/deputy/internal/compare"
@@ -106,6 +107,260 @@ func (c *packageJSONCache) groupsForPackage(manifestPath, pkgName string) ([]str
 	return groups, nil
 }
 
+// uvLockCache lazily parses uv.lock files and memoizes their dependency metadata.
+type uvLockCache struct {
+	resolver manifestResolver
+	entries  map[string]*uvLockData
+	errs     map[string]error
+}
+
+type uvLockData struct {
+	groups map[string][]string
+	direct map[string]bool
+}
+
+func newUVLockCache(resolver manifestResolver) *uvLockCache {
+	if resolver == nil {
+		return nil
+	}
+	return &uvLockCache{
+		resolver: resolver,
+		entries:  make(map[string]*uvLockData),
+		errs:     make(map[string]error),
+	}
+}
+
+func (c *uvLockCache) packageInfo(manifestPath, pkgName string) ([]string, bool, error) {
+	if c == nil {
+		return nil, false, fmt.Errorf("no resolver")
+	}
+	data, err := c.get(manifestPath)
+	if err != nil {
+		return nil, false, err
+	}
+	key := normalizePythonName(pkgName)
+	groups := append([]string(nil), data.groups[key]...)
+	return groups, data.direct[key], nil
+}
+
+func (c *uvLockCache) get(path string) (*uvLockData, error) {
+	if data, ok := c.entries[path]; ok {
+		return data, nil
+	}
+	if err, ok := c.errs[path]; ok {
+		return nil, err
+	}
+	content, err := c.resolver.ReadFile(path)
+	if err != nil {
+		c.errs[path] = err
+		return nil, err
+	}
+	data, err := parseUVLock(content)
+	if err != nil {
+		c.errs[path] = err
+		return nil, err
+	}
+	c.entries[path] = data
+	return data, nil
+}
+
+// uvLockDocument mirrors the top-level TOML structure produced by uv.lock.
+type uvLockDocument struct {
+	Packages []uvLockEntry `toml:"package"`
+}
+
+// uvLockEntry captures each [[package]] stanza including its dependency groups.
+type uvLockEntry struct {
+	Name         string                        `toml:"name"`
+	Source       uvLockSource                  `toml:"source"`
+	Dependencies []uvLockDependency            `toml:"dependencies"`
+	Optional     map[string][]uvLockDependency `toml:"optional-dependencies"`
+	Dev          map[string][]uvLockDependency `toml:"dev-dependencies"`
+}
+
+// uvLockSource indicates whether a package is virtual (the root) or from a registry.
+type uvLockSource struct {
+	Virtual string `toml:"virtual"`
+}
+
+// uvLockDependency references another package by name.
+type uvLockDependency struct {
+	Name string `toml:"name"`
+}
+
+// parseUVLock returns the dependency-group metadata for all packages in a uv.lock file.
+func parseUVLock(content []byte) (*uvLockData, error) {
+	var doc uvLockDocument
+	if err := toml.Unmarshal(content, &doc); err != nil {
+		return nil, err
+	}
+	data := &uvLockData{
+		groups: make(map[string][]string),
+		direct: make(map[string]bool),
+	}
+	for _, pkg := range doc.Packages {
+		if strings.TrimSpace(pkg.Source.Virtual) != "." {
+			continue
+		}
+		for _, dep := range pkg.Dependencies {
+			name := normalizePythonName(dep.Name)
+			if name == "" {
+				continue
+			}
+			data.direct[name] = true
+			data.groups[name] = appendGroupLabel(data.groups[name], "dependencies")
+		}
+		for group, deps := range pkg.Optional {
+			label := strings.TrimSpace(group)
+			if label == "" {
+				continue
+			}
+			for _, dep := range deps {
+				name := normalizePythonName(dep.Name)
+				if name == "" {
+					continue
+				}
+				data.groups[name] = appendGroupLabel(data.groups[name], label)
+			}
+		}
+		for group, deps := range pkg.Dev {
+			label := strings.TrimSpace(group)
+			if label == "" {
+				label = "dev"
+			}
+			for _, dep := range deps {
+				name := normalizePythonName(dep.Name)
+				if name == "" {
+					continue
+				}
+				data.groups[name] = appendGroupLabel(data.groups[name], label)
+			}
+		}
+	}
+	return data, nil
+}
+
+// appendGroupLabel adds label to the slice if it is not already present (case-insensitive).
+func appendGroupLabel(existing []string, label string) []string {
+	for _, v := range existing {
+		if strings.EqualFold(v, label) {
+			return existing
+		}
+	}
+	return append(existing, label)
+}
+
+// cargoManifestCache parses Cargo.toml files and records dependency classifications.
+type cargoManifestCache struct {
+	resolver manifestResolver
+	entries  map[string]*cargoManifestData
+	errs     map[string]error
+}
+
+type cargoManifestData struct {
+	groups map[string][]string
+	direct map[string]bool
+}
+
+func newCargoManifestCache(resolver manifestResolver) *cargoManifestCache {
+	if resolver == nil {
+		return nil
+	}
+	return &cargoManifestCache{
+		resolver: resolver,
+		entries:  make(map[string]*cargoManifestData),
+		errs:     make(map[string]error),
+	}
+}
+
+func (c *cargoManifestCache) packageInfo(manifestPath, pkgName string) ([]string, bool, error) {
+	if c == nil {
+		return nil, false, fmt.Errorf("no resolver")
+	}
+	data, err := c.get(manifestPath)
+	if err != nil {
+		return nil, false, err
+	}
+	key := normalizeCrateName(pkgName)
+	groups := append([]string(nil), data.groups[key]...)
+	return groups, data.direct[key], nil
+}
+
+func (c *cargoManifestCache) get(path string) (*cargoManifestData, error) {
+	if data, ok := c.entries[path]; ok {
+		return data, nil
+	}
+	if err, ok := c.errs[path]; ok {
+		return nil, err
+	}
+	content, err := c.resolver.ReadFile(path)
+	if err != nil {
+		c.errs[path] = err
+		return nil, err
+	}
+	data, err := parseCargoManifest(content)
+	if err != nil {
+		c.errs[path] = err
+		return nil, err
+	}
+	c.entries[path] = data
+	return data, nil
+}
+
+type cargoManifest struct {
+	Dependencies      map[string]any         `toml:"dependencies"`
+	DevDependencies   map[string]any         `toml:"dev-dependencies"`
+	BuildDependencies map[string]any         `toml:"build-dependencies"`
+	Workspace         cargoWorkspaceManifest `toml:"workspace"`
+	Target            map[string]cargoTarget `toml:"target"`
+}
+
+type cargoWorkspaceManifest struct {
+	Dependencies map[string]any `toml:"dependencies"`
+}
+
+type cargoTarget struct {
+	Dependencies      map[string]any `toml:"dependencies"`
+	DevDependencies   map[string]any `toml:"dev-dependencies"`
+	BuildDependencies map[string]any `toml:"build-dependencies"`
+}
+
+// parseCargoManifest extracts runtime/dev/build dependency classifications from Cargo.toml.
+func parseCargoManifest(content []byte) (*cargoManifestData, error) {
+	var doc cargoManifest
+	if err := toml.Unmarshal(content, &doc); err != nil {
+		return nil, err
+	}
+	data := &cargoManifestData{
+		groups: make(map[string][]string),
+		direct: make(map[string]bool),
+	}
+	record := func(entries map[string]any, label string, direct bool) {
+		for name := range entries {
+			key := normalizeCrateName(name)
+			if key == "" {
+				continue
+			}
+			if label != "" {
+				data.groups[key] = appendGroupLabel(data.groups[key], label)
+			}
+			if direct {
+				data.direct[key] = true
+			}
+		}
+	}
+	record(doc.Dependencies, "dependencies", true)
+	record(doc.Workspace.Dependencies, "workspace.dependencies", true)
+	record(doc.DevDependencies, "dev-dependencies", false)
+	record(doc.BuildDependencies, "build-dependencies", false)
+	for targetName, target := range doc.Target {
+		record(target.Dependencies, fmt.Sprintf("target:%s:dependencies", targetName), true)
+		record(target.DevDependencies, fmt.Sprintf("target:%s:dev-dependencies", targetName), false)
+		record(target.BuildDependencies, fmt.Sprintf("target:%s:build-dependencies", targetName), false)
+	}
+	return data, nil
+}
+
 func packagesToInputs(pkgs []*extractor.Package, opts packageInputOptions) []analysis.PkgInput {
 	if len(pkgs) == 0 {
 		return nil
@@ -114,6 +369,8 @@ func packagesToInputs(pkgs []*extractor.Package, opts packageInputOptions) []ana
 		opts.GoDirect = map[string]bool{}
 	}
 	cache := newPackageJSONCache(opts.Resolver)
+	cargoCache := newCargoManifestCache(opts.Resolver)
+	uvCache := newUVLockCache(opts.Resolver)
 	seen := map[string]*analysis.PkgInput{}
 	for _, pkg := range pkgs {
 		if pkg == nil {
@@ -121,7 +378,7 @@ func packagesToInputs(pkgs []*extractor.Package, opts packageInputOptions) []ana
 		}
 		name := strings.TrimSpace(pkg.Name)
 		version := strings.TrimSpace(pkg.Version)
-		if name == "" || version == "" {
+		if name == "" {
 			continue
 		}
 		ecos := strings.TrimSpace(pkg.Ecosystem())
@@ -172,6 +429,34 @@ func packagesToInputs(pkgs []*extractor.Package, opts packageInputOptions) []ana
 						}
 					}
 				}
+			case "cargo":
+				if cargoCache != nil {
+					groups, direct, err := cargoCache.packageInfo(manifestPath, name)
+					if err == nil {
+						if len(groups) > 0 {
+							ref.Groups = groups
+						}
+						if direct {
+							entry.IsDirect = true
+						}
+					}
+				}
+			case "uv":
+				if uvCache != nil {
+					groups, direct, err := uvCache.packageInfo(manifestPath, name)
+					if err == nil {
+						if len(groups) > 0 {
+							ref.Groups = groups
+						}
+						if direct {
+							entry.IsDirect = true
+						}
+					}
+				}
+			default:
+				if marksDirectByDefault(manager) {
+					entry.IsDirect = true
+				}
 			}
 			entry.ManifestRefs = mergeManifestReference(entry.ManifestRefs, ref)
 		}
@@ -211,15 +496,23 @@ func detectManager(location, purlType string) (string, string, bool) {
 		return "pipenv", path.Join(dir, "Pipfile"), true
 	case "poetry.lock":
 		return "poetry", path.Join(dir, "pyproject.toml"), true
-	case "Gemfile.lock":
-		return "bundler", path.Join(dir, "Gemfile"), true
+	case "Gemfile.lock", "gems.locked":
+		return "gem", path.Join(dir, "Gemfile"), true
 	case "composer.lock":
 		return "composer", path.Join(dir, "composer.json"), true
+	case "Cargo.toml":
+		return "cargo", loc, true
 	case "Cargo.lock":
 		return "cargo", path.Join(dir, "Cargo.toml"), true
+	case "uv.lock":
+		return "uv", loc, true
 	case "package.json":
 		if strings.EqualFold(purlType, "npm") {
 			return "npm", loc, true
+		}
+	default:
+		if strings.HasSuffix(base, ".gemspec") {
+			return "gem", loc, true
 		}
 	}
 	return "", "", false
@@ -330,4 +623,109 @@ func hasRuntimeDependencyGroup(groups []string) bool {
 		}
 	}
 	return false
+}
+
+func marksDirectByDefault(manager string) bool {
+	switch strings.ToLower(manager) {
+	case "pip", "pipenv", "poetry", "gem":
+		return true
+	default:
+		return false
+	}
+}
+
+// normalizePythonName folds underscores and case to match uv's lockfile naming.
+func normalizePythonName(name string) string {
+	n := strings.ToLower(strings.TrimSpace(name))
+	n = strings.ReplaceAll(n, "_", "-")
+	return n
+}
+
+// normalizeCrateName normalizes Cargo package names for lookups.
+func normalizeCrateName(name string) string {
+	return strings.ToLower(strings.TrimSpace(name))
+}
+
+func buildPackageDirectMap(inputs []analysis.PkgInput) map[string]bool {
+	if len(inputs) == 0 {
+		return nil
+	}
+	direct := make(map[string]bool)
+	for _, in := range inputs {
+		if !in.IsDirect {
+			continue
+		}
+		if key := canonicalPackageKeyFromInput(in); key != "" {
+			direct[key] = true
+		}
+	}
+	if len(direct) == 0 {
+		return nil
+	}
+	return direct
+}
+
+func buildPackageSources(inputs []analysis.PkgInput) map[string][]string {
+	if len(inputs) == 0 {
+		return nil
+	}
+	out := map[string]map[string]struct{}{}
+	for _, in := range inputs {
+		key := canonicalPackageKeyFromInput(in)
+		if key == "" {
+			continue
+		}
+		for _, ref := range in.ManifestRefs {
+			pathStr := strings.TrimSpace(ref.Path)
+			if pathStr == "" {
+				continue
+			}
+			if out[key] == nil {
+				out[key] = map[string]struct{}{}
+			}
+			out[key][pathStr] = struct{}{}
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	result := make(map[string][]string, len(out))
+	for key, entries := range out {
+		if len(entries) == 0 {
+			continue
+		}
+		sources := make([]string, 0, len(entries))
+		for path := range entries {
+			sources = append(sources, path)
+		}
+		sort.Strings(sources)
+		result[key] = sources
+	}
+	if len(result) == 0 {
+		return nil
+	}
+	return result
+}
+
+func canonicalPackageKeyFromInput(in analysis.PkgInput) string {
+	name := strings.TrimSpace(in.Name)
+	if name == "" {
+		return ""
+	}
+	version := strings.ToLower(strings.TrimSpace(in.Version))
+	ecos := strings.TrimSpace(in.Ecosystem)
+	if strings.EqualFold(ecos, "Go") {
+		pkg := &extractor.Package{Name: name}
+		info := cmp.ParseGoPackage(pkg)
+		canonical := strings.ToLower(info.CanonicalName)
+		if canonical == "" {
+			canonical = strings.ToLower(name)
+		}
+		return fmt.Sprintf("go|%s|%s", canonical, version)
+	}
+	lowerName := strings.ToLower(name)
+	if ecos == "" {
+		return fmt.Sprintf("%s|%s", lowerName, version)
+	}
+	return fmt.Sprintf("%s|%s|%s", strings.ToLower(ecos), lowerName, version)
 }

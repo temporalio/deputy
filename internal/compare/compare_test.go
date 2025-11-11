@@ -129,7 +129,7 @@ require (
 		{Name: "github.com/new/added", Version: "v1.0.0", PURLType: scalpurl.TypeGolang},    // added
 	}
 	deps := GetDirectDependencies(ws)
-	changes := ComparePackages(oldPkgs, newPkgs, deps, ws)
+	changes := ComparePackages(oldPkgs, newPkgs, deps, nil, ws)
 	if len(changes) != 3 {
 		t.Fatalf("expected 3 changes got %d: %+v", len(changes), changes)
 	}
@@ -172,7 +172,7 @@ func TestComparePackages_DowngradeAndRename(t *testing.T) {
 		"github.com/example/down":   true,
 		"github.com/example/rename": true,
 	}
-	changes := ComparePackages(oldPkgs, newPkgs, deps, nil)
+	changes := ComparePackages(oldPkgs, newPkgs, deps, nil, nil)
 	if len(changes) != 2 {
 		t.Fatalf("expected 2 changes got %d: %+v", len(changes), changes)
 	}
@@ -206,7 +206,7 @@ func TestComparePackages_NonGo(t *testing.T) {
 		{Name: "left-pad", Version: "1.1.0", PURLType: scalpurl.TypeNPM},
 		{Name: "colors", Version: "2.0.0", PURLType: scalpurl.TypeNPM},
 	}
-	changes := ComparePackages(oldPkgs, newPkgs, nil, nil)
+	changes := ComparePackages(oldPkgs, newPkgs, nil, nil, nil)
 	if len(changes) != 2 {
 		t.Fatalf("expected 2 changes got %d: %+v", len(changes), changes)
 	}
@@ -221,9 +221,9 @@ func TestComparePackages_NonGo(t *testing.T) {
 				t.Fatalf("unexpected added change: %+v", c)
 			}
 			added = true
-		case Updated:
+		case Upgraded:
 			if c.Name != "left-pad" || c.BaseVersion != "1.0.0" || c.TargetVersion != "1.1.0" || c.IsDirect {
-				t.Fatalf("unexpected updated change: %+v", c)
+				t.Fatalf("unexpected upgraded change: %+v", c)
 			}
 			updated = true
 		default:
@@ -232,6 +232,50 @@ func TestComparePackages_NonGo(t *testing.T) {
 	}
 	if !added || !updated {
 		t.Fatalf("missing npm change types added=%v updated=%v", added, updated)
+	}
+}
+
+func TestComparePackages_NonGoDirectness(t *testing.T) {
+	oldPkgs := []*extractor.Package{
+		{Name: "react", Version: "1.0.0", PURLType: scalpurl.TypeNPM},
+	}
+	newPkgs := []*extractor.Package{
+		{Name: "react", Version: "1.0.1", PURLType: scalpurl.TypeNPM},
+	}
+	pkgDirect := map[string]bool{
+		"npm|react": true,
+	}
+	changes := ComparePackages(oldPkgs, newPkgs, nil, pkgDirect, nil)
+	if len(changes) != 1 {
+		t.Fatalf("expected 1 change got %d: %+v", len(changes), changes)
+	}
+	if !changes[0].IsDirect {
+		t.Fatalf("expected react change to be direct: %+v", changes[0])
+	}
+}
+
+func TestSelectChangeType_SemverEcosystems(t *testing.T) {
+	cases := []struct {
+		name       string
+		ecosystem  string
+		base       string
+		target     string
+		wantChange ChangeType
+	}{
+		{"npm upgrade", "npm", "1.0.0", "1.1.0", Upgraded},
+		{"npm downgrade", "npm", "2.0.0", "1.5.0", Downgraded},
+		{"composer upgrade", "composer", "1.2.3", "1.2.4", Upgraded},
+		{"pypi upgrade", "pypi", "1.0.0", "1.0.1", Upgraded},
+		{"pypi downgrade", "pypi", "2.0.0", "1.9.0", Downgraded},
+		{"unknown ecosystem", "custom", "1.0.0", "2.0.0", Updated},
+	}
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			if got := selectChangeType(tc.ecosystem, tc.base, tc.target); got != tc.wantChange {
+				t.Fatalf("selectChangeType(%q,%q,%q)=%v want %v", tc.ecosystem, tc.base, tc.target, got, tc.wantChange)
+			}
+		})
 	}
 }
 

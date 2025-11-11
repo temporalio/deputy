@@ -3,6 +3,7 @@ package cmd
 import (
 	"fmt"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/google/osv-scalibr/extractor"
@@ -155,6 +156,165 @@ func TestPackagesToInputs_NPMDirectDetection(t *testing.T) {
 	}
 	if lookup["left-pad"].IsDirect {
 		t.Fatalf("left-pad should remain indirect")
+	}
+}
+
+func TestPackagesToInputs_UVLockDirectDetection(t *testing.T) {
+	uvLock := `version = 1
+
+[[package]]
+name = "runtime-one"
+version = "1.0.0"
+source = { registry = "https://pypi.org/simple" }
+
+[[package]]
+name = "runtime-two"
+version = "2.0.0"
+source = { registry = "https://pypi.org/simple" }
+
+[[package]]
+name = "optional-one"
+version = "0.1.0"
+source = { registry = "https://pypi.org/simple" }
+
+[[package]]
+name = "pytest"
+version = "7.0.0"
+source = { registry = "https://pypi.org/simple" }
+
+[[package]]
+name = "project"
+version = "0.0.1"
+source = { virtual = "." }
+dependencies = [
+    { name = "runtime-one" },
+    { name = "runtime-two" },
+]
+[package.optional-dependencies]
+extras = [
+    { name = "optional-one" },
+]
+[package.dev-dependencies]
+dev = [
+    { name = "pytest" },
+]
+`
+	resolver := manifestResolverFunc(func(rel string) ([]byte, error) {
+		if filepath.ToSlash(rel) == "uv.lock" {
+			return []byte(uvLock), nil
+		}
+		return nil, fmt.Errorf("not found")
+	})
+
+	pkgs := []*extractor.Package{
+		{Name: "runtime-one", Version: "1.0.0", PURLType: scalpurl.TypePyPi, Locations: []string{"uv.lock"}},
+		{Name: "optional-one", Version: "0.1.0", PURLType: scalpurl.TypePyPi, Locations: []string{"uv.lock"}},
+		{Name: "pytest", Version: "7.0.0", PURLType: scalpurl.TypePyPi, Locations: []string{"uv.lock"}},
+		{Name: "transitive", Version: "0.0.1", PURLType: scalpurl.TypePyPi, Locations: []string{"uv.lock"}},
+	}
+
+	inputs := packagesToInputs(pkgs, packageInputOptions{Resolver: resolver})
+	if len(inputs) != 4 {
+		t.Fatalf("expected 4 inputs, got %d", len(inputs))
+	}
+	lookup := map[string]analysis.PkgInput{}
+	for _, in := range inputs {
+		lookup[in.Name] = in
+	}
+	if !lookup["runtime-one"].IsDirect {
+		t.Fatalf("runtime-one should be direct from uv.lock")
+	}
+	if lookup["optional-one"].IsDirect {
+		t.Fatalf("optional-one should not be direct (optional group)")
+	}
+	if groups := lookup["optional-one"].ManifestRefs[0].Groups; len(groups) == 0 || groups[0] != "extras" {
+		t.Fatalf("expected optional-one groups to include extras, got %+v", lookup["optional-one"].ManifestRefs)
+	}
+	if lookup["pytest"].IsDirect {
+		t.Fatalf("pytest (dev) should not be direct")
+	}
+	if len(lookup["runtime-one"].ManifestRefs) == 0 || lookup["runtime-one"].ManifestRefs[0].Manager != "uv" {
+		t.Fatalf("runtime-one manifest ref should point to uv.lock")
+	}
+}
+
+func TestPackagesToInputs_CargoDirectDetection(t *testing.T) {
+	cargoToml := `[package]
+name = "demo"
+version = "0.1.0"
+
+[dependencies]
+tokio = "1.0"
+bytes = { version = "1.0" }
+
+[dev-dependencies]
+criterion = "0.5"
+
+[build-dependencies]
+cc = "1.0"
+
+[workspace.dependencies]
+serde = "1.0"
+
+[target."cfg(unix)".dependencies]
+libc = "0.2"
+`
+	resolver := manifestResolverFunc(func(rel string) ([]byte, error) {
+		if filepath.ToSlash(rel) == "Cargo.toml" {
+			return []byte(cargoToml), nil
+		}
+		return nil, fmt.Errorf("not found: %s", rel)
+	})
+	pkgs := []*extractor.Package{
+		{Name: "tokio", Version: "1.0.0", PURLType: scalpurl.TypeCargo, Locations: []string{"Cargo.lock"}},
+		{Name: "criterion", Version: "0.5.0", PURLType: scalpurl.TypeCargo, Locations: []string{"Cargo.lock"}},
+		{Name: "serde", Version: "1.0.0", PURLType: scalpurl.TypeCargo, Locations: []string{"Cargo.lock"}},
+		{Name: "cc", Version: "1.0.0", PURLType: scalpurl.TypeCargo, Locations: []string{"Cargo.lock"}},
+		{Name: "libc", Version: "0.2.0", PURLType: scalpurl.TypeCargo, Locations: []string{"Cargo.lock"}},
+	}
+	inputs := packagesToInputs(pkgs, packageInputOptions{Resolver: resolver})
+	if len(inputs) != 5 {
+		t.Fatalf("expected 5 inputs, got %d", len(inputs))
+	}
+	lookup := map[string]analysis.PkgInput{}
+	for _, in := range inputs {
+		lookup[strings.ToLower(in.Name)] = in
+	}
+	if !lookup["tokio"].IsDirect {
+		t.Fatalf("tokio should be marked direct from dependencies")
+	}
+	if lookup["criterion"].IsDirect {
+		t.Fatalf("criterion is a dev-dependency and should remain indirect")
+	}
+	if !lookup["serde"].IsDirect {
+		t.Fatalf("serde should be direct via workspace.dependencies")
+	}
+	if lookup["cc"].IsDirect {
+		t.Fatalf("build dependency cc should not be direct")
+	}
+	if !lookup["libc"].IsDirect {
+		t.Fatalf("target-specific dependency libc should be direct")
+	}
+}
+
+func TestPackagesToInputs_PythonRequirementsMarkedDirect(t *testing.T) {
+	pkgs := []*extractor.Package{
+		{
+			Name:      "requests",
+			Version:   "2.32.0",
+			PURLType:  scalpurl.TypePyPi,
+			Locations: []string{"requirements.txt"},
+		},
+	}
+	inputs := packagesToInputs(pkgs, packageInputOptions{})
+	if len(inputs) != 1 {
+		t.Fatalf("expected 1 input, got %d", len(inputs))
+	}
+	if !inputs[0].IsDirect {
+		t.Fatalf("expected python requirement to be marked direct")
+	}
+	if len(inputs[0].ManifestRefs) != 1 || inputs[0].ManifestRefs[0].Manager != "pip" {
+		t.Fatalf("expected manifest ref for pip, got %+v", inputs[0].ManifestRefs)
 	}
 }
 

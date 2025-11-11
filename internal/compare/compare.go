@@ -4,6 +4,7 @@ import (
 	"strings"
 
 	"github.com/google/osv-scalibr/extractor"
+	"github.com/google/osv-scalibr/semantic"
 	"golang.org/x/mod/semver"
 
 	"github.com/picatz/deputy/internal/repository/workspace"
@@ -292,14 +293,100 @@ func classifyGoChangeType(baseVersion, targetVersion string) ChangeType {
 	}
 }
 
+type versionComparator func(baseVersion, targetVersion string) (int, bool)
+
 func selectChangeType(ecosystem, baseVersion, targetVersion string) ChangeType {
-	if strings.EqualFold(ecosystem, "Go") {
-		return classifyGoChangeType(baseVersion, targetVersion)
+	comp := comparatorForEcosystem(ecosystem)
+	if comp != nil {
+		if cmp, ok := comp(baseVersion, targetVersion); ok {
+			switch {
+			case cmp > 0:
+				return Upgraded
+			case cmp < 0:
+				return Downgraded
+			default:
+				return Updated
+			}
+		}
 	}
 	if baseVersion == targetVersion {
 		return Updated
 	}
 	return Updated
+}
+
+func comparatorForEcosystem(ecosystem string) versionComparator {
+	switch strings.ToLower(strings.TrimSpace(ecosystem)) {
+	case "go", "golang":
+		return compareGoVersions
+	}
+	if canonical, ok := semanticEcosystemName(ecosystem); ok {
+		return func(baseVersion, targetVersion string) (int, bool) {
+			return compareSemanticVersions(baseVersion, targetVersion, canonical)
+		}
+	}
+	return nil
+}
+
+func semanticEcosystemName(ecosystem string) (string, bool) {
+	switch strings.ToLower(strings.TrimSpace(ecosystem)) {
+	case "npm", "yarn", "pnpm":
+		return "npm", true
+	case "pypi", "pip", "pipenv", "poetry", "python":
+		return "PyPI", true
+	case "composer", "packagist":
+		return "Packagist", true
+	case "cargo", "crates.io", "rust":
+		return "crates.io", true
+	case "maven":
+		return "Maven", true
+	case "nuget":
+		return "NuGet", true
+	case "rubygems", "gem", "bundler":
+		return "RubyGems", true
+	case "cran":
+		return "CRAN", true
+	case "hex":
+		return "Hex", true
+	case "pub":
+		return "Pub", true
+	case "swiftpm", "swift", "swifturl":
+		return "SwiftURL", true
+	case "ghc":
+		return "GHC", true
+	case "hackage":
+		return "Hackage", true
+	case "conancenter":
+		return "ConanCenter", true
+	case "bitnami":
+		return "Bitnami", true
+	default:
+		return "", false
+	}
+}
+
+func compareGoVersions(baseVersion, targetVersion string) (int, bool) {
+	if baseVersion == "" || targetVersion == "" {
+		return 0, false
+	}
+	return CompareGoPackageVersions(Change{BaseVersion: baseVersion, TargetVersion: targetVersion}), true
+}
+
+func compareSemanticVersions(baseVersion, targetVersion, ecosystem string) (int, bool) {
+	base := strings.TrimSpace(baseVersion)
+	target := strings.TrimSpace(targetVersion)
+	if base == "" || target == "" {
+		return 0, false
+	}
+	tv, err := semantic.Parse(target, ecosystem)
+	if err != nil {
+		return 0, false
+	}
+	cmp, err := tv.CompareStr(base)
+	if err != nil {
+		return 0, false
+	}
+	return cmp, true
 }
 
 // GetDirectDependenciesFromGoMod parses a go.mod file and returns module roots
@@ -361,6 +448,7 @@ type pkgSummary struct {
 	ecosystem string
 	canonical string
 	module    string
+	key       string
 }
 
 func summarizePackage(p *extractor.Package) (string, pkgSummary) {
@@ -379,14 +467,17 @@ func summarizePackage(p *extractor.Package) (string, pkgSummary) {
 		if meta.module == "" {
 			meta.module = GetModuleRoot(p.Name)
 		}
-		return "go|" + meta.canonical, meta
+		meta.key = "go|" + meta.canonical
+		return meta.key, meta
 	}
 	name := strings.ToLower(p.Name)
 	meta.canonical = name
 	if ecos == "" {
-		return name, meta
+		meta.key = name
+		return meta.key, meta
 	}
-	return strings.ToLower(ecos) + "|" + name, meta
+	meta.key = strings.ToLower(ecos) + "|" + name
+	return meta.key, meta
 }
 
 func (s pkgSummary) ecosystemName() string {
@@ -396,7 +487,7 @@ func (s pkgSummary) ecosystemName() string {
 	return "unknown"
 }
 
-func ComparePackages(oldPkgs, newPkgs []*extractor.Package, deps map[string]bool, ws workspace.FileReader) []Change {
+func ComparePackages(oldPkgs, newPkgs []*extractor.Package, goDirect map[string]bool, pkgDirect map[string]bool, ws workspace.FileReader) []Change {
 	if len(oldPkgs) == 0 && len(newPkgs) == 0 {
 		return nil
 	}
@@ -412,8 +503,8 @@ func ComparePackages(oldPkgs, newPkgs []*extractor.Package, deps map[string]bool
 			newMap[key] = meta
 		}
 	}
-	if deps == nil {
-		deps = GetDirectDependencies(ws)
+	if goDirect == nil {
+		goDirect = GetDirectDependencies(ws)
 	}
 	var changes []Change
 	for key, oldMeta := range oldMap {
@@ -424,7 +515,7 @@ func ComparePackages(oldPkgs, newPkgs []*extractor.Package, deps map[string]bool
 				BaseVersion: oldMeta.pkg.Version,
 				ChangeType:  Removed,
 				Ecosystem:   oldMeta.ecosystemName(),
-				IsDirect:    isDirectForSummary(oldMeta, deps),
+				IsDirect:    isDirectForSummary(oldMeta, goDirect, pkgDirect),
 			})
 			continue
 		}
@@ -436,7 +527,7 @@ func ComparePackages(oldPkgs, newPkgs []*extractor.Package, deps map[string]bool
 				TargetVersion: newMeta.pkg.Version,
 				ChangeType:    selectChangeType(newMeta.ecosystemName(), oldMeta.pkg.Version, newMeta.pkg.Version),
 				Ecosystem:     newMeta.ecosystemName(),
-				IsDirect:      isDirectForSummary(newMeta, deps),
+				IsDirect:      isDirectForSummary(newMeta, goDirect, pkgDirect),
 			})
 		}
 	}
@@ -449,21 +540,26 @@ func ComparePackages(oldPkgs, newPkgs []*extractor.Package, deps map[string]bool
 			TargetVersion: newMeta.pkg.Version,
 			ChangeType:    Added,
 			Ecosystem:     newMeta.ecosystemName(),
-			IsDirect:      isDirectForSummary(newMeta, deps),
+			IsDirect:      isDirectForSummary(newMeta, goDirect, pkgDirect),
 		})
 	}
 	return changes
 }
 
-func isDirectForSummary(meta pkgSummary, deps map[string]bool) bool {
-	if deps == nil {
-		return false
+func isDirectForSummary(meta pkgSummary, goDirect, pkgDirect map[string]bool) bool {
+	if pkgDirect != nil && meta.key != "" {
+		if pkgDirect[meta.key] {
+			return true
+		}
 	}
 	if !strings.EqualFold(meta.ecosystem, "Go") {
+		return false
+	}
+	if goDirect == nil {
 		return false
 	}
 	if meta.module == "" {
 		return false
 	}
-	return deps[meta.module]
+	return goDirect[meta.module]
 }
