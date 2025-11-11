@@ -42,6 +42,7 @@ func AddDiffCommand(root *cobra.Command) {
 	var showUnchanged bool
 	var unchangedThreshold string
 	var ecosystems []string
+	var debugMatcher bool
 
 	cmd := &cobra.Command{
 		Use:   "diff [base] [target]",
@@ -93,7 +94,7 @@ Can be disabled with --skip-vuln-scan for faster execution.`,
 				repo = mustGetwd()
 			}
 			scanOpts := inv.ScanOptions{Ecosystems: ecosystems}
-			matcher, matcherErr := inv.NewDependencyMatcher(scanOpts)
+			matcher, matcherErr := inv.GetDependencyMatcher(scanOpts)
 			if matcherErr != nil {
 				fmt.Fprintf(cmd.ErrOrStderr(), "Warning: dependency matcher unavailable, falling back to full scans: %v\n", matcherErr)
 			}
@@ -101,7 +102,7 @@ Can be disabled with --skip-vuln-scan for faster execution.`,
 			if err != nil {
 				return fmt.Errorf("failed to parse references: %w", err)
 			}
-			return runDiffAnalysis(cmd.Context(), repo, baseRef, targetRef, !skipVulnScan, useLicenseCheck, enrichLicenses, licenseSource, publishedAfterStr, publishedBeforeStr, asOfStr, ignoreUnfixed, showUnchanged, unchangedThreshold, scanOpts, matcher)
+			return runDiffAnalysis(cmd.Context(), repo, baseRef, targetRef, !skipVulnScan, useLicenseCheck, enrichLicenses, licenseSource, publishedAfterStr, publishedBeforeStr, asOfStr, ignoreUnfixed, showUnchanged, unchangedThreshold, scanOpts, matcher, debugMatcher)
 		},
 		Example: `BASIC USAGE:
   # Compare current work with default branch (beginner-friendly)
@@ -214,6 +215,7 @@ PERFORMANCE TIPS:
 	cmd.Flags().BoolVar(&showUnchanged, "show-unchanged", false, "Always show vulnerabilities in unchanged dependencies (overrides quiet behavior)")
 	cmd.Flags().StringVar(&unchangedThreshold, "unchanged-threshold", "critical", "Auto-show unchanged vulns at or above this severity: none|low|med|high|critical|any")
 	cmd.Flags().StringSliceVar(&ecosystems, "ecosystems", []string{"all"}, "Ecosystems to include when scanning (default: all supported)")
+	cmd.Flags().BoolVar(&debugMatcher, "debug-matcher", false, "Print which changed files were considered dependency manifests/lockfiles")
 
 	root.AddCommand(cmd)
 }
@@ -226,7 +228,7 @@ func mustGetwd() string {
 // runDiffAnalysis orchestrates dependency inventory collection for the base and
 // target references, computes a dependency diff, and optionally queries OSV to
 // enrich added/updated modules with vulnerability data.
-func runDiffAnalysis(ctx context.Context, repoPath, baseRef, targetRef string, enableVulnScan bool, useLicenseCheck bool, enrichLicenses bool, licenseSource string, publishedAfterStr, publishedBeforeStr, asOfStr string, ignoreUnfixed bool, showUnchanged bool, unchangedThreshold string, scanOpts inv.ScanOptions, matcher *inv.DependencyMatcher) error {
+func runDiffAnalysis(ctx context.Context, repoPath, baseRef, targetRef string, enableVulnScan bool, useLicenseCheck bool, enrichLicenses bool, licenseSource string, publishedAfterStr, publishedBeforeStr, asOfStr string, ignoreUnfixed bool, showUnchanged bool, unchangedThreshold string, scanOpts inv.ScanOptions, matcher *inv.DependencyMatcher, debugMatcher bool) error {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
@@ -241,6 +243,10 @@ func runDiffAnalysis(ctx context.Context, repoPath, baseRef, targetRef string, e
 		changedFiles, err := gitx.CheckFilesChanged(repoPath, baseRef, targetRef)
 		if err != nil {
 			return fmt.Errorf("error checking files changed: %w", err)
+		}
+
+		if debugMatcher {
+			renderMatcherDebug(changedFiles, matcher)
 		}
 
 		if matcher != nil && !matcher.AnyMatch(changedFiles) {
@@ -766,4 +772,29 @@ func plural(n int) string {
 		return ""
 	}
 	return "s"
+}
+
+// renderMatcherDebug prints a human-friendly breakdown of which changed files
+// were considered dependency-related by the matcher when --debug-matcher is
+// enabled.
+func renderMatcherDebug(files []string, matcher *inv.DependencyMatcher) {
+	fmt.Println(ui.StyleMeta.Render("Matcher debug (changed files considered by dependency scanner):"))
+	if len(files) == 0 {
+		fmt.Println("  (no changed files detected between refs)")
+		return
+	}
+	if matcher == nil {
+		for _, f := range files {
+			fmt.Printf("  ? %s\n", f)
+		}
+		fmt.Println("  (matcher unavailable; treating all files as potential dependency changes)")
+		return
+	}
+	for _, f := range files {
+		if matcher.Matches(f) {
+			fmt.Printf("  %s %s\n", ui.StyleAdded.Render("+match"), f)
+		} else {
+			fmt.Printf("  %s %s\n", ui.StyleDim.Render("-skip"), f)
+		}
+	}
 }
