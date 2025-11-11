@@ -3,8 +3,6 @@ package workspace
 import (
 	"fmt"
 	"io/fs"
-	"os"
-	"sync"
 
 	billy "github.com/go-git/go-billy/v5"
 	"github.com/go-git/go-billy/v5/helper/iofs"
@@ -13,12 +11,11 @@ import (
 	scalibrfs "github.com/google/osv-scalibr/fs"
 )
 
+// Memory implements an in-memory workspace backed by a billy filesystem.
 type Memory struct {
-	mu        sync.RWMutex
-	fsys      billy.Filesystem
-	adapter   scalibrfs.FS
-	scanRoots []*scalibrfs.ScanRoot
-	closed    bool
+	*baseWorkspace
+	fsys    billy.Filesystem
+	adapter scalibrfs.FS
 }
 
 // NewMemory constructs an in-memory workspace using go-billy's memfs implementation.
@@ -37,23 +34,20 @@ func NewMemoryFromBillyFS(fs billy.Filesystem) *Memory {
 			stat: iofs.NewStatFS(fs),
 		}
 	}
+	roots := []*scalibrfs.ScanRoot{{
+		FS:   scalibrAdapter,
+		Path: "",
+	}}
 	return &Memory{
-		fsys:    fs,
-		adapter: scalibrAdapter,
-		scanRoots: []*scalibrfs.ScanRoot{{
-			FS:   scalibrAdapter,
-			Path: "",
-		}},
+		baseWorkspace: newBaseWorkspace("", roots, nil),
+		fsys:          fs,
+		adapter:       scalibrAdapter,
 	}
 }
 
+// ensureOpen verifies the workspace has not been closed yet.
 func (m *Memory) ensureOpen() error {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-	if m.closed {
-		return fmt.Errorf("workspace: closed")
-	}
-	return nil
+	return m.baseWorkspace.ensureOpen()
 }
 
 func (m *Memory) ReadFile(name string) ([]byte, error) {
@@ -117,7 +111,7 @@ func (m *Memory) WriteFile(name string, data []byte, perm fs.FileMode) error {
 	if err != nil {
 		return err
 	}
-	return billyutil.WriteFile(m.fsys, rel, data, os.FileMode(perm))
+	return billyutil.WriteFile(m.fsys, rel, data, perm)
 }
 
 func (m *Memory) MkdirAll(path string, perm fs.FileMode) error {
@@ -131,7 +125,7 @@ func (m *Memory) MkdirAll(path string, perm fs.FileMode) error {
 	if rel == "." {
 		return nil
 	}
-	return m.fsys.MkdirAll(rel, os.FileMode(perm))
+	return m.fsys.MkdirAll(rel, perm)
 }
 
 func (m *Memory) Remove(path string) error {
@@ -162,22 +156,11 @@ func (m *Memory) RemoveAll(path string) error {
 	return billyutil.RemoveAll(m.fsys, rel)
 }
 
-func (m *Memory) ScalibrRoots() []*scalibrfs.ScanRoot {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-	return m.scanRoots
+func (m *Memory) Close() error {
+	return m.baseWorkspace.Close()
 }
-
-func (m *Memory) RootPath() string { return "" }
 
 func (m *Memory) IsVirtual() bool { return true }
-
-func (m *Memory) Close() error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	m.closed = true
-	return nil
-}
 
 var _ FS = (*Memory)(nil)
 
@@ -199,5 +182,3 @@ func (b *billyAdapter) ReadDir(name string) ([]fs.DirEntry, error) {
 func (b *billyAdapter) Stat(name string) (fs.FileInfo, error) {
 	return b.stat.Stat(name)
 }
-
-var _ scalibrfs.FS = (*billyAdapter)(nil)

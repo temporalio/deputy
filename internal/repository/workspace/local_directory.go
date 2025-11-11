@@ -1,12 +1,10 @@
 package workspace
 
 import (
-	"errors"
 	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
-	"sync"
 
 	scalibrfs "github.com/google/osv-scalibr/fs"
 )
@@ -15,12 +13,32 @@ import (
 // filesystem. It uses os.Root to guard against path traversal to ancestors and
 // exposes the directory as a scalibr ScanRoot.
 type LocalDirectory struct {
-	mu            sync.RWMutex
-	base          string
-	root          *os.Root
-	fsys          scalibrfs.FS
-	removeOnClose bool
-	scanRoots     []*scalibrfs.ScanRoot
+	*baseWorkspace
+	fs   scalibrfs.FS
+	root *os.Root
+}
+
+// newLocalDirectory builds a LocalDirectory workspace rooted at abs with optional cleanup.
+func newLocalDirectory(abs string, removeOnClose bool) (*LocalDirectory, error) {
+	root, err := os.OpenRoot(abs)
+	if err != nil {
+		return nil, err
+	}
+	cleanup := func() error {
+		err := root.Close()
+		if removeOnClose {
+			if rmErr := os.RemoveAll(abs); err == nil {
+				err = rmErr
+			}
+		}
+		return err
+	}
+	ws := &LocalDirectory{
+		baseWorkspace: newBaseWorkspace(abs, scalibrfs.RealFSScanRoots(abs), cleanup),
+		fs:            scalibrfs.DirFS(abs),
+		root:          root,
+	}
+	return ws, nil
 }
 
 // NewDir returns a workspace rooted at the provided path. The path must exist
@@ -39,19 +57,9 @@ func NewDir(path string) (*LocalDirectory, error) {
 		return nil, err
 	}
 	if !info.IsDir() {
-		return nil, &fs.PathError{Op: "opendir", Path: abs, Err: errors.New("not a directory")}
+		return nil, &fs.PathError{Op: "opendir", Path: abs, Err: fmt.Errorf("not a directory")}
 	}
-	root, err := os.OpenRoot(abs)
-	if err != nil {
-		return nil, err
-	}
-	fsys := scalibrfs.DirFS(abs)
-	return &LocalDirectory{
-		base:      abs,
-		root:      root,
-		fsys:      fsys,
-		scanRoots: scalibrfs.RealFSScanRoots(abs),
-	}, nil
+	return newLocalDirectory(abs, false)
 }
 
 // NewTempDir creates a temporary workspace on disk using os.MkdirTemp. The
@@ -61,25 +69,18 @@ func NewTempDir(prefix string) (*LocalDirectory, error) {
 	if err != nil {
 		return nil, err
 	}
-	ws, err := NewDir(dir)
+	ws, err := newLocalDirectory(dir, true)
 	if err != nil {
 		_ = os.RemoveAll(dir)
 		return nil, err
 	}
-	ws.removeOnClose = true
 	return ws, nil
 }
 
-func (w *LocalDirectory) ensureOpen() error {
-	w.mu.RLock()
-	defer w.mu.RUnlock()
-	if w.root == nil {
-		return errors.New("workspace: closed")
-	}
-	return nil
-}
-
 func (w *LocalDirectory) ReadFile(name string) ([]byte, error) {
+	if err := w.ensureOpen(); err != nil {
+		return nil, err
+	}
 	rel, err := cleanPath(name)
 	if err != nil {
 		return nil, err
@@ -87,18 +88,24 @@ func (w *LocalDirectory) ReadFile(name string) ([]byte, error) {
 	if rel == "." {
 		return nil, fmt.Errorf("%w: cannot read directory root", ErrInvalidPath)
 	}
-	return fs.ReadFile(w.fsys, rel)
+	return fs.ReadFile(w.fs, rel)
 }
 
 func (w *LocalDirectory) Open(name string) (fs.File, error) {
+	if err := w.ensureOpen(); err != nil {
+		return nil, err
+	}
 	rel, err := cleanPath(name)
 	if err != nil {
 		return nil, err
 	}
-	return w.fsys.Open(rel)
+	return w.fs.Open(rel)
 }
 
 func (w *LocalDirectory) ReadDir(name string) ([]fs.DirEntry, error) {
+	if err := w.ensureOpen(); err != nil {
+		return nil, err
+	}
 	rel, err := cleanPath(name)
 	if err != nil {
 		return nil, err
@@ -106,29 +113,32 @@ func (w *LocalDirectory) ReadDir(name string) ([]fs.DirEntry, error) {
 	if rel == "." {
 		rel = "."
 	}
-	return w.fsys.ReadDir(rel)
+	return w.fs.ReadDir(rel)
 }
 
 func (w *LocalDirectory) Stat(name string) (fs.FileInfo, error) {
+	if err := w.ensureOpen(); err != nil {
+		return nil, err
+	}
 	rel, err := cleanPath(name)
 	if err != nil {
 		return nil, err
 	}
 	if rel == "." {
-		return os.Stat(w.base)
+		return os.Stat(w.rootPath)
 	}
-	return w.fsys.Stat(rel)
+	return w.fs.Stat(rel)
 }
 
 func (w *LocalDirectory) WriteFile(name string, data []byte, perm fs.FileMode) error {
+	if err := w.ensureOpen(); err != nil {
+		return err
+	}
 	rel, err := cleanPath(name)
 	if err != nil {
 		return err
 	}
-	if err := w.ensureOpen(); err != nil {
-		return err
-	}
-	f, err := w.root.OpenFile(rel, os.O_RDWR|os.O_CREATE|os.O_TRUNC, os.FileMode(perm))
+	f, err := w.root.OpenFile(rel, os.O_RDWR|os.O_CREATE|os.O_TRUNC, perm)
 	if err != nil {
 		return err
 	}
@@ -138,25 +148,25 @@ func (w *LocalDirectory) WriteFile(name string, data []byte, perm fs.FileMode) e
 }
 
 func (w *LocalDirectory) MkdirAll(path string, perm fs.FileMode) error {
-	rel, err := cleanPath(path)
-	if err != nil {
+	if err := w.ensureOpen(); err != nil {
 		return err
 	}
-	if err := w.ensureOpen(); err != nil {
+	rel, err := cleanPath(path)
+	if err != nil {
 		return err
 	}
 	if rel == "." {
 		return nil
 	}
-	return w.root.MkdirAll(rel, os.FileMode(perm))
+	return w.root.MkdirAll(rel, perm)
 }
 
 func (w *LocalDirectory) Remove(path string) error {
-	rel, err := cleanPath(path)
-	if err != nil {
+	if err := w.ensureOpen(); err != nil {
 		return err
 	}
-	if err := w.ensureOpen(); err != nil {
+	rel, err := cleanPath(path)
+	if err != nil {
 		return err
 	}
 	if rel == "." {
@@ -166,11 +176,11 @@ func (w *LocalDirectory) Remove(path string) error {
 }
 
 func (w *LocalDirectory) RemoveAll(path string) error {
-	rel, err := cleanPath(path)
-	if err != nil {
+	if err := w.ensureOpen(); err != nil {
 		return err
 	}
-	if err := w.ensureOpen(); err != nil {
+	rel, err := cleanPath(path)
+	if err != nil {
 		return err
 	}
 	if rel == "." {
@@ -179,34 +189,10 @@ func (w *LocalDirectory) RemoveAll(path string) error {
 	return w.root.RemoveAll(rel)
 }
 
-func (w *LocalDirectory) ScalibrRoots() []*scalibrfs.ScanRoot {
-	w.mu.RLock()
-	defer w.mu.RUnlock()
-	return w.scanRoots
-}
-
-func (w *LocalDirectory) RootPath() string {
-	w.mu.RLock()
-	defer w.mu.RUnlock()
-	return w.base
-}
-
-func (w *LocalDirectory) IsVirtual() bool { return false }
-
 func (w *LocalDirectory) Close() error {
-	w.mu.Lock()
-	defer w.mu.Unlock()
-	if w.root == nil {
-		return nil
-	}
-	err := w.root.Close()
+	err := w.baseWorkspace.Close()
 	w.root = nil
-	if w.removeOnClose {
-		if rmErr := os.RemoveAll(w.base); err == nil {
-			err = rmErr
-		}
-	}
 	return err
 }
 
-var _ FS = (*LocalDirectory)(nil)
+func (w *LocalDirectory) IsVirtual() bool { return false }

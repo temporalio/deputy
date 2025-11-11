@@ -7,6 +7,7 @@ import (
 	"path"
 	"path/filepath"
 	"strings"
+	"sync"
 
 	scalibrfs "github.com/google/osv-scalibr/fs"
 )
@@ -15,6 +16,7 @@ var (
 	ErrOutsideWorkspace = errors.New("workspace: path escapes root")
 	ErrInvalidPath      = errors.New("workspace: invalid path")
 	ErrReadOnly         = errors.New("workspace: workspace is read-only")
+	ErrClosed           = errors.New("workspace: closed")
 )
 
 // FileReader captures the minimal contract needed to read files from a workspace.
@@ -22,11 +24,9 @@ type FileReader interface {
 	ReadFile(path string) ([]byte, error)
 }
 
-// FS represents a target filesystem (e.g., git repository) that can be backed by the
-// OS filesystem, go-git billy implementations, or any future virtual storage.
-//
-// Paths supplied to the methods are always interpreted relative to the
-// workspace root.
+// FS represents a target filesystem (e.g., git repository) backed by the OS
+// filesystem, go-git/billy implementations, or any future virtual storage. All
+// paths are interpreted relative to the workspace root.
 type FS interface {
 	FileReader
 	fs.ReadDirFS
@@ -42,6 +42,67 @@ type FS interface {
 	RootPath() string
 	IsVirtual() bool
 	Close() error
+}
+
+// baseWorkspace holds shared state (root path, scalibr roots, cleanup) that
+// concrete workspace implementations embed to get consistent lifecycle
+// handling.
+type baseWorkspace struct {
+	mu        sync.RWMutex
+	rootPath  string
+	scanRoots []*scalibrfs.ScanRoot
+	cleanup   func() error
+	closed    bool
+}
+
+// newBaseWorkspace configures a shared workspace helper that tracks closure and scan roots.
+func newBaseWorkspace(rootPath string, scanRoots []*scalibrfs.ScanRoot, cleanup func() error) *baseWorkspace {
+	return &baseWorkspace{
+		rootPath:  rootPath,
+		scanRoots: scanRoots,
+		cleanup:   cleanup,
+	}
+}
+
+// ensureOpen verifies the workspace hasn't been closed yet.
+func (b *baseWorkspace) ensureOpen() error {
+	b.mu.RLock()
+	defer b.mu.RUnlock()
+	if b.closed {
+		return ErrClosed
+	}
+	return nil
+}
+
+// ScalibrRoots returns the scan roots Deputy advertises to osv-scalibr.
+func (b *baseWorkspace) ScalibrRoots() []*scalibrfs.ScanRoot {
+	b.mu.RLock()
+	defer b.mu.RUnlock()
+	return b.scanRoots
+}
+
+// RootPath returns the underlying on-disk root or "" for virtual workspaces.
+func (b *baseWorkspace) RootPath() string {
+	b.mu.RLock()
+	defer b.mu.RUnlock()
+	return b.rootPath
+}
+
+// Close marks the workspace as closed and invokes the optional cleanup hook.
+func (b *baseWorkspace) Close() error {
+	b.mu.Lock()
+	if b.closed {
+		b.mu.Unlock()
+		return nil
+	}
+	b.closed = true
+	cleanup := b.cleanup
+	b.cleanup = nil
+	b.mu.Unlock()
+	if cleanup != nil {
+		return cleanup()
+	}
+	return nil
 }
 
 // Mutable extends Workspace with the guarantee that write operations
