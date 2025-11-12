@@ -53,6 +53,18 @@ func MarshalTemplate(ecosystem string) (string, error) {
 				},
 			},
 		}
+	case "pypi":
+		cfg = Config{
+			Listeners: []ListenerConfig{
+				{
+					Name:       "pypi-proxy",
+					Bind:       ":8081",
+					Ecosystems: []string{"pypi"},
+					Upstream:   "https://pypi.org",
+					Policies:   []string{"policy/pypi.cel"},
+				},
+			},
+		}
 	default:
 		return "", fmt.Errorf("unknown ecosystem %q", ecosystem)
 	}
