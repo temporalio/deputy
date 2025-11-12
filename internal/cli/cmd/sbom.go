@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	sbomx "github.com/picatz/deputy/internal/sbom"
+	ui "github.com/picatz/deputy/internal/ui"
 	"github.com/spf13/cobra"
 )
 
@@ -60,7 +61,7 @@ Optionally enriches SBOM entries with license information from multiple sources:
 				ref = "HEAD"
 			}
 
-			doc, err := sbomx.Generate(ctx, repoPath, sbomx.Options{
+			result, err := sbomx.Generate(ctx, repoPath, sbomx.Options{
 				Ref:            ref,
 				Ecosystems:     ecos,
 				Name:           name,
@@ -70,6 +71,12 @@ Optionally enriches SBOM entries with license information from multiple sources:
 			if err != nil {
 				return fmt.Errorf("failed to generate SBOM: %w", err)
 			}
+
+			if showContext {
+				emitSBOMContext(cmd.ErrOrStderr(), result)
+			}
+
+			doc := result.Document
 
 			var w io.Writer = os.Stdout
 			if outPath != "" && outPath != "-" {
@@ -208,4 +215,35 @@ PIPELINE INTEGRATION:
 	cmd.Flags().BoolVar(&showContext, "show-context", false, "Print a context header to stderr with repo, ref, and commit hash")
 
 	root.AddCommand(cmd)
+}
+
+func emitSBOMContext(w io.Writer, result sbomx.Result) {
+	if w == nil {
+		return
+	}
+	repo := strings.TrimSpace(result.RepoPath)
+	if repo == "" {
+		repo = "(unknown)"
+	}
+	ref := shortGitRef(refOrHEAD(result.Ref))
+	if ref == "" {
+		ref = "HEAD"
+	}
+	commit := strings.TrimSpace(result.Commit)
+	if commit == "" {
+		commit = "unknown"
+	} else if len(commit) > 7 {
+		commit = commit[:7]
+	}
+	origin := strings.TrimSpace(result.Origin)
+	if origin == "" {
+		origin = repo
+	}
+	fmt.Fprintf(w, "%s\n", ui.StyleHeader.Render("Context"))
+	fmt.Fprintf(w, "  Repo:   %s\n", repo)
+	fmt.Fprintf(w, "  Ref:    %s\n", ref)
+	fmt.Fprintf(w, "  Commit: %s\n", commit)
+	if origin != repo {
+		fmt.Fprintf(w, "  Origin: %s\n", origin)
+	}
 }

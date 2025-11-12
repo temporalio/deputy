@@ -313,28 +313,49 @@ func runDiffAnalysis(ctx context.Context, repoPath, baseRef, targetRef string, e
 	}
 
 	// Determine direct dependencies from target go.mod for accurate classification
-	goDirect := map[string]bool{"stdlib": true}
-	var manifestRes manifestResolver
-	var pkgInputs []analysis.PkgInput
+	targetGoDirect := map[string]bool{"stdlib": true}
+	var targetManifestRes manifestResolver
 	if isWorkingPseudoRef(targetRef) {
 		if repoSrc != nil {
-			goDirect = cmp.CollectGoDirectModulesFromWorkspace(repoSrc.Workspace)
-			manifestRes = workspaceManifestResolver{ws: repoSrc.Workspace}
+			targetGoDirect = cmp.CollectGoDirectModulesFromWorkspace(repoSrc.Workspace)
+			targetManifestRes = workspaceManifestResolver{ws: repoSrc.Workspace}
 		} else {
-			goDirect = cmp.CollectGoDirectModulesFromDisk(repoPath)
-			manifestRes = osManifestResolver(repoPath)
+			targetGoDirect = cmp.CollectGoDirectModulesFromDisk(repoPath)
+			targetManifestRes = osManifestResolver(repoPath)
 		}
 	} else if targetHash != nil {
 		if direct, err := cmp.CollectGoDirectModulesFromCommit(repo, *targetHash); err == nil {
-			goDirect = direct
+			targetGoDirect = direct
 		}
-		manifestRes = gitManifestResolver{repo: repo, hash: *targetHash}
+		targetManifestRes = gitManifestResolver{repo: repo, hash: *targetHash}
 	} else {
-		manifestRes = osManifestResolver(repoPath)
+		targetManifestRes = osManifestResolver(repoPath)
 	}
 
-	pkgInputs = packagesToInputs(targetPackages, packageInputOptions{GoDirect: goDirect, Resolver: manifestRes})
-	pkgDirect := buildPackageDirectMap(pkgInputs)
+	targetPkgInputs := packagesToInputs(targetPackages, packageInputOptions{GoDirect: targetGoDirect, Resolver: targetManifestRes})
+
+	baseGoDirect := map[string]bool{"stdlib": true}
+	var baseManifestRes manifestResolver
+	if isWorkingPseudoRef(baseRef) {
+		if repoSrc != nil {
+			baseGoDirect = cmp.CollectGoDirectModulesFromWorkspace(repoSrc.Workspace)
+			baseManifestRes = workspaceManifestResolver{ws: repoSrc.Workspace}
+		} else {
+			baseGoDirect = cmp.CollectGoDirectModulesFromDisk(repoPath)
+			baseManifestRes = osManifestResolver(repoPath)
+		}
+	} else {
+		baseManifestRes = gitManifestResolver{repo: repo, hash: *baseHash}
+		if direct, err := cmp.CollectGoDirectModulesFromCommit(repo, *baseHash); err == nil {
+			baseGoDirect = direct
+		}
+	}
+
+	basePkgInputs := packagesToInputs(basePackages, packageInputOptions{GoDirect: baseGoDirect, Resolver: baseManifestRes})
+	pkgDirect := mergeDirectMaps(buildPackageDirectMap(basePkgInputs), buildPackageDirectMap(targetPkgInputs))
+	goDirect := mergeGoDirectMaps(baseGoDirect, targetGoDirect)
+	manifestRes := targetManifestRes
+	pkgInputs := targetPkgInputs
 
 	// Compare packages
 	changes := cmp.ComparePackages(basePackages, targetPackages, goDirect, pkgDirect, nil)
@@ -804,4 +825,16 @@ func renderMatcherDebug(files []string, matcher *inv.DependencyMatcher) {
 			fmt.Printf("  %s %s\n", ui.StyleDim.Render("-skip"), f)
 		}
 	}
+}
+
+func mergeGoDirectMaps(maps ...map[string]bool) map[string]bool {
+	merged := map[string]bool{"stdlib": true}
+	for _, m := range maps {
+		for module, direct := range m {
+			if direct {
+				merged[module] = true
+			}
+		}
+	}
+	return merged
 }

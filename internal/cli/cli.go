@@ -10,6 +10,7 @@ import (
 	"github.com/charmbracelet/fang"
 	"github.com/go-git/go-git/v5"
 	"github.com/picatz/deputy/internal/cli/cmd"
+	_ "github.com/picatz/deputy/internal/targets/providers"
 	"github.com/spf13/cobra"
 )
 

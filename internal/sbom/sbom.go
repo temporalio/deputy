@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -21,6 +22,7 @@ import (
 	"github.com/google/osv-scalibr/extractor"
 	"github.com/google/osv-scalibr/purl"
 	analysis "github.com/picatz/deputy/internal/analysis"
+	gitx "github.com/picatz/deputy/internal/gitutil"
 	"github.com/picatz/deputy/internal/inventory"
 	"github.com/picatz/deputy/internal/repository"
 	"github.com/picatz/deputy/internal/repository/workspace"
@@ -43,11 +45,21 @@ type Options struct {
 	LicenseSource  string // depsdev|scan|both
 }
 
+// Result captures the SBOM document alongside contextual metadata that callers
+// can surface to users (e.g., --show-context banner in the CLI).
+type Result struct {
+	Document *sbom.Document
+	RepoPath string
+	Ref      string
+	Commit   string
+	Origin   string
+}
+
 // Generate builds an SBOM document for repoPath (local) or a remote reference.
 // Generate produces a Protobom SBOM document for the supplied repository path
 // (local path or remote reference). Remote repositories are shallow cloned
 // (depth 1) to a temporary directory and cleaned up automatically.
-func Generate(ctx context.Context, repoRef string, opts Options) (*sbom.Document, error) {
+func Generate(ctx context.Context, repoRef string, opts Options) (Result, error) {
 	if opts.Ref == "" {
 		opts.Ref = "HEAD"
 	}
@@ -57,15 +69,21 @@ func Generate(ctx context.Context, repoRef string, opts Options) (*sbom.Document
 		err error
 	)
 
+	result := Result{Ref: opts.Ref}
+	repoDisplay := repoRef
 	if fi, statErr := os.Stat(repoRef); statErr == nil && fi.IsDir() {
+		if abs, absErr := filepath.Abs(repoRef); absErr == nil {
+			repoDisplay = abs
+		}
+
 		src, err = repository.Open(repoRef)
 		if err != nil {
-			return nil, fmt.Errorf("open repository: %w", err)
+			return Result{}, fmt.Errorf("open repository: %w", err)
 		}
 	} else {
 		url := ToHTTPSGitURL(repoRef)
 		if url == "" {
-			return nil, fmt.Errorf("could not interpret repo %q as local path or remote URL", repoRef)
+			return Result{}, fmt.Errorf("could not interpret repo %q as local path or remote URL", repoRef)
 		}
 		auth := AuthForURL(url)
 		refName, resolveErr := ResolveReferenceName(ctx, url, auth, opts.Ref)
@@ -88,11 +106,14 @@ func Generate(ctx context.Context, repoRef string, opts Options) (*sbom.Document
 			src, err = repository.Clone(ctx, cloneOpts, true)
 		}
 		if err != nil {
-			return nil, fmt.Errorf("failed to clone remote repo %s: %w", url, err)
+			return Result{}, fmt.Errorf("failed to clone remote repo %s: %w", url, err)
 		}
 		repoRef = url
+		repoDisplay = url
 	}
 	defer src.Close()
+	result.RepoPath = repoDisplay
+	result.Ref = opts.Ref
 
 	effRef := opts.Ref
 	if strings.EqualFold(effRef, "HEAD") {
@@ -101,45 +122,49 @@ func Generate(ctx context.Context, repoRef string, opts Options) (*sbom.Document
 
 	pkgs, err := collectInventorySBOM(ctx, src.Repo, src.Workspace, effRef, inventory.ScanOptions{Ecosystems: opts.Ecosystems})
 	if err != nil {
-		return nil, err
+		return Result{}, err
 	}
 
 	doc, err := buildProtobomDocument(src.Workspace, repoRef, opts.Ref, opts.Name, pkgs)
 	if err != nil {
-		return nil, err
+		return Result{}, err
 	}
 
 	if opts.EnrichLicenses {
 		switch strings.ToLower(opts.LicenseSource) {
 		case "depsdev", "deps", "dd":
 			if err := enrichProtobomLicensesDepsDev(ctx, doc); err != nil {
-				return nil, err
+				return Result{}, err
 			}
 		case "scan":
 			if err := enrichProtobomLicensesScanLocal(ctx, doc, src.Workspace); err != nil {
-				return nil, err
+				return Result{}, err
 			}
 			fetcher := &remoteFetcher{Timeout: 20 * time.Second}
 			if err := enrichProtobomLicensesScanWithFetcher(ctx, doc, fetcher); err != nil {
-				return nil, err
+				return Result{}, err
 			}
 		case "both":
 			if err := enrichProtobomLicensesDepsDev(ctx, doc); err != nil {
-				return nil, err
+				return Result{}, err
 			}
 			if err := enrichProtobomLicensesScanLocal(ctx, doc, src.Workspace); err != nil {
-				return nil, err
+				return Result{}, err
 			}
 			fetcher := &remoteFetcher{Timeout: 20 * time.Second}
 			if err := enrichProtobomLicensesScanWithFetcher(ctx, doc, fetcher); err != nil {
-				return nil, err
+				return Result{}, err
 			}
 		default:
-			return nil, fmt.Errorf("unsupported license source: %s", opts.LicenseSource)
+			return Result{}, fmt.Errorf("unsupported license source: %s", opts.LicenseSource)
 		}
 	}
 
-	return doc, nil
+	commit, origin := resolveRepoMetadata(src.Repo, effRef, repoDisplay)
+	result.Commit = commit
+	result.Origin = origin
+	result.Document = doc
+	return result, nil
 }
 
 // collectInventorySBOM scans the repository at a specific commit snapshot.
@@ -158,6 +183,36 @@ func collectInventorySBOM(ctx context.Context, repo *git.Repository, ws workspac
 		return nil, err
 	}
 	return inventory.ScanPackagesAtCommitSnapshot(ctx, repo, *h, opts)
+}
+
+func resolveRepoMetadata(repo *git.Repository, ref, fallbackOrigin string) (string, string) {
+	if repo == nil {
+		return "", fallbackOrigin
+	}
+	commitHash := ""
+	if h, err := gitx.ResolveRevisionEnhanced(repo, ref); err == nil && h != nil {
+		commitHash = h.String()
+	} else if head, err := repo.Head(); err == nil && head != nil {
+		commitHash = head.Hash().String()
+	}
+	origin := fallbackOrigin
+	if remote, err := repo.Remote("origin"); err == nil && remote != nil {
+		if cfg := remote.Config(); cfg != nil {
+			for _, raw := range cfg.URLs {
+				candidate := strings.TrimSpace(raw)
+				if candidate == "" {
+					continue
+				}
+				if https := ToHTTPSGitURL(candidate); https != "" {
+					origin = https
+				} else {
+					origin = candidate
+				}
+				break
+			}
+		}
+	}
+	return commitHash, origin
 }
 
 // buildProtobomDocument converts the scalibr packages into a Protobom doc.

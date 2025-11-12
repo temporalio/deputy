@@ -1,8 +1,10 @@
 package cmd
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -10,18 +12,24 @@ import (
 	"strings"
 	"time"
 
+	cdx "github.com/CycloneDX/cyclonedx-go"
 	git "github.com/go-git/go-git/v5"
 	"github.com/go-git/go-git/v5/plumbing"
 	"github.com/google/osv-scalibr/extractor"
+	"github.com/google/osv-scalibr/purl"
 	analysis "github.com/picatz/deputy/internal/analysis"
 	cmp "github.com/picatz/deputy/internal/compare"
 	gitx "github.com/picatz/deputy/internal/gitutil"
 	inv "github.com/picatz/deputy/internal/inventory"
-	"github.com/picatz/deputy/internal/repository"
 	"github.com/picatz/deputy/internal/repository/workspace"
 	sbomx "github.com/picatz/deputy/internal/sbom"
+	"github.com/picatz/deputy/internal/targets"
+	_ "github.com/picatz/deputy/internal/targets/providers"
 	ui "github.com/picatz/deputy/internal/ui"
 	"github.com/protobom/protobom/pkg/sbom"
+	spdxjson "github.com/spdx/tools-golang/json"
+	spdxdoc "github.com/spdx/tools-golang/spdx"
+	spdxcommon "github.com/spdx/tools-golang/spdx/v2/common"
 	"github.com/spf13/cobra"
 	"google.golang.org/protobuf/encoding/protojson"
 	"osv.dev/bindings/go/osvdev"
@@ -58,17 +66,17 @@ type Scanner struct {
 }
 
 type scanExecution struct {
-	displayPath    string
-	localRepoPath  string
-	requestedRef   string
-	effectiveRef   string
-	packages       []*extractor.Package
-	goDirect       map[string]bool
+	displayPath     string
+	localRepoPath   string
+	requestedRef    string
+	effectiveRef    string
+	packages        []*extractor.Package
+	goDirect        map[string]bool
 	vulnerabilities []analysis.Vulnerability
-	commitHash     string
-	originURL      string
-	cloned         bool
-	cleanup        func()
+	commitHash      string
+	originURL       string
+	cloned          bool
+	cleanup         func()
 }
 
 func (se *scanExecution) Close() {
@@ -100,64 +108,50 @@ func (s *Scanner) queryOSV(ctx context.Context, inputs []analysis.PkgInput) ([]a
 }
 
 func (s *Scanner) executeScan(ctx context.Context, repoArg, ref string, refProvided bool, scanOpts inv.ScanOptions, beforeT, afterT time.Time, errW io.Writer) (*scanExecution, error) {
-	displayPath := strings.TrimSpace(repoArg)
-	if displayPath == "" {
+	targetInput := strings.TrimSpace(repoArg)
+	if targetInput == "" {
 		wd, err := os.Getwd()
 		if err != nil {
 			return nil, fmt.Errorf("failed to get current directory: %w", err)
 		}
-		displayPath = wd
+		targetInput = wd
 	}
-	scanPath := displayPath
-	var repoSrc *repository.Source
-	var cleanup func()
-	cleanup = func() {}
-	cloned := false
-	if _, err := os.Stat(scanPath); err != nil {
-		u := sbomx.ToHTTPSGitURL(scanPath)
-		if u == "" {
-			return nil, fmt.Errorf("could not interpret repo %q as local path or remote URL", scanPath)
+	mOpts := map[string]string{}
+	if ref != "" {
+		mOpts["ref"] = ref
+	}
+	mat, err := targets.Open(ctx, targetInput, mOpts)
+	if err != nil {
+		if errors.Is(err, targets.ErrNoProvider) {
+			return nil, fmt.Errorf("could not interpret repo %q as local path or remote URL", targetInput)
 		}
-		cloned = true
-
-		auth := sbomx.AuthForURL(u)
-		rn, err := sbomx.ResolveReferenceName(ctx, u, auth, ref)
-		if err == nil {
-			ref = rn.String()
-		}
-
-		cloneOpts := &git.CloneOptions{
-			URL:          u,
-			Depth:        1,
-			SingleBranch: true,
-			Tags:         git.NoTags,
-			Auth:         auth,
-		}
-		if rn.String() != "" {
-			cloneOpts.ReferenceName = rn
-		}
-		repoSrc, err = repository.Clone(ctx, cloneOpts, false)
-		if err != nil && cloneOpts.ReferenceName != "" {
-			cloneOpts.ReferenceName = ""
-			repoSrc, err = repository.Clone(ctx, cloneOpts, false)
-		}
-		if err != nil {
-			return nil, fmt.Errorf("failed to clone remote repo %s: %w", u, err)
-		}
-		scanPath = repoSrc.Workspace.RootPath()
-		rs := repoSrc
-		cleanup = func() {
-			if rs != nil {
-				rs.Close()
-				rs = nil
-			}
+		return nil, err
+	}
+	cleanup := func() {}
+	if mat.Cleanup != nil {
+		cleanup = mat.Cleanup
+	}
+	localRepoPath := mat.Path
+	if localRepoPath == "" {
+		if src, ok := mat.Data.(interface{ RootPath() string }); ok {
+			localRepoPath = src.RootPath()
 		}
 	}
-
-	localRepoPath := scanPath
+	if localRepoPath == "" {
+		cleanup()
+		return nil, fmt.Errorf("target %q did not provide a local filesystem path", targetInput)
+	}
 	if abs, err := filepath.Abs(localRepoPath); err == nil {
 		localRepoPath = abs
 	}
+	displayPath := targetInput
+	if mat.Meta.Target != "" {
+		displayPath = mat.Meta.Target
+	}
+	if pRef := mat.Meta.Provenance["ref"]; pRef != "" {
+		ref = pRef
+	}
+	cloned := strings.EqualFold(mat.Meta.Provenance["cloned"], "true")
 
 	effRef := refOrHEAD(ref)
 	if strings.EqualFold(effRef, "HEAD") && refProvided {
@@ -383,7 +377,8 @@ TYPICAL USE CASES:
 
 SUPPORTED SBOM FORMATS:
 • protobom-json: Protobom intermediate format (primary support)
-• Future: CycloneDX JSON, SPDX JSON (planned)
+• cyclonedx-json: CycloneDX JSON documents (all 1.x specs)
+• spdx-json: SPDX 2.x JSON documents
 
 This command analyzes package information extracted from SBOM documents and
 queries the OSV database for known vulnerabilities in those packages.
@@ -409,8 +404,9 @@ and available fixes where applicable.`,
   cat sbom.json | deputy scan sbom -
 
   # Specify SBOM format explicitly
-  deputy scan sbom --input-format protobom-json sbom.json
-  deputy scan sbom --input-format auto sbom.json
+  deputy scan sbom --input-format protobom-json sbom.protobom.json
+  deputy scan sbom --input-format cyclonedx-json bom.cdx.json
+  deputy scan sbom --input-format spdx-json bom.spdx.json
 
 OUTPUT AND FILTERING:
   # Save results to file
@@ -447,7 +443,7 @@ WORKFLOW EXAMPLES:
 	scanSBOMCmd.Flags().String("published-before", "", "Only include vulnerabilities published before this date (YYYY, YYYY-MM, YYYY-MM-DD, or RFC3339)")
 	scanSBOMCmd.Flags().String("published-after", "", "Only include vulnerabilities published on/after this date (YYYY, YYYY-MM, YYYY-MM-DD, or RFC3339)")
 	scanSBOMCmd.Flags().String("as-of", "", "Historical view: show vulnerabilities known up to and including this date (implies --published-before)")
-	scanSBOMCmd.Flags().String("input-format", "auto", "Input SBOM format (protobom-json, auto)")
+	scanSBOMCmd.Flags().String("input-format", "auto", "Input SBOM format (auto, protobom-json, cyclonedx-json, spdx-json)")
 
 	scanCmd.AddCommand(scanDirCmd, scanSBOMCmd)
 	root.AddCommand(scanCmd)
@@ -875,34 +871,209 @@ func (s *Scanner) outputJSON(w io.Writer, repo, ref, commit string, vulns []anal
 	return enc.Encode(result)
 }
 
-// parseSBOMPackages converts protobom JSON documents (or future formats) into
-// the package tuples expected by osv-scalibr / OSV queries.
+// parseSBOMPackages converts supported SBOM documents into package tuples for OSV queries.
 func parseSBOMPackages(data []byte, inFmt string) ([]*extractor.Package, error) {
-	useProto := strings.EqualFold(inFmt, "protobom-json") || strings.EqualFold(inFmt, "auto")
-	var pkgs []*extractor.Package
+	const (
+		fmtProtobom  = "protobom"
+		fmtCycloneDX = "cyclonedx"
+		fmtSPDX      = "spdx"
+	)
 
-	if useProto {
-		var doc sbom.Document
-		if err := protojson.Unmarshal(data, &doc); err == nil {
-			for _, n := range doc.GetNodeList().GetNodes() {
-				if n.GetType() == sbom.Node_PACKAGE {
-					name := n.GetName()
-					ver := n.GetVersion()
-					if name != "" && ver != "" {
-						pkgs = append(pkgs, &extractor.Package{Name: name, Version: ver})
-					}
-				}
-			}
-		} else if strings.EqualFold(inFmt, "protobom-json") {
-			return nil, fmt.Errorf("failed to parse protobom-json: %w", err)
+	format := strings.ToLower(strings.TrimSpace(inFmt))
+	var tryOrder []string
+	seen := map[string]struct{}{}
+	addFormat := func(kind string) {
+		if kind == "" {
+			return
+		}
+		if _, ok := seen[kind]; ok {
+			return
+		}
+		seen[kind] = struct{}{}
+		tryOrder = append(tryOrder, kind)
+	}
+
+	switch format {
+	case "", "auto":
+		if detected := detectSBOMFormat(data); detected != "" {
+			addFormat(detected)
+		}
+		addFormat(fmtProtobom)
+		addFormat(fmtCycloneDX)
+		addFormat(fmtSPDX)
+	case "protobom", "protobom-json":
+		addFormat(fmtProtobom)
+	case "cyclonedx", "cyclonedx-json":
+		addFormat(fmtCycloneDX)
+	case "spdx", "spdx-json":
+		addFormat(fmtSPDX)
+	default:
+		return nil, fmt.Errorf("unsupported --input-format %q (use auto|protobom-json|cyclonedx-json|spdx-json)", inFmt)
+	}
+
+	var lastErr error
+	for _, kind := range tryOrder {
+		var (
+			pkgs []*extractor.Package
+			err  error
+		)
+		switch kind {
+		case fmtProtobom:
+			pkgs, err = parseProtobomPackages(data)
+		case fmtCycloneDX:
+			pkgs, err = parseCycloneDXPackages(data)
+		case fmtSPDX:
+			pkgs, err = parseSPDXPackages(data)
+		default:
+			err = fmt.Errorf("unknown SBOM format %q", kind)
+		}
+		if err == nil && len(pkgs) > 0 {
+			return pkgs, nil
+		}
+		if err != nil {
+			lastErr = err
 		}
 	}
 
-	if len(pkgs) == 0 {
-		return nil, fmt.Errorf("unsupported or empty SBOM input; support for CycloneDX/SPDX will be added. Try --input-format protobom-json")
+	if lastErr != nil {
+		return nil, lastErr
 	}
+	return nil, fmt.Errorf("unsupported or empty SBOM input; specify --input-format (protobom-json|cyclonedx-json|spdx-json)")
+}
 
+func detectSBOMFormat(data []byte) string {
+	var probe map[string]any
+	if err := json.Unmarshal(data, &probe); err != nil {
+		return ""
+	}
+	if v, ok := probe["bomFormat"].(string); ok && strings.EqualFold(v, "cyclonedx") {
+		return "cyclonedx"
+	}
+	if schema, ok := probe["$schema"].(string); ok && strings.Contains(strings.ToLower(schema), "cyclonedx") {
+		return "cyclonedx"
+	}
+	if _, ok := probe["spdxVersion"]; ok {
+		return "spdx"
+	}
+	if _, ok := probe["nodeList"]; ok {
+		return "protobom"
+	}
+	return ""
+}
+
+func parseProtobomPackages(data []byte) ([]*extractor.Package, error) {
+	var doc sbom.Document
+	if err := protojson.Unmarshal(data, &doc); err != nil {
+		return nil, err
+	}
+	nodes := doc.GetNodeList().GetNodes()
+	if len(nodes) == 0 {
+		return nil, fmt.Errorf("protobom document contained no nodes")
+	}
+	var pkgs []*extractor.Package
+	for _, n := range nodes {
+		if n.GetType() != sbom.Node_PACKAGE {
+			continue
+		}
+		name := strings.TrimSpace(n.GetName())
+		version := strings.TrimSpace(n.GetVersion())
+		if name == "" || version == "" {
+			continue
+		}
+		pkg := &extractor.Package{Name: name, Version: version}
+		if ids := n.GetIdentifiers(); ids != nil {
+			if purlStr := ids[int32(sbom.SoftwareIdentifierType_PURL)]; purlStr != "" {
+				if pu, err := purl.FromString(purlStr); err == nil {
+					pkg.PURLType = pu.Type
+				}
+			}
+		}
+		pkgs = append(pkgs, pkg)
+	}
+	if len(pkgs) == 0 {
+		return nil, fmt.Errorf("protobom document did not contain package nodes with name+version")
+	}
 	return pkgs, nil
+}
+
+func parseCycloneDXPackages(data []byte) ([]*extractor.Package, error) {
+	var bom cdx.BOM
+	if err := cdx.NewBOMDecoder(bytes.NewReader(data), cdx.BOMFileFormatJSON).Decode(&bom); err != nil {
+		return nil, err
+	}
+	if bom.Components == nil || len(*bom.Components) == 0 {
+		return nil, fmt.Errorf("cyclonedx document contained no components")
+	}
+	var pkgs []*extractor.Package
+	for _, comp := range *bom.Components {
+		name := strings.TrimSpace(comp.Name)
+		version := strings.TrimSpace(comp.Version)
+		if name == "" || version == "" {
+			continue
+		}
+		pkg := &extractor.Package{Name: name, Version: version}
+		if comp.PackageURL != "" {
+			if pu, err := purl.FromString(comp.PackageURL); err == nil {
+				pkg.PURLType = pu.Type
+			}
+		}
+		pkgs = append(pkgs, pkg)
+	}
+	if len(pkgs) == 0 {
+		return nil, fmt.Errorf("cyclonedx document did not contain components with name+version")
+	}
+	return pkgs, nil
+}
+
+func parseSPDXPackages(data []byte) ([]*extractor.Package, error) {
+	doc, err := spdxjson.Read(bytes.NewReader(data))
+	if err != nil {
+		return nil, err
+	}
+	if doc == nil || len(doc.Packages) == 0 {
+		return nil, fmt.Errorf("spdx document contained no packages")
+	}
+	var pkgs []*extractor.Package
+	for _, pkg := range doc.Packages {
+		if pkg == nil {
+			continue
+		}
+		name := strings.TrimSpace(pkg.PackageName)
+		version := strings.TrimSpace(pkg.PackageVersion)
+		if name == "" || version == "" {
+			continue
+		}
+		entry := &extractor.Package{Name: name, Version: version}
+		if purlStr := extractSPDXPackagePURL(pkg); purlStr != "" {
+			if pu, err := purl.FromString(purlStr); err == nil {
+				entry.PURLType = pu.Type
+			}
+		}
+		pkgs = append(pkgs, entry)
+	}
+	if len(pkgs) == 0 {
+		return nil, fmt.Errorf("spdx document did not contain packages with name+version")
+	}
+	return pkgs, nil
+}
+
+func extractSPDXPackagePURL(pkg *spdxdoc.Package) string {
+	for _, ref := range pkg.PackageExternalReferences {
+		if ref == nil {
+			continue
+		}
+		if !strings.EqualFold(ref.Category, string(spdxcommon.CategoryPackageManager)) {
+			continue
+		}
+		if !strings.EqualFold(ref.RefType, string(spdxcommon.TypePackageManagerPURL)) {
+			continue
+		}
+		locator := strings.TrimSpace(ref.Locator)
+		if locator != "" {
+			return locator
+		}
+	}
+	return ""
 }
 
 func buildScanReport(repo, ref, commit string, vulns []analysis.Vulnerability, pkgCount int) ScanResult {

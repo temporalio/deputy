@@ -665,6 +665,21 @@ func buildPackageDirectMap(inputs []analysis.PkgInput) map[string]bool {
 	return direct
 }
 
+func mergeDirectMaps(maps ...map[string]bool) map[string]bool {
+	result := make(map[string]bool)
+	for _, m := range maps {
+		for k, v := range m {
+			if v {
+				result[k] = true
+			}
+		}
+	}
+	if len(result) == 0 {
+		return nil
+	}
+	return result
+}
+
 func buildPackageSources(inputs []analysis.PkgInput) map[string][]string {
 	if len(inputs) == 0 {
 		return nil
