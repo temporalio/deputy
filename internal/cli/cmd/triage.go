@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -52,6 +53,7 @@ ASK CODEX TO PRIORITIZE:
 	triageCmd.Flags().String("agent-thread", "", "Resume a previous codex thread ID")
 	triageCmd.Flags().Bool("agent-include-plan-tool", true, "Allow codex agent to enable the plan tool")
 	triageCmd.Flags().Bool("agent-skip-git-check", true, "Skip codex git repository checks")
+	triageCmd.Flags().StringArray("policy", nil, "Path to CEL policy files or bundles to evaluate against triage summaries (repeatable)")
 	root.AddCommand(triageCmd)
 }
 
@@ -66,6 +68,7 @@ func runTriage(scanner *Scanner, cmd *cobra.Command, args []string) error {
 	agentThreadID, _ := cmd.Flags().GetString("agent-thread")
 	agentIncludePlanTool, _ := cmd.Flags().GetBool("agent-include-plan-tool")
 	agentSkipGitCheck, _ := cmd.Flags().GetBool("agent-skip-git-check")
+	policyPaths, _ := cmd.Flags().GetStringArray("policy")
 
 	repoArg := ""
 	if len(args) > 0 {
@@ -124,6 +127,10 @@ func runTriage(scanner *Scanner, cmd *cobra.Command, args []string) error {
 		report = buildTriageReport(target, stats, cons)
 	}
 
+	if err := runTriagePolicies(cmd.Context(), policyPaths, report, cmd.ErrOrStderr()); err != nil {
+		return err
+	}
+
 	switch strings.ToLower(strings.TrimSpace(format)) {
 	case "", "text":
 		printTriageSummary(report)
@@ -162,6 +169,37 @@ func runTriage(scanner *Scanner, cmd *cobra.Command, args []string) error {
 		}
 	}
 
+	return nil
+}
+
+func runTriagePolicies(ctx context.Context, policyPaths []string, report triageReport, errW io.Writer) error {
+	if len(policyPaths) == 0 {
+		return nil
+	}
+	reportMap, err := structToMap(report)
+	if err != nil {
+		return err
+	}
+	if err := evaluatePoliciesForCommand(ctx, policyPaths, reportMap, "triage", "triage_report", errW); err != nil {
+		return err
+	}
+	targetMap, err := structToMap(report.Target)
+	if err != nil {
+		return err
+	}
+	for _, pkg := range report.TopPackages {
+		pkgMap, err := structToMap(pkg)
+		if err != nil {
+			return err
+		}
+		payload := map[string]any{
+			"target":  targetMap,
+			"cluster": pkgMap,
+		}
+		if err := evaluatePoliciesForCommand(ctx, policyPaths, payload, "triage", "triage_cluster", errW); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 

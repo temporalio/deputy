@@ -322,6 +322,7 @@ WORKFLOW EXAMPLES:
 	scanCmd.Flags().String("published-before", "", "Only include vulnerabilities published before this date (YYYY, YYYY-MM, YYYY-MM-DD, or RFC3339)")
 	scanCmd.Flags().String("published-after", "", "Only include vulnerabilities published on/after this date (YYYY, YYYY-MM, YYYY-MM-DD, or RFC3339)")
 	scanCmd.Flags().String("as-of", "", "Historical view: show vulnerabilities known up to and including this date (implies --published-before)")
+	scanCmd.Flags().StringArray("policy", nil, "Path to a CEL policy file or bundle to evaluate against the scan report (repeatable)")
 
 	scanDirCmd := &cobra.Command{
 		Use:   "dir <path>",
@@ -369,6 +370,7 @@ TYPICAL USE CASES:
 	scanDirCmd.Flags().String("published-before", "", "Only include vulnerabilities published before this date (YYYY, YYYY-MM, YYYY-MM-DD, or RFC3339)")
 	scanDirCmd.Flags().String("published-after", "", "Only include vulnerabilities published on/after this date (YYYY, YYYY-MM, YYYY-MM-DD, or RFC3339)")
 	scanDirCmd.Flags().String("as-of", "", "Historical view: show vulnerabilities known up to and including this date (implies --published-before)")
+	scanDirCmd.Flags().StringArray("policy", nil, "Path to a CEL policy file or bundle to evaluate against the scan report (repeatable)")
 
 	scanSBOMCmd := &cobra.Command{
 		Use:   "sbom <file|->",
@@ -444,6 +446,7 @@ WORKFLOW EXAMPLES:
 	scanSBOMCmd.Flags().String("published-after", "", "Only include vulnerabilities published on/after this date (YYYY, YYYY-MM, YYYY-MM-DD, or RFC3339)")
 	scanSBOMCmd.Flags().String("as-of", "", "Historical view: show vulnerabilities known up to and including this date (implies --published-before)")
 	scanSBOMCmd.Flags().String("input-format", "auto", "Input SBOM format (auto, protobom-json, cyclonedx-json, spdx-json)")
+	scanSBOMCmd.Flags().StringArray("policy", nil, "Path to a CEL policy file or bundle to evaluate against the scan report (repeatable)")
 
 	scanCmd.AddCommand(scanDirCmd, scanSBOMCmd)
 	root.AddCommand(scanCmd)
@@ -461,6 +464,7 @@ func (s *Scanner) runScan(cmd *cobra.Command, args []string) error {
 	publishedBeforeStr, _ := cmd.Flags().GetString("published-before")
 	publishedAfterStr, _ := cmd.Flags().GetString("published-after")
 	asOfStr, _ := cmd.Flags().GetString("as-of")
+	policyPaths, _ := cmd.Flags().GetStringArray("policy")
 
 	repoArg := ""
 	if len(args) > 0 {
@@ -476,6 +480,14 @@ func (s *Scanner) runScan(cmd *cobra.Command, args []string) error {
 	vulns := exec.vulnerabilities
 	pkgs := exec.packages
 	goDirect := exec.goDirect
+	vulnsForPolicy := vulns
+	if ignoreUnfixed {
+		vulnsForPolicy = filterUnfixed(vulns)
+	}
+	report := buildScanReport(exec.displayPath, ref, exec.commitHash, vulnsForPolicy, len(pkgs))
+	if err := runScanPolicies(ctx, policyPaths, report, cmd.ErrOrStderr()); err != nil {
+		return err
+	}
 
 	var w io.Writer = os.Stdout
 	if outPath != "" && outPath != "-" {
@@ -510,6 +522,7 @@ func (s *Scanner) runScanDir(cmd *cobra.Command, args []string) error {
 	publishedBeforeStr, _ := cmd.Flags().GetString("published-before")
 	publishedAfterStr, _ := cmd.Flags().GetString("published-after")
 	asOfStr, _ := cmd.Flags().GetString("as-of")
+	policyPaths, _ := cmd.Flags().GetStringArray("policy")
 
 	ecos, _ := cmd.Flags().GetStringSlice("ecosystems")
 	scanOpts := inv.ScanOptions{Ecosystems: ecos}
@@ -550,6 +563,14 @@ func (s *Scanner) runScanDir(cmd *cobra.Command, args []string) error {
 	if !beforeT.IsZero() || !afterT.IsZero() {
 		vulns = analysis.FilterVulnerabilitiesByPublished(vulns, afterT, beforeT)
 	}
+	vulnsForPolicy := vulns
+	if ignoreUnfixed {
+		vulnsForPolicy = filterUnfixed(vulns)
+	}
+	report := buildScanReport(path, "", "", vulnsForPolicy, len(pkgs))
+	if err := runScanPolicies(ctx, policyPaths, report, cmd.ErrOrStderr()); err != nil {
+		return err
+	}
 
 	var w io.Writer = os.Stdout
 	if outPath != "" && outPath != "-" {
@@ -585,6 +606,7 @@ func (s *Scanner) runScanSBOM(cmd *cobra.Command, args []string) error {
 	publishedAfterStr, _ := cmd.Flags().GetString("published-after")
 	asOfStr, _ := cmd.Flags().GetString("as-of")
 	inFmt, _ := cmd.Flags().GetString("input-format")
+	policyPaths, _ := cmd.Flags().GetStringArray("policy")
 
 	var r io.Reader
 	if input == "-" {
@@ -638,6 +660,14 @@ func (s *Scanner) runScanSBOM(cmd *cobra.Command, args []string) error {
 	}
 	if !beforeT.IsZero() || !afterT.IsZero() {
 		vulns = analysis.FilterVulnerabilitiesByPublished(vulns, afterT, beforeT)
+	}
+	vulnsForPolicy := vulns
+	if ignoreUnfixed {
+		vulnsForPolicy = filterUnfixed(vulns)
+	}
+	report := buildScanReport("sbom", "", "", vulnsForPolicy, len(pkgs))
+	if err := runScanPolicies(ctx, policyPaths, report, cmd.ErrOrStderr()); err != nil {
+		return err
 	}
 
 	var w io.Writer = os.Stdout
@@ -1087,6 +1117,35 @@ func buildScanReport(repo, ref, commit string, vulns []analysis.Vulnerability, p
 		Stats:           stats,
 		Vulnerabilities: vulns,
 	}
+}
+
+func runScanPolicies(ctx context.Context, policyPaths []string, report ScanResult, errW io.Writer) error {
+	if len(policyPaths) == 0 {
+		return nil
+	}
+	reportMap, err := structToMap(report)
+	if err != nil {
+		return err
+	}
+	if err := evaluatePoliciesForCommand(ctx, policyPaths, reportMap, "scan", "scan_report", errW); err != nil {
+		return err
+	}
+	for _, vuln := range report.Vulnerabilities {
+		vulnMap, err := structToMap(vuln)
+		if err != nil {
+			return err
+		}
+		payload := map[string]any{
+			"repo":          report.Repo,
+			"ref":           report.Ref,
+			"commit":        report.Commit,
+			"vulnerability": vulnMap,
+		}
+		if err := evaluatePoliciesForCommand(ctx, policyPaths, payload, "scan", "scan_vulnerability", errW); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 var knownDeprecations = []ModuleDeprecation{

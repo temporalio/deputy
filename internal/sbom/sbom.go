@@ -53,6 +53,7 @@ type Result struct {
 	Ref      string
 	Commit   string
 	Origin   string
+	Packages []*extractor.Package
 }
 
 // Generate builds an SBOM document for repoPath (local) or a remote reference.
@@ -164,6 +165,7 @@ func Generate(ctx context.Context, repoRef string, opts Options) (Result, error)
 	result.Commit = commit
 	result.Origin = origin
 	result.Document = doc
+	result.Packages = pkgs
 	return result, nil
 }
 

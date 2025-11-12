@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"os"
@@ -16,6 +17,7 @@ func AddSBOMCommand(root *cobra.Command) {
 	var ref, format, outPath, name, licenseSource string
 	var ecos []string
 	var enrichLicenses, showContext bool
+	var policyPaths []string
 
 	cmd := &cobra.Command{
 		Use:   "sbom [repo]",
@@ -74,6 +76,10 @@ Optionally enriches SBOM entries with license information from multiple sources:
 
 			if showContext {
 				emitSBOMContext(cmd.ErrOrStderr(), result)
+			}
+
+			if err := runSBOMPolicies(ctx, policyPaths, result, cmd.ErrOrStderr()); err != nil {
+				return err
 			}
 
 			doc := result.Document
@@ -213,8 +219,38 @@ PIPELINE INTEGRATION:
 	cmd.Flags().BoolVar(&enrichLicenses, "enrich-licenses", false, "Enrich SBOM nodes with licenses (optional)")
 	cmd.Flags().StringVar(&licenseSource, "license-source", "depsdev", "License enrichment source: depsdev | scan | both")
 	cmd.Flags().BoolVar(&showContext, "show-context", false, "Print a context header to stderr with repo, ref, and commit hash")
+	cmd.Flags().StringArrayVar(&policyPaths, "policy", nil, "Path to CEL policy files or bundles to evaluate against SBOM results (repeatable)")
 
 	root.AddCommand(cmd)
+}
+
+func runSBOMPolicies(ctx context.Context, policyPaths []string, result sbomx.Result, errW io.Writer) error {
+	if len(policyPaths) == 0 {
+		return nil
+	}
+	reportMap, err := structToMap(result)
+	if err != nil {
+		return err
+	}
+	if err := evaluatePoliciesForCommand(ctx, policyPaths, reportMap, "sbom", "sbom_report", errW); err != nil {
+		return err
+	}
+	for _, pkg := range result.Packages {
+		pkgMap, err := structToMap(pkg)
+		if err != nil {
+			return err
+		}
+		payload := map[string]any{
+			"repo":      result.RepoPath,
+			"ref":       result.Ref,
+			"commit":    result.Commit,
+			"component": pkgMap,
+		}
+		if err := evaluatePoliciesForCommand(ctx, policyPaths, payload, "sbom", "sbom_component", errW); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func emitSBOMContext(w io.Writer, result sbomx.Result) {

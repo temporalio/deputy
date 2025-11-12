@@ -82,6 +82,7 @@ AI-ASSISTED REMEDIATION:
 	fixCmd.Flags().Bool("agent-include-plan-tool", true, "Allow codex agent to enable the plan tool")
 	fixCmd.Flags().Bool("agent-skip-git-check", true, "Skip codex git repository checks")
 	fixCmd.Flags().Bool("apply", false, "Execute runnable remediation commands in-place (local scans only)")
+	fixCmd.Flags().StringArray("policy", nil, "Path to CEL policy files or bundles to evaluate against remediation plans (repeatable)")
 	root.AddCommand(fixCmd)
 }
 
@@ -97,6 +98,7 @@ func runFixPlan(scanner *Scanner, cmd *cobra.Command, args []string) error {
 	agentThreadID, _ := cmd.Flags().GetString("agent-thread")
 	agentIncludePlanTool, _ := cmd.Flags().GetBool("agent-include-plan-tool")
 	agentSkipGitCheck, _ := cmd.Flags().GetBool("agent-skip-git-check")
+	policyPaths, _ := cmd.Flags().GetStringArray("policy")
 
 	if strings.TrimSpace(reportPath) != "" && strings.TrimSpace(planPath) != "" {
 		return fmt.Errorf("--report and --plan cannot be used together")
@@ -163,6 +165,10 @@ func runFixPlan(scanner *Scanner, cmd *cobra.Command, args []string) error {
 		result := buildScanReport(exec.displayPath, ref, exec.commitHash, vulns, len(exec.packages))
 		commands, stdlib := remediation.CommandsFromVulnerabilities(result.Vulnerabilities)
 		plan = buildRemediationPlan(result, commands, stdlib)
+	}
+
+	if err := runFixPolicies(cmd.Context(), policyPaths, plan, cmd.ErrOrStderr()); err != nil {
+		return err
 	}
 
 	format, _ := cmd.Flags().GetString("format")
@@ -351,6 +357,34 @@ func applyRemediationCommands(ctx context.Context, repoDir string, commands []re
 	}
 	if ran == 0 {
 		fmt.Fprintln(out, ui.StyleDim.Render("No runnable commands in remediation plan."))
+	}
+	return nil
+}
+
+func runFixPolicies(ctx context.Context, policyPaths []string, plan remediationPlan, errW io.Writer) error {
+	if len(policyPaths) == 0 {
+		return nil
+	}
+	planMap, err := structToMap(plan)
+	if err != nil {
+		return err
+	}
+	if err := evaluatePoliciesForCommand(ctx, policyPaths, planMap, "fix", "fix_plan", errW); err != nil {
+		return err
+	}
+	for idx, step := range plan.Commands {
+		stepMap, err := structToMap(step)
+		if err != nil {
+			return err
+		}
+		payload := map[string]any{
+			"plan":  planMap,
+			"step":  stepMap,
+			"index": idx,
+		}
+		if err := evaluatePoliciesForCommand(ctx, policyPaths, payload, "fix", "fix_plan_step", errW); err != nil {
+			return err
+		}
 	}
 	return nil
 }

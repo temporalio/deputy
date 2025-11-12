@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/x509"
 	"fmt"
+	"io"
 	"os"
 	"runtime"
 	"strconv"
@@ -43,6 +44,7 @@ func AddDiffCommand(root *cobra.Command) {
 	var unchangedThreshold string
 	var ecosystems []string
 	var debugMatcher bool
+	var policyPaths []string
 
 	cmd := &cobra.Command{
 		Use:   "diff [base] [target]",
@@ -102,7 +104,7 @@ Can be disabled with --skip-vuln-scan for faster execution.`,
 			if err != nil {
 				return fmt.Errorf("failed to parse references: %w", err)
 			}
-			return runDiffAnalysis(cmd.Context(), repo, baseRef, targetRef, !skipVulnScan, useLicenseCheck, enrichLicenses, licenseSource, publishedAfterStr, publishedBeforeStr, asOfStr, ignoreUnfixed, showUnchanged, unchangedThreshold, scanOpts, matcher, debugMatcher)
+			return runDiffAnalysis(cmd.Context(), repo, baseRef, targetRef, !skipVulnScan, useLicenseCheck, enrichLicenses, licenseSource, publishedAfterStr, publishedBeforeStr, asOfStr, ignoreUnfixed, showUnchanged, unchangedThreshold, policyPaths, scanOpts, matcher, debugMatcher, cmd.ErrOrStderr())
 		},
 		Example: `BASIC USAGE:
   # Compare current work with default branch (beginner-friendly)
@@ -216,6 +218,7 @@ PERFORMANCE TIPS:
 	cmd.Flags().StringVar(&unchangedThreshold, "unchanged-threshold", "critical", "Auto-show unchanged vulns at or above this severity: none|low|med|high|critical|any")
 	cmd.Flags().StringSliceVar(&ecosystems, "ecosystems", []string{"all"}, "Ecosystems to include when scanning (default: all supported)")
 	cmd.Flags().BoolVar(&debugMatcher, "debug-matcher", false, "Print which changed files were considered dependency manifests/lockfiles")
+	cmd.Flags().StringArrayVar(&policyPaths, "policy", nil, "Path to CEL policy files or bundles to evaluate against diff results (repeatable)")
 
 	root.AddCommand(cmd)
 }
@@ -225,12 +228,23 @@ func mustGetwd() string {
 	return wd
 }
 
+type DiffPolicyReport struct {
+	Repo            string                   `json:"repo"`
+	BaseRef         string                   `json:"baseRef"`
+	TargetRef       string                   `json:"targetRef"`
+	Changes         []cmp.Change             `json:"changes"`
+	Vulnerabilities []analysis.Vulnerability `json:"vulnerabilities"`
+}
+
 // runDiffAnalysis orchestrates dependency inventory collection for the base and
 // target references, computes a dependency diff, and optionally queries OSV to
 // enrich added/updated modules with vulnerability data.
-func runDiffAnalysis(ctx context.Context, repoPath, baseRef, targetRef string, enableVulnScan bool, useLicenseCheck bool, enrichLicenses bool, licenseSource string, publishedAfterStr, publishedBeforeStr, asOfStr string, ignoreUnfixed bool, showUnchanged bool, unchangedThreshold string, scanOpts inv.ScanOptions, matcher *inv.DependencyMatcher, debugMatcher bool) error {
+func runDiffAnalysis(ctx context.Context, repoPath, baseRef, targetRef string, enableVulnScan bool, useLicenseCheck bool, enrichLicenses bool, licenseSource string, publishedAfterStr, publishedBeforeStr, asOfStr string, ignoreUnfixed bool, showUnchanged bool, unchangedThreshold string, policyPaths []string, scanOpts inv.ScanOptions, matcher *inv.DependencyMatcher, debugMatcher bool, errW io.Writer) error {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
+	if errW == nil {
+		errW = os.Stderr
+	}
 
 	dispTarget := targetRef
 	if isWorkingPseudoRef(targetRef) {
@@ -416,6 +430,22 @@ func runDiffAnalysis(ctx context.Context, repoPath, baseRef, targetRef string, e
 		}
 		if !beforeT.IsZero() || !afterT.IsZero() {
 			vulns = analysis.FilterVulnerabilitiesByPublished(vulns, afterT, beforeT)
+		}
+
+		policyVulns := vulns
+		if ignoreUnfixed {
+			policyVulns = filterUnfixed(vulns)
+		}
+
+		report := DiffPolicyReport{
+			Repo:            repoPath,
+			BaseRef:         baseRef,
+			TargetRef:       targetRef,
+			Changes:         changes,
+			Vulnerabilities: policyVulns,
+		}
+		if err := runDiffPolicies(ctx, policyPaths, report, errW); err != nil {
+			return err
 		}
 
 		changedVulns, unchangedVulns := splitVulnsByChange(vulns, changes)
@@ -837,4 +867,48 @@ func mergeGoDirectMaps(maps ...map[string]bool) map[string]bool {
 		}
 	}
 	return merged
+}
+
+func runDiffPolicies(ctx context.Context, policyPaths []string, report DiffPolicyReport, errW io.Writer) error {
+	if len(policyPaths) == 0 {
+		return nil
+	}
+	reportMap, err := structToMap(report)
+	if err != nil {
+		return err
+	}
+	if err := evaluatePoliciesForCommand(ctx, policyPaths, reportMap, "diff", "diff_report", errW); err != nil {
+		return err
+	}
+	for _, change := range report.Changes {
+		changeMap, err := structToMap(change)
+		if err != nil {
+			return err
+		}
+		payload := map[string]any{
+			"repo":      report.Repo,
+			"baseRef":   report.BaseRef,
+			"targetRef": report.TargetRef,
+			"change":    changeMap,
+		}
+		if err := evaluatePoliciesForCommand(ctx, policyPaths, payload, "diff", "diff_dependency_change", errW); err != nil {
+			return err
+		}
+	}
+	for _, vuln := range report.Vulnerabilities {
+		vulnMap, err := structToMap(vuln)
+		if err != nil {
+			return err
+		}
+		payload := map[string]any{
+			"repo":          report.Repo,
+			"baseRef":       report.BaseRef,
+			"targetRef":     report.TargetRef,
+			"vulnerability": vulnMap,
+		}
+		if err := evaluatePoliciesForCommand(ctx, policyPaths, payload, "diff", "diff_vulnerability", errW); err != nil {
+			return err
+		}
+	}
+	return nil
 }

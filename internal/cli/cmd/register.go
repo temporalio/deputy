@@ -12,4 +12,6 @@ func RegisterCommands(root *cobra.Command) {
 	AddSBOMCommand(root)
 	AddDiffCommand(root)
 	AddListCommand(root)
+	AddPolicyCommand(root)
+	AddProxyCommand(root)
 }

@@ -5,10 +5,12 @@ go 1.24.9
 require (
 	deps.dev/api/v3 v3.0.0-20250903005441-604c45d5b44b
 	github.com/BurntSushi/toml v1.5.0
+	github.com/CycloneDX/cyclonedx-go v0.9.2
 	github.com/charmbracelet/fang v0.4.0
 	github.com/charmbracelet/lipgloss v1.1.1-0.20250404203927-76690c660834
 	github.com/go-git/go-billy/v5 v5.6.2
 	github.com/go-git/go-git/v5 v5.16.3
+	github.com/google/cel-go v0.21.0
 	github.com/google/licensecheck v0.3.1
 	github.com/google/osv-scalibr v0.3.2
 	github.com/ossf/osv-schema/bindings/go v0.0.0-20250902063920-695987a6b7da
@@ -16,6 +18,7 @@ require (
 	github.com/picatz/openai v0.0.0-20251023035433-af6462b7d534
 	github.com/pjbgf/sha1cd v0.5.0
 	github.com/protobom/protobom v0.5.4
+	github.com/spdx/tools-golang v0.5.5
 	github.com/spf13/cobra v1.10.1
 	golang.org/x/mod v0.27.0
 	golang.org/x/sync v0.16.0
@@ -34,13 +37,13 @@ require (
 	deps.dev/util/semver v0.0.0-20250903005441-604c45d5b44b // indirect
 	github.com/AdaLogics/go-fuzz-headers v0.0.0-20240806141605-e8a1dd7889d6 // indirect
 	github.com/AdamKorcz/go-118-fuzz-build v0.0.0-20250520111509-a70c2aa677fa // indirect
-	github.com/CycloneDX/cyclonedx-go v0.9.2 // indirect
 	github.com/GehirnInc/crypt v0.0.0-20230320061759-8cc1b52080c5 // indirect
 	github.com/Microsoft/go-winio v0.6.2 // indirect
 	github.com/Microsoft/hcsshim v0.13.0 // indirect
 	github.com/ProtonMail/go-crypto v1.3.0 // indirect
 	github.com/agext/levenshtein v1.2.3 // indirect
 	github.com/anchore/go-struct-converter v0.0.0-20250211213226-cce56d595160 // indirect
+	github.com/antlr4-go/antlr/v4 v4.13.0 // indirect
 	github.com/aymanbagabas/go-osc52/v2 v2.0.1 // indirect
 	github.com/blang/semver/v4 v4.0.0 // indirect
 	github.com/charmbracelet/colorprofile v0.3.2 // indirect
@@ -138,8 +141,8 @@ require (
 	github.com/sirupsen/logrus v1.9.3 // indirect
 	github.com/skeema/knownhosts v1.3.1 // indirect
 	github.com/spdx/gordf v0.0.0-20250128162952-000978ccd6fb // indirect
-	github.com/spdx/tools-golang v0.5.5 // indirect
 	github.com/spf13/pflag v1.0.10 // indirect
+	github.com/stoewer/go-strcase v1.2.0 // indirect
 	github.com/tidwall/gjson v1.18.0 // indirect
 	github.com/tidwall/jsonc v0.3.2 // indirect
 	github.com/tidwall/match v1.2.0 // indirect
