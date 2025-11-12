@@ -133,6 +133,8 @@ To spin up a PyPI proxy, run `deputy proxy template --ecosystem pypi > proxy.yam
 
 Similarly, `deputy proxy template --ecosystem npm` scaffolds an npm/Node proxy config rooted at `https://registry.npmjs.org`, emitting `npm_artifact_request` payloads so you can block vulnerable or disallowed tarballs before they hit your CI caches.
 
+`deputy proxy template --ecosystem rubygems` does the same for the RubyGems ecosystem, wiring up `/api/...` metadata calls and `/downloads/*.gem` files to the policy engine via `rubygems_artifact_request`.
+
 Key ideas:
 
 - **Multiple listeners**: one binary handles several ecosystems/ports.
@@ -196,6 +198,7 @@ The initial adapters:
 1. **Go Module Proxy** — replicates the behavior of `proxy.golang.org`. It understands `@latest`, `@v/list`, `.info`, `.mod`, `.zip`, and pseudo-versions. It can optionally read modules from private mirrors by chaining upstream URLs.
 2. **PyPI** — proxies `simple/` index traffic plus `packages/...` downloads. It extracts package versions from wheel/sdist filenames, enriches requests with OSV results for the `PyPI` ecosystem, and allows policies to reject releases (e.g., block AGPL-licensed or vulnerable packages).
 3. **npm** — intercepts registry metadata (`/<pkg>`, `/-/package/...`) and tarball downloads (`/<pkg>/-/<pkg>-<version>.tgz`). Handles scoped packages (`@scope/pkg`), enriches with OSV for the npm ecosystem, and allows license/semver policies before tarballs are streamed.
+4. **RubyGems** — proxies `api/v1/...` metadata endpoints plus `/downloads/<gem>-<version>.gem` artifacts, populating vulnerability/license context so policies can gate individual gem versions.
 
 Adding a new adapter mainly requires request parsing + upstream URL mapping; the policy + enrichment layers remain shared.
 

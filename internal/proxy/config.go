@@ -77,6 +77,18 @@ func MarshalTemplate(ecosystem string) (string, error) {
 				},
 			},
 		}
+	case "rubygems":
+		cfg = Config{
+			Listeners: []ListenerConfig{
+				{
+					Name:       "rubygems-proxy",
+					Bind:       ":8083",
+					Ecosystems: []string{"rubygems"},
+					Upstream:   "https://rubygems.org",
+					Policies:   []string{"policy/rubygems.cel"},
+				},
+			},
+		}
 	default:
 		return "", fmt.Errorf("unknown ecosystem %q", ecosystem)
 	}
