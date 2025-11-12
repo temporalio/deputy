@@ -13,6 +13,7 @@ func TestBuildRemediationPlan(t *testing.T) {
 	commands := []remediation.Command{
 		{Command: "go get example.com/mod@v1.2.3", Executable: true},
 		{Command: "Edit Gemfile to require foo >= 2.0.0", Executable: false},
+		{Command: "go get go@1.22.3", Executable: true},
 	}
 	plan := buildRemediationPlan(scan, commands, "v1.22.3")
 	if plan.Target.Repo != scan.Repo || plan.Target.Ref != scan.Ref || plan.Target.Commit != scan.Commit {
@@ -21,11 +22,11 @@ func TestBuildRemediationPlan(t *testing.T) {
 	if plan.StdlibUpgrade != "v1.22.3" {
 		t.Fatalf("expected stdlib v1.22.3, got %q", plan.StdlibUpgrade)
 	}
-	if plan.Stats.TotalCommands != 2 {
-		t.Fatalf("expected total commands 2, got %d", plan.Stats.TotalCommands)
+	if plan.Stats.TotalCommands != 3 {
+		t.Fatalf("expected total commands 3, got %d", plan.Stats.TotalCommands)
 	}
-	if plan.Stats.RunnableCommands != 1 {
-		t.Fatalf("expected runnable commands 1, got %d", plan.Stats.RunnableCommands)
+	if plan.Stats.RunnableCommands != 2 {
+		t.Fatalf("expected runnable commands 2, got %d", plan.Stats.RunnableCommands)
 	}
 }
 

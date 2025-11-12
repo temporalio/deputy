@@ -18,6 +18,141 @@ $ deputy HEAD~1500 HEAD
 
 All commands honor the global logging flags (`--log-level`, `--log-format`) so you can switch between human-readable output and structured logs for CI/CD.
 
+The commands are meant to compose together in pipelines, using other `deputy` commands, or external tools like `jq`. For example, you can run a quick `scan`, `fix` the vulnerabilities, then use `diff` to verify the changes easily, then generate a new `sbom`, all before committing the updates:
+
+```console
+$ deputy scan
+
+Scanned /Users/yournamehere/Documents/GitHub/deputy @ WORKING (4b2eb48)
+  Origin: https://github.com/picatz/deputy.git
+
+∴ Vulnerabilities Found:
+
+github.com/containerd/containerd v1.7.28 [indirect]:
+  • CVE-2024-25621 [HIGH] (↑ v1.7.29)
+    containerd affected by a local privilege escalation via wide permissions on CRI directory
+    Aliases: GHSA-pwhc-rpq9-4c8w
+    Published: 2025-11-06
+  • CVE-2025-64329 [MED] (↑ v1.7.29)
+    containerd CRI server: Host memory exhaustion through Attach goroutine leak
+    Aliases: GHSA-m6hq-p25p-ffr2
+    Published: 2025-11-06
+    Context:
+      Sources:
+        • go.mod
+
+github.com/opencontainers/selinux v1.12.0 [indirect]:
+  • CVE-2025-52881 [HIGH] (↑ v1.13.0)
+    runc container escape and denial of service due to arbitrary write gadgets and procfs write redirects
+    Aliases: GHSA-cgrx-mc8f-2prm
+    Published: 2025-11-05
+    Context:
+      Sources:
+        • go.mod
+
+stdlib v1.24.6 [direct]:
+  • CVE-2025-58187 [HIGH] (↑ v1.24.9)
+    Quadratic complexity when checking name constraints in crypto/x509
+    Aliases: GO-2025-4007, (+1 more)
+    Published: 2025-10-29
+  • CVE-2025-58188 [HIGH] (↑ v1.24.8)
+    Panic when validating certificates with DSA public keys in crypto/x509
+    Aliases: GO-2025-4013, (+1 more)
+    Published: 2025-10-29
+  • CVE-2025-61723 [HIGH] (↑ v1.24.8)
+    Quadratic complexity when parsing some invalid inputs in encoding/pem
+    Aliases: GO-2025-4009, (+1 more)
+    Published: 2025-10-29
+  • CVE-2025-61725 [HIGH] (↑ v1.24.8)
+    Excessive CPU consumption in ParseAddress in net/mail
+    Aliases: GO-2025-4006, (+1 more)
+    Published: 2025-10-29
+  • CVE-2025-47912 [MED] (↑ v1.24.8)
+    Insufficient validation of bracketed IPv6 hostnames in net/url
+    Aliases: GO-2025-4010, (+1 more)
+    Published: 2025-10-29
+  • CVE-2025-58183 [MED] (↑ v1.24.8)
+    Unbounded allocation when parsing GNU sparse map in archive/tar
+    Aliases: GO-2025-4014, (+1 more)
+    Published: 2025-10-29
+  • CVE-2025-58185 [MED] (↑ v1.24.8)
+    Parsing DER payload can cause memory exhaustion in encoding/asn1
+    Aliases: GO-2025-4011, (+1 more)
+    Published: 2025-10-29
+  • CVE-2025-58186 [MED] (↑ v1.24.8)
+    Lack of limit when parsing cookies can cause memory exhaustion in net/http
+    Aliases: GO-2025-4012, (+1 more)
+    Published: 2025-10-29
+  • CVE-2025-58189 [MED] (↑ v1.24.8)
+    ALPN negotiation error contains attacker controlled information in crypto/tls
+    Aliases: GO-2025-4008, (+1 more)
+    Published: 2025-10-29
+  • CVE-2025-61724 [MED] (↑ v1.24.8)
+    Excessive CPU consumption in Reader.ReadResponse in net/textproto
+    Aliases: GO-2025-4015, (+1 more)
+    Published: 2025-10-29
+    Context:
+      Sources:
+        • go.mod
+
+Vulnerability Summary:
+  ! 6 require immediate attention (critical/high severity)
+  ↑ 13 can be fixed by upgrading
+
+Recommended Actions:
+  1. Upgrade Go toolchain to v1.24.9 (update 'go' directive in go.mod)
+  2. Upgrade critical/high modules first
+       go.mod:
+         › go get github.com/containerd/containerd@v1.7.29
+         › go get github.com/opencontainers/selinux@v1.13.0
+         › go get go@1.24.9  # updates go directive
+         ↻ go mod tidy 
+$ deputy fix --apply
+Remediation Plan:
+  Target: /Users/yournamehere/Documents/GitHub/deputy
+  Commit: 4b2eb485b2d18f37dd9a42c19aa52178c0fa1631
+  • Upgrade Go toolchain to v1.24.9 (update 'go' directive in go.mod)
+  • Apply dependency upgrades (4 total, 4 runnable)
+       go.mod:
+         › go get github.com/containerd/containerd@v1.7.29
+         › go get github.com/opencontainers/selinux@v1.13.0
+         › go get go@1.24.9  # updates go directive
+         ↻ go mod tidy
+  ↻ go get github.com/containerd/containerd@v1.7.29 (in .)
+    go: upgraded github.com/containerd/containerd v1.7.28 => v1.7.29
+  ↻ go get github.com/opencontainers/selinux@v1.13.0 (in .)
+    go: upgraded github.com/cyphar/filepath-securejoin v0.4.1 => v0.6.0
+    go: upgraded github.com/opencontainers/selinux v1.12.0 => v1.13.0
+  ↻ go get go@1.24.9 (in .)
+    go: upgraded go 1.24.6 => 1.24.9
+  ↻ go mod tidy (in .)
+$ deputy diff       
+Comparing dependencies: main → WORKING
+Scanning packages in working tree...
+Scanning packages in base reference 4b2eb48...
+
+Dependency Changes:
+  ↑ github.com/containerd/containerd @ 1.7.28 → 1.7.29 (indirect)
+  ↑ stdlib @ 1.24.6 → 1.24.9 (direct)
+  ↑ github.com/cyphar/filepath-securejoin @ 0.4.1 → 0.6.0 (indirect)
+  ↑ github.com/opencontainers/selinux @ 1.12.0 → 1.13.0 (indirect)
+  - github.com/prometheus/procfs @ 0.17.0 (indirect)
+  + cyphar.com/go-pathrs @ 0.2.1 (indirect)
+
+Summary:
+  + 1 package added
+  - 1 package removed
+  ↑ 4 packages upgraded
+
+Scanning dependencies for vulnerabilities...
+
+∴ Vulnerabilities
+
+✓ No vulnerabilities found
+$ deputy sbom | jq -r '.components[].purl' | grep "github.com/containerd/containerd@"
+pkg:golang/github.com/containerd/containerd@1.7.29
+```
+
 ## Agents & Automation
 
 Deputy can hand remediation plans or triage summaries to external agents when you need help parsing large reports or editing code automatically.
@@ -132,6 +267,9 @@ $ deputy sbom --ref=v1.28.0 --format=spdx-json --output=sbom.spdx.json
 # Protobom JSON (intermediary format)
 $ deputy sbom --ref=v1.28.0 --format=protobom-json --output=sbom.protobom.json
 
+# Exact current commit
+$ deputy sbom --ref="$(git rev-parse HEAD)"
+
 # Remote GitHub repository by shorthand or URL
 $ deputy sbom github.com/hashicorp/vault --ref=v1.16.0 --format=spdx-json
 $ deputy sbom https://github.com/hashicorp/vault --ref=main --format=cyclonedx-json
@@ -144,7 +282,7 @@ $ deputy sbom --ref=v1.28.0 --enrich-licenses --license-source=both    --format=
 
 Notes:
 - SBOMs can be generated for any valid Git ref: branches, tags, SHAs, or expressions like `HEAD~3`.
-- When `--ref` is omitted or set to `HEAD`, the SBOM uses the local working tree if available (includes uncommitted changes). Use `--ref=HEAD` to capture the exact last commit.
+- When `--ref` is omitted, the SBOM uses the local working tree if available (includes uncommitted changes). Provide an explicit revision (e.g., `--ref=$(git rev-parse HEAD)` , a tag, or a commit SHA) to capture the exact last commit.
 - Multi-ecosystem inventory is powered by `osv-scalibr` plugins; by default it scans all supported ecosystems.
 - For GitHub, setting `GITHUB_TOKEN` can improve rate limits and enables authenticated fetching during license enrichment of dependencies.
 - Document names prefer the Go module path (e.g., `github.com/hashicorp/vault@v1.16.0`) and Go PURLs are normalized (e.g., `pkg:golang/github.com/hashicorp/vault/sdk@...`).
@@ -167,6 +305,7 @@ $ deputy list
 # Specific ref/commit/tag
 $ deputy list --ref main
 $ deputy list --ref v1.2.3
+$ deputy list --ref "$(git rev-parse HEAD)"
 
 # TSV for pipelines: purl<TAB>direct
 $ deputy list --format tsv | cut -f1
@@ -192,7 +331,7 @@ Notes:
 - No dedup: every discovered package is emitted, similar to SBOM output.
 - Sorting: results are sorted by PURL for stable output.
 - Directness: computed using exact module paths in go.mod with a longest-prefix check against the package import path.
-- When `--ref` is omitted or set to `HEAD`, the inventory uses the working tree if available. Use `--ref=HEAD` to capture the last commit exactly.
+- When `--ref` is omitted, the inventory uses the working tree if available. Provide a concrete ref (commit, tag, or `--ref=$(git rev-parse HEAD)`) to capture the last committed state exactly.
 
 Example (text, condensed):
 
@@ -261,6 +400,9 @@ Notes:
 - `--agent claude` sends the plan to the Anthropic Messages API (set `ANTHROPIC_API_KEY`) and streams
   the textual guidance back to the terminal—useful when you want prioritized advice without granting
   an agent direct access to your repo.
+- When vulnerabilities require a Go toolchain bump, the plan now includes a runnable
+  `go get go@<version>` command that updates the `go` directive in go.mod (and `--apply` executes it
+  automatically, just like any other remediation command).
 
 ### Global logging flags
 

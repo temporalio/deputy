@@ -36,6 +36,11 @@ func CommandsFromVulnerabilities(vs []analysis.Vulnerability) ([]Command, string
 	cons := analysis.ConsolidateVulnerabilities(vs)
 	upgrades, stdlib := buildUpgradeRecommendations(cons)
 	cmds := dedupeCommands(upgrades)
+	if stdlib != "" {
+		if toolchainCmd, ok := buildGoToolchainCommand(stdlib); ok {
+			cmds = append(cmds, toolchainCmd)
+		}
+	}
 	sort.Slice(cmds, func(i, j int) bool {
 		if cmds[i].managerRank == cmds[j].managerRank {
 			if cmds[i].Path == cmds[j].Path {
@@ -147,6 +152,26 @@ func dedupeCommands(upgrades []packageUpgrade) []Command {
 	}
 
 	return commands
+}
+
+func buildGoToolchainCommand(version string) (Command, bool) {
+	trimmed := strings.TrimSpace(version)
+	if trimmed == "" {
+		return Command{}, false
+	}
+	goVersion := strings.TrimPrefix(trimmed, "v")
+	if goVersion == "" {
+		return Command{}, false
+	}
+	cmd := fmt.Sprintf("go get go@%s", goVersion)
+	return Command{
+		Manager:     "go",
+		managerRank: managerRank("go"),
+		Command:     cmd,
+		Path:        "go.mod",
+		Hint:        "updates go directive",
+		Executable:  true,
+	}, true
 }
 
 func recommendCommand(manager, manifestPath, pkg, version string, groups []string) (string, string, bool) {

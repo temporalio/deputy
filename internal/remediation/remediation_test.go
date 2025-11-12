@@ -41,12 +41,13 @@ func TestCommandsFromVulnerabilitiesGeneratesPlan(t *testing.T) {
 	if stdlib != "v1.21.0" {
 		t.Fatalf("expected stdlib recommendation v1.21.0, got %q", stdlib)
 	}
-	if len(commands) != 3 {
+	if len(commands) != 4 {
 		for _, c := range commands {
 			t.Logf("command: %s (manager=%s path=%s)", c.Command, c.Manager, c.Path)
 		}
-		t.Fatalf("expected 3 commands (go get, go mod tidy, gemspec edit); got %d", len(commands))
+		t.Fatalf("expected 4 commands (go toolchain, go get, go mod tidy, gemspec edit); got %d", len(commands))
 	}
+	assertCommand(t, commands, "go get go@1.21.0", true)
 	assertCommand(t, commands, "go get github.com/acme/lib@v1.1.0", true)
 	assertCommand(t, commands, "go mod tidy", true)
 	assertCommand(t, commands, "Edit vagrant.gemspec to require rexml >= v3.3.9", false)

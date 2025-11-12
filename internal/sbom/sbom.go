@@ -99,7 +99,7 @@ func Generate(ctx context.Context, repoRef string, opts Options) (*sbom.Document
 		effRef = "HEAD~0"
 	}
 
-	pkgs, err := collectInventorySBOM(ctx, src.Repo, effRef, inventory.ScanOptions{Ecosystems: opts.Ecosystems})
+	pkgs, err := collectInventorySBOM(ctx, src.Repo, src.Workspace, effRef, inventory.ScanOptions{Ecosystems: opts.Ecosystems})
 	if err != nil {
 		return nil, err
 	}
@@ -143,7 +143,13 @@ func Generate(ctx context.Context, repoRef string, opts Options) (*sbom.Document
 }
 
 // collectInventorySBOM scans the repository at a specific commit snapshot.
-func collectInventorySBOM(ctx context.Context, repo *git.Repository, gitRef string, opts inventory.ScanOptions) ([]*extractor.Package, error) {
+func collectInventorySBOM(ctx context.Context, repo *git.Repository, ws workspace.FS, gitRef string, opts inventory.ScanOptions) ([]*extractor.Package, error) {
+	if strings.EqualFold(gitRef, "HEAD") || strings.EqualFold(gitRef, "HEAD~0") {
+		if ws == nil {
+			return nil, fmt.Errorf("workspace is required for working tree scans")
+		}
+		return inventory.ScanPackagesWorking(ctx, ws, opts)
+	}
 	if repo == nil {
 		return nil, fmt.Errorf("repository is required")
 	}
