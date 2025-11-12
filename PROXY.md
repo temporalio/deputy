@@ -131,6 +131,8 @@ listeners:
 
 To spin up a PyPI proxy, run `deputy proxy template --ecosystem pypi > proxy.yaml` and update the `upstream` (defaults to `https://pypi.org`). Policies receive `pypi_artifact_request` evaluations with the parsed package/version plus any OSV/metadata enrichments.
 
+Similarly, `deputy proxy template --ecosystem npm` scaffolds an npm/Node proxy config rooted at `https://registry.npmjs.org`, emitting `npm_artifact_request` payloads so you can block vulnerable or disallowed tarballs before they hit your CI caches.
+
 Key ideas:
 
 - **Multiple listeners**: one binary handles several ecosystems/ports.
@@ -193,7 +195,7 @@ The initial adapters:
 
 1. **Go Module Proxy** — replicates the behavior of `proxy.golang.org`. It understands `@latest`, `@v/list`, `.info`, `.mod`, `.zip`, and pseudo-versions. It can optionally read modules from private mirrors by chaining upstream URLs.
 2. **PyPI** — proxies `simple/` index traffic plus `packages/...` downloads. It extracts package versions from wheel/sdist filenames, enriches requests with OSV results for the `PyPI` ecosystem, and allows policies to reject releases (e.g., block AGPL-licensed or vulnerable packages).
-3. **npm** — intercepts `/<pkg>` (metadata) and `/<pkg>/-/<pkg>-<version>.tgz` downloads. Handles scoped packages (`@scope/pkg`).
+3. **npm** — intercepts registry metadata (`/<pkg>`, `/-/package/...`) and tarball downloads (`/<pkg>/-/<pkg>-<version>.tgz`). Handles scoped packages (`@scope/pkg`), enriches with OSV for the npm ecosystem, and allows license/semver policies before tarballs are streamed.
 
 Adding a new adapter mainly requires request parsing + upstream URL mapping; the policy + enrichment layers remain shared.
 

@@ -64,6 +64,12 @@ func (s *Server) serveListener(ctx context.Context, cfg ListenerConfig) error {
 			return fmt.Errorf("listener %s: %w", cfg.Name, err)
 		}
 		handler = h
+	case "npm":
+		h, err := newNPMHandler(cfg.Upstream, engine)
+		if err != nil {
+			return fmt.Errorf("listener %s: %w", cfg.Name, err)
+		}
+		handler = h
 	default:
 		return fmt.Errorf("listener %s: unsupported ecosystem %q", cfg.Name, ecos)
 	}

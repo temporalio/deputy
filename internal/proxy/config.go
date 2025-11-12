@@ -65,6 +65,18 @@ func MarshalTemplate(ecosystem string) (string, error) {
 				},
 			},
 		}
+	case "npm":
+		cfg = Config{
+			Listeners: []ListenerConfig{
+				{
+					Name:       "npm-proxy",
+					Bind:       ":8082",
+					Ecosystems: []string{"npm"},
+					Upstream:   "https://registry.npmjs.org",
+					Policies:   []string{"policy/npm.cel"},
+				},
+			},
+		}
 	default:
 		return "", fmt.Errorf("unknown ecosystem %q", ecosystem)
 	}
