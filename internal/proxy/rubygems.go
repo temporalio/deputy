@@ -88,11 +88,15 @@ func (h *rubyGemsHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	upstreamURL := *h.upstream
 	upstreamURL.Path = strings.TrimSuffix(upstreamURL.Path, "/") + r.URL.Path
 	upstreamURL.RawQuery = r.URL.RawQuery
-	req, err := http.NewRequestWithContext(ctx, r.Method, upstreamURL.String(), nil)
+	req, err := http.NewRequestWithContext(ctx, r.Method, upstreamURL.String(), r.Body)
 	if err != nil {
 		http.Error(w, "failed to build upstream request", http.StatusBadGateway)
 		return
 	}
+	if r.ContentLength >= 0 {
+		req.ContentLength = r.ContentLength
+	}
+	req.Header = r.Header.Clone()
 	resp, err := h.client.Do(req)
 	if err != nil {
 		http.Error(w, "upstream fetch failed", http.StatusBadGateway)
@@ -160,7 +164,7 @@ func parseRubyGemsPath(p string) (name string, version string, operation string)
 	if trim == "" {
 		return "", "", "metadata"
 	}
-	if strings.HasPrefix(trim, "download/") || strings.HasPrefix(trim, "downloads/") {
+	if strings.HasSuffix(trim, ".gem") {
 		operation = "download"
 		file := path.Base(trim)
 		base := strings.TrimSuffix(file, ".gem")
@@ -174,7 +178,7 @@ func parseRubyGemsPath(p string) (name string, version string, operation string)
 		operation = "api"
 		parts := strings.Split(trim, "/")
 		if len(parts) >= 4 && parts[2] == "gems" {
-			name = parts[3]
+			name = strings.TrimSuffix(parts[3], ".json")
 		}
 		return
 	}

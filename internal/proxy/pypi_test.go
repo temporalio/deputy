@@ -3,6 +3,7 @@ package proxy
 import (
 	"context"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -111,6 +112,68 @@ func TestPyPIHandlerLicensePolicy(t *testing.T) {
 	handler.ServeHTTP(resp, req)
 	if resp.Code != http.StatusForbidden {
 		t.Fatalf("expected 403, got %d", resp.Code)
+	}
+}
+
+func TestPyPIHandlerForwardsRequestBodyAndHeaders(t *testing.T) {
+	const body = `{"query":"numpy"}`
+	var (
+		gotMethod   string
+		gotBody     string
+		gotAuth     string
+		gotPath     string
+		gotQuery    string
+		contentType string
+	)
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		data, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Fatalf("read body: %v", err)
+		}
+		gotMethod = r.Method
+		gotBody = string(data)
+		gotAuth = r.Header.Get("Authorization")
+		gotPath = r.URL.Path
+		gotQuery = r.URL.RawQuery
+		contentType = r.Header.Get("Content-Type")
+		w.WriteHeader(http.StatusAccepted)
+		fmt.Fprint(w, "ok")
+	}))
+	defer upstream.Close()
+
+	handler, err := newPyPIHandler(upstream.URL, nil)
+	if err != nil {
+		t.Fatalf("newPyPIHandler: %v", err)
+	}
+	handler.osvClient = nil
+	resp := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/simple/search?foo=bar", strings.NewReader(body))
+	req.Header.Set("Authorization", "Bearer secret")
+	req.Header.Set("Content-Type", "application/json")
+	handler.ServeHTTP(resp, req)
+	if resp.Code != http.StatusAccepted {
+		t.Fatalf("expected 202, got %d", resp.Code)
+	}
+	if got := strings.TrimSpace(resp.Body.String()); got != "ok" {
+		t.Fatalf("unexpected response body %q", got)
+	}
+	if gotMethod != http.MethodPost {
+		t.Fatalf("expected POST upstream, got %s", gotMethod)
+	}
+	if gotBody != body {
+		t.Fatalf("body mismatch: %q", gotBody)
+	}
+	if gotAuth != "Bearer secret" {
+		t.Fatalf("authorization header missing: %q", gotAuth)
+	}
+	if contentType != "application/json" {
+		t.Fatalf("content-type missing: %q", contentType)
+	}
+	if gotPath != "/simple/search" {
+		t.Fatalf("path mismatch: %q", gotPath)
+	}
+	if gotQuery != "foo=bar" {
+		t.Fatalf("query mismatch: %q", gotQuery)
 	}
 }
 

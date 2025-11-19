@@ -3,6 +3,7 @@ package proxy
 import (
 	"context"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -81,6 +82,101 @@ func TestNPMHandlerBlocksLicense(t *testing.T) {
 	handler.ServeHTTP(resp, req)
 	if resp.Code != http.StatusForbidden {
 		t.Fatalf("expected 403, got %d", resp.Code)
+	}
+}
+
+func TestNPMHandlerForwardsRequestBodyAndHeaders(t *testing.T) {
+	const body = `{"name":"test","version":"1.0.0"}`
+	var (
+		receivedMethod string
+		receivedBody   string
+		receivedAuth   string
+		receivedPath   string
+		receivedQuery  string
+		contentType    string
+		npmCommand     string
+	)
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		data, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Fatalf("read body: %v", err)
+		}
+		receivedMethod = r.Method
+		receivedBody = string(data)
+		receivedAuth = r.Header.Get("Authorization")
+		receivedPath = r.URL.Path
+		receivedQuery = r.URL.RawQuery
+		contentType = r.Header.Get("Content-Type")
+		npmCommand = r.Header.Get("Npm-Command")
+		w.WriteHeader(http.StatusAccepted)
+		fmt.Fprint(w, `{"ok":true}`)
+	}))
+	defer upstream.Close()
+
+	handler, err := newNPMHandler(upstream.URL, nil)
+	if err != nil {
+		t.Fatalf("newNPMHandler: %v", err)
+	}
+	handler.osvClient = nil
+	resp := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/-/npm/v1/security/audits/quick?foo=bar", strings.NewReader(body))
+	req.Header.Set("Authorization", "Bearer secret")
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Npm-Command", "audit")
+	handler.ServeHTTP(resp, req)
+	if resp.Code != http.StatusAccepted {
+		t.Fatalf("expected 202, got %d", resp.Code)
+	}
+	if got := strings.TrimSpace(resp.Body.String()); got != `{"ok":true}` {
+		t.Fatalf("unexpected response body %q", got)
+	}
+	if receivedMethod != http.MethodPost {
+		t.Fatalf("expected POST upstream, got %s", receivedMethod)
+	}
+	if receivedPath != "/-/npm/v1/security/audits/quick" {
+		t.Fatalf("unexpected path %q", receivedPath)
+	}
+	if receivedQuery != "foo=bar" {
+		t.Fatalf("unexpected query %q", receivedQuery)
+	}
+	if receivedBody != body {
+		t.Fatalf("body mismatch: got %q", receivedBody)
+	}
+	if receivedAuth != "Bearer secret" {
+		t.Fatalf("authorization header dropped: %q", receivedAuth)
+	}
+	if contentType != "application/json" {
+		t.Fatalf("content-type header dropped: %q", contentType)
+	}
+	if npmCommand != "audit" {
+		t.Fatalf("custom header dropped: %q", npmCommand)
+	}
+}
+
+func TestParseNPMPath(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name      string
+		path      string
+		pkg       string
+		version   string
+		operation string
+	}{
+		{"root", "/", "", "", "metadata"},
+		{"simple_pkg", "/left-pad", "left-pad", "", "metadata"},
+		{"scoped_pkg", "/@scope/pkg", "@scope/pkg", "", "metadata"},
+		{"dist_tags", "/-/package/pkg/dist-tags", "pkg", "", "dist-tags"},
+		{"download", "/lodash/-/lodash-4.17.21.tgz", "lodash", "4.17.21", "download"},
+		{"scoped_download", "/@babel/core/-/core-7.0.0.tgz", "@babel/core", "7.0.0", "download"},
+		{"service", "/-/npm/v1/security/advisories/bulk", "", "", "service"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			pkg, version, op := parseNPMPath(tt.path)
+			if pkg != tt.pkg || version != tt.version || op != tt.operation {
+				t.Fatalf("parseNPMPath(%q) = (%q,%q,%q)", tt.path, pkg, version, op)
+			}
+		})
 	}
 }
 

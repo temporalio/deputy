@@ -88,11 +88,15 @@ func (h *npmHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	upstreamURL := *h.upstream
 	upstreamURL.Path = strings.TrimSuffix(upstreamURL.Path, "/") + r.URL.Path
 	upstreamURL.RawQuery = r.URL.RawQuery
-	req, err := http.NewRequestWithContext(ctx, r.Method, upstreamURL.String(), nil)
+	req, err := http.NewRequestWithContext(ctx, r.Method, upstreamURL.String(), r.Body)
 	if err != nil {
 		http.Error(w, "failed to build upstream request", http.StatusBadGateway)
 		return
 	}
+	if r.ContentLength >= 0 {
+		req.ContentLength = r.ContentLength
+	}
+	req.Header = r.Header.Clone()
 	resp, err := h.client.Do(req)
 	if err != nil {
 		http.Error(w, "upstream fetch failed", http.StatusBadGateway)
@@ -186,6 +190,10 @@ func parseNPMPath(p string) (pkg string, version string, operation string) {
 			}
 		}
 		return
+	}
+	if strings.HasPrefix(trimmed, "-/") {
+		operation = "service"
+		return "", "", operation
 	}
 	operation = "metadata"
 	return trimmed, "", operation

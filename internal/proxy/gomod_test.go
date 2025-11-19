@@ -3,6 +3,7 @@ package proxy
 import (
 	"context"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -64,6 +65,48 @@ func TestGoModuleHandlerPassThrough(t *testing.T) {
 	}
 	if body := rr.Body.String(); body != "payload" {
 		t.Fatalf("unexpected body %q", body)
+	}
+}
+
+func TestGoModuleHandlerForwardsRequestDetails(t *testing.T) {
+	body := "payload"
+	var (
+		gotMethod string
+		gotBody   string
+		gotHeader string
+	)
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		data, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Fatalf("read body: %v", err)
+		}
+		gotMethod = r.Method
+		gotBody = string(data)
+		gotHeader = r.Header.Get("Go-Get")
+		w.WriteHeader(http.StatusCreated)
+	}))
+	defer upstream.Close()
+
+	handler, err := newGoModuleHandler(upstream.URL, nil)
+	if err != nil {
+		t.Fatalf("handler error: %v", err)
+	}
+	handler.osvClient = nil
+	resp := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/github.com/foo/bar/@v/v1.2.3.info", strings.NewReader(body))
+	req.Header.Set("Go-Get", "1")
+	handler.ServeHTTP(resp, req)
+	if resp.Code != http.StatusCreated {
+		t.Fatalf("expected 201, got %d", resp.Code)
+	}
+	if gotMethod != http.MethodPost {
+		t.Fatalf("expected method POST, got %s", gotMethod)
+	}
+	if gotBody != body {
+		t.Fatalf("body mismatch: %q", gotBody)
+	}
+	if gotHeader != "1" {
+		t.Fatalf("header missing, got %q", gotHeader)
 	}
 }
 

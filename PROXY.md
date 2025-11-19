@@ -209,6 +209,407 @@ Adding a new adapter mainly requires request parsing + upstream URL mapping; the
 - **Feature matrix** — each adapter ships with a documented coverage table (e.g., npm dist-tags, PyPI pre-release filters). Unsupported combinations surface warnings plus hints to fall back to upstream.
 - **Ecosystem tests** — adapters include golden fixtures under `internal/proxy/<eco>/testdata` plus policy tests referencing real traces so regressions are caught in CI.
 
+### npm Proxy Hands-On Example
+
+You can gain confidence in the npm adapter without installing Node locally by driving it through Docker’s `node:20` image. The steps below were executed verbatim and rely only on Go, Docker Desktop (or another daemon exposing `host.docker.internal`), and the Deputy source tree.
+
+1. **Create a throwaway workspace** — this holds the proxy config, CEL policies, and downloaded tarballs:
+
+   ```bash
+   tmpdir=$(mktemp -d /tmp/deputy-npm-proxy-XXXXXX)
+   mkdir -p "$tmpdir/policies" "$tmpdir/artifacts"
+
+   cat <<EOF > "$tmpdir/proxy.yaml"
+   listeners:
+     - name: npm-proxy
+       bind: ":8082"
+       ecosystems: ["npm"]
+       upstream: https://registry.npmjs.org
+       policies:
+         - $tmpdir/policies/allow-all.cel
+   EOF
+
+   printf '[]\n' > "$tmpdir/policies/allow-all.cel"
+   ```
+
+2. **Launch the proxy** and keep the PID so you can shut it down later:
+
+   ```bash
+   go run . --log-level=info proxy serve --config "$tmpdir/proxy.yaml" \
+     > "$tmpdir/proxy.log" 2>&1 &
+   echo $! > "$tmpdir/proxy.pid"
+   ```
+
+   When the listener is ready `proxy.log` shows `proxy listener starting … ecosystem=npm upstream=https://registry.npmjs.org`.
+
+3. **Happy path** — use Dockerized npm to fetch a tarball through the proxy (Mac/Windows use `host.docker.internal`; Linux can add `--network host` instead):
+
+   ```bash
+   docker run --rm \
+     -v "$tmpdir/artifacts:/work" \
+     -w /work \
+     -e NPM_CONFIG_STRICT_SSL=false \
+     node:20 \
+     npm pack lodash@4.17.21 --registry http://host.docker.internal:8082
+   ```
+
+   Expected result: `lodash-4.17.21.tgz` appears under `$tmpdir/artifacts`, npm prints the usual tarball summary, and `proxy.log` contains an allow decision for the request.
+
+4. **Add a blocking policy** — deny `left-pad` and restart the proxy with the policy overlay:
+
+   ```bash
+   cat <<'EOF' > "$tmpdir/policies/block-leftpad.cel"
+   (request.package == "left-pad"
+     ? [{
+         "action": "deny",
+         "reason": "blocked package (left-pad)",
+         "status": 403,
+         "headers": {"X-Deputy-Policy": "block-leftpad"}
+       }]
+     : [])
+   EOF
+
+   kill $(cat "$tmpdir/proxy.pid")
+   go run . --log-level=info proxy serve \
+     --config "$tmpdir/proxy.yaml" \
+     --policy "$tmpdir/policies/block-leftpad.cel" \
+     > "$tmpdir/proxy.log" 2>&1 &
+   echo $! > "$tmpdir/proxy.pid"
+   ```
+
+5. **See the policy fire** — another Dockerized npm invocation now fails with `E403` and the proxy emits structured deny logs:
+
+   ```bash
+   docker run --rm \
+     -v "$tmpdir/artifacts:/work" \
+     -w /work \
+     -e NPM_CONFIG_STRICT_SSL=false \
+     node:20 \
+     npm pack left-pad@1.3.0 --registry http://host.docker.internal:8082
+   ```
+
+   Output excerpt:
+
+   ```
+   npm error code E403
+   npm error 403 403 Forbidden - GET http://host.docker.internal:8082/left-pad
+   npm error 403 … forbidden by your security policy …
+   ```
+
+   A parallel `curl -i http://127.0.0.1:8082/left-pad` shows the proxy response body `blocked package (left-pad)` plus the `X-Deputy-Policy: block-leftpad` header so you can double-check what a CLI would receive.
+
+6. **Cleanup** when you are done:
+
+   ```bash
+   kill $(cat "$tmpdir/proxy.pid")
+   rm -rf "$tmpdir"
+   ```
+
+These copy/pasteable commands make it easy for new users to exercise both the allow and deny flows before wiring the proxy into npm, pnpm, or yarn on their workstations.
+
+### PyPI Proxy Hands-On Example
+
+The same pattern works for Python without polluting your host interpreter. This example uses Docker’s `python:3.12` image, but any image with `pip` installed will behave the same way.
+
+1. **Create a workspace and config**:
+
+   ```bash
+   tmpdir=$(mktemp -d /tmp/deputy-pypi-proxy-XXXXXX)
+   mkdir -p "$tmpdir/policies" "$tmpdir/artifacts"
+
+   cat <<EOF > "$tmpdir/proxy.yaml"
+   listeners:
+     - name: pypi-proxy
+       bind: ":8081"
+       ecosystems: ["pypi"]
+       upstream: https://pypi.org
+       policies:
+         - $tmpdir/policies/allow-all.cel
+   EOF
+
+   printf '[]\n' > "$tmpdir/policies/allow-all.cel"
+   ```
+
+2. **Start the proxy**:
+
+   ```bash
+   go run . --log-level=info proxy serve --config "$tmpdir/proxy.yaml" \
+     > "$tmpdir/proxy.log" 2>&1 &
+   echo $! > "$tmpdir/proxy.pid"
+   ```
+
+3. **Download through the proxy** using Dockerized pip (Mac/Windows use `host.docker.internal`, Linux can add `--network host` and hit `http://127.0.0.1:8081`):
+
+   ```bash
+   docker run --rm \
+     -v "$tmpdir/artifacts:/work" \
+     -w /work \
+     -e PIP_NO_CACHE_DIR=off \
+     -e PIP_DISABLE_PIP_VERSION_CHECK=1 \
+     python:3.12 \
+     bash -lc "pip download requests==2.31.0 --no-deps -d /work --index-url http://host.docker.internal:8081/simple --trusted-host host.docker.internal"
+   ```
+
+   Expected result: pip reports `Successfully downloaded requests` and the wheel appears under `$tmpdir/artifacts`.
+
+4. **Overlay a deny policy** that blocks `pkginfo` and restart:
+
+   ```bash
+   cat <<'EOF' > "$tmpdir/policies/block-pkginfo.cel"
+   (request.package == "pkginfo"
+     ? [{
+         "action": "deny",
+         "reason": "blocked package (pkginfo)",
+         "status": 403,
+         "headers": {"X-Deputy-Policy": "block-pypi"}
+       }]
+     : [])
+   EOF
+
+   kill $(cat "$tmpdir/proxy.pid")
+   go run . --log-level=info proxy serve \
+     --config "$tmpdir/proxy.yaml" \
+     --policy "$tmpdir/policies/block-pkginfo.cel" \
+     > "$tmpdir/proxy.log" 2>&1 &
+   echo $! > "$tmpdir/proxy.pid"
+   ```
+
+5. **Attempt to download the blocked package**:
+
+   ```bash
+   docker run --rm \
+     -v "$tmpdir/artifacts:/work" \
+     -w /work \
+     -e PIP_NO_CACHE_DIR=off \
+     -e PIP_DISABLE_PIP_VERSION_CHECK=1 \
+     python:3.12 \
+     bash -lc "pip download pkginfo==1.5.0.1 --no-deps -d /work --index-url http://host.docker.internal:8081/simple --trusted-host host.docker.internal"
+   ```
+
+   pip prints:
+
+   ```
+   ERROR: Could not find a version that satisfies the requirement pkginfo==1.5.0.1 (from versions: none)
+   ERROR: No matching distribution found for pkginfo==1.5.0.1
+   ```
+
+   The proxy log simultaneously shows `request denied … reason="blocked package (pkginfo)"`. If you need to inspect the raw HTTP response, run `curl -i http://127.0.0.1:8081/simple/pkginfo/` to see `HTTP/1.1 403` plus the `X-Deputy-Policy: block-pypi` header and the textual reason.
+
+6. **Cleanup**:
+
+   ```bash
+   kill $(cat "$tmpdir/proxy.pid")
+   rm -rf "$tmpdir"
+   ```
+
+This gives Python users the same confidence-building loop before switching `pip config set global.index-url http://proxy/simple` in their real environments.
+
+### RubyGems Proxy Hands-On Example
+
+Rubyists can follow the same pattern with Docker’s `ruby:3.3` image and the `gem fetch` command.
+
+1. **Workspace + config**:
+
+   ```bash
+   tmpdir=$(mktemp -d /tmp/deputy-rubygems-proxy-XXXXXX)
+   mkdir -p "$tmpdir/policies" "$tmpdir/artifacts"
+
+   cat <<EOF > "$tmpdir/proxy.yaml"
+   listeners:
+     - name: rubygems-proxy
+       bind: ":8083"
+       ecosystems: ["rubygems"]
+       upstream: https://rubygems.org
+       policies:
+         - $tmpdir/policies/allow-all.cel
+   EOF
+
+   printf '[]\n' > "$tmpdir/policies/allow-all.cel"
+   ```
+
+2. **Start the proxy**:
+
+   ```bash
+   go run . --log-level=info proxy serve --config "$tmpdir/proxy.yaml" \
+     > "$tmpdir/proxy.log" 2>&1 &
+   echo $! > "$tmpdir/proxy.pid"
+   ```
+
+3. **Happy path** — fetch Bundler through the proxy from inside Docker (again, Linux hosts can prefer `--network host` and `http://127.0.0.1:8083`):
+
+   ```bash
+   docker run --rm \
+     -v "$tmpdir/artifacts:/work" \
+     -w /work \
+     ruby:3.3 \
+     bash -lc "gem fetch bundler -v 2.4.22 --clear-sources --source http://host.docker.internal:8083"
+   ```
+
+   `bundler-2.4.22.gem` lands in `$tmpdir/artifacts` and the proxy quietly streams it back from `https://rubygems.org`.
+
+4. **Overlay a deny policy** for `rake` and restart:
+
+   ```bash
+   cat <<'EOF' > "$tmpdir/policies/block-rake.cel"
+   (request.package == "rake"
+     ? [{
+         "action": "deny",
+         "reason": "blocked package (rake)",
+         "status": 403,
+         "headers": {"X-Deputy-Policy": "block-rubygems"}
+       }]
+     : [])
+   EOF
+
+   kill $(cat "$tmpdir/proxy.pid")
+   go run . --log-level=info proxy serve \
+     --config "$tmpdir/proxy.yaml" \
+     --policy "$tmpdir/policies/block-rake.cel" \
+     > "$tmpdir/proxy.log" 2>&1 &
+   echo $! > "$tmpdir/proxy.pid"
+   ```
+
+5. **Attempt to fetch the blocked gem**:
+
+   ```bash
+   docker run --rm \
+     -v "$tmpdir/artifacts:/work" \
+     -w /work \
+     ruby:3.3 \
+     bash -lc "gem fetch rake -v 13.2.1 --clear-sources --source http://host.docker.internal:8083"
+   ```
+
+   Output excerpt:
+
+   ```
+   ERROR:  While executing gem ... (Gem::RemoteFetcher::FetchError)
+       bad response Forbidden 403 (Gem::RemoteFetcher::FetchError)
+   ```
+
+   The proxy log includes `request denied package=rake version=13.2.1` and a quick `curl -i http://127.0.0.1:8083/gems/rake-13.2.1.gem` shows `HTTP/1.1 403` plus `X-Deputy-Policy: block-rubygems`.
+
+6. **Cleanup**:
+
+   ```bash
+   kill $(cat "$tmpdir/proxy.pid")
+   rm -rf "$tmpdir"
+   ```
+
+New users can copy these commands verbatim to validate RubyGems traffic before pointing their local `gem sources` at Deputy.
+
+### Go Module Proxy Hands-On Example
+
+Because Go tooling relies on GOPROXY, you can validate end-to-end behavior entirely inside Docker’s `golang:1.22` image.
+
+1. **Workspace + config**:
+
+   ```bash
+   tmpdir=$(mktemp -d /tmp/deputy-gomod-proxy-XXXXXX)
+   mkdir -p "$tmpdir/policies" "$tmpdir/cache" "$tmpdir/work"
+
+   cat <<EOF > "$tmpdir/proxy.yaml"
+   listeners:
+     - name: go-proxy
+       bind: ":8080"
+       ecosystems: ["go"]
+       upstream: https://proxy.golang.org
+       policies:
+         - $tmpdir/policies/allow-all.cel
+   EOF
+
+   printf '[]\n' > "$tmpdir/policies/allow-all.cel"
+   ```
+
+2. **Start the proxy**:
+
+   ```bash
+   go run . --log-level=info proxy serve --config "$tmpdir/proxy.yaml" \
+     > "$tmpdir/proxy.log" 2>&1 &
+   echo $! > "$tmpdir/proxy.pid"
+   ```
+
+3. **Download via GOPROXY** — the command below mounts a writable module cache, points `GOPROXY` at Deputy, and downloads `golang.org/x/text@v0.14.0`. Linux hosts can use `--network host` and `http://127.0.0.1:8080` if `host.docker.internal` is unavailable.
+
+   ```bash
+   docker run --rm \
+     -v "$tmpdir/cache:/go/pkg/mod" \
+     -v "$tmpdir/work:/work" \
+     -w /work \
+     -e GOPROXY=http://host.docker.internal:8080,direct \
+     -e GO111MODULE=on \
+     -e GOSUMDB=off \
+     golang:1.22 \
+     bash -lc 'export PATH=/usr/local/go/bin:$PATH
+cat <<"EOF" > go.mod
+module example.com/proxytest
+
+go 1.22
+EOF
+GOMODCACHE=/go/pkg/mod go mod download golang.org/x/text@v0.14.0'
+   ```
+
+   The module populates `$tmpdir/cache`, proving the CLI can talk to the proxy.
+
+4. **Overlay a deny policy** — block `github.com/pkg/errors` and restart:
+
+   ```bash
+   cat <<'EOF' > "$tmpdir/policies/block-errors.cel"
+   (request.module == "github.com/pkg/errors"
+     ? [{
+         "action": "deny",
+         "reason": "blocked module (errors)",
+         "status": 403,
+         "headers": {"X-Deputy-Policy": "block-gomod"}
+       }]
+     : [])
+   EOF
+
+   kill $(cat "$tmpdir/proxy.pid")
+   go run . --log-level=info proxy serve \
+     --config "$tmpdir/proxy.yaml" \
+     --policy "$tmpdir/policies/block-errors.cel" \
+     > "$tmpdir/proxy.log" 2>&1 &
+   echo $! > "$tmpdir/proxy.pid"
+   ```
+
+5. **Attempt to download the blocked module**:
+
+   ```bash
+   docker run --rm \
+     -v "$tmpdir/cache:/go/pkg/mod" \
+     -v "$tmpdir/work:/work" \
+     -w /work \
+     -e GOPROXY=http://host.docker.internal:8080,direct \
+     -e GO111MODULE=on \
+     -e GOSUMDB=off \
+     golang:1.22 \
+     bash -lc 'export PATH=/usr/local/go/bin:$PATH
+cat <<"EOF" > go.mod
+module example.com/proxytest
+
+go 1.22
+EOF
+GOMODCACHE=/go/pkg/mod go mod download github.com/pkg/errors@v0.9.1'
+   ```
+
+   Output excerpt:
+
+   ```
+   go: github.com/pkg/errors@v0.9.1: reading http://host.docker.internal:8080/github.com/pkg/errors/@v/v0.9.1.info: 403 Forbidden
+       server response: blocked module (errors)
+   ```
+
+   `curl -i http://127.0.0.1:8080/github.com/pkg/errors/@v/v0.9.1.zip` shows the matching `X-Deputy-Policy: block-gomod` header for extra confirmation.
+
+6. **Cleanup**:
+
+   ```bash
+   kill $(cat "$tmpdir/proxy.pid")
+   rm -rf "$tmpdir"
+   ```
+
+Once this works you can safely point `GOPROXY` at Deputy in your actual Go toolchains (`GOPROXY=http://proxy:8080,direct GOSUMDB=off go build ...`).
+
 ## CEL Policy Integration
 
 Every proxy decision flows through the CEL engine described in `POLICY.md`. The proxy supplies the following input map:
