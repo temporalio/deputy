@@ -180,7 +180,7 @@ func runTriagePolicies(ctx context.Context, policyPaths []string, report triageR
 	if err != nil {
 		return err
 	}
-	if err := evaluatePoliciesForCommand(ctx, policyPaths, reportMap, "triage", "triage_report", errW); err != nil {
+	if _, err := evaluatePoliciesForCommand(ctx, policyPaths, reportMap, "triage", "triage_report", errW); err != nil {
 		return err
 	}
 	targetMap, err := structToMap(report.Target)
@@ -196,7 +196,7 @@ func runTriagePolicies(ctx context.Context, policyPaths []string, report triageR
 			"target":  targetMap,
 			"cluster": pkgMap,
 		}
-		if err := evaluatePoliciesForCommand(ctx, policyPaths, payload, "triage", "triage_cluster", errW); err != nil {
+		if _, err := evaluatePoliciesForCommand(ctx, policyPaths, payload, "triage", "triage_cluster", errW); err != nil {
 			return err
 		}
 	}

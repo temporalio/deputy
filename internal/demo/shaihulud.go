@@ -17,6 +17,8 @@ import (
 	githttp "github.com/go-git/go-git/v5/plumbing/transport/http"
 	"github.com/google/go-github/v63/github"
 	"github.com/google/osv-scalibr/extractor"
+	"github.com/hashicorp/go-cleanhttp"
+	"github.com/hashicorp/go-retryablehttp"
 	inv "github.com/picatz/deputy/internal/inventory"
 	"github.com/picatz/deputy/internal/repository"
 	"golang.org/x/oauth2"
@@ -151,12 +153,14 @@ func ScanShaiHulud(ctx context.Context, opts Options) ([]ScanResult, error) {
 	return findings, nil
 }
 
+// repoTarget represents a GitHub repository to be scanned.
 type repoTarget struct {
 	owner    string
 	name     string
 	cloneURL string
 }
 
+// scanRepo clones and scans the given repository target, returning a ScanResult.
 func scanRepo(ctx context.Context, target repoTarget, token string, inMemory bool, ecosystems []string, iocs iocSet) ScanResult {
 	finding := ScanResult{Owner: target.owner, Name: target.name, CloneURL: target.cloneURL}
 	if target.cloneURL == "" {
@@ -187,13 +191,14 @@ func scanRepo(ctx context.Context, target repoTarget, token string, inMemory boo
 		return finding
 	}
 	finding.DependencyCount = len(pkgs)
-	for _, p := range pkgs {
-		fmt.Println(p.Ecosystem(), p.Name, p.Version)
-	}
+	// for _, p := range pkgs {
+	// 	fmt.Println(p.Ecosystem(), p.Name, p.Version)
+	// }
 	finding.Matches = matchPackages(pkgs, iocs)
 	return finding
 }
 
+// githubAuth constructs GitHub authentication for go-git using the provided token and URL.
 func githubAuth(token, rawURL string) *githttp.BasicAuth {
 	if token == "" {
 		return nil
@@ -208,10 +213,12 @@ func githubAuth(token, rawURL string) *githttp.BasicAuth {
 	return &githttp.BasicAuth{Username: "oauth2", Password: token}
 }
 
+// iocSet represents a set of package names and versions used for IOC matching.
 type iocSet struct {
 	packages map[string]map[string]struct{}
 }
 
+// match reports whether the provided package name and version exist in the iocSet.
 func (s iocSet) match(name, version string) bool {
 	if len(s.packages) == 0 {
 		return false
@@ -234,6 +241,7 @@ func (s iocSet) match(name, version string) bool {
 	return false
 }
 
+// add inserts the provided package and versions into the iocSet.
 func (s *iocSet) add(pkg string, versions ...string) {
 	if s.packages == nil {
 		s.packages = make(map[string]map[string]struct{})
@@ -256,6 +264,8 @@ func (s *iocSet) add(pkg string, versions ...string) {
 	}
 }
 
+// fetchIOCSet downloads and parses the IOC CSV from the provided URL, returning an iocSet,
+// or an error if the fetch or parse fails.
 func fetchIOCSet(ctx context.Context, client *http.Client, url string) (iocSet, error) {
 	if client == nil {
 		return iocSet{}, fmt.Errorf("http client is required")
@@ -301,6 +311,8 @@ func fetchIOCSet(ctx context.Context, client *http.Client, url string) (iocSet, 
 	return set, nil
 }
 
+// parseVersionList parses a version string containing one or more versions
+// separated by "||", normalizing each version, and returns the list of unique versions.
 func parseVersionList(raw string) []string {
 	if strings.TrimSpace(raw) == "" {
 		return nil
@@ -322,13 +334,15 @@ func parseVersionList(raw string) []string {
 	return out
 }
 
+// normalizeVersion trims and normalizes a version string for matching,
+// removing any leading "=" and "v" or "V" prefixes (e.g., "= v1.2.3" -> "1.2.3").
 func normalizeVersion(v string) string {
 	v = strings.TrimSpace(v)
 	if v == "" {
 		return ""
 	}
-	if strings.HasPrefix(v, "=") {
-		v = strings.TrimSpace(strings.TrimPrefix(v, "="))
+	if after, ok := strings.CutPrefix(v, "="); ok {
+		v = strings.TrimSpace(after)
 	}
 	if strings.HasPrefix(strings.ToLower(v), "v") {
 		v = strings.TrimPrefix(v, "v")
@@ -337,10 +351,12 @@ func normalizeVersion(v string) string {
 	return v
 }
 
+// normalizeName trims and lowercases a package name for matching, e.g., " React " -> "react".
 func normalizeName(name string) string {
 	return strings.ToLower(strings.TrimSpace(name))
 }
 
+// matchPackages returns the subset of pkgs that match entries in the iocSet.
 func matchPackages(pkgs []*extractor.Package, iocs iocSet) []PackageMatch {
 	if len(pkgs) == 0 || len(iocs.packages) == 0 {
 		return nil
@@ -377,6 +393,8 @@ func matchPackages(pkgs []*extractor.Package, iocs iocSet) []PackageMatch {
 	return matches
 }
 
+// listRepos returns the repositories for the given owner. If names are provided, only those
+// repositories are returned; otherwise, all repositories for the owner are listed from GitHub.
 func listRepos(ctx context.Context, client *github.Client, owner string, names []string) ([]repoTarget, error) {
 	if client == nil {
 		return nil, fmt.Errorf("github client is required")
@@ -410,6 +428,7 @@ func listRepos(ctx context.Context, client *github.Client, owner string, names [
 	return repos, nil
 }
 
+// listOrgRepos lists all repositories for the given organization.
 func listOrgRepos(ctx context.Context, client *github.Client, org string) ([]repoTarget, bool, error) {
 	opts := &github.RepositoryListByOrgOptions{Type: "all", ListOptions: github.ListOptions{PerPage: 100}}
 	var out []repoTarget
@@ -435,6 +454,7 @@ func listOrgRepos(ctx context.Context, client *github.Client, org string) ([]rep
 	return out, false, nil
 }
 
+// listUserRepos lists all repositories for the given user.
 func listUserRepos(ctx context.Context, client *github.Client, user string) ([]repoTarget, error) {
 	opts := &github.RepositoryListOptions{Type: "owner", ListOptions: github.ListOptions{PerPage: 100}}
 	var out []repoTarget
@@ -460,6 +480,7 @@ func listUserRepos(ctx context.Context, client *github.Client, user string) ([]r
 	return out, nil
 }
 
+// repoCloneURL returns the best available clone URL for the repository.
 func repoCloneURL(repo *github.Repository) string {
 	if repo == nil {
 		return ""
@@ -476,6 +497,7 @@ func repoCloneURL(repo *github.Repository) string {
 	return ""
 }
 
+// uniqueNames returns a sorted list of unique, trimmed names from the input.
 func uniqueNames(names []string) []string {
 	seen := map[string]struct{}{}
 	out := make([]string, 0, len(names))
@@ -494,10 +516,17 @@ func uniqueNames(names []string) []string {
 	return out
 }
 
+// newGitHubClient constructs a GitHub client using the provided token.
 func newGitHubClient(ctx context.Context, token string) *github.Client {
+	retryableClient := retryablehttp.NewClient()
+	retryableClient.Logger = nil
+	retryableClient.HTTPClient = cleanhttp.DefaultPooledClient()
+
 	if token == "" {
-		return github.NewClient(nil)
+		return github.NewClient(retryableClient.StandardClient())
 	}
+
+	ctx = context.WithValue(ctx, oauth2.HTTPClient, retryableClient.StandardClient())
 	ts := oauth2.StaticTokenSource(&oauth2.Token{AccessToken: token})
 	tc := oauth2.NewClient(ctx, ts)
 	return github.NewClient(tc)

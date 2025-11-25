@@ -21,6 +21,7 @@ import (
 	cmp "github.com/picatz/deputy/internal/compare"
 	gitx "github.com/picatz/deputy/internal/gitutil"
 	inv "github.com/picatz/deputy/internal/inventory"
+	"github.com/picatz/deputy/internal/policy"
 	"github.com/picatz/deputy/internal/repository/workspace"
 	sbomx "github.com/picatz/deputy/internal/sbom"
 	"github.com/picatz/deputy/internal/targets"
@@ -45,6 +46,18 @@ type ScanResult struct {
 	PackagesScanned int                         `json:"packagesScanned"`
 	Stats           analysis.VulnerabilityStats `json:"stats"`
 	Vulnerabilities []analysis.Vulnerability    `json:"vulnerabilities"`
+	PolicyFindings  []PolicyFinding             `json:"policyFindings,omitempty"`
+}
+
+// PolicyFinding represents a policy action emitted during scan evaluation.
+type PolicyFinding struct {
+	Source      string `json:"source"`
+	Action      string `json:"action"`
+	Reason      string `json:"reason,omitempty"`
+	Message     string `json:"message,omitempty"`
+	Remediation string `json:"remediation,omitempty"`
+	Status      *int   `json:"status,omitempty"`
+	Code        string `json:"code,omitempty"`
 }
 
 // ModuleDeprecation captures information about a deprecated module and its
@@ -485,9 +498,14 @@ func (s *Scanner) runScan(cmd *cobra.Command, args []string) error {
 		vulnsForPolicy = filterUnfixed(vulns)
 	}
 	report := buildScanReport(exec.displayPath, ref, exec.commitHash, vulnsForPolicy, len(pkgs))
-	if err := runScanPolicies(ctx, policyPaths, report, cmd.ErrOrStderr()); err != nil {
+	policyActions, err := runScanPolicies(ctx, policyPaths, report, cmd.ErrOrStderr())
+	if err != nil {
 		return err
 	}
+	policyFindings := actionsToPolicyFindings(policyActions)
+	report.PolicyFindings = policyFindings
+	report.PolicyFindings = policyFindings
+	report.PolicyFindings = policyFindings
 
 	var w io.Writer = os.Stdout
 	if outPath != "" && outPath != "-" {
@@ -501,9 +519,9 @@ func (s *Scanner) runScan(cmd *cobra.Command, args []string) error {
 
 	switch strings.ToLower(format) {
 	case "", "text":
-		return s.outputText(w, cmd.ErrOrStderr(), exec.displayPath, ref, exec.commitHash, exec.originURL, pkgs, goDirect, vulns, ignoreUnfixed)
+		return s.outputText(w, cmd.ErrOrStderr(), exec.displayPath, ref, exec.commitHash, exec.originURL, pkgs, goDirect, vulns, ignoreUnfixed, policyFindings)
 	case "json":
-		return s.outputJSON(w, exec.displayPath, ref, exec.commitHash, vulns, len(pkgs), ignoreUnfixed)
+		return s.outputJSON(w, exec.displayPath, ref, exec.commitHash, vulns, len(pkgs), ignoreUnfixed, policyFindings)
 	default:
 		return fmt.Errorf("unsupported --format %q (use text|json)", format)
 	}
@@ -568,9 +586,11 @@ func (s *Scanner) runScanDir(cmd *cobra.Command, args []string) error {
 		vulnsForPolicy = filterUnfixed(vulns)
 	}
 	report := buildScanReport(path, "", "", vulnsForPolicy, len(pkgs))
-	if err := runScanPolicies(ctx, policyPaths, report, cmd.ErrOrStderr()); err != nil {
+	policyActions, err := runScanPolicies(ctx, policyPaths, report, cmd.ErrOrStderr())
+	if err != nil {
 		return err
 	}
+	policyFindings := actionsToPolicyFindings(policyActions)
 
 	var w io.Writer = os.Stdout
 	if outPath != "" && outPath != "-" {
@@ -584,9 +604,9 @@ func (s *Scanner) runScanDir(cmd *cobra.Command, args []string) error {
 
 	switch strings.ToLower(format) {
 	case "", "text":
-		return s.outputTextDir(w, cmd.ErrOrStderr(), path, vulns, ignoreUnfixed)
+		return s.outputTextDir(w, cmd.ErrOrStderr(), path, vulns, ignoreUnfixed, policyFindings)
 	case "json":
-		return s.outputJSON(w, path, "", "", vulns, len(pkgs), ignoreUnfixed)
+		return s.outputJSON(w, path, "", "", vulns, len(pkgs), ignoreUnfixed, policyFindings)
 	default:
 		return fmt.Errorf("unsupported --format %q (use text|json)", format)
 	}
@@ -666,9 +686,11 @@ func (s *Scanner) runScanSBOM(cmd *cobra.Command, args []string) error {
 		vulnsForPolicy = filterUnfixed(vulns)
 	}
 	report := buildScanReport("sbom", "", "", vulnsForPolicy, len(pkgs))
-	if err := runScanPolicies(ctx, policyPaths, report, cmd.ErrOrStderr()); err != nil {
+	policyActions, err := runScanPolicies(ctx, policyPaths, report, cmd.ErrOrStderr())
+	if err != nil {
 		return err
 	}
+	policyFindings := actionsToPolicyFindings(policyActions)
 
 	var w io.Writer = os.Stdout
 	if outPath != "" && outPath != "-" {
@@ -689,9 +711,10 @@ func (s *Scanner) runScanSBOM(cmd *cobra.Command, args []string) error {
 			fmt.Fprintln(cmd.ErrOrStderr(), "  "+ui.StyleMeta.Render("Note: ignoring unfixed vulnerabilities (--ignore-unfixed)"))
 		}
 		DisplayVulnerabilities(vulnsEff)
+		DisplayPolicyFindings(policyFindings)
 		return nil
 	case "json":
-		return s.outputJSON(w, "sbom", "", "", vulns, len(pkgs), ignoreUnfixed)
+		return s.outputJSON(w, "sbom", "", "", vulns, len(pkgs), ignoreUnfixed, policyFindings)
 	default:
 		return fmt.Errorf("unsupported --format %q (use text|json)", format)
 	}
@@ -831,7 +854,7 @@ func getRepoMetadata(localRepoPath, ref string) (string, string) {
 	return commitHash, originURL
 }
 
-func (s *Scanner) outputText(w io.Writer, errW io.Writer, repoPath, ref, commitHash, originURL string, pkgs []*extractor.Package, goDirect map[string]bool, vulns []analysis.Vulnerability, ignoreUnfixed bool) error {
+func (s *Scanner) outputText(w io.Writer, errW io.Writer, repoPath, ref, commitHash, originURL string, pkgs []*extractor.Package, goDirect map[string]bool, vulns []analysis.Vulnerability, ignoreUnfixed bool, policyFindings []PolicyFinding) error {
 	shortRef := shortGitRef(refOrHEAD(ref))
 	shortHash := commitHash
 	if len(shortHash) > 7 {
@@ -859,6 +882,7 @@ func (s *Scanner) outputText(w io.Writer, errW io.Writer, repoPath, ref, commitH
 	}
 
 	DisplayVulnerabilities(vulnsEff)
+	DisplayPolicyFindings(policyFindings)
 
 	// Show module deprecations
 	if deps := detectModuleDeprecations(pkgs, goDirect); len(deps) > 0 {
@@ -875,7 +899,7 @@ func (s *Scanner) outputText(w io.Writer, errW io.Writer, repoPath, ref, commitH
 	return nil
 }
 
-func (s *Scanner) outputTextDir(w io.Writer, errW io.Writer, path string, vulns []analysis.Vulnerability, ignoreUnfixed bool) error {
+func (s *Scanner) outputTextDir(w io.Writer, errW io.Writer, path string, vulns []analysis.Vulnerability, ignoreUnfixed bool, policyFindings []PolicyFinding) error {
 	fmt.Fprintf(w, "\nScanned %s\n", path)
 
 	vulnsEff := vulns
@@ -885,16 +909,18 @@ func (s *Scanner) outputTextDir(w io.Writer, errW io.Writer, path string, vulns 
 	}
 
 	DisplayVulnerabilities(vulnsEff)
+	DisplayPolicyFindings(policyFindings)
 	return nil
 }
 
-func (s *Scanner) outputJSON(w io.Writer, repo, ref, commit string, vulns []analysis.Vulnerability, pkgCount int, ignoreUnfixed bool) error {
+func (s *Scanner) outputJSON(w io.Writer, repo, ref, commit string, vulns []analysis.Vulnerability, pkgCount int, ignoreUnfixed bool, policyFindings []PolicyFinding) error {
 	vulnsEff := vulns
 	if ignoreUnfixed {
 		vulnsEff = filterUnfixed(vulns)
 	}
 
 	result := buildScanReport(repo, ref, commit, vulnsEff, pkgCount)
+	result.PolicyFindings = policyFindings
 
 	enc := json.NewEncoder(w)
 	enc.SetIndent("", "  ")
@@ -1119,21 +1145,24 @@ func buildScanReport(repo, ref, commit string, vulns []analysis.Vulnerability, p
 	}
 }
 
-func runScanPolicies(ctx context.Context, policyPaths []string, report ScanResult, errW io.Writer) error {
+func runScanPolicies(ctx context.Context, policyPaths []string, report ScanResult, errW io.Writer) ([]policy.Action, error) {
 	if len(policyPaths) == 0 {
-		return nil
+		return nil, nil
 	}
+	var out []policy.Action
 	reportMap, err := structToMap(report)
 	if err != nil {
-		return err
+		return nil, err
 	}
-	if err := evaluatePoliciesForCommand(ctx, policyPaths, reportMap, "scan", "scan_report", errW); err != nil {
-		return err
+	actions, err := evaluatePoliciesForCommand(ctx, policyPaths, reportMap, "scan", "scan_report", errW)
+	if err != nil {
+		return nil, err
 	}
+	out = append(out, actions...)
 	for _, vuln := range report.Vulnerabilities {
 		vulnMap, err := structToMap(vuln)
 		if err != nil {
-			return err
+			return nil, err
 		}
 		payload := map[string]any{
 			"repo":          report.Repo,
@@ -1141,11 +1170,37 @@ func runScanPolicies(ctx context.Context, policyPaths []string, report ScanResul
 			"commit":        report.Commit,
 			"vulnerability": vulnMap,
 		}
-		if err := evaluatePoliciesForCommand(ctx, policyPaths, payload, "scan", "scan_vulnerability", errW); err != nil {
-			return err
+		actions, err := evaluatePoliciesForCommand(ctx, policyPaths, payload, "scan", "scan_vulnerability", errW)
+		if err != nil {
+			return nil, err
 		}
+		out = append(out, actions...)
 	}
-	return nil
+	return out, nil
+}
+
+func actionsToPolicyFindings(actions []policy.Action) []PolicyFinding {
+	if len(actions) == 0 {
+		return nil
+	}
+	var findings []PolicyFinding
+	for _, act := range actions {
+		actionType := strings.TrimSpace(act.Type)
+		if actionType == "" || strings.EqualFold(actionType, "allow") {
+			continue
+		}
+		f := PolicyFinding{
+			Source:      act.Source,
+			Action:      actionType,
+			Reason:      act.Reason,
+			Message:     act.Message,
+			Remediation: act.Remediation,
+			Status:      act.Status,
+			Code:        act.Code,
+		}
+		findings = append(findings, f)
+	}
+	return findings
 }
 
 var knownDeprecations = []ModuleDeprecation{

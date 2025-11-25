@@ -4,30 +4,13 @@ This guide shows how to run Deputy with the Shai-Hulud npm IOC policy, both for 
 
 ## Prereqs
 - Go toolchain installed (for building/running `deputy`).
-- Network egress to npm and GitHub (for proxy upstream and remote scans).
+- Network egress to NPM and GitHub (for proxy upstream).
 - Optional: `GITHUB_TOKEN` set if you scan private repos or want higher GitHub API limits.
 
 ## Files you need
 - Policy: `policy/examples/shai-hulud-npm.yaml` (already in the tree).
 
-## A. Static scan with the policy
-Run a scan and enforce the policy against the scan report. A deny will exit non-zero and show the reason.
-
-```bash
-# Scan current directory, npm ecosystem only (faster) with the Shai-Hulud policy
-deputy scan --ecosystems npm --policy policy/examples/shai-hulud-npm.yaml .
-
-# Scan a remote GitHub repo
-deputy scan github.com/your/org/repo --ecosystems npm \
-  --policy policy/examples/shai-hulud-npm.yaml
-```
-
-If any dependency matches the IOC list, you’ll see an error like:
-```
-policy ... blocked: package/version matches Wiz Shai-Hulud 2.0 IOC
-```
-
-## B. Block installs via the Deputy proxy (quick, one-shot)
+## A. Block installs via the Deputy proxy (quick, one-shot)
 Wrap a single npm command with a temporary proxy that enforces the policy.
 
 ```bash
@@ -40,7 +23,7 @@ What happens:
 - Sets `NPM_CONFIG_REGISTRY` (and `YARN_REGISTRY`) for the child process.
 - Enforces the Shai-Hulud policy. IOC versions are denied with HTTP 403.
 
-## C. Run a long-lived npm proxy with the policy
+## B. Run a long-lived npm proxy with the policy
 1) Create a config (example `proxy-npm.yaml`):
 ```yaml
 listeners:

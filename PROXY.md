@@ -24,12 +24,12 @@ All proxy subcommands accept the global logging flags, `--trace-http` for verbos
 ## High-Level Architecture
 
 ```
-┌────────────────────┐        ┌──────────────────┐        ┌─────────────────┐
-│ HTTP Listener(s)   │ ───▶  │ Ecosystem Adapter │ ───▶  │ Policy Pipeline │
-└────────────────────┘        └──────────────────┘        └─────────────────┘
-          │                               │                         │
-          ▼                               ▼                         ▼
-   Metrics/Tracing           Deputy Inventory / OSV         Upstream Fetcher
+┌──────────────────┐       ┌───────────────────┐       ┌─────────────────┐
+│ HTTP Listener(s) │ ───▶  │ Ecosystem Adapter │ ───▶  │ Policy Pipeline │
+└──────────────────┘       └───────────────────┘       └─────────────────┘
+          │                         │                           │
+          ▼                         ▼                           ▼
+   Metrics/Tracing         Deputy Inventory / OSV        Upstream Fetcher
 
 ```
 

@@ -15,6 +15,8 @@ require (
 	github.com/google/go-github/v63 v63.0.0
 	github.com/google/licensecheck v0.3.1
 	github.com/google/osv-scalibr v0.3.2
+	github.com/hashicorp/go-cleanhttp v0.5.2
+	github.com/hashicorp/go-retryablehttp v0.7.7
 	github.com/ossf/osv-schema/bindings/go v0.0.0-20250902063920-695987a6b7da
 	github.com/pandatix/go-cvss v0.6.2
 	github.com/picatz/openai v0.0.0-20251023035433-af6462b7d534

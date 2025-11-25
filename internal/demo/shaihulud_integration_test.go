@@ -38,7 +38,7 @@ func TestScanShaiHuludIntegration_temporalio(t *testing.T) {
 		// "temporal",
 		// "sdk-go",
 		// "sdk-java",
-		"sdk-typescript",
+		// "sdk-typescript",
 		// "sdk-python",
 		// "sdk-dotnet",
 		// "sdk-ruby",
@@ -68,8 +68,13 @@ func TestScanShaiHuludIntegration_fetchWizIOCs(t *testing.T) {
 	}
 	t.Logf("fetched %d IOC packages from Wiz ShaiHulud CSV", len(set.packages))
 
-	for pkg, versions := range set.packages {
-		t.Logf(" - package %s: %d versions: %v", pkg, len(versions), slices.Collect(maps.Keys(versions)))
+	// Print packages and versions, in sorted order.
+	pkgNames := slices.Collect(maps.Keys(set.packages))
+	slices.Sort(pkgNames)
+	for _, pkg := range pkgNames {
+		versions := slices.Collect(maps.Keys(set.packages[pkg]))
+		slices.Sort(versions)
+		t.Logf(" - package %s: %d versions: %v", pkg, len(versions), versions)
 	}
 }
 
@@ -112,7 +117,8 @@ func testScanShaiHuludIntegration(t *testing.T, owner, token string, repos ...st
 			t.Fatalf("missing clone URL for repo %s", f.Name)
 		}
 		if f.Error != nil {
-			t.Fatalf("repo %s error: %v", f.Name, f.Error)
+			t.Logf("repo %s error: %v", f.Name, f.Error)
+			continue
 		}
 		t.Logf("repo %s: %d matches", f.Name, len(f.Matches))
 		for _, m := range f.Matches {

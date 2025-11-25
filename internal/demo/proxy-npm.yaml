@@ -1,0 +1,7 @@
+listeners:
+  - name: npm-proxy
+    bind: ":8082"
+    ecosystems: ["npm"]
+    upstream: "https://registry.npmjs.org"
+    policies:
+      - policy/examples/npm-scope-allowlist.yaml
