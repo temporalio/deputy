@@ -11,6 +11,8 @@ require (
 	github.com/go-git/go-billy/v5 v5.6.2
 	github.com/go-git/go-git/v5 v5.16.3
 	github.com/google/cel-go v0.21.0
+	github.com/google/go-cmp v0.7.0
+	github.com/google/go-github/v63 v63.0.0
 	github.com/google/licensecheck v0.3.1
 	github.com/google/osv-scalibr v0.3.2
 	github.com/ossf/osv-schema/bindings/go v0.0.0-20250902063920-695987a6b7da
@@ -21,9 +23,12 @@ require (
 	github.com/spdx/tools-golang v0.5.5
 	github.com/spf13/cobra v1.10.1
 	golang.org/x/mod v0.27.0
+	golang.org/x/oauth2 v0.30.0
 	golang.org/x/sync v0.16.0
+	google.golang.org/genproto/googleapis/api v0.0.0-20250826171959-ef028d996bc1
 	google.golang.org/grpc v1.75.0
 	google.golang.org/protobuf v1.36.8
+	gopkg.in/yaml.v3 v3.0.1
 	osv.dev/bindings/go v0.0.0-20250905014459-96958296f6f2
 )
 
@@ -91,8 +96,8 @@ require (
 	github.com/gobwas/glob v0.2.3 // indirect
 	github.com/gogo/protobuf v1.3.2 // indirect
 	github.com/golang/groupcache v0.0.0-20241129210726-2c02b8208cf8 // indirect
-	github.com/google/go-cmp v0.7.0 // indirect
 	github.com/google/go-containerregistry v0.20.6 // indirect
+	github.com/google/go-querystring v1.1.0 // indirect
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
 	github.com/jbenet/go-context v0.0.0-20150711004518-d14ea06fba99 // indirect
@@ -173,11 +178,9 @@ require (
 	golang.org/x/vuln v1.1.4 // indirect
 	golang.org/x/xerrors v0.0.0-20240903120638-7835f813f4da // indirect
 	google.golang.org/genproto v0.0.0-20250826171959-ef028d996bc1 // indirect
-	google.golang.org/genproto/googleapis/api v0.0.0-20250826171959-ef028d996bc1 // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20250826171959-ef028d996bc1 // indirect
 	gopkg.in/ini.v1 v1.67.0 // indirect
 	gopkg.in/warnings.v0 v0.1.2 // indirect
-	gopkg.in/yaml.v3 v3.0.1 // indirect
 	modernc.org/libc v1.66.8 // indirect
 	modernc.org/mathutil v1.7.1 // indirect
 	modernc.org/memory v1.11.0 // indirect
