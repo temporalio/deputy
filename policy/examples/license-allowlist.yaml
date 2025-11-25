@@ -1,0 +1,18 @@
+apiVersion: policy.deputy.sh/v1alpha2
+kind: PolicyBundle
+metadata:
+  title: "License guardrails"
+policies:
+  - name: allow-sans-copyleft
+    description: Block packages carrying copyleft licenses
+    vars:
+      forbidden: '["SSPL-1.0", "AGPL-3.0-only", "GPL-3.0", "GPL-3.0-only"]'
+    rules:
+      - action: deny
+        when: licenses.exists(l, l in forbidden)
+        reason: package carries a forbidden license
+        details:
+          policy: allow-sans-copyleft
+      - action: warn
+        when: size(licenses) == 0
+        reason: package missing license metadata

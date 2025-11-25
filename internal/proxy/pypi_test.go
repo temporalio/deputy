@@ -52,9 +52,9 @@ func TestPyPIHandlerPolicyBlocksVuln(t *testing.T) {
 	if err := os.WriteFile(path, []byte(policySource), 0o644); err != nil {
 		t.Fatalf("write policy: %v", err)
 	}
-	engine, err := newPolicyEngine([]string{path})
+	engine, err := NewPolicyEngine([]string{path})
 	if err != nil {
-		t.Fatalf("newPolicyEngine: %v", err)
+		t.Fatalf("NewPolicyEngine: %v", err)
 	}
 	handler, err := newPyPIHandler(upstream.URL, engine)
 	if err != nil {
@@ -91,9 +91,9 @@ func TestPyPIHandlerLicensePolicy(t *testing.T) {
 	if err := os.WriteFile(polPath, []byte(policySource), 0o644); err != nil {
 		t.Fatalf("write policy: %v", err)
 	}
-	engine, err := newPolicyEngine([]string{polPath})
+	engine, err := NewPolicyEngine([]string{polPath})
 	if err != nil {
-		t.Fatalf("newPolicyEngine: %v", err)
+		t.Fatalf("NewPolicyEngine: %v", err)
 	}
 	handler, err := newPyPIHandler(upstream.URL, engine)
 	if err != nil {
@@ -198,9 +198,9 @@ func TestPyPIHandlerEndToEndPip(t *testing.T) {
 	if err := os.WriteFile(polPath, []byte(policySource), 0o644); err != nil {
 		t.Fatalf("write policy: %v", err)
 	}
-	engine, err := newPolicyEngine([]string{polPath})
+	engine, err := NewPolicyEngine([]string{polPath})
 	if err != nil {
-		t.Fatalf("newPolicyEngine: %v", err)
+		t.Fatalf("NewPolicyEngine: %v", err)
 	}
 	handler, err := newPyPIHandler("https://pypi.org", engine)
 	if err != nil {

@@ -1,0 +1,15 @@
+apiVersion: policy.deputy.sh/v1alpha2
+kind: PolicyBundle
+policies:
+  - name: block-log4shell
+    description: Deny any artifact that is still vulnerable to Log4Shell
+    vars:
+      log4shellAliases: '["CVE-2021-44228", "CVE-2021-45046", "GHSA-jfh8-c2jp-5v3q"]'
+    rules:
+      - action: deny
+        when: vulnerabilities.exists(v, v.Aliases.exists(a, a in log4shellAliases))
+        reason: dependency still vulnerable to Log4Shell
+        status: 451
+        headers:
+          X-Deputy-Policy: block-log4shell
+        remediation: Upgrade to a patched Log4j release (>= 2.17.1)

@@ -57,6 +57,14 @@ func LoadSources(paths []string) ([]Source, error) {
 			}
 			continue
 		}
+		s, ok, err := tryParseStructuredBundle(data, path)
+		if err != nil {
+			return nil, err
+		}
+		if ok {
+			sources = append(sources, s...)
+			continue
+		}
 		sources = append(sources, Source{
 			Name: path,
 			Body: string(data),

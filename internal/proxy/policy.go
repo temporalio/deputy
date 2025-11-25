@@ -7,24 +7,25 @@ import (
 	"github.com/picatz/deputy/internal/policy"
 )
 
-// policyEngine loads CEL sources and evaluates them for proxy requests.
-type policyEvaluator interface {
-	Evaluate(context.Context, string, map[string]any) ([]policy.Action, error)
+// PolicyEvaluator loads CEL sources and evaluates them for proxy requests.
+type PolicyEvaluator interface {
+    Evaluate(context.Context, string, map[string]any) ([]policy.Action, error)
 }
 
 type policyEngine struct {
-	sources []policy.Source
+    sources []policy.Source
 }
 
-func newPolicyEngine(paths []string) (*policyEngine, error) {
-	if len(paths) == 0 {
-		return &policyEngine{}, nil
-	}
-	sources, err := policy.LoadSources(paths)
-	if err != nil {
-		return nil, err
-	}
-	return &policyEngine{sources: sources}, nil
+// NewPolicyEngine loads CEL policies from the provided paths.
+func NewPolicyEngine(paths []string) (PolicyEvaluator, error) {
+    if len(paths) == 0 {
+        return &policyEngine{}, nil
+    }
+    sources, err := policy.LoadSources(paths)
+    if err != nil {
+        return nil, err
+    }
+    return &policyEngine{sources: sources}, nil
 }
 
 func (e *policyEngine) Evaluate(ctx context.Context, entrypoint string, payload map[string]any) ([]policy.Action, error) {

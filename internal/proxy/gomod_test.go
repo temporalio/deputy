@@ -140,10 +140,10 @@ func TestGoModuleHandlerBlocksCriticalVulnerability(t *testing.T) {
 	if err := os.WriteFile(policyPath, []byte(policySource), 0o644); err != nil {
 		t.Fatalf("write policy: %v", err)
 	}
-	engine, err := newPolicyEngine([]string{policyPath})
-	if err != nil {
-		t.Fatalf("newPolicyEngine: %v", err)
-	}
+			engine, err := NewPolicyEngine([]string{policyPath})
+			if err != nil {
+				t.Fatalf("NewPolicyEngine: %v", err)
+			}
 	handler, err := newGoModuleHandler("https://proxy.golang.org", engine)
 	if err != nil {
 		t.Fatalf("handler: %v", err)
@@ -174,9 +174,9 @@ func TestGoModuleHandlerLicensePolicy(t *testing.T) {
 	if err := os.WriteFile(policyPath, []byte(policySource), 0o644); err != nil {
 		t.Fatalf("write policy: %v", err)
 	}
-	engine, err := newPolicyEngine([]string{policyPath})
+	engine, err := NewPolicyEngine([]string{policyPath})
 	if err != nil {
-		t.Fatalf("newPolicyEngine: %v", err)
+		t.Fatalf("NewPolicyEngine: %v", err)
 	}
 	handler, err := newGoModuleHandler("https://proxy.golang.org", engine)
 	if err != nil {
@@ -236,9 +236,9 @@ func TestGoModuleHandlerEndToEndPolicies(t *testing.T) {
 		paths = append(paths, p)
 	}
 
-	engine, err := newPolicyEngine(paths)
+	engine, err := NewPolicyEngine(paths)
 	if err != nil {
-		t.Fatalf("newPolicyEngine() error = %v", err)
+		t.Fatalf("NewPolicyEngine() error = %v", err)
 	}
 	handler, err := newGoModuleHandler(upstream.URL, engine)
 	if err != nil {
@@ -333,9 +333,9 @@ func TestGoModuleHandlerEndToEndGoGet(t *testing.T) {
 		policyPaths = append(policyPaths, path)
 	}
 
-	engine, err := newPolicyEngine(policyPaths)
+	engine, err := NewPolicyEngine(policyPaths)
 	if err != nil {
-		t.Fatalf("newPolicyEngine error: %v", err)
+		t.Fatalf("NewPolicyEngine error: %v", err)
 	}
 	handler, err := newGoModuleHandler("https://proxy.golang.org", engine)
 	if err != nil {

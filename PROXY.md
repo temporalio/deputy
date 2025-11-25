@@ -307,6 +307,19 @@ You can gain confidence in the npm adapter without installing Node locally by dr
 
 These copy/pasteable commands make it easy for new users to exercise both the allow and deny flows before wiring the proxy into npm, pnpm, or yarn on their workstations.
 
+### Proxy Quick Runner
+
+If you already have Deputy installed locally, the fastest way to try the proxy is to let the CLI spin up a temporary listener and wrap your package manager. Each ecosystem now has a dedicated subcommand that accepts the real tool invocation after `--`:
+
+- `deputy proxy go -- go mod download golang.org/x/text@v0.14.0`
+- `deputy proxy npm -- npm pack lodash@4.17.21`
+- `deputy proxy pypi -- pip download requests==2.31.0 --no-deps`
+- `deputy proxy rubygems -- gem fetch bundler -v 2.4.22`
+
+> The npm wrapper also covers Yarn and pnpm because they respect `NPM_CONFIG_REGISTRY` out of the box.
+
+Under the hood these commands launch an in-process proxy bound to `127.0.0.1`, set the right env vars (`GOPROXY`, `NPM_CONFIG_REGISTRY`, `PIP_INDEX_URL`, `GEMRC`, etc.), run your command, then tear everything down. You can still pass extra flags before `--`, e.g. `--policy corp.cel` or `--upstream https://custom.mirror` to mirror production settings. The manual Docker flows below remain available when you want to see every moving piece explicitly or script the experience into CI.
+
 ### PyPI Proxy Hands-On Example
 
 The same pattern works for Python without polluting your host interpreter. This example uses Docker’s `python:3.12` image, but any image with `pip` installed will behave the same way.
