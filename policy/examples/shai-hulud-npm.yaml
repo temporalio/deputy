@@ -1,0 +1,77 @@
+apiVersion: policy.deputy.sh/v1alpha2
+kind: PolicyBundle
+metadata:
+  title: "Wiz Shai-Hulud 2.0 IOC quarantine"
+policies:
+  - name: block-shai-hulud-npm
+    description: Deny npm artifacts whose package+version match the Wiz Shai-Hulud 2.0 IOC list (Nov 2025)
+    vars:
+      # Package → exact versions (normalized without leading "=" or "v")
+      iocPkgs: '[
+        {"name":"02-echo","versions":["0.0.7"]},
+        {"name":"@accordproject/concerto-analysis","versions":["3.24.1"]},
+        {"name":"@accordproject/concerto-linter","versions":["3.24.1"]},
+        {"name":"@accordproject/concerto-linter-default-ruleset","versions":["3.24.1"]},
+        {"name":"@accordproject/concerto-metamodel","versions":["3.12.5"]},
+        {"name":"@accordproject/concerto-types","versions":["3.24.1"]},
+        {"name":"@accordproject/markdown-it-cicero","versions":["0.16.26"]},
+        {"name":"@accordproject/template-engine","versions":["2.7.2"]},
+        {"name":"@actbase/css-to-react-native-transform","versions":["1.0.3"]},
+        {"name":"@actbase/native","versions":["0.1.32"]},
+        {"name":"@actbase/node-server","versions":["1.1.19"]},
+        {"name":"@actbase/react-absolute","versions":["0.8.3"]},
+        {"name":"@actbase/react-daum-postcode","versions":["1.0.5"]},
+        {"name":"@actbase/react-kakaosdk","versions":["0.9.27"]},
+        {"name":"@actbase/react-native-actionsheet","versions":["1.0.3"]},
+        {"name":"@actbase/react-native-devtools","versions":["0.1.3"]},
+        {"name":"@actbase/react-native-fast-image","versions":["8.5.13"]},
+        {"name":"@actbase/react-native-kakao-channel","versions":["1.0.2"]},
+        {"name":"@actbase/react-native-kakao-navi","versions":["2.0.4"]},
+        {"name":"@actbase/react-native-less-transformer","versions":["1.0.6"]},
+        {"name":"@actbase/react-native-naver-login","versions":["1.0.1"]},
+        {"name":"@actbase/react-native-simple-video","versions":["1.0.13"]},
+        {"name":"@actbase/react-native-tiktok","versions":["1.1.3"]},
+        {"name":"@afetcan/api","versions":["0.0.13"]},
+        {"name":"@afetcan/storage","versions":["0.0.27"]},
+        {"name":"@alexadark/amadeus-api","versions":["1.0.4"]},
+        {"name":"@alexadark/gatsby-theme-events","versions":["1.0.1"]},
+        {"name":"@alexadark/gatsby-theme-wordpress-blog","versions":["2.0.1"]},
+        {"name":"@alexadark/reusable-functions","versions":["1.5.1"]},
+        {"name":"@alexcolls/nuxt-socket.io","versions":["0.0.7","0.0.8"]},
+        {"name":"@alexcolls/nuxt-ux","versions":["0.6.2","0.6.1"]},
+        {"name":"@antstackio/eslint-config-antstack","versions":["0.0.3"]},
+        {"name":"@antstackio/express-graphql-proxy","versions":["0.2.8"]},
+        {"name":"@antstackio/graphql-body-parser","versions":["0.1.1"]},
+        {"name":"@antstackio/json-to-graphql","versions":["1.0.3"]},
+        {"name":"@antstackio/shelbysam","versions":["1.1.7"]},
+        {"name":"@aryanhussain/my-angular-lib","versions":["0.0.23"]},
+        {"name":"@asyncapi/dotnet-rabbitmq-template","versions":["1.0.1","1.0.2"]},
+        {"name":"@asyncapi/edavisualiser","versions":["1.2.2","1.2.1"]},
+        {"name":"@asyncapi/go-watermill-template","versions":["0.2.76","0.2.77"]},
+        {"name":"@asyncapi/java-template","versions":["0.3.6","0.3.5"]},
+        {"name":"@asyncapi/keeper","versions":["0.0.2","0.0.3"]},
+        {"name":"@asyncapi/php-template","versions":["0.1.1","0.1.2"]},
+        {"name":"@asyncapi/python-paho-template","versions":["0.2.14","0.2.15"]},
+        {"name":"@asyncapi/server-api","versions":["0.16.24","0.16.25"]},
+        {"name":"@asyncapi/studio","versions":["1.0.3","1.0.2"]},
+        {"name":"@asyncapi/web-component","versions":["2.6.6","2.6.7"]}
+      ]'
+    rules:
+      - action: deny
+        when: request.ecosystem == "npm" &&
+          iocPkgs.exists(p,
+            lower(p.name) == lower(request.package) &&
+            p.versions.exists(v,
+              // normalize both sides: strip leading "=" or "v"
+              (let sv = v.startsWith("=") ? v.substring(1) : v;
+                   sv2 = sv.startsWith("v") ? sv.substring(1) : sv;
+                   rv = request.version.startsWith("=") ? request.version.substring(1) : request.version;
+                   rv2 = rv.startsWith("v") ? rv.substring(1) : rv;
+               true) && sv2 == rv2
+            )
+          )
+        reason: package/version matches Wiz Shai-Hulud 2.0 IOC
+        remediation: Remove the compromised version, clear npm cache, reinstall clean versions, rotate credentials/tokens, and audit CI runners for rogue workflows.
+        details:
+          source: wiz-shai-hulud-2-packages.csv
+          policy: block-shai-hulud-npm
