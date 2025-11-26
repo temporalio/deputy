@@ -1,6 +1,6 @@
 # Using the Shai-Hulud IOC Policy with Deputy
 
-This guide shows how to run Deputy with the Shai-Hulud npm IOC policy, both for static scanning and for blocking live installs via the Deputy proxy. Commands assume you are in the repo root.
+This guide shows how to run Deputy with the Shai-Hulud `npm` IOC policy, both for static scanning and for blocking live installs via the Deputy proxy.
 
 ## Prereqs
 - Go toolchain installed (for building/running `deputy`).
