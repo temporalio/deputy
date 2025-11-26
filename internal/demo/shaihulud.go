@@ -1,6 +1,7 @@
 package demo
 
 import (
+	"cmp"
 	"context"
 	"encoding/csv"
 	"errors"
@@ -87,26 +88,19 @@ func ScanShaiHulud(ctx context.Context, opts Options) ([]ScanResult, error) {
 		return nil, fmt.Errorf("owner is required")
 	}
 
-	iocURL := opts.IOCURL
-	if iocURL == "" {
-		iocURL = WizShaiHuludIOCURL
-	}
-
-	httpClient := opts.HTTPClient
-	if httpClient == nil {
-		httpClient = http.DefaultClient
-	}
+	var (
+		conc       = cmp.Or(opts.Concurrency, 4)
+		iocURL     = cmp.Or(opts.IOCURL, WizShaiHuludIOCURL)
+		httpClient = cmp.Or(opts.HTTPClient, http.DefaultClient)
+	)
 
 	iocs, err := fetchIOCSet(ctx, httpClient, iocURL)
 	if err != nil {
-		return nil, fmt.Errorf("fetch IOCs: %w", err)
+		return nil, fmt.Errorf("failed to fetch Wiz IOCs: %w", err)
 	}
 
-	ghClient := opts.GitHubClient
-	token := os.Getenv("GITHUB_TOKEN")
-	if ghClient == nil {
-		ghClient = newGitHubClient(ctx, token)
-	}
+	ghToken := os.Getenv("GITHUB_TOKEN")
+	ghClient := cmp.Or(opts.GitHubClient, newGitHubClient(ctx, ghToken))
 	if ghClient == nil {
 		return nil, fmt.Errorf("failed to construct GitHub client")
 	}
@@ -116,12 +110,7 @@ func ScanShaiHulud(ctx context.Context, opts Options) ([]ScanResult, error) {
 		return nil, err
 	}
 	if len(repos) == 0 {
-		return nil, fmt.Errorf("no repositories found for %s", opts.Owner)
-	}
-
-	conc := opts.Concurrency
-	if conc <= 0 {
-		conc = 4
+		return nil, fmt.Errorf("no repositories found for %q", opts.Owner)
 	}
 
 	var (
@@ -133,11 +122,11 @@ func ScanShaiHulud(ctx context.Context, opts Options) ([]ScanResult, error) {
 	g.SetLimit(conc)
 	for _, repo := range repos {
 		g.Go(func() error {
-			finding := scanRepo(ctx, repo, token, opts.CloneInMemory, opts.Ecosystems, iocs)
+			finding := scanRepo(ctx, repo, ghToken, opts.CloneInMemory, opts.Ecosystems, iocs)
 			mu.Lock()
 			findings = append(findings, finding)
 			mu.Unlock()
-			return nil // per-repo errors are stored in finding
+			return nil
 		})
 	}
 
@@ -173,9 +162,7 @@ func scanRepo(ctx context.Context, target repoTarget, token string, inMemory boo
 		Depth:        1,
 		SingleBranch: true,
 		Tags:         git.NoTags,
-	}
-	if auth := githubAuth(token, target.cloneURL); auth != nil {
-		cloneOpts.Auth = auth
+		Auth:         githubAuth(token, target.cloneURL),
 	}
 
 	src, err := repository.Clone(ctx, cloneOpts, inMemory)

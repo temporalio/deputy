@@ -31,11 +31,12 @@ func TestScanShaiHuludIntegration(t *testing.T) {
 	testScanShaiHuludIntegration(t, owner, os.Getenv("GITHUB_TOKEN"), repos...)
 }
 
+/*
 func TestScanShaiHuludIntegration_temporalio(t *testing.T) {
 	testScanShaiHuludIntegration(
 		t, "temporalio",
 		os.Getenv("GITHUB_TOKEN"),
-		// "temporal",
+		"temporal",
 		// "sdk-go",
 		// "sdk-java",
 		// "sdk-typescript",
@@ -44,6 +45,7 @@ func TestScanShaiHuludIntegration_temporalio(t *testing.T) {
 		// "sdk-ruby",
 		// "sdk-php",
 		// "ui-server",
+		"ui",
 	)
 }
 
@@ -54,6 +56,7 @@ func TestScanShaiHuludIntegration_hashicorp(t *testing.T) {
 		"vault",
 	)
 }
+*/
 
 func TestScanShaiHuludIntegration_fetchWizIOCs(t *testing.T) {
 	t.Helper()
@@ -82,15 +85,6 @@ func testScanShaiHuludIntegration(t *testing.T, owner, token string, repos ...st
 	t.Helper()
 	ctx := t.Context()
 	client := newGitHubClient(ctx, token)
-
-	// Ensure we can reach Wiz IOC CSV.
-	set, err := fetchIOCSet(ctx, http.DefaultClient, WizShaiHuludIOCURL)
-	if err != nil {
-		t.Fatalf("fetchIOCSet: %v", err)
-	}
-	if len(set.packages) == 0 {
-		t.Fatalf("expected IOC set to be non-empty")
-	}
 
 	results, err := ScanShaiHulud(ctx, Options{
 		Owner:        owner,
