@@ -811,15 +811,7 @@ policies:
     rules:
       - action: deny
         when: |
-          env.command == "proxy" && env.entrypoint == "npm_artifact_request" &&
-          iocPkgs.exists(p,
-            request.package.matches("(?i)^" + p.name + "$") &&
-            p.versions.exists(v,
-              // normalize both sides: strip optional leading "v"
-              request.version.matches("^\\s*v?" + v + "\\s*$") ||
-              v.matches("^\\s*v?" + request.version + "\\s*$")
-            )
-          )
+          iocPkgs.exists(p, p.name == request.package && p.versions.exists(v, v.matches(request.version)))
         reason: package/version matches Wiz Shai-Hulud 2.0 IOC
         remediation: Remove the compromised version, clear npm cache, reinstall clean versions, rotate credentials/tokens, and audit CI runners for rogue workflows.
         details:
