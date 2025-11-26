@@ -16,15 +16,15 @@ import (
 )
 
 type goModuleHandler struct {
-	upstream      *url.URL
-	policies      policyEvaluator
+    upstream      *url.URL
+    policies      PolicyEvaluator
 	client        *http.Client
 	osvClient     analysis.OSVClient
 	vulnLookup    func(context.Context, string, string) ([]analysis.Vulnerability, error)
 	licenseLookup func(context.Context, string, string) ([]string, error)
 }
 
-func newGoModuleHandler(upstream string, policies policyEvaluator) (*goModuleHandler, error) {
+func newGoModuleHandler(upstream string, policies PolicyEvaluator) (*goModuleHandler, error) {
 	u, err := url.Parse(upstream)
 	if err != nil {
 		return nil, fmt.Errorf("parse upstream %q: %w", upstream, err)
@@ -206,4 +206,10 @@ func parseGoProxyPath(p string) (module, version, fileType, operation string, er
 		operation = "fetch"
 	}
 	return
+}
+
+// NewGoModuleHandler exposes the Go module proxy handler for reuse outside the
+// proxy server when an in-process HTTP handler is sufficient.
+func NewGoModuleHandler(upstream string, policies PolicyEvaluator) (http.Handler, error) {
+    return newGoModuleHandler(upstream, policies)
 }

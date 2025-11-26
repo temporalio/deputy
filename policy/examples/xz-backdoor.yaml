@@ -1,0 +1,24 @@
+apiVersion: policy.deputy.sh/v1alpha2
+kind: PolicyBundle
+metadata:
+  title: "XZ backdoor quarantine"
+policies:
+  - name: block-xz-malware-window
+    description: Block known compromised xz/liblzma releases (CVE-2024-3094)
+    vars:
+      compromisedVersions: '["5.6.0", "5.6.1"]'
+      targetPackages: '[
+        {"ecosystem": "npm", "names": ["xz", "lzma-native"]},
+        {"ecosystem": "pypi", "names": ["xz", "liblzma"]},
+        {"ecosystem": "rubygems", "names": ["xz"]},
+        {"ecosystem": "go", "names": ["github.com/ulikunitz/xz"]}
+      ]'
+    rules:
+      - action: deny
+        when: targetPackages.exists(t, t.ecosystem == request.ecosystem && t.names.exists(n, n == request.package)) &&
+          compromisedVersions.exists(v, v == request.version)
+        reason: package version falls inside the CVE-2024-3094 window
+        remediation: Upgrade to xz/liblzma 5.6.2 or downgrade to 5.4.x series
+        details:
+          cve: CVE-2024-3094
+          policy: block-xz-malware-window

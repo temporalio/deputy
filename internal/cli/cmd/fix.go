@@ -369,7 +369,7 @@ func runFixPolicies(ctx context.Context, policyPaths []string, plan remediationP
 	if err != nil {
 		return err
 	}
-	if err := evaluatePoliciesForCommand(ctx, policyPaths, planMap, "fix", "fix_plan", errW); err != nil {
+	if _, err := evaluatePoliciesForCommand(ctx, policyPaths, planMap, "fix", "fix_plan", errW); err != nil {
 		return err
 	}
 	for idx, step := range plan.Commands {
@@ -382,7 +382,7 @@ func runFixPolicies(ctx context.Context, policyPaths []string, plan remediationP
 			"step":  stepMap,
 			"index": idx,
 		}
-		if err := evaluatePoliciesForCommand(ctx, policyPaths, payload, "fix", "fix_plan_step", errW); err != nil {
+		if _, err := evaluatePoliciesForCommand(ctx, policyPaths, payload, "fix", "fix_plan_step", errW); err != nil {
 			return err
 		}
 	}

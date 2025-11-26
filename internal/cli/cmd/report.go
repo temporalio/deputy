@@ -19,6 +19,34 @@ func DisplayVulnerabilities(vulns []analysis.Vulnerability) {
 	DisplayVulnerabilitiesWithHeader(vulns, "Vulnerabilities Found:")
 }
 
+// DisplayPolicyFindings renders any policy actions emitted during a command.
+func DisplayPolicyFindings(findings []PolicyFinding) {
+	if len(findings) == 0 {
+		return
+	}
+	fmt.Println("\n" + ui.StyleHeader.Render("Policy Findings:"))
+	for _, f := range findings {
+		action := strings.ToUpper(strings.TrimSpace(f.Action))
+		if action == "" {
+			action = "ACTION"
+		}
+		source := strings.TrimSpace(f.Source)
+		line := fmt.Sprintf("  %s [%s]", ui.StyleVersion.Render("•"), ui.StyleBold.Render(action))
+		if source != "" {
+			line += " " + ui.StyleMeta.Render(source)
+		}
+		fmt.Println(line)
+
+		msg := strings.TrimSpace(firstNonEmpty(f.Reason, f.Message))
+		if msg != "" {
+			fmt.Println("    " + ui.StyleSymbol.Render("• ") + msg)
+		}
+		if rem := strings.TrimSpace(f.Remediation); rem != "" {
+			fmt.Println("    " + ui.StyleMeta.Render("Remediation: ") + rem)
+		}
+	}
+}
+
 // DisplayVulnerabilitiesWithHeader renders a styled vulnerability report to stdout using the provided heading.
 func DisplayVulnerabilitiesWithHeader(vulns []analysis.Vulnerability, heading string) {
 	cons := analysis.ConsolidateVulnerabilities(vulns)

@@ -29,6 +29,7 @@ func AddPolicyCommand(root *cobra.Command) {
 	cmd.AddCommand(newPolicyBundleCommand())
 	cmd.AddCommand(newPolicyInspectCommand())
 	cmd.AddCommand(newPolicySimulateCommand())
+	cmd.AddCommand(newPolicyREPLCommand())
 	root.AddCommand(cmd)
 }
 
@@ -80,12 +81,25 @@ func newPolicyLintCommand() *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			stdinUsed := false
 			for _, path := range args {
-				data, err := readPathOrStdinOnce(cmd.InOrStdin(), path, &stdinUsed)
-				if err != nil {
-					return fmt.Errorf("read %q: %w", path, err)
+				if path == "-" {
+					data, err := readPathOrStdinOnce(cmd.InOrStdin(), path, &stdinUsed)
+					if err != nil {
+						return fmt.Errorf("read %q: %w", path, err)
+					}
+					if err := policy.Compile(string(data), extraVars); err != nil {
+						return fmt.Errorf("%s: %w", path, err)
+					}
+					fmt.Fprintf(cmd.OutOrStdout(), "%s OK\n", labelPath(path))
+					continue
 				}
-				if err := policy.Compile(string(data), extraVars); err != nil {
-					return fmt.Errorf("%s: %w", path, err)
+				sources, err := policy.LoadSources([]string{path})
+				if err != nil {
+					return err
+				}
+				for _, src := range sources {
+					if err := policy.Compile(src.Body, extraVars); err != nil {
+						return fmt.Errorf("%s: %w", src.Name, err)
+					}
 				}
 				fmt.Fprintf(cmd.OutOrStdout(), "%s OK\n", labelPath(path))
 			}

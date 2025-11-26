@@ -30,9 +30,9 @@ func TestNPMHandlerBlocksVulnerability(t *testing.T) {
 	if err := os.WriteFile(path, []byte(policySource), 0o644); err != nil {
 		t.Fatalf("write policy: %v", err)
 	}
-	engine, err := newPolicyEngine([]string{path})
+	engine, err := NewPolicyEngine([]string{path})
 	if err != nil {
-		t.Fatalf("newPolicyEngine: %v", err)
+		t.Fatalf("NewPolicyEngine: %v", err)
 	}
 	handler, err := newNPMHandler(upstream.URL, engine)
 	if err != nil {
@@ -65,7 +65,7 @@ func TestNPMHandlerBlocksLicense(t *testing.T) {
 	if err := os.WriteFile(pol, []byte(policySource), 0o644); err != nil {
 		t.Fatalf("write policy: %v", err)
 	}
-	engine, err := newPolicyEngine([]string{pol})
+	engine, err := NewPolicyEngine([]string{pol})
 	if err != nil {
 		t.Fatalf("engine: %v", err)
 	}
@@ -197,9 +197,9 @@ func TestNPMHandlerEndToEndNPM(t *testing.T) {
 	if err := os.WriteFile(policyPath, []byte(policySource), 0o644); err != nil {
 		t.Fatalf("write policy: %v", err)
 	}
-	engine, err := newPolicyEngine([]string{policyPath})
+	engine, err := NewPolicyEngine([]string{policyPath})
 	if err != nil {
-		t.Fatalf("newPolicyEngine: %v", err)
+		t.Fatalf("NewPolicyEngine: %v", err)
 	}
 	handler, err := newNPMHandler("https://registry.npmjs.org", engine)
 	if err != nil {

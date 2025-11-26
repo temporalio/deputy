@@ -51,6 +51,7 @@ func AddProxyCommand(root *cobra.Command) {
 		},
 	}
 
-	proxyCmd.AddCommand(serveCmd, templateCmd)
+    registerProxyExecCommands(proxyCmd)
+    proxyCmd.AddCommand(serveCmd, templateCmd)
 	root.AddCommand(proxyCmd)
 }

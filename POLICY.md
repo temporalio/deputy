@@ -19,6 +19,7 @@ Deputy’s core insight is that dependency intelligence should be reusable every
 | `deputy policy lint policy/*.cel` | Static checks (unused vars, shadowed identifiers, deprecated helpers). |
 | `deputy policy inspect policy.cel bundle.json` | Show CEL metadata (names, entrypoints) or bundle contents. |
 | `deputy policy simulate --policy policy.cel --input payload.json` | Replay recorded inputs through one or more policies to observe combined decisions before rollout. |
+| `deputy policy repl` | Start an interactive CEL playground backed by a `metadata` map for quick experiments. |
 
 Other commands opt into the framework via `--policy` or `--policy-bundle` flags. Examples:
 
@@ -40,6 +41,43 @@ Each CLI command emits well-defined entrypoints when `--policy` is provided:
 | `deputy triage` | `triage_report`, `triage_cluster` |
 
 The `env` object passed to CEL now contains both `command` (e.g., `scan`) and `entrypoint` (e.g., `scan_vulnerability`) so a single policy file can branch on where it is being evaluated.
+
+## Structured Policy Bundles
+
+You can still author raw `.cel` files, but most teams prefer a structured format that wraps CEL in YAML. Deputy now ships a bundle schema (`apiVersion: policy.deputy.sh/v1alpha2`, `kind: PolicyBundle`) so AppSec engineers can declare variables, multiple rules, and metadata without hand-writing ternary expressions. Example (`policy/examples/license-allowlist.yaml`):
+
+```yaml
+apiVersion: policy.deputy.sh/v1alpha2
+kind: PolicyBundle
+policies:
+  - name: allow-sans-copyleft
+    description: Block AGPL/SSPL-licensed packages
+    vars:
+      forbidden: '["SSPL-1.0", "AGPL-3.0-only", "GPL-3.0"]'
+    rules:
+      - action: deny
+        when: licenses.exists(l, l in forbidden)
+        reason: package carries a forbidden license
+      - action: warn
+        when: size(licenses) == 0
+        reason: package missing license metadata
+```
+
+Each rule becomes a CEL expression under the hood (`when ? [action] : []`), variables are expanded using `let` bindings, and metadata is preserved via the `//! policy.*` comments for compatibility with existing tooling. The bundle loader also supports structured details, statuses, remediation strings, and per-ecosystem scoping (`ecosystems: ["go"]` automatically injects `request.ecosystem in [...]`).
+
+Policy bundles live anywhere; Deputy ships a growing set of curated examples under `policy/examples/`:
+
+- `license-allowlist.yaml` — block copyleft while warning on missing metadata.
+- `log4shell.yaml` / `xz-backdoor.yaml` — quarantine high-profile supply-chain incidents.
+- `min-version.yaml` — enforce minimum versions for high-risk Go modules.
+- `severity-guardrail.yaml` — globally deny CRITICAL/HIGH vulnerabilities.
+- `block-package.yaml` — keep incident-prone packages like `left-pad` or `event-stream` out of repos.
+- `npm-scope-allowlist.yaml` — limit package installs to approved org scopes.
+- `prerelease-guard.yaml` — prevent alpha/beta drops from entering production caches.
+
+Treat these as living playbooks: copy them wholesale, or stitch multiple bundles together via `--policy bundle1.yaml --policy bundle2.yaml`.
+
+Use `deputy policy lint policy/examples/*.yaml` to ensure the generated CEL compiles, and reference them from any command via `--policy policy/examples/log4shell.yaml`.
 
 ## Policy Anatomy
 

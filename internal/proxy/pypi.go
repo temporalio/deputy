@@ -17,15 +17,15 @@ import (
 )
 
 type pypiHandler struct {
-	upstream      *url.URL
-	policies      policyEvaluator
+    upstream      *url.URL
+    policies      PolicyEvaluator
 	client        *http.Client
 	osvClient     analysis.OSVClient
 	vulnLookup    func(context.Context, string, string) ([]analysis.Vulnerability, error)
 	licenseLookup func(context.Context, string, string) ([]string, error)
 }
 
-func newPyPIHandler(upstream string, policies policyEvaluator) (*pypiHandler, error) {
+func newPyPIHandler(upstream string, policies PolicyEvaluator) (*pypiHandler, error) {
 	u, err := url.Parse(upstream)
 	if err != nil {
 		return nil, fmt.Errorf("parse upstream %q: %w", upstream, err)
@@ -204,6 +204,11 @@ func parsePyPIDistributionFilename(filename string) (string, string) {
 	namePart := base[:idx]
 	versionPart := base[idx+1:]
 	return namePart, versionPart
+}
+
+// NewPyPIHandler exposes the PyPI proxy handler for embedding in other servers.
+func NewPyPIHandler(upstream string, policies PolicyEvaluator) (http.Handler, error) {
+    return newPyPIHandler(upstream, policies)
 }
 
 func findVersionBoundary(base string) int {

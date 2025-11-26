@@ -17,15 +17,15 @@ import (
 )
 
 type npmHandler struct {
-	upstream      *url.URL
-	policies      policyEvaluator
+    upstream      *url.URL
+    policies      PolicyEvaluator
 	client        *http.Client
 	osvClient     analysis.OSVClient
 	vulnLookup    func(context.Context, string, string) ([]analysis.Vulnerability, error)
 	licenseLookup func(context.Context, string, string) ([]string, error)
 }
 
-func newNPMHandler(upstream string, policies policyEvaluator) (*npmHandler, error) {
+func newNPMHandler(upstream string, policies PolicyEvaluator) (*npmHandler, error) {
 	u, err := url.Parse(upstream)
 	if err != nil {
 		return nil, fmt.Errorf("parse upstream %q: %w", upstream, err)
@@ -197,4 +197,9 @@ func parseNPMPath(p string) (pkg string, version string, operation string) {
 	}
 	operation = "metadata"
 	return trimmed, "", operation
+}
+
+// NewNPMHandler exposes the npm proxy handler for embedding in other servers.
+func NewNPMHandler(upstream string, policies PolicyEvaluator) (http.Handler, error) {
+    return newNPMHandler(upstream, policies)
 }

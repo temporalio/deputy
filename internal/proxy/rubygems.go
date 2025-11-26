@@ -17,15 +17,15 @@ import (
 )
 
 type rubyGemsHandler struct {
-	upstream      *url.URL
-	policies      policyEvaluator
+    upstream      *url.URL
+    policies      PolicyEvaluator
 	client        *http.Client
 	osvClient     analysis.OSVClient
 	vulnLookup    func(context.Context, string, string) ([]analysis.Vulnerability, error)
 	licenseLookup func(context.Context, string, string) ([]string, error)
 }
 
-func newRubyGemsHandler(upstream string, policies policyEvaluator) (*rubyGemsHandler, error) {
+func newRubyGemsHandler(upstream string, policies PolicyEvaluator) (*rubyGemsHandler, error) {
 	u, err := url.Parse(upstream)
 	if err != nil {
 		return nil, fmt.Errorf("parse upstream %q: %w", upstream, err)
@@ -184,4 +184,10 @@ func parseRubyGemsPath(p string) (name string, version string, operation string)
 	}
 	operation = "metadata"
 	return trim, "", operation
+}
+
+// NewRubyGemsHandler exposes the RubyGems proxy handler for embedding in
+// other HTTP servers.
+func NewRubyGemsHandler(upstream string, policies PolicyEvaluator) (http.Handler, error) {
+    return newRubyGemsHandler(upstream, policies)
 }

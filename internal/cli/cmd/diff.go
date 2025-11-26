@@ -877,7 +877,7 @@ func runDiffPolicies(ctx context.Context, policyPaths []string, report DiffPolic
 	if err != nil {
 		return err
 	}
-	if err := evaluatePoliciesForCommand(ctx, policyPaths, reportMap, "diff", "diff_report", errW); err != nil {
+	if _, err := evaluatePoliciesForCommand(ctx, policyPaths, reportMap, "diff", "diff_report", errW); err != nil {
 		return err
 	}
 	for _, change := range report.Changes {
@@ -891,7 +891,7 @@ func runDiffPolicies(ctx context.Context, policyPaths []string, report DiffPolic
 			"targetRef": report.TargetRef,
 			"change":    changeMap,
 		}
-		if err := evaluatePoliciesForCommand(ctx, policyPaths, payload, "diff", "diff_dependency_change", errW); err != nil {
+		if _, err := evaluatePoliciesForCommand(ctx, policyPaths, payload, "diff", "diff_dependency_change", errW); err != nil {
 			return err
 		}
 	}
@@ -906,7 +906,7 @@ func runDiffPolicies(ctx context.Context, policyPaths []string, report DiffPolic
 			"targetRef":     report.TargetRef,
 			"vulnerability": vulnMap,
 		}
-		if err := evaluatePoliciesForCommand(ctx, policyPaths, payload, "diff", "diff_vulnerability", errW); err != nil {
+		if _, err := evaluatePoliciesForCommand(ctx, policyPaths, payload, "diff", "diff_vulnerability", errW); err != nil {
 			return err
 		}
 	}

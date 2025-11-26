@@ -1,0 +1,16 @@
+apiVersion: policy.deputy.sh/v1alpha2
+kind: PolicyBundle
+metadata:
+  title: "Severity guardrail"
+policies:
+  - name: deny-critical-and-high
+    description: Deny artifacts that still carry CRITICAL/HIGH vulnerabilities
+    vars:
+      blockedSeverities: '["CRITICAL", "HIGH"]'
+    rules:
+      - action: deny
+        when: vulnerabilities.exists(v, blockedSeverities.exists(s, s == v.severity))
+        reason: dependency has unresolved high-severity vulnerabilities
+        remediation: Apply the vendor patch or upgrade to a remediated release
+        details:
+          policy: deny-critical-and-high

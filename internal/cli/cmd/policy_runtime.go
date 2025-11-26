@@ -10,9 +10,9 @@ import (
 	"github.com/picatz/deputy/internal/policy"
 )
 
-func evaluatePoliciesForCommand(ctx context.Context, policyPaths []string, payload map[string]any, command, entrypoint string, errW io.Writer) error {
+func evaluatePoliciesForCommand(ctx context.Context, policyPaths []string, payload map[string]any, command, entrypoint string, errW io.Writer) ([]policy.Action, error) {
 	if len(policyPaths) == 0 {
-		return nil
+		return nil, nil
 	}
 	if errW == nil {
 		errW = os.Stderr
@@ -35,20 +35,23 @@ func evaluatePoliciesForCommand(ctx context.Context, policyPaths []string, paylo
 
 	sources, err := policy.LoadSources(policyPaths)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	actions, err := policy.EvaluateAll(ctx, sources, payload)
 	if err != nil {
-		return err
+		return nil, err
 	}
+	printWarnings := command != "scan"
 	for _, act := range actions {
 		switch act.Type {
 		case "deny":
 			msg := firstNonEmpty(act.Reason, act.Message, "policy denied execution")
-			return fmt.Errorf("policy %s denied command: %s", act.Source, msg)
+			return nil, fmt.Errorf("policy %s denied command: %s", act.Source, msg)
 		case "warn":
-			msg := firstNonEmpty(act.Reason, act.Message, "policy warning")
-			fmt.Fprintf(errW, "policy warning (%s): %s\n", act.Source, msg)
+			if printWarnings {
+				msg := firstNonEmpty(act.Reason, act.Message, "policy warning")
+				fmt.Fprintf(errW, "policy warning (%s): %s\n", act.Source, msg)
+			}
 		case "allow", "":
 			continue
 		default:
@@ -58,7 +61,7 @@ func evaluatePoliciesForCommand(ctx context.Context, policyPaths []string, paylo
 			}
 		}
 	}
-	return nil
+	return actions, nil
 }
 
 func firstNonEmpty(values ...string) string {

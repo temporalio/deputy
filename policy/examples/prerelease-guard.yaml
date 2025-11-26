@@ -1,0 +1,19 @@
+apiVersion: policy.deputy.sh/v1alpha2
+kind: PolicyBundle
+metadata:
+  title: "Pre-release guardrails"
+policies:
+  - name: block-pre-release-in-prod
+    description: Prevent alpha/beta/rc builds from entering prod artifact caches
+    vars:
+      prereleasePattern: '"(?i).*(alpha|beta|rc|preview)"'
+    rules:
+      - action: deny
+        when: request.operation == "download" && request.version.matches(prereleasePattern) && env.?config.?allowPrerelease.orValue(false) == false
+        reason: pre-release build blocked outside laboratories
+        remediation: Pin to the latest stable release or set allowPrerelease=true for dev listeners
+      - action: warn
+        when: request.version.matches(prereleasePattern) && env.?config.?allowPrerelease.orValue(false) == true
+        reason: pre-release build fetched under allowPrerelease override
+        headers:
+          X-Deputy-Warning: prerelease-build

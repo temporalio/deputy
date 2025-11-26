@@ -232,7 +232,7 @@ func runSBOMPolicies(ctx context.Context, policyPaths []string, result sbomx.Res
 	if err != nil {
 		return err
 	}
-	if err := evaluatePoliciesForCommand(ctx, policyPaths, reportMap, "sbom", "sbom_report", errW); err != nil {
+	if _, err := evaluatePoliciesForCommand(ctx, policyPaths, reportMap, "sbom", "sbom_report", errW); err != nil {
 		return err
 	}
 	for _, pkg := range result.Packages {
@@ -246,7 +246,7 @@ func runSBOMPolicies(ctx context.Context, policyPaths []string, result sbomx.Res
 			"commit":    result.Commit,
 			"component": pkgMap,
 		}
-		if err := evaluatePoliciesForCommand(ctx, policyPaths, payload, "sbom", "sbom_component", errW); err != nil {
+		if _, err := evaluatePoliciesForCommand(ctx, policyPaths, payload, "sbom", "sbom_component", errW); err != nil {
 			return err
 		}
 	}

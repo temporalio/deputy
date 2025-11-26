@@ -52,9 +52,9 @@ func TestRubyGemsHandlerBlocksVulnerability(t *testing.T) {
 	if err := os.WriteFile(pol, []byte(policySource), 0o644); err != nil {
 		t.Fatalf("write policy: %v", err)
 	}
-	engine, err := newPolicyEngine([]string{pol})
+	engine, err := NewPolicyEngine([]string{pol})
 	if err != nil {
-		t.Fatalf("newPolicyEngine: %v", err)
+		t.Fatalf("NewPolicyEngine: %v", err)
 	}
 	handler, err := newRubyGemsHandler(upstream.URL, engine)
 	if err != nil {
@@ -87,7 +87,7 @@ func TestRubyGemsHandlerBlocksLicense(t *testing.T) {
 	if err := os.WriteFile(pol, []byte(policySource), 0o644); err != nil {
 		t.Fatalf("write policy: %v", err)
 	}
-	engine, err := newPolicyEngine([]string{pol})
+	engine, err := NewPolicyEngine([]string{pol})
 	if err != nil {
 		t.Fatalf("engine: %v", err)
 	}
@@ -186,7 +186,7 @@ func TestRubyGemsHandlerEndToEndGemCLI(t *testing.T) {
 	if err := os.WriteFile(pol, []byte(policySource), 0o644); err != nil {
 		t.Fatalf("write policy: %v", err)
 	}
-	engine, err := newPolicyEngine([]string{pol})
+	engine, err := NewPolicyEngine([]string{pol})
 	if err != nil {
 		t.Fatalf("engine: %v", err)
 	}
