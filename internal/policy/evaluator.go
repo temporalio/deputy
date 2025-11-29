@@ -10,6 +10,7 @@ import (
 	"github.com/google/cel-go/cel"
 	"github.com/google/cel-go/checker/decls"
 	"github.com/google/cel-go/common/types/ref"
+	"github.com/google/cel-go/ext"
 	exprpb "google.golang.org/genproto/googleapis/api/expr/v1alpha1"
 )
 
@@ -35,6 +36,14 @@ var (
 // Evaluate compiles the provided CEL source and evaluates it against the input
 // document. Input keys are exposed to the CEL program as top-level identifiers.
 func Evaluate(ctx context.Context, source string, input map[string]any) (any, error) {
+	if input == nil {
+		input = map[string]any{}
+	}
+	for _, name := range defaultVariableNames {
+		if _, ok := input[name]; !ok {
+			input[name] = nil
+		}
+	}
 	env, err := envForInput(input)
 	if err != nil {
 		return nil, err
@@ -46,9 +55,6 @@ func Evaluate(ctx context.Context, source string, input map[string]any) (any, er
 	prog, err := env.Program(ast)
 	if err != nil {
 		return nil, err
-	}
-	if input == nil {
-		input = map[string]any{}
 	}
 	out, _, err := prog.ContextEval(ctx, input)
 	if err != nil {
@@ -103,6 +109,7 @@ func envWithNames(extra []string) (*cel.Env, error) {
 	env, err := cel.NewEnv(
 		cel.OptionalTypes(),
 		cel.Declarations(declSlice...),
+		ext.Strings(),
 	)
 	if err != nil {
 		return nil, fmt.Errorf("build CEL env: %w", err)

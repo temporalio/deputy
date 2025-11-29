@@ -17,11 +17,68 @@ type structuredBundle struct {
 }
 
 type structuredPolicy struct {
-	Name        string            `yaml:"name"`
-	Description string            `yaml:"description,omitempty"`
-	Ecosystems  []string          `yaml:"ecosystems,omitempty"`
-	Vars        map[string]string `yaml:"vars,omitempty"`
-	Rules       []structuredRule  `yaml:"rules"`
+	Name        string           `yaml:"name"`
+	Description string           `yaml:"description,omitempty"`
+	Ecosystems  []string         `yaml:"ecosystems,omitempty"`
+	Vars        orderedVars      `yaml:"vars,omitempty"`
+	Rules       []structuredRule `yaml:"rules"`
+}
+
+// orderedVars preserves author order from YAML mappings so dependent vars
+// expand deterministically (later vars can reference earlier ones).
+type orderedVars []varKV
+
+type varKV struct {
+	Name string
+	Expr string
+}
+
+func (o *orderedVars) UnmarshalYAML(node *yaml.Node) error {
+	if node == nil {
+		return nil
+	}
+	if node.Kind != yaml.MappingNode {
+		return fmt.Errorf("vars must be a mapping")
+	}
+	if len(node.Content)%2 != 0 {
+		return fmt.Errorf("vars mapping must have even number of nodes")
+	}
+	var out []varKV
+	for i := 0; i < len(node.Content); i += 2 {
+		k := node.Content[i]
+		v := node.Content[i+1]
+		var kv varKV
+		if err := k.Decode(&kv.Name); err != nil {
+			return err
+		}
+		if err := v.Decode(&kv.Expr); err != nil {
+			return err
+		}
+		out = append(out, kv)
+	}
+	*o = out
+	return nil
+}
+
+func (o *orderedVars) UnmarshalJSON(data []byte) error {
+	if len(data) == 0 || string(data) == "null" {
+		return nil
+	}
+	var m map[string]string
+	if err := json.Unmarshal(data, &m); err != nil {
+		return err
+	}
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	out := make([]varKV, 0, len(keys))
+	for _, k := range keys {
+		out = append(out, varKV{Name: k, Expr: m[k]})
+	}
+	*o = out
+	return nil
 }
 
 type structuredRule struct {
@@ -39,6 +96,10 @@ const structuredAPIVersion = "policy.deputy.sh/v1alpha2"
 func tryParseStructuredBundle(data []byte, path string) ([]Source, bool, error) {
 	var bundle structuredBundle
 	if err := yaml.Unmarshal(data, &bundle); err != nil {
+		trim := strings.TrimSpace(string(data))
+		if strings.HasPrefix(trim, "apiVersion") || strings.Contains(trim, "apiVersion:") {
+			return nil, false, fmt.Errorf("%s: parse structured bundle: %w", path, err)
+		}
 		return nil, false, nil
 	}
 	if strings.TrimSpace(bundle.APIVersion) == "" || len(bundle.Policies) == 0 {
@@ -84,14 +145,20 @@ func (p structuredPolicy) toCELSource() (string, error) {
 	}
 	body := builder.String()
 	if len(p.Vars) > 0 {
-		keys := make([]string, 0, len(p.Vars))
-		for k := range p.Vars {
-			keys = append(keys, k)
+		seen := map[string]struct{}{}
+		for _, kv := range p.Vars {
+			if strings.TrimSpace(kv.Name) == "" {
+				return "", fmt.Errorf("vars must have non-empty names")
+			}
+			if _, ok := seen[kv.Name]; ok {
+				return "", fmt.Errorf("duplicate var name %q", kv.Name)
+			}
+			seen[kv.Name] = struct{}{}
 		}
-		sort.Strings(keys)
-		for i := len(keys) - 1; i >= 0; i-- {
-			name := keys[i]
-			expr := p.Vars[name]
+		// expand vars in reverse author order so earlier vars are in scope for later ones
+		for i := len(p.Vars) - 1; i >= 0; i-- {
+			name := p.Vars[i].Name
+			expr := p.Vars[i].Expr
 			body = fmt.Sprintf("([%s]).map(%s, %s)[0]", expr, name, body)
 		}
 	}

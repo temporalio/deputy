@@ -17,8 +17,8 @@ import (
 )
 
 type pypiHandler struct {
-    upstream      *url.URL
-    policies      PolicyEvaluator
+	upstream      *url.URL
+	policies      PolicyEvaluator
 	client        *http.Client
 	osvClient     analysis.OSVClient
 	vulnLookup    func(context.Context, string, string) ([]analysis.Vulnerability, error)
@@ -59,6 +59,9 @@ func (h *pypiHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		if licenses := h.licensePayload(ctx, pkg, version); len(licenses) > 0 {
 			payload["licenses"] = licenses
+			if req, ok := payload["request"].(map[string]any); ok {
+				req["licenses"] = licenses
+			}
 		}
 	}
 
@@ -208,7 +211,7 @@ func parsePyPIDistributionFilename(filename string) (string, string) {
 
 // NewPyPIHandler exposes the PyPI proxy handler for embedding in other servers.
 func NewPyPIHandler(upstream string, policies PolicyEvaluator) (http.Handler, error) {
-    return newPyPIHandler(upstream, policies)
+	return newPyPIHandler(upstream, policies)
 }
 
 func findVersionBoundary(base string) int {

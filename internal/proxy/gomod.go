@@ -16,8 +16,8 @@ import (
 )
 
 type goModuleHandler struct {
-    upstream      *url.URL
-    policies      PolicyEvaluator
+	upstream      *url.URL
+	policies      PolicyEvaluator
 	client        *http.Client
 	osvClient     analysis.OSVClient
 	vulnLookup    func(context.Context, string, string) ([]analysis.Vulnerability, error)
@@ -63,6 +63,9 @@ func (h *goModuleHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		if licenses := h.licensePayload(ctx, module, version); len(licenses) > 0 {
 			payload["licenses"] = licenses
+			if req, ok := payload["request"].(map[string]any); ok {
+				req["licenses"] = licenses
+			}
 		}
 	}
 	var actions []policy.Action
@@ -211,5 +214,5 @@ func parseGoProxyPath(p string) (module, version, fileType, operation string, er
 // NewGoModuleHandler exposes the Go module proxy handler for reuse outside the
 // proxy server when an in-process HTTP handler is sufficient.
 func NewGoModuleHandler(upstream string, policies PolicyEvaluator) (http.Handler, error) {
-    return newGoModuleHandler(upstream, policies)
+	return newGoModuleHandler(upstream, policies)
 }

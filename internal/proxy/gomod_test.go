@@ -140,10 +140,10 @@ func TestGoModuleHandlerBlocksCriticalVulnerability(t *testing.T) {
 	if err := os.WriteFile(policyPath, []byte(policySource), 0o644); err != nil {
 		t.Fatalf("write policy: %v", err)
 	}
-			engine, err := NewPolicyEngine([]string{policyPath})
-			if err != nil {
-				t.Fatalf("NewPolicyEngine: %v", err)
-			}
+	engine, err := NewPolicyEngine([]string{policyPath})
+	if err != nil {
+		t.Fatalf("NewPolicyEngine: %v", err)
+	}
 	handler, err := newGoModuleHandler("https://proxy.golang.org", engine)
 	if err != nil {
 		t.Fatalf("handler: %v", err)
@@ -195,6 +195,34 @@ func TestGoModuleHandlerLicensePolicy(t *testing.T) {
 	handler.ServeHTTP(resp, req)
 	if resp.Code != http.StatusForbidden {
 		t.Fatalf("expected 403 for license block, got %d", resp.Code)
+	}
+}
+
+func TestGoModuleHandlerLicenseAllowlistExample(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, "ok")
+	}))
+	defer upstream.Close()
+
+	pol := filepath.Clean(filepath.Join("..", "..", "policy", "examples", "license-allowlist.yaml"))
+	engine, err := NewPolicyEngine([]string{pol})
+	if err != nil {
+		t.Fatalf("NewPolicyEngine: %v", err)
+	}
+	handler, err := newGoModuleHandler(upstream.URL, engine)
+	if err != nil {
+		t.Fatalf("handler: %v", err)
+	}
+	handler.osvClient = nil
+	handler.licenseLookup = func(ctx context.Context, module, version string) ([]string, error) {
+		return []string{"GPL-3.0"}, nil
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/github.com/example/mod/@v/v1.0.0.zip", nil)
+	rr := httptest.NewRecorder()
+	handler.ServeHTTP(rr, req)
+	if rr.Code != http.StatusForbidden {
+		t.Fatalf("expected 403 for license allowlist policy, got %d", rr.Code)
 	}
 }
 

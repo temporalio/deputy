@@ -1,0 +1,21 @@
+apiVersion: policy.deputy.sh/v1alpha2
+kind: PolicyBundle
+metadata:
+  title: "License guardrails (composed vars)"
+policies:
+  - name: license-allowlist-composed
+    description: Copyleft block with layered vars and scope guard
+    vars:
+      componentLicenses: 'component.?licenses.orValue([])'
+      requestLicenses: 'request.?licenses.orValue([])'
+      licenses_union: 'componentLicenses + requestLicenses'
+      normalized: 'licenses_union.map(l, l.upperAscii())'
+      forbidden: "['SSPL-1.0','AGPL-3.0-ONLY','AGPL-3.0','GPL-3.0','GPL-3.0-ONLY']"
+      in_scope: "env.command in ['proxy','sbom','diff']"
+    rules:
+      - action: deny
+        when: in_scope && normalized.exists(l, l in forbidden)
+        reason: "forbidden license(s): "
+      - action: warn
+        when: in_scope && size(normalized) == 0
+        reason: "missing license metadata"

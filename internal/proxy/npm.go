@@ -17,8 +17,8 @@ import (
 )
 
 type npmHandler struct {
-    upstream      *url.URL
-    policies      PolicyEvaluator
+	upstream      *url.URL
+	policies      PolicyEvaluator
 	client        *http.Client
 	osvClient     analysis.OSVClient
 	vulnLookup    func(context.Context, string, string) ([]analysis.Vulnerability, error)
@@ -58,6 +58,9 @@ func (h *npmHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		if licenses := h.licensePayload(ctx, pkg, version); len(licenses) > 0 {
 			payload["licenses"] = licenses
+			if req, ok := payload["request"].(map[string]any); ok {
+				req["licenses"] = licenses
+			}
 		}
 	}
 
@@ -201,5 +204,5 @@ func parseNPMPath(p string) (pkg string, version string, operation string) {
 
 // NewNPMHandler exposes the npm proxy handler for embedding in other servers.
 func NewNPMHandler(upstream string, policies PolicyEvaluator) (http.Handler, error) {
-    return newNPMHandler(upstream, policies)
+	return newNPMHandler(upstream, policies)
 }

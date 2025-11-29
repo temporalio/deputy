@@ -17,8 +17,8 @@ import (
 )
 
 type rubyGemsHandler struct {
-    upstream      *url.URL
-    policies      PolicyEvaluator
+	upstream      *url.URL
+	policies      PolicyEvaluator
 	client        *http.Client
 	osvClient     analysis.OSVClient
 	vulnLookup    func(context.Context, string, string) ([]analysis.Vulnerability, error)
@@ -58,6 +58,9 @@ func (h *rubyGemsHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		if licenses := h.licensePayload(ctx, name, version); len(licenses) > 0 {
 			payload["licenses"] = licenses
+			if req, ok := payload["request"].(map[string]any); ok {
+				req["licenses"] = licenses
+			}
 		}
 	}
 
@@ -189,5 +192,5 @@ func parseRubyGemsPath(p string) (name string, version string, operation string)
 // NewRubyGemsHandler exposes the RubyGems proxy handler for embedding in
 // other HTTP servers.
 func NewRubyGemsHandler(upstream string, policies PolicyEvaluator) (http.Handler, error) {
-    return newRubyGemsHandler(upstream, policies)
+	return newRubyGemsHandler(upstream, policies)
 }
