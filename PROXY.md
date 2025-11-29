@@ -226,10 +226,18 @@ You can gain confidence in the npm adapter without installing Node locally by dr
        ecosystems: ["npm"]
        upstream: https://registry.npmjs.org
        policies:
-         - $tmpdir/policies/allow-all.cel
+         - $tmpdir/policies/allow-all.yaml
    EOF
 
-   printf '[]\n' > "$tmpdir/policies/allow-all.cel"
+cat <<'EOF' > "$tmpdir/policies/allow-all.yaml"
+apiVersion: policy.deputy.sh/v1alpha2
+kind: PolicyBundle
+policies:
+  - name: allow-all
+    rules:
+      - action: allow
+        when: true
+EOF
    ```
 
 2. **Launch the proxy** and keep the PID so you can shut it down later:
@@ -258,21 +266,24 @@ You can gain confidence in the npm adapter without installing Node locally by dr
 4. **Add a blocking policy** — deny `left-pad` and restart the proxy with the policy overlay:
 
    ```bash
-   cat <<'EOF' > "$tmpdir/policies/block-leftpad.cel"
-   (request.package == "left-pad"
-     ? [{
-         "action": "deny",
-         "reason": "blocked package (left-pad)",
-         "status": 403,
-         "headers": {"X-Deputy-Policy": "block-leftpad"}
-       }]
-     : [])
+   cat <<'EOF' > "$tmpdir/policies/block-leftpad.yaml"
+   apiVersion: policy.deputy.sh/v1alpha2
+   kind: PolicyBundle
+   policies:
+     - name: block-leftpad
+       rules:
+         - action: deny
+           when: request.package == "left-pad"
+           reason: "blocked package (left-pad)"
+           status: 403
+           headers:
+             X-Deputy-Policy: block-leftpad
    EOF
 
    kill $(cat "$tmpdir/proxy.pid")
    go run . --log-level=info proxy serve \
      --config "$tmpdir/proxy.yaml" \
-     --policy "$tmpdir/policies/block-leftpad.cel" \
+     --policy "$tmpdir/policies/block-leftpad.yaml" \
      > "$tmpdir/proxy.log" 2>&1 &
    echo $! > "$tmpdir/proxy.pid"
    ```
@@ -318,7 +329,7 @@ If you already have Deputy installed locally, the fastest way to try the proxy i
 
 > The npm wrapper also covers Yarn and pnpm because they respect `NPM_CONFIG_REGISTRY` out of the box.
 
-Under the hood these commands launch an in-process proxy bound to `127.0.0.1`, set the right env vars (`GOPROXY`, `NPM_CONFIG_REGISTRY`, `PIP_INDEX_URL`, `GEMRC`, etc.), run your command, then tear everything down. You can still pass extra flags before `--`, e.g. `--policy corp.cel` or `--upstream https://custom.mirror` to mirror production settings. The manual Docker flows below remain available when you want to see every moving piece explicitly or script the experience into CI.
+Under the hood these commands launch an in-process proxy bound to `127.0.0.1`, set the right env vars (`GOPROXY`, `NPM_CONFIG_REGISTRY`, `PIP_INDEX_URL`, `GEMRC`, etc.), run your command, then tear everything down. You can still pass extra flags before `--`, e.g. `--policy corp.yaml` or `--upstream https://custom.mirror` to mirror production settings. The manual Docker flows below remain available when you want to see every moving piece explicitly or script the experience into CI.
 
 ### PyPI Proxy Hands-On Example
 
@@ -337,10 +348,18 @@ The same pattern works for Python without polluting your host interpreter. This 
        ecosystems: ["pypi"]
        upstream: https://pypi.org
        policies:
-         - $tmpdir/policies/allow-all.cel
+         - $tmpdir/policies/allow-all.yaml
    EOF
 
-   printf '[]\n' > "$tmpdir/policies/allow-all.cel"
+   cat <<'EOF' > "$tmpdir/policies/allow-all.yaml"
+   apiVersion: policy.deputy.sh/v1alpha2
+   kind: PolicyBundle
+   policies:
+     - name: allow-all
+       rules:
+         - action: allow
+           when: true
+   EOF
    ```
 
 2. **Start the proxy**:
@@ -368,21 +387,24 @@ The same pattern works for Python without polluting your host interpreter. This 
 4. **Overlay a deny policy** that blocks `pkginfo` and restart:
 
    ```bash
-   cat <<'EOF' > "$tmpdir/policies/block-pkginfo.cel"
-   (request.package == "pkginfo"
-     ? [{
-         "action": "deny",
-         "reason": "blocked package (pkginfo)",
-         "status": 403,
-         "headers": {"X-Deputy-Policy": "block-pypi"}
-       }]
-     : [])
+   cat <<'EOF' > "$tmpdir/policies/block-pkginfo.yaml"
+   apiVersion: policy.deputy.sh/v1alpha2
+   kind: PolicyBundle
+   policies:
+     - name: block-pkginfo
+       rules:
+         - action: deny
+           when: request.package == "pkginfo"
+           reason: "blocked package (pkginfo)"
+           status: 403
+           headers:
+             X-Deputy-Policy: block-pypi
    EOF
 
    kill $(cat "$tmpdir/proxy.pid")
    go run . --log-level=info proxy serve \
      --config "$tmpdir/proxy.yaml" \
-     --policy "$tmpdir/policies/block-pkginfo.cel" \
+     --policy "$tmpdir/policies/block-pkginfo.yaml" \
      > "$tmpdir/proxy.log" 2>&1 &
    echo $! > "$tmpdir/proxy.pid"
    ```
@@ -434,10 +456,18 @@ Rubyists can follow the same pattern with Docker’s `ruby:3.3` image and the `g
        ecosystems: ["rubygems"]
        upstream: https://rubygems.org
        policies:
-         - $tmpdir/policies/allow-all.cel
+         - $tmpdir/policies/allow-all.yaml
    EOF
 
-   printf '[]\n' > "$tmpdir/policies/allow-all.cel"
+cat <<'EOF' > "$tmpdir/policies/allow-all.yaml"
+apiVersion: policy.deputy.sh/v1alpha2
+kind: PolicyBundle
+policies:
+  - name: allow-all
+    rules:
+      - action: allow
+        when: true
+EOF
    ```
 
 2. **Start the proxy**:
@@ -463,21 +493,24 @@ Rubyists can follow the same pattern with Docker’s `ruby:3.3` image and the `g
 4. **Overlay a deny policy** for `rake` and restart:
 
    ```bash
-   cat <<'EOF' > "$tmpdir/policies/block-rake.cel"
-   (request.package == "rake"
-     ? [{
-         "action": "deny",
-         "reason": "blocked package (rake)",
-         "status": 403,
-         "headers": {"X-Deputy-Policy": "block-rubygems"}
-       }]
-     : [])
+   cat <<'EOF' > "$tmpdir/policies/block-rake.yaml"
+   apiVersion: policy.deputy.sh/v1alpha2
+   kind: PolicyBundle
+   policies:
+     - name: block-rake
+       rules:
+         - action: deny
+           when: request.package == "rake"
+           reason: "blocked package (rake)"
+           status: 403
+           headers:
+             X-Deputy-Policy: block-rubygems
    EOF
 
    kill $(cat "$tmpdir/proxy.pid")
    go run . --log-level=info proxy serve \
      --config "$tmpdir/proxy.yaml" \
-     --policy "$tmpdir/policies/block-rake.cel" \
+     --policy "$tmpdir/policies/block-rake.yaml" \
      > "$tmpdir/proxy.log" 2>&1 &
    echo $! > "$tmpdir/proxy.pid"
    ```
@@ -527,10 +560,18 @@ Because Go tooling relies on GOPROXY, you can validate end-to-end behavior entir
        ecosystems: ["go"]
        upstream: https://proxy.golang.org
        policies:
-         - $tmpdir/policies/allow-all.cel
+         - $tmpdir/policies/allow-all.yaml
    EOF
 
-   printf '[]\n' > "$tmpdir/policies/allow-all.cel"
+   cat <<'EOF' > "$tmpdir/policies/allow-all.yaml"
+   apiVersion: policy.deputy.sh/v1alpha2
+   kind: PolicyBundle
+   policies:
+     - name: allow-all
+       rules:
+         - action: allow
+           when: true
+   EOF
    ```
 
 2. **Start the proxy**:
@@ -566,21 +607,24 @@ GOMODCACHE=/go/pkg/mod go mod download golang.org/x/text@v0.14.0'
 4. **Overlay a deny policy** — block `github.com/pkg/errors` and restart:
 
    ```bash
-   cat <<'EOF' > "$tmpdir/policies/block-errors.cel"
-   (request.module == "github.com/pkg/errors"
-     ? [{
-         "action": "deny",
-         "reason": "blocked module (errors)",
-         "status": 403,
-         "headers": {"X-Deputy-Policy": "block-gomod"}
-       }]
-     : [])
+   cat <<'EOF' > "$tmpdir/policies/block-errors.yaml"
+   apiVersion: policy.deputy.sh/v1alpha2
+   kind: PolicyBundle
+   policies:
+     - name: block-errors
+       rules:
+         - action: deny
+           when: request.module == "github.com/pkg/errors"
+           reason: "blocked module (errors)"
+           status: 403
+           headers:
+             X-Deputy-Policy: block-gomod
    EOF
 
    kill $(cat "$tmpdir/proxy.pid")
    go run . --log-level=info proxy serve \
      --config "$tmpdir/proxy.yaml" \
-     --policy "$tmpdir/policies/block-errors.cel" \
+     --policy "$tmpdir/policies/block-errors.yaml" \
      > "$tmpdir/proxy.log" 2>&1 &
    echo $! > "$tmpdir/proxy.pid"
    ```
@@ -800,7 +844,7 @@ This phased plan ensures that when Deputy eventually proxies write traffic the s
 
 1. Create `proxy.yaml` using `deputy proxy template --ecosystem go > proxy.yaml`.
 2. Customize upstream URLs, severity guardrails, and policy bundle references.
-3. Write CEL policies (see `POLICY.md`) and bundle them: `deputy policy bundle --out policy/corp.bundle.json policy/*.cel`.
+3. Write YAML policies (see `POLICY.md`) and bundle them: `deputy policy bundle --out policy/corp.bundle.json policy/*.yaml`.
 4. Run `deputy proxy check --config proxy.yaml`.
 5. Launch the proxy: `deputy proxy serve --config proxy.yaml`.
 6. Point `GOPROXY` (and later `PIP_INDEX_URL`, `npm config set registry`) at the Deputy listener.

@@ -49,7 +49,7 @@ func MarshalTemplate(ecosystem string) (string, error) {
 					Bind:       ":8080",
 					Ecosystems: []string{"go"},
 					Upstream:   "https://proxy.golang.org",
-					Policies:   []string{"policy/go-proxy.cel"},
+					Policies:   []string{"policy/go-proxy.yaml"},
 				},
 			},
 		}
@@ -61,7 +61,7 @@ func MarshalTemplate(ecosystem string) (string, error) {
 					Bind:       ":8081",
 					Ecosystems: []string{"pypi"},
 					Upstream:   "https://pypi.org",
-					Policies:   []string{"policy/pypi.cel"},
+					Policies:   []string{"policy/pypi.yaml"},
 				},
 			},
 		}
@@ -73,7 +73,7 @@ func MarshalTemplate(ecosystem string) (string, error) {
 					Bind:       ":8082",
 					Ecosystems: []string{"npm"},
 					Upstream:   "https://registry.npmjs.org",
-					Policies:   []string{"policy/npm.cel"},
+					Policies:   []string{"policy/npm.yaml"},
 				},
 			},
 		}
@@ -85,7 +85,7 @@ func MarshalTemplate(ecosystem string) (string, error) {
 					Bind:       ":8083",
 					Ecosystems: []string{"rubygems"},
 					Upstream:   "https://rubygems.org",
-					Policies:   []string{"policy/rubygems.cel"},
+					Policies:   []string{"policy/rubygems.yaml"},
 				},
 			},
 		}

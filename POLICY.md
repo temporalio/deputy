@@ -13,22 +13,22 @@ Deputy’s core insight is that dependency intelligence should be reusable every
 
 | Command | Purpose |
 | --- | --- |
-| `deputy policy eval --policy policy/block.cel --input scan.json` | Evaluate a policy file against JSON input (any Deputy command can emit JSON for reuse here). |
+| `deputy policy eval --policy policy/block.yaml --input scan.json` | Evaluate a policy bundle against JSON input (any Deputy command can emit JSON for reuse here). |
 | `deputy policy test ./policy` | Run table-driven test cases stored alongside policies (see below). |
-| `deputy policy bundle --out policy/corp.bundle.json policy/*.cel` | Compile + type-check CEL programs and package them (with metadata) for fast loading by other commands. |
-| `deputy policy lint policy/*.cel` | Static checks (unused vars, shadowed identifiers, deprecated helpers). |
-| `deputy policy inspect policy.cel bundle.json` | Show CEL metadata (names, entrypoints) or bundle contents. |
-| `deputy policy simulate --policy policy.cel --input payload.json` | Replay recorded inputs through one or more policies to observe combined decisions before rollout. |
+| `deputy policy bundle --out policy/corp.bundle.json policy/*.yaml` | Package structured bundles for fast loading by other commands. |
+| `deputy policy lint policy/*.yaml` | Static checks (unused vars, shadowed identifiers, deprecated helpers). |
+| `deputy policy inspect policy.yaml bundle.json` | Show bundle metadata (names, entrypoints) or bundle contents. |
+| `deputy policy simulate --policy policy.yaml --input payload.json` | Replay recorded inputs through one or more policies to observe combined decisions before rollout. |
 | `deputy policy repl` | Start an interactive CEL playground backed by a `metadata` map for quick experiments. |
 
 Other commands opt into the framework via `--policy` or `--policy-bundle` flags. Examples:
 
 - `deputy scan --policy policy/corp.bundle.json`
-- `deputy diff --policy policy/licensing.cel`
+- `deputy diff --policy policy/licensing.yaml`
 - `deputy proxy serve --config proxy.yaml --policy-bundle policy/corp.bundle.json`
-- `deputy sbom --policy policy/sbom.cel --format json`
-- `deputy fix --policy policy/fix.cel --format json`
-- `deputy triage --policy policy/triage.cel`
+- `deputy sbom --policy policy/sbom.yaml --format json`
+- `deputy fix --policy policy/fix.yaml --format json`
+- `deputy triage --policy policy/triage.yaml`
 
 Each CLI command emits well-defined entrypoints when `--policy` is provided:
 
@@ -44,7 +44,7 @@ The `env` object passed to CEL now contains both `command` (e.g., `scan`) and `e
 
 ## Structured Policy Bundles
 
-You can still author raw `.cel` files, but most teams prefer a structured format that wraps CEL in YAML. Deputy now ships a bundle schema (`apiVersion: policy.deputy.sh/v1alpha2`, `kind: PolicyBundle`) so AppSec engineers can declare variables, multiple rules, and metadata without hand-writing ternary expressions. Example (`policy/examples/license-allowlist.yaml`):
+Policies must be authored as structured YAML bundles (`apiVersion: policy.deputy.sh/v1alpha2`, `kind: PolicyBundle`). Raw `.cel` files are no longer accepted directly. Example (`policy/examples/license-allowlist.yaml`):
 
 ```yaml
 apiVersion: policy.deputy.sh/v1alpha2
@@ -265,7 +265,7 @@ Policies live alongside test cases (`*.policytest.json`):
 {
   "name": "blocks high severity go modules",
   "entrypoint": "go_artifact_request",
-  "policy": "./policy/go-block.cel",
+  "policy": "./policy/go-block.yaml",
   "input": "./testdata/go_high.json",
   "want": [
     {"action": "deny", "reason": "High severity vuln(s): CVE-2024-9999"}
@@ -375,8 +375,8 @@ Because CEL entrypoints share the same schema across commands, a single policy f
 ## Putting It Together
 
 1. Draft CEL policies and tests under `policy/`.
-2. Run `deputy policy lint policy/*.cel` and `deputy policy test ./policy`.
-3. Bundle them: `deputy policy bundle --out policy/corp.bundle.json policy/*.cel`.
+2. Run `deputy policy lint policy/*.yaml` and `deputy policy test ./policy`.
+3. Bundle them: `deputy policy bundle --out policy/corp.bundle.json policy/*.yaml`.
 4. Reference the bundle from any command:
    - `deputy scan --policy policy/corp.bundle.json`
    - `deputy proxy serve --config proxy.yaml --policy-bundle policy/corp.bundle.json`

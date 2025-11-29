@@ -17,9 +17,15 @@ true`
 
 func TestBuildBundle(t *testing.T) {
 	dir := t.TempDir()
-	path := filepath.Join(dir, "policy.cel")
-	source := `//! policy.name = "bundle-policy"
-true`
+	path := filepath.Join(dir, "policy.yaml")
+	source := `apiVersion: policy.deputy.sh/v1alpha2
+kind: PolicyBundle
+policies:
+  - name: bundle-policy
+    rules:
+      - action: allow
+        when: true
+`
 	if err := os.WriteFile(path, []byte(source), 0o644); err != nil {
 		t.Fatalf("write policy: %v", err)
 	}

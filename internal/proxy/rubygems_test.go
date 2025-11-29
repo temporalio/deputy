@@ -15,6 +15,24 @@ import (
 	analysis "github.com/picatz/deputy/internal/analysis"
 )
 
+func writeRubyBundle(t *testing.T, dir, name, when, reason, action string) string {
+	t.Helper()
+	content := fmt.Sprintf(`apiVersion: policy.deputy.sh/v1alpha2
+kind: PolicyBundle
+policies:
+  - name: %s
+    rules:
+      - action: %s
+        when: %s
+        reason: %q
+`, name, action, when, reason)
+	path := filepath.Join(dir, name+".yaml")
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatalf("write bundle: %v", err)
+	}
+	return path
+}
+
 func TestParseRubyGemsPath(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -43,15 +61,8 @@ func TestRubyGemsHandlerBlocksVulnerability(t *testing.T) {
 	}))
 	defer upstream.Close()
 
-	policySource := `//! policy.name = "block-critical"
-(vulnerabilities.exists(v, v.Severity == "CRITICAL")
-  ? [{"action":"deny","reason":"critical vuln"}]
-  : [])`
 	tmp := t.TempDir()
-	pol := filepath.Join(tmp, "rubygems.cel")
-	if err := os.WriteFile(pol, []byte(policySource), 0o644); err != nil {
-		t.Fatalf("write policy: %v", err)
-	}
+	pol := writeRubyBundle(t, tmp, "block-critical", `vulnerabilities.exists(v, v.Severity == "CRITICAL")`, "critical vuln", "deny")
 	engine, err := NewPolicyEngine([]string{pol})
 	if err != nil {
 		t.Fatalf("NewPolicyEngine: %v", err)
@@ -78,15 +89,8 @@ func TestRubyGemsHandlerBlocksLicense(t *testing.T) {
 	}))
 	defer upstream.Close()
 
-	policySource := `//! policy.name = "block-license"
-(licenses.exists(l, l == "AGPL-3.0")
-  ? [{"action":"deny","reason":"license"}]
-  : [])`
 	tmp := t.TempDir()
-	pol := filepath.Join(tmp, "license.cel")
-	if err := os.WriteFile(pol, []byte(policySource), 0o644); err != nil {
-		t.Fatalf("write policy: %v", err)
-	}
+	pol := writeRubyBundle(t, tmp, "block-license", `licenses.exists(l, l == "AGPL-3.0")`, "license", "deny")
 	engine, err := NewPolicyEngine([]string{pol})
 	if err != nil {
 		t.Fatalf("engine: %v", err)
@@ -177,15 +181,8 @@ func TestRubyGemsHandlerEndToEndGemCLI(t *testing.T) {
 		t.Skip("gem CLI not found")
 	}
 
-	policySource := `//! policy.name = "block-rake"
-(request.package == "rake"
-  ? [{"action":"deny","reason":"blocked package"}]
-  : [])`
 	tmp := t.TempDir()
-	pol := filepath.Join(tmp, "rake-policy.cel")
-	if err := os.WriteFile(pol, []byte(policySource), 0o644); err != nil {
-		t.Fatalf("write policy: %v", err)
-	}
+	pol := writeRubyBundle(t, tmp, "block-rake", `request.package == "rake"`, "blocked package", "deny")
 	engine, err := NewPolicyEngine([]string{pol})
 	if err != nil {
 		t.Fatalf("engine: %v", err)

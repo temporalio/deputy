@@ -98,7 +98,7 @@ func newProxyExecCommand(spec proxyExecSpec) *cobra.Command {
 	cmd.Flags().StringArrayVar(&policies, "policy", nil, "Additional CEL policy files to enforce")
 	cmd.SilenceUsage = true
 	trimmed := strings.TrimPrefix(spec.exampleCmd, fmt.Sprintf("deputy proxy %s -- ", spec.name))
-	cmd.Example = spec.exampleCmd + "\n# pass additional policy bundles\n" + fmt.Sprintf("deputy proxy %s --policy corp.cel -- %s", spec.name, trimmed)
+	cmd.Example = spec.exampleCmd + "\n# pass additional policy bundles\n" + fmt.Sprintf("deputy proxy %s --policy corp.yaml -- %s", spec.name, trimmed)
 	return cmd
 }
 

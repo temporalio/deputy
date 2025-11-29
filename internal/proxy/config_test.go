@@ -16,7 +16,7 @@ listeners:
     ecosystems: ["go"]
     upstream: https://proxy.golang.org
     policies:
-      - policy.go.cel
+      - policy.go.yaml
 `
 	if err := os.WriteFile(path, []byte(configYAML), 0o644); err != nil {
 		t.Fatalf("write config: %v", err)

@@ -16,6 +16,24 @@ import (
 	"github.com/picatz/deputy/internal/policy"
 )
 
+func writeBundle(t *testing.T, dir, name, when, reason, action string) string {
+	t.Helper()
+	content := fmt.Sprintf(`apiVersion: policy.deputy.sh/v1alpha2
+kind: PolicyBundle
+policies:
+  - name: %s
+    rules:
+      - action: %s
+        when: %s
+        reason: %q
+`, name, action, when, reason)
+	path := filepath.Join(dir, name+".yaml")
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatalf("write bundle %s: %v", name, err)
+	}
+	return path
+}
+
 func TestParseGoProxyPath(t *testing.T) {
 	cases := []struct {
 		path                string
@@ -131,15 +149,8 @@ func (denyPolicyEngine) Evaluate(ctx context.Context, entrypoint string, payload
 }
 
 func TestGoModuleHandlerBlocksCriticalVulnerability(t *testing.T) {
-	policySource := `//! policy.name = "block-critical"
-(vulnerabilities.exists(v, v.Severity == "CRITICAL")
-  ? [{"action":"deny","reason":"critical vuln"}]
-  : [])`
 	tmp := t.TempDir()
-	policyPath := filepath.Join(tmp, "critical.cel")
-	if err := os.WriteFile(policyPath, []byte(policySource), 0o644); err != nil {
-		t.Fatalf("write policy: %v", err)
-	}
+	policyPath := writeBundle(t, tmp, "block-critical", `vulnerabilities.exists(v, v.Severity == "CRITICAL")`, "critical vuln", "deny")
 	engine, err := NewPolicyEngine([]string{policyPath})
 	if err != nil {
 		t.Fatalf("NewPolicyEngine: %v", err)
@@ -165,15 +176,8 @@ func TestGoModuleHandlerBlocksCriticalVulnerability(t *testing.T) {
 }
 
 func TestGoModuleHandlerLicensePolicy(t *testing.T) {
-	policySource := `//! policy.name = "block-gpl"
-(licenses.exists(l, l == "GPL-3.0")
-  ? [{"action":"deny","reason":"license policy"}]
-  : [])`
 	tmp := t.TempDir()
-	policyPath := filepath.Join(tmp, "license.cel")
-	if err := os.WriteFile(policyPath, []byte(policySource), 0o644); err != nil {
-		t.Fatalf("write policy: %v", err)
-	}
+	policyPath := writeBundle(t, tmp, "block-gpl", `licenses.exists(l, l == "GPL-3.0")`, "license policy", "deny")
 	engine, err := NewPolicyEngine([]string{policyPath})
 	if err != nil {
 		t.Fatalf("NewPolicyEngine: %v", err)
@@ -235,34 +239,9 @@ func TestGoModuleHandlerEndToEndPolicies(t *testing.T) {
 	defer upstream.Close()
 
 	tmp := t.TempDir()
-	policies := []struct {
-		name string
-		src  string
-	}{
-		{
-			name: "deny_blocked",
-			src: `//! policy.name = "deny-blocked"
-(request.module.contains("blocked")
-  ? [{"action":"deny","reason":"blocked module"}]
-  : [])`,
-		},
-		{
-			name: "warn_unstable",
-			src: `//! policy.name = "warn-unstable"
-(request.version.startsWith("v0.")
-  ? [{"action":"warn","reason":"experimental version"}]
-  : [])`,
-		},
-	}
-
 	var paths []string
-	for _, pol := range policies {
-		p := filepath.Join(tmp, pol.name+".cel")
-		if err := os.WriteFile(p, []byte(pol.src), 0o644); err != nil {
-			t.Fatalf("write policy %s: %v", pol.name, err)
-		}
-		paths = append(paths, p)
-	}
+	paths = append(paths, writeBundle(t, tmp, "deny_blocked", `request.module.contains("blocked")`, "blocked module", "deny"))
+	paths = append(paths, writeBundle(t, tmp, "warn_unstable", `request.version.startsWith("v0.")`, "experimental version", "warn"))
 
 	engine, err := NewPolicyEngine(paths)
 	if err != nil {
@@ -342,24 +321,10 @@ func TestGoModuleHandlerEndToEndGoGet(t *testing.T) {
 	}
 
 	denyModule := "github.com/pkg/errors"
-	warnPolicy := `//! policy.name = "warn-v0"
-(request.version.startsWith("v0.")
-  ? [{"action":"warn","reason":"unstable version"}]
-  : [])`
-	denyPolicy := fmt.Sprintf(`//! policy.name = "deny-specific"
-(request.module == %q
-  ? [{"action":"deny","reason":"blocked by policy"}]
-  : [])`, denyModule)
-
 	tmp := t.TempDir()
 	var policyPaths []string
-	for i, src := range []string{warnPolicy, denyPolicy} {
-		path := filepath.Join(tmp, fmt.Sprintf("policy-%d.cel", i))
-		if err := os.WriteFile(path, []byte(src), 0o644); err != nil {
-			t.Fatalf("write policy: %v", err)
-		}
-		policyPaths = append(policyPaths, path)
-	}
+	policyPaths = append(policyPaths, writeBundle(t, tmp, "warn-un", `request.version.startsWith("v0.")`, "unstable", "warn"))
+	policyPaths = append(policyPaths, writeBundle(t, tmp, "deny-specific", fmt.Sprintf(`request.module == "%s"`, denyModule), "blocked by policy", "deny"))
 
 	engine, err := NewPolicyEngine(policyPaths)
 	if err != nil {

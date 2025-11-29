@@ -42,17 +42,12 @@ policies:
 	if err := os.WriteFile(structuredPath, []byte(structured), 0o644); err != nil {
 		t.Fatalf("write structured: %v", err)
 	}
-	rawCel := filepath.Join(tmp, "raw.cel")
-	if err := os.WriteFile(rawCel, []byte(`true ? [{"action":"warn"}] : []`), 0o644); err != nil {
-		t.Fatalf("write raw cel: %v", err)
-	}
-
-	sources, err := LoadSources([]string{jsonPath, structuredPath, rawCel})
+	sources, err := LoadSources([]string{jsonPath, structuredPath})
 	if err != nil {
 		t.Fatalf("LoadSources: %v", err)
 	}
-	if len(sources) != 3 {
-		t.Fatalf("expected 3 sources, got %d", len(sources))
+	if len(sources) != 2 {
+		t.Fatalf("expected 2 sources, got %d", len(sources))
 	}
 	for _, src := range sources {
 		if err := Compile(src.Body, []string{"a", "b"}); err != nil {

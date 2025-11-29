@@ -38,7 +38,7 @@ func newPolicyEvalCommand() *cobra.Command {
 	var inputPath string
 	var format string
 	cmd := &cobra.Command{
-		Use:   "eval --policy policy.cel --input input.json",
+		Use:   "eval --policy policy.yaml --input input.json",
 		Short: "Evaluate a CEL policy against JSON input",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if strings.TrimSpace(policyPath) == "" {
@@ -75,7 +75,7 @@ func newPolicyEvalCommand() *cobra.Command {
 func newPolicyLintCommand() *cobra.Command {
 	var extraVars []string
 	cmd := &cobra.Command{
-		Use:   "lint <policy.cel> [policy2.cel ...]",
+		Use:   "lint <policy.yaml> [policy2.yaml ...]",
 		Short: "Lint CEL policies for syntax/type issues",
 		Args:  cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -183,7 +183,7 @@ func newPolicyTestCommand() *cobra.Command {
 func newPolicyBundleCommand() *cobra.Command {
 	var outPath string
 	cmd := &cobra.Command{
-		Use:   "bundle --out bundle.json <policy.cel> [policy2.cel ...]",
+		Use:   "bundle --out bundle.json <policy.yaml> [policy2.yaml ...]",
 		Short: "Compile CEL policies into a reusable bundle",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if strings.TrimSpace(outPath) == "" {
@@ -232,7 +232,7 @@ func newPolicySimulateCommand() *cobra.Command {
 	var inputs []string
 	var format string
 	cmd := &cobra.Command{
-		Use:   "simulate --policy policy.cel --input input.json",
+		Use:   "simulate --policy policy.yaml --input input.json",
 		Short: "Run policies against recorded JSON inputs",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if len(policies) == 0 {
@@ -445,21 +445,7 @@ func inspectPolicyPath(w io.Writer, path string) error {
 		}
 		return nil
 	}
-	meta := policy.ExtractMetadata(string(data))
-	fmt.Fprintf(w, "Policy: %s\n", path)
-	if name := meta["policy.name"]; name != "" {
-		fmt.Fprintf(w, "  Name: %s\n", name)
-	}
-	if desc := meta["policy.description"]; desc != "" {
-		fmt.Fprintf(w, "  Description: %s\n", desc)
-	}
-	if entry := meta["policy.entrypoints"]; entry != "" {
-		fmt.Fprintf(w, "  Entrypoints: %s\n", entry)
-	}
-	if actions := meta["policy.actions"]; actions != "" {
-		fmt.Fprintf(w, "  Declared actions: %s\n", actions)
-	}
-	return nil
+	return fmt.Errorf("%s is not a policy bundle", path)
 }
 
 func loadSimulationInputs(stdin io.Reader, paths []string) ([]map[string]any, error) {

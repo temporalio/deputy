@@ -65,35 +65,32 @@ func LoadSources(paths []string) ([]Source, error) {
 			sources = append(sources, s...)
 			continue
 		}
-		sources = append(sources, Source{
-			Name: path,
-			Body: string(data),
-		})
+		return nil, fmt.Errorf("%s is not a policy bundle", path)
 	}
 	return sources, nil
 }
 
-// BuildBundle compiles all provided CEL files and returns a bundle structure.
+// BuildBundle compiles all provided policy sources and returns a bundle structure.
 func BuildBundle(paths []string) (*Bundle, error) {
 	if len(paths) == 0 {
 		return nil, fmt.Errorf("no policy files supplied")
 	}
-	policies := make([]BundlePolicy, 0, len(paths))
-	for _, path := range paths {
-		data, err := os.ReadFile(path)
-		if err != nil {
-			return nil, fmt.Errorf("read policy %q: %w", path, err)
+	sources, err := LoadSources(paths)
+	if err != nil {
+		return nil, err
+	}
+	policies := make([]BundlePolicy, 0, len(sources))
+	for _, src := range sources {
+		if err := Compile(src.Body, nil); err != nil {
+			return nil, fmt.Errorf("%s: %w", src.Name, err)
 		}
-		if err := Compile(string(data), nil); err != nil {
-			return nil, fmt.Errorf("%s: %w", path, err)
-		}
-		name := extractPolicyName(string(data))
+		name := extractPolicyName(src.Body)
 		if name == "" {
-			name = filepath.Base(path)
+			name = filepath.Base(src.Name)
 		}
 		policies = append(policies, BundlePolicy{
 			Name:   name,
-			Source: string(data),
+			Source: src.Body,
 		})
 	}
 	return &Bundle{
@@ -166,26 +163,4 @@ func LoadBundle(path string) (*Bundle, error) {
 // ParseBundle attempts to parse the provided bytes as a policy bundle.
 func ParseBundle(data []byte) (*Bundle, bool) {
 	return tryParseBundle(data)
-}
-
-// ExtractMetadata returns metadata comment key/value pairs from a CEL source.
-func ExtractMetadata(source string) map[string]string {
-	meta := map[string]string{}
-	scanner := bufio.NewScanner(strings.NewReader(source))
-	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
-		if !strings.HasPrefix(line, "//!") {
-			if line == "" {
-				continue
-			}
-			break
-		}
-		line = strings.TrimSpace(strings.TrimPrefix(line, "//!"))
-		if idx := strings.Index(line, "="); idx >= 0 {
-			key := strings.TrimSpace(line[:idx])
-			val := strings.Trim(strings.TrimSpace(line[idx+1:]), `"`)
-			meta[key] = val
-		}
-	}
-	return meta
 }

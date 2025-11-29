@@ -86,5 +86,4 @@ policies:
 
 ## Compatibility notes
 - v1alpha2 bundles only; v1alpha1 JSON bundles remain supported through `tryParseBundle`.
-- Raw `.cel` files continue to work; structured parsing only triggers when `apiVersion`/`kind` are present.
-
+- Raw `.cel` files are not supported. Author structured bundles and load them directly.
