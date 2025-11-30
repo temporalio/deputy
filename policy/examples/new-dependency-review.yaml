@@ -1,0 +1,19 @@
+apiVersion: policy.deputy.sh/v1alpha2
+kind: PolicyBundle
+policies:
+  - name: new-dependency-review
+    description: Require review/allowlist for newly added dependencies in diffs
+    vars:
+      approvedPrefixes:
+        - github.com/acme
+        - github.com/corp
+        - npm:@acme
+        - pypi:acme_
+      isAddition: 'change.?type.orValue(change.?Type.orValue("")).lowerAscii() == "added"'
+      name: 'change.?name.orValue(change.?Name.orValue(""))'
+      matchesPrefix: 'approvedPrefixes.exists(p, name.lowerAscii().startsWith(p.lowerAscii()))'
+    rules:
+      - action: deny
+        when: env.entrypoint == "diff_dependency_change" && isAddition && !matchesPrefix
+        reason: New dependency requires review or is outside the approved allowlist
+        remediation: Use an approved origin or request an exception via security review

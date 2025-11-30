@@ -1,0 +1,29 @@
+apiVersion: policy.deputy.sh/v1alpha2
+kind: PolicyBundle
+policies:
+  - name: fix-step-command-allowlist
+    description: Ensure auto-run remediation commands stay within safe package-manager verbs
+    vars:
+      allowedPrefixes:
+        - "go get"
+        - "go mod tidy"
+        - "npm install"
+        - "npm update"
+        - "pnpm add"
+        - "pnpm update"
+        - "yarn add"
+        - "yarn upgrade"
+        - "pip install"
+        - "pip3 install"
+        - "poetry add"
+        - "pipenv install"
+        - "bundle update"
+        - "cargo update"
+      commandText: 'step.?command.orValue(step.?Command.orValue("")).lowerAscii().trim()'
+      executable: 'step.?executable.orValue(step.?Executable.orValue(false))'
+      allowed: 'allowedPrefixes.exists(p, commandText.startsWith(p))'
+    rules:
+      - action: deny
+        when: env.entrypoint == "fix_plan_step" && executable && !allowed
+        reason: Remediation step runs a command outside the approved allowlist
+        remediation: Regenerate the plan or edit the command to use a vetted package manager verb

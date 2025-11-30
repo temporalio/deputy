@@ -1,0 +1,17 @@
+apiVersion: policy.deputy.sh/v1alpha2
+kind: PolicyBundle
+policies:
+  - name: sbom-metadata-quality
+    description: Warn when SBOM components miss key metadata
+    vars:
+      name: 'component.?name.orValue(component.?Name.orValue(""))'
+      version: 'component.?version.orValue(component.?Version.orValue(""))'
+      purlType: 'component.?purlType.orValue(component.?PURLType.orValue(""))'
+      missingVersion: 'version == ""'
+      missingPurlType: 'purlType == ""'
+      missingName: 'name == ""'
+    rules:
+      - action: warn
+        when: env.entrypoint == "sbom_component" && (missingVersion || missingPurlType || missingName)
+        reason: SBOM component is missing key metadata (name, version, or ecosystem)
+        remediation: Re-run SBOM generation with enrichment or verify extractor coverage

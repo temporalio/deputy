@@ -21,6 +21,7 @@ var (
 		"pkg",
 		"request",
 		"vulnerabilities",
+		"vulnerability",
 		"sbom",
 		"config",
 		"env",

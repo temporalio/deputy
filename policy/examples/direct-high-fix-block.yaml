@@ -1,0 +1,18 @@
+apiVersion: policy.deputy.sh/v1alpha2
+kind: PolicyBundle
+policies:
+  - name: direct-high-fix-block
+    description: Block direct dependencies that still carry HIGH/CRITICAL vulns when a fix exists
+    vars:
+      highSeverities:
+        - CRITICAL
+        - HIGH
+      severity: 'vulnerability.?severity.orValue(vulnerability.?Severity.orValue("")).upperAscii()'
+      isDirect: 'vulnerability.?isDirect.orValue(vulnerability.?IsDirect.orValue(false))'
+      hasFix: 'size(vulnerability.?fixedVersions.orValue(vulnerability.?FixedVersions.orValue([]))) > 0'
+      inScope: 'env.entrypoint in ["scan_vulnerability", "diff_vulnerability"]'
+    rules:
+      - action: deny
+        when: inScope && isDirect && hasFix && severity in highSeverities
+        reason: Direct dependency has a HIGH/CRITICAL vulnerability with an available fix
+        remediation: Upgrade this dependency to a fixed version before merging

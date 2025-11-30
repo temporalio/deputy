@@ -1,0 +1,16 @@
+apiVersion: policy.deputy.sh/v1alpha2
+kind: PolicyBundle
+policies:
+  - name: pypi-prefix-allowlist
+    description: Allow only approved prefixes for PyPI artifacts via the proxy
+    vars:
+      allowedPrefixes:
+        - "acme_"
+        - "corp_"
+        - "internal-"
+      pkgName: 'request.?package.orValue(request.?name.orValue(pkg.?name.orValue(""))).lowerAscii()'
+    rules:
+      - action: deny
+        when: env.entrypoint == "pypi_artifact_request" && !(allowedPrefixes.exists(p, pkgName.startsWith(p)))
+        reason: PyPI package is outside approved prefixes
+        remediation: Publish under an approved prefix or request an exception

@@ -1,0 +1,15 @@
+apiVersion: policy.deputy.sh/v1alpha2
+kind: PolicyBundle
+policies:
+  - name: unstable-major-guard
+    description: Flag v0/pre-release dependencies for extra scrutiny
+    vars:
+      ecosystem: 'pkg.?ecosystem.orValue(request.?ecosystem.orValue(change.?ecosystem.orValue(""))).lowerAscii()'
+      version: 'pkg.?version.orValue(request.?version.orValue(change.?targetVersion.orValue(change.?version.orValue("")))).lowerAscii()'
+      unstable: 'version.matches("^(v?0\\.)") || version.matches("(?i)(alpha|beta|rc|preview|snapshot)")'
+      inScopeEco: 'ecosystem in ["go", "npm", "pypi"]'
+    rules:
+      - action: warn
+        when: inScopeEco && unstable
+        reason: Dependency is using an unstable or pre-release version
+        remediation: Pin to the latest stable release before promotion
