@@ -1,5 +1,3 @@
-metadata:
-  title: "Severity guardrail"
 policies:
   - name: deny-critical-and-high
     description: Deny artifacts that still carry CRITICAL/HIGH vulnerabilities

@@ -1,5 +1,3 @@
-metadata:
-  title: "License guardrails"
 policies:
   - name: allow-sans-copyleft
     description: Block packages carrying copyleft licenses (works for SBOM/diff and proxy payloads)

@@ -1,5 +1,3 @@
-metadata:
-  title: "Go module source allowlist"
 policies:
   - name: allow-org-scoped-go-modules
     description: Only allow Go modules whose import paths are rooted in approved orgs

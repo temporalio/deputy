@@ -1,5 +1,3 @@
-metadata:
-  title: "Go downgrade guard"
 policies:
   - name: deny-go-downgrades
     description: Deny downgrades of Go modules to prevent reintroducing older versions

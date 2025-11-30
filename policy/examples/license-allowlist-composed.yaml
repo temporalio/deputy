@@ -1,5 +1,3 @@
-metadata:
-  title: "License guardrails (composed vars)"
 policies:
   - name: license-allowlist-composed
     description: Copyleft block with layered vars and scope guard

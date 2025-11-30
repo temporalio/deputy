@@ -1,5 +1,3 @@
-metadata:
-  title: "Pre-release guardrails"
 policies:
   - name: block-pre-release-in-prod
     description: Prevent alpha/beta/rc builds from entering prod artifact caches

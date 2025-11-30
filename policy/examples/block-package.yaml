@@ -1,10 +1,12 @@
-metadata:
-  title: "Known-bad package blocklist"
 policies:
   - name: block-known-bad-packages
     description: Deny npm/PyPI artifacts that have been pulled from public registries for supply-chain incidents
     vars:
-      blockedPkgs: '["left-pad", "event-stream", "ua-parser-js", "ctx"]'
+      blockedPkgs:
+        - left-pad
+        - event-stream
+        - ua-parser-js
+        - ctx
     rules:
       - action: deny
         when: pkg.name in blockedPkgs

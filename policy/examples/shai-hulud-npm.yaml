@@ -1,5 +1,3 @@
-metadata:
-  title: "Wiz Shai-Hulud 2.0 IOC quarantine"
 policies:
   - name: block-shai-hulud-npm
     description: Deny npm artifacts whose package+version match the Wiz Shai-Hulud 2.0 IOC list (Nov 2025)

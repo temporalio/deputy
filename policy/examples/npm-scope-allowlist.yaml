@@ -1,5 +1,3 @@
-metadata:
-  title: "NPM scope guard"
 policies:
   - name: enforce-approved-scopes
     description: Allow only approved npm scopes/packages in corp workloads

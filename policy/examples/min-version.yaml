@@ -1,5 +1,3 @@
-metadata:
-  title: "Pinned Go baselines"
 policies:
   - name: pin-go-standard-libs
     description: Prevent downgrades below approved versions for critical Go modules

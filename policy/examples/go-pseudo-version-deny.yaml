@@ -1,5 +1,3 @@
-metadata:
-  title: "Disallow Go pseudo-versions"
 policies:
   - name: deny-go-pseudo-versions
     description: Require tagged Go module releases instead of pseudo-versions

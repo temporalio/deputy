@@ -1,5 +1,3 @@
-metadata:
-  title: "AWS Go SDK v1 sunset"
 policies:
   - name: deny-aws-sdk-v1
     description: Block deprecated AWS SDK for Go v1 to avoid unmaintained code paths
