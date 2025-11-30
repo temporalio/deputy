@@ -264,3 +264,55 @@ func TestPolicyIntegration_SbomSizeShapeSanity(t *testing.T) {
 		t.Fatalf("expected warn for oversized SBOM, got %+v", actions)
 	}
 }
+
+func TestPolicyIntegration_CriticalTransitiveSpotlight(t *testing.T) {
+	pol := filepath.Clean(filepath.Join("..", "..", "..", "policy", "examples", "critical-transitive-spotlight.yaml"))
+	payload := map[string]any{
+		"vulnerability": map[string]any{
+			"severity": "CRITICAL",
+			"isDirect": false,
+		},
+	}
+	if actions, err := evaluatePoliciesForCommand(context.Background(), []string{pol}, payload, "scan", "scan_vulnerability", &bytes.Buffer{}); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	} else {
+		foundWarn := false
+		for _, a := range actions {
+			if a.Type == "warn" {
+				foundWarn = true
+			}
+		}
+		if !foundWarn {
+			t.Fatalf("expected warn for critical indirect vuln, got %+v", actions)
+		}
+	}
+}
+
+func TestPolicyIntegration_TyposquatLevenshteinGuard(t *testing.T) {
+	pol := filepath.Clean(filepath.Join("..", "..", "..", "policy", "examples", "typosquat-levenshtein-guard.yaml"))
+	payload := map[string]any{
+		"request": map[string]any{
+			"package":   "lodas",
+			"ecosystem": "npm",
+		},
+	}
+	if _, err := evaluatePoliciesForCommand(context.Background(), []string{pol}, payload, "proxy", "npm_artifact_request", &bytes.Buffer{}); err == nil {
+		t.Fatalf("expected denial for typosquat package")
+	}
+
+	allowPayload := map[string]any{
+		"request": map[string]any{
+			"package":   "teamlib",
+			"ecosystem": "npm",
+		},
+	}
+	if actions, err := evaluatePoliciesForCommand(context.Background(), []string{pol}, allowPayload, "proxy", "npm_artifact_request", &bytes.Buffer{}); err != nil {
+		t.Fatalf("did not expect error for safe package: %v", err)
+	} else {
+		for _, a := range actions {
+			if a.Type == "deny" {
+				t.Fatalf("did not expect deny for safe package: %+v", actions)
+			}
+		}
+	}
+}

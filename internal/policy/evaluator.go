@@ -9,6 +9,7 @@ import (
 
 	"github.com/google/cel-go/cel"
 	"github.com/google/cel-go/checker/decls"
+	"github.com/google/cel-go/common/types"
 	"github.com/google/cel-go/common/types/ref"
 	"github.com/google/cel-go/ext"
 	exprpb "google.golang.org/genproto/googleapis/api/expr/v1alpha1"
@@ -123,6 +124,32 @@ func envWithNames(extra []string) (*cel.Env, error) {
 		ext.Lists(),
 		ext.Sets(),
 		ext.Regex(),
+		cel.Function("levenshtein",
+			cel.Overload("levenshtein_string",
+				[]*cel.Type{cel.StringType, cel.StringType},
+				cel.IntType,
+				cel.BinaryBinding(func(a, b ref.Val) ref.Val {
+					return types.Int(levenshtein(toString(a), toString(b), 128, -1))
+				}),
+			),
+		),
+		cel.Function("levenshteinWithin",
+			cel.Overload("levenshteinWithin_string",
+				[]*cel.Type{cel.StringType, cel.StringType, cel.IntType},
+				cel.BoolType,
+				cel.FunctionBinding(func(args ...ref.Val) ref.Val {
+					if len(args) != 3 {
+						return types.Bool(false)
+					}
+					a, b, limit := toString(args[0]), toString(args[1]), toInt64(args[2])
+					dist := levenshtein(a, b, 128, limit)
+					if dist < 0 {
+						return types.Bool(false)
+					}
+					return types.Bool(dist <= limit)
+				}),
+			),
+		),
 	)
 	if err != nil {
 		return nil, fmt.Errorf("build CEL env: %w", err)
@@ -200,5 +227,108 @@ func convertRefVal(val ref.Val) (any, error) {
 			return native, nil
 		}
 		return nil, fmt.Errorf("unable to convert CEL value of type %T", val.Value())
+	}
+}
+
+// levenshtein computes the Levenshtein distance between a and b with an optional
+// maxLen cap (rejects if either input exceeds cap by returning -1) and an early
+// exit limit (stop when distance already exceeds limit; pass -1 for no early exit).
+func levenshtein(a, b string, maxLen int, limit int64) int64 {
+	if maxLen > 0 && (len(a) > maxLen || len(b) > maxLen) {
+		return -1
+	}
+	if a == b {
+		return 0
+	}
+	if len(a) == 0 {
+		return int64(len(b))
+	}
+	if len(b) == 0 {
+		return int64(len(a))
+	}
+	if len(a) > len(b) {
+		a, b = b, a
+	}
+	prev := make([]int64, len(a)+1)
+	for i := range prev {
+		prev[i] = int64(i)
+	}
+	for j := 1; j <= len(b); j++ {
+		curr := make([]int64, len(a)+1)
+		curr[0] = int64(j)
+		minRow := curr[0]
+		bc := b[j-1]
+		for i := 1; i <= len(a); i++ {
+			cost := int64(0)
+			if a[i-1] != bc {
+				cost = 1
+			}
+			del := prev[i] + 1
+			ins := curr[i-1] + 1
+			sub := prev[i-1] + cost
+			curr[i] = minInt64(del, ins, sub)
+			if curr[i] < minRow {
+				minRow = curr[i]
+			}
+		}
+		if limit >= 0 && minRow > limit {
+			return minRow
+		}
+		prev = curr
+	}
+	if limit >= 0 && prev[len(a)] > limit {
+		return prev[len(a)]
+	}
+	return prev[len(a)]
+}
+
+func minInt64(vals ...int64) int64 {
+	if len(vals) == 0 {
+		return 0
+	}
+	m := vals[0]
+	for _, v := range vals[1:] {
+		if v < m {
+			m = v
+		}
+	}
+	return m
+}
+
+func toString(v ref.Val) string {
+	if v == nil {
+		return ""
+	}
+	switch t := v.Value().(type) {
+	case string:
+		return t
+	case fmt.Stringer:
+		return t.String()
+	default:
+		return fmt.Sprint(t)
+	}
+}
+
+func toInt64(v ref.Val) int64 {
+	if v == nil {
+		return 0
+	}
+	switch t := v.Value().(type) {
+	case int64:
+		return t
+	case int32:
+		return int64(t)
+	case int:
+		return int64(t)
+	case uint64:
+		return int64(t)
+	case uint32:
+		return int64(t)
+	case float64:
+		return int64(t)
+	case float32:
+		return int64(t)
+	default:
+		return 0
 	}
 }

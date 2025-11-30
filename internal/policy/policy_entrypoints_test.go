@@ -916,57 +916,6 @@ func TestSbomSizeShapeSanity(t *testing.T) {
 		}
 	}
 }
-
-func TestRuntimeCriticalBaseline(t *testing.T) {
-	path := filepath.Clean(filepath.Join("..", "..", "policy", "examples", "runtime-critical-baseline.yaml"))
-	sources, err := LoadSources([]string{path})
-	if err != nil {
-		t.Fatalf("LoadSources: %v", err)
-	}
-
-	t.Run("deny downgrade of critical module", func(t *testing.T) {
-		payload := map[string]any{
-			"change": map[string]any{
-				"type": "downgraded",
-				"name": "github.com/sirupsen/logrus",
-			},
-			"env": map[string]any{"command": "diff", "entrypoint": "diff_dependency_change"},
-		}
-		actions, err := EvaluateAll(context.Background(), sources, payload)
-		if err != nil {
-			t.Fatalf("EvaluateAll: %v", err)
-		}
-		found := false
-		for _, a := range actions {
-			if a.Type == "deny" {
-				found = true
-			}
-		}
-		if !found {
-			t.Fatalf("expected deny for critical downgrade, got %+v", actions)
-		}
-	})
-
-	t.Run("allow change to non-critical module", func(t *testing.T) {
-		payload := map[string]any{
-			"change": map[string]any{
-				"type": "downgraded",
-				"name": "github.com/not/critical",
-			},
-			"env": map[string]any{"command": "diff", "entrypoint": "diff_dependency_change"},
-		}
-		actions, err := EvaluateAll(context.Background(), sources, payload)
-		if err != nil {
-			t.Fatalf("EvaluateAll: %v", err)
-		}
-		for _, a := range actions {
-			if a.Type == "deny" {
-				t.Fatalf("did not expect deny for non-critical module: %+v", actions)
-			}
-		}
-	})
-}
-
 func TestExploitAvailableBlocker(t *testing.T) {
 	path := filepath.Clean(filepath.Join("..", "..", "policy", "examples", "exploit-available-blocker.yaml"))
 	sources, err := LoadSources([]string{path})

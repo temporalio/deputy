@@ -1,0 +1,19 @@
+policies:
+  - name: typosquat-levenshtein-guard
+    description: Block likely typosquats while sparing scoped, numeric-suffix, and allowlisted packages
+    vars:
+      popular: ["react","lodash","express","typescript","axios","next","vue","angular","jest","webpack","requests"]
+      allowScopes:
+        - "@acme"
+        - "@types"
+      name: 'pkg.?name.orValue("").lowerAscii()'
+      isScoped: 'name.startsWith("@")'
+      hasNumericSuffix: 'name.matches(".*\\d+$")'
+      limit: '(size(name) <= 5 ? 1 : (size(name) <= 8 ? 2 : 3))'
+      nearPopular: 'popular.exists(p, levenshteinWithin(name, p, limit))'
+      allowedScope: 'allowScopes.exists(s, name.startsWith(s + "/"))'
+    rules:
+      - action: deny
+        when: env.command == "proxy" && !isScoped && !allowedScope && !hasNumericSuffix && nearPopular
+        reason: npm package name is very similar to a popular package; potential typosquat
+        remediation: Verify the intended package name or use the official package
