@@ -1,0 +1,15 @@
+policies:
+  - name: sbom-size-shape-sanity
+    description: Flag oversized SBOMs or high rates of missing metadata
+    vars:
+      components: 'packages.orValue([])'
+      total: 'size(components)'
+      missingVersions: 'components.filter(c, c.?version.orValue("").lowerAscii() == "")'
+      missingCount: 'size(missingVersions)'
+    rules:
+      - action: warn
+        when: env.entrypoint == "sbom_report" && total > 10000
+        reason: SBOM contains more than 10,000 components; review scope or dedupe
+      - action: warn
+        when: env.entrypoint == "sbom_report" && missingCount * 20 > total
+        reason: SBOM has many components missing versions; consider enriching metadata

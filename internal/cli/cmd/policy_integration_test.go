@@ -146,3 +146,121 @@ func TestPolicyIntegration_DeprecatedModuleBlock(t *testing.T) {
 		t.Fatalf("expected denial error for deprecated module")
 	}
 }
+
+func TestPolicyIntegration_DependencyCountGuard(t *testing.T) {
+	pol := filepath.Clean(filepath.Join("..", "..", "..", "policy", "examples", "dependency-count-guard.yaml"))
+	payload := map[string]any{
+		"changes": make([]any, 80),
+	}
+	if _, err := evaluatePoliciesForCommand(context.Background(), []string{pol}, payload, "diff", "diff_report", &bytes.Buffer{}); err == nil {
+		t.Fatalf("expected denial for oversized diff change set")
+	}
+}
+
+func TestPolicyIntegration_LicensePresentBlocker(t *testing.T) {
+	pol := filepath.Clean(filepath.Join("..", "..", "..", "policy", "examples", "license-present-blocker.yaml"))
+	payload := map[string]any{
+		"pkg": map[string]any{
+			"licenses": []any{},
+		},
+	}
+	if _, err := evaluatePoliciesForCommand(context.Background(), []string{pol}, payload, "proxy", "go_artifact_request", &bytes.Buffer{}); err == nil {
+		t.Fatalf("expected denial for missing license metadata")
+	}
+}
+
+func TestPolicyIntegration_NoFixEscalator(t *testing.T) {
+	pol := filepath.Clean(filepath.Join("..", "..", "..", "policy", "examples", "no-fix-escalator.yaml"))
+	payload := map[string]any{
+		"vulnerability": map[string]any{
+			"severity":      "HIGH",
+			"isDirect":      true,
+			"fixedVersions": []any{},
+		},
+	}
+	actions, err := evaluatePoliciesForCommand(context.Background(), []string{pol}, payload, "scan", "scan_vulnerability", &bytes.Buffer{})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	foundWarn := false
+	for _, a := range actions {
+		if a.Type == "warn" {
+			foundWarn = true
+		}
+	}
+	if !foundWarn {
+		t.Fatalf("expected warn for no-fix vuln, got %+v", actions)
+	}
+}
+
+func TestPolicyIntegration_ProdManifestGate(t *testing.T) {
+	pol := filepath.Clean(filepath.Join("..", "..", "..", "policy", "examples", "prod-manifest-gate.yaml"))
+	payload := map[string]any{
+		"vulnerability": map[string]any{
+			"severity": "CRITICAL",
+			"manifestRefs": []any{
+				map[string]any{"groups": []any{"prod"}},
+			},
+		},
+	}
+	if _, err := evaluatePoliciesForCommand(context.Background(), []string{pol}, payload, "scan", "scan_vulnerability", &bytes.Buffer{}); err == nil {
+		t.Fatalf("expected denial for prod manifest vuln")
+	}
+}
+
+func TestPolicyIntegration_DomainBrandedPackageGuard(t *testing.T) {
+	pol := filepath.Clean(filepath.Join("..", "..", "..", "policy", "examples", "domain-branded-package-guard.yaml"))
+	payload := map[string]any{
+		"request": map[string]any{
+			"package": "aws-helper",
+		},
+	}
+	if _, err := evaluatePoliciesForCommand(context.Background(), []string{pol}, payload, "proxy", "npm_artifact_request", &bytes.Buffer{}); err == nil {
+		t.Fatalf("expected denial for branded package name")
+	}
+}
+
+func TestPolicyIntegration_CriticalRuntimePinning(t *testing.T) {
+	pol := filepath.Clean(filepath.Join("..", "..", "..", "policy", "examples", "critical-runtime-pinning.yaml"))
+	payload := map[string]any{
+		"change": map[string]any{
+			"name":          "golang.org/x/crypto",
+			"baseVersion":   "v0.24.0",
+			"targetVersion": "v0.24.0",
+		},
+	}
+	actions, err := evaluatePoliciesForCommand(context.Background(), []string{pol}, payload, "diff", "diff_dependency_change", &bytes.Buffer{})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	foundWarn := false
+	for _, a := range actions {
+		if a.Type == "warn" {
+			foundWarn = true
+		}
+	}
+	if !foundWarn {
+		t.Fatalf("expected warn for unchanged critical module, got %+v", actions)
+	}
+}
+
+func TestPolicyIntegration_SbomSizeShapeSanity(t *testing.T) {
+	pol := filepath.Clean(filepath.Join("..", "..", "..", "policy", "examples", "sbom-size-shape-sanity.yaml"))
+	packages := make([]any, 12000)
+	payload := map[string]any{
+		"packages": packages,
+	}
+	actions, err := evaluatePoliciesForCommand(context.Background(), []string{pol}, payload, "sbom", "sbom_report", &bytes.Buffer{})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	foundWarn := false
+	for _, a := range actions {
+		if a.Type == "warn" {
+			foundWarn = true
+		}
+	}
+	if !foundWarn {
+		t.Fatalf("expected warn for oversized SBOM, got %+v", actions)
+	}
+}

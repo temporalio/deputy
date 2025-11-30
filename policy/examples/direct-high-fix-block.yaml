@@ -5,9 +5,9 @@ policies:
       highSeverities:
         - CRITICAL
         - HIGH
-      severity: 'vulnerability.?severity.orValue(vulnerability.?Severity.orValue("")).upperAscii()'
-      isDirect: 'vulnerability.?isDirect.orValue(vulnerability.?IsDirect.orValue(false))'
-      hasFix: 'size(vulnerability.?fixedVersions.orValue(vulnerability.?FixedVersions.orValue([]))) > 0'
+      severity: 'vulnerability.?severity.orValue("").upperAscii()'
+      isDirect: 'vulnerability.?isDirect.orValue(false)'
+      hasFix: 'size(vulnerability.?fixedVersions.orValue([])) > 0'
       inScope: 'env.entrypoint in ["scan_vulnerability", "diff_vulnerability"]'
     rules:
       - action: deny

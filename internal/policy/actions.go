@@ -121,6 +121,12 @@ func toAction(source string, value any) (*Action, error) {
 			act.Annotations = annRaw
 		}
 		return &act, nil
+	case map[ref.Val]ref.Val:
+		native, err := convertRefMap(v)
+		if err != nil {
+			return nil, err
+		}
+		return toAction(source, native)
 	case ref.Val:
 		native, err := convertRefVal(v)
 		if err != nil {
@@ -133,22 +139,43 @@ func toAction(source string, value any) (*Action, error) {
 }
 
 func getString(m map[string]any, key string) (string, bool) {
-	if v, ok := m[key]; ok {
-		switch val := v.(type) {
-		case string:
-			return val, true
-		case fmt.Stringer:
-			return val.String(), true
-		case json.Number:
-			return val.String(), true
-		case float64:
-			if math.IsNaN(val) {
-				return "", false
-			}
-			return fmt.Sprint(val), true
-		default:
-			return fmt.Sprint(val), true
-		}
+	v, ok := m[key]
+	if !ok {
+		return "", false
 	}
-	return "", false
+	switch val := v.(type) {
+	case string:
+		return val, true
+	case fmt.Stringer:
+		return val.String(), true
+	case json.Number:
+		return val.String(), true
+	case float64:
+		if math.IsNaN(val) {
+			return "", false
+		}
+		return fmt.Sprint(val), true
+	default:
+		return fmt.Sprint(val), true
+	}
+}
+
+func convertRefMap(m map[ref.Val]ref.Val) (map[string]any, error) {
+	out := make(map[string]any, len(m))
+	for k, v := range m {
+		ks, err := convertRefVal(k)
+		if err != nil {
+			return nil, err
+		}
+		kstr, ok := ks.(string)
+		if !ok {
+			return nil, fmt.Errorf("policy output map keys must be strings, got %T", ks)
+		}
+		val, err := convertRefVal(v)
+		if err != nil {
+			return nil, err
+		}
+		out[kstr] = val
+	}
+	return out, nil
 }

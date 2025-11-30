@@ -1,0 +1,19 @@
+policies:
+  - name: domain-branded-package-guard
+    description: Prevent use of packages that impersonate major vendor brands
+    vars:
+      pkgName: 'request.?package.orValue(request.?module.orValue(pkg.?name.orValue(""))).lowerAscii()'
+      brands:
+        - google
+        - aws
+        - azure
+        - meta
+        - facebook
+        - apple
+        - microsoft
+      isBrandImpersonation: 'brands.exists(b, pkgName.startsWith(b + "-") || pkgName.startsWith(b + "_"))'
+    rules:
+      - action: deny
+        when: env.command == "proxy" && isBrandImpersonation
+        reason: Package name appears to impersonate a major vendor brand
+        remediation: Use official packages or verify the publisher before proceeding

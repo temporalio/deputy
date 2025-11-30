@@ -22,6 +22,8 @@ var (
 		"request",
 		"vulnerabilities",
 		"vulnerability",
+		"changes",
+		"packages",
 		"sbom",
 		"config",
 		"env",

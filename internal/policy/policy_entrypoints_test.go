@@ -734,6 +734,189 @@ func TestPypiPrefixAllowlist(t *testing.T) {
 	})
 }
 
+func TestDependencyCountGuard(t *testing.T) {
+	path := filepath.Clean(filepath.Join("..", "..", "policy", "examples", "dependency-count-guard.yaml"))
+	sources, err := LoadSources([]string{path})
+	if err != nil {
+		t.Fatalf("LoadSources: %v", err)
+	}
+
+	denyPayload := map[string]any{
+		"changes": make([]any, 80),
+		"env":     map[string]any{"command": "diff", "entrypoint": "diff_report"},
+	}
+	if actions, err := EvaluateAll(context.Background(), sources, denyPayload); err != nil || len(actions) == 0 || actions[0].Type != "deny" {
+		t.Fatalf("expected deny for large change set, got %+v err=%v", actions, err)
+	}
+
+	warnPayload := map[string]any{
+		"changes": make([]any, 30),
+		"env":     map[string]any{"command": "diff", "entrypoint": "diff_report"},
+	}
+	actions, err := EvaluateAll(context.Background(), sources, warnPayload)
+	if err != nil {
+		t.Fatalf("EvaluateAll: %v", err)
+	}
+	foundWarn := false
+	for _, a := range actions {
+		if a.Type == "warn" {
+			foundWarn = true
+		}
+	}
+	if !foundWarn {
+		t.Fatalf("expected warn for medium change set, got %+v", actions)
+	}
+}
+
+func TestLicensePresentBlocker(t *testing.T) {
+	path := filepath.Clean(filepath.Join("..", "..", "policy", "examples", "license-present-blocker.yaml"))
+	sources, err := LoadSources([]string{path})
+	if err != nil {
+		t.Fatalf("LoadSources: %v", err)
+	}
+	denyPayload := map[string]any{
+		"pkg": map[string]any{"licenses": []any{}},
+		"env": map[string]any{"command": "proxy"},
+	}
+	if actions, err := EvaluateAll(context.Background(), sources, denyPayload); err != nil || len(actions) == 0 || actions[0].Type != "deny" {
+		t.Fatalf("expected deny for missing licenses, got %+v err=%v", actions, err)
+	}
+	allowPayload := map[string]any{
+		"pkg": map[string]any{"licenses": []any{"MIT"}},
+		"env": map[string]any{"command": "proxy"},
+	}
+	if actions, err := EvaluateAll(context.Background(), sources, allowPayload); err != nil {
+		t.Fatalf("EvaluateAll: %v", err)
+	} else {
+		for _, a := range actions {
+			if a.Type == "deny" {
+				t.Fatalf("did not expect deny: %+v", actions)
+			}
+		}
+	}
+}
+
+func TestNoFixEscalator(t *testing.T) {
+	path := filepath.Clean(filepath.Join("..", "..", "policy", "examples", "no-fix-escalator.yaml"))
+	sources, err := LoadSources([]string{path})
+	if err != nil {
+		t.Fatalf("LoadSources: %v", err)
+	}
+	payload := map[string]any{
+		"vulnerability": map[string]any{
+			"severity":      "HIGH",
+			"isDirect":      true,
+			"fixedVersions": []any{},
+		},
+		"env": map[string]any{"command": "scan", "entrypoint": "scan_vulnerability"},
+	}
+	actions, err := EvaluateAll(context.Background(), sources, payload)
+	if err != nil {
+		t.Fatalf("EvaluateAll: %v", err)
+	}
+	warn := false
+	for _, a := range actions {
+		if a.Type == "warn" {
+			warn = true
+		}
+	}
+	if !warn {
+		t.Fatalf("expected warn for no-fix direct vuln, got %+v", actions)
+	}
+}
+
+func TestProdManifestGate(t *testing.T) {
+	path := filepath.Clean(filepath.Join("..", "..", "policy", "examples", "prod-manifest-gate.yaml"))
+	sources, err := LoadSources([]string{path})
+	if err != nil {
+		t.Fatalf("LoadSources: %v", err)
+	}
+	payload := map[string]any{
+		"vulnerability": map[string]any{
+			"severity": "CRITICAL",
+			"manifestRefs": []any{
+				map[string]any{"groups": []any{"prod"}},
+			},
+		},
+		"env": map[string]any{"command": "scan", "entrypoint": "scan_vulnerability"},
+	}
+	if actions, err := EvaluateAll(context.Background(), sources, payload); err != nil || len(actions) == 0 || actions[0].Type != "deny" {
+		t.Fatalf("expected deny for prod manifest vuln, got %+v err=%v", actions, err)
+	}
+}
+
+func TestDomainBrandedPackageGuard(t *testing.T) {
+	path := filepath.Clean(filepath.Join("..", "..", "policy", "examples", "domain-branded-package-guard.yaml"))
+	sources, err := LoadSources([]string{path})
+	if err != nil {
+		t.Fatalf("LoadSources: %v", err)
+	}
+	payload := map[string]any{
+		"request": map[string]any{
+			"package": "aws-helper",
+		},
+		"env": map[string]any{"command": "proxy"},
+	}
+	if actions, err := EvaluateAll(context.Background(), sources, payload); err != nil || len(actions) == 0 || actions[0].Type != "deny" {
+		t.Fatalf("expected deny for branded package, got %+v err=%v", actions, err)
+	}
+}
+
+func TestCriticalRuntimePinning(t *testing.T) {
+	path := filepath.Clean(filepath.Join("..", "..", "policy", "examples", "critical-runtime-pinning.yaml"))
+	sources, err := LoadSources([]string{path})
+	if err != nil {
+		t.Fatalf("LoadSources: %v", err)
+	}
+	payload := map[string]any{
+		"change": map[string]any{
+			"name":          "golang.org/x/crypto",
+			"baseVersion":   "v0.24.0",
+			"targetVersion": "v0.24.0",
+		},
+		"env": map[string]any{"command": "diff", "entrypoint": "diff_dependency_change"},
+	}
+	if actions, err := EvaluateAll(context.Background(), sources, payload); err != nil {
+		t.Fatalf("EvaluateAll: %v", err)
+	} else {
+		warn := false
+		for _, a := range actions {
+			if a.Type == "warn" {
+				warn = true
+			}
+		}
+		if !warn {
+			t.Fatalf("expected warn for unchanged critical module, got %+v", actions)
+		}
+	}
+}
+
+func TestSbomSizeShapeSanity(t *testing.T) {
+	path := filepath.Clean(filepath.Join("..", "..", "policy", "examples", "sbom-size-shape-sanity.yaml"))
+	sources, err := LoadSources([]string{path})
+	if err != nil {
+		t.Fatalf("LoadSources: %v", err)
+	}
+	components := make([]any, 12000)
+	payload := map[string]any{
+		"packages": components,
+		"env":      map[string]any{"command": "sbom", "entrypoint": "sbom_report"},
+	}
+	if actions, err := EvaluateAll(context.Background(), sources, payload); err != nil {
+		t.Fatalf("EvaluateAll: %v", err)
+	} else {
+		warn := false
+		for _, a := range actions {
+			if a.Type == "warn" {
+				warn = true
+			}
+		}
+		if !warn {
+			t.Fatalf("expected warn for oversized SBOM, got %+v", actions)
+		}
+	}
+}
+
 func TestRuntimeCriticalBaseline(t *testing.T) {
 	path := filepath.Clean(filepath.Join("..", "..", "policy", "examples", "runtime-critical-baseline.yaml"))
 	sources, err := LoadSources([]string{path})

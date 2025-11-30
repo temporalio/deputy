@@ -1,0 +1,12 @@
+policies:
+  - name: prod-manifest-gate
+    description: Block vulnerabilities located in production manifests/groups
+    vars:
+      refs: 'vulnerability.?manifestRefs.orValue([])'
+      inProd: 'refs.exists(r, r.?groups.orValue([]).exists(g, g.lowerAscii().matches("prod|production|default")))'
+      highSev: 'vulnerability.?severity.orValue("").upperAscii() in ["CRITICAL","HIGH"]'
+    rules:
+      - action: deny
+        when: env.entrypoint in ["scan_vulnerability","diff_vulnerability"] && inProd && highSev
+        reason: Production manifest carries a CRITICAL/HIGH vulnerability
+        remediation: Patch or replace the dependency before promoting to prod

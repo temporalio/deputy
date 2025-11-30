@@ -110,7 +110,32 @@ func StructToMap(v any) (map[string]any, error) {
 	if err := json.Unmarshal(data, &out); err != nil {
 		return nil, err
 	}
+	normalizeMapKeys(out)
 	return out, nil
+}
+
+// normalizeMapKeys adds lowercased duplicates of top-level keys (recursively) to
+// improve CEL ergonomics without breaking existing fields.
+func normalizeMapKeys(m map[string]any) {
+	for k, v := range m {
+		// Recurse into nested maps and slices
+		switch t := v.(type) {
+		case map[string]any:
+			normalizeMapKeys(t)
+		case []any:
+			for _, elem := range t {
+				if em, ok := elem.(map[string]any); ok {
+					normalizeMapKeys(em)
+				}
+			}
+		}
+		lower := strings.ToLower(k)
+		if lower != k {
+			if _, exists := m[lower]; !exists {
+				m[lower] = v
+			}
+		}
+	}
 }
 
 func tryParseBundle(data []byte) (*Bundle, bool) {

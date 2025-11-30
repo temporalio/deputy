@@ -2,9 +2,9 @@ policies:
   - name: sbom-metadata-quality
     description: Warn when SBOM components miss key metadata
     vars:
-      name: 'component.?name.orValue(component.?Name.orValue(""))'
-      version: 'component.?version.orValue(component.?Version.orValue(""))'
-      purlType: 'component.?purlType.orValue(component.?PURLType.orValue(""))'
+      name: 'pkg.?name.orValue("")'
+      version: 'pkg.?version.orValue("")'
+      purlType: 'component.?purlType.orValue("")'
       missingVersion: 'version == ""'
       missingPurlType: 'purlType == ""'
       missingName: 'name == ""'

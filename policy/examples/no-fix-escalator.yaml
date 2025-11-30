@@ -1,0 +1,12 @@
+policies:
+  - name: no-fix-escalator
+    description: Escalate direct vulnerabilities with no available fix
+    vars:
+      hasFix: 'size(vulnerability.?fixedVersions.orValue([])) > 0'
+      isDirect: 'vulnerability.?isDirect.orValue(false)'
+      highSev: 'vulnerability.?severity.orValue("").upperAscii() in ["CRITICAL","HIGH"]'
+    rules:
+      - action: warn
+        when: env.entrypoint in ["scan_vulnerability","diff_vulnerability"] && isDirect && !hasFix && highSev
+        reason: Direct dependency has a CRITICAL/HIGH vuln with no available fix
+        remediation: Apply vendor mitigation or isolate usage until a fix is released

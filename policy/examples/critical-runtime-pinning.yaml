@@ -1,0 +1,20 @@
+policies:
+  - name: critical-runtime-pinning
+    description: Encourage explicit version bumps when touching critical runtime modules
+    vars:
+      criticalModules:
+        - golang.org/x/crypto
+        - golang.org/x/net
+        - golang.org/x/sys
+        - github.com/aws/aws-sdk-go-v2
+        - github.com/sirupsen/logrus
+        - go.uber.org/zap
+      name: 'change.?name.orValue(change.?Name.orValue("")).lowerAscii()'
+      base: 'change.?baseVersion.orValue(change.?BaseVersion.orValue("")).lowerAscii()'
+      target: 'change.?targetVersion.orValue(change.?TargetVersion.orValue("")).lowerAscii()'
+      unchanged: 'base != "" && base == target'
+      isCritical: 'criticalModules.exists(c, name.startsWith(c.lowerAscii()))'
+    rules:
+      - action: warn
+        when: env.entrypoint == "diff_dependency_change" && isCritical && unchanged
+        reason: Critical runtime module changed without a version bump; consider explicit upgrade
