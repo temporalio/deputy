@@ -31,6 +31,7 @@ var (
 		"cluster",
 		"component",
 		"findings",
+		"change",
 	}
 )
 

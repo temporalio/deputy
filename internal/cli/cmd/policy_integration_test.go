@@ -21,6 +21,24 @@ func TestPolicyIntegration_ComposedBundleSbomComponent(t *testing.T) {
 	}
 }
 
+func TestPolicyIntegration_ComposedBundleSbomComponent_AllowsPermissive(t *testing.T) {
+	bundlePath := filepath.Clean(filepath.Join("..", "..", "..", "policy", "examples", "license-allowlist-composed.yaml"))
+	payload := map[string]any{
+		"component": map[string]any{
+			"licenses": []any{"MIT"},
+		},
+	}
+	actions, err := evaluatePoliciesForCommand(context.Background(), []string{bundlePath}, payload, "sbom", "sbom_component", &bytes.Buffer{})
+	if err != nil {
+		t.Fatalf("evaluatePoliciesForCommand: %v", err)
+	}
+	for _, a := range actions {
+		if a.Type == "deny" {
+			t.Fatalf("did not expect deny: %+v", a)
+		}
+	}
+}
+
 // Ensure scan command (no licenses) is not denied by the composed bundle.
 func TestPolicyIntegration_ComposedBundleScanReport_NoDeny(t *testing.T) {
 	bundlePath := filepath.Clean(filepath.Join("..", "..", "..", "policy", "examples", "license-allowlist-composed.yaml"))

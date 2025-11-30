@@ -4,7 +4,9 @@ policies:
   - name: deny-critical-and-high
     description: Deny artifacts that still carry CRITICAL/HIGH vulnerabilities
     vars:
-      blockedSeverities: '["CRITICAL", "HIGH"]'
+      blockedSeverities:
+        - CRITICAL
+        - HIGH
     rules:
       - action: deny
         when: vulnerabilities.exists(v, blockedSeverities.exists(s, s == v.severity))

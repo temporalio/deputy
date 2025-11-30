@@ -29,8 +29,22 @@ type structuredPolicy struct {
 type orderedVars []varKV
 
 type varKV struct {
-	Name string
-	Expr string
+	Name     string
+	Value    any
+	IsString bool
+}
+
+func (kv varKV) exprString() string {
+	if kv.IsString {
+		if s, ok := kv.Value.(string); ok {
+			return s
+		}
+	}
+	b, err := json.Marshal(kv.Value)
+	if err != nil {
+		return "null"
+	}
+	return string(b)
 }
 
 func (o *orderedVars) UnmarshalYAML(node *yaml.Node) error {
@@ -51,8 +65,17 @@ func (o *orderedVars) UnmarshalYAML(node *yaml.Node) error {
 		if err := k.Decode(&kv.Name); err != nil {
 			return err
 		}
-		if err := v.Decode(&kv.Expr); err != nil {
-			return err
+		// Detect string vs other scalars/collections
+		if v.Kind == yaml.ScalarNode && v.Tag == "!!str" {
+			if err := v.Decode(&kv.Value); err != nil {
+				return err
+			}
+			kv.IsString = true
+		} else {
+			if err := v.Decode(&kv.Value); err != nil {
+				return err
+			}
+			kv.IsString = false
 		}
 		out = append(out, kv)
 	}
@@ -64,7 +87,7 @@ func (o *orderedVars) UnmarshalJSON(data []byte) error {
 	if len(data) == 0 || string(data) == "null" {
 		return nil
 	}
-	var m map[string]string
+	var m map[string]any
 	if err := json.Unmarshal(data, &m); err != nil {
 		return err
 	}
@@ -75,7 +98,9 @@ func (o *orderedVars) UnmarshalJSON(data []byte) error {
 	sort.Strings(keys)
 	out := make([]varKV, 0, len(keys))
 	for _, k := range keys {
-		out = append(out, varKV{Name: k, Expr: m[k]})
+		val := m[k]
+		_, isString := val.(string)
+		out = append(out, varKV{Name: k, Value: val, IsString: isString})
 	}
 	*o = out
 	return nil
@@ -154,7 +179,7 @@ func (p structuredPolicy) toCELSource() (string, error) {
 		// expand vars in reverse author order so earlier vars are in scope for later ones
 		for i := len(p.Vars) - 1; i >= 0; i-- {
 			name := p.Vars[i].Name
-			expr := p.Vars[i].Expr
+			expr := p.Vars[i].exprString()
 			body = fmt.Sprintf("([%s]).map(%s, %s)[0]", expr, name, body)
 		}
 	}

@@ -1,6 +1,7 @@
 package policy
 
 import (
+	"context"
 	"strings"
 	"testing"
 )
@@ -9,12 +10,14 @@ func TestOrderedVarsExpandInAuthorOrder(t *testing.T) {
 	p := structuredPolicy{
 		Name: "ordered-vars",
 		Vars: orderedVars{
-			{Name: "a", Expr: "1"},
-			{Name: "b", Expr: "a + 1"},
-			{Name: "c", Expr: "b + 1"},
+			{Name: "a", Value: "1", IsString: true},
+			{Name: "b", Value: "a + 1", IsString: true},
+			{Name: "c", Value: "b + 1", IsString: true},
+			{Name: "literalList", Value: []any{"x", "y"}, IsString: false},
+			{Name: "literalMap", Value: map[string]any{"k": "v"}, IsString: false},
 		},
 		Rules: []structuredRule{
-			{Action: "deny", When: "c == 3"},
+			{Action: "deny", When: "c == 3 && literalList.size() == 2 && literalMap.k == \"v\""},
 		},
 	}
 	body, err := p.toCELSource()
@@ -30,12 +33,45 @@ func TestOrderedVarsExpandInAuthorOrder(t *testing.T) {
 	}
 }
 
+func TestLiteralsNestedListsAndMapsEvaluate(t *testing.T) {
+	p := structuredPolicy{
+		Name: "nested-literals",
+		Vars: orderedVars{
+			{Name: "listMaps", Value: []any{map[string]any{"k": "v"}}, IsString: false},
+			{Name: "listLists", Value: []any{[]any{"a", "b"}, []any{"c"}}, IsString: false},
+		},
+		Rules: []structuredRule{
+			{
+				Action: "deny",
+				When:   `listMaps[0].k == "v" && listLists.size() == 2 && listLists[0].size() == 2`,
+				Reason: "nested literals ok",
+			},
+		},
+	}
+	src, err := p.toCELSource()
+	if err != nil {
+		t.Fatalf("toCELSource: %v", err)
+	}
+	val, err := Evaluate(context.Background(), src, nil)
+	if err != nil {
+		t.Fatalf("Evaluate: %v", err)
+	}
+	actions, ok := val.([]any)
+	if !ok || len(actions) != 1 {
+		t.Fatalf("expected one action, got %#v", val)
+	}
+	act, _ := actions[0].(map[string]any)
+	if act["action"] != "deny" {
+		t.Fatalf("expected deny action, got %+v", act)
+	}
+}
+
 func TestOrderedVarsRejectDuplicateNames(t *testing.T) {
 	p := structuredPolicy{
 		Name: "dupe-vars",
 		Vars: orderedVars{
-			{Name: "a", Expr: "1"},
-			{Name: "a", Expr: "2"},
+			{Name: "a", Value: "1", IsString: true},
+			{Name: "a", Value: "2", IsString: true},
 		},
 		Rules: []structuredRule{{Action: "deny", When: "true"}},
 	}

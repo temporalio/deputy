@@ -34,6 +34,23 @@ const (
 	Downgraded
 )
 
+func (c ChangeType) String() string {
+	switch c {
+	case Added:
+		return "added"
+	case Removed:
+		return "removed"
+	case Updated:
+		return "updated"
+	case Upgraded:
+		return "upgraded"
+	case Downgraded:
+		return "downgraded"
+	default:
+		return "unknown"
+	}
+}
+
 // Change captures a single dependency delta between two scans. For Added
 // entries BaseVersion/OldName are empty. For Removed entries TargetVersion is
 // empty. Updated entries record both old and new identifying information.
@@ -42,13 +59,14 @@ const (
 // support. IsDirect is true when the module root appears explicitly (without
 // "// indirect" annotation) in go.mod of the target workspace.
 type Change struct {
-	Name          string     // canonical or full import path in target inventory
-	OldName       string     // previous path (may differ after canonicalization)
-	TargetVersion string     // version in target inventory (for Added/Updated)
-	BaseVersion   string     // version in base inventory (for Removed/Updated)
-	ChangeType    ChangeType // classification of the change
-	Ecosystem     string     // e.g. "Go", "npm"
-	IsDirect      bool       // true if a direct dependency when known (currently Go)
+	Name          string     `json:"name"`          // canonical or full import path in target inventory
+	OldName       string     `json:"oldName"`       // previous path (may differ after canonicalization)
+	TargetVersion string     `json:"targetVersion"` // version in target inventory (for Added/Updated)
+	BaseVersion   string     `json:"baseVersion"`   // version in base inventory (for Removed/Updated)
+	ChangeType    ChangeType `json:"changeType"`    // numeric classification of the change
+	Type          string     `json:"type"`          // string classification ("added","removed","updated","upgraded","downgraded")
+	Ecosystem     string     `json:"ecosystem"`     // e.g. "go", "npm"
+	IsDirect      bool       `json:"isDirect"`      // true if a direct dependency when known (currently Go)
 }
 
 // GoPackageInfo represents a parsed interpretation of an import path possibly
@@ -514,18 +532,21 @@ func ComparePackages(oldPkgs, newPkgs []*extractor.Package, goDirect map[string]
 				Name:        oldMeta.pkg.Name,
 				BaseVersion: oldMeta.pkg.Version,
 				ChangeType:  Removed,
+				Type:        Removed.String(),
 				Ecosystem:   oldMeta.ecosystemName(),
 				IsDirect:    isDirectForSummary(oldMeta, goDirect, pkgDirect),
 			})
 			continue
 		}
 		if oldMeta.pkg.Version != newMeta.pkg.Version || oldMeta.pkg.Name != newMeta.pkg.Name {
+			ct := selectChangeType(newMeta.ecosystemName(), oldMeta.pkg.Version, newMeta.pkg.Version)
 			changes = append(changes, Change{
 				Name:          newMeta.pkg.Name,
 				OldName:       oldMeta.pkg.Name,
 				BaseVersion:   oldMeta.pkg.Version,
 				TargetVersion: newMeta.pkg.Version,
-				ChangeType:    selectChangeType(newMeta.ecosystemName(), oldMeta.pkg.Version, newMeta.pkg.Version),
+				ChangeType:    ct,
+				Type:          ct.String(),
 				Ecosystem:     newMeta.ecosystemName(),
 				IsDirect:      isDirectForSummary(newMeta, goDirect, pkgDirect),
 			})
@@ -539,6 +560,7 @@ func ComparePackages(oldPkgs, newPkgs []*extractor.Package, goDirect map[string]
 			Name:          newMeta.pkg.Name,
 			TargetVersion: newMeta.pkg.Version,
 			ChangeType:    Added,
+			Type:          Added.String(),
 			Ecosystem:     newMeta.ecosystemName(),
 			IsDirect:      isDirectForSummary(newMeta, goDirect, pkgDirect),
 		})

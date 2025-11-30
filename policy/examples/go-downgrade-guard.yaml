@@ -1,0 +1,11 @@
+metadata:
+  title: "Go downgrade guard"
+policies:
+  - name: deny-go-downgrades
+    description: Deny downgrades of Go modules to prevent reintroducing older versions
+    rules:
+      - action: deny
+        when: env.entrypoint == "diff_dependency_change" &&
+          change.type == "downgraded" &&
+          change.ecosystem.lowerAscii() == "go"
+        reason: "downgrade detected for Go module"

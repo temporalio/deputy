@@ -7,7 +7,7 @@ policies:
       blockedPkgs: '["left-pad", "event-stream", "ua-parser-js", "ctx"]'
     rules:
       - action: deny
-        when: request.package in blockedPkgs
+        when: pkg.name in blockedPkgs
         reason: package is blocklisted due to previous compromises
         remediation: Use reviewed internal alternatives or forked mirrors
         details:

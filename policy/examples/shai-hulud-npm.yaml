@@ -1,13 +1,10 @@
-apiVersion: policy.deputy.sh/v1alpha2
-kind: PolicyBundle
 metadata:
   title: "Wiz Shai-Hulud 2.0 IOC quarantine"
 policies:
   - name: block-shai-hulud-npm
     description: Deny npm artifacts whose package+version match the Wiz Shai-Hulud 2.0 IOC list (Nov 2025)
     vars:
-      iocPkgs: |
-        [
+      iocPkgs: [
           {"name":"02-echo","versions":["0.0.7"]},
           {"name":"@accordproject/concerto-analysis","versions":["3.24.1"]},
           {"name":"@accordproject/concerto-linter","versions":["3.24.1"]},

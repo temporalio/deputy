@@ -1,0 +1,9 @@
+metadata:
+  title: "AWS Go SDK v1 sunset"
+policies:
+  - name: deny-aws-sdk-v1
+    description: Block deprecated AWS SDK for Go v1 to avoid unmaintained code paths
+    rules:
+      - action: deny
+        when: pkg.ecosystem == "go" && pkg.name == "github.com/aws/aws-sdk-go" && pkg.version.matches("^v1\\.")
+        reason: "AWS SDK for Go v1 is deprecated; migrate to v2"

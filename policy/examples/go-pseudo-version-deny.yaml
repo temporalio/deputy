@@ -1,0 +1,14 @@
+metadata:
+  title: "Disallow Go pseudo-versions"
+policies:
+  - name: deny-go-pseudo-versions
+    description: Require tagged Go module releases instead of pseudo-versions
+    vars:
+      isPseudo: |
+        pkg.ecosystem == "go" &&
+        pkg.version.matches("^v\\d+\\.\\d+\\.\\d+(?:-[0-9A-Za-z\\.]+)?-(?:0\\.)?\\d{14}-[0-9a-f]{12,}$")
+    rules:
+      - action: deny
+        when: isPseudo
+        reason: "Go module pinned to pseudo-version (commit SHA) instead of tagged release"
+        remediation: "Depend on a tagged release; avoid pseudo-versions like v0.0.0-YYYYMMDDHHMMSS-<sha>"

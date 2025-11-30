@@ -4,7 +4,12 @@ policies:
   - name: allow-sans-copyleft
     description: Block packages carrying copyleft licenses (works for SBOM/diff and proxy payloads)
     vars:
-      forbidden: '["SSPL-1.0", "AGPL-3.0-only", "AGPL-3.0", "GPL-3.0", "GPL-3.0-only"]'
+      forbidden:
+        - SSPL-1.0
+        - AGPL-3.0-only
+        - AGPL-3.0
+        - GPL-3.0
+        - GPL-3.0-only
     rules:
       - action: deny
         when: pkg.?licenses.orValue([]).exists(l, l in forbidden)
