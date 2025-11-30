@@ -117,6 +117,9 @@ func envWithNames(extra []string) (*cel.Env, error) {
 		cel.OptionalTypes(),
 		cel.Declarations(declSlice...),
 		ext.Strings(),
+		ext.Lists(),
+		ext.Sets(),
+		ext.Regex(),
 	)
 	if err != nil {
 		return nil, fmt.Errorf("build CEL env: %w", err)

@@ -6,7 +6,7 @@ import (
 )
 
 func TestEvaluateSimplePolicy(t *testing.T) {
-const src = `
+	const src = `
 (sbom.?component.?licenses[?0].orValue("UNKNOWN") in ["GPL-3.0-only"]
   ? [{"action": "deny", "reason": "bad"}]
   : [{"action": "allow"}])`
@@ -36,4 +36,41 @@ const src = `
 	if action["action"] != "deny" {
 		t.Fatalf("expected deny action, got %v", action["action"])
 	}
+}
+
+func TestCelExtensions(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("lists slice and repeat", func(t *testing.T) {
+		src := `["a","b","c","d"].slice(1,3).reverse().join(",")`
+		val, err := Evaluate(ctx, src, nil)
+		if err != nil {
+			t.Fatalf("Evaluate lists: %v", err)
+		}
+		if s, ok := val.(string); !ok || s != "c,b" {
+			t.Fatalf("unexpected value %v", val)
+		}
+	})
+
+	t.Run("sets contains dedup", func(t *testing.T) {
+		src := `sets.contains(["a","b","c"], ["b","c"]) && sets.equivalent(["a","a","b","c"], ["c","b","a"])`
+		val, err := Evaluate(ctx, src, nil)
+		if err != nil {
+			t.Fatalf("Evaluate sets: %v", err)
+		}
+		if b, ok := val.(bool); !ok || !b {
+			t.Fatalf("expected true, got %v", val)
+		}
+	})
+
+	t.Run("regex partial match", func(t *testing.T) {
+		src := `regex.extractAll("foo123bar456", "\\d+").size() == 2 && regex.extract("foo123", "foo(\\d+)").orValue("") == "123"`
+		val, err := Evaluate(ctx, src, nil)
+		if err != nil {
+			t.Fatalf("Evaluate regex: %v", err)
+		}
+		if b, ok := val.(bool); !ok || !b {
+			t.Fatalf("expected true, got %v", val)
+		}
+	})
 }
