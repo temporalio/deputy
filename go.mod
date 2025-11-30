@@ -14,7 +14,7 @@ require (
 	github.com/google/go-cmp v0.7.0
 	github.com/google/go-github/v63 v63.0.0
 	github.com/google/licensecheck v0.3.1
-	github.com/google/osv-scalibr v0.3.2
+	github.com/google/osv-scalibr v0.3.4
 	github.com/hashicorp/go-cleanhttp v0.5.2
 	github.com/hashicorp/go-retryablehttp v0.7.7
 	github.com/ossf/osv-schema/bindings/go v0.0.0-20250902063920-695987a6b7da
@@ -36,6 +36,7 @@ require (
 
 require (
 	cel.dev/expr v0.24.0 // indirect
+	cloud.google.com/go/compute/metadata v0.9.0 // indirect
 	cyphar.com/go-pathrs v0.2.1 // indirect
 	dario.cat/mergo v1.0.2 // indirect
 	deps.dev/api/v3alpha v0.0.0-20250903005441-604c45d5b44b // indirect
@@ -155,6 +156,7 @@ require (
 	github.com/tidwall/jsonc v0.3.2 // indirect
 	github.com/tidwall/match v1.2.0 // indirect
 	github.com/tidwall/pretty v1.2.1 // indirect
+	github.com/tink-crypto/tink-go/v2 v2.4.0 // indirect
 	github.com/tklauser/go-sysconf v0.3.15 // indirect
 	github.com/tklauser/numcpus v0.10.0 // indirect
 	github.com/tonistiigi/go-csvvalue v0.0.0-20240814133006-030d3b2625d0 // indirect
