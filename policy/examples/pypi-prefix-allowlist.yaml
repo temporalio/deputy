@@ -1,5 +1,3 @@
-apiVersion: policy.deputy.sh/v1alpha2
-kind: PolicyBundle
 policies:
   - name: pypi-prefix-allowlist
     description: Allow only approved prefixes for PyPI artifacts via the proxy

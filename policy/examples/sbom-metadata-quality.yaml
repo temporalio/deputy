@@ -1,5 +1,3 @@
-apiVersion: policy.deputy.sh/v1alpha2
-kind: PolicyBundle
 policies:
   - name: sbom-metadata-quality
     description: Warn when SBOM components miss key metadata

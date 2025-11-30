@@ -10,10 +10,8 @@ import (
 )
 
 type structuredBundle struct {
-	APIVersion string             `yaml:"apiVersion"`
-	Kind       string             `yaml:"kind"`
-	Metadata   map[string]any     `yaml:"metadata,omitempty"`
-	Policies   []structuredPolicy `yaml:"policies"`
+	Metadata map[string]any     `yaml:"metadata,omitempty"`
+	Policies []structuredPolicy `yaml:"policies"`
 }
 
 type structuredPolicy struct {
@@ -116,8 +114,6 @@ type structuredRule struct {
 	Details     map[string]any    `yaml:"details,omitempty"`
 }
 
-const structuredAPIVersion = "policy.deputy.sh/v1alpha2"
-
 func tryParseStructuredBundle(data []byte, path string) ([]Source, bool, error) {
 	var bundle structuredBundle
 	if err := yaml.Unmarshal(data, &bundle); err != nil {
@@ -125,12 +121,6 @@ func tryParseStructuredBundle(data []byte, path string) ([]Source, bool, error) 
 	}
 	if len(bundle.Policies) == 0 {
 		return nil, false, nil
-	}
-	if av := strings.TrimSpace(bundle.APIVersion); av != "" && av != structuredAPIVersion {
-		return nil, false, fmt.Errorf("%s: unsupported apiVersion %q", path, bundle.APIVersion)
-	}
-	if k := strings.TrimSpace(bundle.Kind); k != "" && k != "PolicyBundle" {
-		return nil, false, fmt.Errorf("%s: unsupported kind %q", path, bundle.Kind)
 	}
 	var sources []Source
 	for _, pol := range bundle.Policies {

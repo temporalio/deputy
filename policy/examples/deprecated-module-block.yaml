@@ -1,0 +1,12 @@
+policies:
+  - name: deprecated-module-block
+    description: Block dependencies marked as deprecated or end-of-life
+    vars:
+      summary: 'vulnerability.?summary.orValue(vulnerability.?Summary.orValue("")).lowerAscii()'
+      details: 'vulnerability.?details.orValue(vulnerability.?Details.orValue("")).lowerAscii()'
+      isDeprecatedText: 'summary.matches("(?i)deprecated|end[- ]of[- ]life|eol|unmaintained") || details.matches("(?i)deprecated|end[- ]of[- ]life|eol|unmaintained")'
+    rules:
+      - action: deny
+        when: env.entrypoint in ["scan_vulnerability", "diff_vulnerability"] && isDeprecatedText
+        reason: Dependency is deprecated or end-of-life
+        remediation: Migrate to the recommended replacement before merging

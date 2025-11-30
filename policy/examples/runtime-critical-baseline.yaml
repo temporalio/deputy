@@ -1,0 +1,22 @@
+policies:
+  - name: runtime-critical-baseline
+    description: Prevent downgrades/removals of runtime-critical components
+    vars:
+      criticalModules:
+        - github.com/sirupsen/logrus
+        - go.uber.org/zap
+        - github.com/gin-gonic/gin
+        - github.com/labstack/echo
+        - github.com/aws/aws-sdk-go-v2
+        - github.com/google/uuid
+        - golang.org/x/crypto
+        - golang.org/x/net
+        - golang.org/x/sys
+      changeType: 'change.?type.orValue(change.?Type.orValue("")).lowerAscii()'
+      name: 'change.?name.orValue(change.?Name.orValue("")).lowerAscii()'
+      isCritical: 'criticalModules.exists(c, name.startsWith(c.lowerAscii()))'
+    rules:
+      - action: deny
+        when: env.entrypoint == "diff_dependency_change" && isCritical && changeType in ["removed", "downgraded"]
+        reason: Runtime-critical dependency cannot be removed or downgraded
+        remediation: Keep the critical dependency at or above the current baseline

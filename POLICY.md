@@ -44,11 +44,9 @@ The `env` object passed to CEL now contains both `command` (e.g., `scan`) and `e
 
 ## Structured Policy Bundles
 
-Policies must be authored as structured YAML bundles (`apiVersion: policy.deputy.sh/v1alpha2`, `kind: PolicyBundle`). Raw `.cel` files are no longer accepted directly. Example (`policy/examples/license-allowlist.yaml`):
+Policies are authored as structured YAML bundles. Example (`policy/examples/license-allowlist.yaml`):
 
 ```yaml
-apiVersion: policy.deputy.sh/v1alpha2
-kind: PolicyBundle
 policies:
   - name: allow-sans-copyleft
     description: Block AGPL/SSPL-licensed packages

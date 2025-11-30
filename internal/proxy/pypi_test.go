@@ -18,9 +18,7 @@ import (
 
 func writePyPIBundle(t *testing.T, dir, name, when, reason, action string) string {
 	t.Helper()
-	content := fmt.Sprintf(`apiVersion: policy.deputy.sh/v1alpha2
-kind: PolicyBundle
-policies:
+	content := fmt.Sprintf(`policies:
   - name: %s
     rules:
       - action: %s

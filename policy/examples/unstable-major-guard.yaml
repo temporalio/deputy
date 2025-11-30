@@ -1,5 +1,3 @@
-apiVersion: policy.deputy.sh/v1alpha2
-kind: PolicyBundle
 policies:
   - name: unstable-major-guard
     description: Flag v0/pre-release dependencies for extra scrutiny

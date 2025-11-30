@@ -230,8 +230,6 @@ You can gain confidence in the npm adapter without installing Node locally by dr
    EOF
 
 cat <<'EOF' > "$tmpdir/policies/allow-all.yaml"
-apiVersion: policy.deputy.sh/v1alpha2
-kind: PolicyBundle
 policies:
   - name: allow-all
     rules:
@@ -267,8 +265,6 @@ EOF
 
    ```bash
    cat <<'EOF' > "$tmpdir/policies/block-leftpad.yaml"
-   apiVersion: policy.deputy.sh/v1alpha2
-   kind: PolicyBundle
    policies:
      - name: block-leftpad
        rules:
@@ -352,8 +348,6 @@ The same pattern works for Python without polluting your host interpreter. This 
    EOF
 
    cat <<'EOF' > "$tmpdir/policies/allow-all.yaml"
-   apiVersion: policy.deputy.sh/v1alpha2
-   kind: PolicyBundle
    policies:
      - name: allow-all
        rules:
@@ -388,8 +382,6 @@ The same pattern works for Python without polluting your host interpreter. This 
 
    ```bash
    cat <<'EOF' > "$tmpdir/policies/block-pkginfo.yaml"
-   apiVersion: policy.deputy.sh/v1alpha2
-   kind: PolicyBundle
    policies:
      - name: block-pkginfo
        rules:
@@ -460,8 +452,6 @@ Rubyists can follow the same pattern with Docker’s `ruby:3.3` image and the `g
    EOF
 
 cat <<'EOF' > "$tmpdir/policies/allow-all.yaml"
-apiVersion: policy.deputy.sh/v1alpha2
-kind: PolicyBundle
 policies:
   - name: allow-all
     rules:
@@ -494,8 +484,6 @@ EOF
 
    ```bash
    cat <<'EOF' > "$tmpdir/policies/block-rake.yaml"
-   apiVersion: policy.deputy.sh/v1alpha2
-   kind: PolicyBundle
    policies:
      - name: block-rake
        rules:
@@ -564,8 +552,6 @@ Because Go tooling relies on GOPROXY, you can validate end-to-end behavior entir
    EOF
 
    cat <<'EOF' > "$tmpdir/policies/allow-all.yaml"
-   apiVersion: policy.deputy.sh/v1alpha2
-   kind: PolicyBundle
    policies:
      - name: allow-all
        rules:
@@ -608,8 +594,6 @@ GOMODCACHE=/go/pkg/mod go mod download golang.org/x/text@v0.14.0'
 
    ```bash
    cat <<'EOF' > "$tmpdir/policies/block-errors.yaml"
-   apiVersion: policy.deputy.sh/v1alpha2
-   kind: PolicyBundle
    policies:
      - name: block-errors
        rules:

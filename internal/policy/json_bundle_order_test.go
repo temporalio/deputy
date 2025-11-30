@@ -28,9 +28,7 @@ true ? [{"action":"warn"}] : []`},
 
 	// structured bundle (ordered vars) alongside raw CEL
 	structuredPath := filepath.Join(tmp, "struct.yaml")
-	structured := `apiVersion: policy.deputy.sh/v1alpha2
-kind: PolicyBundle
-policies:
+	structured := `policies:
   - name: structured
     vars:
       a: "1"

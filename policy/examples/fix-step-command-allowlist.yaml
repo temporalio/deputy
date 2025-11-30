@@ -1,5 +1,3 @@
-apiVersion: policy.deputy.sh/v1alpha2
-kind: PolicyBundle
 policies:
   - name: fix-step-command-allowlist
     description: Ensure auto-run remediation commands stay within safe package-manager verbs

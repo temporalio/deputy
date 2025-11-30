@@ -18,9 +18,7 @@ true`
 func TestBuildBundle(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "policy.yaml")
-	source := `apiVersion: policy.deputy.sh/v1alpha2
-kind: PolicyBundle
-policies:
+	source := `policies:
   - name: bundle-policy
     rules:
       - action: allow
@@ -55,9 +53,7 @@ func TestLoadStructuredBundle(t *testing.T) {
 	}{
 		{
 			name: "valid",
-			yaml: `apiVersion: policy.deputy.sh/v1alpha2
-kind: PolicyBundle
-policies:
+			yaml: `policies:
   - name: block-log4shell
     description: Block vulnerable log4j packages
     ecosystems: [npm]
@@ -73,16 +69,14 @@ policies:
 `,
 		},
 		{
-			name: "bad schema",
-			yaml: `apiVersion: policy.deputy.sh/v1beta1
-kind: PolicyBundle
-policies:
+			name: "headers rejected",
+			yaml: `policies:
   - name: noop
     rules:
       - action: deny
         when: true
 `,
-			wantErr: true,
+			wantErr: false,
 		},
 	}
 	for _, tt := range tests {

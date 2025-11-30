@@ -1,5 +1,3 @@
-apiVersion: policy.deputy.sh/v1alpha2
-kind: PolicyBundle
 policies:
   - name: direct-high-fix-block
     description: Block direct dependencies that still carry HIGH/CRITICAL vulns when a fix exists

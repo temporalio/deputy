@@ -108,3 +108,41 @@ func TestPolicyIntegration_PypiPrefixAllowlist(t *testing.T) {
 		}
 	}
 }
+
+func TestPolicyIntegration_RuntimeCriticalBaseline(t *testing.T) {
+	pol := filepath.Clean(filepath.Join("..", "..", "..", "policy", "examples", "runtime-critical-baseline.yaml"))
+	payload := map[string]any{
+		"change": map[string]any{
+			"type": "removed",
+			"name": "github.com/sirupsen/logrus",
+		},
+	}
+	if _, err := evaluatePoliciesForCommand(context.Background(), []string{pol}, payload, "diff", "diff_dependency_change", &bytes.Buffer{}); err == nil {
+		t.Fatalf("expected denial error for removing critical module")
+	}
+}
+
+func TestPolicyIntegration_ExploitAvailableBlocker(t *testing.T) {
+	pol := filepath.Clean(filepath.Join("..", "..", "..", "policy", "examples", "exploit-available-blocker.yaml"))
+	payload := map[string]any{
+		"vulnerability": map[string]any{
+			"severity":   "CRITICAL",
+			"references": []any{"https://exploit-db.com/awesome-poc"},
+		},
+	}
+	if _, err := evaluatePoliciesForCommand(context.Background(), []string{pol}, payload, "scan", "scan_vulnerability", &bytes.Buffer{}); err == nil {
+		t.Fatalf("expected denial error for exploit-available vulnerability")
+	}
+}
+
+func TestPolicyIntegration_DeprecatedModuleBlock(t *testing.T) {
+	pol := filepath.Clean(filepath.Join("..", "..", "..", "policy", "examples", "deprecated-module-block.yaml"))
+	payload := map[string]any{
+		"vulnerability": map[string]any{
+			"summary": "Module is deprecated and unmaintained",
+		},
+	}
+	if _, err := evaluatePoliciesForCommand(context.Background(), []string{pol}, payload, "scan", "scan_vulnerability", &bytes.Buffer{}); err == nil {
+		t.Fatalf("expected denial error for deprecated module")
+	}
+}

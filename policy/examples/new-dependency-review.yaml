@@ -1,5 +1,3 @@
-apiVersion: policy.deputy.sh/v1alpha2
-kind: PolicyBundle
 policies:
   - name: new-dependency-review
     description: Require review/allowlist for newly added dependencies in diffs

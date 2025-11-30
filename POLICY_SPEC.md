@@ -1,12 +1,10 @@
-# Deputy Policy Bundle Specification (v1alpha2)
+# Deputy Policy Bundle Specification
 
 This document defines the structured bundle format used by Deputy for CEL policies.
 
 ## Schema
 
 ```yaml
-apiVersion: policy.deputy.sh/v1alpha2
-kind: PolicyBundle
 metadata:          # optional map
   title: "... "
 policies:          # required, non-empty list
@@ -38,16 +36,12 @@ policies:          # required, non-empty list
 - `env.command` and `env.entrypoint` indicate the invoking command/entrypoint.
 
 ### Validation
-- Unsupported `apiVersion` or `kind` fails parsing.
 - Empty `policies` or missing `rules` is invalid.
 - Vars must be strings; rules must include `action` and `when`.
 
 ## Examples
 
 License allowlist (composed):
-```yaml
-apiVersion: policy.deputy.sh/v1alpha2
-kind: PolicyBundle
 policies:
   - name: license-allowlist-composed
     description: Copyleft block with layered vars and scope guard
@@ -68,7 +62,6 @@ policies:
 ```
 
 High-severity proxy blocker:
-```yaml
 policies:
   - name: proxy-high-sev
     vars:
@@ -85,5 +78,4 @@ policies:
 - `ext.Strings()` is enabled by default; add more CEL extensions in `internal/policy/evaluator.go` if required.
 
 ## Compatibility notes
-- v1alpha2 bundles only; v1alpha1 JSON bundles remain supported through `tryParseBundle`.
 - Raw `.cel` files are not supported. Author structured bundles and load them directly.
