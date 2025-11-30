@@ -1,21 +1,16 @@
-apiVersion: policy.deputy.sh/v1alpha2
-kind: PolicyBundle
 metadata:
   title: "License guardrails"
 policies:
   - name: allow-sans-copyleft
     description: Block packages carrying copyleft licenses (works for SBOM/diff and proxy payloads)
     vars:
-      # Collect license strings from SBOM/diff components or any proxy request metadata.
-      # Optional access keeps evaluation safe when fields are missing.
-      licenses_union: 'component.?licenses.orValue([]) + request.?licenses.orValue([])'
       forbidden: '["SSPL-1.0", "AGPL-3.0-only", "AGPL-3.0", "GPL-3.0", "GPL-3.0-only"]'
     rules:
       - action: deny
-        when: licenses_union.exists(l, l in forbidden)
+        when: pkg.?licenses.orValue([]).exists(l, l in forbidden)
         reason: package carries a forbidden license
         details:
           policy: allow-sans-copyleft
       - action: warn
-        when: size(licenses_union) == 0
+        when: size(pkg.?licenses.orValue([])) == 0
         reason: package missing license metadata

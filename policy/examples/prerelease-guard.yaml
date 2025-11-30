@@ -1,5 +1,3 @@
-apiVersion: policy.deputy.sh/v1alpha2
-kind: PolicyBundle
 metadata:
   title: "Pre-release guardrails"
 policies:

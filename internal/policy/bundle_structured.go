@@ -96,19 +96,15 @@ const structuredAPIVersion = "policy.deputy.sh/v1alpha2"
 func tryParseStructuredBundle(data []byte, path string) ([]Source, bool, error) {
 	var bundle structuredBundle
 	if err := yaml.Unmarshal(data, &bundle); err != nil {
-		trim := strings.TrimSpace(string(data))
-		if strings.HasPrefix(trim, "apiVersion") || strings.Contains(trim, "apiVersion:") {
-			return nil, false, fmt.Errorf("%s: parse structured bundle: %w", path, err)
-		}
 		return nil, false, nil
 	}
-	if strings.TrimSpace(bundle.APIVersion) == "" || len(bundle.Policies) == 0 {
+	if len(bundle.Policies) == 0 {
 		return nil, false, nil
 	}
-	if bundle.APIVersion != structuredAPIVersion {
+	if av := strings.TrimSpace(bundle.APIVersion); av != "" && av != structuredAPIVersion {
 		return nil, false, fmt.Errorf("%s: unsupported apiVersion %q", path, bundle.APIVersion)
 	}
-	if bundle.Kind != "PolicyBundle" && bundle.Kind != "" {
+	if k := strings.TrimSpace(bundle.Kind); k != "" && k != "PolicyBundle" {
 		return nil, false, fmt.Errorf("%s: unsupported kind %q", path, bundle.Kind)
 	}
 	var sources []Source

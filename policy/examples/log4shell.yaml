@@ -1,5 +1,3 @@
-apiVersion: policy.deputy.sh/v1alpha2
-kind: PolicyBundle
 policies:
   - name: block-log4shell
     description: Deny any artifact that is still vulnerable to Log4Shell

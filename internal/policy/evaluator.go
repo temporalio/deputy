@@ -18,6 +18,7 @@ var (
 	anyType = reflect.TypeOf((*any)(nil)).Elem()
 
 	defaultVariableNames = []string{
+		"pkg",
 		"request",
 		"vulnerabilities",
 		"sbom",
@@ -42,6 +43,11 @@ func Evaluate(ctx context.Context, source string, input map[string]any) (any, er
 	for _, name := range defaultVariableNames {
 		if _, ok := input[name]; !ok {
 			input[name] = nil
+		}
+	}
+	if val, ok := input["pkg"]; !ok || val == nil {
+		if pkg := buildPkgHelper(input); pkg != nil {
+			input["pkg"] = pkg
 		}
 	}
 	env, err := envForInput(input)
@@ -115,6 +121,38 @@ func envWithNames(extra []string) (*cel.Env, error) {
 		return nil, fmt.Errorf("build CEL env: %w", err)
 	}
 	return env, nil
+}
+
+// buildPkgHelper synthesizes a unified package view from common input shapes.
+// If no recognizable package data is present, it returns nil.
+func buildPkgHelper(input map[string]any) map[string]any {
+	// Prefer component (sbom/diff) then request (proxy)
+	var src map[string]any
+	if comp, ok := input["component"].(map[string]any); ok {
+		src = comp
+	} else if req, ok := input["request"].(map[string]any); ok {
+		src = req
+	} else {
+		return nil
+	}
+	pkg := map[string]any{}
+	if name, ok := src["package"]; ok {
+		pkg["name"] = name
+	} else if name, ok := src["module"]; ok {
+		pkg["name"] = name
+	} else if name, ok := src["name"]; ok {
+		pkg["name"] = name
+	}
+	if ver, ok := src["version"]; ok {
+		pkg["version"] = ver
+	}
+	if eco, ok := src["ecosystem"]; ok {
+		pkg["ecosystem"] = eco
+	}
+	if lic, ok := src["licenses"]; ok {
+		pkg["licenses"] = lic
+	}
+	return pkg
 }
 
 func convertRefVal(val ref.Val) (any, error) {
