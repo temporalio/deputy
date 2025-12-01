@@ -9,9 +9,9 @@ policies:
         - github.com/aws/aws-sdk-go-v2
         - github.com/sirupsen/logrus
         - go.uber.org/zap
-      name: 'change.?name.orValue(change.?Name.orValue("")).lowerAscii()'
-      base: 'change.?baseVersion.orValue(change.?BaseVersion.orValue("")).lowerAscii()'
-      target: 'change.?targetVersion.orValue(change.?TargetVersion.orValue("")).lowerAscii()'
+      name: 'change.?name.orValue("").lowerAscii()'
+      base: 'change.?baseVersion.orValue("").lowerAscii()'
+      target: 'change.?targetVersion.orValue("").lowerAscii()'
       unchanged: 'base != "" && base == target'
       isCritical: 'criticalModules.exists(c, name.startsWith(c.lowerAscii()))'
     rules:

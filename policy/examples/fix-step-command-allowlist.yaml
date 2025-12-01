@@ -17,8 +17,8 @@ policies:
         - "pipenv install"
         - "bundle update"
         - "cargo update"
-      commandText: 'step.?command.orValue(step.?Command.orValue("")).lowerAscii().trim()'
-      executable: 'step.?executable.orValue(step.?Executable.orValue(false))'
+      commandText: 'step.?command.orValue("").lowerAscii().trim()'
+      executable: 'step.?executable.orValue(false)'
       allowed: 'allowedPrefixes.exists(p, commandText.startsWith(p))'
     rules:
       - action: deny

@@ -1015,3 +1015,279 @@ func TestDeprecatedModuleBlock(t *testing.T) {
 		}
 	})
 }
+
+func TestBlockPackagePolicy(t *testing.T) {
+	path := filepath.Clean(filepath.Join("..", "..", "policy", "examples", "block-package.yaml"))
+	sources, err := LoadSources([]string{path})
+	if err != nil {
+		t.Fatalf("LoadSources: %v", err)
+	}
+	payload := map[string]any{
+		"pkg": map[string]any{"name": "left-pad"},
+		"env": map[string]any{"command": "proxy"},
+	}
+	actions, err := EvaluateAll(context.Background(), sources, payload)
+	if err != nil {
+		t.Fatalf("EvaluateAll: %v", err)
+	}
+	if len(actions) == 0 || actions[0].Type != "deny" {
+		t.Fatalf("expected deny for blocked package, got %+v", actions)
+	}
+}
+
+func TestGoDowngradeGuard(t *testing.T) {
+	path := filepath.Clean(filepath.Join("..", "..", "policy", "examples", "go-downgrade-guard.yaml"))
+	sources, err := LoadSources([]string{path})
+	if err != nil {
+		t.Fatalf("LoadSources: %v", err)
+	}
+	denyPayload := map[string]any{
+		"change": map[string]any{
+			"type":      "downgraded",
+			"ecosystem": "go",
+		},
+		"env": map[string]any{"command": "diff", "entrypoint": "diff_dependency_change"},
+	}
+	if actions, err := EvaluateAll(context.Background(), sources, denyPayload); err != nil || len(actions) == 0 || actions[0].Type != "deny" {
+		t.Fatalf("expected deny for go downgrade, got %+v err=%v", actions, err)
+	}
+	allowPayload := map[string]any{
+		"change": map[string]any{
+			"type":      "upgraded",
+			"ecosystem": "go",
+		},
+		"env": map[string]any{"command": "diff", "entrypoint": "diff_dependency_change"},
+	}
+	if actions, err := EvaluateAll(context.Background(), sources, allowPayload); err != nil {
+		t.Fatalf("EvaluateAll: %v", err)
+	} else {
+		for _, a := range actions {
+			if a.Type == "deny" {
+				t.Fatalf("did not expect deny for upgrade: %+v", actions)
+			}
+		}
+	}
+}
+
+func TestLicenseAllowlistAdvisory(t *testing.T) {
+	path := filepath.Clean(filepath.Join("..", "..", "policy", "examples", "license-allowlist-advisory.yaml"))
+	sources, err := LoadSources([]string{path})
+	if err != nil {
+		t.Fatalf("LoadSources: %v", err)
+	}
+	payload := map[string]any{
+		"pkg": map[string]any{"licenses": []any{"AGPL-3.0"}},
+		"env": map[string]any{"command": "proxy"},
+	}
+	actions, err := EvaluateAll(context.Background(), sources, payload)
+	if err != nil {
+		t.Fatalf("EvaluateAll: %v", err)
+	}
+	warn := false
+	for _, a := range actions {
+		if a.Type == "warn" {
+			warn = true
+		}
+		if a.Type == "deny" {
+			t.Fatalf("advisory policy should downgrade deny to warn: %+v", actions)
+		}
+	}
+	if !warn {
+		t.Fatalf("expected warn for forbidden license in advisory mode, got %+v", actions)
+	}
+}
+
+func TestLog4ShellPolicy(t *testing.T) {
+	path := filepath.Clean(filepath.Join("..", "..", "policy", "examples", "log4shell.yaml"))
+	sources, err := LoadSources([]string{path})
+	if err != nil {
+		t.Fatalf("LoadSources: %v", err)
+	}
+	payload := map[string]any{
+		"vulnerabilities": []any{
+			map[string]any{"aliases": []any{"CVE-2021-44228"}},
+		},
+	}
+	actions, err := EvaluateAll(context.Background(), sources, payload)
+	if err != nil {
+		t.Fatalf("EvaluateAll: %v", err)
+	}
+	if len(actions) == 0 || actions[0].Type != "deny" {
+		t.Fatalf("expected deny for log4shell alias, got %+v", actions)
+	}
+}
+
+func TestMinVersionPolicy(t *testing.T) {
+	path := filepath.Clean(filepath.Join("..", "..", "policy", "examples", "min-version.yaml"))
+	sources, err := LoadSources([]string{path})
+	if err != nil {
+		t.Fatalf("LoadSources: %v", err)
+	}
+	payload := map[string]any{
+		"pkg": map[string]any{
+			"ecosystem": "go",
+			"name":      "golang.org/x/crypto",
+			"version":   "v0.25.0",
+		},
+	}
+	actions, err := EvaluateAll(context.Background(), sources, payload)
+	if err != nil {
+		t.Fatalf("EvaluateAll: %v", err)
+	}
+	if len(actions) == 0 || actions[0].Type != "deny" {
+		t.Fatalf("expected deny for version below baseline, got %+v", actions)
+	}
+}
+
+func TestNpmScopeAllowlist(t *testing.T) {
+	path := filepath.Clean(filepath.Join("..", "..", "policy", "examples", "npm-scope-allowlist.yaml"))
+	sources, err := LoadSources([]string{path})
+	if err != nil {
+		t.Fatalf("LoadSources: %v", err)
+	}
+	denyPayload := map[string]any{
+		"pkg": map[string]any{
+			"ecosystem": "npm",
+			"name":      "evilpkg",
+		},
+		"env": map[string]any{"command": "proxy", "entrypoint": "npm_artifact_request"},
+	}
+	if actions, err := EvaluateAll(context.Background(), sources, denyPayload); err != nil || len(actions) == 0 || actions[0].Type != "deny" {
+		t.Fatalf("expected deny for unapproved npm package, got %+v err=%v", actions, err)
+	}
+	allowPayload := map[string]any{
+		"pkg": map[string]any{
+			"ecosystem": "npm",
+			"name":      "lodash",
+		},
+		"env": map[string]any{"command": "proxy", "entrypoint": "npm_artifact_request"},
+	}
+	if actions, err := EvaluateAll(context.Background(), sources, allowPayload); err != nil {
+		t.Fatalf("EvaluateAll: %v", err)
+	} else {
+		for _, a := range actions {
+			if a.Type == "deny" {
+				t.Fatalf("did not expect deny for allowlisted package: %+v", actions)
+			}
+		}
+	}
+}
+
+func TestProxyCriticalAdvisory(t *testing.T) {
+	path := filepath.Clean(filepath.Join("..", "..", "policy", "examples", "proxy-critical-advisory.yaml"))
+	sources, err := LoadSources([]string{path})
+	if err != nil {
+		t.Fatalf("LoadSources: %v", err)
+	}
+	payload := map[string]any{
+		"vulnerabilities": []any{
+			map[string]any{"Severity": "CRITICAL"},
+		},
+		"env": map[string]any{"command": "proxy", "entrypoint": "go_artifact_request"},
+	}
+	actions, err := EvaluateAll(context.Background(), sources, payload)
+	if err != nil {
+		t.Fatalf("EvaluateAll: %v", err)
+	}
+	warn := false
+	for _, a := range actions {
+		if a.Type == "warn" {
+			warn = true
+		}
+		if a.Type == "deny" {
+			t.Fatalf("advisory policy should downgrade to warn: %+v", actions)
+		}
+	}
+	if !warn {
+		t.Fatalf("expected warn for critical vuln at proxy, got %+v", actions)
+	}
+}
+
+func TestRuntimeCriticalBaseline(t *testing.T) {
+	path := filepath.Clean(filepath.Join("..", "..", "policy", "examples", "runtime-critical-baseline.yaml"))
+	sources, err := LoadSources([]string{path})
+	if err != nil {
+		t.Fatalf("LoadSources: %v", err)
+	}
+	payload := map[string]any{
+		"change": map[string]any{
+			"type": "removed",
+			"name": "github.com/google/uuid",
+		},
+		"env": map[string]any{"command": "diff", "entrypoint": "diff_dependency_change"},
+	}
+	actions, err := EvaluateAll(context.Background(), sources, payload)
+	if err != nil {
+		t.Fatalf("EvaluateAll: %v", err)
+	}
+	if len(actions) == 0 || actions[0].Type != "deny" {
+		t.Fatalf("expected deny for removing critical runtime dep, got %+v", actions)
+	}
+}
+
+func TestSeverityGuardrail(t *testing.T) {
+	path := filepath.Clean(filepath.Join("..", "..", "policy", "examples", "severity-guardrail.yaml"))
+	sources, err := LoadSources([]string{path})
+	if err != nil {
+		t.Fatalf("LoadSources: %v", err)
+	}
+	payload := map[string]any{
+		"vulnerabilities": []any{
+			map[string]any{"severity": "HIGH"},
+		},
+		"env": map[string]any{"command": "scan", "entrypoint": "scan_vulnerability"},
+	}
+	actions, err := EvaluateAll(context.Background(), sources, payload)
+	if err != nil {
+		t.Fatalf("EvaluateAll: %v", err)
+	}
+	if len(actions) == 0 || actions[0].Type != "deny" {
+		t.Fatalf("expected deny for high severity vuln, got %+v", actions)
+	}
+}
+
+func TestShaiHuludNpm(t *testing.T) {
+	path := filepath.Clean(filepath.Join("..", "..", "policy", "examples", "shai-hulud-npm.yaml"))
+	sources, err := LoadSources([]string{path})
+	if err != nil {
+		t.Fatalf("LoadSources: %v", err)
+	}
+	payload := map[string]any{
+		"pkg": map[string]any{
+			"ecosystem": "npm",
+			"name":      "@kvytech/cli",
+			"version":   "0.0.7",
+		},
+		"env": map[string]any{"command": "proxy", "entrypoint": "npm_artifact_request"},
+	}
+	actions, err := EvaluateAll(context.Background(), sources, payload)
+	if err != nil {
+		t.Fatalf("EvaluateAll: %v", err)
+	}
+	if len(actions) == 0 || actions[0].Type != "deny" {
+		t.Fatalf("expected deny for IOC package, got %+v", actions)
+	}
+}
+
+func TestXZBackdoorPolicy(t *testing.T) {
+	path := filepath.Clean(filepath.Join("..", "..", "policy", "examples", "xz-backdoor.yaml"))
+	sources, err := LoadSources([]string{path})
+	if err != nil {
+		t.Fatalf("LoadSources: %v", err)
+	}
+	payload := map[string]any{
+		"pkg": map[string]any{
+			"ecosystem": "npm",
+			"name":      "xz",
+			"version":   "5.6.0",
+		},
+		"env": map[string]any{"command": "proxy"},
+	}
+	actions, err := EvaluateAll(context.Background(), sources, payload)
+	if err != nil {
+		t.Fatalf("EvaluateAll: %v", err)
+	}
+	if len(actions) == 0 || actions[0].Type != "deny" {
+		t.Fatalf("expected deny for compromised xz version, got %+v", actions)
+	}
+}
