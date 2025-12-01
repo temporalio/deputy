@@ -18,6 +18,9 @@ type structuredPolicy struct {
 	Name        string           `yaml:"name"`
 	Description string           `yaml:"description,omitempty"`
 	Ecosystems  []string         `yaml:"ecosystems,omitempty"`
+	Entrypoints []string         `yaml:"entrypoints,omitempty"`
+	Commands    []string         `yaml:"commands,omitempty"`
+	Mode        string           `yaml:"mode,omitempty"`
 	Vars        orderedVars      `yaml:"vars,omitempty"`
 	Rules       []structuredRule `yaml:"rules"`
 }
@@ -122,8 +125,18 @@ func tryParseStructuredBundle(data []byte, path string) ([]Source, bool, error) 
 	if len(bundle.Policies) == 0 {
 		return nil, false, nil
 	}
+	seenNames := map[string]struct{}{}
 	var sources []Source
 	for _, pol := range bundle.Policies {
+		if len(pol.Rules) == 0 {
+			return nil, false, fmt.Errorf("%s/%s: policy must contain at least one rule", path, pol.Name)
+		}
+		if pol.Name != "" {
+			if _, dup := seenNames[pol.Name]; dup {
+				return nil, false, fmt.Errorf("%s/%s: duplicate policy name", path, pol.Name)
+			}
+			seenNames[pol.Name] = struct{}{}
+		}
 		src, err := pol.toCELSource()
 		if err != nil {
 			return nil, false, fmt.Errorf("%s/%s: %w", path, pol.Name, err)
@@ -142,7 +155,24 @@ func tryParseStructuredBundle(data []byte, path string) ([]Source, bool, error) 
 
 func (p structuredPolicy) toCELSource() (string, error) {
 	if len(p.Rules) == 0 {
-		return "[]", nil
+		return "", fmt.Errorf("policy must contain at least one rule")
+	}
+	for _, ep := range p.Entrypoints {
+		if !IsAllowedEntrypoint(ep) {
+			return "", fmt.Errorf("invalid entrypoint %q", ep)
+		}
+	}
+	for _, cmd := range p.Commands {
+		if !IsAllowedCommand(cmd) {
+			return "", fmt.Errorf("invalid command %q", cmd)
+		}
+	}
+	if p.Mode != "" {
+		mode := strings.ToLower(strings.TrimSpace(p.Mode))
+		if mode != "advisory" && mode != "enforce" {
+			return "", fmt.Errorf("invalid mode %q (expected advisory|enforce)", p.Mode)
+		}
+		p.Mode = mode
 	}
 	var builder strings.Builder
 	builder.WriteString("[]")
@@ -180,6 +210,15 @@ func (p structuredPolicy) toCELSource() (string, error) {
 	if p.Description != "" {
 		metadata = append(metadata, fmt.Sprintf("//! policy.description = \"%s\"", escapeComment(p.Description)))
 	}
+	if len(p.Entrypoints) > 0 {
+		metadata = append(metadata, fmt.Sprintf("//! policy.entrypoints = \"%s\"", strings.Join(p.Entrypoints, ",")))
+	}
+	if len(p.Commands) > 0 {
+		metadata = append(metadata, fmt.Sprintf("//! policy.commands = \"%s\"", strings.Join(p.Commands, ",")))
+	}
+	if p.Mode != "" && p.Mode != "enforce" {
+		metadata = append(metadata, fmt.Sprintf("//! policy.mode = \"%s\"", p.Mode))
+	}
 	if len(p.Ecosystems) > 0 {
 		metadata = append(metadata, fmt.Sprintf("//! policy.ecosystems = \"%s\"", strings.Join(p.Ecosystems, ",")))
 	}
@@ -199,7 +238,8 @@ func (r structuredRule) toRuleExpr(ecosystems []string) (string, error) {
 		for i, eco := range ecosystems {
 			quoted[i] = fmt.Sprintf("\"%s\"", eco)
 		}
-		when = fmt.Sprintf("((request.ecosystem in [%s]) && (%s))", strings.Join(quoted, ","), when)
+		guard := fmt.Sprintf("(request.?ecosystem.orValue(\"\") in [%s]) || (pkg.?ecosystem.orValue(\"\") in [%s])", strings.Join(quoted, ","), strings.Join(quoted, ","))
+		when = fmt.Sprintf("((%s) && (%s))", guard, when)
 	}
 	if strings.TrimSpace(r.Action) == "" {
 		return "", fmt.Errorf("rule missing action")

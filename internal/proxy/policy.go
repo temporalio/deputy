@@ -9,27 +9,24 @@ import (
 
 // PolicyEvaluator loads CEL sources and evaluates them for proxy requests.
 type PolicyEvaluator interface {
-    Evaluate(context.Context, string, map[string]any) ([]policy.Action, error)
+	Evaluate(context.Context, string, map[string]any) ([]policy.Action, error)
 }
 
 type policyEngine struct {
-    sources []policy.Source
+	engine *policy.Engine
 }
 
 // NewPolicyEngine loads CEL policies from the provided paths.
 func NewPolicyEngine(paths []string) (PolicyEvaluator, error) {
-    if len(paths) == 0 {
-        return &policyEngine{}, nil
-    }
-    sources, err := policy.LoadSources(paths)
-    if err != nil {
-        return nil, err
-    }
-    return &policyEngine{sources: sources}, nil
+	eng, err := policy.NewEngineFromPaths(paths)
+	if err != nil {
+		return nil, err
+	}
+	return &policyEngine{engine: eng}, nil
 }
 
 func (e *policyEngine) Evaluate(ctx context.Context, entrypoint string, payload map[string]any) ([]policy.Action, error) {
-	if e == nil || len(e.sources) == 0 {
+	if e == nil || e.engine == nil {
 		return nil, nil
 	}
 	if payload == nil {
@@ -45,7 +42,7 @@ func (e *policyEngine) Evaluate(ctx context.Context, entrypoint string, payload 
 		}
 	}
 	payload["env"] = env
-	return policy.EvaluateAll(ctx, e.sources, payload)
+	return e.engine.EvaluateAll(ctx, payload, "proxy", entrypoint)
 }
 
 func summarizeActions(actions []policy.Action) (deny *policy.Action, warnings []policy.Action, headers map[string]string) {

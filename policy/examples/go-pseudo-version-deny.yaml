@@ -1,9 +1,9 @@
 policies:
   - name: deny-go-pseudo-versions
     description: Require tagged Go module releases instead of pseudo-versions
+    ecosystems: ["go"]
     vars:
       isPseudo: |
-        pkg.ecosystem == "go" &&
         pkg.version.matches("^v\\d+\\.\\d+\\.\\d+(?:-[0-9A-Za-z\\.]+)?-(?:0\\.)?\\d{14}-[0-9a-f]{12,}$")
     rules:
       - action: deny

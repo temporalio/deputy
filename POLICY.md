@@ -101,7 +101,17 @@ in_scope && vulns.size() > 0
 
 ### Entry points
 
-Each Deputy command exposes one or more entrypoints. Policies declare which entrypoints they support. Every evaluation injects `env.command` and `env.entrypoint` so a single policy can branch on where it is running.
+Each Deputy command exposes one or more entrypoints. Policies can declare the entrypoints (and/or commands) they target via leading metadata comments (e.g., `//! policy.entrypoints = "go_artifact_request,scan_vulnerability"`) or structured YAML (`entrypoints: ["go_artifact_request"]`). The runtime prefilters policies using these lists before evaluation. Every evaluation still injects `env.command` and `env.entrypoint` so a single policy can branch further if needed.
+
+**Ecosystem identifiers** (used in `request.ecosystem` and commonly in `pkg.ecosystem`): `go`, `npm`, `pypi`, `rubygems`. Use these strings in `ecosystems: [...]` when scoping policies to package managers.
+
+**Entrypoint identifiers** (snake_case):
+- proxy: `go_artifact_request`, `npm_artifact_request`, `pypi_artifact_request`, `rubygems_artifact_request`
+- scan: `scan_report`, `scan_vulnerability`
+- diff: `diff_report`, `diff_dependency_change`, `diff_vulnerability`
+- sbom: `sbom_report`, `sbom_component`
+- fix: `fix_plan`, `fix_plan_step`
+- triage: `triage_report`, `triage_cluster`
 
 | Entry point | Triggered by | Input shape |
 | --- | --- | --- |
@@ -130,7 +140,8 @@ Policies return arrays of action objects. Each object must include an `action` f
 | `allow` | `action: "allow"` | `message`, `annotations`, `headers` | Explicitly allow while optionally emitting metadata. |
 | `warn` | `action: "warn"`, `reason` | `code`, `annotations`, `remediation` | Non-blocking warning surfaced by the caller (CLI log, HTTP header, etc.). |
 | `deny` | `action: "deny"`, `reason` | `status`, `remediation`, `annotations` | Abort the operation. `status` maps to HTTP/CLI status codes. |
-| `mutate` | `action: "mutate"`, `patch` | — | JSON merge patch applied by compatible entrypoints (proxy rewrites, fix-plan adjustments). |
+
+`mutate` is reserved but not yet supported by the runtime.
 
 Use conditional expressions to include actions only when needed:
 
@@ -148,15 +159,9 @@ has_forbidden_license := license in forbidden;
 
 Multiple action arrays can be concatenated with `+`; the caller evaluates the final list in order (`deny` short-circuits unless `fail-open` is enabled).
 
-### Policy Ordering, Priority & Modes
+### Policy Ordering & Modes
 
-To avoid ambiguous outcomes when multiple bundles apply to the same entrypoint:
-
-- Policies declare an optional `policy.priority` metadata value (default `0`). Higher numbers run first.
-- Within a policy, CEL `deny/warn/...` helpers execute in the order they appear.
-- Callers aggregate actions using the fixed precedence `deny > mutate > warn > allow`. The first deny stops evaluation unless the listener/command is configured with `fail-open`.
-- `policy.mode = "advisory"` forces all actions to log/annotate only; `mode = "enforce"` (default) may block or mutate behavior. Advisory policies are perfect for canaries.
-- `policy.requires = ["sbom_component"]` can request that upstream callers populate expensive fields (e.g., SBOMs) before evaluation; the proxy honors this by pausing the stream.
+Policies are evaluated in the order provided by the caller. `deny` actions still take precedence over `warn/allow` in callers that enforce actions. A policy can opt into **advisory** mode via `policy.mode = "advisory"` (or YAML `mode: advisory`), which downgrades any `deny` actions from that policy to `warn` so you can canary without blocking. `mutate`, explicit priority, and `requires` hints remain on the roadmap.
 
 `deputy policy simulate` (see command table) replays captured JSON inputs through multiple bundles so you can confirm the combined order of operations before turning a policy from advisory into enforce mode.
 

@@ -63,6 +63,8 @@ All proxy subcommands accept the global logging flags, `--trace-http` for verbos
 
 ## Configuration Model
 
+Supported ecosystems today: `go`, `npm`, `pypi`, `rubygems`. These map to the ecosystem adapters that populate `request.ecosystem` during policy evaluation.
+
 The config file is YAML or JSON (same schema). Shape:
 
 ```yaml

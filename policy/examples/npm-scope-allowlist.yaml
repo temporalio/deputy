@@ -1,6 +1,7 @@
 policies:
   - name: enforce-approved-scopes
     description: Allow only approved npm scopes/packages in corp workloads
+    ecosystems: ["npm"]
     vars:
       allowedScopes:
         - "@acme"
@@ -10,15 +11,14 @@ policies:
         - "lodash"
         - "react"
         - "typescript"
+      inAllowlist: 'allowedScopes.exists(s, s != "" && pkg.name.startsWith(s + "/")) || allowedPackages.exists(p, p == pkg.name)'
     rules:
       - action: deny
-        when: pkg.ecosystem == "npm" &&
-          !(allowedScopes.exists(s, s != "" && pkg.name.startsWith(s + "/")) ||
-            allowedPackages.exists(p, p == pkg.name))
+        when: "!inAllowlist"
         reason: npm package outside approved scopes
         remediation: "Publish packages under @acme/* or request an exception"
         details:
           policy: enforce-approved-scopes
       - action: warn
-        when: pkg.ecosystem == "npm" && pkg.name.startsWith("@acme/") && pkg.version.matches("(?i)(alpha|beta|rc)")
+        when: pkg.name.startsWith("@acme/") && pkg.version.matches("(?i)(alpha|beta|rc)")
         reason: "@acme package is still in a pre-release channel"

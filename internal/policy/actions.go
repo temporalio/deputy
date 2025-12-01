@@ -27,22 +27,11 @@ type Action struct {
 // EvaluateAll executes every policy source against the provided input and
 // aggregates the resulting actions.
 func EvaluateAll(ctx context.Context, sources []Source, input map[string]any) ([]Action, error) {
-	if len(sources) == 0 {
-		return nil, nil
-	}
-	var actions []Action
-	for _, src := range sources {
-		val, err := Evaluate(ctx, src.Body, input)
-		if err != nil {
-			return nil, fmt.Errorf("%s: %w", src.Name, err)
-		}
-		normalized, err := toActions(src.Name, val)
-		if err != nil {
-			return nil, fmt.Errorf("%s: %w", src.Name, err)
-		}
-		actions = append(actions, normalized...)
-	}
-	return actions, nil
+    eng, err := NewEngine(sources)
+    if err != nil {
+        return nil, err
+    }
+    return eng.EvaluateAll(ctx, input, "", "")
 }
 
 func toActions(source string, value any) ([]Action, error) {

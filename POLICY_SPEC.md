@@ -11,6 +11,9 @@ policies:          # required, non-empty list
   - name:          # required, unique within bundle
     description:   # optional
     ecosystems:    # optional list of ecosystem strings
+    entrypoints:   # optional list of entrypoint strings (pre-filter at runtime)
+    commands:      # optional list of commands (pre-filter at runtime)
+    mode:          # optional, "enforce" (default) or "advisory" (deny -> warn)
     vars:          # optional ordered map (preserves author order)
       <name>: <cel-expression-string>
     rules:         # required list
@@ -35,9 +38,20 @@ policies:          # required, non-empty list
 - Standard top-level identifiers: `request`, `vulnerabilities`, `sbom`, `config`, `env`, `dependency`, `plan`, `step`, `repo`, `cluster`, `component`, `findings`.
 - `env.command` and `env.entrypoint` indicate the invoking command/entrypoint.
 
+Canonical entrypoints (snake_case):
+- proxy: `go_artifact_request`, `npm_artifact_request`, `pypi_artifact_request`, `rubygems_artifact_request`
+- scan: `scan_report`, `scan_vulnerability`
+- diff: `diff_report`, `diff_dependency_change`, `diff_vulnerability`
+- sbom: `sbom_report`, `sbom_component`
+- fix: `fix_plan`, `fix_plan_step`
+- triage: `triage_report`, `triage_cluster`
+
 ### Validation
-- Empty `policies` or missing `rules` is invalid.
+- Empty `policies` or missing `rules` is invalid; each policy must have at least one rule.
+- Policy names must be unique within a bundle.
 - Vars must be strings; rules must include `action` and `when`.
+- `mode`, if set, must be `enforce` or `advisory`.
+- Canonical ecosystem strings used by built-in entrypoints: `go`, `npm`, `pypi`, `rubygems`.
 
 ## Examples
 

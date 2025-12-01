@@ -1,0 +1,20 @@
+policies:
+  - name: license-allowlist-advisory
+    description: Copyleft guardrail in advisory mode (warn instead of deny) for proxy/SBOM/diff
+    mode: advisory
+    commands: ["proxy", "sbom", "diff"]
+    vars:
+      licenses: 'pkg.?licenses.orValue([]).map(l, l.upperAscii())'
+      forbidden:
+        - SSPL-1.0
+        - AGPL-3.0-ONLY
+        - AGPL-3.0
+        - GPL-3.0
+        - GPL-3.0-ONLY
+    rules:
+      - action: deny
+        when: licenses.exists(l, l in forbidden)
+        reason: forbidden license detected (advisory)
+      - action: warn
+        when: size(licenses) == 0
+        reason: package missing license metadata

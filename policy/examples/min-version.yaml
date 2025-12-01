@@ -1,6 +1,7 @@
 policies:
   - name: pin-go-standard-libs
     description: Prevent downgrades below approved versions for critical Go modules
+    ecosystems: ["go"]
     vars:
       versionPins:
         - module: "github.com/google/uuid"
@@ -9,8 +10,7 @@ policies:
           min: "v0.26.0"
     rules:
       - action: deny
-        when: pkg.ecosystem == "go" &&
-          versionPins.exists(p, p.module == pkg.name && pkg.version < p.min)
+        when: versionPins.exists(p, p.module == pkg.name && pkg.version < p.min)
         reason: module version is older than the security baseline
         details:
           policy: pin-go-standard-libs

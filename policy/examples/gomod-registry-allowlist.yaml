@@ -1,12 +1,13 @@
 policies:
   - name: allow-org-scoped-go-modules
     description: Only allow Go modules whose import paths are rooted in approved orgs
+    ecosystems: ["go"]
     vars:
       approvedOrgs:
         - github.com/org-a
         - github.com/org-b
     rules:
       - action: deny
-        when: pkg.ecosystem == "go" && !approvedOrgs.exists(o, pkg.name.startsWith(o + "/"))
+        when: "!approvedOrgs.exists(o, pkg.name.startsWith(o + \"/\"))"
         reason: "module source not in approved GitHub org allowlist"
         remediation: "Depend only on modules from github.com/org-a or github.com/org-b, or request an exception"
