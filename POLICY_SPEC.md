@@ -56,6 +56,7 @@ Canonical entrypoints (snake_case):
 ## Examples
 
 License allowlist (composed):
+```yaml
 policies:
   - name: license-allowlist-composed
     description: Copyleft block with layered vars and scope guard
@@ -76,13 +77,16 @@ policies:
 ```
 
 High-severity proxy blocker:
+```yaml
 policies:
   - name: proxy-high-sev
     vars:
-      high: '["CRITICAL","HIGH"]'
+      high: 
+        - "CRITICAL"
+        - "HIGH"
     rules:
       - action: deny
-        when: env.command == "proxy" && vulnerabilities.exists(v, v.Severity in high)
+        when: env.command == "proxy" && vulnerabilities.exists(v, v.severity in high)
         reason: "proxy block: high severity vuln"
 ```
 

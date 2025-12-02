@@ -48,10 +48,13 @@ Policies are authored as structured YAML bundles. Example (`policy/examples/lice
 
 ```yaml
 policies:
-  - name: allow-sans-copyleft
-    description: Block AGPL/SSPL-licensed packages
+  - name: block-copyleft-licenses 
+    description: Do not allow dependencies with copyleft licenses
     vars:
-      forbidden: '["SSPL-1.0", "AGPL-3.0-only", "GPL-3.0"]'
+      forbidden: 
+        - "SSPL-1.0"
+        - "AGPL-3.0-only"
+        - "GPL-3.0"
     rules:
       - action: deny
         when: licenses.exists(l, l in forbidden)
@@ -61,51 +64,15 @@ policies:
         reason: package missing license metadata
 ```
 
-Each rule becomes a CEL expression under the hood (`when ? [action] : []`), variables are expanded using `let` bindings, and metadata is preserved via the `//! policy.*` comments for compatibility with existing tooling. The bundle loader also supports structured details, statuses, remediation strings, and per-ecosystem scoping (`ecosystems: ["go"]` automatically injects `request.ecosystem in [...]`).
-
-Policy bundles live anywhere; Deputy ships a growing set of curated examples under `policy/examples/`:
-
-- `license-allowlist.yaml` — block copyleft while warning on missing metadata.
-- `log4shell.yaml` / `xz-backdoor.yaml` — quarantine high-profile supply-chain incidents.
-- `min-version.yaml` — enforce minimum versions for high-risk Go modules.
-- `severity-guardrail.yaml` — globally deny CRITICAL/HIGH vulnerabilities.
-- `block-package.yaml` — keep incident-prone packages like `left-pad` or `event-stream` out of repos.
-- `npm-scope-allowlist.yaml` — limit package installs to approved org scopes.
-- `prerelease-guard.yaml` — prevent alpha/beta drops from entering production caches.
-
-Treat these as living playbooks: copy them wholesale, or stitch multiple bundles together via `--policy bundle1.yaml --policy bundle2.yaml`.
-
 Use `deputy policy lint policy/examples/*.yaml` to ensure the generated CEL compiles, and reference them from any command via `--policy policy/examples/log4shell.yaml`.
-
-## Policy Anatomy
-
-Policies are CEL programs annotated with metadata comments:
-
-```cel
-//! policy.name = "go-high-severity-blocker"
-//! policy.description = "Block CRITICAL/HIGH vulnerabilities on Go artifacts"
-//! policy.entrypoints = ["go_artifact_request", "scan_vulnerability"]
-
-severity_to_block := {"CRITICAL", "HIGH"};
-in_scope := request.ecosystem == "go";
-vulns := vulnerabilities.filter(v, v.severity in severity_to_block);
-
-in_scope && vulns.size() > 0
-  ? [{
-      "action": "deny",
-      "reason": "High severity vuln(s): " + vulns.map(v, v.id).join(", "),
-      "status": 403,
-    }]
-  : [];
-```
 
 ### Entry points
 
-Each Deputy command exposes one or more entrypoints. Policies can declare the entrypoints (and/or commands) they target via leading metadata comments (e.g., `//! policy.entrypoints = "go_artifact_request,scan_vulnerability"`) or structured YAML (`entrypoints: ["go_artifact_request"]`). The runtime prefilters policies using these lists before evaluation. Every evaluation still injects `env.command` and `env.entrypoint` so a single policy can branch further if needed.
+Each Deputy **command** exposes one or more **entrypoints**. Policies can declare the entrypoints (and/or commands) they target (`entrypoints: ["..."]`). The runtime prefilters policies using these lists before evaluation. Every evaluation injects `env.command` and `env.entrypoint` so a single policy can branch further if needed.
 
 **Ecosystem identifiers** (used in `request.ecosystem` and commonly in `pkg.ecosystem`): `go`, `npm`, `pypi`, `rubygems`. Use these strings in `ecosystems: [...]` when scoping policies to package managers.
 
-**Entrypoint identifiers** (snake_case):
+**Entrypoint identifiers** (always use `snake_case` format):
 - proxy: `go_artifact_request`, `npm_artifact_request`, `pypi_artifact_request`, `rubygems_artifact_request`
 - scan: `scan_report`, `scan_vulnerability`
 - diff: `diff_report`, `diff_dependency_change`, `diff_vulnerability`
@@ -129,11 +96,11 @@ Each Deputy command exposes one or more entrypoints. Policies can declare the en
 | `triage_report` | `deputy triage` summary | `triageReport`. |
 | `triage_cluster` | `deputy triage` (per top package) | `{target, cluster}`. |
 
-The `deputy policy inspect` command documents all available entrypoints and the fields they expose (pulled straight from Go structs).
+The `deputy policy inspect` command documents all available entrypoints and the fields they expose.
 
 ### Actions
 
-Policies return arrays of action objects. Each object must include an `action` field and can carry additional metadata:
+Policies return arrays of **action objects**. Each object must include an `action` field and can carry additional metadata:
 
 | Action | Required fields | Optional fields | Effect |
 | --- | --- | --- | --- |
@@ -143,27 +110,11 @@ Policies return arrays of action objects. Each object must include an `action` f
 
 `mutate` is reserved but not yet supported by the runtime.
 
-Use conditional expressions to include actions only when needed:
-
-```cel
-has_forbidden_license := license in forbidden;
-
-(has_forbidden_license
-  ? [{
-      "action": "deny",
-      "reason": license + " is not allowed",
-      "remediation": "Replace dependency",
-    }]
-  : [])
-```
-
-Multiple action arrays can be concatenated with `+`; the caller evaluates the final list in order (`deny` short-circuits unless `fail-open` is enabled).
-
 ### Policy Ordering & Modes
 
-Policies are evaluated in the order provided by the caller. `deny` actions still take precedence over `warn/allow` in callers that enforce actions. A policy can opt into **advisory** mode via `policy.mode = "advisory"` (or YAML `mode: advisory`), which downgrades any `deny` actions from that policy to `warn` so you can canary without blocking. `mutate`, explicit priority, and `requires` hints remain on the roadmap.
+Policies are evaluated in the order provided by the caller; `deny` actions still take precedence over `warn/allow` in callers that *enforce* actions. A policy can opt into *advisory* mode via `mode: advisory`, which downgrades any `deny` actions from that policy to `warn` so you can canary without blocking. `mutate`, explicit priority, and `requires` hints remain on the roadmap.
 
-`deputy policy simulate` (see command table) replays captured JSON inputs through multiple bundles so you can confirm the combined order of operations before turning a policy from advisory into enforce mode.
+`deputy policy simulate` (see command table) replays captured JSON inputs through multiple bundles so you can confirm the combined order of operations before turning a policy from *advisory* into *enforce* mode.
 
 ### Helpers & Libraries
 
@@ -189,43 +140,11 @@ Deputy enables CEL’s optional type system via `cel.OptionalTypes` so policies 
 | `optMap` / `optFlatMap` | `component.?licenses.optMap(l, l.upper())` | Transform optional values. |
 | Optional literals | `{?key: request.?module.value()}` | Conditionally set map entries. |
 
-Additional CEL extensions from `github.com/google/cel-go/ext` (math, URL parsing, regex) can be enabled per bundle; Deputy’s default env includes the optional syntax plus `math`, `strings`, and `encoders` helpers.
-
-Examples:
-
-```cel
-//! Applies to go_artifact_request
-license := sbom.?component.?licenses[?0].orValue("UNKNOWN");
-
-(license in {"AGPL-3.0-only", "SSPL-1.0"}
-  ? [{
-      "action": "deny",
-      "reason": request.module + " carries forbidden license " + license,
-      "remediation": "Use org-approved alternatives.",
-    }]
-  : [])
-```
-
-```cel
-//! Enforces approved UUID helper usage
-optional_match := request.?module
-  .optMap(m, m.startsWith("github.com/google/uuid"))
-  .orValue(false);
-
-(!optional_match && request.ecosystem == "go" && request.module.contains("uuid")
-  ? [{
-      "action": "deny",
-      "reason": "Use github.com/google/uuid already vendored in the repo",
-      "remediation": "Remove " + request.module + " from go.mod and reuse the shared helper.",
-    }]
-  : [])
-```
-
 Using optional syntax keeps policies robust even when commands omit certain fields (for example, `sbom_component` entrypoints may not populate `licenses` until SBOM materialization is enabled).
 
 ## Evaluation Inputs
 
-Inputs are JSON-friendly maps so you can capture them via `--format json` flags and replay them through `deputy policy eval`. Representative shapes (note how `env` carries operational context like `offline` flags and quota windows):
+Inputs are JSON-*friendly* objects, so you can capture them via `--format json` flags and replay them through `deputy policy eval`. Representative shapes (note how `env` carries operational context like `offline` flags, quota windows, etc):
 
 ```jsonc
 // go_artifact_request
@@ -304,57 +223,6 @@ Other Deputy commands can load a bundle once and reuse it for every request to a
 - `deputy policy inspect --diff old.bundle.json new.bundle.json` summarizes added/removed entrypoints and changed actions to prevent accidental drift.
 - Running services expose the active bundle digest via logs/metrics so you can confirm what code is enforcing policies.
 
-## Integration Examples
-
-1. **Proxy severity blocker** — same CEL snippet from `PROXY.md`. Denies downloads when severity ≥ threshold.
-2. **Scan drift guard**:
-
-```cel
-//! policy.entrypoints = ["diff_dependency_change"]
-(dependency.direct && dependency.newVersion.semver() < dependency.oldVersion.semver()
-  ? [{
-      "action": "deny",
-      "reason": "Direct dependency downgrades require review",
-      "remediation": "Run `deputy diff --explain` and attach approval.",
-    }]
-  : [])
-```
-
-3. **SBOM license reporter**:
-
-   ```cel
-   //! policy.entrypoints = ["sbom_component"]
-   warn when licenses.is_forbidden(component, ["SSPL-1.0"]) {
-     reason: component.name + " uses SSPL",
-     annotations: {"owner": "legal"}
-   }
-   ```
-
-4. **Fix plan guardrail**:
-
-```cel
-//! policy.entrypoints = ["fix_plan_step"]
-(step.kind == "remove" && plan.context.branch == "main"
-  ? [{
-      "action": "deny",
-      "reason": "Cannot remove dependencies on main",
-      "remediation": "Create a feature branch.",
-    }]
-  : [])
-```
-
-## Core Governance Use Cases
-
-The first wave of policy bundles should focus on high-value, low-regret controls:
-
-- **Critical-vuln gate** — block artifacts (or scan findings) with CRITICAL/HIGH severity alerts unless a remediation version exists and is already in use. Works equally well in the proxy (`go_artifact_request`) and during `deputy scan`.
-- **License guard** — flag or deny dependencies whose licenses fall outside an approved list (GPL, SSPL, AGPL, etc.). When paired with the proxy this keeps restricted code out of Git entirely.
-- **Package consolidation** — enforce canonical utility libraries (`uuid`, `logging`, `http clients`) by denying duplicate packages and suggesting the org-standard equivalents.
-- **Deprecated module ban** — maintain allow/deny lists (e.g., no `logrus` after migrating to `zerolog`) and surface remediation steps right in the policy.
-- **Version floor** — ensure direct dependencies never downgrade below the latest patched release by comparing versions with `semver.parse` and other helpers.
-
-Because CEL entrypoints share the same schema across commands, a single policy file can cover both CLI workflows and proxy enforcement, ensuring engineers get the same guidance whether they run `deputy scan` locally or fetch dependencies through the proxy.
-
 ## Execution Semantics
 
 - Policies run deterministically. There is a strict CPU + wall-clock budget per evaluation; long-running expressions abort with an error that surfaces to the user and increment `deputy_policy_eval_timeouts_total`.
@@ -371,9 +239,8 @@ Because CEL entrypoints share the same schema across commands, a single policy f
 ## Roadmap
 
 1. **Policy registry** — publish signed bundles to OCI or Git, referenced via `--policy ghcr.io/acme/deputy-policies:latest`.
-2. **Interactive editor** — `deputy policy repl` for quick CEL experimentation with live inputs.
-3. **IDE support** — go-to-definition and hover docs for CEL files (via `gopls` + `cel-spec` metadata).
-4. **Runtime metrics** — expose per-policy evaluation duration + decision counts for observability.
+2. **IDE support** — go-to-definition and hover docs for YAML + CEL files.
+3. **Runtime metrics** — expose per-policy evaluation duration + decision counts for observability.
 
 ## Putting It Together
 
