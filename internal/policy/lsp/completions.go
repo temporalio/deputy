@@ -1,0 +1,260 @@
+package lsp
+
+import (
+	"strings"
+
+	"github.com/google/cel-go/common"
+	"github.com/google/cel-go/common/ast"
+	"github.com/google/cel-go/parser"
+	"github.com/picatz/deputy/internal/policy"
+	protocol "github.com/sourcegraph/go-lsp"
+)
+
+var (
+	yamlTopKeys = []string{"policies", "metadata"}
+	policyKeys  = []string{"name", "description", "ecosystems", "entrypoints", "commands", "mode", "vars", "rules"}
+	ruleKeys    = []string{"action", "when", "reason", "status", "headers", "remediation", "details"}
+	actions     = []string{"allow", "deny", "warn"}
+	modes       = []string{"enforce", "advisory"}
+)
+
+// celVariables are the common identifiers injected into CEL environments.
+var celVariables = append([]string{}, policy.DefaultVariableNames()...)
+
+// completionItems returns completion items based on the current line text and cursor.
+func completionItems(line string, cursor int) []protocol.CompletionItem {
+	linePrefix := strings.TrimLeft(line[:min(cursor, len(line))], " \t")
+	if strings.HasPrefix(linePrefix, "- ") {
+		linePrefix = strings.TrimSpace(strings.TrimPrefix(linePrefix, "-"))
+	}
+	if strings.Contains(line, "when") { // be permissive; YAML may have spaces before colon
+		return celCompletion(line, cursor)
+	}
+	// Top-level keys
+	if !strings.Contains(linePrefix, ":") {
+		items := make([]protocol.CompletionItem, 0, len(policyKeys))
+		for _, k := range yamlTopKeys {
+			items = append(items, protocol.CompletionItem{
+				Label: k,
+				Kind:  protocol.CIKVariable,
+			})
+		}
+		for _, k := range policyKeys {
+			items = append(items, protocol.CompletionItem{
+				Label: k + ": ",
+				Kind:  protocol.CIKField,
+			})
+		}
+		return items
+	}
+	if strings.Contains(linePrefix, "action") {
+		items := make([]protocol.CompletionItem, 0, len(actions))
+		for _, a := range actions {
+			items = append(items, protocol.CompletionItem{Label: a, Kind: protocol.CIKEnum})
+		}
+		return items
+	}
+	if strings.Contains(linePrefix, "mode") {
+		items := make([]protocol.CompletionItem, 0, len(modes))
+		for _, m := range modes {
+			items = append(items, protocol.CompletionItem{Label: m, Kind: protocol.CIKEnum})
+		}
+		return items
+	}
+	return nil
+}
+
+// celCompletion suggests identifiers, fields, and helper functions when editing a CEL expression.
+func celCompletion(line string, cursor int) []protocol.CompletionItem {
+	items := []protocol.CompletionItem{}
+	expr := strings.TrimSpace(strings.TrimPrefix(line, "when:"))
+	base, partial := celContextFromAST(expr, cursor-len("when: "))
+	if base == "" {
+		// fallback to heuristic
+		base, partial = celContextToken(line, cursor)
+	}
+	if base != "" {
+		for _, field := range celFieldCompletions(base) {
+			if partial != "" && !strings.HasPrefix(field, partial) {
+				continue
+			}
+			items = append(items, protocol.CompletionItem{
+				Label:  field,
+				Kind:   protocol.CIKField,
+				Detail: base + "." + field,
+			})
+		}
+	}
+	for _, v := range celVariables {
+		if partial == "" || strings.HasPrefix(v, partial) {
+			items = append(items, protocol.CompletionItem{
+				Label:  v,
+				Kind:   protocol.CIKVariable,
+				Detail: "CEL variable",
+			})
+		}
+	}
+	for _, fn := range celFunctionCatalog() {
+		items = append(items, protocol.CompletionItem{
+			Label:         fn.Name,
+			Kind:          protocol.CIKFunction,
+			Detail:        fn.Signature,
+			Documentation: fn.Doc,
+		})
+	}
+	return items
+}
+
+// celContextToken extracts the identifier chain before the cursor and any partial field.
+// It scans backward from the cursor to collect [identifier(.identifier)*] tokens.
+func celContextToken(line string, cursor int) (base string, partial string) {
+	if cursor > len(line) {
+		cursor = len(line)
+	}
+	fragment := line[:cursor]
+	// walk backward to find last token containing dots
+	for i := len(fragment) - 1; i >= 0; i-- {
+		if fragment[i] == ' ' || fragment[i] == '\t' || fragment[i] == '(' || fragment[i] == '[' {
+			fragment = fragment[i+1:]
+			break
+		}
+		if i == 0 {
+			fragment = fragment
+		}
+	}
+	if idx := strings.LastIndex(fragment, "."); idx >= 0 {
+		base = strings.TrimLeft(fragment[:idx], "(!")
+		partial = fragment[idx+1:]
+		return base, partial
+	}
+	return "", ""
+}
+
+// celContextFromAST uses cel-go parser source info to find the identifier at the cursor.
+func celContextFromAST(expr string, offset int) (string, string) {
+	if offset < 0 {
+		offset = len(expr)
+	}
+	src := common.NewTextSource(expr)
+	parsed, errors := parser.Parse(src)
+	if len(errors.GetErrors()) > 0 {
+		return "", ""
+	}
+	info := parsed.SourceInfo()
+	var match string
+	var matchSelect ast.Expr
+	walkExpr(parsed.Expr(), func(e ast.Expr) {
+		if e.Kind() == ast.IdentKind {
+			if rng, ok := info.GetOffsetRange(e.ID()); ok {
+				if offset >= int(rng.Start) && offset <= int(rng.Stop) {
+					match = e.AsIdent()
+				}
+			}
+		}
+		if e.Kind() == ast.SelectKind {
+			if rng, ok := info.GetOffsetRange(e.ID()); ok {
+				if offset >= int(rng.Start) && offset <= int(rng.Stop) {
+					matchSelect = e
+				}
+			}
+		}
+	})
+	if match == "" && matchSelect == nil {
+		return "", ""
+	}
+	var base, partial string
+	if matchSelect != nil {
+		e := matchSelect
+		field := e.AsSelect().FieldName()
+		op := e.AsSelect().Operand()
+		switch op.Kind() {
+		case ast.IdentKind:
+			base = op.AsIdent()
+		case ast.SelectKind:
+			inner := op.AsSelect()
+			if inner.Operand().Kind() == ast.IdentKind {
+				base = inner.Operand().AsIdent() + "." + inner.FieldName()
+			}
+		}
+		partial = field
+	}
+	if base == "" {
+		// fallback: first ident hit
+		base = match
+	}
+	if base == "" {
+		base = match
+	}
+	return base, partial
+}
+
+// celFieldCompletions lists known fields for common CEL base identifiers.
+func celFieldCompletions(base string) []string {
+	switch base {
+	case "env":
+		return []string{"command", "entrypoint", "listener", "hostname", "time", "offline", "quota"}
+	case "request":
+		return []string{"ecosystem", "module", "package", "version", "fileType", "operation", "client", "licenses"}
+	case "request.client":
+		return []string{"ip", "userAgent", "principal"}
+	case "pkg":
+		return []string{"name", "version", "ecosystem", "licenses"}
+	case "vulnerability", "vulnerabilities":
+		return []string{"id", "severity", "summary", "aliases", "fixedVersion"}
+	case "component":
+		return []string{"name", "version", "ecosystem", "licenses"}
+	case "repo":
+		return []string{"name", "ref", "commit", "path"}
+	default:
+		return nil
+	}
+}
+
+// walkExpr performs a depth-first traversal of the CEL AST.
+func walkExpr(e ast.Expr, fn func(ast.Expr)) {
+	if e == nil {
+		return
+	}
+	fn(e)
+	switch e.Kind() {
+	case ast.CallKind:
+		call := e.AsCall()
+		if call.IsMemberFunction() && call.Target() != nil {
+			walkExpr(call.Target(), fn)
+		}
+		for _, arg := range call.Args() {
+			walkExpr(arg, fn)
+		}
+	case ast.SelectKind:
+		walkExpr(e.AsSelect().Operand(), fn)
+	case ast.ListKind:
+		for _, elem := range e.AsList().Elements() {
+			walkExpr(elem, fn)
+		}
+	case ast.MapKind:
+		for _, entry := range e.AsMap().Entries() {
+			me := entry.AsMapEntry()
+			walkExpr(me.Key(), fn)
+			walkExpr(me.Value(), fn)
+		}
+	case ast.StructKind:
+		for _, entry := range e.AsStruct().Fields() {
+			sf := entry.AsStructField()
+			walkExpr(sf.Value(), fn)
+		}
+	case ast.ComprehensionKind:
+		comp := e.AsComprehension()
+		walkExpr(comp.IterRange(), fn)
+		walkExpr(comp.AccuInit(), fn)
+		walkExpr(comp.LoopCondition(), fn)
+		walkExpr(comp.LoopStep(), fn)
+		walkExpr(comp.Result(), fn)
+	}
+}
+
+func min(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
+}

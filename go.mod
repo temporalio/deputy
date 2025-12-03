@@ -2,6 +2,8 @@ module github.com/picatz/deputy
 
 go 1.24.9
 
+toolchain go1.25.0
+
 require (
 	deps.dev/api/v3 v3.0.0-20250903005441-604c45d5b44b
 	github.com/BurntSushi/toml v1.5.0
@@ -148,6 +150,8 @@ require (
 	github.com/shirou/gopsutil v3.21.11+incompatible // indirect
 	github.com/sirupsen/logrus v1.9.3 // indirect
 	github.com/skeema/knownhosts v1.3.1 // indirect
+	github.com/sourcegraph/go-lsp v0.0.0-20240223163137-f80c5dd31dfd // indirect
+	github.com/sourcegraph/jsonrpc2 v0.2.1 // indirect
 	github.com/spdx/gordf v0.0.0-20250128162952-000978ccd6fb // indirect
 	github.com/spf13/pflag v1.0.10 // indirect
 	github.com/stoewer/go-strcase v1.2.0 // indirect

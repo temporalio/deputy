@@ -107,6 +107,18 @@ func (o *orderedVars) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
+// Names returns the ordered variable names.
+func (o orderedVars) Names() []string {
+	if len(o) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(o))
+	for _, kv := range o {
+		out = append(out, kv.Name)
+	}
+	return out
+}
+
 type structuredRule struct {
 	Action      string            `yaml:"action"`
 	When        string            `yaml:"when"`
@@ -151,6 +163,33 @@ func tryParseStructuredBundle(data []byte, path string) ([]Source, bool, error) 
 		})
 	}
 	return sources, true, nil
+}
+
+// TryParseStructuredBundleBytes parses data into a structuredBundle and returns it plus a parsed flag.
+func TryParseStructuredBundleBytes(data []byte) (*structuredBundle, bool, error) {
+	var bundle structuredBundle
+	if err := yaml.Unmarshal(data, &bundle); err != nil {
+		return nil, false, nil
+	}
+	if len(bundle.Policies) == 0 {
+		return nil, false, nil
+	}
+	return &bundle, true, nil
+}
+
+// ParseStructuredSources parses a structured YAML bundle (same format accepted by
+// `deputy policy` commands) into a slice of policy sources. The virtualPath is
+// used only for error context and source naming; callers can provide an in-memory
+// pseudo path such as "buffer" or a real file path.
+func ParseStructuredSources(data []byte, virtualPath string) ([]Source, error) {
+	sources, ok, err := tryParseStructuredBundle(data, virtualPath)
+	if err != nil {
+		return nil, err
+	}
+	if !ok {
+		return nil, fmt.Errorf("%s is not a policy bundle", virtualPath)
+	}
+	return sources, nil
 }
 
 func (p structuredPolicy) toCELSource() (string, error) {

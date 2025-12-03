@@ -10,7 +10,7 @@ policies:
         - GPL-3.0-only
     rules:
       - action: deny
-        when: pkg.?licenses.orValue([]).exists(l, l in forbidden)
+        when: pkg.?licenses.orValue([]).exists(l, l in forbidden) 
         reason: package carries a forbidden license
         details:
           policy: allow-sans-copyleft

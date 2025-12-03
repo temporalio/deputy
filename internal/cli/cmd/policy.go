@@ -8,7 +8,9 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/google/go-cmp/cmp"
@@ -30,6 +32,7 @@ func AddPolicyCommand(root *cobra.Command) {
 	cmd.AddCommand(newPolicyInspectCommand())
 	cmd.AddCommand(newPolicySimulateCommand())
 	cmd.AddCommand(newPolicyREPLCommand())
+	cmd.AddCommand(newPolicyLSPCommand())
 	root.AddCommand(cmd)
 }
 
@@ -87,9 +90,16 @@ func newPolicyLintCommand() *cobra.Command {
 						return fmt.Errorf("read %q: %w", path, err)
 					}
 					if err := policy.Compile(string(data), extraVars); err != nil {
-						return fmt.Errorf("%s: %w", path, err)
+						known := append(policy.DefaultVariableNames(), extraVars...)
+						return fmt.Errorf("%s: %s", path, formatCelCompileError(err, string(data), known))
 					}
 					fmt.Fprintf(cmd.OutOrStdout(), "%s OK\n", labelPath(path))
+					continue
+				}
+				// Prefer structured lint for YAML bundles for clearer CEL errors.
+				if ok, err := lintStructuredBundle(path, extraVars, cmd.OutOrStdout()); err != nil {
+					return err
+				} else if ok {
 					continue
 				}
 				sources, err := policy.LoadSources([]string{path})
@@ -98,7 +108,8 @@ func newPolicyLintCommand() *cobra.Command {
 				}
 				for _, src := range sources {
 					if err := policy.Compile(src.Body, extraVars); err != nil {
-						return fmt.Errorf("%s: %w", src.Name, err)
+						known := append(policy.DefaultVariableNames(), extraVars...)
+						return fmt.Errorf("%s: %s", src.Name, formatCelCompileError(err, src.Body, known))
 					}
 				}
 				fmt.Fprintf(cmd.OutOrStdout(), "%s OK\n", labelPath(path))
@@ -108,6 +119,35 @@ func newPolicyLintCommand() *cobra.Command {
 	}
 	cmd.Flags().StringArrayVar(&extraVars, "var", nil, "Additional variable names to declare while linting (repeatable)")
 	return cmd
+}
+
+// lintStructuredBundle lints a YAML structured bundle with friendlier CEL errors.
+// Returns ok=true if the bundle was structured and handled here.
+func lintStructuredBundle(path string, extraVars []string, out io.Writer) (ok bool, err error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return false, err
+	}
+	bundle, parsed, err := policy.TryParseStructuredBundleBytes(data)
+	if err != nil {
+		return true, err
+	}
+	if !parsed {
+		return false, nil
+	}
+	for pi, pol := range bundle.Policies {
+		declared := append(extraVars, pol.Vars.Names()...)
+		known := append(policy.DefaultVariableNames(), declared...)
+		for ri, rule := range pol.Rules {
+			if err := policy.Compile(rule.When, declared); err != nil {
+				pref := fmt.Sprintf("%s::%s rule[%d]", path, pol.Name, ri)
+				return true, fmt.Errorf("%s: %s", pref, formatCelCompileError(err, rule.When, known))
+			}
+		}
+		_ = pi
+	}
+	fmt.Fprintf(out, "%s OK\n", labelPath(path))
+	return true, nil
 }
 
 func readPathOrStdin(stdin io.Reader, path string) ([]byte, error) {
@@ -152,6 +192,141 @@ func labelPath(path string) string {
 		return "stdin"
 	}
 	return path
+}
+
+var celErrRe = regexp.MustCompile(`ERROR: <input>:(\d+):(\d+): (.+)`)
+var celErrPrefixRe = regexp.MustCompile(`(?i)^(cel:\s*)?error:\s*<input>:\d+:\d+:\s*`)
+var undeclaredNameRe = regexp.MustCompile(`undeclared reference to '([^']+)'`)
+
+// formatCelCompileError prettifies CEL errors with a caret snippet.
+func formatCelCompileError(err error, src string, known []string) string {
+	msg := err.Error()
+	m := celErrRe.FindStringSubmatch(msg)
+	if len(m) != 4 {
+		return celDetail(msg)
+	}
+	lineNum := toInt(m[1])
+	colNum := toInt(m[2])
+	detail := celDetail(m[3])
+	if name := extractUndeclaredName(msg); name != "" {
+		if sugg, ok := suggestName(name, known); ok {
+			detail = fmt.Sprintf("%s (did you mean '%s'?)", detail, sugg)
+		}
+	}
+	lines := strings.Split(src, "\n")
+	if lineNum < 1 || lineNum > len(lines) {
+		return celDetail(msg)
+	}
+	line := strings.ReplaceAll(lines[lineNum-1], "\t", " ")
+	target := colNum - 1
+	if name := extractUndeclaredName(msg); name != "" {
+		if idx := strings.Index(line, name); idx >= 0 {
+			target = idx
+		}
+	}
+	if target < 0 {
+		target = 0
+	}
+	if target >= len(line) {
+		target = len(line) - 1
+	}
+	caret := strings.Repeat(" ", target) + "^"
+	return fmt.Sprintf("CEL: %s\n%s\n%s", detail, line, caret)
+}
+
+func toInt(s string) int {
+	n, _ := strconv.Atoi(s)
+	return n
+}
+
+// celDetail mirrors LSP formatting: strip container suffix, first line only, drop generated CEL tail.
+func celDetail(s string) string {
+	if idx := strings.IndexByte(s, '\n'); idx >= 0 {
+		s = s[:idx]
+	}
+	if idx := strings.Index(s, " (in container"); idx >= 0 {
+		s = s[:idx]
+	}
+	if idx := strings.Index(s, "|"); idx >= 0 {
+		s = s[:idx]
+	}
+	s = celErrPrefixRe.ReplaceAllString(s, "")
+	if idx := strings.Index(s, " | "); idx >= 0 {
+		s = s[:idx]
+	}
+	return s
+}
+
+func extractUndeclaredName(msg string) string {
+	m := undeclaredNameRe.FindStringSubmatch(msg)
+	if len(m) == 2 {
+		return m[1]
+	}
+	return ""
+}
+
+func suggestName(name string, known []string) (string, bool) {
+	best := ""
+	bestDist := 3
+	for _, k := range known {
+		d := levenshteinDistance(name, k)
+		if d < bestDist {
+			bestDist = d
+			best = k
+		}
+	}
+	if best == "" {
+		return "", false
+	}
+	return best, true
+}
+
+// small Levenshtein for short identifiers.
+func levenshteinDistance(a, b string) int {
+	la, lb := len(a), len(b)
+	if la == 0 {
+		return lb
+	}
+	if lb == 0 {
+		return la
+	}
+	if la > lb {
+		a, b = b, a
+		la, lb = lb, la
+	}
+	prev := make([]int, la+1)
+	for i := 0; i <= la; i++ {
+		prev[i] = i
+	}
+	for j := 1; j <= lb; j++ {
+		curr := make([]int, la+1)
+		curr[0] = j
+		for i := 1; i <= la; i++ {
+			cost := 0
+			if a[i-1] != b[j-1] {
+				cost = 1
+			}
+			del := prev[i] + 1
+			ins := curr[i-1] + 1
+			sub := prev[i-1] + cost
+			curr[i] = minInt(del, ins, sub)
+		}
+		prev = curr
+	}
+	return prev[la]
+}
+
+func minInt(vals ...int) int {
+	if len(vals) == 0 {
+		return 0
+	}
+	m := vals[0]
+	for _, v := range vals[1:] {
+		if v < m {
+			m = v
+		}
+	}
+	return m
 }
 
 func newPolicyTestCommand() *cobra.Command {

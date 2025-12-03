@@ -1,7 +1,7 @@
 package cli
 
 import (
-    scalibrlog "github.com/google/osv-scalibr/log"
+	scalibrlog "github.com/google/osv-scalibr/log"
 )
 
 type scalibrNullLogger struct{}
@@ -16,4 +16,3 @@ func (*scalibrNullLogger) Warn(args ...any)                  {}
 func (*scalibrNullLogger) Warnf(format string, args ...any)  {}
 
 func init() { scalibrlog.SetLogger(&scalibrNullLogger{}) }
-

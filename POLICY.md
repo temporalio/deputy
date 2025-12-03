@@ -20,6 +20,7 @@ Deputy’s core insight is that dependency intelligence should be reusable every
 | `deputy policy inspect policy.yaml bundle.json` | Show bundle metadata (names, entrypoints) or bundle contents. |
 | `deputy policy simulate --policy policy.yaml --input payload.json` | Replay recorded inputs through one or more policies to observe combined decisions before rollout. |
 | `deputy policy repl` | Start an interactive CEL playground backed by a `metadata` map for quick experiments. |
+| `deputy policy lsp` | Run the policy language server (YAML + CEL authoring). See `docs/policy-lsp.md` for editor wiring. |
 
 Other commands opt into the framework via `--policy` or `--policy-bundle` flags. Examples:
 

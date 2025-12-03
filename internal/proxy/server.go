@@ -45,7 +45,7 @@ func (s *Server) serveListener(ctx context.Context, cfg ListenerConfig) error {
 	ecos := strings.ToLower(cfg.Ecosystems[0])
 	policyPaths := append([]string{}, cfg.Policies...)
 	policyPaths = append(policyPaths, s.opts.PolicyPaths...)
-    engine, err := NewPolicyEngine(policyPaths)
+	engine, err := NewPolicyEngine(policyPaths)
 	if err != nil {
 		return fmt.Errorf("listener %s: %w", cfg.Name, err)
 	}

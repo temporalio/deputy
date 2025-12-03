@@ -3,11 +3,11 @@ package policy
 import "strings"
 
 type policyMetadata struct {
-    Name        string
-    Entrypoints []string
-    Commands    []string
-    Ecosystems  []string
-    Mode        string
+	Name        string
+	Entrypoints []string
+	Commands    []string
+	Ecosystems  []string
+	Mode        string
 }
 
 // parsePolicyMetadata reads leading `//! key = value` comments from a CEL source body.
@@ -38,13 +38,13 @@ func parsePolicyMetadata(body string) policyMetadata {
 			meta.Entrypoints = splitCSV(val)
 		case "policy.commands":
 			meta.Commands = splitCSV(val)
-        case "policy.ecosystems":
-            meta.Ecosystems = splitCSV(val)
-        case "policy.mode":
-            meta.Mode = strings.ToLower(val)
-        }
-    }
-    return meta
+		case "policy.ecosystems":
+			meta.Ecosystems = splitCSV(val)
+		case "policy.mode":
+			meta.Mode = strings.ToLower(val)
+		}
+	}
+	return meta
 }
 
 func splitCSV(s string) []string {

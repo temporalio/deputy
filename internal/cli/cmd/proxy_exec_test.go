@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 )
+
 func TestEnvPreparers(t *testing.T) {
 	t.Parallel()
 	tests := []struct {

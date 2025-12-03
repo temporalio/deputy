@@ -33,11 +33,11 @@ func evaluatePoliciesForCommand(ctx context.Context, policyPaths []string, paylo
 	}
 	payload["env"] = env
 
-    engine, err := policy.NewEngineFromPaths(policyPaths)
-    if err != nil {
-        return nil, err
-    }
-    actions, err := engine.EvaluateAll(ctx, payload, command, entrypoint)
+	engine, err := policy.NewEngineFromPaths(policyPaths)
+	if err != nil {
+		return nil, err
+	}
+	actions, err := engine.EvaluateAll(ctx, payload, command, entrypoint)
 	if err != nil {
 		return nil, err
 	}

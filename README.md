@@ -16,6 +16,7 @@ $ deputy HEAD~1500 HEAD
 | `deputy fix` | Turn scan results into upgrade commands/plan JSON, optionally apply them or delegate to an AI agent. |
 | `deputy triage` | Summarize vulnerability hotspots and prioritize remediation (text or JSON, with optional AI analysis). |
 | `deputy proxy` | Run Deputy’s policy-aware package proxy (Go modules today, more ecosystems soon). |
+| `deputy policy lsp` | Start the policy-focused language server for YAML + CEL authoring. |
 
 All commands honor the global logging flags (`--log-level`, `--log-format`) so you can switch between human-readable output and structured logs for CI/CD.
 

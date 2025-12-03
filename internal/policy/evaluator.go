@@ -9,7 +9,6 @@ import (
 
 	"github.com/google/cel-go/cel"
 	"github.com/google/cel-go/checker/decls"
-	"github.com/google/cel-go/common/types"
 	"github.com/google/cel-go/common/types/ref"
 	"github.com/google/cel-go/ext"
 	exprpb "google.golang.org/genproto/googleapis/api/expr/v1alpha1"
@@ -38,6 +37,15 @@ var (
 		"change",
 	}
 )
+
+// DefaultVariableNames returns the identifiers that Deputy injects into CEL
+// environments for policies. Tooling (e.g., LSP) uses this to stay aligned with
+// the runtime without duplicating the list.
+func DefaultVariableNames() []string {
+	out := make([]string, len(defaultVariableNames))
+	copy(out, defaultVariableNames)
+	return out
+}
 
 // Evaluate compiles the provided CEL source and evaluates it against the input
 // document. Input keys are exposed to the CEL program as top-level identifiers.
@@ -117,40 +125,16 @@ func envWithNames(extra []string) (*cel.Env, error) {
 	for _, name := range names {
 		declSlice = append(declSlice, decls.NewVar(name, decls.Dyn))
 	}
-	env, err := cel.NewEnv(
+	opts := []cel.EnvOption{
 		cel.OptionalTypes(),
 		cel.Declarations(declSlice...),
 		ext.Strings(),
 		ext.Lists(),
 		ext.Sets(),
 		ext.Regex(),
-		cel.Function("levenshtein",
-			cel.Overload("levenshtein_string",
-				[]*cel.Type{cel.StringType, cel.StringType},
-				cel.IntType,
-				cel.BinaryBinding(func(a, b ref.Val) ref.Val {
-					return types.Int(levenshtein(toString(a), toString(b), 128, -1))
-				}),
-			),
-		),
-		cel.Function("levenshteinWithin",
-			cel.Overload("levenshteinWithin_string",
-				[]*cel.Type{cel.StringType, cel.StringType, cel.IntType},
-				cel.BoolType,
-				cel.FunctionBinding(func(args ...ref.Val) ref.Val {
-					if len(args) != 3 {
-						return types.Bool(false)
-					}
-					a, b, limit := toString(args[0]), toString(args[1]), toInt64(args[2])
-					dist := levenshtein(a, b, 128, limit)
-					if dist < 0 {
-						return types.Bool(false)
-					}
-					return types.Bool(dist <= limit)
-				}),
-			),
-		),
-	)
+	}
+	opts = append(opts, customHelperFunctions()...)
+	env, err := cel.NewEnv(opts...)
 	if err != nil {
 		return nil, fmt.Errorf("build CEL env: %w", err)
 	}
