@@ -4,6 +4,7 @@ import (
 	"context"
 	"io"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"strings"
 	"testing"
@@ -149,6 +150,41 @@ func TestStartProxyInstance(t *testing.T) {
 	resp.Body.Close()
 	if err := inst.stop(context.Background()); err != nil {
 		t.Fatalf("stop error: %v", err)
+	}
+}
+
+func TestInstrumentProxyHandlerCapturesDeny(t *testing.T) {
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("X-Deputy-Policy", "unit-test")
+		w.Header().Set("X-Deputy-Name", "pkg")
+		w.Header().Set("X-Deputy-Version", "1.0.0")
+		w.Header().Set("X-Deputy-Ecosystem", "npm")
+		w.Header().Set("X-Deputy-Operation", "metadata")
+		w.Header().Set("X-Deputy-Reason", "blocked by policy")
+		http.Error(w, "blocked by policy", http.StatusForbidden)
+	})
+	instrumented, events := instrumentProxyHandler(handler)
+
+	req := httptest.NewRequest(http.MethodGet, "/pkg/-/pkg-1.0.0.tgz", nil)
+	rec := httptest.NewRecorder()
+	instrumented.ServeHTTP(rec, req)
+
+	select {
+	case evt := <-events:
+		if evt.status != http.StatusForbidden {
+			t.Fatalf("unexpected status %d", evt.status)
+		}
+		if evt.policy != "unit-test" {
+			t.Fatalf("unexpected policy header: %s", evt.policy)
+		}
+		if evt.reason != "blocked by policy" {
+			t.Fatalf("missing reason: %s", evt.reason)
+		}
+		if evt.name != "pkg" || evt.version != "1.0.0" || evt.ecosystem != "npm" || evt.operation != "metadata" {
+			t.Fatalf("metadata missing: %+v", evt)
+		}
+	default:
+		t.Fatalf("expected policy event")
 	}
 }
 

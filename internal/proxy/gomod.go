@@ -85,6 +85,12 @@ func (h *goModuleHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		slog.Warn("policy warning", "source", warn.Source, "reason", warn.Reason)
 	}
 	if deny != nil {
+		applyPolicyHeaders(w, deny, blockMeta{
+			Ecosystem: "go",
+			Name:      module,
+			Version:   version,
+			Operation: op,
+		})
 		status := statusFromAction(deny, http.StatusForbidden)
 		http.Error(w, deny.Reason, status)
 		slog.Info("request denied", "module", module, "version", version, "reason", deny.Reason)

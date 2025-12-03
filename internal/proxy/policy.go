@@ -2,6 +2,7 @@ package proxy
 
 import (
 	"context"
+	"net/http"
 	"strings"
 
 	"github.com/picatz/deputy/internal/policy"
@@ -91,4 +92,36 @@ func statusFromAction(act *policy.Action, fallback int) int {
 		return *act.Status
 	}
 	return fallback
+}
+
+type blockMeta struct {
+	Ecosystem string
+	Name      string
+	Version   string
+	Operation string
+}
+
+// applyPolicyHeaders ensures policy denies surface consistent headers for downstream tooling.
+func applyPolicyHeaders(w http.ResponseWriter, act *policy.Action, meta blockMeta) {
+	if w == nil || act == nil {
+		return
+	}
+	if hdr := w.Header().Get("X-Deputy-Policy"); strings.TrimSpace(hdr) == "" {
+		w.Header().Set("X-Deputy-Policy", firstNonEmpty(act.Source, "policy"))
+	}
+	if meta.Ecosystem != "" {
+		w.Header().Set("X-Deputy-Ecosystem", meta.Ecosystem)
+	}
+	if meta.Name != "" {
+		w.Header().Set("X-Deputy-Name", meta.Name)
+	}
+	if meta.Version != "" {
+		w.Header().Set("X-Deputy-Version", meta.Version)
+	}
+	if meta.Operation != "" {
+		w.Header().Set("X-Deputy-Operation", meta.Operation)
+	}
+	if act.Reason != "" {
+		w.Header().Set("X-Deputy-Reason", act.Reason)
+	}
 }

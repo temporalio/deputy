@@ -82,6 +82,12 @@ func (h *rubyGemsHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		slog.Warn("policy warning", "source", warn.Source, "reason", warn.Reason)
 	}
 	if deny != nil {
+		applyPolicyHeaders(w, deny, blockMeta{
+			Ecosystem: "rubygems",
+			Name:      name,
+			Version:   version,
+			Operation: operation,
+		})
 		status := statusFromAction(deny, http.StatusForbidden)
 		http.Error(w, deny.Reason, status)
 		slog.Info("request denied", "package", name, "version", version, "reason", deny.Reason)
