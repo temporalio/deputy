@@ -53,10 +53,11 @@ func summarizeActions(actions []policy.Action) (deny *policy.Action, warnings []
 		case "deny":
 			if deny == nil {
 				deny = &policy.Action{
-					Source: act.Source,
-					Type:   act.Type,
-					Reason: firstNonEmpty(act.Reason, act.Message, "request denied by policy"),
-					Status: act.Status,
+					Source:      act.Source,
+					Type:        act.Type,
+					Reason:      firstNonEmpty(act.Reason, act.Message, "request denied by policy"),
+					Remediation: act.Remediation,
+					Status:      act.Status,
 				}
 			}
 		case "warn":
@@ -123,5 +124,8 @@ func applyPolicyHeaders(w http.ResponseWriter, act *policy.Action, meta blockMet
 	}
 	if act.Reason != "" {
 		w.Header().Set("X-Deputy-Reason", act.Reason)
+	}
+	if act.Remediation != "" {
+		w.Header().Set("X-Deputy-Remediation", act.Remediation)
 	}
 }

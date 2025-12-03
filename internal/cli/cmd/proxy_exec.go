@@ -13,7 +13,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
-	"sync/atomic"
+	"sync"
 	"time"
 
 	"github.com/charmbracelet/lipgloss"
@@ -131,15 +131,16 @@ func runProxyExec(ctx context.Context, cfg proxyExecConfig, command []string) er
 			slog.Debug("proxy shutdown", "error", err)
 		}
 	}()
-
 	eventsCtx, cancelEvents := context.WithCancel(ctx)
 	defer cancelEvents()
-	var lastEvent atomic.Pointer[proxyEvent]
+
+	var history eventHistory
 	if inst.events != nil {
-		go streamProxyEvents(eventsCtx, cfg.ecosystem, cfg.requested, inst.events, &lastEvent)
+		go streamProxyEvents(eventsCtx, cfg.ecosystem, cfg.requested, inst.events, &history)
 	}
 
-	printProxyIntro(cfg, inst.url, command)
+	// Skip intro line - Deputy announces itself via block messages if/when they occur.
+	// This keeps the happy path (no blocks) completely silent.
 
 	env, cleanup, err := cfg.envPrep(inst.url)
 	if err != nil {
@@ -149,16 +150,36 @@ func runProxyExec(ctx context.Context, cfg proxyExecConfig, command []string) er
 		defer cleanup()
 	}
 	if err := execProxyCommand(ctx, command, env); err != nil {
-		if last := lastEvent.Load(); last == nil {
-			fmt.Fprintf(os.Stderr, "[deputy] command failed (no policy event captured): %v\n", err)
-		} else {
-			printSummaryLine(*last, cfg.requested)
-		}
+		// Wait a brief moment for any pending events to flush
+		time.Sleep(50 * time.Millisecond)
+		printSummaryReport(history.All(), cfg.requested)
 		return err
 	}
 	return nil
 }
 
+// eventHistory is a thread-safe collector for proxy events.
+type eventHistory struct {
+	mu     sync.Mutex
+	events []proxyEvent
+}
+
+func (h *eventHistory) Add(evt proxyEvent) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.events = append(h.events, evt)
+}
+
+func (h *eventHistory) All() []proxyEvent {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	// Return a copy
+	out := make([]proxyEvent, len(h.events))
+	copy(out, h.events)
+	return out
+}
+
+// proxyInstance tracks the ephemeral proxy server for a single `deputy proxy` execution.
 // proxyInstance tracks the ephemeral proxy server for a single `deputy proxy` execution.
 type proxyInstance struct {
 	url    string
@@ -235,18 +256,17 @@ func startProxyInstance(ctx context.Context, handler http.Handler) (*proxyInstan
 }
 
 // proxyEvent captures metadata about a proxied request that was denied by policy.
-// proxyEvent captures metadata about a proxied request that was denied by policy.
-// proxyEvent captures metadata about a proxied request that was denied by policy.
 type proxyEvent struct {
-	status    int
-	reason    string
-	method    string
-	path      string
-	policy    string
-	ecosystem string
-	name      string
-	version   string
-	operation string
+	status      int
+	reason      string
+	remediation string
+	method      string
+	path        string
+	policy      string
+	ecosystem   string
+	name        string
+	version     string
+	operation   string
 }
 
 // instrumentProxyHandler wraps the handler and emits proxyEvents when a denial occurs.
@@ -266,15 +286,16 @@ func instrumentProxyHandler(handler http.Handler) (http.Handler, <-chan proxyEve
 			reason = strings.TrimSpace(rec.BodyPreview())
 		}
 		evt := proxyEvent{
-			status:    status,
-			reason:    reason,
-			method:    r.Method,
-			path:      r.URL.Path,
-			policy:    policy,
-			ecosystem: strings.TrimSpace(hdr.Get("X-Deputy-Ecosystem")),
-			name:      strings.TrimSpace(hdr.Get("X-Deputy-Name")),
-			version:   strings.TrimSpace(hdr.Get("X-Deputy-Version")),
-			operation: strings.TrimSpace(hdr.Get("X-Deputy-Operation")),
+			status:      status,
+			reason:      reason,
+			remediation: strings.TrimSpace(hdr.Get("X-Deputy-Remediation")),
+			method:      r.Method,
+			path:        r.URL.Path,
+			policy:      policy,
+			ecosystem:   strings.TrimSpace(hdr.Get("X-Deputy-Ecosystem")),
+			name:        strings.TrimSpace(hdr.Get("X-Deputy-Name")),
+			version:     strings.TrimSpace(hdr.Get("X-Deputy-Version")),
+			operation:   strings.TrimSpace(hdr.Get("X-Deputy-Operation")),
 		}
 		select {
 		case events <- evt:
@@ -359,29 +380,8 @@ func runExternalCommand(ctx context.Context, command []string, extraEnv []string
 	return cmd.Run()
 }
 
-// printProxyIntro renders a short header describing the proxied session.
-func printProxyIntro(cfg proxyExecConfig, proxyURL string, command []string) {
-	// Compact, single-line intro to reduce visual noise.
-	// e.g. "deputy: proxying npm • policy: shai-hulud-npm.yaml"
-	parts := []string{
-		ui.StyleHeader.Render(fmt.Sprintf("deputy: proxying %s", cfg.ecosystem)),
-	}
-	if len(cfg.policyPaths) > 0 {
-		shortPolicies := make([]string, len(cfg.policyPaths))
-		for i, p := range cfg.policyPaths {
-			shortPolicies[i] = filepath.Base(p)
-		}
-		parts = append(parts, ui.StyleMeta.Render(fmt.Sprintf("policy: %s", strings.Join(shortPolicies, ", "))))
-	} else {
-		parts = append(parts, ui.StyleMeta.Render("policy: none"))
-	}
-	
-	// Join with a bullet point
-	fmt.Fprintln(os.Stderr, strings.Join(parts, ui.StyleDim.Render(" • ")))
-}
-
 // streamProxyEvents continuously renders policy block events while the proxy runs.
-func streamProxyEvents(ctx context.Context, ecosystem, requested string, events <-chan proxyEvent, last *atomic.Pointer[proxyEvent]) {
+func streamProxyEvents(ctx context.Context, ecosystem, requested string, events <-chan proxyEvent, history *eventHistory) {
 	for {
 		select {
 		case <-ctx.Done():
@@ -390,116 +390,151 @@ func streamProxyEvents(ctx context.Context, ecosystem, requested string, events 
 			if !ok {
 				return
 			}
-			last.Store(&evt)
+			history.Add(evt)
 			printPolicyBlock(ecosystem, requested, evt)
 		}
 	}
 }
 
-// printPolicyBlock renders a formatted block describing a policy denial.
+// printPolicyBlock renders a helpful message for a blocked request.
 func printPolicyBlock(ecosystem, requested string, evt proxyEvent) {
+	// Construct a display name for the package/artifact
+	pkg := evt.name
+	if evt.version != "" {
+		pkg = fmt.Sprintf("%s@%s", evt.name, evt.version)
+	} else if requested != "" && strings.Contains(requested, evt.name) {
+		// If we blocked a metadata request (no version), but we know what the user asked for,
+		// show the requested spec to provide better context.
+		pkg = requested
+	}
+
+	if pkg == "" {
+		pkg = evt.path
+	}
+
+	// Visual separator before the block
 	fmt.Fprintln(os.Stderr)
-	
-	// Determine labels based on ecosystem
-	subjectLabel := "Subject"
-	switch ecosystem {
-	case "npm", "pypi", "rubygems":
-		subjectLabel = "Package"
-	case "go":
-		subjectLabel = "Module"
+
+	// Header line: × <package> blocked
+	fmt.Fprintf(os.Stderr, "%s %s\n",
+		ui.StyleRemoved.Render("×"),
+		ui.StylePackageName.Render(pkg))
+
+	// Why it was blocked (always show if available)
+	if evt.reason != "" {
+		fmt.Fprintf(os.Stderr, "  %s\n",
+			ui.StyleDim.Render(evt.reason))
 	}
 
-	fmt.Fprintf(os.Stderr, "%s %s %s\n", ui.StyleRemoved.Render("deputy: blocked"), ui.StyleRemoved.Render(ui.StyleSymbol.Render("×")), formatStatus(evt.status))
-	
-	pkg := pickFirst(evt.version, requested, evt.name)
-	if pkg != "" {
-		printColoredRow(subjectLabel, ui.StylePackageName.Render(pkg))
+	// What to do about it - the most important part, make it stand out
+	if evt.remediation != "" {
+		fmt.Fprintln(os.Stderr)
+		fmt.Fprintf(os.Stderr, "  %s %s\n",
+			ui.StyleAdded.Render("→"),
+			wrapText(evt.remediation, 76))
 	}
-	
-	// Simplify request display: "GET /foo" -> "/foo" if it's just metadata, or keep it if it's interesting.
-	// For now, we'll just show the path to keep it cleaner, or the operation if known.
-	reqDesc := evt.path
-	if evt.operation != "" && evt.operation != "metadata" {
-		reqDesc = fmt.Sprintf("%s (%s)", evt.path, evt.operation)
-	}
-	printColoredRow("Request", ui.StylePath.Render(reqDesc))
 
-	if pol := pickFirst(evt.policy); pol != "" {
-		// Truncate policy path for display if it's too long
-		displayPol := pol
-		if parts := strings.Split(pol, "::"); len(parts) > 1 {
-			// If it's "path/to/file.yaml::policy-name", show "file.yaml::policy-name"
-			file := filepath.Base(parts[0])
-			displayPol = file + "::" + parts[1]
-		}
-		printColoredRow("Policy", ui.StyleMeta.Render(displayPol))
-	}
-	if reason := pickFirst(evt.reason); reason != "" {
-		printColoredRow("Reason", ui.StyleRemoved.Render(reason))
-	}
-}
-
-func printAligned(w io.Writer, key, value string) {
-	if strings.TrimSpace(value) == "" {
-		return
-	}
-	fmt.Fprintf(w, "  %-10s: %s\n", key, value)
-}
-
-// printColoredRow writes an aligned key/value pair using Deputy CLI styles.
-func printColoredRow(key, value string) {
-	if strings.TrimSpace(value) == "" {
-		return
-	}
-	// Dynamic padding based on key length, assuming max ~10 chars for alignment
-	keyWidth := 10
-	pad := keyWidth - lipgloss.Width(key)
-	if pad < 1 {
-		pad = 1
-	}
-	label := ui.StyleMeta.Render(key)
-	fmt.Fprintf(os.Stderr, "  %s%s %s\n", label, strings.Repeat(" ", pad), value)
-}
-
-// pickFirst returns the first non-empty value in the provided list.
-func pickFirst(values ...string) string {
-	for _, v := range values {
-		if s := strings.TrimSpace(v); s != "" {
-			return s
-		}
-	}
-	return ""
-}
-
-// formatStatus renders an HTTP status code using the warning color palette.
-func formatStatus(status int) string {
-	if status <= 0 {
-		return ui.StyleMeta.Render("unknown")
-	}
-	return lipgloss.NewStyle().Foreground(lipgloss.Color("#FF5555")).Bold(true).Render(fmt.Sprintf("%d", status))
-}
-
-// printSummaryLine emits a compact summary after a blocked proxied command.
-func printSummaryLine(evt proxyEvent, requested string) {
-	pkg := pickFirst(evt.version, requested, evt.name)
-	status := formatStatus(evt.status)
-	reason := pickFirst(evt.reason)
-	parts := []string{ui.StyleRemoved.Render(ui.StyleSymbol.Render("×")), status}
-	if pkg != "" {
-		parts = append(parts, ui.StylePackageName.Render(pkg))
-	}
-	if reason != "" {
-		parts = append(parts, ui.StyleRemoved.Render(reason))
-	}
-	fmt.Fprintf(os.Stderr, "deputy: %s", strings.Join(parts, " "))
+	// Policy reference (subtle, for debugging)
 	if evt.policy != "" {
-		// Truncate policy path for display if it's too long
 		displayPol := evt.policy
 		if parts := strings.Split(evt.policy, "::"); len(parts) > 1 {
 			file := filepath.Base(parts[0])
 			displayPol = file + "::" + parts[1]
 		}
-		fmt.Fprintf(os.Stderr, " %s", ui.StyleMeta.Render(fmt.Sprintf("(%s)", displayPol)))
+		fmt.Fprintf(os.Stderr, "  %s\n",
+			ui.StyleDim.Render(displayPol))
+	}
+
+	fmt.Fprintln(os.Stderr)
+}
+
+// wrapText wraps long text to the specified width, indenting continuation lines.
+func wrapText(text string, width int) string {
+	if len(text) <= width {
+		return text
+	}
+
+	var lines []string
+	words := strings.Fields(text)
+	var currentLine strings.Builder
+
+	for _, word := range words {
+		if currentLine.Len() == 0 {
+			currentLine.WriteString(word)
+		} else if currentLine.Len()+1+len(word) <= width {
+			currentLine.WriteString(" ")
+			currentLine.WriteString(word)
+		} else {
+			lines = append(lines, currentLine.String())
+			currentLine.Reset()
+			currentLine.WriteString(word)
+		}
+	}
+	if currentLine.Len() > 0 {
+		lines = append(lines, currentLine.String())
+	}
+
+	if len(lines) <= 1 {
+		return text
+	}
+
+	// First line as-is, continuation lines indented
+	result := lines[0]
+	for i := 1; i < len(lines); i++ {
+		result += "\n    " + lines[i]
+	}
+	return result
+}
+
+// printSummaryReport emits a summary of blocked requests.
+// For a single block, it stays silent (the real-time line is sufficient).
+// For multiple blocks, it provides a compact list.
+func printSummaryReport(events []proxyEvent, requested string) {
+	if len(events) == 0 {
+		return
+	}
+
+	// Deduplicate events by package+policy to count unique blocks
+	type blockInfo struct {
+		pkg    string
+		reason string
+		evt    proxyEvent
+	}
+	seen := make(map[string]blockInfo)
+	for _, evt := range events {
+		pkg := evt.name
+		if evt.version != "" {
+			pkg = fmt.Sprintf("%s@%s", evt.name, evt.version)
+		} else if requested != "" && evt.name != "" && strings.Contains(requested, evt.name) {
+			pkg = requested
+		}
+		if pkg == "" {
+			pkg = requested
+		}
+		key := pkg + "::" + evt.policy
+		if _, exists := seen[key]; !exists {
+			seen[key] = blockInfo{pkg: pkg, reason: evt.reason, evt: evt}
+		}
+	}
+
+	// For a single unique block, skip the summary - the real-time line was enough
+	if len(seen) <= 1 {
+		return
+	}
+
+	// Summary header
+	fmt.Fprintln(os.Stderr)
+	fmt.Fprintf(os.Stderr, "%s\n",
+		ui.StyleRemoved.Render(fmt.Sprintf("── %d packages blocked ──", len(seen))))
+
+	// Compact list
+	for _, info := range seen {
+		if info.pkg == "" {
+			continue
+		}
+		fmt.Fprintf(os.Stderr, "  %s %s\n",
+			ui.StyleRemoved.Render("×"),
+			ui.StylePackageName.Render(info.pkg))
 	}
 	fmt.Fprintln(os.Stderr)
 }
@@ -592,4 +627,40 @@ func prepareRubyGemsEnv(proxyURL string) ([]string, func(), error) {
 		_ = os.RemoveAll(dir)
 	}
 	return env, cleanup, nil
+}
+
+// printProxyIntro renders a short header describing the proxied session.
+func printProxyIntro(cfg proxyExecConfig, proxyURL string, command []string) {
+	// Compact, single-line intro to reduce visual noise.
+	// e.g. "deputy: proxying npm • policy: shai-hulud-npm.yaml"
+	parts := []string{
+		ui.StyleHeader.Render(fmt.Sprintf("deputy: proxying %s", cfg.ecosystem)),
+	}
+	if len(cfg.policyPaths) > 0 {
+		shortPolicies := make([]string, len(cfg.policyPaths))
+		for i, p := range cfg.policyPaths {
+			shortPolicies[i] = filepath.Base(p)
+		}
+		parts = append(parts, ui.StyleMeta.Render(fmt.Sprintf("policy: %s", strings.Join(shortPolicies, ", "))))
+	} else {
+		parts = append(parts, ui.StyleMeta.Render("policy: none"))
+	}
+
+	// Join with a bullet point
+	fmt.Fprintln(os.Stderr, strings.Join(parts, ui.StyleDim.Render(" • ")))
+}
+
+// printColoredRow writes an aligned key/value pair using Deputy CLI styles.
+func printColoredRow(key, value string) {
+	if strings.TrimSpace(value) == "" {
+		return
+	}
+	// Dynamic padding based on key length, assuming max ~10 chars for alignment
+	keyWidth := 10
+	pad := keyWidth - lipgloss.Width(key)
+	if pad < 1 {
+		pad = 1
+	}
+	label := ui.StyleMeta.Render(key)
+	fmt.Fprintf(os.Stderr, "  %s%s %s\n", label, strings.Repeat(" ", pad), value)
 }

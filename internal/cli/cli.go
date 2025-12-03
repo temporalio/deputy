@@ -3,6 +3,7 @@ package cli
 import (
 	"context"
 	"fmt"
+	"io"
 	"log/slog"
 	"os"
 	"strings"
@@ -17,7 +18,13 @@ import (
 // Run constructs the root command hierarchy and executes it with all
 // subcommands registered. It is the primary entry point used by main.
 func Run(ctx context.Context) error {
-	return fang.Execute(ctx, newRoot())
+	return fang.Execute(ctx, newRoot(), fang.WithErrorHandler(silentErrorHandler))
+}
+
+// silentErrorHandler suppresses fang's default styled error output.
+// Commands that need custom error handling (like proxy exec) print their own messages.
+func silentErrorHandler(_ io.Writer, _ fang.Styles, _ error) {
+	// intentionally empty - let commands handle their own errors
 }
 
 // newRoot returns the root command with all subcommands attached.
