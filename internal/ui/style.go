@@ -8,7 +8,7 @@ var (
 	StyleAdded      = lipgloss.NewStyle().Foreground(lipgloss.Color("#32CD32")).Bold(true)
 	StyleRemoved    = lipgloss.NewStyle().Foreground(lipgloss.Color("#FF5555")).Bold(true)
 	StyleHeader     = lipgloss.NewStyle().Foreground(lipgloss.Color("#00BFFF")).Bold(true)
-	StyleDim        = lipgloss.NewStyle().Foreground(lipgloss.Color("#444444"))
+	StyleDim        = lipgloss.NewStyle().Foreground(lipgloss.Color("#666666"))
 	StyleAlias      = lipgloss.NewStyle().Foreground(lipgloss.Color("#BBBBBB")).Bold(true)
 	StyleAliasOther = lipgloss.NewStyle().Foreground(lipgloss.Color("#CCCCCC")).Bold(true)
 	StyleMeta       = lipgloss.NewStyle().Foreground(lipgloss.Color("#A0A0A0")).Italic(true)
@@ -25,4 +25,9 @@ var (
 	StyleSymbol         = lipgloss.NewStyle().Bold(true)
 	StylePath           = lipgloss.NewStyle().Foreground(lipgloss.Color("#E6E6FA"))
 	StyleManager        = lipgloss.NewStyle().Foreground(lipgloss.Color("#7FDBFF")).Faint(true)
+
+	// Policy-related styles for proxy output
+	StylePolicyFile = lipgloss.NewStyle().Foreground(lipgloss.Color("#87CEEB")) // Sky blue - file reference
+	StylePolicyRule = lipgloss.NewStyle().Foreground(lipgloss.Color("#B0C4DE")) // Light steel blue - rule name
+	StyleSeparator  = lipgloss.NewStyle().Foreground(lipgloss.Color("#708090")) // Slate gray - punctuation
 )

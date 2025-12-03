@@ -399,56 +399,79 @@ func streamProxyEvents(ctx context.Context, ecosystem, requested string, events 
 // printPolicyBlock renders a helpful message for a blocked request.
 func printPolicyBlock(ecosystem, requested string, evt proxyEvent) {
 	// Construct a display name for the package/artifact
-	pkg := evt.name
-	if evt.version != "" {
-		pkg = fmt.Sprintf("%s@%s", evt.name, evt.version)
-	} else if requested != "" && strings.Contains(requested, evt.name) {
+	name := evt.name
+	version := evt.version
+	if version == "" && requested != "" && strings.Contains(requested, evt.name) {
 		// If we blocked a metadata request (no version), but we know what the user asked for,
 		// show the requested spec to provide better context.
-		pkg = requested
+		if idx := strings.Index(requested, "@"); idx > 0 {
+			name = requested[:idx]
+			version = requested[idx+1:]
+		} else {
+			name = requested
+		}
 	}
 
-	if pkg == "" {
-		pkg = evt.path
+	if name == "" {
+		name = evt.path
 	}
 
 	// Visual separator before the block
 	fmt.Fprintln(os.Stderr)
 
-	// Header line: × <package> blocked
-	fmt.Fprintf(os.Stderr, "%s %s\n",
-		ui.StyleRemoved.Render("×"),
-		ui.StylePackageName.Render(pkg))
+	// Header line: × name@version
+	// Colors: × (red), name (bold white), @ (slate gray), version (bold white)
+	if version != "" {
+		fmt.Fprintf(os.Stderr, "%s %s%s%s\n",
+			ui.StyleRemoved.Render("×"),
+			ui.StyleBold.Render(name),
+			ui.StyleSeparator.Render("@"),
+			ui.StyleBold.Render(version))
+	} else {
+		fmt.Fprintf(os.Stderr, "%s %s\n",
+			ui.StyleRemoved.Render("×"),
+			ui.StyleBold.Render(name))
+	}
 
-	// Why it was blocked (always show if available)
+	// Policy reference - file::rule with distinct colors
+	if evt.policy != "" {
+		file := evt.policy
+		rule := ""
+		if parts := strings.Split(evt.policy, "::"); len(parts) > 1 {
+			file = filepath.Base(parts[0])
+			rule = parts[1]
+		}
+		if rule != "" {
+			fmt.Fprintf(os.Stderr, "  %s%s%s\n",
+				ui.StylePolicyFile.Render(file),
+				ui.StyleSeparator.Render("::"),
+				ui.StylePolicyRule.Render(rule))
+		} else {
+			fmt.Fprintf(os.Stderr, "  %s\n",
+				ui.StylePolicyFile.Render(file))
+		}
+	}
+
+	// Why it was blocked - dim supporting text
 	if evt.reason != "" {
 		fmt.Fprintf(os.Stderr, "  %s\n",
 			ui.StyleDim.Render(evt.reason))
 	}
 
-	// What to do about it - the most important part, make it stand out
+	// What to do about it - arrow is green, text is normal white
 	if evt.remediation != "" {
 		fmt.Fprintln(os.Stderr)
+		wrapped := wrapText(evt.remediation, 70)
 		fmt.Fprintf(os.Stderr, "  %s %s\n",
 			ui.StyleAdded.Render("→"),
-			wrapText(evt.remediation, 76))
-	}
-
-	// Policy reference (subtle, for debugging)
-	if evt.policy != "" {
-		displayPol := evt.policy
-		if parts := strings.Split(evt.policy, "::"); len(parts) > 1 {
-			file := filepath.Base(parts[0])
-			displayPol = file + "::" + parts[1]
-		}
-		fmt.Fprintf(os.Stderr, "  %s\n",
-			ui.StyleDim.Render(displayPol))
+			wrapped)
 	}
 
 	fmt.Fprintln(os.Stderr)
 }
 
 // wrapText wraps long text to the specified width, indenting continuation lines.
+// The indent parameter specifies additional spaces for continuation lines.
 func wrapText(text string, width int) string {
 	if len(text) <= width {
 		return text
@@ -478,7 +501,7 @@ func wrapText(text string, width int) string {
 		return text
 	}
 
-	// First line as-is, continuation lines indented
+	// First line as-is, continuation lines indented to align after "→ " (4 spaces: 2 indent + 2 for arrow+space)
 	result := lines[0]
 	for i := 1; i < len(lines); i++ {
 		result += "\n    " + lines[i]
