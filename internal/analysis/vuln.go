@@ -1,6 +1,8 @@
 package analysis
 
 import (
+	"cmp"
+	"slices"
 	"strings"
 	"time"
 
@@ -23,8 +25,8 @@ func ProcessOSVVulnerability(vuln osvschema.Vulnerability, input PkgInput) Vulne
 		IsDirect:     input.IsDirect,
 		Ecosystem:    input.Ecosystem,
 		PURL:         input.PURL,
-		Locations:    append([]string{}, input.Locations...),
-		ManifestRefs: append([]ManifestReference{}, input.ManifestRefs...),
+		Locations:    slices.Clone(input.Locations),
+		ManifestRefs: slices.Clone(input.ManifestRefs),
 	}
 	if !vuln.Published.IsZero() {
 		v.Published = vuln.Published.Format(time.RFC3339)
@@ -33,24 +35,15 @@ func ProcessOSVVulnerability(vuln osvschema.Vulnerability, input PkgInput) Vulne
 		v.Modified = vuln.Modified.Format(time.RFC3339)
 	}
 	if vuln.Aliases != nil {
-		v.Aliases = append([]string{}, vuln.Aliases...)
+		v.Aliases = slices.Clone(vuln.Aliases)
 	}
 
 	// Prefer CVE alias; fallback to GO- or GHSA-
-	for _, alias := range v.Aliases {
-		if strings.HasPrefix(alias, "CVE-") {
-			v.CVE = alias
-			break
-		}
-	}
-	if v.CVE == "" {
-		for _, alias := range v.Aliases {
-			if strings.HasPrefix(alias, "GO-") || strings.HasPrefix(alias, "GHSA-") {
-				v.CVE = alias
-				break
-			}
-		}
-	}
+	v.CVE = cmp.Or(
+		findAliasPrefix(v.Aliases, "CVE-"),
+		findAliasPrefix(v.Aliases, "GO-"),
+		findAliasPrefix(v.Aliases, "GHSA-"),
+	)
 
 	// Severity: prefer CVSS, then GHSA textual in database_specific
 	if vuln.Severity != nil {
@@ -100,4 +93,13 @@ func ProcessOSVVulnerability(vuln osvschema.Vulnerability, input PkgInput) Vulne
 		}
 	}
 	return v
+}
+
+func findAliasPrefix(aliases []string, prefix string) string {
+	for _, alias := range aliases {
+		if strings.HasPrefix(alias, prefix) {
+			return alias
+		}
+	}
+	return ""
 }

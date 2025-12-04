@@ -18,6 +18,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
+// remediationPlan represents a structured plan for remediating vulnerabilities.
 type remediationPlan struct {
 	Target        remediationPlanTarget  `json:"target"`
 	StdlibUpgrade string                 `json:"stdlibUpgrade,omitempty"`
@@ -25,42 +26,74 @@ type remediationPlan struct {
 	Stats         remediationPlanSummary `json:"stats"`
 }
 
+// remediationPlanTarget identifies the repository and commit that the plan applies to.
 type remediationPlanTarget struct {
 	Repo   string `json:"repo"`
 	Ref    string `json:"ref,omitempty"`
 	Commit string `json:"commit,omitempty"`
 }
 
+// remediationPlanSummary provides statistics about the remediation plan.
 type remediationPlanSummary struct {
 	TotalCommands    int `json:"totalCommands"`
 	RunnableCommands int `json:"runnableCommands"`
 }
 
+// AddFixCommand registers the fix subcommand with the root command.
+// It configures flags for report input, plan input, and AI agent options.
 func AddFixCommand(root *cobra.Command) {
 	scanner := NewScanner()
 	fixCmd := &cobra.Command{
 		Use:   "fix [repo]",
 		Short: "Generate and optionally apply remediation steps",
-		Long: `Run a scan (or consume an existing JSON report) and produce actionable
-remediation commands. When run without --report, the fix command performs the
-same multi-ecosystem inventory scan as "deputy scan" before building the plan.`,
-		Example: `SCAN CURRENT REPOSITORY:
-	  deputy fix
+		Long: `Generate and apply remediation plans for security vulnerabilities.
 
-REPLAY REMOTE / REPORT RESULTS:
-	  deputy fix github.com/hashicorp/vagrant --ignore-unfixed
-	  deputy scan --format json --output scan.json
-	  deputy fix --report scan.json
+REMEDIATION WORKFLOW:
+1. Scan: Detects vulnerabilities in the repository (or uses an existing report).
+2. Plan: Generates a set of remediation commands (e.g., 'go get', 'npm install').
+3. Apply: Optionally executes the commands to fix the issues.
 
-PIPE A REPORT DIRECTLY:
-	  deputy scan --format json --output - | deputy fix --report -
-
-USE A SAVED REMEDIATION PLAN:
-	  deputy fix --plan plan.json
-	  deputy fix --plan plan.json --apply .
+AUTOMATED FIXES:
+Deputy can automatically generate upgrade commands for:
+• Go modules (go get)
+• npm packages (npm install)
+• PyPI packages (pip install)
+• RubyGems (bundle update)
 
 AI-ASSISTED REMEDIATION:
-	  deputy fix --plan plan.json --agent codex --agent-model gpt-4.1`,
+For complex issues or when standard upgrades aren't enough, Deputy can delegate
+remediation to an AI agent (like Codex). The agent can:
+• Analyze the vulnerability context
+• Propose code changes or configuration updates
+• Execute fixes in a sandboxed environment
+
+PLAN MANAGEMENT:
+Remediation plans can be saved to JSON and reviewed before application. This is
+useful for CI/CD pipelines where you want to generate a plan in one step and
+apply it in another (after approval).`,
+		Example: `BASIC USAGE:
+  # Scan and generate a remediation plan
+  deputy fix
+
+  # Scan and immediately apply fixes (interactive)
+  deputy fix --apply .
+
+ADVANCED WORKFLOWS:
+  # Generate a plan and save it to a file
+  deputy fix --format json > plan.json
+
+  # Apply a previously generated plan
+  deputy fix --plan plan.json --apply .
+
+  # Fix only critical vulnerabilities
+  deputy fix --ignore-unfixed
+
+AI ASSISTANCE:
+  # Use AI to fix complex issues
+  deputy fix --agent codex --agent-model gpt-4
+
+  # Run AI in full-auto mode (dangerous!)
+  deputy fix --agent codex --agent-full-auto`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runFixPlan(scanner, cmd, args)
 		},
@@ -86,6 +119,9 @@ AI-ASSISTED REMEDIATION:
 	root.AddCommand(fixCmd)
 }
 
+// runFixPlan executes the fix command logic. It handles plan generation from
+// reports, existing plans, or fresh scans, and optionally applies fixes or
+// invokes AI agents.
 func runFixPlan(scanner *Scanner, cmd *cobra.Command, args []string) error {
 	reportPath, _ := cmd.Flags().GetString("report")
 	planPath, _ := cmd.Flags().GetString("plan")
@@ -222,6 +258,7 @@ func runFixPlan(scanner *Scanner, cmd *cobra.Command, args []string) error {
 	return nil
 }
 
+// readReportSource reads the scan report from the specified path or stdin.
 func readReportSource(r io.Reader, path string) ([]byte, error) {
 	trimmed := strings.TrimSpace(path)
 	if trimmed == "" {
@@ -237,6 +274,7 @@ func readReportSource(r io.Reader, path string) ([]byte, error) {
 	return data, nil
 }
 
+// readPlanSource reads the remediation plan from the specified path or stdin.
 func readPlanSource(r io.Reader, path string) (remediationPlan, error) {
 	trimmed := strings.TrimSpace(path)
 	if trimmed == "" {
@@ -265,6 +303,7 @@ func readPlanSource(r io.Reader, path string) (remediationPlan, error) {
 	return plan, nil
 }
 
+// printFixSummary displays a human-readable summary of the remediation plan.
 func printFixSummary(plan remediationPlan) {
 	fmt.Println(ui.StyleHeader.Render("Remediation Plan:"))
 	if repo := strings.TrimSpace(plan.Target.Repo); repo != "" {
@@ -288,6 +327,7 @@ func printFixSummary(plan remediationPlan) {
 	renderRemediationCommands(plan.Commands, "       ", "         ")
 }
 
+// buildRemediationPlan constructs a remediation plan from the scan result and generated commands.
 func buildRemediationPlan(result ScanResult, commands []remediation.Command, stdlib string) remediationPlan {
 	plan := remediationPlan{
 		Target: remediationPlanTarget{
@@ -302,12 +342,14 @@ func buildRemediationPlan(result ScanResult, commands []remediation.Command, std
 	return plan
 }
 
+// outputRemediationPlanJSON writes the remediation plan to the writer in JSON format.
 func outputRemediationPlanJSON(w io.Writer, plan remediationPlan) error {
 	enc := json.NewEncoder(w)
 	enc.SetIndent("", "  ")
 	return enc.Encode(plan)
 }
 
+// refreshRemediationPlanStats updates the summary statistics of the remediation plan.
 func refreshRemediationPlanStats(plan *remediationPlan) {
 	if plan == nil {
 		return
@@ -318,6 +360,7 @@ func refreshRemediationPlanStats(plan *remediationPlan) {
 	}
 }
 
+// countExecutable returns the number of executable commands in the list.
 func countExecutable(commands []remediation.Command) int {
 	count := 0
 	for _, cmd := range commands {
@@ -328,6 +371,7 @@ func countExecutable(commands []remediation.Command) int {
 	return count
 }
 
+// applyRemediationCommands executes the runnable commands in the remediation plan.
 func applyRemediationCommands(ctx context.Context, repoDir string, commands []remediation.Command, out io.Writer, errW io.Writer) error {
 	ran := 0
 	for _, rec := range commands {
@@ -361,6 +405,7 @@ func applyRemediationCommands(ctx context.Context, repoDir string, commands []re
 	return nil
 }
 
+// runFixPolicies evaluates policies against the remediation plan and its steps.
 func runFixPolicies(ctx context.Context, policyPaths []string, plan remediationPlan, errW io.Writer) error {
 	if len(policyPaths) == 0 {
 		return nil
@@ -389,6 +434,7 @@ func runFixPolicies(ctx context.Context, policyPaths []string, plan remediationP
 	return nil
 }
 
+// shellCommand creates an exec.Cmd to run a shell command.
 func shellCommand(ctx context.Context, command string) *exec.Cmd {
 	if runtime.GOOS == "windows" {
 		return exec.CommandContext(ctx, "cmd.exe", "/C", command)
@@ -396,6 +442,7 @@ func shellCommand(ctx context.Context, command string) *exec.Cmd {
 	return exec.CommandContext(ctx, "sh", "-c", command)
 }
 
+// relativeOrDot returns the relative path from base to target, or "." if they are the same.
 func relativeOrDot(base, target string) string {
 	if rel, err := filepath.Rel(base, target); err == nil && rel != "" {
 		if rel == "." {
@@ -406,6 +453,7 @@ func relativeOrDot(base, target string) string {
 	return "."
 }
 
+// resolveRepoPath determines the absolute path to the repository.
 func resolveRepoPath(existing, repoArg string) (string, error) {
 	if strings.TrimSpace(existing) != "" {
 		return existing, nil

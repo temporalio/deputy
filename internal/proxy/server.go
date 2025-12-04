@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"slices"
 	"strings"
 	"sync"
 
@@ -23,10 +24,14 @@ type Server struct {
 	opts Options
 }
 
+// NewServer creates a new proxy server instance with the provided configuration
+// and options. It prepares the server to handle requests for configured listeners.
 func NewServer(cfg Config, opts Options) *Server {
 	return &Server{cfg: cfg, opts: opts}
 }
 
+// Serve starts all configured listeners and blocks until all of them exit or
+// the context is canceled. It returns the first error encountered by any listener.
 func (s *Server) Serve(ctx context.Context) error {
 	group, ctx := errgroup.WithContext(ctx)
 	for _, lst := range s.cfg.Listeners {
@@ -38,13 +43,14 @@ func (s *Server) Serve(ctx context.Context) error {
 	return group.Wait()
 }
 
+// serveListener initializes and runs a single listener for a specific ecosystem.
+// It sets up the policy engine and HTTP handler for the listener.
 func (s *Server) serveListener(ctx context.Context, cfg ListenerConfig) error {
 	if len(cfg.Ecosystems) == 0 {
 		return fmt.Errorf("listener %q has no ecosystems configured", cfg.Name)
 	}
 	ecos := strings.ToLower(cfg.Ecosystems[0])
-	policyPaths := append([]string{}, cfg.Policies...)
-	policyPaths = append(policyPaths, s.opts.PolicyPaths...)
+	policyPaths := slices.Concat(cfg.Policies, s.opts.PolicyPaths)
 	engine, err := NewPolicyEngine(policyPaths)
 	if err != nil {
 		return fmt.Errorf("listener %s: %w", cfg.Name, err)

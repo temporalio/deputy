@@ -64,6 +64,8 @@ func ScanPackagesAtCommitSnapshot(ctx context.Context, repo *git.Repository, com
 	return scanWorkspace(ctx, ws, opts)
 }
 
+// scanWorkspace runs the scalibr scan on the provided workspace.
+// It configures plugins, runs the scan, and collects results.
 func scanWorkspace(ctx context.Context, ws workspace.FS, opts ScanOptions) ([]*extractor.Package, error) {
 	cap := defaultCapabilities(ws)
 	plugins, err := resolvePlugins(opts, cap)
@@ -88,6 +90,7 @@ func scanWorkspace(ctx context.Context, ws workspace.FS, opts ScanOptions) ([]*e
 	return pkgs, nil
 }
 
+// defaultCapabilities returns the default capabilities for the current environment.
 func defaultCapabilities(ws workspace.FS) *plugin.Capabilities {
 	cap := &plugin.Capabilities{OS: hostOS(), Network: plugin.NetworkOffline}
 	if ws != nil && !ws.IsVirtual() {
@@ -96,6 +99,7 @@ func defaultCapabilities(ws workspace.FS) *plugin.Capabilities {
 	return cap
 }
 
+// hostOS returns the scalibr OS enum for the current runtime OS.
 func hostOS() plugin.OS {
 	switch runtime.GOOS {
 	case "linux":
@@ -109,6 +113,7 @@ func hostOS() plugin.OS {
 	}
 }
 
+// summarizeScanFailures checks the scan result for plugin failures and returns an error if any critical failures occurred.
 func summarizeScanFailures(res *scalibr.ScanResult) error {
 	if res == nil {
 		return nil
@@ -152,6 +157,7 @@ func summarizeScanFailures(res *scalibr.ScanResult) error {
 	return nil
 }
 
+// resolvePlugins determines which plugins to use based on the scan options and capabilities.
 func resolvePlugins(opts ScanOptions, cap *plugin.Capabilities) ([]plugin.Plugin, error) {
 	names := normalizeEcosystems(opts.Ecosystems)
 	if len(names) == 0 {
@@ -164,6 +170,7 @@ func resolvePlugins(opts ScanOptions, cap *plugin.Capabilities) ([]plugin.Plugin
 	return plugin.FilterByCapabilities(plugins, cap), nil
 }
 
+// filterInventoryPlugins filters out plugins that are not relevant for inventory scanning or are explicitly excluded.
 func filterInventoryPlugins(plugins []plugin.Plugin) []plugin.Plugin {
 	if len(plugins) == 0 {
 		return plugins
@@ -201,10 +208,7 @@ func filterInventoryPlugins(plugins []plugin.Plugin) []plugin.Plugin {
 		if _, banned := excluded[p.Name()]; banned {
 			continue
 		}
-		seg := p.Name()
-		if idx := strings.IndexRune(seg, '/'); idx != -1 {
-			seg = seg[:idx]
-		}
+		seg, _, _ := strings.Cut(p.Name(), "/")
 		if _, ok := allowedSegments[seg]; !ok {
 			continue
 		}
@@ -213,33 +217,30 @@ func filterInventoryPlugins(plugins []plugin.Plugin) []plugin.Plugin {
 	return out
 }
 
+// normalizeEcosystems cleans up and sorts the ecosystem names.
+// It returns nil if "all" is present or the list is empty.
 func normalizeEcosystems(names []string) []string {
 	if len(names) == 0 {
 		return nil
 	}
-	seen := map[string]struct{}{}
 	out := make([]string, 0, len(names))
 	for _, raw := range names {
 		name := strings.TrimSpace(strings.ToLower(raw))
-		if name == "" {
-			continue
-		}
 		if name == "all" {
 			return nil
 		}
-		if _, ok := seen[name]; ok {
-			continue
+		if name != "" {
+			out = append(out, name)
 		}
-		seen[name] = struct{}{}
-		out = append(out, name)
 	}
 	if len(out) == 0 {
 		return nil
 	}
 	slices.Sort(out)
-	return out
+	return slices.Compact(out)
 }
 
+// populateWorkspaceFromTree copies files from a git tree into the workspace.
 func populateWorkspaceFromTree(ws workspace.FS, tree *object.Tree) error {
 	if tree == nil {
 		return fmt.Errorf("nil tree")
@@ -278,6 +279,7 @@ func populateWorkspaceFromTree(ws workspace.FS, tree *object.Tree) error {
 	})
 }
 
+// fileModeToPerm converts a git file mode to a filesystem permission.
 func fileModeToPerm(mode filemode.FileMode) fs.FileMode {
 	if mode == filemode.Executable {
 		return 0o755

@@ -9,11 +9,11 @@ func Test_CompareGoPackageVersions(t *testing.T) {
 		target string
 		want   int
 	}{
-		{"upgrade", "v1.2.3", "v1.3.0", 1},
-		{"downgrade", "v2.0.0", "v1.9.9", -1},
-		{"equal", "v1.0.0", "v1.0.0", 0},
-		{"missing-v-prefix", "1.2.3", "1.2.4", 1},
-		{"empty", "", "", 0},
+		{name: "upgrade", base: "v1.2.3", target: "v1.3.0", want: 1},
+		{name: "downgrade", base: "v2.0.0", target: "v1.9.9", want: -1},
+		{name: "equal", base: "v1.0.0", target: "v1.0.0", want: 0},
+		{name: "missing-v-prefix", base: "1.2.3", target: "1.2.4", want: 1},
+		{name: "empty", base: "", target: "", want: 0},
 	}
 	for _, c := range cases {
 		c := c

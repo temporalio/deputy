@@ -287,23 +287,23 @@ func TestGoModuleHandlerEndToEndPolicies(t *testing.T) {
 		},
 	}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
 			before := upstreamHits
-			path := fmt.Sprintf("/%s/@v/%s%s", tt.module, tt.version, tt.fileType)
+			path := fmt.Sprintf("/%s/@v/%s%s", test.module, test.version, test.fileType)
 			resp, err := http.Get(ts.URL + path)
 			if err != nil {
 				t.Fatalf("GET %s: %v", path, err)
 			}
 			resp.Body.Close()
-			if resp.StatusCode != tt.wantStatus {
-				t.Fatalf("status = %d want %d", resp.StatusCode, tt.wantStatus)
+			if resp.StatusCode != test.wantStatus {
+				t.Fatalf("status = %d want %d", resp.StatusCode, test.wantStatus)
 			}
 			hitDelta := upstreamHits - before
-			if tt.wantHit && hitDelta != 1 {
+			if test.wantHit && hitDelta != 1 {
 				t.Fatalf("expected upstream hit, got delta %d", hitDelta)
 			}
-			if !tt.wantHit && hitDelta != 0 {
+			if !test.wantHit && hitDelta != 0 {
 				t.Fatalf("expected no upstream hit, got delta %d", hitDelta)
 			}
 		})
@@ -357,10 +357,10 @@ func TestGoModuleHandlerEndToEndGoGet(t *testing.T) {
 		},
 	}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
 			ctx := context.Background()
-			caseDir := filepath.Join(tmp, strings.ReplaceAll(tt.name, " ", "_"))
+			caseDir := filepath.Join(tmp, strings.ReplaceAll(test.name, " ", "_"))
 			if err := os.MkdirAll(caseDir, 0o755); err != nil {
 				t.Fatalf("mkdir: %v", err)
 			}
@@ -370,7 +370,7 @@ func TestGoModuleHandlerEndToEndGoGet(t *testing.T) {
 			}
 			gomodcache := filepath.Join(gopath, "pkg", "mod")
 			env := []string{
-				fmt.Sprintf("GO111MODULE=on"),
+				"GO111MODULE=on",
 				"GOSUMDB=off",
 				"GOFLAGS=-modcacherw",
 				fmt.Sprintf("GOPROXY=%s", ts.URL),
@@ -381,8 +381,8 @@ func TestGoModuleHandlerEndToEndGoGet(t *testing.T) {
 			if _, err := runGoCommand(ctx, caseDir, env, "mod", "init", "example.com/testproxy"); err != nil {
 				t.Fatalf("go mod init: %v", err)
 			}
-			_, err := runGoCommand(ctx, caseDir, env, "mod", "download", fmt.Sprintf("%s@%s", tt.module, tt.version))
-			if tt.wantErr {
+			_, err := runGoCommand(ctx, caseDir, env, "mod", "download", fmt.Sprintf("%s@%s", test.module, test.version))
+			if test.wantErr {
 				if err == nil {
 					t.Fatalf("expected download failure")
 				}

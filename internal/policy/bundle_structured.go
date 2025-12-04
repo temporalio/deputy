@@ -9,32 +9,40 @@ import (
 	yaml "gopkg.in/yaml.v3"
 )
 
+// structuredBundle represents the top-level structure of a YAML policy bundle.
+// It contains global metadata and a list of policy definitions.
 type structuredBundle struct {
-	Metadata map[string]any     `yaml:"metadata,omitempty"`
-	Policies []structuredPolicy `yaml:"policies"`
+	Metadata map[string]any     `yaml:"metadata,omitempty"` // Metadata contains global bundle metadata.
+	Policies []structuredPolicy `yaml:"policies"`           // Policies is the list of policies in the bundle.
 }
 
+// structuredPolicy defines a single policy within a bundle, including its
+// metadata, execution mode, variables, and evaluation rules.
 type structuredPolicy struct {
-	Name        string           `yaml:"name"`
-	Description string           `yaml:"description,omitempty"`
-	Ecosystems  []string         `yaml:"ecosystems,omitempty"`
-	Entrypoints []string         `yaml:"entrypoints,omitempty"`
-	Commands    []string         `yaml:"commands,omitempty"`
-	Mode        string           `yaml:"mode,omitempty"`
-	Vars        orderedVars      `yaml:"vars,omitempty"`
-	Rules       []structuredRule `yaml:"rules"`
+	Name        string           `yaml:"name"`                  // Name is the policy name.
+	Description string           `yaml:"description,omitempty"` // Description describes the policy's purpose.
+	Ecosystems  []string         `yaml:"ecosystems,omitempty"`  // Ecosystems limits the policy to specific ecosystems.
+	Entrypoints []string         `yaml:"entrypoints,omitempty"` // Entrypoints limits the policy to specific entrypoints.
+	Commands    []string         `yaml:"commands,omitempty"`    // Commands limits the policy to specific CLI commands.
+	Mode        string           `yaml:"mode,omitempty"`        // Mode is the execution mode (e.g., "enforce", "advisory").
+	Vars        orderedVars      `yaml:"vars,omitempty"`        // Vars defines variables used in the policy rules.
+	Rules       []structuredRule `yaml:"rules"`                 // Rules is the list of evaluation rules.
 }
 
 // orderedVars preserves author order from YAML mappings so dependent vars
 // expand deterministically (later vars can reference earlier ones).
 type orderedVars []varKV
 
+// varKV represents a single variable definition (key-value pair) in an ordered list.
 type varKV struct {
-	Name     string
-	Value    any
-	IsString bool
+	Name     string // Name is the variable name.
+	Value    any    // Value is the variable value.
+	IsString bool   // IsString indicates if the value was parsed as a string.
 }
 
+// exprString converts the variable's value into a CEL-compatible string representation.
+// Strings are returned as-is (quoted by the caller if needed), while other types
+// are JSON-marshaled.
 func (kv varKV) exprString() string {
 	if kv.IsString {
 		if s, ok := kv.Value.(string); ok {
@@ -48,6 +56,8 @@ func (kv varKV) exprString() string {
 	return string(b)
 }
 
+// UnmarshalYAML implements the yaml.Unmarshaler interface to decode a mapping
+// into an ordered list of key-value pairs.
 func (o *orderedVars) UnmarshalYAML(node *yaml.Node) error {
 	if node == nil {
 		return nil
@@ -84,6 +94,9 @@ func (o *orderedVars) UnmarshalYAML(node *yaml.Node) error {
 	return nil
 }
 
+// UnmarshalJSON implements the json.Unmarshaler interface. Since JSON maps are
+// unordered, this implementation sorts keys alphabetically to ensure deterministic
+// behavior, though it loses the original author order.
 func (o *orderedVars) UnmarshalJSON(data []byte) error {
 	if len(data) == 0 || string(data) == "null" {
 		return nil
@@ -119,16 +132,21 @@ func (o orderedVars) Names() []string {
 	return out
 }
 
+// structuredRule defines a single evaluation rule within a policy. It maps a
+// condition (When) to an outcome (Action) and optional metadata.
 type structuredRule struct {
-	Action      string            `yaml:"action"`
-	When        string            `yaml:"when"`
-	Reason      string            `yaml:"reason,omitempty"`
-	Status      *int              `yaml:"status,omitempty"`
-	Headers     map[string]string `yaml:"headers,omitempty"`
-	Remediation string            `yaml:"remediation,omitempty"`
-	Details     map[string]any    `yaml:"details,omitempty"`
+	Action      string            `yaml:"action"`                // Action is the outcome if the rule matches (e.g., "deny").
+	When        string            `yaml:"when"`                  // When is the CEL condition that triggers the rule.
+	Reason      string            `yaml:"reason,omitempty"`      // Reason explains why the rule matched.
+	Status      *int              `yaml:"status,omitempty"`      // Status is the HTTP status code to return.
+	Headers     map[string]string `yaml:"headers,omitempty"`     // Headers are HTTP headers to set.
+	Remediation string            `yaml:"remediation,omitempty"` // Remediation suggests how to fix the violation.
+	Details     map[string]any    `yaml:"details,omitempty"`     // Details provides extra context.
 }
 
+// tryParseStructuredBundle attempts to parse a byte slice as a structured YAML bundle.
+// It returns the generated CEL sources if successful, or a boolean indicating
+// whether the input looked like a bundle but failed validation.
 func tryParseStructuredBundle(data []byte, path string) ([]Source, bool, error) {
 	var bundle structuredBundle
 	if err := yaml.Unmarshal(data, &bundle); err != nil {
@@ -192,6 +210,8 @@ func ParseStructuredSources(data []byte, virtualPath string) ([]Source, error) {
 	return sources, nil
 }
 
+// toCELSource compiles the structured policy into a raw CEL source string.
+// It generates the necessary metadata comments and constructs the rule evaluation logic.
 func (p structuredPolicy) toCELSource() (string, error) {
 	if len(p.Rules) == 0 {
 		return "", fmt.Errorf("policy must contain at least one rule")
@@ -267,6 +287,8 @@ func (p structuredPolicy) toCELSource() (string, error) {
 	return strings.Join(metadata, "\n") + "\n" + body, nil
 }
 
+// toRuleExpr converts a structured rule into a CEL expression string.
+// It handles ecosystem filtering and constructs the conditional logic.
 func (r structuredRule) toRuleExpr(ecosystems []string) (string, error) {
 	when := strings.TrimSpace(r.When)
 	if when == "" {
@@ -306,6 +328,8 @@ func (r structuredRule) toRuleExpr(ecosystems []string) (string, error) {
 	return fmt.Sprintf("((%s) ? [%s] : [])", when, string(actionJSON)), nil
 }
 
+// escapeComment escapes characters in a string to make it safe for inclusion
+// in a generated CEL comment.
 func escapeComment(s string) string {
 	s = strings.ReplaceAll(s, "\\", "\\\\")
 	s = strings.ReplaceAll(s, "\"", "\\\"")

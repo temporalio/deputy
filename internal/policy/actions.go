@@ -12,16 +12,16 @@ import (
 
 // Action represents a normalized policy decision emitted by a CEL program.
 type Action struct {
-	Source      string
-	Type        string
-	Reason      string
-	Message     string
-	Remediation string
-	Code        string
-	Status      *int
-	Headers     map[string]string
-	Annotations map[string]any
-	Raw         map[string]any
+	Source      string            // Source is the name of the policy that generated this action.
+	Type        string            // Type is the action type (e.g., "deny", "warn", "allow").
+	Reason      string            // Reason is a human-readable explanation for the action.
+	Message     string            // Message is an optional additional message.
+	Remediation string            // Remediation suggests how to resolve the issue.
+	Code        string            // Code is a machine-readable error code.
+	Status      *int              // Status is an optional HTTP status code to return.
+	Headers     map[string]string // Headers are HTTP headers to set in the response.
+	Annotations map[string]any    // Annotations are arbitrary metadata attached to the action.
+	Raw         map[string]any    // Raw is the original map returned by the policy.
 }
 
 // EvaluateAll executes every policy source against the provided input and
@@ -34,6 +34,7 @@ func EvaluateAll(ctx context.Context, sources []Source, input map[string]any) ([
 	return eng.EvaluateAll(ctx, input, "", "")
 }
 
+// toActions converts a raw policy result (map or list of maps) into a slice of Action structs.
 func toActions(source string, value any) ([]Action, error) {
 	if value == nil {
 		return nil, nil
@@ -65,6 +66,7 @@ func toActions(source string, value any) ([]Action, error) {
 	}
 }
 
+// toAction converts a single raw policy result map into an Action struct.
 func toAction(source string, value any) (*Action, error) {
 	if value == nil {
 		return nil, nil
@@ -127,6 +129,7 @@ func toAction(source string, value any) (*Action, error) {
 	}
 }
 
+// getString safely retrieves a string value from a map[string]any, handling various types.
 func getString(m map[string]any, key string) (string, bool) {
 	v, ok := m[key]
 	if !ok {
@@ -136,8 +139,6 @@ func getString(m map[string]any, key string) (string, bool) {
 	case string:
 		return val, true
 	case fmt.Stringer:
-		return val.String(), true
-	case json.Number:
 		return val.String(), true
 	case float64:
 		if math.IsNaN(val) {
@@ -149,6 +150,7 @@ func getString(m map[string]any, key string) (string, bool) {
 	}
 }
 
+// convertRefMap converts a CEL map[ref.Val]ref.Val to a native map[string]any.
 func convertRefMap(m map[ref.Val]ref.Val) (map[string]any, error) {
 	out := make(map[string]any, len(m))
 	for k, v := range m {

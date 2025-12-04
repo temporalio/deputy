@@ -13,7 +13,6 @@ import (
 var (
 	yamlTopKeys = []string{"policies", "metadata"}
 	policyKeys  = []string{"name", "description", "ecosystems", "entrypoints", "commands", "mode", "vars", "rules"}
-	ruleKeys    = []string{"action", "when", "reason", "status", "headers", "remediation", "details"}
 	actions     = []string{"allow", "deny", "warn"}
 	modes       = []string{"enforce", "advisory"}
 )
@@ -113,14 +112,8 @@ func celContextToken(line string, cursor int) (base string, partial string) {
 	}
 	fragment := line[:cursor]
 	// walk backward to find last token containing dots
-	for i := len(fragment) - 1; i >= 0; i-- {
-		if fragment[i] == ' ' || fragment[i] == '\t' || fragment[i] == '(' || fragment[i] == '[' {
-			fragment = fragment[i+1:]
-			break
-		}
-		if i == 0 {
-			fragment = fragment
-		}
+	if idx := strings.LastIndexAny(fragment, " \t(["); idx >= 0 {
+		fragment = fragment[idx+1:]
 	}
 	if idx := strings.LastIndex(fragment, "."); idx >= 0 {
 		base = strings.TrimLeft(fragment[:idx], "(!")
@@ -252,6 +245,7 @@ func walkExpr(e ast.Expr, fn func(ast.Expr)) {
 	}
 }
 
+// min returns the smaller of two integers.
 func min(a, b int) int {
 	if a < b {
 		return a

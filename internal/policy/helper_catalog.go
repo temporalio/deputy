@@ -4,9 +4,9 @@ package policy
 // It is used both by the runtime (for registration) and by tooling (LSP, docs)
 // to keep completions/hovers in sync with the functions actually available.
 type HelperFunction struct {
-	Name      string
-	Signature string
-	Doc       string
+	Name      string // Name is the function name as it appears in CEL.
+	Signature string // Signature is the function signature for documentation/hover.
+	Doc       string // Doc is the documentation string for the function.
 }
 
 // helperFunctions centralizes the catalog so tooling (LSP, docs) stay in sync

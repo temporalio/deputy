@@ -39,16 +39,16 @@ func TestParseRubyGemsPath(t *testing.T) {
 		version   string
 		operation string
 	}{
-		{"/downloads/rails-7.1.0.gem", "rails", "7.1.0", "download"},
-		{"/gems/rake-13.2.1.gem", "rake", "13.2.1", "download"},
-		{"/api/v1/gems/rack.json", "rack", "", "api"},
-		{"/api/v1/versions/rake/latest", "", "", "api"},
-		{"/rails", "rails", "", "metadata"},
+		{path: "/downloads/rails-7.1.0.gem", name: "rails", version: "7.1.0", operation: "download"},
+		{path: "/gems/rake-13.2.1.gem", name: "rake", version: "13.2.1", operation: "download"},
+		{path: "/api/v1/gems/rack.json", name: "rack", version: "", operation: "api"},
+		{path: "/api/v1/versions/rake/latest", name: "", version: "", operation: "api"},
+		{path: "/rails", name: "rails", version: "", operation: "metadata"},
 	}
-	for _, tt := range tests {
-		name, version, op := parseRubyGemsPath(tt.path)
-		if name != tt.name || version != tt.version || op != tt.operation {
-			t.Fatalf("parseRubyGemsPath(%q) = (%q,%q,%q)", tt.path, name, version, op)
+	for _, test := range tests {
+		name, version, op := parseRubyGemsPath(test.path)
+		if name != test.name || version != test.version || op != test.operation {
+			t.Fatalf("parseRubyGemsPath(%q) = (%q,%q,%q)", test.path, name, version, op)
 		}
 	}
 }
@@ -203,10 +203,10 @@ func TestRubyGemsHandlerEndToEndGemCLI(t *testing.T) {
 		{"deny_rake", "rake", "13.1.0", true},
 	}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
 			args := []string{
-				"fetch", fmt.Sprintf("%s:%s", tt.pkg, tt.version),
+				"fetch", fmt.Sprintf("%s:%s", test.pkg, test.version),
 				"--clear-sources",
 				"--source", ts.URL,
 			}
@@ -216,7 +216,7 @@ func TestRubyGemsHandlerEndToEndGemCLI(t *testing.T) {
 				"GEM_PATH="+tmp,
 			)
 			output, err := cmd.CombinedOutput()
-			if tt.wantErr {
+			if test.wantErr {
 				if err == nil {
 					t.Fatalf("expected failure\n%s", output)
 				}

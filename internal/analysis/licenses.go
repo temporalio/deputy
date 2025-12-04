@@ -204,9 +204,8 @@ func DetectLicenseIDs(b []byte) []string {
 	return out
 }
 
-// Remote module license scanning (best effort). Currently supports github.com
-// modules by constructing the repository URL and tagging the version if it
-// looks like a tag. If cloning fails, returns nil silently.
+// RemoteModuleLicenseScan performs a best-effort license scan for a remote module.
+// It currently supports github.com modules by cloning or fetching raw content.
 func RemoteModuleLicenseScan(ctx context.Context, modulePath, version string) []string {
 	if modulePath == "" {
 		return nil
@@ -282,6 +281,7 @@ func ExtractLicensesFromReader(r io.Reader) []string {
 	return DetectLicenseIDs(b)
 }
 
+// cloneStrings returns a deep copy of a string slice.
 func cloneStrings(src []string) []string {
 	if src == nil {
 		return nil
@@ -291,6 +291,8 @@ func cloneStrings(src []string) []string {
 	return out
 }
 
+// getGitHubHTTPClient returns a singleton HTTP client configured with a timeout
+// suitable for GitHub API requests.
 func getGitHubHTTPClient() *nethttp.Client {
 	githubHTTPClientOnce.Do(func() {
 		githubHTTPClient = &nethttp.Client{Timeout: 10 * time.Second}
@@ -298,6 +300,9 @@ func getGitHubHTTPClient() *nethttp.Client {
 	return githubHTTPClient
 }
 
+// fetchLicensesFromGitHubRaw attempts to download license files directly from
+// GitHub's raw content domain. This avoids the overhead of a full git clone
+// when only the license text is needed.
 func fetchLicensesFromGitHubRaw(ctx context.Context, owner, repo, version string) ([]string, error) {
 	ref := deriveGitRef(version)
 	if ref == "" {
@@ -352,6 +357,9 @@ func fetchLicensesFromGitHubRaw(ctx context.Context, owner, repo, version string
 	return out, nil
 }
 
+// deriveGitRef attempts to extract a usable git reference (commit hash or tag)
+// from a version string. It handles Go pseudo-versions and standard semantic
+// versions.
 func deriveGitRef(version string) string {
 	if version == "" {
 		return ""
@@ -369,6 +377,8 @@ func deriveGitRef(version string) string {
 	return v
 }
 
+// pseudoVersionCommit extracts the commit hash from a Go pseudo-version string
+// (e.g., v0.0.0-20230101000000-abcdef123456).
 func pseudoVersionCommit(version string) string {
 	parts := strings.Split(version, "-")
 	if len(parts) < 3 {

@@ -9,12 +9,15 @@ import (
 	pb "deps.dev/api/v3"
 )
 
+// fakeDepsClientOK simulates a successful deps.dev API response with a known license.
+// fakeDepsClientOK simulates a successful deps.dev API response with a known license.
 type fakeDepsClientOK struct{}
 
 func (f *fakeDepsClientOK) GetVersion(ctx context.Context, req *pb.GetVersionRequest) (*pb.Version, error) {
 	return &pb.Version{Licenses: []string{"MIT"}}, nil
 }
 
+// fakeDepsClientErr simulates a deps.dev API failure.
 type fakeDepsClientErr struct{}
 
 func (f *fakeDepsClientErr) GetVersion(ctx context.Context, req *pb.GetVersionRequest) (*pb.Version, error) {
@@ -43,6 +46,9 @@ func Test_FetchLicensesForPackage_error_returns_unknown(t *testing.T) {
 	}
 }
 
+// countingDepsClient tracks the number of API calls made.
+// countingDepsClient tracks the number of API calls made.
+// countingDepsClient tracks the number of API calls made.
 type countingDepsClient struct{ calls int }
 
 func (c *countingDepsClient) GetVersion(ctx context.Context, req *pb.GetVersionRequest) (*pb.Version, error) {

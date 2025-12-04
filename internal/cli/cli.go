@@ -34,28 +34,29 @@ func newRoot() *cobra.Command {
 
 	rootCmd := &cobra.Command{
 		Use:   "deputy",
-		Short: "Analyze dependencies, diff refs, and scan for vulns",
-		Long: `Deputy is a comprehensive tool for analyzing Go dependencies, comparing changes between 
-  Git references, and scanning for security vulnerabilities.
+		Short: "Secure your dependencies with policy enforcement, vulnerability scanning, and automated remediation",
+		Long: `Deputy is a comprehensive security tool for modern development workflows. It integrates 
+dependency analysis, vulnerability scanning, policy enforcement, and automated remediation 
+into a single CLI.
 
 CORE CAPABILITIES:
-• Dependency Analysis: Compare dependencies between any Git references
-• Vulnerability Scanning: Scan repositories, directories, or SBOM files for security issues  
-• SBOM Generation: Create Software Bills of Materials in multiple formats
-• License Detection: Identify licenses for dependencies
-• CI/CD Integration: JSON outputs and machine-readable formats
+• Vulnerability Management: Scan for issues, triage results with AI, and apply automated fixes.
+• Policy Enforcement: Define and enforce CEL-based policies for dependencies and licenses.
+• Dependency Analysis: Track changes between commits and list dependencies across ecosystems.
+• Supply Chain Security: Generate SBOMs and proxy package managers to block risky packages.
 
 COMMAND OVERVIEW:
-• diff: Compare dependency changes between Git references (default when run without subcommand)
-• scan: Scan for vulnerabilities using OSV database
-• sbom: Generate Software Bills of Materials
-
-The tool automatically detects default branches, optimizes scans by checking for actual
-dependency changes, and provides detailed vulnerability information with fix recommendations.
+• scan:    Scan repositories or SBOMs for vulnerabilities
+• fix:     Generate and apply remediation plans for vulnerabilities
+• triage:  Summarize and prioritize issues (with optional AI assistance)
+• policy:  Develop, test, and evaluate security policies
+• proxy:   Run a policy-enforcing proxy for Go, npm, PyPI, and RubyGems
+• diff:    Compare dependency changes between Git references
+• list:    List dependencies in a repository
+• sbom:    Generate Software Bills of Materials (SBOMs)
 
 DEFAULT EXECUTION:
-Running 'deputy' with no subcommand executes the dependency diff analysis (equivalent to 'deputy diff').
-Use 'deputy --help' to view global help or 'deputy diff --help' for diff-specific flags.`,
+Running 'deputy' without arguments defaults to 'deputy diff' if inside a Git repository.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			// Invoke diff command programmatically when no subcommand specified,
 			// and we're in a Git repository.
@@ -71,73 +72,32 @@ Use 'deputy --help' to view global help or 'deputy diff --help' for diff-specifi
 			return cmd.Help()
 		},
 		Example: `QUICK START:
-  # Compare your current work with main branch
-  deputy
-
-  # Compare two branches explicitly  
-  deputy diff main feature-branch
-
-  # Scan current repository for vulnerabilities
+  # Scan for vulnerabilities
   deputy scan
 
-  # Generate SBOM for current repository
-  deputy sbom
+  # Fix vulnerabilities automatically
+  deputy fix
+
+  # Triage issues with AI assistance
+  deputy triage --agent codex
+
+POLICY ENFORCEMENT:
+  # Run npm through the Deputy proxy to enforce policies
+  deputy proxy npm -- npm install
+
+  # Evaluate a policy against a context
+  deputy policy eval --policy policy.yaml --input context.json
 
 DEPENDENCY ANALYSIS:
-  # Compare current work with default branch
-  deputy
-  deputy diff
+  # Compare current work with main branch
+  deputy diff main
 
-  # Compare specific branches
-  deputy diff main develop
-  deputy diff v1.0.0 v2.0.0
+  # List all dependencies
+  deputy list
 
-  # Compare with your uncommitted changes
-  deputy diff main WORKING
-
-VULNERABILITY SCANNING:
-  # Scan repository at HEAD
-  deputy scan
-
-  # Scan specific Git reference  
-  deputy scan --ref v1.2.3
-
-  # Scan directory without Git context
-  deputy scan dir /path/to/project
-
-  # Scan SBOM file
-  deputy scan sbom project-sbom.json
-
-SBOM GENERATION:
-  # Generate CycloneDX SBOM
-  deputy sbom
-
-  # Generate SPDX SBOM with licenses
-  deputy sbom --format spdx --enrich-licenses
-
-  # Generate for specific reference
-  deputy sbom --ref v1.2.3 --output release-sbom.json
-
-CI/CD INTEGRATION:
-  # Dependency change analysis
-  deputy diff --format json main HEAD
-
-  # Vulnerability scanning with JSON output
-  deputy scan --format json --ignore-unfixed
-
-  # SBOM generation for compliance
-  deputy sbom --format spdx --enrich-licenses --output sbom.json
-
-ADVANCED WORKFLOWS:
-  # Full security pipeline
-  deputy sbom --format protobom | deputy scan sbom -
-
-  # Compare releases for security analysis
-  deputy diff v1.0.0 v2.0.0
-  deputy scan --ref v2.0.0 --format json
-
-  # Historical vulnerability analysis
-  deputy scan --ref "main@{3.month.ago}"`,
+SUPPLY CHAIN:
+  # Generate an SBOM
+  deputy sbom --format spdx`,
 	}
 
 	rootCmd.PersistentFlags().StringVar(&logLevel, "log-level", logLevel, "Logging level (debug, info, warn, error). Override with DEPUTY_LOG_LEVEL")
@@ -149,12 +109,14 @@ ADVANCED WORKFLOWS:
 	return rootCmd
 }
 
+// isInGitRepo checks if the current working directory is inside a git repository.
 func isInGitRepo() bool {
 	// Use the internal git package to check if we're in a Git repository.
 	_, err := git.PlainOpen(".")
 	return err == nil
 }
 
+// defaultLogLevel returns the default log level from the environment or "info".
 func defaultLogLevel() string {
 	if v := strings.TrimSpace(os.Getenv("DEPUTY_LOG_LEVEL")); v != "" {
 		return v
@@ -162,6 +124,7 @@ func defaultLogLevel() string {
 	return "info"
 }
 
+// defaultLogFormat returns the default log format from the environment or "text".
 func defaultLogFormat() string {
 	if v := strings.TrimSpace(os.Getenv("DEPUTY_LOG_FORMAT")); v != "" {
 		return v
@@ -169,6 +132,7 @@ func defaultLogFormat() string {
 	return "text"
 }
 
+// configureLogging sets up the global slog logger based on the provided level and format.
 func configureLogging(levelStr, format string) error {
 	level, err := parseLogLevel(levelStr)
 	if err != nil {
@@ -187,6 +151,7 @@ func configureLogging(levelStr, format string) error {
 	return nil
 }
 
+// parseLogLevel converts a string log level to a slog.Leveler.
 func parseLogLevel(value string) (slog.Leveler, error) {
 	switch strings.ToLower(strings.TrimSpace(value)) {
 	case "debug":

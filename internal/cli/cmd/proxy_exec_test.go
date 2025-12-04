@@ -85,18 +85,17 @@ func TestEnvPreparers(t *testing.T) {
 			},
 		},
 	}
-	for _, tt := range tests {
-		tt := tt
-		t.Run(tt.name, func(t *testing.T) {
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
 			t.Parallel()
-			env, cleanup, err := tt.prep(tt.proxyURL)
+			env, cleanup, err := test.prep(test.proxyURL)
 			if err != nil {
 				t.Fatalf("prep error: %v", err)
 			}
 			if len(env) == 0 {
 				t.Fatalf("expected env vars")
 			}
-			tt.validate(t, env, cleanup)
+			test.validate(t, env, cleanup)
 		})
 	}
 }

@@ -40,15 +40,15 @@ func TestParsePyPIPath(t *testing.T) {
 		op       string
 		filename string
 	}{
-		{"/simple/numpy/", "numpy", "", "simple", ""},
-		{"/project/numpy/1.24/", "numpy", "1.24", "project", ""},
-		{"/packages/source/n/numpy/numpy-1.24.0.tar.gz", "numpy", "1.24.0", "download", "numpy-1.24.0.tar.gz"},
-		{"/packages/ab/cd/google-auth-2.34.0.tar.gz", "google-auth", "2.34.0", "download", "google-auth-2.34.0.tar.gz"},
+		{path: "/simple/numpy/", pkg: "numpy", version: "", op: "simple", filename: ""},
+		{path: "/project/numpy/1.24/", pkg: "numpy", version: "1.24", op: "project", filename: ""},
+		{path: "/packages/source/n/numpy/numpy-1.24.0.tar.gz", pkg: "numpy", version: "1.24.0", op: "download", filename: "numpy-1.24.0.tar.gz"},
+		{path: "/packages/ab/cd/google-auth-2.34.0.tar.gz", pkg: "google-auth", version: "2.34.0", op: "download", filename: "google-auth-2.34.0.tar.gz"},
 	}
-	for _, tt := range tests {
-		pkg, version, filename, op := parsePyPIPath(tt.path)
-		if pkg != tt.pkg || version != tt.version || op != tt.op || filename != tt.filename {
-			t.Fatalf("parsePyPIPath(%q) -> pkg=%q version=%q op=%q filename=%q", tt.path, pkg, version, op, filename)
+	for _, test := range tests {
+		pkg, version, filename, op := parsePyPIPath(test.path)
+		if pkg != test.pkg || version != test.version || op != test.op || filename != test.filename {
+			t.Fatalf("parsePyPIPath(%q) -> pkg=%q version=%q op=%q filename=%q", test.path, pkg, version, op, filename)
 		}
 	}
 }
@@ -220,13 +220,13 @@ func TestPyPIHandlerEndToEndPip(t *testing.T) {
 		{"deny_pkginfo", "pkginfo", "1.5.0.1", true},
 	}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			dest := filepath.Join(tmp, tt.name)
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			dest := filepath.Join(tmp, test.name)
 			if err := os.MkdirAll(dest, 0o755); err != nil {
 				t.Fatalf("mkdir: %v", err)
 			}
-			pkgSpec := fmt.Sprintf("%s==%s", tt.pkg, tt.version)
+			pkgSpec := fmt.Sprintf("%s==%s", test.pkg, test.version)
 			args := []string{
 				"-m", "pip", "download", pkgSpec,
 				"--no-deps",
@@ -241,7 +241,7 @@ func TestPyPIHandlerEndToEndPip(t *testing.T) {
 				"PIP_RETRIES=0",
 			)
 			output, err := cmd.CombinedOutput()
-			if tt.wantErr {
+			if test.wantErr {
 				if err == nil {
 					t.Fatalf("expected failure, output: %s", output)
 				}

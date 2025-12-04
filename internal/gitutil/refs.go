@@ -125,11 +125,12 @@ func getRemoteDefaultBranch(repo *git.Repository) string {
 	}
 	remoteOrder := []string{"origin", "upstream"}
 	for _, remoteName := range remoteOrder {
-		for _, remote := range remotes {
-			if remote.Config().Name == remoteName {
-				if branch := getRemoteHeadBranch(remote); branch != "" {
-					return branch
-				}
+		idx := slices.IndexFunc(remotes, func(r *git.Remote) bool {
+			return r.Config().Name == remoteName
+		})
+		if idx != -1 {
+			if branch := getRemoteHeadBranch(remotes[idx]); branch != "" {
+				return branch
 			}
 		}
 	}
@@ -146,14 +147,16 @@ func getRemoteHeadBranch(remote *git.Remote) string {
 	if err != nil {
 		return ""
 	}
-	var headSymref *plumbing.Reference
-	for _, ref := range refs {
-		if ref.Name().String() == fmt.Sprintf("refs/remotes/%s/HEAD", remote.Config().Name) {
-			headSymref = ref
-			break
-		}
+	targetRef := fmt.Sprintf("refs/remotes/%s/HEAD", remote.Config().Name)
+	idx := slices.IndexFunc(refs, func(ref *plumbing.Reference) bool {
+		return ref.Name().String() == targetRef
+	})
+	if idx == -1 {
+		return ""
 	}
-	if headSymref != nil && headSymref.Type() == plumbing.SymbolicReference {
+	headSymref := refs[idx]
+
+	if headSymref.Type() == plumbing.SymbolicReference {
 		target := headSymref.Target().String()
 		if after, ok := strings.CutPrefix(target, fmt.Sprintf("refs/remotes/%s/", remote.Config().Name)); ok {
 			return after

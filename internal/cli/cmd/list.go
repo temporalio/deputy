@@ -58,10 +58,38 @@ func AddListCommand(root *cobra.Command) {
 		Use:     "list [repo]",
 		Aliases: []string{"ls"},
 		Short:   "List dependencies in a repository",
-		Long: `List dependencies (no scan or diff) as normalized PURLs for easy grep/jq workflows.
+		Long: `List all dependencies in a repository as Package URLs (PURLs).
 
-Emits one PURL per discovered package (no dedup), mirroring what the SBOM command would include,
-with a direct/indirect classification.`,
+This command provides a flat list of all discovered dependencies, including
+transitive ones. It is designed for:
+• Scripting and automation (easy to grep/jq)
+• Inventory auditing
+• Verifying dependency detection
+
+OUTPUT FORMATS:
+• text: Tab-separated values (PURL, Direct/Indirect)
+• json: Structured JSON output with metadata
+
+The output mirrors what would be included in an SBOM but in a more lightweight format.`,
+		Example: `BASIC USAGE:
+  # List dependencies in current repo
+  deputy list
+
+  # List dependencies in a remote repo
+  deputy list https://github.com/example/repo
+
+FILTERING & FORMATTING:
+  # Output as JSON
+  deputy list --format json
+
+  # Only show direct dependencies
+  deputy list --direct
+
+  # Filter by ecosystem
+  deputy list --ecosystems go,npm
+
+  # Save to file
+  deputy list --output deps.txt`,
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := cmd.Context()
@@ -123,23 +151,6 @@ with a direct/indirect classification.`,
 				return fmt.Errorf("unsupported --format %q (use text|tsv|json)", format)
 			}
 		},
-		Example: `BASIC USAGE:
-  # List dependencies for current repository at HEAD
-  deputy list
-
-  # List dependencies for a specific ref
-  deputy list --ref v1.2.3
-  deputy list --ref main
-
-  # TSV for easy grep/cut/awk
-  deputy list --format tsv | cut -f1
-
-  # JSON for jq
-  deputy list --format json | jq '.items[] | {purl: .purl, direct: .isDirect}'
-
-REMOTE REPOSITORIES:
-  deputy list github.com/username/repo
-  deputy list --ref v1.0.0 https://github.com/username/repo.git`,
 	}
 
 	cmd.Flags().StringVar(&ref, "ref", "HEAD", "Git reference (commit, tag, branch)")
@@ -349,6 +360,8 @@ func toListItems(ws workspace.FS, pkgs []*extractor.Package, goDirect map[string
 	return out
 }
 
+// bestModuleForPackage finds the longest matching module path for a given package
+// from the set of direct dependencies.
 func bestModuleForPackage(pkg string, direct map[string]bool) string {
 	best := ""
 	for mod := range direct {
@@ -364,6 +377,7 @@ func bestModuleForPackage(pkg string, direct map[string]bool) string {
 	return best
 }
 
+// packageKeyFromExtractor generates a unique key for a package based on its ecosystem, name, and version.
 func packageKeyFromExtractor(p *extractor.Package) string {
 	if p == nil || p.Name == "" {
 		return ""
@@ -392,6 +406,7 @@ func packageKeyFromExtractor(p *extractor.Package) string {
 	return fmt.Sprintf("%s|%s|%s", strings.ToLower(ecos), lowerName, version)
 }
 
+// formatSources formats the list of sources into a comma-separated string, truncating if necessary.
 func formatSources(sources []string) string {
 	if len(sources) == 0 {
 		return ""
@@ -533,6 +548,7 @@ func normalizeGolangPURLLikeSBOM(purlStr string, ws workspace.FileReader) string
 	return pp.String()
 }
 
+// readModulePathWorkspace reads the module path from the go.mod file in the workspace.
 func readModulePathWorkspace(ws workspace.FileReader) string {
 	if ws == nil {
 		return ""
@@ -547,6 +563,7 @@ func readModulePathWorkspace(ws workspace.FileReader) string {
 	return ""
 }
 
+// filterOnlyDirect filters the list items to include only direct dependencies.
 func filterOnlyDirect(items []ListItem) []ListItem {
 	out := items[:0]
 	for _, it := range items {

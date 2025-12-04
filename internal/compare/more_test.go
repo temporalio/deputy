@@ -6,12 +6,12 @@ import (
 
 func Test_NormalizeGopkgInURL_and_ExtractCanonical(t *testing.T) {
 	cases := []struct{ in, norm, canon string }{
-		{"gopkg.in/go-jose/go-jose.v2", "github.com/go-jose/go-jose", "github.com/go-jose/go-jose"},
-		{"gopkg.in/yaml.v3", "github.com/go-yaml/yaml", "github.com/go-yaml/yaml"},
-		{"gopkg.in/user/repo/subpkg.v2", "github.com/user/repo/subpkg", "github.com/user/repo/subpkg"},
-		{"modernc.org/cc/v3", "modernc.org/cc/v3", "modernc.org/cc"},
-		{"github.com/example/pkg/v10", "github.com/example/pkg/v10", "github.com/example/pkg"},
-		{"github.com/example/pkg/v1", "github.com/example/pkg/v1", "github.com/example/pkg/v1"},
+		{in: "gopkg.in/go-jose/go-jose.v2", norm: "github.com/go-jose/go-jose", canon: "github.com/go-jose/go-jose"},
+		{in: "gopkg.in/yaml.v3", norm: "github.com/go-yaml/yaml", canon: "github.com/go-yaml/yaml"},
+		{in: "gopkg.in/user/repo/subpkg.v2", norm: "github.com/user/repo/subpkg", canon: "github.com/user/repo/subpkg"},
+		{in: "modernc.org/cc/v3", norm: "modernc.org/cc/v3", canon: "modernc.org/cc"},
+		{in: "github.com/example/pkg/v10", norm: "github.com/example/pkg/v10", canon: "github.com/example/pkg"},
+		{in: "github.com/example/pkg/v1", norm: "github.com/example/pkg/v1", canon: "github.com/example/pkg/v1"},
 	}
 	for _, c := range cases {
 		if got := NormalizeGopkgInURL(c.in); got != c.norm {

@@ -215,6 +215,7 @@ func QueryOSVBatch(ctx context.Context, client OSVClient, pkgs []PkgInput) ([]Vu
 	return out, nil
 }
 
+// matchesPackage checks if an OSV package definition matches the target package input.
 func matchesPackage(pkg osvschema.Package, target PkgInput) bool {
 	if pkg.Purl != "" && target.PURL != "" {
 		if equivalentPURL(pkg.Purl, target.PURL) {
@@ -234,6 +235,7 @@ func matchesPackage(pkg osvschema.Package, target PkgInput) bool {
 	return true
 }
 
+// equivalentPURL checks if two PURLs refer to the same package, ignoring version.
 func equivalentPURL(a, b string) bool {
 	pa, errA := purl.FromString(a)
 	pb, errB := purl.FromString(b)

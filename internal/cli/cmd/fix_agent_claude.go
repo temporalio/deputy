@@ -17,6 +17,8 @@ import (
 
 const anthropicAPIURL = "https://api.anthropic.com/v1/messages"
 
+// runClaudeAgent executes the Claude AI agent to generate remediation suggestions.
+// It constructs a request to the Anthropic API and prints the response.
 func runClaudeAgent(ctx context.Context, prompt string, repoPath string, opts agentInvocationOptions, out, errW io.Writer) error {
 	apiKey := strings.TrimSpace(os.Getenv("ANTHROPIC_API_KEY"))
 	if apiKey == "" {

@@ -19,6 +19,9 @@ var (
 	reGemQuotedVal = regexp.MustCompile(`["']([^"']+)["']`)
 )
 
+// collectGemfilePackages scans the workspace for Gemfiles and extracts
+// dependencies declared within them. It walks the filesystem, skipping
+// directories and non-Gemfile files.
 func collectGemfilePackages(ws workspace.FS) ([]*extractor.Package, error) {
 	var pkgs []*extractor.Package
 	fsys := fs.FS(ws)
@@ -45,6 +48,9 @@ func collectGemfilePackages(ws workspace.FS) ([]*extractor.Package, error) {
 	return pkgs, nil
 }
 
+// parseGemfileDependencies parses the content of a Gemfile to identify
+// declared dependencies. It uses regex matching to find `gem` declarations
+// and extracts the package name and version constraints.
 func parseGemfileDependencies(path string, content []byte) []*extractor.Package {
 	scanner := bufio.NewScanner(bytes.NewReader(content))
 	var buffer string
@@ -71,6 +77,7 @@ func parseGemfileDependencies(path string, content []byte) []*extractor.Package 
 	return out
 }
 
+// gemDependencyFromLine parses a single line (or accumulated buffer) to extract a gem dependency.
 func gemDependencyFromLine(line, path string) *extractor.Package {
 	if !strings.Contains(line, "gem ") {
 		return nil
@@ -95,6 +102,7 @@ func gemDependencyFromLine(line, path string) *extractor.Package {
 	}
 }
 
+// normalizeGemConstraint cleans up a version constraint string to extract the version number.
 func normalizeGemConstraint(expr string) string {
 	expr = strings.TrimSpace(expr)
 	expr = strings.Trim(expr, "\"'")

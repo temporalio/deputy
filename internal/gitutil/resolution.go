@@ -16,18 +16,17 @@ import (
 // the input is returned unchanged.
 func NormalizeGitRefForGoGit(ref string) string {
 	r := strings.TrimSpace(ref)
-	i := strings.Index(r, "@{")
-	if i < 0 {
+	before, after, found := strings.Cut(r, "@{")
+	if !found {
 		return r
 	}
-	jrel := strings.Index(r[i+2:], "}")
-	if jrel < 0 {
+	inner, rest, found := strings.Cut(after, "}")
+	if !found {
 		return r
 	}
-	j := i + 2 + jrel
-	inner := strings.TrimSpace(r[i+2 : j])
+	inner = strings.TrimSpace(inner)
 	if iso := ParseTimeShorthandToISO(inner); iso != "" {
-		return r[:i+2] + iso + r[j:]
+		return before + "@{" + iso + "}" + rest
 	}
 	return r
 }
@@ -46,13 +45,12 @@ func ParseTimeShorthandToISO(expr string) string {
 	case "yesterday":
 		return now.Add(-24 * time.Hour).Format(time.RFC3339)
 	}
-	if strings.HasSuffix(s, ".ago") {
-		core := strings.TrimSuffix(s, ".ago")
+	if core, found := strings.CutSuffix(s, ".ago"); found {
 		core = strings.TrimSuffix(core, ".") // tolerate trailing dot
-		parts := strings.Split(core, ".")
-		if len(parts) == 2 {
-			nStr := strings.TrimSpace(parts[0])
-			unit := strings.TrimSpace(parts[1])
+		nStr, unit, found := strings.Cut(core, ".")
+		if found {
+			nStr = strings.TrimSpace(nStr)
+			unit = strings.TrimSpace(unit)
 			if n, err := strconv.Atoi(nStr); err == nil && n > 0 {
 				switch unit {
 				case "s", "sec", "secs", "second", "seconds":
@@ -84,20 +82,19 @@ func ParseTimeShorthandToISO(expr string) string {
 // If no time selector is present, this defers to go-git's ResolveRevision.
 func ResolveRevisionEnhanced(repo *git.Repository, ref string) (*plumbing.Hash, error) {
 	r := strings.TrimSpace(ref)
-	i := strings.Index(r, "@{")
-	if i < 0 {
+	before, after, found := strings.Cut(r, "@{")
+	if !found {
 		rn := NormalizeGitRefForGoGit(r)
 		return repo.ResolveRevision(plumbing.Revision(rn))
 	}
 
-	jrel := strings.Index(r[i+2:], "}")
-	if jrel < 0 {
+	inner, _, found := strings.Cut(after, "}")
+	if !found {
 		rn := NormalizeGitRefForGoGit(r)
 		return repo.ResolveRevision(plumbing.Revision(rn))
 	}
-	j := i + 2 + jrel
-	base := strings.TrimSpace(r[:i])
-	inner := strings.TrimSpace(r[i+2 : j])
+	base := strings.TrimSpace(before)
+	inner = strings.TrimSpace(inner)
 
 	// Parse timestamp
 	var ts time.Time

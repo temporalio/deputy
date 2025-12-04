@@ -54,6 +54,8 @@ func celHover(exprLine string) string {
 	return ""
 }
 
+// firstToken extracts the first identifier token from a string.
+// It handles leading punctuation like '(!' and trailing punctuation.
 func firstToken(s string) string {
 	fields := strings.Fields(s)
 	if len(fields) == 0 {

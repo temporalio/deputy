@@ -224,6 +224,8 @@ PIPELINE INTEGRATION:
 	root.AddCommand(cmd)
 }
 
+// runSBOMPolicies evaluates policies against the generated SBOM result.
+// It checks both the overall report and individual components.
 func runSBOMPolicies(ctx context.Context, policyPaths []string, result sbomx.Result, errW io.Writer) error {
 	if len(policyPaths) == 0 {
 		return nil
@@ -253,6 +255,7 @@ func runSBOMPolicies(ctx context.Context, policyPaths []string, result sbomx.Res
 	return nil
 }
 
+// emitSBOMContext prints context information (repo, ref, commit) to the provided writer.
 func emitSBOMContext(w io.Writer, result sbomx.Result) {
 	if w == nil {
 		return

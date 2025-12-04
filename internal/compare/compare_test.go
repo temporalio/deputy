@@ -15,13 +15,13 @@ import (
 
 func TestGetModuleRoot(t *testing.T) {
 	cases := []struct{ in, want string }{
-		{"github.com/user/repo/sub/pkg", "github.com/user/repo"},
-		{"github.com/user/repo", "github.com/user/repo"},
-		{"github.com/user/repo/", "github.com/user/repo"}, // trailing slash handled by split/join logic implicitly
-		{"example.com/mod/sub", "example.com/mod"},
-		{"example.com/mod", "example.com/mod"},
-		{"single", "single"},
-		{"", ""},
+		{in: "github.com/user/repo/sub/pkg", want: "github.com/user/repo"},
+		{in: "github.com/user/repo", want: "github.com/user/repo"},
+		{in: "github.com/user/repo/", want: "github.com/user/repo"}, // trailing slash handled by split/join logic implicitly
+		{in: "example.com/mod/sub", want: "example.com/mod"},
+		{in: "example.com/mod", want: "example.com/mod"},
+		{in: "single", want: "single"},
+		{in: "", want: ""},
 	}
 	for _, c := range cases {
 		if got := GetModuleRoot(c.in); got != c.want {
@@ -32,10 +32,10 @@ func TestGetModuleRoot(t *testing.T) {
 
 func Test_normalizeGoVersion(t *testing.T) {
 	cases := []struct{ in, want string }{
-		{"", ""},
-		{"v1.2.3", "v1.2.3"},
-		{"1.2.3", "v1.2.3"},
-		{"v0.0.0", "v0.0.0"},
+		{in: "", want: ""},
+		{in: "v1.2.3", want: "v1.2.3"},
+		{in: "1.2.3", want: "v1.2.3"},
+		{in: "v0.0.0", want: "v0.0.0"},
 	}
 	for _, c := range cases {
 		if got := normalizeGoVersion(c.in); got != c.want {
@@ -49,11 +49,11 @@ func Test_allDigits(t *testing.T) {
 		in   string
 		want bool
 	}{
-		{"", true}, // empty treated as true by current implementation
-		{"0", true},
-		{"12345", true},
-		{"12a45", false},
-		{"abc", false},
+		{in: "", want: true}, // empty treated as true by current implementation
+		{in: "0", want: true},
+		{in: "12345", want: true},
+		{in: "12a45", want: false},
+		{in: "abc", want: false},
 	}
 	for _, c := range cases {
 		if got := allDigits(c.in); got != c.want {
@@ -262,12 +262,12 @@ func TestSelectChangeType_SemverEcosystems(t *testing.T) {
 		target     string
 		wantChange ChangeType
 	}{
-		{"npm upgrade", "npm", "1.0.0", "1.1.0", Upgraded},
-		{"npm downgrade", "npm", "2.0.0", "1.5.0", Downgraded},
-		{"composer upgrade", "composer", "1.2.3", "1.2.4", Upgraded},
-		{"pypi upgrade", "pypi", "1.0.0", "1.0.1", Upgraded},
-		{"pypi downgrade", "pypi", "2.0.0", "1.9.0", Downgraded},
-		{"unknown ecosystem", "custom", "1.0.0", "2.0.0", Updated},
+		{name: "npm upgrade", ecosystem: "npm", base: "1.0.0", target: "1.1.0", wantChange: Upgraded},
+		{name: "npm downgrade", ecosystem: "npm", base: "2.0.0", target: "1.5.0", wantChange: Downgraded},
+		{name: "composer upgrade", ecosystem: "composer", base: "1.2.3", target: "1.2.4", wantChange: Upgraded},
+		{name: "pypi upgrade", ecosystem: "pypi", base: "1.0.0", target: "1.0.1", wantChange: Upgraded},
+		{name: "pypi downgrade", ecosystem: "pypi", base: "2.0.0", target: "1.9.0", wantChange: Downgraded},
+		{name: "unknown ecosystem", ecosystem: "custom", base: "1.0.0", target: "2.0.0", wantChange: Updated},
 	}
 	for _, tc := range cases {
 		tc := tc

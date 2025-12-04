@@ -1,12 +1,13 @@
 package inventory
 
 import (
+	"path/filepath"
+	"testing"
+
 	git "github.com/go-git/go-git/v5"
 	"github.com/go-git/go-git/v5/plumbing"
 	"github.com/google/osv-scalibr/extractor"
 	cmp "github.com/picatz/deputy/internal/compare"
-	"path/filepath"
-	"testing"
 )
 
 func Test_Integration_CompareTags(t *testing.T) {
@@ -23,26 +24,66 @@ func Test_Integration_CompareTags(t *testing.T) {
 		expectedChanges int
 		skipReason      string
 	}{
-		{"hashicorp/go-getter v1.6.0 to v1.7.0", "https://github.com/hashicorp/go-getter", "v1.6.0", "v1.7.0", true, 38, "go-getter should have Go modules"},
-		{"gin-gonic/gin v1.8.0 to v1.9.0", "https://github.com/gin-gonic/gin", "v1.8.0", "v1.9.0", true, 20, "gin should have Go modules"},
-		{"spf13/cobra v1.6.0 to v1.7.0", "https://github.com/spf13/cobra", "v1.6.0", "v1.7.0", true, 1, "cobra should have Go modules"},
-		{"same version comparison", "https://github.com/hashicorp/go-getter", "v1.7.0", "v1.7.0", true, 0, "go-getter should have Go modules"},
-		{"kubernetes/client-go major version jump", "https://github.com/kubernetes/client-go", "v0.26.0", "v0.28.0", true, 27, "kubernetes client-go should have many dependencies"},
+		{
+			name:            "hashicorp/go-getter v1.6.0 to v1.7.0",
+			repoURL:         "https://github.com/hashicorp/go-getter",
+			baseTag:         "v1.6.0",
+			targetTag:       "v1.7.0",
+			expectPackages:  true,
+			expectedChanges: 38,
+			skipReason:      "go-getter should have Go modules",
+		},
+		{
+			name:            "gin-gonic/gin v1.8.0 to v1.9.0",
+			repoURL:         "https://github.com/gin-gonic/gin",
+			baseTag:         "v1.8.0",
+			targetTag:       "v1.9.0",
+			expectPackages:  true,
+			expectedChanges: 20,
+			skipReason:      "gin should have Go modules",
+		},
+		{
+			name:            "spf13/cobra v1.6.0 to v1.7.0",
+			repoURL:         "https://github.com/spf13/cobra",
+			baseTag:         "v1.6.0",
+			targetTag:       "v1.7.0",
+			expectPackages:  true,
+			expectedChanges: 1,
+			skipReason:      "cobra should have Go modules",
+		},
+		{
+			name:            "same version comparison",
+			repoURL:         "https://github.com/hashicorp/go-getter",
+			baseTag:         "v1.7.0",
+			targetTag:       "v1.7.0",
+			expectPackages:  true,
+			expectedChanges: 0,
+			skipReason:      "go-getter should have Go modules",
+		},
+		{
+			name:            "kubernetes/client-go major version jump",
+			repoURL:         "https://github.com/kubernetes/client-go",
+			baseTag:         "v0.26.0",
+			targetTag:       "v0.28.0",
+			expectPackages:  true,
+			expectedChanges: 27,
+			skipReason:      "kubernetes client-go should have many dependencies",
+		},
 	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
 			ctx := t.Context()
 			tmp := t.TempDir()
 			repoDir := filepath.Join(tmp, "repo")
-			repo, err := git.PlainClone(repoDir, false, &git.CloneOptions{URL: tt.repoURL, Tags: git.AllTags, Depth: 0})
+			repo, err := git.PlainClone(repoDir, false, &git.CloneOptions{URL: test.repoURL, Tags: git.AllTags, Depth: 0})
 			if err != nil {
 				t.Fatalf("clone: %v", err)
 			}
-			baseRev, err := repo.ResolveRevision(plumbing.Revision(tt.baseTag))
+			baseRev, err := repo.ResolveRevision(plumbing.Revision(test.baseTag))
 			if err != nil {
 				t.Fatalf("resolve base: %v", err)
 			}
-			targetRev, err := repo.ResolveRevision(plumbing.Revision(tt.targetTag))
+			targetRev, err := repo.ResolveRevision(plumbing.Revision(test.targetTag))
 			if err != nil {
 				t.Fatalf("resolve target: %v", err)
 			}
@@ -59,20 +100,20 @@ func Test_Integration_CompareTags(t *testing.T) {
 				if changes != nil {
 					t.Fatalf("changes should be nil for empty inputs")
 				}
-				if tt.expectPackages {
-					t.Fatalf("Expected packages: %s", tt.skipReason)
+				if test.expectPackages {
+					t.Fatalf("Expected packages: %s", test.skipReason)
 				}
-				t.Skipf("No packages found: %s", tt.skipReason)
+				t.Skipf("No packages found: %s", test.skipReason)
 				return
 			}
-			if tt.baseTag == tt.targetTag && len(changes) == 0 {
+			if test.baseTag == test.targetTag && len(changes) == 0 {
 				return
 			}
 			if changes == nil {
 				t.Fatalf("nil changes slice with non-empty inputs")
 			}
-			if tt.expectedChanges >= 0 && len(changes) != tt.expectedChanges {
-				t.Errorf("expected %d changes, got %d", tt.expectedChanges, len(changes))
+			if test.expectedChanges >= 0 && len(changes) != test.expectedChanges {
+				t.Errorf("expected %d changes, got %d", test.expectedChanges, len(changes))
 			}
 			// sanity check package objects
 			check := func(ps []*extractor.Package) {

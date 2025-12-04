@@ -7,6 +7,8 @@ import (
 	"github.com/spf13/cobra"
 )
 
+// AddProxyCommand adds the "proxy" command and its subcommands to the root command.
+// The proxy command allows running Deputy as an artifact proxy server.
 func AddProxyCommand(root *cobra.Command) {
 	var cfgPath string
 	var extraPolicies []string
@@ -14,6 +16,40 @@ func AddProxyCommand(root *cobra.Command) {
 	proxyCmd := &cobra.Command{
 		Use:   "proxy",
 		Short: "Run Deputy's artifact proxy",
+		Long: `Run a policy-enforcing artifact proxy for various package managers.
+
+The proxy intercepts requests to upstream registries (like proxy.golang.org, npmjs.org, PyPI, RubyGems)
+and evaluates CEL policies against the requested packages. If a policy denies a package (e.g., due to
+vulnerabilities, license issues, or naming conventions), the proxy blocks the download.
+
+MODES:
+• exec: Run a single command wrapped with proxy configuration (e.g., 'deputy proxy go -- go get ...')
+• serve: Run a standalone proxy server (requires configuration file)
+
+SUPPORTED ECOSYSTEMS:
+• Go (proxy.golang.org protocol)
+• npm (npm registry protocol)
+• PyPI (Simple API)
+• RubyGems (Gem server API)
+
+This tool is essential for "secure-by-default" development environments where you want to prevent
+risky dependencies from ever entering your codebase.`,
+		Example: `EXECUTION WRAPPERS:
+  # Run go get with policy enforcement
+  deputy proxy go -- go get github.com/example/pkg@latest
+
+  # Run npm install with policy enforcement
+  deputy proxy npm -- npm install
+
+  # Run pip install with policy enforcement
+  deputy proxy pypi -- pip install requests
+
+STANDALONE SERVER:
+  # Generate a starter configuration
+  deputy proxy template > proxy.yaml
+
+  # Run the proxy server
+  deputy proxy serve --config proxy.yaml`,
 	}
 
 	serveCmd := &cobra.Command{

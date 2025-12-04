@@ -24,6 +24,8 @@ require (
 	github.com/picatz/openai v0.0.0-20251023035433-af6462b7d534
 	github.com/pjbgf/sha1cd v0.5.0
 	github.com/protobom/protobom v0.5.4
+	github.com/sourcegraph/go-lsp v0.0.0-20240223163137-f80c5dd31dfd
+	github.com/sourcegraph/jsonrpc2 v0.2.1
 	github.com/spdx/tools-golang v0.5.5
 	github.com/spf13/cobra v1.10.1
 	golang.org/x/mod v0.27.0
@@ -150,8 +152,6 @@ require (
 	github.com/shirou/gopsutil v3.21.11+incompatible // indirect
 	github.com/sirupsen/logrus v1.9.3 // indirect
 	github.com/skeema/knownhosts v1.3.1 // indirect
-	github.com/sourcegraph/go-lsp v0.0.0-20240223163137-f80c5dd31dfd // indirect
-	github.com/sourcegraph/jsonrpc2 v0.2.1 // indirect
 	github.com/spdx/gordf v0.0.0-20250128162952-000978ccd6fb // indirect
 	github.com/spf13/pflag v1.0.10 // indirect
 	github.com/stoewer/go-strcase v1.2.0 // indirect

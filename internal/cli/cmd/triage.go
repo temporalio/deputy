@@ -14,26 +14,50 @@ import (
 	"github.com/spf13/cobra"
 )
 
+// AddTriageCommand registers the triage subcommand.
 func AddTriageCommand(root *cobra.Command) {
 	scanner := NewScanner()
 	triageCmd := &cobra.Command{
 		Use:   "triage [repo]",
 		Short: "Summarize vulnerabilities and optionally invoke an AI triage agent",
-		Long: `Analyze vulnerabilities for a repository (or scan report) and produce a prioritized
-summary. Optionally send the summary to an AI agent (e.g., codex) to highlight the
-most actionable issues and propose next steps.`,
-		Example: `BASIC TRIAGE:
+		Long: `Analyze and prioritize vulnerabilities to help you focus on what matters.
+
+TRIAGE PROCESS:
+1. Scan: Detects vulnerabilities (or consumes an existing report).
+2. Filter: Applies filters (e.g., ignore unfixed, date ranges).
+3. Summarize: Groups issues by severity and package.
+4. Analyze: Optionally uses AI to provide context and recommendations.
+
+AI-ASSISTED TRIAGE:
+When using an AI agent (like Codex), Deputy sends the vulnerability summary
+to the model. The agent can:
+• Explain the impact of specific vulnerabilities
+• Suggest mitigation strategies
+• Prioritize issues based on your project's context
+
+HISTORICAL ANALYSIS:
+Use the --as-of flag to see the state of vulnerabilities at a specific point in time.
+This is useful for understanding when a vulnerability was introduced or fixed.`,
+		Example: `BASIC USAGE:
+  # Triage current repository
   deputy triage
 
-TRIAGE A REMOTE REPO:
-  deputy triage github.com/hashicorp/vagrant --ignore-unfixed
+  # Triage a remote repository
+  deputy triage github.com/hashicorp/vagrant
 
-TRIAGE FROM A SAVED REPORT:
-  deputy scan --format json --output scan.json
-  deputy triage --report scan.json
+FILTERING:
+  # Ignore vulnerabilities with no known fix
+  deputy triage --ignore-unfixed
 
-ASK CODEX TO PRIORITIZE:
-  deputy triage --agent codex --agent-model gpt-4.1`,
+  # Only show critical vulnerabilities
+  deputy triage --policy critical-only.yaml
+
+AI ASSISTANCE:
+  # Ask AI to prioritize issues
+  deputy triage --agent codex --agent-model gpt-4
+
+  # Resume a previous triage session
+  deputy triage --agent codex --agent-thread <thread-id>`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runTriage(scanner, cmd, args)
 		},
@@ -57,6 +81,9 @@ ASK CODEX TO PRIORITIZE:
 	root.AddCommand(triageCmd)
 }
 
+// runTriage executes the triage command logic.
+// It reads a report or runs a scan, filters vulnerabilities, and generates a summary.
+// Optionally, it sends the summary to an AI agent.
 func runTriage(scanner *Scanner, cmd *cobra.Command, args []string) error {
 	reportPath, _ := cmd.Flags().GetString("report")
 	ignoreUnfixed, _ := cmd.Flags().GetBool("ignore-unfixed")
@@ -172,6 +199,8 @@ func runTriage(scanner *Scanner, cmd *cobra.Command, args []string) error {
 	return nil
 }
 
+// runTriagePolicies evaluates policies against the triage report.
+// It checks both the overall report and individual top packages.
 func runTriagePolicies(ctx context.Context, policyPaths []string, report triageReport, errW io.Writer) error {
 	if len(policyPaths) == 0 {
 		return nil
@@ -203,6 +232,7 @@ func runTriagePolicies(ctx context.Context, policyPaths []string, report triageR
 	return nil
 }
 
+// printTriageSummary prints a human-readable summary of the triage report to stdout.
 func printTriageSummary(report triageReport) {
 	fmt.Println(ui.StyleHeader.Render("Triage Summary:"))
 	if repo := strings.TrimSpace(report.Target.Repo); repo != "" {
@@ -249,12 +279,14 @@ func printTriageSummary(report triageReport) {
 	}
 }
 
+// outputTriageJSON writes the triage report as JSON to the provided writer.
 func outputTriageJSON(w io.Writer, report triageReport) error {
 	enc := json.NewEncoder(w)
 	enc.SetIndent("", "  ")
 	return enc.Encode(report)
 }
 
+// buildTriageReport constructs a triageReport from the target, stats, and consolidated vulnerabilities.
 func buildTriageReport(target remediationPlanTarget, stats analysis.VulnerabilityStats, cons []analysis.ConsolidatedVulnerability) triageReport {
 	report := triageReport{Target: target, Stats: stats}
 	agg := aggregatePackages(cons)
@@ -265,12 +297,14 @@ func buildTriageReport(target remediationPlanTarget, stats analysis.Vulnerabilit
 	return report
 }
 
+// triageReport represents the summary of a triage analysis.
 type triageReport struct {
 	Target      remediationPlanTarget       `json:"target"`
 	Stats       analysis.VulnerabilityStats `json:"stats"`
 	TopPackages []triagePackageSummary      `json:"topPackages"`
 }
 
+// triagePackageSummary represents a summary of a single package's vulnerabilities.
 type triagePackageSummary struct {
 	Package      string   `json:"package"`
 	Version      string   `json:"version"`
@@ -282,6 +316,7 @@ type triagePackageSummary struct {
 	SampleIDs    []string `json:"sampleIDs,omitempty"`
 }
 
+// aggregatePackages aggregates consolidated vulnerabilities into package summaries.
 func aggregatePackages(cons []analysis.ConsolidatedVulnerability) []triagePackageSummary {
 	type aggInfo struct {
 		pkg       string
@@ -351,6 +386,7 @@ func aggregatePackages(cons []analysis.ConsolidatedVulnerability) []triagePackag
 	return list
 }
 
+// severityRank returns a numeric rank for a severity string.
 func severityRank(sev string) (int, string) {
 	up := strings.ToUpper(strings.TrimSpace(sev))
 	switch up {
@@ -367,6 +403,7 @@ func severityRank(sev string) (int, string) {
 	}
 }
 
+// bestFix returns the best available fix version for a vulnerability.
 func bestFix(v analysis.ConsolidatedVulnerability) string {
 	if len(v.FixedVersions) == 0 {
 		return ""

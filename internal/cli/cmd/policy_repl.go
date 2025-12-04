@@ -12,6 +12,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
+// newPolicyREPLCommand creates the `repl` subcommand for interactive policy evaluation.
 func newPolicyREPLCommand() *cobra.Command {
 	return &cobra.Command{
 		Use:   "repl",
@@ -25,6 +26,7 @@ func newPolicyREPLCommand() *cobra.Command {
 	}
 }
 
+// runPolicyREPL starts the Read-Eval-Print Loop for CEL policies.
 func runPolicyREPL(ctx context.Context, in io.Reader, out io.Writer) error {
 	fmt.Fprintln(out, "CEL Policy Expression REPL")
 	fmt.Fprintln(out, "Type :help for commands or enter CEL expressions to evaluate against the 'request' map.")
@@ -72,6 +74,7 @@ func runPolicyREPL(ctx context.Context, in io.Reader, out io.Writer) error {
 
 var errReplExit = errors.New("repl exit")
 
+// handleREPLCommand processes REPL meta-commands (starting with :).
 func handleREPLCommand(line string, request map[string]string, out io.Writer) error {
 	parts := strings.Fields(line)
 	if len(parts) == 0 {

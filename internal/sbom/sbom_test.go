@@ -120,10 +120,10 @@ func Test_NormalizeGolangPURLString(t *testing.T) {
 		t.Fatalf("write go.mod: %v", err)
 	}
 	cases := []struct{ in, want string }{
-		{"", ""},
-		{"pkg:golang/github.com/foo/bar@v1.0.0", "pkg:golang/github.com/foo/bar@v1.0.0"},
-		{"pkg:golang/.@v1.2.3", "pkg:golang/github.com/example/project@v1.2.3"},
-		{"pkg:golang/./sub@v0.0.1", "pkg:golang/github.com/example/project/sub@v0.0.1"},
+		{in: "", want: ""},
+		{in: "pkg:golang/github.com/foo/bar@v1.0.0", want: "pkg:golang/github.com/foo/bar@v1.0.0"},
+		{in: "pkg:golang/.@v1.2.3", want: "pkg:golang/github.com/example/project@v1.2.3"},
+		{in: "pkg:golang/./sub@v0.0.1", want: "pkg:golang/github.com/example/project/sub@v0.0.1"},
 	}
 	ws, err := workspace.NewDir(dir)
 	if err != nil {
@@ -157,8 +157,8 @@ func Test_ReadModulePath(t *testing.T) {
 
 func Test_DeriveDisplayName(t *testing.T) {
 	cases := []struct{ name, purl, want string }{
-		{"plain", "", "plain"},
-		{"ignored", "pkg:golang/github.com/foo/bar@v1.0.0", "bar"},
+		{name: "plain", purl: "", want: "plain"},
+		{name: "ignored", purl: "pkg:golang/github.com/foo/bar@v1.0.0", want: "bar"},
 	}
 	for _, c := range cases {
 		if got := deriveDisplayName(c.name, c.purl); got != c.want {
@@ -169,8 +169,8 @@ func Test_DeriveDisplayName(t *testing.T) {
 
 func Test_SPDXSafeIDFromPURL_and_Sanitize(t *testing.T) {
 	cases := []struct{ in string }{
-		{"pkg:golang/github.com/foo/bar@v1.0.0"},
-		{"pkg:golang/github.com/foo/bar%2Bplus@v1.0.0"},
+		{in: "pkg:golang/github.com/foo/bar@v1.0.0"},
+		{in: "pkg:golang/github.com/foo/bar%2Bplus@v1.0.0"},
 	}
 	for _, c := range cases {
 		id := spdxSafeIDFromPURL(c.in)
@@ -190,7 +190,7 @@ func Test_ResolveReferenceName_Variants(t *testing.T) {
 	ctx := t.Context()
 	remote := "https://github.com/example/nonexistent-one-two-three.git"
 	cases := []struct{ in string }{
-		{"HEAD"}, {""}, {"main"}, {"master"}, {"v1.2.3"}, {"refs/heads/feature"}, {"refs/tags/v0.1.0"},
+		{in: "HEAD"}, {in: ""}, {in: "main"}, {in: "master"}, {in: "v1.2.3"}, {in: "refs/heads/feature"}, {in: "refs/tags/v0.1.0"},
 	}
 	for _, c := range cases {
 		ref, _ := ResolveReferenceName(ctx, remote, nil, c.in)

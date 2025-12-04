@@ -9,6 +9,7 @@ import (
 	ui "github.com/picatz/deputy/internal/ui"
 )
 
+// agentInvocationOptions holds configuration for running an AI agent.
 type agentInvocationOptions struct {
 	Model            string
 	Sandbox          string
@@ -18,6 +19,7 @@ type agentInvocationOptions struct {
 	SkipGitRepoCheck bool
 }
 
+// runAgent dispatches the remediation task to the specified AI agent.
 func runAgent(ctx context.Context, name string, prompt string, repoPath string, opts agentInvocationOptions, out, errW io.Writer) error {
 	trimmed := strings.ToLower(strings.TrimSpace(name))
 	if trimmed == "" || trimmed == "none" {

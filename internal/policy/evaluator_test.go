@@ -74,3 +74,57 @@ func TestCelExtensions(t *testing.T) {
 		}
 	})
 }
+
+func TestEvaluatePkgHelper(t *testing.T) {
+	ctx := context.Background()
+
+	tests := []struct {
+		name     string
+		input    map[string]any
+		expected string // expected pkg.name
+	}{
+		{
+			name: "component package name",
+			input: map[string]any{
+				"component": map[string]any{"package": "comp-pkg"},
+				"request":   map[string]any{"package": "req-pkg"},
+			},
+			expected: "comp-pkg",
+		},
+		{
+			name: "request package name fallback",
+			input: map[string]any{
+				"request": map[string]any{"package": "req-pkg"},
+			},
+			expected: "req-pkg",
+		},
+		{
+			name: "module name fallback",
+			input: map[string]any{
+				"component": map[string]any{"module": "mod-name"},
+			},
+			expected: "mod-name",
+		},
+		{
+			name: "generic name fallback",
+			input: map[string]any{
+				"component": map[string]any{"name": "gen-name"},
+			},
+			expected: "gen-name",
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			// We evaluate a simple expression that returns pkg.name
+			src := `pkg.name`
+			val, err := Evaluate(ctx, src, test.input)
+			if err != nil {
+				t.Fatalf("Evaluate() error = %v", err)
+			}
+			if s, ok := val.(string); !ok || s != test.expected {
+				t.Errorf("expected pkg.name = %q, got %v", test.expected, val)
+			}
+		})
+	}
+}

@@ -1,7 +1,9 @@
 package proxy
 
 import (
+	"cmp"
 	"context"
+	"maps"
 	"net/http"
 	"strings"
 
@@ -38,9 +40,7 @@ func (e *policyEngine) Evaluate(ctx context.Context, entrypoint string, payload 
 		"entrypoint": entrypoint,
 	}
 	if existing, ok := payload["env"].(map[string]any); ok {
-		for k, v := range existing {
-			env[k] = v
-		}
+		maps.Copy(env, existing)
 	}
 	payload["env"] = env
 	return e.engine.EvaluateAll(ctx, payload, "proxy", entrypoint)
@@ -55,7 +55,7 @@ func summarizeActions(actions []policy.Action) (deny *policy.Action, warnings []
 				deny = &policy.Action{
 					Source:      act.Source,
 					Type:        act.Type,
-					Reason:      firstNonEmpty(act.Reason, act.Message, "request denied by policy"),
+					Reason:      cmp.Or(strings.TrimSpace(act.Reason), strings.TrimSpace(act.Message), "request denied by policy"),
 					Remediation: act.Remediation,
 					Status:      act.Status,
 				}
@@ -68,21 +68,10 @@ func summarizeActions(actions []policy.Action) (deny *policy.Action, warnings []
 			continue
 		}
 		if len(act.Headers) > 0 {
-			for k, v := range act.Headers {
-				headers[k] = v
-			}
+			maps.Copy(headers, act.Headers)
 		}
 	}
 	return deny, warnings, headers
-}
-
-func firstNonEmpty(values ...string) string {
-	for _, v := range values {
-		if s := strings.TrimSpace(v); s != "" {
-			return s
-		}
-	}
-	return ""
 }
 
 func statusFromAction(act *policy.Action, fallback int) int {
@@ -108,7 +97,7 @@ func applyPolicyHeaders(w http.ResponseWriter, act *policy.Action, meta blockMet
 		return
 	}
 	if hdr := w.Header().Get("X-Deputy-Policy"); strings.TrimSpace(hdr) == "" {
-		w.Header().Set("X-Deputy-Policy", firstNonEmpty(act.Source, "policy"))
+		w.Header().Set("X-Deputy-Policy", cmp.Or(strings.TrimSpace(act.Source), "policy"))
 	}
 	if meta.Ecosystem != "" {
 		w.Header().Set("X-Deputy-Ecosystem", meta.Ecosystem)

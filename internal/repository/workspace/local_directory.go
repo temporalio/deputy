@@ -77,6 +77,7 @@ func NewTempDir(prefix string) (*LocalDirectory, error) {
 	return ws, nil
 }
 
+// ReadFile reads the named file from the workspace.
 func (w *LocalDirectory) ReadFile(name string) ([]byte, error) {
 	if err := w.ensureOpen(); err != nil {
 		return nil, err
@@ -91,6 +92,7 @@ func (w *LocalDirectory) ReadFile(name string) ([]byte, error) {
 	return fs.ReadFile(w.fs, rel)
 }
 
+// Open opens the named file for reading.
 func (w *LocalDirectory) Open(name string) (fs.File, error) {
 	if err := w.ensureOpen(); err != nil {
 		return nil, err
@@ -102,6 +104,7 @@ func (w *LocalDirectory) Open(name string) (fs.File, error) {
 	return w.fs.Open(rel)
 }
 
+// ReadDir reads the directory named by name and returns a list of directory entries.
 func (w *LocalDirectory) ReadDir(name string) ([]fs.DirEntry, error) {
 	if err := w.ensureOpen(); err != nil {
 		return nil, err
@@ -116,6 +119,7 @@ func (w *LocalDirectory) ReadDir(name string) ([]fs.DirEntry, error) {
 	return w.fs.ReadDir(rel)
 }
 
+// Stat returns a FileInfo describing the named file.
 func (w *LocalDirectory) Stat(name string) (fs.FileInfo, error) {
 	if err := w.ensureOpen(); err != nil {
 		return nil, err
@@ -130,6 +134,7 @@ func (w *LocalDirectory) Stat(name string) (fs.FileInfo, error) {
 	return w.fs.Stat(rel)
 }
 
+// WriteFile writes data to the named file, creating it if necessary.
 func (w *LocalDirectory) WriteFile(name string, data []byte, perm fs.FileMode) error {
 	if err := w.ensureOpen(); err != nil {
 		return err
@@ -147,6 +152,7 @@ func (w *LocalDirectory) WriteFile(name string, data []byte, perm fs.FileMode) e
 	return err
 }
 
+// MkdirAll creates a directory named path, along with any necessary parents.
 func (w *LocalDirectory) MkdirAll(path string, perm fs.FileMode) error {
 	if err := w.ensureOpen(); err != nil {
 		return err
@@ -161,6 +167,7 @@ func (w *LocalDirectory) MkdirAll(path string, perm fs.FileMode) error {
 	return w.root.MkdirAll(rel, perm)
 }
 
+// Remove removes the named file or (empty) directory.
 func (w *LocalDirectory) Remove(path string) error {
 	if err := w.ensureOpen(); err != nil {
 		return err
@@ -175,6 +182,7 @@ func (w *LocalDirectory) Remove(path string) error {
 	return w.root.Remove(rel)
 }
 
+// RemoveAll removes path and any children it contains.
 func (w *LocalDirectory) RemoveAll(path string) error {
 	if err := w.ensureOpen(); err != nil {
 		return err
@@ -189,10 +197,12 @@ func (w *LocalDirectory) RemoveAll(path string) error {
 	return w.root.RemoveAll(rel)
 }
 
+// Close closes the workspace and releases any resources.
 func (w *LocalDirectory) Close() error {
 	err := w.baseWorkspace.Close()
 	w.root = nil
 	return err
 }
 
+// IsVirtual returns false for LocalDirectory.
 func (w *LocalDirectory) IsVirtual() bool { return false }

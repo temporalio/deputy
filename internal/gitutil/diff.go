@@ -40,18 +40,15 @@ func CheckFilesChanged(repoPath string, baseRef string, prRef string) ([]string,
 		return nil, fmt.Errorf("error getting patch: %w", err)
 	}
 
-	fileNames := make([]string, 0)
-	for _, change := range changes.FilePatches() {
+	patches := changes.FilePatches()
+	fileNames := make([]string, 0, len(patches))
+	for _, change := range patches {
 		from, to := change.Files()
-		var fileName string
 		if from != nil {
-			fileName = from.Path()
+			fileNames = append(fileNames, from.Path())
 		} else if to != nil {
-			fileName = to.Path()
-		} else {
-			continue
+			fileNames = append(fileNames, to.Path())
 		}
-		fileNames = append(fileNames, fileName)
 	}
 
 	return fileNames, nil

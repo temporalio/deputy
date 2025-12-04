@@ -69,7 +69,7 @@ func Run(ctx context.Context, opts Options) error {
 	}{Reader: os.Stdin, Writer: os.Stdout, Closer: io.NopCloser(nil)})
 }
 
-// handler implements jsonrpc2.Handler.
+// handler implements jsonrpc2.Handler to process LSP requests.
 type handler struct {
 	conn *jsonrpc2.Conn
 	log  *slog.Logger
@@ -77,6 +77,7 @@ type handler struct {
 	diag *diagnosticEngine
 }
 
+// newHandler creates a new LSP request handler.
 func newHandler(log *slog.Logger) *handler {
 	return &handler{
 		log:  log,
@@ -85,8 +86,10 @@ func newHandler(log *slog.Logger) *handler {
 	}
 }
 
+// setConn sets the JSON-RPC connection for the handler.
 func (h *handler) setConn(c *jsonrpc2.Conn) { h.conn = c }
 
+// Handle processes incoming JSON-RPC requests and notifications.
 func (h *handler) Handle(ctx context.Context, conn *jsonrpc2.Conn, req *jsonrpc2.Request) {
 	switch req.Method {
 	case "initialize":
@@ -175,6 +178,7 @@ func (h *handler) Handle(ctx context.Context, conn *jsonrpc2.Conn, req *jsonrpc2
 	}
 }
 
+// runDiagnostics analyzes the document and publishes diagnostics to the client.
 func (h *handler) runDiagnostics(ctx context.Context, uri protocol.DocumentURI, text string) {
 	diag, err := h.diag.analyze(uri, text)
 	if err != nil {
@@ -190,6 +194,7 @@ func (h *handler) runDiagnostics(ctx context.Context, uri protocol.DocumentURI, 
 	}
 }
 
+// handleCompletion provides completion items for the current cursor position.
 func (h *handler) handleCompletion(params protocol.CompletionParams) []protocol.CompletionItem {
 	doc, ok := h.docs.get(params.TextDocument.URI)
 	if !ok {
@@ -204,6 +209,7 @@ func (h *handler) handleCompletion(params protocol.CompletionParams) []protocol.
 	return completionItems(line, int(params.Position.Character))
 }
 
+// handleHover provides hover information for the symbol at the current cursor position.
 func (h *handler) handleHover(params protocol.TextDocumentPositionParams) *protocol.Hover {
 	doc, ok := h.docs.get(params.TextDocument.URI)
 	if !ok {
@@ -224,6 +230,7 @@ func (h *handler) handleHover(params protocol.TextDocumentPositionParams) *proto
 	}
 }
 
+// handleDocumentSymbols returns the symbol information for the document.
 func (h *handler) handleDocumentSymbols(params protocol.DocumentSymbolParams) []protocol.SymbolInformation {
 	doc, ok := h.docs.get(params.TextDocument.URI)
 	if !ok {

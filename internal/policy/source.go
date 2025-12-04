@@ -14,22 +14,22 @@ const bundleSchemaVersion = "policy.deputy.sh/v1alpha1"
 
 // Source represents an individual CEL policy ready for evaluation.
 type Source struct {
-	Name string
-	Body string
+	Name string // Name is the identifier for the policy source.
+	Body string // Body is the CEL source code.
 }
 
 // Bundle is the on-disk representation produced by `deputy policy bundle`.
 type Bundle struct {
-	SchemaVersion string         `json:"schemaVersion"`
-	Generated     string         `json:"generated"`
-	Policies      []BundlePolicy `json:"policies"`
-	Metadata      map[string]any `json:"metadata,omitempty"`
+	SchemaVersion string         `json:"schemaVersion"`      // SchemaVersion is the bundle format version.
+	Generated     string         `json:"generated"`          // Generated is the timestamp when the bundle was built.
+	Policies      []BundlePolicy `json:"policies"`           // Policies is the list of compiled policies.
+	Metadata      map[string]any `json:"metadata,omitempty"` // Metadata contains arbitrary bundle metadata.
 }
 
 // BundlePolicy contains the CEL program for a single entry in a bundle.
 type BundlePolicy struct {
-	Name   string `json:"name"`
-	Source string `json:"source"`
+	Name   string `json:"name"`   // Name is the policy name.
+	Source string `json:"source"` // Source is the compiled CEL source code.
 }
 
 // LoadSources reads a list of file paths (either raw CEL files or bundle JSON)

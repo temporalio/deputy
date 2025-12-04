@@ -12,6 +12,12 @@ import (
 	"osv.dev/bindings/go/osvdev"
 )
 
+// fakeOSVClient mocks the OSV client for testing purposes.
+// It returns a fixed set of vulnerabilities regardless of the input query.
+// fakeOSVClient mocks the OSV client for testing purposes.
+// It returns a fixed set of vulnerabilities regardless of the input query.
+// fakeOSVClient mocks the OSV client for testing purposes.
+// It returns a fixed set of vulnerabilities regardless of the input query.
 type fakeOSVClient struct{}
 
 func (f *fakeOSVClient) QueryBatch(ctx context.Context, queries []*osvdev.Query) (*osvdev.BatchedResponse, error) {

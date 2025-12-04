@@ -2,6 +2,9 @@ package lsp
 
 import "testing"
 
+// diagCase represents a test case for diagnostic formatting.
+// It defines the input code, the expected error message, and the expected
+// caret position for the error.
 type diagCase struct {
 	name      string
 	line      int

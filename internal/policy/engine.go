@@ -12,15 +12,18 @@ import (
 
 // Engine holds compiled CEL programs and evaluates them without per-request recompilation.
 type Engine struct {
-	compiled []compiledPolicy
+	compiled []compiledPolicy // compiled is the list of pre-compiled policies ready for execution.
 }
 
+// compiledPolicy represents a single policy source that has been parsed and
+// compiled into an executable CEL program. It includes metadata for filtering
+// execution based on entrypoints and commands.
 type compiledPolicy struct {
-	source      Source
-	program     celProgram
-	entrypoints map[string]struct{}
-	commands    map[string]struct{}
-	mode        string
+	source      Source              // source is the original policy source.
+	program     celProgram          // program is the compiled CEL executable.
+	entrypoints map[string]struct{} // entrypoints is the set of entrypoints this policy applies to.
+	commands    map[string]struct{} // commands is the set of commands this policy applies to.
+	mode        string              // mode defines the execution mode (e.g., "enforce", "audit").
 }
 
 // celProgram is the minimal interface we need from cel.Program for testing/abstraction.
@@ -125,6 +128,9 @@ func toSet(items []string) map[string]struct{} {
 	return out
 }
 
+// shouldSkip determines if a policy should be ignored based on the requested
+// command or entrypoint. If the policy defines specific entrypoints or commands,
+// it will only run if the request matches one of them.
 func shouldSkip(pol compiledPolicy, command, entrypoint string) bool {
 	if entrypoint != "" && len(pol.entrypoints) > 0 {
 		if _, ok := pol.entrypoints[entrypoint]; !ok {
@@ -139,7 +145,9 @@ func shouldSkip(pol compiledPolicy, command, entrypoint string) bool {
 	return false
 }
 
-// seedDefaultVariables mirrors Evaluate's behavior to keep semantics stable for compiled engine.
+// seedDefaultVariables ensures that standard variables expected by policies
+// are present in the input map. It populates missing variables with nil or
+// default values to prevent runtime errors during CEL evaluation.
 func seedDefaultVariables(input map[string]any) {
 	if input == nil {
 		return
@@ -156,6 +164,9 @@ func seedDefaultVariables(input map[string]any) {
 	}
 }
 
+// downgradeAdvisory converts "deny" actions to "warn" actions for policies
+// running in advisory mode. This allows policies to report violations without
+// blocking execution.
 func downgradeAdvisory(actions []Action) []Action {
 	if len(actions) == 0 {
 		return actions
@@ -174,6 +185,9 @@ func downgradeAdvisory(actions []Action) []Action {
 	return out
 }
 
+// compileSource compiles a raw policy source into a CEL program. It handles
+// dynamic environment generation by detecting undeclared variables and
+// recompiling with the necessary context.
 func compileSource(src Source) (celProgram, error) {
 	env, err := envWithNames(nil)
 	if err != nil {
@@ -203,6 +217,9 @@ func compileSource(src Source) (celProgram, error) {
 
 var undeclaredRe = regexp.MustCompile(`undeclared reference to '([^']+)'`)
 
+// parseUndeclared extracts variable names from CEL compilation errors related
+// to undeclared references. This allows the engine to dynamically register
+// these variables in the environment.
 func parseUndeclared(msg string) []string {
 	matches := undeclaredRe.FindAllStringSubmatch(msg, -1)
 	var out []string

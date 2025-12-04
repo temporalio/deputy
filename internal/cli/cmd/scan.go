@@ -78,6 +78,8 @@ type Scanner struct {
 	osvClient            analysis.OSVClient
 }
 
+// scanExecution holds the state and results of a single scan operation,
+// including the target path, resolved references, inventory, and findings.
 type scanExecution struct {
 	displayPath     string
 	localRepoPath   string
@@ -92,6 +94,8 @@ type scanExecution struct {
 	cleanup         func()
 }
 
+// Close cleans up any resources associated with the scan execution,
+// such as temporary directories created during cloning.
 func (se *scanExecution) Close() {
 	if se != nil && se.cleanup != nil {
 		se.cleanup()
@@ -108,6 +112,7 @@ func NewScanner() *Scanner {
 	}
 }
 
+// queryOSV executes the vulnerability query using the configured client and query function.
 func (s *Scanner) queryOSV(ctx context.Context, inputs []analysis.PkgInput) ([]analysis.Vulnerability, error) {
 	query := s.queryVulnerabilities
 	if query == nil {
@@ -120,6 +125,8 @@ func (s *Scanner) queryOSV(ctx context.Context, inputs []analysis.PkgInput) ([]a
 	return query(ctx, client, inputs)
 }
 
+// executeScan performs the core scanning logic: resolving the target, collecting inventory,
+// and querying for vulnerabilities. It returns a scanExecution object containing the results.
 func (s *Scanner) executeScan(ctx context.Context, repoArg, ref string, refProvided bool, scanOpts inv.ScanOptions, beforeT, afterT time.Time, errW io.Writer) (*scanExecution, error) {
 	targetInput := strings.TrimSpace(repoArg)
 	if targetInput == "" {
@@ -218,7 +225,8 @@ func (s *Scanner) executeScan(ctx context.Context, repoArg, ref string, refProvi
 	}, nil
 }
 
-// AddScanCommand registers the scan subcommand
+// AddScanCommand registers the scan subcommand with the root command.
+// It configures the command flags and usage examples.
 func AddScanCommand(root *cobra.Command) {
 	scanner := NewScanner()
 
@@ -465,6 +473,8 @@ WORKFLOW EXAMPLES:
 	root.AddCommand(scanCmd)
 }
 
+// runScan executes the scan command logic, handling argument parsing,
+// scan execution, policy evaluation, and output formatting.
 func (s *Scanner) runScan(cmd *cobra.Command, args []string) error {
 	ctx := cmd.Context()
 
@@ -504,8 +514,6 @@ func (s *Scanner) runScan(cmd *cobra.Command, args []string) error {
 	}
 	policyFindings := actionsToPolicyFindings(policyActions)
 	report.PolicyFindings = policyFindings
-	report.PolicyFindings = policyFindings
-	report.PolicyFindings = policyFindings
 
 	var w io.Writer = os.Stdout
 	if outPath != "" && outPath != "-" {
@@ -527,6 +535,7 @@ func (s *Scanner) runScan(cmd *cobra.Command, args []string) error {
 	}
 }
 
+// runScanDir executes the directory scan command logic.
 func (s *Scanner) runScanDir(cmd *cobra.Command, args []string) error {
 	if len(args) != 1 {
 		return fmt.Errorf("expected 1 argument: <path>")
@@ -612,6 +621,7 @@ func (s *Scanner) runScanDir(cmd *cobra.Command, args []string) error {
 	}
 }
 
+// runScanSBOM executes the SBOM scan command logic.
 func (s *Scanner) runScanSBOM(cmd *cobra.Command, args []string) error {
 	if len(args) != 1 {
 		return fmt.Errorf("expected 1 argument: <path|->")
@@ -722,6 +732,8 @@ func (s *Scanner) runScanSBOM(cmd *cobra.Command, args []string) error {
 
 // Helper functions
 
+// collectInventory determines whether to scan the working directory or a specific commit
+// based on the provided git reference, and delegates to the appropriate scanning function.
 func collectInventory(ctx context.Context, repoPath, gitRef string, opts inv.ScanOptions) ([]*extractor.Package, error) {
 	ref := refOrHEAD(gitRef)
 	if strings.EqualFold(ref, "HEAD") {
@@ -743,6 +755,8 @@ func collectInventory(ctx context.Context, repoPath, gitRef string, opts inv.Sca
 
 	return scanPackagesAtCommit(ctx, repoPath, *h, opts)
 }
+
+// scanPackagesWorkingAtPath scans the filesystem at the given path for packages.
 func scanPackagesWorkingAtPath(ctx context.Context, path string, opts inv.ScanOptions) ([]*extractor.Package, error) {
 	ws, err := workspace.NewDir(path)
 	if err != nil {
@@ -752,6 +766,7 @@ func scanPackagesWorkingAtPath(ctx context.Context, path string, opts inv.ScanOp
 	return inv.ScanPackagesWorking(ctx, ws, opts)
 }
 
+// scanPackagesAtCommit scans the repository at the given commit hash for packages.
 func scanPackagesAtCommit(ctx context.Context, path string, hash plumbing.Hash, opts inv.ScanOptions) ([]*extractor.Package, error) {
 	repo, err := git.PlainOpen(path)
 	if err != nil {
@@ -760,6 +775,7 @@ func scanPackagesAtCommit(ctx context.Context, path string, hash plumbing.Hash, 
 	return inv.ScanPackagesAtCommitSnapshot(ctx, repo, hash, opts)
 }
 
+// refOrHEAD returns "HEAD" if the input reference is empty, otherwise returns the input.
 func refOrHEAD(r string) string {
 	if strings.TrimSpace(r) == "" {
 		return "HEAD"
@@ -767,6 +783,7 @@ func refOrHEAD(r string) string {
 	return r
 }
 
+// parsePublishedFilters parses the date filter flags and returns the before and after times.
 func parsePublishedFilters(errW io.Writer, asOfStr, beforeStr, afterStr string) (time.Time, time.Time) {
 	var beforeT, afterT time.Time
 	if asOfStr != "" {
@@ -793,6 +810,7 @@ func parsePublishedFilters(errW io.Writer, asOfStr, beforeStr, afterStr string) 
 	return beforeT, afterT
 }
 
+// filterUnfixed returns a slice of vulnerabilities that have at least one fixed version.
 func filterUnfixed(vs []analysis.Vulnerability) []analysis.Vulnerability {
 	if len(vs) == 0 {
 		return vs
@@ -809,6 +827,7 @@ func filterUnfixed(vs []analysis.Vulnerability) []analysis.Vulnerability {
 	return out
 }
 
+// getRepoMetadata attempts to resolve the commit hash and origin URL for the given repository path and reference.
 func getRepoMetadata(localRepoPath, ref string) (string, string) {
 	commitHash := ""
 	originURL := ""
@@ -854,6 +873,7 @@ func getRepoMetadata(localRepoPath, ref string) (string, string) {
 	return commitHash, originURL
 }
 
+// outputText writes the scan results in a human-readable text format to the provided writer.
 func (s *Scanner) outputText(w io.Writer, errW io.Writer, repoPath, ref, commitHash, originURL string, pkgs []*extractor.Package, goDirect map[string]bool, vulns []analysis.Vulnerability, ignoreUnfixed bool, policyFindings []PolicyFinding) error {
 	shortRef := shortGitRef(refOrHEAD(ref))
 	shortHash := commitHash
@@ -899,6 +919,7 @@ func (s *Scanner) outputText(w io.Writer, errW io.Writer, repoPath, ref, commitH
 	return nil
 }
 
+// outputTextDir writes the directory scan results in a human-readable text format.
 func (s *Scanner) outputTextDir(w io.Writer, errW io.Writer, path string, vulns []analysis.Vulnerability, ignoreUnfixed bool, policyFindings []PolicyFinding) error {
 	fmt.Fprintf(w, "\nScanned %s\n", path)
 
@@ -913,6 +934,7 @@ func (s *Scanner) outputTextDir(w io.Writer, errW io.Writer, path string, vulns 
 	return nil
 }
 
+// outputJSON writes the scan results in JSON format to the provided writer.
 func (s *Scanner) outputJSON(w io.Writer, repo, ref, commit string, vulns []analysis.Vulnerability, pkgCount int, ignoreUnfixed bool, policyFindings []PolicyFinding) error {
 	vulnsEff := vulns
 	if ignoreUnfixed {
@@ -997,6 +1019,8 @@ func parseSBOMPackages(data []byte, inFmt string) ([]*extractor.Package, error) 
 	return nil, fmt.Errorf("unsupported or empty SBOM input; specify --input-format (protobom-json|cyclonedx-json|spdx-json)")
 }
 
+// detectSBOMFormat attempts to identify the SBOM format from the input data.
+// It checks for known fields and schemas for CycloneDX, SPDX, and Protobom.
 func detectSBOMFormat(data []byte) string {
 	var probe map[string]any
 	if err := json.Unmarshal(data, &probe); err != nil {
@@ -1017,6 +1041,7 @@ func detectSBOMFormat(data []byte) string {
 	return ""
 }
 
+// parseProtobomPackages parses a Protobom JSON document and extracts package information.
 func parseProtobomPackages(data []byte) ([]*extractor.Package, error) {
 	var doc sbom.Document
 	if err := protojson.Unmarshal(data, &doc); err != nil {
@@ -1052,6 +1077,7 @@ func parseProtobomPackages(data []byte) ([]*extractor.Package, error) {
 	return pkgs, nil
 }
 
+// parseCycloneDXPackages parses a CycloneDX JSON document and extracts package information.
 func parseCycloneDXPackages(data []byte) ([]*extractor.Package, error) {
 	var bom cdx.BOM
 	if err := cdx.NewBOMDecoder(bytes.NewReader(data), cdx.BOMFileFormatJSON).Decode(&bom); err != nil {
@@ -1081,6 +1107,7 @@ func parseCycloneDXPackages(data []byte) ([]*extractor.Package, error) {
 	return pkgs, nil
 }
 
+// parseSPDXPackages parses an SPDX JSON document and extracts package information.
 func parseSPDXPackages(data []byte) ([]*extractor.Package, error) {
 	doc, err := spdxjson.Read(bytes.NewReader(data))
 	if err != nil {
@@ -1113,6 +1140,7 @@ func parseSPDXPackages(data []byte) ([]*extractor.Package, error) {
 	return pkgs, nil
 }
 
+// extractSPDXPackagePURL attempts to find a Package URL (PURL) in the external references of an SPDX package.
 func extractSPDXPackagePURL(pkg *spdxdoc.Package) string {
 	for _, ref := range pkg.PackageExternalReferences {
 		if ref == nil {
@@ -1132,6 +1160,7 @@ func extractSPDXPackagePURL(pkg *spdxdoc.Package) string {
 	return ""
 }
 
+// buildScanReport constructs a ScanResult from the scan metadata and findings.
 func buildScanReport(repo, ref, commit string, vulns []analysis.Vulnerability, pkgCount int) ScanResult {
 	stats := analysis.CategorizeVulnerabilities(vulns)
 	return ScanResult{
@@ -1145,6 +1174,7 @@ func buildScanReport(repo, ref, commit string, vulns []analysis.Vulnerability, p
 	}
 }
 
+// runScanPolicies evaluates the provided policies against the scan report and individual vulnerabilities.
 func runScanPolicies(ctx context.Context, policyPaths []string, report ScanResult, errW io.Writer) ([]policy.Action, error) {
 	if len(policyPaths) == 0 {
 		return nil, nil
@@ -1179,6 +1209,7 @@ func runScanPolicies(ctx context.Context, policyPaths []string, report ScanResul
 	return out, nil
 }
 
+// actionsToPolicyFindings converts policy actions into findings suitable for the scan report.
 func actionsToPolicyFindings(actions []policy.Action) []PolicyFinding {
 	if len(actions) == 0 {
 		return nil
@@ -1207,6 +1238,8 @@ var knownDeprecations = []ModuleDeprecation{
 	{Module: "github.com/aws/aws-sdk-go", Suggest: "github.com/aws/aws-sdk-go-v2", URL: "https://github.com/aws/aws-sdk-go-v2"},
 }
 
+// detectModuleDeprecations checks for usage of known deprecated modules in the scanned packages.
+// It only reports deprecations for direct dependencies.
 func detectModuleDeprecations(pkgs []*extractor.Package, direct map[string]bool) []ModuleDeprecation {
 	if len(pkgs) == 0 {
 		return nil
@@ -1260,6 +1293,7 @@ func detectModuleDeprecations(pkgs []*extractor.Package, direct map[string]bool)
 	return out
 }
 
+// moduleIsDirect checks if a module is a direct dependency.
 func moduleIsDirect(module string, direct map[string]bool) bool {
 	if len(direct) == 0 {
 		return false
@@ -1278,6 +1312,7 @@ func moduleIsDirect(module string, direct map[string]bool) bool {
 	return false
 }
 
+// shortGitRef returns a shortened version of a git reference, removing common prefixes.
 func shortGitRef(ref string) string {
 	r := strings.TrimSpace(ref)
 	if r == "" {

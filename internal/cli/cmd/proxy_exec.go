@@ -22,6 +22,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
+// registerProxyExecCommands registers the proxy execution commands for supported ecosystems.
 func registerProxyExecCommands(proxyCmd *cobra.Command) {
 	specs := []proxyExecSpec{
 		{
@@ -59,6 +60,7 @@ func registerProxyExecCommands(proxyCmd *cobra.Command) {
 	}
 }
 
+// proxyExecSpec defines the configuration for a proxy execution command.
 type proxyExecSpec struct {
 	name            string
 	defaultUpstream string
@@ -67,8 +69,11 @@ type proxyExecSpec struct {
 	envPrep         envPreparer
 }
 
+// envPreparer is a function that prepares the environment variables for the proxied command.
+// It returns the environment variables, a cleanup function, and an error if any.
 type envPreparer func(proxyURL string) ([]string, func(), error)
 
+// proxyExecConfig holds the runtime configuration for a proxy execution.
 type proxyExecConfig struct {
 	ecosystem   string
 	upstream    string
@@ -77,6 +82,7 @@ type proxyExecConfig struct {
 	requested   string
 }
 
+// newProxyExecCommand creates a new cobra.Command for a specific proxy execution specification.
 func newProxyExecCommand(spec proxyExecSpec) *cobra.Command {
 	var upstream string
 	var policies []string
@@ -111,6 +117,8 @@ func newProxyExecCommand(spec proxyExecSpec) *cobra.Command {
 var startProxyForEcosystem = startEcosystemProxy
 var execProxyCommand = runExternalCommand
 
+// runProxyExec executes the proxy command.
+// It starts the proxy server, prepares the environment, runs the command, and handles events.
 func runProxyExec(ctx context.Context, cfg proxyExecConfig, command []string) error {
 	if len(command) == 0 {
 		return fmt.Errorf("no command specified")
@@ -164,12 +172,14 @@ type eventHistory struct {
 	events []proxyEvent
 }
 
+// Add appends an event to the history.
 func (h *eventHistory) Add(evt proxyEvent) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	h.events = append(h.events, evt)
 }
 
+// All returns a copy of all collected events.
 func (h *eventHistory) All() []proxyEvent {
 	h.mu.Lock()
 	defer h.mu.Unlock()
@@ -180,13 +190,13 @@ func (h *eventHistory) All() []proxyEvent {
 }
 
 // proxyInstance tracks the ephemeral proxy server for a single `deputy proxy` execution.
-// proxyInstance tracks the ephemeral proxy server for a single `deputy proxy` execution.
 type proxyInstance struct {
 	url    string
 	stop   func(context.Context) error
 	events <-chan proxyEvent
 }
 
+// startEcosystemProxy starts a proxy server for the specified ecosystem.
 func startEcosystemProxy(ctx context.Context, ecosystem, upstream string, policies []string) (*proxyInstance, error) {
 	var evaluator proxy.PolicyEvaluator
 	var err error
@@ -209,6 +219,7 @@ func startEcosystemProxy(ctx context.Context, ecosystem, upstream string, polici
 	return inst, nil
 }
 
+// handlerForEcosystem returns the appropriate HTTP handler for the given ecosystem.
 func handlerForEcosystem(ecosystem, upstream string, evaluator proxy.PolicyEvaluator) (http.Handler, error) {
 	switch ecosystem {
 	case "go":
@@ -224,6 +235,7 @@ func handlerForEcosystem(ecosystem, upstream string, evaluator proxy.PolicyEvalu
 	}
 }
 
+// startProxyInstance starts the HTTP server for the proxy handler.
 func startProxyInstance(ctx context.Context, handler http.Handler) (*proxyInstance, error) {
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
@@ -305,12 +317,14 @@ func instrumentProxyHandler(handler http.Handler) (http.Handler, <-chan proxyEve
 	return wrapped, events
 }
 
+// proxyResponseWriter is a wrapper around http.ResponseWriter that captures the status code and a preview of the body.
 type proxyResponseWriter struct {
 	http.ResponseWriter
 	status int
 	buf    *limitedBuffer
 }
 
+// newProxyResponseWriter creates a new proxyResponseWriter.
 func newProxyResponseWriter(w http.ResponseWriter) *proxyResponseWriter {
 	return &proxyResponseWriter{
 		ResponseWriter: w,
@@ -318,13 +332,16 @@ func newProxyResponseWriter(w http.ResponseWriter) *proxyResponseWriter {
 	}
 }
 
+// Header returns the header map that will be sent by WriteHeader.
 func (w *proxyResponseWriter) Header() http.Header { return w.ResponseWriter.Header() }
 
+// WriteHeader sends an HTTP response header with the provided status code.
 func (w *proxyResponseWriter) WriteHeader(status int) {
 	w.status = status
 	w.ResponseWriter.WriteHeader(status)
 }
 
+// Write writes the data to the connection as part of an HTTP reply.
 func (w *proxyResponseWriter) Write(p []byte) (int, error) {
 	if w.status == 0 {
 		w.status = http.StatusOK
@@ -333,6 +350,7 @@ func (w *proxyResponseWriter) Write(p []byte) (int, error) {
 	return w.ResponseWriter.Write(p)
 }
 
+// Status returns the HTTP status code of the response.
 func (w *proxyResponseWriter) Status() int {
 	if w.status == 0 {
 		return http.StatusOK
@@ -340,19 +358,23 @@ func (w *proxyResponseWriter) Status() int {
 	return w.status
 }
 
+// BodyPreview returns the captured body preview.
 func (w *proxyResponseWriter) BodyPreview() string { return w.buf.String() }
 
+// Flush flushes the response writer if it implements http.Flusher.
 func (w *proxyResponseWriter) Flush() {
 	if f, ok := w.ResponseWriter.(http.Flusher); ok {
 		f.Flush()
 	}
 }
 
+// limitedBuffer is a buffer that limits the amount of data written to it.
 type limitedBuffer struct {
 	limit int
 	b     strings.Builder
 }
 
+// Write writes p to the buffer, truncating if the limit is reached.
 func (b *limitedBuffer) Write(p []byte) {
 	if b.limit <= 0 {
 		return
@@ -367,10 +389,12 @@ func (b *limitedBuffer) Write(p []byte) {
 	_, _ = b.b.Write(p)
 }
 
+// String returns the contents of the buffer as a string.
 func (b *limitedBuffer) String() string {
 	return b.b.String()
 }
 
+// runExternalCommand executes the given command with the provided environment variables.
 func runExternalCommand(ctx context.Context, command []string, extraEnv []string) error {
 	cmd := exec.CommandContext(ctx, command[0], command[1:]...)
 	cmd.Stdout = os.Stdout
@@ -600,10 +624,12 @@ func deriveRequestedSpec(ecosystem string, command []string) string {
 	return fallback
 }
 
+// prepareGoEnv prepares the environment for Go commands.
 func prepareGoEnv(proxyURL string) ([]string, func(), error) {
 	return []string{"GOPROXY=" + proxyURL + ",direct"}, nil, nil
 }
 
+// prepareNPMEnv prepares the environment for NPM commands.
 func prepareNPMEnv(proxyURL string) ([]string, func(), error) {
 	env := []string{
 		"NPM_CONFIG_REGISTRY=" + proxyURL,
@@ -613,6 +639,7 @@ func prepareNPMEnv(proxyURL string) ([]string, func(), error) {
 	return env, nil, nil
 }
 
+// preparePyPIEnv prepares the environment for PyPI commands.
 func preparePyPIEnv(proxyURL string) ([]string, func(), error) {
 	parsed, err := url.Parse(proxyURL)
 	if err != nil {
@@ -630,6 +657,7 @@ func preparePyPIEnv(proxyURL string) ([]string, func(), error) {
 	return env, nil, nil
 }
 
+// prepareRubyGemsEnv prepares the environment for RubyGems commands.
 func prepareRubyGemsEnv(proxyURL string) ([]string, func(), error) {
 	dir, err := os.MkdirTemp("", "deputy-gemrc-")
 	if err != nil {

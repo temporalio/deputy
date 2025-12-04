@@ -13,13 +13,13 @@ func TestCleanPath(t *testing.T) {
 		want string
 		err  error
 	}{
-		{"", ".", nil},
-		{".", ".", nil},
-		{"./go.mod", "go.mod", nil},
-		{"sub/dir/file", "sub/dir/file", nil},
-		{"sub/../file", "file", nil},
-		{"../escape", "", ErrOutsideWorkspace},
-		{"/abs", "", ErrOutsideWorkspace},
+		{in: "", want: ".", err: nil},
+		{in: ".", want: ".", err: nil},
+		{in: "./go.mod", want: "go.mod", err: nil},
+		{in: "sub/dir/file", want: "sub/dir/file", err: nil},
+		{in: "sub/../file", want: "file", err: nil},
+		{in: "../escape", want: "", err: ErrOutsideWorkspace},
+		{in: "/abs", want: "", err: ErrOutsideWorkspace},
 	}
 	for _, tc := range cases {
 		got, err := cleanPath(tc.in)

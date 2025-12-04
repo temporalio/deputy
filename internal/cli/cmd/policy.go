@@ -23,7 +23,34 @@ func AddPolicyCommand(root *cobra.Command) {
 	cmd := &cobra.Command{
 		Use:   "policy",
 		Short: "Work with Deputy CEL policies",
-		Long:  "Evaluate and validate Deputy CEL policies against JSON inputs.",
+		Long: `Develop, test, and manage Deputy security policies.
+
+Deputy uses the Common Expression Language (CEL) to define security policies for:
+• Vulnerability management (e.g., "block critical severity")
+• License compliance (e.g., "deny AGPL-3.0")
+• Dependency constraints (e.g., "only allow approved scopes")
+
+SUBCOMMANDS:
+• eval:    Evaluate a policy against a JSON input
+• lint:    Check policy syntax and types
+• test:    Run unit tests for policies
+• bundle:  Package multiple policies into a single file
+• repl:    Interactive policy development shell
+• lsp:     Language Server Protocol support for editors
+
+These tools help you write robust policies before deploying them to the proxy or CI/CD.`,
+		Example: `DEVELOPMENT WORKFLOW:
+  # 1. Write a policy
+  echo 'vulnerabilities.exists(v, v.Severity == "CRITICAL")' > policy.yaml
+
+  # 2. Lint it
+  deputy policy lint policy.yaml
+
+  # 3. Test it interactively
+  deputy policy repl
+
+  # 4. Evaluate against real data
+  deputy policy eval --policy policy.yaml --input context.json`,
 	}
 	cmd.AddCommand(newPolicyEvalCommand())
 	cmd.AddCommand(newPolicyLintCommand())
@@ -36,6 +63,7 @@ func AddPolicyCommand(root *cobra.Command) {
 	root.AddCommand(cmd)
 }
 
+// newPolicyEvalCommand creates the `eval` subcommand for evaluating policies.
 func newPolicyEvalCommand() *cobra.Command {
 	var policyPath string
 	var inputPath string
@@ -75,6 +103,7 @@ func newPolicyEvalCommand() *cobra.Command {
 	return cmd
 }
 
+// newPolicyLintCommand creates the `lint` subcommand for validating policies.
 func newPolicyLintCommand() *cobra.Command {
 	var extraVars []string
 	cmd := &cobra.Command{
@@ -150,6 +179,7 @@ func lintStructuredBundle(path string, extraVars []string, out io.Writer) (ok bo
 	return true, nil
 }
 
+// readPathOrStdin reads data from the given path or stdin if path is "-".
 func readPathOrStdin(stdin io.Reader, path string) ([]byte, error) {
 	if path == "-" {
 		return io.ReadAll(stdin)
@@ -157,6 +187,7 @@ func readPathOrStdin(stdin io.Reader, path string) ([]byte, error) {
 	return os.ReadFile(path)
 }
 
+// readPathOrStdinOnce reads data from the given path or stdin, ensuring stdin is only read once.
 func readPathOrStdinOnce(stdin io.Reader, path string, used *bool) ([]byte, error) {
 	if path != "-" {
 		return os.ReadFile(path)
@@ -170,6 +201,7 @@ func readPathOrStdinOnce(stdin io.Reader, path string, used *bool) ([]byte, erro
 	return io.ReadAll(stdin)
 }
 
+// writePolicyEvalOutput writes the evaluation result to the writer in the specified format.
 func writePolicyEvalOutput(w io.Writer, value any, format string) error {
 	switch strings.ToLower(strings.TrimSpace(format)) {
 	case "", "json":
@@ -187,6 +219,7 @@ func writePolicyEvalOutput(w io.Writer, value any, format string) error {
 	}
 }
 
+// labelPath returns a display label for the given path, using "stdin" for "-".
 func labelPath(path string) string {
 	if path == "-" {
 		return "stdin"
@@ -234,6 +267,7 @@ func formatCelCompileError(err error, src string, known []string) string {
 	return fmt.Sprintf("CEL: %s\n%s\n%s", detail, line, caret)
 }
 
+// toInt converts a string to an integer, returning 0 on error.
 func toInt(s string) int {
 	n, _ := strconv.Atoi(s)
 	return n
@@ -257,6 +291,7 @@ func celDetail(s string) string {
 	return s
 }
 
+// extractUndeclaredName extracts the name of the undeclared variable from a CEL error message.
 func extractUndeclaredName(msg string) string {
 	m := undeclaredNameRe.FindStringSubmatch(msg)
 	if len(m) == 2 {
@@ -265,6 +300,7 @@ func extractUndeclaredName(msg string) string {
 	return ""
 }
 
+// suggestName finds the closest matching name from the known list using Levenshtein distance.
 func suggestName(name string, known []string) (string, bool) {
 	best := ""
 	bestDist := 3
@@ -281,7 +317,7 @@ func suggestName(name string, known []string) (string, bool) {
 	return best, true
 }
 
-// small Levenshtein for short identifiers.
+// levenshteinDistance calculates the Levenshtein distance between two strings.
 func levenshteinDistance(a, b string) int {
 	la, lb := len(a), len(b)
 	if la == 0 {
@@ -316,6 +352,7 @@ func levenshteinDistance(a, b string) int {
 	return prev[la]
 }
 
+// minInt returns the minimum value from a list of integers.
 func minInt(vals ...int) int {
 	if len(vals) == 0 {
 		return 0
@@ -329,6 +366,7 @@ func minInt(vals ...int) int {
 	return m
 }
 
+// newPolicyTestCommand creates the `test` subcommand for running policy tests.
 func newPolicyTestCommand() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "test <case.policytest.json|dir> [more...]",
@@ -355,6 +393,7 @@ func newPolicyTestCommand() *cobra.Command {
 	return cmd
 }
 
+// newPolicyBundleCommand creates the `bundle` subcommand for compiling policies into a bundle.
 func newPolicyBundleCommand() *cobra.Command {
 	var outPath string
 	cmd := &cobra.Command{
@@ -386,6 +425,7 @@ func newPolicyBundleCommand() *cobra.Command {
 	return cmd
 }
 
+// newPolicyInspectCommand creates the `inspect` subcommand for inspecting policies or bundles.
 func newPolicyInspectCommand() *cobra.Command {
 	return &cobra.Command{
 		Use:   "inspect <policy-or-bundle> [more...]",
@@ -402,6 +442,7 @@ func newPolicyInspectCommand() *cobra.Command {
 	}
 }
 
+// newPolicySimulateCommand creates the `simulate` subcommand for running policies against inputs.
 func newPolicySimulateCommand() *cobra.Command {
 	var policies []string
 	var inputs []string
@@ -445,6 +486,7 @@ func newPolicySimulateCommand() *cobra.Command {
 	return cmd
 }
 
+// policyTestCase represents a single test case for policy validation.
 type policyTestCase struct {
 	Name      string           `json:"name"`
 	Policy    string           `json:"policy,omitempty"`
@@ -455,6 +497,7 @@ type policyTestCase struct {
 	Metadata  map[string]any   `json:"metadata,omitempty"`
 }
 
+// collectPolicyTestFiles gathers all policy test files from the provided paths.
 func collectPolicyTestFiles(paths []string) ([]string, error) {
 	var files []string
 	for _, p := range paths {
@@ -489,6 +532,7 @@ func collectPolicyTestFiles(paths []string) ([]string, error) {
 	return files, nil
 }
 
+// runPolicyTestFile executes all test cases defined in a single file.
 func runPolicyTestFile(ctx context.Context, path string, cmd *cobra.Command) (int, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -516,6 +560,7 @@ func runPolicyTestFile(ctx context.Context, path string, cmd *cobra.Command) (in
 	return len(cases), nil
 }
 
+// executePolicyTestCase runs a single policy test case and compares the result with the expected output.
 func executePolicyTestCase(ctx context.Context, baseDir, file string, tc *policyTestCase, cmd *cobra.Command) error {
 	name := tc.Name
 	if name == "" {
@@ -567,6 +612,7 @@ func executePolicyTestCase(ctx context.Context, baseDir, file string, tc *policy
 	return nil
 }
 
+// actionsToComparable converts a list of policy actions into a comparable map format.
 func actionsToComparable(actions []policy.Action) []map[string]any {
 	out := make([]map[string]any, 0, len(actions))
 	for _, act := range actions {
@@ -603,6 +649,7 @@ func actionsToComparable(actions []policy.Action) []map[string]any {
 	return out
 }
 
+// inspectPolicyPath inspects a policy file or bundle and prints its metadata.
 func inspectPolicyPath(w io.Writer, path string) error {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -623,6 +670,7 @@ func inspectPolicyPath(w io.Writer, path string) error {
 	return fmt.Errorf("%s is not a policy bundle", path)
 }
 
+// loadSimulationInputs reads simulation inputs from the provided paths.
 func loadSimulationInputs(stdin io.Reader, paths []string) ([]map[string]any, error) {
 	var payloads []map[string]any
 	stdinUsed := false
@@ -640,6 +688,7 @@ func loadSimulationInputs(stdin io.Reader, paths []string) ([]map[string]any, er
 	return payloads, nil
 }
 
+// parseSimulationPayloads parses JSON data into a list of payloads.
 func parseSimulationPayloads(data []byte) ([]map[string]any, error) {
 	trim := strings.TrimSpace(string(data))
 	if trim == "" {
@@ -662,6 +711,7 @@ func parseSimulationPayloads(data []byte) ([]map[string]any, error) {
 	return nil, fmt.Errorf("input must be JSON object or array")
 }
 
+// writeSimulationResult writes the simulation result to the writer in the specified format.
 func writeSimulationResult(w io.Writer, format string, index int, payload map[string]any, actions []policy.Action) error {
 	switch strings.ToLower(strings.TrimSpace(format)) {
 	case "", "text":

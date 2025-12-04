@@ -18,16 +18,20 @@ import (
 // analysis.PkgInput records suitable for OSV queries. It normalizes package
 // names, deduplicates modules, and annotates whether each dependency is direct
 // according to the provided dependency map.
+// manifestResolver abstracts file reading for manifest parsing.
 type manifestResolver interface {
 	ReadFile(path string) ([]byte, error)
 }
 
+// manifestResolverFunc adapts a function to the manifestResolver interface.
 type manifestResolverFunc func(string) ([]byte, error)
 
+// ReadFile calls the underlying function.
 func (f manifestResolverFunc) ReadFile(path string) ([]byte, error) {
 	return f(path)
 }
 
+// packageInputOptions configures how packages are converted to inputs.
 type packageInputOptions struct {
 	GoDirect map[string]bool
 	Resolver manifestResolver
@@ -45,6 +49,7 @@ type packageJSONData struct {
 	PeerDependencies     map[string]string `json:"peerDependencies"`
 }
 
+// packageJSONCache caches parsed package.json files.
 type packageJSONCache struct {
 	resolver manifestResolver
 	entries  map[string]*packageJSONData
@@ -307,6 +312,7 @@ func (c *cargoManifestCache) get(path string) (*cargoManifestData, error) {
 	return data, nil
 }
 
+// cargoManifest represents the structure of a Cargo.toml file.
 type cargoManifest struct {
 	Dependencies      map[string]any         `toml:"dependencies"`
 	DevDependencies   map[string]any         `toml:"dev-dependencies"`
@@ -477,6 +483,7 @@ func packagesToInputs(pkgs []*extractor.Package, opts packageInputOptions) []ana
 	return inputs
 }
 
+// detectManager identifies the package manager and manifest path for a given location.
 func detectManager(location, purlType string) (string, string, bool) {
 	loc := filepath.ToSlash(location)
 	base := path.Base(loc)
@@ -518,6 +525,7 @@ func detectManager(location, purlType string) (string, string, bool) {
 	return "", "", false
 }
 
+// appendUnique adds strings to a slice if they are not already present.
 func appendUnique(dst []string, src ...string) []string {
 	seen := map[string]struct{}{}
 	for _, existing := range dst {
@@ -537,6 +545,7 @@ func appendUnique(dst []string, src ...string) []string {
 	return dst
 }
 
+// mergeManifestReference adds a manifest reference to the list, merging groups if it already exists.
 func mergeManifestReference(existing []analysis.ManifestReference, ref analysis.ManifestReference) []analysis.ManifestReference {
 	if ref.Path == "" || ref.Manager == "" {
 		return existing
@@ -552,6 +561,7 @@ func mergeManifestReference(existing []analysis.ManifestReference, ref analysis.
 	return append(existing, ref)
 }
 
+// mergeGroups combines two lists of groups, removing duplicates.
 func mergeGroups(base []string, extra []string) []string {
 	set := map[string]struct{}{}
 	for _, g := range base {
@@ -571,6 +581,7 @@ func mergeGroups(base []string, extra []string) []string {
 	return base
 }
 
+// sortedUnique returns a sorted list of unique strings.
 func sortedUnique(values []string) []string {
 	if len(values) == 0 {
 		return values
@@ -588,6 +599,7 @@ func sortedUnique(values []string) []string {
 	return out
 }
 
+// sortAndUniqueManifestRefs deduplicates and sorts manifest references.
 func sortAndUniqueManifestRefs(refs []analysis.ManifestReference) []analysis.ManifestReference {
 	if len(refs) == 0 {
 		return refs
@@ -616,6 +628,7 @@ func sortAndUniqueManifestRefs(refs []analysis.ManifestReference) []analysis.Man
 	return out
 }
 
+// hasRuntimeDependencyGroup checks if any of the groups indicate a runtime dependency.
 func hasRuntimeDependencyGroup(groups []string) bool {
 	for _, g := range groups {
 		if strings.EqualFold(strings.TrimSpace(g), "dependencies") {
@@ -625,6 +638,7 @@ func hasRuntimeDependencyGroup(groups []string) bool {
 	return false
 }
 
+// marksDirectByDefault returns true if the package manager considers dependencies direct by default.
 func marksDirectByDefault(manager string) bool {
 	switch strings.ToLower(manager) {
 	case "pip", "pipenv", "poetry", "gem":
@@ -646,6 +660,7 @@ func normalizeCrateName(name string) string {
 	return strings.ToLower(strings.TrimSpace(name))
 }
 
+// buildPackageDirectMap creates a map of direct dependencies from the input list.
 func buildPackageDirectMap(inputs []analysis.PkgInput) map[string]bool {
 	if len(inputs) == 0 {
 		return nil
@@ -665,6 +680,7 @@ func buildPackageDirectMap(inputs []analysis.PkgInput) map[string]bool {
 	return direct
 }
 
+// mergeDirectMaps combines multiple direct dependency maps.
 func mergeDirectMaps(maps ...map[string]bool) map[string]bool {
 	result := make(map[string]bool)
 	for _, m := range maps {
@@ -680,6 +696,7 @@ func mergeDirectMaps(maps ...map[string]bool) map[string]bool {
 	return result
 }
 
+// buildPackageSources creates a map of package sources from the input list.
 func buildPackageSources(inputs []analysis.PkgInput) map[string][]string {
 	if len(inputs) == 0 {
 		return nil
@@ -722,6 +739,7 @@ func buildPackageSources(inputs []analysis.PkgInput) map[string][]string {
 	return result
 }
 
+// canonicalPackageKeyFromInput generates a unique key for a package input.
 func canonicalPackageKeyFromInput(in analysis.PkgInput) string {
 	name := strings.TrimSpace(in.Name)
 	if name == "" {

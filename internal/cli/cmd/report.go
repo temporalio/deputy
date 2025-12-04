@@ -14,7 +14,6 @@ import (
 )
 
 // DisplayVulnerabilities renders a styled vulnerability report with the default heading.
-
 func DisplayVulnerabilities(vulns []analysis.Vulnerability) {
 	DisplayVulnerabilitiesWithHeader(vulns, "Vulnerabilities Found:")
 }
@@ -61,6 +60,7 @@ func DisplayVulnerabilitiesWithHeader(vulns []analysis.Vulnerability, heading st
 	RenderVulnerabilitySummaryAndActions(vulns)
 }
 
+// scoreLabel returns a styled string representing the severity score.
 func scoreLabel(score float64) string {
 	switch {
 	case score >= 9.0:
@@ -76,6 +76,8 @@ func scoreLabel(score float64) string {
 	}
 }
 
+// consolidatedSeverityPriority returns a priority tuple (int, float64) for sorting vulnerabilities.
+// Higher values indicate higher priority.
 func consolidatedSeverityPriority(v analysis.ConsolidatedVulnerability) (int, float64) {
 	sev := strings.ToUpper(strings.TrimSpace(v.Severity))
 	if v.SeverityType == "GHSA" {
@@ -94,6 +96,7 @@ func consolidatedSeverityPriority(v analysis.ConsolidatedVulnerability) (int, fl
 	return int(score*10 + 0.5), score
 }
 
+// managerRank returns a ranking integer for package managers to enforce a consistent display order.
 func managerRank(name string) int {
 	switch strings.ToLower(strings.TrimSpace(name)) {
 	case "go":
@@ -125,6 +128,7 @@ func managerRank(name string) int {
 	}
 }
 
+// normalizeGoVersion ensures the Go version string starts with "v".
 func normalizeGoVersion(v string) string {
 	if v == "" {
 		return v
@@ -252,26 +256,31 @@ func RenderVulnerabilityList(vulns []analysis.Vulnerability) {
 	}
 }
 
+// manifestDisplayEntry represents a single manifest file in the display context.
 type manifestDisplayEntry struct {
 	Path   string
 	Groups []string
 }
 
+// manifestDisplayGroup represents a group of manifests managed by a specific package manager.
 type manifestDisplayGroup struct {
 	Manager string
 	Entries []manifestDisplayEntry
 }
 
+// artifactDisplayGroup represents a group of artifacts managed by a specific package manager.
 type artifactDisplayGroup struct {
 	Manager string
 	Entries []string
 }
 
+// manifestDisplayContext holds the organized structure of sources and artifacts for display.
 type manifestDisplayContext struct {
 	Sources   []manifestDisplayGroup
 	Artifacts []artifactDisplayGroup
 }
 
+// buildManifestDisplayContext constructs a manifestDisplayContext from a list of consolidated vulnerabilities.
 func buildManifestDisplayContext(list []analysis.ConsolidatedVulnerability) manifestDisplayContext {
 	ctx := manifestDisplayContext{}
 	if len(list) == 0 {
@@ -414,6 +423,7 @@ func buildManifestDisplayContext(list []analysis.ConsolidatedVulnerability) mani
 	return ctx
 }
 
+// inferArtifactManager attempts to determine the package manager for a given artifact path.
 func inferArtifactManager(path string, manifestManagers map[string]string, dirManagers map[string]string) string {
 	if mgr := manifestManagers[path]; mgr != "" {
 		return mgr
@@ -455,6 +465,7 @@ func inferArtifactManager(path string, manifestManagers map[string]string, dirMa
 	return ""
 }
 
+// renderManifestContext prints the context (sources and artifacts) for a list of vulnerabilities.
 func renderManifestContext(list []analysis.ConsolidatedVulnerability) {
 	ctx := buildManifestDisplayContext(list)
 	if len(ctx.Sources) == 0 && len(ctx.Artifacts) == 0 {
@@ -513,6 +524,7 @@ func renderManifestContext(list []analysis.ConsolidatedVulnerability) {
 	}
 }
 
+// mergeGroupNames merges two lists of group names, ensuring uniqueness and case-insensitivity.
 func mergeGroupNames(base []string, extra []string) []string {
 	set := map[string]struct{}{}
 	for _, g := range base {
@@ -533,6 +545,7 @@ func mergeGroupNames(base []string, extra []string) []string {
 	return base
 }
 
+// uniqueSortedStrings returns a sorted list of unique strings from the input.
 func uniqueSortedStrings(values []string) []string {
 	if len(values) == 0 {
 		return values

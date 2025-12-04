@@ -9,6 +9,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
+// newPolicyLSPCommand creates the `lsp` subcommand for starting the language server.
 func newPolicyLSPCommand() *cobra.Command {
 	var useTCP string
 	var logLevel string

@@ -13,6 +13,9 @@ import (
 	"github.com/picatz/deputy/internal/repository/workspace"
 )
 
+// CollectGoDirectModulesFromWorkspace scans the provided workspace for go.mod files
+// and extracts the set of direct dependencies. It skips vendor directories and
+// the .git folder. The "stdlib" pseudo-dependency is always included.
 func CollectGoDirectModulesFromWorkspace(ws workspace.FS) map[string]bool {
 	deps := map[string]bool{"stdlib": true}
 	if ws == nil {
@@ -45,6 +48,9 @@ func CollectGoDirectModulesFromWorkspace(ws workspace.FS) map[string]bool {
 	return deps
 }
 
+// CollectGoDirectModulesFromCommit extracts direct dependencies from go.mod files
+// present in a specific Git commit. It traverses the file tree of the commit,
+// parsing any go.mod files found.
 func CollectGoDirectModulesFromCommit(repo *git.Repository, hash plumbing.Hash) (map[string]bool, error) {
 	deps := map[string]bool{"stdlib": true}
 	if repo == nil {
@@ -78,6 +84,8 @@ func CollectGoDirectModulesFromCommit(repo *git.Repository, hash plumbing.Hash) 
 	return deps, nil
 }
 
+// CollectGoDirectModulesFromDisk scans a local directory for go.mod files and
+// extracts direct dependencies. It respects standard exclusion rules (vendor, .git).
 func CollectGoDirectModulesFromDisk(root string) map[string]bool {
 	deps := map[string]bool{"stdlib": true}
 	if strings.TrimSpace(root) == "" {
@@ -110,6 +118,7 @@ func CollectGoDirectModulesFromDisk(root string) map[string]bool {
 	return deps
 }
 
+// mergeDirectDependencies adds all direct dependencies from src to dst.
 func mergeDirectDependencies(dst, src map[string]bool) {
 	for mod, direct := range src {
 		if direct {

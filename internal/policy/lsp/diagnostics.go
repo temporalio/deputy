@@ -16,6 +16,7 @@ import (
 // diagnosticEngine produces LSP diagnostics for a document.
 type diagnosticEngine struct{}
 
+// newDiagnosticEngine creates a new instance of the diagnostic engine.
 func newDiagnosticEngine() *diagnosticEngine { return &diagnosticEngine{} }
 
 // analyze runs YAML parsing, structural checks, and CEL compilation.
@@ -132,7 +133,9 @@ func (d *diagnosticEngine) analyze(uri protocol.DocumentURI, text string) ([]pro
 	return diag, nil
 }
 
-func yamlErrorToDiagnostic(uri protocol.DocumentURI, err error) protocol.Diagnostic {
+// yamlErrorToDiagnostic converts a YAML parsing error into an LSP diagnostic.
+// It attempts to parse the line number from the error message.
+func yamlErrorToDiagnostic(_ protocol.DocumentURI, err error) protocol.Diagnostic {
 	msg := err.Error()
 	line, col := 0, 0
 	// gopkg.in/yaml.v3 formats as "line X: ...".
@@ -153,7 +156,9 @@ func yamlErrorToDiagnostic(uri protocol.DocumentURI, err error) protocol.Diagnos
 	}
 }
 
-func makeDiagnostic(uri protocol.DocumentURI, line, col int, msg string, sev protocol.DiagnosticSeverity) protocol.Diagnostic {
+// makeDiagnostic creates a basic LSP diagnostic with the given severity and message.
+// It handles 1-based to 0-based line/column conversion.
+func makeDiagnostic(_ protocol.DocumentURI, line, col int, msg string, sev protocol.DiagnosticSeverity) protocol.Diagnostic {
 	// yaml.Node.Line/Column are 1-based
 	if line < 1 {
 		line = 1
@@ -172,12 +177,16 @@ func makeDiagnostic(uri protocol.DocumentURI, line, col int, msg string, sev pro
 	}
 }
 
+// diagWithCode creates a diagnostic with an associated error code.
+// This code is used by the code action handler to provide quick fixes.
 func diagWithCode(uri protocol.DocumentURI, line, col int, msg string, sev protocol.DiagnosticSeverity, code string) protocol.Diagnostic {
 	d := makeDiagnostic(uri, line, col, msg, sev)
 	d.Code = code
 	return d
 }
 
+// diagWithRangeAndCode creates a diagnostic with a specific length and error code.
+// It is useful for highlighting specific tokens or ranges.
 func diagWithRangeAndCode(uri protocol.DocumentURI, line, col, length int, msg string, sev protocol.DiagnosticSeverity, code string) protocol.Diagnostic {
 	d := makeDiagnostic(uri, line, col, msg, sev)
 	d.Range.End.Character = d.Range.Start.Character + length
@@ -185,6 +194,8 @@ func diagWithRangeAndCode(uri protocol.DocumentURI, line, col, length int, msg s
 	return d
 }
 
+// celErrorDiagnostic converts a CEL compilation error into an LSP diagnostic.
+// It attempts to map the error location to the specific AST node in the YAML.
 func celErrorDiagnostic(uri protocol.DocumentURI, node *yaml.Node, err error, knownNames []string) protocol.Diagnostic {
 	msg := err.Error()
 	lineOffset, colOffset := 0, 0
@@ -306,6 +317,8 @@ func widenWithAST(expr string, yamlCol int, lineOffset, colOffset int) (length i
 	return length, adjustedCol
 }
 
+// offsetFromLineCol calculates the byte offset for a given line and column in the text.
+// It returns -1 if the line offset is out of bounds.
 func offsetFromLineCol(text string, lineOffset, colOffset int) int {
 	lines := strings.Split(text, "\n")
 	if lineOffset < 0 || lineOffset >= len(lines) {
@@ -318,10 +331,13 @@ func offsetFromLineCol(text string, lineOffset, colOffset int) int {
 	return offset + colOffset
 }
 
+// isSpaceOrPunct checks if a rune is a whitespace or punctuation character.
+// This is used to determine token boundaries.
 func isSpaceOrPunct(r rune) bool {
 	return r == ' ' || r == '\t' || r == '\n' || r == '\r' || r == ',' || r == ')' || r == '(' || r == '+' || r == '-' || r == '*' || r == '/' || r == '='
 }
 
+// firstLine returns the first line of a string.
 func firstLine(s string) string {
 	if idx := strings.IndexByte(s, '\n'); idx >= 0 {
 		return s[:idx]
@@ -349,14 +365,14 @@ func celDetail(s string) string {
 }
 
 var celErrPrefixRe = regexp.MustCompile(`(?i)^(cel:\s*)?error:\s*<input>:\d+:\d+:\s*`)
-var undeclaredNameRe = regexp.MustCompile(`undeclared reference to '([^']+)'`)
 
+// snippetInfo holds a code snippet and a caret pointing to the error location.
 type snippetInfo struct {
 	code  string
 	caret string
 }
 
-// formatSnippet returns a one-line excerpt and caret for the CEL expression at the given offset.
+// snippetFromCelError returns a one-line excerpt and caret for the CEL expression at the given offset.
 func snippetFromCelError(expr string, line, col int, hint string) snippetInfo {
 	lines := strings.Split(strings.ReplaceAll(expr, "\r\n", "\n"), "\n")
 	if line < 1 || line > len(lines) {

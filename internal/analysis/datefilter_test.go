@@ -11,11 +11,11 @@ func TestParseFlexibleDate(t *testing.T) {
 		intent string
 		ok     bool
 	}{
-		{"2025", "before", true},
-		{"2025-02", "after", true},
-		{"2025-02-12", "before", true},
-		{"2025-02-12T10:11:12Z", "asof", true},
-		{"bad", "before", false},
+		{in: "2025", intent: "before", ok: true},
+		{in: "2025-02", intent: "after", ok: true},
+		{in: "2025-02-12", intent: "before", ok: true},
+		{in: "2025-02-12T10:11:12Z", intent: "asof", ok: true},
+		{in: "bad", intent: "before", ok: false},
 	}
 	for _, c := range cases {
 		_, err := ParseFlexibleDate(c.in, c.intent)

@@ -13,10 +13,14 @@ import (
 )
 
 var (
+	// ErrOutsideWorkspace indicates that a requested path attempts to escape the workspace root.
 	ErrOutsideWorkspace = errors.New("workspace: path escapes root")
-	ErrInvalidPath      = errors.New("workspace: invalid path")
-	ErrReadOnly         = errors.New("workspace: workspace is read-only")
-	ErrClosed           = errors.New("workspace: closed")
+	// ErrInvalidPath indicates that a path contains invalid characters or formatting.
+	ErrInvalidPath = errors.New("workspace: invalid path")
+	// ErrReadOnly indicates that a write operation was attempted on a read-only workspace.
+	ErrReadOnly = errors.New("workspace: workspace is read-only")
+	// ErrClosed indicates that an operation was attempted on a closed workspace.
+	ErrClosed = errors.New("workspace: closed")
 )
 
 // FileReader captures the minimal contract needed to read files from a workspace.

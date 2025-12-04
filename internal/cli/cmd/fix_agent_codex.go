@@ -12,6 +12,8 @@ import (
 	"github.com/picatz/openai/codex"
 )
 
+// runCodexAgent initializes and runs the Codex agent for remediation.
+// It configures the sandbox mode, sets up the arguments, and streams events to the output.
 func runCodexAgent(ctx context.Context, prompt string, repoPath string, opts agentInvocationOptions, out, errW io.Writer) error {
 	if strings.TrimSpace(repoPath) == "" {
 		return fmt.Errorf("--agent codex requires a local repository path (pass it as an argument or run from the repo root)")
@@ -47,6 +49,7 @@ func runCodexAgent(ctx context.Context, prompt string, repoPath string, opts age
 	return nil
 }
 
+// buildCodexFixPrompt constructs the prompt for the Codex agent based on the remediation plan.
 func buildCodexFixPrompt(plan remediationPlan) (string, error) {
 	data, err := json.MarshalIndent(plan, "", "  ")
 	if err != nil {
@@ -67,6 +70,7 @@ func buildCodexFixPrompt(plan remediationPlan) (string, error) {
 	return sb.String(), nil
 }
 
+// buildCodexTriagePrompt constructs the prompt for the Codex agent based on the triage report.
 func buildCodexTriagePrompt(report triageReport) (string, error) {
 	data, err := json.MarshalIndent(report, "", "  ")
 	if err != nil {
@@ -85,6 +89,7 @@ func buildCodexTriagePrompt(report triageReport) (string, error) {
 	return sb.String(), nil
 }
 
+// parseCodexSandbox converts the sandbox string to a codex.SandboxMode.
 func parseCodexSandbox(value string) (codex.SandboxMode, error) {
 	trimmed := strings.ToLower(strings.TrimSpace(value))
 	switch trimmed {
@@ -99,6 +104,7 @@ func parseCodexSandbox(value string) (codex.SandboxMode, error) {
 	}
 }
 
+// renderCodexEvent formats and prints Codex agent events to the output writer.
 func renderCodexEvent(out io.Writer, event *codex.ThreadEvent) {
 	if event == nil {
 		return

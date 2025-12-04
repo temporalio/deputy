@@ -45,6 +45,8 @@ func parseDocumentSymbols(text string, uri protocol.DocumentURI) ([]protocol.Sym
 	return out, nil
 }
 
+// nodeRange converts a YAML node's line/column information into an LSP Range.
+// It handles nil nodes gracefully by returning a zero range.
 func nodeRange(n *yaml.Node) protocol.Range {
 	if n == nil {
 		return protocol.Range{}

@@ -93,22 +93,19 @@ type GoPackageInfo struct {
 // to the module root github.com/user/repo. For non GitHub style hosts it
 // returns the first two path segments when available.
 func GetModuleRoot(canonicalName string) string {
-	parts := strings.Split(canonicalName, "/")
-	if len(parts) == 0 {
+	host, rest, ok := strings.Cut(canonicalName, "/")
+	if !ok {
 		return canonicalName
 	}
-	if len(parts) == 1 {
-		return parts[0]
+	user, rest2, ok := strings.Cut(rest, "/")
+	if !ok {
+		return canonicalName
 	}
-	// For github.com/user/repo style, return first 3 parts if available
-	if len(parts) >= 3 && parts[0] == "github.com" {
-		return strings.Join(parts[:3], "/")
+	if host == "github.com" {
+		repo, _, _ := strings.Cut(rest2, "/")
+		return host + "/" + user + "/" + repo
 	}
-	// For other cases, return first 2 parts
-	if len(parts) >= 2 {
-		return parts[0] + "/" + parts[1]
-	}
-	return parts[0]
+	return host + "/" + user
 }
 
 // normalizeGoVersion ensures semantic versions are prefixed with a leading 'v'
@@ -135,51 +132,53 @@ func NormalizeGopkgInURL(name string) string {
 	if !strings.HasPrefix(name, "gopkg.in/") {
 		return name
 	}
-	rest := strings.TrimPrefix(name, "gopkg.in/")
+	rest := name[9:] // "gopkg.in/"
+
 	parts := strings.Split(rest, "/")
 	if len(parts) == 0 {
 		return name
 	}
-	if len(parts) == 1 {
-		// gopkg.in/repo.vN -> github.com/go-repo/repo
-		rv := parts[0]
-		for i := len(rv) - 1; i >= 0; i-- {
-			if rv[i] == '.' && i+1 < len(rv) && rv[i+1] == 'v' {
-				ver := rv[i+2:]
-				if ver != "" && allDigits(ver) {
-					repo := rv[:i]
-					return "github.com/go-" + repo + "/" + repo
-				}
-			}
+
+	// Helper to check and extract .vN
+	parseVersion := func(s string) (base string, ok bool) {
+		idx := strings.LastIndex(s, ".v")
+		if idx == -1 {
+			return "", false
 		}
-	} else {
-		user := parts[0]
-		for idx := 1; idx < len(parts); idx++ {
-			p := parts[idx]
-			for j := len(p) - 1; j >= 0; j-- {
-				if p[j] == '.' && j+1 < len(p) && p[j+1] == 'v' {
-					ver := p[j+2:]
-					if ver != "" && allDigits(ver) {
-						base := p[:j]
-						// repo possibly in parts[1]
-						result := "github.com/" + user
-						if idx == 1 {
-							result += "/" + base
-						} else {
-							result += "/" + parts[1]
-						}
-						for k := 2; k < idx; k++ {
-							result += "/" + parts[k]
-						}
-						if idx > 1 {
-							result += "/" + base
-						}
-						return result
-					}
-				}
+		ver := s[idx+2:]
+		if ver != "" && allDigits(ver) {
+			return s[:idx], true
+		}
+		return "", false
+	}
+
+	// Case 1: gopkg.in/pkg.v3 (single segment)
+	if len(parts) == 1 {
+		if base, ok := parseVersion(parts[0]); ok {
+			return "github.com/go-" + base + "/" + base
+		}
+		return name
+	}
+
+	// Case 2: gopkg.in/user/repo.vN/...
+	// Iterate to find the versioned segment.
+	user := parts[0]
+	for i := 1; i < len(parts); i++ {
+		if base, ok := parseVersion(parts[i]); ok {
+			// Found versioned segment at i.
+			// Reconstruct: github.com/user/part1/.../base/...
+			res := "github.com/" + user
+			for k := 1; k < i; k++ {
+				res += "/" + parts[k]
 			}
+			res += "/" + base
+			if i+1 < len(parts) {
+				res += "/" + strings.Join(parts[i+1:], "/")
+			}
+			return res
 		}
 	}
+
 	return name
 }
 
@@ -227,56 +226,37 @@ func ParseGoPackage(pkg *extractor.Package) GoPackageInfo {
 		MajorVersion:  1,
 	}
 	if info.FullName != info.CanonicalName {
-		parts := strings.Split(info.FullName, "/")
-		last := parts[len(parts)-1]
-		if len(last) > 1 && last[0] == 'v' && allDigits(last[1:]) {
-			// parse number
-			n := 0
-			for _, r := range last[1:] {
-				if r >= '0' && r <= '9' {
+		// Extract version from the suffix of FullName (e.g. .../v2)
+		if idx := strings.LastIndex(info.FullName, "/v"); idx != -1 {
+			verStr := info.FullName[idx+2:]
+			if allDigits(verStr) {
+				n := 0
+				for _, r := range verStr {
 					n = n*10 + int(r-'0')
-				} else {
-					break
 				}
-			}
-			if n > 0 {
-				info.MajorVersion = n
+				if n > 0 {
+					info.MajorVersion = n
+				}
 			}
 		}
 	}
 	// Handle gopkg.in style embedded suffixes (foo.v2) which are removed during
-	// normalization so FullName == CanonicalName and the branch above does not
-	// execute. We examine the original import path components for a trailing
-	// .vN pattern.
+	// normalization so FullName == CanonicalName. We examine the original import
+	// path's last segment for a .vN pattern.
 	if info.MajorVersion == 1 && info.FullName == info.CanonicalName {
-		origParts := strings.Split(info.OriginalName, "/")
-		if len(origParts) > 0 {
-			last := origParts[len(origParts)-1]
-			// search from end for .v
-			for i := len(last) - 1; i >= 2; i-- { // need at least 3 chars like x.v2
-				if last[i] >= '0' && last[i] <= '9' { // potential digit sequence end
-					// find start of digits
-					j := i
-					for j >= 0 && last[j] >= '0' && last[j] <= '9' {
-						j--
-					}
-					// expect .v before digits
-					if j >= 1 && last[j] == 'v' && last[j-1] == '.' {
-						verDigits := last[j+1 : i+1]
-						if verDigits != "" && allDigits(verDigits) {
-							// parse
-							n := 0
-							for _, r := range verDigits {
-								n = n*10 + int(r-'0')
-							}
-							if n > 0 {
-								info.MajorVersion = n
-								break
-							}
-						}
-					}
-					// continue scanning left of this digit block
-					i = j
+		lastSeg := info.OriginalName
+		if idx := strings.LastIndex(info.OriginalName, "/"); idx != -1 {
+			lastSeg = info.OriginalName[idx+1:]
+		}
+		if idx := strings.LastIndex(lastSeg, ".v"); idx != -1 {
+			verStr := lastSeg[idx+2:]
+			if verStr != "" && allDigits(verStr) {
+				n := 0
+				for _, r := range verStr {
+					n = n*10 + int(r-'0')
+				}
+				if n > 0 {
+					info.MajorVersion = n
 				}
 			}
 		}
@@ -284,7 +264,6 @@ func ParseGoPackage(pkg *extractor.Package) GoPackageInfo {
 	return info
 }
 
-// CompareGoPackageVersions returns 1 for upgrade, -1 for downgrade, 0 otherwise.
 // CompareGoPackageVersions compares BaseVersion and TargetVersion of a Change
 // returning 1 if TargetVersion is a semantic upgrade, -1 if a downgrade, and 0
 // if versions are identical or unparsable.
@@ -311,8 +290,10 @@ func classifyGoChangeType(baseVersion, targetVersion string) ChangeType {
 	}
 }
 
+// versionComparator is a function type for comparing two versions.
 type versionComparator func(baseVersion, targetVersion string) (int, bool)
 
+// selectChangeType determines the type of change between two versions for a given ecosystem.
 func selectChangeType(ecosystem, baseVersion, targetVersion string) ChangeType {
 	comp := comparatorForEcosystem(ecosystem)
 	if comp != nil {
@@ -333,6 +314,7 @@ func selectChangeType(ecosystem, baseVersion, targetVersion string) ChangeType {
 	return Updated
 }
 
+// comparatorForEcosystem returns a version comparison function for the specified ecosystem.
 func comparatorForEcosystem(ecosystem string) versionComparator {
 	switch strings.ToLower(strings.TrimSpace(ecosystem)) {
 	case "go", "golang":
@@ -346,6 +328,7 @@ func comparatorForEcosystem(ecosystem string) versionComparator {
 	return nil
 }
 
+// semanticEcosystemName maps a raw ecosystem string to its canonical semantic versioning ecosystem name.
 func semanticEcosystemName(ecosystem string) (string, bool) {
 	switch strings.ToLower(strings.TrimSpace(ecosystem)) {
 	case "npm", "yarn", "pnpm":
@@ -383,6 +366,7 @@ func semanticEcosystemName(ecosystem string) (string, bool) {
 	}
 }
 
+// compareGoVersions compares two Go versions.
 func compareGoVersions(baseVersion, targetVersion string) (int, bool) {
 	if baseVersion == "" || targetVersion == "" {
 		return 0, false
@@ -390,6 +374,7 @@ func compareGoVersions(baseVersion, targetVersion string) (int, bool) {
 	return CompareGoPackageVersions(Change{BaseVersion: baseVersion, TargetVersion: targetVersion}), true
 }
 
+// compareSemanticVersions compares two versions using the specified ecosystem's semantic versioning rules.
 func compareSemanticVersions(baseVersion, targetVersion, ecosystem string) (int, bool) {
 	base := strings.TrimSpace(baseVersion)
 	target := strings.TrimSpace(targetVersion)
@@ -453,14 +438,7 @@ func GetDirectDependencies(ws workspace.FileReader) map[string]bool {
 	return GetDirectDependenciesFromGoMod(data)
 }
 
-// ComparePackages computes changes between old and new package inventories.
-// ComparePackages computes the dependency delta between two package slices.
-// It indexes each slice by canonical import path and classifies additions,
-// removals, upgrades, downgrades, and other updates while also tagging whether
-// each resulting Change is a direct dependency in the target workspace.
-//
-// If deps is nil, direct dependencies are inferred from go.mod in the supplied
-// workspace.
+// pkgSummary holds metadata about a package for comparison purposes.
 type pkgSummary struct {
 	pkg       *extractor.Package
 	ecosystem string
@@ -469,6 +447,7 @@ type pkgSummary struct {
 	key       string
 }
 
+// summarizePackage extracts comparison metadata from a package.
 func summarizePackage(p *extractor.Package) (string, pkgSummary) {
 	if p == nil || p.Name == "" {
 		return "", pkgSummary{}
@@ -498,6 +477,7 @@ func summarizePackage(p *extractor.Package) (string, pkgSummary) {
 	return meta.key, meta
 }
 
+// ecosystemName returns the ecosystem name or "unknown" if empty.
 func (s pkgSummary) ecosystemName() string {
 	if strings.TrimSpace(s.ecosystem) != "" {
 		return s.ecosystem
@@ -505,6 +485,13 @@ func (s pkgSummary) ecosystemName() string {
 	return "unknown"
 }
 
+// ComparePackages computes the dependency delta between two package slices.
+// It indexes each slice by canonical import path and classifies additions,
+// removals, upgrades, downgrades, and other updates while also tagging whether
+// each resulting Change is a direct dependency in the target workspace.
+//
+// If deps is nil, direct dependencies are inferred from go.mod in the supplied
+// workspace.
 func ComparePackages(oldPkgs, newPkgs []*extractor.Package, goDirect map[string]bool, pkgDirect map[string]bool, ws workspace.FileReader) []Change {
 	if len(oldPkgs) == 0 && len(newPkgs) == 0 {
 		return nil
@@ -568,6 +555,7 @@ func ComparePackages(oldPkgs, newPkgs []*extractor.Package, goDirect map[string]
 	return changes
 }
 
+// isDirectForSummary determines if a package is a direct dependency.
 func isDirectForSummary(meta pkgSummary, goDirect, pkgDirect map[string]bool) bool {
 	if pkgDirect != nil && meta.key != "" {
 		if pkgDirect[meta.key] {

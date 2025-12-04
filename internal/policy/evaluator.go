@@ -3,8 +3,9 @@ package policy
 import (
 	"context"
 	"fmt"
+	"maps"
 	"reflect"
-	"sort"
+	"slices"
 	"strings"
 
 	"github.com/google/cel-go/cel"
@@ -42,14 +43,14 @@ var (
 // environments for policies. Tooling (e.g., LSP) uses this to stay aligned with
 // the runtime without duplicating the list.
 func DefaultVariableNames() []string {
-	out := make([]string, len(defaultVariableNames))
-	copy(out, defaultVariableNames)
-	return out
+	return slices.Clone(defaultVariableNames)
 }
 
 // Evaluate compiles the provided CEL source and evaluates it against the input
 // document. Input keys are exposed to the CEL program as top-level identifiers.
 func Evaluate(ctx context.Context, source string, input map[string]any) (any, error) {
+	// Clone input to avoid side effects on the caller's map.
+	input = maps.Clone(input)
 	if input == nil {
 		input = map[string]any{}
 	}
@@ -96,6 +97,7 @@ func Compile(source string, extraVars []string) error {
 	return nil
 }
 
+// envForInput creates a CEL environment configured with variables derived from the input map keys.
 func envForInput(input map[string]any) (*cel.Env, error) {
 	var extra []string
 	for name := range input {
@@ -104,25 +106,19 @@ func envForInput(input map[string]any) (*cel.Env, error) {
 	return envWithNames(extra)
 }
 
+// envWithNames creates a CEL environment with the default variables plus any extra variables provided.
 func envWithNames(extra []string) (*cel.Env, error) {
-	vars := make(map[string]struct{}, len(extra)+len(defaultVariableNames))
-	for _, name := range defaultVariableNames {
-		vars[name] = struct{}{}
-	}
-	for _, name := range extra {
+	names := slices.Concat(defaultVariableNames, extra)
+	slices.Sort(names)
+	names = slices.Compact(names)
+
+	// Filter out empty strings and create declarations
+	declSlice := make([]*exprpb.Decl, 0, len(names))
+	for _, name := range names {
 		name = strings.TrimSpace(name)
 		if name == "" {
 			continue
 		}
-		vars[name] = struct{}{}
-	}
-	names := make([]string, 0, len(vars))
-	for name := range vars {
-		names = append(names, name)
-	}
-	sort.Strings(names)
-	declSlice := make([]*exprpb.Decl, 0, len(names))
-	for _, name := range names {
 		declSlice = append(declSlice, decls.NewVar(name, decls.Dyn))
 	}
 	opts := []cel.EnvOption{
@@ -148,19 +144,32 @@ func buildPkgHelper(input map[string]any) map[string]any {
 	var src map[string]any
 	if comp, ok := input["component"].(map[string]any); ok {
 		src = comp
-	} else if req, ok := input["request"].(map[string]any); ok {
-		src = req
-	} else {
+	}
+	if src == nil {
+		if req, ok := input["request"].(map[string]any); ok {
+			src = req
+		}
+	}
+	if src == nil {
 		return nil
 	}
+
 	pkg := map[string]any{}
+	// Try various keys for the package name
 	if name, ok := src["package"]; ok {
 		pkg["name"] = name
-	} else if name, ok := src["module"]; ok {
-		pkg["name"] = name
-	} else if name, ok := src["name"]; ok {
-		pkg["name"] = name
 	}
+	if _, ok := pkg["name"]; !ok {
+		if name, ok := src["module"]; ok {
+			pkg["name"] = name
+		}
+	}
+	if _, ok := pkg["name"]; !ok {
+		if name, ok := src["name"]; ok {
+			pkg["name"] = name
+		}
+	}
+
 	if ver, ok := src["version"]; ok {
 		pkg["version"] = ver
 	}
@@ -173,6 +182,7 @@ func buildPkgHelper(input map[string]any) map[string]any {
 	return pkg
 }
 
+// convertRefVal converts a CEL ref.Val to a native Go value.
 func convertRefVal(val ref.Val) (any, error) {
 	if val == nil {
 		return nil, nil
@@ -266,6 +276,7 @@ func levenshtein(a, b string, maxLen int, limit int64) int64 {
 	return prev[len(a)]
 }
 
+// minInt64 returns the minimum value from a list of int64s.
 func minInt64(vals ...int64) int64 {
 	if len(vals) == 0 {
 		return 0
@@ -279,6 +290,7 @@ func minInt64(vals ...int64) int64 {
 	return m
 }
 
+// toString safely converts a CEL ref.Val to a string.
 func toString(v ref.Val) string {
 	if v == nil {
 		return ""
@@ -293,6 +305,7 @@ func toString(v ref.Val) string {
 	}
 }
 
+// toInt64 safely converts a CEL ref.Val to an int64.
 func toInt64(v ref.Val) int64 {
 	if v == nil {
 		return 0

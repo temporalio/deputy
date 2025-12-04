@@ -7,20 +7,20 @@ func Test_ParseCVSSScore_and_parseFloat(t *testing.T) {
 		in   string
 		want float64
 	}{
-		{"3", 3},
-		{"7.5", 7.5},
-		{"7.5-something", 7.5},
-		{"11.1", -1},
-		{"abc", -1},
-		{"CVSS:3.1/Base:9.8/AV:N/AC:L", 9.8},
-		{"CVSS:3.1/AV:L/AC:H/PR:L/UI:N/S:U/C:L/I:N/A:N", 2.5},
-		{"HIGH", 7.5},
-		{"no-score", -1},
+		{in: "3", want: 3},
+		{in: "7.5", want: 7.5},
+		{in: "7.5-something", want: 7.5},
+		{in: "11.1", want: -1},
+		{in: "abc", want: -1},
+		{in: "CVSS:3.1/Base:9.8/AV:N/AC:L", want: 9.8},
+		{in: "CVSS:3.1/AV:L/AC:H/PR:L/UI:N/S:U/C:L/I:N/A:N", want: 2.5},
+		{in: "HIGH", want: 7.5},
+		{in: "no-score", want: -1},
 	}
-	for _, tt := range tests {
-		got := ParseCVSSScore(tt.in)
-		if got != tt.want {
-			t.Fatalf("ParseCVSSScore(%q)=%v want %v", tt.in, got, tt.want)
+	for _, test := range tests {
+		got := ParseCVSSScore(test.in)
+		if got != test.want {
+			t.Fatalf("ParseCVSSScore(%q)=%v want %v", test.in, got, test.want)
 		}
 	}
 }

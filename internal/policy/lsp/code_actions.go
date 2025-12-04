@@ -29,6 +29,8 @@ func buildCodeActions(params protocol.CodeActionParams, docText string) []any {
 	return out
 }
 
+// codeActionInsert creates a CodeAction that inserts text at a specific position.
+// It packages the edit as a WorkspaceEdit and includes a fallback command.
 func codeActionInsert(uri protocol.DocumentURI, pos protocol.Position, text string, kind string, diag protocol.Diagnostic) CodeAction {
 	edit := TextEdit{Range: protocol.Range{Start: pos, End: pos}, NewText: text}
 	return CodeAction{
@@ -46,6 +48,7 @@ func codeActionInsert(uri protocol.DocumentURI, pos protocol.Position, text stri
 	}
 }
 
+// minInt returns the smallest integer from the provided list.
 func minInt(a ...int) int {
 	if len(a) == 0 {
 		return 0
@@ -109,6 +112,7 @@ func undeclaredReplacement(uri protocol.DocumentURI, d protocol.Diagnostic, docT
 	}
 }
 
+// extractUndeclaredName parses the variable name from a CEL "undeclared reference" error message.
 func extractUndeclaredName(msg string) string {
 	const needle = "undeclared reference to '"
 	idx := strings.Index(msg, needle)
@@ -190,6 +194,7 @@ func tokenAtRange(doc string, r protocol.Range) (line string, token string) {
 	return line, line[start:end]
 }
 
+// isIdentChar checks if a rune is a valid identifier character (alphanumeric or underscore).
 func isIdentChar(r rune) bool {
 	return r == '_' || ('a' <= r && r <= 'z') || ('A' <= r && r <= 'Z') || ('0' <= r && r <= '9')
 }

@@ -1,9 +1,10 @@
 package remediation
 
 import (
+	"cmp"
 	"fmt"
 	"path"
-	"sort"
+	"slices"
 	"strings"
 
 	analysis "github.com/picatz/deputy/internal/analysis"
@@ -21,6 +22,8 @@ type Command struct {
 	managerRank int
 }
 
+// packageUpgrade represents a suggested dependency update to resolve a vulnerability.
+// It contains details about the package, the current version, and the target version.
 type packageUpgrade struct {
 	Name        string
 	Current     string
@@ -41,24 +44,27 @@ func CommandsFromVulnerabilities(vs []analysis.Vulnerability) ([]Command, string
 			cmds = append(cmds, toolchainCmd)
 		}
 	}
-	sort.Slice(cmds, func(i, j int) bool {
-		if cmds[i].managerRank == cmds[j].managerRank {
-			if cmds[i].Path == cmds[j].Path {
-				return cmds[i].Command < cmds[j].Command
-			}
-			return cmds[i].Path < cmds[j].Path
+	slices.SortFunc(cmds, func(a, b Command) int {
+		if n := cmp.Compare(a.managerRank, b.managerRank); n != 0 {
+			return n
 		}
-		return cmds[i].managerRank < cmds[j].managerRank
+		if n := strings.Compare(a.Path, b.Path); n != 0 {
+			return n
+		}
+		return strings.Compare(a.Command, b.Command)
 	})
 	return cmds, stdlib
 }
 
+// buildUpgradeRecommendations analyzes consolidated vulnerabilities to determine
+// the best fixed versions for each affected package. It separates standard library
+// upgrades from regular dependency upgrades.
 func buildUpgradeRecommendations(cons []analysis.ConsolidatedVulnerability) ([]packageUpgrade, string) {
 	var stdlibRec string
 	upgrades := []packageUpgrade{}
 
 	for _, v := range cons {
-		if v.FixedVersions == nil || len(v.FixedVersions) == 0 {
+		if len(v.FixedVersions) == 0 {
 			continue
 		}
 		best := analysis.FindBestFixedVersion(v.FixedVersions, v.Version)
@@ -85,6 +91,9 @@ func buildUpgradeRecommendations(cons []analysis.ConsolidatedVulnerability) ([]p
 	return upgrades, stdlibRec
 }
 
+// dedupeCommands converts a list of package upgrades into a set of unique,
+// executable commands. It handles deduplication logic to avoid suggesting
+// the same fix multiple times for the same context.
 func dedupeCommands(upgrades []packageUpgrade) []Command {
 	commands := []Command{}
 	seen := map[string]struct{}{}
@@ -306,19 +315,13 @@ func uniqueSortedStrings(values []string) []string {
 	if len(values) == 0 {
 		return values
 	}
-	set := map[string]struct{}{}
 	out := make([]string, 0, len(values))
 	for _, v := range values {
 		v = strings.TrimSpace(v)
-		if v == "" {
-			continue
+		if v != "" {
+			out = append(out, v)
 		}
-		if _, ok := set[v]; ok {
-			continue
-		}
-		set[v] = struct{}{}
-		out = append(out, v)
 	}
-	sort.Strings(out)
-	return out
+	slices.Sort(out)
+	return slices.Compact(out)
 }

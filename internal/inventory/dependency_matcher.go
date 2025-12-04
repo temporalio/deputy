@@ -3,6 +3,7 @@ package inventory
 import (
 	"io/fs"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
@@ -48,9 +49,7 @@ func (m *DependencyMatcher) Matches(path string) bool {
 	if clean == "" {
 		return false
 	}
-	if strings.HasPrefix(clean, "./") {
-		clean = strings.TrimPrefix(clean, "./")
-	}
+	clean = strings.TrimPrefix(clean, "./")
 	fake := fakeFileAPI{path: clean}
 	for _, ex := range m.extractors {
 		if ex.FileRequired(fake) {
@@ -66,22 +65,21 @@ func (m *DependencyMatcher) AnyMatch(paths []string) bool {
 	if m == nil || len(m.extractors) == 0 {
 		return false
 	}
-	for _, p := range paths {
-		if m.Matches(p) {
-			return true
-		}
-	}
-	return false
+	return slices.ContainsFunc(paths, m.Matches)
 }
 
+// fakeFileAPI implements the scalibr FileAPI interface for path checking.
 type fakeFileAPI struct {
 	path string
 }
 
+// Path returns the file path.
 func (f fakeFileAPI) Path() string { return f.path }
 
+// Stat returns a fake file info.
 func (f fakeFileAPI) Stat() (fs.FileInfo, error) { return fakeFileInfo{}, nil }
 
+// fakeFileInfo implements fs.FileInfo for testing.
 type fakeFileInfo struct{}
 
 func (fakeFileInfo) Name() string       { return "" }
@@ -89,4 +87,4 @@ func (fakeFileInfo) Size() int64        { return 0 }
 func (fakeFileInfo) Mode() fs.FileMode  { return 0 }
 func (fakeFileInfo) ModTime() time.Time { return time.Time{} }
 func (fakeFileInfo) IsDir() bool        { return false }
-func (fakeFileInfo) Sys() interface{}   { return nil }
+func (fakeFileInfo) Sys() any           { return nil }

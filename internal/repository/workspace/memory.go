@@ -50,6 +50,7 @@ func (m *Memory) ensureOpen() error {
 	return m.baseWorkspace.ensureOpen()
 }
 
+// ReadFile reads the named file from the workspace.
 func (m *Memory) ReadFile(name string) ([]byte, error) {
 	if err := m.ensureOpen(); err != nil {
 		return nil, err
@@ -64,6 +65,7 @@ func (m *Memory) ReadFile(name string) ([]byte, error) {
 	return fs.ReadFile(m.adapter, rel)
 }
 
+// Open opens the named file for reading.
 func (m *Memory) Open(name string) (fs.File, error) {
 	if err := m.ensureOpen(); err != nil {
 		return nil, err
@@ -75,6 +77,7 @@ func (m *Memory) Open(name string) (fs.File, error) {
 	return m.adapter.Open(rel)
 }
 
+// ReadDir reads the directory named by name and returns a list of directory entries.
 func (m *Memory) ReadDir(name string) ([]fs.DirEntry, error) {
 	if err := m.ensureOpen(); err != nil {
 		return nil, err
@@ -89,6 +92,7 @@ func (m *Memory) ReadDir(name string) ([]fs.DirEntry, error) {
 	return m.adapter.ReadDir(rel)
 }
 
+// Stat returns a FileInfo describing the named file.
 func (m *Memory) Stat(name string) (fs.FileInfo, error) {
 	if err := m.ensureOpen(); err != nil {
 		return nil, err
@@ -103,6 +107,7 @@ func (m *Memory) Stat(name string) (fs.FileInfo, error) {
 	return m.adapter.Stat(rel)
 }
 
+// WriteFile writes data to the named file, creating it if necessary.
 func (m *Memory) WriteFile(name string, data []byte, perm fs.FileMode) error {
 	if err := m.ensureOpen(); err != nil {
 		return err
@@ -114,6 +119,7 @@ func (m *Memory) WriteFile(name string, data []byte, perm fs.FileMode) error {
 	return billyutil.WriteFile(m.fsys, rel, data, perm)
 }
 
+// MkdirAll creates a directory named path, along with any necessary parents.
 func (m *Memory) MkdirAll(path string, perm fs.FileMode) error {
 	if err := m.ensureOpen(); err != nil {
 		return err
@@ -128,6 +134,7 @@ func (m *Memory) MkdirAll(path string, perm fs.FileMode) error {
 	return m.fsys.MkdirAll(rel, perm)
 }
 
+// Remove removes the named file or (empty) directory.
 func (m *Memory) Remove(path string) error {
 	if err := m.ensureOpen(); err != nil {
 		return err
@@ -142,6 +149,7 @@ func (m *Memory) Remove(path string) error {
 	return m.fsys.Remove(rel)
 }
 
+// RemoveAll removes path and any children it contains.
 func (m *Memory) RemoveAll(path string) error {
 	if err := m.ensureOpen(); err != nil {
 		return err
@@ -156,10 +164,12 @@ func (m *Memory) RemoveAll(path string) error {
 	return billyutil.RemoveAll(m.fsys, rel)
 }
 
+// Close closes the workspace and releases any resources.
 func (m *Memory) Close() error {
 	return m.baseWorkspace.Close()
 }
 
+// IsVirtual returns true for Memory.
 func (m *Memory) IsVirtual() bool { return true }
 
 var _ FS = (*Memory)(nil)
@@ -171,14 +181,17 @@ type billyAdapter struct {
 	stat fs.StatFS
 }
 
+// Open opens the named file for reading.
 func (b *billyAdapter) Open(name string) (fs.File, error) {
 	return b.base.Open(name)
 }
 
+// ReadDir reads the directory named by name and returns a list of directory entries.
 func (b *billyAdapter) ReadDir(name string) ([]fs.DirEntry, error) {
 	return b.dir.ReadDir(name)
 }
 
+// Stat returns a FileInfo describing the named file.
 func (b *billyAdapter) Stat(name string) (fs.FileInfo, error) {
 	return b.stat.Stat(name)
 }

@@ -93,7 +93,11 @@ Can be disabled with --skip-vuln-scan for faster execution.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			repo := repoPath
 			if repo == "" {
-				repo = mustGetwd()
+				var err error
+				repo, err = os.Getwd()
+				if err != nil {
+					return fmt.Errorf("failed to get current directory: %w", err)
+				}
 			}
 			scanOpts := inv.ScanOptions{Ecosystems: ecosystems}
 			matcher, matcherErr := inv.GetDependencyMatcher(scanOpts)
@@ -223,11 +227,7 @@ PERFORMANCE TIPS:
 	root.AddCommand(cmd)
 }
 
-func mustGetwd() string {
-	wd, _ := os.Getwd()
-	return wd
-}
-
+// DiffPolicyReport captures the full context of a diff operation for policy evaluation.
 type DiffPolicyReport struct {
 	Repo            string                   `json:"repo"`
 	BaseRef         string                   `json:"baseRef"`
@@ -538,6 +538,8 @@ func isWorkingPseudoRef(s string) bool {
 	return u == "WORKING" || u == "WORKTREE" || u == "WT"
 }
 
+// licenseScanConcurrency determines the number of concurrent license scans to run.
+// It respects the DEPUTY_LICENSE_SCAN_CONCURRENCY environment variable if set.
 func licenseScanConcurrency(total int) int {
 	if total <= 0 {
 		return 1
@@ -825,6 +827,7 @@ func (d depsClient) GetVersion(ctx context.Context, req *pb.GetVersionRequest) (
 	return d.InsightsClient.GetVersion(ctx, req)
 }
 
+// plural returns "s" if n is not 1, otherwise empty string.
 func plural(n int) string {
 	if n == 1 {
 		return ""
@@ -857,6 +860,7 @@ func renderMatcherDebug(files []string, matcher *inv.DependencyMatcher) {
 	}
 }
 
+// mergeGoDirectMaps combines multiple direct dependency maps into one.
 func mergeGoDirectMaps(maps ...map[string]bool) map[string]bool {
 	merged := map[string]bool{"stdlib": true}
 	for _, m := range maps {
@@ -869,6 +873,7 @@ func mergeGoDirectMaps(maps ...map[string]bool) map[string]bool {
 	return merged
 }
 
+// runDiffPolicies evaluates the configured policies against the diff report.
 func runDiffPolicies(ctx context.Context, policyPaths []string, report DiffPolicyReport, errW io.Writer) error {
 	if len(policyPaths) == 0 {
 		return nil

@@ -79,18 +79,17 @@ func TestLoadStructuredBundle(t *testing.T) {
 			wantErr: false,
 		},
 	}
-	for _, tt := range tests {
-		tt := tt
-		t.Run(tt.name, func(t *testing.T) {
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
 			dir := t.TempDir()
 			path := filepath.Join(dir, "bundle.yaml")
-			if err := os.WriteFile(path, []byte(tt.yaml), 0o644); err != nil {
+			if err := os.WriteFile(path, []byte(test.yaml), 0o644); err != nil {
 				t.Fatalf("write bundle: %v", err)
 			}
 			sources, err := LoadSources([]string{path})
-			if tt.wantErr {
+			if test.wantErr {
 				if err == nil {
-					t.Fatalf("expected error for %s", tt.name)
+					t.Fatalf("expected error for %s", test.name)
 				}
 				return
 			}

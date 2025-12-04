@@ -32,6 +32,8 @@ func HasCommonAlias(a1, a2 []string) bool {
 	return false
 }
 
+// getIDPriority assigns a numeric priority to vulnerability IDs for sorting.
+// Lower numbers indicate higher priority (CVE > GO > GHSA > others).
 func getIDPriority(id string) int {
 	if strings.HasPrefix(id, "CVE-") {
 		return 1
@@ -45,6 +47,8 @@ func getIDPriority(id string) int {
 	return 4
 }
 
+// isTrustedAlias checks if a vulnerability ID belongs to a known, trusted
+// numbering authority (e.g., CVE, GHSA, GO).
 func isTrustedAlias(id string) bool {
 	id = strings.TrimSpace(id)
 	if id == "" {
@@ -59,6 +63,7 @@ func isTrustedAlias(id string) bool {
 	return false
 }
 
+// filterTrustedAliases separates trusted aliases from others and counts hidden ones.
 func filterTrustedAliases(ids []string) (preferred []string, hidden int) {
 	if len(ids) == 0 {
 		return nil, 0
@@ -74,6 +79,7 @@ func filterTrustedAliases(ids []string) (preferred []string, hidden int) {
 	return preferred, hidden
 }
 
+// findBestPrimaryIDFromGroup selects the best primary ID for a group of vulnerabilities.
 func findBestPrimaryIDFromGroup(vs []Vulnerability) string {
 	var all []string
 	for _, v := range vs {
@@ -103,6 +109,7 @@ func findBestPrimaryIDFromGroup(vs []Vulnerability) string {
 	return best
 }
 
+// createConsolidatedVulnerability merges a group of vulnerabilities into a single consolidated record.
 func createConsolidatedVulnerability(primaryID string, vulns []Vulnerability) ConsolidatedVulnerability {
 	if len(vulns) == 0 {
 		return ConsolidatedVulnerability{}
@@ -405,6 +412,7 @@ func FindBestFixedVersion(fixed []string, current string) string {
 	return cands[0]
 }
 
+// normalizeGoVersion ensures the Go version string starts with "v".
 func normalizeGoVersion(v string) string {
 	if v == "" {
 		return v
