@@ -510,7 +510,7 @@ func runDiffAnalysis(ctx context.Context, repoPath, baseRef, targetRef string, e
 
 		if len(all) > 0 {
 			fmt.Println("\n" + ui.StyleDowngraded.Render("∴ ") + ui.StyleHeader.Render("Vulnerabilities"))
-			RenderVulnerabilityList(changedVulns)
+			RenderVulnerabilityList(changedVulns, vulnDisplayOptions{})
 			if showUnchangedEff && len(unchangedVulns) > 0 {
 				// Visual separator for unchanged dependencies, include reason if any
 				title := "Unchanged dependencies"
@@ -519,7 +519,7 @@ func runDiffAnalysis(ctx context.Context, repoPath, baseRef, targetRef string, e
 				}
 				sep := ui.StyleDim.Render(strings.Repeat("─", 3) + " " + title + " " + strings.Repeat("─", 3))
 				fmt.Println("\n" + sep)
-				RenderVulnerabilityList(unchangedVulns)
+				RenderVulnerabilityList(unchangedVulns, vulnDisplayOptions{})
 			}
 		}
 		RenderVulnerabilitySummaryAndActions(all)

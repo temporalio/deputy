@@ -47,3 +47,50 @@ func Test_ProcessOSVVulnerability_severityPreference(t *testing.T) {
 		}
 	})
 }
+
+func Test_ProcessOSVVulnerability_extractsImports(t *testing.T) {
+	v := osvschema.Vulnerability{
+		ID: "GO-IMPORTS",
+		Affected: []osvschema.Affected{
+			{
+				Package: osvschema.Package{Name: "github.com/example/mod", Ecosystem: "Go"},
+				EcosystemSpecific: map[string]any{
+					"imports": []any{
+						map[string]any{"path": "net/http", "symbols": []any{"Serve", "ListenAndServe", "Serve"}},
+						map[string]any{"path": "crypto/tls"},
+					},
+				},
+			},
+		},
+	}
+	out := ProcessOSVVulnerability(v, PkgInput{Name: "github.com/example/mod", Version: "v1.0.0", Ecosystem: "Go"})
+	if len(out.AffectedImports) != 2 {
+		t.Fatalf("expected 2 import entries, got %d", len(out.AffectedImports))
+	}
+	if out.AffectedImports[0].Path != "crypto/tls" {
+		t.Fatalf("expected crypto/tls first, got %s", out.AffectedImports[0].Path)
+	}
+	if out.AffectedImports[1].Path != "net/http" {
+		t.Fatalf("expected net/http second, got %s", out.AffectedImports[1].Path)
+	}
+	if len(out.AffectedImports[1].Symbols) != 2 {
+		t.Fatalf("expected deduped symbols, got %v", out.AffectedImports[1].Symbols)
+	}
+}
+
+func Test_ProcessOSVVulnerability_databaseSpecific(t *testing.T) {
+	v := osvschema.Vulnerability{
+		ID:               "GO-DBSPEC",
+		DatabaseSpecific: map[string]any{"url": "https://pkg.go.dev/vuln/GO-DBSPEC", "review_status": "REVIEWED", "count": 5},
+	}
+	out := ProcessOSVVulnerability(v, PkgInput{Name: "github.com/example/mod", Version: "v1.0.0", Ecosystem: "Go"})
+	if out.DatabaseSpecific["url"] != "https://pkg.go.dev/vuln/GO-DBSPEC" {
+		t.Fatalf("expected url preserved, got %q", out.DatabaseSpecific["url"])
+	}
+	if out.DatabaseSpecific["review_status"] != "REVIEWED" {
+		t.Fatalf("expected review_status preserved, got %q", out.DatabaseSpecific["review_status"])
+	}
+	if len(out.DatabaseSpecific) != 2 {
+		t.Fatalf("expected only string entries kept, got %v", out.DatabaseSpecific)
+	}
+}

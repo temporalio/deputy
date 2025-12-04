@@ -78,6 +78,7 @@ AI ASSISTANCE:
 	triageCmd.Flags().Bool("agent-include-plan-tool", true, "Allow codex agent to enable the plan tool")
 	triageCmd.Flags().Bool("agent-skip-git-check", true, "Skip codex git repository checks")
 	triageCmd.Flags().StringArray("policy", nil, "Path to CEL policy files or bundles to evaluate against triage summaries (repeatable)")
+	triageCmd.Flags().Bool("show-db-info", false, "Show database-specific metadata (e.g., review_status) in text output")
 	root.AddCommand(triageCmd)
 }
 
@@ -96,6 +97,7 @@ func runTriage(scanner *Scanner, cmd *cobra.Command, args []string) error {
 	agentIncludePlanTool, _ := cmd.Flags().GetBool("agent-include-plan-tool")
 	agentSkipGitCheck, _ := cmd.Flags().GetBool("agent-skip-git-check")
 	policyPaths, _ := cmd.Flags().GetStringArray("policy")
+	showDBInfo, _ := cmd.Flags().GetBool("show-db-info")
 
 	repoArg := ""
 	if len(args) > 0 {
@@ -160,7 +162,7 @@ func runTriage(scanner *Scanner, cmd *cobra.Command, args []string) error {
 
 	switch strings.ToLower(strings.TrimSpace(format)) {
 	case "", "text":
-		printTriageSummary(report)
+		printTriageSummary(report, showDBInfo)
 	case "json":
 		if err := outputTriageJSON(cmd.OutOrStdout(), report); err != nil {
 			return err
@@ -233,7 +235,7 @@ func runTriagePolicies(ctx context.Context, policyPaths []string, report triageR
 }
 
 // printTriageSummary prints a human-readable summary of the triage report to stdout.
-func printTriageSummary(report triageReport) {
+func printTriageSummary(report triageReport, showDBInfo bool) {
 	fmt.Println(ui.StyleHeader.Render("Triage Summary:"))
 	if repo := strings.TrimSpace(report.Target.Repo); repo != "" {
 		repoLine := repo
@@ -250,24 +252,62 @@ func printTriageSummary(report triageReport) {
 	fmt.Printf("  Low: %d\n", report.Stats.LowSeverity)
 	fmt.Printf("  Fixable: %d\n", report.Stats.FixAvailable)
 	fmt.Printf("  Direct deps affected: %d\n", report.Stats.DirectDeps)
+	if report.PackagesWithVulns > 0 {
+		fmt.Printf("  Packages with vulns: %d", report.PackagesWithVulns)
+		if report.Stats.IndirectDeps > 0 {
+			fmt.Printf(" (direct: %d, indirect: %d)", report.Stats.DirectDeps, report.Stats.IndirectDeps)
+		}
+		fmt.Println()
+	}
 	if len(report.TopPackages) == 0 {
 		fmt.Println("\n" + ui.StyleAdded.Render("No fixable vulnerabilities after filtering."))
 		return
 	}
-	fmt.Println("\nTop Impacted Packages:")
+	fmt.Printf("\nTop Impacted Packages")
+	if report.PackagesWithVulns > len(report.TopPackages) {
+		fmt.Printf(" (showing %d of %d)", len(report.TopPackages), report.PackagesWithVulns)
+	}
+	fmt.Println(":")
+	fmt.Println("  " + ui.StyleMeta.Render("Severity shown per package = highest vuln severity in that package."))
 	for idx, pkg := range report.TopPackages {
 		marker := fmt.Sprintf("%d.", idx+1)
 		sev := ui.SeverityLabel(pkg.Severity, pkg.SeverityType)
+		sevInline := formatSeverityCounts(pkg.SeverityCounts)
+		countInline := ""
+		if pkg.VulnerabilityCount > 0 {
+			if sevInline != "" {
+				countInline = ui.StyleMeta.Render(fmt.Sprintf("— %d vulns (%s)", pkg.VulnerabilityCount, sevInline))
+			} else {
+				countInline = ui.StyleMeta.Render(fmt.Sprintf("— %d vulns", pkg.VulnerabilityCount))
+			}
+		}
 		fix := ""
 		if pkg.FixVersion != "" {
 			fix = ui.StyleUpgraded.Render("↑ " + pkg.FixVersion)
 		}
-		fmt.Printf("  %s %s %s %s\n", marker, ui.StylePackageName.Render(pkg.Package), ui.StyleVersion.Render(pkg.Version), sev)
+		fmt.Printf("  %s %s %s %s %s\n", marker, ui.StylePackageName.Render(pkg.Package), ui.StyleVersion.Render(pkg.Version), sev, countInline)
 		if pkg.Summary != "" {
 			fmt.Println("     ", ui.StyleDim.Render(pkg.Summary))
 		}
 		if fix != "" {
 			fmt.Println("     ", fix)
+		}
+		if len(pkg.AffectedImports) > 0 {
+			lines := formatImportSummaries(pkg.AffectedImports, 2, 3)
+			if len(lines) > 0 {
+				fmt.Println("     ", ui.StyleMeta.Render("Symbol hints (Go/OSV):"))
+				for _, line := range lines {
+					fmt.Println("       ", ui.StylePath.Render(line))
+				}
+			}
+		}
+		if showDBInfo {
+			if dbLines := formatDatabaseSpecificInfo(pkg.DatabaseSpecific, 2); len(dbLines) > 0 {
+				fmt.Println("     ", ui.StyleMeta.Render("Database info:"))
+				for _, line := range dbLines {
+					fmt.Println("       ", ui.StyleMeta.Render(line))
+				}
+			}
 		}
 	}
 }
@@ -283,6 +323,7 @@ func outputTriageJSON(w io.Writer, report triageReport) error {
 func buildTriageReport(target remediationPlanTarget, stats analysis.VulnerabilityStats, cons []analysis.ConsolidatedVulnerability) triageReport {
 	report := triageReport{Target: target, Stats: stats}
 	agg := aggregatePackages(cons)
+	report.PackagesWithVulns = len(agg)
 	report.TopPackages = agg
 	if len(report.TopPackages) > 10 {
 		report.TopPackages = report.TopPackages[:10]
@@ -292,35 +333,44 @@ func buildTriageReport(target remediationPlanTarget, stats analysis.Vulnerabilit
 
 // triageReport represents the summary of a triage analysis.
 type triageReport struct {
-	Target      remediationPlanTarget       `json:"target"`
-	Stats       analysis.VulnerabilityStats `json:"stats"`
-	TopPackages []triagePackageSummary      `json:"topPackages"`
+	Target            remediationPlanTarget       `json:"target"`
+	Stats             analysis.VulnerabilityStats `json:"stats"`
+	TopPackages       []triagePackageSummary      `json:"topPackages"`
+	PackagesWithVulns int                         `json:"packagesWithVulns"`
 }
 
 // triagePackageSummary represents a summary of a single package's vulnerabilities.
 type triagePackageSummary struct {
-	Package      string   `json:"package"`
-	Version      string   `json:"version"`
-	Severity     string   `json:"severity"`
-	SeverityType string   `json:"severityType"`
-	FixVersion   string   `json:"fixVersion,omitempty"`
-	IsDirect     bool     `json:"isDirect"`
-	Summary      string   `json:"summary,omitempty"`
-	SampleIDs    []string `json:"sampleIDs,omitempty"`
+	Package            string                    `json:"package"`
+	Version            string                    `json:"version"`
+	Severity           string                    `json:"severity"`
+	SeverityType       string                    `json:"severityType"`
+	FixVersion         string                    `json:"fixVersion,omitempty"`
+	IsDirect           bool                      `json:"isDirect"`
+	Summary            string                    `json:"summary,omitempty"`
+	SampleIDs          []string                  `json:"sampleIDs,omitempty"`
+	AffectedImports    []analysis.AffectedImport `json:"affectedImports,omitempty"`
+	DatabaseSpecific   map[string]string         `json:"databaseSpecific,omitempty"`
+	VulnerabilityCount int                       `json:"vulnerabilityCount"`
+	SeverityCounts     map[string]int            `json:"severityCounts,omitempty"`
 }
 
 // aggregatePackages aggregates consolidated vulnerabilities into package summaries.
 func aggregatePackages(cons []analysis.ConsolidatedVulnerability) []triagePackageSummary {
 	type aggInfo struct {
-		pkg       string
-		version   string
-		severity  string
-		severityT string
-		priority  int
-		fix       string
-		summary   string
-		ids       []string
-		isDirect  bool
+		pkg        string
+		version    string
+		severity   string
+		severityT  string
+		priority   int
+		fix        string
+		summary    string
+		ids        []string
+		isDirect   bool
+		imports    []analysis.AffectedImport
+		dbSpecific map[string]string
+		counts     map[string]int
+		total      int
 	}
 	pkgMap := map[string]*aggInfo{}
 	for _, v := range cons {
@@ -334,6 +384,18 @@ func aggregatePackages(cons []analysis.ConsolidatedVulnerability) []triagePackag
 			info = &aggInfo{pkg: v.Package, version: v.Version, severity: v.Severity, severityT: v.SeverityType, priority: priority, fix: bestFix(v), summary: v.Summary, isDirect: v.IsDirect}
 			pkgMap[key] = info
 		}
+		if len(v.AffectedImports) > 0 {
+			info.imports = analysis.MergeAffectedImports(info.imports, v.AffectedImports)
+		}
+		if len(v.DatabaseSpecific) > 0 {
+			info.dbSpecific = mergeStringMap(info.dbSpecific, v.DatabaseSpecific)
+		}
+		if info.counts == nil {
+			info.counts = map[string]int{}
+		}
+		sevKey := severityBucket(v.Severity, v.SeverityType)
+		info.counts[sevKey]++
+		info.total++
 		if priority > info.priority {
 			info.priority = priority
 			info.severity = v.Severity
@@ -352,14 +414,18 @@ func aggregatePackages(cons []analysis.ConsolidatedVulnerability) []triagePackag
 	list := make([]triagePackageSummary, 0, len(pkgMap))
 	for _, info := range pkgMap {
 		list = append(list, triagePackageSummary{
-			Package:      info.pkg,
-			Version:      info.version,
-			Severity:     info.severity,
-			SeverityType: info.severityT,
-			FixVersion:   info.fix,
-			IsDirect:     info.isDirect,
-			Summary:      info.summary,
-			SampleIDs:    info.ids,
+			Package:            info.pkg,
+			Version:            info.version,
+			Severity:           info.severity,
+			SeverityType:       info.severityT,
+			FixVersion:         info.fix,
+			IsDirect:           info.isDirect,
+			Summary:            info.summary,
+			SampleIDs:          info.ids,
+			AffectedImports:    info.imports,
+			DatabaseSpecific:   info.dbSpecific,
+			VulnerabilityCount: info.total,
+			SeverityCounts:     info.counts,
 		})
 	}
 	sort.Slice(list, func(i, j int) bool {
@@ -377,6 +443,146 @@ func aggregatePackages(cons []analysis.ConsolidatedVulnerability) []triagePackag
 		return list[i].Version < list[j].Version
 	})
 	return list
+}
+
+// severityBucket normalizes severities into coarse buckets for counting.
+func severityBucket(sev, sevType string) string {
+	up := strings.ToUpper(strings.TrimSpace(sev))
+	if sevType == "GHSA" {
+		switch up {
+		case "CRITICAL":
+			return "CRITICAL"
+		case "HIGH":
+			return "HIGH"
+		case "MEDIUM", "MODERATE":
+			return "MED"
+		case "LOW":
+			return "LOW"
+		}
+	}
+	switch up {
+	case "CRITICAL":
+		return "CRITICAL"
+	case "HIGH":
+		return "HIGH"
+	case "MEDIUM", "MODERATE":
+		return "MED"
+	case "LOW":
+		return "LOW"
+	}
+	score := analysis.ParseCVSSScore(sev)
+	switch {
+	case score >= 9.0:
+		return "CRITICAL"
+	case score >= 7.0:
+		return "HIGH"
+	case score >= 4.0:
+		return "MED"
+	case score >= 0.0:
+		return "LOW"
+	default:
+		return "UNKNOWN"
+	}
+}
+
+// formatImportSummaries prepares a compact set of import/symbol hints for display.
+func formatImportSummaries(imps []analysis.AffectedImport, maxPaths, maxSymbols int) []string {
+	if len(imps) == 0 {
+		return nil
+	}
+	lines := make([]string, 0, len(imps))
+	for i, imp := range imps {
+		if maxPaths > 0 && i >= maxPaths {
+			lines = append(lines, fmt.Sprintf("... %d more import paths", len(imps)-maxPaths))
+			break
+		}
+		path := strings.TrimSpace(imp.Path)
+		if path == "" {
+			continue
+		}
+		if len(imp.Symbols) == 0 {
+			lines = append(lines, path)
+			continue
+		}
+		syms := imp.Symbols
+		truncated := false
+		if maxSymbols > 0 && len(syms) > maxSymbols {
+			syms = syms[:maxSymbols]
+			truncated = true
+		}
+		symStr := strings.Join(syms, ", ")
+		if truncated {
+			symStr += ", ..."
+		}
+		lines = append(lines, fmt.Sprintf("%s (%s)", path, symStr))
+	}
+	return lines
+}
+
+// formatSeverityCounts renders a short severity breakdown like "2 HIGH, 1 MED".
+func formatSeverityCounts(counts map[string]int) string {
+	if len(counts) == 0 {
+		return ""
+	}
+	order := []string{"CRITICAL", "HIGH", "MED", "LOW", "UNKNOWN"}
+	labels := map[string]string{
+		"CRITICAL": "CRIT",
+		"HIGH":     "HIGH",
+		"MED":      "MED",
+		"LOW":      "LOW",
+		"UNKNOWN":  "?",
+	}
+	var parts []string
+	for _, key := range order {
+		if n := counts[key]; n > 0 {
+			parts = append(parts, fmt.Sprintf("%d %s", n, labels[key]))
+		}
+	}
+	return strings.Join(parts, ", ")
+}
+
+// formatDatabaseSpecificInfo flattens database_specific metadata into displayable lines.
+// It truncates after maxEntries with a summary entry when provided.
+func formatDatabaseSpecificInfo(db map[string]string, maxEntries int) []string {
+	if len(db) == 0 {
+		return nil
+	}
+	keys := make([]string, 0, len(db))
+	for k := range db {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	lines := make([]string, 0, len(keys))
+	for idx, k := range keys {
+		if maxEntries > 0 && idx >= maxEntries {
+			lines = append(lines, fmt.Sprintf("... %d more entries", len(keys)-maxEntries))
+			break
+		}
+		lines = append(lines, fmt.Sprintf("%s: %s", k, db[k]))
+	}
+	return lines
+}
+
+// mergeStringMap merges string maps, preferring existing keys in base.
+func mergeStringMap(base map[string]string, extra map[string]string) map[string]string {
+	if len(extra) == 0 {
+		return base
+	}
+	if base == nil {
+		base = map[string]string{}
+	}
+	for k, v := range extra {
+		k = strings.TrimSpace(k)
+		v = strings.TrimSpace(v)
+		if k == "" || v == "" {
+			continue
+		}
+		if _, ok := base[k]; ok {
+			continue
+		}
+		base[k] = v
+	}
+	return base
 }
 
 // severityRank returns a numeric rank for a severity string.

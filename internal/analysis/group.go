@@ -218,6 +218,34 @@ func createConsolidatedVulnerability(primaryID string, vulns []Vulnerability) Co
 		return manifestRefs[i].Manager < manifestRefs[j].Manager
 	})
 
+	var importSets [][]AffectedImport
+	for _, v := range vulns {
+		if len(v.AffectedImports) > 0 {
+			importSets = append(importSets, v.AffectedImports)
+		}
+	}
+	mergedImports := MergeAffectedImports(importSets...)
+
+	dbSpecific := map[string]string{}
+	for _, v := range vulns {
+		for k, val := range v.DatabaseSpecific {
+			k = strings.TrimSpace(k)
+			if k == "" {
+				continue
+			}
+			if val == "" {
+				continue
+			}
+			if _, ok := dbSpecific[k]; ok {
+				continue
+			}
+			dbSpecific[k] = val
+		}
+	}
+	if len(dbSpecific) == 0 {
+		dbSpecific = nil
+	}
+
 	return ConsolidatedVulnerability{
 		PrimaryID:        primaryID,
 		SecondaryIDs:     preferredSecondaries,
@@ -239,6 +267,8 @@ func createConsolidatedVulnerability(primaryID string, vulns []Vulnerability) Co
 		RelatedCount:     len(vulns),
 		Locations:        locations,
 		ManifestRefs:     manifestRefs,
+		AffectedImports:  mergedImports,
+		DatabaseSpecific: dbSpecific,
 	}
 }
 

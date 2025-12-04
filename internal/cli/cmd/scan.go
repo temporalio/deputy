@@ -344,6 +344,8 @@ WORKFLOW EXAMPLES:
 	scanCmd.Flags().String("published-after", "", "Only include vulnerabilities published on/after this date (YYYY, YYYY-MM, YYYY-MM-DD, or RFC3339)")
 	scanCmd.Flags().String("as-of", "", "Historical view: show vulnerabilities known up to and including this date (implies --published-before)")
 	scanCmd.Flags().StringArray("policy", nil, "Path to a CEL policy file or bundle to evaluate against the scan report (repeatable)")
+	scanCmd.Flags().Bool("show-symbols", false, "Show symbol hints (OSV imports) in text output")
+	scanCmd.Flags().Bool("show-db-info", false, "Show database-specific metadata (e.g., review_status) in text output")
 
 	scanDirCmd := &cobra.Command{
 		Use:   "dir <path>",
@@ -392,6 +394,8 @@ TYPICAL USE CASES:
 	scanDirCmd.Flags().String("published-after", "", "Only include vulnerabilities published on/after this date (YYYY, YYYY-MM, YYYY-MM-DD, or RFC3339)")
 	scanDirCmd.Flags().String("as-of", "", "Historical view: show vulnerabilities known up to and including this date (implies --published-before)")
 	scanDirCmd.Flags().StringArray("policy", nil, "Path to a CEL policy file or bundle to evaluate against the scan report (repeatable)")
+	scanDirCmd.Flags().Bool("show-symbols", false, "Show symbol hints (OSV imports) in text output")
+	scanDirCmd.Flags().Bool("show-db-info", false, "Show database-specific metadata (e.g., review_status) in text output")
 
 	scanSBOMCmd := &cobra.Command{
 		Use:   "sbom <file|->",
@@ -468,6 +472,8 @@ WORKFLOW EXAMPLES:
 	scanSBOMCmd.Flags().String("as-of", "", "Historical view: show vulnerabilities known up to and including this date (implies --published-before)")
 	scanSBOMCmd.Flags().String("input-format", "auto", "Input SBOM format (auto, protobom-json, cyclonedx-json, spdx-json)")
 	scanSBOMCmd.Flags().StringArray("policy", nil, "Path to a CEL policy file or bundle to evaluate against the scan report (repeatable)")
+	scanSBOMCmd.Flags().Bool("show-symbols", false, "Show symbol hints (OSV imports) in text output")
+	scanSBOMCmd.Flags().Bool("show-db-info", false, "Show database-specific metadata (e.g., review_status) in text output")
 
 	scanCmd.AddCommand(scanDirCmd, scanSBOMCmd)
 	root.AddCommand(scanCmd)
@@ -488,6 +494,9 @@ func (s *Scanner) runScan(cmd *cobra.Command, args []string) error {
 	publishedAfterStr, _ := cmd.Flags().GetString("published-after")
 	asOfStr, _ := cmd.Flags().GetString("as-of")
 	policyPaths, _ := cmd.Flags().GetStringArray("policy")
+	showSymbols, _ := cmd.Flags().GetBool("show-symbols")
+	showDBInfo, _ := cmd.Flags().GetBool("show-db-info")
+	displayOpts := vulnDisplayOptions{showSymbols: showSymbols, showDatabaseInfo: showDBInfo}
 
 	repoArg := ""
 	if len(args) > 0 {
@@ -527,7 +536,7 @@ func (s *Scanner) runScan(cmd *cobra.Command, args []string) error {
 
 	switch strings.ToLower(format) {
 	case "", "text":
-		return s.outputText(w, cmd.ErrOrStderr(), exec.displayPath, ref, exec.commitHash, exec.originURL, pkgs, goDirect, vulns, ignoreUnfixed, policyFindings)
+		return s.outputText(w, cmd.ErrOrStderr(), exec.displayPath, ref, exec.commitHash, exec.originURL, pkgs, goDirect, vulns, ignoreUnfixed, policyFindings, displayOpts)
 	case "json":
 		return s.outputJSON(w, exec.displayPath, ref, exec.commitHash, vulns, len(pkgs), ignoreUnfixed, policyFindings)
 	default:
@@ -550,6 +559,9 @@ func (s *Scanner) runScanDir(cmd *cobra.Command, args []string) error {
 	publishedAfterStr, _ := cmd.Flags().GetString("published-after")
 	asOfStr, _ := cmd.Flags().GetString("as-of")
 	policyPaths, _ := cmd.Flags().GetStringArray("policy")
+	showSymbols, _ := cmd.Flags().GetBool("show-symbols")
+	showDBInfo, _ := cmd.Flags().GetBool("show-db-info")
+	displayOpts := vulnDisplayOptions{showSymbols: showSymbols, showDatabaseInfo: showDBInfo}
 
 	ecos, _ := cmd.Flags().GetStringSlice("ecosystems")
 	scanOpts := inv.ScanOptions{Ecosystems: ecos}
@@ -613,7 +625,7 @@ func (s *Scanner) runScanDir(cmd *cobra.Command, args []string) error {
 
 	switch strings.ToLower(format) {
 	case "", "text":
-		return s.outputTextDir(w, cmd.ErrOrStderr(), path, vulns, ignoreUnfixed, policyFindings)
+		return s.outputTextDir(w, cmd.ErrOrStderr(), path, vulns, ignoreUnfixed, policyFindings, displayOpts)
 	case "json":
 		return s.outputJSON(w, path, "", "", vulns, len(pkgs), ignoreUnfixed, policyFindings)
 	default:
@@ -637,6 +649,9 @@ func (s *Scanner) runScanSBOM(cmd *cobra.Command, args []string) error {
 	asOfStr, _ := cmd.Flags().GetString("as-of")
 	inFmt, _ := cmd.Flags().GetString("input-format")
 	policyPaths, _ := cmd.Flags().GetStringArray("policy")
+	showSymbols, _ := cmd.Flags().GetBool("show-symbols")
+	showDBInfo, _ := cmd.Flags().GetBool("show-db-info")
+	displayOpts := vulnDisplayOptions{showSymbols: showSymbols, showDatabaseInfo: showDBInfo}
 
 	var r io.Reader
 	if input == "-" {
@@ -722,7 +737,7 @@ func (s *Scanner) runScanSBOM(cmd *cobra.Command, args []string) error {
 			vulnsEff = filterUnfixed(vulns)
 			fmt.Fprintln(cmd.ErrOrStderr(), "  "+ui.StyleMeta.Render("Note: ignoring unfixed vulnerabilities (--ignore-unfixed)"))
 		}
-		DisplayVulnerabilities(vulnsEff)
+		DisplayVulnerabilities(vulnsEff, displayOpts)
 		DisplayPolicyFindings(policyFindings)
 		return nil
 	case "json":
@@ -876,7 +891,7 @@ func getRepoMetadata(localRepoPath, ref string) (string, string) {
 }
 
 // outputText writes the scan results in a human-readable text format to the provided writer.
-func (s *Scanner) outputText(w io.Writer, errW io.Writer, repoPath, ref, commitHash, originURL string, pkgs []*extractor.Package, goDirect map[string]bool, vulns []analysis.Vulnerability, ignoreUnfixed bool, policyFindings []PolicyFinding) error {
+func (s *Scanner) outputText(w io.Writer, errW io.Writer, repoPath, ref, commitHash, originURL string, pkgs []*extractor.Package, goDirect map[string]bool, vulns []analysis.Vulnerability, ignoreUnfixed bool, policyFindings []PolicyFinding, displayOpts vulnDisplayOptions) error {
 	shortRef := shortGitRef(refOrHEAD(ref))
 	shortHash := commitHash
 	if len(shortHash) > 7 {
@@ -907,7 +922,7 @@ func (s *Scanner) outputText(w io.Writer, errW io.Writer, repoPath, ref, commitH
 		fmt.Fprintln(errW, "  "+ui.StyleMeta.Render("Note: ignoring unfixed vulnerabilities (--ignore-unfixed)"))
 	}
 
-	DisplayVulnerabilities(vulnsEff)
+	DisplayVulnerabilities(vulnsEff, displayOpts)
 	DisplayPolicyFindings(policyFindings)
 
 	// Show module deprecations
@@ -926,7 +941,7 @@ func (s *Scanner) outputText(w io.Writer, errW io.Writer, repoPath, ref, commitH
 }
 
 // outputTextDir writes the directory scan results in a human-readable text format.
-func (s *Scanner) outputTextDir(w io.Writer, errW io.Writer, path string, vulns []analysis.Vulnerability, ignoreUnfixed bool, policyFindings []PolicyFinding) error {
+func (s *Scanner) outputTextDir(w io.Writer, errW io.Writer, path string, vulns []analysis.Vulnerability, ignoreUnfixed bool, policyFindings []PolicyFinding, displayOpts vulnDisplayOptions) error {
 	fmt.Fprintln(w)
 	fmt.Fprintln(w, ui.StyleHeader.Render("Scan Results:"))
 	fmt.Fprintf(w, "  Target: %s\n", ui.StylePackageName.Render(path))
@@ -937,7 +952,7 @@ func (s *Scanner) outputTextDir(w io.Writer, errW io.Writer, path string, vulns 
 		fmt.Fprintln(errW, "  "+ui.StyleMeta.Render("Note: ignoring unfixed vulnerabilities (--ignore-unfixed)"))
 	}
 
-	DisplayVulnerabilities(vulnsEff)
+	DisplayVulnerabilities(vulnsEff, displayOpts)
 	DisplayPolicyFindings(policyFindings)
 	return nil
 }

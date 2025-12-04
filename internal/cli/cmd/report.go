@@ -13,9 +13,21 @@ import (
 	ui "github.com/picatz/deputy/internal/ui"
 )
 
+type vulnDisplayOptions struct {
+	showSymbols      bool
+	showDatabaseInfo bool
+}
+
+func resolveVulnDisplayOptions(opts []vulnDisplayOptions) vulnDisplayOptions {
+	if len(opts) > 0 {
+		return opts[0]
+	}
+	return vulnDisplayOptions{}
+}
+
 // DisplayVulnerabilities renders a styled vulnerability report with the default heading.
-func DisplayVulnerabilities(vulns []analysis.Vulnerability) {
-	DisplayVulnerabilitiesWithHeader(vulns, "Vulnerabilities Found:")
+func DisplayVulnerabilities(vulns []analysis.Vulnerability, opts ...vulnDisplayOptions) {
+	DisplayVulnerabilitiesWithHeader(vulns, "Vulnerabilities Found:", opts...)
 }
 
 // DisplayPolicyFindings renders any policy actions emitted during a command.
@@ -47,7 +59,8 @@ func DisplayPolicyFindings(findings []PolicyFinding) {
 }
 
 // DisplayVulnerabilitiesWithHeader renders a styled vulnerability report to stdout using the provided heading.
-func DisplayVulnerabilitiesWithHeader(vulns []analysis.Vulnerability, heading string) {
+func DisplayVulnerabilitiesWithHeader(vulns []analysis.Vulnerability, heading string, opts ...vulnDisplayOptions) {
+	displayOpts := resolveVulnDisplayOptions(opts)
 	cons := analysis.ConsolidateVulnerabilities(vulns)
 	if len(cons) == 0 {
 		fmt.Println("\n" + ui.StyleAdded.Render("✓ No vulnerabilities found"))
@@ -55,7 +68,7 @@ func DisplayVulnerabilitiesWithHeader(vulns []analysis.Vulnerability, heading st
 	}
 	fmt.Println("\n" + ui.StyleDowngraded.Render("∴ ") + ui.StyleHeader.Render(heading))
 
-	RenderVulnerabilityList(vulns)
+	RenderVulnerabilityList(vulns, displayOpts)
 
 	RenderVulnerabilitySummaryAndActions(vulns)
 }
@@ -141,7 +154,7 @@ func normalizeGoVersion(v string) string {
 
 // RenderVulnerabilityList prints per-package vulnerability details without headings or summary.
 // Used by diff to compose combined views.
-func RenderVulnerabilityList(vulns []analysis.Vulnerability) {
+func RenderVulnerabilityList(vulns []analysis.Vulnerability, opts vulnDisplayOptions) {
 	cons := analysis.ConsolidateVulnerabilities(vulns)
 	if len(cons) == 0 {
 		return
@@ -203,6 +216,23 @@ func RenderVulnerabilityList(vulns []analysis.Vulnerability) {
 
 			if v.Summary != "" && len(v.Summary) < 120 {
 				fmt.Println("    " + ui.StyleSymbol.Render(strings.TrimSpace(v.Summary)))
+			}
+			if opts.showSymbols && len(v.AffectedImports) > 0 {
+				lines := formatImportSummaries(v.AffectedImports, 3, 4)
+				if len(lines) > 0 {
+					fmt.Println("    " + ui.StyleMeta.Render("Symbol hints (Go/OSV):"))
+					for _, line := range lines {
+						fmt.Println("      " + ui.StylePath.Render(line))
+					}
+				}
+			}
+			if opts.showDatabaseInfo {
+				if dbLines := formatDatabaseSpecificInfo(v.DatabaseSpecific, 3); len(dbLines) > 0 {
+					fmt.Println("    " + ui.StyleMeta.Render("Database info:"))
+					for _, line := range dbLines {
+						fmt.Println("      " + ui.StyleMeta.Render(line))
+					}
+				}
 			}
 			if len(v.SecondaryIDs) > 0 {
 				aliases := append([]string(nil), v.SecondaryIDs...)

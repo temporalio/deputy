@@ -177,11 +177,20 @@ func QueryOSVBatch(ctx context.Context, client OSVClient, pkgs []PkgInput) ([]Vu
 					base.Severity, base.SeverityType = sev, typ
 				}
 				fixSet := map[string]struct{}{}
+				var importSets [][]AffectedImport
+				if len(base.AffectedImports) > 0 {
+					importSets = append(importSets, base.AffectedImports)
+				}
+				dbSpecific := cloneStringMap(base.DatabaseSpecific)
 				for _, v := range all {
 					for _, f := range v.FixedVersions {
 						fixSet[f] = struct{}{}
 					}
 					base.Aliases = append(base.Aliases, v.Aliases...)
+					if len(v.AffectedImports) > 0 {
+						importSets = append(importSets, v.AffectedImports)
+					}
+					dbSpecific = mergeStringMap(dbSpecific, v.DatabaseSpecific)
 				}
 				aliasSet := map[string]struct{}{}
 				uniqAliases := make([]string, 0, len(base.Aliases))
@@ -199,6 +208,8 @@ func QueryOSVBatch(ctx context.Context, client OSVClient, pkgs []PkgInput) ([]Vu
 				for f := range fixSet {
 					base.FixedVersions = append(base.FixedVersions, f)
 				}
+				base.AffectedImports = MergeAffectedImports(importSets...)
+				base.DatabaseSpecific = dbSpecific
 				local = append(local, base)
 			}
 			if len(local) > 0 {
@@ -294,4 +305,35 @@ func isVersionAffected(v osvschema.Vulnerability, pkg PkgInput) bool {
 		}
 	}
 	return false
+}
+
+// mergeStringMap merges string maps, keeping existing entries in base when keys collide.
+func mergeStringMap(base map[string]string, extra map[string]string) map[string]string {
+	if len(extra) == 0 {
+		return base
+	}
+	if base == nil {
+		base = map[string]string{}
+	}
+	for k, v := range extra {
+		if k == "" || v == "" {
+			continue
+		}
+		if _, ok := base[k]; ok {
+			continue
+		}
+		base[k] = v
+	}
+	return base
+}
+
+func cloneStringMap(src map[string]string) map[string]string {
+	if len(src) == 0 {
+		return nil
+	}
+	out := make(map[string]string, len(src))
+	for k, v := range src {
+		out[k] = v
+	}
+	return out
 }

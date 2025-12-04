@@ -91,3 +91,21 @@ func TestCreateConsolidatedVulnerabilityAllAliasesHidden(t *testing.T) {
 		t.Fatalf("expected hidden alias count 3, got %d", cons.HiddenAliasCount)
 	}
 }
+
+func TestCreateConsolidatedVulnerabilityDatabaseSpecificMerged(t *testing.T) {
+	vulns := []Vulnerability{
+		{ID: "A", Affected: true, DatabaseSpecific: map[string]string{"url": "https://pkg.go.dev/vuln/GO-A"}},
+		{ID: "B", Affected: true, DatabaseSpecific: map[string]string{"review_status": "REVIEWED"}},
+		{ID: "C", Affected: true, DatabaseSpecific: map[string]string{"url": "https://pkg.go.dev/vuln/GO-A"}},
+	}
+	cons := createConsolidatedVulnerability("A", vulns)
+	if len(cons.DatabaseSpecific) != 2 {
+		t.Fatalf("expected merged database_specific entries, got %v", cons.DatabaseSpecific)
+	}
+	if cons.DatabaseSpecific["url"] != "https://pkg.go.dev/vuln/GO-A" {
+		t.Fatalf("unexpected url %q", cons.DatabaseSpecific["url"])
+	}
+	if cons.DatabaseSpecific["review_status"] != "REVIEWED" {
+		t.Fatalf("unexpected review_status %q", cons.DatabaseSpecific["review_status"])
+	}
+}

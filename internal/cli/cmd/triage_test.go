@@ -26,3 +26,34 @@ func TestAggregatePackages(t *testing.T) {
 		t.Fatalf("expected sample id for pkg/b")
 	}
 }
+
+func TestAggregatePackagesImports(t *testing.T) {
+	cons := []analysis.ConsolidatedVulnerability{
+		{
+			Package:         "pkg/a",
+			Version:         "1.0.0",
+			Severity:        "HIGH",
+			AffectedImports: []analysis.AffectedImport{{Path: "net/http", Symbols: []string{"Serve"}}},
+		},
+		{
+			Package:         "pkg/a",
+			Version:         "1.0.0",
+			Severity:        "LOW",
+			AffectedImports: []analysis.AffectedImport{{Path: "crypto/tls"}, {Path: "net/http", Symbols: []string{"Serve"}}},
+		},
+	}
+	pkgs := aggregatePackages(cons)
+	if len(pkgs) != 1 {
+		t.Fatalf("expected 1 package summary, got %d", len(pkgs))
+	}
+	imports := pkgs[0].AffectedImports
+	if len(imports) != 2 {
+		t.Fatalf("expected merged imports, got %d", len(imports))
+	}
+	if imports[0].Path != "crypto/tls" {
+		t.Fatalf("expected crypto/tls first, got %s", imports[0].Path)
+	}
+	if len(imports[1].Symbols) != 1 || imports[1].Symbols[0] != "Serve" {
+		t.Fatalf("expected deduped symbol Serve, got %v", imports[1].Symbols)
+	}
+}
