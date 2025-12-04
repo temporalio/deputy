@@ -10,6 +10,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/picatz/deputy/internal/logs"
 	protocol "github.com/sourcegraph/go-lsp"
 	"github.com/sourcegraph/jsonrpc2"
 )
@@ -25,7 +26,12 @@ type Options struct {
 func Run(ctx context.Context, opts Options) error {
 	log := opts.Log
 	if log == nil {
-		log = slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelInfo}))
+		log = logs.New(logs.Options{
+			Level:        slog.LevelInfo,
+			Format:       "text",
+			Writer:       os.Stderr,
+			ColorEnabled: false, // LSP usually runs in background/editor, color might break parsing if not careful, though stderr is usually safe. Safe to disable by default here.
+		})
 	}
 	handler := newHandler(log)
 

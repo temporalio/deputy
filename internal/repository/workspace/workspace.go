@@ -3,7 +3,6 @@ package workspace
 import (
 	"errors"
 	"fmt"
-	"io/fs"
 	"path"
 	"path/filepath"
 	"strings"
@@ -24,28 +23,18 @@ var (
 )
 
 // FileReader captures the minimal contract needed to read files from a workspace.
+// Deprecated: Use ReadableFS instead.
 type FileReader interface {
 	ReadFile(path string) ([]byte, error)
 }
 
-// FS represents a target filesystem (e.g., git repository) backed by the OS
-// filesystem, go-git/billy implementations, or any future virtual storage. All
-// paths are interpreted relative to the workspace root.
-type FS interface {
-	FileReader
-	fs.ReadDirFS
-	fs.StatFS
-
-	Open(name string) (fs.File, error)
-	WriteFile(name string, data []byte, perm fs.FileMode) error
-	MkdirAll(path string, perm fs.FileMode) error
-	Remove(path string) error
-	RemoveAll(path string) error
-
-	ScalibrRoots() []*scalibrfs.ScanRoot
-	RootPath() string
-	IsVirtual() bool
-	Close() error
+// Mutable extends Workspace with the guarantee that write operations
+// succeed. Implementations that are read-only can return ErrReadOnly for write
+// methods; callers can use a type assertion to Mutable when mutation
+// is required.
+// Deprecated: Use MutableFS interface instead.
+type Mutable interface {
+	FS
 }
 
 // baseWorkspace holds shared state (root path, scalibr roots, cleanup) that
@@ -79,10 +68,16 @@ func (b *baseWorkspace) ensureOpen() error {
 }
 
 // ScalibrRoots returns the scan roots Deputy advertises to osv-scalibr.
+// Deprecated: Use Scanner interface and ToScanner adapter instead.
 func (b *baseWorkspace) ScalibrRoots() []*scalibrfs.ScanRoot {
 	b.mu.RLock()
 	defer b.mu.RUnlock()
 	return b.scanRoots
+}
+
+// ScanRoots implements the Scanner interface.
+func (b *baseWorkspace) ScanRoots() []*scalibrfs.ScanRoot {
+	return b.ScalibrRoots()
 }
 
 // RootPath returns the underlying on-disk root or "" for virtual workspaces.
@@ -107,14 +102,6 @@ func (b *baseWorkspace) Close() error {
 		return cleanup()
 	}
 	return nil
-}
-
-// Mutable extends Workspace with the guarantee that write operations
-// succeed. Implementations that are read-only can return ErrReadOnly for write
-// methods; callers can use a type assertion to Mutable when mutation
-// is required.
-type Mutable interface {
-	FS
 }
 
 // cleanPath normalises a potentially OS-specific path into a slash-separated

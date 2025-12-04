@@ -11,6 +11,7 @@ import (
 	"github.com/charmbracelet/fang"
 	"github.com/go-git/go-git/v5"
 	"github.com/picatz/deputy/internal/cli/cmd"
+	"github.com/picatz/deputy/internal/logs"
 	_ "github.com/picatz/deputy/internal/targets/providers"
 	"github.com/spf13/cobra"
 )
@@ -138,16 +139,17 @@ func configureLogging(levelStr, format string) error {
 	if err != nil {
 		return err
 	}
-	var handler slog.Handler
-	switch strings.ToLower(strings.TrimSpace(format)) {
-	case "", "text":
-		handler = slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: level})
-	case "json":
-		handler = slog.NewJSONHandler(os.Stderr, &slog.HandlerOptions{Level: level})
-	default:
-		return fmt.Errorf("unknown log format %q", format)
-	}
-	slog.SetDefault(slog.New(handler))
+
+	logger := logs.New(logs.Options{
+		Level:        level.(slog.Level),
+		Format:       format,
+		Writer:       os.Stderr,
+		ColorEnabled: true,
+	})
+
+	slog.SetDefault(logger)
+	logs.SetDefault(logger)
+
 	return nil
 }
 

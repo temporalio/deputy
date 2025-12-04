@@ -1,0 +1,224 @@
+package analysis
+
+import (
+	"fmt"
+	"strings"
+)
+
+// Severity represents the severity level of a vulnerability using a type-safe enum.
+type Severity int
+
+const (
+	// SeverityUnknown indicates the severity level is not determined or unavailable.
+	SeverityUnknown Severity = iota
+	// SeverityLow represents low severity vulnerabilities with minimal impact.
+	SeverityLow
+	// SeverityMedium represents medium severity vulnerabilities with moderate impact.
+	SeverityMedium
+	// SeverityHigh represents high severity vulnerabilities with significant impact.
+	SeverityHigh
+	// SeverityCritical represents critical severity vulnerabilities requiring immediate attention.
+	SeverityCritical
+)
+
+// String returns the string representation of the severity level.
+func (s Severity) String() string {
+	switch s {
+	case SeverityLow:
+		return "LOW"
+	case SeverityMedium:
+		return "MEDIUM"
+	case SeverityHigh:
+		return "HIGH"
+	case SeverityCritical:
+		return "CRITICAL"
+	default:
+		return "UNKNOWN"
+	}
+}
+
+// ParseSeverity converts a string severity level to the Severity enum.
+// It normalizes the input to handle common variations and returns SeverityUnknown
+// for unrecognized values.
+func ParseSeverity(s string) Severity {
+	switch strings.ToUpper(strings.TrimSpace(s)) {
+	case "LOW":
+		return SeverityLow
+	case "MEDIUM", "MODERATE", "MED":
+		return SeverityMedium
+	case "HIGH":
+		return SeverityHigh
+	case "CRITICAL", "CRIT":
+		return SeverityCritical
+	default:
+		return SeverityUnknown
+	}
+}
+
+// Score returns a numeric score for severity ordering (higher is more severe).
+func (s Severity) Score() int {
+	return int(s)
+}
+
+// IsHigherThan returns true if this severity is more severe than the other.
+func (s Severity) IsHigherThan(other Severity) bool {
+	return s.Score() > other.Score()
+}
+
+// SeverityType represents the source or scoring system for a severity rating.
+type SeverityType int
+
+const (
+	// SeverityTypeUnknown indicates the severity type is not specified.
+	SeverityTypeUnknown SeverityType = iota
+	// SeverityTypeCVSSv2 indicates Common Vulnerability Scoring System version 2.
+	SeverityTypeCVSSv2
+	// SeverityTypeCVSSv3 indicates Common Vulnerability Scoring System version 3.
+	SeverityTypeCVSSv3
+	// SeverityTypeCVSSv4 indicates Common Vulnerability Scoring System version 4.
+	SeverityTypeCVSSv4
+	// SeverityTypeGHSA indicates GitHub Security Advisory severity rating.
+	SeverityTypeGHSA
+	// SeverityTypeCustom indicates a custom or vendor-specific severity rating.
+	SeverityTypeCustom
+)
+
+// String returns the string representation of the severity type.
+func (st SeverityType) String() string {
+	switch st {
+	case SeverityTypeCVSSv2:
+		return "CVSS_V2"
+	case SeverityTypeCVSSv3:
+		return "CVSS_V3"
+	case SeverityTypeCVSSv4:
+		return "CVSS_V4"
+	case SeverityTypeGHSA:
+		return "GHSA"
+	case SeverityTypeCustom:
+		return "CUSTOM"
+	default:
+		return "UNKNOWN"
+	}
+}
+
+// ParseSeverityType converts a string to the SeverityType enum.
+func ParseSeverityType(s string) SeverityType {
+	switch strings.ToUpper(strings.TrimSpace(s)) {
+	case "CVSS_V2", "CVSSV2":
+		return SeverityTypeCVSSv2
+	case "CVSS_V3", "CVSSV3":
+		return SeverityTypeCVSSv3
+	case "CVSS_V4", "CVSSV4":
+		return SeverityTypeCVSSv4
+	case "GHSA":
+		return SeverityTypeGHSA
+	case "CUSTOM":
+		return SeverityTypeCustom
+	default:
+		return SeverityTypeUnknown
+	}
+}
+
+// SeverityInfo encapsulates both the severity level and its source/type.
+type SeverityInfo struct {
+	Level    Severity
+	Type     SeverityType
+	RawScore string // Original CVSS score or severity string
+	RawType  string // Original type string for compatibility
+}
+
+// NewSeverityInfo creates a SeverityInfo from raw string values.
+// This is useful for migrating from string-based severity fields.
+func NewSeverityInfo(severityStr, typeStr string) SeverityInfo {
+	return SeverityInfo{
+		Level:    ParseSeverity(severityStr),
+		Type:     ParseSeverityType(typeStr),
+		RawScore: severityStr,
+		RawType:  typeStr,
+	}
+}
+
+// IsValid returns true if the severity info has a recognized level and type.
+func (si SeverityInfo) IsValid() bool {
+	return si.Level != SeverityUnknown && si.Type != SeverityTypeUnknown
+}
+
+// String returns a human-readable representation of the severity info.
+func (si SeverityInfo) String() string {
+	if si.Type != SeverityTypeUnknown {
+		return fmt.Sprintf("%s (%s)", si.Level, si.Type)
+	}
+	return si.Level.String()
+}
+
+// Ecosystem represents a package ecosystem or registry.
+type Ecosystem int
+
+const (
+	// EcosystemUnknown indicates the ecosystem is not recognized.
+	EcosystemUnknown Ecosystem = iota
+	// EcosystemGo represents the Go module ecosystem.
+	EcosystemGo
+	// EcosystemNPM represents the npm (Node.js) ecosystem.
+	EcosystemNPM
+	// EcosystemPyPI represents the Python Package Index.
+	EcosystemPyPI
+	// EcosystemRubyGems represents the RubyGems ecosystem.
+	EcosystemRubyGems
+	// EcosystemMaven represents the Maven (Java) ecosystem.
+	EcosystemMaven
+	// EcosystemNuGet represents the NuGet (.NET) ecosystem.
+	EcosystemNuGet
+	// EcosystemCrates represents the Cargo/crates.io (Rust) ecosystem.
+	EcosystemCrates
+	// EcosystemComposer represents the Composer (PHP) ecosystem.
+	EcosystemComposer
+)
+
+// String returns the canonical string name for the ecosystem.
+func (e Ecosystem) String() string {
+	switch e {
+	case EcosystemGo:
+		return "go"
+	case EcosystemNPM:
+		return "npm"
+	case EcosystemPyPI:
+		return "pypi"
+	case EcosystemRubyGems:
+		return "rubygems"
+	case EcosystemMaven:
+		return "maven"
+	case EcosystemNuGet:
+		return "nuget"
+	case EcosystemCrates:
+		return "crates"
+	case EcosystemComposer:
+		return "composer"
+	default:
+		return "unknown"
+	}
+}
+
+// ParseEcosystem converts a string ecosystem name to the Ecosystem enum.
+func ParseEcosystem(s string) Ecosystem {
+	switch strings.ToLower(strings.TrimSpace(s)) {
+	case "go", "golang":
+		return EcosystemGo
+	case "npm", "node", "nodejs":
+		return EcosystemNPM
+	case "pypi", "python", "pip":
+		return EcosystemPyPI
+	case "rubygems", "ruby", "gem":
+		return EcosystemRubyGems
+	case "maven":
+		return EcosystemMaven
+	case "nuget":
+		return EcosystemNuGet
+	case "crates", "cargo", "rust":
+		return EcosystemCrates
+	case "composer", "php":
+		return EcosystemComposer
+	default:
+		return EcosystemUnknown
+	}
+}

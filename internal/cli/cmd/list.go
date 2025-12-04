@@ -48,11 +48,13 @@ type ListResult struct {
 
 // AddListCommand registers the list (ls) subcommand.
 func AddListCommand(root *cobra.Command) {
-	var ref, format, outPath, level string
-	var ecos []string
-	var noHeader bool
-	var onlyDirect bool
-	var showSources bool
+	var (
+		ref, format, outPath, level string
+		ecos                        []string
+		noHeader                    bool
+		onlyDirect                  bool
+		showSources                 bool
+	)
 
 	cmd := &cobra.Command{
 		Use:     "list [repo]",

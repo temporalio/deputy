@@ -10,8 +10,10 @@ import (
 // AddProxyCommand adds the "proxy" command and its subcommands to the root command.
 // The proxy command allows running Deputy as an artifact proxy server.
 func AddProxyCommand(root *cobra.Command) {
-	var cfgPath string
-	var extraPolicies []string
+	var (
+		cfgPath       string
+		extraPolicies []string
+	)
 
 	proxyCmd := &cobra.Command{
 		Use:   "proxy",

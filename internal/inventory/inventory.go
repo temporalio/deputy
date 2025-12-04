@@ -73,7 +73,11 @@ func scanWorkspace(ctx context.Context, ws workspace.FS, opts ScanOptions) ([]*e
 		return nil, err
 	}
 	plugins = filterInventoryPlugins(plugins)
-	cfg := &scalibr.ScanConfig{ScanRoots: ws.ScalibrRoots(), Plugins: plugins, Capabilities: cap}
+
+	// Use the Scanner adapter to isolate scalibr dependencies
+	scanner := workspace.ToScanner(ws)
+	cfg := &scalibr.ScanConfig{ScanRoots: scanner.ScanRoots(), Plugins: plugins, Capabilities: cap}
+
 	results := scalibr.New().Scan(ctx, cfg)
 	pkgs := results.Inventory.Packages
 	if extras, err := collectGemfilePackages(ws); err != nil {

@@ -84,8 +84,10 @@ type proxyExecConfig struct {
 
 // newProxyExecCommand creates a new cobra.Command for a specific proxy execution specification.
 func newProxyExecCommand(spec proxyExecSpec) *cobra.Command {
-	var upstream string
-	var policies []string
+	var (
+		upstream string
+		policies []string
+	)
 	cmd := &cobra.Command{
 		Use:   spec.name + " -- <command> [args...]",
 		Short: spec.short,

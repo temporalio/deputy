@@ -14,10 +14,12 @@ import (
 
 // AddSBOMCommand registers the sbom subcommand
 func AddSBOMCommand(root *cobra.Command) {
-	var ref, format, outPath, name, licenseSource string
-	var ecos []string
-	var enrichLicenses, showContext bool
-	var policyPaths []string
+	var (
+		ref, format, outPath, name, licenseSource string
+		ecos                                      []string
+		enrichLicenses, showContext               bool
+		policyPaths                               []string
+	)
 
 	cmd := &cobra.Command{
 		Use:   "sbom [repo]",

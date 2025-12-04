@@ -33,18 +33,20 @@ import (
 // inventories between two Git references (or working tree) and optionally
 // performs vulnerability scanning on changed modules.
 func AddDiffCommand(root *cobra.Command) {
-	var repoPath string
-	var skipVulnScan bool
-	var useLicenseCheck bool
-	var enrichLicenses bool
-	var licenseSource string
-	var publishedBeforeStr, publishedAfterStr, asOfStr string
-	var ignoreUnfixed bool
-	var showUnchanged bool
-	var unchangedThreshold string
-	var ecosystems []string
-	var debugMatcher bool
-	var policyPaths []string
+	var (
+		repoPath                                       string
+		skipVulnScan                                   bool
+		useLicenseCheck                                bool
+		enrichLicenses                                 bool
+		licenseSource                                  string
+		publishedBeforeStr, publishedAfterStr, asOfStr string
+		ignoreUnfixed                                  bool
+		showUnchanged                                  bool
+		unchangedThreshold                             string
+		ecosystems                                     []string
+		debugMatcher                                   bool
+		policyPaths                                    []string
+	)
 
 	cmd := &cobra.Command{
 		Use:   "diff [base] [target]",

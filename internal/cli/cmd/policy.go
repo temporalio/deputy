@@ -65,9 +65,11 @@ These tools help you write robust policies before deploying them to the proxy or
 
 // newPolicyEvalCommand creates the `eval` subcommand for evaluating policies.
 func newPolicyEvalCommand() *cobra.Command {
-	var policyPath string
-	var inputPath string
-	var format string
+	var (
+		policyPath string
+		inputPath  string
+		format     string
+	)
 	cmd := &cobra.Command{
 		Use:   "eval --policy policy.yaml --input input.json",
 		Short: "Evaluate a CEL policy against JSON input",
@@ -444,9 +446,11 @@ func newPolicyInspectCommand() *cobra.Command {
 
 // newPolicySimulateCommand creates the `simulate` subcommand for running policies against inputs.
 func newPolicySimulateCommand() *cobra.Command {
-	var policies []string
-	var inputs []string
-	var format string
+	var (
+		policies []string
+		inputs   []string
+		format   string
+	)
 	cmd := &cobra.Command{
 		Use:   "simulate --policy policy.yaml --input input.json",
 		Short: "Run policies against recorded JSON inputs",

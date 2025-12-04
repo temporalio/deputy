@@ -11,8 +11,10 @@ import (
 
 // newPolicyLSPCommand creates the `lsp` subcommand for starting the language server.
 func newPolicyLSPCommand() *cobra.Command {
-	var useTCP string
-	var logLevel string
+	var (
+		useTCP   string
+		logLevel string
+	)
 	cmd := &cobra.Command{
 		Use:   "lsp",
 		Short: "Start the Deputy policy language server (YAML + CEL)",
