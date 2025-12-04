@@ -22,6 +22,7 @@ import (
 	"github.com/google/osv-scalibr/extractor"
 	"github.com/google/osv-scalibr/purl"
 	analysis "github.com/picatz/deputy/internal/analysis"
+	cmp "github.com/picatz/deputy/internal/compare"
 	gitx "github.com/picatz/deputy/internal/gitutil"
 	"github.com/picatz/deputy/internal/inventory"
 	"github.com/picatz/deputy/internal/repository"
@@ -126,7 +127,16 @@ func Generate(ctx context.Context, repoRef string, opts Options) (Result, error)
 		return Result{}, err
 	}
 
-	doc, err := buildProtobomDocument(src.Workspace, repoRef, opts.Ref, opts.Name, pkgs)
+	var directDeps map[string]bool
+	if strings.EqualFold(effRef, "HEAD") || strings.EqualFold(effRef, "HEAD~0") {
+		directDeps = cmp.CollectGoDirectModulesFromWorkspace(src.Workspace)
+	} else {
+		if hash, err := gitx.ResolveRevisionEnhanced(src.Repo, effRef); err == nil {
+			directDeps, _ = cmp.CollectGoDirectModulesFromCommit(src.Repo, *hash)
+		}
+	}
+
+	doc, err := buildProtobomDocument(src.Workspace, repoRef, opts.Ref, opts.Name, pkgs, directDeps)
 	if err != nil {
 		return Result{}, err
 	}
@@ -218,8 +228,7 @@ func resolveRepoMetadata(repo *git.Repository, ref, fallbackOrigin string) (stri
 }
 
 // buildProtobomDocument converts the scalibr packages into a Protobom doc.
-// buildProtobomDocument converts the scalibr packages into a Protobom doc.
-func buildProtobomDocument(ws workspace.FS, repoRef, ref, name string, pkgs []*extractor.Package) (*sbom.Document, error) {
+func buildProtobomDocument(ws workspace.FS, repoRef, ref, name string, pkgs []*extractor.Package, directDeps map[string]bool) (*sbom.Document, error) {
 	if name == "" {
 		name = fmt.Sprintf("%s@%s", repoRef, ref)
 	}
@@ -258,6 +267,42 @@ func buildProtobomDocument(ws workspace.FS, repoRef, ref, name string, pkgs []*e
 			}
 			n.Identifiers[int32(sbom.SoftwareIdentifierType_PURL)] = purlStr
 		}
+
+		// Mark direct dependencies.
+		// We use a custom property "deputy:direct" because Protobom's Node struct
+		// does not have a native field for dependency directness (unlike CycloneDX's
+		// dependency graph or SPDX's relationship types, which are not fully exposed
+		// in the flat Node list in a way that persists easily through all formats).
+		isDirect := false
+		if directDeps != nil {
+			nameToCheck := p.Name
+			if pu := p.PURL(); pu != nil && pu.Type == purl.TypeGolang {
+				info := cmp.ParseGoPackage(p)
+				nameToCheck = cmp.GetModuleRoot(info.CanonicalName)
+			}
+			if directDeps[nameToCheck] {
+				isDirect = true
+			}
+		}
+
+		if isDirect {
+			n.Properties = append(n.Properties, &sbom.Property{
+				Name: "deputy:direct",
+				Data: "true",
+			})
+		}
+
+		// Persist location evidence (e.g. "go.mod").
+		// Protobom's Node struct does not currently have a dedicated "Evidence" or
+		// "Occurrences" field that maps to CycloneDX's component.evidence.occurrences.
+		// We use "deputy:location" to preserve this context for remediation commands.
+		for _, loc := range p.Locations {
+			n.Properties = append(n.Properties, &sbom.Property{
+				Name: "deputy:location",
+				Data: loc,
+			})
+		}
+
 		d.NodeList.Nodes = append(d.NodeList.Nodes, n)
 		d.NodeList.Edges = append(d.NodeList.Edges, &sbom.Edge{
 			Type: sbom.Edge_contains,

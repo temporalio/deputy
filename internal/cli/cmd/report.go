@@ -189,25 +189,7 @@ func RenderVulnerabilityList(vulns []analysis.Vulnerability) {
 		fmt.Printf("\n%s %s %s:\n", ui.StylePackageName.Render(pkg), ui.StyleVersion.Render(list[0].Version), depType)
 
 		for _, v := range list {
-			var sevDisp string
-			if v.SeverityType == "GHSA" {
-				up := strings.ToUpper(v.Severity)
-				switch up {
-				case "CRITICAL":
-					sevDisp = lipgloss.NewStyle().Foreground(lipgloss.Color("#FF00FF")).Bold(true).Render("[CRITICAL]")
-				case "HIGH":
-					sevDisp = ui.StyleRemoved.Render("[HIGH]")
-				case "MEDIUM", "MODERATE":
-					sevDisp = ui.StyleDowngraded.Render("[MED]")
-				case "LOW":
-					sevDisp = ui.StyleVersion.Render("[LOW]")
-				default:
-					score := analysis.ParseCVSSScore(v.Severity)
-					sevDisp = scoreLabel(score)
-				}
-			} else {
-				sevDisp = scoreLabel(analysis.ParseCVSSScore(v.Severity))
-			}
+			sevDisp := ui.SeverityLabel(v.Severity, v.SeverityType)
 			parts := []string{ui.StyleSymbol.Render(v.PrimaryID), sevDisp}
 			if len(v.FixedVersions) > 0 {
 				if best := analysis.FindBestFixedVersion(v.FixedVersions, v.Version); best != "" {

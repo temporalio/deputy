@@ -15,7 +15,7 @@ func TestParseSBOMPackagesCycloneDX(t *testing.T) {
     }
   ]
 }`
-	pkgs, err := parseSBOMPackages([]byte(data), "auto")
+	pkgs, _, err := parseSBOMPackages([]byte(data), "auto")
 	if err != nil {
 		t.Fatalf("parseSBOMPackages auto cyclonedx: %v", err)
 	}
@@ -57,7 +57,7 @@ func TestParseSBOMPackagesSPDX(t *testing.T) {
     }
   ]
 }`
-	pkgs, err := parseSBOMPackages([]byte(data), "spdx-json")
+	pkgs, _, err := parseSBOMPackages([]byte(data), "spdx-json")
 	if err != nil {
 		t.Fatalf("parseSBOMPackages spdx: %v", err)
 	}
@@ -69,5 +69,38 @@ func TestParseSBOMPackagesSPDX(t *testing.T) {
 	}
 	if pkgs[0].PURLType != "npm" {
 		t.Fatalf("expected npm PURL type, got %q", pkgs[0].PURLType)
+	}
+}
+
+func TestParseSBOMPackagesProtobomDirect(t *testing.T) {
+	data := `{
+  "nodeList": {
+    "nodes": [
+      {
+        "id": "node-1",
+        "name": "left-pad",
+        "version": "1.3.0",
+        "identifiers": {
+          "1": "pkg:npm/left-pad@1.3.0"
+        },
+        "properties": [
+          {
+            "name": "deputy:direct",
+            "data": "true"
+          }
+        ]
+      }
+    ]
+  }
+}`
+	pkgs, direct, err := parseSBOMPackages([]byte(data), "protobom")
+	if err != nil {
+		t.Fatalf("parseSBOMPackages protobom: %v", err)
+	}
+	if len(pkgs) != 1 {
+		t.Fatalf("expected 1 package, got %d", len(pkgs))
+	}
+	if !direct["pkg:npm/left-pad@1.3.0"] {
+		t.Fatalf("expected direct dependency")
 	}
 }

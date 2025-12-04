@@ -655,12 +655,12 @@ func (s *Scanner) runScanSBOM(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to read input: %w", err)
 	}
 
-	pkgs, err := parseSBOMPackages(data, inFmt)
+	pkgs, direct, err := parseSBOMPackages(data, inFmt)
 	if err != nil {
 		return fmt.Errorf("failed to parse SBOM: %w", err)
 	}
 
-	inputs := packagesToInputs(pkgs, packageInputOptions{})
+	inputs := packagesToInputs(pkgs, packageInputOptions{DirectPackages: direct})
 
 	vulns, err := s.queryOSV(ctx, inputs)
 	if err != nil {
@@ -714,7 +714,9 @@ func (s *Scanner) runScanSBOM(cmd *cobra.Command, args []string) error {
 
 	switch strings.ToLower(format) {
 	case "", "text":
-		fmt.Fprintln(w, "\nScanned SBOM input")
+		fmt.Fprintln(w)
+		fmt.Fprintln(w, ui.StyleHeader.Render("Scan Results:"))
+		fmt.Fprintf(w, "  Target: %s\n", ui.StylePackageName.Render("SBOM input"))
 		vulnsEff := vulns
 		if ignoreUnfixed {
 			vulnsEff = filterUnfixed(vulns)
@@ -890,9 +892,13 @@ func (s *Scanner) outputText(w io.Writer, errW io.Writer, repoPath, ref, commitH
 		}
 	}
 
-	fmt.Fprintf(w, "\nScanned %s @ %s (%s)\n", repoPath, shortRef, shortHash)
+	// Consistent header format matching triage/fix commands
+	fmt.Fprintln(w)
+	fmt.Fprintln(w, ui.StyleHeader.Render("Scan Results:"))
+	fmt.Fprintf(w, "  Target: %s\n", ui.StylePackageName.Render(repoPath))
+	fmt.Fprintf(w, "  Ref: %s (%s)\n", ui.StyleVersion.Render(shortRef), ui.StyleVersion.Render(shortHash))
 	if originURL != "" {
-		fmt.Fprintln(w, "  "+ui.StyleMeta.Render("Origin: ")+originURL)
+		fmt.Fprintf(w, "  Origin: %s\n", ui.StyleMeta.Render(originURL))
 	}
 
 	vulnsEff := vulns
@@ -921,7 +927,9 @@ func (s *Scanner) outputText(w io.Writer, errW io.Writer, repoPath, ref, commitH
 
 // outputTextDir writes the directory scan results in a human-readable text format.
 func (s *Scanner) outputTextDir(w io.Writer, errW io.Writer, path string, vulns []analysis.Vulnerability, ignoreUnfixed bool, policyFindings []PolicyFinding) error {
-	fmt.Fprintf(w, "\nScanned %s\n", path)
+	fmt.Fprintln(w)
+	fmt.Fprintln(w, ui.StyleHeader.Render("Scan Results:"))
+	fmt.Fprintf(w, "  Target: %s\n", ui.StylePackageName.Render(path))
 
 	vulnsEff := vulns
 	if ignoreUnfixed {
@@ -950,7 +958,7 @@ func (s *Scanner) outputJSON(w io.Writer, repo, ref, commit string, vulns []anal
 }
 
 // parseSBOMPackages converts supported SBOM documents into package tuples for OSV queries.
-func parseSBOMPackages(data []byte, inFmt string) ([]*extractor.Package, error) {
+func parseSBOMPackages(data []byte, inFmt string) ([]*extractor.Package, map[string]bool, error) {
 	const (
 		fmtProtobom  = "protobom"
 		fmtCycloneDX = "cyclonedx"
@@ -986,27 +994,28 @@ func parseSBOMPackages(data []byte, inFmt string) ([]*extractor.Package, error) 
 	case "spdx", "spdx-json":
 		addFormat(fmtSPDX)
 	default:
-		return nil, fmt.Errorf("unsupported --input-format %q (use auto|protobom-json|cyclonedx-json|spdx-json)", inFmt)
+		return nil, nil, fmt.Errorf("unsupported --input-format %q (use auto|protobom-json|cyclonedx-json|spdx-json)", inFmt)
 	}
 
 	var lastErr error
 	for _, kind := range tryOrder {
 		var (
-			pkgs []*extractor.Package
-			err  error
+			pkgs   []*extractor.Package
+			direct map[string]bool
+			err    error
 		)
 		switch kind {
 		case fmtProtobom:
-			pkgs, err = parseProtobomPackages(data)
+			pkgs, direct, err = parseProtobomPackages(data)
 		case fmtCycloneDX:
-			pkgs, err = parseCycloneDXPackages(data)
+			pkgs, direct, err = parseCycloneDXPackages(data)
 		case fmtSPDX:
-			pkgs, err = parseSPDXPackages(data)
+			pkgs, direct, err = parseSPDXPackages(data)
 		default:
 			err = fmt.Errorf("unknown SBOM format %q", kind)
 		}
 		if err == nil && len(pkgs) > 0 {
-			return pkgs, nil
+			return pkgs, direct, nil
 		}
 		if err != nil {
 			lastErr = err
@@ -1014,9 +1023,9 @@ func parseSBOMPackages(data []byte, inFmt string) ([]*extractor.Package, error) 
 	}
 
 	if lastErr != nil {
-		return nil, lastErr
+		return nil, nil, lastErr
 	}
-	return nil, fmt.Errorf("unsupported or empty SBOM input; specify --input-format (protobom-json|cyclonedx-json|spdx-json)")
+	return nil, nil, fmt.Errorf("unsupported or empty SBOM input; specify --input-format (protobom-json|cyclonedx-json|spdx-json)")
 }
 
 // detectSBOMFormat attempts to identify the SBOM format from the input data.
@@ -1042,16 +1051,17 @@ func detectSBOMFormat(data []byte) string {
 }
 
 // parseProtobomPackages parses a Protobom JSON document and extracts package information.
-func parseProtobomPackages(data []byte) ([]*extractor.Package, error) {
+func parseProtobomPackages(data []byte) ([]*extractor.Package, map[string]bool, error) {
 	var doc sbom.Document
 	if err := protojson.Unmarshal(data, &doc); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	nodes := doc.GetNodeList().GetNodes()
 	if len(nodes) == 0 {
-		return nil, fmt.Errorf("protobom document contained no nodes")
+		return nil, nil, fmt.Errorf("protobom document contained no nodes")
 	}
 	var pkgs []*extractor.Package
+	direct := make(map[string]bool)
 	for _, n := range nodes {
 		if n.GetType() != sbom.Node_PACKAGE {
 			continue
@@ -1062,31 +1072,47 @@ func parseProtobomPackages(data []byte) ([]*extractor.Package, error) {
 			continue
 		}
 		pkg := &extractor.Package{Name: name, Version: version}
+		var purlStr string
 		if ids := n.GetIdentifiers(); ids != nil {
-			if purlStr := ids[int32(sbom.SoftwareIdentifierType_PURL)]; purlStr != "" {
+			if p := ids[int32(sbom.SoftwareIdentifierType_PURL)]; p != "" {
+				purlStr = p
 				if pu, err := purl.FromString(purlStr); err == nil {
 					pkg.PURLType = pu.Type
 				}
 			}
 		}
+		// Restore deputy-specific metadata from properties.
+		// "deputy:direct" restores the direct dependency status.
+		// "deputy:location" restores the file path (e.g. go.mod) needed for remediation.
+		for _, prop := range n.GetProperties() {
+			if prop.GetName() == "deputy:direct" && prop.GetData() == "true" {
+				if purlStr != "" {
+					direct[purlStr] = true
+				}
+			}
+			if prop.GetName() == "deputy:location" {
+				pkg.Locations = append(pkg.Locations, prop.GetData())
+			}
+		}
 		pkgs = append(pkgs, pkg)
 	}
 	if len(pkgs) == 0 {
-		return nil, fmt.Errorf("protobom document did not contain package nodes with name+version")
+		return nil, nil, fmt.Errorf("protobom document did not contain package nodes with name+version")
 	}
-	return pkgs, nil
+	return pkgs, direct, nil
 }
 
 // parseCycloneDXPackages parses a CycloneDX JSON document and extracts package information.
-func parseCycloneDXPackages(data []byte) ([]*extractor.Package, error) {
+func parseCycloneDXPackages(data []byte) ([]*extractor.Package, map[string]bool, error) {
 	var bom cdx.BOM
 	if err := cdx.NewBOMDecoder(bytes.NewReader(data), cdx.BOMFileFormatJSON).Decode(&bom); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	if bom.Components == nil || len(*bom.Components) == 0 {
-		return nil, fmt.Errorf("cyclonedx document contained no components")
+		return nil, nil, fmt.Errorf("cyclonedx document contained no components")
 	}
 	var pkgs []*extractor.Package
+	direct := make(map[string]bool)
 	for _, comp := range *bom.Components {
 		name := strings.TrimSpace(comp.Name)
 		version := strings.TrimSpace(comp.Version)
@@ -1097,24 +1123,48 @@ func parseCycloneDXPackages(data []byte) ([]*extractor.Package, error) {
 		if comp.PackageURL != "" {
 			if pu, err := purl.FromString(comp.PackageURL); err == nil {
 				pkg.PURLType = pu.Type
+				// Restore full name from PURL if namespace is present (e.g. for Go, NPM)
+				if pu.Namespace != "" {
+					sep := "/"
+					if pu.Type == "maven" || pu.Type == "gradle" {
+						sep = ":"
+					}
+					fullName := pu.Namespace + sep + pu.Name
+					// If the name in SBOM is just the short name, replace it with full name
+					if pkg.Name == pu.Name {
+						pkg.Name = fullName
+					}
+				}
+			}
+		}
+		if comp.Properties != nil {
+			for _, prop := range *comp.Properties {
+				if prop.Name == "deputy:direct" && prop.Value == "true" {
+					if comp.PackageURL != "" {
+						direct[comp.PackageURL] = true
+					}
+				}
+				if prop.Name == "deputy:location" {
+					pkg.Locations = append(pkg.Locations, prop.Value)
+				}
 			}
 		}
 		pkgs = append(pkgs, pkg)
 	}
 	if len(pkgs) == 0 {
-		return nil, fmt.Errorf("cyclonedx document did not contain components with name+version")
+		return nil, nil, fmt.Errorf("cyclonedx document did not contain components with name+version")
 	}
-	return pkgs, nil
+	return pkgs, direct, nil
 }
 
 // parseSPDXPackages parses an SPDX JSON document and extracts package information.
-func parseSPDXPackages(data []byte) ([]*extractor.Package, error) {
+func parseSPDXPackages(data []byte) ([]*extractor.Package, map[string]bool, error) {
 	doc, err := spdxjson.Read(bytes.NewReader(data))
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	if doc == nil || len(doc.Packages) == 0 {
-		return nil, fmt.Errorf("spdx document contained no packages")
+		return nil, nil, fmt.Errorf("spdx document contained no packages")
 	}
 	var pkgs []*extractor.Package
 	for _, pkg := range doc.Packages {
@@ -1135,9 +1185,9 @@ func parseSPDXPackages(data []byte) ([]*extractor.Package, error) {
 		pkgs = append(pkgs, entry)
 	}
 	if len(pkgs) == 0 {
-		return nil, fmt.Errorf("spdx document did not contain packages with name+version")
+		return nil, nil, fmt.Errorf("spdx document did not contain packages with name+version")
 	}
-	return pkgs, nil
+	return pkgs, nil, nil
 }
 
 // extractSPDXPackagePURL attempts to find a Package URL (PURL) in the external references of an SPDX package.

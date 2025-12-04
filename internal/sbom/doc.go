@@ -12,4 +12,13 @@
 //
 // The Generate function is the orchestration entry point returning an in-memory
 // Protobom document for further serialization or analysis.
+//
+// Custom Properties:
+// Deputy injects custom metadata into the SBOM properties to preserve context
+// that is not natively supported by the core Protobom model or is specific to
+// Deputy's remediation engine.
+//
+//   - "deputy:direct": "true" if the package is a direct dependency.
+//   - "deputy:location": The file path (e.g. "go.mod") where the dependency was found.
+//     This property may appear multiple times if a package is referenced in multiple locations.
 package sbomx

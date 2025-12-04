@@ -252,7 +252,7 @@ func runDiffAnalysis(ctx context.Context, repoPath, baseRef, targetRef string, e
 	if isWorkingPseudoRef(targetRef) {
 		dispTarget = "WORKING"
 	}
-	fmt.Printf("Comparing dependencies: %s → %s\n", baseRef, dispTarget)
+	fmt.Printf("%s %s → %s\n", ui.StyleHeader.Render("Comparing dependencies:"), ui.StyleVersion.Render(baseRef), ui.StyleVersion.Render(dispTarget))
 
 	// Check if dependency files have changed (optimization for non-working refs)
 	if !isWorkingPseudoRef(targetRef) {
@@ -266,7 +266,7 @@ func runDiffAnalysis(ctx context.Context, repoPath, baseRef, targetRef string, e
 		}
 
 		if matcher != nil && !matcher.AnyMatch(changedFiles) {
-			fmt.Println("No dependency changes detected.")
+			fmt.Println(ui.StyleAdded.Render("No dependency changes detected."))
 			return nil
 		}
 	}
@@ -293,7 +293,7 @@ func runDiffAnalysis(ctx context.Context, repoPath, baseRef, targetRef string, e
 	var targetHash *plumbing.Hash
 
 	if isWorkingPseudoRef(targetRef) {
-		fmt.Println("Scanning packages in working tree...")
+		fmt.Println(ui.StyleMeta.Render("Scanning packages in working tree..."))
 		tp, err := inv.ScanPackagesWorking(ctx, repoSrc.Workspace, scanOpts)
 		if err != nil {
 			return fmt.Errorf("error scanning working tree packages: %w", err)
@@ -312,7 +312,7 @@ func runDiffAnalysis(ctx context.Context, repoPath, baseRef, targetRef string, e
 	}
 
 	// Scan base packages
-	fmt.Printf("Scanning packages in base reference %s...\n", baseHash.String()[:7])
+	fmt.Println(ui.StyleMeta.Render(fmt.Sprintf("Scanning packages in base reference %s...", baseHash.String()[:7])))
 	basePackages, err := inv.ScanPackagesAtCommitSnapshot(ctx, repo, *baseHash, scanOpts)
 	if err != nil {
 		return fmt.Errorf("error scanning base reference packages: %w", err)
@@ -320,7 +320,7 @@ func runDiffAnalysis(ctx context.Context, repoPath, baseRef, targetRef string, e
 
 	// Scan target packages if not already done
 	if targetPackages == nil && targetHash != nil {
-		fmt.Printf("Scanning packages in target reference %s...\n", targetHash.String()[:7])
+		fmt.Println(ui.StyleMeta.Render(fmt.Sprintf("Scanning packages in target reference %s...", targetHash.String()[:7])))
 		tp, err := inv.ScanPackagesAtCommitSnapshot(ctx, repo, *targetHash, scanOpts)
 		if err != nil {
 			return fmt.Errorf("error scanning target reference packages: %w", err)
@@ -394,7 +394,7 @@ func runDiffAnalysis(ctx context.Context, repoPath, baseRef, targetRef string, e
 	// Scan for vulnerabilities if enabled
 	var vulns []analysis.Vulnerability
 	if enableVulnScan {
-		fmt.Printf("\nScanning dependencies for vulnerabilities...\n")
+		fmt.Printf("\n%s\n", ui.StyleMeta.Render("Scanning dependencies for vulnerabilities..."))
 
 		inputs := pkgInputs
 		if inputs == nil {
@@ -503,21 +503,24 @@ func runDiffAnalysis(ctx context.Context, repoPath, baseRef, targetRef string, e
 		}
 
 		// Combined cohesive output
-		fmt.Println("\n" + ui.StyleDowngraded.Render("∴ ") + ui.StyleHeader.Render("Vulnerabilities"))
-		RenderVulnerabilityList(changedVulns)
-		if showUnchangedEff && len(unchangedVulns) > 0 {
-			// Visual separator for unchanged dependencies, include reason if any
-			title := "Unchanged dependencies"
-			if reason != "" {
-				title += " (" + reason + ")"
-			}
-			sep := ui.StyleDim.Render(strings.Repeat("─", 3) + " " + title + " " + strings.Repeat("─", 3))
-			fmt.Println("\n" + sep)
-			RenderVulnerabilityList(unchangedVulns)
-		}
 		all := append([]analysis.Vulnerability{}, changedVulns...)
 		if showUnchangedEff {
 			all = append(all, unchangedVulns...)
+		}
+
+		if len(all) > 0 {
+			fmt.Println("\n" + ui.StyleDowngraded.Render("∴ ") + ui.StyleHeader.Render("Vulnerabilities"))
+			RenderVulnerabilityList(changedVulns)
+			if showUnchangedEff && len(unchangedVulns) > 0 {
+				// Visual separator for unchanged dependencies, include reason if any
+				title := "Unchanged dependencies"
+				if reason != "" {
+					title += " (" + reason + ")"
+				}
+				sep := ui.StyleDim.Render(strings.Repeat("─", 3) + " " + title + " " + strings.Repeat("─", 3))
+				fmt.Println("\n" + sep)
+				RenderVulnerabilityList(unchangedVulns)
+			}
 		}
 		RenderVulnerabilitySummaryAndActions(all)
 		return nil

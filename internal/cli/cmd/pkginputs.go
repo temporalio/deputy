@@ -33,8 +33,9 @@ func (f manifestResolverFunc) ReadFile(path string) ([]byte, error) {
 
 // packageInputOptions configures how packages are converted to inputs.
 type packageInputOptions struct {
-	GoDirect map[string]bool
-	Resolver manifestResolver
+	GoDirect       map[string]bool
+	DirectPackages map[string]bool
+	Resolver       manifestResolver
 }
 
 type manifestRefKey struct {
@@ -391,6 +392,9 @@ func packagesToInputs(pkgs []*extractor.Package, opts packageInputOptions) []ana
 		if ecos == "" && pkg.PURLType != "" {
 			ecos = pkg.PURLType
 		}
+		if strings.EqualFold(ecos, "golang") {
+			ecos = "Go"
+		}
 		var purlStr string
 		if pu := pkg.PURL(); pu != nil {
 			purlStr = pu.String()
@@ -407,6 +411,12 @@ func packagesToInputs(pkgs []*extractor.Package, opts packageInputOptions) []ana
 			seen[key] = entry
 		}
 		entry.Locations = appendUnique(entry.Locations, pkg.Locations...)
+
+		if opts.DirectPackages != nil && purlStr != "" {
+			if opts.DirectPackages[purlStr] {
+				entry.IsDirect = true
+			}
+		}
 
 		if strings.EqualFold(ecos, "Go") {
 			info := cmp.ParseGoPackage(pkg)

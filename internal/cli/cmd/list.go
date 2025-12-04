@@ -428,6 +428,7 @@ func writeListText(w io.Writer, items []ListItem, header bool, showSources bool)
 	dirW := len(dirH)
 	sourcesH := "SOURCES"
 	sourcesW := len(sourcesH)
+	directCount, indirectCount := 0, 0
 	for _, it := range items {
 		if l := len(it.PURL); l > purlW {
 			purlW = l
@@ -435,6 +436,9 @@ func writeListText(w io.Writer, items []ListItem, header bool, showSources bool)
 		d := "indirect"
 		if it.IsDirect {
 			d = "direct"
+			directCount++
+		} else {
+			indirectCount++
 		}
 		if l := len(d); l > dirW {
 			dirW = l
@@ -484,6 +488,14 @@ func writeListText(w io.Writer, items []ListItem, header bool, showSources bool)
 			fmt.Fprintf(w, "%s%s%s\n", it.PURL, pad(purlW-len(it.PURL)+2), dStyled)
 		}
 	}
+
+	// Print summary line
+	total := len(items)
+	if total > 0 {
+		fmt.Fprintf(w, "\n%s\n", ui.StyleHeader.Render("Summary:"))
+		fmt.Fprintf(w, "  %d total packages (%d direct, %d indirect)\n", total, directCount, indirectCount)
+	}
+
 	return nil
 }
 

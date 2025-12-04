@@ -251,20 +251,13 @@ func printTriageSummary(report triageReport) {
 	fmt.Printf("  Fixable: %d\n", report.Stats.FixAvailable)
 	fmt.Printf("  Direct deps affected: %d\n", report.Stats.DirectDeps)
 	if len(report.TopPackages) == 0 {
-		fmt.Println("\n", ui.StyleDim.Render("No fixable vulnerabilities after filtering."))
+		fmt.Println("\n" + ui.StyleAdded.Render("No fixable vulnerabilities after filtering."))
 		return
 	}
 	fmt.Println("\nTop Impacted Packages:")
 	for idx, pkg := range report.TopPackages {
 		marker := fmt.Sprintf("%d.", idx+1)
-		sev := ui.StyleRemoved.Render(pkg.Severity)
-		if strings.EqualFold(pkg.Severity, "LOW") || strings.EqualFold(pkg.Severity, "MODERATE") {
-			sev = ui.StyleDowngraded.Render(pkg.Severity)
-		} else if strings.EqualFold(pkg.Severity, "MEDIUM") {
-			sev = ui.StyleDowngraded.Render(pkg.Severity)
-		} else if strings.EqualFold(pkg.Severity, "HIGH") || strings.EqualFold(pkg.Severity, "CRITICAL") {
-			sev = ui.StyleRemoved.Render(pkg.Severity)
-		}
+		sev := ui.SeverityLabel(pkg.Severity, pkg.SeverityType)
 		fix := ""
 		if pkg.FixVersion != "" {
 			fix = ui.StyleUpgraded.Render("↑ " + pkg.FixVersion)

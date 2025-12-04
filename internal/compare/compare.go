@@ -1,6 +1,8 @@
 package compare
 
 import (
+	"cmp"
+	"slices"
 	"strings"
 
 	"github.com/google/osv-scalibr/extractor"
@@ -552,6 +554,30 @@ func ComparePackages(oldPkgs, newPkgs []*extractor.Package, goDirect map[string]
 			IsDirect:      isDirectForSummary(newMeta, goDirect, pkgDirect),
 		})
 	}
+
+	// Sort changes for consistent output: by change type priority, then name
+	slices.SortFunc(changes, func(a, b Change) int {
+		// Sort by change type: Upgraded, Downgraded, Added, Removed, Updated
+		typePriority := func(ct ChangeType) int {
+			switch ct {
+			case Upgraded:
+				return 0
+			case Downgraded:
+				return 1
+			case Added:
+				return 2
+			case Removed:
+				return 3
+			default:
+				return 4
+			}
+		}
+		if n := cmp.Compare(typePriority(a.ChangeType), typePriority(b.ChangeType)); n != 0 {
+			return n
+		}
+		return strings.Compare(a.Name, b.Name)
+	})
+
 	return changes
 }
 

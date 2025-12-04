@@ -320,7 +320,7 @@ func printFixSummary(plan remediationPlan) {
 		fmt.Printf("  • %s %s %s\n", ui.StyleBold.Render("Upgrade Go toolchain to"), ui.StyleUpgraded.Render(plan.StdlibUpgrade), ui.StyleVersion.Render("(update 'go' directive in go.mod)"))
 	}
 	if len(plan.Commands) == 0 {
-		fmt.Println("  • No dependency upgrades with fixes (report contains only unfixed issues).")
+		fmt.Printf("  • %s\n", ui.StyleMeta.Render("No dependency upgrades with fixes (report contains only unfixed issues)."))
 		return
 	}
 	fmt.Printf("  • %s (%d total, %d runnable)\n", ui.StyleBold.Render("Apply dependency upgrades"), plan.Stats.TotalCommands, plan.Stats.RunnableCommands)

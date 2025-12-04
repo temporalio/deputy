@@ -98,11 +98,11 @@ func QueryOSVBatch(ctx context.Context, client OSVClient, pkgs []PkgInput) ([]Vu
 		if strings.EqualFold(normalized.Ecosystem, "go") {
 			queryVersion = normalizeGoVersion(queryVersion)
 		}
-		query := &osvdev.Query{Package: pkgQuery}
-		if queryVersion != "" {
-			query.Version = queryVersion
-		}
-		queries = append(queries, query)
+
+		queries = append(queries, &osvdev.Query{
+			Package: pkgQuery,
+			Version: queryVersion,
+		})
 		meta = append(meta, normalized)
 	}
 	if len(queries) == 0 {

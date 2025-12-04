@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	analysis "github.com/picatz/deputy/internal/analysis"
+	"golang.org/x/mod/semver"
 )
 
 // Command represents an actionable remediation step (shell command or manual edit).
@@ -58,10 +59,13 @@ func CommandsFromVulnerabilities(vs []analysis.Vulnerability) ([]Command, string
 
 // buildUpgradeRecommendations analyzes consolidated vulnerabilities to determine
 // the best fixed versions for each affected package. It separates standard library
-// upgrades from regular dependency upgrades.
+// upgrades from regular dependency upgrades. When multiple vulnerabilities affect
+// the same package, it recommends the highest required version to fix all issues.
 func buildUpgradeRecommendations(cons []analysis.ConsolidatedVulnerability) ([]packageUpgrade, string) {
 	var stdlibRec string
-	upgrades := []packageUpgrade{}
+
+	// Track the best (highest) recommended version per package
+	pkgBest := map[string]*packageUpgrade{}
 
 	for _, v := range cons {
 		if len(v.FixedVersions) == 0 {
@@ -72,23 +76,112 @@ func buildUpgradeRecommendations(cons []analysis.ConsolidatedVulnerability) ([]p
 			continue
 		}
 		if strings.EqualFold(v.Package, "stdlib") {
-			if stdlibRec == "" || best > stdlibRec {
+			if stdlibRec == "" || compareVersions(best, stdlibRec) > 0 {
 				stdlibRec = best
 			}
 			continue
 		}
-		upgrades = append(upgrades, packageUpgrade{
-			Name:        v.Package,
-			Current:     v.Version,
-			Recommended: best,
-			IsDirect:    v.IsDirect,
-			Ecosystem:   v.Ecosystem,
-			References:  v.ManifestRefs,
-			Locations:   v.Locations,
-		})
+
+		existing, ok := pkgBest[v.Package]
+		if !ok {
+			pkgBest[v.Package] = &packageUpgrade{
+				Name:        v.Package,
+				Current:     v.Version,
+				Recommended: best,
+				IsDirect:    v.IsDirect,
+				Ecosystem:   v.Ecosystem,
+				References:  v.ManifestRefs,
+				Locations:   v.Locations,
+			}
+		} else {
+			// Keep the higher recommended version
+			if compareVersions(best, existing.Recommended) > 0 {
+				existing.Recommended = best
+			}
+			// Merge references
+			existing.References = mergeManifestRefs(existing.References, v.ManifestRefs)
+			existing.Locations = mergeStrings(existing.Locations, v.Locations)
+			// IsDirect if any vuln is direct
+			if v.IsDirect {
+				existing.IsDirect = true
+			}
+		}
+	}
+
+	upgrades := make([]packageUpgrade, 0, len(pkgBest))
+	for _, u := range pkgBest {
+		upgrades = append(upgrades, *u)
 	}
 
 	return upgrades, stdlibRec
+}
+
+// compareVersions compares two version strings. Returns >0 if a > b, <0 if a < b, 0 if equal.
+// Handles both semver (v1.2.3) and Go-style versions.
+func compareVersions(a, b string) int {
+	// Normalize to semver format
+	aNorm := normalizeVersion(a)
+	bNorm := normalizeVersion(b)
+
+	// Use semver comparison if both are valid
+	if semver.IsValid(aNorm) && semver.IsValid(bNorm) {
+		return semver.Compare(aNorm, bNorm)
+	}
+
+	// Fallback to string comparison
+	return strings.Compare(a, b)
+}
+
+// normalizeVersion ensures the version has a "v" prefix for semver comparison.
+func normalizeVersion(v string) string {
+	v = strings.TrimSpace(v)
+	if v == "" {
+		return v
+	}
+	if !strings.HasPrefix(v, "v") {
+		return "v" + v
+	}
+	return v
+}
+
+// mergeManifestRefs combines two slices of manifest references, deduplicating by path+manager.
+func mergeManifestRefs(a, b []analysis.ManifestReference) []analysis.ManifestReference {
+	seen := map[string]struct{}{}
+	result := make([]analysis.ManifestReference, 0, len(a)+len(b))
+	for _, ref := range a {
+		key := ref.Path + "|" + ref.Manager
+		if _, ok := seen[key]; !ok {
+			seen[key] = struct{}{}
+			result = append(result, ref)
+		}
+	}
+	for _, ref := range b {
+		key := ref.Path + "|" + ref.Manager
+		if _, ok := seen[key]; !ok {
+			seen[key] = struct{}{}
+			result = append(result, ref)
+		}
+	}
+	return result
+}
+
+// mergeStrings combines two slices of strings, deduplicating.
+func mergeStrings(a, b []string) []string {
+	seen := map[string]struct{}{}
+	result := make([]string, 0, len(a)+len(b))
+	for _, s := range a {
+		if _, ok := seen[s]; !ok {
+			seen[s] = struct{}{}
+			result = append(result, s)
+		}
+	}
+	for _, s := range b {
+		if _, ok := seen[s]; !ok {
+			seen[s] = struct{}{}
+			result = append(result, s)
+		}
+	}
+	return result
 }
 
 // dedupeCommands converts a list of package upgrades into a set of unique,
