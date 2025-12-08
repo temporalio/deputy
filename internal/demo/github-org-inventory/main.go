@@ -502,6 +502,9 @@ func defaultLicenseResolver(deepScan bool) licenseResolver {
 		if ctx.Err() != nil {
 			return nil
 		}
+		if l := knownLicenses(pkg); len(l) > 0 {
+			return l
+		}
 		if cleaned := normalizeLicenses(pkg.Licenses); len(cleaned) > 0 {
 			return cleaned
 		}
@@ -512,6 +515,9 @@ func defaultLicenseResolver(deepScan bool) licenseResolver {
 		eco := canonicalEcosystem(pkg)
 		module := modulePathFromPackage(pkg)
 		version := strings.TrimSpace(pkg.Version)
+		if eco == "go" && version != "" && !strings.HasPrefix(version, "v") {
+			version = "v" + version
+		}
 		key := pkg.Name + "|" + version + "|" + eco
 
 		if v, ok := cache.Load(key); ok {
@@ -525,6 +531,14 @@ func defaultLicenseResolver(deepScan bool) licenseResolver {
 			}
 			logs.Debug(ctx, "license lookup starting", "name", pkg.Name, "version", version, "ecosystem", eco)
 			licenses := lookupDepsDevLicenses(ctx, getClient(), pkg, eco, module)
+			if len(licenses) == 0 && eco == "go" {
+				for _, parent := range ancestorModules(module) {
+					licenses = lookupDepsDevLicenses(ctx, getClient(), pkgWithModule(pkg, parent), eco, parent)
+					if len(licenses) > 0 {
+						break
+					}
+				}
+			}
 			if len(licenses) == 0 && eco == "go" && module != "" {
 				logs.Debug(ctx, "license lookup falling back to remote scan", "module", module, "version", version)
 				licenses = lookupRemoteLicenses(ctx, module, version)
@@ -546,8 +560,56 @@ func modulePathFromPackage(pkg *extractor.Package) string {
 	if pkg == nil {
 		return ""
 	}
+	// For Go, scalibr reports the module path in Package.Name for go.mod entries,
+	// including nested modules (e.g., github.com/Azure/azure-sdk-for-go/sdk/azcore).
+	// Preserve the full path so deps.dev lookups work for multi-module repos.
+	if canonicalEcosystem(pkg) == "go" {
+		return strings.TrimSpace(pkg.Name)
+	}
 	info := cmp.ParseGoPackage(pkg)
 	return cmp.GetModuleRoot(info.CanonicalName)
+}
+
+// ancestorModules returns parent module paths for a given module, excluding the original.
+func ancestorModules(module string) []string {
+	if module == "" {
+		return nil
+	}
+	parts := strings.Split(module, "/")
+	if len(parts) < 3 { // host/user/repo minimum
+		return nil
+	}
+	var out []string
+	for i := len(parts) - 1; i >= 3; i-- {
+		out = append(out, strings.Join(parts[:i], "/"))
+	}
+	return out
+}
+
+// pkgWithModule returns a shallow copy of pkg with Name replaced by module path.
+func pkgWithModule(pkg *extractor.Package, module string) *extractor.Package {
+	if pkg == nil {
+		return nil
+	}
+	cp := *pkg
+	if module != "" {
+		cp.Name = module
+	}
+	return &cp
+}
+
+// knownLicenses returns hardcoded licenses for well-known packages that lack metadata.
+func knownLicenses(pkg *extractor.Package) []string {
+	if pkg == nil {
+		return nil
+	}
+	name := strings.TrimSpace(pkg.Name)
+	ecosystem := canonicalEcosystem(pkg)
+	// Go standard library
+	if ecosystem == "go" && strings.EqualFold(name, "stdlib") {
+		return []string{"BSD-3-Clause"}
+	}
+	return nil
 }
 
 func displayEcosystems(ecosystems []string) string {
@@ -667,6 +729,9 @@ func lookupDepsDevLicenses(ctx context.Context, client pb.InsightsClient, pkg *e
 	defer cancel()
 
 	version := strings.TrimSpace(pkg.Version)
+	if eco == "go" && version != "" && !strings.HasPrefix(version, "v") {
+		version = "v" + version
+	}
 	system, name := depsDevKeyFromPackage(pkg, eco, module)
 	if system == pb.System_SYSTEM_UNSPECIFIED || name == "" || version == "" {
 		return nil
@@ -727,6 +792,9 @@ func (d depsClient) GetVersion(ctx context.Context, req *pb.GetVersionRequest) (
 func depsDevKeyFromPackage(pkg *extractor.Package, eco string, module string) (pb.System, string) {
 	if pkg == nil {
 		return pb.System_SYSTEM_UNSPECIFIED, ""
+	}
+	if eco == "go" && module != "" {
+		return pb.System_GO, module
 	}
 	// Prefer PURL if available for precise ecosystem mapping.
 	if pu := pkg.PURL(); pu != nil {
