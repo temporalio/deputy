@@ -4,11 +4,13 @@ import (
 	"context"
 	"crypto/x509"
 	"encoding/csv"
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
 	"log"
 	"log/slog"
+	"net/http"
 	neturl "net/url"
 	"os"
 	"os/signal"
@@ -55,6 +57,8 @@ type repoTarget struct {
 }
 
 type licenseResolver func(context.Context, *extractor.Package) []string
+
+var httpClient = &http.Client{Timeout: 5 * time.Second}
 
 func main() {
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
@@ -543,6 +547,16 @@ func defaultLicenseResolver(deepScan bool) licenseResolver {
 				logs.Debug(ctx, "license lookup falling back to remote scan", "module", module, "version", version)
 				licenses = lookupRemoteLicenses(ctx, module, version)
 			}
+			if len(licenses) == 0 && eco == "rust" {
+				if rust := lookupCratesLicense(ctx, pkg.Name, version); len(rust) > 0 {
+					licenses = rust
+				}
+			}
+			if len(licenses) == 0 && eco == "php" {
+				if php := lookupPackagistLicense(ctx, pkg.Name, version); len(php) > 0 {
+					licenses = php
+				}
+			}
 			if licenses == nil {
 				licenses = []string{}
 			}
@@ -764,28 +778,206 @@ func lookupRemoteLicenses(ctx context.Context, module, version string) []string 
 	return normalizeLicenses(analysis.RemoteModuleLicenseScan(cctx, module, version))
 }
 
-// newDepsDevClient constructs a deps.dev gRPC client (best-effort). Returns nil on failure.
-func newDepsDevClient() pb.InsightsClient {
-	pool, err := x509.SystemCertPool()
+// lookupCratesLicense queries crates.io for license metadata.
+func lookupCratesLicense(ctx context.Context, name, version string) []string {
+	name = strings.TrimSpace(name)
+	version = strings.TrimSpace(version)
+	if name == "" || version == "" {
+		return nil
+	}
+	if ctx.Err() != nil {
+		return nil
+	}
+	url := fmt.Sprintf("https://crates.io/api/v1/crates/%s/%s", name, version)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return nil
 	}
-	dctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-
-	conn, err := grpc.DialContext(dctx, "api.deps.dev:443", grpc.WithTransportCredentials(credentials.NewClientTLSFromCert(pool, "")), grpc.WithBlock())
+	resp, err := httpClient.Do(req)
 	if err != nil {
-		logs.Debug(context.Background(), "deps.dev dial failed", "error", err)
 		return nil
 	}
-	return pb.NewInsightsClient(conn)
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil
+	}
+	var payload struct {
+		Version struct {
+			License string `json:"license"`
+		} `json:"version"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		return nil
+	}
+	return normalizeLicenses(splitLicenseString(payload.Version.License))
 }
 
-// depsClient adapts a deps.dev InsightsClient to the internal analysis.DepsClient interface.
-type depsClient struct{ pb.InsightsClient }
+// lookupPackagistLicense queries packagist.org for license metadata.
+func lookupPackagistLicense(ctx context.Context, name, version string) []string {
+	name = strings.ToLower(strings.TrimSpace(name))
+	version = strings.TrimSpace(version)
+	if name == "" || version == "" {
+		return nil
+	}
+	if ctx.Err() != nil {
+		return nil
+	}
+	if l := lookupPackagistP2(ctx, name, version); len(l) > 0 {
+		return l
+	}
+	return lookupPackagistLegacy(ctx, name, version)
+}
 
-func (d depsClient) GetVersion(ctx context.Context, req *pb.GetVersionRequest) (*pb.Version, error) {
-	return d.InsightsClient.GetVersion(ctx, req)
+// lookupPackagistP2 queries the p2 endpoint, which returns an array of versions.
+func lookupPackagistP2(ctx context.Context, name, version string) []string {
+	url := fmt.Sprintf("https://repo.packagist.org/p2/%s.json", name)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return nil
+	}
+	resp, err := httpClient.Do(req)
+	if err != nil {
+		return nil
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil
+	}
+	var payload struct {
+		Packages map[string][]struct {
+			Version           string   `json:"version"`
+			VersionNormalized string   `json:"version_normalized"`
+			License           []string `json:"license"`
+		} `json:"packages"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		return nil
+	}
+	versions, ok := payload.Packages[name]
+	if !ok {
+		for k, v := range payload.Packages {
+			if strings.EqualFold(k, name) {
+				versions = v
+				break
+			}
+		}
+	}
+	if len(versions) == 0 {
+		return nil
+	}
+	tryVersions := []string{version}
+	if strings.HasPrefix(version, "v") {
+		tryVersions = append(tryVersions, strings.TrimPrefix(version, "v"))
+	} else {
+		tryVersions = append(tryVersions, "v"+version)
+	}
+	for _, v := range tryVersions {
+		for _, pkg := range versions {
+			if pkg.Version == v || pkg.VersionNormalized == v {
+				if l := normalizeLicenses(pkg.License); len(l) > 0 {
+					return l
+				}
+			}
+		}
+	}
+	// Fallback to first available license
+	for _, pkg := range versions {
+		if l := normalizeLicenses(pkg.License); len(l) > 0 {
+			return l
+		}
+	}
+	return nil
+}
+
+// lookupPackagistLegacy queries the legacy p endpoint.
+func lookupPackagistLegacy(ctx context.Context, name, version string) []string {
+	url := fmt.Sprintf("https://repo.packagist.org/p/%s.json", name)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return nil
+	}
+	resp, err := httpClient.Do(req)
+	if err != nil {
+		return nil
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil
+	}
+	var payload struct {
+		Packages map[string]map[string]struct {
+			License           []string `json:"license"`
+			VersionNormalized string   `json:"version_normalized"`
+		} `json:"packages"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		return nil
+	}
+	versions := payload.Packages[name]
+	if versions == nil {
+		for k, v := range payload.Packages {
+			if strings.EqualFold(k, name) {
+				versions = v
+				break
+			}
+		}
+	}
+	if versions == nil {
+		return nil
+	}
+	tryVersions := []string{version}
+	if strings.HasPrefix(version, "v") {
+		tryVersions = append(tryVersions, strings.TrimPrefix(version, "v"))
+	} else {
+		tryVersions = append(tryVersions, "v"+version)
+	}
+	for _, v := range tryVersions {
+		if pkg, ok := versions[v]; ok {
+			return normalizeLicenses(pkg.License)
+		}
+	}
+	for _, pkg := range versions {
+		if pkg.VersionNormalized == version || pkg.VersionNormalized == strings.TrimPrefix(version, "v") {
+			if l := normalizeLicenses(pkg.License); len(l) > 0 {
+				return l
+			}
+		}
+	}
+	for _, pkg := range versions {
+		if l := normalizeLicenses(pkg.License); len(l) > 0 {
+			return l
+		}
+	}
+	return nil
+}
+
+// splitLicenseString splits a license string like "Apache-2.0 OR MIT" into parts.
+func splitLicenseString(s string) []string {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return nil
+	}
+	parts := strings.FieldsFunc(s, func(r rune) bool {
+		switch r {
+		case ';', ',', '|', '/', '\\':
+			return true
+		}
+		return false
+	})
+	var out []string
+	for _, p := range parts {
+		p = strings.TrimSpace(p)
+		if p == "" {
+			continue
+		}
+		p = strings.TrimPrefix(p, "OR")
+		p = strings.TrimPrefix(p, "AND")
+		p = strings.TrimSpace(p)
+		if p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
 }
 
 // depsDevKeyFromPackage maps an extractor package to deps.dev system/name values.
@@ -796,7 +988,7 @@ func depsDevKeyFromPackage(pkg *extractor.Package, eco string, module string) (p
 	if eco == "go" && module != "" {
 		return pb.System_GO, module
 	}
-	// Prefer PURL if available for precise ecosystem mapping.
+
 	if pu := pkg.PURL(); pu != nil {
 		switch pu.Type {
 		case "golang":
@@ -844,14 +1036,21 @@ func depsDevKeyFromPackage(pkg *extractor.Package, eco string, module string) (p
 	}
 }
 
-// cloneStrings copies a string slice to avoid sharing mutable backing arrays.
-func cloneStrings(src []string) []string {
-	if len(src) == 0 {
+// newDepsDevClient constructs a deps.dev gRPC client (best-effort). Returns nil on failure.
+func newDepsDevClient() pb.InsightsClient {
+	pool, err := x509.SystemCertPool()
+	if err != nil {
 		return nil
 	}
-	out := make([]string, len(src))
-	copy(out, src)
-	return out
+	dctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	conn, err := grpc.DialContext(dctx, "api.deps.dev:443", grpc.WithTransportCredentials(credentials.NewClientTLSFromCert(pool, "")), grpc.WithBlock())
+	if err != nil {
+		logs.Debug(context.Background(), "deps.dev dial failed", "error", err)
+		return nil
+	}
+	return pb.NewInsightsClient(conn)
 }
 
 // configureLogging builds a slog logger and sets it as default for both slog and Deputy logs.
@@ -917,4 +1116,14 @@ func (l *scalibrSlogLogger) logArgs(level slog.Level, args ...any) {
 		return
 	}
 	l.log.Log(context.Background(), level, fmt.Sprint(args...))
+}
+
+// cloneStrings copies a string slice to avoid sharing mutable backing arrays.
+func cloneStrings(src []string) []string {
+	if len(src) == 0 {
+		return nil
+	}
+	out := make([]string, len(src))
+	copy(out, src)
+	return out
 }

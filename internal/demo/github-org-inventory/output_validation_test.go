@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/csv"
 	"errors"
 	"fmt"
@@ -132,4 +133,30 @@ func sampleStrings(in []string, n int) []string {
 		return in
 	}
 	return in[:n]
+}
+
+func TestPackagistLookup(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	cases := []struct {
+		name    string
+		version string
+	}{
+		{"amphp/amp", "v3.1.0"},
+		{"composer/pcre", "3.3.2"},
+		{"phpunit/phpunit", "10.5.45"},
+	}
+
+	for _, tc := range cases {
+		licenses := lookupPackagistLicense(ctx, tc.name, tc.version)
+		if len(licenses) == 0 {
+			t.Fatalf("expected licenses for %s@%s, got none", tc.name, tc.version)
+		}
+		for _, l := range licenses {
+			if strings.TrimSpace(l) == "" || strings.TrimSpace(l) == "?" {
+				t.Fatalf("got empty/unknown license for %s@%s: %+v", tc.name, tc.version, licenses)
+			}
+		}
+	}
 }
