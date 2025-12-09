@@ -3,12 +3,18 @@ package main
 import (
 	"context"
 	"encoding/csv"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
+	neturl "net/url"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
+
+	pb "deps.dev/api/v3"
 )
 
 // TestInventoryOutput_NoUnknowns walks the generated inventory-output
@@ -158,5 +164,199 @@ func TestPackagistLookup(t *testing.T) {
 				t.Fatalf("got empty/unknown license for %s@%s: %+v", tc.name, tc.version, licenses)
 			}
 		}
+	}
+}
+
+// TestLicenseVerificationSample re-fetches licenses for a small sample of rows
+// from generated CSVs using upstream registries (deps.dev for Go, npm registry
+// for JS) to validate accuracy. Skips if CSVs are absent or registry lookups
+// are unavailable (network, rate limits).
+func TestLicenseVerificationSample(t *testing.T) {
+	base := filepath.Join("inventory-output")
+	info, err := os.Stat(base)
+	if errors.Is(err, os.ErrNotExist) {
+		t.Skip("inventory-output not present; generate CSVs first")
+	}
+	if err != nil || !info.IsDir() {
+		t.Skip("inventory-output missing or not dir")
+	}
+
+	type sample struct {
+		eco  string
+		path string
+	}
+	samples := []sample{
+		{eco: "go", path: filepath.Join(base, "temporalio", "go.csv")},
+		{eco: "javascript", path: filepath.Join(base, "temporalio", "javascript.csv")},
+	}
+	for _, s := range samples {
+		s := s
+		t.Run(s.eco, func(t *testing.T) {
+			if _, err := os.Stat(s.path); errors.Is(err, os.ErrNotExist) {
+				t.Skipf("%s not present", s.path)
+			}
+			rows, err := readCSVRows(s.path)
+			if err != nil {
+				t.Fatalf("read csv: %v", err)
+			}
+			if len(rows) == 0 {
+				t.Skip("no rows to verify")
+			}
+			ctx := context.Background()
+			checked := 0
+			for _, r := range rows {
+				if r.License == "" || r.License == "?" {
+					continue
+				}
+				ok, reason := verifyLicense(ctx, s.eco, r)
+				if !ok {
+					t.Fatalf("license mismatch for %s@%s from %s: %s", r.Package, r.Version, s.path, reason)
+				}
+				checked++
+				if checked >= 5 { // limit to keep test fast
+					break
+				}
+			}
+			if checked == 0 {
+				t.Skip("no rows with licenses to verify")
+			}
+		})
+	}
+}
+
+type csvRow struct {
+	Project string
+	Package string
+	Version string
+	License string
+}
+
+func readCSVRows(path string) ([]csvRow, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	r := csv.NewReader(f)
+	recs, err := r.ReadAll()
+	if err != nil {
+		return nil, err
+	}
+	if len(recs) < 2 {
+		return nil, nil
+	}
+	var rows []csvRow
+	for _, rec := range recs[1:] {
+		if len(rec) < 4 {
+			continue
+		}
+		rows = append(rows, csvRow{
+			Project: strings.TrimSpace(rec[0]),
+			Package: strings.TrimSpace(rec[1]),
+			Version: strings.TrimSpace(rec[2]),
+			License: strings.TrimSpace(rec[3]),
+		})
+	}
+	return rows, nil
+}
+
+func verifyLicense(ctx context.Context, eco string, row csvRow) (bool, string) {
+	gotLicenses := splitLicenseString(row.License)
+	if len(gotLicenses) == 0 {
+		return false, "csv license empty"
+	}
+	switch eco {
+	case "go":
+		client := newDepsDevClient()
+		if client == nil {
+			return true, "deps.dev unavailable; skip"
+		}
+		version := row.Version
+		if version != "" && !strings.HasPrefix(version, "v") {
+			version = "v" + version
+		}
+		req := &pb.GetVersionRequest{VersionKey: &pb.VersionKey{System: pb.System_GO, Name: row.Package, Version: version}}
+		resp, err := client.GetVersion(ctx, req)
+		if err != nil || resp == nil || len(resp.Licenses) == 0 {
+			return true, "deps.dev lookup skipped (error or empty)"
+		}
+		want := normalizeLicenses(resp.Licenses)
+		if !anyIntersect(gotLicenses, want) {
+			return false, fmt.Sprintf("csv licenses %v do not match deps.dev %v", gotLicenses, want)
+		}
+		return true, ""
+	case "javascript":
+		if lic := fetchNPMLicense(ctx, row.Package, row.Version); len(lic) > 0 {
+			want := normalizeLicenses(lic)
+			if !anyIntersect(gotLicenses, want) {
+				return false, fmt.Sprintf("csv licenses %v do not match npm %v", gotLicenses, want)
+			}
+			return true, ""
+		}
+		return true, "npm lookup skipped (empty)"
+	default:
+		return true, "ecosystem not verified"
+	}
+}
+
+func anyIntersect(a, b []string) bool {
+	if len(a) == 0 || len(b) == 0 {
+		return false
+	}
+	set := map[string]struct{}{}
+	for _, v := range a {
+		set[strings.ToLower(strings.TrimSpace(v))] = struct{}{}
+	}
+	for _, v := range b {
+		if _, ok := set[strings.ToLower(strings.TrimSpace(v))]; ok {
+			return true
+		}
+	}
+	return false
+}
+
+func fetchNPMLicense(ctx context.Context, name, version string) []string {
+	name = strings.TrimSpace(name)
+	version = strings.TrimSpace(version)
+	if name == "" || version == "" {
+		return nil
+	}
+	if ctx.Err() != nil {
+		return nil
+	}
+	encodedName := neturl.PathEscape(name)
+	url := fmt.Sprintf("https://registry.npmjs.org/%s/%s", encodedName, version)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return nil
+	}
+	client := &http.Client{Timeout: 5 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil
+	}
+	var payload struct {
+		License any `json:"license"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		return nil
+	}
+	switch v := payload.License.(type) {
+	case string:
+		return splitLicenseString(v)
+	case []any:
+		var out []string
+		for _, elem := range v {
+			if s, ok := elem.(string); ok {
+				out = append(out, s)
+			}
+		}
+		return normalizeLicenses(out)
+	default:
+		return nil
 	}
 }

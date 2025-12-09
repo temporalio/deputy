@@ -1,6 +1,8 @@
 package main
 
 import (
+	"archive/zip"
+	"bytes"
 	"context"
 	"crypto/x509"
 	"encoding/csv"
@@ -8,6 +10,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"log"
 	"log/slog"
 	"net/http"
@@ -34,6 +37,7 @@ import (
 	"github.com/picatz/deputy/internal/logs"
 	"github.com/picatz/deputy/internal/repository"
 	"github.com/picatz/deputy/internal/repository/workspace"
+	"golang.org/x/mod/module"
 	"golang.org/x/oauth2"
 	"golang.org/x/sync/errgroup"
 	"golang.org/x/sync/singleflight"
@@ -256,6 +260,10 @@ func collectRowsFromPackages(ctx context.Context, repoName string, pkgs []*extra
 		}
 		name := strings.TrimSpace(p.Name)
 		version := strings.TrimSpace(p.Version)
+		if eco := canonicalEcosystem(p); eco == "go" && isLocalGoModule(name) {
+			logs.Debug(ctx, "skipping local go module", "repo", repoName, "name", name)
+			continue
+		}
 		if strings.EqualFold(name, "unknown") || name == "" {
 			logs.Debug(ctx, "skipping package with unknown name", "repo", repoName, "ecosystem", canonicalEcosystem(p))
 			continue
@@ -546,6 +554,11 @@ func defaultLicenseResolver(deepScan bool) licenseResolver {
 			if len(licenses) == 0 && eco == "go" && module != "" {
 				logs.Debug(ctx, "license lookup falling back to remote scan", "module", module, "version", version)
 				licenses = lookupRemoteLicenses(ctx, module, version)
+				if len(licenses) == 0 {
+					if gp := lookupGoProxyLicense(ctx, module, version); len(gp) > 0 {
+						licenses = gp
+					}
+				}
 			}
 			if len(licenses) == 0 && eco == "rust" {
 				if rust := lookupCratesLicense(ctx, pkg.Name, version); len(rust) > 0 {
@@ -618,12 +631,37 @@ func knownLicenses(pkg *extractor.Package) []string {
 		return nil
 	}
 	name := strings.TrimSpace(pkg.Name)
+	version := strings.TrimSpace(pkg.Version)
 	ecosystem := canonicalEcosystem(pkg)
 	// Go standard library
 	if ecosystem == "go" && strings.EqualFold(name, "stdlib") {
 		return []string{"BSD-3-Clause"}
 	}
+	// Go toolchain module (go@1.x)
+	if ecosystem == "go" && strings.EqualFold(name, "go") {
+		return []string{"BSD-3-Clause"}
+	}
+	// Known legacy module missing embedded license but licensed via upstream repo.
+	// See https://github.com/mattn/go-localereader/pull/1
+	if ecosystem == "go" && strings.EqualFold(name, "github.com/mattn/go-localereader") && version == "0.0.1" {
+		return []string{"MIT"}
+	}
 	return nil
+}
+
+// isLocalGoModule reports whether a module path appears to be a local/internal module
+// (no domain-like prefix). Such modules are typically not published and lack registry
+// license metadata; we skip them to avoid noisy \"?\" entries.
+func isLocalGoModule(path string) bool {
+	if path == "" {
+		return true
+	}
+	parts := strings.Split(path, "/")
+	if len(parts) == 0 {
+		return true
+	}
+	host := parts[0]
+	return !strings.Contains(host, ".")
 }
 
 func displayEcosystems(ecosystems []string) string {
@@ -776,6 +814,57 @@ func lookupRemoteLicenses(ctx context.Context, module, version string) []string 
 	cctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 	return normalizeLicenses(analysis.RemoteModuleLicenseScan(cctx, module, version))
+}
+
+// lookupGoProxyLicense downloads the module zip from the Go proxy and scans license files.
+func lookupGoProxyLicense(ctx context.Context, modulePath, version string) []string {
+	if modulePath == "" || version == "" {
+		return nil
+	}
+	if ctx.Err() != nil {
+		return nil
+	}
+	encPath, err := module.EscapePath(modulePath)
+	if err != nil {
+		return nil
+	}
+	url := fmt.Sprintf("https://proxy.golang.org/%s/@v/%s.zip", encPath, version)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return nil
+	}
+	resp, err := httpClient.Do(req)
+	if err != nil {
+		return nil
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil
+	}
+	data, err := io.ReadAll(io.LimitReader(resp.Body, 20<<20)) // cap at 20MB
+	if err != nil || len(data) == 0 {
+		return nil
+	}
+	zr, err := zip.NewReader(bytes.NewReader(data), int64(len(data)))
+	if err != nil {
+		return nil
+	}
+	var out []string
+	for _, f := range zr.File {
+		name := strings.ToLower(f.Name)
+		for _, candidate := range analysis.DefaultLicenseFilenamesForScan() {
+			if strings.HasSuffix(name, strings.ToLower(candidate)) {
+				rc, err := f.Open()
+				if err != nil {
+					continue
+				}
+				content, _ := io.ReadAll(rc)
+				rc.Close()
+				out = append(out, analysis.DetectLicenseIDs(content)...)
+			}
+		}
+	}
+	return normalizeLicenses(out)
 }
 
 // lookupCratesLicense queries crates.io for license metadata.

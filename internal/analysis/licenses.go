@@ -32,6 +32,11 @@ var defaultLicenseFilenames = []string{
 	"UNLICENSE",
 }
 
+// DefaultLicenseFilenamesForScan returns the default filenames used when scanning for licenses.
+func DefaultLicenseFilenamesForScan() []string {
+	return defaultLicenseFilenames
+}
+
 // DepsClient abstracts deps.dev client method GetVersion.
 type DepsClient interface {
 	GetVersion(ctx context.Context, req *pb.GetVersionRequest) (*pb.Version, error)
