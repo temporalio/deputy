@@ -877,28 +877,36 @@ func lookupCratesLicense(ctx context.Context, name, version string) []string {
 	if ctx.Err() != nil {
 		return nil
 	}
-	url := fmt.Sprintf("https://crates.io/api/v1/crates/%s/%s", name, version)
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
-	if err != nil {
-		return nil
+	tryVersions := crateVersionCandidates(version)
+	for _, v := range tryVersions {
+		url := fmt.Sprintf("https://crates.io/api/v1/crates/%s/%s", name, v)
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+		if err != nil {
+			continue
+		}
+		resp, err := httpClient.Do(req)
+		if err != nil {
+			continue
+		}
+		if resp.StatusCode != http.StatusOK {
+			resp.Body.Close()
+			continue
+		}
+		var payload struct {
+			Version struct {
+				License string `json:"license"`
+			} `json:"version"`
+		}
+		if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+			resp.Body.Close()
+			continue
+		}
+		resp.Body.Close()
+		if l := normalizeLicenses(splitLicenseString(payload.Version.License)); len(l) > 0 {
+			return l
+		}
 	}
-	resp, err := httpClient.Do(req)
-	if err != nil {
-		return nil
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return nil
-	}
-	var payload struct {
-		Version struct {
-			License string `json:"license"`
-		} `json:"version"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
-		return nil
-	}
-	return normalizeLicenses(splitLicenseString(payload.Version.License))
+	return nil
 }
 
 // lookupPackagistLicense queries packagist.org for license metadata.
@@ -1065,6 +1073,50 @@ func splitLicenseString(s string) []string {
 		if p != "" {
 			out = append(out, p)
 		}
+	}
+	return out
+}
+
+// crateVersionCandidates generates possible semver forms crates.io might accept.
+func crateVersionCandidates(v string) []string {
+	v = strings.TrimSpace(v)
+	if v == "" {
+		return nil
+	}
+	out := []string{v}
+	if strings.HasPrefix(v, "v") {
+		out = append(out, strings.TrimPrefix(v, "v"))
+	} else {
+		out = append(out, "v"+v)
+	}
+	trimmed := strings.TrimPrefix(v, "v")
+	parts := strings.Split(trimmed, ".")
+	if len(parts) == 2 {
+		out = append(out, trimmed+".0")
+		out = append(out, "v"+trimmed+".0")
+	}
+	if len(parts) == 1 {
+		out = append(out, trimmed+".0.0")
+		out = append(out, "v"+trimmed+".0.0")
+		out = append(out, trimmed+".0")
+		out = append(out, "v"+trimmed+".0")
+	}
+	return normalizeStringSlice(out)
+}
+
+func normalizeStringSlice(in []string) []string {
+	seen := map[string]struct{}{}
+	var out []string
+	for _, s := range in {
+		s = strings.TrimSpace(s)
+		if s == "" {
+			continue
+		}
+		if _, ok := seen[s]; ok {
+			continue
+		}
+		seen[s] = struct{}{}
+		out = append(out, s)
 	}
 	return out
 }

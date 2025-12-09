@@ -167,6 +167,34 @@ func TestPackagistLookup(t *testing.T) {
 	}
 }
 
+// TestCratesLookup samples a few Rust crates to ensure crates.io license lookup works,
+// including versions that may omit patch components.
+func TestCratesLookup(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	cases := []struct {
+		name    string
+		version string
+	}{
+		{"crossbeam-channel", "0.5"},
+		{"crossbeam-queue", "0.3"},
+		{"dashmap", "6.0"},
+	}
+
+	for _, tc := range cases {
+		licenses := lookupCratesLicense(ctx, tc.name, tc.version)
+		if len(licenses) == 0 {
+			t.Fatalf("expected licenses for %s@%s, got none", tc.name, tc.version)
+		}
+		for _, l := range licenses {
+			if strings.TrimSpace(l) == "" || strings.TrimSpace(l) == "?" {
+				t.Fatalf("got empty/unknown license for %s@%s: %+v", tc.name, tc.version, licenses)
+			}
+		}
+	}
+}
+
 // TestLicenseVerificationSample re-fetches licenses for a small sample of rows
 // from generated CSVs using upstream registries (deps.dev for Go, npm registry
 // for JS) to validate accuracy. Skips if CSVs are absent or registry lookups
