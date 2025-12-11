@@ -36,6 +36,9 @@ func newGoModuleHandler(upstream string, policies PolicyEvaluator) (*goModuleHan
 			Timeout: 30 * time.Second,
 		},
 		osvClient: osvdev.DefaultClient(),
+		licenseLookup: func(ctx context.Context, module, version string) ([]string, error) {
+			return analysis.LookupLicensesBestEffort(ctx, "go", module, version), nil
+		},
 	}, nil
 }
 

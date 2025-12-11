@@ -287,6 +287,7 @@ Notes:
 - When `--ref` is omitted, the SBOM uses the local working tree if available (includes uncommitted changes). Provide an explicit revision (e.g., `--ref=$(git rev-parse HEAD)` , a tag, or a commit SHA) to capture the exact last commit.
 - Multi-ecosystem inventory is powered by `osv-scalibr` plugins; by default it scans all supported ecosystems.
 - For GitHub, setting `GITHUB_TOKEN` can improve rate limits and enables authenticated fetching during license enrichment of dependencies.
+- `--license-source=scan` uses local file scanning plus best-effort remote lookups (GitHub raw/clone, Go module proxy zips, crates.io, Packagist) when metadata is missing; `depsdev` remains the fast default.
 - Document names prefer the Go module path (e.g., `github.com/hashicorp/vault@v1.16.0`) and Go PURLs are normalized (e.g., `pkg:golang/github.com/hashicorp/vault/sdk@...`).
 - Tip: if copy/pasting commands, prefer `--flag=value` form to avoid odd whitespace characters breaking flag parsing.
 - Optional: add a human-friendly context header with `--show-context` (printed to stderr; does not affect JSON):

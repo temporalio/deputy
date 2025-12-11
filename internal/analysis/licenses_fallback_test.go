@@ -1,0 +1,230 @@
+package analysis
+
+import (
+	"archive/zip"
+	"bytes"
+	"context"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"sync"
+	"testing"
+
+	pb "deps.dev/api/v3"
+)
+
+type countingDepsClientEcosystem struct {
+	calls int
+	sys   pb.System
+}
+
+func (c *countingDepsClientEcosystem) GetVersion(ctx context.Context, req *pb.GetVersionRequest) (*pb.Version, error) {
+	c.calls++
+	c.sys = req.GetVersionKey().GetSystem()
+	return &pb.Version{Licenses: []string{"Apache-2.0"}}, nil
+}
+
+func TestFetchLicensesForEcosystem_NormalizesAndCaches(t *testing.T) {
+	resetLicenseTestState(t)
+
+	client := &countingDepsClientEcosystem{}
+	got := FetchLicensesForEcosystem(context.Background(), client, "python", "Requests", "2.31.0")
+	if want := []string{"Apache-2.0"}; !equalStrings(got, want) {
+		t.Fatalf("unexpected licenses: %v", got)
+	}
+	if client.sys != pb.System_PYPI {
+		t.Fatalf("expected PYPI system, got %v", client.sys)
+	}
+	FetchLicensesForEcosystem(context.Background(), client, "python", "Requests", "2.31.0")
+	if client.calls != 1 {
+		t.Fatalf("expected cache hit to avoid second call, got %d calls", client.calls)
+	}
+}
+
+func TestLookupLicensesBestEffort_GoProxy(t *testing.T) {
+	resetLicenseTestState(t)
+
+	const mitText = `MIT License
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.`
+	if ids := DetectLicenseIDs([]byte(mitText)); len(ids) == 0 {
+		t.Fatalf("expected MIT detection for fixture text")
+	}
+	server, zipPath := serveLicenseZip(t, "LICENSE", mitText)
+	defer server.Close()
+
+	restore := swapHTTPGlobals(server)
+	defer restore()
+
+	goProxyBase = server.URL
+	defer func() { goProxyBase = "https://proxy.golang.org" }()
+
+	if got := GoProxyLicenseScan(context.Background(), "example.com/mod", "v1.2.3"); !equalStrings(got, []string{"MIT"}) {
+		t.Fatalf("expected go proxy direct scan to return MIT, got %v", got)
+	}
+
+	licenses := LookupLicensesBestEffort(context.Background(), "go", "example.com/mod", "v1.2.3")
+	if want := []string{"MIT"}; !equalStrings(licenses, want) {
+		t.Fatalf("expected go proxy license, got %v", licenses)
+	}
+	if zipPath == nil || *zipPath != "/example.com/mod/@v/v1.2.3.zip" {
+		t.Fatalf("unexpected proxy path %v", zipPath)
+	}
+}
+
+func TestLookupLicensesBestEffort_Crates(t *testing.T) {
+	resetLicenseTestState(t)
+	var requested string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requested = r.URL.Path
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"version": map[string]any{"license": "MIT"},
+		})
+	}))
+	defer server.Close()
+
+	restore := swapHTTPGlobals(server)
+	defer restore()
+
+	cratesBase = server.URL
+	defer func() { cratesBase = "https://crates.io" }()
+
+	got := LookupLicensesBestEffort(context.Background(), "rust", "serde", "1.0.0")
+	if want := []string{"MIT"}; !equalStrings(got, want) {
+		t.Fatalf("expected crates.io license, got %v", got)
+	}
+	if !strings.Contains(requested, "/api/v1/crates/serde/") {
+		t.Fatalf("unexpected crates path %s", requested)
+	}
+}
+
+func TestLookupLicensesBestEffort_Packagist(t *testing.T) {
+	t.Run("p2", func(t *testing.T) {
+		resetLicenseTestState(t)
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if strings.Contains(r.URL.Path, "/p2/") {
+				_ = json.NewEncoder(w).Encode(map[string]any{
+					"packages": map[string]any{
+						"laravel/framework": []map[string]any{
+							{"version": "v10.0.0", "version_normalized": "10.0.0", "license": []string{"BSD-3-Clause"}},
+						},
+					},
+				})
+				return
+			}
+			http.NotFound(w, r)
+		}))
+		defer server.Close()
+		restore := swapHTTPGlobals(server)
+		defer restore()
+
+		packagistBase = server.URL
+		defer func() { packagistBase = "https://repo.packagist.org" }()
+
+		got := LookupLicensesBestEffort(context.Background(), "php", "laravel/framework", "10.0.0")
+		if want := []string{"BSD-3-Clause"}; !equalStrings(got, want) {
+			t.Fatalf("expected packagist license, got %v", got)
+		}
+	})
+
+	t.Run("legacy", func(t *testing.T) {
+		resetLicenseTestState(t)
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if strings.Contains(r.URL.Path, "/p/") {
+				_ = json.NewEncoder(w).Encode(map[string]any{
+					"packages": map[string]any{
+						"vendor/name": map[string]any{
+							"1.2.3": map[string]any{
+								"license":            []string{"Apache-2.0"},
+								"version_normalized": "1.2.3",
+							},
+						},
+					},
+				})
+				return
+			}
+			http.NotFound(w, r)
+		}))
+		defer server.Close()
+		restore := swapHTTPGlobals(server)
+		defer restore()
+
+		packagistBase = server.URL
+		defer func() { packagistBase = "https://repo.packagist.org" }()
+
+		got := LookupLicensesBestEffort(context.Background(), "composer", "vendor/name", "1.2.3")
+		if want := []string{"Apache-2.0"}; !equalStrings(got, want) {
+			t.Fatalf("expected packagist legacy license, got %v", got)
+		}
+	})
+}
+
+func serveLicenseZip(t *testing.T, filename, content string) (*httptest.Server, *string) {
+	t.Helper()
+	var requestedPath string
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requestedPath = r.URL.Path
+		var buf bytes.Buffer
+		zw := zip.NewWriter(&buf)
+		f, err := zw.Create(filename)
+		if err != nil {
+			t.Fatalf("create zip: %v", err)
+		}
+		if _, err := f.Write([]byte(content)); err != nil {
+			t.Fatalf("write zip: %v", err)
+		}
+		if err := zw.Close(); err != nil {
+			t.Fatalf("close zip: %v", err)
+		}
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write(buf.Bytes())
+	})
+	server := httptest.NewServer(handler)
+	return server, &requestedPath
+}
+
+func swapHTTPGlobals(server *httptest.Server) func() {
+	origClient := licenseHTTPClient
+	licenseHTTPClient = server.Client()
+	return func() {
+		licenseHTTPClient = origClient
+	}
+}
+
+func resetLicenseTestState(t *testing.T) {
+	t.Helper()
+	cacheDirOnce = sync.Once{}
+	cacheDirPath = ""
+	t.Setenv("DEPUTY_CACHE_DIR", t.TempDir())
+	registryLicenseMemo = sync.Map{}
+	remoteLicenseMemo = sync.Map{}
+}
+
+func equalStrings(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}

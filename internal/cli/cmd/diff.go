@@ -229,6 +229,18 @@ PERFORMANCE TIPS:
 	root.AddCommand(cmd)
 }
 
+// adjustLicenseOptions ensures backward-compatible handling of the deprecated
+// --use-licensecheck flag by enabling enrichment and preferring scan sources.
+func adjustLicenseOptions(useLicenseCheck bool, enrichLicenses bool, licenseSource string) (bool, string) {
+	if useLicenseCheck && !enrichLicenses {
+		enrichLicenses = true
+		if licenseSource == "depsdev" {
+			licenseSource = "scan"
+		}
+	}
+	return enrichLicenses, licenseSource
+}
+
 // DiffPolicyReport captures the full context of a diff operation for policy evaluation.
 type DiffPolicyReport struct {
 	Repo            string                   `json:"repo"`
@@ -381,12 +393,7 @@ func runDiffAnalysis(ctx context.Context, repoPath, baseRef, targetRef string, e
 	}
 
 	// Determine enrichment modes
-	if useLicenseCheck && !enrichLicenses { // backward compatibility
-		enrichLicenses = true
-		if licenseSource == "depsdev" {
-			licenseSource = "scan"
-		}
-	}
+	enrichLicenses, licenseSource = adjustLicenseOptions(useLicenseCheck, enrichLicenses, licenseSource)
 
 	// Detailed dependency change rendering (legacy style) with optional enrichment
 	displayDetailedDependencyChanges(ctx, repoSrc.Workspace, changes, enrichLicenses, licenseSource)
@@ -586,7 +593,18 @@ func displayDetailedDependencyChanges(ctx context.Context, ws workspace.FS, chan
 	}
 
 	// Pre-fetch deps.dev licenses in parallel when requested
-	type pkgKey struct{ name, version string }
+	type pkgKey struct {
+		ecosystem string
+		name      string
+		version   string
+	}
+	resolveEcosystem := func(raw string) string {
+		eco := strings.ToLower(strings.TrimSpace(raw))
+		if eco == "" {
+			return "go"
+		}
+		return eco
+	}
 	licMap := map[pkgKey][]string{}
 	if client != nil && enrich && (licenseSource == "depsdev" || licenseSource == "both") {
 		var mu sync.Mutex
@@ -595,13 +613,13 @@ func displayDetailedDependencyChanges(ctx context.Context, ws workspace.FS, chan
 			if c.ChangeType == cmp.Removed || c.TargetVersion == "" {
 				continue
 			}
-			pk := pkgKey{c.Name, c.TargetVersion}
+			pk := pkgKey{ecosystem: resolveEcosystem(c.Ecosystem), name: c.Name, version: c.TargetVersion}
 			if _, ok := licMap[pk]; ok {
 				continue
 			}
 			pkCopy := pk
 			g.Go(func() error {
-				l := analysis.FetchLicensesForPackage(gctx, depsClient{client}, pkCopy.name, pkCopy.version)
+				l := analysis.FetchLicensesForEcosystem(gctx, depsClient{client}, pkCopy.ecosystem, pkCopy.name, pkCopy.version)
 				mu.Lock()
 				licMap[pkCopy] = l
 				mu.Unlock()
@@ -618,18 +636,14 @@ func displayDetailedDependencyChanges(ctx context.Context, ws workspace.FS, chan
 
 	var remoteFetchers map[pkgKey]chan []string
 	var remoteCache map[pkgKey][]string
-	var remoteTasks []struct {
-		pk      pkgKey
-		name    string
-		version string
-	}
+	var remoteTasks []pkgKey
 	if enrich && (licenseSource == "scan" || licenseSource == "both") {
 		required := map[pkgKey]struct{}{}
 		for _, c := range changes {
 			if c.ChangeType == cmp.Removed || c.TargetVersion == "" {
 				continue
 			}
-			pk := pkgKey{c.Name, c.TargetVersion}
+			pk := pkgKey{ecosystem: resolveEcosystem(c.Ecosystem), name: c.Name, version: c.TargetVersion}
 			if _, ok := required[pk]; ok {
 				continue
 			}
@@ -638,28 +652,20 @@ func displayDetailedDependencyChanges(ctx context.Context, ws workspace.FS, chan
 		if len(required) > 0 {
 			remoteFetchers = make(map[pkgKey]chan []string, len(required))
 			remoteCache = make(map[pkgKey][]string, len(required))
-			remoteTasks = make([]struct {
-				pk      pkgKey
-				name    string
-				version string
-			}, 0, len(required))
+			remoteTasks = make([]pkgKey, 0, len(required))
 			seen := map[pkgKey]struct{}{}
 			for _, c := range changes {
 				if c.ChangeType == cmp.Removed || c.TargetVersion == "" {
 					continue
 				}
-				pk := pkgKey{c.Name, c.TargetVersion}
+				pk := pkgKey{ecosystem: resolveEcosystem(c.Ecosystem), name: c.Name, version: c.TargetVersion}
 				if _, ok := seen[pk]; ok {
 					continue
 				}
 				seen[pk] = struct{}{}
 				ch := make(chan []string, 1)
 				remoteFetchers[pk] = ch
-				remoteTasks = append(remoteTasks, struct {
-					pk      pkgKey
-					name    string
-					version string
-				}{pk: pk, name: c.Name, version: c.TargetVersion})
+				remoteTasks = append(remoteTasks, pk)
 			}
 			concurrency := licenseScanConcurrency(len(remoteTasks))
 			if concurrency < 1 {
@@ -668,7 +674,7 @@ func displayDetailedDependencyChanges(ctx context.Context, ws workspace.FS, chan
 			sem := make(chan struct{}, concurrency)
 			for _, task := range remoteTasks {
 				t := task
-				ch := remoteFetchers[t.pk]
+				ch := remoteFetchers[t]
 				go func() {
 					defer close(ch)
 					select {
@@ -677,7 +683,7 @@ func displayDetailedDependencyChanges(ctx context.Context, ws workspace.FS, chan
 						return
 					}
 					defer func() { <-sem }()
-					lics := analysis.RemoteModuleLicenseScan(ctx, t.name, t.version)
+					lics := analysis.LookupLicensesBestEffort(ctx, t.ecosystem, t.name, t.version)
 					ch <- lics
 				}()
 			}
@@ -689,8 +695,9 @@ func displayDetailedDependencyChanges(ctx context.Context, ws workspace.FS, chan
 
 	for _, c := range changes {
 		// Build the license and direct/indirect annotation in the new format: [License1, License2] (direct/indirect)
+		pk := pkgKey{ecosystem: resolveEcosystem(c.Ecosystem), name: c.Name, version: c.TargetVersion}
 		licenses := []string{"?"}
-		if l, ok := licMap[pkgKey{c.Name, c.TargetVersion}]; ok && len(l) > 0 {
+		if l, ok := licMap[pk]; ok && len(l) > 0 {
 			licenses = l
 		}
 		if c.ChangeType != cmp.Removed && c.TargetVersion != "" && enrich && (licenseSource == "scan" || licenseSource == "both") {
@@ -698,7 +705,6 @@ func displayDetailedDependencyChanges(ctx context.Context, ws workspace.FS, chan
 				licenses = analysis.MergeLicenseSources(licenses, localScan)
 			}
 			if remoteFetchers != nil {
-				pk := pkgKey{c.Name, c.TargetVersion}
 				if rc, ok := remoteCache[pk]; ok {
 					if len(rc) > 0 {
 						licenses = analysis.MergeLicenseSources(licenses, rc)

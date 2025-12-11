@@ -394,15 +394,19 @@ func enrichProtobomLicensesScanWithFetcher(ctx context.Context, doc *sbom.Docume
 			continue
 		}
 		pu := nodePackageURL(node)
-		if pu == nil || pu.Type != purl.TypeGolang {
+		if pu == nil {
 			continue
 		}
-		module := goModuleFromPURL(pu)
+		eco := strings.ToLower(strings.TrimSpace(pu.Type))
 		version := strings.TrimSpace(pu.Version)
-		if module == "" || version == "" {
+		if eco == "" || version == "" {
 			continue
 		}
-		if ids := analysis.RemoteModuleLicenseScan(ctx, module, version); len(ids) > 0 {
+		name := packageNameForLicenseLookup(pu)
+		if name == "" {
+			continue
+		}
+		if ids := analysis.LookupLicensesBestEffort(ctx, eco, name, version); len(ids) > 0 {
 			node.Licenses = appendUniqueLicenses(node.Licenses, ids)
 		}
 	}
@@ -514,6 +518,21 @@ func appendUniqueLicenses(dst []string, src []string) []string {
 		dst = append(dst, candidate)
 	}
 	return dst
+}
+
+func packageNameForLicenseLookup(pu *purl.PackageURL) string {
+	if pu == nil {
+		return ""
+	}
+	switch strings.ToLower(pu.Type) {
+	case purl.TypeGolang:
+		return goModuleFromPURL(pu)
+	default:
+		if pu.Namespace != "" {
+			return pu.Namespace + "/" + pu.Name
+		}
+		return pu.Name
+	}
 }
 
 func rootNode(doc *sbom.Document) *sbom.Node {
