@@ -1,8 +1,10 @@
 package analysis
 
 import (
+	"archive/tar"
 	"archive/zip"
 	"bytes"
+	"compress/gzip"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -40,6 +42,9 @@ var (
 	goProxyBase   = "https://proxy.golang.org"
 	cratesBase    = "https://crates.io"
 	packagistBase = "https://repo.packagist.org"
+	pubBase       = "https://pub.dev"
+	cocoapodsBase = "https://cocoapods.org"
+	hexpmBase     = "https://hex.pm"
 )
 
 // DefaultLicenseFilenamesForScan returns the default filenames used when scanning for licenses.
@@ -393,6 +398,12 @@ func resolveEcosystemLicenses(ctx context.Context, ecosystem, name, version stri
 		return LookupCratesLicense(ctx, name, version)
 	case "php", "composer", "packagist":
 		return LookupPackagistLicense(ctx, name, version)
+	case "dart", "pub":
+		return LookupPubLicense(ctx, name, version)
+	case "cocoapods", "pod", "pods":
+		return LookupCocoaPodsLicense(ctx, name, version)
+	case "hex":
+		return LookupHexLicense(ctx, name, version)
 	default:
 		return RemoteModuleLicenseScan(ctx, name, version)
 	}
@@ -615,6 +626,192 @@ func packagistVersionCandidates(version string) []string {
 		out = append(out, "v"+v)
 	}
 	return normalizeStringSlice(out)
+}
+
+// LookupPubLicense fetches license metadata from pub.dev package API.
+func LookupPubLicense(ctx context.Context, name, version string) []string {
+	name = strings.TrimSpace(name)
+	version = strings.TrimSpace(version)
+	if name == "" || version == "" || ctx.Err() != nil {
+		return nil
+	}
+	url := fmt.Sprintf("%s/api/packages/%s/versions/%s", strings.TrimRight(pubBase, "/"), name, version)
+	req, err := nethttp.NewRequestWithContext(ctx, nethttp.MethodGet, url, nil)
+	if err != nil {
+		return nil
+	}
+	resp, err := licenseHTTPClient.Do(req)
+	if err != nil {
+		return nil
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != nethttp.StatusOK {
+		return nil
+	}
+	var payload struct {
+		ArchiveURL string `json:"archive_url"`
+		Pubspec    struct {
+			License string `json:"license"`
+		} `json:"pubspec"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		return nil
+	}
+	if lic := cleanLicenseList(splitLicenseString(payload.Pubspec.License)); len(lic) > 0 {
+		return lic
+	}
+	if payload.ArchiveURL == "" {
+		return nil
+	}
+	return scanTarballForLicenses(ctx, payload.ArchiveURL)
+}
+
+// LookupCocoaPodsLicense fetches license metadata from the CocoaPods API.
+func LookupCocoaPodsLicense(ctx context.Context, name, version string) []string {
+	name = strings.TrimSpace(name)
+	version = strings.TrimSpace(version)
+	if name == "" || version == "" || ctx.Err() != nil {
+		return nil
+	}
+	url := fmt.Sprintf("https://trunk.cocoapods.org/api/v1/pods/%s/versions/%s", name, version)
+	req, err := nethttp.NewRequestWithContext(ctx, nethttp.MethodGet, url, nil)
+	if err != nil {
+		return nil
+	}
+	req.Header.Set("Accept", "application/json")
+	resp, err := licenseHTTPClient.Do(req)
+	if err != nil {
+		return nil
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != nethttp.StatusOK {
+		return nil
+	}
+	var payload struct {
+		DataURL string `json:"data_url"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		return nil
+	}
+	if payload.DataURL == "" {
+		return nil
+	}
+	reqSpec, err := nethttp.NewRequestWithContext(ctx, nethttp.MethodGet, payload.DataURL, nil)
+	if err != nil {
+		return nil
+	}
+	respSpec, err := licenseHTTPClient.Do(reqSpec)
+	if err != nil {
+		return nil
+	}
+	defer respSpec.Body.Close()
+	if respSpec.StatusCode != nethttp.StatusOK {
+		return nil
+	}
+	var podspec map[string]any
+	if err := json.NewDecoder(respSpec.Body).Decode(&podspec); err != nil {
+		return nil
+	}
+	licVal, ok := podspec["license"]
+	if !ok {
+		licVal, ok = podspec["licenses"]
+	}
+	switch v := licVal.(type) {
+	case string:
+		return cleanLicenseList(splitLicenseString(v))
+	case map[string]any:
+		if t, ok := v["type"].(string); ok {
+			return cleanLicenseList([]string{t})
+		}
+		if s, ok := v["text"].(string); ok {
+			return cleanLicenseList(splitLicenseString(s))
+		}
+	case []any:
+		var parts []string
+		for _, item := range v {
+			if s, ok := item.(string); ok {
+				parts = append(parts, s)
+			}
+		}
+		if len(parts) > 0 {
+			return cleanLicenseList(parts)
+		}
+	}
+	return nil
+}
+
+// LookupHexLicense fetches license metadata from hex.pm API.
+func LookupHexLicense(ctx context.Context, name, version string) []string {
+	name = strings.TrimSpace(name)
+	version = strings.TrimSpace(version)
+	if name == "" || version == "" || ctx.Err() != nil {
+		return nil
+	}
+	url := fmt.Sprintf("%s/api/packages/%s", strings.TrimRight(hexpmBase, "/"), name)
+	req, err := nethttp.NewRequestWithContext(ctx, nethttp.MethodGet, url, nil)
+	if err != nil {
+		return nil
+	}
+	resp, err := licenseHTTPClient.Do(req)
+	if err != nil {
+		return nil
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != nethttp.StatusOK {
+		return nil
+	}
+	var payload struct {
+		Meta struct {
+			Licenses []string `json:"licenses"`
+		} `json:"meta"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		return nil
+	}
+	return cleanLicenseList(payload.Meta.Licenses)
+}
+
+func scanTarballForLicenses(ctx context.Context, url string) []string {
+	if ctx.Err() != nil || url == "" {
+		return nil
+	}
+	req, err := nethttp.NewRequestWithContext(ctx, nethttp.MethodGet, url, nil)
+	if err != nil {
+		return nil
+	}
+	resp, err := licenseHTTPClient.Do(req)
+	if err != nil {
+		return nil
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != nethttp.StatusOK {
+		return nil
+	}
+	data, err := io.ReadAll(io.LimitReader(resp.Body, 20<<20))
+	if err != nil || len(data) == 0 {
+		return nil
+	}
+	gr, err := gzip.NewReader(bytes.NewReader(data))
+	if err != nil {
+		return nil
+	}
+	defer gr.Close()
+	tr := tar.NewReader(gr)
+	var ids []string
+	for {
+		hdr, err := tr.Next()
+		if err != nil {
+			break
+		}
+		lower := strings.ToLower(filepath.Base(hdr.Name))
+		for _, candidate := range defaultLicenseFilenames {
+			if strings.ToLower(candidate) == lower || strings.HasSuffix(lower, strings.ToLower(candidate)) {
+				content, _ := io.ReadAll(io.LimitReader(tr, 1<<20))
+				ids = append(ids, DetectLicenseIDs(content)...)
+			}
+		}
+	}
+	return cleanLicenseList(ids)
 }
 
 // splitLicenseString splits a license string like "Apache-2.0 OR MIT" into parts.

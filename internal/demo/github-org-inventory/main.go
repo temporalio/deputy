@@ -433,6 +433,12 @@ func canonicalEcosystem(p *extractor.Package) string {
 		return "dotnet"
 	case "packagist", "composer", "php":
 		return "php"
+	case "dart", "pub", "flutter":
+		return "dart"
+	case "cocoapods", "pod", "pods":
+		return "cocoapods"
+	case "hex", "hexpm":
+		return "hex"
 	default:
 		if raw == "" {
 			return "unknown"
@@ -568,6 +574,21 @@ func defaultLicenseResolver(deepScan bool) licenseResolver {
 			if len(licenses) == 0 && eco == "php" {
 				if php := lookupPackagistLicense(ctx, pkg.Name, version); len(php) > 0 {
 					licenses = php
+				}
+			}
+			if len(licenses) == 0 && eco == "dart" {
+				if dart := analysis.LookupPubLicense(ctx, pkg.Name, version); len(dart) > 0 {
+					licenses = dart
+				}
+			}
+			if len(licenses) == 0 && eco == "cocoapods" {
+				if pods := analysis.LookupCocoaPodsLicense(ctx, pkg.Name, version); len(pods) > 0 {
+					licenses = pods
+				}
+			}
+			if len(licenses) == 0 && eco == "hex" {
+				if hex := analysis.LookupHexLicense(ctx, pkg.Name, version); len(hex) > 0 {
+					licenses = hex
 				}
 			}
 			if licenses == nil {

@@ -14,11 +14,14 @@ func WithLicenseHTTPClient(client *http.Client) func() {
 }
 
 // WithLicenseEndpoints overrides registry base URLs used in license lookups during tests.
-func WithLicenseEndpoints(goProxy, crates, packagist string) func() {
+func WithLicenseEndpoints(goProxy, crates, packagist, pub, cocoapods, hexpm string) func() {
 	origGo, origCrates, origPack := goProxyBase, cratesBase, packagistBase
+	origPub, origPods, origHex := pubBase, cocoapodsBase, hexpmBase
 	goProxyBase, cratesBase, packagistBase = goProxy, crates, packagist
+	pubBase, cocoapodsBase, hexpmBase = pub, cocoapods, hexpm
 	return func() {
 		goProxyBase, cratesBase, packagistBase = origGo, origCrates, origPack
+		pubBase, cocoapodsBase, hexpmBase = origPub, origPods, origHex
 	}
 }
 

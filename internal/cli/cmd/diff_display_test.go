@@ -30,7 +30,7 @@ func TestDisplayDetailedDependencyChanges_ScanUsesBestEffortLicenses(t *testing.
 
 	restoreClient := analysis.WithLicenseHTTPClient(server.Client())
 	defer restoreClient()
-	restoreBases := analysis.WithLicenseEndpoints(server.URL, server.URL, server.URL)
+	restoreBases := analysis.WithLicenseEndpoints(server.URL, server.URL, server.URL, server.URL, server.URL, server.URL)
 	defer restoreBases()
 
 	changes := []cmp.Change{{

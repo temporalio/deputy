@@ -15,6 +15,7 @@ import (
 	"time"
 
 	pb "deps.dev/api/v3"
+	analysis "github.com/picatz/deputy/internal/analysis"
 )
 
 // TestInventoryOutput_NoUnknowns walks the generated inventory-output
@@ -156,6 +157,79 @@ func TestPackagistLookup(t *testing.T) {
 
 	for _, tc := range cases {
 		licenses := lookupPackagistLicense(ctx, tc.name, tc.version)
+		if len(licenses) == 0 {
+			t.Fatalf("expected licenses for %s@%s, got none", tc.name, tc.version)
+		}
+		for _, l := range licenses {
+			if strings.TrimSpace(l) == "" || strings.TrimSpace(l) == "?" {
+				t.Fatalf("got empty/unknown license for %s@%s: %+v", tc.name, tc.version, licenses)
+			}
+		}
+	}
+}
+
+func TestPubLookup(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	cases := []struct {
+		name    string
+		version string
+	}{
+		{"http", "1.1.0"},
+		{"riverpod", "1.0.0"},
+	}
+
+	for _, tc := range cases {
+		licenses := analysis.LookupPubLicense(ctx, tc.name, tc.version)
+		if len(licenses) == 0 {
+			t.Fatalf("expected licenses for %s@%s, got none", tc.name, tc.version)
+		}
+		for _, l := range licenses {
+			if strings.TrimSpace(l) == "" || strings.TrimSpace(l) == "?" {
+				t.Fatalf("got empty/unknown license for %s@%s: %+v", tc.name, tc.version, licenses)
+			}
+		}
+	}
+}
+
+func TestCocoaPodsLookup(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	cases := []struct {
+		name    string
+		version string
+	}{
+		{"Alamofire", "5.9.1"},
+	}
+
+	for _, tc := range cases {
+		licenses := analysis.LookupCocoaPodsLicense(ctx, tc.name, tc.version)
+		if len(licenses) == 0 {
+			t.Fatalf("expected licenses for %s@%s, got none", tc.name, tc.version)
+		}
+		for _, l := range licenses {
+			if strings.TrimSpace(l) == "" || strings.TrimSpace(l) == "?" {
+				t.Fatalf("got empty/unknown license for %s@%s: %+v", tc.name, tc.version, licenses)
+			}
+		}
+	}
+}
+
+func TestHexLookup(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	cases := []struct {
+		name    string
+		version string
+	}{
+		{"plug", "1.12.0"},
+	}
+
+	for _, tc := range cases {
+		licenses := analysis.LookupHexLicense(ctx, tc.name, tc.version)
 		if len(licenses) == 0 {
 			t.Fatalf("expected licenses for %s@%s, got none", tc.name, tc.version)
 		}

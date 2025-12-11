@@ -1,10 +1,13 @@
 package analysis
 
 import (
+	"archive/tar"
 	"archive/zip"
 	"bytes"
+	"compress/gzip"
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -70,11 +73,10 @@ SOFTWARE.`
 	server, zipPath := serveLicenseZip(t, "LICENSE", mitText)
 	defer server.Close()
 
-	restore := swapHTTPGlobals(server)
-	defer restore()
-
-	goProxyBase = server.URL
-	defer func() { goProxyBase = "https://proxy.golang.org" }()
+	restoreClient := swapHTTPGlobals(server)
+	defer restoreClient()
+	restoreBases := WithLicenseEndpoints(server.URL, cratesBase, packagistBase, pubBase, cocoapodsBase, hexpmBase)
+	defer restoreBases()
 
 	if got := GoProxyLicenseScan(context.Background(), "example.com/mod", "v1.2.3"); !equalStrings(got, []string{"MIT"}) {
 		t.Fatalf("expected go proxy direct scan to return MIT, got %v", got)
@@ -100,11 +102,10 @@ func TestLookupLicensesBestEffort_Crates(t *testing.T) {
 	}))
 	defer server.Close()
 
-	restore := swapHTTPGlobals(server)
-	defer restore()
-
-	cratesBase = server.URL
-	defer func() { cratesBase = "https://crates.io" }()
+	restoreClient := swapHTTPGlobals(server)
+	defer restoreClient()
+	restoreBases := WithLicenseEndpoints(goProxyBase, server.URL, packagistBase, pubBase, cocoapodsBase, hexpmBase)
+	defer restoreBases()
 
 	got := LookupLicensesBestEffort(context.Background(), "rust", "serde", "1.0.0")
 	if want := []string{"MIT"}; !equalStrings(got, want) {
@@ -132,11 +133,10 @@ func TestLookupLicensesBestEffort_Packagist(t *testing.T) {
 			http.NotFound(w, r)
 		}))
 		defer server.Close()
-		restore := swapHTTPGlobals(server)
-		defer restore()
-
-		packagistBase = server.URL
-		defer func() { packagistBase = "https://repo.packagist.org" }()
+		restoreClient := swapHTTPGlobals(server)
+		defer restoreClient()
+		restoreBases := WithLicenseEndpoints(goProxyBase, cratesBase, server.URL, pubBase, cocoapodsBase, hexpmBase)
+		defer restoreBases()
 
 		got := LookupLicensesBestEffort(context.Background(), "php", "laravel/framework", "10.0.0")
 		if want := []string{"BSD-3-Clause"}; !equalStrings(got, want) {
@@ -163,17 +163,115 @@ func TestLookupLicensesBestEffort_Packagist(t *testing.T) {
 			http.NotFound(w, r)
 		}))
 		defer server.Close()
-		restore := swapHTTPGlobals(server)
-		defer restore()
-
-		packagistBase = server.URL
-		defer func() { packagistBase = "https://repo.packagist.org" }()
+		restoreClient := swapHTTPGlobals(server)
+		defer restoreClient()
+		restoreBases := WithLicenseEndpoints(goProxyBase, cratesBase, server.URL, pubBase, cocoapodsBase, hexpmBase)
+		defer restoreBases()
 
 		got := LookupLicensesBestEffort(context.Background(), "composer", "vendor/name", "1.2.3")
 		if want := []string{"Apache-2.0"}; !equalStrings(got, want) {
 			t.Fatalf("expected packagist legacy license, got %v", got)
 		}
 	})
+}
+
+func TestLookupLicensesBestEffort_Pub(t *testing.T) {
+	resetLicenseTestState(t)
+	mitText := `MIT License
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.`
+	var base string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.Contains(r.URL.Path, "/api/packages/riverpod/versions/1.0.0") {
+			_, _ = w.Write([]byte(fmt.Sprintf(`{"pubspec":{"license":""},"archive_url":"%s/pkg.tar.gz"}`, base)))
+			return
+		}
+		if strings.Contains(r.URL.Path, "/pkg.tar.gz") {
+			zw := gzip.NewWriter(w)
+			tw := tar.NewWriter(zw)
+			_ = tw.WriteHeader(&tar.Header{Name: "LICENSE", Size: int64(len(mitText))})
+			_, _ = tw.Write([]byte(mitText))
+			_ = tw.Close()
+			_ = zw.Close()
+			return
+		}
+		http.NotFound(w, r)
+	}))
+	base = server.URL
+	defer server.Close()
+	restoreClient := swapHTTPGlobals(server)
+	defer restoreClient()
+	restoreBases := WithLicenseEndpoints(goProxyBase, cratesBase, packagistBase, server.URL, cocoapodsBase, hexpmBase)
+	defer restoreBases()
+
+	got := LookupLicensesBestEffort(context.Background(), "dart", "riverpod", "1.0.0")
+	if want := []string{"MIT"}; !equalStrings(got, want) {
+		t.Fatalf("expected pub license, got %v", got)
+	}
+}
+
+func TestLookupLicensesBestEffort_CocoaPods(t *testing.T) {
+	resetLicenseTestState(t)
+	var base string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.Contains(r.URL.Path, "/api/v1/pods/Alamofire/versions/5.9.1") {
+			_, _ = w.Write([]byte(fmt.Sprintf(`{"data_url":"%s/Specs/Alamofire.json"}`, base)))
+			return
+		}
+		if strings.Contains(r.URL.Path, "/Specs/Alamofire.json") {
+			_, _ = w.Write([]byte(`{"license":{"type":"MIT"}}`))
+			return
+		}
+		http.NotFound(w, r)
+	}))
+	base = server.URL
+	defer server.Close()
+	restoreClient := swapHTTPGlobals(server)
+	defer restoreClient()
+	restoreBases := WithLicenseEndpoints(goProxyBase, cratesBase, packagistBase, pubBase, server.URL, hexpmBase)
+	defer restoreBases()
+
+	got := LookupLicensesBestEffort(context.Background(), "cocoapods", "Alamofire", "5.9.1")
+	if want := []string{"MIT"}; !equalStrings(got, want) {
+		t.Fatalf("expected cocoapods license, got %v", got)
+	}
+}
+
+func TestLookupLicensesBestEffort_Hex(t *testing.T) {
+	resetLicenseTestState(t)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.Contains(r.URL.Path, "/api/packages/plug") && !strings.Contains(r.URL.Path, "releases") {
+			_, _ = w.Write([]byte(`{"meta":{"licenses":["Apache-2.0"]}}`))
+			return
+		}
+		http.NotFound(w, r)
+	}))
+	defer server.Close()
+	restoreClient := swapHTTPGlobals(server)
+	defer restoreClient()
+	restoreBases := WithLicenseEndpoints(goProxyBase, cratesBase, packagistBase, pubBase, cocoapodsBase, server.URL)
+	defer restoreBases()
+
+	got := LookupLicensesBestEffort(context.Background(), "hex", "plug", "1.12.0")
+	if want := []string{"Apache-2.0"}; !equalStrings(got, want) {
+		t.Fatalf("expected hex license, got %v", got)
+	}
 }
 
 func serveLicenseZip(t *testing.T, filename, content string) (*httptest.Server, *string) {
