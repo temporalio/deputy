@@ -109,6 +109,54 @@ func TestRubyGemsHandlerBlocksLicense(t *testing.T) {
 	}
 }
 
+func TestRubyGemsHandlerIgnoresMissingVersionForVersionPolicies(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, "{}")
+	}))
+	defer upstream.Close()
+
+	tmp := t.TempDir()
+	pol := writeRubyBundle(t, tmp, "deny-version", `pkg.name == "rails" && ["7.1.0"].exists(v, v.matches(pkg.version))`, "blocked", "deny")
+	engine, err := NewPolicyEngine([]string{pol})
+	if err != nil {
+		t.Fatalf("engine: %v", err)
+	}
+	handler, err := newRubyGemsHandler(upstream.URL, engine)
+	if err != nil {
+		t.Fatalf("handler: %v", err)
+	}
+	handler.osvClient = nil
+	handler.licenseLookup = nil
+
+	// metadata (no version) should pass
+	{
+		rr := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/rails", nil)
+		handler.ServeHTTP(rr, req)
+		if rr.Code != http.StatusOK {
+			t.Fatalf("expected 200 for metadata without version, got %d", rr.Code)
+		}
+	}
+	// non-IOC version should pass
+	{
+		rr := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/rails-6.1.0.gem", nil)
+		handler.ServeHTTP(rr, req)
+		if rr.Code != http.StatusOK {
+			t.Fatalf("expected 200 for non-IOC version, got %d", rr.Code)
+		}
+	}
+	// IOC version should be denied
+	{
+		rr := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/rails-7.1.0.gem", nil)
+		handler.ServeHTTP(rr, req)
+		if rr.Code != http.StatusForbidden {
+			t.Fatalf("expected 403 for IOC version, got %d", rr.Code)
+		}
+	}
+}
+
 func TestRubyGemsHandlerForwardsRequestBodyAndHeaders(t *testing.T) {
 	const body = `{"key":"value"}`
 	var (

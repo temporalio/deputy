@@ -37,6 +37,14 @@ policies:          # required, non-empty list
 ### Entrypoint inputs
 - Standard top-level identifiers: `request`, `vulnerabilities`, `sbom`, `config`, `env`, `dependency`, `plan`, `step`, `repo`, `cluster`, `component`, `findings`.
 - `env.command` and `env.entrypoint` indicate the invoking command/entrypoint.
+- Proxy requests always include `request.version` as a string. When no concrete version exists yet (e.g., metadata/index requests), Deputy sets it to the placeholder `"<unknown>"` and also provides:
+  - `request.has_version` (bool) — true only when a real version was present in the request path.
+  - `request.raw_version` (string) — the original version string (empty when none was present).
+  Use `request.has_version` to guard version-sensitive logic, e.g.:
+  ```cel
+  request.has_version &&
+  iocPkgs.exists(p, p.name == pkg.name && p.versions.exists(v, v.matches(pkg.version)))
+  ```
 
 Canonical entrypoints (snake_case):
 - proxy: `go_artifact_request`, `npm_artifact_request`, `pypi_artifact_request`, `rubygems_artifact_request`
@@ -88,6 +96,19 @@ policies:
       - action: deny
         when: env.command == "proxy" && vulnerabilities.exists(v, v.severity in high)
         reason: "proxy block: high severity vuln"
+```
+
+Version-aware IOC example (use `has_version` to avoid matching metadata requests):
+```yaml
+policies:
+  - name: block-react-ioc
+    vars:
+      iocPkgs: [{name: "react", versions: ["18.3.1"]}]
+    rules:
+      - action: deny
+        when: request.has_version &&
+              iocPkgs.exists(p, p.name == pkg.name && p.versions.exists(v, v.matches(pkg.version)))
+        reason: package/version matches IOC
 ```
 
 ## Tooling and tests

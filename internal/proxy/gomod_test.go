@@ -228,6 +228,55 @@ func TestGoModuleHandlerLicenseAllowlistExample(t *testing.T) {
 	}
 }
 
+func TestGoModuleHandlerIgnoresMissingVersionForVersionPolicies(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, "{}")
+	}))
+	defer upstream.Close()
+
+	tmp := t.TempDir()
+	pol := writeBundle(t, tmp, "deny-version", `pkg.name == "github.com/foo/bar" && ["v1.2.3"].exists(v, v.matches(pkg.version))`, "blocked", "deny")
+
+	engine, err := NewPolicyEngine([]string{pol})
+	if err != nil {
+		t.Fatalf("NewPolicyEngine: %v", err)
+	}
+	handler, err := newGoModuleHandler(upstream.URL, engine)
+	if err != nil {
+		t.Fatalf("handler: %v", err)
+	}
+	handler.osvClient = nil
+	handler.licenseLookup = nil
+
+	// list (no version) should pass
+	{
+		rr := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/github.com/foo/bar/@v/list", nil)
+		handler.ServeHTTP(rr, req)
+		if rr.Code != http.StatusOK {
+			t.Fatalf("expected 200 for list without version, got %d", rr.Code)
+		}
+	}
+	// non-IOC version should pass
+	{
+		rr := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/github.com/foo/bar/@v/v1.0.0.zip", nil)
+		handler.ServeHTTP(rr, req)
+		if rr.Code != http.StatusOK {
+			t.Fatalf("expected 200 for non-IOC version, got %d", rr.Code)
+		}
+	}
+	// IOC version should be denied
+	{
+		rr := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/github.com/foo/bar/@v/v1.2.3.zip", nil)
+		handler.ServeHTTP(rr, req)
+		if rr.Code != http.StatusForbidden {
+			t.Fatalf("expected 403 for IOC version, got %d", rr.Code)
+		}
+	}
+}
+
 func TestGoModuleHandlerEndToEndPolicies(t *testing.T) {
 	upstreamHits := 0
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

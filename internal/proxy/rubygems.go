@@ -43,20 +43,32 @@ func newRubyGemsHandler(upstream string, policies PolicyEvaluator) (*rubyGemsHan
 func (h *rubyGemsHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	name, version, operation := parseRubyGemsPath(r.URL.Path)
+	hasVersion := strings.TrimSpace(version) != ""
+	rawVersion := version
+	if !hasVersion {
+		version = unknownVersionPlaceholder
+	}
 	payload := map[string]any{
 		"request": map[string]any{
 			"ecosystem": "rubygems",
 			"package":   name,
 			"version":   version,
-			"operation": operation,
-			"path":      r.URL.Path,
+			"raw_version": func() string {
+				if hasVersion {
+					return rawVersion
+				}
+				return ""
+			}(),
+			"has_version": hasVersion,
+			"operation":   operation,
+			"path":        r.URL.Path,
 		},
 	}
-	if version != "" {
-		if vulnMaps := h.vulnerabilityPayload(ctx, name, version); len(vulnMaps) > 0 {
+	if hasVersion {
+		if vulnMaps := h.vulnerabilityPayload(ctx, name, rawVersion); len(vulnMaps) > 0 {
 			payload["vulnerabilities"] = vulnMaps
 		}
-		if licenses := h.licensePayload(ctx, name, version); len(licenses) > 0 {
+		if licenses := h.licensePayload(ctx, name, rawVersion); len(licenses) > 0 {
 			payload["licenses"] = licenses
 			if req, ok := payload["request"].(map[string]any); ok {
 				req["licenses"] = licenses
@@ -85,12 +97,12 @@ func (h *rubyGemsHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		applyPolicyHeaders(w, deny, blockMeta{
 			Ecosystem: "rubygems",
 			Name:      name,
-			Version:   version,
+			Version:   rawVersion,
 			Operation: operation,
 		})
 		status := statusFromAction(deny, http.StatusForbidden)
 		http.Error(w, deny.Reason, status)
-		slog.Info("request denied", "package", name, "version", version, "reason", deny.Reason)
+		slog.Info("request denied", "package", name, "version", rawVersion, "reason", deny.Reason)
 		return
 	}
 

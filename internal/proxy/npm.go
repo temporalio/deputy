@@ -43,20 +43,32 @@ func newNPMHandler(upstream string, policies PolicyEvaluator) (*npmHandler, erro
 func (h *npmHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	pkg, version, operation := parseNPMPath(r.URL.Path)
+	hasVersion := strings.TrimSpace(version) != ""
+	rawVersion := version
+	if !hasVersion {
+		version = unknownVersionPlaceholder
+	}
 	payload := map[string]any{
 		"request": map[string]any{
 			"ecosystem": "npm",
 			"package":   pkg,
 			"version":   version,
-			"operation": operation,
-			"path":      r.URL.Path,
+			"raw_version": func() string {
+				if hasVersion {
+					return rawVersion
+				}
+				return ""
+			}(),
+			"has_version": hasVersion,
+			"operation":   operation,
+			"path":        r.URL.Path,
 		},
 	}
-	if version != "" {
-		if vulnMaps := h.vulnerabilityPayload(ctx, pkg, version); len(vulnMaps) > 0 {
+	if hasVersion {
+		if vulnMaps := h.vulnerabilityPayload(ctx, pkg, rawVersion); len(vulnMaps) > 0 {
 			payload["vulnerabilities"] = vulnMaps
 		}
-		if licenses := h.licensePayload(ctx, pkg, version); len(licenses) > 0 {
+		if licenses := h.licensePayload(ctx, pkg, rawVersion); len(licenses) > 0 {
 			payload["licenses"] = licenses
 			if req, ok := payload["request"].(map[string]any); ok {
 				req["licenses"] = licenses
@@ -85,12 +97,12 @@ func (h *npmHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		applyPolicyHeaders(w, deny, blockMeta{
 			Ecosystem: "npm",
 			Name:      pkg,
-			Version:   version,
+			Version:   rawVersion,
 			Operation: operation,
 		})
 		status := statusFromAction(deny, http.StatusForbidden)
 		http.Error(w, deny.Reason, status)
-		slog.Info("request denied", "package", pkg, "version", version, "reason", deny.Reason)
+		slog.Info("request denied", "package", pkg, "version", rawVersion, "reason", deny.Reason)
 		return
 	}
 

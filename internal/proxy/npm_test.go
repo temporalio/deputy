@@ -183,3 +183,55 @@ func TestNPMHandlerEndToEndPolicy(t *testing.T) {
 		t.Fatalf("expected 403 from policy, got %d", rr.Code)
 	}
 }
+
+func TestNPMHandlerIgnoresMissingVersionForVersionPolicies(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, "{}")
+	}))
+	defer upstream.Close()
+
+	tmp := t.TempDir()
+	// Mirrors the IOC-style pattern that previously matched when version was empty.
+	pol := writeNPMBundle(t, tmp, "deny-react-ioc", `pkg.name == "react" && ["18.3.1"].exists(v, v.matches(pkg.version))`, "ioc hit", "deny")
+
+	engine, err := NewPolicyEngine([]string{pol})
+	if err != nil {
+		t.Fatalf("NewPolicyEngine: %v", err)
+	}
+	handler, err := newNPMHandler(upstream.URL, engine)
+	if err != nil {
+		t.Fatalf("newNPMHandler: %v", err)
+	}
+	handler.osvClient = nil
+	handler.licenseLookup = nil
+
+	// Metadata (no version) should not be denied just because version is empty.
+	{
+		rr := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/react", nil)
+		handler.ServeHTTP(rr, req)
+		if rr.Code != http.StatusOK {
+			t.Fatalf("expected 200 for metadata request, got %d", rr.Code)
+		}
+	}
+
+	// Non-IOC version should pass.
+	{
+		rr := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/react/-/react-19.0.0.tgz", nil)
+		handler.ServeHTTP(rr, req)
+		if rr.Code != http.StatusOK {
+			t.Fatalf("expected 200 for non-IOC download, got %d", rr.Code)
+		}
+	}
+
+	// IOC version should still be denied.
+	{
+		rr := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/react/-/react-18.3.1.tgz", nil)
+		handler.ServeHTTP(rr, req)
+		if rr.Code != http.StatusForbidden {
+			t.Fatalf("expected 403 for IOC download, got %d", rr.Code)
+		}
+	}
+}

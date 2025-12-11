@@ -43,21 +43,33 @@ func newPyPIHandler(upstream string, policies PolicyEvaluator) (*pypiHandler, er
 func (h *pypiHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	pkg, version, filename, op := parsePyPIPath(r.URL.Path)
+	hasVersion := strings.TrimSpace(version) != ""
+	rawVersion := version
+	if !hasVersion {
+		version = unknownVersionPlaceholder
+	}
 	payload := map[string]any{
 		"request": map[string]any{
 			"ecosystem": "pypi",
 			"package":   pkg,
 			"version":   version,
-			"operation": op,
-			"path":      r.URL.Path,
-			"filename":  filename,
+			"raw_version": func() string {
+				if hasVersion {
+					return rawVersion
+				}
+				return ""
+			}(),
+			"has_version": hasVersion,
+			"operation":   op,
+			"path":        r.URL.Path,
+			"filename":    filename,
 		},
 	}
-	if version != "" {
-		if vulnMaps := h.vulnerabilityPayload(ctx, pkg, version); len(vulnMaps) > 0 {
+	if hasVersion {
+		if vulnMaps := h.vulnerabilityPayload(ctx, pkg, rawVersion); len(vulnMaps) > 0 {
 			payload["vulnerabilities"] = vulnMaps
 		}
-		if licenses := h.licensePayload(ctx, pkg, version); len(licenses) > 0 {
+		if licenses := h.licensePayload(ctx, pkg, rawVersion); len(licenses) > 0 {
 			payload["licenses"] = licenses
 			if req, ok := payload["request"].(map[string]any); ok {
 				req["licenses"] = licenses
@@ -87,12 +99,12 @@ func (h *pypiHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		applyPolicyHeaders(w, deny, blockMeta{
 			Ecosystem: "pypi",
 			Name:      pkg,
-			Version:   version,
+			Version:   rawVersion,
 			Operation: op,
 		})
 		status := statusFromAction(deny, http.StatusForbidden)
 		http.Error(w, deny.Reason, status)
-		slog.Info("request denied", "package", pkg, "version", version, "reason", deny.Reason)
+		slog.Info("request denied", "package", pkg, "version", rawVersion, "reason", deny.Reason)
 		return
 	}
 

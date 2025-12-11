@@ -117,6 +117,54 @@ func TestPyPIHandlerLicensePolicy(t *testing.T) {
 	}
 }
 
+func TestPyPIHandlerIgnoresMissingVersionForVersionPolicies(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, "{}")
+	}))
+	defer upstream.Close()
+
+	tmp := t.TempDir()
+	polPath := writePyPIBundle(t, tmp, "deny-version", `pkg.name == "example" && ["1.2.3"].exists(v, v.matches(pkg.version))`, "blocked", "deny")
+	engine, err := NewPolicyEngine([]string{polPath})
+	if err != nil {
+		t.Fatalf("NewPolicyEngine: %v", err)
+	}
+	handler, err := newPyPIHandler(upstream.URL, engine)
+	if err != nil {
+		t.Fatalf("newPyPIHandler: %v", err)
+	}
+	handler.osvClient = nil
+	handler.licenseLookup = nil
+
+	// simple index (no version) should pass
+	{
+		rr := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/simple/example/", nil)
+		handler.ServeHTTP(rr, req)
+		if rr.Code != http.StatusOK {
+			t.Fatalf("expected 200 for simple index without version, got %d", rr.Code)
+		}
+	}
+	// non-IOC version should pass
+	{
+		rr := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/example-2.0.0.tar.gz", nil)
+		handler.ServeHTTP(rr, req)
+		if rr.Code != http.StatusOK {
+			t.Fatalf("expected 200 for non-IOC version, got %d", rr.Code)
+		}
+	}
+	// IOC version should be denied
+	{
+		rr := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/example-1.2.3.tar.gz", nil)
+		handler.ServeHTTP(rr, req)
+		if rr.Code != http.StatusForbidden {
+			t.Fatalf("expected 403 for IOC version, got %d", rr.Code)
+		}
+	}
+}
+
 func TestPyPIHandlerForwardsRequestBodyAndHeaders(t *testing.T) {
 	const body = `{"query":"numpy"}`
 	var (

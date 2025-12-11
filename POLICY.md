@@ -73,6 +73,16 @@ Each Deputy **command** exposes one or more **entrypoints**. Policies can declar
 
 **Ecosystem identifiers** (used in `request.ecosystem` and commonly in `pkg.ecosystem`): `go`, `npm`, `pypi`, `rubygems`. Use these strings in `ecosystems: [...]` when scoping policies to package managers.
 
+**Version presence semantics (proxy)**:
+- `request.version` is always a string. If the incoming request had no concrete version (e.g., metadata/index), Deputy uses the placeholder `"<unknown>"`.
+- `request.has_version` is true only when a real version was present in the request path.
+- `request.raw_version` is the original version string (empty when none was provided).
+- Guard version-sensitive rules with `request.has_version` to avoid matching metadata requests:
+  ```cel
+  request.has_version &&
+  iocPkgs.exists(p, p.name == pkg.name && p.versions.exists(v, v.matches(pkg.version)))
+  ```
+
 **Entrypoint identifiers** (always use `snake_case` format):
 - proxy: `go_artifact_request`, `npm_artifact_request`, `pypi_artifact_request`, `rubygems_artifact_request`
 - scan: `scan_report`, `scan_vulnerability`

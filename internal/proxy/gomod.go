@@ -47,21 +47,34 @@ func (h *goModuleHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	hasVersion := strings.TrimSpace(version) != ""
+	rawVersion := version
+	if !hasVersion {
+		version = unknownVersionPlaceholder
+	}
+
 	payload := map[string]any{
 		"request": map[string]any{
 			"ecosystem": "go",
 			"module":    module,
 			"version":   version,
-			"fileType":  fileType,
-			"operation": op,
-			"path":      r.URL.Path,
+			"raw_version": func() string {
+				if hasVersion {
+					return rawVersion
+				}
+				return ""
+			}(),
+			"has_version": hasVersion,
+			"fileType":    fileType,
+			"operation":   op,
+			"path":        r.URL.Path,
 		},
 	}
-	if version != "" {
-		if vulnMaps := h.vulnerabilityPayload(ctx, module, version); len(vulnMaps) > 0 {
+	if hasVersion {
+		if vulnMaps := h.vulnerabilityPayload(ctx, module, rawVersion); len(vulnMaps) > 0 {
 			payload["vulnerabilities"] = vulnMaps
 		}
-		if licenses := h.licensePayload(ctx, module, version); len(licenses) > 0 {
+		if licenses := h.licensePayload(ctx, module, rawVersion); len(licenses) > 0 {
 			payload["licenses"] = licenses
 			if req, ok := payload["request"].(map[string]any); ok {
 				req["licenses"] = licenses
@@ -88,12 +101,12 @@ func (h *goModuleHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		applyPolicyHeaders(w, deny, blockMeta{
 			Ecosystem: "go",
 			Name:      module,
-			Version:   version,
+			Version:   rawVersion,
 			Operation: op,
 		})
 		status := statusFromAction(deny, http.StatusForbidden)
 		http.Error(w, deny.Reason, status)
-		slog.Info("request denied", "module", module, "version", version, "reason", deny.Reason)
+		slog.Info("request denied", "module", module, "version", rawVersion, "reason", deny.Reason)
 		return
 	}
 
