@@ -19,6 +19,7 @@ import (
 	cmp "github.com/picatz/deputy/internal/compare"
 	gitx "github.com/picatz/deputy/internal/gitutil"
 	inv "github.com/picatz/deputy/internal/inventory"
+	"github.com/picatz/deputy/internal/output"
 	"github.com/picatz/deputy/internal/repository"
 	"github.com/picatz/deputy/internal/repository/workspace"
 	ui "github.com/picatz/deputy/internal/ui"
@@ -26,7 +27,6 @@ import (
 	"golang.org/x/sync/errgroup"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
-	"osv.dev/bindings/go/osvdev"
 )
 
 // AddDiffCommand registers the diff subcommand which compares dependency
@@ -49,9 +49,10 @@ func AddDiffCommand(root *cobra.Command) {
 	)
 
 	cmd := &cobra.Command{
-		Use:          "diff [base] [target]",
-		Short:        "Compare dependency changes between Git references",
-		SilenceUsage: true,
+		Use:           "diff [base] [target]",
+		Short:         "Compare dependency changes between Git references",
+		SilenceErrors: true,
+		SilenceUsage:  true,
 		Long: `Compare dependencies between Git references with comprehensive vulnerability analysis.
 
 DEPENDENCY CHANGE ANALYSIS:
@@ -111,7 +112,7 @@ Can be disabled with --skip-vuln-scan for faster execution.`,
 			if err != nil {
 				return fmt.Errorf("failed to parse references: %w", err)
 			}
-			return runDiffAnalysis(cmd.Context(), repo, baseRef, targetRef, !skipVulnScan, useLicenseCheck, enrichLicenses, licenseSource, publishedAfterStr, publishedBeforeStr, asOfStr, ignoreUnfixed, showUnchanged, unchangedThreshold, policyPaths, scanOpts, matcher, debugMatcher, cmd.ErrOrStderr())
+			return runDiffAnalysis(cmd.Context(), repo, baseRef, targetRef, !skipVulnScan, useLicenseCheck, enrichLicenses, licenseSource, publishedAfterStr, publishedBeforeStr, asOfStr, ignoreUnfixed, showUnchanged, unchangedThreshold, policyPaths, scanOpts, matcher, debugMatcher, cmd.OutOrStdout(), cmd.ErrOrStderr())
 		},
 		Example: `BASIC USAGE:
   # Compare current work with default branch (beginner-friendly)
@@ -254,18 +255,22 @@ type DiffPolicyReport struct {
 // runDiffAnalysis orchestrates dependency inventory collection for the base and
 // target references, computes a dependency diff, and optionally queries OSV to
 // enrich added/updated modules with vulnerability data.
-func runDiffAnalysis(ctx context.Context, repoPath, baseRef, targetRef string, enableVulnScan bool, useLicenseCheck bool, enrichLicenses bool, licenseSource string, publishedAfterStr, publishedBeforeStr, asOfStr string, ignoreUnfixed bool, showUnchanged bool, unchangedThreshold string, policyPaths []string, scanOpts inv.ScanOptions, matcher *inv.DependencyMatcher, debugMatcher bool, errW io.Writer) error {
+func runDiffAnalysis(ctx context.Context, repoPath, baseRef, targetRef string, enableVulnScan bool, useLicenseCheck bool, enrichLicenses bool, licenseSource string, publishedAfterStr, publishedBeforeStr, asOfStr string, ignoreUnfixed bool, showUnchanged bool, unchangedThreshold string, policyPaths []string, scanOpts inv.ScanOptions, matcher *inv.DependencyMatcher, debugMatcher bool, outW io.Writer, errW io.Writer) error {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
+	if outW == nil {
+		outW = io.Discard
+	}
 	if errW == nil {
-		errW = os.Stderr
+		errW = io.Discard
 	}
 
 	dispTarget := targetRef
 	if isWorkingPseudoRef(targetRef) {
 		dispTarget = "WORKING"
 	}
-	fmt.Printf("%s %s → %s\n", ui.StyleHeader.Render("Comparing dependencies:"), ui.StyleVersion.Render(baseRef), ui.StyleVersion.Render(dispTarget))
+	doc := diffHeaderDoc(baseRef, dispTarget)
+	_ = doc.Render(outW, output.UIStyles())
 
 	// Check if dependency files have changed (optimization for non-working refs)
 	if !isWorkingPseudoRef(targetRef) {
@@ -275,11 +280,11 @@ func runDiffAnalysis(ctx context.Context, repoPath, baseRef, targetRef string, e
 		}
 
 		if debugMatcher {
-			renderMatcherDebug(changedFiles, matcher)
+			renderMatcherDebug(outW, changedFiles, matcher)
 		}
 
 		if matcher != nil && !matcher.AnyMatch(changedFiles) {
-			fmt.Println(ui.StyleAdded.Render("No dependency changes detected."))
+			fmt.Fprintln(outW, ui.StyleAdded.Render("No dependency changes detected."))
 			return nil
 		}
 	}
@@ -306,7 +311,7 @@ func runDiffAnalysis(ctx context.Context, repoPath, baseRef, targetRef string, e
 	var targetHash *plumbing.Hash
 
 	if isWorkingPseudoRef(targetRef) {
-		fmt.Println(ui.StyleMeta.Render("Scanning packages in working tree..."))
+		fmt.Fprintln(outW, ui.StyleMeta.Render("Scanning packages in working tree..."))
 		tp, err := inv.ScanPackagesWorking(ctx, repoSrc.Workspace, scanOpts)
 		if err != nil {
 			return fmt.Errorf("error scanning working tree packages: %w", err)
@@ -325,7 +330,7 @@ func runDiffAnalysis(ctx context.Context, repoPath, baseRef, targetRef string, e
 	}
 
 	// Scan base packages
-	fmt.Println(ui.StyleMeta.Render(fmt.Sprintf("Scanning packages in base reference %s...", baseHash.String()[:7])))
+	fmt.Fprintln(outW, ui.StyleMeta.Render(fmt.Sprintf("Scanning packages in base reference %s...", baseHash.String()[:7])))
 	basePackages, err := inv.ScanPackagesAtCommitSnapshot(ctx, repo, *baseHash, scanOpts)
 	if err != nil {
 		return fmt.Errorf("error scanning base reference packages: %w", err)
@@ -333,7 +338,7 @@ func runDiffAnalysis(ctx context.Context, repoPath, baseRef, targetRef string, e
 
 	// Scan target packages if not already done
 	if targetPackages == nil && targetHash != nil {
-		fmt.Println(ui.StyleMeta.Render(fmt.Sprintf("Scanning packages in target reference %s...", targetHash.String()[:7])))
+		fmt.Fprintln(outW, ui.StyleMeta.Render(fmt.Sprintf("Scanning packages in target reference %s...", targetHash.String()[:7])))
 		tp, err := inv.ScanPackagesAtCommitSnapshot(ctx, repo, *targetHash, scanOpts)
 		if err != nil {
 			return fmt.Errorf("error scanning target reference packages: %w", err)
@@ -389,7 +394,7 @@ func runDiffAnalysis(ctx context.Context, repoPath, baseRef, targetRef string, e
 	// Compare packages
 	changes := cmp.ComparePackages(basePackages, targetPackages, goDirect, pkgDirect, nil)
 	if len(changes) == 0 {
-		fmt.Println("No package changes detected.")
+		fmt.Fprintln(outW, "No package changes detected.")
 		return nil
 	}
 
@@ -397,20 +402,21 @@ func runDiffAnalysis(ctx context.Context, repoPath, baseRef, targetRef string, e
 	enrichLicenses, licenseSource = adjustLicenseOptions(useLicenseCheck, enrichLicenses, licenseSource)
 
 	// Detailed dependency change rendering (legacy style) with optional enrichment
-	displayDetailedDependencyChanges(ctx, repoSrc.Workspace, changes, enrichLicenses, licenseSource)
+	displayDetailedDependencyChanges(ctx, repoSrc.Workspace, changes, enrichLicenses, licenseSource, outW, errW)
 
 	// Scan for vulnerabilities if enabled
 	var vulns []analysis.Vulnerability
 	if enableVulnScan {
-		fmt.Printf("\n%s\n", ui.StyleMeta.Render("Scanning dependencies for vulnerabilities..."))
+		fmt.Fprintln(outW)
+		fmt.Fprintln(outW, ui.StyleMeta.Render("Scanning dependencies for vulnerabilities..."))
 
 		inputs := pkgInputs
 		if inputs == nil {
 			inputs = packagesToInputs(targetPackages, packageInputOptions{GoDirect: goDirect, Resolver: manifestRes})
 		}
-		vv, err := analysis.QueryOSVBatch(ctx, osvdev.DefaultClient(), inputs)
+		vv, err := analysis.QueryOSVBatch(ctx, analysis.NewOSVClient(), inputs)
 		if err != nil {
-			fmt.Printf("Warning: Vulnerability scanning failed: %v\n", err)
+			fmt.Fprintf(errW, "Warning: Vulnerability scanning failed: %v\n", err)
 		} else {
 			vulns = vv
 		}
@@ -421,21 +427,21 @@ func runDiffAnalysis(ctx context.Context, repoPath, baseRef, targetRef string, e
 			if t, err := analysis.ParseFlexibleDate(asOfStr, "asof"); err == nil {
 				beforeT = t
 			} else {
-				fmt.Printf("Warning: could not parse --as-of date %q: %v\n", asOfStr, err)
+				fmt.Fprintf(errW, "Warning: could not parse --as-of date %q: %v\n", asOfStr, err)
 			}
 		}
 		if publishedBeforeStr != "" && beforeT.IsZero() {
 			if t, err := analysis.ParseFlexibleDate(publishedBeforeStr, "before"); err == nil {
 				beforeT = t
 			} else {
-				fmt.Printf("Warning: could not parse --published-before %q: %v\n", publishedBeforeStr, err)
+				fmt.Fprintf(errW, "Warning: could not parse --published-before %q: %v\n", publishedBeforeStr, err)
 			}
 		}
 		if publishedAfterStr != "" {
 			if t, err := analysis.ParseFlexibleDate(publishedAfterStr, "after"); err == nil {
 				afterT = t
 			} else {
-				fmt.Printf("Warning: could not parse --published-after %q: %v\n", publishedAfterStr, err)
+				fmt.Fprintf(errW, "Warning: could not parse --published-after %q: %v\n", publishedAfterStr, err)
 			}
 		}
 		if !beforeT.IsZero() || !afterT.IsZero() {
@@ -464,7 +470,7 @@ func runDiffAnalysis(ctx context.Context, repoPath, baseRef, targetRef string, e
 		if ignoreUnfixed {
 			changedVulns = filterUnfixed(changedVulns)
 			unchangedVulns = filterUnfixed(unchangedVulns)
-			fmt.Printf("  %s\n", ui.StyleMeta.Render("Note: ignoring unfixed vulnerabilities (--ignore-unfixed)"))
+			fmt.Fprintf(errW, "  %s\n", ui.StyleMeta.Render("Note: ignoring unfixed vulnerabilities (--ignore-unfixed)"))
 		}
 
 		// Decide whether to show unchanged set based on threshold
@@ -517,8 +523,9 @@ func runDiffAnalysis(ctx context.Context, repoPath, baseRef, targetRef string, e
 		}
 
 		if len(all) > 0 {
-			fmt.Println("\n" + ui.StyleDowngraded.Render("∴ ") + ui.StyleHeader.Render("Vulnerabilities"))
-			RenderVulnerabilityList(changedVulns, vulnDisplayOptions{})
+			fmt.Fprintln(outW)
+			fmt.Fprintln(outW, ui.StyleDowngraded.Render("∴ ")+ui.StyleHeader.Render("Vulnerabilities"))
+			RenderVulnerabilityList(outW, changedVulns, vulnDisplayOptions{})
 			if showUnchangedEff && len(unchangedVulns) > 0 {
 				// Visual separator for unchanged dependencies, include reason if any
 				title := "Unchanged dependencies"
@@ -526,17 +533,30 @@ func runDiffAnalysis(ctx context.Context, repoPath, baseRef, targetRef string, e
 					title += " (" + reason + ")"
 				}
 				sep := ui.StyleDim.Render(strings.Repeat("─", 3) + " " + title + " " + strings.Repeat("─", 3))
-				fmt.Println("\n" + sep)
-				RenderVulnerabilityList(unchangedVulns, vulnDisplayOptions{})
+				fmt.Fprintln(outW)
+				fmt.Fprintln(outW, sep)
+				RenderVulnerabilityList(outW, unchangedVulns, vulnDisplayOptions{})
 			}
 		}
-		RenderVulnerabilitySummaryAndActions(all)
+		RenderVulnerabilitySummaryAndActions(outW, all)
 		return nil
 	}
 
 	// Display results (no vulnerabilities scanned)
-	DisplayVulnerabilities(vulns)
+	DisplayVulnerabilities(outW, vulns)
 	return nil
+}
+
+func diffHeaderDoc(baseRef, targetRef string) output.Doc {
+	var doc output.Doc
+	doc.AddLine(
+		output.Span{Text: "Comparing dependencies:", Style: output.StyleHeader},
+		output.Span{Text: " "},
+		output.Span{Text: baseRef, Style: output.StyleVersion},
+		output.Span{Text: " → "},
+		output.Span{Text: targetRef, Style: output.StyleVersion},
+	)
+	return doc
 }
 
 // isWorkingPseudoRef reports whether the provided reference token should be
@@ -577,11 +597,12 @@ func licenseScanConcurrency(total int) int {
 
 // displayDetailedDependencyChanges renders dependency changes with symbols, arrows,
 // license lookups via deps.dev and a concise summary similar to the original tool output.
-func displayDetailedDependencyChanges(ctx context.Context, ws workspace.FS, changes []cmp.Change, enrich bool, licenseSource string) {
+func displayDetailedDependencyChanges(ctx context.Context, ws workspace.FS, changes []cmp.Change, enrich bool, licenseSource string, outW io.Writer, errW io.Writer) {
 	if len(changes) == 0 {
 		return
 	}
-	fmt.Printf("\n%s\n", ui.StyleHeader.Render("Dependency Changes:"))
+	fmt.Fprintln(outW)
+	fmt.Fprintln(outW, ui.StyleHeader.Render("Dependency Changes:"))
 
 	// Open deps.dev gRPC client (best‑effort). Failures degrade gracefully.
 	var client pb.InsightsClient
@@ -743,7 +764,7 @@ func displayDetailedDependencyChanges(ctx context.Context, ws workspace.FS, chan
 
 		switch c.ChangeType {
 		case cmp.Added:
-			fmt.Printf("  %s %s @ %s %s\n", ui.StyleAdded.Render("+"), ui.StyleAdded.Render(c.Name), ui.StyleVersion.Render(c.TargetVersion), licAndDepStr)
+			fmt.Fprintf(outW, "  %s %s @ %s %s\n", ui.StyleAdded.Render("+"), ui.StyleAdded.Render(c.Name), ui.StyleVersion.Render(c.TargetVersion), licAndDepStr)
 			addedN++
 		case cmp.Removed:
 			// For removed dependencies, we don't have target version license info, so just show directness
@@ -751,7 +772,7 @@ func displayDetailedDependencyChanges(ctx context.Context, ws workspace.FS, chan
 			if c.IsDirect {
 				removedDirectness = "(direct)"
 			}
-			fmt.Printf("  %s %s @ %s %s\n", ui.StyleRemoved.Render("-"), ui.StyleRemoved.Render(c.Name), ui.StyleVersion.Render(c.BaseVersion), ui.StyleVersion.Render(removedDirectness))
+			fmt.Fprintf(outW, "  %s %s @ %s %s\n", ui.StyleRemoved.Render("-"), ui.StyleRemoved.Render(c.Name), ui.StyleVersion.Render(c.BaseVersion), ui.StyleVersion.Render(removedDirectness))
 			removedN++
 		case cmp.Upgraded:
 			updatedN++
@@ -760,7 +781,7 @@ func displayDetailedDependencyChanges(ctx context.Context, ws workspace.FS, chan
 			if c.OldName != "" && c.OldName != c.Name {
 				oldNamePart = ui.StyleDim.Render(c.OldName) + " " + ui.StyleUpdateArrow.Render("→ ")
 			}
-			fmt.Printf("  %s %s%s @ %s %s %s %s\n", ui.StyleUpgraded.Render("↑"), oldNamePart, ui.StyleBold.Render(c.Name), ui.StyleVersion.Render(c.BaseVersion), ui.StyleUpdateArrow.Render("→"), ui.StyleVersion.Render(c.TargetVersion), licAndDepStr)
+			fmt.Fprintf(outW, "  %s %s%s @ %s %s %s %s\n", ui.StyleUpgraded.Render("↑"), oldNamePart, ui.StyleBold.Render(c.Name), ui.StyleVersion.Render(c.BaseVersion), ui.StyleUpdateArrow.Render("→"), ui.StyleVersion.Render(c.TargetVersion), licAndDepStr)
 		case cmp.Downgraded:
 			updatedN++
 			downgradedN++
@@ -768,7 +789,7 @@ func displayDetailedDependencyChanges(ctx context.Context, ws workspace.FS, chan
 			if c.OldName != "" && c.OldName != c.Name {
 				oldNamePart = ui.StyleDim.Render(c.OldName) + " " + ui.StyleDowngradeArrow.Render("→ ")
 			}
-			fmt.Printf("  %s %s%s @ %s %s %s %s\n", ui.StyleDowngraded.Render("↓"), oldNamePart, ui.StyleBold.Render(c.Name), ui.StyleVersion.Render(c.BaseVersion), ui.StyleDowngradeArrow.Render("→"), ui.StyleVersion.Render(c.TargetVersion), licAndDepStr)
+			fmt.Fprintf(outW, "  %s %s%s @ %s %s %s %s\n", ui.StyleDowngraded.Render("↓"), oldNamePart, ui.StyleBold.Render(c.Name), ui.StyleVersion.Render(c.BaseVersion), ui.StyleDowngradeArrow.Render("→"), ui.StyleVersion.Render(c.TargetVersion), licAndDepStr)
 		case cmp.Updated:
 			updatedN++
 			arrowStyle := ui.StyleUpdateArrow
@@ -777,27 +798,28 @@ func displayDetailedDependencyChanges(ctx context.Context, ws workspace.FS, chan
 			if c.OldName != "" && c.OldName != c.Name {
 				oldNamePart = ui.StyleDim.Render(c.OldName) + " " + arrowStyle.Render("→ ")
 			}
-			fmt.Printf("  %s %s%s @ %s %s %s %s\n", symbol, oldNamePart, ui.StyleBold.Render(c.Name), ui.StyleVersion.Render(c.BaseVersion), arrowStyle.Render("→"), ui.StyleVersion.Render(c.TargetVersion), licAndDepStr)
+			fmt.Fprintf(outW, "  %s %s%s @ %s %s %s %s\n", symbol, oldNamePart, ui.StyleBold.Render(c.Name), ui.StyleVersion.Render(c.BaseVersion), arrowStyle.Render("→"), ui.StyleVersion.Render(c.TargetVersion), licAndDepStr)
 		}
 	}
 
-	fmt.Printf("\n%s\n", ui.StyleHeader.Render("Summary:"))
+	fmt.Fprintln(outW)
+	fmt.Fprintln(outW, ui.StyleHeader.Render("Summary:"))
 	if addedN > 0 {
-		fmt.Printf("  %s %d package%s added\n", ui.StyleAdded.Render("+"), addedN, plural(addedN))
+		fmt.Fprintf(outW, "  %s %d package%s added\n", ui.StyleAdded.Render("+"), addedN, plural(addedN))
 	}
 	if removedN > 0 {
-		fmt.Printf("  %s %d package%s removed\n", ui.StyleRemoved.Render("-"), removedN, plural(removedN))
+		fmt.Fprintf(outW, "  %s %d package%s removed\n", ui.StyleRemoved.Render("-"), removedN, plural(removedN))
 	}
 	if updatedN > 0 {
 		if upgradedN > 0 {
-			fmt.Printf("  %s %d package%s upgraded\n", ui.StyleUpgraded.Render("↑"), upgradedN, plural(upgradedN))
+			fmt.Fprintf(outW, "  %s %d package%s upgraded\n", ui.StyleUpgraded.Render("↑"), upgradedN, plural(upgradedN))
 		}
 		if downgradedN > 0 {
-			fmt.Printf("  %s %d package%s downgraded\n", ui.StyleDowngraded.Render("↓"), downgradedN, plural(downgradedN))
+			fmt.Fprintf(outW, "  %s %d package%s downgraded\n", ui.StyleDowngraded.Render("↓"), downgradedN, plural(downgradedN))
 		}
 		other := updatedN - (upgradedN + downgradedN)
 		if other > 0 {
-			fmt.Printf("  %s %d package%s changed\n", ui.StyleNeutral.Render("~"), other, plural(other))
+			fmt.Fprintf(outW, "  %s %d package%s changed\n", ui.StyleNeutral.Render("~"), other, plural(other))
 		}
 	}
 }
@@ -850,24 +872,24 @@ func plural(n int) string {
 // renderMatcherDebug prints a human-friendly breakdown of which changed files
 // were considered dependency-related by the matcher when --debug-matcher is
 // enabled.
-func renderMatcherDebug(files []string, matcher *inv.DependencyMatcher) {
-	fmt.Println(ui.StyleMeta.Render("Matcher debug (changed files considered by dependency scanner):"))
+func renderMatcherDebug(w io.Writer, files []string, matcher *inv.DependencyMatcher) {
+	fmt.Fprintln(w, ui.StyleMeta.Render("Matcher debug (changed files considered by dependency scanner):"))
 	if len(files) == 0 {
-		fmt.Println("  (no changed files detected between refs)")
+		fmt.Fprintln(w, "  (no changed files detected between refs)")
 		return
 	}
 	if matcher == nil {
 		for _, f := range files {
-			fmt.Printf("  ? %s\n", f)
+			fmt.Fprintf(w, "  ? %s\n", f)
 		}
-		fmt.Println("  (matcher unavailable; treating all files as potential dependency changes)")
+		fmt.Fprintln(w, "  (matcher unavailable; treating all files as potential dependency changes)")
 		return
 	}
 	for _, f := range files {
 		if matcher.Matches(f) {
-			fmt.Printf("  %s %s\n", ui.StyleAdded.Render("+match"), f)
+			fmt.Fprintf(w, "  %s %s\n", ui.StyleAdded.Render("+match"), f)
 		} else {
-			fmt.Printf("  %s %s\n", ui.StyleDim.Render("-skip"), f)
+			fmt.Fprintf(w, "  %s %s\n", ui.StyleDim.Render("-skip"), f)
 		}
 	}
 }

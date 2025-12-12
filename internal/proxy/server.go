@@ -3,19 +3,35 @@ package proxy
 import (
 	"context"
 	"errors"
+	"expvar"
 	"fmt"
 	"log/slog"
+	"net"
 	"net/http"
+	"net/http/pprof"
 	"slices"
 	"strings"
-	"sync"
+	"sync/atomic"
+	"time"
 
 	"golang.org/x/sync/errgroup"
 )
 
+const (
+	proxyReadHeaderTimeout = 10 * time.Second
+	proxyWriteTimeout      = 5 * time.Minute
+	proxyIdleTimeout       = 2 * time.Minute
+	proxyShutdownTimeout   = 10 * time.Second
+	proxyMaxHeaderBytes    = 1 << 20 // 1 MiB
+	proxyMaxRequestBody    = 1 << 20 // 1 MiB
+)
+
 // Options customize server behavior from CLI flags.
 type Options struct {
-	PolicyPaths []string
+	PolicyPaths  []string
+	EnableReadyz bool
+	EnablePprof  bool
+	EnableVars   bool
 }
 
 // Server manages one or more listeners defined in the configuration.
@@ -86,26 +102,124 @@ func (s *Server) serveListener(ctx context.Context, cfg ListenerConfig) error {
 		return fmt.Errorf("listener %s: unsupported ecosystem %q", cfg.Name, ecos)
 	}
 
-	server := &http.Server{
-		Addr:    cfg.Bind,
-		Handler: handler,
+	var ready atomic.Bool
+	rootHandler := newListenerMux(cfg, s.opts, slog.Default(), cfg.Name, ecos, &ready, handler)
+
+	ln, err := net.Listen("tcp", cfg.Bind)
+	if err != nil {
+		return err
 	}
-	shutdownErr := make(chan error, 1)
-	var once sync.Once
+	addr := ln.Addr().String()
+
+	slog.Info("proxy listener starting", "name", cfg.Name, "addr", addr, "ecosystem", ecos, "upstream", cfg.Upstream)
+
+	readHeaderTimeout := cfg.ReadHeaderTimeout
+	if readHeaderTimeout == 0 {
+		readHeaderTimeout = proxyReadHeaderTimeout
+	}
+	writeTimeout := cfg.WriteTimeout
+	if writeTimeout == 0 {
+		writeTimeout = proxyWriteTimeout
+	}
+	idleTimeout := cfg.IdleTimeout
+	if idleTimeout == 0 {
+		idleTimeout = proxyIdleTimeout
+	}
+
+	server := &http.Server{
+		Addr:              addr,
+		Handler:           rootHandler,
+		ReadHeaderTimeout: readHeaderTimeout,
+		WriteTimeout:      writeTimeout,
+		IdleTimeout:       idleTimeout,
+		MaxHeaderBytes:    proxyMaxHeaderBytes,
+		ErrorLog:          slog.NewLogLogger(slog.Default().Handler(), slog.LevelError),
+		BaseContext: func(_ net.Listener) context.Context {
+			return ctx
+		},
+	}
+
+	errCh := make(chan error, 1)
 	go func() {
-		<-ctx.Done()
-		once.Do(func() {
-			shutdownErr <- server.Shutdown(context.Background())
-		})
+		ready.Store(true)
+		errCh <- server.Serve(ln)
 	}()
 
-	slog.Info("proxy listener starting", "name", cfg.Name, "addr", cfg.Bind, "ecosystem", ecos, "upstream", cfg.Upstream)
-	err = server.ListenAndServe()
-	if errors.Is(err, http.ErrServerClosed) {
-		err = nil
+	select {
+	case <-ctx.Done():
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), proxyShutdownTimeout)
+		defer cancel()
+		_ = server.Shutdown(shutdownCtx)
+		err = <-errCh
+	case err = <-errCh:
 	}
-	once.Do(func() {
-		shutdownErr <- err
+
+	if errors.Is(err, http.ErrServerClosed) {
+		return nil
+	}
+	return err
+}
+
+func newListenerMux(cfg ListenerConfig, opts Options, logger *slog.Logger, name, ecosystem string, ready *atomic.Bool, handler http.Handler) http.Handler {
+	if logger == nil {
+		logger = slog.Default()
+	}
+	skipLogPaths := map[string]bool{"/healthz": true}
+	if opts.EnableReadyz {
+		skipLogPaths["/readyz"] = true
+	}
+	if opts.EnablePprof || opts.EnableVars {
+		skipLogPaths["/debug/vars"] = true
+		skipLogPaths["/debug/pprof/"] = true
+		skipLogPaths["/debug/pprof/cmdline"] = true
+		skipLogPaths["/debug/pprof/profile"] = true
+		skipLogPaths["/debug/pprof/symbol"] = true
+		skipLogPaths["/debug/pprof/trace"] = true
+	}
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("ok\n"))
 	})
-	return <-shutdownErr
+	if opts.EnableReadyz {
+		mux.HandleFunc("/readyz", func(w http.ResponseWriter, r *http.Request) {
+			if ready == nil || !ready.Load() {
+				http.Error(w, "not ready", http.StatusServiceUnavailable)
+				return
+			}
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte("ok\n"))
+		})
+	} else {
+		mux.Handle("/readyz", http.NotFoundHandler())
+	}
+	if opts.EnableVars {
+		registerProxyCacheVars()
+		mux.Handle("/debug/vars", expvar.Handler())
+	} else {
+		mux.Handle("/debug/vars", http.NotFoundHandler())
+	}
+	if opts.EnablePprof {
+		mux.HandleFunc("/debug/pprof/", pprof.Index)
+		mux.HandleFunc("/debug/pprof/cmdline", pprof.Cmdline)
+		mux.HandleFunc("/debug/pprof/profile", pprof.Profile)
+		mux.HandleFunc("/debug/pprof/symbol", pprof.Symbol)
+		mux.HandleFunc("/debug/pprof/trace", pprof.Trace)
+	} else {
+		mux.Handle("/debug/pprof/", http.NotFoundHandler())
+	}
+
+	wrapped := handler
+	wrapped = withConcurrencyLimit(cfg.MaxConcurrentRequests)(wrapped)
+	wrapped = withRequestID("X-Request-ID")(wrapped)
+	wrapped = withRequestLogging(logger, name, ecosystem, cfg.Upstream, skipLogPaths)(wrapped)
+	mux.Handle("/", wrapped)
+
+	rootHandler := http.Handler(mux)
+	maxBody := cfg.MaxRequestBodyBytes
+	if maxBody == 0 {
+		maxBody = proxyMaxRequestBody
+	}
+	return withMaxRequestBodyBytes(maxBody)(rootHandler)
 }

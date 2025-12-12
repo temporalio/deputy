@@ -58,10 +58,11 @@ func AddListCommand(root *cobra.Command) {
 	)
 
 	cmd := &cobra.Command{
-		Use:          "list [repo]",
-		Aliases:      []string{"ls"},
-		Short:        "List dependencies in a repository",
-		SilenceUsage: true,
+		Use:           "list [repo]",
+		Aliases:       []string{"ls"},
+		Short:         "List dependencies in a repository",
+		SilenceErrors: true,
+		SilenceUsage:  true,
 		Long: `List all dependencies in a repository as Package URLs (PURLs).
 
 This command provides a flat list of all discovered dependencies, including
@@ -118,7 +119,7 @@ FILTERING & FORMATTING:
 				return err
 			}
 
-			var w io.Writer = os.Stdout
+			var w io.Writer = cmd.OutOrStdout()
 			if outPath != "" && outPath != "-" {
 				f, err := os.Create(outPath)
 				if err != nil {

@@ -16,7 +16,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/charmbracelet/lipgloss"
 	deputyerrors "github.com/picatz/deputy/internal/errors"
 	"github.com/picatz/deputy/internal/proxy"
 	"github.com/picatz/deputy/internal/ui"
@@ -106,12 +105,13 @@ func newProxyExecCommand(spec proxyExecSpec) *cobra.Command {
 				envPrep:     spec.envPrep,
 				requested:   deriveRequestedSpec(spec.name, args),
 			}
-			return runProxyExec(cmd.Context(), cfg, args)
+			return runProxyExec(cmd.Context(), cfg, args, cmd.InOrStdin(), cmd.OutOrStdout(), cmd.ErrOrStderr())
 		},
 	}
 	cmd.Flags().StringVar(&upstream, "upstream", spec.defaultUpstream, "Upstream registry to mirror")
 	cmd.Flags().StringArrayVar(&policies, "policy", nil, "Additional CEL policy files to enforce")
 	cmd.SilenceUsage = true
+	cmd.SilenceErrors = true
 	trimmed := strings.TrimPrefix(spec.exampleCmd, fmt.Sprintf("deputy proxy %s -- ", spec.name))
 	cmd.Example = spec.exampleCmd + "\n# pass additional policy bundles\n" + fmt.Sprintf("deputy proxy %s --policy corp.yaml -- %s", spec.name, trimmed)
 	return cmd
@@ -122,7 +122,7 @@ var execProxyCommand = runExternalCommand
 
 // runProxyExec executes the proxy command.
 // It starts the proxy server, prepares the environment, runs the command, and handles events.
-func runProxyExec(ctx context.Context, cfg proxyExecConfig, command []string) error {
+func runProxyExec(ctx context.Context, cfg proxyExecConfig, command []string, stdin io.Reader, stdout, stderr io.Writer) error {
 	if len(command) == 0 {
 		return fmt.Errorf("no command specified")
 	}
@@ -147,7 +147,7 @@ func runProxyExec(ctx context.Context, cfg proxyExecConfig, command []string) er
 
 	var history eventHistory
 	if inst.events != nil {
-		go streamProxyEvents(eventsCtx, cfg.ecosystem, cfg.requested, inst.events, &history)
+		go streamProxyEvents(eventsCtx, cfg.ecosystem, cfg.requested, inst.events, &history, stderr)
 	}
 
 	// Skip intro line - Deputy announces itself via block messages if/when they occur.
@@ -160,10 +160,10 @@ func runProxyExec(ctx context.Context, cfg proxyExecConfig, command []string) er
 	if cleanup != nil {
 		defer cleanup()
 	}
-	if err := execProxyCommand(ctx, command, env); err != nil {
+	if err := execProxyCommand(ctx, command, env, stdin, stdout, stderr); err != nil {
 		// Wait a brief moment for any pending events to flush
 		time.Sleep(50 * time.Millisecond)
-		printSummaryReport(history.All(), cfg.requested)
+		printSummaryReport(stderr, history.All(), cfg.requested)
 		return deputyerrors.Silent(err)
 	}
 	return nil
@@ -398,17 +398,26 @@ func (b *limitedBuffer) String() string {
 }
 
 // runExternalCommand executes the given command with the provided environment variables.
-func runExternalCommand(ctx context.Context, command []string, extraEnv []string) error {
+func runExternalCommand(ctx context.Context, command []string, extraEnv []string, stdin io.Reader, stdout, stderr io.Writer) error {
 	cmd := exec.CommandContext(ctx, command[0], command[1:]...)
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	cmd.Stdin = os.Stdin
+	if stdout == nil {
+		stdout = os.Stdout
+	}
+	if stderr == nil {
+		stderr = os.Stderr
+	}
+	if stdin == nil {
+		stdin = os.Stdin
+	}
+	cmd.Stdout = stdout
+	cmd.Stderr = stderr
+	cmd.Stdin = stdin
 	cmd.Env = append(os.Environ(), extraEnv...)
 	return cmd.Run()
 }
 
 // streamProxyEvents continuously renders policy block events while the proxy runs.
-func streamProxyEvents(ctx context.Context, ecosystem, requested string, events <-chan proxyEvent, history *eventHistory) {
+func streamProxyEvents(ctx context.Context, ecosystem, requested string, events <-chan proxyEvent, history *eventHistory, errW io.Writer) {
 	for {
 		select {
 		case <-ctx.Done():
@@ -418,13 +427,16 @@ func streamProxyEvents(ctx context.Context, ecosystem, requested string, events 
 				return
 			}
 			history.Add(evt)
-			printPolicyBlock(ecosystem, requested, evt)
+			printPolicyBlock(errW, ecosystem, requested, evt)
 		}
 	}
 }
 
 // printPolicyBlock renders a helpful message for a blocked request.
-func printPolicyBlock(ecosystem, requested string, evt proxyEvent) {
+func printPolicyBlock(errW io.Writer, ecosystem, requested string, evt proxyEvent) {
+	if errW == nil {
+		errW = io.Discard
+	}
 	// Construct a display name for the package/artifact
 	name := evt.name
 	version := evt.version
@@ -444,18 +456,18 @@ func printPolicyBlock(ecosystem, requested string, evt proxyEvent) {
 	}
 
 	// Visual separator before the block
-	fmt.Fprintln(os.Stderr)
+	fmt.Fprintln(errW)
 
 	// Header line: × name@version
 	// Colors: × (red), name (bold white), @ (slate gray), version (bold white)
 	if version != "" {
-		fmt.Fprintf(os.Stderr, "%s %s%s%s\n",
+		fmt.Fprintf(errW, "%s %s%s%s\n",
 			ui.StyleRemoved.Render("×"),
 			ui.StyleBold.Render(name),
 			ui.StyleSeparator.Render("@"),
 			ui.StyleBold.Render(version))
 	} else {
-		fmt.Fprintf(os.Stderr, "%s %s\n",
+		fmt.Fprintf(errW, "%s %s\n",
 			ui.StyleRemoved.Render("×"),
 			ui.StyleBold.Render(name))
 	}
@@ -469,32 +481,32 @@ func printPolicyBlock(ecosystem, requested string, evt proxyEvent) {
 			rule = parts[1]
 		}
 		if rule != "" {
-			fmt.Fprintf(os.Stderr, "  %s%s%s\n",
+			fmt.Fprintf(errW, "  %s%s%s\n",
 				ui.StylePolicyFile.Render(file),
 				ui.StyleSeparator.Render("::"),
 				ui.StylePolicyRule.Render(rule))
 		} else {
-			fmt.Fprintf(os.Stderr, "  %s\n",
+			fmt.Fprintf(errW, "  %s\n",
 				ui.StylePolicyFile.Render(file))
 		}
 	}
 
 	// Why it was blocked - dim supporting text
 	if evt.reason != "" {
-		fmt.Fprintf(os.Stderr, "  %s\n",
+		fmt.Fprintf(errW, "  %s\n",
 			ui.StyleDim.Render(evt.reason))
 	}
 
 	// What to do about it - arrow is green, text is normal white
 	if evt.remediation != "" {
-		fmt.Fprintln(os.Stderr)
+		fmt.Fprintln(errW)
 		wrapped := wrapText(evt.remediation, 70)
-		fmt.Fprintf(os.Stderr, "  %s %s\n",
+		fmt.Fprintf(errW, "  %s %s\n",
 			ui.StyleAdded.Render("→"),
 			wrapped)
 	}
 
-	fmt.Fprintln(os.Stderr)
+	fmt.Fprintln(errW)
 }
 
 // wrapText wraps long text to the specified width, indenting continuation lines.
@@ -539,7 +551,10 @@ func wrapText(text string, width int) string {
 // printSummaryReport emits a summary of blocked requests.
 // For a single block, it stays silent (the real-time line is sufficient).
 // For multiple blocks, it provides a compact list.
-func printSummaryReport(events []proxyEvent, requested string) {
+func printSummaryReport(errW io.Writer, events []proxyEvent, requested string) {
+	if errW == nil {
+		errW = io.Discard
+	}
 	if len(events) == 0 {
 		return
 	}
@@ -573,8 +588,8 @@ func printSummaryReport(events []proxyEvent, requested string) {
 	}
 
 	// Summary header
-	fmt.Fprintln(os.Stderr)
-	fmt.Fprintf(os.Stderr, "%s\n",
+	fmt.Fprintln(errW)
+	fmt.Fprintf(errW, "%s\n",
 		ui.StyleRemoved.Render(fmt.Sprintf("── %d packages blocked ──", len(seen))))
 
 	// Compact list
@@ -582,11 +597,11 @@ func printSummaryReport(events []proxyEvent, requested string) {
 		if info.pkg == "" {
 			continue
 		}
-		fmt.Fprintf(os.Stderr, "  %s %s\n",
+		fmt.Fprintf(errW, "  %s %s\n",
 			ui.StyleRemoved.Render("×"),
 			ui.StylePackageName.Render(info.pkg))
 	}
-	fmt.Fprintln(os.Stderr)
+	fmt.Fprintln(errW)
 }
 
 // deriveRequestedSpec heuristically extracts the requested package spec from the child command.
@@ -681,40 +696,4 @@ func prepareRubyGemsEnv(proxyURL string) ([]string, func(), error) {
 		_ = os.RemoveAll(dir)
 	}
 	return env, cleanup, nil
-}
-
-// printProxyIntro renders a short header describing the proxied session.
-func printProxyIntro(cfg proxyExecConfig, proxyURL string, command []string) {
-	// Compact, single-line intro to reduce visual noise.
-	// e.g. "deputy: proxying npm • policy: shai-hulud-npm.yaml"
-	parts := []string{
-		ui.StyleHeader.Render(fmt.Sprintf("deputy: proxying %s", cfg.ecosystem)),
-	}
-	if len(cfg.policyPaths) > 0 {
-		shortPolicies := make([]string, len(cfg.policyPaths))
-		for i, p := range cfg.policyPaths {
-			shortPolicies[i] = filepath.Base(p)
-		}
-		parts = append(parts, ui.StyleMeta.Render(fmt.Sprintf("policy: %s", strings.Join(shortPolicies, ", "))))
-	} else {
-		parts = append(parts, ui.StyleMeta.Render("policy: none"))
-	}
-
-	// Join with a bullet point
-	fmt.Fprintln(os.Stderr, strings.Join(parts, ui.StyleDim.Render(" • ")))
-}
-
-// printColoredRow writes an aligned key/value pair using Deputy CLI styles.
-func printColoredRow(key, value string) {
-	if strings.TrimSpace(value) == "" {
-		return
-	}
-	// Dynamic padding based on key length, assuming max ~10 chars for alignment
-	keyWidth := 10
-	pad := keyWidth - lipgloss.Width(key)
-	if pad < 1 {
-		pad = 1
-	}
-	label := ui.StyleMeta.Render(key)
-	fmt.Fprintf(os.Stderr, "  %s%s %s\n", label, strings.Repeat(" ", pad), value)
 }

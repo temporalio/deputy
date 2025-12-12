@@ -4,6 +4,8 @@ import (
 	"net/http"
 	"sync"
 	"testing"
+
+	"github.com/picatz/deputy/internal/cache"
 )
 
 // WithLicenseHTTPClient overrides the HTTP client used for remote license lookups during tests.
@@ -30,6 +32,6 @@ func ResetLicenseCachesForTest(t *testing.T) {
 	t.Helper()
 	cacheDirOnce = sync.Once{}
 	cacheDirPath = ""
-	registryLicenseMemo = sync.Map{}
-	remoteLicenseMemo = sync.Map{}
+	registryLicenseMemo = cache.NewTTLCache[string, []string](licenseMemoMaxItems, licenseMemoTTL)
+	remoteLicenseMemo = cache.NewTTLCache[string, []string](licenseMemoMaxItems, licenseMemoTTL)
 }

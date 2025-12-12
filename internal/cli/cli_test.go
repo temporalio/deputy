@@ -3,9 +3,11 @@ package cli
 import (
 	"log/slog"
 	"os"
+	"slices"
 	"testing"
 
 	"github.com/go-git/go-git/v5"
+	"github.com/spf13/cobra"
 )
 
 func TestParseLogLevel(t *testing.T) {
@@ -49,14 +51,9 @@ func TestNewRoot(t *testing.T) {
 	// Check for specific subcommands
 	expectedCmds := []string{"scan", "fix", "triage", "policy", "proxy", "diff", "list", "sbom"}
 	for _, name := range expectedCmds {
-		found := false
-		for _, c := range cmd.Commands() {
-			if c.Name() == name {
-				found = true
-				break
-			}
-		}
-		if !found {
+		if !slices.ContainsFunc(cmd.Commands(), func(c *cobra.Command) bool {
+			return c.Name() == name
+		}) {
 			t.Errorf("expected subcommand %q not found", name)
 		}
 	}

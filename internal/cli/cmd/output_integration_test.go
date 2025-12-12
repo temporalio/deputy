@@ -1,0 +1,109 @@
+package cmd
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"os"
+	"strings"
+	"testing"
+
+	analysis "github.com/picatz/deputy/internal/analysis"
+	"github.com/spf13/cobra"
+)
+
+func newTestRoot(out, errW *bytes.Buffer) *cobra.Command {
+	root := &cobra.Command{
+		Use:           "deputy",
+		SilenceErrors: true,
+		SilenceUsage:  true,
+	}
+	root.SetOut(out)
+	root.SetErr(errW)
+	RegisterCommands(root)
+	return root
+}
+
+func writeScanReportFile(t *testing.T, report ScanResult) string {
+	t.Helper()
+	f, err := os.CreateTemp(t.TempDir(), "scan-report-*.json")
+	if err != nil {
+		t.Fatalf("create temp report: %v", err)
+	}
+	t.Cleanup(func() { _ = f.Close() })
+	enc := json.NewEncoder(f)
+	enc.SetIndent("", "  ")
+	if err := enc.Encode(report); err != nil {
+		t.Fatalf("encode report: %v", err)
+	}
+	if err := f.Close(); err != nil {
+		t.Fatalf("close report: %v", err)
+	}
+	return f.Name()
+}
+
+func TestCLIOutput_TriageFromReport_WritesToCommandOut(t *testing.T) {
+	v := analysis.Vulnerability{
+		ID:           "OSV-TEST-1",
+		Package:      "github.com/acme/mod",
+		Version:      "v1.0.0",
+		Ecosystem:    "Go",
+		Severity:     "9.8",
+		SeverityType: "CVSS_V3",
+		FixedVersions: []string{
+			"v1.0.1",
+		},
+		IsDirect: true,
+	}
+	report := buildScanReport("github.com/acme/repo", "HEAD", "deadbeef", []analysis.Vulnerability{v}, 1)
+	path := writeScanReportFile(t, report)
+
+	var out, errBuf bytes.Buffer
+	root := newTestRoot(&out, &errBuf)
+	root.SetArgs([]string{"triage", "--report", path, "--format", "text"})
+	if err := root.ExecuteContext(context.Background()); err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+
+	if errBuf.Len() != 0 {
+		t.Fatalf("unexpected stderr: %q", errBuf.String())
+	}
+	got := out.String()
+	for _, want := range []string{"Triage Summary:", "Target:", "Commit:"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("expected stdout to contain %q, got %q", want, got)
+		}
+	}
+}
+
+func TestCLIOutput_FixFromReport_WritesToCommandOut(t *testing.T) {
+	v := analysis.Vulnerability{
+		ID:           "OSV-TEST-1",
+		Package:      "github.com/acme/mod",
+		Version:      "v1.0.0",
+		Ecosystem:    "Go",
+		Severity:     "9.8",
+		SeverityType: "CVSS_V3",
+		FixedVersions: []string{
+			"v1.0.1",
+		},
+		IsDirect: true,
+	}
+	report := buildScanReport("github.com/acme/repo", "HEAD", "deadbeef", []analysis.Vulnerability{v}, 1)
+	path := writeScanReportFile(t, report)
+
+	var out, errBuf bytes.Buffer
+	root := newTestRoot(&out, &errBuf)
+	root.SetArgs([]string{"fix", "--report", path, "--format", "text"})
+	if err := root.ExecuteContext(context.Background()); err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+
+	if errBuf.Len() != 0 {
+		t.Fatalf("unexpected stderr: %q", errBuf.String())
+	}
+	got := out.String()
+	if !strings.Contains(got, "Remediation Plan:") {
+		t.Fatalf("expected stdout to contain remediation header, got %q", got)
+	}
+}

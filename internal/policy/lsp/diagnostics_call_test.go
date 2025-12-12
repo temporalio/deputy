@@ -1,6 +1,7 @@
 package lsp
 
 import (
+	"slices"
 	"testing"
 
 	protocol "github.com/sourcegraph/go-lsp"
@@ -20,13 +21,9 @@ policies:
 	if err != nil {
 		t.Fatalf("analyze: %v", err)
 	}
-	found := false
-	for _, d := range diag {
-		if d.Code == "undeclared" && d.Range.End.Character-d.Range.Start.Character >= len("missingFunc") {
-			found = true
-		}
-	}
-	if !found {
+	if !slices.ContainsFunc(diag, func(d protocol.Diagnostic) bool {
+		return d.Code == "undeclared" && d.Range.End.Character-d.Range.Start.Character >= len("missingFunc")
+	}) {
 		t.Fatalf("expected widened range on missing function, got %+v", diag)
 	}
 }

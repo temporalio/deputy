@@ -3,6 +3,7 @@ package gitutil
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -146,14 +147,7 @@ func Test_checkFilesChanged_withTimeRef(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CheckFilesChanged: %v", err)
 	}
-	found := false
-	for _, f := range files {
-		if f == "go.mod" {
-			found = true
-			break
-		}
-	}
-	if !found {
+	if !slices.Contains(files, "go.mod") {
 		t.Fatalf("expected go.mod in changed files, got %v", files)
 	}
 }

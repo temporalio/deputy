@@ -6,7 +6,6 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"strings"
 	"testing"
 
@@ -41,16 +40,8 @@ func TestDisplayDetailedDependencyChanges_ScanUsesBestEffortLicenses(t *testing.
 		IsDirect:      true,
 	}}
 
-	oldStdout := os.Stdout
-	r, w, _ := os.Pipe()
-	os.Stdout = w
-
-	displayDetailedDependencyChanges(context.Background(), nil, changes, true, "scan")
-
-	_ = w.Close()
-	os.Stdout = oldStdout
 	var buf bytes.Buffer
-	_, _ = io.Copy(&buf, r)
+	displayDetailedDependencyChanges(context.Background(), nil, changes, true, "scan", &buf, io.Discard)
 
 	out := buf.String()
 	if !strings.Contains(out, "MIT") {

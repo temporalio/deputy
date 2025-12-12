@@ -22,6 +22,7 @@ import (
 	"github.com/go-git/go-git/v5/plumbing"
 	githttp "github.com/go-git/go-git/v5/plumbing/transport/http"
 	"github.com/google/licensecheck"
+	"github.com/picatz/deputy/internal/cache"
 	"github.com/picatz/deputy/internal/collections"
 	"github.com/picatz/deputy/internal/repository"
 	"github.com/picatz/deputy/internal/repository/workspace"
@@ -46,6 +47,11 @@ var (
 	pubBase       = "https://pub.dev"
 	cocoapodsBase = "https://cocoapods.org"
 	hexpmBase     = "https://hex.pm"
+)
+
+const (
+	licenseMemoTTL      = 30 * time.Minute
+	licenseMemoMaxItems = 4096
 )
 
 // DefaultLicenseFilenamesForScan returns the default filenames used when scanning for licenses.
@@ -226,9 +232,9 @@ func LocalRepoLicenseScan(ws workspace.FS) []string {
 }
 
 var (
-	remoteLicenseMemo    sync.Map // string -> []string
+	remoteLicenseMemo    = cache.NewTTLCache[string, []string](licenseMemoMaxItems, licenseMemoTTL)
 	remoteLicenseGroup   singleflight.Group
-	registryLicenseMemo  sync.Map // string -> []string (ecosystem-aware)
+	registryLicenseMemo  = cache.NewTTLCache[string, []string](licenseMemoMaxItems, licenseMemoTTL)
 	registryLicenseGroup singleflight.Group
 	githubHTTPClientOnce sync.Once
 	githubHTTPClient     *nethttp.Client
@@ -290,17 +296,17 @@ func RemoteModuleLicenseScan(ctx context.Context, modulePath, version string) []
 		return nil
 	}
 	key := modulePath + "@" + version
-	if cached, ok := remoteLicenseMemo.Load(key); ok {
-		return cloneStrings(cached.([]string))
+	if cached, ok := remoteLicenseMemo.Get(key); ok {
+		return cloneStrings(cached)
 	}
 	var diskCached []string
 	if version != "" && readCache("license-scan", key, &diskCached) && len(diskCached) > 0 {
-		remoteLicenseMemo.Store(key, cloneStrings(diskCached))
+		remoteLicenseMemo.Set(key, cloneStrings(diskCached))
 		return cloneStrings(diskCached)
 	}
 	result, _, _ := remoteLicenseGroup.Do(key, func() (interface{}, error) {
-		if cached, ok := remoteLicenseMemo.Load(key); ok {
-			return cloneStrings(cached.([]string)), nil
+		if cached, ok := remoteLicenseMemo.Get(key); ok {
+			return cloneStrings(cached), nil
 		}
 		if version != "" && len(diskCached) > 0 {
 			return cloneStrings(diskCached), nil
@@ -338,7 +344,7 @@ func RemoteModuleLicenseScan(ctx context.Context, modulePath, version string) []
 		if version != "" && len(ids) > 0 {
 			writeCache("license-scan", key, ids)
 		}
-		remoteLicenseMemo.Store(key, cloneStrings(ids))
+		remoteLicenseMemo.Set(key, cloneStrings(ids))
 		return ids, nil
 	})
 	if ids, ok := result.([]string); ok {
@@ -358,23 +364,23 @@ func LookupLicensesBestEffort(ctx context.Context, ecosystem, name, version stri
 		return nil
 	}
 	key := eco + "|" + name + "@" + version
-	if cached, ok := registryLicenseMemo.Load(key); ok {
-		return cloneStrings(cached.([]string))
+	if cached, ok := registryLicenseMemo.Get(key); ok {
+		return cloneStrings(cached)
 	}
 	var diskCached []string
 	if readCache("license-registry", key, &diskCached) && len(diskCached) > 0 {
-		registryLicenseMemo.Store(key, cloneStrings(diskCached))
+		registryLicenseMemo.Set(key, cloneStrings(diskCached))
 		return cloneStrings(diskCached)
 	}
 	result, _, _ := registryLicenseGroup.Do(key, func() (interface{}, error) {
-		if cached, ok := registryLicenseMemo.Load(key); ok {
-			return cloneStrings(cached.([]string)), nil
+		if cached, ok := registryLicenseMemo.Get(key); ok {
+			return cloneStrings(cached), nil
 		}
 		lics := resolveEcosystemLicenses(ctx, eco, name, version)
 		if len(lics) > 0 {
 			writeCache("license-registry", key, lics)
 		}
-		registryLicenseMemo.Store(key, cloneStrings(lics))
+		registryLicenseMemo.Set(key, cloneStrings(lics))
 		return lics, nil
 	})
 	if lics, ok := result.([]string); ok {

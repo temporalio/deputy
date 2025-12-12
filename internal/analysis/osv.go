@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"maps"
+	"slices"
 	"strings"
 	"sync"
 
@@ -212,14 +213,15 @@ func queryOSVAPIBatch(ctx context.Context, client OSVClient, pkgs []PkgInput) ([
 						}
 						aliasCache.Store(alias, aliasV)
 					}
-					hasPkg := false
-					for _, a := range aliasV.Affected {
-						if matchesPackage(a.Package, pkgMeta) {
-							hasPkg = true
-							break
-						}
+					if aliasV == nil {
+						continue
 					}
-					if hasPkg && !isVersionAffected(*aliasV, pkgMeta) {
+					if !slices.ContainsFunc(aliasV.Affected, func(a osvschema.Affected) bool {
+						return matchesPackage(a.Package, pkgMeta)
+					}) {
+						continue
+					}
+					if !isVersionAffected(*aliasV, pkgMeta) {
 						skip = true
 						break
 					}

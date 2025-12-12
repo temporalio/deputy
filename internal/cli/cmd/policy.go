@@ -21,9 +21,10 @@ import (
 // AddPolicyCommand registers the `deputy policy` command tree.
 func AddPolicyCommand(root *cobra.Command) {
 	cmd := &cobra.Command{
-		Use:          "policy",
-		Short:        "Work with Deputy CEL policies",
-		SilenceUsage: true,
+		Use:           "policy",
+		Short:         "Work with Deputy CEL policies",
+		SilenceErrors: true,
+		SilenceUsage:  true,
 		Long: `Develop, test, and manage Deputy security policies.
 
 Deputy uses the Common Expression Language (CEL) to define security policies for:
@@ -72,9 +73,10 @@ func newPolicyEvalCommand() *cobra.Command {
 		format     string
 	)
 	cmd := &cobra.Command{
-		Use:          "eval --policy policy.yaml --input input.json",
-		Short:        "Evaluate a CEL policy against JSON input",
-		SilenceUsage: true,
+		Use:           "eval --policy policy.yaml --input input.json",
+		Short:         "Evaluate a CEL policy against JSON input",
+		SilenceErrors: true,
+		SilenceUsage:  true,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if strings.TrimSpace(policyPath) == "" {
 				return errors.New("missing --policy path")
@@ -111,10 +113,11 @@ func newPolicyEvalCommand() *cobra.Command {
 func newPolicyLintCommand() *cobra.Command {
 	var extraVars []string
 	cmd := &cobra.Command{
-		Use:          "lint <policy.yaml> [policy2.yaml ...]",
-		Short:        "Lint CEL policies for syntax/type issues",
-		SilenceUsage: true,
-		Args:         cobra.MinimumNArgs(1),
+		Use:           "lint <policy.yaml> [policy2.yaml ...]",
+		Short:         "Lint CEL policies for syntax/type issues",
+		SilenceErrors: true,
+		SilenceUsage:  true,
+		Args:          cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			stdinUsed := false
 			for _, path := range args {
@@ -374,10 +377,11 @@ func minInt(vals ...int) int {
 // newPolicyTestCommand creates the `test` subcommand for running policy tests.
 func newPolicyTestCommand() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:          "test <case.policytest.json|dir> [more...]",
-		Short:        "Execute policy tests defined in JSON fixtures",
-		SilenceUsage: true,
-		Args:         cobra.MinimumNArgs(1),
+		Use:           "test <case.policytest.json|dir> [more...]",
+		Short:         "Execute policy tests defined in JSON fixtures",
+		SilenceErrors: true,
+		SilenceUsage:  true,
+		Args:          cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			files, err := collectPolicyTestFiles(args)
 			if err != nil {
@@ -403,9 +407,10 @@ func newPolicyTestCommand() *cobra.Command {
 func newPolicyBundleCommand() *cobra.Command {
 	var outPath string
 	cmd := &cobra.Command{
-		Use:          "bundle --out bundle.json <policy.yaml> [policy2.yaml ...]",
-		Short:        "Compile CEL policies into a reusable bundle",
-		SilenceUsage: true,
+		Use:           "bundle --out bundle.json <policy.yaml> [policy2.yaml ...]",
+		Short:         "Compile CEL policies into a reusable bundle",
+		SilenceErrors: true,
+		SilenceUsage:  true,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if strings.TrimSpace(outPath) == "" {
 				return errors.New("missing --out path for bundle")
@@ -435,10 +440,11 @@ func newPolicyBundleCommand() *cobra.Command {
 // newPolicyInspectCommand creates the `inspect` subcommand for inspecting policies or bundles.
 func newPolicyInspectCommand() *cobra.Command {
 	return &cobra.Command{
-		Use:          "inspect <policy-or-bundle> [more...]",
-		Short:        "Inspect CEL policies or bundles",
-		SilenceUsage: true,
-		Args:         cobra.MinimumNArgs(1),
+		Use:           "inspect <policy-or-bundle> [more...]",
+		Short:         "Inspect CEL policies or bundles",
+		SilenceErrors: true,
+		SilenceUsage:  true,
+		Args:          cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			for _, path := range args {
 				if err := inspectPolicyPath(cmd.OutOrStdout(), path); err != nil {
@@ -458,9 +464,10 @@ func newPolicySimulateCommand() *cobra.Command {
 		format   string
 	)
 	cmd := &cobra.Command{
-		Use:          "simulate --policy policy.yaml --input input.json",
-		Short:        "Run policies against recorded JSON inputs",
-		SilenceUsage: true,
+		Use:           "simulate --policy policy.yaml --input input.json",
+		Short:         "Run policies against recorded JSON inputs",
+		SilenceErrors: true,
+		SilenceUsage:  true,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if len(policies) == 0 {
 				return errors.New("at least one --policy file is required")

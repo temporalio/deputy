@@ -15,6 +15,7 @@ import (
 	"testing"
 
 	pb "deps.dev/api/v3"
+	"github.com/picatz/deputy/internal/cache"
 )
 
 type countingDepsClientEcosystem struct {
@@ -311,8 +312,8 @@ func resetLicenseTestState(t *testing.T) {
 	cacheDirOnce = sync.Once{}
 	cacheDirPath = ""
 	t.Setenv("DEPUTY_CACHE_DIR", t.TempDir())
-	registryLicenseMemo = sync.Map{}
-	remoteLicenseMemo = sync.Map{}
+	registryLicenseMemo = cache.NewTTLCache[string, []string](licenseMemoMaxItems, licenseMemoTTL)
+	remoteLicenseMemo = cache.NewTTLCache[string, []string](licenseMemoMaxItems, licenseMemoTTL)
 }
 
 func equalStrings(a, b []string) bool {

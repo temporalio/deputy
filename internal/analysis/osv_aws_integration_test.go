@@ -2,6 +2,7 @@ package analysis
 
 import (
 	"context"
+	"slices"
 	"testing"
 
 	"osv.dev/bindings/go/osvdev"
@@ -28,14 +29,9 @@ func TestAWSV1Integration(t *testing.T) {
 	if len(cons) == 0 {
 		t.Fatalf("expected vulns for old version")
 	}
-	found := false
-	for _, v := range cons {
-		if FindBestFixedVersion(v.FixedVersions, "1.33.0") == "v1.34.0" {
-			found = true
-			break
-		}
-	}
-	if !found {
+	if !slices.ContainsFunc(cons, func(v ConsolidatedVulnerability) bool {
+		return FindBestFixedVersion(v.FixedVersions, "1.33.0") == "v1.34.0"
+	}) {
 		t.Fatalf("expected fix v1.34.0 present")
 	}
 }

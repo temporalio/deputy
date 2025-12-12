@@ -5,11 +5,14 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"maps"
+	"slices"
 	"sort"
 	"strings"
 
 	analysis "github.com/picatz/deputy/internal/analysis"
 	inv "github.com/picatz/deputy/internal/inventory"
+	"github.com/picatz/deputy/internal/output"
 	ui "github.com/picatz/deputy/internal/ui"
 	"github.com/spf13/cobra"
 )
@@ -18,9 +21,10 @@ import (
 func AddTriageCommand(root *cobra.Command) {
 	scanner := NewScanner()
 	triageCmd := &cobra.Command{
-		Use:          "triage [repo]",
-		Short:        "Summarize vulnerabilities and optionally invoke an AI triage agent",
-		SilenceUsage: true,
+		Use:           "triage [repo]",
+		Short:         "Summarize vulnerabilities and optionally invoke an AI triage agent",
+		SilenceErrors: true,
+		SilenceUsage:  true,
 		Long: `Analyze and prioritize vulnerabilities to help you focus on what matters.
 
 TRIAGE PROCESS:
@@ -163,7 +167,7 @@ func runTriage(scanner *Scanner, cmd *cobra.Command, args []string) error {
 
 	switch strings.ToLower(strings.TrimSpace(format)) {
 	case "", "text":
-		printTriageSummary(report, showDBInfo)
+		printTriageSummary(cmd.OutOrStdout(), report, showDBInfo)
 	case "json":
 		if err := outputTriageJSON(cmd.OutOrStdout(), report); err != nil {
 			return err
@@ -235,41 +239,21 @@ func runTriagePolicies(ctx context.Context, policyPaths []string, report triageR
 	return nil
 }
 
-// printTriageSummary prints a human-readable summary of the triage report to stdout.
-func printTriageSummary(report triageReport, showDBInfo bool) {
-	fmt.Println(ui.StyleHeader.Render("Triage Summary:"))
-	if repo := strings.TrimSpace(report.Target.Repo); repo != "" {
-		repoLine := repo
-		if report.Target.Ref != "" {
-			repoLine = fmt.Sprintf("%s@%s", repoLine, report.Target.Ref)
-		}
-		fmt.Println("  Target:", ui.StylePackageName.Render(repoLine))
-	}
-	if report.Target.Commit != "" {
-		fmt.Println("  Commit:", ui.StyleVersion.Render(report.Target.Commit))
-	}
-	fmt.Printf("  Critical/High: %d\n", report.Stats.CriticalSev+report.Stats.HighSeverity)
-	fmt.Printf("  Medium: %d\n", report.Stats.MedSeverity)
-	fmt.Printf("  Low: %d\n", report.Stats.LowSeverity)
-	fmt.Printf("  Fixable: %d\n", report.Stats.FixAvailable)
-	fmt.Printf("  Direct deps affected: %d\n", report.Stats.DirectDeps)
-	if report.PackagesWithVulns > 0 {
-		fmt.Printf("  Packages with vulns: %d", report.PackagesWithVulns)
-		if report.Stats.IndirectDeps > 0 {
-			fmt.Printf(" (direct: %d, indirect: %d)", report.Stats.DirectDeps, report.Stats.IndirectDeps)
-		}
-		fmt.Println()
-	}
+// printTriageSummary prints a human-readable summary of the triage report.
+func printTriageSummary(w io.Writer, report triageReport, showDBInfo bool) {
+	doc := triageSummaryDoc(report)
 	if len(report.TopPackages) == 0 {
-		fmt.Println("\n" + ui.StyleAdded.Render("No fixable vulnerabilities after filtering."))
+		doc.AddBlank()
+		doc.AddLine(output.Span{Text: "No fixable vulnerabilities after filtering.", Style: output.StyleAdded})
+		_ = doc.Render(w, output.UIStyles())
 		return
 	}
-	fmt.Printf("\nTop Impacted Packages")
-	if report.PackagesWithVulns > len(report.TopPackages) {
-		fmt.Printf(" (showing %d of %d)", len(report.TopPackages), report.PackagesWithVulns)
-	}
-	fmt.Println(":")
-	fmt.Println("  " + ui.StyleMeta.Render("Severity shown per package = highest vuln severity in that package."))
+	doc.AddBlank()
+	title := topImpactedTitle(report)
+	doc.AddLine(output.Span{Text: title})
+	doc.AddLine(output.Span{Text: "  Severity shown per package = highest vuln severity in that package.", Style: output.StyleMeta})
+	_ = doc.Render(w, output.UIStyles())
+
 	for idx, pkg := range report.TopPackages {
 		marker := fmt.Sprintf("%d.", idx+1)
 		sev := ui.SeverityLabel(pkg.Severity, pkg.SeverityType)
@@ -286,31 +270,67 @@ func printTriageSummary(report triageReport, showDBInfo bool) {
 		if pkg.FixVersion != "" {
 			fix = ui.StyleUpgraded.Render("↑ " + pkg.FixVersion)
 		}
-		fmt.Printf("  %s %s %s %s %s\n", marker, ui.StylePackageName.Render(pkg.Package), ui.StyleVersion.Render(pkg.Version), sev, countInline)
+		fmt.Fprintf(w, "  %s %s %s %s %s\n", marker, ui.StylePackageName.Render(pkg.Package), ui.StyleVersion.Render(pkg.Version), sev, countInline)
 		if pkg.Summary != "" {
-			fmt.Println("     ", ui.StyleDim.Render(pkg.Summary))
+			fmt.Fprintln(w, "     ", ui.StyleDim.Render(pkg.Summary))
 		}
 		if fix != "" {
-			fmt.Println("     ", fix)
+			fmt.Fprintln(w, "     ", fix)
 		}
 		if len(pkg.AffectedImports) > 0 {
 			lines := formatImportSummaries(pkg.AffectedImports, 2, 3)
 			if len(lines) > 0 {
-				fmt.Println("     ", ui.StyleMeta.Render("Symbol hints (Go/OSV):"))
+				fmt.Fprintln(w, "     ", ui.StyleMeta.Render("Symbol hints (Go/OSV):"))
 				for _, line := range lines {
-					fmt.Println("       ", ui.StylePath.Render(line))
+					fmt.Fprintln(w, "       ", ui.StylePath.Render(line))
 				}
 			}
 		}
 		if showDBInfo {
 			if dbLines := formatDatabaseSpecificInfo(pkg.DatabaseSpecific, 2); len(dbLines) > 0 {
-				fmt.Println("     ", ui.StyleMeta.Render("Database info:"))
+				fmt.Fprintln(w, "     ", ui.StyleMeta.Render("Database info:"))
 				for _, line := range dbLines {
-					fmt.Println("       ", ui.StyleMeta.Render(line))
+					fmt.Fprintln(w, "       ", ui.StyleMeta.Render(line))
 				}
 			}
 		}
 	}
+}
+
+func triageSummaryDoc(report triageReport) output.Doc {
+	var doc output.Doc
+	doc.AddLine(output.Span{Text: "Triage Summary:", Style: output.StyleHeader})
+	if repo := strings.TrimSpace(report.Target.Repo); repo != "" {
+		repoLine := repo
+		if report.Target.Ref != "" {
+			repoLine = fmt.Sprintf("%s@%s", repoLine, report.Target.Ref)
+		}
+		doc.AddLine(output.Span{Text: "  Target: "}, output.Span{Text: repoLine, Style: output.StylePackageName})
+	}
+	if report.Target.Commit != "" {
+		doc.AddLine(output.Span{Text: "  Commit: "}, output.Span{Text: report.Target.Commit, Style: output.StyleVersion})
+	}
+	doc.AddLine(output.Span{Text: fmt.Sprintf("  Critical/High: %d", report.Stats.CriticalSev+report.Stats.HighSeverity)})
+	doc.AddLine(output.Span{Text: fmt.Sprintf("  Medium: %d", report.Stats.MedSeverity)})
+	doc.AddLine(output.Span{Text: fmt.Sprintf("  Low: %d", report.Stats.LowSeverity)})
+	doc.AddLine(output.Span{Text: fmt.Sprintf("  Fixable: %d", report.Stats.FixAvailable)})
+	doc.AddLine(output.Span{Text: fmt.Sprintf("  Direct deps affected: %d", report.Stats.DirectDeps)})
+	if report.PackagesWithVulns > 0 {
+		line := fmt.Sprintf("  Packages with vulns: %d", report.PackagesWithVulns)
+		if report.Stats.IndirectDeps > 0 {
+			line += fmt.Sprintf(" (direct: %d, indirect: %d)", report.Stats.DirectDeps, report.Stats.IndirectDeps)
+		}
+		doc.AddLine(output.Span{Text: line})
+	}
+	return doc
+}
+
+func topImpactedTitle(report triageReport) string {
+	title := "Top Impacted Packages"
+	if report.PackagesWithVulns > len(report.TopPackages) {
+		title += fmt.Sprintf(" (showing %d of %d)", len(report.TopPackages), report.PackagesWithVulns)
+	}
+	return title + ":"
 }
 
 // outputTriageJSON writes the triage report as JSON to the provided writer.
@@ -548,11 +568,7 @@ func formatDatabaseSpecificInfo(db map[string]string, maxEntries int) []string {
 	if len(db) == 0 {
 		return nil
 	}
-	keys := make([]string, 0, len(db))
-	for k := range db {
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
+	keys := slices.Sorted(maps.Keys(db))
 	lines := make([]string, 0, len(keys))
 	for idx, k := range keys {
 		if maxEntries > 0 && idx >= maxEntries {

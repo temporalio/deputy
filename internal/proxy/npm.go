@@ -3,23 +3,20 @@ package proxy
 import (
 	"context"
 	"fmt"
-	"io"
 	"log/slog"
 	"net/http"
+	"net/http/httputil"
 	"net/url"
 	"path"
 	"strings"
-	"time"
 
 	analysis "github.com/picatz/deputy/internal/analysis"
 	"github.com/picatz/deputy/internal/policy"
-	"osv.dev/bindings/go/osvdev"
 )
 
 type npmHandler struct {
-	upstream      *url.URL
 	policies      PolicyEvaluator
-	client        *http.Client
+	proxy         *httputil.ReverseProxy
 	osvClient     analysis.OSVClient
 	vulnLookup    func(context.Context, string, string) ([]analysis.Vulnerability, error)
 	licenseLookup func(context.Context, string, string) ([]string, error)
@@ -30,13 +27,15 @@ func newNPMHandler(upstream string, policies PolicyEvaluator) (*npmHandler, erro
 	if err != nil {
 		return nil, fmt.Errorf("parse upstream %q: %w", upstream, err)
 	}
+	client := newUpstreamHTTPClient()
+	osvClient := analysis.NewOSVClient()
 	return &npmHandler{
-		upstream: u,
-		policies: policies,
-		client: &http.Client{
-			Timeout: 45 * time.Second,
+		policies:  policies,
+		proxy:     newUpstreamReverseProxy(u, "npm", client.Transport),
+		osvClient: osvClient,
+		vulnLookup: func(ctx context.Context, pkg, version string) ([]analysis.Vulnerability, error) {
+			return cachedOSVLookup(ctx, osvClient, "npm", pkg, version)
 		},
-		osvClient: osvdev.DefaultClient(),
 	}, nil
 }
 
@@ -76,59 +75,12 @@ func (h *npmHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	var actions []policy.Action
-	var err error
-	if h.policies != nil {
-		actions, err = h.policies.Evaluate(ctx, "npm_artifact_request", payload)
-		if err != nil {
-			http.Error(w, "policy evaluation failed", http.StatusInternalServerError)
-			slog.Error("policy evaluation failed", "error", err)
-			return
-		}
-	}
-	deny, warns, hdrs := summarizeActions(actions)
-	for k, v := range hdrs {
-		w.Header().Set(k, v)
-	}
-	for _, warn := range warns {
-		slog.Warn("policy warning", "source", warn.Source, "reason", warn.Reason)
-	}
-	if deny != nil {
-		applyPolicyHeaders(w, deny, blockMeta{
-			Ecosystem: "npm",
-			Name:      pkg,
-			Version:   rawVersion,
-			Operation: operation,
-		})
-		status := statusFromAction(deny, http.StatusForbidden)
-		http.Error(w, deny.Reason, status)
-		slog.Info("request denied", "package", pkg, "version", rawVersion, "reason", deny.Reason)
-		return
-	}
-
-	upstreamURL := *h.upstream
-	upstreamURL.Path = strings.TrimSuffix(upstreamURL.Path, "/") + r.URL.Path
-	upstreamURL.RawQuery = r.URL.RawQuery
-	req, err := http.NewRequestWithContext(ctx, r.Method, upstreamURL.String(), r.Body)
-	if err != nil {
-		http.Error(w, "failed to build upstream request", http.StatusBadGateway)
-		return
-	}
-	if r.ContentLength >= 0 {
-		req.ContentLength = r.ContentLength
-	}
-	req.Header = r.Header.Clone()
-	resp, err := h.client.Do(req)
-	if err != nil {
-		http.Error(w, "upstream fetch failed", http.StatusBadGateway)
-		return
-	}
-	defer resp.Body.Close()
-	copyHeaders(w.Header(), resp.Header)
-	w.WriteHeader(resp.StatusCode)
-	if _, err := io.Copy(w, resp.Body); err != nil {
-		slog.Warn("failed to stream upstream response", "error", err)
-	}
+	serveWithPolicy(w, r, h.policies, "npm_artifact_request", payload, blockMeta{
+		Ecosystem: "npm",
+		Name:      pkg,
+		Version:   rawVersion,
+		Operation: operation,
+	}, h.proxy)
 }
 
 func (h *npmHandler) vulnerabilityPayload(ctx context.Context, pkg, version string) []map[string]any {

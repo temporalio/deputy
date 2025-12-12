@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"path"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 
@@ -644,12 +645,9 @@ func sortAndUniqueManifestRefs(refs []analysis.ManifestReference) []analysis.Man
 
 // hasRuntimeDependencyGroup checks if any of the groups indicate a runtime dependency.
 func hasRuntimeDependencyGroup(groups []string) bool {
-	for _, g := range groups {
-		if strings.EqualFold(strings.TrimSpace(g), "dependencies") {
-			return true
-		}
-	}
-	return false
+	return slices.ContainsFunc(groups, func(g string) bool {
+		return strings.EqualFold(strings.TrimSpace(g), "dependencies")
+	})
 }
 
 // marksDirectByDefault returns true if the package manager considers dependencies direct by default.

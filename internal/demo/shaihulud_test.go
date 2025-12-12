@@ -7,6 +7,7 @@ import (
 	neturl "net/url"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -74,23 +75,25 @@ func TestScanShaiHuludFindsIOC(t *testing.T) {
 		t.Fatalf("expected 2 repo results, got %d", len(results))
 	}
 
-	matched := false
-	for _, res := range results {
-		if res.Name == "ioc" {
-			if len(res.Matches) != 1 {
-				t.Fatalf("expected 1 match in ioc repo, got %d (err=%v)", len(res.Matches), res.Error)
-			}
-			if res.Matches[0].Package != "@actbase/react-absolute" {
-				t.Fatalf("unexpected package match: %+v", res.Matches[0])
-			}
-			matched = true
-		}
-		if res.Name == "clean" && res.Error != nil {
-			t.Fatalf("clean repo error: %v", res.Error)
-		}
-	}
-	if !matched {
+	iocIndex := slices.IndexFunc(results, func(res ScanResult) bool { return res.Name == "ioc" })
+	if iocIndex < 0 {
 		t.Fatalf("ioc repo match not found in results")
+	}
+	ioc := results[iocIndex]
+	if len(ioc.Matches) != 1 {
+		t.Fatalf("expected 1 match in ioc repo, got %d (err=%v)", len(ioc.Matches), ioc.Error)
+	}
+	if ioc.Matches[0].Package != "@actbase/react-absolute" {
+		t.Fatalf("unexpected package match: %+v", ioc.Matches[0])
+	}
+
+	cleanIndex := slices.IndexFunc(results, func(res ScanResult) bool { return res.Name == "clean" })
+	if cleanIndex < 0 {
+		t.Fatalf("clean repo result not found in results")
+	}
+	clean := results[cleanIndex]
+	if clean.Error != nil {
+		t.Fatalf("clean repo error: %v", clean.Error)
 	}
 }
 

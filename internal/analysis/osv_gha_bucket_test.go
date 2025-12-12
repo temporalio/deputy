@@ -5,6 +5,9 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"io"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -14,6 +17,7 @@ import (
 
 	"github.com/google/osv-scalibr/purl"
 	"github.com/ossf/osv-schema/bindings/go/osvschema"
+	"golang.org/x/sync/singleflight"
 )
 
 func TestNormalizeSemverVersion_Table(t *testing.T) {
@@ -154,10 +158,205 @@ func TestBuildGHAVulnIndex_UsesCacheZip(t *testing.T) {
 	}
 }
 
+func TestEnsureGHACacheZip_UsesETagConditionalRequest(t *testing.T) {
+	resetGHATestState()
+	tmp := t.TempDir()
+	t.Setenv("DEPUTY_CACHE_DIR", tmp)
+	cacheDirOnce = sync.Once{}
+	cacheDirPath = ""
+
+	var (
+		requests     int
+		lastIfNone   string
+		zipBodyBytes []byte
+	)
+	zipBodyBytes = mustGHATestZipBytes(t, map[string]osvschema.Vulnerability{
+		"GHSA-one.json": {
+			ID: "GHSA-one",
+			Affected: []osvschema.Affected{
+				{Package: osvschema.Package{Name: "owner/repo", Ecosystem: string(osvschema.EcosystemGitHubActions)}},
+			},
+		},
+	})
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		lastIfNone = r.Header.Get("If-None-Match")
+		if lastIfNone == `W/"abc"` {
+			w.WriteHeader(http.StatusNotModified)
+			return
+		}
+		w.Header().Set("ETag", `W/"abc"`)
+		w.Header().Set("Last-Modified", time.Now().UTC().Format(http.TimeFormat))
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write(zipBodyBytes)
+	}))
+	defer srv.Close()
+
+	origURL := ghaAllZipURL
+	origClient := ghaHTTPClient
+	origTTL := ghaDownloadTTL
+	ghaAllZipURL = srv.URL
+	ghaHTTPClient = srv.Client()
+	ghaDownloadTTL = 0
+	t.Cleanup(func() {
+		ghaAllZipURL = origURL
+		ghaHTTPClient = origClient
+		ghaDownloadTTL = origTTL
+	})
+
+	p1, err := ensureGHACacheZip(context.Background())
+	if err != nil {
+		t.Fatalf("ensureGHACacheZip (first): %v", err)
+	}
+	if requests != 1 {
+		t.Fatalf("requests=%d want=1", requests)
+	}
+	if fi, err := os.Stat(p1); err != nil || fi.Size() == 0 {
+		t.Fatalf("expected zip file to exist, err=%v size=%d", err, fi.Size())
+	}
+
+	// Second call should send If-None-Match and receive 304.
+	p2, err := ensureGHACacheZip(context.Background())
+	if err != nil {
+		t.Fatalf("ensureGHACacheZip (second): %v", err)
+	}
+	if p2 != p1 {
+		t.Fatalf("path changed: %q vs %q", p1, p2)
+	}
+	if requests != 2 {
+		t.Fatalf("requests=%d want=2", requests)
+	}
+	if lastIfNone != `W/"abc"` {
+		t.Fatalf("If-None-Match=%q want=%q", lastIfNone, `W/"abc"`)
+	}
+}
+
+func TestLoadGHAVulnIndex_RefreshesAfterTTL(t *testing.T) {
+	resetGHATestState()
+	tmp := t.TempDir()
+	t.Setenv("DEPUTY_CACHE_DIR", tmp)
+	cacheDirOnce = sync.Once{}
+	cacheDirPath = ""
+
+	zipV1 := mustGHATestZipBytes(t, map[string]osvschema.Vulnerability{
+		"GHSA-one.json": {
+			ID: "GHSA-one",
+			Affected: []osvschema.Affected{
+				{Package: osvschema.Package{Name: "owner/repo", Ecosystem: string(osvschema.EcosystemGitHubActions)}},
+			},
+		},
+	})
+	zipV2 := mustGHATestZipBytes(t, map[string]osvschema.Vulnerability{
+		"GHSA-two.json": {
+			ID: "GHSA-two",
+			Affected: []osvschema.Affected{
+				{Package: osvschema.Package{Name: "owner/repo2", Ecosystem: string(osvschema.EcosystemGitHubActions)}},
+			},
+		},
+	})
+
+	var body []byte
+	var etag string
+	body = zipV1
+	etag = `W/"v1"`
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if inm := r.Header.Get("If-None-Match"); inm != "" && inm == etag {
+			w.WriteHeader(http.StatusNotModified)
+			return
+		}
+		w.Header().Set("ETag", etag)
+		w.Header().Set("Last-Modified", time.Now().UTC().Format(http.TimeFormat))
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write(body)
+	}))
+	defer srv.Close()
+
+	origURL := ghaAllZipURL
+	origClient := ghaHTTPClient
+	origDownloadTTL := ghaDownloadTTL
+	origIndexTTL := ghaIndexTTL
+	t.Cleanup(func() {
+		ghaAllZipURL = origURL
+		ghaHTTPClient = origClient
+		ghaDownloadTTL = origDownloadTTL
+		ghaIndexTTL = origIndexTTL
+		resetGHATestState()
+	})
+
+	ghaAllZipURL = srv.URL
+	ghaHTTPClient = srv.Client()
+	ghaDownloadTTL = 0
+
+	ghaIndexTTL = time.Hour
+	idx1, err := loadGHAVulnIndex(context.Background())
+	if err != nil {
+		t.Fatalf("loadGHAVulnIndex (v1): %v", err)
+	}
+	if idx1 == nil || len(idx1.byPkg["owner/repo"]) != 1 {
+		t.Fatalf("expected owner/repo in v1 index, got %#v", idx1.byPkg)
+	}
+
+	// Change the upstream zip, but keep in-memory TTL long enough that the index should not rebuild.
+	body = zipV2
+	etag = `W/"v2"`
+
+	idx2, err := loadGHAVulnIndex(context.Background())
+	if err != nil {
+		t.Fatalf("loadGHAVulnIndex (still cached): %v", err)
+	}
+	if idx2 != idx1 {
+		t.Fatalf("expected cached index reuse")
+	}
+	if _, ok := idx2.byPkg["owner/repo2"]; ok {
+		t.Fatalf("unexpected refresh while TTL valid")
+	}
+
+	// Force refresh and confirm new content appears.
+	ghaIndexTTL = 0
+	idx3, err := loadGHAVulnIndex(context.Background())
+	if err != nil {
+		t.Fatalf("loadGHAVulnIndex (refresh): %v", err)
+	}
+	if idx3 == nil || len(idx3.byPkg["owner/repo2"]) != 1 {
+		t.Fatalf("expected owner/repo2 in refreshed index, got %#v", idx3.byPkg)
+	}
+}
+
+func mustGHATestZipBytes(t *testing.T, files map[string]osvschema.Vulnerability) []byte {
+	t.Helper()
+	var buf bytes.Buffer
+	zw := zip.NewWriter(&buf)
+	for name, vuln := range files {
+		w, err := zw.Create(name)
+		if err != nil {
+			t.Fatalf("zip create: %v", err)
+		}
+		b, err := json.Marshal(vuln)
+		if err != nil {
+			t.Fatalf("json marshal: %v", err)
+		}
+		if _, err := w.Write(b); err != nil {
+			t.Fatalf("zip write: %v", err)
+		}
+	}
+	if err := zw.Close(); err != nil {
+		t.Fatalf("zip close: %v", err)
+	}
+	out, err := io.ReadAll(&buf)
+	if err != nil {
+		t.Fatalf("read buf: %v", err)
+	}
+	return out
+}
+
 func resetGHATestState() {
-	ghaIndexOnce = sync.Once{}
+	ghaIndexBuildGroup = singleflight.Group{}
+	ghaIndexMu = sync.RWMutex{}
 	ghaIndex = nil
-	ghaIndexErr = nil
+	ghaIndexBuiltAt = time.Time{}
+	ghaIndexTTL = ghaDownloadTTL
 }
 
 func writeGHATestZip(path string, files map[string]osvschema.Vulnerability) error {

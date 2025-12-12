@@ -22,9 +22,10 @@ func AddSBOMCommand(root *cobra.Command) {
 	)
 
 	cmd := &cobra.Command{
-		Use:          "sbom [repo]",
-		Short:        "Generate an SBOM for a repository",
-		SilenceUsage: true,
+		Use:           "sbom [repo]",
+		Short:         "Generate an SBOM for a repository",
+		SilenceErrors: true,
+		SilenceUsage:  true,
 		Long: `Generate a Software Bill of Materials (SBOM) for repositories at any Git reference.
 
 SOFTWARE BILL OF MATERIALS:
@@ -87,7 +88,7 @@ Optionally enriches SBOM entries with license information from multiple sources:
 
 			doc := result.Document
 
-			var w io.Writer = os.Stdout
+			var w io.Writer = cmd.OutOrStdout()
 			if outPath != "" && outPath != "-" {
 				f, err := os.Create(outPath)
 				if err != nil {

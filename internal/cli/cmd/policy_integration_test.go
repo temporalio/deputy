@@ -4,7 +4,10 @@ import (
 	"bytes"
 	"context"
 	"path/filepath"
+	"slices"
 	"testing"
+
+	"github.com/picatz/deputy/internal/policy"
 )
 
 // End-to-end style check: load the composed example bundle and execute the sbom entrypoint payload path.
@@ -182,13 +185,7 @@ func TestPolicyIntegration_NoFixEscalator(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	foundWarn := false
-	for _, a := range actions {
-		if a.Type == "warn" {
-			foundWarn = true
-		}
-	}
-	if !foundWarn {
+	if !slices.ContainsFunc(actions, func(a policy.Action) bool { return a.Type == "warn" }) {
 		t.Fatalf("expected warn for no-fix vuln, got %+v", actions)
 	}
 }
@@ -233,13 +230,7 @@ func TestPolicyIntegration_CriticalRuntimePinning(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	foundWarn := false
-	for _, a := range actions {
-		if a.Type == "warn" {
-			foundWarn = true
-		}
-	}
-	if !foundWarn {
+	if !slices.ContainsFunc(actions, func(a policy.Action) bool { return a.Type == "warn" }) {
 		t.Fatalf("expected warn for unchanged critical module, got %+v", actions)
 	}
 }
@@ -254,13 +245,7 @@ func TestPolicyIntegration_SbomSizeShapeSanity(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	foundWarn := false
-	for _, a := range actions {
-		if a.Type == "warn" {
-			foundWarn = true
-		}
-	}
-	if !foundWarn {
+	if !slices.ContainsFunc(actions, func(a policy.Action) bool { return a.Type == "warn" }) {
 		t.Fatalf("expected warn for oversized SBOM, got %+v", actions)
 	}
 }
@@ -276,13 +261,7 @@ func TestPolicyIntegration_CriticalTransitiveSpotlight(t *testing.T) {
 	if actions, err := evaluatePoliciesForCommand(context.Background(), []string{pol}, payload, "scan", "scan_vulnerability", &bytes.Buffer{}); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	} else {
-		foundWarn := false
-		for _, a := range actions {
-			if a.Type == "warn" {
-				foundWarn = true
-			}
-		}
-		if !foundWarn {
+		if !slices.ContainsFunc(actions, func(a policy.Action) bool { return a.Type == "warn" }) {
 			t.Fatalf("expected warn for critical indirect vuln, got %+v", actions)
 		}
 	}

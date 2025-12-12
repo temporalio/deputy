@@ -261,13 +261,13 @@ func shouldIncludeGitHubActions(names []string) bool {
 	if names == nil {
 		return true
 	}
-	for _, n := range names {
+	return slices.ContainsFunc(names, func(n string) bool {
 		switch n {
 		case "github", "github-actions", "githubactions", "actions", "gha":
 			return true
 		}
-	}
-	return false
+		return false
+	})
 }
 
 // filterExternalEcosystems removes internal ecosystem aliases so upstream scalibr

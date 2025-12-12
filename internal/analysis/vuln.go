@@ -2,6 +2,7 @@ package analysis
 
 import (
 	"cmp"
+	"maps"
 	"slices"
 	"sort"
 	"strings"
@@ -205,11 +206,7 @@ func MergeAffectedImports(importSets ...[]AffectedImport) []AffectedImport {
 	if len(pathMap) == 0 {
 		return nil
 	}
-	paths := make([]string, 0, len(pathMap))
-	for p := range pathMap {
-		paths = append(paths, p)
-	}
-	sort.Strings(paths)
+	paths := slices.Sorted(maps.Keys(pathMap))
 	out := make([]AffectedImport, 0, len(paths))
 	for _, p := range paths {
 		symSet := pathMap[p]

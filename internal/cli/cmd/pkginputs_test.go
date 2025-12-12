@@ -3,6 +3,7 @@ package cmd
 import (
 	"fmt"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -319,10 +320,5 @@ func TestPackagesToInputs_PythonRequirementsMarkedDirect(t *testing.T) {
 }
 
 func containsGroup(groups []string, want string) bool {
-	for _, g := range groups {
-		if g == want {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(groups, want)
 }

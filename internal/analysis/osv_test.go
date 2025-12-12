@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -226,6 +227,54 @@ func Test_QueryOSVBatch_aliasWithoutRange(t *testing.T) {
 	}
 	if len(vulns) != 1 {
 		t.Fatalf("expected 1 vulnerability, got %d", len(vulns))
+	}
+}
+
+type fakeOSVClientAliasUnmatchedPackage struct{}
+
+func (f *fakeOSVClientAliasUnmatchedPackage) QueryBatch(ctx context.Context, queries []*osvdev.Query) (*osvdev.BatchedResponse, error) {
+	return &osvdev.BatchedResponse{Results: []osvdev.MinimalResponse{{Vulns: []osvdev.MinimalVulnerability{{ID: "GHSA-base"}}}}}, nil
+}
+
+func (f *fakeOSVClientAliasUnmatchedPackage) GetVulnByID(ctx context.Context, id string) (*osvschema.Vulnerability, error) {
+	switch id {
+	case "GHSA-base":
+		return &osvschema.Vulnerability{
+			ID:      id,
+			Aliases: []string{"CVE-ALIAS"},
+			Affected: []osvschema.Affected{{
+				Package: osvschema.Package{Name: "github.com/example/pkg", Ecosystem: "Go"},
+				Ranges:  []osvschema.Range{{Type: osvschema.RangeSemVer, Events: []osvschema.Event{{Introduced: "0"}}}},
+			}},
+		}, nil
+	case "CVE-ALIAS":
+		return &osvschema.Vulnerability{
+			ID: id,
+			Affected: []osvschema.Affected{{
+				// Alias record does not identify the package; it should not influence results.
+				Package: osvschema.Package{},
+				Ranges:  []osvschema.Range{{Type: osvschema.RangeSemVer, Events: []osvschema.Event{{Introduced: "0"}, {Fixed: "v9.9.9"}}}},
+			}},
+		}, nil
+	default:
+		return nil, fmt.Errorf("unknown id %s", id)
+	}
+}
+
+func Test_QueryOSVBatch_ignoresAliasWithoutPackageIdentity(t *testing.T) {
+	cacheDirOnce = sync.Once{}
+	cacheDirPath = ""
+	t.Setenv("DEPUTY_CACHE_DIR", t.TempDir())
+	client := &fakeOSVClientAliasUnmatchedPackage{}
+	vulns, err := QueryOSVBatch(context.Background(), client, []PkgInput{{Name: "github.com/example/pkg", Version: "1.2.3", Ecosystem: "Go", IsDirect: true}})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(vulns) != 1 {
+		t.Fatalf("expected 1 vulnerability, got %d", len(vulns))
+	}
+	if slices.Contains(vulns[0].FixedVersions, "v9.9.9") {
+		t.Fatalf("unexpected fixed version from unmatched alias: %+v", vulns[0].FixedVersions)
 	}
 }
 

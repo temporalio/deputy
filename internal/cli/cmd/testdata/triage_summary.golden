@@ -1,0 +1,12 @@
+Triage Summary:
+  Target: github.com/acme/repo@main
+  Commit: deadbeef
+  Critical/High: 2
+  Medium: 0
+  Low: 1
+  Fixable: 2
+  Direct deps affected: 1
+  Packages with vulns: 5 (direct: 1, indirect: 4)
+
+Top Impacted Packages (showing 2 of 5):
+  Severity shown per package = highest vuln severity in that package.

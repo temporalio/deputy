@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"fmt"
+	"io"
 	"strings"
 
 	remediation "github.com/picatz/deputy/internal/remediation"
@@ -10,16 +11,16 @@ import (
 
 // renderRemediationCommands prints grouped remediation commands using the
 // provided prefixes for group headers and command lines.
-func renderRemediationCommands(commands []remediation.Command, groupPrefix, commandPrefix string) {
+func renderRemediationCommands(w io.Writer, commands []remediation.Command, groupPrefix, commandPrefix string) {
 	if len(commands) == 0 {
 		return
 	}
 	order, grouped, groupIsPath := groupRemediationCommands(commands)
 	for _, label := range order {
 		if groupIsPath[label] {
-			fmt.Println(groupPrefix + ui.StylePath.Render(label) + ":")
+			fmt.Fprintln(w, groupPrefix+ui.StylePath.Render(label)+":")
 		} else {
-			fmt.Println(groupPrefix + ui.StyleManager.Render(label) + ":")
+			fmt.Fprintln(w, groupPrefix+ui.StyleManager.Render(label)+":")
 		}
 		for _, rec := range grouped[label] {
 			symbol := "›"
@@ -42,7 +43,7 @@ func renderRemediationCommands(commands []remediation.Command, groupPrefix, comm
 			if len(contexts) > 0 {
 				suffix = ui.StyleDim.Render("  # " + strings.Join(contexts, "; "))
 			}
-			fmt.Printf("%s%s %s%s\n", commandPrefix, marker, rec.Command, suffix)
+			fmt.Fprintf(w, "%s%s %s%s\n", commandPrefix, marker, rec.Command, suffix)
 		}
 	}
 }

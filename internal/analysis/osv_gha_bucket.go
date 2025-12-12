@@ -6,9 +6,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -17,6 +19,7 @@ import (
 	"github.com/picatz/deputy/internal/collections"
 	"github.com/picatz/deputy/internal/purlx"
 	"golang.org/x/mod/semver"
+	"golang.org/x/sync/singleflight"
 )
 
 var (
@@ -29,14 +32,66 @@ var (
 	ghaDownloadLimit int64 = 50 << 20 // 50MB safety cap
 )
 
+type ghaZipMeta struct {
+	ETag         string `json:"etag,omitempty"`
+	LastModified string `json:"last_modified,omitempty"`
+}
+
+func ghaZipMetaPath(zipPath string) string {
+	return zipPath + ".meta.json"
+}
+
+func readGHAMeta(zipPath string) ghaZipMeta {
+	var meta ghaZipMeta
+	p := ghaZipMetaPath(zipPath)
+	b, err := os.ReadFile(p)
+	if err != nil {
+		return meta
+	}
+	_ = json.Unmarshal(b, &meta)
+	return meta
+}
+
+func writeGHAMeta(zipPath string, meta ghaZipMeta) {
+	p := ghaZipMetaPath(zipPath)
+	b, err := json.Marshal(meta)
+	if err != nil {
+		return
+	}
+	_ = os.WriteFile(p, b, 0o644)
+}
+
+var ghaHTTPClient = &http.Client{
+	Timeout: 30 * time.Second,
+	Transport: &http.Transport{
+		Proxy: http.ProxyFromEnvironment,
+		DialContext: (&net.Dialer{
+			Timeout:   10 * time.Second,
+			KeepAlive: 30 * time.Second,
+		}).DialContext,
+		ForceAttemptHTTP2:     true,
+		MaxIdleConns:          20,
+		IdleConnTimeout:       90 * time.Second,
+		TLSHandshakeTimeout:   10 * time.Second,
+		ResponseHeaderTimeout: 20 * time.Second,
+	},
+}
+
 type ghaVulnIndex struct {
 	byPkg map[string][]osvschema.Vulnerability
 }
 
 var (
-	ghaIndexOnce sync.Once
-	ghaIndex     *ghaVulnIndex
-	ghaIndexErr  error
+	ghaIndexMu      sync.RWMutex
+	ghaIndex        *ghaVulnIndex
+	ghaIndexBuiltAt time.Time
+
+	// ghaIndexTTL controls how long an in-memory GHA vulnerability index is
+	// considered valid. It defaults to ghaDownloadTTL and exists separately so
+	// tests can override refresh behavior without mutating the on-disk TTL.
+	ghaIndexTTL = ghaDownloadTTL
+
+	ghaIndexBuildGroup singleflight.Group
 )
 
 // queryOSVGHABucketBatch looks up GitHub Actions vulnerabilities using the
@@ -87,20 +142,16 @@ func queryOSVGHABucketBatch(ctx context.Context, client OSVClient, pkgs []PkgInp
 					}
 					aliasCache.Store(alias, aliasV)
 				}
-				hasPkg := false
-				for _, a := range aliasV.Affected {
-					if matchesPackage(a.Package, normalized) {
-						hasPkg = true
-						if !versionAffectedByGHARanges(*aliasV, normalized) {
-							skip = true
-						}
-						break
-					}
+				if !slices.ContainsFunc(aliasV.Affected, func(a osvschema.Affected) bool {
+					return matchesPackage(a.Package, normalized)
+				}) {
+					continue
 				}
-				if skip {
+				if !versionAffectedByGHARanges(*aliasV, normalized) {
+					skip = true
 					break
 				}
-				if hasPkg {
+				{
 					pv := ProcessOSVVulnerability(*aliasV, normalized)
 					extras = append(extras, pv)
 				}
@@ -249,10 +300,40 @@ func normalizeSemverVersion(v string) string {
 
 // loadGHAVulnIndex memoizes a parsed view of the GitHub Actions all.zip bucket.
 func loadGHAVulnIndex(ctx context.Context) (*ghaVulnIndex, error) {
-	ghaIndexOnce.Do(func() {
-		ghaIndex, ghaIndexErr = buildGHAVulnIndex(ctx)
+	ghaIndexMu.RLock()
+	idx := ghaIndex
+	builtAt := ghaIndexBuiltAt
+	ttl := ghaIndexTTL
+	ghaIndexMu.RUnlock()
+
+	if idx != nil && ttl > 0 && time.Since(builtAt) < ttl {
+		return idx, nil
+	}
+
+	buildCtx := ctx
+	if buildCtx != nil {
+		buildCtx = context.WithoutCancel(buildCtx)
+	}
+
+	v, err, _ := ghaIndexBuildGroup.Do("build", func() (any, error) {
+		return buildGHAVulnIndex(buildCtx)
 	})
-	return ghaIndex, ghaIndexErr
+	if err != nil {
+		// If we have a previously built index, prefer serving it over failing
+		// requests when refresh fails.
+		if idx != nil {
+			return idx, nil
+		}
+		return nil, err
+	}
+	newIdx := v.(*ghaVulnIndex)
+
+	ghaIndexMu.Lock()
+	ghaIndex = newIdx
+	ghaIndexBuiltAt = time.Now()
+	ghaIndexMu.Unlock()
+
+	return newIdx, nil
 }
 
 // buildGHAVulnIndex downloads (or reuses cached) all.zip and indexes vulnerabilities by package name.
@@ -327,15 +408,28 @@ func ensureGHACacheZip(ctx context.Context) (string, error) {
 		ctx, cancel = context.WithTimeout(ctx, 30*time.Second)
 		defer cancel()
 	}
+
+	meta := readGHAMeta(path)
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, ghaAllZipURL, nil)
 	if err != nil {
 		return "", err
 	}
-	resp, err := http.DefaultClient.Do(req)
+	if strings.TrimSpace(meta.ETag) != "" {
+		req.Header.Set("If-None-Match", meta.ETag)
+	}
+	if strings.TrimSpace(meta.LastModified) != "" {
+		req.Header.Set("If-Modified-Since", meta.LastModified)
+	}
+	resp, err := ghaHTTPClient.Do(req)
 	if err != nil {
 		return "", err
 	}
 	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusNotModified {
+		now := time.Now()
+		_ = os.Chtimes(path, now, now)
+		return path, nil
+	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return "", fmt.Errorf("download GHA all.zip: %s", resp.Status)
 	}
@@ -358,5 +452,10 @@ func ensureGHACacheZip(ctx context.Context) (string, error) {
 		_ = os.Remove(tmp)
 		return "", err
 	}
+
+	writeGHAMeta(path, ghaZipMeta{
+		ETag:         strings.TrimSpace(resp.Header.Get("ETag")),
+		LastModified: strings.TrimSpace(resp.Header.Get("Last-Modified")),
+	})
 	return path, nil
 }

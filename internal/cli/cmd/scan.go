@@ -21,6 +21,7 @@ import (
 	cmp "github.com/picatz/deputy/internal/compare"
 	gitx "github.com/picatz/deputy/internal/gitutil"
 	inv "github.com/picatz/deputy/internal/inventory"
+	"github.com/picatz/deputy/internal/output"
 	"github.com/picatz/deputy/internal/policy"
 	"github.com/picatz/deputy/internal/purlx"
 	"github.com/picatz/deputy/internal/repository/workspace"
@@ -34,7 +35,6 @@ import (
 	spdxcommon "github.com/spdx/tools-golang/spdx/v2/common"
 	"github.com/spf13/cobra"
 	"google.golang.org/protobuf/encoding/protojson"
-	"osv.dev/bindings/go/osvdev"
 )
 
 // ScanResult is the structured output of a vulnerability scan suitable for
@@ -109,7 +109,7 @@ func NewScanner() *Scanner {
 	return &Scanner{
 		collectInventory:     collectInventory,
 		queryVulnerabilities: analysis.QueryOSVBatch,
-		osvClient:            osvdev.DefaultClient(),
+		osvClient:            analysis.NewOSVClient(),
 	}
 }
 
@@ -121,7 +121,7 @@ func (s *Scanner) queryOSV(ctx context.Context, inputs []analysis.PkgInput) ([]a
 	}
 	client := s.osvClient
 	if client == nil {
-		client = osvdev.DefaultClient()
+		client = analysis.NewOSVClient()
 	}
 	return query(ctx, client, inputs)
 }
@@ -232,9 +232,10 @@ func AddScanCommand(root *cobra.Command) {
 	scanner := NewScanner()
 
 	scanCmd := &cobra.Command{
-		Use:          "scan [repo]",
-		Short:        "Scan for vulnerabilities",
-		SilenceUsage: true,
+		Use:           "scan [repo]",
+		Short:         "Scan for vulnerabilities",
+		SilenceErrors: true,
+		SilenceUsage:  true,
 		Long: `Scan repositories, directories, or SBOM files for security vulnerabilities using the OSV database.
 
 VULNERABILITY DATABASE:
@@ -350,9 +351,10 @@ WORKFLOW EXAMPLES:
 	scanCmd.Flags().Bool("show-db-info", false, "Show database-specific metadata (e.g., review_status) in text output")
 
 	scanDirCmd := &cobra.Command{
-		Use:          "dir <path>",
-		Short:        "Scan a directory for vulnerabilities",
-		SilenceUsage: true,
+		Use:           "dir <path>",
+		Short:         "Scan a directory for vulnerabilities",
+		SilenceErrors: true,
+		SilenceUsage:  true,
 		Long: `Scan a directory for vulnerabilities without Git context.
 
 This subcommand is useful when you want to scan source code that isn't in a Git
@@ -401,9 +403,10 @@ TYPICAL USE CASES:
 	scanDirCmd.Flags().Bool("show-db-info", false, "Show database-specific metadata (e.g., review_status) in text output")
 
 	scanSBOMCmd := &cobra.Command{
-		Use:          "sbom <file|->",
-		Short:        "Scan an SBOM file for vulnerabilities",
-		SilenceUsage: true,
+		Use:           "sbom <file|->",
+		Short:         "Scan an SBOM file for vulnerabilities",
+		SilenceErrors: true,
+		SilenceUsage:  true,
 		Long: `Scan a Software Bill of Materials (SBOM) file for vulnerabilities.
 
 SUPPORTED SBOM FORMATS:
@@ -528,7 +531,7 @@ func (s *Scanner) runScan(cmd *cobra.Command, args []string) error {
 	policyFindings := actionsToPolicyFindings(policyActions)
 	report.PolicyFindings = policyFindings
 
-	var w io.Writer = os.Stdout
+	var w io.Writer = cmd.OutOrStdout()
 	if outPath != "" && outPath != "-" {
 		f, err := os.Create(outPath)
 		if err != nil {
@@ -617,7 +620,7 @@ func (s *Scanner) runScanDir(cmd *cobra.Command, args []string) error {
 	}
 	policyFindings := actionsToPolicyFindings(policyActions)
 
-	var w io.Writer = os.Stdout
+	var w io.Writer = cmd.OutOrStdout()
 	if outPath != "" && outPath != "-" {
 		f, err := os.Create(outPath)
 		if err != nil {
@@ -659,7 +662,7 @@ func (s *Scanner) runScanSBOM(cmd *cobra.Command, args []string) error {
 
 	var r io.Reader
 	if input == "-" {
-		r = os.Stdin
+		r = cmd.InOrStdin()
 	} else {
 		f, err := os.Open(input)
 		if err != nil {
@@ -721,7 +724,7 @@ func (s *Scanner) runScanSBOM(cmd *cobra.Command, args []string) error {
 	}
 	policyFindings := actionsToPolicyFindings(policyActions)
 
-	var w io.Writer = os.Stdout
+	var w io.Writer = cmd.OutOrStdout()
 	if outPath != "" && outPath != "-" {
 		f, err := os.Create(outPath)
 		if err != nil {
@@ -733,22 +736,46 @@ func (s *Scanner) runScanSBOM(cmd *cobra.Command, args []string) error {
 
 	switch strings.ToLower(format) {
 	case "", "text":
-		fmt.Fprintln(w)
-		fmt.Fprintln(w, ui.StyleHeader.Render("Scan Results:"))
-		fmt.Fprintf(w, "  Target: %s\n", ui.StylePackageName.Render("SBOM input"))
+		doc := scanResultsHeaderDoc("SBOM input", "", "", "")
+		_ = doc.Render(w, output.UIStyles())
 		vulnsEff := vulns
 		if ignoreUnfixed {
 			vulnsEff = filterUnfixed(vulns)
 			fmt.Fprintln(cmd.ErrOrStderr(), "  "+ui.StyleMeta.Render("Note: ignoring unfixed vulnerabilities (--ignore-unfixed)"))
 		}
-		DisplayVulnerabilities(vulnsEff, displayOpts)
-		DisplayPolicyFindings(policyFindings)
+		DisplayVulnerabilities(w, vulnsEff, displayOpts)
+		DisplayPolicyFindings(w, policyFindings)
 		return nil
 	case "json":
 		return s.outputJSON(w, "sbom", "", "", vulns, len(pkgs), ignoreUnfixed, policyFindings)
 	default:
 		return fmt.Errorf("unsupported --format %q (use text|json)", format)
 	}
+}
+
+func scanResultsHeaderDoc(target, ref, commitHash, originURL string) output.Doc {
+	var doc output.Doc
+	doc.AddBlank()
+	doc.AddLine(output.Span{Text: "Scan Results:", Style: output.StyleHeader})
+	doc.AddLine(output.Span{Text: "  Target: "}, output.Span{Text: target, Style: output.StylePackageName})
+	if strings.TrimSpace(ref) != "" {
+		spans := []output.Span{
+			{Text: "  Ref: "},
+			{Text: ref, Style: output.StyleVersion},
+		}
+		if strings.TrimSpace(commitHash) != "" {
+			spans = append(spans,
+				output.Span{Text: " ("},
+				output.Span{Text: commitHash, Style: output.StyleVersion},
+				output.Span{Text: ")"},
+			)
+		}
+		doc.AddLine(spans...)
+	}
+	if strings.TrimSpace(originURL) != "" {
+		doc.AddLine(output.Span{Text: "  Origin: "}, output.Span{Text: originURL, Style: output.StyleMeta})
+	}
+	return doc
 }
 
 // Helper functions
@@ -911,14 +938,8 @@ func (s *Scanner) outputText(w io.Writer, errW io.Writer, repoPath, ref, commitH
 		}
 	}
 
-	// Consistent header format matching triage/fix commands
-	fmt.Fprintln(w)
-	fmt.Fprintln(w, ui.StyleHeader.Render("Scan Results:"))
-	fmt.Fprintf(w, "  Target: %s\n", ui.StylePackageName.Render(repoPath))
-	fmt.Fprintf(w, "  Ref: %s (%s)\n", ui.StyleVersion.Render(shortRef), ui.StyleVersion.Render(shortHash))
-	if originURL != "" {
-		fmt.Fprintf(w, "  Origin: %s\n", ui.StyleMeta.Render(originURL))
-	}
+	doc := scanResultsHeaderDoc(repoPath, shortRef, shortHash, originURL)
+	_ = doc.Render(w, output.UIStyles())
 
 	vulnsEff := vulns
 	if ignoreUnfixed {
@@ -926,8 +947,8 @@ func (s *Scanner) outputText(w io.Writer, errW io.Writer, repoPath, ref, commitH
 		fmt.Fprintln(errW, "  "+ui.StyleMeta.Render("Note: ignoring unfixed vulnerabilities (--ignore-unfixed)"))
 	}
 
-	DisplayVulnerabilities(vulnsEff, displayOpts)
-	DisplayPolicyFindings(policyFindings)
+	DisplayVulnerabilities(w, vulnsEff, displayOpts)
+	DisplayPolicyFindings(w, policyFindings)
 
 	// Show module deprecations
 	if deps := detectModuleDeprecations(pkgs, goDirect); len(deps) > 0 {
@@ -946,9 +967,8 @@ func (s *Scanner) outputText(w io.Writer, errW io.Writer, repoPath, ref, commitH
 
 // outputTextDir writes the directory scan results in a human-readable text format.
 func (s *Scanner) outputTextDir(w io.Writer, errW io.Writer, path string, vulns []analysis.Vulnerability, ignoreUnfixed bool, policyFindings []PolicyFinding, displayOpts vulnDisplayOptions) error {
-	fmt.Fprintln(w)
-	fmt.Fprintln(w, ui.StyleHeader.Render("Scan Results:"))
-	fmt.Fprintf(w, "  Target: %s\n", ui.StylePackageName.Render(path))
+	doc := scanResultsHeaderDoc(path, "", "", "")
+	_ = doc.Render(w, output.UIStyles())
 
 	vulnsEff := vulns
 	if ignoreUnfixed {
@@ -956,8 +976,8 @@ func (s *Scanner) outputTextDir(w io.Writer, errW io.Writer, path string, vulns 
 		fmt.Fprintln(errW, "  "+ui.StyleMeta.Render("Note: ignoring unfixed vulnerabilities (--ignore-unfixed)"))
 	}
 
-	DisplayVulnerabilities(vulnsEff, displayOpts)
-	DisplayPolicyFindings(policyFindings)
+	DisplayVulnerabilities(w, vulnsEff, displayOpts)
+	DisplayPolicyFindings(w, policyFindings)
 	return nil
 }
 

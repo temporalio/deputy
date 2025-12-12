@@ -3,6 +3,7 @@ package policy
 import (
 	"context"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -197,13 +198,7 @@ func TestLicenseAllowlistHappySadPaths(t *testing.T) {
 		if err != nil {
 			t.Fatalf("EvaluateAll: %v", err)
 		}
-		foundDeny := false
-		for _, a := range actions {
-			if a.Type == "deny" {
-				foundDeny = true
-			}
-		}
-		if !foundDeny {
+		if !slices.ContainsFunc(actions, func(a Action) bool { return a.Type == "deny" }) {
 			t.Fatalf("expected deny, got %+v", actions)
 		}
 	})
@@ -403,13 +398,7 @@ func TestPrereleaseGuardPolicy(t *testing.T) {
 		if err != nil {
 			t.Fatalf("EvaluateAll: %v", err)
 		}
-		found := false
-		for _, a := range actions {
-			if a.Type == "deny" {
-				found = true
-			}
-		}
-		if !found {
+		if !slices.ContainsFunc(actions, func(a Action) bool { return a.Type == "deny" }) {
 			t.Fatalf("expected deny for prerelease version, got %+v", actions)
 		}
 	})
@@ -757,13 +746,7 @@ func TestDependencyCountGuard(t *testing.T) {
 	if err != nil {
 		t.Fatalf("EvaluateAll: %v", err)
 	}
-	foundWarn := false
-	for _, a := range actions {
-		if a.Type == "warn" {
-			foundWarn = true
-		}
-	}
-	if !foundWarn {
+	if !slices.ContainsFunc(actions, func(a Action) bool { return a.Type == "warn" }) {
 		t.Fatalf("expected warn for medium change set, got %+v", actions)
 	}
 }

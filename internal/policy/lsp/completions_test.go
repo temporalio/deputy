@@ -1,18 +1,16 @@
 package lsp
 
-import "testing"
+import (
+	"slices"
+	"testing"
+
+	protocol "github.com/sourcegraph/go-lsp"
+)
 
 func TestCELCompletionIncludesHelpers(t *testing.T) {
 	items := celCompletion("when: ", 6)
-	var hasVar, hasFn bool
-	for _, it := range items {
-		if it.Label == "request" {
-			hasVar = true
-		}
-		if it.Label == "levenshteinWithin" {
-			hasFn = true
-		}
-	}
+	hasVar := slices.ContainsFunc(items, func(it protocol.CompletionItem) bool { return it.Label == "request" })
+	hasFn := slices.ContainsFunc(items, func(it protocol.CompletionItem) bool { return it.Label == "levenshteinWithin" })
 	if !hasVar || !hasFn {
 		t.Fatalf("expected request var and levenshteinWithin fn in completions; got %v", items)
 	}
@@ -21,13 +19,7 @@ func TestCELCompletionIncludesHelpers(t *testing.T) {
 func TestCELCompletionFieldAfterEnvDot(t *testing.T) {
 	line := "when: env."
 	items := celCompletion(line, len(line))
-	found := false
-	for _, it := range items {
-		if it.Label == "command" {
-			found = true
-		}
-	}
-	if !found {
+	if !slices.ContainsFunc(items, func(it protocol.CompletionItem) bool { return it.Label == "command" }) {
 		t.Fatalf("expected env.command completion, got %v", items)
 	}
 }

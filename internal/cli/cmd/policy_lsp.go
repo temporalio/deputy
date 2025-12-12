@@ -1,7 +1,6 @@
 package cmd
 
 import (
-	"context"
 	"fmt"
 	"log/slog"
 
@@ -16,9 +15,10 @@ func newPolicyLSPCommand() *cobra.Command {
 		logLevel string
 	)
 	cmd := &cobra.Command{
-		Use:          "lsp",
-		Short:        "Start the Deputy policy language server (YAML + CEL)",
-		SilenceUsage: true,
+		Use:           "lsp",
+		Short:         "Start the Deputy policy language server (YAML + CEL)",
+		SilenceErrors: true,
+		SilenceUsage:  true,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			level := slog.LevelInfo
 			switch logLevel {
@@ -39,7 +39,7 @@ func newPolicyLSPCommand() *cobra.Command {
 				TCP:      useTCP,
 				Log:      logger,
 			}
-			return lsp.Run(context.Background(), opts)
+			return lsp.Run(cmd.Context(), opts)
 		},
 	}
 	cmd.Flags().StringVar(&useTCP, "tcp", "", "Listen on TCP address instead of stdio (e.g., 127.0.0.1:4389)")

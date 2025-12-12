@@ -2,6 +2,9 @@ package cmd
 
 import (
 	"fmt"
+	"io"
+	"maps"
+	"slices"
 	"sort"
 	"strings"
 
@@ -10,6 +13,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	analysis "github.com/picatz/deputy/internal/analysis"
 	"github.com/picatz/deputy/internal/collections"
+	"github.com/picatz/deputy/internal/output"
 	remediation "github.com/picatz/deputy/internal/remediation"
 	ui "github.com/picatz/deputy/internal/ui"
 )
@@ -26,17 +30,18 @@ func resolveVulnDisplayOptions(opts []vulnDisplayOptions) vulnDisplayOptions {
 	return vulnDisplayOptions{}
 }
 
-// DisplayVulnerabilities renders a styled vulnerability report with the default heading.
-func DisplayVulnerabilities(vulns []analysis.Vulnerability, opts ...vulnDisplayOptions) {
-	DisplayVulnerabilitiesWithHeader(vulns, "Vulnerabilities Found:", opts...)
+// DisplayVulnerabilities writes a styled vulnerability report to w with the default heading.
+func DisplayVulnerabilities(w io.Writer, vulns []analysis.Vulnerability, opts ...vulnDisplayOptions) {
+	DisplayVulnerabilitiesWithHeader(w, vulns, "Vulnerabilities Found:", opts...)
 }
 
-// DisplayPolicyFindings renders any policy actions emitted during a command.
-func DisplayPolicyFindings(findings []PolicyFinding) {
+// DisplayPolicyFindings writes any policy actions emitted during a command to w.
+func DisplayPolicyFindings(w io.Writer, findings []PolicyFinding) {
 	if len(findings) == 0 {
 		return
 	}
-	fmt.Println("\n" + ui.StyleHeader.Render("Policy Findings:"))
+	fmt.Fprintln(w)
+	fmt.Fprintln(w, ui.StyleHeader.Render("Policy Findings:"))
 	for _, f := range findings {
 		action := strings.ToUpper(strings.TrimSpace(f.Action))
 		if action == "" {
@@ -47,31 +52,33 @@ func DisplayPolicyFindings(findings []PolicyFinding) {
 		if source != "" {
 			line += " " + ui.StyleMeta.Render(source)
 		}
-		fmt.Println(line)
+		fmt.Fprintln(w, line)
 
 		msg := strings.TrimSpace(firstNonEmpty(f.Reason, f.Message))
 		if msg != "" {
-			fmt.Println("    " + ui.StyleSymbol.Render("• ") + msg)
+			fmt.Fprintln(w, "    "+ui.StyleSymbol.Render("• ")+msg)
 		}
 		if rem := strings.TrimSpace(f.Remediation); rem != "" {
-			fmt.Println("    " + ui.StyleMeta.Render("Remediation: ") + rem)
+			fmt.Fprintln(w, "    "+ui.StyleMeta.Render("Remediation: ")+rem)
 		}
 	}
 }
 
-// DisplayVulnerabilitiesWithHeader renders a styled vulnerability report to stdout using the provided heading.
-func DisplayVulnerabilitiesWithHeader(vulns []analysis.Vulnerability, heading string, opts ...vulnDisplayOptions) {
+// DisplayVulnerabilitiesWithHeader writes a styled vulnerability report to w using the provided heading.
+func DisplayVulnerabilitiesWithHeader(w io.Writer, vulns []analysis.Vulnerability, heading string, opts ...vulnDisplayOptions) {
 	displayOpts := resolveVulnDisplayOptions(opts)
 	cons := analysis.ConsolidateVulnerabilities(vulns)
 	if len(cons) == 0 {
-		fmt.Println("\n" + ui.StyleAdded.Render("✓ No vulnerabilities found"))
+		fmt.Fprintln(w)
+		fmt.Fprintln(w, ui.StyleAdded.Render("✓ No vulnerabilities found"))
 		return
 	}
-	fmt.Println("\n" + ui.StyleDowngraded.Render("∴ ") + ui.StyleHeader.Render(heading))
+	fmt.Fprintln(w)
+	fmt.Fprintln(w, ui.StyleDowngraded.Render("∴ ")+ui.StyleHeader.Render(heading))
 
-	RenderVulnerabilityList(vulns, displayOpts)
+	RenderVulnerabilityList(w, vulns, displayOpts)
 
-	RenderVulnerabilitySummaryAndActions(vulns)
+	RenderVulnerabilitySummaryAndActions(w, vulns)
 }
 
 // scoreLabel returns a styled string representing the severity score.
@@ -153,9 +160,9 @@ func normalizeGoVersion(v string) string {
 	return "v" + v
 }
 
-// RenderVulnerabilityList prints per-package vulnerability details without headings or summary.
+// RenderVulnerabilityList writes per-package vulnerability details to w without headings or summary.
 // Used by diff to compose combined views.
-func RenderVulnerabilityList(vulns []analysis.Vulnerability, opts vulnDisplayOptions) {
+func RenderVulnerabilityList(w io.Writer, vulns []analysis.Vulnerability, opts vulnDisplayOptions) {
 	cons := analysis.ConsolidateVulnerabilities(vulns)
 	if len(cons) == 0 {
 		return
@@ -166,11 +173,7 @@ func RenderVulnerabilityList(vulns []analysis.Vulnerability, opts vulnDisplayOpt
 		byPkg[v.Package] = append(byPkg[v.Package], v)
 	}
 
-	pkgNames := make([]string, 0, len(byPkg))
-	for pkg := range byPkg {
-		pkgNames = append(pkgNames, pkg)
-	}
-	sort.Strings(pkgNames)
+	pkgNames := slices.Sorted(maps.Keys(byPkg))
 
 	for _, pkg := range pkgNames {
 		list := byPkg[pkg]
@@ -189,18 +192,28 @@ func RenderVulnerabilityList(vulns []analysis.Vulnerability, opts vulnDisplayOpt
 			return list[i].PrimaryID < list[j].PrimaryID
 		})
 
-		hasDirect := false
-		for _, v := range list {
-			if v.IsDirect {
-				hasDirect = true
-				break
-			}
-		}
-		depType := ui.StyleVersion.Render("[indirect]")
+		hasDirect := slices.ContainsFunc(list, func(v analysis.ConsolidatedVulnerability) bool {
+			return v.IsDirect
+		})
+		depType := "[indirect]"
+		depStyle := output.StyleVersion
 		if hasDirect {
-			depType = ui.StyleUpgraded.Render("[direct]")
+			depType = "[direct]"
+			depStyle = output.StyleUpgraded
 		}
-		fmt.Printf("\n%s %s %s:\n", ui.StylePackageName.Render(pkg), ui.StyleVersion.Render(list[0].Version), depType)
+		{
+			var doc output.Doc
+			doc.AddBlank()
+			doc.AddLine(
+				output.Span{Text: pkg, Style: output.StylePackageName},
+				output.Span{Text: " "},
+				output.Span{Text: list[0].Version, Style: output.StyleVersion},
+				output.Span{Text: " "},
+				output.Span{Text: depType, Style: depStyle},
+				output.Span{Text: ":"},
+			)
+			_ = doc.Render(w, output.UIStyles())
+		}
 
 		for _, v := range list {
 			sevDisp := ui.SeverityLabel(v.Severity, v.SeverityType)
@@ -213,25 +226,25 @@ func RenderVulnerabilityList(vulns []analysis.Vulnerability, opts vulnDisplayOpt
 			if v.RelatedCount > 1 {
 				parts = append(parts, ui.StyleVersion.Render(fmt.Sprintf("[%d related]", v.RelatedCount)))
 			}
-			fmt.Println("  " + ui.StyleVersion.Render("• ") + strings.Join(parts, " "))
+			fmt.Fprintln(w, "  "+ui.StyleVersion.Render("• ")+strings.Join(parts, " "))
 
 			if v.Summary != "" && len(v.Summary) < 120 {
-				fmt.Println("    " + ui.StyleSymbol.Render(strings.TrimSpace(v.Summary)))
+				fmt.Fprintln(w, "    "+ui.StyleSymbol.Render(strings.TrimSpace(v.Summary)))
 			}
 			if opts.showSymbols && len(v.AffectedImports) > 0 {
 				lines := formatImportSummaries(v.AffectedImports, 3, 4)
 				if len(lines) > 0 {
-					fmt.Println("    " + ui.StyleMeta.Render("Symbol hints (Go/OSV):"))
+					fmt.Fprintln(w, "    "+ui.StyleMeta.Render("Symbol hints (Go/OSV):"))
 					for _, line := range lines {
-						fmt.Println("      " + ui.StylePath.Render(line))
+						fmt.Fprintln(w, "      "+ui.StylePath.Render(line))
 					}
 				}
 			}
 			if opts.showDatabaseInfo {
 				if dbLines := formatDatabaseSpecificInfo(v.DatabaseSpecific, 3); len(dbLines) > 0 {
-					fmt.Println("    " + ui.StyleMeta.Render("Database info:"))
+					fmt.Fprintln(w, "    "+ui.StyleMeta.Render("Database info:"))
 					for _, line := range dbLines {
-						fmt.Println("      " + ui.StyleMeta.Render(line))
+						fmt.Fprintln(w, "      "+ui.StyleMeta.Render(line))
 					}
 				}
 			}
@@ -250,22 +263,22 @@ func RenderVulnerabilityList(vulns []analysis.Vulnerability, opts vulnDisplayOpt
 					aliasBlocks = append(aliasBlocks, ui.StyleMeta.Render(fmt.Sprintf("(+%d more)", v.HiddenAliasCount)))
 				}
 				aliasRow := lipgloss.JoinHorizontal(lipgloss.Top, ui.StyleMeta.Render("Aliases:"), lipgloss.NewStyle().MarginLeft(1).Render(strings.Join(aliasBlocks, ", ")))
-				fmt.Println("    " + aliasRow)
+				fmt.Fprintln(w, "    "+aliasRow)
 			} else if v.HiddenAliasCount > 0 {
 				aliasRow := lipgloss.JoinHorizontal(
 					lipgloss.Top,
 					ui.StyleMeta.Render("Aliases:"),
 					lipgloss.NewStyle().MarginLeft(1).Render(ui.StyleMeta.Render(fmt.Sprintf("(+%d more)", v.HiddenAliasCount))),
 				)
-				fmt.Println("    " + aliasRow)
+				fmt.Fprintln(w, "    "+aliasRow)
 			}
 			if v.Published != "" && len(v.Published) >= 10 {
 				metaBlock := lipgloss.JoinHorizontal(lipgloss.Top, ui.StyleMeta.Render("Published:"), lipgloss.NewStyle().MarginLeft(1).Faint(true).Render(v.Published[:10]))
-				fmt.Println("    " + metaBlock)
+				fmt.Fprintln(w, "    "+metaBlock)
 			}
 		}
 
-		renderManifestContext(list)
+		renderManifestContext(w, list)
 	}
 }
 
@@ -345,10 +358,7 @@ func buildManifestDisplayContext(list []analysis.ConsolidatedVulnerability) mani
 		}
 	}
 
-	managerKeys := make([]string, 0, len(groupEntries))
-	for key := range groupEntries {
-		managerKeys = append(managerKeys, key)
-	}
+	managerKeys := slices.Collect(maps.Keys(groupEntries))
 	sort.Slice(managerKeys, func(i, j int) bool {
 		ri := managerRank(managerKeys[i])
 		rj := managerRank(managerKeys[j])
@@ -407,10 +417,7 @@ func buildManifestDisplayContext(list []analysis.ConsolidatedVulnerability) mani
 		}
 	}
 
-	artifactKeys := make([]string, 0, len(artifactGroups))
-	for key := range artifactGroups {
-		artifactKeys = append(artifactKeys, key)
-	}
+	artifactKeys := slices.Collect(maps.Keys(artifactGroups))
 	sort.Slice(artifactKeys, func(i, j int) bool {
 		ri := managerRank(artifactManagerNames[artifactKeys[i]])
 		rj := managerRank(artifactManagerNames[artifactKeys[j]])
@@ -474,19 +481,19 @@ func inferArtifactManager(path string, manifestManagers map[string]string, dirMa
 	return ""
 }
 
-// renderManifestContext prints the context (sources and artifacts) for a list of vulnerabilities.
-func renderManifestContext(list []analysis.ConsolidatedVulnerability) {
+// renderManifestContext writes the context (sources and artifacts) for a list of vulnerabilities.
+func renderManifestContext(w io.Writer, list []analysis.ConsolidatedVulnerability) {
 	ctx := buildManifestDisplayContext(list)
 	if len(ctx.Sources) == 0 && len(ctx.Artifacts) == 0 {
 		return
 	}
-	fmt.Println("    " + ui.StyleMeta.Render("Context:"))
+	fmt.Fprintln(w, "    "+ui.StyleMeta.Render("Context:"))
 	sourceEntryCount := 0
 	for _, grp := range ctx.Sources {
 		sourceEntryCount += len(grp.Entries)
 	}
 	if sourceEntryCount > 0 {
-		fmt.Println("      " + ui.StyleMeta.Render("Sources:"))
+		fmt.Fprintln(w, "      "+ui.StyleMeta.Render("Sources:"))
 		for _, grp := range ctx.Sources {
 			if len(grp.Entries) == 0 {
 				continue
@@ -511,12 +518,12 @@ func renderManifestContext(list []analysis.ConsolidatedVulnerability) {
 				if len(lineParts) == 0 {
 					lineParts = append(lineParts, ui.StyleMeta.Render("(manifest)"))
 				}
-				fmt.Println("        " + ui.StyleSymbol.Render("• ") + strings.Join(lineParts, " "))
+				fmt.Fprintln(w, "        "+ui.StyleSymbol.Render("• ")+strings.Join(lineParts, " "))
 			}
 		}
 	}
 	if len(ctx.Artifacts) > 0 {
-		fmt.Println("      " + ui.StyleMeta.Render("Artifacts:"))
+		fmt.Fprintln(w, "      "+ui.StyleMeta.Render("Artifacts:"))
 		for _, grp := range ctx.Artifacts {
 			if len(grp.Entries) == 0 {
 				continue
@@ -527,7 +534,7 @@ func renderManifestContext(list []analysis.ConsolidatedVulnerability) {
 				if manager != "" {
 					lineParts = append(lineParts, ui.StyleManager.Render("("+manager+")"))
 				}
-				fmt.Println("        " + ui.StyleSymbol.Render("• ") + strings.Join(lineParts, " "))
+				fmt.Fprintln(w, "        "+ui.StyleSymbol.Render("• ")+strings.Join(lineParts, " "))
 			}
 		}
 	}
@@ -570,35 +577,38 @@ func uniqueSortedStrings(values []string) []string {
 	return out
 }
 
-// RenderVulnerabilitySummaryAndActions prints the summary and recommended
+// RenderVulnerabilitySummaryAndActions writes the summary and recommended
 // actions for a set of vulnerabilities without reprinting the list header.
-func RenderVulnerabilitySummaryAndActions(vulns []analysis.Vulnerability) {
+func RenderVulnerabilitySummaryAndActions(w io.Writer, vulns []analysis.Vulnerability) {
 	cons := analysis.ConsolidateVulnerabilities(vulns)
 	if len(cons) == 0 {
-		fmt.Println("\n" + ui.StyleAdded.Render("✓ No vulnerabilities found"))
+		fmt.Fprintln(w)
+		fmt.Fprintln(w, ui.StyleAdded.Render("✓ No vulnerabilities found"))
 		return
 	}
 	consolidated := analysis.CategorizeVulnerabilities(vulns)
 
-	fmt.Println("\n" + ui.StyleHeader.Render("Vulnerability Summary:"))
+	fmt.Fprintln(w)
+	fmt.Fprintln(w, ui.StyleHeader.Render("Vulnerability Summary:"))
 	high := consolidated.CriticalSev + consolidated.HighSeverity
 	if high > 0 {
-		fmt.Println("  " + ui.StyleSymbol.Render(ui.StyleRemoved.Render("!")) + " " + ui.StyleSymbol.Render(fmt.Sprintf("%d require immediate attention ", high)) + ui.StyleRemoved.Render("(critical/high severity)"))
+		fmt.Fprintln(w, "  "+ui.StyleSymbol.Render(ui.StyleRemoved.Render("!"))+" "+ui.StyleSymbol.Render(fmt.Sprintf("%d require immediate attention ", high))+ui.StyleRemoved.Render("(critical/high severity)"))
 	}
 	if consolidated.FixAvailable > 0 {
-		fmt.Println("  " + ui.StyleSymbol.Render(ui.StyleUpgraded.Render("↑")) + " " + ui.StyleSymbol.Render(fmt.Sprintf("%d can be fixed by upgrading", consolidated.FixAvailable)))
+		fmt.Fprintln(w, "  "+ui.StyleSymbol.Render(ui.StyleUpgraded.Render("↑"))+" "+ui.StyleSymbol.Render(fmt.Sprintf("%d can be fixed by upgrading", consolidated.FixAvailable)))
 	}
 	unfixed := consolidated.UniqueVulns - consolidated.FixAvailable
 	if unfixed > 0 {
-		fmt.Println("  " + ui.StyleSymbol.Render(ui.StyleRemoved.Render("-")) + " " + ui.StyleSymbol.Render(fmt.Sprintf("%d have no fix available yet", unfixed)))
+		fmt.Fprintln(w, "  "+ui.StyleSymbol.Render(ui.StyleRemoved.Render("-"))+" "+ui.StyleSymbol.Render(fmt.Sprintf("%d have no fix available yet", unfixed)))
 	}
 
 	commands, stdlibRec := remediation.CommandsFromVulnerabilities(vulns)
 	if len(commands) > 0 || stdlibRec != "" || unfixed > 0 {
-		fmt.Println("\n" + ui.StyleHeader.Render("Recommended Actions:"))
+		fmt.Fprintln(w)
+		fmt.Fprintln(w, ui.StyleHeader.Render("Recommended Actions:"))
 		step := 1
 		if stdlibRec != "" {
-			fmt.Printf("  %d. %s %s %s\n", step, ui.StyleBold.Render("Upgrade Go toolchain to"), ui.StyleUpgraded.Render(stdlibRec), ui.StyleVersion.Render("(update 'go' directive in go.mod)"))
+			fmt.Fprintf(w, "  %d. %s %s %s\n", step, ui.StyleBold.Render("Upgrade Go toolchain to"), ui.StyleUpgraded.Render(stdlibRec), ui.StyleVersion.Render("(update 'go' directive in go.mod)"))
 			step++
 		}
 		if len(commands) > 0 {
@@ -607,12 +617,12 @@ func RenderVulnerabilitySummaryAndActions(vulns []analysis.Vulnerability) {
 			if high > 0 {
 				header = "Upgrade critical/high modules first"
 			}
-			fmt.Printf("  %d. %s\n", step, ui.StyleBold.Render(header))
-			renderRemediationCommands(commands, "       ", "         ")
+			fmt.Fprintf(w, "  %d. %s\n", step, ui.StyleBold.Render(header))
+			renderRemediationCommands(w, commands, "       ", "         ")
 			step++
 		}
 		if unfixed > 0 {
-			fmt.Printf("  %d. %s %s\n", step, ui.StyleBold.Render("Investigate remaining unfixed vulnerabilities"), ui.StyleVersion.Render("(monitor upstream / consider alternatives)"))
+			fmt.Fprintf(w, "  %d. %s %s\n", step, ui.StyleBold.Render("Investigate remaining unfixed vulnerabilities"), ui.StyleVersion.Render("(monitor upstream / consider alternatives)"))
 		}
 	}
 }

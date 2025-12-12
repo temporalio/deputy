@@ -3,7 +3,8 @@ package policy
 import (
 	"encoding/json"
 	"fmt"
-	"sort"
+	"maps"
+	"slices"
 	"strings"
 
 	yaml "gopkg.in/yaml.v3"
@@ -105,11 +106,7 @@ func (o *orderedVars) UnmarshalJSON(data []byte) error {
 	if err := json.Unmarshal(data, &m); err != nil {
 		return err
 	}
-	keys := make([]string, 0, len(m))
-	for k := range m {
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
+	keys := slices.Sorted(maps.Keys(m))
 	out := make([]varKV, 0, len(keys))
 	for _, k := range keys {
 		val := m[k]

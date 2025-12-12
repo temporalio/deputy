@@ -1,6 +1,7 @@
 package lsp
 
 import (
+	"slices"
 	"strings"
 	"testing"
 
@@ -24,14 +25,9 @@ policies:
 	if len(diag) == 0 {
 		t.Fatalf("expected diagnostic for invalid entrypoint")
 	}
-	found := false
-	for _, d := range diag {
-		if d.Severity == protocol.Warning && strings.Contains(d.Message, "invalid entrypoint") {
-			found = true
-			break
-		}
-	}
-	if !found {
+	if !slices.ContainsFunc(diag, func(d protocol.Diagnostic) bool {
+		return d.Severity == protocol.Warning && strings.Contains(d.Message, "invalid entrypoint")
+	}) {
 		t.Fatalf("expected warning about invalid entrypoint, got %+v", diag)
 	}
 }
@@ -52,16 +48,12 @@ policies:
 	if len(diag) == 0 {
 		t.Fatalf("expected CEL diagnostic")
 	}
-	foundUndeclared := false
-	for _, d := range diag {
-		if d.Code == "undeclared" {
-			foundUndeclared = true
-			if got := d.Range.End.Character - d.Range.Start.Character; got < 3 {
-				t.Fatalf("expected widened range for identifier, got length %d", got)
-			}
+	if !slices.ContainsFunc(diag, func(d protocol.Diagnostic) bool {
+		if d.Code != "undeclared" {
+			return false
 		}
-	}
-	if !foundUndeclared {
+		return d.Range.End.Character-d.Range.Start.Character >= 3
+	}) {
 		t.Fatalf("expected undeclared code, got %+v", diag)
 	}
 }

@@ -13,12 +13,16 @@ func AddProxyCommand(root *cobra.Command) {
 	var (
 		cfgPath       string
 		extraPolicies []string
+		enableReadyz  bool
+		enablePprof   bool
+		enableVars    bool
 	)
 
 	proxyCmd := &cobra.Command{
-		Use:          "proxy",
-		Short:        "Run Deputy's artifact proxy",
-		SilenceUsage: true,
+		Use:           "proxy",
+		Short:         "Run Deputy's artifact proxy",
+		SilenceErrors: true,
+		SilenceUsage:  true,
 		Long: `Run a policy-enforcing artifact proxy for various package managers.
 
 The proxy intercepts requests to upstream registries (like proxy.golang.org, npmjs.org, PyPI, RubyGems)
@@ -56,9 +60,10 @@ STANDALONE SERVER:
 	}
 
 	serveCmd := &cobra.Command{
-		Use:          "serve --config proxy.yaml",
-		Short:        "Serve the Deputy proxy based on the configuration file",
-		SilenceUsage: true,
+		Use:           "serve --config proxy.yaml",
+		Short:         "Serve the Deputy proxy based on the configuration file",
+		SilenceErrors: true,
+		SilenceUsage:  true,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if cfgPath == "" {
 				return fmt.Errorf("missing --config")
@@ -67,17 +72,26 @@ STANDALONE SERVER:
 			if err != nil {
 				return err
 			}
-			server := proxy.NewServer(cfg, proxy.Options{PolicyPaths: extraPolicies})
+			server := proxy.NewServer(cfg, proxy.Options{
+				PolicyPaths:  extraPolicies,
+				EnableReadyz: enableReadyz,
+				EnablePprof:  enablePprof,
+				EnableVars:   enableVars,
+			})
 			return server.Serve(cmd.Context())
 		},
 	}
 	serveCmd.Flags().StringVarP(&cfgPath, "config", "c", "", "Proxy configuration file (YAML/JSON)")
 	serveCmd.Flags().StringArrayVar(&extraPolicies, "policy", nil, "Additional CEL policy files or bundles (repeatable)")
+	serveCmd.Flags().BoolVar(&enableReadyz, "readyz", false, "Expose /readyz endpoint")
+	serveCmd.Flags().BoolVar(&enablePprof, "pprof", false, "Expose /debug/pprof/* endpoints")
+	serveCmd.Flags().BoolVar(&enableVars, "vars", false, "Expose /debug/vars endpoint (includes cache stats)")
 
 	templateCmd := &cobra.Command{
-		Use:          "template [ecosystem]",
-		Short:        "Emit a starter proxy configuration",
-		SilenceUsage: true,
+		Use:           "template [ecosystem]",
+		Short:         "Emit a starter proxy configuration",
+		SilenceErrors: true,
+		SilenceUsage:  true,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ecosystem := ""
 			if len(args) > 0 {

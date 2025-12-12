@@ -49,8 +49,10 @@ func newRoot() *cobra.Command {
 	logFormat := defaultLogFormat()
 
 	rootCmd := &cobra.Command{
-		Use:   "deputy",
-		Short: "Secure your dependencies with policy enforcement, vulnerability scanning, and automated remediation",
+		Use:           "deputy",
+		Short:         "Secure your dependencies with policy enforcement, vulnerability scanning, and automated remediation",
+		SilenceErrors: true,
+		SilenceUsage:  true,
 		Long: `Deputy is a comprehensive security tool for modern development workflows. It integrates 
 dependency analysis, vulnerability scanning, policy enforcement, and automated remediation 
 into a single CLI.

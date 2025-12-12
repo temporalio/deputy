@@ -1,6 +1,7 @@
 package lsp
 
 import (
+	"slices"
 	"testing"
 
 	protocol "github.com/sourcegraph/go-lsp"
@@ -20,15 +21,10 @@ func TestBuildCodeActionsMissingReason(t *testing.T) {
 	if len(cmds) == 0 {
 		t.Fatalf("expected code action command")
 	}
-	found := false
-	for _, c := range cmds {
-		if ca, ok := c.(CodeAction); ok {
-			if ca.Edit != nil && len(ca.Diagnostics) == 1 {
-				found = true
-			}
-		}
-	}
-	if !found {
+	if !slices.ContainsFunc(cmds, func(c any) bool {
+		ca, ok := c.(CodeAction)
+		return ok && ca.Edit != nil && len(ca.Diagnostics) == 1
+	}) {
 		t.Fatalf("expected addReason code action with edit, got %+v", cmds)
 	}
 }
@@ -46,21 +42,20 @@ func TestUndeclaredReplacementPrefersRequestChain(t *testing.T) {
 	}
 	doc := "policies:\n  - name: p\n    rules:\n      - action: deny\n        when: requestx.client == true\n"
 	cmds := buildCodeActions(params, doc)
-	found := false
-	for _, c := range cmds {
-		if ca, ok := c.(CodeAction); ok {
-			if ca.Edit != nil && len(ca.Edit.Changes) > 0 {
-				for _, edits := range ca.Edit.Changes {
-					for _, e := range edits {
-						if e.NewText == "request.client" {
-							found = true
-						}
-					}
+	if !slices.ContainsFunc(cmds, func(c any) bool {
+		ca, ok := c.(CodeAction)
+		if !ok || ca.Edit == nil || len(ca.Edit.Changes) == 0 {
+			return false
+		}
+		for _, edits := range ca.Edit.Changes {
+			for _, e := range edits {
+				if e.NewText == "request.client" {
+					return true
 				}
 			}
 		}
-	}
-	if !found {
+		return false
+	}) {
 		t.Fatalf("expected replacement to prefer request.client, got %+v", cmds)
 	}
 }

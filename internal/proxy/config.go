@@ -3,6 +3,7 @@ package proxy
 import (
 	"fmt"
 	"os"
+	"time"
 
 	"gopkg.in/yaml.v3"
 )
@@ -19,6 +20,22 @@ type ListenerConfig struct {
 	Ecosystems []string `yaml:"ecosystems"`
 	Upstream   string   `yaml:"upstream"`
 	Policies   []string `yaml:"policies"`
+	// MaxConcurrentRequests caps in-flight HTTP requests for this listener.
+	// A value <= 0 means unlimited.
+	MaxConcurrentRequests int `yaml:"max_concurrent_requests,omitempty"`
+
+	// ReadHeaderTimeout is the maximum amount of time to read request headers.
+	// A value of 0 uses the proxy default.
+	ReadHeaderTimeout time.Duration `yaml:"read_header_timeout,omitempty"`
+	// WriteTimeout is the maximum duration before timing out writes of the response.
+	// A value of 0 uses the proxy default.
+	WriteTimeout time.Duration `yaml:"write_timeout,omitempty"`
+	// IdleTimeout is the maximum amount of time to wait for the next request when keep-alives are enabled.
+	// A value of 0 uses the proxy default.
+	IdleTimeout time.Duration `yaml:"idle_timeout,omitempty"`
+	// MaxRequestBodyBytes caps the request body size for this listener.
+	// A value of 0 uses the proxy default; a value < 0 disables the cap.
+	MaxRequestBodyBytes int64 `yaml:"max_request_body_bytes,omitempty"`
 }
 
 // LoadConfig loads YAML/JSON configuration from the provided path.

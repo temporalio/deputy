@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -115,7 +116,7 @@ func TestRunProxyExecSetsEnv(t *testing.T) {
 		}, nil
 	}
 	captured := []string{}
-	execProxyCommand = func(ctx context.Context, command []string, env []string) error {
+	execProxyCommand = func(ctx context.Context, command []string, env []string, stdin io.Reader, stdout, stderr io.Writer) error {
 		captured = append([]string{}, env...)
 		return nil
 	}
@@ -124,7 +125,7 @@ func TestRunProxyExecSetsEnv(t *testing.T) {
 		upstream:  "https://proxy.golang.org",
 		envPrep:   prepareGoEnv,
 	}
-	if err := runProxyExec(context.Background(), cfg, []string{"echo"}); err != nil {
+	if err := runProxyExec(context.Background(), cfg, []string{"echo"}, nil, io.Discard, io.Discard); err != nil {
 		t.Fatalf("runProxyExec error: %v", err)
 	}
 	if !containsEnv(captured, "GOPROXY=http://127.0.0.1:5555,direct") {
@@ -188,10 +189,5 @@ func TestInstrumentProxyHandlerCapturesDeny(t *testing.T) {
 }
 
 func containsEnv(env []string, target string) bool {
-	for _, v := range env {
-		if v == target {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(env, target)
 }

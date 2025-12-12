@@ -3,6 +3,7 @@ package policy
 import (
 	"context"
 	"path/filepath"
+	"slices"
 	"testing"
 )
 
@@ -23,13 +24,7 @@ func TestCriticalTransitiveSpotlight(t *testing.T) {
 	if err != nil {
 		t.Fatalf("EvaluateAll: %v", err)
 	}
-	foundWarn := false
-	for _, a := range actions {
-		if a.Type == "warn" {
-			foundWarn = true
-		}
-	}
-	if !foundWarn {
+	if !slices.ContainsFunc(actions, func(a Action) bool { return a.Type == "warn" }) {
 		t.Fatalf("expected warn for critical indirect vuln, got %+v", actions)
 	}
 }

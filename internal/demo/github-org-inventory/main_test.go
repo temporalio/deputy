@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 
 	"github.com/google/osv-scalibr/extractor"
@@ -100,14 +101,9 @@ func main() {}
 	if len(goRows) == 0 {
 		t.Fatalf("expected at least one go dependency, got none")
 	}
-	foundLicense := false
-	for _, row := range goRows {
-		if len(row.Licenses) > 0 && row.Licenses[0] == "Test-License" {
-			foundLicense = true
-			break
-		}
-	}
-	if !foundLicense {
+	if !slices.ContainsFunc(goRows, func(row dependencyRow) bool {
+		return len(row.Licenses) > 0 && row.Licenses[0] == "Test-License"
+	}) {
 		t.Fatalf("expected Test-License to be used for dependencies, got %+v", goRows)
 	}
 }
