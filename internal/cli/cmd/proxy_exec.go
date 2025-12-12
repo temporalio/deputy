@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/charmbracelet/lipgloss"
+	deputyerrors "github.com/picatz/deputy/internal/errors"
 	"github.com/picatz/deputy/internal/proxy"
 	"github.com/picatz/deputy/internal/ui"
 	"github.com/spf13/cobra"
@@ -163,7 +164,7 @@ func runProxyExec(ctx context.Context, cfg proxyExecConfig, command []string) er
 		// Wait a brief moment for any pending events to flush
 		time.Sleep(50 * time.Millisecond)
 		printSummaryReport(history.All(), cfg.requested)
-		return err
+		return deputyerrors.Silent(err)
 	}
 	return nil
 }

@@ -49,8 +49,9 @@ func AddDiffCommand(root *cobra.Command) {
 	)
 
 	cmd := &cobra.Command{
-		Use:   "diff [base] [target]",
-		Short: "Compare dependency changes between Git references",
+		Use:          "diff [base] [target]",
+		Short:        "Compare dependency changes between Git references",
+		SilenceUsage: true,
 		Long: `Compare dependencies between Git references with comprehensive vulnerability analysis.
 
 DEPENDENCY CHANGE ANALYSIS:

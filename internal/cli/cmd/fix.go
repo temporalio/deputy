@@ -44,8 +44,9 @@ type remediationPlanSummary struct {
 func AddFixCommand(root *cobra.Command) {
 	scanner := NewScanner()
 	fixCmd := &cobra.Command{
-		Use:   "fix [repo]",
-		Short: "Generate and optionally apply remediation steps",
+		Use:          "fix [repo]",
+		Short:        "Generate and optionally apply remediation steps",
+		SilenceUsage: true,
 		Long: `Generate and apply remediation plans for security vulnerabilities.
 
 REMEDIATION WORKFLOW:

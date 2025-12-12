@@ -4,14 +4,15 @@
 package config
 
 import (
-"fmt"
-"log/slog"
-"os"
-"path/filepath"
-"strings"
+	"fmt"
+	"log/slog"
+	"os"
+	"path/filepath"
+	"slices"
+	"strings"
 
-"github.com/picatz/deputy/internal/errors"
-"gopkg.in/yaml.v3"
+	"github.com/picatz/deputy/internal/errors"
+	"gopkg.in/yaml.v3"
 )
 
 // Config represents the complete Deputy configuration.
@@ -306,12 +307,9 @@ func FindConfigFile() string {
 
 // contains checks if a string slice contains a value.
 func contains(slice []string, val string) bool {
-	for _, item := range slice {
-		if strings.EqualFold(item, val) {
-			return true
-		}
-	}
-	return false
+	return slices.ContainsFunc(slice, func(item string) bool {
+		return strings.EqualFold(item, val)
+	})
 }
 
 // isTerminal checks if stdout is a terminal (for auto-enabling colors).

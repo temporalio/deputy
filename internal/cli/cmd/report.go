@@ -9,6 +9,7 @@ import (
 
 	"github.com/charmbracelet/lipgloss"
 	analysis "github.com/picatz/deputy/internal/analysis"
+	"github.com/picatz/deputy/internal/collections"
 	remediation "github.com/picatz/deputy/internal/remediation"
 	ui "github.com/picatz/deputy/internal/ui"
 )
@@ -298,7 +299,7 @@ func buildManifestDisplayContext(list []analysis.ConsolidatedVulnerability) mani
 	if len(list) == 0 {
 		return ctx
 	}
-	manifestPaths := map[string]struct{}{}
+	manifestPaths := collections.NewSet[string]()
 	groupEntries := map[string]map[string]*manifestDisplayEntry{}
 	displayGroups := map[string]*manifestDisplayGroup{}
 	manifestManagers := map[string]string{}
@@ -311,7 +312,7 @@ func buildManifestDisplayContext(list []analysis.ConsolidatedVulnerability) mani
 				continue
 			}
 			if path != "" {
-				manifestPaths[path] = struct{}{}
+				manifestPaths.Add(path)
 				manifestManagers[path] = manager
 				dir := strings.TrimPrefix(pathpkg.Dir(path), "./")
 				if dir == "." {
@@ -378,7 +379,7 @@ func buildManifestDisplayContext(list []analysis.ConsolidatedVulnerability) mani
 		ctx.Sources = append(ctx.Sources, *grp)
 	}
 
-	artifactGroups := map[string]map[string]struct{}{}
+	artifactGroups := map[string]collections.Set[string]{}
 	artifactManagerNames := map[string]string{}
 	for _, v := range list {
 		for _, loc := range v.Locations {
@@ -386,7 +387,7 @@ func buildManifestDisplayContext(list []analysis.ConsolidatedVulnerability) mani
 			if loc == "" {
 				continue
 			}
-			if _, ok := manifestPaths[loc]; ok {
+			if manifestPaths.Has(loc) {
 				continue
 			}
 			mgr := inferArtifactManager(loc, manifestManagers, dirManagers)
@@ -396,13 +397,12 @@ func buildManifestDisplayContext(list []analysis.ConsolidatedVulnerability) mani
 			}
 			set := artifactGroups[key]
 			if set == nil {
-				set = map[string]struct{}{}
+				set = collections.NewSet[string]()
 				artifactGroups[key] = set
 			}
-			if _, ok := set[loc]; ok {
+			if !set.Add(loc) {
 				continue
 			}
-			set[loc] = struct{}{}
 			artifactManagerNames[key] = mgr
 		}
 	}
@@ -422,10 +422,7 @@ func buildManifestDisplayContext(list []analysis.ConsolidatedVulnerability) mani
 
 	for _, key := range artifactKeys {
 		set := artifactGroups[key]
-		entries := make([]string, 0, len(set))
-		for loc := range set {
-			entries = append(entries, loc)
-		}
+		entries := set.Slice()
 		sort.Strings(entries)
 		ctx.Artifacts = append(ctx.Artifacts, artifactDisplayGroup{
 			Manager: artifactManagerNames[key],
@@ -538,9 +535,9 @@ func renderManifestContext(list []analysis.ConsolidatedVulnerability) {
 
 // mergeGroupNames merges two lists of group names, ensuring uniqueness and case-insensitivity.
 func mergeGroupNames(base []string, extra []string) []string {
-	set := map[string]struct{}{}
+	set := collections.NewSet[string]()
 	for _, g := range base {
-		set[strings.ToLower(g)] = struct{}{}
+		set.Add(strings.ToLower(g))
 	}
 	for _, g := range extra {
 		gTrim := strings.TrimSpace(g)
@@ -548,10 +545,9 @@ func mergeGroupNames(base []string, extra []string) []string {
 			continue
 		}
 		key := strings.ToLower(gTrim)
-		if _, ok := set[key]; ok {
+		if !set.Add(key) {
 			continue
 		}
-		set[key] = struct{}{}
 		base = append(base, gTrim)
 	}
 	return base
@@ -562,13 +558,12 @@ func uniqueSortedStrings(values []string) []string {
 	if len(values) == 0 {
 		return values
 	}
-	set := map[string]struct{}{}
+	set := collections.NewSet[string]()
 	out := make([]string, 0, len(values))
 	for _, v := range values {
-		if _, ok := set[v]; ok {
+		if !set.Add(v) {
 			continue
 		}
-		set[v] = struct{}{}
 		out = append(out, v)
 	}
 	sort.Strings(out)

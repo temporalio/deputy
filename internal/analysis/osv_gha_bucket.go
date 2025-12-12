@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/ossf/osv-schema/bindings/go/osvschema"
+	"github.com/picatz/deputy/internal/collections"
 	"github.com/picatz/deputy/internal/purlx"
 	"golang.org/x/mod/semver"
 )
@@ -111,7 +112,7 @@ func queryOSVGHABucketBatch(ctx context.Context, client OSVClient, pkgs []PkgInp
 			if sev, typ := FindBestSeverity(all); sev != "" {
 				base.Severity, base.SeverityType = sev, typ
 			}
-			fixSet := map[string]struct{}{}
+			fixSet := collections.NewSet[string]()
 			var importSets [][]AffectedImport
 			if len(base.AffectedImports) > 0 {
 				importSets = append(importSets, base.AffectedImports)
@@ -119,7 +120,7 @@ func queryOSVGHABucketBatch(ctx context.Context, client OSVClient, pkgs []PkgInp
 			dbSpecific := cloneStringMap(base.DatabaseSpecific)
 			for _, vv := range all {
 				for _, f := range vv.FixedVersions {
-					fixSet[f] = struct{}{}
+					fixSet.Add(f)
 				}
 				base.Aliases = append(base.Aliases, vv.Aliases...)
 				if len(vv.AffectedImports) > 0 {
@@ -127,20 +128,19 @@ func queryOSVGHABucketBatch(ctx context.Context, client OSVClient, pkgs []PkgInp
 				}
 				dbSpecific = mergeStringMap(dbSpecific, vv.DatabaseSpecific)
 			}
-			aliasSet := map[string]struct{}{}
+			aliasSet := collections.NewSet[string]()
 			uniqAliases := make([]string, 0, len(base.Aliases))
 			for _, a := range append([]string{base.ID}, base.Aliases...) {
-				if _, ok := aliasSet[a]; ok {
+				if !aliasSet.Add(a) {
 					continue
 				}
-				aliasSet[a] = struct{}{}
 				if a != base.ID {
 					uniqAliases = append(uniqAliases, a)
 				}
 			}
 			base.Aliases = uniqAliases
 			base.FixedVersions = base.FixedVersions[:0]
-			for f := range fixSet {
+			for _, f := range fixSet.Slice() {
 				base.FixedVersions = append(base.FixedVersions, f)
 			}
 			base.AffectedImports = MergeAffectedImports(importSets...)

@@ -16,8 +16,9 @@ func AddProxyCommand(root *cobra.Command) {
 	)
 
 	proxyCmd := &cobra.Command{
-		Use:   "proxy",
-		Short: "Run Deputy's artifact proxy",
+		Use:          "proxy",
+		Short:        "Run Deputy's artifact proxy",
+		SilenceUsage: true,
 		Long: `Run a policy-enforcing artifact proxy for various package managers.
 
 The proxy intercepts requests to upstream registries (like proxy.golang.org, npmjs.org, PyPI, RubyGems)
@@ -55,8 +56,9 @@ STANDALONE SERVER:
 	}
 
 	serveCmd := &cobra.Command{
-		Use:   "serve --config proxy.yaml",
-		Short: "Serve the Deputy proxy based on the configuration file",
+		Use:          "serve --config proxy.yaml",
+		Short:        "Serve the Deputy proxy based on the configuration file",
+		SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if cfgPath == "" {
 				return fmt.Errorf("missing --config")
@@ -73,8 +75,9 @@ STANDALONE SERVER:
 	serveCmd.Flags().StringArrayVar(&extraPolicies, "policy", nil, "Additional CEL policy files or bundles (repeatable)")
 
 	templateCmd := &cobra.Command{
-		Use:   "template [ecosystem]",
-		Short: "Emit a starter proxy configuration",
+		Use:          "template [ecosystem]",
+		Short:        "Emit a starter proxy configuration",
+		SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ecosystem := ""
 			if len(args) > 0 {

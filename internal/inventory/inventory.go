@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
-	"log"
+	"log/slog"
 	"path"
 	"runtime"
 	"slices"
@@ -82,7 +82,7 @@ func scanWorkspace(ctx context.Context, ws workspace.FS, opts ScanOptions) ([]*e
 	results := scalibr.New().Scan(ctx, cfg)
 	pkgs := results.Inventory.Packages
 	if extras, err := collectGemfilePackages(ws); err != nil {
-		log.Printf("inventory: scan gemfile extras: %v", err)
+		slog.WarnContext(ctx, "inventory: scan gemfile extras", "error", err)
 	} else if len(extras) > 0 {
 		pkgs = append(pkgs, extras...)
 	}

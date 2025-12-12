@@ -22,6 +22,7 @@ import (
 	"github.com/go-git/go-git/v5/plumbing"
 	githttp "github.com/go-git/go-git/v5/plumbing/transport/http"
 	"github.com/google/licensecheck"
+	"github.com/picatz/deputy/internal/collections"
 	"github.com/picatz/deputy/internal/repository"
 	"github.com/picatz/deputy/internal/repository/workspace"
 	"golang.org/x/mod/module"
@@ -212,13 +213,12 @@ func LocalRepoLicenseScan(ws workspace.FS) []string {
 	}
 	wg.Wait()
 	close(ch)
-	seen := map[string]struct{}{}
+	seen := collections.NewSet[string]()
 	var out []string
 	for r := range ch {
-		if _, ok := seen[r.id]; ok {
+		if !seen.Add(r.id) {
 			continue
 		}
-		seen[r.id] = struct{}{}
 		out = append(out, r.id)
 	}
 	sort.Strings(out)
@@ -238,24 +238,21 @@ var (
 // MergeLicenseSources merges deps.dev licenses (primary) with locally scanned
 // ones (secondary). Returns '?' if both empty. Removes duplicates.
 func MergeLicenseSources(primary, local []string) []string {
-	set := map[string]struct{}{}
+	set := collections.NewSet[string]()
 	for _, s := range primary {
 		if s != "" && s != "?" {
-			set[s] = struct{}{}
+			set.Add(s)
 		}
 	}
 	for _, s := range local {
 		if s != "" && s != "?" {
-			set[s] = struct{}{}
+			set.Add(s)
 		}
 	}
 	if len(set) == 0 {
 		return []string{"?"}
 	}
-	out := make([]string, 0, len(set))
-	for s := range set {
-		out = append(out, s)
-	}
+	out := set.Slice()
 	sort.Strings(out)
 	return out
 }
@@ -269,17 +266,16 @@ func DetectLicenseIDs(b []byte) []string {
 	if len(cov.Match) == 0 {
 		return nil
 	}
-	seen := map[string]struct{}{}
+	seen := collections.NewSet[string]()
 	var out []string
 	for _, m := range cov.Match {
 		id := m.ID
 		if id == "" {
 			continue
 		}
-		if _, ok := seen[id]; ok {
+		if !seen.Add(id) {
 			continue
 		}
-		seen[id] = struct{}{}
 		out = append(out, id)
 	}
 	sort.Strings(out)
@@ -876,17 +872,16 @@ func crateVersionCandidates(v string) []string {
 }
 
 func normalizeStringSlice(in []string) []string {
-	seen := map[string]struct{}{}
+	seen := collections.NewSet[string]()
 	var out []string
 	for _, s := range in {
 		s = strings.TrimSpace(s)
 		if s == "" {
 			continue
 		}
-		if _, ok := seen[s]; ok {
+		if !seen.Add(s) {
 			continue
 		}
-		seen[s] = struct{}{}
 		out = append(out, s)
 	}
 	return out
@@ -896,17 +891,16 @@ func cleanLicenseList(in []string) []string {
 	if len(in) == 0 {
 		return nil
 	}
-	seen := map[string]struct{}{}
+	seen := collections.NewSet[string]()
 	var out []string
 	for _, l := range in {
 		l = strings.TrimSpace(l)
 		if l == "" || l == "?" {
 			continue
 		}
-		if _, ok := seen[l]; ok {
+		if !seen.Add(l) {
 			continue
 		}
-		seen[l] = struct{}{}
 		out = append(out, l)
 	}
 	if len(out) == 0 {
@@ -962,7 +956,7 @@ func fetchLicensesFromGitHubRaw(ctx context.Context, owner, repo, version string
 	}
 	client := getGitHubHTTPClient()
 	token := strings.TrimSpace(os.Getenv("GITHUB_TOKEN"))
-	seen := map[string]struct{}{}
+	seen := collections.NewSet[string]()
 	var out []string
 	for _, name := range defaultLicenseFilenames {
 		url := fmt.Sprintf("https://raw.githubusercontent.com/%s/%s/%s/%s", owner, repo, ref, name)
@@ -995,10 +989,9 @@ func fetchLicensesFromGitHubRaw(ctx context.Context, owner, repo, version string
 			if id == "" {
 				continue
 			}
-			if _, ok := seen[id]; ok {
+			if !seen.Add(id) {
 				continue
 			}
-			seen[id] = struct{}{}
 			out = append(out, id)
 		}
 	}

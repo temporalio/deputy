@@ -16,8 +16,9 @@ func newPolicyLSPCommand() *cobra.Command {
 		logLevel string
 	)
 	cmd := &cobra.Command{
-		Use:   "lsp",
-		Short: "Start the Deputy policy language server (YAML + CEL)",
+		Use:          "lsp",
+		Short:        "Start the Deputy policy language server (YAML + CEL)",
+		SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			level := slog.LevelInfo
 			switch logLevel {

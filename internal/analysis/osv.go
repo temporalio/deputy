@@ -3,11 +3,13 @@ package analysis
 import (
 	"context"
 	"fmt"
+	"maps"
 	"strings"
 	"sync"
 
 	"github.com/google/osv-scalibr/purl"
 	"github.com/ossf/osv-schema/bindings/go/osvschema"
+	"github.com/picatz/deputy/internal/collections"
 	"github.com/picatz/deputy/internal/purlx"
 	"golang.org/x/mod/semver"
 	"golang.org/x/sync/errgroup"
@@ -232,7 +234,7 @@ func queryOSVAPIBatch(ctx context.Context, client OSVClient, pkgs []PkgInput) ([
 				if sev, typ := FindBestSeverity(all); sev != "" {
 					base.Severity, base.SeverityType = sev, typ
 				}
-				fixSet := map[string]struct{}{}
+				fixSet := collections.NewSet[string]()
 				var importSets [][]AffectedImport
 				if len(base.AffectedImports) > 0 {
 					importSets = append(importSets, base.AffectedImports)
@@ -240,7 +242,7 @@ func queryOSVAPIBatch(ctx context.Context, client OSVClient, pkgs []PkgInput) ([
 				dbSpecific := cloneStringMap(base.DatabaseSpecific)
 				for _, v := range all {
 					for _, f := range v.FixedVersions {
-						fixSet[f] = struct{}{}
+						fixSet.Add(f)
 					}
 					base.Aliases = append(base.Aliases, v.Aliases...)
 					if len(v.AffectedImports) > 0 {
@@ -248,20 +250,19 @@ func queryOSVAPIBatch(ctx context.Context, client OSVClient, pkgs []PkgInput) ([
 					}
 					dbSpecific = mergeStringMap(dbSpecific, v.DatabaseSpecific)
 				}
-				aliasSet := map[string]struct{}{}
+				aliasSet := collections.NewSet[string]()
 				uniqAliases := make([]string, 0, len(base.Aliases))
 				for _, a := range append([]string{base.ID}, base.Aliases...) {
-					if _, ok := aliasSet[a]; ok {
+					if !aliasSet.Add(a) {
 						continue
 					}
-					aliasSet[a] = struct{}{}
 					if a != base.ID {
 						uniqAliases = append(uniqAliases, a)
 					}
 				}
 				base.Aliases = uniqAliases
 				base.FixedVersions = base.FixedVersions[:0]
-				for f := range fixSet {
+				for _, f := range fixSet.Slice() {
 					base.FixedVersions = append(base.FixedVersions, f)
 				}
 				base.AffectedImports = MergeAffectedImports(importSets...)
@@ -373,9 +374,5 @@ func cloneStringMap(src map[string]string) map[string]string {
 	if len(src) == 0 {
 		return nil
 	}
-	out := make(map[string]string, len(src))
-	for k, v := range src {
-		out[k] = v
-	}
-	return out
+	return maps.Clone(src)
 }

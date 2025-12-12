@@ -3,6 +3,7 @@ package policy
 import (
 	"context"
 	"fmt"
+	"maps"
 	"regexp"
 	"strings"
 
@@ -72,11 +73,10 @@ func (e *Engine) EvaluateAll(ctx context.Context, payload map[string]any, comman
 	input := cloneMap(payload)
 	seedDefaultVariables(input)
 	if command != "" || entrypoint != "" {
-		env := map[string]any{}
-		if existing, ok := input["env"].(map[string]any); ok {
-			for k, v := range existing {
-				env[k] = v
-			}
+		env, _ := input["env"].(map[string]any)
+		env = maps.Clone(env)
+		if env == nil {
+			env = map[string]any{}
 		}
 		if command != "" {
 			env["command"] = command
@@ -236,9 +236,5 @@ func cloneMap(m map[string]any) map[string]any {
 	if m == nil {
 		return map[string]any{}
 	}
-	out := make(map[string]any, len(m))
-	for k, v := range m {
-		out[k] = v
-	}
-	return out
+	return maps.Clone(m)
 }

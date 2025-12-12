@@ -28,6 +28,30 @@ var (
 	ErrPermission = errors.New("permission denied")
 )
 
+// SilentError indicates an error that should cause a non-zero exit but should
+// not be printed by the CLI framework (because the command already explained it).
+type SilentError struct {
+	Cause error
+}
+
+func (e *SilentError) Error() string {
+	if e == nil || e.Cause == nil {
+		return ""
+	}
+	return e.Cause.Error()
+}
+
+func (e *SilentError) Unwrap() error { return e.Cause }
+
+// Silent wraps err so the CLI framework can suppress printing while still
+// returning a non-zero exit status.
+func Silent(err error) error {
+	if err == nil {
+		return nil
+	}
+	return &SilentError{Cause: err}
+}
+
 // PolicyError represents a policy evaluation or compilation failure.
 type PolicyError struct {
 	PolicyName string

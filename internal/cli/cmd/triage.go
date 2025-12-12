@@ -18,8 +18,9 @@ import (
 func AddTriageCommand(root *cobra.Command) {
 	scanner := NewScanner()
 	triageCmd := &cobra.Command{
-		Use:   "triage [repo]",
-		Short: "Summarize vulnerabilities and optionally invoke an AI triage agent",
+		Use:          "triage [repo]",
+		Short:        "Summarize vulnerabilities and optionally invoke an AI triage agent",
+		SilenceUsage: true,
 		Long: `Analyze and prioritize vulnerabilities to help you focus on what matters.
 
 TRIAGE PROCESS:

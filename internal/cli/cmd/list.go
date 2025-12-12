@@ -58,9 +58,10 @@ func AddListCommand(root *cobra.Command) {
 	)
 
 	cmd := &cobra.Command{
-		Use:     "list [repo]",
-		Aliases: []string{"ls"},
-		Short:   "List dependencies in a repository",
+		Use:          "list [repo]",
+		Aliases:      []string{"ls"},
+		Short:        "List dependencies in a repository",
+		SilenceUsage: true,
 		Long: `List all dependencies in a repository as Package URLs (PURLs).
 
 This command provides a flat list of all discovered dependencies, including

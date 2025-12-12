@@ -11,6 +11,7 @@ import (
 	"github.com/BurntSushi/toml"
 	"github.com/google/osv-scalibr/extractor"
 	analysis "github.com/picatz/deputy/internal/analysis"
+	"github.com/picatz/deputy/internal/collections"
 	cmp "github.com/picatz/deputy/internal/compare"
 	"github.com/picatz/deputy/internal/purlx"
 )
@@ -543,19 +544,18 @@ func detectManager(location, purlType string) (string, string, bool) {
 
 // appendUnique adds strings to a slice if they are not already present.
 func appendUnique(dst []string, src ...string) []string {
-	seen := map[string]struct{}{}
+	seen := collections.NewSet[string]()
 	for _, existing := range dst {
-		seen[existing] = struct{}{}
+		seen.Add(existing)
 	}
 	for _, s := range src {
 		s = filepath.ToSlash(strings.TrimSpace(s))
 		if s == "" {
 			continue
 		}
-		if _, ok := seen[s]; ok {
+		if !seen.Add(s) {
 			continue
 		}
-		seen[s] = struct{}{}
 		dst = append(dst, s)
 	}
 	return dst
@@ -579,19 +579,18 @@ func mergeManifestReference(existing []analysis.ManifestReference, ref analysis.
 
 // mergeGroups combines two lists of groups, removing duplicates.
 func mergeGroups(base []string, extra []string) []string {
-	set := map[string]struct{}{}
+	set := collections.NewSet[string]()
 	for _, g := range base {
-		set[g] = struct{}{}
+		set.Add(g)
 	}
 	for _, g := range extra {
 		g = strings.TrimSpace(g)
 		if g == "" {
 			continue
 		}
-		if _, ok := set[g]; ok {
+		if !set.Add(g) {
 			continue
 		}
-		set[g] = struct{}{}
 		base = append(base, g)
 	}
 	return base
@@ -602,13 +601,12 @@ func sortedUnique(values []string) []string {
 	if len(values) == 0 {
 		return values
 	}
-	set := map[string]struct{}{}
+	set := collections.NewSet[string]()
 	out := make([]string, 0, len(values))
 	for _, v := range values {
-		if _, ok := set[v]; ok {
+		if !set.Add(v) {
 			continue
 		}
-		set[v] = struct{}{}
 		out = append(out, v)
 	}
 	sort.Strings(out)
@@ -717,7 +715,7 @@ func buildPackageSources(inputs []analysis.PkgInput) map[string][]string {
 	if len(inputs) == 0 {
 		return nil
 	}
-	out := map[string]map[string]struct{}{}
+	out := map[string]collections.Set[string]{}
 	for _, in := range inputs {
 		key := canonicalPackageKeyFromInput(in)
 		if key == "" {
@@ -729,9 +727,9 @@ func buildPackageSources(inputs []analysis.PkgInput) map[string][]string {
 				continue
 			}
 			if out[key] == nil {
-				out[key] = map[string]struct{}{}
+				out[key] = collections.NewSet[string]()
 			}
-			out[key][pathStr] = struct{}{}
+			out[key].Add(pathStr)
 		}
 	}
 	if len(out) == 0 {
@@ -742,10 +740,7 @@ func buildPackageSources(inputs []analysis.PkgInput) map[string][]string {
 		if len(entries) == 0 {
 			continue
 		}
-		sources := make([]string, 0, len(entries))
-		for path := range entries {
-			sources = append(sources, path)
-		}
+		sources := entries.Slice()
 		sort.Strings(sources)
 		result[key] = sources
 	}

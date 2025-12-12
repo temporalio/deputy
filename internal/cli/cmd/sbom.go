@@ -22,8 +22,9 @@ func AddSBOMCommand(root *cobra.Command) {
 	)
 
 	cmd := &cobra.Command{
-		Use:   "sbom [repo]",
-		Short: "Generate an SBOM for a repository",
+		Use:          "sbom [repo]",
+		Short:        "Generate an SBOM for a repository",
+		SilenceUsage: true,
 		Long: `Generate a Software Bill of Materials (SBOM) for repositories at any Git reference.
 
 SOFTWARE BILL OF MATERIALS:

@@ -60,9 +60,9 @@ func TestParseSeverity(t *testing.T) {
 func TestSeverityScore(t *testing.T) {
 	// Verify that severity scores are ordered correctly
 	tests := []struct {
-		name  string
-		sev1  Severity
-		sev2  Severity
+		name             string
+		sev1             Severity
+		sev2             Severity
 		want1HigherThan2 bool
 	}{
 		{"critical > high", SeverityCritical, SeverityHigh, true},

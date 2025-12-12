@@ -17,6 +17,7 @@ import (
 	"github.com/go-git/go-git/v5/plumbing"
 	"github.com/google/osv-scalibr/extractor"
 	analysis "github.com/picatz/deputy/internal/analysis"
+	"github.com/picatz/deputy/internal/collections"
 	cmp "github.com/picatz/deputy/internal/compare"
 	gitx "github.com/picatz/deputy/internal/gitutil"
 	inv "github.com/picatz/deputy/internal/inventory"
@@ -231,8 +232,9 @@ func AddScanCommand(root *cobra.Command) {
 	scanner := NewScanner()
 
 	scanCmd := &cobra.Command{
-		Use:   "scan [repo]",
-		Short: "Scan for vulnerabilities",
+		Use:          "scan [repo]",
+		Short:        "Scan for vulnerabilities",
+		SilenceUsage: true,
 		Long: `Scan repositories, directories, or SBOM files for security vulnerabilities using the OSV database.
 
 VULNERABILITY DATABASE:
@@ -348,8 +350,9 @@ WORKFLOW EXAMPLES:
 	scanCmd.Flags().Bool("show-db-info", false, "Show database-specific metadata (e.g., review_status) in text output")
 
 	scanDirCmd := &cobra.Command{
-		Use:   "dir <path>",
-		Short: "Scan a directory for vulnerabilities",
+		Use:          "dir <path>",
+		Short:        "Scan a directory for vulnerabilities",
+		SilenceUsage: true,
 		Long: `Scan a directory for vulnerabilities without Git context.
 
 This subcommand is useful when you want to scan source code that isn't in a Git
@@ -398,8 +401,9 @@ TYPICAL USE CASES:
 	scanDirCmd.Flags().Bool("show-db-info", false, "Show database-specific metadata (e.g., review_status) in text output")
 
 	scanSBOMCmd := &cobra.Command{
-		Use:   "sbom <file|->",
-		Short: "Scan an SBOM file for vulnerabilities",
+		Use:          "sbom <file|->",
+		Short:        "Scan an SBOM file for vulnerabilities",
+		SilenceUsage: true,
 		Long: `Scan a Software Bill of Materials (SBOM) file for vulnerabilities.
 
 SUPPORTED SBOM FORMATS:
@@ -982,15 +986,14 @@ func parseSBOMPackages(data []byte, inFmt string) ([]*extractor.Package, map[str
 
 	format := strings.ToLower(strings.TrimSpace(inFmt))
 	var tryOrder []string
-	seen := map[string]struct{}{}
+	seen := collections.NewSet[string]()
 	addFormat := func(kind string) {
 		if kind == "" {
 			return
 		}
-		if _, ok := seen[kind]; ok {
+		if !seen.Add(kind) {
 			return
 		}
-		seen[kind] = struct{}{}
 		tryOrder = append(tryOrder, kind)
 	}
 
@@ -1314,7 +1317,7 @@ func detectModuleDeprecations(pkgs []*extractor.Package, direct map[string]bool)
 	}
 
 	// Build a set of present module roots by inferring module path from package path
-	present := map[string]struct{}{}
+	present := collections.NewSet[string]()
 	for _, p := range pkgs {
 		if p == nil || p.Name == "" {
 			continue
@@ -1326,30 +1329,28 @@ func detectModuleDeprecations(pkgs []*extractor.Package, direct map[string]bool)
 		if len(parts) >= 3 && parts[0] == "github.com" {
 			name = strings.Join(parts[:3], "/")
 		}
-		present[name] = struct{}{}
+		present.Add(name)
 	}
 
 	// Collect matches
 	var out []ModuleDeprecation
-	seen := map[string]struct{}{}
+	seen := collections.NewSet[string]()
 	for _, d := range knownDeprecations {
 		if !moduleIsDirect(d.Module, direct) {
 			continue
 		}
 		// match by exact or prefix
-		if _, ok := present[d.Module]; ok {
-			if _, dup := seen[d.Module]; !dup {
+		if present.Has(d.Module) {
+			if seen.Add(d.Module) {
 				out = append(out, d)
-				seen[d.Module] = struct{}{}
 			}
 			continue
 		}
 		// Also detect subpackages
-		for m := range present {
+		for m := range present.All() {
 			if strings.HasPrefix(m, d.Module+"/") {
-				if _, dup := seen[d.Module]; !dup {
+				if seen.Add(d.Module) {
 					out = append(out, d)
-					seen[d.Module] = struct{}{}
 				}
 				break
 			}

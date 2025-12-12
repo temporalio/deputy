@@ -15,9 +15,10 @@ import (
 // newPolicyREPLCommand creates the `repl` subcommand for interactive policy evaluation.
 func newPolicyREPLCommand() *cobra.Command {
 	return &cobra.Command{
-		Use:   "repl",
-		Short: "Interactive CEL policy playground",
-		Long:  "Start an interactive REPL for experimenting with CEL expressions using a mock proxy request map (request.*).",
+		Use:          "repl",
+		Short:        "Interactive CEL policy playground",
+		SilenceUsage: true,
+		Long:         "Start an interactive REPL for experimenting with CEL expressions using a mock proxy request map (request.*).",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			in := cmd.InOrStdin()
 			out := cmd.OutOrStdout()

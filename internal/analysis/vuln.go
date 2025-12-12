@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/ossf/osv-schema/bindings/go/osvschema"
+	"github.com/picatz/deputy/internal/collections"
 )
 
 // ProcessOSVVulnerability converts a raw OSV schema vulnerability into the
@@ -179,7 +180,7 @@ func parseImportArray(items []any) []AffectedImport {
 // MergeAffectedImports deduplicates import paths and symbols while keeping output stable.
 // Callers can pass multiple slices (e.g., from aliases) and receive a merged, sorted result.
 func MergeAffectedImports(importSets ...[]AffectedImport) []AffectedImport {
-	pathMap := make(map[string]map[string]struct{})
+	pathMap := make(map[string]collections.Set[string])
 	for _, imports := range importSets {
 		for _, imp := range imports {
 			path := strings.TrimSpace(imp.Path)
@@ -187,7 +188,7 @@ func MergeAffectedImports(importSets ...[]AffectedImport) []AffectedImport {
 				continue
 			}
 			if _, ok := pathMap[path]; !ok {
-				pathMap[path] = map[string]struct{}{}
+				pathMap[path] = collections.NewSet[string]()
 			}
 			if len(imp.Symbols) == 0 {
 				continue
@@ -197,7 +198,7 @@ func MergeAffectedImports(importSets ...[]AffectedImport) []AffectedImport {
 				if s == "" {
 					continue
 				}
-				pathMap[path][s] = struct{}{}
+				pathMap[path].Add(s)
 			}
 		}
 	}
@@ -212,10 +213,7 @@ func MergeAffectedImports(importSets ...[]AffectedImport) []AffectedImport {
 	out := make([]AffectedImport, 0, len(paths))
 	for _, p := range paths {
 		symSet := pathMap[p]
-		syms := make([]string, 0, len(symSet))
-		for s := range symSet {
-			syms = append(syms, s)
-		}
+		syms := symSet.Slice()
 		sort.Strings(syms)
 		out = append(out, AffectedImport{Path: p, Symbols: syms})
 	}

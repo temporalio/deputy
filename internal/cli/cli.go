@@ -2,7 +2,7 @@ package cli
 
 import (
 	"context"
-	"fmt"
+	"errors"
 	"io"
 	"log/slog"
 	"os"
@@ -11,9 +11,11 @@ import (
 	"github.com/charmbracelet/fang"
 	"github.com/go-git/go-git/v5"
 	"github.com/picatz/deputy/internal/cli/cmd"
+	deputyerrors "github.com/picatz/deputy/internal/errors"
 	"github.com/picatz/deputy/internal/logs"
 	_ "github.com/picatz/deputy/internal/targets/providers"
 	"github.com/spf13/cobra"
+	"github.com/spf13/pflag"
 )
 
 // Run constructs the root command hierarchy and executes it with all
@@ -24,14 +26,27 @@ func Run(ctx context.Context) error {
 
 // silentErrorHandler suppresses fang's default styled error output.
 // Commands that need custom error handling (like proxy exec) print their own messages.
-func silentErrorHandler(_ io.Writer, _ fang.Styles, _ error) {
-	// intentionally empty - let commands handle their own errors
+func silentErrorHandler(w io.Writer, styles fang.Styles, err error) {
+	if err == nil {
+		return
+	}
+	if errors.Is(err, context.Canceled) {
+		return
+	}
+	if errors.Is(err, pflag.ErrHelp) {
+		return
+	}
+	var silent *deputyerrors.SilentError
+	if errors.As(err, &silent) {
+		return
+	}
+	fang.DefaultErrorHandler(w, styles, err)
 }
 
 // newRoot returns the root command with all subcommands attached.
 func newRoot() *cobra.Command {
-	var logLevel = defaultLogLevel()
-	var logFormat = defaultLogFormat()
+	logLevel := defaultLogLevel()
+	logFormat := defaultLogFormat()
 
 	rootCmd := &cobra.Command{
 		Use:   "deputy",
@@ -113,7 +128,7 @@ SUPPLY CHAIN:
 // isInGitRepo checks if the current working directory is inside a git repository.
 func isInGitRepo() bool {
 	// Use the internal git package to check if we're in a Git repository.
-	_, err := git.PlainOpen(".")
+	_, err := git.PlainOpenWithOptions(".", &git.PlainOpenOptions{DetectDotGit: true})
 	return err == nil
 }
 
@@ -141,7 +156,7 @@ func configureLogging(levelStr, format string) error {
 	}
 
 	logger := logs.New(logs.Options{
-		Level:        level.(slog.Level),
+		Level:        level,
 		Format:       format,
 		Writer:       os.Stderr,
 		ColorEnabled: true,
@@ -153,18 +168,9 @@ func configureLogging(levelStr, format string) error {
 	return nil
 }
 
-// parseLogLevel converts a string log level to a slog.Leveler.
-func parseLogLevel(value string) (slog.Leveler, error) {
-	switch strings.ToLower(strings.TrimSpace(value)) {
-	case "debug":
-		return slog.LevelDebug, nil
-	case "", "info":
+func parseLogLevel(value string) (slog.Level, error) {
+	if strings.TrimSpace(value) == "" {
 		return slog.LevelInfo, nil
-	case "warn", "warning":
-		return slog.LevelWarn, nil
-	case "error":
-		return slog.LevelError, nil
-	default:
-		return nil, fmt.Errorf("unknown log level %q", value)
 	}
+	return logs.ParseLevel(value)
 }

@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	analysis "github.com/picatz/deputy/internal/analysis"
+	"github.com/picatz/deputy/internal/collections"
 	"golang.org/x/mod/semver"
 )
 
@@ -146,19 +147,17 @@ func normalizeVersion(v string) string {
 
 // mergeManifestRefs combines two slices of manifest references, deduplicating by path+manager.
 func mergeManifestRefs(a, b []analysis.ManifestReference) []analysis.ManifestReference {
-	seen := map[string]struct{}{}
+	seen := collections.NewSet[string]()
 	result := make([]analysis.ManifestReference, 0, len(a)+len(b))
 	for _, ref := range a {
 		key := ref.Path + "|" + ref.Manager
-		if _, ok := seen[key]; !ok {
-			seen[key] = struct{}{}
+		if seen.Add(key) {
 			result = append(result, ref)
 		}
 	}
 	for _, ref := range b {
 		key := ref.Path + "|" + ref.Manager
-		if _, ok := seen[key]; !ok {
-			seen[key] = struct{}{}
+		if seen.Add(key) {
 			result = append(result, ref)
 		}
 	}
@@ -167,17 +166,15 @@ func mergeManifestRefs(a, b []analysis.ManifestReference) []analysis.ManifestRef
 
 // mergeStrings combines two slices of strings, deduplicating.
 func mergeStrings(a, b []string) []string {
-	seen := map[string]struct{}{}
+	seen := collections.NewSet[string]()
 	result := make([]string, 0, len(a)+len(b))
 	for _, s := range a {
-		if _, ok := seen[s]; !ok {
-			seen[s] = struct{}{}
+		if seen.Add(s) {
 			result = append(result, s)
 		}
 	}
 	for _, s := range b {
-		if _, ok := seen[s]; !ok {
-			seen[s] = struct{}{}
+		if seen.Add(s) {
 			result = append(result, s)
 		}
 	}
@@ -189,9 +186,9 @@ func mergeStrings(a, b []string) []string {
 // the same fix multiple times for the same context.
 func dedupeCommands(upgrades []packageUpgrade) []Command {
 	commands := []Command{}
-	seen := map[string]struct{}{}
+	seen := collections.NewSet[string]()
 	goManagerPresent := false
-	goPaths := map[string]struct{}{}
+	goPaths := collections.NewSet[string]()
 
 	for _, u := range upgrades {
 		for _, ref := range u.References {
@@ -210,10 +207,9 @@ func dedupeCommands(upgrades []packageUpgrade) []Command {
 				hint,
 				fmt.Sprintf("%t", u.IsDirect),
 			}, "|")
-			if _, ok := seen[key]; ok {
+			if !seen.Add(key) {
 				continue
 			}
-			seen[key] = struct{}{}
 			manager := strings.TrimSpace(ref.Manager)
 			commands = append(commands, Command{
 				Manager:     manager,
@@ -228,7 +224,7 @@ func dedupeCommands(upgrades []packageUpgrade) []Command {
 			if strings.EqualFold(manager, "go") {
 				goManagerPresent = true
 				if pathStr != "" {
-					goPaths[pathStr] = struct{}{}
+					goPaths.Add(pathStr)
 				}
 			}
 		}
@@ -242,7 +238,9 @@ func dedupeCommands(upgrades []packageUpgrade) []Command {
 			Executable:  true,
 		})
 	} else if len(goPaths) > 0 {
-		for path := range goPaths {
+		paths := goPaths.Slice()
+		slices.Sort(paths)
+		for _, path := range paths {
 			commands = append(commands, Command{
 				Manager:     "go",
 				managerRank: managerRank("go"),
@@ -392,12 +390,12 @@ func hasGroup(groups []string, candidates ...string) bool {
 	if len(groups) == 0 {
 		return false
 	}
-	lookup := map[string]struct{}{}
+	lookup := collections.NewSet[string]()
 	for _, g := range groups {
-		lookup[strings.ToLower(g)] = struct{}{}
+		lookup.Add(strings.ToLower(g))
 	}
 	for _, c := range candidates {
-		if _, ok := lookup[strings.ToLower(c)]; ok {
+		if lookup.Has(strings.ToLower(c)) {
 			return true
 		}
 	}

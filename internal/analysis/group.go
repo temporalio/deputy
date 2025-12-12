@@ -4,6 +4,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/picatz/deputy/internal/collections"
 	"golang.org/x/mod/semver"
 )
 
@@ -20,12 +21,12 @@ var trustedAliasPrefixes = []string{
 
 // HasCommonAlias reports if two alias sets intersect.
 func HasCommonAlias(a1, a2 []string) bool {
-	set := make(map[string]struct{}, len(a1))
+	set := collections.NewSet[string]()
 	for _, a := range a1 {
-		set[a] = struct{}{}
+		set.Add(a)
 	}
 	for _, a := range a2 {
-		if _, ok := set[a]; ok {
+		if set.Has(a) {
 			return true
 		}
 	}
@@ -86,11 +87,10 @@ func findBestPrimaryIDFromGroup(vs []Vulnerability) string {
 		all = append(all, v.ID)
 		all = append(all, v.Aliases...)
 	}
-	seen := map[string]struct{}{}
+	seen := collections.NewSet[string]()
 	var uniq []string
 	for _, id := range all {
-		if _, ok := seen[id]; !ok {
-			seen[id] = struct{}{}
+		if seen.Add(id) {
 			uniq = append(uniq, id)
 		}
 	}
@@ -117,7 +117,7 @@ func createConsolidatedVulnerability(primaryID string, vulns []Vulnerability) Co
 	base := vulns[0]
 
 	// Secondary and all IDs
-	seen := map[string]struct{}{primaryID: {}}
+	seen := collections.NewSet[string](primaryID)
 	var secondaries []string
 	// Collect all IDs
 	allIDs := []string{primaryID}
@@ -126,10 +126,9 @@ func createConsolidatedVulnerability(primaryID string, vulns []Vulnerability) Co
 		allIDs = append(allIDs, v.Aliases...)
 	}
 	uniqAll := make([]string, 0, len(allIDs))
-	tmp := map[string]struct{}{}
+	tmp := collections.NewSet[string]()
 	for _, id := range allIDs {
-		if _, ok := tmp[id]; !ok {
-			tmp[id] = struct{}{}
+		if tmp.Add(id) {
 			uniqAll = append(uniqAll, id)
 		}
 	}
@@ -137,33 +136,30 @@ func createConsolidatedVulnerability(primaryID string, vulns []Vulnerability) Co
 		if id == primaryID {
 			continue
 		}
-		if _, ok := seen[id]; !ok {
+		if seen.Add(id) {
 			secondaries = append(secondaries, id)
-			seen[id] = struct{}{}
 		}
 	}
 
 	preferredSecondaries, hiddenAliases := filterTrustedAliases(secondaries)
 
 	// Merge fixed versions
-	fixSet := map[string]struct{}{}
+	fixSet := collections.NewSet[string]()
 	var fixed []string
 	for _, v := range vulns {
 		for _, f := range v.FixedVersions {
-			if _, ok := fixSet[f]; !ok {
-				fixSet[f] = struct{}{}
+			if fixSet.Add(f) {
 				fixed = append(fixed, f)
 			}
 		}
 	}
 
 	// Merge references
-	refSet := map[string]struct{}{}
+	refSet := collections.NewSet[string]()
 	var refs []string
 	for _, v := range vulns {
 		for _, r := range v.References {
-			if _, ok := refSet[r]; !ok {
-				refSet[r] = struct{}{}
+			if refSet.Add(r) {
 				refs = append(refs, r)
 			}
 		}
@@ -171,14 +167,13 @@ func createConsolidatedVulnerability(primaryID string, vulns []Vulnerability) Co
 
 	bestSev, bestSevType := FindBestSeverity(vulns)
 
-	locSet := map[string]struct{}{}
+	locSet := collections.NewSet[string]()
 	var locations []string
 	for _, v := range vulns {
 		for _, loc := range v.Locations {
-			if _, ok := locSet[loc]; ok {
+			if !locSet.Add(loc) {
 				continue
 			}
-			locSet[loc] = struct{}{}
 			locations = append(locations, loc)
 		}
 	}
@@ -193,15 +188,14 @@ func createConsolidatedVulnerability(primaryID string, vulns []Vulnerability) Co
 			if !ok {
 				existing = ManifestReference{Path: ref.Path, Manager: ref.Manager}
 			}
-			groupSet := map[string]struct{}{}
+			groupSet := collections.NewSet[string]()
 			for _, g := range existing.Groups {
-				groupSet[g] = struct{}{}
+				groupSet.Add(g)
 			}
 			for _, g := range ref.Groups {
-				if _, ok := groupSet[g]; ok {
+				if !groupSet.Add(g) {
 					continue
 				}
-				groupSet[g] = struct{}{}
 				existing.Groups = append(existing.Groups, g)
 			}
 			manifestMap[key] = existing
