@@ -394,6 +394,12 @@ func resolveEcosystemLicenses(ctx context.Context, ecosystem, name, version stri
 			RemoteModuleLicenseScan(ctx, name, version),
 			GoProxyLicenseScan(ctx, name, version),
 		)
+	case "github", "github actions", "github-actions", "githubactions", "gha":
+		repo := name
+		if !strings.HasPrefix(repo, "github.com/") {
+			repo = "github.com/" + strings.TrimPrefix(repo, "/")
+		}
+		return RemoteModuleLicenseScan(ctx, repo, version)
 	case "cargo", "rust", "crates", "crates.io":
 		return LookupCratesLicense(ctx, name, version)
 	case "php", "composer", "packagist":

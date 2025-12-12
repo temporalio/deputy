@@ -21,6 +21,7 @@ import (
 	"github.com/google/osv-scalibr/plugin"
 	pl "github.com/google/osv-scalibr/plugin/list"
 
+	ghactions "github.com/picatz/deputy/internal/inventory/plugins/github/actionsx"
 	rubygemspec "github.com/picatz/deputy/internal/inventory/plugins/ruby/gemspecx"
 	"github.com/picatz/deputy/internal/repository/workspace"
 )
@@ -164,12 +165,21 @@ func summarizeScanFailures(res *scalibr.ScanResult) error {
 // resolvePlugins determines which plugins to use based on the scan options and capabilities.
 func resolvePlugins(opts ScanOptions, cap *plugin.Capabilities) ([]plugin.Plugin, error) {
 	names := normalizeEcosystems(opts.Ecosystems)
+	includeActions := shouldIncludeGitHubActions(names)
+	names = filterExternalEcosystems(names)
 	if len(names) == 0 {
-		return pl.FromCapabilities(cap), nil
+		plugins := pl.FromCapabilities(cap)
+		if includeActions {
+			plugins = append(plugins, ghactions.New())
+		}
+		return plugins, nil
 	}
 	plugins, err := pl.FromNames(names)
 	if err != nil {
 		return nil, fmt.Errorf("error creating plugins: %w", err)
+	}
+	if includeActions {
+		plugins = append(plugins, ghactions.New())
 	}
 	return plugin.FilterByCapabilities(plugins, cap), nil
 }
@@ -196,6 +206,7 @@ func filterInventoryPlugins(plugins []plugin.Plugin) []plugin.Plugin {
 		"swift":      {},
 		"r":          {},
 		"cpp":        {},
+		"github":     {},
 	}
 	excluded := map[string]struct{}{
 		"rust/cargoauditable": {},
@@ -242,6 +253,42 @@ func normalizeEcosystems(names []string) []string {
 	}
 	slices.Sort(out)
 	return slices.Compact(out)
+}
+
+// shouldIncludeGitHubActions reports whether the internal GitHub Actions plugin should run.
+// If names is nil (meaning all ecosystems), it returns true.
+func shouldIncludeGitHubActions(names []string) bool {
+	if names == nil {
+		return true
+	}
+	for _, n := range names {
+		switch n {
+		case "github", "github-actions", "githubactions", "actions", "gha":
+			return true
+		}
+	}
+	return false
+}
+
+// filterExternalEcosystems removes internal ecosystem aliases so upstream scalibr
+// plugin resolution does not error on unknown names.
+func filterExternalEcosystems(names []string) []string {
+	if names == nil {
+		return nil
+	}
+	out := make([]string, 0, len(names))
+	for _, n := range names {
+		switch n {
+		case "github", "github-actions", "githubactions", "actions", "gha":
+			continue
+		default:
+			out = append(out, n)
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
 }
 
 // populateWorkspaceFromTree copies files from a git tree into the workspace.

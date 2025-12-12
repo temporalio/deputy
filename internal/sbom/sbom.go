@@ -25,6 +25,7 @@ import (
 	cmp "github.com/picatz/deputy/internal/compare"
 	gitx "github.com/picatz/deputy/internal/gitutil"
 	"github.com/picatz/deputy/internal/inventory"
+	"github.com/picatz/deputy/internal/purlx"
 	"github.com/picatz/deputy/internal/repository"
 	"github.com/picatz/deputy/internal/repository/workspace"
 	"github.com/protobom/protobom/pkg/formats"
@@ -250,7 +251,9 @@ func buildProtobomDocument(ws workspace.FS, repoRef, ref, name string, pkgs []*e
 		}
 		n := sbom.NewNode()
 		var purlStr string
-		if pu := p.PURL(); pu != nil {
+		if purlx.IsGitHubActionsType(p.PURLType) {
+			purlStr = purlx.GitHubActionsPURLFromPackage(p)
+		} else if pu := p.PURL(); pu != nil {
 			purlStr = normalizeGolangPURLString(pu.String(), ws)
 		}
 		if purlStr != "" {
@@ -421,9 +424,17 @@ func nodePackageURL(n *sbom.Node) *purl.PackageURL {
 	if !ok || strings.TrimSpace(val) == "" {
 		return nil
 	}
-	pu, err := purl.FromString(strings.TrimSpace(val))
+	pp, err := purlx.ParseLoose(strings.TrimSpace(val))
 	if err != nil {
 		return nil
+	}
+	pu := purl.PackageURL{
+		Type:       pp.Type,
+		Namespace:  pp.Namespace,
+		Name:       pp.Name,
+		Version:    pp.Version,
+		Qualifiers: purl.Qualifiers(pp.Qualifiers),
+		Subpath:    pp.Subpath,
 	}
 	return &pu
 }
@@ -527,6 +538,11 @@ func packageNameForLicenseLookup(pu *purl.PackageURL) string {
 	switch strings.ToLower(pu.Type) {
 	case purl.TypeGolang:
 		return goModuleFromPURL(pu)
+	case purl.TypeGithub:
+		if pu.Namespace != "" {
+			return "github.com/" + pu.Namespace + "/" + pu.Name
+		}
+		return "github.com/" + pu.Name
 	default:
 		if pu.Namespace != "" {
 			return pu.Namespace + "/" + pu.Name

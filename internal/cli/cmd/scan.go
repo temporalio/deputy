@@ -16,12 +16,12 @@ import (
 	git "github.com/go-git/go-git/v5"
 	"github.com/go-git/go-git/v5/plumbing"
 	"github.com/google/osv-scalibr/extractor"
-	"github.com/google/osv-scalibr/purl"
 	analysis "github.com/picatz/deputy/internal/analysis"
 	cmp "github.com/picatz/deputy/internal/compare"
 	gitx "github.com/picatz/deputy/internal/gitutil"
 	inv "github.com/picatz/deputy/internal/inventory"
 	"github.com/picatz/deputy/internal/policy"
+	"github.com/picatz/deputy/internal/purlx"
 	"github.com/picatz/deputy/internal/repository/workspace"
 	sbomx "github.com/picatz/deputy/internal/sbom"
 	"github.com/picatz/deputy/internal/targets"
@@ -242,7 +242,7 @@ database, and others. Provides comprehensive coverage for Go ecosystem packages.
 
 SUPPORTED ECOSYSTEMS:
 Supports all ecosystems exposed by OSV-Scalibr (Go modules, npm, PyPI, Maven,
-RubyGems, containers, operating system packages, and more).
+RubyGems, containers, operating system packages, GitHub Actions workflows/actions, and more).
 Use --ecosystems to limit scanning to specific sets when you don't need the full inventory.
 
 OUTPUT FORMATS:
@@ -1091,7 +1091,7 @@ func parseProtobomPackages(data []byte) ([]*extractor.Package, map[string]bool, 
 		if ids := n.GetIdentifiers(); ids != nil {
 			if p := ids[int32(sbom.SoftwareIdentifierType_PURL)]; p != "" {
 				purlStr = p
-				if pu, err := purl.FromString(purlStr); err == nil {
+				if pu, err := purlx.ParseLoose(purlStr); err == nil {
 					pkg.PURLType = pu.Type
 				}
 			}
@@ -1136,7 +1136,7 @@ func parseCycloneDXPackages(data []byte) ([]*extractor.Package, map[string]bool,
 		}
 		pkg := &extractor.Package{Name: name, Version: version}
 		if comp.PackageURL != "" {
-			if pu, err := purl.FromString(comp.PackageURL); err == nil {
+			if pu, err := purlx.ParseLoose(comp.PackageURL); err == nil {
 				pkg.PURLType = pu.Type
 				// Restore full name from PURL if namespace is present (e.g. for Go, NPM)
 				if pu.Namespace != "" {
@@ -1193,7 +1193,7 @@ func parseSPDXPackages(data []byte) ([]*extractor.Package, map[string]bool, erro
 		}
 		entry := &extractor.Package{Name: name, Version: version}
 		if purlStr := extractSPDXPackagePURL(pkg); purlStr != "" {
-			if pu, err := purl.FromString(purlStr); err == nil {
+			if pu, err := purlx.ParseLoose(purlStr); err == nil {
 				entry.PURLType = pu.Type
 			}
 		}

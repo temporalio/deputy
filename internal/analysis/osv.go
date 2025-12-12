@@ -8,6 +8,7 @@ import (
 
 	"github.com/google/osv-scalibr/purl"
 	"github.com/ossf/osv-schema/bindings/go/osvschema"
+	"github.com/picatz/deputy/internal/purlx"
 	"golang.org/x/mod/semver"
 	"golang.org/x/sync/errgroup"
 	"osv.dev/bindings/go/osvdev"
@@ -56,6 +57,61 @@ func getCachedVuln(ctx context.Context, client OSVClient, id string) (*osvschema
 // The function is resilient: individual GetVulnByID failures are skipped so a
 // single retrieval error does not abort the entire batch.
 func QueryOSVBatch(ctx context.Context, client OSVClient, pkgs []PkgInput) ([]Vulnerability, error) {
+	if len(pkgs) == 0 {
+		return nil, nil
+	}
+	var ghaPkgs []PkgInput
+	var otherPkgs []PkgInput
+	for _, p := range pkgs {
+		if isGitHubActionsInput(p) {
+			ghaPkgs = append(ghaPkgs, p)
+			continue
+		}
+		otherPkgs = append(otherPkgs, p)
+	}
+
+	var out []Vulnerability
+	if len(otherPkgs) > 0 {
+		vv, err := queryOSVAPIBatch(ctx, client, otherPkgs)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, vv...)
+	}
+	if len(ghaPkgs) > 0 {
+		vv, err := queryOSVGHABucketBatch(ctx, client, ghaPkgs)
+		if err != nil {
+			if len(out) > 0 {
+				return out, err
+			}
+			return nil, err
+		}
+		out = append(out, vv...)
+	}
+	if len(out) == 0 {
+		return nil, nil
+	}
+	return out, nil
+}
+
+// isGitHubActionsInput reports whether the given package should be queried against
+// the OSV GitHub Actions bucket instead of the OSV API.
+func isGitHubActionsInput(p PkgInput) bool {
+	eco := strings.ToLower(strings.TrimSpace(p.Ecosystem))
+	switch eco {
+	case "github actions", "github-actions", "githubactions", "gha":
+		return true
+	}
+	if p.PURL != "" {
+		if pu, err := purlx.ParseLoose(p.PURL); err == nil && purlx.IsGitHubActionsType(pu.Type) {
+			return true
+		}
+	}
+	return false
+}
+
+// queryOSVAPIBatch performs the standard OSV v1/querybatch flow.
+func queryOSVAPIBatch(ctx context.Context, client OSVClient, pkgs []PkgInput) ([]Vulnerability, error) {
 	if len(pkgs) == 0 {
 		return nil, nil
 	}
@@ -248,21 +304,7 @@ func matchesPackage(pkg osvschema.Package, target PkgInput) bool {
 
 // equivalentPURL checks if two PURLs refer to the same package, ignoring version.
 func equivalentPURL(a, b string) bool {
-	pa, errA := purl.FromString(a)
-	pb, errB := purl.FromString(b)
-	if errA != nil || errB != nil {
-		return strings.EqualFold(a, b)
-	}
-	if !strings.EqualFold(pa.Type, pb.Type) {
-		return false
-	}
-	if !strings.EqualFold(pa.Namespace, pb.Namespace) {
-		return false
-	}
-	if !strings.EqualFold(pa.Name, pb.Name) {
-		return false
-	}
-	return true
+	return purlx.EquivalentIgnoringVersion(a, b)
 }
 
 // isVersionAffected reports whether the package metadata and version fall within

@@ -12,6 +12,7 @@ import (
 	"github.com/google/osv-scalibr/extractor"
 	analysis "github.com/picatz/deputy/internal/analysis"
 	cmp "github.com/picatz/deputy/internal/compare"
+	"github.com/picatz/deputy/internal/purlx"
 )
 
 // packagesToInputs converts a slice of extractor.Package objects into
@@ -392,11 +393,16 @@ func packagesToInputs(pkgs []*extractor.Package, opts packageInputOptions) []ana
 		if ecos == "" && pkg.PURLType != "" {
 			ecos = pkg.PURLType
 		}
+		if strings.EqualFold(ecos, "github") || strings.EqualFold(ecos, purlx.TypeGitHubActions) {
+			ecos = "GitHub Actions"
+		}
 		if strings.EqualFold(ecos, "golang") {
 			ecos = "Go"
 		}
 		var purlStr string
-		if pu := pkg.PURL(); pu != nil {
+		if purlx.IsGitHubActionsType(pkg.PURLType) {
+			purlStr = purlx.GitHubActionsPURLFromPackage(pkg)
+		} else if pu := pkg.PURL(); pu != nil {
 			purlStr = pu.String()
 		}
 		key := fmt.Sprintf("%s|%s|%s|%s", strings.ToLower(ecos), strings.ToLower(name), version, purlStr)

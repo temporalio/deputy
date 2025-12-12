@@ -17,6 +17,7 @@ import (
 	cmp "github.com/picatz/deputy/internal/compare"
 	gitx "github.com/picatz/deputy/internal/gitutil"
 	inv "github.com/picatz/deputy/internal/inventory"
+	"github.com/picatz/deputy/internal/purlx"
 	"github.com/picatz/deputy/internal/repository"
 	"github.com/picatz/deputy/internal/repository/workspace"
 	sbomx "github.com/picatz/deputy/internal/sbom"
@@ -289,6 +290,9 @@ func toListItems(ws workspace.FS, pkgs []*extractor.Package, goDirect map[string
 		if ecos == "" && p.PURLType != "" {
 			ecos = p.PURLType
 		}
+		if purlx.IsGitHubActionsType(ecos) {
+			ecos = "GitHub Actions"
+		}
 		li := ListItem{
 			Ecosystem: ecos,
 			Name:      p.Name,
@@ -303,7 +307,9 @@ func toListItems(ws workspace.FS, pkgs []*extractor.Package, goDirect map[string
 				li.IsDirect = true
 			}
 		}
-		if pu := p.PURL(); pu != nil {
+		if purlx.IsGitHubActionsType(p.PURLType) {
+			li.PURL = purlx.GitHubActionsPURLFromPackage(p)
+		} else if pu := p.PURL(); pu != nil {
 			li.PURL = pu.String()
 		}
 		if strings.EqualFold(ecos, "Go") || strings.EqualFold(p.PURLType, scalpurl.TypeGolang) {
