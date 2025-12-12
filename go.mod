@@ -30,6 +30,7 @@ require (
 	github.com/sourcegraph/jsonrpc2 v0.2.1
 	github.com/spdx/tools-golang v0.5.5
 	github.com/spf13/cobra v1.10.1
+	github.com/spf13/pflag v1.0.10
 	golang.org/x/mod v0.27.0
 	golang.org/x/oauth2 v0.30.0
 	golang.org/x/sync v0.16.0
@@ -154,7 +155,6 @@ require (
 	github.com/sirupsen/logrus v1.9.3 // indirect
 	github.com/skeema/knownhosts v1.3.1 // indirect
 	github.com/spdx/gordf v0.0.0-20250128162952-000978ccd6fb // indirect
-	github.com/spf13/pflag v1.0.10 // indirect
 	github.com/stoewer/go-strcase v1.2.0 // indirect
 	github.com/tidwall/gjson v1.18.0 // indirect
 	github.com/tidwall/jsonc v0.3.2 // indirect
