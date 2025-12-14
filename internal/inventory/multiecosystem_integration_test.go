@@ -113,7 +113,5 @@ func collectPURLTypes(pkgs []*extractor.Package) map[string]int {
 }
 
 func mapKeys(m map[string]int) []string {
-	keys := slices.Collect(maps.Keys(m))
-	slices.Sort(keys)
-	return keys
+	return slices.Sorted(maps.Keys(m))
 }

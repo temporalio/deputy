@@ -6,6 +6,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	git "github.com/go-git/go-git/v5"
@@ -98,31 +99,33 @@ func Test_normalizeGitRefForGoGit_transformsInsideBraces(t *testing.T) {
 }
 
 func Test_ResolveRevision_withTimeRef_HEAD(t *testing.T) {
-	dir := t.TempDir()
-	repo, err := git.PlainInit(dir, false)
-	if err != nil {
-		t.Fatalf("init repo: %v", err)
-	}
-	wt, err := repo.Worktree()
-	if err != nil {
-		t.Fatalf("worktree: %v", err)
-	}
+	synctest.Test(t, func(t *testing.T) {
+		dir := t.TempDir()
+		repo, err := git.PlainInit(dir, false)
+		if err != nil {
+			t.Fatalf("init repo: %v", err)
+		}
+		wt, err := repo.Worktree()
+		if err != nil {
+			t.Fatalf("worktree: %v", err)
+		}
 
-	// First commit
-	h1 := commitFile(t, repo, wt, dir, "go.mod", "module example.com/mod\n\n", "init")
-	time.Sleep(3 * time.Second)
-	// Second commit
-	_ = commitFile(t, repo, wt, dir, "go.mod", "module example.com/mod\nrequire example.com/dep v0.1.0\n", "add dep")
-	time.Sleep(1 * time.Second)
+		// First commit
+		h1 := commitFile(t, repo, wt, dir, "go.mod", "module example.com/mod\n\n", "init")
+		time.Sleep(3 * time.Second)
+		// Second commit
+		_ = commitFile(t, repo, wt, dir, "go.mod", "module example.com/mod\nrequire example.com/dep v0.1.0\n", "add dep")
+		time.Sleep(1 * time.Second)
 
-	// Resolve HEAD as of 2 seconds ago (between two commits)
-	h, err := ResolveRevisionEnhanced(repo, "HEAD@{2.second.ago}")
-	if err != nil {
-		t.Fatalf("ResolveRevisionEnhanced: %v", err)
-	}
-	if *h != h1 {
-		t.Fatalf("expected hash %s, got %s", h1.String(), h.String())
-	}
+		// Resolve HEAD as of 2 seconds ago (between two commits)
+		h, err := ResolveRevisionEnhanced(repo, "HEAD@{2.second.ago}")
+		if err != nil {
+			t.Fatalf("ResolveRevisionEnhanced: %v", err)
+		}
+		if *h != h1 {
+			t.Fatalf("expected hash %s, got %s", h1.String(), h.String())
+		}
+	})
 }
 
 func Test_checkFilesChanged_withTimeRef(t *testing.T) {

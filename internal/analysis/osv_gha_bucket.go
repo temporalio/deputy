@@ -191,7 +191,7 @@ func queryOSVGHABucketBatch(ctx context.Context, client OSVClient, pkgs []PkgInp
 			}
 			base.Aliases = uniqAliases
 			base.FixedVersions = base.FixedVersions[:0]
-			for _, f := range fixSet.Slice() {
+			for f := range fixSet.All() {
 				base.FixedVersions = append(base.FixedVersions, f)
 			}
 			base.AffectedImports = MergeAffectedImports(importSets...)

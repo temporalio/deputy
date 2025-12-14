@@ -10,7 +10,7 @@ import (
 	"testing"
 
 	analysis "github.com/picatz/deputy/internal/analysis"
-	cmp "github.com/picatz/deputy/internal/compare"
+	"github.com/picatz/deputy/internal/compare"
 )
 
 // Ensure scan-mode enrichment pulls licenses via best-effort sources (e.g., crates.io)
@@ -32,10 +32,10 @@ func TestDisplayDetailedDependencyChanges_ScanUsesBestEffortLicenses(t *testing.
 	restoreBases := analysis.WithLicenseEndpoints(server.URL, server.URL, server.URL, server.URL, server.URL, server.URL)
 	defer restoreBases()
 
-	changes := []cmp.Change{{
+	changes := []compare.Change{{
 		Name:          "serde",
 		TargetVersion: "1.0.0",
-		ChangeType:    cmp.Added,
+		ChangeType:    compare.Added,
 		Ecosystem:     "rust",
 		IsDirect:      true,
 	}}

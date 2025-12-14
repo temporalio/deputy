@@ -6,14 +6,13 @@ import (
 	"path"
 	"path/filepath"
 	"slices"
-	"sort"
 	"strings"
 
 	"github.com/BurntSushi/toml"
 	"github.com/google/osv-scalibr/extractor"
 	analysis "github.com/picatz/deputy/internal/analysis"
 	"github.com/picatz/deputy/internal/collections"
-	cmp "github.com/picatz/deputy/internal/compare"
+	"github.com/picatz/deputy/internal/compare"
 	"github.com/picatz/deputy/internal/purlx"
 )
 
@@ -427,8 +426,8 @@ func packagesToInputs(pkgs []*extractor.Package, opts packageInputOptions) []ana
 		}
 
 		if strings.EqualFold(ecos, "Go") {
-			info := cmp.ParseGoPackage(pkg)
-			module := cmp.GetModuleRoot(info.CanonicalName)
+			info := compare.ParseGoPackage(pkg)
+			module := compare.GetModuleRoot(info.CanonicalName)
 			if opts.GoDirect[module] {
 				entry.IsDirect = true
 			}
@@ -492,11 +491,11 @@ func packagesToInputs(pkgs []*extractor.Package, opts packageInputOptions) []ana
 		in.ManifestRefs = sortAndUniqueManifestRefs(in.ManifestRefs)
 		inputs = append(inputs, *in)
 	}
-	sort.Slice(inputs, func(i, j int) bool {
-		if inputs[i].Name == inputs[j].Name {
-			return inputs[i].Version < inputs[j].Version
+	slices.SortFunc(inputs, func(a, b analysis.PkgInput) int {
+		if c := strings.Compare(a.Name, b.Name); c != 0 {
+			return c
 		}
-		return inputs[i].Name < inputs[j].Name
+		return strings.Compare(a.Version, b.Version)
 	})
 	return inputs
 }
@@ -610,7 +609,7 @@ func sortedUnique(values []string) []string {
 		}
 		out = append(out, v)
 	}
-	sort.Strings(out)
+	slices.Sort(out)
 	return out
 }
 
@@ -634,11 +633,11 @@ func sortAndUniqueManifestRefs(refs []analysis.ManifestReference) []analysis.Man
 		ref.Groups = sortedUnique(ref.Groups)
 		out = append(out, ref)
 	}
-	sort.Slice(out, func(i, j int) bool {
-		if out[i].Manager == out[j].Manager {
-			return out[i].Path < out[j].Path
+	slices.SortFunc(out, func(a, b analysis.ManifestReference) int {
+		if c := strings.Compare(a.Manager, b.Manager); c != 0 {
+			return c
 		}
-		return out[i].Manager < out[j].Manager
+		return strings.Compare(a.Path, b.Path)
 	})
 	return out
 }
@@ -739,7 +738,7 @@ func buildPackageSources(inputs []analysis.PkgInput) map[string][]string {
 			continue
 		}
 		sources := entries.Slice()
-		sort.Strings(sources)
+		slices.Sort(sources)
 		result[key] = sources
 	}
 	if len(result) == 0 {
@@ -758,7 +757,7 @@ func canonicalPackageKeyFromInput(in analysis.PkgInput) string {
 	ecos := strings.TrimSpace(in.Ecosystem)
 	if strings.EqualFold(ecos, "Go") {
 		pkg := &extractor.Package{Name: name}
-		info := cmp.ParseGoPackage(pkg)
+		info := compare.ParseGoPackage(pkg)
 		canonical := strings.ToLower(info.CanonicalName)
 		if canonical == "" {
 			canonical = strings.ToLower(name)

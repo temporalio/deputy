@@ -19,7 +19,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"runtime"
-	"sort"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -32,7 +32,7 @@ import (
 	"github.com/google/osv-scalibr/extractor"
 	scalibrlog "github.com/google/osv-scalibr/log"
 	analysis "github.com/picatz/deputy/internal/analysis"
-	cmp "github.com/picatz/deputy/internal/compare"
+	"github.com/picatz/deputy/internal/compare"
 	inv "github.com/picatz/deputy/internal/inventory"
 	"github.com/picatz/deputy/internal/logs"
 	"github.com/picatz/deputy/internal/repository"
@@ -299,14 +299,14 @@ func collectRowsFromPackages(ctx context.Context, repoName string, pkgs []*extra
 	)
 
 	for eco := range rowsByEco {
-		sort.Slice(rowsByEco[eco], func(i, j int) bool {
-			if rowsByEco[eco][i].Project == rowsByEco[eco][j].Project {
-				if rowsByEco[eco][i].PackageName == rowsByEco[eco][j].PackageName {
-					return rowsByEco[eco][i].Version < rowsByEco[eco][j].Version
-				}
-				return rowsByEco[eco][i].PackageName < rowsByEco[eco][j].PackageName
+		slices.SortFunc(rowsByEco[eco], func(a, b dependencyRow) int {
+			if c := strings.Compare(a.Project, b.Project); c != 0 {
+				return c
 			}
-			return rowsByEco[eco][i].Project < rowsByEco[eco][j].Project
+			if c := strings.Compare(a.PackageName, b.PackageName); c != 0 {
+				return c
+			}
+			return strings.Compare(a.Version, b.Version)
 		})
 	}
 
@@ -329,14 +329,14 @@ func mergeRows(dst, src []dependencyRow) []dependencyRow {
 		seen[key] = struct{}{}
 		dst = append(dst, row)
 	}
-	sort.Slice(dst, func(i, j int) bool {
-		if dst[i].Project == dst[j].Project {
-			if dst[i].PackageName == dst[j].PackageName {
-				return dst[i].Version < dst[j].Version
-			}
-			return dst[i].PackageName < dst[j].PackageName
+	slices.SortFunc(dst, func(a, b dependencyRow) int {
+		if c := strings.Compare(a.Project, b.Project); c != 0 {
+			return c
 		}
-		return dst[i].Project < dst[j].Project
+		if c := strings.Compare(a.PackageName, b.PackageName); c != 0 {
+			return c
+		}
+		return strings.Compare(a.Version, b.Version)
 	})
 	return dst
 }
@@ -406,7 +406,7 @@ func parseEcosystems(raw string) []string {
 	if len(out) == 0 {
 		return nil
 	}
-	sort.Strings(out)
+	slices.Sort(out)
 	return out
 }
 
@@ -494,7 +494,7 @@ func normalizeLicenses(licenses []string) []string {
 		seen[l] = struct{}{}
 		out = append(out, l)
 	}
-	sort.Strings(out)
+	slices.Sort(out)
 	return out
 }
 
@@ -614,8 +614,8 @@ func modulePathFromPackage(pkg *extractor.Package) string {
 	if canonicalEcosystem(pkg) == "go" {
 		return strings.TrimSpace(pkg.Name)
 	}
-	info := cmp.ParseGoPackage(pkg)
-	return cmp.GetModuleRoot(info.CanonicalName)
+	info := compare.ParseGoPackage(pkg)
+	return compare.GetModuleRoot(info.CanonicalName)
 }
 
 // ancestorModules returns parent module paths for a given module, excluding the original.

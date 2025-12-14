@@ -10,7 +10,7 @@ import (
 	"github.com/google/osv-scalibr/extractor"
 	scalpurl "github.com/google/osv-scalibr/purl"
 	analysis "github.com/picatz/deputy/internal/analysis"
-	cmp "github.com/picatz/deputy/internal/compare"
+	"github.com/picatz/deputy/internal/compare"
 )
 
 // Test that packagesToInputs includes all packages and determines directness
@@ -22,7 +22,7 @@ require (
     github.com/golang-jwt/jwt/v4 v4.5.1
     github.com/indirect/pkg v1.2.3 // indirect
 )`
-	deps := cmp.GetDirectDependenciesFromGoMod([]byte(goMod))
+	deps := compare.GetDirectDependenciesFromGoMod([]byte(goMod))
 
 	pkgs := []*extractor.Package{
 		{Name: "github.com/golang-jwt/jwt/v4", Version: "v4.5.1", PURLType: scalpurl.TypeGolang},
@@ -62,7 +62,7 @@ require (
     gopkg.in/yaml.v3 v3.0.1
     gopkg.in/indirect.v3 v3.0.0 // indirect
 )`
-	deps := cmp.GetDirectDependenciesFromGoMod([]byte(goMod))
+	deps := compare.GetDirectDependenciesFromGoMod([]byte(goMod))
 
 	pkgs := []*extractor.Package{
 		{Name: "gopkg.in/yaml.v3", Version: "v3.0.1", PURLType: scalpurl.TypeGolang},

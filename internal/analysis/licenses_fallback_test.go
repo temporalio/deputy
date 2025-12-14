@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -34,7 +35,7 @@ func TestFetchLicensesForEcosystem_NormalizesAndCaches(t *testing.T) {
 
 	client := &countingDepsClientEcosystem{}
 	got := FetchLicensesForEcosystem(context.Background(), client, "python", "Requests", "2.31.0")
-	if want := []string{"Apache-2.0"}; !equalStrings(got, want) {
+	if want := []string{"Apache-2.0"}; !slices.Equal(got, want) {
 		t.Fatalf("unexpected licenses: %v", got)
 	}
 	if client.sys != pb.System_PYPI {
@@ -79,12 +80,12 @@ SOFTWARE.`
 	restoreBases := WithLicenseEndpoints(server.URL, cratesBase, packagistBase, pubBase, cocoapodsBase, hexpmBase)
 	defer restoreBases()
 
-	if got := GoProxyLicenseScan(context.Background(), "example.com/mod", "v1.2.3"); !equalStrings(got, []string{"MIT"}) {
+	if got := GoProxyLicenseScan(context.Background(), "example.com/mod", "v1.2.3"); !slices.Equal(got, []string{"MIT"}) {
 		t.Fatalf("expected go proxy direct scan to return MIT, got %v", got)
 	}
 
 	licenses := LookupLicensesBestEffort(context.Background(), "go", "example.com/mod", "v1.2.3")
-	if want := []string{"MIT"}; !equalStrings(licenses, want) {
+	if want := []string{"MIT"}; !slices.Equal(licenses, want) {
 		t.Fatalf("expected go proxy license, got %v", licenses)
 	}
 	if zipPath == nil || *zipPath != "/example.com/mod/@v/v1.2.3.zip" {
@@ -109,7 +110,7 @@ func TestLookupLicensesBestEffort_Crates(t *testing.T) {
 	defer restoreBases()
 
 	got := LookupLicensesBestEffort(context.Background(), "rust", "serde", "1.0.0")
-	if want := []string{"MIT"}; !equalStrings(got, want) {
+	if want := []string{"MIT"}; !slices.Equal(got, want) {
 		t.Fatalf("expected crates.io license, got %v", got)
 	}
 	if !strings.Contains(requested, "/api/v1/crates/serde/") {
@@ -140,7 +141,7 @@ func TestLookupLicensesBestEffort_Packagist(t *testing.T) {
 		defer restoreBases()
 
 		got := LookupLicensesBestEffort(context.Background(), "php", "laravel/framework", "10.0.0")
-		if want := []string{"BSD-3-Clause"}; !equalStrings(got, want) {
+		if want := []string{"BSD-3-Clause"}; !slices.Equal(got, want) {
 			t.Fatalf("expected packagist license, got %v", got)
 		}
 	})
@@ -170,7 +171,7 @@ func TestLookupLicensesBestEffort_Packagist(t *testing.T) {
 		defer restoreBases()
 
 		got := LookupLicensesBestEffort(context.Background(), "composer", "vendor/name", "1.2.3")
-		if want := []string{"Apache-2.0"}; !equalStrings(got, want) {
+		if want := []string{"Apache-2.0"}; !slices.Equal(got, want) {
 			t.Fatalf("expected packagist legacy license, got %v", got)
 		}
 	})
@@ -222,7 +223,7 @@ SOFTWARE.`
 	defer restoreBases()
 
 	got := LookupLicensesBestEffort(context.Background(), "dart", "riverpod", "1.0.0")
-	if want := []string{"MIT"}; !equalStrings(got, want) {
+	if want := []string{"MIT"}; !slices.Equal(got, want) {
 		t.Fatalf("expected pub license, got %v", got)
 	}
 }
@@ -249,7 +250,7 @@ func TestLookupLicensesBestEffort_CocoaPods(t *testing.T) {
 	defer restoreBases()
 
 	got := LookupLicensesBestEffort(context.Background(), "cocoapods", "Alamofire", "5.9.1")
-	if want := []string{"MIT"}; !equalStrings(got, want) {
+	if want := []string{"MIT"}; !slices.Equal(got, want) {
 		t.Fatalf("expected cocoapods license, got %v", got)
 	}
 }
@@ -270,7 +271,7 @@ func TestLookupLicensesBestEffort_Hex(t *testing.T) {
 	defer restoreBases()
 
 	got := LookupLicensesBestEffort(context.Background(), "hex", "plug", "1.12.0")
-	if want := []string{"Apache-2.0"}; !equalStrings(got, want) {
+	if want := []string{"Apache-2.0"}; !slices.Equal(got, want) {
 		t.Fatalf("expected hex license, got %v", got)
 	}
 }
@@ -314,16 +315,4 @@ func resetLicenseTestState(t *testing.T) {
 	t.Setenv("DEPUTY_CACHE_DIR", t.TempDir())
 	registryLicenseMemo = cache.NewTTLCache[string, []string](licenseMemoMaxItems, licenseMemoTTL)
 	remoteLicenseMemo = cache.NewTTLCache[string, []string](licenseMemoMaxItems, licenseMemoTTL)
-}
-
-func equalStrings(a, b []string) bool {
-	if len(a) != len(b) {
-		return false
-	}
-	for i := range a {
-		if a[i] != b[i] {
-			return false
-		}
-	}
-	return true
 }

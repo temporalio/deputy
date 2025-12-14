@@ -99,11 +99,7 @@ func Compile(source string, extraVars []string) error {
 
 // envForInput creates a CEL environment configured with variables derived from the input map keys.
 func envForInput(input map[string]any) (*cel.Env, error) {
-	var extra []string
-	for name := range input {
-		extra = append(extra, name)
-	}
-	return envWithNames(extra)
+	return envWithNames(slices.Collect(maps.Keys(input)))
 }
 
 // envWithNames creates a CEL environment with the default variables plus any extra variables provided.

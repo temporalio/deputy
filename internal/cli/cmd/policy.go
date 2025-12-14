@@ -9,11 +9,11 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
-	"sort"
+	"slices"
 	"strconv"
 	"strings"
 
-	"github.com/google/go-cmp/cmp"
+	gocmp "github.com/google/go-cmp/cmp"
 	"github.com/picatz/deputy/internal/policy"
 	"github.com/spf13/cobra"
 )
@@ -546,7 +546,7 @@ func collectPolicyTestFiles(paths []string) ([]string, error) {
 	if len(files) == 0 {
 		return nil, errors.New("no policy test files found")
 	}
-	sort.Strings(files)
+	slices.Sort(files)
 	return files, nil
 }
 
@@ -623,7 +623,7 @@ func executePolicyTestCase(ctx context.Context, baseDir, file string, tc *policy
 		return fmt.Errorf("%s (%s): %w", name, file, err)
 	}
 	actual := actionsToComparable(actions)
-	if diff := cmp.Diff(tc.Want, actual); diff != "" {
+	if diff := gocmp.Diff(tc.Want, actual); diff != "" {
 		return fmt.Errorf("%s (%s): unexpected actions (-want +got):\n%s", name, file, diff)
 	}
 	fmt.Fprintf(cmd.OutOrStdout(), "✓ %s\n", name)

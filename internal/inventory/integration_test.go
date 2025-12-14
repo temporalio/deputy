@@ -7,7 +7,7 @@ import (
 	git "github.com/go-git/go-git/v5"
 	"github.com/go-git/go-git/v5/plumbing"
 	"github.com/google/osv-scalibr/extractor"
-	cmp "github.com/picatz/deputy/internal/compare"
+	"github.com/picatz/deputy/internal/compare"
 )
 
 func Test_Integration_CompareTags(t *testing.T) {
@@ -95,7 +95,7 @@ func Test_Integration_CompareTags(t *testing.T) {
 			if err != nil {
 				t.Fatalf("scan target: %v", err)
 			}
-			changes := cmp.ComparePackages(basePkgs, targetPkgs, nil, nil, nil)
+			changes := compare.ComparePackages(basePkgs, targetPkgs, nil, nil, nil)
 			if len(basePkgs) == 0 && len(targetPkgs) == 0 {
 				if changes != nil {
 					t.Fatalf("changes should be nil for empty inputs")

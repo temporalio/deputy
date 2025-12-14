@@ -1,11 +1,11 @@
 package cmd
 
 import (
+	"cmp"
 	"fmt"
 	"io"
 	"maps"
 	"slices"
-	"sort"
 	"strings"
 
 	pathpkg "path"
@@ -180,16 +180,16 @@ func RenderVulnerabilityList(w io.Writer, vulns []analysis.Vulnerability, opts v
 		if len(list) == 0 {
 			continue
 		}
-		sort.SliceStable(list, func(i, j int) bool {
-			pi, si := consolidatedSeverityPriority(list[i])
-			pj, sj := consolidatedSeverityPriority(list[j])
-			if pi != pj {
-				return pi > pj
+		slices.SortStableFunc(list, func(a, b analysis.ConsolidatedVulnerability) int {
+			pa, sa := consolidatedSeverityPriority(a)
+			pb, sb := consolidatedSeverityPriority(b)
+			if pa != pb {
+				return cmp.Compare(pb, pa) // descending
 			}
-			if si != sj {
-				return si > sj
+			if sa != sb {
+				return cmp.Compare(sb, sa) // descending
 			}
-			return list[i].PrimaryID < list[j].PrimaryID
+			return strings.Compare(a.PrimaryID, b.PrimaryID)
 		})
 
 		hasDirect := slices.ContainsFunc(list, func(v analysis.ConsolidatedVulnerability) bool {
@@ -250,7 +250,7 @@ func RenderVulnerabilityList(w io.Writer, vulns []analysis.Vulnerability, opts v
 			}
 			if len(v.SecondaryIDs) > 0 {
 				aliases := append([]string(nil), v.SecondaryIDs...)
-				sort.Strings(aliases)
+				slices.Sort(aliases)
 				aliasBlocks := make([]string, 0, len(aliases))
 				for _, a := range aliases {
 					st := ui.StyleAliasOther
@@ -358,14 +358,13 @@ func buildManifestDisplayContext(list []analysis.ConsolidatedVulnerability) mani
 		}
 	}
 
-	managerKeys := slices.Collect(maps.Keys(groupEntries))
-	sort.Slice(managerKeys, func(i, j int) bool {
-		ri := managerRank(managerKeys[i])
-		rj := managerRank(managerKeys[j])
-		if ri != rj {
-			return ri < rj
+	managerKeys := slices.SortedFunc(maps.Keys(groupEntries), func(a, b string) int {
+		ra := managerRank(a)
+		rb := managerRank(b)
+		if ra != rb {
+			return cmp.Compare(ra, rb)
 		}
-		return managerKeys[i] < managerKeys[j]
+		return strings.Compare(a, b)
 	})
 
 	for _, key := range managerKeys {
@@ -379,8 +378,8 @@ func buildManifestDisplayContext(list []analysis.ConsolidatedVulnerability) mani
 			entry.Groups = uniqueSortedStrings(entry.Groups)
 			entryList = append(entryList, *entry)
 		}
-		sort.Slice(entryList, func(i, j int) bool {
-			return entryList[i].Path < entryList[j].Path
+		slices.SortFunc(entryList, func(a, b manifestDisplayEntry) int {
+			return strings.Compare(a.Path, b.Path)
 		})
 		grp.Entries = entryList
 		if grp.Manager == "" && len(entryList) > 0 {
@@ -417,20 +416,19 @@ func buildManifestDisplayContext(list []analysis.ConsolidatedVulnerability) mani
 		}
 	}
 
-	artifactKeys := slices.Collect(maps.Keys(artifactGroups))
-	sort.Slice(artifactKeys, func(i, j int) bool {
-		ri := managerRank(artifactManagerNames[artifactKeys[i]])
-		rj := managerRank(artifactManagerNames[artifactKeys[j]])
-		if ri != rj {
-			return ri < rj
+	artifactKeys := slices.SortedFunc(maps.Keys(artifactGroups), func(a, b string) int {
+		ra := managerRank(artifactManagerNames[a])
+		rb := managerRank(artifactManagerNames[b])
+		if ra != rb {
+			return cmp.Compare(ra, rb)
 		}
-		return artifactManagerNames[artifactKeys[i]] < artifactManagerNames[artifactKeys[j]]
+		return strings.Compare(artifactManagerNames[a], artifactManagerNames[b])
 	})
 
 	for _, key := range artifactKeys {
 		set := artifactGroups[key]
 		entries := set.Slice()
-		sort.Strings(entries)
+		slices.Sort(entries)
 		ctx.Artifacts = append(ctx.Artifacts, artifactDisplayGroup{
 			Manager: artifactManagerNames[key],
 			Entries: entries,
@@ -573,7 +571,7 @@ func uniqueSortedStrings(values []string) []string {
 		}
 		out = append(out, v)
 	}
-	sort.Strings(out)
+	slices.Sort(out)
 	return out
 }
 

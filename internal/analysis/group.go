@@ -1,7 +1,7 @@
 package analysis
 
 import (
-	"sort"
+	"slices"
 	"strings"
 
 	"github.com/picatz/deputy/internal/collections"
@@ -178,7 +178,7 @@ func createConsolidatedVulnerability(primaryID string, vulns []Vulnerability) Co
 		}
 	}
 
-	sort.Strings(locations)
+	slices.Sort(locations)
 
 	manifestMap := map[string]ManifestReference{}
 	for _, v := range vulns {
@@ -205,11 +205,11 @@ func createConsolidatedVulnerability(primaryID string, vulns []Vulnerability) Co
 	for _, ref := range manifestMap {
 		manifestRefs = append(manifestRefs, ref)
 	}
-	sort.Slice(manifestRefs, func(i, j int) bool {
-		if manifestRefs[i].Manager == manifestRefs[j].Manager {
-			return manifestRefs[i].Path < manifestRefs[j].Path
+	slices.SortFunc(manifestRefs, func(a, b ManifestReference) int {
+		if c := strings.Compare(a.Manager, b.Manager); c != 0 {
+			return c
 		}
-		return manifestRefs[i].Manager < manifestRefs[j].Manager
+		return strings.Compare(a.Path, b.Path)
 	})
 
 	var importSets [][]AffectedImport

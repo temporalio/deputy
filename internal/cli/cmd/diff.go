@@ -16,7 +16,7 @@ import (
 	"github.com/go-git/go-git/v5/plumbing"
 	"github.com/google/osv-scalibr/extractor"
 	analysis "github.com/picatz/deputy/internal/analysis"
-	cmp "github.com/picatz/deputy/internal/compare"
+	"github.com/picatz/deputy/internal/compare"
 	gitx "github.com/picatz/deputy/internal/gitutil"
 	inv "github.com/picatz/deputy/internal/inventory"
 	"github.com/picatz/deputy/internal/output"
@@ -248,7 +248,7 @@ type DiffPolicyReport struct {
 	Repo            string                   `json:"repo"`
 	BaseRef         string                   `json:"baseRef"`
 	TargetRef       string                   `json:"targetRef"`
-	Changes         []cmp.Change             `json:"changes"`
+	Changes         []compare.Change         `json:"changes"`
 	Vulnerabilities []analysis.Vulnerability `json:"vulnerabilities"`
 }
 
@@ -351,14 +351,14 @@ func runDiffAnalysis(ctx context.Context, repoPath, baseRef, targetRef string, e
 	var targetManifestRes manifestResolver
 	if isWorkingPseudoRef(targetRef) {
 		if repoSrc != nil {
-			targetGoDirect = cmp.CollectGoDirectModulesFromWorkspace(repoSrc.Workspace)
+			targetGoDirect = compare.CollectGoDirectModulesFromWorkspace(repoSrc.Workspace)
 			targetManifestRes = workspaceManifestResolver{ws: repoSrc.Workspace}
 		} else {
-			targetGoDirect = cmp.CollectGoDirectModulesFromDisk(repoPath)
+			targetGoDirect = compare.CollectGoDirectModulesFromDisk(repoPath)
 			targetManifestRes = osManifestResolver(repoPath)
 		}
 	} else if targetHash != nil {
-		if direct, err := cmp.CollectGoDirectModulesFromCommit(repo, *targetHash); err == nil {
+		if direct, err := compare.CollectGoDirectModulesFromCommit(repo, *targetHash); err == nil {
 			targetGoDirect = direct
 		}
 		targetManifestRes = gitManifestResolver{repo: repo, hash: *targetHash}
@@ -372,15 +372,15 @@ func runDiffAnalysis(ctx context.Context, repoPath, baseRef, targetRef string, e
 	var baseManifestRes manifestResolver
 	if isWorkingPseudoRef(baseRef) {
 		if repoSrc != nil {
-			baseGoDirect = cmp.CollectGoDirectModulesFromWorkspace(repoSrc.Workspace)
+			baseGoDirect = compare.CollectGoDirectModulesFromWorkspace(repoSrc.Workspace)
 			baseManifestRes = workspaceManifestResolver{ws: repoSrc.Workspace}
 		} else {
-			baseGoDirect = cmp.CollectGoDirectModulesFromDisk(repoPath)
+			baseGoDirect = compare.CollectGoDirectModulesFromDisk(repoPath)
 			baseManifestRes = osManifestResolver(repoPath)
 		}
 	} else {
 		baseManifestRes = gitManifestResolver{repo: repo, hash: *baseHash}
-		if direct, err := cmp.CollectGoDirectModulesFromCommit(repo, *baseHash); err == nil {
+		if direct, err := compare.CollectGoDirectModulesFromCommit(repo, *baseHash); err == nil {
 			baseGoDirect = direct
 		}
 	}
@@ -392,7 +392,7 @@ func runDiffAnalysis(ctx context.Context, repoPath, baseRef, targetRef string, e
 	pkgInputs := targetPkgInputs
 
 	// Compare packages
-	changes := cmp.ComparePackages(basePackages, targetPackages, goDirect, pkgDirect, nil)
+	changes := compare.ComparePackages(basePackages, targetPackages, goDirect, pkgDirect, nil)
 	if len(changes) == 0 {
 		fmt.Fprintln(outW, "No package changes detected.")
 		return nil
@@ -597,7 +597,7 @@ func licenseScanConcurrency(total int) int {
 
 // displayDetailedDependencyChanges renders dependency changes with symbols, arrows,
 // license lookups via deps.dev and a concise summary similar to the original tool output.
-func displayDetailedDependencyChanges(ctx context.Context, ws workspace.FS, changes []cmp.Change, enrich bool, licenseSource string, outW io.Writer, errW io.Writer) {
+func displayDetailedDependencyChanges(ctx context.Context, ws workspace.FS, changes []compare.Change, enrich bool, licenseSource string, outW io.Writer, errW io.Writer) {
 	if len(changes) == 0 {
 		return
 	}
@@ -632,7 +632,7 @@ func displayDetailedDependencyChanges(ctx context.Context, ws workspace.FS, chan
 		var mu sync.Mutex
 		g, gctx := errgroup.WithContext(ctx)
 		for _, c := range changes {
-			if c.ChangeType == cmp.Removed || c.TargetVersion == "" {
+			if c.ChangeType == compare.Removed || c.TargetVersion == "" {
 				continue
 			}
 			pk := pkgKey{ecosystem: resolveEcosystem(c.Ecosystem), name: c.Name, version: c.TargetVersion}
@@ -662,7 +662,7 @@ func displayDetailedDependencyChanges(ctx context.Context, ws workspace.FS, chan
 	if enrich && (licenseSource == "scan" || licenseSource == "both") {
 		required := map[pkgKey]struct{}{}
 		for _, c := range changes {
-			if c.ChangeType == cmp.Removed || c.TargetVersion == "" {
+			if c.ChangeType == compare.Removed || c.TargetVersion == "" {
 				continue
 			}
 			pk := pkgKey{ecosystem: resolveEcosystem(c.Ecosystem), name: c.Name, version: c.TargetVersion}
@@ -677,7 +677,7 @@ func displayDetailedDependencyChanges(ctx context.Context, ws workspace.FS, chan
 			remoteTasks = make([]pkgKey, 0, len(required))
 			seen := map[pkgKey]struct{}{}
 			for _, c := range changes {
-				if c.ChangeType == cmp.Removed || c.TargetVersion == "" {
+				if c.ChangeType == compare.Removed || c.TargetVersion == "" {
 					continue
 				}
 				pk := pkgKey{ecosystem: resolveEcosystem(c.Ecosystem), name: c.Name, version: c.TargetVersion}
@@ -722,7 +722,7 @@ func displayDetailedDependencyChanges(ctx context.Context, ws workspace.FS, chan
 		if l, ok := licMap[pk]; ok && len(l) > 0 {
 			licenses = l
 		}
-		if c.ChangeType != cmp.Removed && c.TargetVersion != "" && enrich && (licenseSource == "scan" || licenseSource == "both") {
+		if c.ChangeType != compare.Removed && c.TargetVersion != "" && enrich && (licenseSource == "scan" || licenseSource == "both") {
 			if len(localScan) > 0 {
 				licenses = analysis.MergeLicenseSources(licenses, localScan)
 			}
@@ -763,10 +763,10 @@ func displayDetailedDependencyChanges(ctx context.Context, ws workspace.FS, chan
 		}
 
 		switch c.ChangeType {
-		case cmp.Added:
+		case compare.Added:
 			fmt.Fprintf(outW, "  %s %s @ %s %s\n", ui.StyleAdded.Render("+"), ui.StyleAdded.Render(c.Name), ui.StyleVersion.Render(c.TargetVersion), licAndDepStr)
 			addedN++
-		case cmp.Removed:
+		case compare.Removed:
 			// For removed dependencies, we don't have target version license info, so just show directness
 			removedDirectness := "(indirect)"
 			if c.IsDirect {
@@ -774,7 +774,7 @@ func displayDetailedDependencyChanges(ctx context.Context, ws workspace.FS, chan
 			}
 			fmt.Fprintf(outW, "  %s %s @ %s %s\n", ui.StyleRemoved.Render("-"), ui.StyleRemoved.Render(c.Name), ui.StyleVersion.Render(c.BaseVersion), ui.StyleVersion.Render(removedDirectness))
 			removedN++
-		case cmp.Upgraded:
+		case compare.Upgraded:
 			updatedN++
 			upgradedN++
 			oldNamePart := ""
@@ -782,7 +782,7 @@ func displayDetailedDependencyChanges(ctx context.Context, ws workspace.FS, chan
 				oldNamePart = ui.StyleDim.Render(c.OldName) + " " + ui.StyleUpdateArrow.Render("→ ")
 			}
 			fmt.Fprintf(outW, "  %s %s%s @ %s %s %s %s\n", ui.StyleUpgraded.Render("↑"), oldNamePart, ui.StyleBold.Render(c.Name), ui.StyleVersion.Render(c.BaseVersion), ui.StyleUpdateArrow.Render("→"), ui.StyleVersion.Render(c.TargetVersion), licAndDepStr)
-		case cmp.Downgraded:
+		case compare.Downgraded:
 			updatedN++
 			downgradedN++
 			oldNamePart := ""
@@ -790,7 +790,7 @@ func displayDetailedDependencyChanges(ctx context.Context, ws workspace.FS, chan
 				oldNamePart = ui.StyleDim.Render(c.OldName) + " " + ui.StyleDowngradeArrow.Render("→ ")
 			}
 			fmt.Fprintf(outW, "  %s %s%s @ %s %s %s %s\n", ui.StyleDowngraded.Render("↓"), oldNamePart, ui.StyleBold.Render(c.Name), ui.StyleVersion.Render(c.BaseVersion), ui.StyleDowngradeArrow.Render("→"), ui.StyleVersion.Render(c.TargetVersion), licAndDepStr)
-		case cmp.Updated:
+		case compare.Updated:
 			updatedN++
 			arrowStyle := ui.StyleUpdateArrow
 			symbol := ui.StyleNeutral.Render("~")
@@ -828,23 +828,23 @@ func displayDetailedDependencyChanges(ctx context.Context, ws workspace.FS, chan
 // dependencies versus those in unchanged modules. Changes marked as Added,
 // Updated, Upgraded, or Downgraded are treated as "changed" for classification
 // purposes.
-func splitVulnsByChange(vulns []analysis.Vulnerability, changes []cmp.Change) (changed, unchanged []analysis.Vulnerability) {
+func splitVulnsByChange(vulns []analysis.Vulnerability, changes []compare.Change) (changed, unchanged []analysis.Vulnerability) {
 	if len(vulns) == 0 {
 		return nil, nil
 	}
 	changedSet := map[string]bool{}
 	for _, c := range changes {
 		switch c.ChangeType {
-		case cmp.Added, cmp.Updated, cmp.Upgraded, cmp.Downgraded:
+		case compare.Added, compare.Updated, compare.Upgraded, compare.Downgraded:
 			// treat as changed
 		default:
 			continue
 		}
-		info := cmp.ParseGoPackage(&extractor.Package{Name: c.Name})
+		info := compare.ParseGoPackage(&extractor.Package{Name: c.Name})
 		changedSet[info.CanonicalName] = true
 	}
 	for _, v := range vulns {
-		info := cmp.ParseGoPackage(&extractor.Package{Name: v.Package})
+		info := compare.ParseGoPackage(&extractor.Package{Name: v.Package})
 		if changedSet[info.CanonicalName] {
 			changed = append(changed, v)
 		} else {

@@ -2,6 +2,7 @@ package cache
 
 import (
 	"testing"
+	"testing/synctest"
 	"time"
 )
 
@@ -32,15 +33,17 @@ func TestTTLCache_Table(t *testing.T) {
 		{
 			name: "Expires",
 			run: func(t *testing.T) {
-				c := NewTTLCache[string, int](10, 10*time.Millisecond)
-				c.Set("a", 1)
-				time.Sleep(25 * time.Millisecond)
-				if _, ok := c.Get("a"); ok {
-					t.Fatalf("expected expired miss")
-				}
-				if c.Stats().Expired == 0 {
-					t.Fatalf("expected expired counter increment")
-				}
+				synctest.Test(t, func(t *testing.T) {
+					c := NewTTLCache[string, int](10, 10*time.Millisecond)
+					c.Set("a", 1)
+					time.Sleep(25 * time.Millisecond)
+					if _, ok := c.Get("a"); ok {
+						t.Fatalf("expected expired miss")
+					}
+					if c.Stats().Expired == 0 {
+						t.Fatalf("expected expired counter increment")
+					}
+				})
 			},
 		},
 		{

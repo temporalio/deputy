@@ -4,7 +4,6 @@ import (
 	"cmp"
 	"maps"
 	"slices"
-	"sort"
 	"strings"
 	"time"
 
@@ -211,7 +210,7 @@ func MergeAffectedImports(importSets ...[]AffectedImport) []AffectedImport {
 	for _, p := range paths {
 		symSet := pathMap[p]
 		syms := symSet.Slice()
-		sort.Strings(syms)
+		slices.Sort(syms)
 		out = append(out, AffectedImport{Path: p, Symbols: syms})
 	}
 	return out

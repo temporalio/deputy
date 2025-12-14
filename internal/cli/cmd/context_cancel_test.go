@@ -2,13 +2,12 @@ package cmd
 
 import (
 	"context"
-	"io"
 	"os"
 	"path/filepath"
 	"testing"
 	"time"
 
-	"github.com/spf13/cobra"
+	"github.com/picatz/deputy/internal/proxy"
 )
 
 func TestProxyServeHonorsContextCancellation(t *testing.T) {
@@ -40,26 +39,35 @@ listeners:
 		t.Fatalf("write config: %v", err)
 	}
 
-	root := &cobra.Command{
-		Use:           "deputy",
-		SilenceErrors: true,
-		SilenceUsage:  true,
+	cfg, err := proxy.LoadConfig(cfgPath)
+	if err != nil {
+		t.Fatalf("load config: %v", err)
 	}
-	RegisterCommands(root)
-	root.SetOut(io.Discard)
-	root.SetErr(io.Discard)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
 
-	root.SetArgs([]string{"proxy", "serve", "--config", cfgPath})
-
 	done := make(chan error, 1)
+	started := make(chan struct{})
+	server := proxy.NewServer(cfg, proxy.Options{
+		OnListenerStart: func(_, _ string) {
+			select {
+			case <-started:
+			default:
+				close(started)
+			}
+		},
+	})
 	go func() {
-		done <- root.ExecuteContext(ctx)
+		done <- server.Serve(ctx)
 	}()
 
-	time.Sleep(50 * time.Millisecond)
+	select {
+	case <-started:
+	case <-time.After(2 * time.Second):
+		t.Fatalf("timed out waiting for proxy serve to start")
+	}
+
 	cancel()
 
 	select {
@@ -71,4 +79,3 @@ listeners:
 		t.Fatalf("timed out waiting for proxy serve to exit after cancel")
 	}
 }
-

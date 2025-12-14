@@ -7,7 +7,6 @@ import (
 	"io"
 	"maps"
 	"slices"
-	"sort"
 	"strings"
 
 	analysis "github.com/picatz/deputy/internal/analysis"
@@ -449,19 +448,27 @@ func aggregatePackages(cons []analysis.ConsolidatedVulnerability) []triagePackag
 			SeverityCounts:     info.counts,
 		})
 	}
-	sort.Slice(list, func(i, j int) bool {
-		pi, _ := severityRank(list[i].Severity)
-		pj, _ := severityRank(list[j].Severity)
-		if pi != pj {
-			return pi > pj
+	slices.SortFunc(list, func(a, b triagePackageSummary) int {
+		pa, _ := severityRank(a.Severity)
+		pb, _ := severityRank(b.Severity)
+		if pa != pb {
+			// higher severity first
+			if pa > pb {
+				return -1
+			}
+			return 1
 		}
-		if list[i].IsDirect != list[j].IsDirect {
-			return list[i].IsDirect
+		if a.IsDirect != b.IsDirect {
+			// direct first
+			if a.IsDirect {
+				return -1
+			}
+			return 1
 		}
-		if list[i].Package != list[j].Package {
-			return list[i].Package < list[j].Package
+		if c := strings.Compare(a.Package, b.Package); c != 0 {
+			return c
 		}
-		return list[i].Version < list[j].Version
+		return strings.Compare(a.Version, b.Version)
 	})
 	return list
 }

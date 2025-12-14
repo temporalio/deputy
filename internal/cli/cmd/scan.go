@@ -18,7 +18,7 @@ import (
 	"github.com/google/osv-scalibr/extractor"
 	analysis "github.com/picatz/deputy/internal/analysis"
 	"github.com/picatz/deputy/internal/collections"
-	cmp "github.com/picatz/deputy/internal/compare"
+	"github.com/picatz/deputy/internal/compare"
 	gitx "github.com/picatz/deputy/internal/gitutil"
 	inv "github.com/picatz/deputy/internal/inventory"
 	"github.com/picatz/deputy/internal/output"
@@ -188,11 +188,11 @@ func (s *Scanner) executeScan(ctx context.Context, repoArg, ref string, refProvi
 	goDirect := map[string]bool{"stdlib": true}
 	resolver := osManifestResolver(localRepoPath)
 	if strings.EqualFold(effRef, "HEAD") || strings.EqualFold(effRef, "HEAD~0") {
-		goDirect = cmp.CollectGoDirectModulesFromDisk(localRepoPath)
+		goDirect = compare.CollectGoDirectModulesFromDisk(localRepoPath)
 	} else {
 		if repo, err := git.PlainOpen(localRepoPath); err == nil {
 			if h, err := gitx.ResolveRevisionEnhanced(repo, effRef); err == nil && h != nil {
-				if direct, derr := cmp.CollectGoDirectModulesFromCommit(repo, *h); derr == nil {
+				if direct, derr := compare.CollectGoDirectModulesFromCommit(repo, *h); derr == nil {
 					goDirect = direct
 				}
 				resolver = gitManifestResolver{repo: repo, hash: *h}
@@ -577,7 +577,7 @@ func (s *Scanner) runScanDir(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to scan packages: %w", err)
 	}
 
-	goDirect := cmp.CollectGoDirectModulesFromDisk(path)
+	goDirect := compare.CollectGoDirectModulesFromDisk(path)
 	inputs := packagesToInputs(pkgs, packageInputOptions{GoDirect: goDirect, Resolver: osManifestResolver(path)})
 
 	vulns, err := s.queryOSV(ctx, inputs)

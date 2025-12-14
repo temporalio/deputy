@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"net"
-	"sync"
 	"testing"
 	"time"
 
@@ -26,15 +25,15 @@ func TestLSPDiagnosticsAndCodeActionsEndToEnd(t *testing.T) {
 	h.setConn(serverConn)
 
 	// Client-side handler to capture diagnostics notifications
-	var notifMu sync.Mutex
-	var diags []protocol.PublishDiagnosticsParams
+	diagCh := make(chan protocol.PublishDiagnosticsParams, 1)
 	clientHandler := jsonrpc2.HandlerWithError(func(ctx context.Context, conn *jsonrpc2.Conn, req *jsonrpc2.Request) (any, error) {
 		if req.Notif && req.Method == "textDocument/publishDiagnostics" {
 			var p protocol.PublishDiagnosticsParams
 			_ = json.Unmarshal(*req.Params, &p)
-			notifMu.Lock()
-			diags = append(diags, p)
-			notifMu.Unlock()
+			select {
+			case diagCh <- p:
+			default:
+			}
 			return nil, nil
 		}
 		return nil, nil
@@ -54,15 +53,12 @@ func TestLSPDiagnosticsAndCodeActionsEndToEnd(t *testing.T) {
 		t.Fatalf("didOpen: %v", err)
 	}
 
-	waitFor(t, func() bool {
-		notifMu.Lock()
-		defer notifMu.Unlock()
-		return len(diags) > 0
-	})
-
-	notifMu.Lock()
-	diag := diags[len(diags)-1]
-	notifMu.Unlock()
+	var diag protocol.PublishDiagnosticsParams
+	select {
+	case diag = <-diagCh:
+	case <-ctx.Done():
+		t.Fatalf("timed out waiting for diagnostics")
+	}
 	if len(diag.Diagnostics) == 0 {
 		t.Fatalf("expected diagnostics")
 	}
@@ -78,15 +74,4 @@ func TestLSPDiagnosticsAndCodeActionsEndToEnd(t *testing.T) {
 
 	clientConn.Close()
 	serverConn.Close()
-}
-
-func waitFor(t *testing.T, cond func() bool) {
-	deadline := time.Now().Add(1 * time.Second)
-	for time.Now().Before(deadline) {
-		if cond() {
-			return
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
-	t.Fatalf("condition not met before deadline")
 }

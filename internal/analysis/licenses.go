@@ -12,7 +12,7 @@ import (
 	nethttp "net/http"
 	"os"
 	"path/filepath"
-	"sort"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -227,7 +227,7 @@ func LocalRepoLicenseScan(ws workspace.FS) []string {
 		}
 		out = append(out, r.id)
 	}
-	sort.Strings(out)
+	slices.Sort(out)
 	return out
 }
 
@@ -259,7 +259,7 @@ func MergeLicenseSources(primary, local []string) []string {
 		return []string{"?"}
 	}
 	out := set.Slice()
-	sort.Strings(out)
+	slices.Sort(out)
 	return out
 }
 
@@ -284,7 +284,7 @@ func DetectLicenseIDs(b []byte) []string {
 		}
 		out = append(out, id)
 	}
-	sort.Strings(out)
+	slices.Sort(out)
 	return out
 }
 
@@ -912,7 +912,7 @@ func cleanLicenseList(in []string) []string {
 	if len(out) == 0 {
 		return nil
 	}
-	sort.Strings(out)
+	slices.Sort(out)
 	return out
 }
 
@@ -1004,7 +1004,7 @@ func fetchLicensesFromGitHubRaw(ctx context.Context, owner, repo, version string
 	if len(out) == 0 {
 		return nil, fmt.Errorf("no license files via raw")
 	}
-	sort.Strings(out)
+	slices.Sort(out)
 	return out, nil
 }
 

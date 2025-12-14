@@ -72,11 +72,9 @@ func TestScanShaiHuludIntegration_fetchWizIOCs(t *testing.T) {
 	t.Logf("fetched %d IOC packages from Wiz ShaiHulud CSV", len(set.packages))
 
 	// Print packages and versions, in sorted order.
-	pkgNames := slices.Collect(maps.Keys(set.packages))
-	slices.Sort(pkgNames)
+	pkgNames := slices.Sorted(maps.Keys(set.packages))
 	for _, pkg := range pkgNames {
-		versions := slices.Collect(maps.Keys(set.packages[pkg]))
-		slices.Sort(versions)
+		versions := slices.Sorted(maps.Keys(set.packages[pkg]))
 		t.Logf(" - package %s: %d versions: %v", pkg, len(versions), versions)
 	}
 }

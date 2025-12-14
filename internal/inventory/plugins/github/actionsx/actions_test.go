@@ -4,7 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
-	"sort"
+	"slices"
 	"strings"
 	"testing"
 
@@ -228,18 +228,10 @@ func packageKeys(pkgs []*extractor.Package) []string {
 		}
 		out = append(out, strings.ToLower(p.PURLType)+"|"+p.Name+"|"+p.Version)
 	}
-	sort.Strings(out)
+	slices.Sort(out)
 	return out
 }
 
 func equalStrings(a, b []string) bool {
-	if len(a) != len(b) {
-		return false
-	}
-	for i := range a {
-		if a[i] != b[i] {
-			return false
-		}
-	}
-	return true
+	return slices.Equal(a, b)
 }

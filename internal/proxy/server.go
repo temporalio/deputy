@@ -28,10 +28,11 @@ const (
 
 // Options customize server behavior from CLI flags.
 type Options struct {
-	PolicyPaths  []string
-	EnableReadyz bool
-	EnablePprof  bool
-	EnableVars   bool
+	PolicyPaths     []string
+	EnableReadyz    bool
+	EnablePprof     bool
+	EnableVars      bool
+	OnListenerStart func(name, addr string)
 }
 
 // Server manages one or more listeners defined in the configuration.
@@ -112,6 +113,9 @@ func (s *Server) serveListener(ctx context.Context, cfg ListenerConfig) error {
 	addr := ln.Addr().String()
 
 	slog.Info("proxy listener starting", "name", cfg.Name, "addr", addr, "ecosystem", ecos, "upstream", cfg.Upstream)
+	if s.opts.OnListenerStart != nil {
+		s.opts.OnListenerStart(cfg.Name, addr)
+	}
 
 	readHeaderTimeout := cfg.ReadHeaderTimeout
 	if readHeaderTimeout == 0 {

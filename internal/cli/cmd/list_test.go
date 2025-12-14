@@ -7,7 +7,7 @@ import (
 
 	"github.com/google/osv-scalibr/extractor"
 	scalpurl "github.com/google/osv-scalibr/purl"
-	cmp "github.com/picatz/deputy/internal/compare"
+	"github.com/picatz/deputy/internal/compare"
 	"github.com/picatz/deputy/internal/repository/workspace"
 )
 
@@ -19,7 +19,7 @@ require (
     github.com/acme/foo v1.0.0
     gopkg.in/yaml.v3 v3.0.1
 )`
-	goDirect := cmp.GetDirectDependenciesFromGoMod([]byte(goMod))
+	goDirect := compare.GetDirectDependenciesFromGoMod([]byte(goMod))
 
 	pkgs := []*extractor.Package{
 		{Name: "github.com/acme/foo", Version: "v1.0.0", PURLType: scalpurl.TypeGolang},
@@ -70,7 +70,7 @@ require (
     github.com/acme/foo v1.0.0
     gopkg.in/yaml.v3 v3.0.1
 )`
-	goDirect := cmp.GetDirectDependenciesFromGoMod([]byte(goMod))
+	goDirect := compare.GetDirectDependenciesFromGoMod([]byte(goMod))
 
 	pkgs := []*extractor.Package{
 		{Name: "github.com/acme/foo", Version: "v1.0.0", PURLType: scalpurl.TypeGolang},
@@ -133,7 +133,7 @@ func TestToListItems_DedupeHighestVersion(t *testing.T) {
 require (
     cloud.google.com/go v1.24.1
 )`
-	goDirect := cmp.GetDirectDependenciesFromGoMod([]byte(goMod))
+	goDirect := compare.GetDirectDependenciesFromGoMod([]byte(goMod))
 
 	pkgs := []*extractor.Package{
 		{Name: "cloud.google.com/go", Version: "v0.6.0", PURLType: scalpurl.TypeGolang},

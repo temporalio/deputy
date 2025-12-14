@@ -267,10 +267,3 @@ func calculateSimilarity(a, b string) float64 {
 	}
 	return float64(common) / float64(maxLen)
 }
-
-func max(a, b int) int {
-	if a > b {
-		return a
-	}
-	return b
-}

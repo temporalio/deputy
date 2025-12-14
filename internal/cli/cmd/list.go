@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"sort"
+	"slices"
 	"strings"
 	"time"
 
@@ -14,7 +14,7 @@ import (
 	"github.com/go-git/go-git/v5/plumbing"
 	"github.com/google/osv-scalibr/extractor"
 	scalpurl "github.com/google/osv-scalibr/purl"
-	cmp "github.com/picatz/deputy/internal/compare"
+	"github.com/picatz/deputy/internal/compare"
 	gitx "github.com/picatz/deputy/internal/gitutil"
 	inv "github.com/picatz/deputy/internal/inventory"
 	"github.com/picatz/deputy/internal/purlx"
@@ -237,10 +237,10 @@ func collectListItems(ctx context.Context, repoPath, ref string, ecosystems []st
 	goDirect := map[string]bool{"stdlib": true}
 	var manifestRes manifestResolver
 	if strings.EqualFold(effRef, "HEAD") || strings.EqualFold(effRef, "HEAD~0") {
-		goDirect = cmp.CollectGoDirectModulesFromWorkspace(ws)
+		goDirect = compare.CollectGoDirectModulesFromWorkspace(ws)
 		manifestRes = workspaceManifestResolver{ws: ws}
 	} else if targetHash != nil {
-		if direct, err := cmp.CollectGoDirectModulesFromCommit(repo, *targetHash); err == nil {
+		if direct, err := compare.CollectGoDirectModulesFromCommit(repo, *targetHash); err == nil {
 			goDirect = direct
 		}
 		manifestRes = gitManifestResolver{repo: repo, hash: *targetHash}
@@ -253,16 +253,19 @@ func collectListItems(ctx context.Context, repoPath, ref string, ecosystems []st
 	pkgSources := buildPackageSources(pkgInputs)
 
 	items := toListItems(ws, pkgs, goDirect, pkgDirect, pkgSources, showSources)
-	sort.Slice(items, func(i, j int) bool {
+	slices.SortFunc(items, func(a, b ListItem) int {
 		// Sort by PURL for stable output
-		if items[i].PURL == items[j].PURL {
-			if items[i].IsDirect == items[j].IsDirect {
-				return items[i].Name < items[j].Name
-			}
-			// direct first
-			return items[i].IsDirect && !items[j].IsDirect
+		if c := strings.Compare(a.PURL, b.PURL); c != 0 {
+			return c
 		}
-		return items[i].PURL < items[j].PURL
+		if a.IsDirect != b.IsDirect {
+			// direct first
+			if a.IsDirect {
+				return -1
+			}
+			return 1
+		}
+		return strings.Compare(a.Name, b.Name)
 	})
 
 	// Repo metadata
@@ -315,13 +318,13 @@ func toListItems(ws workspace.FS, pkgs []*extractor.Package, goDirect map[string
 			li.PURL = pu.String()
 		}
 		if strings.EqualFold(ecos, "Go") || strings.EqualFold(p.PURLType, scalpurl.TypeGolang) {
-			info := cmp.ParseGoPackage(p)
+			info := compare.ParseGoPackage(p)
 			module := bestModuleForPackage(info.CanonicalName, goDirect)
 			if module == "" {
 				module = bestModuleForPackage(p.Name, goDirect)
 			}
 			if module == "" {
-				module = cmp.GetModuleRoot(info.CanonicalName)
+				module = compare.GetModuleRoot(info.CanonicalName)
 			}
 			li.Module = module
 			if goDirect[module] {
@@ -402,7 +405,7 @@ func packageKeyFromExtractor(p *extractor.Package) string {
 		return ""
 	}
 	if strings.EqualFold(ecos, "Go") || strings.EqualFold(p.PURLType, scalpurl.TypeGolang) {
-		info := cmp.ParseGoPackage(p)
+		info := compare.ParseGoPackage(p)
 		canonical := strings.ToLower(info.CanonicalName)
 		if canonical == "" {
 			canonical = strings.ToLower(name)

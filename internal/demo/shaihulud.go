@@ -10,7 +10,7 @@ import (
 	"net/http"
 	neturl "net/url"
 	"os"
-	"sort"
+	"slices"
 	"strings"
 	"sync"
 
@@ -132,11 +132,11 @@ func ScanShaiHulud(ctx context.Context, opts Options) ([]ScanResult, error) {
 
 	_ = g.Wait()
 
-	sort.Slice(findings, func(i, j int) bool {
-		if findings[i].Owner == findings[j].Owner {
-			return findings[i].Name < findings[j].Name
+	slices.SortFunc(findings, func(a, b ScanResult) int {
+		if c := strings.Compare(a.Owner, b.Owner); c != 0 {
+			return c
 		}
-		return findings[i].Owner < findings[j].Owner
+		return strings.Compare(a.Name, b.Name)
 	})
 
 	return findings, nil
@@ -371,11 +371,11 @@ func matchPackages(pkgs []*extractor.Package, iocs iocSet) []PackageMatch {
 		}
 		matches = append(matches, match)
 	}
-	sort.Slice(matches, func(i, j int) bool {
-		if matches[i].Package == matches[j].Package {
-			return matches[i].Version < matches[j].Version
+	slices.SortFunc(matches, func(a, b PackageMatch) int {
+		if c := strings.Compare(a.Package, b.Package); c != 0 {
+			return c
 		}
-		return matches[i].Package < matches[j].Package
+		return strings.Compare(a.Version, b.Version)
 	})
 	return matches
 }
@@ -499,7 +499,7 @@ func uniqueNames(names []string) []string {
 		seen[n] = struct{}{}
 		out = append(out, n)
 	}
-	sort.Strings(out)
+	slices.Sort(out)
 	return out
 }
 

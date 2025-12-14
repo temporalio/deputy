@@ -244,11 +244,3 @@ func walkExpr(e ast.Expr, fn func(ast.Expr)) {
 		walkExpr(comp.Result(), fn)
 	}
 }
-
-// min returns the smaller of two integers.
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
-}

@@ -146,8 +146,13 @@ func runProxyExec(ctx context.Context, cfg proxyExecConfig, command []string, st
 	defer cancelEvents()
 
 	var history eventHistory
+	var eventsDone chan struct{}
 	if inst.events != nil {
-		go streamProxyEvents(eventsCtx, cfg.ecosystem, cfg.requested, inst.events, &history, stderr)
+		eventsDone = make(chan struct{})
+		go func() {
+			defer close(eventsDone)
+			streamProxyEvents(eventsCtx, cfg.ecosystem, cfg.requested, inst.events, &history, stderr)
+		}()
 	}
 
 	// Skip intro line - Deputy announces itself via block messages if/when they occur.
@@ -161,12 +166,29 @@ func runProxyExec(ctx context.Context, cfg proxyExecConfig, command []string, st
 		defer cleanup()
 	}
 	if err := execProxyCommand(ctx, command, env, stdin, stdout, stderr); err != nil {
-		// Wait a brief moment for any pending events to flush
-		time.Sleep(50 * time.Millisecond)
+		cancelEvents()
+		if eventsDone != nil {
+			<-eventsDone
+		}
+		drainProxyEvents(inst.events, &history)
 		printSummaryReport(stderr, history.All(), cfg.requested)
 		return deputyerrors.Silent(err)
 	}
 	return nil
+}
+
+func drainProxyEvents(events <-chan proxyEvent, history *eventHistory) {
+	if events == nil || history == nil {
+		return
+	}
+	for {
+		select {
+		case evt := <-events:
+			history.Add(evt)
+		default:
+			return
+		}
+	}
 }
 
 // eventHistory is a thread-safe collector for proxy events.

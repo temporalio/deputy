@@ -22,7 +22,7 @@ import (
 	"github.com/google/osv-scalibr/extractor"
 	"github.com/google/osv-scalibr/purl"
 	analysis "github.com/picatz/deputy/internal/analysis"
-	cmp "github.com/picatz/deputy/internal/compare"
+	"github.com/picatz/deputy/internal/compare"
 	gitx "github.com/picatz/deputy/internal/gitutil"
 	"github.com/picatz/deputy/internal/inventory"
 	"github.com/picatz/deputy/internal/purlx"
@@ -130,10 +130,10 @@ func Generate(ctx context.Context, repoRef string, opts Options) (Result, error)
 
 	var directDeps map[string]bool
 	if strings.EqualFold(effRef, "HEAD") || strings.EqualFold(effRef, "HEAD~0") {
-		directDeps = cmp.CollectGoDirectModulesFromWorkspace(src.Workspace)
+		directDeps = compare.CollectGoDirectModulesFromWorkspace(src.Workspace)
 	} else {
 		if hash, err := gitx.ResolveRevisionEnhanced(src.Repo, effRef); err == nil {
-			directDeps, _ = cmp.CollectGoDirectModulesFromCommit(src.Repo, *hash)
+			directDeps, _ = compare.CollectGoDirectModulesFromCommit(src.Repo, *hash)
 		}
 	}
 
@@ -280,8 +280,8 @@ func buildProtobomDocument(ws workspace.FS, repoRef, ref, name string, pkgs []*e
 		if directDeps != nil {
 			nameToCheck := p.Name
 			if pu := p.PURL(); pu != nil && pu.Type == purl.TypeGolang {
-				info := cmp.ParseGoPackage(p)
-				nameToCheck = cmp.GetModuleRoot(info.CanonicalName)
+				info := compare.ParseGoPackage(p)
+				nameToCheck = compare.GetModuleRoot(info.CanonicalName)
 			}
 			if directDeps[nameToCheck] {
 				isDirect = true
