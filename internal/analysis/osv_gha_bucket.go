@@ -11,10 +11,17 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
 
+	git "github.com/go-git/go-git/v5"
+	"github.com/go-git/go-git/v5/config"
+	"github.com/go-git/go-git/v5/plumbing"
+	"github.com/go-git/go-git/v5/plumbing/transport"
+	githttp "github.com/go-git/go-git/v5/plumbing/transport/http"
+	"github.com/go-git/go-git/v5/storage/memory"
 	"github.com/ossf/osv-schema/bindings/go/osvschema"
 	"github.com/picatz/deputy/internal/collections"
 	"github.com/picatz/deputy/internal/purlx"
@@ -77,6 +84,8 @@ var ghaHTTPClient = &http.Client{
 	},
 }
 
+var ghaGitHubTokenEnvVar = "GITHUB_TOKEN"
+
 type ghaVulnIndex struct {
 	byPkg map[string][]osvschema.Vulnerability
 }
@@ -106,6 +115,7 @@ func queryOSVGHABucketBatch(ctx context.Context, client OSVClient, pkgs []PkgInp
 		return nil, err
 	}
 	var aliasCache sync.Map
+	var majorTagCache sync.Map
 	var out []Vulnerability
 	for _, p := range pkgs {
 		version := strings.TrimSpace(p.Version)
@@ -116,15 +126,21 @@ func queryOSVGHABucketBatch(ctx context.Context, client OSVClient, pkgs []PkgInp
 		if normalized.Name == "" {
 			continue
 		}
+		effective := normalized
+		effectiveVersion := version
+		if resolved := resolveGitHubActionsVersion(ctx, &majorTagCache, normalized.Name, version); resolved != "" {
+			effectiveVersion = resolved
+			effective.Version = resolved
+		}
 		candidates := idx.byPkg[strings.ToLower(normalized.Name)]
 		if len(candidates) == 0 {
 			continue
 		}
 		for _, v := range candidates {
-			if !versionAffectedByGHARanges(v, normalized) {
+			if !versionAffectedByGHARanges(v, effective, effectiveVersion) {
 				continue
 			}
-			base := ProcessOSVVulnerability(v, normalized)
+			base := ProcessOSVVulnerability(v, effective)
 			base.Affected = true
 			var extras []Vulnerability
 			skip := false
@@ -143,16 +159,16 @@ func queryOSVGHABucketBatch(ctx context.Context, client OSVClient, pkgs []PkgInp
 					aliasCache.Store(alias, aliasV)
 				}
 				if !slices.ContainsFunc(aliasV.Affected, func(a osvschema.Affected) bool {
-					return matchesPackage(a.Package, normalized)
+					return matchesPackage(a.Package, effective)
 				}) {
 					continue
 				}
-				if !versionAffectedByGHARanges(*aliasV, normalized) {
+				if !versionAffectedByGHARanges(*aliasV, effective, effectiveVersion) {
 					skip = true
 					break
 				}
 				{
-					pv := ProcessOSVVulnerability(*aliasV, normalized)
+					pv := ProcessOSVVulnerability(*aliasV, effective)
 					extras = append(extras, pv)
 				}
 			}
@@ -205,6 +221,141 @@ func queryOSVGHABucketBatch(ctx context.Context, client OSVClient, pkgs []PkgInp
 	return out, nil
 }
 
+func resolveGitHubActionsVersion(ctx context.Context, cache *sync.Map, name, version string) string {
+	name = strings.TrimSpace(name)
+	version = strings.TrimSpace(version)
+	if name == "" || version == "" {
+		return ""
+	}
+	major, ok := parseGHAMajorRef(version)
+	if !ok && normalizeSemverVersion(version) != "" {
+		// Fully specified semver doesn't need resolution.
+		// Note: x/mod/semver treats "v4" as valid ("v4.0.0"), but we still want to
+		// resolve the rolling major tag when the user requested "v4".
+		return ""
+	}
+	if !ok {
+		return ""
+	}
+
+	key := name + "@v" + strconv.Itoa(major)
+	if cache != nil {
+		if v, ok := cache.Load(key); ok {
+			if s, ok := v.(string); ok {
+				return s
+			}
+			return ""
+		}
+	}
+
+	resolved := resolveGHAMajorTagToHighestSemver(ctx, name, major)
+	if cache != nil {
+		cache.Store(key, resolved)
+	}
+	return resolved
+}
+
+// parseGHAMajorRef extracts the major version from a GitHub Actions "rolling major"
+// reference like "v4" or "4".
+//
+// It returns ok=false for non-major refs such as "v4.2.0", commit SHAs, or empty
+// strings.
+func parseGHAMajorRef(v string) (int, bool) {
+	v = strings.TrimSpace(v)
+	if v == "" {
+		return 0, false
+	}
+	if strings.HasPrefix(v, "v") {
+		v = strings.TrimPrefix(v, "v")
+	}
+	if strings.Contains(v, ".") {
+		return 0, false
+	}
+	n, err := strconv.Atoi(v)
+	if err != nil || n <= 0 {
+		return 0, false
+	}
+	return n, true
+}
+
+var ghaListRemoteRefs = listRemoteRefs
+
+// resolveGHAMajorTagToHighestSemver resolves a major tag (like "v4") by listing
+// remote tags and selecting the highest "v4.x.y" tag.
+//
+// This is needed because GitHub Actions often recommend pinning to a major
+// (or major.minor) tag, which is a moving reference.
+func resolveGHAMajorTagToHighestSemver(ctx context.Context, repo string, major int) string {
+	if major <= 0 {
+		return ""
+	}
+	repo = strings.TrimSpace(repo)
+	if repo == "" || !strings.Contains(repo, "/") {
+		return ""
+	}
+	remoteURL := fmt.Sprintf("https://github.com/%s.git", repo)
+	refs, err := ghaListRemoteRefs(ctx, remoteURL)
+	if err != nil || len(refs) == 0 {
+		return ""
+	}
+
+	wantPrefix := "v" + strconv.Itoa(major) + "."
+	best := ""
+	for _, refName := range refs {
+		if !strings.HasPrefix(refName, "refs/tags/") {
+			continue
+		}
+		name := strings.TrimPrefix(refName, "refs/tags/")
+		name = strings.TrimSuffix(name, "^{}")
+		name = strings.TrimSpace(name)
+		if name == "" || !strings.HasPrefix(name, wantPrefix) {
+			continue
+		}
+		sv := normalizeSemverVersion(name)
+		if sv == "" {
+			continue
+		}
+		if best == "" || semver.Compare(sv, best) > 0 {
+			best = sv
+		}
+	}
+	return best
+}
+
+// gitHubAuthFromEnv returns a GitHub HTTPS auth method if GITHUB_TOKEN is set.
+func gitHubAuthFromEnv() transport.AuthMethod {
+	tok := strings.TrimSpace(os.Getenv(ghaGitHubTokenEnvVar))
+	if tok == "" {
+		return nil
+	}
+	return &githttp.BasicAuth{Username: "x-access-token", Password: tok}
+}
+
+// listRemoteRefs lists remote refs using go-git (similar to `git ls-remote`).
+func listRemoteRefs(ctx context.Context, remoteURL string) ([]string, error) {
+	remoteURL = strings.TrimSpace(remoteURL)
+	if remoteURL == "" {
+		return nil, fmt.Errorf("empty remote URL")
+	}
+	r := git.NewRemote(memory.NewStorage(), &config.RemoteConfig{Name: "origin", URLs: []string{remoteURL}})
+	refs, err := r.ListContext(ctx, &git.ListOptions{Auth: gitHubAuthFromEnv()})
+	if err != nil {
+		return nil, err
+	}
+	out := make([]string, 0, len(refs))
+	for _, ref := range refs {
+		if ref == nil {
+			continue
+		}
+		name := ref.Name()
+		if name == "" || name == plumbing.HEAD {
+			continue
+		}
+		out = append(out, name.String())
+	}
+	return out, nil
+}
+
 // normalizeGitHubActionsInput canonicalizes a GitHub Actions PkgInput for matching:
 // - Ecosystem is set to "GitHub Actions"
 // - github.com/ prefix is stripped from names
@@ -229,8 +380,11 @@ func normalizeGitHubActionsInput(in PkgInput) PkgInput {
 
 // versionAffectedByGHARanges evaluates whether pkg.Version falls within any
 // SEMVER or ECOSYSTEM ranges for GitHub Actions vulnerabilities.
-func versionAffectedByGHARanges(v osvschema.Vulnerability, pkg PkgInput) bool {
-	cur := normalizeSemverVersion(pkg.Version)
+func versionAffectedByGHARanges(v osvschema.Vulnerability, pkg PkgInput, version string) bool {
+	if strings.TrimSpace(version) == "" {
+		version = pkg.Version
+	}
+	cur := normalizeSemverVersion(version)
 	if cur == "" {
 		for _, a := range v.Affected {
 			if matchesPackage(a.Package, pkg) {

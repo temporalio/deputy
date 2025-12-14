@@ -97,10 +97,228 @@ func TestVersionAffectedByGHARanges_Table(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.version, func(t *testing.T) {
 			pkg := PkgInput{Name: "owner/repo", Version: tc.version, Ecosystem: "GitHub Actions"}
-			if got := versionAffectedByGHARanges(vuln, pkg); got != tc.want {
+			if got := versionAffectedByGHARanges(vuln, pkg, tc.version); got != tc.want {
 				t.Fatalf("versionAffectedByGHARanges(%q) = %v, want %v", tc.version, got, tc.want)
 			}
 		})
+	}
+}
+
+func TestParseGHAMajorRef_Table(t *testing.T) {
+	tests := []struct {
+		in   string
+		want int
+		ok   bool
+	}{
+		{"v4", 4, true},
+		{"4", 4, true},
+		{" v4 ", 4, true},
+		{"v04", 4, true},
+		{"v0", 0, false},
+		{"0", 0, false},
+		{"v4.2.0", 0, false},
+		{"4.2.0", 0, false},
+		{"", 0, false},
+		{"deadbeef", 0, false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.in, func(t *testing.T) {
+			got, ok := parseGHAMajorRef(tc.in)
+			if ok != tc.ok || got != tc.want {
+				t.Fatalf("parseGHAMajorRef(%q) = %d,%v want %d,%v", tc.in, got, ok, tc.want, tc.ok)
+			}
+		})
+	}
+}
+
+func TestResolveGitHubActionsVersion_Table(t *testing.T) {
+	origList := ghaListRemoteRefs
+	t.Cleanup(func() { ghaListRemoteRefs = origList })
+
+	tests := []struct {
+		name       string
+		repo       string
+		version    string
+		refs       []string
+		want       string
+		wantCalled bool
+	}{
+		{
+			name:       "fully specified semver skips lookup",
+			repo:       "owner/repo",
+			version:    "v4.2.0",
+			refs:       []string{"refs/tags/v4.3.0"},
+			want:       "",
+			wantCalled: false,
+		},
+		{
+			name:       "rolling major resolves to highest patch",
+			repo:       "owner/repo",
+			version:    "v4",
+			refs:       []string{"refs/tags/v4", "refs/tags/v4.1.3", "refs/tags/v4.2.0", "refs/tags/v3.9.9"},
+			want:       "v4.2.0",
+			wantCalled: true,
+		},
+		{
+			name:       "annotated tags are handled",
+			repo:       "owner/repo",
+			version:    "v4",
+			refs:       []string{"refs/tags/v4.2.0^{}", "refs/tags/v4.1.3"},
+			want:       "v4.2.0",
+			wantCalled: true,
+		},
+		{
+			name:       "no matching tags yields empty",
+			repo:       "owner/repo",
+			version:    "v4",
+			refs:       []string{"refs/tags/v5.0.0"},
+			want:       "",
+			wantCalled: true,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			called := false
+			ghaListRemoteRefs = func(_ context.Context, remoteURL string) ([]string, error) {
+				called = true
+				if remoteURL != "https://github.com/"+tc.repo+".git" {
+					t.Fatalf("unexpected remoteURL %q", remoteURL)
+				}
+				return tc.refs, nil
+			}
+			got := resolveGitHubActionsVersion(context.Background(), &sync.Map{}, tc.repo, tc.version)
+			if got != tc.want {
+				t.Fatalf("resolveGitHubActionsVersion(%q,%q)=%q want %q", tc.repo, tc.version, got, tc.want)
+			}
+			if called != tc.wantCalled {
+				t.Fatalf("called=%v want %v", called, tc.wantCalled)
+			}
+		})
+	}
+}
+
+func TestQueryOSVGHABucketBatch_MajorTagResolutionAvoidsFalsePositive(t *testing.T) {
+	resetGHATestState()
+	tmp := t.TempDir()
+	t.Setenv("DEPUTY_CACHE_DIR", tmp)
+	cacheDirOnce = sync.Once{}
+	cacheDirPath = ""
+
+	zipPath := filepath.Join(tmp, ghaCacheSubdir, ghaZipFilename)
+	if err := os.MkdirAll(filepath.Dir(zipPath), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+
+	vuln := osvschema.Vulnerability{
+		ID: "GHSA-major-tag",
+		Affected: []osvschema.Affected{
+			{
+				Package: osvschema.Package{Name: "actions/download-artifact", Ecosystem: string(osvschema.EcosystemGitHubActions)},
+				Ranges: []osvschema.Range{
+					{
+						Type: osvschema.RangeEcosystem,
+						Events: []osvschema.Event{
+							{Introduced: "0"},
+							{Fixed: "4.1.3"},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	if err := writeGHATestZip(zipPath, map[string]osvschema.Vulnerability{
+		"GHSA-major-tag.json": vuln,
+	}); err != nil {
+		t.Fatalf("write zip: %v", err)
+	}
+	now := time.Now()
+	_ = os.Chtimes(zipPath, now, now)
+
+	origList := ghaListRemoteRefs
+	ghaListRemoteRefs = func(_ context.Context, remoteURL string) ([]string, error) {
+		if remoteURL != "https://github.com/actions/download-artifact.git" {
+			t.Fatalf("unexpected remoteURL %q", remoteURL)
+		}
+		return []string{
+			"refs/tags/v4",
+			"refs/tags/v4.2.0",
+			"refs/tags/v4.1.3",
+		}, nil
+	}
+	t.Cleanup(func() { ghaListRemoteRefs = origList })
+
+	got, err := queryOSVGHABucketBatch(context.Background(), nil, []PkgInput{
+		{Name: "actions/download-artifact", Version: "v4", Ecosystem: "GitHub Actions"},
+	})
+	if err != nil {
+		t.Fatalf("queryOSVGHABucketBatch: %v", err)
+	}
+	if len(got) != 0 {
+		t.Fatalf("expected no vulnerabilities for rolling v4 tag that resolves >= fixed, got %#v", got)
+	}
+}
+
+func TestQueryOSVGHABucketBatch_MajorTagResolutionReportsEffectiveVersion(t *testing.T) {
+	resetGHATestState()
+	tmp := t.TempDir()
+	t.Setenv("DEPUTY_CACHE_DIR", tmp)
+	cacheDirOnce = sync.Once{}
+	cacheDirPath = ""
+
+	zipPath := filepath.Join(tmp, ghaCacheSubdir, ghaZipFilename)
+	if err := os.MkdirAll(filepath.Dir(zipPath), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+
+	vuln := osvschema.Vulnerability{
+		ID: "GHSA-major-tag-vuln",
+		Affected: []osvschema.Affected{
+			{
+				Package: osvschema.Package{Name: "actions/download-artifact", Ecosystem: string(osvschema.EcosystemGitHubActions)},
+				Ranges: []osvschema.Range{
+					{
+						Type: osvschema.RangeEcosystem,
+						Events: []osvschema.Event{
+							{Introduced: "0"},
+							{Fixed: "4.2.0"},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	if err := writeGHATestZip(zipPath, map[string]osvschema.Vulnerability{
+		"GHSA-major-tag-vuln.json": vuln,
+	}); err != nil {
+		t.Fatalf("write zip: %v", err)
+	}
+	now := time.Now()
+	_ = os.Chtimes(zipPath, now, now)
+
+	origList := ghaListRemoteRefs
+	ghaListRemoteRefs = func(_ context.Context, remoteURL string) ([]string, error) {
+		if remoteURL != "https://github.com/actions/download-artifact.git" {
+			t.Fatalf("unexpected remoteURL %q", remoteURL)
+		}
+		// Highest v4.x.y is below fixed.
+		return []string{"refs/tags/v4", "refs/tags/v4.1.3"}, nil
+	}
+	t.Cleanup(func() { ghaListRemoteRefs = origList })
+
+	got, err := queryOSVGHABucketBatch(context.Background(), nil, []PkgInput{
+		{Name: "actions/download-artifact", Version: "v4", Ecosystem: "GitHub Actions"},
+	})
+	if err != nil {
+		t.Fatalf("queryOSVGHABucketBatch: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("expected 1 vulnerability, got %#v", got)
+	}
+	if got[0].Version != "v4.1.3" {
+		t.Fatalf("expected effective version v4.1.3, got %q", got[0].Version)
 	}
 }
 
