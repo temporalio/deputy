@@ -442,6 +442,8 @@ func packagesToInputs(pkgs []*extractor.Package, opts packageInputOptions) []ana
 			switch manager {
 			case "go":
 				// direct already handled via GoDirect map
+			case purlx.TypeGitHubActions:
+				entry.IsDirect = true
 			case "npm", "yarn", "pnpm":
 				if cache != nil {
 					groups, err := cache.groupsForPackage(manifestPath, name)
@@ -503,6 +505,12 @@ func packagesToInputs(pkgs []*extractor.Package, opts packageInputOptions) []ana
 // detectManager identifies the package manager and manifest path for a given location.
 func detectManager(location, purlType string) (string, string, bool) {
 	loc := filepath.ToSlash(location)
+	if strings.HasPrefix(loc, ".github/workflows/") {
+		ext := strings.ToLower(path.Ext(loc))
+		if ext == ".yml" || ext == ".yaml" {
+			return purlx.TypeGitHubActions, loc, true
+		}
+	}
 	base := path.Base(loc)
 	dir := path.Dir(loc)
 	switch base {
@@ -534,6 +542,8 @@ func detectManager(location, purlType string) (string, string, bool) {
 		if strings.EqualFold(purlType, "npm") {
 			return "npm", loc, true
 		}
+	case "action.yml", "action.yaml":
+		return purlx.TypeGitHubActions, loc, true
 	default:
 		if strings.HasSuffix(base, ".gemspec") {
 			return "gem", loc, true

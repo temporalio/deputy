@@ -1,6 +1,7 @@
 package sbomx
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
@@ -10,7 +11,11 @@ import (
 	"github.com/go-git/go-git/v5"
 	"github.com/go-git/go-git/v5/plumbing"
 	"github.com/go-git/go-git/v5/plumbing/object"
+	"github.com/go-git/go-git/v5/plumbing/transport"
+	"github.com/google/osv-scalibr/extractor"
+	"github.com/picatz/deputy/internal/purlx"
 	"github.com/picatz/deputy/internal/repository/workspace"
+	"github.com/protobom/protobom/pkg/sbom"
 )
 
 // helper to create a temporary git repo with an initial commit and optional branches
@@ -200,5 +205,69 @@ func Test_ResolveReferenceName_Variants(t *testing.T) {
 		if c.in == "refs/tags/v0.1.0" && !strings.HasPrefix(ref.String(), "refs/tags/") {
 			t.Errorf("expected tags prefix for tag, got %s", ref)
 		}
+	}
+}
+
+func TestBuildProtobomDocument_GitHubActionsResolutionProperties(t *testing.T) {
+	orig := listRemoteRefsForSBOM
+	t.Cleanup(func() { listRemoteRefsForSBOM = orig })
+
+	listRemoteRefsForSBOM = func(ctx context.Context, remoteURL string, _ transport.AuthMethod) ([]*plumbing.Reference, error) {
+		if remoteURL != "https://github.com/actions/checkout.git" {
+			t.Fatalf("unexpected remoteURL %q", remoteURL)
+		}
+		return []*plumbing.Reference{
+			plumbing.NewHashReference(plumbing.ReferenceName("refs/tags/v2"), plumbing.NewHash("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")),
+			plumbing.NewHashReference(plumbing.ReferenceName("refs/tags/v2.0.0"), plumbing.NewHash("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb")),
+			plumbing.NewHashReference(plumbing.ReferenceName("refs/tags/v2.1.3"), plumbing.NewHash("cccccccccccccccccccccccccccccccccccccccc")),
+			plumbing.NewHashReference(plumbing.ReferenceName("refs/tags/v2.1.3^{}"), plumbing.NewHash("dddddddddddddddddddddddddddddddddddddddd")),
+			plumbing.NewHashReference(plumbing.ReferenceName("refs/tags/v2.2.0"), plumbing.NewHash("eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee")),
+		}, nil
+	}
+
+	ws := workspace.NewMemory()
+	defer ws.Close()
+
+	doc, err := buildProtobomDocument(t.Context(), ws, "https://example.invalid/repo.git", "HEAD", "test", []*extractor.Package{
+		{Name: "actions/checkout", Version: "v2", PURLType: purlx.TypeGitHubActions},
+	}, nil)
+	if err != nil {
+		t.Fatalf("buildProtobomDocument: %v", err)
+	}
+
+	var node *sbom.Node
+	for _, n := range doc.GetNodeList().GetNodes() {
+		if n == nil {
+			continue
+		}
+		if got := n.GetIdentifiers()[int32(sbom.SoftwareIdentifierType_PURL)]; got == "pkg:githubactions/actions/checkout@v2" {
+			node = n
+			break
+		}
+	}
+	if node == nil {
+		t.Fatalf("expected github actions node")
+	}
+	if node.GetVersion() != "v2" {
+		t.Fatalf("expected node version to remain requested ref v2, got %q", node.GetVersion())
+	}
+	props := map[string]string{}
+	for _, p := range node.GetProperties() {
+		props[p.GetName()] = p.GetData()
+	}
+	if props["deputy:requestedRef"] != "v2" {
+		t.Fatalf("requestedRef=%q", props["deputy:requestedRef"])
+	}
+	if props["deputy:direct"] != "true" {
+		t.Fatalf("direct=%q", props["deputy:direct"])
+	}
+	if props["deputy:resolvedVersion"] != "v2.2.0" {
+		t.Fatalf("resolvedVersion=%q", props["deputy:resolvedVersion"])
+	}
+	if props["deputy:resolvedTag"] != "v2.2.0" {
+		t.Fatalf("resolvedTag=%q", props["deputy:resolvedTag"])
+	}
+	if props["deputy:resolvedCommit"] != "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee" {
+		t.Fatalf("resolvedCommit=%q", props["deputy:resolvedCommit"])
 	}
 }

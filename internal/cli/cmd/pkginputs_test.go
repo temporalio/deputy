@@ -11,6 +11,7 @@ import (
 	scalpurl "github.com/google/osv-scalibr/purl"
 	analysis "github.com/picatz/deputy/internal/analysis"
 	"github.com/picatz/deputy/internal/compare"
+	"github.com/picatz/deputy/internal/purlx"
 )
 
 // Test that packagesToInputs includes all packages and determines directness
@@ -51,6 +52,56 @@ require (
 	}
 	if !directFound || !indirectFound {
 		t.Fatalf("missing expected inputs: %+v", inputs)
+	}
+}
+
+func TestPackagesToInputs_GitHubActions_WorkflowUsesAreDirect(t *testing.T) {
+	pkgs := []*extractor.Package{
+		{
+			Name:      "actions/download-artifact",
+			Version:   "v4",
+			PURLType:  purlx.TypeGitHubActions,
+			Locations: []string{".github/workflows/build.yaml"},
+		},
+	}
+
+	inputs := packagesToInputs(pkgs, packageInputOptions{})
+	if len(inputs) != 1 {
+		t.Fatalf("expected 1 input, got %d", len(inputs))
+	}
+	if !inputs[0].IsDirect {
+		t.Fatalf("expected GitHub Actions workflow dependency to be direct, got %+v", inputs[0])
+	}
+	if len(inputs[0].ManifestRefs) != 1 {
+		t.Fatalf("expected 1 manifest ref, got %+v", inputs[0].ManifestRefs)
+	}
+	if inputs[0].ManifestRefs[0].Manager != purlx.TypeGitHubActions || inputs[0].ManifestRefs[0].Path != ".github/workflows/build.yaml" {
+		t.Fatalf("unexpected manifest ref %+v", inputs[0].ManifestRefs[0])
+	}
+}
+
+func TestPackagesToInputs_GitHubActions_ActionManifestUsesAreDirect(t *testing.T) {
+	pkgs := []*extractor.Package{
+		{
+			Name:      "actions/checkout",
+			Version:   "v4",
+			PURLType:  purlx.TypeGitHubActions,
+			Locations: []string{"tools/action/action.yml"},
+		},
+	}
+
+	inputs := packagesToInputs(pkgs, packageInputOptions{})
+	if len(inputs) != 1 {
+		t.Fatalf("expected 1 input, got %d", len(inputs))
+	}
+	if !inputs[0].IsDirect {
+		t.Fatalf("expected GitHub Actions action.yml dependency to be direct, got %+v", inputs[0])
+	}
+	if len(inputs[0].ManifestRefs) != 1 {
+		t.Fatalf("expected 1 manifest ref, got %+v", inputs[0].ManifestRefs)
+	}
+	if inputs[0].ManifestRefs[0].Manager != purlx.TypeGitHubActions || inputs[0].ManifestRefs[0].Path != "tools/action/action.yml" {
+		t.Fatalf("unexpected manifest ref %+v", inputs[0].ManifestRefs[0])
 	}
 }
 

@@ -400,6 +400,9 @@ func packageKeyFromExtractor(p *extractor.Package) string {
 	if ecos == "" && p.PURLType != "" {
 		ecos = p.PURLType
 	}
+	if purlx.IsGitHubActionsType(ecos) {
+		ecos = "GitHub Actions"
+	}
 	name := strings.TrimSpace(p.Name)
 	if name == "" {
 		return ""

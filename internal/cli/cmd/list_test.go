@@ -7,7 +7,9 @@ import (
 
 	"github.com/google/osv-scalibr/extractor"
 	scalpurl "github.com/google/osv-scalibr/purl"
+	analysis "github.com/picatz/deputy/internal/analysis"
 	"github.com/picatz/deputy/internal/compare"
+	"github.com/picatz/deputy/internal/purlx"
 	"github.com/picatz/deputy/internal/repository/workspace"
 )
 
@@ -60,6 +62,36 @@ require (
 	}
 	if !seenFoo || !seenYaml {
 		t.Fatalf("missing expected items: %+v", items)
+	}
+}
+
+func TestToListItems_GitHubActionsDirectness_UsesPkgDirectKey(t *testing.T) {
+	ws := workspace.NewMemory()
+	defer ws.Close()
+
+	inputs := []analysis.PkgInput{
+		{
+			Name:      "actions/download-artifact",
+			Version:   "v4",
+			Ecosystem: "GitHub Actions",
+			IsDirect:  true,
+		},
+	}
+	pkgDirect := buildPackageDirectMap(inputs)
+	pkgs := []*extractor.Package{
+		{
+			Name:     "actions/download-artifact",
+			Version:  "v4",
+			PURLType: purlx.TypeGitHubActions,
+		},
+	}
+
+	items := toListItems(ws, pkgs, nil, pkgDirect, nil, false)
+	if len(items) != 1 {
+		t.Fatalf("expected 1 item, got %#v", items)
+	}
+	if !items[0].IsDirect {
+		t.Fatalf("expected GitHub Actions dependency to be direct, got %#v", items[0])
 	}
 }
 

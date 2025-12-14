@@ -7,7 +7,9 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	neturl "net/url"
@@ -32,6 +34,7 @@ import (
 	"github.com/protobom/protobom/pkg/sbom"
 	"github.com/protobom/protobom/pkg/writer"
 	"golang.org/x/mod/modfile"
+	"golang.org/x/mod/semver"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/protobuf/encoding/protojson"
@@ -137,7 +140,7 @@ func Generate(ctx context.Context, repoRef string, opts Options) (Result, error)
 		}
 	}
 
-	doc, err := buildProtobomDocument(src.Workspace, repoRef, opts.Ref, opts.Name, pkgs, directDeps)
+	doc, err := buildProtobomDocument(ctx, src.Workspace, repoRef, opts.Ref, opts.Name, pkgs, directDeps)
 	if err != nil {
 		return Result{}, err
 	}
@@ -229,7 +232,7 @@ func resolveRepoMetadata(repo *git.Repository, ref, fallbackOrigin string) (stri
 }
 
 // buildProtobomDocument converts the scalibr packages into a Protobom doc.
-func buildProtobomDocument(ws workspace.FS, repoRef, ref, name string, pkgs []*extractor.Package, directDeps map[string]bool) (*sbom.Document, error) {
+func buildProtobomDocument(ctx context.Context, ws workspace.FS, repoRef, ref, name string, pkgs []*extractor.Package, directDeps map[string]bool) (*sbom.Document, error) {
 	if name == "" {
 		name = fmt.Sprintf("%s@%s", repoRef, ref)
 	}
@@ -244,6 +247,8 @@ func buildProtobomDocument(ws workspace.FS, repoRef, ref, name string, pkgs []*e
 	app.Name = name
 	d.NodeList.Nodes = append(d.NodeList.Nodes, app)
 	d.NodeList.RootElements = append(d.NodeList.RootElements, app.Id)
+
+	ghaCache := &githubActionsResolutionCache{}
 
 	for _, p := range pkgs {
 		if p == nil || p.Name == "" {
@@ -269,6 +274,34 @@ func buildProtobomDocument(ws workspace.FS, repoRef, ref, name string, pkgs []*e
 				n.Identifiers = map[int32]string{}
 			}
 			n.Identifiers[int32(sbom.SoftwareIdentifierType_PURL)] = purlStr
+		}
+
+		if purlx.IsGitHubActionsType(p.PURLType) {
+			// Preserve the uses ref as written in the workflow/action file, but
+			// also attach a best-effort resolved tag+commit for higher-fidelity SBOMs.
+			n.Properties = append(n.Properties, &sbom.Property{
+				Name: "deputy:requestedRef",
+				Data: strings.TrimSpace(p.Version),
+			})
+			// GitHub Actions "uses: owner/repo@v2" is effectively a moving tag.
+			// We treat it as a direct dependency in Deputy's SCA model.
+			n.Properties = append(n.Properties, &sbom.Property{
+				Name: "deputy:direct",
+				Data: "true",
+			})
+			if ctx == nil {
+				ctx = context.Background()
+			}
+			res := resolveGitHubActionsRefForSBOM(ctx, ghaCache, p.Name, p.Version)
+			if res.ResolvedTag != "" {
+				n.Properties = append(n.Properties, &sbom.Property{Name: "deputy:resolvedTag", Data: res.ResolvedTag})
+			}
+			if res.ResolvedVersion != "" {
+				n.Properties = append(n.Properties, &sbom.Property{Name: "deputy:resolvedVersion", Data: res.ResolvedVersion})
+			}
+			if res.ResolvedCommit != "" {
+				n.Properties = append(n.Properties, &sbom.Property{Name: "deputy:resolvedCommit", Data: res.ResolvedCommit})
+			}
 		}
 
 		// Mark direct dependencies.
@@ -650,6 +683,225 @@ func discoverDefaultBranch(ctx context.Context, remoteURL string, auth transport
 		return "refs/heads/master"
 	}
 	return "refs/heads/main"
+}
+
+func listRemoteRefs(ctx context.Context, remoteURL string, auth transport.AuthMethod) ([]*plumbing.Reference, error) {
+	r := git.NewRemote(memory.NewStorage(), &config.RemoteConfig{Name: "origin", URLs: []string{remoteURL}})
+	return r.ListContext(ctx, &git.ListOptions{Auth: auth})
+}
+
+type githubActionsResolution struct {
+	ResolvedTag     string
+	ResolvedVersion string
+	ResolvedCommit  string
+}
+
+type githubActionsResolutionCache struct {
+	mu    sync.Mutex
+	cache map[string]githubActionsResolution
+}
+
+func (c *githubActionsResolutionCache) get(key string) (githubActionsResolution, bool) {
+	if c == nil {
+		return githubActionsResolution{}, false
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.cache == nil {
+		return githubActionsResolution{}, false
+	}
+	v, ok := c.cache[key]
+	return v, ok
+}
+
+func (c *githubActionsResolutionCache) set(key string, v githubActionsResolution) {
+	if c == nil {
+		return
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.cache == nil {
+		c.cache = map[string]githubActionsResolution{}
+	}
+	c.cache[key] = v
+}
+
+var listRemoteRefsForSBOM = listRemoteRefs
+
+// resolveGitHubActionsRefForSBOM resolves a GitHub Actions repository ref (e.g. "v2")
+// to a more specific immutable reference when possible (e.g. highest "v2.x.y" tag)
+// and includes its commit hash.
+//
+// Resolution is best-effort: failures return an empty result and should not fail SBOM generation.
+func resolveGitHubActionsRefForSBOM(ctx context.Context, cache *githubActionsResolutionCache, repo, ref string) githubActionsResolution {
+	repo = strings.TrimSpace(repo)
+	ref = strings.TrimSpace(ref)
+	if repo == "" || ref == "" {
+		return githubActionsResolution{}
+	}
+	key := repo + "@" + ref
+	if v, ok := cache.get(key); ok {
+		return v
+	}
+
+	remoteURL := ToHTTPSGitURL("github.com/" + repo)
+	if remoteURL == "" {
+		cache.set(key, githubActionsResolution{})
+		return githubActionsResolution{}
+	}
+
+	refs, err := listRemoteRefsForSBOM(ctx, remoteURL, AuthForURL(remoteURL))
+	if err != nil || len(refs) == 0 {
+		cache.set(key, githubActionsResolution{})
+		return githubActionsResolution{}
+	}
+
+	resolved := resolveGitHubActionsRefFromRefs(refs, ref)
+	cache.set(key, resolved)
+	return resolved
+}
+
+// resolveGitHubActionsRefFromRefs resolves a ref using an already-listed remote ref set.
+// It is deterministic and does not perform network calls (used by tests).
+func resolveGitHubActionsRefFromRefs(refs []*plumbing.Reference, requested string) githubActionsResolution {
+	requested = strings.TrimSpace(requested)
+	if requested == "" || len(refs) == 0 {
+		return githubActionsResolution{}
+	}
+	if looksLikeCommitSHA(requested) {
+		return githubActionsResolution{ResolvedCommit: requested}
+	}
+
+	peeled := map[string]string{}
+	raw := map[string]string{}
+	for _, r := range refs {
+		if r == nil {
+			continue
+		}
+		name := r.Name().String()
+		if name == "" {
+			continue
+		}
+		hash := r.Hash().String()
+		if strings.HasSuffix(name, "^{}") {
+			peeled[strings.TrimSuffix(name, "^{}")] = hash
+			continue
+		}
+		raw[name] = hash
+	}
+	commitForTag := func(tag string) string {
+		if tag == "" {
+			return ""
+		}
+		full := "refs/tags/" + tag
+		if h := peeled[full]; h != "" {
+			return h
+		}
+		return raw[full]
+	}
+	commitForHead := func(branch string) string {
+		full := "refs/heads/" + branch
+		return raw[full]
+	}
+
+	// If this is a rolling major/minor reference, pick the highest matching semver tag.
+	if major, minor, ok := parseGHARollingRef(requested); ok {
+		best := ""
+		for name := range raw {
+			if !strings.HasPrefix(name, "refs/tags/") {
+				continue
+			}
+			tag := strings.TrimPrefix(name, "refs/tags/")
+			tag = strings.TrimSuffix(tag, "^{}")
+			if !strings.HasPrefix(tag, "v") {
+				continue
+			}
+			canon := semver.Canonical(tag)
+			if canon == "" {
+				continue
+			}
+			if semver.Major(canon) != fmt.Sprintf("v%d", major) {
+				continue
+			}
+			if minor >= 0 && semver.MajorMinor(canon) != fmt.Sprintf("v%d.%d", major, minor) {
+				continue
+			}
+			if best == "" || semver.Compare(canon, best) > 0 {
+				best = canon
+			}
+		}
+		if best != "" {
+			tag := best
+			commit := commitForTag(tag)
+			return githubActionsResolution{ResolvedTag: tag, ResolvedVersion: tag, ResolvedCommit: commit}
+		}
+		return githubActionsResolution{}
+	}
+
+	// Immutable semver tag: resolve to its commit.
+	if canon := semver.Canonical(requested); canon != "" && strings.Count(strings.TrimPrefix(canon, "v"), ".") == 2 {
+		commit := commitForTag(canon)
+		if commit != "" {
+			return githubActionsResolution{ResolvedTag: canon, ResolvedVersion: canon, ResolvedCommit: commit}
+		}
+	}
+
+	// Try tags/branches by name as a best-effort for "master"/"main".
+	if h := commitForTag(requested); h != "" {
+		return githubActionsResolution{ResolvedTag: requested, ResolvedCommit: h}
+	}
+	if h := commitForHead(requested); h != "" {
+		return githubActionsResolution{ResolvedTag: requested, ResolvedCommit: h}
+	}
+	return githubActionsResolution{}
+}
+
+func looksLikeCommitSHA(s string) bool {
+	s = strings.TrimSpace(s)
+	if len(s) != 40 {
+		return false
+	}
+	for _, r := range s {
+		switch {
+		case r >= '0' && r <= '9':
+		case r >= 'a' && r <= 'f':
+		case r >= 'A' && r <= 'F':
+		default:
+			return false
+		}
+	}
+	return true
+}
+
+// parseGHARollingRef parses GitHub Actions rolling major/minor refs such as:
+// "v2", "2", "v2.3", "2.3".
+//
+// For major-only refs, minor will be -1.
+func parseGHARollingRef(s string) (major int, minor int, ok bool) {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return 0, 0, false
+	}
+	if strings.HasPrefix(s, "v") {
+		s = strings.TrimPrefix(s, "v")
+	}
+	if strings.Count(s, ".") == 0 {
+		n, err := strconv.Atoi(s)
+		if err != nil || n <= 0 {
+			return 0, 0, false
+		}
+		return n, -1, true
+	}
+	if strings.Count(s, ".") == 1 {
+		parts := strings.SplitN(s, ".", 2)
+		maj, err1 := strconv.Atoi(parts[0])
+		min, err2 := strconv.Atoi(parts[1])
+		if err1 != nil || err2 != nil || maj <= 0 || min < 0 {
+			return 0, 0, false
+		}
+		return maj, min, true
+	}
+	return 0, 0, false
 }
 
 // PURL helpers
