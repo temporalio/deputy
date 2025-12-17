@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"net"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -24,6 +23,7 @@ import (
 	"github.com/go-git/go-git/v5/storage/memory"
 	"github.com/ossf/osv-schema/bindings/go/osvschema"
 	"github.com/picatz/deputy/internal/collections"
+	"github.com/picatz/deputy/internal/httputil"
 	"github.com/picatz/deputy/internal/purlx"
 	"golang.org/x/mod/semver"
 	"golang.org/x/sync/singleflight"
@@ -48,6 +48,7 @@ func ghaZipMetaPath(zipPath string) string {
 	return zipPath + ".meta.json"
 }
 
+// readGHAMeta reads cache metadata if available. Returns empty struct on any error.
 func readGHAMeta(zipPath string) ghaZipMeta {
 	var meta ghaZipMeta
 	p := ghaZipMetaPath(zipPath)
@@ -55,34 +56,25 @@ func readGHAMeta(zipPath string) ghaZipMeta {
 	if err != nil {
 		return meta
 	}
-	_ = json.Unmarshal(b, &meta)
+	_ = json.Unmarshal(b, &meta) // best-effort; corrupt meta is handled gracefully
 	return meta
 }
 
+// writeGHAMeta writes cache metadata. Failures are silently ignored as metadata
+// is an optimization for conditional requests, not required for correctness.
 func writeGHAMeta(zipPath string, meta ghaZipMeta) {
 	p := ghaZipMetaPath(zipPath)
 	b, err := json.Marshal(meta)
 	if err != nil {
 		return
 	}
-	_ = os.WriteFile(p, b, 0o644)
+	_ = os.WriteFile(p, b, 0o644) // best-effort cache metadata
 }
 
-var ghaHTTPClient = &http.Client{
-	Timeout: 30 * time.Second,
-	Transport: &http.Transport{
-		Proxy: http.ProxyFromEnvironment,
-		DialContext: (&net.Dialer{
-			Timeout:   10 * time.Second,
-			KeepAlive: 30 * time.Second,
-		}).DialContext,
-		ForceAttemptHTTP2:     true,
-		MaxIdleConns:          20,
-		IdleConnTimeout:       90 * time.Second,
-		TLSHandshakeTimeout:   10 * time.Second,
-		ResponseHeaderTimeout: 20 * time.Second,
-	},
-}
+// ghaHTTPTimeout is the overall request timeout for GHA vulnerability fetches.
+const ghaHTTPTimeout = 30 * time.Second
+
+var ghaHTTPClient = httputil.NewClient(ghaHTTPTimeout)
 
 var ghaGitHubTokenEnvVar = "GITHUB_TOKEN"
 
@@ -100,6 +92,10 @@ var (
 	// tests can override refresh behavior without mutating the on-disk TTL.
 	ghaIndexTTL = ghaDownloadTTL
 
+	// ghaIndexBuildGroup ensures only one goroutine builds/refreshes the GHA
+	// vulnerability index at a time using singleflight request coalescing.
+	// Without this, concurrent vulnerability scans could trigger redundant
+	// downloads of the ~50MB all.zip file from the OSV GCS bucket.
 	ghaIndexBuildGroup singleflight.Group
 )
 
@@ -511,7 +507,7 @@ func buildGHAVulnIndex(ctx context.Context) (*ghaVulnIndex, error) {
 			continue
 		}
 		b, err := io.ReadAll(rc)
-		_ = rc.Close()
+		_ = rc.Close() // best-effort; already read all data
 		if err != nil {
 			continue
 		}
@@ -581,7 +577,7 @@ func ensureGHACacheZip(ctx context.Context) (string, error) {
 	defer resp.Body.Close()
 	if resp.StatusCode == http.StatusNotModified {
 		now := time.Now()
-		_ = os.Chtimes(path, now, now)
+		_ = os.Chtimes(path, now, now) // best-effort TTL refresh
 		return path, nil
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
@@ -594,16 +590,16 @@ func ensureGHACacheZip(ctx context.Context) (string, error) {
 	}
 	limited := &io.LimitedReader{R: resp.Body, N: ghaDownloadLimit}
 	if _, err := io.Copy(f, limited); err != nil {
-		_ = f.Close()
-		_ = os.Remove(tmp)
+		_ = f.Close()      // best-effort cleanup
+		_ = os.Remove(tmp) // best-effort cleanup
 		return "", err
 	}
 	if err := f.Close(); err != nil {
-		_ = os.Remove(tmp)
+		_ = os.Remove(tmp) // best-effort cleanup
 		return "", err
 	}
 	if err := os.Rename(tmp, path); err != nil {
-		_ = os.Remove(tmp)
+		_ = os.Remove(tmp) // best-effort cleanup
 		return "", err
 	}
 

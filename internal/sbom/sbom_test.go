@@ -8,11 +8,13 @@ import (
 	"testing"
 	"time"
 
+	pb "deps.dev/api/v3"
 	"github.com/go-git/go-git/v5"
 	"github.com/go-git/go-git/v5/plumbing"
 	"github.com/go-git/go-git/v5/plumbing/object"
 	"github.com/go-git/go-git/v5/plumbing/transport"
 	"github.com/google/osv-scalibr/extractor"
+	"github.com/google/osv-scalibr/purl"
 	"github.com/picatz/deputy/internal/purlx"
 	"github.com/picatz/deputy/internal/repository/workspace"
 	"github.com/protobom/protobom/pkg/sbom"
@@ -269,5 +271,306 @@ func TestBuildProtobomDocument_GitHubActionsResolutionProperties(t *testing.T) {
 	}
 	if props["deputy:resolvedCommit"] != "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee" {
 		t.Fatalf("resolvedCommit=%q", props["deputy:resolvedCommit"])
+	}
+}
+
+func Test_appendUniqueLicenses(t *testing.T) {
+	tests := []struct {
+		name string
+		dst  []string
+		src  []string
+		want []string
+	}{
+		{name: "empty src", dst: []string{"MIT"}, src: nil, want: []string{"MIT"}},
+		{name: "empty dst", dst: nil, src: []string{"MIT"}, want: []string{"MIT"}},
+		{name: "no overlap", dst: []string{"MIT"}, src: []string{"Apache-2.0"}, want: []string{"MIT", "Apache-2.0"}},
+		{name: "with overlap", dst: []string{"MIT"}, src: []string{"MIT", "Apache-2.0"}, want: []string{"MIT", "Apache-2.0"}},
+		{name: "whitespace trimmed", dst: nil, src: []string{"  MIT  ", ""}, want: []string{"MIT"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := appendUniqueLicenses(tt.dst, tt.src)
+			if len(got) != len(tt.want) {
+				t.Fatalf("len=%d want %d", len(got), len(tt.want))
+			}
+			for i := range got {
+				if got[i] != tt.want[i] {
+					t.Errorf("got[%d]=%q want %q", i, got[i], tt.want[i])
+				}
+			}
+		})
+	}
+}
+
+func Test_looksLikeCommitSHA(t *testing.T) {
+	tests := []struct {
+		input string
+		want  bool
+	}{
+		{"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", true},
+		{"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", true},
+		{"0123456789abcdef0123456789abcdef01234567", true},
+		{"abc", false},
+		{"gggggggggggggggggggggggggggggggggggggggg", false}, // 'g' is invalid hex
+		{"v1.0.0", false},
+		{"", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			if got := looksLikeCommitSHA(tt.input); got != tt.want {
+				t.Errorf("looksLikeCommitSHA(%q)=%v want %v", tt.input, got, tt.want)
+			}
+		})
+	}
+}
+
+func Test_parseGHARollingRef(t *testing.T) {
+	tests := []struct {
+		input     string
+		wantMajor int
+		wantMinor int
+		wantOK    bool
+	}{
+		{"v2", 2, -1, true},
+		{"2", 2, -1, true},
+		{"v2.3", 2, 3, true},
+		{"2.3", 2, 3, true},
+		{"v1.2.3", 0, 0, false}, // full semver, not rolling
+		{"main", 0, 0, false},
+		{"", 0, 0, false},
+		{"v0", 0, 0, false}, // v0 not allowed (must be >0)
+	}
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			major, minor, ok := parseGHARollingRef(tt.input)
+			if ok != tt.wantOK || major != tt.wantMajor || minor != tt.wantMinor {
+				t.Errorf("parseGHARollingRef(%q)=(%d,%d,%v) want (%d,%d,%v)",
+					tt.input, major, minor, ok, tt.wantMajor, tt.wantMinor, tt.wantOK)
+			}
+		})
+	}
+}
+
+func Test_goModuleFromPURL(t *testing.T) {
+	tests := []struct {
+		namespace string
+		name      string
+		want      string
+	}{
+		{"github.com/foo", "bar", "github.com/foo/bar"},
+		{"", "simple", "simple"},
+		{"github.com/foo/", "bar", "github.com/foo/bar"}, // trailing slash handled
+	}
+	for _, tt := range tests {
+		t.Run(tt.want, func(t *testing.T) {
+			pu := &purl.PackageURL{Namespace: tt.namespace, Name: tt.name}
+			if got := goModuleFromPURL(pu); got != tt.want {
+				t.Errorf("goModuleFromPURL=%q want %q", got, tt.want)
+			}
+		})
+	}
+	// nil case
+	if got := goModuleFromPURL(nil); got != "" {
+		t.Errorf("goModuleFromPURL(nil)=%q want empty", got)
+	}
+}
+
+func Test_rootNode(t *testing.T) {
+	// nil doc
+	if got := rootNode(nil); got != nil {
+		t.Error("expected nil for nil doc")
+	}
+	// doc without root elements
+	doc := sbom.NewDocument()
+	if got := rootNode(doc); got != nil {
+		t.Error("expected nil without root elements")
+	}
+	// doc with root element
+	node := sbom.NewNode()
+	node.Id = "test-root"
+	doc.NodeList.Nodes = append(doc.NodeList.Nodes, node)
+	doc.NodeList.RootElements = append(doc.NodeList.RootElements, "test-root")
+	if got := rootNode(doc); got == nil || got.Id != "test-root" {
+		t.Errorf("expected root node with id test-root, got %v", got)
+	}
+}
+
+func Test_nodePackageURL(t *testing.T) {
+	tests := []struct {
+		name    string
+		node    *sbom.Node
+		wantNil bool
+		wantPkg string
+	}{
+		{name: "nil node", node: nil, wantNil: true},
+		{name: "empty identifiers", node: &sbom.Node{}, wantNil: true},
+		{name: "no purl identifier", node: &sbom.Node{Identifiers: map[int32]string{0: "other"}}, wantNil: true},
+		{
+			name: "valid purl",
+			node: &sbom.Node{Identifiers: map[int32]string{int32(sbom.SoftwareIdentifierType_PURL): "pkg:golang/github.com/foo/bar@v1.0.0"}},
+			wantPkg: "bar",
+		},
+		{name: "whitespace purl", node: &sbom.Node{Identifiers: map[int32]string{int32(sbom.SoftwareIdentifierType_PURL): "   "}}, wantNil: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := nodePackageURL(tt.node)
+			if tt.wantNil && got != nil {
+				t.Errorf("expected nil, got %v", got)
+			}
+			if !tt.wantNil && got == nil {
+				t.Error("expected non-nil purl")
+			}
+			if !tt.wantNil && got != nil && got.Name != tt.wantPkg {
+				t.Errorf("got name %q want %q", got.Name, tt.wantPkg)
+			}
+		})
+	}
+}
+
+func Test_systemFromPURL(t *testing.T) {
+	tests := []struct {
+		purlType string
+		wantSys  string
+	}{
+		{purl.TypeGolang, "GO"},
+		{purl.TypeNPM, "NPM"},
+		{purl.TypeCargo, "CARGO"},
+		{purl.TypePyPi, "PYPI"},
+		{purl.TypeGem, "RUBYGEMS"},
+		{purl.TypeMaven, "MAVEN"},
+		{purl.TypeNuget, "NUGET"},
+		{"unknown", "SYSTEM_UNSPECIFIED"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.purlType, func(t *testing.T) {
+			pu := &purl.PackageURL{Type: tt.purlType}
+			got := systemFromPURL(pu)
+			if got.String() != tt.wantSys {
+				t.Errorf("systemFromPURL(%q)=%s want %s", tt.purlType, got.String(), tt.wantSys)
+			}
+		})
+	}
+	// nil case
+	if got := systemFromPURL(nil); got.String() != "SYSTEM_UNSPECIFIED" {
+		t.Errorf("systemFromPURL(nil)=%s want SYSTEM_UNSPECIFIED", got.String())
+	}
+}
+
+func Test_packageNameForLicenseLookup(t *testing.T) {
+	tests := []struct {
+		name      string
+		purlType  string
+		namespace string
+		pkgName   string
+		want      string
+	}{
+		{"golang with namespace", purl.TypeGolang, "github.com/foo", "bar", "github.com/foo/bar"},
+		{"golang no namespace", purl.TypeGolang, "", "simple", "simple"},
+		{"github with namespace", purl.TypeGithub, "owner", "repo", "github.com/owner/repo"},
+		{"github no namespace", purl.TypeGithub, "", "repo", "github.com/repo"},
+		{"npm with namespace", purl.TypeNPM, "scope", "pkg", "scope/pkg"},
+		{"npm no namespace", purl.TypeNPM, "", "lodash", "lodash"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			pu := &purl.PackageURL{Type: tt.purlType, Namespace: tt.namespace, Name: tt.pkgName}
+			if got := packageNameForLicenseLookup(pu); got != tt.want {
+				t.Errorf("got %q want %q", got, tt.want)
+			}
+		})
+	}
+	if got := packageNameForLicenseLookup(nil); got != "" {
+		t.Errorf("packageNameForLicenseLookup(nil)=%q want empty", got)
+	}
+}
+
+func Test_normalizeVersionForSystem(t *testing.T) {
+	tests := []struct {
+		name    string
+		sysName string
+		version string
+		want    string
+	}{
+		{"go adds v prefix", "GO", "1.2.3", "v1.2.3"},
+		{"go keeps v prefix", "GO", "v1.2.3", "v1.2.3"},
+		{"npm unchanged", "NPM", "1.2.3", "1.2.3"},
+		{"empty version", "GO", "", ""},
+		{"whitespace trimmed", "NPM", "  1.0.0  ", "1.0.0"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Map system name to pb.System
+			var sys pb.System
+			switch tt.sysName {
+			case "GO":
+				sys = pb.System_GO
+			case "NPM":
+				sys = pb.System_NPM
+			default:
+				sys = pb.System_SYSTEM_UNSPECIFIED
+			}
+			if got := normalizeVersionForSystem(sys, tt.version); got != tt.want {
+				t.Errorf("got %q want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func Test_sanitizeForSPDXID(t *testing.T) {
+	tests := []struct {
+		input string
+		want  string
+	}{
+		{"simple", "simple"},
+		{"with spaces", "with-spaces"},
+		{"with/slashes", "with-slashes"},
+		{"with@special#chars!", "with-special-chars-"},
+		{"multiple---dashes", "multiple---dashes"},
+		{"123-numbers.okay_underscore", "123-numbers.okay_underscore"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			if got := sanitizeForSPDXID(tt.input); got != tt.want {
+				t.Errorf("sanitizeForSPDXID(%q)=%q want %q", tt.input, got, tt.want)
+			}
+		})
+	}
+}
+
+func Test_resolveGitHubActionsRefFromRefs(t *testing.T) {
+	refs := []*plumbing.Reference{
+		plumbing.NewHashReference(plumbing.ReferenceName("refs/tags/v1.0.0"), plumbing.NewHash("1111111111111111111111111111111111111111")),
+		plumbing.NewHashReference(plumbing.ReferenceName("refs/tags/v1.1.0"), plumbing.NewHash("2222222222222222222222222222222222222222")),
+		plumbing.NewHashReference(plumbing.ReferenceName("refs/tags/v2.0.0"), plumbing.NewHash("3333333333333333333333333333333333333333")),
+		plumbing.NewHashReference(plumbing.ReferenceName("refs/heads/main"), plumbing.NewHash("4444444444444444444444444444444444444444")),
+	}
+
+	tests := []struct {
+		name    string
+		ref     string
+		wantTag string
+		wantVer string
+		wantSHA string
+	}{
+		{"rolling v1", "v1", "v1.1.0", "v1.1.0", "2222222222222222222222222222222222222222"},
+		{"exact semver", "v2.0.0", "v2.0.0", "v2.0.0", "3333333333333333333333333333333333333333"},
+		{"branch main", "main", "main", "", "4444444444444444444444444444444444444444"},
+		{"commit SHA", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "", "", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},
+		{"empty", "", "", "", ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			res := resolveGitHubActionsRefFromRefs(refs, tt.ref)
+			if res.ResolvedTag != tt.wantTag {
+				t.Errorf("ResolvedTag=%q want %q", res.ResolvedTag, tt.wantTag)
+			}
+			if res.ResolvedVersion != tt.wantVer {
+				t.Errorf("ResolvedVersion=%q want %q", res.ResolvedVersion, tt.wantVer)
+			}
+			if res.ResolvedCommit != tt.wantSHA {
+				t.Errorf("ResolvedCommit=%q want %q", res.ResolvedCommit, tt.wantSHA)
+			}
+		})
 	}
 }

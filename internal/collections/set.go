@@ -6,7 +6,15 @@ import (
 	"iter"
 	"maps"
 	"slices"
+	"strings"
 )
+
+// NormalizeLower returns a lowercase, trimmed version of the input string.
+// This is a common pattern used throughout the codebase for case-insensitive
+// comparisons and key normalization.
+func NormalizeLower(s string) string {
+	return strings.ToLower(strings.TrimSpace(s))
+}
 
 // Set is a lightweight generic set implementation backed by a map.
 //

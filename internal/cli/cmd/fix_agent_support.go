@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	ui "github.com/picatz/deputy/internal/ui"
+	"github.com/spf13/cobra"
 )
 
 // agentInvocationOptions holds configuration for running an AI agent.
@@ -17,6 +18,20 @@ type agentInvocationOptions struct {
 	ThreadID         string
 	IncludePlanTool  bool
 	SkipGitRepoCheck bool
+}
+
+// getAgentFlags extracts all agent-related flags from the command.
+// This consolidates the common pattern of reading agent flags used by
+// fix, triage, and other agent-enabled commands.
+func getAgentFlags(cmd *cobra.Command) (name string, opts agentInvocationOptions) {
+	name, _ = cmd.Flags().GetString("agent")
+	opts.Model, _ = cmd.Flags().GetString("agent-model")
+	opts.Sandbox, _ = cmd.Flags().GetString("agent-sandbox")
+	opts.FullAuto, _ = cmd.Flags().GetBool("agent-full-auto")
+	opts.ThreadID, _ = cmd.Flags().GetString("agent-thread")
+	opts.IncludePlanTool, _ = cmd.Flags().GetBool("agent-include-plan-tool")
+	opts.SkipGitRepoCheck, _ = cmd.Flags().GetBool("agent-skip-git-check")
+	return name, opts
 }
 
 // runAgent dispatches the remediation task to the specified AI agent.

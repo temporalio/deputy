@@ -1,137 +1,55 @@
 package proxy
 
 import (
-	"context"
-	"fmt"
-	"log/slog"
 	"net/http"
-	"net/http/httputil"
-	"net/url"
 	"path"
 	"strings"
-
-	analysis "github.com/picatz/deputy/internal/analysis"
-	"github.com/picatz/deputy/internal/policy"
 )
 
+// npmHandler proxies requests to an npm registry (e.g., registry.npmjs.org)
+// while evaluating policy rules and enriching requests with vulnerability data.
 type npmHandler struct {
-	policies      PolicyEvaluator
-	proxy         *httputil.ReverseProxy
-	osvClient     analysis.OSVClient
-	vulnLookup    func(context.Context, string, string) ([]analysis.Vulnerability, error)
-	licenseLookup func(context.Context, string, string) ([]string, error)
+	*baseHandler
 }
 
+// newNPMHandler creates a handler for proxying npm registry requests.
+// It configures vulnerability lookups against the "npm" ecosystem in OSV.
 func newNPMHandler(upstream string, policies PolicyEvaluator) (*npmHandler, error) {
-	u, err := url.Parse(upstream)
+	base, err := newBaseHandler(handlerConfig{
+		ecosystem:    "npm",
+		osvEcosystem: "npm",
+		upstream:     upstream,
+		policies:     policies,
+		wantLicenses: false,
+	})
 	if err != nil {
-		return nil, fmt.Errorf("parse upstream %q: %w", upstream, err)
+		return nil, err
 	}
-	client := newUpstreamHTTPClient()
-	osvClient := analysis.NewOSVClient()
-	return &npmHandler{
-		policies:  policies,
-		proxy:     newUpstreamReverseProxy(u, "npm", client.Transport),
-		osvClient: osvClient,
-		vulnLookup: func(ctx context.Context, pkg, version string) ([]analysis.Vulnerability, error) {
-			return cachedOSVLookup(ctx, osvClient, "npm", pkg, version)
-		},
-	}, nil
+	return &npmHandler{baseHandler: base}, nil
 }
 
+// ServeHTTP handles incoming npm registry requests, parsing the path to extract
+// package name, version, and operation type, then evaluating policies before proxying.
 func (h *npmHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	ctx := r.Context()
 	pkg, version, operation := parseNPMPath(r.URL.Path)
-	hasVersion := strings.TrimSpace(version) != ""
-	rawVersion := version
-	if !hasVersion {
-		version = unknownVersionPlaceholder
-	}
-	payload := map[string]any{
-		"request": map[string]any{
-			"ecosystem": "npm",
-			"package":   pkg,
-			"version":   version,
-			"raw_version": func() string {
-				if hasVersion {
-					return rawVersion
-				}
-				return ""
-			}(),
-			"has_version": hasVersion,
-			"operation":   operation,
-			"path":        r.URL.Path,
-		},
-	}
-	if hasVersion {
-		if vulnMaps := h.vulnerabilityPayload(ctx, pkg, rawVersion); len(vulnMaps) > 0 {
-			payload["vulnerabilities"] = vulnMaps
-		}
-		if licenses := h.licensePayload(ctx, pkg, rawVersion); len(licenses) > 0 {
-			payload["licenses"] = licenses
-			if req, ok := payload["request"].(map[string]any); ok {
-				req["licenses"] = licenses
-			}
-		}
-	}
 
-	serveWithPolicy(w, r, h.policies, "npm_artifact_request", payload, blockMeta{
-		Ecosystem: "npm",
-		Name:      pkg,
-		Version:   rawVersion,
-		Operation: operation,
-	}, h.proxy)
+	info := requestInfo{
+		Name:       pkg,
+		Version:    version,
+		HasVersion: strings.TrimSpace(version) != "",
+		Operation:  operation,
+		Ecosystem:  "npm",
+	}
+	payload := h.buildPayload(r.Context(), info, r.URL.Path)
+	h.serve(w, r, "npm_artifact_request", info, payload)
 }
 
-func (h *npmHandler) vulnerabilityPayload(ctx context.Context, pkg, version string) []map[string]any {
-	var vulns []analysis.Vulnerability
-	var err error
-	switch {
-	case h == nil:
-		return nil
-	case h.vulnLookup != nil:
-		vulns, err = h.vulnLookup(ctx, pkg, version)
-	case h.osvClient != nil:
-		inputs := []analysis.PkgInput{{
-			Name:      pkg,
-			Version:   version,
-			Ecosystem: "npm",
-		}}
-		vulns, err = analysis.QueryOSVBatch(ctx, h.osvClient, inputs)
-	default:
-		return nil
-	}
-	if err != nil {
-		slog.Warn("osv lookup failed", "package", pkg, "version", version, "error", err)
-		return nil
-	}
-	if len(vulns) == 0 {
-		return nil
-	}
-	var maps []map[string]any
-	for _, v := range vulns {
-		m, err := policy.StructToMap(v)
-		if err != nil {
-			slog.Debug("failed to map vulnerability", "id", v.ID, "error", err)
-			continue
-		}
-		maps = append(maps, m)
-	}
-	return maps
-}
-
-func (h *npmHandler) licensePayload(ctx context.Context, pkg, version string) []string {
-	if h == nil || h.licenseLookup == nil {
-		return nil
-	}
-	licenses, err := h.licenseLookup(ctx, pkg, version)
-	if err != nil {
-		slog.Warn("license lookup failed", "package", pkg, "version", version, "error", err)
-		return nil
-	}
-	return licenses
-}
-
+// parseNPMPath extracts package name, version, and operation from an npm registry
+// URL path. Supported path formats include:
+//   - /<package>                  - package metadata
+//   - /<package>/-/<package>-<version>.tgz - tarball download
+//   - -/package/<package>/dist-tags - dist-tags lookup
+//   - -/<service>                 - registry service endpoints
 func parseNPMPath(p string) (pkg string, version string, operation string) {
 	trimmed := strings.Trim(p, "/")
 	if trimmed == "" {

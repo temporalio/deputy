@@ -194,6 +194,19 @@ func allDigits(s string) bool {
 	return true
 }
 
+// parseDigits converts a string of digits to an integer.
+// Returns 0 if the string is empty or contains non-digit characters.
+func parseDigits(s string) int {
+	if s == "" || !allDigits(s) {
+		return 0
+	}
+	n := 0
+	for _, r := range s {
+		n = n*10 + int(r-'0')
+	}
+	return n
+}
+
 // ExtractCanonicalPackageName trims superfluous major version suffixes (e.g.
 // /v2, /v3) from an import path except for v0 and v1 which remain part of the
 // canonical module path per Go module path semantics. gopkg.in names are first
@@ -230,15 +243,8 @@ func ParseGoPackage(pkg *extractor.Package) GoPackageInfo {
 	if info.FullName != info.CanonicalName {
 		// Extract version from the suffix of FullName (e.g. .../v2)
 		if idx := strings.LastIndex(info.FullName, "/v"); idx != -1 {
-			verStr := info.FullName[idx+2:]
-			if allDigits(verStr) {
-				n := 0
-				for _, r := range verStr {
-					n = n*10 + int(r-'0')
-				}
-				if n > 0 {
-					info.MajorVersion = n
-				}
+			if n := parseDigits(info.FullName[idx+2:]); n > 0 {
+				info.MajorVersion = n
 			}
 		}
 	}
@@ -251,15 +257,8 @@ func ParseGoPackage(pkg *extractor.Package) GoPackageInfo {
 			lastSeg = info.OriginalName[idx+1:]
 		}
 		if idx := strings.LastIndex(lastSeg, ".v"); idx != -1 {
-			verStr := lastSeg[idx+2:]
-			if verStr != "" && allDigits(verStr) {
-				n := 0
-				for _, r := range verStr {
-					n = n*10 + int(r-'0')
-				}
-				if n > 0 {
-					info.MajorVersion = n
-				}
+			if n := parseDigits(lastSeg[idx+2:]); n > 0 {
+				info.MajorVersion = n
 			}
 		}
 	}

@@ -29,12 +29,19 @@ type OSVClient interface {
 // dependency is direct (appears explicitly in go.mod). Directness influences
 // downstream prioritization but not query mechanics.
 type PkgInput struct {
-	Name         string
-	Version      string
-	Ecosystem    string
-	PURL         string
-	IsDirect     bool
-	Locations    []string
+	// Name is the package/module name (e.g., "github.com/foo/bar", "lodash").
+	Name string
+	// Version is the installed version string.
+	Version string
+	// Ecosystem identifies the package ecosystem for OSV queries (e.g., "Go", "npm").
+	Ecosystem string
+	// PURL is the Package URL providing a canonical identifier.
+	PURL string
+	// IsDirect indicates if this is a direct dependency.
+	IsDirect bool
+	// Locations lists file paths where the dependency was found.
+	Locations []string
+	// ManifestRefs describes manifest files declaring this dependency.
 	ManifestRefs []ManifestReference
 }
 
@@ -53,6 +60,11 @@ func getCachedVuln(ctx context.Context, client OSVClient, id string) (*osvschema
 	writeCache("osv", id, res)
 	return res, nil
 }
+
+// osvConcurrencyLimit controls the maximum number of concurrent GetVulnByID
+// requests when expanding batch query results. This prevents overwhelming
+// the OSV API with too many parallel requests.
+const osvConcurrencyLimit = 10
 
 // QueryOSVBatch performs a batched OSV vulnerability lookup for the provided
 // packages. For each minimal vulnerability match it expands full vulnerability
@@ -175,7 +187,7 @@ func queryOSVAPIBatch(ctx context.Context, client OSVClient, pkgs []PkgInput) ([
 	var mu sync.Mutex
 	var aliasCache sync.Map
 	g, ctx := errgroup.WithContext(ctx)
-	g.SetLimit(10)
+	g.SetLimit(osvConcurrencyLimit)
 	for i, res := range resp.Results {
 		if i >= len(queries) || i >= len(meta) {
 			break

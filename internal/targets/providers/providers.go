@@ -58,7 +58,7 @@ func (localGitProvider) Open(ctx context.Context, target string, opts map[string
 		},
 		Data: src,
 		Cleanup: func() {
-			_ = src.Close()
+			_ = src.Close() // best-effort resource cleanup
 		},
 	}
 	return mat, nil
@@ -161,7 +161,7 @@ func (remoteGitProvider) Open(ctx context.Context, target string, opts map[strin
 		},
 		Data: src,
 		Cleanup: func() {
-			_ = src.Close()
+			_ = src.Close() // best-effort resource cleanup
 		},
 	}
 	return mat, nil

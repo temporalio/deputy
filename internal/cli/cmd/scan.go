@@ -40,25 +40,40 @@ import (
 // ScanResult is the structured output of a vulnerability scan suitable for
 // serialization to JSON or further aggregation.
 type ScanResult struct {
-	Repo            string                      `json:"repo"`
-	Ref             string                      `json:"ref"`
-	Commit          string                      `json:"commit"`
-	Generated       string                      `json:"generated"`
-	PackagesScanned int                         `json:"packagesScanned"`
-	Stats           analysis.VulnerabilityStats `json:"stats"`
-	Vulnerabilities []analysis.Vulnerability    `json:"vulnerabilities"`
-	PolicyFindings  []PolicyFinding             `json:"policyFindings,omitempty"`
+	// Repo is the repository path or URL that was scanned.
+	Repo string `json:"repo"`
+	// Ref is the git reference (branch, tag, commit) that was scanned.
+	Ref string `json:"ref"`
+	// Commit is the resolved commit hash of the scanned reference.
+	Commit string `json:"commit"`
+	// Generated is the ISO 8601 timestamp when the scan was performed.
+	Generated string `json:"generated"`
+	// PackagesScanned is the total number of packages analyzed for vulnerabilities.
+	PackagesScanned int `json:"packagesScanned"`
+	// Stats provides aggregate vulnerability counts and severity breakdown.
+	Stats analysis.VulnerabilityStats `json:"stats"`
+	// Vulnerabilities is the list of security vulnerabilities found in dependencies.
+	Vulnerabilities []analysis.Vulnerability `json:"vulnerabilities"`
+	// PolicyFindings contains policy evaluation results (deny/warn actions).
+	PolicyFindings []PolicyFinding `json:"policyFindings,omitempty"`
 }
 
 // PolicyFinding represents a policy action emitted during scan evaluation.
 type PolicyFinding struct {
-	Source      string `json:"source"`
-	Action      string `json:"action"`
-	Reason      string `json:"reason,omitempty"`
-	Message     string `json:"message,omitempty"`
+	// Source is the name of the policy that generated this finding.
+	Source string `json:"source"`
+	// Action is the policy decision type (e.g., "deny", "warn", "allow").
+	Action string `json:"action"`
+	// Reason explains why the policy triggered this action.
+	Reason string `json:"reason,omitempty"`
+	// Message provides additional context or details about the finding.
+	Message string `json:"message,omitempty"`
+	// Remediation suggests steps to resolve the policy violation.
 	Remediation string `json:"remediation,omitempty"`
-	Status      *int   `json:"status,omitempty"`
-	Code        string `json:"code,omitempty"`
+	// Status is an optional HTTP status code suggestion for proxy mode.
+	Status *int `json:"status,omitempty"`
+	// Code is a machine-readable identifier for the finding type.
+	Code string `json:"code,omitempty"`
 }
 
 // ModuleDeprecation captures information about a deprecated module and its
@@ -584,28 +599,7 @@ func (s *Scanner) runScanDir(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		fmt.Fprintf(cmd.ErrOrStderr(), "Warning: OSV query failed: %v\n", err)
 	}
-	var beforeT, afterT time.Time
-	if asOfStr != "" {
-		if t, err := analysis.ParseFlexibleDate(asOfStr, "asof"); err == nil {
-			beforeT = t
-		} else {
-			fmt.Fprintf(cmd.ErrOrStderr(), "Warning: could not parse --as-of date %q: %v\n", asOfStr, err)
-		}
-	}
-	if publishedBeforeStr != "" && beforeT.IsZero() {
-		if t, err := analysis.ParseFlexibleDate(publishedBeforeStr, "before"); err == nil {
-			beforeT = t
-		} else {
-			fmt.Fprintf(cmd.ErrOrStderr(), "Warning: could not parse --published-before %q: %v\n", publishedBeforeStr, err)
-		}
-	}
-	if publishedAfterStr != "" {
-		if t, err := analysis.ParseFlexibleDate(publishedAfterStr, "after"); err == nil {
-			afterT = t
-		} else {
-			fmt.Fprintf(cmd.ErrOrStderr(), "Warning: could not parse --published-after %q: %v\n", publishedAfterStr, err)
-		}
-	}
+	beforeT, afterT := parsePublishedFilters(cmd.ErrOrStderr(), asOfStr, publishedBeforeStr, publishedAfterStr)
 	if !beforeT.IsZero() || !afterT.IsZero() {
 		vulns = analysis.FilterVulnerabilitiesByPublished(vulns, afterT, beforeT)
 	}
@@ -688,28 +682,7 @@ func (s *Scanner) runScanSBOM(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		fmt.Fprintf(cmd.ErrOrStderr(), "Warning: OSV query failed: %v\n", err)
 	}
-	var beforeT, afterT time.Time
-	if asOfStr != "" {
-		if t, err := analysis.ParseFlexibleDate(asOfStr, "asof"); err == nil {
-			beforeT = t
-		} else {
-			fmt.Fprintf(cmd.ErrOrStderr(), "Warning: could not parse --as-of date %q: %v\n", asOfStr, err)
-		}
-	}
-	if publishedBeforeStr != "" && beforeT.IsZero() {
-		if t, err := analysis.ParseFlexibleDate(publishedBeforeStr, "before"); err == nil {
-			beforeT = t
-		} else {
-			fmt.Fprintf(cmd.ErrOrStderr(), "Warning: could not parse --published-before %q: %v\n", publishedBeforeStr, err)
-		}
-	}
-	if publishedAfterStr != "" {
-		if t, err := analysis.ParseFlexibleDate(publishedAfterStr, "after"); err == nil {
-			afterT = t
-		} else {
-			fmt.Fprintf(cmd.ErrOrStderr(), "Warning: could not parse --published-after %q: %v\n", publishedAfterStr, err)
-		}
-	}
+	beforeT, afterT := parsePublishedFilters(cmd.ErrOrStderr(), asOfStr, publishedBeforeStr, publishedAfterStr)
 	if !beforeT.IsZero() || !afterT.IsZero() {
 		vulns = analysis.FilterVulnerabilitiesByPublished(vulns, afterT, beforeT)
 	}

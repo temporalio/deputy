@@ -28,10 +28,15 @@ const (
 
 // Options customize server behavior from CLI flags.
 type Options struct {
-	PolicyPaths     []string
-	EnableReadyz    bool
-	EnablePprof     bool
-	EnableVars      bool
+	// PolicyPaths specifies additional policy file paths to load for all listeners.
+	PolicyPaths []string
+	// EnableReadyz enables the /readyz endpoint for Kubernetes-style readiness probes.
+	EnableReadyz bool
+	// EnablePprof enables the /debug/pprof/* endpoints for profiling.
+	EnablePprof bool
+	// EnableVars enables the /debug/vars endpoint for expvar metrics.
+	EnableVars bool
+	// OnListenerStart is called when a listener successfully binds to its address.
 	OnListenerStart func(name, addr string)
 }
 

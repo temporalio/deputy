@@ -3,10 +3,16 @@ package proxy
 import (
 	"fmt"
 	"os"
+	"slices"
+	"strings"
 	"time"
 
+	"github.com/picatz/deputy/internal/errors"
 	"gopkg.in/yaml.v3"
 )
+
+// validEcosystems defines the supported ecosystem adapters.
+var validEcosystems = []string{"go", "pypi", "npm", "rubygems"}
 
 // Config describes one or more listeners exposed by the proxy server.
 type Config struct {
@@ -48,10 +54,97 @@ func LoadConfig(path string) (Config, error) {
 	if err := yaml.Unmarshal(data, &cfg); err != nil {
 		return Config{}, fmt.Errorf("parse config: %w", err)
 	}
-	if len(cfg.Listeners) == 0 {
-		return Config{}, fmt.Errorf("config must define at least one listener")
+	if err := cfg.Validate(); err != nil {
+		return Config{}, err
 	}
 	return cfg, nil
+}
+
+// Validate checks the configuration for invalid or missing values.
+func (c *Config) Validate() error {
+	if len(c.Listeners) == 0 {
+		return &errors.ValidationError{
+			Field:   "listeners",
+			Message: "config must define at least one listener",
+		}
+	}
+	seen := make(map[string]bool)
+	for i, l := range c.Listeners {
+		if err := l.Validate(i); err != nil {
+			return err
+		}
+		if seen[l.Name] {
+			return &errors.ValidationError{
+				Field:   fmt.Sprintf("listeners[%d].name", i),
+				Value:   l.Name,
+				Message: "duplicate listener name",
+			}
+		}
+		seen[l.Name] = true
+	}
+	return nil
+}
+
+// Validate checks a single listener configuration for invalid values.
+func (l *ListenerConfig) Validate(index int) error {
+	prefix := fmt.Sprintf("listeners[%d]", index)
+
+	if strings.TrimSpace(l.Name) == "" {
+		return &errors.ValidationError{
+			Field:   prefix + ".name",
+			Message: "listener name is required",
+		}
+	}
+	if strings.TrimSpace(l.Bind) == "" {
+		return &errors.ValidationError{
+			Field:   prefix + ".bind",
+			Message: "bind address is required",
+		}
+	}
+	if len(l.Ecosystems) == 0 {
+		return &errors.ValidationError{
+			Field:   prefix + ".ecosystems",
+			Message: "at least one ecosystem is required",
+		}
+	}
+	for _, eco := range l.Ecosystems {
+		ecoLower := strings.ToLower(strings.TrimSpace(eco))
+		if !slices.Contains(validEcosystems, ecoLower) {
+			return &errors.ValidationError{
+				Field:   prefix + ".ecosystems",
+				Value:   eco,
+				Message: fmt.Sprintf("unsupported ecosystem; must be one of: %s", strings.Join(validEcosystems, ", ")),
+			}
+		}
+	}
+	if strings.TrimSpace(l.Upstream) == "" {
+		return &errors.ValidationError{
+			Field:   prefix + ".upstream",
+			Message: "upstream URL is required",
+		}
+	}
+	if l.ReadHeaderTimeout < 0 {
+		return &errors.ValidationError{
+			Field:   prefix + ".read_header_timeout",
+			Value:   l.ReadHeaderTimeout,
+			Message: "timeout must be non-negative",
+		}
+	}
+	if l.WriteTimeout < 0 {
+		return &errors.ValidationError{
+			Field:   prefix + ".write_timeout",
+			Value:   l.WriteTimeout,
+			Message: "timeout must be non-negative",
+		}
+	}
+	if l.IdleTimeout < 0 {
+		return &errors.ValidationError{
+			Field:   prefix + ".idle_timeout",
+			Value:   l.IdleTimeout,
+			Message: "timeout must be non-negative",
+		}
+	}
+	return nil
 }
 
 // MarshalTemplate renders a starter configuration for the specified ecosystem.

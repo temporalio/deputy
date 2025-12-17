@@ -1,145 +1,62 @@
 package proxy
 
 import (
-	"context"
 	"fmt"
-	"log/slog"
 	"net/http"
-	"net/http/httputil"
-	"net/url"
 	"strings"
-
-	analysis "github.com/picatz/deputy/internal/analysis"
-	"github.com/picatz/deputy/internal/policy"
 )
 
+// goModuleHandler proxies requests to a Go module proxy (e.g., proxy.golang.org)
+// while evaluating policy rules and enriching requests with vulnerability and
+// license data.
 type goModuleHandler struct {
-	policies      PolicyEvaluator
-	proxy         *httputil.ReverseProxy
-	osvClient     analysis.OSVClient
-	vulnLookup    func(context.Context, string, string) ([]analysis.Vulnerability, error)
-	licenseLookup func(context.Context, string, string) ([]string, error)
+	*baseHandler
 }
 
+// newGoModuleHandler creates a handler for proxying Go module requests.
+// It configures vulnerability lookups against the "Go" ecosystem in OSV
+// and enables license lookups.
 func newGoModuleHandler(upstream string, policies PolicyEvaluator) (*goModuleHandler, error) {
-	u, err := url.Parse(upstream)
+	base, err := newBaseHandler(handlerConfig{
+		ecosystem:    "go",
+		osvEcosystem: "Go",
+		upstream:     upstream,
+		policies:     policies,
+		wantLicenses: true,
+	})
 	if err != nil {
-		return nil, fmt.Errorf("parse upstream %q: %w", upstream, err)
+		return nil, err
 	}
-	client := newUpstreamHTTPClient()
-	osvClient := analysis.NewOSVClient()
-	return &goModuleHandler{
-		policies:  policies,
-		proxy:     newUpstreamReverseProxy(u, "go", client.Transport),
-		osvClient: osvClient,
-		vulnLookup: func(ctx context.Context, module, version string) ([]analysis.Vulnerability, error) {
-			return cachedOSVLookup(ctx, osvClient, "Go", module, version)
-		},
-		licenseLookup: func(ctx context.Context, module, version string) ([]string, error) {
-			return cachedLicenseLookup(ctx, "go", module, version)
-		},
-	}, nil
+	return &goModuleHandler{baseHandler: base}, nil
 }
 
+// ServeHTTP handles incoming Go module proxy requests, parsing the path to extract
+// module name, version, and operation type, then evaluating policies before proxying.
 func (h *goModuleHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	ctx := r.Context()
 	module, version, fileType, op, err := parseGoProxyPath(r.URL.Path)
 	if err != nil {
 		http.Error(w, "bad request: "+err.Error(), http.StatusBadRequest)
 		return
 	}
 
-	hasVersion := strings.TrimSpace(version) != ""
-	rawVersion := version
-	if !hasVersion {
-		version = unknownVersionPlaceholder
+	info := requestInfo{
+		Name:       module,
+		Version:    version,
+		HasVersion: strings.TrimSpace(version) != "",
+		Operation:  op,
+		Ecosystem:  "go",
+		FileType:   fileType,
 	}
-
-	payload := map[string]any{
-		"request": map[string]any{
-			"ecosystem": "go",
-			"module":    module,
-			"version":   version,
-			"raw_version": func() string {
-				if hasVersion {
-					return rawVersion
-				}
-				return ""
-			}(),
-			"has_version": hasVersion,
-			"fileType":    fileType,
-			"operation":   op,
-			"path":        r.URL.Path,
-		},
-	}
-	if hasVersion {
-		if vulnMaps := h.vulnerabilityPayload(ctx, module, rawVersion); len(vulnMaps) > 0 {
-			payload["vulnerabilities"] = vulnMaps
-		}
-		if licenses := h.licensePayload(ctx, module, rawVersion); len(licenses) > 0 {
-			payload["licenses"] = licenses
-			if req, ok := payload["request"].(map[string]any); ok {
-				req["licenses"] = licenses
-			}
-		}
-	}
-	serveWithPolicy(w, r, h.policies, "go_artifact_request", payload, blockMeta{
-		Ecosystem: "go",
-		Name:      module,
-		Version:   rawVersion,
-		Operation: op,
-	}, h.proxy)
+	payload := h.buildPayload(r.Context(), info, r.URL.Path)
+	h.serve(w, r, "go_artifact_request", info, payload)
 }
 
-func (h *goModuleHandler) vulnerabilityPayload(ctx context.Context, module, version string) []map[string]any {
-	var vulns []analysis.Vulnerability
-	var err error
-	switch {
-	case h == nil:
-		return nil
-	case h.vulnLookup != nil:
-		vulns, err = h.vulnLookup(ctx, module, version)
-	case h.osvClient != nil:
-		inputs := []analysis.PkgInput{{
-			Name:      module,
-			Version:   version,
-			Ecosystem: "Go",
-		}}
-		vulns, err = analysis.QueryOSVBatch(ctx, h.osvClient, inputs)
-	default:
-		return nil
-	}
-	if err != nil {
-		slog.Warn("osv lookup failed", "module", module, "version", version, "error", err)
-		return nil
-	}
-	if len(vulns) == 0 {
-		return nil
-	}
-	var maps []map[string]any
-	for _, v := range vulns {
-		m, err := policy.StructToMap(v)
-		if err != nil {
-			slog.Debug("failed to map vulnerability", "id", v.ID, "error", err)
-			continue
-		}
-		maps = append(maps, m)
-	}
-	return maps
-}
-
-func (h *goModuleHandler) licensePayload(ctx context.Context, module, version string) []string {
-	if h == nil || h.licenseLookup == nil {
-		return nil
-	}
-	licenses, err := h.licenseLookup(ctx, module, version)
-	if err != nil {
-		slog.Warn("license lookup failed", "module", module, "version", version, "error", err)
-		return nil
-	}
-	return licenses
-}
-
+// parseGoProxyPath extracts module name, version, file type, and operation from
+// a Go module proxy URL path. The path format follows the GOPROXY protocol:
+//   - /<module>/@v/list           - list available versions
+//   - /<module>/@v/<version>.info - version metadata
+//   - /<module>/@v/<version>.mod  - go.mod file
+//   - /<module>/@v/<version>.zip  - module source archive
 func parseGoProxyPath(p string) (module, version, fileType, operation string, err error) {
 	if !strings.HasPrefix(p, "/") {
 		err = fmt.Errorf("path must start with /")

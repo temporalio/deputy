@@ -89,41 +89,7 @@ func (d *diagnosticEngine) analyze(uri protocol.DocumentURI, text string) ([]pro
 		knownNames := append(policy.DefaultVariableNames(), declaredVars...)
 
 		// rules
-		rulesNode := findMapValue(item, "rules")
-		if rulesNode == nil {
-			diag = append(diag, makeDiagnostic(uri, item.Line, item.Column, "policy missing 'rules'", protocol.Error))
-			continue
-		}
-		if rulesNode.Kind != yaml.SequenceNode {
-			diag = append(diag, makeDiagnostic(uri, rulesNode.Line, rulesNode.Column, "'rules' must be a list", protocol.Error))
-			continue
-		}
-		for _, rule := range rulesNode.Content {
-			if rule.Kind != yaml.MappingNode {
-				diag = append(diag, makeDiagnostic(uri, rule.Line, rule.Column, "rule must be a mapping", protocol.Error))
-				continue
-			}
-			whenNode := findMapValue(rule, "when")
-			if whenNode == nil || whenNode.Kind != yaml.ScalarNode {
-				diag = append(diag, diagWithCode(uri, rule.Line, rule.Column, "rule missing 'when' expression", protocol.Error, "missing-when"))
-				continue
-			}
-			// CEL compile of the when expression with location mapping.
-			if err := policy.Compile(whenNode.Value, declaredVars); err != nil {
-				diag = append(diag, celErrorDiagnostic(uri, whenNode, err, knownNames))
-			}
-			actionNode := findMapValue(rule, "action")
-			if actionNode == nil || actionNode.Kind != yaml.ScalarNode {
-				diag = append(diag, diagWithCode(uri, rule.Line, rule.Column, "rule missing 'action'", protocol.Error, "missing-action"))
-			} else {
-				if actionNode.Value == "deny" || actionNode.Value == "warn" {
-					reasonNode := findMapValue(rule, "reason")
-					if reasonNode == nil || strings.TrimSpace(reasonNode.Value) == "" {
-						diag = append(diag, diagWithRangeAndCode(uri, actionNode.Line, actionNode.Column, len(actionNode.Value), "missing 'reason' for warn/deny", protocol.Hint, "missing-reason"))
-					}
-				}
-			}
-		}
+		diag = append(diag, validateRulesNode(uri, item, declaredVars, knownNames)...)
 	}
 
 	// Compile the whole policy to ensure bundled vars/metadata are valid.
@@ -131,6 +97,47 @@ func (d *diagnosticEngine) analyze(uri protocol.DocumentURI, text string) ([]pro
 		diag = append(diag, makeDiagnostic(uri, 0, 0, err.Error(), protocol.Warning))
 	}
 	return diag, nil
+}
+
+// validateRulesNode validates the rules list for a policy item and returns diagnostics.
+// It checks for the presence of a rules list, validates each rule's structure,
+// compiles CEL expressions, and checks for missing required fields.
+func validateRulesNode(uri protocol.DocumentURI, item *yaml.Node, declaredVars, knownNames []string) []protocol.Diagnostic {
+	var diag []protocol.Diagnostic
+	rulesNode := findMapValue(item, "rules")
+	if rulesNode == nil {
+		return []protocol.Diagnostic{makeDiagnostic(uri, item.Line, item.Column, "policy missing 'rules'", protocol.Error)}
+	}
+	if rulesNode.Kind != yaml.SequenceNode {
+		return []protocol.Diagnostic{makeDiagnostic(uri, rulesNode.Line, rulesNode.Column, "'rules' must be a list", protocol.Error)}
+	}
+	for _, rule := range rulesNode.Content {
+		if rule.Kind != yaml.MappingNode {
+			diag = append(diag, makeDiagnostic(uri, rule.Line, rule.Column, "rule must be a mapping", protocol.Error))
+			continue
+		}
+		whenNode := findMapValue(rule, "when")
+		if whenNode == nil || whenNode.Kind != yaml.ScalarNode {
+			diag = append(diag, diagWithCode(uri, rule.Line, rule.Column, "rule missing 'when' expression", protocol.Error, "missing-when"))
+			continue
+		}
+		// CEL compile of the when expression with location mapping.
+		if err := policy.Compile(whenNode.Value, declaredVars); err != nil {
+			diag = append(diag, celErrorDiagnostic(uri, whenNode, err, knownNames))
+		}
+		actionNode := findMapValue(rule, "action")
+		if actionNode == nil || actionNode.Kind != yaml.ScalarNode {
+			diag = append(diag, diagWithCode(uri, rule.Line, rule.Column, "rule missing 'action'", protocol.Error, "missing-action"))
+		} else {
+			if actionNode.Value == "deny" || actionNode.Value == "warn" {
+				reasonNode := findMapValue(rule, "reason")
+				if reasonNode == nil || strings.TrimSpace(reasonNode.Value) == "" {
+					diag = append(diag, diagWithRangeAndCode(uri, actionNode.Line, actionNode.Column, len(actionNode.Value), "missing 'reason' for warn/deny", protocol.Hint, "missing-reason"))
+				}
+			}
+		}
+	}
+	return diag
 }
 
 // yamlErrorToDiagnostic converts a YAML parsing error into an LSP diagnostic.

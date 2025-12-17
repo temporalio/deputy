@@ -3,6 +3,8 @@ package analysis
 import (
 	"fmt"
 	"strings"
+
+	"github.com/picatz/deputy/internal/collections"
 )
 
 // Severity represents the severity level of a vulnerability using a type-safe enum.
@@ -58,6 +60,30 @@ func ParseSeverity(s string) Severity {
 // Score returns a numeric score for severity ordering (higher is more severe).
 func (s Severity) Score() int {
 	return int(s)
+}
+
+// CVSS score thresholds for severity classification per CVSS v3.x specification.
+const (
+	CVSSScoreCritical = 9.0 // CRITICAL: 9.0 - 10.0
+	CVSSScoreHigh     = 7.0 // HIGH: 7.0 - 8.9
+	CVSSScoreMedium   = 4.0 // MEDIUM: 4.0 - 6.9
+	CVSSScoreLow      = 0.1 // LOW: 0.1 - 3.9 (0.0 is informational/none)
+)
+
+// SeverityFromCVSS converts a CVSS score to a Severity level.
+func SeverityFromCVSS(score float64) Severity {
+	switch {
+	case score >= CVSSScoreCritical:
+		return SeverityCritical
+	case score >= CVSSScoreHigh:
+		return SeverityHigh
+	case score >= CVSSScoreMedium:
+		return SeverityMedium
+	case score > 0:
+		return SeverityLow
+	default:
+		return SeverityUnknown
+	}
 }
 
 // IsHigherThan returns true if this severity is more severe than the other.
@@ -201,7 +227,7 @@ func (e Ecosystem) String() string {
 
 // ParseEcosystem converts a string ecosystem name to the Ecosystem enum.
 func ParseEcosystem(s string) Ecosystem {
-	switch strings.ToLower(strings.TrimSpace(s)) {
+	switch collections.NormalizeLower(s) {
 	case "go", "golang":
 		return EcosystemGo
 	case "npm", "node", "nodejs":

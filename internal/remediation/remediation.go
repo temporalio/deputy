@@ -12,15 +12,24 @@ import (
 	"golang.org/x/mod/semver"
 )
 
-// Command represents an actionable remediation step (shell command or manual edit).
+// Command represents an actionable remediation step for resolving a vulnerability.
+// It can be either an executable shell command or a manual edit instruction.
 type Command struct {
-	Manager     string
-	Command     string
-	Path        string
-	Groups      []string
-	Hint        string
-	IsDirect    bool
-	Executable  bool
+	// Manager identifies the package manager (e.g., "go", "npm", "pip", "gem").
+	Manager string
+	// Command is the shell command to execute or instruction to follow.
+	Command string
+	// Path is the manifest/lockfile path where this command should be run.
+	Path string
+	// Groups indicates dependency groups affected (e.g., "dev", "optional" for npm).
+	Groups []string
+	// Hint provides additional context (e.g., "run bundle install afterwards").
+	Hint string
+	// IsDirect indicates if the vulnerable package is a direct dependency.
+	IsDirect bool
+	// Executable indicates if Command can be run directly (true) or requires manual action (false).
+	Executable bool
+	// managerRank is used internally for sorting commands by package manager priority.
 	managerRank int
 }
 
@@ -200,7 +209,7 @@ func dedupeCommands(upgrades []packageUpgrade) []Command {
 			groups := uniqueSortedStrings(ref.Groups)
 			groupsKey := strings.Join(groups, ",")
 			key := strings.Join([]string{
-				strings.ToLower(strings.TrimSpace(ref.Manager)),
+				collections.NormalizeLower(ref.Manager),
 				cmd,
 				pathStr,
 				groupsKey,
@@ -213,7 +222,7 @@ func dedupeCommands(upgrades []packageUpgrade) []Command {
 			manager := strings.TrimSpace(ref.Manager)
 			commands = append(commands, Command{
 				Manager:     manager,
-				managerRank: managerRank(manager),
+				managerRank: analysis.ManagerRank(manager),
 				Command:     cmd,
 				Path:        pathStr,
 				Groups:      groups,
@@ -233,7 +242,7 @@ func dedupeCommands(upgrades []packageUpgrade) []Command {
 	if goManagerPresent && len(goPaths) == 0 {
 		commands = append(commands, Command{
 			Manager:     "go",
-			managerRank: managerRank("go"),
+			managerRank: analysis.ManagerRank("go"),
 			Command:     "go mod tidy",
 			Executable:  true,
 		})
@@ -243,7 +252,7 @@ func dedupeCommands(upgrades []packageUpgrade) []Command {
 		for _, path := range paths {
 			commands = append(commands, Command{
 				Manager:     "go",
-				managerRank: managerRank("go"),
+				managerRank: analysis.ManagerRank("go"),
 				Command:     "go mod tidy",
 				Path:        path,
 				Executable:  true,
@@ -266,7 +275,7 @@ func buildGoToolchainCommand(version string) (Command, bool) {
 	cmd := fmt.Sprintf("go get go@%s", goVersion)
 	return Command{
 		Manager:     "go",
-		managerRank: managerRank("go"),
+		managerRank: analysis.ManagerRank("go"),
 		Command:     cmd,
 		Path:        "go.mod",
 		Hint:        "updates go directive",
@@ -274,31 +283,28 @@ func buildGoToolchainCommand(version string) (Command, bool) {
 	}, true
 }
 
+// jsPackageManagerCommands maps JS package managers to their install command verbs.
+var jsPackageManagerCommands = map[string]string{
+	"npm":  "npm install",
+	"yarn": "yarn add",
+	"pnpm": "pnpm add",
+}
+
 func recommendCommand(manager, manifestPath, pkg, version string, groups []string) (string, string, bool) {
-	switch strings.ToLower(manager) {
+	m := strings.ToLower(manager)
+
+	// Handle JS package managers with a unified approach
+	if installCmd, ok := jsPackageManagerCommands[m]; ok {
+		cmd := fmt.Sprintf("%s %s@%s", installCmd, pkg, version)
+		if flag := dependencyGroupFlag(m, groups); flag != "" {
+			cmd = fmt.Sprintf("%s %s", cmd, flag)
+		}
+		return cmd, "", true
+	}
+
+	switch m {
 	case "go":
 		return fmt.Sprintf("go get %s@%s", pkg, version), "", true
-	case "npm":
-		flag := npmFlag(groups)
-		cmd := fmt.Sprintf("npm install %s@%s", pkg, version)
-		if flag != "" {
-			cmd = fmt.Sprintf("%s %s", cmd, flag)
-		}
-		return cmd, "", true
-	case "yarn":
-		flag := yarnFlag(groups)
-		cmd := fmt.Sprintf("yarn add %s@%s", pkg, version)
-		if flag != "" {
-			cmd = fmt.Sprintf("%s %s", cmd, flag)
-		}
-		return cmd, "", true
-	case "pnpm":
-		flag := npmFlag(groups)
-		cmd := fmt.Sprintf("pnpm add %s@%s", pkg, version)
-		if flag != "" {
-			cmd = fmt.Sprintf("%s %s", cmd, flag)
-		}
-		return cmd, "", true
 	case "pip":
 		return fmt.Sprintf("pip install --upgrade %s==%s", pkg, version), "", true
 	case "pipenv":
@@ -329,62 +335,55 @@ func recommendCommand(manager, manifestPath, pkg, version string, groups []strin
 	return "", "", false
 }
 
-func managerRank(name string) int {
-	switch strings.ToLower(strings.TrimSpace(name)) {
-	case "go":
-		return 0
-	case "npm":
-		return 1
-	case "pnpm":
-		return 2
-	case "yarn":
-		return 3
-	case "composer":
-		return 4
-	case "gem":
-		return 5
-	case "cargo":
-		return 6
-	case "pip":
-		return 7
-	case "pipenv":
-		return 8
-	case "poetry":
-		return 9
-	case "maven":
-		return 10
-	case "gradle":
-		return 11
-	default:
-		return 100
-	}
+// Dependency group names recognized across package managers.
+const (
+	groupDev      = "dev"
+	groupDevDeps  = "devdependencies"
+	groupOptional = "optional"
+	groupOptDeps  = "optionaldependencies"
+	groupPeer     = "peer"
+	groupPeerDeps = "peerdependencies"
+)
+
+// managerGroupFlags maps package managers to their dependency group flags.
+// The inner map keys are group categories, values are CLI flags.
+var managerGroupFlags = map[string]map[string]string{
+	"npm": {
+		"dev":      "--save-dev",
+		"optional": "--save-optional",
+		"peer":     "--save-peer",
+	},
+	"pnpm": {
+		"dev":      "--save-dev",
+		"optional": "--save-optional",
+		"peer":     "--save-peer",
+	},
+	"yarn": {
+		"dev":      "--dev",
+		"optional": "--optional",
+		"peer":     "--peer",
+	},
 }
 
-func npmFlag(groups []string) string {
-	if hasGroup(groups, "dev", "devdependencies") {
-		return "--save-dev"
+// dependencyGroupFlag returns the appropriate CLI flag for a given package manager
+// and dependency groups. Returns empty string if no special flag is needed.
+func dependencyGroupFlag(manager string, groups []string) string {
+	flags, ok := managerGroupFlags[strings.ToLower(manager)]
+	if !ok {
+		return ""
 	}
-	if hasGroup(groups, "optional", "optionaldependencies") {
-		return "--save-optional"
+	if hasGroup(groups, groupDev, groupDevDeps) {
+		return flags["dev"]
 	}
-	if hasGroup(groups, "peer", "peerdependencies") {
-		return "--save-peer"
+	if hasGroup(groups, groupOptional, groupOptDeps) {
+		return flags["optional"]
+	}
+	if hasGroup(groups, groupPeer, groupPeerDeps) {
+		return flags["peer"]
 	}
 	return ""
 }
 
-func yarnFlag(groups []string) string {
-	if hasGroup(groups, "dev", "devdependencies") {
-		return "--dev"
-	}
-	if hasGroup(groups, "optional", "optionaldependencies") {
-		return "--optional"
-	}
-	if hasGroup(groups, "peer", "peerdependencies") {
-		return "--peer"
-	}
-	return ""
-}
 
 func hasGroup(groups []string, candidates ...string) bool {
 	if len(groups) == 0 {

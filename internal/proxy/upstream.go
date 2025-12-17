@@ -1,21 +1,20 @@
 package proxy
 
 import (
-	"net"
 	"net/http"
 	"net/http/httputil"
 	"net/url"
 	"time"
+
+	dephttputil "github.com/picatz/deputy/internal/httputil"
 )
 
+// Proxy-specific timeouts that differ from the shared defaults.
 const (
-	upstreamReadHeaderTimeout = 10 * time.Second
-	upstreamIdleTimeout       = 90 * time.Second
-	upstreamDialTimeout       = 10 * time.Second
-	upstreamKeepAlive         = 30 * time.Second
-	upstreamTLSHandshake      = 10 * time.Second
-	upstreamExpectContinue    = 1 * time.Second
-	upstreamResponseHeader    = 30 * time.Second
+	upstreamExpectContinue = 1 * time.Second
+	upstreamResponseHeader = 30 * time.Second
+	upstreamMaxIdleConns   = 100
+	upstreamFlushInterval  = 100 * time.Millisecond
 )
 
 // newUpstreamHTTPClient returns an HTTP client intended for outbound upstream fetches.
@@ -27,23 +26,14 @@ func newUpstreamHTTPClient() *http.Client {
 }
 
 // newUpstreamTransport returns a transport with conservative production timeouts and keep-alives.
+// It builds on the shared defaults but overrides settings specific to proxying.
 func newUpstreamTransport() *http.Transport {
-	dialer := &net.Dialer{
-		Timeout:   upstreamDialTimeout,
-		KeepAlive: upstreamKeepAlive,
-	}
-
-	return &http.Transport{
-		Proxy:                 http.ProxyFromEnvironment,
-		DialContext:           dialer.DialContext,
-		ForceAttemptHTTP2:     true,
-		MaxIdleConns:          100,
-		IdleConnTimeout:       upstreamIdleTimeout,
-		TLSHandshakeTimeout:   upstreamTLSHandshake,
-		ExpectContinueTimeout: upstreamExpectContinue,
-		ResponseHeaderTimeout: upstreamResponseHeader,
-		DisableCompression:    true,
-	}
+	t := dephttputil.NewTransport()
+	t.MaxIdleConns = upstreamMaxIdleConns
+	t.ExpectContinueTimeout = upstreamExpectContinue
+	t.ResponseHeaderTimeout = upstreamResponseHeader
+	t.DisableCompression = true
+	return t
 }
 
 // newUpstreamReverseProxy creates a reverse proxy that forwards requests to upstream.
@@ -62,7 +52,7 @@ func newUpstreamReverseProxy(upstream *url.URL, ecosystem string, transport http
 	}
 
 	proxy.Transport = transport
-	proxy.FlushInterval = 100 * time.Millisecond
+	proxy.FlushInterval = upstreamFlushInterval
 	proxy.ErrorHandler = func(w http.ResponseWriter, r *http.Request, err error) {
 		onUpstreamError(w, r, ecosystem, err)
 	}

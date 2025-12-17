@@ -93,13 +93,7 @@ func runTriage(scanner *Scanner, cmd *cobra.Command, args []string) error {
 	reportPath, _ := cmd.Flags().GetString("report")
 	ignoreUnfixed, _ := cmd.Flags().GetBool("ignore-unfixed")
 	format, _ := cmd.Flags().GetString("format")
-	agentName, _ := cmd.Flags().GetString("agent")
-	agentModel, _ := cmd.Flags().GetString("agent-model")
-	agentSandbox, _ := cmd.Flags().GetString("agent-sandbox")
-	agentFullAuto, _ := cmd.Flags().GetBool("agent-full-auto")
-	agentThreadID, _ := cmd.Flags().GetString("agent-thread")
-	agentIncludePlanTool, _ := cmd.Flags().GetBool("agent-include-plan-tool")
-	agentSkipGitCheck, _ := cmd.Flags().GetBool("agent-skip-git-check")
+	agentName, agentOpts := getAgentFlags(cmd)
 	policyPaths, _ := cmd.Flags().GetStringArray("policy")
 	showDBInfo, _ := cmd.Flags().GetBool("show-db-info")
 
@@ -187,14 +181,6 @@ func runTriage(scanner *Scanner, cmd *cobra.Command, args []string) error {
 		prompt, err := buildCodexTriagePrompt(report)
 		if err != nil {
 			return err
-		}
-		agentOpts := agentInvocationOptions{
-			Model:            agentModel,
-			Sandbox:          agentSandbox,
-			FullAuto:         agentFullAuto,
-			ThreadID:         agentThreadID,
-			IncludePlanTool:  agentIncludePlanTool,
-			SkipGitRepoCheck: agentSkipGitCheck,
 		}
 		fmt.Fprintf(cmd.OutOrStdout(), "%s Sending triage summary (%s) to %s\n", ui.StyleManager.Render("agent"), triageSource, agentName)
 		if err := runAgent(cmd.Context(), agentName, prompt, targetRepo, agentOpts, cmd.OutOrStdout(), cmd.ErrOrStderr()); err != nil {

@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/google/cel-go/common/types/ref"
+	"github.com/picatz/deputy/internal/collections"
 )
 
 // Action represents a normalized policy decision emitted by a CEL program.
@@ -82,7 +83,7 @@ func toAction(source string, value any) (*Action, error) {
 		}
 		act := Action{
 			Source: source,
-			Type:   strings.ToLower(strings.TrimSpace(actType)),
+			Type:   collections.NormalizeLower(actType),
 			Raw:    v,
 		}
 		act.Reason, _ = getString(v, "reason")

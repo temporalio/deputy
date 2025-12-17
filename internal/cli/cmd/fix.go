@@ -130,13 +130,7 @@ func runFixPlan(scanner *Scanner, cmd *cobra.Command, args []string) error {
 	planPath, _ := cmd.Flags().GetString("plan")
 	ignoreUnfixed, _ := cmd.Flags().GetBool("ignore-unfixed")
 	apply, _ := cmd.Flags().GetBool("apply")
-	agentName, _ := cmd.Flags().GetString("agent")
-	agentModel, _ := cmd.Flags().GetString("agent-model")
-	agentSandbox, _ := cmd.Flags().GetString("agent-sandbox")
-	agentFullAuto, _ := cmd.Flags().GetBool("agent-full-auto")
-	agentThreadID, _ := cmd.Flags().GetString("agent-thread")
-	agentIncludePlanTool, _ := cmd.Flags().GetBool("agent-include-plan-tool")
-	agentSkipGitCheck, _ := cmd.Flags().GetBool("agent-skip-git-check")
+	agentName, agentOpts := getAgentFlags(cmd)
 	policyPaths, _ := cmd.Flags().GetStringArray("policy")
 
 	if strings.TrimSpace(reportPath) != "" && strings.TrimSpace(planPath) != "" {
@@ -244,14 +238,6 @@ func runFixPlan(scanner *Scanner, cmd *cobra.Command, args []string) error {
 		agentPrompt, err := buildCodexFixPrompt(plan)
 		if err != nil {
 			return err
-		}
-		agentOpts := agentInvocationOptions{
-			Model:            agentModel,
-			Sandbox:          agentSandbox,
-			FullAuto:         agentFullAuto,
-			ThreadID:         agentThreadID,
-			IncludePlanTool:  agentIncludePlanTool,
-			SkipGitRepoCheck: agentSkipGitCheck,
 		}
 		if err := runAgent(cmd.Context(), agentName, agentPrompt, repoPathForMutations, agentOpts, cmd.OutOrStdout(), cmd.ErrOrStderr()); err != nil {
 			return err

@@ -1,137 +1,55 @@
 package proxy
 
 import (
-	"context"
-	"fmt"
-	"log/slog"
 	"net/http"
-	"net/http/httputil"
-	"net/url"
 	"path"
 	"strings"
-
-	analysis "github.com/picatz/deputy/internal/analysis"
-	"github.com/picatz/deputy/internal/policy"
 )
 
+// pypiHandler proxies requests to a PyPI registry (e.g., pypi.org) while
+// evaluating policy rules and enriching requests with vulnerability data.
 type pypiHandler struct {
-	policies      PolicyEvaluator
-	proxy         *httputil.ReverseProxy
-	osvClient     analysis.OSVClient
-	vulnLookup    func(context.Context, string, string) ([]analysis.Vulnerability, error)
-	licenseLookup func(context.Context, string, string) ([]string, error)
+	*baseHandler
 }
 
+// newPyPIHandler creates a handler for proxying PyPI registry requests.
+// It configures vulnerability lookups against the "PyPI" ecosystem in OSV.
 func newPyPIHandler(upstream string, policies PolicyEvaluator) (*pypiHandler, error) {
-	u, err := url.Parse(upstream)
+	base, err := newBaseHandler(handlerConfig{
+		ecosystem:    "pypi",
+		osvEcosystem: "PyPI",
+		upstream:     upstream,
+		policies:     policies,
+		wantLicenses: false,
+	})
 	if err != nil {
-		return nil, fmt.Errorf("parse upstream %q: %w", upstream, err)
+		return nil, err
 	}
-	client := newUpstreamHTTPClient()
-	osvClient := analysis.NewOSVClient()
-	return &pypiHandler{
-		policies:  policies,
-		proxy:     newUpstreamReverseProxy(u, "pypi", client.Transport),
-		osvClient: osvClient,
-		vulnLookup: func(ctx context.Context, pkg, version string) ([]analysis.Vulnerability, error) {
-			return cachedOSVLookup(ctx, osvClient, "PyPI", pkg, version)
-		},
-	}, nil
+	return &pypiHandler{baseHandler: base}, nil
 }
 
+// ServeHTTP handles incoming PyPI registry requests, parsing the path to extract
+// package name, version, and operation type, then evaluating policies before proxying.
 func (h *pypiHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	ctx := r.Context()
 	pkg, version, filename, op := parsePyPIPath(r.URL.Path)
-	hasVersion := strings.TrimSpace(version) != ""
-	rawVersion := version
-	if !hasVersion {
-		version = unknownVersionPlaceholder
+
+	info := requestInfo{
+		Name:       pkg,
+		Version:    version,
+		HasVersion: strings.TrimSpace(version) != "",
+		Operation:  op,
+		Ecosystem:  "pypi",
+		Filename:   filename,
 	}
-	payload := map[string]any{
-		"request": map[string]any{
-			"ecosystem": "pypi",
-			"package":   pkg,
-			"version":   version,
-			"raw_version": func() string {
-				if hasVersion {
-					return rawVersion
-				}
-				return ""
-			}(),
-			"has_version": hasVersion,
-			"operation":   op,
-			"path":        r.URL.Path,
-			"filename":    filename,
-		},
-	}
-	if hasVersion {
-		if vulnMaps := h.vulnerabilityPayload(ctx, pkg, rawVersion); len(vulnMaps) > 0 {
-			payload["vulnerabilities"] = vulnMaps
-		}
-		if licenses := h.licensePayload(ctx, pkg, rawVersion); len(licenses) > 0 {
-			payload["licenses"] = licenses
-			if req, ok := payload["request"].(map[string]any); ok {
-				req["licenses"] = licenses
-			}
-		}
-	}
-	serveWithPolicy(w, r, h.policies, "pypi_artifact_request", payload, blockMeta{
-		Ecosystem: "pypi",
-		Name:      pkg,
-		Version:   rawVersion,
-		Operation: op,
-	}, h.proxy)
+	payload := h.buildPayload(r.Context(), info, r.URL.Path)
+	h.serve(w, r, "pypi_artifact_request", info, payload)
 }
 
-func (h *pypiHandler) vulnerabilityPayload(ctx context.Context, pkg, version string) []map[string]any {
-	var vulns []analysis.Vulnerability
-	var err error
-	switch {
-	case h == nil:
-		return nil
-	case h.vulnLookup != nil:
-		vulns, err = h.vulnLookup(ctx, pkg, version)
-	case h.osvClient != nil:
-		inputs := []analysis.PkgInput{{
-			Name:      pkg,
-			Version:   version,
-			Ecosystem: "PyPI",
-		}}
-		vulns, err = analysis.QueryOSVBatch(ctx, h.osvClient, inputs)
-	default:
-		return nil
-	}
-	if err != nil {
-		slog.Warn("osv lookup failed", "package", pkg, "version", version, "error", err)
-		return nil
-	}
-	if len(vulns) == 0 {
-		return nil
-	}
-	var maps []map[string]any
-	for _, v := range vulns {
-		m, err := policy.StructToMap(v)
-		if err != nil {
-			slog.Debug("failed to map vulnerability", "id", v.ID, "error", err)
-			continue
-		}
-		maps = append(maps, m)
-	}
-	return maps
-}
-
-func (h *pypiHandler) licensePayload(ctx context.Context, pkg, version string) []string {
-	if h == nil || h.licenseLookup == nil {
-		return nil
-	}
-	licenses, err := h.licenseLookup(ctx, pkg, version)
-	if err != nil {
-		slog.Warn("license lookup failed", "package", pkg, "version", version, "error", err)
-		return nil
-	}
-	return licenses
-}
-
+// parsePyPIPath extracts package name, version, filename, and operation from a PyPI
+// registry URL path. Supported path formats include:
+//   - /simple/<package>/         - simple API package listing
+//   - /project/<package>/<version>/ - project page
+//   - /packages/.../<package>-<version>.<ext> - distribution download
 func parsePyPIPath(p string) (pkg, version, filename, operation string) {
 	if strings.HasPrefix(p, "/simple/") {
 		pkg = strings.Trim(strings.TrimPrefix(p, "/simple/"), "/")
@@ -160,6 +78,8 @@ func parsePyPIPath(p string) (pkg, version, filename, operation string) {
 	return
 }
 
+// parsePyPIDistributionFilename extracts package name and version from a PyPI
+// distribution filename (e.g., "requests-2.31.0.tar.gz" -> "requests", "2.31.0").
 func parsePyPIDistributionFilename(filename string) (string, string) {
 	base := filename
 	for _, ext := range []string{".tar.gz", ".tar.bz2", ".tar.xz", ".tgz", ".zip", ".whl"} {
@@ -182,6 +102,8 @@ func NewPyPIHandler(upstream string, policies PolicyEvaluator) (http.Handler, er
 	return newPyPIHandler(upstream, policies)
 }
 
+// findVersionBoundary finds the index of the hyphen separating package name from
+// version in a PyPI distribution filename base (without extension).
 func findVersionBoundary(base string) int {
 	for i := 0; i < len(base); i++ {
 		if base[i] == '-' && i+1 < len(base) && isVersionStart(base[i+1]) {
@@ -191,6 +113,7 @@ func findVersionBoundary(base string) int {
 	return -1
 }
 
+// isVersionStart returns true if the byte could start a version string (digit or 'v').
 func isVersionStart(b byte) bool {
 	return (b >= '0' && b <= '9') || b == 'v'
 }

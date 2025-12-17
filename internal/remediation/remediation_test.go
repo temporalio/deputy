@@ -65,3 +65,56 @@ func assertCommand(t *testing.T, commands []Command, want string, expectExecutab
 	}
 	t.Fatalf("command %q not found in remediation plan", want)
 }
+
+func TestDependencyGroupFlag(t *testing.T) {
+	tests := []struct {
+		manager string
+		groups  []string
+		want    string
+	}{
+		// npm flags
+		{"npm", []string{"dev"}, "--save-dev"},
+		{"npm", []string{"devDependencies"}, "--save-dev"},
+		{"npm", []string{"optional"}, "--save-optional"},
+		{"npm", []string{"optionalDependencies"}, "--save-optional"},
+		{"npm", []string{"peer"}, "--save-peer"},
+		{"npm", []string{"peerDependencies"}, "--save-peer"},
+		{"npm", []string{"production"}, ""},
+		{"npm", nil, ""},
+
+		// pnpm flags (same as npm)
+		{"pnpm", []string{"dev"}, "--save-dev"},
+		{"pnpm", []string{"optional"}, "--save-optional"},
+
+		// yarn flags
+		{"yarn", []string{"dev"}, "--dev"},
+		{"yarn", []string{"devDependencies"}, "--dev"},
+		{"yarn", []string{"optional"}, "--optional"},
+		{"yarn", []string{"peer"}, "--peer"},
+		{"yarn", []string{"production"}, ""},
+
+		// Unknown manager
+		{"pip", []string{"dev"}, ""},
+		{"go", []string{"dev"}, ""},
+
+		// Case insensitivity
+		{"NPM", []string{"DEV"}, "--save-dev"},
+		{"Yarn", []string{"Optional"}, "--optional"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.manager+"_"+sliceToString(tt.groups), func(t *testing.T) {
+			got := dependencyGroupFlag(tt.manager, tt.groups)
+			if got != tt.want {
+				t.Errorf("dependencyGroupFlag(%q, %v) = %q, want %q", tt.manager, tt.groups, got, tt.want)
+			}
+		})
+	}
+}
+
+func sliceToString(s []string) string {
+	if len(s) == 0 {
+		return "empty"
+	}
+	return s[0]
+}

@@ -27,6 +27,7 @@ import (
 	"github.com/picatz/deputy/internal/repository"
 	"github.com/picatz/deputy/internal/repository/workspace"
 	"golang.org/x/mod/module"
+	"golang.org/x/sync/errgroup"
 	"golang.org/x/sync/singleflight"
 )
 
@@ -52,7 +53,26 @@ var (
 const (
 	licenseMemoTTL      = 30 * time.Minute
 	licenseMemoMaxItems = 4096
+	// maxModuleArchiveSize limits the size of module archives (zip, tarball) read
+	// into memory when scanning for licenses. This prevents memory exhaustion
+	// from unexpectedly large packages.
+	maxModuleArchiveSize = 20 << 20 // 20 MB
+
+	// HTTP client timeout constants for license lookups.
+	licenseHTTPTimeout = 5 * time.Second  // general license fetches (short, best-effort)
+	githubHTTPTimeout  = 10 * time.Second // GitHub API calls (slightly longer for rate limits)
 )
+
+// drainAndClose discards remaining response body content and closes the body.
+// This is important for HTTP connection reuse - if the body is not fully read,
+// the underlying TCP connection cannot be reused for subsequent requests.
+func drainAndClose(resp *nethttp.Response) {
+	if resp == nil || resp.Body == nil {
+		return
+	}
+	io.Copy(io.Discard, resp.Body)
+	resp.Body.Close()
+}
 
 // DefaultLicenseFilenamesForScan returns the default filenames used when scanning for licenses.
 func DefaultLicenseFilenamesForScan() []string {
@@ -61,7 +81,7 @@ func DefaultLicenseFilenamesForScan() []string {
 
 // systemFromEcosystem maps a free-form ecosystem string to a deps.dev system.
 func systemFromEcosystem(ecosystem string) pb.System {
-	switch strings.ToLower(strings.TrimSpace(ecosystem)) {
+	switch collections.NormalizeLower(ecosystem) {
 	case "go", "golang":
 		return pb.System_GO
 	case "npm", "javascript", "node", "nodejs":
@@ -198,27 +218,40 @@ func LocalRepoLicenseScan(ws workspace.FS) []string {
 	if len(candidates) == 0 {
 		return nil
 	}
+
+	// Use bounded concurrency to prevent resource exhaustion when scanning
+	// many license files. The limit of 10 is chosen to balance parallelism
+	// with resource usage.
+	const maxConcurrentScans = 10
+
 	type res struct{ id string }
 	ch := make(chan res, len(candidates))
-	var wg sync.WaitGroup
+
+	g := new(errgroup.Group)
+	g.SetLimit(maxConcurrentScans)
+
 	for _, f := range candidates {
 		f := f
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		g.Go(func() error {
 			data, err := ws.ReadFile(f)
 			if err != nil {
-				return
+				return nil // Ignore read errors, continue with other files
 			}
 			for _, id := range DetectLicenseIDs(data) {
 				if id != "" {
 					ch <- res{id: id}
 				}
 			}
-		}()
+			return nil
+		})
 	}
-	wg.Wait()
-	close(ch)
+
+	// Close channel after all goroutines complete
+	go func() {
+		g.Wait()
+		close(ch)
+	}()
+
 	seen := collections.NewSet[string]()
 	var out []string
 	for r := range ch {
@@ -231,6 +264,20 @@ func LocalRepoLicenseScan(ws workspace.FS) []string {
 	return out
 }
 
+// License lookup caching and request deduplication.
+//
+// We use a two-layer caching strategy with singleflight for request coalescing:
+//
+//  1. TTL cache (remoteLicenseMemo, registryLicenseMemo): In-memory cache with
+//     time-based expiration for quick repeated lookups within a session.
+//
+//  2. Singleflight groups (remoteLicenseGroup, registryLicenseGroup): Prevent
+//     duplicate in-flight requests for the same key. When multiple goroutines
+//     request the same license info concurrently, only one HTTP request is made
+//     and all waiters receive the same result.
+//
+// This pattern is especially important during SBOM generation and vulnerability
+// scanning where the same package may be referenced multiple times.
 var (
 	remoteLicenseMemo    = cache.NewTTLCache[string, []string](licenseMemoMaxItems, licenseMemoTTL)
 	remoteLicenseGroup   singleflight.Group
@@ -238,7 +285,7 @@ var (
 	registryLicenseGroup singleflight.Group
 	githubHTTPClientOnce sync.Once
 	githubHTTPClient     *nethttp.Client
-	licenseHTTPClient    = &nethttp.Client{Timeout: 5 * time.Second}
+	licenseHTTPClient    = &nethttp.Client{Timeout: licenseHTTPTimeout}
 )
 
 // MergeLicenseSources merges deps.dev licenses (primary) with locally scanned
@@ -357,7 +404,7 @@ func RemoteModuleLicenseScan(ctx context.Context, modulePath, version string) []
 // populate licenses when upstream metadata is missing. It leverages registry APIs
 // (Go proxy zips, crates.io, Packagist) in addition to GitHub raw/clone scans.
 func LookupLicensesBestEffort(ctx context.Context, ecosystem, name, version string) []string {
-	eco := strings.ToLower(strings.TrimSpace(ecosystem))
+	eco := collections.NormalizeLower(ecosystem)
 	name = strings.TrimSpace(name)
 	version = strings.TrimSpace(version)
 	if eco == "" || name == "" || version == "" {
@@ -438,11 +485,11 @@ func GoProxyLicenseScan(ctx context.Context, modulePath, version string) []strin
 	if err != nil {
 		return nil
 	}
-	defer resp.Body.Close()
+	defer drainAndClose(resp)
 	if resp.StatusCode != nethttp.StatusOK {
 		return nil
 	}
-	data, err := io.ReadAll(io.LimitReader(resp.Body, 20<<20)) // cap at 20MB
+	data, err := io.ReadAll(io.LimitReader(resp.Body, maxModuleArchiveSize))
 	if err != nil || len(data) == 0 {
 		return nil
 	}
@@ -486,7 +533,7 @@ func LookupCratesLicense(ctx context.Context, name, version string) []string {
 			continue
 		}
 		if resp.StatusCode != nethttp.StatusOK {
-			resp.Body.Close()
+			drainAndClose(resp)
 			continue
 		}
 		var payload struct {
@@ -495,10 +542,10 @@ func LookupCratesLicense(ctx context.Context, name, version string) []string {
 			} `json:"version"`
 		}
 		if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
-			resp.Body.Close()
+			drainAndClose(resp)
 			continue
 		}
-		resp.Body.Close()
+		drainAndClose(resp)
 		if l := cleanLicenseList(splitLicenseString(payload.Version.License)); len(l) > 0 {
 			return l
 		}
@@ -508,7 +555,7 @@ func LookupCratesLicense(ctx context.Context, name, version string) []string {
 
 // LookupPackagistLicense queries packagist.org for license metadata.
 func LookupPackagistLicense(ctx context.Context, name, version string) []string {
-	name = strings.ToLower(strings.TrimSpace(name))
+	name = collections.NormalizeLower(name)
 	version = strings.TrimSpace(version)
 	if name == "" || version == "" || ctx.Err() != nil {
 		return nil
@@ -529,7 +576,7 @@ func lookupPackagistP2(ctx context.Context, name, version string) []string {
 	if err != nil {
 		return nil
 	}
-	defer resp.Body.Close()
+	defer drainAndClose(resp)
 	if resp.StatusCode != nethttp.StatusOK {
 		return nil
 	}
@@ -582,7 +629,7 @@ func lookupPackagistLegacy(ctx context.Context, name, version string) []string {
 	if err != nil {
 		return nil
 	}
-	defer resp.Body.Close()
+	defer drainAndClose(resp)
 	if resp.StatusCode != nethttp.StatusOK {
 		return nil
 	}
@@ -652,7 +699,7 @@ func LookupPubLicense(ctx context.Context, name, version string) []string {
 	if err != nil {
 		return nil
 	}
-	defer resp.Body.Close()
+	defer drainAndClose(resp)
 	if resp.StatusCode != nethttp.StatusOK {
 		return nil
 	}
@@ -691,7 +738,7 @@ func LookupCocoaPodsLicense(ctx context.Context, name, version string) []string 
 	if err != nil {
 		return nil
 	}
-	defer resp.Body.Close()
+	defer drainAndClose(resp)
 	if resp.StatusCode != nethttp.StatusOK {
 		return nil
 	}
@@ -712,7 +759,7 @@ func LookupCocoaPodsLicense(ctx context.Context, name, version string) []string 
 	if err != nil {
 		return nil
 	}
-	defer respSpec.Body.Close()
+	defer drainAndClose(respSpec)
 	if respSpec.StatusCode != nethttp.StatusOK {
 		return nil
 	}
@@ -764,7 +811,7 @@ func LookupHexLicense(ctx context.Context, name, version string) []string {
 	if err != nil {
 		return nil
 	}
-	defer resp.Body.Close()
+	defer drainAndClose(resp)
 	if resp.StatusCode != nethttp.StatusOK {
 		return nil
 	}
@@ -791,11 +838,11 @@ func scanTarballForLicenses(ctx context.Context, url string) []string {
 	if err != nil {
 		return nil
 	}
-	defer resp.Body.Close()
+	defer drainAndClose(resp)
 	if resp.StatusCode != nethttp.StatusOK {
 		return nil
 	}
-	data, err := io.ReadAll(io.LimitReader(resp.Body, 20<<20))
+	data, err := io.ReadAll(io.LimitReader(resp.Body, maxModuleArchiveSize))
 	if err != nil || len(data) == 0 {
 		return nil
 	}
@@ -947,7 +994,7 @@ func cloneStrings(src []string) []string {
 // suitable for GitHub API requests.
 func getGitHubHTTPClient() *nethttp.Client {
 	githubHTTPClientOnce.Do(func() {
-		githubHTTPClient = &nethttp.Client{Timeout: 10 * time.Second}
+		githubHTTPClient = &nethttp.Client{Timeout: githubHTTPTimeout}
 	})
 	return githubHTTPClient
 }
@@ -979,15 +1026,15 @@ func fetchLicensesFromGitHubRaw(ctx context.Context, owner, repo, version string
 			return nil, err
 		}
 		if resp.StatusCode == nethttp.StatusNotFound {
-			resp.Body.Close()
+			drainAndClose(resp)
 			continue
 		}
 		if resp.StatusCode != nethttp.StatusOK {
-			resp.Body.Close()
+			drainAndClose(resp)
 			continue
 		}
 		data, err := io.ReadAll(resp.Body)
-		resp.Body.Close()
+		resp.Body.Close() // Body fully read, no need to drain
 		if err != nil || len(data) == 0 {
 			continue
 		}

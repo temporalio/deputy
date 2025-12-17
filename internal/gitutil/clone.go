@@ -23,6 +23,6 @@ func CloneContext(ctx context.Context, dir string, opts *gitlib.CloneOptions) (*
 	if err != nil {
 		return nil, nil, err
 	}
-	cleanup := func() { _ = storer.Close() }
+	cleanup := func() { _ = storer.Close() } // best-effort storer cleanup
 	return repo, cleanup, nil
 }

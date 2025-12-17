@@ -118,3 +118,26 @@ func TestSet_Nil(t *testing.T) {
 		t.Fatalf("All() on nil set=%v want empty", got)
 	}
 }
+
+func TestNormalizeLower(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		in   string
+		want string
+	}{
+		{in: "", want: ""},
+		{in: "  ", want: ""},
+		{in: "Hello", want: "hello"},
+		{in: "  HELLO  ", want: "hello"},
+		{in: "  Go Lang  ", want: "go lang"},
+		{in: "npm", want: "npm"},
+		{in: "\tPyPI\n", want: "pypi"},
+	}
+
+	for _, tt := range tests {
+		if got := NormalizeLower(tt.in); got != tt.want {
+			t.Errorf("NormalizeLower(%q)=%q want %q", tt.in, got, tt.want)
+		}
+	}
+}

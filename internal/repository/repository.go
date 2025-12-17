@@ -106,7 +106,7 @@ func CloneToDir(ctx context.Context, opts *git.CloneOptions) (*Source, error) {
 	cleanup := func() error { return ws.Close() }
 	repo, closeStorer, err := gitx.CloneContext(ctx, ws.RootPath(), opts)
 	if err != nil {
-		_ = ws.Close()
+		_ = ws.Close() // best-effort cleanup on error
 		return nil, err
 	}
 	src := &Source{

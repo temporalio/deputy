@@ -117,38 +117,6 @@ func consolidatedSeverityPriority(v analysis.ConsolidatedVulnerability) (int, fl
 	return int(score*10 + 0.5), score
 }
 
-// managerRank returns a ranking integer for package managers to enforce a consistent display order.
-func managerRank(name string) int {
-	switch strings.ToLower(strings.TrimSpace(name)) {
-	case "go":
-		return 0
-	case "npm":
-		return 1
-	case "pnpm":
-		return 2
-	case "yarn":
-		return 3
-	case "composer":
-		return 4
-	case "gem":
-		return 5
-	case "cargo":
-		return 6
-	case "pip":
-		return 7
-	case "pipenv":
-		return 8
-	case "poetry":
-		return 9
-	case "maven":
-		return 10
-	case "gradle":
-		return 11
-	default:
-		return 100
-	}
-}
-
 // normalizeGoVersion ensures the Go version string starts with "v".
 func normalizeGoVersion(v string) string {
 	if v == "" {
@@ -359,8 +327,8 @@ func buildManifestDisplayContext(list []analysis.ConsolidatedVulnerability) mani
 	}
 
 	managerKeys := slices.SortedFunc(maps.Keys(groupEntries), func(a, b string) int {
-		ra := managerRank(a)
-		rb := managerRank(b)
+		ra := analysis.ManagerRank(a)
+		rb := analysis.ManagerRank(b)
 		if ra != rb {
 			return cmp.Compare(ra, rb)
 		}
@@ -417,8 +385,8 @@ func buildManifestDisplayContext(list []analysis.ConsolidatedVulnerability) mani
 	}
 
 	artifactKeys := slices.SortedFunc(maps.Keys(artifactGroups), func(a, b string) int {
-		ra := managerRank(artifactManagerNames[a])
-		rb := managerRank(artifactManagerNames[b])
+		ra := analysis.ManagerRank(artifactManagerNames[a])
+		rb := analysis.ManagerRank(artifactManagerNames[b])
 		if ra != rb {
 			return cmp.Compare(ra, rb)
 		}
@@ -435,6 +403,19 @@ func buildManifestDisplayContext(list []analysis.ConsolidatedVulnerability) mani
 		})
 	}
 	return ctx
+}
+
+// lockfileManagers maps lockfile suffixes to their package managers.
+var lockfileManagers = map[string]string{
+	"package-lock.json": "npm",
+	"yarn.lock":         "yarn",
+	"pnpm-lock.yaml":    "pnpm",
+	"composer.lock":     "composer",
+	"Gemfile.lock":      "bundler",
+	"Cargo.lock":        "cargo",
+	"requirements.txt":  "pip",
+	"poetry.lock":       "poetry",
+	"package.json":      "npm",
 }
 
 // inferArtifactManager attempts to determine the package manager for a given artifact path.
@@ -456,25 +437,10 @@ func inferArtifactManager(path string, manifestManagers map[string]string, dirMa
 		}
 		return "go"
 	}
-	switch {
-	case strings.HasSuffix(path, "package-lock.json"):
-		return "npm"
-	case strings.HasSuffix(path, "yarn.lock"):
-		return "yarn"
-	case strings.HasSuffix(path, "pnpm-lock.yaml"):
-		return "pnpm"
-	case strings.HasSuffix(path, "composer.lock"):
-		return "composer"
-	case strings.HasSuffix(path, "Gemfile.lock"):
-		return "bundler"
-	case strings.HasSuffix(path, "Cargo.lock"):
-		return "cargo"
-	case strings.HasSuffix(path, "requirements.txt"):
-		return "pip"
-	case strings.HasSuffix(path, "poetry.lock"):
-		return "poetry"
-	case strings.HasSuffix(path, "package.json"):
-		return "npm"
+	for suffix, mgr := range lockfileManagers {
+		if strings.HasSuffix(path, suffix) {
+			return mgr
+		}
 	}
 	return ""
 }

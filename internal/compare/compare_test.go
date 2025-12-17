@@ -62,6 +62,27 @@ func Test_allDigits(t *testing.T) {
 	}
 }
 
+func Test_parseDigits(t *testing.T) {
+	cases := []struct {
+		in   string
+		want int
+	}{
+		{in: "", want: 0},
+		{in: "0", want: 0},
+		{in: "1", want: 1},
+		{in: "42", want: 42},
+		{in: "12345", want: 12345},
+		{in: "12a45", want: 0},
+		{in: "abc", want: 0},
+		{in: "007", want: 7},
+	}
+	for _, c := range cases {
+		if got := parseDigits(c.in); got != c.want {
+			t.Fatalf("parseDigits(%q)=%d want %d", c.in, got, c.want)
+		}
+	}
+}
+
 func TestGetDirectDependencies(t *testing.T) {
 	ws, err := workspace.NewTempDir("cmp-go-mod")
 	if err != nil {

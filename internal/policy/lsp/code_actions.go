@@ -6,6 +6,10 @@ import (
 	protocol "github.com/sourcegraph/go-lsp"
 )
 
+// maxLevenshteinDistance is the maximum edit distance for fuzzy matching
+// when suggesting replacements for undeclared identifiers.
+const maxLevenshteinDistance = 3
+
 // buildCodeActions returns quick-fix style actions with inline text edits when possible.
 // The server replies with []any so clients can handle either CodeAction or Command.
 // docText is used to propose context-aware replacements for undeclared identifiers.
@@ -81,7 +85,7 @@ func undeclaredReplacement(uri protocol.DocumentURI, d protocol.Diagnostic, docT
 		suffix = token[idx:]
 	}
 	best := ""
-	bestDist := 3 // allow small Levenshtein distance
+	bestDist := maxLevenshteinDistance
 	for _, v := range celVariables {
 		dist := levenshteinDistance(base, v)
 		// prefer matching chain suffix context

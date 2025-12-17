@@ -1,21 +1,16 @@
 package analysis
 
 import (
-	"net"
-	"net/http"
 	"time"
 
+	"github.com/picatz/deputy/internal/httputil"
 	"osv.dev/bindings/go/osvdev"
 )
 
-const (
-	osvHTTPTimeout        = 45 * time.Second
-	osvIdleConnTimeout    = 90 * time.Second
-	osvTLSHandshake       = 10 * time.Second
-	osvResponseHeaderWait = 20 * time.Second
-	osvDialTimeout        = 10 * time.Second
-	osvKeepAlive          = 30 * time.Second
-)
+// osvHTTPTimeout is the overall request timeout for OSV API calls.
+// This is slightly longer than the GHA timeout to account for potentially
+// larger batch queries.
+const osvHTTPTimeout = 45 * time.Second
 
 // NewOSVClient returns an osv.dev client configured with production-friendly HTTP timeouts.
 //
@@ -23,26 +18,6 @@ const (
 // hung connections and slow/broken networks.
 func NewOSVClient() *osvdev.OSVClient {
 	c := osvdev.DefaultClient()
-	c.HTTPClient = newOSVHTTPClient()
+	c.HTTPClient = httputil.NewClient(osvHTTPTimeout)
 	return c
-}
-
-func newOSVHTTPClient() *http.Client {
-	dialer := &net.Dialer{
-		Timeout:   osvDialTimeout,
-		KeepAlive: osvKeepAlive,
-	}
-	transport := &http.Transport{
-		Proxy:                 http.ProxyFromEnvironment,
-		DialContext:           dialer.DialContext,
-		ForceAttemptHTTP2:     true,
-		MaxIdleConns:          100,
-		IdleConnTimeout:       osvIdleConnTimeout,
-		TLSHandshakeTimeout:   osvTLSHandshake,
-		ResponseHeaderTimeout: osvResponseHeaderWait,
-	}
-	return &http.Client{
-		Timeout:   osvHTTPTimeout,
-		Transport: transport,
-	}
 }

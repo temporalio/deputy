@@ -17,9 +17,13 @@ import (
 
 // Options configure the LSP server.
 type Options struct {
+	// UseStdio enables stdio transport mode, reading from stdin and writing to stdout.
 	UseStdio bool
-	TCP      string // optional "127.0.0.1:0" style
-	Log      *slog.Logger
+	// TCP specifies a TCP address to listen on (e.g., "127.0.0.1:0" or ":9000").
+	// When set and UseStdio is false, the server accepts TCP connections.
+	TCP string
+	// Log is the structured logger for server events. If nil, a default logger is used.
+	Log *slog.Logger
 }
 
 // Run starts the LSP server and blocks until the connection ends.

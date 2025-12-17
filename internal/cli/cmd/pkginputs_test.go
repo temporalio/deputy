@@ -373,3 +373,539 @@ func TestPackagesToInputs_PythonRequirementsMarkedDirect(t *testing.T) {
 func containsGroup(groups []string, want string) bool {
 	return slices.Contains(groups, want)
 }
+
+func TestDetectManager(t *testing.T) {
+	tests := []struct {
+		location     string
+		purlType     string
+		wantManager  string
+		wantManifest string
+		wantOk       bool
+	}{
+		// Go
+		{"go.mod", "", "go", "go.mod", true},
+		{"subdir/go.mod", "", "go", "subdir/go.mod", true},
+
+		// npm ecosystem
+		{"package-lock.json", "", "npm", "package.json", true},
+		{"web/package-lock.json", "", "npm", "web/package.json", true},
+		{"npm-shrinkwrap.json", "", "npm", "package.json", true},
+		{"yarn.lock", "", "yarn", "package.json", true},
+		{"app/yarn.lock", "", "yarn", "app/package.json", true},
+		{"pnpm-lock.yaml", "", "pnpm", "package.json", true},
+		{"pnpm-lock.yml", "", "pnpm", "package.json", true},
+		{"package.json", "npm", "npm", "package.json", true},
+		{"package.json", "", "", "", false}, // without purlType hint
+
+		// Python
+		{"requirements.txt", "", "pip", "requirements.txt", true},
+		{"Pipfile.lock", "", "pipenv", "Pipfile", true},
+		{"poetry.lock", "", "poetry", "pyproject.toml", true},
+		{"uv.lock", "", "uv", "uv.lock", true},
+
+		// Ruby
+		{"Gemfile.lock", "", "gem", "Gemfile", true},
+		{"gems.locked", "", "gem", "Gemfile", true},
+		{"myapp.gemspec", "", "gem", "myapp.gemspec", true},
+		{"lib/foo.gemspec", "", "gem", "lib/foo.gemspec", true},
+
+		// PHP
+		{"composer.lock", "", "composer", "composer.json", true},
+
+		// Rust
+		{"Cargo.toml", "", "cargo", "Cargo.toml", true},
+		{"Cargo.lock", "", "cargo", "Cargo.toml", true},
+		{"sub/Cargo.lock", "", "cargo", "sub/Cargo.toml", true},
+
+		// GitHub Actions
+		{".github/workflows/ci.yml", "", purlx.TypeGitHubActions, ".github/workflows/ci.yml", true},
+		{".github/workflows/ci.yaml", "", purlx.TypeGitHubActions, ".github/workflows/ci.yaml", true},
+		{".github/workflows/build.YML", "", purlx.TypeGitHubActions, ".github/workflows/build.YML", true},
+		{"action.yml", "", purlx.TypeGitHubActions, "action.yml", true},
+		{"action.yaml", "", purlx.TypeGitHubActions, "action.yaml", true},
+		{"tools/my-action/action.yml", "", purlx.TypeGitHubActions, "tools/my-action/action.yml", true},
+
+		// Unknown
+		{"random.txt", "", "", "", false},
+		{"Makefile", "", "", "", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.location, func(t *testing.T) {
+			manager, manifest, ok := detectManager(tt.location, tt.purlType)
+			if ok != tt.wantOk {
+				t.Errorf("detectManager(%q, %q) ok = %v, want %v", tt.location, tt.purlType, ok, tt.wantOk)
+			}
+			if manager != tt.wantManager {
+				t.Errorf("detectManager(%q, %q) manager = %q, want %q", tt.location, tt.purlType, manager, tt.wantManager)
+			}
+			if manifest != tt.wantManifest {
+				t.Errorf("detectManager(%q, %q) manifest = %q, want %q", tt.location, tt.purlType, manifest, tt.wantManifest)
+			}
+		})
+	}
+}
+
+func TestAppendUnique(t *testing.T) {
+	tests := []struct {
+		name string
+		dst  []string
+		src  []string
+		want []string
+	}{
+		{"nil dst", nil, []string{"a", "b"}, []string{"a", "b"}},
+		{"nil src", []string{"a"}, nil, []string{"a"}},
+		{"both nil", nil, nil, nil},
+		{"no duplicates", []string{"a"}, []string{"b", "c"}, []string{"a", "b", "c"}},
+		{"with duplicates", []string{"a", "b"}, []string{"b", "c"}, []string{"a", "b", "c"}},
+		{"empty strings filtered", []string{"a"}, []string{"", "  ", "b"}, []string{"a", "b"}},
+		{"whitespace trimmed", []string{"a"}, []string{" b "}, []string{"a", "b"}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := appendUnique(tt.dst, tt.src...)
+			if !slices.Equal(got, tt.want) {
+				t.Errorf("appendUnique(%v, %v) = %v, want %v", tt.dst, tt.src, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestMergeGroups(t *testing.T) {
+	tests := []struct {
+		name  string
+		base  []string
+		extra []string
+		want  []string
+	}{
+		{"nil base", nil, []string{"a", "b"}, []string{"a", "b"}},
+		{"nil extra", []string{"a"}, nil, []string{"a"}},
+		{"both nil", nil, nil, nil},
+		{"no overlap", []string{"a"}, []string{"b"}, []string{"a", "b"}},
+		{"with overlap", []string{"a", "b"}, []string{"b", "c"}, []string{"a", "b", "c"}},
+		{"empty strings skipped", []string{"a"}, []string{"", "  "}, []string{"a"}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := mergeGroups(tt.base, tt.extra)
+			if !slices.Equal(got, tt.want) {
+				t.Errorf("mergeGroups(%v, %v) = %v, want %v", tt.base, tt.extra, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestSortedUnique(t *testing.T) {
+	tests := []struct {
+		name   string
+		values []string
+		want   []string
+	}{
+		{"nil", nil, nil},
+		{"empty", []string{}, []string{}},
+		{"single", []string{"a"}, []string{"a"}},
+		{"already sorted unique", []string{"a", "b", "c"}, []string{"a", "b", "c"}},
+		{"unsorted", []string{"c", "a", "b"}, []string{"a", "b", "c"}},
+		{"with duplicates", []string{"b", "a", "b", "c", "a"}, []string{"a", "b", "c"}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := sortedUnique(tt.values)
+			if !slices.Equal(got, tt.want) {
+				t.Errorf("sortedUnique(%v) = %v, want %v", tt.values, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestHasRuntimeDependencyGroup(t *testing.T) {
+	tests := []struct {
+		groups []string
+		want   bool
+	}{
+		{nil, false},
+		{[]string{}, false},
+		{[]string{"devDependencies"}, false},
+		{[]string{"dependencies"}, true},
+		{[]string{"DEPENDENCIES"}, true}, // case insensitive
+		{[]string{" dependencies "}, true}, // whitespace trimmed
+		{[]string{"devDependencies", "dependencies"}, true},
+	}
+
+	for _, tt := range tests {
+		t.Run(fmt.Sprintf("%v", tt.groups), func(t *testing.T) {
+			got := hasRuntimeDependencyGroup(tt.groups)
+			if got != tt.want {
+				t.Errorf("hasRuntimeDependencyGroup(%v) = %v, want %v", tt.groups, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestMarksDirectByDefault(t *testing.T) {
+	tests := []struct {
+		manager string
+		want    bool
+	}{
+		{"pip", true},
+		{"PIP", true},
+		{"pipenv", true},
+		{"poetry", true},
+		{"gem", true},
+		{"npm", false},
+		{"yarn", false},
+		{"go", false},
+		{"cargo", false},
+		{"unknown", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.manager, func(t *testing.T) {
+			got := marksDirectByDefault(tt.manager)
+			if got != tt.want {
+				t.Errorf("marksDirectByDefault(%q) = %v, want %v", tt.manager, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestNormalizePythonName(t *testing.T) {
+	tests := []struct {
+		input string
+		want  string
+	}{
+		{"requests", "requests"},
+		{"Requests", "requests"},
+		{"django_rest_framework", "django-rest-framework"},
+		{"  Flask  ", "flask"},
+		{"PyYAML", "pyyaml"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			got := normalizePythonName(tt.input)
+			if got != tt.want {
+				t.Errorf("normalizePythonName(%q) = %q, want %q", tt.input, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestNormalizeCrateName(t *testing.T) {
+	tests := []struct {
+		input string
+		want  string
+	}{
+		{"tokio", "tokio"},
+		{"Tokio", "tokio"},
+		{"  serde  ", "serde"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			got := normalizeCrateName(tt.input)
+			if got != tt.want {
+				t.Errorf("normalizeCrateName(%q) = %q, want %q", tt.input, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestMergeManifestReference(t *testing.T) {
+	tests := []struct {
+		name     string
+		existing []analysis.ManifestReference
+		ref      analysis.ManifestReference
+		wantLen  int
+	}{
+		{
+			name:     "add to empty",
+			existing: nil,
+			ref:      analysis.ManifestReference{Manager: "npm", Path: "package.json"},
+			wantLen:  1,
+		},
+		{
+			name:     "add new ref",
+			existing: []analysis.ManifestReference{{Manager: "npm", Path: "a/package.json"}},
+			ref:      analysis.ManifestReference{Manager: "npm", Path: "b/package.json"},
+			wantLen:  2,
+		},
+		{
+			name:     "merge same ref",
+			existing: []analysis.ManifestReference{{Manager: "npm", Path: "package.json", Groups: []string{"dependencies"}}},
+			ref:      analysis.ManifestReference{Manager: "npm", Path: "package.json", Groups: []string{"devDependencies"}},
+			wantLen:  1,
+		},
+		{
+			name:     "skip empty path",
+			existing: []analysis.ManifestReference{{Manager: "npm", Path: "package.json"}},
+			ref:      analysis.ManifestReference{Manager: "npm", Path: ""},
+			wantLen:  1,
+		},
+		{
+			name:     "skip empty manager",
+			existing: []analysis.ManifestReference{{Manager: "npm", Path: "package.json"}},
+			ref:      analysis.ManifestReference{Manager: "", Path: "package.json"},
+			wantLen:  1,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := mergeManifestReference(tt.existing, tt.ref)
+			if len(got) != tt.wantLen {
+				t.Errorf("mergeManifestReference() returned %d refs, want %d", len(got), tt.wantLen)
+			}
+		})
+	}
+
+	// Test group merging specifically
+	t.Run("groups merged correctly", func(t *testing.T) {
+		existing := []analysis.ManifestReference{
+			{Manager: "npm", Path: "package.json", Groups: []string{"dependencies"}},
+		}
+		ref := analysis.ManifestReference{Manager: "npm", Path: "package.json", Groups: []string{"devDependencies"}}
+		got := mergeManifestReference(existing, ref)
+		if len(got) != 1 {
+			t.Fatalf("expected 1 ref, got %d", len(got))
+		}
+		if !slices.Contains(got[0].Groups, "dependencies") || !slices.Contains(got[0].Groups, "devDependencies") {
+			t.Errorf("groups not merged correctly: %v", got[0].Groups)
+		}
+	})
+}
+
+func TestCanonicalPackageKeyFromInput(t *testing.T) {
+	tests := []struct {
+		name  string
+		input analysis.PkgInput
+		want  string
+	}{
+		{
+			name:  "empty name",
+			input: analysis.PkgInput{Name: "", Version: "1.0.0"},
+			want:  "",
+		},
+		{
+			name:  "go package",
+			input: analysis.PkgInput{Name: "github.com/foo/bar", Version: "v1.0.0", Ecosystem: "Go"},
+			want:  "go|github.com/foo/bar|v1.0.0",
+		},
+		{
+			name:  "go package with v2 suffix",
+			input: analysis.PkgInput{Name: "github.com/foo/bar/v2", Version: "v2.1.0", Ecosystem: "Go"},
+			want:  "go|github.com/foo/bar|v2.1.0",
+		},
+		{
+			name:  "npm package",
+			input: analysis.PkgInput{Name: "lodash", Version: "4.17.0", Ecosystem: "npm"},
+			want:  "npm|lodash|4.17.0",
+		},
+		{
+			name:  "no ecosystem",
+			input: analysis.PkgInput{Name: "unknown-pkg", Version: "1.0.0"},
+			want:  "unknown-pkg|1.0.0",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := canonicalPackageKeyFromInput(tt.input)
+			if got != tt.want {
+				t.Errorf("canonicalPackageKeyFromInput() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestBuildPackageDirectMap(t *testing.T) {
+	tests := []struct {
+		name   string
+		inputs []analysis.PkgInput
+		want   map[string]bool
+	}{
+		{
+			name:   "nil inputs",
+			inputs: nil,
+			want:   nil,
+		},
+		{
+			name:   "empty inputs",
+			inputs: []analysis.PkgInput{},
+			want:   nil,
+		},
+		{
+			name: "no direct deps",
+			inputs: []analysis.PkgInput{
+				{Name: "foo", Version: "1.0.0", Ecosystem: "npm", IsDirect: false},
+			},
+			want: nil,
+		},
+		{
+			name: "with direct deps",
+			inputs: []analysis.PkgInput{
+				{Name: "foo", Version: "1.0.0", Ecosystem: "npm", IsDirect: true},
+				{Name: "bar", Version: "2.0.0", Ecosystem: "npm", IsDirect: false},
+			},
+			want: map[string]bool{"npm|foo|1.0.0": true},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := buildPackageDirectMap(tt.inputs)
+			if tt.want == nil && got != nil {
+				t.Errorf("buildPackageDirectMap() = %v, want nil", got)
+				return
+			}
+			if tt.want != nil {
+				for k, v := range tt.want {
+					if got[k] != v {
+						t.Errorf("buildPackageDirectMap()[%q] = %v, want %v", k, got[k], v)
+					}
+				}
+			}
+		})
+	}
+}
+
+func TestMergeDirectMaps(t *testing.T) {
+	tests := []struct {
+		name string
+		maps []map[string]bool
+		want map[string]bool
+	}{
+		{
+			name: "all nil",
+			maps: []map[string]bool{nil, nil},
+			want: nil,
+		},
+		{
+			name: "merge two maps",
+			maps: []map[string]bool{
+				{"a": true},
+				{"b": true},
+			},
+			want: map[string]bool{"a": true, "b": true},
+		},
+		{
+			name: "false values not included",
+			maps: []map[string]bool{
+				{"a": true, "b": false},
+			},
+			want: map[string]bool{"a": true},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := mergeDirectMaps(tt.maps...)
+			if tt.want == nil && got != nil {
+				t.Errorf("mergeDirectMaps() = %v, want nil", got)
+				return
+			}
+			if tt.want != nil {
+				for k, v := range tt.want {
+					if got[k] != v {
+						t.Errorf("mergeDirectMaps()[%q] = %v, want %v", k, got[k], v)
+					}
+				}
+			}
+		})
+	}
+}
+
+func TestPackagesToInputs_EdgeCases(t *testing.T) {
+	t.Run("nil packages", func(t *testing.T) {
+		inputs := packagesToInputs(nil, packageInputOptions{})
+		if inputs != nil {
+			t.Errorf("expected nil for nil input, got %v", inputs)
+		}
+	})
+
+	t.Run("empty packages", func(t *testing.T) {
+		inputs := packagesToInputs([]*extractor.Package{}, packageInputOptions{})
+		if inputs != nil {
+			t.Errorf("expected nil for empty input, got %v", inputs)
+		}
+	})
+
+	t.Run("nil package in slice", func(t *testing.T) {
+		pkgs := []*extractor.Package{nil, {Name: "foo", Version: "1.0.0"}}
+		inputs := packagesToInputs(pkgs, packageInputOptions{})
+		if len(inputs) != 1 {
+			t.Errorf("expected 1 input, got %d", len(inputs))
+		}
+	})
+
+	t.Run("empty name filtered", func(t *testing.T) {
+		pkgs := []*extractor.Package{{Name: "", Version: "1.0.0"}, {Name: "foo", Version: "1.0.0"}}
+		inputs := packagesToInputs(pkgs, packageInputOptions{})
+		if len(inputs) != 1 {
+			t.Errorf("expected 1 input, got %d", len(inputs))
+		}
+	})
+
+	t.Run("deduplication", func(t *testing.T) {
+		pkgs := []*extractor.Package{
+			{Name: "foo", Version: "1.0.0", PURLType: scalpurl.TypeNPM},
+			{Name: "foo", Version: "1.0.0", PURLType: scalpurl.TypeNPM},
+		}
+		inputs := packagesToInputs(pkgs, packageInputOptions{})
+		if len(inputs) != 1 {
+			t.Errorf("expected 1 deduplicated input, got %d", len(inputs))
+		}
+	})
+
+	t.Run("golang ecosystem normalization", func(t *testing.T) {
+		pkgs := []*extractor.Package{
+			{Name: "github.com/foo/bar", Version: "v1.0.0", PURLType: "golang"},
+		}
+		inputs := packagesToInputs(pkgs, packageInputOptions{})
+		if len(inputs) != 1 {
+			t.Fatalf("expected 1 input, got %d", len(inputs))
+		}
+		if inputs[0].Ecosystem != "Go" {
+			t.Errorf("expected ecosystem Go, got %s", inputs[0].Ecosystem)
+		}
+	})
+
+	t.Run("github ecosystem normalization", func(t *testing.T) {
+		pkgs := []*extractor.Package{
+			{Name: "actions/checkout", Version: "v4", PURLType: "github"},
+		}
+		inputs := packagesToInputs(pkgs, packageInputOptions{})
+		if len(inputs) != 1 {
+			t.Fatalf("expected 1 input, got %d", len(inputs))
+		}
+		if inputs[0].Ecosystem != "GitHub Actions" {
+			t.Errorf("expected ecosystem GitHub Actions, got %s", inputs[0].Ecosystem)
+		}
+	})
+}
+
+func TestAppendGroupLabel(t *testing.T) {
+	tests := []struct {
+		name     string
+		existing []string
+		label    string
+		want     []string
+	}{
+		{"add to nil", nil, "dev", []string{"dev"}},
+		{"add new label", []string{"prod"}, "dev", []string{"prod", "dev"}},
+		{"skip duplicate same case", []string{"dev"}, "dev", []string{"dev"}},
+		{"skip duplicate different case", []string{"DEV"}, "dev", []string{"DEV"}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := appendGroupLabel(tt.existing, tt.label)
+			if !slices.Equal(got, tt.want) {
+				t.Errorf("appendGroupLabel(%v, %q) = %v, want %v", tt.existing, tt.label, got, tt.want)
+			}
+		})
+	}
+}

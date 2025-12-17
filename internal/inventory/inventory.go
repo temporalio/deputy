@@ -21,6 +21,7 @@ import (
 	"github.com/google/osv-scalibr/plugin"
 	pl "github.com/google/osv-scalibr/plugin/list"
 
+	"github.com/picatz/deputy/internal/collections"
 	ghactions "github.com/picatz/deputy/internal/inventory/plugins/github/actionsx"
 	rubygemspec "github.com/picatz/deputy/internal/inventory/plugins/ruby/gemspecx"
 	"github.com/picatz/deputy/internal/repository/workspace"
@@ -58,7 +59,7 @@ func ScanPackagesAtCommitSnapshot(ctx context.Context, repo *git.Repository, com
 	}
 	ws := workspace.NewMemory()
 	if err := populateWorkspaceFromTree(ws, tree); err != nil {
-		_ = ws.Close()
+		_ = ws.Close() // best-effort cleanup on error
 		return nil, err
 	}
 	defer ws.Close()
@@ -257,17 +258,21 @@ func normalizeEcosystems(names []string) []string {
 
 // shouldIncludeGitHubActions reports whether the internal GitHub Actions plugin should run.
 // If names is nil (meaning all ecosystems), it returns true.
+// githubActionsAliases contains all recognized aliases for GitHub Actions ecosystem.
+var githubActionsAliases = collections.NewSet(
+	"github", "github-actions", "githubactions", "actions", "gha",
+)
+
+// isGitHubActionsEcosystem checks if a name is an alias for GitHub Actions.
+func isGitHubActionsEcosystem(name string) bool {
+	return githubActionsAliases.Has(name)
+}
+
 func shouldIncludeGitHubActions(names []string) bool {
 	if names == nil {
 		return true
 	}
-	return slices.ContainsFunc(names, func(n string) bool {
-		switch n {
-		case "github", "github-actions", "githubactions", "actions", "gha":
-			return true
-		}
-		return false
-	})
+	return slices.ContainsFunc(names, isGitHubActionsEcosystem)
 }
 
 // filterExternalEcosystems removes internal ecosystem aliases so upstream scalibr
@@ -278,12 +283,10 @@ func filterExternalEcosystems(names []string) []string {
 	}
 	out := make([]string, 0, len(names))
 	for _, n := range names {
-		switch n {
-		case "github", "github-actions", "githubactions", "actions", "gha":
+		if isGitHubActionsEcosystem(n) {
 			continue
-		default:
-			out = append(out, n)
 		}
+		out = append(out, n)
 	}
 	if len(out) == 0 {
 		return nil

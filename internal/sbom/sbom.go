@@ -24,6 +24,7 @@ import (
 	"github.com/google/osv-scalibr/extractor"
 	"github.com/google/osv-scalibr/purl"
 	analysis "github.com/picatz/deputy/internal/analysis"
+	"github.com/picatz/deputy/internal/collections"
 	"github.com/picatz/deputy/internal/compare"
 	gitx "github.com/picatz/deputy/internal/gitutil"
 	"github.com/picatz/deputy/internal/inventory"
@@ -41,23 +42,39 @@ import (
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
+// HTTP client timeout for remote license scanning during SBOM enrichment.
+const remoteLicenseFetchTimeout = 20 * time.Second
+
 // Options configures SBOM generation behavior and enrichment passes.
 type Options struct {
-	Ref            string
-	Ecosystems     []string
-	Name           string
+	// Ref specifies the git reference (branch, tag, or commit) to generate the SBOM from.
+	// Defaults to "HEAD" if empty.
+	Ref string
+	// Ecosystems filters which package ecosystems to include (e.g., "go", "npm").
+	// An empty slice includes all detected ecosystems.
+	Ecosystems []string
+	// Name overrides the SBOM document name. If empty, defaults to "repoRef@ref".
+	Name string
+	// EnrichLicenses enables license enrichment for packages in the SBOM.
 	EnrichLicenses bool
-	LicenseSource  string // depsdev|scan|both
+	// LicenseSource specifies where to fetch license data: "depsdev", "scan", or "both".
+	LicenseSource string
 }
 
 // Result captures the SBOM document alongside contextual metadata that callers
 // can surface to users (e.g., --show-context banner in the CLI).
 type Result struct {
+	// Document is the generated Protobom SBOM document.
 	Document *sbom.Document
+	// RepoPath is the local or remote repository path that was scanned.
 	RepoPath string
-	Ref      string
-	Commit   string
-	Origin   string
+	// Ref is the git reference that was resolved (may differ from input if normalized).
+	Ref string
+	// Commit is the resolved commit hash for the scanned reference.
+	Commit string
+	// Origin is the repository's remote origin URL (if available).
+	Origin string
+	// Packages is the raw list of packages discovered by the inventory scanner.
 	Packages []*extractor.Package
 }
 
@@ -155,7 +172,7 @@ func Generate(ctx context.Context, repoRef string, opts Options) (Result, error)
 			if err := enrichProtobomLicensesScanLocal(ctx, doc, src.Workspace); err != nil {
 				return Result{}, err
 			}
-			fetcher := &remoteFetcher{Timeout: 20 * time.Second}
+			fetcher := &remoteFetcher{Timeout: remoteLicenseFetchTimeout}
 			if err := enrichProtobomLicensesScanWithFetcher(ctx, doc, fetcher); err != nil {
 				return Result{}, err
 			}
@@ -166,7 +183,7 @@ func Generate(ctx context.Context, repoRef string, opts Options) (Result, error)
 			if err := enrichProtobomLicensesScanLocal(ctx, doc, src.Workspace); err != nil {
 				return Result{}, err
 			}
-			fetcher := &remoteFetcher{Timeout: 20 * time.Second}
+			fetcher := &remoteFetcher{Timeout: remoteLicenseFetchTimeout}
 			if err := enrichProtobomLicensesScanWithFetcher(ctx, doc, fetcher); err != nil {
 				return Result{}, err
 			}
@@ -433,7 +450,7 @@ func enrichProtobomLicensesScanWithFetcher(ctx context.Context, doc *sbom.Docume
 		if pu == nil {
 			continue
 		}
-		eco := strings.ToLower(strings.TrimSpace(pu.Type))
+		eco := collections.NormalizeLower(pu.Type)
 		version := strings.TrimSpace(pu.Version)
 		if eco == "" || version == "" {
 			continue
