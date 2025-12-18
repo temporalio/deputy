@@ -2,64 +2,172 @@
 
 Scan repositories, directories, or SBOM files for known vulnerabilities using OSV.
 
-## When to use it
+## Synopsis
 
-- Before releases to catch vulnerable dependencies early.
-- In CI to gate merges or produce vulnerability artifacts.
-- As a forensic tool (use `--as-of` / published-date filters).
+```
+deputy scan [repo] [flags]
+deputy scan dir <directory> [flags]
+deputy scan sbom <sbom-file> [flags]
+```
 
-## Common patterns
+## When to Use
+
+- Before releases to catch vulnerable dependencies early
+- In CI to gate merges or produce vulnerability artifacts
+- As a forensic tool with `--as-of` / published-date filters
+- To scan existing SBOMs from other tools
+
+## Flags
+
+| Flag | Short | Default | Description |
+| --- | --- | --- | --- |
+| `--ref` | `-r` | `HEAD` | Git reference to scan (branch, tag, commit, or `WORKING`) |
+| `--format` | `-f` | `text` | Output format: `text`, `json` |
+| `--output` | `-o` | stdout | Output file path |
+| `--ignore-unfixed` | | `false` | Hide vulnerabilities without a known fix |
+| `--published-before` | | | Only show vulns published before this date |
+| `--published-after` | | | Only show vulns published on/after this date |
+| `--as-of` | | | Historical view up to this date (implies `--published-before`) |
+| `--policy` | | | CEL policy file(s) to evaluate (repeatable) |
+| `--ecosystems` | | all | Limit to specific ecosystems (e.g., `go,npm`) |
+| `--show-symbols` | | `false` | Show affected symbols in text output |
+| `--show-db-info` | | `false` | Show database metadata (e.g., review_status) |
+
+### Date Format
+
+Date flags accept: `YYYY`, `YYYY-MM`, `YYYY-MM-DD`, or RFC3339.
+
+## Examples
+
+### Basic Scanning
 
 ```console
 # Scan current repo at HEAD
 $ deputy scan
 
-# Include uncommitted changes explicitly
+# Scan at a specific ref
+$ deputy scan --ref v1.2.3
+
+# Include uncommitted changes
 $ deputy scan --ref WORKING
 
-# Machine-readable output (CI artifacts)
+# Scan a remote repository
+$ deputy scan github.com/hashicorp/vault --ref v1.16.0
+```
+
+### Output Formats
+
+```console
+# Machine-readable JSON for CI
 $ deputy scan --format json --output scan.json
 
-# Reduce noise by ignoring unfixed vulns 
+# Pipe to jq for processing
+$ deputy scan --format json | jq '.vulnerabilities[] | {id: .id, severity: .severity}'
+```
+
+### Filtering
+
+```console
+# Hide unfixable vulnerabilities
 $ deputy scan --ignore-unfixed
 
-# Historical view: “What was known up to end of 2024?”
+# Only Go and npm ecosystems
+$ deputy scan --ecosystems go,npm
+```
+
+### Historical Analysis
+
+```console
+# What was known at end of 2024?
 $ deputy scan --as-of 2024-12-31
 
-# Scan an SBOM file (or stdin)
+# Vulns published in a specific window
+$ deputy scan --published-after 2025-01 --published-before 2025-03
+
+# Combine with ignore-unfixed for actionable results
+$ deputy scan --as-of 2024-12-31 --ignore-unfixed
+```
+
+### Scanning Directories and SBOMs
+
+```console
+# Scan a directory (no Git context)
+$ deputy scan dir ./vendor
+
+# Scan an SBOM file
 $ deputy scan sbom sbom.spdx.json
+
+# Scan SBOM from stdin
 $ deputy sbom --format protobom-json | deputy scan sbom -
 ```
 
-## Historical analysis
-
-Deputy supports “time-window” and “as-of” views for vulnerability knowledge:
+### With Policies
 
 ```console
-# Vulns first published in 2025 or later
-$ deputy scan --published-after=2025
+# Enforce severity guardrails
+$ deputy scan --policy policy/severity-guardrail.yaml
 
-# A specific month window
-$ deputy scan --published-after=2025-02 --published-before=2025-03
-
-# “State of known, fixable vulns at end of 2023”
-$ deputy scan --as-of=2023 --ignore-unfixed
+# Multiple policies
+$ deputy scan --policy policy/severity.yaml --policy policy/licenses.yaml
 ```
 
-See [`docs/examples/historical-analysis.md`](../examples/historical-analysis.md) for more.
+## Output
 
-## Example output
+### Text Format
 
-For a realistic end-to-end workflow (including output), see:
+```
+Scanned /path/to/repo @ HEAD (abc123d)
+  Origin: https://github.com/example/repo.git
 
-- [`docs/examples/pipeline.md`](../examples/pipeline.md)
+∴ Vulnerabilities Found:
 
-## Policies
+github.com/example/pkg v1.2.3 [direct]:
+  • CVE-2024-1234 [HIGH] (↑ v1.2.4)
+    Description of the vulnerability
+    Aliases: GHSA-xxxx-xxxx-xxxx
+    Published: 2024-01-15
 
-Use `--policy` to evaluate CEL policies against the scan report and/or per-vulnerability entrypoints.
-See [`docs/concepts/policies.md`](../concepts/policies.md).
+Vulnerability Summary:
+  ! 3 require immediate attention (critical/high severity)
+  ↑ 5 can be fixed by upgrading
+```
 
-## Code pointers
+### JSON Format
 
-- CLI command: [`internal/cli/cmd/scan.go`](../../internal/cli/cmd/scan.go)
-- Inventory + OSV queries: [`internal/inventory`](../../internal/inventory), [`internal/analysis`](../../internal/analysis)
+```json
+{
+  "repo": "/path/to/repo",
+  "ref": "HEAD",
+  "commit": "abc123d...",
+  "generated": "2025-01-15T10:30:00Z",
+  "packagesScanned": 42,
+  "stats": {
+    "total": 5,
+    "critical": 1,
+    "high": 2,
+    "medium": 2,
+    "low": 0,
+    "fixable": 4
+  },
+  "vulnerabilities": [...]
+}
+```
+
+## Exit Codes
+
+| Code | Meaning |
+| --- | --- |
+| `0` | Success (no policy violations) |
+| `1` | Policy violations or scan errors |
+
+## See Also
+
+- Historical analysis: [`docs/examples/historical-analysis.md`](../examples/historical-analysis.md)
+- Policies: [`docs/concepts/policies.md`](../concepts/policies.md)
+- Pipeline example: [`docs/examples/pipeline.md`](../examples/pipeline.md)
+
+## Code Pointers
+
+- CLI: [`internal/cli/cmd/scan.go`](../../internal/cli/cmd/scan.go)
+- Inventory: [`internal/inventory`](../../internal/inventory)
+- OSV queries: [`internal/analysis`](../../internal/analysis)

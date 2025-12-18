@@ -1,6 +1,6 @@
 # Deputy
 
-Deputy enables depedency management at scale.
+Deputy enables dependency management at scale.
 
 - Inventory dependencies across ecosystems, bring your own plugins for custom sources.
 - Scan dependencies using vulnerability sources like OSV to produce actionable findings.

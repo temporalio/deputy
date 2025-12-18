@@ -1,10 +1,29 @@
 # Guides
 
-Practical “how do we use this in the real world?” documentation.
+Practical "how do I use this in the real world?" documentation.
 
-- CI gating + artifacts: [`docs/guides/ci.md`](ci.md)
-- Safe agent usage: [`docs/guides/agents.md`](agents.md)
-- Proxy rollout checklist: [`docs/guides/proxy-rollout.md`](proxy-rollout.md)
-- Workflow chooser: [`docs/guides/workflows.md`](workflows.md)
-- Troubleshooting: [`docs/guides/troubleshooting.md`](troubleshooting.md)
-- Examples & transcripts: [`docs/examples/README.md`](../examples/README.md)
+## Getting Started
+
+| Guide | Description |
+| --- | --- |
+| [Workflows](workflows.md) | Choose the right command for your task |
+| [CI Integration](ci.md) | GitHub Actions, GitLab CI, Azure DevOps, CircleCI |
+
+## Policies
+
+| Guide | Description |
+| --- | --- |
+| [Policy Cookbook](policy-cookbook.md) | Real-world CEL policy patterns and examples |
+| [Proxy Rollout](proxy-rollout.md) | Phased approach to policy enforcement |
+
+## Advanced
+
+| Guide | Description |
+| --- | --- |
+| [Agents](agents.md) | AI-assisted remediation and triage |
+| [Troubleshooting](troubleshooting.md) | Common issues and solutions |
+
+## See Also
+
+- Examples with real output: [`docs/examples/README.md`](../examples/README.md)
+- Concepts (mental models): [`docs/concepts/README.md`](../concepts/README.md)

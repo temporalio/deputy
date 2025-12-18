@@ -1,38 +1,160 @@
 # `deputy triage`
 
-Summarize and prioritize vulnerability findings so you know where to start.
+Summarize and prioritize vulnerability findings with optional AI assistance.
 
-## When to use it
+## Synopsis
 
-- A repo has many findings and you need the “top risks” view.
-- You want a structured summary (`--format json`) for dashboards or audits.
-- You want optional AI analysis (text-only or repo-aware, depending on agent).
-
-## Common patterns
-
-```console
-# Triage current repo
-$ deputy triage
-
-# Triage remote repo at a ref
-$ deputy triage github.com/hashicorp/vagrant --ref main
-
-# Reduce noise
-$ deputy triage --ignore-unfixed
-
-# JSON output
-$ deputy triage --format json > triage.json
-
-# Triage an existing scan report
-$ deputy triage --report scan.json --format json
+```
+deputy triage [repo] [flags]
 ```
 
-## Notes
+## When to Use
 
-- Triaging without `--report` performs a fresh scan (same inventory engine as `deputy scan`).
-- `--format json` emits a structured summary suitable for archiving and diffing over time.
+- A repo has many findings and you need a "top risks" view
+- You want structured summaries for dashboards or audits
+- You want AI-assisted analysis and recommendations
 
-## Code pointers
+## Flags
 
-- CLI command: [`internal/cli/cmd/triage.go`](../../internal/cli/cmd/triage.go)
-- Analysis + clustering: [`internal/analysis`](../../internal/analysis)
+| Flag | Short | Default | Description |
+| --- | --- | --- | --- |
+| `--report` | | | Path to JSON scan report (use `-` for stdin) |
+| `--ref` | | `HEAD` | Git reference to scan |
+| `--ecosystems` | | all | Limit to specific ecosystems |
+| `--ignore-unfixed` | | `false` | Hide vulns without fixes |
+| `--published-before` | | | Date filter for vulnerabilities |
+| `--published-after` | | | Date filter for vulnerabilities |
+| `--as-of` | | | Historical view date |
+| `--format` | `-f` | `text` | Output format: `text`, `json` |
+| `--policy` | | | CEL policy files (repeatable) |
+| `--show-db-info` | | `false` | Show database metadata |
+
+### Agent Flags
+
+| Flag | Default | Description |
+| --- | --- | --- |
+| `--agent` | | AI agent (e.g., `codex`) |
+| `--agent-model` | | Model identifier |
+| `--agent-sandbox` | `read-only` | Sandbox policy |
+| `--agent-full-auto` | `false` | Full-auto mode |
+| `--agent-thread` | | Resume previous thread |
+| `--agent-include-plan-tool` | `true` | Allow plan tool |
+| `--agent-skip-git-check` | `true` | Skip git checks |
+
+## Examples
+
+### Basic Usage
+
+```console
+# Triage current repository
+$ deputy triage
+
+# Triage a remote repository
+$ deputy triage github.com/hashicorp/vagrant --ref main
+```
+
+### Filtering
+
+```console
+# Only actionable vulnerabilities
+$ deputy triage --ignore-unfixed
+
+# Historical view
+$ deputy triage --as-of 2024-12-31
+```
+
+### From Existing Report
+
+```console
+# Use a scan report
+$ deputy triage --report scan.json
+
+# Pipe from scan
+$ deputy scan --format json | deputy triage --report -
+```
+
+### Output Formats
+
+```console
+# JSON for dashboards
+$ deputy triage --format json > triage.json
+```
+
+### AI Assistance
+
+```console
+# Ask AI to prioritize and explain
+$ deputy triage --agent codex
+
+# With specific model
+$ deputy triage --agent codex --agent-model gpt-4
+
+# Resume a previous session
+$ deputy triage --agent codex --agent-thread <thread-id>
+```
+
+## Output
+
+### Text Format
+
+```
+Triage Summary for /path/to/repo @ HEAD
+
+Top Affected Packages:
+  1. github.com/example/pkg (3 vulns: 1 critical, 2 high)
+  2. github.com/other/dep (2 vulns: 2 medium)
+
+Severity Distribution:
+  Critical: 1
+  High: 2
+  Medium: 2
+  Low: 0
+
+Recommendations:
+  • Address github.com/example/pkg first (critical severity)
+  • 3 of 5 vulnerabilities have available fixes
+```
+
+### JSON Format
+
+```json
+{
+  "target": "/path/to/repo",
+  "ref": "HEAD",
+  "generated": "2025-01-15T10:30:00Z",
+  "clusters": [
+    {
+      "package": "github.com/example/pkg",
+      "version": "v1.2.3",
+      "vulnerabilities": [...],
+      "severity": "critical",
+      "fixable": true
+    }
+  ],
+  "stats": {
+    "total": 5,
+    "critical": 1,
+    "high": 2,
+    "medium": 2,
+    "low": 0,
+    "fixable": 3
+  }
+}
+```
+
+## Exit Codes
+
+| Code | Meaning |
+| --- | --- |
+| `0` | Success |
+| `1` | Errors or policy violations |
+
+## See Also
+
+- Agent safety: [`docs/guides/agents.md`](../guides/agents.md)
+- Scanning: [`scan.md`](scan.md)
+
+## Code Pointers
+
+- CLI: [`internal/cli/cmd/triage.go`](../../internal/cli/cmd/triage.go)
+- Analysis: [`internal/analysis`](../../internal/analysis)

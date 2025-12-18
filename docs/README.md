@@ -2,20 +2,32 @@
 
 Deputy helps teams **understand, enforce, and improve** their software supply chain:
 
-- **Inventory** dependencies across ecosystems.
-- **Scan** for known vulnerabilities (OSV) and produce actionable reports.
-- **Generate SBOMs** (CycloneDX / SPDX) for audit and compliance workflows.
-- **Create remediation plans** (and optionally apply them).
-- **Enforce policies** (CEL) in CI and at download-time via a package proxy.
+- **Inventory** dependencies across ecosystems
+- **Scan** for known vulnerabilities (OSV) and produce actionable reports
+- **Generate SBOMs** (CycloneDX / SPDX) for audit and compliance
+- **Create remediation plans** and optionally apply them
+- **Enforce policies** (CEL) in CI and at download-time via a package proxy
 
-## Who uses Deputy
+## Why Deputy
 
-- **Developers**: see what changed (`diff`), scan before merging (`scan`), and generate SBOMs (`sbom`).
-- **Security teams**: codify guardrails once (policies) and reuse them across repos and enforcement points.
-- **Platform/CI owners**: produce structured artifacts for audit (`scan --format json`, `sbom`) and gate pipelines.
-- **Organizations**: move from reactive scanning to preventive controls (`proxy` + policy).
+| Problem | Deputy's Approach |
+| --- | --- |
+| Scattered tools for scanning, SBOMs, remediation | Single CLI with composable commands |
+| Policies repeated across repos and tools | Write once, enforce everywhere (scan, diff, proxy) |
+| Reactive scanning finds issues too late | Proxy blocks risky packages at download time |
+| Manual vulnerability triage | AI-assisted prioritization and remediation |
+| Hard to audit "what changed" | Git-aware diff with time-travel queries |
 
-## Quick start
+## Who Uses Deputy
+
+| Role | Primary Commands |
+| --- | --- |
+| **Developers** | `scan`, `diff`, `fix --apply` |
+| **Security Teams** | `policy`, `scan --policy`, `proxy` |
+| **Platform/CI** | `scan --format json`, `sbom`, policy gates |
+| **Compliance** | `sbom --licenses`, historical scans |
+
+## Quick Start
 
 ```console
 # 1) Scan the current repo at HEAD
@@ -65,13 +77,20 @@ flowchart LR
 
 ## Documentation map
 
-- **Getting started:** [`docs/getting-started.md`](getting-started.md)
-- **Concepts:** [`docs/concepts/README.md`](concepts/README.md)
-- **Commands:** [`docs/commands/README.md`](commands/README.md)
-- **Guides:** [`docs/guides/README.md`](guides/README.md)
-- **Examples (realistic output):** [`docs/examples/README.md`](examples/README.md)
-- **Reference:** [`docs/reference/README.md`](reference/README.md)
-- **Development:** [`docs/development/README.md`](development/README.md)
+| Section | Description |
+| --- | --- |
+| [Getting Started](getting-started.md) | Install and first commands |
+| [Cheat Sheet](cheatsheet.md) | Quick reference for common patterns |
+| [FAQ](faq.md) | Frequently asked questions |
+| [Glossary](glossary.md) | Key terms and definitions |
+| [Concepts](concepts/README.md) | Mental models: targets, refs, policies |
+| [Commands](commands/README.md) | Full command reference |
+| [Guides](guides/README.md) | CI, workflows, policy cookbook |
+| [Examples](examples/README.md) | Realistic output and transcripts |
+| [Reference](reference/README.md) | Configuration, logging, environment |
+| [Development](development/README.md) | Contributing, architecture |
+
+> **For LLMs:** See [`LLMS.txt`](../LLMS.txt) for structured project context.
 
 ## Where to look in code
 
