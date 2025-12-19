@@ -210,7 +210,7 @@ Key entry points: [`main.go`](main.go) → [`internal/cli/cli.go`](internal/cli/
 
 ## Tech Stack
 
-- [Go] 1.21+ (uses `toolchain` directive); use modern packages like `slices`, `maps`, `iter`, `cmp`, `log/slog`, etc.
+- [Go] 1.21+ (uses [`toolchain`](https://go.dev/doc/toolchain) directive); use modern features like [generics](https://go.dev/blog/intro-generics), and packages like [`slices`](https://pkg.go.dev/slices), [`maps`](https://pkg.go.dev/maps), [`iter`](https://pkg.go.dev/iter), [`cmp`](https://pkg.go.dev/cmp), [`log/slog`](https://pkg.go.dev/log/slog), etc.
 - [Cobra] for CLI; [Charm] for [Fang], [Lipgloss], etc. Prefer avoiding emojis in output, use ASCII or Unicode symbols, only if they add clarity; when in doubt, don't use them. Avoid them in most machine-readable output.
 - [CEL] (Common Expression Language) for policies in a [YAML]-based [DSL].
 - [OSV] API and [GCS] buckets for vulnerability data.
@@ -384,8 +384,10 @@ Full spec: [`POLICY_SPEC.md`](POLICY_SPEC.md) • Examples: [`policy/examples/`]
 
 ## Exit Codes
 
-- `0` = success (scan clean, command succeeded)
-- `1` = error (vulnerabilities found, policy violation, runtime error)
+| Code | Meaning |
+|------|---------|
+| `0` | Success (scan clean, command succeeded) |
+| `1` | Error (vulnerabilities found, policy violation, runtime error) |
 
 ## Style
 
@@ -418,7 +420,4 @@ DEPUTY_LOG_FORMAT=json deputy scan           # structured logs
 
 ## Don't
 
-- Don't add `--fail-on` flags (exit codes handle this)
-- Don't assume exit code 2 exists (only 0 and 1)
-- Don't put `--only-direct` on scan (it's only on `list`)
 - Don't skip tests before submitting changes (run [`blackbox_test.go`](blackbox_test.go) for CLI integration)
