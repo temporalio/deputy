@@ -336,7 +336,7 @@ require github.com/three/four v2.0.0`
 	}
 }
 
-func TestCollectGoDirectModulesFromDisk(t *testing.T) {
+func TestCollectGoDirectModulesFromWorkspace_NestedModules(t *testing.T) {
 	root := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(root, "moduleC"), 0o755); err != nil {
 		t.Fatalf("mkdir: %v", err)
@@ -347,7 +347,12 @@ require github.com/direct/only v0.9.0`
 	if err := os.WriteFile(filepath.Join(root, "moduleC", "go.mod"), []byte(content), 0o644); err != nil {
 		t.Fatalf("write go.mod: %v", err)
 	}
-	deps := CollectGoDirectModulesFromDisk(root)
+	ws, err := workspace.NewDir(root)
+	if err != nil {
+		t.Fatalf("NewDir: %v", err)
+	}
+	defer ws.Close()
+	deps := CollectGoDirectModulesFromWorkspace(ws)
 	if !deps["github.com/direct/only"] {
 		t.Fatalf("expected direct dep present: %+v", deps)
 	}

@@ -24,6 +24,7 @@ import (
 	"github.com/picatz/deputy/internal/output"
 	"github.com/picatz/deputy/internal/policy"
 	"github.com/picatz/deputy/internal/purlx"
+	"github.com/picatz/deputy/internal/repository"
 	"github.com/picatz/deputy/internal/repository/workspace"
 	sbomx "github.com/picatz/deputy/internal/sbom"
 	"github.com/picatz/deputy/internal/targets"
@@ -167,6 +168,16 @@ func (s *Scanner) executeScan(ctx context.Context, repoArg, ref string, refProvi
 	if mat.Cleanup != nil {
 		cleanup = mat.Cleanup
 	}
+
+	// Extract workspace from materialized target
+	var ws workspace.FS
+	switch src := mat.Data.(type) {
+	case *repository.Source:
+		ws = src.Workspace
+	case workspace.FS:
+		ws = src
+	}
+
 	localRepoPath := mat.Path
 	if localRepoPath == "" {
 		if src, ok := mat.Data.(interface{ RootPath() string }); ok {
@@ -201,9 +212,11 @@ func (s *Scanner) executeScan(ctx context.Context, repoArg, ref string, refProvi
 	}
 
 	goDirect := map[string]bool{"stdlib": true}
-	resolver := osManifestResolver(localRepoPath)
+	var resolver manifestResolver = workspaceManifestResolver{ws: ws}
 	if strings.EqualFold(effRef, "HEAD") || strings.EqualFold(effRef, "HEAD~0") {
-		goDirect = compare.CollectGoDirectModulesFromDisk(localRepoPath)
+		if ws != nil {
+			goDirect = compare.CollectGoDirectModulesFromWorkspace(ws)
+		}
 	} else {
 		if repo, err := git.PlainOpen(localRepoPath); err == nil {
 			if h, err := gitx.ResolveRevisionEnhanced(repo, effRef); err == nil && h != nil {
@@ -587,13 +600,20 @@ func (s *Scanner) runScanDir(cmd *cobra.Command, args []string) error {
 
 	ecos, _ := cmd.Flags().GetStringSlice("ecosystems")
 	scanOpts := inv.ScanOptions{Ecosystems: ecos}
-	pkgs, err := scanPackagesWorkingAtPath(ctx, path, scanOpts)
+
+	ws, err := workspace.NewDir(path)
+	if err != nil {
+		return fmt.Errorf("failed to open directory: %w", err)
+	}
+	defer ws.Close()
+
+	pkgs, err := inv.ScanPackagesWorking(ctx, ws, scanOpts)
 	if err != nil {
 		return fmt.Errorf("failed to scan packages: %w", err)
 	}
 
-	goDirect := compare.CollectGoDirectModulesFromDisk(path)
-	inputs := packagesToInputs(pkgs, packageInputOptions{GoDirect: goDirect, Resolver: osManifestResolver(path)})
+	goDirect := compare.CollectGoDirectModulesFromWorkspace(ws)
+	inputs := packagesToInputs(pkgs, packageInputOptions{GoDirect: goDirect, Resolver: workspaceManifestResolver{ws: ws}})
 
 	vulns, err := s.queryOSV(ctx, inputs)
 	if err != nil {

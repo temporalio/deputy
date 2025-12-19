@@ -14,6 +14,7 @@ import (
 	"github.com/go-git/go-git/v5/plumbing"
 	"github.com/google/osv-scalibr/extractor"
 	scalpurl "github.com/google/osv-scalibr/purl"
+	"github.com/picatz/deputy/internal/auth"
 	"github.com/picatz/deputy/internal/compare"
 	gitx "github.com/picatz/deputy/internal/gitutil"
 	inv "github.com/picatz/deputy/internal/inventory"
@@ -186,8 +187,9 @@ func collectListItems(ctx context.Context, repoPath, ref string, ecosystems []st
 		if u == "" {
 			return nil, "", "", fmt.Errorf("could not interpret repo %q as local path or remote URL", repoPath)
 		}
-		auth := sbomx.AuthForURL(u)
-		rn, resolveErr := sbomx.ResolveReferenceName(ctx, u, auth, ref)
+		// Use the unified auth package for secure, host-aware credential resolution
+		gitAuth, _ := auth.GitAuthForURL(ctx, u)
+		rn, resolveErr := sbomx.ResolveReferenceName(ctx, u, gitAuth, ref)
 		if resolveErr == nil && rn.String() != "" {
 			ref = rn.String()
 		}
@@ -196,7 +198,7 @@ func collectListItems(ctx context.Context, repoPath, ref string, ecosystems []st
 			Depth:        1,
 			SingleBranch: true,
 			Tags:         git.NoTags,
-			Auth:         auth,
+			Auth:         gitAuth,
 		}
 		if rn.String() != "" {
 			cloneOpts.ReferenceName = rn
@@ -245,7 +247,9 @@ func collectListItems(ctx context.Context, repoPath, ref string, ecosystems []st
 		}
 		manifestRes = gitManifestResolver{repo: repo, hash: *targetHash}
 	} else {
-		manifestRes = osManifestResolver(repoPath)
+		// Fallback: use workspace for current state
+		goDirect = compare.CollectGoDirectModulesFromWorkspace(ws)
+		manifestRes = workspaceManifestResolver{ws: ws}
 	}
 
 	pkgInputs := packagesToInputs(pkgs, packageInputOptions{GoDirect: goDirect, Resolver: manifestRes})

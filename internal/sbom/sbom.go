@@ -24,6 +24,7 @@ import (
 	"github.com/google/osv-scalibr/extractor"
 	"github.com/google/osv-scalibr/purl"
 	analysis "github.com/picatz/deputy/internal/analysis"
+	"github.com/picatz/deputy/internal/auth"
 	"github.com/picatz/deputy/internal/collections"
 	"github.com/picatz/deputy/internal/compare"
 	gitx "github.com/picatz/deputy/internal/gitutil"
@@ -108,8 +109,9 @@ func Generate(ctx context.Context, repoRef string, opts Options) (Result, error)
 		if url == "" {
 			return Result{}, fmt.Errorf("could not interpret repo %q as local path or remote URL", repoRef)
 		}
-		auth := AuthForURL(url)
-		refName, resolveErr := ResolveReferenceName(ctx, url, auth, opts.Ref)
+		// Use the unified auth package for secure, host-aware credential resolution
+		gitAuth, _ := auth.GitAuthForURL(ctx, url)
+		refName, resolveErr := ResolveReferenceName(ctx, url, gitAuth, opts.Ref)
 		if resolveErr == nil && refName.String() != "" {
 			opts.Ref = refName.String()
 		}
@@ -118,7 +120,7 @@ func Generate(ctx context.Context, repoRef string, opts Options) (Result, error)
 			Depth:        1,
 			SingleBranch: true,
 			Tags:         git.NoTags,
-			Auth:         auth,
+			Auth:         gitAuth,
 		}
 		if refName.String() != "" {
 			cloneOpts.ReferenceName = refName
@@ -635,6 +637,10 @@ func ToHTTPSGitURL(ref string) string {
 	return ""
 }
 
+// AuthForURL returns a go-git transport.AuthMethod for the given URL.
+//
+// Deprecated: Use [auth.GitAuthForURL] instead for secure, host-aware credential
+// resolution that prevents credential leakage to unintended hosts.
 func AuthForURL(rawurl string) transport.AuthMethod {
 	if u, err := neturl.Parse(rawurl); err == nil && u.Scheme == "https" && u.Host == "github.com" {
 		if token := os.Getenv("GITHUB_TOKEN"); token != "" {
@@ -767,7 +773,8 @@ func resolveGitHubActionsRefForSBOM(ctx context.Context, cache *githubActionsRes
 		return githubActionsResolution{}
 	}
 
-	refs, err := listRemoteRefsForSBOM(ctx, remoteURL, AuthForURL(remoteURL))
+	gitAuth, _ := auth.GitAuthForURL(ctx, remoteURL)
+	refs, err := listRemoteRefsForSBOM(ctx, remoteURL, gitAuth)
 	if err != nil || len(refs) == 0 {
 		cache.set(key, githubActionsResolution{})
 		return githubActionsResolution{}

@@ -350,20 +350,17 @@ func runDiffAnalysis(ctx context.Context, repoPath, baseRef, targetRef string, e
 	targetGoDirect := map[string]bool{"stdlib": true}
 	var targetManifestRes manifestResolver
 	if isWorkingPseudoRef(targetRef) {
-		if repoSrc != nil {
-			targetGoDirect = compare.CollectGoDirectModulesFromWorkspace(repoSrc.Workspace)
-			targetManifestRes = workspaceManifestResolver{ws: repoSrc.Workspace}
-		} else {
-			targetGoDirect = compare.CollectGoDirectModulesFromDisk(repoPath)
-			targetManifestRes = osManifestResolver(repoPath)
-		}
+		targetGoDirect = compare.CollectGoDirectModulesFromWorkspace(repoSrc.Workspace)
+		targetManifestRes = workspaceManifestResolver{ws: repoSrc.Workspace}
 	} else if targetHash != nil {
 		if direct, err := compare.CollectGoDirectModulesFromCommit(repo, *targetHash); err == nil {
 			targetGoDirect = direct
 		}
 		targetManifestRes = gitManifestResolver{repo: repo, hash: *targetHash}
 	} else {
-		targetManifestRes = osManifestResolver(repoPath)
+		// Fallback: use workspace for current state
+		targetGoDirect = compare.CollectGoDirectModulesFromWorkspace(repoSrc.Workspace)
+		targetManifestRes = workspaceManifestResolver{ws: repoSrc.Workspace}
 	}
 
 	targetPkgInputs := packagesToInputs(targetPackages, packageInputOptions{GoDirect: targetGoDirect, Resolver: targetManifestRes})
@@ -371,13 +368,8 @@ func runDiffAnalysis(ctx context.Context, repoPath, baseRef, targetRef string, e
 	baseGoDirect := map[string]bool{"stdlib": true}
 	var baseManifestRes manifestResolver
 	if isWorkingPseudoRef(baseRef) {
-		if repoSrc != nil {
-			baseGoDirect = compare.CollectGoDirectModulesFromWorkspace(repoSrc.Workspace)
-			baseManifestRes = workspaceManifestResolver{ws: repoSrc.Workspace}
-		} else {
-			baseGoDirect = compare.CollectGoDirectModulesFromDisk(repoPath)
-			baseManifestRes = osManifestResolver(repoPath)
-		}
+		baseGoDirect = compare.CollectGoDirectModulesFromWorkspace(repoSrc.Workspace)
+		baseManifestRes = workspaceManifestResolver{ws: repoSrc.Workspace}
 	} else {
 		baseManifestRes = gitManifestResolver{repo: repo, hash: *baseHash}
 		if direct, err := compare.CollectGoDirectModulesFromCommit(repo, *baseHash); err == nil {

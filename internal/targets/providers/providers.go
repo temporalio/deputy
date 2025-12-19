@@ -9,7 +9,9 @@ import (
 	"strings"
 
 	git "github.com/go-git/go-git/v5"
+	"github.com/picatz/deputy/internal/auth"
 	"github.com/picatz/deputy/internal/repository"
+	"github.com/picatz/deputy/internal/repository/workspace"
 	sbomx "github.com/picatz/deputy/internal/sbom"
 	"github.com/picatz/deputy/internal/targets"
 )
@@ -20,8 +22,10 @@ func init() {
 	targets.RegisterProvider(remoteGitProvider{})
 }
 
+// localGitProvider implements [targets.Provider] for local Git repositories.
 type localGitProvider struct{}
 
+// Detect returns true if the target path exists and is a Git repository.
 func (localGitProvider) Detect(_ context.Context, target string) bool {
 	path := targetPath(target)
 	if path == "" {
@@ -39,6 +43,7 @@ func (localGitProvider) Detect(_ context.Context, target string) bool {
 	return false
 }
 
+// Open materializes a local Git repository target.
 func (localGitProvider) Open(ctx context.Context, target string, opts map[string]string) (targets.Materialized, error) {
 	path := targetPath(target)
 	if path == "" {
@@ -64,8 +69,10 @@ func (localGitProvider) Open(ctx context.Context, target string, opts map[string
 	return mat, nil
 }
 
+// localDirProvider implements [targets.Provider] for local directories.
 type localDirProvider struct{}
 
+// Detect returns true if the target path exists and is a directory.
 func (localDirProvider) Detect(_ context.Context, target string) bool {
 	path := targetPath(target)
 	if path == "" {
@@ -78,6 +85,7 @@ func (localDirProvider) Detect(_ context.Context, target string) bool {
 	return info.IsDir()
 }
 
+// Open materializes a local directory target.
 func (localDirProvider) Open(ctx context.Context, target string, opts map[string]string) (targets.Materialized, error) {
 	path := targetPath(target)
 	if path == "" {
@@ -87,15 +95,25 @@ func (localDirProvider) Open(ctx context.Context, target string, opts map[string
 	if err != nil {
 		return targets.Materialized{}, err
 	}
+	ws, err := workspace.NewDir(abs)
+	if err != nil {
+		return targets.Materialized{}, err
+	}
 	return targets.Materialized{
-		FS:   os.DirFS(abs),
+		FS:   ws,
 		Path: abs,
 		Meta: targets.Descriptor{Kind: targets.KindDir, Target: target, Options: opts},
+		Data: ws,
+		Cleanup: func() {
+			_ = ws.Close()
+		},
 	}, nil
 }
 
+// remoteGitProvider implements [targets.Provider] for remote Git repositories.
 type remoteGitProvider struct{}
 
+// Detect returns true if the target looks like a remote Git URL.
 func (remoteGitProvider) Detect(_ context.Context, target string) bool {
 	if target == "" {
 		return false
@@ -109,6 +127,7 @@ func (remoteGitProvider) Detect(_ context.Context, target string) bool {
 	return sbomx.ToHTTPSGitURL(target) != ""
 }
 
+// Open materializes a remote Git repository target by cloning it.
 func (remoteGitProvider) Open(ctx context.Context, target string, opts map[string]string) (targets.Materialized, error) {
 	ref := ""
 	if opts != nil {
@@ -120,8 +139,9 @@ func (remoteGitProvider) Open(ctx context.Context, target string, opts map[strin
 			urlStr = converted
 		}
 	}
-	auth := sbomx.AuthForURL(urlStr)
-	refName, err := sbomx.ResolveReferenceName(ctx, urlStr, auth, ref)
+	// Use the unified auth package for secure, host-aware credential resolution
+	gitAuth, _ := auth.GitAuthForURL(ctx, urlStr)
+	refName, err := sbomx.ResolveReferenceName(ctx, urlStr, gitAuth, ref)
 	if err == nil && refName.String() != "" {
 		ref = refName.String()
 	}
@@ -130,7 +150,7 @@ func (remoteGitProvider) Open(ctx context.Context, target string, opts map[strin
 		Depth:        1,
 		SingleBranch: true,
 		Tags:         git.NoTags,
-		Auth:         auth,
+		Auth:         gitAuth,
 	}
 	if refName.String() != "" {
 		cloneOpts.ReferenceName = refName
@@ -167,6 +187,7 @@ func (remoteGitProvider) Open(ctx context.Context, target string, opts map[strin
 	return mat, nil
 }
 
+// targetPath returns the absolute path of the target if it exists locally.
 func targetPath(target string) string {
 	if target == "" {
 		return ""
@@ -178,6 +199,7 @@ func targetPath(target string) string {
 	return abs
 }
 
+// looksLikeRemoteURL returns true if the string appears to be a remote URL or SSH path.
 func looksLikeRemoteURL(s string) bool {
 	if strings.HasPrefix(s, "git@") {
 		return true
