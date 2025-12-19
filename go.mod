@@ -1,6 +1,6 @@
 module github.com/picatz/deputy
 
-go 1.24.9
+go 1.25
 
 toolchain go1.25.0
 

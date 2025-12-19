@@ -170,6 +170,7 @@ func configureLogging(levelStr, format string) error {
 	return nil
 }
 
+// parseLogLevel converts a string log level to slog.Level, defaulting to [slog.LevelInfo] if empty.
 func parseLogLevel(value string) (slog.Level, error) {
 	if strings.TrimSpace(value) == "" {
 		return slog.LevelInfo, nil

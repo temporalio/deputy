@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"slices"
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
@@ -9,34 +10,55 @@ import (
 // Predefined lipgloss style palette used by CLI presentation layers. Grouping
 // styles here keeps formatting concerns separate from formatting logic.
 var (
-	StyleAdded      = lipgloss.NewStyle().Foreground(lipgloss.Color("#32CD32")).Bold(true)
-	StyleRemoved    = lipgloss.NewStyle().Foreground(lipgloss.Color("#FF5555")).Bold(true)
-	StyleHeader     = lipgloss.NewStyle().Foreground(lipgloss.Color("#00BFFF")).Bold(true)
-	StyleDim        = lipgloss.NewStyle().Foreground(lipgloss.Color("#666666"))
-	StyleAlias      = lipgloss.NewStyle().Foreground(lipgloss.Color("#BBBBBB")).Bold(true)
+	// StyleAdded is used for newly added items or positive changes.
+	StyleAdded = lipgloss.NewStyle().Foreground(lipgloss.Color("#32CD32")).Bold(true)
+	// StyleRemoved is used for removed items or negative changes.
+	StyleRemoved = lipgloss.NewStyle().Foreground(lipgloss.Color("#FF5555")).Bold(true)
+	// StyleHeader is used for section headers.
+	StyleHeader = lipgloss.NewStyle().Foreground(lipgloss.Color("#00BFFF")).Bold(true)
+	// StyleDim is used for less important or secondary text.
+	StyleDim = lipgloss.NewStyle().Foreground(lipgloss.Color("#666666"))
+	// StyleAlias is used for primary aliases or alternative names.
+	StyleAlias = lipgloss.NewStyle().Foreground(lipgloss.Color("#BBBBBB")).Bold(true)
+	// StyleAliasOther is used for secondary aliases.
 	StyleAliasOther = lipgloss.NewStyle().Foreground(lipgloss.Color("#CCCCCC")).Bold(true)
-	StyleMeta       = lipgloss.NewStyle().Foreground(lipgloss.Color("#A0A0A0")).Italic(true)
-	StyleBold       = lipgloss.NewStyle().Bold(true)
-	StyleUpgraded   = lipgloss.NewStyle().Foreground(lipgloss.Color("#00CED1")).Bold(true)
+	// StyleMeta is used for metadata or supplementary information.
+	StyleMeta = lipgloss.NewStyle().Foreground(lipgloss.Color("#A0A0A0")).Italic(true)
+	// StyleBold is a generic bold style.
+	StyleBold = lipgloss.NewStyle().Bold(true)
+	// StyleUpgraded is used for version upgrades.
+	StyleUpgraded = lipgloss.NewStyle().Foreground(lipgloss.Color("#00CED1")).Bold(true)
+	// StyleDowngraded is used for version downgrades.
 	StyleDowngraded = lipgloss.NewStyle().Foreground(lipgloss.Color("#FFD700")).Bold(true)
-	StyleNeutral    = lipgloss.NewStyle().Foreground(lipgloss.Color("#FFFFFF")).Bold(true)
+	// StyleNeutral is a generic neutral bold style.
+	StyleNeutral = lipgloss.NewStyle().Foreground(lipgloss.Color("#FFFFFF")).Bold(true)
 
-	StylePackageName    = lipgloss.NewStyle().Foreground(lipgloss.Color("#FFFFFF"))
-	StyleVersion        = lipgloss.NewStyle().Foreground(lipgloss.Color("#A9A9A9")).Faint(true)
-	StyleLicense        = lipgloss.NewStyle().Foreground(lipgloss.Color("#A9A9A9")).Faint(true)
-	StyleUpdateArrow    = lipgloss.NewStyle().Foreground(lipgloss.Color("#00CED1")).Faint(true)
+	// StylePackageName is used for displaying package names.
+	StylePackageName = lipgloss.NewStyle().Foreground(lipgloss.Color("#FFFFFF"))
+	// StyleVersion is used for displaying package versions.
+	StyleVersion = lipgloss.NewStyle().Foreground(lipgloss.Color("#A9A9A9")).Faint(true)
+	// StyleLicense is used for displaying package licenses.
+	StyleLicense = lipgloss.NewStyle().Foreground(lipgloss.Color("#A9A9A9")).Faint(true)
+	// StyleUpdateArrow is used for the arrow in upgrade paths.
+	StyleUpdateArrow = lipgloss.NewStyle().Foreground(lipgloss.Color("#00CED1")).Faint(true)
+	// StyleDowngradeArrow is used for the arrow in downgrade paths.
 	StyleDowngradeArrow = lipgloss.NewStyle().Foreground(lipgloss.Color("#FFD700")).Faint(true)
-	StyleSymbol         = lipgloss.NewStyle().Bold(true)
-	StylePath           = lipgloss.NewStyle().Foreground(lipgloss.Color("#E6E6FA"))
-	StyleManager        = lipgloss.NewStyle().Foreground(lipgloss.Color("#7FDBFF")).Faint(true)
+	// StyleSymbol is used for generic symbols or icons.
+	StyleSymbol = lipgloss.NewStyle().Bold(true)
+	// StylePath is used for file or directory paths.
+	StylePath = lipgloss.NewStyle().Foreground(lipgloss.Color("#E6E6FA"))
+	// StyleManager is used for package manager names (e.g., npm, gomod).
+	StyleManager = lipgloss.NewStyle().Foreground(lipgloss.Color("#7FDBFF")).Faint(true)
 
-	// Severity-specific styles for consistent vulnerability display
+	// StyleCritical is used for critical severity vulnerabilities.
 	StyleCritical = lipgloss.NewStyle().Foreground(lipgloss.Color("#FF00FF")).Bold(true)
 
-	// Policy-related styles for proxy output
-	StylePolicyFile = lipgloss.NewStyle().Foreground(lipgloss.Color("#87CEEB")) // Sky blue - file reference
-	StylePolicyRule = lipgloss.NewStyle().Foreground(lipgloss.Color("#B0C4DE")) // Light steel blue - rule name
-	StyleSeparator  = lipgloss.NewStyle().Foreground(lipgloss.Color("#708090")) // Slate gray - punctuation
+	// StylePolicyFile is used for policy file references in proxy output.
+	StylePolicyFile = lipgloss.NewStyle().Foreground(lipgloss.Color("#87CEEB")) // Sky blue
+	// StylePolicyRule is used for policy rule names in proxy output.
+	StylePolicyRule = lipgloss.NewStyle().Foreground(lipgloss.Color("#B0C4DE")) // Light steel blue
+	// StyleSeparator is used for punctuation or separators in proxy output.
+	StyleSeparator = lipgloss.NewStyle().Foreground(lipgloss.Color("#708090")) // Slate gray
 )
 
 // SeverityLabel returns a consistently styled severity label in the format [CRITICAL], [HIGH], [MED], [LOW], or [?].
@@ -103,10 +125,10 @@ func parseCVSSScoreSimple(severity string) float64 {
 	}
 
 	// Look for CVSS vector pattern and extract score
-	if strings.Contains(severity, "CVSS") || strings.Contains(severity, "/AV:") {
+	if strings.Contains(severity, "CVSS") || strings.Contains(severity, "AV:") {
 		// Try to find a floating point number in the string
-		parts := strings.Fields(severity)
-		for _, p := range parts {
+		parts := strings.FieldsSeq(severity)
+		for p := range parts {
 			if err := parseFloat(p, &score); err == nil && score >= 0 && score <= 10 {
 				return score
 			}
@@ -160,19 +182,27 @@ func estimateScoreFromVector(vector string) float64 {
 	vector = strings.ToUpper(vector)
 	score := 5.0 // Base medium
 
-	if strings.Contains(vector, "AV:N") {
+	// TODO: replace with strings.SplitSeq and consider
+	// using [github.com/picatz/iters.Contains] for better performance.
+	// Or consider a better CVSS parser / library.
+	parts := strings.Split(vector, "/")
+	has := func(s string) bool {
+		return slices.Contains(parts, s)
+	}
+
+	if has("AV:N") {
 		score += 1.5 // Network accessible
 	}
-	if strings.Contains(vector, "AC:L") {
+	if has("AC:L") {
 		score += 1.0 // Low complexity
 	}
-	if strings.Contains(vector, "PR:N") {
+	if has("PR:N") {
 		score += 0.5 // No privileges required
 	}
-	if strings.Contains(vector, "C:H") || strings.Contains(vector, "I:H") || strings.Contains(vector, "A:H") {
+	if has("C:H") || has("I:H") || has("A:H") {
 		score += 1.5 // High impact
 	}
-	if strings.Contains(vector, "C:N") && strings.Contains(vector, "I:N") {
+	if has("C:N") && has("I:N") {
 		score -= 1.0 // No confidentiality/integrity impact
 	}
 
