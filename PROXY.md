@@ -762,10 +762,11 @@ While SBOMs describe contents, signature verification ensures provenance:
 
 ## Authorization, Principals & Multi-Tenancy
 
-- Inbound auth supports basic auth, bearer tokens, mTLS, or trusted headers from an upstream identity proxy. Each request is annotated with `client.principal`.
-- Policies can branch on principals (`request.client.principal in {"team-a", "team-b"}`) to apply distinct rules or allowlists.
+- Inbound auth supports basic auth, bearer tokens (JWT/OIDC), mTLS, or trusted headers from an upstream identity proxy. Each request is annotated with `client.principal`.
+- **JWT authentication** validates tokens via JWKS endpoints or static public keys. Claims are exposed as the `jwt` variable in CEL policies, enabling fine-grained access control based on roles, teams, or custom attributes. See [docs/commands/proxy.md](docs/commands/proxy.md#authentication-jwtoidc) for configuration.
+- Policies can branch on principals (`request.client.principal in {"team-a", "team-b"}`) or JWT claims (`jwt.?roles.orValue([]).exists(r, r == "admin")`) to apply distinct rules or allowlists.
 - Per-listener `principalMappings` translate certificates or JWT claims into canonical principals.
-- Metrics and logs include `principal`, enabling rate limits or blocklists per tenant. A future `deputy quota` command can read these counters for chargeback.
+- Metrics and logs include `principal` and auth status, enabling rate limits or blocklists per tenant. Auth metrics are exposed via `/debug/vars` when `--vars` is enabled.
 - Outbound auth handles private registries or mirrors via bearer tokens, mTLS certs, or PATs sourced from env vars / secret stores so proxied fetches remain transparent.
 
 ## Offline / Air-Gapped Operation

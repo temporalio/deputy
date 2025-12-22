@@ -1,0 +1,58 @@
+# JWT Audit and Compliance Policies
+#
+# Policies for ensuring proper identity tracking and audit compliance.
+# These policies help meet compliance requirements by ensuring all
+# package downloads are attributable to verified identities.
+
+policies:
+  - name: jwt-require-email-claim
+    description: Ensure user identity is verifiable for audit logging
+    entrypoints: ["go_artifact_request", "npm_artifact_request", "pypi_artifact_request"]
+    rules:
+      - action: deny
+        when: |
+          !jwt.anonymous &&
+          (!has(jwt.email) || jwt.email == "")
+        reason: "Token must include email claim for audit logging"
+        remediation: "Ensure your identity provider includes email in tokens"
+
+  - name: jwt-require-subject-format
+    description: Enforce subject claim format for traceability
+    entrypoints: ["go_artifact_request", "npm_artifact_request", "pypi_artifact_request"]
+    rules:
+      - action: deny
+        when: |
+          !jwt.anonymous &&
+          (!has(jwt.sub) || jwt.sub == "")
+        reason: "Token must include subject claim"
+      - action: warn
+        when: |
+          !jwt.anonymous &&
+          has(jwt.sub) &&
+          !jwt.sub.matches("^(user:|sa:|bot:)[a-zA-Z0-9._-]+$")
+        reason: "Subject claim should follow format: user:id, sa:name, or bot:name"
+
+  - name: jwt-require-jti-claim
+    description: Tokens should include unique ID for audit trail
+    entrypoints: ["go_artifact_request", "npm_artifact_request", "pypi_artifact_request"]
+    rules:
+      # This is a defense in depth check - ensures tokens can be uniquely
+      # identified for audit logging and potential revocation
+      - action: warn
+        when: |
+          !jwt.anonymous &&
+          (!has(jwt.jti) || jwt.jti == "")
+        reason: "Token should include a unique ID (jti) for audit trail"
+
+  - name: jwt-token-age-warning
+    description: Warn about old tokens that should be refreshed
+    entrypoints: ["go_artifact_request", "npm_artifact_request", "pypi_artifact_request"]
+    rules:
+      # This is a backup check - the auth middleware validates expiration,
+      # but this provides defense in depth for policy-level auditing
+      - action: warn
+        when: |
+          !jwt.anonymous &&
+          has(jwt.iat) &&
+          age(jwt.iat) > duration("24h")
+        reason: "Token was issued more than 24 hours ago - consider refreshing"

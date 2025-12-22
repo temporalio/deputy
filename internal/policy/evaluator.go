@@ -23,6 +23,7 @@ var (
 		"request",
 		"vulnerabilities",
 		"vulnerability",
+		"jwt", // JWT claims from authenticated proxy requests
 		"changes",
 		"packages",
 		"sbom",
@@ -120,10 +121,15 @@ func envWithNames(extra []string) (*cel.Env, error) {
 	opts := []cel.EnvOption{
 		cel.OptionalTypes(),
 		cel.Declarations(declSlice...),
+		// Standard extensions
 		ext.Strings(),
 		ext.Lists(),
 		ext.Sets(),
 		ext.Regex(),
+		// Additional extensions for richer policy expressions
+		ext.Bindings(), // cel.bind() for local variables
+		ext.Encoders(), // base64.encode/decode
+		ext.Math(),     // math functions (abs, ceil, floor, etc.)
 	}
 	opts = append(opts, customHelperFunctions()...)
 	env, err := cel.NewEnv(opts...)

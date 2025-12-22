@@ -1,0 +1,43 @@
+# JWT Anonymous Access Guards
+#
+# Policies for controlling what anonymous (unauthenticated) users can access.
+# Use with auth.mode: "optional" to allow both authenticated and anonymous access.
+
+policies:
+  - name: jwt-block-anonymous-critical
+    description: Anonymous users cannot download packages with critical vulnerabilities
+    entrypoints: ["go_artifact_request", "npm_artifact_request", "pypi_artifact_request", "rubygems_artifact_request"]
+    rules:
+      - action: deny
+        when: |
+          jwt.anonymous &&
+          vulnerabilities.orValue([]).exists(v, v.severity == "CRITICAL")
+        reason: "Anonymous users cannot download packages with critical vulnerabilities"
+        remediation: "Authenticate with a valid token to download this package"
+
+  - name: jwt-anonymous-public-only
+    description: Anonymous access limited to public packages
+    entrypoints: ["go_artifact_request"]
+    vars:
+      publicPrefixes:
+        - "github.com/"
+        - "golang.org/"
+        - "google.golang.org/"
+    rules:
+      - action: deny
+        when: |
+          jwt.anonymous &&
+          !publicPrefixes.exists(p, request.module.startsWith(p))
+        reason: "Anonymous access is only allowed for public packages"
+        remediation: "Authenticate to access private or internal packages"
+
+  - name: jwt-anonymous-npm-scoped-deny
+    description: Anonymous users cannot access scoped npm packages
+    entrypoints: ["npm_artifact_request"]
+    rules:
+      - action: deny
+        when: |
+          jwt.anonymous &&
+          request.package.startsWith("@")
+        reason: "Scoped npm packages require authentication"
+        remediation: "Login with npm to access scoped packages"

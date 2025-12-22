@@ -89,6 +89,73 @@ $ deputy proxy go -- go get github.com/example/pkg@latest
 - Network/latency issues
 - Edge cases not covered by CI testing
 
+## Phase 4: Enable Authentication (Optional)
+
+**Goal**: Add identity-based access control using JWT tokens.
+
+Authentication enables policies that depend on *who* is making the request, not just *what* they're requesting.
+
+### When to enable authentication
+
+- Enforce different access tiers (internal vs external packages)
+- Require specific roles for sensitive packages
+- Audit package downloads by user/service identity
+- Integrate with existing OIDC identity provider
+
+### Configuration
+
+```yaml
+listeners:
+  - name: go-secure
+    bind: ":8080"
+    ecosystems: ["go"]
+    upstream: https://proxy.golang.org
+    policies:
+      - policy/go-proxy.yaml
+      - policy/jwt-rbac.yaml  # JWT-based policies
+    auth:
+      mode: optional  # Start with optional, move to required
+      jwks:
+        url: "https://auth.example.com/.well-known/jwks.json"
+        refresh_interval: 1h
+      issuers: ["https://auth.example.com"]
+      audiences: ["deputy-proxy"]
+```
+
+### Auth modes
+
+| Mode | Behavior | Use case |
+|------|----------|----------|
+| `disabled` | No authentication | Default, open access |
+| `optional` | Validate tokens if present | Gradual rollout, audit |
+| `required` | Reject requests without tokens | Full enforcement |
+
+### Example JWT policy
+
+```yaml
+# policy/jwt-rbac.yaml
+policies:
+  - name: internal-packages-require-auth
+    entrypoints: ["go_artifact_request"]
+    rules:
+      - action: deny
+        when: |
+          request.module.startsWith("go.internal.corp/") &&
+          jwt.anonymous
+        reason: "Internal packages require authentication"
+```
+
+### Rollout steps
+
+1. **Deploy with `mode: optional`**: Tokens validated if present, anonymous allowed
+2. **Monitor auth metrics**: Check `/debug/vars` for `deputy_proxy_auth` stats
+3. **Add JWT-aware policies**: Start with warnings, then enforce
+4. **Switch to `mode: required`**: After clients are updated
+
+See [proxy.md](../commands/proxy.md#authentication-jwtoidc) for full configuration reference.
+
+---
+
 ## Monitoring and Maintenance
 
 ### Metrics to track
@@ -96,12 +163,17 @@ $ deputy proxy go -- go get github.com/example/pkg@latest
 - `deputy_proxy_requests_total`: Total requests by ecosystem
 - `deputy_proxy_policy_decisions`: Allow/warn/deny counts
 - `deputy_proxy_latency_ms`: Request latency (watch for spikes)
+- `deputy_proxy_auth.authenticated`: Successful token validations
+- `deputy_proxy_auth.anonymous`: Requests without tokens
+- `deputy_proxy_auth.rejected.*`: Auth failures by error type
+- `deputy_proxy_auth.jwks.*`: JWKS cache health
 
 ### Ongoing tasks
 
 - **Review warnings weekly**: Advisory-mode policies may surface new concerns
 - **Update policies with releases**: New CVEs may require policy updates
 - **Rotate credentials**: If using authenticated upstreams, rotate regularly
+- **Monitor JWKS health**: Watch for refresh failures in `/debug/vars`
 
 ## Rollback plan
 
@@ -122,6 +194,9 @@ If issues arise, you can quickly revert:
 - [ ] Monitor for 2-4 weeks
 - [ ] Roll out to developer machines
 - [ ] Document escalation/exception process
+- [ ] (Optional) Configure JWT authentication
+- [ ] (Optional) Add JWT-based policies
+- [ ] (Optional) Switch auth mode to required
 
 ## Related
 

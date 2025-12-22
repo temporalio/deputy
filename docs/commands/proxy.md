@@ -57,7 +57,7 @@ deputy proxy serve --config proxy.yaml
 | `--policy` | | | Additional CEL policy files (repeatable) |
 | `--readyz` | | `false` | Expose `/readyz` health endpoint |
 | `--pprof` | | `false` | Expose `/debug/pprof/*` endpoints |
-| `--vars` | | `false` | Expose `/debug/vars` (cache stats) |
+| `--vars` | | `false` | Expose `/debug/vars` (cache stats, auth metrics) |
 
 ### Example
 
@@ -75,24 +75,102 @@ $ deputy proxy serve --config proxy.yaml --readyz
 
 ```yaml
 # proxy.yaml
-listen: ":8080"
-
-ecosystems:
-  go:
-    enabled: true
+listeners:
+  - name: go-proxy
+    bind: ":8080"
+    ecosystems: ["go"]
     upstream: "https://proxy.golang.org"
-  npm:
-    enabled: true
+    policies:
+      - ./policies/security.yaml
+      - ./policies/compliance.yaml
+    max_concurrent_requests: 100
+
+  - name: npm-proxy
+    bind: ":8081"
+    ecosystems: ["npm"]
     upstream: "https://registry.npmjs.org"
-
-policies:
-  - path: ./policies/security.yaml
-  - path: ./policies/compliance.yaml
-
-cache:
-  enabled: true
-  ttl: 1h
+    policies:
+      - ./policies/security.yaml
 ```
+
+### Authentication (JWT/OIDC)
+
+The proxy supports JWT-based authentication via OIDC/JWKS. When enabled, JWT claims are extracted and made available to CEL policies via the `jwt` variable.
+
+#### Auth Modes
+
+| Mode | Behavior |
+| --- | --- |
+| `disabled` | No authentication (default) |
+| `optional` | Validate tokens if present, allow anonymous |
+| `required` | Reject requests without valid tokens (401) |
+
+#### Configuration Example
+
+```yaml
+listeners:
+  - name: go-secure
+    bind: ":8080"
+    ecosystems: ["go"]
+    upstream: "https://proxy.golang.org"
+    policies:
+      - ./policies/jwt-policies.yaml
+    auth:
+      mode: required
+      jwks:
+        url: "https://auth.example.com/.well-known/jwks.json"
+        oidc_discovery: false  # Auto-discover from issuer
+        refresh_interval: 1h
+      # Alternative: static keys for offline validation
+      # static_keys:
+      #   - kid: "key-1"
+      #     alg: "RS256"
+      #     public_key: |
+      #       -----BEGIN PUBLIC KEY-----
+      #       MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8A...
+      #       -----END PUBLIC KEY-----
+      issuers:
+        - "https://auth.example.com"
+      audiences:
+        - "deputy-proxy"
+      required_claims:
+        - "sub"
+        - "email"
+      clock_skew: 30s
+```
+
+#### Auth Config Options
+
+| Field | Type | Description |
+| --- | --- | --- |
+| `mode` | string | `disabled`, `optional`, or `required` |
+| `jwks.url` | string | JWKS endpoint URL |
+| `jwks.oidc_discovery` | bool | Auto-discover JWKS from issuer's `.well-known/openid-configuration` |
+| `jwks.refresh_interval` | duration | Key refresh interval (default: 1h, min: 5m) |
+| `static_keys` | list | Inline public keys (alternative to JWKS) |
+| `static_keys[].kid` | string | Key ID |
+| `static_keys[].alg` | string | Algorithm (RS256, ES256, EdDSA) |
+| `static_keys[].public_key` | string | PEM-encoded public key |
+| `issuers` | list | Allowed token issuers (iss claim) |
+| `audiences` | list | Expected audiences (aud claim) |
+| `required_claims` | list | Claims that must be present |
+| `clock_skew` | duration | Clock drift tolerance for exp/nbf (default: 0) |
+| `allowed_algorithms` | list | Restrict signing algorithms (default: RS256, ES256, EdDSA, etc.) |
+
+#### Error Responses
+
+| HTTP Status | Error Code | Description |
+| --- | --- | --- |
+| 401 | `missing_token` | No Authorization header (mode=required) |
+| 401 | `invalid_token` | Malformed JWT |
+| 401 | `expired_token` | Token past expiration |
+| 401 | `signature_invalid` | Signature verification failed |
+| 401 | `key_not_found` | No matching key in JWKS |
+| 403 | `invalid_issuer` | Issuer not in allowed list |
+| 403 | `invalid_audience` | Audience not in allowed list |
+| 403 | `missing_claim` | Required claim not present |
+
+Responses include `WWW-Authenticate: Bearer realm="deputy-proxy"` and `X-Deputy-Auth-Error: <code>` headers.
 
 ---
 
@@ -228,7 +306,9 @@ deputy proxy go -- go get github.com/vulnerable/pkg@v1.0.0
 
 ### Policy Variables
 
-In proxy policies, the `request` object contains:
+In proxy policies, the following variables are available:
+
+#### `request` object
 
 ```cel
 request.ecosystem    // "go", "npm", "pypi", "rubygems"
@@ -238,7 +318,54 @@ request.module       // (Go) Module path
 request.scope        // (npm) @org scope
 ```
 
-See [`POLICY_SPEC.md`](../../POLICY_SPEC.md) for full proxy policy variables.
+#### `jwt` object (when authentication is enabled)
+
+```cel
+jwt.sub              // Subject (user/service ID)
+jwt.iss              // Issuer URL
+jwt.aud              // Audience(s)
+jwt.exp              // Expiration timestamp (Unix seconds)
+jwt.iat              // Issued-at timestamp (Unix seconds)
+jwt.nbf              // Not-before timestamp (Unix seconds)
+jwt.jti              // JWT ID (unique identifier)
+jwt.anonymous        // true if no token provided (mode=optional)
+jwt.<custom>         // Any custom claims from the token
+```
+
+#### JWT Policy Examples
+
+Using CEL optionals (`?.field` and `.orValue()`) for cleaner null-safe access:
+
+```yaml
+# Require admin role for internal packages
+# Uses optionals: jwt.?roles returns optional, orValue([]) provides default
+- action: deny
+  when: |
+    request.package.startsWith("internal/") &&
+    !jwt.?roles.orValue([]).exists(r, r == "admin")
+  reason: "Internal packages require admin role"
+
+# Block anonymous downloads of critical packages
+- action: deny
+  when: |
+    jwt.anonymous &&
+    request.package in ["aws-sdk", "stripe"]
+  reason: "Authentication required for this package"
+
+# Warn about old tokens
+# Uses optionals for safe access to optional claims
+- action: warn
+  when: |
+    !jwt.anonymous &&
+    age(jwt.?iat.orValue(0)) > duration("24h")
+  reason: "Token is older than 24 hours - consider refreshing"
+```
+
+See [`POLICY_SPEC.md`](../../POLICY_SPEC.md) for full proxy policy variables. JWT policy examples:
+- [jwt-role-based-access.yaml](../../policy/examples/jwt-role-based-access.yaml) - Team/role-based package access
+- [jwt-service-account.yaml](../../policy/examples/jwt-service-account.yaml) - CI/CD service account policies
+- [jwt-anonymous-guard.yaml](../../policy/examples/jwt-anonymous-guard.yaml) - Require auth for sensitive packages
+- [jwt-audit-logging.yaml](../../policy/examples/jwt-audit-logging.yaml) - Token age warnings
 
 ---
 

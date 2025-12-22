@@ -26,6 +26,11 @@ type ListenerConfig struct {
 	Ecosystems []string `yaml:"ecosystems"`
 	Upstream   string   `yaml:"upstream"`
 	Policies   []string `yaml:"policies"`
+
+	// Auth configures JWT-based authentication for this listener.
+	// If nil or mode is "disabled", no authentication is performed.
+	Auth *AuthConfig `yaml:"auth,omitempty"`
+
 	// MaxConcurrentRequests caps in-flight HTTP requests for this listener.
 	// A value <= 0 means unlimited.
 	MaxConcurrentRequests int `yaml:"max_concurrent_requests,omitempty"`
@@ -144,6 +149,90 @@ func (l *ListenerConfig) Validate(index int) error {
 			Message: "timeout must be non-negative",
 		}
 	}
+	if l.Auth != nil {
+		if err := l.Auth.Validate(prefix); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// Validate checks the authentication configuration for invalid values.
+func (a *AuthConfig) Validate(prefix string) error {
+	prefix = prefix + ".auth"
+
+	// Validate mode
+	switch strings.ToLower(a.Mode) {
+	case "", "disabled", "optional", "required":
+		// valid
+	default:
+		return &errors.ValidationError{
+			Field:   prefix + ".mode",
+			Value:   a.Mode,
+			Message: "must be one of: disabled, optional, required",
+		}
+	}
+
+	// If auth is enabled, require at least one key source
+	mode := strings.ToLower(a.Mode)
+	if mode == "optional" || mode == "required" {
+		if a.JWKS == nil && len(a.StaticKeys) == 0 {
+			return &errors.ValidationError{
+				Field:   prefix,
+				Message: "either jwks or static_keys must be configured when auth is enabled",
+			}
+		}
+	}
+
+	// Validate JWKS config
+	if a.JWKS != nil {
+		if strings.TrimSpace(a.JWKS.URL) == "" {
+			return &errors.ValidationError{
+				Field:   prefix + ".jwks.url",
+				Message: "JWKS URL is required",
+			}
+		}
+		if a.JWKS.RefreshInterval < 0 {
+			return &errors.ValidationError{
+				Field:   prefix + ".jwks.refresh_interval",
+				Value:   a.JWKS.RefreshInterval,
+				Message: "refresh interval must be non-negative",
+			}
+		}
+	}
+
+	// Validate static keys
+	for i, key := range a.StaticKeys {
+		keyPrefix := fmt.Sprintf("%s.static_keys[%d]", prefix, i)
+		if strings.TrimSpace(key.KeyID) == "" {
+			return &errors.ValidationError{
+				Field:   keyPrefix + ".kid",
+				Message: "key ID is required",
+			}
+		}
+		if strings.TrimSpace(key.Algorithm) == "" {
+			return &errors.ValidationError{
+				Field:   keyPrefix + ".alg",
+				Message: "algorithm is required",
+			}
+		}
+		if strings.TrimSpace(key.PublicKey) == "" {
+			return &errors.ValidationError{
+				Field:   keyPrefix + ".public_key",
+				Message: "public key is required",
+			}
+		}
+	}
+
+	// Validate clock skew
+	if a.ClockSkew < 0 {
+		return &errors.ValidationError{
+			Field:   prefix + ".clock_skew",
+			Value:   a.ClockSkew,
+			Message: "clock skew must be non-negative",
+		}
+	}
+
 	return nil
 }
 
@@ -206,5 +295,34 @@ func MarshalTemplate(ecosystem string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return string(data), nil
+
+	// Append commented auth configuration example
+	authExample := `
+# Authentication (optional):
+# Uncomment to enable JWT-based authentication.
+# See: docs/commands/proxy.md#authentication-jwtoidc
+#
+# auth:
+#   mode: required  # disabled | optional | required
+#   jwks:
+#     url: "https://auth.example.com/.well-known/jwks.json"
+#     # oidc_discovery: true  # auto-discover from issuer
+#     # refresh_interval: 1h
+#   # static_keys:  # alternative to JWKS
+#   #   - kid: "key-1"
+#   #     alg: "RS256"
+#   #     public_key: |
+#   #       -----BEGIN PUBLIC KEY-----
+#   #       ...
+#   #       -----END PUBLIC KEY-----
+#   issuers:
+#     - "https://auth.example.com"
+#   audiences:
+#     - "deputy-proxy"
+#   # required_claims: ["sub", "email"]
+#   # clock_skew: 30s
+#   # allowed_algorithms: ["RS256", "ES256"]
+`
+
+	return string(data) + authExample, nil
 }

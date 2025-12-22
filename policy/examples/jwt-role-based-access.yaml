@@ -1,0 +1,47 @@
+# JWT Role-Based Access Control
+#
+# This policy demonstrates using JWT claims for role-based access control
+# at the proxy level. Requires auth to be enabled on the listener.
+#
+# Uses CEL optionals (?.field and .orValue()) for cleaner null-safe access.
+# See: https://github.com/google/cel-spec/wiki/proposal-246
+#
+# Example auth configuration:
+#   auth:
+#     mode: required
+#     jwks:
+#       url: "https://auth.example.com/.well-known/jwks.json"
+#     issuers: ["https://auth.example.com"]
+#     audiences: ["deputy-proxy"]
+
+policies:
+  - name: jwt-admin-internal-access
+    description: Only admins can access internal/private modules
+    entrypoints: ["go_artifact_request"]
+    vars:
+      internalPrefixes:
+        - "github.com/acme-internal"
+        - "go.acme.corp"
+        - "internal/"
+    rules:
+      - action: deny
+        when: |
+          internalPrefixes.exists(p, request.module.startsWith(p)) &&
+          !jwt.?roles.orValue([]).exists(r, r == "admin")
+        reason: "Internal modules require admin role"
+        remediation: "Request admin access from your team lead"
+
+  - name: jwt-team-scoped-npm
+    description: Restrict npm scopes by team membership
+    entrypoints: ["npm_artifact_request"]
+    rules:
+      - action: deny
+        when: |
+          request.package.startsWith("@acme-platform/") &&
+          !jwt.?teams.orValue([]).exists(t, t == "platform")
+        reason: "Package requires platform team membership"
+      - action: deny
+        when: |
+          request.package.startsWith("@acme-security/") &&
+          !jwt.?teams.orValue([]).exists(t, t in ["security", "sre"])
+        reason: "Package requires security or SRE team membership"

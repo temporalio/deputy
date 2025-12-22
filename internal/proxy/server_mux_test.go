@@ -20,7 +20,7 @@ func TestListenerMux_HealthzAndReadyz(t *testing.T) {
 
 	t.Run("readyz disabled", func(t *testing.T) {
 		var ready atomic.Bool
-		srv := httptest.NewServer(newListenerMux(cfg, Options{}, nil, "test", "go", &ready, handler))
+		srv := httptest.NewServer(newListenerMux(cfg, Options{}, nil, nil, "test", "go", &ready, handler))
 		t.Cleanup(srv.Close)
 
 		resp, err := srv.Client().Get(srv.URL + "/healthz")
@@ -44,7 +44,7 @@ func TestListenerMux_HealthzAndReadyz(t *testing.T) {
 
 	t.Run("readyz enabled", func(t *testing.T) {
 		var ready atomic.Bool
-		srv := httptest.NewServer(newListenerMux(cfg, Options{EnableReadyz: true}, nil, "test", "go", &ready, handler))
+		srv := httptest.NewServer(newListenerMux(cfg, Options{EnableReadyz: true}, nil, nil, "test", "go", &ready, handler))
 		t.Cleanup(srv.Close)
 
 		resp, err := srv.Client().Get(srv.URL + "/readyz")
@@ -84,7 +84,7 @@ func TestListenerMux_ConcurrencyLimit429(t *testing.T) {
 		<-release
 		w.WriteHeader(http.StatusOK)
 	})
-	srv := httptest.NewServer(newListenerMux(cfg, Options{}, nil, "test", "go", &ready, handler))
+	srv := httptest.NewServer(newListenerMux(cfg, Options{}, nil, nil, "test", "go", &ready, handler))
 	t.Cleanup(srv.Close)
 
 	req1Done := make(chan struct{})
@@ -138,7 +138,7 @@ func TestListenerMux_RequestIDAndForwardingHeaders(t *testing.T) {
 	var ready atomic.Bool
 	ready.Store(true)
 	proxyHandler := newUpstreamReverseProxy(u, "test", http.DefaultTransport)
-	srv := httptest.NewServer(newListenerMux(cfg, Options{}, nil, "test", "go", &ready, proxyHandler))
+	srv := httptest.NewServer(newListenerMux(cfg, Options{}, nil, nil, "test", "go", &ready, proxyHandler))
 	t.Cleanup(srv.Close)
 
 	req, err := http.NewRequest(http.MethodGet, srv.URL+"/something", nil)
@@ -186,7 +186,7 @@ func TestListenerMux_MaxRequestBodyBytes(t *testing.T) {
 		_, _ = io.Copy(io.Discard, r.Body)
 		w.WriteHeader(http.StatusOK)
 	})
-	srv := httptest.NewServer(newListenerMux(cfg, Options{}, nil, "test", "go", &ready, handler))
+	srv := httptest.NewServer(newListenerMux(cfg, Options{}, nil, nil, "test", "go", &ready, handler))
 	t.Cleanup(srv.Close)
 
 	req, err := http.NewRequest(http.MethodPost, srv.URL+"/upload", bytes.NewReader([]byte("01234567890123456789")))

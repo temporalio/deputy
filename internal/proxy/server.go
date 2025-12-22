@@ -78,6 +78,18 @@ func (s *Server) serveListener(ctx context.Context, cfg ListenerConfig) error {
 		return fmt.Errorf("listener %s: %w", cfg.Name, err)
 	}
 
+	// Create authenticator if auth is configured
+	var auth Authenticator
+	authMode := cfg.Auth.GetMode()
+	if authMode != AuthModeDisabled {
+		auth, err = NewAuthenticator(cfg.Auth)
+		if err != nil {
+			return fmt.Errorf("listener %s: create authenticator: %w", cfg.Name, err)
+		}
+		defer auth.Close()
+		slog.Info("authentication enabled", "listener", cfg.Name, "mode", authMode)
+	}
+
 	var handler http.Handler
 	switch ecos {
 	case "go":
@@ -109,7 +121,7 @@ func (s *Server) serveListener(ctx context.Context, cfg ListenerConfig) error {
 	}
 
 	var ready atomic.Bool
-	rootHandler := newListenerMux(cfg, s.opts, slog.Default(), cfg.Name, ecos, &ready, handler)
+	rootHandler := newListenerMux(cfg, s.opts, auth, slog.Default(), cfg.Name, ecos, &ready, handler)
 
 	ln, err := net.Listen("tcp", cfg.Bind)
 	if err != nil {
@@ -169,7 +181,7 @@ func (s *Server) serveListener(ctx context.Context, cfg ListenerConfig) error {
 	return err
 }
 
-func newListenerMux(cfg ListenerConfig, opts Options, logger *slog.Logger, name, ecosystem string, ready *atomic.Bool, handler http.Handler) http.Handler {
+func newListenerMux(cfg ListenerConfig, opts Options, auth Authenticator, logger *slog.Logger, name, ecosystem string, ready *atomic.Bool, handler http.Handler) http.Handler {
 	if logger == nil {
 		logger = slog.Default()
 	}
@@ -219,9 +231,15 @@ func newListenerMux(cfg ListenerConfig, opts Options, logger *slog.Logger, name,
 		mux.Handle("/debug/pprof/", http.NotFoundHandler())
 	}
 
+	// Build middleware chain (order matters):
+	// 1. ConcurrencyLimit - reject overload early
+	// 2. RequestID - needed for logging/correlation
+	// 3. Authentication - validate tokens, add claims to context
+	// 4. Logging - log requests with auth context
 	wrapped := handler
 	wrapped = withConcurrencyLimit(cfg.MaxConcurrentRequests)(wrapped)
 	wrapped = withRequestID("X-Request-ID")(wrapped)
+	wrapped = withAuthentication(auth, cfg.Auth.GetMode())(wrapped)
 	wrapped = withRequestLogging(logger, name, ecosystem, cfg.Upstream, skipLogPaths)(wrapped)
 	mux.Handle("/", wrapped)
 

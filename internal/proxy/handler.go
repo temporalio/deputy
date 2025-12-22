@@ -106,6 +106,13 @@ func (h *baseHandler) buildPayload(ctx context.Context, info requestInfo, path s
 
 	payload := map[string]any{"request": reqMap}
 
+	// Add JWT claims to payload for policy evaluation
+	if claims := JWTClaimsFromContext(ctx); claims != nil {
+		payload["jwt"] = claims.ToMap()
+	} else {
+		payload["jwt"] = AnonymousClaims()
+	}
+
 	// Add vulnerability and license data if version is known
 	if info.HasVersion {
 		if vulnMaps := vulnerabilitiesToMaps(ctx, h.lookups, info.Ecosystem, info.Name, rawVersion); len(vulnMaps) > 0 {

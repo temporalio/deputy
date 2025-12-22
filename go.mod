@@ -23,6 +23,7 @@ require (
 	github.com/ossf/osv-schema/bindings/go v0.0.0-20250902063920-695987a6b7da
 	github.com/package-url/packageurl-go v0.1.3
 	github.com/pandatix/go-cvss v0.6.2
+	github.com/picatz/jose v0.0.0-20250816152409-7521c7f65f1b
 	github.com/picatz/openai v0.0.0-20251023035433-af6462b7d534
 	github.com/pjbgf/sha1cd v0.5.0
 	github.com/protobom/protobom v0.5.4

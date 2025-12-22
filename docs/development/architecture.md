@@ -187,6 +187,69 @@ sequenceDiagram
     end
 ```
 
+### Proxy Authentication (JWT/OIDC)
+
+When authentication is enabled, the proxy validates JWT tokens before policy evaluation:
+
+```mermaid
+sequenceDiagram
+    participant Client as go/npm/pip
+    participant Auth as auth middleware
+    participant JWKS as JWKS cache
+    participant Policy as policy engine
+    participant Upstream as registry
+
+    Client->>Auth: GET /pkg (+ Bearer token)
+
+    alt no token + mode=required
+        Auth-->>Client: 401 missing_token
+    else has token
+        Auth->>Auth: Parse JWT header (kid, alg)
+        Auth->>JWKS: GetKey(kid)
+
+        alt key not found
+            JWKS->>JWKS: ForceRefresh()
+        end
+
+        JWKS-->>Auth: public key
+        Auth->>Auth: Verify signature
+
+        alt invalid signature
+            Auth-->>Client: 401 signature_invalid
+        else valid
+            Auth->>Auth: Validate claims (exp, iss, aud)
+
+            alt claims invalid
+                Auth-->>Client: 401/403 + error code
+            else claims valid
+                Auth->>Policy: Evaluate(request, jwt claims)
+                Policy-->>Auth: allow/deny
+
+                alt allowed
+                    Auth->>Upstream: Fetch artifact
+                    Upstream-->>Auth: artifact
+                    Auth-->>Client: 200 + artifact
+                else denied by policy
+                    Auth-->>Client: 403 + policy reason
+                end
+            end
+        end
+    end
+```
+
+**JWT claims available in CEL policies:**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `jwt.sub` | string | Subject (user/service ID) |
+| `jwt.iss` | string | Issuer URL |
+| `jwt.aud` | list | Audience(s) |
+| `jwt.exp` | int | Expiration timestamp |
+| `jwt.anonymous` | bool | True if no token (mode=optional) |
+| `jwt.<custom>` | any | Custom claims from token |
+
+See [proxy.md](../commands/proxy.md#authentication-jwtoidc) for configuration details.
+
 ## Key Abstractions
 
 ### Package (internal/inventory)

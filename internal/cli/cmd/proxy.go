@@ -39,6 +39,17 @@ SUPPORTED ECOSYSTEMS:
 • PyPI (Simple API)
 • RubyGems (Gem server API)
 
+AUTHENTICATION:
+The proxy supports JWT-based authentication via OIDC/JWKS. Configure auth in your proxy.yaml:
+• mode: disabled (default), optional (validate if present), or required (reject without token)
+• jwks: JWKS endpoint URL for key discovery (supports OIDC auto-discovery)
+• static_keys: Inline public keys for offline validation
+• issuers: Trusted token issuers (iss claim validation)
+• audiences: Expected audiences (aud claim validation)
+• required_claims: Claims that must be present in tokens
+
+JWT claims are exposed as the 'jwt' variable in CEL policies, enabling claim-based access control.
+
 This tool is essential for "secure-by-default" development environments where you want to prevent
 risky dependencies from ever entering your codebase.`,
 		Example: `EXECUTION WRAPPERS:
@@ -56,7 +67,21 @@ STANDALONE SERVER:
   deputy proxy template > proxy.yaml
 
   # Run the proxy server
-  deputy proxy serve --config proxy.yaml`,
+  deputy proxy serve --config proxy.yaml
+
+AUTHENTICATION (in proxy.yaml):
+  listeners:
+    - name: go-secure
+      bind: ":8080"
+      ecosystems: ["go"]
+      upstream: https://proxy.golang.org
+      policies: ["policy.yaml"]
+      auth:
+        mode: required
+        jwks:
+          url: https://auth.example.com/.well-known/jwks.json
+        issuers: ["https://auth.example.com"]
+        audiences: ["deputy-proxy"]`,
 	}
 
 	serveCmd := &cobra.Command{

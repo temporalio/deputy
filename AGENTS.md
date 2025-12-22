@@ -371,7 +371,220 @@ Contains information about the environment in which `deputy` is running.
 *   Apply a rule only during a `scan` command:
     `env.command == 'scan'`
 
+---
+
+#### `jwt` object
+
+Contains verified JWT claims from authenticated proxy requests. Available in all proxy entrypoints when authentication is enabled. See [Proxy Authentication](#proxy-authentication) for configuration.
+
+| Field | Type | Description | Example Value |
+|---|---|---|---|
+| `anonymous` | `bool` | `true` if no token was provided | `false` |
+| `sub` | `string` | Subject (user/service ID) | `"user:alice"` |
+| `iss` | `string` | Token issuer | `"https://auth.example.com"` |
+| `aud` | `list(string)` | Audiences | `["deputy-proxy"]` |
+| `exp` | `int` | Expiration timestamp (Unix) | `1700000000` |
+| `iat` | `int` | Issued-at timestamp (Unix) | `1699990000` |
+| `nbf` | `int` | Not-before timestamp (Unix) | `1699990000` |
+| `jti` | `string` | JWT ID | `"abc123"` |
+| `<custom>` | `any` | Any custom claims from the token | varies |
+
+**Example Expressions for `jwt`:**
+
+Using CEL optionals (`?.field` and `.orValue()`) for cleaner null-safe access:
+
+*   Deny anonymous access to internal packages:
+    `jwt.anonymous && request.module.startsWith("internal/")`
+*   Require admin role for certain packages (using optionals):
+    `!jwt.?roles.orValue([]).exists(r, r == "admin")`
+*   Check team membership (using optionals):
+    `jwt.?teams.orValue([]).exists(t, t == "platform")`
+*   Validate service account format (using optionals):
+    `jwt.?sub.orValue("").startsWith("sa:")`
+*   Check token age (using time functions and optionals):
+    `age(jwt.?iat.orValue(0)) > duration("24h")`
+
+### CEL Helper Functions
+
+Deputy extends CEL with custom functions for policy evaluation:
+
+#### Time Functions
+
+| Function | Signature | Description |
+|----------|-----------|-------------|
+| `now()` | `now() timestamp` | Returns current time as a timestamp (custom) |
+| `age()` | `age(int\|timestamp) duration` | Duration since a Unix timestamp (custom convenience) |
+| `timestamp()` | `timestamp(int\|string)` | CEL built-in: convert Unix seconds or RFC 3339 string |
+| `duration()` | `duration(string) duration` | CEL built-in: parse duration (e.g., `"1h"`, `"30m"`) |
+| `int(now())` | - | Get current Unix timestamp (use native conversion) |
+| `int(timestamp)` | - | Get Unix seconds from timestamp (native conversion) |
+
+**Example: Token age check (using optionals)**
+```yaml
+- action: warn
+  when: |
+    !jwt.anonymous &&
+    age(jwt.?iat.orValue(0)) > duration("24h")
+  reason: "Token is older than 24 hours"
+```
+
+#### String Functions (ext.Strings)
+
+| Function | Signature | Description |
+|----------|-----------|-------------|
+| `matches()` | `string.matches(pattern)` | Regex match |
+| `split()` | `string.split(sep)` | Split into list |
+| `join()` | `list.join(sep)` | Join list elements |
+| `trim()` | `string.trim()` | Remove whitespace |
+| `replace()` | `string.replace(old, new)` | Replace occurrences |
+| `lowerAscii()` | `string.lowerAscii()` | Lowercase ASCII |
+| `upperAscii()` | `string.upperAscii()` | Uppercase ASCII |
+
+#### Math Functions (ext.Math)
+
+| Function | Signature | Description |
+|----------|-----------|-------------|
+| `math.abs()` | `math.abs(number)` | Absolute value |
+| `math.ceil()` | `math.ceil(double)` | Round up |
+| `math.floor()` | `math.floor(double)` | Round down |
+| `math.round()` | `math.round(double)` | Round to nearest |
+| `math.greatest()` | `math.greatest(a, b, ...)` | Maximum value |
+| `math.least()` | `math.least(a, b, ...)` | Minimum value |
+
+#### Other Functions
+
+| Function | Signature | Description |
+|----------|-----------|-------------|
+| `levenshtein()` | `levenshtein(a, b) int` | String edit distance |
+| `levenshteinWithin()` | `levenshteinWithin(a, b, limit) bool` | Distance within limit |
+| `cel.bind()` | `cel.bind(var, init, expr)` | Bind local variable |
+| `base64.encode()` | `base64.encode(bytes)` | Encode to base64 |
+| `base64.decode()` | `base64.decode(string)` | Decode from base64 |
+
 Full spec: [`POLICY_SPEC.md`](POLICY_SPEC.md) • Examples: [`policy/examples/`](policy/examples/)
+
+## Proxy Authentication
+
+The Deputy proxy supports JWT-based authentication for production deployments. Authentication can be configured per-listener with JWKS endpoints or static public keys.
+
+### Configuration
+
+```yaml
+listeners:
+  - name: go-proxy
+    bind: ":8080"
+    ecosystems: ["go"]
+    upstream: "https://proxy.golang.org"
+    policies: ["policy/go-proxy.yaml"]
+    auth:
+      # Authentication mode: required | optional | disabled
+      mode: required
+
+      # JWKS endpoint for key discovery (recommended for production)
+      jwks:
+        url: "https://auth.example.com/.well-known/jwks.json"
+        oidc_discovery: false    # Set true to auto-discover from issuer URL
+        refresh_interval: 1h     # Background key refresh interval
+
+      # Alternative: inline public keys (for testing or air-gapped environments)
+      static_keys:
+        - kid: "key-1"
+          alg: "RS256"
+          public_key: |
+            -----BEGIN PUBLIC KEY-----
+            MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA...
+            -----END PUBLIC KEY-----
+
+      # Token validation
+      issuers: ["https://auth.example.com"]           # Allowed issuers (iss claim)
+      audiences: ["deputy-proxy"]                      # Allowed audiences (aud claim)
+      required_claims: ["sub", "email"]               # Claims that must be present
+      clock_skew: 30s                                  # Tolerance for exp/nbf validation
+```
+
+### Authentication Modes
+
+| Mode | Behavior |
+|------|----------|
+| `disabled` | No authentication (default, backward compatible) |
+| `optional` | Validates tokens if present; allows anonymous access |
+| `required` | Rejects requests without valid tokens (401) |
+
+### HTTP Headers
+
+**Request:** Tokens are passed via the standard `Authorization` header:
+```
+Authorization: Bearer <jwt-token>
+```
+
+**Response (on auth failure):**
+```
+WWW-Authenticate: Bearer realm="deputy-proxy"
+X-Deputy-Auth-Error: <error-code>
+X-Deputy-Auth-Message: <human-readable message>
+```
+
+### Error Codes
+
+| Code | HTTP Status | Description |
+|------|-------------|-------------|
+| `missing_token` | 401 | No Authorization header (mode=required) |
+| `invalid_token` | 401 | Malformed JWT |
+| `expired_token` | 401 | Token past expiration |
+| `signature_invalid` | 401 | Signature verification failed |
+| `key_not_found` | 401 | Key ID not in JWKS or static keys |
+| `invalid_issuer` | 403 | Issuer not in allowed list |
+| `invalid_audience` | 403 | Audience not in allowed list |
+| `missing_claim` | 403 | Required claim not present |
+
+### Key Types Supported
+
+- **RSA** (RS256, RS384, RS512)
+- **ECDSA** (ES256, ES384, ES512)
+- **EdDSA** (Ed25519)
+
+### OIDC Discovery
+
+When `oidc_discovery: true`, the proxy fetches the OIDC configuration from `<url>/.well-known/openid-configuration` and extracts the `jwks_uri` automatically.
+
+### Policy Examples with JWT
+
+```yaml
+# Require authentication for internal packages
+policies:
+  - name: internal-requires-auth
+    entrypoints: ["go_artifact_request"]
+    rules:
+      - action: deny
+        when: |
+          jwt.anonymous &&
+          request.module.startsWith("github.com/acme-internal/")
+        reason: "Internal packages require authentication"
+
+# Role-based access control (using optionals for cleaner syntax)
+policies:
+  - name: admin-only-packages
+    entrypoints: ["npm_artifact_request"]
+    rules:
+      - action: deny
+        when: |
+          request.package.startsWith("@acme-admin/") &&
+          !jwt.?roles.orValue([]).exists(r, r == "admin")
+        reason: "Admin packages require admin role"
+
+# Block anonymous users from packages with critical vulns
+policies:
+  - name: auth-for-critical
+    entrypoints: ["go_artifact_request", "npm_artifact_request"]
+    rules:
+      - action: deny
+        when: |
+          jwt.anonymous &&
+          vulnerabilities.orValue([]).exists(v, v.severity == "CRITICAL")
+        reason: "Authenticate to download packages with critical vulnerabilities"
+```
+
+See [`policy/examples/jwt-*.yaml`](policy/examples/) for more examples.
 
 ## Environment Variables
 
