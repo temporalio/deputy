@@ -17,7 +17,7 @@ func Test_ProcessOSVVulnerability_basic_fields(t *testing.T) {
 		Modified:         tTime("2020-02-03T12:00:00Z"),
 		Aliases:          []string{"CVE-2020-1", "GO-2020-1"},
 		Severity:         []osvschema.Severity{{Type: "CVSS_V3", Score: "7.8"}},
-		DatabaseSpecific: map[string]interface{}{"severity": "HIGH"},
+		DatabaseSpecific: map[string]any{"severity": "HIGH"},
 		References:       []osvschema.Reference{{URL: "https://example.com"}},
 		Affected:         []osvschema.Affected{{Ranges: []osvschema.Range{{Events: []osvschema.Event{{Fixed: "v1.2.3"}}}}}},
 	}

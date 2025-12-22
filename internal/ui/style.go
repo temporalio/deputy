@@ -1,7 +1,6 @@
 package ui
 
 import (
-	"slices"
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
@@ -182,12 +181,13 @@ func estimateScoreFromVector(vector string) float64 {
 	vector = strings.ToUpper(vector)
 	score := 5.0 // Base medium
 
-	// TODO: replace with strings.SplitSeq and consider
-	// using [github.com/picatz/iters.Contains] for better performance.
-	// Or consider a better CVSS parser / library.
-	parts := strings.Split(vector, "/")
+	parts := make(map[string]struct{})
+	for part := range strings.SplitSeq(vector, "/") {
+		parts[part] = struct{}{}
+	}
 	has := func(s string) bool {
-		return slices.Contains(parts, s)
+		_, ok := parts[s]
+		return ok
 	}
 
 	if has("AV:N") {

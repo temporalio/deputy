@@ -1016,8 +1016,6 @@ func sanitizeForSPDXID(s string) string {
 	return b.String()
 }
 
-// shortGitRef removed (unused)
-
 // Writers
 func WriteCycloneDXJSON(doc *sbom.Document, w io.Writer) error {
 	return writer.New(writer.WithFormat(formats.CDX16JSON)).WriteStream(doc, w)

@@ -351,7 +351,7 @@ func RemoteModuleLicenseScan(ctx context.Context, modulePath, version string) []
 		remoteLicenseMemo.Set(key, cloneStrings(diskCached))
 		return cloneStrings(diskCached)
 	}
-	result, _, _ := remoteLicenseGroup.Do(key, func() (interface{}, error) {
+	result, _, _ := remoteLicenseGroup.Do(key, func() (any, error) {
 		if cached, ok := remoteLicenseMemo.Get(key); ok {
 			return cloneStrings(cached), nil
 		}
@@ -419,7 +419,7 @@ func LookupLicensesBestEffort(ctx context.Context, ecosystem, name, version stri
 		registryLicenseMemo.Set(key, cloneStrings(diskCached))
 		return cloneStrings(diskCached)
 	}
-	result, _, _ := registryLicenseGroup.Do(key, func() (interface{}, error) {
+	result, _, _ := registryLicenseGroup.Do(key, func() (any, error) {
 		if cached, ok := registryLicenseMemo.Get(key); ok {
 			return cloneStrings(cached), nil
 		}

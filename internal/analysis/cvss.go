@@ -60,8 +60,7 @@ func ParseCVSSScore(severity string) float64 {
 
 	// Vector with Base: score
 	if strings.Contains(severity, "/") {
-		parts := strings.Split(severity, "/")
-		for _, part := range parts {
+		for part := range strings.SplitSeq(severity, "/") {
 			if strings.HasPrefix(part, "Base:") || strings.HasPrefix(part, "base:") {
 				scoreStr := strings.TrimPrefix(strings.TrimPrefix(part, "Base:"), "base:")
 				if score := parseFloat(scoreStr); score >= 0 {

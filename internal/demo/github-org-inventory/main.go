@@ -543,7 +543,7 @@ func defaultLicenseResolver(deepScan bool) licenseResolver {
 			return cloneStrings(v.([]string))
 		}
 
-		res, _, _ := sf.Do(key, func() (interface{}, error) {
+		res, _, _ := sf.Do(key, func() (any, error) {
 			if ctx.Err() != nil {
 				return []string{}, ctx.Err()
 			}

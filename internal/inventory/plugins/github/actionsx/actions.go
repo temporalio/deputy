@@ -415,7 +415,7 @@ func asMap(v any) (map[string]any, bool) {
 
 // asList attempts to coerce a YAML-decoded value into a slice.
 func asList(v any) ([]any, bool) {
-	t, ok := v.([]interface{})
+	t, ok := v.([]any)
 	if !ok {
 		return nil, false
 	}
