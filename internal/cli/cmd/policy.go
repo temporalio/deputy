@@ -134,9 +134,11 @@ func newPolicyLintCommand() *cobra.Command {
 					continue
 				}
 				// Prefer structured lint for YAML bundles for clearer CEL errors.
-				if ok, err := lintStructuredBundle(path, extraVars, cmd.OutOrStdout()); err != nil {
+				ok, err := lintStructuredBundle(path, extraVars, cmd.OutOrStdout())
+				if err != nil {
 					return err
-				} else if ok {
+				}
+				if ok {
 					continue
 				}
 				sources, err := policy.LoadSources([]string{path})
@@ -585,11 +587,12 @@ func executePolicyTestCase(ctx context.Context, baseDir, file string, tc *policy
 		name = file
 	}
 	var policyPaths []string
-	if len(tc.Policies) > 0 {
+	switch {
+	case len(tc.Policies) > 0:
 		policyPaths = append(policyPaths, tc.Policies...)
-	} else if tc.Policy != "" {
+	case tc.Policy != "":
 		policyPaths = append(policyPaths, tc.Policy)
-	} else {
+	default:
 		return fmt.Errorf("%s: test %q missing policy path", file, name)
 	}
 	for i, p := range policyPaths {
@@ -598,9 +601,10 @@ func executePolicyTestCase(ctx context.Context, baseDir, file string, tc *policy
 		}
 	}
 	inputMap := map[string]any{}
-	if tc.InputJSON != nil {
+	switch {
+	case tc.InputJSON != nil:
 		inputMap = tc.InputJSON
-	} else if strings.TrimSpace(tc.Input) != "" {
+	case strings.TrimSpace(tc.Input) != "":
 		path := tc.Input
 		if !filepath.IsAbs(path) {
 			path = filepath.Join(baseDir, path)

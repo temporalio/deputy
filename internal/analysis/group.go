@@ -1,6 +1,7 @@
 package analysis
 
 import (
+	"cmp"
 	"slices"
 	"strings"
 
@@ -179,10 +180,10 @@ func mergeManifestRefs(vulns []Vulnerability) []ManifestReference {
 		refs = append(refs, ref)
 	}
 	slices.SortFunc(refs, func(a, b ManifestReference) int {
-		if c := strings.Compare(a.Manager, b.Manager); c != 0 {
+		if c := cmp.Compare(a.Manager, b.Manager); c != 0 {
 			return c
 		}
-		return strings.Compare(a.Path, b.Path)
+		return cmp.Compare(a.Path, b.Path)
 	})
 	return refs
 }

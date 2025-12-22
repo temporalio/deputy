@@ -6,7 +6,6 @@ import (
 	"net/http"
 	"net/http/httputil"
 	"net/url"
-	"strings"
 
 	analysis "github.com/picatz/deputy/internal/analysis"
 )
@@ -133,14 +132,4 @@ func (h *baseHandler) serve(w http.ResponseWriter, r *http.Request, policyName s
 		Version:   rawVersion,
 		Operation: info.Operation,
 	}, h.proxy)
-}
-
-// parseVersion normalizes version handling: returns the version (or placeholder)
-// and whether a real version was provided.
-func parseVersion(v string) (version string, hasVersion bool) {
-	hasVersion = strings.TrimSpace(v) != ""
-	if hasVersion {
-		return v, true
-	}
-	return unknownVersionPlaceholder, false
 }

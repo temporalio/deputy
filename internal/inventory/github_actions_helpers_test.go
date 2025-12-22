@@ -48,7 +48,7 @@ func TestFilterExternalEcosystems_Table(t *testing.T) {
 	}
 	for _, tc := range tests {
 		label := "nil"
-		if tc.in != nil && len(tc.in) > 0 {
+		if len(tc.in) > 0 {
 			label = tc.in[0]
 		}
 		t.Run(label, func(t *testing.T) {

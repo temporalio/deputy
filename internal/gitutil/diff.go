@@ -44,9 +44,10 @@ func CheckFilesChanged(repoPath string, baseRef string, prRef string) ([]string,
 	fileNames := make([]string, 0, len(patches))
 	for _, change := range patches {
 		from, to := change.Files()
-		if from != nil {
+		switch {
+		case from != nil:
 			fileNames = append(fileNames, from.Path())
-		} else if to != nil {
+		case to != nil:
 			fileNames = append(fileNames, to.Path())
 		}
 	}

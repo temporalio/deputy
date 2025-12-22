@@ -1,0 +1,74 @@
+# Deputy Configuration Example
+# Copy to .deputy.yaml and customize for your project.
+#
+# Precedence: CLI flags > Environment variables > Config file > Defaults
+#
+# See: docs/reference/configuration.md
+
+# Logging configuration
+logging:
+  # Log verbosity: debug, info, warn, error
+  level: info
+
+  # Output format: text, json
+  format: text
+
+  # Enable ANSI colors in text format (auto-detected by default)
+  # color: true
+
+  # Include source file/line in logs (useful for debugging)
+  # source: false
+
+# Default scanning behavior
+scan:
+  # Limit scanning to specific ecosystems
+  # ecosystems:
+  #   - go
+  #   - npm
+
+  # Always ignore vulnerabilities without fixes
+  # ignore_unfixed: false
+
+  # Default output format: text, json
+  # format: text
+
+# SBOM generation defaults
+sbom:
+  # Default format: cyclonedx-json, spdx-json, protobom-json
+  format: cyclonedx-json
+
+  # Enrich SBOMs with license information
+  # enrich_licenses: false
+
+  # License data source: depsdev, scan, both
+  # license_source: depsdev
+
+# Policy configuration
+policy:
+  # Default policy files to load (can be overridden with --policy)
+  # paths:
+  #   - policy/severity-guardrail.yaml
+  #   - policy/license-allowlist.yaml
+
+  # Default mode: enforce, advisory
+  # mode: enforce
+
+# Proxy configuration (for `deputy proxy serve`)
+proxy:
+  # Default listen address
+  # addr: ":8080"
+
+  # Policy files for proxy enforcement
+  # policies:
+  #   - policy/proxy-guardrails.yaml
+
+# Agent configuration (for `deputy fix --agent` and `deputy triage --agent`)
+# Requires API keys set via environment variables:
+#   ANTHROPIC_API_KEY for Claude
+#   CODEX_API_KEY for Codex
+agent:
+  # Default agent sandbox level: read-only, workspace-write, danger-full-access
+  sandbox: workspace-write
+
+  # Skip git repository checks when running agents
+  # skip_git_check: true

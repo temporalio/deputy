@@ -59,10 +59,10 @@ func CommandsFromVulnerabilities(vs []analysis.Vulnerability) ([]Command, string
 		if n := cmp.Compare(a.managerRank, b.managerRank); n != 0 {
 			return n
 		}
-		if n := strings.Compare(a.Path, b.Path); n != 0 {
+		if n := cmp.Compare(a.Path, b.Path); n != 0 {
 			return n
 		}
-		return strings.Compare(a.Command, b.Command)
+		return cmp.Compare(a.Command, b.Command)
 	})
 	return cmds, stdlib
 }
@@ -139,7 +139,7 @@ func compareVersions(a, b string) int {
 	}
 
 	// Fallback to string comparison
-	return strings.Compare(a, b)
+	return cmp.Compare(a, b)
 }
 
 // normalizeVersion ensures the version has a "v" prefix for semver comparison.
@@ -239,14 +239,15 @@ func dedupeCommands(upgrades []packageUpgrade) []Command {
 		}
 	}
 
-	if goManagerPresent && len(goPaths) == 0 {
+	switch {
+	case goManagerPresent && len(goPaths) == 0:
 		commands = append(commands, Command{
 			Manager:     "go",
 			managerRank: analysis.ManagerRank("go"),
 			Command:     "go mod tidy",
 			Executable:  true,
 		})
-	} else if len(goPaths) > 0 {
+	case len(goPaths) > 0:
 		paths := goPaths.Slice()
 		slices.Sort(paths)
 		for _, path := range paths {

@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -103,7 +104,8 @@ FILTERING & FORMATTING:
 			repoPath := ""
 			if len(args) > 0 && strings.TrimSpace(args[0]) != "" {
 				repoPath = args[0]
-			} else {
+			}
+			if repoPath == "" {
 				var err error
 				repoPath, err = os.Getwd()
 				if err != nil {
@@ -182,7 +184,8 @@ func collectListItems(ctx context.Context, repoPath, ref string, ecosystems []st
 		if err != nil {
 			return nil, "", "", err
 		}
-	} else {
+	}
+	if src == nil {
 		u := sbomx.ToHTTPSGitURL(repoPath)
 		if u == "" {
 			return nil, "", "", fmt.Errorf("could not interpret repo %q as local path or remote URL", repoPath)
@@ -225,7 +228,8 @@ func collectListItems(ctx context.Context, repoPath, ref string, ecosystems []st
 	scanOpts := inv.ScanOptions{Ecosystems: ecosystems}
 	if strings.EqualFold(effRef, "HEAD") {
 		pkgs, err = inv.ScanPackagesWorking(ctx, ws, scanOpts)
-	} else {
+	}
+	if !strings.EqualFold(effRef, "HEAD") {
 		targetHash, err = gitx.ResolveRevisionEnhanced(repo, effRef)
 		if err != nil {
 			return nil, "", "", err
@@ -238,15 +242,16 @@ func collectListItems(ctx context.Context, repoPath, ref string, ecosystems []st
 
 	goDirect := map[string]bool{"stdlib": true}
 	var manifestRes manifestResolver
-	if strings.EqualFold(effRef, "HEAD") || strings.EqualFold(effRef, "HEAD~0") {
+	switch {
+	case strings.EqualFold(effRef, "HEAD") || strings.EqualFold(effRef, "HEAD~0"):
 		goDirect = compare.CollectGoDirectModulesFromWorkspace(ws)
 		manifestRes = workspaceManifestResolver{ws: ws}
-	} else if targetHash != nil {
+	case targetHash != nil:
 		if direct, err := compare.CollectGoDirectModulesFromCommit(repo, *targetHash); err == nil {
 			goDirect = direct
 		}
 		manifestRes = gitManifestResolver{repo: repo, hash: *targetHash}
-	} else {
+	default:
 		// Fallback: use workspace for current state
 		goDirect = compare.CollectGoDirectModulesFromWorkspace(ws)
 		manifestRes = workspaceManifestResolver{ws: ws}
@@ -259,7 +264,7 @@ func collectListItems(ctx context.Context, repoPath, ref string, ecosystems []st
 	items := toListItems(ws, pkgs, goDirect, pkgDirect, pkgSources, showSources)
 	slices.SortFunc(items, func(a, b ListItem) int {
 		// Sort by PURL for stable output
-		if c := strings.Compare(a.PURL, b.PURL); c != 0 {
+		if c := cmp.Compare(a.PURL, b.PURL); c != 0 {
 			return c
 		}
 		if a.IsDirect != b.IsDirect {
@@ -269,16 +274,17 @@ func collectListItems(ctx context.Context, repoPath, ref string, ecosystems []st
 			}
 			return 1
 		}
-		return strings.Compare(a.Name, b.Name)
+		return cmp.Compare(a.Name, b.Name)
 	})
 
 	// Repo metadata
 	commitHash := ""
-	if strings.EqualFold(effRef, "HEAD") {
+	switch {
+	case strings.EqualFold(effRef, "HEAD"):
 		if head, err := repo.Head(); err == nil {
 			commitHash = head.Hash().String()
 		}
-	} else if targetHash != nil {
+	case targetHash != nil:
 		commitHash = targetHash.String()
 	}
 	return items, commitHash, "", nil
@@ -316,10 +322,11 @@ func toListItems(ws workspace.FS, pkgs []*extractor.Package, goDirect map[string
 				li.IsDirect = true
 			}
 		}
-		if purlx.IsGitHubActionsType(p.PURLType) {
+		switch {
+		case purlx.IsGitHubActionsType(p.PURLType):
 			li.PURL = purlx.GitHubActionsPURLFromPackage(p)
-		} else if pu := p.PURL(); pu != nil {
-			li.PURL = pu.String()
+		case p.PURL() != nil:
+			li.PURL = p.PURL().String()
 		}
 		if strings.EqualFold(ecos, "Go") || strings.EqualFold(p.PURLType, scalpurl.TypeGolang) {
 			info := compare.ParseGoPackage(p)
@@ -336,7 +343,8 @@ func toListItems(ws workspace.FS, pkgs []*extractor.Package, goDirect map[string
 			}
 			if pu := p.PURL(); pu != nil {
 				li.PURL = normalizeGolangPURLLikeSBOM(pu.String(), ws)
-			} else {
+			}
+			if li.PURL == "" {
 				full := info.CanonicalName
 				ns := ""
 				name := full
@@ -346,7 +354,8 @@ func toListItems(ws workspace.FS, pkgs []*extractor.Package, goDirect map[string
 				}
 				li.PURL = scalpurl.PackageURL{Type: scalpurl.TypeGolang, Namespace: ns, Name: name, Version: p.Version}.String()
 			}
-		} else {
+		}
+		if !strings.EqualFold(ecos, "Go") && !strings.EqualFold(p.PURLType, scalpurl.TypeGolang) {
 			if li.PURL == "" && p.PURLType != "" {
 				li.PURL = scalpurl.PackageURL{Type: p.PURLType, Name: p.Name, Version: p.Version}.String()
 			}

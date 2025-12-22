@@ -3,6 +3,7 @@ package targets
 import (
 	"context"
 	"errors"
+	"slices"
 	"sync"
 )
 
@@ -29,7 +30,7 @@ func (r *registry) Register(p Provider) {
 
 func (r *registry) Open(ctx context.Context, target string, opts map[string]string) (Materialized, error) {
 	r.mu.RLock()
-	providers := append([]Provider(nil), r.providers...)
+	providers := slices.Clone(r.providers)
 	r.mu.RUnlock()
 	for _, p := range providers {
 		if !p.Detect(ctx, target) {

@@ -349,15 +349,16 @@ func runDiffAnalysis(ctx context.Context, repoPath, baseRef, targetRef string, e
 	// Determine direct dependencies from target go.mod for accurate classification
 	targetGoDirect := map[string]bool{"stdlib": true}
 	var targetManifestRes manifestResolver
-	if isWorkingPseudoRef(targetRef) {
+	switch {
+	case isWorkingPseudoRef(targetRef):
 		targetGoDirect = compare.CollectGoDirectModulesFromWorkspace(repoSrc.Workspace)
 		targetManifestRes = workspaceManifestResolver{ws: repoSrc.Workspace}
-	} else if targetHash != nil {
+	case targetHash != nil:
 		if direct, err := compare.CollectGoDirectModulesFromCommit(repo, *targetHash); err == nil {
 			targetGoDirect = direct
 		}
 		targetManifestRes = gitManifestResolver{repo: repo, hash: *targetHash}
-	} else {
+	default:
 		// Fallback: use workspace for current state
 		targetGoDirect = compare.CollectGoDirectModulesFromWorkspace(repoSrc.Workspace)
 		targetManifestRes = workspaceManifestResolver{ws: repoSrc.Workspace}
@@ -719,11 +720,11 @@ func displayDetailedDependencyChanges(ctx context.Context, ws workspace.FS, chan
 				licenses = analysis.MergeLicenseSources(licenses, localScan)
 			}
 			if remoteFetchers != nil {
-				if rc, ok := remoteCache[pk]; ok {
-					if len(rc) > 0 {
-						licenses = analysis.MergeLicenseSources(licenses, rc)
-					}
-				} else if ch, ok := remoteFetchers[pk]; ok {
+				switch {
+				case remoteCache[pk] != nil:
+					licenses = analysis.MergeLicenseSources(licenses, remoteCache[pk])
+				case remoteFetchers[pk] != nil:
+					ch := remoteFetchers[pk]
 					select {
 					case rc, ok := <-ch:
 						if ok && len(rc) > 0 {

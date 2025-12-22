@@ -261,9 +261,7 @@ func parseGHAMajorRef(v string) (int, bool) {
 	if v == "" {
 		return 0, false
 	}
-	if strings.HasPrefix(v, "v") {
-		v = strings.TrimPrefix(v, "v")
-	}
+	v = strings.TrimPrefix(v, "v")
 	if strings.Contains(v, ".") {
 		return 0, false
 	}

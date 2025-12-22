@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"cmp"
 	"encoding/json"
 	"fmt"
 	"path"
@@ -147,7 +148,7 @@ func (c *uvLockCache) packageInfo(manifestPath, pkgName string) ([]string, bool,
 		return nil, false, err
 	}
 	key := normalizePythonName(pkgName)
-	groups := append([]string(nil), data.groups[key]...)
+	groups := slices.Clone(data.groups[key])
 	return groups, data.direct[key], nil
 }
 
@@ -290,7 +291,7 @@ func (c *cargoManifestCache) packageInfo(manifestPath, pkgName string) ([]string
 		return nil, false, err
 	}
 	key := normalizeCrateName(pkgName)
-	groups := append([]string(nil), data.groups[key]...)
+	groups := slices.Clone(data.groups[key])
 	return groups, data.direct[key], nil
 }
 
@@ -401,10 +402,11 @@ func packagesToInputs(pkgs []*extractor.Package, opts packageInputOptions) []ana
 			ecos = "Go"
 		}
 		var purlStr string
-		if purlx.IsGitHubActionsType(pkg.PURLType) {
+		switch {
+		case purlx.IsGitHubActionsType(pkg.PURLType):
 			purlStr = purlx.GitHubActionsPURLFromPackage(pkg)
-		} else if pu := pkg.PURL(); pu != nil {
-			purlStr = pu.String()
+		case pkg.PURL() != nil:
+			purlStr = pkg.PURL().String()
 		}
 		key := fmt.Sprintf("%s|%s|%s|%s", strings.ToLower(ecos), strings.ToLower(name), version, purlStr)
 		entry := seen[key]
@@ -494,10 +496,10 @@ func packagesToInputs(pkgs []*extractor.Package, opts packageInputOptions) []ana
 		inputs = append(inputs, *in)
 	}
 	slices.SortFunc(inputs, func(a, b analysis.PkgInput) int {
-		if c := strings.Compare(a.Name, b.Name); c != 0 {
+		if c := cmp.Compare(a.Name, b.Name); c != 0 {
 			return c
 		}
-		return strings.Compare(a.Version, b.Version)
+		return cmp.Compare(a.Version, b.Version)
 	})
 	return inputs
 }
@@ -644,10 +646,10 @@ func sortAndUniqueManifestRefs(refs []analysis.ManifestReference) []analysis.Man
 		out = append(out, ref)
 	}
 	slices.SortFunc(out, func(a, b analysis.ManifestReference) int {
-		if c := strings.Compare(a.Manager, b.Manager); c != 0 {
+		if c := cmp.Compare(a.Manager, b.Manager); c != 0 {
 			return c
 		}
-		return strings.Compare(a.Path, b.Path)
+		return cmp.Compare(a.Path, b.Path)
 	})
 	return out
 }

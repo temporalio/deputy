@@ -32,9 +32,10 @@ func (s *Source) Close() error {
 		return nil
 	}
 	s.closeOnce.Do(func() {
-		if s.cleanup != nil {
+		switch {
+		case s.cleanup != nil:
 			s.closeErr = s.cleanup()
-		} else if s.Workspace != nil {
+		case s.Workspace != nil:
 			s.closeErr = s.Workspace.Close()
 		}
 	})

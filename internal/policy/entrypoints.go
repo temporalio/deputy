@@ -1,5 +1,7 @@
 package policy
 
+import "slices"
+
 // Canonical entrypoint names emitted by Deputy commands. Keep in sync with CLI/proxy emitters.
 
 const (
@@ -76,7 +78,7 @@ var (
 	}
 
 	// AllEntrypoints contains every canonical entrypoint defined in Deputy.
-	AllEntrypoints = append(append(append(append(append(append([]string{}, EntrypointsProxy...), EntrypointsScan...), EntrypointsDiff...), EntrypointsSBOM...), EntrypointsFix...), EntrypointsTriage...)
+	AllEntrypoints = slices.Concat(EntrypointsProxy, EntrypointsScan, EntrypointsDiff, EntrypointsSBOM, EntrypointsFix, EntrypointsTriage)
 
 	allowedEntrypointsSet = buildSet(AllEntrypoints)
 	allowedCommands       = []string{"proxy", "scan", "diff", "sbom", "fix", "triage"}

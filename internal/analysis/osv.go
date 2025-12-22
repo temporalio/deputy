@@ -300,10 +300,7 @@ func queryOSVAPIBatch(ctx context.Context, client OSVClient, pkgs []PkgInput) ([
 // matchesPackage checks if an OSV package definition matches the target package input.
 func matchesPackage(pkg osvschema.Package, target PkgInput) bool {
 	if pkg.Purl != "" && target.PURL != "" {
-		if equivalentPURL(pkg.Purl, target.PURL) {
-			return true
-		}
-		return false
+		return equivalentPURL(pkg.Purl, target.PURL)
 	}
 	if pkg.Name != "" && target.Name != "" && !strings.EqualFold(pkg.Name, target.Name) {
 		return false

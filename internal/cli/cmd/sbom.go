@@ -273,9 +273,10 @@ func emitSBOMContext(w io.Writer, result sbomx.Result) {
 		ref = "HEAD"
 	}
 	commit := strings.TrimSpace(result.Commit)
-	if commit == "" {
+	switch {
+	case commit == "":
 		commit = "unknown"
-	} else if len(commit) > 7 {
+	case len(commit) > 7:
 		commit = commit[:7]
 	}
 	origin := strings.TrimSpace(result.Origin)

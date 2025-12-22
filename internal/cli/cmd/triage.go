@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -451,10 +452,10 @@ func aggregatePackages(cons []analysis.ConsolidatedVulnerability) []triagePackag
 			}
 			return 1
 		}
-		if c := strings.Compare(a.Package, b.Package); c != 0 {
+		if c := cmp.Compare(a.Package, b.Package); c != 0 {
 			return c
 		}
-		return strings.Compare(a.Version, b.Version)
+		return cmp.Compare(a.Version, b.Version)
 	})
 	return list
 }

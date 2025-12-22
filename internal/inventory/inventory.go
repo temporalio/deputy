@@ -82,9 +82,11 @@ func scanWorkspace(ctx context.Context, ws workspace.FS, opts ScanOptions) ([]*e
 
 	results := scalibr.New().Scan(ctx, cfg)
 	pkgs := results.Inventory.Packages
-	if extras, err := collectGemfilePackages(ws); err != nil {
+	extras, err := collectGemfilePackages(ws)
+	if err != nil {
 		slog.WarnContext(ctx, "inventory: scan gemfile extras", "error", err)
-	} else if len(extras) > 0 {
+	}
+	if len(extras) > 0 {
 		pkgs = append(pkgs, extras...)
 	}
 	if scanErr := summarizeScanFailures(results); scanErr != nil {

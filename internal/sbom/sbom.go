@@ -104,7 +104,8 @@ func Generate(ctx context.Context, repoRef string, opts Options) (Result, error)
 		if err != nil {
 			return Result{}, fmt.Errorf("open repository: %w", err)
 		}
-	} else {
+	}
+	if src == nil {
 		url := ToHTTPSGitURL(repoRef)
 		if url == "" {
 			return Result{}, fmt.Errorf("could not interpret repo %q as local path or remote URL", repoRef)
@@ -151,9 +152,10 @@ func Generate(ctx context.Context, repoRef string, opts Options) (Result, error)
 	}
 
 	var directDeps map[string]bool
-	if strings.EqualFold(effRef, "HEAD") || strings.EqualFold(effRef, "HEAD~0") {
+	switch {
+	case strings.EqualFold(effRef, "HEAD") || strings.EqualFold(effRef, "HEAD~0"):
 		directDeps = compare.CollectGoDirectModulesFromWorkspace(src.Workspace)
-	} else {
+	default:
 		if hash, err := gitx.ResolveRevisionEnhanced(src.Repo, effRef); err == nil {
 			directDeps, _ = compare.CollectGoDirectModulesFromCommit(src.Repo, *hash)
 		}
@@ -240,7 +242,8 @@ func resolveRepoMetadata(repo *git.Repository, ref, fallbackOrigin string) (stri
 				}
 				if https := ToHTTPSGitURL(candidate); https != "" {
 					origin = https
-				} else {
+				}
+				if origin == fallbackOrigin {
 					origin = candidate
 				}
 				break
@@ -275,15 +278,15 @@ func buildProtobomDocument(ctx context.Context, ws workspace.FS, repoRef, ref, n
 		}
 		n := sbom.NewNode()
 		var purlStr string
-		if purlx.IsGitHubActionsType(p.PURLType) {
+		switch {
+		case purlx.IsGitHubActionsType(p.PURLType):
 			purlStr = purlx.GitHubActionsPURLFromPackage(p)
-		} else if pu := p.PURL(); pu != nil {
-			purlStr = normalizeGolangPURLString(pu.String(), ws)
+		case p.PURL() != nil:
+			purlStr = normalizeGolangPURLString(p.PURL().String(), ws)
 		}
+		n.Id = fmt.Sprintf("pkg:%s@%s", p.Name, p.Version)
 		if purlStr != "" {
 			n.Id = spdxSafeIDFromPURL(purlStr)
-		} else {
-			n.Id = fmt.Sprintf("pkg:%s@%s", p.Name, p.Version)
 		}
 		n.Type = sbom.Node_PACKAGE
 		n.Name = deriveDisplayName(p.Name, purlStr)
@@ -906,9 +909,7 @@ func parseGHARollingRef(s string) (major int, minor int, ok bool) {
 	if s == "" {
 		return 0, 0, false
 	}
-	if strings.HasPrefix(s, "v") {
-		s = strings.TrimPrefix(s, "v")
-	}
+	s = strings.TrimPrefix(s, "v")
 	if strings.Count(s, ".") == 0 {
 		n, err := strconv.Atoi(s)
 		if err != nil || n <= 0 {
@@ -955,12 +956,11 @@ func normalizeGolangPURLString(purlStr string, ws workspace.FileReader) string {
 			full = modPath + "/" + rel
 		}
 	}
+	pp.Namespace = ""
+	pp.Name = full
 	if idx := strings.LastIndex(full, "/"); idx >= 0 {
 		pp.Namespace = full[:idx]
 		pp.Name = full[idx+1:]
-	} else {
-		pp.Namespace = ""
-		pp.Name = full
 	}
 	return pp.String()
 }

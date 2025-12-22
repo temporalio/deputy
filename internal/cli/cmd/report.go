@@ -81,22 +81,6 @@ func DisplayVulnerabilitiesWithHeader(w io.Writer, vulns []analysis.Vulnerabilit
 	RenderVulnerabilitySummaryAndActions(w, vulns)
 }
 
-// scoreLabel returns a styled string representing the severity score.
-func scoreLabel(score float64) string {
-	switch {
-	case score >= 9.0:
-		return lipgloss.NewStyle().Foreground(lipgloss.Color("#FF00FF")).Bold(true).Render("[CRITICAL]")
-	case score >= 7.0:
-		return ui.StyleRemoved.Render("[HIGH]")
-	case score >= 4.0:
-		return ui.StyleDowngraded.Render("[MED]")
-	case score >= 0.0:
-		return ui.StyleVersion.Render("[LOW]")
-	default:
-		return ui.StyleVersion.Render("[?]")
-	}
-}
-
 // consolidatedSeverityPriority returns a priority tuple (int, float64) for sorting vulnerabilities.
 // Higher values indicate higher priority.
 func consolidatedSeverityPriority(v analysis.ConsolidatedVulnerability) (int, float64) {
@@ -115,17 +99,6 @@ func consolidatedSeverityPriority(v analysis.ConsolidatedVulnerability) (int, fl
 	}
 	score := analysis.ParseCVSSScore(v.Severity)
 	return int(score*10 + 0.5), score
-}
-
-// normalizeGoVersion ensures the Go version string starts with "v".
-func normalizeGoVersion(v string) string {
-	if v == "" {
-		return v
-	}
-	if strings.HasPrefix(v, "v") {
-		return v
-	}
-	return "v" + v
 }
 
 // RenderVulnerabilityList writes per-package vulnerability details to w without headings or summary.
@@ -157,7 +130,7 @@ func RenderVulnerabilityList(w io.Writer, vulns []analysis.Vulnerability, opts v
 			if sa != sb {
 				return cmp.Compare(sb, sa) // descending
 			}
-			return strings.Compare(a.PrimaryID, b.PrimaryID)
+			return cmp.Compare(a.PrimaryID, b.PrimaryID)
 		})
 
 		hasDirect := slices.ContainsFunc(list, func(v analysis.ConsolidatedVulnerability) bool {
@@ -216,8 +189,9 @@ func RenderVulnerabilityList(w io.Writer, vulns []analysis.Vulnerability, opts v
 					}
 				}
 			}
-			if len(v.SecondaryIDs) > 0 {
-				aliases := append([]string(nil), v.SecondaryIDs...)
+			switch {
+			case len(v.SecondaryIDs) > 0:
+				aliases := slices.Clone(v.SecondaryIDs)
 				slices.Sort(aliases)
 				aliasBlocks := make([]string, 0, len(aliases))
 				for _, a := range aliases {
@@ -232,7 +206,7 @@ func RenderVulnerabilityList(w io.Writer, vulns []analysis.Vulnerability, opts v
 				}
 				aliasRow := lipgloss.JoinHorizontal(lipgloss.Top, ui.StyleMeta.Render("Aliases:"), lipgloss.NewStyle().MarginLeft(1).Render(strings.Join(aliasBlocks, ", ")))
 				fmt.Fprintln(w, "    "+aliasRow)
-			} else if v.HiddenAliasCount > 0 {
+			case v.HiddenAliasCount > 0:
 				aliasRow := lipgloss.JoinHorizontal(
 					lipgloss.Top,
 					ui.StyleMeta.Render("Aliases:"),
@@ -332,7 +306,7 @@ func buildManifestDisplayContext(list []analysis.ConsolidatedVulnerability) mani
 		if ra != rb {
 			return cmp.Compare(ra, rb)
 		}
-		return strings.Compare(a, b)
+		return cmp.Compare(a, b)
 	})
 
 	for _, key := range managerKeys {
@@ -347,7 +321,7 @@ func buildManifestDisplayContext(list []analysis.ConsolidatedVulnerability) mani
 			entryList = append(entryList, *entry)
 		}
 		slices.SortFunc(entryList, func(a, b manifestDisplayEntry) int {
-			return strings.Compare(a.Path, b.Path)
+			return cmp.Compare(a.Path, b.Path)
 		})
 		grp.Entries = entryList
 		if grp.Manager == "" && len(entryList) > 0 {
@@ -390,7 +364,7 @@ func buildManifestDisplayContext(list []analysis.ConsolidatedVulnerability) mani
 		if ra != rb {
 			return cmp.Compare(ra, rb)
 		}
-		return strings.Compare(artifactManagerNames[a], artifactManagerNames[b])
+		return cmp.Compare(artifactManagerNames[a], artifactManagerNames[b])
 	})
 
 	for _, key := range artifactKeys {

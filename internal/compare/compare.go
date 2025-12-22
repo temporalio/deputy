@@ -274,23 +274,6 @@ func CompareGoPackageVersions(c Change) int {
 	return semver.Compare(newV, oldV)
 }
 
-// classifyGoChangeType derives a ChangeType based on Go semantic version ordering.
-// When versions cannot be compared it falls back to Updated.
-func classifyGoChangeType(baseVersion, targetVersion string) ChangeType {
-	if baseVersion == "" || targetVersion == "" {
-		return Updated
-	}
-	cmp := CompareGoPackageVersions(Change{BaseVersion: baseVersion, TargetVersion: targetVersion})
-	switch {
-	case cmp > 0:
-		return Upgraded
-	case cmp < 0:
-		return Downgraded
-	default:
-		return Updated
-	}
-}
-
 // versionComparator is a function type for comparing two versions.
 type versionComparator func(baseVersion, targetVersion string) (int, bool)
 
@@ -574,7 +557,7 @@ func ComparePackages(oldPkgs, newPkgs []*extractor.Package, goDirect map[string]
 		if n := cmp.Compare(typePriority(a.ChangeType), typePriority(b.ChangeType)); n != 0 {
 			return n
 		}
-		return strings.Compare(a.Name, b.Name)
+		return cmp.Compare(a.Name, b.Name)
 	})
 
 	return changes

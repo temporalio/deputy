@@ -543,12 +543,13 @@ func wrapText(text string, width int) string {
 	var currentLine strings.Builder
 
 	for _, word := range words {
-		if currentLine.Len() == 0 {
+		switch {
+		case currentLine.Len() == 0:
 			currentLine.WriteString(word)
-		} else if currentLine.Len()+1+len(word) <= width {
+		case currentLine.Len()+1+len(word) <= width:
 			currentLine.WriteString(" ")
 			currentLine.WriteString(word)
-		} else {
+		default:
 			lines = append(lines, currentLine.String())
 			currentLine.Reset()
 			currentLine.WriteString(word)
@@ -590,9 +591,10 @@ func printSummaryReport(errW io.Writer, events []proxyEvent, requested string) {
 	seen := make(map[string]blockInfo)
 	for _, evt := range events {
 		pkg := evt.name
-		if evt.version != "" {
+		switch {
+		case evt.version != "":
 			pkg = fmt.Sprintf("%s@%s", evt.name, evt.version)
-		} else if requested != "" && evt.name != "" && strings.Contains(requested, evt.name) {
+		case requested != "" && evt.name != "" && strings.Contains(requested, evt.name):
 			pkg = requested
 		}
 		if pkg == "" {

@@ -45,7 +45,7 @@ func cachePath(subdir, key string) string {
 // readCache attempts to load and unmarshal a cached value from disk.
 // It returns true if the cache hit was successful and the value was unmarshaled
 // into v, otherwise false.
-func readCache(subdir, key string, v interface{}) bool {
+func readCache(subdir, key string, v any) bool {
 	p := cachePath(subdir, key)
 	if p == "" {
 		return false
@@ -63,7 +63,7 @@ func readCache(subdir, key string, v interface{}) bool {
 // writeCache serializes and saves a value to the cache on disk.
 // It creates the necessary directories if they do not exist. Errors during
 // serialization or file writing are silently ignored.
-func writeCache(subdir, key string, v interface{}) {
+func writeCache(subdir, key string, v any) {
 	p := cachePath(subdir, key)
 	if p == "" {
 		return

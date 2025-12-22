@@ -90,7 +90,7 @@ flowchart LR
 | [Reference](reference/README.md) | Configuration, logging, environment |
 | [Development](development/README.md) | Contributing, architecture |
 
-> **For LLMs:** See [`LLMS.txt`](../LLMS.txt) for structured project context.
+> **For LLMs/Agents:** See [`AGENTS.md`](../AGENTS.md) for structured project context.
 
 ## Where to look in code
 

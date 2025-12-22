@@ -889,23 +889,23 @@ func getRepoMetadata(localRepoPath, ref string) (string, string) {
 	if r, err := repo.Remote("origin"); err == nil && r != nil && r.Config() != nil && len(r.Config().URLs) > 0 {
 		u := strings.TrimSpace(r.Config().URLs[0])
 		if u != "" {
-			if strings.HasPrefix(u, "git@github.com:") {
+			switch {
+			case strings.HasPrefix(u, "git@github.com:"):
 				p := strings.TrimPrefix(u, "git@github.com:")
 				if !strings.HasSuffix(p, ".git") {
 					p += ".git"
 				}
 				originURL = "https://github.com/" + p
-			} else if strings.HasPrefix(u, "ssh://git@github.com/") {
+			case strings.HasPrefix(u, "ssh://git@github.com/"):
 				p := strings.TrimPrefix(u, "ssh://git@github.com/")
 				if !strings.HasSuffix(p, ".git") {
 					p += ".git"
 				}
 				originURL = "https://github.com/" + p
-			} else {
+			default:
+				originURL = u
 				if n := sbomx.ToHTTPSGitURL(u); n != "" {
 					originURL = n
-				} else {
-					originURL = u
 				}
 			}
 		}

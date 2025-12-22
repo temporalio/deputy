@@ -769,7 +769,7 @@ func LookupCocoaPodsLicense(ctx context.Context, name, version string) []string 
 	}
 	licVal, ok := podspec["license"]
 	if !ok {
-		licVal, ok = podspec["licenses"]
+		licVal = podspec["licenses"]
 	}
 	switch v := licVal.(type) {
 	case string:

@@ -91,12 +91,13 @@ func toAction(source string, value any) (*Action, error) {
 		act.Remediation, _ = getString(v, "remediation")
 		act.Code, _ = getString(v, "code")
 		if statusVal, ok := v["status"]; ok {
-			if n, ok := statusVal.(float64); ok {
+			switch n := statusVal.(type) {
+			case float64:
 				s := int(n)
 				act.Status = &s
-			} else if n, ok := statusVal.(int); ok {
+			case int:
 				act.Status = &n
-			} else if n, ok := statusVal.(json.Number); ok {
+			case json.Number:
 				if i, err := n.Int64(); err == nil {
 					s := int(i)
 					act.Status = &s
