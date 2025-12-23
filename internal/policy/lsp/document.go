@@ -1,6 +1,7 @@
 package lsp
 
 import (
+	"strings"
 	"sync"
 
 	protocol "github.com/sourcegraph/go-lsp"
@@ -89,7 +90,9 @@ func (s *documentStore) get(uri protocol.DocumentURI) (*document, bool) {
 // buildLineOffsets calculates the rune offsets for the start of each line in the text.
 // This allows for efficient mapping between offsets and line/character positions.
 func buildLineOffsets(text string) []int {
-	offsets := []int{0}
+	// Pre-allocate based on newline count (strings.Count is SIMD-optimized)
+	offsets := make([]int, 1, strings.Count(text, "\n")+1)
+	offsets[0] = 0
 	for i, r := range text {
 		if r == '\n' {
 			offsets = append(offsets, i+1)

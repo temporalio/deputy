@@ -175,6 +175,14 @@ type colorWriter struct {
 	w io.Writer
 }
 
+// Pre-computed level patterns to avoid allocations in Write hot path.
+var (
+	levelINFO  = []byte("level=INFO")
+	levelWARN  = []byte("level=WARN")
+	levelERROR = []byte("level=ERROR")
+	levelDEBUG = []byte("level=DEBUG")
+)
+
 func (cw *colorWriter) Write(p []byte) (n int, err error) {
 	// Fast path: if no level key is found, just write.
 	// slog.TextHandler always writes "level=".
@@ -184,19 +192,17 @@ func (cw *colorWriter) Write(p []byte) (n int, err error) {
 	// However, slog.TextHandler puts the level attribute early in the output.
 	// For a CLI tool, this trade-off is acceptable for the benefit of robust formatting.
 
-	s := string(p)
-
-	// Check for standard levels
-	if idx := strings.Index(s, "level=INFO"); idx != -1 {
+	// Check for standard levels using bytes.Index to avoid string conversion
+	if idx := bytes.Index(p, levelINFO); idx != -1 {
 		return cw.writeColored(p, idx+6, 4, colorBlue)
 	}
-	if idx := strings.Index(s, "level=WARN"); idx != -1 {
+	if idx := bytes.Index(p, levelWARN); idx != -1 {
 		return cw.writeColored(p, idx+6, 4, colorYellow)
 	}
-	if idx := strings.Index(s, "level=ERROR"); idx != -1 {
+	if idx := bytes.Index(p, levelERROR); idx != -1 {
 		return cw.writeColored(p, idx+6, 5, colorRed)
 	}
-	if idx := strings.Index(s, "level=DEBUG"); idx != -1 {
+	if idx := bytes.Index(p, levelDEBUG); idx != -1 {
 		return cw.writeColored(p, idx+6, 5, colorGray)
 	}
 

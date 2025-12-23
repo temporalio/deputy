@@ -245,12 +245,13 @@ func levenshtein(a, b string, maxLen int, limit int64) int64 {
 	if len(a) > len(b) {
 		a, b = b, a
 	}
+	// Pre-allocate two rows and swap them to avoid allocations per iteration
 	prev := make([]int64, len(a)+1)
+	curr := make([]int64, len(a)+1)
 	for i := range prev {
 		prev[i] = int64(i)
 	}
 	for j := 1; j <= len(b); j++ {
-		curr := make([]int64, len(a)+1)
 		curr[0] = int64(j)
 		minRow := curr[0]
 		bc := b[j-1]
@@ -270,7 +271,7 @@ func levenshtein(a, b string, maxLen int, limit int64) int64 {
 		if limit >= 0 && minRow > limit {
 			return minRow
 		}
-		prev = curr
+		prev, curr = curr, prev
 	}
 	if limit >= 0 && prev[len(a)] > limit {
 		return prev[len(a)]

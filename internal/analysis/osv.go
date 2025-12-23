@@ -14,6 +14,7 @@ import (
 	"github.com/picatz/deputy/internal/purlx"
 	"golang.org/x/mod/semver"
 	"golang.org/x/sync/errgroup"
+	"golang.org/x/sync/singleflight"
 	"osv.dev/bindings/go/osvdev"
 )
 
@@ -185,7 +186,7 @@ func queryOSVAPIBatch(ctx context.Context, client OSVClient, pkgs []PkgInput) ([
 	}
 	var out []Vulnerability
 	var mu sync.Mutex
-	var aliasCache sync.Map
+	var aliasGroup singleflight.Group
 	g, ctx := errgroup.WithContext(ctx)
 	g.SetLimit(osvConcurrencyLimit)
 	for i, res := range resp.Results {
@@ -215,16 +216,14 @@ func queryOSVAPIBatch(ctx context.Context, client OSVClient, pkgs []PkgInput) ([
 				var extras []Vulnerability
 				skip := false
 				for _, alias := range full.Aliases {
-					var aliasV *osvschema.Vulnerability
-					if cached, ok := aliasCache.Load(alias); ok {
-						aliasV = cached.(*osvschema.Vulnerability)
-					} else {
-						aliasV, err = getCachedVuln(ctx, client, alias)
-						if err != nil {
-							continue
-						}
-						aliasCache.Store(alias, aliasV)
+					// Use singleflight to deduplicate concurrent requests for the same alias
+					result, err, _ := aliasGroup.Do(alias, func() (any, error) {
+						return getCachedVuln(ctx, client, alias)
+					})
+					if err != nil {
+						continue
 					}
+					aliasV := result.(*osvschema.Vulnerability)
 					if aliasV == nil {
 						continue
 					}

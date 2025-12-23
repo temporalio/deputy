@@ -723,7 +723,7 @@ type githubActionsResolution struct {
 }
 
 type githubActionsResolutionCache struct {
-	mu    sync.Mutex
+	mu    sync.RWMutex
 	cache map[string]githubActionsResolution
 }
 
@@ -731,8 +731,8 @@ func (c *githubActionsResolutionCache) get(key string) (githubActionsResolution,
 	if c == nil {
 		return githubActionsResolution{}, false
 	}
-	c.mu.Lock()
-	defer c.mu.Unlock()
+	c.mu.RLock()
+	defer c.mu.RUnlock()
 	if c.cache == nil {
 		return githubActionsResolution{}, false
 	}

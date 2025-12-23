@@ -24,6 +24,7 @@ import (
 	"github.com/google/licensecheck"
 	"github.com/picatz/deputy/internal/cache"
 	"github.com/picatz/deputy/internal/collections"
+	"github.com/picatz/deputy/internal/httputil"
 	"github.com/picatz/deputy/internal/repository"
 	"github.com/picatz/deputy/internal/repository/workspace"
 	"golang.org/x/mod/module"
@@ -285,7 +286,9 @@ var (
 	registryLicenseGroup singleflight.Group
 	githubHTTPClientOnce sync.Once
 	githubHTTPClient     *nethttp.Client
-	licenseHTTPClient    = &nethttp.Client{Timeout: licenseHTTPTimeout}
+	// licenseHTTPClient uses retryable HTTP for resilience against transient failures
+	// when fetching license data from package registries (crates.io, packagist, etc.)
+	licenseHTTPClient = httputil.NewRetryableClient(licenseHTTPTimeout)
 )
 
 // MergeLicenseSources merges deps.dev licenses (primary) with locally scanned
@@ -982,19 +985,15 @@ func ExtractLicensesFromReader(r io.Reader) []string {
 
 // cloneStrings returns a deep copy of a string slice.
 func cloneStrings(src []string) []string {
-	if src == nil {
-		return nil
-	}
-	out := make([]string, len(src))
-	copy(out, src)
-	return out
+	return slices.Clone(src)
 }
 
 // getGitHubHTTPClient returns a singleton HTTP client configured with a timeout
-// suitable for GitHub API requests.
+// suitable for GitHub API requests. Uses retryable HTTP for resilience against
+// transient failures and rate limiting.
 func getGitHubHTTPClient() *nethttp.Client {
 	githubHTTPClientOnce.Do(func() {
-		githubHTTPClient = &nethttp.Client{Timeout: githubHTTPTimeout}
+		githubHTTPClient = httputil.NewRetryableClient(githubHTTPTimeout)
 	})
 	return githubHTTPClient
 }
@@ -1002,6 +1001,9 @@ func getGitHubHTTPClient() *nethttp.Client {
 // fetchLicensesFromGitHubRaw attempts to download license files directly from
 // GitHub's raw content domain. This avoids the overhead of a full git clone
 // when only the license text is needed.
+//
+// License files are fetched in parallel with bounded concurrency to improve
+// performance while respecting GitHub rate limits.
 func fetchLicensesFromGitHubRaw(ctx context.Context, owner, repo, version string) ([]string, error) {
 	ref := deriveGitRef(version)
 	if ref == "" {
@@ -1009,36 +1011,65 @@ func fetchLicensesFromGitHubRaw(ctx context.Context, owner, repo, version string
 	}
 	client := getGitHubHTTPClient()
 	token := strings.TrimSpace(os.Getenv("GITHUB_TOKEN"))
+
+	// Fetch all license files in parallel with bounded concurrency.
+	// This significantly speeds up license detection since we check 7 filenames.
+	const maxConcurrent = 4 // conservative to avoid GitHub rate limits
+	type result struct {
+		ids []string
+	}
+	ch := make(chan result, len(defaultLicenseFilenames))
+
+	g := new(errgroup.Group)
+	g.SetLimit(maxConcurrent)
+
+	for _, name := range defaultLicenseFilenames {
+		name := name // capture loop variable
+		g.Go(func() error {
+			url := fmt.Sprintf("https://raw.githubusercontent.com/%s/%s/%s/%s", owner, repo, ref, name)
+			req, err := nethttp.NewRequestWithContext(ctx, nethttp.MethodGet, url, nil)
+			if err != nil {
+				return nil // non-fatal, continue with other files
+			}
+			req.Header.Set("User-Agent", "deputy-license-scan")
+			if token != "" {
+				req.Header.Set("Authorization", "Bearer "+token)
+			}
+			resp, err := client.Do(req)
+			if err != nil {
+				return nil // non-fatal
+			}
+			if resp.StatusCode == nethttp.StatusNotFound {
+				drainAndClose(resp)
+				return nil
+			}
+			if resp.StatusCode != nethttp.StatusOK {
+				drainAndClose(resp)
+				return nil
+			}
+			data, err := io.ReadAll(resp.Body)
+			resp.Body.Close()
+			if err != nil || len(data) == 0 {
+				return nil
+			}
+			if ids := DetectLicenseIDs(data); len(ids) > 0 {
+				ch <- result{ids: ids}
+			}
+			return nil
+		})
+	}
+
+	// Close channel after all goroutines complete
+	go func() {
+		g.Wait()
+		close(ch)
+	}()
+
+	// Collect results
 	seen := collections.NewSet[string]()
 	var out []string
-	for _, name := range defaultLicenseFilenames {
-		url := fmt.Sprintf("https://raw.githubusercontent.com/%s/%s/%s/%s", owner, repo, ref, name)
-		req, err := nethttp.NewRequestWithContext(ctx, nethttp.MethodGet, url, nil)
-		if err != nil {
-			return nil, err
-		}
-		req.Header.Set("User-Agent", "deputy-license-scan")
-		if token != "" {
-			req.Header.Set("Authorization", "Bearer "+token)
-		}
-		resp, err := client.Do(req)
-		if err != nil {
-			return nil, err
-		}
-		if resp.StatusCode == nethttp.StatusNotFound {
-			drainAndClose(resp)
-			continue
-		}
-		if resp.StatusCode != nethttp.StatusOK {
-			drainAndClose(resp)
-			continue
-		}
-		data, err := io.ReadAll(resp.Body)
-		resp.Body.Close() // Body fully read, no need to drain
-		if err != nil || len(data) == 0 {
-			continue
-		}
-		for _, id := range DetectLicenseIDs(data) {
+	for r := range ch {
+		for _, id := range r.ids {
 			if id == "" {
 				continue
 			}
@@ -1048,6 +1079,7 @@ func fetchLicensesFromGitHubRaw(ctx context.Context, owner, repo, version string
 			out = append(out, id)
 		}
 	}
+
 	if len(out) == 0 {
 		return nil, fmt.Errorf("no license files via raw")
 	}

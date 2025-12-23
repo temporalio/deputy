@@ -5,6 +5,9 @@ import (
 	"net"
 	"net/http"
 	"time"
+
+	"github.com/hashicorp/go-cleanhttp"
+	"github.com/hashicorp/go-retryablehttp"
 )
 
 // Common HTTP client timeout constants used across deputy subsystems.
@@ -27,6 +30,11 @@ const (
 
 	// DefaultMaxIdleConns is the maximum number of idle connections in the pool.
 	DefaultMaxIdleConns = 20
+
+	// DefaultMaxIdleConnsPerHost is the maximum number of idle connections per host.
+	// The default http.Transport value is 2, which limits connection reuse when
+	// talking to a single upstream. We set this higher to improve throughput.
+	DefaultMaxIdleConnsPerHost = 10
 )
 
 // NewTransport returns an http.Transport configured with production-friendly defaults.
@@ -38,11 +46,12 @@ func NewTransport() *http.Transport {
 			Timeout:   DefaultDialTimeout,
 			KeepAlive: DefaultKeepAlive,
 		}).DialContext,
-		ForceAttemptHTTP2:     true,
-		MaxIdleConns:          DefaultMaxIdleConns,
-		IdleConnTimeout:       DefaultIdleConnTimeout,
-		TLSHandshakeTimeout:   DefaultTLSHandshakeTimeout,
-		ResponseHeaderTimeout: DefaultResponseHeaderTimeout,
+		ForceAttemptHTTP2:      true,
+		MaxIdleConns:           DefaultMaxIdleConns,
+		MaxIdleConnsPerHost:    DefaultMaxIdleConnsPerHost,
+		IdleConnTimeout:        DefaultIdleConnTimeout,
+		TLSHandshakeTimeout:    DefaultTLSHandshakeTimeout,
+		ResponseHeaderTimeout:  DefaultResponseHeaderTimeout,
 	}
 }
 
@@ -52,4 +61,52 @@ func NewClient(timeout time.Duration) *http.Client {
 		Timeout:   timeout,
 		Transport: NewTransport(),
 	}
+}
+
+// Retry configuration defaults for retryable HTTP clients.
+const (
+	// DefaultRetryMax is the maximum number of retries for transient failures.
+	DefaultRetryMax = 3
+
+	// DefaultRetryWaitMin is the minimum wait time between retries.
+	DefaultRetryWaitMin = 500 * time.Millisecond
+
+	// DefaultRetryWaitMax is the maximum wait time between retries.
+	DefaultRetryWaitMax = 5 * time.Second
+)
+
+// NewRetryableClient returns an http.Client with automatic retry support for
+// transient failures (5xx errors, connection errors, etc.). This is ideal for
+// external API calls to services like GitHub, OSV, or package registries.
+//
+// The client uses exponential backoff with jitter and respects Retry-After headers.
+// Logging is disabled by default to avoid noisy output.
+func NewRetryableClient(timeout time.Duration) *http.Client {
+	rc := retryablehttp.NewClient()
+	rc.Logger = nil // disable noisy retry logging
+	rc.HTTPClient = cleanhttp.DefaultPooledClient()
+	rc.HTTPClient.Timeout = timeout
+	rc.RetryMax = DefaultRetryMax
+	rc.RetryWaitMin = DefaultRetryWaitMin
+	rc.RetryWaitMax = DefaultRetryWaitMax
+	// StandardClient() returns a wrapper that uses the retryable transport,
+	// but we need to set the timeout on the returned client as well
+	client := rc.StandardClient()
+	client.Timeout = timeout
+	return client
+}
+
+// NewRetryableClientWithConfig returns a retryable HTTP client with custom retry settings.
+// Use this when you need different retry behavior than the defaults.
+func NewRetryableClientWithConfig(timeout time.Duration, retryMax int, retryWaitMin, retryWaitMax time.Duration) *http.Client {
+	rc := retryablehttp.NewClient()
+	rc.Logger = nil
+	rc.HTTPClient = cleanhttp.DefaultPooledClient()
+	rc.HTTPClient.Timeout = timeout
+	rc.RetryMax = retryMax
+	rc.RetryWaitMin = retryWaitMin
+	rc.RetryWaitMax = retryWaitMax
+	client := rc.StandardClient()
+	client.Timeout = timeout
+	return client
 }

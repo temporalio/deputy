@@ -7,10 +7,19 @@ import (
 	"log/slog"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 )
 
 type requestIDKey struct{}
+
+// statusRecorderPool reduces allocations for status recording middleware.
+// Each request needs a statusRecorder, so pooling them helps under load.
+var statusRecorderPool = sync.Pool{
+	New: func() any {
+		return &statusRecorder{}
+	},
+}
 
 func requestIDFromContext(ctx context.Context) string {
 	if ctx == nil {
@@ -118,7 +127,11 @@ func withRequestLogging(logger *slog.Logger, listenerName, ecosystem, upstream s
 			}
 
 			start := time.Now()
-			rec := &statusRecorder{ResponseWriter: w}
+			rec := statusRecorderPool.Get().(*statusRecorder)
+			rec.ResponseWriter = w
+			rec.status = 0
+			rec.bytes = 0
+
 			next.ServeHTTP(rec, r)
 			dur := time.Since(start)
 
@@ -126,6 +139,11 @@ func withRequestLogging(logger *slog.Logger, listenerName, ecosystem, upstream s
 			if status == 0 {
 				status = http.StatusOK
 			}
+			bytes := rec.bytes
+
+			// Clear references before returning to pool to avoid retaining memory
+			rec.ResponseWriter = nil
+			statusRecorderPool.Put(rec)
 
 			level := slog.LevelInfo
 			switch {
@@ -143,7 +161,7 @@ func withRequestLogging(logger *slog.Logger, listenerName, ecosystem, upstream s
 				"method", r.Method,
 				"path", r.URL.Path,
 				"status", status,
-				"bytes", rec.bytes,
+				"bytes", bytes,
 				"duration_ms", dur.Milliseconds(),
 			)
 		})

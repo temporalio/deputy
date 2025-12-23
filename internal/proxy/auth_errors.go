@@ -40,12 +40,10 @@ func (e *AuthError) Unwrap() error {
 // Authorization failures (identity known but insufficient) return 403.
 func (e *AuthError) HTTPStatus() int {
 	switch e.Code {
-	case AuthCodeMissingToken:
-		return http.StatusUnauthorized // 401
-	case AuthCodeInvalidToken, AuthCodeExpiredToken, AuthCodeSignatureInvalid, AuthCodeKeyNotFound:
-		return http.StatusUnauthorized // 401
+	case AuthCodeMissingToken, AuthCodeInvalidToken, AuthCodeExpiredToken, AuthCodeSignatureInvalid, AuthCodeKeyNotFound:
+		return http.StatusUnauthorized // 401 - identity unknown or unverifiable
 	case AuthCodeInvalidIssuer, AuthCodeInvalidAudience, AuthCodeMissingClaim:
-		return http.StatusForbidden // 403
+		return http.StatusForbidden // 403 - identity known but insufficient permissions
 	default:
 		return http.StatusUnauthorized
 	}

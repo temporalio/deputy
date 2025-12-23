@@ -31,6 +31,12 @@ func NewSet[T comparable](values ...T) Set[T] {
 	return set
 }
 
+// NewSetWithCapacity returns a new empty [Set] with pre-allocated capacity.
+// Use this when you know the approximate number of elements to avoid reallocations.
+func NewSetWithCapacity[T comparable](capacity int) Set[T] {
+	return make(Set[T], capacity)
+}
+
 // Add inserts v and reports whether it was newly added.
 func (s Set[T]) Add(v T) bool {
 	_, existed := s[v]

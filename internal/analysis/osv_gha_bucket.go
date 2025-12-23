@@ -74,7 +74,9 @@ func writeGHAMeta(zipPath string, meta ghaZipMeta) {
 // ghaHTTPTimeout is the overall request timeout for GHA vulnerability fetches.
 const ghaHTTPTimeout = 30 * time.Second
 
-var ghaHTTPClient = httputil.NewClient(ghaHTTPTimeout)
+// ghaHTTPClient uses retryable HTTP for resilience when downloading the GHA
+// vulnerability zip from Google Cloud Storage, which may have transient failures.
+var ghaHTTPClient = httputil.NewRetryableClient(ghaHTTPTimeout)
 
 var ghaGitHubTokenEnvVar = "GITHUB_TOKEN"
 
@@ -495,7 +497,14 @@ func buildGHAVulnIndex(ctx context.Context) (*ghaVulnIndex, error) {
 		return nil, fmt.Errorf("open GHA all.zip: %w", err)
 	}
 	defer reader.Close()
-	idx := &ghaVulnIndex{byPkg: make(map[string][]osvschema.Vulnerability)}
+	// Pre-allocate map with estimated capacity based on JSON file count
+	jsonCount := 0
+	for _, f := range reader.File {
+		if f != nil && strings.HasSuffix(strings.ToLower(f.Name), ".json") {
+			jsonCount++
+		}
+	}
+	idx := &ghaVulnIndex{byPkg: make(map[string][]osvschema.Vulnerability, jsonCount)}
 	for _, f := range reader.File {
 		if f == nil || !strings.HasSuffix(strings.ToLower(f.Name), ".json") {
 			continue

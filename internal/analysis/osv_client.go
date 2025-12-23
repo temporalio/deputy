@@ -12,12 +12,14 @@ import (
 // larger batch queries.
 const osvHTTPTimeout = 45 * time.Second
 
-// NewOSVClient returns an osv.dev client configured with production-friendly HTTP timeouts.
+// NewOSVClient returns an osv.dev client configured with production-friendly HTTP timeouts
+// and automatic retry for transient failures.
 //
 // Callers should still pass a cancelable context; this function primarily protects against
-// hung connections and slow/broken networks.
+// hung connections and slow/broken networks. The retryable HTTP client automatically
+// handles 5xx errors and connection failures with exponential backoff.
 func NewOSVClient() *osvdev.OSVClient {
 	c := osvdev.DefaultClient()
-	c.HTTPClient = httputil.NewClient(osvHTTPTimeout)
+	c.HTTPClient = httputil.NewRetryableClient(osvHTTPTimeout)
 	return c
 }

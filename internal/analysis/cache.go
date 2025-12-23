@@ -6,7 +6,24 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 )
+
+// Default TTLs for different cache types. OSV vulnerability data changes frequently
+// so we use a shorter TTL, while license data is more stable.
+const (
+	defaultOSVCacheTTL     = 24 * time.Hour  // OSV vulnerability data
+	defaultLicenseCacheTTL = 7 * 24 * time.Hour // License data (more stable)
+	defaultCacheTTL        = 24 * time.Hour  // Default for other data
+)
+
+// cacheTTLs maps cache subdirectories to their TTL durations.
+var cacheTTLs = map[string]time.Duration{
+	"osv":              defaultOSVCacheTTL,
+	"depsdev":          defaultLicenseCacheTTL,
+	"license-scan":     defaultLicenseCacheTTL,
+	"license-registry": defaultLicenseCacheTTL,
+}
 
 var (
 	cacheDirOnce sync.Once
@@ -43,11 +60,26 @@ func cachePath(subdir, key string) string {
 }
 
 // readCache attempts to load and unmarshal a cached value from disk.
-// It returns true if the cache hit was successful and the value was unmarshaled
-// into v, otherwise false.
+// It returns true if the cache hit was successful, the entry is not expired,
+// and the value was unmarshaled into v, otherwise false.
+// Cache entries are considered expired based on the TTL for the given subdir.
 func readCache(subdir, key string, v any) bool {
 	p := cachePath(subdir, key)
 	if p == "" {
+		return false
+	}
+	info, err := os.Stat(p)
+	if err != nil {
+		return false
+	}
+	// Check TTL based on file modification time
+	ttl := cacheTTLs[subdir]
+	if ttl == 0 {
+		ttl = defaultCacheTTL
+	}
+	if time.Since(info.ModTime()) > ttl {
+		// Cache entry expired, remove it
+		_ = os.Remove(p)
 		return false
 	}
 	b, err := os.ReadFile(p)

@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"net/http/httputil"
 	"net/url"
+	"sync"
 	"time"
 
 	dephttputil "github.com/picatz/deputy/internal/httputil"
@@ -17,12 +18,34 @@ const (
 	upstreamFlushInterval  = 100 * time.Millisecond
 )
 
+// Shared transport and client for upstream connections.
+// Using a single transport allows connection pooling across all handlers,
+// improving performance when proxying to multiple upstreams.
+var (
+	sharedTransportOnce sync.Once
+	sharedTransport     *http.Transport
+	sharedClientOnce    sync.Once
+	sharedClient        *http.Client
+)
+
+// getSharedTransport returns the singleton upstream transport.
+// This enables connection reuse across all proxy handlers.
+func getSharedTransport() *http.Transport {
+	sharedTransportOnce.Do(func() {
+		sharedTransport = newUpstreamTransport()
+	})
+	return sharedTransport
+}
+
 // newUpstreamHTTPClient returns an HTTP client intended for outbound upstream fetches.
-// It is configured with timeouts suitable for production proxying.
+// It uses a shared transport to enable connection pooling across handlers.
 func newUpstreamHTTPClient() *http.Client {
-	return &http.Client{
-		Transport: newUpstreamTransport(),
-	}
+	sharedClientOnce.Do(func() {
+		sharedClient = &http.Client{
+			Transport: getSharedTransport(),
+		}
+	})
+	return sharedClient
 }
 
 // newUpstreamTransport returns a transport with conservative production timeouts and keep-alives.

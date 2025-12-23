@@ -83,13 +83,15 @@ func filterTrustedAliases(ids []string) (preferred []string, hidden int) {
 
 // findBestPrimaryIDFromGroup selects the best primary ID for a group of vulnerabilities.
 func findBestPrimaryIDFromGroup(vs []Vulnerability) string {
-	var all []string
+	// Estimate capacity: each vuln has 1 ID + average ~2 aliases
+	estimatedCap := len(vs) * 3
+	all := make([]string, 0, estimatedCap)
 	for _, v := range vs {
 		all = append(all, v.ID)
 		all = append(all, v.Aliases...)
 	}
-	seen := collections.NewSet[string]()
-	var uniq []string
+	seen := collections.NewSetWithCapacity[string](len(all))
+	uniq := make([]string, 0, len(all))
 	for _, id := range all {
 		if seen.Add(id) {
 			uniq = append(uniq, id)
@@ -113,13 +115,16 @@ func findBestPrimaryIDFromGroup(vs []Vulnerability) string {
 // collectUniqueIDs gathers all IDs from vulnerabilities, deduplicates them, and returns
 // unique IDs, secondary IDs (excluding primary), and hidden alias count.
 func collectUniqueIDs(primaryID string, vulns []Vulnerability) (uniqAll, secondaries []string, hiddenAliases int) {
-	allIDs := []string{primaryID}
+	// Estimate capacity: 1 primary + each vuln has 1 ID + ~2 aliases on average
+	estimatedCap := 1 + len(vulns)*3
+	allIDs := make([]string, 0, estimatedCap)
+	allIDs = append(allIDs, primaryID)
 	for _, v := range vulns {
 		allIDs = append(allIDs, v.ID)
 		allIDs = append(allIDs, v.Aliases...)
 	}
 
-	seen := collections.NewSet[string]()
+	seen := collections.NewSetWithCapacity[string](len(allIDs))
 	uniqAll = make([]string, 0, len(allIDs))
 	for _, id := range allIDs {
 		if seen.Add(id) {
@@ -127,6 +132,7 @@ func collectUniqueIDs(primaryID string, vulns []Vulnerability) (uniqAll, seconda
 		}
 	}
 
+	secondaries = make([]string, 0, len(uniqAll)-1)
 	for _, id := range uniqAll {
 		if id != primaryID {
 			secondaries = append(secondaries, id)
@@ -431,7 +437,7 @@ func FindBestFixedVersion(fixed []string, current string) string {
 		return ""
 	}
 	cur := normalizeGoVersion(current)
-	var cands []string
+	cands := make([]string, 0, len(fixed))
 	for _, f := range fixed {
 		nf := normalizeGoVersion(f)
 		if semver.Compare(nf, cur) >= 0 {

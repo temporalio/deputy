@@ -27,7 +27,18 @@ var (
 // pkgCacheKey returns a stable cache key for package lookups by ecosystem, name, and version.
 // The key format is "ecosystem|name@version" with ecosystem lowercased and all parts trimmed.
 func pkgCacheKey(ecosystem, name, version string) string {
-	return strings.ToLower(strings.TrimSpace(ecosystem)) + "|" + strings.TrimSpace(name) + "@" + strings.TrimSpace(version)
+	eco := strings.ToLower(strings.TrimSpace(ecosystem))
+	n := strings.TrimSpace(name)
+	v := strings.TrimSpace(version)
+	// Pre-compute capacity: eco + "|" + name + "@" + version
+	var b strings.Builder
+	b.Grow(len(eco) + 1 + len(n) + 1 + len(v))
+	b.WriteString(eco)
+	b.WriteByte('|')
+	b.WriteString(n)
+	b.WriteByte('@')
+	b.WriteString(v)
+	return b.String()
 }
 
 // cachedOSVLookup queries the OSV database for vulnerabilities, using a local cache
@@ -95,16 +106,16 @@ func vulnerabilitiesToMaps(ctx context.Context, lookups handlerLookups, ecosyste
 	if len(vulns) == 0 {
 		return nil
 	}
-	var maps []map[string]any
+	result := make([]map[string]any, 0, len(vulns))
 	for _, v := range vulns {
 		m, err := policy.StructToMap(v)
 		if err != nil {
 			slog.Debug("failed to map vulnerability", "id", v.ID, "error", err)
 			continue
 		}
-		maps = append(maps, m)
+		result = append(result, m)
 	}
-	return maps
+	return result
 }
 
 // lookupLicenses retrieves license information using the provided lookup function.
