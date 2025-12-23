@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httputil"
 	"net/url"
+	"strings"
 
 	analysis "github.com/picatz/deputy/internal/analysis"
 )
@@ -25,6 +26,8 @@ type handlerConfig struct {
 	upstream      string
 	policies      PolicyEvaluator
 	wantLicenses  bool
+	osvCache      OSVCache     // optional, uses global cache if nil
+	licenseCache  LicenseCache // optional, uses global cache if nil
 }
 
 // newBaseHandler creates a baseHandler with the common initialization logic.
@@ -36,19 +39,23 @@ func newBaseHandler(cfg handlerConfig) (*baseHandler, error) {
 	client := newUpstreamHTTPClient()
 	osvClient := analysis.NewOSVClient()
 
+	// Use provided caches or fall back to defaults
+	osvCache := getOSVCache(cfg.osvCache)
+	licenseCache := getLicenseCache(cfg.licenseCache)
+
 	h := &baseHandler{
 		policies: cfg.policies,
 		proxy:    newUpstreamReverseProxy(u, cfg.ecosystem, client.Transport),
 		lookups: handlerLookups{
 			osvClient: osvClient,
 			vulnLookup: func(ctx context.Context, name, version string) ([]analysis.Vulnerability, error) {
-				return cachedOSVLookup(ctx, osvClient, cfg.osvEcosystem, name, version)
+				return cachedOSVLookupWithCache(ctx, osvClient, osvCache, cfg.osvEcosystem, name, version)
 			},
 		},
 	}
 	if cfg.wantLicenses {
 		h.lookups.licenseLookup = func(ctx context.Context, name, version string) ([]string, error) {
-			return cachedLicenseLookup(ctx, cfg.ecosystem, name, version)
+			return cachedLicenseLookupWithCache(ctx, licenseCache, cfg.ecosystem, name, version)
 		}
 	}
 	return h, nil
@@ -139,4 +146,18 @@ func (h *baseHandler) serve(w http.ResponseWriter, r *http.Request, policyName s
 		Version:   rawVersion,
 		Operation: info.Operation,
 	}, h.proxy)
+}
+
+// serveRequest is a higher-level helper that combines request info creation,
+// payload building, and serving into a single call. This reduces boilerplate
+// in ecosystem-specific handlers.
+func (h *baseHandler) serveRequest(w http.ResponseWriter, r *http.Request, policyEntrypoint string, info requestInfo) {
+	payload := h.buildPayload(r.Context(), info, r.URL.Path)
+	h.serve(w, r, policyEntrypoint, info, payload)
+}
+
+// hasVersion returns true if the version string is non-empty after trimming whitespace.
+// This is a common check across all handlers.
+func hasVersion(version string) bool {
+	return strings.TrimSpace(version) != ""
 }

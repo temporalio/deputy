@@ -116,7 +116,7 @@ func ResolveRevisionEnhanced(repo *git.Repository, ref string) (*plumbing.Hash, 
 	// Resolve base ref without time selector
 	baseRef := strings.TrimSpace(base)
 	if baseRef == "" {
-		baseRef = "HEAD"
+		baseRef = RefHEAD
 	}
 	bh, err := repo.ResolveRevision(plumbing.Revision(baseRef))
 	if err != nil {

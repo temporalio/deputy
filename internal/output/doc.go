@@ -1,3 +1,6 @@
+// Package output provides a style-aware document model for CLI output rendering.
+// It decouples content structure from visual styling, allowing consistent formatting
+// across different terminal environments.
 package output
 
 import (

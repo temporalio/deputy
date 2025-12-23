@@ -10,6 +10,14 @@ import (
 	inv "github.com/picatz/deputy/internal/inventory"
 )
 
+// Common Git reference constants.
+const (
+	// RefHEAD is the symbolic reference to the current commit.
+	RefHEAD = "HEAD"
+	// RefWORKING represents the working tree (uncommitted changes).
+	RefWORKING = "WORKING"
+)
+
 // ParseReferences intelligently parses command line arguments to determine base and target references.
 // It supports all Git reference types: branches, tags, commits, remote refs, and Git revision expressions.
 // Dependency-related decisions (e.g., whether to compare with WORKING) are aided by the provided matcher.
@@ -29,9 +37,9 @@ func ParseReferences(repoPath string, args []string, matcher *inv.DependencyMatc
 		// No arguments: compare default branch with HEAD by default.
 		// If working tree has dependency changes, compare default branch with WORKING tree.
 		if ok, _ := hasWorkingDependencyChanges(repo, matcher); ok {
-			return defaultBranch, "WORKING", nil
+			return defaultBranch, RefWORKING, nil
 		}
-		return defaultBranch, "HEAD", nil
+		return defaultBranch, RefHEAD, nil
 	case 1:
 		// One argument: compare default branch with provided reference
 		// Validate the provided reference
@@ -114,7 +122,7 @@ func GetDefaultBranch(repo *git.Repository) (string, error) {
 		}
 	}
 	// Fallback to HEAD if nothing else
-	return "HEAD", nil
+	return RefHEAD, nil
 }
 
 // getRemoteDefaultBranch tries to determine the default branch from remote HEAD symref.
@@ -165,7 +173,9 @@ func getRemoteHeadBranch(remote *git.Remote) string {
 	return ""
 }
 
-var defaultBranchPatterns = []string{"main", "master", "trunk", "default"}
+// DefaultBranchPatterns lists common default branch names used by various Git hosting providers.
+// Order matters: more common names come first for prioritized matching.
+var DefaultBranchPatterns = []string{"main", "master", "trunk", "default"}
 
 // findLocalDefaultBranch looks for common default branch names in local branches.
 func findLocalDefaultBranch(repo *git.Repository) string {
@@ -173,7 +183,7 @@ func findLocalDefaultBranch(repo *git.Repository) string {
 	if err != nil {
 		return ""
 	}
-	for _, candidate := range defaultBranchPatterns {
+	for _, candidate := range DefaultBranchPatterns {
 		var found bool
 		branches.ForEach(func(ref *plumbing.Reference) error {
 			if ref.Name().Short() == candidate {
@@ -191,8 +201,7 @@ func findLocalDefaultBranch(repo *git.Repository) string {
 
 // isLikelyDefaultBranch checks if a branch name looks like a default branch.
 func isLikelyDefaultBranch(branchName string) bool {
-	defaultPatterns := []string{"main", "master", "trunk", "default"}
-	return slices.Contains(defaultPatterns, branchName)
+	return slices.Contains(DefaultBranchPatterns, branchName)
 }
 
 // validateReference checks if a Git reference is valid and provides helpful error messages.

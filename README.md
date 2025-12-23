@@ -22,11 +22,27 @@ In the future: container images, artifact registries, container orchestrators, b
 
 ## Supported Ecosystems
 
-- Go (modules)
-- npm (yarn, pnpm)
-- PyPI (pip)
-- RubyGems (bundler)
-- GitHub Actions (action dependencies)
+Deputy scans dependencies across 15 ecosystems via [OSV-SCALIBR](https://github.com/google/osv-scalibr) and custom extractors:
+
+| Ecosystem | Scan | Proxy | Lockfiles / Manifests |
+|-----------|:----:|:-----:|----------------------|
+| Go | ✓ | ✓ | go.mod, go.sum, Go binaries |
+| npm | ✓ | ✓ | package-lock.json, yarn.lock, pnpm-lock.yaml, bun.lock |
+| PyPI | ✓ | ✓ | requirements.txt, Pipfile.lock, poetry.lock, uv.lock, pdm.lock, setup.py, Conda environments |
+| RubyGems | ✓ | ✓ | Gemfile.lock, gems.locked, *.gemspec |
+| Maven | ✓ | — | pom.xml, gradle.lockfile, JAR/WAR/EAR archives |
+| Cargo | ✓ | — | Cargo.lock, Cargo.toml, Rust binaries |
+| NuGet | ✓ | — | packages.lock.json, packages.config, *.deps.json |
+| Hex | ✓ | — | mix.lock |
+| Pub | ✓ | — | pubspec.lock |
+| CocoaPods | ✓ | — | Podfile.lock, Package.resolved |
+| Packagist | ✓ | — | composer.lock |
+| GitHub Actions | ✓ | — | .github/workflows/*.yml |
+| Haskell | ✓ | — | cabal.project.freeze, stack.yaml.lock |
+| R | ✓ | — | renv.lock |
+| C++ | ✓ | — | conan.lock |
+
+**Proxy support** is available for Go, npm, PyPI, and RubyGems—ecosystems with standardized registry protocols for download-time policy enforcement
 
 ## Documentation
 
@@ -83,18 +99,49 @@ $ go run . --help
 
 ```mermaid
 flowchart LR
-  Target[(Repo / Dir / Remote / SBOM)] --> Inv[Inventory]
-  Inv --> Scan[scan]
-  Inv --> SBOM[sbom]
-  Scan --> Fix[fix]
-  Scan --> Triage[triage]
-  Inv --> Diff[diff]
+  subgraph Input
+    Target[(Repo / Dir / SBOM)]
+  end
 
-  Policy[CEL policies] -.-> Scan
+  subgraph Core
+    Inv[Inventory]
+  end
+
+  subgraph Commands
+    Scan[scan]
+    SBOM[sbom]
+    Fix[fix]
+    Triage[triage]
+    Diff[diff]
+    Proxy[proxy]
+  end
+
+  subgraph Policies
+    Policy[CEL policies]
+  end
+
+  Target --> Inv
+  Inv --> Scan
+  Inv --> SBOM
+  Inv --> Diff
+  Scan --> Fix
+  Scan --> Triage
+
+  Policy -.-> Scan
   Policy -.-> SBOM
   Policy -.-> Fix
   Policy -.-> Triage
-  Policy -.-> Proxy[proxy]
+  Policy -.-> Proxy
+
+  style Target fill:#e1f5fe,stroke:#01579b
+  style Inv fill:#fff3e0,stroke:#e65100
+  style Scan fill:#f3e5f5,stroke:#7b1fa2
+  style SBOM fill:#f3e5f5,stroke:#7b1fa2
+  style Fix fill:#f3e5f5,stroke:#7b1fa2
+  style Triage fill:#f3e5f5,stroke:#7b1fa2
+  style Diff fill:#f3e5f5,stroke:#7b1fa2
+  style Proxy fill:#f3e5f5,stroke:#7b1fa2
+  style Policy fill:#e8f5e9,stroke:#2e7d32
 ```
 
 ## Commands

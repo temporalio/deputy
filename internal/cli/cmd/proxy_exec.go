@@ -246,18 +246,7 @@ func startEcosystemProxy(ctx context.Context, ecosystem, upstream string, polici
 
 // handlerForEcosystem returns the appropriate HTTP handler for the given ecosystem.
 func handlerForEcosystem(ecosystem, upstream string, evaluator proxy.PolicyEvaluator) (http.Handler, error) {
-	switch ecosystem {
-	case "go":
-		return proxy.NewGoModuleHandler(upstream, evaluator)
-	case "npm":
-		return proxy.NewNPMHandler(upstream, evaluator)
-	case "pypi":
-		return proxy.NewPyPIHandler(upstream, evaluator)
-	case "rubygems":
-		return proxy.NewRubyGemsHandler(upstream, evaluator)
-	default:
-		return nil, fmt.Errorf("unsupported ecosystem %q", ecosystem)
-	}
+	return proxy.NewHandlerFromString(ecosystem, upstream, evaluator)
 }
 
 // startProxyInstance starts the HTTP server for the proxy handler.

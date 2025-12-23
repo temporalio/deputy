@@ -39,16 +39,14 @@ func (h *goModuleHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	info := requestInfo{
+	h.serveRequest(w, r, "go_artifact_request", requestInfo{
 		Name:       module,
 		Version:    version,
-		HasVersion: strings.TrimSpace(version) != "",
+		HasVersion: hasVersion(version),
 		Operation:  op,
 		Ecosystem:  "go",
 		FileType:   fileType,
-	}
-	payload := h.buildPayload(r.Context(), info, r.URL.Path)
-	h.serve(w, r, "go_artifact_request", info, payload)
+	})
 }
 
 // parseGoProxyPath extracts module name, version, file type, and operation from

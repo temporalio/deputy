@@ -3,6 +3,7 @@ package gitutil
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -13,6 +14,45 @@ import (
 	"github.com/go-git/go-git/v5/plumbing/object"
 	inv "github.com/picatz/deputy/internal/inventory"
 )
+
+func TestRefConstants(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name  string
+		value string
+		want  string
+	}{
+		{"RefHEAD", RefHEAD, "HEAD"},
+		{"RefWORKING", RefWORKING, "WORKING"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if tt.value != tt.want {
+				t.Errorf("%s = %q, want %q", tt.name, tt.value, tt.want)
+			}
+		})
+	}
+}
+
+func TestDefaultBranchPatterns(t *testing.T) {
+	t.Parallel()
+
+	// Verify expected patterns are present
+	expected := []string{"main", "master", "trunk", "default"}
+	for _, pattern := range expected {
+		if !slices.Contains(DefaultBranchPatterns, pattern) {
+			t.Errorf("DefaultBranchPatterns missing %q", pattern)
+		}
+	}
+
+	// Verify "main" comes before "master" (priority order)
+	mainIdx := slices.Index(DefaultBranchPatterns, "main")
+	masterIdx := slices.Index(DefaultBranchPatterns, "master")
+	if mainIdx > masterIdx {
+		t.Error("expected 'main' before 'master' in DefaultBranchPatterns")
+	}
+}
 
 func TestGetDefaultBranch(t *testing.T) {
 	dir := t.TempDir()

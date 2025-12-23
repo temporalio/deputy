@@ -47,28 +47,8 @@ func ProcessOSVVulnerability(vuln osvschema.Vulnerability, input PkgInput) Vulne
 		findAliasPrefix(v.Aliases, "GHSA-"),
 	)
 
-	// Severity: prefer CVSS, then GHSA textual in database_specific
-	if vuln.Severity != nil {
-		for _, s := range vuln.Severity {
-			if s.Type == "CVSS_V3" || s.Type == "CVSS_V2" {
-				v.Severity = s.Score
-				v.SeverityType = string(s.Type)
-				break
-			}
-		}
-	}
-	if vuln.DatabaseSpecific != nil {
-		if sevVal, ok := vuln.DatabaseSpecific["severity"]; ok {
-			if sevStr, ok := sevVal.(string); ok && sevStr != "" {
-				isGHSA := strings.HasPrefix(vuln.ID, "GHSA-")
-				sevUp := strings.ToUpper(sevStr)
-				if v.Severity == "" || (isGHSA && (sevUp == "CRITICAL" || sevUp == "HIGH")) {
-					v.Severity = sevStr
-					v.SeverityType = "GHSA"
-				}
-			}
-		}
-	}
+	// Resolve severity using priority order
+	v.Severity, v.SeverityType = resolveSeverity(vuln)
 
 	// References
 	if vuln.References != nil {
@@ -110,6 +90,71 @@ func findAliasPrefix(aliases []string, prefix string) string {
 		}
 	}
 	return ""
+}
+
+// resolveSeverity applies a priority-ordered severity resolution strategy:
+//  1. For GHSA advisories: GHSA severity (HIGH/CRITICAL) is authoritative and overrides CVSS
+//  2. CVSS_V3 score (highest priority for non-GHSA or when GHSA severity is not HIGH/CRITICAL)
+//  3. CVSS_V2 score (fallback CVSS)
+//  4. Any database_specific severity as final fallback
+//
+// Returns the severity score/label and its type indicator.
+func resolveSeverity(vuln osvschema.Vulnerability) (score, severityType string) {
+	isGHSA := strings.HasPrefix(vuln.ID, "GHSA-")
+	ghsaSev := extractDatabaseSeverity(vuln.DatabaseSpecific)
+
+	// For GHSA advisories with HIGH/CRITICAL severity, GHSA is authoritative
+	if isGHSA && ghsaSev != "" && isHighOrCritical(ghsaSev) {
+		return ghsaSev, "GHSA"
+	}
+
+	// For non-GHSA advisories or low-severity GHSA, prefer CVSS scores
+	if cvss := findCVSSSeverity(vuln.Severity); cvss != nil {
+		return cvss.Score, string(cvss.Type)
+	}
+
+	// Fallback to database_specific severity
+	if ghsaSev != "" {
+		if isGHSA || isHighOrCritical(ghsaSev) {
+			return ghsaSev, "GHSA"
+		}
+		return ghsaSev, "database_specific"
+	}
+
+	return "", ""
+}
+
+// findCVSSSeverity returns the first CVSS severity entry (preferring V3 over V2).
+func findCVSSSeverity(severities []osvschema.Severity) *osvschema.Severity {
+	for i := range severities {
+		s := &severities[i]
+		if s.Type == "CVSS_V3" || s.Type == "CVSS_V2" {
+			return s
+		}
+	}
+	return nil
+}
+
+// extractDatabaseSeverity extracts the severity string from database_specific metadata.
+func extractDatabaseSeverity(dbSpecific map[string]any) string {
+	if dbSpecific == nil {
+		return ""
+	}
+	sevVal, ok := dbSpecific["severity"]
+	if !ok {
+		return ""
+	}
+	sevStr, ok := sevVal.(string)
+	if !ok || sevStr == "" {
+		return ""
+	}
+	return sevStr
+}
+
+// isHighOrCritical returns true if the severity string indicates HIGH or CRITICAL level.
+func isHighOrCritical(severity string) bool {
+	upper := strings.ToUpper(strings.TrimSpace(severity))
+	return upper == "CRITICAL" || upper == "HIGH"
 }
 
 // extractGoImports pulls Go ecosystem-specific import/symbol metadata from OSV records.

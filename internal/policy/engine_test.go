@@ -3,10 +3,12 @@ package policy
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/google/cel-go/cel"
 	"github.com/google/cel-go/common/types/ref"
+	"github.com/picatz/deputy/internal/collections"
 )
 
 func TestNewEngine_Empty(t *testing.T) {
@@ -472,11 +474,11 @@ func TestShouldSkip(t *testing.T) {
 	}
 }
 
-func TestToSet(t *testing.T) {
+func TestNewSetFunc(t *testing.T) {
 	tests := []struct {
 		name     string
 		items    []string
-		expected map[string]struct{}
+		expected collections.Set[string]
 	}{
 		{
 			name:     "nil slice",
@@ -491,28 +493,28 @@ func TestToSet(t *testing.T) {
 		{
 			name:     "single item",
 			items:    []string{"foo"},
-			expected: map[string]struct{}{"foo": {}},
+			expected: collections.Set[string]{"foo": {}},
 		},
 		{
 			name:     "multiple items",
 			items:    []string{"foo", "bar", "baz"},
-			expected: map[string]struct{}{"foo": {}, "bar": {}, "baz": {}},
+			expected: collections.Set[string]{"foo": {}, "bar": {}, "baz": {}},
 		},
 		{
 			name:     "whitespace trimmed",
 			items:    []string{"  foo  ", "bar", "  "},
-			expected: map[string]struct{}{"foo": {}, "bar": {}},
+			expected: collections.Set[string]{"foo": {}, "bar": {}},
 		},
 		{
 			name:     "empty strings filtered",
 			items:    []string{"foo", "", "bar"},
-			expected: map[string]struct{}{"foo": {}, "bar": {}},
+			expected: collections.Set[string]{"foo": {}, "bar": {}},
 		},
 	}
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			result := toSet(tc.items)
+			result := collections.NewSetFunc(tc.items, strings.TrimSpace)
 			if len(result) != len(tc.expected) {
 				t.Errorf("expected %d items, got %d", len(tc.expected), len(result))
 				return

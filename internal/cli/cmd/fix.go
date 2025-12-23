@@ -104,7 +104,7 @@ AI ASSISTANCE:
 	fixCmd.Flags().String("report", "", "Path to JSON output from 'deputy scan --format json'; omit to run a fresh scan (use '-' for stdin)")
 	fixCmd.Flags().String("plan", "", "Path to remediation plan JSON (produced via 'deputy fix --format json'); use '-' for stdin")
 	fixCmd.Flags().String("ref", "", "Git ref/commit to scan (defaults to HEAD or WORKING when inside a repo)")
-	fixCmd.Flags().StringSlice("ecosystems", nil, "Limit scanning to specific ecosystems (defaults to all supported)")
+	fixCmd.Flags().StringSlice("ecosystems", nil, "Limit scanning to ecosystems: go, npm, pypi, maven, rubygems, cargo, nuget, hex, pub, cocoapods, packagist, github-actions, haskell, r, cpp (default: all)")
 	fixCmd.Flags().Bool("ignore-unfixed", false, "Ignore vulnerabilities without fixes when generating commands")
 	fixCmd.Flags().String("published-before", "", "Only include vulnerabilities published before this date (YYYY, YYYY-MM, YYYY-MM-DD, or RFC3339)")
 	fixCmd.Flags().String("published-after", "", "Only include vulnerabilities published on/after this date (YYYY, YYYY-MM, YYYY-MM-DD, or RFC3339)")
@@ -206,9 +206,9 @@ func runFixPlan(scanner *Scanner, cmd *cobra.Command, args []string) error {
 
 	format, _ := cmd.Flags().GetString("format")
 	switch strings.ToLower(strings.TrimSpace(format)) {
-	case "", "text":
+	case "", FormatText:
 		printFixSummary(cmd.OutOrStdout(), plan)
-	case "json":
+	case FormatJSON:
 		if err := outputRemediationPlanJSON(cmd.OutOrStdout(), plan); err != nil {
 			return err
 		}

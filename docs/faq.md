@@ -13,11 +13,27 @@ Deputy is a dependency management and security tool that:
 
 ### What ecosystems does Deputy support?
 
-- **Go** (go.mod, go.sum)
-- **npm** (package.json, package-lock.json, yarn.lock, pnpm-lock.yaml)
-- **PyPI** (requirements.txt, setup.py, pyproject.toml, Pipfile.lock)
-- **RubyGems** (Gemfile, Gemfile.lock)
-- **GitHub Actions** (workflow YAML files)
+Deputy supports 15 ecosystems for scanning via [OSV-SCALIBR](https://github.com/google/osv-scalibr) and custom extractors:
+
+| Ecosystem | Lockfiles / Manifests |
+|-----------|----------------------|
+| **Go** | go.mod, go.sum, Go binaries |
+| **npm** | package-lock.json, yarn.lock, pnpm-lock.yaml, bun.lock |
+| **PyPI** | requirements.txt, Pipfile.lock, poetry.lock, uv.lock, pdm.lock, setup.py, Conda environments |
+| **RubyGems** | Gemfile.lock, gems.locked, *.gemspec |
+| **Maven** | pom.xml, gradle.lockfile, JAR/WAR/EAR archives |
+| **Cargo** | Cargo.lock, Cargo.toml, Rust binaries |
+| **NuGet** | packages.lock.json, packages.config, *.deps.json |
+| **Hex** | mix.lock |
+| **Pub** | pubspec.lock |
+| **CocoaPods** | Podfile.lock, Package.resolved |
+| **Packagist** | composer.lock |
+| **GitHub Actions** | .github/workflows/*.yml |
+| **Haskell** | cabal.project.freeze, stack.yaml.lock |
+| **R** | renv.lock |
+| **C++** | conan.lock |
+
+**Proxy support** (download-time enforcement) is available for Go, npm, PyPI, and RubyGems
 
 ### How does Deputy get vulnerability data?
 

@@ -214,14 +214,14 @@ func readPathOrStdinOnce(stdin io.Reader, path string, used *bool) ([]byte, erro
 // writePolicyEvalOutput writes the evaluation result to the writer in the specified format.
 func writePolicyEvalOutput(w io.Writer, value any, format string) error {
 	switch strings.ToLower(strings.TrimSpace(format)) {
-	case "", "json":
+	case "", FormatJSON:
 		data, err := json.MarshalIndent(value, "", "  ")
 		if err != nil {
 			return fmt.Errorf("marshal evaluation result: %w", err)
 		}
 		_, err = w.Write(append(data, '\n'))
 		return err
-	case "text":
+	case FormatText:
 		_, err := fmt.Fprintf(w, "%v\n", value)
 		return err
 	default:
@@ -736,7 +736,7 @@ func parseSimulationPayloads(data []byte) ([]map[string]any, error) {
 // writeSimulationResult writes the simulation result to the writer in the specified format.
 func writeSimulationResult(w io.Writer, format string, index int, payload map[string]any, actions []policy.Action) error {
 	switch strings.ToLower(strings.TrimSpace(format)) {
-	case "", "text":
+	case "", FormatText:
 		fmt.Fprintf(w, "Input %d:\n", index)
 		for _, act := range actions {
 			fmt.Fprintf(w, "  %s from %s", strings.ToUpper(act.Type), act.Source)
@@ -746,7 +746,7 @@ func writeSimulationResult(w io.Writer, format string, index int, payload map[st
 			fmt.Fprintln(w)
 		}
 		return nil
-	case "json":
+	case FormatJSON:
 		out := map[string]any{
 			"inputIndex": index,
 			"actions":    actionsToComparable(actions),

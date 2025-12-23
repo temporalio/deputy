@@ -33,16 +33,14 @@ func newPyPIHandler(upstream string, policies PolicyEvaluator) (*pypiHandler, er
 func (h *pypiHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	pkg, version, filename, op := parsePyPIPath(r.URL.Path)
 
-	info := requestInfo{
+	h.serveRequest(w, r, "pypi_artifact_request", requestInfo{
 		Name:       pkg,
 		Version:    version,
-		HasVersion: strings.TrimSpace(version) != "",
+		HasVersion: hasVersion(version),
 		Operation:  op,
 		Ecosystem:  "pypi",
 		Filename:   filename,
-	}
-	payload := h.buildPayload(r.Context(), info, r.URL.Path)
-	h.serve(w, r, "pypi_artifact_request", info, payload)
+	})
 }
 
 // parsePyPIPath extracts package name, version, filename, and operation from a PyPI

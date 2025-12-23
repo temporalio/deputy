@@ -87,37 +87,12 @@ func (s *Server) serveListener(ctx context.Context, cfg ListenerConfig) error {
 			return fmt.Errorf("listener %s: create authenticator: %w", cfg.Name, err)
 		}
 		defer auth.Close()
-		slog.Info("authentication enabled", "listener", cfg.Name, "mode", authMode)
+		slog.InfoContext(ctx, "authentication enabled", "listener", cfg.Name, "mode", authMode)
 	}
 
-	var handler http.Handler
-	switch ecos {
-	case "go":
-		h, err := newGoModuleHandler(cfg.Upstream, engine)
-		if err != nil {
-			return fmt.Errorf("listener %s: %w", cfg.Name, err)
-		}
-		handler = h
-	case "pypi":
-		h, err := newPyPIHandler(cfg.Upstream, engine)
-		if err != nil {
-			return fmt.Errorf("listener %s: %w", cfg.Name, err)
-		}
-		handler = h
-	case "npm":
-		h, err := newNPMHandler(cfg.Upstream, engine)
-		if err != nil {
-			return fmt.Errorf("listener %s: %w", cfg.Name, err)
-		}
-		handler = h
-	case "rubygems":
-		h, err := newRubyGemsHandler(cfg.Upstream, engine)
-		if err != nil {
-			return fmt.Errorf("listener %s: %w", cfg.Name, err)
-		}
-		handler = h
-	default:
-		return fmt.Errorf("listener %s: unsupported ecosystem %q", cfg.Name, ecos)
+	handler, err := createEcosystemHandler(cfg.Name, ecos, cfg.Upstream, engine)
+	if err != nil {
+		return err
 	}
 
 	var ready atomic.Bool
@@ -129,30 +104,18 @@ func (s *Server) serveListener(ctx context.Context, cfg ListenerConfig) error {
 	}
 	addr := ln.Addr().String()
 
-	slog.Info("proxy listener starting", "name", cfg.Name, "addr", addr, "ecosystem", ecos, "upstream", cfg.Upstream)
+	slog.InfoContext(ctx, "proxy listener starting", "name", cfg.Name, "addr", addr, "ecosystem", ecos, "upstream", cfg.Upstream)
 	if s.opts.OnListenerStart != nil {
 		s.opts.OnListenerStart(cfg.Name, addr)
 	}
 
-	readHeaderTimeout := cfg.ReadHeaderTimeout
-	if readHeaderTimeout == 0 {
-		readHeaderTimeout = proxyReadHeaderTimeout
-	}
-	writeTimeout := cfg.WriteTimeout
-	if writeTimeout == 0 {
-		writeTimeout = proxyWriteTimeout
-	}
-	idleTimeout := cfg.IdleTimeout
-	if idleTimeout == 0 {
-		idleTimeout = proxyIdleTimeout
-	}
-
+	timeouts := resolveListenerTimeouts(cfg)
 	server := &http.Server{
 		Addr:              addr,
 		Handler:           rootHandler,
-		ReadHeaderTimeout: readHeaderTimeout,
-		WriteTimeout:      writeTimeout,
-		IdleTimeout:       idleTimeout,
+		ReadHeaderTimeout: timeouts.ReadHeader,
+		WriteTimeout:      timeouts.Write,
+		IdleTimeout:       timeouts.Idle,
 		MaxHeaderBytes:    proxyMaxHeaderBytes,
 		ErrorLog:          slog.NewLogLogger(slog.Default().Handler(), slog.LevelError),
 		BaseContext: func(_ net.Listener) context.Context {

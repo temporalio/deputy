@@ -113,3 +113,67 @@ func TestCreateConsolidatedVulnerabilityDatabaseSpecificMerged(t *testing.T) {
 		t.Fatalf("unexpected review_status %q", cons.DatabaseSpecific["review_status"])
 	}
 }
+
+func TestIDPriorityConstants(t *testing.T) {
+	t.Parallel()
+
+	// Verify constants have expected values and ordering
+	tests := []struct {
+		name     string
+		constant int
+		want     int
+	}{
+		{"IDPriorityCVE", IDPriorityCVE, 1},
+		{"IDPriorityGO", IDPriorityGO, 2},
+		{"IDPriorityGHSA", IDPriorityGHSA, 3},
+		{"IDPriorityOther", IDPriorityOther, 4},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if tt.constant != tt.want {
+				t.Errorf("%s = %d, want %d", tt.name, tt.constant, tt.want)
+			}
+		})
+	}
+
+	// Verify priority ordering: CVE < GO < GHSA < Other
+	if IDPriorityCVE >= IDPriorityGO {
+		t.Error("CVE priority should be higher (lower number) than GO")
+	}
+	if IDPriorityGO >= IDPriorityGHSA {
+		t.Error("GO priority should be higher (lower number) than GHSA")
+	}
+	if IDPriorityGHSA >= IDPriorityOther {
+		t.Error("GHSA priority should be higher (lower number) than Other")
+	}
+}
+
+func TestGetIDPriority(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		id   string
+		want int
+	}{
+		{"CVE-2024-0001", IDPriorityCVE},
+		{"CVE-2023-12345", IDPriorityCVE},
+		{"GO-2024-0001", IDPriorityGO},
+		{"GO-2023-9999", IDPriorityGO},
+		{"GHSA-xxxx-xxxx-xxxx", IDPriorityGHSA},
+		{"GHSA-1234-5678-9abc", IDPriorityGHSA},
+		{"PYSEC-2024-0001", IDPriorityOther},
+		{"RUSTSEC-2024-0001", IDPriorityOther},
+		{"BIT-golang-2024-1", IDPriorityOther},
+		{"UNKNOWN-123", IDPriorityOther},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.id, func(t *testing.T) {
+			got := getIDPriority(tt.id)
+			if got != tt.want {
+				t.Errorf("getIDPriority(%q) = %d, want %d", tt.id, got, tt.want)
+			}
+		})
+	}
+}

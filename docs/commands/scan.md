@@ -29,7 +29,7 @@ deputy scan sbom <sbom-file> [flags]
 | `--published-after` | | | Only show vulns published on/after this date |
 | `--as-of` | | | Historical view up to this date (implies `--published-before`) |
 | `--policy` | | | CEL policy file(s) to evaluate (repeatable) |
-| `--ecosystems` | | all | Limit to specific ecosystems (e.g., `go,npm`) |
+| `--ecosystems` | `-e` | all | Limit to specific ecosystems (see [Supported Ecosystems](#supported-ecosystems)) |
 | `--show-symbols` | | `false` | Show affected symbols in text output |
 | `--show-db-info` | | `false` | Show database metadata (e.g., review_status) |
 
@@ -73,7 +73,35 @@ $ deputy scan --ignore-unfixed
 
 # Only Go and npm ecosystems
 $ deputy scan --ecosystems go,npm
+
+# Scan Java and Rust projects
+$ deputy scan --ecosystems maven,cargo
 ```
+
+## Supported Ecosystems
+
+Deputy supports 15 ecosystems for scanning:
+
+| Ecosystem | Flag Value | Lockfiles / Manifests |
+|-----------|------------|----------------------|
+| Go | `go` | go.mod, go.sum, Go binaries |
+| npm | `npm` | package-lock.json, yarn.lock, pnpm-lock.yaml, bun.lock |
+| PyPI | `pypi` | requirements.txt, Pipfile.lock, poetry.lock, uv.lock, pdm.lock, setup.py, Conda environments |
+| RubyGems | `rubygems` | Gemfile.lock, gems.locked, *.gemspec |
+| Maven | `maven` | pom.xml, gradle.lockfile, JAR/WAR/EAR archives |
+| Cargo | `cargo` | Cargo.lock, Cargo.toml, Rust binaries |
+| NuGet | `nuget` | packages.lock.json, packages.config, *.deps.json |
+| Hex | `hex` | mix.lock |
+| Pub | `pub` | pubspec.lock |
+| CocoaPods | `cocoapods` | Podfile.lock, Package.resolved |
+| Packagist | `packagist` | composer.lock |
+| GitHub Actions | `github-actions` | .github/workflows/*.yml |
+| Haskell | `haskell` | cabal.project.freeze, stack.yaml.lock |
+| R | `r` | renv.lock |
+| C++ | `cpp` | conan.lock |
+
+Detection is powered by [OSV-SCALIBR](https://github.com/google/osv-scalibr) with custom extensions for GitHub Actions.
+Binary analysis extracts dependencies from compiled Go and Rust executables
 
 ### Historical Analysis
 

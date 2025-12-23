@@ -3,8 +3,6 @@ package analysis
 import (
 	"fmt"
 	"strings"
-
-	"github.com/picatz/deputy/internal/collections"
 )
 
 // Severity represents the severity level of a vulnerability using a type-safe enum.
@@ -175,76 +173,4 @@ func (si SeverityInfo) String() string {
 		return fmt.Sprintf("%s (%s)", si.Level, si.Type)
 	}
 	return si.Level.String()
-}
-
-// Ecosystem represents a package ecosystem or registry.
-type Ecosystem int
-
-const (
-	// EcosystemUnknown indicates the ecosystem is not recognized.
-	EcosystemUnknown Ecosystem = iota
-	// EcosystemGo represents the Go module ecosystem.
-	EcosystemGo
-	// EcosystemNPM represents the npm (Node.js) ecosystem.
-	EcosystemNPM
-	// EcosystemPyPI represents the Python Package Index.
-	EcosystemPyPI
-	// EcosystemRubyGems represents the RubyGems ecosystem.
-	EcosystemRubyGems
-	// EcosystemMaven represents the Maven (Java) ecosystem.
-	EcosystemMaven
-	// EcosystemNuGet represents the NuGet (.NET) ecosystem.
-	EcosystemNuGet
-	// EcosystemCrates represents the Cargo/crates.io (Rust) ecosystem.
-	EcosystemCrates
-	// EcosystemComposer represents the Composer (PHP) ecosystem.
-	EcosystemComposer
-)
-
-// String returns the canonical string name for the ecosystem.
-func (e Ecosystem) String() string {
-	switch e {
-	case EcosystemGo:
-		return "go"
-	case EcosystemNPM:
-		return "npm"
-	case EcosystemPyPI:
-		return "pypi"
-	case EcosystemRubyGems:
-		return "rubygems"
-	case EcosystemMaven:
-		return "maven"
-	case EcosystemNuGet:
-		return "nuget"
-	case EcosystemCrates:
-		return "crates"
-	case EcosystemComposer:
-		return "composer"
-	default:
-		return "unknown"
-	}
-}
-
-// ParseEcosystem converts a string ecosystem name to the Ecosystem enum.
-func ParseEcosystem(s string) Ecosystem {
-	switch collections.NormalizeLower(s) {
-	case "go", "golang":
-		return EcosystemGo
-	case "npm", "node", "nodejs":
-		return EcosystemNPM
-	case "pypi", "python", "pip":
-		return EcosystemPyPI
-	case "rubygems", "ruby", "gem":
-		return EcosystemRubyGems
-	case "maven":
-		return EcosystemMaven
-	case "nuget":
-		return EcosystemNuGet
-	case "crates", "cargo", "rust":
-		return EcosystemCrates
-	case "composer", "php":
-		return EcosystemComposer
-	default:
-		return EcosystemUnknown
-	}
 }

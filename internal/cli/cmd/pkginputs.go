@@ -55,47 +55,27 @@ type packageJSONData struct {
 
 // packageJSONCache caches parsed package.json files.
 type packageJSONCache struct {
-	resolver manifestResolver
-	entries  map[string]*packageJSONData
-	errs     map[string]error
+	*manifestCache[*packageJSONData]
 }
 
 func newPackageJSONCache(resolver manifestResolver) *packageJSONCache {
-	if resolver == nil {
+	mc := newManifestCache(resolver, func(content []byte) (*packageJSONData, error) {
+		var pj packageJSONData
+		if err := json.Unmarshal(content, &pj); err != nil {
+			return nil, err
+		}
+		return &pj, nil
+	})
+	if mc == nil {
 		return nil
 	}
-	return &packageJSONCache{
-		resolver: resolver,
-		entries:  make(map[string]*packageJSONData),
-		errs:     make(map[string]error),
-	}
-}
-
-func (c *packageJSONCache) get(path string) (*packageJSONData, error) {
-	if c == nil {
-		return nil, fmt.Errorf("no resolver")
-	}
-	if data, ok := c.entries[path]; ok {
-		return data, nil
-	}
-	if err, ok := c.errs[path]; ok {
-		return nil, err
-	}
-	content, err := c.resolver.ReadFile(path)
-	if err != nil {
-		c.errs[path] = err
-		return nil, err
-	}
-	var pj packageJSONData
-	if err := json.Unmarshal(content, &pj); err != nil {
-		c.errs[path] = err
-		return nil, err
-	}
-	c.entries[path] = &pj
-	return &pj, nil
+	return &packageJSONCache{mc}
 }
 
 func (c *packageJSONCache) groupsForPackage(manifestPath, pkgName string) ([]string, error) {
+	if c == nil {
+		return nil, fmt.Errorf("no resolver")
+	}
 	data, err := c.get(manifestPath)
 	if err != nil || data == nil {
 		return nil, err
@@ -118,9 +98,7 @@ func (c *packageJSONCache) groupsForPackage(manifestPath, pkgName string) ([]str
 
 // uvLockCache lazily parses uv.lock files and memoizes their dependency metadata.
 type uvLockCache struct {
-	resolver manifestResolver
-	entries  map[string]*uvLockData
-	errs     map[string]error
+	*manifestCache[*uvLockData]
 }
 
 type uvLockData struct {
@@ -129,14 +107,11 @@ type uvLockData struct {
 }
 
 func newUVLockCache(resolver manifestResolver) *uvLockCache {
-	if resolver == nil {
+	mc := newManifestCache(resolver, parseUVLock)
+	if mc == nil {
 		return nil
 	}
-	return &uvLockCache{
-		resolver: resolver,
-		entries:  make(map[string]*uvLockData),
-		errs:     make(map[string]error),
-	}
+	return &uvLockCache{mc}
 }
 
 func (c *uvLockCache) packageInfo(manifestPath, pkgName string) ([]string, bool, error) {
@@ -150,27 +125,6 @@ func (c *uvLockCache) packageInfo(manifestPath, pkgName string) ([]string, bool,
 	key := normalizePythonName(pkgName)
 	groups := slices.Clone(data.groups[key])
 	return groups, data.direct[key], nil
-}
-
-func (c *uvLockCache) get(path string) (*uvLockData, error) {
-	if data, ok := c.entries[path]; ok {
-		return data, nil
-	}
-	if err, ok := c.errs[path]; ok {
-		return nil, err
-	}
-	content, err := c.resolver.ReadFile(path)
-	if err != nil {
-		c.errs[path] = err
-		return nil, err
-	}
-	data, err := parseUVLock(content)
-	if err != nil {
-		c.errs[path] = err
-		return nil, err
-	}
-	c.entries[path] = data
-	return data, nil
 }
 
 // uvLockDocument mirrors the top-level TOML structure produced by uv.lock.
@@ -261,9 +215,7 @@ func appendGroupLabel(existing []string, label string) []string {
 
 // cargoManifestCache parses Cargo.toml files and records dependency classifications.
 type cargoManifestCache struct {
-	resolver manifestResolver
-	entries  map[string]*cargoManifestData
-	errs     map[string]error
+	*manifestCache[*cargoManifestData]
 }
 
 type cargoManifestData struct {
@@ -272,14 +224,11 @@ type cargoManifestData struct {
 }
 
 func newCargoManifestCache(resolver manifestResolver) *cargoManifestCache {
-	if resolver == nil {
+	mc := newManifestCache(resolver, parseCargoManifest)
+	if mc == nil {
 		return nil
 	}
-	return &cargoManifestCache{
-		resolver: resolver,
-		entries:  make(map[string]*cargoManifestData),
-		errs:     make(map[string]error),
-	}
+	return &cargoManifestCache{mc}
 }
 
 func (c *cargoManifestCache) packageInfo(manifestPath, pkgName string) ([]string, bool, error) {
@@ -293,27 +242,6 @@ func (c *cargoManifestCache) packageInfo(manifestPath, pkgName string) ([]string
 	key := normalizeCrateName(pkgName)
 	groups := slices.Clone(data.groups[key])
 	return groups, data.direct[key], nil
-}
-
-func (c *cargoManifestCache) get(path string) (*cargoManifestData, error) {
-	if data, ok := c.entries[path]; ok {
-		return data, nil
-	}
-	if err, ok := c.errs[path]; ok {
-		return nil, err
-	}
-	content, err := c.resolver.ReadFile(path)
-	if err != nil {
-		c.errs[path] = err
-		return nil, err
-	}
-	data, err := parseCargoManifest(content)
-	if err != nil {
-		c.errs[path] = err
-		return nil, err
-	}
-	c.entries[path] = data
-	return data, nil
 }
 
 // cargoManifest represents the structure of a Cargo.toml file.

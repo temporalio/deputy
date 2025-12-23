@@ -33,15 +33,13 @@ func newNPMHandler(upstream string, policies PolicyEvaluator) (*npmHandler, erro
 func (h *npmHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	pkg, version, operation := parseNPMPath(r.URL.Path)
 
-	info := requestInfo{
+	h.serveRequest(w, r, "npm_artifact_request", requestInfo{
 		Name:       pkg,
 		Version:    version,
-		HasVersion: strings.TrimSpace(version) != "",
+		HasVersion: hasVersion(version),
 		Operation:  operation,
 		Ecosystem:  "npm",
-	}
-	payload := h.buildPayload(r.Context(), info, r.URL.Path)
-	h.serve(w, r, "npm_artifact_request", info, payload)
+	})
 }
 
 // parseNPMPath extracts package name, version, and operation from an npm registry

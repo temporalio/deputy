@@ -22,6 +22,7 @@ import (
 	pl "github.com/google/osv-scalibr/plugin/list"
 
 	"github.com/picatz/deputy/internal/collections"
+	"github.com/picatz/deputy/internal/ecosystem"
 	ghactions "github.com/picatz/deputy/internal/inventory/plugins/github/actionsx"
 	rubygemspec "github.com/picatz/deputy/internal/inventory/plugins/ruby/gemspecx"
 	"github.com/picatz/deputy/internal/repository/workspace"
@@ -192,28 +193,8 @@ func filterInventoryPlugins(plugins []plugin.Plugin) []plugin.Plugin {
 	if len(plugins) == 0 {
 		return plugins
 	}
-	allowedSegments := map[string]struct{}{
-		"go":         {},
-		"golang":     {},
-		"javascript": {},
-		"python":     {},
-		"ruby":       {},
-		"rust":       {},
-		"php":        {},
-		"java":       {},
-		"dotnet":     {},
-		"haskell":    {},
-		"dart":       {},
-		"elixir":     {},
-		"erlang":     {},
-		"swift":      {},
-		"r":          {},
-		"cpp":        {},
-		"github":     {},
-	}
-	excluded := map[string]struct{}{
-		"rust/cargoauditable": {},
-	}
+	allowedSegments := collections.NewSet(ecosystem.AllScalibrPrefixes()...)
+	excluded := collections.NewSet("rust/cargoauditable")
 	out := make([]plugin.Plugin, 0, len(plugins))
 	for _, p := range plugins {
 		if _, ok := p.(fsx.Extractor); !ok {
@@ -223,11 +204,11 @@ func filterInventoryPlugins(plugins []plugin.Plugin) []plugin.Plugin {
 			out = append(out, rubygemspec.New())
 			continue
 		}
-		if _, banned := excluded[p.Name()]; banned {
+		if excluded.Has(p.Name()) {
 			continue
 		}
 		seg, _, _ := strings.Cut(p.Name(), "/")
-		if _, ok := allowedSegments[seg]; !ok {
+		if !allowedSegments.Has(seg) {
 			continue
 		}
 		out = append(out, p)

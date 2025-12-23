@@ -49,3 +49,111 @@ func Test_ProcessOSVVulnerability_no_aliases_severity(t *testing.T) {
 		t.Fatalf("unexpected CVE: %q", out.CVE)
 	}
 }
+
+func Test_resolveSeverity(t *testing.T) {
+	tests := []struct {
+		name         string
+		vuln         osvschema.Vulnerability
+		wantScore    string
+		wantType     string
+	}{
+		{
+			name: "CVSS_V3 takes priority for non-GHSA",
+			vuln: osvschema.Vulnerability{
+				ID:               "CVE-2020-1234",
+				Severity:         []osvschema.Severity{{Type: "CVSS_V3", Score: "9.8"}},
+				DatabaseSpecific: map[string]any{"severity": "MEDIUM"},
+			},
+			wantScore: "9.8",
+			wantType:  "CVSS_V3",
+		},
+		{
+			name: "GHSA overrides CVSS for GHSA advisory with HIGH/CRITICAL",
+			vuln: osvschema.Vulnerability{
+				ID:               "GHSA-xxxx",
+				Severity:         []osvschema.Severity{{Type: "CVSS_V3", Score: "9.8"}},
+				DatabaseSpecific: map[string]any{"severity": "CRITICAL"},
+			},
+			wantScore: "CRITICAL",
+			wantType:  "GHSA",
+		},
+		{
+			name: "CVSS_V2 fallback",
+			vuln: osvschema.Vulnerability{
+				ID:       "CVE-2020-1234",
+				Severity: []osvschema.Severity{{Type: "CVSS_V2", Score: "7.5"}},
+			},
+			wantScore: "7.5",
+			wantType:  "CVSS_V2",
+		},
+		{
+			name: "GHSA database_specific when no CVSS",
+			vuln: osvschema.Vulnerability{
+				ID:               "GHSA-xxxx",
+				DatabaseSpecific: map[string]any{"severity": "HIGH"},
+			},
+			wantScore: "HIGH",
+			wantType:  "GHSA",
+		},
+		{
+			name: "non-GHSA database_specific high severity",
+			vuln: osvschema.Vulnerability{
+				ID:               "CVE-2020-1234",
+				DatabaseSpecific: map[string]any{"severity": "CRITICAL"},
+			},
+			wantScore: "CRITICAL",
+			wantType:  "GHSA",
+		},
+		{
+			name: "non-GHSA database_specific low severity",
+			vuln: osvschema.Vulnerability{
+				ID:               "CVE-2020-1234",
+				DatabaseSpecific: map[string]any{"severity": "LOW"},
+			},
+			wantScore: "LOW",
+			wantType:  "database_specific",
+		},
+		{
+			name:      "no severity info",
+			vuln:      osvschema.Vulnerability{ID: "V-1"},
+			wantScore: "",
+			wantType:  "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			score, sevType := resolveSeverity(tt.vuln)
+			if score != tt.wantScore {
+				t.Errorf("resolveSeverity() score = %q, want %q", score, tt.wantScore)
+			}
+			if sevType != tt.wantType {
+				t.Errorf("resolveSeverity() type = %q, want %q", sevType, tt.wantType)
+			}
+		})
+	}
+}
+
+func Test_isHighOrCritical(t *testing.T) {
+	tests := []struct {
+		input string
+		want  bool
+	}{
+		{"CRITICAL", true},
+		{"critical", true},
+		{"HIGH", true},
+		{"high", true},
+		{"  HIGH  ", true},
+		{"MEDIUM", false},
+		{"LOW", false},
+		{"", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			if got := isHighOrCritical(tt.input); got != tt.want {
+				t.Errorf("isHighOrCritical(%q) = %v, want %v", tt.input, got, tt.want)
+			}
+		})
+	}
+}

@@ -133,17 +133,17 @@ FILTERING & FORMATTING:
 			}
 
 			switch strings.ToLower(format) {
-			case "", "text":
+			case "", FormatText:
 				if onlyDirect {
 					items = filterOnlyDirect(items)
 				}
 				return writeListText(w, items, !noHeader, showSources)
-			case "tsv":
+			case FormatTSV:
 				if onlyDirect {
 					items = filterOnlyDirect(items)
 				}
 				return writeListTSV(w, items, !noHeader, showSources)
-			case "json":
+			case FormatJSON:
 				result := ListResult{
 					Repo:      repoPath,
 					Ref:       shortGitRef(refOrHEAD(ref)),
@@ -162,7 +162,7 @@ FILTERING & FORMATTING:
 	}
 
 	cmd.Flags().StringVar(&ref, "ref", "HEAD", "Git reference (commit, tag, branch)")
-	cmd.Flags().StringSliceVar(&ecos, "ecosystems", []string{"all"}, "Ecosystems to include (e.g., go,npm,python). Defaults to all supported.")
+	cmd.Flags().StringSliceVar(&ecos, "ecosystems", []string{"all"}, "Ecosystems to include: go, npm, pypi, maven, rubygems, cargo, nuget, hex, pub, cocoapods, packagist, github-actions, haskell, r, cpp (default: all)")
 	cmd.Flags().StringVarP(&format, "format", "f", "text", "Output format: text | tsv | json")
 	cmd.Flags().StringVar(&level, "level", "package", "(Reserved) Output granularity; currently always emits package-level entries")
 	cmd.Flags().StringVarP(&outPath, "output", "o", "-", "Output file path or '-' for stdout")

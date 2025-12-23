@@ -42,13 +42,15 @@ var defaultLicenseFilenames = []string{
 	"UNLICENSE",
 }
 
+// Package registry base URLs for license lookups.
+// These are variables (not constants) to allow test overrides via WithLicenseEndpoints.
 var (
-	goProxyBase   = "https://proxy.golang.org"
-	cratesBase    = "https://crates.io"
-	packagistBase = "https://repo.packagist.org"
-	pubBase       = "https://pub.dev"
-	cocoapodsBase = "https://cocoapods.org"
-	hexpmBase     = "https://hex.pm"
+	goProxyBase   = "https://proxy.golang.org"   // Go module proxy
+	cratesBase    = "https://crates.io"          // Rust crates registry
+	packagistBase = "https://repo.packagist.org" // PHP Composer registry
+	pubBase       = "https://pub.dev"            // Dart/Flutter packages
+	cocoapodsBase = "https://cocoapods.org"      // iOS/macOS CocoaPods
+	hexpmBase     = "https://hex.pm"             // Erlang/Elixir Hex.pm
 )
 
 const (
@@ -73,6 +75,36 @@ func drainAndClose(resp *nethttp.Response) {
 	}
 	io.Copy(io.Discard, resp.Body)
 	resp.Body.Close()
+}
+
+// fetchJSON performs an HTTP GET request and decodes the JSON response into v.
+// It handles common patterns: context cancellation, non-200 responses, and proper
+// connection cleanup. Returns an error if the request fails or response is not 200 OK.
+// Optional headers can be passed to set custom request headers (e.g., Accept header).
+// Pass nil for headers if no custom headers are needed.
+func fetchJSON(ctx context.Context, url string, headers map[string]string, v any) error {
+	if ctx.Err() != nil {
+		return ctx.Err()
+	}
+	req, err := nethttp.NewRequestWithContext(ctx, nethttp.MethodGet, url, nil)
+	if err != nil {
+		return fmt.Errorf("create request: %w", err)
+	}
+	for k, val := range headers {
+		req.Header.Set(k, val)
+	}
+	resp, err := licenseHTTPClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("HTTP request failed: %w", err)
+	}
+	defer drainAndClose(resp)
+	if resp.StatusCode != nethttp.StatusOK {
+		return fmt.Errorf("unexpected status %d", resp.StatusCode)
+	}
+	if err := json.NewDecoder(resp.Body).Decode(v); err != nil {
+		return fmt.Errorf("decode JSON: %w", err)
+	}
+	return nil
 }
 
 // DefaultLicenseFilenamesForScan returns the default filenames used when scanning for licenses.
@@ -571,18 +603,6 @@ func LookupPackagistLicense(ctx context.Context, name, version string) []string 
 
 func lookupPackagistP2(ctx context.Context, name, version string) []string {
 	url := fmt.Sprintf("%s/p2/%s.json", strings.TrimRight(packagistBase, "/"), name)
-	req, err := nethttp.NewRequestWithContext(ctx, nethttp.MethodGet, url, nil)
-	if err != nil {
-		return nil
-	}
-	resp, err := licenseHTTPClient.Do(req)
-	if err != nil {
-		return nil
-	}
-	defer drainAndClose(resp)
-	if resp.StatusCode != nethttp.StatusOK {
-		return nil
-	}
 	var payload struct {
 		Packages map[string][]struct {
 			Version           string   `json:"version"`
@@ -590,7 +610,7 @@ func lookupPackagistP2(ctx context.Context, name, version string) []string {
 			License           []string `json:"license"`
 		} `json:"packages"`
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+	if err := fetchJSON(ctx, url, nil, &payload); err != nil {
 		return nil
 	}
 	versions, ok := payload.Packages[name]
@@ -624,25 +644,13 @@ func lookupPackagistP2(ctx context.Context, name, version string) []string {
 
 func lookupPackagistLegacy(ctx context.Context, name, version string) []string {
 	url := fmt.Sprintf("%s/p/%s.json", strings.TrimRight(packagistBase, "/"), name)
-	req, err := nethttp.NewRequestWithContext(ctx, nethttp.MethodGet, url, nil)
-	if err != nil {
-		return nil
-	}
-	resp, err := licenseHTTPClient.Do(req)
-	if err != nil {
-		return nil
-	}
-	defer drainAndClose(resp)
-	if resp.StatusCode != nethttp.StatusOK {
-		return nil
-	}
 	var payload struct {
 		Packages map[string]map[string]struct {
 			License           []string `json:"license"`
 			VersionNormalized string   `json:"version_normalized"`
 		} `json:"packages"`
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+	if err := fetchJSON(ctx, url, nil, &payload); err != nil {
 		return nil
 	}
 	versions := payload.Packages[name]
@@ -690,29 +698,17 @@ func packagistVersionCandidates(version string) []string {
 func LookupPubLicense(ctx context.Context, name, version string) []string {
 	name = strings.TrimSpace(name)
 	version = strings.TrimSpace(version)
-	if name == "" || version == "" || ctx.Err() != nil {
+	if name == "" || version == "" {
 		return nil
 	}
 	url := fmt.Sprintf("%s/api/packages/%s/versions/%s", strings.TrimRight(pubBase, "/"), name, version)
-	req, err := nethttp.NewRequestWithContext(ctx, nethttp.MethodGet, url, nil)
-	if err != nil {
-		return nil
-	}
-	resp, err := licenseHTTPClient.Do(req)
-	if err != nil {
-		return nil
-	}
-	defer drainAndClose(resp)
-	if resp.StatusCode != nethttp.StatusOK {
-		return nil
-	}
 	var payload struct {
 		ArchiveURL string `json:"archive_url"`
 		Pubspec    struct {
 			License string `json:"license"`
 		} `json:"pubspec"`
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+	if err := fetchJSON(ctx, url, nil, &payload); err != nil {
 		return nil
 	}
 	if lic := cleanLicenseList(splitLicenseString(payload.Pubspec.License)); len(lic) > 0 {
@@ -728,48 +724,30 @@ func LookupPubLicense(ctx context.Context, name, version string) []string {
 func LookupCocoaPodsLicense(ctx context.Context, name, version string) []string {
 	name = strings.TrimSpace(name)
 	version = strings.TrimSpace(version)
-	if name == "" || version == "" || ctx.Err() != nil {
+	if name == "" || version == "" {
 		return nil
 	}
+	// First, get the data URL from the version endpoint
 	url := fmt.Sprintf("https://trunk.cocoapods.org/api/v1/pods/%s/versions/%s", name, version)
-	req, err := nethttp.NewRequestWithContext(ctx, nethttp.MethodGet, url, nil)
-	if err != nil {
-		return nil
-	}
-	req.Header.Set("Accept", "application/json")
-	resp, err := licenseHTTPClient.Do(req)
-	if err != nil {
-		return nil
-	}
-	defer drainAndClose(resp)
-	if resp.StatusCode != nethttp.StatusOK {
-		return nil
-	}
 	var payload struct {
 		DataURL string `json:"data_url"`
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+	if err := fetchJSON(ctx, url, map[string]string{"Accept": "application/json"}, &payload); err != nil {
 		return nil
 	}
 	if payload.DataURL == "" {
 		return nil
 	}
-	reqSpec, err := nethttp.NewRequestWithContext(ctx, nethttp.MethodGet, payload.DataURL, nil)
-	if err != nil {
-		return nil
-	}
-	respSpec, err := licenseHTTPClient.Do(reqSpec)
-	if err != nil {
-		return nil
-	}
-	defer drainAndClose(respSpec)
-	if respSpec.StatusCode != nethttp.StatusOK {
-		return nil
-	}
+	// Then fetch the podspec from the data URL
 	var podspec map[string]any
-	if err := json.NewDecoder(respSpec.Body).Decode(&podspec); err != nil {
+	if err := fetchJSON(ctx, payload.DataURL, nil, &podspec); err != nil {
 		return nil
 	}
+	return extractCocoaPodsLicense(podspec)
+}
+
+// extractCocoaPodsLicense extracts license information from a CocoaPods podspec.
+func extractCocoaPodsLicense(podspec map[string]any) []string {
 	licVal, ok := podspec["license"]
 	if !ok {
 		licVal = podspec["licenses"]
@@ -802,28 +780,16 @@ func LookupCocoaPodsLicense(ctx context.Context, name, version string) []string 
 func LookupHexLicense(ctx context.Context, name, version string) []string {
 	name = strings.TrimSpace(name)
 	version = strings.TrimSpace(version)
-	if name == "" || version == "" || ctx.Err() != nil {
+	if name == "" || version == "" {
 		return nil
 	}
 	url := fmt.Sprintf("%s/api/packages/%s", strings.TrimRight(hexpmBase, "/"), name)
-	req, err := nethttp.NewRequestWithContext(ctx, nethttp.MethodGet, url, nil)
-	if err != nil {
-		return nil
-	}
-	resp, err := licenseHTTPClient.Do(req)
-	if err != nil {
-		return nil
-	}
-	defer drainAndClose(resp)
-	if resp.StatusCode != nethttp.StatusOK {
-		return nil
-	}
 	var payload struct {
 		Meta struct {
 			Licenses []string `json:"licenses"`
 		} `json:"meta"`
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+	if err := fetchJSON(ctx, url, nil, &payload); err != nil {
 		return nil
 	}
 	return cleanLicenseList(payload.Meta.Licenses)

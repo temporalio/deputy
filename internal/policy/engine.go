@@ -9,6 +9,7 @@ import (
 
 	"github.com/google/cel-go/cel"
 	"github.com/google/cel-go/common/types/ref"
+	"github.com/picatz/deputy/internal/collections"
 )
 
 // Engine holds compiled CEL programs and evaluates them without per-request recompilation.
@@ -20,11 +21,11 @@ type Engine struct {
 // compiled into an executable CEL program. It includes metadata for filtering
 // execution based on entrypoints and commands.
 type compiledPolicy struct {
-	source      Source              // source is the original policy source.
-	program     celProgram          // program is the compiled CEL executable.
-	entrypoints map[string]struct{} // entrypoints is the set of entrypoints this policy applies to.
-	commands    map[string]struct{} // commands is the set of commands this policy applies to.
-	mode        string              // mode defines the execution mode (e.g., "enforce", "audit").
+	source      Source                  // source is the original policy source.
+	program     celProgram              // program is the compiled CEL executable.
+	entrypoints collections.Set[string] // entrypoints is the set of entrypoints this policy applies to.
+	commands    collections.Set[string] // commands is the set of commands this policy applies to.
+	mode        string                  // mode defines the execution mode (e.g., "enforce", "audit").
 }
 
 // celProgram is the minimal interface we need from cel.Program for testing/abstraction.
@@ -47,8 +48,8 @@ func NewEngine(sources []Source) (*Engine, error) {
 		compiled = append(compiled, compiledPolicy{
 			source:      src,
 			program:     prog,
-			entrypoints: toSet(meta.Entrypoints),
-			commands:    toSet(meta.Commands),
+			entrypoints: collections.NewSetFunc(meta.Entrypoints, strings.TrimSpace),
+			commands:    collections.NewSetFunc(meta.Commands, strings.TrimSpace),
 			mode:        meta.Mode,
 		})
 	}
@@ -110,22 +111,6 @@ func (e *Engine) EvaluateAll(ctx context.Context, payload map[string]any, comman
 		actions = append(actions, normalized...)
 	}
 	return actions, nil
-}
-
-// toSet turns a slice into a set for quick filtering.
-func toSet(items []string) map[string]struct{} {
-	if len(items) == 0 {
-		return nil
-	}
-	out := make(map[string]struct{}, len(items))
-	for _, v := range items {
-		v = strings.TrimSpace(v)
-		if v == "" {
-			continue
-		}
-		out[v] = struct{}{}
-	}
-	return out
 }
 
 // shouldSkip determines if a policy should be ignored based on the requested

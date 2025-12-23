@@ -33,15 +33,13 @@ func newRubyGemsHandler(upstream string, policies PolicyEvaluator) (*rubyGemsHan
 func (h *rubyGemsHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	name, version, operation := parseRubyGemsPath(r.URL.Path)
 
-	info := requestInfo{
+	h.serveRequest(w, r, "rubygems_artifact_request", requestInfo{
 		Name:       name,
 		Version:    version,
-		HasVersion: strings.TrimSpace(version) != "",
+		HasVersion: hasVersion(version),
 		Operation:  operation,
 		Ecosystem:  "rubygems",
-	}
-	payload := h.buildPayload(r.Context(), info, r.URL.Path)
-	h.serve(w, r, "rubygems_artifact_request", info, payload)
+	})
 }
 
 // parseRubyGemsPath extracts gem name, version, and operation from a RubyGems

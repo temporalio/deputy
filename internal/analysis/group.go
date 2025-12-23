@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/picatz/deputy/internal/collections"
+	"github.com/picatz/deputy/internal/ecosystem"
 	"golang.org/x/mod/semver"
 )
 
@@ -19,6 +20,19 @@ var trustedAliasPrefixes = []string{
 	"MSRC-",
 	"GSD-",
 }
+
+// ID priority constants for sorting vulnerability IDs.
+// Lower numbers indicate higher priority when selecting the primary ID.
+const (
+	// IDPriorityCVE is the highest priority for CVE identifiers.
+	IDPriorityCVE = 1
+	// IDPriorityGO is the priority for Go vulnerability database identifiers.
+	IDPriorityGO = 2
+	// IDPriorityGHSA is the priority for GitHub Security Advisory identifiers.
+	IDPriorityGHSA = 3
+	// IDPriorityOther is the default priority for other identifier types.
+	IDPriorityOther = 4
+)
 
 // HasCommonAlias reports if two alias sets intersect.
 func HasCommonAlias(a1, a2 []string) bool {
@@ -38,15 +52,15 @@ func HasCommonAlias(a1, a2 []string) bool {
 // Lower numbers indicate higher priority (CVE > GO > GHSA > others).
 func getIDPriority(id string) int {
 	if strings.HasPrefix(id, "CVE-") {
-		return 1
+		return IDPriorityCVE
 	}
 	if strings.HasPrefix(id, "GO-") {
-		return 2
+		return IDPriorityGO
 	}
 	if strings.HasPrefix(id, "GHSA-") {
-		return 3
+		return IDPriorityGHSA
 	}
-	return 4
+	return IDPriorityOther
 }
 
 // isTrustedAlias checks if a vulnerability ID belongs to a known, trusted
@@ -375,25 +389,22 @@ func incrementSeverityStats(stats *VulnerabilityStats, severity, severityType st
 		stats.UnknownSev++
 		return
 	}
-	// For GHSA, try textual severity first
+
+	// For GHSA, try textual severity first using ParseSeverity
 	if severityType == "GHSA" {
-		switch strings.ToUpper(severity) {
-		case "CRITICAL":
-			stats.CriticalSev++
-			return
-		case "HIGH":
-			stats.HighSeverity++
-			return
-		case "MEDIUM", "MODERATE":
-			stats.MedSeverity++
-			return
-		case "LOW":
-			stats.LowSeverity++
+		if sev := ParseSeverity(severity); sev != SeverityUnknown {
+			incrementStatsBySeverity(stats, sev)
 			return
 		}
 	}
+
 	// Fall back to CVSS score parsing
 	sev := SeverityFromCVSS(ParseCVSSScore(severity))
+	incrementStatsBySeverity(stats, sev)
+}
+
+// incrementStatsBySeverity updates the appropriate stats counter for the given severity level.
+func incrementStatsBySeverity(stats *VulnerabilityStats, sev Severity) {
 	switch sev {
 	case SeverityCritical:
 		stats.CriticalSev++
@@ -453,12 +464,7 @@ func FindBestFixedVersion(fixed []string, current string) string {
 }
 
 // normalizeGoVersion ensures the Go version string starts with "v".
+// Delegates to the canonical implementation in the ecosystem package.
 func normalizeGoVersion(v string) string {
-	if v == "" {
-		return v
-	}
-	if strings.HasPrefix(v, "v") {
-		return v
-	}
-	return "v" + v
+	return ecosystem.Go.NormalizeVersion(v)
 }

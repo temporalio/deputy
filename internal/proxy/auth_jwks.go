@@ -203,7 +203,7 @@ func (c *JWKSCache) refreshLoop() {
 		case <-ticker.C:
 			ctx, cancel := context.WithTimeout(context.Background(), defaultJWKSHTTPTimeout)
 			if err := c.refresh(ctx); err != nil {
-				slog.Warn("JWKS refresh failed", "url", c.url, "error", err)
+				slog.WarnContext(ctx, "JWKS refresh failed", "url", c.url, "error", err)
 			}
 			cancel()
 		}

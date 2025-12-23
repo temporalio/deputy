@@ -9,6 +9,7 @@ import (
 	"github.com/google/osv-scalibr/semantic"
 	"golang.org/x/mod/semver"
 
+	"github.com/picatz/deputy/internal/ecosystem"
 	"github.com/picatz/deputy/internal/repository/workspace"
 )
 
@@ -112,14 +113,9 @@ func GetModuleRoot(canonicalName string) string {
 
 // normalizeGoVersion ensures semantic versions are prefixed with a leading 'v'
 // so they can be safely compared with golang.org/x/mod/semver utilities.
+// Delegates to the canonical implementation in the ecosystem package.
 func normalizeGoVersion(v string) string {
-	if v == "" {
-		return v
-	}
-	if strings.HasPrefix(v, "v") {
-		return v
-	}
-	return "v" + v
+	return ecosystem.Go.NormalizeVersion(v)
 }
 
 // NormalizeGopkgInURL converts gopkg.in URLs to their canonical GitHub repository names.

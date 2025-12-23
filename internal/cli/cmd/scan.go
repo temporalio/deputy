@@ -112,11 +112,13 @@ type scanExecution struct {
 }
 
 // Close cleans up any resources associated with the scan execution,
-// such as temporary directories created during cloning.
-func (se *scanExecution) Close() {
+// such as temporary directories created during cloning. Returns nil
+// since cleanup functions do not report errors.
+func (se *scanExecution) Close() error {
 	if se != nil && se.cleanup != nil {
 		se.cleanup()
 	}
+	return nil
 }
 
 // NewScanner returns a Scanner configured with the default inventory collection
@@ -142,21 +144,33 @@ func (s *Scanner) queryOSV(ctx context.Context, inputs []analysis.PkgInput) ([]a
 	return query(ctx, client, inputs)
 }
 
-// executeScan performs the core scanning logic: resolving the target, collecting inventory,
-// and querying for vulnerabilities. It returns a scanExecution object containing the results.
-func (s *Scanner) executeScan(ctx context.Context, repoArg, ref string, refProvided bool, scanOpts inv.ScanOptions, beforeT, afterT time.Time, errW io.Writer) (*scanExecution, error) {
-	targetInput := strings.TrimSpace(repoArg)
-	if targetInput == "" {
+// resolvedTarget holds the result of resolving a scan target input.
+type resolvedTarget struct {
+	mat           targets.Materialized
+	workspace     workspace.FS
+	localRepoPath string
+	displayPath   string
+	ref           string
+	cloned        bool
+	cleanup       func()
+}
+
+// resolveTarget resolves the input target string to a materialized target with
+// local filesystem access. Returns workspace, paths, and cleanup function.
+func resolveTarget(ctx context.Context, targetInput, ref string) (*resolvedTarget, error) {
+	if targetInput = strings.TrimSpace(targetInput); targetInput == "" {
 		wd, err := os.Getwd()
 		if err != nil {
 			return nil, fmt.Errorf("failed to get current directory: %w", err)
 		}
 		targetInput = wd
 	}
+
 	mOpts := map[string]string{}
 	if ref != "" {
 		mOpts["ref"] = ref
 	}
+
 	mat, err := targets.Open(ctx, targetInput, mOpts)
 	if err != nil {
 		if errors.Is(err, targets.ErrNoProvider) {
@@ -164,6 +178,7 @@ func (s *Scanner) executeScan(ctx context.Context, repoArg, ref string, refProvi
 		}
 		return nil, err
 	}
+
 	cleanup := func() {}
 	if mat.Cleanup != nil {
 		cleanup = mat.Cleanup
@@ -191,6 +206,7 @@ func (s *Scanner) executeScan(ctx context.Context, repoArg, ref string, refProvi
 	if abs, err := filepath.Abs(localRepoPath); err == nil {
 		localRepoPath = abs
 	}
+
 	displayPath := targetInput
 	if mat.Meta.Target != "" {
 		displayPath = mat.Meta.Target
@@ -200,57 +216,107 @@ func (s *Scanner) executeScan(ctx context.Context, repoArg, ref string, refProvi
 	}
 	cloned := strings.EqualFold(mat.Meta.Provenance["cloned"], "true")
 
+	return &resolvedTarget{
+		mat:           mat,
+		workspace:     ws,
+		localRepoPath: localRepoPath,
+		displayPath:   displayPath,
+		ref:           ref,
+		cloned:        cloned,
+		cleanup:       cleanup,
+	}, nil
+}
+
+// directModuleInfo holds the resolved direct module information and manifest resolver.
+type directModuleInfo struct {
+	goDirect map[string]bool
+	resolver manifestResolver
+}
+
+// resolveDirectModules determines direct Go modules and manifest resolver based on
+// the effective reference and workspace/repository state.
+func resolveDirectModules(localRepoPath, effRef string, ws workspace.FS) directModuleInfo {
+	goDirect := map[string]bool{"stdlib": true}
+	var resolver manifestResolver = workspaceManifestResolver{ws: ws}
+
+	if strings.EqualFold(effRef, "HEAD") || strings.EqualFold(effRef, "HEAD~0") {
+		if ws != nil {
+			goDirect = compare.CollectGoDirectModulesFromWorkspace(ws)
+		}
+		return directModuleInfo{goDirect: goDirect, resolver: resolver}
+	}
+
+	// For non-HEAD refs, try to resolve from git history
+	repo, err := git.PlainOpen(localRepoPath)
+	if err != nil {
+		return directModuleInfo{goDirect: goDirect, resolver: resolver}
+	}
+
+	h, err := gitx.ResolveRevisionEnhanced(repo, effRef)
+	if err != nil || h == nil {
+		return directModuleInfo{goDirect: goDirect, resolver: resolver}
+	}
+
+	if direct, derr := compare.CollectGoDirectModulesFromCommit(repo, *h); derr == nil {
+		goDirect = direct
+	}
+	resolver = gitManifestResolver{repo: repo, hash: *h}
+
+	return directModuleInfo{goDirect: goDirect, resolver: resolver}
+}
+
+// executeScan performs the core scanning logic: resolving the target, collecting inventory,
+// and querying for vulnerabilities. It returns a scanExecution object containing the results.
+func (s *Scanner) executeScan(ctx context.Context, repoArg, ref string, refProvided bool, scanOpts inv.ScanOptions, beforeT, afterT time.Time, errW io.Writer) (*scanExecution, error) {
+	// Resolve the target to a local filesystem path
+	target, err := resolveTarget(ctx, repoArg, ref)
+	if err != nil {
+		return nil, err
+	}
+	ref = target.ref
+
+	// Compute effective reference
 	effRef := refOrHEAD(ref)
 	if strings.EqualFold(effRef, "HEAD") && refProvided {
 		effRef = "HEAD~0"
 	}
 
-	pkgs, err := s.collectInventory(ctx, localRepoPath, effRef, scanOpts)
+	// Collect inventory
+	pkgs, err := s.collectInventory(ctx, target.localRepoPath, effRef, scanOpts)
 	if err != nil {
-		cleanup()
+		target.cleanup()
 		return nil, fmt.Errorf("failed to collect inventory: %w", err)
 	}
 
-	goDirect := map[string]bool{"stdlib": true}
-	var resolver manifestResolver = workspaceManifestResolver{ws: ws}
-	if strings.EqualFold(effRef, "HEAD") || strings.EqualFold(effRef, "HEAD~0") {
-		if ws != nil {
-			goDirect = compare.CollectGoDirectModulesFromWorkspace(ws)
-		}
-	} else {
-		if repo, err := git.PlainOpen(localRepoPath); err == nil {
-			if h, err := gitx.ResolveRevisionEnhanced(repo, effRef); err == nil && h != nil {
-				if direct, derr := compare.CollectGoDirectModulesFromCommit(repo, *h); derr == nil {
-					goDirect = direct
-				}
-				resolver = gitManifestResolver{repo: repo, hash: *h}
-			}
-		}
-	}
+	// Resolve direct modules and manifest resolver
+	modInfo := resolveDirectModules(target.localRepoPath, effRef, target.workspace)
 
-	inputs := packagesToInputs(pkgs, packageInputOptions{GoDirect: goDirect, Resolver: resolver})
+	// Query vulnerabilities
+	inputs := packagesToInputs(pkgs, packageInputOptions{GoDirect: modInfo.goDirect, Resolver: modInfo.resolver})
 	vulns, queryErr := s.queryOSV(ctx, inputs)
 	if queryErr != nil {
 		fmt.Fprintf(errW, "Warning: OSV query failed: %v\n", queryErr)
 	}
+
+	// Apply time-based filtering if specified
 	if !beforeT.IsZero() || !afterT.IsZero() {
 		vulns = analysis.FilterVulnerabilitiesByPublished(vulns, afterT, beforeT)
 	}
 
-	commitHash, originURL := getRepoMetadata(localRepoPath, ref)
+	commitHash, originURL := getRepoMetadata(target.localRepoPath, ref)
 
 	return &scanExecution{
-		displayPath:     displayPath,
-		localRepoPath:   localRepoPath,
+		displayPath:     target.displayPath,
+		localRepoPath:   target.localRepoPath,
 		requestedRef:    ref,
 		effectiveRef:    effRef,
 		packages:        pkgs,
-		goDirect:        goDirect,
+		goDirect:        modInfo.goDirect,
 		vulnerabilities: vulns,
 		commitHash:      commitHash,
 		originURL:       originURL,
-		cloned:          cloned,
-		cleanup:         cleanup,
+		cloned:          target.cloned,
+		cleanup:         target.cleanup,
 	}, nil
 }
 
@@ -367,7 +433,7 @@ WORKFLOW EXAMPLES:
 	}
 
 	scanCmd.Flags().StringP("ref", "r", "HEAD", "Git reference to scan (branch, tag, or commit)")
-	scanCmd.PersistentFlags().StringSliceP("ecosystems", "e", []string{"all"}, "Ecosystems to scan (default: all supported)")
+	scanCmd.PersistentFlags().StringSliceP("ecosystems", "e", []string{"all"}, "Ecosystems to scan: go, npm, pypi, maven, rubygems, cargo, nuget, hex, pub, cocoapods, packagist, github-actions, haskell, r, cpp (default: all)")
 	scanCmd.Flags().StringP("output", "o", "", "Output file (default: stdout)")
 	scanCmd.Flags().StringP("format", "f", "text", "Output format (text, json)")
 	scanCmd.Flags().Bool("ignore-unfixed", false, "Ignore vulnerabilities without fixes")
@@ -518,27 +584,15 @@ WORKFLOW EXAMPLES:
 // scan execution, policy evaluation, and output formatting.
 func (s *Scanner) runScan(cmd *cobra.Command, args []string) error {
 	ctx := cmd.Context()
-
-	ref, _ := cmd.Flags().GetString("ref")
-	ecos, _ := cmd.Flags().GetStringSlice("ecosystems")
-	scanOpts := inv.ScanOptions{Ecosystems: ecos}
-	outPath, _ := cmd.Flags().GetString("output")
-	format, _ := cmd.Flags().GetString("format")
-	ignoreUnfixed, _ := cmd.Flags().GetBool("ignore-unfixed")
-	publishedBeforeStr, _ := cmd.Flags().GetString("published-before")
-	publishedAfterStr, _ := cmd.Flags().GetString("published-after")
-	asOfStr, _ := cmd.Flags().GetString("as-of")
-	policyPaths, _ := cmd.Flags().GetStringArray("policy")
-	showSymbols, _ := cmd.Flags().GetBool("show-symbols")
-	showDBInfo, _ := cmd.Flags().GetBool("show-db-info")
-	displayOpts := vulnDisplayOptions{showSymbols: showSymbols, showDatabaseInfo: showDBInfo}
+	flags := extractScanFlags(cmd)
 
 	repoArg := ""
 	if len(args) > 0 {
 		repoArg = strings.TrimSpace(args[0])
 	}
-	beforeT, afterT := parsePublishedFilters(cmd.ErrOrStderr(), asOfStr, publishedBeforeStr, publishedAfterStr)
-	exec, err := s.executeScan(ctx, repoArg, ref, cmd.Flags().Changed("ref"), scanOpts, beforeT, afterT, cmd.ErrOrStderr())
+
+	beforeT, afterT := flags.parsePublishedTimes(cmd.ErrOrStderr())
+	exec, err := s.executeScan(ctx, repoArg, flags.Ref, cmd.Flags().Changed("ref"), flags.scanOptions(), beforeT, afterT, cmd.ErrOrStderr())
 	if err != nil {
 		return err
 	}
@@ -548,34 +602,30 @@ func (s *Scanner) runScan(cmd *cobra.Command, args []string) error {
 	pkgs := exec.packages
 	goDirect := exec.goDirect
 	vulnsForPolicy := vulns
-	if ignoreUnfixed {
+	if flags.IgnoreUnfixed {
 		vulnsForPolicy = filterUnfixed(vulns)
 	}
-	report := buildScanReport(exec.displayPath, ref, exec.commitHash, vulnsForPolicy, len(pkgs))
-	policyActions, err := runScanPolicies(ctx, policyPaths, report, cmd.ErrOrStderr())
+	report := buildScanReport(exec.displayPath, flags.Ref, exec.commitHash, vulnsForPolicy, len(pkgs))
+	policyActions, err := runScanPolicies(ctx, flags.PolicyPaths, report, cmd.ErrOrStderr())
 	if err != nil {
 		return err
 	}
 	policyFindings := actionsToPolicyFindings(policyActions)
 	report.PolicyFindings = policyFindings
 
-	var w io.Writer = cmd.OutOrStdout()
-	if outPath != "" && outPath != "-" {
-		f, err := os.Create(outPath)
-		if err != nil {
-			return fmt.Errorf("failed to create output file: %w", err)
-		}
-		defer f.Close()
-		w = f
+	out, err := openOutputWriter(cmd, flags.OutPath)
+	if err != nil {
+		return err
 	}
+	defer out.Close()
 
-	switch strings.ToLower(format) {
-	case "", "text":
-		return s.outputText(w, cmd.ErrOrStderr(), exec.displayPath, ref, exec.commitHash, exec.originURL, pkgs, goDirect, vulns, ignoreUnfixed, policyFindings, displayOpts)
-	case "json":
-		return s.outputJSON(w, exec.displayPath, ref, exec.commitHash, vulns, len(pkgs), ignoreUnfixed, policyFindings)
+	switch strings.ToLower(flags.Format) {
+	case "", FormatText:
+		return s.outputText(out.Writer, cmd.ErrOrStderr(), exec.displayPath, flags.Ref, exec.commitHash, exec.originURL, pkgs, goDirect, vulns, flags.IgnoreUnfixed, policyFindings, flags.displayOptions())
+	case FormatJSON:
+		return s.outputJSON(out.Writer, exec.displayPath, flags.Ref, exec.commitHash, vulns, len(pkgs), flags.IgnoreUnfixed, policyFindings)
 	default:
-		return fmt.Errorf("unsupported --format %q (use text|json)", format)
+		return fmt.Errorf("unsupported --format %q (use text|json)", flags.Format)
 	}
 }
 
@@ -586,20 +636,8 @@ func (s *Scanner) runScanDir(cmd *cobra.Command, args []string) error {
 	}
 
 	ctx := cmd.Context()
+	flags := extractScanFlags(cmd)
 	path := strings.TrimSpace(args[0])
-	outPath, _ := cmd.Flags().GetString("output")
-	format, _ := cmd.Flags().GetString("format")
-	ignoreUnfixed, _ := cmd.Flags().GetBool("ignore-unfixed")
-	publishedBeforeStr, _ := cmd.Flags().GetString("published-before")
-	publishedAfterStr, _ := cmd.Flags().GetString("published-after")
-	asOfStr, _ := cmd.Flags().GetString("as-of")
-	policyPaths, _ := cmd.Flags().GetStringArray("policy")
-	showSymbols, _ := cmd.Flags().GetBool("show-symbols")
-	showDBInfo, _ := cmd.Flags().GetBool("show-db-info")
-	displayOpts := vulnDisplayOptions{showSymbols: showSymbols, showDatabaseInfo: showDBInfo}
-
-	ecos, _ := cmd.Flags().GetStringSlice("ecosystems")
-	scanOpts := inv.ScanOptions{Ecosystems: ecos}
 
 	ws, err := workspace.NewDir(path)
 	if err != nil {
@@ -607,7 +645,7 @@ func (s *Scanner) runScanDir(cmd *cobra.Command, args []string) error {
 	}
 	defer ws.Close()
 
-	pkgs, err := inv.ScanPackagesWorking(ctx, ws, scanOpts)
+	pkgs, err := inv.ScanPackagesWorking(ctx, ws, flags.scanOptions())
 	if err != nil {
 		return fmt.Errorf("failed to scan packages: %w", err)
 	}
@@ -619,38 +657,34 @@ func (s *Scanner) runScanDir(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		fmt.Fprintf(cmd.ErrOrStderr(), "Warning: OSV query failed: %v\n", err)
 	}
-	beforeT, afterT := parsePublishedFilters(cmd.ErrOrStderr(), asOfStr, publishedBeforeStr, publishedAfterStr)
+	beforeT, afterT := flags.parsePublishedTimes(cmd.ErrOrStderr())
 	if !beforeT.IsZero() || !afterT.IsZero() {
 		vulns = analysis.FilterVulnerabilitiesByPublished(vulns, afterT, beforeT)
 	}
 	vulnsForPolicy := vulns
-	if ignoreUnfixed {
+	if flags.IgnoreUnfixed {
 		vulnsForPolicy = filterUnfixed(vulns)
 	}
 	report := buildScanReport(path, "", "", vulnsForPolicy, len(pkgs))
-	policyActions, err := runScanPolicies(ctx, policyPaths, report, cmd.ErrOrStderr())
+	policyActions, err := runScanPolicies(ctx, flags.PolicyPaths, report, cmd.ErrOrStderr())
 	if err != nil {
 		return err
 	}
 	policyFindings := actionsToPolicyFindings(policyActions)
 
-	var w io.Writer = cmd.OutOrStdout()
-	if outPath != "" && outPath != "-" {
-		f, err := os.Create(outPath)
-		if err != nil {
-			return fmt.Errorf("failed to create output file: %w", err)
-		}
-		defer f.Close()
-		w = f
+	out, err := openOutputWriter(cmd, flags.OutPath)
+	if err != nil {
+		return err
 	}
+	defer out.Close()
 
-	switch strings.ToLower(format) {
-	case "", "text":
-		return s.outputTextDir(w, cmd.ErrOrStderr(), path, vulns, ignoreUnfixed, policyFindings, displayOpts)
-	case "json":
-		return s.outputJSON(w, path, "", "", vulns, len(pkgs), ignoreUnfixed, policyFindings)
+	switch strings.ToLower(flags.Format) {
+	case "", FormatText:
+		return s.outputTextDir(out.Writer, cmd.ErrOrStderr(), path, vulns, flags.IgnoreUnfixed, policyFindings, flags.displayOptions())
+	case FormatJSON:
+		return s.outputJSON(out.Writer, path, "", "", vulns, len(pkgs), flags.IgnoreUnfixed, policyFindings)
 	default:
-		return fmt.Errorf("unsupported --format %q (use text|json)", format)
+		return fmt.Errorf("unsupported --format %q (use text|json)", flags.Format)
 	}
 }
 
@@ -661,18 +695,8 @@ func (s *Scanner) runScanSBOM(cmd *cobra.Command, args []string) error {
 	}
 
 	ctx := cmd.Context()
+	flags := extractScanFlags(cmd)
 	input := strings.TrimSpace(args[0])
-	outPath, _ := cmd.Flags().GetString("output")
-	format, _ := cmd.Flags().GetString("format")
-	ignoreUnfixed, _ := cmd.Flags().GetBool("ignore-unfixed")
-	publishedBeforeStr, _ := cmd.Flags().GetString("published-before")
-	publishedAfterStr, _ := cmd.Flags().GetString("published-after")
-	asOfStr, _ := cmd.Flags().GetString("as-of")
-	inFmt, _ := cmd.Flags().GetString("input-format")
-	policyPaths, _ := cmd.Flags().GetStringArray("policy")
-	showSymbols, _ := cmd.Flags().GetBool("show-symbols")
-	showDBInfo, _ := cmd.Flags().GetBool("show-db-info")
-	displayOpts := vulnDisplayOptions{showSymbols: showSymbols, showDatabaseInfo: showDBInfo}
 
 	var r io.Reader
 	if input == "-" {
@@ -691,7 +715,7 @@ func (s *Scanner) runScanSBOM(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to read input: %w", err)
 	}
 
-	pkgs, direct, err := parseSBOMPackages(data, inFmt)
+	pkgs, direct, err := parseSBOMPackages(data, flags.InputFormat)
 	if err != nil {
 		return fmt.Errorf("failed to parse SBOM: %w", err)
 	}
@@ -702,47 +726,43 @@ func (s *Scanner) runScanSBOM(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		fmt.Fprintf(cmd.ErrOrStderr(), "Warning: OSV query failed: %v\n", err)
 	}
-	beforeT, afterT := parsePublishedFilters(cmd.ErrOrStderr(), asOfStr, publishedBeforeStr, publishedAfterStr)
+	beforeT, afterT := flags.parsePublishedTimes(cmd.ErrOrStderr())
 	if !beforeT.IsZero() || !afterT.IsZero() {
 		vulns = analysis.FilterVulnerabilitiesByPublished(vulns, afterT, beforeT)
 	}
 	vulnsForPolicy := vulns
-	if ignoreUnfixed {
+	if flags.IgnoreUnfixed {
 		vulnsForPolicy = filterUnfixed(vulns)
 	}
 	report := buildScanReport("sbom", "", "", vulnsForPolicy, len(pkgs))
-	policyActions, err := runScanPolicies(ctx, policyPaths, report, cmd.ErrOrStderr())
+	policyActions, err := runScanPolicies(ctx, flags.PolicyPaths, report, cmd.ErrOrStderr())
 	if err != nil {
 		return err
 	}
 	policyFindings := actionsToPolicyFindings(policyActions)
 
-	var w io.Writer = cmd.OutOrStdout()
-	if outPath != "" && outPath != "-" {
-		f, err := os.Create(outPath)
-		if err != nil {
-			return fmt.Errorf("failed to create output file: %w", err)
-		}
-		defer f.Close()
-		w = f
+	out, err := openOutputWriter(cmd, flags.OutPath)
+	if err != nil {
+		return err
 	}
+	defer out.Close()
 
-	switch strings.ToLower(format) {
-	case "", "text":
+	switch strings.ToLower(flags.Format) {
+	case "", FormatText:
 		doc := scanResultsHeaderDoc("SBOM input", "", "", "")
-		_ = doc.Render(w, output.UIStyles())
+		_ = doc.Render(out.Writer, output.UIStyles())
 		vulnsEff := vulns
-		if ignoreUnfixed {
+		if flags.IgnoreUnfixed {
 			vulnsEff = filterUnfixed(vulns)
 			fmt.Fprintln(cmd.ErrOrStderr(), "  "+ui.StyleMeta.Render("Note: ignoring unfixed vulnerabilities (--ignore-unfixed)"))
 		}
-		DisplayVulnerabilities(w, vulnsEff, displayOpts)
-		DisplayPolicyFindings(w, policyFindings)
+		DisplayVulnerabilities(out.Writer, vulnsEff, flags.displayOptions())
+		DisplayPolicyFindings(out.Writer, policyFindings)
 		return nil
-	case "json":
-		return s.outputJSON(w, "sbom", "", "", vulns, len(pkgs), ignoreUnfixed, policyFindings)
+	case FormatJSON:
+		return s.outputJSON(out.Writer, "sbom", "", "", vulns, len(pkgs), flags.IgnoreUnfixed, policyFindings)
 	default:
-		return fmt.Errorf("unsupported --format %q (use text|json)", format)
+		return fmt.Errorf("unsupported --format %q (use text|json)", flags.Format)
 	}
 }
 
@@ -777,13 +797,13 @@ func scanResultsHeaderDoc(target, ref, commitHash, originURL string) output.Doc 
 // based on the provided git reference, and delegates to the appropriate scanning function.
 func collectInventory(ctx context.Context, repoPath, gitRef string, opts inv.ScanOptions) ([]*extractor.Package, error) {
 	ref := refOrHEAD(gitRef)
-	if strings.EqualFold(ref, "HEAD") {
-		if _, err := git.PlainOpen(repoPath); err == nil {
-			return scanPackagesWorkingAtPath(ctx, repoPath, opts)
-		}
+
+	// HEAD or empty ref means scan the working directory
+	if strings.EqualFold(ref, gitx.RefHEAD) {
 		return scanPackagesWorkingAtPath(ctx, repoPath, opts)
 	}
 
+	// For specific refs, resolve and scan at that commit
 	repo, err := git.PlainOpen(repoPath)
 	if err != nil {
 		return nil, err
@@ -816,10 +836,10 @@ func scanPackagesAtCommit(ctx context.Context, path string, hash plumbing.Hash, 
 	return inv.ScanPackagesAtCommitSnapshot(ctx, repo, hash, opts)
 }
 
-// refOrHEAD returns "HEAD" if the input reference is empty, otherwise returns the input.
+// refOrHEAD returns RefHEAD if the input reference is empty, otherwise returns the input.
 func refOrHEAD(r string) string {
 	if strings.TrimSpace(r) == "" {
-		return "HEAD"
+		return gitx.RefHEAD
 	}
 	return r
 }
@@ -853,19 +873,7 @@ func parsePublishedFilters(errW io.Writer, asOfStr, beforeStr, afterStr string) 
 
 // filterUnfixed returns a slice of vulnerabilities that have at least one fixed version.
 func filterUnfixed(vs []analysis.Vulnerability) []analysis.Vulnerability {
-	if len(vs) == 0 {
-		return vs
-	}
-
-	out := make([]analysis.Vulnerability, 0, len(vs))
-	for _, v := range vs {
-		if len(v.FixedVersions) > 0 {
-			if fix := analysis.FindBestFixedVersion(v.FixedVersions, v.Version); fix != "" {
-				out = append(out, v)
-			}
-		}
-	}
-	return out
+	return analysis.FilterVulnerabilities(vs, analysis.HasFix())
 }
 
 // getRepoMetadata attempts to resolve the commit hash and origin URL for the given repository path and reference.

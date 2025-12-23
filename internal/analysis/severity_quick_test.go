@@ -71,21 +71,6 @@ func TestParseSeverityRoundTrip(t *testing.T) {
 	}
 }
 
-// TestEcosystemRoundTripQuick uses property-based testing to verify round-trip conversion.
-func TestEcosystemRoundTripQuick(t *testing.T) {
-	f := func(a uint8) bool {
-		// Map to valid Ecosystem values (0-8)
-		eco := Ecosystem(a % 9)
-		str := eco.String()
-		parsed := ParseEcosystem(str)
-		return parsed == eco
-	}
-
-	if err := quick.Check(f, nil); err != nil {
-		t.Error(err)
-	}
-}
-
 // TestSeverityScoreMonotonicity verifies that score increases with severity.
 func TestSeverityScoreMonotonicity(t *testing.T) {
 	f := func(a, b uint8) bool {
