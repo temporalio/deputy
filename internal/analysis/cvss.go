@@ -5,6 +5,7 @@ import (
 
 	gocvss30 "github.com/pandatix/go-cvss/30"
 	gocvss31 "github.com/pandatix/go-cvss/31"
+	gocvss40 "github.com/pandatix/go-cvss/40"
 )
 
 // parseFloat extracts a float64 from a string, returning -1 on error.
@@ -46,16 +47,13 @@ func parseFloat(s string) float64 {
 
 // ParseCVSSScore interprets common CVSS representations and returns the base score or -1.
 func ParseCVSSScore(severity string) float64 {
-	// Standard CVSS vector strings (CVSS:3.x/...)
-	if strings.HasPrefix(severity, "CVSS:3.1/") {
-		if v, err := gocvss31.ParseVector(severity); err == nil {
-			return v.BaseScore()
-		}
+	severity = strings.TrimSpace(severity)
+	if severity == "" {
+		return -1
 	}
-	if strings.HasPrefix(severity, "CVSS:3.0/") {
-		if v, err := gocvss30.ParseVector(severity); err == nil {
-			return v.BaseScore()
-		}
+
+	if score := parseCVSSVector(severity); score >= 0 {
+		return score
 	}
 
 	// Vector with Base: score
@@ -69,10 +67,12 @@ func ParseCVSSScore(severity string) float64 {
 			}
 		}
 	}
-	// Direct numeric value
-	if score := parseFloat(severity); score >= 0 {
+
+	// Direct numeric value or score embedded in text (e.g., "vector 9.8").
+	if score := parseScoreToken(severity); score >= 0 {
 		return score
 	}
+
 	// Common labels
 	switch strings.ToLower(severity) {
 	case "critical":
@@ -86,4 +86,58 @@ func ParseCVSSScore(severity string) float64 {
 	default:
 		return -1.0
 	}
+}
+
+func parseCVSSVector(severity string) float64 {
+	for token := range strings.FieldsSeq(severity) {
+		if score := parseCVSSVectorToken(token); score >= 0 {
+			return score
+		}
+	}
+	return -1
+}
+
+func parseCVSSVectorToken(token string) float64 {
+	if strings.HasPrefix(token, "CVSS:4.0/") {
+		if v, err := gocvss40.ParseVector(token); err == nil {
+			return v.Score()
+		}
+		return -1
+	}
+	if strings.HasPrefix(token, "CVSS:3.1/") {
+		if v, err := gocvss31.ParseVector(token); err == nil {
+			return v.BaseScore()
+		}
+		return -1
+	}
+	if strings.HasPrefix(token, "CVSS:3.0/") {
+		if v, err := gocvss30.ParseVector(token); err == nil {
+			return v.BaseScore()
+		}
+		return -1
+	}
+	if strings.HasPrefix(token, "CVSS:") {
+		return -1
+	}
+	if strings.Contains(token, "AV:") {
+		if v, err := gocvss40.ParseVector("CVSS:4.0/" + token); err == nil {
+			return v.Score()
+		}
+		if v, err := gocvss31.ParseVector("CVSS:3.1/" + token); err == nil {
+			return v.BaseScore()
+		}
+		if v, err := gocvss30.ParseVector("CVSS:3.0/" + token); err == nil {
+			return v.BaseScore()
+		}
+	}
+	return -1
+}
+
+func parseScoreToken(severity string) float64 {
+	for token := range strings.FieldsSeq(severity) {
+		if score := parseFloat(token); score >= 0 {
+			return score
+		}
+	}
+	return -1
 }

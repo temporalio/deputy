@@ -4,6 +4,7 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/picatz/deputy/internal/analysis"
 )
 
 // Predefined lipgloss style palette used by CLI presentation layers. Grouping
@@ -80,7 +81,7 @@ func SeverityLabel(severity, severityType string) string {
 	}
 
 	// Try to parse as CVSS score
-	score := parseCVSSScoreSimple(severity)
+	score := analysis.ParseCVSSScore(severity)
 	return ScoreLabel(score)
 }
 
@@ -107,110 +108,4 @@ func isGHSASeverity(sev string) bool {
 		return true
 	}
 	return false
-}
-
-// parseCVSSScoreSimple extracts a CVSS score from common formats.
-// Returns -1 if no score could be parsed.
-func parseCVSSScoreSimple(severity string) float64 {
-	severity = strings.TrimSpace(severity)
-	if severity == "" {
-		return -1
-	}
-
-	// Try direct float parse first
-	var score float64
-	if err := parseFloat(severity, &score); err == nil && score >= 0 && score <= 10 {
-		return score
-	}
-
-	// Look for CVSS vector pattern and extract score
-	if strings.Contains(severity, "CVSS") || strings.Contains(severity, "AV:") {
-		// Try to find a floating point number in the string
-		parts := strings.FieldsSeq(severity)
-		for p := range parts {
-			if err := parseFloat(p, &score); err == nil && score >= 0 && score <= 10 {
-				return score
-			}
-		}
-		// Estimate from vector if present
-		return estimateScoreFromVector(severity)
-	}
-
-	return -1
-}
-
-// parseFloat is a simple float parser helper that parses a float from a string.
-func parseFloat(s string, out *float64) error {
-	s = strings.TrimSpace(s)
-	if s == "" {
-		return errParseFloat
-	}
-	var n float64
-	var hasDot bool
-	var dec float64 = 0.1
-	for _, c := range s {
-		if c >= '0' && c <= '9' {
-			if hasDot {
-				n += float64(c-'0') * dec
-				dec /= 10
-			} else {
-				n = n*10 + float64(c-'0')
-			}
-		} else if c == '.' && !hasDot {
-			hasDot = true
-		} else {
-			break
-		}
-	}
-	*out = n
-	if n > 0 || (s[0] == '0' && (len(s) == 1 || s[1] == '.')) {
-		return nil
-	}
-	return errParseFloat
-}
-
-var errParseFloat = &parseFloatError{}
-
-type parseFloatError struct{}
-
-func (e *parseFloatError) Error() string { return "parse float error" }
-
-// estimateScoreFromVector provides a rough severity estimate from CVSS vector components.
-func estimateScoreFromVector(vector string) float64 {
-	// Very rough heuristic based on attack vector and impact
-	vector = strings.ToUpper(vector)
-	score := 5.0 // Base medium
-
-	parts := make(map[string]struct{})
-	for part := range strings.SplitSeq(vector, "/") {
-		parts[part] = struct{}{}
-	}
-	has := func(s string) bool {
-		_, ok := parts[s]
-		return ok
-	}
-
-	if has("AV:N") {
-		score += 1.5 // Network accessible
-	}
-	if has("AC:L") {
-		score += 1.0 // Low complexity
-	}
-	if has("PR:N") {
-		score += 0.5 // No privileges required
-	}
-	if has("C:H") || has("I:H") || has("A:H") {
-		score += 1.5 // High impact
-	}
-	if has("C:N") && has("I:N") {
-		score -= 1.0 // No confidentiality/integrity impact
-	}
-
-	if score > 10 {
-		score = 9.9
-	}
-	if score < 0 {
-		score = 0
-	}
-	return score
 }
