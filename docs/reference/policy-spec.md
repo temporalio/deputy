@@ -32,7 +32,7 @@ policies:          # required, non-empty list
 
 ### Expansion semantics
 - Each var is expanded as `([expr]).map(name, BODY)[0]` from last to first, so each name is in scope for subsequent vars and rules.
-- CEL environment includes optional types, plus string helpers from `ext.Strings()` (e.g., `join`, `upper`, `upperAscii`, `lowerAscii`).
+- CEL environment includes optional types plus cel-go extensions: `ext.Strings`, `ext.Regex`, `ext.Lists`, `ext.Sets`, `ext.Bindings`, `ext.Encoders`, and `ext.Math`. See the [policy framework](policy-framework.md#cel-helpers-and-extensions) for details.
 
 ### Entrypoint inputs
 - Standard top-level identifiers include `request`, `pkg`, `vulnerabilities`, `vulnerability`, `jwt`, `changes`, `packages`, `sbom`, `config`, `env`, `dependency`, `plan`, `step`, `repo`, `cluster`, `component`, `findings`, and `change`. See the [policy inputs](policy-inputs.md) for the full list and example payloads.
@@ -72,7 +72,7 @@ policies:
       componentLicenses: 'component.?licenses.orValue([])'
       requestLicenses: 'request.?licenses.orValue([])'
       licenses_union: 'componentLicenses + requestLicenses'
-      normalized: 'licenses_union.map(l, l.upper())'
+      normalized: 'licenses_union.map(l, l.upperAscii())'
       forbidden: '["SSPL-1.0","AGPL-3.0-ONLY","AGPL-3.0","GPL-3.0","GPL-3.0-ONLY"]'
       in_scope: 'env.command in ["proxy","sbom","diff"]'
     rules:
@@ -114,7 +114,7 @@ policies:
 ## Tooling and tests
 - `deputy policy lint` rejects malformed bundles or CEL expressions.
 - `go test ./internal/policy` compiles all examples and runs entrypoint evaluations.
-- `ext.Strings()` is enabled by default; add more CEL extensions in `internal/policy/evaluator.go` if required.
+- CEL extensions are configured in `internal/policy/evaluator.go` if you need to audit or change the environment.
 
 ## Compatibility
 - Raw `.cel` files are not supported. Author structured bundles and load them directly.

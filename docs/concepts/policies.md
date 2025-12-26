@@ -53,6 +53,7 @@ deputy scan --policy policy/block-critical.yaml
 ## Learn more
 
 - [Policy framework](../reference/policy-framework.md)
+- [CEL language reference](../reference/policy-framework.md#cel-language-reference)
 - [Policy inputs](../reference/policy-inputs.md)
 - [Policy command reference](../commands/policy.md)
 - [Policy spec](../reference/policy-spec.md)

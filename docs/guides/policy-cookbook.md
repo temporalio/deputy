@@ -291,11 +291,17 @@ policies:
 # min-version.yaml
 policies:
   - name: minimum-go-version
+    vars:
+      parts: 'pkg.version.split(".")'
+      major: 'size(parts) > 0 ? int(parts[0]) : 0'
+      minor: 'size(parts) > 1 ? int(parts[1]) : 0'
+      numeric: 'pkg.version.matches("^\\d+\\.\\d+(\\.\\d+)?$")'
     rules:
       - action: warn
         when: |
           pkg.name == "stdlib" &&
-          semver(pkg.version) < semver("1.21.0")
+          numeric &&
+          (major < 1 || (major == 1 && minor < 21))
         reason: Go version below minimum supported
         remediation: Upgrade to Go 1.21+
 ```
@@ -419,15 +425,20 @@ $ deputy scan --policy production-bundle.json
 | `env.command` | string | `scan`, `diff`, `proxy`, etc. |
 | `env.entrypoint` | string | Current entrypoint (e.g., `scan_vulnerability`) |
 
-### CEL Functions
+### CEL Functions and Extensions
 
-| Function | Description |
+Deputy policies use standard CEL operators and macros (`has`, `exists`, `map`, `filter`) plus cel-go extensions. Key helpers available in Deputy:
+
+| Category | Functions |
 | --- | --- |
-| `semver(s)` | Parse semantic version for comparison |
-| `levenshteinWithin(a, b, n)` | Check edit distance ≤ n |
-| `matches(pattern)` | Regex match |
-| `startsWith(prefix)` | String prefix check |
-| `contains(substr)` | Substring check |
+| Deputy helpers | `now`, `age`, `levenshtein`, `levenshteinWithin` |
+| String helpers | `matches`, `join`, `split`, `trim`, `replace`, `lowerAscii`, `upperAscii` |
+| Encoding | `base64.encode`, `base64.decode` |
+| Math | `math.abs`, `math.ceil`, `math.floor`, `math.round`, `math.greatest`, `math.least` |
+| Bindings | `cel.bind` |
+
+Additional list/set helpers from `ext.Lists` and `ext.Sets` are enabled; see the [policy framework](../reference/policy-framework.md#cel-helpers-and-extensions) for details and links to the CEL extension docs.
+This list is not exhaustive; see the CEL language references linked in the policy framework.
 
 ### Testing Your Policy
 

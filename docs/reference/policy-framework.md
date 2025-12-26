@@ -80,20 +80,48 @@ Use `mode: advisory` to downgrade `deny` actions from that policy into `warn` ac
 
 See the [policy inputs](policy-inputs.md) for the full entrypoint list, standard variables, proxy version fields, and example payloads.
 
+## CEL language reference
+
+Deputy embeds CEL via cel-go; policy expressions follow the CEL language definition and standard library. Use these references for syntax, macros, and core functions:
+
+- [CEL overview](https://cel.dev/overview/cel-overview)
+- [CEL in depth](https://cel.dev/)
+- [CEL intro (spec)](https://github.com/google/cel-spec/blob/master/doc/intro.md)
+- [CEL language definition](https://github.com/google/cel-spec/blob/master/doc/langdef.md)
+- [CEL string functions](https://github.com/google/cel-spec/blob/master/doc/extensions/strings.md)
+- [cel-go extensions](https://github.com/google/cel-go/blob/master/ext/README.md)
+- [cel-go examples](https://github.com/google/cel-go/blob/master/examples/README.md)
+
 ## CEL helpers and extensions
 
-Deputy enables CEL optional types and registers a small helper library:
+Deputy enables CEL optional types (null-safe `?.` access and `.orValue()`) and registers a small helper library:
 
 - `now()` and `age()` for time-based checks
 - `levenshtein()` and `levenshteinWithin()` for string distance checks
 
-Enabled CEL extensions:
+CEL macros available in policy expressions: `has`, `exists`, `map`, `filter`.
 
-- `ext.Strings` (matches, split, join, trim, replace, upperAscii, lowerAscii)
-- `ext.Lists`, `ext.Sets`, `ext.Regex`
-- `ext.Bindings` (cel.bind)
-- `ext.Encoders` (base64.encode/decode)
-- `ext.Math`
+Enabled CEL extensions (cel-go):
+
+- `ext.Strings` (join, split, trim, replace, upperAscii, lowerAscii)
+- `ext.Regex` (`string.matches(pattern)`)
+- `ext.Lists`, `ext.Sets` (see cel-go extensions for the full function list)
+- `ext.Bindings` (`cel.bind(var, init, expr)`)
+- `ext.Encoders` (`base64.encode`, `base64.decode`)
+- `ext.Math` (`math.abs`, `math.ceil`, `math.floor`, `math.round`, `math.greatest`, `math.least`)
+
+These lists are not exhaustive; use the CEL language references above for the full standard library, macros, and extension details.
+
+Deputy helper functions:
+
+| Function | Signature | Notes |
+| --- | --- | --- |
+| `levenshtein` | `levenshtein(string, string) int` | Edit distance (capped length). |
+| `levenshteinWithin` | `levenshteinWithin(string, string, int) bool` | True if distance within limit. |
+| `now` | `now() timestamp` | Current time as a timestamp. |
+| `age` | `age(int\|timestamp) duration` | Time since Unix seconds or timestamp. |
+| `timestamp` | `timestamp(int\|string) timestamp` | CEL built-in: Unix seconds or RFC 3339. |
+| `duration` | `duration(string) duration` | CEL built-in: parse duration strings. |
 
 ## Tooling commands
 
