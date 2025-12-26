@@ -62,18 +62,18 @@ Deputy commands generally accept a **repo target**:
 - Local path: `deputy scan .`
 - Remote GitHub: `deputy scan github.com/hashicorp/vault --ref v1.16.0`
 
-See [`docs/concepts/targets-and-refs.md`](concepts/targets-and-refs.md) for the full mental model.
+See [targets and refs](concepts/targets-and-refs.md) for the full mental model.
 
 ## Common environment variables
 
 - Logging: `DEPUTY_LOG_LEVEL`, `DEPUTY_LOG_FORMAT`
-- Optional config file: see [`docs/reference/configuration.md`](reference/configuration.md)
+- Optional config file: see the [configuration reference](reference/configuration.md)
 - Optional: `GITHUB_TOKEN` (rate limits + fetch improvements during enrichment)
 - Optional agents: `CODEX_API_KEY`, `ANTHROPIC_API_KEY`
 
 ## Next
 
-- Learn the reference model: [`docs/concepts/README.md`](concepts/README.md)
-- Pick a command: [`docs/commands/README.md`](commands/README.md)
-- Roll into CI: [`docs/guides/ci.md`](guides/ci.md)
-- See realistic output and advanced workflows: [`docs/examples/README.md`](examples/README.md)
+- [Concepts](concepts/README.md)
+- [Command reference](commands/README.md)
+- [CI guide](guides/ci.md)
+- [Examples](examples/README.md)

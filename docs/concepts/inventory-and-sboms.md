@@ -15,12 +15,13 @@ flowchart TD
   Normalize --> SBOM([SBOM graph])
   Normalize --> Scan([OSV queries])
 
-  style Target fill:#e1f5fe,stroke:#01579b
-  style Detect fill:#fff3e0,stroke:#e65100
-  style Normalize fill:#fff3e0,stroke:#e65100
-  style PURLs fill:#e8f5e9,stroke:#2e7d32
-  style SBOM fill:#e8f5e9,stroke:#2e7d32
-  style Scan fill:#e8f5e9,stroke:#2e7d32
+  classDef source fill:#e3f2fd,stroke:#1565c0
+  classDef process fill:#e8f5e9,stroke:#2e7d32
+  classDef output fill:#f3e5f5,stroke:#7b1fa2
+
+  class Target source
+  class Detect,Normalize,Scan process
+  class PURLs,SBOM output
 ```
 
 ## PURLs

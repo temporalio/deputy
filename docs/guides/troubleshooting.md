@@ -18,7 +18,7 @@ $ deputy scan --log-level debug
 ### OSV timeouts or failures
 
 - Deputy continues with warnings when OSV is unreachable (SBOM generation still works).
-- For air-gapped environments, consider the proxy with a local OSV mirror (see [`PROXY.md`](../../PROXY.md)).
+- For air-gapped environments, consider the proxy with a local OSV mirror (see the [proxy design](../reference/proxy.md)).
 
 ## Git & Repository Issues
 

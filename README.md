@@ -46,12 +46,12 @@ Deputy scans dependencies across 15 ecosystems via [OSV-SCALIBR](https://github.
 
 ## Documentation
 
-- Start here: [`docs/README.md`](docs/README.md)
-- Getting started: [`docs/getting-started.md`](docs/getting-started.md)
-- Concepts: [`docs/concepts/README.md`](docs/concepts/README.md)
-- Commands: [`docs/commands/README.md`](docs/commands/README.md)
-- Guides: [`docs/guides/README.md`](docs/guides/README.md)
-- Reference (config/logging): [`docs/reference/README.md`](docs/reference/README.md)
+- Start here: [Documentation index](docs/README.md)
+- Getting started: [Getting started](docs/getting-started.md)
+- Concepts: [Concepts](docs/concepts/README.md)
+- Commands: [Command reference](docs/commands/README.md)
+- Guides: [Guides](docs/guides/README.md)
+- Reference (config/logging): [Reference](docs/reference/README.md)
 
 ## Quick start
 
@@ -133,38 +133,38 @@ flowchart LR
   Policy -.-> Triage
   Policy -.-> Proxy
 
-  style Target fill:#e1f5fe,stroke:#01579b
-  style Inv fill:#fff3e0,stroke:#e65100
-  style Scan fill:#f3e5f5,stroke:#7b1fa2
-  style SBOM fill:#f3e5f5,stroke:#7b1fa2
-  style Fix fill:#f3e5f5,stroke:#7b1fa2
-  style Triage fill:#f3e5f5,stroke:#7b1fa2
-  style Diff fill:#f3e5f5,stroke:#7b1fa2
-  style Proxy fill:#f3e5f5,stroke:#7b1fa2
-  style Policy fill:#e8f5e9,stroke:#2e7d32
+  classDef source fill:#e3f2fd,stroke:#1565c0
+  classDef process fill:#e8f5e9,stroke:#2e7d32
+  classDef control fill:#fff3e0,stroke:#e65100
+
+  class Target source
+  class Inv,Scan,SBOM,Fix,Triage,Diff,Proxy process
+  class Policy control
 ```
+
+Legend: Dashed lines indicate policy enforcement paths.
 
 ## Commands
 
 | Command | What it’s for | Docs |
 | --- | --- | --- |
-| `scan` | Find known vulnerabilities via OSV (repos/dirs/SBOMs) | [`docs/commands/scan.md`](docs/commands/scan.md) |
-| `fix` | Turn findings into upgrade commands / a plan (optionally apply) | [`docs/commands/fix.md`](docs/commands/fix.md) |
-| `triage` | Summarize and prioritize findings (optional agent help) | [`docs/commands/triage.md`](docs/commands/triage.md) |
-| `diff` | Compare dependency changes between Git refs | [`docs/commands/diff.md`](docs/commands/diff.md) |
-| `sbom` | Emit CycloneDX/SPDX SBOMs at any Git ref | [`docs/commands/sbom.md`](docs/commands/sbom.md) |
-| `list` | Dump normalized PURLs for quick auditing/scripting | [`docs/commands/list.md`](docs/commands/list.md) |
-| `policy` | Lint/test/eval/bundle policies; authoring tools (LSP) | [`docs/commands/policy.md`](docs/commands/policy.md) |
-| `proxy` | Policy-enforcing package proxy (Go/npm/PyPI/RubyGems) | [`docs/commands/proxy.md`](docs/commands/proxy.md) |
+| `scan` | Find known vulnerabilities via OSV (repos/dirs/SBOMs) | [Reference](docs/commands/scan.md) |
+| `fix` | Turn findings into upgrade commands / a plan (optionally apply) | [Reference](docs/commands/fix.md) |
+| `triage` | Summarize and prioritize findings (optional agent help) | [Reference](docs/commands/triage.md) |
+| `diff` | Compare dependency changes between Git refs | [Reference](docs/commands/diff.md) |
+| `sbom` | Emit CycloneDX/SPDX SBOMs at any Git ref | [Reference](docs/commands/sbom.md) |
+| `list` | Dump normalized PURLs for quick auditing/scripting | [Reference](docs/commands/list.md) |
+| `policy` | Lint/test/eval/bundle policies; authoring tools (LSP) | [Reference](docs/commands/policy.md) |
+| `proxy` | Policy-enforcing package proxy (Go/npm/PyPI/RubyGems) | [Reference](docs/commands/proxy.md) |
 
 ## Policies and enforcement
 
 Deputy’s core design idea is: **write policies once and reuse them everywhere** (scan, diff, sbom, fix, triage, and proxy).
 
-- Policy framework overview: [`POLICY.md`](POLICY.md)
-- Policy bundle spec: [`POLICY_SPEC.md`](POLICY_SPEC.md)
-- Policy examples: [`policy/examples`](policy/examples)
-- Policy authoring LSP: [`docs/policy-lsp.md`](docs/policy-lsp.md)
+- [Policy framework overview](docs/reference/policy-framework.md)
+- [Policy bundle spec](docs/reference/policy-spec.md)
+- [Policy examples](policy/examples)
+- [Policy authoring LSP](docs/policy-lsp.md)
 
 ```console
 # Lint policies before enforcement
@@ -178,8 +178,8 @@ $ deputy scan --policy policy/examples/severity-guardrail.yaml
 
 If you want preventive controls (not just reactive scanning), run Deputy as a proxy and enforce policies at download time.
 
-- Proxy design: [`PROXY.md`](PROXY.md)
-- Rollout guide: [`docs/guides/proxy-rollout.md`](docs/guides/proxy-rollout.md)
+- [Proxy design](docs/reference/proxy.md)
+- [Proxy rollout guide](docs/guides/proxy-rollout.md)
 
 ```console
 $ deputy proxy template > proxy.yaml
@@ -188,14 +188,14 @@ $ deputy proxy serve --config proxy.yaml
 
 ## Configuration
 
-- Example config: [`.deputy.yaml.example`](.deputy.yaml.example)
-- Reference: [`docs/reference/configuration.md`](docs/reference/configuration.md)
-- Logging: [`docs/reference/logging.md`](docs/reference/logging.md)
+- [Example config (`.deputy.yaml.example`)](.deputy.yaml.example)
+- [Configuration reference](docs/reference/configuration.md)
+- [Logging reference](docs/reference/logging.md)
 
 ## Contributing
 
-See [`CONTRIBUTING.md`](CONTRIBUTING.md).
+See the [contributing guide](CONTRIBUTING.md).
 
 ## License
 
-MIT. See [`LICENSE`](LICENSE).
+MIT. See the [`LICENSE`](LICENSE).

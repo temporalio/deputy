@@ -271,6 +271,6 @@ $ deputy fix --agent claude --agent-rate-limit 1s
 
 ## See Also
 
-- Fix command: [`docs/commands/fix.md`](../commands/fix.md)
-- Triage command: [`docs/commands/triage.md`](../commands/triage.md)
+- [Fix command reference](../commands/fix.md)
+- [Triage command reference](../commands/triage.md)
 - Code: [`internal/cli/cmd/fix.go`](../../internal/cli/cmd/fix.go)

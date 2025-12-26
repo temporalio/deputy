@@ -53,7 +53,7 @@ Yes. Deputy is open source under the MIT license.
 go install github.com/picatz/deputy@latest
 ```
 
-Requires Go 1.21+. See [Getting Started](getting-started.md).
+Requires Go 1.21+. See the [getting started guide](getting-started.md).
 
 ### Do I need Go installed to use Deputy?
 
@@ -158,7 +158,7 @@ policies:
         reason: critical vulnerability found
 ```
 
-See [Policy Cookbook](guides/policy-cookbook.md).
+See the [policy cookbook](guides/policy-cookbook.md).
 
 ### How do I test my policy?
 
@@ -175,7 +175,7 @@ deputy scan --policy my-policy.yaml
 
 ### Where can I find example policies?
 
-See [`policy/examples/`](../policy/examples/) for 30+ ready-to-use policies.
+See the [policy examples](../policy/examples/) for 30+ ready-to-use policies.
 
 ---
 
@@ -238,7 +238,7 @@ deputy diff main feature-branch
     deputy scan --format json --output scan.json
 ```
 
-See [CI Guide](guides/ci.md).
+See the [CI guide](guides/ci.md).
 
 ### How do I fail the build on vulnerabilities?
 
@@ -289,7 +289,7 @@ Ensure manifest/lock files exist and are valid:
 
 ### Network errors querying OSV
 
-Check connectivity to `api.osv.dev`. See [Troubleshooting](guides/troubleshooting.md).
+Check connectivity to `api.osv.dev`. See the [troubleshooting guide](guides/troubleshooting.md).
 
 ### "Permission denied" errors
 

@@ -1,6 +1,6 @@
 # Deputy Policy Bundle Specification
 
-This document defines the structured bundle format used by Deputy for CEL policies.
+Defines the structured bundle format used by Deputy for CEL policies.
 
 ## Schema
 
@@ -15,7 +15,7 @@ policies:          # required, non-empty list
     commands:      # optional list of commands (pre-filter at runtime)
     mode:          # optional, "enforce" (default) or "advisory" (deny -> warn)
     vars:          # optional ordered map (preserves author order)
-      <name>: <cel-expression-string>
+      <name>: <cel-expression-string | literal>
     rules:         # required list
       - action: <string>   # e.g., deny | warn | allow
         when:   <cel-expression-string>   # required
@@ -35,7 +35,7 @@ policies:          # required, non-empty list
 - CEL environment includes optional types, plus string helpers from `ext.Strings()` (e.g., `join`, `upper`, `upperAscii`, `lowerAscii`).
 
 ### Entrypoint inputs
-- Standard top-level identifiers: `request`, `vulnerabilities`, `sbom`, `config`, `env`, `dependency`, `plan`, `step`, `repo`, `cluster`, `component`, `findings`.
+- Standard top-level identifiers include `request`, `pkg`, `vulnerabilities`, `vulnerability`, `jwt`, `changes`, `packages`, `sbom`, `config`, `env`, `dependency`, `plan`, `step`, `repo`, `cluster`, `component`, `findings`, and `change`. See the [policy inputs](policy-inputs.md) for the full list and example payloads.
 - `env.command` and `env.entrypoint` indicate the invoking command/entrypoint.
 - Proxy requests always include `request.version` as a string. When no concrete version exists yet (e.g., metadata/index requests), Deputy sets it to the placeholder `"<unknown>"` and also provides:
   - `request.has_version` (bool) — true only when a real version was present in the request path.
@@ -57,7 +57,7 @@ Canonical entrypoints (snake_case):
 ### Validation
 - Empty `policies` or missing `rules` is invalid; each policy must have at least one rule.
 - Policy names must be unique within a bundle.
-- Vars must be strings; rules must include `action` and `when`.
+- String vars are CEL expressions; non-string values are treated as literals. Rules must include `action` and `when`.
 - `mode`, if set, must be `enforce` or `advisory`.
 - Canonical ecosystem strings used by built-in entrypoints: `go`, `npm`, `pypi`, `rubygems`.
 
@@ -112,9 +112,9 @@ policies:
 ```
 
 ## Tooling and tests
-- `deputy policy lint` (via `policy.LoadSources`) rejects malformed bundles or CEL.
+- `deputy policy lint` rejects malformed bundles or CEL expressions.
 - `go test ./internal/policy` compiles all examples and runs entrypoint evaluations.
 - `ext.Strings()` is enabled by default; add more CEL extensions in `internal/policy/evaluator.go` if required.
 
-## Compatibility notes
+## Compatibility
 - Raw `.cel` files are not supported. Author structured bundles and load them directly.

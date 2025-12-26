@@ -3,8 +3,8 @@
 The language server helps author Deputy policy bundles (YAML + CEL) with diagnostics, completions, and hovers. It speaks the Language Server Protocol (LSP) so any compatible editor can connect.
 
 See also:
-- Policies overview: [`docs/concepts/policies.md`](concepts/policies.md)
-- Policy tooling command: [`docs/commands/policy.md`](commands/policy.md)
+- [Policy concepts](concepts/policies.md)
+- [Policy command reference](commands/policy.md)
 
 ## Starting the server
 

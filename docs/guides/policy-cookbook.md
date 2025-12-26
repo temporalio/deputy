@@ -2,7 +2,7 @@
 
 Real-world CEL policy patterns for common security and compliance scenarios.
 
-> All examples are available in [`policy/examples/`](../../policy/examples/).
+> All examples are available in the [policy examples](../../policy/examples/).
 
 ## Quick Reference
 
@@ -457,6 +457,6 @@ $ deputy scan --policy my-policy.yaml
 
 ## See Also
 
-- Policy command reference: [`docs/commands/policy.md`](../commands/policy.md)
-- Policy specification: [`POLICY_SPEC.md`](../../POLICY_SPEC.md)
-- All examples: [`policy/examples/`](../../policy/examples/)
+- [Policy command reference](../commands/policy.md)
+- [Policy spec](../reference/policy-spec.md)
+- [Policy examples](../../policy/examples/)

@@ -262,7 +262,7 @@ deputy policy lsp [flags]
 
 ### Editor Setup
 
-**VS Code:** See [`docs/policy-lsp.md`](../policy-lsp.md)
+**VS Code:** See the [policy LSP setup](../policy-lsp.md)
 
 **Neovim (nvim-lspconfig):**
 
@@ -301,10 +301,10 @@ require('lspconfig').deputy.setup({})
 
 ## See Also
 
-- Policy specification: [`POLICY_SPEC.md`](../../POLICY_SPEC.md)
-- Policy concepts: [`docs/concepts/policies.md`](../concepts/policies.md)
-- Policy LSP setup: [`docs/policy-lsp.md`](../policy-lsp.md)
-- Proxy integration: [`proxy.md`](proxy.md)
+- [Policy spec](../reference/policy-spec.md)
+- [Policy concepts](../concepts/policies.md)
+- [Policy LSP setup](../policy-lsp.md)
+- [Proxy command reference](proxy.md)
 
 ## Code Pointers
 

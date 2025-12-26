@@ -8,7 +8,7 @@ Software composition analysis is reactive unless you gate artifacts before they 
 - enrich every request with Deputy’s inventory + vulnerability intelligence, and
 - evaluate CEL policies before an artifact is streamed downstream.
 
-This document describes how the proxy command is structured, how it is configured, and how it composes with the forthcoming CEL policy engine (`POLICY.md`).
+This document describes how the proxy command is structured, how it is configured, and how it composes with the CEL policy engine (see the [policy framework](policy-framework.md)).
 
 ## Command Surface
 
@@ -23,14 +23,33 @@ All proxy subcommands accept the global logging flags, `--trace-http` for verbos
 
 ## High-Level Architecture
 
-```
-┌──────────────────┐       ┌───────────────────┐       ┌─────────────────┐
-│ HTTP Listener(s) │ ───▶  │ Ecosystem Adapter │ ───▶  │ Policy Pipeline │
-└──────────────────┘       └───────────────────┘       └─────────────────┘
-          │                         │                           │
-          ▼                         ▼                           ▼
-   Metrics/Tracing         Deputy Inventory / OSV        Upstream Fetcher
+```mermaid
+flowchart LR
+  subgraph RequestPath["Request path"]
+    direction LR
+    Listener["HTTP Listener(s)"] --> Adapter["Ecosystem Adapter"] --> Policy["Policy Pipeline"] --> Upstream["Upstream Fetcher"]
+  end
 
+  Inventory["Inventory + OSV"]
+  Metrics["Metrics/Tracing"]
+
+  Adapter --> Inventory
+  Inventory -.-> Policy
+  Listener --> Metrics
+  Policy --> Metrics
+
+  classDef source fill:#e3f2fd,stroke:#1565c0
+  classDef process fill:#e8f5e9,stroke:#2e7d32
+  classDef control fill:#fff3e0,stroke:#e65100
+  classDef output fill:#f3e5f5,stroke:#7b1fa2
+  classDef external fill:#fff9c4,stroke:#f9a825
+
+  class Listener source
+  class Adapter process
+  class Policy control
+  class Upstream external
+  class Inventory external
+  class Metrics output
 ```
 
 1. **Listener** — a thin HTTP server per `listen` entry in the config. Every request is wrapped in a cancellable context with per-ecosystem deadlines.
@@ -53,7 +72,7 @@ All proxy subcommands accept the global logging flags, `--trace-http` for verbos
    }
    ```
 2. **Enrich** — Deputy’s existing inventory + OSV code is reused to attach vulnerability data. The proxy never shells out to the Go toolchain; it uses `internal/inventory` for parsing and `internal/remediation` for upgrade hints when needed.
-3. **Policy evaluation** — the CEL engine receives `{request, inventory, osv, config}` and must return at least one decision (see `POLICY.md`).
+3. **Policy evaluation** — the CEL engine receives `{request, inventory, osv, config}` and must return at least one decision (see the [policy framework](policy-framework.md)).
 4. **Decision**:
    - `allow` — continue to upstream fetch, stream bytes back, update optional cache.
    - `warn` — log + emit structured warning headers (`X-Deputy-Warning`) but still forward.
@@ -655,7 +674,7 @@ Once this works you can safely point `GOPROXY` at Deputy in your actual Go toolc
 
 ## CEL Policy Integration
 
-Every proxy decision flows through the CEL engine described in `POLICY.md`. The proxy supplies the following input map:
+Every proxy decision flows through the CEL engine described in the [policy framework](policy-framework.md). The proxy supplies the following input map:
 
 ```cel
 {
@@ -763,7 +782,7 @@ While SBOMs describe contents, signature verification ensures provenance:
 ## Authorization, Principals & Multi-Tenancy
 
 - Inbound auth supports basic auth, bearer tokens (JWT/OIDC), mTLS, or trusted headers from an upstream identity proxy. Each request is annotated with `client.principal`.
-- **JWT authentication** validates tokens via JWKS endpoints or static public keys. Claims are exposed as the `jwt` variable in CEL policies, enabling fine-grained access control based on roles, teams, or custom attributes. See [docs/commands/proxy.md](docs/commands/proxy.md#authentication-jwtoidc) for configuration.
+- **JWT authentication** validates tokens via JWKS endpoints or static public keys. Claims are exposed as the `jwt` variable in CEL policies, enabling fine-grained access control based on roles, teams, or custom attributes. See the [proxy command reference](../commands/proxy.md#authentication-jwtoidc) for configuration.
 - Policies can branch on principals (`request.client.principal in {"team-a", "team-b"}`) or JWT claims (`jwt.?roles.orValue([]).exists(r, r == "admin")`) to apply distinct rules or allowlists.
 - Per-listener `principalMappings` translate certificates or JWT claims into canonical principals.
 - Metrics and logs include `principal` and auth status, enabling rate limits or blocklists per tenant. Auth metrics are exposed via `/debug/vars` when `--vars` is enabled.
@@ -831,7 +850,7 @@ This phased plan ensures that when Deputy eventually proxies write traffic the s
 
 1. Create `proxy.yaml` using `deputy proxy template --ecosystem go > proxy.yaml`.
 2. Customize upstream URLs, severity guardrails, and policy bundle references.
-3. Write YAML policies (see `POLICY.md`) and bundle them: `deputy policy bundle --out policy/corp.bundle.json policy/*.yaml`.
+3. Write YAML policies (see the [policy framework](policy-framework.md)) and bundle them: `deputy policy bundle --out policy/corp.bundle.json policy/*.yaml`.
 4. Run `deputy proxy check --config proxy.yaml`.
 5. Launch the proxy: `deputy proxy serve --config proxy.yaml`.
 6. Point `GOPROXY` (and later `PIP_INDEX_URL`, `npm config set registry`) at the Deputy listener.

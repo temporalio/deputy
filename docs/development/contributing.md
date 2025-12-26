@@ -133,7 +133,7 @@ const (
 
 2. Add input bindings in `internal/policy/evaluator.go`
 
-3. Document in `POLICY.md`:
+3. Document in the [policy framework](../reference/policy-framework.md):
    - Entry point name
    - Input shape (available variables)
    - Use cases

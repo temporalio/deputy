@@ -6,6 +6,10 @@ Stable, "look it up" documentation for Deputy configuration.
 
 - [Configuration file](configuration.md) — YAML config file format and precedence
 - [Logging](logging.md) — Log levels and output formats
+- [Policy framework](policy-framework.md) — Policy bundles, entrypoints, and evaluation context
+- [Policy inputs](policy-inputs.md) — Entrypoints, variables, and payload shapes
+- [Policy spec](policy-spec.md) — Formal schema and validation rules
+- [Proxy design](proxy.md) — Proxy architecture and policy enforcement flow
 - [Environment variables](#environment-variables) — All `DEPUTY_*` variables
 
 ## Environment Variables
@@ -60,4 +64,4 @@ Stable, "look it up" documentation for Deputy configuration.
 CLI flags > Environment variables > Config file > Built-in defaults
 ```
 
-See [configuration.md](configuration.md) for details.
+See the [configuration reference](configuration.md) for details.

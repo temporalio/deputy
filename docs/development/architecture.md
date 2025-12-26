@@ -58,18 +58,29 @@ flowchart TB
 
 All commands share the same inventory extraction logic. Whether scanning, diffing, generating SBOMs, or running the proxy, Deputy uses `internal/inventory` to parse manifests into a normalized package list.
 
-```
-go.mod, package.json, requirements.txt, Gemfile
-                      |
-                      v
-              internal/inventory
-                      |
-                      v
-              []Package (with PURLs)
-                      |
-          +-----------+-----------+
-          |           |           |
-       scan         sbom       proxy
+```mermaid
+flowchart TB
+  Manifests["go.mod<br/>package.json<br/>requirements.txt<br/>Gemfile"]
+  Inv["internal/inventory"]
+  Packages["Package list<br/>(PURLs)"]
+  Scan["scan"]
+  SBOM["sbom"]
+  Diff["diff"]
+  Proxy["proxy"]
+
+  Manifests --> Inv --> Packages
+  Packages --> Scan
+  Packages --> SBOM
+  Packages --> Diff
+  Packages --> Proxy
+
+  classDef source fill:#e3f2fd,stroke:#1565c0
+  classDef process fill:#e8f5e9,stroke:#2e7d32
+  classDef output fill:#f3e5f5,stroke:#7b1fa2
+
+  class Manifests source
+  class Inv,Scan,SBOM,Diff,Proxy process
+  class Packages output
 ```
 
 ### Non-Destructive Git Operations
@@ -87,17 +98,38 @@ Only `fix --apply` modifies files, and only when explicitly requested.
 
 CEL policies are evaluated at multiple points, not just scan output:
 
-```
-                    +------------------+
-                    |  CEL Policy      |
-                    |  Engine          |
-                    +--------+---------+
-                             |
-         +-------------------+-------------------+
-         |                   |                   |
-    scan_report      proxy_request        sbom_component
-         |                   |                   |
-      deny/warn           allow/deny          annotate
+```mermaid
+flowchart LR
+  subgraph Entrypoints["Entrypoints"]
+    direction TB
+    ScanEntry["scan_report"]
+    ProxyEntry["proxy_*_request"]
+    SBOMEntry["sbom_component"]
+  end
+
+  Engine["CEL Policy Engine"]
+
+  subgraph Actions["Decisions"]
+    direction TB
+    ScanActions["allow | warn | deny"]
+    ProxyActions["allow | warn | deny"]
+    SBOMActions["allow | warn | deny"]
+  end
+
+  ScanEntry --> Engine
+  ProxyEntry --> Engine
+  SBOMEntry --> Engine
+  Engine --> ScanActions
+  Engine --> ProxyActions
+  Engine --> SBOMActions
+
+  classDef source fill:#e3f2fd,stroke:#1565c0
+  classDef control fill:#fff3e0,stroke:#e65100
+  classDef output fill:#f3e5f5,stroke:#7b1fa2
+
+  class ScanEntry,ProxyEntry,SBOMEntry source
+  class Engine control
+  class ScanActions,ProxyActions,SBOMActions output
 ```
 
 This lets you write rules once and enforce them everywhere: in CI scans, at package download time, and during SBOM generation.
@@ -248,7 +280,7 @@ sequenceDiagram
 | `jwt.anonymous` | bool | True if no token (mode=optional) |
 | `jwt.<custom>` | any | Custom claims from token |
 
-See [proxy.md](../commands/proxy.md#authentication-jwtoidc) for configuration details.
+See the [proxy command reference](../commands/proxy.md#authentication-jwtoidc) for configuration details.
 
 ## Key Abstractions
 
@@ -311,7 +343,7 @@ type Action struct {
 
 1. Define constant in `internal/policy/entrypoints.go`
 2. Add input bindings in `internal/policy/evaluator.go`
-3. Document in `POLICY.md`
+3. Document in the [policy framework](../reference/policy-framework.md)
 4. Add example in `policy/examples/`
 
 ### Adding a Command
@@ -351,6 +383,6 @@ type Action struct {
 ## See Also
 
 - [Contributing](contributing.md) - Development workflow
-- [AGENTS.md](../../AGENTS.md) - Project context for AI agents
-- [POLICY.md](../../POLICY.md) - Policy framework design
-- [PROXY.md](../../PROXY.md) - Proxy architecture
+- [AGENTS context](../../AGENTS.md) - Project context for AI agents
+- [Policy framework](../reference/policy-framework.md) - Policy framework design
+- [Proxy design](../reference/proxy.md) - Proxy architecture

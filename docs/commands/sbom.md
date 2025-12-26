@@ -155,8 +155,8 @@ commit: abc123d...
 
 ## See Also
 
-- Inventory concepts: [`docs/concepts/inventory-and-sboms.md`](../concepts/inventory-and-sboms.md)
-- Pipeline example: [`docs/examples/pipeline.md`](../examples/pipeline.md)
+- [Inventory concepts](../concepts/inventory-and-sboms.md)
+- [Pipeline example](../examples/pipeline.md)
 
 ## Code Pointers
 

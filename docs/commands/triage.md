@@ -151,8 +151,8 @@ Recommendations:
 
 ## See Also
 
-- Agent safety: [`docs/guides/agents.md`](../guides/agents.md)
-- Scanning: [`scan.md`](scan.md)
+- [Agents guide](../guides/agents.md)
+- [Scan command](scan.md)
 
 ## Code Pointers
 

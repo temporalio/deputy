@@ -210,6 +210,6 @@ Deputy exits with:
 
 ## Related
 
-- Policies: [`docs/concepts/policies.md`](../concepts/policies.md)
-- Policy framework: [`POLICY.md`](../../POLICY.md)
-- Troubleshooting: [`troubleshooting.md`](troubleshooting.md)
+- [Policy concepts](../concepts/policies.md)
+- [Policy framework](../reference/policy-framework.md)
+- [Troubleshooting](troubleshooting.md)

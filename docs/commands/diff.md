@@ -160,8 +160,8 @@ github.com/example/pkg v1.1.0:
 
 ## See Also
 
-- Time travel guide: [`docs/examples/time-travel.md`](../examples/time-travel.md)
-- Targets and refs: [`docs/concepts/targets-and-refs.md`](../concepts/targets-and-refs.md)
+- [Time travel guide](../examples/time-travel.md)
+- [Targets and refs](../concepts/targets-and-refs.md)
 
 ## Code Pointers
 

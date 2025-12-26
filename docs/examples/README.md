@@ -51,7 +51,7 @@ $ deputy scan --as-of=2024-06-15
 
 ## Policy Examples
 
-See [`policy/examples/`](../../policy/examples/) for 30+ ready-to-use policies:
+See the [policy examples](../../policy/examples/) for 30+ ready-to-use policies:
 
 - Severity blocking (`severity-guardrail.yaml`)
 - License allowlists (`license-allowlist.yaml`)
@@ -61,5 +61,5 @@ See [`policy/examples/`](../../policy/examples/) for 30+ ready-to-use policies:
 
 ## See Also
 
-- Policy cookbook: [`docs/guides/policy-cookbook.md`](../guides/policy-cookbook.md)
-- Command reference: [`docs/commands/`](../commands/)
+- [Policy cookbook](../guides/policy-cookbook.md)
+- [Command reference](../commands/)

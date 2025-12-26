@@ -128,6 +128,6 @@ deputy scan --policy deny-critical.yaml
 
 ## See Also
 
-- Full docs: [`docs/README.md`](README.md)
-- Commands: [`docs/commands/`](commands/)
-- Guides: [`docs/guides/`](guides/)
+- [Documentation index](README.md)
+- [Command reference](commands/)
+- [Guides](guides/)

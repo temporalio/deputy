@@ -152,7 +152,7 @@ policies:
 3. **Add JWT-aware policies**: Start with warnings, then enforce
 4. **Switch to `mode: required`**: After clients are updated
 
-See [proxy.md](../commands/proxy.md#authentication-jwtoidc) for full configuration reference.
+See the [proxy command reference](../commands/proxy.md#authentication-jwtoidc) for full configuration reference.
 
 ---
 
@@ -200,6 +200,6 @@ If issues arise, you can quickly revert:
 
 ## Related
 
-- Proxy design: [`PROXY.md`](../../PROXY.md)
-- Policy framework: [`POLICY.md`](../../POLICY.md)
-- Troubleshooting: [`troubleshooting.md`](troubleshooting.md)
+- [Proxy design](../reference/proxy.md)
+- [Policy framework](../reference/policy-framework.md)
+- [Troubleshooting](troubleshooting.md)

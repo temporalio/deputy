@@ -68,14 +68,14 @@ Use exit codes for CI gating.
 
 ### Core Workflow
 
-- [`scan.md`](scan.md) — Vulnerability scanning
-- [`fix.md`](fix.md) — Remediation planning
-- [`triage.md`](triage.md) — Prioritization
-- [`diff.md`](diff.md) — Dependency change analysis
-- [`sbom.md`](sbom.md) — SBOM generation
-- [`list.md`](list.md) — Dependency listing
+- [Scan](scan.md) — Vulnerability scanning
+- [Fix](fix.md) — Remediation planning
+- [Triage](triage.md) — Prioritization
+- [Diff](diff.md) — Dependency change analysis
+- [SBOM](sbom.md) — SBOM generation
+- [List](list.md) — Dependency listing
 
 ### Enforcement & Platform
 
-- [`policy.md`](policy.md) — Policy authoring tools
-- [`proxy.md`](proxy.md) — Package proxy
+- [Policy](policy.md) — Policy authoring tools
+- [Proxy](proxy.md) — Package proxy

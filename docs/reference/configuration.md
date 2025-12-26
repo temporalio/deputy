@@ -18,11 +18,11 @@ flowchart TD
   File["Config file"] --> Merge
   Defaults["Built-in defaults"] --> Merge
 
-  style Flags fill:#c8e6c9,stroke:#2e7d32,stroke-width:2px
-  style Env fill:#dcedc8,stroke:#558b2f
-  style File fill:#f0f4c3,stroke:#9e9d24
-  style Defaults fill:#fff9c4,stroke:#f9a825
-  style Merge fill:#e3f2fd,stroke:#1565c0,stroke-width:2px
+  classDef source fill:#e3f2fd,stroke:#1565c0
+  classDef process fill:#e8f5e9,stroke:#2e7d32
+
+  class Flags,Env,File,Defaults source
+  class Merge process
 ```
 
 ## Config File Locations

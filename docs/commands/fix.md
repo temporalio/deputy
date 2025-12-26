@@ -44,11 +44,19 @@ deputy fix [repo] [flags]
 
 ## Workflow
 
-```
-┌──────────────┐     ┌──────────────┐     ┌──────────────┐
-│    Scan      │ ──► │    Plan      │ ──► │    Apply     │
-│  (or report) │     │  (commands)  │     │  (execute)   │
-└──────────────┘     └──────────────┘     └──────────────┘
+```mermaid
+flowchart LR
+  Scan["Scan<br/>(or report)"] --> Plan["Plan<br/>(commands)"]
+  Plan -->|--apply| Apply["Apply<br/>(execute)"]
+  Plan -->|default| Output["Plan output"]
+
+  classDef source fill:#e3f2fd,stroke:#1565c0
+  classDef process fill:#e8f5e9,stroke:#2e7d32
+  classDef output fill:#f3e5f5,stroke:#7b1fa2
+
+  class Scan source
+  class Plan,Apply process
+  class Output output
 ```
 
 ## Examples
@@ -170,8 +178,8 @@ Remediation Plan:
 
 ## See Also
 
-- Agent safety: [`docs/guides/agents.md`](../guides/agents.md)
-- Pipeline example: [`docs/examples/pipeline.md`](../examples/pipeline.md)
+- [Agents guide](../guides/agents.md)
+- [Pipeline example](../examples/pipeline.md)
 
 ## Code Pointers
 

@@ -55,7 +55,15 @@ Use Mermaid for workflows, architecture, and sequences:
 ```markdown
 ```mermaid
 flowchart LR
-  A --> B --> C
+  A[Source] --> B[Process] --> C[Output]
+
+  classDef source fill:#e3f2fd,stroke:#1565c0
+  classDef process fill:#e8f5e9,stroke:#2e7d32
+  classDef output fill:#f3e5f5,stroke:#7b1fa2
+
+  class A source
+  class B process
+  class C output
 ```
 ```
 

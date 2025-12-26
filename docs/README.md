@@ -56,24 +56,27 @@ flowchart LR
   Plan --> Apply([--apply / agent / manual])
 
   subgraph Control["Control plane"]
-    Policy[CEL policies] --> Scan
-    Policy --> SBOM
-    Policy --> Fix
-    Policy --> Proxy[deputy proxy]
+    Policy[CEL policies] -.-> Scan
+    Policy -.-> SBOM
+    Policy -.-> Fix
+    Policy -.-> Proxy[deputy proxy]
   end
 
-  style Repo fill:#e1f5fe,stroke:#01579b
-  style Inv fill:#fff3e0,stroke:#e65100
-  style Scan fill:#e3f2fd,stroke:#1565c0
-  style SBOM fill:#e3f2fd,stroke:#1565c0
-  style Findings fill:#ffebee,stroke:#c62828
-  style Fix fill:#e3f2fd,stroke:#1565c0
-  style Plan fill:#e8f5e9,stroke:#2e7d32
-  style Apply fill:#c8e6c9,stroke:#2e7d32
-  style Policy fill:#fff3e0,stroke:#e65100,stroke-width:2px
-  style Proxy fill:#e3f2fd,stroke:#1565c0
-  style Control fill:#fffde7,stroke:#f57f17
+  classDef source fill:#e3f2fd,stroke:#1565c0
+  classDef process fill:#e8f5e9,stroke:#2e7d32
+  classDef control fill:#fff3e0,stroke:#e65100
+  classDef output fill:#f3e5f5,stroke:#7b1fa2
+  classDef risk fill:#ffebee,stroke:#c62828
+
+  class Repo source
+  class Inv,Scan,SBOM,Fix,Proxy process
+  class Findings risk
+  class Plan,Apply output
+  class Policy control
+  style Control fill:#fff3e0,stroke:#e65100
 ```
+
+Legend: Dashed lines indicate policy enforcement paths.
 
 ## Documentation map
 
@@ -90,7 +93,7 @@ flowchart LR
 | [Reference](reference/README.md) | Configuration, logging, environment |
 | [Development](development/README.md) | Contributing, architecture |
 
-> **For LLMs/Agents:** See [`AGENTS.md`](../AGENTS.md) for structured project context.
+> **For LLMs/Agents:** See [AGENTS context](../AGENTS.md) for structured project context.
 
 ## Where to look in code
 

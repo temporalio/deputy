@@ -5,7 +5,7 @@ Key terms and concepts used throughout Deputy documentation.
 ## A
 
 ### Agent
-An AI assistant (Claude, Codex, etc.) that can help implement remediation plans or triage vulnerabilities. See [`docs/guides/agents.md`](guides/agents.md).
+An AI assistant (Claude, Codex, etc.) that can help implement remediation plans or triage vulnerabilities. See the [agents guide](guides/agents.md).
 
 ### Allowlist
 A policy pattern that permits only specified items (licenses, packages, scopes). Opposite of blocklist.
@@ -151,5 +151,5 @@ Special ref indicating uncommitted changes in the working tree. Used in `deputy 
 
 ## See Also
 
-- Concepts: [`docs/concepts/README.md`](concepts/README.md)
-- Commands: [`docs/commands/README.md`](commands/README.md)
+- [Concepts](concepts/README.md)
+- [Command reference](commands/README.md)

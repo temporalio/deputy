@@ -361,7 +361,7 @@ Using CEL optionals (`?.field` and `.orValue()`) for cleaner null-safe access:
   reason: "Token is older than 24 hours - consider refreshing"
 ```
 
-See [`POLICY_SPEC.md`](../../POLICY_SPEC.md) for full proxy policy variables. JWT policy examples:
+See the [policy spec](../reference/policy-spec.md) for full proxy policy variables. JWT policy examples:
 - [jwt-role-based-access.yaml](../../policy/examples/jwt-role-based-access.yaml) - Team/role-based package access
 - [jwt-service-account.yaml](../../policy/examples/jwt-service-account.yaml) - CI/CD service account policies
 - [jwt-anonymous-guard.yaml](../../policy/examples/jwt-anonymous-guard.yaml) - Require auth for sensitive packages
@@ -413,9 +413,9 @@ export npm_config_registry=http://proxy.internal:8080
 
 ## See Also
 
-- Proxy rollout guide: [`docs/guides/proxy-rollout.md`](../guides/proxy-rollout.md)
-- Policy development: [`policy.md`](policy.md)
-- PROXY.md reference: [`PROXY.md`](../../PROXY.md)
+- [Proxy rollout guide](../guides/proxy-rollout.md)
+- [Policy command reference](policy.md)
+- [Proxy architecture](../reference/proxy.md)
 
 ## Code Pointers
 

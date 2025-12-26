@@ -1,13 +1,14 @@
 # Policies (CEL)
 
-Deputy policies let you define reusable guardrails for:
+Deputy policies are reusable guardrails for supply chain decisions. You write them once and apply them everywhere Deputy runs: scan, diff, sbom, fix, triage, and the artifact proxy.
 
-- Vulnerabilities (severity thresholds, “block exploit-available”, etc.)
-- Licenses and provenance constraints
-- Naming and typosquat heuristics
-- Proxy-time enforcement (block before artifacts land in builds)
+Policies are authored as YAML bundles that contain CEL expressions. This gives you a single, auditable rule set that can block risky artifacts, warn on policy drift, or annotate outputs for downstream tooling.
 
-Deputy policies are written in YAML bundles that contain **CEL** expressions.
+## What policies solve
+
+- Enforce severity thresholds and exploit signals across scans and proxies.
+- Standardize license and provenance requirements for every dependency.
+- Codify enterprise rules (allowlists, blocklists, naming conventions).
 
 ## Where policies run
 
@@ -20,46 +21,40 @@ flowchart LR
   Policy --> Triage[triage]
   Policy --> Proxy[proxy]
 
-  style Policy fill:#fff3e0,stroke:#e65100,stroke-width:2px
-  style Scan fill:#e3f2fd,stroke:#1565c0
-  style Diff fill:#e3f2fd,stroke:#1565c0
-  style SBOM fill:#e3f2fd,stroke:#1565c0
-  style Fix fill:#e3f2fd,stroke:#1565c0
-  style Triage fill:#e3f2fd,stroke:#1565c0
-  style Proxy fill:#e3f2fd,stroke:#1565c0
+  classDef control fill:#fff3e0,stroke:#e65100
+  classDef process fill:#e8f5e9,stroke:#2e7d32
+
+  class Policy control
+  class Scan,Diff,SBOM,Fix,Triage,Proxy process
 ```
 
-## Entry points
+## How policy evaluation works
 
-Each command evaluates policies at one or more **entry points** (for example: `scan_report`,
-`diff_dependency_change`, `sbom_component`, `go_artifact_request`).
+Each command emits one or more entrypoints (for example: `scan_report`, `diff_dependency_change`, `sbom_component`, `go_artifact_request`). The policy runtime injects `env.command` and `env.entrypoint` so a single policy can branch based on where it is being applied.
 
-This lets you write one bundle that behaves differently depending on where it’s being applied via
-`env.command` and `env.entrypoint`.
+## Quick start
 
-## Start using policies
-
-- Read the framework overview: [`POLICY.md`](../../POLICY.md)
-- Policy file spec: [`POLICY_SPEC.md`](../../POLICY_SPEC.md)
-- Examples you can copy: [`policy/examples`](../../policy/examples)
-
-Common workflows:
-
-```console
-# Lint and test policies before enforcement
-$ deputy policy lint policy/examples/*.yaml
-$ deputy policy test policy/
-
-# Enforce a policy during a scan
-$ deputy scan --policy policy/examples/severity-guardrail.yaml
+```yaml
+policies:
+  - name: block-critical
+    entrypoints: ["scan_vulnerability"]
+    rules:
+      - action: deny
+        when: vulnerability.?severity.orValue("") == "CRITICAL"
+        reason: "critical vulnerability found"
 ```
 
-## Editor tooling
+```bash
+deputy policy lint policy/block-critical.yaml
+deputy policy test policy/
+deputy scan --policy policy/block-critical.yaml
+```
 
-Deputy ships an LSP for YAML + CEL authoring:
+## Learn more
 
-- [`docs/policy-lsp.md`](../policy-lsp.md)
-
-## Code pointers
-
-- Policy engine + CEL environment: [`internal/policy`](../../internal/policy)
+- [Policy framework](../reference/policy-framework.md)
+- [Policy inputs](../reference/policy-inputs.md)
+- [Policy command reference](../commands/policy.md)
+- [Policy spec](../reference/policy-spec.md)
+- [Policy examples](../../policy/examples/)
+- [Policy LSP setup](../policy-lsp.md)

@@ -20,14 +20,13 @@ flowchart TD
   F -->|Yes| Proxy(["✅ deputy proxy"])
   F -->|No| Policy(["✅ deputy policy"])
 
-  style Start fill:#e3f2fd,stroke:#1565c0
-  style SBOM fill:#c8e6c9,stroke:#2e7d32
-  style Scan fill:#c8e6c9,stroke:#2e7d32
-  style Diff fill:#c8e6c9,stroke:#2e7d32
-  style Fix fill:#c8e6c9,stroke:#2e7d32
-  style Triage fill:#c8e6c9,stroke:#2e7d32
-  style Proxy fill:#c8e6c9,stroke:#2e7d32
-  style Policy fill:#c8e6c9,stroke:#2e7d32
+  classDef source fill:#e3f2fd,stroke:#1565c0
+  classDef process fill:#e8f5e9,stroke:#2e7d32
+  classDef control fill:#fff3e0,stroke:#e65100
+
+  class Start source
+  class A,B,C,D,E,F control
+  class SBOM,Scan,Diff,Fix,Triage,Proxy,Policy process
 ```
 
 ---
@@ -265,7 +264,7 @@ $ deputy scan | grep -v CVE-2024-WONTFIX
 
 ## See Also
 
-- Command reference: [`docs/commands/`](../commands/)
-- CI setup: [`ci.md`](ci.md)
-- Policy cookbook: [`policy-cookbook.md`](policy-cookbook.md)
-- Troubleshooting: [`troubleshooting.md`](troubleshooting.md)
+- [Command reference](../commands/)
+- [CI guide](ci.md)
+- [Policy cookbook](policy-cookbook.md)
+- [Troubleshooting](troubleshooting.md)

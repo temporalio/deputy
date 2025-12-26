@@ -25,5 +25,5 @@ Practical "how do I use this in the real world?" documentation.
 
 ## See Also
 
-- Examples with real output: [`docs/examples/README.md`](../examples/README.md)
-- Concepts (mental models): [`docs/concepts/README.md`](../concepts/README.md)
+- [Examples](../examples/README.md)
+- [Concepts](../concepts/README.md)

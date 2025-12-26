@@ -29,7 +29,7 @@ deputy scan sbom <sbom-file> [flags]
 | `--published-after` | | | Only show vulns published on/after this date |
 | `--as-of` | | | Historical view up to this date (implies `--published-before`) |
 | `--policy` | | | CEL policy file(s) to evaluate (repeatable) |
-| `--ecosystems` | `-e` | all | Limit to specific ecosystems (see [Supported Ecosystems](#supported-ecosystems)) |
+| `--ecosystems` | `-e` | all | Limit to specific ecosystems (see [supported ecosystems](#supported-ecosystems)) |
 | `--show-symbols` | | `false` | Show affected symbols in text output |
 | `--show-db-info` | | `false` | Show database metadata (e.g., review_status) |
 
@@ -190,9 +190,9 @@ Vulnerability Summary:
 
 ## See Also
 
-- Historical analysis: [`docs/examples/historical-analysis.md`](../examples/historical-analysis.md)
-- Policies: [`docs/concepts/policies.md`](../concepts/policies.md)
-- Pipeline example: [`docs/examples/pipeline.md`](../examples/pipeline.md)
+- [Historical analysis](../examples/historical-analysis.md)
+- [Policy concepts](../concepts/policies.md)
+- [Pipeline example](../examples/pipeline.md)
 
 ## Code Pointers
 

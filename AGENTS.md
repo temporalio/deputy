@@ -5,8 +5,6 @@ Deputy is a Go CLI for software supply chain security. Scan, fix, diff, and enfo
 ## Architecture Overview
 
 ```mermaid
-%%{init: {'theme': 'base', 'themeVariables': { 'primaryColor': '#4f46e5', 'primaryTextColor': '#fff', 'primaryBorderColor': '#3730a3', 'lineColor': '#6366f1', 'secondaryColor': '#f0fdf4', 'tertiaryColor': '#fefce8', 'background': '#ffffff', 'mainBkg': '#ffffff', 'secondBkg': '#f8fafc', 'border1': '#e2e8f0', 'border2': '#cbd5e1', 'fontFamily': 'ui-sans-serif, system-ui, sans-serif'}}}%%
-
 flowchart TB
     subgraph CLI["<b>CLI Layer</b>"]
         direction LR
@@ -62,41 +60,23 @@ flowchart TB
     inventory --> depsdev
     sbom_pkg & gitutil --> github
 
-    style CLI fill:#4f46e5,stroke:#3730a3,color:#fff
-    style Commands fill:#8b5cf6,stroke:#6d28d9,color:#fff
-    style Core fill:#f0fdf4,stroke:#86efac,color:#166534
-    style External fill:#fefce8,stroke:#fde047,color:#854d0e
-    
-    style main fill:#6366f1,stroke:#4338ca,color:#fff
-    style cli fill:#6366f1,stroke:#4338ca,color:#fff
-    style register fill:#6366f1,stroke:#4338ca,color:#fff
-    
-    style scan fill:#a78bfa,stroke:#7c3aed,color:#fff
-    style fix fill:#a78bfa,stroke:#7c3aed,color:#fff
-    style diff fill:#a78bfa,stroke:#7c3aed,color:#fff
-    style sbom fill:#a78bfa,stroke:#7c3aed,color:#fff
-    style list fill:#a78bfa,stroke:#7c3aed,color:#fff
-    style policy fill:#a78bfa,stroke:#7c3aed,color:#fff
-    style proxy fill:#a78bfa,stroke:#7c3aed,color:#fff
-    
-    style inventory fill:#dcfce7,stroke:#22c55e,color:#166534
-    style analysis fill:#dcfce7,stroke:#22c55e,color:#166534
-    style policy_pkg fill:#dcfce7,stroke:#22c55e,color:#166534
-    style remediation fill:#dcfce7,stroke:#22c55e,color:#166534
-    style gitutil fill:#dcfce7,stroke:#22c55e,color:#166534
-    style sbom_pkg fill:#dcfce7,stroke:#22c55e,color:#166534
-    
-    style osv_db fill:#fef9c3,stroke:#eab308,color:#854d0e
-    style depsdev fill:#fef9c3,stroke:#eab308,color:#854d0e
-    style github fill:#fef9c3,stroke:#eab308,color:#854d0e
-    
+    classDef source fill:#e3f2fd,stroke:#1565c0
+    classDef process fill:#e8f5e9,stroke:#2e7d32
+    classDef control fill:#fff3e0,stroke:#e65100
+    classDef output fill:#f3e5f5,stroke:#7b1fa2
+    classDef external fill:#fff9c4,stroke:#f9a825
+
+    class CLI,main,cli,register source
+    class Commands,scan,fix,diff,sbom,list,proxy output
+    class policy,policy_pkg control
+    class Core,inventory,analysis,remediation,gitutil,sbom_pkg process
+    class External,osv_db,depsdev,github external
+
     style Row1 fill:transparent,stroke:transparent
     style Row2 fill:transparent,stroke:transparent
 ```
 
 ```mermaid
-%%{init: {'theme': 'base', 'themeVariables': { 'primaryColor': '#4f46e5', 'primaryTextColor': '#fff', 'lineColor': '#6366f1', 'fontFamily': 'ui-sans-serif, system-ui, sans-serif'}}}%%
-
 flowchart LR
     subgraph Developer["<b>Developer</b>"]
         direction TB
@@ -123,16 +103,17 @@ flowchart LR
     decision -->|"✗ no"| blocked["⛔ blocked"]
     blocked -->|"④ deny"| cmd
 
-    style Developer fill:#dbeafe,stroke:#3b82f6,color:#1e40af
-    style Proxy fill:#f0fdf4,stroke:#22c55e,color:#166534
-    style Upstream fill:#fefce8,stroke:#eab308,color:#854d0e
-    
-    style cmd fill:#60a5fa,stroke:#2563eb,color:#fff
-    style intercept fill:#86efac,stroke:#22c55e,color:#166534
-    style eval fill:#4ade80,stroke:#16a34a,color:#fff
-    style registry fill:#fde047,stroke:#ca8a04,color:#854d0e
-    style decision fill:#c4b5fd,stroke:#7c3aed,color:#5b21b6
-    style blocked fill:#fca5a5,stroke:#dc2626,color:#991b1b
+    classDef source fill:#e3f2fd,stroke:#1565c0
+    classDef process fill:#e8f5e9,stroke:#2e7d32
+    classDef control fill:#fff3e0,stroke:#e65100
+    classDef external fill:#fff9c4,stroke:#f9a825
+    classDef risk fill:#ffebee,stroke:#c62828
+
+    class Developer,cmd source
+    class Proxy,intercept process
+    class eval,decision control
+    class Upstream,registry external
+    class blocked risk
 ```
 
 **Data Flow (for `scan` command):**
@@ -461,7 +442,7 @@ Deputy extends CEL with custom functions for policy evaluation:
 | `base64.encode()` | `base64.encode(bytes)` | Encode to base64 |
 | `base64.decode()` | `base64.decode(string)` | Decode from base64 |
 
-Full spec: [`POLICY_SPEC.md`](POLICY_SPEC.md) • Examples: [`policy/examples/`](policy/examples/)
+Full spec: [Policy spec](docs/reference/policy-spec.md) • Examples: [Policy examples](policy/examples/)
 
 ## Proxy Authentication
 
@@ -584,7 +565,7 @@ policies:
         reason: "Authenticate to download packages with critical vulnerabilities"
 ```
 
-See [`policy/examples/jwt-*.yaml`](policy/examples/) for more examples.
+See [JWT policy examples](policy/examples/) for more examples.
 
 ## Environment Variables
 
@@ -614,7 +595,7 @@ See [`policy/examples/jwt-*.yaml`](policy/examples/) for more examples.
 
 1. Create `internal/cli/cmd/yourcommand.go` (use `cobra.Command`)
 2. Register in [`internal/cli/cmd/root.go`](internal/cli/cmd/root.go)
-3. Add docs in [`docs/commands/`](docs/commands/)
+3. Add docs in [Command reference](docs/commands/)
 
 ### Common Tasks
 
@@ -622,7 +603,7 @@ See [`policy/examples/jwt-*.yaml`](policy/examples/) for more examples.
 |------|-----------|
 | Vulnerability analysis | [`internal/analysis/osv_client.go`](internal/analysis/osv_client.go), [`severity.go`](internal/analysis/severity.go), [`group.go`](internal/analysis/group.go) |
 | Ecosystem support | [`internal/inventory/`](internal/inventory/), [`internal/purlx/`](internal/purlx/), [`internal/proxy/`](internal/proxy/) |
-| Policy features | [`internal/policy/eval.go`](internal/policy/eval.go), [`policy/examples/`](policy/examples/) |
+| Policy features | [`internal/policy/eval.go`](internal/policy/eval.go), [Policy examples](policy/examples/) |
 
 ## Debugging Tips
 

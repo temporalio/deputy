@@ -132,8 +132,8 @@ pkg:golang/github.com/other/dep@v2.0.0false
 
 ## See Also
 
-- SBOM generation: [`sbom.md`](sbom.md)
-- Inventory concepts: [`docs/concepts/inventory-and-sboms.md`](../concepts/inventory-and-sboms.md)
+- [SBOM command](sbom.md)
+- [Inventory concepts](../concepts/inventory-and-sboms.md)
 
 ## Code Pointers
 
