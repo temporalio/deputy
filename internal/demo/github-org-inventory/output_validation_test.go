@@ -15,7 +15,7 @@ import (
 	"time"
 
 	pb "deps.dev/api/v3"
-	analysis "github.com/picatz/deputy/internal/analysis"
+	"github.com/picatz/deputy/internal/license"
 )
 
 // TestInventoryOutput_NoUnknowns walks the generated inventory-output
@@ -181,7 +181,7 @@ func TestPubLookup(t *testing.T) {
 	}
 
 	for _, tc := range cases {
-		licenses := analysis.LookupPubLicense(ctx, tc.name, tc.version)
+		licenses := license.LookupPubLicense(ctx, tc.name, tc.version)
 		if len(licenses) == 0 {
 			t.Fatalf("expected licenses for %s@%s, got none", tc.name, tc.version)
 		}
@@ -205,7 +205,7 @@ func TestCocoaPodsLookup(t *testing.T) {
 	}
 
 	for _, tc := range cases {
-		licenses := analysis.LookupCocoaPodsLicense(ctx, tc.name, tc.version)
+		licenses := license.LookupCocoaPodsLicense(ctx, tc.name, tc.version)
 		if len(licenses) == 0 {
 			t.Fatalf("expected licenses for %s@%s, got none", tc.name, tc.version)
 		}
@@ -229,7 +229,7 @@ func TestHexLookup(t *testing.T) {
 	}
 
 	for _, tc := range cases {
-		licenses := analysis.LookupHexLicense(ctx, tc.name, tc.version)
+		licenses := license.LookupHexLicense(ctx, tc.name, tc.version)
 		if len(licenses) == 0 {
 			t.Fatalf("expected licenses for %s@%s, got none", tc.name, tc.version)
 		}

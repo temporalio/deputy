@@ -79,3 +79,19 @@ Scan vulnerability (simplified):
 ```
 
 If you use `deputy policy eval` or `deputy policy simulate`, include `env` explicitly when your policy depends on it. CLI commands and the proxy inject `env` automatically.
+
+## Policy findings in scan reports
+
+When `--policy` is used with `deputy scan`, the JSON report includes a `policyFindings` array. Each entry uses this shape:
+
+```json
+{
+  "source": "policy.yaml",
+  "action": "deny",
+  "reason": "blocked by policy",
+  "message": "optional details",
+  "remediation": "suggested fix",
+  "status": 403,
+  "code": "policy.blocked"
+}
+```

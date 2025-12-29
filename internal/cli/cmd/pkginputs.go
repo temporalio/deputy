@@ -4,7 +4,6 @@ import (
 	"cmp"
 	"encoding/json"
 	"fmt"
-	"path"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -14,6 +13,7 @@ import (
 	analysis "github.com/picatz/deputy/internal/analysis"
 	"github.com/picatz/deputy/internal/collections"
 	"github.com/picatz/deputy/internal/compare"
+	"github.com/picatz/deputy/internal/inventory/manifests"
 	"github.com/picatz/deputy/internal/purlx"
 )
 
@@ -39,11 +39,6 @@ type packageInputOptions struct {
 	GoDirect       map[string]bool
 	DirectPackages map[string]bool
 	Resolver       manifestResolver
-}
-
-type manifestRefKey struct {
-	manager string
-	path    string
 }
 
 type packageJSONData struct {
@@ -364,7 +359,7 @@ func packagesToInputs(pkgs []*extractor.Package, opts packageInputOptions) []ana
 		}
 
 		for _, loc := range pkg.Locations {
-			manager, manifestPath, ok := detectManager(loc, pkg.PURLType)
+			manager, manifestPath, ok := manifests.DetectManager(loc, pkg.PURLType)
 			if !ok {
 				continue
 			}
@@ -379,7 +374,7 @@ func packagesToInputs(pkgs []*extractor.Package, opts packageInputOptions) []ana
 					groups, err := cache.groupsForPackage(manifestPath, name)
 					if err == nil && len(groups) > 0 {
 						ref.Groups = groups
-						if hasRuntimeDependencyGroup(groups) {
+						if manifests.HasRuntimeDependencyGroup(groups) {
 							entry.IsDirect = true
 						}
 					}
@@ -409,18 +404,18 @@ func packagesToInputs(pkgs []*extractor.Package, opts packageInputOptions) []ana
 					}
 				}
 			default:
-				if marksDirectByDefault(manager) {
+				if manifests.MarksDirectByDefault(manager) {
 					entry.IsDirect = true
 				}
 			}
-			entry.ManifestRefs = mergeManifestReference(entry.ManifestRefs, ref)
+			entry.ManifestRefs = analysis.MergeManifestReference(entry.ManifestRefs, ref)
 		}
 	}
 	inputs := make([]analysis.PkgInput, 0, len(seen))
 	for _, in := range seen {
 		// sort locations and manifest refs for stable output
 		in.Locations = sortedUnique(in.Locations)
-		in.ManifestRefs = sortAndUniqueManifestRefs(in.ManifestRefs)
+		in.ManifestRefs = analysis.SortAndUniqueManifestRefs(in.ManifestRefs)
 		inputs = append(inputs, *in)
 	}
 	slices.SortFunc(inputs, func(a, b analysis.PkgInput) int {
@@ -430,56 +425,6 @@ func packagesToInputs(pkgs []*extractor.Package, opts packageInputOptions) []ana
 		return cmp.Compare(a.Version, b.Version)
 	})
 	return inputs
-}
-
-// detectManager identifies the package manager and manifest path for a given location.
-func detectManager(location, purlType string) (string, string, bool) {
-	loc := filepath.ToSlash(location)
-	if strings.HasPrefix(loc, ".github/workflows/") {
-		ext := strings.ToLower(path.Ext(loc))
-		if ext == ".yml" || ext == ".yaml" {
-			return purlx.TypeGitHubActions, loc, true
-		}
-	}
-	base := path.Base(loc)
-	dir := path.Dir(loc)
-	switch base {
-	case "go.mod":
-		return "go", loc, true
-	case "package-lock.json", "npm-shrinkwrap.json":
-		return "npm", path.Join(dir, "package.json"), true
-	case "yarn.lock":
-		return "yarn", path.Join(dir, "package.json"), true
-	case "pnpm-lock.yaml", "pnpm-lock.yml":
-		return "pnpm", path.Join(dir, "package.json"), true
-	case "requirements.txt":
-		return "pip", loc, true
-	case "Pipfile.lock":
-		return "pipenv", path.Join(dir, "Pipfile"), true
-	case "poetry.lock":
-		return "poetry", path.Join(dir, "pyproject.toml"), true
-	case "Gemfile.lock", "gems.locked":
-		return "gem", path.Join(dir, "Gemfile"), true
-	case "composer.lock":
-		return "composer", path.Join(dir, "composer.json"), true
-	case "Cargo.toml":
-		return "cargo", loc, true
-	case "Cargo.lock":
-		return "cargo", path.Join(dir, "Cargo.toml"), true
-	case "uv.lock":
-		return "uv", loc, true
-	case "package.json":
-		if strings.EqualFold(purlType, "npm") {
-			return "npm", loc, true
-		}
-	case "action.yml", "action.yaml":
-		return purlx.TypeGitHubActions, loc, true
-	default:
-		if strings.HasSuffix(base, ".gemspec") {
-			return "gem", loc, true
-		}
-	}
-	return "", "", false
 }
 
 // appendUnique adds strings to a slice if they are not already present.
@@ -501,41 +446,6 @@ func appendUnique(dst []string, src ...string) []string {
 	return dst
 }
 
-// mergeManifestReference adds a manifest reference to the list, merging groups if it already exists.
-func mergeManifestReference(existing []analysis.ManifestReference, ref analysis.ManifestReference) []analysis.ManifestReference {
-	if ref.Path == "" || ref.Manager == "" {
-		return existing
-	}
-	for i, cur := range existing {
-		if cur.Manager == ref.Manager && cur.Path == ref.Path {
-			merged := mergeGroups(cur.Groups, ref.Groups)
-			existing[i].Groups = merged
-			return existing
-		}
-	}
-	ref.Groups = mergeGroups(nil, ref.Groups)
-	return append(existing, ref)
-}
-
-// mergeGroups combines two lists of groups, removing duplicates.
-func mergeGroups(base []string, extra []string) []string {
-	set := collections.NewSet[string]()
-	for _, g := range base {
-		set.Add(g)
-	}
-	for _, g := range extra {
-		g = strings.TrimSpace(g)
-		if g == "" {
-			continue
-		}
-		if !set.Add(g) {
-			continue
-		}
-		base = append(base, g)
-	}
-	return base
-}
-
 // sortedUnique returns a sorted list of unique strings.
 func sortedUnique(values []string) []string {
 	if len(values) == 0 {
@@ -551,52 +461,6 @@ func sortedUnique(values []string) []string {
 	}
 	slices.Sort(out)
 	return out
-}
-
-// sortAndUniqueManifestRefs deduplicates and sorts manifest references.
-func sortAndUniqueManifestRefs(refs []analysis.ManifestReference) []analysis.ManifestReference {
-	if len(refs) == 0 {
-		return refs
-	}
-	merged := map[manifestRefKey]analysis.ManifestReference{}
-	for _, ref := range refs {
-		key := manifestRefKey{manager: ref.Manager, path: ref.Path}
-		cur, ok := merged[key]
-		if !ok {
-			cur = analysis.ManifestReference{Manager: ref.Manager, Path: ref.Path}
-		}
-		cur.Groups = mergeGroups(cur.Groups, ref.Groups)
-		merged[key] = cur
-	}
-	out := make([]analysis.ManifestReference, 0, len(merged))
-	for _, ref := range merged {
-		ref.Groups = sortedUnique(ref.Groups)
-		out = append(out, ref)
-	}
-	slices.SortFunc(out, func(a, b analysis.ManifestReference) int {
-		if c := cmp.Compare(a.Manager, b.Manager); c != 0 {
-			return c
-		}
-		return cmp.Compare(a.Path, b.Path)
-	})
-	return out
-}
-
-// hasRuntimeDependencyGroup checks if any of the groups indicate a runtime dependency.
-func hasRuntimeDependencyGroup(groups []string) bool {
-	return slices.ContainsFunc(groups, func(g string) bool {
-		return strings.EqualFold(strings.TrimSpace(g), "dependencies")
-	})
-}
-
-// marksDirectByDefault returns true if the package manager considers dependencies direct by default.
-func marksDirectByDefault(manager string) bool {
-	switch strings.ToLower(manager) {
-	case "pip", "pipenv", "poetry", "gem":
-		return true
-	default:
-		return false
-	}
 }
 
 // normalizePythonName folds underscores and case to match uv's lockfile naming.

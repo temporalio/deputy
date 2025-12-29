@@ -11,6 +11,7 @@ import (
 	scalpurl "github.com/google/osv-scalibr/purl"
 	analysis "github.com/picatz/deputy/internal/analysis"
 	"github.com/picatz/deputy/internal/compare"
+	"github.com/picatz/deputy/internal/inventory/manifests"
 	"github.com/picatz/deputy/internal/purlx"
 )
 
@@ -432,7 +433,7 @@ func TestDetectManager(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.location, func(t *testing.T) {
-			manager, manifest, ok := detectManager(tt.location, tt.purlType)
+			manager, manifest, ok := manifests.DetectManager(tt.location, tt.purlType)
 			if ok != tt.wantOk {
 				t.Errorf("detectManager(%q, %q) ok = %v, want %v", tt.location, tt.purlType, ok, tt.wantOk)
 			}
@@ -472,31 +473,6 @@ func TestAppendUnique(t *testing.T) {
 	}
 }
 
-func TestMergeGroups(t *testing.T) {
-	tests := []struct {
-		name  string
-		base  []string
-		extra []string
-		want  []string
-	}{
-		{"nil base", nil, []string{"a", "b"}, []string{"a", "b"}},
-		{"nil extra", []string{"a"}, nil, []string{"a"}},
-		{"both nil", nil, nil, nil},
-		{"no overlap", []string{"a"}, []string{"b"}, []string{"a", "b"}},
-		{"with overlap", []string{"a", "b"}, []string{"b", "c"}, []string{"a", "b", "c"}},
-		{"empty strings skipped", []string{"a"}, []string{"", "  "}, []string{"a"}},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := mergeGroups(tt.base, tt.extra)
-			if !slices.Equal(got, tt.want) {
-				t.Errorf("mergeGroups(%v, %v) = %v, want %v", tt.base, tt.extra, got, tt.want)
-			}
-		})
-	}
-}
-
 func TestSortedUnique(t *testing.T) {
 	tests := []struct {
 		name   string
@@ -530,14 +506,14 @@ func TestHasRuntimeDependencyGroup(t *testing.T) {
 		{[]string{}, false},
 		{[]string{"devDependencies"}, false},
 		{[]string{"dependencies"}, true},
-		{[]string{"DEPENDENCIES"}, true}, // case insensitive
+		{[]string{"DEPENDENCIES"}, true},   // case insensitive
 		{[]string{" dependencies "}, true}, // whitespace trimmed
 		{[]string{"devDependencies", "dependencies"}, true},
 	}
 
 	for _, tt := range tests {
 		t.Run(fmt.Sprintf("%v", tt.groups), func(t *testing.T) {
-			got := hasRuntimeDependencyGroup(tt.groups)
+			got := manifests.HasRuntimeDependencyGroup(tt.groups)
 			if got != tt.want {
 				t.Errorf("hasRuntimeDependencyGroup(%v) = %v, want %v", tt.groups, got, tt.want)
 			}
@@ -564,7 +540,7 @@ func TestMarksDirectByDefault(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.manager, func(t *testing.T) {
-			got := marksDirectByDefault(tt.manager)
+			got := manifests.MarksDirectByDefault(tt.manager)
 			if got != tt.want {
 				t.Errorf("marksDirectByDefault(%q) = %v, want %v", tt.manager, got, tt.want)
 			}
@@ -612,70 +588,6 @@ func TestNormalizeCrateName(t *testing.T) {
 			}
 		})
 	}
-}
-
-func TestMergeManifestReference(t *testing.T) {
-	tests := []struct {
-		name     string
-		existing []analysis.ManifestReference
-		ref      analysis.ManifestReference
-		wantLen  int
-	}{
-		{
-			name:     "add to empty",
-			existing: nil,
-			ref:      analysis.ManifestReference{Manager: "npm", Path: "package.json"},
-			wantLen:  1,
-		},
-		{
-			name:     "add new ref",
-			existing: []analysis.ManifestReference{{Manager: "npm", Path: "a/package.json"}},
-			ref:      analysis.ManifestReference{Manager: "npm", Path: "b/package.json"},
-			wantLen:  2,
-		},
-		{
-			name:     "merge same ref",
-			existing: []analysis.ManifestReference{{Manager: "npm", Path: "package.json", Groups: []string{"dependencies"}}},
-			ref:      analysis.ManifestReference{Manager: "npm", Path: "package.json", Groups: []string{"devDependencies"}},
-			wantLen:  1,
-		},
-		{
-			name:     "skip empty path",
-			existing: []analysis.ManifestReference{{Manager: "npm", Path: "package.json"}},
-			ref:      analysis.ManifestReference{Manager: "npm", Path: ""},
-			wantLen:  1,
-		},
-		{
-			name:     "skip empty manager",
-			existing: []analysis.ManifestReference{{Manager: "npm", Path: "package.json"}},
-			ref:      analysis.ManifestReference{Manager: "", Path: "package.json"},
-			wantLen:  1,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := mergeManifestReference(tt.existing, tt.ref)
-			if len(got) != tt.wantLen {
-				t.Errorf("mergeManifestReference() returned %d refs, want %d", len(got), tt.wantLen)
-			}
-		})
-	}
-
-	// Test group merging specifically
-	t.Run("groups merged correctly", func(t *testing.T) {
-		existing := []analysis.ManifestReference{
-			{Manager: "npm", Path: "package.json", Groups: []string{"dependencies"}},
-		}
-		ref := analysis.ManifestReference{Manager: "npm", Path: "package.json", Groups: []string{"devDependencies"}}
-		got := mergeManifestReference(existing, ref)
-		if len(got) != 1 {
-			t.Fatalf("expected 1 ref, got %d", len(got))
-		}
-		if !slices.Contains(got[0].Groups, "dependencies") || !slices.Contains(got[0].Groups, "devDependencies") {
-			t.Errorf("groups not merged correctly: %v", got[0].Groups)
-		}
-	})
 }
 
 func TestCanonicalPackageKeyFromInput(t *testing.T) {

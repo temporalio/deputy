@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"strings"
 
+	"github.com/picatz/deputy/internal/report"
 	ui "github.com/picatz/deputy/internal/ui"
 	"github.com/picatz/openai/codex"
 )
@@ -71,8 +72,8 @@ func buildCodexFixPrompt(plan remediationPlan) (string, error) {
 }
 
 // buildCodexTriagePrompt constructs the prompt for the Codex agent based on the triage report.
-func buildCodexTriagePrompt(report triageReport) (string, error) {
-	data, err := json.MarshalIndent(report, "", "  ")
+func buildCodexTriagePrompt(triageReport report.TriageReport) (string, error) {
+	data, err := json.MarshalIndent(triageReport, "", "  ")
 	if err != nil {
 		return "", fmt.Errorf("encode triage report: %w", err)
 	}

@@ -16,13 +16,14 @@ import (
 	"github.com/google/osv-scalibr/extractor"
 	scalpurl "github.com/google/osv-scalibr/purl"
 	"github.com/picatz/deputy/internal/auth"
+	"github.com/picatz/deputy/internal/cli/flags"
 	"github.com/picatz/deputy/internal/compare"
+	"github.com/picatz/deputy/internal/gitutil"
 	gitx "github.com/picatz/deputy/internal/gitutil"
 	inv "github.com/picatz/deputy/internal/inventory"
 	"github.com/picatz/deputy/internal/purlx"
 	"github.com/picatz/deputy/internal/repository"
 	"github.com/picatz/deputy/internal/repository/workspace"
-	sbomx "github.com/picatz/deputy/internal/sbom"
 	ui "github.com/picatz/deputy/internal/ui"
 	"github.com/spf13/cobra"
 	"golang.org/x/mod/modfile"
@@ -156,7 +157,7 @@ FILTERING & FORMATTING:
 				enc.SetIndent("", "  ")
 				return enc.Encode(result)
 			default:
-				return fmt.Errorf("unsupported --format %q (use text|tsv|json)", format)
+				return flags.UnsupportedFormatError("--format", format, "text|tsv|json")
 			}
 		},
 	}
@@ -186,13 +187,13 @@ func collectListItems(ctx context.Context, repoPath, ref string, ecosystems []st
 		}
 	}
 	if src == nil {
-		u := sbomx.ToHTTPSGitURL(repoPath)
+		u := gitutil.ToHTTPSGitURL(repoPath)
 		if u == "" {
 			return nil, "", "", fmt.Errorf("could not interpret repo %q as local path or remote URL", repoPath)
 		}
 		// Use the unified auth package for secure, host-aware credential resolution
 		gitAuth, _ := auth.GitAuthForURL(ctx, u)
-		rn, resolveErr := sbomx.ResolveReferenceName(ctx, u, gitAuth, ref)
+		rn, resolveErr := gitutil.ResolveReferenceName(ctx, u, gitAuth, ref)
 		if resolveErr == nil && rn.String() != "" {
 			ref = rn.String()
 		}

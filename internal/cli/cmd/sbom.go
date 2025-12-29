@@ -7,6 +7,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/picatz/deputy/internal/cli/flags"
 	sbomx "github.com/picatz/deputy/internal/sbom"
 	ui "github.com/picatz/deputy/internal/ui"
 	"github.com/spf13/cobra"
@@ -67,6 +68,7 @@ Optionally enriches SBOM entries with license information from multiple sources:
 				ref = "HEAD"
 			}
 
+			licenseSource = flags.NormalizeLicenseSource(licenseSource)
 			result, err := sbomx.Generate(ctx, repoPath, sbomx.Options{
 				Ref:            ref,
 				Ecosystems:     ecos,
@@ -98,15 +100,19 @@ Optionally enriches SBOM entries with license information from multiple sources:
 				w = f
 			}
 
-			switch strings.ToLower(format) {
-			case "cyclonedx-json", "cyclonedx":
+			fmtFmt, err := flags.NormalizeSBOMOutputFormat(format)
+			if err != nil {
+				return err
+			}
+			switch fmtFmt {
+			case flags.SBOMOutputCycloneDXJSON:
 				return sbomx.WriteCycloneDXJSON(doc, w)
-			case "spdx-json", "spdx":
+			case flags.SBOMOutputSPDXJSON:
 				return sbomx.WriteSPDXJSON(doc, w)
-			case "protobom-json", "protobom":
+			case flags.SBOMOutputProtobomJSON:
 				return sbomx.WriteProtobomJSON(doc, w)
 			default:
-				return fmt.Errorf("unsupported format %q (use cyclonedx-json | spdx-json | protobom-json)", format)
+				return flags.UnsupportedFormatError("", format, "cyclonedx-json | spdx-json | protobom-json")
 			}
 		},
 		Example: `BASIC SBOM GENERATION:

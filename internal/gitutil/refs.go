@@ -2,12 +2,12 @@ package gitutil
 
 import (
 	"fmt"
+	"reflect"
 	"slices"
 	"strings"
 
 	git "github.com/go-git/go-git/v5"
 	"github.com/go-git/go-git/v5/plumbing"
-	inv "github.com/picatz/deputy/internal/inventory"
 )
 
 // Common Git reference constants.
@@ -18,10 +18,15 @@ const (
 	RefWORKING = "WORKING"
 )
 
+// PathMatcher reports whether a path should be treated as a dependency manifest.
+type PathMatcher interface {
+	Matches(path string) bool
+}
+
 // ParseReferences intelligently parses command line arguments to determine base and target references.
 // It supports all Git reference types: branches, tags, commits, remote refs, and Git revision expressions.
 // Dependency-related decisions (e.g., whether to compare with WORKING) are aided by the provided matcher.
-func ParseReferences(repoPath string, args []string, matcher *inv.DependencyMatcher) (baseRef, targetRef string, err error) {
+func ParseReferences(repoPath string, args []string, matcher PathMatcher) (baseRef, targetRef string, err error) {
 	repo, err := git.PlainOpen(repoPath)
 	if err != nil {
 		return "", "", fmt.Errorf("error opening Git repository at %s: %w", repoPath, err)
@@ -62,8 +67,8 @@ func ParseReferences(repoPath string, args []string, matcher *inv.DependencyMatc
 }
 
 // hasWorkingDependencyChanges reports if dependency manifest/lock files have uncommitted changes.
-func hasWorkingDependencyChanges(repo *git.Repository, matcher *inv.DependencyMatcher) (bool, error) {
-	if matcher == nil {
+func hasWorkingDependencyChanges(repo *git.Repository, matcher PathMatcher) (bool, error) {
+	if matcher == nil || isNilMatcher(matcher) {
 		return false, nil
 	}
 	wt, err := repo.Worktree()
@@ -83,6 +88,19 @@ func hasWorkingDependencyChanges(repo *git.Repository, matcher *inv.DependencyMa
 		}
 	}
 	return false, nil
+}
+
+func isNilMatcher(matcher PathMatcher) bool {
+	v := reflect.ValueOf(matcher)
+	if !v.IsValid() {
+		return true
+	}
+	switch v.Kind() {
+	case reflect.Ptr, reflect.Interface, reflect.Map, reflect.Slice, reflect.Func, reflect.Chan:
+		return v.IsNil()
+	default:
+		return false
+	}
 }
 
 // GetDefaultBranch attempts to find the repository's default branch using multiple strategies.

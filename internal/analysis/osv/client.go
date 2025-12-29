@@ -1,0 +1,25 @@
+package osv
+
+import (
+	"time"
+
+	"github.com/picatz/deputy/internal/httputil"
+	"osv.dev/bindings/go/osvdev"
+)
+
+// osvHTTPTimeout is the overall request timeout for OSV API calls.
+// This is slightly longer than the GHA timeout to account for potentially
+// larger batch queries.
+const osvHTTPTimeout = 45 * time.Second
+
+// NewOSVClient returns an osv.dev client configured with production-friendly HTTP timeouts
+// and automatic retry for transient failures.
+//
+// Callers should still pass a cancelable context; this function primarily protects against
+// hung connections and slow/broken networks. The retryable HTTP client automatically
+// handles 5xx errors and connection failures with exponential backoff.
+func NewOSVClient() *osvdev.OSVClient {
+	c := osvdev.DefaultClient()
+	c.HTTPClient = httputil.NewRetryableClient(osvHTTPTimeout)
+	return c
+}

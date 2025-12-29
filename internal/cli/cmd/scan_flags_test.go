@@ -134,11 +134,11 @@ func TestScanFlags_DisplayOptions(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			opts := tt.flags.displayOptions()
-			if opts.showSymbols != tt.wantSymbols {
-				t.Errorf("displayOptions().showSymbols = %v, want %v", opts.showSymbols, tt.wantSymbols)
+			if opts.ShowSymbols != tt.wantSymbols {
+				t.Errorf("displayOptions().ShowSymbols = %v, want %v", opts.ShowSymbols, tt.wantSymbols)
 			}
-			if opts.showDatabaseInfo != tt.wantDBInfo {
-				t.Errorf("displayOptions().showDatabaseInfo = %v, want %v", opts.showDatabaseInfo, tt.wantDBInfo)
+			if opts.ShowDatabaseInfo != tt.wantDBInfo {
+				t.Errorf("displayOptions().ShowDatabaseInfo = %v, want %v", opts.ShowDatabaseInfo, tt.wantDBInfo)
 			}
 		})
 	}
@@ -190,12 +190,12 @@ func TestOpenOutputWriter(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
-		name        string
-		outPath     string
-		wantStdout  bool
-		wantErr     bool
-		writeData   string
-		checkFile   bool
+		name       string
+		outPath    string
+		wantStdout bool
+		wantErr    bool
+		writeData  string
+		checkFile  bool
 	}{
 		{
 			name:       "empty path uses stdout",

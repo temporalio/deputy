@@ -12,26 +12,22 @@ import (
 	"runtime"
 	"strings"
 
+	"github.com/picatz/deputy/internal/cli/flags"
 	inv "github.com/picatz/deputy/internal/inventory"
 	"github.com/picatz/deputy/internal/output"
 	remediation "github.com/picatz/deputy/internal/remediation"
+	"github.com/picatz/deputy/internal/report"
+	"github.com/picatz/deputy/internal/report/render"
 	ui "github.com/picatz/deputy/internal/ui"
 	"github.com/spf13/cobra"
 )
 
 // remediationPlan represents a structured plan for remediating vulnerabilities.
 type remediationPlan struct {
-	Target        remediationPlanTarget  `json:"target"`
+	Target        report.Target          `json:"target"`
 	StdlibUpgrade string                 `json:"stdlibUpgrade,omitempty"`
 	Commands      []remediation.Command  `json:"commands"`
 	Stats         remediationPlanSummary `json:"stats"`
-}
-
-// remediationPlanTarget identifies the repository and commit that the plan applies to.
-type remediationPlanTarget struct {
-	Repo   string `json:"repo"`
-	Ref    string `json:"ref,omitempty"`
-	Commit string `json:"commit,omitempty"`
 }
 
 // remediationPlanSummary provides statistics about the remediation plan.
@@ -183,7 +179,7 @@ func runFixPlan(scanner *Scanner, cmd *cobra.Command, args []string) error {
 		publishedBeforeStr, _ := cmd.Flags().GetString("published-before")
 		publishedAfterStr, _ := cmd.Flags().GetString("published-after")
 		asOfStr, _ := cmd.Flags().GetString("as-of")
-		beforeT, afterT := parsePublishedFilters(cmd.ErrOrStderr(), asOfStr, publishedBeforeStr, publishedAfterStr)
+		beforeT, afterT := flags.ParsePublishedFilters(cmd.ErrOrStderr(), asOfStr, publishedBeforeStr, publishedAfterStr)
 		exec, err := scanner.executeScan(ctx, repoArg, ref, cmd.Flags().Changed("ref"), scanOpts, beforeT, afterT, cmd.ErrOrStderr())
 		if err != nil {
 			return err
@@ -213,7 +209,7 @@ func runFixPlan(scanner *Scanner, cmd *cobra.Command, args []string) error {
 			return err
 		}
 	default:
-		return fmt.Errorf("unsupported --format %q (use text|json)", format)
+		return flags.UnsupportedFormatError("--format", format, "text|json")
 	}
 
 	var repoPathForMutations string
@@ -294,53 +290,22 @@ func readPlanSource(r io.Reader, path string) (remediationPlan, error) {
 
 // printFixSummary displays a human-readable summary of the remediation plan.
 func printFixSummary(w io.Writer, plan remediationPlan) {
-	doc, hasCommands := fixSummaryDoc(plan)
+	doc, hasCommands := render.FixSummaryDoc(render.TargetSummary{
+		Repo:   plan.Target.Repo,
+		Ref:    plan.Target.Ref,
+		Commit: plan.Target.Commit,
+	}, plan.StdlibUpgrade, plan.Stats.TotalCommands, plan.Stats.RunnableCommands, len(plan.Commands))
 	_ = doc.Render(w, output.UIStyles())
 	if !hasCommands {
 		return
 	}
-	renderRemediationCommands(w, plan.Commands, "       ", "         ")
-}
-
-func fixSummaryDoc(plan remediationPlan) (output.Doc, bool) {
-	var doc output.Doc
-	doc.AddLine(output.Span{Text: "Remediation Plan:", Style: output.StyleHeader})
-	if repo := strings.TrimSpace(plan.Target.Repo); repo != "" {
-		repoLine := repo
-		if plan.Target.Ref != "" {
-			repoLine = fmt.Sprintf("%s@%s", repoLine, plan.Target.Ref)
-		}
-		doc.AddLine(output.Span{Text: "  Target: "}, output.Span{Text: repoLine, Style: output.StylePackageName})
-	}
-	if plan.Target.Commit != "" {
-		doc.AddLine(output.Span{Text: "  Commit: "}, output.Span{Text: plan.Target.Commit, Style: output.StyleVersion})
-	}
-	if plan.StdlibUpgrade != "" {
-		doc.AddLine(
-			output.Span{Text: "  • "},
-			output.Span{Text: "Upgrade Go toolchain to", Style: output.StyleBold},
-			output.Span{Text: " "},
-			output.Span{Text: plan.StdlibUpgrade, Style: output.StyleUpgraded},
-			output.Span{Text: " "},
-			output.Span{Text: "(update 'go' directive in go.mod)", Style: output.StyleVersion},
-		)
-	}
-	if len(plan.Commands) == 0 {
-		doc.AddLine(output.Span{Text: "  • "}, output.Span{Text: "No dependency upgrades with fixes (report contains only unfixed issues).", Style: output.StyleMeta})
-		return doc, false
-	}
-	doc.AddLine(
-		output.Span{Text: "  • "},
-		output.Span{Text: "Apply dependency upgrades", Style: output.StyleBold},
-		output.Span{Text: fmt.Sprintf(" (%d total, %d runnable)", plan.Stats.TotalCommands, plan.Stats.RunnableCommands)},
-	)
-	return doc, true
+	render.RenderRemediationCommands(w, plan.Commands, "       ", "         ")
 }
 
 // buildRemediationPlan constructs a remediation plan from the scan result and generated commands.
 func buildRemediationPlan(result ScanResult, commands []remediation.Command, stdlib string) remediationPlan {
 	plan := remediationPlan{
-		Target: remediationPlanTarget{
+		Target: report.Target{
 			Repo:   result.Repo,
 			Ref:    result.Ref,
 			Commit: result.Commit,

@@ -14,6 +14,7 @@ import (
 	"strings"
 
 	gocmp "github.com/google/go-cmp/cmp"
+	"github.com/picatz/deputy/internal/cli/flags"
 	"github.com/picatz/deputy/internal/policy"
 	"github.com/spf13/cobra"
 )
@@ -225,7 +226,7 @@ func writePolicyEvalOutput(w io.Writer, value any, format string) error {
 		_, err := fmt.Fprintf(w, "%v\n", value)
 		return err
 	default:
-		return fmt.Errorf("unsupported format %q", format)
+		return flags.UnsupportedFormatError("--format", format, "text|json")
 	}
 }
 
@@ -755,6 +756,6 @@ func writeSimulationResult(w io.Writer, format string, index int, payload map[st
 		enc.SetIndent("", "  ")
 		return enc.Encode(out)
 	default:
-		return fmt.Errorf("unsupported format %q", format)
+		return flags.UnsupportedFormatError("--format", format, "text|json")
 	}
 }

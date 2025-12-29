@@ -17,16 +17,19 @@ import (
 	"github.com/go-git/go-git/v5/plumbing"
 	"github.com/google/osv-scalibr/extractor"
 	analysis "github.com/picatz/deputy/internal/analysis"
+	cliflags "github.com/picatz/deputy/internal/cli/flags"
 	"github.com/picatz/deputy/internal/collections"
 	"github.com/picatz/deputy/internal/compare"
+	"github.com/picatz/deputy/internal/gitutil"
 	gitx "github.com/picatz/deputy/internal/gitutil"
 	inv "github.com/picatz/deputy/internal/inventory"
 	"github.com/picatz/deputy/internal/output"
 	"github.com/picatz/deputy/internal/policy"
 	"github.com/picatz/deputy/internal/purlx"
+	"github.com/picatz/deputy/internal/report"
+	"github.com/picatz/deputy/internal/report/render"
 	"github.com/picatz/deputy/internal/repository"
 	"github.com/picatz/deputy/internal/repository/workspace"
-	sbomx "github.com/picatz/deputy/internal/sbom"
 	"github.com/picatz/deputy/internal/targets"
 	_ "github.com/picatz/deputy/internal/targets/providers"
 	ui "github.com/picatz/deputy/internal/ui"
@@ -56,25 +59,7 @@ type ScanResult struct {
 	// Vulnerabilities is the list of security vulnerabilities found in dependencies.
 	Vulnerabilities []analysis.Vulnerability `json:"vulnerabilities"`
 	// PolicyFindings contains policy evaluation results (deny/warn actions).
-	PolicyFindings []PolicyFinding `json:"policyFindings,omitempty"`
-}
-
-// PolicyFinding represents a policy action emitted during scan evaluation.
-type PolicyFinding struct {
-	// Source is the name of the policy that generated this finding.
-	Source string `json:"source"`
-	// Action is the policy decision type (e.g., "deny", "warn", "allow").
-	Action string `json:"action"`
-	// Reason explains why the policy triggered this action.
-	Reason string `json:"reason,omitempty"`
-	// Message provides additional context or details about the finding.
-	Message string `json:"message,omitempty"`
-	// Remediation suggests steps to resolve the policy violation.
-	Remediation string `json:"remediation,omitempty"`
-	// Status is an optional HTTP status code suggestion for proxy mode.
-	Status *int `json:"status,omitempty"`
-	// Code is a machine-readable identifier for the finding type.
-	Code string `json:"code,omitempty"`
+	PolicyFindings []report.PolicyFinding `json:"policyFindings,omitempty"`
 }
 
 // ModuleDeprecation captures information about a deprecated module and its
@@ -625,7 +610,7 @@ func (s *Scanner) runScan(cmd *cobra.Command, args []string) error {
 	case FormatJSON:
 		return s.outputJSON(out.Writer, exec.displayPath, flags.Ref, exec.commitHash, vulns, len(pkgs), flags.IgnoreUnfixed, policyFindings)
 	default:
-		return fmt.Errorf("unsupported --format %q (use text|json)", flags.Format)
+		return cliflags.UnsupportedFormatError("--format", flags.Format, "text|json")
 	}
 }
 
@@ -684,7 +669,7 @@ func (s *Scanner) runScanDir(cmd *cobra.Command, args []string) error {
 	case FormatJSON:
 		return s.outputJSON(out.Writer, path, "", "", vulns, len(pkgs), flags.IgnoreUnfixed, policyFindings)
 	default:
-		return fmt.Errorf("unsupported --format %q (use text|json)", flags.Format)
+		return cliflags.UnsupportedFormatError("--format", flags.Format, "text|json")
 	}
 }
 
@@ -749,46 +734,21 @@ func (s *Scanner) runScanSBOM(cmd *cobra.Command, args []string) error {
 
 	switch strings.ToLower(flags.Format) {
 	case "", FormatText:
-		doc := scanResultsHeaderDoc("SBOM input", "", "", "")
+		doc := render.ScanResultsHeaderDoc("SBOM input", "", "", "")
 		_ = doc.Render(out.Writer, output.UIStyles())
 		vulnsEff := vulns
 		if flags.IgnoreUnfixed {
 			vulnsEff = filterUnfixed(vulns)
 			fmt.Fprintln(cmd.ErrOrStderr(), "  "+ui.StyleMeta.Render("Note: ignoring unfixed vulnerabilities (--ignore-unfixed)"))
 		}
-		DisplayVulnerabilities(out.Writer, vulnsEff, flags.displayOptions())
-		DisplayPolicyFindings(out.Writer, policyFindings)
+		render.DisplayVulnerabilities(out.Writer, vulnsEff, flags.displayOptions())
+		render.RenderPolicyFindings(out.Writer, policyFindings)
 		return nil
 	case FormatJSON:
 		return s.outputJSON(out.Writer, "sbom", "", "", vulns, len(pkgs), flags.IgnoreUnfixed, policyFindings)
 	default:
-		return fmt.Errorf("unsupported --format %q (use text|json)", flags.Format)
+		return cliflags.UnsupportedFormatError("--format", flags.Format, "text|json")
 	}
-}
-
-func scanResultsHeaderDoc(target, ref, commitHash, originURL string) output.Doc {
-	var doc output.Doc
-	doc.AddBlank()
-	doc.AddLine(output.Span{Text: "Scan Results:", Style: output.StyleHeader})
-	doc.AddLine(output.Span{Text: "  Target: "}, output.Span{Text: target, Style: output.StylePackageName})
-	if strings.TrimSpace(ref) != "" {
-		spans := []output.Span{
-			{Text: "  Ref: "},
-			{Text: ref, Style: output.StyleVersion},
-		}
-		if strings.TrimSpace(commitHash) != "" {
-			spans = append(spans,
-				output.Span{Text: " ("},
-				output.Span{Text: commitHash, Style: output.StyleVersion},
-				output.Span{Text: ")"},
-			)
-		}
-		doc.AddLine(spans...)
-	}
-	if strings.TrimSpace(originURL) != "" {
-		doc.AddLine(output.Span{Text: "  Origin: "}, output.Span{Text: originURL, Style: output.StyleMeta})
-	}
-	return doc
 }
 
 // Helper functions
@@ -844,33 +804,6 @@ func refOrHEAD(r string) string {
 	return r
 }
 
-// parsePublishedFilters parses the date filter flags and returns the before and after times.
-func parsePublishedFilters(errW io.Writer, asOfStr, beforeStr, afterStr string) (time.Time, time.Time) {
-	var beforeT, afterT time.Time
-	if asOfStr != "" {
-		if t, err := analysis.ParseFlexibleDate(asOfStr, "asof"); err == nil {
-			beforeT = t
-		} else {
-			fmt.Fprintf(errW, "Warning: could not parse --as-of date %q: %v\n", asOfStr, err)
-		}
-	}
-	if beforeStr != "" && beforeT.IsZero() {
-		if t, err := analysis.ParseFlexibleDate(beforeStr, "before"); err == nil {
-			beforeT = t
-		} else {
-			fmt.Fprintf(errW, "Warning: could not parse --published-before %q: %v\n", beforeStr, err)
-		}
-	}
-	if afterStr != "" {
-		if t, err := analysis.ParseFlexibleDate(afterStr, "after"); err == nil {
-			afterT = t
-		} else {
-			fmt.Fprintf(errW, "Warning: could not parse --published-after %q: %v\n", afterStr, err)
-		}
-	}
-	return beforeT, afterT
-}
-
 // filterUnfixed returns a slice of vulnerabilities that have at least one fixed version.
 func filterUnfixed(vs []analysis.Vulnerability) []analysis.Vulnerability {
 	return analysis.FilterVulnerabilities(vs, analysis.HasFix())
@@ -912,7 +845,7 @@ func getRepoMetadata(localRepoPath, ref string) (string, string) {
 				originURL = "https://github.com/" + p
 			default:
 				originURL = u
-				if n := sbomx.ToHTTPSGitURL(u); n != "" {
+				if n := gitutil.ToHTTPSGitURL(u); n != "" {
 					originURL = n
 				}
 			}
@@ -923,7 +856,7 @@ func getRepoMetadata(localRepoPath, ref string) (string, string) {
 }
 
 // outputText writes the scan results in a human-readable text format to the provided writer.
-func (s *Scanner) outputText(w io.Writer, errW io.Writer, repoPath, ref, commitHash, originURL string, pkgs []*extractor.Package, goDirect map[string]bool, vulns []analysis.Vulnerability, ignoreUnfixed bool, policyFindings []PolicyFinding, displayOpts vulnDisplayOptions) error {
+func (s *Scanner) outputText(w io.Writer, errW io.Writer, repoPath, ref, commitHash, originURL string, pkgs []*extractor.Package, goDirect map[string]bool, vulns []analysis.Vulnerability, ignoreUnfixed bool, policyFindings []report.PolicyFinding, displayOpts render.VulnerabilityDisplayOptions) error {
 	shortRef := shortGitRef(refOrHEAD(ref))
 	shortHash := commitHash
 	if len(shortHash) > 7 {
@@ -939,7 +872,7 @@ func (s *Scanner) outputText(w io.Writer, errW io.Writer, repoPath, ref, commitH
 		}
 	}
 
-	doc := scanResultsHeaderDoc(repoPath, shortRef, shortHash, originURL)
+	doc := render.ScanResultsHeaderDoc(repoPath, shortRef, shortHash, originURL)
 	_ = doc.Render(w, output.UIStyles())
 
 	vulnsEff := vulns
@@ -948,8 +881,8 @@ func (s *Scanner) outputText(w io.Writer, errW io.Writer, repoPath, ref, commitH
 		fmt.Fprintln(errW, "  "+ui.StyleMeta.Render("Note: ignoring unfixed vulnerabilities (--ignore-unfixed)"))
 	}
 
-	DisplayVulnerabilities(w, vulnsEff, displayOpts)
-	DisplayPolicyFindings(w, policyFindings)
+	render.DisplayVulnerabilities(w, vulnsEff, displayOpts)
+	render.RenderPolicyFindings(w, policyFindings)
 
 	// Show module deprecations
 	if deps := detectModuleDeprecations(pkgs, goDirect); len(deps) > 0 {
@@ -967,8 +900,8 @@ func (s *Scanner) outputText(w io.Writer, errW io.Writer, repoPath, ref, commitH
 }
 
 // outputTextDir writes the directory scan results in a human-readable text format.
-func (s *Scanner) outputTextDir(w io.Writer, errW io.Writer, path string, vulns []analysis.Vulnerability, ignoreUnfixed bool, policyFindings []PolicyFinding, displayOpts vulnDisplayOptions) error {
-	doc := scanResultsHeaderDoc(path, "", "", "")
+func (s *Scanner) outputTextDir(w io.Writer, errW io.Writer, path string, vulns []analysis.Vulnerability, ignoreUnfixed bool, policyFindings []report.PolicyFinding, displayOpts render.VulnerabilityDisplayOptions) error {
+	doc := render.ScanResultsHeaderDoc(path, "", "", "")
 	_ = doc.Render(w, output.UIStyles())
 
 	vulnsEff := vulns
@@ -977,13 +910,13 @@ func (s *Scanner) outputTextDir(w io.Writer, errW io.Writer, path string, vulns 
 		fmt.Fprintln(errW, "  "+ui.StyleMeta.Render("Note: ignoring unfixed vulnerabilities (--ignore-unfixed)"))
 	}
 
-	DisplayVulnerabilities(w, vulnsEff, displayOpts)
-	DisplayPolicyFindings(w, policyFindings)
+	render.DisplayVulnerabilities(w, vulnsEff, displayOpts)
+	render.RenderPolicyFindings(w, policyFindings)
 	return nil
 }
 
 // outputJSON writes the scan results in JSON format to the provided writer.
-func (s *Scanner) outputJSON(w io.Writer, repo, ref, commit string, vulns []analysis.Vulnerability, pkgCount int, ignoreUnfixed bool, policyFindings []PolicyFinding) error {
+func (s *Scanner) outputJSON(w io.Writer, repo, ref, commit string, vulns []analysis.Vulnerability, pkgCount int, ignoreUnfixed bool, policyFindings []report.PolicyFinding) error {
 	vulnsEff := vulns
 	if ignoreUnfixed {
 		vulnsEff = filterUnfixed(vulns)
@@ -999,13 +932,10 @@ func (s *Scanner) outputJSON(w io.Writer, repo, ref, commit string, vulns []anal
 
 // parseSBOMPackages converts supported SBOM documents into package tuples for OSV queries.
 func parseSBOMPackages(data []byte, inFmt string) ([]*extractor.Package, map[string]bool, error) {
-	const (
-		fmtProtobom  = "protobom"
-		fmtCycloneDX = "cyclonedx"
-		fmtSPDX      = "spdx"
-	)
-
-	format := strings.ToLower(strings.TrimSpace(inFmt))
+	format, err := cliflags.NormalizeSBOMInputFormat(inFmt)
+	if err != nil {
+		return nil, nil, err
+	}
 	var tryOrder []string
 	seen := collections.NewSet[string]()
 	addFormat := func(kind string) {
@@ -1019,21 +949,19 @@ func parseSBOMPackages(data []byte, inFmt string) ([]*extractor.Package, map[str
 	}
 
 	switch format {
-	case "", "auto":
+	case cliflags.SBOMInputAuto:
 		if detected := detectSBOMFormat(data); detected != "" {
 			addFormat(detected)
 		}
-		addFormat(fmtProtobom)
-		addFormat(fmtCycloneDX)
-		addFormat(fmtSPDX)
-	case "protobom", "protobom-json":
-		addFormat(fmtProtobom)
-	case "cyclonedx", "cyclonedx-json":
-		addFormat(fmtCycloneDX)
-	case "spdx", "spdx-json":
-		addFormat(fmtSPDX)
-	default:
-		return nil, nil, fmt.Errorf("unsupported --input-format %q (use auto|protobom-json|cyclonedx-json|spdx-json)", inFmt)
+		addFormat(cliflags.SBOMInputProtobom)
+		addFormat(cliflags.SBOMInputCycloneDX)
+		addFormat(cliflags.SBOMInputSPDX)
+	case cliflags.SBOMInputProtobom:
+		addFormat(cliflags.SBOMInputProtobom)
+	case cliflags.SBOMInputCycloneDX:
+		addFormat(cliflags.SBOMInputCycloneDX)
+	case cliflags.SBOMInputSPDX:
+		addFormat(cliflags.SBOMInputSPDX)
 	}
 
 	var lastErr error
@@ -1044,11 +972,11 @@ func parseSBOMPackages(data []byte, inFmt string) ([]*extractor.Package, map[str
 			err    error
 		)
 		switch kind {
-		case fmtProtobom:
+		case cliflags.SBOMInputProtobom:
 			pkgs, direct, err = parseProtobomPackages(data)
-		case fmtCycloneDX:
+		case cliflags.SBOMInputCycloneDX:
 			pkgs, direct, err = parseCycloneDXPackages(data)
-		case fmtSPDX:
+		case cliflags.SBOMInputSPDX:
 			pkgs, direct, err = parseSPDXPackages(data)
 		default:
 			err = fmt.Errorf("unknown SBOM format %q", kind)
@@ -1299,17 +1227,17 @@ func runScanPolicies(ctx context.Context, policyPaths []string, report ScanResul
 }
 
 // actionsToPolicyFindings converts policy actions into findings suitable for the scan report.
-func actionsToPolicyFindings(actions []policy.Action) []PolicyFinding {
+func actionsToPolicyFindings(actions []policy.Action) []report.PolicyFinding {
 	if len(actions) == 0 {
 		return nil
 	}
-	var findings []PolicyFinding
+	var findings []report.PolicyFinding
 	for _, act := range actions {
 		actionType := strings.TrimSpace(act.Type)
 		if actionType == "" || strings.EqualFold(actionType, "allow") {
 			continue
 		}
-		f := PolicyFinding{
+		f := report.PolicyFinding{
 			Source:      act.Source,
 			Action:      actionType,
 			Reason:      act.Reason,

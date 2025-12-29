@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	remediation "github.com/picatz/deputy/internal/remediation"
+	"github.com/picatz/deputy/internal/report"
 )
 
 func TestBuildRemediationPlan(t *testing.T) {
@@ -32,7 +33,7 @@ func TestBuildRemediationPlan(t *testing.T) {
 
 func TestOutputRemediationPlanJSON(t *testing.T) {
 	plan := remediationPlan{
-		Target:        remediationPlanTarget{Repo: "repo", Ref: "main", Commit: "abc"},
+		Target:        report.Target{Repo: "repo", Ref: "main", Commit: "abc"},
 		StdlibUpgrade: "v1.2.0",
 		Commands:      []remediation.Command{{Command: "npm install foo@1", Executable: true}},
 		Stats:         remediationPlanSummary{TotalCommands: 1, RunnableCommands: 1},
@@ -52,7 +53,7 @@ func TestOutputRemediationPlanJSON(t *testing.T) {
 
 func TestReadPlanSourceFromReader(t *testing.T) {
 	plan := remediationPlan{
-		Target:        remediationPlanTarget{Repo: "repo", Ref: "main", Commit: "abc"},
+		Target:        report.Target{Repo: "repo", Ref: "main", Commit: "abc"},
 		StdlibUpgrade: "v1.0.0",
 		Commands: []remediation.Command{
 			{Command: "go get example.com/foo@v1.2.3", Executable: true},

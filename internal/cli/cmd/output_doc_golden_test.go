@@ -10,6 +10,8 @@ import (
 	analysis "github.com/picatz/deputy/internal/analysis"
 	"github.com/picatz/deputy/internal/output"
 	"github.com/picatz/deputy/internal/remediation"
+	"github.com/picatz/deputy/internal/report"
+	"github.com/picatz/deputy/internal/report/render"
 )
 
 func TestOutputDocs_Golden(t *testing.T) {
@@ -24,7 +26,7 @@ func TestOutputDocs_Golden(t *testing.T) {
 			name:   "ScanHeader",
 			golden: "scan_header.golden",
 			render: func() (string, error) {
-				doc := scanResultsHeaderDoc("github.com/acme/repo", "main", "deadbeef", "https://github.com/acme/repo")
+				doc := render.ScanResultsHeaderDoc("github.com/acme/repo", "main", "deadbeef", "https://github.com/acme/repo")
 				var buf bytes.Buffer
 				if err := doc.Render(&buf, output.PlainStyles()); err != nil {
 					return "", err
@@ -36,7 +38,7 @@ func TestOutputDocs_Golden(t *testing.T) {
 			name:   "DiffHeader",
 			golden: "diff_header.golden",
 			render: func() (string, error) {
-				doc := diffHeaderDoc("main", "WORKING")
+				doc := render.DiffHeaderDoc("main", "WORKING")
 				var buf bytes.Buffer
 				if err := doc.Render(&buf, output.PlainStyles()); err != nil {
 					return "", err
@@ -48,8 +50,8 @@ func TestOutputDocs_Golden(t *testing.T) {
 			name:   "TriageSummary",
 			golden: "triage_summary.golden",
 			render: func() (string, error) {
-				report := triageReport{
-					Target: remediationPlanTarget{
+				triageReport := report.TriageReport{
+					Target: report.Target{
 						Repo:   "github.com/acme/repo",
 						Ref:    "main",
 						Commit: "deadbeef",
@@ -65,15 +67,19 @@ func TestOutputDocs_Golden(t *testing.T) {
 						IndirectDeps:    4,
 						DuplicatesFound: 0,
 					},
-					TopPackages: []triagePackageSummary{
+					TopPackages: []report.TriagePackageSummary{
 						{Package: "a", Version: "1", Severity: "HIGH", SeverityType: "GHSA"},
 						{Package: "b", Version: "2", Severity: "MED", SeverityType: "GHSA"},
 					},
 					PackagesWithVulns: 5,
 				}
-				doc := triageSummaryDoc(report)
+				doc := render.TriageSummaryDoc(render.TargetSummary{
+					Repo:   triageReport.Target.Repo,
+					Ref:    triageReport.Target.Ref,
+					Commit: triageReport.Target.Commit,
+				}, triageReport.Stats, triageReport.PackagesWithVulns)
 				doc.AddBlank()
-				doc.AddLine(output.Span{Text: topImpactedTitle(report)})
+				doc.AddLine(output.Span{Text: render.TopImpactedTitle(triageReport.PackagesWithVulns, len(triageReport.TopPackages))})
 				doc.AddLine(output.Span{Text: "  Severity shown per package = highest vuln severity in that package.", Style: output.StyleMeta})
 
 				var buf bytes.Buffer
@@ -88,7 +94,7 @@ func TestOutputDocs_Golden(t *testing.T) {
 			golden: "fix_summary.golden",
 			render: func() (string, error) {
 				plan := remediationPlan{
-					Target: remediationPlanTarget{
+					Target: report.Target{
 						Repo:   "github.com/acme/repo",
 						Ref:    "main",
 						Commit: "deadbeef",
@@ -100,7 +106,11 @@ func TestOutputDocs_Golden(t *testing.T) {
 						RunnableCommands: 2,
 					},
 				}
-				doc, _ := fixSummaryDoc(plan)
+				doc, _ := render.FixSummaryDoc(render.TargetSummary{
+					Repo:   plan.Target.Repo,
+					Ref:    plan.Target.Ref,
+					Commit: plan.Target.Commit,
+				}, plan.StdlibUpgrade, plan.Stats.TotalCommands, plan.Stats.RunnableCommands, len(plan.Commands))
 
 				var buf bytes.Buffer
 				if err := doc.Render(&buf, output.PlainStyles()); err != nil {

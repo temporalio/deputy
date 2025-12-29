@@ -6,7 +6,9 @@ import (
 	"os"
 	"time"
 
+	"github.com/picatz/deputy/internal/cli/flags"
 	inv "github.com/picatz/deputy/internal/inventory"
+	"github.com/picatz/deputy/internal/report/render"
 	"github.com/spf13/cobra"
 )
 
@@ -58,11 +60,11 @@ type scanFlags struct {
 	InputFormat string
 }
 
-// displayOptions returns the vulnDisplayOptions derived from scan flags.
-func (f scanFlags) displayOptions() vulnDisplayOptions {
-	return vulnDisplayOptions{
-		showSymbols:      f.ShowSymbols,
-		showDatabaseInfo: f.ShowDBInfo,
+// displayOptions returns the VulnerabilityDisplayOptions derived from scan flags.
+func (f scanFlags) displayOptions() render.VulnerabilityDisplayOptions {
+	return render.VulnerabilityDisplayOptions{
+		ShowSymbols:      f.ShowSymbols,
+		ShowDatabaseInfo: f.ShowDBInfo,
 	}
 }
 
@@ -73,7 +75,7 @@ func (f scanFlags) scanOptions() inv.ScanOptions {
 
 // parsePublishedTimes parses the published time filters and returns before/after times.
 func (f scanFlags) parsePublishedTimes(errW io.Writer) (beforeT, afterT time.Time) {
-	return parsePublishedFilters(errW, f.AsOfStr, f.PublishedBeforeStr, f.PublishedAfterStr)
+	return flags.ParsePublishedFilters(errW, f.AsOfStr, f.PublishedBeforeStr, f.PublishedAfterStr)
 }
 
 // extractScanFlags reads all common scan flags from a cobra command.

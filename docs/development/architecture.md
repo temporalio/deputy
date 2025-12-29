@@ -141,6 +141,19 @@ This lets you write rules once and enforce them everywhere: in CI scans, at pack
 - **JSON formats**: Stable schemas for scripting
 - **Exit codes**: 0 = success, 1 = error/policy violation
 
+### Domain vs Integration Split
+
+Deputy keeps pure domain logic separate from service integrations:
+
+- `internal/vuln` owns the vulnerability domain model, CVSS/severity parsing,
+  alias consolidation, and fix selection. It is pure and has no IO.
+- `internal/analysis/osv` owns OSV API and GitHub Actions bucket integration,
+  including cache-aware lookups and conversion into domain types.
+- `internal/license` handles license enrichment (deps.dev, registry APIs, local
+  scans) and uses `internal/diskcache` for on-disk caching.
+- `internal/analysis` is a thin orchestration layer and compatibility facade
+  that keeps CLI and policy code stable while delegating to the above packages.
+
 ## Package Reference
 
 ### Entry Points
@@ -156,8 +169,14 @@ This lets you write rules once and enforce them everywhere: in CI scans, at pack
 | Package | Purpose | Key Types |
 |---------|---------|-----------|
 | `internal/inventory` | Dependency detection from manifests | `Package`, `Inventory`, `Extractor` |
-| `internal/analysis` | OSV queries, vulnerability matching | `OSVClient`, `Vulnerability`, `Match` |
+| `internal/inventory/manifests` | Manifest/manager heuristics for locations | `DetectManager`, `InferArtifactManager` |
+| `internal/analysis` | Orchestration + facades over vuln/OSV integrations | `OSVClient`, `Vulnerability` (aliases) |
+| `internal/analysis/osv` | OSV API + GitHub Actions bucket integration | `OSVClient`, `PkgInput` |
+| `internal/vuln` | Domain types, CVSS/severity, consolidation | `Vulnerability`, `ConsolidatedVulnerability` |
+| `internal/license` | License enrichment and scanning | `DepsClient` |
 | `internal/remediation` | Fix planning, upgrade commands | `Plan`, `Step`, `Upgrade` |
+| `internal/report` | Report/context assembly helpers (rendering in subpackages) | `ManifestContext`, `Summary`, `TriageReport`, `PolicyFinding`, `Target` |
+| `internal/report/render` | Human-readable report rendering | `RenderVulnerabilityList`, `TriageSummaryDoc`, `RenderPolicyFindings` |
 | `internal/sbom` | SBOM generation (CycloneDX, SPDX) | `Generator`, `Document` |
 | `internal/policy` | CEL evaluation engine | `Evaluator`, `Policy`, `Action` |
 | `internal/proxy` | Package proxy adapters and server | `Server`, `Adapter`, `Request` |
@@ -170,6 +189,8 @@ This lets you write rules once and enforce them everywhere: in CI scans, at pack
 | `internal/purlx` | PURL parsing and normalization |
 | `internal/output` | Output formatting (table, JSON) |
 | `internal/config` | Configuration loading |
+| `internal/diskcache` | JSON-on-disk cache helpers |
+| `internal/cli/flags` | Shared CLI flag parsing helpers |
 
 ## Data Flow
 
@@ -375,7 +396,7 @@ type Action struct {
 | Fix implementation | [internal/cli/cmd/fix.go](../../internal/cli/cmd/fix.go) |
 | Policy evaluator | [internal/policy/evaluator.go](../../internal/policy/evaluator.go) |
 | Policy entrypoints | [internal/policy/entrypoints.go](../../internal/policy/entrypoints.go) |
-| OSV client | [internal/analysis/osv_client.go](../../internal/analysis/osv_client.go) |
+| OSV client | [internal/analysis/osv/client.go](../../internal/analysis/osv/client.go) |
 | Inventory extraction | [internal/inventory/inventory.go](../../internal/inventory/inventory.go) |
 | Go proxy adapter | [internal/proxy/gomod.go](../../internal/proxy/gomod.go) |
 | npm proxy adapter | [internal/proxy/npm.go](../../internal/proxy/npm.go) |

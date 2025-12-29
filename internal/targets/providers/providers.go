@@ -10,9 +10,9 @@ import (
 
 	git "github.com/go-git/go-git/v5"
 	"github.com/picatz/deputy/internal/auth"
+	"github.com/picatz/deputy/internal/gitutil"
 	"github.com/picatz/deputy/internal/repository"
 	"github.com/picatz/deputy/internal/repository/workspace"
-	sbomx "github.com/picatz/deputy/internal/sbom"
 	"github.com/picatz/deputy/internal/targets"
 )
 
@@ -124,7 +124,7 @@ func (remoteGitProvider) Detect(_ context.Context, target string) bool {
 	if looksLikeRemoteURL(target) {
 		return true
 	}
-	return sbomx.ToHTTPSGitURL(target) != ""
+	return gitutil.ToHTTPSGitURL(target) != ""
 }
 
 // Open materializes a remote Git repository target by cloning it.
@@ -135,13 +135,13 @@ func (remoteGitProvider) Open(ctx context.Context, target string, opts map[strin
 	}
 	urlStr := target
 	if !looksLikeRemoteURL(urlStr) {
-		if converted := sbomx.ToHTTPSGitURL(target); converted != "" {
+		if converted := gitutil.ToHTTPSGitURL(target); converted != "" {
 			urlStr = converted
 		}
 	}
 	// Use the unified auth package for secure, host-aware credential resolution
 	gitAuth, _ := auth.GitAuthForURL(ctx, urlStr)
-	refName, err := sbomx.ResolveReferenceName(ctx, urlStr, gitAuth, ref)
+	refName, err := gitutil.ResolveReferenceName(ctx, urlStr, gitAuth, ref)
 	if err == nil && refName.String() != "" {
 		ref = refName.String()
 	}

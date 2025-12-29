@@ -9,6 +9,7 @@ import (
 
 	analysis "github.com/picatz/deputy/internal/analysis"
 	"github.com/picatz/deputy/internal/collections"
+	"github.com/picatz/deputy/internal/ecosystem"
 	"golang.org/x/mod/semver"
 )
 
@@ -222,7 +223,7 @@ func dedupeCommands(upgrades []packageUpgrade) []Command {
 			manager := strings.TrimSpace(ref.Manager)
 			commands = append(commands, Command{
 				Manager:     manager,
-				managerRank: analysis.ManagerRank(manager),
+				managerRank: ecosystem.ManagerRank(manager),
 				Command:     cmd,
 				Path:        pathStr,
 				Groups:      groups,
@@ -243,7 +244,7 @@ func dedupeCommands(upgrades []packageUpgrade) []Command {
 	case goManagerPresent && len(goPaths) == 0:
 		commands = append(commands, Command{
 			Manager:     "go",
-			managerRank: analysis.ManagerRank("go"),
+			managerRank: ecosystem.ManagerRank("go"),
 			Command:     "go mod tidy",
 			Executable:  true,
 		})
@@ -253,7 +254,7 @@ func dedupeCommands(upgrades []packageUpgrade) []Command {
 		for _, path := range paths {
 			commands = append(commands, Command{
 				Manager:     "go",
-				managerRank: analysis.ManagerRank("go"),
+				managerRank: ecosystem.ManagerRank("go"),
 				Command:     "go mod tidy",
 				Path:        path,
 				Executable:  true,
@@ -276,7 +277,7 @@ func buildGoToolchainCommand(version string) (Command, bool) {
 	cmd := fmt.Sprintf("go get go@%s", goVersion)
 	return Command{
 		Manager:     "go",
-		managerRank: analysis.ManagerRank("go"),
+		managerRank: ecosystem.ManagerRank("go"),
 		Command:     cmd,
 		Path:        "go.mod",
 		Hint:        "updates go directive",
@@ -384,7 +385,6 @@ func dependencyGroupFlag(manager string, groups []string) string {
 	}
 	return ""
 }
-
 
 func hasGroup(groups []string, candidates ...string) bool {
 	if len(groups) == 0 {

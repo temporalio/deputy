@@ -8,6 +8,7 @@ import (
 
 	analysis "github.com/picatz/deputy/internal/analysis"
 	"github.com/picatz/deputy/internal/cache"
+	"github.com/picatz/deputy/internal/license"
 	"github.com/picatz/deputy/internal/policy"
 )
 
@@ -135,7 +136,7 @@ func cachedLicenseLookupWithCache(ctx context.Context, c LicenseCache, ecosystem
 		return cached, nil
 	}
 	slog.Debug("license cache miss", "package", name, "version", version, "ecosystem", ecosystem)
-	lics := analysis.LookupLicensesBestEffort(ctx, ecosystem, name, version)
+	lics := license.LookupLicensesBestEffort(ctx, ecosystem, name, version)
 	cache.Set(key, lics)
 	slog.Debug("license cache populated", "package", name, "version", version, "ecosystem", ecosystem, "licenses", len(lics))
 	return lics, nil

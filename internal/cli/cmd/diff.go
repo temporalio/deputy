@@ -10,16 +10,18 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-	"time"
 
 	pb "deps.dev/api/v3"
 	"github.com/go-git/go-git/v5/plumbing"
 	"github.com/google/osv-scalibr/extractor"
 	analysis "github.com/picatz/deputy/internal/analysis"
+	"github.com/picatz/deputy/internal/cli/flags"
 	"github.com/picatz/deputy/internal/compare"
 	gitx "github.com/picatz/deputy/internal/gitutil"
 	inv "github.com/picatz/deputy/internal/inventory"
+	"github.com/picatz/deputy/internal/license"
 	"github.com/picatz/deputy/internal/output"
+	"github.com/picatz/deputy/internal/report/render"
 	"github.com/picatz/deputy/internal/repository"
 	"github.com/picatz/deputy/internal/repository/workspace"
 	ui "github.com/picatz/deputy/internal/ui"
@@ -234,10 +236,11 @@ PERFORMANCE TIPS:
 // adjustLicenseOptions ensures backward-compatible handling of the deprecated
 // --use-licensecheck flag by enabling enrichment and preferring scan sources.
 func adjustLicenseOptions(useLicenseCheck bool, enrichLicenses bool, licenseSource string) (bool, string) {
+	licenseSource = flags.NormalizeLicenseSource(licenseSource)
 	if useLicenseCheck && !enrichLicenses {
 		enrichLicenses = true
-		if licenseSource == "depsdev" {
-			licenseSource = "scan"
+		if licenseSource == flags.LicenseSourceDepsDev {
+			licenseSource = flags.LicenseSourceScan
 		}
 	}
 	return enrichLicenses, licenseSource
@@ -269,7 +272,7 @@ func runDiffAnalysis(ctx context.Context, repoPath, baseRef, targetRef string, e
 	if isWorkingPseudoRef(targetRef) {
 		dispTarget = "WORKING"
 	}
-	doc := diffHeaderDoc(baseRef, dispTarget)
+	doc := render.DiffHeaderDoc(baseRef, dispTarget)
 	_ = doc.Render(outW, output.UIStyles())
 
 	// Check if dependency files have changed (optimization for non-working refs)
@@ -415,28 +418,7 @@ func runDiffAnalysis(ctx context.Context, repoPath, baseRef, targetRef string, e
 		}
 
 		// Historical filtering
-		var beforeT, afterT time.Time
-		if asOfStr != "" {
-			if t, err := analysis.ParseFlexibleDate(asOfStr, "asof"); err == nil {
-				beforeT = t
-			} else {
-				fmt.Fprintf(errW, "Warning: could not parse --as-of date %q: %v\n", asOfStr, err)
-			}
-		}
-		if publishedBeforeStr != "" && beforeT.IsZero() {
-			if t, err := analysis.ParseFlexibleDate(publishedBeforeStr, "before"); err == nil {
-				beforeT = t
-			} else {
-				fmt.Fprintf(errW, "Warning: could not parse --published-before %q: %v\n", publishedBeforeStr, err)
-			}
-		}
-		if publishedAfterStr != "" {
-			if t, err := analysis.ParseFlexibleDate(publishedAfterStr, "after"); err == nil {
-				afterT = t
-			} else {
-				fmt.Fprintf(errW, "Warning: could not parse --published-after %q: %v\n", publishedAfterStr, err)
-			}
-		}
+		beforeT, afterT := flags.ParsePublishedFilters(errW, asOfStr, publishedBeforeStr, publishedAfterStr)
 		if !beforeT.IsZero() || !afterT.IsZero() {
 			vulns = analysis.FilterVulnerabilitiesByPublished(vulns, afterT, beforeT)
 		}
@@ -518,7 +500,7 @@ func runDiffAnalysis(ctx context.Context, repoPath, baseRef, targetRef string, e
 		if len(all) > 0 {
 			fmt.Fprintln(outW)
 			fmt.Fprintln(outW, ui.StyleDowngraded.Render("∴ ")+ui.StyleHeader.Render("Vulnerabilities"))
-			RenderVulnerabilityList(outW, changedVulns, vulnDisplayOptions{})
+			render.RenderVulnerabilityList(outW, changedVulns, render.VulnerabilityDisplayOptions{})
 			if showUnchangedEff && len(unchangedVulns) > 0 {
 				// Visual separator for unchanged dependencies, include reason if any
 				title := "Unchanged dependencies"
@@ -528,28 +510,16 @@ func runDiffAnalysis(ctx context.Context, repoPath, baseRef, targetRef string, e
 				sep := ui.StyleDim.Render(strings.Repeat("─", 3) + " " + title + " " + strings.Repeat("─", 3))
 				fmt.Fprintln(outW)
 				fmt.Fprintln(outW, sep)
-				RenderVulnerabilityList(outW, unchangedVulns, vulnDisplayOptions{})
+				render.RenderVulnerabilityList(outW, unchangedVulns, render.VulnerabilityDisplayOptions{})
 			}
 		}
-		RenderVulnerabilitySummaryAndActions(outW, all)
+		render.RenderVulnerabilitySummaryAndActions(outW, all)
 		return nil
 	}
 
 	// Display results (no vulnerabilities scanned)
-	DisplayVulnerabilities(outW, vulns)
+	render.DisplayVulnerabilities(outW, vulns)
 	return nil
-}
-
-func diffHeaderDoc(baseRef, targetRef string) output.Doc {
-	var doc output.Doc
-	doc.AddLine(
-		output.Span{Text: "Comparing dependencies:", Style: output.StyleHeader},
-		output.Span{Text: " "},
-		output.Span{Text: baseRef, Style: output.StyleVersion},
-		output.Span{Text: " → "},
-		output.Span{Text: targetRef, Style: output.StyleVersion},
-	)
-	return doc
 }
 
 // isWorkingPseudoRef reports whether the provided reference token should be
@@ -621,7 +591,7 @@ func displayDetailedDependencyChanges(ctx context.Context, ws workspace.FS, chan
 		return eco
 	}
 	licMap := map[pkgKey][]string{}
-	if client != nil && enrich && (licenseSource == "depsdev" || licenseSource == "both") {
+	if client != nil && enrich && (licenseSource == flags.LicenseSourceDepsDev || licenseSource == flags.LicenseSourceBoth) {
 		var mu sync.Mutex
 		g, gctx := errgroup.WithContext(ctx)
 		for _, c := range changes {
@@ -634,7 +604,7 @@ func displayDetailedDependencyChanges(ctx context.Context, ws workspace.FS, chan
 			}
 			pkCopy := pk
 			g.Go(func() error {
-				l := analysis.FetchLicensesForEcosystem(gctx, depsClient{client}, pkCopy.ecosystem, pkCopy.name, pkCopy.version)
+				l := license.FetchLicensesForEcosystem(gctx, depsClient{client}, pkCopy.ecosystem, pkCopy.name, pkCopy.version)
 				mu.Lock()
 				licMap[pkCopy] = l
 				mu.Unlock()
@@ -645,14 +615,14 @@ func displayDetailedDependencyChanges(ctx context.Context, ws workspace.FS, chan
 	}
 
 	var localScan []string
-	if enrich && (licenseSource == "scan" || licenseSource == "both") {
-		localScan = analysis.LocalRepoLicenseScan(ws)
+	if enrich && (licenseSource == flags.LicenseSourceScan || licenseSource == flags.LicenseSourceBoth) {
+		localScan = license.LocalRepoLicenseScan(ws)
 	}
 
 	var remoteFetchers map[pkgKey]chan []string
 	var remoteCache map[pkgKey][]string
 	var remoteTasks []pkgKey
-	if enrich && (licenseSource == "scan" || licenseSource == "both") {
+	if enrich && (licenseSource == flags.LicenseSourceScan || licenseSource == flags.LicenseSourceBoth) {
 		required := map[pkgKey]struct{}{}
 		for _, c := range changes {
 			if c.ChangeType == compare.Removed || c.TargetVersion == "" {
@@ -698,7 +668,7 @@ func displayDetailedDependencyChanges(ctx context.Context, ws workspace.FS, chan
 						return
 					}
 					defer func() { <-sem }()
-					lics := analysis.LookupLicensesBestEffort(ctx, t.ecosystem, t.name, t.version)
+					lics := license.LookupLicensesBestEffort(ctx, t.ecosystem, t.name, t.version)
 					ch <- lics
 				}()
 			}
@@ -715,21 +685,21 @@ func displayDetailedDependencyChanges(ctx context.Context, ws workspace.FS, chan
 		if l, ok := licMap[pk]; ok && len(l) > 0 {
 			licenses = l
 		}
-		if c.ChangeType != compare.Removed && c.TargetVersion != "" && enrich && (licenseSource == "scan" || licenseSource == "both") {
+		if c.ChangeType != compare.Removed && c.TargetVersion != "" && enrich && (licenseSource == flags.LicenseSourceScan || licenseSource == flags.LicenseSourceBoth) {
 			if len(localScan) > 0 {
-				licenses = analysis.MergeLicenseSources(licenses, localScan)
+				licenses = license.MergeLicenseSources(licenses, localScan)
 			}
 			if remoteFetchers != nil {
 				switch {
 				case remoteCache[pk] != nil:
-					licenses = analysis.MergeLicenseSources(licenses, remoteCache[pk])
+					licenses = license.MergeLicenseSources(licenses, remoteCache[pk])
 				case remoteFetchers[pk] != nil:
 					ch := remoteFetchers[pk]
 					select {
 					case rc, ok := <-ch:
 						if ok && len(rc) > 0 {
 							remoteCache[pk] = rc
-							licenses = analysis.MergeLicenseSources(licenses, rc)
+							licenses = license.MergeLicenseSources(licenses, rc)
 						} else {
 							remoteCache[pk] = nil
 						}

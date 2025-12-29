@@ -1,12 +1,12 @@
-// Package analysis consolidates and enriches vulnerability data for Go
-// dependencies. It provides:
-//   - Data model types (Vulnerability, ConsolidatedVulnerability, VulnerabilityStats)
-//   - Adapters for querying the OSV API in efficient batches (QueryOSVBatch)
-//   - Normalization logic that selects stable identifiers (CVE over GO-/GHSA-)
-//   - Extraction of severity, references, and fixed version metadata
+// Package analysis orchestrates vulnerability enrichment and provides a
+// compatibility facade for higher-level callers.
 //
-// The package is intentionally light on external assumptions so it can be used
-// both by human‑oriented CLI presentation layers and machine consumers
-// (e.g. JSON reporters, CI policy gates). All exported types are stable value
-// objects whose fields are designed for long‑term backwards compatibility.
+// Responsibilities:
+//   - Coordinate scan analysis workflows (filtering, grouping, reporting inputs)
+//   - Expose stable aliases to the vulnerability domain types
+//   - Route OSV integration through internal/analysis/osv
+//
+// Pure domain logic (types, CVSS parsing, severity classification, grouping)
+// lives in internal/vuln. Service integrations live in subpackages such as
+// internal/analysis/osv and internal/license.
 package analysis

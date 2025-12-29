@@ -35,6 +35,7 @@ flowchart TB
         subgraph Row2[" "]
             direction LR
             remediation["<b>remediation/</b><br/>fix planning<br/>version bumps<br/>AI agents"]
+            report_pkg["<b>report/</b><br/>report assembly<br/>render helpers"]
             gitutil["<b>gitutil/</b><br/>go-git clone<br/>ref resolution<br/>commit diffs"]
             sbom_pkg["<b>sbom/</b><br/>Protobom<br/>CycloneDX<br/>SPDX"]
         end
@@ -51,6 +52,7 @@ flowchart TB
     
     scan & diff --> inventory & analysis & gitutil & policy_pkg
     fix --> inventory & analysis & remediation & policy_pkg
+    scan & diff & fix --> report_pkg
     sbom --> inventory & sbom_pkg
     list --> inventory
     policy --> policy_pkg
@@ -69,7 +71,7 @@ flowchart TB
     class CLI,main,cli,register source
     class Commands,scan,fix,diff,sbom,list,proxy output
     class policy,policy_pkg control
-    class Core,inventory,analysis,remediation,gitutil,sbom_pkg process
+    class Core,inventory,analysis,remediation,report_pkg,gitutil,sbom_pkg process
     class External,osv_db,depsdev,github external
 
     style Row1 fill:transparent,stroke:transparent
@@ -174,13 +176,21 @@ main.go                      # entry point
 internal/
   cli/cmd/                   # Cobra commands (scan.go, fix.go, diff.go, etc.)
                              # see internal/cli/cmd/root.go for command registration
-  analysis/                  # OSV client (osv_client.go), vulnerability matching (vuln.go)
+  cli/flags/                 # shared CLI flag parsing helpers
+  analysis/                  # analysis orchestration and OSV facade
+    osv/                     # OSV API + GitHub Actions bucket integration
+  diskcache/                 # shared on-disk cache helpers
   inventory/                 # dependency detection
+    manifests/               # manifest path + manager heuristics
+  license/                   # license enrichment + scanning
   policy/                    # CEL evaluation engine (eval.go)
   proxy/                     # package proxy server
+  report/                    # report/context helpers
+    render/                  # CLI-friendly rendering helpers
   sbom/                      # SBOM generation
   remediation/               # fix planning
   gitutil/                   # Git operations (clone.go, diff.go, refs.go)
+  vuln/                      # vulnerability domain types + CVSS/severity
 docs/                        # documentation
   commands/                  # command reference
   guides/                    # how-to guides (ci.md, workflows.md, agents.md)
@@ -571,7 +581,7 @@ See [JWT policy examples](policy/examples/) for more examples.
 
 | Variable | Purpose |
 |----------|---------|
-| `GITHUB_TOKEN` | API access for SBOMs, licenses, and vulnerability data ([`internal/sbom/sbom.go`](internal/sbom/sbom.go), [`internal/analysis/licenses.go`](internal/analysis/licenses.go)) |
+| `GITHUB_TOKEN` | API access for SBOMs, licenses, and vulnerability data ([`internal/sbom/sbom.go`](internal/sbom/sbom.go), [`internal/license/license.go`](internal/license/license.go), [`internal/analysis/osv/gha_bucket.go`](internal/analysis/osv/gha_bucket.go)) |
 | `ANTHROPIC_API_KEY` | AI-assisted remediation ([`internal/cli/cmd/fix_agent_claude.go`](internal/cli/cmd/fix_agent_claude.go)) |
 | `DEPUTY_LOG_LEVEL` | `debug`, `info`, `warn`, `error` ([`internal/cli/cli.go`](internal/cli/cli.go)) |
 | `DEPUTY_CONFIG` | Path to config file (default: `.deputy.yaml`) ([`internal/config/config.go`](internal/config/config.go)) |
@@ -601,7 +611,7 @@ See [JWT policy examples](policy/examples/) for more examples.
 
 | Task | Key Files |
 |------|-----------|
-| Vulnerability analysis | [`internal/analysis/osv_client.go`](internal/analysis/osv_client.go), [`severity.go`](internal/analysis/severity.go), [`group.go`](internal/analysis/group.go) |
+| Vulnerability analysis | [`internal/analysis/osv/client.go`](internal/analysis/osv/client.go), [`internal/vuln/severity.go`](internal/vuln/severity.go), [`internal/vuln/group.go`](internal/vuln/group.go) |
 | Ecosystem support | [`internal/inventory/`](internal/inventory/), [`internal/purlx/`](internal/purlx/), [`internal/proxy/`](internal/proxy/) |
 | Policy features | [`internal/policy/eval.go`](internal/policy/eval.go), [Policy examples](policy/examples/) |
 

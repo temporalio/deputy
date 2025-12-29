@@ -31,9 +31,9 @@ import (
 	"github.com/google/go-github/v63/github"
 	"github.com/google/osv-scalibr/extractor"
 	scalibrlog "github.com/google/osv-scalibr/log"
-	analysis "github.com/picatz/deputy/internal/analysis"
 	"github.com/picatz/deputy/internal/compare"
 	inv "github.com/picatz/deputy/internal/inventory"
+	"github.com/picatz/deputy/internal/license"
 	"github.com/picatz/deputy/internal/logs"
 	"github.com/picatz/deputy/internal/repository"
 	"github.com/picatz/deputy/internal/repository/workspace"
@@ -577,17 +577,17 @@ func defaultLicenseResolver(deepScan bool) licenseResolver {
 				}
 			}
 			if len(licenses) == 0 && eco == "dart" {
-				if dart := analysis.LookupPubLicense(ctx, pkg.Name, version); len(dart) > 0 {
+				if dart := license.LookupPubLicense(ctx, pkg.Name, version); len(dart) > 0 {
 					licenses = dart
 				}
 			}
 			if len(licenses) == 0 && eco == "cocoapods" {
-				if pods := analysis.LookupCocoaPodsLicense(ctx, pkg.Name, version); len(pods) > 0 {
+				if pods := license.LookupCocoaPodsLicense(ctx, pkg.Name, version); len(pods) > 0 {
 					licenses = pods
 				}
 			}
 			if len(licenses) == 0 && eco == "hex" {
-				if hex := analysis.LookupHexLicense(ctx, pkg.Name, version); len(hex) > 0 {
+				if hex := license.LookupHexLicense(ctx, pkg.Name, version); len(hex) > 0 {
 					licenses = hex
 				}
 			}
@@ -834,7 +834,7 @@ func lookupRemoteLicenses(ctx context.Context, module, version string) []string 
 	}
 	cctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
-	return normalizeLicenses(analysis.RemoteModuleLicenseScan(cctx, module, version))
+	return normalizeLicenses(license.RemoteModuleLicenseScan(cctx, module, version))
 }
 
 // lookupGoProxyLicense downloads the module zip from the Go proxy and scans license files.
@@ -873,7 +873,7 @@ func lookupGoProxyLicense(ctx context.Context, modulePath, version string) []str
 	var out []string
 	for _, f := range zr.File {
 		name := strings.ToLower(f.Name)
-		for _, candidate := range analysis.DefaultLicenseFilenamesForScan() {
+		for _, candidate := range license.DefaultLicenseFilenamesForScan() {
 			if strings.HasSuffix(name, strings.ToLower(candidate)) {
 				rc, err := f.Open()
 				if err != nil {
@@ -881,7 +881,7 @@ func lookupGoProxyLicense(ctx context.Context, modulePath, version string) []str
 				}
 				content, _ := io.ReadAll(rc)
 				rc.Close()
-				out = append(out, analysis.DetectLicenseIDs(content)...)
+				out = append(out, license.DetectLicenseIDs(content)...)
 			}
 		}
 	}

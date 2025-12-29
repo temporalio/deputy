@@ -23,12 +23,12 @@ import (
 	"github.com/go-git/go-git/v5/storage/memory"
 	"github.com/google/osv-scalibr/extractor"
 	"github.com/google/osv-scalibr/purl"
-	analysis "github.com/picatz/deputy/internal/analysis"
 	"github.com/picatz/deputy/internal/auth"
 	"github.com/picatz/deputy/internal/collections"
 	"github.com/picatz/deputy/internal/compare"
 	gitx "github.com/picatz/deputy/internal/gitutil"
 	"github.com/picatz/deputy/internal/inventory"
+	"github.com/picatz/deputy/internal/license"
 	"github.com/picatz/deputy/internal/purlx"
 	"github.com/picatz/deputy/internal/repository"
 	"github.com/picatz/deputy/internal/repository/workspace"
@@ -106,13 +106,13 @@ func Generate(ctx context.Context, repoRef string, opts Options) (Result, error)
 		}
 	}
 	if src == nil {
-		url := ToHTTPSGitURL(repoRef)
+		url := gitx.ToHTTPSGitURL(repoRef)
 		if url == "" {
 			return Result{}, fmt.Errorf("could not interpret repo %q as local path or remote URL", repoRef)
 		}
 		// Use the unified auth package for secure, host-aware credential resolution
 		gitAuth, _ := auth.GitAuthForURL(ctx, url)
-		refName, resolveErr := ResolveReferenceName(ctx, url, gitAuth, opts.Ref)
+		refName, resolveErr := gitx.ResolveReferenceName(ctx, url, gitAuth, opts.Ref)
 		if resolveErr == nil && refName.String() != "" {
 			opts.Ref = refName.String()
 		}
@@ -240,7 +240,7 @@ func resolveRepoMetadata(repo *git.Repository, ref, fallbackOrigin string) (stri
 				if candidate == "" {
 					continue
 				}
-				if https := ToHTTPSGitURL(candidate); https != "" {
+				if https := gitx.ToHTTPSGitURL(candidate); https != "" {
 					origin = https
 				}
 				if origin == fallbackOrigin {
@@ -430,7 +430,7 @@ func enrichProtobomLicensesScanLocal(_ context.Context, doc *sbom.Document, ws w
 	if root == nil {
 		return nil
 	}
-	ids := analysis.LocalRepoLicenseScan(ws)
+	ids := license.LocalRepoLicenseScan(ws)
 	if len(ids) == 0 {
 		return nil
 	}
@@ -464,7 +464,7 @@ func enrichProtobomLicensesScanWithFetcher(ctx context.Context, doc *sbom.Docume
 		if name == "" {
 			continue
 		}
-		if ids := analysis.LookupLicensesBestEffort(ctx, eco, name, version); len(ids) > 0 {
+		if ids := license.LookupLicensesBestEffort(ctx, eco, name, version); len(ids) > 0 {
 			node.Licenses = appendUniqueLicenses(node.Licenses, ids)
 		}
 	}
@@ -619,27 +619,6 @@ func rootNode(doc *sbom.Document) *sbom.Node {
 	return nil
 }
 
-// Git helpers
-func ToHTTPSGitURL(ref string) string {
-	s := strings.TrimSpace(ref)
-	if s == "" {
-		return ""
-	}
-	if strings.HasPrefix(s, "http://") || strings.HasPrefix(s, "https://") {
-		if !strings.HasSuffix(s, ".git") {
-			s += ".git"
-		}
-		return s
-	}
-	if strings.HasPrefix(s, "github.com/") {
-		if !strings.HasSuffix(s, ".git") {
-			s += ".git"
-		}
-		return "https://" + s
-	}
-	return ""
-}
-
 // AuthForURL returns a go-git transport.AuthMethod for the given URL.
 //
 // Deprecated: Use [auth.GitAuthForURL] instead for secure, host-aware credential
@@ -651,64 +630,6 @@ func AuthForURL(rawurl string) transport.AuthMethod {
 		}
 	}
 	return nil
-}
-
-func ResolveReferenceName(ctx context.Context, remoteURL string, auth transport.AuthMethod, refStr string) (plumbing.ReferenceName, error) {
-	r := strings.TrimSpace(refStr)
-	if r == "" || strings.EqualFold(r, "HEAD") {
-		if br := discoverDefaultBranch(ctx, remoteURL, auth); br != "" {
-			return plumbing.ReferenceName(br), nil
-		}
-		return "", fmt.Errorf("could not discover default branch")
-	}
-	if strings.HasPrefix(r, "refs/") {
-		return plumbing.ReferenceName(r), nil
-	}
-	if looksLikeTag(r) {
-		return plumbing.ReferenceName("refs/tags/" + r), nil
-	}
-	return plumbing.ReferenceName("refs/heads/" + r), nil
-}
-
-func looksLikeTag(r string) bool {
-	if strings.HasPrefix(strings.ToLower(r), "v") {
-		return true
-	}
-	for _, c := range r {
-		if (c < '0' || c > '9') && c != '.' && c != '-' && c != '_' && c != 'v' {
-			return false
-		}
-	}
-	return true
-}
-
-func discoverDefaultBranch(ctx context.Context, remoteURL string, auth transport.AuthMethod) string {
-	r := git.NewRemote(memory.NewStorage(), &config.RemoteConfig{Name: "origin", URLs: []string{remoteURL}})
-	refs, err := r.ListContext(ctx, &git.ListOptions{Auth: auth})
-	if err != nil || len(refs) == 0 {
-		// Fallback to common defaults
-		return "refs/heads/main"
-	}
-	// Find HEAD symbolic ref or common branches
-	var hasMain, hasMaster bool
-	for _, ref := range refs {
-		if ref.Name() == plumbing.HEAD && ref.Target().IsBranch() {
-			return ref.Target().String()
-		}
-		if ref.Name() == plumbing.ReferenceName("refs/heads/main") {
-			hasMain = true
-		}
-		if ref.Name() == plumbing.ReferenceName("refs/heads/master") {
-			hasMaster = true
-		}
-	}
-	if hasMain {
-		return "refs/heads/main"
-	}
-	if hasMaster {
-		return "refs/heads/master"
-	}
-	return "refs/heads/main"
 }
 
 func listRemoteRefs(ctx context.Context, remoteURL string, auth transport.AuthMethod) ([]*plumbing.Reference, error) {
@@ -770,7 +691,7 @@ func resolveGitHubActionsRefForSBOM(ctx context.Context, cache *githubActionsRes
 		return v
 	}
 
-	remoteURL := ToHTTPSGitURL("github.com/" + repo)
+	remoteURL := gitx.ToHTTPSGitURL("github.com/" + repo)
 	if remoteURL == "" {
 		cache.set(key, githubActionsResolution{})
 		return githubActionsResolution{}
