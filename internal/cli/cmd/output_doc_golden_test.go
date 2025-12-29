@@ -7,11 +7,11 @@ import (
 	"strings"
 	"testing"
 
-	analysis "github.com/picatz/deputy/internal/analysis"
 	"github.com/picatz/deputy/internal/output"
 	"github.com/picatz/deputy/internal/remediation"
 	"github.com/picatz/deputy/internal/report"
 	"github.com/picatz/deputy/internal/report/render"
+	"github.com/picatz/deputy/internal/vulnerability"
 )
 
 func TestOutputDocs_Golden(t *testing.T) {
@@ -56,7 +56,7 @@ func TestOutputDocs_Golden(t *testing.T) {
 						Ref:    "main",
 						Commit: "deadbeef",
 					},
-					Stats: analysis.VulnerabilityStats{
+					Stats: vulnerability.Stats{
 						UniqueVulns:     2,
 						CriticalSev:     1,
 						HighSeverity:    1,

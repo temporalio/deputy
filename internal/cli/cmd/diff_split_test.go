@@ -3,12 +3,12 @@ package cmd
 import (
 	"testing"
 
-	analysis "github.com/picatz/deputy/internal/analysis"
 	"github.com/picatz/deputy/internal/compare"
+	"github.com/picatz/deputy/internal/report"
 )
 
 func TestSplitVulnsByChange(t *testing.T) {
-	vulns := []analysis.Vulnerability{
+	vulns := []report.Vulnerability{
 		{Package: "github.com/foo/bar", Version: "v1.0.0"},
 		{Package: "github.com/baz/qux", Version: "v0.1.0"},
 	}
@@ -25,7 +25,7 @@ func TestSplitVulnsByChange(t *testing.T) {
 }
 
 func TestSplitVulnsByChange_Downgrade(t *testing.T) {
-	vulns := []analysis.Vulnerability{{Package: "github.com/example/down", Version: "v1.0.0"}}
+	vulns := []report.Vulnerability{{Package: "github.com/example/down", Version: "v1.0.0"}}
 	changes := []compare.Change{{Name: "github.com/example/down", ChangeType: compare.Downgraded}}
 	changed, unchanged := splitVulnsByChange(vulns, changes)
 	if len(changed) != 1 || changed[0].Package != "github.com/example/down" {
@@ -38,7 +38,7 @@ func TestSplitVulnsByChange_Downgrade(t *testing.T) {
 
 // Ensure splitVulnsByChange handles gopkg.in to GitHub path transitions.
 func TestSplitVulnsByChange_GopkgInCanonical(t *testing.T) {
-	vulns := []analysis.Vulnerability{{Package: "gopkg.in/go-jose/go-jose.v4", Version: "v4.0.5"}}
+	vulns := []report.Vulnerability{{Package: "gopkg.in/go-jose/go-jose.v4", Version: "v4.0.5"}}
 	changes := []compare.Change{{Name: "github.com/go-jose/go-jose/v4", ChangeType: compare.Updated}}
 	changed, unchanged := splitVulnsByChange(vulns, changes)
 	if len(changed) != 1 || changed[0].Package != "gopkg.in/go-jose/go-jose.v4" {

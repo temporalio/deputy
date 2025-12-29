@@ -1,4 +1,4 @@
-package cmd
+package scan
 
 import "fmt"
 
@@ -6,7 +6,7 @@ import "fmt"
 // It stores both successful parses and errors to avoid repeated parsing attempts.
 // The parser function is called on cache miss to parse the file content.
 type manifestCache[T any] struct {
-	resolver manifestResolver
+	resolver ManifestResolver
 	parser   func([]byte) (T, error)
 	entries  map[string]T
 	errs     map[string]error
@@ -14,7 +14,7 @@ type manifestCache[T any] struct {
 
 // newManifestCache creates a new manifest cache with the given resolver and parser.
 // Returns nil if resolver is nil.
-func newManifestCache[T any](resolver manifestResolver, parser func([]byte) (T, error)) *manifestCache[T] {
+func newManifestCache[T any](resolver ManifestResolver, parser func([]byte) (T, error)) *manifestCache[T] {
 	if resolver == nil {
 		return nil
 	}

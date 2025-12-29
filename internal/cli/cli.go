@@ -13,6 +13,7 @@ import (
 	"github.com/picatz/deputy/internal/cli/cmd"
 	deputyerrors "github.com/picatz/deputy/internal/errors"
 	"github.com/picatz/deputy/internal/logs"
+	"github.com/picatz/deputy/internal/scan"
 	_ "github.com/picatz/deputy/internal/targets/providers"
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
@@ -123,7 +124,7 @@ SUPPLY CHAIN:
 	rootCmd.PersistentPreRunE = func(cmd *cobra.Command, args []string) error {
 		return configureLogging(logLevel, logFormat)
 	}
-	cmd.RegisterCommands(rootCmd)
+	cmd.RegisterCommands(rootCmd, cmd.Dependencies{ScanService: scan.NewService()})
 	return rootCmd
 }
 

@@ -4,35 +4,26 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"os"
-	"path/filepath"
 	"strings"
 	"time"
 
 	cdx "github.com/CycloneDX/cyclonedx-go"
 	git "github.com/go-git/go-git/v5"
-	"github.com/go-git/go-git/v5/plumbing"
 	"github.com/google/osv-scalibr/extractor"
-	analysis "github.com/picatz/deputy/internal/analysis"
 	cliflags "github.com/picatz/deputy/internal/cli/flags"
 	"github.com/picatz/deputy/internal/collections"
-	"github.com/picatz/deputy/internal/compare"
-	"github.com/picatz/deputy/internal/gitutil"
 	gitx "github.com/picatz/deputy/internal/gitutil"
-	inv "github.com/picatz/deputy/internal/inventory"
 	"github.com/picatz/deputy/internal/output"
 	"github.com/picatz/deputy/internal/policy"
 	"github.com/picatz/deputy/internal/purlx"
 	"github.com/picatz/deputy/internal/report"
 	"github.com/picatz/deputy/internal/report/render"
-	"github.com/picatz/deputy/internal/repository"
-	"github.com/picatz/deputy/internal/repository/workspace"
-	"github.com/picatz/deputy/internal/targets"
-	_ "github.com/picatz/deputy/internal/targets/providers"
+	"github.com/picatz/deputy/internal/scan"
 	ui "github.com/picatz/deputy/internal/ui"
+	"github.com/picatz/deputy/internal/vulnerability"
 	"github.com/protobom/protobom/pkg/sbom"
 	spdxjson "github.com/spdx/tools-golang/json"
 	spdxdoc "github.com/spdx/tools-golang/spdx"
@@ -55,9 +46,9 @@ type ScanResult struct {
 	// PackagesScanned is the total number of packages analyzed for vulnerabilities.
 	PackagesScanned int `json:"packagesScanned"`
 	// Stats provides aggregate vulnerability counts and severity breakdown.
-	Stats analysis.VulnerabilityStats `json:"stats"`
+	Stats vulnerability.Stats `json:"stats"`
 	// Vulnerabilities is the list of security vulnerabilities found in dependencies.
-	Vulnerabilities []analysis.Vulnerability `json:"vulnerabilities"`
+	Vulnerabilities []report.Vulnerability `json:"vulnerabilities"`
 	// PolicyFindings contains policy evaluation results (deny/warn actions).
 	PolicyFindings []report.PolicyFinding `json:"policyFindings,omitempty"`
 }
@@ -70,245 +61,23 @@ type ModuleDeprecation struct {
 	URL     string `json:"url,omitempty"`
 }
 
-// Scanner orchestrates vulnerability scans by combining inventory collection
-// (scalibr), OSV lookups, and presentation helpers. The collaborators are
-// fields so tests can inject deterministic doubles instead of hitting the
-// network or filesystem.
+// Scanner bridges CLI commands to the scan service.
 type Scanner struct {
-	collectInventory     func(ctx context.Context, repoPath, gitRef string, opts inv.ScanOptions) ([]*extractor.Package, error)
-	queryVulnerabilities func(ctx context.Context, client analysis.OSVClient, pkgs []analysis.PkgInput) ([]analysis.Vulnerability, error)
-	osvClient            analysis.OSVClient
+	service *scan.Service
 }
 
-// scanExecution holds the state and results of a single scan operation,
-// including the target path, resolved references, inventory, and findings.
-type scanExecution struct {
-	displayPath     string
-	localRepoPath   string
-	requestedRef    string
-	effectiveRef    string
-	packages        []*extractor.Package
-	goDirect        map[string]bool
-	vulnerabilities []analysis.Vulnerability
-	commitHash      string
-	originURL       string
-	cloned          bool
-	cleanup         func()
-}
-
-// Close cleans up any resources associated with the scan execution,
-// such as temporary directories created during cloning. Returns nil
-// since cleanup functions do not report errors.
-func (se *scanExecution) Close() error {
-	if se != nil && se.cleanup != nil {
-		se.cleanup()
+// NewScanner returns a Scanner configured with the provided scan service.
+func NewScanner(service *scan.Service) *Scanner {
+	if service == nil {
+		service = scan.NewService()
 	}
-	return nil
-}
-
-// NewScanner returns a Scanner configured with the default inventory collection
-// implementation.
-func NewScanner() *Scanner {
-	return &Scanner{
-		collectInventory:     collectInventory,
-		queryVulnerabilities: analysis.QueryOSVBatch,
-		osvClient:            analysis.NewOSVClient(),
-	}
-}
-
-// queryOSV executes the vulnerability query using the configured client and query function.
-func (s *Scanner) queryOSV(ctx context.Context, inputs []analysis.PkgInput) ([]analysis.Vulnerability, error) {
-	query := s.queryVulnerabilities
-	if query == nil {
-		query = analysis.QueryOSVBatch
-	}
-	client := s.osvClient
-	if client == nil {
-		client = analysis.NewOSVClient()
-	}
-	return query(ctx, client, inputs)
-}
-
-// resolvedTarget holds the result of resolving a scan target input.
-type resolvedTarget struct {
-	mat           targets.Materialized
-	workspace     workspace.FS
-	localRepoPath string
-	displayPath   string
-	ref           string
-	cloned        bool
-	cleanup       func()
-}
-
-// resolveTarget resolves the input target string to a materialized target with
-// local filesystem access. Returns workspace, paths, and cleanup function.
-func resolveTarget(ctx context.Context, targetInput, ref string) (*resolvedTarget, error) {
-	if targetInput = strings.TrimSpace(targetInput); targetInput == "" {
-		wd, err := os.Getwd()
-		if err != nil {
-			return nil, fmt.Errorf("failed to get current directory: %w", err)
-		}
-		targetInput = wd
-	}
-
-	mOpts := map[string]string{}
-	if ref != "" {
-		mOpts["ref"] = ref
-	}
-
-	mat, err := targets.Open(ctx, targetInput, mOpts)
-	if err != nil {
-		if errors.Is(err, targets.ErrNoProvider) {
-			return nil, fmt.Errorf("could not interpret repo %q as local path or remote URL", targetInput)
-		}
-		return nil, err
-	}
-
-	cleanup := func() {}
-	if mat.Cleanup != nil {
-		cleanup = mat.Cleanup
-	}
-
-	// Extract workspace from materialized target
-	var ws workspace.FS
-	switch src := mat.Data.(type) {
-	case *repository.Source:
-		ws = src.Workspace
-	case workspace.FS:
-		ws = src
-	}
-
-	localRepoPath := mat.Path
-	if localRepoPath == "" {
-		if src, ok := mat.Data.(interface{ RootPath() string }); ok {
-			localRepoPath = src.RootPath()
-		}
-	}
-	if localRepoPath == "" {
-		cleanup()
-		return nil, fmt.Errorf("target %q did not provide a local filesystem path", targetInput)
-	}
-	if abs, err := filepath.Abs(localRepoPath); err == nil {
-		localRepoPath = abs
-	}
-
-	displayPath := targetInput
-	if mat.Meta.Target != "" {
-		displayPath = mat.Meta.Target
-	}
-	if pRef := mat.Meta.Provenance["ref"]; pRef != "" {
-		ref = pRef
-	}
-	cloned := strings.EqualFold(mat.Meta.Provenance["cloned"], "true")
-
-	return &resolvedTarget{
-		mat:           mat,
-		workspace:     ws,
-		localRepoPath: localRepoPath,
-		displayPath:   displayPath,
-		ref:           ref,
-		cloned:        cloned,
-		cleanup:       cleanup,
-	}, nil
-}
-
-// directModuleInfo holds the resolved direct module information and manifest resolver.
-type directModuleInfo struct {
-	goDirect map[string]bool
-	resolver manifestResolver
-}
-
-// resolveDirectModules determines direct Go modules and manifest resolver based on
-// the effective reference and workspace/repository state.
-func resolveDirectModules(localRepoPath, effRef string, ws workspace.FS) directModuleInfo {
-	goDirect := map[string]bool{"stdlib": true}
-	var resolver manifestResolver = workspaceManifestResolver{ws: ws}
-
-	if strings.EqualFold(effRef, "HEAD") || strings.EqualFold(effRef, "HEAD~0") {
-		if ws != nil {
-			goDirect = compare.CollectGoDirectModulesFromWorkspace(ws)
-		}
-		return directModuleInfo{goDirect: goDirect, resolver: resolver}
-	}
-
-	// For non-HEAD refs, try to resolve from git history
-	repo, err := git.PlainOpen(localRepoPath)
-	if err != nil {
-		return directModuleInfo{goDirect: goDirect, resolver: resolver}
-	}
-
-	h, err := gitx.ResolveRevisionEnhanced(repo, effRef)
-	if err != nil || h == nil {
-		return directModuleInfo{goDirect: goDirect, resolver: resolver}
-	}
-
-	if direct, derr := compare.CollectGoDirectModulesFromCommit(repo, *h); derr == nil {
-		goDirect = direct
-	}
-	resolver = gitManifestResolver{repo: repo, hash: *h}
-
-	return directModuleInfo{goDirect: goDirect, resolver: resolver}
-}
-
-// executeScan performs the core scanning logic: resolving the target, collecting inventory,
-// and querying for vulnerabilities. It returns a scanExecution object containing the results.
-func (s *Scanner) executeScan(ctx context.Context, repoArg, ref string, refProvided bool, scanOpts inv.ScanOptions, beforeT, afterT time.Time, errW io.Writer) (*scanExecution, error) {
-	// Resolve the target to a local filesystem path
-	target, err := resolveTarget(ctx, repoArg, ref)
-	if err != nil {
-		return nil, err
-	}
-	ref = target.ref
-
-	// Compute effective reference
-	effRef := refOrHEAD(ref)
-	if strings.EqualFold(effRef, "HEAD") && refProvided {
-		effRef = "HEAD~0"
-	}
-
-	// Collect inventory
-	pkgs, err := s.collectInventory(ctx, target.localRepoPath, effRef, scanOpts)
-	if err != nil {
-		target.cleanup()
-		return nil, fmt.Errorf("failed to collect inventory: %w", err)
-	}
-
-	// Resolve direct modules and manifest resolver
-	modInfo := resolveDirectModules(target.localRepoPath, effRef, target.workspace)
-
-	// Query vulnerabilities
-	inputs := packagesToInputs(pkgs, packageInputOptions{GoDirect: modInfo.goDirect, Resolver: modInfo.resolver})
-	vulns, queryErr := s.queryOSV(ctx, inputs)
-	if queryErr != nil {
-		fmt.Fprintf(errW, "Warning: OSV query failed: %v\n", queryErr)
-	}
-
-	// Apply time-based filtering if specified
-	if !beforeT.IsZero() || !afterT.IsZero() {
-		vulns = analysis.FilterVulnerabilitiesByPublished(vulns, afterT, beforeT)
-	}
-
-	commitHash, originURL := getRepoMetadata(target.localRepoPath, ref)
-
-	return &scanExecution{
-		displayPath:     target.displayPath,
-		localRepoPath:   target.localRepoPath,
-		requestedRef:    ref,
-		effectiveRef:    effRef,
-		packages:        pkgs,
-		goDirect:        modInfo.goDirect,
-		vulnerabilities: vulns,
-		commitHash:      commitHash,
-		originURL:       originURL,
-		cloned:          target.cloned,
-		cleanup:         target.cleanup,
-	}, nil
+	return &Scanner{service: service}
 }
 
 // AddScanCommand registers the scan subcommand with the root command.
 // It configures the command flags and usage examples.
-func AddScanCommand(root *cobra.Command) {
-	scanner := NewScanner()
+func AddScanCommand(root *cobra.Command, service *scan.Service) {
+	scanner := NewScanner(service)
 
 	scanCmd := &cobra.Command{
 		Use:           "scan [repo]",
@@ -577,26 +346,35 @@ func (s *Scanner) runScan(cmd *cobra.Command, args []string) error {
 	}
 
 	beforeT, afterT := flags.parsePublishedTimes(cmd.ErrOrStderr())
-	exec, err := s.executeScan(ctx, repoArg, flags.Ref, cmd.Flags().Changed("ref"), flags.scanOptions(), beforeT, afterT, cmd.ErrOrStderr())
+	scanOpts := flags.scanOptions()
+	exec, err := s.service.ScanRepository(ctx, repoArg, flags.Ref, cmd.Flags().Changed("ref"), scan.Options{
+		Ecosystems:      scanOpts.Ecosystems,
+		PublishedBefore: beforeT,
+		PublishedAfter:  afterT,
+	})
 	if err != nil {
 		return err
 	}
 	defer exec.Close()
 
-	vulns := exec.vulnerabilities
-	pkgs := exec.packages
-	goDirect := exec.goDirect
-	vulnsForPolicy := vulns
-	if flags.IgnoreUnfixed {
-		vulnsForPolicy = filterUnfixed(vulns)
+	for _, warning := range exec.Result.Warnings {
+		fmt.Fprintf(cmd.ErrOrStderr(), "Warning: %s\n", warning)
 	}
-	report := buildScanReport(exec.displayPath, flags.Ref, exec.commitHash, vulnsForPolicy, len(pkgs))
+
+	resultOut := exec.Result
+	policyResult := exec.Result
+	if flags.IgnoreUnfixed {
+		policyResult = scan.FilterUnfixed(policyResult)
+		resultOut = policyResult
+	}
+	report := buildScanReport(policyResult)
 	policyActions, err := runScanPolicies(ctx, flags.PolicyPaths, report, cmd.ErrOrStderr())
 	if err != nil {
 		return err
 	}
 	policyFindings := actionsToPolicyFindings(policyActions)
 	report.PolicyFindings = policyFindings
+	exec.Result.PolicyDecisions = actionsToPolicyDecisions(policyActions)
 
 	out, err := openOutputWriter(cmd, flags.OutPath)
 	if err != nil {
@@ -606,9 +384,9 @@ func (s *Scanner) runScan(cmd *cobra.Command, args []string) error {
 
 	switch strings.ToLower(flags.Format) {
 	case "", FormatText:
-		return s.outputText(out.Writer, cmd.ErrOrStderr(), exec.displayPath, flags.Ref, exec.commitHash, exec.originURL, pkgs, goDirect, vulns, flags.IgnoreUnfixed, policyFindings, flags.displayOptions())
+		return s.outputText(out.Writer, cmd.ErrOrStderr(), resultOut, flags.IgnoreUnfixed, policyFindings, flags.displayOptions())
 	case FormatJSON:
-		return s.outputJSON(out.Writer, exec.displayPath, flags.Ref, exec.commitHash, vulns, len(pkgs), flags.IgnoreUnfixed, policyFindings)
+		return s.outputJSON(out.Writer, resultOut, policyFindings)
 	default:
 		return cliflags.UnsupportedFormatError("--format", flags.Format, "text|json")
 	}
@@ -624,38 +402,35 @@ func (s *Scanner) runScanDir(cmd *cobra.Command, args []string) error {
 	flags := extractScanFlags(cmd)
 	path := strings.TrimSpace(args[0])
 
-	ws, err := workspace.NewDir(path)
-	if err != nil {
-		return fmt.Errorf("failed to open directory: %w", err)
-	}
-	defer ws.Close()
-
-	pkgs, err := inv.ScanPackagesWorking(ctx, ws, flags.scanOptions())
-	if err != nil {
-		return fmt.Errorf("failed to scan packages: %w", err)
-	}
-
-	goDirect := compare.CollectGoDirectModulesFromWorkspace(ws)
-	inputs := packagesToInputs(pkgs, packageInputOptions{GoDirect: goDirect, Resolver: workspaceManifestResolver{ws: ws}})
-
-	vulns, err := s.queryOSV(ctx, inputs)
-	if err != nil {
-		fmt.Fprintf(cmd.ErrOrStderr(), "Warning: OSV query failed: %v\n", err)
-	}
 	beforeT, afterT := flags.parsePublishedTimes(cmd.ErrOrStderr())
-	if !beforeT.IsZero() || !afterT.IsZero() {
-		vulns = analysis.FilterVulnerabilitiesByPublished(vulns, afterT, beforeT)
+	scanOpts := flags.scanOptions()
+	exec, err := s.service.ScanDirectory(ctx, path, scan.Options{
+		Ecosystems:      scanOpts.Ecosystems,
+		PublishedBefore: beforeT,
+		PublishedAfter:  afterT,
+	})
+	if err != nil {
+		return err
 	}
-	vulnsForPolicy := vulns
+	defer exec.Close()
+
+	for _, warning := range exec.Result.Warnings {
+		fmt.Fprintf(cmd.ErrOrStderr(), "Warning: %s\n", warning)
+	}
+
+	resultOut := exec.Result
+	policyResult := exec.Result
 	if flags.IgnoreUnfixed {
-		vulnsForPolicy = filterUnfixed(vulns)
+		policyResult = scan.FilterUnfixed(policyResult)
+		resultOut = policyResult
 	}
-	report := buildScanReport(path, "", "", vulnsForPolicy, len(pkgs))
+	report := buildScanReport(policyResult)
 	policyActions, err := runScanPolicies(ctx, flags.PolicyPaths, report, cmd.ErrOrStderr())
 	if err != nil {
 		return err
 	}
 	policyFindings := actionsToPolicyFindings(policyActions)
+	exec.Result.PolicyDecisions = actionsToPolicyDecisions(policyActions)
 
 	out, err := openOutputWriter(cmd, flags.OutPath)
 	if err != nil {
@@ -665,9 +440,9 @@ func (s *Scanner) runScanDir(cmd *cobra.Command, args []string) error {
 
 	switch strings.ToLower(flags.Format) {
 	case "", FormatText:
-		return s.outputTextDir(out.Writer, cmd.ErrOrStderr(), path, vulns, flags.IgnoreUnfixed, policyFindings, flags.displayOptions())
+		return s.outputTextDir(out.Writer, cmd.ErrOrStderr(), resultOut, flags.IgnoreUnfixed, policyFindings, flags.displayOptions())
 	case FormatJSON:
-		return s.outputJSON(out.Writer, path, "", "", vulns, len(pkgs), flags.IgnoreUnfixed, policyFindings)
+		return s.outputJSON(out.Writer, resultOut, policyFindings)
 	default:
 		return cliflags.UnsupportedFormatError("--format", flags.Format, "text|json")
 	}
@@ -705,26 +480,34 @@ func (s *Scanner) runScanSBOM(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to parse SBOM: %w", err)
 	}
 
-	inputs := packagesToInputs(pkgs, packageInputOptions{DirectPackages: direct})
-
-	vulns, err := s.queryOSV(ctx, inputs)
-	if err != nil {
-		fmt.Fprintf(cmd.ErrOrStderr(), "Warning: OSV query failed: %v\n", err)
-	}
 	beforeT, afterT := flags.parsePublishedTimes(cmd.ErrOrStderr())
-	if !beforeT.IsZero() || !afterT.IsZero() {
-		vulns = analysis.FilterVulnerabilitiesByPublished(vulns, afterT, beforeT)
+	scanOpts := flags.scanOptions()
+	exec, err := s.service.ScanSBOM(ctx, pkgs, direct, scan.Options{
+		Ecosystems:      scanOpts.Ecosystems,
+		PublishedBefore: beforeT,
+		PublishedAfter:  afterT,
+	})
+	if err != nil {
+		return err
 	}
-	vulnsForPolicy := vulns
+
+	for _, warning := range exec.Result.Warnings {
+		fmt.Fprintf(cmd.ErrOrStderr(), "Warning: %s\n", warning)
+	}
+
+	resultOut := exec.Result
+	policyResult := exec.Result
 	if flags.IgnoreUnfixed {
-		vulnsForPolicy = filterUnfixed(vulns)
+		policyResult = scan.FilterUnfixed(policyResult)
+		resultOut = policyResult
 	}
-	report := buildScanReport("sbom", "", "", vulnsForPolicy, len(pkgs))
+	report := buildScanReport(policyResult)
 	policyActions, err := runScanPolicies(ctx, flags.PolicyPaths, report, cmd.ErrOrStderr())
 	if err != nil {
 		return err
 	}
 	policyFindings := actionsToPolicyFindings(policyActions)
+	exec.Result.PolicyDecisions = actionsToPolicyDecisions(policyActions)
 
 	out, err := openOutputWriter(cmd, flags.OutPath)
 	if err != nil {
@@ -736,65 +519,20 @@ func (s *Scanner) runScanSBOM(cmd *cobra.Command, args []string) error {
 	case "", FormatText:
 		doc := render.ScanResultsHeaderDoc("SBOM input", "", "", "")
 		_ = doc.Render(out.Writer, output.UIStyles())
-		vulnsEff := vulns
 		if flags.IgnoreUnfixed {
-			vulnsEff = filterUnfixed(vulns)
 			fmt.Fprintln(cmd.ErrOrStderr(), "  "+ui.StyleMeta.Render("Note: ignoring unfixed vulnerabilities (--ignore-unfixed)"))
 		}
-		render.DisplayVulnerabilities(out.Writer, vulnsEff, flags.displayOptions())
+		render.DisplayVulnerabilities(out.Writer, resultOut, flags.displayOptions())
 		render.RenderPolicyFindings(out.Writer, policyFindings)
 		return nil
 	case FormatJSON:
-		return s.outputJSON(out.Writer, "sbom", "", "", vulns, len(pkgs), flags.IgnoreUnfixed, policyFindings)
+		return s.outputJSON(out.Writer, resultOut, policyFindings)
 	default:
 		return cliflags.UnsupportedFormatError("--format", flags.Format, "text|json")
 	}
 }
 
 // Helper functions
-
-// collectInventory determines whether to scan the working directory or a specific commit
-// based on the provided git reference, and delegates to the appropriate scanning function.
-func collectInventory(ctx context.Context, repoPath, gitRef string, opts inv.ScanOptions) ([]*extractor.Package, error) {
-	ref := refOrHEAD(gitRef)
-
-	// HEAD or empty ref means scan the working directory
-	if strings.EqualFold(ref, gitx.RefHEAD) {
-		return scanPackagesWorkingAtPath(ctx, repoPath, opts)
-	}
-
-	// For specific refs, resolve and scan at that commit
-	repo, err := git.PlainOpen(repoPath)
-	if err != nil {
-		return nil, err
-	}
-
-	h, err := gitx.ResolveRevisionEnhanced(repo, ref)
-	if err != nil {
-		return nil, err
-	}
-
-	return scanPackagesAtCommit(ctx, repoPath, *h, opts)
-}
-
-// scanPackagesWorkingAtPath scans the filesystem at the given path for packages.
-func scanPackagesWorkingAtPath(ctx context.Context, path string, opts inv.ScanOptions) ([]*extractor.Package, error) {
-	ws, err := workspace.NewDir(path)
-	if err != nil {
-		return nil, err
-	}
-	defer ws.Close()
-	return inv.ScanPackagesWorking(ctx, ws, opts)
-}
-
-// scanPackagesAtCommit scans the repository at the given commit hash for packages.
-func scanPackagesAtCommit(ctx context.Context, path string, hash plumbing.Hash, opts inv.ScanOptions) ([]*extractor.Package, error) {
-	repo, err := git.PlainOpen(path)
-	if err != nil {
-		return nil, err
-	}
-	return inv.ScanPackagesAtCommitSnapshot(ctx, repo, hash, opts)
-}
 
 // refOrHEAD returns RefHEAD if the input reference is empty, otherwise returns the input.
 func refOrHEAD(r string) string {
@@ -804,88 +542,39 @@ func refOrHEAD(r string) string {
 	return r
 }
 
-// filterUnfixed returns a slice of vulnerabilities that have at least one fixed version.
-func filterUnfixed(vs []analysis.Vulnerability) []analysis.Vulnerability {
-	return analysis.FilterVulnerabilities(vs, analysis.HasFix())
-}
-
-// getRepoMetadata attempts to resolve the commit hash and origin URL for the given repository path and reference.
-func getRepoMetadata(localRepoPath, ref string) (string, string) {
-	commitHash := ""
-	originURL := ""
-
-	repo, err := git.PlainOpen(localRepoPath)
-	if err != nil {
-		return commitHash, originURL
-	}
-
-	// Get commit hash
-	if h, err := gitx.ResolveRevisionEnhanced(repo, refOrHEAD(ref)); err == nil && h != nil {
-		commitHash = h.String()
-	} else if headRef, err := repo.Head(); err == nil {
-		commitHash = headRef.Hash().String()
-	}
-
-	// Get origin URL
-	if r, err := repo.Remote("origin"); err == nil && r != nil && r.Config() != nil && len(r.Config().URLs) > 0 {
-		u := strings.TrimSpace(r.Config().URLs[0])
-		if u != "" {
-			switch {
-			case strings.HasPrefix(u, "git@github.com:"):
-				p := strings.TrimPrefix(u, "git@github.com:")
-				if !strings.HasSuffix(p, ".git") {
-					p += ".git"
-				}
-				originURL = "https://github.com/" + p
-			case strings.HasPrefix(u, "ssh://git@github.com/"):
-				p := strings.TrimPrefix(u, "ssh://git@github.com/")
-				if !strings.HasSuffix(p, ".git") {
-					p += ".git"
-				}
-				originURL = "https://github.com/" + p
-			default:
-				originURL = u
-				if n := gitutil.ToHTTPSGitURL(u); n != "" {
-					originURL = n
-				}
-			}
-		}
-	}
-
-	return commitHash, originURL
-}
-
 // outputText writes the scan results in a human-readable text format to the provided writer.
-func (s *Scanner) outputText(w io.Writer, errW io.Writer, repoPath, ref, commitHash, originURL string, pkgs []*extractor.Package, goDirect map[string]bool, vulns []analysis.Vulnerability, ignoreUnfixed bool, policyFindings []report.PolicyFinding, displayOpts render.VulnerabilityDisplayOptions) error {
-	shortRef := shortGitRef(refOrHEAD(ref))
-	shortHash := commitHash
+func (s *Scanner) outputText(w io.Writer, errW io.Writer, result scan.Result, ignoreUnfixed bool, policyFindings []report.PolicyFinding, displayOpts render.VulnerabilityDisplayOptions) error {
+	displayPath := result.Target.DisplayPath
+	localPath := result.Target.LocalPath
+	shortRef := shortGitRef(refOrHEAD(result.Target.Ref))
+	shortHash := result.Target.CommitHash
 	if len(shortHash) > 7 {
 		shortHash = shortHash[:7]
 	}
 
 	// Check for working tree changes
-	if repo, err := git.PlainOpen(repoPath); err == nil {
-		if wt, err := repo.Worktree(); err == nil {
-			if st, err := wt.Status(); err == nil && !st.IsClean() {
-				shortRef = "WORKING"
+	if strings.TrimSpace(localPath) != "" {
+		if repo, err := git.PlainOpen(localPath); err == nil {
+			if wt, err := repo.Worktree(); err == nil {
+				if st, err := wt.Status(); err == nil && !st.IsClean() {
+					shortRef = "WORKING"
+				}
 			}
 		}
 	}
 
-	doc := render.ScanResultsHeaderDoc(repoPath, shortRef, shortHash, originURL)
+	doc := render.ScanResultsHeaderDoc(displayPath, shortRef, shortHash, result.Target.OriginURL)
 	_ = doc.Render(w, output.UIStyles())
 
-	vulnsEff := vulns
 	if ignoreUnfixed {
-		vulnsEff = filterUnfixed(vulns)
 		fmt.Fprintln(errW, "  "+ui.StyleMeta.Render("Note: ignoring unfixed vulnerabilities (--ignore-unfixed)"))
 	}
 
-	render.DisplayVulnerabilities(w, vulnsEff, displayOpts)
+	render.DisplayVulnerabilities(w, result, displayOpts)
 	render.RenderPolicyFindings(w, policyFindings)
 
 	// Show module deprecations
-	if deps := detectModuleDeprecations(pkgs, goDirect); len(deps) > 0 {
+	if deps := detectModuleDeprecations(result.Inventory.Packages, result.Inventory.Direct); len(deps) > 0 {
 		fmt.Fprintf(w, "\n%s\n", ui.StyleHeader.Render("Module Deprecations:"))
 		for _, d := range deps {
 			line := fmt.Sprintf("  %s %s -> %s", ui.StyleVersion.Render("•"), ui.StyleBold.Render(d.Module), ui.StyleVersion.Render(d.Suggest))
@@ -900,34 +589,27 @@ func (s *Scanner) outputText(w io.Writer, errW io.Writer, repoPath, ref, commitH
 }
 
 // outputTextDir writes the directory scan results in a human-readable text format.
-func (s *Scanner) outputTextDir(w io.Writer, errW io.Writer, path string, vulns []analysis.Vulnerability, ignoreUnfixed bool, policyFindings []report.PolicyFinding, displayOpts render.VulnerabilityDisplayOptions) error {
-	doc := render.ScanResultsHeaderDoc(path, "", "", "")
+func (s *Scanner) outputTextDir(w io.Writer, errW io.Writer, result scan.Result, ignoreUnfixed bool, policyFindings []report.PolicyFinding, displayOpts render.VulnerabilityDisplayOptions) error {
+	doc := render.ScanResultsHeaderDoc(result.Target.DisplayPath, "", "", "")
 	_ = doc.Render(w, output.UIStyles())
 
-	vulnsEff := vulns
 	if ignoreUnfixed {
-		vulnsEff = filterUnfixed(vulns)
 		fmt.Fprintln(errW, "  "+ui.StyleMeta.Render("Note: ignoring unfixed vulnerabilities (--ignore-unfixed)"))
 	}
 
-	render.DisplayVulnerabilities(w, vulnsEff, displayOpts)
+	render.DisplayVulnerabilities(w, result, displayOpts)
 	render.RenderPolicyFindings(w, policyFindings)
 	return nil
 }
 
 // outputJSON writes the scan results in JSON format to the provided writer.
-func (s *Scanner) outputJSON(w io.Writer, repo, ref, commit string, vulns []analysis.Vulnerability, pkgCount int, ignoreUnfixed bool, policyFindings []report.PolicyFinding) error {
-	vulnsEff := vulns
-	if ignoreUnfixed {
-		vulnsEff = filterUnfixed(vulns)
-	}
-
-	result := buildScanReport(repo, ref, commit, vulnsEff, pkgCount)
-	result.PolicyFindings = policyFindings
+func (s *Scanner) outputJSON(w io.Writer, result scan.Result, policyFindings []report.PolicyFinding) error {
+	report := buildScanReport(result)
+	report.PolicyFindings = policyFindings
 
 	enc := json.NewEncoder(w)
 	enc.SetIndent("", "  ")
-	return enc.Encode(result)
+	return enc.Encode(report)
 }
 
 // parseSBOMPackages converts supported SBOM documents into package tuples for OSV queries.
@@ -1178,16 +860,23 @@ func extractSPDXPackagePURL(pkg *spdxdoc.Package) string {
 }
 
 // buildScanReport constructs a ScanResult from the scan metadata and findings.
-func buildScanReport(repo, ref, commit string, vulns []analysis.Vulnerability, pkgCount int) ScanResult {
-	stats := analysis.CategorizeVulnerabilities(vulns)
+func buildScanReport(result scan.Result) ScanResult {
+	ref := strings.TrimSpace(result.Target.Ref)
+	if ref != "" {
+		ref = shortGitRef(ref)
+	}
+	generated := time.Now().UTC()
+	if !result.GeneratedAt.IsZero() {
+		generated = result.GeneratedAt
+	}
 	return ScanResult{
-		Repo:            repo,
-		Ref:             shortGitRef(ref),
-		Commit:          commit,
-		Generated:       time.Now().UTC().Format(time.RFC3339),
-		PackagesScanned: pkgCount,
-		Stats:           stats,
-		Vulnerabilities: vulns,
+		Repo:            result.Target.DisplayPath,
+		Ref:             ref,
+		Commit:          result.Target.CommitHash,
+		Generated:       generated.Format(time.RFC3339),
+		PackagesScanned: result.PackagesScanned,
+		Stats:           result.Stats,
+		Vulnerabilities: report.FlattenResult(result),
 	}
 }
 
@@ -1249,6 +938,17 @@ func actionsToPolicyFindings(actions []policy.Action) []report.PolicyFinding {
 		findings = append(findings, f)
 	}
 	return findings
+}
+
+func actionsToPolicyDecisions(actions []policy.Action) []policy.Decision {
+	if len(actions) == 0 {
+		return nil
+	}
+	decisions := make([]policy.Decision, 0, len(actions))
+	for _, act := range actions {
+		decisions = append(decisions, policy.DecisionFromAction(act))
+	}
+	return decisions
 }
 
 var knownDeprecations = []ModuleDeprecation{

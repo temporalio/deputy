@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"strings"
 
-	analysis "github.com/picatz/deputy/internal/analysis"
 	"github.com/picatz/deputy/internal/output"
+	"github.com/picatz/deputy/internal/vulnerability"
 )
 
 // TargetSummary identifies the repository and reference for a summary.
@@ -29,7 +29,7 @@ func DiffHeaderDoc(baseRef, targetRef string) output.Doc {
 }
 
 // TriageSummaryDoc builds the summary header for triage output.
-func TriageSummaryDoc(target TargetSummary, stats analysis.VulnerabilityStats, packagesWithVulns int) output.Doc {
+func TriageSummaryDoc(target TargetSummary, stats vulnerability.Stats, packagesWithVulns int) output.Doc {
 	var doc output.Doc
 	doc.AddLine(output.Span{Text: "Triage Summary:", Style: output.StyleHeader})
 	if repo := strings.TrimSpace(target.Repo); repo != "" {

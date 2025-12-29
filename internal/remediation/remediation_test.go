@@ -3,41 +3,35 @@ package remediation
 import (
 	"testing"
 
-	analysis "github.com/picatz/deputy/internal/analysis"
+	"github.com/picatz/deputy/internal/dependency"
+	"github.com/picatz/deputy/internal/vulnerability"
 )
 
-func TestCommandsFromVulnerabilitiesGeneratesPlan(t *testing.T) {
-	vulns := []analysis.Vulnerability{
+func TestCommandsFromConsolidatedGeneratesPlan(t *testing.T) {
+	cons := []vulnerability.Consolidated{
 		{
-			ID:            "STD-1",
+			PrimaryID:     "STD-1",
 			Package:       "stdlib",
 			Version:       "1.20.0",
 			FixedVersions: []string{"1.21.0"},
-			Affected:      true,
 		},
 		{
-			ID:            "GO-1",
+			PrimaryID:     "GO-1",
 			Package:       "github.com/acme/lib",
 			Version:       "v1.0.0",
 			FixedVersions: []string{"v1.1.0"},
 			IsDirect:      true,
-			Affected:      true,
-			ManifestRefs: []analysis.ManifestReference{
-				{Manager: "go", Path: "./go.mod"},
-			},
+			ManifestRefs:  []dependency.ManifestRef{{Manager: "go", Path: "./go.mod"}},
 		},
 		{
-			ID:            "RUBY-1",
+			PrimaryID:     "RUBY-1",
 			Package:       "rexml",
 			Version:       "3.2.3",
 			FixedVersions: []string{"3.3.9"},
-			Affected:      true,
-			ManifestRefs: []analysis.ManifestReference{
-				{Manager: "gem", Path: "vagrant.gemspec"},
-			},
+			ManifestRefs:  []dependency.ManifestRef{{Manager: "gem", Path: "vagrant.gemspec"}},
 		},
 	}
-	commands, stdlib := CommandsFromVulnerabilities(vulns)
+	commands, stdlib := CommandsFromConsolidated(cons)
 	if stdlib != "v1.21.0" {
 		t.Fatalf("expected stdlib recommendation v1.21.0, got %q", stdlib)
 	}

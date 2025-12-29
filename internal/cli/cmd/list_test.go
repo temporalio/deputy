@@ -11,6 +11,7 @@ import (
 	"github.com/picatz/deputy/internal/compare"
 	"github.com/picatz/deputy/internal/purlx"
 	"github.com/picatz/deputy/internal/repository/workspace"
+	"github.com/picatz/deputy/internal/scan"
 )
 
 func TestToListItems_ListAll_NoDedup(t *testing.T) {
@@ -77,7 +78,7 @@ func TestToListItems_GitHubActionsDirectness_UsesPkgDirectKey(t *testing.T) {
 			IsDirect:  true,
 		},
 	}
-	pkgDirect := buildPackageDirectMap(inputs)
+	pkgDirect := scan.BuildPackageDirectMap(inputs)
 	pkgs := []*extractor.Package{
 		{
 			Name:     "actions/download-artifact",

@@ -1,4 +1,4 @@
-package cmd
+package scan
 
 import (
 	"fmt"
@@ -15,7 +15,7 @@ import (
 	"github.com/picatz/deputy/internal/purlx"
 )
 
-// Test that packagesToInputs includes all packages and determines directness
+// Test that PackagesToInputs includes all packages and determines directness
 // using go.mod in the current working directory.
 func TestPackagesToInputs_AllPackages(t *testing.T) {
 	goMod := `module example.com/app
@@ -31,7 +31,7 @@ require (
 		{Name: "github.com/indirect/pkg", Version: "v1.2.3", PURLType: scalpurl.TypeGolang},
 	}
 
-	inputs := packagesToInputs(pkgs, packageInputOptions{GoDirect: deps})
+	inputs := PackagesToInputs(pkgs, PackageInputOptions{GoDirect: deps})
 	if len(inputs) != 2 {
 		t.Fatalf("expected 2 inputs, got %d", len(inputs))
 	}
@@ -66,7 +66,7 @@ func TestPackagesToInputs_GitHubActions_WorkflowUsesAreDirect(t *testing.T) {
 		},
 	}
 
-	inputs := packagesToInputs(pkgs, packageInputOptions{})
+	inputs := PackagesToInputs(pkgs, PackageInputOptions{})
 	if len(inputs) != 1 {
 		t.Fatalf("expected 1 input, got %d", len(inputs))
 	}
@@ -91,7 +91,7 @@ func TestPackagesToInputs_GitHubActions_ActionManifestUsesAreDirect(t *testing.T
 		},
 	}
 
-	inputs := packagesToInputs(pkgs, packageInputOptions{})
+	inputs := PackagesToInputs(pkgs, PackageInputOptions{})
 	if len(inputs) != 1 {
 		t.Fatalf("expected 1 input, got %d", len(inputs))
 	}
@@ -121,7 +121,7 @@ require (
 		{Name: "gopkg.in/indirect.v3", Version: "v3.0.0", PURLType: scalpurl.TypeGolang},
 	}
 
-	inputs := packagesToInputs(pkgs, packageInputOptions{GoDirect: deps})
+	inputs := PackagesToInputs(pkgs, PackageInputOptions{GoDirect: deps})
 	if len(inputs) != 2 {
 		t.Fatalf("expected 2 inputs, got %d", len(inputs))
 	}
@@ -154,7 +154,7 @@ func TestPackagesToInputs_NPMDirectDetection(t *testing.T) {
 		  }
 		}`,
 	}
-	resolver := manifestResolverFunc(func(rel string) ([]byte, error) {
+	resolver := ManifestResolverFunc(func(rel string) ([]byte, error) {
 		if data, ok := files[filepath.ToSlash(rel)]; ok {
 			return []byte(data), nil
 		}
@@ -182,7 +182,7 @@ func TestPackagesToInputs_NPMDirectDetection(t *testing.T) {
 		},
 	}
 
-	inputs := packagesToInputs(pkgs, packageInputOptions{Resolver: resolver})
+	inputs := PackagesToInputs(pkgs, PackageInputOptions{Resolver: resolver})
 	if len(inputs) != 3 {
 		t.Fatalf("expected 3 inputs, got %d", len(inputs))
 	}
@@ -252,7 +252,7 @@ dev = [
     { name = "pytest" },
 ]
 `
-	resolver := manifestResolverFunc(func(rel string) ([]byte, error) {
+	resolver := ManifestResolverFunc(func(rel string) ([]byte, error) {
 		if filepath.ToSlash(rel) == "uv.lock" {
 			return []byte(uvLock), nil
 		}
@@ -266,7 +266,7 @@ dev = [
 		{Name: "transitive", Version: "0.0.1", PURLType: scalpurl.TypePyPi, Locations: []string{"uv.lock"}},
 	}
 
-	inputs := packagesToInputs(pkgs, packageInputOptions{Resolver: resolver})
+	inputs := PackagesToInputs(pkgs, PackageInputOptions{Resolver: resolver})
 	if len(inputs) != 4 {
 		t.Fatalf("expected 4 inputs, got %d", len(inputs))
 	}
@@ -312,7 +312,7 @@ serde = "1.0"
 [target."cfg(unix)".dependencies]
 libc = "0.2"
 `
-	resolver := manifestResolverFunc(func(rel string) ([]byte, error) {
+	resolver := ManifestResolverFunc(func(rel string) ([]byte, error) {
 		if filepath.ToSlash(rel) == "Cargo.toml" {
 			return []byte(cargoToml), nil
 		}
@@ -325,7 +325,7 @@ libc = "0.2"
 		{Name: "cc", Version: "1.0.0", PURLType: scalpurl.TypeCargo, Locations: []string{"Cargo.lock"}},
 		{Name: "libc", Version: "0.2.0", PURLType: scalpurl.TypeCargo, Locations: []string{"Cargo.lock"}},
 	}
-	inputs := packagesToInputs(pkgs, packageInputOptions{Resolver: resolver})
+	inputs := PackagesToInputs(pkgs, PackageInputOptions{Resolver: resolver})
 	if len(inputs) != 5 {
 		t.Fatalf("expected 5 inputs, got %d", len(inputs))
 	}
@@ -359,7 +359,7 @@ func TestPackagesToInputs_PythonRequirementsMarkedDirect(t *testing.T) {
 			Locations: []string{"requirements.txt"},
 		},
 	}
-	inputs := packagesToInputs(pkgs, packageInputOptions{})
+	inputs := PackagesToInputs(pkgs, PackageInputOptions{})
 	if len(inputs) != 1 {
 		t.Fatalf("expected 1 input, got %d", len(inputs))
 	}
@@ -668,15 +668,15 @@ func TestBuildPackageDirectMap(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := buildPackageDirectMap(tt.inputs)
+			got := BuildPackageDirectMap(tt.inputs)
 			if tt.want == nil && got != nil {
-				t.Errorf("buildPackageDirectMap() = %v, want nil", got)
+				t.Errorf("BuildPackageDirectMap() = %v, want nil", got)
 				return
 			}
 			if tt.want != nil {
 				for k, v := range tt.want {
 					if got[k] != v {
-						t.Errorf("buildPackageDirectMap()[%q] = %v, want %v", k, got[k], v)
+						t.Errorf("BuildPackageDirectMap()[%q] = %v, want %v", k, got[k], v)
 					}
 				}
 			}
@@ -714,15 +714,15 @@ func TestMergeDirectMaps(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := mergeDirectMaps(tt.maps...)
+			got := MergeDirectMaps(tt.maps...)
 			if tt.want == nil && got != nil {
-				t.Errorf("mergeDirectMaps() = %v, want nil", got)
+				t.Errorf("MergeDirectMaps() = %v, want nil", got)
 				return
 			}
 			if tt.want != nil {
 				for k, v := range tt.want {
 					if got[k] != v {
-						t.Errorf("mergeDirectMaps()[%q] = %v, want %v", k, got[k], v)
+						t.Errorf("MergeDirectMaps()[%q] = %v, want %v", k, got[k], v)
 					}
 				}
 			}
@@ -732,14 +732,14 @@ func TestMergeDirectMaps(t *testing.T) {
 
 func TestPackagesToInputs_EdgeCases(t *testing.T) {
 	t.Run("nil packages", func(t *testing.T) {
-		inputs := packagesToInputs(nil, packageInputOptions{})
+		inputs := PackagesToInputs(nil, PackageInputOptions{})
 		if inputs != nil {
 			t.Errorf("expected nil for nil input, got %v", inputs)
 		}
 	})
 
 	t.Run("empty packages", func(t *testing.T) {
-		inputs := packagesToInputs([]*extractor.Package{}, packageInputOptions{})
+		inputs := PackagesToInputs([]*extractor.Package{}, PackageInputOptions{})
 		if inputs != nil {
 			t.Errorf("expected nil for empty input, got %v", inputs)
 		}
@@ -747,7 +747,7 @@ func TestPackagesToInputs_EdgeCases(t *testing.T) {
 
 	t.Run("nil package in slice", func(t *testing.T) {
 		pkgs := []*extractor.Package{nil, {Name: "foo", Version: "1.0.0"}}
-		inputs := packagesToInputs(pkgs, packageInputOptions{})
+		inputs := PackagesToInputs(pkgs, PackageInputOptions{})
 		if len(inputs) != 1 {
 			t.Errorf("expected 1 input, got %d", len(inputs))
 		}
@@ -755,7 +755,7 @@ func TestPackagesToInputs_EdgeCases(t *testing.T) {
 
 	t.Run("empty name filtered", func(t *testing.T) {
 		pkgs := []*extractor.Package{{Name: "", Version: "1.0.0"}, {Name: "foo", Version: "1.0.0"}}
-		inputs := packagesToInputs(pkgs, packageInputOptions{})
+		inputs := PackagesToInputs(pkgs, PackageInputOptions{})
 		if len(inputs) != 1 {
 			t.Errorf("expected 1 input, got %d", len(inputs))
 		}
@@ -766,7 +766,7 @@ func TestPackagesToInputs_EdgeCases(t *testing.T) {
 			{Name: "foo", Version: "1.0.0", PURLType: scalpurl.TypeNPM},
 			{Name: "foo", Version: "1.0.0", PURLType: scalpurl.TypeNPM},
 		}
-		inputs := packagesToInputs(pkgs, packageInputOptions{})
+		inputs := PackagesToInputs(pkgs, PackageInputOptions{})
 		if len(inputs) != 1 {
 			t.Errorf("expected 1 deduplicated input, got %d", len(inputs))
 		}
@@ -776,7 +776,7 @@ func TestPackagesToInputs_EdgeCases(t *testing.T) {
 		pkgs := []*extractor.Package{
 			{Name: "github.com/foo/bar", Version: "v1.0.0", PURLType: "golang"},
 		}
-		inputs := packagesToInputs(pkgs, packageInputOptions{})
+		inputs := PackagesToInputs(pkgs, PackageInputOptions{})
 		if len(inputs) != 1 {
 			t.Fatalf("expected 1 input, got %d", len(inputs))
 		}
@@ -789,7 +789,7 @@ func TestPackagesToInputs_EdgeCases(t *testing.T) {
 		pkgs := []*extractor.Package{
 			{Name: "actions/checkout", Version: "v4", PURLType: "github"},
 		}
-		inputs := packagesToInputs(pkgs, packageInputOptions{})
+		inputs := PackagesToInputs(pkgs, PackageInputOptions{})
 		if len(inputs) != 1 {
 			t.Fatalf("expected 1 input, got %d", len(inputs))
 		}

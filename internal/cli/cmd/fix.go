@@ -13,12 +13,13 @@ import (
 	"strings"
 
 	"github.com/picatz/deputy/internal/cli/flags"
-	inv "github.com/picatz/deputy/internal/inventory"
 	"github.com/picatz/deputy/internal/output"
 	remediation "github.com/picatz/deputy/internal/remediation"
 	"github.com/picatz/deputy/internal/report"
 	"github.com/picatz/deputy/internal/report/render"
+	"github.com/picatz/deputy/internal/scan"
 	ui "github.com/picatz/deputy/internal/ui"
+	"github.com/picatz/deputy/internal/vulnerability"
 	"github.com/spf13/cobra"
 )
 
@@ -38,8 +39,8 @@ type remediationPlanSummary struct {
 
 // AddFixCommand registers the fix subcommand with the root command.
 // It configures flags for report input, plan input, and AI agent options.
-func AddFixCommand(root *cobra.Command) {
-	scanner := NewScanner()
+func AddFixCommand(root *cobra.Command, service *scan.Service) {
+	scanner := NewScanner(service)
 	fixCmd := &cobra.Command{
 		Use:           "fix [repo]",
 		Short:         "Generate and optionally apply remediation steps",
@@ -141,7 +142,7 @@ func runFixPlan(scanner *Scanner, cmd *cobra.Command, args []string) error {
 	var (
 		plan        remediationPlan
 		applyDir    string
-		scannedExec *scanExecution
+		scannedExec *scan.Execution
 	)
 
 	switch {
@@ -166,33 +167,44 @@ func runFixPlan(scanner *Scanner, cmd *cobra.Command, args []string) error {
 		if err := json.Unmarshal(data, &result); err != nil {
 			return fmt.Errorf("failed to parse report: %w", err)
 		}
-		if ignoreUnfixed {
-			result.Vulnerabilities = filterUnfixed(result.Vulnerabilities)
+		findings, advisories := report.SplitVulnerabilities(result.Vulnerabilities)
+		scanResult := scan.Result{
+			Findings:   findings,
+			Advisories: advisories,
+			Stats:      result.Stats,
 		}
-		commands, stdlib := remediation.CommandsFromVulnerabilities(result.Vulnerabilities)
+		if ignoreUnfixed {
+			scanResult = scan.FilterUnfixed(scanResult)
+		}
+		cons := vulnerability.Consolidate(scanResult.Findings, scanResult.Advisories)
+		commands, stdlib := remediation.CommandsFromConsolidated(cons)
 		plan = buildRemediationPlan(result, commands, stdlib)
 	default:
 		ctx := cmd.Context()
 		ref, _ := cmd.Flags().GetString("ref")
 		ecos, _ := cmd.Flags().GetStringSlice("ecosystems")
-		scanOpts := inv.ScanOptions{Ecosystems: ecos}
 		publishedBeforeStr, _ := cmd.Flags().GetString("published-before")
 		publishedAfterStr, _ := cmd.Flags().GetString("published-after")
 		asOfStr, _ := cmd.Flags().GetString("as-of")
 		beforeT, afterT := flags.ParsePublishedFilters(cmd.ErrOrStderr(), asOfStr, publishedBeforeStr, publishedAfterStr)
-		exec, err := scanner.executeScan(ctx, repoArg, ref, cmd.Flags().Changed("ref"), scanOpts, beforeT, afterT, cmd.ErrOrStderr())
+		exec, err := scanner.service.ScanRepository(ctx, repoArg, ref, cmd.Flags().Changed("ref"), scan.Options{
+			Ecosystems:      ecos,
+			PublishedBefore: beforeT,
+			PublishedAfter:  afterT,
+		})
 		if err != nil {
 			return err
 		}
 		defer exec.Close()
 		scannedExec = exec
-		applyDir = exec.localRepoPath
-		vulns := exec.vulnerabilities
+		applyDir = exec.Result.Target.LocalPath
+		resultOut := exec.Result
 		if ignoreUnfixed {
-			vulns = filterUnfixed(vulns)
+			resultOut = scan.FilterUnfixed(resultOut)
 		}
-		result := buildScanReport(exec.displayPath, ref, exec.commitHash, vulns, len(exec.packages))
-		commands, stdlib := remediation.CommandsFromVulnerabilities(result.Vulnerabilities)
+		cons := vulnerability.Consolidate(resultOut.Findings, resultOut.Advisories)
+		commands, stdlib := remediation.CommandsFromConsolidated(cons)
+		result := buildScanReport(resultOut)
 		plan = buildRemediationPlan(result, commands, stdlib)
 	}
 
@@ -219,7 +231,7 @@ func runFixPlan(scanner *Scanner, cmd *cobra.Command, args []string) error {
 		if err != nil {
 			return err
 		}
-		if scannedExec != nil && scannedExec.cloned {
+		if scannedExec != nil && scannedExec.Result.Target.Cloned {
 			return fmt.Errorf("mutations are only supported for local repositories (clone detected)")
 		}
 	}

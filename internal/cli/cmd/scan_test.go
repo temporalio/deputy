@@ -12,6 +12,7 @@ import (
 	"github.com/google/osv-scalibr/purl"
 	analysis "github.com/picatz/deputy/internal/analysis"
 	inv "github.com/picatz/deputy/internal/inventory"
+	"github.com/picatz/deputy/internal/scan"
 	"github.com/spf13/cobra"
 )
 
@@ -22,17 +23,18 @@ func TestScannerRunScanHonorsEcosystemFilter(t *testing.T) {
 	writeGoModule(t, tmpDir)
 	outPath := filepath.Join(tmpDir, "scan.json")
 
-	scanner := &Scanner{}
 	var captured inv.ScanOptions
-	scanner.collectInventory = func(ctx context.Context, repoPath, gitRef string, opts inv.ScanOptions) ([]*extractor.Package, error) {
-		captured = opts
-		return []*extractor.Package{
-			{Name: "github.com/acme/lib", Version: "v1.0.0", PURLType: purl.TypeGolang},
-		}, nil
-	}
-	scanner.queryVulnerabilities = func(ctx context.Context, client analysis.OSVClient, inputs []analysis.PkgInput) ([]analysis.Vulnerability, error) {
-		return nil, nil
-	}
+	scanner := &Scanner{service: scan.NewServiceWithConfig(&scan.ServiceConfig{
+		CollectInventory: func(ctx context.Context, repoPath, gitRef string, opts inv.ScanOptions) ([]*extractor.Package, error) {
+			captured = opts
+			return []*extractor.Package{
+				{Name: "github.com/acme/lib", Version: "v1.0.0", PURLType: purl.TypeGolang},
+			}, nil
+		},
+		QueryVulnerabilities: func(ctx context.Context, client analysis.OSVClient, inputs []analysis.PkgInput) ([]analysis.Vulnerability, error) {
+			return nil, nil
+		},
+	})}
 
 	cmd := newScanTestCommand(t)
 	mustSetFlag(t, cmd, "ecosystems", "go,npm")
@@ -69,15 +71,16 @@ func TestScannerRunScanEmitsMultiEcosystemInputs(t *testing.T) {
 		Locations: []string{"web/package-lock.json"},
 	}
 
-	scanner := &Scanner{}
-	scanner.collectInventory = func(ctx context.Context, repoPath, gitRef string, opts inv.ScanOptions) ([]*extractor.Package, error) {
-		return []*extractor.Package{goPkg, npmPkg}, nil
-	}
 	var captured []analysis.PkgInput
-	scanner.queryVulnerabilities = func(ctx context.Context, client analysis.OSVClient, inputs []analysis.PkgInput) ([]analysis.Vulnerability, error) {
-		captured = append([]analysis.PkgInput(nil), inputs...)
-		return nil, nil
-	}
+	scanner := &Scanner{service: scan.NewServiceWithConfig(&scan.ServiceConfig{
+		CollectInventory: func(ctx context.Context, repoPath, gitRef string, opts inv.ScanOptions) ([]*extractor.Package, error) {
+			return []*extractor.Package{goPkg, npmPkg}, nil
+		},
+		QueryVulnerabilities: func(ctx context.Context, client analysis.OSVClient, inputs []analysis.PkgInput) ([]analysis.Vulnerability, error) {
+			captured = append([]analysis.PkgInput(nil), inputs...)
+			return nil, nil
+		},
+	})}
 
 	cmd := newScanTestCommand(t)
 	mustSetFlag(t, cmd, "ecosystems", "go,npm")

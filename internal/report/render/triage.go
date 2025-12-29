@@ -7,10 +7,10 @@ import (
 	"slices"
 	"strings"
 
-	analysis "github.com/picatz/deputy/internal/analysis"
 	"github.com/picatz/deputy/internal/output"
 	"github.com/picatz/deputy/internal/report"
 	ui "github.com/picatz/deputy/internal/ui"
+	"github.com/picatz/deputy/internal/vulnerability"
 )
 
 // RenderTriageSummary prints a human-readable summary of the triage report.
@@ -76,7 +76,7 @@ func RenderTriageSummary(w io.Writer, triageReport report.TriageReport, showDBIn
 }
 
 // FormatImportSummaries prepares a compact set of import/symbol hints for display.
-func FormatImportSummaries(imps []analysis.AffectedImport, maxPaths, maxSymbols int) []string {
+func FormatImportSummaries(imps []vulnerability.AffectedImport, maxPaths, maxSymbols int) []string {
 	if len(imps) == 0 {
 		return nil
 	}

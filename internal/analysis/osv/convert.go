@@ -2,12 +2,15 @@ package osv
 
 import (
 	"cmp"
+	"maps"
 	"slices"
 	"strings"
 	"time"
 
 	"github.com/ossf/osv-schema/bindings/go/osvschema"
+	"github.com/picatz/deputy/internal/dependency"
 	"github.com/picatz/deputy/internal/vuln"
+	"github.com/picatz/deputy/internal/vulnerability"
 )
 
 // ProcessOSVVulnerability converts a raw OSV schema vulnerability into the
@@ -17,43 +20,58 @@ import (
 // preference (favoring CVSS metrics unless GHSA severity is authoritative),
 // and aggregates fixed version markers relevant to the matched package.
 func ProcessOSVVulnerability(vuln osvschema.Vulnerability, input PkgInput) Vulnerability {
-	v := Vulnerability{
-		ID:           vuln.ID,
-		Summary:      vuln.Summary,
-		Details:      vuln.Details,
-		Package:      input.Name,
-		Version:      input.Version,
-		IsDirect:     input.IsDirect,
-		Ecosystem:    input.Ecosystem,
-		PURL:         input.PURL,
-		Locations:    slices.Clone(input.Locations),
-		ManifestRefs: slices.Clone(input.ManifestRefs),
+	advisory, finding := ProcessOSVVulnerabilityDomain(vuln, input)
+	return flattenAdvisoryFinding(advisory, finding)
+}
+
+// ProcessOSVVulnerabilityDomain converts a raw OSV vulnerability into the
+// domain Advisory + Finding pair, keeping the advisory metadata separate from
+// scan-time occurrence details.
+func ProcessOSVVulnerabilityDomain(vuln osvschema.Vulnerability, input PkgInput) (vulnerability.Advisory, vulnerability.Finding) {
+	advisory := vulnerability.Advisory{
+		ID:      vuln.ID,
+		Summary: vuln.Summary,
+		Details: vuln.Details,
 	}
+	finding := vulnerability.Finding{
+		AdvisoryID: vuln.ID,
+		Dependency: dependency.ID{
+			Name:      input.Name,
+			Ecosystem: input.Ecosystem,
+			PURL:      input.PURL,
+		},
+		Version:      input.Version,
+		Direct:       input.IsDirect,
+		Locations:    slices.Clone(input.Locations),
+		ManifestRefs: toDomainManifestRefs(input.ManifestRefs),
+	}
+
 	if !vuln.Published.IsZero() {
-		v.Published = vuln.Published.Format(time.RFC3339)
+		advisory.Published = vuln.Published
 	}
 	if !vuln.Modified.IsZero() {
-		v.Modified = vuln.Modified.Format(time.RFC3339)
+		advisory.Modified = vuln.Modified
 	}
 	if vuln.Aliases != nil {
-		v.Aliases = slices.Clone(vuln.Aliases)
+		advisory.Aliases = slices.Clone(vuln.Aliases)
 	}
 
 	// Prefer CVE alias; fallback to GO- or GHSA-
-	v.CVE = cmp.Or(
-		findAliasPrefix(v.Aliases, "CVE-"),
-		findAliasPrefix(v.Aliases, "GO-"),
-		findAliasPrefix(v.Aliases, "GHSA-"),
+	advisory.CVE = cmp.Or(
+		findAliasPrefix(advisory.Aliases, "CVE-"),
+		findAliasPrefix(advisory.Aliases, "GO-"),
+		findAliasPrefix(advisory.Aliases, "GHSA-"),
 	)
 
 	// Resolve severity using priority order
-	v.Severity, v.SeverityType = resolveSeverity(vuln)
+	sev, sevType := resolveSeverity(vuln)
+	advisory.Severity = vulnerability.NewSeverity(sev, sevType)
 
 	// References
 	if vuln.References != nil {
 		for _, ref := range vuln.References {
 			if ref.URL != "" {
-				v.References = append(v.References, ref.URL)
+				advisory.References = append(advisory.References, ref.URL)
 			}
 		}
 	}
@@ -67,19 +85,19 @@ func ProcessOSVVulnerability(vuln osvschema.Vulnerability, input PkgInput) Vulne
 			for _, r := range a.Ranges {
 				for _, e := range r.Events {
 					if e.Fixed != "" {
-						v.FixedVersions = append(v.FixedVersions, e.Fixed)
+						advisory.FixedVersions = append(advisory.FixedVersions, e.Fixed)
 					}
 				}
 			}
 		}
 	}
 	if imports := extractGoImports(vuln.Affected, input); len(imports) > 0 {
-		v.AffectedImports = imports
+		finding.AffectedImports = toDomainAffectedImports(imports)
 	}
 	if ds := extractDatabaseSpecificStrings(vuln.DatabaseSpecific); len(ds) > 0 {
-		v.DatabaseSpecific = ds
+		advisory.DatabaseSpecific = ds
 	}
-	return v
+	return advisory, finding
 }
 
 func findAliasPrefix(aliases []string, prefix string) string {
@@ -241,6 +259,113 @@ func extractDatabaseSpecificStrings(raw map[string]any) map[string]string {
 	}
 	if len(out) == 0 {
 		return nil
+	}
+	return out
+}
+
+func flattenAdvisoryFinding(advisory vulnerability.Advisory, finding vulnerability.Finding) Vulnerability {
+	sev := advisory.Severity.Raw
+	if sev == "" && advisory.Severity.Level != vulnerability.SeverityUnknown {
+		sev = advisory.Severity.Level.String()
+	}
+	sevType := advisory.Severity.RawType
+	if sevType == "" && advisory.Severity.Type != vulnerability.SeverityTypeUnknown {
+		sevType = advisory.Severity.Type.String()
+	}
+
+	var published string
+	if !advisory.Published.IsZero() {
+		published = advisory.Published.Format(time.RFC3339)
+	}
+	var modified string
+	if !advisory.Modified.IsZero() {
+		modified = advisory.Modified.Format(time.RFC3339)
+	}
+
+	return Vulnerability{
+		ID:              advisory.ID,
+		Aliases:         slices.Clone(advisory.Aliases),
+		Summary:         advisory.Summary,
+		Details:         advisory.Details,
+		CVE:             advisory.CVE,
+		Severity:        sev,
+		SeverityType:    sevType,
+		Package:         finding.Dependency.Name,
+		Version:         finding.Version,
+		IsDirect:        finding.Direct,
+		Ecosystem:       finding.Dependency.Ecosystem,
+		PURL:            finding.Dependency.PURL,
+		Published:       published,
+		Modified:        modified,
+		References:      slices.Clone(advisory.References),
+		FixedVersions:   slices.Clone(advisory.FixedVersions),
+		Affected:        finding.Affected,
+		Locations:       slices.Clone(finding.Locations),
+		ManifestRefs:    toLegacyManifestRefs(finding.ManifestRefs),
+		AffectedImports: toLegacyAffectedImports(finding.AffectedImports),
+		DatabaseSpecific: func() map[string]string {
+			if len(advisory.DatabaseSpecific) == 0 {
+				return nil
+			}
+			return maps.Clone(advisory.DatabaseSpecific)
+		}(),
+	}
+}
+
+func toDomainManifestRefs(refs []ManifestReference) []dependency.ManifestRef {
+	if len(refs) == 0 {
+		return nil
+	}
+	out := make([]dependency.ManifestRef, 0, len(refs))
+	for _, ref := range refs {
+		out = append(out, dependency.ManifestRef{
+			Path:    ref.Path,
+			Manager: ref.Manager,
+			Groups:  slices.Clone(ref.Groups),
+		})
+	}
+	return out
+}
+
+func toDomainAffectedImports(imports []AffectedImport) []vulnerability.AffectedImport {
+	if len(imports) == 0 {
+		return nil
+	}
+	out := make([]vulnerability.AffectedImport, 0, len(imports))
+	for _, imp := range imports {
+		out = append(out, vulnerability.AffectedImport{
+			Path:    imp.Path,
+			Symbols: slices.Clone(imp.Symbols),
+		})
+	}
+	return out
+}
+
+func toLegacyManifestRefs(refs []dependency.ManifestRef) []ManifestReference {
+	if len(refs) == 0 {
+		return nil
+	}
+	out := make([]ManifestReference, 0, len(refs))
+	for _, ref := range refs {
+		out = append(out, ManifestReference{
+			Path:    ref.Path,
+			Manager: ref.Manager,
+			Groups:  slices.Clone(ref.Groups),
+		})
+	}
+	return out
+}
+
+func toLegacyAffectedImports(imports []vulnerability.AffectedImport) []AffectedImport {
+	if len(imports) == 0 {
+		return nil
+	}
+	out := make([]AffectedImport, 0, len(imports))
+	for _, imp := range imports {
+		out = append(out, AffectedImport{
+			Path:    imp.Path,
+			Symbols: slices.Clone(imp.Symbols),
+		})
 	}
 	return out
 }

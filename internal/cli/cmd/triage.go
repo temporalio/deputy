@@ -7,18 +7,18 @@ import (
 	"io"
 	"strings"
 
-	analysis "github.com/picatz/deputy/internal/analysis"
 	"github.com/picatz/deputy/internal/cli/flags"
-	inv "github.com/picatz/deputy/internal/inventory"
 	"github.com/picatz/deputy/internal/report"
 	"github.com/picatz/deputy/internal/report/render"
+	"github.com/picatz/deputy/internal/scan"
 	ui "github.com/picatz/deputy/internal/ui"
+	"github.com/picatz/deputy/internal/vulnerability"
 	"github.com/spf13/cobra"
 )
 
 // AddTriageCommand registers the triage subcommand.
-func AddTriageCommand(root *cobra.Command) {
-	scanner := NewScanner()
+func AddTriageCommand(root *cobra.Command, service *scan.Service) {
+	scanner := NewScanner(service)
 	triageCmd := &cobra.Command{
 		Use:           "triage [repo]",
 		Short:         "Summarize vulnerabilities and optionally invoke an AI triage agent",
@@ -116,42 +116,51 @@ func runTriage(scanner *Scanner, cmd *cobra.Command, args []string) error {
 		if len(strings.TrimSpace(string(data))) == 0 {
 			return fmt.Errorf("report %q is empty", reportPath)
 		}
-		var scan ScanResult
-		if err := json.Unmarshal(data, &scan); err != nil {
+		var scanReport ScanResult
+		if err := json.Unmarshal(data, &scanReport); err != nil {
 			return fmt.Errorf("failed to parse report: %w", err)
 		}
-		vulns := scan.Vulnerabilities
-		if ignoreUnfixed {
-			vulns = filterUnfixed(vulns)
+		findings, advisories := report.SplitVulnerabilities(scanReport.Vulnerabilities)
+		scanResult := scan.Result{
+			Findings:   findings,
+			Advisories: advisories,
+			Stats:      scanReport.Stats,
 		}
-		stats := analysis.CategorizeVulnerabilities(vulns)
-		cons := analysis.ConsolidateVulnerabilities(vulns)
-		triageReport = report.BuildTriageReport(report.Target{Repo: scan.Repo, Ref: scan.Ref, Commit: scan.Commit}, stats, cons)
+		if ignoreUnfixed {
+			scanResult = scan.FilterUnfixed(scanResult)
+		}
+		cons := vulnerability.Consolidate(scanResult.Findings, scanResult.Advisories)
+		triageReport = report.BuildTriageReport(report.Target{Repo: scanReport.Repo, Ref: scanReport.Ref, Commit: scanReport.Commit}, scanResult.Stats, cons)
 		triageSource = "report"
 	} else {
 		ctx := cmd.Context()
 		ref, _ := cmd.Flags().GetString("ref")
 		ecos, _ := cmd.Flags().GetStringSlice("ecosystems")
-		scanOpts := inv.ScanOptions{Ecosystems: ecos}
 		publishedBeforeStr, _ := cmd.Flags().GetString("published-before")
 		publishedAfterStr, _ := cmd.Flags().GetString("published-after")
 		asOfStr, _ := cmd.Flags().GetString("as-of")
 		beforeT, afterT := flags.ParsePublishedFilters(cmd.ErrOrStderr(), asOfStr, publishedBeforeStr, publishedAfterStr)
-		exec, err := scanner.executeScan(ctx, repoArg, ref, cmd.Flags().Changed("ref"), scanOpts, beforeT, afterT, cmd.ErrOrStderr())
+		exec, err := scanner.service.ScanRepository(ctx, repoArg, ref, cmd.Flags().Changed("ref"), scan.Options{
+			Ecosystems:      ecos,
+			PublishedBefore: beforeT,
+			PublishedAfter:  afterT,
+		})
 		if err != nil {
 			return err
 		}
 		defer exec.Close()
-		repoPath = exec.localRepoPath
-		triageSource = "scan"
-		vulns := exec.vulnerabilities
-		if ignoreUnfixed {
-			vulns = filterUnfixed(vulns)
+		for _, warning := range exec.Result.Warnings {
+			fmt.Fprintf(cmd.ErrOrStderr(), "Warning: %s\n", warning)
 		}
-		stats := analysis.CategorizeVulnerabilities(vulns)
-		cons := analysis.ConsolidateVulnerabilities(vulns)
-		target := report.Target{Repo: exec.displayPath, Ref: ref, Commit: exec.commitHash}
-		triageReport = report.BuildTriageReport(target, stats, cons)
+		repoPath = exec.Result.Target.LocalPath
+		triageSource = "scan"
+		resultOut := exec.Result
+		if ignoreUnfixed {
+			resultOut = scan.FilterUnfixed(resultOut)
+		}
+		cons := vulnerability.Consolidate(resultOut.Findings, resultOut.Advisories)
+		target := report.Target{Repo: exec.Result.Target.DisplayPath, Ref: ref, Commit: exec.Result.Target.CommitHash}
+		triageReport = report.BuildTriageReport(target, resultOut.Stats, cons)
 	}
 
 	if err := runTriagePolicies(cmd.Context(), policyPaths, triageReport, cmd.ErrOrStderr()); err != nil {

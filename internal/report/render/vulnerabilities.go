@@ -11,10 +11,11 @@ import (
 	pathpkg "path"
 
 	"github.com/charmbracelet/lipgloss"
-	analysis "github.com/picatz/deputy/internal/analysis"
 	"github.com/picatz/deputy/internal/output"
 	"github.com/picatz/deputy/internal/report"
+	"github.com/picatz/deputy/internal/scan"
 	ui "github.com/picatz/deputy/internal/ui"
+	"github.com/picatz/deputy/internal/vulnerability"
 )
 
 // VulnerabilityDisplayOptions controls optional verbosity in vulnerability output.
@@ -31,14 +32,14 @@ func resolveVulnerabilityDisplayOptions(opts []VulnerabilityDisplayOptions) Vuln
 }
 
 // DisplayVulnerabilities writes a styled vulnerability report to w with the default heading.
-func DisplayVulnerabilities(w io.Writer, vulns []analysis.Vulnerability, opts ...VulnerabilityDisplayOptions) {
-	DisplayVulnerabilitiesWithHeader(w, vulns, "Vulnerabilities Found:", opts...)
+func DisplayVulnerabilities(w io.Writer, result scan.Result, opts ...VulnerabilityDisplayOptions) {
+	DisplayVulnerabilitiesWithHeader(w, result, "Vulnerabilities Found:", opts...)
 }
 
 // DisplayVulnerabilitiesWithHeader writes a styled vulnerability report to w using the provided heading.
-func DisplayVulnerabilitiesWithHeader(w io.Writer, vulns []analysis.Vulnerability, heading string, opts ...VulnerabilityDisplayOptions) {
+func DisplayVulnerabilitiesWithHeader(w io.Writer, result scan.Result, heading string, opts ...VulnerabilityDisplayOptions) {
 	displayOpts := resolveVulnerabilityDisplayOptions(opts)
-	cons := analysis.ConsolidateVulnerabilities(vulns)
+	cons := vulnerability.Consolidate(result.Findings, result.Advisories)
 	if len(cons) == 0 {
 		fmt.Fprintln(w)
 		fmt.Fprintln(w, ui.StyleAdded.Render("✓ No vulnerabilities found"))
@@ -47,20 +48,19 @@ func DisplayVulnerabilitiesWithHeader(w io.Writer, vulns []analysis.Vulnerabilit
 	fmt.Fprintln(w)
 	fmt.Fprintln(w, ui.StyleDowngraded.Render("∴ ")+ui.StyleHeader.Render(heading))
 
-	RenderVulnerabilityList(w, vulns, displayOpts)
+	RenderVulnerabilityList(w, cons, displayOpts)
 
-	RenderVulnerabilitySummaryAndActions(w, vulns)
+	RenderVulnerabilitySummaryAndActions(w, cons, result.Stats)
 }
 
 // RenderVulnerabilityList writes per-package vulnerability details to w without headings or summary.
 // Used by diff to compose combined views.
-func RenderVulnerabilityList(w io.Writer, vulns []analysis.Vulnerability, opts VulnerabilityDisplayOptions) {
-	cons := analysis.ConsolidateVulnerabilities(vulns)
+func RenderVulnerabilityList(w io.Writer, cons []vulnerability.Consolidated, opts VulnerabilityDisplayOptions) {
 	if len(cons) == 0 {
 		return
 	}
 
-	byPkg := map[string][]analysis.ConsolidatedVulnerability{}
+	byPkg := map[string][]vulnerability.Consolidated{}
 	for _, v := range cons {
 		byPkg[v.Package] = append(byPkg[v.Package], v)
 	}
@@ -72,7 +72,7 @@ func RenderVulnerabilityList(w io.Writer, vulns []analysis.Vulnerability, opts V
 		if len(list) == 0 {
 			continue
 		}
-		slices.SortStableFunc(list, func(a, b analysis.ConsolidatedVulnerability) int {
+		slices.SortStableFunc(list, func(a, b vulnerability.Consolidated) int {
 			pa, sa := report.ConsolidatedSeverityPriority(a)
 			pb, sb := report.ConsolidatedSeverityPriority(b)
 			if pa != pb {
@@ -84,7 +84,7 @@ func RenderVulnerabilityList(w io.Writer, vulns []analysis.Vulnerability, opts V
 			return cmp.Compare(a.PrimaryID, b.PrimaryID)
 		})
 
-		hasDirect := slices.ContainsFunc(list, func(v analysis.ConsolidatedVulnerability) bool {
+		hasDirect := slices.ContainsFunc(list, func(v vulnerability.Consolidated) bool {
 			return v.IsDirect
 		})
 		depType := "[indirect]"
@@ -111,7 +111,7 @@ func RenderVulnerabilityList(w io.Writer, vulns []analysis.Vulnerability, opts V
 			sevDisp := ui.SeverityLabel(v.Severity, v.SeverityType)
 			parts := []string{ui.StyleSymbol.Render(v.PrimaryID), sevDisp}
 			if len(v.FixedVersions) > 0 {
-				if best := analysis.FindBestFixedVersion(v.FixedVersions, v.Version); best != "" {
+				if best := vulnerability.FindBestFixedVersion(v.FixedVersions, v.Version); best != "" {
 					parts = append(parts, ui.StyleUpgraded.Render(fmt.Sprintf("(↑ %s)", best)))
 				}
 			}
@@ -177,8 +177,8 @@ func RenderVulnerabilityList(w io.Writer, vulns []analysis.Vulnerability, opts V
 
 // RenderVulnerabilitySummaryAndActions writes the summary and recommended
 // actions for a set of vulnerabilities without reprinting the list header.
-func RenderVulnerabilitySummaryAndActions(w io.Writer, vulns []analysis.Vulnerability) {
-	summary := report.BuildSummary(vulns)
+func RenderVulnerabilitySummaryAndActions(w io.Writer, cons []vulnerability.Consolidated, stats vulnerability.Stats) {
+	summary := report.BuildSummary(cons, stats)
 	if !summary.HasVulnerabilities {
 		fmt.Fprintln(w)
 		fmt.Fprintln(w, ui.StyleAdded.Render("✓ No vulnerabilities found"))
@@ -217,7 +217,7 @@ func RenderVulnerabilitySummaryAndActions(w io.Writer, vulns []analysis.Vulnerab
 }
 
 // renderManifestContext writes the context (sources and artifacts) for a list of vulnerabilities.
-func renderManifestContext(w io.Writer, list []analysis.ConsolidatedVulnerability) {
+func renderManifestContext(w io.Writer, list []vulnerability.Consolidated) {
 	ctx := report.BuildManifestContext(list)
 	if len(ctx.Sources) == 0 && len(ctx.Artifacts) == 0 {
 		return

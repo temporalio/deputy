@@ -1,0 +1,18 @@
+package scan
+
+import (
+	"context"
+
+	"github.com/google/osv-scalibr/extractor"
+	analysis "github.com/picatz/deputy/internal/analysis"
+)
+
+// ScanInputs queries OSV using precomputed inputs and returns a populated scan result.
+func (s *Service) ScanInputs(ctx context.Context, target Target, pkgs []*extractor.Package, direct map[string]bool, inputs []analysis.PkgInput, opts Options) Result {
+	svc := s
+	if svc == nil {
+		svc = NewService()
+	}
+	vulns, queryErr := svc.queryOSV(ctx, inputs)
+	return buildResult(target, pkgs, direct, vulns, queryErr, opts)
+}

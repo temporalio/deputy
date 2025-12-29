@@ -1,14 +1,14 @@
 package report
 
 import (
-	analysis "github.com/picatz/deputy/internal/analysis"
 	remediation "github.com/picatz/deputy/internal/remediation"
+	"github.com/picatz/deputy/internal/vulnerability"
 )
 
 // Summary captures counts and recommended actions derived from vulnerabilities.
 type Summary struct {
 	HasVulnerabilities   bool
-	Stats                analysis.VulnerabilityStats
+	Stats                vulnerability.Stats
 	CriticalHighCount    int
 	FixAvailableCount    int
 	UnfixedCount         int
@@ -18,15 +18,19 @@ type Summary struct {
 }
 
 // BuildSummary computes summary stats and remediation suggestions for vulnerabilities.
-func BuildSummary(vulns []analysis.Vulnerability) Summary {
-	cons := analysis.ConsolidateVulnerabilities(vulns)
+func BuildSummary(cons []vulnerability.Consolidated, stats vulnerability.Stats) Summary {
 	if len(cons) == 0 {
 		return Summary{HasVulnerabilities: false}
 	}
-	stats := analysis.CategorizeVulnerabilities(vulns)
+	if stats.UniqueVulns == 0 {
+		stats = vulnerability.StatsFromConsolidated(cons, len(cons))
+	}
 	high := stats.CriticalSev + stats.HighSeverity
 	unfixed := stats.UniqueVulns - stats.FixAvailable
-	commands, stdlibRec := remediation.CommandsFromVulnerabilities(vulns)
+	if unfixed < 0 {
+		unfixed = 0
+	}
+	commands, stdlibRec := remediation.CommandsFromConsolidated(cons)
 	header := "Upgrade affected modules"
 	if high > 0 {
 		header = "Upgrade critical/high modules first"

@@ -8,7 +8,9 @@ import (
 	"strings"
 	"testing"
 
-	analysis "github.com/picatz/deputy/internal/analysis"
+	"github.com/picatz/deputy/internal/report"
+	"github.com/picatz/deputy/internal/scan"
+	"github.com/picatz/deputy/internal/vulnerability"
 	"github.com/spf13/cobra"
 )
 
@@ -20,7 +22,7 @@ func newTestRoot(out, errW *bytes.Buffer) *cobra.Command {
 	}
 	root.SetOut(out)
 	root.SetErr(errW)
-	RegisterCommands(root)
+	RegisterCommands(root, Dependencies{})
 	return root
 }
 
@@ -43,7 +45,7 @@ func writeScanReportFile(t *testing.T, report ScanResult) string {
 }
 
 func TestCLIOutput_TriageFromReport_WritesToCommandOut(t *testing.T) {
-	v := analysis.Vulnerability{
+	v := report.Vulnerability{
 		ID:           "OSV-TEST-1",
 		Package:      "github.com/acme/mod",
 		Version:      "v1.0.0",
@@ -55,8 +57,21 @@ func TestCLIOutput_TriageFromReport_WritesToCommandOut(t *testing.T) {
 		},
 		IsDirect: true,
 	}
-	report := buildScanReport("github.com/acme/repo", "HEAD", "deadbeef", []analysis.Vulnerability{v}, 1)
-	path := writeScanReportFile(t, report)
+	findings, advisories := report.SplitVulnerabilities([]report.Vulnerability{v})
+	result := scan.Result{
+		Target: scan.Target{
+			DisplayPath: "github.com/acme/repo",
+			Ref:         "HEAD",
+			CommitHash:  "deadbeef",
+		},
+		PackagesScanned: 1,
+		Findings:        findings,
+		Advisories:      advisories,
+	}
+	cons := vulnerability.Consolidate(result.Findings, result.Advisories)
+	result.Stats = vulnerability.StatsFromConsolidated(cons, len(result.Findings))
+	scanReport := buildScanReport(result)
+	path := writeScanReportFile(t, scanReport)
 
 	var out, errBuf bytes.Buffer
 	root := newTestRoot(&out, &errBuf)
@@ -77,7 +92,7 @@ func TestCLIOutput_TriageFromReport_WritesToCommandOut(t *testing.T) {
 }
 
 func TestCLIOutput_FixFromReport_WritesToCommandOut(t *testing.T) {
-	v := analysis.Vulnerability{
+	v := report.Vulnerability{
 		ID:           "OSV-TEST-1",
 		Package:      "github.com/acme/mod",
 		Version:      "v1.0.0",
@@ -89,8 +104,21 @@ func TestCLIOutput_FixFromReport_WritesToCommandOut(t *testing.T) {
 		},
 		IsDirect: true,
 	}
-	report := buildScanReport("github.com/acme/repo", "HEAD", "deadbeef", []analysis.Vulnerability{v}, 1)
-	path := writeScanReportFile(t, report)
+	findings, advisories := report.SplitVulnerabilities([]report.Vulnerability{v})
+	result := scan.Result{
+		Target: scan.Target{
+			DisplayPath: "github.com/acme/repo",
+			Ref:         "HEAD",
+			CommitHash:  "deadbeef",
+		},
+		PackagesScanned: 1,
+		Findings:        findings,
+		Advisories:      advisories,
+	}
+	cons := vulnerability.Consolidate(result.Findings, result.Advisories)
+	result.Stats = vulnerability.StatsFromConsolidated(cons, len(result.Findings))
+	scanReport := buildScanReport(result)
+	path := writeScanReportFile(t, scanReport)
 
 	var out, errBuf bytes.Buffer
 	root := newTestRoot(&out, &errBuf)

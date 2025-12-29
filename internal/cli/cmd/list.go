@@ -24,6 +24,7 @@ import (
 	"github.com/picatz/deputy/internal/purlx"
 	"github.com/picatz/deputy/internal/repository"
 	"github.com/picatz/deputy/internal/repository/workspace"
+	"github.com/picatz/deputy/internal/scan"
 	ui "github.com/picatz/deputy/internal/ui"
 	"github.com/spf13/cobra"
 	"golang.org/x/mod/modfile"
@@ -242,25 +243,25 @@ func collectListItems(ctx context.Context, repoPath, ref string, ecosystems []st
 	}
 
 	goDirect := map[string]bool{"stdlib": true}
-	var manifestRes manifestResolver
+	var manifestRes scan.ManifestResolver
 	switch {
 	case strings.EqualFold(effRef, "HEAD") || strings.EqualFold(effRef, "HEAD~0"):
 		goDirect = compare.CollectGoDirectModulesFromWorkspace(ws)
-		manifestRes = workspaceManifestResolver{ws: ws}
+		manifestRes = scan.NewWorkspaceManifestResolver(ws)
 	case targetHash != nil:
 		if direct, err := compare.CollectGoDirectModulesFromCommit(repo, *targetHash); err == nil {
 			goDirect = direct
 		}
-		manifestRes = gitManifestResolver{repo: repo, hash: *targetHash}
+		manifestRes = scan.NewGitManifestResolver(repo, *targetHash)
 	default:
 		// Fallback: use workspace for current state
 		goDirect = compare.CollectGoDirectModulesFromWorkspace(ws)
-		manifestRes = workspaceManifestResolver{ws: ws}
+		manifestRes = scan.NewWorkspaceManifestResolver(ws)
 	}
 
-	pkgInputs := packagesToInputs(pkgs, packageInputOptions{GoDirect: goDirect, Resolver: manifestRes})
-	pkgDirect := buildPackageDirectMap(pkgInputs)
-	pkgSources := buildPackageSources(pkgInputs)
+	pkgInputs := scan.PackagesToInputs(pkgs, scan.PackageInputOptions{GoDirect: goDirect, Resolver: manifestRes})
+	pkgDirect := scan.BuildPackageDirectMap(pkgInputs)
+	pkgSources := scan.BuildPackageSources(pkgInputs)
 
 	items := toListItems(ws, pkgs, goDirect, pkgDirect, pkgSources, showSources)
 	slices.SortFunc(items, func(a, b ListItem) int {

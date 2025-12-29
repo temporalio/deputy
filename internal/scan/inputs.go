@@ -1,4 +1,4 @@
-package cmd
+package scan
 
 import (
 	"cmp"
@@ -17,28 +17,28 @@ import (
 	"github.com/picatz/deputy/internal/purlx"
 )
 
-// packagesToInputs converts a slice of extractor.Package objects into
+// PackagesToInputs converts a slice of extractor.Package objects into
 // analysis.PkgInput records suitable for OSV queries. It normalizes package
 // names, deduplicates modules, and annotates whether each dependency is direct
 // according to the provided dependency map.
-// manifestResolver abstracts file reading for manifest parsing.
-type manifestResolver interface {
+// ManifestResolver abstracts file reading for manifest parsing.
+type ManifestResolver interface {
 	ReadFile(path string) ([]byte, error)
 }
 
-// manifestResolverFunc adapts a function to the manifestResolver interface.
-type manifestResolverFunc func(string) ([]byte, error)
+// ManifestResolverFunc adapts a function to the ManifestResolver interface.
+type ManifestResolverFunc func(string) ([]byte, error)
 
 // ReadFile calls the underlying function.
-func (f manifestResolverFunc) ReadFile(path string) ([]byte, error) {
+func (f ManifestResolverFunc) ReadFile(path string) ([]byte, error) {
 	return f(path)
 }
 
-// packageInputOptions configures how packages are converted to inputs.
-type packageInputOptions struct {
+// PackageInputOptions configures how packages are converted to inputs.
+type PackageInputOptions struct {
 	GoDirect       map[string]bool
 	DirectPackages map[string]bool
-	Resolver       manifestResolver
+	Resolver       ManifestResolver
 }
 
 type packageJSONData struct {
@@ -53,7 +53,7 @@ type packageJSONCache struct {
 	*manifestCache[*packageJSONData]
 }
 
-func newPackageJSONCache(resolver manifestResolver) *packageJSONCache {
+func newPackageJSONCache(resolver ManifestResolver) *packageJSONCache {
 	mc := newManifestCache(resolver, func(content []byte) (*packageJSONData, error) {
 		var pj packageJSONData
 		if err := json.Unmarshal(content, &pj); err != nil {
@@ -101,7 +101,7 @@ type uvLockData struct {
 	direct map[string]bool
 }
 
-func newUVLockCache(resolver manifestResolver) *uvLockCache {
+func newUVLockCache(resolver ManifestResolver) *uvLockCache {
 	mc := newManifestCache(resolver, parseUVLock)
 	if mc == nil {
 		return nil
@@ -218,7 +218,7 @@ type cargoManifestData struct {
 	direct map[string]bool
 }
 
-func newCargoManifestCache(resolver manifestResolver) *cargoManifestCache {
+func newCargoManifestCache(resolver ManifestResolver) *cargoManifestCache {
 	mc := newManifestCache(resolver, parseCargoManifest)
 	if mc == nil {
 		return nil
@@ -294,7 +294,7 @@ func parseCargoManifest(content []byte) (*cargoManifestData, error) {
 	return data, nil
 }
 
-func packagesToInputs(pkgs []*extractor.Package, opts packageInputOptions) []analysis.PkgInput {
+func PackagesToInputs(pkgs []*extractor.Package, opts PackageInputOptions) []analysis.PkgInput {
 	if len(pkgs) == 0 {
 		return nil
 	}
@@ -475,8 +475,8 @@ func normalizeCrateName(name string) string {
 	return strings.ToLower(strings.TrimSpace(name))
 }
 
-// buildPackageDirectMap creates a map of direct dependencies from the input list.
-func buildPackageDirectMap(inputs []analysis.PkgInput) map[string]bool {
+// BuildPackageDirectMap creates a map of direct dependencies from the input list.
+func BuildPackageDirectMap(inputs []analysis.PkgInput) map[string]bool {
 	if len(inputs) == 0 {
 		return nil
 	}
@@ -495,8 +495,8 @@ func buildPackageDirectMap(inputs []analysis.PkgInput) map[string]bool {
 	return direct
 }
 
-// mergeDirectMaps combines multiple direct dependency maps.
-func mergeDirectMaps(maps ...map[string]bool) map[string]bool {
+// MergeDirectMaps combines multiple direct dependency maps.
+func MergeDirectMaps(maps ...map[string]bool) map[string]bool {
 	result := make(map[string]bool)
 	for _, m := range maps {
 		for k, v := range m {
@@ -511,8 +511,8 @@ func mergeDirectMaps(maps ...map[string]bool) map[string]bool {
 	return result
 }
 
-// buildPackageSources creates a map of package sources from the input list.
-func buildPackageSources(inputs []analysis.PkgInput) map[string][]string {
+// BuildPackageSources creates a map of package sources from the input list.
+func BuildPackageSources(inputs []analysis.PkgInput) map[string][]string {
 	if len(inputs) == 0 {
 		return nil
 	}

@@ -7,9 +7,10 @@ import (
 	"slices"
 	"strings"
 
-	analysis "github.com/picatz/deputy/internal/analysis"
 	"github.com/picatz/deputy/internal/collections"
+	"github.com/picatz/deputy/internal/dependency"
 	"github.com/picatz/deputy/internal/ecosystem"
+	"github.com/picatz/deputy/internal/vulnerability"
 	"golang.org/x/mod/semver"
 )
 
@@ -42,13 +43,12 @@ type packageUpgrade struct {
 	Recommended string
 	IsDirect    bool
 	Ecosystem   string
-	References  []analysis.ManifestReference
+	References  []dependency.ManifestRef
 	Locations   []string
 }
 
-// CommandsFromVulnerabilities derives recommended commands and stdlib upgrades.
-func CommandsFromVulnerabilities(vs []analysis.Vulnerability) ([]Command, string) {
-	cons := analysis.ConsolidateVulnerabilities(vs)
+// CommandsFromConsolidated derives recommended commands and stdlib upgrades.
+func CommandsFromConsolidated(cons []vulnerability.Consolidated) ([]Command, string) {
 	upgrades, stdlib := buildUpgradeRecommendations(cons)
 	cmds := dedupeCommands(upgrades)
 	if stdlib != "" {
@@ -72,7 +72,7 @@ func CommandsFromVulnerabilities(vs []analysis.Vulnerability) ([]Command, string
 // the best fixed versions for each affected package. It separates standard library
 // upgrades from regular dependency upgrades. When multiple vulnerabilities affect
 // the same package, it recommends the highest required version to fix all issues.
-func buildUpgradeRecommendations(cons []analysis.ConsolidatedVulnerability) ([]packageUpgrade, string) {
+func buildUpgradeRecommendations(cons []vulnerability.Consolidated) ([]packageUpgrade, string) {
 	var stdlibRec string
 
 	// Track the best (highest) recommended version per package
@@ -82,7 +82,7 @@ func buildUpgradeRecommendations(cons []analysis.ConsolidatedVulnerability) ([]p
 		if len(v.FixedVersions) == 0 {
 			continue
 		}
-		best := analysis.FindBestFixedVersion(v.FixedVersions, v.Version)
+		best := vulnerability.FindBestFixedVersion(v.FixedVersions, v.Version)
 		if best == "" {
 			continue
 		}
@@ -156,9 +156,9 @@ func normalizeVersion(v string) string {
 }
 
 // mergeManifestRefs combines two slices of manifest references, deduplicating by path+manager.
-func mergeManifestRefs(a, b []analysis.ManifestReference) []analysis.ManifestReference {
+func mergeManifestRefs(a, b []dependency.ManifestRef) []dependency.ManifestRef {
 	seen := collections.NewSet[string]()
-	result := make([]analysis.ManifestReference, 0, len(a)+len(b))
+	result := make([]dependency.ManifestRef, 0, len(a)+len(b))
 	for _, ref := range a {
 		key := ref.Path + "|" + ref.Manager
 		if seen.Add(key) {

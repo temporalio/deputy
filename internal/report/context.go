@@ -10,7 +10,7 @@ import (
 	"github.com/picatz/deputy/internal/collections"
 	"github.com/picatz/deputy/internal/ecosystem"
 	"github.com/picatz/deputy/internal/inventory/manifests"
-	"github.com/picatz/deputy/internal/vuln"
+	"github.com/picatz/deputy/internal/vulnerability"
 )
 
 // ManifestEntry represents a single manifest file in the display context.
@@ -38,7 +38,7 @@ type ManifestContext struct {
 }
 
 // BuildManifestContext constructs a ManifestContext from a list of consolidated vulnerabilities.
-func BuildManifestContext(list []vuln.ConsolidatedVulnerability) ManifestContext {
+func BuildManifestContext(list []vulnerability.Consolidated) ManifestContext {
 	ctx := ManifestContext{}
 	if len(list) == 0 {
 		return ctx

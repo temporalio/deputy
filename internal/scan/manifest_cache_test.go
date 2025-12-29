@@ -1,11 +1,11 @@
-package cmd
+package scan
 
 import (
 	"errors"
 	"testing"
 )
 
-// mockResolver implements manifestResolver for testing.
+// mockResolver implements ManifestResolver for testing.
 type mockResolver struct {
 	files map[string][]byte
 	err   error
@@ -27,7 +27,7 @@ func TestNewManifestCache(t *testing.T) {
 
 	tests := []struct {
 		name     string
-		resolver manifestResolver
+		resolver ManifestResolver
 		wantNil  bool
 	}{
 		{

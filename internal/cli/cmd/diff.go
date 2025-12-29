@@ -14,17 +14,19 @@ import (
 	pb "deps.dev/api/v3"
 	"github.com/go-git/go-git/v5/plumbing"
 	"github.com/google/osv-scalibr/extractor"
-	analysis "github.com/picatz/deputy/internal/analysis"
 	"github.com/picatz/deputy/internal/cli/flags"
 	"github.com/picatz/deputy/internal/compare"
 	gitx "github.com/picatz/deputy/internal/gitutil"
 	inv "github.com/picatz/deputy/internal/inventory"
 	"github.com/picatz/deputy/internal/license"
 	"github.com/picatz/deputy/internal/output"
+	"github.com/picatz/deputy/internal/report"
 	"github.com/picatz/deputy/internal/report/render"
 	"github.com/picatz/deputy/internal/repository"
 	"github.com/picatz/deputy/internal/repository/workspace"
+	"github.com/picatz/deputy/internal/scan"
 	ui "github.com/picatz/deputy/internal/ui"
+	"github.com/picatz/deputy/internal/vulnerability"
 	"github.com/spf13/cobra"
 	"golang.org/x/sync/errgroup"
 	"google.golang.org/grpc"
@@ -34,7 +36,7 @@ import (
 // AddDiffCommand registers the diff subcommand which compares dependency
 // inventories between two Git references (or working tree) and optionally
 // performs vulnerability scanning on changed modules.
-func AddDiffCommand(root *cobra.Command) {
+func AddDiffCommand(root *cobra.Command, service *scan.Service) {
 	var (
 		repoPath                                       string
 		skipVulnScan                                   bool
@@ -49,6 +51,10 @@ func AddDiffCommand(root *cobra.Command) {
 		debugMatcher                                   bool
 		policyPaths                                    []string
 	)
+
+	if service == nil {
+		service = scan.NewService()
+	}
 
 	cmd := &cobra.Command{
 		Use:           "diff [base] [target]",
@@ -114,7 +120,7 @@ Can be disabled with --skip-vuln-scan for faster execution.`,
 			if err != nil {
 				return fmt.Errorf("failed to parse references: %w", err)
 			}
-			return runDiffAnalysis(cmd.Context(), repo, baseRef, targetRef, !skipVulnScan, useLicenseCheck, enrichLicenses, licenseSource, publishedAfterStr, publishedBeforeStr, asOfStr, ignoreUnfixed, showUnchanged, unchangedThreshold, policyPaths, scanOpts, matcher, debugMatcher, cmd.OutOrStdout(), cmd.ErrOrStderr())
+			return runDiffAnalysis(cmd.Context(), service, repo, baseRef, targetRef, !skipVulnScan, useLicenseCheck, enrichLicenses, licenseSource, publishedAfterStr, publishedBeforeStr, asOfStr, ignoreUnfixed, showUnchanged, unchangedThreshold, policyPaths, scanOpts, matcher, debugMatcher, cmd.OutOrStdout(), cmd.ErrOrStderr())
 		},
 		Example: `BASIC USAGE:
   # Compare current work with default branch (beginner-friendly)
@@ -252,13 +258,13 @@ type DiffPolicyReport struct {
 	BaseRef         string                   `json:"baseRef"`
 	TargetRef       string                   `json:"targetRef"`
 	Changes         []compare.Change         `json:"changes"`
-	Vulnerabilities []analysis.Vulnerability `json:"vulnerabilities"`
+	Vulnerabilities []report.Vulnerability   `json:"vulnerabilities"`
 }
 
 // runDiffAnalysis orchestrates dependency inventory collection for the base and
 // target references, computes a dependency diff, and optionally queries OSV to
 // enrich added/updated modules with vulnerability data.
-func runDiffAnalysis(ctx context.Context, repoPath, baseRef, targetRef string, enableVulnScan bool, useLicenseCheck bool, enrichLicenses bool, licenseSource string, publishedAfterStr, publishedBeforeStr, asOfStr string, ignoreUnfixed bool, showUnchanged bool, unchangedThreshold string, policyPaths []string, scanOpts inv.ScanOptions, matcher *inv.DependencyMatcher, debugMatcher bool, outW io.Writer, errW io.Writer) error {
+func runDiffAnalysis(ctx context.Context, service *scan.Service, repoPath, baseRef, targetRef string, enableVulnScan bool, useLicenseCheck bool, enrichLicenses bool, licenseSource string, publishedAfterStr, publishedBeforeStr, asOfStr string, ignoreUnfixed bool, showUnchanged bool, unchangedThreshold string, policyPaths []string, scanOpts inv.ScanOptions, matcher *inv.DependencyMatcher, debugMatcher bool, outW io.Writer, errW io.Writer) error {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	if outW == nil {
@@ -266,6 +272,9 @@ func runDiffAnalysis(ctx context.Context, repoPath, baseRef, targetRef string, e
 	}
 	if errW == nil {
 		errW = io.Discard
+	}
+	if service == nil {
+		service = scan.NewService()
 	}
 
 	dispTarget := targetRef
@@ -351,38 +360,38 @@ func runDiffAnalysis(ctx context.Context, repoPath, baseRef, targetRef string, e
 
 	// Determine direct dependencies from target go.mod for accurate classification
 	targetGoDirect := map[string]bool{"stdlib": true}
-	var targetManifestRes manifestResolver
+	var targetManifestRes scan.ManifestResolver
 	switch {
 	case isWorkingPseudoRef(targetRef):
 		targetGoDirect = compare.CollectGoDirectModulesFromWorkspace(repoSrc.Workspace)
-		targetManifestRes = workspaceManifestResolver{ws: repoSrc.Workspace}
+		targetManifestRes = scan.NewWorkspaceManifestResolver(repoSrc.Workspace)
 	case targetHash != nil:
 		if direct, err := compare.CollectGoDirectModulesFromCommit(repo, *targetHash); err == nil {
 			targetGoDirect = direct
 		}
-		targetManifestRes = gitManifestResolver{repo: repo, hash: *targetHash}
+		targetManifestRes = scan.NewGitManifestResolver(repo, *targetHash)
 	default:
 		// Fallback: use workspace for current state
 		targetGoDirect = compare.CollectGoDirectModulesFromWorkspace(repoSrc.Workspace)
-		targetManifestRes = workspaceManifestResolver{ws: repoSrc.Workspace}
+		targetManifestRes = scan.NewWorkspaceManifestResolver(repoSrc.Workspace)
 	}
 
-	targetPkgInputs := packagesToInputs(targetPackages, packageInputOptions{GoDirect: targetGoDirect, Resolver: targetManifestRes})
+	targetPkgInputs := scan.PackagesToInputs(targetPackages, scan.PackageInputOptions{GoDirect: targetGoDirect, Resolver: targetManifestRes})
 
 	baseGoDirect := map[string]bool{"stdlib": true}
-	var baseManifestRes manifestResolver
+	var baseManifestRes scan.ManifestResolver
 	if isWorkingPseudoRef(baseRef) {
 		baseGoDirect = compare.CollectGoDirectModulesFromWorkspace(repoSrc.Workspace)
-		baseManifestRes = workspaceManifestResolver{ws: repoSrc.Workspace}
+		baseManifestRes = scan.NewWorkspaceManifestResolver(repoSrc.Workspace)
 	} else {
-		baseManifestRes = gitManifestResolver{repo: repo, hash: *baseHash}
+		baseManifestRes = scan.NewGitManifestResolver(repo, *baseHash)
 		if direct, err := compare.CollectGoDirectModulesFromCommit(repo, *baseHash); err == nil {
 			baseGoDirect = direct
 		}
 	}
 
-	basePkgInputs := packagesToInputs(basePackages, packageInputOptions{GoDirect: baseGoDirect, Resolver: baseManifestRes})
-	pkgDirect := mergeDirectMaps(buildPackageDirectMap(basePkgInputs), buildPackageDirectMap(targetPkgInputs))
+	basePkgInputs := scan.PackagesToInputs(basePackages, scan.PackageInputOptions{GoDirect: baseGoDirect, Resolver: baseManifestRes})
+	pkgDirect := scan.MergeDirectMaps(scan.BuildPackageDirectMap(basePkgInputs), scan.BuildPackageDirectMap(targetPkgInputs))
 	goDirect := mergeGoDirectMaps(baseGoDirect, targetGoDirect)
 	manifestRes := targetManifestRes
 	pkgInputs := targetPkgInputs
@@ -401,82 +410,76 @@ func runDiffAnalysis(ctx context.Context, repoPath, baseRef, targetRef string, e
 	displayDetailedDependencyChanges(ctx, repoSrc.Workspace, changes, enrichLicenses, licenseSource, outW, errW)
 
 	// Scan for vulnerabilities if enabled
-	var vulns []analysis.Vulnerability
 	if enableVulnScan {
 		fmt.Fprintln(outW)
 		fmt.Fprintln(outW, ui.StyleMeta.Render("Scanning dependencies for vulnerabilities..."))
 
 		inputs := pkgInputs
 		if inputs == nil {
-			inputs = packagesToInputs(targetPackages, packageInputOptions{GoDirect: goDirect, Resolver: manifestRes})
+			inputs = scan.PackagesToInputs(targetPackages, scan.PackageInputOptions{GoDirect: goDirect, Resolver: manifestRes})
 		}
-		vv, err := analysis.QueryOSVBatch(ctx, analysis.NewOSVClient(), inputs)
-		if err != nil {
-			fmt.Fprintf(errW, "Warning: Vulnerability scanning failed: %v\n", err)
-		} else {
-			vulns = vv
-		}
-
-		// Historical filtering
 		beforeT, afterT := flags.ParsePublishedFilters(errW, asOfStr, publishedBeforeStr, publishedAfterStr)
-		if !beforeT.IsZero() || !afterT.IsZero() {
-			vulns = analysis.FilterVulnerabilitiesByPublished(vulns, afterT, beforeT)
+		result := service.ScanInputs(
+			ctx,
+			scan.Target{DisplayPath: repoPath, LocalPath: repoPath, Ref: targetRef, EffectiveRef: targetRef},
+			targetPackages,
+			pkgDirect,
+			inputs,
+			scan.Options{PublishedBefore: beforeT, PublishedAfter: afterT},
+		)
+		for _, warning := range result.Warnings {
+			fmt.Fprintf(errW, "Warning: %s\n", warning)
 		}
-
-		policyVulns := vulns
 		if ignoreUnfixed {
-			policyVulns = filterUnfixed(vulns)
+			result = scan.FilterUnfixed(result)
+			fmt.Fprintf(errW, "  %s\n", ui.StyleMeta.Render("Note: ignoring unfixed vulnerabilities (--ignore-unfixed)"))
 		}
 
-		report := DiffPolicyReport{
+		reportVulns := report.FlattenResult(result)
+
+		policyReport := DiffPolicyReport{
 			Repo:            repoPath,
 			BaseRef:         baseRef,
 			TargetRef:       targetRef,
 			Changes:         changes,
-			Vulnerabilities: policyVulns,
+			Vulnerabilities: reportVulns,
 		}
-		if err := runDiffPolicies(ctx, policyPaths, report, errW); err != nil {
+		if err := runDiffPolicies(ctx, policyPaths, policyReport, errW); err != nil {
 			return err
 		}
 
-		changedVulns, unchangedVulns := splitVulnsByChange(vulns, changes)
+		changedVulns, unchangedVulns := splitVulnsByChange(reportVulns, changes)
 
-		// Optional: ignore unfixed across both sets
-		if ignoreUnfixed {
-			changedVulns = filterUnfixed(changedVulns)
-			unchangedVulns = filterUnfixed(unchangedVulns)
-			fmt.Fprintf(errW, "  %s\n", ui.StyleMeta.Render("Note: ignoring unfixed vulnerabilities (--ignore-unfixed)"))
-		}
+		_, unchangedStats := consolidateReportVulnerabilities(unchangedVulns)
 
 		// Decide whether to show unchanged set based on threshold
 		showUnchangedEff := showUnchanged
 		reason := ""
 		if !showUnchangedEff {
-			stats := analysis.CategorizeVulnerabilities(unchangedVulns)
 			thr := strings.ToLower(strings.TrimSpace(unchangedThreshold))
 			switch thr {
 			case "", "critical":
-				if stats.CriticalSev > 0 {
+				if unchangedStats.CriticalSev > 0 {
 					showUnchangedEff = true
 					reason = "Critical severity present"
 				}
 			case "high":
-				if stats.CriticalSev+stats.HighSeverity > 0 {
+				if unchangedStats.CriticalSev+unchangedStats.HighSeverity > 0 {
 					showUnchangedEff = true
 					reason = ">= High severity present"
 				}
 			case "med", "medium", "moderate":
-				if stats.CriticalSev+stats.HighSeverity+stats.MedSeverity > 0 {
+				if unchangedStats.CriticalSev+unchangedStats.HighSeverity+unchangedStats.MedSeverity > 0 {
 					showUnchangedEff = true
 					reason = ">= Medium severity present"
 				}
 			case "low":
-				if stats.CriticalSev+stats.HighSeverity+stats.MedSeverity+stats.LowSeverity > 0 {
+				if unchangedStats.CriticalSev+unchangedStats.HighSeverity+unchangedStats.MedSeverity+unchangedStats.LowSeverity > 0 {
 					showUnchangedEff = true
 					reason = ">= Low severity present"
 				}
 			case "any", "all":
-				if stats.UniqueVulns > 0 {
+				if unchangedStats.UniqueVulns > 0 {
 					showUnchangedEff = true
 					reason = "Vulnerabilities present"
 				}
@@ -484,7 +487,7 @@ func runDiffAnalysis(ctx context.Context, repoPath, baseRef, targetRef string, e
 				// never auto-show
 			default:
 				// fallback to critical if unknown value
-				if stats.CriticalSev > 0 {
+				if unchangedStats.CriticalSev > 0 {
 					showUnchangedEff = true
 					reason = "Critical severity present"
 				}
@@ -492,15 +495,18 @@ func runDiffAnalysis(ctx context.Context, repoPath, baseRef, targetRef string, e
 		}
 
 		// Combined cohesive output
-		all := append([]analysis.Vulnerability{}, changedVulns...)
+		all := append([]report.Vulnerability{}, changedVulns...)
 		if showUnchangedEff {
 			all = append(all, unchangedVulns...)
 		}
 
+		_, changedCons := resultFromReportVulnerabilities(changedVulns)
+		_, unchangedCons := resultFromReportVulnerabilities(unchangedVulns)
+
 		if len(all) > 0 {
 			fmt.Fprintln(outW)
 			fmt.Fprintln(outW, ui.StyleDowngraded.Render("∴ ")+ui.StyleHeader.Render("Vulnerabilities"))
-			render.RenderVulnerabilityList(outW, changedVulns, render.VulnerabilityDisplayOptions{})
+			render.RenderVulnerabilityList(outW, changedCons, render.VulnerabilityDisplayOptions{})
 			if showUnchangedEff && len(unchangedVulns) > 0 {
 				// Visual separator for unchanged dependencies, include reason if any
 				title := "Unchanged dependencies"
@@ -510,15 +516,16 @@ func runDiffAnalysis(ctx context.Context, repoPath, baseRef, targetRef string, e
 				sep := ui.StyleDim.Render(strings.Repeat("─", 3) + " " + title + " " + strings.Repeat("─", 3))
 				fmt.Fprintln(outW)
 				fmt.Fprintln(outW, sep)
-				render.RenderVulnerabilityList(outW, unchangedVulns, render.VulnerabilityDisplayOptions{})
+				render.RenderVulnerabilityList(outW, unchangedCons, render.VulnerabilityDisplayOptions{})
 			}
 		}
-		render.RenderVulnerabilitySummaryAndActions(outW, all)
+		allResult, allCons := resultFromReportVulnerabilities(all)
+		render.RenderVulnerabilitySummaryAndActions(outW, allCons, allResult.Stats)
 		return nil
 	}
 
 	// Display results (no vulnerabilities scanned)
-	render.DisplayVulnerabilities(outW, vulns)
+	render.DisplayVulnerabilities(outW, scan.Result{})
 	return nil
 }
 
@@ -791,7 +798,7 @@ func displayDetailedDependencyChanges(ctx context.Context, ws workspace.FS, chan
 // dependencies versus those in unchanged modules. Changes marked as Added,
 // Updated, Upgraded, or Downgraded are treated as "changed" for classification
 // purposes.
-func splitVulnsByChange(vulns []analysis.Vulnerability, changes []compare.Change) (changed, unchanged []analysis.Vulnerability) {
+func splitVulnsByChange(vulns []report.Vulnerability, changes []compare.Change) (changed, unchanged []report.Vulnerability) {
 	if len(vulns) == 0 {
 		return nil, nil
 	}
@@ -815,6 +822,25 @@ func splitVulnsByChange(vulns []analysis.Vulnerability, changes []compare.Change
 		}
 	}
 	return changed, unchanged
+}
+
+func resultFromReportVulnerabilities(vulns []report.Vulnerability) (scan.Result, []vulnerability.Consolidated) {
+	if len(vulns) == 0 {
+		return scan.Result{}, nil
+	}
+	findings, advisories := report.SplitVulnerabilities(vulns)
+	cons := vulnerability.Consolidate(findings, advisories)
+	stats := vulnerability.StatsFromConsolidated(cons, len(findings))
+	return scan.Result{
+		Findings:   findings,
+		Advisories: advisories,
+		Stats:      stats,
+	}, cons
+}
+
+func consolidateReportVulnerabilities(vulns []report.Vulnerability) ([]vulnerability.Consolidated, vulnerability.Stats) {
+	result, cons := resultFromReportVulnerabilities(vulns)
+	return cons, result.Stats
 }
 
 // depsClient adapts a deps.dev InsightsClient to the internal analysis.DepsClient interface.

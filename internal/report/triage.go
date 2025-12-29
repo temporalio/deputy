@@ -2,16 +2,18 @@ package report
 
 import (
 	"cmp"
+	"maps"
 	"slices"
 	"strings"
 
-	analysis "github.com/picatz/deputy/internal/analysis"
+	"github.com/picatz/deputy/internal/collections"
+	"github.com/picatz/deputy/internal/vulnerability"
 )
 
 // TriageReport represents the summary of a triage analysis.
 type TriageReport struct {
 	Target            Target                      `json:"target"`
-	Stats             analysis.VulnerabilityStats `json:"stats"`
+	Stats             vulnerability.Stats         `json:"stats"`
 	TopPackages       []TriagePackageSummary      `json:"topPackages"`
 	PackagesWithVulns int                         `json:"packagesWithVulns"`
 }
@@ -26,14 +28,14 @@ type TriagePackageSummary struct {
 	IsDirect           bool                      `json:"isDirect"`
 	Summary            string                    `json:"summary,omitempty"`
 	SampleIDs          []string                  `json:"sampleIDs,omitempty"`
-	AffectedImports    []analysis.AffectedImport `json:"affectedImports,omitempty"`
+	AffectedImports    []vulnerability.AffectedImport `json:"affectedImports,omitempty"`
 	DatabaseSpecific   map[string]string         `json:"databaseSpecific,omitempty"`
 	VulnerabilityCount int                       `json:"vulnerabilityCount"`
 	SeverityCounts     map[string]int            `json:"severityCounts,omitempty"`
 }
 
 // BuildTriageReport constructs a TriageReport from the target, stats, and consolidated vulnerabilities.
-func BuildTriageReport(target Target, stats analysis.VulnerabilityStats, cons []analysis.ConsolidatedVulnerability) TriageReport {
+func BuildTriageReport(target Target, stats vulnerability.Stats, cons []vulnerability.Consolidated) TriageReport {
 	report := TriageReport{Target: target, Stats: stats}
 	agg := aggregatePackages(cons)
 	report.PackagesWithVulns = len(agg)
@@ -45,7 +47,7 @@ func BuildTriageReport(target Target, stats analysis.VulnerabilityStats, cons []
 }
 
 // aggregatePackages aggregates consolidated vulnerabilities into package summaries.
-func aggregatePackages(cons []analysis.ConsolidatedVulnerability) []TriagePackageSummary {
+func aggregatePackages(cons []vulnerability.Consolidated) []TriagePackageSummary {
 	type aggInfo struct {
 		pkg        string
 		version    string
@@ -56,7 +58,7 @@ func aggregatePackages(cons []analysis.ConsolidatedVulnerability) []TriagePackag
 		summary    string
 		ids        []string
 		isDirect   bool
-		imports    []analysis.AffectedImport
+		imports    []vulnerability.AffectedImport
 		dbSpecific map[string]string
 		counts     map[string]int
 		total      int
@@ -74,7 +76,7 @@ func aggregatePackages(cons []analysis.ConsolidatedVulnerability) []TriagePackag
 			pkgMap[key] = info
 		}
 		if len(v.AffectedImports) > 0 {
-			info.imports = analysis.MergeAffectedImports(info.imports, v.AffectedImports)
+			info.imports = mergeAffectedImports(info.imports, v.AffectedImports)
 		}
 		if len(v.DatabaseSpecific) > 0 {
 			info.dbSpecific = mergeStringMap(info.dbSpecific, v.DatabaseSpecific)
@@ -167,7 +169,7 @@ func severityBucket(sev, sevType string) string {
 	case "LOW":
 		return "LOW"
 	}
-	score := analysis.ParseCVSSScore(sev)
+	score := vulnerability.ParseCVSSScore(sev)
 	switch {
 	case score >= 9.0:
 		return "CRITICAL"
@@ -180,28 +182,6 @@ func severityBucket(sev, sevType string) string {
 	default:
 		return "UNKNOWN"
 	}
-}
-
-// mergeStringMap merges string maps, preferring existing keys in base.
-func mergeStringMap(base map[string]string, extra map[string]string) map[string]string {
-	if len(extra) == 0 {
-		return base
-	}
-	if base == nil {
-		base = map[string]string{}
-	}
-	for k, v := range extra {
-		k = strings.TrimSpace(k)
-		v = strings.TrimSpace(v)
-		if k == "" || v == "" {
-			continue
-		}
-		if _, ok := base[k]; ok {
-			continue
-		}
-		base[k] = v
-	}
-	return base
 }
 
 // severityRank returns a numeric rank for a severity string.
@@ -222,12 +202,62 @@ func severityRank(sev string) (int, string) {
 }
 
 // bestFix returns the best available fix version for a vulnerability.
-func bestFix(v analysis.ConsolidatedVulnerability) string {
+func bestFix(v vulnerability.Consolidated) string {
 	if len(v.FixedVersions) == 0 {
 		return ""
 	}
-	if fix := analysis.FindBestFixedVersion(v.FixedVersions, v.Version); fix != "" {
+	if fix := vulnerability.FindBestFixedVersion(v.FixedVersions, v.Version); fix != "" {
 		return fix
 	}
 	return strings.Join(v.FixedVersions, ",")
+}
+
+func mergeAffectedImports(base []vulnerability.AffectedImport, extra []vulnerability.AffectedImport) []vulnerability.AffectedImport {
+	if len(extra) == 0 {
+		return base
+	}
+	pathMap := make(map[string]collections.Set[string])
+	for _, imp := range base {
+		path := strings.TrimSpace(imp.Path)
+		if path == "" {
+			continue
+		}
+		set := pathMap[path]
+		if set == nil {
+			set = collections.NewSet[string]()
+			pathMap[path] = set
+		}
+		for _, sym := range imp.Symbols {
+			if s := strings.TrimSpace(sym); s != "" {
+				set.Add(s)
+			}
+		}
+	}
+	for _, imp := range extra {
+		path := strings.TrimSpace(imp.Path)
+		if path == "" {
+			continue
+		}
+		set := pathMap[path]
+		if set == nil {
+			set = collections.NewSet[string]()
+			pathMap[path] = set
+		}
+		for _, sym := range imp.Symbols {
+			if s := strings.TrimSpace(sym); s != "" {
+				set.Add(s)
+			}
+		}
+	}
+	if len(pathMap) == 0 {
+		return nil
+	}
+	paths := slices.Sorted(maps.Keys(pathMap))
+	out := make([]vulnerability.AffectedImport, 0, len(paths))
+	for _, p := range paths {
+		syms := pathMap[p].Slice()
+		slices.Sort(syms)
+		out = append(out, vulnerability.AffectedImport{Path: p, Symbols: syms})
+	}
+	return out
 }

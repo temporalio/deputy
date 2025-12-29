@@ -3,22 +3,22 @@ package report
 import (
 	"testing"
 
-	analysis "github.com/picatz/deputy/internal/analysis"
+	"github.com/picatz/deputy/internal/vulnerability"
 )
 
 func TestBuildSummary_NoVulns(t *testing.T) {
-	summary := BuildSummary(nil)
+	summary := BuildSummary(nil, vulnerability.Stats{})
 	if summary.HasVulnerabilities {
 		t.Fatalf("expected HasVulnerabilities=false")
 	}
 }
 
 func TestBuildSummary_WithVulns(t *testing.T) {
-	vulns := []analysis.Vulnerability{
-		{ID: "V1", Severity: "9.8", SeverityType: "CVSS_V3", FixedVersions: []string{"v1.2.0"}, Version: "v1.0.0", Affected: true},
-		{ID: "V2", Severity: "HIGH", SeverityType: "GHSA", Affected: true},
+	cons := []vulnerability.Consolidated{
+		{PrimaryID: "V1", Severity: "9.8", SeverityType: "CVSS_V3", FixedVersions: []string{"v1.2.0"}, Version: "v1.0.0"},
+		{PrimaryID: "V2", Severity: "HIGH", SeverityType: "GHSA"},
 	}
-	summary := BuildSummary(vulns)
+	summary := BuildSummary(cons, vulnerability.Stats{})
 	if !summary.HasVulnerabilities {
 		t.Fatalf("expected HasVulnerabilities=true")
 	}

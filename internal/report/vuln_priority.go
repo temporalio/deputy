@@ -3,12 +3,12 @@ package report
 import (
 	"strings"
 
-	analysis "github.com/picatz/deputy/internal/analysis"
+	"github.com/picatz/deputy/internal/vulnerability"
 )
 
 // ConsolidatedSeverityPriority returns a priority tuple (int, float64) for sorting vulnerabilities.
 // Higher values indicate higher priority.
-func ConsolidatedSeverityPriority(v analysis.ConsolidatedVulnerability) (int, float64) {
+func ConsolidatedSeverityPriority(v vulnerability.Consolidated) (int, float64) {
 	sev := strings.ToUpper(strings.TrimSpace(v.Severity))
 	if v.SeverityType == "GHSA" {
 		switch sev {
@@ -22,6 +22,6 @@ func ConsolidatedSeverityPriority(v analysis.ConsolidatedVulnerability) (int, fl
 			return 100, 2.0
 		}
 	}
-	score := analysis.ParseCVSSScore(v.Severity)
+	score := vulnerability.ParseCVSSScore(v.Severity)
 	return int(score*10 + 0.5), score
 }
