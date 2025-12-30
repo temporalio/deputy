@@ -274,7 +274,7 @@ func levenshtein(a, b string, maxLen int, limit int64) int64 {
 			del := prev[i] + 1
 			ins := curr[i-1] + 1
 			sub := prev[i-1] + cost
-			curr[i] = minInt64(del, ins, sub)
+			curr[i] = min(del, ins, sub)
 			if curr[i] < minRow {
 				minRow = curr[i]
 			}
@@ -288,20 +288,6 @@ func levenshtein(a, b string, maxLen int, limit int64) int64 {
 		return prev[len(a)]
 	}
 	return prev[len(a)]
-}
-
-// minInt64 returns the minimum value from a list of int64s.
-func minInt64(vals ...int64) int64 {
-	if len(vals) == 0 {
-		return 0
-	}
-	m := vals[0]
-	for _, v := range vals[1:] {
-		if v < m {
-			m = v
-		}
-	}
-	return m
 }
 
 // toString safely converts a CEL ref.Val to a string.

@@ -301,9 +301,7 @@ func TestWithConcurrencyLimit(t *testing.T) {
 			// Launch more requests than the limit allows
 			var wg sync.WaitGroup
 			for i := 0; i < maxConcurrent+3; i++ {
-				wg.Add(1)
-				go func() {
-					defer wg.Done()
+				wg.Go(func() {
 					req := httptest.NewRequest("GET", "/test", nil)
 					rec := httptest.NewRecorder()
 					wrapped.ServeHTTP(rec, req)
@@ -315,7 +313,7 @@ func TestWithConcurrencyLimit(t *testing.T) {
 							t.Errorf("expected Retry-After: 1, got %q", rec.Header().Get("Retry-After"))
 						}
 					}
-				}()
+				})
 			}
 
 			// Wait for all goroutines

@@ -2,7 +2,6 @@ package auth
 
 import (
 	"bytes"
-	"context"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -21,10 +20,9 @@ func TestStore_Lookup(t *testing.T) {
 
 	store := NewStore(WithProvider(NewStaticProvider(cred)))
 
-	ctx := context.Background()
 	scope := Scope{Host: "github.com"}
 
-	got, err := store.Lookup(ctx, scope)
+	got, err := store.Lookup(t.Context(), scope)
 	if err != nil {
 		t.Fatalf("Lookup failed: %v", err)
 	}
@@ -45,10 +43,9 @@ func TestStore_LookupHostMismatch(t *testing.T) {
 
 	store := NewStore(WithProvider(NewStaticProvider(cred)))
 
-	ctx := context.Background()
 	scope := Scope{Host: "gitlab.com"}
 
-	got, err := store.Lookup(ctx, scope)
+	got, err := store.Lookup(t.Context(), scope)
 	if err != nil {
 		t.Fatalf("Lookup failed: %v", err)
 	}
@@ -66,8 +63,7 @@ func TestStore_GitAuth(t *testing.T) {
 	}
 	store := NewStore(WithProvider(provider))
 
-	ctx := context.Background()
-	auth, err := store.GitAuth(ctx, "https://github.com/user/repo.git")
+	auth, err := store.GitAuth(t.Context(), "https://github.com/user/repo.git")
 	if err != nil {
 		t.Fatalf("GitAuth failed: %v", err)
 	}
@@ -90,8 +86,7 @@ func TestStore_GitAuth(t *testing.T) {
 func TestStore_GitAuthNoCredential(t *testing.T) {
 	store := NewStore(WithProvider(NullProvider{}))
 
-	ctx := context.Background()
-	auth, err := store.GitAuth(ctx, "https://github.com/user/repo.git")
+	auth, err := store.GitAuth(t.Context(), "https://github.com/user/repo.git")
 	if err != nil {
 		t.Fatalf("GitAuth failed: %v", err)
 	}
@@ -107,8 +102,7 @@ func TestStore_HTTPBearerToken(t *testing.T) {
 	}
 	store := NewStore(WithProvider(NewStaticProvider(cred)))
 
-	ctx := context.Background()
-	token, err := store.HTTPBearerToken(ctx, "api.example.com")
+	token, err := store.HTTPBearerToken(t.Context(), "api.example.com")
 	if err != nil {
 		t.Fatalf("HTTPBearerToken failed: %v", err)
 	}
@@ -125,8 +119,7 @@ func TestStore_HTTPBasicAuth(t *testing.T) {
 	}
 	store := NewStore(WithProvider(NewStaticProvider(cred)))
 
-	ctx := context.Background()
-	user, pass, err := store.HTTPBasicAuth(ctx, "registry.example.com")
+	user, pass, err := store.HTTPBasicAuth(t.Context(), "registry.example.com")
 	if err != nil {
 		t.Fatalf("HTTPBasicAuth failed: %v", err)
 	}
@@ -146,9 +139,8 @@ func TestStore_ConfigureHTTPRequest(t *testing.T) {
 	store := NewStore(WithProvider(NewStaticProvider(cred)))
 
 	req := httptest.NewRequest(http.MethodGet, "https://api.example.com/v1/data", nil)
-	ctx := context.Background()
 
-	err := store.ConfigureHTTPRequest(ctx, req)
+	err := store.ConfigureHTTPRequest(t.Context(), req)
 	if err != nil {
 		t.Fatalf("ConfigureHTTPRequest failed: %v", err)
 	}
@@ -168,9 +160,8 @@ func TestStore_ConfigureHTTPRequestNoHTTPS(t *testing.T) {
 
 	// HTTP (not HTTPS) - should NOT add credentials by default
 	req := httptest.NewRequest(http.MethodGet, "http://api.example.com/v1/data", nil)
-	ctx := context.Background()
 
-	err := store.ConfigureHTTPRequest(ctx, req)
+	err := store.ConfigureHTTPRequest(t.Context(), req)
 	if err != nil {
 		t.Fatalf("ConfigureHTTPRequest failed: %v", err)
 	}
@@ -193,9 +184,8 @@ func TestStore_ConfigureHTTPRequestNoHTTPSDisabled(t *testing.T) {
 
 	// HTTP (not HTTPS) - should add credentials when HTTPS check disabled
 	req := httptest.NewRequest(http.MethodGet, "http://api.example.com/v1/data", nil)
-	ctx := context.Background()
 
-	err := store.ConfigureHTTPRequest(ctx, req)
+	err := store.ConfigureHTTPRequest(t.Context(), req)
 	if err != nil {
 		t.Fatalf("ConfigureHTTPRequest failed: %v", err)
 	}
@@ -214,8 +204,7 @@ func TestStore_ContainerAuth(t *testing.T) {
 	}
 	store := NewStore(WithProvider(NewStaticProvider(cred)))
 
-	ctx := context.Background()
-	docker, err := store.ContainerAuth(ctx, "ghcr.io")
+	docker, err := store.ContainerAuth(t.Context(), "ghcr.io")
 	if err != nil {
 		t.Fatalf("ContainerAuth failed: %v", err)
 	}
@@ -236,8 +225,7 @@ func TestStore_LLMAPIKey(t *testing.T) {
 	}
 	store := NewStore(WithProvider(provider))
 
-	ctx := context.Background()
-	key, err := store.LLMAPIKey(ctx, "api.anthropic.com")
+	key, err := store.LLMAPIKey(t.Context(), "api.anthropic.com")
 	if err != nil {
 		t.Fatalf("LLMAPIKey failed: %v", err)
 	}
@@ -261,11 +249,9 @@ func TestChainProvider(t *testing.T) {
 		NewStaticProvider(cred2),
 	)
 
-	ctx := context.Background()
-
 	// Should find cred1
 	scope1 := Scope{Host: "host1.com"}
-	got1, err := chain.Lookup(ctx, scope1)
+	got1, err := chain.Lookup(t.Context(), scope1)
 	if err != nil {
 		t.Fatalf("Lookup failed: %v", err)
 	}
@@ -275,7 +261,7 @@ func TestChainProvider(t *testing.T) {
 
 	// Should find cred2
 	scope2 := Scope{Host: "host2.com"}
-	got2, err := chain.Lookup(ctx, scope2)
+	got2, err := chain.Lookup(t.Context(), scope2)
 	if err != nil {
 		t.Fatalf("Lookup failed: %v", err)
 	}
@@ -285,7 +271,7 @@ func TestChainProvider(t *testing.T) {
 
 	// Should find nothing
 	scope3 := Scope{Host: "host3.com"}
-	got3, err := chain.Lookup(ctx, scope3)
+	got3, err := chain.Lookup(t.Context(), scope3)
 	if err != nil {
 		t.Fatalf("Lookup failed: %v", err)
 	}
@@ -321,8 +307,7 @@ func TestStore_WithLogger(t *testing.T) {
 		WithLogger(logger),
 	)
 
-	ctx := context.Background()
-	_, _ = store.Lookup(ctx, Scope{Host: "github.com"})
+	_, _ = store.Lookup(t.Context(), Scope{Host: "github.com"})
 
 	// Logger should have logged something
 	if buf.Len() == 0 {

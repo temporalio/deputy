@@ -356,26 +356,13 @@ func levenshteinDistance(a, b string) int {
 			del := prev[i] + 1
 			ins := curr[i-1] + 1
 			sub := prev[i-1] + cost
-			curr[i] = minInt(del, ins, sub)
+			curr[i] = min(del, ins, sub)
 		}
 		prev = curr
 	}
 	return prev[la]
 }
 
-// minInt returns the minimum value from a list of integers.
-func minInt(vals ...int) int {
-	if len(vals) == 0 {
-		return 0
-	}
-	m := vals[0]
-	for _, v := range vals[1:] {
-		if v < m {
-			m = v
-		}
-	}
-	return m
-}
 
 // newPolicyTestCommand creates the `test` subcommand for running policy tests.
 func newPolicyTestCommand() *cobra.Command {

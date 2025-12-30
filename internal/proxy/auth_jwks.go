@@ -78,8 +78,7 @@ func NewJWKSCache(cfg *JWKSConfig) (*JWKSCache, error) {
 	}
 
 	// Start background refresh
-	cache.wg.Add(1)
-	go cache.refreshLoop()
+	cache.wg.Go(cache.refreshLoop)
 
 	return cache, nil
 }
@@ -191,8 +190,6 @@ func (c *JWKSCache) refresh(ctx context.Context) error {
 
 // refreshLoop runs background JWKS refresh.
 func (c *JWKSCache) refreshLoop() {
-	defer c.wg.Done()
-
 	ticker := time.NewTicker(c.refreshInterval)
 	defer ticker.Stop()
 

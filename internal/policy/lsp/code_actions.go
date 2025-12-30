@@ -52,19 +52,6 @@ func codeActionInsert(uri protocol.DocumentURI, pos protocol.Position, text stri
 	}
 }
 
-// minInt returns the smallest integer from the provided list.
-func minInt(a ...int) int {
-	if len(a) == 0 {
-		return 0
-	}
-	m := a[0]
-	for _, v := range a[1:] {
-		if v < m {
-			m = v
-		}
-	}
-	return m
-}
 
 // undeclaredReplacement proposes a replacement for undeclared identifiers by fuzzy matching
 // against known CEL variables. Uses document text for context to include select chains and
@@ -156,7 +143,7 @@ func levenshteinDistance(a, b string) int {
 			if a[i-1] != b[j-1] {
 				cost = 1
 			}
-			curr[i] = minInt(prev[i]+1, curr[i-1]+1, prev[i-1]+cost)
+			curr[i] = min(prev[i]+1, curr[i-1]+1, prev[i-1]+cost)
 		}
 		prev = curr
 	}

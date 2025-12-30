@@ -1,7 +1,6 @@
 package policy
 
 import (
-	"context"
 	"testing"
 )
 
@@ -18,7 +17,7 @@ func TestEvaluateSimplePolicy(t *testing.T) {
 			},
 		},
 	}
-	val, err := Evaluate(context.Background(), src, input)
+	val, err := Evaluate(t.Context(), src, input)
 	if err != nil {
 		t.Fatalf("Evaluate() error = %v", err)
 	}
@@ -39,11 +38,9 @@ func TestEvaluateSimplePolicy(t *testing.T) {
 }
 
 func TestCelExtensions(t *testing.T) {
-	ctx := context.Background()
-
 	t.Run("lists slice and repeat", func(t *testing.T) {
 		src := `["a","b","c","d"].slice(1,3).reverse().join(",")`
-		val, err := Evaluate(ctx, src, nil)
+		val, err := Evaluate(t.Context(), src, nil)
 		if err != nil {
 			t.Fatalf("Evaluate lists: %v", err)
 		}
@@ -54,7 +51,7 @@ func TestCelExtensions(t *testing.T) {
 
 	t.Run("sets contains dedup", func(t *testing.T) {
 		src := `sets.contains(["a","b","c"], ["b","c"]) && sets.equivalent(["a","a","b","c"], ["c","b","a"])`
-		val, err := Evaluate(ctx, src, nil)
+		val, err := Evaluate(t.Context(), src, nil)
 		if err != nil {
 			t.Fatalf("Evaluate sets: %v", err)
 		}
@@ -65,7 +62,7 @@ func TestCelExtensions(t *testing.T) {
 
 	t.Run("regex partial match", func(t *testing.T) {
 		src := `regex.extractAll("foo123bar456", "\\d+").size() == 2 && regex.extract("foo123", "foo(\\d+)").orValue("") == "123"`
-		val, err := Evaluate(ctx, src, nil)
+		val, err := Evaluate(t.Context(), src, nil)
 		if err != nil {
 			t.Fatalf("Evaluate regex: %v", err)
 		}
@@ -76,8 +73,6 @@ func TestCelExtensions(t *testing.T) {
 }
 
 func TestEvaluatePkgHelper(t *testing.T) {
-	ctx := context.Background()
-
 	tests := []struct {
 		name     string
 		input    map[string]any
@@ -118,7 +113,7 @@ func TestEvaluatePkgHelper(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			// We evaluate a simple expression that returns pkg.name
 			src := `pkg.name`
-			val, err := Evaluate(ctx, src, test.input)
+			val, err := Evaluate(t.Context(), src, test.input)
 			if err != nil {
 				t.Fatalf("Evaluate() error = %v", err)
 			}
@@ -130,8 +125,6 @@ func TestEvaluatePkgHelper(t *testing.T) {
 }
 
 func TestPkgHelperDefaults(t *testing.T) {
-	ctx := context.Background()
-
 	// Test that pkg fields have sensible defaults when not provided,
 	// allowing policies to use them directly without ?.orValue() boilerplate.
 	t.Run("licenses defaults to empty list", func(t *testing.T) {
@@ -140,7 +133,7 @@ func TestPkgHelperDefaults(t *testing.T) {
 		}
 		// This should work without ?.orValue() because licenses defaults to []
 		src := `pkg.licenses.size() == 0`
-		val, err := Evaluate(ctx, src, input)
+		val, err := Evaluate(t.Context(), src, input)
 		if err != nil {
 			t.Fatalf("Evaluate() error = %v", err)
 		}
@@ -155,7 +148,7 @@ func TestPkgHelperDefaults(t *testing.T) {
 		}
 		// This should work without ?.orValue()
 		src := `!pkg.licenses.exists(l, l == "GPL-3.0")`
-		val, err := Evaluate(ctx, src, input)
+		val, err := Evaluate(t.Context(), src, input)
 		if err != nil {
 			t.Fatalf("Evaluate() error = %v", err)
 		}
@@ -169,7 +162,7 @@ func TestPkgHelperDefaults(t *testing.T) {
 			"component": map[string]any{"name": "test-pkg"},
 		}
 		src := `pkg.version == ""`
-		val, err := Evaluate(ctx, src, input)
+		val, err := Evaluate(t.Context(), src, input)
 		if err != nil {
 			t.Fatalf("Evaluate() error = %v", err)
 		}
@@ -183,7 +176,7 @@ func TestPkgHelperDefaults(t *testing.T) {
 			"component": map[string]any{"name": "test-pkg"},
 		}
 		src := `pkg.ecosystem == ""`
-		val, err := Evaluate(ctx, src, input)
+		val, err := Evaluate(t.Context(), src, input)
 		if err != nil {
 			t.Fatalf("Evaluate() error = %v", err)
 		}
@@ -202,7 +195,7 @@ func TestPkgHelperDefaults(t *testing.T) {
 			},
 		}
 		src := `pkg.version == "1.2.3" && pkg.ecosystem == "npm" && pkg.licenses.size() == 2`
-		val, err := Evaluate(ctx, src, input)
+		val, err := Evaluate(t.Context(), src, input)
 		if err != nil {
 			t.Fatalf("Evaluate() error = %v", err)
 		}
@@ -217,7 +210,7 @@ func TestPkgHelperDefaults(t *testing.T) {
 		}
 		// String methods should work on empty string default
 		src := `!pkg.version.startsWith("v") && !pkg.version.matches(".*alpha.*")`
-		val, err := Evaluate(ctx, src, input)
+		val, err := Evaluate(t.Context(), src, input)
 		if err != nil {
 			t.Fatalf("Evaluate() error = %v", err)
 		}
@@ -232,7 +225,7 @@ func TestPkgHelperDefaults(t *testing.T) {
 			"env": map[string]any{"command": "scan"},
 		}
 		src := `pkg.name == "" && pkg.version == "" && pkg.ecosystem == "" && pkg.licenses.size() == 0`
-		val, err := Evaluate(ctx, src, input)
+		val, err := Evaluate(t.Context(), src, input)
 		if err != nil {
 			t.Fatalf("Evaluate() error = %v", err)
 		}
@@ -247,7 +240,7 @@ func TestPkgHelperDefaults(t *testing.T) {
 			"component": map[string]any{"licenses": []any{"MIT"}},
 		}
 		src := `pkg.name == ""`
-		val, err := Evaluate(ctx, src, input)
+		val, err := Evaluate(t.Context(), src, input)
 		if err != nil {
 			t.Fatalf("Evaluate() error = %v", err)
 		}

@@ -1,7 +1,6 @@
 package policy
 
 import (
-	"context"
 	"testing"
 	"time"
 )
@@ -163,7 +162,6 @@ func TestLevenshtein_Symmetry(t *testing.T) {
 
 func TestLevenshteinWithin_ViaEvaluate(t *testing.T) {
 	// Test the CEL function through actual evaluation
-	ctx := context.Background()
 	tests := []struct {
 		name     string
 		expr     string
@@ -198,7 +196,7 @@ func TestLevenshteinWithin_ViaEvaluate(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			result, err := Evaluate(ctx, tc.expr, nil)
+			result, err := Evaluate(t.Context(), tc.expr, nil)
 			if err != nil {
 				t.Fatalf("Evaluate() error: %v", err)
 			}
@@ -215,7 +213,6 @@ func TestLevenshteinWithin_ViaEvaluate(t *testing.T) {
 
 func TestLevenshtein_ViaEvaluate(t *testing.T) {
 	// Test the CEL function through actual evaluation
-	ctx := context.Background()
 	tests := []struct {
 		name     string
 		expr     string
@@ -240,7 +237,7 @@ func TestLevenshtein_ViaEvaluate(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			result, err := Evaluate(ctx, tc.expr, nil)
+			result, err := Evaluate(t.Context(), tc.expr, nil)
 			if err != nil {
 				t.Fatalf("Evaluate() error: %v", err)
 			}
@@ -255,64 +252,9 @@ func TestLevenshtein_ViaEvaluate(t *testing.T) {
 	}
 }
 
-func TestMinInt64(t *testing.T) {
-	tests := []struct {
-		name     string
-		vals     []int64
-		expected int64
-	}{
-		{
-			name:     "single value",
-			vals:     []int64{5},
-			expected: 5,
-		},
-		{
-			name:     "two values, first smaller",
-			vals:     []int64{3, 7},
-			expected: 3,
-		},
-		{
-			name:     "two values, second smaller",
-			vals:     []int64{7, 3},
-			expected: 3,
-		},
-		{
-			name:     "three values",
-			vals:     []int64{5, 2, 8},
-			expected: 2,
-		},
-		{
-			name:     "negative values",
-			vals:     []int64{-1, -5, 3},
-			expected: -5,
-		},
-		{
-			name:     "all same",
-			vals:     []int64{4, 4, 4},
-			expected: 4,
-		},
-		{
-			name:     "empty slice",
-			vals:     []int64{},
-			expected: 0,
-		},
-	}
-
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			result := minInt64(tc.vals...)
-			if result != tc.expected {
-				t.Errorf("minInt64(%v) = %d, want %d", tc.vals, result, tc.expected)
-			}
-		})
-	}
-}
-
 func TestNow_ViaEvaluate(t *testing.T) {
-	ctx := context.Background()
-
 	// Test now() returns a timestamp
-	result, err := Evaluate(ctx, `now()`, nil)
+	result, err := Evaluate(t.Context(), `now()`, nil)
 	if err != nil {
 		t.Fatalf("Evaluate() error: %v", err)
 	}
@@ -323,10 +265,8 @@ func TestNow_ViaEvaluate(t *testing.T) {
 }
 
 func TestIntNow_ViaEvaluate(t *testing.T) {
-	ctx := context.Background()
-
 	// Test that int(now()) works as the idiomatic way to get Unix timestamp
-	result, err := Evaluate(ctx, `int(now())`, nil)
+	result, err := Evaluate(t.Context(), `int(now())`, nil)
 	if err != nil {
 		t.Fatalf("Evaluate() error: %v", err)
 	}
@@ -341,13 +281,11 @@ func TestIntNow_ViaEvaluate(t *testing.T) {
 }
 
 func TestAge_ViaEvaluate(t *testing.T) {
-	ctx := context.Background()
-
 	// Test age with a Unix timestamp from the past (1 hour ago)
 	// The age should be approximately 1 hour (3600 seconds)
 	// Use int(now()) - the idiomatic way to get current Unix timestamp
 	expr := `age(int(now()) - 3600) >= duration("59m")`
-	result, err := Evaluate(ctx, expr, nil)
+	result, err := Evaluate(t.Context(), expr, nil)
 	if err != nil {
 		t.Fatalf("Evaluate() error: %v", err)
 	}
@@ -361,12 +299,10 @@ func TestAge_ViaEvaluate(t *testing.T) {
 }
 
 func TestTimestamp_ViaEvaluate(t *testing.T) {
-	ctx := context.Background()
-
 	// Test CEL native timestamp(int) constructor
 	// 1704067200 = 2024-01-01 00:00:00 UTC
 	expr := `timestamp(1704067200) < now()`
-	result, err := Evaluate(ctx, expr, nil)
+	result, err := Evaluate(t.Context(), expr, nil)
 	if err != nil {
 		t.Fatalf("Evaluate() error: %v", err)
 	}
@@ -380,7 +316,6 @@ func TestTimestamp_ViaEvaluate(t *testing.T) {
 }
 
 func TestTimeFunctions_JWTScenarios(t *testing.T) {
-	ctx := context.Background()
 	nowUnix := time.Now().Unix()
 
 	tests := []struct {
@@ -443,7 +378,7 @@ func TestTimeFunctions_JWTScenarios(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			result, err := Evaluate(ctx, tc.expr, tc.input)
+			result, err := Evaluate(t.Context(), tc.expr, tc.input)
 			if err != nil {
 				t.Fatalf("Evaluate() error: %v", err)
 			}
@@ -459,7 +394,6 @@ func TestTimeFunctions_JWTScenarios(t *testing.T) {
 }
 
 func TestMathExtensions_ViaEvaluate(t *testing.T) {
-	ctx := context.Background()
 
 	tests := []struct {
 		name     string
@@ -490,7 +424,7 @@ func TestMathExtensions_ViaEvaluate(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			result, err := Evaluate(ctx, tc.expr, nil)
+			result, err := Evaluate(t.Context(), tc.expr, nil)
 			if err != nil {
 				t.Fatalf("Evaluate() error: %v", err)
 			}
@@ -502,7 +436,6 @@ func TestMathExtensions_ViaEvaluate(t *testing.T) {
 }
 
 func TestBindings_ViaEvaluate(t *testing.T) {
-	ctx := context.Background()
 
 	// Test cel.bind() for local variables
 	expr := `cel.bind(threshold, 10, vulnerabilities.filter(v, v.score > threshold).size())`
@@ -515,7 +448,7 @@ func TestBindings_ViaEvaluate(t *testing.T) {
 		},
 	}
 
-	result, err := Evaluate(ctx, expr, input)
+	result, err := Evaluate(t.Context(), expr, input)
 	if err != nil {
 		t.Fatalf("Evaluate() error: %v", err)
 	}

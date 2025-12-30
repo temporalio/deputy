@@ -61,7 +61,7 @@ func TestNewEngine_CompilationError(t *testing.T) {
 	if err == nil {
 		t.Fatal("NewEngine() should return error for invalid CEL syntax")
 	}
-	if !contains(err.Error(), "bad-policy") {
+	if !strings.Contains(err.Error(), "bad-policy") {
 		t.Errorf("error should contain policy name, got: %v", err)
 	}
 }
@@ -79,7 +79,7 @@ func TestNewEngine_MultipleSourcesWithOneError(t *testing.T) {
 
 func TestEvaluateAll_NilEngine(t *testing.T) {
 	var eng *Engine
-	actions, err := eng.EvaluateAll(context.Background(), nil, "", "")
+	actions, err := eng.EvaluateAll(t.Context(), nil, "", "")
 	if err != nil {
 		t.Errorf("EvaluateAll on nil engine should not error, got: %v", err)
 	}
@@ -90,7 +90,7 @@ func TestEvaluateAll_NilEngine(t *testing.T) {
 
 func TestEvaluateAll_EmptyEngine(t *testing.T) {
 	eng := &Engine{}
-	actions, err := eng.EvaluateAll(context.Background(), nil, "", "")
+	actions, err := eng.EvaluateAll(t.Context(), nil, "", "")
 	if err != nil {
 		t.Errorf("EvaluateAll on empty engine should not error, got: %v", err)
 	}
@@ -108,7 +108,7 @@ func TestEvaluateAll_SimpleAllow(t *testing.T) {
 		t.Fatalf("NewEngine() error: %v", err)
 	}
 
-	actions, err := eng.EvaluateAll(context.Background(), nil, "", "")
+	actions, err := eng.EvaluateAll(t.Context(), nil, "", "")
 	if err != nil {
 		t.Fatalf("EvaluateAll() error: %v", err)
 	}
@@ -129,7 +129,7 @@ func TestEvaluateAll_DenyWithReason(t *testing.T) {
 		t.Fatalf("NewEngine() error: %v", err)
 	}
 
-	actions, err := eng.EvaluateAll(context.Background(), nil, "", "")
+	actions, err := eng.EvaluateAll(t.Context(), nil, "", "")
 	if err != nil {
 		t.Fatalf("EvaluateAll() error: %v", err)
 	}
@@ -181,7 +181,7 @@ func TestEvaluateAll_CommandFiltering(t *testing.T) {
 				t.Fatalf("NewEngine() error: %v", err)
 			}
 
-			actions, err := eng.EvaluateAll(context.Background(), nil, tc.command, "")
+			actions, err := eng.EvaluateAll(t.Context(), nil, tc.command, "")
 			if err != nil {
 				t.Fatalf("EvaluateAll() error: %v", err)
 			}
@@ -233,7 +233,7 @@ func TestEvaluateAll_EntrypointFiltering(t *testing.T) {
 				t.Fatalf("NewEngine() error: %v", err)
 			}
 
-			actions, err := eng.EvaluateAll(context.Background(), nil, "", tc.entrypoint)
+			actions, err := eng.EvaluateAll(t.Context(), nil, "", tc.entrypoint)
 			if err != nil {
 				t.Fatalf("EvaluateAll() error: %v", err)
 			}
@@ -258,7 +258,7 @@ func TestEvaluateAll_AdvisoryMode(t *testing.T) {
 		t.Fatalf("NewEngine() error: %v", err)
 	}
 
-	actions, err := eng.EvaluateAll(context.Background(), nil, "", "")
+	actions, err := eng.EvaluateAll(t.Context(), nil, "", "")
 	if err != nil {
 		t.Fatalf("EvaluateAll() error: %v", err)
 	}
@@ -281,7 +281,7 @@ func TestEvaluateAll_MultipleAdvisoryActions(t *testing.T) {
 		t.Fatalf("NewEngine() error: %v", err)
 	}
 
-	actions, err := eng.EvaluateAll(context.Background(), nil, "", "")
+	actions, err := eng.EvaluateAll(t.Context(), nil, "", "")
 	if err != nil {
 		t.Fatalf("EvaluateAll() error: %v", err)
 	}
@@ -307,7 +307,7 @@ func TestEvaluateAll_ContextCancellation(t *testing.T) {
 	}
 
 	// Cancel the context before evaluation
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
 
 	// Evaluation should still work for simple policies (CEL doesn't check context for simple evals)
@@ -327,7 +327,7 @@ func TestEvaluateAll_PayloadNotModified(t *testing.T) {
 		"key": "value",
 	}
 
-	_, err = eng.EvaluateAll(context.Background(), original, "cmd", "ep")
+	_, err = eng.EvaluateAll(t.Context(), original, "cmd", "ep")
 	if err != nil {
 		t.Fatalf("EvaluateAll() error: %v", err)
 	}
@@ -665,29 +665,16 @@ func TestEvaluateAll_ProgramError(t *testing.T) {
 		},
 	}
 
-	_, err := eng.EvaluateAll(context.Background(), nil, "", "")
+	_, err := eng.EvaluateAll(t.Context(), nil, "", "")
 	if err == nil {
 		t.Fatal("expected error from failing program")
 	}
-	if !contains(err.Error(), "error-policy") {
+	if !strings.Contains(err.Error(), "error-policy") {
 		t.Errorf("error should contain policy name, got: %v", err)
 	}
 }
 
 // Helper functions
-
-func contains(s, substr string) bool {
-	return len(s) >= len(substr) && (s == substr || len(s) > 0 && containsHelper(s, substr))
-}
-
-func containsHelper(s, substr string) bool {
-	for i := 0; i <= len(s)-len(substr); i++ {
-		if s[i:i+len(substr)] == substr {
-			return true
-		}
-	}
-	return false
-}
 
 func intPtr(i int) *int {
 	return &i
