@@ -60,7 +60,8 @@ $ deputy scan --ref WORKING
 ### CEL expression errors
 
 Common mistakes:
-- Missing optional handling: use `pkg.?licenses.orValue([])` not `pkg.licenses`
+- Missing optional handling for external data: use `vulnerability.?fixedVersions.orValue([])` for fields that may not exist
+- Note: `pkg` fields have defaults, so `pkg.licenses`, `pkg.version`, etc. work without `?.orValue()`
 - Wrong type comparisons: severity is a string (`"HIGH"`), not an enum
 - List vs single value: `vulnerabilities` is a list; use `.exists()` or `.filter()`
 

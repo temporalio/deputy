@@ -6,7 +6,8 @@ policies:
         - "acme_"
         - "corp_"
         - "internal-"
-      pkgName: 'request.?package.orValue(request.?name.orValue(pkg.?name.orValue(""))).lowerAscii()'
+      # pkg.name is synthesized from request.package/name, so we can use it directly
+      pkgName: 'pkg.name.lowerAscii()'
     rules:
       - action: deny
         when: env.entrypoint == "pypi_artifact_request" && !(allowedPrefixes.exists(p, pkgName.startsWith(p)))

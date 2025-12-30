@@ -284,9 +284,9 @@ Contains information about the dependency being analyzed. Available in [`scan_re
 *   Deny older versions of a package:
     `pkg.name == 'react' && pkg.version.startsWith('16.')`
 *   Deny if license information is missing:
-    `!has(pkg.licenses) || pkg.licenses.size() == 0`
-*   Deny if license information is missing (using optionals):
-    `pkg.?licenses.orValue([]).size() == 0`
+    `pkg.licenses.size() == 0`
+
+Note: The `pkg` helper provides sensible defaults (`name`, `version`, `ecosystem` default to `""`, `licenses` defaults to `[]`), so you don't need `?.orValue()` for these fields.
 
 ---
 

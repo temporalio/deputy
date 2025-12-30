@@ -2,6 +2,50 @@
 
 This page defines the payloads Deputy sends to the policy engine and the entrypoints each command emits.
 
+## How Entrypoints Work
+
+```mermaid
+flowchart TB
+    subgraph Commands["Commands"]
+        Scan["deputy scan"]
+        Diff["deputy diff"]
+        SBOM["deputy sbom"]
+        Fix["deputy fix"]
+        Proxy["deputy proxy"]
+    end
+
+    subgraph Entrypoints["Entrypoints"]
+        ScanEP["scan_report<br/>scan_vulnerability"]
+        DiffEP["diff_report<br/>diff_dependency_change"]
+        SBOMEP["sbom_report<br/>sbom_component"]
+        FixEP["fix_plan<br/>fix_plan_step"]
+        ProxyEP["go_artifact_request<br/>npm_artifact_request<br/>..."]
+    end
+
+    subgraph Policy["Policy Engine"]
+        Match["Match entrypoint"]
+        Eval["Evaluate CEL"]
+        Action["Return action"]
+    end
+
+    Scan --> ScanEP
+    Diff --> DiffEP
+    SBOM --> SBOMEP
+    Fix --> FixEP
+    Proxy --> ProxyEP
+
+    ScanEP & DiffEP & SBOMEP & FixEP & ProxyEP --> Match
+    Match --> Eval --> Action
+
+    classDef cmd fill:#e3f2fd,stroke:#1565c0
+    classDef ep fill:#e8f5e9,stroke:#2e7d32
+    classDef policy fill:#fff3e0,stroke:#e65100
+
+    class Scan,Diff,SBOM,Fix,Proxy cmd
+    class ScanEP,DiffEP,SBOMEP,FixEP,ProxyEP ep
+    class Match,Eval,Action policy
+```
+
 ## Entrypoints by command
 
 Each command emits one or more entrypoints when `--policy` is provided:

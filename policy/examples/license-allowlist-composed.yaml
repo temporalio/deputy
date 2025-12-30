@@ -2,7 +2,7 @@ policies:
   - name: license-allowlist-composed
     description: Copyleft block with layered vars and scope guard
     vars:
-      licenses_union: 'pkg.?licenses.orValue([])'
+      licenses_union: 'pkg.licenses'
       normalized: 'licenses_union.map(l, l.upperAscii())'
       forbidden:
         - SSPL-1.0

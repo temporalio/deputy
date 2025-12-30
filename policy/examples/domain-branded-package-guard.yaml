@@ -2,7 +2,8 @@ policies:
   - name: domain-branded-package-guard
     description: Prevent use of packages that impersonate major vendor brands
     vars:
-      pkgName: 'request.?package.orValue(request.?module.orValue(pkg.?name.orValue(""))).lowerAscii()'
+      # pkg.name is synthesized from request.package/module, so we can use it directly
+      pkgName: 'pkg.name.lowerAscii()'
       brands:
         - google
         - aws

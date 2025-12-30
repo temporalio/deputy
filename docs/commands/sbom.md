@@ -8,6 +8,45 @@ Generate a Software Bill of Materials (SBOM) for a repository.
 deputy sbom [repo] [flags]
 ```
 
+## How SBOM Generation Works
+
+```mermaid
+flowchart LR
+    subgraph Input["Input"]
+        Repo["Repository"]
+        Ref["Git ref"]
+    end
+
+    subgraph Extract["Extract"]
+        Inventory["Build inventory"]
+        Licenses["Enrich licenses"]
+    end
+
+    subgraph Transform["Transform"]
+        Protobom["Protobom model"]
+    end
+
+    subgraph Output["Output Formats"]
+        CDX["CycloneDX"]
+        SPDX["SPDX"]
+        PB["Protobom JSON"]
+    end
+
+    Repo --> Inventory
+    Ref --> Inventory
+    Inventory --> Licenses
+    Licenses --> Protobom
+    Protobom --> CDX & SPDX & PB
+
+    classDef source fill:#e3f2fd,stroke:#1565c0
+    classDef process fill:#e8f5e9,stroke:#2e7d32
+    classDef output fill:#f3e5f5,stroke:#7b1fa2
+
+    class Repo,Ref source
+    class Inventory,Licenses,Protobom process
+    class CDX,SPDX,PB output
+```
+
 ## When to Use
 
 - Compliance and audit ("what did we ship?")

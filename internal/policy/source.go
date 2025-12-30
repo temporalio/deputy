@@ -32,8 +32,17 @@ type BundlePolicy struct {
 	Source string `json:"source"` // Source is the compiled CEL source code.
 }
 
-// LoadSources reads a list of file paths (either raw CEL files or bundle JSON)
-// and returns the flattened list of policy sources.
+// LoadSources reads a list of file paths and returns the flattened list of policy sources.
+//
+// Supported formats:
+//   - Structured YAML bundle (policies: [...]) - recommended for authoring
+//   - JSON bundle with schemaVersion field - for compiled/distributed bundles
+//
+// The function tries to parse each file in order of preference:
+//  1. JSON bundle format (compiled bundles from `deputy policy bundle`)
+//  2. Structured YAML format (human-authored policy files)
+//
+// If neither format matches, an error is returned with guidance on valid formats.
 func LoadSources(paths []string) ([]Source, error) {
 	if len(paths) == 0 {
 		return nil, fmt.Errorf("no policy paths provided")
@@ -44,6 +53,7 @@ func LoadSources(paths []string) ([]Source, error) {
 		if err != nil {
 			return nil, fmt.Errorf("read policy %q: %w", path, err)
 		}
+		// Try JSON bundle format first (compiled bundles)
 		if bundle, ok := tryParseBundle(data); ok {
 			for _, p := range bundle.Policies {
 				name := p.Name
@@ -57,6 +67,7 @@ func LoadSources(paths []string) ([]Source, error) {
 			}
 			continue
 		}
+		// Try structured YAML format (human-authored policies)
 		s, ok, err := tryParseStructuredBundle(data, path)
 		if err != nil {
 			return nil, err
@@ -65,7 +76,8 @@ func LoadSources(paths []string) ([]Source, error) {
 			sources = append(sources, s...)
 			continue
 		}
-		return nil, fmt.Errorf("%s is not a policy bundle", path)
+		// Neither format matched - provide helpful error
+		return nil, fmt.Errorf("%s: unrecognized policy format; expected YAML with 'policies:' key or JSON bundle with 'schemaVersion' field", path)
 	}
 	return sources, nil
 }
@@ -172,7 +184,8 @@ func extractPolicyName(source string) string {
 	return ""
 }
 
-// LoadBundle reads a bundle file from disk.
+// LoadBundle reads a compiled JSON bundle file from disk.
+// For structured YAML policies, use LoadSources instead.
 func LoadBundle(path string) (*Bundle, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -180,7 +193,7 @@ func LoadBundle(path string) (*Bundle, error) {
 	}
 	bundle, ok := tryParseBundle(data)
 	if !ok {
-		return nil, fmt.Errorf("%s is not a policy bundle", path)
+		return nil, fmt.Errorf("%s: not a valid JSON bundle (expected 'schemaVersion' field and 'policies' array)", path)
 	}
 	return bundle, nil
 }

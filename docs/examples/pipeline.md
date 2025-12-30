@@ -1,6 +1,43 @@
 # Pipeline example: scan → fix → diff → sbom
 
-Deputy’s commands are designed to compose in pipelines. This workflow is a common “tight loop” before committing dependency updates:
+Deputy's commands are designed to compose in pipelines. This workflow is a common "tight loop" before committing dependency updates:
+
+```mermaid
+flowchart LR
+    subgraph Discover["1. Discover"]
+        Scan["deputy scan"]
+    end
+
+    subgraph Remediate["2. Remediate"]
+        Fix["deputy fix --apply"]
+    end
+
+    subgraph Verify["3. Verify"]
+        Diff["deputy diff"]
+        Rescan["Confirm clean"]
+    end
+
+    subgraph Document["4. Document"]
+        SBOM["deputy sbom"]
+        Validate["jq validation"]
+    end
+
+    Scan -->|"vulns found"| Fix
+    Fix -->|"upgrades applied"| Diff
+    Diff --> Rescan
+    Rescan -->|"no vulns"| SBOM
+    SBOM --> Validate
+
+    classDef discover fill:#ffcdd2,stroke:#c62828
+    classDef remediate fill:#fff9c4,stroke:#f9a825
+    classDef verify fill:#c8e6c9,stroke:#2e7d32
+    classDef document fill:#e3f2fd,stroke:#1565c0
+
+    class Scan discover
+    class Fix remediate
+    class Diff,Rescan verify
+    class SBOM,Validate document
+```
 
 1. `scan` for vulnerabilities
 2. `fix` to generate (and optionally apply) remediation steps

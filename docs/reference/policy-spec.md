@@ -30,6 +30,36 @@ policies:          # required, non-empty list
 - Variables are evaluated in the **author-specified order**. Later vars can reference earlier ones. Duplicate or empty names are rejected.
 - JSON bundles fall back to lexical order for determinism (JSON objects are unordered).
 
+```mermaid
+flowchart TB
+    subgraph Input["Input Context"]
+        Ctx["pkg, vulnerabilities, env, ..."]
+    end
+
+    subgraph Vars["Variable Expansion (top to bottom)"]
+        V1["var1 = expr1"]
+        V2["var2 = expr2 (can use var1)"]
+        V3["var3 = expr3 (can use var1, var2)"]
+    end
+
+    subgraph Rules["Rule Evaluation"]
+        R1["rule.when (can use var1, var2, var3)"]
+    end
+
+    Ctx --> V1
+    V1 --> V2
+    V2 --> V3
+    V3 --> R1
+
+    classDef input fill:#e3f2fd,stroke:#1565c0
+    classDef vars fill:#fff9c4,stroke:#f9a825
+    classDef rules fill:#e8f5e9,stroke:#2e7d32
+
+    class Ctx input
+    class V1,V2,V3 vars
+    class R1 rules
+```
+
 ### Expansion semantics
 - Each var is expanded as `([expr]).map(name, BODY)[0]` from last to first, so each name is in scope for subsequent vars and rules.
 - CEL environment includes optional types plus cel-go extensions: `ext.Strings`, `ext.Regex`, `ext.Lists`, `ext.Sets`, `ext.Bindings`, `ext.Encoders`, and `ext.Math`. See the [policy framework](policy-framework.md#cel-helpers-and-extensions) for details.

@@ -55,16 +55,7 @@ func Evaluate(ctx context.Context, source string, input map[string]any) (any, er
 	if input == nil {
 		input = map[string]any{}
 	}
-	for _, name := range defaultVariableNames {
-		if _, ok := input[name]; !ok {
-			input[name] = nil
-		}
-	}
-	if val, ok := input["pkg"]; !ok || val == nil {
-		if pkg := buildPkgHelper(input); pkg != nil {
-			input["pkg"] = pkg
-		}
-	}
+	seedDefaultVariables(input)
 	env, err := envForInput(input)
 	if err != nil {
 		return nil, err
@@ -140,8 +131,28 @@ func envWithNames(extra []string) (*cel.Env, error) {
 }
 
 // buildPkgHelper synthesizes a unified package view from common input shapes.
-// If no recognizable package data is present, it returns nil.
+// It always returns a map with sensible defaults for optional fields so that
+// policy authors can write simpler expressions without excessive ?.orValue() usage:
+//   - name defaults to "" (empty string)
+//   - licenses defaults to [] (empty list)
+//   - version defaults to "" (empty string)
+//   - ecosystem defaults to "" (empty string)
+//
+// This allows policies like `pkg.licenses.exists(l, l == "GPL-3.0")` to work
+// without needing `pkg.?licenses.orValue([]).exists(...)`.
+//
+// Policies that need to guard against "no package data" can check `pkg.name == ""`
+// or use entrypoint filtering to only run when package data is expected.
 func buildPkgHelper(input map[string]any) map[string]any {
+	// Initialize with sensible defaults for all fields.
+	// This simplifies policy expressions by eliminating ?.orValue() boilerplate.
+	pkg := map[string]any{
+		"name":      "",
+		"licenses":  []any{},
+		"version":   "",
+		"ecosystem": "",
+	}
+
 	// Prefer component (sbom/diff) then request (proxy)
 	var src map[string]any
 	if comp, ok := input["component"].(map[string]any); ok {
@@ -153,25 +164,25 @@ func buildPkgHelper(input map[string]any) map[string]any {
 		}
 	}
 	if src == nil {
-		return nil
+		return pkg
 	}
 
-	pkg := map[string]any{}
 	// Try various keys for the package name
 	if name, ok := src["package"]; ok {
 		pkg["name"] = name
 	}
-	if _, ok := pkg["name"]; !ok {
+	if pkg["name"] == "" {
 		if name, ok := src["module"]; ok {
 			pkg["name"] = name
 		}
 	}
-	if _, ok := pkg["name"]; !ok {
+	if pkg["name"] == "" {
 		if name, ok := src["name"]; ok {
 			pkg["name"] = name
 		}
 	}
 
+	// Override defaults with actual values if present
 	if ver, ok := src["version"]; ok {
 		pkg["version"] = ver
 	}

@@ -6,6 +6,6 @@ policies:
         "(?i).*(alpha|beta|rc|preview)"
     rules:
       - action: deny
-        when: pkg.?version.orValue("").matches(prereleasePattern)
+        when: pkg.version.matches(prereleasePattern)
         reason: pre-release build blocked
         remediation: Pin to the latest stable release

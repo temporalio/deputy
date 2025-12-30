@@ -2,8 +2,10 @@ policies:
   - name: unstable-major-guard
     description: Flag v0/pre-release dependencies for extra scrutiny
     vars:
-      ecosystem: 'pkg.?ecosystem.orValue(request.?ecosystem.orValue(change.?ecosystem.orValue(""))).lowerAscii()'
-      version: 'pkg.?version.orValue(request.?version.orValue(change.?targetVersion.orValue(change.?version.orValue("")))).lowerAscii()'
+      # pkg is synthesized from request/component, so we can access it directly.
+      # For change entrypoints (diff), we fall back to change fields.
+      ecosystem: 'pkg.ecosystem != "" ? pkg.ecosystem.lowerAscii() : change.?ecosystem.orValue("").lowerAscii()'
+      version: 'pkg.version != "" ? pkg.version.lowerAscii() : change.?targetVersion.orValue(change.?version.orValue("")).lowerAscii()'
       unstable: 'version.matches("^(v?0\\.)") || version.matches("(?i)(alpha|beta|rc|preview|snapshot)")'
       inScopeEco: 'ecosystem in ["go", "npm", "pypi"]'
     rules:

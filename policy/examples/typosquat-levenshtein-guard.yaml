@@ -6,7 +6,7 @@ policies:
       allowScopes:
         - "@acme"
         - "@types"
-      name: 'pkg.?name.orValue("").lowerAscii()'
+      name: 'pkg.name.lowerAscii()'
       isScoped: 'name.startsWith("@")'
       hasNumericSuffix: 'name.matches(".*\\d+$")'
       limit: '(size(name) <= 5 ? 1 : (size(name) <= 8 ? 2 : 3))'

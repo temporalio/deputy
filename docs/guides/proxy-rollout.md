@@ -2,6 +2,45 @@
 
 A phased approach to introducing `deputy proxy` into your organization.
 
+## Rollout Phases Overview
+
+```mermaid
+flowchart LR
+    subgraph P1["Phase 1: Observe"]
+        Advisory["Advisory mode"]
+        Logs["Review logs"]
+    end
+
+    subgraph P2["Phase 2: CI/Build"]
+        Enforce1["Enforce in CI"]
+        Feedback["Gather feedback"]
+    end
+
+    subgraph P3["Phase 3: Developer"]
+        Enforce2["Enforce locally"]
+        Wrapper["Wrapper scripts"]
+    end
+
+    subgraph P4["Phase 4: Auth"]
+        JWT["JWT tokens"]
+        RBAC["Role-based access"]
+    end
+
+    P1 -->|"1-2 weeks"| P2
+    P2 -->|"2-4 weeks"| P3
+    P3 -->|"optional"| P4
+
+    classDef observe fill:#fff9c4,stroke:#f9a825
+    classDef enforce fill:#ffe0b2,stroke:#e65100
+    classDef full fill:#c8e6c9,stroke:#2e7d32
+    classDef auth fill:#e1bee7,stroke:#7b1fa2
+
+    class Advisory,Logs observe
+    class Enforce1,Feedback enforce
+    class Enforce2,Wrapper full
+    class JWT,RBAC auth
+```
+
 ## Why a phased rollout?
 
 Rolling out a policy-enforcing proxy all at once can disrupt development. A phased approach lets you:

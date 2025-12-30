@@ -11,6 +11,24 @@ import (
 	"github.com/picatz/deputy/internal/collections"
 )
 
+// Action type constants represent the standard policy decision types.
+// These are case-insensitive when compared (use ActionTypeIs for comparison).
+const (
+	// ActionDeny blocks the operation and returns an error to the caller.
+	ActionDeny = "deny"
+
+	// ActionWarn allows the operation but emits a warning message.
+	ActionWarn = "warn"
+
+	// ActionAllow explicitly permits the operation (no effect if other rules deny).
+	ActionAllow = "allow"
+)
+
+// ActionTypeIs returns true if the action type matches the expected type (case-insensitive).
+func ActionTypeIs(actionType, expected string) bool {
+	return strings.EqualFold(actionType, expected)
+}
+
 // Action represents a normalized policy decision emitted by a CEL program.
 type Action struct {
 	Source      string            // Source is the name of the policy that generated this action.

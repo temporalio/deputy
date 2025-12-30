@@ -2,7 +2,7 @@ policies:
   - name: license-present-blocker
     description: Require license metadata for packages in proxy/SBOM/diff contexts
     vars:
-      licList: 'pkg.?licenses.orValue([])'
+      licList: 'pkg.licenses'
     rules:
       - action: deny
         when: env.command in ["proxy","sbom","diff"] && size(licList) == 0

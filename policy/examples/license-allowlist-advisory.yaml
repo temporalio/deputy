@@ -4,7 +4,7 @@ policies:
     mode: advisory
     commands: ["proxy", "sbom", "diff"]
     vars:
-      licenses: 'pkg.?licenses.orValue([]).map(l, l.upperAscii())'
+      licenses: 'pkg.licenses.map(l, l.upperAscii())'
       forbidden:
         - SSPL-1.0
         - AGPL-3.0-ONLY

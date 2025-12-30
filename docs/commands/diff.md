@@ -8,6 +8,61 @@ Compare dependency changes between Git references with vulnerability analysis.
 deputy diff [base] [target] [flags]
 ```
 
+## How Diff Works
+
+```mermaid
+flowchart TB
+    subgraph Input["Input Refs"]
+        Base["Base ref<br/>(e.g., main)"]
+        Target["Target ref<br/>(e.g., HEAD)"]
+    end
+
+    subgraph Extract["Extract"]
+        BaseSnap["Snapshot base"]
+        TargetSnap["Snapshot target"]
+        BaseInv["Base inventory"]
+        TargetInv["Target inventory"]
+    end
+
+    subgraph Compare["Compare"]
+        Diff["Compute diff"]
+        Added["+ Added"]
+        Removed["- Removed"]
+        Changed["~ Changed"]
+        Unchanged["= Unchanged"]
+    end
+
+    subgraph Enrich["Enrich"]
+        Vulns["Vulnerability scan"]
+        Licenses["License lookup"]
+        Policy["Policy evaluation"]
+    end
+
+    Base --> BaseSnap --> BaseInv
+    Target --> TargetSnap --> TargetInv
+    BaseInv --> Diff
+    TargetInv --> Diff
+    Diff --> Added & Removed & Changed & Unchanged
+    Added & Removed & Changed --> Vulns
+    Unchanged -.->|"--show-unchanged"| Vulns
+    Vulns --> Licenses
+    Licenses --> Policy
+
+    classDef source fill:#e3f2fd,stroke:#1565c0
+    classDef process fill:#e8f5e9,stroke:#2e7d32
+    classDef added fill:#c8e6c9,stroke:#2e7d32
+    classDef removed fill:#ffcdd2,stroke:#c62828
+    classDef changed fill:#fff9c4,stroke:#f9a825
+    classDef unchanged fill:#e0e0e0,stroke:#757575
+
+    class Base,Target source
+    class BaseSnap,TargetSnap,BaseInv,TargetInv,Diff,Vulns,Licenses,Policy process
+    class Added added
+    class Removed removed
+    class Changed changed
+    class Unchanged unchanged
+```
+
 ## When to Use
 
 - In PR reviews to see what dependencies changed
@@ -36,6 +91,42 @@ deputy diff [base] [target] [flags]
 ### Unchanged Threshold Values
 
 `none` | `low` | `med` | `high` | `critical` | `any`
+
+The `--unchanged-threshold` flag controls when vulnerabilities in unchanged dependencies are shown:
+
+```mermaid
+flowchart LR
+    subgraph Threshold["--unchanged-threshold"]
+        None["none<br/>(never show)"]
+        Low["low"]
+        Med["med"]
+        High["high"]
+        Crit["critical<br/>(default)"]
+        Any["any<br/>(always show)"]
+    end
+
+    subgraph Result["Unchanged deps shown when..."]
+        NoneR["Never"]
+        LowR["LOW+"]
+        MedR["MEDIUM+"]
+        HighR["HIGH+"]
+        CritR["CRITICAL only"]
+        AnyR["Always"]
+    end
+
+    None --> NoneR
+    Low --> LowR
+    Med --> MedR
+    High --> HighR
+    Crit --> CritR
+    Any --> AnyR
+
+    classDef thresh fill:#e3f2fd,stroke:#1565c0
+    classDef result fill:#e8f5e9,stroke:#2e7d32
+
+    class None,Low,Med,High,Crit,Any thresh
+    class NoneR,LowR,MedR,HighR,CritR,AnyR result
+```
 
 ## Reference Types
 

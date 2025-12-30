@@ -128,3 +128,131 @@ func TestEvaluatePkgHelper(t *testing.T) {
 		})
 	}
 }
+
+func TestPkgHelperDefaults(t *testing.T) {
+	ctx := context.Background()
+
+	// Test that pkg fields have sensible defaults when not provided,
+	// allowing policies to use them directly without ?.orValue() boilerplate.
+	t.Run("licenses defaults to empty list", func(t *testing.T) {
+		input := map[string]any{
+			"component": map[string]any{"name": "test-pkg"},
+		}
+		// This should work without ?.orValue() because licenses defaults to []
+		src := `pkg.licenses.size() == 0`
+		val, err := Evaluate(ctx, src, input)
+		if err != nil {
+			t.Fatalf("Evaluate() error = %v", err)
+		}
+		if b, ok := val.(bool); !ok || !b {
+			t.Errorf("expected pkg.licenses to be empty list, got %v", val)
+		}
+	})
+
+	t.Run("licenses exists works without orValue", func(t *testing.T) {
+		input := map[string]any{
+			"component": map[string]any{"name": "test-pkg"},
+		}
+		// This should work without ?.orValue()
+		src := `!pkg.licenses.exists(l, l == "GPL-3.0")`
+		val, err := Evaluate(ctx, src, input)
+		if err != nil {
+			t.Fatalf("Evaluate() error = %v", err)
+		}
+		if b, ok := val.(bool); !ok || !b {
+			t.Errorf("expected pkg.licenses.exists to work on empty list")
+		}
+	})
+
+	t.Run("version defaults to empty string", func(t *testing.T) {
+		input := map[string]any{
+			"component": map[string]any{"name": "test-pkg"},
+		}
+		src := `pkg.version == ""`
+		val, err := Evaluate(ctx, src, input)
+		if err != nil {
+			t.Fatalf("Evaluate() error = %v", err)
+		}
+		if b, ok := val.(bool); !ok || !b {
+			t.Errorf("expected pkg.version to default to empty string")
+		}
+	})
+
+	t.Run("ecosystem defaults to empty string", func(t *testing.T) {
+		input := map[string]any{
+			"component": map[string]any{"name": "test-pkg"},
+		}
+		src := `pkg.ecosystem == ""`
+		val, err := Evaluate(ctx, src, input)
+		if err != nil {
+			t.Fatalf("Evaluate() error = %v", err)
+		}
+		if b, ok := val.(bool); !ok || !b {
+			t.Errorf("expected pkg.ecosystem to default to empty string")
+		}
+	})
+
+	t.Run("actual values override defaults", func(t *testing.T) {
+		input := map[string]any{
+			"component": map[string]any{
+				"name":      "test-pkg",
+				"version":   "1.2.3",
+				"ecosystem": "npm",
+				"licenses":  []any{"MIT", "Apache-2.0"},
+			},
+		}
+		src := `pkg.version == "1.2.3" && pkg.ecosystem == "npm" && pkg.licenses.size() == 2`
+		val, err := Evaluate(ctx, src, input)
+		if err != nil {
+			t.Fatalf("Evaluate() error = %v", err)
+		}
+		if b, ok := val.(bool); !ok || !b {
+			t.Errorf("expected actual values to override defaults")
+		}
+	})
+
+	t.Run("string methods work on default version", func(t *testing.T) {
+		input := map[string]any{
+			"component": map[string]any{"name": "test-pkg"},
+		}
+		// String methods should work on empty string default
+		src := `!pkg.version.startsWith("v") && !pkg.version.matches(".*alpha.*")`
+		val, err := Evaluate(ctx, src, input)
+		if err != nil {
+			t.Fatalf("Evaluate() error = %v", err)
+		}
+		if b, ok := val.(bool); !ok || !b {
+			t.Errorf("expected string methods to work on default empty version")
+		}
+	})
+
+	t.Run("pkg always exists with defaults even without component/request", func(t *testing.T) {
+		// When there's no component or request, pkg should still exist with all defaults
+		input := map[string]any{
+			"env": map[string]any{"command": "scan"},
+		}
+		src := `pkg.name == "" && pkg.version == "" && pkg.ecosystem == "" && pkg.licenses.size() == 0`
+		val, err := Evaluate(ctx, src, input)
+		if err != nil {
+			t.Fatalf("Evaluate() error = %v", err)
+		}
+		if b, ok := val.(bool); !ok || !b {
+			t.Errorf("expected pkg to exist with all defaults when no component/request present")
+		}
+	})
+
+	t.Run("name defaults to empty string", func(t *testing.T) {
+		// Even with component that has no name, pkg.name should be empty string
+		input := map[string]any{
+			"component": map[string]any{"licenses": []any{"MIT"}},
+		}
+		src := `pkg.name == ""`
+		val, err := Evaluate(ctx, src, input)
+		if err != nil {
+			t.Fatalf("Evaluate() error = %v", err)
+		}
+		if b, ok := val.(bool); !ok || !b {
+			t.Errorf("expected pkg.name to default to empty string")
+		}
+	})
+}

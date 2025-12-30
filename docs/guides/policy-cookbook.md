@@ -4,6 +4,81 @@ Real-world CEL policy patterns for common security and compliance scenarios.
 
 > All examples are available in the [policy examples](../../policy/examples/).
 
+## Policy Categories Overview
+
+```mermaid
+flowchart TB
+    subgraph Vuln["Vulnerability Policies"]
+        Severity["Severity gates"]
+        Exploit["Exploit detection"]
+        FixAvail["Fix available"]
+    end
+
+    subgraph License["License Policies"]
+        Allowlist["Allowlist"]
+        Blocklist["Blocklist"]
+        Missing["Missing metadata"]
+    end
+
+    subgraph Package["Package Policies"]
+        Block["Block packages"]
+        CVE["Specific CVEs"]
+        Typo["Typosquat detection"]
+    end
+
+    subgraph Ecosystem["Ecosystem Policies"]
+        Scope["npm scopes"]
+        Registry["Go registries"]
+        Prefix["PyPI prefixes"]
+    end
+
+    subgraph Version["Version Policies"]
+        Prerelease["Block prerelease"]
+        Pseudo["Block pseudo-versions"]
+        MinVer["Minimum versions"]
+    end
+
+    classDef vuln fill:#ffcdd2,stroke:#c62828
+    classDef license fill:#e1bee7,stroke:#7b1fa2
+    classDef package fill:#ffe0b2,stroke:#e65100
+    classDef eco fill:#c8e6c9,stroke:#2e7d32
+    classDef version fill:#bbdefb,stroke:#1565c0
+
+    class Severity,Exploit,FixAvail vuln
+    class Allowlist,Blocklist,Missing license
+    class Block,CVE,Typo package
+    class Scope,Registry,Prefix eco
+    class Prerelease,Pseudo,MinVer version
+```
+
+## Choosing a Policy
+
+```mermaid
+flowchart TD
+    Start([What do you need?]) --> Q1{Block vulnerabilities?}
+    Q1 -->|Yes| Q1a{By severity?}
+    Q1a -->|Yes| Sev["severity-guardrail.yaml"]
+    Q1a -->|Only with fix| Fix["direct-high-fix-block.yaml"]
+    Q1 -->|No| Q2{License compliance?}
+    Q2 -->|Block copyleft| Lic["license-allowlist.yaml"]
+    Q2 -->|Require specific| LicComp["license-allowlist-composed.yaml"]
+    Q2 -->|No| Q3{Block packages?}
+    Q3 -->|Known bad| Block["block-package.yaml"]
+    Q3 -->|Typosquats| Typo["typosquat-levenshtein-guard.yaml"]
+    Q3 -->|No| Q4{Ecosystem rules?}
+    Q4 -->|npm scopes| NPM["npm-scope-allowlist.yaml"]
+    Q4 -->|Go modules| Go["gomod-registry-allowlist.yaml"]
+    Q4 -->|No| Q5{Version rules?}
+    Q5 -->|No prereleases| Pre["prerelease-guard.yaml"]
+    Q5 -->|No| Proxy["proxy-critical-advisory.yaml"]
+
+    classDef question fill:#fff9c4,stroke:#f9a825
+    classDef answer fill:#c8e6c9,stroke:#2e7d32
+
+    class Q1,Q1a,Q2,Q3,Q4,Q5 question
+    class Sev,Fix,Lic,LicComp,Block,Typo,NPM,Go,Pre,Proxy answer
+```
+
 ## Quick Reference
 
 | Category | Policy | Use Case |
@@ -101,10 +176,10 @@ policies:
         - GPL-3.0
     rules:
       - action: deny
-        when: pkg.?licenses.orValue([]).exists(l, l in forbidden)
+        when: pkg.licenses.exists(l, l in forbidden)
         reason: package carries a forbidden license
       - action: warn
-        when: size(pkg.?licenses.orValue([])) == 0
+        when: size(pkg.licenses) == 0
         reason: package missing license metadata
 ```
 
@@ -125,7 +200,7 @@ policies:
     rules:
       - action: deny
         when: |
-          size(pkg.?licenses.orValue([])) > 0 &&
+          size(pkg.licenses) > 0 &&
           !pkg.licenses.all(l, l in approved)
         reason: package uses non-approved license
         remediation: Request license exception or find alternative
@@ -207,7 +282,7 @@ policies:
     rules:
       - action: deny
         when: |
-          pkg.?ecosystem.orValue("") == "npm" &&
+          pkg.ecosystem == "npm" &&
           pkg.name.startsWith("@") &&
           !allowedScopes.exists(s, pkg.name.startsWith(s + "/"))
         reason: npm scope not in allowlist
@@ -229,7 +304,7 @@ policies:
     rules:
       - action: deny
         when: |
-          pkg.?ecosystem.orValue("") == "go" &&
+          pkg.ecosystem == "go" &&
           !allowedPrefixes.exists(p, pkg.name.startsWith(p))
         reason: Go module not from approved registry
 ```
@@ -248,7 +323,7 @@ policies:
     rules:
       - action: warn
         when: |
-          pkg.?ecosystem.orValue("") == "pypi" &&
+          pkg.ecosystem == "pypi" &&
           !allowedPrefixes.exists(p, pkg.name.startsWith(p))
         reason: PyPI package not from approved namespace
 ```
@@ -279,7 +354,7 @@ policies:
     rules:
       - action: deny
         when: |
-          pkg.?ecosystem.orValue("") == "go" &&
+          pkg.ecosystem == "go" &&
           pkg.version.matches("v\\d+\\.\\d+\\.\\d+-\\d{14}-[a-f0-9]{12}")
         reason: Go pseudo-versions indicate unreleased code
         remediation: Pin to a tagged release
@@ -319,7 +394,7 @@ policies:
     vars:
       popular: ["react","lodash","express","typescript","axios"]
       allowScopes: ["@acme", "@types"]
-      name: 'pkg.?name.orValue("").lowerAscii()'
+      name: 'pkg.name.lowerAscii()'
       isScoped: 'name.startsWith("@")'
       limit: '(size(name) <= 5 ? 1 : (size(name) <= 8 ? 2 : 3))'
       nearPopular: 'popular.exists(p, levenshteinWithin(name, p, limit))'
@@ -465,6 +540,212 @@ Result: true
 # 4. Test against real scan
 $ deputy scan --policy my-policy.yaml
 ```
+
+---
+
+## Common Mistakes
+
+Avoid these anti-patterns when writing CEL policies.
+
+### Mistake 1: Missing Optional Handling for External Data Fields
+
+```yaml
+# WRONG: Will error if fixedVersions field is not present
+- action: deny
+  when: vulnerability.fixedVersions.size() > 0
+  reason: fix available
+```
+
+```yaml
+# CORRECT: Use optional chaining with orValue for fields that may not exist
+- action: deny
+  when: vulnerability.?fixedVersions.orValue([]).size() > 0
+  reason: fix available
+```
+
+**Why:** Objects representing external data (like `vulnerability`, `change`, `jwt`) may not have all fields present. Use `?.orValue()` for fields that may be absent.
+
+**When to use `?.orValue()`:**
+- `vulnerability.?fixedVersions.orValue([])` — not all vulns have fixes
+- `vulnerability.?severity.orValue("")` — severity may be unknown
+- `component.?purlType.orValue("")` — SBOM components may lack type
+- `change.?targetVersion.orValue("")` — diff changes may lack target
+- `jwt.?roles.orValue([])` — JWT custom claims are optional
+
+**When NOT needed (sensible defaults provided):**
+- `pkg.name` — defaults to `""` (empty string)
+- `pkg.version` — defaults to `""` (empty string)
+- `pkg.ecosystem` — defaults to `""` (empty string)
+- `pkg.licenses` — defaults to `[]` (empty list)
+- `vulnerabilities.exists(...)` — top-level list handles nil gracefully
+- `env.command` — always injected by Deputy
+
+The `pkg` helper is synthesized by Deputy and always provides sensible defaults, so you can safely write:
+
+```yaml
+# This works without ?.orValue() because pkg fields have defaults
+- action: deny
+  when: pkg.licenses.exists(l, l == "GPL-3.0")
+  reason: copyleft license
+```
+
+### Mistake 2: Case Sensitivity Issues
+
+```yaml
+# WRONG: Severity values are uppercase
+- action: deny
+  when: vulnerability.severity == "critical"
+  reason: critical vulnerability
+```
+
+```yaml
+# CORRECT: Use uppercase
+- action: deny
+  when: vulnerability.severity == "CRITICAL"
+  reason: critical vulnerability
+```
+
+**Why:** Deputy uses uppercase severity strings (`CRITICAL`, `HIGH`, `MEDIUM`, `LOW`). String comparisons are case-sensitive.
+
+### Mistake 3: Forgetting Entrypoint Context
+
+```yaml
+# WRONG: vulnerability (singular) is only populated in scan_vulnerability entrypoint
+policies:
+  - name: check-vuln
+    rules:
+      - action: deny
+        when: vulnerability.severity == "CRITICAL"
+```
+
+```yaml
+# CORRECT: Use entrypoints filter to scope the policy
+policies:
+  - name: check-vuln
+    entrypoints: ["scan_vulnerability", "diff_vulnerability"]
+    rules:
+      - action: deny
+        when: vulnerability.severity == "CRITICAL"
+
+# OR use env check in the rule:
+policies:
+  - name: check-vuln
+    rules:
+      - action: deny
+        when: env.entrypoint == "scan_vulnerability" && vulnerability.severity == "CRITICAL"
+```
+
+**Why:** Different entrypoints populate different variables. The `vulnerability` (singular) object is only available in per-vulnerability entrypoints like `scan_vulnerability`. Use `vulnerabilities` (list) with `.exists()` in report-level entrypoints like `scan_report`.
+
+### Mistake 4: Variable Order Dependencies
+
+```yaml
+# WRONG: vars reference each other in wrong order
+policies:
+  - name: bad-order
+    vars:
+      filtered: 'all.filter(x, x.severity == "HIGH")'  # 'all' not defined yet!
+      all: 'vulnerabilities'
+    rules:
+      - action: deny
+        when: size(filtered) > 0
+```
+
+```yaml
+# CORRECT: Define dependencies first (top to bottom)
+policies:
+  - name: good-order
+    vars:
+      all: 'vulnerabilities'
+      filtered: 'all.filter(x, x.severity == "HIGH")'  # 'all' is now available
+    rules:
+      - action: deny
+        when: size(filtered) > 0
+```
+
+**Why:** Variables are evaluated in author-specified order (top to bottom). Later vars can reference earlier ones, but not vice versa.
+
+### Mistake 5: Version-Specific Proxy Logic Without Guard
+
+```yaml
+# PROBLEM: Also matches metadata/index requests where version is "<unknown>"
+- action: deny
+  when: pkg.name == "lodash" && pkg.version == "4.17.20"
+  reason: blocked vulnerable version
+```
+
+```yaml
+# CORRECT: Guard version-specific logic with has_version
+- action: deny
+  when: request.has_version && pkg.name == "lodash" && pkg.version == "4.17.20"
+  reason: blocked vulnerable version
+```
+
+**Why:** Proxy requests for package metadata/indexes don't have a concrete version (`request.version` is `"<unknown>"`). Use `request.has_version` to only match artifact downloads. For blocking all versions of a package, no guard is needed:
+
+```yaml
+# This is fine for all-version blocks:
+- action: deny
+  when: pkg.name == "lodash"
+  reason: blocked package (all versions)
+```
+
+### Mistake 6: Overly Broad String Matching
+
+```yaml
+# WRONG: Matches "react", "react-dom", "react-native", "preact", etc.
+- action: deny
+  when: pkg.name.contains("react")
+  reason: blocked package
+```
+
+```yaml
+# CORRECT: Use exact match or anchored patterns
+- action: deny
+  when: pkg.name == "react"
+  reason: blocked package
+
+# OR match a family with regex:
+- action: deny
+  when: pkg.name.matches("^react(-.*)?$")
+  reason: blocked react packages
+```
+
+**Why:** `contains()` matches substrings anywhere. Use `==` for exact matches or `matches()` with anchored patterns for controlled matching.
+
+### Mistake 7: Empty List Edge Cases
+
+```yaml
+# WRONG: Returns true when no vulnerabilities exist (vacuous truth)
+- action: allow
+  when: vulnerabilities.all(v, v.severity != "CRITICAL")
+  reason: no critical vulnerabilities
+```
+
+```yaml
+# CORRECT: Check for non-empty list first
+- action: allow
+  when: size(vulnerabilities) > 0 && vulnerabilities.all(v, v.severity != "CRITICAL")
+  reason: no critical vulnerabilities in non-empty scan
+
+# BETTER: Use exists() for deny rules (handles empty lists correctly)
+- action: deny
+  when: vulnerabilities.exists(v, v.severity == "CRITICAL")
+  reason: critical vulnerability found
+```
+
+**Why:** `all()` on an empty list returns `true` (vacuously true). This can cause unexpected allows. Prefer `exists()` for deny rules — it returns `false` on empty lists.
+
+### Debugging Checklist
+
+When a policy doesn't behave as expected:
+
+1. **Lint first:** `deputy policy lint policy.yaml`
+2. **Check entrypoint:** Is the variable populated in your entrypoint?
+3. **Test in REPL:** `deputy policy repl` to test expressions interactively
+4. **Use simulate:** `deputy policy simulate --policy policy.yaml --input recorded.json`
+5. **Check case:** Are string comparisons using the correct case?
+6. **Check field access:** Use `?.orValue()` for object fields that may not exist
 
 ## See Also
 

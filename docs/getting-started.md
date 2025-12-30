@@ -2,6 +2,29 @@
 
 This page is for getting Deputy installed and useful in ~5 minutes.
 
+## Quick Start Overview
+
+```mermaid
+flowchart LR
+    subgraph Setup["Setup"]
+        Install["go install"]
+    end
+
+    subgraph Core["Core Workflow"]
+        Scan["1. Scan<br/>Find vulnerabilities"]
+        Fix["2. Fix<br/>Apply upgrades"]
+        Verify["3. Verify<br/>Rescan + SBOM"]
+    end
+
+    Install --> Scan --> Fix --> Verify
+
+    classDef setup fill:#e3f2fd,stroke:#1565c0
+    classDef core fill:#e8f5e9,stroke:#2e7d32
+
+    class Install setup
+    class Scan,Fix,Verify core
+```
+
 ## Install
 
 ### Go install (recommended)

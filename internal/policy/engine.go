@@ -65,7 +65,22 @@ func NewEngineFromPaths(paths []string) (*Engine, error) {
 	return NewEngine(sources)
 }
 
-// EvaluateAll runs all compiled policies against the payload, prefiltering by command/entrypoint when declared.
+// EvaluateAll runs all compiled policies against the payload and returns aggregated actions.
+//
+// Policy execution order: Policies are evaluated in the order they were loaded (typically
+// the order they appear in source files). Each policy may return zero or more actions.
+// All actions from all matching policies are collected and returned.
+//
+// Filtering behavior: Policies can declare entrypoint and/or command restrictions via metadata.
+// A policy is skipped if EITHER:
+//   - The policy declares specific entrypoints AND the request entrypoint doesn't match any
+//   - The policy declares specific commands AND the request command doesn't match any
+//
+// This means both filters must pass (AND logic) for a policy to run. Policies without
+// restrictions always run.
+//
+// Advisory mode: Policies with mode="advisory" have their "deny" actions downgraded to "warn",
+// allowing observation without blocking.
 func (e *Engine) EvaluateAll(ctx context.Context, payload map[string]any, command, entrypoint string) ([]Action, error) {
 	if e == nil || len(e.compiled) == 0 {
 		return nil, nil
@@ -114,20 +129,29 @@ func (e *Engine) EvaluateAll(ctx context.Context, payload map[string]any, comman
 }
 
 // shouldSkip determines if a policy should be ignored based on the requested
-// command or entrypoint. If the policy defines specific entrypoints or commands,
-// it will only run if the request matches one of them.
+// command or entrypoint.
+//
+// Skip logic (returns true to skip):
+//   - If request has entrypoint AND policy has entrypoint restrictions AND request doesn't match → skip
+//   - If request has command AND policy has command restrictions AND request doesn't match → skip
+//   - Otherwise → don't skip (run the policy)
+//
+// This implements AND semantics: BOTH command and entrypoint filters must pass for the policy to run.
+// Policies without restrictions (empty entrypoints/commands lists) always pass their respective checks.
 func shouldSkip(pol compiledPolicy, command, entrypoint string) bool {
+	// Check entrypoint filter
 	if entrypoint != "" && len(pol.entrypoints) > 0 {
 		if _, ok := pol.entrypoints[entrypoint]; !ok {
-			return true
+			return true // Entrypoint doesn't match policy's allowed entrypoints
 		}
 	}
+	// Check command filter
 	if command != "" && len(pol.commands) > 0 {
 		if _, ok := pol.commands[command]; !ok {
-			return true
+			return true // Command doesn't match policy's allowed commands
 		}
 	}
-	return false
+	return false // All filters passed, run the policy
 }
 
 // seedDefaultVariables ensures that standard variables expected by policies
@@ -158,8 +182,8 @@ func downgradeAdvisory(actions []Action) []Action {
 	}
 	out := make([]Action, len(actions))
 	for i, a := range actions {
-		if strings.EqualFold(a.Type, "deny") {
-			a.Type = "warn"
+		if ActionTypeIs(a.Type, ActionDeny) {
+			a.Type = ActionWarn
 			a.Status = nil
 			if strings.TrimSpace(a.Reason) == "" {
 				a.Reason = "advisory policy (originally deny)"

@@ -202,7 +202,7 @@ func ParseStructuredSources(data []byte, virtualPath string) ([]Source, error) {
 		return nil, err
 	}
 	if !ok {
-		return nil, fmt.Errorf("%s is not a policy bundle", virtualPath)
+		return nil, fmt.Errorf("%s: not a valid structured policy (expected 'policies:' key with at least one policy)", virtualPath)
 	}
 	return sources, nil
 }
@@ -296,7 +296,7 @@ func (r structuredRule) toRuleExpr(ecosystems []string) (string, error) {
 		for i, eco := range ecosystems {
 			quoted[i] = fmt.Sprintf("\"%s\"", eco)
 		}
-		guard := fmt.Sprintf("(request.?ecosystem.orValue(\"\") in [%s]) || (pkg.?ecosystem.orValue(\"\") in [%s])", strings.Join(quoted, ","), strings.Join(quoted, ","))
+		guard := fmt.Sprintf("(request.?ecosystem.orValue(\"\") in [%s]) || (pkg.ecosystem in [%s])", strings.Join(quoted, ","), strings.Join(quoted, ","))
 		when = fmt.Sprintf("((%s) && (%s))", guard, when)
 	}
 	if strings.TrimSpace(r.Action) == "" {

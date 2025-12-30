@@ -10,6 +10,45 @@ deputy scan dir <directory> [flags]
 deputy scan sbom <sbom-file> [flags]
 ```
 
+## How Scan Works
+
+```mermaid
+flowchart LR
+    subgraph Input["Input"]
+        Repo["Repository"]
+        Dir["Directory"]
+        SBOM["SBOM file"]
+    end
+
+    subgraph Process["Process"]
+        Resolve["Resolve target"]
+        Extract["Extract inventory"]
+        Query["Query OSV"]
+        Enrich["Enrich findings"]
+        Policy["Apply policies"]
+    end
+
+    subgraph Output["Output"]
+        Text["Text report"]
+        JSON["JSON report"]
+    end
+
+    Repo & Dir & SBOM --> Resolve
+    Resolve --> Extract
+    Extract --> Query
+    Query --> Enrich
+    Enrich --> Policy
+    Policy --> Text & JSON
+
+    classDef source fill:#e3f2fd,stroke:#1565c0
+    classDef process fill:#e8f5e9,stroke:#2e7d32
+    classDef output fill:#f3e5f5,stroke:#7b1fa2
+
+    class Repo,Dir,SBOM source
+    class Resolve,Extract,Query,Enrich,Policy process
+    class Text,JSON output
+```
+
 ## When to Use
 
 - Before releases to catch vulnerable dependencies early

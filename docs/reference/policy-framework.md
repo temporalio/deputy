@@ -2,6 +2,48 @@
 
 Deputy policies capture a decision once and enforce it everywhere: scan, diff, sbom, fix, triage, and the artifact proxy. Policies are structured YAML bundles compiled to CEL and evaluated against a consistent input map, so rules stay readable, testable, and auditable.
 
+## Policy Evaluation Flow
+
+```mermaid
+flowchart LR
+    subgraph Author["Authoring"]
+        YAML["policy.yaml"]
+        Lint["deputy policy lint"]
+        Test["deputy policy test"]
+        Bundle["deputy policy bundle"]
+    end
+
+    subgraph Runtime["Runtime"]
+        Command["Command<br/>(scan, diff, proxy...)"]
+        Input["Build input map"]
+        Entrypoint["Match entrypoint"]
+        CEL["CEL evaluation"]
+    end
+
+    subgraph Output["Output"]
+        Allow["allow"]
+        Warn["warn"]
+        Deny["deny"]
+    end
+
+    YAML --> Lint --> Test --> Bundle
+    Bundle --> Command
+    Command --> Input --> Entrypoint --> CEL
+    CEL --> Allow & Warn & Deny
+
+    classDef author fill:#e3f2fd,stroke:#1565c0
+    classDef runtime fill:#e8f5e9,stroke:#2e7d32
+    classDef allow fill:#c8e6c9,stroke:#2e7d32
+    classDef warn fill:#fff9c4,stroke:#f9a825
+    classDef deny fill:#ffcdd2,stroke:#c62828
+
+    class YAML,Lint,Test,Bundle author
+    class Command,Input,Entrypoint,CEL runtime
+    class Allow allow
+    class Warn warn
+    class Deny deny
+```
+
 ## Quick start
 
 1. Write a policy bundle in YAML.
@@ -55,10 +97,10 @@ policies:
         - GPL-3.0-only
     rules:
       - action: deny
-        when: pkg.?licenses.orValue([]).exists(l, l in forbidden)
+        when: pkg.licenses.exists(l, l in forbidden)
         reason: package carries a forbidden license
       - action: warn
-        when: size(pkg.?licenses.orValue([])) == 0
+        when: size(pkg.licenses) == 0
         reason: package missing license metadata
 ```
 
@@ -73,6 +115,49 @@ Policies return a list of action objects:
 | `allow` | Explicitly allow | Add metadata, optional override |
 | `warn` | Non-blocking | Notify, audit, or soft gates |
 | `deny` | Blocking | Enforce policy, fail the command |
+
+```mermaid
+flowchart TD
+    subgraph Evaluation["Policy Evaluation"]
+        Rules["Evaluate rules"]
+    end
+
+    subgraph Actions["Actions"]
+        A["allow"]
+        W["warn"]
+        D["deny"]
+    end
+
+    subgraph Mode["mode: advisory?"]
+        Advisory["Yes: downgrade"]
+        Enforce["No: as-is"]
+    end
+
+    subgraph Result["Result"]
+        Pass["Exit 0"]
+        Log["Log + continue"]
+        Fail["Exit 1"]
+    end
+
+    Rules --> A & W & D
+    A --> Pass
+    W --> Log
+    D --> Mode
+    Advisory --> Log
+    Enforce --> Fail
+
+    classDef eval fill:#e3f2fd,stroke:#1565c0
+    classDef allow fill:#c8e6c9,stroke:#2e7d32
+    classDef warn fill:#fff9c4,stroke:#f9a825
+    classDef deny fill:#ffcdd2,stroke:#c62828
+    classDef mode fill:#e1bee7,stroke:#7b1fa2
+
+    class Rules eval
+    class A,Pass allow
+    class W,Log warn
+    class D,Fail deny
+    class Advisory,Enforce mode
+```
 
 Use `mode: advisory` to downgrade `deny` actions from that policy into `warn` actions for canary rollouts.
 

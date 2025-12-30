@@ -243,6 +243,72 @@ Result: true
 Goodbye!
 ```
 
+### Debugging Expressions
+
+The REPL is invaluable for testing and debugging CEL expressions before deploying them in policies.
+
+**Testing license checks:**
+
+```
+> :set name=lodash
+> :set version=4.17.21
+> pkg.licenses
+Result: []
+> pkg.licenses.size()
+Result: 0
+> :set licenses=["MIT"]
+> pkg.licenses.exists(l, l == "MIT")
+Result: true
+```
+
+Note: The `pkg` helper provides sensible defaults (`name`, `version`, `ecosystem` default to `""`, `licenses` defaults to `[]`), so you don't need `?.orValue()` for these fields.
+
+**Testing string patterns:**
+
+```
+> :set name=react-dom
+> pkg.name.matches("^react(-.*)?$")
+Result: true
+> :set name=preact
+> pkg.name.matches("^react(-.*)?$")
+Result: false
+```
+
+**Testing list operations:**
+
+```
+> :example
+Loaded example: lodash@4.17.21 (npm) with vulnerability CVE-2021-23337
+> vulnerabilities.exists(v, v.severity == "HIGH")
+Result: true
+> vulnerabilities.filter(v, v.severity in ["HIGH", "CRITICAL"])
+Result: [{id: "CVE-2021-23337", severity: "HIGH", ...}]
+> size(vulnerabilities.filter(v, v.severity == "CRITICAL"))
+Result: 0
+```
+
+**Testing variable compositions:**
+
+```
+> :set ecosystem=go
+> :set name=github.com/acme/internal
+> cel.bind(isInternal, pkg.name.contains("/internal"), isInternal && pkg.ecosystem == "go")
+Result: true
+```
+
+**Testing levenshtein for typosquat detection:**
+
+```
+> :set name=lodahs
+> levenshtein(pkg.name, "lodash")
+Result: 2
+> levenshteinWithin(pkg.name, "lodash", 2)
+Result: true
+> :set name=loadash
+> levenshteinWithin(pkg.name, "lodash", 2)
+Result: true
+```
+
 ---
 
 ## `lsp`
@@ -282,6 +348,45 @@ require('lspconfig').deputy.setup({})
 ---
 
 ## Development Workflow
+
+```mermaid
+flowchart LR
+    subgraph Author["1. Author"]
+        Write["Write policy.yaml"]
+    end
+
+    subgraph Validate["2. Validate"]
+        Lint["deputy policy lint"]
+        Test["deputy policy test"]
+        REPL["deputy policy repl"]
+    end
+
+    subgraph Package["3. Package"]
+        Bundle["deputy policy bundle"]
+    end
+
+    subgraph Deploy["4. Deploy"]
+        Scan["deputy scan --policy"]
+        Proxy["deputy proxy serve"]
+    end
+
+    Write --> Lint
+    Lint --> Test
+    Test --> REPL
+    REPL -.->|"iterate"| Write
+    Test --> Bundle
+    Bundle --> Scan & Proxy
+
+    classDef author fill:#e3f2fd,stroke:#1565c0
+    classDef validate fill:#fff9c4,stroke:#f9a825
+    classDef package fill:#e8f5e9,stroke:#2e7d32
+    classDef deploy fill:#f3e5f5,stroke:#7b1fa2
+
+    class Write author
+    class Lint,Test,REPL validate
+    class Bundle package
+    class Scan,Proxy deploy
+```
 
 ```
 1. Write policy        →  policy.yaml

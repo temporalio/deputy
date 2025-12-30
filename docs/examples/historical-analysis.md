@@ -16,6 +16,155 @@ Deputy supports time-window and as-of views so you can answer:
 
 **Date formats**: `YYYY`, `YYYY-MM`, `YYYY-MM-DD`, or RFC3339
 
+## How Date Filters Work
+
+The following diagrams illustrate how each flag filters vulnerabilities based on their publication dates.
+
+### `--as-of`: Knowledge Cutoff
+
+Shows only vulnerabilities that were publicly known by a specific date:
+
+```mermaid
+gantt
+    title --as-of=2024-06-15 (Knowledge Cutoff)
+    dateFormat YYYY-MM-DD
+    axisFormat %b %Y
+
+    section Vulnerabilities
+    CVE-2024-001 (published Jan 15)    :done, 2024-01-15, 1d
+    CVE-2024-002 (published Mar 20)    :done, 2024-03-20, 1d
+    CVE-2024-003 (published Jun 10)    :done, 2024-06-10, 1d
+    CVE-2024-004 (published Jul 25)    :crit, 2024-07-25, 1d
+    CVE-2024-005 (published Sep 05)    :crit, 2024-09-05, 1d
+
+    section Cutoff
+    Knowledge cutoff                    :milestone, 2024-06-15, 0d
+```
+
+```
+Result: CVE-2024-001, CVE-2024-002, CVE-2024-003 (3 vulnerabilities)
+        CVE-2024-004, CVE-2024-005 excluded (published after cutoff)
+```
+
+### `--published-after`: Start of Window
+
+Shows only vulnerabilities published on or after a specific date:
+
+```mermaid
+gantt
+    title --published-after=2024-04-01 (Start of Window)
+    dateFormat YYYY-MM-DD
+    axisFormat %b %Y
+
+    section Vulnerabilities
+    CVE-2024-001 (published Jan 15)    :crit, 2024-01-15, 1d
+    CVE-2024-002 (published Mar 20)    :crit, 2024-03-20, 1d
+    CVE-2024-003 (published Jun 10)    :done, 2024-06-10, 1d
+    CVE-2024-004 (published Jul 25)    :done, 2024-07-25, 1d
+    CVE-2024-005 (published Sep 05)    :done, 2024-09-05, 1d
+
+    section Window
+    Included window                     :active, 2024-04-01, 180d
+```
+
+```
+Result: CVE-2024-003, CVE-2024-004, CVE-2024-005 (3 vulnerabilities)
+        CVE-2024-001, CVE-2024-002 excluded (published before window)
+```
+
+### `--published-before`: End of Window
+
+Shows only vulnerabilities published before a specific date:
+
+```mermaid
+gantt
+    title --published-before=2024-07-01 (End of Window)
+    dateFormat YYYY-MM-DD
+    axisFormat %b %Y
+
+    section Vulnerabilities
+    CVE-2024-001 (published Jan 15)    :done, 2024-01-15, 1d
+    CVE-2024-002 (published Mar 20)    :done, 2024-03-20, 1d
+    CVE-2024-003 (published Jun 10)    :done, 2024-06-10, 1d
+    CVE-2024-004 (published Jul 25)    :crit, 2024-07-25, 1d
+    CVE-2024-005 (published Sep 05)    :crit, 2024-09-05, 1d
+
+    section Window
+    Included window                     :active, 2024-01-01, 182d
+```
+
+```
+Result: CVE-2024-001, CVE-2024-002, CVE-2024-003 (3 vulnerabilities)
+        CVE-2024-004, CVE-2024-005 excluded (published on/after cutoff)
+```
+
+### Combining Filters: Time Window
+
+Use both `--published-after` and `--published-before` to define a specific time window:
+
+```mermaid
+gantt
+    title --published-after=2024-03-01 --published-before=2024-07-01 (Q2 Window)
+    dateFormat YYYY-MM-DD
+    axisFormat %b %Y
+
+    section Vulnerabilities
+    CVE-2024-001 (published Jan 15)    :crit, 2024-01-15, 1d
+    CVE-2024-002 (published Mar 20)    :done, 2024-03-20, 1d
+    CVE-2024-003 (published Jun 10)    :done, 2024-06-10, 1d
+    CVE-2024-004 (published Jul 25)    :crit, 2024-07-25, 1d
+    CVE-2024-005 (published Sep 05)    :crit, 2024-09-05, 1d
+
+    section Window
+    Q2 2024 window                      :active, 2024-03-01, 122d
+```
+
+```
+Result: CVE-2024-002, CVE-2024-003 (2 vulnerabilities)
+        Only vulnerabilities within the Mar-Jun window are included
+```
+
+### Real-World Scenario: Release Retrospective
+
+This diagram shows a typical scenario where you want to understand what was known when you shipped a release:
+
+```mermaid
+timeline
+    title Security Timeline for v2.0.0 Release
+
+    section Pre-Release
+        2024-03-15 : CVE-2024-1234 published
+                   : (SQL injection in dependency)
+        2024-05-01 : v2.0.0 development begins
+        2024-05-20 : CVE-2024-2345 published
+                   : (XSS vulnerability)
+
+    section Release
+        2024-06-15 : v2.0.0 shipped
+                   : --as-of=2024-06-15 shows
+                   : CVE-2024-1234 and CVE-2024-2345
+
+    section Post-Release
+        2024-07-10 : CVE-2024-3456 published
+                   : (RCE vulnerability)
+        2024-08-20 : Security incident reported
+                   : Post-incident review needed
+```
+
+```console
+# What did we know when we shipped?
+$ deputy scan --ref v2.0.0 --as-of=2024-06-15
+# Shows: CVE-2024-1234, CVE-2024-2345
+
+# What do we know now?
+$ deputy scan --ref v2.0.0
+# Shows: CVE-2024-1234, CVE-2024-2345, CVE-2024-3456
+
+# What was disclosed between ship and incident?
+$ deputy scan --ref v2.0.0 --published-after=2024-06-15 --published-before=2024-08-20
+# Shows: CVE-2024-3456
+```
+
 ## `--as-of` (Knowledge Cutoff)
 
 `--as-of` shows vulnerabilities known up to and including a specific date. This lets you see what your security posture looked like at a point in time, avoiding retroactive bias.
