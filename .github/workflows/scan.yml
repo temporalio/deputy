@@ -1,0 +1,93 @@
+# Security Scan Workflow
+#
+# A composable workflow for vulnerability scanning with Deputy.
+# Call this from any repository to get consistent security scanning.
+#
+# Usage:
+#   jobs:
+#     security:
+#       uses: picatz/deputy/.github/workflows/scan.yml@main
+#       with:
+#         policy: policy/ci/security-gate.yaml
+#       permissions:
+#         security-events: write
+#         contents: read
+
+name: Scan
+
+on:
+  workflow_call:
+    inputs:
+      target:
+        description: 'Path to scan (default: current directory)'
+        type: string
+        required: false
+        default: '.'
+      policy:
+        description: 'Path to policy file'
+        type: string
+        required: false
+        default: ''
+      fail-on-findings:
+        description: 'Fail workflow if vulnerabilities are found'
+        type: boolean
+        required: false
+        default: false
+      fail-on-policy-violation:
+        description: 'Fail workflow on policy violations'
+        type: boolean
+        required: false
+        default: true
+      upload-sarif:
+        description: 'Upload SARIF to GitHub Security tab'
+        type: boolean
+        required: false
+        default: true
+      sarif-category:
+        description: 'SARIF category for GitHub Security'
+        type: string
+        required: false
+        default: 'deputy-scan'
+
+    outputs:
+      findings-count:
+        description: 'Total vulnerabilities found'
+        value: ${{ jobs.scan.outputs.findings-count }}
+      critical-count:
+        description: 'Critical severity count'
+        value: ${{ jobs.scan.outputs.critical-count }}
+      high-count:
+        description: 'High severity count'
+        value: ${{ jobs.scan.outputs.high-count }}
+      policy-violations:
+        description: 'Number of policy violations'
+        value: ${{ jobs.scan.outputs.policy-violations }}
+
+jobs:
+  scan:
+    name: Security Scan
+    runs-on: ubuntu-latest
+
+    outputs:
+      findings-count: ${{ steps.scan.outputs.findings-count }}
+      critical-count: ${{ steps.scan.outputs.critical-count }}
+      high-count: ${{ steps.scan.outputs.high-count }}
+      policy-violations: ${{ steps.scan.outputs.policy-violations }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Deputy
+        uses: picatz/deputy/actions/setup@main
+
+      - name: Run scan
+        id: scan
+        uses: picatz/deputy/actions/scan@main
+        with:
+          target: ${{ inputs.target }}
+          policy: ${{ inputs.policy }}
+          fail-on-findings: ${{ inputs.fail-on-findings }}
+          fail-on-policy-violation: ${{ inputs.fail-on-policy-violation }}
+          upload-sarif: ${{ inputs.upload-sarif }}
+          sarif-category: ${{ inputs.sarif-category }}

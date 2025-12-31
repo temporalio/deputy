@@ -1,0 +1,91 @@
+# Release SBOM Workflow
+#
+# Generates and publishes an SBOM (Software Bill of Materials) on releases.
+# Uploads the SBOM as a release asset and optionally as a workflow artifact.
+#
+# Usage:
+#   jobs:
+#     sbom:
+#       uses: picatz/deputy/.github/workflows/release-sbom.yml@main
+#       with:
+#         format: cyclonedx-json
+#       permissions:
+#         contents: write
+
+name: Release SBOM
+
+on:
+  workflow_call:
+    inputs:
+      target:
+        description: 'Path to scan for dependencies'
+        type: string
+        required: false
+        default: '.'
+      format:
+        description: 'SBOM format (cyclonedx-json or spdx-json)'
+        type: string
+        required: false
+        default: 'cyclonedx-json'
+      output:
+        description: 'Output filename'
+        type: string
+        required: false
+        default: ''
+      upload-release-asset:
+        description: 'Attach SBOM to GitHub release'
+        type: boolean
+        required: false
+        default: true
+      upload-artifact:
+        description: 'Upload SBOM as workflow artifact'
+        type: boolean
+        required: false
+        default: true
+      artifact-name:
+        description: 'Name for the workflow artifact'
+        type: string
+        required: false
+        default: 'sbom'
+
+    outputs:
+      sbom-path:
+        description: 'Path to generated SBOM file'
+        value: ${{ jobs.sbom.outputs.sbom-path }}
+      component-count:
+        description: 'Number of components in SBOM'
+        value: ${{ jobs.sbom.outputs.component-count }}
+
+jobs:
+  sbom:
+    name: Generate SBOM
+    runs-on: ubuntu-latest
+
+    outputs:
+      sbom-path: ${{ steps.sbom.outputs.sbom-path }}
+      component-count: ${{ steps.sbom.outputs.component-count }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Deputy
+        uses: picatz/deputy/actions/setup@main
+
+      - name: Generate SBOM
+        id: sbom
+        uses: picatz/deputy/actions/sbom@main
+        with:
+          target: ${{ inputs.target }}
+          format: ${{ inputs.format }}
+          output: ${{ inputs.output }}
+          upload-artifact: ${{ inputs.upload-artifact }}
+          artifact-name: ${{ inputs.artifact-name }}
+
+      - name: Upload to release
+        if: inputs.upload-release-asset && github.event_name == 'release'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+          SBOM_PATH: ${{ steps.sbom.outputs.sbom-path }}
+        run: gh release upload "$TAG" "$SBOM_PATH"

@@ -12,26 +12,26 @@ import (
 
 // TriageReport represents the summary of a triage analysis.
 type TriageReport struct {
-	Target            Target                      `json:"target"`
-	Stats             vulnerability.Stats         `json:"stats"`
-	TopPackages       []TriagePackageSummary      `json:"topPackages"`
-	PackagesWithVulns int                         `json:"packagesWithVulns"`
+	Target            Target                 `json:"target"`
+	Stats             vulnerability.Stats    `json:"stats"`
+	TopPackages       []TriagePackageSummary `json:"topPackages"`
+	PackagesWithVulns int                    `json:"packagesWithVulns"`
 }
 
 // TriagePackageSummary represents a summary of a single package's vulnerabilities.
 type TriagePackageSummary struct {
-	Package            string                    `json:"package"`
-	Version            string                    `json:"version"`
-	Severity           string                    `json:"severity"`
-	SeverityType       string                    `json:"severityType"`
-	FixVersion         string                    `json:"fixVersion,omitempty"`
-	IsDirect           bool                      `json:"isDirect"`
-	Summary            string                    `json:"summary,omitempty"`
-	SampleIDs          []string                  `json:"sampleIDs,omitempty"`
+	Package            string                         `json:"package"`
+	Version            string                         `json:"version"`
+	Severity           string                         `json:"severity"`
+	SeverityType       string                         `json:"severityType"`
+	FixVersion         string                         `json:"fixVersion,omitempty"`
+	IsDirect           bool                           `json:"isDirect"`
+	Summary            string                         `json:"summary,omitempty"`
+	SampleIDs          []string                       `json:"sampleIDs,omitempty"`
 	AffectedImports    []vulnerability.AffectedImport `json:"affectedImports,omitempty"`
-	DatabaseSpecific   map[string]string         `json:"databaseSpecific,omitempty"`
-	VulnerabilityCount int                       `json:"vulnerabilityCount"`
-	SeverityCounts     map[string]int            `json:"severityCounts,omitempty"`
+	DatabaseSpecific   map[string]string              `json:"databaseSpecific,omitempty"`
+	VulnerabilityCount int                            `json:"vulnerabilityCount"`
+	SeverityCounts     map[string]int                 `json:"severityCounts,omitempty"`
 }
 
 // BuildTriageReport constructs a TriageReport from the target, stats, and consolidated vulnerabilities.

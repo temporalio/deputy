@@ -1,0 +1,123 @@
+# PR Security Gate Workflow
+#
+# Enforces security policies on pull requests by scanning for new vulnerabilities
+# and comparing dependencies between base and head refs.
+#
+# Usage:
+#   jobs:
+#     pr-security:
+#       uses: picatz/deputy/.github/workflows/pr-gate.yml@main
+#       with:
+#         policy: policy/ci/pr-review.yaml
+#       permissions:
+#         security-events: write
+#         contents: read
+#         pull-requests: write
+
+name: PR Gate
+
+on:
+  workflow_call:
+    inputs:
+      target:
+        description: 'Path to scan'
+        type: string
+        required: false
+        default: '.'
+      scan-policy:
+        description: 'Policy file for full scan'
+        type: string
+        required: false
+        default: ''
+      diff-policy:
+        description: 'Policy file for dependency diff'
+        type: string
+        required: false
+        default: ''
+      fail-on-new-vulnerabilities:
+        description: 'Fail if new dependencies introduce vulnerabilities'
+        type: boolean
+        required: false
+        default: true
+      fail-on-policy-violation:
+        description: 'Fail on policy violations'
+        type: boolean
+        required: false
+        default: true
+      upload-sarif:
+        description: 'Upload SARIF to GitHub Security tab'
+        type: boolean
+        required: false
+        default: true
+      comment-on-pr:
+        description: 'Post diff summary as PR comment'
+        type: boolean
+        required: false
+        default: true
+
+    outputs:
+      findings-count:
+        description: 'Total vulnerabilities found'
+        value: ${{ jobs.scan.outputs.findings-count }}
+      added-deps:
+        description: 'Number of added dependencies'
+        value: ${{ jobs.diff.outputs.added-count }}
+      new-vulnerabilities:
+        description: 'Vulnerabilities in new dependencies'
+        value: ${{ jobs.diff.outputs.new-vulnerabilities }}
+
+jobs:
+  scan:
+    name: Security Scan
+    runs-on: ubuntu-latest
+
+    outputs:
+      findings-count: ${{ steps.scan.outputs.findings-count }}
+      critical-count: ${{ steps.scan.outputs.critical-count }}
+      high-count: ${{ steps.scan.outputs.high-count }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Deputy
+        uses: picatz/deputy/actions/setup@main
+
+      - name: Run scan
+        id: scan
+        uses: picatz/deputy/actions/scan@main
+        with:
+          target: ${{ inputs.target }}
+          policy: ${{ inputs.scan-policy }}
+          fail-on-policy-violation: ${{ inputs.fail-on-policy-violation }}
+          upload-sarif: ${{ inputs.upload-sarif }}
+          sarif-category: deputy-pr-scan
+
+  diff:
+    name: Dependency Diff
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+
+    outputs:
+      added-count: ${{ steps.diff.outputs.added-count }}
+      removed-count: ${{ steps.diff.outputs.removed-count }}
+      new-vulnerabilities: ${{ steps.diff.outputs.new-vulnerabilities }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Deputy
+        uses: picatz/deputy/actions/setup@main
+
+      - name: Run diff
+        id: diff
+        uses: picatz/deputy/actions/diff@main
+        with:
+          base: ${{ github.base_ref }}
+          target: ${{ github.head_ref }}
+          policy: ${{ inputs.diff-policy }}
+          comment-on-pr: ${{ inputs.comment-on-pr }}
+          fail-on-new-vulnerabilities: ${{ inputs.fail-on-new-vulnerabilities }}

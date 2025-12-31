@@ -52,10 +52,10 @@ func Test_ProcessOSVVulnerability_no_aliases_severity(t *testing.T) {
 
 func Test_resolveSeverity(t *testing.T) {
 	tests := []struct {
-		name         string
-		vuln         osvschema.Vulnerability
-		wantScore    string
-		wantType     string
+		name      string
+		vuln      osvschema.Vulnerability
+		wantScore string
+		wantType  string
 	}{
 		{
 			name: "CVSS_V3 takes priority for non-GHSA",

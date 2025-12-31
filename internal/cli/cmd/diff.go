@@ -257,11 +257,11 @@ func adjustLicenseOptions(useLicenseCheck bool, enrichLicenses bool, licenseSour
 
 // DiffPolicyReport captures the full context of a diff operation for policy evaluation.
 type DiffPolicyReport struct {
-	Repo            string                   `json:"repo"`
-	BaseRef         string                   `json:"baseRef"`
-	TargetRef       string                   `json:"targetRef"`
-	Changes         []compare.Change         `json:"changes"`
-	Vulnerabilities []report.Vulnerability   `json:"vulnerabilities"`
+	Repo            string                 `json:"repo"`
+	BaseRef         string                 `json:"baseRef"`
+	TargetRef       string                 `json:"targetRef"`
+	Changes         []compare.Change       `json:"changes"`
+	Vulnerabilities []report.Vulnerability `json:"vulnerabilities"`
 }
 
 // runDiffAnalysis orchestrates dependency inventory collection for the base and

@@ -1,0 +1,251 @@
+name: 'Deputy Scan'
+description: 'Detect vulnerabilities with CEL-powered policies. Uploads SARIF to GitHub Security tab. Supports Go, npm, Python, Maven, and more.'
+author: 'picatz'
+
+branding:
+  icon: 'shield'
+  color: 'blue'
+
+inputs:
+  # Target configuration
+  target:
+    description: 'Path to scan (default: current directory)'
+    required: false
+    default: '.'
+  ref:
+    description: 'Git reference to scan (branch, tag, or commit)'
+    required: false
+    default: 'HEAD'
+  ecosystems:
+    description: 'Ecosystems to scan (comma-separated: go,npm,pypi,maven,etc.)'
+    required: false
+    default: 'all'
+
+  # Output configuration
+  format:
+    description: 'Output format (sarif, json, text)'
+    required: false
+    default: 'sarif'
+  output:
+    description: 'Output file path'
+    required: false
+    default: 'deputy-results.sarif'
+
+  # Filtering
+  ignore-unfixed:
+    description: 'Ignore vulnerabilities without fixes'
+    required: false
+    default: 'false'
+
+  # Policy
+  policy:
+    description: 'Path to policy file(s) for evaluation (comma-separated)'
+    required: false
+    default: ''
+
+  # GitHub integration
+  upload-sarif:
+    description: 'Upload SARIF to GitHub Security tab'
+    required: false
+    default: 'true'
+  sarif-category:
+    description: 'Category for SARIF results (unique per scan type)'
+    required: false
+    default: 'deputy-scan'
+  github-token:
+    description: 'Token for SARIF upload and API access'
+    required: false
+    default: ${{ github.token }}
+
+  # Behavior
+  fail-on-findings:
+    description: 'Fail action if vulnerabilities are found'
+    required: false
+    default: 'false'
+  fail-on-policy-violation:
+    description: 'Fail action if policy violations are found'
+    required: false
+    default: 'true'
+
+outputs:
+  sarif:
+    description: 'Path to SARIF output file'
+    value: ${{ steps.scan.outputs.sarif }}
+  findings-count:
+    description: 'Total number of vulnerabilities found'
+    value: ${{ steps.scan.outputs.findings-count }}
+  critical-count:
+    description: 'Number of CRITICAL severity findings'
+    value: ${{ steps.scan.outputs.critical-count }}
+  high-count:
+    description: 'Number of HIGH severity findings'
+    value: ${{ steps.scan.outputs.high-count }}
+  policy-violations:
+    description: 'Number of policy violations'
+    value: ${{ steps.scan.outputs.policy-violations }}
+  exit-code:
+    description: 'Deputy exit code'
+    value: ${{ steps.scan.outputs.exit-code }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Run Deputy Scan
+      id: scan
+      shell: bash
+      env:
+        GITHUB_TOKEN: ${{ inputs.github-token }}
+        INPUT_TARGET: ${{ inputs.target }}
+        INPUT_REF: ${{ inputs.ref }}
+        INPUT_ECOSYSTEMS: ${{ inputs.ecosystems }}
+        INPUT_FORMAT: ${{ inputs.format }}
+        INPUT_OUTPUT: ${{ inputs.output }}
+        INPUT_IGNORE_UNFIXED: ${{ inputs.ignore-unfixed }}
+        INPUT_POLICY: ${{ inputs.policy }}
+      run: |
+        set -euo pipefail
+
+        # Build command arguments as array (safer than string concatenation)
+        ARGS=(scan)
+
+        # Add target if not current directory
+        if [ "$INPUT_TARGET" != "." ]; then
+          ARGS+=("$INPUT_TARGET")
+        fi
+
+        # Add options
+        ARGS+=(--ref "$INPUT_REF")
+        ARGS+=(--format "$INPUT_FORMAT")
+        ARGS+=(--output "$INPUT_OUTPUT")
+
+        if [ "$INPUT_ECOSYSTEMS" != "all" ]; then
+          ARGS+=(--ecosystems "$INPUT_ECOSYSTEMS")
+        fi
+
+        if [ "$INPUT_IGNORE_UNFIXED" = "true" ]; then
+          ARGS+=(--ignore-unfixed)
+        fi
+
+        # Add policy files if specified
+        if [ -n "$INPUT_POLICY" ]; then
+          IFS=',' read -ra POLICIES <<< "$INPUT_POLICY"
+          for policy in "${POLICIES[@]}"; do
+            ARGS+=(--policy "$policy")
+          done
+        fi
+
+        echo "Running: deputy ${ARGS[*]}"
+
+        # Run scan and capture exit code
+        set +e
+        deputy "${ARGS[@]}" 2>&1
+        EXIT_CODE=$?
+        set -e
+
+        echo "exit-code=$EXIT_CODE" >> "$GITHUB_OUTPUT"
+        echo "sarif=$INPUT_OUTPUT" >> "$GITHUB_OUTPUT"
+
+        # Parse results for counts (SARIF format)
+        # Uses security-severity from rule properties: CRITICAL >= 9.0, HIGH >= 7.0
+        if [ -f "$INPUT_OUTPUT" ] && [ "$INPUT_FORMAT" = "sarif" ]; then
+          FINDINGS=$(jq -r '.runs[0].results | length // 0' "$INPUT_OUTPUT" 2>/dev/null || echo "0")
+
+          # Count by security-severity score (CRITICAL: 9.0+, HIGH: 7.0-8.9)
+          # Build a map of ruleId -> security-severity, then count results by severity
+          CRITICAL=$(jq -r '
+            (.runs[0].tool.driver.rules // []) as $rules |
+            [.runs[0].results[] |
+              . as $r |
+              ($rules | map(select(.id == $r.ruleId)) | .[0].properties."security-severity" // 0) as $sev |
+              select($sev >= 9.0)
+            ] | length
+          ' "$INPUT_OUTPUT" 2>/dev/null || echo "0")
+
+          HIGH=$(jq -r '
+            (.runs[0].tool.driver.rules // []) as $rules |
+            [.runs[0].results[] |
+              . as $r |
+              ($rules | map(select(.id == $r.ruleId)) | .[0].properties."security-severity" // 0) as $sev |
+              select($sev >= 7.0 and $sev < 9.0)
+            ] | length
+          ' "$INPUT_OUTPUT" 2>/dev/null || echo "0")
+
+          VIOLATIONS=$(jq -r '[.runs[0].results[] | select(.ruleId | startswith("policy/"))] | length // 0' "$INPUT_OUTPUT" 2>/dev/null || echo "0")
+
+          echo "findings-count=$FINDINGS" >> "$GITHUB_OUTPUT"
+          echo "critical-count=$CRITICAL" >> "$GITHUB_OUTPUT"
+          echo "high-count=$HIGH" >> "$GITHUB_OUTPUT"
+          echo "policy-violations=$VIOLATIONS" >> "$GITHUB_OUTPUT"
+
+          echo "Found $FINDINGS vulnerabilities ($CRITICAL critical, $HIGH high), $VIOLATIONS policy violations"
+        else
+          echo "findings-count=0" >> "$GITHUB_OUTPUT"
+          echo "critical-count=0" >> "$GITHUB_OUTPUT"
+          echo "high-count=0" >> "$GITHUB_OUTPUT"
+          echo "policy-violations=0" >> "$GITHUB_OUTPUT"
+        fi
+
+        # Store exit code for later check
+        echo "DEPUTY_EXIT_CODE=$EXIT_CODE" >> "$GITHUB_ENV"
+
+    - name: Upload SARIF to GitHub Security
+      if: inputs.upload-sarif == 'true' && inputs.format == 'sarif' && always()
+      uses: github/codeql-action/upload-sarif@v3
+      with:
+        sarif_file: ${{ inputs.output }}
+        category: ${{ inputs.sarif-category }}
+      continue-on-error: true
+
+    - name: Check failure conditions
+      shell: bash
+      env:
+        INPUT_FAIL_ON_FINDINGS: ${{ inputs.fail-on-findings }}
+        INPUT_FAIL_ON_POLICY_VIOLATION: ${{ inputs.fail-on-policy-violation }}
+        FINDINGS: ${{ steps.scan.outputs.findings-count }}
+        VIOLATIONS: ${{ steps.scan.outputs.policy-violations }}
+      run: |
+        EXIT_CODE="${DEPUTY_EXIT_CODE:-0}"
+
+        # Check for vulnerability findings
+        if [ "$INPUT_FAIL_ON_FINDINGS" = "true" ] && [ "$FINDINGS" -gt 0 ]; then
+          echo "::error::Found $FINDINGS vulnerabilities"
+          exit 1
+        fi
+
+        # Check for policy violations
+        if [ "$INPUT_FAIL_ON_POLICY_VIOLATION" = "true" ] && [ "$VIOLATIONS" -gt 0 ]; then
+          echo "::error::Found $VIOLATIONS policy violations"
+          exit 1
+        fi
+
+        # Check deputy exit code for policy deny actions
+        if [ "$INPUT_FAIL_ON_POLICY_VIOLATION" = "true" ] && [ "$EXIT_CODE" != "0" ]; then
+          echo "::error::Deputy scan failed with exit code $EXIT_CODE (policy violation)"
+          exit 1
+        fi
+
+        echo "Scan completed successfully"
+
+    - name: Write job summary
+      if: always()
+      shell: bash
+      env:
+        FINDINGS: ${{ steps.scan.outputs.findings-count }}
+        CRITICAL: ${{ steps.scan.outputs.critical-count }}
+        HIGH: ${{ steps.scan.outputs.high-count }}
+        VIOLATIONS: ${{ steps.scan.outputs.policy-violations }}
+      run: |
+        {
+          echo "## Deputy Scan Results"
+          echo ""
+          echo "| Metric | Count |"
+          echo "|--------|-------|"
+          echo "| Total Vulnerabilities | ${FINDINGS:-0} |"
+          echo "| Critical | ${CRITICAL:-0} |"
+          echo "| High | ${HIGH:-0} |"
+          echo "| Policy Violations | ${VIOLATIONS:-0} |"
+          echo ""
+          if [ "${FINDINGS:-0}" -eq 0 ]; then
+            echo "> No vulnerabilities found"
+          fi
+        } >> "$GITHUB_STEP_SUMMARY"

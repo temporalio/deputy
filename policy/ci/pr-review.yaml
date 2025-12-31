@@ -1,0 +1,64 @@
+# PR Review Policy (Starter Template)
+#
+# A starting point for PR-focused dependency checks. Review and adjust
+# the license allowlist and severity thresholds for your organization.
+#
+# This template:
+# - Blocks new dependencies with critical/high vulnerabilities
+# - Warns on licenses outside a common permissive list
+# - Warns on pre-release versions
+#
+# Customize by editing the permissive_licenses list, adjusting severity
+# levels, or adding checks for deprecated packages.
+#
+# Usage:
+#   deputy diff main HEAD --policy policy/ci/pr-review.yaml
+#
+# Or in GitHub Actions:
+#   - uses: picatz/deputy/actions/diff@main
+#     with:
+#       policy: policy/ci/pr-review.yaml
+
+policies:
+  # Block critical/high vulnerabilities in new dependencies
+  - name: pr-block-vulnerable-deps
+    description: Block PRs adding dependencies with critical/high vulnerabilities
+    rules:
+      - action: deny
+        when: vulnerabilities.exists(v, v.severity in ["CRITICAL", "HIGH"])
+        reason: New dependency introduces critical/high severity vulnerabilities
+        remediation: Choose a version or package without known vulnerabilities
+
+  # Check license compatibility
+  - name: pr-license-check
+    description: Ensure dependencies have acceptable licenses
+    vars:
+      permissive_licenses:
+        - MIT
+        - Apache-2.0
+        - BSD-2-Clause
+        - BSD-3-Clause
+        - ISC
+        - MPL-2.0
+        - CC0-1.0
+        - Unlicense
+        - 0BSD
+    rules:
+      - action: warn
+        when: pkg.licenses.size() > 0 && pkg.licenses.all(l, !(l in permissive_licenses))
+        reason: Dependency uses a license not in the approved list
+        remediation: Review license compatibility with your project
+
+      - action: warn
+        when: pkg.licenses.size() == 0
+        reason: No license information detected
+        remediation: Verify the dependency's license manually
+
+  # Warn on pre-release versions
+  - name: pr-prerelease-check
+    description: Warn when adding pre-release versions
+    rules:
+      - action: warn
+        when: pkg.version.matches("-(alpha|beta|rc|preview|dev|snapshot)")
+        reason: Adding a pre-release dependency version
+        remediation: Consider using a stable release for production code

@@ -378,7 +378,6 @@ func levenshteinDistance(a, b string) int {
 	return prev[la]
 }
 
-
 // newPolicyTestCommand creates the `test` subcommand for running policy tests.
 func newPolicyTestCommand() *cobra.Command {
 	cmd := &cobra.Command{

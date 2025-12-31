@@ -1,0 +1,190 @@
+name: 'Deputy SBOM'
+description: 'Generate Software Bill of Materials for compliance and transparency. Outputs CycloneDX or SPDX with license enrichment.'
+author: 'picatz'
+
+branding:
+  icon: 'package'
+  color: 'green'
+
+inputs:
+  # Target configuration
+  target:
+    description: 'Path to analyze'
+    required: false
+    default: '.'
+  ref:
+    description: 'Git reference'
+    required: false
+    default: 'HEAD'
+
+  # Output configuration
+  format:
+    description: 'SBOM format (cyclonedx-json, spdx-json, protobom-json)'
+    required: false
+    default: 'cyclonedx-json'
+  output:
+    description: 'Output file path'
+    required: false
+    default: 'sbom.json'
+  name:
+    description: 'SBOM document name'
+    required: false
+    default: ''
+
+  # License enrichment
+  enrich-licenses:
+    description: 'Add license information to SBOM'
+    required: false
+    default: 'true'
+  license-source:
+    description: 'License source (depsdev, scan, both)'
+    required: false
+    default: 'depsdev'
+
+  # Policy
+  policy:
+    description: 'Policy file(s) for SBOM validation (comma-separated)'
+    required: false
+    default: ''
+
+  # GitHub integration
+  upload-artifact:
+    description: 'Upload SBOM as GitHub artifact'
+    required: false
+    default: 'true'
+  artifact-name:
+    description: 'Artifact name'
+    required: false
+    default: 'sbom'
+  retention-days:
+    description: 'Artifact retention days'
+    required: false
+    default: '90'
+  github-token:
+    description: 'GitHub token for API access'
+    required: false
+    default: ${{ github.token }}
+
+outputs:
+  sbom-path:
+    description: 'Path to generated SBOM file'
+    value: ${{ steps.sbom.outputs.sbom-path }}
+  filename:
+    description: 'SBOM filename (basename only, for display/logs)'
+    value: ${{ steps.sbom.outputs.filename }}
+  format:
+    description: 'SBOM format used'
+    value: ${{ steps.sbom.outputs.format }}
+  component-count:
+    description: 'Number of components in SBOM'
+    value: ${{ steps.sbom.outputs.component-count }}
+  artifact-name:
+    description: 'Name of uploaded artifact (for downloading in other jobs)'
+    value: ${{ steps.sbom.outputs.artifact-name }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Generate SBOM
+      id: sbom
+      shell: bash
+      env:
+        GITHUB_TOKEN: ${{ inputs.github-token }}
+        INPUT_TARGET: ${{ inputs.target }}
+        INPUT_REF: ${{ inputs.ref }}
+        INPUT_FORMAT: ${{ inputs.format }}
+        INPUT_OUTPUT: ${{ inputs.output }}
+        INPUT_NAME: ${{ inputs.name }}
+        INPUT_ENRICH_LICENSES: ${{ inputs.enrich-licenses }}
+        INPUT_LICENSE_SOURCE: ${{ inputs.license-source }}
+        INPUT_POLICY: ${{ inputs.policy }}
+        INPUT_ARTIFACT_NAME: ${{ inputs.artifact-name }}
+      run: |
+        set -euo pipefail
+
+        # Build command arguments as array (avoids eval)
+        ARGS=(sbom)
+
+        # Add target if not current directory
+        if [ "$INPUT_TARGET" != "." ]; then
+          ARGS+=("$INPUT_TARGET")
+        fi
+
+        # Add options
+        ARGS+=(--ref "$INPUT_REF")
+        ARGS+=(--format "$INPUT_FORMAT")
+        ARGS+=(--output "$INPUT_OUTPUT")
+
+        if [ -n "$INPUT_NAME" ]; then
+          ARGS+=(--name "$INPUT_NAME")
+        fi
+
+        if [ "$INPUT_ENRICH_LICENSES" = "true" ]; then
+          ARGS+=(--enrich-licenses --license-source "$INPUT_LICENSE_SOURCE")
+        fi
+
+        # Add policy files if specified
+        if [ -n "$INPUT_POLICY" ]; then
+          IFS=',' read -ra POLICIES <<< "$INPUT_POLICY"
+          for policy in "${POLICIES[@]}"; do
+            ARGS+=(--policy "$policy")
+          done
+        fi
+
+        echo "Running: deputy ${ARGS[*]}"
+        deputy "${ARGS[@]}"
+
+        echo "sbom-path=$INPUT_OUTPUT" >> "$GITHUB_OUTPUT"
+        echo "filename=$(basename "$INPUT_OUTPUT")" >> "$GITHUB_OUTPUT"
+        echo "format=$INPUT_FORMAT" >> "$GITHUB_OUTPUT"
+        echo "artifact-name=$INPUT_ARTIFACT_NAME" >> "$GITHUB_OUTPUT"
+
+        # Count components
+        if [ -f "$INPUT_OUTPUT" ]; then
+          case "$INPUT_FORMAT" in
+            cyclonedx-json)
+              COUNT=$(jq '.components | length // 0' "$INPUT_OUTPUT" 2>/dev/null || echo "0")
+              ;;
+            spdx-json)
+              COUNT=$(jq '.packages | length // 0' "$INPUT_OUTPUT" 2>/dev/null || echo "0")
+              ;;
+            *)
+              COUNT="0"
+              ;;
+          esac
+          echo "component-count=$COUNT" >> "$GITHUB_OUTPUT"
+          echo "Generated SBOM with $COUNT components"
+        else
+          echo "component-count=0" >> "$GITHUB_OUTPUT"
+        fi
+
+    - name: Upload SBOM Artifact
+      if: inputs.upload-artifact == 'true'
+      uses: actions/upload-artifact@v4
+      with:
+        name: ${{ inputs.artifact-name }}
+        path: ${{ inputs.output }}
+        retention-days: ${{ inputs.retention-days }}
+
+    - name: Write job summary
+      if: always()
+      shell: bash
+      env:
+        SBOM_PATH: ${{ steps.sbom.outputs.sbom-path }}
+        FORMAT: ${{ steps.sbom.outputs.format }}
+        COMPONENTS: ${{ steps.sbom.outputs.component-count }}
+        ARTIFACT: ${{ steps.sbom.outputs.artifact-name }}
+        UPLOAD: ${{ inputs.upload-artifact }}
+      run: |
+        {
+          echo "## Deputy SBOM Generated"
+          echo ""
+          echo "| Property | Value |"
+          echo "|----------|-------|"
+          echo "| Format | ${FORMAT:-unknown} |"
+          echo "| Components | ${COMPONENTS:-0} |"
+          echo "| Output | \`${SBOM_PATH:-sbom.json}\` |"
+          if [ "$UPLOAD" = "true" ]; then
+            echo "| Artifact | ${ARTIFACT:-sbom} |"
+          fi
+        } >> "$GITHUB_STEP_SUMMARY"

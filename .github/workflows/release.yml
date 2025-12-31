@@ -1,0 +1,88 @@
+# Release - Build and publish with GoReleaser
+#
+# Triggered on version tags. Runs security gate, builds cross-platform
+# binaries with GoReleaser, generates SBOM with Deputy (dogfooding).
+
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write        # Release creation and asset uploads
+  security-events: write # SARIF upload for security scan
+  id-token: write        # Sigstore OIDC keyless signing
+  pull-requests: write   # Homebrew cask PR creation
+
+jobs:
+  # Security gate before release
+  security:
+    name: Security Gate
+    uses: picatz/deputy/.github/workflows/scan.yml@main
+    with:
+      policy: policy/ci/release-gate.yaml
+      fail-on-policy-violation: true
+      upload-sarif: true
+      sarif-category: deputy-release-scan
+
+  # Build and release with GoReleaser
+  release:
+    name: Release
+    needs: security
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Install Cosign
+        uses: sigstore/cosign-installer@v3
+
+      - name: Run GoReleaser
+        uses: goreleaser/goreleaser-action@v6
+        with:
+          distribution: goreleaser
+          version: "~> v2"
+          args: release --clean
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # Generate SBOM with Deputy (dogfooding)
+      - name: Setup Deputy
+        uses: picatz/deputy/actions/setup@main
+
+      - name: Generate and sign SBOM
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          # Generate SBOMs with Deputy (dogfooding)
+          deputy sbom --format cyclonedx-json --output "deputy_${TAG}.sbom.cdx.json"
+          deputy sbom --format spdx-json --output "deputy_${TAG}.sbom.spdx.json"
+
+          # Sign SBOMs with Cosign (keyless, bundle format)
+          cosign sign-blob --yes \
+            --bundle "deputy_${TAG}.sbom.cdx.json.bundle.json" \
+            "deputy_${TAG}.sbom.cdx.json"
+
+          cosign sign-blob --yes \
+            --bundle "deputy_${TAG}.sbom.spdx.json.bundle.json" \
+            "deputy_${TAG}.sbom.spdx.json"
+
+      - name: Upload SBOM to release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          gh release upload "$TAG" \
+            "deputy_${TAG}.sbom.cdx.json" \
+            "deputy_${TAG}.sbom.cdx.json.bundle.json" \
+            "deputy_${TAG}.sbom.spdx.json" \
+            "deputy_${TAG}.sbom.spdx.json.bundle.json"

@@ -21,13 +21,13 @@ type baseHandler struct {
 
 // handlerConfig specifies how to initialize a baseHandler for a specific ecosystem.
 type handlerConfig struct {
-	ecosystem     string
-	osvEcosystem  string // OSV ecosystem name (e.g., "Go", "npm", "PyPI", "RubyGems")
-	upstream      string
-	policies      PolicyEvaluator
-	wantLicenses  bool
-	osvCache      OSVCache     // optional, uses global cache if nil
-	licenseCache  LicenseCache // optional, uses global cache if nil
+	ecosystem    string
+	osvEcosystem string // OSV ecosystem name (e.g., "Go", "npm", "PyPI", "RubyGems")
+	upstream     string
+	policies     PolicyEvaluator
+	wantLicenses bool
+	osvCache     OSVCache     // optional, uses global cache if nil
+	licenseCache LicenseCache // optional, uses global cache if nil
 }
 
 // newBaseHandler creates a baseHandler with the common initialization logic.

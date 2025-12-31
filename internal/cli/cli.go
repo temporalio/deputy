@@ -17,6 +17,7 @@ import (
 	"github.com/picatz/deputy/internal/otel"
 	"github.com/picatz/deputy/internal/scan"
 	_ "github.com/picatz/deputy/internal/targets/providers"
+	"github.com/picatz/deputy/internal/version"
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
 )
@@ -38,7 +39,7 @@ func Run(ctx context.Context) error {
 		}
 	}()
 
-	return fang.Execute(ctx, newRoot(), fang.WithErrorHandler(silentErrorHandler))
+	return fang.Execute(ctx, newRoot(), fang.WithErrorHandler(silentErrorHandler), fang.WithVersion(version.Value))
 }
 
 // loadOTelConfig returns OTel configuration from environment and config file.

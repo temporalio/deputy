@@ -47,12 +47,12 @@ func NewTransport() *http.Transport {
 			Timeout:   DefaultDialTimeout,
 			KeepAlive: DefaultKeepAlive,
 		}).DialContext,
-		ForceAttemptHTTP2:      true,
-		MaxIdleConns:           DefaultMaxIdleConns,
-		MaxIdleConnsPerHost:    DefaultMaxIdleConnsPerHost,
-		IdleConnTimeout:        DefaultIdleConnTimeout,
-		TLSHandshakeTimeout:    DefaultTLSHandshakeTimeout,
-		ResponseHeaderTimeout:  DefaultResponseHeaderTimeout,
+		ForceAttemptHTTP2:     true,
+		MaxIdleConns:          DefaultMaxIdleConns,
+		MaxIdleConnsPerHost:   DefaultMaxIdleConnsPerHost,
+		IdleConnTimeout:       DefaultIdleConnTimeout,
+		TLSHandshakeTimeout:   DefaultTLSHandshakeTimeout,
+		ResponseHeaderTimeout: DefaultResponseHeaderTimeout,
 	}
 }
 

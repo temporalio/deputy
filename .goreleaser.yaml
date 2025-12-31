@@ -1,0 +1,143 @@
+# GoReleaser configuration for Deputy
+# yaml-language-server: $schema=https://goreleaser.com/static/schema.json
+# https://goreleaser.com
+
+version: 2
+
+project_name: deputy
+
+before:
+  hooks:
+    - go mod tidy
+    - go generate ./...
+
+builds:
+  - id: deputy
+    main: .
+    binary: deputy
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+      - windows
+    goarch:
+      - amd64
+      - arm64
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w
+      - -X github.com/picatz/deputy/internal/version.Value={{.Version}}
+    mod_timestamp: "{{ .CommitTimestamp }}"
+
+archives:
+  - id: default
+    formats:
+      - tar.gz
+    format_overrides:
+      - goos: windows
+        formats:
+          - zip
+    name_template: >-
+      {{ .ProjectName }}_
+      {{- .Version }}_
+      {{- .Os }}_
+      {{- .Arch }}
+    files:
+      - LICENSE
+      - README.md
+
+checksum:
+  name_template: "checksums.txt"
+  algorithm: sha256
+
+snapshot:
+  version_template: "{{ incpatch .Version }}-next+{{.ShortCommit}}"
+
+changelog:
+  sort: asc
+  use: github
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^chore:"
+      - "^ci:"
+      - Merge pull request
+      - Merge branch
+  groups:
+    - title: Features
+      regexp: '^.*?feat(\([[:word:]]+\))??!?:.+$'
+      order: 0
+    - title: Bug Fixes
+      regexp: '^.*?fix(\([[:word:]]+\))??!?:.+$'
+      order: 1
+    - title: Security
+      regexp: '^.*?sec(\([[:word:]]+\))??!?:.+$'
+      order: 2
+    - title: Others
+      order: 999
+
+signs:
+  - id: cosign
+    cmd: cosign
+    signature: "${artifact}.bundle.json"
+    args:
+      - sign-blob
+      - "--bundle=${signature}"
+      - "${artifact}"
+      - --yes
+    artifacts: checksum
+    output: true
+
+# SBOM generation is handled separately by Deputy itself (dogfooding)
+# See .github/workflows/release.yml
+
+homebrew_casks:
+  - name: deputy
+    repository:
+      owner: picatz
+      name: deputy
+      branch: main
+      pull_request:
+        enabled: true
+        base:
+          owner: picatz
+          name: deputy
+          branch: main
+    homepage: "https://github.com/picatz/deputy"
+    description: "Software supply chain security CLI"
+    license: "MIT"
+    binaries:
+      - deputy
+
+release:
+  github:
+    owner: picatz
+    name: deputy
+  draft: false
+  prerelease: auto
+  mode: replace
+  header: |
+    ## Deputy {{ .Version }}
+
+    Supply chain security for your dependencies.
+
+    ### Install
+
+    ```bash
+    # Homebrew
+    brew install --cask picatz/deputy/deputy
+
+    # Go
+    go install github.com/picatz/deputy@{{ .Tag }}
+
+    # Binary
+    # Download from assets below
+    ```
+  footer: |
+    **Full Changelog**: https://github.com/picatz/deputy/compare/{{ .PreviousTag }}...{{ .Tag }}
+
+    ---
+    Released with [GoReleaser](https://goreleaser.com).

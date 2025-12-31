@@ -1,0 +1,42 @@
+# Security - Vulnerability Scanning
+#
+# Deputy scanning itself (dogfooding). Runs on pushes, PRs, and weekly.
+# Uses Deputy's own reusable workflow for consistent scanning.
+
+name: Security
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    # Weekly scan on Mondays at 9am UTC
+    - cron: '0 9 * * 1'
+  workflow_dispatch:
+
+permissions:
+  security-events: write
+  contents: read
+  pull-requests: write
+
+jobs:
+  # Full security scan on all events
+  scan:
+    name: Scan
+    uses: picatz/deputy/.github/workflows/scan.yml@main
+    with:
+      policy: policy/ci/security-gate.yaml
+      upload-sarif: true
+      sarif-category: deputy-self-scan
+
+  # PR-specific checks with dependency diff
+  pr-gate:
+    name: PR Gate
+    if: github.event_name == 'pull_request'
+    uses: picatz/deputy/.github/workflows/pr-gate.yml@main
+    with:
+      scan-policy: policy/ci/security-gate.yaml
+      diff-policy: policy/ci/pr-review.yaml
+      comment-on-pr: true
+      fail-on-new-vulnerabilities: true

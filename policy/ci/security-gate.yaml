@@ -1,0 +1,48 @@
+# CI Security Gate Policy (Starter Template)
+#
+# A starting point for CI security gates. Review and adjust thresholds
+# to match your organization's risk tolerance.
+#
+# This template:
+# - Blocks critical vulnerabilities (always)
+# - Blocks high severity only when fixes are available
+# - Warns on high severity without fixes
+#
+# Customize by adjusting severity levels, adding license checks,
+# or requiring fixes for medium severity issues.
+#
+# Usage:
+#   deputy scan --policy policy/ci/security-gate.yaml
+#
+# Or in GitHub Actions:
+#   - uses: picatz/deputy/actions/scan@main
+#     with:
+#       policy: policy/ci/security-gate.yaml
+
+policies:
+  # Always block critical vulnerabilities
+  - name: ci-block-critical
+    description: Block CI when critical vulnerabilities are present
+    rules:
+      - action: deny
+        when: vulnerabilities.exists(v, v.severity == "CRITICAL")
+        reason: Critical vulnerability blocks CI pipeline
+        remediation: Upgrade affected packages to patched versions
+
+  # Block high severity only when fixes are available
+  - name: ci-block-fixable-high
+    description: Block high severity vulnerabilities that have fixes
+    rules:
+      - action: deny
+        when: vulnerabilities.exists(v, v.severity == "HIGH" && size(v.fixedVersions) > 0)
+        reason: High severity vulnerability has an available fix
+        remediation: Upgrade to a fixed version
+
+  # Warn on high severity without fixes (informational)
+  - name: ci-warn-unfixable-high
+    description: Warn on high severity without available fixes
+    rules:
+      - action: warn
+        when: vulnerabilities.exists(v, v.severity == "HIGH" && size(v.fixedVersions) == 0)
+        reason: High severity vulnerability (no fix available yet)
+        remediation: Monitor for upstream fix availability

@@ -1,0 +1,59 @@
+# Release Gate Policy (Starter Template)
+#
+# A starting point for production release gates. Review and adjust
+# requirements to match your compliance and security posture.
+#
+# This template:
+# - Blocks critical and high severity vulnerabilities
+# - Requires direct dependencies to be free of medium+ issues
+# - Requires license information on all dependencies
+# - Warns on copyleft licenses (GPL, AGPL)
+#
+# Customize by adjusting severity thresholds, defining an allowlist
+# of approved licenses, or adding SBOM requirements.
+#
+# Usage:
+#   deputy scan --policy policy/ci/release-gate.yaml
+#
+# Or in GitHub Actions (on release events):
+#   - uses: picatz/deputy/actions/scan@main
+#     with:
+#       policy: policy/ci/release-gate.yaml
+#       fail-on-policy-violation: true
+
+policies:
+  # Security: Block any critical or high severity vulnerabilities
+  - name: release-security-gate
+    description: Block releases with critical or high severity vulnerabilities
+    rules:
+      - action: deny
+        when: vulnerabilities.exists(v, v.severity in ["CRITICAL", "HIGH"])
+        reason: Cannot release with critical/high severity vulnerabilities
+        remediation: Resolve all critical and high severity vulnerabilities before release
+
+  # Security: Stricter rules for direct dependencies (medium+ must be addressed)
+  - name: release-direct-deps-clean
+    description: Direct dependencies must be free of medium+ vulnerabilities
+    rules:
+      - action: deny
+        when: vulnerabilities.exists(v, v.isDirect && v.severity == "MEDIUM")
+        reason: Direct dependency has medium severity vulnerability
+        remediation: Update or replace the affected direct dependency
+
+  # Compliance: Require license information
+  - name: release-license-required
+    description: All dependencies must have known licenses
+    rules:
+      - action: deny
+        when: pkg.licenses.size() == 0
+        reason: Dependency has no license information
+        remediation: Verify the dependency's license before release
+
+  # Compliance: Flag copyleft licenses (GPL, AGPL families)
+  - name: release-copyleft-review
+    description: Flag strong copyleft licenses for review
+    rules:
+      - action: warn
+        when: pkg.licenses.exists(l, l.startsWith("GPL") || l.startsWith("AGPL"))
+        reason: Dependency uses a copyleft license
+        remediation: Ensure compliance with copyleft license terms

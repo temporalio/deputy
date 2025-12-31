@@ -1,0 +1,95 @@
+name: 'Setup Deputy'
+description: 'Install the Deputy CLI for supply chain security. Prerequisite for scan, diff, sbom, and proxy actions.'
+author: 'picatz'
+
+branding:
+  icon: 'shield'
+  color: 'blue'
+
+inputs:
+  version:
+    description: 'Deputy version to install (e.g., "latest", "v1.0.0", or commit SHA)'
+    required: false
+    default: 'latest'
+  go-version:
+    description: 'Go version to use (e.g., "stable", "1.23"). Ignored if go-version-file is set.'
+    required: false
+    default: ''
+  go-version-file:
+    description: 'Path to go.mod or go.work file to extract Go version from toolchain/go directive'
+    required: false
+    default: ''
+  github-token:
+    description: 'GitHub token for API access (used for SBOM enrichment, private repos)'
+    required: false
+    default: ''
+
+outputs:
+  version:
+    description: 'Installed Deputy version'
+    value: ${{ steps.install.outputs.version }}
+  path:
+    description: 'Path to Deputy binary'
+    value: ${{ steps.install.outputs.path }}
+  go-version:
+    description: 'Go version used for installation'
+    value: ${{ steps.setup-go.outputs.go-version }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Setup Go
+      id: setup-go
+      uses: actions/setup-go@v5
+      with:
+        # go-version-file takes precedence if set, otherwise fall back to go-version or stable
+        go-version: ${{ inputs.go-version-file == '' && (inputs.go-version || 'stable') || '' }}
+        go-version-file: ${{ inputs.go-version-file }}
+        # Let setup-go handle caching automatically (v4+ behavior)
+        # It uses go.sum as cache key and caches GOCACHE + GOMODCACHE
+        cache: true
+
+    - name: Install Deputy
+      id: install
+      shell: bash
+      env:
+        GITHUB_TOKEN: ${{ inputs.github-token }}
+        INPUT_VERSION: ${{ inputs.version }}
+      run: |
+        set -euo pipefail
+
+        if [ "$INPUT_VERSION" = "latest" ]; then
+          echo "Installing Deputy@latest..."
+          go install github.com/picatz/deputy@latest
+        else
+          echo "Installing Deputy@$INPUT_VERSION..."
+          go install "github.com/picatz/deputy@$INPUT_VERSION"
+        fi
+
+        DEPUTY_PATH="$(go env GOPATH)/bin/deputy"
+
+        if [ ! -f "$DEPUTY_PATH" ]; then
+          echo "::error::Deputy binary not found at $DEPUTY_PATH"
+          exit 1
+        fi
+
+        # Get actual installed version from binary (uses --version flag, not subcommand)
+        INSTALLED_VERSION=$("$DEPUTY_PATH" --version 2>/dev/null | grep -oE 'v?[0-9]+\.[0-9]+\.[0-9]+[^ ]*' | head -1 || echo "$INPUT_VERSION")
+
+        echo "path=$DEPUTY_PATH" >> "$GITHUB_OUTPUT"
+        echo "version=$INSTALLED_VERSION" >> "$GITHUB_OUTPUT"
+
+        echo "Deputy installed successfully at $DEPUTY_PATH (version: $INSTALLED_VERSION)"
+
+    - name: Add to PATH
+      shell: bash
+      run: echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
+
+    - name: Verify installation
+      shell: bash
+      run: |
+        if ! command -v deputy &> /dev/null; then
+          echo "::error::Deputy not found in PATH after installation"
+          exit 1
+        fi
+        echo "Deputy is available in PATH"

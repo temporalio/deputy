@@ -1,0 +1,476 @@
+name: 'Deputy Proxy'
+description: 'Block vulnerable packages at install time. Enforces CEL policies before go get, npm install, or pip install completes.'
+author: 'picatz'
+
+branding:
+  icon: 'shield'
+  color: 'orange'
+
+inputs:
+  # Mode selection
+  mode:
+    description: 'Proxy mode: "local" starts ephemeral proxy, "remote" uses existing proxy server'
+    required: false
+    default: 'local'
+
+  # Remote proxy configuration
+  proxy-url:
+    description: 'URL of remote Deputy proxy (required if mode=remote)'
+    required: false
+    default: ''
+
+  # Local proxy configuration
+  policy:
+    description: 'Policy file(s) for local proxy (comma-separated paths)'
+    required: false
+    default: ''
+  config:
+    description: 'Path to proxy config file (for advanced local proxy configuration)'
+    required: false
+    default: ''
+  upstream-go:
+    description: 'Upstream Go module proxy'
+    required: false
+    default: 'https://proxy.golang.org'
+  upstream-npm:
+    description: 'Upstream npm registry'
+    required: false
+    default: 'https://registry.npmjs.org'
+  upstream-pypi:
+    description: 'Upstream PyPI index'
+    required: false
+    default: 'https://pypi.org'
+  upstream-rubygems:
+    description: 'Upstream RubyGems source'
+    required: false
+    default: 'https://rubygems.org'
+
+  # Ecosystem selection
+  ecosystems:
+    description: 'Ecosystems to proxy (comma-separated: go,npm,pypi,rubygems)'
+    required: false
+    default: 'go,npm'
+
+  # Authentication (for remote proxy)
+  auth-token:
+    description: 'JWT token for authenticated proxy access (use this OR use-oidc, not both)'
+    required: false
+    default: ''
+
+  # GitHub Actions OIDC authentication
+  use-oidc:
+    description: 'Use GitHub Actions OIDC token for authentication (requires id-token: write permission)'
+    required: false
+    default: 'false'
+  oidc-audience:
+    description: 'Audience for OIDC token (defaults to proxy-url for remote mode)'
+    required: false
+    default: ''
+
+  # Behavior
+  fail-on-policy-violation:
+    description: 'Fail workflow if proxy blocks a package'
+    required: false
+    default: 'true'
+  log-level:
+    description: 'Proxy log level (debug, info, warn, error)'
+    required: false
+    default: 'warn'
+
+outputs:
+  proxy-url-go:
+    description: 'Proxy URL for Go modules (use as GOPROXY)'
+    value: ${{ steps.configure.outputs.proxy-url-go }}
+  proxy-url-npm:
+    description: 'Proxy URL for npm/yarn/pnpm/bun (use as NPM_CONFIG_REGISTRY)'
+    value: ${{ steps.configure.outputs.proxy-url-npm }}
+  proxy-url-pypi:
+    description: 'Proxy URL for pip/poetry (use as PIP_INDEX_URL)'
+    value: ${{ steps.configure.outputs.proxy-url-pypi }}
+  proxy-url-rubygems:
+    description: 'Proxy URL for gem/bundler (use as GEM_HOST)'
+    value: ${{ steps.configure.outputs.proxy-url-rubygems }}
+  proxy-pid:
+    description: 'PID of local proxy process (if mode=local)'
+    value: ${{ steps.start-local.outputs.proxy-pid }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Validate inputs
+      shell: bash
+      env:
+        INPUT_MODE: ${{ inputs.mode }}
+        INPUT_PROXY_URL: ${{ inputs.proxy-url }}
+      run: |
+        if [ "$INPUT_MODE" = "remote" ] && [ -z "$INPUT_PROXY_URL" ]; then
+          echo "::error::proxy-url is required when mode=remote"
+          exit 1
+        fi
+
+    - name: Generate local proxy config
+      if: inputs.mode == 'local' && inputs.config == ''
+      id: gen-config
+      shell: bash
+      env:
+        INPUT_ECOSYSTEMS: ${{ inputs.ecosystems }}
+        INPUT_UPSTREAM_GO: ${{ inputs.upstream-go }}
+        INPUT_UPSTREAM_NPM: ${{ inputs.upstream-npm }}
+        INPUT_UPSTREAM_PYPI: ${{ inputs.upstream-pypi }}
+        INPUT_UPSTREAM_RUBYGEMS: ${{ inputs.upstream-rubygems }}
+        INPUT_POLICY: ${{ inputs.policy }}
+      run: |
+        set -euo pipefail
+
+        CONFIG_FILE="${RUNNER_TEMP}/deputy-proxy-config.yaml"
+
+        # Start config
+        cat > "$CONFIG_FILE" << 'EOF'
+        # Auto-generated Deputy proxy config for GitHub Actions
+        listeners:
+        EOF
+
+        PORT=18080
+
+        # Helper function to add policies
+        add_policies() {
+          if [ -n "$INPUT_POLICY" ]; then
+            echo "    policies:" >> "$CONFIG_FILE"
+            IFS=',' read -ra POLICIES <<< "$INPUT_POLICY"
+            for policy in "${POLICIES[@]}"; do
+              echo "      - ${policy}" >> "$CONFIG_FILE"
+            done
+          fi
+        }
+
+        # Add Go listener if requested
+        if echo "$INPUT_ECOSYSTEMS" | grep -q "go"; then
+          cat >> "$CONFIG_FILE" << EOF
+          - name: go-proxy
+            bind: ":${PORT}"
+            ecosystems: ["go"]
+            upstream: "${INPUT_UPSTREAM_GO}"
+        EOF
+          add_policies
+          echo "go-port=$PORT" >> "$GITHUB_OUTPUT"
+          PORT=$((PORT + 1))
+        fi
+
+        # Add npm listener if requested
+        if echo "$INPUT_ECOSYSTEMS" | grep -q "npm"; then
+          cat >> "$CONFIG_FILE" << EOF
+          - name: npm-proxy
+            bind: ":${PORT}"
+            ecosystems: ["npm"]
+            upstream: "${INPUT_UPSTREAM_NPM}"
+        EOF
+          add_policies
+          echo "npm-port=$PORT" >> "$GITHUB_OUTPUT"
+          PORT=$((PORT + 1))
+        fi
+
+        # Add PyPI listener if requested
+        if echo "$INPUT_ECOSYSTEMS" | grep -q "pypi"; then
+          cat >> "$CONFIG_FILE" << EOF
+          - name: pypi-proxy
+            bind: ":${PORT}"
+            ecosystems: ["pypi"]
+            upstream: "${INPUT_UPSTREAM_PYPI}"
+        EOF
+          add_policies
+          echo "pypi-port=$PORT" >> "$GITHUB_OUTPUT"
+          PORT=$((PORT + 1))
+        fi
+
+        # Add RubyGems listener if requested
+        if echo "$INPUT_ECOSYSTEMS" | grep -q "rubygems"; then
+          cat >> "$CONFIG_FILE" << EOF
+          - name: rubygems-proxy
+            bind: ":${PORT}"
+            ecosystems: ["rubygems"]
+            upstream: "${INPUT_UPSTREAM_RUBYGEMS}"
+        EOF
+          add_policies
+          echo "rubygems-port=$PORT" >> "$GITHUB_OUTPUT"
+          PORT=$((PORT + 1))
+        fi
+
+        echo "config-file=$CONFIG_FILE" >> "$GITHUB_OUTPUT"
+        echo "Generated proxy config:"
+        cat "$CONFIG_FILE"
+
+    - name: Start local proxy
+      if: inputs.mode == 'local'
+      id: start-local
+      shell: bash
+      env:
+        INPUT_CONFIG: ${{ inputs.config }}
+        INPUT_LOG_LEVEL: ${{ inputs.log-level }}
+        GEN_CONFIG_FILE: ${{ steps.gen-config.outputs.config-file }}
+        GO_PORT: ${{ steps.gen-config.outputs.go-port }}
+        NPM_PORT: ${{ steps.gen-config.outputs.npm-port }}
+        PYPI_PORT: ${{ steps.gen-config.outputs.pypi-port }}
+        GEMS_PORT: ${{ steps.gen-config.outputs.rubygems-port }}
+      run: |
+        set -euo pipefail
+
+        CONFIG_FILE="${INPUT_CONFIG:-$GEN_CONFIG_FILE}"
+
+        # Determine first available port for health check
+        # Priority: Go > npm > PyPI > RubyGems (first configured listener)
+        HEALTH_CHECK_PORT="${GO_PORT:-${NPM_PORT:-${PYPI_PORT:-${GEMS_PORT:-18080}}}}"
+
+        echo "Starting Deputy proxy with config: $CONFIG_FILE"
+        echo "Health check port: $HEALTH_CHECK_PORT"
+
+        # Start proxy in background
+        DEPUTY_LOG_LEVEL="$INPUT_LOG_LEVEL" nohup deputy proxy serve \
+          --config "$CONFIG_FILE" \
+          --readyz \
+          > "${RUNNER_TEMP}/deputy-proxy.log" 2>&1 &
+
+        PROXY_PID=$!
+        echo "proxy-pid=$PROXY_PID" >> "$GITHUB_OUTPUT"
+
+        # Wait for proxy to be ready
+        echo "Waiting for proxy to start..."
+        for i in {1..30}; do
+          if curl -sf "http://localhost:${HEALTH_CHECK_PORT}/healthz" > /dev/null 2>&1; then
+            echo "Proxy is ready (PID: $PROXY_PID)"
+            break
+          fi
+          if ! kill -0 "$PROXY_PID" 2>/dev/null; then
+            echo "::error::Proxy process died unexpectedly"
+            cat "${RUNNER_TEMP}/deputy-proxy.log"
+            exit 1
+          fi
+          sleep 1
+        done
+
+        if ! curl -sf "http://localhost:${HEALTH_CHECK_PORT}/healthz" > /dev/null 2>&1; then
+          echo "::error::Proxy failed to start within 30 seconds"
+          cat "${RUNNER_TEMP}/deputy-proxy.log"
+          exit 1
+        fi
+
+    - name: Get OIDC token
+      if: inputs.use-oidc == 'true' && inputs.mode == 'remote'
+      id: oidc
+      shell: bash
+      env:
+        INPUT_OIDC_AUDIENCE: ${{ inputs.oidc-audience }}
+        INPUT_PROXY_URL: ${{ inputs.proxy-url }}
+        ACTIONS_ID_TOKEN_REQUEST_URL: ${{ env.ACTIONS_ID_TOKEN_REQUEST_URL }}
+        ACTIONS_ID_TOKEN_REQUEST_TOKEN: ${{ env.ACTIONS_ID_TOKEN_REQUEST_TOKEN }}
+      run: |
+        set -euo pipefail
+
+        # Determine audience: use provided audience or default to proxy URL
+        if [ -n "$INPUT_OIDC_AUDIENCE" ]; then
+          AUDIENCE="$INPUT_OIDC_AUDIENCE"
+        elif [ -n "$INPUT_PROXY_URL" ]; then
+          AUDIENCE="$INPUT_PROXY_URL"
+        else
+          echo "::error::oidc-audience or proxy-url must be set when use-oidc is true"
+          exit 1
+        fi
+
+        echo "Requesting OIDC token for audience: $AUDIENCE"
+
+        # Check if OIDC is available
+        if [ -z "$ACTIONS_ID_TOKEN_REQUEST_URL" ]; then
+          echo "::error::OIDC token not available. Ensure 'permissions: id-token: write' is set in your workflow."
+          exit 1
+        fi
+
+        # Request OIDC token from GitHub
+        OIDC_TOKEN=$(curl -sS -H "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
+          "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=${AUDIENCE}" | jq -r '.value')
+
+        if [ -z "$OIDC_TOKEN" ] || [ "$OIDC_TOKEN" = "null" ]; then
+          echo "::error::Failed to obtain OIDC token from GitHub"
+          exit 1
+        fi
+
+        # Mask the token in logs
+        echo "::add-mask::$OIDC_TOKEN"
+
+        # Export for subsequent steps
+        echo "oidc-token=$OIDC_TOKEN" >> "$GITHUB_OUTPUT"
+        echo "Successfully obtained GitHub Actions OIDC token"
+
+    - name: Configure environment
+      id: configure
+      shell: bash
+      env:
+        INPUT_MODE: ${{ inputs.mode }}
+        INPUT_PROXY_URL: ${{ inputs.proxy-url }}
+        INPUT_ECOSYSTEMS: ${{ inputs.ecosystems }}
+        INPUT_AUTH_TOKEN: ${{ inputs.auth-token }}
+        INPUT_USE_OIDC: ${{ inputs.use-oidc }}
+        OIDC_TOKEN: ${{ steps.oidc.outputs.oidc-token }}
+        INPUT_FAIL_ON_VIOLATION: ${{ inputs.fail-on-policy-violation }}
+        GO_PORT: ${{ steps.gen-config.outputs.go-port }}
+        NPM_PORT: ${{ steps.gen-config.outputs.npm-port }}
+        PYPI_PORT: ${{ steps.gen-config.outputs.pypi-port }}
+        GEMS_PORT: ${{ steps.gen-config.outputs.rubygems-port }}
+      run: |
+        set -euo pipefail
+
+        if [ "$INPUT_MODE" = "remote" ]; then
+          BASE_URL="$INPUT_PROXY_URL"
+        else
+          BASE_URL="http://localhost"
+        fi
+
+        # Configure Go
+        if echo "$INPUT_ECOSYSTEMS" | grep -q "go"; then
+          if [ "$INPUT_MODE" = "remote" ]; then
+            GO_PROXY_URL="${BASE_URL}"
+          else
+            GO_PROXY_URL="http://localhost:${GO_PORT:-18080}"
+          fi
+          echo "GOPROXY=${GO_PROXY_URL},direct" >> "$GITHUB_ENV"
+          echo "proxy-url-go=${GO_PROXY_URL}" >> "$GITHUB_OUTPUT"
+          echo "Configured GOPROXY=${GO_PROXY_URL},direct"
+        fi
+
+        # Configure npm/yarn/pnpm/bun (JavaScript ecosystem)
+        if echo "$INPUT_ECOSYSTEMS" | grep -q "npm"; then
+          if [ "$INPUT_MODE" = "remote" ]; then
+            NPM_PROXY_URL="${BASE_URL}"
+          else
+            NPM_PROXY_URL="http://localhost:${NPM_PORT:-18081}"
+          fi
+          # npm
+          echo "NPM_CONFIG_REGISTRY=${NPM_PROXY_URL}" >> "$GITHUB_ENV"
+          # yarn classic (v1)
+          echo "YARN_REGISTRY=${NPM_PROXY_URL}" >> "$GITHUB_ENV"
+          # yarn berry (v2+) - uses npmRegistryServer
+          echo "YARN_NPM_REGISTRY_SERVER=${NPM_PROXY_URL}" >> "$GITHUB_ENV"
+          # pnpm
+          echo "NPM_CONFIG_REGISTRY=${NPM_PROXY_URL}" >> "$GITHUB_ENV"
+          # bun
+          echo "BUN_CONFIG_REGISTRY=${NPM_PROXY_URL}" >> "$GITHUB_ENV"
+          # For local proxy, disable SSL verification
+          if [ "$INPUT_MODE" = "local" ]; then
+            echo "NPM_CONFIG_STRICT_SSL=false" >> "$GITHUB_ENV"
+            echo "NODE_TLS_REJECT_UNAUTHORIZED=0" >> "$GITHUB_ENV"
+          fi
+          echo "proxy-url-npm=${NPM_PROXY_URL}" >> "$GITHUB_OUTPUT"
+          echo "Configured npm/yarn/pnpm/bun registry: ${NPM_PROXY_URL}"
+        fi
+
+        # Configure pip/PyPI
+        if echo "$INPUT_ECOSYSTEMS" | grep -q "pypi"; then
+          if [ "$INPUT_MODE" = "remote" ]; then
+            PYPI_PROXY_URL="${BASE_URL}"
+          else
+            PYPI_PROXY_URL="http://localhost:${PYPI_PORT:-18082}"
+          fi
+          # pip
+          echo "PIP_INDEX_URL=${PYPI_PROXY_URL}/simple/" >> "$GITHUB_ENV"
+          echo "PIP_TRUSTED_HOST=$(echo "$PYPI_PROXY_URL" | sed 's|https\?://||' | cut -d':' -f1)" >> "$GITHUB_ENV"
+          # poetry
+          echo "POETRY_REPOSITORIES_DEPUTY_URL=${PYPI_PROXY_URL}/simple/" >> "$GITHUB_ENV"
+          # pipenv respects PIP_INDEX_URL
+          echo "proxy-url-pypi=${PYPI_PROXY_URL}" >> "$GITHUB_OUTPUT"
+          echo "Configured pip/poetry index: ${PYPI_PROXY_URL}"
+        fi
+
+        # Configure RubyGems
+        if echo "$INPUT_ECOSYSTEMS" | grep -q "rubygems"; then
+          if [ "$INPUT_MODE" = "remote" ]; then
+            GEMS_PROXY_URL="${BASE_URL}"
+          else
+            GEMS_PROXY_URL="http://localhost:${GEMS_PORT:-18083}"
+          fi
+          # gem command
+          echo "GEM_HOST=${GEMS_PROXY_URL}" >> "$GITHUB_ENV"
+          # bundler mirror
+          echo "BUNDLE_MIRROR__HTTPS://RUBYGEMS__ORG/=${GEMS_PROXY_URL}" >> "$GITHUB_ENV"
+          echo "proxy-url-rubygems=${GEMS_PROXY_URL}" >> "$GITHUB_OUTPUT"
+          echo "Configured gem/bundler source: ${GEMS_PROXY_URL}"
+        fi
+
+        # Configure authentication header for remote proxy
+        # Priority: OIDC token > explicit auth-token
+        AUTH_TOKEN=""
+        if [ "$INPUT_USE_OIDC" = "true" ] && [ -n "$OIDC_TOKEN" ]; then
+          AUTH_TOKEN="$OIDC_TOKEN"
+          echo "Using GitHub Actions OIDC token for authentication"
+        elif [ -n "$INPUT_AUTH_TOKEN" ]; then
+          AUTH_TOKEN="$INPUT_AUTH_TOKEN"
+          echo "Using provided auth-token for authentication"
+        fi
+
+        if [ -n "$AUTH_TOKEN" ]; then
+          echo "DEPUTY_PROXY_TOKEN=${AUTH_TOKEN}" >> "$GITHUB_ENV"
+
+          # For Go, configure authentication via .netrc (only for non-OIDC)
+          # Note: Go sends Basic Auth from .netrc, which requires proxy support
+          # OIDC tokens work best with npm; for Go+OIDC, see proxy README
+          if echo "$INPUT_ECOSYSTEMS" | grep -q "go" && [ "$INPUT_USE_OIDC" != "true" ]; then
+            PROXY_HOST=$(echo "$INPUT_PROXY_URL" | sed 's|https\?://||' | cut -d'/' -f1)
+            # Use "bearer" as login to signal bearer token auth
+            echo "machine ${PROXY_HOST} login bearer password ${AUTH_TOKEN}" >> ~/.netrc
+            chmod 600 ~/.netrc
+            echo "Configured Go proxy authentication for ${PROXY_HOST}"
+          elif echo "$INPUT_ECOSYSTEMS" | grep -q "go" && [ "$INPUT_USE_OIDC" = "true" ]; then
+            echo "::warning::OIDC authentication for Go proxies requires the proxy to accept Basic Auth with bearer tokens. See proxy README for details."
+          fi
+
+          # For npm, set auth token in .npmrc (works with both OIDC and static tokens)
+          if echo "$INPUT_ECOSYSTEMS" | grep -q "npm"; then
+            echo "//$(echo "$INPUT_PROXY_URL" | sed 's|https\?://||')/:_authToken=${AUTH_TOKEN}" >> ~/.npmrc
+            echo "Configured npm proxy authentication"
+          fi
+        fi
+
+    - name: Verify proxy connectivity
+      shell: bash
+      env:
+        INPUT_MODE: ${{ inputs.mode }}
+        INPUT_ECOSYSTEMS: ${{ inputs.ecosystems }}
+        PROXY_URL_GO: ${{ steps.configure.outputs.proxy-url-go }}
+        PROXY_URL_NPM: ${{ steps.configure.outputs.proxy-url-npm }}
+        PROXY_URL_PYPI: ${{ steps.configure.outputs.proxy-url-pypi }}
+        PROXY_URL_RUBYGEMS: ${{ steps.configure.outputs.proxy-url-rubygems }}
+      run: |
+        set -euo pipefail
+
+        echo "Verifying proxy connectivity..."
+
+        if echo "$INPUT_ECOSYSTEMS" | grep -q "go" && [ -n "$PROXY_URL_GO" ]; then
+          if curl -sf "${PROXY_URL_GO}/healthz" > /dev/null 2>&1; then
+            echo "Go proxy is reachable at $PROXY_URL_GO"
+          elif [ "$INPUT_MODE" = "local" ]; then
+            echo "::warning::Go proxy health check failed (may still work)"
+          fi
+        fi
+
+        if echo "$INPUT_ECOSYSTEMS" | grep -q "npm" && [ -n "$PROXY_URL_NPM" ]; then
+          if curl -sf "${PROXY_URL_NPM}/healthz" > /dev/null 2>&1; then
+            echo "npm proxy is reachable at $PROXY_URL_NPM"
+          elif [ "$INPUT_MODE" = "local" ]; then
+            echo "::warning::npm proxy health check failed (may still work)"
+          fi
+        fi
+
+        if echo "$INPUT_ECOSYSTEMS" | grep -q "pypi" && [ -n "$PROXY_URL_PYPI" ]; then
+          if curl -sf "${PROXY_URL_PYPI}/healthz" > /dev/null 2>&1; then
+            echo "PyPI proxy is reachable at $PROXY_URL_PYPI"
+          elif [ "$INPUT_MODE" = "local" ]; then
+            echo "::warning::PyPI proxy health check failed (may still work)"
+          fi
+        fi
+
+        if echo "$INPUT_ECOSYSTEMS" | grep -q "rubygems" && [ -n "$PROXY_URL_RUBYGEMS" ]; then
+          if curl -sf "${PROXY_URL_RUBYGEMS}/healthz" > /dev/null 2>&1; then
+            echo "RubyGems proxy is reachable at $PROXY_URL_RUBYGEMS"
+          elif [ "$INPUT_MODE" = "local" ]; then
+            echo "::warning::RubyGems proxy health check failed (may still work)"
+          fi
+        fi
+
+        echo "Proxy environment configured successfully"

@@ -271,4 +271,3 @@ func ParseLevel(s string) (slog.Level, error) {
 		return slog.LevelInfo, fmt.Errorf("unknown log level: %q", s)
 	}
 }
-

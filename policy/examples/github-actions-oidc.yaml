@@ -1,0 +1,226 @@
+# GitHub Actions OIDC Identity Policies
+#
+# These policies demonstrate how to use GitHub Actions OIDC tokens
+# with Deputy proxy for identity-based access control. When a workflow
+# uses the proxy with `use-oidc: true`, the JWT contains claims about
+# the workflow's identity that can be used in policy decisions.
+#
+# GitHub Actions OIDC Token Claims:
+#   - sub: Subject (e.g., "repo:org/repo:ref:refs/heads/main")
+#   - iss: Issuer ("https://token.actions.githubusercontent.com")
+#   - aud: Audience (configured when requesting token)
+#   - repository: Full repository name (e.g., "myorg/myrepo")
+#   - repository_owner: Organization or user (e.g., "myorg")
+#   - repository_id: Numeric repository ID
+#   - repository_owner_id: Numeric owner ID
+#   - repository_visibility: "public" or "private"
+#   - actor: Username triggering the workflow
+#   - actor_id: Numeric user ID
+#   - workflow: Workflow name
+#   - workflow_ref: Full workflow reference
+#   - job_workflow_ref: Reference for reusable workflows
+#   - ref: Git reference (e.g., "refs/heads/main")
+#   - ref_type: "branch" or "tag"
+#   - head_ref: Source branch (for PRs)
+#   - base_ref: Target branch (for PRs)
+#   - sha: Commit SHA
+#   - event_name: Trigger event (e.g., "push", "pull_request")
+#   - run_id: Workflow run ID
+#   - run_number: Run number
+#   - run_attempt: Attempt number
+#   - runner_environment: "github-hosted" or "self-hosted"
+#   - environment: Deployment environment name (if set)
+#
+# JWKS Discovery:
+#   Configure your Deputy proxy with:
+#     auth:
+#       mode: required
+#       jwks:
+#         url: https://token.actions.githubusercontent.com/.well-known/jwks
+#       issuers:
+#         - https://token.actions.githubusercontent.com
+#
+# Usage in GitHub Actions:
+#   permissions:
+#     id-token: write
+#
+#   - uses: picatz/deputy/actions/proxy@main
+#     with:
+#       mode: remote
+#       proxy-url: https://deputy-proxy.example.com
+#       use-oidc: true
+
+policies:
+  # Organization-level access control
+  # Only allow workflows from specific organizations
+  - name: org-allowlist
+    description: Only allow requests from approved GitHub organizations
+    vars:
+      allowed_orgs:
+        - mycompany
+        - mycompany-internal
+    rules:
+      - action: deny
+        when: |
+          !jwt.anonymous &&
+          !(jwt.?repository_owner.orValue("") in allowed_orgs)
+        reason: Repository owner not in allowed organization list
+        remediation: Contact security team to add your organization
+
+  # Repository-level access control
+  # Restrict access to specific repositories
+  - name: repo-allowlist
+    description: Only allow requests from approved repositories
+    vars:
+      allowed_repos:
+        - mycompany/frontend
+        - mycompany/backend
+        - mycompany/shared-libs
+    rules:
+      - action: deny
+        when: |
+          !jwt.anonymous &&
+          !(jwt.?repository.orValue("") in allowed_repos)
+        reason: Repository not in allowlist
+        remediation: Add repository to the allowed_repos list
+
+  # Branch protection
+  # Only allow production dependencies from protected branches
+  - name: production-branch-only
+    description: Block requests from non-protected branches for production packages
+    vars:
+      protected_refs:
+        - refs/heads/main
+        - refs/heads/master
+        - refs/heads/release
+    rules:
+      - action: deny
+        when: |
+          !jwt.anonymous &&
+          pkg.name.startsWith("@mycompany/prod-") &&
+          !(jwt.?ref.orValue("") in protected_refs) &&
+          !jwt.?ref.orValue("").startsWith("refs/tags/")
+        reason: Production packages can only be accessed from protected branches
+        remediation: Merge to main/release branch or create a release tag
+
+  # Environment-based access
+  # Require deployment environment for sensitive packages
+  - name: require-environment
+    description: Sensitive packages require a deployment environment
+    rules:
+      - action: deny
+        when: |
+          !jwt.anonymous &&
+          pkg.name.contains("secrets") &&
+          jwt.?environment.orValue("") == ""
+        reason: Secrets packages require a deployment environment
+        remediation: Configure a deployment environment in your workflow
+
+  # Private repository enforcement
+  # Block public repos from accessing internal packages
+  - name: private-repos-only
+    description: Internal packages only accessible from private repositories
+    rules:
+      - action: deny
+        when: |
+          !jwt.anonymous &&
+          pkg.name.startsWith("@internal/") &&
+          jwt.?repository_visibility.orValue("") == "public"
+        reason: Internal packages cannot be accessed from public repositories
+        remediation: This package is only available to private repositories
+
+  # Runner environment restrictions
+  # Require self-hosted runners for certain packages
+  - name: self-hosted-only
+    description: Sensitive packages require self-hosted runners
+    rules:
+      - action: deny
+        when: |
+          !jwt.anonymous &&
+          pkg.name.contains("airgapped") &&
+          jwt.?runner_environment.orValue("") != "self-hosted"
+        reason: This package requires self-hosted runners
+        remediation: Use self-hosted runners for this workflow
+
+  # Event type restrictions
+  # Block PR builds from accessing production packages
+  - name: no-pr-production
+    description: Production packages not available in PR builds
+    vars:
+      pr_events:
+        - pull_request
+        - pull_request_target
+    rules:
+      - action: deny
+        when: |
+          !jwt.anonymous &&
+          pkg.name.startsWith("@mycompany/prod-") &&
+          jwt.?event_name.orValue("") in pr_events
+        reason: Production packages are not available in pull request builds
+        remediation: Merge the PR to access production packages
+
+  # Workflow verification
+  # Only allow specific workflows to access certain packages
+  - name: workflow-allowlist
+    description: Restrict package access to specific workflows
+    vars:
+      deploy_workflows:
+        - deploy.yml
+        - release.yml
+        - production-deploy.yml
+    rules:
+      - action: deny
+        when: |
+          !jwt.anonymous &&
+          pkg.name.startsWith("@deploy/") &&
+          !deploy_workflows.exists(w, jwt.?workflow.orValue("").endsWith(w))
+        reason: This package is only accessible from deployment workflows
+        remediation: Use an approved deployment workflow
+
+  # Actor restrictions
+  # Restrict who can trigger access to sensitive packages
+  - name: trusted-actors
+    description: Sensitive packages require trusted actors
+    vars:
+      trusted_actors:
+        - dependabot[bot]
+        - github-actions[bot]
+        - release-bot
+    rules:
+      - action: warn
+        when: |
+          !jwt.anonymous &&
+          pkg.name.contains("security") &&
+          !(jwt.?actor.orValue("") in trusted_actors)
+        reason: Security package accessed by non-trusted actor
+        # Warning only - for audit purposes
+
+  # Reusable workflow verification
+  # Ensure packages are accessed via approved reusable workflows
+  - name: reusable-workflow-required
+    description: Require use of organization's reusable security workflow
+    vars:
+      approved_workflows:
+        - mycompany/.github/.github/workflows/security-scan.yml@main
+        - mycompany/.github/.github/workflows/secure-build.yml@main
+    rules:
+      - action: deny
+        when: |
+          !jwt.anonymous &&
+          pkg.name.startsWith("@secure/") &&
+          !approved_workflows.exists(w,
+            jwt.?job_workflow_ref.orValue("").startsWith(w.split("@")[0])
+          )
+        reason: This package requires an approved reusable workflow
+        remediation: Use the organization's secure-build workflow
+
+  # Audit logging for all authenticated requests
+  # This policy always allows but logs identity information
+  - name: audit-github-actions
+    description: Log all GitHub Actions requests for audit purposes
+    rules:
+      - action: allow
+        when: |
+          !jwt.anonymous &&
+          jwt.?iss.orValue("") == "https://token.actions.githubusercontent.com"
+        # The allow action with identity logged provides audit trail

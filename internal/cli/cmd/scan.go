@@ -21,8 +21,10 @@ import (
 	"github.com/picatz/deputy/internal/purlx"
 	"github.com/picatz/deputy/internal/report"
 	"github.com/picatz/deputy/internal/report/render"
+	"github.com/picatz/deputy/internal/sarif"
 	"github.com/picatz/deputy/internal/scan"
 	ui "github.com/picatz/deputy/internal/ui"
+	"github.com/picatz/deputy/internal/version"
 	"github.com/picatz/deputy/internal/vulnerability"
 	"github.com/protobom/protobom/pkg/sbom"
 	spdxjson "github.com/spdx/tools-golang/json"
@@ -189,7 +191,7 @@ WORKFLOW EXAMPLES:
 	scanCmd.Flags().StringP("ref", "r", "HEAD", "Git reference to scan (branch, tag, or commit)")
 	scanCmd.PersistentFlags().StringSliceP("ecosystems", "e", []string{"all"}, "Ecosystems to scan: go, npm, pypi, maven, rubygems, cargo, nuget, hex, pub, cocoapods, packagist, github-actions, haskell, r, cpp (default: all)")
 	scanCmd.Flags().StringP("output", "o", "", "Output file (default: stdout)")
-	scanCmd.Flags().StringP("format", "f", "text", "Output format (text, json)")
+	scanCmd.Flags().StringP("format", "f", "text", "Output format (text, json, sarif)")
 	scanCmd.Flags().Bool("ignore-unfixed", false, "Ignore vulnerabilities without fixes")
 	scanCmd.Flags().String("published-before", "", "Only include vulnerabilities published before this date (YYYY, YYYY-MM, YYYY-MM-DD, or RFC3339)")
 	scanCmd.Flags().String("published-after", "", "Only include vulnerabilities published on/after this date (YYYY, YYYY-MM, YYYY-MM-DD, or RFC3339)")
@@ -241,7 +243,7 @@ TYPICAL USE CASES:
   deputy scan dir . --ignore-unfixed`,
 	}
 	scanDirCmd.Flags().StringP("output", "o", "", "Output file (default: stdout)")
-	scanDirCmd.Flags().StringP("format", "f", "text", "Output format (text, json)")
+	scanDirCmd.Flags().StringP("format", "f", "text", "Output format (text, json, sarif)")
 	scanDirCmd.Flags().Bool("ignore-unfixed", false, "Ignore vulnerabilities without fixes")
 	scanDirCmd.Flags().String("published-before", "", "Only include vulnerabilities published before this date (YYYY, YYYY-MM, YYYY-MM-DD, or RFC3339)")
 	scanDirCmd.Flags().String("published-after", "", "Only include vulnerabilities published on/after this date (YYYY, YYYY-MM, YYYY-MM-DD, or RFC3339)")
@@ -320,7 +322,7 @@ WORKFLOW EXAMPLES:
   deputy scan sbom new-release-sbom.json --format json > new-vulns.json`,
 	}
 	scanSBOMCmd.Flags().StringP("output", "o", "", "Output file (default: stdout)")
-	scanSBOMCmd.Flags().StringP("format", "f", "text", "Output format (text, json)")
+	scanSBOMCmd.Flags().StringP("format", "f", "text", "Output format (text, json, sarif)")
 	scanSBOMCmd.Flags().Bool("ignore-unfixed", false, "Ignore vulnerabilities without fixes")
 	scanSBOMCmd.Flags().String("published-before", "", "Only include vulnerabilities published before this date (YYYY, YYYY-MM, YYYY-MM-DD, or RFC3339)")
 	scanSBOMCmd.Flags().String("published-after", "", "Only include vulnerabilities published on/after this date (YYYY, YYYY-MM, YYYY-MM-DD, or RFC3339)")
@@ -387,8 +389,10 @@ func (s *Scanner) runScan(cmd *cobra.Command, args []string) error {
 		return s.outputText(out.Writer, cmd.ErrOrStderr(), resultOut, flags.IgnoreUnfixed, policyFindings, flags.displayOptions())
 	case FormatJSON:
 		return s.outputJSON(out.Writer, resultOut, policyFindings)
+	case FormatSARIF:
+		return s.outputSARIF(out.Writer, resultOut, policyFindings)
 	default:
-		return cliflags.UnsupportedFormatError("--format", flags.Format, "text|json")
+		return cliflags.UnsupportedFormatError("--format", flags.Format, "text|json|sarif")
 	}
 }
 
@@ -443,8 +447,10 @@ func (s *Scanner) runScanDir(cmd *cobra.Command, args []string) error {
 		return s.outputTextDir(out.Writer, cmd.ErrOrStderr(), resultOut, flags.IgnoreUnfixed, policyFindings, flags.displayOptions())
 	case FormatJSON:
 		return s.outputJSON(out.Writer, resultOut, policyFindings)
+	case FormatSARIF:
+		return s.outputSARIF(out.Writer, resultOut, policyFindings)
 	default:
-		return cliflags.UnsupportedFormatError("--format", flags.Format, "text|json")
+		return cliflags.UnsupportedFormatError("--format", flags.Format, "text|json|sarif")
 	}
 }
 
@@ -527,8 +533,10 @@ func (s *Scanner) runScanSBOM(cmd *cobra.Command, args []string) error {
 		return nil
 	case FormatJSON:
 		return s.outputJSON(out.Writer, resultOut, policyFindings)
+	case FormatSARIF:
+		return s.outputSARIF(out.Writer, resultOut, policyFindings)
 	default:
-		return cliflags.UnsupportedFormatError("--format", flags.Format, "text|json")
+		return cliflags.UnsupportedFormatError("--format", flags.Format, "text|json|sarif")
 	}
 }
 
@@ -610,6 +618,31 @@ func (s *Scanner) outputJSON(w io.Writer, result scan.Result, policyFindings []r
 	enc := json.NewEncoder(w)
 	enc.SetIndent("", "  ")
 	return enc.Encode(report)
+}
+
+// outputSARIF writes the scan results in SARIF format for GitHub Security tab integration.
+func (s *Scanner) outputSARIF(w io.Writer, result scan.Result, policyFindings []report.PolicyFinding) error {
+	vulns := report.FlattenResult(result)
+
+	opts := sarif.Options{
+		ToolVersion: version.Value,
+		Repo:        result.Target.OriginURL,
+		Ref:         result.Target.EffectiveRef,
+		Commit:      result.Target.CommitHash,
+		StartTime:   time.Now(),
+		EndTime:     time.Now(),
+	}
+
+	// Use display path as repo if no origin URL
+	if opts.Repo == "" {
+		opts.Repo = result.Target.DisplayPath
+	}
+
+	log := sarif.Convert(vulns, policyFindings, opts)
+
+	enc := json.NewEncoder(w)
+	enc.SetIndent("", "  ")
+	return enc.Encode(log)
 }
 
 // parseSBOMPackages converts supported SBOM documents into package tuples for OSV queries.

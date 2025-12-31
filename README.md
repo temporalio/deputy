@@ -73,26 +73,103 @@ $ deputy diff main WORKING
 $ deputy sbom --format spdx-json --output sbom.spdx.json
 ```
 
+## GitHub Actions
+
+Deputy provides composable GitHub Actions for CI/CD integration. Scan results upload to GitHub's **Security > Code scanning alerts** tab via SARIF.
+
+```yaml
+name: Security Scan
+on: [push, pull_request]
+
+permissions:
+  security-events: write  # Required for SARIF upload
+  contents: read
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: picatz/deputy/actions/setup@main
+      - uses: picatz/deputy/actions/scan@main
+        with:
+          upload-sarif: true
+          policy: policy/ci/security-gate.yaml  # Optional: enforce policies
+```
+
+| Action | Purpose |
+|--------|---------|
+| [`setup`](actions/setup/) | Install Deputy CLI (required first) |
+| [`scan`](actions/scan/) | Vulnerability scanning + SARIF upload |
+| [`sbom`](actions/sbom/) | SBOM generation (CycloneDX/SPDX) |
+| [`diff`](actions/diff/) | Dependency change analysis for PRs |
+| [`proxy`](actions/proxy/) | Block vulnerable packages at install time |
+
+**Starter CI policies** ([`policy/ci/`](policy/ci/)) — review and customize for your needs:
+- `security-gate.yaml` — Block critical vulns; block high when fixes exist
+- `pr-review.yaml` — Stricter checks for new dependencies in PRs
+- `release-gate.yaml` — Production release requirements
+
+**Reusable workflows** for standardized security across repos:
+- [`scan.yml`](.github/workflows/scan.yml) — Basic vulnerability scanning
+- [`pr-gate.yml`](.github/workflows/pr-gate.yml) — PR security enforcement with diff
+- [`release-sbom.yml`](.github/workflows/release-sbom.yml) — SBOM generation on release
+
+See the [GitHub Actions Guide](docs/guides/github-actions.md) for workflow recipes, permissions reference, and advanced patterns.
+
 ## Installation
 
-### Go install (recommended)
+### Homebrew
+
+```console
+$ brew install --cask picatz/deputy/deputy
+
+# Or add the tap first
+$ brew tap picatz/deputy && brew install --cask deputy
+```
+
+### Go install
 
 ```console
 $ go install github.com/picatz/deputy@latest
-$ deputy --version
 ```
 
-Notes:
-- Deputy’s `go.mod` uses the Go `toolchain` directive; use Go 1.21+ so `go` can fetch the pinned toolchain automatically.
-- Pin a specific version for reproducibility: `go install github.com/picatz/deputy@vX.Y.Z`
+Pin a specific version for reproducibility: `go install github.com/picatz/deputy@vX.Y.Z`
+
+### Binary releases
+
+Download from [GitHub Releases](https://github.com/picatz/deputy/releases). Each release includes:
+- Cross-platform binaries (Linux, macOS, Windows / amd64, arm64)
+- SHA256 checksums (`checksums.txt`)
+- Cosign signatures for verification
+- SBOMs in CycloneDX and SPDX formats
+
+#### Verify release signatures
+
+Releases are signed with [Sigstore](https://sigstore.dev) (keyless). To verify:
+
+```console
+# Install cosign: https://docs.sigstore.dev/cosign/system_config/installation/
+$ cosign verify-blob \
+    --certificate checksums.txt.pem \
+    --signature checksums.txt.sig \
+    --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+    --certificate-identity-regexp 'https://github.com/picatz/deputy/.github/workflows/release.yml@.*' \
+    checksums.txt
+
+# Then verify your download against checksums.txt
+$ sha256sum -c checksums.txt --ignore-missing
+```
+
+This verifies the checksums file was signed by Deputy's release workflow, not a compromised artifact. See [Verifying Releases](docs/guides/verifying-releases.md) for full details.
 
 ### Build from source
 
 ```console
 $ git clone https://github.com/picatz/deputy.git
 $ cd deputy
-$ go test ./...
-$ go run . --help
+$ go build -o deputy .
+$ ./deputy --version
 ```
 
 ## How Deputy fits together

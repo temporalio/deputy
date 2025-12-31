@@ -115,16 +115,16 @@ func TestIsLikelyDefaultBranch(t *testing.T) {
 
 func TestCalculateSimilarity(t *testing.T) {
 	tests := []struct {
-		a, b     string
-		wantMin  float64
-		wantMax  float64
+		a, b    string
+		wantMin float64
+		wantMax float64
 	}{
-		{"main", "main", 1.0, 1.0},        // identical strings
-		{"", "", 1.0, 1.0},                 // empty strings (edge case: both empty returns 1.0)
-		{"abc", "abd", 0.6, 0.7},           // 2 of 3 match at same positions
-		{"master", "maser", 0.4, 0.6},      // m-a-s match, t!=e, e!=r = 3/6 = 0.5
-		{"xyz", "abc", 0.0, 0.1},           // no characters match
-		{"main", "mane", 0.5, 0.75},        // m-a match, i!=n, n!=e = 2/4 = 0.5
+		{"main", "main", 1.0, 1.0},    // identical strings
+		{"", "", 1.0, 1.0},            // empty strings (edge case: both empty returns 1.0)
+		{"abc", "abd", 0.6, 0.7},      // 2 of 3 match at same positions
+		{"master", "maser", 0.4, 0.6}, // m-a-s match, t!=e, e!=r = 3/6 = 0.5
+		{"xyz", "abc", 0.0, 0.1},      // no characters match
+		{"main", "mane", 0.5, 0.75},   // m-a match, i!=n, n!=e = 2/4 = 0.5
 	}
 	for _, tt := range tests {
 		t.Run(tt.a+"_"+tt.b, func(t *testing.T) {

@@ -1,0 +1,101 @@
+# Deputy Scan Action
+
+Scan for vulnerabilities and upload results to GitHub Security tab via SARIF.
+
+## Usage
+
+```yaml
+- uses: picatz/deputy/actions/setup@main
+- uses: picatz/deputy/actions/scan@main
+```
+
+## Inputs
+
+| Input | Description | Default |
+|-------|-------------|---------|
+| `target` | Path to scan | `.` |
+| `ref` | Git reference to scan | `HEAD` |
+| `ecosystems` | Ecosystems to scan (comma-separated) | `all` |
+| `format` | Output format (`sarif`, `json`, `text`) | `sarif` |
+| `output` | Output file path | `deputy-results.sarif` |
+| `ignore-unfixed` | Ignore vulns without fixes | `false` |
+| `policy` | Policy file path(s), comma-separated | `''` |
+| `upload-sarif` | Upload to GitHub Security | `true` |
+| `sarif-category` | SARIF category | `deputy-scan` |
+| `github-token` | Token for API access | `${{ github.token }}` |
+| `fail-on-findings` | Fail if vulns found | `false` |
+| `fail-on-policy-violation` | Fail on policy violations | `true` |
+
+## Outputs
+
+| Output | Description |
+|--------|-------------|
+| `sarif` | Path to SARIF file |
+| `findings-count` | Total vulnerabilities |
+| `critical-count` | Critical severity count |
+| `high-count` | High severity count |
+| `policy-violations` | Policy violation count |
+| `exit-code` | Deputy exit code |
+
+## Examples
+
+### Basic SARIF Upload
+
+```yaml
+name: Security Scan
+on: [push, pull_request]
+
+permissions:
+  security-events: write
+  contents: read
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: picatz/deputy/actions/setup@main
+      - uses: picatz/deputy/actions/scan@main
+```
+
+### With Policy Enforcement
+
+```yaml
+- uses: picatz/deputy/actions/scan@main
+  with:
+    policy: policy/ci/security-gate.yaml
+    fail-on-policy-violation: true
+```
+
+### Scan Specific Path
+
+```yaml
+- uses: picatz/deputy/actions/scan@main
+  with:
+    target: ./backend
+    sarif-category: deputy-backend
+```
+
+### Multiple Policies
+
+```yaml
+- uses: picatz/deputy/actions/scan@main
+  with:
+    policy: policy/security.yaml,policy/compliance.yaml
+```
+
+## Permissions
+
+Required for SARIF upload:
+
+```yaml
+permissions:
+  security-events: write
+  contents: read
+```
+
+## See Also
+
+- [Setup Action](../setup/README.md) - Install Deputy
+- [SBOM Action](../sbom/README.md) - SBOM generation
+- [Diff Action](../diff/README.md) - Dependency diff

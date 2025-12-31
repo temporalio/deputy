@@ -32,18 +32,18 @@ type Ecosystem string
 
 // Supported ecosystems.
 const (
-	Go       Ecosystem = "go"
-	NPM      Ecosystem = "npm"
-	PyPI     Ecosystem = "pypi"
-	Maven    Ecosystem = "maven"
-	RubyGems Ecosystem = "rubygems"
-	Cargo    Ecosystem = "cargo"
-	NuGet    Ecosystem = "nuget"
-	Hex      Ecosystem = "hex"
-	Pub      Ecosystem = "pub"
+	Go        Ecosystem = "go"
+	NPM       Ecosystem = "npm"
+	PyPI      Ecosystem = "pypi"
+	Maven     Ecosystem = "maven"
+	RubyGems  Ecosystem = "rubygems"
+	Cargo     Ecosystem = "cargo"
+	NuGet     Ecosystem = "nuget"
+	Hex       Ecosystem = "hex"
+	Pub       Ecosystem = "pub"
 	CocoaPods Ecosystem = "cocoapods"
 	Packagist Ecosystem = "packagist"
-	Unknown  Ecosystem = "unknown"
+	Unknown   Ecosystem = "unknown"
 )
 
 // Parse normalizes a free-form ecosystem string into a canonical Ecosystem value.

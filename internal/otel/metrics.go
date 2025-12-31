@@ -34,10 +34,10 @@ type Metrics struct {
 	PolicyDuration    metric.Float64Histogram
 
 	// Proxy metrics
-	ProxyRequests       metric.Int64Counter
+	ProxyRequests        metric.Int64Counter
 	ProxyRequestDuration metric.Float64Histogram
-	ProxyAuth           metric.Int64Counter
-	ProxyPolicyDenials  metric.Int64Counter
+	ProxyAuth            metric.Int64Counter
+	ProxyPolicyDenials   metric.Int64Counter
 
 	// Cache metrics
 	CacheHits   metric.Int64Counter
@@ -46,10 +46,10 @@ type Metrics struct {
 }
 
 var (
-	globalMetrics    *Metrics
-	metricsOnce      sync.Once
-	metricsErr       error
-	metricsWarnOnce  sync.Once
+	globalMetrics   *Metrics
+	metricsOnce     sync.Once
+	metricsErr      error
+	metricsWarnOnce sync.Once
 )
 
 // GetMetrics returns the singleton Metrics instance.
@@ -247,13 +247,13 @@ func newMetrics() (*Metrics, error) {
 // underscores for Prometheus export (e.g., "deputy.ecosystem" -> "deputy_ecosystem").
 var (
 	// Ecosystem attributes - using deputy.ecosystem for consistency with traces
-	AttrEcosystemGo     = attribute.String("deputy.ecosystem", "go")
-	AttrEcosystemNpm    = attribute.String("deputy.ecosystem", "npm")
-	AttrEcosystemPyPI   = attribute.String("deputy.ecosystem", "pypi")
-	AttrEcosystemRuby   = attribute.String("deputy.ecosystem", "ruby")
-	AttrEcosystemCargo  = attribute.String("deputy.ecosystem", "cargo")
-	AttrEcosystemMaven  = attribute.String("deputy.ecosystem", "maven")
-	AttrEcosystemNuget  = attribute.String("deputy.ecosystem", "nuget")
+	AttrEcosystemGo    = attribute.String("deputy.ecosystem", "go")
+	AttrEcosystemNpm   = attribute.String("deputy.ecosystem", "npm")
+	AttrEcosystemPyPI  = attribute.String("deputy.ecosystem", "pypi")
+	AttrEcosystemRuby  = attribute.String("deputy.ecosystem", "ruby")
+	AttrEcosystemCargo = attribute.String("deputy.ecosystem", "cargo")
+	AttrEcosystemMaven = attribute.String("deputy.ecosystem", "maven")
+	AttrEcosystemNuget = attribute.String("deputy.ecosystem", "nuget")
 
 	// Severity attributes
 	AttrSeverityCritical = attribute.String("severity", "CRITICAL")

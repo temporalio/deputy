@@ -52,7 +52,6 @@ func codeActionInsert(uri protocol.DocumentURI, pos protocol.Position, text stri
 	}
 }
 
-
 // undeclaredReplacement proposes a replacement for undeclared identifiers by fuzzy matching
 // against known CEL variables. Uses document text for context to include select chains and
 // prefers bases that match the chain suffix (e.g., requestx.client -> request.client).
