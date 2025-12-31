@@ -12,6 +12,8 @@ import (
 	"os"
 	"strings"
 	"sync/atomic"
+
+	deputyotel "github.com/picatz/deputy/internal/otel"
 )
 
 type contextKey struct{}
@@ -44,6 +46,13 @@ type Options struct {
 
 	// AddSource includes source file and line number in log output.
 	AddSource bool
+
+	// IncludeTraceContext adds trace_id and span_id to log records when available.
+	IncludeTraceContext bool
+
+	// ExportToOTel enables exporting logs to the OpenTelemetry collector.
+	// When enabled, logs are sent both to the writer and to the OTel backend.
+	ExportToOTel bool
 }
 
 // New creates a new configured slog.Logger based on the provided options.
@@ -67,6 +76,17 @@ func New(opts Options) *slog.Logger {
 		} else {
 			handler = slog.NewTextHandler(opts.Writer, handlerOpts)
 		}
+	}
+
+	// Wrap with trace context handler if enabled
+	if opts.IncludeTraceContext {
+		handler = deputyotel.NewTraceContextHandler(handler)
+	}
+
+	// Add OTel handler for log export if enabled
+	if opts.ExportToOTel {
+		otelHandler := deputyotel.NewOTelHandler("deputy")
+		handler = deputyotel.NewMultiHandler(handler, otelHandler)
 	}
 
 	return slog.New(handler)
@@ -251,3 +271,4 @@ func ParseLevel(s string) (slog.Level, error) {
 		return slog.LevelInfo, fmt.Errorf("unknown log level: %q", s)
 	}
 }
+

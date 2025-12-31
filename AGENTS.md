@@ -583,8 +583,11 @@ See [JWT policy examples](policy/examples/) for more examples.
 |----------|---------|
 | `GITHUB_TOKEN` | API access for SBOMs, licenses, and vulnerability data ([`internal/sbom/sbom.go`](internal/sbom/sbom.go), [`internal/license/license.go`](internal/license/license.go), [`internal/analysis/osv/gha_bucket.go`](internal/analysis/osv/gha_bucket.go)) |
 | `ANTHROPIC_API_KEY` | AI-assisted remediation ([`internal/cli/cmd/fix_agent_claude.go`](internal/cli/cmd/fix_agent_claude.go)) |
-| `DEPUTY_LOG_LEVEL` | `debug`, `info`, `warn`, `error` ([`internal/cli/cli.go`](internal/cli/cli.go)) |
+| `DEPUTY_LOG_LEVEL` | `debug`, `info`, `warn` (default), `error` ([`internal/cli/cli.go`](internal/cli/cli.go)) |
+| `DEPUTY_LOG_FORMAT` | `text` (default), `json` for structured logs ([`internal/logs/logs.go`](internal/logs/logs.go)) |
 | `DEPUTY_CONFIG` | Path to config file (default: `.deputy.yaml`) ([`internal/config/config.go`](internal/config/config.go)) |
+| `DEPUTY_OTEL_ENABLED` | Enable OpenTelemetry instrumentation ([`internal/otel/otel.go`](internal/otel/otel.go)) |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | OTel collector endpoint, e.g., `localhost:4317` ([`internal/otel/config.go`](internal/otel/config.go)) |
 
 ## Exit Codes
 

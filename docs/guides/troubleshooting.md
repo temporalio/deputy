@@ -113,10 +113,26 @@ $ deputy sbom --enrich-licenses
 - For repeated scans, the proxy caches OSV results automatically.
 - Consider generating an SBOM once and scanning that: `deputy sbom | deputy scan sbom -`
 
+## OpenTelemetry Observability
+
+Deputy supports OpenTelemetry for distributed tracing, metrics, and log correlation. This is useful for diagnosing performance issues and understanding request flows.
+
+```bash
+# Enable OTel with a local collector
+export DEPUTY_OTEL_ENABLED=true
+export OTEL_EXPORTER_OTLP_ENDPOINT=localhost:4317
+export OTEL_EXPORTER_OTLP_INSECURE=true
+
+deputy scan
+```
+
+See the [Observability Guide](observability.md) for full setup instructions and a Docker Compose stack for local development.
+
 ## Getting Help
 
 If these don't resolve your issue:
 
 1. Run with `--log-level debug` and check the output
-2. Check [GitHub Issues](https://github.com/picatz/deputy/issues) for similar reports
-3. Open a new issue with debug logs and reproduction steps
+2. Enable OTel tracing to diagnose performance issues
+3. Check [GitHub Issues](https://github.com/picatz/deputy/issues) for similar reports
+4. Open a new issue with debug logs and reproduction steps

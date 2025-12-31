@@ -9,9 +9,12 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/picatz/deputy/internal/errors"
+	"github.com/picatz/deputy/internal/otel"
 	"gopkg.in/yaml.v3"
 )
 
@@ -28,6 +31,9 @@ type Config struct {
 
 	// Policy configures policy evaluation.
 	Policy PolicyConfig `yaml:"policy,omitempty"`
+
+	// OTel configures OpenTelemetry instrumentation.
+	OTel otel.Config `yaml:"otel,omitempty"`
 }
 
 // LogConfig configures logging behavior.
@@ -194,6 +200,34 @@ func (l *Loader) loadFromEnv(cfg *Config) {
 	if val := os.Getenv(l.envPrefix + "POLICY_MODE"); val != "" {
 		cfg.Policy.Mode = val
 	}
+
+	// OTel configuration
+	if val := os.Getenv(l.envPrefix + "OTEL_ENABLED"); val != "" {
+		cfg.OTel.Enabled = val == "true" || val == "1"
+	}
+	if val := os.Getenv(l.envPrefix + "OTEL_SERVICE_NAME"); val != "" {
+		cfg.OTel.ServiceName = val
+	}
+	// Standard OTel environment variables
+	if val := os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT"); val != "" {
+		cfg.OTel.Exporter.Endpoint = val
+	}
+	if val := os.Getenv("OTEL_EXPORTER_OTLP_PROTOCOL"); val != "" {
+		cfg.OTel.Exporter.Protocol = val
+	}
+	if val := os.Getenv("OTEL_EXPORTER_OTLP_INSECURE"); val != "" {
+		cfg.OTel.Exporter.Insecure = val == "true" || val == "1"
+	}
+	if val := os.Getenv("OTEL_TRACES_SAMPLER_ARG"); val != "" {
+		if rate, err := strconv.ParseFloat(val, 64); err == nil {
+			cfg.OTel.Traces.SampleRate = rate
+		}
+	}
+	if val := os.Getenv("OTEL_EXPORTER_OTLP_TIMEOUT"); val != "" {
+		if d, err := time.ParseDuration(val); err == nil {
+			cfg.OTel.Exporter.Timeout = d
+		}
+	}
 }
 
 // defaultConfig returns a configuration with sensible defaults.
@@ -214,6 +248,7 @@ func defaultConfig() *Config {
 		Policy: PolicyConfig{
 			Mode: "enforce",
 		},
+		OTel: otel.DefaultConfig(),
 	}
 }
 
@@ -249,6 +284,11 @@ func (c *Config) Validate() error {
 				Message: fmt.Sprintf("must be one of: %s", strings.Join(validModes, ", ")),
 			}
 		}
+	}
+
+	// Validate OTel configuration
+	if err := c.OTel.Validate(); err != nil {
+		return err
 	}
 
 	return nil

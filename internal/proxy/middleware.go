@@ -9,6 +9,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	deputyotel "github.com/picatz/deputy/internal/otel"
 )
 
 type requestIDKey struct{}
@@ -152,6 +154,9 @@ func withRequestLogging(logger *slog.Logger, listenerName, ecosystem, upstream s
 			case status >= 400:
 				level = slog.LevelWarn
 			}
+
+			// Record OTel metrics for proxy requests
+			deputyotel.RecordProxyRequest(r.Context(), dur.Seconds(), ecosystem, status)
 
 			logger.Log(r.Context(), level, "proxy request",
 				"request_id", requestIDFromContext(r.Context()),

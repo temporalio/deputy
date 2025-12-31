@@ -1,0 +1,27 @@
+# Prometheus configuration for local development
+# Scrapes metrics from the OTel Collector
+
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+# Enable exemplar storage for metrics-to-trace correlation
+storage:
+  exemplars:
+    max_exemplars: 100000
+
+scrape_configs:
+  # Scrape OTel Collector's Prometheus exporter
+  - job_name: 'otel-collector'
+    static_configs:
+      - targets: ['otel-collector:8889']
+
+  # Scrape Prometheus itself
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: ['localhost:9090']
+
+  # Scrape Tempo metrics
+  - job_name: 'tempo'
+    static_configs:
+      - targets: ['tempo:9095']

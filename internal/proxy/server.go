@@ -14,6 +14,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/picatz/deputy/internal/httputil"
 	"golang.org/x/sync/errgroup"
 )
 
@@ -195,15 +196,17 @@ func newListenerMux(cfg ListenerConfig, opts Options, auth Authenticator, logger
 	}
 
 	// Build middleware chain (order matters):
-	// 1. ConcurrencyLimit - reject overload early
-	// 2. RequestID - needed for logging/correlation
-	// 3. Authentication - validate tokens, add claims to context
-	// 4. Logging - log requests with auth context
+	// 1. OTel tracing - capture full request lifecycle (outermost)
+	// 2. ConcurrencyLimit - reject overload early
+	// 3. RequestID - needed for logging/correlation
+	// 4. Authentication - validate tokens, add claims to context
+	// 5. Logging - log requests with auth context
 	wrapped := handler
 	wrapped = withConcurrencyLimit(cfg.MaxConcurrentRequests)(wrapped)
 	wrapped = withRequestID("X-Request-ID")(wrapped)
 	wrapped = withAuthentication(auth, cfg.Auth.GetMode())(wrapped)
 	wrapped = withRequestLogging(logger, name, ecosystem, cfg.Upstream, skipLogPaths)(wrapped)
+	wrapped = httputil.InstrumentedMiddleware("deputy.proxy." + ecosystem)(wrapped)
 	mux.Handle("/", wrapped)
 
 	rootHandler := http.Handler(mux)

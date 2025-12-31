@@ -21,12 +21,15 @@ import (
 	"github.com/picatz/deputy/internal/gitutil"
 	gitx "github.com/picatz/deputy/internal/gitutil"
 	inv "github.com/picatz/deputy/internal/inventory"
+	"github.com/picatz/deputy/internal/otel"
 	"github.com/picatz/deputy/internal/purlx"
 	"github.com/picatz/deputy/internal/repository"
 	"github.com/picatz/deputy/internal/repository/workspace"
 	"github.com/picatz/deputy/internal/scan"
 	ui "github.com/picatz/deputy/internal/ui"
 	"github.com/spf13/cobra"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/trace"
 	"golang.org/x/mod/modfile"
 )
 
@@ -177,6 +180,13 @@ FILTERING & FORMATTING:
 
 // collectListItems gathers packages for repo/ref (supporting remote clone) and converts to ListItem set.
 func collectListItems(ctx context.Context, repoPath, ref string, ecosystems []string, showSources bool) ([]ListItem, string, string, error) {
+	ctx, span := otel.StartSpan(ctx, "deputy.list",
+		trace.WithAttributes(
+			attribute.String("deputy.target.path", repoPath),
+			attribute.String("deputy.target.ref", ref),
+		))
+	defer span.End()
+
 	var (
 		src *repository.Source
 		err error
@@ -184,6 +194,7 @@ func collectListItems(ctx context.Context, repoPath, ref string, ecosystems []st
 	if fi, statErr := os.Stat(repoPath); statErr == nil && fi.IsDir() {
 		src, err = repository.Open(repoPath)
 		if err != nil {
+			otel.SetSpanError(span, err)
 			return nil, "", "", err
 		}
 	}
@@ -289,6 +300,11 @@ func collectListItems(ctx context.Context, repoPath, ref string, ecosystems []st
 	case targetHash != nil:
 		commitHash = targetHash.String()
 	}
+
+	// Record results on span
+	span.SetAttributes(attribute.Int("deputy.package.count", len(items)))
+	otel.SetSpanOK(span)
+
 	return items, commitHash, "", nil
 }
 

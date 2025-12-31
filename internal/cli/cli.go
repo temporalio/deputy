@@ -11,8 +11,10 @@ import (
 	"github.com/charmbracelet/fang"
 	"github.com/go-git/go-git/v5"
 	"github.com/picatz/deputy/internal/cli/cmd"
+	"github.com/picatz/deputy/internal/config"
 	deputyerrors "github.com/picatz/deputy/internal/errors"
 	"github.com/picatz/deputy/internal/logs"
+	"github.com/picatz/deputy/internal/otel"
 	"github.com/picatz/deputy/internal/scan"
 	_ "github.com/picatz/deputy/internal/targets/providers"
 	"github.com/spf13/cobra"
@@ -22,7 +24,35 @@ import (
 // Run constructs the root command hierarchy and executes it with all
 // subcommands registered. It is the primary entry point used by main.
 func Run(ctx context.Context) error {
+	// Load configuration (includes OTel settings)
+	cfg := loadOTelConfig()
+
+	// Initialize OpenTelemetry (graceful no-op if disabled)
+	provider, err := otel.Init(ctx, cfg)
+	if err != nil {
+		slog.Warn("failed to initialize OpenTelemetry", "error", err)
+	}
+	defer func() {
+		if err := provider.Shutdown(context.Background()); err != nil {
+			slog.Debug("otel shutdown error", "error", err)
+		}
+	}()
+
 	return fang.Execute(ctx, newRoot(), fang.WithErrorHandler(silentErrorHandler))
+}
+
+// loadOTelConfig returns OTel configuration from environment and config file.
+func loadOTelConfig() otel.Config {
+	// Try to load from config file
+	configPath := config.FindConfigFile()
+	if configPath != "" {
+		loader := config.NewLoader(configPath)
+		if cfg, err := loader.Load(); err == nil {
+			return cfg.OTel
+		}
+	}
+	// Fall back to defaults (env vars are checked in otel.Init)
+	return otel.DefaultConfig()
 }
 
 // silentErrorHandler suppresses fang's default styled error output.
@@ -119,7 +149,7 @@ SUPPLY CHAIN:
   deputy sbom --format spdx`,
 	}
 
-	rootCmd.PersistentFlags().StringVar(&logLevel, "log-level", logLevel, "Logging level (debug, info, warn, error). Override with DEPUTY_LOG_LEVEL")
+	rootCmd.PersistentFlags().StringVar(&logLevel, "log-level", logLevel, "Logging level: debug, info, warn, error (default: warn). Override with DEPUTY_LOG_LEVEL")
 	rootCmd.PersistentFlags().StringVar(&logFormat, "log-format", logFormat, "Logging format (text, json). Override with DEPUTY_LOG_FORMAT")
 	rootCmd.PersistentPreRunE = func(cmd *cobra.Command, args []string) error {
 		return configureLogging(logLevel, logFormat)
@@ -135,12 +165,14 @@ func isInGitRepo() bool {
 	return err == nil
 }
 
-// defaultLogLevel returns the default log level from the environment or "info".
+// defaultLogLevel returns the default log level from the environment or "warn".
+// Default is warn to keep CLI output clean for interactive use. Users who want
+// verbose observability logs can set DEPUTY_LOG_LEVEL=info or --log-level=info.
 func defaultLogLevel() string {
 	if v := strings.TrimSpace(os.Getenv("DEPUTY_LOG_LEVEL")); v != "" {
 		return v
 	}
-	return "info"
+	return "warn"
 }
 
 // defaultLogFormat returns the default log format from the environment or "text".
@@ -158,11 +190,16 @@ func configureLogging(levelStr, format string) error {
 		return err
 	}
 
+	// Enable trace context and OTel log export when OTel is enabled
+	otelEnabled := otel.IsEnabled()
+
 	logger := logs.New(logs.Options{
-		Level:        level,
-		Format:       format,
-		Writer:       os.Stderr,
-		ColorEnabled: true,
+		Level:               level,
+		Format:              format,
+		Writer:              os.Stderr,
+		ColorEnabled:        true,
+		IncludeTraceContext: otelEnabled,
+		ExportToOTel:        otelEnabled,
 	})
 
 	slog.SetDefault(logger)

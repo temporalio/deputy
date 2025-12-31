@@ -15,8 +15,11 @@ import (
 
 	gocmp "github.com/google/go-cmp/cmp"
 	"github.com/picatz/deputy/internal/cli/flags"
+	"github.com/picatz/deputy/internal/otel"
 	"github.com/picatz/deputy/internal/policy"
 	"github.com/spf13/cobra"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/trace"
 )
 
 // AddPolicyCommand registers the `deputy policy` command tree.
@@ -79,6 +82,13 @@ func newPolicyEvalCommand() *cobra.Command {
 		SilenceErrors: true,
 		SilenceUsage:  true,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			ctx, span := otel.StartSpan(cmd.Context(), "deputy.policy.eval",
+				trace.WithAttributes(
+					attribute.String("deputy.policy.path", policyPath),
+					attribute.String("deputy.policy.input", inputPath),
+				))
+			defer span.End()
+
 			if strings.TrimSpace(policyPath) == "" {
 				return errors.New("missing --policy path")
 			}
@@ -87,20 +97,25 @@ func newPolicyEvalCommand() *cobra.Command {
 			}
 			policyBytes, err := readPathOrStdin(cmd.InOrStdin(), policyPath)
 			if err != nil {
+				otel.SetSpanError(span, err)
 				return fmt.Errorf("read policy %q: %w", policyPath, err)
 			}
 			inputBytes, err := readPathOrStdin(cmd.InOrStdin(), inputPath)
 			if err != nil {
+				otel.SetSpanError(span, err)
 				return fmt.Errorf("read input %q: %w", inputPath, err)
 			}
 			var payload map[string]any
 			if err := json.Unmarshal(inputBytes, &payload); err != nil {
+				otel.SetSpanError(span, err)
 				return fmt.Errorf("parse input JSON: %w", err)
 			}
-			result, err := policy.Evaluate(cmd.Context(), string(policyBytes), payload)
+			result, err := policy.Evaluate(ctx, string(policyBytes), payload)
 			if err != nil {
+				otel.SetSpanError(span, err)
 				return fmt.Errorf("evaluate policy: %w", err)
 			}
+			otel.SetSpanOK(span)
 			return writePolicyEvalOutput(cmd.OutOrStdout(), result, format)
 		},
 	}

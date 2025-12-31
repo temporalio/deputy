@@ -5,6 +5,8 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+
+	"go.opentelemetry.io/otel/trace"
 )
 
 // jwtClaimsKey is the context key for storing verified JWT claims.
@@ -35,19 +37,23 @@ func withAuthentication(auth Authenticator, mode AuthMode) func(http.Handler) ht
 
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			claims, err := auth.Authenticate(r.Context(), r)
+			ctx := r.Context()
+			span := trace.SpanFromContext(ctx)
+			claims, err := auth.Authenticate(ctx, r)
 
 			if err != nil {
 				var authErr *AuthError
 				if errors.As(err, &authErr) {
 					authMetrics.RecordError(authErr.Code)
+					RecordAuthRejected(ctx, span, authErr.Code)
 					handleAuthError(w, r, authErr)
 					return
 				}
 				// Unexpected error
 				authMetrics.RecordError("internal_error")
+				RecordAuthRejected(ctx, span, "internal_error")
 				slog.Error("authentication failed",
-					"request_id", requestIDFromContext(r.Context()),
+					"request_id", requestIDFromContext(ctx),
 					"error", err,
 				)
 				http.Error(w, "authentication error", http.StatusInternalServerError)
@@ -57,6 +63,7 @@ func withAuthentication(auth Authenticator, mode AuthMode) func(http.Handler) ht
 			if claims == nil && required {
 				// No token provided but auth is required
 				authMetrics.RecordError(AuthCodeMissingToken)
+				RecordAuthRejected(ctx, span, AuthCodeMissingToken)
 				handleAuthError(w, r, &AuthError{
 					Code:    AuthCodeMissingToken,
 					Message: "authentication required",
@@ -64,15 +71,17 @@ func withAuthentication(auth Authenticator, mode AuthMode) func(http.Handler) ht
 				return
 			}
 
-			// Record success or anonymous
+			// Record success or anonymous with OTel span events
 			if claims != nil {
 				authMetrics.RecordSuccess()
+				RecordAuthSuccess(ctx, span, claims.Subject)
 			} else {
 				authMetrics.RecordAnonymous()
+				RecordAuthAnonymous(ctx, span)
 			}
 
 			// Store claims in context (may be nil for anonymous)
-			ctx := context.WithValue(r.Context(), jwtClaimsKey{}, claims)
+			ctx = context.WithValue(ctx, jwtClaimsKey{}, claims)
 			next.ServeHTTP(w, r.WithContext(ctx))
 		})
 	}

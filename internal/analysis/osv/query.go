@@ -14,6 +14,7 @@ import (
 	"github.com/picatz/deputy/internal/collections"
 	"github.com/picatz/deputy/internal/diskcache"
 	"github.com/picatz/deputy/internal/ecosystem"
+	"github.com/picatz/deputy/internal/otel"
 	"github.com/picatz/deputy/internal/purlx"
 	"github.com/picatz/deputy/internal/vuln"
 	"golang.org/x/mod/semver"
@@ -56,8 +57,10 @@ type PkgInput struct {
 func getCachedVuln(ctx context.Context, client OSVClient, id string) (*osvschema.Vulnerability, error) {
 	var v osvschema.Vulnerability
 	if diskcache.Read("osv", id, osvCacheTTL, &v) {
+		otel.RecordOSVCacheAccess(ctx, true)
 		return &v, nil
 	}
+	otel.RecordOSVCacheAccess(ctx, false)
 	res, err := client.GetVulnByID(ctx, id)
 	if err != nil {
 		return nil, err
@@ -137,6 +140,7 @@ func queryOSVAPIBatch(ctx context.Context, client OSVClient, pkgs []PkgInput) ([
 	if len(pkgs) == 0 {
 		return nil, nil
 	}
+	startTime := time.Now()
 	queries := make([]*osvdev.Query, 0, len(pkgs))
 	meta := make([]PkgInput, 0, len(pkgs))
 	for _, p := range pkgs {
@@ -297,8 +301,10 @@ func queryOSVAPIBatch(ctx context.Context, client OSVClient, pkgs []PkgInput) ([
 		})
 	}
 	if err := g.Wait(); err != nil {
+		otel.RecordOSVQuery(ctx, time.Since(startTime).Seconds(), "batch", false)
 		return nil, err
 	}
+	otel.RecordOSVQuery(ctx, time.Since(startTime).Seconds(), "batch", true)
 	return out, nil
 }
 

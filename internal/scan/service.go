@@ -10,8 +10,12 @@ import (
 	analysis "github.com/picatz/deputy/internal/analysis"
 	"github.com/picatz/deputy/internal/compare"
 	inv "github.com/picatz/deputy/internal/inventory"
+	"github.com/picatz/deputy/internal/logs"
+	"github.com/picatz/deputy/internal/otel"
 	"github.com/picatz/deputy/internal/repository/workspace"
 	"github.com/picatz/deputy/internal/vulnerability"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/trace"
 )
 
 // Service orchestrates vulnerability scans by combining inventory collection and OSV lookups.
@@ -56,6 +60,12 @@ func NewServiceWithConfig(cfg *ServiceConfig) *Service {
 }
 
 func (s *Service) queryOSV(ctx context.Context, inputs []analysis.PkgInput) ([]analysis.Vulnerability, error) {
+	ctx, span := otel.StartSpan(ctx, "deputy.scan.query_vulnerabilities",
+		trace.WithAttributes(
+			attribute.Int("deputy.osv.batch_size", len(inputs)),
+		))
+	defer span.End()
+
 	query := s.queryVulnerabilities
 	if query == nil {
 		query = analysis.QueryOSVBatch
@@ -64,30 +74,59 @@ func (s *Service) queryOSV(ctx context.Context, inputs []analysis.PkgInput) ([]a
 	if client == nil {
 		client = analysis.NewOSVClient()
 	}
-	return query(ctx, client, inputs)
+	vulns, err := query(ctx, client, inputs)
+	if err != nil {
+		otel.SetSpanError(span, err)
+	} else {
+		span.SetAttributes(attribute.Int("deputy.vuln.count", len(vulns)))
+	}
+	return vulns, err
 }
 
 // ScanRepository scans a repository target (local path or remote) for vulnerabilities.
 func (s *Service) ScanRepository(ctx context.Context, repoArg, ref string, refProvided bool, opts Options) (*Execution, error) {
+	startTime := time.Now()
+	ctx, span := otel.StartSpan(ctx, "deputy.scan.repository",
+		trace.WithAttributes(
+			attribute.String("deputy.target.path", repoArg),
+			attribute.String("deputy.target.ref", ref),
+		))
+	defer span.End()
+
+	logs.Info(ctx, "starting repository scan", "target", repoArg, "ref", ref)
+
 	target, err := resolveTarget(ctx, repoArg, ref)
 	if err != nil {
+		logs.Error(ctx, "failed to resolve target", "error", err)
+		otel.SetSpanError(span, err)
 		return nil, err
 	}
 	ref = target.ref
+	span.SetAttributes(attribute.Bool("deputy.target.remote", target.cloned))
 
 	effRef := refOrHEAD(ref)
 	if strings.EqualFold(effRef, "HEAD") && refProvided {
 		effRef = "HEAD~0"
 	}
 
-	pkgs, err := s.collectInventory(ctx, target.localRepoPath, effRef, inv.ScanOptions{Ecosystems: opts.Ecosystems})
+	// Collect inventory with tracing
+	logs.Debug(ctx, "collecting package inventory", "path", target.localRepoPath, "ref", effRef)
+	inventoryCtx, inventorySpan := otel.StartSpan(ctx, "deputy.scan.collect_inventory")
+	pkgs, err := s.collectInventory(inventoryCtx, target.localRepoPath, effRef, inv.ScanOptions{Ecosystems: opts.Ecosystems})
 	if err != nil {
+		logs.Error(ctx, "failed to collect inventory", "error", err)
+		otel.SetSpanError(inventorySpan, err)
+		inventorySpan.End()
 		target.cleanup()
 		return nil, fmt.Errorf("failed to collect inventory: %w", err)
 	}
+	inventorySpan.SetAttributes(attribute.Int("deputy.package.count", len(pkgs)))
+	inventorySpan.End()
+	logs.Info(ctx, "collected package inventory", "package_count", len(pkgs))
 
 	modInfo := resolveDirectModules(target.localRepoPath, effRef, target.workspace)
 	inputs := PackagesToInputs(pkgs, PackageInputOptions{GoDirect: modInfo.goDirect, Resolver: modInfo.resolver})
+	logs.Debug(ctx, "querying OSV for vulnerabilities", "input_count", len(inputs))
 	vulns, queryErr := s.queryOSV(ctx, inputs)
 
 	result := buildResult(
@@ -106,20 +145,54 @@ func (s *Service) ScanRepository(ctx context.Context, repoArg, ref string, refPr
 	)
 	result.Target.CommitHash, result.Target.OriginURL = getRepoMetadata(target.localRepoPath, ref)
 
+	// Record scan completion (both span and metrics)
+	otel.RecordScanCompletion(ctx, otel.ScanCompletion{
+		Span:         span,
+		Duration:     time.Since(startTime).Seconds(),
+		Ecosystem:    "go",
+		PackageCount: result.PackagesScanned,
+		Severity: otel.SeverityCounts{
+			Critical: result.Stats.CriticalSev,
+			High:     result.Stats.HighSeverity,
+			Medium:   result.Stats.MedSeverity,
+			Low:      result.Stats.LowSeverity,
+		},
+	})
+
+	logs.Info(ctx, "scan completed",
+		"packages_scanned", result.PackagesScanned,
+		"vulnerabilities_found", result.Stats.UniqueVulns,
+		"critical", result.Stats.CriticalSev,
+		"high", result.Stats.HighSeverity,
+		"medium", result.Stats.MedSeverity,
+		"low", result.Stats.LowSeverity,
+		"duration_seconds", time.Since(startTime).Seconds(),
+	)
+
 	return &Execution{Result: result, cleanup: target.cleanup}, nil
 }
 
 // ScanDirectory scans a local directory for vulnerabilities without Git context.
 func (s *Service) ScanDirectory(ctx context.Context, path string, opts Options) (*Execution, error) {
+	startTime := time.Now()
+	ctx, span := otel.StartSpan(ctx, "deputy.scan.directory",
+		trace.WithAttributes(
+			attribute.String("deputy.target.path", path),
+		))
+	defer span.End()
+
 	ws, err := workspace.NewDir(path)
 	if err != nil {
+		otel.SetSpanError(span, err)
 		return nil, fmt.Errorf("failed to open directory: %w", err)
 	}
 	pkgs, err := inv.ScanPackagesWorking(ctx, ws, inv.ScanOptions{Ecosystems: opts.Ecosystems})
 	if err != nil {
+		otel.SetSpanError(span, err)
 		_ = ws.Close()
 		return nil, fmt.Errorf("failed to scan packages: %w", err)
 	}
+	span.SetAttributes(attribute.Int("deputy.package.count", len(pkgs)))
 
 	goDirect := compare.CollectGoDirectModulesFromWorkspace(ws)
 	inputs := PackagesToInputs(pkgs, PackageInputOptions{GoDirect: goDirect, Resolver: WorkspaceManifestResolver{ws: ws}})
@@ -134,6 +207,20 @@ func (s *Service) ScanDirectory(ctx context.Context, path string, opts Options) 
 		opts,
 	)
 
+	// Record scan completion (both span and metrics)
+	otel.RecordScanCompletion(ctx, otel.ScanCompletion{
+		Span:         span,
+		Duration:     time.Since(startTime).Seconds(),
+		Ecosystem:    "go",
+		PackageCount: result.PackagesScanned,
+		Severity: otel.SeverityCounts{
+			Critical: result.Stats.CriticalSev,
+			High:     result.Stats.HighSeverity,
+			Medium:   result.Stats.MedSeverity,
+			Low:      result.Stats.LowSeverity,
+		},
+	})
+
 	return &Execution{
 		Result:  result,
 		cleanup: func() { _ = ws.Close() },
@@ -142,6 +229,13 @@ func (s *Service) ScanDirectory(ctx context.Context, path string, opts Options) 
 
 // ScanSBOM scans packages extracted from an SBOM document.
 func (s *Service) ScanSBOM(ctx context.Context, pkgs []*extractor.Package, direct map[string]bool, opts Options) (*Execution, error) {
+	startTime := time.Now()
+	ctx, span := otel.StartSpan(ctx, "deputy.scan.sbom",
+		trace.WithAttributes(
+			attribute.Int("deputy.package.count", len(pkgs)),
+		))
+	defer span.End()
+
 	inputs := PackagesToInputs(pkgs, PackageInputOptions{DirectPackages: direct})
 	vulns, queryErr := s.queryOSV(ctx, inputs)
 
@@ -153,6 +247,20 @@ func (s *Service) ScanSBOM(ctx context.Context, pkgs []*extractor.Package, direc
 		queryErr,
 		opts,
 	)
+
+	// Record scan completion (both span and metrics)
+	otel.RecordScanCompletion(ctx, otel.ScanCompletion{
+		Span:         span,
+		Duration:     time.Since(startTime).Seconds(),
+		Ecosystem:    "sbom",
+		PackageCount: result.PackagesScanned,
+		Severity: otel.SeverityCounts{
+			Critical: result.Stats.CriticalSev,
+			High:     result.Stats.HighSeverity,
+			Medium:   result.Stats.MedSeverity,
+			Low:      result.Stats.LowSeverity,
+		},
+	})
 
 	return &Execution{Result: result}, nil
 }

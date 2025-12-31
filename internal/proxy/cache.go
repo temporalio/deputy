@@ -10,6 +10,7 @@ import (
 	"github.com/picatz/deputy/internal/cache"
 	"github.com/picatz/deputy/internal/license"
 	"github.com/picatz/deputy/internal/policy"
+	"go.opentelemetry.io/otel/trace"
 )
 
 const (
@@ -97,13 +98,18 @@ func cachedOSVLookup(ctx context.Context, client analysis.OSVClient, ecosystem, 
 
 // cachedOSVLookupWithCache queries the OSV database using the provided cache.
 // This allows tests to inject isolated cache instances.
+//
+// Span enrichment: Records cache access events (hit/miss) on the current span.
 func cachedOSVLookupWithCache(ctx context.Context, client analysis.OSVClient, c OSVCache, ecosystem, name, version string) ([]analysis.Vulnerability, error) {
-	cache := getOSVCache(c)
+	span := trace.SpanFromContext(ctx)
+	osvCache := getOSVCache(c)
 	key := pkgCacheKey(ecosystem, name, version)
-	if cached, ok := cache.Get(key); ok {
+	if cached, ok := osvCache.Get(key); ok {
+		RecordOSVCacheHit(ctx, span, key)
 		slog.Debug("osv cache hit", "package", name, "version", version, "ecosystem", ecosystem, "vulns", len(cached))
 		return cached, nil
 	}
+	RecordOSVCacheMiss(ctx, span, key)
 	slog.Debug("osv cache miss", "package", name, "version", version, "ecosystem", ecosystem)
 	inputs := []analysis.PkgInput{{
 		Name:      name,
@@ -115,7 +121,7 @@ func cachedOSVLookupWithCache(ctx context.Context, client analysis.OSVClient, c 
 		slog.Debug("osv query failed", "package", name, "version", version, "ecosystem", ecosystem, "error", err)
 		return nil, err
 	}
-	cache.Set(key, vulns)
+	osvCache.Set(key, vulns)
 	slog.Debug("osv cache populated", "package", name, "version", version, "ecosystem", ecosystem, "vulns", len(vulns))
 	return vulns, nil
 }
@@ -128,16 +134,21 @@ func cachedLicenseLookup(ctx context.Context, ecosystem, name, version string) (
 
 // cachedLicenseLookupWithCache retrieves license information using the provided cache.
 // This allows tests to inject isolated cache instances.
+//
+// Span enrichment: Records cache access events (hit/miss) on the current span.
 func cachedLicenseLookupWithCache(ctx context.Context, c LicenseCache, ecosystem, name, version string) ([]string, error) {
-	cache := getLicenseCache(c)
+	span := trace.SpanFromContext(ctx)
+	licCache := getLicenseCache(c)
 	key := pkgCacheKey(ecosystem, name, version)
-	if cached, ok := cache.Get(key); ok {
+	if cached, ok := licCache.Get(key); ok {
+		RecordLicenseCacheHit(ctx, span, key)
 		slog.Debug("license cache hit", "package", name, "version", version, "ecosystem", ecosystem, "licenses", len(cached))
 		return cached, nil
 	}
+	RecordLicenseCacheMiss(ctx, span, key)
 	slog.Debug("license cache miss", "package", name, "version", version, "ecosystem", ecosystem)
 	lics := license.LookupLicensesBestEffort(ctx, ecosystem, name, version)
-	cache.Set(key, lics)
+	licCache.Set(key, lics)
 	slog.Debug("license cache populated", "package", name, "version", version, "ecosystem", ecosystem, "licenses", len(lics))
 	return lics, nil
 }
@@ -152,7 +163,10 @@ type handlerLookups struct {
 
 // vulnerabilitiesToMaps converts a list of vulnerabilities to a slice of maps
 // suitable for policy evaluation. Returns nil if no vulnerabilities are found or on error.
+//
+// Span enrichment: Records the vulnerability count on the current span.
 func vulnerabilitiesToMaps(ctx context.Context, lookups handlerLookups, ecosystem, name, version string) []map[string]any {
+	span := trace.SpanFromContext(ctx)
 	var vulns []analysis.Vulnerability
 	var err error
 	switch {
@@ -172,6 +186,10 @@ func vulnerabilitiesToMaps(ctx context.Context, lookups handlerLookups, ecosyste
 		slog.Warn("osv lookup failed", "package", name, "version", version, "error", err)
 		return nil
 	}
+
+	// Record vulnerability count on span
+	RecordVulnerabilityCount(span, len(vulns))
+
 	if len(vulns) == 0 {
 		return nil
 	}

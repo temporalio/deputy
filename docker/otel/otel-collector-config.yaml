@@ -1,0 +1,72 @@
+# OpenTelemetry Collector configuration for Deputy
+# Routes traces to Tempo, metrics to Prometheus, logs to Loki
+#
+# NOTE: service.namespace is intentionally not set. Deputy sets service.name
+# which becomes the Prometheus job label. If you later deploy multiple
+# Deputy-related services (e.g., deputy-proxy as a long-running service),
+# add a resource processor to set service.namespace for grouping:
+#
+#   processors:
+#     resource:
+#       attributes:
+#         - key: service.namespace
+#           value: security-tools
+#           action: upsert
+#
+# This would produce job labels like: security-tools/deputy, security-tools/deputy-proxy
+
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+      http:
+        endpoint: 0.0.0.0:4318
+
+processors:
+  batch:
+    timeout: 1s
+    send_batch_size: 1024
+
+exporters:
+  # Send traces to Tempo
+  otlp/tempo:
+    endpoint: tempo:4317
+    tls:
+      insecure: true
+
+  # Expose metrics for Prometheus scraping with exemplar support
+  prometheus:
+    endpoint: 0.0.0.0:8889
+    enable_open_metrics: true  # Required for exemplar export
+
+  # Send logs to Loki via OTLP
+  otlphttp/loki:
+    endpoint: http://loki:3100/otlp
+
+  # Debug exporter for troubleshooting (logs to collector stdout)
+  debug:
+    verbosity: basic
+    sampling_initial: 5
+    sampling_thereafter: 200
+
+service:
+  pipelines:
+    traces:
+      receivers: [otlp]
+      processors: [batch]
+      exporters: [otlp/tempo]
+
+    metrics:
+      receivers: [otlp]
+      processors: [batch]
+      exporters: [prometheus]
+
+    logs:
+      receivers: [otlp]
+      processors: [batch]
+      exporters: [otlphttp/loki]
+
+  telemetry:
+    logs:
+      level: info

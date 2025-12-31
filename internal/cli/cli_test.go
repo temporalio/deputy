@@ -69,9 +69,9 @@ func TestDefaultLogLevel(t *testing.T) {
 		env  string
 		want string
 	}{
-		{name: "default", env: "", want: "info"},
+		{name: "default", env: "", want: "warn"},
 		{name: "set", env: "debug", want: "debug"},
-		{name: "whitespace", env: "  warn  ", want: "warn"},
+		{name: "whitespace", env: "  info  ", want: "info"},
 	}
 
 	for _, test := range tests {

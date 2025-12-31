@@ -8,6 +8,7 @@ import (
 
 	"github.com/hashicorp/go-cleanhttp"
 	"github.com/hashicorp/go-retryablehttp"
+	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 )
 
 // Common HTTP client timeout constants used across deputy subsystems.
@@ -109,4 +110,52 @@ func NewRetryableClientWithConfig(timeout time.Duration, retryMax int, retryWait
 	client := rc.StandardClient()
 	client.Timeout = timeout
 	return client
+}
+
+// InstrumentedTransport wraps an http.RoundTripper with OpenTelemetry tracing.
+// Creates client spans for outgoing HTTP requests with proper context propagation.
+// If base is nil, uses http.DefaultTransport.
+func InstrumentedTransport(base http.RoundTripper, opts ...otelhttp.Option) http.RoundTripper {
+	if base == nil {
+		base = http.DefaultTransport
+	}
+	return otelhttp.NewTransport(base, opts...)
+}
+
+// NewInstrumentedClient returns an http.Client with OTel tracing enabled.
+// All outgoing requests will create spans and propagate trace context.
+func NewInstrumentedClient(timeout time.Duration) *http.Client {
+	return &http.Client{
+		Timeout:   timeout,
+		Transport: InstrumentedTransport(NewTransport()),
+	}
+}
+
+// NewInstrumentedRetryableClient returns a retryable http.Client with OTel tracing.
+// Combines automatic retry support with distributed tracing.
+func NewInstrumentedRetryableClient(timeout time.Duration) *http.Client {
+	rc := retryablehttp.NewClient()
+	rc.Logger = nil
+	rc.HTTPClient = cleanhttp.DefaultPooledClient()
+	rc.HTTPClient.Timeout = timeout
+	rc.HTTPClient.Transport = InstrumentedTransport(rc.HTTPClient.Transport)
+	rc.RetryMax = DefaultRetryMax
+	rc.RetryWaitMin = DefaultRetryWaitMin
+	rc.RetryWaitMax = DefaultRetryWaitMax
+	client := rc.StandardClient()
+	client.Timeout = timeout
+	return client
+}
+
+// InstrumentedHandler wraps an http.Handler with OpenTelemetry tracing.
+// Creates server spans for incoming HTTP requests.
+func InstrumentedHandler(handler http.Handler, operation string, opts ...otelhttp.Option) http.Handler {
+	return otelhttp.NewHandler(handler, operation, opts...)
+}
+
+// InstrumentedMiddleware returns middleware that wraps handlers with OTel tracing.
+func InstrumentedMiddleware(operation string, opts ...otelhttp.Option) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return InstrumentedHandler(next, operation, opts...)
+	}
 }

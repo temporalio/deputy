@@ -6,10 +6,12 @@ import (
 	"maps"
 	"regexp"
 	"strings"
+	"time"
 
 	"github.com/google/cel-go/cel"
 	"github.com/google/cel-go/common/types/ref"
 	"github.com/picatz/deputy/internal/collections"
+	"github.com/picatz/deputy/internal/otel"
 )
 
 // Engine holds compiled CEL programs and evaluates them without per-request recompilation.
@@ -82,6 +84,7 @@ func NewEngineFromPaths(paths []string) (*Engine, error) {
 // Advisory mode: Policies with mode="advisory" have their "deny" actions downgraded to "warn",
 // allowing observation without blocking.
 func (e *Engine) EvaluateAll(ctx context.Context, payload map[string]any, command, entrypoint string) ([]Action, error) {
+	startTime := time.Now()
 	if e == nil || len(e.compiled) == 0 {
 		return nil, nil
 	}
@@ -103,6 +106,7 @@ func (e *Engine) EvaluateAll(ctx context.Context, payload map[string]any, comman
 		input["env"] = env
 	}
 
+	span := otel.SpanFromContext(ctx)
 	var actions []Action
 	for _, pol := range e.compiled {
 		if shouldSkip(pol, command, entrypoint) {
@@ -123,8 +127,32 @@ func (e *Engine) EvaluateAll(ctx context.Context, payload map[string]any, comman
 		if strings.EqualFold(pol.mode, "advisory") {
 			normalized = downgradeAdvisory(normalized)
 		}
+		// Record individual policy result as span event
+		polResult := "allow"
+		for _, a := range normalized {
+			if ActionTypeIs(a.Type, ActionDeny) {
+				polResult = "deny"
+				break
+			} else if ActionTypeIs(a.Type, ActionWarn) && polResult == "allow" {
+				polResult = "warn"
+			}
+		}
+		otel.RecordPolicyResult(span, pol.source.Name, polResult)
 		actions = append(actions, normalized...)
 	}
+
+	// Record policy evaluation metrics
+	result := "allow"
+	for _, a := range actions {
+		if ActionTypeIs(a.Type, ActionDeny) {
+			result = "deny"
+			break
+		} else if ActionTypeIs(a.Type, ActionWarn) && result == "allow" {
+			result = "warn"
+		}
+	}
+	otel.RecordPolicyEvaluation(ctx, time.Since(startTime).Seconds(), result)
+
 	return actions, nil
 }
 

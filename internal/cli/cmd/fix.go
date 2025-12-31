@@ -13,6 +13,7 @@ import (
 	"strings"
 
 	"github.com/picatz/deputy/internal/cli/flags"
+	"github.com/picatz/deputy/internal/otel"
 	"github.com/picatz/deputy/internal/output"
 	remediation "github.com/picatz/deputy/internal/remediation"
 	"github.com/picatz/deputy/internal/report"
@@ -21,6 +22,8 @@ import (
 	ui "github.com/picatz/deputy/internal/ui"
 	"github.com/picatz/deputy/internal/vulnerability"
 	"github.com/spf13/cobra"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/trace"
 )
 
 // remediationPlan represents a structured plan for remediating vulnerabilities.
@@ -123,12 +126,25 @@ AI ASSISTANCE:
 // reports, existing plans, or fresh scans, and optionally applies fixes or
 // invokes AI agents.
 func runFixPlan(scanner *Scanner, cmd *cobra.Command, args []string) error {
+	ctx, span := otel.StartSpan(cmd.Context(), "deputy.fix",
+		trace.WithAttributes(
+			attribute.String("deputy.command", "fix"),
+		))
+	defer span.End()
+	cmd.SetContext(ctx)
+
 	reportPath, _ := cmd.Flags().GetString("report")
 	planPath, _ := cmd.Flags().GetString("plan")
 	ignoreUnfixed, _ := cmd.Flags().GetBool("ignore-unfixed")
 	apply, _ := cmd.Flags().GetBool("apply")
 	agentName, agentOpts := getAgentFlags(cmd)
 	policyPaths, _ := cmd.Flags().GetStringArray("policy")
+
+	span.SetAttributes(
+		attribute.Bool("deputy.fix.apply", apply),
+		attribute.Bool("deputy.fix.ignore_unfixed", ignoreUnfixed),
+		attribute.String("deputy.fix.agent", agentName),
+	)
 
 	if strings.TrimSpace(reportPath) != "" && strings.TrimSpace(planPath) != "" {
 		return fmt.Errorf("--report and --plan cannot be used together")
@@ -252,6 +268,7 @@ func runFixPlan(scanner *Scanner, cmd *cobra.Command, args []string) error {
 		}
 	}
 
+	otel.SetSpanOK(span)
 	return nil
 }
 

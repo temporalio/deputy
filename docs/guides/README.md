@@ -16,6 +16,12 @@ Practical "how do I use this in the real world?" documentation.
 | [Policy Cookbook](policy-cookbook.md) | Real-world CEL policy patterns and examples |
 | [Proxy Rollout](proxy-rollout.md) | Phased approach to policy enforcement |
 
+## Operations
+
+| Guide | Description |
+| --- | --- |
+| [Observability](observability.md) | OpenTelemetry tracing, metrics, and log correlation |
+
 ## Advanced
 
 | Guide | Description |

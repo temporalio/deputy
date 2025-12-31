@@ -29,12 +29,15 @@ import (
 	gitx "github.com/picatz/deputy/internal/gitutil"
 	"github.com/picatz/deputy/internal/inventory"
 	"github.com/picatz/deputy/internal/license"
+	"github.com/picatz/deputy/internal/otel"
 	"github.com/picatz/deputy/internal/purlx"
 	"github.com/picatz/deputy/internal/repository"
 	"github.com/picatz/deputy/internal/repository/workspace"
 	"github.com/protobom/protobom/pkg/formats"
 	"github.com/protobom/protobom/pkg/sbom"
 	"github.com/protobom/protobom/pkg/writer"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/trace"
 	"golang.org/x/mod/modfile"
 	"golang.org/x/mod/semver"
 	"google.golang.org/grpc"
@@ -84,6 +87,14 @@ type Result struct {
 // (local path or remote reference). Remote repositories are shallow cloned
 // (depth 1) to a temporary directory and cleaned up automatically.
 func Generate(ctx context.Context, repoRef string, opts Options) (Result, error) {
+	ctx, span := otel.StartSpan(ctx, "deputy.sbom.generate",
+		trace.WithAttributes(
+			attribute.String("deputy.target.path", repoRef),
+			attribute.String("deputy.target.ref", opts.Ref),
+			attribute.Bool("deputy.sbom.enrich_licenses", opts.EnrichLicenses),
+		))
+	defer span.End()
+
 	if opts.Ref == "" {
 		opts.Ref = "HEAD"
 	}
@@ -108,7 +119,9 @@ func Generate(ctx context.Context, repoRef string, opts Options) (Result, error)
 	if src == nil {
 		url := gitx.ToHTTPSGitURL(repoRef)
 		if url == "" {
-			return Result{}, fmt.Errorf("could not interpret repo %q as local path or remote URL", repoRef)
+			err := fmt.Errorf("could not interpret repo %q as local path or remote URL", repoRef)
+			otel.SetSpanError(span, err)
+			return Result{}, err
 		}
 		// Use the unified auth package for secure, host-aware credential resolution
 		gitAuth, _ := auth.GitAuthForURL(ctx, url)
@@ -148,6 +161,7 @@ func Generate(ctx context.Context, repoRef string, opts Options) (Result, error)
 
 	pkgs, err := collectInventorySBOM(ctx, src.Repo, src.Workspace, effRef, inventory.ScanOptions{Ecosystems: opts.Ecosystems})
 	if err != nil {
+		otel.SetSpanError(span, err)
 		return Result{}, err
 	}
 
@@ -201,6 +215,13 @@ func Generate(ctx context.Context, repoRef string, opts Options) (Result, error)
 	result.Origin = origin
 	result.Document = doc
 	result.Packages = pkgs
+
+	// Record results on span
+	span.SetAttributes(
+		attribute.Int("deputy.package.count", len(pkgs)),
+		attribute.String("deputy.sbom.commit", commit),
+	)
+
 	return result, nil
 }
 

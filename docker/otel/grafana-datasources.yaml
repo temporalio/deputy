@@ -1,0 +1,94 @@
+# Grafana datasource provisioning for Deputy observability stack
+#
+# This configuration enables full observability correlation:
+#   - Traces → Logs: Click a span to see related logs (filtered by trace_id)
+#   - Traces → Metrics: View metrics correlated with traces via exemplars
+#   - Logs → Traces: Click trace_id in log details to open trace in Tempo
+#   - Metrics → Traces: Click exemplars to jump to related traces
+#   - Service Map: Visual topology of services from trace data
+
+apiVersion: 1
+
+datasources:
+  # Tempo for distributed tracing
+  - name: Tempo
+    type: tempo
+    uid: tempo
+    access: proxy
+    url: http://tempo:3200
+    isDefault: true
+    jsonData:
+      httpMethod: GET
+      # Traces → Logs correlation
+      tracesToLogs:
+        datasourceUid: loki
+        spanStartTimeShift: "-1m"
+        spanEndTimeShift: "1m"
+        filterByTraceID: true
+        filterBySpanID: false
+        mapTagNamesEnabled: true
+        tags:
+          - key: service.name
+            value: service_name
+      # Traces → Metrics correlation (for span metrics)
+      tracesToMetrics:
+        datasourceUid: prometheus
+        spanStartTimeShift: "-1m"
+        spanEndTimeShift: "1m"
+        tags:
+          - key: service.name
+            value: service_name
+        queries:
+          - name: "Scan Duration"
+            query: "deputy_scan_duration_seconds_sum{service_name=\"$${__tags.service.name}\"}"
+          - name: "Vulnerabilities Found"
+            query: "deputy_scan_vulnerabilities_total{service_name=\"$${__tags.service.name}\"}"
+      # Service topology graph
+      serviceMap:
+        datasourceUid: prometheus
+      # Node graph visualization for trace spans
+      nodeGraph:
+        enabled: true
+      # Enable TraceQL search
+      search:
+        hide: false
+      # Span bar visualization
+      spanBar:
+        type: "Tag"
+        tag: "http.status_code"
+
+  # Prometheus for metrics with exemplar support
+  - name: Prometheus
+    type: prometheus
+    uid: prometheus
+    access: proxy
+    url: http://prometheus:9090
+    jsonData:
+      httpMethod: POST
+      # Metrics → Traces: exemplars link to Tempo
+      exemplarTraceIdDestinations:
+        - name: trace_id
+          datasourceUid: tempo
+          urlDisplayLabel: "View Trace"
+
+  # Loki for logs with trace correlation
+  - name: Loki
+    type: loki
+    uid: loki
+    access: proxy
+    url: http://loki:3100
+    jsonData:
+      # Logs → Traces: derived fields create clickable links to Tempo
+      derivedFields:
+        # Primary: trace_id label (extracted by OTel Collector)
+        - datasourceUid: tempo
+          matcherType: label
+          name: trace_id
+          url: "$${__value.raw}"
+          urlDisplayLabel: "View Trace"
+        # Secondary: span_id for direct span linking
+        - datasourceUid: tempo
+          matcherType: label
+          name: span_id
+          url: "$${__value.raw}"
+          urlDisplayLabel: "View Span"

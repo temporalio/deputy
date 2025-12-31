@@ -19,6 +19,7 @@ import (
 	gitx "github.com/picatz/deputy/internal/gitutil"
 	inv "github.com/picatz/deputy/internal/inventory"
 	"github.com/picatz/deputy/internal/license"
+	"github.com/picatz/deputy/internal/otel"
 	"github.com/picatz/deputy/internal/output"
 	"github.com/picatz/deputy/internal/report"
 	"github.com/picatz/deputy/internal/report/render"
@@ -28,6 +29,8 @@ import (
 	ui "github.com/picatz/deputy/internal/ui"
 	"github.com/picatz/deputy/internal/vulnerability"
 	"github.com/spf13/cobra"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/trace"
 	"golang.org/x/sync/errgroup"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
@@ -265,6 +268,15 @@ type DiffPolicyReport struct {
 // target references, computes a dependency diff, and optionally queries OSV to
 // enrich added/updated modules with vulnerability data.
 func runDiffAnalysis(ctx context.Context, service *scan.Service, repoPath, baseRef, targetRef string, enableVulnScan bool, useLicenseCheck bool, enrichLicenses bool, licenseSource string, publishedAfterStr, publishedBeforeStr, asOfStr string, ignoreUnfixed bool, showUnchanged bool, unchangedThreshold string, policyPaths []string, scanOpts inv.ScanOptions, matcher *inv.DependencyMatcher, debugMatcher bool, outW io.Writer, errW io.Writer) error {
+	ctx, span := otel.StartSpan(ctx, "deputy.diff",
+		trace.WithAttributes(
+			attribute.String("deputy.target.path", repoPath),
+			attribute.String("deputy.diff.base_ref", baseRef),
+			attribute.String("deputy.diff.target_ref", targetRef),
+			attribute.Bool("deputy.diff.vuln_scan", enableVulnScan),
+		))
+	defer span.End()
+
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	if outW == nil {
@@ -288,6 +300,7 @@ func runDiffAnalysis(ctx context.Context, service *scan.Service, repoPath, baseR
 	if !isWorkingPseudoRef(targetRef) {
 		changedFiles, err := gitx.CheckFilesChanged(repoPath, baseRef, targetRef)
 		if err != nil {
+			otel.SetSpanError(span, err)
 			return fmt.Errorf("error checking files changed: %w", err)
 		}
 
@@ -297,6 +310,7 @@ func runDiffAnalysis(ctx context.Context, service *scan.Service, repoPath, baseR
 
 		if matcher != nil && !matcher.AnyMatch(changedFiles) {
 			fmt.Fprintln(outW, ui.StyleAdded.Render("No dependency changes detected."))
+			otel.SetSpanOK(span)
 			return nil
 		}
 	}
@@ -304,6 +318,7 @@ func runDiffAnalysis(ctx context.Context, service *scan.Service, repoPath, baseR
 	// Open repository and resolve references
 	repoSrc, err := repository.Open(repoPath)
 	if err != nil {
+		otel.SetSpanError(span, err)
 		return fmt.Errorf("error opening Git repository at %s: %w\nMake sure you're running this from within a valid Git repository", repoPath, err)
 	}
 	defer repoSrc.Close()
@@ -311,6 +326,7 @@ func runDiffAnalysis(ctx context.Context, service *scan.Service, repoPath, baseR
 
 	baseHash, err := gitx.ResolveRevisionEnhanced(repo, baseRef)
 	if err != nil {
+		otel.SetSpanError(span, err)
 		suggestions := gitx.GetReferenceSuggestions(repo, baseRef)
 		if len(suggestions) > 0 {
 			return fmt.Errorf("error resolving base reference %q: %v\nDid you mean one of these?\n  %s", baseRef, err, strings.Join(suggestions, "\n  "))
@@ -326,12 +342,14 @@ func runDiffAnalysis(ctx context.Context, service *scan.Service, repoPath, baseR
 		fmt.Fprintln(outW, ui.StyleMeta.Render("Scanning packages in working tree..."))
 		tp, err := inv.ScanPackagesWorking(ctx, repoSrc.Workspace, scanOpts)
 		if err != nil {
+			otel.SetSpanError(span, err)
 			return fmt.Errorf("error scanning working tree packages: %w", err)
 		}
 		targetPackages = tp
 	} else {
 		th, err := gitx.ResolveRevisionEnhanced(repo, targetRef)
 		if err != nil {
+			otel.SetSpanError(span, err)
 			suggestions := gitx.GetReferenceSuggestions(repo, targetRef)
 			if len(suggestions) > 0 {
 				return fmt.Errorf("error resolving target reference %q: %v\nDid you mean one of these?\n  %s", targetRef, err, strings.Join(suggestions, "\n  "))
@@ -345,6 +363,7 @@ func runDiffAnalysis(ctx context.Context, service *scan.Service, repoPath, baseR
 	fmt.Fprintln(outW, ui.StyleMeta.Render(fmt.Sprintf("Scanning packages in base reference %s...", baseHash.String()[:7])))
 	basePackages, err := inv.ScanPackagesAtCommitSnapshot(ctx, repo, *baseHash, scanOpts)
 	if err != nil {
+		otel.SetSpanError(span, err)
 		return fmt.Errorf("error scanning base reference packages: %w", err)
 	}
 
@@ -353,6 +372,7 @@ func runDiffAnalysis(ctx context.Context, service *scan.Service, repoPath, baseR
 		fmt.Fprintln(outW, ui.StyleMeta.Render(fmt.Sprintf("Scanning packages in target reference %s...", targetHash.String()[:7])))
 		tp, err := inv.ScanPackagesAtCommitSnapshot(ctx, repo, *targetHash, scanOpts)
 		if err != nil {
+			otel.SetSpanError(span, err)
 			return fmt.Errorf("error scanning target reference packages: %w", err)
 		}
 		targetPackages = tp
@@ -400,6 +420,7 @@ func runDiffAnalysis(ctx context.Context, service *scan.Service, repoPath, baseR
 	changes := compare.ComparePackages(basePackages, targetPackages, goDirect, pkgDirect, nil)
 	if len(changes) == 0 {
 		fmt.Fprintln(outW, "No package changes detected.")
+		otel.SetSpanOK(span)
 		return nil
 	}
 
@@ -445,6 +466,7 @@ func runDiffAnalysis(ctx context.Context, service *scan.Service, repoPath, baseR
 			Vulnerabilities: reportVulns,
 		}
 		if err := runDiffPolicies(ctx, policyPaths, policyReport, errW); err != nil {
+			otel.SetSpanError(span, err)
 			return err
 		}
 
@@ -521,11 +543,13 @@ func runDiffAnalysis(ctx context.Context, service *scan.Service, repoPath, baseR
 		}
 		allResult, allCons := resultFromReportVulnerabilities(all)
 		render.RenderVulnerabilitySummaryAndActions(outW, allCons, allResult.Stats)
+		otel.SetSpanOK(span)
 		return nil
 	}
 
 	// Display results (no vulnerabilities scanned)
 	render.DisplayVulnerabilities(outW, scan.Result{})
+	otel.SetSpanOK(span)
 	return nil
 }
 
