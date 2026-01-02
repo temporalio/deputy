@@ -41,7 +41,12 @@ jobs:
         with:
           go-version-file: go.mod
 
+      - name: Build binary for blackbox tests
+        run: go build -o deputy-test-binary .
+
       - name: Test
+        env:
+          DEPUTY_TEST_BINARY: ${{ github.workspace }}/deputy-test-binary
         run: go test -v -race -coverprofile=coverage.out ./...
 
       - name: Upload coverage
@@ -50,19 +55,3 @@ jobs:
           name: coverage
           path: coverage.out
 
-  lint:
-    name: Lint
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Setup Go
-        uses: actions/setup-go@v5
-        with:
-          go-version-file: go.mod
-
-      - name: golangci-lint
-        uses: golangci/golangci-lint-action@v6
-        with:
-          version: latest

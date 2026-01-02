@@ -17,7 +17,8 @@ import (
 
 func TestMain(m *testing.M) {
 	code := m.Run()
-	if binPath != "" {
+	// Only clean up if we built the binary ourselves (not pre-built from env)
+	if binPath != "" && os.Getenv("DEPUTY_TEST_BINARY") == "" {
 		_ = os.RemoveAll(filepath.Dir(binPath))
 	}
 	os.Exit(code)
@@ -32,6 +33,14 @@ var (
 func deputyBinary(t *testing.T) string {
 	t.Helper()
 	buildOnce.Do(func() {
+		// Check for pre-built binary (used in CI to avoid OOM with race detector)
+		if prebuilt := os.Getenv("DEPUTY_TEST_BINARY"); prebuilt != "" {
+			if _, err := os.Stat(prebuilt); err == nil {
+				binPath = prebuilt
+				return
+			}
+		}
+
 		tmp, err := os.MkdirTemp("", "deputy-blackbox-*")
 		if err != nil {
 			buildErr = err

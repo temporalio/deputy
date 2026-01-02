@@ -58,15 +58,19 @@ runs:
       run: |
         set -euo pipefail
 
-        if [ "$INPUT_VERSION" = "latest" ]; then
+        DEPUTY_PATH="$(go env GOPATH)/bin/deputy"
+
+        # Check if we're in the deputy repository with source code available
+        if [ -f "go.mod" ] && grep -q "^module github.com/picatz/deputy$" go.mod 2>/dev/null; then
+          echo "Building Deputy from source (detected deputy repository)..."
+          go build -o "$DEPUTY_PATH" .
+        elif [ "$INPUT_VERSION" = "latest" ]; then
           echo "Installing Deputy@latest..."
           go install github.com/picatz/deputy@latest
         else
           echo "Installing Deputy@$INPUT_VERSION..."
           go install "github.com/picatz/deputy@$INPUT_VERSION"
         fi
-
-        DEPUTY_PATH="$(go env GOPATH)/bin/deputy"
 
         if [ ! -f "$DEPUTY_PATH" ]; then
           echo "::error::Deputy binary not found at $DEPUTY_PATH"
