@@ -190,7 +190,7 @@ runs:
 
     - name: Upload SARIF to GitHub Security
       if: inputs.upload-sarif == 'true' && inputs.format == 'sarif' && always()
-      uses: github/codeql-action/upload-sarif@v3
+      uses: github/codeql-action/upload-sarif@v4
       with:
         sarif_file: ${{ inputs.output }}
         category: ${{ inputs.sarif-category }}
