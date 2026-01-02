@@ -23,15 +23,17 @@ policies:
   # Block critical/high vulnerabilities in new dependencies
   - name: pr-block-vulnerable-deps
     description: Block PRs adding dependencies with critical/high vulnerabilities
+    entrypoints: [diff_report]
     rules:
       - action: deny
-        when: vulnerabilities.exists(v, v.severity in ["CRITICAL", "HIGH"])
+        when: vulnerabilities.exists(v, v.?severity.orValue("") in ["CRITICAL", "HIGH"])
         reason: New dependency introduces critical/high severity vulnerabilities
         remediation: Choose a version or package without known vulnerabilities
 
   # Check license compatibility
   - name: pr-license-check
     description: Ensure dependencies have acceptable licenses
+    entrypoints: [diff_dependency_change]
     vars:
       permissive_licenses:
         - MIT
@@ -57,6 +59,7 @@ policies:
   # Warn on pre-release versions
   - name: pr-prerelease-check
     description: Warn when adding pre-release versions
+    entrypoints: [diff_dependency_change]
     rules:
       - action: warn
         when: pkg.version.matches("-(alpha|beta|rc|preview|dev|snapshot)")

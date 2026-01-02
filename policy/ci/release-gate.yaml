@@ -25,24 +25,27 @@ policies:
   # Security: Block any critical or high severity vulnerabilities
   - name: release-security-gate
     description: Block releases with critical or high severity vulnerabilities
+    entrypoints: [scan_report]
     rules:
       - action: deny
-        when: vulnerabilities.exists(v, v.severity in ["CRITICAL", "HIGH"])
+        when: vulnerabilities.exists(v, v.?severity.orValue("") in ["CRITICAL", "HIGH"])
         reason: Cannot release with critical/high severity vulnerabilities
         remediation: Resolve all critical and high severity vulnerabilities before release
 
   # Security: Stricter rules for direct dependencies (medium+ must be addressed)
   - name: release-direct-deps-clean
     description: Direct dependencies must be free of medium+ vulnerabilities
+    entrypoints: [scan_report]
     rules:
       - action: deny
-        when: vulnerabilities.exists(v, v.isDirect && v.severity == "MEDIUM")
+        when: vulnerabilities.exists(v, v.?isDirect.orValue(false) && v.?severity.orValue("") == "MEDIUM")
         reason: Direct dependency has medium severity vulnerability
         remediation: Update or replace the affected direct dependency
 
   # Compliance: Require license information
   - name: release-license-required
     description: All dependencies must have known licenses
+    entrypoints: [scan_vulnerability]
     rules:
       - action: deny
         when: pkg.licenses.size() == 0
@@ -52,6 +55,7 @@ policies:
   # Compliance: Flag copyleft licenses (GPL, AGPL families)
   - name: release-copyleft-review
     description: Flag strong copyleft licenses for review
+    entrypoints: [scan_vulnerability]
     rules:
       - action: warn
         when: pkg.licenses.exists(l, l.startsWith("GPL") || l.startsWith("AGPL"))

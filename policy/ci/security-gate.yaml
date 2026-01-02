@@ -23,26 +23,29 @@ policies:
   # Always block critical vulnerabilities
   - name: ci-block-critical
     description: Block CI when critical vulnerabilities are present
+    entrypoints: [scan_report]
     rules:
       - action: deny
-        when: vulnerabilities.exists(v, v.severity == "CRITICAL")
+        when: vulnerabilities.exists(v, v.?severity.orValue("") == "CRITICAL")
         reason: Critical vulnerability blocks CI pipeline
         remediation: Upgrade affected packages to patched versions
 
   # Block high severity only when fixes are available
   - name: ci-block-fixable-high
     description: Block high severity vulnerabilities that have fixes
+    entrypoints: [scan_report]
     rules:
       - action: deny
-        when: vulnerabilities.exists(v, v.severity == "HIGH" && size(v.fixedVersions) > 0)
+        when: vulnerabilities.exists(v, v.?severity.orValue("") == "HIGH" && size(v.?fixedVersions.orValue([])) > 0)
         reason: High severity vulnerability has an available fix
         remediation: Upgrade to a fixed version
 
   # Warn on high severity without fixes (informational)
   - name: ci-warn-unfixable-high
     description: Warn on high severity without available fixes
+    entrypoints: [scan_report]
     rules:
       - action: warn
-        when: vulnerabilities.exists(v, v.severity == "HIGH" && size(v.fixedVersions) == 0)
+        when: vulnerabilities.exists(v, v.?severity.orValue("") == "HIGH" && size(v.?fixedVersions.orValue([])) == 0)
         reason: High severity vulnerability (no fix available yet)
         remediation: Monitor for upstream fix availability
