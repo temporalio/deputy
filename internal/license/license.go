@@ -22,9 +22,9 @@ import (
 	"github.com/go-git/go-git/v5/plumbing"
 	githttp "github.com/go-git/go-git/v5/plumbing/transport/http"
 	"github.com/google/licensecheck"
-	"github.com/picatz/deputy/internal/cache"
+	"github.com/picatz/deputy/internal/cache/disk"
+	"github.com/picatz/deputy/internal/cache/memory"
 	"github.com/picatz/deputy/internal/collections"
-	"github.com/picatz/deputy/internal/diskcache"
 	"github.com/picatz/deputy/internal/httputil"
 	"github.com/picatz/deputy/internal/repository"
 	"github.com/picatz/deputy/internal/repository/workspace"
@@ -167,6 +167,40 @@ type DepsClient interface {
 	GetVersion(ctx context.Context, req *pb.GetVersionRequest) (*pb.Version, error)
 }
 
+// Resolver looks up license information for packages across ecosystems.
+// Implementations handle ecosystem-specific registry APIs and caching.
+type Resolver interface {
+	// Resolve returns SPDX license identifiers for the given package.
+	// Returns nil if no licenses could be determined.
+	Resolve(ctx context.Context, ecosystem, name, version string) []string
+}
+
+// DefaultResolver returns a Resolver that uses ecosystem-specific registry
+// lookups with caching. Pass nil for config to use defaults.
+func DefaultResolver(cfg *ResolverConfig) Resolver {
+	if cfg == nil {
+		cfg = &ResolverConfig{}
+	}
+	return &registryResolver{cfg: *cfg}
+}
+
+// ResolverConfig configures the default license resolver.
+type ResolverConfig struct {
+	// DepsClient is used for deps.dev license lookups.
+	// If nil, deps.dev lookups are skipped.
+	DepsClient DepsClient
+}
+
+// registryResolver implements Resolver using ecosystem-specific registry APIs.
+type registryResolver struct {
+	cfg ResolverConfig
+}
+
+// Resolve implements Resolver by delegating to LookupLicensesBestEffort.
+func (r *registryResolver) Resolve(ctx context.Context, ecosystem, name, version string) []string {
+	return LookupLicensesBestEffort(ctx, ecosystem, name, version)
+}
+
 // FetchLicensesForPackage queries deps.dev for license info for a module name@version.
 // Returns ["?"] on error or missing data to preserve existing UX.
 func FetchLicensesForPackage(ctx context.Context, client DepsClient, name, version string) []string {
@@ -187,7 +221,7 @@ func FetchLicensesForEcosystem(ctx context.Context, client DepsClient, ecosystem
 	n := normalizeNameForSystem(system, name)
 	key := fmt.Sprintf("%d|%s@%s", system, n, v)
 	var cached []string
-	if diskcache.Read("depsdev", key, licenseCacheTTL, &cached) && len(cached) > 0 {
+	if disk.Read("depsdev", key, licenseCacheTTL, &cached) && len(cached) > 0 {
 		return cached
 	}
 	if client == nil {
@@ -197,7 +231,7 @@ func FetchLicensesForEcosystem(ctx context.Context, client DepsClient, ecosystem
 	if err != nil || raw == nil || len(raw.Licenses) == 0 {
 		return []string{"?"}
 	}
-	diskcache.Write("depsdev", key, raw.Licenses)
+	disk.Write("depsdev", key, raw.Licenses)
 	return raw.Licenses
 }
 
@@ -314,9 +348,9 @@ func LocalRepoLicenseScan(ws workspace.FS) []string {
 // This pattern is especially important during SBOM generation and vulnerability
 // scanning where the same package may be referenced multiple times.
 var (
-	remoteLicenseMemo    = cache.NewTTLCache[string, []string](licenseMemoMaxItems, licenseMemoTTL)
+	remoteLicenseMemo    = memory.NewTTLCache[string, []string](licenseMemoMaxItems, licenseMemoTTL)
 	remoteLicenseGroup   singleflight.Group
-	registryLicenseMemo  = cache.NewTTLCache[string, []string](licenseMemoMaxItems, licenseMemoTTL)
+	registryLicenseMemo  = memory.NewTTLCache[string, []string](licenseMemoMaxItems, licenseMemoTTL)
 	registryLicenseGroup singleflight.Group
 	githubHTTPClientOnce sync.Once
 	githubHTTPClient     *nethttp.Client
@@ -384,7 +418,7 @@ func RemoteModuleLicenseScan(ctx context.Context, modulePath, version string) []
 		return cloneStrings(cached)
 	}
 	var diskCached []string
-	if version != "" && diskcache.Read("license-scan", key, licenseCacheTTL, &diskCached) && len(diskCached) > 0 {
+	if version != "" && disk.Read("license-scan", key, licenseCacheTTL, &diskCached) && len(diskCached) > 0 {
 		remoteLicenseMemo.Set(key, cloneStrings(diskCached))
 		return cloneStrings(diskCached)
 	}
@@ -426,7 +460,7 @@ func RemoteModuleLicenseScan(ctx context.Context, modulePath, version string) []
 			}
 		}
 		if version != "" && len(ids) > 0 {
-			diskcache.Write("license-scan", key, ids)
+			disk.Write("license-scan", key, ids)
 		}
 		remoteLicenseMemo.Set(key, cloneStrings(ids))
 		return ids, nil
@@ -452,7 +486,7 @@ func LookupLicensesBestEffort(ctx context.Context, ecosystem, name, version stri
 		return cloneStrings(cached)
 	}
 	var diskCached []string
-	if diskcache.Read("license-registry", key, licenseCacheTTL, &diskCached) && len(diskCached) > 0 {
+	if disk.Read("license-registry", key, licenseCacheTTL, &diskCached) && len(diskCached) > 0 {
 		registryLicenseMemo.Set(key, cloneStrings(diskCached))
 		return cloneStrings(diskCached)
 	}
@@ -462,7 +496,7 @@ func LookupLicensesBestEffort(ctx context.Context, ecosystem, name, version stri
 		}
 		lics := resolveEcosystemLicenses(ctx, eco, name, version)
 		if len(lics) > 0 {
-			diskcache.Write("license-registry", key, lics)
+			disk.Write("license-registry", key, lics)
 		}
 		registryLicenseMemo.Set(key, cloneStrings(lics))
 		return lics, nil

@@ -217,3 +217,74 @@ func Test_ProcessOSVVulnerability_NilLayerDetails(t *testing.T) {
 		t.Errorf("expected LayerDetails to be nil for non-container scan, got %+v", out.LayerDetails)
 	}
 }
+
+func Test_ProcessOSVVulnerabilityDomain_ExtractsCWEs(t *testing.T) {
+	tests := []struct {
+		name     string
+		vuln     osvschema.Vulnerability
+		wantCWEs []string
+	}{
+		{
+			name: "GHSA with CWEs",
+			vuln: osvschema.Vulnerability{
+				ID:      "GHSA-1234-5678-abcd",
+				Summary: "XSS vulnerability",
+				DatabaseSpecific: map[string]any{
+					"cwe_ids":  []any{"CWE-79", "CWE-80"},
+					"severity": "HIGH",
+				},
+			},
+			wantCWEs: []string{"CWE-79", "CWE-80"},
+		},
+		{
+			name: "no CWEs",
+			vuln: osvschema.Vulnerability{
+				ID:      "CVE-2024-1234",
+				Summary: "Some vulnerability",
+			},
+			wantCWEs: nil,
+		},
+		{
+			name: "empty CWE array",
+			vuln: osvschema.Vulnerability{
+				ID:               "GHSA-xxxx-yyyy-zzzz",
+				DatabaseSpecific: map[string]any{"cwe_ids": []any{}},
+			},
+			wantCWEs: nil,
+		},
+		{
+			name: "CWEs with invalid entries filtered",
+			vuln: osvschema.Vulnerability{
+				ID: "GHSA-abcd-1234-efgh",
+				DatabaseSpecific: map[string]any{
+					"cwe_ids": []any{"CWE-89", "invalid", "CWE-79"},
+				},
+			},
+			wantCWEs: []string{"CWE-79", "CWE-89"}, // sorted by ID
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			advisory, _ := ProcessOSVVulnerabilityDomain(tt.vuln, PkgInput{Name: "test-pkg"})
+
+			if tt.wantCWEs == nil {
+				if len(advisory.CWEs) != 0 {
+					t.Errorf("expected no CWEs, got %v", advisory.CWEs)
+				}
+				return
+			}
+
+			if len(advisory.CWEs) != len(tt.wantCWEs) {
+				t.Errorf("CWEs count = %d, want %d", len(advisory.CWEs), len(tt.wantCWEs))
+				return
+			}
+
+			for i, want := range tt.wantCWEs {
+				if string(advisory.CWEs[i]) != want {
+					t.Errorf("CWEs[%d] = %q, want %q", i, advisory.CWEs[i], want)
+				}
+			}
+		})
+	}
+}

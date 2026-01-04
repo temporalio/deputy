@@ -4,6 +4,8 @@ import (
 	"cmp"
 	"slices"
 	"time"
+
+	"github.com/picatz/deputy/internal/dependency"
 )
 
 // ImageRef identifies a container image for comparison.
@@ -82,20 +84,11 @@ type ImagePackageChange struct {
 
 	// BaseLayerDetails indicates which layer the package was in the base image.
 	// Nil if the package was not in the base image (added).
-	BaseLayerDetails *LayerDetails `json:"baseLayerDetails,omitempty"`
+	BaseLayerDetails *dependency.LayerDetails `json:"baseLayerDetails,omitempty"`
 
 	// TargetLayerDetails indicates which layer the package is in the target image.
 	// Nil if the package is not in the target image (removed).
-	TargetLayerDetails *LayerDetails `json:"targetLayerDetails,omitempty"`
-}
-
-// LayerDetails describes which layer introduced a package.
-type LayerDetails struct {
-	Index       int    `json:"index"`                 // Layer position (0 = oldest/base)
-	DiffID      string `json:"diffId,omitempty"`      // Layer content digest
-	ChainID     string `json:"chainId,omitempty"`     // Cumulative chain digest
-	Command     string `json:"command,omitempty"`     // Dockerfile command
-	InBaseImage bool   `json:"inBaseImage,omitempty"` // Whether in FROM base
+	TargetLayerDetails *dependency.LayerDetails `json:"targetLayerDetails,omitempty"`
 }
 
 // VulnerabilityChange represents a vulnerability difference between two images.
@@ -128,7 +121,7 @@ type VulnerabilityChange struct {
 	FixedVersions []string `json:"fixedVersions,omitempty"`
 
 	// LayerDetails describes where the vulnerability was introduced.
-	LayerDetails *LayerDetails `json:"layerDetails,omitempty"`
+	LayerDetails *dependency.LayerDetails `json:"layerDetails,omitempty"`
 
 	// Summary is a brief description of the vulnerability.
 	Summary string `json:"summary,omitempty"`

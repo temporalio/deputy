@@ -9,14 +9,14 @@ import (
 	"strings"
 	"testing"
 
-	analysis "github.com/picatz/deputy/internal/analysis"
 	"github.com/picatz/deputy/internal/compare"
+	"github.com/picatz/deputy/internal/license"
 )
 
 // Ensure scan-mode enrichment pulls licenses via best-effort sources (e.g., crates.io)
 // and surfaces them in the diff output when deps.dev metadata is absent.
 func TestDisplayDetailedDependencyChanges_ScanUsesBestEffortLicenses(t *testing.T) {
-	analysis.ResetLicenseCachesForTest(t)
+	license.ResetLicenseCachesForTest(t)
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if strings.Contains(r.URL.Path, "/api/v1/crates/serde/1.0.0") {
@@ -27,9 +27,9 @@ func TestDisplayDetailedDependencyChanges_ScanUsesBestEffortLicenses(t *testing.
 	}))
 	defer server.Close()
 
-	restoreClient := analysis.WithLicenseHTTPClient(server.Client())
+	restoreClient := license.WithLicenseHTTPClient(server.Client())
 	defer restoreClient()
-	restoreBases := analysis.WithLicenseEndpoints(server.URL, server.URL, server.URL, server.URL, server.URL, server.URL)
+	restoreBases := license.WithLicenseEndpoints(server.URL, server.URL, server.URL, server.URL, server.URL, server.URL)
 	defer restoreBases()
 
 	changes := []compare.Change{{

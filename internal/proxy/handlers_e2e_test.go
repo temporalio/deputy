@@ -213,7 +213,7 @@ func TestProxyHandlers_DenyHeadersIncludeName(t *testing.T) {
 	handler := newUpstreamReverseProxy(u, "test", http.DefaultTransport)
 	req := httptest.NewRequest(http.MethodGet, "http://deputy.local/some/path", nil)
 	rr := httptest.NewRecorder()
-	serveWithPolicy(rr, req, stubPolicyEvaluator{actions: []policy.Action{{Type: "deny", Source: "policy.yaml", Reason: "blocked"}}}, "test_entry", map[string]any{"request": map[string]any{}}, blockMeta{Ecosystem: "test", Name: "pkg", Version: "1.0.0", Operation: "fetch"}, handler)
+	serveWithPolicy(rr, req, stubPolicyEvaluator{actions: []policy.Action{{Type: "deny", Source: "policy.yaml", Reason: "blocked"}}}, policy.EntrypointGoArtifactRequest, map[string]any{"request": map[string]any{}}, blockMeta{Ecosystem: "test", Name: "pkg", Version: "1.0.0", Operation: "fetch"}, handler)
 	if rr.Code != http.StatusForbidden {
 		t.Fatalf("status=%d want=%d", rr.Code, http.StatusForbidden)
 	}

@@ -1,0 +1,35 @@
+# Block vulnerabilities with high EPSS (Exploit Prediction Scoring System) scores.
+# EPSS predicts the probability that a vulnerability will be exploited in the next 30 days.
+#
+# Requires: --enrich flag to populate EPSS data
+#
+# Usage:
+#   deputy scan --enrich --policy policy/examples/epss-threshold.yaml
+#
+# EPSS score ranges:
+#   0.0 - 0.1: Low risk (most CVEs fall here)
+#   0.1 - 0.5: Elevated risk
+#   0.5 - 1.0: High risk (actively exploited or very likely to be)
+#
+policies:
+  - name: block-high-epss
+    entrypoints: [scan_vulnerability]
+    vars:
+      # Threshold for denying vulnerabilities (0.0 - 1.0)
+      # 0.1 = 10% probability of exploitation in 30 days
+      deny_threshold: 0.1
+      # Threshold for warning (0.0 - 1.0)
+      warn_threshold: 0.05
+    rules:
+      - action: deny
+        when: |
+          has(vulnerability.epss) &&
+          vulnerability.epss >= deny_threshold
+        reason: "High EPSS score (>= 10% exploitation probability)"
+
+      - action: warn
+        when: |
+          has(vulnerability.epss) &&
+          vulnerability.epss >= warn_threshold &&
+          vulnerability.epss < deny_threshold
+        reason: "Elevated EPSS score (5-10% exploitation probability)"

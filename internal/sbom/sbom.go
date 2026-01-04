@@ -35,6 +35,7 @@ import (
 	"github.com/picatz/deputy/internal/otel"
 	"github.com/picatz/deputy/internal/purlx"
 	"github.com/picatz/deputy/internal/repository"
+	"github.com/picatz/deputy/internal/version"
 	"github.com/picatz/deputy/internal/repository/workspace"
 	"github.com/picatz/deputy/internal/scan"
 	"github.com/picatz/deputy/internal/targets"
@@ -68,6 +69,13 @@ type Options struct {
 	EnrichLicenses bool
 	// LicenseSource specifies where to fetch license data: "depsdev", "scan", or "both".
 	LicenseSource string
+	// Enrich enables comprehensive SBOM enrichment (CPEs, external refs, suppliers, etc.).
+	// When true, calls deps.dev to add CPE identifiers, VCS URLs, homepage links,
+	// supplier information, and package publish dates to each component.
+	Enrich bool
+	// EnrichConcurrency controls how many parallel deps.dev requests are made during enrichment.
+	// Defaults to 10 if not set.
+	EnrichConcurrency int
 }
 
 // Result captures the SBOM document alongside contextual metadata that callers
@@ -219,6 +227,24 @@ func Generate(ctx context.Context, repoRef string, opts Options) (Result, error)
 		}
 	}
 
+	// Comprehensive SBOM enrichment (CPEs, external refs, suppliers, etc.)
+	if opts.Enrich {
+		concurrency := opts.EnrichConcurrency
+		if concurrency <= 0 {
+			concurrency = 10
+		}
+		enrichOpts := EnrichOptions{
+			AddCPEs:          true,
+			AddSuppliers:     true,
+			AddExternalRefs:  true,
+			AddPublishedDate: true,
+			Concurrency:      concurrency,
+		}
+		if _, err := Enrich(ctx, doc, enrichOpts); err != nil {
+			return Result{}, fmt.Errorf("failed to enrich SBOM: %w", err)
+		}
+	}
+
 	commit, origin := resolveRepoMetadata(src.Repo, effRef, repoDisplay)
 	localPath := ""
 	if src != nil {
@@ -306,6 +332,13 @@ func buildProtobomDocument(ctx context.Context, ws workspace.FS, repoRef, ref, n
 	d := sbom.NewDocument()
 	d.Metadata.Name = name
 	d.Metadata.Date = timestamppb.New(time.Now())
+
+	// Add SBOM tool metadata for NTIA compliance
+	d.Metadata.Tools = append(d.Metadata.Tools, &sbom.Tool{
+		Name:    "deputy",
+		Version: version.Value,
+		Vendor:  "github.com/picatz/deputy",
+	})
 
 	app := sbom.NewNode()
 	app.Id = "application:root"

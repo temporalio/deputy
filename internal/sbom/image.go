@@ -111,6 +111,24 @@ func GenerateImage(ctx context.Context, target string, targetOpts map[string]str
 		}
 	}
 
+	// Comprehensive SBOM enrichment (CPEs, external refs, suppliers, etc.)
+	if opts.Enrich {
+		concurrency := opts.EnrichConcurrency
+		if concurrency <= 0 {
+			concurrency = 10
+		}
+		enrichOpts := EnrichOptions{
+			AddCPEs:          true,
+			AddSuppliers:     true,
+			AddExternalRefs:  true,
+			AddPublishedDate: true,
+			Concurrency:      concurrency,
+		}
+		if _, err := Enrich(ctx, doc, enrichOpts); err != nil {
+			return Result{}, fmt.Errorf("failed to enrich SBOM: %w", err)
+		}
+	}
+
 	targetMeta := scan.Target{
 		Kind:        targets.KindContainerImage,
 		DisplayPath: display,

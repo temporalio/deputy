@@ -4,6 +4,8 @@ import (
 	"net/http"
 	"path"
 	"strings"
+
+	"github.com/picatz/deputy/internal/policy"
 )
 
 // npmHandler proxies requests to an npm registry (e.g., registry.npmjs.org)
@@ -33,7 +35,7 @@ func newNPMHandler(upstream string, policies PolicyEvaluator) (*npmHandler, erro
 func (h *npmHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	pkg, version, operation := parseNPMPath(r.URL.Path)
 
-	h.serveRequest(w, r, "npm_artifact_request", requestInfo{
+	h.serveRequest(w, r, policy.EntrypointNpmArtifactRequest, requestInfo{
 		Name:       pkg,
 		Version:    version,
 		HasVersion: hasVersion(version),

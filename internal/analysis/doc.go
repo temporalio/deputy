@@ -1,12 +1,12 @@
-// Package analysis orchestrates vulnerability enrichment and provides a
-// compatibility facade for higher-level callers.
+// Package analysis provides OSV vulnerability database integration for Deputy.
 //
-// Responsibilities:
-//   - Coordinate scan analysis workflows (filtering, grouping, reporting inputs)
-//   - Expose stable aliases to the vulnerability domain types
-//   - Route OSV integration through internal/analysis/osv
+// The osv subpackage contains the canonical types and functions for querying
+// the OSV database and processing vulnerability results:
+//   - osv.PkgInput: package query input
+//   - osv.Vulnerability: raw OSV query result
+//   - osv.QueryOSVBatch: batch vulnerability queries
+//   - osv.Client: client interface for OSV API
 //
-// Pure domain logic (types, CVSS parsing, severity classification, grouping)
-// lives in internal/vuln. Service integrations live in subpackages such as
-// internal/analysis/osv and internal/license.
+// Downstream processing (consolidation, severity classification, reporting)
+// is handled by internal/vulnerability and internal/scan.
 package analysis

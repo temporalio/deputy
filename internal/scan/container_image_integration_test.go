@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/picatz/deputy/internal/analysis"
+	"github.com/picatz/deputy/internal/analysis/osv"
 )
 
 // TestScanContainerImageIntegration is the basic integration test that validates
@@ -24,7 +24,7 @@ func TestScanContainerImageIntegration(t *testing.T) {
 	defer cancel()
 
 	svc := NewServiceWithConfig(&ServiceConfig{
-		QueryVulnerabilities: func(ctx context.Context, _ analysis.OSVClient, _ []analysis.PkgInput) ([]analysis.Vulnerability, error) {
+		QueryVulnerabilities: func(ctx context.Context, _ osv.Client, _ []osv.PkgInput) ([]osv.Vulnerability, error) {
 			return nil, nil
 		},
 	})
@@ -54,7 +54,7 @@ func TestScanContainerImage_ImageInfoExtraction(t *testing.T) {
 	defer cancel()
 
 	svc := NewServiceWithConfig(&ServiceConfig{
-		QueryVulnerabilities: func(ctx context.Context, _ analysis.OSVClient, _ []analysis.PkgInput) ([]analysis.Vulnerability, error) {
+		QueryVulnerabilities: func(ctx context.Context, _ osv.Client, _ []osv.PkgInput) ([]osv.Vulnerability, error) {
 			return nil, nil
 		},
 	})
@@ -108,7 +108,7 @@ func TestScanContainerImage_RootUserDetection(t *testing.T) {
 	defer cancel()
 
 	svc := NewServiceWithConfig(&ServiceConfig{
-		QueryVulnerabilities: func(ctx context.Context, _ analysis.OSVClient, _ []analysis.PkgInput) ([]analysis.Vulnerability, error) {
+		QueryVulnerabilities: func(ctx context.Context, _ osv.Client, _ []osv.PkgInput) ([]osv.Vulnerability, error) {
 			return nil, nil
 		},
 	})
@@ -161,7 +161,7 @@ func TestScanContainerImage_PlatformSelection(t *testing.T) {
 	defer cancel()
 
 	svc := NewServiceWithConfig(&ServiceConfig{
-		QueryVulnerabilities: func(ctx context.Context, _ analysis.OSVClient, _ []analysis.PkgInput) ([]analysis.Vulnerability, error) {
+		QueryVulnerabilities: func(ctx context.Context, _ osv.Client, _ []osv.PkgInput) ([]osv.Vulnerability, error) {
 			return nil, nil
 		},
 	})
@@ -274,7 +274,7 @@ func TestScanContainerImage_GHCRRegistry(t *testing.T) {
 	defer cancel()
 
 	svc := NewServiceWithConfig(&ServiceConfig{
-		QueryVulnerabilities: func(ctx context.Context, _ analysis.OSVClient, _ []analysis.PkgInput) ([]analysis.Vulnerability, error) {
+		QueryVulnerabilities: func(ctx context.Context, _ osv.Client, _ []osv.PkgInput) ([]osv.Vulnerability, error) {
 			return nil, nil
 		},
 	})
@@ -310,7 +310,7 @@ func TestScanContainerImage_OCILayoutFromTarball(t *testing.T) {
 	_ = t.TempDir()
 
 	svc := NewServiceWithConfig(&ServiceConfig{
-		QueryVulnerabilities: func(ctx context.Context, _ analysis.OSVClient, _ []analysis.PkgInput) ([]analysis.Vulnerability, error) {
+		QueryVulnerabilities: func(ctx context.Context, _ osv.Client, _ []osv.PkgInput) ([]osv.Vulnerability, error) {
 			return nil, nil
 		},
 	})
@@ -343,7 +343,7 @@ func TestScanContainerImage_EnvironmentVariables(t *testing.T) {
 	defer cancel()
 
 	svc := NewServiceWithConfig(&ServiceConfig{
-		QueryVulnerabilities: func(ctx context.Context, _ analysis.OSVClient, _ []analysis.PkgInput) ([]analysis.Vulnerability, error) {
+		QueryVulnerabilities: func(ctx context.Context, _ osv.Client, _ []osv.PkgInput) ([]osv.Vulnerability, error) {
 			return nil, nil
 		},
 	})
@@ -387,7 +387,7 @@ func TestScanContainerImage_Labels(t *testing.T) {
 	defer cancel()
 
 	svc := NewServiceWithConfig(&ServiceConfig{
-		QueryVulnerabilities: func(ctx context.Context, _ analysis.OSVClient, _ []analysis.PkgInput) ([]analysis.Vulnerability, error) {
+		QueryVulnerabilities: func(ctx context.Context, _ osv.Client, _ []osv.PkgInput) ([]osv.Vulnerability, error) {
 			return nil, nil
 		},
 	})
@@ -419,7 +419,7 @@ func TestScanContainerImage_History(t *testing.T) {
 	defer cancel()
 
 	svc := NewServiceWithConfig(&ServiceConfig{
-		QueryVulnerabilities: func(ctx context.Context, _ analysis.OSVClient, _ []analysis.PkgInput) ([]analysis.Vulnerability, error) {
+		QueryVulnerabilities: func(ctx context.Context, _ osv.Client, _ []osv.PkgInput) ([]osv.Vulnerability, error) {
 			return nil, nil
 		},
 	})
@@ -455,7 +455,7 @@ func TestScanContainerImage_Warnings(t *testing.T) {
 	defer cancel()
 
 	svc := NewServiceWithConfig(&ServiceConfig{
-		QueryVulnerabilities: func(ctx context.Context, _ analysis.OSVClient, _ []analysis.PkgInput) ([]analysis.Vulnerability, error) {
+		QueryVulnerabilities: func(ctx context.Context, _ osv.Client, _ []osv.PkgInput) ([]osv.Vulnerability, error) {
 			return nil, nil
 		},
 	})
@@ -484,7 +484,7 @@ func TestScanContainerImage_InvalidPlatform(t *testing.T) {
 	defer cancel()
 
 	svc := NewServiceWithConfig(&ServiceConfig{
-		QueryVulnerabilities: func(ctx context.Context, _ analysis.OSVClient, _ []analysis.PkgInput) ([]analysis.Vulnerability, error) {
+		QueryVulnerabilities: func(ctx context.Context, _ osv.Client, _ []osv.PkgInput) ([]osv.Vulnerability, error) {
 			return nil, nil
 		},
 	})
@@ -512,7 +512,7 @@ func TestScanContainerImage_NonexistentImage(t *testing.T) {
 	defer cancel()
 
 	svc := NewServiceWithConfig(&ServiceConfig{
-		QueryVulnerabilities: func(ctx context.Context, _ analysis.OSVClient, _ []analysis.PkgInput) ([]analysis.Vulnerability, error) {
+		QueryVulnerabilities: func(ctx context.Context, _ osv.Client, _ []osv.PkgInput) ([]osv.Vulnerability, error) {
 			return nil, nil
 		},
 	})

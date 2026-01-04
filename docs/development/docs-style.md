@@ -424,7 +424,7 @@ func processVulnerabilities(vulnerabilities []Vulnerability) {
 
 ```go
 // Good: named fields for clarity
-client := &OSVClient{
+client := &Client{
     BaseURL:    "https://api.osv.dev",
     HTTPClient: http.DefaultClient,
     Timeout:    30 * time.Second,

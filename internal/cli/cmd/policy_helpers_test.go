@@ -5,6 +5,8 @@ import (
 	"context"
 	"path/filepath"
 	"testing"
+
+	"github.com/picatz/deputy/internal/policy"
 )
 
 // helper to locate the example policy from CLI package.
@@ -19,7 +21,7 @@ func TestEvaluatePoliciesForCommand_SbomComponentLicenses(t *testing.T) {
 			"licenses": []any{"GPL-3.0"},
 		},
 	}
-	_, err := evaluatePoliciesForCommand(context.Background(), []string{pol}, payload, "sbom", "sbom_component", &bytes.Buffer{})
+	_, err := evaluatePoliciesForCommand(context.Background(), []string{pol}, payload, "sbom", policy.EntrypointSBOMComponent, &bytes.Buffer{})
 	if err == nil {
 		t.Fatalf("expected policy denial error, got nil")
 	}
@@ -28,7 +30,7 @@ func TestEvaluatePoliciesForCommand_SbomComponentLicenses(t *testing.T) {
 func TestEvaluatePoliciesForCommand_Scan_NoPanic(t *testing.T) {
 	pol := examplePolicyPath("license-allowlist.yaml")
 	payload := map[string]any{} // no licenses present
-	actions, err := evaluatePoliciesForCommand(context.Background(), []string{pol}, payload, "scan", "scan_report", &bytes.Buffer{})
+	actions, err := evaluatePoliciesForCommand(context.Background(), []string{pol}, payload, "scan", policy.EntrypointScanReport, &bytes.Buffer{})
 	if err != nil {
 		t.Fatalf("evaluatePoliciesForCommand: %v", err)
 	}

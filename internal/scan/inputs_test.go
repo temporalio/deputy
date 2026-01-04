@@ -9,7 +9,7 @@ import (
 
 	"github.com/google/osv-scalibr/extractor"
 	scalpurl "github.com/google/osv-scalibr/purl"
-	analysis "github.com/picatz/deputy/internal/analysis"
+	"github.com/picatz/deputy/internal/analysis/osv"
 	"github.com/picatz/deputy/internal/compare"
 	"github.com/picatz/deputy/internal/inventory/manifests"
 	"github.com/picatz/deputy/internal/purlx"
@@ -187,7 +187,7 @@ func TestPackagesToInputs_NPMDirectDetection(t *testing.T) {
 		t.Fatalf("expected 3 inputs, got %d", len(inputs))
 	}
 
-	lookup := map[string]analysis.PkgInput{}
+	lookup := map[string]osv.PkgInput{}
 	for _, in := range inputs {
 		lookup[in.Name] = in
 	}
@@ -270,7 +270,7 @@ dev = [
 	if len(inputs) != 4 {
 		t.Fatalf("expected 4 inputs, got %d", len(inputs))
 	}
-	lookup := map[string]analysis.PkgInput{}
+	lookup := map[string]osv.PkgInput{}
 	for _, in := range inputs {
 		lookup[in.Name] = in
 	}
@@ -329,7 +329,7 @@ libc = "0.2"
 	if len(inputs) != 5 {
 		t.Fatalf("expected 5 inputs, got %d", len(inputs))
 	}
-	lookup := map[string]analysis.PkgInput{}
+	lookup := map[string]osv.PkgInput{}
 	for _, in := range inputs {
 		lookup[strings.ToLower(in.Name)] = in
 	}
@@ -593,32 +593,32 @@ func TestNormalizeCrateName(t *testing.T) {
 func TestCanonicalPackageKeyFromInput(t *testing.T) {
 	tests := []struct {
 		name  string
-		input analysis.PkgInput
+		input osv.PkgInput
 		want  string
 	}{
 		{
 			name:  "empty name",
-			input: analysis.PkgInput{Name: "", Version: "1.0.0"},
+			input: osv.PkgInput{Name: "", Version: "1.0.0"},
 			want:  "",
 		},
 		{
 			name:  "go package",
-			input: analysis.PkgInput{Name: "github.com/foo/bar", Version: "v1.0.0", Ecosystem: "Go"},
+			input: osv.PkgInput{Name: "github.com/foo/bar", Version: "v1.0.0", Ecosystem: "Go"},
 			want:  "go|github.com/foo/bar|v1.0.0",
 		},
 		{
 			name:  "go package with v2 suffix",
-			input: analysis.PkgInput{Name: "github.com/foo/bar/v2", Version: "v2.1.0", Ecosystem: "Go"},
+			input: osv.PkgInput{Name: "github.com/foo/bar/v2", Version: "v2.1.0", Ecosystem: "Go"},
 			want:  "go|github.com/foo/bar|v2.1.0",
 		},
 		{
 			name:  "npm package",
-			input: analysis.PkgInput{Name: "lodash", Version: "4.17.0", Ecosystem: "npm"},
+			input: osv.PkgInput{Name: "lodash", Version: "4.17.0", Ecosystem: "npm"},
 			want:  "npm|lodash|4.17.0",
 		},
 		{
 			name:  "no ecosystem",
-			input: analysis.PkgInput{Name: "unknown-pkg", Version: "1.0.0"},
+			input: osv.PkgInput{Name: "unknown-pkg", Version: "1.0.0"},
 			want:  "unknown-pkg|1.0.0",
 		},
 	}
@@ -636,7 +636,7 @@ func TestCanonicalPackageKeyFromInput(t *testing.T) {
 func TestBuildPackageDirectMap(t *testing.T) {
 	tests := []struct {
 		name   string
-		inputs []analysis.PkgInput
+		inputs []osv.PkgInput
 		want   map[string]bool
 	}{
 		{
@@ -646,19 +646,19 @@ func TestBuildPackageDirectMap(t *testing.T) {
 		},
 		{
 			name:   "empty inputs",
-			inputs: []analysis.PkgInput{},
+			inputs: []osv.PkgInput{},
 			want:   nil,
 		},
 		{
 			name: "no direct deps",
-			inputs: []analysis.PkgInput{
+			inputs: []osv.PkgInput{
 				{Name: "foo", Version: "1.0.0", Ecosystem: "npm", IsDirect: false},
 			},
 			want: nil,
 		},
 		{
 			name: "with direct deps",
-			inputs: []analysis.PkgInput{
+			inputs: []osv.PkgInput{
 				{Name: "foo", Version: "1.0.0", Ecosystem: "npm", IsDirect: true},
 				{Name: "bar", Version: "2.0.0", Ecosystem: "npm", IsDirect: false},
 			},

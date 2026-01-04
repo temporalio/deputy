@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/picatz/deputy/internal/policy"
 	"go.opentelemetry.io/otel/trace"
 )
 
@@ -15,7 +16,7 @@ import (
 //
 // Span enrichment: This function adds policy evaluation events to the current span,
 // recording the evaluation result (allow/deny/warn), entrypoint, and any denial reason.
-func serveWithPolicy(w http.ResponseWriter, r *http.Request, policies PolicyEvaluator, entrypoint string, payload map[string]any, meta blockMeta, upstream http.Handler) {
+func serveWithPolicy(w http.ResponseWriter, r *http.Request, policies PolicyEvaluator, entrypoint policy.Entrypoint, payload map[string]any, meta blockMeta, upstream http.Handler) {
 	if w == nil || r == nil || upstream == nil {
 		return
 	}
@@ -34,19 +35,20 @@ func serveWithPolicy(w http.ResponseWriter, r *http.Request, policies PolicyEval
 
 	if policies != nil {
 		evalStart := time.Now()
-		actions, err := policies.Evaluate(ctx, entrypoint, payload)
+		entrypointStr := entrypoint.String()
+		actions, err := policies.Evaluate(ctx, entrypointStr, payload)
 		evalDuration := time.Since(evalStart)
 
 		if err != nil {
 			RecordPolicyEvent(ctx, span, PolicyEventData{
 				Result:     PolicyResultError,
 				Duration:   evalDuration,
-				Entrypoint: entrypoint,
+				Entrypoint: entrypointStr,
 				Reason:     err.Error(),
 			})
 			http.Error(w, "policy evaluation failed", http.StatusInternalServerError)
 			slog.Error("policy evaluation failed",
-				"entrypoint", entrypoint,
+				"entrypoint", entrypointStr,
 				"ecosystem", meta.Ecosystem,
 				"name", meta.Name,
 				"version", meta.Version,
@@ -62,7 +64,7 @@ func serveWithPolicy(w http.ResponseWriter, r *http.Request, policies PolicyEval
 		}
 		for _, warn := range warns {
 			slog.Warn("policy warning",
-				"entrypoint", entrypoint,
+				"entrypoint", entrypointStr,
 				"ecosystem", meta.Ecosystem,
 				"name", meta.Name,
 				"version", meta.Version,
@@ -72,12 +74,12 @@ func serveWithPolicy(w http.ResponseWriter, r *http.Request, policies PolicyEval
 			)
 		}
 		if deny != nil {
-			RecordPolicyDeny(ctx, span, entrypoint, deny.Source, deny.Reason, meta.Ecosystem, evalDuration)
+			RecordPolicyDeny(ctx, span, entrypointStr, deny.Source, deny.Reason, meta.Ecosystem, evalDuration)
 			applyPolicyHeaders(w, deny, meta)
 			status := statusFromAction(deny, http.StatusForbidden)
 			http.Error(w, deny.Reason, status)
 			slog.Info("request denied",
-				"entrypoint", entrypoint,
+				"entrypoint", entrypointStr,
 				"ecosystem", meta.Ecosystem,
 				"name", meta.Name,
 				"version", meta.Version,
@@ -88,7 +90,7 @@ func serveWithPolicy(w http.ResponseWriter, r *http.Request, policies PolicyEval
 		}
 
 		// Policy allowed the request
-		RecordPolicyAllow(ctx, span, entrypoint, len(warns), evalDuration)
+		RecordPolicyAllow(ctx, span, entrypointStr, len(warns), evalDuration)
 	}
 
 	upstream.ServeHTTP(w, r)

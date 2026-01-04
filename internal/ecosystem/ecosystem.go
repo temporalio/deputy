@@ -25,6 +25,7 @@ import (
 	"strings"
 
 	pb "deps.dev/api/v3"
+	"github.com/picatz/deputy/internal/policy"
 )
 
 // Ecosystem represents a supported package ecosystem.
@@ -181,10 +182,10 @@ func (e Ecosystem) IsSupported() bool {
 	return e != Unknown && e != ""
 }
 
-// ProxyEntrypoint returns the CEL policy entrypoint name for proxy requests
-// to this ecosystem (e.g., "go_artifact_request", "npm_artifact_request").
-func (e Ecosystem) ProxyEntrypoint() string {
-	return string(e) + "_artifact_request"
+// ProxyEntrypoint returns the CEL policy entrypoint for proxy requests
+// to this ecosystem (e.g., EntrypointGoArtifactRequest, EntrypointNpmArtifactRequest).
+func (e Ecosystem) ProxyEntrypoint() policy.Entrypoint {
+	return policy.Entrypoint(string(e) + "_artifact_request")
 }
 
 // All returns all supported ecosystems.

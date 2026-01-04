@@ -17,7 +17,7 @@ import (
 
 	"github.com/google/osv-scalibr/purl"
 	"github.com/ossf/osv-schema/bindings/go/osvschema"
-	"github.com/picatz/deputy/internal/diskcache"
+	"github.com/picatz/deputy/internal/cache/disk"
 	"golang.org/x/sync/singleflight"
 )
 
@@ -202,7 +202,7 @@ func TestResolveGitHubActionsVersion_Table(t *testing.T) {
 func TestQueryOSVGHABucketBatch_MajorTagResolutionAvoidsFalsePositive(t *testing.T) {
 	resetGHATestState()
 	tmp := t.TempDir()
-	restore := diskcache.SetBaseDirForTest(tmp)
+	restore := disk.SetBaseDirForTest(tmp)
 	t.Cleanup(restore)
 
 	zipPath := filepath.Join(tmp, ghaCacheSubdir, ghaZipFilename)
@@ -263,7 +263,7 @@ func TestQueryOSVGHABucketBatch_MajorTagResolutionAvoidsFalsePositive(t *testing
 func TestQueryOSVGHABucketBatch_MajorTagResolutionReportsEffectiveVersion(t *testing.T) {
 	resetGHATestState()
 	tmp := t.TempDir()
-	restore := diskcache.SetBaseDirForTest(tmp)
+	restore := disk.SetBaseDirForTest(tmp)
 	t.Cleanup(restore)
 
 	zipPath := filepath.Join(tmp, ghaCacheSubdir, ghaZipFilename)
@@ -324,7 +324,7 @@ func TestQueryOSVGHABucketBatch_MajorTagResolutionReportsEffectiveVersion(t *tes
 func TestBuildGHAVulnIndex_UsesCacheZip(t *testing.T) {
 	resetGHATestState()
 	tmp := t.TempDir()
-	restore := diskcache.SetBaseDirForTest(tmp)
+	restore := disk.SetBaseDirForTest(tmp)
 	t.Cleanup(restore)
 
 	zipPath := filepath.Join(tmp, ghaCacheSubdir, ghaZipFilename)
@@ -377,7 +377,7 @@ func TestBuildGHAVulnIndex_UsesCacheZip(t *testing.T) {
 func TestEnsureGHACacheZip_UsesETagConditionalRequest(t *testing.T) {
 	resetGHATestState()
 	tmp := t.TempDir()
-	restore := diskcache.SetBaseDirForTest(tmp)
+	restore := disk.SetBaseDirForTest(tmp)
 	t.Cleanup(restore)
 
 	var (
@@ -450,7 +450,7 @@ func TestEnsureGHACacheZip_UsesETagConditionalRequest(t *testing.T) {
 func TestLoadGHAVulnIndex_RefreshesAfterTTL(t *testing.T) {
 	resetGHATestState()
 	tmp := t.TempDir()
-	restore := diskcache.SetBaseDirForTest(tmp)
+	restore := disk.SetBaseDirForTest(tmp)
 	t.Cleanup(restore)
 
 	zipV1 := mustGHATestZipBytes(t, map[string]osvschema.Vulnerability{

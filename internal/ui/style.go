@@ -4,7 +4,7 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
-	"github.com/picatz/deputy/internal/vuln"
+	"github.com/picatz/deputy/internal/vulnerability"
 )
 
 // Predefined lipgloss style palette used by CLI presentation layers. Grouping
@@ -81,7 +81,7 @@ func SeverityLabel(severity, severityType string) string {
 	}
 
 	// Try to parse as CVSS score
-	score := vuln.ParseCVSSScore(severity)
+	score := vulnerability.ParseCVSSScore(severity)
 	return ScoreLabel(score)
 }
 

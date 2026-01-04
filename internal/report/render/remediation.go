@@ -9,9 +9,9 @@ import (
 	ui "github.com/picatz/deputy/internal/ui"
 )
 
-// RenderRemediationCommands prints grouped remediation commands using the
+// RemediationCommands prints grouped remediation commands using the
 // provided prefixes for group headers and command lines.
-func RenderRemediationCommands(w io.Writer, commands []remediation.Command, groupPrefix, commandPrefix string) {
+func RemediationCommands(w io.Writer, commands []remediation.Command, groupPrefix, commandPrefix string) {
 	if len(commands) == 0 {
 		return
 	}

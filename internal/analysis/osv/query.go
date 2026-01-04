@@ -12,22 +12,23 @@ import (
 	"github.com/google/osv-scalibr/purl"
 	"github.com/google/osv-scalibr/semantic"
 	"github.com/ossf/osv-schema/bindings/go/osvschema"
+	"github.com/picatz/deputy/internal/cache/disk"
 	"github.com/picatz/deputy/internal/collections"
-	"github.com/picatz/deputy/internal/diskcache"
+	"github.com/picatz/deputy/internal/dependency"
 	"github.com/picatz/deputy/internal/ecosystem"
 	"github.com/picatz/deputy/internal/otel"
 	"github.com/picatz/deputy/internal/purlx"
-	"github.com/picatz/deputy/internal/vuln"
+	"github.com/picatz/deputy/internal/vulnerability"
 	"golang.org/x/mod/semver"
 	"golang.org/x/sync/errgroup"
 	"golang.org/x/sync/singleflight"
 	"osv.dev/bindings/go/osvdev"
 )
 
-// OSVClient abstracts the subset of osv.dev client functionality required for
+// Client abstracts the subset of osv.dev client functionality required for
 // batch querying and vulnerability expansion. It is satisfied by
 // osvdev.DefaultClient enabling dependency injection in tests.
-type OSVClient interface {
+type Client interface {
 	QueryBatch(ctx context.Context, queries []*osvdev.Query) (*osvdev.BatchedResponse, error)
 	GetVulnByID(ctx context.Context, id string) (*osvschema.Vulnerability, error)
 }
@@ -56,26 +57,15 @@ type PkgInput struct {
 }
 
 // LayerDetails stores details about the container image layer where a package was found.
-// This mirrors the SCALIBR extractor.LayerDetails structure for container image scanning.
-type LayerDetails struct {
-	// Index is the position of the layer in the image (0 = oldest/base layer).
-	Index int
-	// DiffID is the digest of the uncompressed layer content.
-	DiffID string
-	// ChainID is the cumulative hash identifying this layer in context of its parents.
-	ChainID string
-	// Command is the Dockerfile instruction that created this layer.
-	Command string
-	// InBaseImage indicates whether this layer is part of the base image.
-	InBaseImage bool
-}
+// Type alias for dependency.LayerDetails, providing a domain-appropriate name within the osv package.
+type LayerDetails = dependency.LayerDetails
 
 // getCachedVuln retrieves a vulnerability by ID using the provided client,
 // consulting a local on-disk cache when available to avoid redundant network
 // requests. Successful responses are cached for future lookups.
-func getCachedVuln(ctx context.Context, client OSVClient, id string) (*osvschema.Vulnerability, error) {
+func getCachedVuln(ctx context.Context, client Client, id string) (*osvschema.Vulnerability, error) {
 	var v osvschema.Vulnerability
-	if diskcache.Read("osv", id, osvCacheTTL, &v) {
+	if disk.Read("osv", id, osvCacheTTL, &v) {
 		otel.RecordOSVCacheAccess(ctx, true)
 		return &v, nil
 	}
@@ -84,7 +74,7 @@ func getCachedVuln(ctx context.Context, client OSVClient, id string) (*osvschema
 	if err != nil {
 		return nil, err
 	}
-	diskcache.Write("osv", id, res)
+	disk.Write("osv", id, res)
 	return res, nil
 }
 
@@ -100,7 +90,7 @@ const osvConcurrencyLimit = 10
 // details via GetVulnByID to populate rich fields (aliases, severity, ranges).
 // The function is resilient: individual GetVulnByID failures are skipped so a
 // single retrieval error does not abort the entire batch.
-func QueryOSVBatch(ctx context.Context, client OSVClient, pkgs []PkgInput) ([]Vulnerability, error) {
+func QueryOSVBatch(ctx context.Context, client Client, pkgs []PkgInput) ([]Vulnerability, error) {
 	if len(pkgs) == 0 {
 		return nil, nil
 	}
@@ -155,7 +145,7 @@ func isGitHubActionsInput(p PkgInput) bool {
 }
 
 // queryOSVAPIBatch performs the standard OSV v1/querybatch flow.
-func queryOSVAPIBatch(ctx context.Context, client OSVClient, pkgs []PkgInput) ([]Vulnerability, error) {
+func queryOSVAPIBatch(ctx context.Context, client Client, pkgs []PkgInput) ([]Vulnerability, error) {
 	if len(pkgs) == 0 {
 		return nil, nil
 	}
@@ -273,7 +263,7 @@ func queryOSVAPIBatch(ctx context.Context, client OSVClient, pkgs []PkgInput) ([
 					continue
 				}
 				all := append([]Vulnerability{base}, extras...)
-				if sev, typ := vuln.FindBestSeverity(all); sev != "" {
+				if sev, typ := FindBestSeverity(all); sev != "" {
 					base.Severity, base.SeverityType = sev, typ
 				}
 				fixSet := collections.NewSet[string]()
@@ -281,7 +271,7 @@ func queryOSVAPIBatch(ctx context.Context, client OSVClient, pkgs []PkgInput) ([
 				if len(base.AffectedImports) > 0 {
 					importSets = append(importSets, base.AffectedImports)
 				}
-				dbSpecific := cloneStringMap(base.DatabaseSpecific)
+				dbSpecific := maps.Clone(base.DatabaseSpecific)
 				for _, v := range all {
 					for _, f := range v.FixedVersions {
 						fixSet.Add(f)
@@ -290,7 +280,7 @@ func queryOSVAPIBatch(ctx context.Context, client OSVClient, pkgs []PkgInput) ([
 					if len(v.AffectedImports) > 0 {
 						importSets = append(importSets, v.AffectedImports)
 					}
-					dbSpecific = mergeStringMap(dbSpecific, v.DatabaseSpecific)
+					dbSpecific = vulnerability.MergeStringMap(dbSpecific, v.DatabaseSpecific)
 				}
 				aliasSet := collections.NewSet[string]()
 				uniqAliases := make([]string, 0, len(base.Aliases))
@@ -307,7 +297,7 @@ func queryOSVAPIBatch(ctx context.Context, client OSVClient, pkgs []PkgInput) ([
 				for f := range fixSet.All() {
 					base.FixedVersions = append(base.FixedVersions, f)
 				}
-				base.AffectedImports = vuln.MergeAffectedImports(importSets...)
+				base.AffectedImports = vulnerability.MergeAffectedImports(importSets...)
 				base.DatabaseSpecific = dbSpecific
 				local = append(local, base)
 			}
@@ -598,31 +588,4 @@ func mapToSemanticEcosystem(ecosystem string) string {
 	default:
 		return ""
 	}
-}
-
-// mergeStringMap merges string maps, keeping existing entries in base when keys collide.
-func mergeStringMap(base map[string]string, extra map[string]string) map[string]string {
-	if len(extra) == 0 {
-		return base
-	}
-	if base == nil {
-		base = map[string]string{}
-	}
-	for k, v := range extra {
-		if k == "" || v == "" {
-			continue
-		}
-		if _, ok := base[k]; ok {
-			continue
-		}
-		base[k] = v
-	}
-	return base
-}
-
-func cloneStringMap(src map[string]string) map[string]string {
-	if len(src) == 0 {
-		return nil
-	}
-	return maps.Clone(src)
 }

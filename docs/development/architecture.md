@@ -169,7 +169,7 @@ Deputy keeps pure domain logic separate from service integrations:
 - `internal/analysis/osv` owns OSV API and GitHub Actions bucket integration,
   including cache-aware lookups and conversion into domain types.
 - `internal/license` handles license enrichment (deps.dev, registry APIs, local
-  scans) and uses `internal/diskcache` for on-disk caching.
+  scans) and uses `internal/cache/disk` for on-disk caching.
 - `internal/analysis` is a thin orchestration layer and compatibility facade
   that keeps CLI and policy code stable while delegating to the above packages.
 
@@ -189,13 +189,12 @@ Deputy keeps pure domain logic separate from service integrations:
 |---------|---------|-----------|
 | `internal/inventory` | Dependency detection from manifests | `Package`, `Inventory`, `Extractor` |
 | `internal/inventory/manifests` | Manifest/manager heuristics for locations | `DetectManager`, `InferArtifactManager` |
-| `internal/analysis` | Orchestration + facades over vuln/OSV integrations | `OSVClient`, `Vulnerability` (aliases) |
-| `internal/analysis/osv` | OSV API + GitHub Actions bucket integration | `OSVClient`, `PkgInput` |
-| `internal/vuln` | Domain types, CVSS/severity, consolidation | `Vulnerability`, `ConsolidatedVulnerability` |
+| `internal/analysis/osv` | OSV API + GitHub Actions bucket integration | `Client`, `PkgInput`, `Vulnerability` |
+| `internal/vulnerability` | Domain types, CVSS/severity, consolidation | `Finding`, `ConsolidatedFinding` |
 | `internal/license` | License enrichment and scanning | `DepsClient` |
 | `internal/remediation` | Fix planning, upgrade commands | `Plan`, `Step`, `Upgrade` |
 | `internal/report` | Report/context assembly helpers (rendering in subpackages) | `ManifestContext`, `Summary`, `TriageReport`, `PolicyFinding`, `Target` |
-| `internal/report/render` | Human-readable report rendering | `RenderVulnerabilityList`, `TriageSummaryDoc`, `RenderPolicyFindings` |
+| `internal/report/render` | Human-readable report rendering | `VulnerabilityList`, `TriageSummaryDoc`, `PolicyFindings` |
 | `internal/sbom` | SBOM generation (CycloneDX, SPDX) | `Generator`, `Document` |
 | `internal/policy` | CEL evaluation engine | `Evaluator`, `Policy`, `Action` |
 | `internal/proxy` | Package proxy adapters and server | `Server`, `Adapter`, `Request` |
@@ -209,7 +208,7 @@ Deputy keeps pure domain logic separate from service integrations:
 | `internal/purlx` | PURL parsing and normalization |
 | `internal/output` | Output formatting (table, JSON) |
 | `internal/config` | Configuration loading |
-| `internal/diskcache` | JSON-on-disk cache helpers |
+| `internal/cache` | Caching (memory, disk subpackages) |
 | `internal/cli/flags` | Shared CLI flag parsing helpers |
 
 ## Data Flow

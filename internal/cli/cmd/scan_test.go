@@ -11,7 +11,7 @@ import (
 	git "github.com/go-git/go-git/v5"
 	"github.com/google/osv-scalibr/extractor"
 	"github.com/google/osv-scalibr/purl"
-	analysis "github.com/picatz/deputy/internal/analysis"
+	"github.com/picatz/deputy/internal/analysis/osv"
 	inv "github.com/picatz/deputy/internal/inventory"
 	"github.com/picatz/deputy/internal/scan"
 	"github.com/spf13/cobra"
@@ -33,7 +33,7 @@ func TestScannerRunScanHonorsEcosystemFilter(t *testing.T) {
 				{Name: "github.com/acme/lib", Version: "v1.0.0", PURLType: purl.TypeGolang},
 			}, nil
 		},
-		QueryVulnerabilities: func(ctx context.Context, client analysis.OSVClient, inputs []analysis.PkgInput) ([]analysis.Vulnerability, error) {
+		QueryVulnerabilities: func(ctx context.Context, client osv.Client, inputs []osv.PkgInput) ([]osv.Vulnerability, error) {
 			return nil, nil
 		},
 	})}
@@ -74,13 +74,13 @@ func TestScannerRunScanEmitsMultiEcosystemInputs(t *testing.T) {
 		Locations: []string{"web/package-lock.json"},
 	}
 
-	var captured []analysis.PkgInput
+	var captured []osv.PkgInput
 	scanner := &Scanner{service: scan.NewServiceWithConfig(&scan.ServiceConfig{
 		CollectInventory: func(ctx context.Context, repoPath, gitRef string, opts inv.ScanOptions) ([]*extractor.Package, error) {
 			return []*extractor.Package{goPkg, npmPkg}, nil
 		},
-		QueryVulnerabilities: func(ctx context.Context, client analysis.OSVClient, inputs []analysis.PkgInput) ([]analysis.Vulnerability, error) {
-			captured = append([]analysis.PkgInput(nil), inputs...)
+		QueryVulnerabilities: func(ctx context.Context, client osv.Client, inputs []osv.PkgInput) ([]osv.Vulnerability, error) {
+			captured = append([]osv.PkgInput(nil), inputs...)
 			return nil, nil
 		},
 	})}

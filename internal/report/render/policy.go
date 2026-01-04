@@ -9,8 +9,8 @@ import (
 	ui "github.com/picatz/deputy/internal/ui"
 )
 
-// RenderPolicyFindings writes policy findings to w in a human-friendly format.
-func RenderPolicyFindings(w io.Writer, findings []report.PolicyFinding) {
+// PolicyFindings writes policy findings to w in a human-friendly format.
+func PolicyFindings(w io.Writer, findings []report.PolicyFinding) {
 	if len(findings) == 0 {
 		return
 	}

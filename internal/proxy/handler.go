@@ -8,7 +8,8 @@ import (
 	"net/url"
 	"strings"
 
-	analysis "github.com/picatz/deputy/internal/analysis"
+	"github.com/picatz/deputy/internal/analysis/osv"
+	"github.com/picatz/deputy/internal/policy"
 )
 
 // baseHandler contains the common fields and initialization logic shared by all
@@ -37,7 +38,7 @@ func newBaseHandler(cfg handlerConfig) (*baseHandler, error) {
 		return nil, fmt.Errorf("parse upstream %q: %w", cfg.upstream, err)
 	}
 	client := newUpstreamHTTPClient()
-	osvClient := analysis.NewOSVClient()
+	osvClient := osv.NewClient()
 
 	// Use provided caches or fall back to defaults
 	osvCache := getOSVCache(cfg.osvCache)
@@ -48,7 +49,7 @@ func newBaseHandler(cfg handlerConfig) (*baseHandler, error) {
 		proxy:    newUpstreamReverseProxy(u, cfg.ecosystem, client.Transport),
 		lookups: handlerLookups{
 			osvClient: osvClient,
-			vulnLookup: func(ctx context.Context, name, version string) ([]analysis.Vulnerability, error) {
+			vulnLookup: func(ctx context.Context, name, version string) ([]osv.Vulnerability, error) {
 				return cachedOSVLookupWithCache(ctx, osvClient, osvCache, cfg.osvEcosystem, name, version)
 			},
 		},
@@ -135,12 +136,12 @@ func (h *baseHandler) buildPayload(ctx context.Context, info requestInfo, path s
 }
 
 // serve handles the common pattern of policy evaluation and proxying.
-func (h *baseHandler) serve(w http.ResponseWriter, r *http.Request, policyName string, info requestInfo, payload map[string]any) {
+func (h *baseHandler) serve(w http.ResponseWriter, r *http.Request, entrypoint policy.Entrypoint, info requestInfo, payload map[string]any) {
 	rawVersion := info.Version
 	if !info.HasVersion {
 		rawVersion = ""
 	}
-	serveWithPolicy(w, r, h.policies, policyName, payload, blockMeta{
+	serveWithPolicy(w, r, h.policies, entrypoint, payload, blockMeta{
 		Ecosystem: info.Ecosystem,
 		Name:      info.Name,
 		Version:   rawVersion,
@@ -151,9 +152,9 @@ func (h *baseHandler) serve(w http.ResponseWriter, r *http.Request, policyName s
 // serveRequest is a higher-level helper that combines request info creation,
 // payload building, and serving into a single call. This reduces boilerplate
 // in ecosystem-specific handlers.
-func (h *baseHandler) serveRequest(w http.ResponseWriter, r *http.Request, policyEntrypoint string, info requestInfo) {
+func (h *baseHandler) serveRequest(w http.ResponseWriter, r *http.Request, entrypoint policy.Entrypoint, info requestInfo) {
 	payload := h.buildPayload(r.Context(), info, r.URL.Path)
-	h.serve(w, r, policyEntrypoint, info, payload)
+	h.serve(w, r, entrypoint, info, payload)
 }
 
 // hasVersion returns true if the version string is non-empty after trimming whitespace.

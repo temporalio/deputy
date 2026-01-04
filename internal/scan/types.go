@@ -47,7 +47,7 @@ type Result struct {
 	Advisories map[string]vulnerability.Advisory
 	Stats      vulnerability.Stats
 
-	PolicyDecisions []policy.Decision
+	PolicyActions []policy.Action
 
 	Warnings []string
 

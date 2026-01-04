@@ -1,0 +1,24 @@
+# Block vulnerabilities that are in CISA's Known Exploited Vulnerabilities (KEV) catalog.
+# KEV catalog tracks vulnerabilities known to be actively exploited in the wild.
+#
+# Requires: --enrich flag to populate KEV data
+#
+# Usage:
+#   deputy scan --enrich --policy policy/examples/kev-blocker.yaml
+#
+policies:
+  - name: block-known-exploited
+    entrypoints: [scan_vulnerability]
+    rules:
+      - action: deny
+        when: |
+          has(vulnerability.inKEV) &&
+          vulnerability.inKEV == true
+        reason: "CVE is in CISA's Known Exploited Vulnerabilities catalog"
+
+      - action: warn
+        when: |
+          !has(vulnerability.inKEV) &&
+          has(vulnerability.cve) &&
+          vulnerability.cve != ""
+        reason: "KEV status unknown - run with --enrich to check"

@@ -191,7 +191,11 @@ internal/
   cli/flags/                 # shared CLI flag parsing helpers
   analysis/                  # analysis orchestration and OSV facade
     osv/                     # OSV API + GitHub Actions bucket integration
-  diskcache/                 # shared on-disk cache helpers
+  cache/                     # caching primitives
+    memory/                  # in-memory TTL LRU cache
+    disk/                    # persistent JSON-on-disk cache
+  container/                 # container analysis
+    image/                   # image config, metadata, extraction
   inventory/                 # dependency detection
     manifests/               # manifest path + manager heuristics
   license/                   # license enrichment + scanning
@@ -202,7 +206,10 @@ internal/
   sbom/                      # SBOM generation
   remediation/               # fix planning
   gitutil/                   # Git operations (clone.go, diff.go, refs.go)
-  vuln/                      # vulnerability domain types + CVSS/severity
+  vulnerability/             # vulnerability domain types + CVSS/severity
+    intel/                   # threat intelligence enrichment
+      kev/                   # CISA KEV catalog client
+      epss/                  # FIRST EPSS scores client
 docs/                        # documentation
   commands/                  # command reference
   guides/                    # how-to guides (ci.md, workflows.md, agents.md)
@@ -245,8 +252,10 @@ Key entry points: [`main.go`](main.go) → [`internal/cli/cli.go`](internal/cli/
 
 ## Policies (CEL)
 
-Entrypoints define when a policy is evaluated. See [`internal/policy/entrypoints.go`](internal/policy/entrypoints.go) for canonical definitions.  
+Entrypoints define when a policy is evaluated. See [`internal/policy/entrypoints.go`](internal/policy/entrypoints.go) for canonical definitions.
 See [`internal/policy/evaluator.go`](internal/policy/evaluator.go) for CEL activation and variable bindings.
+
+**Type-safe Entrypoints:** The `policy.Entrypoint` type provides compile-time safety when passing entrypoints in Go code. Use constants like `policy.EntrypointScanReport` instead of string literals. The `Entrypoint` type provides `String()`, `IsValid()`, and `Category()` methods.
 
 ### Policy Examples
 
@@ -278,7 +287,7 @@ The following variables are available in CEL expressions, depending on the polic
 
 #### `pkg` object
 
-Contains information about the dependency being analyzed. Available in [`scan_report`](internal/policy/entrypoints.go#L16) and [`scan_vulnerability`](internal/policy/entrypoints.go#L18) entrypoints.
+Contains information about the dependency being analyzed. Available in `scan_report` and `scan_vulnerability` entrypoints.
 
 | Field | Type | Description | Example Value |
 |---|---|---|---|
@@ -304,7 +313,7 @@ Note: The `pkg` helper provides sensible defaults (`name`, `version`, `ecosystem
 
 #### `vulnerability` object
 
-Represents a single vulnerability affecting a package. Available in the [`scan_vulnerability`](internal/policy/entrypoints.go#L18) entrypoint.
+Represents a single vulnerability affecting a package. Available in the `scan_vulnerability` entrypoint.
 
 | Field | Type | Description | Example Value |
 |---|---|---|---|
@@ -313,6 +322,18 @@ Represents a single vulnerability affecting a package. Available in the [`scan_v
 | `isDirect` | `bool` | If the vulnerability is in a direct dependency | `true` |
 | `fixedVersions` | `list(string)` | Versions containing a fix | `["2.15.0"]` |
 | `layerDetails` | `object` | Container image layer info (nil for non-image scans) | see below |
+
+**Enrichment Fields (when `--enrich` is enabled):**
+
+| Field | Type | Description | Example Value |
+|---|---|---|---|
+| `epss` | `float` | EPSS score (0.0-1.0): probability of exploitation in next 30 days | `0.97` |
+| `epssPercentile` | `float` | EPSS percentile (0.0-1.0): % of CVEs with lower EPSS score | `0.99` |
+| `inKEV` | `bool` | Whether CVE is in CISA's Known Exploited Vulnerabilities catalog | `true` |
+| `kevDateAdded` | `string` | Date CVE was added to KEV catalog (YYYY-MM-DD) | `"2021-12-10"` |
+| `kevDueDate` | `string` | Federal agency compliance deadline (YYYY-MM-DD) | `"2021-12-24"` |
+| `kevRequiredAction` | `string` | CISA's required remediation action | `"Apply updates..."` |
+| `kevKnownRansomwareCampaignUse` | `string` | Ransomware involvement: `"Known"` or `"Unknown"` | `"Known"` |
 
 **Layer Details (container images only):**
 
@@ -358,11 +379,24 @@ Use `chainId` when you need to identify a specific layer stack (e.g., for cachin
 *   Flag vulnerabilities in early base layers (likely system packages):
     `has(vulnerability.layerDetails) && vulnerability.layerDetails.index < 3 && vulnerability.severity == 'CRITICAL'`
 
+**Enrichment-Based Examples (when `--enrich` is enabled):**
+
+*   Block vulnerabilities in CISA KEV catalog:
+    `vulnerability.inKEV == true`
+*   Block high-probability exploitation (EPSS > 0.7):
+    `vulnerability.?epss.orValue(0.0) > 0.7`
+*   Block KEV vulnerabilities used in ransomware campaigns:
+    `vulnerability.inKEV == true && vulnerability.kevKnownRansomwareCampaignUse == 'Known'`
+*   Block KEV vulnerabilities past their due date:
+    `vulnerability.inKEV == true && vulnerability.kevDueDate != '' && vulnerability.kevDueDate < now().format('2006-01-02')`
+*   Prioritize by EPSS percentile (top 5% most likely to be exploited):
+    `vulnerability.?epssPercentile.orValue(0.0) > 0.95`
+
 ---
 
 #### `vulnerabilities` list
 
-A list of all `vulnerability` objects found in a scan report. Available in the [`scan_report`](internal/policy/entrypoints.go#L16) entrypoint. This is most commonly used with CEL macros like `exists`.
+A list of all `vulnerability` objects found in a scan report. Available in the `scan_report` entrypoint. This is most commonly used with CEL macros like `exists`.
 
 **Example Expressions for `vulnerabilities`:**
 
@@ -377,7 +411,7 @@ A list of all `vulnerability` objects found in a scan report. Available in the [
 
 #### `image` object
 
-Contains container image configuration and metadata when scanning container images. Available in [`scan_report`](internal/policy/entrypoints.go#L16), [`scan_vulnerability`](internal/policy/entrypoints.go#L18), and [`oci_artifact_request`](internal/policy/entrypoints.go) entrypoints.
+Contains container image configuration and metadata when scanning container images. Available in `scan_report`, `scan_vulnerability`, and `oci_artifact_request` entrypoints.
 
 The `image` object combines provenance data (registry, repository, tag, digest) with extracted configuration (`image.config`) and metadata (`image.metadata`) when available. For advanced use cases, the same data is also available via `image_info` which contains only the extracted config/metadata/history (without provenance).
 
@@ -468,7 +502,7 @@ List of build history entries showing Dockerfile commands:
 
 #### `dockerfile` object
 
-Contains parsed Dockerfile data for static analysis. Available in [`dockerfile_report`](internal/policy/entrypoints.go) and [`dockerfile_stage`](internal/policy/entrypoints.go) entrypoints.
+Contains parsed Dockerfile data for static analysis. Available in `dockerfile_report` and `dockerfile_stage` entrypoints.
 
 | Field | Type | Description | Example Value |
 |---|---|---|---|
@@ -528,7 +562,7 @@ Contains parsed Dockerfile data for static analysis. Available in [`dockerfile_r
 
 #### `dockerfile_analysis` object
 
-Contains static analysis results for Dockerfiles. Available in [`dockerfile_report`](internal/policy/entrypoints.go) and [`dockerfile_stage`](internal/policy/entrypoints.go) entrypoints.
+Contains static analysis results for Dockerfiles. Available in `dockerfile_report` and `dockerfile_stage` entrypoints.
 
 | Field | Type | Description | Example Value |
 |---|---|---|---|
@@ -553,7 +587,7 @@ Contains static analysis results for Dockerfiles. Available in [`dockerfile_repo
 
 #### `request` object
 
-Contains information about a package being requested through the proxy. Available in [`go_artifact_request`](internal/policy/entrypoints.go#L7), [`npm_artifact_request`](internal/policy/entrypoints.go#L9), and other proxy entrypoints.
+Contains information about a package being requested through the proxy. Available in `go_artifact_request`, `npm_artifact_request`, `pypi_artifact_request`, `rubygems_artifact_request`, and `oci_artifact_request` entrypoints.
 
 | Field | Type | Description | Example Value |
 |---|---|---|---|
@@ -945,6 +979,7 @@ See [JWT policy examples](policy/examples/) for more examples.
 | `DEPUTY_PROXY_IMAGE_SCAN_TIMEOUT` | Max time for proxy image scans, e.g., `10m` (default: 10m) |
 | `DEPUTY_PROXY_IMAGE_CACHE_TTL` | TTL for proxy image scan cache (default: 30m) |
 | `DEPUTY_PROXY_IMAGE_CACHE_SIZE` | Max items in proxy image scan cache (default: 1024) |
+| `DEPUTY_CACHE_DIR` | Override cache directory for KEV/EPSS data (default: `~/.deputy/cache`) |
 
 ## Exit Codes
 
@@ -971,9 +1006,12 @@ See [JWT policy examples](policy/examples/) for more examples.
 
 | Task | Key Files |
 |------|-----------|
-| Vulnerability analysis | [`internal/analysis/osv/client.go`](internal/analysis/osv/client.go), [`internal/vuln/severity.go`](internal/vuln/severity.go), [`internal/vuln/group.go`](internal/vuln/group.go) |
+| Vulnerability analysis | [`internal/analysis/osv/client.go`](internal/analysis/osv/client.go), [`internal/vulnerability/`](internal/vulnerability/) |
+| Threat intelligence | [`internal/vulnerability/intel/kev/`](internal/vulnerability/intel/kev/), [`internal/vulnerability/intel/epss/`](internal/vulnerability/intel/epss/) |
 | Ecosystem support | [`internal/inventory/`](internal/inventory/), [`internal/purlx/`](internal/purlx/), [`internal/proxy/`](internal/proxy/) |
-| Policy features | [`internal/policy/eval.go`](internal/policy/eval.go), [Policy examples](policy/examples/) |
+| Policy features | [`internal/policy/entrypoints.go`](internal/policy/entrypoints.go), [`internal/policy/engine.go`](internal/policy/engine.go), [Policy examples](policy/examples/) |
+| License resolution | [`internal/license/license.go`](internal/license/license.go) (implements `Resolver` interface) |
+| Scanning | [`internal/scan/service.go`](internal/scan/service.go) (implements `Scanner` interface) |
 
 ## Debugging Tips
 

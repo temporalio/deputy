@@ -13,8 +13,8 @@ import (
 	"github.com/picatz/deputy/internal/vulnerability"
 )
 
-// RenderTriageSummary prints a human-readable summary of the triage report.
-func RenderTriageSummary(w io.Writer, triageReport report.TriageReport, showDBInfo bool) {
+// TriageSummary prints a human-readable summary of the triage report.
+func TriageSummary(w io.Writer, triageReport report.TriageReport, showDBInfo bool) {
 	doc := TriageSummaryDoc(TargetSummary{
 		Repo:   triageReport.Target.Repo,
 		Ref:    triageReport.Target.Ref,

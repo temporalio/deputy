@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+
+	"github.com/picatz/deputy/internal/policy"
 )
 
 // goModuleHandler proxies requests to a Go module proxy (e.g., proxy.golang.org)
@@ -39,7 +41,7 @@ func (h *goModuleHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	h.serveRequest(w, r, "go_artifact_request", requestInfo{
+	h.serveRequest(w, r, policy.EntrypointGoArtifactRequest, requestInfo{
 		Name:       module,
 		Version:    version,
 		HasVersion: hasVersion(version),

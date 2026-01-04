@@ -9,7 +9,7 @@ import (
 
 	"github.com/google/osv-scalibr/extractor"
 	packageurl "github.com/package-url/packageurl-go"
-	analysis "github.com/picatz/deputy/internal/analysis"
+	"github.com/picatz/deputy/internal/analysis/osv"
 	"github.com/picatz/deputy/internal/ecosystem"
 	"github.com/picatz/deputy/internal/logs"
 	"github.com/picatz/deputy/internal/otel"
@@ -59,7 +59,7 @@ func (s *Service) ScanPURL(ctx context.Context, purlStr string, opts Options) (*
 
 	name := purlDisplayName(pu)
 	ecos := purlEcosystem(pu)
-	inputs := []analysis.PkgInput{
+	inputs := []osv.PkgInput{
 		{
 			Name:      name,
 			Version:   pu.Version,

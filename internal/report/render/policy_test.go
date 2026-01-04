@@ -8,7 +8,7 @@ import (
 	"github.com/picatz/deputy/internal/report"
 )
 
-func TestRenderPolicyFindings(t *testing.T) {
+func TestPolicyFindings(t *testing.T) {
 	tests := []struct {
 		name     string
 		findings []report.PolicyFinding
@@ -35,7 +35,7 @@ func TestRenderPolicyFindings(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			var buf bytes.Buffer
-			RenderPolicyFindings(&buf, tt.findings)
+			PolicyFindings(&buf, tt.findings)
 			out := buf.String()
 			if tt.wantNone && out != "" {
 				t.Fatalf("expected no output, got %q", out)

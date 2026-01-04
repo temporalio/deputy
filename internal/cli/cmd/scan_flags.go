@@ -58,6 +58,9 @@ type scanFlags struct {
 
 	// SBOM-specific
 	InputFormat string
+
+	// Enrichment options
+	Enrich bool
 }
 
 // displayOptions returns the VulnerabilityDisplayOptions derived from scan flags.
@@ -106,6 +109,9 @@ func extractScanFlags(cmd *cobra.Command) scanFlags {
 
 	// SBOM-specific
 	f.InputFormat, _ = cmd.Flags().GetString("input-format")
+
+	// Enrichment options
+	f.Enrich, _ = cmd.Flags().GetBool("enrich")
 
 	return f
 }

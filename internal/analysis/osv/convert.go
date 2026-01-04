@@ -9,7 +9,6 @@ import (
 
 	"github.com/ossf/osv-schema/bindings/go/osvschema"
 	"github.com/picatz/deputy/internal/dependency"
-	"github.com/picatz/deputy/internal/vuln"
 	"github.com/picatz/deputy/internal/vulnerability"
 )
 
@@ -43,7 +42,7 @@ func ProcessOSVVulnerabilityDomain(vuln osvschema.Vulnerability, input PkgInput)
 		Version:      input.Version,
 		Direct:       input.IsDirect,
 		Locations:    slices.Clone(input.Locations),
-		ManifestRefs: toDomainManifestRefs(input.ManifestRefs),
+		ManifestRefs: cloneManifestRefsFromInput(input.ManifestRefs),
 		LayerDetails: toDomainLayerDetails(input.LayerDetails),
 	}
 
@@ -93,10 +92,14 @@ func ProcessOSVVulnerabilityDomain(vuln osvschema.Vulnerability, input PkgInput)
 		}
 	}
 	if imports := extractGoImports(vuln.Affected, input); len(imports) > 0 {
-		finding.AffectedImports = toDomainAffectedImports(imports)
+		finding.AffectedImports = cloneAffectedImportsFromInput(imports)
 	}
 	if ds := extractDatabaseSpecificStrings(vuln.DatabaseSpecific); len(ds) > 0 {
 		advisory.DatabaseSpecific = ds
+	}
+	// Extract CWEs from database_specific.cwe_ids (GHSA records)
+	if cwes := vulnerability.ExtractCWEsFromDatabaseSpecific(vuln.DatabaseSpecific); len(cwes) > 0 {
+		advisory.CWEs = cwes
 	}
 	return advisory, finding
 }
@@ -188,7 +191,7 @@ func extractGoImports(affected []osvschema.Affected, input PkgInput) []AffectedI
 		}
 		imports = append(imports, parseImports(raw)...)
 	}
-	return vuln.MergeAffectedImports(imports)
+	return vulnerability.MergeAffectedImports(imports)
 }
 
 func parseImports(raw any) []AffectedImport {
@@ -302,78 +305,92 @@ func flattenAdvisoryFinding(advisory vulnerability.Advisory, finding vulnerabili
 		FixedVersions:   slices.Clone(advisory.FixedVersions),
 		Affected:        finding.Affected,
 		Locations:       slices.Clone(finding.Locations),
-		ManifestRefs:    toLegacyManifestRefs(finding.ManifestRefs),
-		AffectedImports: toLegacyAffectedImports(finding.AffectedImports),
+		ManifestRefs:    cloneManifestRefs(finding.ManifestRefs),
+		AffectedImports: cloneAffectedImports(finding.AffectedImports),
 		DatabaseSpecific: func() map[string]string {
 			if len(advisory.DatabaseSpecific) == 0 {
 				return nil
 			}
 			return maps.Clone(advisory.DatabaseSpecific)
 		}(),
-		LayerDetails: toVulnLayerDetails(finding.LayerDetails),
+		LayerDetails: cloneLayerDetails(finding.LayerDetails),
 	}
 }
 
-func toDomainManifestRefs(refs []ManifestReference) []dependency.ManifestRef {
+// cloneManifestRefsFromInput deep clones a slice of ManifestReference from PkgInput.
+// Since ManifestReference is a type alias for dependency.ManifestRef,
+// this creates a new slice with cloned Groups fields.
+func cloneManifestRefsFromInput(refs []ManifestReference) []dependency.ManifestRef {
 	if len(refs) == 0 {
 		return nil
 	}
-	out := make([]dependency.ManifestRef, 0, len(refs))
-	for _, ref := range refs {
-		out = append(out, dependency.ManifestRef{
+	out := make([]dependency.ManifestRef, len(refs))
+	for i, ref := range refs {
+		out[i] = dependency.ManifestRef{
 			Path:    ref.Path,
 			Manager: ref.Manager,
 			Groups:  slices.Clone(ref.Groups),
-		})
+		}
 	}
 	return out
 }
 
-func toDomainAffectedImports(imports []AffectedImport) []vulnerability.AffectedImport {
+// cloneAffectedImportsFromInput deep clones a slice of AffectedImport with deep copy of Symbols.
+// Since AffectedImport is a type alias for vulnerability.AffectedImport, this
+// performs a deep clone to avoid sharing slice backing arrays.
+func cloneAffectedImportsFromInput(imports []AffectedImport) []vulnerability.AffectedImport {
 	if len(imports) == 0 {
 		return nil
 	}
-	out := make([]vulnerability.AffectedImport, 0, len(imports))
-	for _, imp := range imports {
-		out = append(out, vulnerability.AffectedImport{
+	out := make([]vulnerability.AffectedImport, len(imports))
+	for i, imp := range imports {
+		out[i] = vulnerability.AffectedImport{
 			Path:    imp.Path,
 			Symbols: slices.Clone(imp.Symbols),
-		})
+		}
 	}
 	return out
 }
 
-func toLegacyManifestRefs(refs []dependency.ManifestRef) []ManifestReference {
+// cloneManifestRefs deep clones a slice of ManifestRef.
+// Since ManifestReference is a type alias for dependency.ManifestRef, this
+// creates a new slice with cloned Groups fields.
+func cloneManifestRefs(refs []dependency.ManifestRef) []dependency.ManifestRef {
 	if len(refs) == 0 {
 		return nil
 	}
-	out := make([]ManifestReference, 0, len(refs))
-	for _, ref := range refs {
-		out = append(out, ManifestReference{
+	out := make([]dependency.ManifestRef, len(refs))
+	for i, ref := range refs {
+		out[i] = dependency.ManifestRef{
 			Path:    ref.Path,
 			Manager: ref.Manager,
 			Groups:  slices.Clone(ref.Groups),
-		})
+		}
 	}
 	return out
 }
 
-func toLegacyAffectedImports(imports []vulnerability.AffectedImport) []AffectedImport {
+// cloneAffectedImports deep clones a slice of AffectedImport.
+// Since AffectedImport is a type alias for vulnerability.AffectedImport, this
+// creates a new slice with cloned Symbols fields.
+func cloneAffectedImports(imports []vulnerability.AffectedImport) []vulnerability.AffectedImport {
 	if len(imports) == 0 {
 		return nil
 	}
-	out := make([]AffectedImport, 0, len(imports))
-	for _, imp := range imports {
-		out = append(out, AffectedImport{
+	out := make([]vulnerability.AffectedImport, len(imports))
+	for i, imp := range imports {
+		out[i] = vulnerability.AffectedImport{
 			Path:    imp.Path,
 			Symbols: slices.Clone(imp.Symbols),
-		})
+		}
 	}
 	return out
 }
 
-// toDomainLayerDetails converts OSV package LayerDetails to the vulnerability domain type.
-func toDomainLayerDetails(ld *LayerDetails) *vulnerability.LayerDetails {
+// cloneLayerDetails returns a deep copy of LayerDetails.
+// Since LayerDetails is a type alias for vulnerability.LayerDetails, this
+// simply creates a new struct with the same field values.
+func cloneLayerDetails(ld *vulnerability.LayerDetails) *vulnerability.LayerDetails {
 	if ld == nil {
 		return nil
 	}
@@ -386,30 +403,5 @@ func toDomainLayerDetails(ld *LayerDetails) *vulnerability.LayerDetails {
 	}
 }
 
-// toLegacyLayerDetails converts domain LayerDetails to the legacy OSV type.
-func toLegacyLayerDetails(ld *vulnerability.LayerDetails) *LayerDetails {
-	if ld == nil {
-		return nil
-	}
-	return &LayerDetails{
-		Index:       ld.Index,
-		DiffID:      ld.DiffID,
-		ChainID:     ld.ChainID,
-		Command:     ld.Command,
-		InBaseImage: ld.InBaseImage,
-	}
-}
-
-// toVulnLayerDetails converts domain LayerDetails to vuln.LayerDetails for the Vulnerability struct.
-func toVulnLayerDetails(ld *vulnerability.LayerDetails) *vuln.LayerDetails {
-	if ld == nil {
-		return nil
-	}
-	return &vuln.LayerDetails{
-		Index:       ld.Index,
-		DiffID:      ld.DiffID,
-		ChainID:     ld.ChainID,
-		Command:     ld.Command,
-		InBaseImage: ld.InBaseImage,
-	}
-}
+// toDomainLayerDetails is an alias for cloneLayerDetails for backward compatibility.
+var toDomainLayerDetails = cloneLayerDetails

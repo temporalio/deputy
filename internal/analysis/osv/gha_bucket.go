@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"maps"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -22,11 +23,11 @@ import (
 	githttp "github.com/go-git/go-git/v5/plumbing/transport/http"
 	"github.com/go-git/go-git/v5/storage/memory"
 	"github.com/ossf/osv-schema/bindings/go/osvschema"
+	"github.com/picatz/deputy/internal/cache/disk"
 	"github.com/picatz/deputy/internal/collections"
-	"github.com/picatz/deputy/internal/diskcache"
 	"github.com/picatz/deputy/internal/httputil"
 	"github.com/picatz/deputy/internal/purlx"
-	"github.com/picatz/deputy/internal/vuln"
+	"github.com/picatz/deputy/internal/vulnerability"
 	"golang.org/x/mod/semver"
 	"golang.org/x/sync/singleflight"
 )
@@ -106,7 +107,7 @@ var (
 // queryOSVGHABucketBatch looks up GitHub Actions vulnerabilities using the
 // OSV GCS bucket (all.zip) because the OSV API does not currently accept the
 // "GitHub Actions" ecosystem for querybatch.
-func queryOSVGHABucketBatch(ctx context.Context, client OSVClient, pkgs []PkgInput) ([]Vulnerability, error) {
+func queryOSVGHABucketBatch(ctx context.Context, client Client, pkgs []PkgInput) ([]Vulnerability, error) {
 	if len(pkgs) == 0 {
 		return nil, nil
 	}
@@ -176,7 +177,7 @@ func queryOSVGHABucketBatch(ctx context.Context, client OSVClient, pkgs []PkgInp
 				continue
 			}
 			all := append([]Vulnerability{base}, extras...)
-			if sev, typ := vuln.FindBestSeverity(all); sev != "" {
+			if sev, typ := FindBestSeverity(all); sev != "" {
 				base.Severity, base.SeverityType = sev, typ
 			}
 			fixSet := collections.NewSet[string]()
@@ -184,7 +185,7 @@ func queryOSVGHABucketBatch(ctx context.Context, client OSVClient, pkgs []PkgInp
 			if len(base.AffectedImports) > 0 {
 				importSets = append(importSets, base.AffectedImports)
 			}
-			dbSpecific := cloneStringMap(base.DatabaseSpecific)
+			dbSpecific := maps.Clone(base.DatabaseSpecific)
 			for _, vv := range all {
 				for _, f := range vv.FixedVersions {
 					fixSet.Add(f)
@@ -193,7 +194,7 @@ func queryOSVGHABucketBatch(ctx context.Context, client OSVClient, pkgs []PkgInp
 				if len(vv.AffectedImports) > 0 {
 					importSets = append(importSets, vv.AffectedImports)
 				}
-				dbSpecific = mergeStringMap(dbSpecific, vv.DatabaseSpecific)
+				dbSpecific = vulnerability.MergeStringMap(dbSpecific, vv.DatabaseSpecific)
 			}
 			aliasSet := collections.NewSet[string]()
 			uniqAliases := make([]string, 0, len(base.Aliases))
@@ -210,7 +211,7 @@ func queryOSVGHABucketBatch(ctx context.Context, client OSVClient, pkgs []PkgInp
 			for f := range fixSet.All() {
 				base.FixedVersions = append(base.FixedVersions, f)
 			}
-			base.AffectedImports = vuln.MergeAffectedImports(importSets...)
+			base.AffectedImports = vulnerability.MergeAffectedImports(importSets...)
 			base.DatabaseSpecific = dbSpecific
 			out = append(out, base)
 		}
@@ -544,7 +545,7 @@ func buildGHAVulnIndex(ctx context.Context) (*ghaVulnIndex, error) {
 // ensureGHACacheZip ensures a recent copy of all.zip exists on disk and returns its path.
 // The zip is refreshed on a TTL to keep results aligned with OSV releases.
 func ensureGHACacheZip(ctx context.Context) (string, error) {
-	base := diskcache.BaseDir()
+	base := disk.BaseDir()
 	if base == "" {
 		tmp, err := os.MkdirTemp("", "deputy-osv-gha-*")
 		if err != nil {

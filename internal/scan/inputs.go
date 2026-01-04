@@ -10,15 +10,16 @@ import (
 
 	"github.com/BurntSushi/toml"
 	"github.com/google/osv-scalibr/extractor"
-	analysis "github.com/picatz/deputy/internal/analysis"
+	"github.com/picatz/deputy/internal/analysis/osv"
 	"github.com/picatz/deputy/internal/collections"
 	"github.com/picatz/deputy/internal/compare"
+	"github.com/picatz/deputy/internal/dependency"
 	"github.com/picatz/deputy/internal/inventory/manifests"
 	"github.com/picatz/deputy/internal/purlx"
 )
 
 // PackagesToInputs converts a slice of extractor.Package objects into
-// analysis.PkgInput records suitable for OSV queries. It normalizes package
+// osv.PkgInput records suitable for OSV queries. It normalizes package
 // names, deduplicates modules, and annotates whether each dependency is direct
 // according to the provided dependency map.
 // ManifestResolver abstracts file reading for manifest parsing.
@@ -294,7 +295,7 @@ func parseCargoManifest(content []byte) (*cargoManifestData, error) {
 	return data, nil
 }
 
-func PackagesToInputs(pkgs []*extractor.Package, opts PackageInputOptions) []analysis.PkgInput {
+func PackagesToInputs(pkgs []*extractor.Package, opts PackageInputOptions) []osv.PkgInput {
 	if len(pkgs) == 0 {
 		return nil
 	}
@@ -304,7 +305,7 @@ func PackagesToInputs(pkgs []*extractor.Package, opts PackageInputOptions) []ana
 	cache := newPackageJSONCache(opts.Resolver)
 	cargoCache := newCargoManifestCache(opts.Resolver)
 	uvCache := newUVLockCache(opts.Resolver)
-	seen := map[string]*analysis.PkgInput{}
+	seen := map[string]*osv.PkgInput{}
 	for _, pkg := range pkgs {
 		if pkg == nil {
 			continue
@@ -334,7 +335,7 @@ func PackagesToInputs(pkgs []*extractor.Package, opts PackageInputOptions) []ana
 		key := fmt.Sprintf("%s|%s|%s|%s", strings.ToLower(ecos), strings.ToLower(name), version, purlStr)
 		entry := seen[key]
 		if entry == nil {
-			entry = &analysis.PkgInput{
+			entry = &osv.PkgInput{
 				Name:      name,
 				Version:   version,
 				Ecosystem: ecos,
@@ -348,7 +349,7 @@ func PackagesToInputs(pkgs []*extractor.Package, opts PackageInputOptions) []ana
 		// If multiple packages map to the same entry (e.g., same package in different locations),
 		// prefer keeping the first layer info encountered or use a stable heuristic.
 		if entry.LayerDetails == nil && pkg.LayerDetails != nil {
-			entry.LayerDetails = &analysis.PkgInputLayerDetails{
+			entry.LayerDetails = &osv.LayerDetails{
 				Index:       pkg.LayerDetails.Index,
 				DiffID:      pkg.LayerDetails.DiffID,
 				ChainID:     pkg.LayerDetails.ChainID,
@@ -376,7 +377,7 @@ func PackagesToInputs(pkgs []*extractor.Package, opts PackageInputOptions) []ana
 			if !ok {
 				continue
 			}
-			ref := analysis.ManifestReference{Path: manifestPath, Manager: manager}
+			ref := osv.ManifestReference{Path: manifestPath, Manager: manager}
 			switch manager {
 			case "go":
 				// direct already handled via GoDirect map
@@ -421,17 +422,17 @@ func PackagesToInputs(pkgs []*extractor.Package, opts PackageInputOptions) []ana
 					entry.IsDirect = true
 				}
 			}
-			entry.ManifestRefs = analysis.MergeManifestReference(entry.ManifestRefs, ref)
+			entry.ManifestRefs = dependency.MergeManifestRef(entry.ManifestRefs, ref)
 		}
 	}
-	inputs := make([]analysis.PkgInput, 0, len(seen))
+	inputs := make([]osv.PkgInput, 0, len(seen))
 	for _, in := range seen {
 		// sort locations and manifest refs for stable output
 		in.Locations = sortedUnique(in.Locations)
-		in.ManifestRefs = analysis.SortAndUniqueManifestRefs(in.ManifestRefs)
+		in.ManifestRefs = dependency.SortAndUniqueManifestRefs(in.ManifestRefs)
 		inputs = append(inputs, *in)
 	}
-	slices.SortFunc(inputs, func(a, b analysis.PkgInput) int {
+	slices.SortFunc(inputs, func(a, b osv.PkgInput) int {
 		if c := cmp.Compare(a.Name, b.Name); c != 0 {
 			return c
 		}
@@ -489,7 +490,7 @@ func normalizeCrateName(name string) string {
 }
 
 // BuildPackageDirectMap creates a map of direct dependencies from the input list.
-func BuildPackageDirectMap(inputs []analysis.PkgInput) map[string]bool {
+func BuildPackageDirectMap(inputs []osv.PkgInput) map[string]bool {
 	if len(inputs) == 0 {
 		return nil
 	}
@@ -525,7 +526,7 @@ func MergeDirectMaps(maps ...map[string]bool) map[string]bool {
 }
 
 // BuildPackageSources creates a map of package sources from the input list.
-func BuildPackageSources(inputs []analysis.PkgInput) map[string][]string {
+func BuildPackageSources(inputs []osv.PkgInput) map[string][]string {
 	if len(inputs) == 0 {
 		return nil
 	}
@@ -565,7 +566,7 @@ func BuildPackageSources(inputs []analysis.PkgInput) map[string][]string {
 }
 
 // canonicalPackageKeyFromInput generates a unique key for a package input.
-func canonicalPackageKeyFromInput(in analysis.PkgInput) string {
+func canonicalPackageKeyFromInput(in osv.PkgInput) string {
 	name := strings.TrimSpace(in.Name)
 	if name == "" {
 		return ""

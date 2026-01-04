@@ -4,6 +4,8 @@ import (
 	"net/http"
 	"path"
 	"strings"
+
+	"github.com/picatz/deputy/internal/policy"
 )
 
 // rubyGemsHandler proxies requests to a RubyGems registry (e.g., rubygems.org)
@@ -33,7 +35,7 @@ func newRubyGemsHandler(upstream string, policies PolicyEvaluator) (*rubyGemsHan
 func (h *rubyGemsHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	name, version, operation := parseRubyGemsPath(r.URL.Path)
 
-	h.serveRequest(w, r, "rubygems_artifact_request", requestInfo{
+	h.serveRequest(w, r, policy.EntrypointRubygemsArtifactRequest, requestInfo{
 		Name:       name,
 		Version:    version,
 		HasVersion: hasVersion(version),

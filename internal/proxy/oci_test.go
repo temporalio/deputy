@@ -129,7 +129,7 @@ func TestOCIHandler_ManifestPayloadIncludesImage(t *testing.T) {
 	if rr.Code != http.StatusOK {
 		t.Fatalf("status=%d want=%d", rr.Code, http.StatusOK)
 	}
-	if capture.entrypoint != policy.EntrypointOCIArtifactRequest {
+	if capture.entrypoint != policy.EntrypointOCIArtifactRequest.String() {
 		t.Fatalf("entrypoint=%q want=%q", capture.entrypoint, policy.EntrypointOCIArtifactRequest)
 	}
 

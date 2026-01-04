@@ -4,6 +4,8 @@ import (
 	"net/http"
 	"path"
 	"strings"
+
+	"github.com/picatz/deputy/internal/policy"
 )
 
 // pypiHandler proxies requests to a PyPI registry (e.g., pypi.org) while
@@ -33,7 +35,7 @@ func newPyPIHandler(upstream string, policies PolicyEvaluator) (*pypiHandler, er
 func (h *pypiHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	pkg, version, filename, op := parsePyPIPath(r.URL.Path)
 
-	h.serveRequest(w, r, "pypi_artifact_request", requestInfo{
+	h.serveRequest(w, r, policy.EntrypointPypiArtifactRequest, requestInfo{
 		Name:       pkg,
 		Version:    version,
 		HasVersion: hasVersion(version),

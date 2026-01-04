@@ -233,6 +233,7 @@ WORKFLOW EXAMPLES:
 	scanCmd.Flags().Bool("show-db-info", false, "Show database-specific metadata (e.g., review_status) in text output")
 	scanCmd.Flags().String("source", "", "Target source override: auto, git, dir, sbom, purl, dockerfile, remote, docker-daemon, tarball")
 	scanCmd.Flags().String("platform", "", "Platform for remote images (os/arch[/variant])")
+	scanCmd.Flags().Bool("enrich", false, "Enrich vulnerabilities with EPSS scores and KEV status (requires network)")
 
 	scanDirCmd := &cobra.Command{
 		Use:           "dir <path>",
@@ -285,6 +286,7 @@ TYPICAL USE CASES:
 	scanDirCmd.Flags().StringArray("policy", nil, "Path to a CEL policy file or bundle to evaluate against the scan report (repeatable)")
 	scanDirCmd.Flags().Bool("show-symbols", false, "Show symbol hints (OSV imports) in text output")
 	scanDirCmd.Flags().Bool("show-db-info", false, "Show database-specific metadata (e.g., review_status) in text output")
+	scanDirCmd.Flags().Bool("enrich", false, "Enrich vulnerabilities with EPSS scores and KEV status (requires network)")
 
 	scanSBOMCmd := &cobra.Command{
 		Use:           "sbom <file|->",
@@ -369,6 +371,7 @@ WORKFLOW EXAMPLES:
 	scanSBOMCmd.Flags().StringArray("policy", nil, "Path to a CEL policy file or bundle to evaluate against the scan report (repeatable)")
 	scanSBOMCmd.Flags().Bool("show-symbols", false, "Show symbol hints (OSV imports) in text output")
 	scanSBOMCmd.Flags().Bool("show-db-info", false, "Show database-specific metadata (e.g., review_status) in text output")
+	scanSBOMCmd.Flags().Bool("enrich", false, "Enrich vulnerabilities with EPSS scores and KEV status (requires network)")
 
 	scanPURLCmd := &cobra.Command{
 		Use:           "purl <purl>",
@@ -401,6 +404,7 @@ OUTPUT AND FILTERING:
 	scanPURLCmd.Flags().StringArray("policy", nil, "Path to a CEL policy file or bundle to evaluate against the scan report (repeatable)")
 	scanPURLCmd.Flags().Bool("show-symbols", false, "Show symbol hints (OSV imports) in text output")
 	scanPURLCmd.Flags().Bool("show-db-info", false, "Show database-specific metadata (e.g., review_status) in text output")
+	scanPURLCmd.Flags().Bool("enrich", false, "Enrich vulnerabilities with EPSS scores and KEV status (requires network)")
 
 	scanImageCmd := &cobra.Command{
 		Use:           "image <ref>",
@@ -470,6 +474,7 @@ POLICY ENFORCEMENT:
 	scanImageCmd.Flags().Bool("show-db-info", false, "Show database-specific metadata (e.g., review_status) in text output")
 	scanImageCmd.Flags().String("source", "remote", "Image source: remote, docker-daemon, tarball")
 	scanImageCmd.Flags().String("platform", "", "Platform for remote images (os/arch[/variant])")
+	scanImageCmd.Flags().Bool("enrich", false, "Enrich vulnerabilities with EPSS scores and KEV status (requires network)")
 
 	scanCmd.AddCommand(scanDirCmd, scanSBOMCmd, scanPURLCmd, scanImageCmd)
 	root.AddCommand(scanCmd)
@@ -616,13 +621,16 @@ func (s *Scanner) runScanRepository(cmd *cobra.Command, repoArg string) error {
 		resultOut = policyResult
 	}
 	report := buildScanReport(policyResult)
+	if flags.Enrich {
+		enrichVulnerabilities(ctx, report.Vulnerabilities, cmd.ErrOrStderr())
+	}
 	policyActions, err := runScanPolicies(ctx, flags.PolicyPaths, policyResult, report, cmd.ErrOrStderr(), nil)
 	if err != nil {
 		return err
 	}
 	policyFindings := actionsToPolicyFindings(policyActions)
 	report.PolicyFindings = policyFindings
-	exec.Result.PolicyDecisions = actionsToPolicyDecisions(policyActions)
+	exec.Result.PolicyActions = policyActions
 
 	out, err := openOutputWriter(cmd, flags.OutPath)
 	if err != nil {
@@ -675,12 +683,15 @@ func (s *Scanner) runScanDir(cmd *cobra.Command, args []string) error {
 		resultOut = policyResult
 	}
 	report := buildScanReport(policyResult)
+	if flags.Enrich {
+		enrichVulnerabilities(ctx, report.Vulnerabilities, cmd.ErrOrStderr())
+	}
 	policyActions, err := runScanPolicies(ctx, flags.PolicyPaths, policyResult, report, cmd.ErrOrStderr(), nil)
 	if err != nil {
 		return err
 	}
 	policyFindings := actionsToPolicyFindings(policyActions)
-	exec.Result.PolicyDecisions = actionsToPolicyDecisions(policyActions)
+	exec.Result.PolicyActions = policyActions
 
 	out, err := openOutputWriter(cmd, flags.OutPath)
 	if err != nil {
@@ -817,6 +828,9 @@ func (s *Scanner) runScanSBOM(cmd *cobra.Command, args []string) error {
 		resultOut = policyResult
 	}
 	report := buildScanReport(policyResult)
+	if flags.Enrich {
+		enrichVulnerabilities(ctx, report.Vulnerabilities, cmd.ErrOrStderr())
+	}
 	var extra map[string]any
 	if len(sbomPURLs) > 0 {
 		extra = map[string]any{"sbom": map[string]any{"purls": sbomPURLs}}
@@ -826,7 +840,7 @@ func (s *Scanner) runScanSBOM(cmd *cobra.Command, args []string) error {
 		return err
 	}
 	policyFindings := actionsToPolicyFindings(policyActions)
-	exec.Result.PolicyDecisions = actionsToPolicyDecisions(policyActions)
+	exec.Result.PolicyActions = policyActions
 
 	out, err := openOutputWriter(cmd, flags.OutPath)
 	if err != nil {
@@ -842,7 +856,7 @@ func (s *Scanner) runScanSBOM(cmd *cobra.Command, args []string) error {
 			fmt.Fprintln(cmd.ErrOrStderr(), "  "+ui.StyleMeta.Render("Note: ignoring unfixed vulnerabilities (--ignore-unfixed)"))
 		}
 		render.DisplayVulnerabilities(out.Writer, resultOut, flags.displayOptions())
-		render.RenderPolicyFindings(out.Writer, policyFindings)
+		render.PolicyFindings(out.Writer, policyFindings)
 		return nil
 	case FormatJSON:
 		return s.outputJSON(out.Writer, resultOut, policyFindings)
@@ -886,12 +900,15 @@ func (s *Scanner) runScanPURL(cmd *cobra.Command, args []string) error {
 		resultOut = policyResult
 	}
 	report := buildScanReport(policyResult)
+	if flags.Enrich {
+		enrichVulnerabilities(ctx, report.Vulnerabilities, cmd.ErrOrStderr())
+	}
 	policyActions, err := runScanPolicies(ctx, flags.PolicyPaths, policyResult, report, cmd.ErrOrStderr(), nil)
 	if err != nil {
 		return err
 	}
 	policyFindings := actionsToPolicyFindings(policyActions)
-	exec.Result.PolicyDecisions = actionsToPolicyDecisions(policyActions)
+	exec.Result.PolicyActions = policyActions
 
 	out, err := openOutputWriter(cmd, flags.OutPath)
 	if err != nil {
@@ -958,12 +975,15 @@ func (s *Scanner) runScanImageWithOptions(cmd *cobra.Command, input, source, pla
 		resultOut = policyResult
 	}
 	report := buildScanReport(policyResult)
+	if flags.Enrich {
+		enrichVulnerabilities(ctx, report.Vulnerabilities, cmd.ErrOrStderr())
+	}
 	policyActions, err := runScanPolicies(ctx, flags.PolicyPaths, policyResult, report, cmd.ErrOrStderr(), nil)
 	if err != nil {
 		return err
 	}
 	policyFindings := actionsToPolicyFindings(policyActions)
-	exec.Result.PolicyDecisions = actionsToPolicyDecisions(policyActions)
+	exec.Result.PolicyActions = policyActions
 
 	out, err := openOutputWriter(cmd, flags.OutPath)
 	if err != nil {
@@ -1044,7 +1064,7 @@ func (s *Scanner) outputText(w io.Writer, errW io.Writer, result scan.Result, ig
 	}
 
 	render.DisplayVulnerabilities(w, result, displayOpts)
-	render.RenderPolicyFindings(w, policyFindings)
+	render.PolicyFindings(w, policyFindings)
 
 	// Show module deprecations
 	if deps := detectModuleDeprecations(result.Inventory.Packages, result.Inventory.Direct); len(deps) > 0 {
@@ -1071,7 +1091,7 @@ func (s *Scanner) outputTextDir(w io.Writer, errW io.Writer, result scan.Result,
 	}
 
 	render.DisplayVulnerabilities(w, result, displayOpts)
-	render.RenderPolicyFindings(w, policyFindings)
+	render.PolicyFindings(w, policyFindings)
 	return nil
 }
 
@@ -1092,7 +1112,7 @@ func (s *Scanner) outputTextContainer(w io.Writer, errW io.Writer, result scan.R
 	}
 
 	render.DisplayVulnerabilities(w, result, displayOpts)
-	render.RenderPolicyFindings(w, policyFindings)
+	render.PolicyFindings(w, policyFindings)
 	return nil
 }
 
@@ -1815,7 +1835,7 @@ func runScanPolicies(ctx context.Context, policyPaths []string, result scan.Resu
 		// Also add image_info as a separate variable for direct access
 		reportMap["image_info"] = imageInfo
 	}
-	actions, err := evaluatePoliciesForCommand(ctx, policyPaths, reportMap, "scan", "scan_report", errW)
+	actions, err := evaluatePoliciesForCommand(ctx, policyPaths, reportMap, "scan", policy.EntrypointScanReport, errW)
 	if err != nil {
 		return nil, err
 	}
@@ -1845,7 +1865,7 @@ func runScanPolicies(ctx context.Context, policyPaths []string, result scan.Resu
 		if imageInfo := reportMap["image_info"]; imageInfo != nil {
 			payload["image_info"] = imageInfo
 		}
-		actions, err := evaluatePoliciesForCommand(ctx, policyPaths, payload, "scan", "scan_vulnerability", errW)
+		actions, err := evaluatePoliciesForCommand(ctx, policyPaths, payload, "scan", policy.EntrypointScanVulnerability, errW)
 		if err != nil {
 			return nil, err
 		}
@@ -1877,17 +1897,6 @@ func actionsToPolicyFindings(actions []policy.Action) []report.PolicyFinding {
 		findings = append(findings, f)
 	}
 	return findings
-}
-
-func actionsToPolicyDecisions(actions []policy.Action) []policy.Decision {
-	if len(actions) == 0 {
-		return nil
-	}
-	decisions := make([]policy.Decision, 0, len(actions))
-	for _, act := range actions {
-		decisions = append(decisions, policy.DecisionFromAction(act))
-	}
-	return decisions
 }
 
 var knownDeprecations = []ModuleDeprecation{

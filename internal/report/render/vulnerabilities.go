@@ -48,14 +48,14 @@ func DisplayVulnerabilitiesWithHeader(w io.Writer, result scan.Result, heading s
 	fmt.Fprintln(w)
 	fmt.Fprintln(w, ui.StyleDowngraded.Render("∴ ")+ui.StyleHeader.Render(heading))
 
-	RenderVulnerabilityList(w, cons, displayOpts)
+	VulnerabilityList(w, cons, displayOpts)
 
-	RenderVulnerabilitySummaryAndActions(w, cons, result.Stats)
+	VulnerabilitySummaryAndActions(w, cons, result.Stats)
 }
 
-// RenderVulnerabilityList writes per-package vulnerability details to w without headings or summary.
+// VulnerabilityList writes per-package vulnerability details to w without headings or summary.
 // Used by diff to compose combined views.
-func RenderVulnerabilityList(w io.Writer, cons []vulnerability.Consolidated, opts VulnerabilityDisplayOptions) {
+func VulnerabilityList(w io.Writer, cons []vulnerability.Consolidated, opts VulnerabilityDisplayOptions) {
 	if len(cons) == 0 {
 		return
 	}
@@ -182,9 +182,9 @@ func RenderVulnerabilityList(w io.Writer, cons []vulnerability.Consolidated, opt
 	}
 }
 
-// RenderVulnerabilitySummaryAndActions writes the summary and recommended
+// VulnerabilitySummaryAndActions writes the summary and recommended
 // actions for a set of vulnerabilities without reprinting the list header.
-func RenderVulnerabilitySummaryAndActions(w io.Writer, cons []vulnerability.Consolidated, stats vulnerability.Stats) {
+func VulnerabilitySummaryAndActions(w io.Writer, cons []vulnerability.Consolidated, stats vulnerability.Stats) {
 	summary := report.BuildSummary(cons, stats)
 	if !summary.HasVulnerabilities {
 		fmt.Fprintln(w)
@@ -214,7 +214,7 @@ func RenderVulnerabilitySummaryAndActions(w io.Writer, cons []vulnerability.Cons
 		}
 		if len(summary.Commands) > 0 {
 			fmt.Fprintf(w, "  %d. %s\n", step, ui.StyleBold.Render(summary.CommandsHeader))
-			RenderRemediationCommands(w, summary.Commands, "       ", "         ")
+			RemediationCommands(w, summary.Commands, "       ", "         ")
 			step++
 		}
 		if summary.UnfixedCount > 0 {

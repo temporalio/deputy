@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/picatz/deputy/internal/cli/flags"
+	"github.com/picatz/deputy/internal/policy"
 	"github.com/picatz/deputy/internal/report"
 	"github.com/picatz/deputy/internal/report/render"
 	"github.com/picatz/deputy/internal/scan"
@@ -169,7 +170,7 @@ func runTriage(scanner *Scanner, cmd *cobra.Command, args []string) error {
 
 	switch strings.ToLower(strings.TrimSpace(format)) {
 	case "", FormatText:
-		render.RenderTriageSummary(cmd.OutOrStdout(), triageReport, showDBInfo)
+		render.TriageSummary(cmd.OutOrStdout(), triageReport, showDBInfo)
 	case FormatJSON:
 		if err := outputTriageJSON(cmd.OutOrStdout(), triageReport); err != nil {
 			return err
@@ -210,7 +211,7 @@ func runTriagePolicies(ctx context.Context, policyPaths []string, triageReport r
 	if err != nil {
 		return err
 	}
-	if _, err := evaluatePoliciesForCommand(ctx, policyPaths, reportMap, "triage", "triage_report", errW); err != nil {
+	if _, err := evaluatePoliciesForCommand(ctx, policyPaths, reportMap, "triage", policy.EntrypointTriageReport, errW); err != nil {
 		return err
 	}
 	targetMap, err := structToMap(triageReport.Target)
@@ -226,7 +227,7 @@ func runTriagePolicies(ctx context.Context, policyPaths []string, triageReport r
 			"target":  targetMap,
 			"cluster": pkgMap,
 		}
-		if _, err := evaluatePoliciesForCommand(ctx, policyPaths, payload, "triage", "triage_cluster", errW); err != nil {
+		if _, err := evaluatePoliciesForCommand(ctx, policyPaths, payload, "triage", policy.EntrypointTriageCluster, errW); err != nil {
 			return err
 		}
 	}

@@ -13,7 +13,7 @@ import (
 	"strings"
 	"testing"
 
-	analysis "github.com/picatz/deputy/internal/analysis"
+	"github.com/picatz/deputy/internal/analysis/osv"
 )
 
 func writePyPIBundle(t *testing.T, dir, name, when, reason, action string) string {
@@ -71,9 +71,9 @@ func TestPyPIHandlerPolicyBlocksVuln(t *testing.T) {
 	}
 	handler.lookups.osvClient = nil
 	blockedPackage := "vulnerablepkg"
-	handler.lookups.vulnLookup = func(ctx context.Context, pkg, version string) ([]analysis.Vulnerability, error) {
+	handler.lookups.vulnLookup = func(ctx context.Context, pkg, version string) ([]osv.Vulnerability, error) {
 		if pkg == blockedPackage {
-			return []analysis.Vulnerability{{ID: "OSV-123", Severity: "CRITICAL", Package: pkg, Version: version}}, nil
+			return []osv.Vulnerability{{ID: "OSV-123", Severity: "CRITICAL", Package: pkg, Version: version}}, nil
 		}
 		return nil, nil
 	}

@@ -106,7 +106,7 @@ func TestServeWithPolicy(t *testing.T) {
 				Operation: "fetch",
 			}
 
-			serveWithPolicy(rr, req, tt.policies, "go_artifact_request", map[string]any{"request": map[string]any{}}, meta, upstream)
+			serveWithPolicy(rr, req, tt.policies, policy.EntrypointGoArtifactRequest, map[string]any{"request": map[string]any{}}, meta, upstream)
 
 			if rr.Code != tt.wantStatus {
 				t.Fatalf("status=%d want=%d body=%q", rr.Code, tt.wantStatus, rr.Body.String())

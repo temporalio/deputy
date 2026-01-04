@@ -2,8 +2,8 @@ package osv
 
 import "testing"
 
-func TestNewOSVClient_ConfiguresHTTPTimeout(t *testing.T) {
-	c := NewOSVClient()
+func TestNewClient_ConfiguresHTTPTimeout(t *testing.T) {
+	c := NewClient()
 	if c == nil {
 		t.Fatalf("expected client")
 	}

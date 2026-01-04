@@ -1,5 +1,7 @@
 package dockerfile
 
+import "github.com/picatz/deputy/internal/policy/celconv"
+
 // ToMap converts Info to a map for CEL policy evaluation.
 func (i *Info) ToMap() map[string]any {
 	if i == nil {
@@ -19,7 +21,7 @@ func (i *Info) ToMap() map[string]any {
 	result := map[string]any{
 		"path":   i.Path,
 		"stages": stages,
-		"args":   toAnyMap(i.Args),
+		"args":   celconv.ToAnyMap(i.Args),
 	}
 
 	if i.FinalStage != nil {
@@ -43,16 +45,16 @@ func (s *Stage) ToMap() map[string]any {
 		"user":             s.User,
 		"is_root":          s.IsRoot(),
 		"workdir":          s.Workdir,
-		"env_vars":         toAnyMap(s.EnvVars),
-		"sensitive_env":    toAnySlice(s.HasSensitiveEnv()),
-		"exposed_ports":    toAnySlice(s.ExposedPorts),
-		"labels":           toAnyMap(s.Labels),
-		"entrypoint":       toAnySlice(s.Entrypoint),
-		"cmd":              toAnySlice(s.Cmd),
-		"shell":            toAnySlice(s.Shell),
+		"env_vars":         celconv.ToAnyMap(s.EnvVars),
+		"sensitive_env":    celconv.ToAnySlice(s.HasSensitiveEnv()),
+		"exposed_ports":    celconv.ToAnySlice(s.ExposedPorts),
+		"labels":           celconv.ToAnyMap(s.Labels),
+		"entrypoint":       celconv.ToAnySlice(s.Entrypoint),
+		"cmd":              celconv.ToAnySlice(s.Cmd),
+		"shell":            celconv.ToAnySlice(s.Shell),
 		"stop_signal":      s.StopSignal,
-		"on_build":         toAnySlice(s.OnBuild),
-		"copy_from_stages": toAnySlice(s.CopyFromStages),
+		"on_build":         celconv.ToAnySlice(s.OnBuild),
+		"copy_from_stages": celconv.ToAnySlice(s.CopyFromStages),
 	}
 
 	// Base image resolved
@@ -118,7 +120,7 @@ func (r *RunCommand) ToMap() map[string]any {
 	return map[string]any{
 		"command":  r.Command,
 		"shell":    r.Shell,
-		"mounts":   toAnySlice(r.Mounts),
+		"mounts":   celconv.ToAnySlice(r.Mounts),
 		"network":  r.Network,
 		"security": r.Security,
 	}
@@ -127,7 +129,7 @@ func (r *RunCommand) ToMap() map[string]any {
 // ToMap converts CopyCommand to a map for CEL policy evaluation.
 func (c *CopyCommand) ToMap() map[string]any {
 	return map[string]any{
-		"sources":     toAnySlice(c.Sources),
+		"sources":     celconv.ToAnySlice(c.Sources),
 		"destination": c.Destination,
 		"from":        c.From,
 		"chown":       c.Chown,
@@ -138,7 +140,7 @@ func (c *CopyCommand) ToMap() map[string]any {
 // ToMap converts AddCommand to a map for CEL policy evaluation.
 func (a *AddCommand) ToMap() map[string]any {
 	return map[string]any{
-		"sources":     toAnySlice(a.Sources),
+		"sources":     celconv.ToAnySlice(a.Sources),
 		"destination": a.Destination,
 		"from_url":    a.FromURL,
 		"chown":       a.Chown,
@@ -152,7 +154,7 @@ func (h *HealthcheckConfig) ToMap() map[string]any {
 		return nil
 	}
 	return map[string]any{
-		"test":           toAnySlice(h.Test),
+		"test":           celconv.ToAnySlice(h.Test),
 		"interval":       h.Interval,
 		"timeout":        h.Timeout,
 		"start_period":   h.StartPeriod,
@@ -173,32 +175,8 @@ func (a *Analysis) ToMap() map[string]any {
 		"builder_stage_count":  a.BuilderStageCount,
 		"final_stage_is_root":  a.FinalStageIsRoot,
 		"final_stage_is_scratch": a.FinalStageIsScratch,
-		"sensitive_env_vars":   toAnySlice(a.SensitiveEnvVars),
+		"sensitive_env_vars":   celconv.ToAnySlice(a.SensitiveEnvVars),
 		"has_add_url":          a.HasAddURL,
-		"add_url_sources":      toAnySlice(a.AddURLSources),
+		"add_url_sources":      celconv.ToAnySlice(a.AddURLSources),
 	}
-}
-
-// toAnySlice converts a string slice to an any slice for CEL compatibility.
-func toAnySlice(s []string) []any {
-	if s == nil {
-		return []any{}
-	}
-	result := make([]any, len(s))
-	for i, v := range s {
-		result[i] = v
-	}
-	return result
-}
-
-// toAnyMap converts a string map to an any map for CEL compatibility.
-func toAnyMap(m map[string]string) map[string]any {
-	if m == nil {
-		return map[string]any{}
-	}
-	result := make(map[string]any, len(m))
-	for k, v := range m {
-		result[k] = v
-	}
-	return result
 }

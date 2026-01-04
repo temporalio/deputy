@@ -7,7 +7,7 @@ import (
 
 	"github.com/google/osv-scalibr/extractor"
 	scalpurl "github.com/google/osv-scalibr/purl"
-	analysis "github.com/picatz/deputy/internal/analysis"
+	"github.com/picatz/deputy/internal/analysis/osv"
 	"github.com/picatz/deputy/internal/compare"
 	"github.com/picatz/deputy/internal/purlx"
 	"github.com/picatz/deputy/internal/repository/workspace"
@@ -70,7 +70,7 @@ func TestToListItems_GitHubActionsDirectness_UsesPkgDirectKey(t *testing.T) {
 	ws := workspace.NewMemory()
 	defer ws.Close()
 
-	inputs := []analysis.PkgInput{
+	inputs := []osv.PkgInput{
 		{
 			Name:      "actions/download-artifact",
 			Version:   "v4",

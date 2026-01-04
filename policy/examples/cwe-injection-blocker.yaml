@@ -1,0 +1,31 @@
+# Block vulnerabilities with injection-related CWEs (SQL, XSS, Command Injection, etc.)
+# CWEs are extracted from GHSA records in the OSV database.
+#
+# Common injection CWEs:
+#   CWE-78:  OS Command Injection
+#   CWE-79:  Cross-site Scripting (XSS)
+#   CWE-89:  SQL Injection
+#   CWE-94:  Code Injection
+#   CWE-77:  Command Injection
+#
+# Usage:
+#   deputy scan --policy policy/examples/cwe-injection-blocker.yaml
+#
+policies:
+  - name: block-injection-cwes
+    entrypoints: [scan_vulnerability]
+    vars:
+      injection_cwes:
+        - "CWE-77"   # Command Injection
+        - "CWE-78"   # OS Command Injection
+        - "CWE-79"   # Cross-site Scripting (XSS)
+        - "CWE-89"   # SQL Injection
+        - "CWE-94"   # Code Injection
+        - "CWE-917"  # Expression Language Injection
+        - "CWE-1321" # Prototype Pollution
+    rules:
+      - action: deny
+        when: |
+          has(vulnerability.cwes) &&
+          vulnerability.cwes.exists(c, c in injection_cwes)
+        reason: "Injection vulnerability detected"

@@ -1,5 +1,11 @@
 package report
 
+import (
+	"strings"
+
+	"github.com/picatz/deputy/internal/policy"
+)
+
 // PolicyFinding represents a policy action emitted during evaluation.
 type PolicyFinding struct {
 	// Source is the name of the policy that generated this finding.
@@ -16,4 +22,30 @@ type PolicyFinding struct {
 	Status *int `json:"status,omitempty"`
 	// Code is a machine-readable identifier for the finding type.
 	Code string `json:"code,omitempty"`
+}
+
+// PolicyFindingsFromActions converts policy actions into report findings.
+// Actions with empty type or "allow" type are filtered out.
+func PolicyFindingsFromActions(actions []policy.Action) []PolicyFinding {
+	if len(actions) == 0 {
+		return nil
+	}
+	var findings []PolicyFinding
+	for _, act := range actions {
+		actionType := strings.TrimSpace(act.Type)
+		if actionType == "" || policy.ActionTypeIs(actionType, policy.ActionAllow) {
+			continue
+		}
+		f := PolicyFinding{
+			Source:      act.Source,
+			Action:      actionType,
+			Reason:      act.Reason,
+			Message:     act.Message,
+			Remediation: act.Remediation,
+			Status:      act.Status,
+			Code:        act.Code,
+		}
+		findings = append(findings, f)
+	}
+	return findings
 }

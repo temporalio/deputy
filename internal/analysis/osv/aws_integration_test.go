@@ -5,7 +5,7 @@ import (
 	"slices"
 	"testing"
 
-	"github.com/picatz/deputy/internal/vuln"
+	"github.com/picatz/deputy/internal/vulnerability"
 	"osv.dev/bindings/go/osvdev"
 )
 
@@ -26,12 +26,11 @@ func TestAWSV1Integration(t *testing.T) {
 	if err != nil {
 		t.Fatalf("query2 failed: %v", err)
 	}
-	cons := vuln.ConsolidateVulnerabilities(vulns)
-	if len(cons) == 0 {
+	if len(vulns) == 0 {
 		t.Fatalf("expected vulns for old version")
 	}
-	if !slices.ContainsFunc(cons, func(v vuln.ConsolidatedVulnerability) bool {
-		return vuln.FindBestFixedVersion(v.FixedVersions, "1.33.0") == "v1.34.0"
+	if !slices.ContainsFunc(vulns, func(v Vulnerability) bool {
+		return vulnerability.FindBestFixedVersion(v.FixedVersions, "1.33.0") == "v1.34.0"
 	}) {
 		t.Fatalf("expected fix v1.34.0 present")
 	}

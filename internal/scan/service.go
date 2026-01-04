@@ -9,7 +9,7 @@ import (
 
 	scalibrimage "github.com/google/osv-scalibr/artifact/image"
 	"github.com/google/osv-scalibr/extractor"
-	analysis "github.com/picatz/deputy/internal/analysis"
+	"github.com/picatz/deputy/internal/analysis/osv"
 	"github.com/picatz/deputy/internal/compare"
 	inv "github.com/picatz/deputy/internal/inventory"
 	"github.com/picatz/deputy/internal/logs"
@@ -22,18 +22,43 @@ import (
 	"go.opentelemetry.io/otel/trace"
 )
 
+// Scanner defines the interface for vulnerability scanning operations.
+// This interface enables dependency injection and testing of scan consumers.
+type Scanner interface {
+	// ScanRepository scans a repository target (local path or remote) for vulnerabilities.
+	ScanRepository(ctx context.Context, repoArg, ref string, refProvided bool, opts Options) (*Execution, error)
+
+	// ScanDirectory scans a local directory for vulnerabilities.
+	ScanDirectory(ctx context.Context, path string, opts Options) (*Execution, error)
+
+	// ScanSBOM scans pre-extracted packages for vulnerabilities.
+	ScanSBOM(ctx context.Context, pkgs []*extractor.Package, direct map[string]bool, opts Options) (*Execution, error)
+
+	// ScanContainerImage scans a container image for vulnerabilities.
+	ScanContainerImage(ctx context.Context, target string, targetOpts map[string]string, opts Options) (*Execution, error)
+
+	// ScanDockerfile scans images referenced in a Dockerfile.
+	ScanDockerfile(ctx context.Context, target string, opts Options) (*Execution, error)
+
+	// ScanPURL scans a single package URL for vulnerabilities.
+	ScanPURL(ctx context.Context, purlStr string, opts Options) (*Execution, error)
+}
+
+// Ensure Service implements Scanner at compile time.
+var _ Scanner = (*Service)(nil)
+
 // Service orchestrates vulnerability scans by combining inventory collection and OSV lookups.
 type Service struct {
 	collectInventory     func(ctx context.Context, repoPath, gitRef string, opts inv.ScanOptions) ([]*extractor.Package, error)
-	queryVulnerabilities func(ctx context.Context, client analysis.OSVClient, pkgs []analysis.PkgInput) ([]analysis.Vulnerability, error)
-	osvClient            analysis.OSVClient
+	queryVulnerabilities func(ctx context.Context, client osv.Client, pkgs []osv.PkgInput) ([]osv.Vulnerability, error)
+	osvClient            osv.Client
 }
 
 // ServiceConfig controls scan service dependencies.
 type ServiceConfig struct {
 	CollectInventory     func(ctx context.Context, repoPath, gitRef string, opts inv.ScanOptions) ([]*extractor.Package, error)
-	QueryVulnerabilities func(ctx context.Context, client analysis.OSVClient, pkgs []analysis.PkgInput) ([]analysis.Vulnerability, error)
-	OSVClient            analysis.OSVClient
+	QueryVulnerabilities func(ctx context.Context, client osv.Client, pkgs []osv.PkgInput) ([]osv.Vulnerability, error)
+	OSVClient            osv.Client
 }
 
 // NewService returns a Service configured with default inventory collection and OSV querying.
@@ -45,8 +70,8 @@ func NewService() *Service {
 func NewServiceWithConfig(cfg *ServiceConfig) *Service {
 	service := &Service{
 		collectInventory:     collectInventory,
-		queryVulnerabilities: analysis.QueryOSVBatch,
-		osvClient:            analysis.NewOSVClient(),
+		queryVulnerabilities: osv.QueryOSVBatch,
+		osvClient:            osv.NewClient(),
 	}
 	if cfg == nil {
 		return service
@@ -63,7 +88,7 @@ func NewServiceWithConfig(cfg *ServiceConfig) *Service {
 	return service
 }
 
-func (s *Service) queryOSV(ctx context.Context, inputs []analysis.PkgInput) ([]analysis.Vulnerability, error) {
+func (s *Service) queryOSV(ctx context.Context, inputs []osv.PkgInput) ([]osv.Vulnerability, error) {
 	ctx, span := otel.StartSpan(ctx, "deputy.scan.query_vulnerabilities",
 		trace.WithAttributes(
 			attribute.Int("deputy.osv.batch_size", len(inputs)),
@@ -72,11 +97,11 @@ func (s *Service) queryOSV(ctx context.Context, inputs []analysis.PkgInput) ([]a
 
 	query := s.queryVulnerabilities
 	if query == nil {
-		query = analysis.QueryOSVBatch
+		query = osv.QueryOSVBatch
 	}
 	client := s.osvClient
 	if client == nil {
-		client = analysis.NewOSVClient()
+		client = osv.NewClient()
 	}
 	vulns, err := query(ctx, client, inputs)
 	if err != nil {
@@ -442,13 +467,13 @@ func (s *Service) ScanDockerfile(ctx context.Context, target string, opts Option
 	return &Execution{Result: result, cleanup: cleanup}, nil
 }
 
-func buildResult(target Target, pkgs []*extractor.Package, direct map[string]bool, vulns []analysis.Vulnerability, queryErr error, opts Options) Result {
+func buildResult(target Target, pkgs []*extractor.Package, direct map[string]bool, vulns []osv.Vulnerability, queryErr error, opts Options) Result {
 	warnings := []string{}
 	if queryErr != nil {
 		warnings = append(warnings, fmt.Sprintf("OSV query failed: %v", queryErr))
 	}
 	if !opts.PublishedBefore.IsZero() || !opts.PublishedAfter.IsZero() {
-		vulns = analysis.FilterVulnerabilitiesByPublished(vulns, opts.PublishedAfter, opts.PublishedBefore)
+		vulns = filterVulnerabilitiesByPublished(vulns, opts.PublishedAfter, opts.PublishedBefore)
 	}
 
 	findings, advisories := splitLegacyVulnerabilities(vulns)

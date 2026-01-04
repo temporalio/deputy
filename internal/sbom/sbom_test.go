@@ -852,3 +852,209 @@ func Test_resolveGitHubActionsRefFromRefs(t *testing.T) {
 		})
 	}
 }
+
+// License enrichment tests
+
+func Test_enrichProtobomLicensesScanLocal(t *testing.T) {
+	t.Run("enriches root node with local license", func(t *testing.T) {
+		licenseText := `MIT License
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.`
+
+		ws := workspace.NewMemory()
+		defer ws.Close()
+		if err := ws.WriteFile("LICENSE", []byte(licenseText), 0644); err != nil {
+			t.Fatalf("write license: %v", err)
+		}
+
+		doc := sbom.NewDocument()
+		root := sbom.NewNode()
+		root.Id = "root"
+		root.Type = sbom.Node_PACKAGE
+		root.Name = "test-app"
+		doc.NodeList.Nodes = append(doc.NodeList.Nodes, root)
+		doc.NodeList.RootElements = append(doc.NodeList.RootElements, root.Id)
+
+		err := enrichProtobomLicensesScanLocal(context.Background(), doc, ws)
+		if err != nil {
+			t.Fatalf("enrichProtobomLicensesScanLocal: %v", err)
+		}
+
+		if len(root.Licenses) == 0 {
+			t.Error("expected licenses to be added to root node")
+		}
+		hasMIT := false
+		for _, l := range root.Licenses {
+			if l == "MIT" {
+				hasMIT = true
+				break
+			}
+		}
+		if !hasMIT {
+			t.Errorf("expected MIT license, got %v", root.Licenses)
+		}
+	})
+
+	t.Run("handles nil workspace gracefully", func(t *testing.T) {
+		doc := sbom.NewDocument()
+		err := enrichProtobomLicensesScanLocal(context.Background(), doc, nil)
+		if err != nil {
+			t.Errorf("expected no error for nil workspace, got %v", err)
+		}
+	})
+
+	t.Run("handles nil document gracefully", func(t *testing.T) {
+		ws := workspace.NewMemory()
+		defer ws.Close()
+		err := enrichProtobomLicensesScanLocal(context.Background(), nil, ws)
+		if err != nil {
+			t.Errorf("expected no error for nil document, got %v", err)
+		}
+	})
+
+	t.Run("does not error when no LICENSE file exists", func(t *testing.T) {
+		ws := workspace.NewMemory()
+		defer ws.Close()
+		// No license file written
+
+		doc := sbom.NewDocument()
+		root := sbom.NewNode()
+		root.Id = "root"
+		root.Name = "test-app"
+		doc.NodeList.Nodes = append(doc.NodeList.Nodes, root)
+		doc.NodeList.RootElements = append(doc.NodeList.RootElements, root.Id)
+
+		err := enrichProtobomLicensesScanLocal(context.Background(), doc, ws)
+		if err != nil {
+			t.Errorf("expected no error, got %v", err)
+		}
+		if len(root.Licenses) > 0 {
+			t.Errorf("expected no licenses without LICENSE file, got %v", root.Licenses)
+		}
+	})
+}
+
+func Test_enrichProtobomLicensesScanWithFetcher_nilHandling(t *testing.T) {
+	t.Run("handles nil document", func(t *testing.T) {
+		fetcher := &remoteFetcher{Timeout: time.Second}
+		err := enrichProtobomLicensesScanWithFetcher(context.Background(), nil, fetcher)
+		if err != nil {
+			t.Errorf("expected no error for nil document, got %v", err)
+		}
+	})
+
+	t.Run("handles nil fetcher", func(t *testing.T) {
+		doc := sbom.NewDocument()
+		err := enrichProtobomLicensesScanWithFetcher(context.Background(), doc, nil)
+		if err != nil {
+			t.Errorf("expected no error for nil fetcher, got %v", err)
+		}
+	})
+
+	t.Run("skips nodes with existing licenses", func(t *testing.T) {
+		doc := sbom.NewDocument()
+		node := sbom.NewNode()
+		node.Id = "pkg:npm/test@1.0.0"
+		node.Type = sbom.Node_PACKAGE
+		node.Name = "test"
+		node.Version = "1.0.0"
+		node.Licenses = []string{"MIT"} // Already has license
+		node.Identifiers = map[int32]string{
+			int32(sbom.SoftwareIdentifierType_PURL): "pkg:npm/test@1.0.0",
+		}
+		doc.NodeList.Nodes = append(doc.NodeList.Nodes, node)
+
+		fetcher := &remoteFetcher{Timeout: time.Second}
+		err := enrichProtobomLicensesScanWithFetcher(context.Background(), doc, fetcher)
+		if err != nil {
+			t.Errorf("unexpected error: %v", err)
+		}
+		// License should remain unchanged
+		if len(node.Licenses) != 1 || node.Licenses[0] != "MIT" {
+			t.Errorf("license should not have changed, got %v", node.Licenses)
+		}
+	})
+}
+
+func Test_buildProtobomDocument_includesToolMetadata(t *testing.T) {
+	ws := workspace.NewMemory()
+	defer ws.Close()
+
+	doc, err := buildProtobomDocument(context.Background(), ws, "https://example.com/repo", "HEAD", "test-doc", nil, nil)
+	if err != nil {
+		t.Fatalf("buildProtobomDocument: %v", err)
+	}
+
+	// Verify tool metadata
+	if doc.Metadata == nil {
+		t.Fatal("expected metadata to be set")
+	}
+	if len(doc.Metadata.Tools) == 0 {
+		t.Fatal("expected at least one tool in metadata")
+	}
+
+	foundDeputy := false
+	for _, tool := range doc.Metadata.Tools {
+		if tool.Name == "deputy" {
+			foundDeputy = true
+			if tool.Vendor != "github.com/picatz/deputy" {
+				t.Errorf("expected vendor 'github.com/picatz/deputy', got %q", tool.Vendor)
+			}
+			// Version should be set (may be empty in test context)
+			break
+		}
+	}
+	if !foundDeputy {
+		t.Error("expected 'deputy' tool in metadata")
+	}
+}
+
+func Test_buildProtobomDocument_setsDocumentName(t *testing.T) {
+	ws := workspace.NewMemory()
+	defer ws.Close()
+
+	doc, err := buildProtobomDocument(context.Background(), ws, "https://example.com/repo", "HEAD", "my-custom-name", nil, nil)
+	if err != nil {
+		t.Fatalf("buildProtobomDocument: %v", err)
+	}
+
+	if doc.Metadata.Name != "my-custom-name" {
+		t.Errorf("expected document name 'my-custom-name', got %q", doc.Metadata.Name)
+	}
+}
+
+func Test_buildProtobomDocument_setsTimestamp(t *testing.T) {
+	ws := workspace.NewMemory()
+	defer ws.Close()
+
+	before := time.Now().Unix()
+	doc, err := buildProtobomDocument(context.Background(), ws, "https://example.com/repo", "HEAD", "test", nil, nil)
+	if err != nil {
+		t.Fatalf("buildProtobomDocument: %v", err)
+	}
+	after := time.Now().Unix()
+
+	if doc.Metadata.Date == nil {
+		t.Fatal("expected metadata date to be set")
+	}
+	ts := doc.Metadata.Date.AsTime().Unix()
+	if ts < before || ts > after {
+		t.Errorf("timestamp %d not in expected range [%d, %d]", ts, before, after)
+	}
+}

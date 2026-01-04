@@ -4,8 +4,8 @@ import (
 	"net/http"
 	"testing"
 
-	"github.com/picatz/deputy/internal/cache"
-	"github.com/picatz/deputy/internal/diskcache"
+	"github.com/picatz/deputy/internal/cache/disk"
+	"github.com/picatz/deputy/internal/cache/memory"
 )
 
 // WithLicenseHTTPClient overrides the HTTP client used for remote license lookups during tests.
@@ -30,8 +30,8 @@ func WithLicenseEndpoints(goProxy, crates, packagist, pub, cocoapods, hexpm stri
 // ResetLicenseCachesForTest clears memoization and on-disk caches for deterministic tests.
 func ResetLicenseCachesForTest(t *testing.T) {
 	t.Helper()
-	restore := diskcache.SetBaseDirForTest(t.TempDir())
+	restore := disk.SetBaseDirForTest(t.TempDir())
 	t.Cleanup(restore)
-	registryLicenseMemo = cache.NewTTLCache[string, []string](licenseMemoMaxItems, licenseMemoTTL)
-	remoteLicenseMemo = cache.NewTTLCache[string, []string](licenseMemoMaxItems, licenseMemoTTL)
+	registryLicenseMemo = memory.NewTTLCache[string, []string](licenseMemoMaxItems, licenseMemoTTL)
+	remoteLicenseMemo = memory.NewTTLCache[string, []string](licenseMemoMaxItems, licenseMemoTTL)
 }

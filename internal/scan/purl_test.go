@@ -4,17 +4,17 @@ import (
 	"context"
 	"testing"
 
-	analysis "github.com/picatz/deputy/internal/analysis"
+	"github.com/picatz/deputy/internal/analysis/osv"
 	"github.com/picatz/deputy/internal/targets"
 )
 
 func TestScanPURL(t *testing.T) {
 	t.Parallel()
 
-	var captured []analysis.PkgInput
+	var captured []osv.PkgInput
 	svc := NewServiceWithConfig(&ServiceConfig{
-		QueryVulnerabilities: func(ctx context.Context, client analysis.OSVClient, inputs []analysis.PkgInput) ([]analysis.Vulnerability, error) {
-			captured = append([]analysis.PkgInput(nil), inputs...)
+		QueryVulnerabilities: func(ctx context.Context, client osv.Client, inputs []osv.PkgInput) ([]osv.Vulnerability, error) {
+			captured = append([]osv.PkgInput(nil), inputs...)
 			return nil, nil
 		},
 	})

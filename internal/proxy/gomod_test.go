@@ -12,7 +12,7 @@ import (
 	"strings"
 	"testing"
 
-	analysis "github.com/picatz/deputy/internal/analysis"
+	"github.com/picatz/deputy/internal/analysis/osv"
 	"github.com/picatz/deputy/internal/policy"
 )
 
@@ -159,9 +159,9 @@ func TestGoModuleHandlerBlocksCriticalVulnerability(t *testing.T) {
 	}
 	handler.lookups.osvClient = nil
 	blockedModule := "github.com/example/vuln"
-	handler.lookups.vulnLookup = func(ctx context.Context, module, version string) ([]analysis.Vulnerability, error) {
+	handler.lookups.vulnLookup = func(ctx context.Context, module, version string) ([]osv.Vulnerability, error) {
 		if module == blockedModule {
-			return []analysis.Vulnerability{{ID: "OSV-CRIT", Severity: "CRITICAL", Package: module, Version: version}}, nil
+			return []osv.Vulnerability{{ID: "OSV-CRIT", Severity: "CRITICAL", Package: module, Version: version}}, nil
 		}
 		return nil, nil
 	}

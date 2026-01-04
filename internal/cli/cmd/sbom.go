@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/picatz/deputy/internal/cli/flags"
+	"github.com/picatz/deputy/internal/policy"
 	sbomx "github.com/picatz/deputy/internal/sbom"
 	"github.com/picatz/deputy/internal/targets"
 	ui "github.com/picatz/deputy/internal/ui"
@@ -20,7 +21,8 @@ func AddSBOMCommand(root *cobra.Command) {
 		ref, format, outPath, name, licenseSource string
 		source, platform                          string
 		ecos                                      []string
-		enrichLicenses, showContext               bool
+		enrichLicenses, showContext, enrich       bool
+		enrichConcurrency                         int
 		policyPaths                               []string
 	)
 
@@ -53,11 +55,38 @@ Docker and OCI registries, local Docker daemon images, and tarball archives.
 
 LICENSE ENRICHMENT:
 Optionally enriches SBOM entries with license information from multiple sources:
-• deps.dev API: Fast, comprehensive license database
-• Local scanning: Analyzes LICENSE files in source code
-• Combined approach: Maximum coverage using both methods`,
-		Args: cobra.MaximumNArgs(1),
+
+  --license-source depsdev (default):
+    Uses the deps.dev API for fast, comprehensive license lookups across
+    Go, npm, Cargo, Maven, PyPI, NuGet, and RubyGems ecosystems.
+
+  --license-source scan:
+    Multi-source license detection with ecosystem-specific registry lookups:
+    • Local workspace: Scans LICENSE, COPYING, COPYRIGHT files in source
+    • Go modules: Downloads from proxy.golang.org and scans archives
+    • Rust crates: Queries crates.io API for license metadata
+    • PHP packages: Queries Packagist API for composer packages
+    • Dart packages: Queries pub.dev API for Flutter/Dart packages
+    • CocoaPods: Queries CocoaPods trunk for iOS/macOS packages
+    • Hex.pm: Queries Hex.pm API for Erlang/Elixir packages
+    • GitHub: Fetches LICENSE files directly from repositories
+    • Container images: Extracts org.opencontainers.image.licenses labels
+
+  --license-source both:
+    Combines deps.dev API lookups with registry scanning for maximum coverage.
+    Uses deps.dev as primary source, then fills gaps with registry scans.
+
+METADATA ENRICHMENT:
+The --enrich flag adds comprehensive metadata from deps.dev:
+• CPE identifiers: Common Platform Enumeration for vulnerability correlation
+• Supplier information: Package maintainer/owner from repository metadata
+• External references: VCS URLs, homepage, issue tracker, documentation
+• Publish dates: When each package version was released`,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			// Validate args (cobra.MaximumNArgs moved here to allow subcommands)
+			if len(args) > 1 {
+				return fmt.Errorf("accepts at most 1 arg(s), received %d", len(args))
+			}
 			ctx := cmd.Context()
 
 			repoPath := ""
@@ -111,10 +140,12 @@ Optionally enriches SBOM entries with license information from multiple sources:
 					targetOpts["platform"] = platform
 				}
 				result, err = sbomx.GenerateImage(ctx, target, targetOpts, sbomx.Options{
-					Ecosystems:     ecos,
-					Name:           name,
-					EnrichLicenses: enrichLicenses,
-					LicenseSource:  licenseSource,
+					Ecosystems:        ecos,
+					Name:              name,
+					EnrichLicenses:    enrichLicenses,
+					LicenseSource:     licenseSource,
+					Enrich:            enrich,
+					EnrichConcurrency: enrichConcurrency,
 				})
 				if err != nil {
 					return fmt.Errorf("failed to generate SBOM: %w", err)
@@ -124,11 +155,13 @@ Optionally enriches SBOM entries with license information from multiple sources:
 					ref = "HEAD"
 				}
 				result, err = sbomx.Generate(ctx, repoPath, sbomx.Options{
-					Ref:            ref,
-					Ecosystems:     ecos,
-					Name:           name,
-					EnrichLicenses: enrichLicenses,
-					LicenseSource:  licenseSource,
+					Ref:               ref,
+					Ecosystems:        ecos,
+					Name:              name,
+					EnrichLicenses:    enrichLicenses,
+					LicenseSource:     licenseSource,
+					Enrich:            enrich,
+					EnrichConcurrency: enrichConcurrency,
 				})
 				if err != nil {
 					return fmt.Errorf("failed to generate SBOM: %w", err)
@@ -293,10 +326,16 @@ PIPELINE INTEGRATION:
 	cmd.Flags().StringVar(&name, "name", "", "Optional document name (defaults to repo@ref or image reference)")
 	cmd.Flags().BoolVar(&enrichLicenses, "enrich-licenses", false, "Enrich SBOM nodes with licenses (optional)")
 	cmd.Flags().StringVar(&licenseSource, "license-source", "depsdev", "License enrichment source: depsdev | scan | both")
+	cmd.Flags().BoolVar(&enrich, "enrich", false, "Enrich SBOM with CPEs, external refs, suppliers, and publish dates from deps.dev")
+	cmd.Flags().IntVar(&enrichConcurrency, "enrich-concurrency", 10, "Max concurrent deps.dev requests during enrichment")
 	cmd.Flags().StringVar(&source, "source", "", "Target source override: auto, git, dir, image, remote, docker-daemon, tarball")
 	cmd.Flags().StringVar(&platform, "platform", "", "Container image platform (os/arch[/variant])")
 	cmd.Flags().BoolVar(&showContext, "show-context", false, "Print a context header to stderr with repo or image details")
 	cmd.Flags().StringArrayVar(&policyPaths, "policy", nil, "Path to CEL policy files or bundles to evaluate against SBOM results (repeatable)")
+
+	// Add subcommands
+	addSBOMEnrichCommand(cmd)
+	addSBOMDiffCommand(cmd)
 
 	root.AddCommand(cmd)
 }
@@ -315,7 +354,7 @@ func runSBOMPolicies(ctx context.Context, policyPaths []string, result sbomx.Res
 	if image := buildScanImagePayload(result.Target); image != nil {
 		reportMap["image"] = image
 	}
-	if _, err := evaluatePoliciesForCommand(ctx, policyPaths, reportMap, "sbom", "sbom_report", errW); err != nil {
+	if _, err := evaluatePoliciesForCommand(ctx, policyPaths, reportMap, "sbom", policy.EntrypointSBOMReport, errW); err != nil {
 		return err
 	}
 	repo := strings.TrimSpace(result.RepoPath)
@@ -345,7 +384,7 @@ func runSBOMPolicies(ctx context.Context, policyPaths []string, result sbomx.Res
 		if image := reportMap["image"]; image != nil {
 			payload["image"] = image
 		}
-		if _, err := evaluatePoliciesForCommand(ctx, policyPaths, payload, "sbom", "sbom_component", errW); err != nil {
+		if _, err := evaluatePoliciesForCommand(ctx, policyPaths, payload, "sbom", policy.EntrypointSBOMComponent, errW); err != nil {
 			return err
 		}
 	}
@@ -424,4 +463,40 @@ func emitSBOMContext(w io.Writer, result sbomx.Result) {
 	if origin != repo {
 		fmt.Fprintf(w, "  Origin: %s\n", origin)
 	}
+
+	// Show completeness scoring if document is available
+	emitSBOMCompleteness(w, result)
+}
+
+// emitSBOMCompleteness prints SBOM completeness scoring information.
+func emitSBOMCompleteness(w io.Writer, result sbomx.Result) {
+	if w == nil || result.Document == nil {
+		return
+	}
+
+	score := sbomx.CalculateCompleteness(result.Document)
+	fmt.Fprintln(w)
+	fmt.Fprintf(w, "%s\n", ui.StyleHeader.Render("SBOM Completeness"))
+	fmt.Fprintf(w, "  Score:        %.1f%% (%d components)\n",
+		score.Score*100, score.TotalComponents)
+
+	// Show NTIA compliance status
+	if score.NTIACompliant {
+		fmt.Fprintf(w, "  NTIA Status:  Compliant (all minimum elements present)\n")
+	} else {
+		fmt.Fprintf(w, "  NTIA Status:  Non-compliant\n")
+		if len(score.NTIAMissing) > 0 {
+			fmt.Fprintf(w, "  Missing:      %s\n", strings.Join(score.NTIAMissing, ", "))
+		}
+	}
+
+	// Show field coverage breakdown
+	fmt.Fprintf(w, "  Coverage:\n")
+	fmt.Fprintf(w, "    - PURL:       %3.0f%%\n", score.HasPURL*100)
+	fmt.Fprintf(w, "    - Version:    %3.0f%%\n", score.HasVersion*100)
+	fmt.Fprintf(w, "    - Licenses:   %3.0f%%\n", score.HasLicenses*100)
+	fmt.Fprintf(w, "    - Hashes:     %3.0f%%\n", score.HasHashes*100)
+	fmt.Fprintf(w, "    - CPE:        %3.0f%%\n", score.HasCPE*100)
+	fmt.Fprintf(w, "    - Supplier:   %3.0f%%\n", score.HasSupplier*100)
+	fmt.Fprintf(w, "    - Ext. Refs:  %3.0f%%\n", score.HasExternalRefs*100)
 }

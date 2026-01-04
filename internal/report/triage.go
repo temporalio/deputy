@@ -79,7 +79,7 @@ func aggregatePackages(cons []vulnerability.Consolidated) []TriagePackageSummary
 			info.imports = mergeAffectedImports(info.imports, v.AffectedImports)
 		}
 		if len(v.DatabaseSpecific) > 0 {
-			info.dbSpecific = mergeStringMap(info.dbSpecific, v.DatabaseSpecific)
+			info.dbSpecific = vulnerability.MergeStringMap(info.dbSpecific, v.DatabaseSpecific)
 		}
 		if info.counts == nil {
 			info.counts = map[string]int{}

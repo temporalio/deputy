@@ -12,6 +12,7 @@ import (
 	"github.com/go-git/go-git/v5"
 	"github.com/google/osv-scalibr/extractor"
 	"github.com/picatz/deputy/internal/compare"
+	"github.com/picatz/deputy/internal/dependency"
 	gitx "github.com/picatz/deputy/internal/gitutil"
 	"github.com/picatz/deputy/internal/otel"
 	"github.com/picatz/deputy/internal/output"
@@ -693,7 +694,7 @@ func renderContainerPackageChanges(w io.Writer, changes []compare.ImagePackageCh
 	fmt.Fprintln(w)
 }
 
-func formatLayerInfo(ld *compare.LayerDetails) string {
+func formatLayerInfo(ld *dependency.LayerDetails) string {
 	if ld == nil {
 		return ""
 	}

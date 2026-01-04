@@ -12,7 +12,7 @@ import (
 	"strings"
 	"testing"
 
-	analysis "github.com/picatz/deputy/internal/analysis"
+	"github.com/picatz/deputy/internal/analysis/osv"
 )
 
 func writeRubyBundle(t *testing.T, dir, name, when, reason, action string) string {
@@ -70,8 +70,8 @@ func TestRubyGemsHandlerBlocksVulnerability(t *testing.T) {
 		t.Fatalf("handler: %v", err)
 	}
 	handler.lookups.osvClient = nil
-	handler.lookups.vulnLookup = func(ctx context.Context, name, version string) ([]analysis.Vulnerability, error) {
-		return []analysis.Vulnerability{{ID: "OSV-crit", Severity: "CRITICAL", Package: name, Version: version}}, nil
+	handler.lookups.vulnLookup = func(ctx context.Context, name, version string) ([]osv.Vulnerability, error) {
+		return []osv.Vulnerability{{ID: "OSV-crit", Severity: "CRITICAL", Package: name, Version: version}}, nil
 	}
 	resp := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/downloads/rails-7.1.0.gem", nil)

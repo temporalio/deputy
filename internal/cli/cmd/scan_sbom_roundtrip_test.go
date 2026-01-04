@@ -15,7 +15,7 @@ import (
 	"github.com/google/go-containerregistry/pkg/v1/empty"
 	"github.com/google/go-containerregistry/pkg/v1/mutate"
 	"github.com/google/go-containerregistry/pkg/v1/tarball"
-	analysis "github.com/picatz/deputy/internal/analysis"
+	"github.com/picatz/deputy/internal/analysis/osv"
 	sbomx "github.com/picatz/deputy/internal/sbom"
 	"github.com/picatz/deputy/internal/scan"
 )
@@ -49,10 +49,10 @@ func TestSBOMImageRoundTrip(t *testing.T) {
 		t.Fatal("expected packages parsed from image SBOM")
 	}
 
-	var calls [][]analysis.PkgInput
+	var calls [][]osv.PkgInput
 	svc := scan.NewServiceWithConfig(&scan.ServiceConfig{
-		QueryVulnerabilities: func(ctx context.Context, client analysis.OSVClient, inputs []analysis.PkgInput) ([]analysis.Vulnerability, error) {
-			copied := append([]analysis.PkgInput(nil), inputs...)
+		QueryVulnerabilities: func(ctx context.Context, client osv.Client, inputs []osv.PkgInput) ([]osv.Vulnerability, error) {
+			copied := append([]osv.PkgInput(nil), inputs...)
 			calls = append(calls, copied)
 			return nil, nil
 		},
@@ -142,7 +142,7 @@ func writeTar(t *testing.T, path string, files map[string]string) {
 	}
 }
 
-func inputKeys(inputs []analysis.PkgInput) []string {
+func inputKeys(inputs []osv.PkgInput) []string {
 	out := make([]string, 0, len(inputs))
 	for _, in := range inputs {
 		key := strings.TrimSpace(in.PURL)

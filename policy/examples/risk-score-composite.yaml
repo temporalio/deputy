@@ -1,0 +1,71 @@
+# Composite risk scoring policy using CVSS severity, EPSS, and KEV status.
+# Creates a tiered response based on multiple risk indicators.
+#
+# Requires: --enrich flag to populate KEV/EPSS data
+#
+# Usage:
+#   deputy scan --enrich --policy policy/examples/risk-score-composite.yaml
+#
+# Risk factors considered:
+#   1. CVSS severity (CRITICAL, HIGH, MEDIUM, LOW)
+#   2. EPSS score (probability of exploitation)
+#   3. KEV status (known to be actively exploited)
+#   4. Fix availability
+#
+policies:
+  - name: composite-risk-assessment
+    entrypoints: [scan_vulnerability]
+    rules:
+      # Highest priority: Known Exploited + Critical severity
+      - action: deny
+        when: |
+          has(vulnerability.inKEV) &&
+          vulnerability.inKEV == true &&
+          vulnerability.severity == "CRITICAL"
+        reason: "Critical severity + actively exploited (KEV)"
+
+      # High priority: Known Exploited (any severity)
+      - action: deny
+        when: |
+          has(vulnerability.inKEV) &&
+          vulnerability.inKEV == true
+        reason: "Actively exploited vulnerability (in KEV catalog)"
+
+      # High priority: Very high EPSS + Critical severity
+      - action: deny
+        when: |
+          has(vulnerability.epss) &&
+          vulnerability.epss >= 0.5 &&
+          vulnerability.severity in ["CRITICAL", "HIGH"]
+        reason: "High/Critical severity with very high exploitation probability (EPSS >= 50%)"
+
+      # Medium priority: High EPSS score
+      - action: deny
+        when: |
+          has(vulnerability.epss) &&
+          vulnerability.epss >= 0.1 &&
+          vulnerability.severity == "CRITICAL"
+        reason: "Critical severity with elevated exploitation probability (EPSS >= 10%)"
+
+      # Standard: Critical without fix
+      - action: deny
+        when: |
+          vulnerability.severity == "CRITICAL" &&
+          (!has(vulnerability.fixedVersions) || size(vulnerability.fixedVersions) == 0)
+        reason: "Critical vulnerability without available fix"
+
+      # Warning: Critical with fix available
+      - action: warn
+        when: |
+          vulnerability.severity == "CRITICAL" &&
+          has(vulnerability.fixedVersions) &&
+          size(vulnerability.fixedVersions) > 0
+        reason: "Critical vulnerability (fix available)"
+
+      # Warning: High severity + elevated EPSS
+      - action: warn
+        when: |
+          vulnerability.severity == "HIGH" &&
+          has(vulnerability.epss) &&
+          vulnerability.epss >= 0.05
+        reason: "High severity with elevated exploitation probability"

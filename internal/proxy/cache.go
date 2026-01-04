@@ -8,8 +8,8 @@ import (
 	"strings"
 	"time"
 
-	analysis "github.com/picatz/deputy/internal/analysis"
-	"github.com/picatz/deputy/internal/cache"
+	"github.com/picatz/deputy/internal/analysis/osv"
+	"github.com/picatz/deputy/internal/cache/memory"
 	"github.com/picatz/deputy/internal/license"
 	"github.com/picatz/deputy/internal/policy"
 	"go.opentelemetry.io/otel/trace"
@@ -127,9 +127,9 @@ var cacheConfig = DefaultCacheConfig()
 // OSVCache defines the interface for caching OSV vulnerability lookups.
 // This allows dependency injection for testing and custom cache implementations.
 type OSVCache interface {
-	Get(key string) ([]analysis.Vulnerability, bool)
-	Set(key string, value []analysis.Vulnerability)
-	Stats() cache.Stats
+	Get(key string) ([]osv.Vulnerability, bool)
+	Set(key string, value []osv.Vulnerability)
+	Stats() memory.Stats
 }
 
 // LicenseCache defines the interface for caching license lookups.
@@ -137,7 +137,7 @@ type OSVCache interface {
 type LicenseCache interface {
 	Get(key string) ([]string, bool)
 	Set(key string, value []string)
-	Stats() cache.Stats
+	Stats() memory.Stats
 }
 
 // ImageScanResult stores cached scan data for a container image.
@@ -153,40 +153,40 @@ type ImageScanResult struct {
 type ImageScanCache interface {
 	Get(key string) (ImageScanResult, bool)
 	Set(key string, value ImageScanResult)
-	Stats() cache.Stats
+	Stats() memory.Stats
 }
 
 // defaultOSVCache is the package-level default cache for OSV lookups.
 // Use NewOSVCache() to create isolated caches for testing.
-var defaultOSVCache OSVCache = cache.NewTTLCache[string, []analysis.Vulnerability](cacheConfig.OSVCacheMaxItems, cacheConfig.OSVCacheTTL)
+var defaultOSVCache OSVCache = memory.NewTTLCache[string, []osv.Vulnerability](cacheConfig.OSVCacheMaxItems, cacheConfig.OSVCacheTTL)
 
 // defaultLicenseCache is the package-level default cache for license lookups.
 // Use NewLicenseCache() to create isolated caches for testing.
-var defaultLicenseCache LicenseCache = cache.NewTTLCache[string, []string](cacheConfig.LicenseCacheMaxItems, cacheConfig.LicenseCacheTTL)
+var defaultLicenseCache LicenseCache = memory.NewTTLCache[string, []string](cacheConfig.LicenseCacheMaxItems, cacheConfig.LicenseCacheTTL)
 
 // defaultImageScanCache is the package-level default cache for image scan results.
 // Use NewImageScanCache() to create isolated caches for testing.
-var defaultImageScanCache ImageScanCache = cache.NewTTLCache[string, ImageScanResult](cacheConfig.ImageScanCacheMaxItems, cacheConfig.ImageScanCacheTTL)
+var defaultImageScanCache ImageScanCache = memory.NewTTLCache[string, ImageScanResult](cacheConfig.ImageScanCacheMaxItems, cacheConfig.ImageScanCacheTTL)
 
 // NewOSVCache creates a new isolated OSV cache instance.
 // This is useful for testing or when you need separate cache instances.
 func NewOSVCache() OSVCache {
 	cfg := DefaultCacheConfig()
-	return cache.NewTTLCache[string, []analysis.Vulnerability](cfg.OSVCacheMaxItems, cfg.OSVCacheTTL)
+	return memory.NewTTLCache[string, []osv.Vulnerability](cfg.OSVCacheMaxItems, cfg.OSVCacheTTL)
 }
 
 // NewLicenseCache creates a new isolated license cache instance.
 // This is useful for testing or when you need separate cache instances.
 func NewLicenseCache() LicenseCache {
 	cfg := DefaultCacheConfig()
-	return cache.NewTTLCache[string, []string](cfg.LicenseCacheMaxItems, cfg.LicenseCacheTTL)
+	return memory.NewTTLCache[string, []string](cfg.LicenseCacheMaxItems, cfg.LicenseCacheTTL)
 }
 
 // NewImageScanCache creates a new isolated image scan cache instance.
 // This is useful for testing or when you need separate cache instances.
 func NewImageScanCache() ImageScanCache {
 	cfg := DefaultCacheConfig()
-	return cache.NewTTLCache[string, ImageScanResult](cfg.ImageScanCacheMaxItems, cfg.ImageScanCacheTTL)
+	return memory.NewTTLCache[string, ImageScanResult](cfg.ImageScanCacheMaxItems, cfg.ImageScanCacheTTL)
 }
 
 // getOSVCache returns the provided cache or the default if nil.
@@ -281,7 +281,7 @@ func digestResolutionCacheKey(registry, repository, tag string) string {
 type DigestResolutionCache interface {
 	Get(key string) (string, bool)
 	Set(key string, value string)
-	Stats() cache.Stats
+	Stats() memory.Stats
 }
 
 // defaultDigestResolutionCacheTTL is shorter than image scan cache TTL
@@ -296,14 +296,14 @@ const defaultDigestResolutionCacheMaxItems = 4096
 const digestResolutionFailureSentinel = "<resolution-failed>"
 
 // defaultDigestResolutionCache is the package-level default cache for digest resolution.
-var defaultDigestResolutionCache DigestResolutionCache = cache.NewTTLCache[string, string](
+var defaultDigestResolutionCache DigestResolutionCache = memory.NewTTLCache[string, string](
 	defaultDigestResolutionCacheMaxItems,
 	defaultDigestResolutionCacheTTL,
 )
 
 // NewDigestResolutionCache creates a new isolated digest resolution cache instance.
 func NewDigestResolutionCache() DigestResolutionCache {
-	return cache.NewTTLCache[string, string](
+	return memory.NewTTLCache[string, string](
 		defaultDigestResolutionCacheMaxItems,
 		defaultDigestResolutionCacheTTL,
 	)
@@ -357,7 +357,7 @@ func GetCachedDigestResolution(c DigestResolutionCache, registry, repository, ta
 
 // cachedOSVLookup queries the OSV database for vulnerabilities, using a local cache
 // to avoid redundant network requests for recently-queried packages.
-func cachedOSVLookup(ctx context.Context, client analysis.OSVClient, ecosystem, name, version string) ([]analysis.Vulnerability, error) {
+func cachedOSVLookup(ctx context.Context, client osv.Client, ecosystem, name, version string) ([]osv.Vulnerability, error) {
 	return cachedOSVLookupWithCache(ctx, client, defaultOSVCache, ecosystem, name, version)
 }
 
@@ -365,7 +365,7 @@ func cachedOSVLookup(ctx context.Context, client analysis.OSVClient, ecosystem, 
 // This allows tests to inject isolated cache instances.
 //
 // Span enrichment: Records cache access events (hit/miss) on the current span.
-func cachedOSVLookupWithCache(ctx context.Context, client analysis.OSVClient, c OSVCache, ecosystem, name, version string) ([]analysis.Vulnerability, error) {
+func cachedOSVLookupWithCache(ctx context.Context, client osv.Client, c OSVCache, ecosystem, name, version string) ([]osv.Vulnerability, error) {
 	span := trace.SpanFromContext(ctx)
 	osvCache := getOSVCache(c)
 	key := pkgCacheKey(ecosystem, name, version)
@@ -376,12 +376,12 @@ func cachedOSVLookupWithCache(ctx context.Context, client analysis.OSVClient, c 
 	}
 	RecordOSVCacheMiss(ctx, span, key)
 	slog.Debug("osv cache miss", "package", name, "version", version, "ecosystem", ecosystem)
-	inputs := []analysis.PkgInput{{
+	inputs := []osv.PkgInput{{
 		Name:      name,
 		Version:   version,
 		Ecosystem: ecosystem,
 	}}
-	vulns, err := analysis.QueryOSVBatch(ctx, client, inputs)
+	vulns, err := osv.QueryOSVBatch(ctx, client, inputs)
 	if err != nil {
 		slog.Debug("osv query failed", "package", name, "version", version, "ecosystem", ecosystem, "error", err)
 		return nil, err
@@ -421,8 +421,8 @@ func cachedLicenseLookupWithCache(ctx context.Context, c LicenseCache, ecosystem
 // handlerLookups holds the lookup functions for vulnerability and license data.
 // This allows dependency injection for testing and custom lookup strategies.
 type handlerLookups struct {
-	osvClient     analysis.OSVClient
-	vulnLookup    func(context.Context, string, string) ([]analysis.Vulnerability, error)
+	osvClient     osv.Client
+	vulnLookup    func(context.Context, string, string) ([]osv.Vulnerability, error)
 	licenseLookup func(context.Context, string, string) ([]string, error)
 }
 
@@ -432,18 +432,18 @@ type handlerLookups struct {
 // Span enrichment: Records the vulnerability count on the current span.
 func vulnerabilitiesToMaps(ctx context.Context, lookups handlerLookups, ecosystem, name, version string) []map[string]any {
 	span := trace.SpanFromContext(ctx)
-	var vulns []analysis.Vulnerability
+	var vulns []osv.Vulnerability
 	var err error
 	switch {
 	case lookups.vulnLookup != nil:
 		vulns, err = lookups.vulnLookup(ctx, name, version)
 	case lookups.osvClient != nil:
-		inputs := []analysis.PkgInput{{
+		inputs := []osv.PkgInput{{
 			Name:      name,
 			Version:   version,
 			Ecosystem: ecosystem,
 		}}
-		vulns, err = analysis.QueryOSVBatch(ctx, lookups.osvClient, inputs)
+		vulns, err = osv.QueryOSVBatch(ctx, lookups.osvClient, inputs)
 	default:
 		return nil
 	}

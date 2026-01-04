@@ -21,6 +21,7 @@ import (
 	"github.com/picatz/deputy/internal/license"
 	"github.com/picatz/deputy/internal/otel"
 	"github.com/picatz/deputy/internal/output"
+	"github.com/picatz/deputy/internal/policy"
 	"github.com/picatz/deputy/internal/report"
 	"github.com/picatz/deputy/internal/report/render"
 	"github.com/picatz/deputy/internal/repository"
@@ -572,7 +573,7 @@ func runDiffAnalysis(ctx context.Context, service *scan.Service, repoPath, baseR
 		if len(all) > 0 {
 			fmt.Fprintln(outW)
 			fmt.Fprintln(outW, ui.StyleDowngraded.Render("∴ ")+ui.StyleHeader.Render("Vulnerabilities"))
-			render.RenderVulnerabilityList(outW, changedCons, render.VulnerabilityDisplayOptions{})
+			render.VulnerabilityList(outW, changedCons, render.VulnerabilityDisplayOptions{})
 			if showUnchangedEff && len(unchangedVulns) > 0 {
 				// Visual separator for unchanged dependencies, include reason if any
 				title := "Unchanged dependencies"
@@ -582,7 +583,7 @@ func runDiffAnalysis(ctx context.Context, service *scan.Service, repoPath, baseR
 				sep := ui.StyleDim.Render(strings.Repeat("─", 3) + " " + title + " " + strings.Repeat("─", 3))
 				fmt.Fprintln(outW)
 				fmt.Fprintln(outW, sep)
-				render.RenderVulnerabilityList(outW, unchangedCons, render.VulnerabilityDisplayOptions{})
+				render.VulnerabilityList(outW, unchangedCons, render.VulnerabilityDisplayOptions{})
 			}
 		}
 		allResult, allCons := resultFromReportVulnerabilities(all)
@@ -598,7 +599,7 @@ func runDiffAnalysis(ctx context.Context, service *scan.Service, repoPath, baseR
 				len(unchangedVulns),
 				ui.StyleSymbol.Render("--show-unchanged"))
 		} else {
-			render.RenderVulnerabilitySummaryAndActions(outW, allCons, allResult.Stats)
+			render.VulnerabilitySummaryAndActions(outW, allCons, allResult.Stats)
 		}
 		otel.SetSpanOK(span)
 		return nil
@@ -986,7 +987,7 @@ func runDiffPolicies(ctx context.Context, policyPaths []string, report DiffPolic
 	if err != nil {
 		return err
 	}
-	if _, err := evaluatePoliciesForCommand(ctx, policyPaths, reportMap, "diff", "diff_report", errW); err != nil {
+	if _, err := evaluatePoliciesForCommand(ctx, policyPaths, reportMap, "diff", policy.EntrypointDiffReport, errW); err != nil {
 		return err
 	}
 	for _, change := range report.Changes {
@@ -1000,7 +1001,7 @@ func runDiffPolicies(ctx context.Context, policyPaths []string, report DiffPolic
 			"targetRef": report.TargetRef,
 			"change":    changeMap,
 		}
-		if _, err := evaluatePoliciesForCommand(ctx, policyPaths, payload, "diff", "diff_dependency_change", errW); err != nil {
+		if _, err := evaluatePoliciesForCommand(ctx, policyPaths, payload, "diff", policy.EntrypointDiffDependencyChange, errW); err != nil {
 			return err
 		}
 	}
@@ -1015,7 +1016,7 @@ func runDiffPolicies(ctx context.Context, policyPaths []string, report DiffPolic
 			"targetRef":     report.TargetRef,
 			"vulnerability": vulnMap,
 		}
-		if _, err := evaluatePoliciesForCommand(ctx, policyPaths, payload, "diff", "diff_vulnerability", errW); err != nil {
+		if _, err := evaluatePoliciesForCommand(ctx, policyPaths, payload, "diff", policy.EntrypointDiffVulnerability, errW); err != nil {
 			return err
 		}
 	}

@@ -6,6 +6,7 @@ import (
 
 	"github.com/google/osv-scalibr/extractor"
 	"github.com/picatz/deputy/internal/compare"
+	"github.com/picatz/deputy/internal/dependency"
 	"github.com/picatz/deputy/internal/vulnerability"
 )
 
@@ -191,15 +192,15 @@ func compareImagePackages(baseResult, targetResult *Result) []compare.ImagePacka
 	return changes
 }
 
-func buildPackageLayerMap(result *Result) map[string]*compare.LayerDetails {
-	layerMap := make(map[string]*compare.LayerDetails)
+func buildPackageLayerMap(result *Result) map[string]*dependency.LayerDetails {
+	layerMap := make(map[string]*dependency.LayerDetails)
 
 	for _, finding := range result.Findings {
 		if finding.LayerDetails == nil {
 			continue
 		}
 		// Each finding is for a single dependency
-		layerMap[finding.Dependency.Name] = &compare.LayerDetails{
+		layerMap[finding.Dependency.Name] = &dependency.LayerDetails{
 			Index:       finding.LayerDetails.Index,
 			DiffID:      finding.LayerDetails.DiffID,
 			ChainID:     finding.LayerDetails.ChainID,
@@ -276,7 +277,7 @@ func buildVulnerabilityChange(
 	changeType compare.VulnChangeType,
 	advisory vulnerability.Advisory,
 	pkgName, baseVersion, targetVersion string,
-	layerDetails *vulnerability.LayerDetails,
+	layerDetails *dependency.LayerDetails,
 ) compare.VulnerabilityChange {
 	change := compare.VulnerabilityChange{
 		ID:            advisoryID,
@@ -330,11 +331,11 @@ func wasFixedByUpgrade(finding vulnerability.Finding, targetResult *Result) bool
 	return false
 }
 
-func convertLayerDetails(ld *vulnerability.LayerDetails) *compare.LayerDetails {
+func convertLayerDetails(ld *dependency.LayerDetails) *dependency.LayerDetails {
 	if ld == nil {
 		return nil
 	}
-	return &compare.LayerDetails{
+	return &dependency.LayerDetails{
 		Index:       ld.Index,
 		DiffID:      ld.DiffID,
 		ChainID:     ld.ChainID,
@@ -437,7 +438,7 @@ func BuildContainerDiffPayload(report *compare.ImageDiffReport) map[string]any {
 	return payload
 }
 
-func layerDetailsToMap(ld *compare.LayerDetails) map[string]any {
+func layerDetailsToMap(ld *dependency.LayerDetails) map[string]any {
 	return map[string]any{
 		"index":         ld.Index,
 		"diff_id":       ld.DiffID,

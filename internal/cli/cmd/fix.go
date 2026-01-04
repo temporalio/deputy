@@ -15,6 +15,7 @@ import (
 	"github.com/picatz/deputy/internal/cli/flags"
 	"github.com/picatz/deputy/internal/otel"
 	"github.com/picatz/deputy/internal/output"
+	"github.com/picatz/deputy/internal/policy"
 	remediation "github.com/picatz/deputy/internal/remediation"
 	"github.com/picatz/deputy/internal/report"
 	"github.com/picatz/deputy/internal/report/render"
@@ -328,7 +329,7 @@ func printFixSummary(w io.Writer, plan remediationPlan) {
 	if !hasCommands {
 		return
 	}
-	render.RenderRemediationCommands(w, plan.Commands, "       ", "         ")
+	render.RemediationCommands(w, plan.Commands, "       ", "         ")
 }
 
 // buildRemediationPlan constructs a remediation plan from the scan result and generated commands.
@@ -418,7 +419,7 @@ func runFixPolicies(ctx context.Context, policyPaths []string, plan remediationP
 	if err != nil {
 		return err
 	}
-	if _, err := evaluatePoliciesForCommand(ctx, policyPaths, planMap, "fix", "fix_plan", errW); err != nil {
+	if _, err := evaluatePoliciesForCommand(ctx, policyPaths, planMap, "fix", policy.EntrypointFixPlan, errW); err != nil {
 		return err
 	}
 	for idx, step := range plan.Commands {
@@ -431,7 +432,7 @@ func runFixPolicies(ctx context.Context, policyPaths []string, plan remediationP
 			"step":  stepMap,
 			"index": idx,
 		}
-		if _, err := evaluatePoliciesForCommand(ctx, policyPaths, payload, "fix", "fix_plan_step", errW); err != nil {
+		if _, err := evaluatePoliciesForCommand(ctx, policyPaths, payload, "fix", policy.EntrypointFixPlanStep, errW); err != nil {
 			return err
 		}
 	}
