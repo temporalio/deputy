@@ -3,6 +3,8 @@ package proxy
 import (
 	"context"
 	"log/slog"
+	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -13,13 +15,114 @@ import (
 	"go.opentelemetry.io/otel/trace"
 )
 
+// Default cache settings. These can be overridden via environment variables:
+//
+//   - DEPUTY_PROXY_OSV_CACHE_TTL: TTL for OSV vulnerability cache (e.g., "10m", "1h")
+//   - DEPUTY_PROXY_OSV_CACHE_SIZE: Maximum items in OSV cache (e.g., "8192")
+//   - DEPUTY_PROXY_LICENSE_CACHE_TTL: TTL for license cache (e.g., "30m")
+//   - DEPUTY_PROXY_LICENSE_CACHE_SIZE: Maximum items in license cache (e.g., "16384")
+//   - DEPUTY_PROXY_IMAGE_CACHE_TTL: TTL for container image scan cache (e.g., "30m")
+//   - DEPUTY_PROXY_IMAGE_CACHE_SIZE: Maximum items in image scan cache (e.g., "1024")
+//   - DEPUTY_PROXY_IMAGE_SCAN_TIMEOUT: Maximum time for container image scans (e.g., "10m")
+//
+// Production deployments with high traffic should increase cache sizes.
+// Long-lived stable environments may benefit from longer TTLs.
 const (
-	proxyOSVCacheTTL      = 10 * time.Minute
-	proxyOSVCacheMaxItems = 8192
+	defaultOSVCacheTTL      = 10 * time.Minute
+	defaultOSVCacheMaxItems = 8192
 
-	proxyLicenseCacheTTL      = 30 * time.Minute
-	proxyLicenseCacheMaxItems = 16384
+	defaultLicenseCacheTTL      = 30 * time.Minute
+	defaultLicenseCacheMaxItems = 16384
+
+	defaultImageScanCacheTTL      = 30 * time.Minute
+	defaultImageScanCacheMaxItems = 1024 // Increased from 256 for production use
+
+	// defaultImageScanTimeout is the maximum time allowed for a container image scan.
+	// Large images with many layers can take several minutes to pull and scan.
+	// This default balances allowing large images while preventing indefinite hangs.
+	defaultImageScanTimeout = 10 * time.Minute
 )
+
+// CacheConfig holds cache configuration settings.
+type CacheConfig struct {
+	OSVCacheTTL            time.Duration
+	OSVCacheMaxItems       int
+	LicenseCacheTTL        time.Duration
+	LicenseCacheMaxItems   int
+	ImageScanCacheTTL      time.Duration
+	ImageScanCacheMaxItems int
+	ImageScanTimeout       time.Duration
+}
+
+// DefaultCacheConfig returns the default cache configuration,
+// with values optionally overridden by environment variables.
+func DefaultCacheConfig() CacheConfig {
+	cfg := CacheConfig{
+		OSVCacheTTL:            defaultOSVCacheTTL,
+		OSVCacheMaxItems:       defaultOSVCacheMaxItems,
+		LicenseCacheTTL:        defaultLicenseCacheTTL,
+		LicenseCacheMaxItems:   defaultLicenseCacheMaxItems,
+		ImageScanCacheTTL:      defaultImageScanCacheTTL,
+		ImageScanCacheMaxItems: defaultImageScanCacheMaxItems,
+		ImageScanTimeout:       defaultImageScanTimeout,
+	}
+
+	// Override from environment variables
+	if v := os.Getenv("DEPUTY_PROXY_OSV_CACHE_TTL"); v != "" {
+		if d, err := time.ParseDuration(v); err == nil && d > 0 {
+			cfg.OSVCacheTTL = d
+		} else {
+			slog.Warn("invalid DEPUTY_PROXY_OSV_CACHE_TTL, using default", "value", v, "default", defaultOSVCacheTTL)
+		}
+	}
+	if v := os.Getenv("DEPUTY_PROXY_OSV_CACHE_SIZE"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			cfg.OSVCacheMaxItems = n
+		} else {
+			slog.Warn("invalid DEPUTY_PROXY_OSV_CACHE_SIZE, using default", "value", v, "default", defaultOSVCacheMaxItems)
+		}
+	}
+	if v := os.Getenv("DEPUTY_PROXY_LICENSE_CACHE_TTL"); v != "" {
+		if d, err := time.ParseDuration(v); err == nil && d > 0 {
+			cfg.LicenseCacheTTL = d
+		} else {
+			slog.Warn("invalid DEPUTY_PROXY_LICENSE_CACHE_TTL, using default", "value", v, "default", defaultLicenseCacheTTL)
+		}
+	}
+	if v := os.Getenv("DEPUTY_PROXY_LICENSE_CACHE_SIZE"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			cfg.LicenseCacheMaxItems = n
+		} else {
+			slog.Warn("invalid DEPUTY_PROXY_LICENSE_CACHE_SIZE, using default", "value", v, "default", defaultLicenseCacheMaxItems)
+		}
+	}
+	if v := os.Getenv("DEPUTY_PROXY_IMAGE_CACHE_TTL"); v != "" {
+		if d, err := time.ParseDuration(v); err == nil && d > 0 {
+			cfg.ImageScanCacheTTL = d
+		} else {
+			slog.Warn("invalid DEPUTY_PROXY_IMAGE_CACHE_TTL, using default", "value", v, "default", defaultImageScanCacheTTL)
+		}
+	}
+	if v := os.Getenv("DEPUTY_PROXY_IMAGE_CACHE_SIZE"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			cfg.ImageScanCacheMaxItems = n
+		} else {
+			slog.Warn("invalid DEPUTY_PROXY_IMAGE_CACHE_SIZE, using default", "value", v, "default", defaultImageScanCacheMaxItems)
+		}
+	}
+	if v := os.Getenv("DEPUTY_PROXY_IMAGE_SCAN_TIMEOUT"); v != "" {
+		if d, err := time.ParseDuration(v); err == nil && d > 0 {
+			cfg.ImageScanTimeout = d
+		} else {
+			slog.Warn("invalid DEPUTY_PROXY_IMAGE_SCAN_TIMEOUT, using default", "value", v, "default", defaultImageScanTimeout)
+		}
+	}
+
+	return cfg
+}
+
+// cacheConfig holds the active cache configuration, initialized from defaults/environment.
+var cacheConfig = DefaultCacheConfig()
 
 // OSVCache defines the interface for caching OSV vulnerability lookups.
 // This allows dependency injection for testing and custom cache implementations.
@@ -37,24 +140,53 @@ type LicenseCache interface {
 	Stats() cache.Stats
 }
 
+// ImageScanResult stores cached scan data for a container image.
+// This includes vulnerabilities and image configuration/metadata for policy evaluation.
+type ImageScanResult struct {
+	Vulnerabilities []map[string]any
+	// ImageInfo contains extracted configuration, metadata, and build history.
+	// This is nil when ImageInfo could not be extracted from the scan result.
+	ImageInfo map[string]any
+}
+
+// ImageScanCache defines the interface for caching image scan results.
+type ImageScanCache interface {
+	Get(key string) (ImageScanResult, bool)
+	Set(key string, value ImageScanResult)
+	Stats() cache.Stats
+}
+
 // defaultOSVCache is the package-level default cache for OSV lookups.
 // Use NewOSVCache() to create isolated caches for testing.
-var defaultOSVCache OSVCache = cache.NewTTLCache[string, []analysis.Vulnerability](proxyOSVCacheMaxItems, proxyOSVCacheTTL)
+var defaultOSVCache OSVCache = cache.NewTTLCache[string, []analysis.Vulnerability](cacheConfig.OSVCacheMaxItems, cacheConfig.OSVCacheTTL)
 
 // defaultLicenseCache is the package-level default cache for license lookups.
 // Use NewLicenseCache() to create isolated caches for testing.
-var defaultLicenseCache LicenseCache = cache.NewTTLCache[string, []string](proxyLicenseCacheMaxItems, proxyLicenseCacheTTL)
+var defaultLicenseCache LicenseCache = cache.NewTTLCache[string, []string](cacheConfig.LicenseCacheMaxItems, cacheConfig.LicenseCacheTTL)
+
+// defaultImageScanCache is the package-level default cache for image scan results.
+// Use NewImageScanCache() to create isolated caches for testing.
+var defaultImageScanCache ImageScanCache = cache.NewTTLCache[string, ImageScanResult](cacheConfig.ImageScanCacheMaxItems, cacheConfig.ImageScanCacheTTL)
 
 // NewOSVCache creates a new isolated OSV cache instance.
 // This is useful for testing or when you need separate cache instances.
 func NewOSVCache() OSVCache {
-	return cache.NewTTLCache[string, []analysis.Vulnerability](proxyOSVCacheMaxItems, proxyOSVCacheTTL)
+	cfg := DefaultCacheConfig()
+	return cache.NewTTLCache[string, []analysis.Vulnerability](cfg.OSVCacheMaxItems, cfg.OSVCacheTTL)
 }
 
 // NewLicenseCache creates a new isolated license cache instance.
 // This is useful for testing or when you need separate cache instances.
 func NewLicenseCache() LicenseCache {
-	return cache.NewTTLCache[string, []string](proxyLicenseCacheMaxItems, proxyLicenseCacheTTL)
+	cfg := DefaultCacheConfig()
+	return cache.NewTTLCache[string, []string](cfg.LicenseCacheMaxItems, cfg.LicenseCacheTTL)
+}
+
+// NewImageScanCache creates a new isolated image scan cache instance.
+// This is useful for testing or when you need separate cache instances.
+func NewImageScanCache() ImageScanCache {
+	cfg := DefaultCacheConfig()
+	return cache.NewTTLCache[string, ImageScanResult](cfg.ImageScanCacheMaxItems, cfg.ImageScanCacheTTL)
 }
 
 // getOSVCache returns the provided cache or the default if nil.
@@ -73,6 +205,21 @@ func getLicenseCache(c LicenseCache) LicenseCache {
 	return defaultLicenseCache
 }
 
+// getImageScanCache returns the provided cache or the default if nil.
+func getImageScanCache(c ImageScanCache) ImageScanCache {
+	if c != nil {
+		return c
+	}
+	return defaultImageScanCache
+}
+
+// GetImageScanTimeout returns the configured image scan timeout.
+// This timeout limits how long container image scans can run to prevent
+// indefinite hangs on slow networks or very large images.
+func GetImageScanTimeout() time.Duration {
+	return cacheConfig.ImageScanTimeout
+}
+
 // pkgCacheKey returns a stable cache key for package lookups by ecosystem, name, and version.
 // The key format is "ecosystem|name@version" with ecosystem lowercased and all parts trimmed.
 func pkgCacheKey(ecosystem, name, version string) string {
@@ -88,6 +235,124 @@ func pkgCacheKey(ecosystem, name, version string) string {
 	b.WriteByte('@')
 	b.WriteString(v)
 	return b.String()
+}
+
+// imageCacheKey returns a stable cache key for container image scans.
+// The key format is "registry|repository@digest" with registry lowercased.
+func imageCacheKey(registry, repository, digest string) string {
+	reg := strings.ToLower(strings.TrimSpace(registry))
+	repo := strings.TrimSpace(repository)
+	dig := strings.TrimSpace(digest)
+	if reg == "" || repo == "" || dig == "" {
+		return ""
+	}
+	var b strings.Builder
+	b.Grow(len(reg) + 1 + len(repo) + 1 + len(dig))
+	b.WriteString(reg)
+	b.WriteByte('|')
+	b.WriteString(repo)
+	b.WriteByte('@')
+	b.WriteString(dig)
+	return b.String()
+}
+
+// digestResolutionCacheKey returns a stable cache key for tag-to-digest resolution failures.
+// The key format is "registry|repository:tag" with registry lowercased.
+func digestResolutionCacheKey(registry, repository, tag string) string {
+	reg := strings.ToLower(strings.TrimSpace(registry))
+	repo := strings.TrimSpace(repository)
+	t := strings.TrimSpace(tag)
+	if reg == "" || repo == "" || t == "" {
+		return ""
+	}
+	var b strings.Builder
+	b.Grow(len(reg) + 1 + len(repo) + 1 + len(t))
+	b.WriteString(reg)
+	b.WriteByte('|')
+	b.WriteString(repo)
+	b.WriteByte(':')
+	b.WriteString(t)
+	return b.String()
+}
+
+// DigestResolutionCache caches tag-to-digest resolution results.
+// This includes both successful resolutions (digest string) and failures (empty string).
+// Using a shorter TTL than image scan cache since tags can be updated.
+type DigestResolutionCache interface {
+	Get(key string) (string, bool)
+	Set(key string, value string)
+	Stats() cache.Stats
+}
+
+// defaultDigestResolutionCacheTTL is shorter than image scan cache TTL
+// because tags are mutable and we want to eventually retry failed resolutions.
+const defaultDigestResolutionCacheTTL = 2 * time.Minute
+
+// defaultDigestResolutionCacheMaxItems is kept smaller since entries are lightweight.
+const defaultDigestResolutionCacheMaxItems = 4096
+
+// digestResolutionFailureSentinel is a marker value indicating a cached resolution failure.
+// Empty string would be ambiguous (could mean "not found" vs "resolution failed").
+const digestResolutionFailureSentinel = "<resolution-failed>"
+
+// defaultDigestResolutionCache is the package-level default cache for digest resolution.
+var defaultDigestResolutionCache DigestResolutionCache = cache.NewTTLCache[string, string](
+	defaultDigestResolutionCacheMaxItems,
+	defaultDigestResolutionCacheTTL,
+)
+
+// NewDigestResolutionCache creates a new isolated digest resolution cache instance.
+func NewDigestResolutionCache() DigestResolutionCache {
+	return cache.NewTTLCache[string, string](
+		defaultDigestResolutionCacheMaxItems,
+		defaultDigestResolutionCacheTTL,
+	)
+}
+
+// getDigestResolutionCache returns the provided cache or the default if nil.
+func getDigestResolutionCache(c DigestResolutionCache) DigestResolutionCache {
+	if c != nil {
+		return c
+	}
+	return defaultDigestResolutionCache
+}
+
+// CacheDigestResolution stores a successful digest resolution.
+func CacheDigestResolution(c DigestResolutionCache, registry, repository, tag, digest string) {
+	key := digestResolutionCacheKey(registry, repository, tag)
+	if key == "" || digest == "" {
+		return
+	}
+	getDigestResolutionCache(c).Set(key, digest)
+}
+
+// CacheDigestResolutionFailure stores a failed digest resolution attempt.
+// This prevents repeated failed lookups for the same tag within the TTL.
+func CacheDigestResolutionFailure(c DigestResolutionCache, registry, repository, tag string) {
+	key := digestResolutionCacheKey(registry, repository, tag)
+	if key == "" {
+		return
+	}
+	getDigestResolutionCache(c).Set(key, digestResolutionFailureSentinel)
+}
+
+// GetCachedDigestResolution retrieves a cached digest resolution.
+// Returns (digest, true, false) for successful resolution.
+// Returns ("", true, true) for cached failure.
+// Returns ("", false, false) for cache miss.
+func GetCachedDigestResolution(c DigestResolutionCache, registry, repository, tag string) (digest string, found bool, wasFailed bool) {
+	key := digestResolutionCacheKey(registry, repository, tag)
+	if key == "" {
+		return "", false, false
+	}
+	cached, ok := getDigestResolutionCache(c).Get(key)
+	if !ok {
+		return "", false, false
+	}
+	if cached == digestResolutionFailureSentinel {
+		return "", true, true
+	}
+	return cached, true, false
 }
 
 // cachedOSVLookup queries the OSV database for vulnerabilities, using a local cache

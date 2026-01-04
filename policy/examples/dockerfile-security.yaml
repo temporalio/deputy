@@ -1,0 +1,345 @@
+# Dockerfile Security Policies
+#
+# Policies for analyzing Dockerfiles and enforcing security best practices.
+# These policies evaluate Dockerfile instructions without pulling images.
+#
+# Available Dockerfile policy variables:
+#   dockerfile                           - Parsed Dockerfile info
+#   dockerfile.path                      - Path to the Dockerfile
+#   dockerfile.stages                    - List of build stages
+#   dockerfile.args                      - ARG instructions with defaults
+#   dockerfile.final_stage               - The last stage (what gets built)
+#   dockerfile_analysis                  - Static analysis results
+#   stage                                - Current stage (in dockerfile_stage entrypoint)
+#
+# Stage fields:
+#   stage.index                          - 0-based stage position
+#   stage.name                           - AS alias (empty if unnamed)
+#   stage.base_image                     - FROM image reference as written
+#   stage.base_image_resolved            - Parsed image reference
+#   stage.base_image_resolved.registry   - Registry (e.g., "docker.io")
+#   stage.base_image_resolved.repository - Repository (e.g., "library/nginx")
+#   stage.base_image_resolved.tag        - Tag (e.g., "latest")
+#   stage.base_image_resolved.digest     - Digest if specified
+#   stage.platform                       - --platform flag value
+#   stage.is_scratch                     - true if FROM scratch
+#   stage.is_builder_stage               - true if only used as COPY source
+#   stage.user                           - Final USER directive value
+#   stage.is_root                        - true if running as root
+#   stage.workdir                        - WORKDIR value
+#   stage.env_vars                       - ENV declarations map
+#   stage.sensitive_env                  - Env vars matching secret patterns
+#   stage.exposed_ports                  - EXPOSE ports
+#   stage.labels                         - LABEL key-value pairs
+#   stage.healthcheck                    - HEALTHCHECK config (or null)
+#   stage.run_commands                   - RUN instructions
+#   stage.copy_commands                  - COPY instructions
+#   stage.add_commands                   - ADD instructions
+#   stage.copy_from_stages               - COPY --from references
+#   stage.entrypoint                     - ENTRYPOINT command
+#   stage.cmd                            - CMD arguments
+#   stage.shell                          - SHELL instruction
+#   stage.stop_signal                    - STOPSIGNAL value
+#   stage.on_build                       - ONBUILD instructions
+
+policies:
+  # ============================================================================
+  # User and Privilege Policies
+  # ============================================================================
+
+  - name: require-non-root-user
+    description: Final stage must not run as root
+    entrypoints: ["dockerfile_report"]
+    rules:
+      - action: deny
+        when: |
+          has(dockerfile.final_stage) &&
+          !dockerfile.final_stage.is_scratch &&
+          dockerfile.final_stage.is_root
+        reason: "Container runs as root user"
+        remediation: "Add 'USER nobody' or create a dedicated non-root user"
+
+  - name: warn-root-in-any-stage
+    description: Warn when any stage runs as root
+    entrypoints: ["dockerfile_stage"]
+    rules:
+      - action: warn
+        when: |
+          !stage.is_scratch &&
+          !stage.is_builder_stage &&
+          stage.is_root
+        reason: "Stage runs as root user"
+        remediation: "Add USER directive with non-root user"
+
+  # ============================================================================
+  # Base Image Policies
+  # ============================================================================
+
+  - name: no-latest-tag
+    description: Block mutable :latest tag in base images
+    entrypoints: ["dockerfile_report"]
+    rules:
+      - action: deny
+        when: |
+          dockerfile.stages.exists(s,
+            !s.is_scratch &&
+            has(s.base_image_resolved) &&
+            s.base_image_resolved.tag == "latest")
+        reason: "Base image uses :latest tag which is mutable"
+        remediation: "Pin to a specific version tag or digest"
+
+  - name: require-digest-for-production
+    description: Production images should use digests for reproducibility
+    entrypoints: ["dockerfile_report"]
+    rules:
+      - action: warn
+        when: |
+          has(dockerfile.final_stage) &&
+          !dockerfile.final_stage.is_scratch &&
+          has(dockerfile.final_stage.base_image_resolved) &&
+          dockerfile.final_stage.base_image_resolved.digest == ""
+        reason: "Final stage base image not pinned by digest"
+        remediation: "Use digest reference: image@sha256:..."
+
+  - name: approved-registries
+    description: Only allow images from approved registries
+    entrypoints: ["dockerfile_report"]
+    vars:
+      # Note: Docker Hub images resolve to "index.docker.io" via go-containerregistry
+      allowed: ["index.docker.io", "docker.io", "gcr.io", "ghcr.io", "registry.k8s.io"]
+    rules:
+      - action: deny
+        when: |
+          dockerfile.stages.exists(s,
+            !s.is_scratch &&
+            has(s.base_image_resolved) &&
+            s.base_image_resolved.registry != "" &&
+            !(s.base_image_resolved.registry in allowed))
+        reason: "Base image from unapproved registry"
+        remediation: "Use an approved registry: docker.io, gcr.io, ghcr.io, or registry.k8s.io"
+
+  - name: prefer-minimal-base
+    description: Prefer distroless, Alpine, or scratch base images
+    entrypoints: ["dockerfile_report"]
+    rules:
+      - action: warn
+        when: |
+          has(dockerfile.final_stage) &&
+          !dockerfile.final_stage.is_scratch &&
+          !dockerfile.final_stage.base_image.contains("distroless") &&
+          !dockerfile.final_stage.base_image.contains("alpine") &&
+          !dockerfile.final_stage.base_image.contains("slim") &&
+          !dockerfile.final_stage.base_image.contains("scratch")
+        reason: "Final stage does not use a minimal base image"
+        remediation: "Consider using distroless, Alpine, or scratch base images"
+
+  # ============================================================================
+  # Secret and Sensitive Data Policies
+  # ============================================================================
+
+  - name: no-secrets-in-env
+    description: Block potential secrets baked into ENV instructions
+    entrypoints: ["dockerfile_report"]
+    rules:
+      - action: deny
+        when: |
+          dockerfile.stages.exists(s,
+            has(s.sensitive_env) &&
+            size(s.sensitive_env) > 0)
+        reason: "Dockerfile contains ENV variables that may contain secrets"
+        remediation: "Use --mount=type=secret or runtime environment variables instead"
+
+  - name: no-hardcoded-credentials
+    description: Detect hardcoded credentials in ENV values
+    entrypoints: ["dockerfile_stage"]
+    rules:
+      - action: deny
+        when: |
+          stage.env_vars.exists_one(k,
+            stage.env_vars[k].matches("(?i)(password|secret|key|token)=.+"))
+        reason: "Hardcoded credential detected in ENV"
+        remediation: "Remove credentials from Dockerfile and use secrets management"
+
+  # ============================================================================
+  # Network and Security Policies
+  # ============================================================================
+
+  - name: no-add-url
+    description: Block ADD with URLs (security risk)
+    entrypoints: ["dockerfile_report"]
+    rules:
+      - action: deny
+        when: |
+          dockerfile.stages.exists(s,
+            s.add_commands.exists(a, a.from_url))
+        reason: "ADD with URL is insecure - content may change"
+        remediation: "Use COPY with curl/wget in a RUN instruction instead"
+
+  - name: no-privileged-ports
+    description: Warn on exposed privileged ports
+    entrypoints: ["dockerfile_stage"]
+    rules:
+      - action: warn
+        when: |
+          stage.exposed_ports.exists(p,
+            cel.bind(port, int(p.split("/")[0]),
+              port > 0 && port < 1024))
+        reason: "Privileged port exposed (< 1024)"
+        remediation: "Use unprivileged ports (>= 1024) and map externally if needed"
+
+  # ============================================================================
+  # Build Best Practices
+  # ============================================================================
+
+  - name: require-healthcheck
+    description: Production images should have HEALTHCHECK
+    entrypoints: ["dockerfile_report"]
+    rules:
+      - action: warn
+        when: |
+          has(dockerfile.final_stage) &&
+          !dockerfile.final_stage.is_scratch &&
+          dockerfile.final_stage.healthcheck == null
+        reason: "No HEALTHCHECK defined"
+        remediation: "Add HEALTHCHECK instruction for container orchestration"
+
+  - name: healthcheck-not-disabled
+    description: Ensure HEALTHCHECK is not explicitly disabled
+    entrypoints: ["dockerfile_report"]
+    rules:
+      - action: warn
+        when: |
+          has(dockerfile.final_stage) &&
+          dockerfile.final_stage.healthcheck != null &&
+          dockerfile.final_stage.healthcheck.disabled
+        reason: "HEALTHCHECK is explicitly disabled"
+        remediation: "Remove 'HEALTHCHECK NONE' and add a proper healthcheck"
+
+  - name: require-workdir
+    description: Recommend setting WORKDIR for clarity
+    entrypoints: ["dockerfile_report"]
+    rules:
+      - action: warn
+        when: |
+          has(dockerfile.final_stage) &&
+          !dockerfile.final_stage.is_scratch &&
+          dockerfile.final_stage.workdir == ""
+        reason: "No WORKDIR set in final stage"
+        remediation: "Add WORKDIR to set a consistent working directory"
+
+  - name: avoid-shell-form-entrypoint
+    description: Prefer exec form for ENTRYPOINT
+    entrypoints: ["dockerfile_stage"]
+    rules:
+      - action: warn
+        when: |
+          size(stage.entrypoint) == 1 &&
+          stage.entrypoint[0].contains(" ")
+        reason: "ENTRYPOINT appears to use shell form"
+        remediation: "Use exec form: ENTRYPOINT [\"cmd\", \"arg1\"]"
+
+  # ============================================================================
+  # Label and Metadata Policies
+  # ============================================================================
+
+  - name: require-oci-labels
+    description: Require OCI standard labels for image provenance
+    entrypoints: ["dockerfile_report"]
+    vars:
+      required_labels:
+        - "org.opencontainers.image.source"
+        - "org.opencontainers.image.version"
+    rules:
+      - action: warn
+        when: |
+          has(dockerfile.final_stage) &&
+          required_labels.exists(label,
+            !(label in dockerfile.final_stage.labels))
+        reason: "Missing OCI standard labels"
+        remediation: "Add LABEL org.opencontainers.image.source and org.opencontainers.image.version"
+
+  - name: require-maintainer-info
+    description: Recommend maintainer information
+    entrypoints: ["dockerfile_report"]
+    rules:
+      - action: warn
+        when: |
+          has(dockerfile.final_stage) &&
+          !("maintainer" in dockerfile.final_stage.labels) &&
+          !("org.opencontainers.image.authors" in dockerfile.final_stage.labels)
+        reason: "No maintainer information in labels"
+        remediation: "Add LABEL maintainer or org.opencontainers.image.authors"
+
+  # ============================================================================
+  # Multi-Stage Build Policies
+  # ============================================================================
+
+  - name: multi-stage-for-compiled-languages
+    description: Recommend multi-stage builds for compiled language images
+    entrypoints: ["dockerfile_report"]
+    vars:
+      compiled_bases: ["golang", "rust", "gcc", "maven", "gradle", "dotnet"]
+    rules:
+      - action: warn
+        when: |
+          dockerfile.stages.exists(s,
+            compiled_bases.exists(lang,
+              s.base_image.contains(lang))) &&
+          !dockerfile_analysis.has_multi_stage
+        reason: "Compiled language detected but no multi-stage build"
+        remediation: "Use multi-stage builds to reduce final image size"
+
+  - name: scratch-for-static-binaries
+    description: Recommend scratch for static binaries
+    entrypoints: ["dockerfile_report"]
+    rules:
+      - action: warn
+        when: |
+          has(dockerfile.final_stage) &&
+          dockerfile.stages.exists(s, s.base_image.contains("golang")) &&
+          !dockerfile.final_stage.is_scratch &&
+          !dockerfile.final_stage.base_image.contains("distroless")
+        reason: "Go binary could use scratch or distroless base"
+        remediation: "Build static binary and use FROM scratch or gcr.io/distroless/static"
+
+  # ============================================================================
+  # Package Manager Policies
+  # ============================================================================
+
+  - name: apt-no-recommends
+    description: Use --no-install-recommends with apt-get
+    entrypoints: ["dockerfile_stage"]
+    rules:
+      - action: warn
+        when: |
+          stage.run_commands.exists(r,
+            r.command.contains("apt-get install") &&
+            !r.command.contains("--no-install-recommends"))
+        reason: "apt-get install without --no-install-recommends"
+        remediation: "Add --no-install-recommends to reduce image size"
+
+  - name: clean-package-cache
+    description: Clean package manager cache in same layer
+    entrypoints: ["dockerfile_stage"]
+    rules:
+      - action: warn
+        when: |
+          stage.run_commands.exists(r,
+            r.command.contains("apt-get install") &&
+            !r.command.contains("rm -rf /var/lib/apt/lists"))
+        reason: "apt-get install without cleaning cache"
+        remediation: "Add 'rm -rf /var/lib/apt/lists/*' in same RUN instruction"
+
+  - name: pin-package-versions
+    description: Recommend pinning package versions
+    entrypoints: ["dockerfile_stage"]
+    rules:
+      - action: warn
+        when: |
+          stage.run_commands.exists(r,
+            (r.command.contains("apt-get install") ||
+             r.command.contains("apk add") ||
+             r.command.contains("yum install")) &&
+            !r.command.matches(".*[a-z]=[0-9].*"))
+        reason: "Package installation without version pinning"
+        remediation: "Pin package versions for reproducible builds"

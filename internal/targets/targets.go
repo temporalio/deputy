@@ -9,12 +9,17 @@ import (
 type Kind string
 
 const (
-	KindDir            Kind = "dir"
-	KindFile           Kind = "file"
-	KindGit            Kind = "git"
-	KindContainerImage Kind = "container-image"
-	KindVMImage        Kind = "vm-image"
-	KindSBOM           Kind = "sbom"
+	KindDir               Kind = "dir"
+	KindFile              Kind = "file"
+	KindBinary            Kind = "binary"
+	KindGit               Kind = "git"
+	KindContainerImage    Kind = "container-image"
+	KindContainerInstance Kind = "container-instance"
+	KindVMImage           Kind = "vm-image"
+	KindExtension         Kind = "extension"
+	KindSBOM              Kind = "sbom"
+	KindPURL              Kind = "purl"
+	KindDockerfile        Kind = "dockerfile"
 )
 
 // Descriptor captures normalized user input (Target) alongside inferred or
@@ -43,6 +48,12 @@ type Materialized struct {
 type Provider interface {
 	Detect(ctx context.Context, target string) bool
 	Open(ctx context.Context, target string, opts map[string]string) (Materialized, error)
+}
+
+// PriorityProvider optionally influences provider selection when multiple
+// providers can detect the same target. Higher values win.
+type PriorityProvider interface {
+	Priority() int
 }
 
 // Registry holds a set of providers used to discover and open targets.

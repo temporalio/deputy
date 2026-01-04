@@ -15,6 +15,10 @@ type OSVClient = osv.OSVClient
 // PkgInput represents a single package@version query for OSV.
 type PkgInput = osv.PkgInput
 
+// PkgInputLayerDetails stores layer details for package input (from SCALIBR).
+// This is the input-side type; use LayerDetails (from vuln package) for output.
+type PkgInputLayerDetails = osv.LayerDetails
+
 // NewOSVClient returns an osv.dev client configured with production-friendly HTTP timeouts
 // and automatic retry for transient failures.
 func NewOSVClient() *osvdev.OSVClient {

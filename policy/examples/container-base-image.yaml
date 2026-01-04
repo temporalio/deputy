@@ -1,0 +1,159 @@
+# Container Base Image Policies
+#
+# Policies for validating Dockerfile base images and container image provenance.
+# These policies evaluate base images extracted from Dockerfiles and container
+# image references to enforce approved base images and security requirements.
+#
+# Use cases:
+#   - Enforce approved base images list
+#   - Block deprecated/end-of-life images
+#   - Require digest-pinned references
+#   - Validate base image sources (registries)
+
+policies:
+  - name: approved-base-images
+    description: Only allow approved base images from trusted sources
+    entrypoints: ["scan_report"]
+    vars:
+      # Approved base image patterns (supports exact match and prefix)
+      approvedImages:
+        - "alpine"
+        - "debian"
+        - "ubuntu"
+        - "gcr.io/distroless/"
+        - "cgr.dev/chainguard/"
+        - "mcr.microsoft.com/"
+        - "ghcr.io/your-org/"
+    rules:
+      - action: deny
+        when: |
+          pkg.ecosystem == "docker" &&
+          !approvedImages.exists(approved,
+            pkg.name == approved ||
+            pkg.name.startsWith(approved)
+          )
+        reason: "Base image not in approved list"
+        remediation: "Use an approved base image from the allowlist"
+
+  - name: block-latest-tag
+    description: Block use of mutable 'latest' tag in base images
+    entrypoints: ["scan_report"]
+    rules:
+      - action: deny
+        when: |
+          pkg.ecosystem == "docker" &&
+          pkg.version == "latest"
+        reason: "Base image uses mutable 'latest' tag"
+        remediation: "Pin base image to specific version or digest"
+
+  - name: require-digest-pinning
+    description: Require base images to be pinned by digest for reproducibility
+    entrypoints: ["scan_report"]
+    rules:
+      - action: warn
+        when: |
+          pkg.ecosystem == "oci" ||
+          (pkg.ecosystem == "docker" && !pkg.version.startsWith("sha256:"))
+        reason: "Base image should be pinned by digest"
+        remediation: "Use digest reference: image@sha256:..."
+
+  - name: block-deprecated-images
+    description: Block known deprecated or end-of-life base images
+    entrypoints: ["scan_report"]
+    vars:
+      deprecatedImages:
+        # Ubuntu EOL versions
+        - "ubuntu:14.04"
+        - "ubuntu:16.04"
+        - "ubuntu:18.04"
+        - "ubuntu:trusty"
+        - "ubuntu:xenial"
+        - "ubuntu:bionic"
+        # Debian EOL versions
+        - "debian:jessie"
+        - "debian:stretch"
+        - "debian:8"
+        - "debian:9"
+        # Alpine EOL versions
+        - "alpine:3.12"
+        - "alpine:3.13"
+        - "alpine:3.14"
+        - "alpine:3.15"
+        # Node.js EOL versions
+        - "node:12"
+        - "node:14"
+        - "node:16"
+        # Python EOL versions
+        - "python:2"
+        - "python:3.6"
+        - "python:3.7"
+    rules:
+      - action: deny
+        when: |
+          (pkg.ecosystem == "docker" || pkg.ecosystem == "oci") &&
+          deprecatedImages.exists(dep,
+            pkg.name == dep ||
+            pkg.name.startsWith(dep + "-") ||
+            (pkg.name + ":" + pkg.version).startsWith(dep)
+          )
+        reason: "Base image is deprecated or end-of-life"
+        remediation: "Upgrade to a supported base image version"
+
+  - name: require-official-images
+    description: Require official Docker Hub images (no user namespace)
+    entrypoints: ["scan_report"]
+    vars:
+      trustedRegistries:
+        - "gcr.io/"
+        - "ghcr.io/"
+        - "mcr.microsoft.com/"
+        - "cgr.dev/"
+        - "public.ecr.aws/"
+    rules:
+      - action: warn
+        when: |
+          pkg.ecosystem == "docker" &&
+          pkg.name.contains("/") &&
+          !trustedRegistries.exists(r, pkg.name.startsWith(r))
+        reason: "Using non-official Docker Hub image"
+        remediation: "Use official images or images from trusted registries"
+
+  - name: block-scratch-for-non-go
+    description: Warn when using scratch base for non-Go applications
+    entrypoints: ["scan_report"]
+    rules:
+      - action: warn
+        when: |
+          pkg.ecosystem == "docker" &&
+          pkg.name == "scratch" &&
+          !vulnerabilities.exists(v, v.pkg.ecosystem == "Go")
+        reason: "Using scratch base image without Go dependencies detected"
+        remediation: "Ensure application is statically compiled for scratch images"
+
+  - name: alpine-version-minimum
+    description: Require minimum Alpine version for security patches
+    entrypoints: ["scan_report"]
+    vars:
+      minVersion: "3.18"
+    rules:
+      - action: warn
+        when: |
+          pkg.ecosystem == "docker" &&
+          pkg.name == "alpine" &&
+          pkg.version != "latest" &&
+          !pkg.version.startsWith("sha256:") &&
+          pkg.version < minVersion
+        reason: "Alpine version below minimum required"
+        remediation: "Upgrade to Alpine 3.18 or later"
+
+  - name: distroless-recommended
+    description: Recommend distroless images for production
+    entrypoints: ["scan_report"]
+    rules:
+      - action: info
+        when: |
+          pkg.ecosystem == "docker" &&
+          (pkg.name == "debian" || pkg.name == "ubuntu") &&
+          !pkg.name.contains("distroless")
+        reason: "Consider using distroless images for smaller attack surface"
+        remediation: "Use gcr.io/distroless/* images for production"

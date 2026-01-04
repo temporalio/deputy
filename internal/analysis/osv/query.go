@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/google/osv-scalibr/purl"
+	"github.com/google/osv-scalibr/semantic"
 	"github.com/ossf/osv-schema/bindings/go/osvschema"
 	"github.com/picatz/deputy/internal/collections"
 	"github.com/picatz/deputy/internal/diskcache"
@@ -49,6 +50,24 @@ type PkgInput struct {
 	Locations []string
 	// ManifestRefs describes manifest files declaring this dependency.
 	ManifestRefs []ManifestReference
+	// LayerDetails contains information about the container image layer where
+	// the package was found. Nil for non-container-image scans.
+	LayerDetails *LayerDetails
+}
+
+// LayerDetails stores details about the container image layer where a package was found.
+// This mirrors the SCALIBR extractor.LayerDetails structure for container image scanning.
+type LayerDetails struct {
+	// Index is the position of the layer in the image (0 = oldest/base layer).
+	Index int
+	// DiffID is the digest of the uncompressed layer content.
+	DiffID string
+	// ChainID is the cumulative hash identifying this layer in context of its parents.
+	ChainID string
+	// Command is the Dockerfile instruction that created this layer.
+	Command string
+	// InBaseImage indicates whether this layer is part of the base image.
+	InBaseImage bool
 }
 
 // getCachedVuln retrieves a vulnerability by ID using the provided client,
@@ -336,45 +355,249 @@ func equivalentPURL(a, b string) bool {
 }
 
 // isVersionAffected reports whether the package metadata and version fall within
-// any affected range of the provided vulnerability. For ecosystems other than Go
-// we currently rely on OSV's matching and only ensure the package identity aligns.
+// any affected range of the provided vulnerability. It uses ecosystem-specific
+// version comparison (Debian, Alpine, npm, etc.) via OSV-SCALIBR's semantic package.
 func isVersionAffected(v osvschema.Vulnerability, pkg PkgInput) bool {
-	if !strings.EqualFold(pkg.Ecosystem, "Go") {
-		for _, a := range v.Affected {
-			if matchesPackage(a.Package, pkg) {
-				return true
-			}
-		}
+	version := strings.TrimSpace(pkg.Version)
+	if version == "" {
 		return false
 	}
-	cur := normalizeGoVersion(pkg.Version)
+
 	for _, a := range v.Affected {
 		if !matchesPackage(a.Package, pkg) {
 			continue
 		}
+
+		// If no ranges are specified, the package is unconditionally affected
+		if len(a.Ranges) == 0 {
+			return true
+		}
+
+		// Check each range
 		for _, r := range a.Ranges {
-			if strings.ToUpper(string(r.Type)) != "SEMVER" {
-				continue
-			}
-			introduced := "v0.0.0"
-			for _, e := range r.Events {
-				if e.Introduced != "" {
-					introduced = normalizeGoVersion(e.Introduced)
-				}
-				if e.Fixed != "" {
-					fixed := normalizeGoVersion(e.Fixed)
-					if semver.Compare(cur, introduced) >= 0 && semver.Compare(cur, fixed) < 0 {
-						return true
-					}
-					introduced = "v0.0.0"
-				}
-			}
-			if introduced != "v0.0.0" && semver.Compare(cur, introduced) >= 0 {
+			if versionInRange(version, pkg.Ecosystem, a.Package.Ecosystem, r) {
 				return true
 			}
 		}
 	}
 	return false
+}
+
+// versionInRange checks if a version falls within an OSV affected range.
+// It handles SEMVER, ECOSYSTEM, and GIT range types with ecosystem-specific comparison.
+func versionInRange(version, pkgEcosystem, osvEcosystem string, r osvschema.Range) bool {
+	rangeType := strings.ToUpper(string(r.Type))
+
+	// GIT ranges require commit hash matching, which we don't support
+	if rangeType == "GIT" {
+		return false
+	}
+
+	// Determine the ecosystem for version comparison
+	eco := resolveEcosystemForComparison(pkgEcosystem, osvEcosystem)
+
+	// For Go ecosystem with SEMVER ranges, use golang.org/x/mod/semver
+	if strings.EqualFold(eco, "Go") && rangeType == "SEMVER" {
+		return versionInGoSemverRange(version, r)
+	}
+
+	// For other ecosystems, use OSV-SCALIBR's semantic version comparison
+	return versionInEcosystemRange(version, eco, r)
+}
+
+// versionInGoSemverRange checks if a Go version falls within a SEMVER range.
+func versionInGoSemverRange(version string, r osvschema.Range) bool {
+	cur := normalizeGoVersion(version)
+	if cur == "" || !semver.IsValid(cur) {
+		return true // Can't compare, assume affected for safety
+	}
+
+	introduced := "v0.0.0"
+	for _, e := range r.Events {
+		if e.Introduced != "" {
+			introduced = normalizeGoVersion(e.Introduced)
+		}
+		if e.Fixed != "" {
+			fixed := normalizeGoVersion(e.Fixed)
+			if semver.Compare(cur, introduced) >= 0 && semver.Compare(cur, fixed) < 0 {
+				return true
+			}
+			introduced = "v0.0.0"
+		}
+	}
+	// Check if still in an open-ended "introduced" range
+	if introduced != "v0.0.0" && semver.Compare(cur, introduced) >= 0 {
+		return true
+	}
+	return false
+}
+
+// versionInEcosystemRange checks if a version falls within an ECOSYSTEM or SEMVER range
+// using OSV-SCALIBR's semantic version comparison for the appropriate ecosystem.
+func versionInEcosystemRange(version, ecosystem string, r osvschema.Range) bool {
+	// Map ecosystem to OSV-SCALIBR semantic package ecosystem name
+	semanticEco := mapToSemanticEcosystem(ecosystem)
+	if semanticEco == "" {
+		// Unknown ecosystem - can't compare versions, assume affected for safety
+		return true
+	}
+
+	// Parse the installed version
+	installedVersion, err := semantic.Parse(version, semanticEco)
+	if err != nil {
+		// Can't parse version - assume affected for safety
+		return true
+	}
+
+	// Track the current "introduced" boundary as we process events
+	var introducedVersion semantic.Version
+	introducedSet := false
+
+	for _, e := range r.Events {
+		if e.Introduced != "" {
+			if e.Introduced == "0" {
+				// "0" means all versions are affected from the beginning
+				introducedSet = true
+				introducedVersion = nil
+			} else {
+				intro, err := semantic.Parse(e.Introduced, semanticEco)
+				if err == nil {
+					introducedVersion = intro
+					introducedSet = true
+				}
+			}
+		}
+		if e.Fixed != "" {
+			fixedVersion, err := semantic.Parse(e.Fixed, semanticEco)
+			if err != nil {
+				continue
+			}
+
+			// Check if installed version is in range [introduced, fixed)
+			if introducedSet {
+				afterIntroduced := true
+				if introducedVersion != nil {
+					cmp, err := installedVersion.CompareStr(e.Introduced)
+					if err == nil {
+						afterIntroduced = cmp >= 0
+					}
+				}
+
+				beforeFixed, err := installedVersion.CompareStr(e.Fixed)
+				if err == nil && afterIntroduced && beforeFixed < 0 {
+					return true
+				}
+			}
+
+			// Reset introduced after processing a fixed event
+			introducedSet = false
+			introducedVersion = nil
+			_ = fixedVersion // silence unused warning
+		}
+	}
+
+	// Check if still in an open-ended "introduced" range (no fixed version)
+	if introducedSet {
+		if introducedVersion == nil {
+			// Introduced from "0" with no fix means all versions affected
+			return true
+		}
+		// Check if installed >= introduced
+		cmp, err := introducedVersion.CompareStr(version)
+		if err == nil && cmp <= 0 {
+			return true
+		}
+	}
+
+	return false
+}
+
+// resolveEcosystemForComparison determines the ecosystem to use for version comparison.
+// It prefers the OSV vulnerability's ecosystem since it's authoritative.
+func resolveEcosystemForComparison(pkgEcosystem, osvEcosystem string) string {
+	// Prefer OSV ecosystem as it's authoritative for the vulnerability
+	if osvEcosystem != "" {
+		return osvEcosystem
+	}
+	return pkgEcosystem
+}
+
+// mapToSemanticEcosystem maps an ecosystem name to the format expected by
+// OSV-SCALIBR's semantic package.
+func mapToSemanticEcosystem(ecosystem string) string {
+	eco := strings.TrimSpace(ecosystem)
+	if eco == "" {
+		return ""
+	}
+
+	// Handle ecosystems with version suffixes (e.g., "Debian:11" -> "Debian")
+	if idx := strings.Index(eco, ":"); idx != -1 {
+		eco = eco[:idx]
+	}
+
+	// Normalize to the canonical names expected by semantic.Parse
+	switch strings.ToLower(eco) {
+	case "debian":
+		return "Debian"
+	case "ubuntu":
+		return "Ubuntu"
+	case "alpine":
+		return "Alpine"
+	case "almalinux":
+		return "AlmaLinux"
+	case "rocky linux", "rocky":
+		return "Rocky Linux"
+	case "red hat", "rhel", "redhat":
+		return "Red Hat"
+	case "centos":
+		return "Red Hat" // CentOS uses Red Hat versioning
+	case "opensuse":
+		return "openSUSE"
+	case "suse", "sles":
+		return "SUSE"
+	case "mageia":
+		return "Mageia"
+	case "wolfi":
+		return "Wolfi"
+	case "chainguard":
+		return "Chainguard"
+	case "npm":
+		return "npm"
+	case "pypi", "python":
+		return "PyPI"
+	case "maven":
+		return "Maven"
+	case "nuget":
+		return "NuGet"
+	case "rubygems":
+		return "RubyGems"
+	case "crates.io", "cargo":
+		return "crates.io"
+	case "packagist", "composer":
+		return "Packagist"
+	case "go", "golang":
+		return "Go"
+	case "hex":
+		return "Hex"
+	case "pub":
+		return "Pub"
+	case "hackage":
+		return "Hackage"
+	case "cran":
+		return "CRAN"
+	case "bitnami":
+		return "Bitnami"
+	case "bioconductor":
+		return "Bioconductor"
+	case "conancenter":
+		return "ConanCenter"
+	case "ghc":
+		return "GHC"
+	case "swifturl":
+		return "SwiftURL"
+	default:
+		return ""
+	}
 }
 
 // mergeStringMap merges string maps, keeping existing entries in base when keys collide.

@@ -14,6 +14,7 @@ import (
 	"github.com/go-git/go-git/v5/plumbing/transport"
 	"github.com/google/osv-scalibr/extractor"
 	"github.com/google/osv-scalibr/purl"
+	"github.com/picatz/deputy/internal/dockerfile"
 	"github.com/picatz/deputy/internal/purlx"
 	"github.com/picatz/deputy/internal/repository/workspace"
 	"github.com/protobom/protobom/pkg/sbom"
@@ -463,6 +464,355 @@ func Test_sanitizeForSPDXID(t *testing.T) {
 				t.Errorf("sanitizeForSPDXID(%q)=%q want %q", tt.input, got, tt.want)
 			}
 		})
+	}
+}
+
+func Test_isDockerfileFilename(t *testing.T) {
+	tests := []struct {
+		name string
+		want bool
+	}{
+		// Exact matches
+		{"Dockerfile", true},
+		{"Containerfile", true},
+		{"dockerfile", true},
+		{"containerfile", true},
+
+		// Prefix patterns
+		{"Dockerfile.prod", true},
+		{"Dockerfile.dev", true},
+		{"Containerfile.staging", true},
+
+		// Suffix patterns (*.dockerfile)
+		{"app.dockerfile", true},
+		{"build.dockerfile", true},
+		{"test.containerfile", true},
+
+		// Suffix patterns (*Dockerfile)
+		{"test-Dockerfile", true},
+		{"my.Dockerfile", true},
+		{"prod-Containerfile", true},
+
+		// Should NOT match
+		{"README.md", false},
+		{"Makefile", false},
+		{"docker-compose.yml", false},
+		{"main.go", false},
+		{".dockerignore", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := isDockerfileFilename(tt.name); got != tt.want {
+				t.Errorf("isDockerfileFilename(%q) = %v, want %v", tt.name, got, tt.want)
+			}
+		})
+	}
+}
+
+func Test_buildContainerPURL(t *testing.T) {
+	tests := []struct {
+		name     string
+		registry string
+		repo     string
+		tag      string
+		digest   string
+		want     string
+	}{
+		{
+			name:     "docker hub library image",
+			registry: "index.docker.io",
+			repo:     "library/alpine",
+			tag:      "3.19",
+			want:     "pkg:docker/library/alpine@3.19",
+		},
+		{
+			name:     "docker hub user image",
+			registry: "docker.io",
+			repo:     "nginx",
+			tag:      "latest",
+			want:     "pkg:docker/nginx@latest",
+		},
+		{
+			name:     "ghcr image",
+			registry: "ghcr.io",
+			repo:     "owner/app",
+			tag:      "v1.0.0",
+			want:     "pkg:oci/ghcr.io/owner/app@v1.0.0",
+		},
+		{
+			name:     "gcr image with digest",
+			registry: "gcr.io",
+			repo:     "project/image",
+			digest:   "sha256:abc123",
+			want:     "pkg:oci/gcr.io/project/image@sha256:abc123",
+		},
+		{
+			name:     "empty registry (docker hub default)",
+			registry: "",
+			repo:     "myimage",
+			tag:      "v1",
+			want:     "pkg:docker/myimage@v1",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ref := &dockerfile.ImageRef{
+				Registry:   tt.registry,
+				Repository: tt.repo,
+				Tag:        tt.tag,
+				Digest:     tt.digest,
+			}
+			got := buildContainerPURL(ref)
+			if got != tt.want {
+				t.Errorf("buildContainerPURL() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+
+	// Test nil case
+	if got := buildContainerPURL(nil); got != "" {
+		t.Errorf("buildContainerPURL(nil) = %q, want empty", got)
+	}
+}
+
+func Test_createBaseImageNode(t *testing.T) {
+	stage := &dockerfile.Stage{
+		Index:     0,
+		Name:      "builder",
+		BaseImage: "golang:1.22",
+		BaseImageResolved: &dockerfile.ImageRef{
+			Full:       "golang:1.22",
+			Registry:   "index.docker.io",
+			Repository: "library/golang",
+			Tag:        "1.22",
+		},
+		Platform: "linux/amd64",
+	}
+
+	node := createBaseImageNode(stage, "Dockerfile")
+
+	if node == nil {
+		t.Fatal("expected non-nil node")
+	}
+
+	// Check basic fields
+	if node.Type != sbom.Node_PACKAGE {
+		t.Errorf("node.Type = %v, want PACKAGE", node.Type)
+	}
+	if node.Name != "library/golang" {
+		t.Errorf("node.Name = %q, want %q", node.Name, "library/golang")
+	}
+	if node.Version != "1.22" {
+		t.Errorf("node.Version = %q, want %q", node.Version, "1.22")
+	}
+
+	// Check PURL identifier
+	purlStr := node.Identifiers[int32(sbom.SoftwareIdentifierType_PURL)]
+	if purlStr != "pkg:docker/library/golang@1.22" {
+		t.Errorf("PURL = %q, want %q", purlStr, "pkg:docker/library/golang@1.22")
+	}
+
+	// Check properties
+	props := map[string]string{}
+	for _, p := range node.Properties {
+		props[p.Name] = p.Data
+	}
+	if props["deputy:type"] != "container-base-image" {
+		t.Errorf("deputy:type = %q, want container-base-image", props["deputy:type"])
+	}
+	if props["deputy:location"] != "Dockerfile" {
+		t.Errorf("deputy:location = %q, want Dockerfile", props["deputy:location"])
+	}
+	if props["deputy:dockerfile-stage"] != "builder" {
+		t.Errorf("deputy:dockerfile-stage = %q, want builder", props["deputy:dockerfile-stage"])
+	}
+	if props["deputy:platform"] != "linux/amd64" {
+		t.Errorf("deputy:platform = %q, want linux/amd64", props["deputy:platform"])
+	}
+	if props["deputy:direct"] != "true" {
+		t.Errorf("deputy:direct = %q, want true", props["deputy:direct"])
+	}
+}
+
+func Test_createBaseImageNode_nilStage(t *testing.T) {
+	if got := createBaseImageNode(nil, "Dockerfile"); got != nil {
+		t.Errorf("createBaseImageNode(nil) = %v, want nil", got)
+	}
+}
+
+func Test_addDockerfileBaseImagesToSBOM(t *testing.T) {
+	doc := sbom.NewDocument()
+	app := sbom.NewNode()
+	app.Id = "application:root"
+	doc.NodeList.Nodes = append(doc.NodeList.Nodes, app)
+
+	dockerfiles := []*dockerfile.Info{
+		{
+			Path: "Dockerfile",
+			Stages: []dockerfile.Stage{
+				{
+					Index:     0,
+					Name:      "builder",
+					BaseImage: "golang:1.22",
+					BaseImageResolved: &dockerfile.ImageRef{
+						Full:       "golang:1.22",
+						Registry:   "index.docker.io",
+						Repository: "library/golang",
+						Tag:        "1.22",
+					},
+				},
+				{
+					Index:     1,
+					BaseImage: "alpine:3.19",
+					BaseImageResolved: &dockerfile.ImageRef{
+						Full:       "alpine:3.19",
+						Registry:   "index.docker.io",
+						Repository: "library/alpine",
+						Tag:        "3.19",
+					},
+				},
+			},
+		},
+	}
+
+	addDockerfileBaseImagesToSBOM(doc, dockerfiles, app.Id)
+
+	// Should have added 2 nodes (golang and alpine)
+	// Total nodes: 1 (app) + 2 (base images) = 3
+	if len(doc.NodeList.Nodes) != 3 {
+		t.Errorf("expected 3 nodes, got %d", len(doc.NodeList.Nodes))
+	}
+
+	// Should have 2 edges
+	if len(doc.NodeList.Edges) != 2 {
+		t.Errorf("expected 2 edges, got %d", len(doc.NodeList.Edges))
+	}
+
+	// Verify edges point from app to base images
+	for _, edge := range doc.NodeList.Edges {
+		if edge.From != app.Id {
+			t.Errorf("edge.From = %q, want %q", edge.From, app.Id)
+		}
+	}
+}
+
+func Test_addDockerfileBaseImagesToSBOM_deduplication(t *testing.T) {
+	doc := sbom.NewDocument()
+	app := sbom.NewNode()
+	app.Id = "application:root"
+	doc.NodeList.Nodes = append(doc.NodeList.Nodes, app)
+
+	// Two Dockerfiles referencing the same base image
+	dockerfiles := []*dockerfile.Info{
+		{
+			Path: "Dockerfile",
+			Stages: []dockerfile.Stage{
+				{
+					BaseImage: "alpine:3.19",
+					BaseImageResolved: &dockerfile.ImageRef{
+						Full:       "alpine:3.19",
+						Registry:   "index.docker.io",
+						Repository: "library/alpine",
+						Tag:        "3.19",
+					},
+				},
+			},
+		},
+		{
+			Path: "Dockerfile.prod",
+			Stages: []dockerfile.Stage{
+				{
+					BaseImage: "alpine:3.19", // Same base image
+					BaseImageResolved: &dockerfile.ImageRef{
+						Full:       "alpine:3.19",
+						Registry:   "index.docker.io",
+						Repository: "library/alpine",
+						Tag:        "3.19",
+					},
+				},
+			},
+		},
+	}
+
+	addDockerfileBaseImagesToSBOM(doc, dockerfiles, app.Id)
+
+	// Should have only 1 base image node (deduplicated)
+	// Total nodes: 1 (app) + 1 (alpine) = 2
+	if len(doc.NodeList.Nodes) != 2 {
+		t.Errorf("expected 2 nodes (deduplicated), got %d", len(doc.NodeList.Nodes))
+	}
+}
+
+func Test_addDockerfileBaseImagesToSBOM_skipScratch(t *testing.T) {
+	doc := sbom.NewDocument()
+	app := sbom.NewNode()
+	app.Id = "application:root"
+	doc.NodeList.Nodes = append(doc.NodeList.Nodes, app)
+
+	dockerfiles := []*dockerfile.Info{
+		{
+			Path: "Dockerfile",
+			Stages: []dockerfile.Stage{
+				{
+					BaseImage: "golang:1.22",
+					BaseImageResolved: &dockerfile.ImageRef{
+						Full:       "golang:1.22",
+						Registry:   "index.docker.io",
+						Repository: "library/golang",
+						Tag:        "1.22",
+					},
+				},
+				{
+					BaseImage: "scratch",
+					IsScratch: true, // Should be skipped
+				},
+			},
+		},
+	}
+
+	addDockerfileBaseImagesToSBOM(doc, dockerfiles, app.Id)
+
+	// Should have only 1 base image node (scratch skipped)
+	// Total nodes: 1 (app) + 1 (golang) = 2
+	if len(doc.NodeList.Nodes) != 2 {
+		t.Errorf("expected 2 nodes (scratch skipped), got %d", len(doc.NodeList.Nodes))
+	}
+}
+
+func Test_discoverAndParseDockerfiles(t *testing.T) {
+	// Create an in-memory workspace with a Dockerfile
+	ws := workspace.NewMemory()
+	defer ws.Close()
+
+	dockerfileContent := `FROM golang:1.22 AS builder
+RUN go build -o app .
+
+FROM alpine:3.19
+COPY --from=builder /app /app
+CMD ["/app"]
+`
+	if err := ws.WriteFile("Dockerfile", []byte(dockerfileContent), 0644); err != nil {
+		t.Fatalf("write Dockerfile: %v", err)
+	}
+	if err := ws.WriteFile("README.md", []byte("# Test"), 0644); err != nil {
+		t.Fatalf("write README: %v", err)
+	}
+
+	dockerfiles, err := discoverAndParseDockerfiles(ws)
+	if err != nil {
+		t.Fatalf("discoverAndParseDockerfiles: %v", err)
+	}
+
+	if len(dockerfiles) != 1 {
+		t.Fatalf("expected 1 dockerfile, got %d", len(dockerfiles))
+	}
+
+	df := dockerfiles[0]
+	if df.Path != "Dockerfile" {
+		t.Errorf("path = %q, want Dockerfile", df.Path)
+	}
+	if len(df.Stages) != 2 {
+		t.Errorf("expected 2 stages, got %d", len(df.Stages))
 	}
 }
 

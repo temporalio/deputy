@@ -483,6 +483,18 @@ func TestRecordCacheHelpers(t *testing.T) {
 		assertEventAttribute(t, event, "deputy.cache.type", "license")
 		assertEventAttribute(t, event, "deputy.cache.hit", true)
 	})
+
+	t.Run("RecordImageScanCacheHit", func(t *testing.T) {
+		tracer, recorder := testTracer(t)
+		ctx, span := startTestSpan(context.Background(), tracer, "test")
+		RecordImageScanCacheHit(ctx, span, "registry|repo@sha256:deadbeef")
+		span.End()
+
+		spans := recorder.Ended()
+		event := getEvent(spans[0], "cache.access")
+		assertEventAttribute(t, event, "deputy.cache.type", "image_scan")
+		assertEventAttribute(t, event, "deputy.cache.hit", true)
+	})
 }
 
 func TestRecordVulnerabilityCount(t *testing.T) {

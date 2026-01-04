@@ -12,7 +12,7 @@ import (
 )
 
 // validEcosystems defines the supported ecosystem adapters.
-var validEcosystems = []string{"go", "pypi", "npm", "rubygems"}
+var validEcosystems = []string{"go", "pypi", "npm", "rubygems", "oci"}
 
 // Config describes one or more listeners exposed by the proxy server.
 type Config struct {
@@ -285,6 +285,18 @@ func MarshalTemplate(ecosystem string) (string, error) {
 					Ecosystems: []string{"rubygems"},
 					Upstream:   "https://rubygems.org",
 					Policies:   []string{"policy/rubygems.yaml"},
+				},
+			},
+		}
+	case "oci":
+		cfg = Config{
+			Listeners: []ListenerConfig{
+				{
+					Name:       "oci-proxy",
+					Bind:       ":8084",
+					Ecosystems: []string{"oci"},
+					Upstream:   "https://registry-1.docker.io",
+					Policies:   []string{"policy/oci.yaml"},
 				},
 			},
 		}

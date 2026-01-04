@@ -82,7 +82,7 @@ vim.api.nvim_create_autocmd({ "BufReadPost", "BufNewFile" }, {
 
 - YAML diagnostics: missing `policies`, non-list `rules`, duplicate policy names, invalid `entrypoints`/`commands`.
 - CEL diagnostics: type/parse errors on `when` expressions.
-- Completions: common keys, `action`/`mode`, CEL identifiers (`request`, `pkg`, `env.*`, etc.), helper functions (`levenshtein`, `levenshteinWithin`, macros like `exists`, `map`, `filter`, regex/string helpers).
+- Completions: common keys, `action`/`mode`, CEL identifiers (`request`, `pkg`, `target`, `image`, `env.*`, etc.), helper functions (`levenshtein`, `levenshteinWithin`, `purl`, macros like `exists`, `map`, `filter`, regex/string helpers).
 - Hovers: reminders for keys plus CEL helper signatures and variable descriptions.
 
 Future improvements: deeper CEL context-aware completions (e.g., after `vulnerabilities[0].`), richer quick-fixes, formatting.
@@ -95,6 +95,7 @@ Future improvements: deeper CEL context-aware completions (e.g., after `vulnerab
 | `levenshteinWithin` | `levenshteinWithin(string, string, int) bool` | True if distance within limit. |
 | `now` | `now() timestamp` | Current time (custom helper). |
 | `age` | `age(int|timestamp) duration` | Time since Unix seconds or timestamp. |
+| `purl` | `purl(string) map` | Parse a Package URL into fields. |
 | `timestamp` | `timestamp(int|string) timestamp` | CEL built-in: Unix seconds or RFC 3339. |
 | `duration` | `duration(string) duration` | CEL built-in: parse duration strings. |
 | `exists` | `list.exists(var, predicate)` | CEL macro: any element matches. |
@@ -120,7 +121,7 @@ Future improvements: deeper CEL context-aware completions (e.g., after `vulnerab
 
 This catalog is not exhaustive; it reflects helpers the LSP surfaces today. See the [policy framework CEL reference](reference/policy-framework.md#cel-language-reference) for full CEL language and extension links.
 
-Standard policy identifiers available in `when` expressions: `request`, `pkg`, `vulnerabilities`, `vulnerability`, `changes`, `packages`, `sbom`, `config`, `env`, `dependency`, `plan`, `step`, `repo`, `cluster`, `component`, `findings`, `change`.
+Standard policy identifiers available in `when` expressions: `request`, `pkg`, `target`, `image`, `vulnerabilities`, `vulnerability`, `changes`, `packages`, `sbom`, `config`, `env`, `dependency`, `plan`, `step`, `repo`, `cluster`, `component`, `findings`, `change`.
 
 ## Troubleshooting
 

@@ -20,6 +20,7 @@ var helperFunctions = []HelperFunction{
 	// Note: timestamp(int), timestamp(string), and duration(string) are CEL built-ins.
 	{Name: "now", Signature: "now() timestamp", Doc: "Returns current time as a timestamp. Use int(now()) for Unix seconds."},
 	{Name: "age", Signature: "age(int|timestamp) duration", Doc: "Duration since the given Unix timestamp or timestamp. Convenience for now() - timestamp(x)."},
+	{Name: "purl", Signature: "purl(string) map", Doc: "Parse a Package URL into a map (type, namespace, name, version, qualifiers, subpath, purl). Returns null on invalid input."},
 	{Name: "timestamp", Signature: "timestamp(int|string) timestamp", Doc: "CEL built-in: convert Unix seconds or RFC 3339 string to timestamp."},
 	{Name: "duration", Signature: "duration(string) duration", Doc: "CEL built-in: parse duration string (e.g., '1h', '30m', '24h')."},
 
@@ -52,6 +53,13 @@ var helperFunctions = []HelperFunction{
 	{Name: "math.round", Signature: "math.round(double)", Doc: "Round to nearest integer (ext.Math)."},
 	{Name: "math.greatest", Signature: "math.greatest(a, b, ...)", Doc: "Return greatest value (ext.Math)."},
 	{Name: "math.least", Signature: "math.least(a, b, ...)", Doc: "Return least value (ext.Math)."},
+
+	// Container Image Helper Functions
+	// These provide complex parsing that can't be done well in pure CEL.
+	// Use CEL's built-in string functions (contains, matches, startsWith, endsWith)
+	// and macros (exists, filter, map) for pattern matching and iteration.
+	{Name: "imageRef", Signature: "imageRef(string) map", Doc: "Parse container image reference into components (registry, repository, name, tag, digest). Handles implicit docker.io, port vs tag disambiguation, and scheme stripping."},
+	{Name: "baseImage", Signature: "baseImage(list) string", Doc: "Extract base image reference from build history (first FROM). Handles multi-stage builds, --platform flags, and Docker's nop format."},
 }
 
 // HelperCatalog returns the CEL helper catalog.

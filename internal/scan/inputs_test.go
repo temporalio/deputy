@@ -821,3 +821,100 @@ func TestAppendGroupLabel(t *testing.T) {
 		})
 	}
 }
+
+func TestPackagesToInputs_LayerDetails(t *testing.T) {
+	t.Run("preserves layer details from SCALIBR package", func(t *testing.T) {
+		pkgs := []*extractor.Package{
+			{
+				Name:     "openssl",
+				Version:  "1.1.1k",
+				PURLType: "deb",
+				LayerDetails: &extractor.LayerDetails{
+					Index:       2,
+					DiffID:      "sha256:abc123",
+					ChainID:     "sha256:def456",
+					Command:     "RUN apt-get install openssl",
+					InBaseImage: true,
+				},
+			},
+		}
+		inputs := PackagesToInputs(pkgs, PackageInputOptions{})
+		if len(inputs) != 1 {
+			t.Fatalf("expected 1 input, got %d", len(inputs))
+		}
+		if inputs[0].LayerDetails == nil {
+			t.Fatal("expected LayerDetails to be preserved, got nil")
+		}
+		ld := inputs[0].LayerDetails
+		if ld.Index != 2 {
+			t.Errorf("LayerDetails.Index = %d, want 2", ld.Index)
+		}
+		if ld.DiffID != "sha256:abc123" {
+			t.Errorf("LayerDetails.DiffID = %q, want sha256:abc123", ld.DiffID)
+		}
+		if ld.ChainID != "sha256:def456" {
+			t.Errorf("LayerDetails.ChainID = %q, want sha256:def456", ld.ChainID)
+		}
+		if ld.Command != "RUN apt-get install openssl" {
+			t.Errorf("LayerDetails.Command = %q, want RUN apt-get install openssl", ld.Command)
+		}
+		if !ld.InBaseImage {
+			t.Error("LayerDetails.InBaseImage = false, want true")
+		}
+	})
+
+	t.Run("nil layer details remains nil", func(t *testing.T) {
+		pkgs := []*extractor.Package{
+			{
+				Name:         "lodash",
+				Version:      "4.17.21",
+				PURLType:     scalpurl.TypeNPM,
+				LayerDetails: nil,
+			},
+		}
+		inputs := PackagesToInputs(pkgs, PackageInputOptions{})
+		if len(inputs) != 1 {
+			t.Fatalf("expected 1 input, got %d", len(inputs))
+		}
+		if inputs[0].LayerDetails != nil {
+			t.Error("expected LayerDetails to be nil for non-container package")
+		}
+	})
+
+	t.Run("first layer details wins on dedup", func(t *testing.T) {
+		pkgs := []*extractor.Package{
+			{
+				Name:     "curl",
+				Version:  "7.80.0",
+				PURLType: "deb",
+				LayerDetails: &extractor.LayerDetails{
+					Index:       1,
+					InBaseImage: true,
+				},
+			},
+			{
+				Name:     "curl",
+				Version:  "7.80.0",
+				PURLType: "deb",
+				LayerDetails: &extractor.LayerDetails{
+					Index:       5,
+					InBaseImage: false,
+				},
+			},
+		}
+		inputs := PackagesToInputs(pkgs, PackageInputOptions{})
+		if len(inputs) != 1 {
+			t.Fatalf("expected 1 deduplicated input, got %d", len(inputs))
+		}
+		if inputs[0].LayerDetails == nil {
+			t.Fatal("expected LayerDetails to be preserved")
+		}
+		// First package's layer details should be kept
+		if inputs[0].LayerDetails.Index != 1 {
+			t.Errorf("expected first layer Index (1), got %d", inputs[0].LayerDetails.Index)
+		}
+		if !inputs[0].LayerDetails.InBaseImage {
+			t.Error("expected first InBaseImage (true)")
+		}
+	})
+}

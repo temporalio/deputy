@@ -21,6 +21,9 @@ var (
 	defaultVariableNames = []string{
 		"pkg",
 		"request",
+		"target",
+		"image",
+		"image_info", // Container image config, metadata, and build history
 		"vulnerabilities",
 		"vulnerability",
 		"jwt", // JWT claims from authenticated proxy requests
@@ -37,6 +40,19 @@ var (
 		"component",
 		"findings",
 		"change",
+		// Container diff specific variables
+		"base_image",
+		"target_image",
+		"package_changes",
+		"vulnerability_changes",
+		"config_changes",
+		"layer_analysis",
+		"summary",
+		"layer",
+		// Dockerfile specific variables
+		"dockerfile",
+		"dockerfile_analysis",
+		"stage",
 	}
 )
 
@@ -195,8 +211,204 @@ func buildPkgHelper(input map[string]any) map[string]any {
 	return pkg
 }
 
+// buildTargetHelper synthesizes a normalized target view with safe defaults.
+// It mirrors the scan/proxy target metadata when available and falls back to
+// repo/ref/commit fields when target metadata is absent.
+func buildTargetHelper(input map[string]any) map[string]any {
+	target := map[string]any{
+		"kind":          "",
+		"display":       "",
+		"ref":           "",
+		"effective_ref": "",
+		"commit":        "",
+		"origin":        "",
+		"local":         "",
+		"cloned":        false,
+		"provenance":    map[string]any{},
+	}
+	if input == nil {
+		return target
+	}
+	if src, ok := input["target"].(map[string]any); ok {
+		maps.Copy(target, src)
+	} else {
+		if repo, ok := input["repo"]; ok {
+			target["display"] = repo
+		}
+		if ref, ok := input["ref"]; ok {
+			target["ref"] = ref
+		}
+		if commit, ok := input["commit"]; ok {
+			target["commit"] = commit
+		}
+	}
+	target["provenance"] = normalizeStringMap(target["provenance"])
+	return target
+}
+
+// buildImageHelper derives normalized image metadata from request/target inputs.
+// It returns nil when no image-related data is available.
+//
+// When image_info is present (from container image scans), the helper merges
+// configuration and metadata into the image object for policy evaluation:
+//   - image.config.user - user to run as (empty = root)
+//   - image.config.is_root - true if running as root
+//   - image.config.env - environment variables
+//   - image.config.sensitive_env - env vars that may contain secrets
+//   - image.config.entrypoint - container entrypoint
+//   - image.config.cmd - default command arguments
+//   - image.config.exposed_ports - exposed ports
+//   - image.config.labels - image labels
+//   - image.metadata.architecture - CPU architecture
+//   - image.metadata.os - operating system
+//   - image.metadata.layer_count - number of layers
+//   - image.metadata.size - total size in bytes
+//   - image.history - build history entries
+func buildImageHelper(input map[string]any) map[string]any {
+	if input == nil {
+		return nil
+	}
+	src, _ := input["image"].(map[string]any)
+	req, _ := input["request"].(map[string]any)
+	tgt, _ := input["target"].(map[string]any)
+	imgInfo, _ := input["image_info"].(map[string]any)
+	var prov map[string]any
+	if tgt != nil {
+		prov, _ = tgt["provenance"].(map[string]any)
+	}
+
+	hasImage := len(src) > 0 || hasImageKeys(req) || hasImageKeys(prov) || len(imgInfo) > 0
+	if !hasImage {
+		return nil
+	}
+
+	image := map[string]any{
+		"registry":   "",
+		"repository": "",
+		"tag":        "",
+		"digest":     "",
+		"reference":  "",
+		"image":      "",
+	}
+	maps.Copy(image, src)
+	mergeImageMap(image, req)
+	mergeImageMap(image, prov)
+
+	if image["reference"] == "" {
+		if digest := stringValue(image["digest"]); digest != "" {
+			image["reference"] = digest
+		} else if tag := stringValue(image["tag"]); tag != "" {
+			image["reference"] = tag
+		}
+	}
+	if image["image"] == "" {
+		reg := stringValue(image["registry"])
+		repo := stringValue(image["repository"])
+		tag := stringValue(image["tag"])
+		digest := stringValue(image["digest"])
+		// Build full image reference: registry/repo:tag or registry/repo@digest
+		var base string
+		if reg != "" && repo != "" {
+			base = reg + "/" + repo
+		} else if repo != "" {
+			base = repo
+		}
+		if base != "" {
+			if digest != "" {
+				image["image"] = base + "@" + digest
+			} else if tag != "" {
+				image["image"] = base + ":" + tag
+			} else {
+				image["image"] = base
+			}
+		}
+	}
+
+	// Merge image_info (config, metadata, history) from container image scans
+	if len(imgInfo) > 0 {
+		if cfg, ok := imgInfo["config"].(map[string]any); ok {
+			image["config"] = cfg
+		}
+		if meta, ok := imgInfo["metadata"].(map[string]any); ok {
+			image["metadata"] = meta
+		}
+		if hist, ok := imgInfo["history"].([]any); ok {
+			image["history"] = hist
+		}
+	}
+
+	return image
+}
+
+func mergeImageMap(dst, src map[string]any) {
+	if dst == nil || src == nil {
+		return
+	}
+	setIfEmpty(dst, "registry", src["registry"])
+	setIfEmpty(dst, "repository", src["repository"])
+	setIfEmpty(dst, "tag", src["tag"])
+	setIfEmpty(dst, "digest", src["digest"])
+	setIfEmpty(dst, "reference", src["reference"])
+	setIfEmpty(dst, "image", src["image"])
+}
+
+func hasImageKeys(src map[string]any) bool {
+	if src == nil {
+		return false
+	}
+	for _, key := range []string{"registry", "repository", "tag", "digest", "reference", "image"} {
+		if stringValue(src[key]) != "" {
+			return true
+		}
+	}
+	return false
+}
+
+func setIfEmpty(dst map[string]any, key string, val any) {
+	if dst == nil {
+		return
+	}
+	if stringValue(dst[key]) != "" {
+		return
+	}
+	if v := stringValue(val); v != "" {
+		dst[key] = v
+	}
+}
+
+func stringValue(v any) string {
+	if v == nil {
+		return ""
+	}
+	if s, ok := v.(string); ok {
+		return s
+	}
+	return ""
+}
+
+func normalizeStringMap(v any) map[string]any {
+	switch t := v.(type) {
+	case map[string]any:
+		return t
+	case map[string]string:
+		out := make(map[string]any, len(t))
+		for k, v := range t {
+			out[k] = v
+		}
+		return out
+	default:
+		return map[string]any{}
+	}
+}
+
 // convertRefVal converts a CEL ref.Val to a native Go value.
+// The path parameter tracks the location in nested structures for error context.
 func convertRefVal(val ref.Val) (any, error) {
+	return convertRefValWithPath(val, "")
+}
+
+// convertRefValWithPath converts a CEL ref.Val with path tracking for better error messages.
+func convertRefValWithPath(val ref.Val, path string) (any, error) {
 	if val == nil {
 		return nil, nil
 	}
@@ -204,7 +416,11 @@ func convertRefVal(val ref.Val) (any, error) {
 	case []ref.Val:
 		out := make([]any, len(v))
 		for i, elem := range v {
-			converted, err := convertRefVal(elem)
+			elemPath := fmt.Sprintf("%s[%d]", path, i)
+			if path == "" {
+				elemPath = fmt.Sprintf("[%d]", i)
+			}
+			converted, err := convertRefValWithPath(elem, elemPath)
 			if err != nil {
 				return nil, err
 			}
@@ -214,15 +430,23 @@ func convertRefVal(val ref.Val) (any, error) {
 	case map[ref.Val]ref.Val:
 		out := make(map[string]any, len(v))
 		for mk, mv := range v {
-			keyVal, err := convertRefVal(mk)
+			keyVal, err := convertRefValWithPath(mk, path+".key")
 			if err != nil {
-				return nil, err
+				return nil, fmt.Errorf("at %s: %w", path, err)
 			}
 			keyStr, ok := keyVal.(string)
 			if !ok {
-				return nil, fmt.Errorf("policy output map keys must be strings, got %T", keyVal)
+				location := path
+				if location == "" {
+					location = "root"
+				}
+				return nil, fmt.Errorf("at %s: map keys must be strings, got %T", location, keyVal)
 			}
-			valVal, err := convertRefVal(mv)
+			valPath := path + "." + keyStr
+			if path == "" {
+				valPath = keyStr
+			}
+			valVal, err := convertRefValWithPath(mv, valPath)
 			if err != nil {
 				return nil, err
 			}
@@ -233,7 +457,11 @@ func convertRefVal(val ref.Val) (any, error) {
 		if native, err := val.ConvertToNative(anyType); err == nil {
 			return native, nil
 		}
-		return nil, fmt.Errorf("unable to convert CEL value of type %T", val.Value())
+		location := path
+		if location == "" {
+			location = "root"
+		}
+		return nil, fmt.Errorf("at %s: unable to convert CEL value of type %T", location, val.Value())
 	}
 }
 

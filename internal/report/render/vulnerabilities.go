@@ -118,6 +118,13 @@ func RenderVulnerabilityList(w io.Writer, cons []vulnerability.Consolidated, opt
 			if v.RelatedCount > 1 {
 				parts = append(parts, ui.StyleVersion.Render(fmt.Sprintf("[%d related]", v.RelatedCount)))
 			}
+			// Add layer context for container image scans
+			if v.LayerDetails != nil {
+				layerTag := formatLayerTag(v.LayerDetails)
+				if layerTag != "" {
+					parts = append(parts, ui.StyleMeta.Render(layerTag))
+				}
+			}
 			fmt.Fprintln(w, "  "+ui.StyleVersion.Render("• ")+strings.Join(parts, " "))
 
 			if v.Summary != "" && len(v.Summary) < 120 {
@@ -273,4 +280,18 @@ func renderManifestContext(w io.Writer, list []vulnerability.Consolidated) {
 			}
 		}
 	}
+}
+
+// formatLayerTag returns a concise layer context tag for container vulnerability display.
+// Examples: "[BASE layer 0]", "[layer 5]", "[APP layer 12]"
+func formatLayerTag(ld *vulnerability.LayerDetails) string {
+	if ld == nil {
+		return ""
+	}
+	var parts []string
+	if ld.InBaseImage {
+		parts = append(parts, "BASE")
+	}
+	parts = append(parts, fmt.Sprintf("layer %d", ld.Index))
+	return "[" + strings.Join(parts, " ") + "]"
 }

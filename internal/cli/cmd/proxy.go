@@ -38,6 +38,7 @@ SUPPORTED ECOSYSTEMS:
 • npm (npm registry protocol)
 • PyPI (Simple API)
 • RubyGems (Gem server API)
+• OCI (container registry API)
 
 AUTHENTICATION:
 The proxy supports JWT-based authentication via OIDC/JWKS. Configure auth in your proxy.yaml:
@@ -61,6 +62,9 @@ risky dependencies from ever entering your codebase.`,
 
   # Run pip install with policy enforcement
   deputy proxy pypi -- pip install requests
+
+  # Run docker pull with policy enforcement
+  deputy proxy oci -- docker pull ubuntu:latest
 
 STANDALONE SERVER:
   # Generate a starter configuration
@@ -132,6 +136,6 @@ AUTHENTICATION (in proxy.yaml):
 	}
 
 	registerProxyExecCommands(proxyCmd)
-	proxyCmd.AddCommand(serveCmd, templateCmd)
+	proxyCmd.AddCommand(serveCmd, templateCmd, newOCIConfigCommand())
 	root.AddCommand(proxyCmd)
 }

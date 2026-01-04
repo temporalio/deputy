@@ -23,6 +23,11 @@ type Metrics struct {
 	ScanVulns         metric.Int64Counter
 	ScanPolicyResults metric.Int64Counter
 
+	// Container image scan metrics
+	ImageScanDuration metric.Float64Histogram
+	ImageScanPackages metric.Int64Counter
+	ImageScanLayers   metric.Int64Counter
+
 	// OSV metrics
 	OSVQueries       metric.Int64Counter
 	OSVQueryDuration metric.Float64Histogram
@@ -122,6 +127,32 @@ func newMetrics() (*Metrics, error) {
 	metrics.ScanPolicyResults, err = m.Int64Counter(
 		"deputy.scan.policy_results",
 		metric.WithDescription("Policy evaluation results"),
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	// Container image scan metrics
+	metrics.ImageScanDuration, err = m.Float64Histogram(
+		"deputy.image.scan.duration",
+		metric.WithDescription("Duration of container image scan operations in seconds"),
+		metric.WithUnit("s"),
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	metrics.ImageScanPackages, err = m.Int64Counter(
+		"deputy.image.scan.packages",
+		metric.WithDescription("Number of packages extracted from container images"),
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	metrics.ImageScanLayers, err = m.Int64Counter(
+		"deputy.image.scan.layers",
+		metric.WithDescription("Number of container image layers scanned"),
 	)
 	if err != nil {
 		return nil, err
@@ -280,6 +311,13 @@ var (
 	AttrCacheTypeOSV     = attribute.String("deputy.cache.type", "osv")
 	AttrCacheTypeLicense = attribute.String("deputy.cache.type", "license")
 	AttrCacheTypeDisk    = attribute.String("deputy.cache.type", "disk")
+	AttrCacheTypeImage   = attribute.String("deputy.cache.type", "image_scan")
+
+	// Image transport attributes for container image scans
+	AttrImageTransportRemote    = attribute.String("deputy.image.transport", "remote")
+	AttrImageTransportDaemon    = attribute.String("deputy.image.transport", "docker-daemon")
+	AttrImageTransportTarball   = attribute.String("deputy.image.transport", "tarball")
+	AttrImageTransportOCILayout = attribute.String("deputy.image.transport", "oci-layout")
 )
 
 // EcosystemAttr returns an ecosystem attribute for the given ecosystem string.
@@ -398,6 +436,32 @@ func RecordProxyPolicyDenial(ctx context.Context, ecosystem, policyName string) 
 		EcosystemAttr(ecosystem),
 		attribute.String("policy", policyName),
 	))
+}
+
+// RecordImageScanMetrics records metrics for a completed container image scan.
+func RecordImageScanMetrics(ctx context.Context, duration float64, transport string, registry string, pkgCount, layerCount int) {
+	m := getMetricsForRecording("image_scan")
+	if m == nil {
+		return
+	}
+
+	attrs := []attribute.KeyValue{
+		attribute.String("deputy.image.transport", transport),
+	}
+	if registry != "" {
+		attrs = append(attrs, attribute.String("deputy.image.registry", registry))
+	}
+
+	m.ImageScanDuration.Record(ctx, duration, metric.WithAttributes(attrs...))
+	m.ImageScanPackages.Add(ctx, int64(pkgCount), metric.WithAttributes(attrs...))
+	if layerCount > 0 {
+		m.ImageScanLayers.Add(ctx, int64(layerCount), metric.WithAttributes(attrs...))
+	}
+}
+
+// ImageTransportAttr returns an image transport attribute for the given transport string.
+func ImageTransportAttr(transport string) attribute.KeyValue {
+	return attribute.String("deputy.image.transport", transport)
 }
 
 // SeverityCounts holds vulnerability counts by severity level.

@@ -194,6 +194,12 @@ func seedDefaultVariables(input map[string]any) {
 			input[name] = nil
 		}
 	}
+	if target := buildTargetHelper(input); target != nil {
+		input["target"] = target
+	}
+	if image := buildImageHelper(input); image != nil {
+		input["image"] = image
+	}
 	if val, ok := input["pkg"]; !ok || val == nil {
 		if pkg := buildPkgHelper(input); pkg != nil {
 			input["pkg"] = pkg
@@ -232,7 +238,7 @@ func compileSource(src Source) (celProgram, error) {
 	}
 	ast, iss := env.Compile(src.Body)
 	if iss != nil && iss.Err() != nil {
-		missing := parseUndeclared(iss.Err().Error())
+		missing := parseUndeclaredFromIssues(iss)
 		if len(missing) == 0 {
 			return nil, fmt.Errorf("%s: %w", src.Name, iss.Err())
 		}
@@ -252,11 +258,43 @@ func compileSource(src Source) (celProgram, error) {
 	return prog, nil
 }
 
+// undeclaredRe matches CEL "undeclared reference" error messages.
+// The pattern captures the variable name from messages like:
+//
+//	"undeclared reference to 'foo'"
+//	"undeclared reference to 'foo' (in container '')"
 var undeclaredRe = regexp.MustCompile(`undeclared reference to '([^']+)'`)
 
-// parseUndeclared extracts variable names from CEL compilation errors related
-// to undeclared references. This allows the engine to dynamically register
-// these variables in the environment.
+// parseUndeclaredFromIssues extracts undeclared variable names by iterating
+// through individual CEL compilation errors. This is more robust than parsing
+// the full error string because it accesses each error's Message field directly.
+func parseUndeclaredFromIssues(iss *cel.Issues) []string {
+	if iss == nil {
+		return nil
+	}
+	errs := iss.Errors()
+	if len(errs) == 0 {
+		return nil
+	}
+	seen := make(map[string]struct{})
+	var out []string
+	for _, e := range errs {
+		names := parseUndeclared(e.Message)
+		for _, name := range names {
+			if _, ok := seen[name]; !ok {
+				seen[name] = struct{}{}
+				out = append(out, name)
+			}
+		}
+	}
+	return out
+}
+
+// parseUndeclared extracts variable names from a CEL error message string.
+// It handles the standard CEL undeclared reference format:
+//
+//	"undeclared reference to 'varname'"
+//	"undeclared reference to 'varname' (in container '')"
 func parseUndeclared(msg string) []string {
 	matches := undeclaredRe.FindAllStringSubmatch(msg, -1)
 	var out []string

@@ -65,6 +65,7 @@ func splitLegacyVulnerability(v analysis.Vulnerability) (vulnerability.Advisory,
 		ManifestRefs:    toDomainManifestRefs(v.ManifestRefs),
 		AffectedImports: toDomainAffectedImports(v.AffectedImports),
 		Affected:        v.Affected,
+		LayerDetails:    toDomainLayerDetails(v.LayerDetails),
 	}
 	return advisory, finding
 }
@@ -207,4 +208,17 @@ func toDomainAffectedImports(imports []analysis.AffectedImport) []vulnerability.
 		})
 	}
 	return out
+}
+
+func toDomainLayerDetails(src *analysis.LayerDetails) *vulnerability.LayerDetails {
+	if src == nil {
+		return nil
+	}
+	return &vulnerability.LayerDetails{
+		Index:       src.Index,
+		DiffID:      src.DiffID,
+		ChainID:     src.ChainID,
+		Command:     src.Command,
+		InBaseImage: src.InBaseImage,
+	}
 }

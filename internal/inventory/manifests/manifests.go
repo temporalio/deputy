@@ -54,8 +54,33 @@ func DetectManager(location, purlType string) (string, string, bool) {
 		if strings.HasSuffix(base, ".gemspec") {
 			return "gem", loc, true
 		}
+		if isDockerfilePath(base) {
+			return "docker", loc, true
+		}
 	}
 	return "", "", false
+}
+
+// isDockerfilePath checks if a filename looks like a Dockerfile or Containerfile.
+func isDockerfilePath(name string) bool {
+	lower := strings.ToLower(name)
+
+	// Exact matches (case-insensitive)
+	if lower == "dockerfile" || lower == "containerfile" {
+		return true
+	}
+
+	// Extension patterns: *.dockerfile, *.containerfile
+	if strings.HasSuffix(lower, ".dockerfile") || strings.HasSuffix(lower, ".containerfile") {
+		return true
+	}
+
+	// Suffix patterns: *Dockerfile, *Containerfile (case-sensitive for suffix)
+	if strings.HasSuffix(name, "Dockerfile") || strings.HasSuffix(name, "Containerfile") {
+		return true
+	}
+
+	return false
 }
 
 // HasRuntimeDependencyGroup checks if any of the groups indicate a runtime dependency.
@@ -66,7 +91,7 @@ func HasRuntimeDependencyGroup(groups []string) bool {
 // MarksDirectByDefault returns true if the package manager considers dependencies direct by default.
 func MarksDirectByDefault(manager string) bool {
 	switch strings.ToLower(strings.TrimSpace(manager)) {
-	case "pip", "pipenv", "poetry", "gem":
+	case "pip", "pipenv", "poetry", "gem", "docker":
 		return true
 	default:
 		return false

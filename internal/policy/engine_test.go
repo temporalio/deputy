@@ -387,6 +387,65 @@ func TestParseUndeclared(t *testing.T) {
 	}
 }
 
+func TestParseUndeclaredFromIssues(t *testing.T) {
+	// Create a CEL environment with no extra variables to trigger undeclared errors
+	env, err := envWithNames(nil)
+	if err != nil {
+		t.Fatalf("envWithNames: %v", err)
+	}
+
+	tests := []struct {
+		name     string
+		expr     string
+		expected []string
+	}{
+		{
+			name:     "single undeclared",
+			expr:     "custom_var == true",
+			expected: []string{"custom_var"},
+		},
+		{
+			name:     "multiple undeclared",
+			expr:     "foo && bar && baz",
+			expected: []string{"foo", "bar", "baz"},
+		},
+		{
+			name:     "duplicate undeclared",
+			expr:     "foo && foo",
+			expected: []string{"foo"},
+		},
+		{
+			name:     "valid expression",
+			expr:     "pkg.name == 'test'",
+			expected: nil,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			_, iss := env.Compile(tc.expr)
+			result := parseUndeclaredFromIssues(iss)
+			if len(result) != len(tc.expected) {
+				t.Errorf("expected %d undeclared vars, got %d: %v", len(tc.expected), len(result), result)
+				return
+			}
+			for i, v := range tc.expected {
+				if result[i] != v {
+					t.Errorf("expected result[%d] = %q, got %q", i, v, result[i])
+				}
+			}
+		})
+	}
+}
+
+func TestParseUndeclaredFromIssues_NilSafety(t *testing.T) {
+	// Test nil safety
+	result := parseUndeclaredFromIssues(nil)
+	if result != nil {
+		t.Errorf("expected nil for nil issues, got %v", result)
+	}
+}
+
 func TestShouldSkip(t *testing.T) {
 	tests := []struct {
 		name       string

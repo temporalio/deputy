@@ -18,6 +18,7 @@ This document describes how the proxy command is structured, how it is configure
 | `deputy proxy check --config proxy.yaml` | Validate the config, verify upstream reachability, and dry‑run policies using sample requests. |
 | `deputy proxy template --ecosystem go` | Emit a starter config section for a given ecosystem. |
 | `deputy proxy inspect --url https://… --config proxy.yaml` | Run a single request through normalization + policy evaluation + upstream fetch without binding a port (great for CI). |
+| `deputy proxy oci-config --host 127.0.0.1:8084` | Emit Docker/Podman registry config snippets for the OCI proxy host. |
 
 All proxy subcommands accept the global logging flags, `--trace-http` for verbose request logs, and `--policy-bundle` to point at an explicit policy bundle instead of the one referenced by the config.
 
@@ -82,7 +83,9 @@ flowchart LR
 
 ## Configuration Model
 
-Supported ecosystems today: `go`, `npm`, `pypi`, `rubygems`. These map to the ecosystem adapters that populate `request.ecosystem` during policy evaluation.
+Supported ecosystems today: `go`, `npm`, `pypi`, `rubygems`, `oci`. These map to the ecosystem adapters that populate `request.ecosystem` during policy evaluation.
+
+OCI registry support is registry‑aware rather than Docker‑only. The exec wrapper (`deputy proxy oci`) rewrites image references only when they match the configured upstream registry host, so pulling from GHCR, ECR, Quay, or Artifactory just requires setting `--upstream` accordingly (or running multiple listeners for multiple registries).
 
 The config file is YAML or JSON (same schema). Shape:
 
@@ -156,6 +159,8 @@ Similarly, `deputy proxy template --ecosystem npm` scaffolds an npm/Node proxy c
 
 `deputy proxy template --ecosystem rubygems` does the same for the RubyGems ecosystem, wiring up `/api/...` metadata calls and `/downloads/*.gem` files to the policy engine via `rubygems_artifact_request`.
 
+For container registries, `deputy proxy template --ecosystem oci` creates a listener backed by `https://registry-1.docker.io`. OCI policies evaluate `oci_artifact_request` with image metadata and optional scan results when manifests are pulled.
+
 Key ideas:
 
 - **Multiple listeners**: one binary handles several ecosystems/ports.
@@ -220,6 +225,7 @@ The initial adapters:
 2. **PyPI** — proxies `simple/` index traffic plus `packages/...` downloads. It extracts package versions from wheel/sdist filenames, enriches requests with OSV results for the `PyPI` ecosystem, and allows policies to reject releases (e.g., block AGPL-licensed or vulnerable packages).
 3. **npm** — intercepts registry metadata (`/<pkg>`, `/-/package/...`) and tarball downloads (`/<pkg>/-/<pkg>-<version>.tgz`). Handles scoped packages (`@scope/pkg`), enriches with OSV for the npm ecosystem, and allows license/semver policies before tarballs are streamed.
 4. **RubyGems** — proxies `api/v1/...` metadata endpoints plus `/downloads/<gem>-<version>.gem` artifacts, populating vulnerability/license context so policies can gate individual gem versions.
+5. **OCI** — proxies `/v2/<repo>/manifests/<ref>` and related Registry API calls. Manifest requests may trigger image scans to populate `vulnerabilities` for the `oci_artifact_request` entrypoint, letting policies block pulls based on image provenance or scan results.
 
 Adding a new adapter mainly requires request parsing + upstream URL mapping; the policy + enrichment layers remain shared.
 

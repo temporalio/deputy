@@ -1,6 +1,7 @@
 package targets
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"slices"
@@ -26,6 +27,9 @@ func (r *registry) Register(p Provider) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.providers = append(r.providers, p)
+	slices.SortStableFunc(r.providers, func(a, b Provider) int {
+		return cmp.Compare(providerPriority(b), providerPriority(a))
+	})
 }
 
 func (r *registry) Open(ctx context.Context, target string, opts map[string]string) (Materialized, error) {
@@ -39,6 +43,13 @@ func (r *registry) Open(ctx context.Context, target string, opts map[string]stri
 		return p.Open(ctx, target, opts)
 	}
 	return Materialized{}, ErrNoProvider
+}
+
+func providerPriority(p Provider) int {
+	if prioritized, ok := p.(PriorityProvider); ok {
+		return prioritized.Priority()
+	}
+	return 0
 }
 
 // RegisterProvider adds a provider to the default registry.

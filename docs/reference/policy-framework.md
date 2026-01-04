@@ -104,6 +104,14 @@ policies:
         reason: package missing license metadata
 ```
 
+This policy works across multiple target types:
+- **Repository scans** with `--enrich-licenses`
+- **Container image scans** (OS packages have embedded license metadata)
+- **SBOM scans** (licenses preserved from generation)
+- **Proxy requests** (deps.dev lookup)
+
+See [License data sources](policy-inputs.md#license-data-sources) for details on where `pkg.licenses` data comes from.
+
 Note on `vars`: string values are CEL expressions; non-string values are treated as literal data (lists, maps, numbers). Structured YAML is the supported authoring format; `deputy policy eval` expects raw CEL and is best used for ad hoc evaluation.
 
 ## Actions and enforcement
@@ -183,6 +191,7 @@ Deputy enables CEL optional types (null-safe `?.` access and `.orValue()`) and r
 
 - `now()` and `age()` for time-based checks
 - `levenshtein()` and `levenshteinWithin()` for string distance checks
+- `purl()` for parsing Package URLs into fields
 
 CEL macros available in policy expressions: `has`, `exists`, `map`, `filter`.
 
@@ -205,6 +214,7 @@ Deputy helper functions:
 | `levenshteinWithin` | `levenshteinWithin(string, string, int) bool` | True if distance within limit. |
 | `now` | `now() timestamp` | Current time as a timestamp. |
 | `age` | `age(int\|timestamp) duration` | Time since Unix seconds or timestamp. |
+| `purl` | `purl(string) map` | Parse a Package URL into fields (or null when invalid). |
 | `timestamp` | `timestamp(int\|string) timestamp` | CEL built-in: Unix seconds or RFC 3339. |
 | `duration` | `duration(string) duration` | CEL built-in: parse duration strings. |
 

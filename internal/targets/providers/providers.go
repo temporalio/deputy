@@ -19,11 +19,20 @@ import (
 func init() {
 	targets.RegisterProvider(localGitProvider{})
 	targets.RegisterProvider(localDirProvider{})
+	targets.RegisterProvider(containerImageProvider{})
 	targets.RegisterProvider(remoteGitProvider{})
 }
 
+const (
+	priorityLocalGit  = 100
+	priorityLocalDir  = 50
+	priorityRemoteGit = 10
+)
+
 // localGitProvider implements [targets.Provider] for local Git repositories.
 type localGitProvider struct{}
+
+func (localGitProvider) Priority() int { return priorityLocalGit }
 
 // Detect returns true if the target path exists and is a Git repository.
 func (localGitProvider) Detect(_ context.Context, target string) bool {
@@ -72,6 +81,8 @@ func (localGitProvider) Open(ctx context.Context, target string, opts map[string
 // localDirProvider implements [targets.Provider] for local directories.
 type localDirProvider struct{}
 
+func (localDirProvider) Priority() int { return priorityLocalDir }
+
 // Detect returns true if the target path exists and is a directory.
 func (localDirProvider) Detect(_ context.Context, target string) bool {
 	path := targetPath(target)
@@ -112,6 +123,8 @@ func (localDirProvider) Open(ctx context.Context, target string, opts map[string
 
 // remoteGitProvider implements [targets.Provider] for remote Git repositories.
 type remoteGitProvider struct{}
+
+func (remoteGitProvider) Priority() int { return priorityRemoteGit }
 
 // Detect returns true if the target looks like a remote Git URL.
 func (remoteGitProvider) Detect(_ context.Context, target string) bool {

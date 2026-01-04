@@ -85,6 +85,22 @@ func TestEnvPreparers(t *testing.T) {
 				cleanup()
 			},
 		},
+		{
+			name:     "oci",
+			prep:     prepareOCIEnv,
+			proxyURL: "http://127.0.0.1:8123",
+			validate: func(t *testing.T, env []string, cleanup func()) {
+				if cleanup != nil {
+					t.Fatalf("expected nil cleanup")
+				}
+				if !containsEnv(env, "DEPUTY_OCI_PROXY=http://127.0.0.1:8123") {
+					t.Fatalf("missing proxy env: %v", env)
+				}
+				if !containsEnv(env, "DEPUTY_OCI_PROXY_HOST=127.0.0.1:8123") {
+					t.Fatalf("missing proxy host env: %v", env)
+				}
+			},
+		},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -98,6 +114,67 @@ func TestEnvPreparers(t *testing.T) {
 			}
 			test.validate(t, env, cleanup)
 		})
+	}
+}
+
+func TestRewriteOCICommand(t *testing.T) {
+	out, err := rewriteOCICommand("http://127.0.0.1:5555", "https://registry-1.docker.io", []string{"docker", "pull", "ubuntu:latest"})
+	if err != nil {
+		t.Fatalf("rewrite error: %v", err)
+	}
+	if len(out) != 3 {
+		t.Fatalf("unexpected args: %v", out)
+	}
+	if out[2] != "127.0.0.1:5555/library/ubuntu:latest" {
+		t.Fatalf("rewrote %q", out[2])
+	}
+
+	unchanged, err := rewriteOCICommand("http://127.0.0.1:5555", "https://registry-1.docker.io", []string{"docker", "pull", "ghcr.io/acme/app:1.0"})
+	if err != nil {
+		t.Fatalf("rewrite error: %v", err)
+	}
+	if unchanged[2] != "ghcr.io/acme/app:1.0" {
+		t.Fatalf("expected unchanged ref, got %q", unchanged[2])
+	}
+
+	ghcr, err := rewriteOCICommand("http://127.0.0.1:5555", "https://ghcr.io", []string{"podman", "pull", "ghcr.io/acme/app:1.0"})
+	if err != nil {
+		t.Fatalf("rewrite error: %v", err)
+	}
+	if ghcr[2] != "127.0.0.1:5555/acme/app:1.0" {
+		t.Fatalf("rewrote %q", ghcr[2])
+	}
+
+	oci, err := rewriteOCICommand("http://127.0.0.1:5555", "https://ghcr.io", []string{"nerdctl", "pull", "oci://ghcr.io/acme/app:1.0"})
+	if err != nil {
+		t.Fatalf("rewrite error: %v", err)
+	}
+	if oci[2] != "oci://127.0.0.1:5555/acme/app:1.0" {
+		t.Fatalf("rewrote %q", oci[2])
+	}
+
+	dockerHub, err := rewriteOCICommand("http://127.0.0.1:5555", "https://registry-1.docker.io", []string{"docker", "pull", "registry-1.docker.io/library/ubuntu:latest"})
+	if err != nil {
+		t.Fatalf("rewrite error: %v", err)
+	}
+	if dockerHub[2] != "127.0.0.1:5555/library/ubuntu:latest" {
+		t.Fatalf("rewrote %q", dockerHub[2])
+	}
+
+	noScheme, err := rewriteOCICommand("http://127.0.0.1:5555", "ghcr.io", []string{"docker", "pull", "ghcr.io/acme/app:1.0"})
+	if err != nil {
+		t.Fatalf("rewrite error: %v", err)
+	}
+	if noScheme[2] != "127.0.0.1:5555/acme/app:1.0" {
+		t.Fatalf("rewrote %q", noScheme[2])
+	}
+
+	alreadyProxy, err := rewriteOCICommand("http://127.0.0.1:5555", "https://registry-1.docker.io", []string{"docker", "pull", "127.0.0.1:5555/library/ubuntu:latest"})
+	if err != nil {
+		t.Fatalf("rewrite error: %v", err)
+	}
+	if alreadyProxy[2] != "127.0.0.1:5555/library/ubuntu:latest" {
+		t.Fatalf("expected unchanged ref, got %q", alreadyProxy[2])
 	}
 }
 

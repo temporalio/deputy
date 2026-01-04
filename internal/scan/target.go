@@ -20,6 +20,7 @@ import (
 
 type resolvedTarget struct {
 	mat           targets.Materialized
+	kind          targets.Kind
 	workspace     workspace.FS
 	localRepoPath string
 	displayPath   string
@@ -47,7 +48,7 @@ func resolveTarget(ctx context.Context, targetInput, ref string) (*resolvedTarge
 	mat, err := targets.Open(ctx, targetInput, mOpts)
 	if err != nil {
 		if errors.Is(err, targets.ErrNoProvider) {
-			return nil, fmt.Errorf("could not interpret repo %q as local path or remote URL", targetInput)
+			return nil, fmt.Errorf("could not interpret target %q as local path or remote Git URL", targetInput)
 		}
 		return nil, err
 	}
@@ -90,6 +91,7 @@ func resolveTarget(ctx context.Context, targetInput, ref string) (*resolvedTarge
 
 	return &resolvedTarget{
 		mat:           mat,
+		kind:          mat.Meta.Kind,
 		workspace:     ws,
 		localRepoPath: localRepoPath,
 		displayPath:   displayPath,

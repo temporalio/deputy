@@ -14,6 +14,7 @@ type (
 	AffectedImport            = vuln.AffectedImport
 	VulnerabilityStats        = vuln.VulnerabilityStats
 	VulnFilter                = vuln.VulnFilter
+	LayerDetails              = vuln.LayerDetails
 
 	Severity     = vuln.Severity
 	SeverityType = vuln.SeverityType

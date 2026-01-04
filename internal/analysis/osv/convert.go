@@ -44,6 +44,7 @@ func ProcessOSVVulnerabilityDomain(vuln osvschema.Vulnerability, input PkgInput)
 		Direct:       input.IsDirect,
 		Locations:    slices.Clone(input.Locations),
 		ManifestRefs: toDomainManifestRefs(input.ManifestRefs),
+		LayerDetails: toDomainLayerDetails(input.LayerDetails),
 	}
 
 	if !vuln.Published.IsZero() {
@@ -309,6 +310,7 @@ func flattenAdvisoryFinding(advisory vulnerability.Advisory, finding vulnerabili
 			}
 			return maps.Clone(advisory.DatabaseSpecific)
 		}(),
+		LayerDetails: toVulnLayerDetails(finding.LayerDetails),
 	}
 }
 
@@ -368,4 +370,46 @@ func toLegacyAffectedImports(imports []vulnerability.AffectedImport) []AffectedI
 		})
 	}
 	return out
+}
+
+// toDomainLayerDetails converts OSV package LayerDetails to the vulnerability domain type.
+func toDomainLayerDetails(ld *LayerDetails) *vulnerability.LayerDetails {
+	if ld == nil {
+		return nil
+	}
+	return &vulnerability.LayerDetails{
+		Index:       ld.Index,
+		DiffID:      ld.DiffID,
+		ChainID:     ld.ChainID,
+		Command:     ld.Command,
+		InBaseImage: ld.InBaseImage,
+	}
+}
+
+// toLegacyLayerDetails converts domain LayerDetails to the legacy OSV type.
+func toLegacyLayerDetails(ld *vulnerability.LayerDetails) *LayerDetails {
+	if ld == nil {
+		return nil
+	}
+	return &LayerDetails{
+		Index:       ld.Index,
+		DiffID:      ld.DiffID,
+		ChainID:     ld.ChainID,
+		Command:     ld.Command,
+		InBaseImage: ld.InBaseImage,
+	}
+}
+
+// toVulnLayerDetails converts domain LayerDetails to vuln.LayerDetails for the Vulnerability struct.
+func toVulnLayerDetails(ld *vulnerability.LayerDetails) *vuln.LayerDetails {
+	if ld == nil {
+		return nil
+	}
+	return &vuln.LayerDetails{
+		Index:       ld.Index,
+		DiffID:      ld.DiffID,
+		ChainID:     ld.ChainID,
+		Command:     ld.Command,
+		InBaseImage: ld.InBaseImage,
+	}
 }

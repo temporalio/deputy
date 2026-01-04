@@ -258,7 +258,8 @@ func AllScalibrPrefixes() []string {
 	// Additional prefixes for ecosystems Deputy supports via other mechanisms:
 	// - github: GitHub Actions (Deputy's custom plugin at internal/inventory/plugins/github/actionsx)
 	// - haskell, r, cpp: Ecosystems supported by OSV-SCALIBR but without dedicated Ecosystem constants
-	extras := []string{"github", "haskell", "r", "cpp"}
+	// - os: OS-level package managers (dpkg, apk, rpm, etc.) for container image scanning
+	extras := []string{"github", "haskell", "r", "cpp", "os"}
 	for _, prefix := range extras {
 		if _, ok := seen[prefix]; !ok {
 			seen[prefix] = struct{}{}

@@ -48,6 +48,27 @@ type Vulnerability struct {
 	AffectedImports []AffectedImport
 	// DatabaseSpecific holds string metadata from OSV (e.g., review_status, url).
 	DatabaseSpecific map[string]string
+	// LayerDetails contains information about the container image layer where
+	// the vulnerable package was found. Nil for non-container-image scans.
+	LayerDetails *LayerDetails
+}
+
+// LayerDetails stores details about the container image layer where a package was found.
+// This information is populated when scanning container images and enables layer-aware
+// vulnerability analysis, base image detection, and layer-specific policy evaluation.
+type LayerDetails struct {
+	// Index is the position of the layer in the image (0 = oldest/base layer).
+	Index int `json:"index"`
+	// DiffID is the digest of the uncompressed layer content.
+	DiffID string `json:"diffId,omitempty"`
+	// ChainID is the cumulative hash identifying this layer in context of its parents.
+	// See: https://github.com/opencontainers/image-spec/blob/main/config.md#layer-chainid
+	ChainID string `json:"chainId,omitempty"`
+	// Command is the Dockerfile instruction that created this layer (e.g., "RUN apt-get install...").
+	Command string `json:"command,omitempty"`
+	// InBaseImage indicates whether this layer is part of the base image (FROM instruction).
+	// This is determined by heuristics based on layer history and common base image patterns.
+	InBaseImage bool `json:"inBaseImage,omitempty"`
 }
 
 // ConsolidatedVulnerability represents a deduplicated vulnerability record formed by

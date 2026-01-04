@@ -25,6 +25,7 @@ flowchart TB
   end
 
   subgraph Support["Support Packages"]
+    Targets[internal/targets]
     Git[internal/gitutil]
     PURL[internal/purlx]
     Out[internal/output]
@@ -39,7 +40,7 @@ flowchart TB
 
   Main --> CLI
   CLI --> CMD
-  CMD --> Inv & Analysis & Remed & SBOM & Policy & Proxy
+  CMD --> Inv & Analysis & Remed & SBOM & Policy & Proxy & Targets
   Inv --> PURL & Git
   Analysis --> OSV
   SBOM --> DepsD & GH
@@ -81,6 +82,24 @@ flowchart TB
   class Manifests source
   class Inv,Scan,SBOM,Diff,Proxy process
   class Packages output
+```
+
+### Target Resolution and Materialization
+
+Targets are resolved through `internal/targets` before inventory extraction:
+
+- Providers detect the target kind (repo, dir, sbom, artifact, etc.).
+- Providers materialize a filesystem view, an SBOM payload, or both.
+- Scan/SBOM commands consume the materialized target to build inventory.
+- New target kinds only need a provider plus any inventory adapters.
+
+```mermaid
+flowchart LR
+  Input["Target string"] --> Registry["targets.Registry"]
+  Registry --> Provider["targets.Provider"]
+  Provider --> Mat["targets.Materialized"]
+  Mat --> Inventory["inventory"]
+  Mat --> SBOM["sbom/scan"]
 ```
 
 ### Non-Destructive Git Operations
@@ -186,6 +205,7 @@ Deputy keeps pure domain logic separate from service integrations:
 | Package | Purpose |
 |---------|---------|
 | `internal/gitutil` | Git operations via go-git |
+| `internal/targets` | Target detection + materialization |
 | `internal/purlx` | PURL parsing and normalization |
 | `internal/output` | Output formatting (table, JSON) |
 | `internal/config` | Configuration loading |

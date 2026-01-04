@@ -157,3 +157,63 @@ func Test_isHighOrCritical(t *testing.T) {
 		})
 	}
 }
+
+func Test_ProcessOSVVulnerability_LayerDetails(t *testing.T) {
+	vuln := osvschema.Vulnerability{
+		ID:      "CVE-2024-1234",
+		Summary: "Test vulnerability with layer details",
+	}
+	input := PkgInput{
+		Name:      "openssl",
+		Version:   "1.1.1k-1ubuntu1",
+		Ecosystem: "Debian:11",
+		IsDirect:  false,
+		LayerDetails: &LayerDetails{
+			Index:       2,
+			DiffID:      "sha256:abc123",
+			ChainID:     "sha256:def456",
+			Command:     "RUN apt-get install -y openssl",
+			InBaseImage: true,
+		},
+	}
+
+	out := ProcessOSVVulnerability(vuln, input)
+
+	if out.LayerDetails == nil {
+		t.Fatal("expected LayerDetails to be populated, got nil")
+	}
+	if out.LayerDetails.Index != 2 {
+		t.Errorf("LayerDetails.Index = %d, want 2", out.LayerDetails.Index)
+	}
+	if out.LayerDetails.DiffID != "sha256:abc123" {
+		t.Errorf("LayerDetails.DiffID = %q, want %q", out.LayerDetails.DiffID, "sha256:abc123")
+	}
+	if out.LayerDetails.ChainID != "sha256:def456" {
+		t.Errorf("LayerDetails.ChainID = %q, want %q", out.LayerDetails.ChainID, "sha256:def456")
+	}
+	if out.LayerDetails.Command != "RUN apt-get install -y openssl" {
+		t.Errorf("LayerDetails.Command = %q, want %q", out.LayerDetails.Command, "RUN apt-get install -y openssl")
+	}
+	if !out.LayerDetails.InBaseImage {
+		t.Error("LayerDetails.InBaseImage = false, want true")
+	}
+}
+
+func Test_ProcessOSVVulnerability_NilLayerDetails(t *testing.T) {
+	vuln := osvschema.Vulnerability{
+		ID:      "CVE-2024-5678",
+		Summary: "Test vulnerability without layer details",
+	}
+	input := PkgInput{
+		Name:         "lodash",
+		Version:      "4.17.20",
+		Ecosystem:    "npm",
+		LayerDetails: nil, // Non-container scan
+	}
+
+	out := ProcessOSVVulnerability(vuln, input)
+
+	if out.LayerDetails != nil {
+		t.Errorf("expected LayerDetails to be nil for non-container scan, got %+v", out.LayerDetails)
+	}
+}

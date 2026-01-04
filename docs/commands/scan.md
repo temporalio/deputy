@@ -1,13 +1,15 @@
 # `deputy scan`
 
-Scan repositories, directories, or SBOM files for known vulnerabilities using OSV.
+Scan repositories, directories, container images, PURLs, or SBOM files for known vulnerabilities using OSV.
 
 ## Synopsis
 
 ```
-deputy scan [repo] [flags]
+deputy scan [target] [flags]
 deputy scan dir <directory> [flags]
 deputy scan sbom <sbom-file> [flags]
+deputy scan purl <purl> [flags]
+deputy scan image <image-ref> [flags]
 ```
 
 ## How Scan Works
@@ -18,6 +20,7 @@ flowchart LR
         Repo["Repository"]
         Dir["Directory"]
         SBOM["SBOM file"]
+        Artifact["Artifact (binary, image, etc.)"]
     end
 
     subgraph Process["Process"]
@@ -33,7 +36,7 @@ flowchart LR
         JSON["JSON report"]
     end
 
-    Repo & Dir & SBOM --> Resolve
+    Repo & Dir & SBOM & Artifact --> Resolve
     Resolve --> Extract
     Extract --> Query
     Query --> Enrich
@@ -44,10 +47,13 @@ flowchart LR
     classDef process fill:#e8f5e9,stroke:#2e7d32
     classDef output fill:#f3e5f5,stroke:#7b1fa2
 
-    class Repo,Dir,SBOM source
+    class Repo,Dir,SBOM,Artifact source
     class Resolve,Extract,Query,Enrich,Policy process
     class Text,JSON output
 ```
+
+Target resolution is extensible via `internal/targets`, so new artifact types
+can plug into the same scan flow as providers are added.
 
 ## When to Use
 
@@ -71,6 +77,8 @@ flowchart LR
 | `--ecosystems` | `-e` | all | Limit to specific ecosystems (see [supported ecosystems](#supported-ecosystems)) |
 | `--show-symbols` | | `false` | Show affected symbols in text output |
 | `--show-db-info` | | `false` | Show database metadata (e.g., review_status) |
+| `--source` | | auto | Target source override: `auto`, `git`, `dir`, `sbom`, `purl`, `dockerfile`, `remote`, `docker-daemon`, `tarball` |
+| `--platform` | | | Platform for remote images (`os/arch[/variant]`) |
 
 ### Date Format
 
@@ -81,7 +89,7 @@ Date flags accept: `YYYY`, `YYYY-MM`, `YYYY-MM-DD`, or RFC3339.
 ### Basic Scanning
 
 ```console
-# Scan current repo at HEAD
+# Scan current repo at HEAD (or current directory if not a repo)
 $ deputy scan
 
 # Scan at a specific ref
@@ -93,6 +101,28 @@ $ deputy scan --ref WORKING
 # Scan a remote repository
 $ deputy scan github.com/hashicorp/vault --ref v1.16.0
 ```
+
+### Target Resolution Order
+
+When you run `deputy scan [target]` without a subcommand, Deputy resolves the
+input in this order:
+
+1. PURLs (`pkg:` prefix)
+2. Explicit image schemes (`docker://`, `oci://`, `docker-daemon://`, `tarball://`)
+3. SBOM stdin (`-`)
+4. Existing paths (Git repo → repo scan, directory → dir scan, file → SBOM scan)
+5. Container image references (including Docker Hub short names)
+6. Remote Git repositories (`github.com/owner/repo`, `https://...`)
+
+If the target is not Git-related, `--ref` is ignored with a warning.
+
+### Ambiguity Rules
+
+- Two-segment Docker Hub short names without a tag or digest (for example
+  `owner/repo`) are considered ambiguous.
+- Use `docker://owner/repo:tag` (or `docker.io/owner/repo:tag`) for images.
+- Use `github.com/owner/repo` for GitHub repositories.
+- Use `--source remote` to force image resolution when needed.
 
 ### Output Formats
 
@@ -166,7 +196,134 @@ $ deputy scan sbom sbom.spdx.json
 
 # Scan SBOM from stdin
 $ deputy sbom --format protobom-json | deputy scan sbom -
+
+# Scan SBOMs that include container image PURLs (docker/oci)
+$ deputy scan sbom sbom-with-images.cdx.json
+
+# Include a platform qualifier in SBOM image PURLs:
+# pkg:docker/library/alpine@3.19?platform=linux/amd64
+
+# Apply license policies to SBOM components
+$ deputy scan sbom sbom.cdx.json --policy policy/license-allowlist.yaml
 ```
+
+When scanning SBOMs, license data embedded in components (CycloneDX `licenses`,
+SPDX `licenseConcluded`, Protobom `licenses`) is extracted and available via
+`pkg.licenses` in policy expressions. This enables license compliance policies
+on pre-generated SBOMs.
+
+### Container Images
+
+```console
+# Scan a remote image (registry)
+$ deputy scan ghcr.io/owner/app:1.2.3
+$ deputy scan image docker://ghcr.io/owner/app:1.2.3
+$ deputy scan image oci://ghcr.io/owner/app@sha256:...
+
+# Scan a local Docker daemon image
+$ deputy scan image docker-daemon://app:latest
+
+# Scan an image tarball (Docker save format)
+$ deputy scan image tarball:///tmp/image.tar
+
+# Scan an OCI image layout directory
+$ deputy scan image oci-layout:///tmp/image-layout
+
+# Resolve source without explicit scheme
+$ deputy scan image ghcr.io/owner/app:1.2.3
+$ deputy scan image --source docker-daemon app:latest
+$ deputy scan image --source tarball ./image.tar
+
+# Docker Hub short names (implicit registry)
+$ deputy scan alpine
+$ deputy scan alpine:3.18
+$ deputy scan library/ubuntu:latest
+```
+
+Image-specific flags:
+
+- `--source` = `remote` | `docker-daemon` | `tarball`
+- `--platform` = `os/arch[/variant]` (remote images only)
+
+Short names are normalized using Docker reference rules. Use explicit tags or
+digests if you want to avoid defaulting to `latest` or the Docker Hub namespace.
+
+#### Registry Authentication
+
+Deputy uses the Docker credential keychain for registry authentication. This supports:
+
+- **Docker config file**: `~/.docker/config.json` credentials
+- **Credential helpers**: `gcloud`, `ecr-login`, `docker-credential-pass`, etc.
+- **Environment variables**: `DOCKER_CONFIG` to specify config location
+
+**Common registry setups:**
+
+```bash
+# Docker Hub (credentials stored after `docker login`)
+$ deputy scan library/nginx:latest
+
+# GitHub Container Registry
+$ echo $GITHUB_TOKEN | docker login ghcr.io -u USERNAME --password-stdin
+$ deputy scan ghcr.io/owner/app:v1.0.0
+
+# AWS ECR (requires aws-cli and ecr-login helper)
+$ aws ecr get-login-password | docker login --username AWS --password-stdin 123456789.dkr.ecr.us-east-1.amazonaws.com
+$ deputy scan 123456789.dkr.ecr.us-east-1.amazonaws.com/app:latest
+
+# Google Artifact Registry (requires gcloud)
+$ gcloud auth configure-docker us-docker.pkg.dev
+$ deputy scan us-docker.pkg.dev/project/repo/image:tag
+
+# Azure Container Registry
+$ az acr login --name myregistry
+$ deputy scan myregistry.azurecr.io/app:latest
+```
+
+**Troubleshooting authentication:**
+
+- Verify credentials work: `docker pull <image>` should succeed
+- Check `~/.docker/config.json` for the registry entry
+- For CI, use service account credentials or workload identity
+- Set `DEPUTY_LOG_LEVEL=debug` for detailed auth logging
+
+### PURLs
+
+```console
+# Scan a single package via PURL
+$ deputy scan pkg:npm/lodash@4.17.21
+$ deputy scan purl pkg:npm/lodash@4.17.21
+$ deputy scan purl pkg:golang/github.com/gin-gonic/gin@v1.9.0
+```
+
+### Dockerfiles
+
+```console
+# Scan a Dockerfile for policy violations
+$ deputy scan Dockerfile
+$ deputy scan Dockerfile.prod
+$ deputy scan --source dockerfile /path/to/containerfile
+
+# With security policies
+$ deputy scan Dockerfile --policy policy/examples/dockerfile-security.yaml
+
+# JSON output
+$ deputy scan Dockerfile --format json
+```
+
+Dockerfile scanning performs static analysis without pulling images. It checks:
+
+- Base image configuration (registries, tags, digests)
+- User privileges (root vs non-root)
+- Sensitive environment variables
+- Build best practices (HEALTHCHECK, WORKDIR, etc.)
+- Multi-stage build patterns
+
+Detected filename patterns:
+- `Dockerfile`, `Containerfile` (exact)
+- `Dockerfile.*`, `Containerfile.*` (variants)
+- `*.dockerfile`, `*.containerfile` (suffixes)
+
+See [Dockerfile scanning guide](../guides/dockerfile.md) for policy examples and variables.
 
 ### With Policies
 

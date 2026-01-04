@@ -143,6 +143,12 @@ deputy scan github.com/owner/repo              # scan remote repo
 deputy scan --ref v1.0.0                       # scan specific Git ref
 deputy scan --format json                      # JSON output
 
+# Container image scanning
+deputy scan nginx:1.25                         # scan remote image
+deputy scan ghcr.io/owner/app:v1.0.0           # scan GHCR image
+deputy scan docker-daemon://myapp:latest       # scan local daemon image
+deputy scan --platform linux/amd64 alpine:3.19 # specific platform
+
 # Remediation
 deputy fix                                     # show remediation plan
 deputy fix --apply .                           # apply fixes to directory
@@ -151,9 +157,14 @@ deputy fix --apply .                           # apply fixes to directory
 deputy diff main HEAD                          # diff main vs HEAD
 deputy diff v1.0.0 v2.0.0                      # diff two tags
 
+# Compare container images
+deputy diff nginx:1.24 nginx:1.25              # diff image versions
+deputy diff docker-daemon://app:dev ghcr.io/org/app:prod
+
 # Generate SBOM
 deputy sbom --format cyclonedx-json --output sbom.json
 deputy sbom --format spdx-json --output sbom.spdx.json
+deputy sbom docker://nginx:1.25 --format cyclonedx-json  # image SBOM
 
 # List dependencies
 deputy list                                    # list all dependencies
@@ -167,6 +178,7 @@ deputy policy lsp                              # language server
 # Proxy (enforce policies at download time)
 deputy proxy go -- go get github.com/pkg
 deputy proxy npm -- npm install lodash
+deputy proxy oci --config oci-proxy.yaml       # OCI registry proxy
 ```
 
 ## Project Structure
@@ -300,6 +312,27 @@ Represents a single vulnerability affecting a package. Available in the [`scan_v
 | `severity` | `string` | `CRITICAL`, `HIGH`, `MEDIUM`, `LOW` | `"CRITICAL"` |
 | `isDirect` | `bool` | If the vulnerability is in a direct dependency | `true` |
 | `fixedVersions` | `list(string)` | Versions containing a fix | `["2.15.0"]` |
+| `layerDetails` | `object` | Container image layer info (nil for non-image scans) | see below |
+
+**Layer Details (container images only):**
+
+When scanning container images, `vulnerability.layerDetails` provides information about which layer introduced the vulnerable package:
+
+| Field | Type | Description | Example Value |
+|---|---|---|---|
+| `layerDetails.index` | `int` | Layer position (0 = oldest/base layer) | `2` |
+| `layerDetails.diffId` | `string` | Digest of uncompressed layer content | `"sha256:abc..."` |
+| `layerDetails.chainId` | `string` | Cumulative layer chain ID (see below) | `"sha256:def..."` |
+| `layerDetails.command` | `string` | Dockerfile instruction that created layer | `"RUN apt-get install..."` |
+| `layerDetails.inBaseImage` | `bool` | Whether layer is from base image (FROM) | `true` |
+
+**Understanding ChainID:**
+
+The `chainId` uniquely identifies a layer in the context of all its parent layers, per the [OCI Image Spec](https://github.com/opencontainers/image-spec/blob/main/config.md#layer-chainid). Unlike `diffId` (which identifies layer content), `chainId` is calculated as:
+- For the first layer: `chainId = diffId`
+- For subsequent layers: `chainId = sha256(parentChainId + " " + diffId)`
+
+Use `chainId` when you need to identify a specific layer stack (e.g., for caching or comparing layers across images with shared bases). Use `diffId` when you only care about the layer content itself.
 
 **Example Expressions for `vulnerability`:**
 
@@ -313,6 +346,17 @@ Represents a single vulnerability affecting a package. Available in the [`scan_v
     `(!has(vulnerability.fixedVersions) || vulnerability.fixedVersions.size() == 0) && (has(vulnerability.severity) && vulnerability.severity in ['HIGH', 'CRITICAL'])`
 *   Deny if a vulnerability has no fix and is `HIGH` or `CRITICAL` (using optionals):
     `size(vulnerability.?fixedVersions.orValue([])) == 0 && vulnerability.?severity.orValue('').upperAscii() in ['HIGH', 'CRITICAL']`
+
+**Layer-Aware Examples (container images):**
+
+*   Block critical vulnerabilities in base image layers:
+    `has(vulnerability.layerDetails) && vulnerability.layerDetails.inBaseImage && vulnerability.severity == 'CRITICAL'`
+*   Warn on vulnerabilities from application layers (not base image):
+    `has(vulnerability.layerDetails) && !vulnerability.layerDetails.inBaseImage && vulnerability.severity in ['HIGH', 'CRITICAL']`
+*   Detect vulnerabilities from apt-get install commands:
+    `has(vulnerability.layerDetails) && vulnerability.layerDetails.command.contains('apt-get install')`
+*   Flag vulnerabilities in early base layers (likely system packages):
+    `has(vulnerability.layerDetails) && vulnerability.layerDetails.index < 3 && vulnerability.severity == 'CRITICAL'`
 
 ---
 
@@ -328,6 +372,182 @@ A list of all `vulnerability` objects found in a scan report. Available in the [
     `vulnerabilities.size() > 5`
 *   Deny if all vulnerabilities are high severity (a strange but possible policy):
     `vulnerabilities.all(v, v.severity == 'HIGH')`
+
+---
+
+#### `image` object
+
+Contains container image configuration and metadata when scanning container images. Available in [`scan_report`](internal/policy/entrypoints.go#L16), [`scan_vulnerability`](internal/policy/entrypoints.go#L18), and [`oci_artifact_request`](internal/policy/entrypoints.go) entrypoints.
+
+The `image` object combines provenance data (registry, repository, tag, digest) with extracted configuration (`image.config`) and metadata (`image.metadata`) when available. For advanced use cases, the same data is also available via `image_info` which contains only the extracted config/metadata/history (without provenance).
+
+**Image Configuration Availability by Transport:**
+
+The availability of `image.config` and `image.metadata` depends on how the image is loaded:
+
+| Transport | Scheme | `image.config` | `image.metadata` | Notes |
+|-----------|--------|----------------|------------------|-------|
+| Remote Registry | `docker://`, `oci://`, `container://` | Yes | Yes | Full config available via v1.Image API |
+| Docker Daemon | `docker-daemon://` | No | Partial | Config extraction not supported; use remote pull for full analysis |
+| Tarball | `tarball://` | No | Partial | Config extraction not supported for Docker image tarballs |
+| OCI Archive | `oci-archive://` | No | Partial | Config extraction not supported for OCI archive tarballs |
+| OCI Layout | `oci-layout://` | No | Partial | Config extraction not supported for OCI layout directories |
+
+For full image configuration analysis, pull images from remote registries. When `image.config` is unavailable, the `image` variable will still be populated with basic metadata (registry, repository, tag, digest) from the request or target provenance.
+
+**Image Configuration (`image.config`):**
+
+Extracted from the container image's configuration (Dockerfile settings):
+
+| Field | Type | Description | Example Value |
+|---|---|---|---|
+| `config.user` | `string` | User to run as (empty = root) | `"nobody"` |
+| `config.is_root` | `bool` | Whether running as root | `true` |
+| `config.env` | `list(string)` | Environment variables | `["PATH=/usr/bin"]` |
+| `config.sensitive_env` | `list(string)` | Env vars that may contain secrets | `["API_KEY"]` |
+| `config.entrypoint` | `list(string)` | Container entrypoint command | `["/app"]` |
+| `config.cmd` | `list(string)` | Default command arguments | `["serve"]` |
+| `config.exposed_ports` | `list(string)` | Exposed ports | `["8080/tcp"]` |
+| `config.volumes` | `list(string)` | Defined volumes | `["/data"]` |
+| `config.labels` | `map(string)` | Image labels | `{"version": "1.0"}` |
+| `config.working_dir` | `string` | Working directory | `"/app"` |
+| `config.healthcheck` | `object` | Healthcheck configuration (if defined) | see below |
+
+**Healthcheck Configuration (`image.config.healthcheck`):**
+
+When a container image defines a HEALTHCHECK instruction, the following fields are available:
+
+| Field | Type | Description | Example Value |
+|---|---|---|---|
+| `healthcheck.test` | `list(string)` | Health check command (`["CMD", "curl", "-f", "http://localhost/"]`) | `["CMD-SHELL", "curl -f http://localhost/health"]` |
+| `healthcheck.interval` | `string` | Time between checks (Go duration format) | `"30s"` |
+| `healthcheck.timeout` | `string` | Timeout for each check (Go duration format) | `"10s"` |
+| `healthcheck.retries` | `int` | Consecutive failures before unhealthy | `3` |
+
+**Note:** `healthcheck` is `null` if no HEALTHCHECK is defined in the image.
+
+**Image Metadata (`image.metadata`):**
+
+| Field | Type | Description | Example Value |
+|---|---|---|---|
+| `metadata.architecture` | `string` | CPU architecture | `"amd64"` |
+| `metadata.os` | `string` | Operating system | `"linux"` |
+| `metadata.layer_count` | `int` | Number of layers | `15` |
+| `metadata.size` | `int` | Total size in bytes | `104857600` |
+| `metadata.created` | `int` | Creation timestamp (Unix) | `1704067200` |
+| `metadata.digest` | `string` | Image digest | `"sha256:abc..."` |
+
+**Image History (`image.history`):**
+
+List of build history entries showing Dockerfile commands:
+
+| Field | Type | Description |
+|---|---|---|
+| `history[].created_by` | `string` | Command that created the layer |
+| `history[].created` | `int` | Creation timestamp (Unix) |
+| `history[].empty_layer` | `bool` | Whether this is a metadata-only layer |
+
+**Example Expressions for `image`:**
+
+*   Block images running as root:
+    `has(image.config) && image.config.is_root == true`
+*   Block images with secrets in environment variables:
+    `has(image.config) && size(image.config.sensitive_env) > 0`
+*   Require healthcheck for production images:
+    `has(image.config) && !has(image.config.healthcheck)`
+*   Block images with too many layers (poor optimization):
+    `has(image.metadata) && image.metadata.layer_count > 25`
+*   Block oversized images (> 2GB):
+    `has(image.metadata) && image.metadata.size > 2147483648`
+*   Require OCI labels for traceability:
+    `has(image.config) && !('org.opencontainers.image.source' in image.config.labels)`
+*   Block images older than 90 days:
+    `has(image.metadata) && age(image.metadata.created) > duration('2160h')`
+
+---
+
+#### `dockerfile` object
+
+Contains parsed Dockerfile data for static analysis. Available in [`dockerfile_report`](internal/policy/entrypoints.go) and [`dockerfile_stage`](internal/policy/entrypoints.go) entrypoints.
+
+| Field | Type | Description | Example Value |
+|---|---|---|---|
+| `dockerfile.path` | `string` | Path to the Dockerfile | `"/app/Dockerfile"` |
+| `dockerfile.stages` | `list(object)` | All build stages | see below |
+| `dockerfile.args` | `map(string)` | ARG instructions with defaults | `{"GO_VERSION": "1.22"}` |
+| `dockerfile.final_stage` | `object` | The last stage (what gets built) | see below |
+
+**Stage fields** (available in `dockerfile.stages[]`, `dockerfile.final_stage`, and `stage` in `dockerfile_stage` entrypoint):
+
+| Field | Type | Description | Example Value |
+|---|---|---|---|
+| `stage.index` | `int` | 0-based stage position | `0` |
+| `stage.name` | `string` | AS alias (empty if unnamed) | `"builder"` |
+| `stage.base_image` | `string` | FROM image reference as written | `"golang:${GO_VERSION}"` |
+| `stage.base_image_resolved` | `object` | Parsed image reference | see below |
+| `stage.platform` | `string` | --platform flag value | `"linux/amd64"` |
+| `stage.is_scratch` | `bool` | True if FROM scratch | `false` |
+| `stage.is_builder_stage` | `bool` | True if only used as COPY source | `true` |
+| `stage.user` | `string` | Final USER directive value | `"nobody"` |
+| `stage.is_root` | `bool` | True if running as root | `false` |
+| `stage.workdir` | `string` | WORKDIR value | `"/app"` |
+| `stage.env_vars` | `map(string)` | ENV declarations | `{"APP_ENV": "prod"}` |
+| `stage.sensitive_env` | `list(string)` | Env vars matching secret patterns | `["API_KEY"]` |
+| `stage.exposed_ports` | `list(string)` | EXPOSE ports | `["8080"]` |
+| `stage.labels` | `map(string)` | LABEL key-value pairs | `{"version": "1.0"}` |
+| `stage.healthcheck` | `object` | HEALTHCHECK config (or null) | see below |
+| `stage.run_commands` | `list(object)` | RUN instructions | see below |
+| `stage.copy_commands` | `list(object)` | COPY instructions | see below |
+| `stage.add_commands` | `list(object)` | ADD instructions | see below |
+| `stage.entrypoint` | `list(string)` | ENTRYPOINT command | `["/app"]` |
+| `stage.cmd` | `list(string)` | CMD arguments | `["serve"]` |
+
+**base_image_resolved fields:**
+
+| Field | Type | Description | Example Value |
+|---|---|---|---|
+| `base_image_resolved.registry` | `string` | Registry (Docker Hub = "index.docker.io") | `"index.docker.io"` |
+| `base_image_resolved.repository` | `string` | Repository path | `"library/alpine"` |
+| `base_image_resolved.tag` | `string` | Tag (default "latest") | `"3.19"` |
+| `base_image_resolved.digest` | `string` | Digest if specified | `"sha256:abc..."` |
+
+**Example Expressions for `dockerfile`:**
+
+*   Block images running as root:
+    `has(dockerfile.final_stage) && dockerfile.final_stage.is_root && !dockerfile.final_stage.is_scratch`
+*   Block :latest tag in any stage:
+    `dockerfile.stages.exists(s, !s.is_scratch && s.base_image_resolved.tag == "latest")`
+*   Require approved registries:
+    `dockerfile.stages.exists(s, !s.is_scratch && !(s.base_image_resolved.registry in ["index.docker.io", "gcr.io"]))`
+*   Detect sensitive environment variables:
+    `dockerfile.stages.exists(s, size(s.sensitive_env) > 0)`
+*   Require HEALTHCHECK in final stage:
+    `has(dockerfile.final_stage) && !dockerfile.final_stage.is_scratch && dockerfile.final_stage.healthcheck == null`
+
+---
+
+#### `dockerfile_analysis` object
+
+Contains static analysis results for Dockerfiles. Available in [`dockerfile_report`](internal/policy/entrypoints.go) and [`dockerfile_stage`](internal/policy/entrypoints.go) entrypoints.
+
+| Field | Type | Description | Example Value |
+|---|---|---|---|
+| `dockerfile_analysis.stage_count` | `int` | Number of stages | `2` |
+| `dockerfile_analysis.has_multi_stage` | `bool` | True if multi-stage build | `true` |
+| `dockerfile_analysis.builder_stage_count` | `int` | Stages used only as COPY sources | `1` |
+| `dockerfile_analysis.final_stage_is_root` | `bool` | Final stage runs as root | `false` |
+| `dockerfile_analysis.final_stage_is_scratch` | `bool` | Final stage uses FROM scratch | `false` |
+| `dockerfile_analysis.sensitive_env_vars` | `list(string)` | ENV vars matching secret patterns | `["AWS_SECRET_KEY"]` |
+| `dockerfile_analysis.has_add_url` | `bool` | Any ADD instruction uses URLs | `false` |
+
+**Example Expressions for `dockerfile_analysis`:**
+
+*   Require multi-stage builds for Go projects:
+    `dockerfile.stages.exists(s, s.base_image.contains("golang")) && !dockerfile_analysis.has_multi_stage`
+*   Block ADD with URLs (security risk):
+    `dockerfile_analysis.has_add_url`
+*   Detect secrets in any stage:
+    `size(dockerfile_analysis.sensitive_env_vars) > 0`
 
 ---
 
@@ -356,11 +576,16 @@ Contains information about the environment in which `deputy` is running.
 | Field | Type | Description | Example Value |
 |---|---|---|---|
 | `command` | `string` | The `deputy` command being executed | `"scan"` |
+| `entrypoint` | `string` | The policy entrypoint being evaluated | `"scan_vulnerability"` |
 
 **Example Expressions for `env`:**
 
 *   Apply a rule only during a `scan` command:
     `env.command == 'scan'`
+*   Apply a rule only for vulnerability-level policies:
+    `env.entrypoint == 'scan_vulnerability'`
+*   Combine command and entrypoint for specific contexts:
+    `env.command == 'proxy' && env.entrypoint == 'oci_artifact_request'`
 
 ---
 
@@ -451,6 +676,134 @@ Deputy extends CEL with custom functions for policy evaluation:
 | `cel.bind()` | `cel.bind(var, init, expr)` | Bind local variable |
 | `base64.encode()` | `base64.encode(bytes)` | Encode to base64 |
 | `base64.decode()` | `base64.decode(string)` | Decode from base64 |
+
+#### Container Image Helper Functions
+
+These functions provide complex parsing for container image policies. They are designed to be **composable** with CEL's built-in string functions (`contains`, `matches`, `startsWith`, `endsWith`) and macros (`exists`, `filter`, `map`).
+
+**Design Principle:** Only add functions that parse complex formats CEL can't handle well. Use native CEL for pattern matching, iteration, and logic.
+
+| Function | Signature | Description |
+|----------|-----------|-------------|
+| `imageRef()` | `imageRef(string) map` | Parse image reference into components |
+| `baseImage()` | `baseImage(list) string` | Extract base image from build history |
+
+**`imageRef()` Return Values:**
+
+Parses container image references, handling implicit `docker.io`, `library/` namespace, port vs tag disambiguation, and scheme stripping (`oci://`, `docker-daemon://`).
+
+| Field | Type | Description | Example |
+|-------|------|-------------|---------|
+| `registry` | `string` | Registry hostname | `"docker.io"`, `"gcr.io"` |
+| `repository` | `string` | Full repository path | `"library/nginx"`, `"my-project/app"` |
+| `name` | `string` | Image name (last path segment) | `"nginx"`, `"app"` |
+| `tag` | `string` | Tag (empty if using digest) | `"1.25.3"`, `"latest"` |
+| `digest` | `string` | Digest (empty if using tag) | `"sha256:abc123..."` |
+
+**`baseImage()` Details:**
+
+Parses the first `FROM` instruction from build history, handling:
+- Standard: `FROM alpine:3.19`
+- Multi-stage: `FROM golang:1.21 AS builder`
+- Platform: `FROM --platform=linux/amd64 ubuntu:22.04`
+- Docker nop format: `/bin/sh -c #(nop) FROM gcr.io/distroless/static`
+
+**Container Image Policy Examples:**
+
+```yaml
+# Block mutable :latest tags (using imageRef + CEL)
+policies:
+  - name: block-latest-tag
+    entrypoints: ["scan_report", "oci_artifact_request"]
+    rules:
+      - action: deny
+        when: |
+          has(target.reference) &&
+          cel.bind(ref, imageRef(target.reference),
+            ref.tag == "latest" || (ref.tag == "" && ref.digest == ""))
+        reason: "Image uses :latest tag which is mutable"
+        remediation: "Use a specific version tag or digest reference"
+
+# Require semver tags (using imageRef + matches)
+  - name: require-semver-tags
+    entrypoints: ["scan_report"]
+    rules:
+      - action: warn
+        when: |
+          has(target.reference) &&
+          cel.bind(ref, imageRef(target.reference),
+            ref.digest == "" &&
+            !ref.tag.matches("^v?[0-9]+\\.[0-9]+\\.[0-9]+"))
+        reason: "Image tag does not follow semantic versioning"
+
+# Registry allowlist (using imageRef + string functions)
+  - name: allowed-registries
+    entrypoints: ["scan_report", "oci_artifact_request"]
+    vars:
+      allowedRegistries: ["docker.io", "ghcr.io", "gcr.io"]
+    rules:
+      - action: deny
+        when: |
+          has(target.reference) &&
+          cel.bind(registry, imageRef(target.reference).registry,
+            !(registry in allowedRegistries) &&
+            !registry.endsWith(".gcr.io") &&
+            !registry.endsWith(".azurecr.io"))
+        reason: "Image from unapproved registry"
+
+# Require minimal base images (using baseImage + contains)
+  - name: require-minimal-base
+    entrypoints: ["scan_report"]
+    rules:
+      - action: warn
+        when: |
+          has(image.history) &&
+          cel.bind(base, baseImage(image.history),
+            base != "" &&
+            !base.contains("distroless") &&
+            !base.contains("chainguard") &&
+            !base.contains("alpine") &&
+            !base.contains("scratch"))
+        reason: "Image does not use a minimal base image"
+
+# Detect secrets in build history (using exists + patterns)
+  - name: no-secrets-in-layers
+    entrypoints: ["scan_report"]
+    vars:
+      secretPatterns: ["password=", "secret=", "api_key=", "token=", ".pem"]
+    rules:
+      - action: deny
+        when: |
+          has(image.history) &&
+          image.history.exists(h,
+            secretPatterns.exists(p, h.created_by.lowerAscii().contains(p)))
+        reason: "Potential secrets detected in image build history"
+
+# Layer count limit (using filter + size)
+  - name: layer-count-limit
+    entrypoints: ["scan_report"]
+    vars:
+      maxLayers: 20
+    rules:
+      - action: warn
+        when: |
+          has(image.history) &&
+          image.history.filter(h, !h.empty_layer).size() > maxLayers
+        reason: "Image has too many layers (inefficient)"
+
+# Detect curl/wget in builds (using exists)
+  - name: no-curl-wget-in-run
+    entrypoints: ["scan_report"]
+    rules:
+      - action: warn
+        when: |
+          has(image.history) &&
+          image.history.exists(h,
+            h.created_by.contains("curl") || h.created_by.contains("wget"))
+        reason: "Image downloads files during build (supply chain risk)"
+```
+
+See [Container security policies](policy/examples/container-security.yaml) for comprehensive examples.
 
 Full spec: [Policy spec](docs/reference/policy-spec.md) • Examples: [Policy examples](policy/examples/)
 
@@ -588,6 +941,10 @@ See [JWT policy examples](policy/examples/) for more examples.
 | `DEPUTY_CONFIG` | Path to config file (default: `.deputy.yaml`) ([`internal/config/config.go`](internal/config/config.go)) |
 | `DEPUTY_OTEL_ENABLED` | Enable OpenTelemetry instrumentation ([`internal/otel/otel.go`](internal/otel/otel.go)) |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | OTel collector endpoint, e.g., `localhost:4317` ([`internal/otel/config.go`](internal/otel/config.go)) |
+| `DEPUTY_SBOM_IMAGE_SCAN_CONCURRENCY` | Max concurrent image scans when scanning SBOMs with container PURLs (default: 4) |
+| `DEPUTY_PROXY_IMAGE_SCAN_TIMEOUT` | Max time for proxy image scans, e.g., `10m` (default: 10m) |
+| `DEPUTY_PROXY_IMAGE_CACHE_TTL` | TTL for proxy image scan cache (default: 30m) |
+| `DEPUTY_PROXY_IMAGE_CACHE_SIZE` | Max items in proxy image scan cache (default: 1024) |
 
 ## Exit Codes
 

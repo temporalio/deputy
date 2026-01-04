@@ -1,0 +1,214 @@
+# Container Image Diff Policies
+#
+# Security policies for comparing container images and detecting risky changes.
+# These policies evaluate package changes, vulnerability changes, configuration
+# changes, and layer analysis between two container images.
+#
+# Entrypoints:
+#   container_diff_report       - Full diff report with summary
+#   container_diff_change       - Per-package change evaluation
+#   container_diff_vulnerability - Per-vulnerability change evaluation
+#   container_diff_layer        - Per-layer change evaluation
+#   container_diff_config       - Configuration change evaluation
+#
+# Available variables for container_diff_report:
+#   base_image                  - Base image reference info
+#   target_image                - Target image reference info
+#   summary.packages_added      - Number of packages added
+#   summary.packages_removed    - Number of packages removed
+#   summary.packages_upgraded   - Number of packages upgraded
+#   summary.packages_downgraded - Number of packages downgraded
+#   summary.vulnerabilities_added   - New vulnerabilities introduced
+#   summary.vulnerabilities_removed - Vulnerabilities no longer present
+#   summary.vulnerabilities_fixed   - Vulnerabilities fixed by upgrades
+#   summary.layers_added        - New layers added
+#   summary.layers_removed      - Layers removed
+#   summary.config_changed      - Whether configuration changed
+#   package_changes             - List of package change details
+#   vulnerability_changes       - List of vulnerability change details
+#   config_changes              - Configuration diff details
+#   layer_analysis              - Layer diff analysis
+#
+# Available variables for container_diff_change:
+#   change.name                 - Package name
+#   change.base_version         - Version in base image
+#   change.target_version       - Version in target image
+#   change.change_type          - added, removed, upgraded, downgraded
+#   change.ecosystem            - Package ecosystem (deb, apk, rpm, etc.)
+#   change.base_layer_details   - Layer info from base image
+#   change.target_layer_details - Layer info from target image
+#
+# Available variables for container_diff_vulnerability:
+#   vulnerability.id            - CVE/GHSA identifier
+#   vulnerability.change_type   - added, removed, fixed, persisted
+#   vulnerability.severity      - CRITICAL, HIGH, MEDIUM, LOW
+#   vulnerability.package       - Affected package name
+#   vulnerability.base_version  - Package version in base image
+#   vulnerability.target_version - Package version in target image
+#   vulnerability.summary       - Vulnerability description
+#   vulnerability.layer_details - Layer where package was introduced
+#
+# Available variables for container_diff_config:
+#   config_changes.user_changed       - Whether USER changed
+#   config_changes.root_changed       - Whether root status changed
+#   config_changes.base_is_root       - Was running as root in base
+#   config_changes.target_is_root     - Is running as root in target
+#   config_changes.ports_changed      - Whether exposed ports changed
+#   config_changes.ports_added        - List of ports added
+#   config_changes.ports_removed      - List of ports removed
+#   config_changes.entrypoint_changed - Whether entrypoint changed
+#   config_changes.healthcheck_changed - Whether healthcheck changed
+
+policies:
+  # Report-level policies
+  - name: container-diff-no-new-critical-vulns
+    description: Block upgrades that introduce critical vulnerabilities
+    entrypoints: ["container_diff_report"]
+    rules:
+      - action: deny
+        when: |
+          size(vulnerability_changes) > 0 &&
+          vulnerability_changes.exists(v,
+            v.change_type == "added" &&
+            v.severity == "CRITICAL"
+          )
+        reason: "Container upgrade introduces critical vulnerabilities"
+        remediation: "Choose a different target image version or wait for patches"
+
+  - name: container-diff-regression-guard
+    description: Warn if upgrade introduces more vulns than it removes
+    entrypoints: ["container_diff_report"]
+    rules:
+      - action: warn
+        when: |
+          summary.vulnerabilities_added > summary.vulnerabilities_fixed + summary.vulnerabilities_removed
+        reason: "Container upgrade introduces more vulnerabilities than it fixes"
+        remediation: "Consider alternative upgrade path or wait for security patches"
+
+  - name: container-diff-downgrade-guard
+    description: Block package downgrades in production
+    entrypoints: ["container_diff_report"]
+    rules:
+      - action: deny
+        when: |
+          summary.packages_downgraded > 0
+        reason: "Container upgrade contains package downgrades"
+        remediation: "Review downgraded packages for security implications"
+
+  - name: container-diff-excessive-changes
+    description: Require review for large-scale changes
+    entrypoints: ["container_diff_report"]
+    vars:
+      maxPackageChanges: 50
+    rules:
+      - action: warn
+        when: |
+          (summary.packages_added + summary.packages_removed +
+           summary.packages_upgraded + summary.packages_downgraded) > maxPackageChanges
+        reason: "Container upgrade has excessive package changes"
+        remediation: "Review changes incrementally or use smaller upgrade steps"
+
+  # Per-change policies
+  - name: container-diff-glibc-downgrade
+    description: Block glibc downgrades (ABI compatibility issues)
+    entrypoints: ["container_diff_change"]
+    rules:
+      - action: deny
+        when: |
+          change.change_type == "downgraded" &&
+          (change.name == "glibc" || change.name == "libc6")
+        reason: "glibc downgrade detected - may cause compatibility issues"
+        remediation: "Ensure glibc version is maintained or upgraded"
+
+  - name: container-diff-openssl-change
+    description: Flag OpenSSL changes for security review
+    entrypoints: ["container_diff_change"]
+    rules:
+      - action: warn
+        when: |
+          change.name.contains("openssl") &&
+          change.change_type in ["added", "upgraded", "downgraded"]
+        reason: "OpenSSL version changed - review for security implications"
+        remediation: "Verify new OpenSSL version is patched for known CVEs"
+
+  # Per-vulnerability policies
+  - name: container-diff-new-high-vuln-review
+    description: Flag new high severity vulnerabilities for review
+    entrypoints: ["container_diff_vulnerability"]
+    rules:
+      - action: warn
+        when: |
+          vulnerability.change_type == "added" &&
+          vulnerability.severity in ["HIGH", "CRITICAL"]
+        reason: "New high/critical vulnerability introduced"
+        remediation: "Evaluate vulnerability impact and upgrade timeline"
+
+  - name: container-diff-persisted-critical
+    description: Block upgrades that don't fix persisted critical vulns
+    entrypoints: ["container_diff_vulnerability"]
+    rules:
+      - action: deny
+        when: |
+          vulnerability.change_type == "persisted" &&
+          vulnerability.severity == "CRITICAL"
+        reason: "Critical vulnerability persists after upgrade"
+        remediation: "Upgrade to a version that fixes the critical vulnerability"
+
+  - name: container-diff-base-image-vuln
+    description: Flag vulnerabilities originating from base image
+    entrypoints: ["container_diff_vulnerability"]
+    rules:
+      - action: warn
+        when: |
+          has(vulnerability.layer_details) &&
+          vulnerability.layer_details.in_base_image == true &&
+          vulnerability.severity in ["HIGH", "CRITICAL"]
+        reason: "High/Critical vulnerability in base image layer"
+        remediation: "Update base image to a patched version"
+
+  # Configuration policies
+  - name: container-diff-root-regression
+    description: Block changes that introduce root user
+    entrypoints: ["container_diff_config"]
+    rules:
+      - action: deny
+        when: |
+          config_changes.root_changed == true &&
+          config_changes.target_is_root == true &&
+          config_changes.base_is_root == false
+        reason: "Container upgrade introduces root user execution"
+        remediation: "Maintain non-root user in the upgraded image"
+
+  - name: container-diff-healthcheck-removed
+    description: Warn if healthcheck is removed in upgrade
+    entrypoints: ["container_diff_config"]
+    rules:
+      - action: warn
+        when: |
+          config_changes.healthcheck_changed == true
+        reason: "Container healthcheck configuration changed"
+        remediation: "Review healthcheck changes for production readiness"
+
+  - name: container-diff-new-ports
+    description: Flag new exposed ports for review
+    entrypoints: ["container_diff_config"]
+    rules:
+      - action: warn
+        when: |
+          config_changes.ports_changed == true &&
+          size(config_changes.?ports_added.orValue([])) > 0
+        reason: "Container upgrade adds new exposed ports"
+        remediation: "Review new ports for security implications"
+
+  # Layer policies
+  - name: container-diff-layer-explosion
+    description: Warn on significant layer count increase
+    entrypoints: ["container_diff_report"]
+    vars:
+      maxNewLayers: 10
+    rules:
+      - action: warn
+        when: |
+          (layer_analysis.target_layer_count - layer_analysis.base_layer_count) > maxNewLayers
+        reason: "Container upgrade adds many new layers"
+        remediation: "Optimize Dockerfile to reduce layer count"

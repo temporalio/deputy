@@ -309,8 +309,14 @@ func comparatorForEcosystem(ecosystem string) versionComparator {
 }
 
 // semanticEcosystemName maps a raw ecosystem string to its canonical semantic versioning ecosystem name.
+// The canonical names are those expected by the osv-scalibr semantic versioning library.
 func semanticEcosystemName(ecosystem string) (string, bool) {
-	switch strings.ToLower(strings.TrimSpace(ecosystem)) {
+	eco := strings.ToLower(strings.TrimSpace(ecosystem))
+	// Handle ecosystems with version suffixes (e.g., "Debian:11" -> "debian")
+	if idx := strings.Index(eco, ":"); idx != -1 {
+		eco = eco[:idx]
+	}
+	switch eco {
 	case "npm", "yarn", "pnpm":
 		return "npm", true
 	case "pypi", "pip", "pipenv", "poetry", "python":
@@ -341,17 +347,44 @@ func semanticEcosystemName(ecosystem string) (string, bool) {
 		return "ConanCenter", true
 	case "bitnami":
 		return "Bitnami", true
+	// OS-level package ecosystems (container images)
+	case "debian":
+		return "Debian", true
+	case "ubuntu":
+		return "Ubuntu", true
+	case "alpine":
+		return "Alpine", true
+	case "red hat", "rhel", "redhat":
+		return "Red Hat", true
+	case "centos":
+		return "Red Hat", true // CentOS uses Red Hat versioning
+	case "rocky", "rocky linux":
+		return "Rocky Linux", true
+	case "alma", "almalinux":
+		return "AlmaLinux", true
+	case "opensuse":
+		return "openSUSE", true
+	case "suse", "sles":
+		return "SUSE", true
 	default:
 		return "", false
 	}
 }
 
 // compareGoVersions compares two Go versions.
+// Returns (0, false) if either version is empty or invalid (e.g., "(devel)").
 func compareGoVersions(baseVersion, targetVersion string) (int, bool) {
 	if baseVersion == "" || targetVersion == "" {
 		return 0, false
 	}
-	return CompareGoPackageVersions(Change{BaseVersion: baseVersion, TargetVersion: targetVersion}), true
+	// Normalize and validate both versions
+	oldV := normalizeGoVersion(baseVersion)
+	newV := normalizeGoVersion(targetVersion)
+	// If either version is invalid (like "(devel)"), don't make upgrade/downgrade claims
+	if !semver.IsValid(oldV) || !semver.IsValid(newV) {
+		return 0, false
+	}
+	return semver.Compare(newV, oldV), true
 }
 
 // compareSemanticVersions compares two versions using the specified ecosystem's semantic versioning rules.
@@ -427,6 +460,27 @@ type pkgSummary struct {
 	key       string
 }
 
+// normalizeEcosystemForComparison returns a normalized ecosystem name suitable for
+// comparing packages across different versions of the same OS distribution.
+// For example, "Debian:11" and "Debian:12" both normalize to "debian" so that
+// packages can be properly matched and compared between OS versions.
+func normalizeEcosystemForComparison(ecos string) string {
+	ecos = strings.ToLower(strings.TrimSpace(ecos))
+	if ecos == "" {
+		return ""
+	}
+	// Strip version suffix from OS distributions (e.g., "debian:11" -> "debian")
+	if idx := strings.Index(ecos, ":"); idx != -1 {
+		base := ecos[:idx]
+		// Only strip version for known OS distributions
+		switch base {
+		case "debian", "ubuntu", "alpine", "fedora", "centos", "rhel", "rocky", "alma", "opensuse", "sles":
+			return base
+		}
+	}
+	return ecos
+}
+
 // summarizePackage extracts comparison metadata from a package.
 func summarizePackage(p *extractor.Package) (string, pkgSummary) {
 	if p == nil || p.Name == "" {
@@ -453,7 +507,9 @@ func summarizePackage(p *extractor.Package) (string, pkgSummary) {
 		meta.key = name
 		return meta.key, meta
 	}
-	meta.key = strings.ToLower(ecos) + "|" + name
+	// Use normalized ecosystem for key to match packages across OS versions
+	normalizedEcos := normalizeEcosystemForComparison(ecos)
+	meta.key = normalizedEcos + "|" + name
 	return meta.key, meta
 }
 

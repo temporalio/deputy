@@ -1,10 +1,12 @@
 package sbomx
 
 import (
+	"bytes"
 	"context"
 	"crypto/x509"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -26,6 +28,7 @@ import (
 	"github.com/picatz/deputy/internal/auth"
 	"github.com/picatz/deputy/internal/collections"
 	"github.com/picatz/deputy/internal/compare"
+	"github.com/picatz/deputy/internal/dockerfile"
 	gitx "github.com/picatz/deputy/internal/gitutil"
 	"github.com/picatz/deputy/internal/inventory"
 	"github.com/picatz/deputy/internal/license"
@@ -33,6 +36,8 @@ import (
 	"github.com/picatz/deputy/internal/purlx"
 	"github.com/picatz/deputy/internal/repository"
 	"github.com/picatz/deputy/internal/repository/workspace"
+	"github.com/picatz/deputy/internal/scan"
+	"github.com/picatz/deputy/internal/targets"
 	"github.com/protobom/protobom/pkg/formats"
 	"github.com/protobom/protobom/pkg/sbom"
 	"github.com/protobom/protobom/pkg/writer"
@@ -70,6 +75,8 @@ type Options struct {
 type Result struct {
 	// Document is the generated Protobom SBOM document.
 	Document *sbom.Document
+	// Target captures the normalized scan target metadata for policies and context output.
+	Target scan.Target
 	// RepoPath is the local or remote repository path that was scanned.
 	RepoPath string
 	// Ref is the git reference that was resolved (may differ from input if normalized).
@@ -106,6 +113,7 @@ func Generate(ctx context.Context, repoRef string, opts Options) (Result, error)
 
 	result := Result{Ref: opts.Ref}
 	repoDisplay := repoRef
+	cloned := false
 	if fi, statErr := os.Stat(repoRef); statErr == nil && fi.IsDir() {
 		if abs, absErr := filepath.Abs(repoRef); absErr == nil {
 			repoDisplay = abs
@@ -119,7 +127,7 @@ func Generate(ctx context.Context, repoRef string, opts Options) (Result, error)
 	if src == nil {
 		url := gitx.ToHTTPSGitURL(repoRef)
 		if url == "" {
-			err := fmt.Errorf("could not interpret repo %q as local path or remote URL", repoRef)
+			err := fmt.Errorf("could not interpret target %q as local path or remote Git URL", repoRef)
 			otel.SetSpanError(span, err)
 			return Result{}, err
 		}
@@ -149,6 +157,7 @@ func Generate(ctx context.Context, repoRef string, opts Options) (Result, error)
 		}
 		repoRef = url
 		repoDisplay = url
+		cloned = true
 	}
 	defer src.Close()
 	result.RepoPath = repoDisplay
@@ -211,10 +220,24 @@ func Generate(ctx context.Context, repoRef string, opts Options) (Result, error)
 	}
 
 	commit, origin := resolveRepoMetadata(src.Repo, effRef, repoDisplay)
+	localPath := ""
+	if src != nil {
+		localPath = src.RootPath()
+	}
 	result.Commit = commit
 	result.Origin = origin
 	result.Document = doc
 	result.Packages = pkgs
+	result.Target = scan.Target{
+		Kind:         targets.KindGit,
+		DisplayPath:  repoDisplay,
+		LocalPath:    localPath,
+		Ref:          opts.Ref,
+		EffectiveRef: effRef,
+		CommitHash:   commit,
+		OriginURL:    origin,
+		Cloned:       cloned,
+	}
 
 	// Record results on span
 	span.SetAttributes(
@@ -292,6 +315,12 @@ func buildProtobomDocument(ctx context.Context, ws workspace.FS, repoRef, ref, n
 	d.NodeList.RootElements = append(d.NodeList.RootElements, app.Id)
 
 	ghaCache := &githubActionsResolutionCache{}
+
+	// Discover and add Dockerfile base images to the SBOM
+	dockerfiles, _ := discoverAndParseDockerfiles(ws)
+	if len(dockerfiles) > 0 {
+		addDockerfileBaseImagesToSBOM(d, dockerfiles, app.Id)
+	}
 
 	for _, p := range pkgs {
 		if p == nil || p.Name == "" {
@@ -380,6 +409,40 @@ func buildProtobomDocument(ctx context.Context, ws workspace.FS, repoRef, ref, n
 				Name: "deputy:location",
 				Data: loc,
 			})
+		}
+
+		// Persist container image layer details for round-trip SBOM scanning.
+		// These properties enable layer-aware vulnerability analysis and policy
+		// evaluation when scanning SBOMs generated from container images.
+		if p.LayerDetails != nil {
+			n.Properties = append(n.Properties, &sbom.Property{
+				Name: "deputy:layer-index",
+				Data: fmt.Sprintf("%d", p.LayerDetails.Index),
+			})
+			if p.LayerDetails.DiffID != "" {
+				n.Properties = append(n.Properties, &sbom.Property{
+					Name: "deputy:layer-diffid",
+					Data: p.LayerDetails.DiffID,
+				})
+			}
+			if p.LayerDetails.ChainID != "" {
+				n.Properties = append(n.Properties, &sbom.Property{
+					Name: "deputy:layer-chainid",
+					Data: p.LayerDetails.ChainID,
+				})
+			}
+			if p.LayerDetails.Command != "" {
+				n.Properties = append(n.Properties, &sbom.Property{
+					Name: "deputy:layer-command",
+					Data: p.LayerDetails.Command,
+				})
+			}
+			if p.LayerDetails.InBaseImage {
+				n.Properties = append(n.Properties, &sbom.Property{
+					Name: "deputy:layer-in-base-image",
+					Data: "true",
+				})
+			}
 		}
 
 		d.NodeList.Nodes = append(d.NodeList.Nodes, n)
@@ -975,4 +1038,260 @@ func WriteProtobomJSON(doc *sbom.Document, w io.Writer) error {
 	}
 	_, err = w.Write(b)
 	return err
+}
+
+// discoverAndParseDockerfiles walks the workspace to find all Dockerfiles and parses them.
+// Returns parsed Dockerfile info for each discovered file.
+func discoverAndParseDockerfiles(ws workspace.FS) ([]*dockerfile.Info, error) {
+	if ws == nil {
+		return nil, nil
+	}
+
+	var dockerfiles []*dockerfile.Info
+
+	// Walk the workspace looking for Dockerfile patterns
+	err := fs.WalkDir(ws, ".", func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return nil // Skip errors, continue walking
+		}
+		if d.IsDir() {
+			// Skip common vendor/build directories
+			name := d.Name()
+			if name == "vendor" || name == "node_modules" || name == ".git" {
+				return fs.SkipDir
+			}
+			return nil
+		}
+
+		// Check if this looks like a Dockerfile
+		if !isDockerfileFilename(d.Name()) {
+			return nil
+		}
+
+		// Read and parse the Dockerfile
+		content, err := ws.ReadFile(path)
+		if err != nil {
+			return nil // Skip unreadable files
+		}
+
+		info, err := dockerfile.Parse(bytes.NewReader(content))
+		if err != nil {
+			return nil // Skip unparseable files
+		}
+		info.Path = path
+
+		dockerfiles = append(dockerfiles, info)
+		return nil
+	})
+
+	if err != nil {
+		return dockerfiles, nil // Return what we found even on walk errors
+	}
+
+	return dockerfiles, nil
+}
+
+// isDockerfileFilename checks if a filename matches Dockerfile naming patterns.
+func isDockerfileFilename(name string) bool {
+	lower := strings.ToLower(name)
+
+	// Exact matches
+	if lower == "dockerfile" || lower == "containerfile" {
+		return true
+	}
+
+	// Prefix patterns: Dockerfile.*, Containerfile.*
+	if strings.HasPrefix(lower, "dockerfile.") || strings.HasPrefix(lower, "containerfile.") {
+		return true
+	}
+
+	// Suffix patterns: *.dockerfile, *.containerfile
+	if strings.HasSuffix(lower, ".dockerfile") || strings.HasSuffix(lower, ".containerfile") {
+		return true
+	}
+
+	// Suffix patterns: *Dockerfile, *Containerfile (case-sensitive check)
+	if strings.HasSuffix(name, "Dockerfile") || strings.HasSuffix(name, "Containerfile") {
+		return true
+	}
+
+	return false
+}
+
+// addDockerfileBaseImagesToSBOM adds base image references from Dockerfiles as SBOM nodes.
+// Each base image becomes a component with a pkg:docker or pkg:oci PURL.
+func addDockerfileBaseImagesToSBOM(doc *sbom.Document, dockerfiles []*dockerfile.Info, appID string) {
+	if doc == nil || len(dockerfiles) == 0 {
+		return
+	}
+
+	seen := make(map[string]bool) // Track unique base images to avoid duplicates
+
+	for _, df := range dockerfiles {
+		if df == nil {
+			continue
+		}
+
+		for i := range df.Stages {
+			stage := &df.Stages[i]
+			if stage.IsScratch {
+				continue // Skip scratch stages
+			}
+
+			baseImage := stage.BaseImage
+			if baseImage == "" {
+				continue
+			}
+
+			// Create a unique key for deduplication
+			key := baseImage
+			if seen[key] {
+				continue
+			}
+			seen[key] = true
+
+			// Create the SBOM node for this base image
+			node := createBaseImageNode(stage, df.Path)
+			if node == nil {
+				continue
+			}
+
+			doc.NodeList.Nodes = append(doc.NodeList.Nodes, node)
+
+			// Add edge from root to this base image
+			doc.NodeList.Edges = append(doc.NodeList.Edges, &sbom.Edge{
+				Type: sbom.Edge_contains,
+				From: appID,
+				To:   []string{node.Id},
+			})
+		}
+	}
+}
+
+// createBaseImageNode creates an SBOM node for a container base image.
+func createBaseImageNode(stage *dockerfile.Stage, dockerfilePath string) *sbom.Node {
+	if stage == nil || stage.BaseImage == "" {
+		return nil
+	}
+
+	node := sbom.NewNode()
+	node.Type = sbom.Node_PACKAGE
+
+	// Parse the image reference to extract components
+	ref := stage.BaseImageResolved
+	if ref == nil {
+		// Fallback: use base image string as-is
+		node.Name = stage.BaseImage
+		node.Id = sanitizeForSPDXID("pkg-docker-" + stage.BaseImage)
+		return node
+	}
+
+	// Build the PURL for the container image
+	purlStr := buildContainerPURL(ref)
+	if purlStr != "" {
+		node.Id = spdxSafeIDFromPURL(purlStr)
+		if node.Identifiers == nil {
+			node.Identifiers = map[int32]string{}
+		}
+		node.Identifiers[int32(sbom.SoftwareIdentifierType_PURL)] = purlStr
+	} else {
+		node.Id = sanitizeForSPDXID("pkg-docker-" + stage.BaseImage)
+	}
+
+	// Set display name
+	node.Name = ref.Repository
+	if ref.Registry != "" && ref.Registry != "index.docker.io" {
+		node.Name = ref.Registry + "/" + ref.Repository
+	}
+
+	// Set version from tag or digest
+	if ref.Digest != "" {
+		node.Version = ref.Digest
+	} else if ref.Tag != "" {
+		node.Version = ref.Tag
+	}
+
+	// Add properties for additional context
+	node.Properties = append(node.Properties, &sbom.Property{
+		Name: "deputy:type",
+		Data: "container-base-image",
+	})
+
+	node.Properties = append(node.Properties, &sbom.Property{
+		Name: "deputy:location",
+		Data: dockerfilePath,
+	})
+
+	if stage.Name != "" {
+		node.Properties = append(node.Properties, &sbom.Property{
+			Name: "deputy:dockerfile-stage",
+			Data: stage.Name,
+		})
+	}
+
+	if stage.Platform != "" {
+		node.Properties = append(node.Properties, &sbom.Property{
+			Name: "deputy:platform",
+			Data: stage.Platform,
+		})
+	}
+
+	// Mark as direct dependency (base images are always direct)
+	node.Properties = append(node.Properties, &sbom.Property{
+		Name: "deputy:direct",
+		Data: "true",
+	})
+
+	return node
+}
+
+// buildContainerPURL constructs a PURL for a container image reference.
+// Uses pkg:docker for Docker Hub images, pkg:oci for other registries.
+//
+// PURL format for containers:
+// - pkg:docker/namespace/name@version (Docker Hub)
+// - pkg:oci/registry/namespace/name@version (other registries)
+func buildContainerPURL(ref *dockerfile.ImageRef) string {
+	if ref == nil || ref.Repository == "" {
+		return ""
+	}
+
+	// Determine PURL type based on registry
+	purlType := "docker"
+	registry := ref.Registry
+
+	// Docker Hub uses index.docker.io internally
+	if registry == "index.docker.io" || registry == "docker.io" || registry == "" {
+		purlType = "docker"
+		registry = "" // Omit for Docker Hub (implicit)
+	} else {
+		purlType = "oci"
+	}
+
+	// Build the PURL string
+	// Note: PURL spec says namespace/name segments use "/" literally, not escaped
+	var sb strings.Builder
+	sb.WriteString("pkg:")
+	sb.WriteString(purlType)
+	sb.WriteString("/")
+
+	// Add registry as namespace for non-Docker Hub
+	if registry != "" {
+		sb.WriteString(registry)
+		sb.WriteString("/")
+	}
+
+	// Add repository name (may contain "/" for namespace/name)
+	sb.WriteString(ref.Repository)
+
+	// Add version (prefer digest, then tag)
+	if ref.Digest != "" {
+		sb.WriteString("@")
+		sb.WriteString(ref.Digest)
+	} else if ref.Tag != "" {
+		sb.WriteString("@")
+		sb.WriteString(ref.Tag)
+	}
+
+	return sb.String()
 }

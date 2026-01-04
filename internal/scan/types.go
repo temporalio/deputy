@@ -4,12 +4,15 @@ import (
 	"time"
 
 	"github.com/google/osv-scalibr/extractor"
+	"github.com/picatz/deputy/internal/dockerfile"
 	"github.com/picatz/deputy/internal/policy"
+	"github.com/picatz/deputy/internal/targets"
 	"github.com/picatz/deputy/internal/vulnerability"
 )
 
 // Target describes what was scanned and how it was resolved.
 type Target struct {
+	Kind         targets.Kind
 	DisplayPath  string
 	LocalPath    string
 	Ref          string
@@ -17,6 +20,7 @@ type Target struct {
 	CommitHash   string
 	OriginURL    string
 	Cloned       bool
+	Provenance   map[string]string
 }
 
 // Inventory captures the packages and direct dependency hints discovered during scanning.
@@ -46,6 +50,18 @@ type Result struct {
 	PolicyDecisions []policy.Decision
 
 	Warnings []string
+
+	// ImageInfo contains extracted configuration and metadata for container image scans.
+	// This is nil for non-container-image targets.
+	ImageInfo *ImageInfo
+
+	// DockerfileInfo contains parsed Dockerfile data for dockerfile targets.
+	// This is nil for non-dockerfile targets.
+	DockerfileInfo *dockerfile.Info
+
+	// DockerfileAnalysis contains static analysis results for dockerfile targets.
+	// This is nil for non-dockerfile targets.
+	DockerfileAnalysis *dockerfile.Analysis
 }
 
 // Execution wraps a scan result and any cleanup callbacks.

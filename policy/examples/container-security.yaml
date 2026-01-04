@@ -1,0 +1,376 @@
+# Container Security Policies
+#
+# Comprehensive security policies for container images using Deputy's
+# container image helper functions combined with native CEL capabilities.
+#
+# Helper Functions:
+#   imageRef(string) map    - Parse image reference into components
+#   baseImage(list) string  - Extract base image from build history
+#
+# These functions provide complex parsing that CEL cannot do well.
+# For everything else, use native CEL: exists(), filter(), contains(),
+# matches(), startsWith(), endsWith(), etc.
+#
+# Available Variables for Container Policies:
+#   image.image     - Full image reference (e.g., "nginx:1.25", "gcr.io/project/app:v1")
+#   image.registry  - Registry hostname
+#   image.repository - Repository path
+#   image.tag       - Tag portion
+#   image.digest    - Digest portion (sha256:...)
+#   image.config.*  - Container configuration (user, env, entrypoint, etc.)
+#   image.metadata.* - Image metadata (architecture, os, layer_count, size, etc.)
+#   image.history[] - Build history entries
+#
+# Entrypoints:
+#   scan_report         - Full scan report evaluation
+#   oci_artifact_request - OCI proxy requests
+
+policies:
+  # ==========================================
+  # Supply Chain Security - Registry Governance
+  # ==========================================
+
+  - name: block-latest-tag
+    description: Block images using :latest tag (mutable, unpredictable)
+    entrypoints: ["scan_report", "oci_artifact_request"]
+    rules:
+      - action: deny
+        when: |
+          has(image.image) && image.image != "" &&
+          cel.bind(ref, imageRef(image.image),
+            ref.tag == "latest" || (ref.tag == "" && ref.digest == ""))
+        reason: "Image uses :latest tag which is mutable and unpredictable"
+        remediation: "Use a specific version tag (e.g., nginx:1.25.3) or digest reference"
+
+  - name: require-digest-for-production
+    description: Require immutable digest references for production images
+    entrypoints: ["scan_report"]
+    rules:
+      - action: warn
+        when: |
+          has(image.image) && image.image != "" &&
+          imageRef(image.image).digest == ""
+        reason: "Production images should use digest references for immutability"
+        remediation: "Pin image to digest: image@sha256:..."
+
+  - name: require-semver-tags
+    description: Enforce semantic versioning for image tags
+    entrypoints: ["scan_report", "oci_artifact_request"]
+    rules:
+      - action: warn
+        when: |
+          has(image.image) && image.image != "" &&
+          cel.bind(ref, imageRef(image.image),
+            ref.digest == "" &&
+            !ref.tag.matches("^v?[0-9]+\\.[0-9]+\\.[0-9]+"))
+        reason: "Image tag does not follow semantic versioning"
+        remediation: "Use semver tags (v1.2.3) for predictable version management"
+
+  - name: allowed-registries
+    description: Only allow images from approved registries
+    entrypoints: ["scan_report", "oci_artifact_request"]
+    vars:
+      allowedRegistries:
+        - "docker.io"
+        - "ghcr.io"
+        - "gcr.io"
+    rules:
+      - action: deny
+        when: |
+          has(image.image) && image.image != "" &&
+          cel.bind(registry, imageRef(image.image).registry,
+            !(registry in allowedRegistries) &&
+            !registry.endsWith(".gcr.io") &&
+            !registry.endsWith(".azurecr.io") &&
+            !registry.matches(".*\\.dkr\\.ecr\\..*\\.amazonaws\\.com"))
+        reason: "Image from unapproved registry"
+        remediation: "Use images from approved registries only"
+
+  - name: block-docker-hub-library
+    description: Block Docker Hub library images in production (prefer vendor images)
+    entrypoints: ["scan_report"]
+    rules:
+      - action: warn
+        when: |
+          has(image.image) && image.image != "" &&
+          cel.bind(ref, imageRef(image.image),
+            ref.registry == "docker.io" &&
+            ref.repository.startsWith("library/"))
+        reason: "Docker Hub library images should be avoided in production"
+        remediation: "Use vendor-provided or internally-vetted images"
+
+  # ==========================================
+  # Base Image Security
+  # ==========================================
+
+  - name: require-minimal-base
+    description: Require minimal base images (distroless, Alpine, or scratch)
+    entrypoints: ["scan_report"]
+    rules:
+      - action: warn
+        when: |
+          has(image.history) &&
+          cel.bind(base, baseImage(image.history),
+            base != "" &&
+            !base.contains("distroless") &&
+            !base.contains("chainguard") &&
+            !base.contains("alpine") &&
+            !base.contains("scratch"))
+        reason: "Image does not use a minimal base (distroless, alpine, scratch)"
+        remediation: "Use distroless or Alpine base images to reduce attack surface"
+
+  - name: approved-base-images
+    description: Enforce approved base image allowlist
+    entrypoints: ["scan_report"]
+    vars:
+      approvedBases:
+        - "alpine"
+        - "distroless"
+        - "chainguard"
+        - "scratch"
+        - "ubuntu"
+        - "debian"
+    rules:
+      - action: warn
+        when: |
+          has(image.history) &&
+          cel.bind(base, baseImage(image.history),
+            base != "" &&
+            !approvedBases.exists(a, base.contains(a)))
+        reason: "Base image is not in approved list"
+        remediation: "Use an approved base image from the allowlist"
+
+  - name: distroless-for-production
+    description: Require distroless images for production workloads
+    entrypoints: ["scan_report"]
+    rules:
+      - action: warn
+        when: |
+          has(image.history) &&
+          cel.bind(base, baseImage(image.history),
+            base != "" &&
+            !base.contains("distroless") &&
+            !base.contains("chainguard"))
+        reason: "Production workloads should use distroless images"
+        remediation: "Use gcr.io/distroless/* or cgr.dev/chainguard/* base images"
+
+  # ==========================================
+  # Build Security - Layer Analysis
+  # ==========================================
+
+  - name: no-secrets-in-layers
+    description: Block images with secrets in build history
+    entrypoints: ["scan_report"]
+    vars:
+      secretPatterns:
+        - "password="
+        - "passwd="
+        - "secret="
+        - "api_key="
+        - "token="
+        - "private_key"
+        - "-----begin"
+        - ".pem"
+        - "credentials"
+    rules:
+      - action: deny
+        when: |
+          has(image.history) &&
+          image.history.exists(h,
+            secretPatterns.exists(p, h.created_by.lowerAscii().contains(p)))
+        reason: "Potential secrets detected in image build history"
+        remediation: "Use multi-stage builds and --secret flag for sensitive data"
+
+  - name: no-curl-wget-in-run
+    description: Warn about curl/wget in RUN commands (supply chain risk)
+    entrypoints: ["scan_report"]
+    rules:
+      - action: warn
+        when: |
+          has(image.history) &&
+          image.history.exists(h,
+            h.created_by.contains("curl") || h.created_by.contains("wget"))
+        reason: "Image contains curl/wget in build commands (supply chain risk)"
+        remediation: "Use COPY with verified artifacts instead of downloading at build time"
+
+  - name: no-root-in-run
+    description: Warn about running commands as root in final image
+    entrypoints: ["scan_report"]
+    rules:
+      - action: warn
+        when: |
+          has(image.config) &&
+          image.config.is_root == true &&
+          has(image.history) &&
+          image.history.exists(h, h.created_by.contains("chmod +s"))
+        reason: "Image runs as root with setuid binaries"
+        remediation: "Add USER directive and avoid setuid binaries"
+
+  # ==========================================
+  # Image Optimization
+  # ==========================================
+
+  - name: layer-count-limit
+    description: Limit number of layers for image efficiency
+    entrypoints: ["scan_report"]
+    vars:
+      maxLayers: 20
+    rules:
+      - action: warn
+        when: |
+          has(image.history) &&
+          image.history.filter(h, !h.empty_layer).size() > maxLayers
+        reason: "Image has too many layers (inefficient)"
+        remediation: "Combine RUN commands and use multi-stage builds"
+
+  - name: no-package-manager-cache
+    description: Warn if package manager cache not cleaned
+    entrypoints: ["scan_report"]
+    rules:
+      - action: warn
+        when: |
+          has(image.history) &&
+          image.history.exists(h,
+            h.created_by.contains("apt-get install") ||
+            h.created_by.contains("apt install")) &&
+          !image.history.exists(h, h.created_by.contains("rm -rf /var/lib/apt"))
+        reason: "APT cache not cleaned in image layers"
+        remediation: "Add 'rm -rf /var/lib/apt/lists/*' after apt-get install"
+
+  # ==========================================
+  # Container Configuration Security
+  # ==========================================
+
+  - name: no-root-user
+    description: Block images running as root
+    entrypoints: ["scan_report", "oci_artifact_request"]
+    rules:
+      - action: deny
+        when: |
+          has(image.config) &&
+          image.config.is_root == true
+        reason: "Container runs as root user"
+        remediation: "Add USER directive with non-root user"
+
+  - name: no-sensitive-env-vars
+    description: Block images with sensitive environment variables
+    entrypoints: ["scan_report"]
+    rules:
+      - action: deny
+        when: |
+          has(image.config) &&
+          has(image.config.sensitive_env) &&
+          size(image.config.sensitive_env) > 0
+        reason: "Image has sensitive environment variables baked in"
+        remediation: "Use secrets management instead of environment variables"
+
+  - name: require-healthcheck
+    description: Require HEALTHCHECK for production readiness
+    entrypoints: ["scan_report"]
+    rules:
+      - action: warn
+        when: |
+          has(image.config) &&
+          !has(image.config.healthcheck)
+        reason: "Image does not define a healthcheck"
+        remediation: "Add HEALTHCHECK instruction to Dockerfile"
+
+  - name: no-privileged-ports
+    description: Warn on privileged ports (< 1024) except 80/443
+    entrypoints: ["scan_report"]
+    rules:
+      - action: warn
+        when: |
+          has(image.config) &&
+          has(image.config.exposed_ports) &&
+          image.config.exposed_ports.exists(p,
+            p.matches("^[0-9]+") &&
+            int(p.split("/")[0]) < 1024 &&
+            int(p.split("/")[0]) != 80 &&
+            int(p.split("/")[0]) != 443)
+        reason: "Image exposes privileged ports"
+        remediation: "Use non-privileged ports (>= 1024) and port mapping"
+
+  - name: require-oci-labels
+    description: Require OCI standard labels for traceability
+    entrypoints: ["scan_report"]
+    vars:
+      requiredLabels:
+        - "org.opencontainers.image.source"
+        - "org.opencontainers.image.version"
+        - "org.opencontainers.image.revision"
+    rules:
+      - action: warn
+        when: |
+          has(image.config) &&
+          has(image.config.labels) &&
+          !requiredLabels.all(l, l in image.config.labels)
+        reason: "Image missing required OCI labels"
+        remediation: "Add OCI labels for source, version, and revision tracking"
+
+  # ==========================================
+  # Image Age and Freshness
+  # ==========================================
+
+  - name: image-age-limit
+    description: Warn on images older than 90 days
+    entrypoints: ["scan_report"]
+    vars:
+      maxAgeDays: 90
+    rules:
+      - action: warn
+        when: |
+          has(image.metadata) &&
+          image.metadata.created > 0 &&
+          age(image.metadata.created) > duration(string(maxAgeDays * 24) + "h")
+        reason: "Image is older than 90 days"
+        remediation: "Rebuild image with latest base and security patches"
+
+  - name: stale-base-image
+    description: Warn if base image is likely outdated
+    entrypoints: ["scan_report"]
+    vars:
+      staleVersionPatterns:
+        - ":3.1"       # Old Alpine versions
+        - ":18.04"     # Old Ubuntu
+        - ":10"        # Old Debian
+        - ":stretch"   # Old Debian codename
+    rules:
+      - action: warn
+        when: |
+          has(image.history) &&
+          cel.bind(base, baseImage(image.history),
+            base != "" &&
+            staleVersionPatterns.exists(p, base.contains(p)))
+        reason: "Base image appears to be an outdated version"
+        remediation: "Update to a supported base image version"
+
+  # ==========================================
+  # Size Limits
+  # ==========================================
+
+  - name: image-size-limit
+    description: Block images larger than 2GB
+    entrypoints: ["scan_report", "oci_artifact_request"]
+    vars:
+      maxSizeBytes: 2147483648  # 2GB
+    rules:
+      - action: deny
+        when: |
+          has(image.metadata) &&
+          image.metadata.size > maxSizeBytes
+        reason: "Image exceeds 2GB size limit"
+        remediation: "Use multi-stage builds and minimal base images"
+
+  - name: warn-large-image
+    description: Warn on images larger than 500MB
+    entrypoints: ["scan_report"]
+    vars:
+      warnSizeBytes: 524288000  # 500MB
+    rules:
+      - action: warn
+        when: |
+          has(image.metadata) &&
+          image.metadata.size > warnSizeBytes
+        reason: "Image is larger than 500MB"
+        remediation: "Consider optimizing image size for faster deployments"

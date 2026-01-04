@@ -1,0 +1,148 @@
+# Container Image Configuration Policies
+#
+# Security policies for container image configuration analysis.
+# These policies evaluate image metadata extracted during scanning,
+# including USER, ENV, ENTRYPOINT, labels, and build history.
+#
+# Available policy variables:
+#   image.config.user          - User to run as (empty = root)
+#   image.config.is_root       - true if running as root
+#   image.config.env           - List of environment variables
+#   image.config.sensitive_env - Env vars that may contain secrets
+#   image.config.entrypoint    - Container entrypoint command
+#   image.config.cmd           - Default command arguments
+#   image.config.exposed_ports - List of exposed ports
+#   image.config.volumes       - List of volumes
+#   image.config.labels        - Image labels map
+#   image.config.working_dir   - Working directory
+#   image.config.shell         - Default shell
+#   image.config.healthcheck   - Healthcheck configuration (if defined)
+#   image.metadata.architecture - CPU architecture
+#   image.metadata.os          - Operating system
+#   image.metadata.layer_count - Number of layers
+#   image.metadata.size        - Total size in bytes
+#   image.metadata.created     - Creation timestamp (Unix)
+#   image.metadata.digest      - Image digest
+#   image.history              - Build history entries
+
+policies:
+  - name: container-no-root
+    description: Block container images that run as root
+    entrypoints: ["scan_report", "oci_artifact_request"]
+    rules:
+      - action: deny
+        when: |
+          has(image.config) &&
+          image.config.is_root == true
+        reason: "Container image runs as root user"
+        remediation: "Add USER directive to Dockerfile with non-root user"
+
+  - name: container-no-secrets-in-env
+    description: Block images with potential secrets in environment variables
+    entrypoints: ["scan_report", "oci_artifact_request"]
+    rules:
+      - action: deny
+        when: |
+          has(image.config) &&
+          has(image.config.sensitive_env) &&
+          size(image.config.sensitive_env) > 0
+        reason: "Container image has potential secrets in environment variables"
+        remediation: "Use secrets management instead of environment variables for sensitive data"
+
+  - name: container-healthcheck-required
+    description: Require healthcheck for production images
+    entrypoints: ["scan_report"]
+    rules:
+      - action: warn
+        when: |
+          has(image.config) &&
+          !has(image.config.healthcheck)
+        reason: "Container image does not define a healthcheck"
+        remediation: "Add HEALTHCHECK directive to Dockerfile"
+
+  - name: container-layer-limit
+    description: Warn on images with too many layers (indicates poor optimization)
+    entrypoints: ["scan_report"]
+    vars:
+      maxLayers: 25
+    rules:
+      - action: warn
+        when: |
+          has(image.metadata) &&
+          image.metadata.layer_count > maxLayers
+        reason: "Container image has excessive layers"
+        remediation: "Combine RUN commands and use multi-stage builds"
+
+  - name: container-size-limit
+    description: Block images larger than 2GB
+    entrypoints: ["scan_report", "oci_artifact_request"]
+    vars:
+      maxSizeBytes: 2147483648  # 2GB
+    rules:
+      - action: deny
+        when: |
+          has(image.metadata) &&
+          image.metadata.size > maxSizeBytes
+        reason: "Container image exceeds size limit"
+        remediation: "Use multi-stage builds and minimize base image"
+
+  - name: container-required-labels
+    description: Require standard OCI labels for traceability
+    entrypoints: ["scan_report"]
+    vars:
+      requiredLabels:
+        - "org.opencontainers.image.source"
+        - "org.opencontainers.image.version"
+    rules:
+      - action: warn
+        when: |
+          has(image.config) &&
+          has(image.config.labels) &&
+          !requiredLabels.all(l, l in image.config.labels)
+        reason: "Container image missing required labels"
+        remediation: "Add OCI labels for source and version tracking"
+
+  - name: container-port-validation
+    description: Warn on images exposing privileged ports
+    entrypoints: ["scan_report"]
+    rules:
+      - action: warn
+        when: |
+          has(image.config) &&
+          has(image.config.exposed_ports) &&
+          image.config.exposed_ports.exists(p,
+            p.matches("^([0-9]+)") &&
+            int(p.split("/")[0]) < 1024 &&
+            int(p.split("/")[0]) != 80 &&
+            int(p.split("/")[0]) != 443
+          )
+        reason: "Container exposes privileged ports (other than 80/443)"
+        remediation: "Use non-privileged ports and port mapping at runtime"
+
+  - name: container-old-image
+    description: Warn on images created more than 90 days ago
+    entrypoints: ["scan_report"]
+    rules:
+      - action: warn
+        when: |
+          has(image.metadata) &&
+          image.metadata.created > 0 &&
+          age(image.metadata.created) > duration("2160h")
+        reason: "Container image is older than 90 days"
+        remediation: "Rebuild image with latest base image and security patches"
+
+  - name: container-platform-check
+    description: Ensure image is built for expected platform
+    entrypoints: ["scan_report"]
+    vars:
+      allowedArchitectures:
+        - "amd64"
+        - "arm64"
+    rules:
+      - action: warn
+        when: |
+          has(image.metadata) &&
+          image.metadata.architecture != "" &&
+          !(image.metadata.architecture in allowedArchitectures)
+        reason: "Container image built for unexpected architecture"
+        remediation: "Build multi-arch image or use correct platform"

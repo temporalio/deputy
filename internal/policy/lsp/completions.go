@@ -187,7 +187,7 @@ func celFieldCompletions(base string) []string {
 	case "env":
 		return []string{"command", "entrypoint", "listener", "hostname", "time", "offline", "quota"}
 	case "request":
-		return []string{"ecosystem", "module", "package", "version", "fileType", "operation", "client", "licenses"}
+		return []string{"ecosystem", "module", "package", "version", "raw_version", "has_version", "fileType", "operation", "client", "licenses", "registry", "repository", "reference", "tag", "digest", "image", "path"}
 	case "request.client":
 		return []string{"ip", "userAgent", "principal"}
 	case "pkg":
@@ -198,6 +198,20 @@ func celFieldCompletions(base string) []string {
 		return []string{"name", "version", "ecosystem", "licenses"}
 	case "repo":
 		return []string{"name", "ref", "commit", "path"}
+	case "target":
+		return []string{"kind", "display", "ref", "effective_ref", "commit", "origin", "local", "cloned", "provenance"}
+	case "target.provenance":
+		return []string{"registry", "repository", "tag", "digest", "reference", "image", "image_input", "transport", "platform", "path"}
+	case "image", "image_info":
+		return []string{"registry", "repository", "tag", "digest", "reference", "image", "config", "metadata", "history"}
+	case "image.config", "image_info.config":
+		return []string{"user", "is_root", "env", "sensitive_env", "entrypoint", "cmd", "exposed_ports", "volumes", "labels", "working_dir", "healthcheck", "shell", "stop_signal", "on_build"}
+	case "image.config.healthcheck", "image_info.config.healthcheck":
+		return []string{"test", "interval", "timeout", "retries"}
+	case "image.metadata", "image_info.metadata":
+		return []string{"architecture", "os", "os_version", "variant", "layer_count", "size", "created", "author", "docker_version", "digest"}
+	case "vulnerability.layerDetails":
+		return []string{"index", "diffId", "chainId", "command", "inBaseImage"}
 	default:
 		return nil
 	}

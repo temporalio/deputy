@@ -23,6 +23,7 @@ import (
 
 	"github.com/picatz/deputy/internal/collections"
 	"github.com/picatz/deputy/internal/ecosystem"
+	dockerfilex "github.com/picatz/deputy/internal/inventory/plugins/docker/dockerfilex"
 	ghactions "github.com/picatz/deputy/internal/inventory/plugins/github/actionsx"
 	rubygemspec "github.com/picatz/deputy/internal/inventory/plugins/ruby/gemspecx"
 	"github.com/picatz/deputy/internal/repository/workspace"
@@ -170,11 +171,15 @@ func summarizeScanFailures(res *scalibr.ScanResult) error {
 func resolvePlugins(opts ScanOptions, cap *plugin.Capabilities) ([]plugin.Plugin, error) {
 	names := normalizeEcosystems(opts.Ecosystems)
 	includeActions := shouldIncludeGitHubActions(names)
+	includeDockerfile := shouldIncludeDockerfile(names)
 	names = filterExternalEcosystems(names)
 	if len(names) == 0 {
 		plugins := pl.FromCapabilities(cap)
 		if includeActions {
 			plugins = append(plugins, ghactions.New())
+		}
+		if includeDockerfile {
+			plugins = append(plugins, dockerfilex.New())
 		}
 		return plugins, nil
 	}
@@ -184,6 +189,9 @@ func resolvePlugins(opts ScanOptions, cap *plugin.Capabilities) ([]plugin.Plugin
 	}
 	if includeActions {
 		plugins = append(plugins, ghactions.New())
+	}
+	if includeDockerfile {
+		plugins = append(plugins, dockerfilex.New())
 	}
 	return plugin.FilterByCapabilities(plugins, cap), nil
 }
@@ -200,8 +208,13 @@ func filterInventoryPlugins(plugins []plugin.Plugin) []plugin.Plugin {
 		if _, ok := p.(fsx.Extractor); !ok {
 			continue
 		}
+		// Deputy-provided custom plugins bypass the SCALIBR prefix filter.
 		if p.Name() == rubygemspec.Name {
 			out = append(out, rubygemspec.New())
+			continue
+		}
+		if p.Name() == dockerfilex.Name {
+			out = append(out, p)
 			continue
 		}
 		if excluded.Has(p.Name()) {
@@ -258,6 +271,25 @@ func shouldIncludeGitHubActions(names []string) bool {
 	return slices.ContainsFunc(names, isGitHubActionsEcosystem)
 }
 
+// dockerfileAliases contains all recognized aliases for Dockerfile ecosystem.
+var dockerfileAliases = collections.NewSet(
+	"docker", "dockerfile", "container", "containerfile", "oci",
+)
+
+// isDockerfileEcosystem checks if a name is an alias for Dockerfile scanning.
+func isDockerfileEcosystem(name string) bool {
+	return dockerfileAliases.Has(name)
+}
+
+// shouldIncludeDockerfile reports whether the internal Dockerfile plugin should run.
+// If names is nil (meaning all ecosystems), it returns true.
+func shouldIncludeDockerfile(names []string) bool {
+	if names == nil {
+		return true
+	}
+	return slices.ContainsFunc(names, isDockerfileEcosystem)
+}
+
 // filterExternalEcosystems removes internal ecosystem aliases so upstream scalibr
 // plugin resolution does not error on unknown names.
 func filterExternalEcosystems(names []string) []string {
@@ -266,7 +298,7 @@ func filterExternalEcosystems(names []string) []string {
 	}
 	out := make([]string, 0, len(names))
 	for _, n := range names {
-		if isGitHubActionsEcosystem(n) {
+		if isGitHubActionsEcosystem(n) || isDockerfileEcosystem(n) {
 			continue
 		}
 		out = append(out, n)

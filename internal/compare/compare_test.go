@@ -289,6 +289,12 @@ func TestSelectChangeType_SemverEcosystems(t *testing.T) {
 		{name: "pypi upgrade", ecosystem: "pypi", base: "1.0.0", target: "1.0.1", wantChange: Upgraded},
 		{name: "pypi downgrade", ecosystem: "pypi", base: "2.0.0", target: "1.9.0", wantChange: Downgraded},
 		{name: "unknown ecosystem", ecosystem: "custom", base: "1.0.0", target: "2.0.0", wantChange: Updated},
+		// Go pseudo-version and devel version handling
+		{name: "go pseudo to devel", ecosystem: "go", base: "0.0.0-20250806184128-f61752e61c34", target: "(devel)", wantChange: Updated},
+		{name: "go devel to pseudo", ecosystem: "go", base: "(devel)", target: "0.0.0-20250806184128-f61752e61c34", wantChange: Updated},
+		{name: "go devel to devel", ecosystem: "go", base: "(devel)", target: "(devel)", wantChange: Updated},
+		{name: "go pseudo upgrade", ecosystem: "go", base: "0.0.0-20240101000000-aaaaaaaaaaaa", target: "0.0.0-20240201000000-bbbbbbbbbbbb", wantChange: Upgraded},
+		{name: "go tagged to devel", ecosystem: "go", base: "1.2.3", target: "(devel)", wantChange: Updated},
 	}
 	for _, tc := range cases {
 		tc := tc
@@ -393,5 +399,123 @@ require github.com/commit/dependency v1.2.3`
 	}
 	if !deps["github.com/commit/dependency"] {
 		t.Fatalf("expected dependency from commit: %+v", deps)
+	}
+}
+
+func TestNormalizeEcosystemForComparison(t *testing.T) {
+	cases := []struct {
+		name, in, want string
+	}{
+		// Standard cases - strips version from OS distributions
+		{name: "debian with version", in: "Debian:11", want: "debian"},
+		{name: "debian 12", in: "Debian:12", want: "debian"},
+		{name: "ubuntu with version", in: "Ubuntu:22.04", want: "ubuntu"},
+		{name: "alpine with version", in: "Alpine:3.19", want: "alpine"},
+		{name: "rhel", in: "RHEL:8", want: "rhel"},
+		{name: "rocky linux", in: "Rocky:9", want: "rocky"},
+
+		// Should NOT strip version from non-OS ecosystems
+		{name: "npm unchanged", in: "npm", want: "npm"},
+		{name: "pypi unchanged", in: "PyPI", want: "pypi"},
+		{name: "go unchanged", in: "Go", want: "go"},
+		{name: "cargo unchanged", in: "crates.io", want: "crates.io"},
+
+		// Edge cases
+		{name: "empty string", in: "", want: ""},
+		{name: "lowercase debian", in: "debian:11", want: "debian"},
+		{name: "whitespace", in: "  Debian:11  ", want: "debian"},
+		{name: "unknown ecosystem with colon", in: "unknown:123", want: "unknown:123"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := normalizeEcosystemForComparison(tc.in)
+			if got != tc.want {
+				t.Errorf("normalizeEcosystemForComparison(%q) = %q, want %q", tc.in, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestSemanticEcosystemName_OSDistributions(t *testing.T) {
+	cases := []struct {
+		name, in, want string
+		wantOK         bool
+	}{
+		// OS distributions with versions
+		{name: "debian 11", in: "Debian:11", want: "Debian", wantOK: true},
+		{name: "debian 12", in: "Debian:12", want: "Debian", wantOK: true},
+		{name: "ubuntu", in: "Ubuntu:22.04", want: "Ubuntu", wantOK: true},
+		{name: "alpine", in: "Alpine:3.19", want: "Alpine", wantOK: true},
+		{name: "rocky linux", in: "Rocky Linux:9", want: "Rocky Linux", wantOK: true},
+
+		// OS distributions without versions
+		{name: "debian no version", in: "debian", want: "Debian", wantOK: true},
+		{name: "ubuntu no version", in: "ubuntu", want: "Ubuntu", wantOK: true},
+		{name: "alpine no version", in: "alpine", want: "Alpine", wantOK: true},
+
+		// Language ecosystems (unchanged behavior)
+		{name: "npm", in: "npm", want: "npm", wantOK: true},
+		{name: "pypi", in: "PyPI", want: "PyPI", wantOK: true},
+		{name: "cargo", in: "cargo", want: "crates.io", wantOK: true},
+
+		// Unknown ecosystem
+		{name: "unknown", in: "foobar", want: "", wantOK: false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, ok := semanticEcosystemName(tc.in)
+			if got != tc.want || ok != tc.wantOK {
+				t.Errorf("semanticEcosystemName(%q) = (%q, %v), want (%q, %v)", tc.in, got, ok, tc.want, tc.wantOK)
+			}
+		})
+	}
+}
+
+func TestComparePackages_PackageMatching(t *testing.T) {
+	// Test that packages are matched correctly even when they have the same
+	// ecosystem. This validates the core comparison logic works correctly.
+	oldPkgs := []*extractor.Package{
+		{Name: "curl", Version: "7.74.0", PURLType: scalpurl.TypeNPM},
+		{Name: "openssl", Version: "1.1.1", PURLType: scalpurl.TypeNPM},
+		{Name: "removed-pkg", Version: "1.0.0", PURLType: scalpurl.TypeNPM},
+	}
+	newPkgs := []*extractor.Package{
+		{Name: "curl", Version: "7.88.1", PURLType: scalpurl.TypeNPM},
+		{Name: "openssl", Version: "3.0.11", PURLType: scalpurl.TypeNPM},
+		{Name: "new-pkg", Version: "2.0.0", PURLType: scalpurl.TypeNPM},
+	}
+	changes := ComparePackages(oldPkgs, newPkgs, nil, nil, nil)
+	if len(changes) != 4 {
+		t.Fatalf("expected 4 changes got %d: %+v", len(changes), changes)
+	}
+
+	var upgraded, added, removed int
+	for _, c := range changes {
+		switch c.ChangeType {
+		case Upgraded:
+			upgraded++
+			if c.Name != "curl" && c.Name != "openssl" {
+				t.Errorf("unexpected upgraded package: %s", c.Name)
+			}
+		case Added:
+			added++
+			if c.Name != "new-pkg" {
+				t.Errorf("unexpected added package: %s", c.Name)
+			}
+		case Removed:
+			removed++
+			if c.Name != "removed-pkg" {
+				t.Errorf("unexpected removed package: %s", c.Name)
+			}
+		}
+	}
+	if upgraded != 2 {
+		t.Errorf("expected 2 upgraded packages, got %d", upgraded)
+	}
+	if added != 1 {
+		t.Errorf("expected 1 added package, got %d", added)
+	}
+	if removed != 1 {
+		t.Errorf("expected 1 removed package, got %d", removed)
 	}
 }

@@ -3,9 +3,11 @@ package scan
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"strings"
 	"time"
 
+	scalibrimage "github.com/google/osv-scalibr/artifact/image"
 	"github.com/google/osv-scalibr/extractor"
 	analysis "github.com/picatz/deputy/internal/analysis"
 	"github.com/picatz/deputy/internal/compare"
@@ -13,6 +15,8 @@ import (
 	"github.com/picatz/deputy/internal/logs"
 	"github.com/picatz/deputy/internal/otel"
 	"github.com/picatz/deputy/internal/repository/workspace"
+	"github.com/picatz/deputy/internal/targets"
+	"github.com/picatz/deputy/internal/targets/providers"
 	"github.com/picatz/deputy/internal/vulnerability"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
@@ -131,11 +135,13 @@ func (s *Service) ScanRepository(ctx context.Context, repoArg, ref string, refPr
 
 	result := buildResult(
 		Target{
+			Kind:         target.kind,
 			DisplayPath:  target.displayPath,
 			LocalPath:    target.localRepoPath,
 			Ref:          ref,
 			EffectiveRef: effRef,
 			Cloned:       target.cloned,
+			Provenance:   target.mat.Meta.Provenance,
 		},
 		pkgs,
 		modInfo.goDirect,
@@ -199,7 +205,7 @@ func (s *Service) ScanDirectory(ctx context.Context, path string, opts Options) 
 	vulns, queryErr := s.queryOSV(ctx, inputs)
 
 	result := buildResult(
-		Target{DisplayPath: path, LocalPath: path},
+		Target{Kind: targets.KindDir, DisplayPath: path, LocalPath: path},
 		pkgs,
 		goDirect,
 		vulns,
@@ -240,7 +246,7 @@ func (s *Service) ScanSBOM(ctx context.Context, pkgs []*extractor.Package, direc
 	vulns, queryErr := s.queryOSV(ctx, inputs)
 
 	result := buildResult(
-		Target{DisplayPath: "sbom"},
+		Target{Kind: targets.KindSBOM, DisplayPath: "sbom"},
 		pkgs,
 		direct,
 		vulns,
@@ -263,6 +269,177 @@ func (s *Service) ScanSBOM(ctx context.Context, pkgs []*extractor.Package, direc
 	})
 
 	return &Execution{Result: result}, nil
+}
+
+// ScanContainerImage scans a container image target for vulnerabilities.
+func (s *Service) ScanContainerImage(ctx context.Context, target string, targetOpts map[string]string, opts Options) (*Execution, error) {
+	startTime := time.Now()
+	ctx, span := otel.StartSpan(ctx, "deputy.scan.container_image",
+		trace.WithAttributes(
+			attribute.String("deputy.target.path", target),
+		))
+	defer span.End()
+
+	logs.Info(ctx, "starting container image scan", "target", target)
+
+	mat, err := targets.Open(ctx, target, targetOpts)
+	if err != nil {
+		logs.Error(ctx, "failed to resolve container image target", "error", err)
+		otel.SetSpanError(span, err)
+		return nil, err
+	}
+
+	cleanup := func() {}
+	if mat.Cleanup != nil {
+		cleanup = mat.Cleanup
+	}
+
+	// Extract scalibrimage.Image and optionally the v1.Image for config access
+	var img scalibrimage.Image
+	var imageInfo *ImageInfo
+	var imageConfigWarning string
+
+	switch data := mat.Data.(type) {
+	case *providers.ContainerImageData:
+		img = data
+		// Extract image configuration if v1.Image is available
+		if data.V1Image != nil {
+			info, err := ExtractImageInfo(data.V1Image)
+			if err != nil {
+				slog.Debug("failed to extract image config", "target", target, "error", err)
+				imageConfigWarning = fmt.Sprintf("image config extraction failed (policy evaluation may be limited): %v", err)
+			} else {
+				imageInfo = info
+			}
+		} else {
+			slog.Debug("v1.Image not available, image config extraction skipped", "target", target)
+		}
+	case scalibrimage.Image:
+		img = data
+		// scalibrimage.Image doesn't expose config directly
+		slog.Debug("image config extraction not supported for this image type", "target", target)
+	default:
+		cleanup()
+		err := fmt.Errorf("target %q did not resolve to a container image", target)
+		otel.SetSpanError(span, err)
+		return nil, err
+	}
+
+	pkgs, err := inv.ScanPackagesContainerImage(ctx, img, inv.ScanOptions{Ecosystems: opts.Ecosystems})
+	if err != nil {
+		cleanup()
+		otel.SetSpanError(span, err)
+		return nil, err
+	}
+	span.SetAttributes(attribute.Int("deputy.package.count", len(pkgs)))
+
+	inputs := PackagesToInputs(pkgs, PackageInputOptions{})
+	vulns, queryErr := s.queryOSV(ctx, inputs)
+
+	displayPath := target
+	if mat.Meta.Target != "" {
+		displayPath = mat.Meta.Target
+	}
+
+	result := buildResult(
+		Target{
+			Kind:        mat.Meta.Kind,
+			DisplayPath: displayPath,
+			LocalPath:   mat.Path,
+			Provenance:  mat.Meta.Provenance,
+		},
+		pkgs,
+		nil,
+		vulns,
+		queryErr,
+		opts,
+	)
+
+	// Attach image configuration to result for policy evaluation
+	result.ImageInfo = imageInfo
+
+	// Add warning if image config extraction failed
+	if imageConfigWarning != "" {
+		result.Warnings = append(result.Warnings, imageConfigWarning)
+	}
+
+	otel.RecordScanCompletion(ctx, otel.ScanCompletion{
+		Span:         span,
+		Duration:     time.Since(startTime).Seconds(),
+		Ecosystem:    string(targets.KindContainerImage),
+		PackageCount: result.PackagesScanned,
+		Severity: otel.SeverityCounts{
+			Critical: result.Stats.CriticalSev,
+			High:     result.Stats.HighSeverity,
+			Medium:   result.Stats.MedSeverity,
+			Low:      result.Stats.LowSeverity,
+		},
+	})
+
+	return &Execution{Result: result, cleanup: cleanup}, nil
+}
+
+// ScanDockerfile scans a Dockerfile for policy evaluation (no vulnerability scanning).
+// Dockerfiles don't contain packages directly - they reference images that contain packages.
+// Use ScanContainerImage to scan the actual images referenced in the Dockerfile.
+func (s *Service) ScanDockerfile(ctx context.Context, target string, opts Options) (*Execution, error) {
+	startTime := time.Now()
+	ctx, span := otel.StartSpan(ctx, "deputy.scan.dockerfile",
+		trace.WithAttributes(
+			attribute.String("deputy.target.path", target),
+		))
+	defer span.End()
+
+	logs.Info(ctx, "starting dockerfile scan", "target", target)
+
+	mat, err := targets.Open(ctx, target, nil)
+	if err != nil {
+		logs.Error(ctx, "failed to resolve dockerfile target", "error", err)
+		otel.SetSpanError(span, err)
+		return nil, err
+	}
+
+	cleanup := func() {}
+	if mat.Cleanup != nil {
+		cleanup = mat.Cleanup
+	}
+
+	data, ok := mat.Data.(*providers.DockerfileData)
+	if !ok {
+		cleanup()
+		err := fmt.Errorf("target %q did not resolve to a dockerfile", target)
+		otel.SetSpanError(span, err)
+		return nil, err
+	}
+
+	displayPath := target
+	if mat.Meta.Target != "" {
+		displayPath = mat.Meta.Target
+	}
+
+	result := Result{
+		Target: Target{
+			Kind:        targets.KindDockerfile,
+			DisplayPath: displayPath,
+			LocalPath:   mat.Path,
+		},
+		GeneratedAt:        time.Now().UTC(),
+		DockerfileInfo:     data.Info,
+		DockerfileAnalysis: data.Analysis,
+	}
+
+	span.SetAttributes(
+		attribute.Int("deputy.dockerfile.stage_count", len(data.Info.Stages)),
+		attribute.Bool("deputy.dockerfile.multi_stage", data.Analysis.HasMultiStage),
+	)
+
+	logs.Info(ctx, "dockerfile scan completed",
+		"stages", len(data.Info.Stages),
+		"multi_stage", data.Analysis.HasMultiStage,
+		"duration_seconds", time.Since(startTime).Seconds(),
+	)
+
+	return &Execution{Result: result, cleanup: cleanup}, nil
 }
 
 func buildResult(target Target, pkgs []*extractor.Package, direct map[string]bool, vulns []analysis.Vulnerability, queryErr error, opts Options) Result {

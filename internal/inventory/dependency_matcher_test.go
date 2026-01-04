@@ -73,13 +73,17 @@ func TestDependencyMatcherMatches(t *testing.T) {
 		{"Cargo.toml", "Cargo.toml", true},
 		{"Cargo.lock", "Cargo.lock", true},
 
+		// Container ecosystem
+		{"Dockerfile", "Dockerfile", true},
+		{"Containerfile", "Containerfile", true},
+		{"server.Dockerfile", "docker/server.Dockerfile", true},
+
 		// Non-dependency files
 		{"README.md", "README.md", false},
 		{"main.go", "main.go", false},
 		{"index.js", "index.js", false},
 		{".gitignore", ".gitignore", false},
 		{"Makefile", "Makefile", false},
-		{"Dockerfile", "Dockerfile", false},
 
 		// Edge cases
 		{"empty path", "", false},
@@ -143,8 +147,13 @@ func TestDependencyMatcherAnyMatch(t *testing.T) {
 		},
 		{
 			name:     "no dependency files",
-			paths:    []string{"README.md", "main.go", "Dockerfile"},
+			paths:    []string{"README.md", "main.go", "config.yaml"},
 			expected: false,
+		},
+		{
+			name:     "dockerfile among non-deps",
+			paths:    []string{"README.md", "main.go", "Dockerfile"},
+			expected: true,
 		},
 		{
 			name:     "empty slice",

@@ -114,6 +114,7 @@ type CacheType string
 const (
 	CacheTypeOSV     CacheType = "osv"
 	CacheTypeLicense CacheType = "license"
+	CacheTypeImage   CacheType = "image_scan"
 )
 
 // RequestInfo contains information about a proxy request for span enrichment.
@@ -324,10 +325,65 @@ func RecordLicenseCacheMiss(ctx context.Context, span trace.Span, key string) {
 	})
 }
 
+// RecordImageScanCacheHit records an image scan cache hit.
+func RecordImageScanCacheHit(ctx context.Context, span trace.Span, key string) {
+	RecordCacheEvent(ctx, span, CacheEventData{
+		Type: CacheTypeImage,
+		Hit:  true,
+		Key:  key,
+	})
+}
+
+// RecordImageScanCacheMiss records an image scan cache miss.
+func RecordImageScanCacheMiss(ctx context.Context, span trace.Span, key string) {
+	RecordCacheEvent(ctx, span, CacheEventData{
+		Type: CacheTypeImage,
+		Hit:  false,
+		Key:  key,
+	})
+}
+
 // RecordVulnerabilityCount adds vulnerability count to the span.
 // Call this when vulnerability lookup completes.
 func RecordVulnerabilityCount(span trace.Span, count int) {
 	span.SetAttributes(attrVulnCount.Int(count))
+}
+
+// RecordDigestResolutionFailure records when tag-to-digest resolution fails.
+// This affects caching effectiveness - without a digest, each request triggers a scan.
+func RecordDigestResolutionFailure(ctx context.Context, span trace.Span, registry, repository, tag string, err error) {
+	attrs := []attribute.KeyValue{
+		attribute.String("deputy.image.registry", registry),
+		attribute.String("deputy.image.repository", repository),
+		attribute.String("deputy.image.tag", tag),
+	}
+	if err != nil {
+		attrs = append(attrs, attribute.String("error", err.Error()))
+	}
+	span.AddEvent("image.digest_resolution_failed", trace.WithAttributes(attrs...))
+}
+
+// RecordImageScanError records when a container image scan fails.
+// This provides visibility into scan failures for debugging and alerting.
+func RecordImageScanError(ctx context.Context, span trace.Span, target string, err error) {
+	attrs := []attribute.KeyValue{
+		attribute.String("deputy.image.target", target),
+	}
+	if err != nil {
+		attrs = append(attrs, attribute.String("error", err.Error()))
+		span.RecordError(err)
+	}
+	span.AddEvent("image.scan_failed", trace.WithAttributes(attrs...))
+}
+
+// RecordImageScanSuccess records when a container image scan completes successfully.
+func RecordImageScanSuccess(ctx context.Context, span trace.Span, target string, vulnCount int, cached bool) {
+	attrs := []attribute.KeyValue{
+		attribute.String("deputy.image.target", target),
+		attribute.Int("deputy.image.vuln_count", vulnCount),
+		attribute.Bool("deputy.image.cached", cached),
+	}
+	span.AddEvent("image.scan_completed", trace.WithAttributes(attrs...))
 }
 
 // ProxyRequestRecorder provides a convenient way to record request metrics.

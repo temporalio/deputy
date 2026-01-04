@@ -220,6 +220,9 @@ func NewHandler(eco ecosystem.Ecosystem, upstream string, policies PolicyEvaluat
 
 // NewHandlerFromString creates a proxy handler by parsing the ecosystem string.
 func NewHandlerFromString(ecoString, upstream string, policies PolicyEvaluator) (http.Handler, error) {
+	if strings.EqualFold(strings.TrimSpace(ecoString), "oci") {
+		return NewOCIHandler(upstream, policies)
+	}
 	eco := ecosystem.Parse(ecoString)
 	if !eco.IsSupported() {
 		return nil, fmt.Errorf("unknown ecosystem: %s", ecoString)

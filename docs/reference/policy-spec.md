@@ -65,7 +65,7 @@ flowchart TB
 - CEL environment includes optional types plus cel-go extensions: `ext.Strings`, `ext.Regex`, `ext.Lists`, `ext.Sets`, `ext.Bindings`, `ext.Encoders`, and `ext.Math`. See the [policy framework](policy-framework.md#cel-helpers-and-extensions) for details.
 
 ### Entrypoint inputs
-- Standard top-level identifiers include `request`, `pkg`, `vulnerabilities`, `vulnerability`, `jwt`, `changes`, `packages`, `sbom`, `config`, `env`, `dependency`, `plan`, `step`, `repo`, `cluster`, `component`, `findings`, and `change`. See the [policy inputs](policy-inputs.md) for the full list and example payloads.
+- Standard top-level identifiers include `request`, `pkg`, `target`, `image`, `vulnerabilities`, `vulnerability`, `jwt`, `changes`, `packages`, `sbom`, `config`, `env`, `dependency`, `plan`, `step`, `repo`, `cluster`, `component`, `findings`, and `change`. See the [policy inputs](policy-inputs.md) for the full list and example payloads.
 - `env.command` and `env.entrypoint` indicate the invoking command/entrypoint.
 - Proxy requests always include `request.version` as a string. When no concrete version exists yet (e.g., metadata/index requests), Deputy sets it to the placeholder `"<unknown>"` and also provides:
   - `request.has_version` (bool) — true only when a real version was present in the request path.
@@ -77,9 +77,11 @@ flowchart TB
   ```
 
 Canonical entrypoints (snake_case):
-- proxy: `go_artifact_request`, `npm_artifact_request`, `pypi_artifact_request`, `rubygems_artifact_request`
-- scan: `scan_report`, `scan_vulnerability`
-- diff: `diff_report`, `diff_dependency_change`, `diff_vulnerability`
+- proxy: `go_artifact_request`, `npm_artifact_request`, `pypi_artifact_request`, `rubygems_artifact_request`, `oci_artifact_request`
+- scan (repository/image): `scan_report`, `scan_vulnerability`
+- scan (Dockerfile): `dockerfile_report`, `dockerfile_stage`
+- diff (git refs): `diff_report`, `diff_dependency_change`, `diff_vulnerability`
+- diff (container images): `container_diff_report`, `container_diff_change`, `container_diff_vulnerability`, `container_diff_layer`, `container_diff_config`
 - sbom: `sbom_report`, `sbom_component`
 - fix: `fix_plan`, `fix_plan_step`
 - triage: `triage_report`, `triage_cluster`

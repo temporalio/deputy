@@ -8,6 +8,7 @@ import (
 	"slices"
 	"testing"
 
+	git "github.com/go-git/go-git/v5"
 	"github.com/google/osv-scalibr/extractor"
 	"github.com/google/osv-scalibr/purl"
 	analysis "github.com/picatz/deputy/internal/analysis"
@@ -21,6 +22,7 @@ func TestScannerRunScanHonorsEcosystemFilter(t *testing.T) {
 
 	tmpDir := t.TempDir()
 	writeGoModule(t, tmpDir)
+	initGitRepo(t, tmpDir)
 	outPath := filepath.Join(tmpDir, "scan.json")
 
 	var captured inv.ScanOptions
@@ -56,6 +58,7 @@ func TestScannerRunScanEmitsMultiEcosystemInputs(t *testing.T) {
 	tmpDir := t.TempDir()
 	writeGoModule(t, tmpDir)
 	writePackageJSON(t, filepath.Join(tmpDir, "web"))
+	initGitRepo(t, tmpDir)
 	outPath := filepath.Join(tmpDir, "scan.json")
 
 	goPkg := &extractor.Package{
@@ -120,6 +123,8 @@ func newScanTestCommand(t *testing.T) *cobra.Command {
 	flags.String("published-before", "", "")
 	flags.String("published-after", "", "")
 	flags.String("as-of", "", "")
+	flags.String("source", "", "")
+	flags.String("platform", "", "")
 	return cmd
 }
 
@@ -152,6 +157,13 @@ func writePackageJSON(t *testing.T, dir string) {
 	}
 	if err := os.WriteFile(filepath.Join(dir, "package-lock.json"), []byte(`{}`), 0o600); err != nil {
 		t.Fatalf("write package-lock: %v", err)
+	}
+}
+
+func initGitRepo(t *testing.T, dir string) {
+	t.Helper()
+	if _, err := git.PlainInit(dir, false); err != nil {
+		t.Fatalf("init git repo: %v", err)
 	}
 }
 

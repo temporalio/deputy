@@ -25,10 +25,12 @@ The proxy intercepts requests to upstream registries and evaluates CEL policies 
 | --- | --- |
 | [`serve`](#serve) | Run standalone proxy server |
 | [`template`](#template) | Generate starter configuration |
+| [`oci-config`](#oci-config) | Emit container runtime config snippets |
 | [`go`](#ecosystem-wrappers) | Wrap Go commands |
 | [`npm`](#ecosystem-wrappers) | Wrap npm/yarn/pnpm commands |
 | [`pypi`](#ecosystem-wrappers) | Wrap pip commands |
 | [`rubygems`](#ecosystem-wrappers) | Wrap gem/bundle commands |
+| [`oci`](#ecosystem-wrappers) | Wrap container image pulls |
 
 ## Supported Ecosystems
 
@@ -38,6 +40,7 @@ The proxy intercepts requests to upstream registries and evaluates CEL policies 
 | npm | `registry.npmjs.org` | npm registry |
 | PyPI | `pypi.org` | Simple API |
 | RubyGems | `rubygems.org` | Gem server API |
+| OCI | `registry-1.docker.io` | OCI Registry API (container images) |
 
 ---
 
@@ -190,13 +193,39 @@ $ deputy proxy template > proxy.yaml
 
 # Single ecosystem
 $ deputy proxy template go > go-proxy.yaml
+$ deputy proxy template oci > oci-proxy.yaml
 ```
+
+---
+
+## `oci-config`
+
+Emit Docker/Podman registry config snippets for the OCI proxy.
+
+```
+deputy proxy oci-config --host 127.0.0.1:8084
+deputy proxy oci-config --url https://proxy.internal:8443 --upstream ghcr.io
+```
+
+### Flags
+
+| Flag | Default | Description |
+| --- | --- | --- |
+| `--host` | | Proxy host:port (e.g., `127.0.0.1:8084`) |
+| `--url` | | Proxy URL (e.g., `https://proxy.internal:8443`) |
+| `--upstream` | | Upstream registry host for mirror snippets (e.g., `ghcr.io`) |
+
+Use the emitted snippets to update Docker `daemon.json` or Podman `registries.conf`. They are templates; adapt to your deployment, TLS termination, and multiple-registry setups.
 
 ---
 
 ## Ecosystem Wrappers
 
 Run package manager commands with policy enforcement — no server setup needed.
+
+OCI image pulls are supported via `deputy proxy serve` and `deputy proxy oci`. The wrapper rewrites image references to the local proxy host (for example, `ubuntu:latest` becomes `127.0.0.1:PORT/library/ubuntu:latest`) so container CLIs can pull through Deputy. To target non‑DockerHub registries (GHCR, ECR, Quay, Artifactory, etc.), set `--upstream` to that registry host so rewrite rules stay registry‑aware.
+
+If you pull from multiple registries, run the wrapper once per registry (set `--upstream` each time), or run multiple listeners in `proxy.yaml` and point your runtime at the appropriate host. Deputy only rewrites image references that match the configured upstream host to avoid cross‑registry confusion.
 
 ### `deputy proxy go`
 
@@ -280,6 +309,29 @@ $ deputy proxy rubygems -- gem install bundler
 $ deputy proxy rubygems -- bundle install
 ```
 
+### `deputy proxy oci`
+
+```
+deputy proxy oci [flags] -- <container command> [args...]
+```
+
+| Flag | Default | Description |
+| --- | --- | --- |
+| `--upstream` | `https://registry-1.docker.io` | Upstream OCI registry |
+| `--policy` | | Additional CEL policy files (repeatable) |
+
+```console
+# Pull from Docker Hub through Deputy
+$ deputy proxy oci -- docker pull ubuntu:latest
+
+# Pull from GHCR (override upstream)
+$ deputy proxy oci --upstream https://ghcr.io -- docker pull ghcr.io/acme/app:1.0
+```
+
+Docker Engine requires HTTPS or an insecure registry configuration for local HTTP registries. If pulls fail with TLS errors, add the proxy host (for example, `127.0.0.1:PORT`) to your daemon's `insecure-registries` list or run Deputy behind a TLS terminator.
+
+For private registries, make sure your container runtime is configured to send credentials to the proxy host. Deputy forwards upstream auth headers, but some registries issue tokens scoped to the registry host; in those cases, a registry mirror configuration can be more reliable than inline rewriting.
+
 ---
 
 ## Policy Enforcement
@@ -311,11 +363,35 @@ In proxy policies, the following variables are available:
 #### `request` object
 
 ```cel
-request.ecosystem    // "go", "npm", "pypi", "rubygems"
+request.ecosystem    // "go", "npm", "pypi", "rubygems", "oci"
 request.package      // Package name
 request.version      // Requested version
 request.module       // (Go) Module path
 request.scope        // (npm) @org scope
+request.registry     // (OCI) Registry host
+request.repository   // (OCI) Repository path
+request.reference    // (OCI) Tag or digest
+request.tag          // (OCI) Tag, if present
+request.digest       // (OCI) Digest, if present
+```
+
+#### `image` object (OCI only)
+
+```cel
+image.registry       // Registry host
+image.repository     // Repository path
+image.reference      // Tag or digest
+image.tag            // Tag (if present)
+image.digest         // Digest (if present)
+image.image          // Canonical image name (registry/repository)
+```
+
+#### `target` object
+
+```cel
+target.kind          // "container-image" for OCI pulls
+target.display       // "oci://<registry>/<repo>@<digest>"
+target.provenance    // Normalized metadata map (registry, repository, digest, etc.)
 ```
 
 #### `jwt` object (when authentication is enabled)

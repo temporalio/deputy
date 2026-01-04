@@ -38,17 +38,26 @@ flowchart TB
         MinVer["Minimum versions"]
     end
 
+    subgraph Container["Container Policies"]
+        ImgTag["Image tags"]
+        ImgRoot["Root user"]
+        ImgReg["Registry allowlist"]
+        ImgLayer["Layer analysis"]
+    end
+
     classDef vuln fill:#ffcdd2,stroke:#c62828
     classDef license fill:#e1bee7,stroke:#7b1fa2
     classDef package fill:#ffe0b2,stroke:#e65100
     classDef eco fill:#c8e6c9,stroke:#2e7d32
     classDef version fill:#bbdefb,stroke:#1565c0
+    classDef container fill:#b3e5fc,stroke:#0277bd
 
     class Severity,Exploit,FixAvail vuln
     class Allowlist,Blocklist,Missing license
     class Block,CVE,Typo package
     class Scope,Registry,Prefix eco
     class Prerelease,Pseudo,MinVer version
+    class ImgTag,ImgRoot,ImgReg,ImgLayer container
 ```
 
 ## Choosing a Policy
@@ -90,6 +99,7 @@ flowchart TD
 | **Ecosystems** | [`npm-scope-allowlist.yaml`](#npm-scope-allowlist) | Restrict to approved scopes |
 | **Versions** | [`prerelease-guard.yaml`](#block-prerelease-versions) | Block alpha/beta/rc versions |
 | **Proxy** | [`proxy-critical-advisory.yaml`](#proxy-time-enforcement) | Enforce at download time |
+| **Containers** | [`container-security.yaml`](#container-image-policies) | Image tags, root user, registries |
 
 ---
 
@@ -161,6 +171,17 @@ policies:
 ---
 
 ## License Policies
+
+License policies use `pkg.licenses` which is populated from different sources depending on target type:
+
+| Target | License Source | Notes |
+|--------|----------------|-------|
+| Repository scan | deps.dev | Requires `--enrich-licenses` |
+| Container image | OS package metadata | apt, apk, rpm embed license info |
+| SBOM scan | SBOM component licenses | Preserved from SBOM generation |
+| Proxy request | deps.dev | Automatic for supported ecosystems |
+
+See [License data sources](../reference/policy-inputs.md#license-data-sources) for details.
 
 ### License Allowlist
 
@@ -460,6 +481,176 @@ policies:
 
 ---
 
+## Container Image Policies
+
+Container image policies use the `imageRef()` helper to parse image references and access `image.*` variables for configuration checks. See the [Container Images Guide](container-images.md) for full details.
+
+### Block Latest Tag
+
+```yaml
+# container-security.yaml
+policies:
+  - name: block-latest-tag
+    description: Block mutable :latest tag
+    entrypoints: ["scan_report", "oci_artifact_request"]
+    rules:
+      - action: deny
+        when: |
+          has(image.image) && image.image != "" &&
+          cel.bind(ref, imageRef(image.image),
+            ref.tag == "latest" || (ref.tag == "" && ref.digest == ""))
+        reason: "Image uses :latest tag which is mutable"
+        remediation: "Use a specific version tag or digest"
+```
+
+**When to use:** Enforce immutable image references for reproducible deployments
+
+### Block Root User
+
+```yaml
+policies:
+  - name: no-root-user
+    description: Block containers running as root
+    entrypoints: ["scan_report", "oci_artifact_request"]
+    rules:
+      - action: deny
+        when: has(image.config) && image.config.is_root == true
+        reason: "Container runs as root user"
+        remediation: "Add USER directive with non-root user"
+```
+
+**When to use:** Security hardening for production workloads
+
+### Registry Allowlist
+
+```yaml
+policies:
+  - name: allowed-registries
+    description: Only allow images from approved registries
+    entrypoints: ["scan_report", "oci_artifact_request"]
+    vars:
+      allowed: ["docker.io", "ghcr.io", "gcr.io"]
+    rules:
+      - action: deny
+        when: |
+          has(image.image) && image.image != "" &&
+          !(imageRef(image.image).registry in allowed) &&
+          !imageRef(image.image).registry.endsWith(".gcr.io") &&
+          !imageRef(image.image).registry.endsWith(".azurecr.io")
+        reason: "Image from unapproved registry"
+```
+
+**When to use:** Governance and supply chain security
+
+### Base Image Critical Vulnerabilities
+
+```yaml
+policies:
+  - name: base-image-critical-vulns
+    description: Block critical vulnerabilities from base image
+    entrypoints: ["scan_vulnerability"]
+    rules:
+      - action: deny
+        when: |
+          has(vulnerability.layerDetails) &&
+          vulnerability.layerDetails.inBaseImage == true &&
+          vulnerability.severity == "CRITICAL"
+        reason: "Critical vulnerability in base image"
+        remediation: "Update to a patched base image"
+```
+
+**When to use:** Distinguish between base image issues (update FROM) vs application issues
+
+### Require Minimal Base Images
+
+```yaml
+policies:
+  - name: require-minimal-base
+    description: Require distroless or Alpine base images
+    entrypoints: ["scan_report"]
+    rules:
+      - action: warn
+        when: |
+          has(image.history) &&
+          cel.bind(base, baseImage(image.history),
+            base != "" &&
+            !base.contains("distroless") &&
+            !base.contains("alpine") &&
+            !base.contains("scratch"))
+        reason: "Image does not use a minimal base"
+        remediation: "Use distroless or Alpine for smaller attack surface"
+```
+
+**When to use:** Reduce attack surface and image size
+
+### Block Sensitive Environment Variables
+
+```yaml
+policies:
+  - name: no-sensitive-env
+    description: Block images with secrets baked in
+    entrypoints: ["scan_report"]
+    rules:
+      - action: deny
+        when: |
+          has(image.config) &&
+          has(image.config.sensitive_env) &&
+          size(image.config.sensitive_env) > 0
+        reason: "Image has sensitive environment variables"
+        remediation: "Use secrets management at runtime"
+```
+
+**When to use:** Prevent credential leakage in images
+
+### Image Size Limit
+
+```yaml
+policies:
+  - name: image-size-limit
+    description: Block oversized images
+    entrypoints: ["scan_report"]
+    vars:
+      maxSizeBytes: 1073741824  # 1GB
+    rules:
+      - action: deny
+        when: has(image.metadata) && image.metadata.size > maxSizeBytes
+        reason: "Image exceeds 1GB size limit"
+        remediation: "Use multi-stage builds and minimal base images"
+```
+
+**When to use:** Enforce image optimization standards
+
+### Container Policy Variables
+
+| Variable | Type | Description |
+| --- | --- | --- |
+| `image.image` | string | Full image reference (e.g., `gcr.io/proj/app:v1.2.3`) |
+| `image.registry` | string | Registry hostname |
+| `image.repository` | string | Repository path |
+| `image.tag` | string | Tag portion |
+| `image.digest` | string | Digest portion |
+| `image.config.user` | string | USER directive value |
+| `image.config.is_root` | bool | True if running as root |
+| `image.config.env` | []string | Environment variables |
+| `image.config.sensitive_env` | []string | Env vars that may contain secrets |
+| `image.metadata.layer_count` | int | Number of layers |
+| `image.metadata.size` | int | Size in bytes |
+| `image.history` | []object | Build history entries |
+| `vulnerability.layerDetails.inBaseImage` | bool | If vuln is from base image |
+| `vulnerability.layerDetails.index` | int | Layer position (0=base) |
+| `vulnerability.layerDetails.command` | string | Dockerfile instruction |
+
+### Container Helper Functions
+
+| Function | Description | Example |
+| --- | --- | --- |
+| `imageRef(string)` | Parse image reference | `imageRef("nginx:1.25").tag == "1.25"` |
+| `baseImage(history)` | Extract base image | `baseImage(image.history).contains("alpine")` |
+
+More container policies: [container-security.yaml](../../policy/examples/container-security.yaml), [container-layer-vulnerability.yaml](../../policy/examples/container-layer-vulnerability.yaml)
+
+---
+
 ## Combining Policies
 
 Bundle multiple policies for comprehensive coverage:
@@ -506,7 +697,7 @@ Deputy policies use standard CEL operators and macros (`has`, `exists`, `map`, `
 
 | Category | Functions |
 | --- | --- |
-| Deputy helpers | `now`, `age`, `levenshtein`, `levenshteinWithin` |
+| Deputy helpers | `now`, `age`, `levenshtein`, `levenshteinWithin`, `purl` |
 | String helpers | `matches`, `join`, `split`, `trim`, `replace`, `lowerAscii`, `upperAscii` |
 | Encoding | `base64.encode`, `base64.decode` |
 | Math | `math.abs`, `math.ceil`, `math.floor`, `math.round`, `math.greatest`, `math.least` |

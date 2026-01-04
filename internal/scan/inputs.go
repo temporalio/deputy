@@ -344,6 +344,19 @@ func PackagesToInputs(pkgs []*extractor.Package, opts PackageInputOptions) []ana
 		}
 		entry.Locations = appendUnique(entry.Locations, pkg.Locations...)
 
+		// Preserve layer details from SCALIBR for container image scans.
+		// If multiple packages map to the same entry (e.g., same package in different locations),
+		// prefer keeping the first layer info encountered or use a stable heuristic.
+		if entry.LayerDetails == nil && pkg.LayerDetails != nil {
+			entry.LayerDetails = &analysis.PkgInputLayerDetails{
+				Index:       pkg.LayerDetails.Index,
+				DiffID:      pkg.LayerDetails.DiffID,
+				ChainID:     pkg.LayerDetails.ChainID,
+				Command:     pkg.LayerDetails.Command,
+				InBaseImage: pkg.LayerDetails.InBaseImage,
+			}
+		}
+
 		if opts.DirectPackages != nil && purlStr != "" {
 			if opts.DirectPackages[purlStr] {
 				entry.IsDirect = true

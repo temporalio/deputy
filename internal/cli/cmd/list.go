@@ -201,7 +201,7 @@ func collectListItems(ctx context.Context, repoPath, ref string, ecosystems []st
 	if src == nil {
 		u := gitutil.ToHTTPSGitURL(repoPath)
 		if u == "" {
-			return nil, "", "", fmt.Errorf("could not interpret repo %q as local path or remote URL", repoPath)
+			return nil, "", "", fmt.Errorf("could not interpret target %q as local path or remote Git URL", repoPath)
 		}
 		// Use the unified auth package for secure, host-aware credential resolution
 		gitAuth, _ := auth.GitAuthForURL(ctx, u)

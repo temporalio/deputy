@@ -16,6 +16,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/google/go-containerregistry/pkg/name"
 	deputyerrors "github.com/picatz/deputy/internal/errors"
 	"github.com/picatz/deputy/internal/proxy"
 	"github.com/picatz/deputy/internal/ui"
@@ -53,6 +54,14 @@ func registerProxyExecCommands(proxyCmd *cobra.Command) {
 			exampleCmd:      "deputy proxy rubygems -- gem fetch bundler -v 2.4.22",
 			envPrep:         prepareRubyGemsEnv,
 		},
+		{
+			name:            "oci",
+			defaultUpstream: "https://registry-1.docker.io",
+			short:           "Run container image pulls with Deputy enforcement",
+			exampleCmd:      "deputy proxy oci -- docker pull ubuntu:latest",
+			envPrep:         prepareOCIEnv,
+			argRewrite:      rewriteOCICommand,
+		},
 	}
 
 	for _, spec := range specs {
@@ -67,6 +76,7 @@ type proxyExecSpec struct {
 	short           string
 	exampleCmd      string
 	envPrep         envPreparer
+	argRewrite      argRewriter
 }
 
 // envPreparer is a function that prepares the environment variables for the proxied command.
@@ -79,8 +89,11 @@ type proxyExecConfig struct {
 	upstream    string
 	policyPaths []string
 	envPrep     envPreparer
+	argRewrite  argRewriter
 	requested   string
 }
+
+type argRewriter func(proxyURL, upstream string, command []string) ([]string, error)
 
 // newProxyExecCommand creates a new cobra.Command for a specific proxy execution specification.
 func newProxyExecCommand(spec proxyExecSpec) *cobra.Command {
@@ -103,6 +116,7 @@ func newProxyExecCommand(spec proxyExecSpec) *cobra.Command {
 				upstream:    upstream,
 				policyPaths: policies,
 				envPrep:     spec.envPrep,
+				argRewrite:  spec.argRewrite,
 				requested:   deriveRequestedSpec(spec.name, args),
 			}
 			return runProxyExec(cmd.Context(), cfg, args, cmd.InOrStdin(), cmd.OutOrStdout(), cmd.ErrOrStderr())
@@ -158,6 +172,14 @@ func runProxyExec(ctx context.Context, cfg proxyExecConfig, command []string, st
 	// Skip intro line - Deputy announces itself via block messages if/when they occur.
 	// This keeps the happy path (no blocks) completely silent.
 
+	runCmd := command
+	if cfg.argRewrite != nil {
+		runCmd, err = cfg.argRewrite(inst.url, cfg.upstream, command)
+		if err != nil {
+			return err
+		}
+	}
+
 	env, cleanup, err := cfg.envPrep(inst.url)
 	if err != nil {
 		return err
@@ -165,7 +187,7 @@ func runProxyExec(ctx context.Context, cfg proxyExecConfig, command []string, st
 	if cleanup != nil {
 		defer cleanup()
 	}
-	if err := execProxyCommand(ctx, command, env, stdin, stdout, stderr); err != nil {
+	if err := execProxyCommand(ctx, runCmd, env, stdin, stdout, stderr); err != nil {
 		cancelEvents()
 		if eventsDone != nil {
 			<-eventsDone
@@ -635,6 +657,9 @@ func deriveRequestedSpec(ecosystem string, command []string) string {
 		"rubygems": {
 			"install": true, "fetch": true, "bundle": true, "exec": true,
 		},
+		"oci": {
+			"pull": true, "run": true, "create": true, "image": true, "copy": true, "push": true, "tag": true, "build": true, "load": true, "save": true,
+		},
 	}
 	var fallback string
 	for _, tok := range command {
@@ -709,4 +734,129 @@ func prepareRubyGemsEnv(proxyURL string) ([]string, func(), error) {
 		_ = os.RemoveAll(dir)
 	}
 	return env, cleanup, nil
+}
+
+// prepareOCIEnv prepares the environment for OCI commands.
+func prepareOCIEnv(proxyURL string) ([]string, func(), error) {
+	parsed, err := url.Parse(proxyURL)
+	if err != nil {
+		return nil, nil, err
+	}
+	host := parsed.Host
+	env := []string{
+		"DEPUTY_OCI_PROXY=" + proxyURL,
+		"DEPUTY_OCI_PROXY_HOST=" + host,
+	}
+	return env, nil, nil
+}
+
+func rewriteOCICommand(proxyURL, upstream string, command []string) ([]string, error) {
+	if len(command) == 0 {
+		return command, nil
+	}
+	proxyHost, err := hostFromURL(proxyURL)
+	if err != nil || proxyHost == "" {
+		return command, err
+	}
+	upstreamHosts, err := resolveUpstreamHosts(upstream)
+	if err != nil {
+		return command, err
+	}
+	if len(upstreamHosts) == 0 {
+		return command, nil
+	}
+	out := append([]string{}, command...)
+	for i := 1; i < len(out); i++ {
+		if rewritten, ok := rewriteOCIArg(out[i], proxyHost, upstreamHosts); ok {
+			out[i] = rewritten
+		}
+	}
+	return out, nil
+}
+
+func rewriteOCIArg(arg, proxyHost string, upstreamHosts map[string]bool) (string, bool) {
+	if key, val, ok := strings.Cut(arg, "="); ok {
+		if rewritten, ok := rewriteOCIReference(val, proxyHost, upstreamHosts); ok {
+			return key + "=" + rewritten, true
+		}
+		return "", false
+	}
+	if strings.HasPrefix(arg, "-") {
+		return "", false
+	}
+	rewritten, ok := rewriteOCIReference(arg, proxyHost, upstreamHosts)
+	return rewritten, ok
+}
+
+func rewriteOCIReference(ref, proxyHost string, upstreamHosts map[string]bool) (string, bool) {
+	trimmed := strings.TrimSpace(ref)
+	if trimmed == "" {
+		return "", false
+	}
+	prefix := ""
+	for _, scheme := range []string{"docker://", "oci://"} {
+		if strings.HasPrefix(trimmed, scheme) {
+			prefix = scheme
+			trimmed = strings.TrimPrefix(trimmed, scheme)
+			break
+		}
+	}
+	parsed, err := name.ParseReference(trimmed, name.WeakValidation)
+	if err != nil {
+		return "", false
+	}
+	registry := strings.ToLower(parsed.Context().RegistryStr())
+	if strings.EqualFold(registry, proxyHost) {
+		return "", false
+	}
+	if len(upstreamHosts) > 0 && !upstreamHosts[registry] {
+		return "", false
+	}
+	repo := parsed.Context().RepositoryStr()
+	switch v := parsed.(type) {
+	case name.Tag:
+		return prefix + fmt.Sprintf("%s/%s:%s", proxyHost, repo, v.TagStr()), true
+	case name.Digest:
+		return prefix + fmt.Sprintf("%s/%s@%s", proxyHost, repo, v.DigestStr()), true
+	default:
+		return prefix + fmt.Sprintf("%s/%s", proxyHost, repo), true
+	}
+}
+
+func hostFromURL(raw string) (string, error) {
+	parsed, err := url.Parse(raw)
+	if err != nil {
+		return "", err
+	}
+	return parsed.Host, nil
+}
+
+func resolveUpstreamHosts(upstream string) (map[string]bool, error) {
+	if strings.TrimSpace(upstream) == "" {
+		return nil, nil
+	}
+	parsed, err := url.Parse(upstream)
+	if err != nil || parsed.Host == "" {
+		parsed, err = url.Parse("https://" + upstream)
+		if err != nil {
+			return nil, err
+		}
+	}
+	host := strings.ToLower(parsed.Host)
+	hosts := map[string]bool{host: true}
+	if isDockerHubHost(host) {
+		for _, alias := range []string{"docker.io", "index.docker.io", "registry-1.docker.io"} {
+			hosts[alias] = true
+		}
+	}
+	return hosts, nil
+}
+
+func isDockerHubHost(host string) bool {
+	switch strings.ToLower(host) {
+	case "docker.io", "index.docker.io", "registry-1.docker.io":
+		return true
+	default:
+		return false
+	}
 }

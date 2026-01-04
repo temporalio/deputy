@@ -158,6 +158,7 @@ func TestNewHandlerFromString(t *testing.T) {
 		{"javascript_alias", "javascript", false},
 		{"go", "go", false},
 		{"golang_alias", "golang", false},
+		{"oci", "oci", false},
 		{"unknown", "unknown_eco", true},
 	}
 

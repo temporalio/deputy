@@ -53,6 +53,8 @@ func AddDiffCommand(root *cobra.Command, service *scan.Service) {
 		ecosystems                                     []string
 		debugMatcher                                   bool
 		policyPaths                                    []string
+		useLocalDaemon                                 bool
+		outputFormat                                   string
 	)
 
 	if service == nil {
@@ -61,17 +63,24 @@ func AddDiffCommand(root *cobra.Command, service *scan.Service) {
 
 	cmd := &cobra.Command{
 		Use:           "diff [base] [target]",
-		Short:         "Compare dependency changes between Git references",
+		Short:         "Compare dependency changes between Git references or container images",
 		SilenceErrors: true,
 		SilenceUsage:  true,
-		Long: `Compare dependencies between Git references with comprehensive vulnerability analysis.
+		Long: `Compare dependencies between Git references or container images with comprehensive vulnerability analysis.
 
 DEPENDENCY CHANGE ANALYSIS:
-Analyzes differences in Go module dependencies between two Git references, including:
-• Added dependencies (new packages introduced)  
+Analyzes differences in dependencies between two Git references or container images, including:
+• Added dependencies (new packages introduced)
 • Removed dependencies (packages no longer used)
 • Updated dependencies (version changes)
 • Direct vs indirect dependency classification
+
+CONTAINER IMAGE DIFF:
+When both arguments are container image references, performs a semantic diff between images:
+• Package changes across image layers
+• Vulnerability additions, removals, and fixes
+• Configuration changes (user, ports, volumes, etc.)
+• Layer-by-layer analysis
 
 SUPPORTED REFERENCE TYPES:
 • Branch names: main, develop, feature-branch, bugfix/issue-123
@@ -106,6 +115,7 @@ Uses batch queries to the OSV API for efficient scanning.
 Can be disabled with --skip-vuln-scan for faster execution.`,
 		Args: cobra.MaximumNArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			// Determine repo path first - we need it to check for Git refs
 			repo := repoPath
 			if repo == "" {
 				var err error
@@ -113,6 +123,18 @@ Can be disabled with --skip-vuln-scan for faster execution.`,
 				if err != nil {
 					return fmt.Errorf("failed to get current directory: %w", err)
 				}
+			}
+
+			// Check if both arguments are container image references
+			// BUT only if they don't look like Git refs in the current repo context
+			if len(args) == 2 && isContainerDiffInContext(args[0], args[1], repo) {
+				opts := containerDiffOpts{
+					skipVulnScan:   skipVulnScan,
+					policyPaths:    policyPaths,
+					useLocalDaemon: useLocalDaemon,
+					format:         outputFormat,
+				}
+				return runContainerDiff(cmd.Context(), service, args[0], args[1], opts, cmd.OutOrStdout(), cmd.ErrOrStderr())
 			}
 			scanOpts := inv.ScanOptions{Ecosystems: ecosystems}
 			matcher, matcherErr := inv.GetDependencyMatcher(scanOpts)
@@ -214,6 +236,26 @@ WORKFLOW EXAMPLES:
   # Check uncommitted dependency changes
   deputy diff HEAD WORKING
 
+CONTAINER IMAGE EXAMPLES:
+  # Compare two image tags
+  deputy diff nginx:1.24 nginx:1.25
+
+  # Compare images across registries
+  deputy diff ghcr.io/org/app:v1.0 ghcr.io/org/app:v2.0
+
+  # Compare with explicit OCI scheme
+  deputy diff oci://alpine:3.18 oci://alpine:3.19
+
+  # Skip vulnerability scanning for faster diff
+  deputy diff --skip-vuln-scan myapp:old myapp:new
+
+  # Use locally cached images from Docker daemon (avoids rate limits)
+  docker pull nginx:1.24 && docker pull nginx:1.25
+  deputy diff --local-daemon nginx:1.24 nginx:1.25
+
+  # Explicit docker-daemon scheme (equivalent to --local-daemon)
+  deputy diff docker-daemon://nginx:1.24 docker-daemon://nginx:1.25
+
 ERROR HANDLING:
 If you specify an invalid reference, deputy will suggest similar valid references
 and provide guidance on supported reference types.
@@ -238,6 +280,8 @@ PERFORMANCE TIPS:
 	cmd.Flags().StringSliceVar(&ecosystems, "ecosystems", []string{"all"}, "Ecosystems to include: go, npm, pypi, maven, rubygems, cargo, nuget, hex, pub, cocoapods, packagist, github-actions, haskell, r, cpp (default: all)")
 	cmd.Flags().BoolVar(&debugMatcher, "debug-matcher", false, "Print which changed files were considered dependency manifests/lockfiles")
 	cmd.Flags().StringArrayVar(&policyPaths, "policy", nil, "Path to CEL policy files or bundles to evaluate against diff results (repeatable)")
+	cmd.Flags().BoolVar(&useLocalDaemon, "local-daemon", false, "Use local Docker daemon instead of pulling from remote registry (requires 'docker pull' first)")
+	cmd.Flags().StringVar(&outputFormat, "format", "text", "Output format for container diff: text | json")
 
 	root.AddCommand(cmd)
 }
@@ -542,7 +586,20 @@ func runDiffAnalysis(ctx context.Context, service *scan.Service, repoPath, baseR
 			}
 		}
 		allResult, allCons := resultFromReportVulnerabilities(all)
-		render.RenderVulnerabilitySummaryAndActions(outW, allCons, allResult.Stats)
+
+		// Handle the case where there are hidden unchanged vulnerabilities
+		if len(all) == 0 && len(unchangedVulns) > 0 {
+			// Don't say "No vulnerabilities found" when there ARE vulnerabilities, just hidden
+			fmt.Fprintln(outW)
+			fmt.Fprintf(outW, "%s No vulnerabilities in changed dependencies\n",
+				ui.StyleAdded.Render("✓"))
+			fmt.Fprintf(outW, "  %s %d vulnerabilities in unchanged dependencies (use %s to see)\n",
+				ui.StyleMeta.Render("→"),
+				len(unchangedVulns),
+				ui.StyleSymbol.Render("--show-unchanged"))
+		} else {
+			render.RenderVulnerabilitySummaryAndActions(outW, allCons, allResult.Stats)
+		}
 		otel.SetSpanOK(span)
 		return nil
 	}
