@@ -30,10 +30,10 @@ const (
 )
 
 type ociHandlerOptions struct {
-	imageCache          ImageScanCache
-	digestCache         DigestResolutionCache
-	scanner             imageScanner
-	resolveHead         func(context.Context, name.Reference) (string, error)
+	imageCache  ImageScanCache
+	digestCache DigestResolutionCache
+	scanner     imageScanner
+	resolveHead func(context.Context, name.Reference) (string, error)
 }
 
 type imageScanner interface {

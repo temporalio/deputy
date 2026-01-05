@@ -527,14 +527,14 @@ func TestOCIHandler_PolicyExpressionsWithRealPayloads(t *testing.T) {
 	// Simulate an OCI proxy payload for gcr.io/myproject/app:v1.2.3
 	tagPayload := map[string]any{
 		"request": map[string]any{
-			"ecosystem":   "oci",
-			"operation":   "manifest",
-			"registry":    "gcr.io",
-			"repository":  "myproject/app",
-			"tag":         "v1.2.3",
-			"digest":      "",
-			"reference":   "v1.2.3",
-			"image":       "gcr.io/myproject/app:v1.2.3",
+			"ecosystem":  "oci",
+			"operation":  "manifest",
+			"registry":   "gcr.io",
+			"repository": "myproject/app",
+			"tag":        "v1.2.3",
+			"digest":     "",
+			"reference":  "v1.2.3",
+			"image":      "gcr.io/myproject/app:v1.2.3",
 		},
 		"image": map[string]any{
 			"registry":   "gcr.io",
@@ -549,14 +549,14 @@ func TestOCIHandler_PolicyExpressionsWithRealPayloads(t *testing.T) {
 	// Simulate an OCI proxy payload for nginx:latest (should trigger block-latest-tag)
 	latestPayload := map[string]any{
 		"request": map[string]any{
-			"ecosystem":   "oci",
-			"operation":   "manifest",
-			"registry":    "docker.io",
-			"repository":  "library/nginx",
-			"tag":         "latest",
-			"digest":      "",
-			"reference":   "latest",
-			"image":       "docker.io/library/nginx:latest",
+			"ecosystem":  "oci",
+			"operation":  "manifest",
+			"registry":   "docker.io",
+			"repository": "library/nginx",
+			"tag":        "latest",
+			"digest":     "",
+			"reference":  "latest",
+			"image":      "docker.io/library/nginx:latest",
 		},
 		"image": map[string]any{
 			"registry":   "docker.io",
@@ -571,13 +571,13 @@ func TestOCIHandler_PolicyExpressionsWithRealPayloads(t *testing.T) {
 	// Simulate an OCI proxy payload with image running as root
 	rootPayload := map[string]any{
 		"request": map[string]any{
-			"ecosystem":   "oci",
-			"operation":   "manifest",
-			"registry":    "ghcr.io",
-			"repository":  "acme/insecure-app",
-			"tag":         "v1.0.0",
-			"reference":   "v1.0.0",
-			"image":       "ghcr.io/acme/insecure-app:v1.0.0",
+			"ecosystem":  "oci",
+			"operation":  "manifest",
+			"registry":   "ghcr.io",
+			"repository": "acme/insecure-app",
+			"tag":        "v1.0.0",
+			"reference":  "v1.0.0",
+			"image":      "ghcr.io/acme/insecure-app:v1.0.0",
 		},
 		"image": map[string]any{
 			"registry":   "ghcr.io",

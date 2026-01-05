@@ -5,6 +5,7 @@ import (
 
 	"github.com/google/osv-scalibr/extractor"
 	"github.com/picatz/deputy/internal/compare"
+	"github.com/picatz/deputy/internal/container/image"
 	"github.com/picatz/deputy/internal/dependency"
 	"github.com/picatz/deputy/internal/vulnerability"
 )
@@ -85,18 +86,18 @@ func TestToImageInput(t *testing.T) {
 	})
 
 	t.Run("basic config", func(t *testing.T) {
-		info := &ImageInfo{
-			Config: ImageConfig{
+		info := &image.Info{
+			Config: image.Config{
 				User:       "nobody",
 				Env:        []string{"PATH=/usr/bin"},
 				Entrypoint: []string{"/app"},
 				Cmd:        []string{"serve"},
 				WorkingDir: "/app",
 			},
-			Metadata: ImageMetadata{
+			Metadata: image.Metadata{
 				LayerCount: 5,
 			},
-			History: []ImageHistoryEntry{
+			History: []image.HistoryEntry{
 				{CreatedBy: "RUN apt-get update", EmptyLayer: false},
 			},
 		}
@@ -160,8 +161,8 @@ func TestCompareImageVulnerabilities(t *testing.T) {
 		if changes[0].ID != "CVE-2024-1234" {
 			t.Errorf("expected ID %q, got %q", "CVE-2024-1234", changes[0].ID)
 		}
-		if changes[0].Package != "openssl" {
-			t.Errorf("expected package %q, got %q", "openssl", changes[0].Package)
+		if changes[0].PackageName != "openssl" {
+			t.Errorf("expected package %q, got %q", "openssl", changes[0].PackageName)
 		}
 	})
 
@@ -339,7 +340,6 @@ func TestBuildContainerDiffPayload(t *testing.T) {
 					Change: compare.Change{
 						Name:          "openssl",
 						ChangeType:    compare.Upgraded,
-						Type:          "upgraded",
 						BaseVersion:   "1.1.1",
 						TargetVersion: "3.0.0",
 					},
@@ -365,11 +365,10 @@ func TestBuildContainerDiffPayload(t *testing.T) {
 		report := &compare.ImageDiffReport{
 			VulnerabilityChanges: []compare.VulnerabilityChange{
 				{
-					ID:         "CVE-2024-1234",
-					ChangeType: compare.VulnAdded,
-					Type:       "added",
-					Severity:   "HIGH",
-					Package:    "openssl",
+					ID:          "CVE-2024-1234",
+					ChangeType:  compare.VulnAdded,
+					Severity:    "HIGH",
+					PackageName: "openssl",
 				},
 			},
 			Summary: compare.ImageDiffSummary{},

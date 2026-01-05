@@ -494,19 +494,19 @@ type CompletenessScore struct {
 	// Overall score from 0.0 to 1.0
 	Score float64
 	// Component breakdown
-	HasPURL              float64
-	HasVersion           float64
-	HasLicenses          float64
-	HasHashes            float64
-	HasCPE               float64
-	HasSupplier          float64
-	HasExternalRefs      float64
+	HasPURL         float64
+	HasVersion      float64
+	HasLicenses     float64
+	HasHashes       float64
+	HasCPE          float64
+	HasSupplier     float64
+	HasExternalRefs float64
 	// Counts
-	TotalComponents      int
-	ComponentsWithPURL   int
-	ComponentsWithHash   int
-	ComponentsWithCPE    int
-	ComponentsWithLicense int
+	TotalComponents        int
+	ComponentsWithPURL     int
+	ComponentsWithHash     int
+	ComponentsWithCPE      int
+	ComponentsWithLicense  int
 	ComponentsWithSupplier int
 	// NTIA minimum elements compliance
 	NTIACompliant bool

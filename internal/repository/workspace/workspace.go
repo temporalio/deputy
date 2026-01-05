@@ -28,15 +28,6 @@ type FileReader interface {
 	ReadFile(path string) ([]byte, error)
 }
 
-// Mutable extends Workspace with the guarantee that write operations
-// succeed. Implementations that are read-only can return ErrReadOnly for write
-// methods; callers can use a type assertion to Mutable when mutation
-// is required.
-// Deprecated: Use MutableFS interface instead.
-type Mutable interface {
-	FS
-}
-
 // baseWorkspace holds shared state (root path, scalibr roots, cleanup) that
 // concrete workspace implementations embed to get consistent lifecycle
 // handling.

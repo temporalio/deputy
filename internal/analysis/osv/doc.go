@@ -2,8 +2,8 @@
 // vulnerability domain types. It owns:
 //   - OSV API batch queries and vulnerability expansion
 //   - GitHub Actions bucket ingestion and version resolution
-//   - Cache-aware lookups and conversion into internal/vuln models
+//   - Conversion into internal/vulnerability domain models
 //
-// This package is integration-focused; callers should rely on internal/vuln
-// for domain logic and internal/analysis for orchestration facades.
+// This package is integration-focused; callers should rely on
+// internal/vulnerability for domain logic.
 package osv

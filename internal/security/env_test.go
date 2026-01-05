@@ -71,18 +71,18 @@ func TestDetectSensitiveEnvNames(t *testing.T) {
 		{
 			name: "single sensitive var",
 			envVars: map[string]string{
-				"PATH":          "/usr/bin",
-				"DATABASE_URL":  "postgres://...",
+				"PATH":         "/usr/bin",
+				"DATABASE_URL": "postgres://...",
 			},
 			expected: []string{"DATABASE_URL"},
 		},
 		{
 			name: "multiple sensitive vars",
 			envVars: map[string]string{
-				"PATH":          "/usr/bin",
-				"DB_PASSWORD":   "secret123",
-				"API_KEY":       "key123",
-				"GITHUB_TOKEN":  "ghp_xxx",
+				"PATH":         "/usr/bin",
+				"DB_PASSWORD":  "secret123",
+				"API_KEY":      "key123",
+				"GITHUB_TOKEN": "ghp_xxx",
 			},
 			expected: []string{"DB_PASSWORD", "API_KEY", "GITHUB_TOKEN"},
 		},

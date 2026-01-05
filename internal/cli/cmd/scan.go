@@ -22,6 +22,7 @@ import (
 	packageurl "github.com/package-url/packageurl-go"
 	cliflags "github.com/picatz/deputy/internal/cli/flags"
 	"github.com/picatz/deputy/internal/collections"
+	"github.com/picatz/deputy/internal/container/image"
 	"github.com/picatz/deputy/internal/dockerfile"
 	gitx "github.com/picatz/deputy/internal/gitutil"
 	"github.com/picatz/deputy/internal/output"
@@ -65,7 +66,7 @@ type ScanResult struct {
 	PolicyFindings []report.PolicyFinding `json:"policyFindings,omitempty"`
 	// ImageInfo contains container image configuration and metadata when scanning
 	// container images. Nil for non-container scans or when image config is unavailable.
-	ImageInfo *scan.ImageInfo `json:"imageInfo,omitempty"`
+	ImageInfo *image.Info `json:"imageInfo,omitempty"`
 }
 
 // ModuleDeprecation captures information about a deprecated module and its
@@ -2088,25 +2089,25 @@ func (s *Scanner) runScanDockerfile(cmd *cobra.Command, target string) error {
 
 // DockerfileScanResult is the structured output of a Dockerfile scan.
 type DockerfileScanResult struct {
-	Path           string                       `json:"path"`
-	StageCount     int                          `json:"stage_count"`
-	Stages         []DockerfileStageOutput      `json:"stages"`
-	Analysis       DockerfileAnalysisOutput     `json:"analysis"`
-	PolicyFindings []report.PolicyFinding       `json:"policy_findings,omitempty"`
+	Path           string                   `json:"path"`
+	StageCount     int                      `json:"stage_count"`
+	Stages         []DockerfileStageOutput  `json:"stages"`
+	Analysis       DockerfileAnalysisOutput `json:"analysis"`
+	PolicyFindings []report.PolicyFinding   `json:"policy_findings,omitempty"`
 }
 
 // DockerfileStageOutput represents a stage in the scan output.
 type DockerfileStageOutput struct {
-	Index         int      `json:"index"`
-	Name          string   `json:"name,omitempty"`
-	BaseImage     string   `json:"base_image"`
-	Platform      string   `json:"platform,omitempty"`
-	IsScratch     bool     `json:"is_scratch"`
-	IsBuilder     bool     `json:"is_builder"`
-	User          string   `json:"user,omitempty"`
-	IsRoot        bool     `json:"is_root"`
-	ExposedPorts  []string `json:"exposed_ports,omitempty"`
-	HasHealthcheck bool    `json:"has_healthcheck"`
+	Index          int      `json:"index"`
+	Name           string   `json:"name,omitempty"`
+	BaseImage      string   `json:"base_image"`
+	Platform       string   `json:"platform,omitempty"`
+	IsScratch      bool     `json:"is_scratch"`
+	IsBuilder      bool     `json:"is_builder"`
+	User           string   `json:"user,omitempty"`
+	IsRoot         bool     `json:"is_root"`
+	ExposedPorts   []string `json:"exposed_ports,omitempty"`
+	HasHealthcheck bool     `json:"has_healthcheck"`
 }
 
 // DockerfileAnalysisOutput contains static analysis results.

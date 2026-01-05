@@ -13,11 +13,11 @@ func TestGenerateCPE(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
-		name     string
-		purl     *purl.PackageURL
-		pkgName  string
-		version  string
-		wantCPE  string
+		name      string
+		purl      *purl.PackageURL
+		pkgName   string
+		version   string
+		wantCPE   string
 		wantEmpty bool
 	}{
 		{
@@ -206,7 +206,7 @@ func TestExtractOwnerFromProjectID(t *testing.T) {
 		{"gitlab.com/gitlab-org/gitlab", "gitlab-org"},
 		{"bitbucket.org/atlassian/stash", "atlassian"},
 		{"example.com/owner", "example.com"},
-		{"single", ""},   // single word without "/" is not a valid project ID format
+		{"single", ""}, // single word without "/" is not a valid project ID format
 		{"", ""},
 	}
 
@@ -427,9 +427,9 @@ func TestBuildPURLFromVersionKey(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
-		name    string
-		vk      *pb.VersionKey
-		want    string
+		name string
+		vk   *pb.VersionKey
+		want string
 	}{
 		{
 			name: "nil version key",

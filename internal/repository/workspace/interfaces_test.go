@@ -136,7 +136,4 @@ func TestBackwardCompatibility(t *testing.T) {
 
 	// FileReader should still be assignable
 	var _ FileReader = testFS
-
-	// Mutable should still work (it's now just an alias for FS)
-	var _ Mutable = testFS
 }

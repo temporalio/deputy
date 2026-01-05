@@ -149,11 +149,11 @@ func (containerImageProvider) Open(ctx context.Context, target string, opts map[
 	}
 
 	var (
-		img      *layerimage.Image
-		v1Img    v1.Image // Underlying v1.Image for config access (may be nil for local sources)
-		imgRef   *imageReference
-		pathRef  string
-		err      error
+		img     *layerimage.Image
+		v1Img   v1.Image // Underlying v1.Image for config access (may be nil for local sources)
+		imgRef  *imageReference
+		pathRef string
+		err     error
 	)
 
 	// cleanupImage safely cleans up image resources on error paths.

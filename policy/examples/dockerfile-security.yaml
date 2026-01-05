@@ -88,7 +88,7 @@ policies:
         reason: "Base image uses :latest tag which is mutable"
         remediation: "Pin to a specific version tag or digest"
 
-  - name: require-digest-for-production
+  - name: dockerfile-require-digest-for-production
     description: Production images should use digests for reproducibility
     entrypoints: ["dockerfile_report"]
     rules:
@@ -175,7 +175,7 @@ policies:
         reason: "ADD with URL is insecure - content may change"
         remediation: "Use COPY with curl/wget in a RUN instruction instead"
 
-  - name: no-privileged-ports
+  - name: dockerfile-no-privileged-ports
     description: Warn on exposed privileged ports
     entrypoints: ["dockerfile_stage"]
     rules:
@@ -191,7 +191,7 @@ policies:
   # Build Best Practices
   # ============================================================================
 
-  - name: require-healthcheck
+  - name: dockerfile-require-healthcheck
     description: Production images should have HEALTHCHECK
     entrypoints: ["dockerfile_report"]
     rules:
@@ -242,7 +242,7 @@ policies:
   # Label and Metadata Policies
   # ============================================================================
 
-  - name: require-oci-labels
+  - name: dockerfile-require-oci-labels
     description: Require OCI standard labels for image provenance
     entrypoints: ["dockerfile_report"]
     vars:

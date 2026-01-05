@@ -21,7 +21,6 @@ import (
 	"github.com/go-git/go-git/v5/config"
 	"github.com/go-git/go-git/v5/plumbing"
 	"github.com/go-git/go-git/v5/plumbing/transport"
-	"github.com/go-git/go-git/v5/plumbing/transport/http"
 	"github.com/go-git/go-git/v5/storage/memory"
 	"github.com/google/osv-scalibr/extractor"
 	"github.com/google/osv-scalibr/purl"
@@ -35,10 +34,10 @@ import (
 	"github.com/picatz/deputy/internal/otel"
 	"github.com/picatz/deputy/internal/purlx"
 	"github.com/picatz/deputy/internal/repository"
-	"github.com/picatz/deputy/internal/version"
 	"github.com/picatz/deputy/internal/repository/workspace"
 	"github.com/picatz/deputy/internal/scan"
 	"github.com/picatz/deputy/internal/targets"
+	"github.com/picatz/deputy/internal/version"
 	"github.com/protobom/protobom/pkg/formats"
 	"github.com/protobom/protobom/pkg/sbom"
 	"github.com/protobom/protobom/pkg/writer"
@@ -731,19 +730,6 @@ func rootNode(doc *sbom.Document) *sbom.Node {
 	for _, node := range doc.NodeList.Nodes {
 		if node != nil && node.Id == target {
 			return node
-		}
-	}
-	return nil
-}
-
-// AuthForURL returns a go-git transport.AuthMethod for the given URL.
-//
-// Deprecated: Use [auth.GitAuthForURL] instead for secure, host-aware credential
-// resolution that prevents credential leakage to unintended hosts.
-func AuthForURL(rawurl string) transport.AuthMethod {
-	if u, err := neturl.Parse(rawurl); err == nil && u.Scheme == "https" && u.Host == "github.com" {
-		if token := os.Getenv("GITHUB_TOKEN"); token != "" {
-			return &http.BasicAuth{Username: "oauth2", Password: token}
 		}
 	}
 	return nil

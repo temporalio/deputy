@@ -264,17 +264,17 @@ func normalizeImageReference(ref string, useLocalDaemon bool) string {
 
 // ContainerDiffJSONOutput represents the JSON output for container diff.
 type ContainerDiffJSONOutput struct {
-	BaseImage        compare.ImageRef              `json:"baseImage"`
-	TargetImage      compare.ImageRef              `json:"targetImage"`
-	BaseContext      ImageContext                  `json:"baseContext,omitempty"`
-	TargetContext    ImageContext                  `json:"targetContext,omitempty"`
-	PackageChanges   []compare.ImagePackageChange  `json:"packageChanges,omitempty"`
-	Vulnerabilities  []compare.VulnerabilityChange `json:"vulnerabilities,omitempty"`
-	ConfigChanges    *compare.ImageConfigDiff      `json:"configChanges,omitempty"`
-	LayerAnalysis    *compare.LayerDiffAnalysis    `json:"layerAnalysis,omitempty"`
-	Summary          compare.ImageDiffSummary      `json:"summary"`
-	VulnSummary      *VulnSummaryJSON              `json:"vulnerabilitySummary,omitempty"`
-	Recommendations  []RecommendationJSON          `json:"recommendations,omitempty"`
+	BaseImage       compare.ImageRef              `json:"baseImage"`
+	TargetImage     compare.ImageRef              `json:"targetImage"`
+	BaseContext     ImageContext                  `json:"baseContext,omitempty"`
+	TargetContext   ImageContext                  `json:"targetContext,omitempty"`
+	PackageChanges  []compare.ImagePackageChange  `json:"packageChanges,omitempty"`
+	Vulnerabilities []compare.VulnerabilityChange `json:"vulnerabilities,omitempty"`
+	ConfigChanges   *compare.ImageConfigDiff      `json:"configChanges,omitempty"`
+	LayerAnalysis   *compare.LayerDiffAnalysis    `json:"layerAnalysis,omitempty"`
+	Summary         compare.ImageDiffSummary      `json:"summary"`
+	VulnSummary     *VulnSummaryJSON              `json:"vulnerabilitySummary,omitempty"`
+	Recommendations []RecommendationJSON          `json:"recommendations,omitempty"`
 }
 
 // ImageContext provides additional context about an image.
@@ -294,18 +294,18 @@ type VulnSummaryJSON struct {
 
 // RecommendationJSON represents a recommended action.
 type RecommendationJSON struct {
-	Priority    int                  `json:"priority"`
-	Action      string               `json:"action"`
-	Description string               `json:"description,omitempty"`
-	Packages    []PackageFixJSON     `json:"packages,omitempty"`
+	Priority    int              `json:"priority"`
+	Action      string           `json:"action"`
+	Description string           `json:"description,omitempty"`
+	Packages    []PackageFixJSON `json:"packages,omitempty"`
 }
 
 // PackageFixJSON represents a package with available fix.
 type PackageFixJSON struct {
-	Package        string           `json:"package"`
-	CurrentVersion string           `json:"currentVersion"`
-	FixedVersion   string           `json:"fixedVersion"`
-	VulnCount      int              `json:"vulnCount"`
+	Package        string            `json:"package"`
+	CurrentVersion string            `json:"currentVersion"`
+	FixedVersion   string            `json:"fixedVersion"`
+	VulnCount      int               `json:"vulnCount"`
 	LayerContext   *LayerContextJSON `json:"layerContext,omitempty"`
 }
 
@@ -442,7 +442,7 @@ func buildFixablePackagesJSON(changes []compare.VulnerabilityChange) []PackageFi
 		if v.ChangeType != compare.VulnAdded && v.ChangeType != compare.VulnPersisted {
 			continue
 		}
-		key := v.Package
+		key := v.PackageName
 		if pf, ok := pkgFixes[key]; ok {
 			pf.count++
 			// Update fix version if this vuln has a better in-band fix
@@ -462,17 +462,21 @@ func buildFixablePackagesJSON(changes []compare.VulnerabilityChange) []PackageFi
 			// Use findBestFixVersion for in-band preference
 			fix := findBestFixVersion(v.FixedVersions, version)
 			pf := &pkgFix{
-				pkg:     v.Package,
+				pkg:     v.PackageName,
 				version: version,
 				fix:     fix,
 				count:   1,
 			}
-			// Capture layer info if available
-			if v.LayerDetails != nil {
+			// Capture layer info if available (prefer target, fall back to base)
+			ld := v.TargetLayerDetails
+			if ld == nil {
+				ld = v.BaseLayerDetails
+			}
+			if ld != nil {
 				pf.hasLayer = true
-				pf.layerIdx = v.LayerDetails.Index
-				pf.layerCmd = v.LayerDetails.Command
-				pf.inBaseImage = v.LayerDetails.InBaseImage
+				pf.layerIdx = ld.Index
+				pf.layerCmd = ld.Command
+				pf.inBaseImage = ld.InBaseImage
 			}
 			pkgFixes[key] = pf
 		}
@@ -799,7 +803,7 @@ func consolidateVulnerabilityChanges(changes []compare.VulnerabilityChange) []co
 	var groupOrder []groupKey
 
 	for _, v := range changes {
-		key := groupKey{pkg: v.Package, changeType: v.ChangeType}
+		key := groupKey{pkg: v.PackageName, changeType: v.ChangeType}
 		if _, exists := groups[key]; !exists {
 			groupOrder = append(groupOrder, key)
 		}
@@ -810,18 +814,14 @@ func consolidateVulnerabilityChanges(changes []compare.VulnerabilityChange) []co
 
 	for _, key := range groupOrder {
 		vulns := groups[key]
-		// Build a map of CVE -> consolidated vulnerability
-		cveMap := make(map[string]*compare.VulnerabilityChange)
+		// Build a map of ID/alias -> consolidated vulnerability
 		idToVuln := make(map[string]*compare.VulnerabilityChange)
 
 		for i := range vulns {
 			v := &vulns[i]
 
-			// Collect all identifiers for this vuln
+			// Collect all identifiers for this vuln (ID + all aliases)
 			allIDs := append([]string{v.ID}, v.Aliases...)
-			if v.CVE != "" {
-				allIDs = append(allIDs, v.CVE)
-			}
 
 			// Check if we've seen any of these IDs before
 			var existing *compare.VulnerabilityChange
@@ -841,9 +841,6 @@ func consolidateVulnerabilityChanges(changes []compare.VulnerabilityChange) []co
 				for _, id := range allIDs {
 					idToVuln[id] = &clone
 				}
-				if v.CVE != "" {
-					cveMap[v.CVE] = &clone
-				}
 				result = append(result, clone)
 			}
 		}
@@ -854,14 +851,14 @@ func consolidateVulnerabilityChanges(changes []compare.VulnerabilityChange) []co
 
 // mergeVulnerabilityChange merges src into dst, preferring CVE as primary ID.
 func mergeVulnerabilityChange(dst, src *compare.VulnerabilityChange) {
-	// Prefer CVE as primary ID
-	if src.CVE != "" && !strings.HasPrefix(dst.ID, "CVE-") && strings.HasPrefix(src.CVE, "CVE-") {
+	// Prefer CVE as primary ID - check src ID and aliases for a CVE
+	srcCVE := extractCVE(src.ID, src.Aliases)
+	if srcCVE != "" && !strings.HasPrefix(dst.ID, "CVE-") {
 		// Swap: make CVE the primary ID, demote current ID to alias
-		if dst.ID != src.CVE {
+		if dst.ID != srcCVE {
 			dst.Aliases = appendUniqueString(dst.Aliases, dst.ID)
 		}
-		dst.ID = src.CVE
-		dst.CVE = src.CVE
+		dst.ID = srcCVE
 	}
 
 	// Merge aliases
@@ -870,8 +867,8 @@ func mergeVulnerabilityChange(dst, src *compare.VulnerabilityChange) {
 		dst.Aliases = appendUniqueString(dst.Aliases, a)
 	}
 
-	// Remove primary ID and CVE from aliases
-	dst.Aliases = filterStrings(dst.Aliases, dst.ID, dst.CVE)
+	// Remove primary ID from aliases
+	dst.Aliases = filterStrings(dst.Aliases, dst.ID)
 
 	// Take best severity (prefer named severity over unknown)
 	if dst.Severity == "" || dst.Severity == "UNKNOWN" {
@@ -890,11 +887,19 @@ func mergeVulnerabilityChange(dst, src *compare.VulnerabilityChange) {
 	if dst.Summary == "" {
 		dst.Summary = src.Summary
 	}
+}
 
-	// Take CVE if missing
-	if dst.CVE == "" {
-		dst.CVE = src.CVE
+// extractCVE finds a CVE ID from the primary ID or aliases.
+func extractCVE(id string, aliases []string) string {
+	if strings.HasPrefix(id, "CVE-") {
+		return id
 	}
+	for _, a := range aliases {
+		if strings.HasPrefix(a, "CVE-") {
+			return a
+		}
+	}
+	return ""
 }
 
 func appendUniqueString(slice []string, s string) []string {
@@ -945,10 +950,10 @@ func renderVulnList(w io.Writer, vulns []compare.VulnerabilityChange) {
 	byPkg := make(map[string][]compare.VulnerabilityChange)
 	var pkgOrder []string
 	for _, v := range vulns {
-		if _, seen := byPkg[v.Package]; !seen {
-			pkgOrder = append(pkgOrder, v.Package)
+		if _, seen := byPkg[v.PackageName]; !seen {
+			pkgOrder = append(pkgOrder, v.PackageName)
 		}
-		byPkg[v.Package] = append(byPkg[v.Package], v)
+		byPkg[v.PackageName] = append(byPkg[v.PackageName], v)
 	}
 
 	for _, pkg := range pkgOrder {
@@ -980,9 +985,10 @@ func renderSingleVuln(w io.Writer, v compare.VulnerabilityChange) {
 	sevLabel := vulnSeverityLabel(v.Severity)
 	idPart := v.ID
 
-	// Show CVE if it's different from the primary ID
-	if v.CVE != "" && v.CVE != v.ID {
-		idPart = fmt.Sprintf("%s %s", v.ID, ui.StyleAlias.Render(v.CVE))
+	// Show CVE if it's in aliases and different from the primary ID
+	cve := extractCVE(v.ID, v.Aliases)
+	if cve != "" && cve != v.ID {
+		idPart = fmt.Sprintf("%s %s", v.ID, ui.StyleAlias.Render(cve))
 	}
 
 	// Fix indicator
@@ -997,13 +1003,18 @@ func renderSingleVuln(w io.Writer, v compare.VulnerabilityChange) {
 	}
 
 	// Layer context indicator - show where the vuln was introduced
+	// Prefer target layer (current state) for display, fall back to base layer
 	layerPart := ""
-	if v.LayerDetails != nil {
-		if v.LayerDetails.InBaseImage {
+	ld := v.TargetLayerDetails
+	if ld == nil {
+		ld = v.BaseLayerDetails
+	}
+	if ld != nil {
+		if ld.InBaseImage {
 			layerPart = ui.StyleMeta.Render(" [base image]")
 		} else {
 			// Show layer type hint based on command
-			hint := getLayerHint(v.LayerDetails.Command)
+			hint := getLayerHint(ld.Command)
 			if hint != "" {
 				layerPart = ui.StyleDim.Render(fmt.Sprintf(" [%s]", hint))
 			}
@@ -1022,7 +1033,7 @@ func renderSingleVuln(w io.Writer, v compare.VulnerabilityChange) {
 	}
 
 	// Show additional aliases if present (excluding CVE already shown)
-	aliases := filterAliases(v.Aliases, v.ID, v.CVE)
+	aliases := filterAliases(v.Aliases, v.ID, cve)
 	if len(aliases) > 0 {
 		aliasStr := strings.Join(aliases[:min(3, len(aliases))], ", ")
 		if len(aliases) > 3 {
@@ -1633,12 +1644,12 @@ func renderContainerLayerAnalysis(w io.Writer, la *compare.LayerDiffAnalysis) {
 	// Show layer change breakdown by type
 	var addedCount, removedCount, modifiedCount int
 	for _, lc := range la.LayerChanges {
-		switch lc.Type {
-		case "added":
+		switch lc.ChangeType {
+		case compare.LayerAdded:
 			addedCount++
-		case "removed":
+		case compare.LayerRemoved:
 			removedCount++
-		case "modified":
+		case compare.LayerModified:
 			modifiedCount++
 		}
 	}
@@ -1662,12 +1673,12 @@ func renderContainerLayerAnalysis(w io.Writer, la *compare.LayerDiffAnalysis) {
 	// Categorize layer changes
 	var added, removed, modified []compare.LayerChange
 	for _, lc := range la.LayerChanges {
-		switch lc.Type {
-		case "added":
+		switch lc.ChangeType {
+		case compare.LayerAdded:
 			added = append(added, lc)
-		case "removed":
+		case compare.LayerRemoved:
 			removed = append(removed, lc)
-		case "modified":
+		case compare.LayerModified:
 			modified = append(modified, lc)
 		}
 	}
@@ -1928,7 +1939,7 @@ func renderFixablePackages(w io.Writer, changes []compare.VulnerabilityChange) {
 			continue
 		}
 
-		key := v.Package
+		key := v.PackageName
 		if pf, ok := pkgFixes[key]; ok {
 			pf.count++
 			// Merge fix versions
@@ -1950,17 +1961,21 @@ func renderFixablePackages(w io.Writer, changes []compare.VulnerabilityChange) {
 				version = v.BaseVersion
 			}
 			pf := &pkgFix{
-				pkg:      v.Package,
+				pkg:      v.PackageName,
 				version:  version,
 				fixes:    append([]string{}, v.FixedVersions...),
 				count:    1,
 				layerIdx: -1,
 			}
-			// Capture layer info if available
-			if v.LayerDetails != nil {
-				pf.layerIdx = v.LayerDetails.Index
-				pf.layerCmd = v.LayerDetails.Command
-				pf.inBaseImage = v.LayerDetails.InBaseImage
+			// Capture layer info if available (prefer target, fall back to base)
+			ld := v.TargetLayerDetails
+			if ld == nil {
+				ld = v.BaseLayerDetails
+			}
+			if ld != nil {
+				pf.layerIdx = ld.Index
+				pf.layerCmd = ld.Command
+				pf.inBaseImage = ld.InBaseImage
 			}
 			pkgFixes[key] = pf
 		}

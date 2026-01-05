@@ -43,7 +43,7 @@ func ProcessOSVVulnerabilityDomain(vuln osvschema.Vulnerability, input PkgInput)
 		Version:      input.Version,
 		Direct:       input.IsDirect,
 		Locations:    slices.Clone(input.Locations),
-		ManifestRefs: cloneManifestRefsFromInput(input.ManifestRefs),
+		ManifestRefs: dependency.CloneManifestRefs(input.ManifestRefs),
 		LayerDetails: dependency.CloneLayerDetails(input.LayerDetails),
 	}
 
@@ -93,7 +93,7 @@ func ProcessOSVVulnerabilityDomain(vuln osvschema.Vulnerability, input PkgInput)
 		}
 	}
 	if imports := extractGoImports(vuln.Affected, input); len(imports) > 0 {
-		finding.AffectedImports = cloneAffectedImportsFromInput(imports)
+		finding.AffectedImports = vulnerability.CloneAffectedImports(imports)
 	}
 	if ds := extractDatabaseSpecificStrings(vuln.DatabaseSpecific); len(ds) > 0 {
 		advisory.DatabaseSpecific = ds
@@ -306,8 +306,8 @@ func flattenAdvisoryFinding(advisory vulnerability.Advisory, finding vulnerabili
 		FixedVersions:   slices.Clone(advisory.FixedVersions),
 		Affected:        finding.Affected,
 		Locations:       slices.Clone(finding.Locations),
-		ManifestRefs:    cloneManifestRefs(finding.ManifestRefs),
-		AffectedImports: cloneAffectedImports(finding.AffectedImports),
+		ManifestRefs:    dependency.CloneManifestRefs(finding.ManifestRefs),
+		AffectedImports: vulnerability.CloneAffectedImports(finding.AffectedImports),
 		DatabaseSpecific: func() map[string]string {
 			if len(advisory.DatabaseSpecific) == 0 {
 				return nil
@@ -317,74 +317,3 @@ func flattenAdvisoryFinding(advisory vulnerability.Advisory, finding vulnerabili
 		LayerDetails: dependency.CloneLayerDetails(finding.LayerDetails),
 	}
 }
-
-// cloneManifestRefsFromInput deep clones a slice of ManifestReference from PkgInput.
-// Since ManifestReference is a type alias for dependency.ManifestRef,
-// this creates a new slice with cloned Groups fields.
-func cloneManifestRefsFromInput(refs []ManifestReference) []dependency.ManifestRef {
-	if len(refs) == 0 {
-		return nil
-	}
-	out := make([]dependency.ManifestRef, len(refs))
-	for i, ref := range refs {
-		out[i] = dependency.ManifestRef{
-			Path:    ref.Path,
-			Manager: ref.Manager,
-			Groups:  slices.Clone(ref.Groups),
-		}
-	}
-	return out
-}
-
-// cloneAffectedImportsFromInput deep clones a slice of AffectedImport with deep copy of Symbols.
-// Since AffectedImport is a type alias for vulnerability.AffectedImport, this
-// performs a deep clone to avoid sharing slice backing arrays.
-func cloneAffectedImportsFromInput(imports []AffectedImport) []vulnerability.AffectedImport {
-	if len(imports) == 0 {
-		return nil
-	}
-	out := make([]vulnerability.AffectedImport, len(imports))
-	for i, imp := range imports {
-		out[i] = vulnerability.AffectedImport{
-			Path:    imp.Path,
-			Symbols: slices.Clone(imp.Symbols),
-		}
-	}
-	return out
-}
-
-// cloneManifestRefs deep clones a slice of ManifestRef.
-// Since ManifestReference is a type alias for dependency.ManifestRef, this
-// creates a new slice with cloned Groups fields.
-func cloneManifestRefs(refs []dependency.ManifestRef) []dependency.ManifestRef {
-	if len(refs) == 0 {
-		return nil
-	}
-	out := make([]dependency.ManifestRef, len(refs))
-	for i, ref := range refs {
-		out[i] = dependency.ManifestRef{
-			Path:    ref.Path,
-			Manager: ref.Manager,
-			Groups:  slices.Clone(ref.Groups),
-		}
-	}
-	return out
-}
-
-// cloneAffectedImports deep clones a slice of AffectedImport.
-// Since AffectedImport is a type alias for vulnerability.AffectedImport, this
-// creates a new slice with cloned Symbols fields.
-func cloneAffectedImports(imports []vulnerability.AffectedImport) []vulnerability.AffectedImport {
-	if len(imports) == 0 {
-		return nil
-	}
-	out := make([]vulnerability.AffectedImport, len(imports))
-	for i, imp := range imports {
-		out[i] = vulnerability.AffectedImport{
-			Path:    imp.Path,
-			Symbols: slices.Clone(imp.Symbols),
-		}
-	}
-	return out
-}
-

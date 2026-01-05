@@ -170,13 +170,13 @@ func (a *Analysis) ToMap() map[string]any {
 		return map[string]any{}
 	}
 	return map[string]any{
-		"stage_count":          a.StageCount,
-		"has_multi_stage":      a.HasMultiStage,
-		"builder_stage_count":  a.BuilderStageCount,
-		"final_stage_is_root":  a.FinalStageIsRoot,
+		"stage_count":            a.StageCount,
+		"has_multi_stage":        a.HasMultiStage,
+		"builder_stage_count":    a.BuilderStageCount,
+		"final_stage_is_root":    a.FinalStageIsRoot,
 		"final_stage_is_scratch": a.FinalStageIsScratch,
-		"sensitive_env_vars":   celconv.ToAnySlice(a.SensitiveEnvVars),
-		"has_add_url":          a.HasAddURL,
-		"add_url_sources":      celconv.ToAnySlice(a.AddURLSources),
+		"sensitive_env_vars":     celconv.ToAnySlice(a.SensitiveEnvVars),
+		"has_add_url":            a.HasAddURL,
+		"add_url_sources":        celconv.ToAnySlice(a.AddURLSources),
 	}
 }

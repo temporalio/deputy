@@ -1,7 +1,6 @@
 package cmd
 
 import (
-	"context"
 	"fmt"
 	"io"
 	"os"
@@ -169,6 +168,3 @@ func readProtobomDocument(path string) (*sbom.Document, error) {
 
 	return doc, nil
 }
-
-// Ensure ctx is used to satisfy linter
-var _ context.Context

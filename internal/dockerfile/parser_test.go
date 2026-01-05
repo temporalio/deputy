@@ -160,12 +160,12 @@ func TestParseUSER(t *testing.T) {
 		dockerfile string
 		isRoot     bool
 	}{
-		{"FROM alpine", true},                      // No USER = root
-		{"FROM alpine\nUSER root", true},           // Explicit root
-		{"FROM alpine\nUSER 0", true},              // UID 0 = root
-		{"FROM alpine\nUSER nobody", false},        // Named user
-		{"FROM alpine\nUSER 1000", false},          // Non-root UID
-		{"FROM alpine\nUSER app:app", false},       // User:group
+		{"FROM alpine", true},                       // No USER = root
+		{"FROM alpine\nUSER root", true},            // Explicit root
+		{"FROM alpine\nUSER 0", true},               // UID 0 = root
+		{"FROM alpine\nUSER nobody", false},         // Named user
+		{"FROM alpine\nUSER 1000", false},           // Non-root UID
+		{"FROM alpine\nUSER app:app", false},        // User:group
 		{"FROM alpine\nUSER root\nUSER app", false}, // Last USER wins
 	}
 

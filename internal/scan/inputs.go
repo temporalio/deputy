@@ -349,7 +349,7 @@ func PackagesToInputs(pkgs []*extractor.Package, opts PackageInputOptions) []osv
 		// If multiple packages map to the same entry (e.g., same package in different locations),
 		// prefer keeping the first layer info encountered or use a stable heuristic.
 		if entry.LayerDetails == nil && pkg.LayerDetails != nil {
-			entry.LayerDetails = &osv.LayerDetails{
+			entry.LayerDetails = &dependency.LayerDetails{
 				Index:       pkg.LayerDetails.Index,
 				DiffID:      pkg.LayerDetails.DiffID,
 				ChainID:     pkg.LayerDetails.ChainID,
@@ -377,7 +377,7 @@ func PackagesToInputs(pkgs []*extractor.Package, opts PackageInputOptions) []osv
 			if !ok {
 				continue
 			}
-			ref := osv.ManifestReference{Path: manifestPath, Manager: manager}
+			ref := dependency.ManifestRef{Path: manifestPath, Manager: manager}
 			switch manager {
 			case "go":
 				// direct already handled via GoDirect map

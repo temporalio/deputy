@@ -66,8 +66,7 @@ type Change struct {
 	OldName       string     `json:"oldName"`       // previous path (may differ after canonicalization)
 	TargetVersion string     `json:"targetVersion"` // version in target inventory (for Added/Updated)
 	BaseVersion   string     `json:"baseVersion"`   // version in base inventory (for Removed/Updated)
-	ChangeType    ChangeType `json:"changeType"`    // numeric classification of the change
-	Type          string     `json:"type"`          // string classification ("added","removed","updated","upgraded","downgraded")
+	ChangeType    ChangeType `json:"changeType"`    // classification of the change
 	Ecosystem     string     `json:"ecosystem"`     // e.g. "go", "npm"
 	IsDirect      bool       `json:"isDirect"`      // true if a direct dependency when known (currently Go)
 }
@@ -555,7 +554,6 @@ func ComparePackages(oldPkgs, newPkgs []*extractor.Package, goDirect map[string]
 				Name:        oldMeta.pkg.Name,
 				BaseVersion: oldMeta.pkg.Version,
 				ChangeType:  Removed,
-				Type:        Removed.String(),
 				Ecosystem:   oldMeta.ecosystemName(),
 				IsDirect:    isDirectForSummary(oldMeta, goDirect, pkgDirect),
 			})
@@ -569,7 +567,6 @@ func ComparePackages(oldPkgs, newPkgs []*extractor.Package, goDirect map[string]
 				BaseVersion:   oldMeta.pkg.Version,
 				TargetVersion: newMeta.pkg.Version,
 				ChangeType:    ct,
-				Type:          ct.String(),
 				Ecosystem:     newMeta.ecosystemName(),
 				IsDirect:      isDirectForSummary(newMeta, goDirect, pkgDirect),
 			})
@@ -583,7 +580,6 @@ func ComparePackages(oldPkgs, newPkgs []*extractor.Package, goDirect map[string]
 			Name:          newMeta.pkg.Name,
 			TargetVersion: newMeta.pkg.Version,
 			ChangeType:    Added,
-			Type:          Added.String(),
 			Ecosystem:     newMeta.ecosystemName(),
 			IsDirect:      isDirectForSummary(newMeta, goDirect, pkgDirect),
 		})

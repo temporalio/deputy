@@ -91,48 +91,52 @@ type ImagePackageChange struct {
 	TargetLayerDetails *dependency.LayerDetails `json:"targetLayerDetails,omitempty"`
 }
 
-// VulnerabilityChange represents a vulnerability difference between two images.
+// VulnerabilityChange represents a vulnerability difference between two container images.
+// It tracks whether vulnerabilities were introduced, resolved, or persist across image versions.
 type VulnerabilityChange struct {
-	// ID is the vulnerability identifier (CVE, GHSA, etc.)
+	// ID is the primary vulnerability identifier (preferring CVE over GHSA/GO- when available).
 	ID string `json:"id"`
 
-	// ChangeType indicates if the vulnerability was added, removed, or fixed.
+	// ChangeType classifies how the vulnerability changed between images.
 	ChangeType VulnChangeType `json:"changeType"`
 
-	// Type is the string representation of ChangeType.
-	Type string `json:"type"`
+	// Aliases contains alternate identifiers for this vulnerability (e.g., GHSA-xxx, GO-xxx).
+	// When ID is a CVE, aliases may include the corresponding GHSA or Go advisory ID.
+	Aliases []string `json:"aliases,omitempty"`
 
-	// Severity of the vulnerability (CRITICAL, HIGH, MEDIUM, LOW, UNKNOWN).
+	// Severity is the normalized severity level (CRITICAL, HIGH, MEDIUM, LOW, UNKNOWN).
 	Severity string `json:"severity,omitempty"`
 
-	// SeverityType indicates the scoring system (CVSS_V3, GHSA, etc.).
+	// SeverityType indicates the scoring methodology (CVSS_V3, CVSS_V2, GHSA).
 	SeverityType string `json:"severityType,omitempty"`
 
-	// Package affected by the vulnerability.
-	Package string `json:"package,omitempty"`
+	// PackageName is the name of the affected package.
+	PackageName string `json:"package,omitempty"`
 
-	// BaseVersion is the package version in the base image.
+	// Ecosystem identifies the package ecosystem (e.g., "go", "npm", "deb", "apk").
+	Ecosystem string `json:"ecosystem,omitempty"`
+
+	// BaseVersion is the package version in the base image (empty if package was not present).
 	BaseVersion string `json:"baseVersion,omitempty"`
 
-	// TargetVersion is the package version in the target image.
+	// TargetVersion is the package version in the target image (empty if package was removed).
 	TargetVersion string `json:"targetVersion,omitempty"`
 
 	// FixedVersions lists versions where this vulnerability is resolved.
 	FixedVersions []string `json:"fixedVersions,omitempty"`
 
-	// LayerDetails describes where the vulnerability was introduced.
-	LayerDetails *dependency.LayerDetails `json:"layerDetails,omitempty"`
+	// BaseLayerDetails describes the layer where the vulnerable package existed in the base image.
+	// Nil if the vulnerability was not present in the base image (i.e., VulnAdded).
+	BaseLayerDetails *dependency.LayerDetails `json:"baseLayerDetails,omitempty"`
+
+	// TargetLayerDetails describes the layer where the vulnerable package exists in the target image.
+	// Nil if the vulnerability is not present in the target image (i.e., VulnRemoved or VulnFixed).
+	TargetLayerDetails *dependency.LayerDetails `json:"targetLayerDetails,omitempty"`
 
 	// Summary is a brief description of the vulnerability.
 	Summary string `json:"summary,omitempty"`
 
-	// CVE is the CVE identifier if assigned.
-	CVE string `json:"cve,omitempty"`
-
-	// Aliases contains alternate identifiers (CVE, GHSA, etc.).
-	Aliases []string `json:"aliases,omitempty"`
-
-	// Published is the ISO 8601 timestamp when the vulnerability was first published.
+	// Published is the RFC 3339 timestamp when the vulnerability was first disclosed.
 	Published string `json:"published,omitempty"`
 }
 
@@ -216,7 +220,6 @@ type ImageConfigDiff struct {
 type EnvChange struct {
 	Name        string     `json:"name"`
 	ChangeType  ChangeType `json:"changeType"`
-	Type        string     `json:"type"`
 	BaseValue   string     `json:"baseValue,omitempty"`
 	TargetValue string     `json:"targetValue,omitempty"`
 	IsSensitive bool       `json:"isSensitive,omitempty"`
@@ -226,7 +229,6 @@ type EnvChange struct {
 type LabelChange struct {
 	Key         string     `json:"key"`
 	ChangeType  ChangeType `json:"changeType"`
-	Type        string     `json:"type"`
 	BaseValue   string     `json:"baseValue,omitempty"`
 	TargetValue string     `json:"targetValue,omitempty"`
 }
@@ -249,7 +251,6 @@ type LayerDiffAnalysis struct {
 type LayerChange struct {
 	Index      int             `json:"index"`
 	ChangeType LayerChangeType `json:"changeType"`
-	Type       string          `json:"type"`
 
 	// BaseDiffID is the layer digest in the base image (if present).
 	BaseDiffID string `json:"baseDiffId,omitempty"`
@@ -297,16 +298,16 @@ func (l LayerChangeType) String() string {
 // ImageConfigInput is a simplified representation of image configuration
 // for comparison purposes, avoiding import cycles with scan package.
 type ImageConfigInput struct {
-	User          string
-	Env           []string
-	SensitiveEnv  []string
-	Entrypoint    []string
-	Cmd           []string
-	WorkingDir    string
-	ExposedPorts  []string
-	Volumes       []string
-	Labels        map[string]string
-	IsRoot        bool
+	User           string
+	Env            []string
+	SensitiveEnv   []string
+	Entrypoint     []string
+	Cmd            []string
+	WorkingDir     string
+	ExposedPorts   []string
+	Volumes        []string
+	Labels         map[string]string
+	IsRoot         bool
 	HasHealthcheck bool
 }
 
@@ -453,8 +454,6 @@ func AnalyzeLayerDiff(base, target *ImageInput) *LayerDiffAnalysis {
 		} else {
 			lc.ChangeType = LayerSame
 		}
-		lc.Type = lc.ChangeType.String()
-
 		// Only include non-same layers in output
 		if lc.ChangeType != LayerSame {
 			analysis.LayerChanges = append(analysis.LayerChanges, lc)
@@ -527,7 +526,6 @@ func compareEnvVars(baseEnv, targetEnv, sensitiveEnv []string) []EnvChange {
 			changes = append(changes, EnvChange{
 				Name:        name,
 				ChangeType:  Removed,
-				Type:        Removed.String(),
 				BaseValue:   baseVal,
 				IsSensitive: sensitiveSet[name],
 			})
@@ -535,7 +533,6 @@ func compareEnvVars(baseEnv, targetEnv, sensitiveEnv []string) []EnvChange {
 			changes = append(changes, EnvChange{
 				Name:        name,
 				ChangeType:  Updated,
-				Type:        Updated.String(),
 				BaseValue:   baseVal,
 				TargetValue: targetVal,
 				IsSensitive: sensitiveSet[name],
@@ -548,7 +545,6 @@ func compareEnvVars(baseEnv, targetEnv, sensitiveEnv []string) []EnvChange {
 			changes = append(changes, EnvChange{
 				Name:        name,
 				ChangeType:  Added,
-				Type:        Added.String(),
 				TargetValue: targetVal,
 				IsSensitive: sensitiveSet[name],
 			})
@@ -592,14 +588,12 @@ func compareLabels(baseLabels, targetLabels map[string]string) []LabelChange {
 			changes = append(changes, LabelChange{
 				Key:        key,
 				ChangeType: Removed,
-				Type:       Removed.String(),
 				BaseValue:  baseVal,
 			})
 		} else if baseVal != targetVal {
 			changes = append(changes, LabelChange{
 				Key:         key,
 				ChangeType:  Updated,
-				Type:        Updated.String(),
 				BaseValue:   baseVal,
 				TargetValue: targetVal,
 			})
@@ -611,7 +605,6 @@ func compareLabels(baseLabels, targetLabels map[string]string) []LabelChange {
 			changes = append(changes, LabelChange{
 				Key:         key,
 				ChangeType:  Added,
-				Type:        Added.String(),
 				TargetValue: targetVal,
 			})
 		}

@@ -88,12 +88,6 @@ const (
 	DefaultSchema = Schema21
 )
 
-// Deprecated: Use DefaultSchema instead.
-const Schema = DefaultSchema
-
-// Deprecated: Use DefaultVersion instead.
-const Version = DefaultVersion
-
 // GitHub Code Scanning limits for SARIF fields.
 // See: https://docs.github.com/en/code-security/code-scanning/integrating-with-code-scanning/sarif-support-for-code-scanning
 const (

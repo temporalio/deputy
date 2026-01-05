@@ -17,6 +17,7 @@ import (
 	"github.com/google/go-containerregistry/pkg/authn"
 	"github.com/google/go-containerregistry/pkg/name"
 	"github.com/google/go-containerregistry/pkg/v1/remote"
+	"github.com/picatz/deputy/internal/container/image"
 	"github.com/picatz/deputy/internal/scan"
 	"github.com/picatz/deputy/internal/vulnerability"
 )
@@ -379,8 +380,8 @@ policies:
 	stubScanner := &integrationStubScanner{
 		result: &scan.Execution{
 			Result: scan.Result{
-				ImageInfo: &scan.ImageInfo{
-					Config: scan.ImageConfig{
+				ImageInfo: &image.Info{
+					Config: image.Config{
 						User: "", // empty user means root
 					},
 				},
@@ -498,7 +499,6 @@ func TestOCIProxy_RealGCRImage(t *testing.T) {
 	}
 }
 
-
 // writeTestFile writes content to a file for testing.
 func writeTestFile(path, content string) error {
 	return os.WriteFile(path, []byte(content), 0644)
@@ -517,4 +517,3 @@ func (s *integrationStubScanner) ScanContainerImage(ctx context.Context, target 
 	}
 	return s.result, nil
 }
-

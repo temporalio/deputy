@@ -4,6 +4,7 @@ import (
 	"time"
 
 	"github.com/google/osv-scalibr/extractor"
+	"github.com/picatz/deputy/internal/container/image"
 	"github.com/picatz/deputy/internal/dockerfile"
 	"github.com/picatz/deputy/internal/policy"
 	"github.com/picatz/deputy/internal/targets"
@@ -53,7 +54,7 @@ type Result struct {
 
 	// ImageInfo contains extracted configuration and metadata for container image scans.
 	// This is nil for non-container-image targets.
-	ImageInfo *ImageInfo
+	ImageInfo *image.Info
 
 	// DockerfileInfo contains parsed Dockerfile data for dockerfile targets.
 	// This is nil for non-dockerfile targets.

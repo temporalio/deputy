@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/picatz/deputy/internal/container/image"
 	"github.com/picatz/deputy/internal/output"
-	"github.com/picatz/deputy/internal/scan"
 )
 
 // ScanResultsHeaderDoc builds the scan header block shown in text output.
@@ -35,7 +35,7 @@ func ScanResultsHeaderDoc(target, ref, commitHash, originURL string) output.Doc 
 }
 
 // ContainerScanHeaderDoc builds a container-specific scan header block with image metadata.
-func ContainerScanHeaderDoc(target string, imageInfo *scan.ImageInfo) output.Doc {
+func ContainerScanHeaderDoc(target string, imageInfo *image.Info) output.Doc {
 	var doc output.Doc
 	doc.AddBlank()
 	doc.AddLine(output.Span{Text: "Container Scan Results:", Style: output.StyleHeader})
@@ -98,7 +98,7 @@ func ContainerScanHeaderDoc(target string, imageInfo *scan.ImageInfo) output.Doc
 }
 
 // ImageSecuritySummaryDoc builds a summary of image configuration security issues.
-func ImageSecuritySummaryDoc(imageInfo *scan.ImageInfo) output.Doc {
+func ImageSecuritySummaryDoc(imageInfo *image.Info) output.Doc {
 	var doc output.Doc
 	if imageInfo == nil {
 		return doc

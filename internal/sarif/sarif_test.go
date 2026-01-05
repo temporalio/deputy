@@ -187,11 +187,11 @@ func TestSeverityToLevel(t *testing.T) {
 func TestConvert_Empty(t *testing.T) {
 	log := Convert(nil, nil, Options{})
 
-	if log.Schema != Schema {
-		t.Errorf("Schema = %q, want %q", log.Schema, Schema)
+	if log.Schema != DefaultSchema {
+		t.Errorf("Schema = %q, want %q", log.Schema, DefaultSchema)
 	}
-	if log.Version != Version {
-		t.Errorf("Version = %q, want %q", log.Version, Version)
+	if log.Version != DefaultVersion {
+		t.Errorf("Version = %q, want %q", log.Version, DefaultVersion)
 	}
 	if len(log.Runs) != 1 {
 		t.Fatalf("len(Runs) = %d, want 1", len(log.Runs))
@@ -453,8 +453,8 @@ func TestConvert_JSON(t *testing.T) {
 	}
 
 	// Basic sanity checks
-	if decoded.Schema != Schema {
-		t.Errorf("decoded.Schema = %q, want %q", decoded.Schema, Schema)
+	if decoded.Schema != DefaultSchema {
+		t.Errorf("decoded.Schema = %q, want %q", decoded.Schema, DefaultSchema)
 	}
 	if len(decoded.Runs) != 1 {
 		t.Errorf("len(decoded.Runs) = %d, want 1", len(decoded.Runs))

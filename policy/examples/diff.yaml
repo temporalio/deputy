@@ -1,0 +1,142 @@
+# Git Repository Diff Policies
+#
+# Security policies for comparing dependencies between Git references.
+# These policies evaluate dependency changes and vulnerability differences
+# between two Git refs (branches, tags, commits).
+#
+# Entrypoints:
+#   diff_report            - Full diff report with all changes
+#   diff_dependency_change - Per-dependency change evaluation
+#   diff_vulnerability     - Per-vulnerability evaluation
+#
+# Available variables for diff_report:
+#   repo                   - Repository path or URL
+#   baseRef                - Base Git reference (e.g., "main", "v1.0.0")
+#   targetRef              - Target Git reference (e.g., "HEAD", "feature-branch")
+#   changes                - List of dependency changes
+#   vulnerabilities        - List of vulnerabilities in changed dependencies
+#
+# Available variables for diff_dependency_change:
+#   repo                   - Repository path or URL
+#   baseRef                - Base Git reference
+#   targetRef              - Target Git reference
+#   change.name            - Package name (canonical path)
+#   change.oldName         - Previous package name (if renamed)
+#   change.targetVersion   - Version in target ref
+#   change.baseVersion     - Version in base ref
+#   change.type            - Change type: "added", "removed", "updated", "upgraded", "downgraded"
+#   change.ecosystem       - Package ecosystem (go, npm, etc.)
+#   change.isDirect        - Whether this is a direct dependency
+#
+# Available variables for diff_vulnerability:
+#   repo                   - Repository path or URL
+#   baseRef                - Base Git reference
+#   targetRef              - Target Git reference
+#   vulnerability.id       - CVE/GHSA identifier
+#   vulnerability.severity - CRITICAL, HIGH, MEDIUM, LOW
+#   vulnerability.package  - Affected package name
+#   vulnerability.version  - Affected package version
+#   vulnerability.fixedVersions - Versions containing the fix
+
+policies:
+  # Report-level policies
+  - name: diff-limit-change-scope
+    description: Warn when too many dependencies change at once
+    entrypoints: ["diff_report"]
+    vars:
+      maxChanges: 50
+    rules:
+      - action: warn
+        when: size(changes) > maxChanges
+        reason: "Large dependency change detected"
+        remediation: "Consider breaking this change into smaller, incremental updates"
+
+  - name: diff-block-critical-vulns
+    description: Block changes that introduce critical vulnerabilities
+    entrypoints: ["diff_report"]
+    rules:
+      - action: deny
+        when: |
+          vulnerabilities.exists(v, v.severity == "CRITICAL")
+        reason: "Critical vulnerability introduced by dependency change"
+        remediation: "Update to a patched version or choose an alternative package"
+
+  - name: diff-warn-high-vulns
+    description: Warn about high severity vulnerabilities in changes
+    entrypoints: ["diff_report"]
+    rules:
+      - action: warn
+        when: |
+          vulnerabilities.exists(v, v.severity == "HIGH")
+        reason: "High severity vulnerability found in dependency changes"
+        remediation: "Review vulnerabilities and update to patched versions"
+
+  # Dependency change policies
+  - name: diff-block-version-downgrades
+    description: Block dependency downgrades (may reintroduce vulnerabilities)
+    entrypoints: ["diff_dependency_change"]
+    rules:
+      - action: deny
+        when: change.type == "downgraded"
+        reason: "Dependency downgrade detected"
+        remediation: "Avoid downgrading dependencies as this may reintroduce fixed vulnerabilities"
+
+  - name: diff-warn-major-upgrades
+    description: Warn about major version upgrades that may break compatibility
+    entrypoints: ["diff_dependency_change"]
+    rules:
+      - action: warn
+        when: |
+          change.type == "upgraded" &&
+          change.baseVersion != "" &&
+          change.targetVersion != "" &&
+          change.baseVersion.split(".")[0] != change.targetVersion.split(".")[0]
+        reason: "Major version upgrade may introduce breaking changes"
+        remediation: "Review changelog and test thoroughly before merging"
+
+  - name: diff-audit-new-dependencies
+    description: Audit all newly added dependencies
+    entrypoints: ["diff_dependency_change"]
+    rules:
+      - action: warn
+        when: change.type == "added"
+        reason: "New dependency added"
+        remediation: "Review the new dependency for security, maintenance, and license compliance"
+
+  - name: diff-block-new-direct-deps
+    description: Block new direct dependencies without review
+    entrypoints: ["diff_dependency_change"]
+    rules:
+      - action: deny
+        when: change.type == "added" && change.isDirect
+        reason: "New direct dependency requires approval"
+        remediation: "Add dependency to allowlist or get approval from security team"
+
+  # Vulnerability-level policies
+  - name: diff-vuln-critical-block
+    description: Block any critical vulnerability
+    entrypoints: ["diff_vulnerability"]
+    rules:
+      - action: deny
+        when: vulnerability.severity == "CRITICAL"
+        reason: "Critical vulnerability detected in changed dependency"
+        remediation: "Update to a version that fixes the vulnerability"
+
+  - name: diff-vuln-fixable
+    description: Warn about vulnerabilities that have fixes available
+    entrypoints: ["diff_vulnerability"]
+    rules:
+      - action: warn
+        when: |
+          size(vulnerability.?fixedVersions.orValue([])) > 0
+        reason: "Vulnerability has available fix"
+        remediation: "Update to one of the fixed versions"
+
+  - name: diff-vuln-known-cve
+    description: Track known CVEs for compliance reporting
+    entrypoints: ["diff_vulnerability"]
+    rules:
+      - action: warn
+        when: vulnerability.id.startsWith("CVE-")
+        reason: "Known CVE detected in dependency"
+        remediation: "Document for compliance and plan remediation"

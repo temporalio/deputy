@@ -42,11 +42,11 @@ type PackageChange struct {
 
 // DiffStats provides summary statistics for the diff.
 type DiffStats struct {
-	OldTotal    int `json:"old_total"`
-	NewTotal    int `json:"new_total"`
-	AddedCount  int `json:"added"`
-	RemovedCount int `json:"removed"`
-	ChangedCount int `json:"changed"`
+	OldTotal       int `json:"old_total"`
+	NewTotal       int `json:"new_total"`
+	AddedCount     int `json:"added"`
+	RemovedCount   int `json:"removed"`
+	ChangedCount   int `json:"changed"`
 	UnchangedCount int `json:"unchanged"`
 }
 

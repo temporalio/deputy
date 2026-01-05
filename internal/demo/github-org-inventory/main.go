@@ -540,7 +540,7 @@ func defaultLicenseResolver(deepScan bool) licenseResolver {
 
 		if v, ok := cache.Load(key); ok {
 			logs.Debug(ctx, "license cache hit", "module", module, "version", version)
-			return cloneStrings(v.([]string))
+			return slices.Clone(v.([]string))
 		}
 
 		res, _, _ := sf.Do(key, func() (any, error) {
@@ -598,7 +598,7 @@ func defaultLicenseResolver(deepScan bool) licenseResolver {
 			return licenses, nil
 		})
 		if v, ok := res.([]string); ok {
-			return cloneStrings(v)
+			return slices.Clone(v)
 		}
 		return nil
 	}
@@ -1278,14 +1278,4 @@ func (l *scalibrSlogLogger) logArgs(level slog.Level, args ...any) {
 		return
 	}
 	l.log.Log(context.Background(), level, fmt.Sprint(args...))
-}
-
-// cloneStrings copies a string slice to avoid sharing mutable backing arrays.
-func cloneStrings(src []string) []string {
-	if len(src) == 0 {
-		return nil
-	}
-	out := make([]string, len(src))
-	copy(out, src)
-	return out
 }

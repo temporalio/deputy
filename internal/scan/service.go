@@ -11,6 +11,7 @@ import (
 	"github.com/google/osv-scalibr/extractor"
 	"github.com/picatz/deputy/internal/analysis/osv"
 	"github.com/picatz/deputy/internal/compare"
+	"github.com/picatz/deputy/internal/container/image"
 	inv "github.com/picatz/deputy/internal/inventory"
 	"github.com/picatz/deputy/internal/logs"
 	"github.com/picatz/deputy/internal/otel"
@@ -321,7 +322,7 @@ func (s *Service) ScanContainerImage(ctx context.Context, target string, targetO
 
 	// Extract scalibrimage.Image and optionally the v1.Image for config access
 	var img scalibrimage.Image
-	var imageInfo *ImageInfo
+	var imageInfo *image.Info
 	var imageConfigWarning string
 
 	switch data := mat.Data.(type) {
@@ -329,7 +330,7 @@ func (s *Service) ScanContainerImage(ctx context.Context, target string, targetO
 		img = data
 		// Extract image configuration if v1.Image is available
 		if data.V1Image != nil {
-			info, err := ExtractImageInfo(data.V1Image)
+			info, err := image.Extract(data.V1Image)
 			if err != nil {
 				slog.Debug("failed to extract image config", "target", target, "error", err)
 				imageConfigWarning = fmt.Sprintf("image config extraction failed (policy evaluation may be limited): %v", err)

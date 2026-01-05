@@ -18,8 +18,8 @@ func TestAllowedEntrypoints(t *testing.T) {
 
 func TestEntrypointCategory(t *testing.T) {
 	tests := []struct {
-		ep       Entrypoint
-		wantCat  string
+		ep      Entrypoint
+		wantCat string
 	}{
 		{EntrypointGoArtifactRequest, "proxy"},
 		{EntrypointNpmArtifactRequest, "proxy"},

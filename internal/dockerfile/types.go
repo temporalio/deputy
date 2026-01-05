@@ -1,4 +1,3 @@
-// Package dockerfile provides Dockerfile parsing and analysis for policy evaluation.
 package dockerfile
 
 // Info contains parsed Dockerfile data for policy evaluation.

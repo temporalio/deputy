@@ -2,7 +2,6 @@ package compare
 
 import (
 	"testing"
-	"time"
 )
 
 func TestImageRef_String(t *testing.T) {
@@ -420,6 +419,3 @@ func TestDiffSets(t *testing.T) {
 		t.Errorf("removed=%v want=[a]", removed)
 	}
 }
-
-// Suppress unused import warning for time package
-var _ = time.Now

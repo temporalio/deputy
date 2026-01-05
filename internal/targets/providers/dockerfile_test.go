@@ -13,16 +13,16 @@ func TestDockerfileProviderDetect(t *testing.T) {
 
 	// Create test files
 	files := map[string]bool{
-		"Dockerfile":        true,
-		"Dockerfile.prod":   true,
-		"Dockerfile.dev":    true,
-		"app.dockerfile":    true,
-		"build.Dockerfile":  true,
-		"Containerfile":     true,
-		"Containerfile.dev": true,
-		"app.containerfile": true,
-		"README.md":         false,
-		"main.go":           false,
+		"Dockerfile":         true,
+		"Dockerfile.prod":    true,
+		"Dockerfile.dev":     true,
+		"app.dockerfile":     true,
+		"build.Dockerfile":   true,
+		"Containerfile":      true,
+		"Containerfile.dev":  true,
+		"app.containerfile":  true,
+		"README.md":          false,
+		"main.go":            false,
 		"docker-compose.yml": false,
 	}
 

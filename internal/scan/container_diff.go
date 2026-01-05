@@ -4,8 +4,8 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/google/osv-scalibr/extractor"
 	"github.com/picatz/deputy/internal/compare"
+	"github.com/picatz/deputy/internal/container/image"
 	"github.com/picatz/deputy/internal/dependency"
 	"github.com/picatz/deputy/internal/vulnerability"
 )
@@ -123,7 +123,7 @@ func extractImageRef(result *Result) compare.ImageRef {
 	return ref
 }
 
-func toImageInput(info *ImageInfo) *compare.ImageInput {
+func toImageInput(info *image.Info) *compare.ImageInput {
 	if info == nil {
 		return nil
 	}
@@ -240,18 +240,21 @@ func compareImageVulnerabilities(baseResult, targetResult *Result) []compare.Vul
 			if wasFixedByUpgrade(baseFinding, targetResult) {
 				changeType = compare.VulnFixed
 			}
+			// Removed/fixed: only base layer details, no target
 			changes = append(changes, buildVulnerabilityChange(
 				advisoryID, changeType, baseAdvisory,
-				baseFinding.Dependency.Name, baseFinding.Version, "",
-				baseFinding.LayerDetails,
+				baseFinding.Dependency.Name, baseFinding.Dependency.Ecosystem,
+				baseFinding.Version, "",
+				baseFinding.LayerDetails, nil,
 			))
 		} else {
-			// Vulnerability persists (always track, even if version unchanged)
+			// Vulnerability persists: has both base and target layer details
 			targetAdvisory := targetResult.Advisories[advisoryID]
 			changes = append(changes, buildVulnerabilityChange(
 				advisoryID, compare.VulnPersisted, targetAdvisory,
-				targetFinding.Dependency.Name, baseFinding.Version, targetFinding.Version,
-				targetFinding.LayerDetails,
+				targetFinding.Dependency.Name, targetFinding.Dependency.Ecosystem,
+				baseFinding.Version, targetFinding.Version,
+				baseFinding.LayerDetails, targetFinding.LayerDetails,
 			))
 		}
 	}
@@ -260,10 +263,12 @@ func compareImageVulnerabilities(baseResult, targetResult *Result) []compare.Vul
 	for advisoryID, targetFinding := range targetFindings {
 		if _, exists := baseFindings[advisoryID]; !exists {
 			targetAdvisory := targetResult.Advisories[advisoryID]
+			// Added: only target layer details, no base
 			changes = append(changes, buildVulnerabilityChange(
 				advisoryID, compare.VulnAdded, targetAdvisory,
-				targetFinding.Dependency.Name, "", targetFinding.Version,
-				targetFinding.LayerDetails,
+				targetFinding.Dependency.Name, targetFinding.Dependency.Ecosystem,
+				"", targetFinding.Version,
+				nil, targetFinding.LayerDetails,
 			))
 		}
 	}
@@ -276,23 +281,23 @@ func buildVulnerabilityChange(
 	advisoryID string,
 	changeType compare.VulnChangeType,
 	advisory vulnerability.Advisory,
-	pkgName, baseVersion, targetVersion string,
-	layerDetails *dependency.LayerDetails,
+	pkgName, ecosystem, baseVersion, targetVersion string,
+	baseLayerDetails, targetLayerDetails *dependency.LayerDetails,
 ) compare.VulnerabilityChange {
 	change := compare.VulnerabilityChange{
-		ID:            advisoryID,
-		ChangeType:   changeType,
-		Type:         changeType.String(),
-		Severity:     advisory.Severity.Level.String(),
-		SeverityType: advisory.Severity.Type.String(),
-		Package:      pkgName,
-		BaseVersion:  baseVersion,
-		TargetVersion: targetVersion,
-		FixedVersions: advisory.FixedVersions,
-		Summary:      advisory.Summary,
-		CVE:          advisory.CVE,
-		Aliases:      advisory.Aliases,
-		LayerDetails: convertLayerDetails(layerDetails),
+		ID:                 advisoryID,
+		ChangeType:         changeType,
+		Severity:           advisory.Severity.Level.String(),
+		SeverityType:       advisory.Severity.Type.String(),
+		PackageName:        pkgName,
+		Ecosystem:          ecosystem,
+		BaseVersion:        baseVersion,
+		TargetVersion:      targetVersion,
+		FixedVersions:      advisory.FixedVersions,
+		Summary:            advisory.Summary,
+		Aliases:            advisory.Aliases,
+		BaseLayerDetails:   convertLayerDetails(baseLayerDetails),
+		TargetLayerDetails: convertLayerDetails(targetLayerDetails),
 	}
 
 	// Format published date if available
@@ -384,7 +389,7 @@ func BuildContainerDiffPayload(report *compare.ImageDiffReport) map[string]any {
 				"old_name":       c.OldName,
 				"target_version": c.TargetVersion,
 				"base_version":   c.BaseVersion,
-				"change_type":    c.Type,
+				"change_type":    c.ChangeType.String(),
 				"ecosystem":      c.Ecosystem,
 				"is_direct":      c.IsDirect,
 			}
@@ -405,20 +410,23 @@ func BuildContainerDiffPayload(report *compare.ImageDiffReport) map[string]any {
 		for _, v := range report.VulnerabilityChanges {
 			vuln := map[string]any{
 				"id":             v.ID,
-				"change_type":    v.Type,
+				"change_type":    v.ChangeType.String(),
 				"severity":       v.Severity,
 				"severity_type":  v.SeverityType,
-				"package":        v.Package,
+				"package":        v.PackageName,
+				"ecosystem":      v.Ecosystem,
 				"base_version":   v.BaseVersion,
 				"target_version": v.TargetVersion,
 				"fixed_versions": v.FixedVersions,
 				"summary":        v.Summary,
-				"cve":            v.CVE,
 				"aliases":        v.Aliases,
 				"published":      v.Published,
 			}
-			if v.LayerDetails != nil {
-				vuln["layer_details"] = layerDetailsToMap(v.LayerDetails)
+			if v.BaseLayerDetails != nil {
+				vuln["base_layer_details"] = layerDetailsToMap(v.BaseLayerDetails)
+			}
+			if v.TargetLayerDetails != nil {
+				vuln["target_layer_details"] = layerDetailsToMap(v.TargetLayerDetails)
 			}
 			vulns = append(vulns, vuln)
 		}
@@ -481,7 +489,7 @@ func layerAnalysisToMap(la *compare.LayerDiffAnalysis) map[string]any {
 		for _, lc := range la.LayerChanges {
 			changes = append(changes, map[string]any{
 				"index":          lc.Index,
-				"change_type":    lc.Type,
+				"change_type":    lc.ChangeType.String(),
 				"base_command":   lc.BaseCommand,
 				"target_command": lc.TargetCommand,
 			})
@@ -491,6 +499,3 @@ func layerAnalysisToMap(la *compare.LayerDiffAnalysis) map[string]any {
 
 	return result
 }
-
-// Suppress unused import warning
-var _ = extractor.Package{}

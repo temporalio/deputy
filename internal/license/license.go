@@ -415,19 +415,19 @@ func RemoteModuleLicenseScan(ctx context.Context, modulePath, version string) []
 	}
 	key := modulePath + "@" + version
 	if cached, ok := remoteLicenseMemo.Get(key); ok {
-		return cloneStrings(cached)
+		return slices.Clone(cached)
 	}
 	var diskCached []string
 	if version != "" && disk.Read("license-scan", key, licenseCacheTTL, &diskCached) && len(diskCached) > 0 {
-		remoteLicenseMemo.Set(key, cloneStrings(diskCached))
-		return cloneStrings(diskCached)
+		remoteLicenseMemo.Set(key, slices.Clone(diskCached))
+		return slices.Clone(diskCached)
 	}
 	result, _, _ := remoteLicenseGroup.Do(key, func() (any, error) {
 		if cached, ok := remoteLicenseMemo.Get(key); ok {
-			return cloneStrings(cached), nil
+			return slices.Clone(cached), nil
 		}
 		if version != "" && len(diskCached) > 0 {
-			return cloneStrings(diskCached), nil
+			return slices.Clone(diskCached), nil
 		}
 		var ids []string
 		if strings.HasPrefix(modulePath, "github.com/") {
@@ -462,11 +462,11 @@ func RemoteModuleLicenseScan(ctx context.Context, modulePath, version string) []
 		if version != "" && len(ids) > 0 {
 			disk.Write("license-scan", key, ids)
 		}
-		remoteLicenseMemo.Set(key, cloneStrings(ids))
+		remoteLicenseMemo.Set(key, slices.Clone(ids))
 		return ids, nil
 	})
 	if ids, ok := result.([]string); ok {
-		return cloneStrings(ids)
+		return slices.Clone(ids)
 	}
 	return nil
 }
@@ -483,26 +483,26 @@ func LookupLicensesBestEffort(ctx context.Context, ecosystem, name, version stri
 	}
 	key := eco + "|" + name + "@" + version
 	if cached, ok := registryLicenseMemo.Get(key); ok {
-		return cloneStrings(cached)
+		return slices.Clone(cached)
 	}
 	var diskCached []string
 	if disk.Read("license-registry", key, licenseCacheTTL, &diskCached) && len(diskCached) > 0 {
-		registryLicenseMemo.Set(key, cloneStrings(diskCached))
-		return cloneStrings(diskCached)
+		registryLicenseMemo.Set(key, slices.Clone(diskCached))
+		return slices.Clone(diskCached)
 	}
 	result, _, _ := registryLicenseGroup.Do(key, func() (any, error) {
 		if cached, ok := registryLicenseMemo.Get(key); ok {
-			return cloneStrings(cached), nil
+			return slices.Clone(cached), nil
 		}
 		lics := resolveEcosystemLicenses(ctx, eco, name, version)
 		if len(lics) > 0 {
 			disk.Write("license-registry", key, lics)
 		}
-		registryLicenseMemo.Set(key, cloneStrings(lics))
+		registryLicenseMemo.Set(key, slices.Clone(lics))
 		return lics, nil
 	})
 	if lics, ok := result.([]string); ok {
-		return cloneStrings(lics)
+		return slices.Clone(lics)
 	}
 	return nil
 }
@@ -983,11 +983,6 @@ func mergeLicenseSets(groups ...[]string) []string {
 func ExtractLicensesFromReader(r io.Reader) []string {
 	b, _ := io.ReadAll(r)
 	return DetectLicenseIDs(b)
-}
-
-// cloneStrings returns a deep copy of a string slice.
-func cloneStrings(src []string) []string {
-	return slices.Clone(src)
 }
 
 // getGitHubHTTPClient returns a singleton HTTP client configured with a timeout

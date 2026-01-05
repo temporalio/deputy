@@ -11,7 +11,7 @@
 #   - Validate base image sources (registries)
 
 policies:
-  - name: approved-base-images
+  - name: scan-approved-base-images
     description: Only allow approved base images from trusted sources
     entrypoints: ["scan_report"]
     vars:
@@ -35,7 +35,7 @@ policies:
         reason: "Base image not in approved list"
         remediation: "Use an approved base image from the allowlist"
 
-  - name: block-latest-tag
+  - name: scan-block-latest-tag
     description: Block use of mutable 'latest' tag in base images
     entrypoints: ["scan_report"]
     rules:

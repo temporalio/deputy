@@ -77,4 +77,3 @@ func FindBestSeverity(vulns []Vulnerability) (string, string) {
 	}
 	return bestSev, bestType
 }
-

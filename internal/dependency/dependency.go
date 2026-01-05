@@ -11,6 +11,8 @@
 // through vulnerability analysis and reporting.
 package dependency
 
+import "slices"
+
 // ID captures the identity of a dependency independently of a scan.
 type ID struct {
 	Name      string
@@ -68,18 +70,8 @@ func CloneManifestRefs(refs []ManifestRef) []ManifestRef {
 		out[i] = ManifestRef{
 			Path:    ref.Path,
 			Manager: ref.Manager,
-			Groups:  cloneStrings(ref.Groups),
+			Groups:  slices.Clone(ref.Groups),
 		}
 	}
-	return out
-}
-
-// cloneStrings returns a copy of the string slice.
-func cloneStrings(s []string) []string {
-	if len(s) == 0 {
-		return nil
-	}
-	out := make([]string, len(s))
-	copy(out, s)
 	return out
 }
