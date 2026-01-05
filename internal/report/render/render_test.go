@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/picatz/deputy/internal/dependency"
 	"github.com/picatz/deputy/internal/remediation"
 	"github.com/picatz/deputy/internal/report"
 	"github.com/picatz/deputy/internal/scan"
@@ -103,7 +104,7 @@ func TestVulnerabilityList(t *testing.T) {
 				PrimaryID: "CVE-1",
 				Package:   "pkg",
 				Version:   "1.0.0",
-				LayerDetails: &vulnerability.LayerDetails{
+				LayerDetails: &dependency.LayerDetails{
 					Index:       5,
 					InBaseImage: true,
 				},
@@ -153,15 +154,15 @@ func TestFormatLayerTag(t *testing.T) {
 
 	tests := []struct {
 		name   string
-		ld     *vulnerability.LayerDetails
+		ld     *dependency.LayerDetails
 		expect string
 	}{
 		{"nil", nil, ""},
-		{"layer 0", &vulnerability.LayerDetails{Index: 0}, "[layer 0]"},
-		{"layer 5", &vulnerability.LayerDetails{Index: 5}, "[layer 5]"},
-		{"base image layer 0", &vulnerability.LayerDetails{Index: 0, InBaseImage: true}, "[BASE layer 0]"},
-		{"base image layer 3", &vulnerability.LayerDetails{Index: 3, InBaseImage: true}, "[BASE layer 3]"},
-		{"app layer", &vulnerability.LayerDetails{Index: 12, InBaseImage: false}, "[layer 12]"},
+		{"layer 0", &dependency.LayerDetails{Index: 0}, "[layer 0]"},
+		{"layer 5", &dependency.LayerDetails{Index: 5}, "[layer 5]"},
+		{"base image layer 0", &dependency.LayerDetails{Index: 0, InBaseImage: true}, "[BASE layer 0]"},
+		{"base image layer 3", &dependency.LayerDetails{Index: 3, InBaseImage: true}, "[BASE layer 3]"},
+		{"app layer", &dependency.LayerDetails{Index: 12, InBaseImage: false}, "[layer 12]"},
 	}
 
 	for _, tt := range tests {

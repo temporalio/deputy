@@ -258,7 +258,7 @@ func TestConvertLayerDetails(t *testing.T) {
 	})
 
 	t.Run("with details", func(t *testing.T) {
-		ld := &vulnerability.LayerDetails{
+		ld := &dependency.LayerDetails{
 			Index:       2,
 			DiffID:      "sha256:abc",
 			ChainID:     "sha256:def",

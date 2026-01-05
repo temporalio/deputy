@@ -11,6 +11,7 @@ import (
 	pathpkg "path"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/picatz/deputy/internal/dependency"
 	"github.com/picatz/deputy/internal/output"
 	"github.com/picatz/deputy/internal/report"
 	"github.com/picatz/deputy/internal/scan"
@@ -284,7 +285,7 @@ func renderManifestContext(w io.Writer, list []vulnerability.Consolidated) {
 
 // formatLayerTag returns a concise layer context tag for container vulnerability display.
 // Examples: "[BASE layer 0]", "[layer 5]", "[APP layer 12]"
-func formatLayerTag(ld *vulnerability.LayerDetails) string {
+func formatLayerTag(ld *dependency.LayerDetails) string {
 	if ld == nil {
 		return ""
 	}
