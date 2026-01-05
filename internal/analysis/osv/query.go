@@ -50,15 +50,11 @@ type PkgInput struct {
 	// Locations lists file paths where the dependency was found.
 	Locations []string
 	// ManifestRefs describes manifest files declaring this dependency.
-	ManifestRefs []ManifestReference
+	ManifestRefs []dependency.ManifestRef
 	// LayerDetails contains information about the container image layer where
 	// the package was found. Nil for non-container-image scans.
-	LayerDetails *LayerDetails
+	LayerDetails *dependency.LayerDetails
 }
-
-// LayerDetails stores details about the container image layer where a package was found.
-// Type alias for dependency.LayerDetails, providing a domain-appropriate name within the osv package.
-type LayerDetails = dependency.LayerDetails
 
 // getCachedVuln retrieves a vulnerability by ID using the provided client,
 // consulting a local on-disk cache when available to avoid redundant network
@@ -267,7 +263,7 @@ func queryOSVAPIBatch(ctx context.Context, client Client, pkgs []PkgInput) ([]Vu
 					base.Severity, base.SeverityType = sev, typ
 				}
 				fixSet := collections.NewSet[string]()
-				var importSets [][]AffectedImport
+				var importSets [][]vulnerability.AffectedImport
 				if len(base.AffectedImports) > 0 {
 					importSets = append(importSets, base.AffectedImports)
 				}

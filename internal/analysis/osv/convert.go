@@ -180,8 +180,8 @@ func isHighOrCritical(severity string) bool {
 }
 
 // extractGoImports pulls Go ecosystem-specific import/symbol metadata from OSV records.
-func extractGoImports(affected []osvschema.Affected, input PkgInput) []AffectedImport {
-	var imports []AffectedImport
+func extractGoImports(affected []osvschema.Affected, input PkgInput) []vulnerability.AffectedImport {
+	var imports []vulnerability.AffectedImport
 	for _, a := range affected {
 		if !matchesPackage(a.Package, input) {
 			continue
@@ -195,7 +195,7 @@ func extractGoImports(affected []osvschema.Affected, input PkgInput) []AffectedI
 	return vulnerability.MergeAffectedImports(imports)
 }
 
-func parseImports(raw any) []AffectedImport {
+func parseImports(raw any) []vulnerability.AffectedImport {
 	switch val := raw.(type) {
 	case []any:
 		return parseImportArray(val)
@@ -210,8 +210,8 @@ func parseImports(raw any) []AffectedImport {
 	}
 }
 
-func parseImportArray(items []any) []AffectedImport {
-	var imports []AffectedImport
+func parseImportArray(items []any) []vulnerability.AffectedImport {
+	var imports []vulnerability.AffectedImport
 	for _, item := range items {
 		m, ok := item.(map[string]any)
 		if !ok {
@@ -239,7 +239,7 @@ func parseImportArray(items []any) []AffectedImport {
 				}
 			}
 		}
-		imports = append(imports, AffectedImport{Path: pathVal, Symbols: syms})
+		imports = append(imports, vulnerability.AffectedImport{Path: pathVal, Symbols: syms})
 	}
 	return imports
 }

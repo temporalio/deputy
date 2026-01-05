@@ -181,7 +181,7 @@ func queryOSVGHABucketBatch(ctx context.Context, client Client, pkgs []PkgInput)
 				base.Severity, base.SeverityType = sev, typ
 			}
 			fixSet := collections.NewSet[string]()
-			var importSets [][]AffectedImport
+			var importSets [][]vulnerability.AffectedImport
 			if len(base.AffectedImports) > 0 {
 				importSets = append(importSets, base.AffectedImports)
 			}

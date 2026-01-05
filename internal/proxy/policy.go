@@ -10,25 +10,26 @@ import (
 	"github.com/picatz/deputy/internal/policy"
 )
 
-// PolicyEvaluator loads CEL sources and evaluates them for proxy requests.
-type PolicyEvaluator interface {
-	Evaluate(context.Context, string, map[string]any) ([]policy.Action, error)
-}
+// PolicyEvaluator is an alias for policy.Evaluator for backward compatibility.
+// Use policy.Evaluator directly in new code.
+type PolicyEvaluator = policy.Evaluator
 
-type policyEngine struct {
+// proxyPolicyEngine wraps policy.Engine to inject proxy-specific context.
+type proxyPolicyEngine struct {
 	engine *policy.Engine
 }
 
 // NewPolicyEngine loads CEL policies from the provided paths.
-func NewPolicyEngine(paths []string) (PolicyEvaluator, error) {
+// The returned Evaluator sets env.command="proxy" on all evaluations.
+func NewPolicyEngine(paths []string) (policy.Evaluator, error) {
 	eng, err := policy.NewEngineFromPaths(paths)
 	if err != nil {
 		return nil, err
 	}
-	return &policyEngine{engine: eng}, nil
+	return &proxyPolicyEngine{engine: eng}, nil
 }
 
-func (e *policyEngine) Evaluate(ctx context.Context, entrypoint string, payload map[string]any) ([]policy.Action, error) {
+func (e *proxyPolicyEngine) Evaluate(ctx context.Context, entrypoint string, payload map[string]any) ([]policy.Action, error) {
 	if e == nil || e.engine == nil {
 		return nil, nil
 	}

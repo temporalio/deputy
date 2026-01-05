@@ -1,9 +1,11 @@
 package osv
 
 import (
-	"github.com/ossf/osv-schema/bindings/go/osvschema"
 	"testing"
 	"time"
+
+	"github.com/ossf/osv-schema/bindings/go/osvschema"
+	"github.com/picatz/deputy/internal/dependency"
 )
 
 func tTime(tstr string) time.Time { tm, _ := time.Parse(time.RFC3339, tstr); return tm }
@@ -168,7 +170,7 @@ func Test_ProcessOSVVulnerability_LayerDetails(t *testing.T) {
 		Version:   "1.1.1k-1ubuntu1",
 		Ecosystem: "Debian:11",
 		IsDirect:  false,
-		LayerDetails: &LayerDetails{
+		LayerDetails: &dependency.LayerDetails{
 			Index:       2,
 			DiffID:      "sha256:abc123",
 			ChainID:     "sha256:def456",

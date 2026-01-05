@@ -8,6 +8,13 @@ import (
 	"github.com/picatz/deputy/internal/vulnerability/severity/cvss"
 )
 
+// NOTE: This package previously defined type aliases (ManifestReference, AffectedImport, LayerDetails)
+// that pointed to canonical types in the dependency and vulnerability packages.
+// These aliases have been removed. Import the canonical types directly:
+//   - dependency.ManifestRef for manifest file references
+//   - vulnerability.AffectedImport for ecosystem-specific import/symbol data
+//   - dependency.LayerDetails for container image layer information
+
 // Vulnerability represents a security vulnerability found in a software package.
 // This is the flattened output format used by the OSV query layer for backward
 // compatibility. For new code, prefer using vulnerability.Advisory and vulnerability.Finding.
@@ -30,19 +37,11 @@ type Vulnerability struct {
 	FixedVersions    []string
 	Affected         bool
 	Locations        []string
-	ManifestRefs     []ManifestReference
-	AffectedImports  []AffectedImport
+	ManifestRefs     []dependency.ManifestRef
+	AffectedImports  []vulnerability.AffectedImport
 	DatabaseSpecific map[string]string
-	LayerDetails     *vulnerability.LayerDetails
+	LayerDetails     *dependency.LayerDetails
 }
-
-// ManifestReference describes the manifest/lockfile context for a dependency.
-// Type alias for dependency.ManifestRef, providing a domain-appropriate name within the osv package.
-type ManifestReference = dependency.ManifestRef
-
-// AffectedImport captures ecosystem-specific import path and symbol data.
-// Type alias for vulnerability.AffectedImport, providing a domain-appropriate name within the osv package.
-type AffectedImport = vulnerability.AffectedImport
 
 // FindBestSeverity chooses the most meaningful severity across related vulns.
 // Prefers GHSA textual severities when HIGH/CRITICAL, otherwise the highest CVSS score.

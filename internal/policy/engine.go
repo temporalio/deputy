@@ -14,6 +14,12 @@ import (
 	"github.com/picatz/deputy/internal/otel"
 )
 
+// Evaluator is the interface for evaluating policies against a payload.
+// It abstracts the policy engine for consumers that only need evaluation capability.
+type Evaluator interface {
+	Evaluate(ctx context.Context, entrypoint string, payload map[string]any) ([]Action, error)
+}
+
 // Engine holds compiled CEL programs and evaluates them without per-request recompilation.
 type Engine struct {
 	compiled []compiledPolicy // compiled is the list of pre-compiled policies ready for execution.
@@ -154,6 +160,19 @@ func (e *Engine) EvaluateAll(ctx context.Context, payload map[string]any, comman
 	otel.RecordPolicyEvaluation(ctx, time.Since(startTime).Seconds(), result)
 
 	return actions, nil
+}
+
+// Evaluate implements the Evaluator interface. It evaluates all policies against
+// the payload using the provided entrypoint, with command inferred from the
+// payload's env.command field (if present).
+func (e *Engine) Evaluate(ctx context.Context, entrypoint string, payload map[string]any) ([]Action, error) {
+	command := ""
+	if env, ok := payload["env"].(map[string]any); ok {
+		if cmd, ok := env["command"].(string); ok {
+			command = cmd
+		}
+	}
+	return e.EvaluateAll(ctx, payload, command, entrypoint)
 }
 
 // shouldSkip determines if a policy should be ignored based on the requested
