@@ -8,6 +8,7 @@ import (
 
 	"github.com/picatz/deputy/internal/collections"
 	"github.com/picatz/deputy/internal/vulnerability"
+	"github.com/picatz/deputy/internal/vulnerability/severity/cvss"
 )
 
 // TriageReport represents the summary of a triage analysis.
@@ -169,7 +170,7 @@ func severityBucket(sev, sevType string) string {
 	case "LOW":
 		return "LOW"
 	}
-	score := vulnerability.ParseCVSSScore(sev)
+	score := cvss.ParseScore(sev)
 	switch {
 	case score >= 9.0:
 		return "CRITICAL"

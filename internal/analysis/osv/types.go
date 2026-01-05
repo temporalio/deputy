@@ -5,6 +5,7 @@ import (
 
 	"github.com/picatz/deputy/internal/dependency"
 	"github.com/picatz/deputy/internal/vulnerability"
+	"github.com/picatz/deputy/internal/vulnerability/severity/cvss"
 )
 
 // Vulnerability represents a security vulnerability found in a software package.
@@ -67,7 +68,7 @@ func FindBestSeverity(vulns []Vulnerability) (string, string) {
 
 	// Otherwise pick the highest CVSS score.
 	for _, v := range vulns {
-		score := vulnerability.ParseCVSSScore(v.Severity)
+		score := cvss.ParseScore(v.Severity)
 		if score > bestScore {
 			bestScore = score
 			bestSev = v.Severity

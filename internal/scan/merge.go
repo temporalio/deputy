@@ -58,7 +58,7 @@ func mergeAdvisories(base, extra map[string]vulnerability.Advisory) map[string]v
 	}
 	for id, adv := range extra {
 		if existing, ok := out[id]; ok {
-			out[id] = mergeAdvisory(existing, adv)
+			out[id] = vulnerability.MergeAdvisory(existing, adv)
 			continue
 		}
 		out[id] = adv

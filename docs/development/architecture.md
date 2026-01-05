@@ -164,7 +164,7 @@ This lets you write rules once and enforce them everywhere: in CI scans, at pack
 
 Deputy keeps pure domain logic separate from service integrations:
 
-- `internal/vuln` owns the vulnerability domain model, CVSS/severity parsing,
+- `internal/vulnerability` owns the vulnerability domain model, severity parsing,
   alias consolidation, and fix selection. It is pure and has no IO.
 - `internal/analysis/osv` owns OSV API and GitHub Actions bucket integration,
   including cache-aware lookups and conversion into domain types.

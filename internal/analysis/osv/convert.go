@@ -10,6 +10,7 @@ import (
 	"github.com/ossf/osv-schema/bindings/go/osvschema"
 	"github.com/picatz/deputy/internal/dependency"
 	"github.com/picatz/deputy/internal/vulnerability"
+	"github.com/picatz/deputy/internal/vulnerability/weakness/cwe"
 )
 
 // ProcessOSVVulnerability converts a raw OSV schema vulnerability into the
@@ -43,7 +44,7 @@ func ProcessOSVVulnerabilityDomain(vuln osvschema.Vulnerability, input PkgInput)
 		Direct:       input.IsDirect,
 		Locations:    slices.Clone(input.Locations),
 		ManifestRefs: cloneManifestRefsFromInput(input.ManifestRefs),
-		LayerDetails: toDomainLayerDetails(input.LayerDetails),
+		LayerDetails: dependency.CloneLayerDetails(input.LayerDetails),
 	}
 
 	if !vuln.Published.IsZero() {
@@ -98,7 +99,7 @@ func ProcessOSVVulnerabilityDomain(vuln osvschema.Vulnerability, input PkgInput)
 		advisory.DatabaseSpecific = ds
 	}
 	// Extract CWEs from database_specific.cwe_ids (GHSA records)
-	if cwes := vulnerability.ExtractCWEsFromDatabaseSpecific(vuln.DatabaseSpecific); len(cwes) > 0 {
+	if cwes := cwe.ExtractFromDatabaseSpecific(vuln.DatabaseSpecific); len(cwes) > 0 {
 		advisory.CWEs = cwes
 	}
 	return advisory, finding
@@ -313,7 +314,7 @@ func flattenAdvisoryFinding(advisory vulnerability.Advisory, finding vulnerabili
 			}
 			return maps.Clone(advisory.DatabaseSpecific)
 		}(),
-		LayerDetails: cloneLayerDetails(finding.LayerDetails),
+		LayerDetails: dependency.CloneLayerDetails(finding.LayerDetails),
 	}
 }
 
@@ -387,21 +388,3 @@ func cloneAffectedImports(imports []vulnerability.AffectedImport) []vulnerabilit
 	return out
 }
 
-// cloneLayerDetails returns a deep copy of LayerDetails.
-// Since LayerDetails is a type alias for vulnerability.LayerDetails, this
-// simply creates a new struct with the same field values.
-func cloneLayerDetails(ld *vulnerability.LayerDetails) *vulnerability.LayerDetails {
-	if ld == nil {
-		return nil
-	}
-	return &vulnerability.LayerDetails{
-		Index:       ld.Index,
-		DiffID:      ld.DiffID,
-		ChainID:     ld.ChainID,
-		Command:     ld.Command,
-		InBaseImage: ld.InBaseImage,
-	}
-}
-
-// toDomainLayerDetails is an alias for cloneLayerDetails for backward compatibility.
-var toDomainLayerDetails = cloneLayerDetails

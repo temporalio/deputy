@@ -4,6 +4,7 @@ import (
 	"strings"
 
 	"github.com/picatz/deputy/internal/vulnerability"
+	"github.com/picatz/deputy/internal/vulnerability/severity/cvss"
 )
 
 // ConsolidatedSeverityPriority returns a priority tuple (int, float64) for sorting vulnerabilities.
@@ -22,6 +23,6 @@ func ConsolidatedSeverityPriority(v vulnerability.Consolidated) (int, float64) {
 			return 100, 2.0
 		}
 	}
-	score := vulnerability.ParseCVSSScore(v.Severity)
+	score := cvss.ParseScore(v.Severity)
 	return int(score*10 + 0.5), score
 }

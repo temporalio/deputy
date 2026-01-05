@@ -41,3 +41,45 @@ type LayerDetails struct {
 	// InBaseImage indicates whether this layer is part of the base image (FROM instruction).
 	InBaseImage bool `json:"inBaseImage,omitempty"`
 }
+
+// CloneLayerDetails returns a deep copy of LayerDetails.
+// Returns nil if src is nil.
+func CloneLayerDetails(src *LayerDetails) *LayerDetails {
+	if src == nil {
+		return nil
+	}
+	return &LayerDetails{
+		Index:       src.Index,
+		DiffID:      src.DiffID,
+		ChainID:     src.ChainID,
+		Command:     src.Command,
+		InBaseImage: src.InBaseImage,
+	}
+}
+
+// CloneManifestRefs deep clones a slice of ManifestRef.
+// Returns nil if refs is empty or nil.
+func CloneManifestRefs(refs []ManifestRef) []ManifestRef {
+	if len(refs) == 0 {
+		return nil
+	}
+	out := make([]ManifestRef, len(refs))
+	for i, ref := range refs {
+		out[i] = ManifestRef{
+			Path:    ref.Path,
+			Manager: ref.Manager,
+			Groups:  cloneStrings(ref.Groups),
+		}
+	}
+	return out
+}
+
+// cloneStrings returns a copy of the string slice.
+func cloneStrings(s []string) []string {
+	if len(s) == 0 {
+		return nil
+	}
+	out := make([]string, len(s))
+	copy(out, s)
+	return out
+}

@@ -3,7 +3,6 @@ package scan
 import (
 	"maps"
 	"slices"
-	"strings"
 	"time"
 
 	"github.com/picatz/deputy/internal/analysis/osv"
@@ -25,7 +24,7 @@ func filterVulnerabilitiesByPublished(vulns []osv.Vulnerability, after, before t
 			out = append(out, v)
 			continue
 		}
-		pt := parseTimeRFC3339(v.Published)
+		pt := vulnerability.ParseTimeRFC3339(v.Published)
 		if pt.IsZero() {
 			if !after.IsZero() {
 				continue
@@ -54,7 +53,7 @@ func splitLegacyVulnerabilities(vulns []osv.Vulnerability) ([]vulnerability.Find
 		advisory, finding := splitLegacyVulnerability(v)
 		if advisory.ID != "" {
 			if existing, ok := advisories[advisory.ID]; ok {
-				advisories[advisory.ID] = mergeAdvisory(existing, advisory)
+				advisories[advisory.ID] = vulnerability.MergeAdvisory(existing, advisory)
 			} else {
 				advisories[advisory.ID] = advisory
 			}
@@ -79,10 +78,10 @@ func splitLegacyVulnerability(v osv.Vulnerability) (vulnerability.Advisory, vuln
 		FixedVersions:    slices.Clone(v.FixedVersions),
 		DatabaseSpecific: maps.Clone(v.DatabaseSpecific),
 	}
-	if t := parseTimeRFC3339(v.Published); !t.IsZero() {
+	if t := vulnerability.ParseTimeRFC3339(v.Published); !t.IsZero() {
 		advisory.Published = t
 	}
-	if t := parseTimeRFC3339(v.Modified); !t.IsZero() {
+	if t := vulnerability.ParseTimeRFC3339(v.Modified); !t.IsZero() {
 		advisory.Modified = t
 	}
 
@@ -99,29 +98,11 @@ func splitLegacyVulnerability(v osv.Vulnerability) (vulnerability.Advisory, vuln
 		ManifestRefs:    cloneManifestRefs(v.ManifestRefs),
 		AffectedImports: cloneAffectedImports(v.AffectedImports),
 		Affected:        v.Affected,
-		LayerDetails:    cloneLayerDetails(v.LayerDetails),
+		LayerDetails:    dependency.CloneLayerDetails(v.LayerDetails),
 	}
 	return advisory, finding
 }
 
-// mergeAdvisory is a convenience alias for vulnerability.MergeAdvisory.
-// Kept for local readability in the consolidation code.
-var mergeAdvisory = vulnerability.MergeAdvisory
-
-func parseTimeRFC3339(raw string) time.Time {
-	if strings.TrimSpace(raw) == "" {
-		return time.Time{}
-	}
-	if t, err := time.Parse(time.RFC3339, raw); err == nil {
-		return t
-	}
-	if len(raw) >= 10 {
-		if t, err := time.Parse("2006-01-02", raw[:10]); err == nil {
-			return t
-		}
-	}
-	return time.Time{}
-}
 
 // cloneManifestRefs deep clones a slice of ManifestReference.
 // Since osv.ManifestReference is a type alias for dependency.ManifestRef,
@@ -156,18 +137,4 @@ func cloneAffectedImports(imports []osv.AffectedImport) []vulnerability.Affected
 		}
 	}
 	return out
-}
-
-// cloneLayerDetails returns a deep copy of LayerDetails.
-func cloneLayerDetails(src *vulnerability.LayerDetails) *vulnerability.LayerDetails {
-	if src == nil {
-		return nil
-	}
-	return &vulnerability.LayerDetails{
-		Index:       src.Index,
-		DiffID:      src.DiffID,
-		ChainID:     src.ChainID,
-		Command:     src.Command,
-		InBaseImage: src.InBaseImage,
-	}
 }
