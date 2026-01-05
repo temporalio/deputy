@@ -355,3 +355,11 @@ func fileModeToPerm(mode filemode.FileMode) fs.FileMode {
 	}
 	return 0o644
 }
+
+// DefaultScanner returns a function that uses the default scanning logic.
+// This adapter is useful for dependency injection in tests or custom pipelines.
+func DefaultScanner() func(ctx context.Context, ws workspace.FS, ecosystems []string) ([]*extractor.Package, error) {
+	return func(ctx context.Context, ws workspace.FS, ecosystems []string) ([]*extractor.Package, error) {
+		return ScanPackagesWorking(ctx, ws, ScanOptions{Ecosystems: ecosystems})
+	}
+}

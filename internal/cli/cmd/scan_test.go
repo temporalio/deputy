@@ -14,6 +14,7 @@ import (
 	"github.com/picatz/deputy/internal/analysis/osv"
 	inv "github.com/picatz/deputy/internal/inventory"
 	"github.com/picatz/deputy/internal/scan"
+	"github.com/picatz/deputy/internal/vulnerability"
 	"github.com/spf13/cobra"
 )
 
@@ -33,8 +34,8 @@ func TestScannerRunScanHonorsEcosystemFilter(t *testing.T) {
 				{Name: "github.com/acme/lib", Version: "v1.0.0", PURLType: purl.TypeGolang},
 			}, nil
 		},
-		QueryVulnerabilities: func(ctx context.Context, client osv.Client, inputs []osv.PkgInput) ([]osv.Vulnerability, error) {
-			return nil, nil
+		QueryVulnerabilities: func(ctx context.Context, client osv.Client, inputs []osv.PkgInput) ([]vulnerability.Finding, map[string]vulnerability.Advisory, error) {
+			return nil, nil, nil
 		},
 	})}
 
@@ -79,9 +80,9 @@ func TestScannerRunScanEmitsMultiEcosystemInputs(t *testing.T) {
 		CollectInventory: func(ctx context.Context, repoPath, gitRef string, opts inv.ScanOptions) ([]*extractor.Package, error) {
 			return []*extractor.Package{goPkg, npmPkg}, nil
 		},
-		QueryVulnerabilities: func(ctx context.Context, client osv.Client, inputs []osv.PkgInput) ([]osv.Vulnerability, error) {
+		QueryVulnerabilities: func(ctx context.Context, client osv.Client, inputs []osv.PkgInput) ([]vulnerability.Finding, map[string]vulnerability.Advisory, error) {
 			captured = append([]osv.PkgInput(nil), inputs...)
-			return nil, nil
+			return nil, nil, nil
 		},
 	})}
 

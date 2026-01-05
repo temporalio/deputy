@@ -1,4 +1,4 @@
-package scan
+package inputs
 
 import (
 	"fmt"
@@ -15,9 +15,9 @@ import (
 	"github.com/picatz/deputy/internal/purlx"
 )
 
-// Test that PackagesToInputs includes all packages and determines directness
+// Test that Convert includes all packages and determines directness
 // using go.mod in the current working directory.
-func TestPackagesToInputs_AllPackages(t *testing.T) {
+func TestConvert_AllPackages(t *testing.T) {
 	goMod := `module example.com/app
 
 require (
@@ -31,7 +31,7 @@ require (
 		{Name: "github.com/indirect/pkg", Version: "v1.2.3", PURLType: scalpurl.TypeGolang},
 	}
 
-	inputs := PackagesToInputs(pkgs, PackageInputOptions{GoDirect: deps})
+	inputs := Convert(pkgs, Options{GoDirect: deps})
 	if len(inputs) != 2 {
 		t.Fatalf("expected 2 inputs, got %d", len(inputs))
 	}
@@ -56,7 +56,7 @@ require (
 	}
 }
 
-func TestPackagesToInputs_GitHubActions_WorkflowUsesAreDirect(t *testing.T) {
+func TestConvert_GitHubActions_WorkflowUsesAreDirect(t *testing.T) {
 	pkgs := []*extractor.Package{
 		{
 			Name:      "actions/download-artifact",
@@ -66,7 +66,7 @@ func TestPackagesToInputs_GitHubActions_WorkflowUsesAreDirect(t *testing.T) {
 		},
 	}
 
-	inputs := PackagesToInputs(pkgs, PackageInputOptions{})
+	inputs := Convert(pkgs, Options{})
 	if len(inputs) != 1 {
 		t.Fatalf("expected 1 input, got %d", len(inputs))
 	}
@@ -81,7 +81,7 @@ func TestPackagesToInputs_GitHubActions_WorkflowUsesAreDirect(t *testing.T) {
 	}
 }
 
-func TestPackagesToInputs_GitHubActions_ActionManifestUsesAreDirect(t *testing.T) {
+func TestConvert_GitHubActions_ActionManifestUsesAreDirect(t *testing.T) {
 	pkgs := []*extractor.Package{
 		{
 			Name:      "actions/checkout",
@@ -91,7 +91,7 @@ func TestPackagesToInputs_GitHubActions_ActionManifestUsesAreDirect(t *testing.T
 		},
 	}
 
-	inputs := PackagesToInputs(pkgs, PackageInputOptions{})
+	inputs := Convert(pkgs, Options{})
 	if len(inputs) != 1 {
 		t.Fatalf("expected 1 input, got %d", len(inputs))
 	}
@@ -107,7 +107,7 @@ func TestPackagesToInputs_GitHubActions_ActionManifestUsesAreDirect(t *testing.T
 }
 
 // Ensure gopkg.in modules retain their original import path and directness.
-func TestPackagesToInputs_GopkgInPreserved(t *testing.T) {
+func TestConvert_GopkgInPreserved(t *testing.T) {
 	goMod := `module example.com/app
 
 require (
@@ -121,7 +121,7 @@ require (
 		{Name: "gopkg.in/indirect.v3", Version: "v3.0.0", PURLType: scalpurl.TypeGolang},
 	}
 
-	inputs := PackagesToInputs(pkgs, PackageInputOptions{GoDirect: deps})
+	inputs := Convert(pkgs, Options{GoDirect: deps})
 	if len(inputs) != 2 {
 		t.Fatalf("expected 2 inputs, got %d", len(inputs))
 	}
@@ -142,7 +142,7 @@ require (
 	}
 }
 
-func TestPackagesToInputs_NPMDirectDetection(t *testing.T) {
+func TestConvert_NPMDirectDetection(t *testing.T) {
 	files := map[string]string{
 		"web/package.json": `{
 		  "name": "web",
@@ -154,7 +154,7 @@ func TestPackagesToInputs_NPMDirectDetection(t *testing.T) {
 		  }
 		}`,
 	}
-	resolver := ManifestResolverFunc(func(rel string) ([]byte, error) {
+	resolver := ResolverFunc(func(rel string) ([]byte, error) {
 		if data, ok := files[filepath.ToSlash(rel)]; ok {
 			return []byte(data), nil
 		}
@@ -182,7 +182,7 @@ func TestPackagesToInputs_NPMDirectDetection(t *testing.T) {
 		},
 	}
 
-	inputs := PackagesToInputs(pkgs, PackageInputOptions{Resolver: resolver})
+	inputs := Convert(pkgs, Options{Resolver: resolver})
 	if len(inputs) != 3 {
 		t.Fatalf("expected 3 inputs, got %d", len(inputs))
 	}
@@ -212,7 +212,7 @@ func TestPackagesToInputs_NPMDirectDetection(t *testing.T) {
 	}
 }
 
-func TestPackagesToInputs_UVLockDirectDetection(t *testing.T) {
+func TestConvert_UVLockDirectDetection(t *testing.T) {
 	uvLock := `version = 1
 
 [[package]]
@@ -252,7 +252,7 @@ dev = [
     { name = "pytest" },
 ]
 `
-	resolver := ManifestResolverFunc(func(rel string) ([]byte, error) {
+	resolver := ResolverFunc(func(rel string) ([]byte, error) {
 		if filepath.ToSlash(rel) == "uv.lock" {
 			return []byte(uvLock), nil
 		}
@@ -266,7 +266,7 @@ dev = [
 		{Name: "transitive", Version: "0.0.1", PURLType: scalpurl.TypePyPi, Locations: []string{"uv.lock"}},
 	}
 
-	inputs := PackagesToInputs(pkgs, PackageInputOptions{Resolver: resolver})
+	inputs := Convert(pkgs, Options{Resolver: resolver})
 	if len(inputs) != 4 {
 		t.Fatalf("expected 4 inputs, got %d", len(inputs))
 	}
@@ -291,7 +291,7 @@ dev = [
 	}
 }
 
-func TestPackagesToInputs_CargoDirectDetection(t *testing.T) {
+func TestConvert_CargoDirectDetection(t *testing.T) {
 	cargoToml := `[package]
 name = "demo"
 version = "0.1.0"
@@ -312,7 +312,7 @@ serde = "1.0"
 [target."cfg(unix)".dependencies]
 libc = "0.2"
 `
-	resolver := ManifestResolverFunc(func(rel string) ([]byte, error) {
+	resolver := ResolverFunc(func(rel string) ([]byte, error) {
 		if filepath.ToSlash(rel) == "Cargo.toml" {
 			return []byte(cargoToml), nil
 		}
@@ -325,7 +325,7 @@ libc = "0.2"
 		{Name: "cc", Version: "1.0.0", PURLType: scalpurl.TypeCargo, Locations: []string{"Cargo.lock"}},
 		{Name: "libc", Version: "0.2.0", PURLType: scalpurl.TypeCargo, Locations: []string{"Cargo.lock"}},
 	}
-	inputs := PackagesToInputs(pkgs, PackageInputOptions{Resolver: resolver})
+	inputs := Convert(pkgs, Options{Resolver: resolver})
 	if len(inputs) != 5 {
 		t.Fatalf("expected 5 inputs, got %d", len(inputs))
 	}
@@ -350,7 +350,7 @@ libc = "0.2"
 	}
 }
 
-func TestPackagesToInputs_PythonRequirementsMarkedDirect(t *testing.T) {
+func TestConvert_PythonRequirementsMarkedDirect(t *testing.T) {
 	pkgs := []*extractor.Package{
 		{
 			Name:      "requests",
@@ -359,7 +359,7 @@ func TestPackagesToInputs_PythonRequirementsMarkedDirect(t *testing.T) {
 			Locations: []string{"requirements.txt"},
 		},
 	}
-	inputs := PackagesToInputs(pkgs, PackageInputOptions{})
+	inputs := Convert(pkgs, Options{})
 	if len(inputs) != 1 {
 		t.Fatalf("expected 1 input, got %d", len(inputs))
 	}
@@ -598,42 +598,42 @@ func TestCanonicalPackageKeyFromInput(t *testing.T) {
 	}{
 		{
 			name:  "empty name",
-			input: osv.PkgInput{Name: "", Version: "1.0.0"},
+			input: osv.PkgInput{QueryKey: osv.QueryKey{Name: "", Version: "1.0.0"}},
 			want:  "",
 		},
 		{
 			name:  "go package",
-			input: osv.PkgInput{Name: "github.com/foo/bar", Version: "v1.0.0", Ecosystem: "Go"},
+			input: osv.PkgInput{QueryKey: osv.QueryKey{Name: "github.com/foo/bar", Version: "v1.0.0", Ecosystem: "Go"}},
 			want:  "go|github.com/foo/bar|v1.0.0",
 		},
 		{
 			name:  "go package with v2 suffix",
-			input: osv.PkgInput{Name: "github.com/foo/bar/v2", Version: "v2.1.0", Ecosystem: "Go"},
+			input: osv.PkgInput{QueryKey: osv.QueryKey{Name: "github.com/foo/bar/v2", Version: "v2.1.0", Ecosystem: "Go"}},
 			want:  "go|github.com/foo/bar|v2.1.0",
 		},
 		{
 			name:  "npm package",
-			input: osv.PkgInput{Name: "lodash", Version: "4.17.0", Ecosystem: "npm"},
+			input: osv.PkgInput{QueryKey: osv.QueryKey{Name: "lodash", Version: "4.17.0", Ecosystem: "npm"}},
 			want:  "npm|lodash|4.17.0",
 		},
 		{
 			name:  "no ecosystem",
-			input: osv.PkgInput{Name: "unknown-pkg", Version: "1.0.0"},
+			input: osv.PkgInput{QueryKey: osv.QueryKey{Name: "unknown-pkg", Version: "1.0.0"}},
 			want:  "unknown-pkg|1.0.0",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := canonicalPackageKeyFromInput(tt.input)
+			got := canonicalKey(tt.input)
 			if got != tt.want {
-				t.Errorf("canonicalPackageKeyFromInput() = %q, want %q", got, tt.want)
+				t.Errorf("canonicalKey() = %q, want %q", got, tt.want)
 			}
 		})
 	}
 }
 
-func TestBuildPackageDirectMap(t *testing.T) {
+func TestBuildDirectMap(t *testing.T) {
 	tests := []struct {
 		name   string
 		inputs []osv.PkgInput
@@ -652,15 +652,15 @@ func TestBuildPackageDirectMap(t *testing.T) {
 		{
 			name: "no direct deps",
 			inputs: []osv.PkgInput{
-				{Name: "foo", Version: "1.0.0", Ecosystem: "npm", IsDirect: false},
+				{QueryKey: osv.QueryKey{Name: "foo", Version: "1.0.0", Ecosystem: "npm"}, PackageContext: osv.PackageContext{IsDirect: false}},
 			},
 			want: nil,
 		},
 		{
 			name: "with direct deps",
 			inputs: []osv.PkgInput{
-				{Name: "foo", Version: "1.0.0", Ecosystem: "npm", IsDirect: true},
-				{Name: "bar", Version: "2.0.0", Ecosystem: "npm", IsDirect: false},
+				{QueryKey: osv.QueryKey{Name: "foo", Version: "1.0.0", Ecosystem: "npm"}, PackageContext: osv.PackageContext{IsDirect: true}},
+				{QueryKey: osv.QueryKey{Name: "bar", Version: "2.0.0", Ecosystem: "npm"}, PackageContext: osv.PackageContext{IsDirect: false}},
 			},
 			want: map[string]bool{"npm|foo|1.0.0": true},
 		},
@@ -668,15 +668,15 @@ func TestBuildPackageDirectMap(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := BuildPackageDirectMap(tt.inputs)
+			got := BuildDirectMap(tt.inputs)
 			if tt.want == nil && got != nil {
-				t.Errorf("BuildPackageDirectMap() = %v, want nil", got)
+				t.Errorf("BuildDirectMap() = %v, want nil", got)
 				return
 			}
 			if tt.want != nil {
 				for k, v := range tt.want {
 					if got[k] != v {
-						t.Errorf("BuildPackageDirectMap()[%q] = %v, want %v", k, got[k], v)
+						t.Errorf("BuildDirectMap()[%q] = %v, want %v", k, got[k], v)
 					}
 				}
 			}
@@ -730,16 +730,16 @@ func TestMergeDirectMaps(t *testing.T) {
 	}
 }
 
-func TestPackagesToInputs_EdgeCases(t *testing.T) {
+func TestConvert_EdgeCases(t *testing.T) {
 	t.Run("nil packages", func(t *testing.T) {
-		inputs := PackagesToInputs(nil, PackageInputOptions{})
+		inputs := Convert(nil, Options{})
 		if inputs != nil {
 			t.Errorf("expected nil for nil input, got %v", inputs)
 		}
 	})
 
 	t.Run("empty packages", func(t *testing.T) {
-		inputs := PackagesToInputs([]*extractor.Package{}, PackageInputOptions{})
+		inputs := Convert([]*extractor.Package{}, Options{})
 		if inputs != nil {
 			t.Errorf("expected nil for empty input, got %v", inputs)
 		}
@@ -747,7 +747,7 @@ func TestPackagesToInputs_EdgeCases(t *testing.T) {
 
 	t.Run("nil package in slice", func(t *testing.T) {
 		pkgs := []*extractor.Package{nil, {Name: "foo", Version: "1.0.0"}}
-		inputs := PackagesToInputs(pkgs, PackageInputOptions{})
+		inputs := Convert(pkgs, Options{})
 		if len(inputs) != 1 {
 			t.Errorf("expected 1 input, got %d", len(inputs))
 		}
@@ -755,7 +755,7 @@ func TestPackagesToInputs_EdgeCases(t *testing.T) {
 
 	t.Run("empty name filtered", func(t *testing.T) {
 		pkgs := []*extractor.Package{{Name: "", Version: "1.0.0"}, {Name: "foo", Version: "1.0.0"}}
-		inputs := PackagesToInputs(pkgs, PackageInputOptions{})
+		inputs := Convert(pkgs, Options{})
 		if len(inputs) != 1 {
 			t.Errorf("expected 1 input, got %d", len(inputs))
 		}
@@ -766,7 +766,7 @@ func TestPackagesToInputs_EdgeCases(t *testing.T) {
 			{Name: "foo", Version: "1.0.0", PURLType: scalpurl.TypeNPM},
 			{Name: "foo", Version: "1.0.0", PURLType: scalpurl.TypeNPM},
 		}
-		inputs := PackagesToInputs(pkgs, PackageInputOptions{})
+		inputs := Convert(pkgs, Options{})
 		if len(inputs) != 1 {
 			t.Errorf("expected 1 deduplicated input, got %d", len(inputs))
 		}
@@ -776,7 +776,7 @@ func TestPackagesToInputs_EdgeCases(t *testing.T) {
 		pkgs := []*extractor.Package{
 			{Name: "github.com/foo/bar", Version: "v1.0.0", PURLType: "golang"},
 		}
-		inputs := PackagesToInputs(pkgs, PackageInputOptions{})
+		inputs := Convert(pkgs, Options{})
 		if len(inputs) != 1 {
 			t.Fatalf("expected 1 input, got %d", len(inputs))
 		}
@@ -789,7 +789,7 @@ func TestPackagesToInputs_EdgeCases(t *testing.T) {
 		pkgs := []*extractor.Package{
 			{Name: "actions/checkout", Version: "v4", PURLType: "github"},
 		}
-		inputs := PackagesToInputs(pkgs, PackageInputOptions{})
+		inputs := Convert(pkgs, Options{})
 		if len(inputs) != 1 {
 			t.Fatalf("expected 1 input, got %d", len(inputs))
 		}
@@ -822,7 +822,7 @@ func TestAppendGroupLabel(t *testing.T) {
 	}
 }
 
-func TestPackagesToInputs_LayerDetails(t *testing.T) {
+func TestConvert_LayerDetails(t *testing.T) {
 	t.Run("preserves layer details from SCALIBR package", func(t *testing.T) {
 		pkgs := []*extractor.Package{
 			{
@@ -838,7 +838,7 @@ func TestPackagesToInputs_LayerDetails(t *testing.T) {
 				},
 			},
 		}
-		inputs := PackagesToInputs(pkgs, PackageInputOptions{})
+		inputs := Convert(pkgs, Options{})
 		if len(inputs) != 1 {
 			t.Fatalf("expected 1 input, got %d", len(inputs))
 		}
@@ -872,7 +872,7 @@ func TestPackagesToInputs_LayerDetails(t *testing.T) {
 				LayerDetails: nil,
 			},
 		}
-		inputs := PackagesToInputs(pkgs, PackageInputOptions{})
+		inputs := Convert(pkgs, Options{})
 		if len(inputs) != 1 {
 			t.Fatalf("expected 1 input, got %d", len(inputs))
 		}
@@ -902,7 +902,7 @@ func TestPackagesToInputs_LayerDetails(t *testing.T) {
 				},
 			},
 		}
-		inputs := PackagesToInputs(pkgs, PackageInputOptions{})
+		inputs := Convert(pkgs, Options{})
 		if len(inputs) != 1 {
 			t.Fatalf("expected 1 deduplicated input, got %d", len(inputs))
 		}

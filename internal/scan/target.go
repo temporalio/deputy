@@ -162,7 +162,7 @@ type directModuleInfo struct {
 // the effective reference and workspace/repository state.
 func resolveDirectModules(localRepoPath, effRef string, ws workspace.FS) directModuleInfo {
 	goDirect := map[string]bool{"stdlib": true}
-	var resolver ManifestResolver = WorkspaceManifestResolver{ws: ws}
+	var resolver ManifestResolver = NewWorkspaceManifestResolver(ws)
 
 	if strings.EqualFold(effRef, "HEAD") || strings.EqualFold(effRef, "HEAD~0") {
 		if ws != nil {
@@ -184,7 +184,7 @@ func resolveDirectModules(localRepoPath, effRef string, ws workspace.FS) directM
 	if direct, derr := compare.CollectGoDirectModulesFromCommit(repo, *h); derr == nil {
 		goDirect = direct
 	}
-	resolver = GitManifestResolver{repo: repo, hash: *h}
+	resolver = NewGitManifestResolver(repo, *h)
 
 	return directModuleInfo{goDirect: goDirect, resolver: resolver}
 }

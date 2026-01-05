@@ -40,10 +40,10 @@ func resetDiskCache(t *testing.T) {
 	t.Cleanup(restore)
 }
 
-func Test_QueryOSVBatch_ok(t *testing.T) {
+func Test_QueryRaw_ok(t *testing.T) {
 	resetDiskCache(t)
 	client := &fakeClient{}
-	vulns, err := QueryOSVBatch(context.Background(), client, []PkgInput{{Name: "github.com/example/pkg", Version: "1.2.3", Ecosystem: "Go", IsDirect: true}})
+	vulns, err := QueryRaw(context.Background(), client, []PkgInput{{QueryKey: QueryKey{Name: "github.com/example/pkg", Version: "1.2.3", Ecosystem: "Go"}, PackageContext: PackageContext{IsDirect: true}}})
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
@@ -64,10 +64,10 @@ func (f *fakeClientQueryErr) GetVulnByID(ctx context.Context, id string) (*osvsc
 	return nil, nil
 }
 
-func Test_QueryOSVBatch_query_error(t *testing.T) {
+func Test_QueryRaw_query_error(t *testing.T) {
 	resetDiskCache(t)
 	client := &fakeClientQueryErr{}
-	_, err := QueryOSVBatch(context.Background(), client, []PkgInput{{Name: "n", Version: "1", Ecosystem: "Go", IsDirect: true}})
+	_, err := QueryRaw(context.Background(), client, []PkgInput{{QueryKey: QueryKey{Name: "n", Version: "1", Ecosystem: "Go"}, PackageContext: PackageContext{IsDirect: true}}})
 	if err == nil {
 		t.Fatalf("expected error")
 	}
@@ -82,10 +82,10 @@ func (f *fakeClientGetErr) GetVulnByID(ctx context.Context, id string) (*osvsche
 	return nil, errors.New("get-failed")
 }
 
-func Test_QueryOSVBatch_getvuln_error(t *testing.T) {
+func Test_QueryRaw_getvuln_error(t *testing.T) {
 	resetDiskCache(t)
 	client := &fakeClientGetErr{}
-	_, err := QueryOSVBatch(context.Background(), client, []PkgInput{{Name: "n", Version: "1", Ecosystem: "Go", IsDirect: true}})
+	_, err := QueryRaw(context.Background(), client, []PkgInput{{QueryKey: QueryKey{Name: "n", Version: "1", Ecosystem: "Go"}, PackageContext: PackageContext{IsDirect: true}}})
 	if err == nil {
 		t.Fatalf("expected error when GetVulnByID fails")
 	}
@@ -110,10 +110,10 @@ func (f *fakeClientFixed) GetVulnByID(ctx context.Context, id string) (*osvschem
 	}, nil
 }
 
-func Test_QueryOSVBatch_skips_fixed_version(t *testing.T) {
+func Test_QueryRaw_skips_fixed_version(t *testing.T) {
 	resetDiskCache(t)
 	client := &fakeClientFixed{}
-	vulns, err := QueryOSVBatch(context.Background(), client, []PkgInput{{Name: "github.com/example/pkg", Version: "1.55.6", Ecosystem: "Go", IsDirect: true}})
+	vulns, err := QueryRaw(context.Background(), client, []PkgInput{{QueryKey: QueryKey{Name: "github.com/example/pkg", Version: "1.55.6", Ecosystem: "Go"}, PackageContext: PackageContext{IsDirect: true}}})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -153,10 +153,10 @@ func (f *fakeClientAWS) GetVulnByID(ctx context.Context, id string) (*osvschema.
 	return &base, nil
 }
 
-func Test_QueryOSVBatch_awssdkv1(t *testing.T) {
+func Test_QueryRaw_awssdkv1(t *testing.T) {
 	resetDiskCache(t)
 	client := &fakeClientAWS{}
-	vulns, err := QueryOSVBatch(context.Background(), client, []PkgInput{{Name: "github.com/aws/aws-sdk-go", Version: "1.55.6", Ecosystem: "Go", IsDirect: true}})
+	vulns, err := QueryRaw(context.Background(), client, []PkgInput{{QueryKey: QueryKey{Name: "github.com/aws/aws-sdk-go", Version: "1.55.6", Ecosystem: "Go"}, PackageContext: PackageContext{IsDirect: true}}})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -164,7 +164,7 @@ func Test_QueryOSVBatch_awssdkv1(t *testing.T) {
 		t.Fatalf("expected no vulns for fixed version, got %d", len(vulns))
 	}
 
-	vulns, err = QueryOSVBatch(context.Background(), client, []PkgInput{{Name: "github.com/aws/aws-sdk-go", Version: "1.33.0", Ecosystem: "Go", IsDirect: true}})
+	vulns, err = QueryRaw(context.Background(), client, []PkgInput{{QueryKey: QueryKey{Name: "github.com/aws/aws-sdk-go", Version: "1.33.0", Ecosystem: "Go"}, PackageContext: PackageContext{IsDirect: true}}})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -211,10 +211,10 @@ func (f *fakeClientAlias) GetVulnByID(ctx context.Context, id string) (*osvschem
 	}
 }
 
-func Test_QueryOSVBatch_aliasWithoutRange(t *testing.T) {
+func Test_QueryRaw_aliasWithoutRange(t *testing.T) {
 	resetDiskCache(t)
 	client := &fakeClientAlias{}
-	vulns, err := QueryOSVBatch(context.Background(), client, []PkgInput{{Name: "github.com/example/pkg", Version: "1.2.3", Ecosystem: "Go", IsDirect: true}})
+	vulns, err := QueryRaw(context.Background(), client, []PkgInput{{QueryKey: QueryKey{Name: "github.com/example/pkg", Version: "1.2.3", Ecosystem: "Go"}, PackageContext: PackageContext{IsDirect: true}}})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -254,10 +254,10 @@ func (f *fakeClientAliasUnmatchedPackage) GetVulnByID(ctx context.Context, id st
 	}
 }
 
-func Test_QueryOSVBatch_ignoresAliasWithoutPackageIdentity(t *testing.T) {
+func Test_QueryRaw_ignoresAliasWithoutPackageIdentity(t *testing.T) {
 	resetDiskCache(t)
 	client := &fakeClientAliasUnmatchedPackage{}
-	vulns, err := QueryOSVBatch(context.Background(), client, []PkgInput{{Name: "github.com/example/pkg", Version: "1.2.3", Ecosystem: "Go", IsDirect: true}})
+	vulns, err := QueryRaw(context.Background(), client, []PkgInput{{QueryKey: QueryKey{Name: "github.com/example/pkg", Version: "1.2.3", Ecosystem: "Go"}, PackageContext: PackageContext{IsDirect: true}}})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -286,14 +286,14 @@ func (c *countingClient) GetVulnByID(ctx context.Context, id string) (*osvschema
 	}, nil
 }
 
-func Test_QueryOSVBatch_cache(t *testing.T) {
+func Test_QueryRaw_cache(t *testing.T) {
 	resetDiskCache(t)
 	client := &countingClient{}
-	pkgs := []PkgInput{{Name: "github.com/example/pkg", Version: "1.0.0", Ecosystem: "Go"}}
-	if _, err := QueryOSVBatch(context.Background(), client, pkgs); err != nil {
+	pkgs := []PkgInput{{QueryKey: QueryKey{Name: "github.com/example/pkg", Version: "1.0.0", Ecosystem: "Go"}}}
+	if _, err := QueryRaw(context.Background(), client, pkgs); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if _, err := QueryOSVBatch(context.Background(), client, pkgs); err != nil {
+	if _, err := QueryRaw(context.Background(), client, pkgs); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if client.calls != 1 {

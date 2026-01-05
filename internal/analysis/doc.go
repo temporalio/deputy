@@ -3,8 +3,8 @@
 // The osv subpackage contains the canonical types and functions for querying
 // the OSV database and processing vulnerability results:
 //   - osv.PkgInput: package query input
-//   - osv.Vulnerability: raw OSV query result
-//   - osv.QueryOSVBatch: batch vulnerability queries
+//   - osv.Query: batch queries returning domain types (findings + advisories)
+//   - osv.QueryRaw: batch queries returning flat Vulnerability records
 //   - osv.Client: client interface for OSV API
 //
 // Downstream processing (consolidation, severity classification, reporting)

@@ -13,7 +13,7 @@ func Test_ProcessOSVVulnerability_identifierPreference(t *testing.T) {
 		Details: "d",
 		Aliases: []string{"CVE-2024-1234", "GO-2024-0001"},
 	}
-	out := ProcessOSVVulnerability(v, PkgInput{Name: "github.com/example/mod", Version: "v1.2.3", Ecosystem: "Go", IsDirect: true})
+	out := ProcessOSVVulnerability(v, PkgInput{QueryKey: QueryKey{Name: "github.com/example/mod", Version: "v1.2.3", Ecosystem: "Go"}, PackageContext: PackageContext{IsDirect: true}})
 	if out.CVE != "CVE-2024-1234" {
 		t.Fatalf("preferred identifier mismatch: %q", out.CVE)
 	}
@@ -28,7 +28,7 @@ func Test_ProcessOSVVulnerability_severityPreference(t *testing.T) {
 			Severity:         []osvschema.Severity{{Type: "CVSS_V3", Score: "7.5"}},
 			DatabaseSpecific: map[string]any{"severity": "HIGH"},
 		}
-		out := ProcessOSVVulnerability(v, PkgInput{Name: "github.com/example/mod", Version: "v1.0.0"})
+		out := ProcessOSVVulnerability(v, PkgInput{QueryKey: QueryKey{Name: "github.com/example/mod", Version: "v1.0.0"}})
 		if out.Severity != "HIGH" || out.SeverityType != "GHSA" {
 			t.Fatalf("expected GHSA override, got %q (%s)", out.Severity, out.SeverityType)
 		}
@@ -41,7 +41,7 @@ func Test_ProcessOSVVulnerability_severityPreference(t *testing.T) {
 			Severity:         []osvschema.Severity{{Type: "CVSS_V3", Score: "9.8"}},
 			DatabaseSpecific: map[string]any{"severity": "CRITICAL"},
 		}
-		out := ProcessOSVVulnerability(v, PkgInput{Name: "github.com/example/mod", Version: "v1.0.0"})
+		out := ProcessOSVVulnerability(v, PkgInput{QueryKey: QueryKey{Name: "github.com/example/mod", Version: "v1.0.0"}})
 		if out.Severity != "9.8" || out.SeverityType != "CVSS_V3" {
 			t.Fatalf("expected CVSS retained, got %q (%s)", out.Severity, out.SeverityType)
 		}
@@ -63,7 +63,7 @@ func Test_ProcessOSVVulnerability_extractsImports(t *testing.T) {
 			},
 		},
 	}
-	out := ProcessOSVVulnerability(v, PkgInput{Name: "github.com/example/mod", Version: "v1.0.0", Ecosystem: "Go"})
+	out := ProcessOSVVulnerability(v, PkgInput{QueryKey: QueryKey{Name: "github.com/example/mod", Version: "v1.0.0", Ecosystem: "Go"}})
 	if len(out.AffectedImports) != 2 {
 		t.Fatalf("expected 2 import entries, got %d", len(out.AffectedImports))
 	}
@@ -83,7 +83,7 @@ func Test_ProcessOSVVulnerability_databaseSpecific(t *testing.T) {
 		ID:               "GO-DBSPEC",
 		DatabaseSpecific: map[string]any{"url": "https://pkg.go.dev/vuln/GO-DBSPEC", "review_status": "REVIEWED", "count": 5},
 	}
-	out := ProcessOSVVulnerability(v, PkgInput{Name: "github.com/example/mod", Version: "v1.0.0", Ecosystem: "Go"})
+	out := ProcessOSVVulnerability(v, PkgInput{QueryKey: QueryKey{Name: "github.com/example/mod", Version: "v1.0.0", Ecosystem: "Go"}})
 	if out.DatabaseSpecific["url"] != "https://pkg.go.dev/vuln/GO-DBSPEC" {
 		t.Fatalf("expected url preserved, got %q", out.DatabaseSpecific["url"])
 	}

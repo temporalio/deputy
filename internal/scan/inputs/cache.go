@@ -1,24 +1,24 @@
-package scan
+package inputs
 
 import "fmt"
 
-// manifestCache is a generic cache for parsed manifest files.
+// cache is a generic cache for parsed manifest files.
 // It stores both successful parses and errors to avoid repeated parsing attempts.
 // The parser function is called on cache miss to parse the file content.
-type manifestCache[T any] struct {
-	resolver ManifestResolver
+type cache[T any] struct {
+	resolver Resolver
 	parser   func([]byte) (T, error)
 	entries  map[string]T
 	errs     map[string]error
 }
 
-// newManifestCache creates a new manifest cache with the given resolver and parser.
+// newCache creates a new manifest cache with the given resolver and parser.
 // Returns nil if resolver is nil.
-func newManifestCache[T any](resolver ManifestResolver, parser func([]byte) (T, error)) *manifestCache[T] {
+func newCache[T any](resolver Resolver, parser func([]byte) (T, error)) *cache[T] {
 	if resolver == nil {
 		return nil
 	}
-	return &manifestCache[T]{
+	return &cache[T]{
 		resolver: resolver,
 		parser:   parser,
 		entries:  make(map[string]T),
@@ -28,7 +28,7 @@ func newManifestCache[T any](resolver ManifestResolver, parser func([]byte) (T, 
 
 // get retrieves a parsed manifest from the cache, parsing it on first access.
 // Both successful parses and errors are cached.
-func (c *manifestCache[T]) get(path string) (T, error) {
+func (c *cache[T]) get(path string) (T, error) {
 	var zero T
 	if c == nil {
 		return zero, fmt.Errorf("no resolver")

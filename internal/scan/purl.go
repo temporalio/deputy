@@ -61,11 +61,15 @@ func (s *Service) ScanPURL(ctx context.Context, purlStr string, opts Options) (*
 	ecos := purlEcosystem(pu)
 	inputs := []osv.PkgInput{
 		{
-			Name:      name,
-			Version:   pu.Version,
-			Ecosystem: ecos,
-			PURL:      canonical,
-			IsDirect:  true,
+			QueryKey: osv.QueryKey{
+				Name:      name,
+				Version:   pu.Version,
+				Ecosystem: ecos,
+				PURL:      canonical,
+			},
+			PackageContext: osv.PackageContext{
+				IsDirect: true,
+			},
 		},
 	}
 	pkgs := []*extractor.Package{
@@ -80,7 +84,7 @@ func (s *Service) ScanPURL(ctx context.Context, purlStr string, opts Options) (*
 		direct[canonical] = true
 	}
 
-	vulns, queryErr := s.queryOSV(ctx, inputs)
+	findings, advisories, queryErr := s.queryOSV(ctx, inputs)
 	result := buildResult(
 		Target{
 			Kind:        targets.KindPURL,
@@ -88,7 +92,8 @@ func (s *Service) ScanPURL(ctx context.Context, purlStr string, opts Options) (*
 		},
 		pkgs,
 		direct,
-		vulns,
+		findings,
+		advisories,
 		queryErr,
 		opts,
 	)

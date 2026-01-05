@@ -1,6 +1,7 @@
 package scan
 
 import (
+	"fmt"
 	"time"
 
 	"github.com/google/osv-scalibr/extractor"
@@ -35,6 +36,16 @@ type Options struct {
 	Ecosystems      []string
 	PublishedBefore time.Time
 	PublishedAfter  time.Time
+}
+
+// Validate checks that the options are valid.
+func (o Options) Validate() error {
+	if !o.PublishedBefore.IsZero() && !o.PublishedAfter.IsZero() {
+		if o.PublishedAfter.After(o.PublishedBefore) {
+			return fmt.Errorf("PublishedAfter must be before PublishedBefore")
+		}
+	}
+	return nil
 }
 
 // Result is the output of a scan operation.

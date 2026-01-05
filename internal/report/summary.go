@@ -17,6 +17,12 @@ type Summary struct {
 	CommandsHeader       string
 }
 
+// BuildSummaryFromResult computes summary stats from a ConsolidatedResult.
+// This is the preferred API when using ConsolidateAll.
+func BuildSummaryFromResult(result vulnerability.ConsolidatedResult) Summary {
+	return BuildSummary(result.Vulnerabilities, result.Stats)
+}
+
 // BuildSummary computes summary stats and remediation suggestions for vulnerabilities.
 func BuildSummary(cons []vulnerability.Consolidated, stats vulnerability.Stats) Summary {
 	if len(cons) == 0 {

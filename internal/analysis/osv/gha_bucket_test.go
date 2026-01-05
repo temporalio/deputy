@@ -49,13 +49,13 @@ func TestNormalizeGitHubActionsInput_Table(t *testing.T) {
 	}{
 		{
 			name: "strip github.com prefix",
-			in:   PkgInput{Name: "github.com/owner/repo", Version: "1.0.0", Ecosystem: "github"},
-			want: PkgInput{Name: "owner/repo", Version: "1.0.0", Ecosystem: "GitHub Actions"},
+			in:   PkgInput{QueryKey: QueryKey{Name: "github.com/owner/repo", Version: "1.0.0", Ecosystem: "github"}},
+			want: PkgInput{QueryKey: QueryKey{Name: "owner/repo", Version: "1.0.0", Ecosystem: "GitHub Actions"}},
 		},
 		{
 			name: "derive from purl",
-			in:   PkgInput{PURL: "pkg:github/owner/repo@v2"},
-			want: PkgInput{Name: "owner/repo", PURL: "pkg:github/owner/repo@v2", Ecosystem: "GitHub Actions"},
+			in:   PkgInput{QueryKey: QueryKey{PURL: "pkg:github/owner/repo@v2"}},
+			want: PkgInput{QueryKey: QueryKey{Name: "owner/repo", PURL: "pkg:github/owner/repo@v2", Ecosystem: "GitHub Actions"}},
 		},
 	}
 	for _, tc := range tests {
@@ -97,7 +97,7 @@ func TestVersionAffectedByGHARanges_Table(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.version, func(t *testing.T) {
-			pkg := PkgInput{Name: "owner/repo", Version: tc.version, Ecosystem: "GitHub Actions"}
+			pkg := PkgInput{QueryKey: QueryKey{Name: "owner/repo", Version: tc.version, Ecosystem: "GitHub Actions"}}
 			if got := versionAffectedByGHARanges(vuln, pkg, tc.version); got != tc.want {
 				t.Fatalf("versionAffectedByGHARanges(%q) = %v, want %v", tc.version, got, tc.want)
 			}
@@ -250,7 +250,7 @@ func TestQueryOSVGHABucketBatch_MajorTagResolutionAvoidsFalsePositive(t *testing
 	t.Cleanup(func() { ghaListRemoteRefs = origList })
 
 	got, err := queryOSVGHABucketBatch(context.Background(), nil, []PkgInput{
-		{Name: "actions/download-artifact", Version: "v4", Ecosystem: "GitHub Actions"},
+		{QueryKey: QueryKey{Name: "actions/download-artifact", Version: "v4", Ecosystem: "GitHub Actions"}},
 	})
 	if err != nil {
 		t.Fatalf("queryOSVGHABucketBatch: %v", err)
@@ -308,7 +308,7 @@ func TestQueryOSVGHABucketBatch_MajorTagResolutionReportsEffectiveVersion(t *tes
 	t.Cleanup(func() { ghaListRemoteRefs = origList })
 
 	got, err := queryOSVGHABucketBatch(context.Background(), nil, []PkgInput{
-		{Name: "actions/download-artifact", Version: "v4", Ecosystem: "GitHub Actions"},
+		{QueryKey: QueryKey{Name: "actions/download-artifact", Version: "v4", Ecosystem: "GitHub Actions"}},
 	})
 	if err != nil {
 		t.Fatalf("queryOSVGHABucketBatch: %v", err)
@@ -367,7 +367,7 @@ func TestBuildGHAVulnIndex_UsesCacheZip(t *testing.T) {
 	}
 
 	// Confirm normalize+matching uses purl without github.com prefix.
-	in := PkgInput{PURL: purl.PackageURL{Type: purl.TypeGithub, Namespace: "owner", Name: "repo", Version: "v1"}.String(), Version: "1.0.0"}
+	in := PkgInput{QueryKey: QueryKey{PURL: purl.PackageURL{Type: purl.TypeGithub, Namespace: "owner", Name: "repo", Version: "v1"}.String(), Version: "1.0.0"}}
 	norm := normalizeGitHubActionsInput(in)
 	if norm.Name != "owner/repo" || norm.Ecosystem != "GitHub Actions" {
 		t.Fatalf("normalized input = %+v", norm)
@@ -603,10 +603,10 @@ func TestIsGitHubActionsInput_Table(t *testing.T) {
 		in   PkgInput
 		want bool
 	}{
-		{PkgInput{Ecosystem: "GitHub Actions"}, true},
-		{PkgInput{Ecosystem: "gha"}, true},
-		{PkgInput{PURL: "pkg:github/owner/repo@v1"}, true},
-		{PkgInput{Ecosystem: "npm"}, false},
+		{PkgInput{QueryKey: QueryKey{Ecosystem: "GitHub Actions"}}, true},
+		{PkgInput{QueryKey: QueryKey{Ecosystem: "gha"}}, true},
+		{PkgInput{QueryKey: QueryKey{PURL: "pkg:github/owner/repo@v1"}}, true},
+		{PkgInput{QueryKey: QueryKey{Ecosystem: "npm"}}, false},
 	}
 	for _, tc := range tests {
 		label := strings.TrimSpace(tc.in.Ecosystem)

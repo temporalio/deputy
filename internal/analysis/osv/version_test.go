@@ -126,11 +126,11 @@ func TestIsVersionAffected_Debian(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			pkg := PkgInput{
+			pkg := PkgInput{QueryKey: QueryKey{
 				Name:      tt.pkgName,
 				Version:   tt.pkgVersion,
 				Ecosystem: tt.pkgEcosystem,
-			}
+			}}
 			got := isVersionAffected(tt.vuln, pkg)
 			if got != tt.want {
 				t.Errorf("isVersionAffected() = %v, want %v", got, tt.want)
@@ -206,11 +206,11 @@ func TestIsVersionAffected_Alpine(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			pkg := PkgInput{
+			pkg := PkgInput{QueryKey: QueryKey{
 				Name:      tt.pkgName,
 				Version:   tt.pkgVersion,
 				Ecosystem: tt.pkgEcosystem,
-			}
+			}}
 			got := isVersionAffected(tt.vuln, pkg)
 			if got != tt.want {
 				t.Errorf("isVersionAffected() = %v, want %v", got, tt.want)
@@ -286,11 +286,11 @@ func TestIsVersionAffected_Go(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			pkg := PkgInput{
+			pkg := PkgInput{QueryKey: QueryKey{
 				Name:      tt.pkgName,
 				Version:   tt.pkgVersion,
 				Ecosystem: tt.pkgEcosystem,
-			}
+			}}
 			got := isVersionAffected(tt.vuln, pkg)
 			if got != tt.want {
 				t.Errorf("isVersionAffected() = %v, want %v", got, tt.want)

@@ -18,6 +18,7 @@ import (
 	"github.com/picatz/deputy/internal/analysis/osv"
 	sbomx "github.com/picatz/deputy/internal/sbom"
 	"github.com/picatz/deputy/internal/scan"
+	"github.com/picatz/deputy/internal/vulnerability"
 )
 
 func TestSBOMImageRoundTrip(t *testing.T) {
@@ -51,10 +52,10 @@ func TestSBOMImageRoundTrip(t *testing.T) {
 
 	var calls [][]osv.PkgInput
 	svc := scan.NewServiceWithConfig(&scan.ServiceConfig{
-		QueryVulnerabilities: func(ctx context.Context, client osv.Client, inputs []osv.PkgInput) ([]osv.Vulnerability, error) {
+		QueryVulnerabilities: func(ctx context.Context, client osv.Client, inputs []osv.PkgInput) ([]vulnerability.Finding, map[string]vulnerability.Advisory, error) {
 			copied := append([]osv.PkgInput(nil), inputs...)
 			calls = append(calls, copied)
-			return nil, nil
+			return nil, nil, nil
 		},
 	})
 

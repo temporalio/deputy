@@ -25,8 +25,7 @@ func FilterUnfixed(result Result) Result {
 	}
 	result.Findings = filtered
 	result.Advisories = filterAdvisories(filtered, result.Advisories)
-	cons := vulnerability.Consolidate(result.Findings, result.Advisories)
-	result.Stats = vulnerability.StatsFromConsolidated(cons, len(result.Findings))
+	result.Stats = vulnerability.ConsolidateAll(result.Findings, result.Advisories).Stats
 	return result
 }
 

@@ -44,7 +44,6 @@ func AddDiffCommand(root *cobra.Command, service *scan.Service) {
 	var (
 		repoPath                                       string
 		skipVulnScan                                   bool
-		useLicenseCheck                                bool
 		enrichLicenses                                 bool
 		licenseSource                                  string
 		publishedBeforeStr, publishedAfterStr, asOfStr string
@@ -146,7 +145,7 @@ Can be disabled with --skip-vuln-scan for faster execution.`,
 			if err != nil {
 				return fmt.Errorf("failed to parse references: %w", err)
 			}
-			return runDiffAnalysis(cmd.Context(), service, repo, baseRef, targetRef, !skipVulnScan, useLicenseCheck, enrichLicenses, licenseSource, publishedAfterStr, publishedBeforeStr, asOfStr, ignoreUnfixed, showUnchanged, unchangedThreshold, policyPaths, scanOpts, matcher, debugMatcher, cmd.OutOrStdout(), cmd.ErrOrStderr())
+			return runDiffAnalysis(cmd.Context(), service, repo, baseRef, targetRef, !skipVulnScan, enrichLicenses, licenseSource, publishedAfterStr, publishedBeforeStr, asOfStr, ignoreUnfixed, showUnchanged, unchangedThreshold, policyPaths, scanOpts, matcher, debugMatcher, cmd.OutOrStdout(), cmd.ErrOrStderr())
 		},
 		Example: `BASIC USAGE:
   # Compare current work with default branch (beginner-friendly)
@@ -269,7 +268,6 @@ PERFORMANCE TIPS:
 
 	cmd.Flags().StringVarP(&repoPath, "repo", "r", "", "Path to the repository (defaults to current directory)")
 	cmd.Flags().BoolVarP(&skipVulnScan, "skip-vuln-scan", "s", false, "Skip vulnerability scanning (faster execution)")
-	cmd.Flags().BoolVar(&useLicenseCheck, "use-licensecheck", false, "(Deprecated) Alias for --licenses --license-source=scan")
 	cmd.Flags().BoolVar(&enrichLicenses, "licenses", false, "Include license information for changed dependencies")
 	cmd.Flags().StringVar(&licenseSource, "license-source", "depsdev", "License information source: depsdev | scan | both")
 	cmd.Flags().StringVar(&publishedBeforeStr, "published-before", "", "Only include vulnerabilities published before this date (YYYY, YYYY-MM, YYYY-MM-DD, or RFC3339)")
@@ -287,19 +285,6 @@ PERFORMANCE TIPS:
 	root.AddCommand(cmd)
 }
 
-// adjustLicenseOptions ensures backward-compatible handling of the deprecated
-// --use-licensecheck flag by enabling enrichment and preferring scan sources.
-func adjustLicenseOptions(useLicenseCheck bool, enrichLicenses bool, licenseSource string) (bool, string) {
-	licenseSource = flags.NormalizeLicenseSource(licenseSource)
-	if useLicenseCheck && !enrichLicenses {
-		enrichLicenses = true
-		if licenseSource == flags.LicenseSourceDepsDev {
-			licenseSource = flags.LicenseSourceScan
-		}
-	}
-	return enrichLicenses, licenseSource
-}
-
 // DiffPolicyReport captures the full context of a diff operation for policy evaluation.
 type DiffPolicyReport struct {
 	Repo            string                 `json:"repo"`
@@ -312,7 +297,7 @@ type DiffPolicyReport struct {
 // runDiffAnalysis orchestrates dependency inventory collection for the base and
 // target references, computes a dependency diff, and optionally queries OSV to
 // enrich added/updated modules with vulnerability data.
-func runDiffAnalysis(ctx context.Context, service *scan.Service, repoPath, baseRef, targetRef string, enableVulnScan bool, useLicenseCheck bool, enrichLicenses bool, licenseSource string, publishedAfterStr, publishedBeforeStr, asOfStr string, ignoreUnfixed bool, showUnchanged bool, unchangedThreshold string, policyPaths []string, scanOpts inv.ScanOptions, matcher *inv.DependencyMatcher, debugMatcher bool, outW io.Writer, errW io.Writer) error {
+func runDiffAnalysis(ctx context.Context, service *scan.Service, repoPath, baseRef, targetRef string, enableVulnScan bool, enrichLicenses bool, licenseSource string, publishedAfterStr, publishedBeforeStr, asOfStr string, ignoreUnfixed bool, showUnchanged bool, unchangedThreshold string, policyPaths []string, scanOpts inv.ScanOptions, matcher *inv.DependencyMatcher, debugMatcher bool, outW io.Writer, errW io.Writer) error {
 	ctx, span := otel.StartSpan(ctx, "deputy.diff",
 		trace.WithAttributes(
 			attribute.String("deputy.target.path", repoPath),
@@ -469,8 +454,8 @@ func runDiffAnalysis(ctx context.Context, service *scan.Service, repoPath, baseR
 		return nil
 	}
 
-	// Determine enrichment modes
-	enrichLicenses, licenseSource = adjustLicenseOptions(useLicenseCheck, enrichLicenses, licenseSource)
+	// Normalize license source
+	licenseSource = flags.NormalizeLicenseSource(licenseSource)
 
 	// Detailed dependency change rendering (legacy style) with optional enrichment
 	displayDetailedDependencyChanges(ctx, repoSrc.Workspace, changes, enrichLicenses, licenseSource, outW, errW)

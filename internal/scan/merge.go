@@ -23,8 +23,7 @@ func MergeResults(base, extra Result) Result {
 	merged.Warnings = append(append([]string{}, base.Warnings...), extra.Warnings...)
 	merged.PolicyActions = append(append([]policy.Action{}, base.PolicyActions...), extra.PolicyActions...)
 
-	cons := vulnerability.Consolidate(merged.Findings, merged.Advisories)
-	merged.Stats = vulnerability.StatsFromConsolidated(cons, len(merged.Findings))
+	merged.Stats = vulnerability.ConsolidateAll(merged.Findings, merged.Advisories).Stats
 
 	return merged
 }

@@ -13,6 +13,6 @@ func (s *Service) ScanInputs(ctx context.Context, target Target, pkgs []*extract
 	if svc == nil {
 		svc = NewService()
 	}
-	vulns, queryErr := svc.queryOSV(ctx, inputs)
-	return buildResult(target, pkgs, direct, vulns, queryErr, opts)
+	findings, advisories, queryErr := svc.queryOSV(ctx, inputs)
+	return buildResult(target, pkgs, direct, findings, advisories, queryErr, opts)
 }

@@ -1,11 +1,9 @@
 package osv
 
 import (
-	"strings"
-
 	"github.com/picatz/deputy/internal/dependency"
 	"github.com/picatz/deputy/internal/vulnerability"
-	"github.com/picatz/deputy/internal/vulnerability/severity/cvss"
+	"github.com/picatz/deputy/internal/vulnerability/severity"
 )
 
 // NOTE: This package previously defined type aliases (ManifestReference, AffectedImport, LayerDetails)
@@ -49,30 +47,9 @@ func FindBestSeverity(vulns []Vulnerability) (string, string) {
 	if len(vulns) == 0 {
 		return "", ""
 	}
-	var bestScore float64 = -1
-	var bestSev, bestType string
-
-	// GHSA textual severities (HIGH/CRITICAL) take precedence.
+	values := make([]severity.Value, 0, len(vulns))
 	for _, v := range vulns {
-		if v.SeverityType == "GHSA" {
-			up := strings.ToUpper(v.Severity)
-			if up == "CRITICAL" {
-				return v.Severity, v.SeverityType
-			}
-			if up == "HIGH" && bestSev == "" {
-				bestSev, bestType = v.Severity, v.SeverityType
-			}
-		}
+		values = append(values, severity.FromRaw(v.Severity, v.SeverityType))
 	}
-
-	// Otherwise pick the highest CVSS score.
-	for _, v := range vulns {
-		score := cvss.ParseScore(v.Severity)
-		if score > bestScore {
-			bestScore = score
-			bestSev = v.Severity
-			bestType = v.SeverityType
-		}
-	}
-	return bestSev, bestType
+	return severity.SelectBest(values).Strings()
 }

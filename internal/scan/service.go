@@ -51,14 +51,14 @@ var _ Scanner = (*Service)(nil)
 // Service orchestrates vulnerability scans by combining inventory collection and OSV lookups.
 type Service struct {
 	collectInventory     func(ctx context.Context, repoPath, gitRef string, opts inv.ScanOptions) ([]*extractor.Package, error)
-	queryVulnerabilities func(ctx context.Context, client osv.Client, pkgs []osv.PkgInput) ([]osv.Vulnerability, error)
+	queryVulnerabilities func(ctx context.Context, client osv.Client, pkgs []osv.PkgInput) ([]vulnerability.Finding, map[string]vulnerability.Advisory, error)
 	osvClient            osv.Client
 }
 
 // ServiceConfig controls scan service dependencies.
 type ServiceConfig struct {
 	CollectInventory     func(ctx context.Context, repoPath, gitRef string, opts inv.ScanOptions) ([]*extractor.Package, error)
-	QueryVulnerabilities func(ctx context.Context, client osv.Client, pkgs []osv.PkgInput) ([]osv.Vulnerability, error)
+	QueryVulnerabilities func(ctx context.Context, client osv.Client, pkgs []osv.PkgInput) ([]vulnerability.Finding, map[string]vulnerability.Advisory, error)
 	OSVClient            osv.Client
 }
 
@@ -71,7 +71,7 @@ func NewService() *Service {
 func NewServiceWithConfig(cfg *ServiceConfig) *Service {
 	service := &Service{
 		collectInventory:     collectInventory,
-		queryVulnerabilities: osv.QueryOSVBatch,
+		queryVulnerabilities: osv.Query,
 		osvClient:            osv.NewClient(),
 	}
 	if cfg == nil {
@@ -89,7 +89,7 @@ func NewServiceWithConfig(cfg *ServiceConfig) *Service {
 	return service
 }
 
-func (s *Service) queryOSV(ctx context.Context, inputs []osv.PkgInput) ([]osv.Vulnerability, error) {
+func (s *Service) queryOSV(ctx context.Context, inputs []osv.PkgInput) ([]vulnerability.Finding, map[string]vulnerability.Advisory, error) {
 	ctx, span := otel.StartSpan(ctx, "deputy.scan.query_vulnerabilities",
 		trace.WithAttributes(
 			attribute.Int("deputy.osv.batch_size", len(inputs)),
@@ -98,19 +98,19 @@ func (s *Service) queryOSV(ctx context.Context, inputs []osv.PkgInput) ([]osv.Vu
 
 	query := s.queryVulnerabilities
 	if query == nil {
-		query = osv.QueryOSVBatch
+		query = osv.Query
 	}
 	client := s.osvClient
 	if client == nil {
 		client = osv.NewClient()
 	}
-	vulns, err := query(ctx, client, inputs)
+	findings, advisories, err := query(ctx, client, inputs)
 	if err != nil {
 		otel.SetSpanError(span, err)
 	} else {
-		span.SetAttributes(attribute.Int("deputy.vuln.count", len(vulns)))
+		span.SetAttributes(attribute.Int("deputy.vuln.count", len(findings)))
 	}
-	return vulns, err
+	return findings, advisories, err
 }
 
 // ScanRepository scans a repository target (local path or remote) for vulnerabilities.
@@ -157,7 +157,7 @@ func (s *Service) ScanRepository(ctx context.Context, repoArg, ref string, refPr
 	modInfo := resolveDirectModules(target.localRepoPath, effRef, target.workspace)
 	inputs := PackagesToInputs(pkgs, PackageInputOptions{GoDirect: modInfo.goDirect, Resolver: modInfo.resolver})
 	logs.Debug(ctx, "querying OSV for vulnerabilities", "input_count", len(inputs))
-	vulns, queryErr := s.queryOSV(ctx, inputs)
+	findings, advisories, queryErr := s.queryOSV(ctx, inputs)
 
 	result := buildResult(
 		Target{
@@ -171,7 +171,8 @@ func (s *Service) ScanRepository(ctx context.Context, repoArg, ref string, refPr
 		},
 		pkgs,
 		modInfo.goDirect,
-		vulns,
+		findings,
+		advisories,
 		queryErr,
 		opts,
 	)
@@ -227,14 +228,15 @@ func (s *Service) ScanDirectory(ctx context.Context, path string, opts Options) 
 	span.SetAttributes(attribute.Int("deputy.package.count", len(pkgs)))
 
 	goDirect := compare.CollectGoDirectModulesFromWorkspace(ws)
-	inputs := PackagesToInputs(pkgs, PackageInputOptions{GoDirect: goDirect, Resolver: WorkspaceManifestResolver{ws: ws}})
-	vulns, queryErr := s.queryOSV(ctx, inputs)
+	inputs := PackagesToInputs(pkgs, PackageInputOptions{GoDirect: goDirect, Resolver: NewWorkspaceManifestResolver(ws)})
+	findings, advisories, queryErr := s.queryOSV(ctx, inputs)
 
 	result := buildResult(
 		Target{Kind: targets.KindDir, DisplayPath: path, LocalPath: path},
 		pkgs,
 		goDirect,
-		vulns,
+		findings,
+		advisories,
 		queryErr,
 		opts,
 	)
@@ -269,13 +271,14 @@ func (s *Service) ScanSBOM(ctx context.Context, pkgs []*extractor.Package, direc
 	defer span.End()
 
 	inputs := PackagesToInputs(pkgs, PackageInputOptions{DirectPackages: direct})
-	vulns, queryErr := s.queryOSV(ctx, inputs)
+	findings, advisories, queryErr := s.queryOSV(ctx, inputs)
 
 	result := buildResult(
 		Target{Kind: targets.KindSBOM, DisplayPath: "sbom"},
 		pkgs,
 		direct,
-		vulns,
+		findings,
+		advisories,
 		queryErr,
 		opts,
 	)
@@ -360,7 +363,7 @@ func (s *Service) ScanContainerImage(ctx context.Context, target string, targetO
 	span.SetAttributes(attribute.Int("deputy.package.count", len(pkgs)))
 
 	inputs := PackagesToInputs(pkgs, PackageInputOptions{})
-	vulns, queryErr := s.queryOSV(ctx, inputs)
+	findings, advisories, queryErr := s.queryOSV(ctx, inputs)
 
 	displayPath := target
 	if mat.Meta.Target != "" {
@@ -376,7 +379,8 @@ func (s *Service) ScanContainerImage(ctx context.Context, target string, targetO
 		},
 		pkgs,
 		nil,
-		vulns,
+		findings,
+		advisories,
 		queryErr,
 		opts,
 	)
@@ -468,18 +472,16 @@ func (s *Service) ScanDockerfile(ctx context.Context, target string, opts Option
 	return &Execution{Result: result, cleanup: cleanup}, nil
 }
 
-func buildResult(target Target, pkgs []*extractor.Package, direct map[string]bool, vulns []osv.Vulnerability, queryErr error, opts Options) Result {
+func buildResult(target Target, pkgs []*extractor.Package, direct map[string]bool, findings []vulnerability.Finding, advisories map[string]vulnerability.Advisory, queryErr error, opts Options) Result {
 	warnings := []string{}
 	if queryErr != nil {
 		warnings = append(warnings, fmt.Sprintf("OSV query failed: %v", queryErr))
 	}
 	if !opts.PublishedBefore.IsZero() || !opts.PublishedAfter.IsZero() {
-		vulns = filterVulnerabilitiesByPublished(vulns, opts.PublishedAfter, opts.PublishedBefore)
+		findings = filterFindingsByPublished(findings, advisories, opts.PublishedAfter, opts.PublishedBefore)
 	}
 
-	findings, advisories := splitLegacyVulnerabilities(vulns)
-	cons := vulnerability.Consolidate(findings, advisories)
-	stats := vulnerability.StatsFromConsolidated(cons, len(findings))
+	consolidated := vulnerability.ConsolidateAll(findings, advisories)
 
 	return Result{
 		Target:          target,
@@ -491,7 +493,7 @@ func buildResult(target Target, pkgs []*extractor.Package, direct map[string]boo
 		},
 		Findings:   findings,
 		Advisories: advisories,
-		Stats:      stats,
+		Stats:      consolidated.Stats,
 		Warnings:   warnings,
 	}
 }

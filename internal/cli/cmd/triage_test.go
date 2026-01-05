@@ -12,6 +12,7 @@ import (
 	"github.com/google/osv-scalibr/extractor"
 	"github.com/google/osv-scalibr/purl"
 	"github.com/picatz/deputy/internal/analysis/osv"
+	"github.com/picatz/deputy/internal/dependency"
 	inv "github.com/picatz/deputy/internal/inventory"
 	"github.com/picatz/deputy/internal/report"
 	"github.com/picatz/deputy/internal/scan"
@@ -26,14 +27,18 @@ func TestTriageCommandTextOutput(t *testing.T) {
 	writeGoModule(t, tmpDir)
 	initGitRepo(t, tmpDir)
 
-	scanner := newMockTriageScanner(t, []osv.Vulnerability{
-		{
-			ID:           "GHSA-1234-5678-9012",
-			Package:      "github.com/acme/lib",
-			Version:      "v1.0.0",
-			Severity:     "HIGH",
-			SeverityType: "GHSA",
-			Affected:     true,
+	scanner := newMockTriageScanner(t, triageMockData{
+		Findings: []vulnerability.Finding{{
+			AdvisoryID: "GHSA-1234-5678-9012",
+			Dependency: dependency.ID{Name: "github.com/acme/lib", Ecosystem: "Go"},
+			Version:    "v1.0.0",
+			Affected:   true,
+		}},
+		Advisories: map[string]vulnerability.Advisory{
+			"GHSA-1234-5678-9012": {
+				ID:       "GHSA-1234-5678-9012",
+				Severity: vulnerability.NewSeverity("HIGH", "GHSA"),
+			},
 		},
 	})
 
@@ -65,14 +70,17 @@ func TestTriageCommandJSONOutput(t *testing.T) {
 	writeGoModule(t, tmpDir)
 	initGitRepo(t, tmpDir)
 
-	scanner := newMockTriageScanner(t, []osv.Vulnerability{
-		{
-			ID:           "CVE-2024-1234",
-			Package:      "github.com/acme/lib",
-			Version:      "v1.0.0",
-			Severity:     "CRITICAL",
-			SeverityType: "GHSA",
-			Affected:     true,
+	scanner := newMockTriageScanner(t, triageMockData{
+		Findings: []vulnerability.Finding{{
+			AdvisoryID: "CVE-2024-1234",
+			Version:    "v1.0.0",
+			Affected:   true,
+		}},
+		Advisories: map[string]vulnerability.Advisory{
+			"CVE-2024-1234": {
+				ID:       "CVE-2024-1234",
+				Severity: vulnerability.NewSeverity("CRITICAL", "GHSA"),
+			},
 		},
 	})
 
@@ -105,24 +113,30 @@ func TestTriageCommandIgnoreUnfixed(t *testing.T) {
 	writeGoModule(t, tmpDir)
 	initGitRepo(t, tmpDir)
 
-	scanner := newMockTriageScanner(t, []osv.Vulnerability{
-		{
-			ID:            "GHSA-unfixed",
-			Package:       "github.com/acme/lib",
-			Version:       "v1.0.0",
-			Severity:      "HIGH",
-			SeverityType:  "GHSA",
-			Affected:      true,
-			FixedVersions: nil, // No fix available
+	scanner := newMockTriageScanner(t, triageMockData{
+		Findings: []vulnerability.Finding{
+			{
+				AdvisoryID: "GHSA-unfixed",
+				Version:    "v1.0.0",
+				Affected:   true,
+			},
+			{
+				AdvisoryID: "GHSA-fixed",
+				Version:    "v1.0.0",
+				Affected:   true,
+			},
 		},
-		{
-			ID:            "GHSA-fixed",
-			Package:       "github.com/acme/lib",
-			Version:       "v1.0.0",
-			Severity:      "MEDIUM",
-			SeverityType:  "GHSA",
-			Affected:      true,
-			FixedVersions: []string{"v1.1.0"},
+		Advisories: map[string]vulnerability.Advisory{
+			"GHSA-unfixed": {
+				ID:            "GHSA-unfixed",
+				Severity:      vulnerability.NewSeverity("HIGH", "GHSA"),
+				FixedVersions: nil, // No fix available
+			},
+			"GHSA-fixed": {
+				ID:            "GHSA-fixed",
+				Severity:      vulnerability.NewSeverity("MEDIUM", "GHSA"),
+				FixedVersions: []string{"v1.1.0"},
+			},
 		},
 	})
 
@@ -180,7 +194,7 @@ func TestTriageCommandFromReport(t *testing.T) {
 	}
 
 	// Create scanner (won't be used when reading from report)
-	scanner := newMockTriageScanner(t, nil)
+	scanner := newMockTriageScanner(t, triageMockData{})
 
 	cmd := newTriageTestCommand(t)
 	mustSetFlag(t, cmd, "report", reportPath)
@@ -209,7 +223,7 @@ func TestTriageCommandNoVulnerabilities(t *testing.T) {
 	writeGoModule(t, tmpDir)
 	initGitRepo(t, tmpDir)
 
-	scanner := newMockTriageScanner(t, nil) // No vulnerabilities
+	scanner := newMockTriageScanner(t, triageMockData{}) // No vulnerabilities
 
 	cmd := newTriageTestCommand(t)
 	mustSetFlag(t, cmd, "format", "json")
@@ -237,7 +251,7 @@ func TestTriageCommandInvalidFormat(t *testing.T) {
 	writeGoModule(t, tmpDir)
 	initGitRepo(t, tmpDir)
 
-	scanner := newMockTriageScanner(t, nil)
+	scanner := newMockTriageScanner(t, triageMockData{})
 
 	cmd := newTriageTestCommand(t)
 	mustSetFlag(t, cmd, "format", "xml")
@@ -287,8 +301,14 @@ func newTriageTestCommand(t *testing.T) *cobra.Command {
 	return cmd
 }
 
-// newMockTriageScanner creates a scanner that returns mock vulnerabilities.
-func newMockTriageScanner(t *testing.T, vulns []osv.Vulnerability) *Scanner {
+// triageMockData holds mock findings and advisories for test scanners.
+type triageMockData struct {
+	Findings   []vulnerability.Finding
+	Advisories map[string]vulnerability.Advisory
+}
+
+// newMockTriageScanner creates a scanner that returns mock vulnerability data.
+func newMockTriageScanner(t *testing.T, mock triageMockData) *Scanner {
 	t.Helper()
 	return &Scanner{
 		service: scan.NewServiceWithConfig(&scan.ServiceConfig{
@@ -302,8 +322,8 @@ func newMockTriageScanner(t *testing.T, vulns []osv.Vulnerability) *Scanner {
 					},
 				}, nil
 			},
-			QueryVulnerabilities: func(ctx context.Context, client osv.Client, inputs []osv.PkgInput) ([]osv.Vulnerability, error) {
-				return vulns, nil
+			QueryVulnerabilities: func(ctx context.Context, client osv.Client, inputs []osv.PkgInput) ([]vulnerability.Finding, map[string]vulnerability.Advisory, error) {
+				return mock.Findings, mock.Advisories, nil
 			},
 		}),
 	}

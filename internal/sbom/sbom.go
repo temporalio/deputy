@@ -77,6 +77,23 @@ type Options struct {
 	EnrichConcurrency int
 }
 
+// Validate checks that Options are valid.
+// Returns an error if LicenseSource is set but not a recognized value.
+func (o Options) Validate() error {
+	if o.EnrichLicenses && o.LicenseSource != "" {
+		switch strings.ToLower(o.LicenseSource) {
+		case "depsdev", "deps", "dd", "scan", "both":
+			// Valid
+		default:
+			return fmt.Errorf("invalid license source %q: must be one of depsdev, scan, or both", o.LicenseSource)
+		}
+	}
+	if o.EnrichConcurrency < 0 {
+		return fmt.Errorf("enrichment concurrency must be non-negative, got %d", o.EnrichConcurrency)
+	}
+	return nil
+}
+
 // Result captures the SBOM document alongside contextual metadata that callers
 // can surface to users (e.g., --show-context banner in the CLI).
 type Result struct {
@@ -1313,4 +1330,19 @@ func buildContainerPURL(ref *dockerfile.ImageRef) string {
 	}
 
 	return sb.String()
+}
+
+// DefaultGenerator returns a function that generates SBOMs using the default logic.
+// This adapter allows the sbom package to satisfy the service.SBOMGenerator interface.
+func DefaultGenerator() func(ctx context.Context, target string, ref string, ecosystems []string) (*sbom.Document, error) {
+	return func(ctx context.Context, target string, ref string, ecosystems []string) (*sbom.Document, error) {
+		result, err := Generate(ctx, target, Options{
+			Ref:        ref,
+			Ecosystems: ecosystems,
+		})
+		if err != nil {
+			return nil, err
+		}
+		return result.Document, nil
+	}
 }

@@ -23,7 +23,7 @@ func Test_ProcessOSVVulnerability_basic_fields(t *testing.T) {
 		References:       []osvschema.Reference{{URL: "https://example.com"}},
 		Affected:         []osvschema.Affected{{Ranges: []osvschema.Range{{Events: []osvschema.Event{{Fixed: "v1.2.3"}}}}}},
 	}
-	out := ProcessOSVVulnerability(vuln, PkgInput{Name: "github.com/example/pkg", Version: "v1.0.0", Ecosystem: "Go", IsDirect: true})
+	out := ProcessOSVVulnerability(vuln, PkgInput{QueryKey: QueryKey{Name: "github.com/example/pkg", Version: "v1.0.0", Ecosystem: "Go"}, PackageContext: PackageContext{IsDirect: true}})
 	if out.ID != "GHSA-xxxx" {
 		t.Fatalf("unexpected ID: %v", out.ID)
 	}
@@ -46,7 +46,7 @@ func Test_ProcessOSVVulnerability_basic_fields(t *testing.T) {
 
 func Test_ProcessOSVVulnerability_no_aliases_severity(t *testing.T) {
 	vuln := osvschema.Vulnerability{ID: "V-1"}
-	out := ProcessOSVVulnerability(vuln, PkgInput{Name: "pkg"})
+	out := ProcessOSVVulnerability(vuln, PkgInput{QueryKey: QueryKey{Name: "pkg"}})
 	if out.CVE != "" {
 		t.Fatalf("unexpected CVE: %q", out.CVE)
 	}
@@ -166,16 +166,20 @@ func Test_ProcessOSVVulnerability_LayerDetails(t *testing.T) {
 		Summary: "Test vulnerability with layer details",
 	}
 	input := PkgInput{
-		Name:      "openssl",
-		Version:   "1.1.1k-1ubuntu1",
-		Ecosystem: "Debian:11",
-		IsDirect:  false,
-		LayerDetails: &dependency.LayerDetails{
-			Index:       2,
-			DiffID:      "sha256:abc123",
-			ChainID:     "sha256:def456",
-			Command:     "RUN apt-get install -y openssl",
-			InBaseImage: true,
+		QueryKey: QueryKey{
+			Name:      "openssl",
+			Version:   "1.1.1k-1ubuntu1",
+			Ecosystem: "Debian:11",
+		},
+		PackageContext: PackageContext{
+			IsDirect: false,
+			LayerDetails: &dependency.LayerDetails{
+				Index:       2,
+				DiffID:      "sha256:abc123",
+				ChainID:     "sha256:def456",
+				Command:     "RUN apt-get install -y openssl",
+				InBaseImage: true,
+			},
 		},
 	}
 
@@ -207,10 +211,14 @@ func Test_ProcessOSVVulnerability_NilLayerDetails(t *testing.T) {
 		Summary: "Test vulnerability without layer details",
 	}
 	input := PkgInput{
-		Name:         "lodash",
-		Version:      "4.17.20",
-		Ecosystem:    "npm",
-		LayerDetails: nil, // Non-container scan
+		QueryKey: QueryKey{
+			Name:      "lodash",
+			Version:   "4.17.20",
+			Ecosystem: "npm",
+		},
+		PackageContext: PackageContext{
+			LayerDetails: nil, // Non-container scan
+		},
 	}
 
 	out := ProcessOSVVulnerability(vuln, input)
@@ -268,7 +276,7 @@ func Test_ProcessOSVVulnerabilityDomain_ExtractsCWEs(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			advisory, _ := ProcessOSVVulnerabilityDomain(tt.vuln, PkgInput{Name: "test-pkg"})
+			advisory, _ := ProcessOSVVulnerabilityDomain(tt.vuln, PkgInput{QueryKey: QueryKey{Name: "test-pkg"}})
 
 			if tt.wantCWEs == nil {
 				if len(advisory.CWEs) != 0 {

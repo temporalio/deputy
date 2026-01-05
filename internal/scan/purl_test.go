@@ -6,6 +6,7 @@ import (
 
 	"github.com/picatz/deputy/internal/analysis/osv"
 	"github.com/picatz/deputy/internal/targets"
+	"github.com/picatz/deputy/internal/vulnerability"
 )
 
 func TestScanPURL(t *testing.T) {
@@ -13,9 +14,9 @@ func TestScanPURL(t *testing.T) {
 
 	var captured []osv.PkgInput
 	svc := NewServiceWithConfig(&ServiceConfig{
-		QueryVulnerabilities: func(ctx context.Context, client osv.Client, inputs []osv.PkgInput) ([]osv.Vulnerability, error) {
+		QueryVulnerabilities: func(ctx context.Context, client osv.Client, inputs []osv.PkgInput) ([]vulnerability.Finding, map[string]vulnerability.Advisory, error) {
 			captured = append([]osv.PkgInput(nil), inputs...)
-			return nil, nil
+			return nil, nil, nil
 		},
 	})
 

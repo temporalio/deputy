@@ -33,10 +33,9 @@ type Client interface {
 	GetVulnByID(ctx context.Context, id string) (*osvschema.Vulnerability, error)
 }
 
-// PkgInput represents a single package@version query along with whether the
-// dependency is direct (appears explicitly in go.mod). Directness influences
-// downstream prioritization but not query mechanics.
-type PkgInput struct {
+// QueryKey identifies a package for OSV queries.
+// This is the cacheable, query-focused subset of package identity.
+type QueryKey struct {
 	// Name is the package/module name (e.g., "github.com/foo/bar", "lodash").
 	Name string
 	// Version is the installed version string.
@@ -45,6 +44,11 @@ type PkgInput struct {
 	Ecosystem string
 	// PURL is the Package URL providing a canonical identifier.
 	PURL string
+}
+
+// PackageContext contains scan-time context about where a package was found.
+// This information is not needed for OSV queries but is preserved for findings.
+type PackageContext struct {
 	// IsDirect indicates if this is a direct dependency.
 	IsDirect bool
 	// Locations lists file paths where the dependency was found.
@@ -54,6 +58,20 @@ type PkgInput struct {
 	// LayerDetails contains information about the container image layer where
 	// the package was found. Nil for non-container-image scans.
 	LayerDetails *dependency.LayerDetails
+}
+
+// PkgInput represents a single package@version query along with scan-time context.
+// It combines QueryKey (for OSV queries) with PackageContext (for findings).
+//
+// For new code, prefer using QueryKey and PackageContext separately when possible.
+type PkgInput struct {
+	QueryKey
+	PackageContext
+}
+
+// NewPkgInput creates a PkgInput from a QueryKey and PackageContext.
+func NewPkgInput(key QueryKey, ctx PackageContext) PkgInput {
+	return PkgInput{QueryKey: key, PackageContext: ctx}
 }
 
 // getCachedVuln retrieves a vulnerability by ID using the provided client,
@@ -81,12 +99,86 @@ const osvCacheTTL = 24 * time.Hour
 // the OSV API with too many parallel requests.
 const osvConcurrencyLimit = 10
 
-// QueryOSVBatch performs a batched OSV vulnerability lookup for the provided
-// packages. For each minimal vulnerability match it expands full vulnerability
-// details via GetVulnByID to populate rich fields (aliases, severity, ranges).
-// The function is resilient: individual GetVulnByID failures are skipped so a
-// single retrieval error does not abort the entire batch.
-func QueryOSVBatch(ctx context.Context, client Client, pkgs []PkgInput) ([]Vulnerability, error) {
+// Query performs a batched OSV vulnerability lookup and returns domain types.
+// This is the primary API for scan operations that need findings and advisories.
+func Query(ctx context.Context, client Client, pkgs []PkgInput) ([]vulnerability.Finding, map[string]vulnerability.Advisory, error) {
+	vulns, err := QueryRaw(ctx, client, pkgs)
+	if err != nil {
+		return nil, nil, err
+	}
+	return splitVulnerabilities(vulns)
+}
+
+// QueryRaw performs a batched OSV vulnerability lookup and returns flat Vulnerability records.
+// Use this when you need the raw OSV data format (e.g., for caching or policy evaluation maps).
+// For scan operations that need domain types, use Query instead.
+func QueryRaw(ctx context.Context, client Client, pkgs []PkgInput) ([]Vulnerability, error) {
+	return queryBatch(ctx, client, pkgs)
+}
+
+// splitVulnerabilities converts flat Vulnerability records to domain types.
+func splitVulnerabilities(vulns []Vulnerability) ([]vulnerability.Finding, map[string]vulnerability.Advisory, error) {
+	if len(vulns) == 0 {
+		return nil, map[string]vulnerability.Advisory{}, nil
+	}
+	advisories := make(map[string]vulnerability.Advisory, len(vulns))
+	findings := make([]vulnerability.Finding, 0, len(vulns))
+	for _, v := range vulns {
+		advisory, finding := splitVulnerability(v)
+		if advisory.ID != "" {
+			if existing, ok := advisories[advisory.ID]; ok {
+				advisories[advisory.ID] = vulnerability.MergeAdvisory(existing, advisory)
+			} else {
+				advisories[advisory.ID] = advisory
+			}
+		}
+		findings = append(findings, finding)
+	}
+	return findings, advisories, nil
+}
+
+// splitVulnerability converts a flat Vulnerability to domain types.
+func splitVulnerability(v Vulnerability) (vulnerability.Advisory, vulnerability.Finding) {
+	advisory := vulnerability.Advisory{
+		ID:               v.ID,
+		Aliases:          slices.Clone(v.Aliases),
+		Summary:          v.Summary,
+		Details:          v.Details,
+		CVE:              v.CVE,
+		Severity:         vulnerability.NewSeverity(v.Severity, v.SeverityType),
+		References:       slices.Clone(v.References),
+		FixedVersions:    slices.Clone(v.FixedVersions),
+		DatabaseSpecific: maps.Clone(v.DatabaseSpecific),
+	}
+	if t := vulnerability.ParseTimeRFC3339(v.Published); !t.IsZero() {
+		advisory.Published = t
+	}
+	if t := vulnerability.ParseTimeRFC3339(v.Modified); !t.IsZero() {
+		advisory.Modified = t
+	}
+
+	finding := vulnerability.Finding{
+		AdvisoryID: v.ID,
+		Dependency: dependency.ID{
+			Name:      v.Package,
+			Ecosystem: v.Ecosystem,
+			PURL:      v.PURL,
+		},
+		Version:         v.Version,
+		Direct:          v.IsDirect,
+		Locations:       slices.Clone(v.Locations),
+		ManifestRefs:    dependency.CloneManifestRefs(v.ManifestRefs),
+		AffectedImports: vulnerability.CloneAffectedImports(v.AffectedImports),
+		Affected:        v.Affected,
+		LayerDetails:    dependency.CloneLayerDetails(v.LayerDetails),
+	}
+	return advisory, finding
+}
+
+// queryBatch performs a batched OSV vulnerability lookup for the provided packages,
+// returning flat Vulnerability records. For each minimal vulnerability match it
+// expands full vulnerability details via GetVulnByID to populate rich fields.
+func queryBatch(ctx context.Context, client Client, pkgs []PkgInput) ([]Vulnerability, error) {
 	if len(pkgs) == 0 {
 		return nil, nil
 	}

@@ -1,11 +1,11 @@
-package scan
+package inputs
 
 import (
 	"errors"
 	"testing"
 )
 
-// mockResolver implements ManifestResolver for testing.
+// mockResolver implements Resolver for testing.
 type mockResolver struct {
 	files map[string][]byte
 	err   error
@@ -22,12 +22,12 @@ func (m *mockResolver) ReadFile(path string) ([]byte, error) {
 	return content, nil
 }
 
-func TestNewManifestCache(t *testing.T) {
+func TestNewCache(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
 		name     string
-		resolver ManifestResolver
+		resolver Resolver
 		wantNil  bool
 	}{
 		{
@@ -44,17 +44,17 @@ func TestNewManifestCache(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			cache := newManifestCache(tt.resolver, func(b []byte) (string, error) {
+			c := newCache(tt.resolver, func(b []byte) (string, error) {
 				return string(b), nil
 			})
-			if (cache == nil) != tt.wantNil {
-				t.Errorf("newManifestCache() nil = %v, want nil = %v", cache == nil, tt.wantNil)
+			if (c == nil) != tt.wantNil {
+				t.Errorf("newCache() nil = %v, want nil = %v", c == nil, tt.wantNil)
 			}
 		})
 	}
 }
 
-func TestManifestCache_Get(t *testing.T) {
+func TestCache_Get(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
@@ -98,14 +98,14 @@ func TestManifestCache_Get(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			resolver := &mockResolver{files: tt.files, err: tt.resolveErr}
-			cache := newManifestCache(resolver, func(b []byte) (string, error) {
+			c := newCache(resolver, func(b []byte) (string, error) {
 				if tt.parseErr != nil {
 					return "", tt.parseErr
 				}
 				return string(b), nil
 			})
 
-			data, err := cache.get(tt.path)
+			data, err := c.get(tt.path)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("get() error = %v, wantErr %v", err, tt.wantErr)
 				return
@@ -117,20 +117,20 @@ func TestManifestCache_Get(t *testing.T) {
 	}
 }
 
-func TestManifestCache_Caching(t *testing.T) {
+func TestCache_Caching(t *testing.T) {
 	t.Parallel()
 
 	callCount := 0
 	resolver := &mockResolver{
 		files: map[string][]byte{"test.json": []byte(`data`)},
 	}
-	cache := newManifestCache(resolver, func(b []byte) (string, error) {
+	c := newCache(resolver, func(b []byte) (string, error) {
 		callCount++
 		return string(b), nil
 	})
 
 	// First call should parse
-	data1, err := cache.get("test.json")
+	data1, err := c.get("test.json")
 	if err != nil {
 		t.Fatalf("first get() error = %v", err)
 	}
@@ -139,7 +139,7 @@ func TestManifestCache_Caching(t *testing.T) {
 	}
 
 	// Second call should use cache
-	data2, err := cache.get("test.json")
+	data2, err := c.get("test.json")
 	if err != nil {
 		t.Fatalf("second get() error = %v", err)
 	}
@@ -152,20 +152,20 @@ func TestManifestCache_Caching(t *testing.T) {
 	}
 }
 
-func TestManifestCache_ErrorCaching(t *testing.T) {
+func TestCache_ErrorCaching(t *testing.T) {
 	t.Parallel()
 
 	callCount := 0
 	resolver := &mockResolver{
 		files: map[string][]byte{"test.json": []byte(`data`)},
 	}
-	cache := newManifestCache(resolver, func(b []byte) (string, error) {
+	c := newCache(resolver, func(b []byte) (string, error) {
 		callCount++
 		return "", errors.New("parse error")
 	})
 
 	// First call should fail
-	_, err1 := cache.get("test.json")
+	_, err1 := c.get("test.json")
 	if err1 == nil {
 		t.Fatal("expected error on first call")
 	}
@@ -174,7 +174,7 @@ func TestManifestCache_ErrorCaching(t *testing.T) {
 	}
 
 	// Second call should return cached error
-	_, err2 := cache.get("test.json")
+	_, err2 := c.get("test.json")
 	if err2 == nil {
 		t.Fatal("expected cached error on second call")
 	}
@@ -183,11 +183,11 @@ func TestManifestCache_ErrorCaching(t *testing.T) {
 	}
 }
 
-func TestManifestCache_NilCache(t *testing.T) {
+func TestCache_NilCache(t *testing.T) {
 	t.Parallel()
 
-	var cache *manifestCache[string]
-	_, err := cache.get("test.json")
+	var c *cache[string]
+	_, err := c.get("test.json")
 	if err == nil {
 		t.Error("expected error for nil cache")
 	}

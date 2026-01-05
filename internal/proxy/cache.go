@@ -377,11 +377,13 @@ func cachedOSVLookupWithCache(ctx context.Context, client osv.Client, c OSVCache
 	RecordOSVCacheMiss(ctx, span, key)
 	slog.Debug("osv cache miss", "package", name, "version", version, "ecosystem", ecosystem)
 	inputs := []osv.PkgInput{{
-		Name:      name,
-		Version:   version,
-		Ecosystem: ecosystem,
+		QueryKey: osv.QueryKey{
+			Name:      name,
+			Version:   version,
+			Ecosystem: ecosystem,
+		},
 	}}
-	vulns, err := osv.QueryOSVBatch(ctx, client, inputs)
+	vulns, err := osv.QueryRaw(ctx, client, inputs)
 	if err != nil {
 		slog.Debug("osv query failed", "package", name, "version", version, "ecosystem", ecosystem, "error", err)
 		return nil, err
@@ -439,11 +441,13 @@ func vulnerabilitiesToMaps(ctx context.Context, lookups handlerLookups, ecosyste
 		vulns, err = lookups.vulnLookup(ctx, name, version)
 	case lookups.osvClient != nil:
 		inputs := []osv.PkgInput{{
-			Name:      name,
-			Version:   version,
-			Ecosystem: ecosystem,
+			QueryKey: osv.QueryKey{
+				Name:      name,
+				Version:   version,
+				Ecosystem: ecosystem,
+			},
 		}}
-		vulns, err = osv.QueryOSVBatch(ctx, lookups.osvClient, inputs)
+		vulns, err = osv.QueryRaw(ctx, lookups.osvClient, inputs)
 	default:
 		return nil
 	}

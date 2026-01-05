@@ -72,10 +72,14 @@ func TestToListItems_GitHubActionsDirectness_UsesPkgDirectKey(t *testing.T) {
 
 	inputs := []osv.PkgInput{
 		{
-			Name:      "actions/download-artifact",
-			Version:   "v4",
-			Ecosystem: "GitHub Actions",
-			IsDirect:  true,
+			QueryKey: osv.QueryKey{
+				Name:      "actions/download-artifact",
+				Version:   "v4",
+				Ecosystem: "GitHub Actions",
+			},
+			PackageContext: osv.PackageContext{
+				IsDirect: true,
+			},
 		},
 	}
 	pkgDirect := scan.BuildPackageDirectMap(inputs)
