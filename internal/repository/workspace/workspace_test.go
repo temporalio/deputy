@@ -99,14 +99,14 @@ func TestMemoryWorkspace_ReadWrite(t *testing.T) {
 	}
 }
 
-func TestDirWorkspace_ScalibrRoots(t *testing.T) {
+func TestDirWorkspace_ScanRoots(t *testing.T) {
 	dir := t.TempDir()
 	ws, err := NewDir(dir)
 	if err != nil {
 		t.Fatalf("NewDir: %v", err)
 	}
 	defer ws.Close()
-	roots := ws.ScalibrRoots()
+	roots := ws.ScanRoots()
 	if len(roots) != 1 {
 		t.Fatalf("unexpected roots len: %d", len(roots))
 	}
@@ -118,10 +118,10 @@ func TestDirWorkspace_ScalibrRoots(t *testing.T) {
 	}
 }
 
-func TestMemoryWorkspace_ScalibrRootsVirtual(t *testing.T) {
+func TestMemoryWorkspace_ScanRootsVirtual(t *testing.T) {
 	ws := NewMemory()
 	defer ws.Close()
-	roots := ws.ScalibrRoots()
+	roots := ws.ScanRoots()
 	if len(roots) != 1 {
 		t.Fatalf("unexpected roots len: %d", len(roots))
 	}

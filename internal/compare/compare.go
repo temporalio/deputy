@@ -439,7 +439,7 @@ func GetDirectDependenciesFromGoMod(data []byte) map[string]bool {
 // GetDirectDependencies reads go.mod from the provided workspace and returns
 // direct module roots. If go.mod cannot be read (missing or workspace nil)
 // the returned set only contains "stdlib".
-func GetDirectDependencies(ws workspace.FileReader) map[string]bool {
+func GetDirectDependencies(ws workspace.ReadableFS) map[string]bool {
 	if ws == nil {
 		return map[string]bool{"stdlib": true}
 	}
@@ -527,7 +527,7 @@ func (s pkgSummary) ecosystemName() string {
 //
 // If deps is nil, direct dependencies are inferred from go.mod in the supplied
 // workspace.
-func ComparePackages(oldPkgs, newPkgs []*extractor.Package, goDirect map[string]bool, pkgDirect map[string]bool, ws workspace.FileReader) []Change {
+func ComparePackages(oldPkgs, newPkgs []*extractor.Package, goDirect map[string]bool, pkgDirect map[string]bool, ws workspace.ReadableFS) []Change {
 	if len(oldPkgs) == 0 && len(newPkgs) == 0 {
 		return nil
 	}

@@ -569,7 +569,7 @@ func writeListTSV(w io.Writer, items []ListItem, header bool, showSources bool) 
 
 // normalizeGolangPURLLikeSBOM mirrors the SBOM normalization for Golang PURLs.
 // It expands relative names (., ./sub) to the module path read from go.mod.
-func normalizeGolangPURLLikeSBOM(purlStr string, ws workspace.FileReader) string {
+func normalizeGolangPURLLikeSBOM(purlStr string, ws workspace.ReadableFS) string {
 	if purlStr == "" {
 		return purlStr
 	}
@@ -608,7 +608,7 @@ func normalizeGolangPURLLikeSBOM(purlStr string, ws workspace.FileReader) string
 }
 
 // readModulePathWorkspace reads the module path from the go.mod file in the workspace.
-func readModulePathWorkspace(ws workspace.FileReader) string {
+func readModulePathWorkspace(ws workspace.ReadableFS) string {
 	if ws == nil {
 		return ""
 	}

@@ -129,11 +129,3 @@ func TestScannerAdapterImplementation(t *testing.T) {
 	// Verify scannerAdapter implements Scanner
 	var _ Scanner = (*scannerAdapter)(nil)
 }
-
-func TestBackwardCompatibility(t *testing.T) {
-	// Verify deprecated interfaces still work
-	var testFS FS
-
-	// FileReader should still be assignable
-	var _ FileReader = testFS
-}

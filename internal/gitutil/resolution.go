@@ -1,7 +1,6 @@
 package gitutil
 
 import (
-	"fmt"
 	"strconv"
 	"strings"
 	"time"
@@ -160,12 +159,4 @@ func ResolveRevisionEnhanced(repo *git.Repository, ref string) (*plumbing.Hash, 
 	}
 	// Fallback to base
 	return bh, nil
-}
-
-// DebugString returns a human-friendly description of a resolution attempt.
-func DebugString(ref string, err error) string {
-	if err == nil {
-		return fmt.Sprintf("Resolved %q", ref)
-	}
-	return fmt.Sprintf("Resolve %q failed: %v", ref, err)
 }

@@ -22,12 +22,6 @@ var (
 	ErrClosed = errors.New("workspace: closed")
 )
 
-// FileReader captures the minimal contract needed to read files from a workspace.
-// Deprecated: Use ReadableFS instead.
-type FileReader interface {
-	ReadFile(path string) ([]byte, error)
-}
-
 // baseWorkspace holds shared state (root path, scalibr roots, cleanup) that
 // concrete workspace implementations embed to get consistent lifecycle
 // handling.
@@ -58,17 +52,11 @@ func (b *baseWorkspace) ensureOpen() error {
 	return nil
 }
 
-// ScalibrRoots returns the scan roots Deputy advertises to osv-scalibr.
-// Deprecated: Use Scanner interface and ToScanner adapter instead.
-func (b *baseWorkspace) ScalibrRoots() []*scalibrfs.ScanRoot {
+// ScanRoots implements the Scanner interface.
+func (b *baseWorkspace) ScanRoots() []*scalibrfs.ScanRoot {
 	b.mu.RLock()
 	defer b.mu.RUnlock()
 	return b.scanRoots
-}
-
-// ScanRoots implements the Scanner interface.
-func (b *baseWorkspace) ScanRoots() []*scalibrfs.ScanRoot {
-	return b.ScalibrRoots()
 }
 
 // RootPath returns the underlying on-disk root or "" for virtual workspaces.

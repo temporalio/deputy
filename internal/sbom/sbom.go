@@ -954,7 +954,7 @@ func parseGHARollingRef(s string) (major int, minor int, ok bool) {
 }
 
 // PURL helpers
-func normalizeGolangPURLString(purlStr string, ws workspace.FileReader) string {
+func normalizeGolangPURLString(purlStr string, ws workspace.ReadableFS) string {
 	if purlStr == "" {
 		return purlStr
 	}
@@ -989,7 +989,7 @@ func normalizeGolangPURLString(purlStr string, ws workspace.FileReader) string {
 	return pp.String()
 }
 
-func readModulePath(ws workspace.FileReader) string {
+func readModulePath(ws workspace.ReadableFS) string {
 	if ws == nil {
 		return ""
 	}
