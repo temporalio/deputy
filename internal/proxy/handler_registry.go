@@ -179,7 +179,7 @@ func (f *HandlerFactory) CreateHandlerWithOptions(eco ecosystem.Ecosystem, upstr
 		osvEcosystem: config.Ecosystem.OSVName(),
 		upstream:     upstream,
 		policies:     policies,
-		wantLicenses: config.Ecosystem.WantsLicenseLookup(),
+		wantLicenses: ecosystem.HasLicenseSupport(config.Ecosystem),
 	}
 
 	if opts != nil {

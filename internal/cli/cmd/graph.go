@@ -19,7 +19,6 @@ import (
 	"github.com/picatz/deputy/internal/compare"
 	"github.com/picatz/deputy/internal/dependency/graph"
 	"github.com/picatz/deputy/internal/gitutil"
-	gitx "github.com/picatz/deputy/internal/gitutil"
 	inv "github.com/picatz/deputy/internal/inventory"
 	"github.com/picatz/deputy/internal/otel"
 	"github.com/picatz/deputy/internal/repository"
@@ -623,25 +622,6 @@ func renderChildren(w io.Writer, children []*pathTreeNode, prefix string) {
 	}
 }
 
-// renderDependencyPath renders a single dependency path as a visual chain.
-// Kept for backward compatibility but renderGroupedPaths is preferred.
-func renderDependencyPath(w io.Writer, path graph.Path) {
-	// Use a clean vertical layout similar to go mod why
-	// Each node on its own line with proper indentation showing depth
-	for i, node := range path {
-		label := formatNodeLabel(node)
-
-		if i == 0 {
-			// First node (root/direct dependency)
-			fmt.Fprintf(w, "%s\n", label)
-		} else {
-			// Build indent based on depth
-			indent := strings.Repeat("    ", i-1)
-			arrow := graphStyleArrow.Render("└── ")
-			fmt.Fprintf(w, "%s%s%s\n", indent, arrow, label)
-		}
-	}
-}
 
 // Graph output styles - defined here for consistency across graph commands.
 // These provide better contrast than the default ui.Style* for dependency paths.
@@ -766,6 +746,7 @@ func isGoStdlibPackage(query string) bool {
 
 // containsPathSegment checks if query appears as a path segment in name.
 // For example, "yaml" is a segment in "gopkg.in/yaml.v3" (between / and .).
+// Also matches hyphenated names like "jsonschema" in "jsonschema-go".
 func containsPathSegment(name, query string) bool {
 	// Look for /query. or /query/ patterns
 	segment := "/" + query + "."
@@ -776,7 +757,9 @@ func containsPathSegment(name, query string) bool {
 	if strings.Contains(name, segment) {
 		return true
 	}
-	return false
+	// Match hyphenated package names: jsonschema matches jsonschema-go
+	segment = "/" + query + "-"
+	return strings.Contains(name, segment)
 }
 
 // matchRank represents how well a query matches a package.
@@ -792,6 +775,11 @@ const (
 
 // findMatchingNodes finds nodes matching the query with ranked matching.
 // Returns nodes sorted by match quality (best matches first).
+// Matching priority (highest to lowest):
+//  1. Exact match: query == name
+//  2. Name suffix: name ends with -query (go-yaml matches "yaml")
+//  3. Path match: query is a path segment (/query/ or /query. or /query-)
+//  4. Substring: query appears anywhere in name (fallback)
 func findMatchingNodes(g *graph.Graph, query string) []*graph.Node {
 	queryLower := strings.ToLower(query)
 
@@ -816,12 +804,12 @@ func findMatchingNodes(g *graph.Graph, query string) []*graph.Node {
 			// Path suffix: golang.org/x/net matches "net"
 			rank = matchPathMatch
 		} else if containsPathSegment(nameLower, queryLower) {
-			// Path segment: gopkg.in/yaml.v3 matches "yaml", otelhttp matches "net"
+			// Path segment: gopkg.in/yaml.v3 matches "yaml", jsonschema matches jsonschema-go
 			rank = matchPathMatch
+		} else if strings.Contains(nameLower, queryLower) {
+			// Substring fallback: allows looser matching when nothing else works
+			rank = matchSubstring
 		}
-
-		// Substring matching is too loose - skip it for precision
-		// Users can use more specific queries
 
 		if rank > matchNone {
 			matches = append(matches, rankedMatch{node: node, rank: rank})
@@ -1213,7 +1201,7 @@ func buildGraph(ctx context.Context, repoPath, ref string, ecosystems []string) 
 	if strings.EqualFold(effRef, "HEAD") {
 		pkgs, err = inv.ScanPackagesWorking(ctx, ws, scanOpts)
 	} else {
-		targetHash, err = gitx.ResolveRevisionEnhanced(repo, effRef)
+		targetHash, err = gitutil.ResolveRevisionEnhanced(repo, effRef)
 		if err != nil {
 			return nil, err
 		}

@@ -48,9 +48,6 @@ var (
 // It respects the DEPUTY_CACHE_DIR environment variable, falling back to
 // ~/.deputy/cache if not set. The result is cached for subsequent calls.
 func BaseDir() string {
-	if cacheDirPath != "" {
-		return cacheDirPath
-	}
 	cacheDirOnce.Do(func() {
 		if d := os.Getenv("DEPUTY_CACHE_DIR"); d != "" {
 			cacheDirPath = d

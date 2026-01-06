@@ -2018,12 +2018,6 @@ func renderFixablePackages(w io.Writer, changes []compare.VulnerabilityChange) {
 	}
 }
 
-// formatLayerContext creates a human-readable, actionable description of where
-// a package was introduced and how to fix it.
-func formatLayerContext(layerIdx int, cmd string, inBaseImage bool) string {
-	return formatLayerContextWithPkg(layerIdx, cmd, inBaseImage, "")
-}
-
 // formatLayerContextWithPkg creates a human-readable, actionable description
 // with package-specific guidance when available.
 func formatLayerContextWithPkg(layerIdx int, cmd string, inBaseImage bool, pkgName string) string {
@@ -2086,11 +2080,6 @@ func getLayerHint(cmd string) string {
 		return "go build"
 	}
 	return "" // No hint - don't show anything confusing
-}
-
-// categorizePackageSource determines the package type and suggests a fix action.
-func categorizePackageSource(cmd string, inBaseImage bool) (pkgType string, action string) {
-	return categorizePackageSourceWithPkg(cmd, inBaseImage, "")
 }
 
 // categorizePackageSourceWithPkg determines the package type and suggests a fix action,
@@ -2201,48 +2190,6 @@ func extractBinaryFromCopy(cmd string) string {
 		return src
 	}
 	return ""
-}
-
-// summarizeDockerCommand extracts the most relevant part of a Dockerfile command.
-func summarizeDockerCommand(cmd string) string {
-	// Common patterns in container history
-	cmd = strings.TrimSpace(cmd)
-
-	// Remove shell wrapper noise
-	for _, prefix := range []string{
-		"/bin/sh -c ",
-		"sh -c ",
-		"#(nop) ",
-	} {
-		cmd = strings.TrimPrefix(cmd, prefix)
-	}
-
-	// Handle common Dockerfile instructions
-	cmd = strings.TrimSpace(cmd)
-
-	// If it's an apt-get/apk/yum install, highlight that
-	if strings.Contains(cmd, "apt-get install") || strings.Contains(cmd, "apt install") {
-		return "apt-get install"
-	}
-	if strings.Contains(cmd, "apk add") {
-		return "apk add"
-	}
-	if strings.Contains(cmd, "yum install") || strings.Contains(cmd, "dnf install") {
-		return "yum/dnf install"
-	}
-	if strings.Contains(cmd, "pip install") {
-		return "pip install"
-	}
-	if strings.Contains(cmd, "npm install") {
-		return "npm install"
-	}
-
-	// Truncate long commands
-	if len(cmd) > 40 {
-		cmd = cmd[:37] + "..."
-	}
-
-	return cmd
 }
 
 func pluralY(n int) string {

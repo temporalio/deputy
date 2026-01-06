@@ -205,19 +205,3 @@ func (f *scanFlags) loadIgnoreRules(workDir string) error {
 	f.ignoreRules = rules
 	return nil
 }
-
-// shouldIgnore returns true if the vulnerability should be ignored based on loaded rules.
-func (f *scanFlags) shouldIgnore(vulnID, pkgName, ecosystem string) bool {
-	if f.ignoreRules == nil {
-		return false
-	}
-	return f.ignoreRules.ShouldIgnore(vulnID, pkgName, ecosystem)
-}
-
-// ignoreCount returns the number of active ignore rules.
-func (f *scanFlags) ignoreCount() int {
-	if f.ignoreRules == nil {
-		return 0
-	}
-	return f.ignoreRules.ActiveCount()
-}

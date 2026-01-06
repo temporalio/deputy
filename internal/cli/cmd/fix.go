@@ -261,7 +261,7 @@ func runFixPlan(scanner *Scanner, cmd *cobra.Command, args []string) error {
 	}
 
 	if strings.TrimSpace(agentName) != "" {
-		agentPrompt, err := buildCodexFixPrompt(plan)
+		agentPrompt, err := buildFixPrompt(plan)
 		if err != nil {
 			return err
 		}

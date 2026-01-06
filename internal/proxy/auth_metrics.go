@@ -4,7 +4,12 @@ import (
 	"expvar"
 	"sync"
 	"sync/atomic"
+
+	"github.com/picatz/deputy/internal/auth/jwt"
 )
+
+// Verify AuthMetrics implements jwt.MetricsRecorder.
+var _ jwt.MetricsRecorder = (*AuthMetrics)(nil)
 
 // AuthMetrics tracks authentication statistics for observability.
 type AuthMetrics struct {

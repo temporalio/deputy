@@ -181,13 +181,37 @@ $ deputy fix --agent claude --agent-sandbox workspace-write
 
 ## Agent Configuration
 
+### Config File (`.deputy.yaml`)
+
+```yaml
+ai:
+  # Default provider when --agent flag is omitted
+  default_provider: claude
+
+  # Approval settings
+  approval:
+    required: false     # Require approval for all operations
+    commands: true      # Require approval for shell commands (default)
+    file_writes: false  # Require approval for file modifications
+    high_risk: true     # Always approve dangerous operations (rm -rf, sudo, etc.)
+
+  # Per-provider configuration
+  providers:
+    claude:
+      model: claude-3-5-sonnet-20241022
+      api_key: ${ANTHROPIC_API_KEY}
+      sandbox: workspace-write
+    codex:
+      sandbox: workspace-write
+```
+
 ### Environment Variables
 
 ```bash
 # Claude
 export ANTHROPIC_API_KEY=sk-...
 
-# OpenAI
+# OpenAI / Codex
 export OPENAI_API_KEY=sk-...
 
 # Custom endpoint
@@ -201,6 +225,28 @@ export DEPUTY_AGENT_ENDPOINT=https://my-llm.internal/v1
 | Claude | `--agent claude` | Anthropic API |
 | Codex | `--agent codex` | OpenAI Codex |
 | Custom | `--agent-endpoint URL` | Any compatible API |
+
+### Approval Policy
+
+Deputy enforces safety by default. Operations require approval unless explicitly disabled:
+
+| Setting | Default | Description |
+| --- | --- | --- |
+| `commands` | `true` | Shell commands need approval |
+| `file_writes` | `false` | File modifications proceed |
+| `high_risk` | `true` | Dangerous ops always need approval |
+
+High-risk operations detected automatically:
+- `rm -rf /`, `sudo`, `chmod 777`
+- Writes to `/etc/`, `~/.ssh/`, `.env`
+- `git push --force`, `git reset --hard`
+
+```console
+# Override approval with --agent-full-auto (dangerous!)
+$ deputy fix --agent claude --agent-full-auto
+
+WARNING: Full-auto mode enabled: commands and file writes will execute without approval
+```
 
 ---
 

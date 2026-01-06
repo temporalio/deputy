@@ -6,7 +6,6 @@ import (
 	"net/http"
 	"net/http/httputil"
 	"net/url"
-	"strings"
 
 	"github.com/picatz/deputy/internal/analysis/osv"
 	"github.com/picatz/deputy/internal/policy"
@@ -147,18 +146,4 @@ func (h *baseHandler) serve(w http.ResponseWriter, r *http.Request, entrypoint p
 		Version:   rawVersion,
 		Operation: info.Operation,
 	}, h.proxy)
-}
-
-// serveRequest is a higher-level helper that combines request info creation,
-// payload building, and serving into a single call. This reduces boilerplate
-// in ecosystem-specific handlers.
-func (h *baseHandler) serveRequest(w http.ResponseWriter, r *http.Request, entrypoint policy.Entrypoint, info requestInfo) {
-	payload := h.buildPayload(r.Context(), info, r.URL.Path)
-	h.serve(w, r, entrypoint, info, payload)
-}
-
-// hasVersion returns true if the version string is non-empty after trimming whitespace.
-// This is a common check across all handlers.
-func hasVersion(version string) bool {
-	return strings.TrimSpace(version) != ""
 }

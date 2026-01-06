@@ -365,7 +365,7 @@ func recommendCommand(manager, manifestPath, pkg, version string, groups []strin
 		switch {
 		case base == "gradle.lockfile" || base == "buildscript-gradle.lockfile":
 			// For lockfiles, update via gradle command then regenerate lockfile
-			return fmt.Sprintf("./gradlew dependencies --write-locks"), "update dependency version in build.gradle first", true
+			return "./gradlew dependencies --write-locks", "update dependency version in build.gradle first", true
 		case base == "build.gradle" || base == "build.gradle.kts":
 			return fmt.Sprintf("Update %s to %s in %s", pkg, version, path.Base(manifestPath)), "run ./gradlew dependencies --write-locks afterwards", false
 		default:

@@ -3,6 +3,10 @@ package cmd
 import (
 	"github.com/picatz/deputy/internal/scan"
 	"github.com/spf13/cobra"
+
+	// Import AI providers to register them via init()
+	_ "github.com/picatz/deputy/internal/ai/providers/claude"
+	_ "github.com/picatz/deputy/internal/ai/providers/codex"
 )
 
 // Dependencies bundles shared services for CLI commands.
@@ -40,4 +44,8 @@ func RegisterCommands(root *cobra.Command, deps Dependencies) {
 	// Informational commands
 	AddVersionCommand(root)
 	AddEcosystemsCommand(root)
+	AddExplainCommand(root)
+
+	// Integration commands
+	AddMCPCommand(root)
 }

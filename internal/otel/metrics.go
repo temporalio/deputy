@@ -52,6 +52,11 @@ type Metrics struct {
 	CacheSize      metric.Int64Gauge
 	CacheMaxSize   metric.Int64Gauge
 	CacheHitRate   metric.Float64Gauge
+
+	// MCP metrics
+	MCPToolCalls    metric.Int64Counter
+	MCPToolDuration metric.Float64Histogram
+	MCPToolErrors   metric.Int64Counter
 }
 
 var (
@@ -300,6 +305,32 @@ func newMetrics() (*Metrics, error) {
 	metrics.CacheHitRate, err = m.Float64Gauge(
 		"deputy.cache.hit_rate",
 		metric.WithDescription("Cache hit rate (0.0-1.0)"),
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	// MCP metrics
+	metrics.MCPToolCalls, err = m.Int64Counter(
+		"deputy.mcp.tool_calls",
+		metric.WithDescription("Number of MCP tool invocations"),
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	metrics.MCPToolDuration, err = m.Float64Histogram(
+		"deputy.mcp.tool_duration",
+		metric.WithDescription("Duration of MCP tool invocations in seconds"),
+		metric.WithUnit("s"),
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	metrics.MCPToolErrors, err = m.Int64Counter(
+		"deputy.mcp.tool_errors",
+		metric.WithDescription("Number of MCP tool errors"),
 	)
 	if err != nil {
 		return nil, err
@@ -596,4 +627,21 @@ func RecordCacheExpiration(ctx context.Context, cacheType string) {
 		return
 	}
 	m.CacheExpired.Add(ctx, 1, metric.WithAttributes(CacheTypeAttr(cacheType)))
+}
+
+// RecordMCPToolCall records an MCP tool invocation.
+func RecordMCPToolCall(ctx context.Context, toolName string, duration float64, success bool) {
+	m := getMetricsForRecording("mcp_tool_call")
+	if m == nil {
+		return
+	}
+
+	toolAttr := attribute.String("deputy.mcp.tool", toolName)
+
+	m.MCPToolCalls.Add(ctx, 1, metric.WithAttributes(toolAttr))
+	m.MCPToolDuration.Record(ctx, duration, metric.WithAttributes(toolAttr))
+
+	if !success {
+		m.MCPToolErrors.Add(ctx, 1, metric.WithAttributes(toolAttr))
+	}
 }

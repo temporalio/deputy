@@ -120,6 +120,21 @@ var (
 	AttrCacheType = attribute.Key("deputy.cache.type")
 	AttrCacheHit  = attribute.Key("deputy.cache.hit")
 	AttrCacheKey  = attribute.Key("deputy.cache.key")
+
+	// MCP attributes
+	AttrMCPTool           = attribute.Key("deputy.mcp.tool")
+	AttrMCPVulnID         = attribute.Key("deputy.mcp.vuln_id")
+	AttrMCPVulnCount      = attribute.Key("deputy.mcp.vuln_count")
+	AttrMCPPackageCount   = attribute.Key("deputy.mcp.package_count")
+	AttrMCPImage          = attribute.Key("deputy.mcp.image")
+	AttrMCPBaseRef        = attribute.Key("deputy.mcp.base_ref")
+	AttrMCPTargetRef      = attribute.Key("deputy.mcp.target_ref")
+	AttrMCPChangeCount    = attribute.Key("deputy.mcp.change_count")
+	AttrMCPTriageCount    = attribute.Key("deputy.mcp.triage_count")
+	AttrMCPGraphPackage   = attribute.Key("deputy.mcp.graph_package")
+	AttrMCPGraphFound     = attribute.Key("deputy.mcp.graph_found")
+	AttrMCPGraphDirect    = attribute.Key("deputy.mcp.graph_direct")
+	AttrMCPGraphPathCount = attribute.Key("deputy.mcp.graph_path_count")
 )
 
 // WithCommandAttrs returns span start options for command spans.

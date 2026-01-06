@@ -189,7 +189,7 @@ func runTriage(scanner *Scanner, cmd *cobra.Command, args []string) error {
 				return err
 			}
 		}
-		prompt, err := buildCodexTriagePrompt(triageReport)
+		prompt, err := buildTriagePrompt(triageReport)
 		if err != nil {
 			return err
 		}

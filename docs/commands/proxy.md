@@ -157,8 +157,16 @@ listeners:
 | `issuers` | list | Allowed token issuers (iss claim) |
 | `audiences` | list | Expected audiences (aud claim) |
 | `required_claims` | list | Claims that must be present |
-| `clock_skew` | duration | Clock drift tolerance for exp/nbf (default: 0) |
-| `allowed_algorithms` | list | Restrict signing algorithms (default: RS256, ES256, EdDSA, etc.) |
+| `clock_skew` | duration | Clock drift tolerance for exp/nbf (default: 0, max: 5m) |
+| `allowed_algorithms` | list | Restrict signing algorithms (default: RS256, ES256, EdDSA, PS256, etc.) |
+| `max_token_size` | int | Maximum JWT token size in bytes (default: 16KB) |
+
+#### Security Notes
+
+- **Asymmetric algorithms only**: Symmetric algorithms (HS256, HS384, HS512) are intentionally not supported. They require shared secrets between issuers and validators, which is insecure for distributed systems.
+- **TLS required**: Always use HTTPS in production to protect tokens in transit.
+- **Key rotation**: Use JWKS with background refresh (`jwks.refresh_interval`) for automatic key rotation support.
+- **Clock skew**: Keep `clock_skew` minimal (default: 0). Maximum allowed is 5 minutes.
 
 #### Error Responses
 
@@ -173,7 +181,15 @@ listeners:
 | 403 | `invalid_audience` | Audience not in allowed list |
 | 403 | `missing_claim` | Required claim not present |
 
-Responses include `WWW-Authenticate: Bearer realm="deputy-proxy"` and `X-Deputy-Auth-Error: <code>` headers.
+#### Response Headers
+
+Authentication failures include these headers for programmatic handling:
+
+| Header | Description |
+| --- | --- |
+| `WWW-Authenticate` | `Bearer realm="deputy-proxy"` (on 401 responses) |
+| `X-Deputy-Auth-Error` | Error code from table above |
+| `X-Deputy-Auth-Message` | Human-readable error description |
 
 ---
 

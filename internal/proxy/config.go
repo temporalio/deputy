@@ -149,16 +149,18 @@ func (l *ListenerConfig) Validate(index int) error {
 			Message: "timeout must be non-negative",
 		}
 	}
-	if l.Auth != nil {
-		if err := l.Auth.Validate(prefix); err != nil {
-			return err
-		}
+	if err := validateAuthConfig(l.Auth, prefix); err != nil {
+		return err
 	}
 	return nil
 }
 
-// Validate checks the authentication configuration for invalid values.
-func (a *AuthConfig) Validate(prefix string) error {
+// validateAuthConfig checks the authentication configuration for invalid values.
+// This is a standalone function since AuthConfig is a type alias for jwt.Config.
+func validateAuthConfig(a *AuthConfig, prefix string) error {
+	if a == nil {
+		return nil
+	}
 	prefix = prefix + ".auth"
 
 	// Validate mode

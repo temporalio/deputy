@@ -1,4 +1,4 @@
-package proxy
+package jwt
 
 import (
 	"context"
@@ -13,9 +13,9 @@ import (
 	"github.com/picatz/jose/pkg/jwk"
 )
 
+// JWKS cache timing constants.
 const (
 	defaultJWKSRefreshInterval = 1 * time.Hour
-	defaultJWKSCacheDuration   = 24 * time.Hour
 	defaultJWKSHTTPTimeout     = 10 * time.Second
 	minJWKSRefreshInterval     = 5 * time.Minute
 )
@@ -25,6 +25,7 @@ type JWKSCache struct {
 	url             string
 	oidcDiscovery   bool
 	refreshInterval time.Duration
+	metrics         MetricsRecorder
 
 	mu          sync.RWMutex
 	keySet      *jwk.Set
@@ -37,8 +38,29 @@ type JWKSCache struct {
 	closeOnce  sync.Once
 }
 
+// JWKSCacheOption configures a JWKSCache.
+type JWKSCacheOption func(*JWKSCache)
+
+// WithJWKSMetrics sets the metrics recorder for the JWKS cache.
+func WithJWKSMetrics(m MetricsRecorder) JWKSCacheOption {
+	return func(c *JWKSCache) {
+		if m != nil {
+			c.metrics = m
+		}
+	}
+}
+
+// WithJWKSHTTPClient sets a custom HTTP client for the JWKS cache.
+func WithJWKSHTTPClient(client *http.Client) JWKSCacheOption {
+	return func(c *JWKSCache) {
+		if client != nil {
+			c.httpClient = client
+		}
+	}
+}
+
 // NewJWKSCache creates a new JWKS cache with the given configuration.
-func NewJWKSCache(cfg *JWKSConfig) (*JWKSCache, error) {
+func NewJWKSCache(cfg *JWKSConfig, opts ...JWKSCacheOption) (*JWKSCache, error) {
 	if cfg == nil || cfg.URL == "" {
 		return nil, fmt.Errorf("JWKS URL is required")
 	}
@@ -55,10 +77,16 @@ func NewJWKSCache(cfg *JWKSConfig) (*JWKSCache, error) {
 		url:             cfg.URL,
 		oidcDiscovery:   cfg.OIDCDiscovery,
 		refreshInterval: refreshInterval,
+		metrics:         NoopMetrics{},
 		httpClient: &http.Client{
 			Timeout: defaultJWKSHTTPTimeout,
 		},
 		stopCh: make(chan struct{}),
+	}
+
+	// Apply options
+	for _, opt := range opts {
+		opt(cache)
 	}
 
 	// Resolve JWKS URL from OIDC discovery if needed
@@ -78,7 +106,8 @@ func NewJWKSCache(cfg *JWKSConfig) (*JWKSCache, error) {
 	}
 
 	// Start background refresh
-	cache.wg.Go(cache.refreshLoop)
+	cache.wg.Add(1)
+	go cache.refreshLoop()
 
 	return cache, nil
 }
@@ -89,17 +118,17 @@ func (c *JWKSCache) GetKey(ctx context.Context, kid string) (crypto.PublicKey, e
 	defer c.mu.RUnlock()
 
 	if c.keySet == nil {
-		authMetrics.RecordJWKSKeyLookup(false)
+		c.metrics.RecordJWKSKeyLookup(false)
 		return nil, fmt.Errorf("no JWKS loaded")
 	}
 
 	keyValue, err := c.keySet.Get(kid)
 	if err != nil {
-		authMetrics.RecordJWKSKeyLookup(false)
+		c.metrics.RecordJWKSKeyLookup(false)
 		return nil, fmt.Errorf("key %q not found in JWKS: %w", kid, err)
 	}
 
-	authMetrics.RecordJWKSKeyLookup(true)
+	c.metrics.RecordJWKSKeyLookup(true)
 	return extractPublicKey(keyValue)
 }
 
@@ -124,6 +153,20 @@ func (c *JWKSCache) Close() error {
 		c.wg.Wait()
 	})
 	return nil
+}
+
+// LastError returns the last error from a refresh attempt, if any.
+func (c *JWKSCache) LastError() error {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.lastError
+}
+
+// LastRefresh returns the time of the last successful refresh.
+func (c *JWKSCache) LastRefresh() time.Time {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.lastRefresh
 }
 
 // discoverJWKSURL fetches the JWKS URL from the OIDC discovery endpoint.
@@ -170,14 +213,14 @@ func (c *JWKSCache) discoverJWKSURL(ctx context.Context) (string, error) {
 func (c *JWKSCache) refresh(ctx context.Context) error {
 	keySet, err := jwk.FetchSet(ctx, c.url, c.httpClient)
 	if err != nil {
-		authMetrics.RecordJWKSRefresh(false)
+		c.metrics.RecordJWKSRefresh(false)
 		c.mu.Lock()
 		c.lastError = err
 		c.mu.Unlock()
 		return fmt.Errorf("fetch JWKS: %w", err)
 	}
 
-	authMetrics.RecordJWKSRefresh(true)
+	c.metrics.RecordJWKSRefresh(true)
 	c.mu.Lock()
 	c.keySet = keySet
 	c.lastRefresh = time.Now()
@@ -190,6 +233,8 @@ func (c *JWKSCache) refresh(ctx context.Context) error {
 
 // refreshLoop runs background JWKS refresh.
 func (c *JWKSCache) refreshLoop() {
+	defer c.wg.Done()
+
 	ticker := time.NewTicker(c.refreshInterval)
 	defer ticker.Stop()
 
@@ -200,7 +245,7 @@ func (c *JWKSCache) refreshLoop() {
 		case <-ticker.C:
 			ctx, cancel := context.WithTimeout(context.Background(), defaultJWKSHTTPTimeout)
 			if err := c.refresh(ctx); err != nil {
-				slog.WarnContext(ctx, "JWKS refresh failed", "url", c.url, "error", err)
+				slog.Warn("JWKS refresh failed", "url", c.url, "error", err)
 			}
 			cancel()
 		}

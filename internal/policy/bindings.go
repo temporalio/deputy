@@ -49,9 +49,6 @@ var (
 	// jwtVars are available in proxy contexts
 	jwtVars = []string{"jwt"}
 
-	// vulnerabilityListVars provide access to vulnerability collections
-	vulnerabilityListVars = []string{"vulnerabilities", "findings"}
-
 	// singleVulnerabilityVars provide access to a single vulnerability
 	singleVulnerabilityVars = []string{"vulnerability", "pkg"}
 

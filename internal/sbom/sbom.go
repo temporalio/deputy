@@ -262,10 +262,7 @@ func Generate(ctx context.Context, repoRef string, opts Options) (Result, error)
 	}
 
 	commit, origin := resolveRepoMetadata(src.Repo, effRef, repoDisplay)
-	localPath := ""
-	if src != nil {
-		localPath = src.RootPath()
-	}
+	localPath := src.RootPath()
 	result.Commit = commit
 	result.Origin = origin
 	result.Document = doc

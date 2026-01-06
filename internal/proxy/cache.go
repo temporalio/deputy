@@ -355,12 +355,6 @@ func GetCachedDigestResolution(c DigestResolutionCache, registry, repository, ta
 	return cached, true, false
 }
 
-// cachedOSVLookup queries the OSV database for vulnerabilities, using a local cache
-// to avoid redundant network requests for recently-queried packages.
-func cachedOSVLookup(ctx context.Context, client osv.Client, ecosystem, name, version string) ([]osv.Vulnerability, error) {
-	return cachedOSVLookupWithCache(ctx, client, defaultOSVCache, ecosystem, name, version)
-}
-
 // cachedOSVLookupWithCache queries the OSV database using the provided cache.
 // This allows tests to inject isolated cache instances.
 //
@@ -391,12 +385,6 @@ func cachedOSVLookupWithCache(ctx context.Context, client osv.Client, c OSVCache
 	osvCache.Set(key, vulns)
 	slog.Debug("osv cache populated", "package", name, "version", version, "ecosystem", ecosystem, "vulns", len(vulns))
 	return vulns, nil
-}
-
-// cachedLicenseLookup retrieves license information for a package, using a local cache
-// to avoid redundant lookups for recently-queried packages.
-func cachedLicenseLookup(ctx context.Context, ecosystem, name, version string) ([]string, error) {
-	return cachedLicenseLookupWithCache(ctx, defaultLicenseCache, ecosystem, name, version)
 }
 
 // cachedLicenseLookupWithCache retrieves license information using the provided cache.

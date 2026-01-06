@@ -164,9 +164,7 @@ func ImageSecuritySummaryDoc(imageInfo *image.Info) output.Doc {
 
 	doc.AddBlank()
 	doc.AddLine(output.Span{Text: "Image Configuration:", Style: output.StyleHeader})
-	for _, issue := range issues {
-		doc.Lines = append(doc.Lines, issue)
-	}
+	doc.Lines = append(doc.Lines, issues...)
 
 	return doc
 }

@@ -8,9 +8,7 @@ import (
 	"time"
 
 	pb "deps.dev/api/v3"
-	"github.com/go-git/go-git/v5"
 	"github.com/go-git/go-git/v5/plumbing"
-	"github.com/go-git/go-git/v5/plumbing/object"
 	"github.com/go-git/go-git/v5/plumbing/transport"
 	"github.com/google/osv-scalibr/extractor"
 	"github.com/google/osv-scalibr/purl"
@@ -19,52 +17,6 @@ import (
 	"github.com/picatz/deputy/internal/repository/workspace"
 	"github.com/protobom/protobom/pkg/sbom"
 )
-
-// helper to create a temporary git repo with an initial commit and optional branches
-func newTempGitRepo(t *testing.T, branches ...string) (string, *git.Repository) {
-	t.Helper()
-	dir := t.TempDir()
-	repo, err := git.PlainInit(dir, false)
-	if err != nil {
-		t.Fatalf("init repo: %v", err)
-	}
-	// write go.mod minimal
-	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module example.com/test\n\ngo 1.23\n"), 0o644); err != nil {
-		t.Fatalf("write go.mod: %v", err)
-	}
-	// initial file
-	if err := os.WriteFile(filepath.Join(dir, "README.md"), []byte("test"), 0o644); err != nil {
-		t.Fatalf("write README: %v", err)
-	}
-	wt, err := repo.Worktree()
-	if err != nil {
-		t.Fatalf("worktree: %v", err)
-	}
-	if _, err := wt.Add("go.mod"); err != nil {
-		t.Fatalf("add go.mod: %v", err)
-	}
-	if _, err := wt.Add("README.md"); err != nil {
-		t.Fatalf("add README: %v", err)
-	}
-	if _, err := wt.Commit("initial", &git.CommitOptions{Author: &object.Signature{Name: "Test", Email: "test@example.com", When: time.Now()}}); err != nil {
-		t.Fatalf("commit: %v", err)
-	}
-	// create extra branches
-	for _, b := range branches {
-		if b == "main" {
-			continue
-		} // skip duplicate
-		refName := plumbing.NewBranchReferenceName(b)
-		headRef, err := repo.Head()
-		if err != nil {
-			t.Fatalf("head: %v", err)
-		}
-		if err := repo.Storer.SetReference(plumbing.NewHashReference(refName, headRef.Hash())); err != nil {
-			t.Fatalf("create branch %s: %v", b, err)
-		}
-	}
-	return dir, repo
-}
 
 func Test_NormalizeGolangPURLString(t *testing.T) {
 	dir := t.TempDir()

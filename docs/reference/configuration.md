@@ -75,10 +75,21 @@ proxy:
   policies:                # Policy files for enforcement
     - policy/proxy.yaml
 
-# Agent configuration
-agent:
-  sandbox: workspace-write # read-only, workspace-write, danger-full-access
-  skip_git_check: false    # Skip git repo validation
+# AI/Agent configuration
+ai:
+  default_provider: ""     # Default AI provider (codex, claude)
+  disabled: false          # Completely disable AI features
+  approval:
+    required: false        # Require approval for all operations
+    commands: true         # Require approval for shell commands
+    file_writes: false     # Require approval for file modifications
+    high_risk: true        # Always require approval for dangerous operations
+  providers:
+    codex:
+      sandbox: workspace-write
+    claude:
+      model: claude-3-5-sonnet-20241022
+      api_key: ${ANTHROPIC_API_KEY}
 ```
 
 ## Configuration Reference
@@ -140,17 +151,41 @@ agent:
 - `DEPUTY_PROXY_ADDR`
 - `DEPUTY_PROXY_POLICIES` (comma-separated)
 
-### Agent
+### AI / Agents
 
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
-| `agent.sandbox` | string | `workspace-write` | Sandbox level for AI agents |
-| `agent.skip_git_check` | bool | `false` | Skip git repository validation |
+| `ai.default_provider` | string | none | Default AI provider (`codex`, `claude`) |
+| `ai.disabled` | bool | `false` | Completely disable AI features |
+| `ai.approval.required` | bool | `false` | Require approval for all operations |
+| `ai.approval.commands` | bool | `true` | Require approval for shell commands |
+| `ai.approval.file_writes` | bool | `false` | Require approval for file modifications |
+| `ai.approval.high_risk` | bool | `true` | Always require approval for dangerous operations |
+
+**Provider-specific settings** (under `ai.providers.<name>`):
+
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `model` | string | provider default | Model to use |
+| `api_key` | string | none | API key (supports `${ENV_VAR}` expansion) |
+| `sandbox` | string | `workspace-write` | Sandbox level for agentic operations |
+| `base_url` | string | provider default | Override API endpoint |
+| `max_tokens` | int | provider default | Max tokens for completions |
+| `temperature` | float | provider default | Temperature (0.0-2.0) |
 
 **Sandbox levels:**
 - `read-only` - Agent can only read files
 - `workspace-write` - Agent can write within workspace
-- `danger-full-access` - Full system access (use with caution)
+- `full-access` - Full system access (use with caution)
+
+**Approval flow:**
+1. If `approval.required=true`, all operations need approval
+2. If not, check individual `commands` and `file_writes` settings
+3. High-risk operations (rm -rf, sudo, etc.) always need approval if `high_risk=true`
+
+**Environment variables:**
+- `ANTHROPIC_API_KEY` - Claude API key
+- `CODEX_API_KEY` - Codex API key (or use `OPENAI_API_KEY`)
 
 ## Environment Variables
 

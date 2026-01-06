@@ -11,7 +11,6 @@ import (
 	git "github.com/go-git/go-git/v5"
 	"github.com/picatz/deputy/internal/compare"
 	"github.com/picatz/deputy/internal/gitutil"
-	gitx "github.com/picatz/deputy/internal/gitutil"
 	"github.com/picatz/deputy/internal/repository"
 	"github.com/picatz/deputy/internal/repository/workspace"
 	"github.com/picatz/deputy/internal/targets"
@@ -104,7 +103,7 @@ func resolveTarget(ctx context.Context, targetInput, ref string) (*resolvedTarge
 // refOrHEAD returns RefHEAD if the input reference is empty, otherwise returns the input.
 func refOrHEAD(r string) string {
 	if strings.TrimSpace(r) == "" {
-		return gitx.RefHEAD
+		return gitutil.RefHEAD
 	}
 	return r
 }
@@ -119,7 +118,7 @@ func getRepoMetadata(localRepoPath, ref string) (string, string) {
 		return commitHash, originURL
 	}
 
-	if h, err := gitx.ResolveRevisionEnhanced(repo, refOrHEAD(ref)); err == nil && h != nil {
+	if h, err := gitutil.ResolveRevisionEnhanced(repo, refOrHEAD(ref)); err == nil && h != nil {
 		commitHash = h.String()
 	} else if headRef, err := repo.Head(); err == nil {
 		commitHash = headRef.Hash().String()
@@ -176,7 +175,7 @@ func resolveDirectModules(localRepoPath, effRef string, ws workspace.FS) directM
 		return directModuleInfo{goDirect: goDirect, resolver: resolver}
 	}
 
-	h, err := gitx.ResolveRevisionEnhanced(repo, effRef)
+	h, err := gitutil.ResolveRevisionEnhanced(repo, effRef)
 	if err != nil || h == nil {
 		return directModuleInfo{goDirect: goDirect, resolver: resolver}
 	}

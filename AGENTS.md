@@ -984,7 +984,11 @@ policies:
         reason: "Authenticate to download packages with critical vulnerabilities"
 ```
 
-See [JWT policy examples](policy/examples/) for more examples.
+See JWT policy examples for more patterns:
+- [jwt-role-based-access.yaml](policy/examples/jwt-role-based-access.yaml) - Role and team-based authorization
+- [jwt-anonymous-guard.yaml](policy/examples/jwt-anonymous-guard.yaml) - Protecting resources from anonymous access
+- [jwt-audit-logging.yaml](policy/examples/jwt-audit-logging.yaml) - Token age and audit policies
+- [jwt-service-account.yaml](policy/examples/jwt-service-account.yaml) - Service account validation
 
 ## Environment Variables
 

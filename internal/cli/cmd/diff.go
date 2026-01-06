@@ -519,6 +519,13 @@ func runDiffAnalysis(ctx context.Context, service *scan.Service, repoPath, baseR
 
 	// Scan for vulnerabilities if enabled
 	if enableVulnScan {
+		// Show progress indicator for interactive mode
+		var progress *ui.Progress
+		if ui.IsTTY(errW) && !isJSON {
+			fmt.Fprintln(errW) // Visual spacing (cleared with spinner)
+			progress = ui.NewProgress(errW, "Scanning for vulnerabilities")
+			progress.Start(ctx)
+		}
 
 		inputs := pkgInputs
 		if inputs == nil {
@@ -533,6 +540,13 @@ func runDiffAnalysis(ctx context.Context, service *scan.Service, repoPath, baseR
 			inputs,
 			scan.Options{PublishedBefore: beforeT, PublishedAfter: afterT},
 		)
+
+		if progress != nil {
+			progress.Clear()
+			// Move cursor up to clear the blank line we added for spacing
+			fmt.Fprint(errW, "\033[A\033[K")
+		}
+
 		for _, warning := range result.Warnings {
 			fmt.Fprintf(errW, "Warning: %s\n", warning)
 		}

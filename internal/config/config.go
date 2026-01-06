@@ -38,6 +38,9 @@ type Config struct {
 	// Policy configures policy evaluation.
 	Policy PolicyConfig `yaml:"policy,omitempty" json:"policy,omitempty"`
 
+	// AI configures AI/LLM providers for agentic features.
+	AI AIConfig `yaml:"ai,omitempty" json:"ai,omitempty"`
+
 	// OTel configures OpenTelemetry instrumentation.
 	OTel otel.Config `yaml:"otel,omitempty" json:"otel,omitempty"`
 }
@@ -82,6 +85,127 @@ type PolicyConfig struct {
 
 	// Mode sets the default policy mode (enforce, advisory).
 	Mode string `yaml:"mode" json:"mode"`
+}
+
+// AIConfig configures AI/LLM providers for agentic features.
+type AIConfig struct {
+	// DefaultProvider is used when no provider is explicitly specified.
+	// Common values: "codex", "claude", "openai", "anthropic"
+	DefaultProvider string `yaml:"default_provider" json:"default_provider"`
+
+	// Providers contains per-provider configuration.
+	Providers map[string]AIProviderConfig `yaml:"providers,omitempty" json:"providers,omitempty"`
+
+	// Approval configures when user approval is required.
+	Approval AIApprovalConfig `yaml:"approval,omitempty" json:"approval,omitempty"`
+
+	// Guardrails configures safety constraints for AI operations.
+	// These are evaluated before approval checks and can block operations
+	// outright or flag them as high-risk.
+	Guardrails AIGuardrailsConfig `yaml:"guardrails,omitempty" json:"guardrails,omitempty"`
+
+	// Disabled completely disables AI features.
+	Disabled bool `yaml:"disabled" json:"disabled"`
+}
+
+// AIProviderConfig contains settings for a specific AI provider.
+type AIProviderConfig struct {
+	// Model specifies the model to use.
+	Model string `yaml:"model" json:"model"`
+
+	// APIKey for API-based providers.
+	// Supports ${ENV_VAR} syntax for environment variable expansion.
+	APIKey string `yaml:"api_key,omitempty" json:"api_key,omitempty"`
+
+	// BaseURL overrides the default API endpoint.
+	BaseURL string `yaml:"base_url,omitempty" json:"base_url,omitempty"`
+
+	// Sandbox sets the default sandbox mode for agentic providers.
+	// Values: "read-only", "workspace-write", "full-access"
+	Sandbox string `yaml:"sandbox,omitempty" json:"sandbox,omitempty"`
+
+	// MaxTokens sets the default max tokens for completions.
+	MaxTokens int `yaml:"max_tokens,omitempty" json:"max_tokens,omitempty"`
+
+	// Temperature sets the default temperature (0.0-2.0).
+	Temperature *float64 `yaml:"temperature,omitempty" json:"temperature,omitempty"`
+
+	// Extra contains provider-specific additional configuration.
+	Extra map[string]any `yaml:"extra,omitempty" json:"extra,omitempty"`
+}
+
+// AIApprovalConfig controls when user approval is required for AI operations.
+type AIApprovalConfig struct {
+	// Required makes all AI operations require approval.
+	Required bool `yaml:"required" json:"required"`
+
+	// Commands requires approval before shell command execution.
+	Commands bool `yaml:"commands" json:"commands"`
+
+	// FileWrites requires approval before file modifications.
+	FileWrites bool `yaml:"file_writes" json:"file_writes"`
+}
+
+// AIGuardrailsConfig configures safety constraints for AI operations.
+// Guardrails are evaluated before approval checks and can block operations
+// outright or flag them as high-risk.
+type AIGuardrailsConfig struct {
+	// Preset selects a predefined guardrail configuration.
+	// Values: "default", "strict", "permissive"
+	// Default: "default"
+	Preset string `yaml:"preset" json:"preset"`
+
+	// Commands configures command execution guardrails.
+	Commands AICommandGuardrails `yaml:"commands,omitempty" json:"commands,omitempty"`
+
+	// Files configures file operation guardrails.
+	Files AIFileGuardrails `yaml:"files,omitempty" json:"files,omitempty"`
+
+	// WorkspaceOnly restricts all file operations to the workspace directory.
+	// Default: true
+	WorkspaceOnly *bool `yaml:"workspace_only,omitempty" json:"workspace_only,omitempty"`
+}
+
+// AICommandGuardrails configures command execution constraints.
+type AICommandGuardrails struct {
+	// DenyPatterns blocks commands matching these regex patterns.
+	DenyPatterns []string `yaml:"deny_patterns,omitempty" json:"deny_patterns,omitempty"`
+
+	// AllowPatterns permits only commands matching these patterns.
+	// If non-empty, commands not matching any pattern are denied.
+	AllowPatterns []string `yaml:"allow_patterns,omitempty" json:"allow_patterns,omitempty"`
+
+	// HighRiskPatterns flags commands as high-risk (requiring approval).
+	HighRiskPatterns []string `yaml:"high_risk_patterns,omitempty" json:"high_risk_patterns,omitempty"`
+
+	// DenyCommands blocks specific command names (e.g., "rm", "sudo").
+	DenyCommands []string `yaml:"deny_commands,omitempty" json:"deny_commands,omitempty"`
+
+	// AllowCommands permits only these command names.
+	// If non-empty, commands not in this list are denied.
+	AllowCommands []string `yaml:"allow_commands,omitempty" json:"allow_commands,omitempty"`
+}
+
+// AIFileGuardrails configures file operation constraints.
+type AIFileGuardrails struct {
+	// DenyPaths blocks operations on paths matching these glob patterns.
+	// Supports glob syntax (e.g., "/etc/**", "~/.ssh/*").
+	DenyPaths []string `yaml:"deny_paths,omitempty" json:"deny_paths,omitempty"`
+
+	// AllowPaths permits only operations on paths matching these patterns.
+	AllowPaths []string `yaml:"allow_paths,omitempty" json:"allow_paths,omitempty"`
+
+	// HighRiskPaths flags operations on these paths as high-risk.
+	HighRiskPaths []string `yaml:"high_risk_paths,omitempty" json:"high_risk_paths,omitempty"`
+
+	// DenyExtensions blocks operations on files with these extensions.
+	DenyExtensions []string `yaml:"deny_extensions,omitempty" json:"deny_extensions,omitempty"`
+
+	// AllowExtensions permits only operations on files with these extensions.
+	AllowExtensions []string `yaml:"allow_extensions,omitempty" json:"allow_extensions,omitempty"`
+
+	// DenyActions blocks specific actions (e.g., "delete", "execute").
+	DenyActions []string `yaml:"deny_actions,omitempty" json:"deny_actions,omitempty"`
 }
 
 // HTTPConfig configures HTTP client behavior across all subsystems.
@@ -811,4 +935,63 @@ func isTerminal() bool {
 		return false
 	}
 	return (fi.Mode() & os.ModeCharDevice) != 0
+}
+
+// ToGuardrails converts the config to an ai.Guardrails instance.
+// This method is in config to avoid circular imports.
+func (g AIGuardrailsConfig) ToGuardrails() *AIGuardrailsResult {
+	result := &AIGuardrailsResult{
+		Commands: AIGuardrailsResultCommands{
+			DenyPatterns:     g.Commands.DenyPatterns,
+			AllowPatterns:    g.Commands.AllowPatterns,
+			HighRiskPatterns: g.Commands.HighRiskPatterns,
+			DenyCommands:     g.Commands.DenyCommands,
+			AllowCommands:    g.Commands.AllowCommands,
+		},
+		Files: AIGuardrailsResultFiles{
+			DenyPaths:       g.Files.DenyPaths,
+			AllowPaths:      g.Files.AllowPaths,
+			HighRiskPaths:   g.Files.HighRiskPaths,
+			DenyExtensions:  g.Files.DenyExtensions,
+			AllowExtensions: g.Files.AllowExtensions,
+			DenyActions:     g.Files.DenyActions,
+			WorkspaceOnly:   true, // Default to true
+		},
+		Preset: g.Preset,
+	}
+
+	// Override WorkspaceOnly if explicitly set
+	if g.WorkspaceOnly != nil {
+		result.Files.WorkspaceOnly = *g.WorkspaceOnly
+	}
+
+	return result
+}
+
+// AIGuardrailsResult is a transport struct for guardrails configuration.
+// It avoids circular imports between config and ai packages.
+type AIGuardrailsResult struct {
+	Preset   string
+	Commands AIGuardrailsResultCommands
+	Files    AIGuardrailsResultFiles
+}
+
+// AIGuardrailsResultCommands contains command guardrail settings.
+type AIGuardrailsResultCommands struct {
+	DenyPatterns     []string
+	AllowPatterns    []string
+	HighRiskPatterns []string
+	DenyCommands     []string
+	AllowCommands    []string
+}
+
+// AIGuardrailsResultFiles contains file guardrail settings.
+type AIGuardrailsResultFiles struct {
+	DenyPaths       []string
+	AllowPaths      []string
+	HighRiskPaths   []string
+	DenyExtensions  []string
+	AllowExtensions []string
+	DenyActions     []string
+	WorkspaceOnly   bool
 }

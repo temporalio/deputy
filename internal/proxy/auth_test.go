@@ -171,12 +171,13 @@ func TestAuthConfig_Validate(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := tt.config.Validate("test")
+			// Use the standalone validation function since AuthConfig is now a type alias
+			err := validateAuthConfig(tt.config, "test")
 			if (err != nil) != tt.wantErr {
-				t.Errorf("Validate() error = %v, wantErr %v", err, tt.wantErr)
+				t.Errorf("validateAuthConfig() error = %v, wantErr %v", err, tt.wantErr)
 			}
 			if err != nil && tt.errMsg != "" && !strings.Contains(err.Error(), tt.errMsg) {
-				t.Errorf("Validate() error = %v, want error containing %q", err, tt.errMsg)
+				t.Errorf("validateAuthConfig() error = %v, want error containing %q", err, tt.errMsg)
 			}
 		})
 	}
@@ -1132,7 +1133,7 @@ func TestJWTClaimsFromContext(t *testing.T) {
 
 	t.Run("context with claims", func(t *testing.T) {
 		expected := &JWTClaims{Subject: "user123"}
-		ctx := context.WithValue(context.Background(), jwtClaimsKey{}, expected)
+		ctx := ContextWithJWTClaims(context.Background(), expected)
 		claims := JWTClaimsFromContext(ctx)
 		if claims == nil {
 			t.Fatal("expected non-nil claims")

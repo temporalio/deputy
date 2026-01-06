@@ -19,7 +19,6 @@ import (
 	"github.com/picatz/deputy/internal/cli/flags"
 	"github.com/picatz/deputy/internal/compare"
 	"github.com/picatz/deputy/internal/gitutil"
-	gitx "github.com/picatz/deputy/internal/gitutil"
 	inv "github.com/picatz/deputy/internal/inventory"
 	"github.com/picatz/deputy/internal/otel"
 	"github.com/picatz/deputy/internal/purlx"
@@ -243,7 +242,7 @@ func collectListItems(ctx context.Context, repoPath, ref string, ecosystems []st
 		pkgs, err = inv.ScanPackagesWorking(ctx, ws, scanOpts)
 	}
 	if !strings.EqualFold(effRef, "HEAD") {
-		targetHash, err = gitx.ResolveRevisionEnhanced(repo, effRef)
+		targetHash, err = gitutil.ResolveRevisionEnhanced(repo, effRef)
 		if err != nil {
 			return nil, "", "", err
 		}
