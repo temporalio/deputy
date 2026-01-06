@@ -17,13 +17,23 @@ func RegisterCommands(root *cobra.Command, deps Dependencies) {
 	if deps.ScanService == nil {
 		deps.ScanService = scan.NewService()
 	}
+
+	// Core workflow commands
 	AddScanCommand(root, deps.ScanService)
 	AddFixCommand(root, deps.ScanService)
 	AddTriageCommand(root, deps.ScanService)
-	AddSBOMCommand(root)
 	AddDiffCommand(root, deps.ScanService)
-	AddListCommand(root)
 	AddGraphCommand(root)
+
+	// Supply chain commands
+	AddSBOMCommand(root)
+	AddListCommand(root)
+
+	// Policy and enforcement commands
 	AddPolicyCommand(root)
 	AddProxyCommand(root)
+
+	// Setup and configuration commands
+	AddInitCommand(root)
+	AddConfigCommand(root)
 }

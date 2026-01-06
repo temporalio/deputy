@@ -17,6 +17,8 @@ Deputy is intentionally pipeline-friendly: commands compose well with each other
 | [`list`](list.md) | Dump PURLs for scripting | `--format`, `--only-direct` |
 | [`policy`](policy.md) | Lint, test, bundle, evaluate policies | subcommands: `lint`, `test`, `eval`, `bundle` |
 | [`proxy`](proxy.md) | Run policy-enforcing package proxy | subcommands: `serve`, `template` |
+| [`init`](init.md) | Bootstrap Deputy in a project | `--force`, `--config-only`, `--policy-only` |
+| [`config`](config.md) | Manage configuration files | subcommands: `validate`, `show`, `path` |
 
 ## Quick Examples
 
@@ -87,3 +89,9 @@ Use exit codes for CI gating.
 
 - [Policy](policy.md) — Policy authoring tools
 - [Proxy](proxy.md) — Package proxy
+
+### Setup & Configuration
+
+- [Init](init.md) — Project initialization
+- [Config](config.md) — Configuration management
+- [Completion](completion.md) — Shell autocompletion

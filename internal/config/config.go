@@ -21,67 +21,67 @@ import (
 // Config represents the complete Deputy configuration.
 type Config struct {
 	// Logging configures log output behavior.
-	Logging LogConfig `yaml:"logging"`
+	Logging LogConfig `yaml:"logging" json:"logging"`
 
 	// HTTP configures HTTP client behavior across all subsystems.
-	HTTP HTTPConfig `yaml:"http,omitempty"`
+	HTTP HTTPConfig `yaml:"http,omitempty" json:"http,omitempty"`
 
 	// Performance configures concurrency, caching, and resource limits.
-	Performance PerformanceConfig `yaml:"performance,omitempty"`
+	Performance PerformanceConfig `yaml:"performance,omitempty" json:"performance,omitempty"`
 
 	// Proxy configures the package proxy server.
-	Proxy ProxyConfig `yaml:"proxy,omitempty"`
+	Proxy ProxyConfig `yaml:"proxy,omitempty" json:"proxy,omitempty"`
 
 	// Scan configures vulnerability scanning behavior.
-	Scan ScanConfig `yaml:"scan,omitempty"`
+	Scan ScanConfig `yaml:"scan,omitempty" json:"scan,omitempty"`
 
 	// Policy configures policy evaluation.
-	Policy PolicyConfig `yaml:"policy,omitempty"`
+	Policy PolicyConfig `yaml:"policy,omitempty" json:"policy,omitempty"`
 
 	// OTel configures OpenTelemetry instrumentation.
-	OTel otel.Config `yaml:"otel,omitempty"`
+	OTel otel.Config `yaml:"otel,omitempty" json:"otel,omitempty"`
 }
 
 // LogConfig configures logging behavior.
 type LogConfig struct {
 	// Level sets the minimum log level (debug, info, warn, error).
-	Level string `yaml:"level"`
+	Level string `yaml:"level" json:"level"`
 
 	// Format specifies output format (text, json).
-	Format string `yaml:"format"`
+	Format string `yaml:"format" json:"format"`
 
 	// Color enables ANSI color codes in text format.
-	Color bool `yaml:"color"`
+	Color bool `yaml:"color" json:"color"`
 
 	// Source includes source file and line number in logs.
-	Source bool `yaml:"source"`
+	Source bool `yaml:"source" json:"source"`
 }
 
 // ProxyConfig configures the package proxy server.
 type ProxyConfig struct {
 	// ListenAddr is the address to bind the proxy server (e.g., ":8080").
-	ListenAddr string `yaml:"listen_addr"`
+	ListenAddr string `yaml:"listen_addr" json:"listen_addr"`
 
 	// PolicyPaths are paths to policy files to enforce.
-	PolicyPaths []string `yaml:"policy_paths"`
+	PolicyPaths []string `yaml:"policy_paths" json:"policy_paths"`
 }
 
 // ScanConfig configures vulnerability scanning.
 type ScanConfig struct {
 	// Ecosystems limits scanning to specific ecosystems.
-	Ecosystems []string `yaml:"ecosystems,omitempty"`
+	Ecosystems []string `yaml:"ecosystems,omitempty" json:"ecosystems,omitempty"`
 
 	// SkipCache disables result caching.
-	SkipCache bool `yaml:"skip_cache"`
+	SkipCache bool `yaml:"skip_cache" json:"skip_cache"`
 }
 
 // PolicyConfig configures policy evaluation.
 type PolicyConfig struct {
 	// Paths are locations of policy files or directories.
-	Paths []string `yaml:"paths"`
+	Paths []string `yaml:"paths" json:"paths"`
 
 	// Mode sets the default policy mode (enforce, advisory).
-	Mode string `yaml:"mode"`
+	Mode string `yaml:"mode" json:"mode"`
 }
 
 // HTTPConfig configures HTTP client behavior across all subsystems.
@@ -90,114 +90,114 @@ type PolicyConfig struct {
 type HTTPConfig struct {
 	// Timeout is the overall request timeout for HTTP operations.
 	// Default: 30s
-	Timeout time.Duration `yaml:"timeout"`
+	Timeout time.Duration `yaml:"timeout" json:"timeout"`
 
 	// DialTimeout is the maximum time to establish a TCP connection.
 	// Default: 10s
-	DialTimeout time.Duration `yaml:"dial_timeout"`
+	DialTimeout time.Duration `yaml:"dial_timeout" json:"dial_timeout"`
 
 	// TLSHandshakeTimeout is the maximum time for TLS handshake.
 	// Default: 10s
-	TLSHandshakeTimeout time.Duration `yaml:"tls_handshake_timeout"`
+	TLSHandshakeTimeout time.Duration `yaml:"tls_handshake_timeout" json:"tls_handshake_timeout"`
 
 	// ResponseHeaderTimeout is the maximum time to wait for response headers.
 	// Default: 20s
-	ResponseHeaderTimeout time.Duration `yaml:"response_header_timeout"`
+	ResponseHeaderTimeout time.Duration `yaml:"response_header_timeout" json:"response_header_timeout"`
 
 	// KeepAlive is the interval between TCP keep-alive probes.
 	// Default: 30s
-	KeepAlive time.Duration `yaml:"keep_alive"`
+	KeepAlive time.Duration `yaml:"keep_alive" json:"keep_alive"`
 
 	// IdleConnTimeout is how long idle connections remain in the pool.
 	// Default: 90s
-	IdleConnTimeout time.Duration `yaml:"idle_conn_timeout"`
+	IdleConnTimeout time.Duration `yaml:"idle_conn_timeout" json:"idle_conn_timeout"`
 
 	// MaxIdleConns is the maximum number of idle connections in the pool.
 	// Default: 20
-	MaxIdleConns int `yaml:"max_idle_conns"`
+	MaxIdleConns int `yaml:"max_idle_conns" json:"max_idle_conns"`
 
 	// MaxIdleConnsPerHost is the maximum idle connections per host.
 	// Default: 10
-	MaxIdleConnsPerHost int `yaml:"max_idle_conns_per_host"`
+	MaxIdleConnsPerHost int `yaml:"max_idle_conns_per_host" json:"max_idle_conns_per_host"`
 
 	// Retry configures automatic retry behavior for transient failures.
-	Retry RetryConfig `yaml:"retry,omitempty"`
+	Retry RetryConfig `yaml:"retry,omitempty" json:"retry,omitempty"`
 }
 
 // RetryConfig configures HTTP retry behavior.
 type RetryConfig struct {
 	// Max is the maximum number of retry attempts.
 	// Default: 3
-	Max int `yaml:"max"`
+	Max int `yaml:"max" json:"max"`
 
 	// WaitMin is the minimum wait time between retries.
 	// Default: 500ms
-	WaitMin time.Duration `yaml:"wait_min"`
+	WaitMin time.Duration `yaml:"wait_min" json:"wait_min"`
 
 	// WaitMax is the maximum wait time between retries.
 	// Default: 5s
-	WaitMax time.Duration `yaml:"wait_max"`
+	WaitMax time.Duration `yaml:"wait_max" json:"wait_max"`
 
 	// Enabled controls whether retries are attempted at all.
 	// Default: true
-	Enabled *bool `yaml:"enabled,omitempty"`
+	Enabled *bool `yaml:"enabled,omitempty" json:"enabled,omitempty"`
 }
 
 // PerformanceConfig configures concurrency, caching, and resource limits.
 type PerformanceConfig struct {
 	// OSVConcurrency is the number of concurrent OSV API requests.
 	// Default: 10
-	OSVConcurrency int `yaml:"osv_concurrency"`
+	OSVConcurrency int `yaml:"osv_concurrency" json:"osv_concurrency"`
 
 	// GraphConcurrency is the number of concurrent graph resolution operations.
 	// Default: 5
-	GraphConcurrency int `yaml:"graph_concurrency"`
+	GraphConcurrency int `yaml:"graph_concurrency" json:"graph_concurrency"`
 
 	// SBOMEnrichConcurrency is the concurrency for SBOM enrichment operations.
 	// Default: 4
-	SBOMEnrichConcurrency int `yaml:"sbom_enrich_concurrency"`
+	SBOMEnrichConcurrency int `yaml:"sbom_enrich_concurrency" json:"sbom_enrich_concurrency"`
 
 	// ImageScanConcurrency is the concurrency for container image scanning.
 	// Default: 4
-	ImageScanConcurrency int `yaml:"image_scan_concurrency"`
+	ImageScanConcurrency int `yaml:"image_scan_concurrency" json:"image_scan_concurrency"`
 
 	// Cache configures caching behavior.
-	Cache CacheConfig `yaml:"cache,omitempty"`
+	Cache CacheConfig `yaml:"cache,omitempty" json:"cache,omitempty"`
 }
 
 // CacheConfig configures caching behavior.
 type CacheConfig struct {
 	// Dir is the directory for persistent cache storage.
 	// Default: ~/.deputy/cache
-	Dir string `yaml:"dir"`
+	Dir string `yaml:"dir" json:"dir"`
 
 	// TTL is the default time-to-live for cached entries.
 	// Default: 1h
-	TTL time.Duration `yaml:"ttl"`
+	TTL time.Duration `yaml:"ttl" json:"ttl"`
 
 	// KEVTTL is the TTL for CISA KEV catalog cache.
 	// Default: 24h
-	KEVTTL time.Duration `yaml:"kev_ttl"`
+	KEVTTL time.Duration `yaml:"kev_ttl" json:"kev_ttl"`
 
 	// EPSSTTL is the TTL for EPSS scores cache.
 	// Default: 24h
-	EPSSTTL time.Duration `yaml:"epss_ttl"`
+	EPSSTTL time.Duration `yaml:"epss_ttl" json:"epss_ttl"`
 
 	// OSVTTL is the TTL for OSV vulnerability cache.
 	// Default: 1h
-	OSVTTL time.Duration `yaml:"osv_ttl"`
+	OSVTTL time.Duration `yaml:"osv_ttl" json:"osv_ttl"`
 
 	// LicenseTTL is the TTL for license information cache.
 	// Default: 24h
-	LicenseTTL time.Duration `yaml:"license_ttl"`
+	LicenseTTL time.Duration `yaml:"license_ttl" json:"license_ttl"`
 
 	// MaxSize is the maximum number of entries in in-memory caches.
 	// Default: 1024
-	MaxSize int `yaml:"max_size"`
+	MaxSize int `yaml:"max_size" json:"max_size"`
 
 	// Disabled completely disables caching.
 	// Default: false
-	Disabled bool `yaml:"disabled"`
+	Disabled bool `yaml:"disabled" json:"disabled"`
 }
 
 // Loader handles loading configuration from multiple sources.

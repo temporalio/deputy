@@ -3,6 +3,7 @@ package cmd
 import (
 	"context"
 	"crypto/x509"
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -146,7 +147,7 @@ Can be disabled with --skip-vuln-scan for faster execution.`,
 			if err != nil {
 				return fmt.Errorf("failed to parse references: %w", err)
 			}
-			return runDiffAnalysis(cmd.Context(), service, repo, baseRef, targetRef, !skipVulnScan, enrichLicenses, licenseSource, publishedAfterStr, publishedBeforeStr, asOfStr, ignoreUnfixed, showUnchanged, unchangedThreshold, policyPaths, scanOpts, matcher, debugMatcher, cmd.OutOrStdout(), cmd.ErrOrStderr())
+			return runDiffAnalysis(cmd.Context(), service, repo, baseRef, targetRef, !skipVulnScan, enrichLicenses, licenseSource, publishedAfterStr, publishedBeforeStr, asOfStr, ignoreUnfixed, showUnchanged, unchangedThreshold, policyPaths, scanOpts, matcher, debugMatcher, outputFormat, cmd.OutOrStdout(), cmd.ErrOrStderr())
 		},
 		Example: `BASIC USAGE:
   # Compare current work with default branch (beginner-friendly)
@@ -281,7 +282,7 @@ PERFORMANCE TIPS:
 	cmd.Flags().BoolVar(&debugMatcher, "debug-matcher", false, "Print which changed files were considered dependency manifests/lockfiles")
 	cmd.Flags().StringArrayVar(&policyPaths, "policy", nil, "Path to CEL policy files or bundles to evaluate against diff results (repeatable)")
 	cmd.Flags().BoolVar(&useLocalDaemon, "local-daemon", false, "Use local Docker daemon instead of pulling from remote registry (requires 'docker pull' first)")
-	cmd.Flags().StringVar(&outputFormat, "format", "text", "Output format for container diff: text | json")
+	cmd.Flags().StringVar(&outputFormat, "format", "text", "Output format: text | json")
 
 	root.AddCommand(cmd)
 }
@@ -298,7 +299,7 @@ type DiffPolicyReport struct {
 // runDiffAnalysis orchestrates dependency inventory collection for the base and
 // target references, computes a dependency diff, and optionally queries OSV to
 // enrich added/updated modules with vulnerability data.
-func runDiffAnalysis(ctx context.Context, service *scan.Service, repoPath, baseRef, targetRef string, enableVulnScan bool, enrichLicenses bool, licenseSource string, publishedAfterStr, publishedBeforeStr, asOfStr string, ignoreUnfixed bool, showUnchanged bool, unchangedThreshold string, policyPaths []string, scanOpts inv.ScanOptions, matcher *inv.DependencyMatcher, debugMatcher bool, outW io.Writer, errW io.Writer) error {
+func runDiffAnalysis(ctx context.Context, service *scan.Service, repoPath, baseRef, targetRef string, enableVulnScan bool, enrichLicenses bool, licenseSource string, publishedAfterStr, publishedBeforeStr, asOfStr string, ignoreUnfixed bool, showUnchanged bool, unchangedThreshold string, policyPaths []string, scanOpts inv.ScanOptions, matcher *inv.DependencyMatcher, debugMatcher bool, outputFormat string, outW io.Writer, errW io.Writer) error {
 	ctx, span := otel.StartSpan(ctx, "deputy.diff",
 		trace.WithAttributes(
 			attribute.String("deputy.target.path", repoPath),
@@ -320,12 +321,21 @@ func runDiffAnalysis(ctx context.Context, service *scan.Service, repoPath, baseR
 		service = scan.NewService()
 	}
 
+	// Validate and normalize output format early
+	outputFormat = strings.ToLower(strings.TrimSpace(outputFormat))
+	if outputFormat != "" && outputFormat != "text" && outputFormat != "json" {
+		return fmt.Errorf("unsupported --format %q (use text|json)", outputFormat)
+	}
+	isJSON := outputFormat == "json"
+
 	dispTarget := targetRef
 	if isWorkingPseudoRef(targetRef) {
 		dispTarget = "WORKING"
 	}
-	doc := render.DiffHeaderDoc(baseRef, dispTarget)
-	_ = doc.Render(outW, output.UIStyles())
+	if !isJSON {
+		doc := render.DiffHeaderDoc(baseRef, dispTarget)
+		_ = doc.Render(outW, output.UIStyles())
+	}
 
 	// Check if dependency files have changed (optimization for non-working refs)
 	if !isWorkingPseudoRef(targetRef) {
@@ -335,11 +345,24 @@ func runDiffAnalysis(ctx context.Context, service *scan.Service, repoPath, baseR
 			return fmt.Errorf("error checking files changed: %w", err)
 		}
 
-		if debugMatcher {
+		if debugMatcher && !isJSON {
 			renderMatcherDebug(outW, changedFiles, matcher)
 		}
 
 		if matcher != nil && !matcher.AnyMatch(changedFiles) {
+			if isJSON {
+				emptyReport := DiffPolicyReport{
+					Repo:            repoPath,
+					BaseRef:         baseRef,
+					TargetRef:       targetRef,
+					Changes:         []compare.Change{},
+					Vulnerabilities: []report.Vulnerability{},
+				}
+				enc := json.NewEncoder(outW)
+				enc.SetIndent("", "  ")
+				otel.SetSpanOK(span)
+				return enc.Encode(emptyReport)
+			}
 			fmt.Fprintln(outW, ui.StyleAdded.Render("No dependency changes detected."))
 			otel.SetSpanOK(span)
 			return nil
@@ -468,6 +491,18 @@ func runDiffAnalysis(ctx context.Context, service *scan.Service, repoPath, baseR
 		ExcludeMainModules: excludeMainModules,
 	})
 	if len(changes) == 0 {
+		if isJSON {
+			emptyReport := DiffPolicyReport{
+				Repo:            repoPath,
+				BaseRef:         baseRef,
+				TargetRef:       targetRef,
+				Changes:         []compare.Change{},
+				Vulnerabilities: []report.Vulnerability{},
+			}
+			enc := json.NewEncoder(outW)
+			enc.SetIndent("", "  ")
+			return enc.Encode(emptyReport)
+		}
 		fmt.Fprintln(outW, "No package changes detected.")
 		otel.SetSpanOK(span)
 		return nil
@@ -477,7 +512,10 @@ func runDiffAnalysis(ctx context.Context, service *scan.Service, repoPath, baseR
 	licenseSource = flags.NormalizeLicenseSource(licenseSource)
 
 	// Detailed dependency change rendering (legacy style) with optional enrichment
-	displayDetailedDependencyChanges(ctx, repoSrc.Workspace, changes, enrichLicenses, licenseSource, outW, errW)
+	// Skip text rendering in JSON mode
+	if !isJSON {
+		displayDetailedDependencyChanges(ctx, repoSrc.Workspace, changes, enrichLicenses, licenseSource, outW, errW)
+	}
 
 	// Scan for vulnerabilities if enabled
 	if enableVulnScan {
@@ -515,6 +553,14 @@ func runDiffAnalysis(ctx context.Context, service *scan.Service, repoPath, baseR
 		if err := runDiffPolicies(ctx, policyPaths, policyReport, errW); err != nil {
 			otel.SetSpanError(span, err)
 			return err
+		}
+
+		// JSON output mode
+		if isJSON {
+			enc := json.NewEncoder(outW)
+			enc.SetIndent("", "  ")
+			otel.SetSpanOK(span)
+			return enc.Encode(policyReport)
 		}
 
 		changedVulns, unchangedVulns := splitVulnsByChange(reportVulns, changes)
@@ -605,6 +651,21 @@ func runDiffAnalysis(ctx context.Context, service *scan.Service, repoPath, baseR
 		}
 		otel.SetSpanOK(span)
 		return nil
+	}
+
+	// No vulnerability scanning - output changes only
+	if isJSON {
+		noVulnReport := DiffPolicyReport{
+			Repo:            repoPath,
+			BaseRef:         baseRef,
+			TargetRef:       targetRef,
+			Changes:         changes,
+			Vulnerabilities: []report.Vulnerability{},
+		}
+		enc := json.NewEncoder(outW)
+		enc.SetIndent("", "  ")
+		otel.SetSpanOK(span)
+		return enc.Encode(noVulnReport)
 	}
 
 	// Display results (no vulnerabilities scanned)

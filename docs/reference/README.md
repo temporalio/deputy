@@ -4,6 +4,7 @@ Stable, "look it up" documentation for Deputy configuration.
 
 ## Quick Links
 
+- [Capabilities](capabilities.md) — Feature matrix: ecosystems, commands, outputs
 - [Configuration file](configuration.md) — YAML config file format and precedence
 - [Logging](logging.md) — Log levels and output formats
 - [Policy framework](policy-framework.md) — Policy bundles, entrypoints, and evaluation context

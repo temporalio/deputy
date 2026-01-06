@@ -8,6 +8,7 @@ This page is for getting Deputy installed and useful in ~5 minutes.
 flowchart LR
     subgraph Setup["Setup"]
         Install["go install"]
+        Init["deputy init"]
     end
 
     subgraph Core["Core Workflow"]
@@ -16,12 +17,12 @@ flowchart LR
         Verify["3. Verify<br/>Rescan + SBOM"]
     end
 
-    Install --> Scan --> Fix --> Verify
+    Install --> Init --> Scan --> Fix --> Verify
 
     classDef setup fill:#e3f2fd,stroke:#1565c0
     classDef core fill:#e8f5e9,stroke:#2e7d32
 
-    class Install setup
+    class Install,Init setup
     class Scan,Fix,Verify core
 ```
 
@@ -50,6 +51,28 @@ $ cd deputy
 $ go build ./...
 $ go run . --help
 ```
+
+## Initialize a Project (Optional)
+
+Bootstrap Deputy configuration and a starter policy:
+
+```console
+$ deputy init
+Created:
+  .deputy.yaml
+  policy/deputy.yaml
+
+Next steps:
+  1. Run 'deputy scan' to find vulnerabilities
+  2. Edit policy/deputy.yaml to customize rules
+  3. Run 'deputy scan --policy policy/' to enforce policies
+```
+
+This creates:
+- `.deputy.yaml` — Configuration file with documented options
+- `policy/deputy.yaml` — Starter security policy (blocks critical/high vulns)
+
+You can skip this step and use Deputy without configuration, but `init` is helpful for teams standardizing on policies.
 
 ## Your first runs
 
@@ -93,6 +116,21 @@ See [targets and refs](concepts/targets-and-refs.md) for the full mental model.
 - Optional config file: see the [configuration reference](reference/configuration.md)
 - Optional: `GITHUB_TOKEN` (rate limits + fetch improvements during enrichment)
 - Optional agents: `CODEX_API_KEY`, `ANTHROPIC_API_KEY`
+
+## Shell Completion
+
+Enable tab completion for your shell:
+
+```console
+# Bash
+$ deputy completion bash > /etc/bash_completion.d/deputy
+
+# Zsh
+$ deputy completion zsh > "${fpath[1]}/_deputy"
+
+# Fish
+$ deputy completion fish > ~/.config/fish/completions/deputy.fish
+```
 
 ## Next
 
