@@ -392,6 +392,28 @@ Use `chainId` when you need to identify a specific layer stack (e.g., for cachin
 *   Prioritize by EPSS percentile (top 5% most likely to be exploited):
     `vulnerability.?epssPercentile.orValue(0.0) > 0.95`
 
+**Graph Fields (when `--with-graph` is enabled):**
+
+When scanning with `--with-graph`, the dependency graph is resolved to show how transitive vulnerabilities reach your project:
+
+| Field | Type | Description | Example Value |
+|---|---|---|---|
+| `path` | `list(string)` | Dependency chain from root to vulnerable package | `["myapp", "go-git/v5", "x/crypto"]` |
+| `depth` | `int` | Distance from root (0 = direct, 1+ = transitive) | `2` |
+
+**Graph-Based Examples (when `--with-graph` is enabled):**
+
+*   Allow deep transitive vulnerabilities (focus on direct deps):
+    `vulnerability.?depth.orValue(0) > 2 && vulnerability.severity != 'CRITICAL'`
+*   Block critical vulnerabilities regardless of depth:
+    `vulnerability.severity == 'CRITICAL'`
+*   Warn on vulnerabilities introduced through specific packages:
+    `vulnerability.?path.orValue([]).exists(p, p.contains('legacy-lib'))`
+*   Prioritize vulnerabilities in shallow dependencies:
+    `vulnerability.?depth.orValue(0) <= 1 && vulnerability.severity in ['HIGH', 'CRITICAL']`
+*   Identify vulnerabilities with long dependency chains (supply chain risk):
+    `vulnerability.?depth.orValue(0) > 3`
+
 ---
 
 #### `vulnerabilities` list

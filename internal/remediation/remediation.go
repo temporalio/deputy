@@ -292,6 +292,20 @@ var jsPackageManagerCommands = map[string]string{
 	"pnpm": "pnpm add",
 }
 
+// pythonPackageManagerCommands maps Python package managers to their install patterns.
+// Each entry specifies the command template with %s placeholders for package and version.
+var pythonPackageManagerCommands = map[string]struct {
+	template string // fmt template: package, version
+	hint     string
+}{
+	"pip":    {template: "pip install --upgrade %s==%s", hint: ""},
+	"pipenv": {template: "pipenv install %s==%s", hint: ""},
+	"poetry": {template: "poetry add %s@%s", hint: ""},
+	"uv":     {template: "uv add \"%s>=%s\"", hint: "run uv lock afterwards to update lockfile"},
+	"pdm":    {template: "pdm add %s@%s", hint: ""},
+	"conda":  {template: "conda install %s=%s", hint: "use -c conda-forge if needed"},
+}
+
 func recommendCommand(manager, manifestPath, pkg, version string, groups []string) (string, string, bool) {
 	m := strings.ToLower(manager)
 
@@ -304,16 +318,23 @@ func recommendCommand(manager, manifestPath, pkg, version string, groups []strin
 		return cmd, "", true
 	}
 
+	// Handle Python package managers with a unified approach
+	if pyCmd, ok := pythonPackageManagerCommands[m]; ok {
+		cmd := fmt.Sprintf(pyCmd.template, pkg, version)
+		hint := pyCmd.hint
+		// Expand hint template if it contains placeholders
+		if strings.Contains(hint, "%s") {
+			hint = fmt.Sprintf(hint, pkg, version)
+		}
+		return cmd, hint, true
+	}
+
 	switch m {
 	case "go":
 		return fmt.Sprintf("go get %s@%s", pkg, version), "", true
-	case "pip":
-		return fmt.Sprintf("pip install --upgrade %s==%s", pkg, version), "", true
-	case "pipenv":
-		return fmt.Sprintf("pipenv install %s==%s", pkg, version), "", true
-	case "poetry":
-		return fmt.Sprintf("poetry add %s@%s", pkg, version), "", true
-	case "gem":
+
+	// Ruby/Bundler
+	case "gem", "bundler":
 		base := strings.ToLower(path.Base(manifestPath))
 		switch {
 		case base == "gemfile.lock" || base == "gems.locked":
@@ -325,16 +346,185 @@ func recommendCommand(manager, manifestPath, pkg, version string, groups []strin
 		default:
 			return fmt.Sprintf("Update Ruby dependency for %s to %s", pkg, version), "", false
 		}
+
+	// PHP/Composer
 	case "composer":
 		return fmt.Sprintf("composer require %s:%s", pkg, version), "", true
+
+	// Rust/Cargo
 	case "cargo":
 		return fmt.Sprintf("cargo update -p %s --precise %s", pkg, version), "", true
+
+	// Java/Maven
 	case "maven":
 		return fmt.Sprintf("mvn versions:use-dep-version -Dincludes=%s -DdepVersion=%s", pkg, version), "consider running mvn versions:commit afterwards", true
+
+	// Java/Gradle - now executable via gradle CLI
 	case "gradle":
-		return fmt.Sprintf("Update dependency declaration for %s to %s", pkg, version), "", false
+		base := strings.ToLower(path.Base(manifestPath))
+		switch {
+		case base == "gradle.lockfile" || base == "buildscript-gradle.lockfile":
+			// For lockfiles, update via gradle command then regenerate lockfile
+			return fmt.Sprintf("./gradlew dependencies --write-locks"), "update dependency version in build.gradle first", true
+		case base == "build.gradle" || base == "build.gradle.kts":
+			return fmt.Sprintf("Update %s to %s in %s", pkg, version, path.Base(manifestPath)), "run ./gradlew dependencies --write-locks afterwards", false
+		default:
+			return fmt.Sprintf("Update dependency %s to %s", pkg, version), "", false
+		}
+
+	// .NET/NuGet
+	case "nuget", "dotnet":
+		base := strings.ToLower(path.Base(manifestPath))
+		switch {
+		case base == "packages.lock.json":
+			// Modern PackageReference format - use dotnet CLI
+			return fmt.Sprintf("dotnet add package %s --version %s", pkg, version), "run dotnet restore afterwards", true
+		case base == "packages.config":
+			// Legacy packages.config format
+			return fmt.Sprintf("Update-Package %s -Version %s", pkg, version), "run in Package Manager Console", true
+		case strings.HasSuffix(base, ".csproj") || strings.HasSuffix(base, ".fsproj") || strings.HasSuffix(base, ".vbproj"):
+			return fmt.Sprintf("dotnet add package %s --version %s", pkg, version), "", true
+		default:
+			return fmt.Sprintf("dotnet add package %s --version %s", pkg, version), "", true
+		}
+
+	// Elixir/Hex
+	case "hex", "mix":
+		base := strings.ToLower(path.Base(manifestPath))
+		switch {
+		case base == "mix.lock":
+			return fmt.Sprintf("mix deps.update %s", pkg), "ensure mix.exs has correct version constraint", true
+		case base == "mix.exs":
+			return fmt.Sprintf("Update %s to ~> %s in mix.exs", pkg, version), "run mix deps.get afterwards", false
+		default:
+			return fmt.Sprintf("mix deps.update %s", pkg), "", true
+		}
+
+	// Dart/Flutter/Pub
+	case "pub", "dart", "flutter":
+		base := strings.ToLower(path.Base(manifestPath))
+		switch {
+		case base == "pubspec.lock":
+			return fmt.Sprintf("dart pub upgrade %s", pkg), "ensure pubspec.yaml has correct version constraint", true
+		case base == "pubspec.yaml":
+			return fmt.Sprintf("Update %s to ^%s in pubspec.yaml", pkg, version), "run dart pub get afterwards", false
+		default:
+			return fmt.Sprintf("dart pub upgrade %s", pkg), "", true
+		}
+
+	// Swift/CocoaPods
+	case "cocoapods", "pod":
+		base := strings.ToLower(path.Base(manifestPath))
+		switch {
+		case base == "podfile.lock":
+			return fmt.Sprintf("pod update %s", pkg), "", true
+		case base == "podfile":
+			return fmt.Sprintf("Update %s to ~> %s in Podfile", pkg, version), "run pod install afterwards", false
+		default:
+			return fmt.Sprintf("pod update %s", pkg), "", true
+		}
+
+	// Swift Package Manager
+	case "swift", "spm":
+		return fmt.Sprintf("Update Package.swift to use %s version %s", pkg, version), "run swift package update afterwards", false
+
+	// Haskell/Cabal
+	case "cabal":
+		return fmt.Sprintf("Update %s to %s in cabal file", pkg, version), "run cabal update && cabal build afterwards", false
+
+	// Haskell/Stack
+	case "stack":
+		return fmt.Sprintf("Update %s to %s in stack.yaml or package.yaml", pkg, version), "run stack build afterwards", false
+
+	// R/renv
+	case "renv":
+		return fmt.Sprintf("renv::install(\"%s@%s\")", pkg, version), "", true
+
+	// C++/Conan
+	case "conan":
+		return fmt.Sprintf("conan install %s/%s@", pkg, version), "update conanfile.txt or conanfile.py first", true
+
+	// GitHub Actions
+	case "github-actions", "githubactions":
+		base := strings.ToLower(path.Base(manifestPath))
+		// Parse the action reference for better advice
+		owner, repo := parseGitHubActionRef(pkg)
+		switch {
+		case strings.HasSuffix(base, ".yml") || strings.HasSuffix(base, ".yaml"):
+			// Provide specific version pinning advice
+			if isCommitSHA(version) {
+				return fmt.Sprintf("Action %s/%s is pinned to commit %s", owner, repo, version[:12]), "verify this commit in the action repository", false
+			}
+			// Return a deputy-internal command that will be handled by the fix applier
+			// Format: deputy:action:update <file> <owner/repo> <new-version>
+			actionRef := fmt.Sprintf("%s/%s", owner, repo)
+			cmd := fmt.Sprintf("deputy:action:update %s %s %s", manifestPath, actionRef, version)
+			return cmd, fmt.Sprintf("consider pinning to full commit SHA: %s/%s@<sha> # %s", owner, repo, version), true
+		default:
+			return fmt.Sprintf("Update action %s to %s", pkg, version), "edit workflow YAML file", false
+		}
+
+	// Dockerfile / Container Images
+	case "docker", "oci", "container":
+		base := strings.ToLower(path.Base(manifestPath))
+		if isContainerfilePath(base) {
+			// Return a deputy-internal command that will be handled by the fix applier
+			// Format: deputy:dockerfile:update <file> <image> <new-version>
+			cmd := fmt.Sprintf("deputy:dockerfile:update %s %s %s", manifestPath, pkg, version)
+			return cmd, "pin to digest for reproducibility: FROM image@sha256:...", true
+		}
+		// Generic container image update (e.g., docker-compose.yml, k8s manifests)
+		return fmt.Sprintf("Update container image %s to %s", pkg, version), "", false
 	}
+
 	return "", "", false
+}
+
+// parseGitHubActionRef extracts owner and repo from action reference.
+func parseGitHubActionRef(ref string) (owner, repo string) {
+	ref = strings.TrimSpace(ref)
+	ref = strings.TrimPrefix(ref, "github.com/")
+	parts := strings.Split(ref, "/")
+	if len(parts) >= 2 {
+		return parts[0], parts[1]
+	}
+	return ref, ""
+}
+
+// isCommitSHA checks if a version string looks like a git commit SHA.
+func isCommitSHA(version string) bool {
+	if len(version) != 40 {
+		return false
+	}
+	for _, c := range version {
+		if !((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F')) {
+			return false
+		}
+	}
+	return true
+}
+
+// isContainerfilePath checks if a filename looks like a Dockerfile or Containerfile.
+// Matches: Dockerfile, Containerfile, *.dockerfile, *.containerfile, *Dockerfile, *Containerfile
+func isContainerfilePath(name string) bool {
+	lower := strings.ToLower(name)
+
+	// Exact matches (case-insensitive)
+	if lower == "dockerfile" || lower == "containerfile" {
+		return true
+	}
+
+	// Extension patterns: *.dockerfile, *.containerfile
+	if strings.HasSuffix(lower, ".dockerfile") || strings.HasSuffix(lower, ".containerfile") {
+		return true
+	}
+
+	// Prefix patterns: dockerfile.*, containerfile.*
+	if strings.HasPrefix(lower, "dockerfile.") || strings.HasPrefix(lower, "containerfile.") {
+		return true
+	}
+
+	return false
 }
 
 // Dependency group names recognized across package managers.
@@ -350,6 +540,7 @@ const (
 // managerGroupFlags maps package managers to their dependency group flags.
 // The inner map keys are group categories, values are CLI flags.
 var managerGroupFlags = map[string]map[string]string{
+	// JavaScript/TypeScript
 	"npm": {
 		"dev":      "--save-dev",
 		"optional": "--save-optional",
@@ -364,6 +555,26 @@ var managerGroupFlags = map[string]map[string]string{
 		"dev":      "--dev",
 		"optional": "--optional",
 		"peer":     "--peer",
+	},
+	// Python
+	"poetry": {
+		"dev": "--group dev",
+	},
+	"uv": {
+		"dev": "--dev",
+	},
+	"pdm": {
+		"dev": "--dev",
+	},
+	// Dart/Flutter
+	"pub": {
+		"dev": "--dev",
+	},
+	"dart": {
+		"dev": "--dev",
+	},
+	"flutter": {
+		"dev": "--dev",
 	},
 }
 

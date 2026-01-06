@@ -64,7 +64,11 @@ func TestMetrics_InstrumentsInitialized(t *testing.T) {
 		{"ProxyPolicyDenials", m.ProxyPolicyDenials},
 		{"CacheHits", m.CacheHits},
 		{"CacheMisses", m.CacheMisses},
+		{"CacheEvictions", m.CacheEvictions},
+		{"CacheExpired", m.CacheExpired},
 		{"CacheSize", m.CacheSize},
+		{"CacheMaxSize", m.CacheMaxSize},
+		{"CacheHitRate", m.CacheHitRate},
 	}
 
 	for _, c := range checks {
@@ -508,6 +512,203 @@ func TestSeverityCounts_Total(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestCacheTypeAttr(t *testing.T) {
+	attr := CacheTypeAttr("depsdev")
+	if string(attr.Key) != "deputy.cache.type" {
+		t.Errorf("expected key 'deputy.cache.type', got %q", attr.Key)
+	}
+	if attr.Value.AsString() != "depsdev" {
+		t.Errorf("expected value 'depsdev', got %q", attr.Value.AsString())
+	}
+}
+
+func TestRecordCacheStats_DoesNotPanic(t *testing.T) {
+	ctx := context.Background()
+
+	stats := CacheStats{
+		Hits:    100,
+		Misses:  25,
+		Evicted: 10,
+		Expired: 5,
+		Size:    50,
+		MaxSize: 100,
+		HitRate: 0.8,
+	}
+
+	// Should not panic
+	RecordCacheStats(ctx, "depsdev", stats)
+	RecordCacheStats(ctx, "goproxy", stats)
+}
+
+func TestRecordCacheStats_RecordsValues(t *testing.T) {
+	reader := setupTestMeterProvider(t)
+	ctx := context.Background()
+
+	stats := CacheStats{
+		Hits:    100,
+		Misses:  25,
+		Evicted: 10,
+		Expired: 5,
+		Size:    50,
+		MaxSize: 100,
+		HitRate: 0.8,
+	}
+
+	RecordCacheStats(ctx, "depsdev", stats)
+
+	var rm metricdata.ResourceMetrics
+	if err := reader.Collect(ctx, &rm); err != nil {
+		t.Fatalf("failed to collect metrics: %v", err)
+	}
+
+	// Verify cache size gauge was recorded
+	sizeMetric := findMetric(&rm, "deputy.cache.size")
+	if sizeMetric == nil {
+		t.Error("expected deputy.cache.size metric to be recorded")
+	}
+
+	// Verify cache max_size gauge was recorded
+	maxSizeMetric := findMetric(&rm, "deputy.cache.max_size")
+	if maxSizeMetric == nil {
+		t.Error("expected deputy.cache.max_size metric to be recorded")
+	}
+
+	// Verify cache hit_rate gauge was recorded
+	hitRateMetric := findMetric(&rm, "deputy.cache.hit_rate")
+	if hitRateMetric == nil {
+		t.Error("expected deputy.cache.hit_rate metric to be recorded")
+	}
+}
+
+func TestRecordCacheHitMiss_RecordsValues(t *testing.T) {
+	reader := setupTestMeterProvider(t)
+	ctx := context.Background()
+
+	RecordCacheHit(ctx, "depsdev")
+	RecordCacheHit(ctx, "depsdev")
+	RecordCacheHit(ctx, "goproxy")
+	RecordCacheMiss(ctx, "depsdev")
+
+	var rm metricdata.ResourceMetrics
+	if err := reader.Collect(ctx, &rm); err != nil {
+		t.Fatalf("failed to collect metrics: %v", err)
+	}
+
+	// Verify cache hits
+	hitsMetric := findMetric(&rm, "deputy.cache.hits")
+	if hitsMetric == nil {
+		t.Error("expected deputy.cache.hits metric to be recorded")
+	} else {
+		sum, ok := hitsMetric.Data.(metricdata.Sum[int64])
+		if !ok {
+			t.Errorf("expected Sum data, got %T", hitsMetric.Data)
+		} else {
+			total := int64(0)
+			for _, dp := range sum.DataPoints {
+				total += dp.Value
+			}
+			if total != 3 {
+				t.Errorf("expected 3 cache hits, got %d", total)
+			}
+		}
+	}
+
+	// Verify cache misses
+	missesMetric := findMetric(&rm, "deputy.cache.misses")
+	if missesMetric == nil {
+		t.Error("expected deputy.cache.misses metric to be recorded")
+	} else {
+		sum, ok := missesMetric.Data.(metricdata.Sum[int64])
+		if !ok {
+			t.Errorf("expected Sum data, got %T", missesMetric.Data)
+		} else {
+			total := int64(0)
+			for _, dp := range sum.DataPoints {
+				total += dp.Value
+			}
+			if total != 1 {
+				t.Errorf("expected 1 cache miss, got %d", total)
+			}
+		}
+	}
+}
+
+func TestRecordCacheEvictionExpiration_RecordsValues(t *testing.T) {
+	reader := setupTestMeterProvider(t)
+	ctx := context.Background()
+
+	RecordCacheEviction(ctx, "depsdev")
+	RecordCacheEviction(ctx, "depsdev")
+	RecordCacheExpiration(ctx, "goproxy")
+
+	var rm metricdata.ResourceMetrics
+	if err := reader.Collect(ctx, &rm); err != nil {
+		t.Fatalf("failed to collect metrics: %v", err)
+	}
+
+	// Verify cache evictions
+	evictMetric := findMetric(&rm, "deputy.cache.evictions")
+	if evictMetric == nil {
+		t.Error("expected deputy.cache.evictions metric to be recorded")
+	} else {
+		sum, ok := evictMetric.Data.(metricdata.Sum[int64])
+		if !ok {
+			t.Errorf("expected Sum data, got %T", evictMetric.Data)
+		} else {
+			total := int64(0)
+			for _, dp := range sum.DataPoints {
+				total += dp.Value
+			}
+			if total != 2 {
+				t.Errorf("expected 2 cache evictions, got %d", total)
+			}
+		}
+	}
+
+	// Verify cache expirations
+	expiredMetric := findMetric(&rm, "deputy.cache.expired")
+	if expiredMetric == nil {
+		t.Error("expected deputy.cache.expired metric to be recorded")
+	} else {
+		sum, ok := expiredMetric.Data.(metricdata.Sum[int64])
+		if !ok {
+			t.Errorf("expected Sum data, got %T", expiredMetric.Data)
+		} else {
+			total := int64(0)
+			for _, dp := range sum.DataPoints {
+				total += dp.Value
+			}
+			if total != 1 {
+				t.Errorf("expected 1 cache expiration, got %d", total)
+			}
+		}
+	}
+}
+
+func TestRecordCacheHit_DoesNotPanic(t *testing.T) {
+	ctx := context.Background()
+	// Should not panic
+	RecordCacheHit(ctx, "test")
+}
+
+func TestRecordCacheMiss_DoesNotPanic(t *testing.T) {
+	ctx := context.Background()
+	// Should not panic
+	RecordCacheMiss(ctx, "test")
+}
+
+func TestRecordCacheEviction_DoesNotPanic(t *testing.T) {
+	ctx := context.Background()
+	// Should not panic
+	RecordCacheEviction(ctx, "test")
+}
+
+func TestRecordCacheExpiration_DoesNotPanic(t *testing.T) {
+	ctx := context.Background()
+	// Should not panic
+	RecordCacheExpiration(ctx, "test")
 }
 
 func TestPredefinedAttributes(t *testing.T) {

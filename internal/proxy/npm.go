@@ -5,43 +5,14 @@ import (
 	"path"
 	"strings"
 
-	"github.com/picatz/deputy/internal/policy"
+	"github.com/picatz/deputy/internal/ecosystem"
 )
 
-// npmHandler proxies requests to an npm registry (e.g., registry.npmjs.org)
-// while evaluating policy rules and enriching requests with vulnerability data.
-type npmHandler struct {
-	*baseHandler
-}
-
-// newNPMHandler creates a handler for proxying npm registry requests.
-// It configures vulnerability lookups against the "npm" ecosystem in OSV.
-func newNPMHandler(upstream string, policies PolicyEvaluator) (*npmHandler, error) {
-	base, err := newBaseHandler(handlerConfig{
-		ecosystem:    "npm",
-		osvEcosystem: "npm",
-		upstream:     upstream,
-		policies:     policies,
-		wantLicenses: false,
-	})
-	if err != nil {
-		return nil, err
-	}
-	return &npmHandler{baseHandler: base}, nil
-}
-
-// ServeHTTP handles incoming npm registry requests, parsing the path to extract
-// package name, version, and operation type, then evaluating policies before proxying.
-func (h *npmHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	pkg, version, operation := parseNPMPath(r.URL.Path)
-
-	h.serveRequest(w, r, policy.EntrypointNpmArtifactRequest, requestInfo{
-		Name:       pkg,
-		Version:    version,
-		HasVersion: hasVersion(version),
-		Operation:  operation,
-		Ecosystem:  "npm",
-	})
+// NewNPMHandler creates an npm proxy handler using the unified handler factory.
+// It proxies requests to an npm registry (e.g., registry.npmjs.org) while
+// evaluating policy rules and enriching requests with vulnerability data.
+func NewNPMHandler(upstream string, policies PolicyEvaluator) (http.Handler, error) {
+	return DefaultFactory.CreateHandler(ecosystem.NPM, upstream, policies)
 }
 
 // parseNPMPath extracts package name, version, and operation from an npm registry
@@ -88,9 +59,4 @@ func parseNPMPath(p string) (pkg string, version string, operation string) {
 	}
 	operation = "metadata"
 	return trimmed, "", operation
-}
-
-// NewNPMHandler exposes the npm proxy handler for embedding in other servers.
-func NewNPMHandler(upstream string, policies PolicyEvaluator) (http.Handler, error) {
-	return newNPMHandler(upstream, policies)
 }

@@ -97,6 +97,7 @@ func AddScanCommand(root *cobra.Command, service *scan.Service) {
 
 	scanCmd := &cobra.Command{
 		Use:           "scan [target]",
+		Aliases:       []string{"s"},
 		Short:         "Scan for vulnerabilities",
 		SilenceErrors: true,
 		SilenceUsage:  true,
@@ -232,9 +233,11 @@ WORKFLOW EXAMPLES:
 	scanCmd.Flags().StringArray("policy", nil, "Path to a CEL policy file or bundle to evaluate against the scan report (repeatable)")
 	scanCmd.Flags().Bool("show-symbols", false, "Show symbol hints (OSV imports) in text output")
 	scanCmd.Flags().Bool("show-db-info", false, "Show database-specific metadata (e.g., review_status) in text output")
+	scanCmd.Flags().Bool("show-unfixable-guidance", false, "Show actionable guidance for vulnerabilities without fixes")
 	scanCmd.Flags().String("source", "", "Target source override: auto, git, dir, sbom, purl, dockerfile, remote, docker-daemon, tarball")
 	scanCmd.Flags().String("platform", "", "Platform for remote images (os/arch[/variant])")
 	scanCmd.Flags().Bool("enrich", false, "Enrich vulnerabilities with EPSS scores and KEV status (requires network)")
+	scanCmd.Flags().Bool("with-graph", false, "Build dependency graph to show paths to vulnerable packages")
 
 	scanDirCmd := &cobra.Command{
 		Use:           "dir <path>",
@@ -287,7 +290,9 @@ TYPICAL USE CASES:
 	scanDirCmd.Flags().StringArray("policy", nil, "Path to a CEL policy file or bundle to evaluate against the scan report (repeatable)")
 	scanDirCmd.Flags().Bool("show-symbols", false, "Show symbol hints (OSV imports) in text output")
 	scanDirCmd.Flags().Bool("show-db-info", false, "Show database-specific metadata (e.g., review_status) in text output")
+	scanDirCmd.Flags().Bool("show-unfixable-guidance", false, "Show actionable guidance for vulnerabilities without fixes")
 	scanDirCmd.Flags().Bool("enrich", false, "Enrich vulnerabilities with EPSS scores and KEV status (requires network)")
+	scanDirCmd.Flags().Bool("with-graph", false, "Build dependency graph to show paths to vulnerable packages")
 
 	scanSBOMCmd := &cobra.Command{
 		Use:           "sbom <file|->",
@@ -372,6 +377,7 @@ WORKFLOW EXAMPLES:
 	scanSBOMCmd.Flags().StringArray("policy", nil, "Path to a CEL policy file or bundle to evaluate against the scan report (repeatable)")
 	scanSBOMCmd.Flags().Bool("show-symbols", false, "Show symbol hints (OSV imports) in text output")
 	scanSBOMCmd.Flags().Bool("show-db-info", false, "Show database-specific metadata (e.g., review_status) in text output")
+	scanSBOMCmd.Flags().Bool("show-unfixable-guidance", false, "Show actionable guidance for vulnerabilities without fixes")
 	scanSBOMCmd.Flags().Bool("enrich", false, "Enrich vulnerabilities with EPSS scores and KEV status (requires network)")
 
 	scanPURLCmd := &cobra.Command{
@@ -405,6 +411,7 @@ OUTPUT AND FILTERING:
 	scanPURLCmd.Flags().StringArray("policy", nil, "Path to a CEL policy file or bundle to evaluate against the scan report (repeatable)")
 	scanPURLCmd.Flags().Bool("show-symbols", false, "Show symbol hints (OSV imports) in text output")
 	scanPURLCmd.Flags().Bool("show-db-info", false, "Show database-specific metadata (e.g., review_status) in text output")
+	scanPURLCmd.Flags().Bool("show-unfixable-guidance", false, "Show actionable guidance for vulnerabilities without fixes")
 	scanPURLCmd.Flags().Bool("enrich", false, "Enrich vulnerabilities with EPSS scores and KEV status (requires network)")
 
 	scanImageCmd := &cobra.Command{
@@ -473,6 +480,7 @@ POLICY ENFORCEMENT:
 	scanImageCmd.Flags().StringArray("policy", nil, "Path to a CEL policy file or bundle to evaluate against the scan report (repeatable)")
 	scanImageCmd.Flags().Bool("show-symbols", false, "Show symbol hints (OSV imports) in text output")
 	scanImageCmd.Flags().Bool("show-db-info", false, "Show database-specific metadata (e.g., review_status) in text output")
+	scanImageCmd.Flags().Bool("show-unfixable-guidance", false, "Show actionable guidance for vulnerabilities without fixes")
 	scanImageCmd.Flags().String("source", "remote", "Image source: remote, docker-daemon, tarball")
 	scanImageCmd.Flags().String("platform", "", "Platform for remote images (os/arch[/variant])")
 	scanImageCmd.Flags().Bool("enrich", false, "Enrich vulnerabilities with EPSS scores and KEV status (requires network)")
@@ -601,11 +609,24 @@ func (s *Scanner) runScanRepository(cmd *cobra.Command, repoArg string) error {
 
 	beforeT, afterT := flags.parsePublishedTimes(cmd.ErrOrStderr())
 	scanOpts := flags.scanOptions()
+
+	// Show progress indicator for interactive mode (text output to TTY)
+	var progress *ui.Progress
+	errW := cmd.ErrOrStderr()
+	if ui.IsTTY(errW) && (flags.Format == "" || flags.Format == FormatText) {
+		progress = ui.NewProgress(errW, "Scanning for vulnerabilities")
+		progress.Start(ctx)
+	}
+
 	exec, err := s.service.ScanRepository(ctx, repoArg, flags.Ref, cmd.Flags().Changed("ref"), scan.Options{
 		Ecosystems:      scanOpts.Ecosystems,
 		PublishedBefore: beforeT,
 		PublishedAfter:  afterT,
+		Graph:           flags.graphOptions(),
 	})
+	if progress != nil {
+		progress.Clear()
+	}
 	if err != nil {
 		return err
 	}
@@ -641,7 +662,7 @@ func (s *Scanner) runScanRepository(cmd *cobra.Command, repoArg string) error {
 
 	switch strings.ToLower(flags.Format) {
 	case "", FormatText:
-		return s.outputText(out.Writer, cmd.ErrOrStderr(), resultOut, flags.IgnoreUnfixed, policyFindings, flags.displayOptions())
+		return s.outputText(out.Writer, cmd.ErrOrStderr(), resultOut, flags.IgnoreUnfixed, policyFindings, flags.displayOptionsWithResult(resultOut))
 	case FormatJSON:
 		return s.outputJSON(out.Writer, resultOut, policyFindings)
 	case FormatSARIF:
@@ -663,11 +684,24 @@ func (s *Scanner) runScanDir(cmd *cobra.Command, args []string) error {
 
 	beforeT, afterT := flags.parsePublishedTimes(cmd.ErrOrStderr())
 	scanOpts := flags.scanOptions()
+
+	// Show progress indicator for interactive mode (text output to TTY)
+	var progress *ui.Progress
+	errW := cmd.ErrOrStderr()
+	if ui.IsTTY(errW) && (flags.Format == "" || flags.Format == FormatText) {
+		progress = ui.NewProgress(errW, "Scanning for vulnerabilities")
+		progress.Start(ctx)
+	}
+
 	exec, err := s.service.ScanDirectory(ctx, path, scan.Options{
 		Ecosystems:      scanOpts.Ecosystems,
 		PublishedBefore: beforeT,
 		PublishedAfter:  afterT,
+		Graph:           flags.graphOptions(),
 	})
+	if progress != nil {
+		progress.Clear()
+	}
 	if err != nil {
 		return err
 	}
@@ -702,7 +736,7 @@ func (s *Scanner) runScanDir(cmd *cobra.Command, args []string) error {
 
 	switch strings.ToLower(flags.Format) {
 	case "", FormatText:
-		return s.outputTextDir(out.Writer, cmd.ErrOrStderr(), resultOut, flags.IgnoreUnfixed, policyFindings, flags.displayOptions())
+		return s.outputTextDir(out.Writer, cmd.ErrOrStderr(), resultOut, flags.IgnoreUnfixed, policyFindings, flags.displayOptionsWithResult(resultOut))
 	case FormatJSON:
 		return s.outputJSON(out.Writer, resultOut, policyFindings)
 	case FormatSARIF:
@@ -955,11 +989,23 @@ func (s *Scanner) runScanImageWithOptions(cmd *cobra.Command, input, source, pla
 
 	beforeT, afterT := flags.parsePublishedTimes(cmd.ErrOrStderr())
 	scanOpts := flags.scanOptions()
+
+	// Show progress indicator for interactive mode (text output to TTY)
+	var progress *ui.Progress
+	errW := cmd.ErrOrStderr()
+	if ui.IsTTY(errW) && (flags.Format == "" || flags.Format == FormatText) {
+		progress = ui.NewProgress(errW, "Scanning container image")
+		progress.Start(ctx)
+	}
+
 	exec, err := s.service.ScanContainerImage(ctx, target, targetOpts, scan.Options{
 		Ecosystems:      scanOpts.Ecosystems,
 		PublishedBefore: beforeT,
 		PublishedAfter:  afterT,
 	})
+	if progress != nil {
+		progress.Clear()
+	}
 	if err != nil {
 		return err
 	}

@@ -63,9 +63,11 @@ func TestExtractScanFlags(t *testing.T) {
 			cmd.Flags().StringArray("policy", nil, "")
 			cmd.Flags().Bool("show-symbols", false, "")
 			cmd.Flags().Bool("show-db-info", false, "")
+			cmd.Flags().Bool("show-unfixable-guidance", false, "")
 			cmd.Flags().StringSlice("ecosystems", nil, "")
 			cmd.Flags().String("ref", "", "")
 			cmd.Flags().String("input-format", "", "")
+			cmd.Flags().Bool("enrich", false, "")
 
 			if err := cmd.ParseFlags(tt.args); err != nil {
 				t.Fatalf("ParseFlags() error = %v", err)
@@ -100,34 +102,46 @@ func TestScanFlags_DisplayOptions(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
-		name        string
-		flags       scanFlags
-		wantSymbols bool
-		wantDBInfo  bool
+		name                  string
+		flags                 scanFlags
+		wantSymbols           bool
+		wantDBInfo            bool
+		wantUnfixableGuidance bool
 	}{
 		{
-			name:        "all false",
-			flags:       scanFlags{},
-			wantSymbols: false,
-			wantDBInfo:  false,
+			name:                  "all false",
+			flags:                 scanFlags{},
+			wantSymbols:           false,
+			wantDBInfo:            false,
+			wantUnfixableGuidance: false,
 		},
 		{
-			name:        "symbols true",
-			flags:       scanFlags{ShowSymbols: true},
-			wantSymbols: true,
-			wantDBInfo:  false,
+			name:                  "symbols true",
+			flags:                 scanFlags{ShowSymbols: true},
+			wantSymbols:           true,
+			wantDBInfo:            false,
+			wantUnfixableGuidance: false,
 		},
 		{
-			name:        "db info true",
-			flags:       scanFlags{ShowDBInfo: true},
-			wantSymbols: false,
-			wantDBInfo:  true,
+			name:                  "db info true",
+			flags:                 scanFlags{ShowDBInfo: true},
+			wantSymbols:           false,
+			wantDBInfo:            true,
+			wantUnfixableGuidance: false,
 		},
 		{
-			name:        "both true",
-			flags:       scanFlags{ShowSymbols: true, ShowDBInfo: true},
-			wantSymbols: true,
-			wantDBInfo:  true,
+			name:                  "both true",
+			flags:                 scanFlags{ShowSymbols: true, ShowDBInfo: true},
+			wantSymbols:           true,
+			wantDBInfo:            true,
+			wantUnfixableGuidance: false,
+		},
+		{
+			name:                  "unfixable guidance true",
+			flags:                 scanFlags{ShowUnfixableGuidance: true},
+			wantSymbols:           false,
+			wantDBInfo:            false,
+			wantUnfixableGuidance: true,
 		},
 	}
 
@@ -139,6 +153,9 @@ func TestScanFlags_DisplayOptions(t *testing.T) {
 			}
 			if opts.ShowDatabaseInfo != tt.wantDBInfo {
 				t.Errorf("displayOptions().ShowDatabaseInfo = %v, want %v", opts.ShowDatabaseInfo, tt.wantDBInfo)
+			}
+			if opts.ShowUnfixableGuidance != tt.wantUnfixableGuidance {
+				t.Errorf("displayOptions().ShowUnfixableGuidance = %v, want %v", opts.ShowUnfixableGuidance, tt.wantUnfixableGuidance)
 			}
 		})
 	}

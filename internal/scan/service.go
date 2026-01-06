@@ -12,6 +12,7 @@ import (
 	"github.com/picatz/deputy/internal/analysis/osv"
 	"github.com/picatz/deputy/internal/compare"
 	"github.com/picatz/deputy/internal/container/image"
+	"github.com/picatz/deputy/internal/dependency/graph"
 	inv "github.com/picatz/deputy/internal/inventory"
 	"github.com/picatz/deputy/internal/logs"
 	"github.com/picatz/deputy/internal/otel"
@@ -159,8 +160,15 @@ func (s *Service) ScanRepository(ctx context.Context, repoArg, ref string, refPr
 	logs.Debug(ctx, "querying OSV for vulnerabilities", "input_count", len(inputs))
 	findings, advisories, queryErr := s.queryOSV(ctx, inputs)
 
-	result := buildResult(
-		Target{
+	// Build dependency graph if enabled
+	var depGraph *graph.Graph
+	if opts.Graph.Enabled {
+		builder := NewGraphBuilder(opts.Graph)
+		depGraph, _ = builder.BuildFromWorkspace(ctx, pkgs, modInfo.goDirect, findings, advisories, target.workspace)
+	}
+
+	result := buildResult(buildResultInput{
+		target: Target{
 			Kind:         target.kind,
 			DisplayPath:  target.displayPath,
 			LocalPath:    target.localRepoPath,
@@ -169,13 +177,14 @@ func (s *Service) ScanRepository(ctx context.Context, repoArg, ref string, refPr
 			Cloned:       target.cloned,
 			Provenance:   target.mat.Meta.Provenance,
 		},
-		pkgs,
-		modInfo.goDirect,
-		findings,
-		advisories,
-		queryErr,
-		opts,
-	)
+		pkgs:       pkgs,
+		direct:     modInfo.goDirect,
+		findings:   findings,
+		advisories: advisories,
+		queryErr:   queryErr,
+		opts:       opts,
+		graph:      depGraph,
+	})
 	result.Target.CommitHash, result.Target.OriginURL = getRepoMetadata(target.localRepoPath, ref)
 
 	// Record scan completion (both span and metrics)
@@ -231,15 +240,23 @@ func (s *Service) ScanDirectory(ctx context.Context, path string, opts Options) 
 	inputs := PackagesToInputs(pkgs, PackageInputOptions{GoDirect: goDirect, Resolver: NewWorkspaceManifestResolver(ws)})
 	findings, advisories, queryErr := s.queryOSV(ctx, inputs)
 
-	result := buildResult(
-		Target{Kind: targets.KindDir, DisplayPath: path, LocalPath: path},
-		pkgs,
-		goDirect,
-		findings,
-		advisories,
-		queryErr,
-		opts,
-	)
+	// Build dependency graph if enabled
+	var depGraph *graph.Graph
+	if opts.Graph.Enabled {
+		builder := NewGraphBuilder(opts.Graph)
+		depGraph, _ = builder.BuildFromWorkspace(ctx, pkgs, goDirect, findings, advisories, ws)
+	}
+
+	result := buildResult(buildResultInput{
+		target:     Target{Kind: targets.KindDir, DisplayPath: path, LocalPath: path},
+		pkgs:       pkgs,
+		direct:     goDirect,
+		findings:   findings,
+		advisories: advisories,
+		queryErr:   queryErr,
+		opts:       opts,
+		graph:      depGraph,
+	})
 
 	// Record scan completion (both span and metrics)
 	otel.RecordScanCompletion(ctx, otel.ScanCompletion{
@@ -273,15 +290,19 @@ func (s *Service) ScanSBOM(ctx context.Context, pkgs []*extractor.Package, direc
 	inputs := PackagesToInputs(pkgs, PackageInputOptions{DirectPackages: direct})
 	findings, advisories, queryErr := s.queryOSV(ctx, inputs)
 
-	result := buildResult(
-		Target{Kind: targets.KindSBOM, DisplayPath: "sbom"},
-		pkgs,
-		direct,
-		findings,
-		advisories,
-		queryErr,
-		opts,
-	)
+	// Note: Graph resolution is not supported for SBOM scans since there's no
+	// filesystem to parse lockfiles from. The SBOM itself should contain
+	// dependency relationships if needed.
+	result := buildResult(buildResultInput{
+		target:     Target{Kind: targets.KindSBOM, DisplayPath: "sbom"},
+		pkgs:       pkgs,
+		direct:     direct,
+		findings:   findings,
+		advisories: advisories,
+		queryErr:   queryErr,
+		opts:       opts,
+		graph:      nil,
+	})
 
 	// Record scan completion (both span and metrics)
 	otel.RecordScanCompletion(ctx, otel.ScanCompletion{
@@ -370,20 +391,23 @@ func (s *Service) ScanContainerImage(ctx context.Context, target string, targetO
 		displayPath = mat.Meta.Target
 	}
 
-	result := buildResult(
-		Target{
+	// Note: Graph resolution is not supported for container image scans since
+	// packages are extracted from the image filesystem, not from lockfiles.
+	result := buildResult(buildResultInput{
+		target: Target{
 			Kind:        mat.Meta.Kind,
 			DisplayPath: displayPath,
 			LocalPath:   mat.Path,
 			Provenance:  mat.Meta.Provenance,
 		},
-		pkgs,
-		nil,
-		findings,
-		advisories,
-		queryErr,
-		opts,
-	)
+		pkgs:       pkgs,
+		direct:     nil,
+		findings:   findings,
+		advisories: advisories,
+		queryErr:   queryErr,
+		opts:       opts,
+		graph:      nil,
+	})
 
 	// Attach image configuration to result for policy evaluation
 	result.ImageInfo = imageInfo
@@ -472,28 +496,42 @@ func (s *Service) ScanDockerfile(ctx context.Context, target string, opts Option
 	return &Execution{Result: result, cleanup: cleanup}, nil
 }
 
-func buildResult(target Target, pkgs []*extractor.Package, direct map[string]bool, findings []vulnerability.Finding, advisories map[string]vulnerability.Advisory, queryErr error, opts Options) Result {
+// buildResultInput holds all inputs for building a scan result.
+// Using a struct avoids long parameter lists and makes it easier to extend.
+type buildResultInput struct {
+	target     Target
+	pkgs       []*extractor.Package
+	direct     map[string]bool
+	findings   []vulnerability.Finding
+	advisories map[string]vulnerability.Advisory
+	queryErr   error
+	opts       Options
+	graph      *graph.Graph
+}
+
+func buildResult(in buildResultInput) Result {
 	warnings := []string{}
-	if queryErr != nil {
-		warnings = append(warnings, fmt.Sprintf("OSV query failed: %v", queryErr))
+	if in.queryErr != nil {
+		warnings = append(warnings, fmt.Sprintf("OSV query failed: %v", in.queryErr))
 	}
-	if !opts.PublishedBefore.IsZero() || !opts.PublishedAfter.IsZero() {
-		findings = filterFindingsByPublished(findings, advisories, opts.PublishedAfter, opts.PublishedBefore)
+	if !in.opts.PublishedBefore.IsZero() || !in.opts.PublishedAfter.IsZero() {
+		in.findings = filterFindingsByPublished(in.findings, in.advisories, in.opts.PublishedAfter, in.opts.PublishedBefore)
 	}
 
-	consolidated := vulnerability.ConsolidateAll(findings, advisories)
+	consolidated := vulnerability.ConsolidateAll(in.findings, in.advisories)
 
 	return Result{
-		Target:          target,
+		Target:          in.target,
 		GeneratedAt:     time.Now().UTC(),
-		PackagesScanned: len(pkgs),
+		PackagesScanned: len(in.pkgs),
 		Inventory: Inventory{
-			Packages: pkgs,
-			Direct:   direct,
+			Packages: in.pkgs,
+			Direct:   in.direct,
 		},
-		Findings:   findings,
-		Advisories: advisories,
+		Findings:   in.findings,
+		Advisories: in.advisories,
 		Stats:      consolidated.Stats,
+		Graph:      in.graph,
 		Warnings:   warnings,
 	}
 }

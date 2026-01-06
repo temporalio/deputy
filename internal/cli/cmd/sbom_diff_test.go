@@ -6,6 +6,9 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	sbomx "github.com/picatz/deputy/internal/sbom"
+	"github.com/picatz/deputy/internal/sbom/diff"
 )
 
 func TestCalculateSBOMDiff_Basic(t *testing.T) {
@@ -42,79 +45,91 @@ func TestCalculateSBOMDiff_Basic(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Read and diff
-	oldDoc, err := readSBOMForDiff(oldPath)
+	// Read and diff using the diff package
+	oldDoc, err := sbomx.ReadFile(oldPath)
 	if err != nil {
 		t.Fatalf("failed to read old SBOM: %v", err)
 	}
-	newDoc, err := readSBOMForDiff(newPath)
+	newDoc, err := sbomx.ReadFile(newPath)
 	if err != nil {
 		t.Fatalf("failed to read new SBOM: %v", err)
 	}
 
-	diff := calculateSBOMDiff(oldDoc, newDoc)
+	result, err := diff.Compare(oldDoc, newDoc)
+	if err != nil {
+		t.Fatalf("failed to compare SBOMs: %v", err)
+	}
+
+	stats := result.Stats()
 
 	// Verify stats
-	if diff.Stats.OldTotal != 3 {
-		t.Errorf("OldTotal = %d, want 3", diff.Stats.OldTotal)
+	if stats.Added != 1 {
+		t.Errorf("Added = %d, want 1", stats.Added)
 	}
-	if diff.Stats.NewTotal != 3 {
-		t.Errorf("NewTotal = %d, want 3", diff.Stats.NewTotal)
+	if stats.Removed != 1 {
+		t.Errorf("Removed = %d, want 1", stats.Removed)
 	}
-	if diff.Stats.AddedCount != 1 {
-		t.Errorf("AddedCount = %d, want 1", diff.Stats.AddedCount)
-	}
-	if diff.Stats.RemovedCount != 1 {
-		t.Errorf("RemovedCount = %d, want 1", diff.Stats.RemovedCount)
-	}
-	if diff.Stats.ChangedCount != 1 {
-		t.Errorf("ChangedCount = %d, want 1", diff.Stats.ChangedCount)
-	}
-	if diff.Stats.UnchangedCount != 1 {
-		t.Errorf("UnchangedCount = %d, want 1", diff.Stats.UnchangedCount)
+	if stats.Changed != 1 {
+		t.Errorf("Changed = %d, want 1", stats.Changed)
 	}
 
 	// Verify added
-	if len(diff.Added) != 1 || diff.Added[0].Name != "new-pkg" {
-		t.Errorf("Added = %+v, want new-pkg", diff.Added)
+	if len(result.Added) != 1 || result.Added[0].Name != "new-pkg" {
+		t.Errorf("Added = %+v, want new-pkg", result.Added)
 	}
 
 	// Verify removed
-	if len(diff.Removed) != 1 || diff.Removed[0].Name != "removed-pkg" {
-		t.Errorf("Removed = %+v, want removed-pkg", diff.Removed)
+	if len(result.Removed) != 1 || result.Removed[0].Name != "removed-pkg" {
+		t.Errorf("Removed = %+v, want removed-pkg", result.Removed)
 	}
 
 	// Verify changed
-	if len(diff.Changed) != 1 || diff.Changed[0].Name != "lodash" {
-		t.Errorf("Changed = %+v, want lodash", diff.Changed)
+	if len(result.Changed) != 1 || result.Changed[0].Name != "lodash" {
+		t.Errorf("Changed = %+v, want lodash", result.Changed)
 	}
-	if diff.Changed[0].OldVersion != "4.17.20" || diff.Changed[0].NewVersion != "4.17.21" {
+	if result.Changed[0].OldVersion != "4.17.20" || result.Changed[0].NewVersion != "4.17.21" {
 		t.Errorf("Changed versions = %s -> %s, want 4.17.20 -> 4.17.21",
-			diff.Changed[0].OldVersion, diff.Changed[0].NewVersion)
+			result.Changed[0].OldVersion, result.Changed[0].NewVersion)
 	}
 }
 
 func TestOutputDiffJSON(t *testing.T) {
-	diff := SBOMDiff{
-		Added:   []PackageSummary{{Name: "new-pkg", Version: "1.0.0"}},
-		Removed: []PackageSummary{{Name: "old-pkg", Version: "0.9.0"}},
-		Changed: []PackageChange{{Name: "updated", OldVersion: "1.0", NewVersion: "2.0"}},
-		Stats: DiffStats{
-			OldTotal:       2,
-			NewTotal:       2,
-			AddedCount:     1,
-			RemovedCount:   1,
-			ChangedCount:   1,
-			UnchangedCount: 0,
-		},
+	// Create a minimal diff using the diff package
+	oldSBOM := `{
+		"nodeList": {
+			"nodes": [
+				{"name": "old-pkg", "version": "0.9.0"}
+			]
+		}
+	}`
+	newSBOM := `{
+		"nodeList": {
+			"nodes": [
+				{"name": "new-pkg", "version": "1.0.0"}
+			]
+		}
+	}`
+
+	tmpDir := t.TempDir()
+	oldPath := filepath.Join(tmpDir, "old.json")
+	newPath := filepath.Join(tmpDir, "new.json")
+	if err := os.WriteFile(oldPath, []byte(oldSBOM), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(newPath, []byte(newSBOM), 0644); err != nil {
+		t.Fatal(err)
 	}
 
+	oldDoc, _ := sbomx.ReadFile(oldPath)
+	newDoc, _ := sbomx.ReadFile(newPath)
+	result, _ := diff.Compare(oldDoc, newDoc)
+
 	var buf bytes.Buffer
-	if err := outputDiffJSON(&buf, diff); err != nil {
+	if err := outputDiffJSON(&buf, result); err != nil {
 		t.Fatalf("outputDiffJSON: %v", err)
 	}
 
-	var parsed SBOMDiff
+	var parsed JSONOutput
 	if err := json.Unmarshal(buf.Bytes(), &parsed); err != nil {
 		t.Fatalf("failed to parse JSON output: %v", err)
 	}
@@ -122,25 +137,46 @@ func TestOutputDiffJSON(t *testing.T) {
 	if len(parsed.Added) != 1 || parsed.Added[0].Name != "new-pkg" {
 		t.Errorf("JSON Added = %+v", parsed.Added)
 	}
+	if len(parsed.Removed) != 1 || parsed.Removed[0].Name != "old-pkg" {
+		t.Errorf("JSON Removed = %+v", parsed.Removed)
+	}
 }
 
 func TestOutputDiffText(t *testing.T) {
-	diff := SBOMDiff{
-		Added:   []PackageSummary{{Name: "new-pkg", Version: "1.0.0"}},
-		Removed: []PackageSummary{{Name: "old-pkg", Version: "0.9.0"}},
-		Changed: []PackageChange{{Name: "updated", OldVersion: "1.0", NewVersion: "2.0"}},
-		Stats: DiffStats{
-			OldTotal:       2,
-			NewTotal:       2,
-			AddedCount:     1,
-			RemovedCount:   1,
-			ChangedCount:   1,
-			UnchangedCount: 0,
-		},
+	// Create a minimal diff using the diff package
+	oldSBOM := `{
+		"nodeList": {
+			"nodes": [
+				{"name": "old-pkg", "version": "0.9.0"},
+				{"name": "updated", "version": "1.0.0"}
+			]
+		}
+	}`
+	newSBOM := `{
+		"nodeList": {
+			"nodes": [
+				{"name": "new-pkg", "version": "1.0.0"},
+				{"name": "updated", "version": "2.0.0"}
+			]
+		}
+	}`
+
+	tmpDir := t.TempDir()
+	oldPath := filepath.Join(tmpDir, "old.json")
+	newPath := filepath.Join(tmpDir, "new.json")
+	if err := os.WriteFile(oldPath, []byte(oldSBOM), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(newPath, []byte(newSBOM), 0644); err != nil {
+		t.Fatal(err)
 	}
 
+	oldDoc, _ := sbomx.ReadFile(oldPath)
+	newDoc, _ := sbomx.ReadFile(newPath)
+	result, _ := diff.Compare(oldDoc, newDoc)
+
 	var buf bytes.Buffer
-	if err := outputDiffText(&buf, diff, "old.json", "new.json"); err != nil {
+	if err := outputDiffText(&buf, result, "old.json", "new.json"); err != nil {
 		t.Fatalf("outputDiffText: %v", err)
 	}
 
@@ -151,28 +187,8 @@ func TestOutputDiffText(t *testing.T) {
 	if !bytes.Contains([]byte(output), []byte("- old-pkg@0.9.0")) {
 		t.Errorf("output missing removed package: %s", output)
 	}
-	if !bytes.Contains([]byte(output), []byte("~ updated: 1.0 -> 2.0")) {
+	if !bytes.Contains([]byte(output), []byte("~ updated: 1.0.0 -> 2.0.0")) {
 		t.Errorf("output missing changed package: %s", output)
-	}
-}
-
-func TestExtractNameFromPURL(t *testing.T) {
-	tests := []struct {
-		purl string
-		want string
-	}{
-		{"pkg:npm/lodash@4.17.21", "lodash"},
-		{"pkg:golang/github.com/foo/bar@v1.0.0", "github.com/foo/bar"},
-		{"pkg:pypi/requests@2.28.0", "requests"},
-		{"pkg:maven/org.apache/commons@1.0", "org.apache/commons"},
-		{"invalid", "invalid"},
-	}
-
-	for _, tt := range tests {
-		got := extractNameFromPURL(tt.purl)
-		if got != tt.want {
-			t.Errorf("extractNameFromPURL(%q) = %q, want %q", tt.purl, got, tt.want)
-		}
 	}
 }
 
@@ -192,9 +208,9 @@ func TestReadSBOMForDiff_CycloneDX(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	doc, err := readSBOMForDiff(path)
+	doc, err := sbomx.ReadFile(path)
 	if err != nil {
-		t.Fatalf("readSBOMForDiff: %v", err)
+		t.Fatalf("ReadFile: %v", err)
 	}
 
 	if doc.NodeList == nil || len(doc.NodeList.Nodes) != 2 {
@@ -228,9 +244,9 @@ func TestReadSBOMForDiff_SPDX(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	doc, err := readSBOMForDiff(path)
+	doc, err := sbomx.ReadFile(path)
 	if err != nil {
-		t.Fatalf("readSBOMForDiff: %v", err)
+		t.Fatalf("ReadFile: %v", err)
 	}
 
 	if doc.NodeList == nil || len(doc.NodeList.Nodes) != 1 {
@@ -240,5 +256,65 @@ func TestReadSBOMForDiff_SPDX(t *testing.T) {
 	node := doc.NodeList.Nodes[0]
 	if node.Name != "lodash" || node.Version != "4.17.21" {
 		t.Errorf("node = %s@%s, want lodash@4.17.21", node.Name, node.Version)
+	}
+}
+
+func TestChangeKindIndicators(t *testing.T) {
+	// Test that the change kind indicators are displayed correctly
+	// Create SBOMs with different version change types
+	oldSBOM := `{
+		"nodeList": {
+			"nodes": [
+				{"name": "major-change", "version": "1.0.0"},
+				{"name": "minor-change", "version": "1.0.0"},
+				{"name": "patch-change", "version": "1.0.0"},
+				{"name": "downgrade", "version": "2.0.0"}
+			]
+		}
+	}`
+	newSBOM := `{
+		"nodeList": {
+			"nodes": [
+				{"name": "major-change", "version": "2.0.0"},
+				{"name": "minor-change", "version": "1.1.0"},
+				{"name": "patch-change", "version": "1.0.1"},
+				{"name": "downgrade", "version": "1.0.0"}
+			]
+		}
+	}`
+
+	tmpDir := t.TempDir()
+	oldPath := filepath.Join(tmpDir, "old.json")
+	newPath := filepath.Join(tmpDir, "new.json")
+	if err := os.WriteFile(oldPath, []byte(oldSBOM), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(newPath, []byte(newSBOM), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	oldDoc, _ := sbomx.ReadFile(oldPath)
+	newDoc, _ := sbomx.ReadFile(newPath)
+	result, _ := diff.Compare(oldDoc, newDoc)
+
+	var buf bytes.Buffer
+	if err := outputDiffText(&buf, result, "old.json", "new.json"); err != nil {
+		t.Fatalf("outputDiffText: %v", err)
+	}
+
+	output := buf.String()
+
+	// Check for change kind indicators
+	if !bytes.Contains([]byte(output), []byte("[BREAKING]")) {
+		t.Errorf("output missing [BREAKING] indicator: %s", output)
+	}
+	if !bytes.Contains([]byte(output), []byte("[minor]")) {
+		t.Errorf("output missing [minor] indicator: %s", output)
+	}
+	if !bytes.Contains([]byte(output), []byte("[patch]")) {
+		t.Errorf("output missing [patch] indicator: %s", output)
+	}
+	if !bytes.Contains([]byte(output), []byte("[DOWNGRADE]")) {
+		t.Errorf("output missing [DOWNGRADE] indicator: %s", output)
 	}
 }

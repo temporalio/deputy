@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 func TestDefaultConfig(t *testing.T) {
@@ -318,5 +319,446 @@ func TestContains(t *testing.T) {
 	}
 	if contains(slice, "notfound") {
 		t.Error("expected contains to not find 'notfound'")
+	}
+}
+
+func TestDefaultHTTPConfig(t *testing.T) {
+	cfg := defaultConfig()
+
+	// Verify HTTP defaults
+	if cfg.HTTP.Timeout != 30*time.Second {
+		t.Errorf("expected HTTP timeout 30s, got %v", cfg.HTTP.Timeout)
+	}
+	if cfg.HTTP.DialTimeout != 10*time.Second {
+		t.Errorf("expected dial timeout 10s, got %v", cfg.HTTP.DialTimeout)
+	}
+	if cfg.HTTP.MaxIdleConns != 20 {
+		t.Errorf("expected max idle conns 20, got %d", cfg.HTTP.MaxIdleConns)
+	}
+	if cfg.HTTP.MaxIdleConnsPerHost != 10 {
+		t.Errorf("expected max idle conns per host 10, got %d", cfg.HTTP.MaxIdleConnsPerHost)
+	}
+	if cfg.HTTP.Retry.Max != 3 {
+		t.Errorf("expected retry max 3, got %d", cfg.HTTP.Retry.Max)
+	}
+	if cfg.HTTP.Retry.WaitMin != 500*time.Millisecond {
+		t.Errorf("expected retry wait min 500ms, got %v", cfg.HTTP.Retry.WaitMin)
+	}
+	if cfg.HTTP.Retry.WaitMax != 5*time.Second {
+		t.Errorf("expected retry wait max 5s, got %v", cfg.HTTP.Retry.WaitMax)
+	}
+	if !cfg.HTTP.RetryEnabled() {
+		t.Error("expected retry to be enabled by default")
+	}
+}
+
+func TestDefaultPerformanceConfig(t *testing.T) {
+	cfg := defaultConfig()
+
+	// Verify performance defaults
+	if cfg.Performance.OSVConcurrency != 10 {
+		t.Errorf("expected OSV concurrency 10, got %d", cfg.Performance.OSVConcurrency)
+	}
+	if cfg.Performance.GraphConcurrency != 5 {
+		t.Errorf("expected graph concurrency 5, got %d", cfg.Performance.GraphConcurrency)
+	}
+	if cfg.Performance.SBOMEnrichConcurrency != 4 {
+		t.Errorf("expected SBOM enrich concurrency 4, got %d", cfg.Performance.SBOMEnrichConcurrency)
+	}
+	if cfg.Performance.ImageScanConcurrency != 4 {
+		t.Errorf("expected image scan concurrency 4, got %d", cfg.Performance.ImageScanConcurrency)
+	}
+
+	// Verify cache defaults
+	if cfg.Performance.Cache.TTL != 1*time.Hour {
+		t.Errorf("expected cache TTL 1h, got %v", cfg.Performance.Cache.TTL)
+	}
+	if cfg.Performance.Cache.KEVTTL != 24*time.Hour {
+		t.Errorf("expected KEV TTL 24h, got %v", cfg.Performance.Cache.KEVTTL)
+	}
+	if cfg.Performance.Cache.MaxSize != 1024 {
+		t.Errorf("expected cache max size 1024, got %d", cfg.Performance.Cache.MaxSize)
+	}
+	if cfg.Performance.Cache.Disabled {
+		t.Error("expected cache to be enabled by default")
+	}
+}
+
+func TestHTTPConfigValidation(t *testing.T) {
+	tests := []struct {
+		name    string
+		cfg     HTTPConfig
+		wantErr bool
+	}{
+		{
+			name:    "valid config",
+			cfg:     defaultConfig().HTTP,
+			wantErr: false,
+		},
+		{
+			name: "negative timeout",
+			cfg: HTTPConfig{
+				Timeout: -1 * time.Second,
+			},
+			wantErr: true,
+		},
+		{
+			name: "negative dial timeout",
+			cfg: HTTPConfig{
+				DialTimeout: -1 * time.Second,
+			},
+			wantErr: true,
+		},
+		{
+			name: "negative retry max",
+			cfg: HTTPConfig{
+				Retry: RetryConfig{Max: -1},
+			},
+			wantErr: true,
+		},
+		{
+			name: "negative retry wait min",
+			cfg: HTTPConfig{
+				Retry: RetryConfig{
+					WaitMin: -1 * time.Second,
+					WaitMax: 5 * time.Second,
+				},
+			},
+			wantErr: true,
+		},
+		{
+			name: "wait max less than wait min",
+			cfg: HTTPConfig{
+				Retry: RetryConfig{
+					WaitMin: 5 * time.Second,
+					WaitMax: 1 * time.Second,
+				},
+			},
+			wantErr: true,
+		},
+		{
+			name: "zero timeout is valid",
+			cfg: HTTPConfig{
+				Timeout:     0,
+				DialTimeout: 0,
+				Retry: RetryConfig{
+					Max:     0,
+					WaitMin: 0,
+					WaitMax: 0,
+				},
+			},
+			wantErr: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := tt.cfg.Validate()
+			if tt.wantErr && err == nil {
+				t.Error("expected validation error, got nil")
+			}
+			if !tt.wantErr && err != nil {
+				t.Errorf("unexpected validation error: %v", err)
+			}
+		})
+	}
+}
+
+func TestPerformanceConfigValidation(t *testing.T) {
+	tests := []struct {
+		name    string
+		cfg     PerformanceConfig
+		wantErr bool
+	}{
+		{
+			name:    "valid config",
+			cfg:     defaultConfig().Performance,
+			wantErr: false,
+		},
+		{
+			name: "negative OSV concurrency",
+			cfg: PerformanceConfig{
+				OSVConcurrency: -1,
+			},
+			wantErr: true,
+		},
+		{
+			name: "negative graph concurrency",
+			cfg: PerformanceConfig{
+				GraphConcurrency: -1,
+			},
+			wantErr: true,
+		},
+		{
+			name: "negative cache max size",
+			cfg: PerformanceConfig{
+				Cache: CacheConfig{MaxSize: -1},
+			},
+			wantErr: true,
+		},
+		{
+			name: "negative cache TTL",
+			cfg: PerformanceConfig{
+				Cache: CacheConfig{TTL: -1 * time.Second},
+			},
+			wantErr: true,
+		},
+		{
+			name: "zero concurrency is valid",
+			cfg: PerformanceConfig{
+				OSVConcurrency:   0,
+				GraphConcurrency: 0,
+			},
+			wantErr: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := tt.cfg.Validate()
+			if tt.wantErr && err == nil {
+				t.Error("expected validation error, got nil")
+			}
+			if !tt.wantErr && err != nil {
+				t.Errorf("unexpected validation error: %v", err)
+			}
+		})
+	}
+}
+
+func TestRetryEnabled(t *testing.T) {
+	tests := []struct {
+		name     string
+		cfg      HTTPConfig
+		expected bool
+	}{
+		{
+			name:     "nil defaults to true",
+			cfg:      HTTPConfig{},
+			expected: true,
+		},
+		{
+			name: "explicit true",
+			cfg: HTTPConfig{
+				Retry: RetryConfig{Enabled: boolPtr(true)},
+			},
+			expected: true,
+		},
+		{
+			name: "explicit false",
+			cfg: HTTPConfig{
+				Retry: RetryConfig{Enabled: boolPtr(false)},
+			},
+			expected: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := tt.cfg.RetryEnabled(); got != tt.expected {
+				t.Errorf("RetryEnabled() = %v, want %v", got, tt.expected)
+			}
+		})
+	}
+}
+
+func boolPtr(b bool) *bool {
+	return &b
+}
+
+func TestLoadHTTPFromEnv(t *testing.T) {
+	envVars := map[string]string{
+		"DEPUTY_HTTP_TIMEOUT":               "60s",
+		"DEPUTY_HTTP_DIAL_TIMEOUT":          "15s",
+		"DEPUTY_HTTP_TLS_TIMEOUT":           "20s",
+		"DEPUTY_HTTP_RESPONSE_TIMEOUT":      "30s",
+		"DEPUTY_HTTP_KEEPALIVE":             "45s",
+		"DEPUTY_HTTP_IDLE_TIMEOUT":          "120s",
+		"DEPUTY_HTTP_MAX_IDLE_CONNS":        "50",
+		"DEPUTY_HTTP_MAX_IDLE_CONNS_PER_HOST": "20",
+		"DEPUTY_HTTP_RETRY_MAX":             "5",
+		"DEPUTY_HTTP_RETRY_WAIT_MIN":        "1s",
+		"DEPUTY_HTTP_RETRY_WAIT_MAX":        "10s",
+		"DEPUTY_HTTP_RETRY_ENABLED":         "false",
+	}
+
+	for k, v := range envVars {
+		t.Setenv(k, v)
+	}
+
+	loader := NewLoader("")
+	cfg, err := loader.Load()
+	if err != nil {
+		t.Fatalf("Load failed: %v", err)
+	}
+
+	if cfg.HTTP.Timeout != 60*time.Second {
+		t.Errorf("expected HTTP timeout 60s, got %v", cfg.HTTP.Timeout)
+	}
+	if cfg.HTTP.DialTimeout != 15*time.Second {
+		t.Errorf("expected dial timeout 15s, got %v", cfg.HTTP.DialTimeout)
+	}
+	if cfg.HTTP.TLSHandshakeTimeout != 20*time.Second {
+		t.Errorf("expected TLS timeout 20s, got %v", cfg.HTTP.TLSHandshakeTimeout)
+	}
+	if cfg.HTTP.ResponseHeaderTimeout != 30*time.Second {
+		t.Errorf("expected response header timeout 30s, got %v", cfg.HTTP.ResponseHeaderTimeout)
+	}
+	if cfg.HTTP.KeepAlive != 45*time.Second {
+		t.Errorf("expected keep-alive 45s, got %v", cfg.HTTP.KeepAlive)
+	}
+	if cfg.HTTP.IdleConnTimeout != 120*time.Second {
+		t.Errorf("expected idle conn timeout 120s, got %v", cfg.HTTP.IdleConnTimeout)
+	}
+	if cfg.HTTP.MaxIdleConns != 50 {
+		t.Errorf("expected max idle conns 50, got %d", cfg.HTTP.MaxIdleConns)
+	}
+	if cfg.HTTP.MaxIdleConnsPerHost != 20 {
+		t.Errorf("expected max idle conns per host 20, got %d", cfg.HTTP.MaxIdleConnsPerHost)
+	}
+	if cfg.HTTP.Retry.Max != 5 {
+		t.Errorf("expected retry max 5, got %d", cfg.HTTP.Retry.Max)
+	}
+	if cfg.HTTP.Retry.WaitMin != 1*time.Second {
+		t.Errorf("expected retry wait min 1s, got %v", cfg.HTTP.Retry.WaitMin)
+	}
+	if cfg.HTTP.Retry.WaitMax != 10*time.Second {
+		t.Errorf("expected retry wait max 10s, got %v", cfg.HTTP.Retry.WaitMax)
+	}
+	if cfg.HTTP.RetryEnabled() {
+		t.Error("expected retry to be disabled")
+	}
+}
+
+func TestLoadPerformanceFromEnv(t *testing.T) {
+	envVars := map[string]string{
+		"DEPUTY_OSV_CONCURRENCY":        "20",
+		"DEPUTY_GRAPH_CONCURRENCY":      "10",
+		"DEPUTY_SBOM_ENRICH_CONCURRENCY": "8",
+		"DEPUTY_IMAGE_SCAN_CONCURRENCY":  "6",
+		"DEPUTY_CACHE_DIR":              "/tmp/deputy-cache",
+		"DEPUTY_CACHE_TTL":              "2h",
+		"DEPUTY_CACHE_KEV_TTL":          "48h",
+		"DEPUTY_CACHE_EPSS_TTL":         "12h",
+		"DEPUTY_CACHE_OSV_TTL":          "30m",
+		"DEPUTY_CACHE_LICENSE_TTL":      "72h",
+		"DEPUTY_CACHE_MAX_SIZE":         "2048",
+		"DEPUTY_CACHE_DISABLED":         "true",
+	}
+
+	for k, v := range envVars {
+		t.Setenv(k, v)
+	}
+
+	loader := NewLoader("")
+	cfg, err := loader.Load()
+	if err != nil {
+		t.Fatalf("Load failed: %v", err)
+	}
+
+	if cfg.Performance.OSVConcurrency != 20 {
+		t.Errorf("expected OSV concurrency 20, got %d", cfg.Performance.OSVConcurrency)
+	}
+	if cfg.Performance.GraphConcurrency != 10 {
+		t.Errorf("expected graph concurrency 10, got %d", cfg.Performance.GraphConcurrency)
+	}
+	if cfg.Performance.SBOMEnrichConcurrency != 8 {
+		t.Errorf("expected SBOM enrich concurrency 8, got %d", cfg.Performance.SBOMEnrichConcurrency)
+	}
+	if cfg.Performance.ImageScanConcurrency != 6 {
+		t.Errorf("expected image scan concurrency 6, got %d", cfg.Performance.ImageScanConcurrency)
+	}
+	if cfg.Performance.Cache.Dir != "/tmp/deputy-cache" {
+		t.Errorf("expected cache dir '/tmp/deputy-cache', got %q", cfg.Performance.Cache.Dir)
+	}
+	if cfg.Performance.Cache.TTL != 2*time.Hour {
+		t.Errorf("expected cache TTL 2h, got %v", cfg.Performance.Cache.TTL)
+	}
+	if cfg.Performance.Cache.KEVTTL != 48*time.Hour {
+		t.Errorf("expected KEV TTL 48h, got %v", cfg.Performance.Cache.KEVTTL)
+	}
+	if cfg.Performance.Cache.EPSSTTL != 12*time.Hour {
+		t.Errorf("expected EPSS TTL 12h, got %v", cfg.Performance.Cache.EPSSTTL)
+	}
+	if cfg.Performance.Cache.OSVTTL != 30*time.Minute {
+		t.Errorf("expected OSV TTL 30m, got %v", cfg.Performance.Cache.OSVTTL)
+	}
+	if cfg.Performance.Cache.LicenseTTL != 72*time.Hour {
+		t.Errorf("expected license TTL 72h, got %v", cfg.Performance.Cache.LicenseTTL)
+	}
+	if cfg.Performance.Cache.MaxSize != 2048 {
+		t.Errorf("expected cache max size 2048, got %d", cfg.Performance.Cache.MaxSize)
+	}
+	if !cfg.Performance.Cache.Disabled {
+		t.Error("expected cache to be disabled")
+	}
+}
+
+func TestLoadHTTPAndPerformanceFromFile(t *testing.T) {
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, "deputy.yaml")
+	configData := []byte(`
+logging:
+  level: info
+  format: text
+http:
+  timeout: 45s
+  dial_timeout: 12s
+  tls_handshake_timeout: 15s
+  max_idle_conns: 30
+  retry:
+    max: 4
+    wait_min: 750ms
+    wait_max: 8s
+performance:
+  osv_concurrency: 15
+  graph_concurrency: 8
+  cache:
+    ttl: 90m
+    max_size: 512
+`)
+
+	if err := os.WriteFile(configPath, configData, 0644); err != nil {
+		t.Fatalf("failed to write config file: %v", err)
+	}
+
+	loader := NewLoader(configPath)
+	cfg, err := loader.Load()
+	if err != nil {
+		t.Fatalf("Load failed: %v", err)
+	}
+
+	if cfg.HTTP.Timeout != 45*time.Second {
+		t.Errorf("expected HTTP timeout 45s, got %v", cfg.HTTP.Timeout)
+	}
+	if cfg.HTTP.DialTimeout != 12*time.Second {
+		t.Errorf("expected dial timeout 12s, got %v", cfg.HTTP.DialTimeout)
+	}
+	if cfg.HTTP.TLSHandshakeTimeout != 15*time.Second {
+		t.Errorf("expected TLS timeout 15s, got %v", cfg.HTTP.TLSHandshakeTimeout)
+	}
+	if cfg.HTTP.MaxIdleConns != 30 {
+		t.Errorf("expected max idle conns 30, got %d", cfg.HTTP.MaxIdleConns)
+	}
+	if cfg.HTTP.Retry.Max != 4 {
+		t.Errorf("expected retry max 4, got %d", cfg.HTTP.Retry.Max)
+	}
+	if cfg.HTTP.Retry.WaitMin != 750*time.Millisecond {
+		t.Errorf("expected retry wait min 750ms, got %v", cfg.HTTP.Retry.WaitMin)
+	}
+	if cfg.HTTP.Retry.WaitMax != 8*time.Second {
+		t.Errorf("expected retry wait max 8s, got %v", cfg.HTTP.Retry.WaitMax)
+	}
+	if cfg.Performance.OSVConcurrency != 15 {
+		t.Errorf("expected OSV concurrency 15, got %d", cfg.Performance.OSVConcurrency)
+	}
+	if cfg.Performance.GraphConcurrency != 8 {
+		t.Errorf("expected graph concurrency 8, got %d", cfg.Performance.GraphConcurrency)
+	}
+	if cfg.Performance.Cache.TTL != 90*time.Minute {
+		t.Errorf("expected cache TTL 90m, got %v", cfg.Performance.Cache.TTL)
+	}
+	if cfg.Performance.Cache.MaxSize != 512 {
+		t.Errorf("expected cache max size 512, got %d", cfg.Performance.Cache.MaxSize)
 	}
 }

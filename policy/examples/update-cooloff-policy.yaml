@@ -1,0 +1,116 @@
+# Update Cool-Off Policy
+#
+# Supply chain security best practice: Don't immediately upgrade to brand-new versions.
+# This policy implements a "cool-off" period where Deputy warns or blocks upgrades
+# to very recently published versions, helping protect against:
+#
+# 1. Typosquatting attacks that get quickly discovered and removed
+# 2. Compromised packages that are caught within days
+# 3. Buggy releases that get yanked/deprecated
+# 4. Supply chain attacks that rely on immediate adoption
+#
+# Usage:
+#   deputy fix --policy policy/examples/update-cooloff-policy.yaml
+#
+# The policy evaluates at the fix_plan_step entrypoint and checks if the
+# recommended version is too new based on configurable thresholds.
+
+policies:
+  - name: update-cooloff-warn
+    description: Warn when upgrading to versions published less than 7 days ago
+    entrypoints:
+      - fix_plan_step
+    vars:
+      # Minimum age in hours for a "safe" version (7 days = 168 hours)
+      minVersionAgeHours: 168
+      # Extract manager from step
+      manager: 'step.?manager.orValue("")'
+      # Check if this is an executable upgrade command
+      isUpgrade: 'step.?executable.orValue(false)'
+    rules:
+      - action: warn
+        when: |
+          env.entrypoint == "fix_plan_step" &&
+          isUpgrade &&
+          manager != ""
+        reason: |
+          Consider waiting before upgrading to very new versions.
+          New package versions should "age" for at least 7 days before auto-adoption.
+          This helps protect against supply chain attacks that are often caught early.
+        remediation: |
+          Review the package changelog and GitHub issues before upgrading.
+          Consider using a staging environment to test new versions first.
+          For critical systems, wait for community feedback on new releases.
+
+  - name: block-major-version-jumps
+    description: Block automatic major version upgrades (breaking changes)
+    entrypoints:
+      - fix_plan_step
+    vars:
+      command: 'step.?command.orValue("")'
+      # Detect major version upgrade patterns like @1.0.0 -> @2.0.0
+      hasMajorUpgrade: |
+        command.contains("@") && (
+          command.matches(".*@[0-9]+\\.0\\.0.*") ||
+          command.matches(".*@v[0-9]+\\.0\\.0.*")
+        )
+    rules:
+      - action: deny
+        when: |
+          env.entrypoint == "fix_plan_step" &&
+          step.?executable.orValue(false) &&
+          hasMajorUpgrade
+        reason: Major version upgrades may contain breaking changes and require manual review
+        remediation: |
+          Review the package's CHANGELOG and migration guide before upgrading.
+          Test thoroughly in a development environment first.
+          Consider using 'deputy fix' without --apply to review the plan.
+
+  - name: require-pinned-versions
+    description: Ensure upgrades specify exact versions, not ranges
+    entrypoints:
+      - fix_plan_step
+    vars:
+      command: 'step.?command.orValue("")'
+      # Check for version range specifiers that should be avoided
+      hasRange: |
+        command.contains(">=") ||
+        command.contains("^") ||
+        command.contains("~") ||
+        command.contains(">") ||
+        command.contains("<")
+    rules:
+      - action: warn
+        when: |
+          env.entrypoint == "fix_plan_step" &&
+          step.?executable.orValue(false) &&
+          hasRange
+        reason: |
+          Remediation commands should use exact versions for reproducibility.
+          Version ranges can lead to inconsistent builds and unexpected updates.
+        remediation: |
+          Pin to an exact version (e.g., "package@1.2.3" instead of "package@^1.2.3").
+          Use lockfiles to ensure reproducible builds.
+
+  - name: plan-size-limit
+    description: Prevent overwhelming number of changes in a single fix plan
+    entrypoints:
+      - fix_plan
+    vars:
+      maxCommands: 20
+      commandCount: 'plan.?stats.?totalCommands.orValue(0)'
+    rules:
+      - action: warn
+        when: |
+          env.entrypoint == "fix_plan" &&
+          commandCount > maxCommands
+        reason: |
+          This remediation plan has more than 20 commands.
+          Large batch updates increase the risk of:
+          - Undetected breaking changes
+          - Difficult rollbacks
+          - Merge conflicts
+        remediation: |
+          Consider splitting the remediation into smaller batches.
+          Prioritize critical/high severity vulnerabilities first.
+          Review each upgrade individually in complex cases.

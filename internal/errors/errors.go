@@ -225,3 +225,101 @@ func (e *ScanError) Is(target error) bool {
 	_, ok := target.(*ScanError)
 	return ok
 }
+
+// Suggestible is an interface for errors that can provide remediation suggestions.
+type Suggestible interface {
+	error
+	Suggestion() string
+}
+
+// WithSuggestion wraps an error with a remediation suggestion.
+// The suggestion appears in CLI output to help users resolve the issue.
+type WithSuggestion struct {
+	Err        error
+	suggestion string
+}
+
+func (e *WithSuggestion) Error() string {
+	return e.Err.Error()
+}
+
+func (e *WithSuggestion) Unwrap() error { return e.Err }
+
+func (e *WithSuggestion) Suggestion() string {
+	return e.suggestion
+}
+
+// Suggest wraps an error with a suggestion for how to fix it.
+// Returns nil if err is nil.
+func Suggest(err error, suggestion string) error {
+	if err == nil {
+		return nil
+	}
+	return &WithSuggestion{Err: err, suggestion: suggestion}
+}
+
+// GetSuggestion extracts a suggestion from an error chain.
+// Returns empty string if no suggestion is found.
+func GetSuggestion(err error) string {
+	var s Suggestible
+	if errors.As(err, &s) {
+		return s.Suggestion()
+	}
+	return ""
+}
+
+// CommonSuggestions provides standard remediation suggestions for common errors.
+var CommonSuggestions = map[string]string{
+	"no go.mod":          "Run 'go mod init' to initialize a Go module in this directory",
+	"no package.json":    "Run 'npm init' to create a package.json file",
+	"network":            "Check your internet connection and try again. If behind a proxy, set HTTP_PROXY/HTTPS_PROXY",
+	"auth":               "Check your credentials. For GitHub, ensure GITHUB_TOKEN is set correctly",
+	"rate limit":         "Wait a few minutes or authenticate to increase rate limits",
+	"not found":          "Verify the path or URL is correct and the resource exists",
+	"permission denied":  "Check file permissions or run with appropriate privileges",
+	"invalid format":     "Check the input format matches expected format (JSON, YAML, etc.)",
+	"policy syntax":      "Run 'deputy policy lint' to validate your policy files",
+	"no vulnerabilities": "No action needed - your dependencies appear secure",
+}
+
+// SuggestFor returns a standard suggestion for a given error category.
+// Falls back to empty string if no match is found.
+func SuggestFor(category string) string {
+	return CommonSuggestions[category]
+}
+
+// TargetError represents failures related to target resolution (repos, images, etc.).
+type TargetError struct {
+	Target     string
+	Message    string
+	Cause      error
+	suggestion string
+}
+
+func (e *TargetError) Error() string {
+	if e.Cause != nil {
+		return fmt.Sprintf("target %q: %s: %v", e.Target, e.Message, e.Cause)
+	}
+	return fmt.Sprintf("target %q: %s", e.Target, e.Message)
+}
+
+func (e *TargetError) Unwrap() error { return e.Cause }
+
+func (e *TargetError) Suggestion() string {
+	return e.suggestion
+}
+
+func (e *TargetError) Is(target error) bool {
+	_, ok := target.(*TargetError)
+	return ok
+}
+
+// NewTargetError creates a TargetError with an optional suggestion.
+func NewTargetError(target, message string, cause error, suggestion string) *TargetError {
+	return &TargetError{
+		Target:     target,
+		Message:    message,
+		Cause:      cause,
+		suggestion: suggestion,
+	}
+}

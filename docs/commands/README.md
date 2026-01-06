@@ -12,6 +12,7 @@ Deputy is intentionally pipeline-friendly: commands compose well with each other
 | [`fix`](fix.md) | Generate/apply remediation plans | `--apply`, `--report`, `--agent` |
 | [`triage`](triage.md) | Prioritize findings | `--format`, `--agent` |
 | [`diff`](diff.md) | Compare dependency changes between refs | `--skip-vuln-scan`, `--licenses` |
+| [`graph`](graph.md) | Visualize dependency graph | `--format`, `--depth`, `--focus`, subcommands: `why`, `needs` |
 | [`sbom`](sbom.md) | Generate CycloneDX/SPDX SBOMs | `--format`, `--ref`, `--enrich-licenses` |
 | [`list`](list.md) | Dump PURLs for scripting | `--format`, `--only-direct` |
 | [`policy`](policy.md) | Lint, test, bundle, evaluate policies | subcommands: `lint`, `test`, `eval`, `bundle` |
@@ -34,6 +35,12 @@ $ deputy diff main feature/upgrade
 
 # Generate an SBOM
 $ deputy sbom --format spdx-json --output sbom.spdx.json
+
+# Visualize dependency graph
+$ deputy graph --format dot | dot -Tpng -o deps.png
+
+# Why is a package in my deps?
+$ deputy graph why lodash
 
 # List all dependencies as PURLs
 $ deputy list --format json | jq '.items[].purl'
@@ -72,6 +79,7 @@ Use exit codes for CI gating.
 - [Fix](fix.md) — Remediation planning
 - [Triage](triage.md) — Prioritization
 - [Diff](diff.md) — Dependency change analysis
+- [Graph](graph.md) — Dependency graph visualization
 - [SBOM](sbom.md) — SBOM generation
 - [List](list.md) — Dependency listing
 

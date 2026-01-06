@@ -3,6 +3,8 @@ package otel
 import (
 	"testing"
 	"time"
+
+	"github.com/picatz/deputy/internal/errors"
 )
 
 func TestDefaultConfig(t *testing.T) {
@@ -46,12 +48,12 @@ func TestConfig_Validate_InvalidProtocol(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for invalid protocol")
 	}
-	cfgErr, ok := err.(*ConfigError)
+	valErr, ok := err.(*errors.ValidationError)
 	if !ok {
-		t.Fatalf("expected *ConfigError, got %T", err)
+		t.Fatalf("expected *errors.ValidationError, got %T", err)
 	}
-	if cfgErr.Field != "exporter.protocol" {
-		t.Errorf("expected field 'exporter.protocol', got %q", cfgErr.Field)
+	if valErr.Field != "exporter.protocol" {
+		t.Errorf("expected field 'exporter.protocol', got %q", valErr.Field)
 	}
 }
 
@@ -137,14 +139,29 @@ func TestConfig_Validate_HTTPProtocol(t *testing.T) {
 	}
 }
 
-func TestConfigError_Error(t *testing.T) {
-	err := &ConfigError{
-		Field:   "test.field",
-		Value:   "bad",
-		Message: "is invalid",
+func TestValidationError_FromValidate(t *testing.T) {
+	// Test that Validate returns properly structured ValidationError
+	cfg := Config{
+		Enabled: true,
+		Exporter: ExporterConfig{
+			Protocol: "invalid",
+		},
 	}
-	expected := "otel config: test.field: is invalid"
-	if err.Error() != expected {
-		t.Errorf("expected %q, got %q", expected, err.Error())
+	err := cfg.Validate()
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	valErr, ok := err.(*errors.ValidationError)
+	if !ok {
+		t.Fatalf("expected *errors.ValidationError, got %T", err)
+	}
+	if valErr.Field != "exporter.protocol" {
+		t.Errorf("expected Field 'exporter.protocol', got %q", valErr.Field)
+	}
+	if valErr.Value != "invalid" {
+		t.Errorf("expected Value 'invalid', got %v", valErr.Value)
+	}
+	if valErr.Message != "must be 'grpc' or 'http'" {
+		t.Errorf("unexpected Message: %q", valErr.Message)
 	}
 }

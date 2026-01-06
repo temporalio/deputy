@@ -9,6 +9,7 @@ import (
 	"github.com/picatz/deputy/internal/cli/flags"
 	inv "github.com/picatz/deputy/internal/inventory"
 	"github.com/picatz/deputy/internal/report/render"
+	"github.com/picatz/deputy/internal/scan"
 	"github.com/spf13/cobra"
 )
 
@@ -49,8 +50,9 @@ type scanFlags struct {
 	PolicyPaths []string
 
 	// Display options
-	ShowSymbols bool
-	ShowDBInfo  bool
+	ShowSymbols           bool
+	ShowDBInfo            bool
+	ShowUnfixableGuidance bool
 
 	// Scan options
 	Ecosystems []string
@@ -61,19 +63,39 @@ type scanFlags struct {
 
 	// Enrichment options
 	Enrich bool
+
+	// Graph option - enables dependency graph resolution for path analysis
+	WithGraph bool
 }
 
 // displayOptions returns the VulnerabilityDisplayOptions derived from scan flags.
 func (f scanFlags) displayOptions() render.VulnerabilityDisplayOptions {
 	return render.VulnerabilityDisplayOptions{
-		ShowSymbols:      f.ShowSymbols,
-		ShowDatabaseInfo: f.ShowDBInfo,
+		ShowSymbols:           f.ShowSymbols,
+		ShowDatabaseInfo:      f.ShowDBInfo,
+		ShowUnfixableGuidance: f.ShowUnfixableGuidance,
 	}
+}
+
+// displayOptionsWithResult returns VulnerabilityDisplayOptions including the graph from a scan result.
+func (f scanFlags) displayOptionsWithResult(result scan.Result) render.VulnerabilityDisplayOptions {
+	opts := f.displayOptions()
+	opts.Graph = result.Graph
+	return opts
 }
 
 // scanOptions returns the inventory scan options derived from scan flags.
 func (f scanFlags) scanOptions() inv.ScanOptions {
 	return inv.ScanOptions{Ecosystems: f.Ecosystems}
+}
+
+// graphOptions returns graph resolution options.
+// When enabled, uses proxy.golang.org for Go module resolution by default.
+func (f scanFlags) graphOptions() scan.GraphOptions {
+	return scan.GraphOptions{
+		Enabled:  f.WithGraph,
+		UseProxy: true,
+	}
 }
 
 // parsePublishedTimes parses the published time filters and returns before/after times.
@@ -102,6 +124,7 @@ func extractScanFlags(cmd *cobra.Command) scanFlags {
 	// Display flags
 	f.ShowSymbols, _ = cmd.Flags().GetBool("show-symbols")
 	f.ShowDBInfo, _ = cmd.Flags().GetBool("show-db-info")
+	f.ShowUnfixableGuidance, _ = cmd.Flags().GetBool("show-unfixable-guidance")
 
 	// Scan options
 	f.Ecosystems, _ = cmd.Flags().GetStringSlice("ecosystems")
@@ -112,6 +135,9 @@ func extractScanFlags(cmd *cobra.Command) scanFlags {
 
 	// Enrichment options
 	f.Enrich, _ = cmd.Flags().GetBool("enrich")
+
+	// Graph option
+	f.WithGraph, _ = cmd.Flags().GetBool("with-graph")
 
 	return f
 }

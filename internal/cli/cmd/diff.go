@@ -63,6 +63,7 @@ func AddDiffCommand(root *cobra.Command, service *scan.Service) {
 
 	cmd := &cobra.Command{
 		Use:           "diff [base] [target]",
+		Aliases:       []string{"d"},
 		Short:         "Compare dependency changes between Git references or container images",
 		SilenceErrors: true,
 		SilenceUsage:  true,
@@ -369,7 +370,6 @@ func runDiffAnalysis(ctx context.Context, service *scan.Service, repoPath, baseR
 	var targetHash *plumbing.Hash
 
 	if isWorkingPseudoRef(targetRef) {
-		fmt.Fprintln(outW, ui.StyleMeta.Render("Scanning packages in working tree..."))
 		tp, err := inv.ScanPackagesWorking(ctx, repoSrc.Workspace, scanOpts)
 		if err != nil {
 			otel.SetSpanError(span, err)
@@ -390,7 +390,6 @@ func runDiffAnalysis(ctx context.Context, service *scan.Service, repoPath, baseR
 	}
 
 	// Scan base packages
-	fmt.Fprintln(outW, ui.StyleMeta.Render(fmt.Sprintf("Scanning packages in base reference %s...", baseHash.String()[:7])))
 	basePackages, err := inv.ScanPackagesAtCommitSnapshot(ctx, repo, *baseHash, scanOpts)
 	if err != nil {
 		otel.SetSpanError(span, err)
@@ -399,7 +398,6 @@ func runDiffAnalysis(ctx context.Context, service *scan.Service, repoPath, baseR
 
 	// Scan target packages if not already done
 	if targetPackages == nil && targetHash != nil {
-		fmt.Fprintln(outW, ui.StyleMeta.Render(fmt.Sprintf("Scanning packages in target reference %s...", targetHash.String()[:7])))
 		tp, err := inv.ScanPackagesAtCommitSnapshot(ctx, repo, *targetHash, scanOpts)
 		if err != nil {
 			otel.SetSpanError(span, err)
@@ -446,8 +444,29 @@ func runDiffAnalysis(ctx context.Context, service *scan.Service, repoPath, baseR
 	manifestRes := targetManifestRes
 	pkgInputs := targetPkgInputs
 
+	// Collect main modules to exclude from comparison (the project itself shouldn't appear as a dependency)
+	excludeMainModules := compare.CollectMainModulesFromWorkspace(repoSrc.Workspace)
+	if baseHash != nil {
+		if baseMains, err := compare.CollectMainModulesFromCommit(repo, *baseHash); err == nil {
+			for mod := range baseMains {
+				excludeMainModules[mod] = true
+			}
+		}
+	}
+	if targetHash != nil {
+		if targetMains, err := compare.CollectMainModulesFromCommit(repo, *targetHash); err == nil {
+			for mod := range targetMains {
+				excludeMainModules[mod] = true
+			}
+		}
+	}
+
 	// Compare packages
-	changes := compare.ComparePackages(basePackages, targetPackages, goDirect, pkgDirect, nil)
+	changes := compare.ComparePackagesWithOptions(basePackages, targetPackages, compare.CompareOptions{
+		GoDirect:           goDirect,
+		PkgDirect:          pkgDirect,
+		ExcludeMainModules: excludeMainModules,
+	})
 	if len(changes) == 0 {
 		fmt.Fprintln(outW, "No package changes detected.")
 		otel.SetSpanOK(span)
@@ -462,8 +481,6 @@ func runDiffAnalysis(ctx context.Context, service *scan.Service, repoPath, baseR
 
 	// Scan for vulnerabilities if enabled
 	if enableVulnScan {
-		fmt.Fprintln(outW)
-		fmt.Fprintln(outW, ui.StyleMeta.Render("Scanning dependencies for vulnerabilities..."))
 
 		inputs := pkgInputs
 		if inputs == nil {

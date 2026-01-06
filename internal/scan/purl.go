@@ -85,18 +85,20 @@ func (s *Service) ScanPURL(ctx context.Context, purlStr string, opts Options) (*
 	}
 
 	findings, advisories, queryErr := s.queryOSV(ctx, inputs)
-	result := buildResult(
-		Target{
+	// Note: Graph resolution is not applicable for single PURL scans.
+	result := buildResult(buildResultInput{
+		target: Target{
 			Kind:        targets.KindPURL,
 			DisplayPath: canonical,
 		},
-		pkgs,
-		direct,
-		findings,
-		advisories,
-		queryErr,
-		opts,
-	)
+		pkgs:       pkgs,
+		direct:     direct,
+		findings:   findings,
+		advisories: advisories,
+		queryErr:   queryErr,
+		opts:       opts,
+		graph:      nil,
+	})
 
 	otel.RecordScanCompletion(ctx, otel.ScanCompletion{
 		Span:         span,

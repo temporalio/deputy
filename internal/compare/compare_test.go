@@ -519,3 +519,108 @@ func TestComparePackages_PackageMatching(t *testing.T) {
 		t.Errorf("expected 1 removed package, got %d", removed)
 	}
 }
+
+func TestGetMainModuleFromGoMod(t *testing.T) {
+	cases := []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{
+			name:  "simple module",
+			input: "module github.com/example/app",
+			want:  "github.com/example/app",
+		},
+		{
+			name:  "module with go directive",
+			input: "module github.com/example/app\n\ngo 1.21",
+			want:  "github.com/example/app",
+		},
+		{
+			name: "module with requires",
+			input: `module github.com/example/app
+
+go 1.21
+
+require (
+	github.com/dep/a v1.0.0
+)`,
+			want: "github.com/example/app",
+		},
+		{
+			name:  "empty input",
+			input: "",
+			want:  "",
+		},
+		{
+			name:  "no module line",
+			input: "go 1.21\nrequire github.com/dep v1.0.0",
+			want:  "",
+		},
+		{
+			name:  "module with trailing comment",
+			input: "module github.com/example/app // some comment",
+			want:  "github.com/example/app",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := GetMainModuleFromGoMod([]byte(tc.input))
+			if got != tc.want {
+				t.Errorf("GetMainModuleFromGoMod() = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestComparePackagesWithOptions_ExcludeMainModule(t *testing.T) {
+	oldPkgs := []*extractor.Package{
+		{Name: "github.com/dep/a", Version: "v1.0.0", PURLType: scalpurl.TypeGolang},
+	}
+	newPkgs := []*extractor.Package{
+		{Name: "github.com/dep/a", Version: "v1.1.0", PURLType: scalpurl.TypeGolang},
+		{Name: "github.com/myproject/app", Version: "v0.0.0-dirty", PURLType: scalpurl.TypeGolang},
+	}
+
+	// Without exclusion, main module appears as added
+	changesNoExclude := ComparePackagesWithOptions(oldPkgs, newPkgs, CompareOptions{})
+	if len(changesNoExclude) != 2 {
+		t.Fatalf("expected 2 changes without exclusion, got %d: %+v", len(changesNoExclude), changesNoExclude)
+	}
+
+	// With exclusion, main module is filtered out
+	changesWithExclude := ComparePackagesWithOptions(oldPkgs, newPkgs, CompareOptions{
+		ExcludeMainModules: map[string]bool{
+			"github.com/myproject/app": true,
+		},
+	})
+	if len(changesWithExclude) != 1 {
+		t.Fatalf("expected 1 change with exclusion, got %d: %+v", len(changesWithExclude), changesWithExclude)
+	}
+	if changesWithExclude[0].Name != "github.com/dep/a" {
+		t.Errorf("expected dep/a change, got %s", changesWithExclude[0].Name)
+	}
+}
+
+func TestComparePackagesWithOptions_GoToolchainNotFiltered(t *testing.T) {
+	// The "go" pseudo-package (toolchain version) is a legitimate dependency
+	// with its own vulnerabilities and should NOT be filtered by default.
+	oldPkgs := []*extractor.Package{
+		{Name: "github.com/dep/a", Version: "v1.0.0", PURLType: scalpurl.TypeGolang},
+	}
+	newPkgs := []*extractor.Package{
+		{Name: "github.com/dep/a", Version: "v1.0.0", PURLType: scalpurl.TypeGolang},
+		{Name: "go", Version: "1.25.4", PURLType: scalpurl.TypeGolang},
+	}
+
+	// The go toolchain should appear as an added dependency
+	changes := ComparePackagesWithOptions(oldPkgs, newPkgs, CompareOptions{
+		ExcludeMainModules: map[string]bool{}, // empty but non-nil to trigger exclusion check
+	})
+	if len(changes) != 1 {
+		t.Fatalf("expected 1 change (go toolchain added), got %d: %+v", len(changes), changes)
+	}
+	if changes[0].Name != "go" || changes[0].ChangeType != Added {
+		t.Errorf("expected go toolchain as added, got: %+v", changes[0])
+	}
+}

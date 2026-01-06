@@ -3,20 +3,43 @@ policies:
     description: Ensure auto-run remediation commands stay within safe package-manager verbs
     vars:
       allowedPrefixes:
+        # Go
         - "go get"
         - "go mod tidy"
+        # JavaScript/TypeScript
         - "npm install"
         - "npm update"
         - "pnpm add"
         - "pnpm update"
         - "yarn add"
         - "yarn upgrade"
+        # Python
         - "pip install"
         - "pip3 install"
         - "poetry add"
         - "pipenv install"
+        - "uv add"
+        - "uv lock"
+        - "pdm add"
+        - "conda install"
+        # Ruby
         - "bundle update"
+        # Rust
         - "cargo update"
+        # .NET
+        - "dotnet add"
+        # Elixir
+        - "mix deps.update"
+        # Dart/Flutter
+        - "dart pub upgrade"
+        # CocoaPods
+        - "pod update"
+        # Composer
+        - "composer require"
+        # Maven
+        - "mvn versions"
+        # Gradle
+        - "./gradlew dependencies"
       commandText: 'step.?command.orValue("").lowerAscii().trim()'
       executable: 'step.?executable.orValue(false)'
       allowed: 'allowedPrefixes.exists(p, commandText.startsWith(p))'

@@ -2,7 +2,9 @@ package otel
 
 import (
 	"context"
+	"io"
 	"log/slog"
+	"strings"
 
 	"go.opentelemetry.io/contrib/bridges/otelslog"
 	"go.opentelemetry.io/otel/trace"
@@ -151,4 +153,67 @@ func (h *MultiHandler) WithGroup(name string) slog.Handler {
 		handlers[i] = handler.WithGroup(name)
 	}
 	return &MultiHandler{handlers: handlers}
+}
+
+// AuditHandler filters log records to only those matching audit event patterns
+// and writes them as JSON to a dedicated audit log destination.
+//
+// Audit events are identified by message prefixes (e.g., "deputy.scan.",
+// "deputy.policy.", "deputy.proxy."). This allows using standard slog calls
+// for audit logging without a separate API.
+//
+// Usage:
+//
+//	auditFile, _ := os.OpenFile("audit.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0600)
+//	auditHandler := otel.NewAuditHandler(auditFile, "deputy.")
+//	logger := slog.New(otel.NewMultiHandler(mainHandler, auditHandler))
+//
+//	// This goes to both main log and audit log:
+//	logger.Info("deputy.scan.completed", "target", "github.com/example/repo", "vulns", 5)
+//
+//	// This only goes to main log (no "deputy." prefix):
+//	logger.Debug("processing file", "path", "/tmp/foo")
+type AuditHandler struct {
+	base   slog.Handler
+	prefix string
+}
+
+// NewAuditHandler creates a handler that filters for audit events and writes JSON.
+// Only log records whose message starts with the given prefix are written.
+// Common prefix values: "deputy." for all Deputy events.
+func NewAuditHandler(w io.Writer, prefix string) *AuditHandler {
+	return &AuditHandler{
+		base:   slog.NewJSONHandler(w, &slog.HandlerOptions{Level: slog.LevelInfo}),
+		prefix: prefix,
+	}
+}
+
+// Enabled reports whether the handler handles records at the given level.
+// The handler is always enabled; filtering happens in Handle based on message prefix.
+func (h *AuditHandler) Enabled(ctx context.Context, level slog.Level) bool {
+	return h.base.Enabled(ctx, level)
+}
+
+// Handle writes the record if its message matches the audit prefix.
+func (h *AuditHandler) Handle(ctx context.Context, r slog.Record) error {
+	if !strings.HasPrefix(r.Message, h.prefix) {
+		return nil // Skip non-audit records
+	}
+	return h.base.Handle(ctx, r)
+}
+
+// WithAttrs returns a new handler with the given attributes added.
+func (h *AuditHandler) WithAttrs(attrs []slog.Attr) slog.Handler {
+	return &AuditHandler{
+		base:   h.base.WithAttrs(attrs),
+		prefix: h.prefix,
+	}
+}
+
+// WithGroup returns a new handler with the given group name prepended.
+func (h *AuditHandler) WithGroup(name string) slog.Handler {
+	return &AuditHandler{
+		base:   h.base.WithGroup(name),
+		prefix: h.prefix,
+	}
 }

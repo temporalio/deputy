@@ -28,11 +28,14 @@ import (
 
 // Stats reports cache behavior counters.
 type Stats struct {
-	Hits     uint64
-	Misses   uint64
-	Evicted  uint64
-	Expired  uint64
-	Inserted uint64
+	Hits     uint64  `json:"hits"`
+	Misses   uint64  `json:"misses"`
+	Evicted  uint64  `json:"evicted"`
+	Expired  uint64  `json:"expired"`
+	Inserted uint64  `json:"inserted"`
+	Size     int     `json:"size"`      // Current number of entries
+	MaxSize  int     `json:"max_size"`  // Maximum capacity
+	HitRate  float64 `json:"hit_rate"`  // Hits / (Hits + Misses), 0 if no accesses
 }
 
 // TTLCache is a bounded LRU cache with per-entry TTL.
@@ -157,11 +160,36 @@ func (c *TTLCache[K, V]) Stats() Stats {
 	if c == nil {
 		return Stats{}
 	}
+	hits := c.hits.Load()
+	misses := c.misses.Load()
+	total := hits + misses
+	var hitRate float64
+	if total > 0 {
+		hitRate = float64(hits) / float64(total)
+	}
+
+	c.mu.Lock()
+	size := len(c.byKey)
+	c.mu.Unlock()
+
 	return Stats{
-		Hits:     c.hits.Load(),
-		Misses:   c.misses.Load(),
+		Hits:     hits,
+		Misses:   misses,
 		Evicted:  c.evict.Load(),
 		Expired:  c.exp.Load(),
 		Inserted: c.ins.Load(),
+		Size:     size,
+		MaxSize:  c.maxEntries,
+		HitRate:  hitRate,
 	}
+}
+
+// Len returns the current number of entries in the cache.
+func (c *TTLCache[K, V]) Len() int {
+	if c == nil {
+		return 0
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return len(c.byKey)
 }

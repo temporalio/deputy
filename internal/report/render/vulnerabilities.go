@@ -12,7 +12,9 @@ import (
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/picatz/deputy/internal/dependency"
+	"github.com/picatz/deputy/internal/dependency/graph"
 	"github.com/picatz/deputy/internal/output"
+	"github.com/picatz/deputy/internal/remediation"
 	"github.com/picatz/deputy/internal/report"
 	"github.com/picatz/deputy/internal/scan"
 	ui "github.com/picatz/deputy/internal/ui"
@@ -21,8 +23,12 @@ import (
 
 // VulnerabilityDisplayOptions controls optional verbosity in vulnerability output.
 type VulnerabilityDisplayOptions struct {
-	ShowSymbols      bool
-	ShowDatabaseInfo bool
+	ShowSymbols           bool
+	ShowDatabaseInfo      bool
+	ShowUnfixableGuidance bool
+	// Graph is the dependency graph for showing paths to vulnerable packages.
+	// When non-nil, transitive vulnerabilities will show their dependency path.
+	Graph *graph.Graph
 }
 
 func resolveVulnerabilityDisplayOptions(opts []VulnerabilityDisplayOptions) VulnerabilityDisplayOptions {
@@ -51,7 +57,7 @@ func DisplayVulnerabilitiesWithHeader(w io.Writer, result scan.Result, heading s
 
 	VulnerabilityList(w, cons, displayOpts)
 
-	VulnerabilitySummaryAndActions(w, cons, result.Stats)
+	VulnerabilitySummaryAndActions(w, cons, result.Stats, displayOpts)
 }
 
 // VulnerabilityList writes per-package vulnerability details to w without headings or summary.
@@ -177,6 +183,10 @@ func VulnerabilityList(w io.Writer, cons []vulnerability.Consolidated, opts Vuln
 				metaBlock := lipgloss.JoinHorizontal(lipgloss.Top, ui.StyleMeta.Render("Published:"), lipgloss.NewStyle().MarginLeft(1).Faint(true).Render(v.Published[:10]))
 				fmt.Fprintln(w, "    "+metaBlock)
 			}
+			// Show dependency path for indirect vulnerabilities when graph is available
+			if !v.IsDirect && opts.Graph != nil {
+				renderDependencyPath(w, v, opts.Graph)
+			}
 		}
 
 		renderManifestContext(w, list)
@@ -185,7 +195,8 @@ func VulnerabilityList(w io.Writer, cons []vulnerability.Consolidated, opts Vuln
 
 // VulnerabilitySummaryAndActions writes the summary and recommended
 // actions for a set of vulnerabilities without reprinting the list header.
-func VulnerabilitySummaryAndActions(w io.Writer, cons []vulnerability.Consolidated, stats vulnerability.Stats) {
+func VulnerabilitySummaryAndActions(w io.Writer, cons []vulnerability.Consolidated, stats vulnerability.Stats, opts ...VulnerabilityDisplayOptions) {
+	displayOpts := resolveVulnerabilityDisplayOptions(opts)
 	summary := report.BuildSummary(cons, stats)
 	if !summary.HasVulnerabilities {
 		fmt.Fprintln(w)
@@ -221,6 +232,11 @@ func VulnerabilitySummaryAndActions(w io.Writer, cons []vulnerability.Consolidat
 		if summary.UnfixedCount > 0 {
 			fmt.Fprintf(w, "  %d. %s %s\n", step, ui.StyleBold.Render("Investigate remaining unfixed vulnerabilities"), ui.StyleVersion.Render("(monitor upstream / consider alternatives)"))
 		}
+	}
+
+	// Show detailed guidance for unfixable vulnerabilities when enabled
+	if displayOpts.ShowUnfixableGuidance && summary.UnfixedCount > 0 {
+		UnfixableGuidance(w, cons)
 	}
 }
 
@@ -295,4 +311,150 @@ func formatLayerTag(ld *dependency.LayerDetails) string {
 	}
 	parts = append(parts, fmt.Sprintf("layer %d", ld.Index))
 	return "[" + strings.Join(parts, " ") + "]"
+}
+
+// UnfixableGuidance renders detailed actionable guidance for vulnerabilities
+// that have no direct fix available. This helps security engineers make
+// informed decisions about risk acceptance or alternative mitigations.
+func UnfixableGuidance(w io.Writer, cons []vulnerability.Consolidated) {
+	guidance := remediation.AnalyzeUnfixable(cons)
+	if len(guidance) == 0 {
+		return
+	}
+
+	fmt.Fprintln(w)
+	fmt.Fprintln(w, ui.StyleHeader.Render("Unfixable Vulnerability Guidance:"))
+
+	for _, g := range guidance {
+		fmt.Fprintln(w)
+		// Header line: package@version - vulnerability ID
+		fmt.Fprintf(w, "  %s %s\n",
+			ui.StylePackageName.Render(fmt.Sprintf("%s@%s", g.Package, g.Version)),
+			ui.StyleSymbol.Render(g.VulnerabilityID))
+		fmt.Fprintf(w, "    %s %s\n",
+			ui.StyleMeta.Render("Status:"),
+			ui.StyleVersion.Render(g.Category.String()))
+
+		// Risk factors (concise, max 3)
+		if len(g.RiskFactors) > 0 {
+			fmt.Fprintln(w, "    "+ui.StyleMeta.Render("Risk factors:"))
+			for i, f := range g.RiskFactors {
+				if i >= 3 {
+					fmt.Fprintf(w, "      %s\n", ui.StyleMeta.Render(fmt.Sprintf("(+%d more)", len(g.RiskFactors)-3)))
+					break
+				}
+				fmt.Fprintf(w, "      %s %s\n", ui.StyleVersion.Render("-"), ui.StyleSymbol.Render(f))
+			}
+		}
+
+		// Recommendations (concise, max 3)
+		if len(g.Recommendations) > 0 {
+			fmt.Fprintln(w, "    "+ui.StyleMeta.Render("Recommendations:"))
+			for i, r := range g.Recommendations {
+				if i >= 3 {
+					fmt.Fprintf(w, "      %s\n", ui.StyleMeta.Render(fmt.Sprintf("(+%d more)", len(g.Recommendations)-3)))
+					break
+				}
+				fmt.Fprintf(w, "      %s %s\n", ui.StyleUpgraded.Render(fmt.Sprintf("%d.", i+1)), ui.StyleSymbol.Render(r))
+			}
+		}
+
+		// Alternative packages (if any)
+		if len(g.AlternativePackages) > 0 {
+			alts := g.AlternativePackages
+			if len(alts) > 3 {
+				alts = alts[:3]
+			}
+			fmt.Fprintf(w, "    %s %s\n",
+				ui.StyleMeta.Render("Alternatives:"),
+				ui.StylePath.Render(strings.Join(alts, ", ")))
+		}
+
+		// Reference (just first one to keep it concise)
+		if len(g.References) > 0 {
+			fmt.Fprintf(w, "    %s %s\n",
+				ui.StyleMeta.Render("Reference:"),
+				ui.StylePath.Render(g.References[0]))
+		}
+	}
+}
+
+// renderDependencyPath shows the dependency path to a transitive vulnerable package.
+// Example output:
+//
+//	Path: go-git/v5 → ssh-agent → x/crypto
+func renderDependencyPath(w io.Writer, v vulnerability.Consolidated, g *graph.Graph) {
+	if g == nil || v.PURL == "" {
+		return
+	}
+
+	// Find the shortest path to this vulnerable package
+	paths := g.PathsTo(v.PURL)
+	if len(paths) == 0 {
+		return
+	}
+
+	// Get shortest path
+	shortest := paths[0]
+	for _, p := range paths[1:] {
+		if len(p) < len(shortest) {
+			shortest = p
+		}
+	}
+
+	if len(shortest) <= 1 {
+		// Direct dependency, no path to show
+		return
+	}
+
+	// Format path: extract just package names for readability
+	var pathParts []string
+	for _, node := range shortest {
+		name := shortPackageName(node.Name)
+		if name != "" {
+			pathParts = append(pathParts, name)
+		}
+	}
+
+	if len(pathParts) <= 1 {
+		return
+	}
+
+	pathStr := strings.Join(pathParts, " → ")
+	pathRow := lipgloss.JoinHorizontal(
+		lipgloss.Top,
+		ui.StyleMeta.Render("Path:"),
+		lipgloss.NewStyle().MarginLeft(1).Render(ui.StylePath.Render(pathStr)),
+	)
+
+	// Show path count if there are multiple paths
+	if len(paths) > 1 {
+		pathRow = lipgloss.JoinHorizontal(
+			lipgloss.Top,
+			pathRow,
+			lipgloss.NewStyle().MarginLeft(1).Render(ui.StyleMeta.Render(fmt.Sprintf("(%d paths)", len(paths)))),
+		)
+	}
+
+	fmt.Fprintln(w, "    "+pathRow)
+}
+
+// shortPackageName returns a shortened package name for display.
+// e.g., "github.com/go-git/go-git/v5" -> "go-git/v5"
+func shortPackageName(name string) string {
+	if name == "" {
+		return ""
+	}
+
+	// For Go packages, try to get a shorter name
+	parts := strings.Split(name, "/")
+	if len(parts) >= 2 {
+		// Return last 2 parts for readability: "go-git/v5" instead of "github.com/go-git/go-git/v5"
+		if len(parts) > 2 && (strings.Contains(parts[0], ".") || parts[0] == "golang.org") {
+			// Skip domain parts
+			return strings.Join(parts[len(parts)-2:], "/")
+		}
+	}
+
+	return name
 }

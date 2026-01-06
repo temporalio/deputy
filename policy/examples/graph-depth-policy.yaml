@@ -1,0 +1,91 @@
+# Graph-Based Vulnerability Policies
+#
+# These policies use dependency graph information to make decisions based on
+# how vulnerabilities reach your project. Requires scanning with --with-graph.
+#
+# Usage:
+#   deputy scan --with-graph --policy policy/examples/graph-depth-policy.yaml
+#
+# Available graph fields in vulnerability object:
+#   - path: list(string)  - Dependency chain from root to vulnerable package
+#   - depth: int          - Distance from root (0 = direct, 1+ = transitive)
+
+policies:
+  # Block critical vulnerabilities in direct dependencies
+  # Direct dependencies are under your direct control - fix them first
+  - name: block-critical-direct
+    description: "Critical vulnerabilities in direct dependencies must be fixed immediately"
+    entrypoints: ["scan_vulnerability"]
+    rules:
+      - action: deny
+        when: |
+          vulnerability.severity == "CRITICAL" &&
+          vulnerability.?depth.orValue(0) == 0
+        reason: "Critical vulnerability in direct dependency"
+        remediation: "Update the direct dependency to a fixed version"
+
+  # Warn on high-severity vulnerabilities in shallow transitive dependencies
+  # Depth 1-2 means the vulnerable package is close to your code
+  - name: warn-high-shallow-transitive
+    description: "High-severity vulnerabilities close in the dependency tree need attention"
+    entrypoints: ["scan_vulnerability"]
+    rules:
+      - action: warn
+        when: |
+          vulnerability.severity == "HIGH" &&
+          vulnerability.?depth.orValue(0) > 0 &&
+          vulnerability.?depth.orValue(0) <= 2
+        reason: "High-severity vulnerability in shallow transitive dependency"
+        remediation: "Consider updating the direct dependency that pulls in this vulnerable package"
+
+  # Allow lower-severity vulnerabilities deep in the dependency tree
+  # Deep transitive dependencies are harder to control and often less risky
+  - name: allow-deep-transitive-medium-low
+    description: "Accept medium/low vulnerabilities deep in the dependency tree"
+    entrypoints: ["scan_vulnerability"]
+    rules:
+      - action: allow
+        when: |
+          vulnerability.severity in ["MEDIUM", "LOW"] &&
+          vulnerability.?depth.orValue(0) > 3
+        reason: "Deep transitive dependency with lower severity - acceptable risk"
+
+  # Flag vulnerabilities with long dependency chains (supply chain risk indicator)
+  - name: flag-long-dependency-chains
+    description: "Long dependency chains increase supply chain risk"
+    entrypoints: ["scan_vulnerability"]
+    rules:
+      - action: warn
+        when: |
+          vulnerability.?depth.orValue(0) > 5
+        reason: "Vulnerability is very deep in dependency tree (depth > 5)"
+        remediation: "Review whether all intermediate dependencies are necessary"
+
+  # Block if vulnerability path contains known problematic packages
+  - name: block-via-problematic-packages
+    description: "Block vulnerabilities that flow through known problematic packages"
+    entrypoints: ["scan_vulnerability"]
+    vars:
+      problematicPackages:
+        - "event-stream"      # Historical supply chain attack
+        - "ua-parser-js"      # Historical supply chain attack
+        - "colors"            # Intentional sabotage
+        - "faker"             # Intentional sabotage
+    rules:
+      - action: deny
+        when: |
+          vulnerability.?path.orValue([]).exists(p,
+            problematicPackages.exists(bad, p.contains(bad)))
+        reason: "Vulnerability path includes a historically problematic package"
+        remediation: "Find an alternative dependency chain that avoids these packages"
+
+  # Report-level: warn if too many deep transitive vulnerabilities
+  - name: warn-excessive-deep-vulns
+    description: "Too many deep transitive vulnerabilities indicates poor dependency hygiene"
+    entrypoints: ["scan_report"]
+    rules:
+      - action: warn
+        when: |
+          vulnerabilities.filter(v, v.?depth.orValue(0) > 3).size() > 10
+        reason: "More than 10 vulnerabilities deep in the dependency tree"
+        remediation: "Consider auditing and reducing dependency tree complexity"

@@ -26,6 +26,7 @@ import (
 func AddPolicyCommand(root *cobra.Command) {
 	cmd := &cobra.Command{
 		Use:           "policy",
+		Aliases:       []string{"p", "pol"},
 		Short:         "Work with Deputy CEL policies",
 		SilenceErrors: true,
 		SilenceUsage:  true,

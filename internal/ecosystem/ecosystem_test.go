@@ -314,3 +314,70 @@ func TestScalibrPrefixesMatchPluginNames(t *testing.T) {
 		}
 	}
 }
+
+func TestCapabilities(t *testing.T) {
+	// Test that proxy ecosystems have proxy capability
+	proxyEcosystems := []Ecosystem{Go, NPM, PyPI, RubyGems}
+	for _, eco := range proxyEcosystems {
+		caps := eco.Capabilities()
+		if !caps.Proxy {
+			t.Errorf("%s.Capabilities().Proxy = false, want true", eco)
+		}
+		if !caps.Scan {
+			t.Errorf("%s.Capabilities().Scan = false, want true", eco)
+		}
+	}
+
+	// Test that graph resolution ecosystems match
+	graphEcosystems := []Ecosystem{Go, NPM, PyPI, RubyGems, Cargo}
+	for _, eco := range graphEcosystems {
+		caps := eco.Capabilities()
+		if !caps.GraphResolution {
+			t.Errorf("%s.Capabilities().GraphResolution = false, want true", eco)
+		}
+	}
+
+	// Test that unknown ecosystem has no capabilities
+	caps := Unknown.Capabilities()
+	if caps.Scan || caps.SBOM || caps.Proxy || caps.License || caps.GraphResolution {
+		t.Error("Unknown ecosystem should have no capabilities")
+	}
+}
+
+func TestWithProxy(t *testing.T) {
+	proxied := WithProxy()
+	if len(proxied) == 0 {
+		t.Fatal("WithProxy() returned empty list")
+	}
+
+	// Should include Go, NPM, PyPI, RubyGems
+	expected := map[Ecosystem]bool{Go: true, NPM: true, PyPI: true, RubyGems: true}
+	for _, eco := range proxied {
+		if !expected[eco] {
+			t.Errorf("WithProxy() included unexpected %s", eco)
+		}
+		delete(expected, eco)
+	}
+	if len(expected) > 0 {
+		t.Errorf("WithProxy() missing ecosystems: %v", expected)
+	}
+}
+
+func TestWithGraphResolution(t *testing.T) {
+	graphed := WithGraphResolution()
+	if len(graphed) == 0 {
+		t.Fatal("WithGraphResolution() returned empty list")
+	}
+
+	// Should include Go, NPM, PyPI, RubyGems, Cargo
+	expected := map[Ecosystem]bool{Go: true, NPM: true, PyPI: true, RubyGems: true, Cargo: true}
+	for _, eco := range graphed {
+		if !expected[eco] {
+			t.Errorf("WithGraphResolution() included unexpected %s", eco)
+		}
+		delete(expected, eco)
+	}
+	if len(expected) > 0 {
+		t.Errorf("WithGraphResolution() missing ecosystems: %v", expected)
+	}
+}

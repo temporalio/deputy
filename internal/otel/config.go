@@ -5,6 +5,8 @@ package otel
 
 import (
 	"time"
+
+	"github.com/picatz/deputy/internal/errors"
 )
 
 // Config configures OpenTelemetry instrumentation.
@@ -135,7 +137,7 @@ func (c *Config) Validate() error {
 	case "http":
 		// valid
 	default:
-		return &ConfigError{
+		return &errors.ValidationError{
 			Field:   "exporter.protocol",
 			Value:   c.Exporter.Protocol,
 			Message: "must be 'grpc' or 'http'",
@@ -153,7 +155,7 @@ func (c *Config) Validate() error {
 
 	// Validate sample rate
 	if c.Traces.SampleRate < 0 || c.Traces.SampleRate > 1 {
-		return &ConfigError{
+		return &errors.ValidationError{
 			Field:   "traces.sample_rate",
 			Value:   c.Traces.SampleRate,
 			Message: "must be between 0.0 and 1.0",
@@ -169,15 +171,4 @@ func (c *Config) Validate() error {
 	}
 
 	return nil
-}
-
-// ConfigError represents a configuration validation error.
-type ConfigError struct {
-	Field   string
-	Value   any
-	Message string
-}
-
-func (e *ConfigError) Error() string {
-	return "otel config: " + e.Field + ": " + e.Message
 }

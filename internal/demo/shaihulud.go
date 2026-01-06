@@ -1,3 +1,30 @@
+// Package demo provides demonstration functionality for supply chain security scanning.
+//
+// This package implements specialized scanning for known supply chain attack campaigns,
+// providing a way to quickly assess whether a GitHub organization's repositories
+// have been impacted by specific threat campaigns.
+//
+// # Shai-Hulud Campaign Scanner
+//
+// The [ScanShaiHulud] function scans GitHub repositories for dependencies matching
+// Wiz Research's Shai-Hulud 2.0 campaign IOCs (Indicators of Compromise). This
+// campaign targeted npm packages through dependency confusion attacks.
+//
+// Example usage:
+//
+//	results, err := demo.ScanShaiHulud(ctx, demo.Options{
+//	    Owner: "my-org",
+//	    Concurrency: 8,
+//	})
+//	for _, result := range results {
+//	    if len(result.Matches) > 0 {
+//	        fmt.Printf("ALERT: %s/%s has %d IOC matches\n",
+//	            result.Owner, result.Name, len(result.Matches))
+//	    }
+//	}
+//
+// The scanner downloads the official IOC list from Wiz Research and matches
+// against extracted dependencies from each repository.
 package demo
 
 import (

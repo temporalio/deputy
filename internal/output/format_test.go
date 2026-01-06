@@ -15,6 +15,8 @@ func TestParseFormat(t *testing.T) {
 		{"json", FormatJSON},
 		{"sarif", FormatSARIF},
 		{"table", FormatTable},
+		{"csv", FormatCSV},
+		{"markdown", FormatMarkdown},
 		{"", FormatTable},
 		{"unknown", FormatTable},
 	}
@@ -126,5 +128,95 @@ func TestMultiFormatter(t *testing.T) {
 	}
 	if buf2.String() != "test" {
 		t.Errorf("buf2 = %q, want %q", buf2.String(), "test")
+	}
+}
+
+// testCSVRecord implements CSVRecord for testing.
+type testCSVRecord struct {
+	Name  string
+	Count int
+}
+
+func (r testCSVRecord) CSVHeaders() []string {
+	return []string{"name", "count"}
+}
+
+func (r testCSVRecord) CSVRow() []string {
+	return []string{r.Name, strings.Repeat("x", r.Count)}
+}
+
+func TestCSVFormatter(t *testing.T) {
+	records := []testCSVRecord{
+		{Name: "first", Count: 1},
+		{Name: "second", Count: 2},
+	}
+
+	formatter := CSVFormatter[[]testCSVRecord, testCSVRecord]()
+
+	var buf bytes.Buffer
+	if err := formatter.Format(&buf, records); err != nil {
+		t.Fatalf("Format error: %v", err)
+	}
+
+	got := buf.String()
+	want := "name,count\nfirst,x\nsecond,xx\n"
+	if got != want {
+		t.Errorf("got:\n%s\nwant:\n%s", got, want)
+	}
+}
+
+func TestCSVFormatterEmpty(t *testing.T) {
+	var records []testCSVRecord
+
+	formatter := CSVFormatter[[]testCSVRecord, testCSVRecord]()
+
+	var buf bytes.Buffer
+	if err := formatter.Format(&buf, records); err != nil {
+		t.Fatalf("Format error: %v", err)
+	}
+
+	got := buf.String()
+	if got != "" {
+		t.Errorf("expected empty output for empty slice, got: %q", got)
+	}
+}
+
+func TestAllFormats(t *testing.T) {
+	formats := AllFormats()
+	// Should include at least table, json, sarif, csv, markdown
+	if len(formats) < 5 {
+		t.Errorf("AllFormats() returned %d formats, expected at least 5", len(formats))
+	}
+
+	// Check that table format is included
+	found := false
+	for _, f := range formats {
+		if f == FormatTable {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Error("AllFormats() should include FormatTable")
+	}
+}
+
+func TestFormatIsValid(t *testing.T) {
+	tests := []struct {
+		format Format
+		want   bool
+	}{
+		{FormatTable, true},
+		{FormatJSON, true},
+		{FormatSARIF, true},
+		{FormatCSV, true},
+		{FormatMarkdown, true},
+		{Format("invalid"), false},
+		{Format(""), false},
+	}
+	for _, tt := range tests {
+		if got := tt.format.IsValid(); got != tt.want {
+			t.Errorf("%q.IsValid() = %v, want %v", tt.format, got, tt.want)
+		}
 	}
 }

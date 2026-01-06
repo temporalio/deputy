@@ -5,50 +5,14 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/picatz/deputy/internal/policy"
+	"github.com/picatz/deputy/internal/ecosystem"
 )
 
-// goModuleHandler proxies requests to a Go module proxy (e.g., proxy.golang.org)
-// while evaluating policy rules and enriching requests with vulnerability and
-// license data.
-type goModuleHandler struct {
-	*baseHandler
-}
-
-// newGoModuleHandler creates a handler for proxying Go module requests.
-// It configures vulnerability lookups against the "Go" ecosystem in OSV
-// and enables license lookups.
-func newGoModuleHandler(upstream string, policies PolicyEvaluator) (*goModuleHandler, error) {
-	base, err := newBaseHandler(handlerConfig{
-		ecosystem:    "go",
-		osvEcosystem: "Go",
-		upstream:     upstream,
-		policies:     policies,
-		wantLicenses: true,
-	})
-	if err != nil {
-		return nil, err
-	}
-	return &goModuleHandler{baseHandler: base}, nil
-}
-
-// ServeHTTP handles incoming Go module proxy requests, parsing the path to extract
-// module name, version, and operation type, then evaluating policies before proxying.
-func (h *goModuleHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	module, version, fileType, op, err := parseGoProxyPath(r.URL.Path)
-	if err != nil {
-		http.Error(w, "bad request: "+err.Error(), http.StatusBadRequest)
-		return
-	}
-
-	h.serveRequest(w, r, policy.EntrypointGoArtifactRequest, requestInfo{
-		Name:       module,
-		Version:    version,
-		HasVersion: hasVersion(version),
-		Operation:  op,
-		Ecosystem:  "go",
-		FileType:   fileType,
-	})
+// NewGoModuleHandler creates a Go module proxy handler using the unified handler factory.
+// It proxies requests to a Go module proxy (e.g., proxy.golang.org) while evaluating
+// policy rules and enriching requests with vulnerability and license data.
+func NewGoModuleHandler(upstream string, policies PolicyEvaluator) (http.Handler, error) {
+	return DefaultFactory.CreateHandler(ecosystem.Go, upstream, policies)
 }
 
 // parseGoProxyPath extracts module name, version, file type, and operation from
@@ -93,10 +57,4 @@ func parseGoProxyPath(p string) (module, version, fileType, operation string, er
 		operation = "fetch"
 	}
 	return
-}
-
-// NewGoModuleHandler exposes the Go module proxy handler for reuse outside the
-// proxy server when an in-process HTTP handler is sufficient.
-func NewGoModuleHandler(upstream string, policies PolicyEvaluator) (http.Handler, error) {
-	return newGoModuleHandler(upstream, policies)
 }

@@ -6,6 +6,7 @@ import (
 
 	"github.com/google/osv-scalibr/extractor"
 	"github.com/picatz/deputy/internal/container/image"
+	"github.com/picatz/deputy/internal/dependency/graph"
 	"github.com/picatz/deputy/internal/dockerfile"
 	"github.com/picatz/deputy/internal/policy"
 	"github.com/picatz/deputy/internal/targets"
@@ -36,6 +37,32 @@ type Options struct {
 	Ecosystems      []string
 	PublishedBefore time.Time
 	PublishedAfter  time.Time
+
+	// Graph controls dependency graph resolution.
+	// When enabled, the scan result includes a fully-resolved dependency graph
+	// with edges showing which packages depend on which.
+	Graph GraphOptions
+}
+
+// GraphOptions configures dependency graph resolution during scans.
+type GraphOptions struct {
+	// Enabled controls whether to build the dependency graph.
+	// When true, the scan will resolve dependency edges and include
+	// the graph in results, enabling path-based vulnerability analysis.
+	Enabled bool
+
+	// UseProxy enables fetching module metadata from package registries
+	// (e.g., proxy.golang.org for Go). This provides more accurate transitive
+	// dependency resolution but requires network access.
+	UseProxy bool
+
+	// UseGit enables cloning repositories for private module resolution.
+	// This is useful for private Go modules that aren't available via proxy.
+	UseGit bool
+
+	// PrivatePatterns specifies glob patterns for private modules
+	// (similar to GOPRIVATE). These modules will use git instead of proxy.
+	PrivatePatterns []string
 }
 
 // Validate checks that the options are valid.
@@ -58,6 +85,12 @@ type Result struct {
 	Findings   []vulnerability.Finding
 	Advisories map[string]vulnerability.Advisory
 	Stats      vulnerability.Stats
+
+	// Graph contains the resolved dependency graph with edges showing
+	// relationships between packages. When populated, it enables path-based
+	// analysis like "why is this vulnerable package in my dependencies?"
+	// This is nil when graph resolution is disabled or not applicable.
+	Graph *graph.Graph
 
 	PolicyActions []policy.Action
 

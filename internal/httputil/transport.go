@@ -1,4 +1,6 @@
-// Package httputil provides shared HTTP configuration constants and helpers.
+// Package httputil provides shared HTTP client creation and configuration.
+// It integrates with the config system for centralized HTTP settings while
+// providing sensible defaults for standalone usage.
 package httputil
 
 import (
@@ -158,4 +160,122 @@ func InstrumentedMiddleware(operation string, opts ...otelhttp.Option) func(http
 	return func(next http.Handler) http.Handler {
 		return InstrumentedHandler(next, operation, opts...)
 	}
+}
+
+// ClientConfig contains all settings needed to create an HTTP client.
+// This mirrors config.HTTPConfig but avoids a circular dependency.
+type ClientConfig struct {
+	// Connection timeouts
+	Timeout               time.Duration
+	DialTimeout           time.Duration
+	TLSHandshakeTimeout   time.Duration
+	ResponseHeaderTimeout time.Duration
+	KeepAlive             time.Duration
+	IdleConnTimeout       time.Duration
+
+	// Connection pool settings
+	MaxIdleConns        int
+	MaxIdleConnsPerHost int
+
+	// Retry settings
+	RetryEnabled bool
+	RetryMax     int
+	RetryWaitMin time.Duration
+	RetryWaitMax time.Duration
+
+	// Instrumentation
+	EnableOTel bool
+}
+
+// DefaultClientConfig returns a ClientConfig with production-ready defaults.
+func DefaultClientConfig() ClientConfig {
+	return ClientConfig{
+		Timeout:               30 * time.Second,
+		DialTimeout:           DefaultDialTimeout,
+		TLSHandshakeTimeout:   DefaultTLSHandshakeTimeout,
+		ResponseHeaderTimeout: DefaultResponseHeaderTimeout,
+		KeepAlive:             DefaultKeepAlive,
+		IdleConnTimeout:       DefaultIdleConnTimeout,
+		MaxIdleConns:          DefaultMaxIdleConns,
+		MaxIdleConnsPerHost:   DefaultMaxIdleConnsPerHost,
+		RetryEnabled:          true,
+		RetryMax:              DefaultRetryMax,
+		RetryWaitMin:          DefaultRetryWaitMin,
+		RetryWaitMax:          DefaultRetryWaitMax,
+		EnableOTel:            false,
+	}
+}
+
+// NewTransportFromConfig creates an http.Transport from the provided configuration.
+func NewTransportFromConfig(cfg ClientConfig) *http.Transport {
+	return &http.Transport{
+		Proxy: http.ProxyFromEnvironment,
+		DialContext: (&net.Dialer{
+			Timeout:   cfg.DialTimeout,
+			KeepAlive: cfg.KeepAlive,
+		}).DialContext,
+		ForceAttemptHTTP2:     true,
+		MaxIdleConns:          cfg.MaxIdleConns,
+		MaxIdleConnsPerHost:   cfg.MaxIdleConnsPerHost,
+		IdleConnTimeout:       cfg.IdleConnTimeout,
+		TLSHandshakeTimeout:   cfg.TLSHandshakeTimeout,
+		ResponseHeaderTimeout: cfg.ResponseHeaderTimeout,
+	}
+}
+
+// NewClientFromConfig creates an http.Client configured from ClientConfig.
+// If retry is enabled and RetryMax > 0, the client will automatically retry
+// transient failures with exponential backoff.
+func NewClientFromConfig(cfg ClientConfig) *http.Client {
+	if cfg.RetryEnabled && cfg.RetryMax > 0 {
+		return newRetryableClientFromConfig(cfg)
+	}
+	return newSimpleClientFromConfig(cfg)
+}
+
+func newSimpleClientFromConfig(cfg ClientConfig) *http.Client {
+	transport := NewTransportFromConfig(cfg)
+	var rt http.RoundTripper = transport
+	if cfg.EnableOTel {
+		rt = InstrumentedTransport(transport)
+	}
+	return &http.Client{
+		Timeout:   cfg.Timeout,
+		Transport: rt,
+	}
+}
+
+func newRetryableClientFromConfig(cfg ClientConfig) *http.Client {
+	rc := retryablehttp.NewClient()
+	rc.Logger = nil // disable noisy retry logging
+
+	// Use cleanhttp for pooled connections with custom settings
+	pooledClient := cleanhttp.DefaultPooledClient()
+	pooledClient.Timeout = cfg.Timeout
+
+	// Apply transport configuration
+	if t, ok := pooledClient.Transport.(*http.Transport); ok {
+		t.DialContext = (&net.Dialer{
+			Timeout:   cfg.DialTimeout,
+			KeepAlive: cfg.KeepAlive,
+		}).DialContext
+		t.MaxIdleConns = cfg.MaxIdleConns
+		t.MaxIdleConnsPerHost = cfg.MaxIdleConnsPerHost
+		t.IdleConnTimeout = cfg.IdleConnTimeout
+		t.TLSHandshakeTimeout = cfg.TLSHandshakeTimeout
+		t.ResponseHeaderTimeout = cfg.ResponseHeaderTimeout
+	}
+
+	if cfg.EnableOTel {
+		pooledClient.Transport = InstrumentedTransport(pooledClient.Transport)
+	}
+
+	rc.HTTPClient = pooledClient
+	rc.RetryMax = cfg.RetryMax
+	rc.RetryWaitMin = cfg.RetryWaitMin
+	rc.RetryWaitMax = cfg.RetryWaitMax
+
+	client := rc.StandardClient()
+	client.Timeout = cfg.Timeout
+	return client
 }

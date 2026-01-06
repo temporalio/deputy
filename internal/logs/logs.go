@@ -53,6 +53,11 @@ type Options struct {
 	// ExportToOTel enables exporting logs to the OpenTelemetry collector.
 	// When enabled, logs are sent both to the writer and to the OTel backend.
 	ExportToOTel bool
+
+	// AuditWriter is an optional destination for audit events.
+	// When set, log messages starting with "deputy." are written as JSON
+	// to this writer in addition to the main output.
+	AuditWriter io.Writer
 }
 
 // New creates a new configured slog.Logger based on the provided options.
@@ -83,12 +88,30 @@ func New(opts Options) *slog.Logger {
 		handler = deputyotel.NewTraceContextHandler(handler)
 	}
 
+	// Collect handlers for multi-handler composition
+	var handlers []slog.Handler
+	handlers = append(handlers, handler)
+
 	// Add OTel handler for log export if enabled
 	if opts.ExportToOTel {
-		otelHandler := deputyotel.NewOTelHandler("deputy")
-		handler = deputyotel.NewMultiHandler(handler, otelHandler)
+		handlers = append(handlers, deputyotel.NewOTelHandler("deputy"))
 	}
 
+	// Add audit handler for audit log file if configured
+	if opts.AuditWriter != nil {
+		auditHandler := deputyotel.NewAuditHandler(opts.AuditWriter, "deputy.")
+		var auditH slog.Handler = auditHandler
+		// Wrap audit handler with trace context for correlation
+		if opts.IncludeTraceContext {
+			auditH = deputyotel.NewTraceContextHandler(auditHandler)
+		}
+		handlers = append(handlers, auditH)
+	}
+
+	// Use multi-handler if we have more than one destination
+	if len(handlers) > 1 {
+		return slog.New(deputyotel.NewMultiHandler(handlers...))
+	}
 	return slog.New(handler)
 }
 

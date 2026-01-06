@@ -5,44 +5,14 @@ import (
 	"path"
 	"strings"
 
-	"github.com/picatz/deputy/internal/policy"
+	"github.com/picatz/deputy/internal/ecosystem"
 )
 
-// pypiHandler proxies requests to a PyPI registry (e.g., pypi.org) while
-// evaluating policy rules and enriching requests with vulnerability data.
-type pypiHandler struct {
-	*baseHandler
-}
-
-// newPyPIHandler creates a handler for proxying PyPI registry requests.
-// It configures vulnerability lookups against the "PyPI" ecosystem in OSV.
-func newPyPIHandler(upstream string, policies PolicyEvaluator) (*pypiHandler, error) {
-	base, err := newBaseHandler(handlerConfig{
-		ecosystem:    "pypi",
-		osvEcosystem: "PyPI",
-		upstream:     upstream,
-		policies:     policies,
-		wantLicenses: false,
-	})
-	if err != nil {
-		return nil, err
-	}
-	return &pypiHandler{baseHandler: base}, nil
-}
-
-// ServeHTTP handles incoming PyPI registry requests, parsing the path to extract
-// package name, version, and operation type, then evaluating policies before proxying.
-func (h *pypiHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	pkg, version, filename, op := parsePyPIPath(r.URL.Path)
-
-	h.serveRequest(w, r, policy.EntrypointPypiArtifactRequest, requestInfo{
-		Name:       pkg,
-		Version:    version,
-		HasVersion: hasVersion(version),
-		Operation:  op,
-		Ecosystem:  "pypi",
-		Filename:   filename,
-	})
+// NewPyPIHandler creates a PyPI proxy handler using the unified handler factory.
+// It proxies requests to a PyPI registry (e.g., pypi.org) while evaluating
+// policy rules and enriching requests with vulnerability data.
+func NewPyPIHandler(upstream string, policies PolicyEvaluator) (http.Handler, error) {
+	return DefaultFactory.CreateHandler(ecosystem.PyPI, upstream, policies)
 }
 
 // parsePyPIPath extracts package name, version, filename, and operation from a PyPI
@@ -95,11 +65,6 @@ func parsePyPIDistributionFilename(filename string) (string, string) {
 	namePart := base[:idx]
 	versionPart := base[idx+1:]
 	return namePart, versionPart
-}
-
-// NewPyPIHandler exposes the PyPI proxy handler for embedding in other servers.
-func NewPyPIHandler(upstream string, policies PolicyEvaluator) (http.Handler, error) {
-	return newPyPIHandler(upstream, policies)
 }
 
 // findVersionBoundary finds the index of the hyphen separating package name from

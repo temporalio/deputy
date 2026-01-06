@@ -91,3 +91,77 @@ func mergeDirectDependencies(dst, src map[string]bool) {
 		}
 	}
 }
+
+// CollectMainModulesFromWorkspace scans the provided workspace for go.mod files
+// and extracts the set of main module paths (the "module" declarations).
+// This is useful for excluding the project's own modules from dependency comparisons.
+func CollectMainModulesFromWorkspace(ws workspace.FS) map[string]bool {
+	modules := make(map[string]bool)
+	if ws == nil {
+		return modules
+	}
+	_ = fs.WalkDir(ws, ".", func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return nil
+		}
+		if d.IsDir() {
+			name := d.Name()
+			if name == ".git" || name == "vendor" {
+				return fs.SkipDir
+			}
+			return nil
+		}
+		if filepath.Base(path) != "go.mod" {
+			return nil
+		}
+		if strings.Contains(path, "/vendor/") {
+			return nil
+		}
+		data, err := ws.ReadFile(path)
+		if err != nil {
+			return nil
+		}
+		if mod := GetMainModuleFromGoMod(data); mod != "" {
+			modules[mod] = true
+		}
+		return nil
+	})
+	return modules
+}
+
+// CollectMainModulesFromCommit extracts main module paths from go.mod files
+// present in a specific Git commit.
+func CollectMainModulesFromCommit(repo *git.Repository, hash plumbing.Hash) (map[string]bool, error) {
+	modules := make(map[string]bool)
+	if repo == nil {
+		return modules, nil
+	}
+	commit, err := repo.CommitObject(hash)
+	if err != nil {
+		return nil, err
+	}
+	tree, err := commit.Tree()
+	if err != nil {
+		return nil, err
+	}
+	err = tree.Files().ForEach(func(f *object.File) error {
+		if filepath.Base(f.Name) != "go.mod" {
+			return nil
+		}
+		if strings.Contains(f.Name, "/vendor/") {
+			return nil
+		}
+		contents, err := f.Contents()
+		if err != nil {
+			return nil
+		}
+		if mod := GetMainModuleFromGoMod([]byte(contents)); mod != "" {
+			modules[mod] = true
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return modules, nil
+}

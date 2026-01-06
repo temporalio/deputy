@@ -23,6 +23,12 @@ type Config struct {
 	// Logging configures log output behavior.
 	Logging LogConfig `yaml:"logging"`
 
+	// HTTP configures HTTP client behavior across all subsystems.
+	HTTP HTTPConfig `yaml:"http,omitempty"`
+
+	// Performance configures concurrency, caching, and resource limits.
+	Performance PerformanceConfig `yaml:"performance,omitempty"`
+
 	// Proxy configures the package proxy server.
 	Proxy ProxyConfig `yaml:"proxy,omitempty"`
 
@@ -76,6 +82,122 @@ type PolicyConfig struct {
 
 	// Mode sets the default policy mode (enforce, advisory).
 	Mode string `yaml:"mode"`
+}
+
+// HTTPConfig configures HTTP client behavior across all subsystems.
+// These settings apply to all HTTP clients created by Deputy unless
+// explicitly overridden.
+type HTTPConfig struct {
+	// Timeout is the overall request timeout for HTTP operations.
+	// Default: 30s
+	Timeout time.Duration `yaml:"timeout"`
+
+	// DialTimeout is the maximum time to establish a TCP connection.
+	// Default: 10s
+	DialTimeout time.Duration `yaml:"dial_timeout"`
+
+	// TLSHandshakeTimeout is the maximum time for TLS handshake.
+	// Default: 10s
+	TLSHandshakeTimeout time.Duration `yaml:"tls_handshake_timeout"`
+
+	// ResponseHeaderTimeout is the maximum time to wait for response headers.
+	// Default: 20s
+	ResponseHeaderTimeout time.Duration `yaml:"response_header_timeout"`
+
+	// KeepAlive is the interval between TCP keep-alive probes.
+	// Default: 30s
+	KeepAlive time.Duration `yaml:"keep_alive"`
+
+	// IdleConnTimeout is how long idle connections remain in the pool.
+	// Default: 90s
+	IdleConnTimeout time.Duration `yaml:"idle_conn_timeout"`
+
+	// MaxIdleConns is the maximum number of idle connections in the pool.
+	// Default: 20
+	MaxIdleConns int `yaml:"max_idle_conns"`
+
+	// MaxIdleConnsPerHost is the maximum idle connections per host.
+	// Default: 10
+	MaxIdleConnsPerHost int `yaml:"max_idle_conns_per_host"`
+
+	// Retry configures automatic retry behavior for transient failures.
+	Retry RetryConfig `yaml:"retry,omitempty"`
+}
+
+// RetryConfig configures HTTP retry behavior.
+type RetryConfig struct {
+	// Max is the maximum number of retry attempts.
+	// Default: 3
+	Max int `yaml:"max"`
+
+	// WaitMin is the minimum wait time between retries.
+	// Default: 500ms
+	WaitMin time.Duration `yaml:"wait_min"`
+
+	// WaitMax is the maximum wait time between retries.
+	// Default: 5s
+	WaitMax time.Duration `yaml:"wait_max"`
+
+	// Enabled controls whether retries are attempted at all.
+	// Default: true
+	Enabled *bool `yaml:"enabled,omitempty"`
+}
+
+// PerformanceConfig configures concurrency, caching, and resource limits.
+type PerformanceConfig struct {
+	// OSVConcurrency is the number of concurrent OSV API requests.
+	// Default: 10
+	OSVConcurrency int `yaml:"osv_concurrency"`
+
+	// GraphConcurrency is the number of concurrent graph resolution operations.
+	// Default: 5
+	GraphConcurrency int `yaml:"graph_concurrency"`
+
+	// SBOMEnrichConcurrency is the concurrency for SBOM enrichment operations.
+	// Default: 4
+	SBOMEnrichConcurrency int `yaml:"sbom_enrich_concurrency"`
+
+	// ImageScanConcurrency is the concurrency for container image scanning.
+	// Default: 4
+	ImageScanConcurrency int `yaml:"image_scan_concurrency"`
+
+	// Cache configures caching behavior.
+	Cache CacheConfig `yaml:"cache,omitempty"`
+}
+
+// CacheConfig configures caching behavior.
+type CacheConfig struct {
+	// Dir is the directory for persistent cache storage.
+	// Default: ~/.deputy/cache
+	Dir string `yaml:"dir"`
+
+	// TTL is the default time-to-live for cached entries.
+	// Default: 1h
+	TTL time.Duration `yaml:"ttl"`
+
+	// KEVTTL is the TTL for CISA KEV catalog cache.
+	// Default: 24h
+	KEVTTL time.Duration `yaml:"kev_ttl"`
+
+	// EPSSTTL is the TTL for EPSS scores cache.
+	// Default: 24h
+	EPSSTTL time.Duration `yaml:"epss_ttl"`
+
+	// OSVTTL is the TTL for OSV vulnerability cache.
+	// Default: 1h
+	OSVTTL time.Duration `yaml:"osv_ttl"`
+
+	// LicenseTTL is the TTL for license information cache.
+	// Default: 24h
+	LicenseTTL time.Duration `yaml:"license_ttl"`
+
+	// MaxSize is the maximum number of entries in in-memory caches.
+	// Default: 1024
+	MaxSize int `yaml:"max_size"`
+
+	// Disabled completely disables caching.
+	// Default: false
+	Disabled bool `yaml:"disabled"`
 }
 
 // Loader handles loading configuration from multiple sources.
@@ -177,6 +299,12 @@ func (l *Loader) loadFromEnv(cfg *Config) {
 		cfg.Logging.Source = val == "true" || val == "1"
 	}
 
+	// HTTP configuration
+	l.loadHTTPFromEnv(cfg)
+
+	// Performance configuration
+	l.loadPerformanceFromEnv(cfg)
+
 	// Proxy configuration
 	if val := os.Getenv(l.envPrefix + "PROXY_ADDR"); val != "" {
 		cfg.Proxy.ListenAddr = val
@@ -230,14 +358,171 @@ func (l *Loader) loadFromEnv(cfg *Config) {
 	}
 }
 
+// loadHTTPFromEnv loads HTTP configuration from environment variables.
+func (l *Loader) loadHTTPFromEnv(cfg *Config) {
+	if val := os.Getenv(l.envPrefix + "HTTP_TIMEOUT"); val != "" {
+		if d, err := time.ParseDuration(val); err == nil {
+			cfg.HTTP.Timeout = d
+		}
+	}
+	if val := os.Getenv(l.envPrefix + "HTTP_DIAL_TIMEOUT"); val != "" {
+		if d, err := time.ParseDuration(val); err == nil {
+			cfg.HTTP.DialTimeout = d
+		}
+	}
+	if val := os.Getenv(l.envPrefix + "HTTP_TLS_TIMEOUT"); val != "" {
+		if d, err := time.ParseDuration(val); err == nil {
+			cfg.HTTP.TLSHandshakeTimeout = d
+		}
+	}
+	if val := os.Getenv(l.envPrefix + "HTTP_RESPONSE_TIMEOUT"); val != "" {
+		if d, err := time.ParseDuration(val); err == nil {
+			cfg.HTTP.ResponseHeaderTimeout = d
+		}
+	}
+	if val := os.Getenv(l.envPrefix + "HTTP_KEEPALIVE"); val != "" {
+		if d, err := time.ParseDuration(val); err == nil {
+			cfg.HTTP.KeepAlive = d
+		}
+	}
+	if val := os.Getenv(l.envPrefix + "HTTP_IDLE_TIMEOUT"); val != "" {
+		if d, err := time.ParseDuration(val); err == nil {
+			cfg.HTTP.IdleConnTimeout = d
+		}
+	}
+	if val := os.Getenv(l.envPrefix + "HTTP_MAX_IDLE_CONNS"); val != "" {
+		if n, err := strconv.Atoi(val); err == nil && n > 0 {
+			cfg.HTTP.MaxIdleConns = n
+		}
+	}
+	if val := os.Getenv(l.envPrefix + "HTTP_MAX_IDLE_CONNS_PER_HOST"); val != "" {
+		if n, err := strconv.Atoi(val); err == nil && n > 0 {
+			cfg.HTTP.MaxIdleConnsPerHost = n
+		}
+	}
+	if val := os.Getenv(l.envPrefix + "HTTP_RETRY_MAX"); val != "" {
+		if n, err := strconv.Atoi(val); err == nil && n >= 0 {
+			cfg.HTTP.Retry.Max = n
+		}
+	}
+	if val := os.Getenv(l.envPrefix + "HTTP_RETRY_WAIT_MIN"); val != "" {
+		if d, err := time.ParseDuration(val); err == nil {
+			cfg.HTTP.Retry.WaitMin = d
+		}
+	}
+	if val := os.Getenv(l.envPrefix + "HTTP_RETRY_WAIT_MAX"); val != "" {
+		if d, err := time.ParseDuration(val); err == nil {
+			cfg.HTTP.Retry.WaitMax = d
+		}
+	}
+	if val := os.Getenv(l.envPrefix + "HTTP_RETRY_ENABLED"); val != "" {
+		enabled := val == "true" || val == "1"
+		cfg.HTTP.Retry.Enabled = &enabled
+	}
+}
+
+// loadPerformanceFromEnv loads performance configuration from environment variables.
+func (l *Loader) loadPerformanceFromEnv(cfg *Config) {
+	if val := os.Getenv(l.envPrefix + "OSV_CONCURRENCY"); val != "" {
+		if n, err := strconv.Atoi(val); err == nil && n > 0 {
+			cfg.Performance.OSVConcurrency = n
+		}
+	}
+	if val := os.Getenv(l.envPrefix + "GRAPH_CONCURRENCY"); val != "" {
+		if n, err := strconv.Atoi(val); err == nil && n > 0 {
+			cfg.Performance.GraphConcurrency = n
+		}
+	}
+	if val := os.Getenv(l.envPrefix + "SBOM_ENRICH_CONCURRENCY"); val != "" {
+		if n, err := strconv.Atoi(val); err == nil && n > 0 {
+			cfg.Performance.SBOMEnrichConcurrency = n
+		}
+	}
+	if val := os.Getenv(l.envPrefix + "IMAGE_SCAN_CONCURRENCY"); val != "" {
+		if n, err := strconv.Atoi(val); err == nil && n > 0 {
+			cfg.Performance.ImageScanConcurrency = n
+		}
+	}
+	// Cache configuration
+	if val := os.Getenv(l.envPrefix + "CACHE_DIR"); val != "" {
+		cfg.Performance.Cache.Dir = val
+	}
+	if val := os.Getenv(l.envPrefix + "CACHE_TTL"); val != "" {
+		if d, err := time.ParseDuration(val); err == nil {
+			cfg.Performance.Cache.TTL = d
+		}
+	}
+	if val := os.Getenv(l.envPrefix + "CACHE_KEV_TTL"); val != "" {
+		if d, err := time.ParseDuration(val); err == nil {
+			cfg.Performance.Cache.KEVTTL = d
+		}
+	}
+	if val := os.Getenv(l.envPrefix + "CACHE_EPSS_TTL"); val != "" {
+		if d, err := time.ParseDuration(val); err == nil {
+			cfg.Performance.Cache.EPSSTTL = d
+		}
+	}
+	if val := os.Getenv(l.envPrefix + "CACHE_OSV_TTL"); val != "" {
+		if d, err := time.ParseDuration(val); err == nil {
+			cfg.Performance.Cache.OSVTTL = d
+		}
+	}
+	if val := os.Getenv(l.envPrefix + "CACHE_LICENSE_TTL"); val != "" {
+		if d, err := time.ParseDuration(val); err == nil {
+			cfg.Performance.Cache.LicenseTTL = d
+		}
+	}
+	if val := os.Getenv(l.envPrefix + "CACHE_MAX_SIZE"); val != "" {
+		if n, err := strconv.Atoi(val); err == nil && n > 0 {
+			cfg.Performance.Cache.MaxSize = n
+		}
+	}
+	if val := os.Getenv(l.envPrefix + "CACHE_DISABLED"); val != "" {
+		cfg.Performance.Cache.Disabled = val == "true" || val == "1"
+	}
+}
+
 // defaultConfig returns a configuration with sensible defaults.
 func defaultConfig() *Config {
+	retryEnabled := true
 	return &Config{
 		Logging: LogConfig{
 			Level:  "info",
 			Format: "text",
 			Color:  isTerminal(),
 			Source: false,
+		},
+		HTTP: HTTPConfig{
+			Timeout:               30 * time.Second,
+			DialTimeout:           10 * time.Second,
+			TLSHandshakeTimeout:   10 * time.Second,
+			ResponseHeaderTimeout: 20 * time.Second,
+			KeepAlive:             30 * time.Second,
+			IdleConnTimeout:       90 * time.Second,
+			MaxIdleConns:          20,
+			MaxIdleConnsPerHost:   10,
+			Retry: RetryConfig{
+				Max:     3,
+				WaitMin: 500 * time.Millisecond,
+				WaitMax: 5 * time.Second,
+				Enabled: &retryEnabled,
+			},
+		},
+		Performance: PerformanceConfig{
+			OSVConcurrency:        10,
+			GraphConcurrency:      5,
+			SBOMEnrichConcurrency: 4,
+			ImageScanConcurrency:  4,
+			Cache: CacheConfig{
+				Dir:        defaultCacheDir(),
+				TTL:        1 * time.Hour,
+				KEVTTL:     24 * time.Hour,
+				EPSSTTL:    24 * time.Hour,
+				OSVTTL:     1 * time.Hour,
+				LicenseTTL: 24 * time.Hour,
+				MaxSize:    1024,
+				Disabled:   false,
+			},
 		},
 		Proxy: ProxyConfig{
 			ListenAddr: ":8080",
@@ -250,6 +535,18 @@ func defaultConfig() *Config {
 		},
 		OTel: otel.DefaultConfig(),
 	}
+}
+
+// defaultCacheDir returns the default cache directory path.
+func defaultCacheDir() string {
+	if dir := os.Getenv("DEPUTY_CACHE_DIR"); dir != "" {
+		return dir
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return ".deputy/cache"
+	}
+	return filepath.Join(home, ".deputy", "cache")
 }
 
 // Validate checks the configuration for invalid values.
@@ -274,6 +571,16 @@ func (c *Config) Validate() error {
 		}
 	}
 
+	// Validate HTTP configuration
+	if err := c.HTTP.Validate(); err != nil {
+		return err
+	}
+
+	// Validate performance configuration
+	if err := c.Performance.Validate(); err != nil {
+		return err
+	}
+
 	// Validate policy mode
 	if c.Policy.Mode != "" {
 		validModes := []string{"enforce", "advisory"}
@@ -291,6 +598,151 @@ func (c *Config) Validate() error {
 		return err
 	}
 
+	return nil
+}
+
+// Validate checks HTTPConfig for invalid values.
+func (h HTTPConfig) Validate() error {
+	if h.Timeout < 0 {
+		return &errors.ValidationError{
+			Field:   "http.timeout",
+			Value:   h.Timeout.String(),
+			Message: "must be non-negative",
+		}
+	}
+	if h.DialTimeout < 0 {
+		return &errors.ValidationError{
+			Field:   "http.dial_timeout",
+			Value:   h.DialTimeout.String(),
+			Message: "must be non-negative",
+		}
+	}
+	if h.Retry.Max < 0 {
+		return &errors.ValidationError{
+			Field:   "http.retry.max",
+			Value:   strconv.Itoa(h.Retry.Max),
+			Message: "must be non-negative",
+		}
+	}
+	if h.Retry.WaitMin < 0 {
+		return &errors.ValidationError{
+			Field:   "http.retry.wait_min",
+			Value:   h.Retry.WaitMin.String(),
+			Message: "must be non-negative",
+		}
+	}
+	if h.Retry.WaitMax < h.Retry.WaitMin {
+		return &errors.ValidationError{
+			Field:   "http.retry.wait_max",
+			Value:   h.Retry.WaitMax.String(),
+			Message: "must be >= wait_min",
+		}
+	}
+	return nil
+}
+
+// RetryEnabled returns whether retry is enabled (defaults to true).
+func (h HTTPConfig) RetryEnabled() bool {
+	if h.Retry.Enabled == nil {
+		return true
+	}
+	return *h.Retry.Enabled
+}
+
+// WithDefaults returns a copy of HTTPConfig with zero values replaced by defaults.
+// This is useful when loading partial configs from YAML where some fields may be omitted.
+func (h HTTPConfig) WithDefaults() HTTPConfig {
+	def := defaultHTTPConfig()
+	if h.Timeout == 0 {
+		h.Timeout = def.Timeout
+	}
+	if h.DialTimeout == 0 {
+		h.DialTimeout = def.DialTimeout
+	}
+	if h.TLSHandshakeTimeout == 0 {
+		h.TLSHandshakeTimeout = def.TLSHandshakeTimeout
+	}
+	if h.ResponseHeaderTimeout == 0 {
+		h.ResponseHeaderTimeout = def.ResponseHeaderTimeout
+	}
+	if h.KeepAlive == 0 {
+		h.KeepAlive = def.KeepAlive
+	}
+	if h.IdleConnTimeout == 0 {
+		h.IdleConnTimeout = def.IdleConnTimeout
+	}
+	if h.MaxIdleConns == 0 {
+		h.MaxIdleConns = def.MaxIdleConns
+	}
+	if h.MaxIdleConnsPerHost == 0 {
+		h.MaxIdleConnsPerHost = def.MaxIdleConnsPerHost
+	}
+	if h.Retry.Max == 0 && h.Retry.Enabled == nil {
+		h.Retry.Max = def.Retry.Max
+	}
+	if h.Retry.WaitMin == 0 {
+		h.Retry.WaitMin = def.Retry.WaitMin
+	}
+	if h.Retry.WaitMax == 0 {
+		h.Retry.WaitMax = def.Retry.WaitMax
+	}
+	if h.Retry.Enabled == nil {
+		h.Retry.Enabled = def.Retry.Enabled
+	}
+	return h
+}
+
+// defaultHTTPConfig returns default HTTP configuration values.
+func defaultHTTPConfig() HTTPConfig {
+	retryEnabled := true
+	return HTTPConfig{
+		Timeout:               30 * time.Second,
+		DialTimeout:           10 * time.Second,
+		TLSHandshakeTimeout:   10 * time.Second,
+		ResponseHeaderTimeout: 20 * time.Second,
+		KeepAlive:             30 * time.Second,
+		IdleConnTimeout:       90 * time.Second,
+		MaxIdleConns:          20,
+		MaxIdleConnsPerHost:   10,
+		Retry: RetryConfig{
+			Max:     3,
+			WaitMin: 500 * time.Millisecond,
+			WaitMax: 5 * time.Second,
+			Enabled: &retryEnabled,
+		},
+	}
+}
+
+// Validate checks PerformanceConfig for invalid values.
+func (p PerformanceConfig) Validate() error {
+	if p.OSVConcurrency < 0 {
+		return &errors.ValidationError{
+			Field:   "performance.osv_concurrency",
+			Value:   strconv.Itoa(p.OSVConcurrency),
+			Message: "must be non-negative",
+		}
+	}
+	if p.GraphConcurrency < 0 {
+		return &errors.ValidationError{
+			Field:   "performance.graph_concurrency",
+			Value:   strconv.Itoa(p.GraphConcurrency),
+			Message: "must be non-negative",
+		}
+	}
+	if p.Cache.MaxSize < 0 {
+		return &errors.ValidationError{
+			Field:   "performance.cache.max_size",
+			Value:   strconv.Itoa(p.Cache.MaxSize),
+			Message: "must be non-negative",
+		}
+	}
+	if p.Cache.TTL < 0 {
+		return &errors.ValidationError{
+			Field:   "performance.cache.ttl",
+			Value:   p.Cache.TTL.String(),
+			Message: "must be non-negative",
+		}
+	}
 	return nil
 }
 

@@ -19,8 +19,21 @@ func TestManagerRank(t *testing.T) {
 		{"pip", 7},
 		{"pipenv", 8},
 		{"poetry", 9},
-		{"maven", 10},
-		{"gradle", 11},
+		{"uv", 10},
+		{"pdm", 11},
+		{"conda", 12},
+		{"maven", 13},
+		{"gradle", 14},
+		{"nuget", 15},
+		{"dotnet", 15},
+		{"hex", 16},
+		{"mix", 16},
+		{"pub", 17},
+		{"cocoapods", 18},
+		{"github-actions", 24},
+		{"githubactions", 24},
+		{"docker", 25},
+		{"oci", 25},
 		{"unknown", 100},
 		{"", 100},
 	}
@@ -35,8 +48,13 @@ func TestManagerRank(t *testing.T) {
 }
 
 func TestManagerRank_Ordering(t *testing.T) {
-	// Verify that Go < npm < pnpm < yarn < ... < gradle < unknown
-	managers := []string{"go", "npm", "pnpm", "yarn", "composer", "gem", "cargo", "pip", "pipenv", "poetry", "maven", "gradle"}
+	// Verify that Go < npm < pnpm < ... < docker < unknown
+	managers := []string{
+		"go", "npm", "pnpm", "yarn", "composer", "gem", "cargo",
+		"pip", "pipenv", "poetry", "uv", "pdm", "conda",
+		"maven", "gradle", "nuget", "hex", "pub", "cocoapods",
+		"cabal", "stack", "renv", "conan", "github-actions", "docker",
+	}
 
 	for i := 1; i < len(managers); i++ {
 		prev := managers[i-1]

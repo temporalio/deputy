@@ -951,3 +951,158 @@ func TestImagePolicyExpressions(t *testing.T) {
 		}
 	})
 }
+
+// TestVulnerabilityGraphFields tests that graph-derived fields (path, depth)
+// work correctly in CEL policy expressions.
+func TestVulnerabilityGraphFields(t *testing.T) {
+	t.Run("depth field with orValue default", func(t *testing.T) {
+		// Vulnerability without depth field (no --with-graph)
+		input := map[string]any{
+			"vulnerability": map[string]any{
+				"id":       "CVE-2024-1234",
+				"severity": "HIGH",
+			},
+		}
+		src := `vulnerability.?depth.orValue(0) == 0`
+		val, err := Evaluate(t.Context(), src, input)
+		if err != nil {
+			t.Fatalf("Evaluate() error = %v", err)
+		}
+		if b, ok := val.(bool); !ok || !b {
+			t.Errorf("expected depth to default to 0 when not present")
+		}
+	})
+
+	t.Run("depth field present", func(t *testing.T) {
+		// Vulnerability with depth (from --with-graph)
+		input := map[string]any{
+			"vulnerability": map[string]any{
+				"id":       "CVE-2024-1234",
+				"severity": "CRITICAL",
+				"depth":    2,
+			},
+		}
+		src := `vulnerability.?depth.orValue(0) == 2`
+		val, err := Evaluate(t.Context(), src, input)
+		if err != nil {
+			t.Fatalf("Evaluate() error = %v", err)
+		}
+		if b, ok := val.(bool); !ok || !b {
+			t.Errorf("expected depth to be 2")
+		}
+	})
+
+	t.Run("path field with orValue default", func(t *testing.T) {
+		// Vulnerability without path field
+		input := map[string]any{
+			"vulnerability": map[string]any{
+				"id":       "CVE-2024-1234",
+				"severity": "HIGH",
+			},
+		}
+		src := `vulnerability.?path.orValue([]).size() == 0`
+		val, err := Evaluate(t.Context(), src, input)
+		if err != nil {
+			t.Fatalf("Evaluate() error = %v", err)
+		}
+		if b, ok := val.(bool); !ok || !b {
+			t.Errorf("expected path to default to empty list")
+		}
+	})
+
+	t.Run("path field present", func(t *testing.T) {
+		// Vulnerability with path (from --with-graph)
+		input := map[string]any{
+			"vulnerability": map[string]any{
+				"id":       "CVE-2024-1234",
+				"severity": "CRITICAL",
+				"path":     []any{"myapp", "go-git/v5", "x/crypto"},
+				"depth":    2,
+			},
+		}
+		src := `vulnerability.?path.orValue([]).size() == 3`
+		val, err := Evaluate(t.Context(), src, input)
+		if err != nil {
+			t.Fatalf("Evaluate() error = %v", err)
+		}
+		if b, ok := val.(bool); !ok || !b {
+			t.Errorf("expected path to have 3 elements")
+		}
+	})
+
+	t.Run("path contains check", func(t *testing.T) {
+		input := map[string]any{
+			"vulnerability": map[string]any{
+				"id":       "CVE-2024-1234",
+				"severity": "HIGH",
+				"path":     []any{"myapp", "legacy-lib", "x/crypto"},
+				"depth":    2,
+			},
+		}
+		src := `vulnerability.?path.orValue([]).exists(p, p.contains("legacy"))`
+		val, err := Evaluate(t.Context(), src, input)
+		if err != nil {
+			t.Fatalf("Evaluate() error = %v", err)
+		}
+		if b, ok := val.(bool); !ok || !b {
+			t.Errorf("expected path to contain 'legacy'")
+		}
+	})
+
+	t.Run("combined depth and severity policy", func(t *testing.T) {
+		// Policy: block critical vulnerabilities in direct deps (depth == 0)
+		input := map[string]any{
+			"vulnerability": map[string]any{
+				"id":       "CVE-2024-1234",
+				"severity": "CRITICAL",
+				"depth":    0,
+			},
+		}
+		src := `vulnerability.severity == "CRITICAL" && vulnerability.?depth.orValue(0) == 0`
+		val, err := Evaluate(t.Context(), src, input)
+		if err != nil {
+			t.Fatalf("Evaluate() error = %v", err)
+		}
+		if b, ok := val.(bool); !ok || !b {
+			t.Errorf("expected policy to match critical direct dependency")
+		}
+	})
+
+	t.Run("allow deep transitive medium severity", func(t *testing.T) {
+		// Policy: allow medium severity if depth > 3
+		input := map[string]any{
+			"vulnerability": map[string]any{
+				"id":       "CVE-2024-5678",
+				"severity": "MEDIUM",
+				"depth":    4,
+			},
+		}
+		src := `vulnerability.severity == "MEDIUM" && vulnerability.?depth.orValue(0) > 3`
+		val, err := Evaluate(t.Context(), src, input)
+		if err != nil {
+			t.Fatalf("Evaluate() error = %v", err)
+		}
+		if b, ok := val.(bool); !ok || !b {
+			t.Errorf("expected policy to match deep transitive medium vulnerability")
+		}
+	})
+
+	t.Run("vulnerabilities list with depth filter", func(t *testing.T) {
+		// Report-level policy: count deep transitive vulnerabilities
+		input := map[string]any{
+			"vulnerabilities": []any{
+				map[string]any{"id": "CVE-1", "severity": "HIGH", "depth": 1},
+				map[string]any{"id": "CVE-2", "severity": "MEDIUM", "depth": 4},
+				map[string]any{"id": "CVE-3", "severity": "LOW", "depth": 5},
+			},
+		}
+		src := `vulnerabilities.filter(v, v.?depth.orValue(0) > 3).size() == 2`
+		val, err := Evaluate(t.Context(), src, input)
+		if err != nil {
+			t.Fatalf("Evaluate() error = %v", err)
+		}
+		if b, ok := val.(bool); !ok || !b {
+			t.Errorf("expected 2 deep transitive vulnerabilities")
+		}
+	})
+}

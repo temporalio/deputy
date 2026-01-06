@@ -112,3 +112,48 @@ func sliceToString(s []string) string {
 	}
 	return s[0]
 }
+
+func TestIsContainerfilePath(t *testing.T) {
+	tests := []struct {
+		name string
+		want bool
+	}{
+		// Exact matches
+		{"Dockerfile", true},
+		{"dockerfile", true},
+		{"DOCKERFILE", true},
+		{"Containerfile", true},
+		{"containerfile", true},
+		{"CONTAINERFILE", true},
+
+		// Extension patterns
+		{"app.dockerfile", true},
+		{"app.Dockerfile", true},
+		{"prod.containerfile", true},
+		{"prod.Containerfile", true},
+
+		// Prefix patterns (e.g., Dockerfile.prod)
+		{"Dockerfile.prod", true},
+		{"dockerfile.dev", true},
+		{"Containerfile.prod", true},
+		{"containerfile.dev", true},
+
+		// Not container files
+		{"docker-compose.yml", false},
+		{"docker-compose.yaml", false},
+		{"requirements.txt", false},
+		{"package.json", false},
+		{"go.mod", false},
+		{"dockerfiler", false},
+		{"my-dockerfile-backup", false},
+		{"", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := isContainerfilePath(tt.name); got != tt.want {
+				t.Errorf("isContainerfilePath(%q) = %v, want %v", tt.name, got, tt.want)
+			}
+		})
+	}
+}

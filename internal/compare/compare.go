@@ -404,6 +404,24 @@ func compareSemanticVersions(baseVersion, targetVersion, ecosystem string) (int,
 	return cmp, true
 }
 
+// GetMainModuleFromGoMod parses a go.mod file and returns the main module path
+// (the "module" declaration). Returns empty string if not found.
+func GetMainModuleFromGoMod(data []byte) string {
+	if len(data) == 0 {
+		return ""
+	}
+	for ln := range strings.SplitSeq(string(data), "\n") {
+		ln = strings.TrimSpace(ln)
+		if strings.HasPrefix(ln, "module ") {
+			fields := strings.Fields(ln)
+			if len(fields) >= 2 {
+				return fields[1]
+			}
+		}
+	}
+	return ""
+}
+
 // GetDirectDependenciesFromGoMod parses a go.mod file and returns module roots
 // for direct dependencies (those without "// indirect"). The returned set
 // always includes "stdlib".
@@ -520,6 +538,19 @@ func (s pkgSummary) ecosystemName() string {
 	return "unknown"
 }
 
+// CompareOptions configures package comparison behavior.
+type CompareOptions struct {
+	// GoDirect is a set of Go module roots that are direct dependencies.
+	GoDirect map[string]bool
+	// PkgDirect is a set of package keys that are direct dependencies.
+	PkgDirect map[string]bool
+	// Workspace is used to read go.mod if GoDirect is nil.
+	Workspace workspace.ReadableFS
+	// ExcludeMainModules is a set of Go module paths to exclude from comparison
+	// (typically the main module(s) of the project being analyzed).
+	ExcludeMainModules map[string]bool
+}
+
 // ComparePackages computes the dependency delta between two package slices.
 // It indexes each slice by canonical import path and classifies additions,
 // removals, upgrades, downgrades, and other updates while also tagging whether
@@ -528,6 +559,15 @@ func (s pkgSummary) ecosystemName() string {
 // If deps is nil, direct dependencies are inferred from go.mod in the supplied
 // workspace.
 func ComparePackages(oldPkgs, newPkgs []*extractor.Package, goDirect map[string]bool, pkgDirect map[string]bool, ws workspace.ReadableFS) []Change {
+	return ComparePackagesWithOptions(oldPkgs, newPkgs, CompareOptions{
+		GoDirect:  goDirect,
+		PkgDirect: pkgDirect,
+		Workspace: ws,
+	})
+}
+
+// ComparePackagesWithOptions computes the dependency delta with configurable options.
+func ComparePackagesWithOptions(oldPkgs, newPkgs []*extractor.Package, opts CompareOptions) []Change {
 	if len(oldPkgs) == 0 && len(newPkgs) == 0 {
 		return nil
 	}
@@ -535,17 +575,27 @@ func ComparePackages(oldPkgs, newPkgs []*extractor.Package, goDirect map[string]
 	newMap := map[string]pkgSummary{}
 	for _, p := range oldPkgs {
 		if key, meta := summarizePackage(p); key != "" {
+			// Skip excluded main modules
+			if opts.ExcludeMainModules != nil && shouldExcludeModule(meta, opts.ExcludeMainModules) {
+				continue
+			}
 			oldMap[key] = meta
 		}
 	}
 	for _, p := range newPkgs {
 		if key, meta := summarizePackage(p); key != "" {
+			// Skip excluded main modules
+			if opts.ExcludeMainModules != nil && shouldExcludeModule(meta, opts.ExcludeMainModules) {
+				continue
+			}
 			newMap[key] = meta
 		}
 	}
+	goDirect := opts.GoDirect
 	if goDirect == nil {
-		goDirect = GetDirectDependencies(ws)
+		goDirect = GetDirectDependencies(opts.Workspace)
 	}
+	pkgDirect := opts.PkgDirect
 	var changes []Change
 	for key, oldMeta := range oldMap {
 		newMeta, ok := newMap[key]
@@ -609,6 +659,22 @@ func ComparePackages(oldPkgs, newPkgs []*extractor.Package, goDirect map[string]
 	})
 
 	return changes
+}
+
+// shouldExcludeModule checks if a package should be excluded based on its module path.
+func shouldExcludeModule(meta pkgSummary, excludeModules map[string]bool) bool {
+	if !strings.EqualFold(meta.ecosystem, "Go") {
+		return false
+	}
+	// Check canonical name directly
+	if excludeModules[meta.canonical] {
+		return true
+	}
+	// Check module root
+	if meta.module != "" && excludeModules[meta.module] {
+		return true
+	}
+	return false
 }
 
 // isDirectForSummary determines if a package is a direct dependency.

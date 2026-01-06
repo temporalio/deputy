@@ -22,6 +22,7 @@ func AddTriageCommand(root *cobra.Command, service *scan.Service) {
 	scanner := NewScanner(service)
 	triageCmd := &cobra.Command{
 		Use:           "triage [repo]",
+		Aliases:       []string{"t", "tri"},
 		Short:         "Summarize vulnerabilities and optionally invoke an AI triage agent",
 		SilenceErrors: true,
 		SilenceUsage:  true,

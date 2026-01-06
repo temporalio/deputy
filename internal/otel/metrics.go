@@ -45,9 +45,13 @@ type Metrics struct {
 	ProxyPolicyDenials   metric.Int64Counter
 
 	// Cache metrics
-	CacheHits   metric.Int64Counter
-	CacheMisses metric.Int64Counter
-	CacheSize   metric.Int64Gauge
+	CacheHits      metric.Int64Counter
+	CacheMisses    metric.Int64Counter
+	CacheEvictions metric.Int64Counter
+	CacheExpired   metric.Int64Counter
+	CacheSize      metric.Int64Gauge
+	CacheMaxSize   metric.Int64Gauge
+	CacheHitRate   metric.Float64Gauge
 }
 
 var (
@@ -247,7 +251,7 @@ func newMetrics() (*Metrics, error) {
 	// Cache metrics
 	metrics.CacheHits, err = m.Int64Counter(
 		"deputy.cache.hits",
-		metric.WithDescription("Cache hits"),
+		metric.WithDescription("Total cache hits"),
 	)
 	if err != nil {
 		return nil, err
@@ -255,7 +259,23 @@ func newMetrics() (*Metrics, error) {
 
 	metrics.CacheMisses, err = m.Int64Counter(
 		"deputy.cache.misses",
-		metric.WithDescription("Cache misses"),
+		metric.WithDescription("Total cache misses"),
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	metrics.CacheEvictions, err = m.Int64Counter(
+		"deputy.cache.evictions",
+		metric.WithDescription("Total cache evictions due to capacity"),
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	metrics.CacheExpired, err = m.Int64Counter(
+		"deputy.cache.expired",
+		metric.WithDescription("Total cache entries expired due to TTL"),
 	)
 	if err != nil {
 		return nil, err
@@ -263,7 +283,23 @@ func newMetrics() (*Metrics, error) {
 
 	metrics.CacheSize, err = m.Int64Gauge(
 		"deputy.cache.size",
-		metric.WithDescription("Current cache size"),
+		metric.WithDescription("Current number of entries in cache"),
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	metrics.CacheMaxSize, err = m.Int64Gauge(
+		"deputy.cache.max_size",
+		metric.WithDescription("Maximum cache capacity"),
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	metrics.CacheHitRate, err = m.Float64Gauge(
+		"deputy.cache.hit_rate",
+		metric.WithDescription("Cache hit rate (0.0-1.0)"),
 	)
 	if err != nil {
 		return nil, err
@@ -308,10 +344,14 @@ var (
 	AttrAuthResultRejected  = attribute.String("result", "rejected")
 
 	// Cache type attributes - using deputy.cache.type for consistency with trace attributes
-	AttrCacheTypeOSV     = attribute.String("deputy.cache.type", "osv")
-	AttrCacheTypeLicense = attribute.String("deputy.cache.type", "license")
-	AttrCacheTypeDisk    = attribute.String("deputy.cache.type", "disk")
-	AttrCacheTypeImage   = attribute.String("deputy.cache.type", "image_scan")
+	AttrCacheTypeOSV      = attribute.String("deputy.cache.type", "osv")
+	AttrCacheTypeLicense  = attribute.String("deputy.cache.type", "license")
+	AttrCacheTypeDisk     = attribute.String("deputy.cache.type", "disk")
+	AttrCacheTypeImage    = attribute.String("deputy.cache.type", "image_scan")
+	AttrCacheTypeDepsDev  = attribute.String("deputy.cache.type", "depsdev")
+	AttrCacheTypeGoProxy  = attribute.String("deputy.cache.type", "goproxy")
+	AttrCacheTypeGraph    = attribute.String("deputy.cache.type", "graph")
+	AttrCacheTypeGit      = attribute.String("deputy.cache.type", "git")
 
 	// Image transport attributes for container image scans
 	AttrImageTransportRemote    = attribute.String("deputy.image.transport", "remote")
@@ -486,4 +526,74 @@ func (s SeverityCounts) ToMap() map[string]int {
 // Total returns the sum of all severity counts.
 func (s SeverityCounts) Total() int {
 	return s.Critical + s.High + s.Medium + s.Low
+}
+
+// CacheStats represents a snapshot of cache statistics compatible with
+// memory.Stats from the cache/memory package.
+type CacheStats struct {
+	Hits     uint64  // Total cache hits
+	Misses   uint64  // Total cache misses
+	Evicted  uint64  // Total evictions due to capacity
+	Expired  uint64  // Total expirations due to TTL
+	Size     int     // Current number of entries
+	MaxSize  int     // Maximum capacity
+	HitRate  float64 // Hit rate (0.0-1.0)
+}
+
+// CacheTypeAttr returns a cache type attribute for the given cache name.
+func CacheTypeAttr(cacheType string) attribute.KeyValue {
+	return attribute.String("deputy.cache.type", cacheType)
+}
+
+// RecordCacheStats records cache statistics for a named cache.
+// The cacheType parameter should identify the cache (e.g., "depsdev", "goproxy", "osv").
+// Use this function with stats from memory.TTLCache.Stats().
+func RecordCacheStats(ctx context.Context, cacheType string, stats CacheStats) {
+	m := getMetricsForRecording("cache_stats")
+	if m == nil {
+		return
+	}
+
+	typeAttr := CacheTypeAttr(cacheType)
+
+	// Record current values as gauges
+	m.CacheSize.Record(ctx, int64(stats.Size), metric.WithAttributes(typeAttr))
+	m.CacheMaxSize.Record(ctx, int64(stats.MaxSize), metric.WithAttributes(typeAttr))
+	m.CacheHitRate.Record(ctx, stats.HitRate, metric.WithAttributes(typeAttr))
+}
+
+// RecordCacheHit records a single cache hit event.
+func RecordCacheHit(ctx context.Context, cacheType string) {
+	m := getMetricsForRecording("cache_hit")
+	if m == nil {
+		return
+	}
+	m.CacheHits.Add(ctx, 1, metric.WithAttributes(CacheTypeAttr(cacheType)))
+}
+
+// RecordCacheMiss records a single cache miss event.
+func RecordCacheMiss(ctx context.Context, cacheType string) {
+	m := getMetricsForRecording("cache_miss")
+	if m == nil {
+		return
+	}
+	m.CacheMisses.Add(ctx, 1, metric.WithAttributes(CacheTypeAttr(cacheType)))
+}
+
+// RecordCacheEviction records a single cache eviction event.
+func RecordCacheEviction(ctx context.Context, cacheType string) {
+	m := getMetricsForRecording("cache_eviction")
+	if m == nil {
+		return
+	}
+	m.CacheEvictions.Add(ctx, 1, metric.WithAttributes(CacheTypeAttr(cacheType)))
+}
+
+// RecordCacheExpiration records a single cache expiration event.
+func RecordCacheExpiration(ctx context.Context, cacheType string) {
+	m := getMetricsForRecording("cache_expiration")
+	if m == nil {
+		return
+	}
+	m.CacheExpired.Add(ctx, 1, metric.WithAttributes(CacheTypeAttr(cacheType)))
 }

@@ -47,6 +47,7 @@ func AddFixCommand(root *cobra.Command, service *scan.Service) {
 	scanner := NewScanner(service)
 	fixCmd := &cobra.Command{
 		Use:           "fix [repo]",
+		Aliases:       []string{"f"},
 		Short:         "Generate and optionally apply remediation steps",
 		SilenceErrors: true,
 		SilenceUsage:  true,
@@ -377,12 +378,26 @@ func countExecutable(commands []remediation.Command) int {
 }
 
 // applyRemediationCommands executes the runnable commands in the remediation plan.
+// It handles both shell commands (e.g., "go get", "npm install") and deputy-internal
+// commands (e.g., "deputy:action:update", "deputy:dockerfile:update").
 func applyRemediationCommands(ctx context.Context, repoDir string, commands []remediation.Command, out io.Writer, errW io.Writer) error {
 	ran := 0
 	for _, rec := range commands {
 		if !rec.Executable {
 			continue
 		}
+
+		// Handle deputy-internal commands (file modifications for Actions/Dockerfiles)
+		if remediation.IsDeputyInternalCommand(rec.Command) {
+			fmt.Fprintf(out, "%s %s\n", ui.StyleUpgraded.Render("↻"), rec.Command)
+			if err := remediation.ApplyDeputyCommand(repoDir, rec.Command); err != nil {
+				return fmt.Errorf("deputy command %q failed: %w", rec.Command, err)
+			}
+			ran++
+			continue
+		}
+
+		// Handle shell commands
 		workDir := repoDir
 		if strings.TrimSpace(rec.Path) != "" {
 			relDir := filepath.Dir(rec.Path)

@@ -270,3 +270,95 @@ func AllScalibrPrefixes() []string {
 
 	return prefixes
 }
+
+// Capabilities describes the features available for an ecosystem.
+type Capabilities struct {
+	// Scan indicates dependency scanning is supported.
+	Scan bool
+	// SBOM indicates SBOM generation is supported.
+	SBOM bool
+	// Proxy indicates download-time policy enforcement is available.
+	Proxy bool
+	// License indicates license lookup enrichment is available.
+	License bool
+	// GraphResolution indicates dependency graph edge resolution is available.
+	GraphResolution bool
+}
+
+// Capabilities returns the features available for this ecosystem.
+func (e Ecosystem) Capabilities() Capabilities {
+	switch e {
+	case Go:
+		return Capabilities{
+			Scan:            true,
+			SBOM:            true,
+			Proxy:           true,
+			License:         true,
+			GraphResolution: true,
+		}
+	case NPM:
+		return Capabilities{
+			Scan:            true,
+			SBOM:            true,
+			Proxy:           true,
+			License:         false,
+			GraphResolution: true,
+		}
+	case PyPI:
+		return Capabilities{
+			Scan:            true,
+			SBOM:            true,
+			Proxy:           true,
+			License:         false,
+			GraphResolution: true,
+		}
+	case RubyGems:
+		return Capabilities{
+			Scan:            true,
+			SBOM:            true,
+			Proxy:           true,
+			License:         false,
+			GraphResolution: true,
+		}
+	case Cargo:
+		return Capabilities{
+			Scan:            true,
+			SBOM:            true,
+			Proxy:           false,
+			License:         true, // via crates.io API
+			GraphResolution: true,
+		}
+	case Maven, NuGet, Hex, Pub, CocoaPods, Packagist:
+		return Capabilities{
+			Scan:            true,
+			SBOM:            true,
+			Proxy:           false,
+			License:         false,
+			GraphResolution: false,
+		}
+	default:
+		return Capabilities{}
+	}
+}
+
+// WithProxy returns all ecosystems that support proxy mode.
+func WithProxy() []Ecosystem {
+	var result []Ecosystem
+	for _, e := range All() {
+		if e.Capabilities().Proxy {
+			result = append(result, e)
+		}
+	}
+	return result
+}
+
+// WithGraphResolution returns all ecosystems that support dependency graph resolution.
+func WithGraphResolution() []Ecosystem {
+	var result []Ecosystem
+	for _, e := range All() {
+		if e.Capabilities().GraphResolution {
+			result = append(result, e)
+		}
+	}
+	return result
+}

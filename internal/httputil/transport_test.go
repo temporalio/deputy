@@ -213,3 +213,209 @@ func TestRetryableClient_NoRetryOn4xx(t *testing.T) {
 		t.Errorf("attempts = %d, want 1 (no retries on 4xx)", got)
 	}
 }
+
+func TestDefaultClientConfig(t *testing.T) {
+	t.Parallel()
+
+	cfg := DefaultClientConfig()
+
+	if cfg.Timeout != 30*time.Second {
+		t.Errorf("Timeout = %v, want 30s", cfg.Timeout)
+	}
+	if cfg.DialTimeout != DefaultDialTimeout {
+		t.Errorf("DialTimeout = %v, want %v", cfg.DialTimeout, DefaultDialTimeout)
+	}
+	if cfg.TLSHandshakeTimeout != DefaultTLSHandshakeTimeout {
+		t.Errorf("TLSHandshakeTimeout = %v, want %v", cfg.TLSHandshakeTimeout, DefaultTLSHandshakeTimeout)
+	}
+	if cfg.MaxIdleConns != DefaultMaxIdleConns {
+		t.Errorf("MaxIdleConns = %d, want %d", cfg.MaxIdleConns, DefaultMaxIdleConns)
+	}
+	if cfg.MaxIdleConnsPerHost != DefaultMaxIdleConnsPerHost {
+		t.Errorf("MaxIdleConnsPerHost = %d, want %d", cfg.MaxIdleConnsPerHost, DefaultMaxIdleConnsPerHost)
+	}
+	if !cfg.RetryEnabled {
+		t.Error("expected RetryEnabled to be true")
+	}
+	if cfg.RetryMax != DefaultRetryMax {
+		t.Errorf("RetryMax = %d, want %d", cfg.RetryMax, DefaultRetryMax)
+	}
+}
+
+func TestNewTransportFromConfig(t *testing.T) {
+	t.Parallel()
+
+	cfg := ClientConfig{
+		DialTimeout:           15 * time.Second,
+		KeepAlive:             45 * time.Second,
+		TLSHandshakeTimeout:   12 * time.Second,
+		ResponseHeaderTimeout: 25 * time.Second,
+		IdleConnTimeout:       60 * time.Second,
+		MaxIdleConns:          50,
+		MaxIdleConnsPerHost:   25,
+	}
+
+	transport := NewTransportFromConfig(cfg)
+
+	if transport.TLSHandshakeTimeout != cfg.TLSHandshakeTimeout {
+		t.Errorf("TLSHandshakeTimeout = %v, want %v", transport.TLSHandshakeTimeout, cfg.TLSHandshakeTimeout)
+	}
+	if transport.ResponseHeaderTimeout != cfg.ResponseHeaderTimeout {
+		t.Errorf("ResponseHeaderTimeout = %v, want %v", transport.ResponseHeaderTimeout, cfg.ResponseHeaderTimeout)
+	}
+	if transport.IdleConnTimeout != cfg.IdleConnTimeout {
+		t.Errorf("IdleConnTimeout = %v, want %v", transport.IdleConnTimeout, cfg.IdleConnTimeout)
+	}
+	if transport.MaxIdleConns != cfg.MaxIdleConns {
+		t.Errorf("MaxIdleConns = %d, want %d", transport.MaxIdleConns, cfg.MaxIdleConns)
+	}
+	if transport.MaxIdleConnsPerHost != cfg.MaxIdleConnsPerHost {
+		t.Errorf("MaxIdleConnsPerHost = %d, want %d", transport.MaxIdleConnsPerHost, cfg.MaxIdleConnsPerHost)
+	}
+	if !transport.ForceAttemptHTTP2 {
+		t.Error("expected ForceAttemptHTTP2 to be true")
+	}
+}
+
+func TestNewClientFromConfig_NoRetry(t *testing.T) {
+	t.Parallel()
+
+	cfg := ClientConfig{
+		Timeout:      30 * time.Second,
+		DialTimeout:  10 * time.Second,
+		RetryEnabled: false,
+		RetryMax:     3,
+	}
+
+	client := NewClientFromConfig(cfg)
+
+	if client == nil {
+		t.Fatal("expected non-nil client")
+	}
+	if client.Timeout != cfg.Timeout {
+		t.Errorf("Timeout = %v, want %v", client.Timeout, cfg.Timeout)
+	}
+}
+
+func TestNewClientFromConfig_WithRetry(t *testing.T) {
+	t.Parallel()
+
+	cfg := ClientConfig{
+		Timeout:      30 * time.Second,
+		DialTimeout:  10 * time.Second,
+		RetryEnabled: true,
+		RetryMax:     3,
+		RetryWaitMin: 100 * time.Millisecond,
+		RetryWaitMax: 1 * time.Second,
+	}
+
+	client := NewClientFromConfig(cfg)
+
+	if client == nil {
+		t.Fatal("expected non-nil client")
+	}
+	if client.Timeout != cfg.Timeout {
+		t.Errorf("Timeout = %v, want %v", client.Timeout, cfg.Timeout)
+	}
+}
+
+func TestNewClientFromConfig_RetryBehavior(t *testing.T) {
+	t.Parallel()
+
+	var attempts atomic.Int32
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		attempt := attempts.Add(1)
+		if attempt < 3 {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	cfg := ClientConfig{
+		Timeout:      10 * time.Second,
+		DialTimeout:  5 * time.Second,
+		RetryEnabled: true,
+		RetryMax:     3,
+		RetryWaitMin: 10 * time.Millisecond,
+		RetryWaitMax: 50 * time.Millisecond,
+	}
+
+	client := NewClientFromConfig(cfg)
+	resp, err := client.Get(server.URL)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("StatusCode = %d, want %d", resp.StatusCode, http.StatusOK)
+	}
+	if got := attempts.Load(); got != 3 {
+		t.Errorf("attempts = %d, want 3", got)
+	}
+}
+
+func TestNewClientFromConfig_NoRetryWhenDisabled(t *testing.T) {
+	t.Parallel()
+
+	var attempts atomic.Int32
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		attempts.Add(1)
+		w.WriteHeader(http.StatusServiceUnavailable)
+	}))
+	defer server.Close()
+
+	cfg := ClientConfig{
+		Timeout:      10 * time.Second,
+		DialTimeout:  5 * time.Second,
+		RetryEnabled: false,
+		RetryMax:     3,
+	}
+
+	client := NewClientFromConfig(cfg)
+	resp, err := client.Get(server.URL)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	defer resp.Body.Close()
+
+	// Should not retry when disabled
+	if got := attempts.Load(); got != 1 {
+		t.Errorf("attempts = %d, want 1 (retries disabled)", got)
+	}
+}
+
+func TestNewClientFromConfig_ZeroRetryMax(t *testing.T) {
+	t.Parallel()
+
+	var attempts atomic.Int32
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		attempts.Add(1)
+		w.WriteHeader(http.StatusServiceUnavailable)
+	}))
+	defer server.Close()
+
+	cfg := ClientConfig{
+		Timeout:      10 * time.Second,
+		DialTimeout:  5 * time.Second,
+		RetryEnabled: true,
+		RetryMax:     0, // Zero means no retries
+	}
+
+	client := NewClientFromConfig(cfg)
+	resp, err := client.Get(server.URL)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	defer resp.Body.Close()
+
+	// Should not retry when RetryMax is 0
+	if got := attempts.Load(); got != 1 {
+		t.Errorf("attempts = %d, want 1 (RetryMax is 0)", got)
+	}
+}

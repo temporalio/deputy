@@ -67,7 +67,7 @@ can plug into the same scan flow as providers are added.
 | Flag | Short | Default | Description |
 | --- | --- | --- | --- |
 | `--ref` | `-r` | `HEAD` | Git reference to scan (branch, tag, commit, or `WORKING`) |
-| `--format` | `-f` | `text` | Output format: `text`, `json` |
+| `--format` | `-f` | `text` | Output format: `text`, `json`, `sarif` |
 | `--output` | `-o` | stdout | Output file path |
 | `--ignore-unfixed` | | `false` | Hide vulnerabilities without a known fix |
 | `--published-before` | | | Only show vulns published before this date |
@@ -75,8 +75,10 @@ can plug into the same scan flow as providers are added.
 | `--as-of` | | | Historical view up to this date (implies `--published-before`) |
 | `--policy` | | | CEL policy file(s) to evaluate (repeatable) |
 | `--ecosystems` | `-e` | all | Limit to specific ecosystems (see [supported ecosystems](#supported-ecosystems)) |
+| `--enrich` | | `false` | Enrich with EPSS scores and KEV status (requires network) |
 | `--show-symbols` | | `false` | Show affected symbols in text output |
 | `--show-db-info` | | `false` | Show database metadata (e.g., review_status) |
+| `--show-unfixable-guidance` | | `false` | Show actionable guidance for unfixable vulnerabilities |
 | `--source` | | auto | Target source override: `auto`, `git`, `dir`, `sbom`, `purl`, `dockerfile`, `remote`, `docker-daemon`, `tarball` |
 | `--platform` | | | Platform for remote images (`os/arch[/variant]`) |
 
@@ -146,6 +148,31 @@ $ deputy scan --ecosystems go,npm
 # Scan Java and Rust projects
 $ deputy scan --ecosystems maven,cargo
 ```
+
+### Enrichment and Guidance
+
+```console
+# Add EPSS scores and KEV (Known Exploited Vulnerabilities) status
+$ deputy scan --enrich
+
+# Show guidance for vulnerabilities that can't be fixed
+$ deputy scan --show-unfixable-guidance
+
+# Combine for comprehensive triage information
+$ deputy scan --enrich --show-unfixable-guidance
+
+# Show affected symbols (Go import paths, functions)
+$ deputy scan --show-symbols
+```
+
+The `--enrich` flag queries external APIs to add:
+- **EPSS scores**: Probability of exploitation in the next 30 days (0.0-1.0)
+- **KEV status**: Whether the CVE is in CISA's Known Exploited Vulnerabilities catalog
+
+The `--show-unfixable-guidance` flag provides actionable recommendations for vulnerabilities without fixes, including:
+- Risk assessment factors
+- Mitigation recommendations
+- Alternative package suggestions (when applicable)
 
 ## Supported Ecosystems
 

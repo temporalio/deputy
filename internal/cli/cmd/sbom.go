@@ -28,6 +28,7 @@ func AddSBOMCommand(root *cobra.Command) {
 
 	cmd := &cobra.Command{
 		Use:           "sbom [target]",
+		Aliases:       []string{"bom"},
 		Short:         "Generate an SBOM for a repository or container image",
 		SilenceErrors: true,
 		SilenceUsage:  true,

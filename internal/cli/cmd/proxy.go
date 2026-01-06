@@ -20,6 +20,7 @@ func AddProxyCommand(root *cobra.Command) {
 
 	proxyCmd := &cobra.Command{
 		Use:           "proxy",
+		Aliases:       []string{"px"},
 		Short:         "Run Deputy's artifact proxy",
 		SilenceErrors: true,
 		SilenceUsage:  true,
