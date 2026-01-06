@@ -3,6 +3,7 @@ package cmd
 import (
 	"fmt"
 
+	deperrors "github.com/picatz/deputy/internal/errors"
 	"github.com/picatz/deputy/internal/proxy"
 	"github.com/spf13/cobra"
 )
@@ -96,7 +97,10 @@ AUTHENTICATION (in proxy.yaml):
 		SilenceUsage:  true,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if cfgPath == "" {
-				return fmt.Errorf("missing --config")
+				return deperrors.Suggest(
+					fmt.Errorf("missing --config"),
+					"Create a config file with 'deputy proxy template > proxy.yaml' then use --config proxy.yaml",
+				)
 			}
 			cfg, err := proxy.LoadConfig(cfgPath)
 			if err != nil {

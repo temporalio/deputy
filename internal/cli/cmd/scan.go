@@ -21,6 +21,7 @@ import (
 	"github.com/google/osv-scalibr/extractor"
 	packageurl "github.com/package-url/packageurl-go"
 	cliflags "github.com/picatz/deputy/internal/cli/flags"
+	deperrors "github.com/picatz/deputy/internal/errors"
 	"github.com/picatz/deputy/internal/collections"
 	"github.com/picatz/deputy/internal/container/image"
 	"github.com/picatz/deputy/internal/dockerfile"
@@ -227,6 +228,7 @@ WORKFLOW EXAMPLES:
 	scanCmd.Flags().StringP("output", "o", "", "Output file (default: stdout)")
 	scanCmd.Flags().StringP("format", "f", "text", "Output format (text, json, sarif)")
 	scanCmd.Flags().Bool("ignore-unfixed", false, "Ignore vulnerabilities without fixes")
+	scanCmd.Flags().String("ignore-file", "", "Path to ignore rules file (.deputyignore.yaml)")
 	scanCmd.Flags().String("published-before", "", "Only include vulnerabilities published before this date (YYYY, YYYY-MM, YYYY-MM-DD, or RFC3339)")
 	scanCmd.Flags().String("published-after", "", "Only include vulnerabilities published on/after this date (YYYY, YYYY-MM, YYYY-MM-DD, or RFC3339)")
 	scanCmd.Flags().String("as-of", "", "Historical view: show vulnerabilities known up to and including this date (implies --published-before)")
@@ -284,6 +286,7 @@ TYPICAL USE CASES:
 	scanDirCmd.Flags().StringP("output", "o", "", "Output file (default: stdout)")
 	scanDirCmd.Flags().StringP("format", "f", "text", "Output format (text, json, sarif)")
 	scanDirCmd.Flags().Bool("ignore-unfixed", false, "Ignore vulnerabilities without fixes")
+	scanDirCmd.Flags().String("ignore-file", "", "Path to ignore rules file (.deputyignore.yaml)")
 	scanDirCmd.Flags().String("published-before", "", "Only include vulnerabilities published before this date (YYYY, YYYY-MM, YYYY-MM-DD, or RFC3339)")
 	scanDirCmd.Flags().String("published-after", "", "Only include vulnerabilities published on/after this date (YYYY, YYYY-MM, YYYY-MM-DD, or RFC3339)")
 	scanDirCmd.Flags().String("as-of", "", "Historical view: show vulnerabilities known up to and including this date (implies --published-before)")
@@ -370,6 +373,7 @@ WORKFLOW EXAMPLES:
 	scanSBOMCmd.Flags().StringP("output", "o", "", "Output file (default: stdout)")
 	scanSBOMCmd.Flags().StringP("format", "f", "text", "Output format (text, json, sarif)")
 	scanSBOMCmd.Flags().Bool("ignore-unfixed", false, "Ignore vulnerabilities without fixes")
+	scanSBOMCmd.Flags().String("ignore-file", "", "Path to ignore rules file (.deputyignore.yaml)")
 	scanSBOMCmd.Flags().String("published-before", "", "Only include vulnerabilities published before this date (YYYY, YYYY-MM, YYYY-MM-DD, or RFC3339)")
 	scanSBOMCmd.Flags().String("published-after", "", "Only include vulnerabilities published on/after this date (YYYY, YYYY-MM, YYYY-MM-DD, or RFC3339)")
 	scanSBOMCmd.Flags().String("as-of", "", "Historical view: show vulnerabilities known up to and including this date (implies --published-before)")
@@ -405,6 +409,7 @@ OUTPUT AND FILTERING:
 	scanPURLCmd.Flags().StringP("output", "o", "", "Output file (default: stdout)")
 	scanPURLCmd.Flags().StringP("format", "f", "text", "Output format (text, json, sarif)")
 	scanPURLCmd.Flags().Bool("ignore-unfixed", false, "Ignore vulnerabilities without fixes")
+	scanPURLCmd.Flags().String("ignore-file", "", "Path to ignore rules file (.deputyignore.yaml)")
 	scanPURLCmd.Flags().String("published-before", "", "Only include vulnerabilities published before this date (YYYY, YYYY-MM, YYYY-MM-DD, or RFC3339)")
 	scanPURLCmd.Flags().String("published-after", "", "Only include vulnerabilities published on/after this date (YYYY, YYYY-MM, YYYY-MM-DD, or RFC3339)")
 	scanPURLCmd.Flags().String("as-of", "", "Historical view: show vulnerabilities known up to and including this date (implies --published-before)")
@@ -474,6 +479,7 @@ POLICY ENFORCEMENT:
 	scanImageCmd.Flags().StringP("output", "o", "", "Output file (default: stdout)")
 	scanImageCmd.Flags().StringP("format", "f", "text", "Output format (text, json, sarif)")
 	scanImageCmd.Flags().Bool("ignore-unfixed", false, "Ignore vulnerabilities without fixes")
+	scanImageCmd.Flags().String("ignore-file", "", "Path to ignore rules file (.deputyignore.yaml)")
 	scanImageCmd.Flags().String("published-before", "", "Only include vulnerabilities published before this date (YYYY, YYYY-MM, YYYY-MM-DD, or RFC3339)")
 	scanImageCmd.Flags().String("published-after", "", "Only include vulnerabilities published on/after this date (YYYY, YYYY-MM, YYYY-MM-DD, or RFC3339)")
 	scanImageCmd.Flags().String("as-of", "", "Historical view: show vulnerabilities known up to and including this date (implies --published-before)")
@@ -642,6 +648,21 @@ func (s *Scanner) runScanRepository(cmd *cobra.Command, repoArg string) error {
 		policyResult = scan.FilterUnfixed(policyResult)
 		resultOut = policyResult
 	}
+
+	// Load and apply ignore rules
+	var ignoredCount int
+	workDir := exec.Result.Target.LocalPath
+	if workDir == "" {
+		workDir, _ = os.Getwd()
+	}
+	if err := flags.loadIgnoreRules(workDir); err != nil {
+		fmt.Fprintf(cmd.ErrOrStderr(), "Warning: %v\n", err)
+	}
+	if flags.ignoreRules != nil {
+		policyResult, ignoredCount = scan.FilterIgnored(policyResult, flags.ignoreRules)
+		resultOut = policyResult
+	}
+
 	report := buildScanReport(policyResult)
 	if flags.Enrich {
 		enrichVulnerabilities(ctx, report.Vulnerabilities, cmd.ErrOrStderr())
@@ -662,7 +683,7 @@ func (s *Scanner) runScanRepository(cmd *cobra.Command, repoArg string) error {
 
 	switch strings.ToLower(flags.Format) {
 	case "", FormatText:
-		return s.outputText(out.Writer, cmd.ErrOrStderr(), resultOut, flags.IgnoreUnfixed, policyFindings, flags.displayOptionsWithResult(resultOut))
+		return s.outputText(out.Writer, cmd.ErrOrStderr(), resultOut, flags.IgnoreUnfixed, ignoredCount, policyFindings, flags.displayOptionsWithResult(resultOut))
 	case FormatJSON:
 		return s.outputJSON(out.Writer, resultOut, policyFindings)
 	case FormatSARIF:
@@ -717,6 +738,17 @@ func (s *Scanner) runScanDir(cmd *cobra.Command, args []string) error {
 		policyResult = scan.FilterUnfixed(policyResult)
 		resultOut = policyResult
 	}
+
+	// Load and apply ignore rules
+	var ignoredCount int
+	if err := flags.loadIgnoreRules(path); err != nil {
+		fmt.Fprintf(cmd.ErrOrStderr(), "Warning: %v\n", err)
+	}
+	if flags.ignoreRules != nil {
+		policyResult, ignoredCount = scan.FilterIgnored(policyResult, flags.ignoreRules)
+		resultOut = policyResult
+	}
+
 	report := buildScanReport(policyResult)
 	if flags.Enrich {
 		enrichVulnerabilities(ctx, report.Vulnerabilities, cmd.ErrOrStderr())
@@ -736,7 +768,7 @@ func (s *Scanner) runScanDir(cmd *cobra.Command, args []string) error {
 
 	switch strings.ToLower(flags.Format) {
 	case "", FormatText:
-		return s.outputTextDir(out.Writer, cmd.ErrOrStderr(), resultOut, flags.IgnoreUnfixed, policyFindings, flags.displayOptionsWithResult(resultOut))
+		return s.outputTextDir(out.Writer, cmd.ErrOrStderr(), resultOut, flags.IgnoreUnfixed, ignoredCount, policyFindings, flags.displayOptionsWithResult(resultOut))
 	case FormatJSON:
 		return s.outputJSON(out.Writer, resultOut, policyFindings)
 	case FormatSARIF:
@@ -862,6 +894,18 @@ func (s *Scanner) runScanSBOM(cmd *cobra.Command, args []string) error {
 		policyResult = scan.FilterUnfixed(policyResult)
 		resultOut = policyResult
 	}
+
+	// Load and apply ignore rules (use cwd for SBOM scans)
+	var ignoredCount int
+	workDir, _ := os.Getwd()
+	if err := flags.loadIgnoreRules(workDir); err != nil {
+		fmt.Fprintf(cmd.ErrOrStderr(), "Warning: %v\n", err)
+	}
+	if flags.ignoreRules != nil {
+		policyResult, ignoredCount = scan.FilterIgnored(policyResult, flags.ignoreRules)
+		resultOut = policyResult
+	}
+
 	report := buildScanReport(policyResult)
 	if flags.Enrich {
 		enrichVulnerabilities(ctx, report.Vulnerabilities, cmd.ErrOrStderr())
@@ -889,6 +933,9 @@ func (s *Scanner) runScanSBOM(cmd *cobra.Command, args []string) error {
 		_ = doc.Render(out.Writer, output.UIStyles())
 		if flags.IgnoreUnfixed {
 			fmt.Fprintln(cmd.ErrOrStderr(), "  "+ui.StyleMeta.Render("Note: ignoring unfixed vulnerabilities (--ignore-unfixed)"))
+		}
+		if ignoredCount > 0 {
+			fmt.Fprintln(cmd.ErrOrStderr(), "  "+ui.StyleMeta.Render(fmt.Sprintf("Note: %d vulnerability finding(s) ignored by rules", ignoredCount)))
 		}
 		render.DisplayVulnerabilities(out.Writer, resultOut, flags.displayOptions())
 		render.PolicyFindings(out.Writer, policyFindings)
@@ -934,6 +981,18 @@ func (s *Scanner) runScanPURL(cmd *cobra.Command, args []string) error {
 		policyResult = scan.FilterUnfixed(policyResult)
 		resultOut = policyResult
 	}
+
+	// Load and apply ignore rules (use cwd for PURL scans)
+	var ignoredCount int
+	workDir, _ := os.Getwd()
+	if err := flags.loadIgnoreRules(workDir); err != nil {
+		fmt.Fprintf(cmd.ErrOrStderr(), "Warning: %v\n", err)
+	}
+	if flags.ignoreRules != nil {
+		policyResult, ignoredCount = scan.FilterIgnored(policyResult, flags.ignoreRules)
+		resultOut = policyResult
+	}
+
 	report := buildScanReport(policyResult)
 	if flags.Enrich {
 		enrichVulnerabilities(ctx, report.Vulnerabilities, cmd.ErrOrStderr())
@@ -953,7 +1012,7 @@ func (s *Scanner) runScanPURL(cmd *cobra.Command, args []string) error {
 
 	switch strings.ToLower(flags.Format) {
 	case "", FormatText:
-		return s.outputTextDir(out.Writer, cmd.ErrOrStderr(), resultOut, flags.IgnoreUnfixed, policyFindings, flags.displayOptions())
+		return s.outputTextDir(out.Writer, cmd.ErrOrStderr(), resultOut, flags.IgnoreUnfixed, ignoredCount, policyFindings, flags.displayOptions())
 	case FormatJSON:
 		return s.outputJSON(out.Writer, resultOut, policyFindings)
 	case FormatSARIF:
@@ -1021,6 +1080,18 @@ func (s *Scanner) runScanImageWithOptions(cmd *cobra.Command, input, source, pla
 		policyResult = scan.FilterUnfixed(policyResult)
 		resultOut = policyResult
 	}
+
+	// Load and apply ignore rules (use cwd for image scans)
+	var ignoredCount int
+	workDir, _ := os.Getwd()
+	if err := flags.loadIgnoreRules(workDir); err != nil {
+		fmt.Fprintf(cmd.ErrOrStderr(), "Warning: %v\n", err)
+	}
+	if flags.ignoreRules != nil {
+		policyResult, ignoredCount = scan.FilterIgnored(policyResult, flags.ignoreRules)
+		resultOut = policyResult
+	}
+
 	report := buildScanReport(policyResult)
 	if flags.Enrich {
 		enrichVulnerabilities(ctx, report.Vulnerabilities, cmd.ErrOrStderr())
@@ -1040,7 +1111,7 @@ func (s *Scanner) runScanImageWithOptions(cmd *cobra.Command, input, source, pla
 
 	switch strings.ToLower(flags.Format) {
 	case "", FormatText:
-		return s.outputTextContainer(out.Writer, cmd.ErrOrStderr(), resultOut, flags.IgnoreUnfixed, policyFindings, flags.displayOptions())
+		return s.outputTextContainer(out.Writer, cmd.ErrOrStderr(), resultOut, flags.IgnoreUnfixed, ignoredCount, policyFindings, flags.displayOptions())
 	case FormatJSON:
 		return s.outputJSON(out.Writer, resultOut, policyFindings)
 	case FormatSARIF:
@@ -1083,7 +1154,7 @@ func normalizeImageTarget(input, source string) (string, error) {
 }
 
 // outputText writes the scan results in a human-readable text format to the provided writer.
-func (s *Scanner) outputText(w io.Writer, errW io.Writer, result scan.Result, ignoreUnfixed bool, policyFindings []report.PolicyFinding, displayOpts render.VulnerabilityDisplayOptions) error {
+func (s *Scanner) outputText(w io.Writer, errW io.Writer, result scan.Result, ignoreUnfixed bool, ignoredCount int, policyFindings []report.PolicyFinding, displayOpts render.VulnerabilityDisplayOptions) error {
 	displayPath := result.Target.DisplayPath
 	localPath := result.Target.LocalPath
 	shortRef := shortGitRef(refOrHEAD(result.Target.Ref))
@@ -1109,6 +1180,9 @@ func (s *Scanner) outputText(w io.Writer, errW io.Writer, result scan.Result, ig
 	if ignoreUnfixed {
 		fmt.Fprintln(errW, "  "+ui.StyleMeta.Render("Note: ignoring unfixed vulnerabilities (--ignore-unfixed)"))
 	}
+	if ignoredCount > 0 {
+		fmt.Fprintln(errW, "  "+ui.StyleMeta.Render(fmt.Sprintf("Note: %d vulnerability finding(s) ignored by rules", ignoredCount)))
+	}
 
 	render.DisplayVulnerabilities(w, result, displayOpts)
 	render.PolicyFindings(w, policyFindings)
@@ -1129,12 +1203,15 @@ func (s *Scanner) outputText(w io.Writer, errW io.Writer, result scan.Result, ig
 }
 
 // outputTextDir writes the directory scan results in a human-readable text format.
-func (s *Scanner) outputTextDir(w io.Writer, errW io.Writer, result scan.Result, ignoreUnfixed bool, policyFindings []report.PolicyFinding, displayOpts render.VulnerabilityDisplayOptions) error {
+func (s *Scanner) outputTextDir(w io.Writer, errW io.Writer, result scan.Result, ignoreUnfixed bool, ignoredCount int, policyFindings []report.PolicyFinding, displayOpts render.VulnerabilityDisplayOptions) error {
 	doc := render.ScanResultsHeaderDoc(result.Target.DisplayPath, "", "", "")
 	_ = doc.Render(w, output.UIStyles())
 
 	if ignoreUnfixed {
 		fmt.Fprintln(errW, "  "+ui.StyleMeta.Render("Note: ignoring unfixed vulnerabilities (--ignore-unfixed)"))
+	}
+	if ignoredCount > 0 {
+		fmt.Fprintln(errW, "  "+ui.StyleMeta.Render(fmt.Sprintf("Note: %d vulnerability finding(s) ignored by rules", ignoredCount)))
 	}
 
 	render.DisplayVulnerabilities(w, result, displayOpts)
@@ -1143,13 +1220,16 @@ func (s *Scanner) outputTextDir(w io.Writer, errW io.Writer, result scan.Result,
 }
 
 // outputTextContainer writes container image scan results with container-specific context.
-func (s *Scanner) outputTextContainer(w io.Writer, errW io.Writer, result scan.Result, ignoreUnfixed bool, policyFindings []report.PolicyFinding, displayOpts render.VulnerabilityDisplayOptions) error {
+func (s *Scanner) outputTextContainer(w io.Writer, errW io.Writer, result scan.Result, ignoreUnfixed bool, ignoredCount int, policyFindings []report.PolicyFinding, displayOpts render.VulnerabilityDisplayOptions) error {
 	// Use container-specific header with image metadata
 	doc := render.ContainerScanHeaderDoc(result.Target.DisplayPath, result.ImageInfo)
 	_ = doc.Render(w, output.UIStyles())
 
 	if ignoreUnfixed {
 		fmt.Fprintln(errW, "  "+ui.StyleMeta.Render("Note: ignoring unfixed vulnerabilities (--ignore-unfixed)"))
+	}
+	if ignoredCount > 0 {
+		fmt.Fprintln(errW, "  "+ui.StyleMeta.Render(fmt.Sprintf("Note: %d vulnerability finding(s) ignored by rules", ignoredCount)))
 	}
 
 	// Show image security summary (root user, sensitive env, etc.)
@@ -1263,7 +1343,10 @@ func parseSBOMPackages(data []byte, inFmt string) ([]*extractor.Package, map[str
 	if lastErr != nil {
 		return nil, nil, nil, nil, lastErr
 	}
-	return nil, nil, nil, nil, fmt.Errorf("unsupported or empty SBOM input; specify --input-format (protobom-json|cyclonedx-json|spdx-json)")
+	return nil, nil, nil, nil, deperrors.Suggest(
+		fmt.Errorf("unsupported or empty SBOM input"),
+		"Specify --input-format (protobom-json|cyclonedx-json|spdx-json) or generate with 'deputy sbom'",
+	)
 }
 
 // detectSBOMFormat attempts to identify the SBOM format from the input data.
@@ -1820,28 +1903,11 @@ func buildScanImagePayload(target scan.Target) map[string]any {
 	if target.Kind != targets.KindContainerImage {
 		return nil
 	}
-	if len(target.Provenance) == 0 {
+	ref := image.RefFromProvenance(target.Provenance)
+	if ref == nil || ref.IsEmpty() {
 		return nil
 	}
-	image := map[string]any{
-		"registry":   target.Provenance["registry"],
-		"repository": target.Provenance["repository"],
-		"tag":        target.Provenance["tag"],
-		"digest":     target.Provenance["digest"],
-		"reference":  "",
-		"image":      target.Provenance["image"],
-	}
-	if image["image"] == "" {
-		image["image"] = target.Provenance["image_input"]
-	}
-	if image["reference"] == "" {
-		if digest := target.Provenance["digest"]; digest != "" {
-			image["reference"] = digest
-		} else if tag := target.Provenance["tag"]; tag != "" {
-			image["reference"] = tag
-		}
-	}
-	return image
+	return ref.ToMap()
 }
 
 // runScanPolicies evaluates the provided policies against the scan report and individual vulnerabilities.

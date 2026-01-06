@@ -36,4 +36,8 @@ func RegisterCommands(root *cobra.Command, deps Dependencies) {
 	// Setup and configuration commands
 	AddInitCommand(root)
 	AddConfigCommand(root)
+
+	// Informational commands
+	AddVersionCommand(root)
+	AddEcosystemsCommand(root)
 }

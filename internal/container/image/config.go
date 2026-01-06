@@ -369,3 +369,151 @@ func (i *Info) historyToMaps() []any {
 	}
 	return result
 }
+
+// Ref represents a container image reference with provenance information.
+// This is the typed representation of image registry, repository, tag, and digest.
+type Ref struct {
+	// Registry is the container registry hostname (e.g., "docker.io", "ghcr.io").
+	Registry string `json:"registry,omitempty"`
+
+	// Repository is the image repository path (e.g., "library/nginx", "owner/app").
+	Repository string `json:"repository,omitempty"`
+
+	// Tag is the image tag (e.g., "latest", "v1.0.0").
+	Tag string `json:"tag,omitempty"`
+
+	// Digest is the image content digest (e.g., "sha256:abc123...").
+	Digest string `json:"digest,omitempty"`
+
+	// Reference is the reference portion of the image (tag or digest).
+	Reference string `json:"reference,omitempty"`
+
+	// Image is the full image reference string (e.g., "docker.io/library/nginx:1.25").
+	Image string `json:"image,omitempty"`
+}
+
+// RefFromProvenance creates an ImageRef from a provenance map (scan target provenance).
+func RefFromProvenance(provenance map[string]string) *Ref {
+	if len(provenance) == 0 {
+		return nil
+	}
+	ref := &Ref{
+		Registry:   provenance["registry"],
+		Repository: provenance["repository"],
+		Tag:        provenance["tag"],
+		Digest:     provenance["digest"],
+		Image:      provenance["image"],
+	}
+	if ref.Image == "" {
+		ref.Image = provenance["image_input"]
+	}
+	if ref.Reference == "" {
+		if ref.Digest != "" {
+			ref.Reference = ref.Digest
+		} else if ref.Tag != "" {
+			ref.Reference = ref.Tag
+		}
+	}
+	return ref
+}
+
+// ToMap converts Ref to a map for CEL policy evaluation.
+func (r *Ref) ToMap() map[string]any {
+	if r == nil {
+		return map[string]any{
+			"registry":   "",
+			"repository": "",
+			"tag":        "",
+			"digest":     "",
+			"reference":  "",
+			"image":      "",
+		}
+	}
+	return map[string]any{
+		"registry":   r.Registry,
+		"repository": r.Repository,
+		"tag":        r.Tag,
+		"digest":     r.Digest,
+		"reference":  r.Reference,
+		"image":      r.Image,
+	}
+}
+
+// IsEmpty returns true if the ref has no meaningful data.
+func (r *Ref) IsEmpty() bool {
+	if r == nil {
+		return true
+	}
+	return r.Registry == "" && r.Repository == "" && r.Tag == "" && r.Digest == "" && r.Image == ""
+}
+
+// String returns the full image reference string.
+func (r *Ref) String() string {
+	if r == nil {
+		return ""
+	}
+	if r.Image != "" {
+		return r.Image
+	}
+	// Build from components
+	var base string
+	if r.Registry != "" && r.Repository != "" {
+		base = r.Registry + "/" + r.Repository
+	} else if r.Repository != "" {
+		base = r.Repository
+	}
+	if base == "" {
+		return ""
+	}
+	if r.Digest != "" {
+		return base + "@" + r.Digest
+	}
+	if r.Tag != "" {
+		return base + ":" + r.Tag
+	}
+	return base
+}
+
+// PolicyPayload combines an image reference with extracted image info for policy evaluation.
+// This is the complete image data structure passed to CEL policies.
+type PolicyPayload struct {
+	// Ref contains the image reference/provenance data.
+	Ref *Ref `json:"ref,omitempty"`
+
+	// Info contains extracted image configuration and metadata.
+	Info *Info `json:"info,omitempty"`
+}
+
+// ToMap converts PolicyPayload to a map for CEL policy evaluation.
+// The resulting map has the image reference fields at the top level,
+// with config, metadata, and history nested inside.
+func (p *PolicyPayload) ToMap() map[string]any {
+	result := make(map[string]any)
+
+	// Start with reference fields
+	if p.Ref != nil {
+		for k, v := range p.Ref.ToMap() {
+			result[k] = v
+		}
+	} else {
+		// Provide empty defaults
+		for k, v := range (&Ref{}).ToMap() {
+			result[k] = v
+		}
+	}
+
+	// Add info fields (config, metadata, history)
+	if p.Info != nil {
+		infoMap := p.Info.ToMap()
+		for k, v := range infoMap {
+			result[k] = v
+		}
+	} else {
+		// Provide empty defaults
+		result["config"] = map[string]any{}
+		result["metadata"] = map[string]any{}
+		result["history"] = []any{}
+	}
+
+	return result
+}

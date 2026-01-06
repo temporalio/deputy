@@ -340,3 +340,264 @@ func TestImageConfigExtractedHealthcheck(t *testing.T) {
 		t.Errorf("Healthcheck.Retries = %d, want 3", ic.Healthcheck.Retries)
 	}
 }
+
+func TestRefFromProvenance(t *testing.T) {
+	tests := []struct {
+		name       string
+		provenance map[string]string
+		wantNil    bool
+		wantImage  string
+	}{
+		{
+			name:       "nil provenance",
+			provenance: nil,
+			wantNil:    true,
+		},
+		{
+			name:       "empty provenance",
+			provenance: map[string]string{},
+			wantNil:    true,
+		},
+		{
+			name: "full provenance",
+			provenance: map[string]string{
+				"registry":   "ghcr.io",
+				"repository": "owner/app",
+				"tag":        "v1.0.0",
+				"digest":     "sha256:abc123",
+				"image":      "ghcr.io/owner/app:v1.0.0",
+			},
+			wantImage: "ghcr.io/owner/app:v1.0.0",
+		},
+		{
+			name: "uses image_input fallback",
+			provenance: map[string]string{
+				"registry":    "docker.io",
+				"repository":  "library/nginx",
+				"tag":         "1.25",
+				"image_input": "nginx:1.25",
+			},
+			wantImage: "nginx:1.25",
+		},
+		{
+			name: "reference from digest",
+			provenance: map[string]string{
+				"registry":   "gcr.io",
+				"repository": "project/image",
+				"digest":     "sha256:abc123",
+			},
+			wantImage: "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ref := RefFromProvenance(tt.provenance)
+			if tt.wantNil {
+				if ref != nil {
+					t.Errorf("expected nil ref, got %+v", ref)
+				}
+				return
+			}
+			if ref == nil {
+				t.Fatal("unexpected nil ref")
+			}
+			if tt.wantImage != "" && ref.Image != tt.wantImage {
+				t.Errorf("Image = %q, want %q", ref.Image, tt.wantImage)
+			}
+		})
+	}
+}
+
+func TestRefToMap(t *testing.T) {
+	ref := &Ref{
+		Registry:   "docker.io",
+		Repository: "library/nginx",
+		Tag:        "1.25",
+		Digest:     "",
+		Reference:  "1.25",
+		Image:      "docker.io/library/nginx:1.25",
+	}
+
+	m := ref.ToMap()
+
+	if m["registry"] != "docker.io" {
+		t.Errorf("registry = %v, want docker.io", m["registry"])
+	}
+	if m["tag"] != "1.25" {
+		t.Errorf("tag = %v, want 1.25", m["tag"])
+	}
+	if m["image"] != "docker.io/library/nginx:1.25" {
+		t.Errorf("image = %v, want docker.io/library/nginx:1.25", m["image"])
+	}
+}
+
+func TestRefToMapNil(t *testing.T) {
+	var ref *Ref
+	m := ref.ToMap()
+
+	if m["registry"] != "" {
+		t.Errorf("registry should be empty for nil ref")
+	}
+	if m["image"] != "" {
+		t.Errorf("image should be empty for nil ref")
+	}
+}
+
+func TestRefString(t *testing.T) {
+	tests := []struct {
+		name string
+		ref  *Ref
+		want string
+	}{
+		{
+			name: "nil ref",
+			ref:  nil,
+			want: "",
+		},
+		{
+			name: "from image field",
+			ref: &Ref{
+				Image: "nginx:1.25",
+			},
+			want: "nginx:1.25",
+		},
+		{
+			name: "build from components with tag",
+			ref: &Ref{
+				Registry:   "ghcr.io",
+				Repository: "owner/app",
+				Tag:        "v1.0.0",
+			},
+			want: "ghcr.io/owner/app:v1.0.0",
+		},
+		{
+			name: "build from components with digest",
+			ref: &Ref{
+				Registry:   "gcr.io",
+				Repository: "project/image",
+				Digest:     "sha256:abc123",
+			},
+			want: "gcr.io/project/image@sha256:abc123",
+		},
+		{
+			name: "repository only",
+			ref: &Ref{
+				Repository: "myapp",
+			},
+			want: "myapp",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := tt.ref.String()
+			if got != tt.want {
+				t.Errorf("String() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestRefIsEmpty(t *testing.T) {
+	tests := []struct {
+		name string
+		ref  *Ref
+		want bool
+	}{
+		{
+			name: "nil ref",
+			ref:  nil,
+			want: true,
+		},
+		{
+			name: "empty ref",
+			ref:  &Ref{},
+			want: true,
+		},
+		{
+			name: "has image",
+			ref:  &Ref{Image: "nginx"},
+			want: false,
+		},
+		{
+			name: "has registry",
+			ref:  &Ref{Registry: "docker.io"},
+			want: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := tt.ref.IsEmpty()
+			if got != tt.want {
+				t.Errorf("IsEmpty() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestPolicyPayloadToMap(t *testing.T) {
+	payload := &PolicyPayload{
+		Ref: &Ref{
+			Registry:   "docker.io",
+			Repository: "library/nginx",
+			Tag:        "1.25",
+			Image:      "docker.io/library/nginx:1.25",
+		},
+		Info: &Info{
+			Config: Config{
+				User: "nginx",
+			},
+			Metadata: Metadata{
+				Architecture: "amd64",
+				LayerCount:   5,
+			},
+		},
+	}
+
+	m := payload.ToMap()
+
+	// Check ref fields
+	if m["registry"] != "docker.io" {
+		t.Errorf("registry = %v, want docker.io", m["registry"])
+	}
+	if m["image"] != "docker.io/library/nginx:1.25" {
+		t.Errorf("image = %v, want docker.io/library/nginx:1.25", m["image"])
+	}
+
+	// Check info fields
+	config, ok := m["config"].(map[string]any)
+	if !ok {
+		t.Fatal("config should be map[string]any")
+	}
+	if config["user"] != "nginx" {
+		t.Errorf("config.user = %v, want nginx", config["user"])
+	}
+
+	metadata, ok := m["metadata"].(map[string]any)
+	if !ok {
+		t.Fatal("metadata should be map[string]any")
+	}
+	if metadata["architecture"] != "amd64" {
+		t.Errorf("metadata.architecture = %v, want amd64", metadata["architecture"])
+	}
+}
+
+func TestPolicyPayloadToMapNilFields(t *testing.T) {
+	payload := &PolicyPayload{}
+	m := payload.ToMap()
+
+	// Should have empty defaults for ref fields
+	if m["registry"] != "" {
+		t.Errorf("registry should be empty")
+	}
+
+	// Should have empty config/metadata
+	if m["config"] == nil {
+		t.Error("config should not be nil")
+	}
+	if m["metadata"] == nil {
+		t.Error("metadata should not be nil")
+	}
+}

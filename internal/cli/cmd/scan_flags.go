@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/picatz/deputy/internal/cli/flags"
+	"github.com/picatz/deputy/internal/ignore"
 	inv "github.com/picatz/deputy/internal/inventory"
 	"github.com/picatz/deputy/internal/report/render"
 	"github.com/picatz/deputy/internal/scan"
@@ -42,6 +43,7 @@ type scanFlags struct {
 
 	// Filtering options
 	IgnoreUnfixed      bool
+	IgnoreFile         string // Path to ignore rules file
 	PublishedBeforeStr string
 	PublishedAfterStr  string
 	AsOfStr            string
@@ -66,6 +68,9 @@ type scanFlags struct {
 
 	// Graph option - enables dependency graph resolution for path analysis
 	WithGraph bool
+
+	// Cached ignore rules (populated by loadIgnoreRules)
+	ignoreRules *ignore.Rules
 }
 
 // displayOptions returns the VulnerabilityDisplayOptions derived from scan flags.
@@ -114,6 +119,7 @@ func extractScanFlags(cmd *cobra.Command) scanFlags {
 
 	// Filtering flags
 	f.IgnoreUnfixed, _ = cmd.Flags().GetBool("ignore-unfixed")
+	f.IgnoreFile, _ = cmd.Flags().GetString("ignore-file")
 	f.PublishedBeforeStr, _ = cmd.Flags().GetString("published-before")
 	f.PublishedAfterStr, _ = cmd.Flags().GetString("published-after")
 	f.AsOfStr, _ = cmd.Flags().GetString("as-of")
@@ -169,4 +175,49 @@ func openOutputWriter(cmd *cobra.Command, outPath string) (*outputWriter, error)
 		return nil, fmt.Errorf("failed to create output file: %w", err)
 	}
 	return &outputWriter{Writer: f, closer: f}, nil
+}
+
+// loadIgnoreRules loads ignore rules from the specified file or auto-discovers them.
+// If IgnoreFile is set, loads from that file only.
+// Otherwise, auto-discovers from .deputy.yaml, .deputyignore.yaml, and deputy-baseline.yaml.
+func (f *scanFlags) loadIgnoreRules(workDir string) error {
+	if f.ignoreRules != nil {
+		return nil // Already loaded
+	}
+
+	var rules *ignore.Rules
+	var err error
+
+	if f.IgnoreFile != "" {
+		// Load from specified file
+		rules, err = ignore.LoadFromPath(f.IgnoreFile)
+		if err != nil {
+			return fmt.Errorf("loading ignore file %s: %w", f.IgnoreFile, err)
+		}
+	} else {
+		// Auto-discover from working directory
+		rules, err = ignore.LoadFromDirectory(workDir)
+		if err != nil {
+			return fmt.Errorf("loading ignore rules: %w", err)
+		}
+	}
+
+	f.ignoreRules = rules
+	return nil
+}
+
+// shouldIgnore returns true if the vulnerability should be ignored based on loaded rules.
+func (f *scanFlags) shouldIgnore(vulnID, pkgName, ecosystem string) bool {
+	if f.ignoreRules == nil {
+		return false
+	}
+	return f.ignoreRules.ShouldIgnore(vulnID, pkgName, ecosystem)
+}
+
+// ignoreCount returns the number of active ignore rules.
+func (f *scanFlags) ignoreCount() int {
+	if f.ignoreRules == nil {
+		return 0
+	}
+	return f.ignoreRules.ActiveCount()
 }

@@ -12,6 +12,7 @@ import (
 	"github.com/google/go-containerregistry/pkg/authn"
 	"github.com/google/go-containerregistry/pkg/name"
 	"github.com/google/go-containerregistry/pkg/v1/remote"
+	"github.com/picatz/deputy/internal/container/image"
 	"github.com/picatz/deputy/internal/policy"
 	"github.com/picatz/deputy/internal/report"
 	"github.com/picatz/deputy/internal/scan"
@@ -254,17 +255,19 @@ func (h *ociHandler) buildPayload(ctx context.Context, info ociRequestInfo, path
 		"image":       imageRef,
 	}
 
+	imgRef := &image.Ref{
+		Registry:   registry,
+		Repository: info.Repository,
+		Tag:        info.Tag,
+		Digest:     info.Digest,
+		Reference:  reference,
+		Image:      imageRef,
+	}
+
 	payload := map[string]any{
 		"request": req,
 		"target":  buildOCITarget(info, registry, imageBase),
-		"image": map[string]any{
-			"registry":   registry,
-			"repository": info.Repository,
-			"tag":        info.Tag,
-			"digest":     info.Digest,
-			"reference":  reference,
-			"image":      imageRef,
-		},
+		"image":   imgRef.ToMap(),
 	}
 
 	if claims := JWTClaimsFromContext(ctx); claims != nil {

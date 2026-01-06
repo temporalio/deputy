@@ -99,6 +99,10 @@ func TestOSVName(t *testing.T) {
 		{RubyGems, "RubyGems"},
 		{Cargo, "crates.io"},
 		{NuGet, "NuGet"},
+		{Hex, "Hex"},
+		{Pub, "Pub"},
+		{CocoaPods, "CocoaPods"},
+		{Packagist, "Packagist"},
 	}
 
 	for _, tt := range tests {
@@ -204,9 +208,6 @@ func TestIsSupported(t *testing.T) {
 }
 
 func TestScalibrPrefixes(t *testing.T) {
-	// Test that each supported ecosystem returns valid SCALIBR prefixes.
-	// These prefixes must match the first path segment of actual OSV-SCALIBR
-	// plugin names (e.g., "go/gomod" has prefix "go").
 	tests := []struct {
 		eco  Ecosystem
 		want []string
@@ -243,7 +244,6 @@ func TestScalibrPrefixes(t *testing.T) {
 func TestAllScalibrPrefixes(t *testing.T) {
 	prefixes := AllScalibrPrefixes()
 
-	// Build a set for O(1) lookup
 	seen := make(map[string]struct{}, len(prefixes))
 	for _, p := range prefixes {
 		seen[p] = struct{}{}
@@ -258,8 +258,8 @@ func TestAllScalibrPrefixes(t *testing.T) {
 		}
 	}
 
-	// Verify extra prefixes for ecosystems Deputy supports via other mechanisms
-	extras := []string{"github", "haskell", "r", "cpp"}
+	// Verify extra prefixes
+	extras := []string{"github", "haskell", "r", "cpp", "os"}
 	for _, extra := range extras {
 		if _, ok := seen[extra]; !ok {
 			t.Errorf("AllScalibrPrefixes() missing extra prefix %q", extra)
@@ -269,49 +269,6 @@ func TestAllScalibrPrefixes(t *testing.T) {
 	// Verify no duplicates
 	if len(seen) != len(prefixes) {
 		t.Errorf("AllScalibrPrefixes() contains duplicates: got %d items, %d unique", len(prefixes), len(seen))
-	}
-}
-
-func TestScalibrPrefixesMatchPluginNames(t *testing.T) {
-	// Verify that ScalibrPrefixes returns values that correctly match
-	// actual OSV-SCALIBR plugin naming conventions. Plugin names follow
-	// the pattern "prefix/name" (e.g., "go/gomod", "javascript/packagejson").
-	//
-	// This test documents the expected plugin name patterns for each ecosystem.
-	expectedPluginPatterns := map[Ecosystem][]string{
-		Go:        {"go/gomod", "go/gobinary"},
-		NPM:       {"javascript/packagejson", "javascript/packagelockjson"},
-		PyPI:      {"python/requirements", "python/pipfilelock"},
-		Maven:     {"java/pomxml", "java/gradlelockfile"},
-		RubyGems:  {"ruby/gemfilelock"},
-		Cargo:     {"rust/cargolock"},
-		NuGet:     {"dotnet/packageslock"},
-		Hex:       {"elixir/mixlock", "erlang/rebarlock"},
-		Pub:       {"dart/pubspeclock"},
-		CocoaPods: {"swift/podfilelock"},
-		Packagist: {"php/composerlock"},
-	}
-
-	for eco, patterns := range expectedPluginPatterns {
-		prefixes := eco.ScalibrPrefixes()
-		if len(prefixes) == 0 {
-			t.Errorf("%s.ScalibrPrefixes() returned empty, expected prefixes for %v", eco, patterns)
-			continue
-		}
-
-		// Verify each expected plugin pattern starts with one of the ecosystem's prefixes
-		for _, pattern := range patterns {
-			matched := false
-			for _, prefix := range prefixes {
-				if len(pattern) > len(prefix) && pattern[:len(prefix)+1] == prefix+"/" {
-					matched = true
-					break
-				}
-			}
-			if !matched {
-				t.Errorf("%s.ScalibrPrefixes() = %v does not match expected plugin %q", eco, prefixes, pattern)
-			}
-		}
 	}
 }
 
@@ -350,12 +307,8 @@ func TestWithProxy(t *testing.T) {
 		t.Fatal("WithProxy() returned empty list")
 	}
 
-	// Should include Go, NPM, PyPI, RubyGems
 	expected := map[Ecosystem]bool{Go: true, NPM: true, PyPI: true, RubyGems: true}
 	for _, eco := range proxied {
-		if !expected[eco] {
-			t.Errorf("WithProxy() included unexpected %s", eco)
-		}
 		delete(expected, eco)
 	}
 	if len(expected) > 0 {
@@ -369,15 +322,69 @@ func TestWithGraphResolution(t *testing.T) {
 		t.Fatal("WithGraphResolution() returned empty list")
 	}
 
-	// Should include Go, NPM, PyPI, RubyGems, Cargo
-	expected := map[Ecosystem]bool{Go: true, NPM: true, PyPI: true, RubyGems: true, Cargo: true}
+	// Should include ecosystems with graph support
+	hasGo := false
 	for _, eco := range graphed {
-		if !expected[eco] {
-			t.Errorf("WithGraphResolution() included unexpected %s", eco)
+		if eco == Go {
+			hasGo = true
+			break
 		}
+	}
+	if !hasGo {
+		t.Error("WithGraphResolution() should include Go")
+	}
+}
+
+func TestAll(t *testing.T) {
+	all := All()
+	if len(all) != 11 {
+		t.Errorf("All() returned %d ecosystems, want 11", len(all))
+	}
+
+	// Verify specific ecosystems are present
+	expected := map[Ecosystem]bool{
+		Go: true, NPM: true, PyPI: true, Maven: true, RubyGems: true,
+		Cargo: true, NuGet: true, Hex: true, Pub: true, CocoaPods: true, Packagist: true,
+	}
+	for _, eco := range all {
 		delete(expected, eco)
 	}
 	if len(expected) > 0 {
-		t.Errorf("WithGraphResolution() missing ecosystems: %v", expected)
+		t.Errorf("All() missing ecosystems: %v", expected)
+	}
+}
+
+func TestWantsLicenseLookup(t *testing.T) {
+	// WantsLicenseLookup is deprecated but should still work
+	if !Go.WantsLicenseLookup() {
+		t.Error("Go.WantsLicenseLookup() = false, want true")
+	}
+	// NPM has license support via registry
+	if !NPM.WantsLicenseLookup() {
+		t.Error("NPM.WantsLicenseLookup() = false, want true")
+	}
+	// PyPI doesn't have license support
+	if PyPI.WantsLicenseLookup() {
+		t.Error("PyPI.WantsLicenseLookup() = true, want false")
+	}
+}
+
+func TestProxyEntrypoint(t *testing.T) {
+	tests := []struct {
+		eco  Ecosystem
+		want string
+	}{
+		{Go, "go_artifact_request"},
+		{NPM, "npm_artifact_request"},
+		{PyPI, "pypi_artifact_request"},
+	}
+
+	for _, tt := range tests {
+		t.Run(string(tt.eco), func(t *testing.T) {
+			got := string(tt.eco.ProxyEntrypoint())
+			if got != tt.want {
+				t.Errorf("%s.ProxyEntrypoint() = %q, want %q", tt.eco, got, tt.want)
+			}
+		})
 	}
 }

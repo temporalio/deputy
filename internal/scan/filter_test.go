@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/picatz/deputy/internal/dependency"
+	"github.com/picatz/deputy/internal/ignore"
 	"github.com/picatz/deputy/internal/vulnerability"
 )
 
@@ -173,5 +174,140 @@ func TestFilterAdvisories_KeepsReferencedOnly(t *testing.T) {
 	}
 	if _, ok := result["CVE-2024-2222"]; ok {
 		t.Error("unreferenced advisory should be filtered out")
+	}
+}
+
+func TestFilterIgnored_NilRules(t *testing.T) {
+	t.Parallel()
+	result := Result{
+		Findings: []vulnerability.Finding{
+			{AdvisoryID: "CVE-2024-1234"},
+		},
+	}
+	filtered, count := FilterIgnored(result, nil)
+	if count != 0 {
+		t.Errorf("expected 0 ignored, got %d", count)
+	}
+	if len(filtered.Findings) != 1 {
+		t.Errorf("expected 1 finding, got %d", len(filtered.Findings))
+	}
+}
+
+func TestFilterIgnored_EmptyFindings(t *testing.T) {
+	t.Parallel()
+	rules := ignore.NewRules()
+	rules.Add(ignore.Rule{ID: "CVE-2024-1234"})
+
+	result := Result{}
+	filtered, count := FilterIgnored(result, rules)
+	if count != 0 {
+		t.Errorf("expected 0 ignored, got %d", count)
+	}
+	if len(filtered.Findings) != 0 {
+		t.Errorf("expected 0 findings, got %d", len(filtered.Findings))
+	}
+}
+
+func TestFilterIgnored_MatchesID(t *testing.T) {
+	t.Parallel()
+	rules := ignore.NewRules()
+	rules.Add(ignore.Rule{ID: "CVE-2024-1234"})
+
+	result := Result{
+		Findings: []vulnerability.Finding{
+			{AdvisoryID: "CVE-2024-1234", Dependency: dependency.ID{Name: "pkg1", Ecosystem: "go"}},
+			{AdvisoryID: "CVE-2024-5678", Dependency: dependency.ID{Name: "pkg2", Ecosystem: "go"}},
+		},
+		Advisories: map[string]vulnerability.Advisory{
+			"CVE-2024-1234": {ID: "CVE-2024-1234"},
+			"CVE-2024-5678": {ID: "CVE-2024-5678"},
+		},
+	}
+
+	filtered, count := FilterIgnored(result, rules)
+	if count != 1 {
+		t.Errorf("expected 1 ignored, got %d", count)
+	}
+	if len(filtered.Findings) != 1 {
+		t.Errorf("expected 1 finding, got %d", len(filtered.Findings))
+	}
+	if filtered.Findings[0].AdvisoryID != "CVE-2024-5678" {
+		t.Errorf("wrong finding kept")
+	}
+}
+
+func TestFilterIgnored_MatchesPackage(t *testing.T) {
+	t.Parallel()
+	rules := ignore.NewRules()
+	rules.Add(ignore.Rule{Package: "vulnerable-pkg"})
+
+	result := Result{
+		Findings: []vulnerability.Finding{
+			{AdvisoryID: "CVE-2024-1111", Dependency: dependency.ID{Name: "vulnerable-pkg", Ecosystem: "npm"}},
+			{AdvisoryID: "CVE-2024-2222", Dependency: dependency.ID{Name: "safe-pkg", Ecosystem: "npm"}},
+		},
+		Advisories: map[string]vulnerability.Advisory{
+			"CVE-2024-1111": {ID: "CVE-2024-1111"},
+			"CVE-2024-2222": {ID: "CVE-2024-2222"},
+		},
+	}
+
+	filtered, count := FilterIgnored(result, rules)
+	if count != 1 {
+		t.Errorf("expected 1 ignored, got %d", count)
+	}
+	if len(filtered.Findings) != 1 {
+		t.Errorf("expected 1 finding, got %d", len(filtered.Findings))
+	}
+}
+
+func TestFilterIgnored_MatchesEcosystem(t *testing.T) {
+	t.Parallel()
+	rules := ignore.NewRules()
+	rules.Add(ignore.Rule{Ecosystem: "npm"})
+
+	result := Result{
+		Findings: []vulnerability.Finding{
+			{AdvisoryID: "CVE-2024-1111", Dependency: dependency.ID{Name: "pkg1", Ecosystem: "npm"}},
+			{AdvisoryID: "CVE-2024-2222", Dependency: dependency.ID{Name: "pkg2", Ecosystem: "go"}},
+		},
+		Advisories: map[string]vulnerability.Advisory{
+			"CVE-2024-1111": {ID: "CVE-2024-1111"},
+			"CVE-2024-2222": {ID: "CVE-2024-2222"},
+		},
+	}
+
+	filtered, count := FilterIgnored(result, rules)
+	if count != 1 {
+		t.Errorf("expected 1 ignored, got %d", count)
+	}
+	if len(filtered.Findings) != 1 {
+		t.Errorf("expected 1 finding, got %d", len(filtered.Findings))
+	}
+	if filtered.Findings[0].Dependency.Ecosystem != "go" {
+		t.Errorf("wrong finding kept")
+	}
+}
+
+func TestFilterIgnored_NoMatches(t *testing.T) {
+	t.Parallel()
+	rules := ignore.NewRules()
+	rules.Add(ignore.Rule{ID: "CVE-9999-9999"})
+
+	result := Result{
+		Findings: []vulnerability.Finding{
+			{AdvisoryID: "CVE-2024-1234", Dependency: dependency.ID{Name: "pkg1", Ecosystem: "go"}},
+		},
+		Advisories: map[string]vulnerability.Advisory{
+			"CVE-2024-1234": {ID: "CVE-2024-1234"},
+		},
+	}
+
+	filtered, count := FilterIgnored(result, rules)
+	if count != 0 {
+		t.Errorf("expected 0 ignored, got %d", count)
+	}
+	if len(filtered.Findings) != 1 {
+		t.Errorf("expected 1 finding, got %d", len(filtered.Findings))
 	}
 }

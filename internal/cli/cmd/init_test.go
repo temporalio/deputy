@@ -193,3 +193,103 @@ func TestInit_PolicyContent(t *testing.T) {
 		}
 	}
 }
+
+func TestDetectEcosystems(t *testing.T) {
+	tests := []struct {
+		name     string
+		files    []string
+		expected []string
+	}{
+		{
+			name:     "go project",
+			files:    []string{"go.mod", "go.sum", "main.go"},
+			expected: []string{"Go"},
+		},
+		{
+			name:     "npm project",
+			files:    []string{"package.json", "package-lock.json"},
+			expected: []string{"npm"},
+		},
+		{
+			name:     "python project",
+			files:    []string{"requirements.txt", "setup.py"},
+			expected: []string{"Python"},
+		},
+		{
+			name:     "multi-ecosystem",
+			files:    []string{"go.mod", "package.json", "Dockerfile"},
+			expected: []string{"Docker", "Go", "npm"},
+		},
+		{
+			name:     "rust project",
+			files:    []string{"Cargo.toml", "Cargo.lock"},
+			expected: []string{"Rust"},
+		},
+		{
+			name:     "empty directory",
+			files:    []string{},
+			expected: nil,
+		},
+		{
+			name:     "no manifests",
+			files:    []string{"main.go", "README.md"},
+			expected: nil,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tmpDir := t.TempDir()
+
+			// Create the files
+			for _, file := range tt.files {
+				path := filepath.Join(tmpDir, file)
+				if err := os.WriteFile(path, []byte(""), 0644); err != nil {
+					t.Fatal(err)
+				}
+			}
+
+			got := detectEcosystems(tmpDir)
+
+			if len(got) != len(tt.expected) {
+				t.Errorf("detectEcosystems() got %v, want %v", got, tt.expected)
+				return
+			}
+
+			for i, eco := range got {
+				if eco != tt.expected[i] {
+					t.Errorf("detectEcosystems()[%d] = %q, want %q", i, eco, tt.expected[i])
+				}
+			}
+		})
+	}
+}
+
+func TestEcosystemTip(t *testing.T) {
+	tests := []struct {
+		eco      string
+		wantTip  bool
+		contains string
+	}{
+		{"Go", true, "graph why"},
+		{"npm", true, "proxy npm"},
+		{"Python", true, "proxy pypi"},
+		{"Ruby", true, "proxy rubygems"},
+		{"Unknown", false, ""},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.eco, func(t *testing.T) {
+			tip := ecosystemTip(tt.eco)
+			if tt.wantTip && tip == "" {
+				t.Errorf("ecosystemTip(%q) returned empty, wanted tip", tt.eco)
+			}
+			if !tt.wantTip && tip != "" {
+				t.Errorf("ecosystemTip(%q) = %q, wanted empty", tt.eco, tip)
+			}
+			if tt.contains != "" && !strings.Contains(tip, tt.contains) {
+				t.Errorf("ecosystemTip(%q) = %q, wanted to contain %q", tt.eco, tip, tt.contains)
+			}
+		})
+	}
+}

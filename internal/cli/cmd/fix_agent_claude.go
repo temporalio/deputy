@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	deperrors "github.com/picatz/deputy/internal/errors"
 	ui "github.com/picatz/deputy/internal/ui"
 )
 
@@ -22,7 +23,10 @@ const anthropicAPIURL = "https://api.anthropic.com/v1/messages"
 func runClaudeAgent(ctx context.Context, prompt string, repoPath string, opts agentInvocationOptions, out, errW io.Writer) error {
 	apiKey := strings.TrimSpace(os.Getenv("ANTHROPIC_API_KEY"))
 	if apiKey == "" {
-		return errors.New("ANTHROPIC_API_KEY is not set")
+		return deperrors.Suggest(
+			errors.New("ANTHROPIC_API_KEY is not set"),
+			"Set the ANTHROPIC_API_KEY environment variable with your API key from https://console.anthropic.com/",
+		)
 	}
 	model := strings.TrimSpace(opts.Model)
 	if model == "" {

@@ -1,6 +1,7 @@
 package scan
 
 import (
+	"github.com/picatz/deputy/internal/ignore"
 	"github.com/picatz/deputy/internal/vulnerability"
 )
 
@@ -40,4 +41,28 @@ func filterAdvisories(findings []vulnerability.Finding, advisories map[string]vu
 		}
 	}
 	return out
+}
+
+// FilterIgnored drops findings matching ignore rules and recomputes stats.
+// Returns the filtered result and count of ignored findings.
+func FilterIgnored(result Result, rules *ignore.Rules) (Result, int) {
+	if rules == nil || len(result.Findings) == 0 {
+		return result, 0
+	}
+	filtered := make([]vulnerability.Finding, 0, len(result.Findings))
+	ignoredCount := 0
+	for _, f := range result.Findings {
+		if rules.ShouldIgnore(f.AdvisoryID, f.Dependency.Name, f.Dependency.Ecosystem) {
+			ignoredCount++
+			continue
+		}
+		filtered = append(filtered, f)
+	}
+	if ignoredCount == 0 {
+		return result, 0
+	}
+	result.Findings = filtered
+	result.Advisories = filterAdvisories(filtered, result.Advisories)
+	result.Stats = vulnerability.ConsolidateAll(result.Findings, result.Advisories).Stats
+	return result, ignoredCount
 }

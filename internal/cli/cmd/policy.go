@@ -15,6 +15,7 @@ import (
 
 	gocmp "github.com/google/go-cmp/cmp"
 	"github.com/picatz/deputy/internal/cli/flags"
+	deperrors "github.com/picatz/deputy/internal/errors"
 	"github.com/picatz/deputy/internal/otel"
 	"github.com/picatz/deputy/internal/policy"
 	"github.com/spf13/cobra"
@@ -91,10 +92,16 @@ func newPolicyEvalCommand() *cobra.Command {
 			defer span.End()
 
 			if strings.TrimSpace(policyPath) == "" {
-				return errors.New("missing --policy path")
+				return deperrors.Suggest(
+					errors.New("missing --policy path"),
+					"Provide a policy file with --policy policy.yaml (see policy/examples/ for samples)",
+				)
 			}
 			if strings.TrimSpace(inputPath) == "" {
-				return errors.New("missing --input path")
+				return deperrors.Suggest(
+					errors.New("missing --input path"),
+					"Provide input JSON with --input context.json (use 'deputy scan --format json' to generate)",
+				)
 			}
 			policyBytes, err := readPathOrStdin(cmd.InOrStdin(), policyPath)
 			if err != nil {

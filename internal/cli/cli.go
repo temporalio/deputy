@@ -73,6 +73,13 @@ func silentErrorHandler(w io.Writer, styles fang.Styles, err error) {
 		return
 	}
 	fang.DefaultErrorHandler(w, styles, err)
+
+	// Display suggestion if available to help users fix the issue.
+	if suggestion := deputyerrors.GetSuggestion(err); suggestion != "" {
+		io.WriteString(w, "\n")
+		io.WriteString(w, styles.FlagDescription.Render("Suggestion: "+suggestion))
+		io.WriteString(w, "\n")
+	}
 }
 
 // newRoot returns the root command with all subcommands attached.

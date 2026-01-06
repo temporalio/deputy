@@ -4,8 +4,10 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 
+	"github.com/picatz/deputy/internal/ecosystem"
 	"github.com/spf13/cobra"
 )
 
@@ -98,11 +100,25 @@ Use flags to generate only specific files.`,
 				fmt.Fprintf(out, "  %s\n", path)
 			}
 
+			// Detect ecosystems in the directory
+			ecosystems := detectEcosystems(dir)
+			if len(ecosystems) > 0 {
+				fmt.Fprintln(out, "")
+				fmt.Fprintf(out, "Detected ecosystems: %s\n", strings.Join(ecosystems, ", "))
+			}
+
 			fmt.Fprintln(out, "")
 			fmt.Fprintln(out, "Next steps:")
 			fmt.Fprintln(out, "  1. Run 'deputy scan' to find vulnerabilities")
 			fmt.Fprintln(out, "  2. Edit policy/deputy.yaml to customize rules")
 			fmt.Fprintln(out, "  3. Run 'deputy scan --policy policy/' to enforce policies")
+
+			// Add ecosystem-specific tips
+			for _, eco := range ecosystems {
+				if tip := ecosystemTip(eco); tip != "" {
+					fmt.Fprintf(out, "\n%s tip: %s\n", eco, tip)
+				}
+			}
 
 			return nil
 		},
@@ -246,3 +262,74 @@ policies:
   #       when: pkg.name in blocked
   #       reason: "Package is on the blocklist due to past security incidents"
 `
+
+// detectEcosystems scans a directory for manifest files and returns detected ecosystems.
+func detectEcosystems(dir string) []string {
+	// Map of manifest file patterns to ecosystems
+	manifestPatterns := map[string]string{
+		"go.mod":              "Go",
+		"go.sum":              "Go",
+		"package.json":        "npm",
+		"package-lock.json":   "npm",
+		"yarn.lock":           "npm",
+		"pnpm-lock.yaml":      "npm",
+		"requirements.txt":    "Python",
+		"Pipfile":             "Python",
+		"pyproject.toml":      "Python",
+		"poetry.lock":         "Python",
+		"Gemfile":             "Ruby",
+		"Gemfile.lock":        "Ruby",
+		"Cargo.toml":          "Rust",
+		"Cargo.lock":          "Rust",
+		"composer.json":       "PHP",
+		"composer.lock":       "PHP",
+		"pom.xml":             "Maven",
+		"build.gradle":        "Gradle",
+		"build.gradle.kts":    "Gradle",
+		"Dockerfile":          "Docker",
+		"docker-compose.yml":  "Docker",
+		"docker-compose.yaml": "Docker",
+	}
+
+	seen := make(map[string]bool)
+	var ecosystems []string
+
+	// Check for manifest files in the directory (non-recursive for speed)
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return nil
+	}
+
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		name := entry.Name()
+		if eco, ok := manifestPatterns[name]; ok {
+			if !seen[eco] {
+				seen[eco] = true
+				ecosystems = append(ecosystems, eco)
+			}
+		}
+	}
+
+	// Sort for consistent output
+	slices.Sort(ecosystems)
+	return ecosystems
+}
+
+// ecosystemTip returns ecosystem-specific advice for using Deputy.
+func ecosystemTip(eco string) string {
+	switch ecosystem.Parse(eco) {
+	case ecosystem.Go:
+		return "Use 'deputy graph why <pkg>' to trace why a dependency is included"
+	case ecosystem.NPM:
+		return "Run 'deputy proxy npm -- npm install' to enforce policies during install"
+	case ecosystem.PyPI:
+		return "Run 'deputy proxy pypi -- pip install -r requirements.txt' for policy enforcement"
+	case ecosystem.RubyGems:
+		return "Run 'deputy proxy rubygems -- bundle install' for policy enforcement"
+	default:
+		return ""
+	}
+}

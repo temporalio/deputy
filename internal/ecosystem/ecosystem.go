@@ -1,24 +1,3 @@
-// Package ecosystem provides a single authoritative source for ecosystem
-// identification and normalization across the deputy codebase.
-//
-// Deputy supports 15 ecosystems for dependency scanning:
-//
-// Core ecosystems with full support (scan, SBOM, policies):
-//   - Go, npm, PyPI, Maven, RubyGems, Cargo, NuGet, Hex, Pub, CocoaPods, Packagist
-//
-// Ecosystems supported via OSV-SCALIBR extractors:
-//   - Haskell (cabal, stack)
-//   - R (renv)
-//   - C++ (conan)
-//
-// Ecosystems supported via Deputy's custom extractors:
-//   - GitHub Actions (.github/workflows/*.yml)
-//
-// Proxy support (download-time policy enforcement) is available for:
-//   - Go, npm, PyPI, RubyGems
-//
-// The [All] function returns core ecosystems. For filtering OSV-SCALIBR plugins,
-// use [AllScalibrPrefixes] which includes both core and extra ecosystem prefixes.
 package ecosystem
 
 import (
@@ -86,32 +65,10 @@ func (e Ecosystem) String() string {
 // OSVName returns the ecosystem name as used by the OSV database.
 // OSV uses title-cased names for some ecosystems.
 func (e Ecosystem) OSVName() string {
-	switch e {
-	case Go:
-		return "Go"
-	case NPM:
-		return "npm"
-	case PyPI:
-		return "PyPI"
-	case Maven:
-		return "Maven"
-	case RubyGems:
-		return "RubyGems"
-	case Cargo:
-		return "crates.io"
-	case NuGet:
-		return "NuGet"
-	case Hex:
-		return "Hex"
-	case Pub:
-		return "Pub"
-	case CocoaPods:
-		return "CocoaPods"
-	case Packagist:
-		return "Packagist"
-	default:
-		return string(e)
+	if reg := Default().Get(e); reg != nil && reg.OSVName != "" {
+		return reg.OSVName
 	}
+	return string(e)
 }
 
 // DepsDevSystem returns the deps.dev API system enum for this ecosystem.
@@ -147,8 +104,10 @@ func (e Ecosystem) PackageKeyField() string {
 
 // WantsLicenseLookup returns whether this ecosystem typically benefits from
 // license lookup enrichment in proxy mode.
+//
+// Deprecated: Use HasLicenseSupport instead.
 func (e Ecosystem) WantsLicenseLookup() bool {
-	return e == Go
+	return HasLicenseSupport(e)
 }
 
 // NormalizeVersion applies ecosystem-specific version normalization.
@@ -202,32 +161,10 @@ func All() []Ecosystem {
 //
 // Returns nil for Unknown or ecosystems without SCALIBR support.
 func (e Ecosystem) ScalibrPrefixes() []string {
-	switch e {
-	case Go:
-		return []string{"go"}
-	case NPM:
-		return []string{"javascript"}
-	case PyPI:
-		return []string{"python"}
-	case Maven:
-		return []string{"java"}
-	case RubyGems:
-		return []string{"ruby"}
-	case Cargo:
-		return []string{"rust"}
-	case NuGet:
-		return []string{"dotnet"}
-	case Hex:
-		return []string{"elixir", "erlang"}
-	case Pub:
-		return []string{"dart"}
-	case CocoaPods:
-		return []string{"swift"}
-	case Packagist:
-		return []string{"php"}
-	default:
-		return nil
+	if reg := Default().Get(e); reg != nil {
+		return reg.ScalibrPrefixes
 	}
+	return nil
 }
 
 // AllScalibrPrefixes returns all SCALIBR plugin name prefixes for supported ecosystems,
@@ -235,43 +172,13 @@ func (e Ecosystem) ScalibrPrefixes() []string {
 //
 // This function is used by inventory scanning to filter OSV-SCALIBR plugins to only
 // those relevant for Deputy's SCA capabilities.
-//
-// Returns prefixes for:
-//   - Core ecosystems via [All] and their [Ecosystem.ScalibrPrefixes]
-//   - github: GitHub Actions (Deputy's custom extractor)
-//   - haskell: Cabal, Stack (OSV-SCALIBR)
-//   - r: renv (OSV-SCALIBR)
-//   - cpp: Conan (OSV-SCALIBR)
 func AllScalibrPrefixes() []string {
-	seen := make(map[string]struct{})
-	var prefixes []string
-
-	// Collect prefixes from all supported ecosystems
-	for _, eco := range All() {
-		for _, prefix := range eco.ScalibrPrefixes() {
-			if _, ok := seen[prefix]; !ok {
-				seen[prefix] = struct{}{}
-				prefixes = append(prefixes, prefix)
-			}
-		}
-	}
-
-	// Additional prefixes for ecosystems Deputy supports via other mechanisms:
-	// - github: GitHub Actions (Deputy's custom plugin at internal/inventory/plugins/github/actionsx)
-	// - haskell, r, cpp: Ecosystems supported by OSV-SCALIBR but without dedicated Ecosystem constants
-	// - os: OS-level package managers (dpkg, apk, rpm, etc.) for container image scanning
-	extras := []string{"github", "haskell", "r", "cpp", "os"}
-	for _, prefix := range extras {
-		if _, ok := seen[prefix]; !ok {
-			seen[prefix] = struct{}{}
-			prefixes = append(prefixes, prefix)
-		}
-	}
-
-	return prefixes
+	return Default().AllScalibrPrefixes()
 }
 
 // Capabilities describes the features available for an ecosystem.
+// This type is maintained for backward compatibility; prefer using
+// the Registry and Capability bitmask for new code.
 type Capabilities struct {
 	// Scan indicates dependency scanning is supported.
 	Scan bool
@@ -286,79 +193,27 @@ type Capabilities struct {
 }
 
 // Capabilities returns the features available for this ecosystem.
+// This method delegates to the Registry for the source of truth.
 func (e Ecosystem) Capabilities() Capabilities {
-	switch e {
-	case Go:
-		return Capabilities{
-			Scan:            true,
-			SBOM:            true,
-			Proxy:           true,
-			License:         true,
-			GraphResolution: true,
-		}
-	case NPM:
-		return Capabilities{
-			Scan:            true,
-			SBOM:            true,
-			Proxy:           true,
-			License:         false,
-			GraphResolution: true,
-		}
-	case PyPI:
-		return Capabilities{
-			Scan:            true,
-			SBOM:            true,
-			Proxy:           true,
-			License:         false,
-			GraphResolution: true,
-		}
-	case RubyGems:
-		return Capabilities{
-			Scan:            true,
-			SBOM:            true,
-			Proxy:           true,
-			License:         false,
-			GraphResolution: true,
-		}
-	case Cargo:
-		return Capabilities{
-			Scan:            true,
-			SBOM:            true,
-			Proxy:           false,
-			License:         true, // via crates.io API
-			GraphResolution: true,
-		}
-	case Maven, NuGet, Hex, Pub, CocoaPods, Packagist:
-		return Capabilities{
-			Scan:            true,
-			SBOM:            true,
-			Proxy:           false,
-			License:         false,
-			GraphResolution: false,
-		}
-	default:
+	reg := Default().Get(e)
+	if reg == nil {
 		return Capabilities{}
+	}
+	return Capabilities{
+		Scan:            reg.HasCapability(CapInventory),
+		SBOM:            reg.HasCapability(CapSBOM),
+		Proxy:           reg.HasCapability(CapProxy),
+		License:         reg.HasCapability(CapLicense),
+		GraphResolution: reg.HasCapability(CapGraph),
 	}
 }
 
-// WithProxy returns all ecosystems that support proxy mode.
+// WithProxy returns all ecosystems that have proxy capability.
 func WithProxy() []Ecosystem {
-	var result []Ecosystem
-	for _, e := range All() {
-		if e.Capabilities().Proxy {
-			result = append(result, e)
-		}
-	}
-	return result
+	return ProxyCapableEcosystems()
 }
 
 // WithGraphResolution returns all ecosystems that support dependency graph resolution.
 func WithGraphResolution() []Ecosystem {
-	var result []Ecosystem
-	for _, e := range All() {
-		if e.Capabilities().GraphResolution {
-			result = append(result, e)
-		}
-	}
-	return result
+	return GraphSupportedEcosystems()
 }
