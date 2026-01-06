@@ -1,16 +1,20 @@
 package cmd
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
+	"os"
 	"strings"
 
-	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/glamour"
 	"github.com/ossf/osv-schema/bindings/go/osvschema"
+	"github.com/picatz/deputy/internal/ai"
+	_ "github.com/picatz/deputy/internal/ai/providers/claude" // Register claude provider
 	"github.com/picatz/deputy/internal/analysis/osv"
+	"github.com/picatz/deputy/internal/explain"
 	ui "github.com/picatz/deputy/internal/ui"
-	"github.com/picatz/deputy/internal/vulnerability"
 	"github.com/spf13/cobra"
 )
 
@@ -18,7 +22,8 @@ import (
 func AddExplainCommand(root *cobra.Command) {
 	var (
 		formatFlag string
-		verbose    bool
+		enrich     bool
+		aiAssist   bool
 	)
 
 	explainCmd := &cobra.Command{
@@ -26,18 +31,25 @@ func AddExplainCommand(root *cobra.Command) {
 		Short: "Explain vulnerabilities by ID",
 		Long: `Get detailed information about vulnerabilities by their IDs.
 
-Fetches vulnerability data from OSV and displays a clear, concise summary
-including severity, description, affected versions, and remediation guidance.
+Fetches vulnerability data from OSV and displays a comprehensive, context-rich
+explanation including severity, timeline, threat intelligence, affected packages,
+and remediation guidance.
 
-Accepts CVE, GHSA, GO-, RUSTSEC-, and other OSV-compatible identifiers.`,
-		Example: `  # Explain a single vulnerability
+Accepts CVE, GHSA, GO-, RUSTSEC-, and other OSV-compatible identifiers.
+
+The output is designed to help developers, security engineers, and managers
+understand the vulnerability's impact and urgency.`,
+		Example: `  # Explain a vulnerability (includes threat intelligence by default)
   deputy explain CVE-2021-44228
 
   # Explain multiple vulnerabilities
-  deputy explain GHSA-jfh8-c2j2-2hch CVE-2023-45853
+  deputy explain GHSA-jfh8-c2jp-5v3q CVE-2023-45853
 
-  # Show verbose output with full details
-  deputy explain --verbose CVE-2021-44228
+  # Skip threat intelligence lookup (faster, offline)
+  deputy explain --enrich=false CVE-2021-44228
+
+  # Get AI-assisted analysis (requires claude CLI)
+  deputy explain --ai CVE-2021-44228
 
   # Output as JSON
   deputy explain --format json CVE-2021-44228`,
@@ -47,8 +59,16 @@ Accepts CVE, GHSA, GO-, RUSTSEC-, and other OSV-compatible identifiers.`,
 			out := cmd.OutOrStdout()
 			client := osv.NewClient()
 
+			// Create renderer with configuration
+			renderer := explain.NewRenderer(explain.Config{
+				Enrich:    enrich,
+				DiskCache: true,
+			})
+
 			for i, id := range args {
 				if i > 0 {
+					fmt.Fprintln(out)
+					fmt.Fprintln(out, strings.Repeat("─", 80))
 					fmt.Fprintln(out)
 				}
 
@@ -63,9 +83,21 @@ Accepts CVE, GHSA, GO-, RUSTSEC-, and other OSV-compatible identifiers.`,
 				}
 
 				if formatFlag == "json" {
-					renderVulnJSON(out, vuln)
+					if err := renderer.RenderJSON(ctx, out, vuln); err != nil {
+						fmt.Fprintf(out, "%s rendering %s: %v\n", ui.StyleRemoved.Render("error"), id, err)
+					}
 				} else {
-					renderVulnText(out, vuln, verbose)
+					if err := renderer.Render(ctx, out, vuln); err != nil {
+						fmt.Fprintf(out, "%s rendering %s: %v\n", ui.StyleRemoved.Render("error"), id, err)
+					}
+
+					// AI-assisted analysis
+					if aiAssist {
+						fmt.Fprintln(out)
+						if err := renderAIAnalysis(ctx, out, vuln); err != nil {
+							fmt.Fprintf(out, "\n%s AI analysis: %v\n", ui.StyleDim.Render("note:"), err)
+						}
+					}
 				}
 			}
 
@@ -74,215 +106,125 @@ Accepts CVE, GHSA, GO-, RUSTSEC-, and other OSV-compatible identifiers.`,
 	}
 
 	explainCmd.Flags().StringVarP(&formatFlag, "format", "f", "text", "Output format: text, json")
-	explainCmd.Flags().BoolVarP(&verbose, "verbose", "v", false, "Show full details including description")
+	explainCmd.Flags().BoolVar(&enrich, "enrich", true, "Enrich with threat intelligence (EPSS scores, KEV catalog)")
+	explainCmd.Flags().BoolVar(&aiAssist, "ai", false, "Add AI-assisted analysis (requires claude CLI)")
 
 	root.AddCommand(explainCmd)
 }
 
-// renderVulnText displays vulnerability details in a human-readable format.
-func renderVulnText(out io.Writer, vuln *osvschema.Vulnerability, verbose bool) {
-	if out == nil || vuln == nil {
-		return
+// renderAIAnalysis uses an AI model to provide additional context and analysis.
+func renderAIAnalysis(ctx context.Context, out io.Writer, vuln *osvschema.Vulnerability) error {
+	// Get the claude provider from the AI registry
+	provider, err := ai.GetProvider("claude")
+	if err != nil {
+		return fmt.Errorf("AI provider not available: %w", err)
 	}
 
-	// Extract severity
-	severity := extractVulnSeverity(vuln)
-	severityStyle := severityStyleFor(severity.Level)
-
-	// Header with ID and severity
-	fmt.Fprintf(out, "%s %s\n", ui.StylePackageName.Render(vuln.ID), severityStyle.Render(severity.Level.String()))
-
-	// Aliases
-	if len(vuln.Aliases) > 0 {
-		fmt.Fprintf(out, "%s %s\n", ui.StyleDim.Render("Aliases:"), strings.Join(vuln.Aliases, ", "))
+	// Build vulnerability summary for the AI
+	vulnJSON, err := json.Marshal(map[string]any{
+		"id":       vuln.ID,
+		"summary":  vuln.Summary,
+		"details":  vuln.Details,
+		"aliases":  vuln.Aliases,
+		"severity": vuln.Severity,
+	})
+	if err != nil {
+		return fmt.Errorf("encode vulnerability: %w", err)
 	}
 
-	// Summary
-	if vuln.Summary != "" {
-		fmt.Fprintf(out, "\n%s\n", vuln.Summary)
+	// Create prompt - now request markdown output for better rendering
+	prompt := buildExplainAIPrompt(string(vulnJSON))
+
+	// Print header
+	fmt.Fprintln(out, ui.StyleHeader.Render("AI Analysis"))
+
+	// Start spinner while waiting for AI response
+	var progress *ui.Progress
+	isTTY := ui.IsTTY(out)
+	if isTTY {
+		progress = ui.NewProgress(os.Stderr, "Generating analysis")
+		progress.Start(ctx)
 	}
 
-	// Details (verbose only)
-	if verbose && vuln.Details != "" {
-		fmt.Fprintf(out, "\n%s\n%s\n", ui.StyleDim.Render("Details:"), wrapDetailsText(vuln.Details, 80))
-	}
+	// Collect the full response for glamour rendering
+	var response strings.Builder
+	firstToken := true
 
-	// Affected packages and fixed versions
-	if len(vuln.Affected) > 0 {
-		fmt.Fprintf(out, "\n%s\n", ui.StyleDim.Render("Affected:"))
-		for _, affected := range vuln.Affected {
-			pkgName := affected.Package.Name
-			if affected.Package.Ecosystem != "" {
-				pkgName = fmt.Sprintf("%s (%s)", pkgName, affected.Package.Ecosystem)
+	// Stream the response using the ai package
+	for event, err := range provider.Stream(ctx, &ai.CompletionRequest{
+		Prompt:    prompt,
+		MaxTokens: 2048,
+	}) {
+		if err != nil {
+			if progress != nil {
+				progress.Fail()
 			}
-			fmt.Fprintf(out, "  %s\n", ui.StylePath.Render(pkgName))
-
-			// Show version ranges
-			for _, r := range affected.Ranges {
-				for _, event := range r.Events {
-					if event.Introduced != "" {
-						fmt.Fprintf(out, "    %s %s\n", ui.StyleDim.Render("introduced:"), event.Introduced)
-					}
-					if event.Fixed != "" {
-						fmt.Fprintf(out, "    %s %s\n", ui.StyleUpgraded.Render("fixed:"), event.Fixed)
-					}
-				}
+			return fmt.Errorf("AI stream: %w", err)
+		}
+		switch e := event.(type) {
+		case ai.TextEvent:
+			// Clear spinner on first token
+			if firstToken && progress != nil {
+				progress.Clear()
+				firstToken = false
 			}
+			response.WriteString(e.Text)
+		case ai.ErrorEvent:
+			if progress != nil {
+				progress.Fail()
+			}
+			return fmt.Errorf("AI error: %w", e.Error())
 		}
 	}
 
-	// References
-	if len(vuln.References) > 0 && verbose {
-		fmt.Fprintf(out, "\n%s\n", ui.StyleDim.Render("References:"))
-		for _, ref := range vuln.References {
-			fmt.Fprintf(out, "  %s\n", ref.URL)
-		}
-	} else if len(vuln.References) > 0 {
-		// Show just first reference in non-verbose mode
-		fmt.Fprintf(out, "\n%s %s\n", ui.StyleDim.Render("More info:"), vuln.References[0].URL)
+	// Clear spinner if no text was received
+	if firstToken && progress != nil {
+		progress.Clear()
 	}
 
-	// Published/Modified dates
-	if !vuln.Published.IsZero() {
-		fmt.Fprintf(out, "\n%s %s", ui.StyleDim.Render("Published:"), vuln.Published.Format("2006-01-02"))
-		if !vuln.Modified.IsZero() {
-			fmt.Fprintf(out, " %s %s", ui.StyleDim.Render("Modified:"), vuln.Modified.Format("2006-01-02"))
+	// Render the response with glamour for beautiful markdown output
+	if response.Len() > 0 {
+		rendered, err := renderMarkdown(response.String())
+		if err != nil {
+			// Fallback to plain text if glamour fails
+			fmt.Fprintln(out)
+			fmt.Fprintln(out, response.String())
+		} else {
+			fmt.Fprint(out, rendered)
 		}
-		fmt.Fprintln(out)
 	}
+
+	return nil
 }
 
-// renderVulnJSON outputs vulnerability data as JSON.
-func renderVulnJSON(out io.Writer, vuln *osvschema.Vulnerability) {
-	// Build a clean JSON structure
-	data := map[string]any{
-		"id":      vuln.ID,
-		"summary": vuln.Summary,
+// renderMarkdown renders markdown text using glamour with a dark theme.
+func renderMarkdown(content string) (string, error) {
+	renderer, err := glamour.NewTermRenderer(
+		glamour.WithAutoStyle(),
+		glamour.WithWordWrap(80),
+	)
+	if err != nil {
+		return "", err
 	}
-
-	if len(vuln.Aliases) > 0 {
-		data["aliases"] = vuln.Aliases
-	}
-	if vuln.Details != "" {
-		data["details"] = vuln.Details
-	}
-
-	severity := extractVulnSeverity(vuln)
-	data["severity"] = severity.Level.String()
-
-	if len(vuln.Affected) > 0 {
-		affected := make([]map[string]any, 0, len(vuln.Affected))
-		for _, a := range vuln.Affected {
-			pkg := map[string]any{
-				"name":      a.Package.Name,
-				"ecosystem": string(a.Package.Ecosystem),
-			}
-			var fixed []string
-			for _, r := range a.Ranges {
-				for _, e := range r.Events {
-					if e.Fixed != "" {
-						fixed = append(fixed, e.Fixed)
-					}
-				}
-			}
-			if len(fixed) > 0 {
-				pkg["fixed_versions"] = fixed
-			}
-			affected = append(affected, pkg)
-		}
-		data["affected"] = affected
-	}
-
-	if len(vuln.References) > 0 {
-		refs := make([]string, 0, len(vuln.References))
-		for _, r := range vuln.References {
-			refs = append(refs, r.URL)
-		}
-		data["references"] = refs
-	}
-
-	if !vuln.Published.IsZero() {
-		data["published"] = vuln.Published.Format("2006-01-02")
-	}
-	if !vuln.Modified.IsZero() {
-		data["modified"] = vuln.Modified.Format("2006-01-02")
-	}
-
-	enc := json.NewEncoder(out)
-	enc.SetIndent("", "  ")
-	enc.Encode(data)
+	return renderer.Render(content)
 }
 
-// extractVulnSeverity extracts severity from an OSV vulnerability.
-func extractVulnSeverity(vuln *osvschema.Vulnerability) vulnerability.Severity {
-	if vuln == nil {
-		return vulnerability.Severity{}
-	}
+// buildExplainAIPrompt creates a prompt for AI vulnerability analysis.
+func buildExplainAIPrompt(vulnJSON string) string {
+	var sb strings.Builder
 
-	// Check severity array first
-	for _, sev := range vuln.Severity {
-		if sev.Score != "" {
-			return vulnerability.NewSeverity(sev.Score, string(sev.Type))
-		}
-	}
+	sb.WriteString("You are a security expert helping developers understand vulnerabilities.\n\n")
+	sb.WriteString("Analyze this vulnerability and provide:\n")
+	sb.WriteString("1. A plain-English explanation of what this vulnerability means\n")
+	sb.WriteString("2. The potential impact if exploited\n")
+	sb.WriteString("3. Who should be concerned (what types of applications)\n")
+	sb.WriteString("4. Key remediation steps\n\n")
+	sb.WriteString("Provide clear, actionable analysis suitable for developers and security engineers.\n")
+	sb.WriteString("Use markdown formatting with **bold** for emphasis and bullet points for lists.\n")
+	sb.WriteString("Keep the response concise but comprehensive.\n\n")
 
-	// Check database_specific for GHSA severity
-	if vuln.DatabaseSpecific != nil {
-		if sevRaw, ok := vuln.DatabaseSpecific["severity"]; ok {
-			if sevStr, ok := sevRaw.(string); ok {
-				return vulnerability.NewSeverity(strings.ToUpper(sevStr), "GHSA")
-			}
-		}
-	}
+	sb.WriteString("Vulnerability data:\n")
+	sb.WriteString(vulnJSON)
 
-	return vulnerability.Severity{}
-}
-
-// severityStyleFor returns the appropriate UI style for a severity level.
-func severityStyleFor(level vulnerability.SeverityLevel) lipgloss.Style {
-	switch level {
-	case vulnerability.SeverityCritical:
-		return ui.StyleCritical
-	case vulnerability.SeverityHigh:
-		return ui.StyleRemoved // High uses the red "removed" style
-	case vulnerability.SeverityMedium:
-		return ui.StyleDowngraded // Medium uses the yellow "downgraded" style
-	case vulnerability.SeverityLow:
-		return ui.StyleVersion // Low uses the dim version style
-	default:
-		return ui.StyleDim
-	}
-}
-
-// wrapDetailsText wraps text to the specified width for vulnerability details.
-func wrapDetailsText(text string, width int) string {
-	if len(text) <= width {
-		return text
-	}
-
-	var lines []string
-	for _, paragraph := range strings.Split(text, "\n\n") {
-		words := strings.Fields(paragraph)
-		if len(words) == 0 {
-			continue
-		}
-
-		var line strings.Builder
-		for _, word := range words {
-			if line.Len()+len(word)+1 > width {
-				lines = append(lines, line.String())
-				line.Reset()
-			}
-			if line.Len() > 0 {
-				line.WriteString(" ")
-			}
-			line.WriteString(word)
-		}
-		if line.Len() > 0 {
-			lines = append(lines, line.String())
-		}
-		lines = append(lines, "")
-	}
-
-	return strings.TrimSuffix(strings.Join(lines, "\n"), "\n")
+	return sb.String()
 }

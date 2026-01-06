@@ -9,6 +9,7 @@ require (
 	github.com/BurntSushi/toml v1.5.0
 	github.com/CycloneDX/cyclonedx-go v0.9.2
 	github.com/charmbracelet/fang v0.4.0
+	github.com/charmbracelet/glamour v0.10.0
 	github.com/charmbracelet/lipgloss v1.1.1-0.20250404203927-76690c660834
 	github.com/go-git/go-billy/v5 v5.6.2
 	github.com/go-git/go-git/v5 v5.16.3
@@ -60,8 +61,18 @@ require (
 )
 
 require (
+	github.com/alecthomas/chroma/v2 v2.19.0 // indirect
+	github.com/aymerick/douceur v0.2.0 // indirect
+	github.com/charmbracelet/x/exp/slice v0.0.0-20250702191427-5bdfc8f2e4ff // indirect
+	github.com/dlclark/regexp2 v1.11.5 // indirect
 	github.com/google/jsonschema-go v0.3.0 // indirect
+	github.com/gorilla/css v1.0.1 // indirect
+	github.com/microcosm-cc/bluemonday v1.0.27 // indirect
+	github.com/muesli/reflow v0.3.0 // indirect
 	github.com/yosida95/uritemplate/v3 v3.0.2 // indirect
+	github.com/yuin/goldmark v1.7.12 // indirect
+	github.com/yuin/goldmark-emoji v1.0.6 // indirect
+	golang.org/x/term v0.37.0 // indirect
 )
 
 require (

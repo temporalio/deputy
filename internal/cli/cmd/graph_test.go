@@ -275,8 +275,8 @@ func TestFindMatchingNodes(t *testing.T) {
 		wantCount   int    // Expected number of matches (-1 = don't check)
 		description string
 	}{
-		// "net" matches both golang.org/x/net and otelhttp (contains /net/), sorted alphabetically
-		{"net", "go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp", 2, "path match for /net"},
+		// "net" matches golang.org/x/net and otelhttp (path match), plus network-utils (substring)
+		{"net", "go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp", 3, "path match + substring match"},
 		// "yaml" matches go-yaml (hyphen suffix, higher rank) + 3 path matches
 		{"yaml", "github.com/goccy/go-yaml", 4, "yaml matches go-yaml first, then path matches"},
 		{"go-yaml", "github.com/goccy/go-yaml", 1, "hyphen suffix match"},

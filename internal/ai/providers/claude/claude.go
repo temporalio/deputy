@@ -161,7 +161,9 @@ func buildArgs(req *ai.CompletionRequest) []string {
 	args := []string{}
 
 	// Non-interactive mode with streaming JSON output
+	// Note: --verbose is required when using --print with --output-format stream-json
 	args = append(args, "--print")
+	args = append(args, "--verbose")
 	args = append(args, "--output-format", "stream-json")
 
 	// Model selection

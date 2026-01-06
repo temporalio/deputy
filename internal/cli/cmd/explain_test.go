@@ -2,15 +2,18 @@ package cmd
 
 import (
 	"bytes"
+	"context"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/ossf/osv-schema/bindings/go/osvschema"
-	"github.com/picatz/deputy/internal/vulnerability"
+	"github.com/picatz/deputy/internal/explain"
 )
 
-func TestRenderVulnText(t *testing.T) {
+func TestExplainRenderer_Text(t *testing.T) {
+	ctx := context.Background()
+
 	t.Run("renders basic vulnerability", func(t *testing.T) {
 		out := &bytes.Buffer{}
 		vuln := &osvschema.Vulnerability{
@@ -19,7 +22,10 @@ func TestRenderVulnText(t *testing.T) {
 			Aliases: []string{"GHSA-jfh8-c2jp-5v3q"},
 		}
 
-		renderVulnText(out, vuln, false)
+		renderer := explain.NewRenderer(explain.Config{})
+		if err := renderer.Render(ctx, out, vuln); err != nil {
+			t.Fatalf("Render failed: %v", err)
+		}
 		output := out.String()
 
 		if !strings.Contains(output, "CVE-2021-44228") {
@@ -56,7 +62,10 @@ func TestRenderVulnText(t *testing.T) {
 			},
 		}
 
-		renderVulnText(out, vuln, false)
+		renderer := explain.NewRenderer(explain.Config{})
+		if err := renderer.Render(ctx, out, vuln); err != nil {
+			t.Fatalf("Render failed: %v", err)
+		}
 		output := out.String()
 
 		if !strings.Contains(output, "lodash") {
@@ -72,19 +81,16 @@ func TestRenderVulnText(t *testing.T) {
 
 	t.Run("handles nil vulnerability", func(t *testing.T) {
 		out := &bytes.Buffer{}
-		renderVulnText(out, nil, false)
+		renderer := explain.NewRenderer(explain.Config{})
+		if err := renderer.Render(ctx, out, nil); err != nil {
+			t.Fatalf("Render failed: %v", err)
+		}
 		if out.Len() != 0 {
 			t.Error("expected no output for nil vulnerability")
 		}
 	})
 
-	t.Run("handles nil writer", func(t *testing.T) {
-		vuln := &osvschema.Vulnerability{ID: "TEST-001"}
-		// Should not panic
-		renderVulnText(nil, vuln, false)
-	})
-
-	t.Run("verbose includes details and references", func(t *testing.T) {
+	t.Run("includes details and references", func(t *testing.T) {
 		out := &bytes.Buffer{}
 		vuln := &osvschema.Vulnerability{
 			ID:      "TEST-002",
@@ -95,20 +101,97 @@ func TestRenderVulnText(t *testing.T) {
 			},
 		}
 
-		renderVulnText(out, vuln, true)
+		renderer := explain.NewRenderer(explain.Config{})
+		if err := renderer.Render(ctx, out, vuln); err != nil {
+			t.Fatalf("Render failed: %v", err)
+		}
 		output := out.String()
 
 		if !strings.Contains(output, "detailed description") {
-			t.Error("verbose output should contain details")
+			t.Error("output should contain details")
 		}
 		if !strings.Contains(output, "https://example.com/advisory") {
-			t.Error("verbose output should contain references")
+			t.Error("output should contain references")
+		}
+	})
+
+	t.Run("renders dates when provided", func(t *testing.T) {
+		out := &bytes.Buffer{}
+		published := time.Date(2021, 12, 10, 0, 0, 0, 0, time.UTC)
+		modified := time.Date(2022, 1, 15, 0, 0, 0, 0, time.UTC)
+
+		vuln := &osvschema.Vulnerability{
+			ID:        "TEST-003",
+			Summary:   "Test vulnerability",
+			Published: published,
+			Modified:  modified,
+		}
+
+		renderer := explain.NewRenderer(explain.Config{})
+		if err := renderer.Render(ctx, out, vuln); err != nil {
+			t.Fatalf("Render failed: %v", err)
+		}
+		output := out.String()
+
+		if !strings.Contains(output, "2021-12-10") {
+			t.Error("output should contain published date")
+		}
+		if !strings.Contains(output, "2022-01-15") {
+			t.Error("output should contain modified date")
+		}
+	})
+
+	t.Run("renders quick links for CVE", func(t *testing.T) {
+		out := &bytes.Buffer{}
+		vuln := &osvschema.Vulnerability{
+			ID:      "CVE-2021-44228",
+			Summary: "Test vulnerability",
+		}
+
+		renderer := explain.NewRenderer(explain.Config{})
+		if err := renderer.Render(ctx, out, vuln); err != nil {
+			t.Fatalf("Render failed: %v", err)
+		}
+		output := out.String()
+
+		if !strings.Contains(output, "Quick Links") {
+			t.Error("output should contain Quick Links section")
+		}
+		if !strings.Contains(output, "osv.dev/vulnerability/CVE-2021-44228") {
+			t.Error("output should contain OSV link")
+		}
+		if !strings.Contains(output, "nvd.nist.gov/vuln/detail/CVE-2021-44228") {
+			t.Error("output should contain NVD link")
+		}
+	})
+
+	t.Run("renders quick links for Go vulnerability", func(t *testing.T) {
+		out := &bytes.Buffer{}
+		vuln := &osvschema.Vulnerability{
+			ID:      "GO-2024-2687",
+			Summary: "Test Go vulnerability",
+			Aliases: []string{"CVE-2023-45288"},
+		}
+
+		renderer := explain.NewRenderer(explain.Config{})
+		if err := renderer.Render(ctx, out, vuln); err != nil {
+			t.Fatalf("Render failed: %v", err)
+		}
+		output := out.String()
+
+		if !strings.Contains(output, "pkg.go.dev/vuln/GO-2024-2687") {
+			t.Error("output should contain Go vulnerability database link")
+		}
+		if !strings.Contains(output, "nvd.nist.gov/vuln/detail/CVE-2023-45288") {
+			t.Error("output should contain NVD link for aliased CVE")
 		}
 	})
 }
 
-func TestRenderVulnJSON(t *testing.T) {
-	t.Run("renders valid JSON", func(t *testing.T) {
+func TestExplainRenderer_JSON(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("renders valid JSON with core fields", func(t *testing.T) {
 		out := &bytes.Buffer{}
 		vuln := &osvschema.Vulnerability{
 			ID:      "CVE-2021-44228",
@@ -131,7 +214,10 @@ func TestRenderVulnJSON(t *testing.T) {
 			},
 		}
 
-		renderVulnJSON(out, vuln)
+		renderer := explain.NewRenderer(explain.Config{})
+		if err := renderer.RenderJSON(ctx, out, vuln); err != nil {
+			t.Fatalf("RenderJSON failed: %v", err)
+		}
 		output := out.String()
 
 		// Check JSON contains expected fields
@@ -147,123 +233,246 @@ func TestRenderVulnJSON(t *testing.T) {
 		if !strings.Contains(output, `"affected"`) {
 			t.Error("JSON should contain affected")
 		}
+	})
+
+	t.Run("includes remediation info for affected packages", func(t *testing.T) {
+		out := &bytes.Buffer{}
+		vuln := &osvschema.Vulnerability{
+			ID:      "TEST-JSON-001",
+			Summary: "Test vulnerability",
+			Affected: []osvschema.Affected{
+				{
+					Package: osvschema.Package{
+						Name:      "lodash",
+						Ecosystem: "npm",
+					},
+					Ranges: []osvschema.Range{
+						{
+							Events: []osvschema.Event{
+								{Introduced: "0"},
+								{Fixed: "4.17.21"},
+							},
+						},
+					},
+				},
+			},
+		}
+
+		renderer := explain.NewRenderer(explain.Config{})
+		if err := renderer.RenderJSON(ctx, out, vuln); err != nil {
+			t.Fatalf("RenderJSON failed: %v", err)
+		}
+		output := out.String()
+
 		if !strings.Contains(output, `"fixed_versions"`) {
-			t.Error("JSON should contain fixed_versions")
+			t.Error("JSON should contain fixed_versions array")
+		}
+		if !strings.Contains(output, `"4.17.21"`) {
+			t.Error("JSON should contain the fixed version")
+		}
+		if !strings.Contains(output, `"remediation"`) {
+			t.Error("JSON should contain remediation guidance")
+		}
+		if !strings.Contains(output, `Upgrade to 4.17.21 or later`) {
+			t.Error("JSON remediation should suggest upgrade")
 		}
 	})
-}
 
-func TestExtractVulnSeverity(t *testing.T) {
-	t.Run("extracts CVSS severity", func(t *testing.T) {
+	t.Run("includes links for CVE IDs", func(t *testing.T) {
+		out := &bytes.Buffer{}
 		vuln := &osvschema.Vulnerability{
+			ID:      "CVE-2023-12345",
+			Summary: "Test CVE",
+		}
+
+		renderer := explain.NewRenderer(explain.Config{})
+		if err := renderer.RenderJSON(ctx, out, vuln); err != nil {
+			t.Fatalf("RenderJSON failed: %v", err)
+		}
+		output := out.String()
+
+		if !strings.Contains(output, `"links"`) {
+			t.Error("JSON should contain links section")
+		}
+		if !strings.Contains(output, `"nvd"`) {
+			t.Error("JSON should contain NVD link for CVE")
+		}
+		if !strings.Contains(output, `nvd.nist.gov`) {
+			t.Error("JSON should contain NVD URL")
+		}
+	})
+
+	t.Run("includes links for GHSA IDs", func(t *testing.T) {
+		out := &bytes.Buffer{}
+		vuln := &osvschema.Vulnerability{
+			ID:      "GHSA-abcd-1234-efgh",
+			Summary: "Test GHSA",
+		}
+
+		renderer := explain.NewRenderer(explain.Config{})
+		if err := renderer.RenderJSON(ctx, out, vuln); err != nil {
+			t.Fatalf("RenderJSON failed: %v", err)
+		}
+		output := out.String()
+
+		if !strings.Contains(output, `"github_advisory"`) {
+			t.Error("JSON should contain github_advisory link for GHSA")
+		}
+		if !strings.Contains(output, `github.com/advisories`) {
+			t.Error("JSON should contain GitHub advisories URL")
+		}
+	})
+
+	t.Run("includes links for Go vulnerability IDs", func(t *testing.T) {
+		out := &bytes.Buffer{}
+		vuln := &osvschema.Vulnerability{
+			ID:      "GO-2023-1234",
+			Summary: "Test Go vuln",
+		}
+
+		renderer := explain.NewRenderer(explain.Config{})
+		if err := renderer.RenderJSON(ctx, out, vuln); err != nil {
+			t.Fatalf("RenderJSON failed: %v", err)
+		}
+		output := out.String()
+
+		if !strings.Contains(output, `"go_vuln"`) {
+			t.Error("JSON should contain go_vuln link for GO- IDs")
+		}
+		if !strings.Contains(output, `pkg.go.dev/vuln`) {
+			t.Error("JSON should contain Go vulnerability database URL")
+		}
+	})
+
+	t.Run("includes timeline with human-readable age", func(t *testing.T) {
+		out := &bytes.Buffer{}
+		published := time.Now().Add(-365 * 24 * time.Hour) // 1 year ago
+
+		vuln := &osvschema.Vulnerability{
+			ID:        "TEST-JSON-002",
+			Summary:   "Test vulnerability",
+			Published: published,
+		}
+
+		renderer := explain.NewRenderer(explain.Config{})
+		if err := renderer.RenderJSON(ctx, out, vuln); err != nil {
+			t.Fatalf("RenderJSON failed: %v", err)
+		}
+		output := out.String()
+
+		if !strings.Contains(output, `"age_human"`) {
+			t.Error("JSON should contain age_human field")
+		}
+		if !strings.Contains(output, `"age_days"`) {
+			t.Error("JSON should contain age_days field")
+		}
+	})
+
+	t.Run("handles package without fix", func(t *testing.T) {
+		out := &bytes.Buffer{}
+		vuln := &osvschema.Vulnerability{
+			ID:      "TEST-JSON-003",
+			Summary: "No fix available",
+			Affected: []osvschema.Affected{
+				{
+					Package: osvschema.Package{
+						Name:      "vulnerable-pkg",
+						Ecosystem: "npm",
+					},
+					Ranges: []osvschema.Range{
+						{
+							Events: []osvschema.Event{
+								{Introduced: "0"},
+							},
+						},
+					},
+				},
+			},
+		}
+
+		renderer := explain.NewRenderer(explain.Config{})
+		if err := renderer.RenderJSON(ctx, out, vuln); err != nil {
+			t.Fatalf("RenderJSON failed: %v", err)
+		}
+		output := out.String()
+
+		if !strings.Contains(output, `"remediation"`) {
+			t.Error("JSON should contain remediation even without fix")
+		}
+		if !strings.Contains(output, `No fix available`) {
+			t.Error("JSON should indicate no fix is available")
+		}
+	})
+
+	t.Run("includes attack characteristics for CVSS vector", func(t *testing.T) {
+		out := &bytes.Buffer{}
+		vuln := &osvschema.Vulnerability{
+			ID:      "CVE-2021-44228",
+			Summary: "Test vulnerability with CVSS",
 			Severity: []osvschema.Severity{
-				{Type: "CVSS_V3", Score: "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:C/C:H/I:H/A:H"},
+				{
+					Type:  osvschema.SeverityCVSSV3,
+					Score: "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:C/C:H/I:H/A:H",
+				},
 			},
 		}
 
-		sev := extractVulnSeverity(vuln)
-		// CVSS 10.0 should be CRITICAL
-		if sev.Level != vulnerability.SeverityCritical {
-			t.Errorf("expected CRITICAL, got %v", sev.Level)
+		renderer := explain.NewRenderer(explain.Config{})
+		if err := renderer.RenderJSON(ctx, out, vuln); err != nil {
+			t.Fatalf("RenderJSON failed: %v", err)
 		}
-	})
+		output := out.String()
 
-	t.Run("extracts GHSA severity from database_specific", func(t *testing.T) {
-		vuln := &osvschema.Vulnerability{
-			DatabaseSpecific: map[string]any{
-				"severity": "HIGH",
-			},
+		if !strings.Contains(output, `"attack_surface"`) {
+			t.Error("JSON should contain attack_surface")
 		}
-
-		sev := extractVulnSeverity(vuln)
-		if sev.Level != vulnerability.SeverityHigh {
-			t.Errorf("expected HIGH, got %v", sev.Level)
+		if !strings.Contains(output, `"attack_characteristics"`) {
+			t.Error("JSON should contain attack_characteristics")
 		}
-	})
-
-	t.Run("handles nil vulnerability", func(t *testing.T) {
-		sev := extractVulnSeverity(nil)
-		if sev.Level != vulnerability.SeverityUnknown {
-			t.Errorf("expected Unknown, got %v", sev.Level)
+		if !strings.Contains(output, `"remote_exploitable"`) {
+			t.Error("JSON should contain remote_exploitable field")
+		}
+		if !strings.Contains(output, `"authentication_required"`) {
+			t.Error("JSON should contain authentication_required field")
 		}
 	})
 }
 
-func TestWrapDetailsText(t *testing.T) {
-	tests := []struct {
-		name     string
-		text     string
-		width    int
-		contains []string
-	}{
-		{
-			name:     "short text unchanged",
-			text:     "Short text",
-			width:    80,
-			contains: []string{"Short text"},
-		},
-		{
-			name:     "long text wrapped",
-			text:     "This is a very long line that should be wrapped at the specified width boundary",
-			width:    40,
-			contains: []string{"This is a very long line", "wrapped"},
-		},
-		{
-			name:     "preserves paragraphs",
-			text:     "First paragraph.\n\nSecond paragraph.",
-			width:    80,
-			contains: []string{"First paragraph.", "Second paragraph."},
-		},
-	}
+func TestExplainHelpers(t *testing.T) {
+	t.Run("FormatAge formats durations correctly", func(t *testing.T) {
+		tests := []struct {
+			duration time.Duration
+			expected string
+		}{
+			{24 * time.Hour, "1 day"},
+			{48 * time.Hour, "2 days"},
+			{7 * 24 * time.Hour, "1 week"},
+			{30 * 24 * time.Hour, "1 month"},
+			{365 * 24 * time.Hour, "1 year"},
+		}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			result := wrapDetailsText(tt.text, tt.width)
-			for _, want := range tt.contains {
-				if !strings.Contains(result, want) {
-					t.Errorf("result %q should contain %q", result, want)
-				}
+		for _, tt := range tests {
+			result := explain.FormatAge(tt.duration)
+			if result != tt.expected {
+				t.Errorf("FormatAge(%v) = %q, want %q", tt.duration, result, tt.expected)
 			}
-		})
-	}
-}
+		}
+	})
 
-func TestSeverityStyleFor(t *testing.T) {
-	// Just verify it doesn't panic for each severity level
-	levels := []vulnerability.SeverityLevel{
-		vulnerability.SeverityCritical,
-		vulnerability.SeverityHigh,
-		vulnerability.SeverityMedium,
-		vulnerability.SeverityLow,
-		vulnerability.SeverityUnknown,
-	}
+	t.Run("TemporalInfo provides age calculations", func(t *testing.T) {
+		info := explain.TemporalInfo{
+			Published: time.Now().Add(-30 * 24 * time.Hour),
+			Modified:  time.Now().Add(-7 * 24 * time.Hour),
+		}
 
-	for _, level := range levels {
-		style := severityStyleFor(level)
-		// Style should be non-nil (lipgloss returns empty style, not nil)
-		_ = style.Render("test")
-	}
-}
+		days := info.DaysSincePublished()
+		if days < 29 || days > 31 {
+			t.Errorf("DaysSincePublished() = %d, want ~30", days)
+		}
 
-func TestRenderVulnText_WithDates(t *testing.T) {
-	out := &bytes.Buffer{}
-	published := time.Date(2021, 12, 10, 0, 0, 0, 0, time.UTC)
-	modified := time.Date(2022, 1, 15, 0, 0, 0, 0, time.UTC)
-
-	vuln := &osvschema.Vulnerability{
-		ID:        "TEST-003",
-		Summary:   "Test vulnerability",
-		Published: published,
-		Modified:  modified,
-	}
-
-	renderVulnText(out, vuln, false)
-	output := out.String()
-
-	if !strings.Contains(output, "2021-12-10") {
-		t.Error("output should contain published date")
-	}
-	if !strings.Contains(output, "2022-01-15") {
-		t.Error("output should contain modified date")
-	}
+		age := info.Age()
+		if age < 29*24*time.Hour || age > 31*24*time.Hour {
+			t.Errorf("Age() = %v, want ~30 days", age)
+		}
+	})
 }
