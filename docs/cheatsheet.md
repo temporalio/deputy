@@ -7,6 +7,7 @@ Quick reference for common commands and patterns.
 | Command | Purpose | Example |
 | --- | --- | --- |
 | `scan` | Find vulnerabilities | `deputy scan` |
+| `explain` | Understand a vulnerability | `deputy explain CVE-2021-44228` |
 | `fix` | Generate/apply upgrades | `deputy fix --apply` |
 | `diff` | Compare dependencies | `deputy diff main HEAD` |
 | `sbom` | Generate SBOM | `deputy sbom -o sbom.json` |
@@ -33,6 +34,11 @@ Quick reference for common commands and patterns.
 ```bash
 # Scan current directory
 deputy scan
+
+# Explain a vulnerability
+deputy explain CVE-2021-44228
+deputy explain --agent claude CVE-2021-44228       # with agent analysis
+deputy explain --agent codex CVE-2021-44228        # use codex agent
 
 # Scan with JSON output
 deputy scan --format json | jq '.summary'
@@ -64,6 +70,7 @@ deputy policy lint policy/*.yaml
 | Command | Formats |
 | --- | --- |
 | `scan` | `text`, `json` |
+| `explain` | `text`, `json` |
 | `diff` | `text`, `json` |
 | `fix` | `text`, `json` |
 | `list` | `text`, `tsv`, `json` |

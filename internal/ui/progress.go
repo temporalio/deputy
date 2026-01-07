@@ -242,6 +242,23 @@ func (p *Progress) clearLine() {
 	}
 }
 
+// FormatStatusHint formats a status hint with styled brackets and content.
+// Input: "[thinking]" -> styled "[" + "thinking" + "]"
+// This provides consistent visual styling for spinner sub-messages.
+func FormatStatusHint(hint string) string {
+	// If already has brackets, extract content and style it
+	if len(hint) >= 2 && hint[0] == '[' && hint[len(hint)-1] == ']' {
+		content := hint[1 : len(hint)-1]
+		return StyleAgentBracket.Render("[") +
+			StyleAgentStatus.Render(content) +
+			StyleAgentBracket.Render("]")
+	}
+	// Otherwise, add brackets and style
+	return StyleAgentBracket.Render("[") +
+		StyleAgentStatus.Render(hint) +
+		StyleAgentBracket.Render("]")
+}
+
 // IsTTY checks if writer is a terminal.
 func IsTTY(w io.Writer) bool {
 	if f, ok := w.(*os.File); ok {

@@ -9,6 +9,7 @@ Deputy is intentionally pipeline-friendly: commands compose well with each other
 | Command | Purpose | Key Flags |
 | --- | --- | --- |
 | [`scan`](scan.md) | Find vulnerabilities via OSV | `--ref`, `--format`, `--policy`, `--ignore-unfixed` |
+| [`explain`](explain.md) | Explain vulnerabilities in detail | `--agent`, `--enrich`, `--format` |
 | [`fix`](fix.md) | Generate/apply remediation plans | `--apply`, `--report`, `--agent` |
 | [`triage`](triage.md) | Prioritize findings | `--format`, `--agent` |
 | [`diff`](diff.md) | Compare dependency changes between refs | `--skip-vuln-scan`, `--licenses` |
@@ -79,6 +80,7 @@ Use exit codes for CI gating.
 ### Core Workflow
 
 - [Scan](scan.md) — Vulnerability scanning
+- [Explain](explain.md) — Vulnerability explanation with agent analysis
 - [Fix](fix.md) — Remediation planning
 - [Triage](triage.md) — Prioritization
 - [Diff](diff.md) — Dependency change analysis

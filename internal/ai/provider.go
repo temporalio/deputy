@@ -186,6 +186,7 @@ const (
 	streamEventFile    streamEventType = "file"
 	streamEventError   streamEventType = "error"
 	streamEventDone    streamEventType = "done"
+	streamEventStatus  streamEventType = "status"
 )
 
 // TextEvent contains incremental text output.
@@ -244,9 +245,26 @@ func (e ErrorEvent) Error() error {
 type DoneEvent struct {
 	SessionID    string
 	FinishReason FinishReason
+	Usage        Usage  // Token usage for this generation
+	Model        string // Model that was actually used (if reported by provider)
 }
 
 func (DoneEvent) eventType() streamEventType { return streamEventDone }
+
+// UsageEvent reports token usage during streaming (emitted periodically or at end).
+type UsageEvent struct {
+	Usage Usage
+}
+
+func (UsageEvent) eventType() streamEventType { return streamEventDone } // Reuse done type for simplicity
+
+// StatusEvent provides progress hints during streaming (for spinner updates).
+// These events don't contain content but indicate what the agent is doing.
+type StatusEvent struct {
+	Status string // e.g., "thinking", "analyzing", "waiting"
+}
+
+func (StatusEvent) eventType() streamEventType { return streamEventStatus }
 
 // Registry manages available AI providers.
 type Registry struct {

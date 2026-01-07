@@ -59,7 +59,37 @@ var (
 	StylePolicyRule = lipgloss.NewStyle().Foreground(lipgloss.Color("#B0C4DE")) // Light steel blue
 	// StyleSeparator is used for punctuation or separators in proxy output.
 	StyleSeparator = lipgloss.NewStyle().Foreground(lipgloss.Color("#708090")) // Slate gray
+
+	// Agent metadata styles - used for spinner status and footer metadata
+	// These use a muted gray palette for subtle, non-distracting visual cues.
+
+	// StyleAgentBracket is used for brackets around status hints [thinking].
+	StyleAgentBracket = lipgloss.NewStyle().Foreground(lipgloss.Color("#4E4E4E")) // Dark gray
+	// StyleAgentStatus is used for status text inside brackets (e.g., "thinking", "reading").
+	StyleAgentStatus = lipgloss.NewStyle().Foreground(lipgloss.Color("#8A8A8A")) // Medium gray
+	// StyleAgentProvider is used for provider/model names in metadata.
+	StyleAgentProvider = lipgloss.NewStyle().Foreground(lipgloss.Color("#B0B0B0")) // Light gray
+	// StyleAgentModel is used for model identifiers.
+	StyleAgentModel = lipgloss.NewStyle().Foreground(lipgloss.Color("#9A9A9A")) // Slightly darker gray
+	// StyleAgentSandbox is used for sandbox mode indicators.
+	StyleAgentSandbox = lipgloss.NewStyle().Foreground(lipgloss.Color("#7A7A7A")) // Medium-dark gray
+	// StyleAgentTokens is used for token count numbers.
+	StyleAgentTokens = lipgloss.NewStyle().Foreground(lipgloss.Color("#A8A8A8")) // Light-medium gray
+	// StyleAgentTokensLabel is used for "tokens" and "(in, out)" labels.
+	StyleAgentTokensLabel = lipgloss.NewStyle().Foreground(lipgloss.Color("#606060")) // Darker gray
+	// StyleAgentDuration is used for timing information.
+	StyleAgentDuration = lipgloss.NewStyle().Foreground(lipgloss.Color("#A0A0A0")) // Light gray
+	// StyleAgentDot is used for the · separator in metadata lines.
+	StyleAgentDot = lipgloss.NewStyle().Foreground(lipgloss.Color("#505050")) // Dark gray
+	// StyleAgentStar is used for the AI indicator star (✦) in metadata lines.
+	StyleAgentStar = lipgloss.NewStyle().Foreground(lipgloss.Color("#B8860B")) // Dark goldenrod (muted yellow)
 )
+
+// AIStarPrefix returns a styled AI indicator star for metadata footers.
+// Uses ✦ (filled four-pointed star) with a muted yellow color.
+func AIStarPrefix() string {
+	return StyleAgentStar.Render("✦") + " "
+}
 
 // SeverityLabel returns a consistently styled severity label in the format [CRITICAL], [HIGH], [MED], [LOW], or [?].
 // It normalizes GHSA-style severity names (CRITICAL, HIGH, MODERATE/MEDIUM, LOW) and CVSS scores.

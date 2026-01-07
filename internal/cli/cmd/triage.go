@@ -107,7 +107,6 @@ func runTriage(scanner *Scanner, cmd *cobra.Command, args []string) error {
 	var (
 		triageReport report.TriageReport
 		repoPath     string
-		triageSource string
 	)
 
 	if strings.TrimSpace(reportPath) != "" {
@@ -133,7 +132,6 @@ func runTriage(scanner *Scanner, cmd *cobra.Command, args []string) error {
 		}
 		cons := vulnerability.Consolidate(scanResult.Findings, scanResult.Advisories)
 		triageReport = report.BuildTriageReport(report.Target{Repo: scanReport.Repo, Ref: scanReport.Ref, Commit: scanReport.Commit}, scanResult.Stats, cons)
-		triageSource = "report"
 	} else {
 		ctx := cmd.Context()
 		ref, _ := cmd.Flags().GetString("ref")
@@ -155,7 +153,6 @@ func runTriage(scanner *Scanner, cmd *cobra.Command, args []string) error {
 			fmt.Fprintf(cmd.ErrOrStderr(), "Warning: %s\n", warning)
 		}
 		repoPath = exec.Result.Target.LocalPath
-		triageSource = "scan"
 		resultOut := exec.Result
 		if ignoreUnfixed {
 			resultOut = scan.FilterUnfixed(resultOut)
@@ -193,8 +190,9 @@ func runTriage(scanner *Scanner, cmd *cobra.Command, args []string) error {
 		if err != nil {
 			return err
 		}
-		fmt.Fprintf(cmd.OutOrStdout(), "%s Sending triage summary (%s) to %s\n", ui.StyleManager.Render("agent"), triageSource, agentName)
-		if err := runAgent(cmd.Context(), agentName, prompt, targetRepo, agentOpts, cmd.OutOrStdout(), cmd.ErrOrStderr()); err != nil {
+		fmt.Fprintln(cmd.OutOrStdout())
+		fmt.Fprintln(cmd.OutOrStdout(), ui.StyleHeader.Render("Agent Analysis"))
+		if err := runAgentAnalysis(cmd.Context(), agentName, prompt, targetRepo, agentOpts, cmd.OutOrStdout()); err != nil {
 			return err
 		}
 	}

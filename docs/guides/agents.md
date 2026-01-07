@@ -1,8 +1,55 @@
-# Agents & Automation
+# Agents
 
-Deputy can delegate workflows to external AI agents to reduce manual toil.
+Deputy integrates AI agents to enhance vulnerability analysis and remediation workflows.
 
 ## Overview
+
+Deputy uses the `--agent` flag consistently across commands to delegate tasks to AI agents (Claude Code or Codex). The key difference between commands is the **default sandbox level**:
+
+| Command | Default Sandbox | Purpose |
+| --- | --- | --- |
+| `deputy explain --agent` | `read-only` | Analysis only, no modifications |
+| `deputy triage --agent` | `read-only` | Prioritization and recommendations |
+| `deputy fix --agent` | `workspace-write` | Apply dependency upgrades |
+
+## Agent-Enabled Commands
+
+```console
+# Explain: agent analyzes the vulnerability (read-only)
+$ deputy explain --agent claude CVE-2021-44228
+
+# Triage: agent prioritizes vulnerabilities (read-only)
+$ deputy triage --agent claude
+
+# Fix: agent implements remediation (workspace-write)
+$ deputy fix --agent claude
+```
+
+---
+
+## Sandbox Levels
+
+Agents operate within a sandbox that controls what they can do:
+
+| Sandbox | Description | Use Case |
+| --- | --- | --- |
+| `read-only` | Analyze files, no modifications | Explain, triage |
+| `workspace-write` | Edit files in workspace, run tests | Fix, remediation |
+| `full-access` | Unrestricted (dangerous) | Automated pipelines |
+
+### Override Sandbox
+
+```console
+# Make explain able to write notes
+$ deputy explain --agent claude --agent-sandbox workspace-write CVE-2021-44228
+
+# Make fix read-only (dry run)
+$ deputy fix --agent claude --agent-sandbox read-only
+```
+
+---
+
+## Workflow Diagram
 
 ```mermaid
 sequenceDiagram
@@ -31,49 +78,37 @@ sequenceDiagram
   end
 ```
 
-## Agent-Enabled Commands
-
-| Command | Agent Use | Description |
-| --- | --- | --- |
-| `deputy fix` | Implement upgrades | Agent applies dependency changes |
-| `deputy triage` | Prioritize vulns | Agent analyzes and recommends actions |
-
----
-
-## Agent Modes
-
-### Sandbox Levels
-
-| Mode | Flag | What Agent Can Do |
-| --- | --- | --- |
-| Read-only | `--agent-sandbox read-only` | Analyze files, suggest changes |
-| Workspace write | `--agent-sandbox workspace-write` | Edit files, run tests |
-| Full auto | `--agent-full-auto` | Unattended changes, commits |
-
-### Choosing a Mode
-
-```console
-# Safe: agent can only analyze
-$ deputy triage --agent claude --agent-sandbox read-only
-
-# Productive: agent can edit files
-$ deputy fix --agent claude --agent-sandbox workspace-write
-
-# Autonomous: agent works independently (use with caution)
-$ deputy fix --agent claude --agent-full-auto
-```
-
 ---
 
 ## Practical Examples
 
-### AI-Assisted Triage
+### Agent-Assisted Explain
 
 ```console
-# Get AI prioritization of vulnerabilities
+# Get agent analysis of a vulnerability
+$ deputy explain --agent claude CVE-2021-44228
+
+CVE-2021-44228 [CRITICAL] 10.0 v3.1
+  ...standard output...
+
+Agent Analysis
+
+**What This Means**
+
+Log4Shell is a critical remote code execution vulnerability...
+
+**Impact**
+- Severity: Maximum (10.0 CVSS)
+- Exploitability: Trivial - single HTTP request can trigger
+...
+```
+
+### Agent-Assisted Triage
+
+```console
+# Get agent prioritization of vulnerabilities
 $ deputy triage --agent claude
 
-# Interactive session
 Deputy: Found 15 vulnerabilities. Starting triage...
 
 Agent Analysis:
@@ -82,27 +117,21 @@ Agent Analysis:
     - Severity: CRITICAL
     - Exploited in wild: Yes
     - Fix available: v1.2.3
-    
+
   Priority 2 (This sprint):
     CVE-2024-5678 in lodash
     - Severity: HIGH
     - Direct dependency
     - Fix: npm update lodash@4.17.21
-    
-  Priority 3 (Backlog):
-    CVE-2024-9999 in indirect-dep
-    - Severity: MEDIUM
-    - Transitive, no direct exposure
 
 Recommended action: Start with CVE-2024-1234
-Proceed? [y/n]
 ```
 
-### AI-Assisted Fix
+### Agent-Assisted Fix
 
 ```console
 # Let agent implement the fix
-$ deputy fix --agent claude --agent-sandbox workspace-write
+$ deputy fix --agent claude
 
 Agent: Analyzing remediation plan...
 
@@ -115,9 +144,6 @@ Step 2/3: Upgrading lodash 4.17.20 → 4.17.21
   - Modified package.json
   - Running npm install
   - Running tests... ✓ All pass
-
-Step 3/3: Verifying no new vulnerabilities introduced
-  - Running deputy scan... ✓ Clean
 
 Summary:
   ✓ 2 packages upgraded
@@ -137,17 +163,17 @@ Review changes with: git diff
    ```console
    # Generate plan without agent
    $ deputy fix --format json > plan.json
-   
+
    # Review it
    $ cat plan.json | jq '.steps'
-   
+
    # Then run with agent
    $ deputy fix --agent claude
    ```
 
 2. **Start with read-only**
    ```console
-   $ deputy triage --agent claude --agent-sandbox read-only
+   $ deputy fix --agent claude --agent-sandbox read-only
    ```
 
 3. **Use workspace-write for edits**
@@ -185,7 +211,7 @@ $ deputy fix --agent claude --agent-sandbox workspace-write
 
 ```yaml
 ai:
-  # Default provider when --agent flag is omitted
+  # Default provider when --agent is used without a value
   default_provider: claude
 
   # Approval settings
@@ -213,18 +239,14 @@ export ANTHROPIC_API_KEY=sk-...
 
 # OpenAI / Codex
 export OPENAI_API_KEY=sk-...
-
-# Custom endpoint
-export DEPUTY_AGENT_ENDPOINT=https://my-llm.internal/v1
 ```
 
 ### Supported Agents
 
-| Agent | Flag | Notes |
+| Agent | Flag | Installation |
 | --- | --- | --- |
-| Claude | `--agent claude` | Anthropic API |
-| Codex | `--agent codex` | OpenAI Codex |
-| Custom | `--agent-endpoint URL` | Any compatible API |
+| Claude | `--agent claude` | `npm install -g @anthropic-ai/claude-code` |
+| Codex | `--agent codex` | `npm install -g @openai/codex` |
 
 ### Approval Policy
 
@@ -289,11 +311,14 @@ $ deputy fix --format json | custom-remediation-bot
 ### Agent Not Responding
 
 ```console
-# Check API key
-$ echo $ANTHROPIC_API_KEY | head -c 10
+# Check Claude CLI is installed
+$ claude --version
 
-# Test with verbose
-$ deputy triage --agent claude --verbose
+# Check Codex CLI is installed
+$ codex --version
+
+# Enable debug logging
+$ DEPUTY_LOG_LEVEL=debug deputy explain --agent claude CVE-2021-44228
 ```
 
 ### Agent Making Wrong Changes
@@ -306,17 +331,13 @@ $ deputy fix --agent claude --agent-sandbox read-only
 # Review suggestions before applying
 ```
 
-### Rate Limits
-
-```console
-# Add delays between operations
-$ deputy fix --agent claude --agent-rate-limit 1s
-```
-
 ---
 
 ## See Also
 
-- [Fix command reference](../commands/fix.md)
-- [Triage command reference](../commands/triage.md)
+- [Explain command reference](../commands/explain.md) — Agent-assisted vulnerability analysis
+- [Fix command reference](../commands/fix.md) — Agent-assisted remediation
+- [Triage command reference](../commands/triage.md) — Agent-assisted prioritization
+- Code: [`internal/cli/cmd/explain.go`](../../internal/cli/cmd/explain.go)
 - Code: [`internal/cli/cmd/fix.go`](../../internal/cli/cmd/fix.go)
+- Code: [`internal/ai/render/render.go`](../../internal/ai/render/render.go)

@@ -8,10 +8,11 @@ import (
 	"os"
 	"strings"
 
-	"github.com/charmbracelet/glamour"
 	"github.com/ossf/osv-schema/bindings/go/osvschema"
 	"github.com/picatz/deputy/internal/ai"
 	_ "github.com/picatz/deputy/internal/ai/providers/claude" // Register claude provider
+	_ "github.com/picatz/deputy/internal/ai/providers/codex"  // Register codex provider
+	"github.com/picatz/deputy/internal/ai/render"
 	"github.com/picatz/deputy/internal/analysis/osv"
 	"github.com/picatz/deputy/internal/explain"
 	ui "github.com/picatz/deputy/internal/ui"
@@ -21,9 +22,11 @@ import (
 // AddExplainCommand adds the explain command to the root command.
 func AddExplainCommand(root *cobra.Command) {
 	var (
-		formatFlag string
-		enrich     bool
-		aiAssist   bool
+		formatFlag   string
+		enrich       bool
+		agentName    string
+		agentModel   string
+		agentSandbox string
 	)
 
 	explainCmd := &cobra.Command{
@@ -38,7 +41,15 @@ and remediation guidance.
 Accepts CVE, GHSA, GO-, RUSTSEC-, and other OSV-compatible identifiers.
 
 The output is designed to help developers, security engineers, and managers
-understand the vulnerability's impact and urgency.`,
+understand the vulnerability's impact and urgency.
+
+AGENT-ASSISTED ANALYSIS:
+When using --agent, Deputy delegates analysis to an AI agent (Claude or Codex).
+The agent runs in read-only mode by default (cannot modify files), providing:
+• Plain-English explanation of the vulnerability
+• Impact assessment and exploitation likelihood
+• Who should be concerned (affected application types)
+• Prioritized remediation steps`,
 		Example: `  # Explain a vulnerability (includes threat intelligence by default)
   deputy explain CVE-2021-44228
 
@@ -48,8 +59,9 @@ understand the vulnerability's impact and urgency.`,
   # Skip threat intelligence lookup (faster, offline)
   deputy explain --enrich=false CVE-2021-44228
 
-  # Get AI-assisted analysis (requires claude CLI)
-  deputy explain --ai CVE-2021-44228
+  # Get agent-assisted analysis (read-only by default)
+  deputy explain --agent claude CVE-2021-44228
+  deputy explain --agent codex CVE-2021-44228
 
   # Output as JSON
   deputy explain --format json CVE-2021-44228`,
@@ -91,11 +103,11 @@ understand the vulnerability's impact and urgency.`,
 						fmt.Fprintf(out, "%s rendering %s: %v\n", ui.StyleRemoved.Render("error"), id, err)
 					}
 
-					// AI-assisted analysis
-					if aiAssist {
+					// Agent-assisted analysis
+					if agentName != "" {
 						fmt.Fprintln(out)
-						if err := renderAIAnalysis(ctx, out, vuln); err != nil {
-							fmt.Fprintf(out, "\n%s AI analysis: %v\n", ui.StyleDim.Render("note:"), err)
+						if err := renderAgentAnalysis(ctx, out, vuln, agentName, agentModel, agentSandbox); err != nil {
+							fmt.Fprintf(out, "\n%s agent analysis: %v\n", ui.StyleDim.Render("note:"), err)
 						}
 					}
 				}
@@ -107,20 +119,25 @@ understand the vulnerability's impact and urgency.`,
 
 	explainCmd.Flags().StringVarP(&formatFlag, "format", "f", "text", "Output format: text, json")
 	explainCmd.Flags().BoolVar(&enrich, "enrich", true, "Enrich with threat intelligence (EPSS scores, KEV catalog)")
-	explainCmd.Flags().BoolVar(&aiAssist, "ai", false, "Add AI-assisted analysis (requires claude CLI)")
+	explainCmd.Flags().StringVar(&agentName, "agent", "", "Use an AI agent to analyze the vulnerability (e.g. 'claude', 'codex')")
+	explainCmd.Flags().StringVar(&agentModel, "agent-model", "", "Model identifier to use when --agent is set")
+	explainCmd.Flags().StringVar(&agentSandbox, "agent-sandbox", "read-only", "Sandbox policy for AI agent (read-only|workspace-write|danger-full-access)")
 
 	root.AddCommand(explainCmd)
 }
 
-// renderAIAnalysis uses an AI model to provide additional context and analysis.
-func renderAIAnalysis(ctx context.Context, out io.Writer, vuln *osvschema.Vulnerability) error {
-	// Get the claude provider from the AI registry
-	provider, err := ai.GetProvider("claude")
+// renderAgentAnalysis uses an AI agent to provide additional context and analysis.
+func renderAgentAnalysis(ctx context.Context, out io.Writer, vuln *osvschema.Vulnerability, providerName, model, sandboxMode string) error {
+	provider, err := ai.GetProvider(providerName)
 	if err != nil {
-		return fmt.Errorf("AI provider not available: %w", err)
+		available := ai.ListProviders()
+		if len(available) > 0 {
+			return fmt.Errorf("agent %q not available (available: %s)", providerName, strings.Join(available, ", "))
+		}
+		return fmt.Errorf("agent %q not available; install claude or codex CLI", providerName)
 	}
 
-	// Build vulnerability summary for the AI
+	// Build vulnerability summary for the agent
 	vulnJSON, err := json.Marshal(map[string]any{
 		"id":       vuln.ID,
 		"summary":  vuln.Summary,
@@ -132,97 +149,78 @@ func renderAIAnalysis(ctx context.Context, out io.Writer, vuln *osvschema.Vulner
 		return fmt.Errorf("encode vulnerability: %w", err)
 	}
 
-	// Create prompt - now request markdown output for better rendering
-	prompt := buildExplainAIPrompt(string(vulnJSON))
+	// Create prompt
+	prompt := buildExplainAgentPrompt(string(vulnJSON))
+
+	// Map sandbox mode string to ai.Sandbox
+	sandbox := parseSandboxMode(sandboxMode)
+
+	// Get working directory (required by some providers like codex)
+	workDir, _ := os.Getwd()
 
 	// Print header
-	fmt.Fprintln(out, ui.StyleHeader.Render("AI Analysis"))
+	fmt.Fprintln(out, ui.StyleHeader.Render("Agent Analysis"))
 
-	// Start spinner while waiting for AI response
-	var progress *ui.Progress
-	isTTY := ui.IsTTY(out)
-	if isTTY {
-		progress = ui.NewProgress(os.Stderr, "Generating analysis")
-		progress.Start(ctx)
-	}
-
-	// Collect the full response for glamour rendering
-	var response strings.Builder
-	firstToken := true
-
-	// Stream the response using the ai package
-	for event, err := range provider.Stream(ctx, &ai.CompletionRequest{
+	// Use the shared render.StreamResponse for consistent output with glamour markdown
+	return render.StreamResponse(ctx, provider, &ai.CompletionRequest{
 		Prompt:    prompt,
+		Model:     model,
 		MaxTokens: 2048,
-	}) {
-		if err != nil {
-			if progress != nil {
-				progress.Fail()
-			}
-			return fmt.Errorf("AI stream: %w", err)
-		}
-		switch e := event.(type) {
-		case ai.TextEvent:
-			// Clear spinner on first token
-			if firstToken && progress != nil {
-				progress.Clear()
-				firstToken = false
-			}
-			response.WriteString(e.Text)
-		case ai.ErrorEvent:
-			if progress != nil {
-				progress.Fail()
-			}
-			return fmt.Errorf("AI error: %w", e.Error())
-		}
-	}
-
-	// Clear spinner if no text was received
-	if firstToken && progress != nil {
-		progress.Clear()
-	}
-
-	// Render the response with glamour for beautiful markdown output
-	if response.Len() > 0 {
-		rendered, err := renderMarkdown(response.String())
-		if err != nil {
-			// Fallback to plain text if glamour fails
-			fmt.Fprintln(out)
-			fmt.Fprintln(out, response.String())
-		} else {
-			fmt.Fprint(out, rendered)
-		}
-	}
-
-	return nil
+		Sandbox:   sandbox,
+		WorkDir:   workDir,
+	}, render.Config{
+		Out:            out,
+		Err:            os.Stderr,
+		SpinnerMessage: providerName,
+		ProviderName:   providerName,
+		Model:          model,
+		RenderMarkdown: true,
+		ShowMetadata:   true,
+		WordWrap:       80,
+	})
 }
 
-// renderMarkdown renders markdown text using glamour with a dark theme.
-func renderMarkdown(content string) (string, error) {
-	renderer, err := glamour.NewTermRenderer(
-		glamour.WithAutoStyle(),
-		glamour.WithWordWrap(80),
-	)
-	if err != nil {
-		return "", err
+// parseSandboxMode converts a sandbox mode string to ai.Sandbox.
+func parseSandboxMode(mode string) ai.Sandbox {
+	switch strings.ToLower(mode) {
+	case "read-only", "readonly":
+		return ai.SandboxReadOnly
+	case "workspace-write", "workspacewrite":
+		return ai.SandboxWorkspaceWrite
+	case "full-access", "fullaccess", "danger-full-access":
+		return ai.SandboxFullAccess
+	default:
+		return ai.SandboxReadOnly // Default to read-only for explain
 	}
-	return renderer.Render(content)
 }
 
-// buildExplainAIPrompt creates a prompt for AI vulnerability analysis.
-func buildExplainAIPrompt(vulnJSON string) string {
+// buildExplainAgentPrompt creates a prompt for agent vulnerability analysis.
+func buildExplainAgentPrompt(vulnJSON string) string {
 	var sb strings.Builder
 
-	sb.WriteString("You are a security expert helping developers understand vulnerabilities.\n\n")
-	sb.WriteString("Analyze this vulnerability and provide:\n")
-	sb.WriteString("1. A plain-English explanation of what this vulnerability means\n")
-	sb.WriteString("2. The potential impact if exploited\n")
-	sb.WriteString("3. Who should be concerned (what types of applications)\n")
-	sb.WriteString("4. Key remediation steps\n\n")
-	sb.WriteString("Provide clear, actionable analysis suitable for developers and security engineers.\n")
-	sb.WriteString("Use markdown formatting with **bold** for emphasis and bullet points for lists.\n")
-	sb.WriteString("Keep the response concise but comprehensive.\n\n")
+	// Context and constraints
+	sb.WriteString("You are Deputy's vulnerability explanation assistant, helping developers understand security issues.\n\n")
 
+	sb.WriteString("IMPORTANT CONSTRAINTS:\n")
+	sb.WriteString("- This is a NON-INTERACTIVE CLI output. Your response will be displayed directly in a terminal.\n")
+	sb.WriteString("- Do NOT ask follow-up questions or offer to do more analysis.\n")
+	sb.WriteString("- Do NOT say things like \"Want me to...\" or \"Let me know if...\" or \"I can help with...\".\n")
+	sb.WriteString("- Provide a COMPLETE, SELF-CONTAINED explanation in a single response.\n")
+	sb.WriteString("- Use markdown formatting (headers, bold, bullet points) for terminal rendering.\n\n")
+
+	// Task description
+	sb.WriteString("TASK:\n")
+	sb.WriteString("Analyze this vulnerability and provide a clear, actionable explanation.\n\n")
+
+	sb.WriteString("COVER THESE TOPICS:\n")
+	sb.WriteString("1. **What This Vulnerability Means** - Plain-English explanation of the issue\n")
+	sb.WriteString("2. **Potential Impact** - What could happen if exploited (data exposure, RCE, DoS, etc.)\n")
+	sb.WriteString("3. **Who Should Be Concerned** - What types of applications/configurations are affected\n")
+	sb.WriteString("4. **Key Remediation Steps** - Concrete actions to fix or mitigate the issue\n\n")
+
+	sb.WriteString("Keep the response concise but comprehensive. Target audience: developers and security engineers.\n\n")
+
+	sb.WriteString("---\n\n")
 	sb.WriteString("Vulnerability data:\n")
 	sb.WriteString(vulnJSON)
 

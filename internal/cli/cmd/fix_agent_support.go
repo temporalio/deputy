@@ -4,9 +4,11 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"os"
 	"strings"
 
 	"github.com/picatz/deputy/internal/ai"
+	"github.com/picatz/deputy/internal/ai/render"
 	ui "github.com/picatz/deputy/internal/ui"
 	"github.com/spf13/cobra"
 )
@@ -112,22 +114,21 @@ func runAIProvider(ctx context.Context, provider ai.Provider, prompt string, rep
 		},
 	})
 
-	fmt.Fprintf(out, "%s Starting %s agent in %s (sandbox=%s)\n",
-		ui.StyleManager.Render(name),
-		name,
-		ui.StylePath.Render(repoPath),
-		sandbox)
+
+	// Create streaming renderer with spinner support
+	renderer := render.NewStreamingRenderer(out, errW, name)
+	renderer.StartSpinner(ctx, "Waiting for agent")
 
 	// Stream the response, rendering events as they occur
 	for event, err := range session.Stream(ctx, prompt) {
 		if err != nil {
+			renderer.Fail()
 			fmt.Fprintf(errW, "%s %v\n", ui.StyleRemoved.Render("error:"), err)
 			continue
 		}
-		renderAIEvent(out, name, event)
+		renderer.RenderEvent(event)
 	}
 
-	fmt.Fprintln(out, ui.StyleUpgraded.Render(fmt.Sprintf("%s remediation completed.", name)))
 	return nil
 }
 
@@ -156,38 +157,6 @@ func createInteractiveApprover(out, errW io.Writer) ai.ApprovalFunc {
 	}
 }
 
-// renderAIEvent formats and prints AI provider events to the output writer.
-func renderAIEvent(out io.Writer, providerName string, event ai.StreamEvent) {
-	if event == nil {
-		return
-	}
-
-	switch e := event.(type) {
-	case ai.TextEvent:
-		text := strings.TrimSpace(e.Text)
-		if text != "" {
-			fmt.Fprintf(out, "%s %s\n", ui.StyleManager.Render(providerName), text)
-		}
-	case ai.CommandEvent:
-		status := e.Status
-		if e.ExitCode != nil {
-			status = fmt.Sprintf("%s (exit %d)", status, *e.ExitCode)
-		}
-		fmt.Fprintf(out, "%s %s %s\n", ui.StyleManager.Render("$"), ui.StylePackageName.Render(e.Command), ui.StyleDim.Render(status))
-		if strings.TrimSpace(e.Output) != "" {
-			fmt.Fprintf(out, "%s\n", strings.TrimSpace(e.Output))
-		}
-	case ai.FileEvent:
-		fmt.Fprintf(out, "%s %s %s\n", ui.StylePath.Render(fmt.Sprintf("[%s]", e.Action)), e.Path, ui.StyleDim.Render(e.Status))
-	case ai.ErrorEvent:
-		fmt.Fprintf(out, "%s %s\n", ui.StyleRemoved.Render("error:"), e.Message)
-	case ai.ToolCallEvent:
-		fmt.Fprintf(out, "%s %s\n", ui.StyleDim.Render("tool:"), e.Call.Name)
-	case ai.DoneEvent:
-		// Session complete, handled by caller
-	}
-}
-
 // parseSandbox converts the sandbox string to an ai.Sandbox value.
 func parseSandbox(value string) ai.Sandbox {
 	trimmed := strings.ToLower(strings.TrimSpace(value))
@@ -201,4 +170,48 @@ func parseSandbox(value string) ai.Sandbox {
 	default:
 		return ai.SandboxWorkspaceWrite
 	}
+}
+
+// runAgentAnalysis runs an agent for read-only analysis tasks (like triage).
+// Unlike runAgent, this collects the full response and renders it with glamour
+// for beautiful markdown output - no real-time streaming of commands/files.
+func runAgentAnalysis(ctx context.Context, name string, prompt string, repoPath string, opts agentInvocationOptions, out io.Writer) error {
+	trimmed := strings.ToLower(strings.TrimSpace(name))
+	if trimmed == "" || trimmed == "none" {
+		return nil
+	}
+	if strings.TrimSpace(prompt) == "" {
+		return fmt.Errorf("agent %q requires a non-empty prompt", name)
+	}
+
+	// Get the provider from the registry
+	provider, err := ai.GetProvider(trimmed)
+	if err != nil {
+		available := ai.ListProviders()
+		if len(available) > 0 {
+			return fmt.Errorf("agent %q not available (available: %s)", name, strings.Join(available, ", "))
+		}
+		return fmt.Errorf("agent %q not available; install claude or codex CLI", name)
+	}
+
+	// Parse sandbox mode
+	sandbox := parseSandbox(opts.Sandbox)
+
+	// Use the shared render.StreamResponse for consistent glamour output
+	return render.StreamResponse(ctx, provider, &ai.CompletionRequest{
+		Prompt:    prompt,
+		Model:     opts.Model,
+		MaxTokens: 4096,
+		Sandbox:   sandbox,
+		WorkDir:   repoPath,
+	}, render.Config{
+		Out:            out,
+		Err:            os.Stderr,
+		SpinnerMessage: trimmed,
+		ProviderName:   trimmed,
+		Model:          opts.Model,
+		RenderMarkdown: true,
+		ShowMetadata:   true,
+		WordWrap:       80,
+	})
 }

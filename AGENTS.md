@@ -143,6 +143,11 @@ deputy scan github.com/owner/repo              # scan remote repo
 deputy scan --ref v1.0.0                       # scan specific Git ref
 deputy scan --format json                      # JSON output
 
+# Explain vulnerabilities
+deputy explain CVE-2021-44228                  # detailed vulnerability info
+deputy explain --agent claude CVE-2021-44228   # with agent analysis
+deputy explain --format json GO-2024-2687      # JSON output
+
 # Container image scanning
 deputy scan nginx:1.25                         # scan remote image
 deputy scan ghcr.io/owner/app:v1.0.0           # scan GHCR image
@@ -198,6 +203,7 @@ internal/
     image/                   # image config, metadata, extraction
   inventory/                 # dependency detection
     manifests/               # manifest path + manager heuristics
+  explain/                   # vulnerability explanation rendering
   license/                   # license enrichment + scanning
   policy/                    # CEL evaluation engine (eval.go)
   proxy/                     # package proxy server
@@ -206,6 +212,9 @@ internal/
   sbom/                      # SBOM generation
   remediation/               # fix planning
   gitutil/                   # Git operations (clone.go, diff.go, refs.go)
+  ai/                        # AI provider abstraction
+    providers/               # claude, codex implementations
+    render/                  # AI output rendering (spinners, glamour)
   vulnerability/             # vulnerability domain types + CVSS/severity
     intel/                   # threat intelligence enrichment
       kev/                   # CISA KEV catalog client

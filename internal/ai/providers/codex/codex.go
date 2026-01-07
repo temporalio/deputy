@@ -91,6 +91,8 @@ func (p *Provider) Stream(ctx context.Context, req *ai.CompletionRequest) iter.S
 		}
 
 		var lastThreadID string
+		var totalUsage ai.Usage
+		requestedModel := req.Model // Track the model we requested (codex doesn't report back which model was used)
 
 		for event, evtErr := range codex.Run(ctx, args) {
 			if evtErr != nil {
@@ -105,6 +107,13 @@ func (p *Provider) Stream(ctx context.Context, req *ai.CompletionRequest) iter.S
 				lastThreadID = event.ThreadID
 			}
 
+			// Accumulate usage from turn.completed events
+			if event.Usage != nil {
+				totalUsage.PromptTokens += event.Usage.InputTokens
+				totalUsage.CompletionTokens += event.Usage.OutputTokens
+				totalUsage.TotalTokens += event.Usage.InputTokens + event.Usage.OutputTokens
+			}
+
 			aiEvent := convertEvent(event)
 			if aiEvent != nil {
 				if !yield(aiEvent, nil) {
@@ -116,6 +125,8 @@ func (p *Provider) Stream(ctx context.Context, req *ai.CompletionRequest) iter.S
 		yield(ai.DoneEvent{
 			SessionID:    lastThreadID,
 			FinishReason: ai.FinishReasonStop,
+			Usage:        totalUsage,
+			Model:        requestedModel,
 		}, nil)
 	}
 }
@@ -172,8 +183,14 @@ func convertEvent(event *codex.ThreadEvent) ai.StreamEvent {
 		}
 	}
 
-	// Handle turn-level events
+	// Handle turn-level events for status updates
 	switch event.Type {
+	case codex.EventTypeThreadStarted:
+		return ai.StatusEvent{Status: "connected"}
+	case codex.EventTypeTurnStarted:
+		return ai.StatusEvent{Status: "thinking"}
+	case codex.EventTypeItemStarted:
+		return ai.StatusEvent{Status: "working"}
 	case codex.EventTypeTurnFailed:
 		if event.Error != nil {
 			return ai.ErrorEvent{

@@ -279,3 +279,44 @@ func TestProgress_ClearIdempotent(t *testing.T) {
 	p.Clear()
 	p.Clear()
 }
+
+func TestFormatStatusHint(t *testing.T) {
+	tests := []struct {
+		input string
+	}{
+		{"starting"},
+		{"thinking"},
+		{"analyzing"},
+		{"[starting]"},
+		{"[thinking]"},
+		{"read go.mod"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			result := FormatStatusHint(tt.input)
+			// Result should contain ANSI escape codes for styling
+			if result == "" {
+				t.Errorf("FormatStatusHint(%q) returned empty string", tt.input)
+			}
+			// Result should contain brackets
+			if !strings.Contains(result, "[") || !strings.Contains(result, "]") {
+				t.Errorf("FormatStatusHint(%q) = %q, should contain brackets", tt.input, result)
+			}
+		})
+	}
+}
+
+func TestFormatStatusHint_Brackets(t *testing.T) {
+	// With brackets - should extract content
+	result := FormatStatusHint("[thinking]")
+	if !strings.Contains(result, "thinking") {
+		t.Errorf("FormatStatusHint([thinking]) should contain 'thinking', got %q", result)
+	}
+
+	// Without brackets - should add them
+	result2 := FormatStatusHint("analyzing")
+	if !strings.Contains(result2, "analyzing") {
+		t.Errorf("FormatStatusHint(analyzing) should contain 'analyzing', got %q", result2)
+	}
+}

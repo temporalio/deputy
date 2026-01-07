@@ -87,7 +87,14 @@ Useful options:
 - `--format json` to integrate with CI and store artifacts.
 - `--as-of 2024-12-31` to ask “what was known up to this date?”
 
-### 2) Turn findings into a plan (and optionally apply it)
+### 2) Understand a vulnerability (optional)
+
+```console
+$ deputy explain CVE-2021-44228               # detailed breakdown
+$ deputy explain --agent claude CVE-2021-44228  # with agent analysis
+```
+
+### 3) Turn findings into a plan (and optionally apply it)
 
 ```console
 $ deputy fix
@@ -95,7 +102,7 @@ $ deputy fix --format json > plan.json
 $ deputy fix --plan plan.json --apply .
 ```
 
-### 3) Generate an SBOM
+### 4) Generate an SBOM
 
 ```console
 $ deputy sbom --format spdx-json --output sbom.spdx.json

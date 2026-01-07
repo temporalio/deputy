@@ -22,8 +22,8 @@ Deputy helps teams **understand, enforce, and improve** their software supply ch
 
 | Role | Primary Commands |
 | --- | --- |
-| **Developers** | `scan`, `diff`, `fix --apply` |
-| **Security Teams** | `policy`, `scan --policy`, `proxy` |
+| **Developers** | `scan`, `explain`, `diff`, `fix --apply` |
+| **Security Teams** | `policy`, `scan --policy`, `proxy`, `explain --agent` |
 | **Platform/CI** | `scan --format json`, `sbom`, policy gates |
 | **Compliance** | `sbom --licenses`, historical scans |
 
@@ -100,6 +100,8 @@ Legend: Dashed lines indicate policy enforcement paths.
 - CLI wiring + subcommands: [`internal/cli`](../internal/cli) and [`internal/cli/cmd`](../internal/cli/cmd)
 - Inventory + PURL normalization: [`internal/inventory`](../internal/inventory), [`internal/purlx`](../internal/purlx)
 - Vulnerability analysis + remediation planning: [`internal/analysis`](../internal/analysis), [`internal/remediation`](../internal/remediation)
+- Vulnerability explanation: [`internal/explain`](../internal/explain)
+- Agent providers + rendering: [`internal/ai`](../internal/ai)
 - SBOM generation: [`internal/sbom`](../internal/sbom)
 - Policy engine + entrypoints: [`internal/policy`](../internal/policy)
 - Proxy runtime: [`internal/proxy`](../internal/proxy)
