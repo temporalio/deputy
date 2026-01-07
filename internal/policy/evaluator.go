@@ -53,6 +53,10 @@ var (
 		"dockerfile",
 		"dockerfile_analysis",
 		"stage",
+		// Secrets specific variables
+		"secret",
+		"secrets",
+		"report",
 	}
 )
 

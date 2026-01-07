@@ -1,0 +1,97 @@
+# SSVC-Based Vulnerability Prioritization Policy
+#
+# This policy uses CISA's Stakeholder-Specific Vulnerability Categorization (SSVC)
+# decision tree framework to prioritize vulnerabilities based on:
+#   - Exploitation status (from KEV catalog and EPSS scores)
+#   - Technical impact (from CVSS severity)
+#   - Mission prevalence (configurable)
+#
+# SSVC produces four decision outcomes:
+#   - act: Immediate coordinated action required
+#   - attend: Remediate sooner than normal patching cycle
+#   - track*: Monitor closely; status may change
+#   - track: Routine monitoring and patching
+#
+# Usage:
+#   deputy scan --policy policy/examples/ssvc-prioritization.yaml --enrich
+#
+# The --enrich flag is recommended to populate KEV and EPSS data for accurate
+# SSVC decisions.
+#
+# References:
+#   - CISA SSVC: https://www.cisa.gov/ssvc
+#   - SEI SSVC Guide: https://resources.sei.cmu.edu/library/asset-view.cfm?assetid=653459
+
+policies:
+  # Block vulnerabilities that SSVC categorizes as requiring immediate action
+  - name: ssvc-act-block
+    description: Block vulnerabilities requiring immediate coordinated action
+    entrypoints: ["scan_vulnerability"]
+    rules:
+      - action: deny
+        when: ssvc(vulnerability).decision == "act"
+        reason: "SSVC Decision: Act - immediate action required"
+        remediation: |
+          This vulnerability has been categorized as requiring immediate action based on:
+          - Active exploitation in the wild (KEV catalog or high EPSS)
+          - High technical impact (CRITICAL/HIGH severity)
+          - Essential mission relevance
+
+          Remediation must happen immediately, outside normal patching cycles.
+
+  # Warn on vulnerabilities that need expedited remediation
+  - name: ssvc-attend-warn
+    description: Warn on vulnerabilities needing expedited remediation
+    entrypoints: ["scan_vulnerability"]
+    rules:
+      - action: warn
+        when: ssvc(vulnerability).decision == "attend"
+        reason: "SSVC Decision: Attend - expedited remediation recommended"
+        remediation: |
+          This vulnerability should be remediated sooner than your normal patching cycle.
+          While not requiring immediate emergency action, it warrants elevated priority.
+
+  # Combined SSVC and KEV policy - strictest enforcement for known exploited vulns
+  - name: ssvc-kev-critical
+    description: Block KEV vulnerabilities with high SSVC priority
+    entrypoints: ["scan_vulnerability"]
+    rules:
+      - action: deny
+        when: |
+          vulnerability.?inKEV.orValue(false) == true &&
+          ssvc(vulnerability).decision in ["act", "attend"]
+        reason: "Known Exploited Vulnerability with high SSVC priority"
+        remediation: |
+          This CVE is in CISA's Known Exploited Vulnerabilities catalog AND
+          has been categorized as high priority by SSVC. Federal agencies have
+          compliance deadlines for these vulnerabilities.
+
+  # Track* vulnerabilities should be monitored but don't block
+  - name: ssvc-track-star-info
+    description: Log vulnerabilities that should be monitored closely
+    entrypoints: ["scan_vulnerability"]
+    rules:
+      - action: warn
+        when: ssvc(vulnerability).decision == "track*"
+        reason: "SSVC Decision: Track* - monitor closely for status changes"
+        remediation: |
+          This vulnerability should be monitored closely. Its threat status may
+          change based on new exploitation evidence or increased attack surface.
+          Consider prioritizing in upcoming patch cycles.
+
+  # Example: Custom mission prevalence override
+  # Uncomment and modify to treat certain packages as essential
+  #
+  # - name: essential-packages-ssvc
+  #   description: Apply essential mission prevalence to critical packages
+  #   entrypoints: ["scan_vulnerability"]
+  #   vars:
+  #     essential_packages:
+  #       - "github.com/your-org/core-auth"
+  #       - "github.com/your-org/payment-processor"
+  #   rules:
+  #     - action: deny
+  #       when: |
+  #         essential_packages.exists(p, vulnerability.?package.orValue("").contains(p)) &&
+  #         ssvc(vulnerability).decision in ["act", "attend", "track*"]
+  #       reason: "Vulnerability in essential package requires immediate attention"

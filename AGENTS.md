@@ -184,6 +184,12 @@ deputy policy lsp                              # language server
 deputy proxy go -- go get github.com/pkg
 deputy proxy npm -- npm install lodash
 deputy proxy oci --config oci-proxy.yaml       # OCI registry proxy
+
+# Secret scanning
+deputy secrets                                 # scan current directory for secrets
+deputy secrets /path/to/project                # scan specific directory
+deputy secrets --format json                   # JSON output for CI/CD
+deputy scan --secrets                          # combined vuln + secrets scan
 ```
 
 ## Project Structure
@@ -219,6 +225,8 @@ internal/
     intel/                   # threat intelligence enrichment
       kev/                   # CISA KEV catalog client
       epss/                  # FIRST EPSS scores client
+    ssvc/                    # SSVC decision tree framework
+  secrets/                   # secret detection engine (Veles + patterns)
 docs/                        # documentation
   commands/                  # command reference
   guides/                    # how-to guides (ci.md, workflows.md, agents.md)
@@ -869,6 +877,73 @@ policies:
 ```
 
 See [Container security policies](policy/examples/container-security.yaml) for comprehensive examples.
+
+#### SSVC (Stakeholder-Specific Vulnerability Categorization)
+
+The `ssvc()` function evaluates vulnerabilities using the CISA SSVC decision tree framework.
+SSVC produces contextual prioritization decisions based on exploitation status, technical impact,
+and mission relevance—going beyond static CVSS scores.
+
+| Function | Signature | Description |
+|----------|-----------|-------------|
+| `ssvc()` | `ssvc(vulnerability) map` | Evaluate vulnerability using SSVC decision tree |
+
+**`ssvc()` Return Values:**
+
+| Field | Type | Description | Example |
+|-------|------|-------------|---------|
+| `decision` | `string` | SSVC outcome: `"act"`, `"attend"`, `"track*"`, `"track"` | `"act"` |
+| `reasoning` | `string` | Explanation of the decision | `"Active exploitation..."` |
+| `input.exploitation` | `string` | Derived exploitation status | `"active"`, `"poc"`, `"none"` |
+| `input.automatable` | `string` | Whether exploit is automatable | `"yes"`, `"no"` |
+| `input.technical_impact` | `string` | Scope of technical impact | `"total"`, `"partial"` |
+| `input.mission_prevalence` | `string` | Mission criticality | `"essential"`, `"support"`, `"minimal"` |
+
+**SSVC Decision Outcomes:**
+
+- **Act**: Immediate coordinated action required (highest priority)
+- **Attend**: Remediate sooner than normal patching cycle
+- **Track***: Monitor closely; status may change
+- **Track**: Routine monitoring and patching
+
+**Derivation from Vulnerability Data:**
+
+The `ssvc()` function automatically derives factors from vulnerability data:
+- `inKEV == true` → exploitation = "active"
+- `epss > 0.1` → exploitation = "poc"
+- `epss > 0.5` → automatable = "yes"
+- `severity in ["CRITICAL", "HIGH"]` → technical_impact = "total"
+
+**SSVC Policy Examples:**
+
+```yaml
+# Block vulnerabilities requiring immediate action
+policies:
+  - name: ssvc-act-required
+    entrypoints: ["scan_vulnerability"]
+    rules:
+      - action: deny
+        when: ssvc(vulnerability).decision == "act"
+        reason: "SSVC: Immediate action required"
+
+# Warn on attend-level vulnerabilities
+  - name: ssvc-attend-warning
+    entrypoints: ["scan_vulnerability"]
+    rules:
+      - action: warn
+        when: ssvc(vulnerability).decision == "attend"
+        reason: "SSVC: Expedited remediation recommended"
+
+# Combined SSVC and KEV policy
+  - name: ssvc-kev-priority
+    entrypoints: ["scan_vulnerability"]
+    rules:
+      - action: deny
+        when: |
+          vulnerability.inKEV == true &&
+          ssvc(vulnerability).decision in ["act", "attend"]
+        reason: "KEV vulnerability with high SSVC priority"
+```
 
 Full spec: [Policy spec](docs/reference/policy-spec.md) • Examples: [Policy examples](policy/examples/)
 

@@ -240,6 +240,7 @@ WORKFLOW EXAMPLES:
 	scanCmd.Flags().String("platform", "", "Platform for remote images (os/arch[/variant])")
 	scanCmd.Flags().Bool("enrich", false, "Enrich vulnerabilities with EPSS scores and KEV status (requires network)")
 	scanCmd.Flags().Bool("with-graph", false, "Build dependency graph to show paths to vulnerable packages")
+	scanCmd.Flags().Bool("secrets", false, "Scan for leaked secrets and credentials in addition to vulnerabilities")
 
 	scanDirCmd := &cobra.Command{
 		Use:           "dir <path>",
@@ -296,6 +297,7 @@ TYPICAL USE CASES:
 	scanDirCmd.Flags().Bool("show-unfixable-guidance", false, "Show actionable guidance for vulnerabilities without fixes")
 	scanDirCmd.Flags().Bool("enrich", false, "Enrich vulnerabilities with EPSS scores and KEV status (requires network)")
 	scanDirCmd.Flags().Bool("with-graph", false, "Build dependency graph to show paths to vulnerable packages")
+	scanDirCmd.Flags().Bool("secrets", false, "Scan for leaked secrets and credentials in addition to vulnerabilities")
 
 	scanSBOMCmd := &cobra.Command{
 		Use:           "sbom <file|->",
@@ -760,6 +762,15 @@ func (s *Scanner) runScanDir(cmd *cobra.Command, args []string) error {
 	policyFindings := actionsToPolicyFindings(policyActions)
 	exec.Result.PolicyActions = policyActions
 
+	// Run secrets scan if enabled
+	var secretsResults *SecretsResult
+	if flags.Secrets {
+		secretsResults, err = runSecretsScanner(ctx, path, cmd.ErrOrStderr())
+		if err != nil {
+			fmt.Fprintf(cmd.ErrOrStderr(), "Warning: secrets scan failed: %v\n", err)
+		}
+	}
+
 	out, err := openOutputWriter(cmd, flags.OutPath)
 	if err != nil {
 		return err
@@ -768,7 +779,14 @@ func (s *Scanner) runScanDir(cmd *cobra.Command, args []string) error {
 
 	switch strings.ToLower(flags.Format) {
 	case "", FormatText:
-		return s.outputTextDir(out.Writer, cmd.ErrOrStderr(), resultOut, flags.IgnoreUnfixed, ignoredCount, policyFindings, flags.displayOptionsWithResult(resultOut))
+		if err := s.outputTextDir(out.Writer, cmd.ErrOrStderr(), resultOut, flags.IgnoreUnfixed, ignoredCount, policyFindings, flags.displayOptionsWithResult(resultOut)); err != nil {
+			return err
+		}
+		// Append secrets findings if enabled
+		if secretsResults != nil {
+			renderSecretsFindings(out.Writer, secretsResults)
+		}
+		return nil
 	case FormatJSON:
 		return s.outputJSON(out.Writer, resultOut, policyFindings)
 	case FormatSARIF:

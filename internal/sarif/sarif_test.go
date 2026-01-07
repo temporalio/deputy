@@ -980,14 +980,14 @@ func TestConvert_PolicyFindingHasPrimaryLocationLineHash(t *testing.T) {
 
 func TestHashFingerprint_Stable(t *testing.T) {
 	// Fingerprint should be deterministic
-	h1 := hashFingerprint("CVE-2024-1234", "lodash", "package.json")
-	h2 := hashFingerprint("CVE-2024-1234", "lodash", "package.json")
+	h1 := HashFingerprint("CVE-2024-1234", "lodash", "package.json")
+	h2 := HashFingerprint("CVE-2024-1234", "lodash", "package.json")
 	if h1 != h2 {
 		t.Errorf("hashFingerprint not deterministic: %q != %q", h1, h2)
 	}
 
 	// Different inputs should produce different hashes
-	h3 := hashFingerprint("CVE-2024-5678", "lodash", "package.json")
+	h3 := HashFingerprint("CVE-2024-5678", "lodash", "package.json")
 	if h1 == h3 {
 		t.Error("Different inputs should produce different hashes")
 	}

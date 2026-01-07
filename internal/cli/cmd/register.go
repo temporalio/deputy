@@ -33,6 +33,9 @@ func RegisterCommands(root *cobra.Command, deps Dependencies) {
 	AddSBOMCommand(root)
 	AddListCommand(root)
 
+	// Security scanning commands
+	AddSecretsCommand(root)
+
 	// Policy and enforcement commands
 	AddPolicyCommand(root)
 	AddProxyCommand(root)

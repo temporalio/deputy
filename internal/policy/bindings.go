@@ -225,6 +225,20 @@ var BindingProfiles = map[Entrypoint]BindingProfile{
 		Optional:    dockerfileVars,
 		Description: "Triggers for each stage in a multi-stage Dockerfile",
 	},
+
+	// Secrets entrypoints
+	EntrypointSecretsReport: {
+		Entrypoint:  EntrypointSecretsReport,
+		Required:    append([]string{"secrets", "report"}, envVars...),
+		Optional:    targetVars,
+		Description: "Triggers after a secrets scan completes with all findings",
+	},
+	EntrypointSecretsFinding: {
+		Entrypoint:  EntrypointSecretsFinding,
+		Required:    append([]string{"secret"}, envVars...),
+		Optional:    append([]string{"report"}, targetVars...),
+		Description: "Triggers for each secret found during a scan",
+	},
 }
 
 // GetBindingProfile returns the binding profile for an entrypoint.

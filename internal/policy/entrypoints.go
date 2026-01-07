@@ -39,6 +39,8 @@ func (e Entrypoint) Category() string {
 		return "triage"
 	case EntrypointDockerfileReport, EntrypointDockerfileStage:
 		return "dockerfile"
+	case EntrypointSecretsReport, EntrypointSecretsFinding:
+		return "secrets"
 	default:
 		return ""
 	}
@@ -101,6 +103,12 @@ const (
 	EntrypointDockerfileReport Entrypoint = "dockerfile_report"
 	// EntrypointDockerfileStage triggers for each stage in a multi-stage Dockerfile.
 	EntrypointDockerfileStage Entrypoint = "dockerfile_stage"
+
+	// Secrets entrypoints - for secret detection policies
+	// EntrypointSecretsReport triggers after a secrets scan completes.
+	EntrypointSecretsReport Entrypoint = "secrets_report"
+	// EntrypointSecretsFinding triggers for each secret found during a scan.
+	EntrypointSecretsFinding Entrypoint = "secrets_finding"
 )
 
 var (
@@ -151,12 +159,17 @@ var (
 		EntrypointDockerfileReport,
 		EntrypointDockerfileStage,
 	}
+	// EntrypointsSecrets lists all entrypoints related to secret detection.
+	EntrypointsSecrets = []Entrypoint{
+		EntrypointSecretsReport,
+		EntrypointSecretsFinding,
+	}
 
 	// AllEntrypoints contains every canonical entrypoint defined in Deputy.
-	AllEntrypoints = slices.Concat(EntrypointsProxy, EntrypointsScan, EntrypointsDiff, EntrypointsContainerDiff, EntrypointsSBOM, EntrypointsFix, EntrypointsTriage, EntrypointsDockerfile)
+	AllEntrypoints = slices.Concat(EntrypointsProxy, EntrypointsScan, EntrypointsDiff, EntrypointsContainerDiff, EntrypointsSBOM, EntrypointsFix, EntrypointsTriage, EntrypointsDockerfile, EntrypointsSecrets)
 
 	allowedEntrypointsSet = buildEntrypointSet(AllEntrypoints)
-	allowedCommands       = []string{"proxy", "scan", "diff", "sbom", "fix", "triage"}
+	allowedCommands       = []string{"proxy", "scan", "diff", "sbom", "fix", "triage", "secrets"}
 	allowedCommandsSet    = buildSet(allowedCommands)
 )
 

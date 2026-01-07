@@ -1,6 +1,7 @@
 package policy
 
 import (
+	"context"
 	"reflect"
 	"strings"
 	"time"
@@ -10,6 +11,7 @@ import (
 	"github.com/google/cel-go/common/types/ref"
 	"github.com/google/cel-go/common/types/traits"
 	"github.com/picatz/deputy/internal/purlx"
+	"github.com/picatz/deputy/internal/vulnerability/ssvc"
 )
 
 // levenshteinMaxInputLen is the maximum string length accepted by the levenshtein
@@ -185,7 +187,163 @@ func customHelperFunctions() []cel.EnvOption {
 				}),
 			),
 		),
+
+		// ===== SSVC (Stakeholder-Specific Vulnerability Categorization) =====
+		//
+		// ssvc() evaluates a vulnerability using the CISA SSVC decision tree.
+		// Returns a map with decision, reasoning, and input factors.
+		//
+		// The function accepts a vulnerability map (from scan_vulnerability entrypoint)
+		// and derives SSVC factors from available data:
+		//   - exploitation: from inKEV (active if in KEV) or epss (poc if > 0.1)
+		//   - automatable: inferred from epss > 0.5
+		//   - technical_impact: from severity (CRITICAL/HIGH = total, else partial)
+		//
+		// Optional fields can be provided to override defaults:
+		//   - mission_prevalence: "minimal", "support", "essential"
+		//   - public_wellbeing_impact: "minimal", "material", "irreversible"
+		//
+		// Returns: map with:
+		//   - decision: "act", "attend", "track*", or "track"
+		//   - reasoning: explanation of the decision
+		//   - input: the factors used for the decision
+		//
+		// Example usage in CEL:
+		//   ssvc(vulnerability).decision == "act"
+		//   ssvc(vulnerability).decision in ["act", "attend"]
+		//   cel.bind(result, ssvc(vulnerability),
+		//     result.decision == "act" || (result.decision == "attend" && vulnerability.severity == "CRITICAL"))
+		cel.Function("ssvc",
+			cel.Overload("ssvc_map",
+				[]*cel.Type{cel.DynType},
+				cel.DynType,
+				cel.UnaryBinding(func(val ref.Val) ref.Val {
+					return types.DefaultTypeAdapter.NativeToValue(evaluateSSVC(val))
+				}),
+			),
+		),
 	}
+}
+
+// evaluateSSVC derives SSVC decision from vulnerability data.
+func evaluateSSVC(val ref.Val) map[string]any {
+	// Extract vulnerability data
+	vuln := extractVulnMap(val)
+
+	input := ssvc.Input{
+		VulnerabilityID: getStringField(vuln, "id"),
+	}
+
+	// Derive exploitation status from KEV and EPSS
+	if getBoolField(vuln, "inKEV") {
+		input.Exploitation = ssvc.ExploitationActive
+	} else if epss := getFloatField(vuln, "epss"); epss > 0.1 {
+		input.Exploitation = ssvc.ExploitationPoC
+	} else {
+		input.Exploitation = ssvc.ExploitationNone
+	}
+
+	// Derive automatable from EPSS (high EPSS suggests automatable exploit)
+	if epss := getFloatField(vuln, "epss"); epss > 0.5 {
+		input.Automatable = ssvc.AutomatableYes
+	} else {
+		input.Automatable = ssvc.AutomatableNo
+	}
+
+	// Derive technical impact from severity
+	severity := strings.ToUpper(getStringField(vuln, "severity"))
+	if severity == "CRITICAL" || severity == "HIGH" {
+		input.TechnicalImpact = ssvc.TechnicalImpactTotal
+	} else {
+		input.TechnicalImpact = ssvc.TechnicalImpactPartial
+	}
+
+	// Allow explicit overrides if provided
+	if mp := getStringField(vuln, "mission_prevalence"); mp != "" {
+		input.MissionPrevalence = ssvc.MissionPrevalence(mp)
+	}
+	if pwi := getStringField(vuln, "public_wellbeing_impact"); pwi != "" {
+		input.PublicWellbeingImpact = ssvc.PublicWellbeingImpact(pwi)
+	}
+
+	// Evaluate using the deployer decision tree
+	tree := ssvc.NewDeployerTree()
+	result := tree.Decide(context.Background(), input)
+
+	return result.ToMap()
+}
+
+// extractVulnMap extracts a map from a CEL value.
+func extractVulnMap(val ref.Val) map[string]any {
+	if val == nil {
+		return map[string]any{}
+	}
+	// Try traits.Mapper first (CEL map)
+	if m, ok := val.(traits.Mapper); ok {
+		result := map[string]any{}
+		it := m.Iterator()
+		for it.HasNext() == types.True {
+			key := it.Next()
+			if keyStr := toString(key); keyStr != "" {
+				if v, found := m.Find(key); found {
+					result[keyStr] = extractNativeValue(v)
+				}
+			}
+		}
+		return result
+	}
+	// Try native map
+	if native, err := val.ConvertToNative(mapStringAnyType); err == nil {
+		if m, ok := native.(map[string]any); ok {
+			return m
+		}
+	}
+	return map[string]any{}
+}
+
+// extractNativeValue converts a CEL ref.Val to a native Go value.
+func extractNativeValue(val ref.Val) any {
+	if val == nil {
+		return nil
+	}
+	return val.Value()
+}
+
+// getStringField safely extracts a string field from a map.
+func getStringField(m map[string]any, key string) string {
+	if v, ok := m[key]; ok {
+		if s, ok := v.(string); ok {
+			return s
+		}
+	}
+	return ""
+}
+
+// getBoolField safely extracts a bool field from a map.
+func getBoolField(m map[string]any, key string) bool {
+	if v, ok := m[key]; ok {
+		if b, ok := v.(bool); ok {
+			return b
+		}
+	}
+	return false
+}
+
+// getFloatField safely extracts a float field from a map.
+func getFloatField(m map[string]any, key string) float64 {
+	if v, ok := m[key]; ok {
+		switch f := v.(type) {
+		case float64:
+			return f
+		case float32:
+			return float64(f)
+		case int64:
+			return float64(f)
+		case int:
+			return float64(f)
+		}
+	}
+	return 0.0
 }
 
 // extractCreatedBy extracts the created_by field from a history entry.

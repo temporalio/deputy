@@ -1150,9 +1150,9 @@ func vulnerabilityToResult(v report.Vulnerability, ruleID string, ruleIdx int) R
 	// primaryLocationLineHash is strongly recommended by GitHub for stable alert tracking.
 	// For dependency vulnerabilities, we create a hash from the vuln ID + package + location.
 	if len(v.Locations) > 0 {
-		fingerprints["primaryLocationLineHash"] = hashFingerprint(v.ID, v.Package, v.Locations[0])
+		fingerprints["primaryLocationLineHash"] = HashFingerprint(v.ID, v.Package, v.Locations[0])
 	} else {
-		fingerprints["primaryLocationLineHash"] = hashFingerprint(v.ID, v.Package, "")
+		fingerprints["primaryLocationLineHash"] = HashFingerprint(v.ID, v.Package, "")
 	}
 
 	// Build fix suggestions if fixed versions are available.
@@ -1290,7 +1290,7 @@ func policyFindingToResult(pf report.PolicyFinding, ruleID string, ruleIdx int) 
 		fingerprints["policyCode/v1"] = pf.Code
 	}
 	// primaryLocationLineHash for stable alert tracking
-	fingerprints["primaryLocationLineHash"] = hashFingerprint(ruleID, pf.Action, pf.Reason)
+	fingerprints["primaryLocationLineHash"] = HashFingerprint(ruleID, pf.Action, pf.Reason)
 
 	return Result{
 		RuleID:              ruleID,
@@ -1353,10 +1353,10 @@ func findManifestLocation(locations []string) string {
 	return ""
 }
 
-// hashFingerprint creates a stable hash for primaryLocationLineHash.
+// HashFingerprint creates a stable hash for primaryLocationLineHash.
 // GitHub uses this to track alerts across runs and commits.
 // The hash should be stable for the same logical issue.
-func hashFingerprint(parts ...string) string {
+func HashFingerprint(parts ...string) string {
 	// Use a simple concatenation with separator, then hash it.
 	// SHA-256 is standard for fingerprinting, truncated to 16 chars for readability.
 	combined := strings.Join(parts, "|")

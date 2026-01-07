@@ -69,6 +69,9 @@ type scanFlags struct {
 	// Graph option - enables dependency graph resolution for path analysis
 	WithGraph bool
 
+	// Secrets option - scan for leaked secrets in addition to vulnerabilities
+	Secrets bool
+
 	// Cached ignore rules (populated by loadIgnoreRules)
 	ignoreRules *ignore.Rules
 }
@@ -144,6 +147,9 @@ func extractScanFlags(cmd *cobra.Command) scanFlags {
 
 	// Graph option
 	f.WithGraph, _ = cmd.Flags().GetBool("with-graph")
+
+	// Secrets option
+	f.Secrets, _ = cmd.Flags().GetBool("secrets")
 
 	return f
 }
