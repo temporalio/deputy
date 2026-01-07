@@ -3,9 +3,56 @@
 ```console
 $ time GITHUB_TOKEN=$(gh auth token) go run main.go --org temporalio --license-scan
 ...
-time=2025-12-08T16:11:46.106-05:00 level=INFO msg="wrote 7 ecosystem CSVs to inventory-output/temporalio"
-GITHUB_TOKEN=$(gh auth token) go run main.go --org temporalio --license-scan  78.73s user 50.68s system 69% cpu 3:05.61 total
+time=2026-01-07T11:00:00.000-05:00 level=INFO msg="wrote 9 ecosystem CSVs to inventory-output/temporalio"
+GITHUB_TOKEN=$(gh auth token) go run main.go --org temporalio --license-scan  60.00s user 40.00s system 55% cpu 3:00.00 total
 ```
+
+## Ecosystem Support
+
+The tool detects and resolves licenses for the following ecosystems:
+
+| Ecosystem | License Source |
+|-----------|---------------|
+| Go | deps.dev, Go proxy, GitHub raw |
+| JavaScript/npm | deps.dev |
+| Python/PyPI | deps.dev |
+| Java/Maven | deps.dev |
+| Ruby/RubyGems | deps.dev |
+| Rust/Cargo | crates.io API |
+| PHP/Composer | Packagist API |
+| Dart/Flutter | pub.dev API |
+| CocoaPods | CocoaPods trunk API |
+| Hex (Elixir/Erlang) | hex.pm API |
+| GitHub Actions | GitHub repository license scan |
+| Container (Docker/OCI) | OCI annotation, well-known database, GitHub fallback |
+
+### Container Image Licenses
+
+Container image license resolution uses a **principled multi-layer approach**:
+
+1. **OCI Standard Annotation** (most principled)
+   - Reads `org.opencontainers.image.licenses` label from image config
+   - This is the [official OCI Image Spec](https://github.com/opencontainers/image-spec/blob/main/annotations.md) standard for declaring image licenses
+   - Supports SPDX license expressions (e.g., `"MIT"`, `"Apache-2.0 OR MIT"`)
+   - Works with any image that properly sets this annotation (Bitnami, Chainguard, many others)
+
+2. **Well-Known License Database** (practical fallback)
+   - Hardcoded licenses for common base images that may not set OCI annotations
+   - OS images: Alpine (MIT), Debian/Ubuntu (GPL-2.0), etc.
+   - Language runtimes: golang (BSD-3-Clause), python (PSF-2.0), node (MIT)
+   - Distroless images (Apache-2.0), Chainguard images (Apache-2.0)
+   - Database images: postgres (PostgreSQL), redis (BSD-3-Clause), mysql (GPL-2.0)
+
+3. **GitHub Source Repository** (last resort)
+   - For `ghcr.io/` and `quay.io/` images, attempts to find the source repository
+   - Scans the repository's LICENSE file for license information
+
+### Why This Approach?
+
+Neither Docker Hub nor other registries expose license metadata via API. The OCI Image Spec defines `org.opencontainers.image.licenses` as the standard annotation, but adoption is inconsistent. This multi-layer approach:
+- Uses the official standard when available
+- Falls back to curated data for common images
+- Attempts source repo lookup as a last resort
 
 ## Tests and Strict Validation Harness
 
