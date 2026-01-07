@@ -7,6 +7,7 @@ import (
 	"syscall"
 
 	"github.com/picatz/deputy/internal/cli"
+	"github.com/picatz/deputy/internal/errors"
 )
 
 func main() {
@@ -14,6 +15,7 @@ func main() {
 	defer cancel()
 
 	if err := cli.Run(ctx); err != nil {
-		os.Exit(1)
+		// Use exit code from error if available, otherwise default to 1
+		os.Exit(errors.ExitCode(err))
 	}
 }

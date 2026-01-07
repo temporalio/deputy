@@ -293,3 +293,83 @@ func TestCommonSuggestions(t *testing.T) {
 		}
 	}
 }
+
+func TestExitError(t *testing.T) {
+	t.Run("with cause", func(t *testing.T) {
+		cause := fmt.Errorf("command failed")
+		exitErr := &ExitError{Code: 1, Cause: cause}
+
+		if exitErr.Error() != "command failed" {
+			t.Errorf("Error() = %q, want %q", exitErr.Error(), "command failed")
+		}
+
+		if errors.Unwrap(exitErr) != cause {
+			t.Error("Unwrap should return cause")
+		}
+	})
+
+	t.Run("without cause", func(t *testing.T) {
+		exitErr := &ExitError{Code: 130, Cause: nil}
+
+		if exitErr.Error() != "exit code 130" {
+			t.Errorf("Error() = %q, want %q", exitErr.Error(), "exit code 130")
+		}
+	})
+}
+
+func TestExitCode(t *testing.T) {
+	tests := []struct {
+		name     string
+		err      error
+		wantCode int
+	}{
+		{"nil error", nil, 0},
+		{"plain error", fmt.Errorf("fail"), 1},
+		{"ExitError code 0", &ExitError{Code: 0}, 0},
+		{"ExitError code 1", &ExitError{Code: 1}, 1},
+		{"ExitError code 130", &ExitError{Code: 130}, 130},
+		{"wrapped ExitError", fmt.Errorf("wrapped: %w", &ExitError{Code: 42}), 42},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := ExitCode(tt.err)
+			if got != tt.wantCode {
+				t.Errorf("ExitCode() = %d, want %d", got, tt.wantCode)
+			}
+		})
+	}
+}
+
+func TestWithExitCode(t *testing.T) {
+	t.Run("nil error with zero code", func(t *testing.T) {
+		err := WithExitCode(nil, 0)
+		if err != nil {
+			t.Errorf("WithExitCode(nil, 0) = %v, want nil", err)
+		}
+	})
+
+	t.Run("nil error with non-zero code", func(t *testing.T) {
+		err := WithExitCode(nil, 1)
+		if err == nil {
+			t.Error("WithExitCode(nil, 1) should not be nil")
+		}
+		if ExitCode(err) != 1 {
+			t.Errorf("ExitCode() = %d, want 1", ExitCode(err))
+		}
+	})
+
+	t.Run("error with code", func(t *testing.T) {
+		cause := fmt.Errorf("partial failure")
+		err := WithExitCode(cause, 2)
+
+		if ExitCode(err) != 2 {
+			t.Errorf("ExitCode() = %d, want 2", ExitCode(err))
+		}
+
+		// Should be able to unwrap to cause
+		if !errors.Is(err, cause) {
+			t.Error("should unwrap to cause")
+		}
+	})
+}

@@ -10,23 +10,40 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"regexp"
 	"strings"
 	"time"
 
 	"github.com/charmbracelet/glamour"
+	"github.com/charmbracelet/lipgloss"
 	"github.com/picatz/deputy/internal/ai"
 	"github.com/picatz/deputy/internal/ui"
 )
 
 // streamStats tracks statistics during AI streaming for the metadata footer.
 type streamStats struct {
-	Usage        ai.Usage // Token usage (if available)
-	Model        string   // Model that was actually used (from DoneEvent)
-	ToolCalls    int      // Number of tool calls made
-	Commands     int      // Number of commands executed
-	FileOps      int      // Number of file operations
-	ThinkingMsgs int      // Number of thinking/reasoning messages (filtered from output)
+	Usage          ai.Usage // Token usage (if available)
+	Model          string   // Model that was actually used (from DoneEvent)
+	ToolCalls      int      // Number of tool calls made
+	Commands       int      // Number of commands executed
+	FailedCommands int      // Number of commands that failed (exit != 0)
+	FileOps        int      // Number of file operations
+	ThinkingMsgs   int      // Number of thinking/reasoning messages (filtered from output)
 }
+
+// AgentStatus represents the overall outcome of an agent session.
+type AgentStatus int
+
+const (
+	// AgentStatusSuccess indicates all commands succeeded.
+	AgentStatusSuccess AgentStatus = iota
+	// AgentStatusPartial indicates some commands failed but work was done.
+	AgentStatusPartial
+	// AgentStatusFailed indicates the agent encountered critical failures.
+	AgentStatusFailed
+	// AgentStatusInterrupted indicates the user interrupted the session.
+	AgentStatusInterrupted
+)
 
 // Config configures AI output rendering.
 type Config struct {
@@ -567,13 +584,17 @@ func extractStatusHint(text string) string {
 }
 
 // RenderMarkdown renders markdown text using glamour with appropriate styling.
+// Uses a dark style optimized for CLI output with subtle styling.
 func RenderMarkdown(content string, wordWrap int) (string, error) {
 	if wordWrap <= 0 {
 		wordWrap = 80
 	}
+
+	// Use DarkStyle for consistent appearance, but modify for subtle CLI output
 	renderer, err := glamour.NewTermRenderer(
 		glamour.WithAutoStyle(),
 		glamour.WithWordWrap(wordWrap),
+		glamour.WithEmoji(), // Support emoji rendering
 	)
 	if err != nil {
 		return "", err
@@ -582,14 +603,56 @@ func RenderMarkdown(content string, wordWrap int) (string, error) {
 }
 
 // StreamingRenderer provides real-time rendering of AI events.
-// This is used for agentic commands (fix --agent, triage --agent) where
-// users want to see what the agent is doing in real-time.
+// This is used for agentic commands (fix --agent) where users want to see
+// what the agent is doing in real-time with command/file events.
+//
+// Unlike StreamResponse (which collects all output for glamour rendering),
+// StreamingRenderer shows events as they occur - useful when the agent is
+// making changes and you want immediate visibility.
+//
+// Output format (non-verbose):
+//
+//	✓ go mod tidy                    (success)
+//	✗ go test ./...                  (failure with exit code)
+//	│ [first 3 lines of output...]
+//
+// The final agent text/summary is collected and rendered with glamour markdown.
 type StreamingRenderer struct {
-	out          io.Writer
-	err          io.Writer
-	providerName string
-	progress     *ui.Progress
-	firstEvent   bool
+	out            io.Writer
+	err            io.Writer
+	providerName   string
+	model          string
+	sandbox        ai.Sandbox
+	progress       *ui.Progress
+	ctx            context.Context // for restarting spinner
+	spinnerActive  bool            // whether spinner is currently showing
+	startTime      time.Time
+	stats          streamStats
+	verbose        bool            // show full command output
+	maxOutputLines int             // max lines in compact mode (default: 3)
+	summaryText    strings.Builder // collected text for final glamour rendering
+	isTTY          bool
+	cmdStartTimes  map[string]time.Time // track when commands started (for duration)
+}
+
+// StreamingConfig configures the streaming renderer.
+type StreamingConfig struct {
+	// Out is the primary output writer for AI responses.
+	Out io.Writer
+	// Err is the error output writer for spinners/progress.
+	Err io.Writer
+	// ProviderName is the name of the AI provider (e.g., "codex", "claude").
+	ProviderName string
+	// Model is the model identifier being used.
+	Model string
+	// Sandbox is the sandbox mode for the agent.
+	Sandbox ai.Sandbox
+	// ShowMetadata enables the footer with duration/token info.
+	ShowMetadata bool
+	// Verbose shows full command output instead of compact summaries.
+	Verbose bool
+	// MaxOutputLines limits command output lines in non-verbose mode (default: 3).
+	MaxOutputLines int
 }
 
 // NewStreamingRenderer creates a renderer for real-time AI event streaming.
@@ -601,58 +664,602 @@ func NewStreamingRenderer(out, errW io.Writer, providerName string) *StreamingRe
 		errW = os.Stderr
 	}
 	return &StreamingRenderer{
-		out:          out,
-		err:          errW,
-		providerName: providerName,
-		firstEvent:   true,
+		out:            out,
+		err:            errW,
+		providerName:   providerName,
+		startTime:      time.Now(),
+		maxOutputLines: 3, // default
+		isTTY:          ui.IsTTY(out),
+		cmdStartTimes:  make(map[string]time.Time),
+	}
+}
+
+// NewStreamingRendererWithConfig creates a renderer with full configuration.
+func NewStreamingRendererWithConfig(cfg StreamingConfig) *StreamingRenderer {
+	out := cfg.Out
+	if out == nil {
+		out = os.Stdout
+	}
+	errW := cfg.Err
+	if errW == nil {
+		errW = os.Stderr
+	}
+	maxLines := cfg.MaxOutputLines
+	if maxLines <= 0 {
+		maxLines = 3 // default
+	}
+	return &StreamingRenderer{
+		out:            out,
+		err:            errW,
+		providerName:   cfg.ProviderName,
+		model:          cfg.Model,
+		sandbox:        cfg.Sandbox,
+		startTime:      time.Now(),
+		verbose:        cfg.Verbose,
+		maxOutputLines: maxLines,
+		isTTY:          ui.IsTTY(out),
+		cmdStartTimes:  make(map[string]time.Time),
 	}
 }
 
 // StartSpinner begins a spinner with the given message.
 // Call this before starting the AI stream.
 func (r *StreamingRenderer) StartSpinner(ctx context.Context, message string) {
-	if ui.IsTTY(r.out) {
+	r.ctx = ctx
+	if r.isTTY {
 		r.progress = ui.NewProgress(r.err, message)
+		r.progress.SetSubMessage(ui.FormatStatusHint("starting"))
 		r.progress.Start(ctx)
+		r.spinnerActive = true
+	}
+	r.startTime = time.Now()
+}
+
+// restartSpinner restarts the spinner after output with a new status hint.
+// This keeps the user informed that work is still happening between events.
+func (r *StreamingRenderer) restartSpinner(hint string) {
+	if !r.isTTY || r.ctx == nil {
+		return
+	}
+	// Create a fresh spinner
+	r.progress = ui.NewProgress(r.err, r.providerName)
+	r.progress.SetSubMessage(ui.FormatStatusHint(hint))
+	r.progress.Start(r.ctx)
+	r.spinnerActive = true
+}
+
+// clearSpinner clears the spinner before outputting content.
+func (r *StreamingRenderer) clearSpinner() {
+	if r.progress != nil && r.spinnerActive {
+		r.progress.Clear()
+		r.spinnerActive = false
 	}
 }
 
+// showContinuation was used to print a visual connector between command output
+// and the next spinner. Now we rely on vertical spacing from the threaded output
+// lines themselves, so this is a no-op.
+func (r *StreamingRenderer) showContinuation() {
+	// No-op: removed the ⇣ arrow per user feedback - the threaded │ lines provide
+	// sufficient visual continuity without additional connectors.
+}
+
+// redactSecrets scans text for potential secrets and redacts them.
+// Returns the redacted text and whether any redactions were made.
+func redactSecrets(text string) (string, bool) {
+	redacted := false
+	result := text
+
+	// Patterns that likely indicate secrets (case-insensitive matching)
+	secretPatterns := []struct {
+		pattern string
+		name    string
+	}{
+		// API keys and tokens (common formats)
+		{`(?i)(api[_-]?key|apikey)\s*[=:]\s*['"]?([a-zA-Z0-9_\-]{20,})['"]?`, "API_KEY"},
+		{`(?i)(secret[_-]?key|secretkey)\s*[=:]\s*['"]?([a-zA-Z0-9_\-]{20,})['"]?`, "SECRET_KEY"},
+		{`(?i)(access[_-]?token|accesstoken)\s*[=:]\s*['"]?([a-zA-Z0-9_\-]{20,})['"]?`, "ACCESS_TOKEN"},
+		{`(?i)(auth[_-]?token|authtoken)\s*[=:]\s*['"]?([a-zA-Z0-9_\-]{20,})['"]?`, "AUTH_TOKEN"},
+		{`(?i)(bearer)\s+([a-zA-Z0-9_\-\.]{20,})`, "BEARER_TOKEN"},
+
+		// Passwords
+		{`(?i)(password|passwd|pwd)\s*[=:]\s*['"]?([^\s'"]{8,})['"]?`, "PASSWORD"},
+
+		// AWS
+		{`(?i)(aws[_-]?access[_-]?key[_-]?id)\s*[=:]\s*['"]?(AKIA[A-Z0-9]{16})['"]?`, "AWS_KEY"},
+		{`(?i)(aws[_-]?secret[_-]?access[_-]?key)\s*[=:]\s*['"]?([a-zA-Z0-9/+=]{40})['"]?`, "AWS_SECRET"},
+
+		// GitHub tokens
+		{`(ghp_[a-zA-Z0-9]{36,})`, "GITHUB_TOKEN"},
+		{`(gho_[a-zA-Z0-9]{36,})`, "GITHUB_TOKEN"},
+		{`(ghu_[a-zA-Z0-9]{36,})`, "GITHUB_TOKEN"},
+		{`(ghs_[a-zA-Z0-9]{36,})`, "GITHUB_TOKEN"},
+		{`(ghr_[a-zA-Z0-9]{36,})`, "GITHUB_TOKEN"},
+
+		// Private keys
+		{`-----BEGIN[A-Z ]*PRIVATE KEY-----`, "PRIVATE_KEY"},
+
+		// Generic long hex strings that look like secrets
+		{`(?i)(token|key|secret|credential)\s*[=:]\s*['"]?([a-f0-9]{32,})['"]?`, "SECRET"},
+	}
+
+	for _, sp := range secretPatterns {
+		re, err := regexp.Compile(sp.pattern)
+		if err != nil {
+			continue
+		}
+		if re.MatchString(result) {
+			result = re.ReplaceAllString(result, fmt.Sprintf("[REDACTED:%s]", sp.name))
+			redacted = true
+		}
+	}
+
+	return result, redacted
+}
+
 // RenderEvent renders a single AI stream event.
-// It automatically clears the spinner on the first event.
+// It manages a spinner that shows activity between events, clearing it before
+// output and restarting it after to keep users informed of ongoing work.
+//
+// Commands are rendered in a compact format:
+//
+//	✓ go mod tidy
+//	✗ go test ./...  (exit 1)
+//	  │ FAIL: TestFoo
+//
+// Text from the agent is collected and rendered with glamour in Finish().
 func (r *StreamingRenderer) RenderEvent(event ai.StreamEvent) {
 	if event == nil {
 		return
 	}
 
-	// Clear spinner on first event
-	if r.firstEvent && r.progress != nil {
-		r.progress.Clear()
-		r.firstEvent = false
-	}
-
 	switch e := event.(type) {
 	case ai.TextEvent:
-		text := strings.TrimSpace(e.Text)
-		if text != "" {
-			fmt.Fprintf(r.out, "%s %s\n", ui.StyleManager.Render(r.providerName), text)
+		text := e.Text
+		trimmed := strings.TrimSpace(text)
+
+		// Handle [thinking] - update spinner status but don't output
+		if strings.HasPrefix(trimmed, "[thinking]") {
+			r.stats.ThinkingMsgs++
+			if r.progress != nil {
+				hint := extractStatusHint(strings.TrimPrefix(trimmed, "[thinking]"))
+				if hint != "" {
+					r.progress.SetSubMessage(ui.FormatStatusHint(hint))
+				}
+			}
+			return
 		}
+
+		// Skip empty text
+		if trimmed == "" {
+			return
+		}
+
+		// Collect text for final glamour rendering instead of printing immediately
+		r.summaryText.WriteString(text)
+		if !strings.HasSuffix(text, "\n") {
+			r.summaryText.WriteString("\n")
+		}
+
 	case ai.CommandEvent:
-		status := e.Status
-		if e.ExitCode != nil {
-			status = fmt.Sprintf("%s (exit %d)", status, *e.ExitCode)
+		r.stats.Commands++
+
+		// Track failed commands for overall status
+		if e.ExitCode != nil && *e.ExitCode != 0 {
+			r.stats.FailedCommands++
 		}
-		fmt.Fprintf(r.out, "%s %s %s\n", ui.StyleManager.Render("$"), ui.StylePackageName.Render(e.Command), ui.StyleDim.Render(status))
-		if strings.TrimSpace(e.Output) != "" {
-			fmt.Fprintf(r.out, "%s\n", strings.TrimSpace(e.Output))
+
+		// Normalize status for comparison
+		status := strings.ToLower(strings.TrimSpace(e.Status))
+
+		// For in-progress commands, track start time and update spinner
+		if status == "in_progress" || status == "running" || status == "pending" {
+			// Record when this command started
+			r.cmdStartTimes[e.Command] = time.Now()
+
+			hint := formatCommandHint(e.Command)
+			if r.progress != nil {
+				r.progress.SetSubMessage(ui.FormatStatusHint(hint))
+			} else {
+				// Spinner was cleared, restart it
+				r.restartSpinner(hint)
+			}
+			return
 		}
+
+		// Calculate command duration if we tracked its start
+		var cmdDuration time.Duration
+		if startTime, ok := r.cmdStartTimes[e.Command]; ok {
+			cmdDuration = time.Since(startTime)
+			delete(r.cmdStartTimes, e.Command)
+		}
+
+		// Clear spinner before showing completed/failed command
+		r.clearSpinner()
+
+		// Render the command in compact format with success/fail indicator
+		r.renderCommand(e, cmdDuration)
+
+		// Show continuation indicator and restart spinner
+		r.showContinuation()
+		r.restartSpinner("working")
+
 	case ai.FileEvent:
-		fmt.Fprintf(r.out, "%s %s %s\n", ui.StylePath.Render(fmt.Sprintf("[%s]", e.Action)), e.Path, ui.StyleDim.Render(e.Status))
-	case ai.ErrorEvent:
-		fmt.Fprintf(r.out, "%s %s\n", ui.StyleRemoved.Render("error:"), e.Message)
+		r.stats.FileOps++
+
+		// Normalize status for comparison
+		status := strings.ToLower(strings.TrimSpace(e.Status))
+
+		// For in-progress file ops, update spinner
+		if status == "in_progress" || status == "running" || status == "pending" {
+			hint := e.Action
+			if e.Path != "" {
+				parts := strings.Split(e.Path, "/")
+				if len(parts) > 0 {
+					hint = e.Action + " " + parts[len(parts)-1]
+				}
+			}
+			if r.progress != nil {
+				r.progress.SetSubMessage(ui.FormatStatusHint(hint))
+			} else {
+				r.restartSpinner(hint)
+			}
+			return
+		}
+
+		// Clear spinner before showing completed file operation
+		r.clearSpinner()
+
+		// Render file operation in compact format
+		r.renderFileOp(e)
+
+		// Show continuation indicator and restart spinner
+		r.showContinuation()
+		r.restartSpinner("working")
+
 	case ai.ToolCallEvent:
-		fmt.Fprintf(r.out, "%s %s\n", ui.StyleDim.Render("tool:"), e.Call.Name)
+		r.stats.ToolCalls++
+
+		// Update or restart spinner with tool name
+		if r.progress != nil {
+			r.progress.SetSubMessage(ui.FormatStatusHint(e.Call.Name))
+		} else {
+			r.restartSpinner(e.Call.Name)
+		}
+
+	case ai.StatusEvent:
+		// Update or restart spinner with status hint
+		if r.progress != nil {
+			r.progress.SetSubMessage(ui.FormatStatusHint(e.Status))
+		} else {
+			r.restartSpinner(e.Status)
+		}
+
+	case ai.ErrorEvent:
+		// Clear spinner and show error
+		r.clearSpinner()
+		fmt.Fprintf(r.out, "%s %s\n", ui.StyleRemoved.Render("✗ error:"), e.Message)
+
 	case ai.DoneEvent:
-		// Session complete, handled by caller
+		// Capture final usage statistics and model
+		r.stats.Usage = e.Usage
+		if e.Model != "" {
+			r.stats.Model = e.Model
+		}
+	}
+}
+
+// renderCommand renders a command event in compact format with colored status indicators.
+//
+// Format (success):
+//
+//	• go mod tidy                              [1.2s]
+//	│ upgraded golang.org/x/crypto v0.44.0 => v0.45.0
+//
+// Format (failure):
+//
+//	• go test ./...                            [exit 1 · 3.4s · 150 lines]
+//	│ FAIL: TestFoo
+//	│ ... 140 more lines ...
+//	│ FAIL
+func (r *StreamingRenderer) renderCommand(e ai.CommandEvent, duration time.Duration) {
+	// Clean up the command string
+	cmd := cleanCommandString(e.Command)
+
+	// Determine success/failure
+	failed := e.ExitCode != nil && *e.ExitCode != 0
+
+	// Choose indicator and line styles based on status
+	var indicator, lineStyle lipgloss.Style
+	if failed {
+		indicator = ui.StyleStatusError
+		lineStyle = ui.StyleLineError
+	} else {
+		indicator = ui.StyleStatusSuccess
+		lineStyle = ui.StyleLineSuccess
+	}
+
+	// Redact secrets from output
+	output := strings.TrimSpace(e.Output)
+	output, secretsRedacted := redactSecrets(output)
+
+	// Count output lines for metadata
+	outputLines := 0
+	if output != "" {
+		outputLines = len(strings.Split(output, "\n"))
+	}
+
+	// Build metadata tags with intentional coloring
+	var styledTags []string
+	dot := ui.StyleDim.Render(" · ")
+
+	// Exit code (for failures) - error red
+	if failed && e.ExitCode != nil {
+		styledTags = append(styledTags, ui.StyleStatusError.Render(fmt.Sprintf("exit %d", *e.ExitCode)))
+	}
+
+	// Duration (if we tracked it) - dim
+	if duration > 0 {
+		styledTags = append(styledTags, ui.StyleDim.Render(formatDuration(duration)))
+	}
+
+	// Output line count (if significant and truncated) - dim
+	if outputLines > r.maxOutputLines*2+1 {
+		styledTags = append(styledTags, ui.StyleDim.Render(fmt.Sprintf("%d lines", outputLines)))
+	}
+
+	// Secrets redacted warning - amber warning
+	if secretsRedacted {
+		styledTags = append(styledTags, ui.StyleStatusWarning.Render("redacted"))
+	}
+
+	// Format the metadata suffix with styled brackets
+	metaSuffix := ""
+	if len(styledTags) > 0 {
+		metaSuffix = "  " + ui.StyleDim.Render("[") + strings.Join(styledTags, dot) + ui.StyleDim.Render("]")
+	}
+
+	// Format the command line with colored bullet indicator and metadata
+	fmt.Fprintf(r.out, "%s %s%s\n",
+		indicator.Render("•"),
+		ui.StylePackageName.Render(cmd),
+		metaSuffix)
+
+	// Show output with colored threading
+	if output != "" {
+		r.renderOutputLines(output, failed, lineStyle)
+	}
+}
+
+// renderFileOp renders a file operation in compact format with colored indicator.
+//
+// Format:
+//
+//	• [write] go.mod
+//	• [read] internal/foo/bar.go
+func (r *StreamingRenderer) renderFileOp(e ai.FileEvent) {
+	// Shorten path for display (show last 2 components)
+	path := e.Path
+	parts := strings.Split(path, "/")
+	if len(parts) > 3 {
+		path = ".../" + strings.Join(parts[len(parts)-2:], "/")
+	}
+
+	// File ops are generally successful if we get here
+	fmt.Fprintf(r.out, "%s %s %s\n",
+		ui.StyleStatusSuccess.Render("•"),
+		ui.StyleDim.Render(fmt.Sprintf("[%s]", e.Action)),
+		ui.StylePath.Render(path))
+}
+
+// renderOutputLines renders command output with a colored vertical line.
+// Shows head (first 3) and tail (last 3) of long outputs with ellipsis.
+//
+// Format:
+//
+//	│ first line of output
+//	│ second line
+//	│ third line
+//	│ ...
+//	│ third to last
+//	│ second to last
+//	│ last line
+func (r *StreamingRenderer) renderOutputLines(output string, isError bool, lineStyle lipgloss.Style) {
+	lines := strings.Split(output, "\n")
+
+	// Filter empty lines
+	var nonEmpty []string
+	for _, line := range lines {
+		if line != "" {
+			nonEmpty = append(nonEmpty, line)
+		}
+	}
+	if len(nonEmpty) == 0 {
+		return
+	}
+
+	// In verbose mode, show everything
+	if r.verbose {
+		for _, line := range nonEmpty {
+			fmt.Fprintf(r.out, "%s %s\n", lineStyle.Render("│"), line)
+		}
+		return
+	}
+
+	// Non-verbose: show first N and last N lines with ellipsis in between
+	headLines := r.maxOutputLines // default: 3
+	tailLines := r.maxOutputLines // default: 3
+
+	// Find important lines (errors, failures, etc.)
+	importantIdxs := make(map[int]bool)
+	for i, line := range nonEmpty {
+		lower := strings.ToLower(line)
+		if strings.Contains(lower, "error") ||
+			strings.Contains(lower, "fail") ||
+			strings.Contains(lower, "panic") ||
+			strings.HasPrefix(line, "--- FAIL") ||
+			strings.HasPrefix(line, "FAIL") {
+			importantIdxs[i] = true
+		}
+	}
+
+	// Calculate what to show
+	totalLines := len(nonEmpty)
+	if totalLines <= headLines+tailLines+1 {
+		// Few enough lines to show all
+		for i, line := range nonEmpty {
+			textStyle := ui.StyleDim
+			if importantIdxs[i] && isError {
+				textStyle = ui.StyleStatusError
+			}
+			fmt.Fprintf(r.out, "%s %s\n", lineStyle.Render("│"), textStyle.Render(line))
+		}
+		return
+	}
+
+	// Show head (first N lines)
+	for i := 0; i < headLines; i++ {
+		line := nonEmpty[i]
+		textStyle := ui.StyleDim
+		if importantIdxs[i] && isError {
+			textStyle = ui.StyleStatusError
+		}
+		fmt.Fprintf(r.out, "%s %s\n", lineStyle.Render("│"), textStyle.Render(line))
+	}
+
+	// Show ellipsis
+	skipped := totalLines - headLines - tailLines
+	fmt.Fprintf(r.out, "%s %s\n",
+		lineStyle.Render("│"),
+		ui.StyleDim.Render(fmt.Sprintf("... %d more lines ...", skipped)))
+
+	// Show tail (last N lines)
+	for i := totalLines - tailLines; i < totalLines; i++ {
+		line := nonEmpty[i]
+		textStyle := ui.StyleDim
+		if importantIdxs[i] && isError {
+			textStyle = ui.StyleStatusError
+		}
+		fmt.Fprintf(r.out, "%s %s\n", lineStyle.Render("│"), textStyle.Render(line))
+	}
+}
+
+// Finish completes the streaming session and optionally shows metadata footer.
+// Call this after all events have been processed.
+//
+// If the agent produced any text summary, it will be rendered with glamour markdown
+// for a polished final output.
+//
+// The session ends with a status endcap showing the overall outcome:
+//
+//	■ done                    (all commands succeeded)
+//	■ done (2 failed)         (some commands failed)
+//	■ interrupted             (user cancelled)
+func (r *StreamingRenderer) Finish(showMetadata bool) {
+	// Clear any remaining spinner
+	r.clearSpinner()
+
+	// Check if we were interrupted
+	interrupted := r.ctx != nil && r.ctx.Err() != nil
+
+	// Determine overall status
+	status := r.computeStatus(interrupted)
+
+	// Show status endcap (visual terminator for the command stream)
+	r.renderStatusEndcap(status)
+
+	// Render collected summary text with glamour
+	if summary := strings.TrimSpace(r.summaryText.String()); summary != "" {
+		// Use glamour for nice markdown rendering in TTY
+		if r.isTTY {
+			rendered, err := RenderMarkdown(summary, 80)
+			if err == nil {
+				fmt.Fprint(r.out, rendered)
+			} else {
+				// Fallback to plain text
+				fmt.Fprintln(r.out, summary)
+			}
+		} else {
+			// Non-TTY: plain text
+			fmt.Fprintln(r.out, summary)
+		}
+	}
+
+	// Show metadata footer
+	if showMetadata {
+		duration := time.Since(r.startTime)
+		model := r.stats.Model
+		if model == "" {
+			model = r.model
+		}
+		meta := buildStyledMetadataLine(r.providerName, model, r.sandbox, duration, r.stats)
+		fmt.Fprintln(r.out)
+		fmt.Fprintln(r.out, meta)
+	}
+}
+
+// computeStatus determines the overall agent session status.
+func (r *StreamingRenderer) computeStatus(interrupted bool) AgentStatus {
+	if interrupted {
+		return AgentStatusInterrupted
+	}
+	if r.stats.FailedCommands > 0 {
+		if r.stats.FailedCommands == r.stats.Commands {
+			return AgentStatusFailed
+		}
+		return AgentStatusPartial
+	}
+	return AgentStatusSuccess
+}
+
+// renderStatusEndcap renders a visual terminator showing the session outcome.
+// Uses a small black square (▪) as an "endcap" for the command stream.
+//
+// Format:
+//
+//	▪ done                    (green - all succeeded)
+//	▪ done (1 failed)         (amber - partial success)
+//	▪ failed                  (red - all failed)
+//	▪ interrupted             (dim - user cancelled)
+func (r *StreamingRenderer) renderStatusEndcap(status AgentStatus) {
+	var label string
+	var style lipgloss.Style
+
+	switch status {
+	case AgentStatusSuccess:
+		label = "done"
+		style = ui.StyleStatusSuccess
+	case AgentStatusPartial:
+		label = fmt.Sprintf("done (%d failed)", r.stats.FailedCommands)
+		style = ui.StyleStatusWarning
+	case AgentStatusFailed:
+		label = "failed"
+		style = ui.StyleStatusError
+	case AgentStatusInterrupted:
+		label = "interrupted"
+		style = ui.StyleDim
+	}
+
+	fmt.Fprintf(r.out, "%s %s\n", style.Render("▪"), ui.StyleDim.Render(label))
+}
+
+// Status returns the overall status of the agent session.
+// Call this after Finish() to get the status for exit codes.
+func (r *StreamingRenderer) Status() AgentStatus {
+	interrupted := r.ctx != nil && r.ctx.Err() != nil
+	return r.computeStatus(interrupted)
+}
+
+// ExitCode returns an appropriate exit code for the agent session.
+// 0 = success, 1 = partial/failed, 130 = interrupted (SIGINT convention)
+func (r *StreamingRenderer) ExitCode() int {
+	switch r.Status() {
+	case AgentStatusSuccess:
+		return 0
+	case AgentStatusInterrupted:
+		return 130 // Convention for SIGINT
+	default:
+		return 1
 	}
 }
 
@@ -670,4 +1277,14 @@ func (r *StreamingRenderer) Clear() {
 		r.progress.Clear()
 		r.progress = nil
 	}
+}
+
+// Stats returns the collected statistics from the streaming session.
+func (r *StreamingRenderer) Stats() streamStats {
+	return r.stats
+}
+
+// Duration returns the time elapsed since the renderer started.
+func (r *StreamingRenderer) Duration() time.Duration {
+	return time.Since(r.startTime)
 }

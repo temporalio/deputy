@@ -13,6 +13,7 @@ import (
 	"strings"
 
 	"github.com/picatz/deputy/internal/cli/flags"
+	deputyerrors "github.com/picatz/deputy/internal/errors"
 	"github.com/picatz/deputy/internal/otel"
 	"github.com/picatz/deputy/internal/output"
 	"github.com/picatz/deputy/internal/policy"
@@ -119,6 +120,7 @@ AI ASSISTANCE:
 	fixCmd.Flags().String("agent-thread", "", "Resume a previous codex thread ID")
 	fixCmd.Flags().Bool("agent-include-plan-tool", true, "Allow codex agent to enable the plan tool")
 	fixCmd.Flags().Bool("agent-skip-git-check", true, "Skip codex git repository checks")
+	fixCmd.Flags().Bool("agent-verbose", false, "Show full command output instead of compact summaries")
 	fixCmd.Flags().Bool("apply", false, "Execute runnable remediation commands in-place (local scans only)")
 	fixCmd.Flags().StringArray("policy", nil, "Path to CEL policy files or bundles to evaluate against remediation plans (repeatable)")
 	root.AddCommand(fixCmd)
@@ -265,8 +267,19 @@ func runFixPlan(scanner *Scanner, cmd *cobra.Command, args []string) error {
 		if err != nil {
 			return err
 		}
-		if err := runAgent(cmd.Context(), agentName, agentPrompt, repoPathForMutations, agentOpts, cmd.OutOrStdout(), cmd.ErrOrStderr()); err != nil {
-			return err
+		// Print header before agent execution (consistent with explain/triage)
+		fmt.Fprintln(cmd.OutOrStdout())
+		fmt.Fprintln(cmd.OutOrStdout(), ui.StyleHeader.Render("Agent Remediation"))
+
+		result := runAgent(cmd.Context(), agentName, agentPrompt, repoPathForMutations, agentOpts, cmd.OutOrStdout(), cmd.ErrOrStderr())
+
+		// Return error with appropriate exit code based on agent result
+		if result.HasError() {
+			return deputyerrors.WithExitCode(result.Err, result.ExitCode)
+		}
+		// Even without an error, propagate non-zero exit codes (e.g., partial failures)
+		if result.ExitCode != 0 {
+			return deputyerrors.WithExitCode(nil, result.ExitCode)
 		}
 	}
 

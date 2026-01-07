@@ -21,6 +21,35 @@ type agentInvocationOptions struct {
 	ThreadID         string
 	IncludePlanTool  bool
 	SkipGitRepoCheck bool
+	Verbose          bool // Show full command output instead of compact summaries
+}
+
+// AgentResult captures the outcome of an agent execution.
+type AgentResult struct {
+	// Status is the overall outcome (success, partial, failed, interrupted).
+	Status render.AgentStatus
+	// ExitCode is the suggested process exit code (0=success, 1=failure, 130=interrupted).
+	ExitCode int
+	// Err is any error that occurred during execution.
+	Err error
+}
+
+// Error implements the error interface, returning the underlying error message.
+func (r AgentResult) Error() string {
+	if r.Err != nil {
+		return r.Err.Error()
+	}
+	return ""
+}
+
+// HasError returns true if the result contains an error.
+func (r AgentResult) HasError() bool {
+	return r.Err != nil
+}
+
+// Success returns true if the agent completed successfully (exit code 0).
+func (r AgentResult) Success() bool {
+	return r.ExitCode == 0 && r.Err == nil
 }
 
 // getAgentFlags extracts all agent-related flags from the command.
@@ -34,19 +63,25 @@ func getAgentFlags(cmd *cobra.Command) (name string, opts agentInvocationOptions
 	opts.ThreadID, _ = cmd.Flags().GetString("agent-thread")
 	opts.IncludePlanTool, _ = cmd.Flags().GetBool("agent-include-plan-tool")
 	opts.SkipGitRepoCheck, _ = cmd.Flags().GetBool("agent-skip-git-check")
+	opts.Verbose, _ = cmd.Flags().GetBool("agent-verbose")
 	return name, opts
 }
 
 // runAgent dispatches the remediation task to the specified AI agent.
 // It uses the ai package's provider registry to find and run the appropriate provider.
-func runAgent(ctx context.Context, name string, prompt string, repoPath string, opts agentInvocationOptions, out, errW io.Writer) error {
+// Returns an AgentResult with the outcome status and exit code for the caller to use.
+func runAgent(ctx context.Context, name string, prompt string, repoPath string, opts agentInvocationOptions, out, errW io.Writer) AgentResult {
 	trimmed := strings.ToLower(strings.TrimSpace(name))
 	if trimmed == "" || trimmed == "none" {
 		fmt.Fprintln(errW, ui.StyleDim.Render("No agent specified; skipping AI remediation."))
-		return nil
+		return AgentResult{Status: render.AgentStatusSuccess, ExitCode: 0}
 	}
 	if strings.TrimSpace(prompt) == "" {
-		return fmt.Errorf("agent %q requires a non-empty prompt", name)
+		return AgentResult{
+			Status:   render.AgentStatusFailed,
+			ExitCode: 1,
+			Err:      fmt.Errorf("agent %q requires a non-empty prompt", name),
+		}
 	}
 
 	// Get the provider from the unified ai package registry
@@ -54,16 +89,25 @@ func runAgent(ctx context.Context, name string, prompt string, repoPath string, 
 	if err != nil {
 		available := ai.ListProviders()
 		if len(available) > 0 {
-			return fmt.Errorf("unsupported agent %q (available: %s)", name, strings.Join(available, ", "))
+			return AgentResult{
+				Status:   render.AgentStatusFailed,
+				ExitCode: 1,
+				Err:      fmt.Errorf("unsupported agent %q (available: %s)", name, strings.Join(available, ", ")),
+			}
 		}
-		return fmt.Errorf("unsupported agent %q; no providers registered", name)
+		return AgentResult{
+			Status:   render.AgentStatusFailed,
+			ExitCode: 1,
+			Err:      fmt.Errorf("unsupported agent %q; no providers registered", name),
+		}
 	}
 
 	return runAIProvider(ctx, provider, prompt, repoPath, opts, out, errW)
 }
 
 // runAIProvider executes an AI provider from the ai package.
-func runAIProvider(ctx context.Context, provider ai.Provider, prompt string, repoPath string, opts agentInvocationOptions, out, errW io.Writer) error {
+// Returns an AgentResult with the renderer's status and exit code.
+func runAIProvider(ctx context.Context, provider ai.Provider, prompt string, repoPath string, opts agentInvocationOptions, out, errW io.Writer) AgentResult {
 	caps := provider.Capabilities()
 	name := provider.Name()
 
@@ -103,57 +147,74 @@ func runAIProvider(ctx context.Context, provider ai.Provider, prompt string, rep
 		Hooks: ai.SessionHooks{
 			OnCommand: func(cmd string) error {
 				// Log command execution (approval already happened)
-				fmt.Fprintf(out, "%s %s\n", ui.StyleManager.Render("$"), ui.StylePackageName.Render(cmd))
+				// Note: This is now handled by the StreamingRenderer
 				return nil
 			},
 			OnFileWrite: func(path string) error {
 				// Log file write (approval already happened)
-				fmt.Fprintf(out, "%s %s\n", ui.StylePath.Render("[modify]"), path)
+				// Note: This is now handled by the StreamingRenderer
 				return nil
 			},
 		},
 	})
 
-
-	// Create streaming renderer with spinner support
-	renderer := render.NewStreamingRenderer(out, errW, name)
-	renderer.StartSpinner(ctx, "Waiting for agent")
+	// Create streaming renderer with full configuration for metadata footer
+	renderer := render.NewStreamingRendererWithConfig(render.StreamingConfig{
+		Out:          out,
+		Err:          errW,
+		ProviderName: name,
+		Model:        opts.Model,
+		Sandbox:      sandbox,
+		ShowMetadata: true,
+		Verbose:      opts.Verbose,
+	})
+	renderer.StartSpinner(ctx, name)
 
 	// Stream the response, rendering events as they occur
+	var streamErr error
 	for event, err := range session.Stream(ctx, prompt) {
 		if err != nil {
+			// Check if it's just a context cancellation (CTRL+C)
+			if ctx.Err() != nil {
+				renderer.Clear()
+				break
+			}
 			renderer.Fail()
-			fmt.Fprintf(errW, "%s %v\n", ui.StyleRemoved.Render("error:"), err)
+			streamErr = err
 			continue
 		}
 		renderer.RenderEvent(event)
 	}
 
-	return nil
+	// Show metadata footer with timing and token usage
+	renderer.Finish(true)
+
+	// Return result with status from renderer (reflects command success/failure)
+	return AgentResult{
+		Status:   renderer.Status(),
+		ExitCode: renderer.ExitCode(),
+		Err:      streamErr,
+	}
 }
 
 // createInteractiveApprover creates an approval function that prompts the user.
 // In a real CLI, this would use a proper interactive prompt (e.g., survey, bubbletea).
-// For now, it auto-approves but logs the operation for visibility.
+// For now, it silently auto-approves non-high-risk operations - the command events
+// themselves will be displayed by the StreamingRenderer when they complete.
 func createInteractiveApprover(out, errW io.Writer) ai.ApprovalFunc {
 	return func(op ai.ApprovalOperation) error {
-		// Show the operation to the user
-		marker := ui.StyleDim.Render("[approval]")
+		// Block high-risk operations unless full-auto mode is enabled
 		if op.HighRisk {
-			marker = ui.StyleRemoved.Render("[HIGH-RISK]")
-		}
-
-		fmt.Fprintf(out, "%s %s: %s\n", marker, op.Type, op.Description)
-
-		// For now, auto-approve non-high-risk operations
-		// TODO: Implement proper interactive approval (e.g., "Press y to approve")
-		if op.HighRisk {
-			fmt.Fprintf(errW, "%s High-risk operation requires explicit approval (use --agent-full-auto to skip)\n",
+			fmt.Fprintf(errW, "\n%s High-risk operation requires explicit approval\n",
 				ui.StyleRemoved.Render("BLOCKED:"))
+			fmt.Fprintf(errW, "  %s: %s\n", op.Type, op.Description)
+			fmt.Fprintf(errW, "  Use --agent-full-auto to allow all operations\n")
 			return fmt.Errorf("high-risk operation blocked: %s", op.Description)
 		}
 
-		return nil // Auto-approve non-high-risk
+		// Silently auto-approve non-high-risk operations
+		// The actual command/file events will be displayed by StreamingRenderer
+		return nil
 	}
 }
 

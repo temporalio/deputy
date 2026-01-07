@@ -116,8 +116,9 @@ func TestStreamingRenderer(t *testing.T) {
 		if r.providerName != "test-provider" {
 			t.Errorf("providerName = %q, want %q", r.providerName, "test-provider")
 		}
-		if !r.firstEvent {
-			t.Error("firstEvent should be true initially")
+		// spinnerActive starts false, becomes true when StartSpinner is called
+		if r.spinnerActive {
+			t.Error("spinnerActive should be false initially")
 		}
 	})
 
@@ -133,22 +134,24 @@ func TestStreamingRenderer(t *testing.T) {
 		}
 	})
 
-	t.Run("renders text events", func(t *testing.T) {
+	t.Run("collects text events for glamour rendering", func(t *testing.T) {
 		out := &bytes.Buffer{}
 		r := NewStreamingRenderer(out, &bytes.Buffer{}, "claude")
 
 		r.RenderEvent(ai.TextEvent{Text: "Hello world"})
 
+		// Text is collected, not immediately printed
 		output := out.String()
-		if !strings.Contains(output, "Hello world") {
-			t.Errorf("output should contain text, got: %q", output)
+		if output != "" {
+			t.Errorf("text should be collected, not printed immediately, got: %q", output)
 		}
-		if !strings.Contains(output, "claude") {
-			t.Error("output should contain provider name")
+		// Text should be in the summary buffer
+		if !strings.Contains(r.summaryText.String(), "Hello world") {
+			t.Errorf("summaryText should contain text, got: %q", r.summaryText.String())
 		}
 	})
 
-	t.Run("renders command events", func(t *testing.T) {
+	t.Run("renders command events with success indicator", func(t *testing.T) {
 		out := &bytes.Buffer{}
 		r := NewStreamingRenderer(out, &bytes.Buffer{}, "claude")
 
@@ -164,15 +167,63 @@ func TestStreamingRenderer(t *testing.T) {
 		if !strings.Contains(output, "go test") {
 			t.Errorf("output should contain command, got: %q", output)
 		}
-		if !strings.Contains(output, "exit 0") {
-			t.Error("output should contain exit code")
+		// Should use • indicator (bullet)
+		if !strings.Contains(output, "•") {
+			t.Errorf("command should have • indicator, got: %q", output)
 		}
 		if !strings.Contains(output, "PASS") {
 			t.Error("output should contain command output")
 		}
+		// Successful commands (exit 0) don't show exit code - only failures do
+		if strings.Contains(output, "exit") {
+			t.Error("successful commands should not show exit code")
+		}
 	})
 
-	t.Run("renders file events", func(t *testing.T) {
+	t.Run("renders failed command events with failure indicator", func(t *testing.T) {
+		out := &bytes.Buffer{}
+		r := NewStreamingRenderer(out, &bytes.Buffer{}, "claude")
+
+		exitCode := 1
+		r.RenderEvent(ai.CommandEvent{
+			Command:  "go test ./...",
+			Status:   "failed",
+			ExitCode: &exitCode,
+			Output:   "FAIL",
+		})
+
+		output := out.String()
+		if !strings.Contains(output, "go test") {
+			t.Errorf("output should contain command, got: %q", output)
+		}
+		// Should use • indicator (bullet - color differs for fail)
+		if !strings.Contains(output, "•") {
+			t.Errorf("command should have • indicator, got: %q", output)
+		}
+		if !strings.Contains(output, "FAIL") {
+			t.Error("output should contain command output")
+		}
+		if !strings.Contains(output, "exit 1") {
+			t.Errorf("failed commands should show exit code, got: %q", output)
+		}
+	})
+
+	t.Run("skips in-progress command events", func(t *testing.T) {
+		out := &bytes.Buffer{}
+		r := NewStreamingRenderer(out, &bytes.Buffer{}, "claude")
+
+		r.RenderEvent(ai.CommandEvent{
+			Command: "go test ./...",
+			Status:  "in_progress",
+		})
+
+		output := out.String()
+		if output != "" {
+			t.Errorf("in_progress commands should not produce output, got: %q", output)
+		}
+	})
+
+	t.Run("renders file events with success indicator", func(t *testing.T) {
 		out := &bytes.Buffer{}
 		r := NewStreamingRenderer(out, &bytes.Buffer{}, "claude")
 
@@ -189,9 +240,13 @@ func TestStreamingRenderer(t *testing.T) {
 		if !strings.Contains(output, "modify") {
 			t.Error("output should contain action")
 		}
+		// File ops should use • indicator (bullet)
+		if !strings.Contains(output, "•") {
+			t.Errorf("file op should have • indicator, got: %q", output)
+		}
 	})
 
-	t.Run("renders error events", func(t *testing.T) {
+	t.Run("renders error events with failure indicator", func(t *testing.T) {
 		out := &bytes.Buffer{}
 		r := NewStreamingRenderer(out, &bytes.Buffer{}, "claude")
 
@@ -204,9 +259,13 @@ func TestStreamingRenderer(t *testing.T) {
 		if !strings.Contains(output, "error") {
 			t.Error("output should contain error prefix")
 		}
+		// Errors should use ✗ indicator
+		if !strings.Contains(output, "✗") {
+			t.Errorf("error should have ✗ indicator, got: %q", output)
+		}
 	})
 
-	t.Run("renders tool call events", func(t *testing.T) {
+	t.Run("tool call events update spinner only", func(t *testing.T) {
 		out := &bytes.Buffer{}
 		r := NewStreamingRenderer(out, &bytes.Buffer{}, "claude")
 
@@ -214,12 +273,10 @@ func TestStreamingRenderer(t *testing.T) {
 			Call: ai.ToolCall{Name: "read_file"},
 		})
 
-		output := out.String()
-		if !strings.Contains(output, "read_file") {
-			t.Errorf("output should contain tool name, got: %q", output)
-		}
-		if !strings.Contains(output, "tool") {
-			t.Error("output should contain tool prefix")
+		// Tool calls don't produce direct output - they update the spinner status
+		// The stats should be updated though
+		if r.stats.ToolCalls != 1 {
+			t.Errorf("ToolCalls = %d, want 1", r.stats.ToolCalls)
 		}
 	})
 
@@ -247,21 +304,16 @@ func TestStreamingRenderer(t *testing.T) {
 		}
 	})
 
-	t.Run("firstEvent flag only cleared with spinner", func(t *testing.T) {
+	t.Run("text events are collected in summaryText", func(t *testing.T) {
 		out := &bytes.Buffer{}
 		r := NewStreamingRenderer(out, &bytes.Buffer{}, "claude")
 
-		if !r.firstEvent {
-			t.Error("firstEvent should be true initially")
-		}
+		// Render real text (not thinking message)
+		r.RenderEvent(ai.TextEvent{Text: "Hello world"})
 
-		// Without a spinner, firstEvent stays true (no spinner to clear)
-		r.RenderEvent(ai.TextEvent{Text: "first"})
-
-		// firstEvent is only cleared when there's a spinner to clear
-		// Since we didn't start a spinner, it stays true
-		if !r.firstEvent {
-			t.Error("firstEvent should remain true without spinner")
+		// Text should be collected for glamour rendering later
+		if !strings.Contains(r.summaryText.String(), "Hello world") {
+			t.Errorf("summaryText should contain text, got: %q", r.summaryText.String())
 		}
 	})
 
@@ -271,9 +323,154 @@ func TestStreamingRenderer(t *testing.T) {
 
 		r.RenderEvent(ai.TextEvent{Text: "   \n\t  "})
 
-		// Whitespace-only text should produce no output
-		if out.Len() != 0 {
-			t.Errorf("whitespace-only text should produce no output, got: %q", out.String())
+		// Whitespace-only text should not affect summary
+		if r.summaryText.Len() != 0 {
+			t.Errorf("whitespace-only text should not be collected, got: %q", r.summaryText.String())
+		}
+	})
+
+	t.Run("truncates long command output showing head and tail", func(t *testing.T) {
+		out := &bytes.Buffer{}
+		r := NewStreamingRendererWithConfig(StreamingConfig{
+			Out:            out,
+			Err:            &bytes.Buffer{},
+			ProviderName:   "claude",
+			MaxOutputLines: 2, // show first 2 and last 2 lines
+			Verbose:        false,
+		})
+
+		exitCode := 0
+		r.RenderEvent(ai.CommandEvent{
+			Command:  "go test",
+			Status:   "completed",
+			ExitCode: &exitCode,
+			Output:   "line1\nline2\nline3\nline4\nline5\nline6\nline7\nline8",
+		})
+
+		output := out.String()
+		// Should show head lines
+		if !strings.Contains(output, "line1") {
+			t.Errorf("should show first line, got: %q", output)
+		}
+		if !strings.Contains(output, "line2") {
+			t.Errorf("should show second line, got: %q", output)
+		}
+		// Should show ellipsis
+		if !strings.Contains(output, "...") {
+			t.Errorf("should show ellipsis, got: %q", output)
+		}
+		if !strings.Contains(output, "more lines") {
+			t.Errorf("should show 'more lines' indicator, got: %q", output)
+		}
+		// Should show tail lines
+		if !strings.Contains(output, "line7") {
+			t.Errorf("should show second to last line, got: %q", output)
+		}
+		if !strings.Contains(output, "line8") {
+			t.Errorf("should show last line, got: %q", output)
+		}
+		// Middle lines should be hidden
+		if strings.Contains(output, "line4") {
+			t.Errorf("should not show middle lines, got: %q", output)
+		}
+	})
+
+	t.Run("shows full output in verbose mode", func(t *testing.T) {
+		out := &bytes.Buffer{}
+		r := NewStreamingRendererWithConfig(StreamingConfig{
+			Out:          out,
+			Err:          &bytes.Buffer{},
+			ProviderName: "claude",
+			Verbose:      true,
+		})
+
+		exitCode := 0
+		r.RenderEvent(ai.CommandEvent{
+			Command:  "go test",
+			Status:   "completed",
+			ExitCode: &exitCode,
+			Output:   "line1\nline2\nline3\nline4\nline5",
+		})
+
+		output := out.String()
+		// Should show all lines
+		if !strings.Contains(output, "line1") {
+			t.Error("verbose should show line1")
+		}
+		if !strings.Contains(output, "line5") {
+			t.Error("verbose should show line5")
+		}
+		// Should NOT show truncation indicator
+		if strings.Contains(output, "... and") {
+			t.Errorf("verbose should not truncate, got: %q", output)
+		}
+	})
+
+	t.Run("Finish renders collected summary with glamour", func(t *testing.T) {
+		out := &bytes.Buffer{}
+		r := NewStreamingRenderer(out, &bytes.Buffer{}, "claude")
+
+		// Collect some text
+		r.RenderEvent(ai.TextEvent{Text: "# Summary\n\nThis is a test."})
+
+		// Finish should render the summary
+		r.Finish(false)
+
+		output := out.String()
+		if !strings.Contains(output, "Summary") {
+			t.Errorf("Finish should render collected text, got: %q", output)
+		}
+	})
+
+	t.Run("Finish shows status endcap for success", func(t *testing.T) {
+		out := &bytes.Buffer{}
+		r := NewStreamingRenderer(out, &bytes.Buffer{}, "claude")
+
+		// Simulate successful command
+		exitCode := 0
+		r.RenderEvent(ai.CommandEvent{
+			Command:  "go test",
+			Status:   "completed",
+			ExitCode: &exitCode,
+		})
+
+		r.Finish(false)
+		output := out.String()
+
+		// Should show success endcap
+		if !strings.Contains(output, "▪") {
+			t.Errorf("Finish should show endcap symbol, got: %q", output)
+		}
+		if !strings.Contains(output, "done") {
+			t.Errorf("Finish should show 'done' label, got: %q", output)
+		}
+		if r.ExitCode() != 0 {
+			t.Errorf("ExitCode should be 0 for success, got: %d", r.ExitCode())
+		}
+	})
+
+	t.Run("Finish shows status endcap for partial failure", func(t *testing.T) {
+		out := &bytes.Buffer{}
+		r := NewStreamingRenderer(out, &bytes.Buffer{}, "claude")
+
+		// Simulate one success, one failure
+		exitCode0 := 0
+		exitCode1 := 1
+		r.RenderEvent(ai.CommandEvent{Command: "cmd1", Status: "completed", ExitCode: &exitCode0})
+		r.RenderEvent(ai.CommandEvent{Command: "cmd2", Status: "failed", ExitCode: &exitCode1})
+
+		r.Finish(false)
+		output := out.String()
+
+		// Should show partial endcap with failure count
+		if !strings.Contains(output, "▪") {
+			t.Errorf("Finish should show endcap symbol, got: %q", output)
+		}
+		if !strings.Contains(output, "1 failed") {
+			t.Errorf("Finish should show failure count, got: %q", output)
+		}
+		if r.ExitCode() != 1 {
+			t.Errorf("ExitCode should be 1 for partial failure, got: %d", r.ExitCode())
 		}
 	})
 }
@@ -437,6 +634,36 @@ func TestFormatNumber(t *testing.T) {
 			result := formatNumber(tt.n)
 			if result != tt.want {
 				t.Errorf("formatNumber(%d) = %q, want %q", tt.n, result, tt.want)
+			}
+		})
+	}
+}
+
+func TestRedactSecrets(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		redacted bool
+		contains string // What the output should contain (for redaction check)
+	}{
+		{"no secrets", "go build ./...", false, "go build"},
+		{"api key", "API_KEY=sk_live_abc123def456ghi789jkl012mno345", true, "[REDACTED:API_KEY]"},
+		{"github token", "using ghp_abcdef1234567890abcdef1234567890ABCD", true, "[REDACTED:GITHUB_TOKEN]"},
+		{"aws key", "AWS_ACCESS_KEY_ID=AKIAIOSFODNN7EXAMPLE", true, "[REDACTED:AWS_KEY]"},
+		{"password", "password=mysecretpassword123", true, "[REDACTED:PASSWORD]"},
+		{"bearer token", "Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9", true, "[REDACTED:BEARER_TOKEN]"},
+		{"private key header", "-----BEGIN RSA PRIVATE KEY-----", true, "[REDACTED:PRIVATE_KEY]"},
+		{"normal output preserved", "go: upgraded golang.org/x/crypto v0.44.0 => v0.45.0", false, "v0.45.0"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result, redacted := redactSecrets(tt.input)
+			if redacted != tt.redacted {
+				t.Errorf("redactSecrets() redacted = %v, want %v", redacted, tt.redacted)
+			}
+			if !strings.Contains(result, tt.contains) {
+				t.Errorf("redactSecrets() result = %q, should contain %q", result, tt.contains)
 			}
 		})
 	}

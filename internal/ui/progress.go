@@ -55,14 +55,16 @@ type Progress struct {
 	style   ProgressStyle
 	message string
 
-	mu       sync.Mutex
-	running  bool
-	done     chan struct{}
-	frame    int
-	total    int64
-	current  atomic.Int64
-	subMsg   string
-	isTTY    bool
+	mu        sync.Mutex
+	running   bool
+	done      chan struct{}
+	frame     int
+	total     int64
+	current   atomic.Int64
+	subMsg    string
+	isTTY     bool
+	startTime time.Time // when the progress started (for elapsed time display)
+	showTime  bool      // whether to show elapsed time after a threshold
 }
 
 // NewProgress creates a new progress indicator.
@@ -72,10 +74,11 @@ func NewProgress(writer io.Writer, message string) *Progress {
 		writer = os.Stderr
 	}
 	return &Progress{
-		writer:  writer,
-		style:   DefaultProgressStyle(),
-		message: message,
-		isTTY:   IsTTY(writer),
+		writer:   writer,
+		style:    DefaultProgressStyle(),
+		message:  message,
+		isTTY:    IsTTY(writer),
+		showTime: true, // show elapsed time by default
 	}
 }
 
@@ -101,6 +104,7 @@ func (p *Progress) Start(ctx context.Context) {
 	}
 	p.running = true
 	p.done = make(chan struct{})
+	p.startTime = time.Now()
 	p.mu.Unlock()
 
 	go p.run(ctx)
@@ -121,6 +125,20 @@ func (p *Progress) SetSubMessage(msg string) {
 	p.mu.Lock()
 	p.subMsg = msg
 	p.mu.Unlock()
+}
+
+// ResetStartTime resets the start time for elapsed time display.
+// Call this when restarting the spinner for a new operation.
+func (p *Progress) ResetStartTime() {
+	p.mu.Lock()
+	p.startTime = time.Now()
+	p.mu.Unlock()
+}
+
+// WithShowTime enables or disables elapsed time display.
+func (p *Progress) WithShowTime(show bool) *Progress {
+	p.showTime = show
+	return p
 }
 
 // Stop stops the progress indicator and shows the final state.
@@ -204,9 +222,20 @@ func (p *Progress) render() {
 	frame := p.style.Spinner[p.frame%len(p.style.Spinner)]
 	p.frame++
 	subMsg := p.subMsg
+	startTime := p.startTime
+	showTime := p.showTime
 	p.mu.Unlock()
 
 	current := p.current.Load()
+
+	// Calculate elapsed time string (show after 3 seconds)
+	var elapsedStr string
+	if showTime && !startTime.IsZero() {
+		elapsed := time.Since(startTime)
+		if elapsed >= 3*time.Second {
+			elapsedStr = " " + StyleAgentDuration.Render(formatElapsed(elapsed))
+		}
+	}
 
 	var line string
 	spinner := p.style.Style.Render(frame)
@@ -214,26 +243,39 @@ func (p *Progress) render() {
 	if p.total > 0 {
 		pct := float64(current) / float64(p.total) * 100
 		if subMsg != "" {
-			line = fmt.Sprintf("\r%s %s (%.0f%%) %s", spinner, p.message, pct, subMsg)
+			line = fmt.Sprintf("\r%s %s (%.0f%%) %s%s", spinner, p.message, pct, subMsg, elapsedStr)
 		} else {
-			line = fmt.Sprintf("\r%s %s (%.0f%%)", spinner, p.message, pct)
+			line = fmt.Sprintf("\r%s %s (%.0f%%)%s", spinner, p.message, pct, elapsedStr)
 		}
 	} else if current > 0 {
 		if subMsg != "" {
-			line = fmt.Sprintf("\r%s %s (%d) %s", spinner, p.message, current, subMsg)
+			line = fmt.Sprintf("\r%s %s (%d) %s%s", spinner, p.message, current, subMsg, elapsedStr)
 		} else {
-			line = fmt.Sprintf("\r%s %s (%d)", spinner, p.message, current)
+			line = fmt.Sprintf("\r%s %s (%d)%s", spinner, p.message, current, elapsedStr)
 		}
 	} else {
 		if subMsg != "" {
-			line = fmt.Sprintf("\r%s %s %s", spinner, p.message, subMsg)
+			line = fmt.Sprintf("\r%s %s %s%s", spinner, p.message, subMsg, elapsedStr)
 		} else {
-			line = fmt.Sprintf("\r%s %s", spinner, p.message)
+			line = fmt.Sprintf("\r%s %s%s", spinner, p.message, elapsedStr)
 		}
 	}
 
 	p.clearLine()
 	fmt.Fprint(p.writer, line)
+}
+
+// formatElapsed formats duration for spinner display (compact format).
+func formatElapsed(d time.Duration) string {
+	if d < time.Minute {
+		return fmt.Sprintf("%ds", int(d.Seconds()))
+	}
+	mins := int(d.Minutes())
+	secs := int(d.Seconds()) % 60
+	if secs == 0 {
+		return fmt.Sprintf("%dm", mins)
+	}
+	return fmt.Sprintf("%dm %ds", mins, secs)
 }
 
 func (p *Progress) clearLine() {

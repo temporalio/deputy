@@ -83,6 +83,26 @@ var (
 	StyleAgentDot = lipgloss.NewStyle().Foreground(lipgloss.Color("#505050")) // Dark gray
 	// StyleAgentStar is used for the AI indicator star (✦) in metadata lines.
 	StyleAgentStar = lipgloss.NewStyle().Foreground(lipgloss.Color("#B8860B")) // Dark goldenrod (muted yellow)
+
+	// Command output status indicators - softer circles instead of harsh checkmarks
+	// StyleStatusSuccess is for successful operations (green circle).
+	StyleStatusSuccess = lipgloss.NewStyle().Foreground(lipgloss.Color("#50C878")) // Emerald green
+	// StyleStatusError is for failed operations (red circle).
+	StyleStatusError = lipgloss.NewStyle().Foreground(lipgloss.Color("#E57373")) // Soft red
+	// StyleStatusWarning is for warnings or uncertain states (amber circle).
+	StyleStatusWarning = lipgloss.NewStyle().Foreground(lipgloss.Color("#FFB74D")) // Amber
+	// StyleStatusPending is for in-progress operations (blue circle).
+	StyleStatusPending = lipgloss.NewStyle().Foreground(lipgloss.Color("#64B5F6")) // Soft blue
+
+	// Output line threading - connects output to its command with matching colors
+	// StyleLineSuccess threads successful command output.
+	StyleLineSuccess = lipgloss.NewStyle().Foreground(lipgloss.Color("#3D7A4A")) // Muted green
+	// StyleLineError threads failed command output.
+	StyleLineError = lipgloss.NewStyle().Foreground(lipgloss.Color("#A84444")) // Muted red
+	// StyleLineWarning threads warning output.
+	StyleLineWarning = lipgloss.NewStyle().Foreground(lipgloss.Color("#B38B3D")) // Muted amber
+	// StyleLineDim threads neutral/info output.
+	StyleLineDim = lipgloss.NewStyle().Foreground(lipgloss.Color("#4A4A4A")) // Dark gray
 )
 
 // AIStarPrefix returns a styled AI indicator star for metadata footers.

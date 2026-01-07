@@ -52,6 +52,45 @@ func Silent(err error) error {
 	return &SilentError{Cause: err}
 }
 
+// ExitError carries a specific exit code for the CLI to use.
+// This allows commands to signal different exit codes (e.g., 130 for SIGINT,
+// or custom codes for partial success/failure scenarios).
+type ExitError struct {
+	Code  int   // Exit code to use (0 = success, 1 = error, 130 = interrupted, etc.)
+	Cause error // Underlying error (may be nil for non-error exit codes)
+}
+
+func (e *ExitError) Error() string {
+	if e == nil || e.Cause == nil {
+		return fmt.Sprintf("exit code %d", e.Code)
+	}
+	return e.Cause.Error()
+}
+
+func (e *ExitError) Unwrap() error { return e.Cause }
+
+// ExitCode returns the exit code from an error chain if present.
+// Returns 1 if error is non-nil but has no ExitError, or 0 if error is nil.
+func ExitCode(err error) int {
+	if err == nil {
+		return 0
+	}
+	var exitErr *ExitError
+	if errors.As(err, &exitErr) {
+		return exitErr.Code
+	}
+	return 1
+}
+
+// WithExitCode wraps an error with a specific exit code.
+// Returns nil if both err is nil and code is 0.
+func WithExitCode(err error, code int) error {
+	if err == nil && code == 0 {
+		return nil
+	}
+	return &ExitError{Code: code, Cause: err}
+}
+
 // PolicyError represents a policy evaluation or compilation failure.
 type PolicyError struct {
 	PolicyName string
