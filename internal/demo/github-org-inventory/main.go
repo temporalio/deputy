@@ -224,7 +224,7 @@ func scanRepo(ctx context.Context, target repoTarget, token string, inMemory boo
 	}
 	defer src.Close()
 
-	rows, err := inventoryFromWorkspace(ctx, target.name, src.Workspace, ecosystems, resolve)
+	rows, err := inventoryFromWorkspace(ctx, target.name, src.Workspace(), ecosystems, resolve)
 	logs.Info(ctx, "inventory complete",
 		"owner", target.org,
 		"name", target.name,

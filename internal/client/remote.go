@@ -17,6 +17,8 @@ import (
 	"github.com/picatz/deputy/gen/deputy/sbom/v1/sbomv1connect"
 	scanv1 "github.com/picatz/deputy/gen/deputy/scan/v1"
 	"github.com/picatz/deputy/gen/deputy/scan/v1/scanv1connect"
+	secretsv1 "github.com/picatz/deputy/gen/deputy/secrets/v1"
+	"github.com/picatz/deputy/gen/deputy/secrets/v1/secretsv1connect"
 )
 
 // Remote implements Client by communicating with a Deputy server via ConnectRPC.
@@ -26,6 +28,7 @@ type Remote struct {
 	listClient        listv1connect.ListServiceClient
 	sbomClient        sbomv1connect.SBOMServiceClient
 	remediationClient remediationv1connect.RemediationServiceClient
+	secretsClient     secretsv1connect.SecretsServiceClient
 	httpClient        *http.Client
 	addr              string
 	isDaemon          bool
@@ -67,6 +70,7 @@ func NewRemote(addr string, isDaemon bool) *Remote {
 		listClient:        listv1connect.NewListServiceClient(httpClient, baseURL),
 		sbomClient:        sbomv1connect.NewSBOMServiceClient(httpClient, baseURL),
 		remediationClient: remediationv1connect.NewRemediationServiceClient(httpClient, baseURL),
+		secretsClient:     secretsv1connect.NewSecretsServiceClient(httpClient, baseURL),
 		httpClient:        httpClient,
 		addr:              addr,
 		isDaemon:          isDaemon,
@@ -151,6 +155,44 @@ func (c *Remote) ListAgents(ctx context.Context, req *connect.Request[remediatio
 // ApproveStep approves or denies a pending remediation step.
 func (c *Remote) ApproveStep(ctx context.Context, req *connect.Request[remediationv1.ApproveStepRequest]) (*connect.Response[remediationv1.ApproveStepResponse], error) {
 	return c.remediationClient.ApproveStep(ctx, req)
+}
+
+// ============================================================================
+// Secrets Service
+// ============================================================================
+
+// ScanSecrets performs secret detection on a target.
+func (c *Remote) ScanSecrets(ctx context.Context, req *connect.Request[secretsv1.ScanRequest]) (*connect.Response[secretsv1.ScanResponse], error) {
+	return c.secretsClient.Scan(ctx, req)
+}
+
+// StreamScanSecrets performs secret detection with streaming progress updates.
+func (c *Remote) StreamScanSecrets(ctx context.Context, req *connect.Request[secretsv1.StreamScanRequest]) (Stream[secretsv1.ScanProgress], error) {
+	stream, err := c.secretsClient.StreamScan(ctx, req)
+	if err != nil {
+		return nil, err
+	}
+	return &connectStream[secretsv1.ScanProgress]{stream: stream}, nil
+}
+
+// ScanSecretsHistory scans git history for secrets.
+func (c *Remote) ScanSecretsHistory(ctx context.Context, req *connect.Request[secretsv1.ScanHistoryRequest]) (*connect.Response[secretsv1.ScanHistoryResponse], error) {
+	return c.secretsClient.ScanHistory(ctx, req)
+}
+
+// ScanSecretsDiff scans changes between two git refs for secrets.
+func (c *Remote) ScanSecretsDiff(ctx context.Context, req *connect.Request[secretsv1.ScanDiffRequest]) (*connect.Response[secretsv1.ScanDiffResponse], error) {
+	return c.secretsClient.ScanDiff(ctx, req)
+}
+
+// VerifySecrets attempts to validate detected secrets.
+func (c *Remote) VerifySecrets(ctx context.Context, req *connect.Request[secretsv1.VerifyRequest]) (*connect.Response[secretsv1.VerifyResponse], error) {
+	return c.secretsClient.Verify(ctx, req)
+}
+
+// ListDetectors returns available secret detectors.
+func (c *Remote) ListDetectors(ctx context.Context, req *connect.Request[secretsv1.ListDetectorsRequest]) (*connect.Response[secretsv1.ListDetectorsResponse], error) {
+	return c.secretsClient.ListDetectors(ctx, req)
 }
 
 // Mode returns the client's execution mode.

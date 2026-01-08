@@ -394,7 +394,7 @@ func runDiffAnalysis(ctx context.Context, service *scan.Service, repoPath, baseR
 	var targetHash *plumbing.Hash
 
 	if isWorkingPseudoRef(targetRef) {
-		tp, err := inv.ScanPackagesWorking(ctx, repoSrc.Workspace, scanOpts)
+		tp, err := inv.ScanPackagesWorking(ctx, repoSrc.Workspace(), scanOpts)
 		if err != nil {
 			otel.SetSpanError(span, err)
 			return fmt.Errorf("error scanning working tree packages: %w", err)
@@ -435,8 +435,8 @@ func runDiffAnalysis(ctx context.Context, service *scan.Service, repoPath, baseR
 	var targetManifestRes scan.ManifestResolver
 	switch {
 	case isWorkingPseudoRef(targetRef):
-		targetGoDirect = compare.CollectGoDirectModulesFromWorkspace(repoSrc.Workspace)
-		targetManifestRes = scan.NewWorkspaceManifestResolver(repoSrc.Workspace)
+		targetGoDirect = compare.CollectGoDirectModulesFromWorkspace(repoSrc.Workspace())
+		targetManifestRes = scan.NewWorkspaceManifestResolver(repoSrc.Workspace())
 	case targetHash != nil:
 		if direct, err := compare.CollectGoDirectModulesFromCommit(repo, *targetHash); err == nil {
 			targetGoDirect = direct
@@ -444,8 +444,8 @@ func runDiffAnalysis(ctx context.Context, service *scan.Service, repoPath, baseR
 		targetManifestRes = scan.NewGitManifestResolver(repo, *targetHash)
 	default:
 		// Fallback: use workspace for current state
-		targetGoDirect = compare.CollectGoDirectModulesFromWorkspace(repoSrc.Workspace)
-		targetManifestRes = scan.NewWorkspaceManifestResolver(repoSrc.Workspace)
+		targetGoDirect = compare.CollectGoDirectModulesFromWorkspace(repoSrc.Workspace())
+		targetManifestRes = scan.NewWorkspaceManifestResolver(repoSrc.Workspace())
 	}
 
 	targetPkgInputs := scan.PackagesToInputs(targetPackages, scan.PackageInputOptions{GoDirect: targetGoDirect, Resolver: targetManifestRes})
@@ -453,8 +453,8 @@ func runDiffAnalysis(ctx context.Context, service *scan.Service, repoPath, baseR
 	baseGoDirect := map[string]bool{"stdlib": true}
 	var baseManifestRes scan.ManifestResolver
 	if isWorkingPseudoRef(baseRef) {
-		baseGoDirect = compare.CollectGoDirectModulesFromWorkspace(repoSrc.Workspace)
-		baseManifestRes = scan.NewWorkspaceManifestResolver(repoSrc.Workspace)
+		baseGoDirect = compare.CollectGoDirectModulesFromWorkspace(repoSrc.Workspace())
+		baseManifestRes = scan.NewWorkspaceManifestResolver(repoSrc.Workspace())
 	} else {
 		baseManifestRes = scan.NewGitManifestResolver(repo, *baseHash)
 		if direct, err := compare.CollectGoDirectModulesFromCommit(repo, *baseHash); err == nil {
@@ -469,7 +469,7 @@ func runDiffAnalysis(ctx context.Context, service *scan.Service, repoPath, baseR
 	pkgInputs := targetPkgInputs
 
 	// Collect main modules to exclude from comparison (the project itself shouldn't appear as a dependency)
-	excludeMainModules := compare.CollectMainModulesFromWorkspace(repoSrc.Workspace)
+	excludeMainModules := compare.CollectMainModulesFromWorkspace(repoSrc.Workspace())
 	if baseHash != nil {
 		if baseMains, err := compare.CollectMainModulesFromCommit(repo, *baseHash); err == nil {
 			for mod := range baseMains {
@@ -515,7 +515,7 @@ func runDiffAnalysis(ctx context.Context, service *scan.Service, repoPath, baseR
 	// Detailed dependency change rendering (legacy style) with optional enrichment
 	// Skip text rendering in JSON mode
 	if !isJSON {
-		displayDetailedDependencyChanges(ctx, repoSrc.Workspace, changes, enrichLicenses, licenseSource, outW, errW)
+		displayDetailedDependencyChanges(ctx, repoSrc.Workspace(), changes, enrichLicenses, licenseSource, outW, errW)
 	}
 
 	// Scan for vulnerabilities if enabled

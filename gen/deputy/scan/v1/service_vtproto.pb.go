@@ -8,6 +8,7 @@ import (
 	fmt "fmt"
 	v11 "github.com/picatz/deputy/gen/deputy/dependency/v1"
 	v13 "github.com/picatz/deputy/gen/deputy/policy/v1"
+	v14 "github.com/picatz/deputy/gen/deputy/secrets/v1"
 	v1 "github.com/picatz/deputy/gen/deputy/target/v1"
 	v12 "github.com/picatz/deputy/gen/deputy/vulnerability/v1"
 	protohelpers "github.com/planetscale/vtprotobuf/protohelpers"
@@ -458,6 +459,28 @@ func (m *ScanResponse) MarshalToSizedBufferVT(dAtA []byte) (int, error) {
 	if m.unknownFields != nil {
 		i -= len(m.unknownFields)
 		copy(dAtA[i:], m.unknownFields)
+	}
+	if m.SecretStats != nil {
+		size, err := m.SecretStats.MarshalToSizedBufferVT(dAtA[:i])
+		if err != nil {
+			return 0, err
+		}
+		i -= size
+		i = protohelpers.EncodeVarint(dAtA, i, uint64(size))
+		i--
+		dAtA[i] = 0x62
+	}
+	if len(m.SecretFindings) > 0 {
+		for iNdEx := len(m.SecretFindings) - 1; iNdEx >= 0; iNdEx-- {
+			size, err := m.SecretFindings[iNdEx].MarshalToSizedBufferVT(dAtA[:i])
+			if err != nil {
+				return 0, err
+			}
+			i -= size
+			i = protohelpers.EncodeVarint(dAtA, i, uint64(size))
+			i--
+			dAtA[i] = 0x5a
+		}
 	}
 	if m.ImageInfo != nil {
 		size, err := m.ImageInfo.MarshalToSizedBufferVT(dAtA[:i])
@@ -1251,6 +1274,16 @@ func (m *ScanResponse) SizeVT() (n int) {
 	}
 	if m.ImageInfo != nil {
 		l = m.ImageInfo.SizeVT()
+		n += 1 + l + protohelpers.SizeOfVarint(uint64(l))
+	}
+	if len(m.SecretFindings) > 0 {
+		for _, e := range m.SecretFindings {
+			l = e.SizeVT()
+			n += 1 + l + protohelpers.SizeOfVarint(uint64(l))
+		}
+	}
+	if m.SecretStats != nil {
+		l = m.SecretStats.SizeVT()
 		n += 1 + l + protohelpers.SizeOfVarint(uint64(l))
 	}
 	n += len(m.unknownFields)
@@ -2887,6 +2920,76 @@ func (m *ScanResponse) UnmarshalVT(dAtA []byte) error {
 				m.ImageInfo = &ImageInfo{}
 			}
 			if err := m.ImageInfo.UnmarshalVT(dAtA[iNdEx:postIndex]); err != nil {
+				return err
+			}
+			iNdEx = postIndex
+		case 11:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field SecretFindings", wireType)
+			}
+			var msglen int
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return protohelpers.ErrIntOverflow
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				msglen |= int(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			if msglen < 0 {
+				return protohelpers.ErrInvalidLength
+			}
+			postIndex := iNdEx + msglen
+			if postIndex < 0 {
+				return protohelpers.ErrInvalidLength
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.SecretFindings = append(m.SecretFindings, &v14.Finding{})
+			if err := m.SecretFindings[len(m.SecretFindings)-1].UnmarshalVT(dAtA[iNdEx:postIndex]); err != nil {
+				return err
+			}
+			iNdEx = postIndex
+		case 12:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field SecretStats", wireType)
+			}
+			var msglen int
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return protohelpers.ErrIntOverflow
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				msglen |= int(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			if msglen < 0 {
+				return protohelpers.ErrInvalidLength
+			}
+			postIndex := iNdEx + msglen
+			if postIndex < 0 {
+				return protohelpers.ErrInvalidLength
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			if m.SecretStats == nil {
+				m.SecretStats = &v14.Stats{}
+			}
+			if err := m.SecretStats.UnmarshalVT(dAtA[iNdEx:postIndex]); err != nil {
 				return err
 			}
 			iNdEx = postIndex

@@ -63,8 +63,8 @@ func (localGitProvider) Open(ctx context.Context, target string, opts map[string
 		return targets.Materialized{}, err
 	}
 	mat := targets.Materialized{
-		FS:   src.Workspace,
-		Path: src.Workspace.RootPath(),
+		FS:   src.Workspace(),
+		Path: src.Workspace().RootPath(),
 		Meta: targets.Descriptor{
 			Kind:    targets.KindGit,
 			Target:  target,
@@ -184,8 +184,8 @@ func (remoteGitProvider) Open(ctx context.Context, target string, opts map[strin
 		prov["ref"] = ref
 	}
 	mat := targets.Materialized{
-		FS:   src.Workspace,
-		Path: src.Workspace.RootPath(),
+		FS:   src.Workspace(),
+		Path: src.Workspace().RootPath(),
 		Meta: targets.Descriptor{
 			Kind:       targets.KindGit,
 			Target:     target,

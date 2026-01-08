@@ -192,7 +192,7 @@ func Generate(ctx context.Context, repoRef string, opts Options) (Result, error)
 		effRef = "HEAD~0"
 	}
 
-	pkgs, err := collectInventorySBOM(ctx, src.Repo, src.Workspace, effRef, inventory.ScanOptions{Ecosystems: opts.Ecosystems})
+	pkgs, err := collectInventorySBOM(ctx, src.Repo, src.Workspace(), effRef, inventory.ScanOptions{Ecosystems: opts.Ecosystems})
 	if err != nil {
 		otel.SetSpanError(span, err)
 		return Result{}, err
@@ -201,14 +201,14 @@ func Generate(ctx context.Context, repoRef string, opts Options) (Result, error)
 	var directDeps map[string]bool
 	switch {
 	case strings.EqualFold(effRef, "HEAD") || strings.EqualFold(effRef, "HEAD~0"):
-		directDeps = compare.CollectGoDirectModulesFromWorkspace(src.Workspace)
+		directDeps = compare.CollectGoDirectModulesFromWorkspace(src.Workspace())
 	default:
 		if hash, err := gitx.ResolveRevisionEnhanced(src.Repo, effRef); err == nil {
 			directDeps, _ = compare.CollectGoDirectModulesFromCommit(src.Repo, *hash)
 		}
 	}
 
-	doc, err := buildProtobomDocument(ctx, src.Workspace, repoRef, opts.Ref, opts.Name, pkgs, directDeps)
+	doc, err := buildProtobomDocument(ctx, src.Workspace(), repoRef, opts.Ref, opts.Name, pkgs, directDeps)
 	if err != nil {
 		return Result{}, err
 	}
@@ -220,7 +220,7 @@ func Generate(ctx context.Context, repoRef string, opts Options) (Result, error)
 				return Result{}, err
 			}
 		case "scan":
-			if err := enrichProtobomLicensesScanLocal(ctx, doc, src.Workspace); err != nil {
+			if err := enrichProtobomLicensesScanLocal(ctx, doc, src.Workspace()); err != nil {
 				return Result{}, err
 			}
 			fetcher := &remoteFetcher{Timeout: remoteLicenseFetchTimeout}
@@ -231,7 +231,7 @@ func Generate(ctx context.Context, repoRef string, opts Options) (Result, error)
 			if err := enrichProtobomLicensesDepsDev(ctx, doc); err != nil {
 				return Result{}, err
 			}
-			if err := enrichProtobomLicensesScanLocal(ctx, doc, src.Workspace); err != nil {
+			if err := enrichProtobomLicensesScanLocal(ctx, doc, src.Workspace()); err != nil {
 				return Result{}, err
 			}
 			fetcher := &remoteFetcher{Timeout: remoteLicenseFetchTimeout}

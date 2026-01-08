@@ -12,6 +12,8 @@ package containerv1
 import (
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
+	durationpb "google.golang.org/protobuf/types/known/durationpb"
+	timestamppb "google.golang.org/protobuf/types/known/timestamppb"
 	reflect "reflect"
 	sync "sync"
 	unsafe "unsafe"
@@ -106,17 +108,572 @@ func (x *LayerDetails) GetInBaseImage() bool {
 	return false
 }
 
+// ImageInfo combines configuration and metadata for a container image.
+// This is the complete image data extracted from OCI/Docker images.
+type ImageInfo struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Config contains the image configuration (Dockerfile runtime settings).
+	Config *ImageConfig `protobuf:"bytes,1,opt,name=config,proto3" json:"config,omitempty"`
+	// Metadata contains image metadata (architecture, OS, layers).
+	Metadata *ImageMetadata `protobuf:"bytes,2,opt,name=metadata,proto3" json:"metadata,omitempty"`
+	// History contains build history entries showing Dockerfile commands.
+	History       []*HistoryEntry `protobuf:"bytes,3,rep,name=history,proto3" json:"history,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ImageInfo) Reset() {
+	*x = ImageInfo{}
+	mi := &file_deputy_container_v1_container_proto_msgTypes[1]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ImageInfo) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ImageInfo) ProtoMessage() {}
+
+func (x *ImageInfo) ProtoReflect() protoreflect.Message {
+	mi := &file_deputy_container_v1_container_proto_msgTypes[1]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ImageInfo.ProtoReflect.Descriptor instead.
+func (*ImageInfo) Descriptor() ([]byte, []int) {
+	return file_deputy_container_v1_container_proto_rawDescGZIP(), []int{1}
+}
+
+func (x *ImageInfo) GetConfig() *ImageConfig {
+	if x != nil {
+		return x.Config
+	}
+	return nil
+}
+
+func (x *ImageInfo) GetMetadata() *ImageMetadata {
+	if x != nil {
+		return x.Metadata
+	}
+	return nil
+}
+
+func (x *ImageInfo) GetHistory() []*HistoryEntry {
+	if x != nil {
+		return x.History
+	}
+	return nil
+}
+
+// ImageConfig represents the extracted configuration from a container image.
+type ImageConfig struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// User is the user (and optionally group) to run container processes as.
+	// An empty value means root, which is a security concern.
+	User string `protobuf:"bytes,1,opt,name=user,proto3" json:"user,omitempty"`
+	// IsRoot indicates whether the image runs as root.
+	IsRoot bool `protobuf:"varint,2,opt,name=is_root,json=isRoot,proto3" json:"is_root,omitempty"`
+	// Env contains environment variables set in the image.
+	Env []string `protobuf:"bytes,3,rep,name=env,proto3" json:"env,omitempty"`
+	// SensitiveEnv lists environment variable names that may contain secrets.
+	SensitiveEnv []string `protobuf:"bytes,4,rep,name=sensitive_env,json=sensitiveEnv,proto3" json:"sensitive_env,omitempty"`
+	// Entrypoint is the command that runs when the container starts.
+	Entrypoint []string `protobuf:"bytes,5,rep,name=entrypoint,proto3" json:"entrypoint,omitempty"`
+	// Cmd provides default arguments to Entrypoint.
+	Cmd []string `protobuf:"bytes,6,rep,name=cmd,proto3" json:"cmd,omitempty"`
+	// WorkingDir is the working directory for commands.
+	WorkingDir string `protobuf:"bytes,7,opt,name=working_dir,json=workingDir,proto3" json:"working_dir,omitempty"`
+	// ExposedPorts lists ports the container exposes.
+	ExposedPorts []string `protobuf:"bytes,8,rep,name=exposed_ports,json=exposedPorts,proto3" json:"exposed_ports,omitempty"`
+	// Volumes lists mount points defined in the image.
+	Volumes []string `protobuf:"bytes,9,rep,name=volumes,proto3" json:"volumes,omitempty"`
+	// Labels are key-value metadata on the image.
+	Labels map[string]string `protobuf:"bytes,10,rep,name=labels,proto3" json:"labels,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
+	// Shell is the default shell for RUN commands.
+	Shell []string `protobuf:"bytes,11,rep,name=shell,proto3" json:"shell,omitempty"`
+	// StopSignal is the signal to stop the container.
+	StopSignal string `protobuf:"bytes,12,opt,name=stop_signal,json=stopSignal,proto3" json:"stop_signal,omitempty"`
+	// Healthcheck configuration if defined.
+	Healthcheck *HealthcheckConfig `protobuf:"bytes,13,opt,name=healthcheck,proto3" json:"healthcheck,omitempty"`
+	// OnBuild contains ONBUILD instructions for child images.
+	OnBuild       []string `protobuf:"bytes,14,rep,name=on_build,json=onBuild,proto3" json:"on_build,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ImageConfig) Reset() {
+	*x = ImageConfig{}
+	mi := &file_deputy_container_v1_container_proto_msgTypes[2]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ImageConfig) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ImageConfig) ProtoMessage() {}
+
+func (x *ImageConfig) ProtoReflect() protoreflect.Message {
+	mi := &file_deputy_container_v1_container_proto_msgTypes[2]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ImageConfig.ProtoReflect.Descriptor instead.
+func (*ImageConfig) Descriptor() ([]byte, []int) {
+	return file_deputy_container_v1_container_proto_rawDescGZIP(), []int{2}
+}
+
+func (x *ImageConfig) GetUser() string {
+	if x != nil {
+		return x.User
+	}
+	return ""
+}
+
+func (x *ImageConfig) GetIsRoot() bool {
+	if x != nil {
+		return x.IsRoot
+	}
+	return false
+}
+
+func (x *ImageConfig) GetEnv() []string {
+	if x != nil {
+		return x.Env
+	}
+	return nil
+}
+
+func (x *ImageConfig) GetSensitiveEnv() []string {
+	if x != nil {
+		return x.SensitiveEnv
+	}
+	return nil
+}
+
+func (x *ImageConfig) GetEntrypoint() []string {
+	if x != nil {
+		return x.Entrypoint
+	}
+	return nil
+}
+
+func (x *ImageConfig) GetCmd() []string {
+	if x != nil {
+		return x.Cmd
+	}
+	return nil
+}
+
+func (x *ImageConfig) GetWorkingDir() string {
+	if x != nil {
+		return x.WorkingDir
+	}
+	return ""
+}
+
+func (x *ImageConfig) GetExposedPorts() []string {
+	if x != nil {
+		return x.ExposedPorts
+	}
+	return nil
+}
+
+func (x *ImageConfig) GetVolumes() []string {
+	if x != nil {
+		return x.Volumes
+	}
+	return nil
+}
+
+func (x *ImageConfig) GetLabels() map[string]string {
+	if x != nil {
+		return x.Labels
+	}
+	return nil
+}
+
+func (x *ImageConfig) GetShell() []string {
+	if x != nil {
+		return x.Shell
+	}
+	return nil
+}
+
+func (x *ImageConfig) GetStopSignal() string {
+	if x != nil {
+		return x.StopSignal
+	}
+	return ""
+}
+
+func (x *ImageConfig) GetHealthcheck() *HealthcheckConfig {
+	if x != nil {
+		return x.Healthcheck
+	}
+	return nil
+}
+
+func (x *ImageConfig) GetOnBuild() []string {
+	if x != nil {
+		return x.OnBuild
+	}
+	return nil
+}
+
+// HealthcheckConfig represents container health check configuration.
+type HealthcheckConfig struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Test is the health check command.
+	Test []string `protobuf:"bytes,1,rep,name=test,proto3" json:"test,omitempty"`
+	// Interval is the time between health checks.
+	Interval *durationpb.Duration `protobuf:"bytes,2,opt,name=interval,proto3" json:"interval,omitempty"`
+	// Timeout is the maximum time for a health check.
+	Timeout *durationpb.Duration `protobuf:"bytes,3,opt,name=timeout,proto3" json:"timeout,omitempty"`
+	// Retries is the number of consecutive failures before unhealthy.
+	Retries       int32 `protobuf:"varint,4,opt,name=retries,proto3" json:"retries,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *HealthcheckConfig) Reset() {
+	*x = HealthcheckConfig{}
+	mi := &file_deputy_container_v1_container_proto_msgTypes[3]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *HealthcheckConfig) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*HealthcheckConfig) ProtoMessage() {}
+
+func (x *HealthcheckConfig) ProtoReflect() protoreflect.Message {
+	mi := &file_deputy_container_v1_container_proto_msgTypes[3]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use HealthcheckConfig.ProtoReflect.Descriptor instead.
+func (*HealthcheckConfig) Descriptor() ([]byte, []int) {
+	return file_deputy_container_v1_container_proto_rawDescGZIP(), []int{3}
+}
+
+func (x *HealthcheckConfig) GetTest() []string {
+	if x != nil {
+		return x.Test
+	}
+	return nil
+}
+
+func (x *HealthcheckConfig) GetInterval() *durationpb.Duration {
+	if x != nil {
+		return x.Interval
+	}
+	return nil
+}
+
+func (x *HealthcheckConfig) GetTimeout() *durationpb.Duration {
+	if x != nil {
+		return x.Timeout
+	}
+	return nil
+}
+
+func (x *HealthcheckConfig) GetRetries() int32 {
+	if x != nil {
+		return x.Retries
+	}
+	return 0
+}
+
+// ImageMetadata contains additional metadata about the image.
+type ImageMetadata struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Architecture is the CPU architecture (e.g., amd64, arm64).
+	Architecture string `protobuf:"bytes,1,opt,name=architecture,proto3" json:"architecture,omitempty"`
+	// OS is the operating system (e.g., linux, windows).
+	Os string `protobuf:"bytes,2,opt,name=os,proto3" json:"os,omitempty"`
+	// OSVersion is the OS version if specified.
+	OsVersion string `protobuf:"bytes,3,opt,name=os_version,json=osVersion,proto3" json:"os_version,omitempty"`
+	// Variant is the architecture variant (e.g., v8 for arm64).
+	Variant string `protobuf:"bytes,4,opt,name=variant,proto3" json:"variant,omitempty"`
+	// Created is when the image was created.
+	Created *timestamppb.Timestamp `protobuf:"bytes,5,opt,name=created,proto3" json:"created,omitempty"`
+	// Author is the image author if specified.
+	Author string `protobuf:"bytes,6,opt,name=author,proto3" json:"author,omitempty"`
+	// DockerVersion is the Docker version used to build the image.
+	DockerVersion string `protobuf:"bytes,7,opt,name=docker_version,json=dockerVersion,proto3" json:"docker_version,omitempty"`
+	// LayerCount is the number of layers in the image.
+	LayerCount int32 `protobuf:"varint,8,opt,name=layer_count,json=layerCount,proto3" json:"layer_count,omitempty"`
+	// Size is the total size of all layers in bytes.
+	Size int64 `protobuf:"varint,9,opt,name=size,proto3" json:"size,omitempty"`
+	// Digest is the image manifest digest.
+	Digest        string `protobuf:"bytes,10,opt,name=digest,proto3" json:"digest,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ImageMetadata) Reset() {
+	*x = ImageMetadata{}
+	mi := &file_deputy_container_v1_container_proto_msgTypes[4]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ImageMetadata) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ImageMetadata) ProtoMessage() {}
+
+func (x *ImageMetadata) ProtoReflect() protoreflect.Message {
+	mi := &file_deputy_container_v1_container_proto_msgTypes[4]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ImageMetadata.ProtoReflect.Descriptor instead.
+func (*ImageMetadata) Descriptor() ([]byte, []int) {
+	return file_deputy_container_v1_container_proto_rawDescGZIP(), []int{4}
+}
+
+func (x *ImageMetadata) GetArchitecture() string {
+	if x != nil {
+		return x.Architecture
+	}
+	return ""
+}
+
+func (x *ImageMetadata) GetOs() string {
+	if x != nil {
+		return x.Os
+	}
+	return ""
+}
+
+func (x *ImageMetadata) GetOsVersion() string {
+	if x != nil {
+		return x.OsVersion
+	}
+	return ""
+}
+
+func (x *ImageMetadata) GetVariant() string {
+	if x != nil {
+		return x.Variant
+	}
+	return ""
+}
+
+func (x *ImageMetadata) GetCreated() *timestamppb.Timestamp {
+	if x != nil {
+		return x.Created
+	}
+	return nil
+}
+
+func (x *ImageMetadata) GetAuthor() string {
+	if x != nil {
+		return x.Author
+	}
+	return ""
+}
+
+func (x *ImageMetadata) GetDockerVersion() string {
+	if x != nil {
+		return x.DockerVersion
+	}
+	return ""
+}
+
+func (x *ImageMetadata) GetLayerCount() int32 {
+	if x != nil {
+		return x.LayerCount
+	}
+	return 0
+}
+
+func (x *ImageMetadata) GetSize() int64 {
+	if x != nil {
+		return x.Size
+	}
+	return 0
+}
+
+func (x *ImageMetadata) GetDigest() string {
+	if x != nil {
+		return x.Digest
+	}
+	return ""
+}
+
+// HistoryEntry represents a single layer's history/build command.
+type HistoryEntry struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// CreatedBy is the command that created this layer.
+	CreatedBy string `protobuf:"bytes,1,opt,name=created_by,json=createdBy,proto3" json:"created_by,omitempty"`
+	// Created is when this layer was created.
+	Created *timestamppb.Timestamp `protobuf:"bytes,2,opt,name=created,proto3" json:"created,omitempty"`
+	// Comment is an optional comment about the layer.
+	Comment string `protobuf:"bytes,3,opt,name=comment,proto3" json:"comment,omitempty"`
+	// EmptyLayer indicates this is a metadata-only layer.
+	EmptyLayer    bool `protobuf:"varint,4,opt,name=empty_layer,json=emptyLayer,proto3" json:"empty_layer,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *HistoryEntry) Reset() {
+	*x = HistoryEntry{}
+	mi := &file_deputy_container_v1_container_proto_msgTypes[5]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *HistoryEntry) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*HistoryEntry) ProtoMessage() {}
+
+func (x *HistoryEntry) ProtoReflect() protoreflect.Message {
+	mi := &file_deputy_container_v1_container_proto_msgTypes[5]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use HistoryEntry.ProtoReflect.Descriptor instead.
+func (*HistoryEntry) Descriptor() ([]byte, []int) {
+	return file_deputy_container_v1_container_proto_rawDescGZIP(), []int{5}
+}
+
+func (x *HistoryEntry) GetCreatedBy() string {
+	if x != nil {
+		return x.CreatedBy
+	}
+	return ""
+}
+
+func (x *HistoryEntry) GetCreated() *timestamppb.Timestamp {
+	if x != nil {
+		return x.Created
+	}
+	return nil
+}
+
+func (x *HistoryEntry) GetComment() string {
+	if x != nil {
+		return x.Comment
+	}
+	return ""
+}
+
+func (x *HistoryEntry) GetEmptyLayer() bool {
+	if x != nil {
+		return x.EmptyLayer
+	}
+	return false
+}
+
 var File_deputy_container_v1_container_proto protoreflect.FileDescriptor
 
 const file_deputy_container_v1_container_proto_rawDesc = "" +
 	"\n" +
-	"#deputy/container/v1/container.proto\x12\x13deputy.container.v1\"\x96\x01\n" +
+	"#deputy/container/v1/container.proto\x12\x13deputy.container.v1\x1a\x1egoogle/protobuf/duration.proto\x1a\x1fgoogle/protobuf/timestamp.proto\"\x96\x01\n" +
 	"\fLayerDetails\x12\x14\n" +
 	"\x05index\x18\x01 \x01(\x05R\x05index\x12\x17\n" +
 	"\adiff_id\x18\x02 \x01(\tR\x06diffId\x12\x19\n" +
 	"\bchain_id\x18\x03 \x01(\tR\achainId\x12\x18\n" +
 	"\acommand\x18\x04 \x01(\tR\acommand\x12\"\n" +
-	"\rin_base_image\x18\x05 \x01(\bR\vinBaseImageB\xd5\x01\n" +
+	"\rin_base_image\x18\x05 \x01(\bR\vinBaseImage\"\xc2\x01\n" +
+	"\tImageInfo\x128\n" +
+	"\x06config\x18\x01 \x01(\v2 .deputy.container.v1.ImageConfigR\x06config\x12>\n" +
+	"\bmetadata\x18\x02 \x01(\v2\".deputy.container.v1.ImageMetadataR\bmetadata\x12;\n" +
+	"\ahistory\x18\x03 \x03(\v2!.deputy.container.v1.HistoryEntryR\ahistory\"\xa0\x04\n" +
+	"\vImageConfig\x12\x12\n" +
+	"\x04user\x18\x01 \x01(\tR\x04user\x12\x17\n" +
+	"\ais_root\x18\x02 \x01(\bR\x06isRoot\x12\x10\n" +
+	"\x03env\x18\x03 \x03(\tR\x03env\x12#\n" +
+	"\rsensitive_env\x18\x04 \x03(\tR\fsensitiveEnv\x12\x1e\n" +
+	"\n" +
+	"entrypoint\x18\x05 \x03(\tR\n" +
+	"entrypoint\x12\x10\n" +
+	"\x03cmd\x18\x06 \x03(\tR\x03cmd\x12\x1f\n" +
+	"\vworking_dir\x18\a \x01(\tR\n" +
+	"workingDir\x12#\n" +
+	"\rexposed_ports\x18\b \x03(\tR\fexposedPorts\x12\x18\n" +
+	"\avolumes\x18\t \x03(\tR\avolumes\x12D\n" +
+	"\x06labels\x18\n" +
+	" \x03(\v2,.deputy.container.v1.ImageConfig.LabelsEntryR\x06labels\x12\x14\n" +
+	"\x05shell\x18\v \x03(\tR\x05shell\x12\x1f\n" +
+	"\vstop_signal\x18\f \x01(\tR\n" +
+	"stopSignal\x12H\n" +
+	"\vhealthcheck\x18\r \x01(\v2&.deputy.container.v1.HealthcheckConfigR\vhealthcheck\x12\x19\n" +
+	"\bon_build\x18\x0e \x03(\tR\aonBuild\x1a9\n" +
+	"\vLabelsEntry\x12\x10\n" +
+	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\xad\x01\n" +
+	"\x11HealthcheckConfig\x12\x12\n" +
+	"\x04test\x18\x01 \x03(\tR\x04test\x125\n" +
+	"\binterval\x18\x02 \x01(\v2\x19.google.protobuf.DurationR\binterval\x123\n" +
+	"\atimeout\x18\x03 \x01(\v2\x19.google.protobuf.DurationR\atimeout\x12\x18\n" +
+	"\aretries\x18\x04 \x01(\x05R\aretries\"\xbe\x02\n" +
+	"\rImageMetadata\x12\"\n" +
+	"\farchitecture\x18\x01 \x01(\tR\farchitecture\x12\x0e\n" +
+	"\x02os\x18\x02 \x01(\tR\x02os\x12\x1d\n" +
+	"\n" +
+	"os_version\x18\x03 \x01(\tR\tosVersion\x12\x18\n" +
+	"\avariant\x18\x04 \x01(\tR\avariant\x124\n" +
+	"\acreated\x18\x05 \x01(\v2\x1a.google.protobuf.TimestampR\acreated\x12\x16\n" +
+	"\x06author\x18\x06 \x01(\tR\x06author\x12%\n" +
+	"\x0edocker_version\x18\a \x01(\tR\rdockerVersion\x12\x1f\n" +
+	"\vlayer_count\x18\b \x01(\x05R\n" +
+	"layerCount\x12\x12\n" +
+	"\x04size\x18\t \x01(\x03R\x04size\x12\x16\n" +
+	"\x06digest\x18\n" +
+	" \x01(\tR\x06digest\"\x9e\x01\n" +
+	"\fHistoryEntry\x12\x1d\n" +
+	"\n" +
+	"created_by\x18\x01 \x01(\tR\tcreatedBy\x124\n" +
+	"\acreated\x18\x02 \x01(\v2\x1a.google.protobuf.TimestampR\acreated\x12\x18\n" +
+	"\acomment\x18\x03 \x01(\tR\acomment\x12\x1f\n" +
+	"\vempty_layer\x18\x04 \x01(\bR\n" +
+	"emptyLayerB\xd5\x01\n" +
 	"\x17com.deputy.container.v1B\x0eContainerProtoP\x01Z<github.com/picatz/deputy/gen/deputy/container/v1;containerv1\xa2\x02\x03DCX\xaa\x02\x13Deputy.Container.V1\xca\x02\x13Deputy\\Container\\V1\xe2\x02\x1fDeputy\\Container\\V1\\GPBMetadata\xea\x02\x15Deputy::Container::V1b\x06proto3"
 
 var (
@@ -131,16 +688,33 @@ func file_deputy_container_v1_container_proto_rawDescGZIP() []byte {
 	return file_deputy_container_v1_container_proto_rawDescData
 }
 
-var file_deputy_container_v1_container_proto_msgTypes = make([]protoimpl.MessageInfo, 1)
+var file_deputy_container_v1_container_proto_msgTypes = make([]protoimpl.MessageInfo, 7)
 var file_deputy_container_v1_container_proto_goTypes = []any{
-	(*LayerDetails)(nil), // 0: deputy.container.v1.LayerDetails
+	(*LayerDetails)(nil),          // 0: deputy.container.v1.LayerDetails
+	(*ImageInfo)(nil),             // 1: deputy.container.v1.ImageInfo
+	(*ImageConfig)(nil),           // 2: deputy.container.v1.ImageConfig
+	(*HealthcheckConfig)(nil),     // 3: deputy.container.v1.HealthcheckConfig
+	(*ImageMetadata)(nil),         // 4: deputy.container.v1.ImageMetadata
+	(*HistoryEntry)(nil),          // 5: deputy.container.v1.HistoryEntry
+	nil,                           // 6: deputy.container.v1.ImageConfig.LabelsEntry
+	(*durationpb.Duration)(nil),   // 7: google.protobuf.Duration
+	(*timestamppb.Timestamp)(nil), // 8: google.protobuf.Timestamp
 }
 var file_deputy_container_v1_container_proto_depIdxs = []int32{
-	0, // [0:0] is the sub-list for method output_type
-	0, // [0:0] is the sub-list for method input_type
-	0, // [0:0] is the sub-list for extension type_name
-	0, // [0:0] is the sub-list for extension extendee
-	0, // [0:0] is the sub-list for field type_name
+	2, // 0: deputy.container.v1.ImageInfo.config:type_name -> deputy.container.v1.ImageConfig
+	4, // 1: deputy.container.v1.ImageInfo.metadata:type_name -> deputy.container.v1.ImageMetadata
+	5, // 2: deputy.container.v1.ImageInfo.history:type_name -> deputy.container.v1.HistoryEntry
+	6, // 3: deputy.container.v1.ImageConfig.labels:type_name -> deputy.container.v1.ImageConfig.LabelsEntry
+	3, // 4: deputy.container.v1.ImageConfig.healthcheck:type_name -> deputy.container.v1.HealthcheckConfig
+	7, // 5: deputy.container.v1.HealthcheckConfig.interval:type_name -> google.protobuf.Duration
+	7, // 6: deputy.container.v1.HealthcheckConfig.timeout:type_name -> google.protobuf.Duration
+	8, // 7: deputy.container.v1.ImageMetadata.created:type_name -> google.protobuf.Timestamp
+	8, // 8: deputy.container.v1.HistoryEntry.created:type_name -> google.protobuf.Timestamp
+	9, // [9:9] is the sub-list for method output_type
+	9, // [9:9] is the sub-list for method input_type
+	9, // [9:9] is the sub-list for extension type_name
+	9, // [9:9] is the sub-list for extension extendee
+	0, // [0:9] is the sub-list for field type_name
 }
 
 func init() { file_deputy_container_v1_container_proto_init() }
@@ -154,7 +728,7 @@ func file_deputy_container_v1_container_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_deputy_container_v1_container_proto_rawDesc), len(file_deputy_container_v1_container_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   1,
+			NumMessages:   7,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

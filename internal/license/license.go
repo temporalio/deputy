@@ -449,7 +449,7 @@ func RemoteModuleLicenseScan(ctx context.Context, modulePath, version string) []
 					}
 					if src, err := repository.CloneInMemory(ctx, opts); err == nil {
 						defer src.Close()
-						ids = LocalRepoLicenseScan(src.Workspace)
+						ids = LocalRepoLicenseScan(src.Workspace())
 					}
 				}
 			}

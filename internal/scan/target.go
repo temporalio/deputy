@@ -60,7 +60,7 @@ func resolveTarget(ctx context.Context, targetInput, ref string) (*resolvedTarge
 	var ws workspace.FS
 	switch src := mat.Data.(type) {
 	case *repository.Source:
-		ws = src.Workspace
+		ws = src.Workspace()
 	case workspace.FS:
 		ws = src
 	}

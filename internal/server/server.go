@@ -19,6 +19,7 @@ import (
 	"github.com/picatz/deputy/gen/deputy/remediation/v1/remediationv1connect"
 	"github.com/picatz/deputy/gen/deputy/sbom/v1/sbomv1connect"
 	"github.com/picatz/deputy/gen/deputy/scan/v1/scanv1connect"
+	"github.com/picatz/deputy/gen/deputy/secrets/v1/secretsv1connect"
 	"github.com/picatz/deputy/internal/logs"
 	"github.com/picatz/deputy/internal/otel"
 	"github.com/picatz/deputy/internal/scan"
@@ -186,6 +187,7 @@ func New(cfg Config) *Server {
 	sbomHandler := NewSBOMHandler()
 	listHandler := NewListHandler(cfg.Scanner)
 	remediationHandler := NewRemediationHandler()
+	secretsHandler, _ := NewSecretsHandler()
 
 	// Register ConnectRPC handlers
 	scanPath, scanConnectHandler := scanv1connect.NewScanServiceHandler(
@@ -211,6 +213,12 @@ func New(cfg Config) *Server {
 		connect.WithInterceptors(interceptors...),
 	)
 	mux.Handle(remediationPath, remediationConnectHandler)
+
+	secretsPath, secretsConnectHandler := secretsv1connect.NewSecretsServiceHandler(
+		secretsHandler,
+		connect.WithInterceptors(interceptors...),
+	)
+	mux.Handle(secretsPath, secretsConnectHandler)
 
 	// Health check endpoint
 	mux.HandleFunc("/health", healthHandler)

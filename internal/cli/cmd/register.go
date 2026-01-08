@@ -52,7 +52,7 @@ func RegisterCommands(root *cobra.Command, deps Dependencies) {
 	AddListCommand(root, deps.Client)
 
 	// Security scanning commands
-	AddSecretsCommand(root)
+	AddSecretsCommand(root, deps.Client)
 
 	// Policy and enforcement commands
 	AddPolicyCommand(root)

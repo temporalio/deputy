@@ -27,6 +27,14 @@ import (
 
 // Scanner defines the interface for vulnerability scanning operations.
 // This interface enables dependency injection and testing of scan consumers.
+//
+// For inventory-only operations (list, sbom, graph), use the inventory package
+// directly instead of Scanner - this provides better separation of concerns:
+//
+//	import "github.com/picatz/deputy/internal/inventory"
+//	exec, err := inventory.Collect(ctx, target, opts)
+//
+// Scanner is focused on vulnerability scanning which requires OSV API queries.
 type Scanner interface {
 	// ScanRepository scans a repository target (local path or remote) for vulnerabilities.
 	ScanRepository(ctx context.Context, repoArg, ref string, refProvided bool, opts Options) (*Execution, error)
@@ -115,6 +123,227 @@ func (s *Service) queryOSV(ctx context.Context, inputs []osv.PkgInput) ([]vulner
 	return findings, advisories, err
 }
 
+// CollectInventoryRepository collects package inventory from a repository target.
+// This is the fast path (~70ms) for operations that don't need vulnerability data,
+// such as 'list', 'sbom', and 'graph' commands.
+func (s *Service) CollectInventoryRepository(ctx context.Context, repoArg, ref string, refProvided bool, opts InventoryOptions) (*InventoryExecution, error) {
+	startTime := time.Now()
+	ctx, span := otel.StartSpan(ctx, "deputy.inventory.repository",
+		trace.WithAttributes(
+			attribute.String("deputy.target.path", repoArg),
+			attribute.String("deputy.target.ref", ref),
+		))
+	defer span.End()
+
+	logs.Info(ctx, "collecting repository inventory", "target", repoArg, "ref", ref)
+
+	target, err := resolveTarget(ctx, repoArg, ref)
+	if err != nil {
+		logs.Error(ctx, "failed to resolve target", "error", err)
+		otel.SetSpanError(span, err)
+		return nil, err
+	}
+	ref = target.ref
+	span.SetAttributes(attribute.Bool("deputy.target.remote", target.cloned))
+
+	effRef := refOrHEAD(ref)
+	if strings.EqualFold(effRef, "HEAD") && refProvided {
+		effRef = "HEAD~0"
+	}
+
+	// Collect inventory
+	logs.Debug(ctx, "collecting package inventory", "path", target.localRepoPath, "ref", effRef)
+	pkgs, err := s.collectInventory(ctx, target.localRepoPath, effRef, inv.ScanOptions{Ecosystems: opts.Ecosystems})
+	if err != nil {
+		logs.Error(ctx, "failed to collect inventory", "error", err)
+		otel.SetSpanError(span, err)
+		target.cleanup()
+		return nil, fmt.Errorf("failed to collect inventory: %w", err)
+	}
+	span.SetAttributes(attribute.Int("deputy.package.count", len(pkgs)))
+
+	modInfo := resolveDirectModules(target.localRepoPath, effRef, target.workspace)
+
+	result := InventoryResult{
+		Target: Target{
+			Kind:         target.kind,
+			DisplayPath:  target.displayPath,
+			LocalPath:    target.localRepoPath,
+			Ref:          ref,
+			EffectiveRef: effRef,
+			Cloned:       target.cloned,
+			Provenance:   target.mat.Meta.Provenance,
+		},
+		GeneratedAt: time.Now().UTC(),
+		Inventory: Inventory{
+			Packages: pkgs,
+			Direct:   modInfo.goDirect,
+		},
+	}
+	result.Target.CommitHash, result.Target.OriginURL = getRepoMetadata(target.localRepoPath, ref)
+
+	logs.Info(ctx, "inventory collection completed",
+		"packages_found", len(pkgs),
+		"duration_ms", time.Since(startTime).Milliseconds(),
+	)
+
+	return &InventoryExecution{Result: result, cleanup: target.cleanup}, nil
+}
+
+// CollectInventory collects package inventory from any target type.
+// It routes to the appropriate collector based on target type detection or explicit hints.
+func (s *Service) CollectInventory(ctx context.Context, target string, opts InventoryOptions) (*InventoryExecution, error) {
+	// Use explicit hint if provided, otherwise auto-detect
+	kind := opts.TargetHint.Kind
+	if kind == targets.KindUnspecified {
+		kind = targets.DetectKind(target)
+	}
+
+	switch kind {
+	case targets.KindContainerImage:
+		targetOpts := map[string]string{}
+		if opts.Platform != "" {
+			targetOpts["platform"] = opts.Platform
+		}
+		if opts.TargetHint.ImageTransport != "" {
+			targetOpts["transport"] = opts.TargetHint.ImageTransport
+		}
+		return s.CollectInventoryContainerImage(ctx, target, targetOpts, opts)
+
+	case targets.KindDir:
+		return s.CollectInventoryDirectory(ctx, target, opts)
+
+	case targets.KindGit:
+		// For git targets, use repository collector with default ref
+		return s.CollectInventoryRepository(ctx, target, "HEAD", false, opts)
+
+	default:
+		// Default: try repository (handles local dirs, remote repos, etc.)
+		return s.CollectInventoryRepository(ctx, target, "HEAD", false, opts)
+	}
+}
+
+// CollectInventoryDirectory collects package inventory from a local directory.
+func (s *Service) CollectInventoryDirectory(ctx context.Context, path string, opts InventoryOptions) (*InventoryExecution, error) {
+	ctx, span := otel.StartSpan(ctx, "deputy.inventory.directory",
+		trace.WithAttributes(
+			attribute.String("deputy.target.path", path),
+		))
+	defer span.End()
+
+	ws, err := workspace.NewDir(path)
+	if err != nil {
+		otel.SetSpanError(span, err)
+		return nil, fmt.Errorf("failed to open directory: %w", err)
+	}
+
+	pkgs, err := inv.ScanPackagesWorking(ctx, ws, inv.ScanOptions{Ecosystems: opts.Ecosystems})
+	if err != nil {
+		otel.SetSpanError(span, err)
+		_ = ws.Close()
+		return nil, fmt.Errorf("failed to scan packages: %w", err)
+	}
+	span.SetAttributes(attribute.Int("deputy.package.count", len(pkgs)))
+
+	goDirect := compare.CollectGoDirectModulesFromWorkspace(ws)
+
+	result := InventoryResult{
+		Target: Target{
+			Kind:        targets.KindDir,
+			DisplayPath: path,
+			LocalPath:   path,
+		},
+		GeneratedAt: time.Now().UTC(),
+		Inventory: Inventory{
+			Packages: pkgs,
+			Direct:   goDirect,
+		},
+	}
+
+	return &InventoryExecution{
+		Result:  result,
+		cleanup: func() { _ = ws.Close() },
+	}, nil
+}
+
+// CollectInventoryContainerImage collects package inventory from a container image.
+func (s *Service) CollectInventoryContainerImage(ctx context.Context, target string, targetOpts map[string]string, opts InventoryOptions) (*InventoryExecution, error) {
+	ctx, span := otel.StartSpan(ctx, "deputy.inventory.container_image",
+		trace.WithAttributes(
+			attribute.String("deputy.target.path", target),
+		))
+	defer span.End()
+
+	logs.Info(ctx, "collecting container image inventory", "target", target)
+
+	mat, err := targets.Open(ctx, target, targetOpts)
+	if err != nil {
+		logs.Error(ctx, "failed to resolve container image target", "error", err)
+		otel.SetSpanError(span, err)
+		return nil, err
+	}
+
+	cleanup := func() {}
+	if mat.Cleanup != nil {
+		cleanup = mat.Cleanup
+	}
+
+	// Extract scalibrimage.Image and optionally the v1.Image for config access
+	var img scalibrimage.Image
+	var imageInfo *image.Info
+
+	switch data := mat.Data.(type) {
+	case *providers.ContainerImageData:
+		img = data
+		// Extract image configuration if v1.Image is available
+		if data.V1Image != nil {
+			info, err := image.Extract(data.V1Image)
+			if err != nil {
+				slog.Debug("failed to extract image config", "target", target, "error", err)
+			} else {
+				imageInfo = info
+			}
+		}
+	case scalibrimage.Image:
+		img = data
+	default:
+		cleanup()
+		err := fmt.Errorf("target %q did not resolve to a container image", target)
+		otel.SetSpanError(span, err)
+		return nil, err
+	}
+
+	pkgs, err := inv.ScanPackagesContainerImage(ctx, img, inv.ScanOptions{Ecosystems: opts.Ecosystems})
+	if err != nil {
+		cleanup()
+		otel.SetSpanError(span, err)
+		return nil, err
+	}
+	span.SetAttributes(attribute.Int("deputy.package.count", len(pkgs)))
+
+	displayPath := target
+	if mat.Meta.Target != "" {
+		displayPath = mat.Meta.Target
+	}
+
+	result := InventoryResult{
+		Target: Target{
+			Kind:        mat.Meta.Kind,
+			DisplayPath: displayPath,
+			LocalPath:   mat.Path,
+			Provenance:  mat.Meta.Provenance,
+		},
+		GeneratedAt: time.Now().UTC(),
+		Inventory: Inventory{
+			Packages: pkgs,
+			Direct:   nil, // Container images don't have direct/transitive distinction
+		},
+		ImageInfo: imageInfo,
+	}
+
+	return &InventoryExecution{Result: result, cleanup: cleanup}, nil
+}
+
 // ScanRepository scans a repository target (local path or remote) for vulnerabilities.
 func (s *Service) ScanRepository(ctx context.Context, repoArg, ref string, refProvided bool, opts Options) (*Execution, error) {
 	startTime := time.Now()
@@ -157,13 +386,23 @@ func (s *Service) ScanRepository(ctx context.Context, repoArg, ref string, refPr
 	logs.Info(ctx, "collected package inventory", "package_count", len(pkgs))
 
 	modInfo := resolveDirectModules(target.localRepoPath, effRef, target.workspace)
-	inputs := PackagesToInputs(pkgs, PackageInputOptions{GoDirect: modInfo.goDirect, Resolver: modInfo.resolver})
-	logs.Debug(ctx, "querying OSV for vulnerabilities", "input_count", len(inputs))
-	findings, advisories, queryErr := s.queryOSV(ctx, inputs)
+
+	// Skip vulnerability scanning if only inventory is needed (e.g., for 'list' command)
+	var findings []vulnerability.Finding
+	var advisories map[string]vulnerabilityv1.Advisory
+	var queryErr error
+	if !opts.SkipVulnScan {
+		inputs := PackagesToInputs(pkgs, PackageInputOptions{GoDirect: modInfo.goDirect, Resolver: modInfo.resolver})
+		logs.Debug(ctx, "querying OSV for vulnerabilities", "input_count", len(inputs))
+		findings, advisories, queryErr = s.queryOSV(ctx, inputs)
+	} else {
+		logs.Debug(ctx, "skipping vulnerability scan (inventory-only mode)")
+		advisories = make(map[string]vulnerabilityv1.Advisory)
+	}
 
 	// Build dependency graph if enabled
 	var depGraph *graph.Graph
-	if opts.Graph.Enabled {
+	if opts.Graph.Enabled && !opts.SkipVulnScan {
 		builder := NewGraphBuilder(opts.Graph)
 		depGraph, _ = builder.BuildFromWorkspace(ctx, pkgs, modInfo.goDirect, findings, advisories, target.workspace)
 	}

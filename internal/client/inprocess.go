@@ -5,6 +5,8 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"os"
+	"path/filepath"
 
 	"connectrpc.com/connect"
 	"google.golang.org/protobuf/types/known/timestamppb"
@@ -14,11 +16,15 @@ import (
 	remediationv1 "github.com/picatz/deputy/gen/deputy/remediation/v1"
 	sbomv1 "github.com/picatz/deputy/gen/deputy/sbom/v1"
 	scanv1 "github.com/picatz/deputy/gen/deputy/scan/v1"
+	secretsv1 "github.com/picatz/deputy/gen/deputy/secrets/v1"
+	targetv1 "github.com/picatz/deputy/gen/deputy/target/v1"
 	"github.com/picatz/deputy/internal/ai"
+	"github.com/picatz/deputy/internal/inventory"
 	internalproto "github.com/picatz/deputy/internal/proto"
 	"github.com/picatz/deputy/internal/scan"
 	sbomx "github.com/picatz/deputy/internal/sbom"
 	sbomdiff "github.com/picatz/deputy/internal/sbom/diff"
+	"github.com/picatz/deputy/internal/secrets"
 	"github.com/picatz/deputy/internal/targets"
 )
 
@@ -124,6 +130,58 @@ func (c *InProcess) routeScan(ctx context.Context, target, ref string, refProvid
 	}
 }
 
+// routeInventory routes to the appropriate inventory collector based on target type.
+// This is the fast path that skips vulnerability scanning.
+// It uses the inventory package directly for cleaner separation of concerns.
+func (c *InProcess) routeInventory(ctx context.Context, req *listv1.ListPackagesRequest) (*inventory.Execution, error) {
+	target := req.Target
+
+	// Build inventory options from request
+	opts := inventory.Options{}
+	if req.Options != nil {
+		opts.Ecosystems = req.Options.Ecosystems
+		opts.Platform = req.Options.Platform
+	}
+
+	// Auto-detect target type
+	kind := targets.DetectKind(target)
+
+	switch kind {
+	case targets.KindContainerImage:
+		targetOpts := map[string]string{}
+		if opts.Platform != "" {
+			targetOpts["platform"] = opts.Platform
+		}
+		return inventory.CollectContainerImage(ctx, target, targetOpts, opts)
+
+	case targets.KindDockerfile:
+		return inventory.CollectDockerfile(ctx, target, opts)
+
+	case targets.KindDir:
+		return inventory.CollectDirectory(ctx, target, opts)
+
+	case targets.KindGit:
+		// For git targets, extract ref from options
+		ref := "HEAD"
+		refProvided := false
+		if req.Options != nil && req.Options.Ref != "" {
+			ref = req.Options.Ref
+			refProvided = true
+		}
+		return inventory.CollectRepository(ctx, target, ref, refProvided, opts)
+
+	default:
+		// Default: try repository (handles local dirs, remote repos, etc.)
+		ref := "HEAD"
+		refProvided := false
+		if req.Options != nil && req.Options.Ref != "" {
+			ref = req.Options.Ref
+			refProvided = true
+		}
+		return inventory.CollectRepository(ctx, target, ref, refProvided, opts)
+	}
+}
+
 // StreamScan performs a vulnerability scan with streaming progress updates.
 func (c *InProcess) StreamScan(ctx context.Context, req *connect.Request[scanv1.StreamScanRequest]) (Stream[scanv1.ScanProgress], error) {
 	target := req.Msg.Target
@@ -209,23 +267,17 @@ func (c *InProcess) ListPackages(ctx context.Context, req *connect.Request[listv
 		return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("target is required"))
 	}
 
-	// Use scanner to get inventory
-	opts := scan.Options{}
+	// Build inventory options (no vuln scanning needed for list)
+	opts := scan.InventoryOptions{}
 	onlyDirect := false
 	if req.Msg.Options != nil {
 		onlyDirect = req.Msg.Options.OnlyDirect
 		opts.Ecosystems = req.Msg.Options.Ecosystems
+		opts.Platform = req.Msg.Options.Platform
 	}
 
-	// Extract ref from options if provided
-	ref := ""
-	refProvided := false
-	if req.Msg.Options != nil && req.Msg.Options.Ref != "" {
-		ref = req.Msg.Options.Ref
-		refProvided = true
-	}
-
-	execution, err := c.scanner.ScanRepository(ctx, target, ref, refProvided, opts)
+	// Route based on target type, similar to how Scan routes
+	execution, err := c.routeInventory(ctx, req.Msg)
 	if err != nil {
 		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("list packages failed: %w", err))
 	}
@@ -241,10 +293,10 @@ func (c *InProcess) ListPackages(ctx context.Context, req *connect.Request[listv
 		locations map[string]bool
 	}
 	entries := make(map[string]*pkgEntry)
-	order := make([]string, 0, len(execution.Result.Inventory.Packages))
+	order := make([]string, 0, len(execution.Result.Packages))
 
-	for _, pkg := range execution.Result.Inventory.Packages {
-		isDirect := execution.Result.Inventory.Direct[pkg.Name]
+	for _, pkg := range execution.Result.Packages {
+		isDirect := execution.Result.Direct[pkg.Name]
 
 		purlStr := ""
 		if p := pkg.PURL(); p != nil {
@@ -317,8 +369,21 @@ func (c *InProcess) ListPackages(ctx context.Context, req *connect.Request[listv
 		}
 	}
 
+	// Convert inventory.Target to scan.Target for proto conversion
+	scanTarget := scan.Target{
+		Kind:         execution.Result.Target.Kind,
+		DisplayPath:  execution.Result.Target.DisplayPath,
+		LocalPath:    execution.Result.Target.LocalPath,
+		Ref:          execution.Result.Target.Ref,
+		EffectiveRef: execution.Result.Target.EffectiveRef,
+		CommitHash:   execution.Result.Target.CommitHash,
+		OriginURL:    execution.Result.Target.OriginURL,
+		Cloned:       execution.Result.Target.Cloned,
+		Provenance:   execution.Result.Target.Provenance,
+	}
+
 	return connect.NewResponse(&listv1.ListPackagesResponse{
-		Target:   internalproto.TargetToProto(execution.Result.Target),
+		Target:   internalproto.TargetToProto(scanTarget),
 		Packages: packages,
 		Stats: &listv1.ListStats{
 			TotalPackages:      int32(len(packages)),
@@ -611,3 +676,427 @@ func (c *InProcess) ApproveStep(ctx context.Context, req *connect.Request[remedi
 	// 2. Send approval/denial to waiting goroutine
 	return nil, connect.NewError(connect.CodeUnimplemented, fmt.Errorf("ApproveStep not yet implemented"))
 }
+
+// ============================================================================
+// Secrets Service Implementation
+// ============================================================================
+
+// secretsEngine is lazily initialized on first secrets call.
+func (c *InProcess) getSecretsEngine() (*secrets.Engine, error) {
+	// Create engine on demand (could cache this in future)
+	return secrets.NewEngine()
+}
+
+// ScanSecrets performs secret detection on a target.
+// For in-process mode, we use the secrets engine directly to allow local paths.
+func (c *InProcess) ScanSecrets(ctx context.Context, req *connect.Request[secretsv1.ScanRequest]) (*connect.Response[secretsv1.ScanResponse], error) {
+	target := req.Msg.Target
+	if target == "" {
+		target = "."
+	}
+
+	engine, err := c.getSecretsEngine()
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to create secrets engine: %w", err))
+	}
+
+	// Build scan options from request
+	opts := internalproto.SecretsScanOptionsFromProto(req.Msg.Options)
+
+	// Parse include/exclude patterns from options
+	var includePatterns, excludePatterns []string
+	if req.Msg.Options != nil {
+		includePatterns = req.Msg.Options.IncludePatterns
+		excludePatterns = req.Msg.Options.ExcludePatterns
+	}
+
+	// Scan based on target type
+	var findings []secrets.Finding
+	var filesScanned int
+
+	info, err := os.Stat(target)
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("target not found: %w", err))
+	}
+
+	if info.IsDir() {
+		findings, filesScanned, err = c.scanSecretsDir(ctx, engine, target, includePatterns, excludePatterns)
+	} else {
+		findings, filesScanned, err = c.scanSecretsFile(ctx, engine, target)
+	}
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("secrets scan failed: %w", err))
+	}
+
+	// Apply confidence filter if set
+	if opts.EntropyThreshold > 0 {
+		var filtered []secrets.Finding
+		for _, f := range findings {
+			if f.Confidence >= opts.EntropyThreshold {
+				filtered = append(filtered, f)
+			}
+		}
+		findings = filtered
+	}
+
+	// Build response
+	response := &secretsv1.ScanResponse{
+		Target: &targetv1.Target{
+			Kind:        targets.DetectKind(target),
+			DisplayPath: target,
+		},
+		GeneratedAt: timestamppb.Now(),
+		Findings:    internalproto.SecretsFindingsToProto(findings),
+		Stats:       internalproto.SecretsStatsToProto(findings),
+	}
+	if response.Stats != nil {
+		response.Stats.FilesScanned = int32(filesScanned)
+	}
+
+	return connect.NewResponse(response), nil
+}
+
+// scanSecretsDir scans a directory for secrets.
+func (c *InProcess) scanSecretsDir(ctx context.Context, engine *secrets.Engine, dir string, includePatterns, excludePatterns []string) ([]secrets.Finding, int, error) {
+	var findings []secrets.Finding
+	var filesScanned int
+
+	// Default exclusions
+	defaultExcludes := []string{".git", "node_modules", "vendor", "__pycache__", ".venv", "venv", "dist", "build", "target"}
+
+	err := filepath.WalkDir(dir, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return nil // Skip inaccessible files
+		}
+
+		// Skip directories
+		if d.IsDir() {
+			for _, excl := range defaultExcludes {
+				if d.Name() == excl {
+					return filepath.SkipDir
+				}
+			}
+			return nil
+		}
+
+		// Get relative path
+		relPath, _ := filepath.Rel(dir, path)
+
+		// Check exclude patterns
+		for _, pattern := range excludePatterns {
+			if matched, _ := filepath.Match(pattern, filepath.Base(path)); matched {
+				return nil
+			}
+		}
+
+		// Check include patterns (if specified)
+		if len(includePatterns) > 0 {
+			included := false
+			for _, pattern := range includePatterns {
+				if matched, _ := filepath.Match(pattern, filepath.Base(path)); matched {
+					included = true
+					break
+				}
+			}
+			if !included {
+				return nil
+			}
+		}
+
+		// Skip large files (> 1MB)
+		info, err := d.Info()
+		if err != nil {
+			return nil
+		}
+		if info.Size() > 1<<20 {
+			return nil
+		}
+
+		// Read and scan file
+		content, err := os.ReadFile(path)
+		if err != nil {
+			return nil
+		}
+
+		// Skip binary files
+		if isBinaryContent(content) {
+			return nil
+		}
+
+		fileFindings, err := engine.ScanFile(ctx, relPath, content)
+		if err != nil {
+			return nil
+		}
+
+		findings = append(findings, fileFindings...)
+		filesScanned++
+
+		return nil
+	})
+
+	return findings, filesScanned, err
+}
+
+// scanSecretsFile scans a single file for secrets.
+func (c *InProcess) scanSecretsFile(ctx context.Context, engine *secrets.Engine, path string) ([]secrets.Finding, int, error) {
+	content, err := os.ReadFile(path)
+	if err != nil {
+		return nil, 0, fmt.Errorf("reading file: %w", err)
+	}
+
+	findings, err := engine.ScanFile(ctx, path, content)
+	if err != nil {
+		return nil, 0, fmt.Errorf("scanning file: %w", err)
+	}
+
+	return findings, 1, nil
+}
+
+// isBinaryContent checks if content appears to be binary.
+func isBinaryContent(content []byte) bool {
+	if len(content) == 0 {
+		return false
+	}
+	checkLen := min(512, len(content))
+	for i := 0; i < checkLen; i++ {
+		if content[i] == 0 {
+			return true
+		}
+	}
+	return false
+}
+
+// StreamScanSecrets performs secret detection with streaming progress updates.
+// For in-process mode, we simulate streaming by running a regular scan and
+// emitting progress events.
+func (c *InProcess) StreamScanSecrets(ctx context.Context, req *connect.Request[secretsv1.StreamScanRequest]) (Stream[secretsv1.ScanProgress], error) {
+	// Create a channel-based stream for in-process mode
+	stream := &inProcessSecretsStream{
+		progress: make(chan *secretsv1.ScanProgress, 10),
+		done:     make(chan struct{}),
+	}
+
+	// Run scan in background, sending progress to channel
+	go func() {
+		defer close(stream.progress)
+		defer close(stream.done)
+
+		// Send initializing phase
+		stream.progress <- &secretsv1.ScanProgress{
+			Phase:   secretsv1.ScanPhase_SCAN_PHASE_INITIALIZING,
+			Message: "Initializing secrets scan...",
+		}
+
+		// Convert StreamScanRequest to ScanRequest
+		scanReq := connect.NewRequest(&secretsv1.ScanRequest{
+			Target:  req.Msg.Target,
+			Options: req.Msg.Options,
+		})
+
+		// Send scanning phase
+		stream.progress <- &secretsv1.ScanProgress{
+			Phase:   secretsv1.ScanPhase_SCAN_PHASE_SCANNING,
+			Message: "Scanning for secrets...",
+		}
+
+		// Perform the scan using our in-process method
+		resp, err := c.ScanSecrets(ctx, scanReq)
+		if err != nil {
+			stream.progress <- &secretsv1.ScanProgress{
+				Phase:   secretsv1.ScanPhase_SCAN_PHASE_FAILED,
+				Message: fmt.Sprintf("Scan failed: %v", err),
+				Error:   err.Error(),
+			}
+			return
+		}
+
+		// Send complete phase with result
+		stream.progress <- &secretsv1.ScanProgress{
+			Phase:        secretsv1.ScanPhase_SCAN_PHASE_COMPLETE,
+			Message:      "Secrets scan completed",
+			SecretsFound: resp.Msg.Stats.GetTotal(),
+			Result:       resp.Msg,
+		}
+	}()
+
+	return stream, nil
+}
+
+// ScanSecretsHistory scans git history for secrets.
+func (c *InProcess) ScanSecretsHistory(ctx context.Context, req *connect.Request[secretsv1.ScanHistoryRequest]) (*connect.Response[secretsv1.ScanHistoryResponse], error) {
+	target := req.Msg.Target
+	if target == "" {
+		target = "."
+	}
+
+	// Use the existing git history scanning from internal/secrets
+	historyFindings, err := secrets.ScanGitHistory(ctx, target, secrets.GitHistoryOptions{
+		MaxCommits:     int(req.Msg.MaxCommits),
+		Since:          req.Msg.Since,
+		Until:          req.Msg.Until,
+		Branch:         req.Msg.Branch,
+		IncludeRemoved: req.Msg.IncludeRemoved,
+	})
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("secrets history scan failed: %w", err))
+	}
+
+	// Convert findings
+	var findings []secrets.Finding
+	for _, hf := range historyFindings {
+		findings = append(findings, hf.Finding)
+	}
+
+	response := &secretsv1.ScanHistoryResponse{
+		Target: &targetv1.Target{
+			Kind:        targetv1.TargetKind_TARGET_KIND_GIT,
+			DisplayPath: target,
+		},
+		GeneratedAt:    timestamppb.Now(),
+		Findings:       historyFindingsToProto(historyFindings),
+		CommitsScanned: int32(len(historyFindings)),
+		Stats:          internalproto.SecretsStatsToProto(findings),
+	}
+
+	return connect.NewResponse(response), nil
+}
+
+// historyFindingsToProto converts history findings to proto with git context.
+func historyFindingsToProto(findings []secrets.HistoryFinding) []*secretsv1.Finding {
+	if len(findings) == 0 {
+		return nil
+	}
+
+	out := make([]*secretsv1.Finding, len(findings))
+	for i, hf := range findings {
+		pf := internalproto.SecretsFindingToProto(hf.Finding)
+
+		// Add git context
+		if pf.Location == nil {
+			pf.Location = &secretsv1.Location{}
+		}
+		pf.Location.Source = secretsv1.SecretSource_SECRET_SOURCE_GIT_COMMIT
+		pf.Location.GitContext = &secretsv1.GitContext{
+			CommitHash:    hf.CommitHash,
+			Author:        hf.Author,
+			AuthorEmail:   hf.AuthorEmail,
+			CommitDate:    hf.CommitDate,
+			CommitMessage: hf.CommitMessage,
+			RemovedIn:     hf.RemovedIn,
+			StillPresent:  hf.StillPresent,
+		}
+
+		out[i] = pf
+	}
+	return out
+}
+
+// ScanSecretsDiff scans changes between two git refs for secrets.
+func (c *InProcess) ScanSecretsDiff(ctx context.Context, req *connect.Request[secretsv1.ScanDiffRequest]) (*connect.Response[secretsv1.ScanDiffResponse], error) {
+	target := req.Msg.Target
+	if target == "" {
+		target = "."
+	}
+
+	baseRef := req.Msg.BaseRef
+	targetRef := req.Msg.TargetRef
+
+	// Use the existing diff scanning from internal/secrets
+	diffResult, err := secrets.ScanGitDiff(ctx, target, baseRef, targetRef)
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("secrets diff scan failed: %w", err))
+	}
+
+	response := &secretsv1.ScanDiffResponse{
+		Target: &targetv1.Target{
+			Kind:        targetv1.TargetKind_TARGET_KIND_GIT,
+			DisplayPath: target,
+		},
+		GeneratedAt:     timestamppb.Now(),
+		BaseRef:         baseRef,
+		TargetRef:       targetRef,
+		AddedFindings:   internalproto.SecretsFindingsToProto(diffResult.Added),
+		RemovedFindings: internalproto.SecretsFindingsToProto(diffResult.Removed),
+		Stats:           internalproto.SecretsStatsToProto(diffResult.Added),
+	}
+
+	return connect.NewResponse(response), nil
+}
+
+// VerifySecrets attempts to validate detected secrets.
+func (c *InProcess) VerifySecrets(ctx context.Context, req *connect.Request[secretsv1.VerifyRequest]) (*connect.Response[secretsv1.VerifyResponse], error) {
+	findings := internalproto.SecretsFindingsFromProto(req.Msg.Findings)
+
+	// Verify findings
+	verifiedFindings, err := secrets.VerifyFindings(ctx, findings, secrets.VerifyOptions{
+		RateLimit: int(req.Msg.RateLimit),
+		Timeout:   0, // Use default
+	})
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("secrets verify failed: %w", err))
+	}
+
+	// Count results
+	var verifiedCount, skippedCount int32
+	for _, f := range verifiedFindings {
+		if f.Validated {
+			verifiedCount++
+		} else {
+			skippedCount++
+		}
+	}
+
+	response := &secretsv1.VerifyResponse{
+		Results:       internalproto.SecretsFindingsToProto(verifiedFindings),
+		VerifiedCount: verifiedCount,
+		SkippedCount:  skippedCount,
+	}
+
+	return connect.NewResponse(response), nil
+}
+
+// ListDetectors returns available secret detectors.
+func (c *InProcess) ListDetectors(ctx context.Context, req *connect.Request[secretsv1.ListDetectorsRequest]) (*connect.Response[secretsv1.ListDetectorsResponse], error) {
+	// Return a static list of built-in detectors
+	detectors := []*secretsv1.DetectorInfo{
+		{Id: "aws", Name: "AWS Credentials", Description: "Detects AWS access keys and secret keys", Source: secretsv1.DetectorSource_DETECTOR_SOURCE_BUILTIN, Enabled: true},
+		{Id: "github", Name: "GitHub Tokens", Description: "Detects GitHub personal access tokens", Source: secretsv1.DetectorSource_DETECTOR_SOURCE_BUILTIN, Enabled: true},
+		{Id: "gcp", Name: "GCP Credentials", Description: "Detects GCP API keys and service account keys", Source: secretsv1.DetectorSource_DETECTOR_SOURCE_BUILTIN, Enabled: true},
+		{Id: "slack", Name: "Slack Tokens", Description: "Detects Slack tokens and webhooks", Source: secretsv1.DetectorSource_DETECTOR_SOURCE_BUILTIN, Enabled: true},
+		{Id: "stripe", Name: "Stripe Keys", Description: "Detects Stripe API keys", Source: secretsv1.DetectorSource_DETECTOR_SOURCE_BUILTIN, Enabled: true},
+		{Id: "openai", Name: "OpenAI Keys", Description: "Detects OpenAI API keys", Source: secretsv1.DetectorSource_DETECTOR_SOURCE_BUILTIN, Enabled: true},
+		{Id: "anthropic", Name: "Anthropic Keys", Description: "Detects Anthropic API keys", Source: secretsv1.DetectorSource_DETECTOR_SOURCE_BUILTIN, Enabled: true},
+		{Id: "private_key", Name: "Private Keys", Description: "Detects RSA, DSA, EC, and other private keys", Source: secretsv1.DetectorSource_DETECTOR_SOURCE_BUILTIN, Enabled: true},
+		{Id: "jwt", Name: "JSON Web Tokens", Description: "Detects JWT tokens", Source: secretsv1.DetectorSource_DETECTOR_SOURCE_BUILTIN, Enabled: true},
+		{Id: "generic", Name: "Generic API Keys", Description: "Detects generic API key patterns", Source: secretsv1.DetectorSource_DETECTOR_SOURCE_BUILTIN, Enabled: true},
+	}
+
+	return connect.NewResponse(&secretsv1.ListDetectorsResponse{
+		Detectors: detectors,
+	}), nil
+}
+
+// inProcessSecretsStream implements Stream[secretsv1.ScanProgress] for in-process mode.
+type inProcessSecretsStream struct {
+	progress chan *secretsv1.ScanProgress
+	done     chan struct{}
+}
+
+// Receive returns the next progress message.
+func (s *inProcessSecretsStream) Receive() (*secretsv1.ScanProgress, error) {
+	select {
+	case msg, ok := <-s.progress:
+		if !ok {
+			return nil, io.EOF
+		}
+		return msg, nil
+	case <-s.done:
+		return nil, io.EOF
+	}
+}
+
+// Close closes the stream.
+func (s *inProcessSecretsStream) Close() error {
+	return nil
+}
+

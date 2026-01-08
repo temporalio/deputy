@@ -70,6 +70,16 @@ func (d *ContainerImageData) ChainLayers() ([]scalibrimage.ChainLayer, error) {
 	return d.Image.ChainLayers()
 }
 
+// V1 returns the underlying go-containerregistry v1.Image, if available.
+// This method allows inventory.collector to access image configuration
+// without importing the providers package directly.
+func (d *ContainerImageData) V1() v1.Image {
+	if d == nil {
+		return nil
+	}
+	return d.V1Image
+}
+
 type imageTransport string
 
 const (
@@ -129,8 +139,12 @@ type containerImageProvider struct{}
 func (containerImageProvider) Priority() int { return priorityContainerImage }
 
 func (containerImageProvider) Detect(_ context.Context, target string) bool {
-	_, _, ok := parseImageTarget(target)
-	return ok
+	// Check for explicit scheme (docker://, oci://, etc.)
+	if _, _, ok := parseImageTarget(target); ok {
+		return true
+	}
+	// Check for bare container image refs (alpine:3.19, ghcr.io/owner/app:v1)
+	return targets.LooksLikeContainerRef(target)
 }
 
 func (containerImageProvider) Open(ctx context.Context, target string, opts map[string]string) (targets.Materialized, error) {
@@ -336,18 +350,26 @@ func imageReferenceProvenance(ref *imageReference) map[string]string {
 }
 
 func parseImageTarget(target string) (imageTransport, string, bool) {
-	scheme, rest, ok := strings.Cut(target, "://")
-	if !ok {
-		return "", "", false
+	// Check for explicit scheme (docker://, oci://, etc.)
+	scheme, rest, hasScheme := strings.Cut(target, "://")
+	if hasScheme {
+		transport, ok := imageSchemes[strings.ToLower(scheme)]
+		if !ok {
+			return "", "", false
+		}
+		if transport == imageTransportRemote && strings.HasPrefix(rest, "/") {
+			rest = strings.TrimPrefix(rest, "/")
+		}
+		return transport, rest, true
 	}
-	transport, ok := imageSchemes[strings.ToLower(scheme)]
-	if !ok {
-		return "", "", false
+
+	// Handle bare container refs (alpine:3.19, ghcr.io/owner/app:v1)
+	// These default to remote registry transport
+	if targets.LooksLikeContainerRef(target) {
+		return imageTransportRemote, target, true
 	}
-	if transport == imageTransportRemote && strings.HasPrefix(rest, "/") {
-		rest = strings.TrimPrefix(rest, "/")
-	}
-	return transport, rest, true
+
+	return "", "", false
 }
 
 func formatImageTarget(target, ref string) string {

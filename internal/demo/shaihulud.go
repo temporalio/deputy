@@ -199,7 +199,7 @@ func scanRepo(ctx context.Context, target repoTarget, token string, inMemory boo
 	}
 	defer src.Close()
 
-	pkgs, err := inv.ScanPackagesWorking(ctx, src.Workspace, inv.ScanOptions{Ecosystems: ecosystems})
+	pkgs, err := inv.ScanPackagesWorking(ctx, src.Workspace(), inv.ScanOptions{Ecosystems: ecosystems})
 	if err != nil {
 		finding.Error = fmt.Errorf("inventory %s: %w", target.name, err)
 		return finding

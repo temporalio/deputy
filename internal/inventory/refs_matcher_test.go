@@ -1,4 +1,4 @@
-package gitutil
+package inventory_test
 
 import (
 	"os"
@@ -8,7 +8,8 @@ import (
 
 	git "github.com/go-git/go-git/v5"
 	"github.com/go-git/go-git/v5/plumbing/object"
-	inv "github.com/picatz/deputy/internal/inventory"
+	"github.com/picatz/deputy/internal/gitutil"
+	"github.com/picatz/deputy/internal/inventory"
 )
 
 // TestParseReferencesDetectsWorkingChangesForNonGoManifests confirms that the
@@ -37,12 +38,12 @@ func TestParseReferencesDetectsWorkingChangesForNonGoManifests(t *testing.T) {
 		t.Fatalf("commit: %v", err)
 	}
 
-	matcher, err := inv.GetDependencyMatcher(inv.ScanOptions{Ecosystems: []string{"all"}})
+	matcher, err := inventory.GetDependencyMatcher(inventory.ScanOptions{Ecosystems: []string{"all"}})
 	if err != nil {
 		t.Fatalf("GetDependencyMatcher: %v", err)
 	}
 
-	base, target, err := ParseReferences(dir, nil, matcher)
+	base, target, err := gitutil.ParseReferences(dir, nil, matcher)
 	if err != nil {
 		t.Fatalf("ParseReferences: %v", err)
 	}
@@ -54,7 +55,7 @@ func TestParseReferencesDetectsWorkingChangesForNonGoManifests(t *testing.T) {
 	if err := os.WriteFile(lockPath, []byte("lockfileVersion: 7\npackages: {}\n"), 0o644); err != nil {
 		t.Fatalf("modify lock: %v", err)
 	}
-	base, target, err = ParseReferences(dir, nil, matcher)
+	base, target, err = gitutil.ParseReferences(dir, nil, matcher)
 	if err != nil {
 		t.Fatalf("ParseReferences (dirty): %v", err)
 	}

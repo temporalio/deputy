@@ -9,6 +9,7 @@ import (
 	remediationv1 "github.com/picatz/deputy/gen/deputy/remediation/v1"
 	sbomv1 "github.com/picatz/deputy/gen/deputy/sbom/v1"
 	scanv1 "github.com/picatz/deputy/gen/deputy/scan/v1"
+	secretsv1 "github.com/picatz/deputy/gen/deputy/secrets/v1"
 	"github.com/picatz/deputy/internal/scan"
 )
 
@@ -17,15 +18,16 @@ import (
 // All methods accept proto request types and return proto response types,
 // enabling transparent switching between in-process and RPC execution modes.
 type Client interface {
-	// --- Scan Service ---
+	// --- Vulnerability Scanning (ScanService) ---
+	// Finds CVEs, advisories, and known vulnerabilities in dependencies.
 
-	// Scan performs a vulnerability scan on a target.
+	// Scan performs a vulnerability scan on a target to find CVEs in dependencies.
 	Scan(ctx context.Context, req *connect.Request[scanv1.ScanRequest]) (*connect.Response[scanv1.ScanResponse], error)
 
 	// StreamScan performs a vulnerability scan with streaming progress updates.
 	StreamScan(ctx context.Context, req *connect.Request[scanv1.StreamScanRequest]) (Stream[scanv1.ScanProgress], error)
 
-	// --- List Service ---
+	// --- Package Enumeration (ListService) ---
 
 	// ListPackages lists packages in a target.
 	ListPackages(ctx context.Context, req *connect.Request[listv1.ListPackagesRequest]) (*connect.Response[listv1.ListPackagesResponse], error)
@@ -63,6 +65,27 @@ type Client interface {
 
 	// ApproveStep approves or denies a pending remediation step.
 	ApproveStep(ctx context.Context, req *connect.Request[remediationv1.ApproveStepRequest]) (*connect.Response[remediationv1.ApproveStepResponse], error)
+
+	// --- Secret Detection (SecretsService) ---
+	// Finds leaked credentials, API keys, and other sensitive data.
+
+	// ScanSecrets performs secret detection on a target to find leaked credentials.
+	ScanSecrets(ctx context.Context, req *connect.Request[secretsv1.ScanRequest]) (*connect.Response[secretsv1.ScanResponse], error)
+
+	// StreamScanSecrets performs secret detection with streaming progress updates.
+	StreamScanSecrets(ctx context.Context, req *connect.Request[secretsv1.StreamScanRequest]) (Stream[secretsv1.ScanProgress], error)
+
+	// ScanSecretsHistory scans git history for secrets that may have been committed.
+	ScanSecretsHistory(ctx context.Context, req *connect.Request[secretsv1.ScanHistoryRequest]) (*connect.Response[secretsv1.ScanHistoryResponse], error)
+
+	// ScanSecretsDiff scans changes between two git refs for newly introduced secrets.
+	ScanSecretsDiff(ctx context.Context, req *connect.Request[secretsv1.ScanDiffRequest]) (*connect.Response[secretsv1.ScanDiffResponse], error)
+
+	// VerifySecrets attempts to validate if detected secrets are still active.
+	VerifySecrets(ctx context.Context, req *connect.Request[secretsv1.VerifyRequest]) (*connect.Response[secretsv1.VerifyResponse], error)
+
+	// ListDetectors returns available secret detection patterns.
+	ListDetectors(ctx context.Context, req *connect.Request[secretsv1.ListDetectorsRequest]) (*connect.Response[secretsv1.ListDetectorsResponse], error)
 
 	// --- Client Lifecycle ---
 

@@ -33,7 +33,52 @@ type Inventory struct {
 	Direct   map[string]bool
 }
 
-// Options configures scan behavior.
+// InventoryOptions configures inventory collection behavior.
+// This is the minimal set of options needed to collect package inventory
+// without performing vulnerability scanning.
+type InventoryOptions struct {
+	// Ecosystems limits scanning to specific package ecosystems.
+	Ecosystems []string
+
+	// TargetHint disambiguates the target type when auto-detection fails.
+	TargetHint TargetHint
+
+	// Platform specifies the target platform for container images (e.g., "linux/amd64").
+	Platform string
+}
+
+// InventoryResult is the output of inventory collection (fast operation).
+// This contains everything needed to understand the dependency tree without
+// vulnerability data, suitable for 'list', 'sbom', and 'graph' commands.
+type InventoryResult struct {
+	Target      Target
+	GeneratedAt time.Time
+	Inventory   Inventory
+
+	// ImageInfo contains extracted configuration and metadata for container image scans.
+	ImageInfo *image.Info
+	// DockerfileInfo contains parsed Dockerfile data for dockerfile targets.
+	DockerfileInfo *dockerfile.Info
+	// DockerfileAnalysis contains static analysis results for dockerfile targets.
+	DockerfileAnalysis *dockerfile.Analysis
+}
+
+// InventoryExecution wraps an inventory result and any cleanup callbacks.
+type InventoryExecution struct {
+	Result  InventoryResult
+	cleanup func()
+}
+
+// Close releases any temporary resources created during inventory collection.
+func (e *InventoryExecution) Close() error {
+	if e == nil || e.cleanup == nil {
+		return nil
+	}
+	e.cleanup()
+	return nil
+}
+
+// Options configures scan behavior (includes both inventory and vuln scanning).
 type Options struct {
 	Ecosystems      []string
 	PublishedBefore time.Time
@@ -51,6 +96,20 @@ type Options struct {
 	// Platform specifies the target platform for container images (e.g., "linux/amd64").
 	// Only applies to container image targets.
 	Platform string
+
+	// SkipVulnScan skips vulnerability scanning when only inventory is needed.
+	// Deprecated: Use CollectInventory* methods instead for cleaner separation.
+	// When true, the scan collects package inventory but does not query OSV.
+	SkipVulnScan bool
+}
+
+// ToInventoryOptions extracts the inventory-related options from scan Options.
+func (o Options) ToInventoryOptions() InventoryOptions {
+	return InventoryOptions{
+		Ecosystems: o.Ecosystems,
+		TargetHint: o.TargetHint,
+		Platform:   o.Platform,
+	}
 }
 
 // TargetHint provides explicit target type hints when auto-detection is insufficient.

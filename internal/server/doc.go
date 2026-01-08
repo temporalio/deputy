@@ -1,34 +1,84 @@
 // Package server provides the Deputy gRPC/Connect server implementation.
 //
-// The server exposes Deputy's scanning capabilities via ConnectRPC, supporting
-// both gRPC and HTTP/JSON protocols. This enables remote scanning from various
-// clients including CLI tools, web applications, and CI/CD pipelines.
+// The server exposes all Deputy capabilities via ConnectRPC, supporting both
+// gRPC and HTTP/JSON protocols. This enables remote access from various clients
+// including CLI tools, web applications, and CI/CD pipelines.
+//
+// # Services
+//
+// The server provides five main services:
+//
+//   - ScanService: Vulnerability scanning - finds CVEs and advisories in dependencies
+//   - SecretsService: Secret detection - finds leaked credentials and API keys
+//   - ListService: Package enumeration - lists dependencies and ecosystems
+//   - SBOMService: SBOM generation - creates and compares Software Bills of Materials
+//   - RemediationService: Fix planning - generates and executes remediation plans
 //
 // # Architecture
 //
-// The server wraps Deputy's internal scan service and exposes it via the
-// ScanService defined in api/deputy/scan/v1/scan.proto. Bidirectional type
-// converters in internal/proto handle translation between proto messages
-// and internal domain types.
+// Each service has a dedicated handler that wraps Deputy's internal packages
+// and exposes them via ConnectRPC. Bidirectional type converters in internal/proto
+// handle translation between proto messages and internal domain types.
+//
+// Handler implementations:
+//   - scan_handler.go: Vulnerability scanning via internal/scan
+//   - list_handler.go: Package listing via internal/inventory
+//   - sbom_handler.go: SBOM generation via internal/sbom
+//   - remediation_handler.go: Fix planning via internal/remediation
+//   - secrets_handler.go: Secret detection via internal/secrets
 //
 // # Starting the Server
 //
-//	server := server.New(server.Config{
+//	srv := server.New(server.Config{
 //	    Addr: ":8090",
 //	})
-//	if err := server.ListenAndServe(); err != nil {
+//	if err := srv.ListenAndServe(); err != nil {
 //	    log.Fatal(err)
+//	}
+//
+// # Configuration
+//
+// The server supports various configuration options:
+//
+//	cfg := server.Config{
+//	    Addr:         ":8090",           // Listen address
+//	    Scanner:      scanService,       // Custom scan.Scanner implementation
+//	    ReadTimeout:  30 * time.Second,  // Request read timeout
+//	    WriteTimeout: 5 * time.Minute,   // Response write timeout
+//	    IdleTimeout:  2 * time.Minute,   // Idle connection timeout
+//	    TLS:          &server.TLSConfig{...}, // Optional TLS
+//	    CORS:         &server.CORSConfig{...}, // Optional CORS
+//	    Auth:         &server.AuthConfig{...}, // Optional JWT auth
+//	    RateLimit:    &server.RateLimitConfig{...}, // Optional rate limiting
 //	}
 //
 // # Client Usage
 //
 // Clients can connect using any ConnectRPC-compatible client:
 //
-//	client := scanv1connect.NewScanServiceClient(
+//	// Scan for VULNERABILITIES (CVEs in dependencies)
+//	scanClient := scanv1connect.NewScanServiceClient(
 //	    http.DefaultClient,
 //	    "http://localhost:8090",
 //	)
-//	resp, err := client.Scan(ctx, connect.NewRequest(&scanv1.ScanRequest{
+//	resp, err := scanClient.Scan(ctx, connect.NewRequest(&scanv1.ScanRequest{
 //	    Target: "github.com/example/repo",
 //	}))
+//
+//	// Scan for SECRETS (leaked credentials, API keys)
+//	secretsClient := secretsv1connect.NewSecretsServiceClient(
+//	    http.DefaultClient,
+//	    "http://localhost:8090",
+//	)
+//	resp, err := secretsClient.Scan(ctx, connect.NewRequest(&secretsv1.ScanRequest{
+//	    Target: "github.com/example/repo",
+//	}))
+//
+// # HTTP Endpoints
+//
+// In addition to the gRPC services, the server exposes health check endpoints:
+//
+//	GET /health  - Returns {"status":"ok"} when healthy
+//	GET /ready   - Returns {"status":"ready"} when ready
+//	GET /version - Returns API version information
 package server

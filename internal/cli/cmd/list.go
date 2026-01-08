@@ -44,6 +44,7 @@ type ListResult struct {
 func AddListCommand(root *cobra.Command, c client.Client) {
 	var (
 		ref, format, outPath string
+		source, platform     string
 		ecos                 []string
 		noHeader             bool
 		onlyDirect           bool
@@ -52,10 +53,16 @@ func AddListCommand(root *cobra.Command, c client.Client) {
 	cmd := &cobra.Command{
 		Use:           "list [target]",
 		Aliases:       []string{"ls"},
-		Short:         "List dependencies in a repository",
+		Short:         "List dependencies in a target",
 		SilenceErrors: true,
 		SilenceUsage:  true,
-		Long: `List all dependencies in a repository as Package URLs (PURLs).
+		Long: `List all dependencies in a target as Package URLs (PURLs).
+
+SUPPORTED TARGETS:
+• Local directory or repository (default: current directory)
+• Remote Git repository (https://github.com/owner/repo)
+• Container image (docker://nginx:1.25 or --source remote nginx:1.25)
+• Specific Git ref (--ref v1.0.0)
 
 This command provides a flat list of all discovered dependencies, including
 transitive ones. It is designed for:
@@ -74,6 +81,22 @@ The output mirrors what would be included in an SBOM but in a more lightweight f
 
   # List dependencies in a remote repo
   deputy list https://github.com/example/repo
+
+  # List dependencies at a specific Git ref
+  deputy list --ref v1.0.0
+
+CONTAINER IMAGES:
+  # List packages in a container image
+  deputy list docker://nginx:1.25
+
+  # Using --source flag for bare image refs
+  deputy list --source remote alpine:3.19
+
+  # Local Docker daemon image
+  deputy list --source docker-daemon myapp:latest
+
+  # Specify platform for multi-arch images
+  deputy list --source remote --platform linux/amd64 nginx:latest
 
 FILTERING & FORMATTING:
   # Output as JSON
@@ -103,6 +126,15 @@ FILTERING & FORMATTING:
 				}
 			}
 
+			// Normalize target based on source hint (for container images)
+			if source != "" {
+				normalized, err := normalizeListTarget(target, source)
+				if err != nil {
+					return err
+				}
+				target = normalized
+			}
+
 			if ref == "" {
 				ref = "HEAD"
 			}
@@ -111,6 +143,7 @@ FILTERING & FORMATTING:
 			opts := &listv1.ListOptions{
 				OnlyDirect: onlyDirect,
 				Ref:        ref,
+				Platform:   platform,
 			}
 			if len(ecos) > 0 && !(len(ecos) == 1 && ecos[0] == "all") {
 				opts.Ecosystems = ecos
@@ -185,8 +218,36 @@ FILTERING & FORMATTING:
 	cmd.Flags().StringVarP(&outPath, "output", "o", "-", "Output file path or '-' for stdout")
 	cmd.Flags().BoolVar(&noHeader, "no-header", false, "Omit header row for text/tsv formats")
 	cmd.Flags().BoolVar(&onlyDirect, "only-direct", false, "Only include direct dependencies")
+	cmd.Flags().StringVar(&source, "source", "", "Target source type: remote, docker-daemon, tarball, oci-archive, oci-layout")
+	cmd.Flags().StringVar(&platform, "platform", "", "Platform for container images (os/arch[/variant])")
 
 	root.AddCommand(cmd)
+}
+
+// normalizeListTarget adds the appropriate URI scheme for container image targets.
+func normalizeListTarget(input, source string) (string, error) {
+	input = strings.TrimSpace(input)
+	if input == "" {
+		return "", fmt.Errorf("target is required")
+	}
+	// Already has a scheme
+	if strings.Contains(input, "://") {
+		return input, nil
+	}
+	switch strings.ToLower(strings.TrimSpace(source)) {
+	case "remote", "registry":
+		return "docker://" + input, nil
+	case "oci":
+		return "oci://" + input, nil
+	case "docker-daemon", "daemon", "local":
+		return "docker-daemon://" + input, nil
+	case "tarball", "archive", "oci-archive":
+		return "tarball://" + input, nil
+	case "oci-layout":
+		return "oci-layout://" + input, nil
+	default:
+		return "", fmt.Errorf("unknown source type %q; use: remote, docker-daemon, tarball, oci-archive, oci-layout", source)
+	}
 }
 
 // protoPackagesToListItems converts proto packages to ListItems for display.

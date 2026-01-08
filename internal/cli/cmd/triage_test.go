@@ -15,6 +15,7 @@ import (
 	remediationv1 "github.com/picatz/deputy/gen/deputy/remediation/v1"
 	sbomv1 "github.com/picatz/deputy/gen/deputy/sbom/v1"
 	scanv1 "github.com/picatz/deputy/gen/deputy/scan/v1"
+	secretsv1 "github.com/picatz/deputy/gen/deputy/secrets/v1"
 	vulnerabilityv1 "github.com/picatz/deputy/gen/deputy/vulnerability/v1"
 	"github.com/picatz/deputy/internal/client"
 	"github.com/picatz/deputy/internal/dependency"
@@ -388,6 +389,30 @@ func (m *mockTriageClient) ListAgents(ctx context.Context, req *connect.Request[
 }
 
 func (m *mockTriageClient) ApproveStep(ctx context.Context, req *connect.Request[remediationv1.ApproveStepRequest]) (*connect.Response[remediationv1.ApproveStepResponse], error) {
+	return nil, nil
+}
+
+func (m *mockTriageClient) ScanSecrets(ctx context.Context, req *connect.Request[secretsv1.ScanRequest]) (*connect.Response[secretsv1.ScanResponse], error) {
+	return nil, nil
+}
+
+func (m *mockTriageClient) StreamScanSecrets(ctx context.Context, req *connect.Request[secretsv1.StreamScanRequest]) (client.Stream[secretsv1.ScanProgress], error) {
+	return nil, nil
+}
+
+func (m *mockTriageClient) ScanSecretsHistory(ctx context.Context, req *connect.Request[secretsv1.ScanHistoryRequest]) (*connect.Response[secretsv1.ScanHistoryResponse], error) {
+	return nil, nil
+}
+
+func (m *mockTriageClient) ScanSecretsDiff(ctx context.Context, req *connect.Request[secretsv1.ScanDiffRequest]) (*connect.Response[secretsv1.ScanDiffResponse], error) {
+	return nil, nil
+}
+
+func (m *mockTriageClient) VerifySecrets(ctx context.Context, req *connect.Request[secretsv1.VerifyRequest]) (*connect.Response[secretsv1.VerifyResponse], error) {
+	return nil, nil
+}
+
+func (m *mockTriageClient) ListDetectors(ctx context.Context, req *connect.Request[secretsv1.ListDetectorsRequest]) (*connect.Response[secretsv1.ListDetectorsResponse], error) {
 	return nil, nil
 }
 

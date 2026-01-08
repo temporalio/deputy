@@ -10,9 +10,13 @@ import (
 	"strings"
 	"time"
 
+	"connectrpc.com/connect"
 	git "github.com/go-git/go-git/v5"
+	secretsv1 "github.com/picatz/deputy/gen/deputy/secrets/v1"
+	"github.com/picatz/deputy/internal/client"
 	"github.com/picatz/deputy/internal/container/image"
 	gitx "github.com/picatz/deputy/internal/gitutil"
+	internalproto "github.com/picatz/deputy/internal/proto"
 	"github.com/picatz/deputy/internal/secrets"
 	"github.com/picatz/deputy/internal/targets"
 	"github.com/picatz/deputy/internal/targets/providers"
@@ -39,7 +43,7 @@ type SecretsResult struct {
 }
 
 // AddSecretsCommand registers the secrets subcommand with the root command.
-func AddSecretsCommand(root *cobra.Command) {
+func AddSecretsCommand(root *cobra.Command, c client.Client) {
 	var (
 		formatFlag     string
 		includeGlob    string
@@ -303,22 +307,33 @@ FILTERING:
 				}
 			}
 
-			// Initialize secret engine for regular file/directory scanning
-			engine, err := secrets.NewEngine()
-			if err != nil {
-				return fmt.Errorf("initializing secret scanner: %w", err)
-			}
-
+			// Use service client for regular file/directory scanning
+			// This enables transparent switching between in-process and remote modes
 			var findings []secrets.Finding
 			var filesScanned int
 
-			if info.IsDir() {
-				findings, filesScanned, err = scanDirectory(ctx, engine, target, includeGlob, excludeGlob)
-			} else {
-				findings, filesScanned, err = scanFile(ctx, engine, target)
+			// Build scan options
+			scanOpts := &secretsv1.ScanOptions{}
+			if includeGlob != "" {
+				scanOpts.IncludePatterns = strings.Split(includeGlob, ",")
 			}
+			if excludeGlob != "" {
+				scanOpts.ExcludePatterns = strings.Split(excludeGlob, ",")
+			}
+
+			// Call the secrets service via client
+			resp, err := c.ScanSecrets(ctx, connect.NewRequest(&secretsv1.ScanRequest{
+				Target:  target,
+				Options: scanOpts,
+			}))
 			if err != nil {
-				return err
+				return fmt.Errorf("scanning for secrets: %w", err)
+			}
+
+			// Convert proto findings back to internal types for rendering
+			findings = internalproto.SecretsFindingsFromProto(resp.Msg.Findings)
+			if resp.Msg.Stats != nil {
+				filesScanned = int(resp.Msg.Stats.FilesScanned)
 			}
 
 			// Filter against baseline if provided

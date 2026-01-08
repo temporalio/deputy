@@ -11,6 +11,7 @@ import "deputy/target/v1/target.proto";
 import "deputy/dependency/v1/dependency.proto";
 import "deputy/vulnerability/v1/vulnerability.proto";
 import "deputy/policy/v1/policy.proto";
+import "deputy/secrets/v1/secrets.proto";
 
 option go_package = "github.com/picatz/deputy/gen/deputy/scan/v1;scanv1";
 
@@ -183,6 +184,12 @@ message ScanResponse {
 
   // ImageInfo contains container image configuration when scanning images.
   ImageInfo image_info = 10;
+
+  // SecretFindings lists detected secrets when include_secrets is enabled.
+  repeated deputy.secrets.v1.Finding secret_findings = 11;
+
+  // SecretStats summarizes secret scan results when include_secrets is enabled.
+  deputy.secrets.v1.Stats secret_stats = 12;
 }
 
 // ScanProgress provides streaming updates during a scan.
@@ -227,10 +234,12 @@ enum ScanPhase {
   SCAN_PHASE_ENRICHING_FINDINGS = 6;
   // Evaluating policies against findings.
   SCAN_PHASE_EVALUATING_POLICIES = 7;
+  // Scanning for secrets (when include_secrets is enabled).
+  SCAN_PHASE_SCANNING_SECRETS = 8;
   // Scan completed successfully.
-  SCAN_PHASE_COMPLETE = 8;
+  SCAN_PHASE_COMPLETE = 9;
   // Scan failed with an error.
-  SCAN_PHASE_FAILED = 9;
+  SCAN_PHASE_FAILED = 10;
 }
 
 // ImageInfo contains container image configuration and metadata.

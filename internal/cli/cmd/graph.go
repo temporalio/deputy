@@ -1192,7 +1192,7 @@ func buildGraph(ctx context.Context, repoPath, ref string, ecosystems []string) 
 	defer src.Close()
 
 	repo := src.Repo
-	ws := src.Workspace
+	ws := src.Workspace()
 
 	effRef := refOrHEAD(ref)
 	var (

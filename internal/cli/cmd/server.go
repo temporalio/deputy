@@ -30,13 +30,20 @@ func AddServerCommand(root *cobra.Command, scanService *scan.Service) {
 	cmd := &cobra.Command{
 		Use:   "server",
 		Short: "Start the Deputy gRPC/Connect server",
-		Long: `Start the Deputy server which exposes scanning capabilities via gRPC and HTTP.
+		Long: `Start the Deputy server which exposes all Deputy capabilities via gRPC and HTTP.
 
 The server supports both gRPC and HTTP/JSON protocols via ConnectRPC, making it
 accessible from various clients including:
   - gRPC clients (Go, Python, Java, etc.)
   - HTTP clients using JSON (curl, web browsers, etc.)
   - gRPC-Web clients (browser-based applications)
+
+SERVICES:
+  ScanService        - Vulnerability scanning (CVEs, advisories in dependencies)
+  SecretsService     - Secret detection (leaked credentials, API keys)
+  ListService        - Package and ecosystem enumeration
+  SBOMService        - Software Bill of Materials generation and diff
+  RemediationService - Fix planning and AI-assisted remediation
 
 Examples:
   # Start server on default port (8090)
@@ -48,16 +55,47 @@ Examples:
   # Start server with custom timeouts
   deputy server --write-timeout 10m
 
-Endpoints:
-  POST /deputy.v1.ScanService/Scan         - Perform vulnerability scan
-  POST /deputy.v1.ScanService/StreamScan   - Scan with streaming progress
-  GET  /health                              - Health check
-  GET  /ready                               - Readiness check
+ENDPOINTS:
+  Vulnerability Scanning (ScanService):
+    POST /deputy.scan.v1.ScanService/Scan           - Find CVEs in dependencies
+    POST /deputy.scan.v1.ScanService/StreamScan     - Scan with streaming progress
 
-Client example (curl):
-  curl -X POST http://localhost:8090/deputy.v1.ScanService/Scan \
+  Secret Detection (SecretsService):
+    POST /deputy.secrets.v1.SecretsService/Scan          - Find leaked credentials
+    POST /deputy.secrets.v1.SecretsService/StreamScan    - Scan with streaming progress
+    POST /deputy.secrets.v1.SecretsService/ScanHistory   - Scan git history for secrets
+    POST /deputy.secrets.v1.SecretsService/ScanDiff      - Scan git diff for secrets
+    POST /deputy.secrets.v1.SecretsService/Verify        - Verify if secrets are active
+    POST /deputy.secrets.v1.SecretsService/ListDetectors - List available detectors
+
+  Package Enumeration (ListService):
+    POST /deputy.list.v1.ListService/ListPackages   - List project dependencies
+    POST /deputy.list.v1.ListService/ListEcosystems - List supported ecosystems
+
+  SBOM Generation (SBOMService):
+    POST /deputy.sbom.v1.SBOMService/Generate       - Generate SBOM
+    POST /deputy.sbom.v1.SBOMService/Diff           - Compare two SBOMs
+
+  Remediation (RemediationService):
+    POST /deputy.remediation.v1.RemediationService/GeneratePlan     - Create fix plan
+    POST /deputy.remediation.v1.RemediationService/ExecutePlan      - Apply fixes
+    POST /deputy.remediation.v1.RemediationService/ExecuteWithAgent - AI-assisted remediation
+
+  Health:
+    GET  /health  - Health check
+    GET  /ready   - Readiness check
+    GET  /version - API version
+
+Examples (curl):
+  # Scan for VULNERABILITIES (CVEs in dependencies)
+  curl -X POST http://localhost:8090/deputy.scan.v1.ScanService/Scan \
     -H "Content-Type: application/json" \
-    -d '{"target": "."}'`,
+    -d '{"target": "github.com/example/repo"}'
+
+  # Scan for SECRETS (leaked credentials, API keys)
+  curl -X POST http://localhost:8090/deputy.secrets.v1.SecretsService/Scan \
+    -H "Content-Type: application/json" \
+    -d '{"target": "github.com/example/repo"}'`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runServer(cmd.Context(), flags, scanService)
 		},

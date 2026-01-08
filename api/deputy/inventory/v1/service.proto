@@ -1,0 +1,432 @@
+// Copyright 2025 Kent "picat" Gruber. All rights reserved.
+// SPDX-License-Identifier: MIT
+
+syntax = "proto3";
+
+package deputy.inventory.v1;
+
+import "buf/validate/validate.proto";
+import "deputy/dependency/v1/dependency.proto";
+import "deputy/target/v1/target.proto";
+import "deputy/container/v1/container.proto";
+import "google/protobuf/timestamp.proto";
+
+option go_package = "github.com/picatz/deputy/gen/deputy/inventory/v1;inventoryv1";
+
+// InventoryService provides package inventory extraction capabilities.
+//
+// This service discovers packages in targets without performing vulnerability
+// analysis. It's the foundation for listing dependencies, generating SBOMs,
+// and dependency graph resolution.
+//
+// # Architecture
+//
+// Inventory extraction is built on a layered extractor system:
+//
+// 1. OSV-SCALIBR extractors: Industry-standard extractors from Google's
+//    osv-scalibr project (go/gomod, javascript/packagejson, python/requirements, etc.)
+//    These implement github.com/google/osv-scalibr/extractor/filesystem.Extractor
+//
+// 2. Deputy built-in extractors: Custom SCALIBR-compatible extractors for
+//    ecosystems not covered by SCALIBR (github/actions, docker/dockerfile)
+//    Located in internal/inventory/plugins/
+//
+// 3. Proto-based plugins: External extractors that communicate via pluginrpc,
+//    enabling custom extractors in any language without recompiling Deputy
+//    Implement the ExtractorPlugin service defined below
+//
+// All three extractor types produce the same Package proto output, ensuring
+// consistent downstream processing regardless of extractor source.
+//
+// # Supported Targets
+//
+//   - Git repositories (local and remote)
+//   - Local directories
+//   - Container images (multiple transports)
+//   - Dockerfiles (static analysis)
+//
+// # Extending with Custom Extractors
+//
+// Option 1 - SCALIBR extractor (Go, recommended):
+//   Implement filesystem.Extractor interface and register in
+//   internal/inventory/inventory.go via resolvePlugins().
+//
+// Option 2 - Deputy extractor (Go):
+//   Same as SCALIBR but add to internal/inventory/plugins/ with
+//   Deputy-specific metadata (ecosystem mapping, PURL handling).
+//
+// Option 3 - Proto plugin (any language):
+//   Implement ExtractorPlugin service and register via RegisterExtractor.
+//   The plugin runs as a separate process communicating via pluginrpc.
+//
+// See internal/ecosystem/plugin.go for additional extension points.
+service InventoryService {
+  // CollectInventory extracts package inventory from a target.
+  // This is the primary method for package discovery.
+  rpc CollectInventory(CollectInventoryRequest) returns (CollectInventoryResponse);
+
+  // StreamCollectInventory extracts inventory with streaming progress updates.
+  // Use this for large targets or when progress visibility is needed.
+  rpc StreamCollectInventory(CollectInventoryRequest) returns (stream CollectInventoryProgress);
+
+  // ListExtractors returns available inventory extractors.
+  // Includes SCALIBR extractors, Deputy built-ins, and registered plugins.
+  rpc ListExtractors(ListExtractorsRequest) returns (ListExtractorsResponse);
+
+  // RegisterExtractor registers a proto-based extractor plugin.
+  // The extractor will be invoked via pluginrpc during inventory collection.
+  rpc RegisterExtractor(RegisterExtractorRequest) returns (RegisterExtractorResponse);
+
+  // UnregisterExtractor removes a previously registered plugin.
+  rpc UnregisterExtractor(UnregisterExtractorRequest) returns (UnregisterExtractorResponse);
+}
+
+// ExtractorPlugin defines the interface for proto-based custom extractors.
+// Implement this service to create a pluginrpc-compatible extractor that
+// can be registered with Deputy at runtime.
+//
+// The interface mirrors OSV-SCALIBR's filesystem.Extractor for consistency:
+//
+//   type Extractor interface {
+//       plugin.Plugin                                    // Name(), Version(), Requirements()
+//       FileRequired(api FileAPI) bool                   // Filter files
+//       Extract(ctx, input *ScanInput) (Inventory, error) // Extract packages
+//   }
+//
+// Example plugin flow:
+//   1. Deputy calls FileRequired with file path and metadata
+//   2. If FileRequired returns true, Deputy calls Extract with file contents
+//   3. Extract returns discovered packages for that file
+//
+// This design allows plugins to efficiently filter files before reading them,
+// matching SCALIBR's optimization pattern.
+service ExtractorPlugin {
+  // FileRequired checks if this extractor should process a file.
+  // Return true to receive an Extract call for this file.
+  // This is called for every file in the scan - keep it fast.
+  rpc FileRequired(FileRequiredRequest) returns (FileRequiredResponse);
+
+  // Extract extracts packages from a file's contents.
+  // Called only for files where FileRequired returned true.
+  rpc Extract(ExtractRequest) returns (ExtractResponse);
+
+  // Info returns extractor metadata for registration and logging.
+  rpc Info(InfoRequest) returns (InfoResponse);
+}
+
+// CollectInventoryRequest specifies the target and options for inventory collection.
+message CollectInventoryRequest {
+  // Target is the path, URL, or reference to scan.
+  // Examples:
+  //   - "." (current directory)
+  //   - "/path/to/project"
+  //   - "https://github.com/owner/repo"
+  //   - "docker://nginx:1.25"
+  //   - "ghcr.io/owner/app:v1"
+  string target = 1 [(buf.validate.field).string.min_len = 1];
+
+  // Options configure collection behavior.
+  CollectInventoryOptions options = 2;
+}
+
+// CollectInventoryOptions configure how inventory is collected.
+message CollectInventoryOptions {
+  // Ecosystems limits extraction to specific package ecosystems.
+  // Empty means all supported ecosystems.
+  // Values: go, npm, pypi, maven, rubygems, cargo, nuget, hex, pub, cocoapods, packagist, github-actions
+  repeated string ecosystems = 1;
+
+  // Ref is a Git reference for repository targets.
+  // Examples: "HEAD", "main", "v1.0.0", "abc123"
+  string ref = 2;
+
+  // Platform specifies container image platform.
+  // Example: "linux/amd64"
+  string platform = 3;
+
+  // IncludeLicenses enriches packages with license information.
+  // This may require additional network requests to deps.dev.
+  bool include_licenses = 4;
+
+  // EnabledExtractors limits which extractors run.
+  // Empty means all available extractors.
+  repeated string enabled_extractors = 5;
+}
+
+// CollectInventoryResponse contains the extracted inventory.
+message CollectInventoryResponse {
+  // Target describes what was scanned.
+  deputy.target.v1.Target target = 1;
+
+  // GeneratedAt is when the inventory was collected.
+  google.protobuf.Timestamp generated_at = 2;
+
+  // Packages lists all discovered dependencies.
+  repeated deputy.dependency.v1.Package packages = 3;
+
+  // Stats summarizes the collection.
+  InventoryStats stats = 4;
+
+  // ImageInfo contains container image metadata when applicable.
+  deputy.container.v1.ImageInfo image_info = 5;
+
+  // Dockerfile contains parsed Dockerfile data when applicable.
+  DockerfileInfo dockerfile_info = 6;
+
+  // ExtractorsUsed lists which extractors produced results.
+  repeated string extractors_used = 7;
+}
+
+// CollectInventoryProgress provides streaming updates during collection.
+message CollectInventoryProgress {
+  // Phase indicates the current collection phase.
+  CollectPhase phase = 1;
+
+  // Message provides human-readable status.
+  string message = 2;
+
+  // PackagesFound is the count of packages discovered so far.
+  int32 packages_found = 3;
+
+  // ExtractorName identifies the active extractor.
+  string extractor_name = 4;
+
+  // Result is populated when phase is PHASE_COMPLETED.
+  CollectInventoryResponse result = 5;
+
+  // Error is populated when phase is PHASE_FAILED.
+  string error = 6;
+}
+
+// CollectPhase describes the current phase of inventory collection.
+enum CollectPhase {
+  PHASE_UNSPECIFIED = 0;
+  PHASE_RESOLVING_TARGET = 1;
+  PHASE_EXTRACTING = 2;
+  PHASE_ENRICHING = 3;
+  PHASE_COMPLETED = 4;
+  PHASE_FAILED = 5;
+}
+
+// InventoryStats provides statistics about the collection.
+message InventoryStats {
+  // TotalPackages is the total count of packages.
+  int32 total_packages = 1;
+
+  // DirectPackages is the count of direct dependencies.
+  int32 direct_packages = 2;
+
+  // TransitivePackages is the count of transitive dependencies.
+  int32 transitive_packages = 3;
+
+  // ByEcosystem maps ecosystem names to package counts.
+  map<string, int32> by_ecosystem = 4;
+
+  // DurationMs is the collection time in milliseconds.
+  int64 duration_ms = 5;
+}
+
+// DockerfileInfo contains parsed Dockerfile data.
+message DockerfileInfo {
+  // Path is the Dockerfile path.
+  string path = 1;
+
+  // Stages lists all build stages.
+  repeated DockerfileStage stages = 2;
+
+  // FinalStage is the last (output) stage.
+  DockerfileStage final_stage = 3;
+
+  // Args are ARG instructions with defaults.
+  map<string, string> args = 4;
+
+  // Analysis contains static analysis results.
+  DockerfileAnalysis analysis = 5;
+}
+
+// DockerfileStage represents a single build stage.
+message DockerfileStage {
+  // Index is the 0-based stage position.
+  int32 index = 1;
+
+  // Name is the AS alias (empty if unnamed).
+  string name = 2;
+
+  // BaseImage is the FROM image reference.
+  string base_image = 3;
+
+  // BaseImageResolved is the parsed image reference.
+  ImageReference base_image_resolved = 4;
+
+  // Platform is the --platform flag value.
+  string platform = 5;
+
+  // IsScratch is true if FROM scratch.
+  bool is_scratch = 6;
+
+  // IsBuilderStage is true if only used as COPY source.
+  bool is_builder_stage = 7;
+
+  // User is the final USER directive value.
+  string user = 8;
+
+  // IsRoot is true if running as root.
+  bool is_root = 9;
+
+  // Workdir is the WORKDIR value.
+  string workdir = 10;
+
+  // EnvVars are ENV declarations.
+  map<string, string> env_vars = 11;
+
+  // SensitiveEnv lists env vars matching secret patterns.
+  repeated string sensitive_env = 12;
+
+  // ExposedPorts are EXPOSE ports.
+  repeated string exposed_ports = 13;
+
+  // Labels are LABEL key-value pairs.
+  map<string, string> labels = 14;
+}
+
+// ImageReference is a parsed container image reference.
+message ImageReference {
+  string registry = 1;
+  string repository = 2;
+  string tag = 3;
+  string digest = 4;
+}
+
+// DockerfileAnalysis contains static analysis results.
+message DockerfileAnalysis {
+  int32 stage_count = 1;
+  bool has_multi_stage = 2;
+  int32 builder_stage_count = 3;
+  bool final_stage_is_root = 4;
+  bool final_stage_is_scratch = 5;
+  repeated string sensitive_env_vars = 6;
+  bool has_add_url = 7;
+}
+
+// ListExtractorsRequest is empty as no parameters are needed.
+message ListExtractorsRequest {}
+
+// ListExtractorsResponse contains available extractors.
+message ListExtractorsResponse {
+  // Extractors lists all available inventory extractors.
+  repeated ExtractorInfo extractors = 1;
+}
+
+// ExtractorInfo describes an inventory extractor.
+message ExtractorInfo {
+  // Name is the extractor identifier (e.g., "go/gomod", "javascript/packagejson").
+  string name = 1;
+
+  // DisplayName is a human-readable name.
+  string display_name = 2;
+
+  // Ecosystem is the package ecosystem this extractor supports.
+  string ecosystem = 3;
+
+  // Version is the extractor version.
+  int32 version = 4;
+
+  // Description provides context about the extractor.
+  string description = 5;
+
+  // FilePatterns lists recognized file patterns.
+  repeated string file_patterns = 6;
+
+  // Source indicates where the extractor comes from.
+  ExtractorSource source = 7;
+}
+
+// ExtractorSource indicates the origin of an extractor.
+enum ExtractorSource {
+  EXTRACTOR_SOURCE_UNSPECIFIED = 0;
+  // Built-in OSV-SCALIBR extractor.
+  EXTRACTOR_SOURCE_SCALIBR = 1;
+  // Deputy custom extractor (e.g., github-actions, dockerfile).
+  EXTRACTOR_SOURCE_DEPUTY = 2;
+  // User-registered plugin via pluginrpc.
+  EXTRACTOR_SOURCE_PLUGIN = 3;
+}
+
+// RegisterExtractorRequest registers a custom extractor plugin.
+message RegisterExtractorRequest {
+  // Info describes the extractor being registered.
+  ExtractorInfo info = 1 [(buf.validate.field).required = true];
+
+  // PluginAddress is the pluginrpc address for the extractor.
+  // Example: "unix:///tmp/my-extractor.sock"
+  string plugin_address = 2 [(buf.validate.field).string.min_len = 1];
+}
+
+// RegisterExtractorResponse confirms registration.
+message RegisterExtractorResponse {
+  // Registered is true if registration succeeded.
+  bool registered = 1;
+}
+
+// UnregisterExtractorRequest identifies the plugin to remove.
+message UnregisterExtractorRequest {
+  // Name is the extractor identifier to unregister.
+  string name = 1 [(buf.validate.field).string.min_len = 1];
+}
+
+// UnregisterExtractorResponse confirms removal.
+message UnregisterExtractorResponse {
+  // Unregistered is true if the plugin was found and removed.
+  bool unregistered = 1;
+}
+
+// --- ExtractorPlugin messages ---
+// These messages define the protocol for proto-based extractor plugins.
+
+// FileRequiredRequest provides file metadata for filtering.
+message FileRequiredRequest {
+  // Path is the file path relative to scan root.
+  string path = 1;
+
+  // IsDir indicates if the path is a directory.
+  bool is_dir = 2;
+
+  // Mode is the file permission mode (Unix-style).
+  uint32 mode = 3;
+
+  // Size is the file size in bytes.
+  int64 size = 4;
+}
+
+// FileRequiredResponse indicates if the extractor wants to process the file.
+message FileRequiredResponse {
+  // Required is true if Extract should be called for this file.
+  bool required = 1;
+}
+
+// ExtractRequest provides file contents for extraction.
+message ExtractRequest {
+  // Path is the file path relative to scan root.
+  string path = 1;
+
+  // Contents is the file's raw bytes.
+  bytes contents = 2;
+
+  // Root is the scan root path (for resolving relative paths).
+  string root = 3;
+}
+
+// ExtractResponse contains packages discovered in a file.
+message ExtractResponse {
+  // Packages are the dependencies discovered in this file.
+  repeated deputy.dependency.v1.Package packages = 1;
+}
+
+// InfoRequest is empty - plugins return metadata unconditionally.
+message InfoRequest {}
+
+// InfoResponse contains extractor metadata.
+message InfoResponse {
+  // Info describes the extractor.
+  ExtractorInfo info = 1;
+}

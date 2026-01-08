@@ -105,9 +105,11 @@ func TestParseImageTarget(t *testing.T) {
 			wantOK:    true,
 		},
 		{
-			name:   "no scheme",
-			target: "alpine:latest",
-			wantOK: false,
+			name:      "no scheme (bare Docker Hub ref)",
+			target:    "alpine:latest",
+			wantTrans: imageTransportRemote,
+			wantRef:   "alpine:latest",
+			wantOK:    true,
 		},
 		{
 			name:   "unknown scheme",
@@ -347,13 +349,19 @@ func TestContainerImageProviderDetect(t *testing.T) {
 		target string
 		want   bool
 	}{
+		// Explicit schemes
 		{"docker://alpine:latest", true},
 		{"oci://ghcr.io/owner/repo:v1", true},
 		{"docker-daemon://myapp:latest", true},
 		{"tarball:///tmp/image.tar", true},
 		{"oci-archive:///tmp/oci.tar", true},
 		{"oci-layout:///tmp/layout", true},
-		{"alpine:latest", false},
+		// Bare container refs (new behavior: detected as container images)
+		{"alpine:latest", true},
+		{"nginx:1.25", true},
+		{"ghcr.io/owner/repo:v1", true},
+		{"gcr.io/project/image:tag", true},
+		// Non-container targets (should not match)
 		{"./local/path", false},
 		{"github.com/owner/repo", false},
 		{"", false},

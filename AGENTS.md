@@ -174,6 +174,8 @@ deputy sbom docker://nginx:1.25 --format cyclonedx-json  # image SBOM
 # List dependencies
 deputy list                                    # list all dependencies
 deputy list --only-direct                      # direct dependencies only
+deputy list docker://nginx:1.25               # list packages in container image
+deputy list --source remote alpine:3.19       # bare image ref with --source
 
 # Policy development
 deputy policy eval policy.yaml                 # test policy

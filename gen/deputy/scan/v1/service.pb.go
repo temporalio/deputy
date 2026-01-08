@@ -13,6 +13,7 @@ import (
 	_ "buf.build/gen/go/bufbuild/protovalidate/protocolbuffers/go/buf/validate"
 	v11 "github.com/picatz/deputy/gen/deputy/dependency/v1"
 	v13 "github.com/picatz/deputy/gen/deputy/policy/v1"
+	v14 "github.com/picatz/deputy/gen/deputy/secrets/v1"
 	v1 "github.com/picatz/deputy/gen/deputy/target/v1"
 	v12 "github.com/picatz/deputy/gen/deputy/vulnerability/v1"
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
@@ -50,25 +51,28 @@ const (
 	ScanPhase_SCAN_PHASE_ENRICHING_FINDINGS ScanPhase = 6
 	// Evaluating policies against findings.
 	ScanPhase_SCAN_PHASE_EVALUATING_POLICIES ScanPhase = 7
+	// Scanning for secrets (when include_secrets is enabled).
+	ScanPhase_SCAN_PHASE_SCANNING_SECRETS ScanPhase = 8
 	// Scan completed successfully.
-	ScanPhase_SCAN_PHASE_COMPLETE ScanPhase = 8
+	ScanPhase_SCAN_PHASE_COMPLETE ScanPhase = 9
 	// Scan failed with an error.
-	ScanPhase_SCAN_PHASE_FAILED ScanPhase = 9
+	ScanPhase_SCAN_PHASE_FAILED ScanPhase = 10
 )
 
 // Enum value maps for ScanPhase.
 var (
 	ScanPhase_name = map[int32]string{
-		0: "SCAN_PHASE_UNSPECIFIED",
-		1: "SCAN_PHASE_INITIALIZING",
-		2: "SCAN_PHASE_RESOLVING_TARGET",
-		3: "SCAN_PHASE_EXTRACTING_INVENTORY",
-		4: "SCAN_PHASE_RESOLVING_GRAPH",
-		5: "SCAN_PHASE_QUERYING_VULNERABILITIES",
-		6: "SCAN_PHASE_ENRICHING_FINDINGS",
-		7: "SCAN_PHASE_EVALUATING_POLICIES",
-		8: "SCAN_PHASE_COMPLETE",
-		9: "SCAN_PHASE_FAILED",
+		0:  "SCAN_PHASE_UNSPECIFIED",
+		1:  "SCAN_PHASE_INITIALIZING",
+		2:  "SCAN_PHASE_RESOLVING_TARGET",
+		3:  "SCAN_PHASE_EXTRACTING_INVENTORY",
+		4:  "SCAN_PHASE_RESOLVING_GRAPH",
+		5:  "SCAN_PHASE_QUERYING_VULNERABILITIES",
+		6:  "SCAN_PHASE_ENRICHING_FINDINGS",
+		7:  "SCAN_PHASE_EVALUATING_POLICIES",
+		8:  "SCAN_PHASE_SCANNING_SECRETS",
+		9:  "SCAN_PHASE_COMPLETE",
+		10: "SCAN_PHASE_FAILED",
 	}
 	ScanPhase_value = map[string]int32{
 		"SCAN_PHASE_UNSPECIFIED":              0,
@@ -79,8 +83,9 @@ var (
 		"SCAN_PHASE_QUERYING_VULNERABILITIES": 5,
 		"SCAN_PHASE_ENRICHING_FINDINGS":       6,
 		"SCAN_PHASE_EVALUATING_POLICIES":      7,
-		"SCAN_PHASE_COMPLETE":                 8,
-		"SCAN_PHASE_FAILED":                   9,
+		"SCAN_PHASE_SCANNING_SECRETS":         8,
+		"SCAN_PHASE_COMPLETE":                 9,
+		"SCAN_PHASE_FAILED":                   10,
 	}
 )
 
@@ -586,7 +591,11 @@ type ScanResponse struct {
 	// Warnings contains non-fatal issues encountered during scanning.
 	Warnings []string `protobuf:"bytes,9,rep,name=warnings,proto3" json:"warnings,omitempty"`
 	// ImageInfo contains container image configuration when scanning images.
-	ImageInfo     *ImageInfo `protobuf:"bytes,10,opt,name=image_info,json=imageInfo,proto3" json:"image_info,omitempty"`
+	ImageInfo *ImageInfo `protobuf:"bytes,10,opt,name=image_info,json=imageInfo,proto3" json:"image_info,omitempty"`
+	// SecretFindings lists detected secrets when include_secrets is enabled.
+	SecretFindings []*v14.Finding `protobuf:"bytes,11,rep,name=secret_findings,json=secretFindings,proto3" json:"secret_findings,omitempty"`
+	// SecretStats summarizes secret scan results when include_secrets is enabled.
+	SecretStats   *v14.Stats `protobuf:"bytes,12,opt,name=secret_stats,json=secretStats,proto3" json:"secret_stats,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -687,6 +696,20 @@ func (x *ScanResponse) GetWarnings() []string {
 func (x *ScanResponse) GetImageInfo() *ImageInfo {
 	if x != nil {
 		return x.ImageInfo
+	}
+	return nil
+}
+
+func (x *ScanResponse) GetSecretFindings() []*v14.Finding {
+	if x != nil {
+		return x.SecretFindings
+	}
+	return nil
+}
+
+func (x *ScanResponse) GetSecretStats() *v14.Stats {
+	if x != nil {
+		return x.SecretStats
 	}
 	return nil
 }
@@ -1223,7 +1246,7 @@ var File_deputy_scan_v1_service_proto protoreflect.FileDescriptor
 
 const file_deputy_scan_v1_service_proto_rawDesc = "" +
 	"\n" +
-	"\x1cdeputy/scan/v1/service.proto\x12\x0edeputy.scan.v1\x1a\x1bbuf/validate/validate.proto\x1a\x1fgoogle/protobuf/timestamp.proto\x1a\x1ddeputy/target/v1/target.proto\x1a%deputy/dependency/v1/dependency.proto\x1a+deputy/vulnerability/v1/vulnerability.proto\x1a\x1ddeputy/policy/v1/policy.proto\"\\\n" +
+	"\x1cdeputy/scan/v1/service.proto\x12\x0edeputy.scan.v1\x1a\x1bbuf/validate/validate.proto\x1a\x1fgoogle/protobuf/timestamp.proto\x1a\x1ddeputy/target/v1/target.proto\x1a%deputy/dependency/v1/dependency.proto\x1a+deputy/vulnerability/v1/vulnerability.proto\x1a\x1ddeputy/policy/v1/policy.proto\x1a\x1fdeputy/secrets/v1/secrets.proto\"\\\n" +
 	"\vScanRequest\x12\x16\n" +
 	"\x06target\x18\x01 \x01(\tR\x06target\x125\n" +
 	"\aoptions\x18\x02 \x01(\v2\x1b.deputy.scan.v1.ScanOptionsR\aoptions\"b\n" +
@@ -1258,7 +1281,7 @@ const file_deputy_scan_v1_service_proto_rawDesc = "" +
 	"\aenabled\x18\x01 \x01(\bR\aenabled\x12!\n" +
 	"\finclude_epss\x18\x02 \x01(\bR\vincludeEpss\x12\x1f\n" +
 	"\vinclude_kev\x18\x03 \x01(\bR\n" +
-	"includeKev\"\xa0\x05\n" +
+	"includeKev\"\xa2\x06\n" +
 	"\fScanResponse\x120\n" +
 	"\x06target\x18\x01 \x01(\v2\x18.deputy.target.v1.TargetR\x06target\x12=\n" +
 	"\fgenerated_at\x18\x02 \x01(\v2\x1a.google.protobuf.TimestampR\vgeneratedAt\x12)\n" +
@@ -1273,7 +1296,9 @@ const file_deputy_scan_v1_service_proto_rawDesc = "" +
 	"\bwarnings\x18\t \x03(\tR\bwarnings\x128\n" +
 	"\n" +
 	"image_info\x18\n" +
-	" \x01(\v2\x19.deputy.scan.v1.ImageInfoR\timageInfo\x1a`\n" +
+	" \x01(\v2\x19.deputy.scan.v1.ImageInfoR\timageInfo\x12C\n" +
+	"\x0fsecret_findings\x18\v \x03(\v2\x1a.deputy.secrets.v1.FindingR\x0esecretFindings\x12;\n" +
+	"\fsecret_stats\x18\f \x01(\v2\x18.deputy.secrets.v1.StatsR\vsecretStats\x1a`\n" +
 	"\x0fAdvisoriesEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x127\n" +
 	"\x05value\x18\x02 \x01(\v2!.deputy.vulnerability.v1.AdvisoryR\x05value:\x028\x01\"\xba\x02\n" +
@@ -1327,7 +1352,7 @@ const file_deputy_scan_v1_service_proto_rawDesc = "" +
 	"created_by\x18\x01 \x01(\tR\tcreatedBy\x12\x18\n" +
 	"\acreated\x18\x02 \x01(\x03R\acreated\x12\x1f\n" +
 	"\vempty_layer\x18\x03 \x01(\bR\n" +
-	"emptyLayer*\xca\x02\n" +
+	"emptyLayer*\xeb\x02\n" +
 	"\tScanPhase\x12\x1a\n" +
 	"\x16SCAN_PHASE_UNSPECIFIED\x10\x00\x12\x1b\n" +
 	"\x17SCAN_PHASE_INITIALIZING\x10\x01\x12\x1f\n" +
@@ -1336,9 +1361,11 @@ const file_deputy_scan_v1_service_proto_rawDesc = "" +
 	"\x1aSCAN_PHASE_RESOLVING_GRAPH\x10\x04\x12'\n" +
 	"#SCAN_PHASE_QUERYING_VULNERABILITIES\x10\x05\x12!\n" +
 	"\x1dSCAN_PHASE_ENRICHING_FINDINGS\x10\x06\x12\"\n" +
-	"\x1eSCAN_PHASE_EVALUATING_POLICIES\x10\a\x12\x17\n" +
-	"\x13SCAN_PHASE_COMPLETE\x10\b\x12\x15\n" +
-	"\x11SCAN_PHASE_FAILED\x10\t2\xa1\x01\n" +
+	"\x1eSCAN_PHASE_EVALUATING_POLICIES\x10\a\x12\x1f\n" +
+	"\x1bSCAN_PHASE_SCANNING_SECRETS\x10\b\x12\x17\n" +
+	"\x13SCAN_PHASE_COMPLETE\x10\t\x12\x15\n" +
+	"\x11SCAN_PHASE_FAILED\x10\n" +
+	"2\xa1\x01\n" +
 	"\vScanService\x12A\n" +
 	"\x04Scan\x12\x1b.deputy.scan.v1.ScanRequest\x1a\x1c.deputy.scan.v1.ScanResponse\x12O\n" +
 	"\n" +
@@ -1383,7 +1410,9 @@ var file_deputy_scan_v1_service_proto_goTypes = []any{
 	(*v12.Finding)(nil),           // 20: deputy.vulnerability.v1.Finding
 	(*v12.Stats)(nil),             // 21: deputy.vulnerability.v1.Stats
 	(*v13.Action)(nil),            // 22: deputy.policy.v1.Action
-	(*v12.Advisory)(nil),          // 23: deputy.vulnerability.v1.Advisory
+	(*v14.Finding)(nil),           // 23: deputy.secrets.v1.Finding
+	(*v14.Stats)(nil),             // 24: deputy.secrets.v1.Stats
+	(*v12.Advisory)(nil),          // 25: deputy.vulnerability.v1.Advisory
 }
 var file_deputy_scan_v1_service_proto_depIdxs = []int32{
 	3,  // 0: deputy.scan.v1.ScanRequest.options:type_name -> deputy.scan.v1.ScanOptions
@@ -1402,23 +1431,25 @@ var file_deputy_scan_v1_service_proto_depIdxs = []int32{
 	21, // 13: deputy.scan.v1.ScanResponse.stats:type_name -> deputy.vulnerability.v1.Stats
 	22, // 14: deputy.scan.v1.ScanResponse.policy_actions:type_name -> deputy.policy.v1.Action
 	9,  // 15: deputy.scan.v1.ScanResponse.image_info:type_name -> deputy.scan.v1.ImageInfo
-	0,  // 16: deputy.scan.v1.ScanProgress.phase:type_name -> deputy.scan.v1.ScanPhase
-	7,  // 17: deputy.scan.v1.ScanProgress.result:type_name -> deputy.scan.v1.ScanResponse
-	10, // 18: deputy.scan.v1.ImageInfo.config:type_name -> deputy.scan.v1.ImageConfig
-	12, // 19: deputy.scan.v1.ImageInfo.metadata:type_name -> deputy.scan.v1.ImageMetadata
-	13, // 20: deputy.scan.v1.ImageInfo.history:type_name -> deputy.scan.v1.HistoryEntry
-	15, // 21: deputy.scan.v1.ImageConfig.labels:type_name -> deputy.scan.v1.ImageConfig.LabelsEntry
-	11, // 22: deputy.scan.v1.ImageConfig.healthcheck:type_name -> deputy.scan.v1.Healthcheck
-	23, // 23: deputy.scan.v1.ScanResponse.AdvisoriesEntry.value:type_name -> deputy.vulnerability.v1.Advisory
-	1,  // 24: deputy.scan.v1.ScanService.Scan:input_type -> deputy.scan.v1.ScanRequest
-	2,  // 25: deputy.scan.v1.ScanService.StreamScan:input_type -> deputy.scan.v1.StreamScanRequest
-	7,  // 26: deputy.scan.v1.ScanService.Scan:output_type -> deputy.scan.v1.ScanResponse
-	8,  // 27: deputy.scan.v1.ScanService.StreamScan:output_type -> deputy.scan.v1.ScanProgress
-	26, // [26:28] is the sub-list for method output_type
-	24, // [24:26] is the sub-list for method input_type
-	24, // [24:24] is the sub-list for extension type_name
-	24, // [24:24] is the sub-list for extension extendee
-	0,  // [0:24] is the sub-list for field type_name
+	23, // 16: deputy.scan.v1.ScanResponse.secret_findings:type_name -> deputy.secrets.v1.Finding
+	24, // 17: deputy.scan.v1.ScanResponse.secret_stats:type_name -> deputy.secrets.v1.Stats
+	0,  // 18: deputy.scan.v1.ScanProgress.phase:type_name -> deputy.scan.v1.ScanPhase
+	7,  // 19: deputy.scan.v1.ScanProgress.result:type_name -> deputy.scan.v1.ScanResponse
+	10, // 20: deputy.scan.v1.ImageInfo.config:type_name -> deputy.scan.v1.ImageConfig
+	12, // 21: deputy.scan.v1.ImageInfo.metadata:type_name -> deputy.scan.v1.ImageMetadata
+	13, // 22: deputy.scan.v1.ImageInfo.history:type_name -> deputy.scan.v1.HistoryEntry
+	15, // 23: deputy.scan.v1.ImageConfig.labels:type_name -> deputy.scan.v1.ImageConfig.LabelsEntry
+	11, // 24: deputy.scan.v1.ImageConfig.healthcheck:type_name -> deputy.scan.v1.Healthcheck
+	25, // 25: deputy.scan.v1.ScanResponse.AdvisoriesEntry.value:type_name -> deputy.vulnerability.v1.Advisory
+	1,  // 26: deputy.scan.v1.ScanService.Scan:input_type -> deputy.scan.v1.ScanRequest
+	2,  // 27: deputy.scan.v1.ScanService.StreamScan:input_type -> deputy.scan.v1.StreamScanRequest
+	7,  // 28: deputy.scan.v1.ScanService.Scan:output_type -> deputy.scan.v1.ScanResponse
+	8,  // 29: deputy.scan.v1.ScanService.StreamScan:output_type -> deputy.scan.v1.ScanProgress
+	28, // [28:30] is the sub-list for method output_type
+	26, // [26:28] is the sub-list for method input_type
+	26, // [26:26] is the sub-list for extension type_name
+	26, // [26:26] is the sub-list for extension extendee
+	0,  // [0:26] is the sub-list for field type_name
 }
 
 func init() { file_deputy_scan_v1_service_proto_init() }
