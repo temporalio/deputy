@@ -5,6 +5,8 @@ import (
 
 	"connectrpc.com/connect"
 
+	diffv1 "github.com/picatz/deputy/gen/deputy/diff/v1"
+	graphv1 "github.com/picatz/deputy/gen/deputy/graph/v1"
 	listv1 "github.com/picatz/deputy/gen/deputy/list/v1"
 	remediationv1 "github.com/picatz/deputy/gen/deputy/remediation/v1"
 	sbomv1 "github.com/picatz/deputy/gen/deputy/sbom/v1"
@@ -86,6 +88,31 @@ type Client interface {
 
 	// ListDetectors returns available secret detection patterns.
 	ListDetectors(ctx context.Context, req *connect.Request[secretsv1.ListDetectorsRequest]) (*connect.Response[secretsv1.ListDetectorsResponse], error)
+
+	// --- Diff Service (DiffService) ---
+	// Compares dependencies and vulnerabilities between two targets.
+
+	// DiffPackages compares dependencies between two targets (git refs, images, etc.).
+	DiffPackages(ctx context.Context, req *connect.Request[diffv1.DiffPackagesRequest]) (*connect.Response[diffv1.DiffPackagesResponse], error)
+
+	// DiffVulnerabilities compares vulnerabilities between two targets.
+	DiffVulnerabilities(ctx context.Context, req *connect.Request[diffv1.DiffVulnerabilitiesRequest]) (*connect.Response[diffv1.DiffVulnerabilitiesResponse], error)
+
+	// DiffContainerImages performs a comprehensive diff between two container images.
+	// Returns package changes, vulnerability changes, configuration changes, and layer analysis.
+	DiffContainerImages(ctx context.Context, req *connect.Request[diffv1.DiffContainerImagesRequest]) (*connect.Response[diffv1.DiffContainerImagesResponse], error)
+
+	// --- Graph Service (GraphService) ---
+	// Builds and queries dependency graphs.
+
+	// BuildGraph constructs a dependency graph for a target.
+	BuildGraph(ctx context.Context, req *connect.Request[graphv1.BuildGraphRequest]) (*connect.Response[graphv1.BuildGraphResponse], error)
+
+	// WhyDependency finds paths explaining why a dependency exists.
+	WhyDependency(ctx context.Context, req *connect.Request[graphv1.WhyDependencyRequest]) (*connect.Response[graphv1.WhyDependencyResponse], error)
+
+	// QueryGraph returns a filtered subset of a dependency graph.
+	QueryGraph(ctx context.Context, req *connect.Request[graphv1.QueryGraphRequest]) (*connect.Response[graphv1.QueryGraphResponse], error)
 
 	// --- Client Lifecycle ---
 

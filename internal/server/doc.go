@@ -6,13 +6,15 @@
 //
 // # Services
 //
-// The server provides five main services:
+// The server provides seven main services:
 //
 //   - ScanService: Vulnerability scanning - finds CVEs and advisories in dependencies
 //   - SecretsService: Secret detection - finds leaked credentials and API keys
 //   - ListService: Package enumeration - lists dependencies and ecosystems
 //   - SBOMService: SBOM generation - creates and compares Software Bills of Materials
 //   - RemediationService: Fix planning - generates and executes remediation plans
+//   - DiffService: Dependency comparison - compares packages and vulnerabilities between targets
+//   - GraphService: Dependency graph analysis - builds and queries dependency graphs
 //
 // # Architecture
 //
@@ -26,6 +28,8 @@
 //   - sbom_handler.go: SBOM generation via internal/sbom
 //   - remediation_handler.go: Fix planning via internal/remediation
 //   - secrets_handler.go: Secret detection via internal/secrets
+//   - diff_handler.go: Dependency comparison via internal/compare
+//   - graph_handler.go: Dependency graph via internal/dependency/graph
 //
 // # Starting the Server
 //

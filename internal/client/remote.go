@@ -9,6 +9,10 @@ import (
 
 	"connectrpc.com/connect"
 
+	diffv1 "github.com/picatz/deputy/gen/deputy/diff/v1"
+	"github.com/picatz/deputy/gen/deputy/diff/v1/diffv1connect"
+	graphv1 "github.com/picatz/deputy/gen/deputy/graph/v1"
+	"github.com/picatz/deputy/gen/deputy/graph/v1/graphv1connect"
 	listv1 "github.com/picatz/deputy/gen/deputy/list/v1"
 	"github.com/picatz/deputy/gen/deputy/list/v1/listv1connect"
 	remediationv1 "github.com/picatz/deputy/gen/deputy/remediation/v1"
@@ -29,6 +33,8 @@ type Remote struct {
 	sbomClient        sbomv1connect.SBOMServiceClient
 	remediationClient remediationv1connect.RemediationServiceClient
 	secretsClient     secretsv1connect.SecretsServiceClient
+	diffClient        diffv1connect.DiffServiceClient
+	graphClient       graphv1connect.GraphServiceClient
 	httpClient        *http.Client
 	addr              string
 	isDaemon          bool
@@ -71,6 +77,8 @@ func NewRemote(addr string, isDaemon bool) *Remote {
 		sbomClient:        sbomv1connect.NewSBOMServiceClient(httpClient, baseURL),
 		remediationClient: remediationv1connect.NewRemediationServiceClient(httpClient, baseURL),
 		secretsClient:     secretsv1connect.NewSecretsServiceClient(httpClient, baseURL),
+		diffClient:        diffv1connect.NewDiffServiceClient(httpClient, baseURL),
+		graphClient:       graphv1connect.NewGraphServiceClient(httpClient, baseURL),
 		httpClient:        httpClient,
 		addr:              addr,
 		isDaemon:          isDaemon,
@@ -193,6 +201,44 @@ func (c *Remote) VerifySecrets(ctx context.Context, req *connect.Request[secrets
 // ListDetectors returns available secret detectors.
 func (c *Remote) ListDetectors(ctx context.Context, req *connect.Request[secretsv1.ListDetectorsRequest]) (*connect.Response[secretsv1.ListDetectorsResponse], error) {
 	return c.secretsClient.ListDetectors(ctx, req)
+}
+
+// ============================================================================
+// Diff Service
+// ============================================================================
+
+// DiffPackages compares dependencies between two targets.
+func (c *Remote) DiffPackages(ctx context.Context, req *connect.Request[diffv1.DiffPackagesRequest]) (*connect.Response[diffv1.DiffPackagesResponse], error) {
+	return c.diffClient.DiffPackages(ctx, req)
+}
+
+// DiffVulnerabilities compares vulnerabilities between two targets.
+func (c *Remote) DiffVulnerabilities(ctx context.Context, req *connect.Request[diffv1.DiffVulnerabilitiesRequest]) (*connect.Response[diffv1.DiffVulnerabilitiesResponse], error) {
+	return c.diffClient.DiffVulnerabilities(ctx, req)
+}
+
+// DiffContainerImages performs a comprehensive diff between two container images.
+func (c *Remote) DiffContainerImages(ctx context.Context, req *connect.Request[diffv1.DiffContainerImagesRequest]) (*connect.Response[diffv1.DiffContainerImagesResponse], error) {
+	return c.diffClient.DiffContainerImages(ctx, req)
+}
+
+// ============================================================================
+// Graph Service
+// ============================================================================
+
+// BuildGraph builds the dependency graph for a target.
+func (c *Remote) BuildGraph(ctx context.Context, req *connect.Request[graphv1.BuildGraphRequest]) (*connect.Response[graphv1.BuildGraphResponse], error) {
+	return c.graphClient.BuildGraph(ctx, req)
+}
+
+// WhyDependency finds paths explaining why a dependency is included.
+func (c *Remote) WhyDependency(ctx context.Context, req *connect.Request[graphv1.WhyDependencyRequest]) (*connect.Response[graphv1.WhyDependencyResponse], error) {
+	return c.graphClient.WhyDependency(ctx, req)
+}
+
+// QueryGraph queries the dependency graph with filters.
+func (c *Remote) QueryGraph(ctx context.Context, req *connect.Request[graphv1.QueryGraphRequest]) (*connect.Response[graphv1.QueryGraphResponse], error) {
+	return c.graphClient.QueryGraph(ctx, req)
 }
 
 // Mode returns the client's execution mode.

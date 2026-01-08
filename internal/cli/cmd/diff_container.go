@@ -8,15 +8,19 @@ import (
 	"slices"
 	"strings"
 
+	"connectrpc.com/connect"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/go-git/go-git/v5"
 	"github.com/google/osv-scalibr/extractor"
 	containerv1 "github.com/picatz/deputy/gen/deputy/container/v1"
+	diffv1 "github.com/picatz/deputy/gen/deputy/diff/v1"
+	"github.com/picatz/deputy/internal/client"
 	"github.com/picatz/deputy/internal/compare"
 	gitx "github.com/picatz/deputy/internal/gitutil"
 	"github.com/picatz/deputy/internal/otel"
 	"github.com/picatz/deputy/internal/output"
 	"github.com/picatz/deputy/internal/policy"
+	internalproto "github.com/picatz/deputy/internal/proto"
 	"github.com/picatz/deputy/internal/report/render"
 	"github.com/picatz/deputy/internal/scan"
 	ui "github.com/picatz/deputy/internal/ui"
@@ -96,7 +100,7 @@ type containerDiffOpts struct {
 
 // runContainerDiff performs a semantic diff between two container images.
 // It compares packages, vulnerabilities, configuration, and layers.
-func runContainerDiff(ctx context.Context, service *scan.Service, baseRef, targetRef string, opts containerDiffOpts, outW, errW io.Writer) error {
+func runContainerDiff(ctx context.Context, c client.Client, baseRef, targetRef string, opts containerDiffOpts, outW, errW io.Writer) error {
 	ctx, span := otel.StartSpan(ctx, "deputy.container_diff",
 		trace.WithAttributes(
 			attribute.String("deputy.container_diff.base_ref", baseRef),
@@ -111,9 +115,6 @@ func runContainerDiff(ctx context.Context, service *scan.Service, baseRef, targe
 	}
 	if errW == nil {
 		errW = io.Discard
-	}
-	if service == nil {
-		service = scan.NewService()
 	}
 
 	// Normalize references based on source (local daemon vs remote registry)
@@ -135,44 +136,51 @@ func runContainerDiff(ctx context.Context, service *scan.Service, baseRef, targe
 		}
 	}
 
-	// Perform the diff (scans both images in parallel)
-	scanOpts := scan.ContainerDiffOptions{
-		ScanVulnerabilities: !opts.skipVulnScan,
-		ScanOptions:         scan.Options{},
+	// Build proto request
+	transport := "remote"
+	if opts.useLocalDaemon {
+		transport = "daemon"
 	}
-	result, err := service.CompareContainerImages(ctx, baseOCI, targetOCI, scanOpts)
+	req := connect.NewRequest(&diffv1.DiffContainerImagesRequest{
+		BaseImage:   baseOCI,
+		TargetImage: targetOCI,
+		Options: &diffv1.ContainerDiffOptions{
+			ScanVulnerabilities: !opts.skipVulnScan,
+			ImageTransport:      transport,
+			PolicyPaths:         opts.policyPaths,
+		},
+	})
+
+	// Perform the diff via client
+	resp, err := c.DiffContainerImages(ctx, req)
 	if err != nil {
 		otel.SetSpanError(span, err)
 		return fmt.Errorf("compare container images: %w", err)
 	}
 
-	// Run policies
+	// Convert proto response to internal format for rendering
+	report := internalproto.ContainerDiffResponseToReport(resp.Msg)
+	protoCtx := internalproto.ExtractContainerDiffContext(resp.Msg)
+
+	// Run policies (if any weren't handled server-side)
 	if len(opts.policyPaths) > 0 {
-		if err := runContainerDiffPolicies(ctx, opts.policyPaths, result.Report, errW); err != nil {
+		if err := runContainerDiffPolicies(ctx, opts.policyPaths, report, errW); err != nil {
 			otel.SetSpanError(span, err)
 			return err
 		}
 	}
 
-	// Gather additional context for rendering
+	// Gather context for rendering
 	ctx2 := containerDiffContext{
-		Report: result.Report,
-	}
-	if result.BaseResult != nil {
-		ctx2.BasePackageCount = len(result.BaseResult.Inventory.Packages)
-		ctx2.BaseDistro = extractDistroFromPackages(result.BaseResult.Inventory.Packages)
-		if result.BaseResult.ImageInfo != nil {
-			ctx2.BaseSize = result.BaseResult.ImageInfo.Metadata.Size
-			ctx2.BaseArch = result.BaseResult.ImageInfo.Metadata.Architecture
-		}
-	}
-	if result.TargetResult != nil {
-		ctx2.TargetPackageCount = len(result.TargetResult.Inventory.Packages)
-		ctx2.TargetDistro = extractDistroFromPackages(result.TargetResult.Inventory.Packages)
-		if result.TargetResult.ImageInfo != nil {
-			ctx2.TargetSize = result.TargetResult.ImageInfo.Metadata.Size
-			ctx2.TargetArch = result.TargetResult.ImageInfo.Metadata.Architecture
-		}
+		Report:             report,
+		BasePackageCount:   protoCtx.BasePackageCount,
+		BaseDistro:         protoCtx.BaseDistro,
+		BaseSize:           protoCtx.BaseSize,
+		BaseArch:           protoCtx.BaseArch,
+		TargetPackageCount: protoCtx.TargetPackageCount,
+		TargetDistro:       protoCtx.TargetDistro,
+		TargetSize:         protoCtx.TargetSize,
+		TargetArch:         protoCtx.TargetArch,
 	}
 
 	// Output based on format

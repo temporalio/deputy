@@ -15,6 +15,8 @@ import (
 	"golang.org/x/net/http2/h2c"
 	"golang.org/x/time/rate"
 
+	"github.com/picatz/deputy/gen/deputy/diff/v1/diffv1connect"
+	"github.com/picatz/deputy/gen/deputy/graph/v1/graphv1connect"
 	"github.com/picatz/deputy/gen/deputy/list/v1/listv1connect"
 	"github.com/picatz/deputy/gen/deputy/remediation/v1/remediationv1connect"
 	"github.com/picatz/deputy/gen/deputy/sbom/v1/sbomv1connect"
@@ -188,6 +190,8 @@ func New(cfg Config) *Server {
 	listHandler := NewListHandler(cfg.Scanner)
 	remediationHandler := NewRemediationHandler()
 	secretsHandler, _ := NewSecretsHandler()
+	diffHandler := NewDiffHandler(cfg.Scanner)
+	graphHandler := NewGraphHandler()
 
 	// Register ConnectRPC handlers
 	scanPath, scanConnectHandler := scanv1connect.NewScanServiceHandler(
@@ -219,6 +223,18 @@ func New(cfg Config) *Server {
 		connect.WithInterceptors(interceptors...),
 	)
 	mux.Handle(secretsPath, secretsConnectHandler)
+
+	diffPath, diffConnectHandler := diffv1connect.NewDiffServiceHandler(
+		diffHandler,
+		connect.WithInterceptors(interceptors...),
+	)
+	mux.Handle(diffPath, diffConnectHandler)
+
+	graphPath, graphConnectHandler := graphv1connect.NewGraphServiceHandler(
+		graphHandler,
+		connect.WithInterceptors(interceptors...),
+	)
+	mux.Handle(graphPath, graphConnectHandler)
 
 	// Health check endpoint
 	mux.HandleFunc("/health", healthHandler)

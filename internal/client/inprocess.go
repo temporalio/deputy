@@ -7,18 +7,26 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"connectrpc.com/connect"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
+	containerv1 "github.com/picatz/deputy/gen/deputy/container/v1"
 	dependencyv1 "github.com/picatz/deputy/gen/deputy/dependency/v1"
+	diffv1 "github.com/picatz/deputy/gen/deputy/diff/v1"
+	graphv1 "github.com/picatz/deputy/gen/deputy/graph/v1"
 	listv1 "github.com/picatz/deputy/gen/deputy/list/v1"
 	remediationv1 "github.com/picatz/deputy/gen/deputy/remediation/v1"
 	sbomv1 "github.com/picatz/deputy/gen/deputy/sbom/v1"
 	scanv1 "github.com/picatz/deputy/gen/deputy/scan/v1"
 	secretsv1 "github.com/picatz/deputy/gen/deputy/secrets/v1"
 	targetv1 "github.com/picatz/deputy/gen/deputy/target/v1"
+	vulnerabilityv1 "github.com/picatz/deputy/gen/deputy/vulnerability/v1"
 	"github.com/picatz/deputy/internal/ai"
+	"github.com/picatz/deputy/internal/compare"
+	"github.com/picatz/deputy/internal/container/image"
+	"github.com/picatz/deputy/internal/dependency/graph"
 	"github.com/picatz/deputy/internal/inventory"
 	internalproto "github.com/picatz/deputy/internal/proto"
 	"github.com/picatz/deputy/internal/scan"
@@ -26,6 +34,7 @@ import (
 	sbomdiff "github.com/picatz/deputy/internal/sbom/diff"
 	"github.com/picatz/deputy/internal/secrets"
 	"github.com/picatz/deputy/internal/targets"
+	"github.com/picatz/deputy/internal/vulnerability"
 )
 
 // InProcess implements Client by calling services directly without serialization.
@@ -1098,5 +1107,1148 @@ func (s *inProcessSecretsStream) Receive() (*secretsv1.ScanProgress, error) {
 // Close closes the stream.
 func (s *inProcessSecretsStream) Close() error {
 	return nil
+}
+
+// ============================================================================
+// Diff Service Implementation
+// ============================================================================
+
+// DiffPackages compares dependencies between two targets.
+func (c *InProcess) DiffPackages(ctx context.Context, req *connect.Request[diffv1.DiffPackagesRequest]) (*connect.Response[diffv1.DiffPackagesResponse], error) {
+	baseTarget := req.Msg.BaseTarget
+	targetTarget := req.Msg.TargetTarget
+
+	if baseTarget == "" {
+		return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("base_target is required"))
+	}
+	if targetTarget == "" {
+		return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("target_target is required"))
+	}
+
+	// Build inventory options
+	opts := inventory.Options{}
+	if req.Msg.Options != nil {
+		opts.Ecosystems = req.Msg.Options.Ecosystems
+		opts.Platform = req.Msg.Options.Platform
+	}
+
+	// Collect inventory from base target
+	baseExec, err := c.collectInventoryForDiff(ctx, baseTarget, opts)
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to collect base inventory: %w", err))
+	}
+	if baseExec != nil {
+		defer baseExec.Close()
+	}
+
+	// Collect inventory from target target
+	targetExec, err := c.collectInventoryForDiff(ctx, targetTarget, opts)
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to collect target inventory: %w", err))
+	}
+	if targetExec != nil {
+		defer targetExec.Close()
+	}
+
+	// Compare packages
+	changes := compare.ComparePackages(
+		baseExec.Result.Packages,
+		targetExec.Result.Packages,
+		baseExec.Result.Direct,
+		nil, // pkgDirect
+		nil, // workspace
+	)
+
+	// Build response
+	response := &diffv1.DiffPackagesResponse{
+		BaseTarget: &targetv1.Target{
+			Kind:        baseExec.Result.Target.Kind,
+			DisplayPath: baseExec.Result.Target.DisplayPath,
+		},
+		TargetTarget: &targetv1.Target{
+			Kind:        targetExec.Result.Target.Kind,
+			DisplayPath: targetExec.Result.Target.DisplayPath,
+		},
+		GeneratedAt: timestamppb.Now(),
+		Changes:     internalproto.PackageChangesToProto(changes),
+		Stats:       internalproto.DiffStatsToProto(changes),
+	}
+
+	return connect.NewResponse(response), nil
+}
+
+// collectInventoryForDiff collects inventory from a target for diff purposes.
+func (c *InProcess) collectInventoryForDiff(ctx context.Context, target string, opts inventory.Options) (*inventory.Execution, error) {
+	kind := targets.DetectKind(target)
+
+	switch kind {
+	case targets.KindContainerImage:
+		targetOpts := map[string]string{}
+		if opts.Platform != "" {
+			targetOpts["platform"] = opts.Platform
+		}
+		return inventory.CollectContainerImage(ctx, target, targetOpts, opts)
+
+	case targets.KindDir:
+		return inventory.CollectDirectory(ctx, target, opts)
+
+	case targets.KindGit:
+		return inventory.CollectRepository(ctx, target, "HEAD", false, opts)
+
+	default:
+		return inventory.CollectRepository(ctx, target, "HEAD", false, opts)
+	}
+}
+
+// DiffVulnerabilities compares vulnerabilities between two targets.
+func (c *InProcess) DiffVulnerabilities(ctx context.Context, req *connect.Request[diffv1.DiffVulnerabilitiesRequest]) (*connect.Response[diffv1.DiffVulnerabilitiesResponse], error) {
+	baseTarget := req.Msg.BaseTarget
+	targetTarget := req.Msg.TargetTarget
+
+	if baseTarget == "" {
+		return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("base_target is required"))
+	}
+	if targetTarget == "" {
+		return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("target_target is required"))
+	}
+
+	// Convert proto options to internal options
+	opts := internalproto.ScanOptionsFromProto(req.Msg.ScanOptions)
+
+	// Scan base target
+	baseExec, err := c.routeScan(ctx, baseTarget, "", false, opts)
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to scan base target: %w", err))
+	}
+	if baseExec != nil {
+		defer baseExec.Close()
+	}
+
+	// Scan target target
+	targetExec, err := c.routeScan(ctx, targetTarget, "", false, opts)
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to scan target: %w", err))
+	}
+	if targetExec != nil {
+		defer targetExec.Close()
+	}
+
+	// Build sets of vulnerability IDs for comparison
+	baseVulns := make(map[string]bool)
+	for _, f := range baseExec.Result.Findings {
+		baseVulns[f.AdvisoryID] = true
+	}
+
+	targetVulns := make(map[string]bool)
+	for _, f := range targetExec.Result.Findings {
+		targetVulns[f.AdvisoryID] = true
+	}
+
+	// Merge advisories from both scans into proto format
+	advisories := internalproto.AdvisoriesToProto(baseExec.Result.Advisories)
+	for id, adv := range internalproto.AdvisoriesToProto(targetExec.Result.Advisories) {
+		advisories[id] = adv
+	}
+
+	// Find added vulnerabilities (in target but not in base)
+	var addedFindings []*vulnerabilityv1.Finding
+	for _, f := range targetExec.Result.Findings {
+		if !baseVulns[f.AdvisoryID] {
+			adv := targetExec.Result.Advisories[f.AdvisoryID]
+			addedFindings = append(addedFindings, internalproto.FindingToProto(f, internalproto.AdvisoriesToProto(map[string]vulnerabilityv1.Advisory{f.AdvisoryID: adv})[f.AdvisoryID]))
+		}
+	}
+
+	// Find removed vulnerabilities (in base but not in target)
+	var removedFindings []*vulnerabilityv1.Finding
+	for _, f := range baseExec.Result.Findings {
+		if !targetVulns[f.AdvisoryID] {
+			adv := baseExec.Result.Advisories[f.AdvisoryID]
+			removedFindings = append(removedFindings, internalproto.FindingToProto(f, internalproto.AdvisoriesToProto(map[string]vulnerabilityv1.Advisory{f.AdvisoryID: adv})[f.AdvisoryID]))
+		}
+	}
+
+	// Build stats
+	addedBySeverity := make(map[string]int32)
+	removedBySeverity := make(map[string]int32)
+	for _, f := range addedFindings {
+		if adv, ok := advisories[f.AdvisoryId]; ok && adv.Severity != nil {
+			addedBySeverity[adv.Severity.Level.String()]++
+		}
+	}
+	for _, f := range removedFindings {
+		if adv, ok := advisories[f.AdvisoryId]; ok && adv.Severity != nil {
+			removedBySeverity[adv.Severity.Level.String()]++
+		}
+	}
+
+	response := &diffv1.DiffVulnerabilitiesResponse{
+		BaseTarget: &targetv1.Target{
+			Kind:        baseExec.Result.Target.Kind,
+			DisplayPath: baseExec.Result.Target.DisplayPath,
+		},
+		TargetTarget: &targetv1.Target{
+			Kind:        targetExec.Result.Target.Kind,
+			DisplayPath: targetExec.Result.Target.DisplayPath,
+		},
+		GeneratedAt:           timestamppb.Now(),
+		AddedVulnerabilities:  addedFindings,
+		RemovedVulnerabilities: removedFindings,
+		Advisories:            advisories,
+		Stats: &diffv1.VulnerabilityDiffStats{
+			AddedCount:        int32(len(addedFindings)),
+			RemovedCount:      int32(len(removedFindings)),
+			AddedBySeverity:   addedBySeverity,
+			RemovedBySeverity: removedBySeverity,
+		},
+	}
+
+	return connect.NewResponse(response), nil
+}
+
+// ============================================================================
+// Graph Service Implementation
+// ============================================================================
+
+// BuildGraph constructs a dependency graph for a target.
+func (c *InProcess) BuildGraph(ctx context.Context, req *connect.Request[graphv1.BuildGraphRequest]) (*connect.Response[graphv1.BuildGraphResponse], error) {
+	target := req.Msg.Target
+	if target == "" {
+		target = "."
+	}
+
+	// Build inventory options
+	opts := inventory.Options{}
+	if req.Msg.Options != nil {
+		opts.Ecosystems = req.Msg.Options.Ecosystems
+		opts.Platform = req.Msg.Options.Platform
+	}
+
+	// Collect inventory
+	exec, err := c.collectInventoryForDiff(ctx, target, opts)
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to collect inventory: %w", err))
+	}
+	if exec != nil {
+		defer exec.Close()
+	}
+
+	// Build graph from inventory
+	g := graph.FromInventory(exec.Result.Packages, exec.Result.Direct)
+
+	// TODO: If options specify use_proxy or use_git, resolve edges
+	// This would involve calling edge resolvers for each ecosystem
+
+	// Update depths based on edges
+	g.UpdateDepths()
+
+	// Convert to proto
+	nodes, edges, roots := internalproto.GraphToProto(g)
+
+	response := &graphv1.BuildGraphResponse{
+		Target: &targetv1.Target{
+			Kind:        exec.Result.Target.Kind,
+			DisplayPath: exec.Result.Target.DisplayPath,
+		},
+		GeneratedAt: timestamppb.Now(),
+		Nodes:       nodes,
+		Edges:       edges,
+		Roots:       roots,
+		Stats:       internalproto.GraphStatsToProto(g.Stats()),
+	}
+
+	return connect.NewResponse(response), nil
+}
+
+// WhyDependency finds paths explaining why a dependency exists.
+func (c *InProcess) WhyDependency(ctx context.Context, req *connect.Request[graphv1.WhyDependencyRequest]) (*connect.Response[graphv1.WhyDependencyResponse], error) {
+	target := req.Msg.Target
+	if target == "" {
+		target = "."
+	}
+
+	dependency := req.Msg.Dependency
+	if dependency == "" {
+		return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("dependency is required"))
+	}
+
+	// Build inventory options
+	opts := inventory.Options{}
+	if req.Msg.Options != nil {
+		opts.Ecosystems = req.Msg.Options.Ecosystems
+		opts.Platform = req.Msg.Options.Platform
+	}
+
+	// Collect inventory
+	exec, err := c.collectInventoryForDiff(ctx, target, opts)
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to collect inventory: %w", err))
+	}
+	if exec != nil {
+		defer exec.Close()
+	}
+
+	// Build graph from inventory
+	g := graph.FromInventory(exec.Result.Packages, exec.Result.Direct)
+	g.UpdateDepths()
+
+	// Find the dependency node by PURL or name match
+	var targetPURL string
+	for n := range g.Nodes() {
+		if n.PURL == dependency || n.Name == dependency || strings.Contains(n.Name, dependency) {
+			targetPURL = n.PURL
+			break
+		}
+	}
+
+	response := &graphv1.WhyDependencyResponse{
+		Target: &targetv1.Target{
+			Kind:        exec.Result.Target.Kind,
+			DisplayPath: exec.Result.Target.DisplayPath,
+		},
+		Dependency: dependency,
+		Found:      targetPURL != "",
+	}
+
+	if targetPURL != "" {
+		// Find paths to the dependency
+		paths := g.PathsTo(targetPURL)
+		response.Paths = internalproto.PathsToProto(paths)
+		response.Dependency = targetPURL
+	}
+
+	return connect.NewResponse(response), nil
+}
+
+// QueryGraph returns a filtered subset of a dependency graph.
+func (c *InProcess) QueryGraph(ctx context.Context, req *connect.Request[graphv1.QueryGraphRequest]) (*connect.Response[graphv1.QueryGraphResponse], error) {
+	target := req.Msg.Target
+	if target == "" {
+		target = "."
+	}
+
+	// Build inventory options
+	opts := inventory.Options{}
+	if req.Msg.Options != nil {
+		opts.Ecosystems = req.Msg.Options.Ecosystems
+		opts.Platform = req.Msg.Options.Platform
+	}
+
+	// Collect inventory
+	exec, err := c.collectInventoryForDiff(ctx, target, opts)
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to collect inventory: %w", err))
+	}
+	if exec != nil {
+		defer exec.Close()
+	}
+
+	// Build graph from inventory
+	g := graph.FromInventory(exec.Result.Packages, exec.Result.Direct)
+	g.UpdateDepths()
+
+	// Apply filters if specified
+	if req.Msg.Filter != nil {
+		filter := req.Msg.Filter
+
+		// Filter by subgraph root
+		if filter.RootPurl != "" {
+			g = g.Subgraph(filter.RootPurl)
+		}
+
+		// Filter by predicate
+		g = g.Filter(func(n *graph.Node) bool {
+			// Ecosystem filter
+			if len(filter.Ecosystems) > 0 {
+				found := false
+				for _, eco := range filter.Ecosystems {
+					if strings.EqualFold(n.Ecosystem, eco) {
+						found = true
+						break
+					}
+				}
+				if !found {
+					return false
+				}
+			}
+
+			// Depth filters
+			if filter.MinDepth > 0 && n.Depth < int(filter.MinDepth) {
+				return false
+			}
+			if filter.MaxDepth > 0 && n.Depth > int(filter.MaxDepth) {
+				return false
+			}
+
+			// Direct/transitive filters
+			if filter.OnlyDirect && !n.Direct {
+				return false
+			}
+			if filter.OnlyTransitive && n.Direct {
+				return false
+			}
+
+			// Vulnerable filter
+			if filter.OnlyVulnerable && n.VulnCount.Total == 0 {
+				return false
+			}
+
+			// Name pattern filter
+			if filter.NamePattern != "" {
+				matched, _ := filepath.Match(filter.NamePattern, n.Name)
+				if !matched {
+					return false
+				}
+			}
+
+			return true
+		})
+	}
+
+	// Convert to proto
+	nodes, edges, _ := internalproto.GraphToProto(g)
+
+	response := &graphv1.QueryGraphResponse{
+		Target: &targetv1.Target{
+			Kind:        exec.Result.Target.Kind,
+			DisplayPath: exec.Result.Target.DisplayPath,
+		},
+		Nodes: nodes,
+		Edges: edges,
+		Stats: internalproto.GraphStatsToProto(g.Stats()),
+	}
+
+	return connect.NewResponse(response), nil
+}
+
+// DiffContainerImages performs a comprehensive diff between two container images.
+func (c *InProcess) DiffContainerImages(ctx context.Context, req *connect.Request[diffv1.DiffContainerImagesRequest]) (*connect.Response[diffv1.DiffContainerImagesResponse], error) {
+	baseImage := req.Msg.BaseImage
+	targetImage := req.Msg.TargetImage
+
+	if baseImage == "" {
+		return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("base_image is required"))
+	}
+	if targetImage == "" {
+		return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("target_image is required"))
+	}
+
+	opts := req.Msg.Options
+	if opts == nil {
+		opts = &diffv1.ContainerDiffOptions{}
+	}
+
+	// Normalize image references based on transport
+	baseRef := normalizeContainerRef(baseImage, opts.ImageTransport)
+	targetRef := normalizeContainerRef(targetImage, opts.ImageTransport)
+
+	// Build scan options from proto options
+	scanOpts := scan.Options{}
+	if opts.ScanOptions != nil {
+		scanOpts = internalproto.ScanOptionsFromProto(opts.ScanOptions)
+	}
+
+	// Scan both images in parallel
+	type scanResult struct {
+		exec *scan.Execution
+		err  error
+	}
+
+	baseCh := make(chan scanResult, 1)
+	targetCh := make(chan scanResult, 1)
+
+	go func() {
+		exec, err := c.scanner.ScanContainerImage(ctx, baseRef, nil, scanOpts)
+		baseCh <- scanResult{exec: exec, err: err}
+	}()
+
+	go func() {
+		exec, err := c.scanner.ScanContainerImage(ctx, targetRef, nil, scanOpts)
+		targetCh <- scanResult{exec: exec, err: err}
+	}()
+
+	// Wait for both scans
+	baseRes := <-baseCh
+	targetRes := <-targetCh
+
+	if baseRes.err != nil {
+		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("scan base image %q: %w", baseRef, baseRes.err))
+	}
+	if targetRes.err != nil {
+		if baseRes.exec != nil {
+			baseRes.exec.Close()
+		}
+		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("scan target image %q: %w", targetRef, targetRes.err))
+	}
+
+	defer baseRes.exec.Close()
+	defer targetRes.exec.Close()
+
+	// Build the response
+	response := buildContainerDiffResponse(&baseRes.exec.Result, &targetRes.exec.Result)
+
+	return connect.NewResponse(response), nil
+}
+
+// normalizeContainerRef ensures the image reference has the appropriate scheme.
+func normalizeContainerRef(ref, transport string) string {
+	ref = strings.TrimSpace(ref)
+	if ref == "" {
+		return ref
+	}
+	// Already has a scheme - respect it
+	if strings.Contains(ref, "://") {
+		return ref
+	}
+	// Add appropriate prefix based on transport
+	switch strings.ToLower(transport) {
+	case "daemon", "docker-daemon":
+		return "docker-daemon://" + ref
+	default:
+		return "oci://" + ref
+	}
+}
+
+// buildContainerDiffResponse constructs the proto response from scan results.
+func buildContainerDiffResponse(baseResult, targetResult *scan.Result) *diffv1.DiffContainerImagesResponse {
+	now := timestamppb.Now()
+
+	response := &diffv1.DiffContainerImagesResponse{
+		BaseImage:     extractContainerImageRef(baseResult),
+		TargetImage:   extractContainerImageRef(targetResult),
+		GeneratedAt:   now,
+		BaseContext:   extractContainerContext(baseResult),
+		TargetContext: extractContainerContext(targetResult),
+	}
+
+	// Compare packages
+	response.PackageChanges = compareContainerPackages(baseResult, targetResult)
+
+	// Compare vulnerabilities
+	response.VulnerabilityChanges, response.Advisories = compareContainerVulnerabilities(baseResult, targetResult)
+
+	// Compare configuration
+	if baseResult != nil && targetResult != nil &&
+		baseResult.ImageInfo != nil && targetResult.ImageInfo != nil {
+		response.ConfigChanges = compareContainerConfigs(baseResult.ImageInfo, targetResult.ImageInfo)
+		response.LayerAnalysis = compareContainerLayers(baseResult.ImageInfo, targetResult.ImageInfo)
+	}
+
+	// Calculate summary
+	response.Summary = calculateContainerDiffSummary(response)
+
+	return response
+}
+
+func extractContainerImageRef(result *scan.Result) *diffv1.ContainerImageRef {
+	if result == nil {
+		return &diffv1.ContainerImageRef{}
+	}
+	ref := &diffv1.ContainerImageRef{
+		Reference: result.Target.DisplayPath,
+	}
+	if result.Target.Provenance != nil {
+		ref.Registry = result.Target.Provenance["registry"]
+		ref.Repository = result.Target.Provenance["repository"]
+		ref.Tag = result.Target.Provenance["tag"]
+		ref.Digest = result.Target.Provenance["digest"]
+	}
+	return ref
+}
+
+func extractContainerContext(result *scan.Result) *diffv1.ContainerImageContext {
+	if result == nil {
+		return &diffv1.ContainerImageContext{}
+	}
+
+	ctx := &diffv1.ContainerImageContext{
+		PackageCount: int32(len(result.Inventory.Packages)),
+	}
+
+	// Extract distro from packages
+	ctx.Distro = extractDistroFromResult(result)
+
+	// Extract metadata from ImageInfo
+	if result.ImageInfo != nil {
+		ctx.Size = result.ImageInfo.Metadata.Size
+		ctx.Architecture = result.ImageInfo.Metadata.Architecture
+	}
+
+	return ctx
+}
+
+func extractDistroFromResult(result *scan.Result) string {
+	if result == nil || len(result.Inventory.Packages) == 0 {
+		return ""
+	}
+
+	// Count ecosystems to find the most common one
+	ecosystemCounts := make(map[string]int)
+	for _, pkg := range result.Inventory.Packages {
+		eco := pkg.Ecosystem()
+		if eco == "" {
+			continue
+		}
+		if strings.Contains(eco, ":") {
+			ecosystemCounts[eco]++
+		}
+	}
+
+	if len(ecosystemCounts) == 0 {
+		return ""
+	}
+
+	var mostCommon string
+	var maxCount int
+	for eco, count := range ecosystemCounts {
+		if count > maxCount {
+			maxCount = count
+			mostCommon = eco
+		}
+	}
+
+	// Format nicely: "Debian:11" -> "Debian 11"
+	if mostCommon != "" {
+		parts := strings.SplitN(mostCommon, ":", 2)
+		if len(parts) == 2 {
+			return parts[0] + " " + parts[1]
+		}
+		return mostCommon
+	}
+	return ""
+}
+
+func compareContainerPackages(baseResult, targetResult *scan.Result) []*diffv1.ContainerPackageChange {
+	if baseResult == nil || targetResult == nil {
+		return nil
+	}
+
+	// Use existing ComparePackages logic
+	baseChanges := compare.ComparePackages(
+		baseResult.Inventory.Packages,
+		targetResult.Inventory.Packages,
+		nil, nil, nil,
+	)
+
+	// Build layer lookup maps
+	baseLayerMap := buildPackageLayerMapForProto(baseResult)
+	targetLayerMap := buildPackageLayerMapForProto(targetResult)
+
+	// Convert to proto
+	changes := make([]*diffv1.ContainerPackageChange, 0, len(baseChanges))
+	for _, c := range baseChanges {
+		change := &diffv1.ContainerPackageChange{
+			Name:               c.Name,
+			Ecosystem:          c.Ecosystem,
+			ChangeKind:         convertChangeKind(c.ChangeType),
+			BaseVersion:        c.BaseVersion,
+			TargetVersion:      c.TargetVersion,
+			OldName:            c.OldName,
+			IsDirect:           c.IsDirect,
+			BaseLayerDetails:   baseLayerMap[c.Name],
+			TargetLayerDetails: targetLayerMap[c.Name],
+		}
+		// For removed packages, use old name if different
+		if c.ChangeType == compare.Removed && c.OldName != "" {
+			change.BaseLayerDetails = baseLayerMap[c.OldName]
+		}
+		changes = append(changes, change)
+	}
+
+	return changes
+}
+
+func convertChangeKind(ct compare.ChangeType) diffv1.ChangeKind {
+	switch ct {
+	case compare.Added:
+		return diffv1.ChangeKind_CHANGE_KIND_ADDED
+	case compare.Removed:
+		return diffv1.ChangeKind_CHANGE_KIND_REMOVED
+	case compare.Upgraded:
+		return diffv1.ChangeKind_CHANGE_KIND_UPGRADED
+	case compare.Downgraded:
+		return diffv1.ChangeKind_CHANGE_KIND_DOWNGRADED
+	case compare.Updated:
+		return diffv1.ChangeKind_CHANGE_KIND_UPDATED
+	default:
+		return diffv1.ChangeKind_CHANGE_KIND_UNSPECIFIED
+	}
+}
+
+func buildPackageLayerMapForProto(result *scan.Result) map[string]*containerv1.LayerDetails {
+	layerMap := make(map[string]*containerv1.LayerDetails)
+
+	for _, finding := range result.Findings {
+		if finding.LayerDetails == nil {
+			continue
+		}
+		layerMap[finding.Dependency.Name] = &containerv1.LayerDetails{
+			Index:       finding.LayerDetails.Index,
+			DiffId:      finding.LayerDetails.DiffId,
+			ChainId:     finding.LayerDetails.ChainId,
+			Command:     finding.LayerDetails.Command,
+			InBaseImage: finding.LayerDetails.InBaseImage,
+		}
+	}
+
+	return layerMap
+}
+
+func compareContainerVulnerabilities(baseResult, targetResult *scan.Result) ([]*diffv1.ContainerVulnerabilityChange, map[string]*vulnerabilityv1.Advisory) {
+	if baseResult == nil || targetResult == nil {
+		return nil, nil
+	}
+
+	// Build map of findings by advisory ID
+	baseFindings := make(map[string]vulnerability.Finding)
+	targetFindings := make(map[string]vulnerability.Finding)
+
+	for _, f := range baseResult.Findings {
+		baseFindings[f.AdvisoryID] = f
+	}
+	for _, f := range targetResult.Findings {
+		targetFindings[f.AdvisoryID] = f
+	}
+
+	var changes []*diffv1.ContainerVulnerabilityChange
+	advisories := make(map[string]*vulnerabilityv1.Advisory)
+
+	// Find removed/fixed vulnerabilities
+	for advisoryID, baseFinding := range baseFindings {
+		baseAdvisory := baseResult.Advisories[advisoryID]
+		_, exists := targetFindings[advisoryID]
+		if !exists {
+			changeKind := diffv1.VulnerabilityChangeKind_VULNERABILITY_CHANGE_KIND_REMOVED
+			// Check if it was fixed by an upgrade
+			if wasVulnFixedByUpgrade(baseFinding, targetResult) {
+				changeKind = diffv1.VulnerabilityChangeKind_VULNERABILITY_CHANGE_KIND_FIXED
+			}
+			change := buildVulnChangeProto(advisoryID, changeKind, baseAdvisory,
+				baseFinding.Dependency.Name, baseFinding.Dependency.Ecosystem,
+				baseFinding.Version, "",
+				baseFinding.LayerDetails, nil)
+			changes = append(changes, change)
+			advCopy := baseAdvisory
+			advisories[advisoryID] = &advCopy
+		} else {
+			// Vulnerability persists
+			targetFinding := targetFindings[advisoryID]
+			targetAdvisory := targetResult.Advisories[advisoryID]
+			change := buildVulnChangeProto(advisoryID, diffv1.VulnerabilityChangeKind_VULNERABILITY_CHANGE_KIND_PERSISTED, targetAdvisory,
+				targetFinding.Dependency.Name, targetFinding.Dependency.Ecosystem,
+				baseFinding.Version, targetFinding.Version,
+				baseFinding.LayerDetails, targetFinding.LayerDetails)
+			changes = append(changes, change)
+			advCopy := targetAdvisory
+			advisories[advisoryID] = &advCopy
+		}
+	}
+
+	// Find added vulnerabilities
+	for advisoryID, targetFinding := range targetFindings {
+		if _, exists := baseFindings[advisoryID]; !exists {
+			targetAdvisory := targetResult.Advisories[advisoryID]
+			change := buildVulnChangeProto(advisoryID, diffv1.VulnerabilityChangeKind_VULNERABILITY_CHANGE_KIND_ADDED, targetAdvisory,
+				targetFinding.Dependency.Name, targetFinding.Dependency.Ecosystem,
+				"", targetFinding.Version,
+				nil, targetFinding.LayerDetails)
+			changes = append(changes, change)
+			advCopy := targetAdvisory
+			advisories[advisoryID] = &advCopy
+		}
+	}
+
+	return changes, advisories
+}
+
+func wasVulnFixedByUpgrade(finding vulnerability.Finding, targetResult *scan.Result) bool {
+	pkgName := finding.Dependency.Name
+	baseVersion := finding.Version
+
+	for _, pkg := range targetResult.Inventory.Packages {
+		if pkg.Name == pkgName {
+			if pkg.Version != baseVersion {
+				return true
+			}
+			return false
+		}
+	}
+	return false
+}
+
+func buildVulnChangeProto(
+	advisoryID string,
+	changeKind diffv1.VulnerabilityChangeKind,
+	advisory vulnerabilityv1.Advisory,
+	pkgName, ecosystem, baseVersion, targetVersion string,
+	baseLayerDetails, targetLayerDetails *containerv1.LayerDetails,
+) *diffv1.ContainerVulnerabilityChange {
+	var sevLevel, sevType string
+	if advisory.Severity != nil {
+		sevLevel = advisory.Severity.Level.String()
+		sevType = advisory.Severity.Type.String()
+	}
+
+	change := &diffv1.ContainerVulnerabilityChange{
+		Id:            advisoryID,
+		ChangeKind:    changeKind,
+		Severity:      sevLevel,
+		SeverityType:  sevType,
+		PackageName:   pkgName,
+		Ecosystem:     ecosystem,
+		BaseVersion:   baseVersion,
+		TargetVersion: targetVersion,
+		FixedVersions: advisory.FixedVersions,
+		Summary:       advisory.Summary,
+		Aliases:       advisory.Aliases,
+	}
+
+	// Format published date if available
+	if pub := vulnerability.AdvisoryPublished(&advisory); !pub.IsZero() {
+		change.Published = pub.Format("2006-01-02")
+	}
+
+	// Copy layer details
+	if baseLayerDetails != nil {
+		change.BaseLayerDetails = &containerv1.LayerDetails{
+			Index:       baseLayerDetails.Index,
+			DiffId:      baseLayerDetails.DiffId,
+			ChainId:     baseLayerDetails.ChainId,
+			Command:     baseLayerDetails.Command,
+			InBaseImage: baseLayerDetails.InBaseImage,
+		}
+	}
+	if targetLayerDetails != nil {
+		change.TargetLayerDetails = &containerv1.LayerDetails{
+			Index:       targetLayerDetails.Index,
+			DiffId:      targetLayerDetails.DiffId,
+			ChainId:     targetLayerDetails.ChainId,
+			Command:     targetLayerDetails.Command,
+			InBaseImage: targetLayerDetails.InBaseImage,
+		}
+	}
+
+	return change
+}
+
+func compareContainerConfigs(baseInfo, targetInfo *image.Info) *diffv1.ContainerConfigDiff {
+	if baseInfo == nil || targetInfo == nil {
+		return nil
+	}
+
+	diff := &diffv1.ContainerConfigDiff{}
+
+	// User comparison
+	if baseInfo.Config.User != targetInfo.Config.User {
+		diff.UserChanged = true
+		diff.BaseUser = baseInfo.Config.User
+		diff.TargetUser = targetInfo.Config.User
+	}
+
+	// Root user comparison
+	baseIsRoot := baseInfo.Config.IsRootUser()
+	targetIsRoot := targetInfo.Config.IsRootUser()
+	if baseIsRoot != targetIsRoot {
+		diff.RootChanged = true
+		diff.BaseIsRoot = baseIsRoot
+		diff.TargetIsRoot = targetIsRoot
+	}
+
+	// Ports comparison
+	basePorts := make(map[string]bool)
+	for _, p := range baseInfo.Config.ExposedPorts {
+		basePorts[p] = true
+	}
+	targetPorts := make(map[string]bool)
+	for _, p := range targetInfo.Config.ExposedPorts {
+		targetPorts[p] = true
+	}
+	for p := range targetPorts {
+		if !basePorts[p] {
+			diff.PortsAdded = append(diff.PortsAdded, p)
+		}
+	}
+	for p := range basePorts {
+		if !targetPorts[p] {
+			diff.PortsRemoved = append(diff.PortsRemoved, p)
+		}
+	}
+	diff.PortsChanged = len(diff.PortsAdded) > 0 || len(diff.PortsRemoved) > 0
+
+	// Volumes comparison
+	baseVols := make(map[string]bool)
+	for _, v := range baseInfo.Config.Volumes {
+		baseVols[v] = true
+	}
+	targetVols := make(map[string]bool)
+	for _, v := range targetInfo.Config.Volumes {
+		targetVols[v] = true
+	}
+	for v := range targetVols {
+		if !baseVols[v] {
+			diff.VolumesAdded = append(diff.VolumesAdded, v)
+		}
+	}
+	for v := range baseVols {
+		if !targetVols[v] {
+			diff.VolumesRemoved = append(diff.VolumesRemoved, v)
+		}
+	}
+	diff.VolumesChanged = len(diff.VolumesAdded) > 0 || len(diff.VolumesRemoved) > 0
+
+	// Entrypoint comparison
+	if !slicesEqual(baseInfo.Config.Entrypoint, targetInfo.Config.Entrypoint) {
+		diff.EntrypointChanged = true
+		diff.BaseEntrypoint = baseInfo.Config.Entrypoint
+		diff.TargetEntrypoint = targetInfo.Config.Entrypoint
+	}
+
+	// Cmd comparison
+	if !slicesEqual(baseInfo.Config.Cmd, targetInfo.Config.Cmd) {
+		diff.CmdChanged = true
+		diff.BaseCmd = baseInfo.Config.Cmd
+		diff.TargetCmd = targetInfo.Config.Cmd
+	}
+
+	// Working dir comparison
+	if baseInfo.Config.WorkingDir != targetInfo.Config.WorkingDir {
+		diff.WorkingDirChanged = true
+		diff.BaseWorkingDir = baseInfo.Config.WorkingDir
+		diff.TargetWorkingDir = targetInfo.Config.WorkingDir
+	}
+
+	// Healthcheck comparison
+	baseHasHealth := baseInfo.Config.Healthcheck != nil
+	targetHasHealth := targetInfo.Config.Healthcheck != nil
+	diff.HealthcheckChanged = baseHasHealth != targetHasHealth
+
+	// Environment variable comparison
+	diff.EnvChanges = compareEnvVars(baseInfo.Config.Env, targetInfo.Config.Env)
+
+	// Label comparison
+	diff.LabelChanges = compareLabels(baseInfo.Config.Labels, targetInfo.Config.Labels)
+
+	return diff
+}
+
+func slicesEqual(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}
+
+func compareEnvVars(baseEnv, targetEnv []string) []*diffv1.EnvChange {
+	baseMap := make(map[string]string)
+	for _, e := range baseEnv {
+		parts := strings.SplitN(e, "=", 2)
+		if len(parts) == 2 {
+			baseMap[parts[0]] = parts[1]
+		}
+	}
+
+	targetMap := make(map[string]string)
+	for _, e := range targetEnv {
+		parts := strings.SplitN(e, "=", 2)
+		if len(parts) == 2 {
+			targetMap[parts[0]] = parts[1]
+		}
+	}
+
+	var changes []*diffv1.EnvChange
+
+	// Find added and updated
+	for name, targetVal := range targetMap {
+		baseVal, exists := baseMap[name]
+		if !exists {
+			changes = append(changes, &diffv1.EnvChange{
+				Name:        name,
+				ChangeKind:  diffv1.ChangeKind_CHANGE_KIND_ADDED,
+				TargetValue: targetVal,
+				IsSensitive: isSensitiveEnvVar(name),
+			})
+		} else if baseVal != targetVal {
+			changes = append(changes, &diffv1.EnvChange{
+				Name:        name,
+				ChangeKind:  diffv1.ChangeKind_CHANGE_KIND_UPDATED,
+				BaseValue:   baseVal,
+				TargetValue: targetVal,
+				IsSensitive: isSensitiveEnvVar(name),
+			})
+		}
+	}
+
+	// Find removed
+	for name, baseVal := range baseMap {
+		if _, exists := targetMap[name]; !exists {
+			changes = append(changes, &diffv1.EnvChange{
+				Name:        name,
+				ChangeKind:  diffv1.ChangeKind_CHANGE_KIND_REMOVED,
+				BaseValue:   baseVal,
+				IsSensitive: isSensitiveEnvVar(name),
+			})
+		}
+	}
+
+	return changes
+}
+
+func isSensitiveEnvVar(name string) bool {
+	upper := strings.ToUpper(name)
+	sensitivePatterns := []string{"PASSWORD", "SECRET", "TOKEN", "KEY", "CREDENTIAL", "API_KEY"}
+	for _, p := range sensitivePatterns {
+		if strings.Contains(upper, p) {
+			return true
+		}
+	}
+	return false
+}
+
+func compareLabels(baseLabels, targetLabels map[string]string) []*diffv1.LabelChange {
+	var changes []*diffv1.LabelChange
+
+	// Find added and updated
+	for key, targetVal := range targetLabels {
+		baseVal, exists := baseLabels[key]
+		if !exists {
+			changes = append(changes, &diffv1.LabelChange{
+				Key:         key,
+				ChangeKind:  diffv1.ChangeKind_CHANGE_KIND_ADDED,
+				TargetValue: targetVal,
+			})
+		} else if baseVal != targetVal {
+			changes = append(changes, &diffv1.LabelChange{
+				Key:         key,
+				ChangeKind:  diffv1.ChangeKind_CHANGE_KIND_UPDATED,
+				BaseValue:   baseVal,
+				TargetValue: targetVal,
+			})
+		}
+	}
+
+	// Find removed
+	for key, baseVal := range baseLabels {
+		if _, exists := targetLabels[key]; !exists {
+			changes = append(changes, &diffv1.LabelChange{
+				Key:        key,
+				ChangeKind: diffv1.ChangeKind_CHANGE_KIND_REMOVED,
+				BaseValue:  baseVal,
+			})
+		}
+	}
+
+	return changes
+}
+
+func compareContainerLayers(baseInfo, targetInfo *image.Info) *diffv1.LayerDiffAnalysis {
+	if baseInfo == nil || targetInfo == nil {
+		return nil
+	}
+
+	analysis := &diffv1.LayerDiffAnalysis{
+		BaseLayerCount:   int32(baseInfo.Metadata.LayerCount),
+		TargetLayerCount: int32(targetInfo.Metadata.LayerCount),
+	}
+
+	// Compare layers by history
+	baseLen := len(baseInfo.History)
+	targetLen := len(targetInfo.History)
+	maxLen := baseLen
+	if targetLen > maxLen {
+		maxLen = targetLen
+	}
+
+	for i := 0; i < maxLen; i++ {
+		var change diffv1.LayerChange
+		change.Index = int32(i)
+
+		hasBase := i < baseLen
+		hasTarget := i < targetLen
+
+		if hasBase {
+			change.BaseCommand = baseInfo.History[i].CreatedBy
+		}
+		if hasTarget {
+			change.TargetCommand = targetInfo.History[i].CreatedBy
+		}
+
+		if hasBase && hasTarget {
+			if baseInfo.History[i].CreatedBy == targetInfo.History[i].CreatedBy {
+				change.ChangeKind = diffv1.LayerChangeKind_LAYER_CHANGE_KIND_UNCHANGED
+				analysis.CommonLayers++
+			} else {
+				change.ChangeKind = diffv1.LayerChangeKind_LAYER_CHANGE_KIND_MODIFIED
+			}
+		} else if hasTarget {
+			change.ChangeKind = diffv1.LayerChangeKind_LAYER_CHANGE_KIND_ADDED
+		} else {
+			change.ChangeKind = diffv1.LayerChangeKind_LAYER_CHANGE_KIND_REMOVED
+		}
+
+		// Only include non-unchanged layers in the response
+		if change.ChangeKind != diffv1.LayerChangeKind_LAYER_CHANGE_KIND_UNCHANGED {
+			analysis.LayerChanges = append(analysis.LayerChanges, &change)
+		}
+	}
+
+	return analysis
+}
+
+func calculateContainerDiffSummary(response *diffv1.DiffContainerImagesResponse) *diffv1.ContainerDiffSummary {
+	summary := &diffv1.ContainerDiffSummary{}
+
+	// Count package changes
+	for _, c := range response.PackageChanges {
+		switch c.ChangeKind {
+		case diffv1.ChangeKind_CHANGE_KIND_ADDED:
+			summary.PackagesAdded++
+		case diffv1.ChangeKind_CHANGE_KIND_REMOVED:
+			summary.PackagesRemoved++
+		case diffv1.ChangeKind_CHANGE_KIND_UPGRADED:
+			summary.PackagesUpgraded++
+		case diffv1.ChangeKind_CHANGE_KIND_DOWNGRADED:
+			summary.PackagesDowngraded++
+		}
+	}
+
+	// Count vulnerability changes
+	for _, v := range response.VulnerabilityChanges {
+		switch v.ChangeKind {
+		case diffv1.VulnerabilityChangeKind_VULNERABILITY_CHANGE_KIND_ADDED:
+			summary.VulnerabilitiesAdded++
+		case diffv1.VulnerabilityChangeKind_VULNERABILITY_CHANGE_KIND_REMOVED:
+			summary.VulnerabilitiesRemoved++
+		case diffv1.VulnerabilityChangeKind_VULNERABILITY_CHANGE_KIND_FIXED:
+			summary.VulnerabilitiesFixed++
+		}
+	}
+
+	// Count layer changes
+	if response.LayerAnalysis != nil {
+		for _, l := range response.LayerAnalysis.LayerChanges {
+			switch l.ChangeKind {
+			case diffv1.LayerChangeKind_LAYER_CHANGE_KIND_ADDED:
+				summary.LayersAdded++
+			case diffv1.LayerChangeKind_LAYER_CHANGE_KIND_REMOVED:
+				summary.LayersRemoved++
+			}
+		}
+	}
+
+	// Check for config changes
+	if response.ConfigChanges != nil {
+		cc := response.ConfigChanges
+		summary.ConfigChanged = cc.UserChanged || cc.RootChanged || cc.PortsChanged ||
+			cc.VolumesChanged || cc.EntrypointChanged || cc.CmdChanged ||
+			cc.WorkingDirChanged || cc.HealthcheckChanged ||
+			len(cc.EnvChanges) > 0 || len(cc.LabelChanges) > 0
+	}
+
+	return summary
 }
 

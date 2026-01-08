@@ -6,6 +6,10 @@ import (
 	"os"
 	"time"
 
+	"google.golang.org/protobuf/types/known/timestamppb"
+
+	scanv1 "github.com/picatz/deputy/gen/deputy/scan/v1"
+	targetv1 "github.com/picatz/deputy/gen/deputy/target/v1"
 	"github.com/picatz/deputy/internal/cli/flags"
 	"github.com/picatz/deputy/internal/ignore"
 	inv "github.com/picatz/deputy/internal/inventory"
@@ -210,4 +214,66 @@ func (f *scanFlags) loadIgnoreRules(workDir string) error {
 
 	f.ignoreRules = rules
 	return nil
+}
+
+// toScanRequest builds a scanv1.ScanRequest from CLI flags.
+// This enables the CLI to use the Client interface consistently across
+// in-process, daemon, and remote server modes.
+func (f scanFlags) toScanRequest(target string, errW io.Writer) *scanv1.ScanRequest {
+	beforeT, afterT := f.parsePublishedTimes(errW)
+
+	opts := &scanv1.ScanOptions{
+		Ecosystems:   f.Ecosystems,
+		Ref:          f.Ref,
+		PolicyPaths:  f.PolicyPaths,
+		IncludeSecrets: f.Secrets,
+	}
+
+	// Set published time filters
+	if !beforeT.IsZero() {
+		opts.PublishedBefore = timestamppb.New(beforeT)
+	}
+	if !afterT.IsZero() {
+		opts.PublishedAfter = timestamppb.New(afterT)
+	}
+
+	// Set graph options
+	if f.WithGraph {
+		opts.GraphOptions = &scanv1.GraphOptions{
+			Enabled:  true,
+			UseProxy: true,
+		}
+	}
+
+	// Set enrichment options
+	if f.Enrich {
+		opts.EnrichOptions = &scanv1.EnrichOptions{
+			Enabled:     true,
+			IncludeEpss: true,
+			IncludeKev:  true,
+		}
+	}
+
+	return &scanv1.ScanRequest{
+		Target:  target,
+		Options: opts,
+	}
+}
+
+// toScanRequestWithHint builds a scanv1.ScanRequest with explicit target hint.
+func (f scanFlags) toScanRequestWithHint(target string, kind targetv1.TargetKind, transport string, platform string, errW io.Writer) *scanv1.ScanRequest {
+	req := f.toScanRequest(target, errW)
+
+	// Set target hint for disambiguation
+	req.Options.TargetHint = &scanv1.TargetHint{
+		Kind:           kind,
+		ImageTransport: transport,
+	}
+
+	// Set platform for container images
+	if platform != "" {
+		req.Options.Platform = platform
+	}
+
+	return req
 }

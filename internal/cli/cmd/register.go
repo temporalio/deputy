@@ -70,6 +70,6 @@ func RegisterCommands(root *cobra.Command, deps Dependencies) {
 	// Integration commands
 	AddMCPCommand(root)
 
-	// Server command (uses scan.Service directly for handling requests)
+	// Server command (uses scan.Scanner for handling requests)
 	AddServerCommand(root, scan.NewService())
 }

@@ -11,6 +11,8 @@ import (
 
 	"connectrpc.com/connect"
 
+	diffv1 "github.com/picatz/deputy/gen/deputy/diff/v1"
+	graphv1 "github.com/picatz/deputy/gen/deputy/graph/v1"
 	listv1 "github.com/picatz/deputy/gen/deputy/list/v1"
 	remediationv1 "github.com/picatz/deputy/gen/deputy/remediation/v1"
 	sbomv1 "github.com/picatz/deputy/gen/deputy/sbom/v1"
@@ -413,6 +415,30 @@ func (m *mockTriageClient) VerifySecrets(ctx context.Context, req *connect.Reque
 }
 
 func (m *mockTriageClient) ListDetectors(ctx context.Context, req *connect.Request[secretsv1.ListDetectorsRequest]) (*connect.Response[secretsv1.ListDetectorsResponse], error) {
+	return nil, nil
+}
+
+func (m *mockTriageClient) DiffPackages(ctx context.Context, req *connect.Request[diffv1.DiffPackagesRequest]) (*connect.Response[diffv1.DiffPackagesResponse], error) {
+	return nil, nil
+}
+
+func (m *mockTriageClient) DiffVulnerabilities(ctx context.Context, req *connect.Request[diffv1.DiffVulnerabilitiesRequest]) (*connect.Response[diffv1.DiffVulnerabilitiesResponse], error) {
+	return nil, nil
+}
+
+func (m *mockTriageClient) DiffContainerImages(ctx context.Context, req *connect.Request[diffv1.DiffContainerImagesRequest]) (*connect.Response[diffv1.DiffContainerImagesResponse], error) {
+	return nil, nil
+}
+
+func (m *mockTriageClient) BuildGraph(ctx context.Context, req *connect.Request[graphv1.BuildGraphRequest]) (*connect.Response[graphv1.BuildGraphResponse], error) {
+	return nil, nil
+}
+
+func (m *mockTriageClient) WhyDependency(ctx context.Context, req *connect.Request[graphv1.WhyDependencyRequest]) (*connect.Response[graphv1.WhyDependencyResponse], error) {
+	return nil, nil
+}
+
+func (m *mockTriageClient) QueryGraph(ctx context.Context, req *connect.Request[graphv1.QueryGraphRequest]) (*connect.Response[graphv1.QueryGraphResponse], error) {
 	return nil, nil
 }
 

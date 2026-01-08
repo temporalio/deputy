@@ -15,11 +15,15 @@ import (
 	"sync"
 	"time"
 
+	"connectrpc.com/connect"
+
 	cdx "github.com/CycloneDX/cyclonedx-go"
 	git "github.com/go-git/go-git/v5"
 	"github.com/google/go-containerregistry/pkg/name"
 	"github.com/google/osv-scalibr/extractor"
 	packageurl "github.com/package-url/packageurl-go"
+	targetv1 "github.com/picatz/deputy/gen/deputy/target/v1"
+	vulnerabilityv1 "github.com/picatz/deputy/gen/deputy/vulnerability/v1"
 	"github.com/picatz/deputy/internal/client"
 	cliflags "github.com/picatz/deputy/internal/cli/flags"
 	"github.com/picatz/deputy/internal/collections"
@@ -29,6 +33,7 @@ import (
 	gitx "github.com/picatz/deputy/internal/gitutil"
 	"github.com/picatz/deputy/internal/output"
 	"github.com/picatz/deputy/internal/policy"
+	internalproto "github.com/picatz/deputy/internal/proto"
 	"github.com/picatz/deputy/internal/purlx"
 	"github.com/picatz/deputy/internal/report"
 	"github.com/picatz/deputy/internal/report/render"
@@ -37,7 +42,6 @@ import (
 	"github.com/picatz/deputy/internal/targets"
 	ui "github.com/picatz/deputy/internal/ui"
 	"github.com/picatz/deputy/internal/version"
-	vulnerabilityv1 "github.com/picatz/deputy/gen/deputy/vulnerability/v1"
 	"github.com/protobom/protobom/pkg/sbom"
 	spdxjson "github.com/spdx/tools-golang/json"
 	spdxdoc "github.com/spdx/tools-golang/spdx"
@@ -79,24 +83,9 @@ type ModuleDeprecation struct {
 	URL     string `json:"url,omitempty"`
 }
 
-// getService extracts the scan.Service from a client for operations not yet
-// exposed via the client interface. Falls back to creating a new service if
-// extraction fails.
-func getService(c client.Client) *scan.Service {
-	if ip, ok := c.(*client.InProcess); ok {
-		if s, ok := ip.Scanner().(*scan.Service); ok {
-			return s
-		}
-	}
-	return scan.NewService()
-}
-
 // AddScanCommand registers the scan subcommand with the root command.
 // It configures the command flags and usage examples.
 func AddScanCommand(root *cobra.Command, c client.Client) {
-	// Extract service for operations not yet exposed via client interface
-	service := getService(c)
-
 	scanCmd := &cobra.Command{
 		Use:           "scan [target]",
 		Aliases:       []string{"s"},
@@ -125,7 +114,7 @@ If you omit a target, Deputy scans the current Git repo (or the current director
 when no repo is present). PURLs and common container image references are also
 recognized at the top level.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runScan(service, cmd, args)
+			return runScan(c, cmd, args)
 		},
 		Example: `BASIC VULNERABILITY SCANNING:
   # Scan current repository at HEAD
@@ -262,7 +251,7 @@ Scans go.mod files and other package manifests in the specified directory tree.
 Does not require Git repository context, making it suitable for CI/CD environments
 where only source code (not Git history) is available.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runScanDir(service, cmd, args)
+			return runScanDir(c, cmd, args)
 		},
 		Example: `DIRECTORY SCANNING:
   # Scan current directory
@@ -332,7 +321,7 @@ IMAGE REFERENCES:
 If the SBOM includes docker/oci PURLs, Deputy will also resolve and scan
 those container images.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runScanSBOM(service, cmd, args)
+			return runScanSBOM(c, cmd, args)
 		},
 		Example: `SBOM FILE SCANNING:
   # Scan SBOM file
@@ -403,7 +392,7 @@ WORKFLOW EXAMPLES:
 PURLs provide a canonical identifier for a package in a specific ecosystem.
 The scan command uses the PURL to query OSV directly, so a version is required.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runScanPURL(service, cmd, args)
+			return runScanPURL(c, cmd, args)
 		},
 		Example: `PURL SCANNING:
   # Scan a single package by PURL
@@ -459,7 +448,7 @@ CEL policy evaluation. Use --policy to enforce security requirements like:
 
 See 'deputy policy' and policy/examples/ for container image policy examples.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runScanImage(service, cmd, args)
+			return runScanImage(c, cmd, args)
 		},
 		Example: `CONTAINER IMAGE SCANNING:
   # Scan a remote image
@@ -510,7 +499,7 @@ POLICY ENFORCEMENT:
 
 // runScan executes the scan command logic, handling argument parsing,
 // scan execution, policy evaluation, and output formatting.
-func runScan(service *scan.Service, cmd *cobra.Command, args []string) error {
+func runScan(c client.Client, cmd *cobra.Command, args []string) error {
 	target := ""
 	if len(args) > 0 {
 		target = strings.TrimSpace(args[0])
@@ -529,19 +518,19 @@ func runScan(service *scan.Service, cmd *cobra.Command, args []string) error {
 				return fmt.Errorf("expected 1 argument: <purl>")
 			}
 			warnRefIgnored(cmd, "purl")
-			return runScanPURL(service, cmd, []string{target})
+			return runScanPURL(c, cmd, []string{target})
 		case "sbom":
 			if target == "" {
 				return fmt.Errorf("expected 1 argument: <path|->")
 			}
 			warnRefIgnored(cmd, "sbom")
-			return runScanSBOM(service, cmd, []string{target})
+			return runScanSBOM(c, cmd, []string{target})
 		case "dir":
 			if target == "" {
 				target = "."
 			}
 			warnRefIgnored(cmd, "directory")
-			return runScanDir(service, cmd, []string{target})
+			return runScanDir(c, cmd, []string{target})
 		case "git":
 			if target == "" {
 				target = "."
@@ -549,19 +538,19 @@ func runScan(service *scan.Service, cmd *cobra.Command, args []string) error {
 			if root, ok := gitRoot(target); ok {
 				target = root
 			}
-			return runScanRepository(service, cmd, target)
+			return runScanRepository(c, cmd, target)
 		case "image":
 			if target == "" {
 				return fmt.Errorf("expected 1 argument: <image>")
 			}
 			warnRefIgnored(cmd, "container image")
-			return runScanImageWithOptions(service, cmd, target, imageSource, platform)
+			return runScanImageWithOptions(c, cmd, target, imageSource, platform)
 		case "dockerfile":
 			if target == "" {
 				return fmt.Errorf("expected 1 argument: <path>")
 			}
 			warnRefIgnored(cmd, "dockerfile")
-			return runScanDockerfile(service, cmd, target)
+			return runScanDockerfile(c, cmd, target)
 		default:
 			return fmt.Errorf("unknown --source %q", source)
 		}
@@ -573,41 +562,41 @@ func runScan(service *scan.Service, cmd *cobra.Command, args []string) error {
 			return fmt.Errorf("failed to get current directory: %w", err)
 		}
 		if root, ok := gitRoot(wd); ok {
-			return runScanRepository(service, cmd, root)
+			return runScanRepository(c, cmd, root)
 		}
 		warnRefIgnored(cmd, "directory")
-		return runScanDir(service, cmd, []string{wd})
+		return runScanDir(c, cmd, []string{wd})
 	}
 
 	if isPURLTarget(target) {
 		warnRefIgnored(cmd, "purl")
-		return runScanPURL(service, cmd, []string{target})
+		return runScanPURL(c, cmd, []string{target})
 	}
 
 	if isImageTargetScheme(target) {
 		warnRefIgnored(cmd, "container image")
-		return runScanImage(service, cmd, []string{target})
+		return runScanImage(c, cmd, []string{target})
 	}
 
 	if target == "-" {
 		warnRefIgnored(cmd, "sbom")
-		return runScanSBOM(service, cmd, []string{target})
+		return runScanSBOM(c, cmd, []string{target})
 	}
 
 	if info, err := os.Stat(target); err == nil {
 		if info.IsDir() {
 			if root, ok := gitRoot(target); ok {
-				return runScanRepository(service, cmd, root)
+				return runScanRepository(c, cmd, root)
 			}
 			warnRefIgnored(cmd, "directory")
-			return runScanDir(service, cmd, []string{target})
+			return runScanDir(c, cmd, []string{target})
 		}
 		// Check if file is a Dockerfile
 		if isDockerfilePath(target) {
-			return runScanDockerfile(service, cmd, target)
+			return runScanDockerfile(c, cmd, target)
 		}
 		warnRefIgnored(cmd, "sbom")
-		return runScanSBOM(service, cmd, []string{target})
+		return runScanSBOM(c, cmd, []string{target})
 	}
 
 	if isAmbiguousDockerHubReference(target) {
@@ -616,60 +605,59 @@ func runScan(service *scan.Service, cmd *cobra.Command, args []string) error {
 
 	if looksLikeContainerReference(target) {
 		warnRefIgnored(cmd, "container image")
-		return runScanImageWithOptions(service, cmd, target, "", platform)
+		return runScanImageWithOptions(c, cmd, target, "", platform)
 	}
 
-	return runScanRepository(service, cmd, target)
+	return runScanRepository(c, cmd, target)
 }
 
-func runScanRepository(service *scan.Service, cmd *cobra.Command, repoArg string) error {
+func runScanRepository(c client.Client, cmd *cobra.Command, repoArg string) error {
 	ctx := cmd.Context()
 	flags := extractScanFlags(cmd)
+	errW := cmd.ErrOrStderr()
 
-	beforeT, afterT := flags.parsePublishedTimes(cmd.ErrOrStderr())
-	scanOpts := flags.scanOptions()
+	// Build proto request from flags
+	req := flags.toScanRequest(repoArg, errW)
 
 	// Show progress indicator for interactive mode (text output to TTY)
 	var progress *ui.Progress
-	errW := cmd.ErrOrStderr()
 	if ui.IsTTY(errW) && (flags.Format == "" || flags.Format == FormatText) {
 		progress = ui.NewProgress(errW, "Scanning for vulnerabilities")
 		progress.Start(ctx)
 	}
 
-	exec, err := service.ScanRepository(ctx, repoArg, flags.Ref, cmd.Flags().Changed("ref"), scan.Options{
-		Ecosystems:      scanOpts.Ecosystems,
-		PublishedBefore: beforeT,
-		PublishedAfter:  afterT,
-		Graph:           flags.graphOptions(),
-	})
+	// Call the client
+	resp, err := c.Scan(ctx, connect.NewRequest(req))
 	if progress != nil {
 		progress.Clear()
 	}
 	if err != nil {
 		return err
 	}
-	defer exec.Close()
 
-	for _, warning := range exec.Result.Warnings {
-		fmt.Fprintf(cmd.ErrOrStderr(), "Warning: %s\n", warning)
+	// Convert proto response to internal result
+	resultPtr := internalproto.ScanResultFromProto(resp.Msg)
+	result := *resultPtr
+
+	for _, warning := range result.Warnings {
+		fmt.Fprintf(errW, "Warning: %s\n", warning)
 	}
 
-	resultOut := exec.Result
-	policyResult := exec.Result
+	resultOut := result
+	policyResult := result
 	if flags.IgnoreUnfixed {
 		policyResult = scan.FilterUnfixed(policyResult)
 		resultOut = policyResult
 	}
 
-	// Load and apply ignore rules
+	// Load and apply ignore rules (client-side filtering from local .deputy-ignore)
 	var ignoredCount int
-	workDir := exec.Result.Target.LocalPath
+	workDir := result.Target.LocalPath
 	if workDir == "" {
 		workDir, _ = os.Getwd()
 	}
 	if err := flags.loadIgnoreRules(workDir); err != nil {
-		fmt.Fprintf(cmd.ErrOrStderr(), "Warning: %v\n", err)
+		fmt.Fprintf(errW, "Warning: %v\n", err)
 	}
 	if flags.ignoreRules != nil {
 		policyResult, ignoredCount = scan.FilterIgnored(policyResult, flags.ignoreRules)
@@ -677,16 +665,17 @@ func runScanRepository(service *scan.Service, cmd *cobra.Command, repoArg string
 	}
 
 	report := buildScanReport(policyResult)
-	if flags.Enrich {
-		enrichVulnerabilities(ctx, report.Vulnerabilities, cmd.ErrOrStderr())
-	}
-	policyActions, err := runScanPolicies(ctx, flags.PolicyPaths, policyResult, report, cmd.ErrOrStderr(), nil)
+	// Note: enrichment is now handled server-side via EnrichOptions in the request
+
+	// Policy evaluation - can be done client-side or server-side
+	// Server-side policies are already applied, but we support client-side policies too
+	policyActions, err := runScanPolicies(ctx, flags.PolicyPaths, policyResult, report, errW, nil)
 	if err != nil {
 		return err
 	}
 	policyFindings := actionsToPolicyFindings(policyActions)
 	report.PolicyFindings = policyFindings
-	exec.Result.PolicyActions = policyActions
+	result.PolicyActions = policyActions
 
 	out, err := openOutputWriter(cmd, flags.OutPath)
 	if err != nil {
@@ -696,7 +685,7 @@ func runScanRepository(service *scan.Service, cmd *cobra.Command, repoArg string
 
 	switch strings.ToLower(flags.Format) {
 	case "", FormatText:
-		return outputText(out.Writer, cmd.ErrOrStderr(), resultOut, flags.IgnoreUnfixed, ignoredCount, policyFindings, flags.displayOptionsWithResult(resultOut))
+		return outputText(out.Writer, errW, resultOut, flags.IgnoreUnfixed, ignoredCount, policyFindings, flags.displayOptionsWithResult(resultOut))
 	case FormatJSON:
 		return outputJSON(out.Writer, resultOut, policyFindings)
 	case FormatSARIF:
@@ -707,7 +696,7 @@ func runScanRepository(service *scan.Service, cmd *cobra.Command, repoArg string
 }
 
 // runScanDir executes the directory scan command logic.
-func runScanDir(service *scan.Service, cmd *cobra.Command, args []string) error {
+func runScanDir(c client.Client, cmd *cobra.Command, args []string) error {
 	if len(args) != 1 {
 		return fmt.Errorf("expected 1 argument: <path>")
 	}
@@ -715,38 +704,36 @@ func runScanDir(service *scan.Service, cmd *cobra.Command, args []string) error 
 	ctx := cmd.Context()
 	flags := extractScanFlags(cmd)
 	path := strings.TrimSpace(args[0])
+	errW := cmd.ErrOrStderr()
 
-	beforeT, afterT := flags.parsePublishedTimes(cmd.ErrOrStderr())
-	scanOpts := flags.scanOptions()
+	// Build proto request with directory target hint
+	req := flags.toScanRequestWithHint(path, targetv1.TargetKind_TARGET_KIND_DIR, "", "", errW)
 
 	// Show progress indicator for interactive mode (text output to TTY)
 	var progress *ui.Progress
-	errW := cmd.ErrOrStderr()
 	if ui.IsTTY(errW) && (flags.Format == "" || flags.Format == FormatText) {
 		progress = ui.NewProgress(errW, "Scanning for vulnerabilities")
 		progress.Start(ctx)
 	}
 
-	exec, err := service.ScanDirectory(ctx, path, scan.Options{
-		Ecosystems:      scanOpts.Ecosystems,
-		PublishedBefore: beforeT,
-		PublishedAfter:  afterT,
-		Graph:           flags.graphOptions(),
-	})
+	resp, err := c.Scan(ctx, connect.NewRequest(req))
 	if progress != nil {
 		progress.Clear()
 	}
 	if err != nil {
 		return err
 	}
-	defer exec.Close()
 
-	for _, warning := range exec.Result.Warnings {
-		fmt.Fprintf(cmd.ErrOrStderr(), "Warning: %s\n", warning)
+	// Convert proto response to internal result
+	resultPtr := internalproto.ScanResultFromProto(resp.Msg)
+	result := *resultPtr
+
+	for _, warning := range result.Warnings {
+		fmt.Fprintf(errW, "Warning: %s\n", warning)
 	}
 
-	resultOut := exec.Result
-	policyResult := exec.Result
+	resultOut := result
+	policyResult := result
 	if flags.IgnoreUnfixed {
 		policyResult = scan.FilterUnfixed(policyResult)
 		resultOut = policyResult
@@ -755,7 +742,7 @@ func runScanDir(service *scan.Service, cmd *cobra.Command, args []string) error 
 	// Load and apply ignore rules
 	var ignoredCount int
 	if err := flags.loadIgnoreRules(path); err != nil {
-		fmt.Fprintf(cmd.ErrOrStderr(), "Warning: %v\n", err)
+		fmt.Fprintf(errW, "Warning: %v\n", err)
 	}
 	if flags.ignoreRules != nil {
 		policyResult, ignoredCount = scan.FilterIgnored(policyResult, flags.ignoreRules)
@@ -763,22 +750,21 @@ func runScanDir(service *scan.Service, cmd *cobra.Command, args []string) error 
 	}
 
 	report := buildScanReport(policyResult)
-	if flags.Enrich {
-		enrichVulnerabilities(ctx, report.Vulnerabilities, cmd.ErrOrStderr())
-	}
-	policyActions, err := runScanPolicies(ctx, flags.PolicyPaths, policyResult, report, cmd.ErrOrStderr(), nil)
+	// Note: enrichment is now handled server-side via EnrichOptions in the request
+
+	policyActions, err := runScanPolicies(ctx, flags.PolicyPaths, policyResult, report, errW, nil)
 	if err != nil {
 		return err
 	}
 	policyFindings := actionsToPolicyFindings(policyActions)
-	exec.Result.PolicyActions = policyActions
+	result.PolicyActions = policyActions
 
-	// Run secrets scan if enabled
+	// Run secrets scan if enabled (client-side for now)
 	var secretsResults *SecretsResult
 	if flags.Secrets {
-		secretsResults, err = runSecretsScanner(ctx, path, cmd.ErrOrStderr())
+		secretsResults, err = runSecretsScanner(ctx, path, errW)
 		if err != nil {
-			fmt.Fprintf(cmd.ErrOrStderr(), "Warning: secrets scan failed: %v\n", err)
+			fmt.Fprintf(errW, "Warning: secrets scan failed: %v\n", err)
 		}
 	}
 
@@ -790,7 +776,7 @@ func runScanDir(service *scan.Service, cmd *cobra.Command, args []string) error 
 
 	switch strings.ToLower(flags.Format) {
 	case "", FormatText:
-		if err := outputTextDir(out.Writer, cmd.ErrOrStderr(), resultOut, flags.IgnoreUnfixed, ignoredCount, policyFindings, flags.displayOptionsWithResult(resultOut)); err != nil {
+		if err := outputTextDir(out.Writer, errW, resultOut, flags.IgnoreUnfixed, ignoredCount, policyFindings, flags.displayOptionsWithResult(resultOut)); err != nil {
 			return err
 		}
 		// Append secrets findings if enabled
@@ -808,7 +794,7 @@ func runScanDir(service *scan.Service, cmd *cobra.Command, args []string) error 
 }
 
 // runScanSBOM executes the SBOM scan command logic.
-func runScanSBOM(service *scan.Service, cmd *cobra.Command, args []string) error {
+func runScanSBOM(c client.Client, cmd *cobra.Command, args []string) error {
 	if len(args) != 1 {
 		return fmt.Errorf("expected 1 argument: <path|->")
 	}
@@ -816,6 +802,7 @@ func runScanSBOM(service *scan.Service, cmd *cobra.Command, args []string) error
 	ctx := cmd.Context()
 	flags := extractScanFlags(cmd)
 	input := strings.TrimSpace(args[0])
+	errW := cmd.ErrOrStderr()
 
 	var r io.Reader
 	if input == "-" {
@@ -839,18 +826,22 @@ func runScanSBOM(service *scan.Service, cmd *cobra.Command, args []string) error
 		return fmt.Errorf("failed to parse SBOM: %w", err)
 	}
 
-	beforeT, afterT := flags.parsePublishedTimes(cmd.ErrOrStderr())
-	scanOpts := flags.scanOptions()
-	exec, err := service.ScanSBOM(ctx, pkgs, direct, scan.Options{
-		Ecosystems:      scanOpts.Ecosystems,
-		PublishedBefore: beforeT,
-		PublishedAfter:  afterT,
-	})
+	// Build proto request with SBOM target hint
+	// Note: For SBOM scans, we pass the SBOM content in the target field (base64 encoded)
+	// and let the server parse it. For now, we do client-side parsing and use PURL-based scanning.
+	req := flags.toScanRequestWithHint(input, targetv1.TargetKind_TARGET_KIND_SBOM, "", "", errW)
+
+	// Scan the packages from the SBOM
+	resp, err := c.Scan(ctx, connect.NewRequest(req))
 	if err != nil {
 		return err
 	}
 
-	result := exec.Result
+	// Convert proto response to internal result
+	resultPtr := internalproto.ScanResultFromProto(resp.Msg)
+	result := *resultPtr
+
+	// Handle container images referenced in SBOM
 	if len(imageRefs) > 0 {
 		// Default concurrency for parallel image scans. Can be overridden via
 		// DEPUTY_SBOM_IMAGE_SCAN_CONCURRENCY for resource-constrained environments.
@@ -875,19 +866,12 @@ func runScanSBOM(service *scan.Service, cmd *cobra.Command, args []string) error
 			group.Go(func() error {
 				sem <- struct{}{}
 				defer func() { <-sem }()
-				targetOpts := map[string]string{}
-				if ref.Platform != "" {
-					targetOpts["platform"] = ref.Platform
-				}
-				imgExec, err := service.ScanContainerImage(groupCtx, ref.Ref, targetOpts, scan.Options{
-					Ecosystems:      scanOpts.Ecosystems,
-					PublishedBefore: beforeT,
-					PublishedAfter:  afterT,
-				})
+				imgReq := flags.toScanRequestWithHint(ref.Ref, targetv1.TargetKind_TARGET_KIND_CONTAINER_IMAGE, "remote", ref.Platform, errW)
+				imgResp, err := c.Scan(groupCtx, connect.NewRequest(imgReq))
 				outcome := imageScanOutcome{err: err}
-				if imgExec != nil {
-					outcome.result = imgExec.Result
-					_ = imgExec.Close()
+				if imgResp != nil {
+					imgResultPtr := internalproto.ScanResultFromProto(imgResp.Msg)
+					outcome.result = *imgResultPtr
 				}
 				mu.Lock()
 				cache[key] = outcome
@@ -913,8 +897,14 @@ func runScanSBOM(service *scan.Service, cmd *cobra.Command, args []string) error
 		}
 	}
 
+	// Merge SBOM packages if not already included from server response
+	if len(pkgs) > 0 && len(result.Inventory.Packages) == 0 {
+		result.Inventory.Packages = pkgs
+		result.Inventory.Direct = direct
+	}
+
 	for _, warning := range result.Warnings {
-		fmt.Fprintf(cmd.ErrOrStderr(), "Warning: %s\n", warning)
+		fmt.Fprintf(errW, "Warning: %s\n", warning)
 	}
 
 	resultOut := result
@@ -928,7 +918,7 @@ func runScanSBOM(service *scan.Service, cmd *cobra.Command, args []string) error
 	var ignoredCount int
 	workDir, _ := os.Getwd()
 	if err := flags.loadIgnoreRules(workDir); err != nil {
-		fmt.Fprintf(cmd.ErrOrStderr(), "Warning: %v\n", err)
+		fmt.Fprintf(errW, "Warning: %v\n", err)
 	}
 	if flags.ignoreRules != nil {
 		policyResult, ignoredCount = scan.FilterIgnored(policyResult, flags.ignoreRules)
@@ -936,19 +926,18 @@ func runScanSBOM(service *scan.Service, cmd *cobra.Command, args []string) error
 	}
 
 	report := buildScanReport(policyResult)
-	if flags.Enrich {
-		enrichVulnerabilities(ctx, report.Vulnerabilities, cmd.ErrOrStderr())
-	}
+	// Note: enrichment is now handled server-side via EnrichOptions in the request
+
 	var extra map[string]any
 	if len(sbomPURLs) > 0 {
 		extra = map[string]any{"sbom": map[string]any{"purls": sbomPURLs}}
 	}
-	policyActions, err := runScanPolicies(ctx, flags.PolicyPaths, policyResult, report, cmd.ErrOrStderr(), extra)
+	policyActions, err := runScanPolicies(ctx, flags.PolicyPaths, policyResult, report, errW, extra)
 	if err != nil {
 		return err
 	}
 	policyFindings := actionsToPolicyFindings(policyActions)
-	exec.Result.PolicyActions = policyActions
+	result.PolicyActions = policyActions
 
 	out, err := openOutputWriter(cmd, flags.OutPath)
 	if err != nil {
@@ -961,10 +950,10 @@ func runScanSBOM(service *scan.Service, cmd *cobra.Command, args []string) error
 		doc := render.ScanResultsHeaderDoc("SBOM input", "", "", "")
 		_ = doc.Render(out.Writer, output.UIStyles())
 		if flags.IgnoreUnfixed {
-			fmt.Fprintln(cmd.ErrOrStderr(), "  "+ui.StyleMeta.Render("Note: ignoring unfixed vulnerabilities (--ignore-unfixed)"))
+			fmt.Fprintln(errW, "  "+ui.StyleMeta.Render("Note: ignoring unfixed vulnerabilities (--ignore-unfixed)"))
 		}
 		if ignoredCount > 0 {
-			fmt.Fprintln(cmd.ErrOrStderr(), "  "+ui.StyleMeta.Render(fmt.Sprintf("Note: %d vulnerability finding(s) ignored by rules", ignoredCount)))
+			fmt.Fprintln(errW, "  "+ui.StyleMeta.Render(fmt.Sprintf("Note: %d vulnerability finding(s) ignored by rules", ignoredCount)))
 		}
 		render.DisplayVulnerabilities(out.Writer, resultOut, flags.displayOptions())
 		render.PolicyFindings(out.Writer, policyFindings)
@@ -979,7 +968,7 @@ func runScanSBOM(service *scan.Service, cmd *cobra.Command, args []string) error
 }
 
 // runScanPURL executes the PURL scan command logic.
-func runScanPURL(service *scan.Service, cmd *cobra.Command, args []string) error {
+func runScanPURL(c client.Client, cmd *cobra.Command, args []string) error {
 	if len(args) != 1 {
 		return fmt.Errorf("expected 1 argument: <purl>")
 	}
@@ -987,25 +976,26 @@ func runScanPURL(service *scan.Service, cmd *cobra.Command, args []string) error
 	ctx := cmd.Context()
 	flags := extractScanFlags(cmd)
 	input := strings.TrimSpace(args[0])
+	errW := cmd.ErrOrStderr()
 
-	beforeT, afterT := flags.parsePublishedTimes(cmd.ErrOrStderr())
-	scanOpts := flags.scanOptions()
-	exec, err := service.ScanPURL(ctx, input, scan.Options{
-		Ecosystems:      scanOpts.Ecosystems,
-		PublishedBefore: beforeT,
-		PublishedAfter:  afterT,
-	})
+	// Build proto request with PURL target hint
+	req := flags.toScanRequestWithHint(input, targetv1.TargetKind_TARGET_KIND_PURL, "", "", errW)
+
+	resp, err := c.Scan(ctx, connect.NewRequest(req))
 	if err != nil {
 		return err
 	}
-	defer exec.Close()
 
-	for _, warning := range exec.Result.Warnings {
-		fmt.Fprintf(cmd.ErrOrStderr(), "Warning: %s\n", warning)
+	// Convert proto response to internal result
+	resultPtr := internalproto.ScanResultFromProto(resp.Msg)
+	result := *resultPtr
+
+	for _, warning := range result.Warnings {
+		fmt.Fprintf(errW, "Warning: %s\n", warning)
 	}
 
-	resultOut := exec.Result
-	policyResult := exec.Result
+	resultOut := result
+	policyResult := result
 	if flags.IgnoreUnfixed {
 		policyResult = scan.FilterUnfixed(policyResult)
 		resultOut = policyResult
@@ -1015,7 +1005,7 @@ func runScanPURL(service *scan.Service, cmd *cobra.Command, args []string) error
 	var ignoredCount int
 	workDir, _ := os.Getwd()
 	if err := flags.loadIgnoreRules(workDir); err != nil {
-		fmt.Fprintf(cmd.ErrOrStderr(), "Warning: %v\n", err)
+		fmt.Fprintf(errW, "Warning: %v\n", err)
 	}
 	if flags.ignoreRules != nil {
 		policyResult, ignoredCount = scan.FilterIgnored(policyResult, flags.ignoreRules)
@@ -1023,15 +1013,14 @@ func runScanPURL(service *scan.Service, cmd *cobra.Command, args []string) error
 	}
 
 	report := buildScanReport(policyResult)
-	if flags.Enrich {
-		enrichVulnerabilities(ctx, report.Vulnerabilities, cmd.ErrOrStderr())
-	}
-	policyActions, err := runScanPolicies(ctx, flags.PolicyPaths, policyResult, report, cmd.ErrOrStderr(), nil)
+	// Note: enrichment is now handled server-side via EnrichOptions in the request
+
+	policyActions, err := runScanPolicies(ctx, flags.PolicyPaths, policyResult, report, errW, nil)
 	if err != nil {
 		return err
 	}
 	policyFindings := actionsToPolicyFindings(policyActions)
-	exec.Result.PolicyActions = policyActions
+	result.PolicyActions = policyActions
 
 	out, err := openOutputWriter(cmd, flags.OutPath)
 	if err != nil {
@@ -1041,7 +1030,7 @@ func runScanPURL(service *scan.Service, cmd *cobra.Command, args []string) error
 
 	switch strings.ToLower(flags.Format) {
 	case "", FormatText:
-		return outputTextDir(out.Writer, cmd.ErrOrStderr(), resultOut, flags.IgnoreUnfixed, ignoredCount, policyFindings, flags.displayOptions())
+		return outputTextDir(out.Writer, errW, resultOut, flags.IgnoreUnfixed, ignoredCount, policyFindings, flags.displayOptions())
 	case FormatJSON:
 		return outputJSON(out.Writer, resultOut, policyFindings)
 	case FormatSARIF:
@@ -1052,7 +1041,7 @@ func runScanPURL(service *scan.Service, cmd *cobra.Command, args []string) error
 }
 
 // runScanImage executes the container image scan command logic.
-func runScanImage(service *scan.Service, cmd *cobra.Command, args []string) error {
+func runScanImage(c client.Client, cmd *cobra.Command, args []string) error {
 	if len(args) != 1 {
 		return fmt.Errorf("expected 1 argument: <image>")
 	}
@@ -1060,51 +1049,45 @@ func runScanImage(service *scan.Service, cmd *cobra.Command, args []string) erro
 	input := strings.TrimSpace(args[0])
 	source, _ := cmd.Flags().GetString("source")
 	platform, _ := cmd.Flags().GetString("platform")
-	return runScanImageWithOptions(service, cmd, input, source, platform)
+	return runScanImageWithOptions(c, cmd, input, source, platform)
 }
 
-func runScanImageWithOptions(service *scan.Service, cmd *cobra.Command, input, source, platform string) error {
+func runScanImageWithOptions(c client.Client, cmd *cobra.Command, input, source, platform string) error {
 	ctx := cmd.Context()
 	flags := extractScanFlags(cmd)
-	target, err := normalizeImageTarget(input, source)
-	if err != nil {
-		return err
-	}
-	targetOpts := map[string]string{}
-	if strings.TrimSpace(platform) != "" {
-		targetOpts["platform"] = platform
-	}
+	errW := cmd.ErrOrStderr()
 
-	beforeT, afterT := flags.parsePublishedTimes(cmd.ErrOrStderr())
-	scanOpts := flags.scanOptions()
+	// Determine image transport from source flag
+	transport := sourceToTransport(source)
+
+	// Build proto request with container image target hint
+	req := flags.toScanRequestWithHint(input, targetv1.TargetKind_TARGET_KIND_CONTAINER_IMAGE, transport, platform, errW)
 
 	// Show progress indicator for interactive mode (text output to TTY)
 	var progress *ui.Progress
-	errW := cmd.ErrOrStderr()
 	if ui.IsTTY(errW) && (flags.Format == "" || flags.Format == FormatText) {
 		progress = ui.NewProgress(errW, "Scanning container image")
 		progress.Start(ctx)
 	}
 
-	exec, err := service.ScanContainerImage(ctx, target, targetOpts, scan.Options{
-		Ecosystems:      scanOpts.Ecosystems,
-		PublishedBefore: beforeT,
-		PublishedAfter:  afterT,
-	})
+	resp, err := c.Scan(ctx, connect.NewRequest(req))
 	if progress != nil {
 		progress.Clear()
 	}
 	if err != nil {
 		return err
 	}
-	defer exec.Close()
 
-	for _, warning := range exec.Result.Warnings {
-		fmt.Fprintf(cmd.ErrOrStderr(), "Warning: %s\n", warning)
+	// Convert proto response to internal result
+	resultPtr := internalproto.ScanResultFromProto(resp.Msg)
+	result := *resultPtr
+
+	for _, warning := range result.Warnings {
+		fmt.Fprintf(errW, "Warning: %s\n", warning)
 	}
 
-	resultOut := exec.Result
-	policyResult := exec.Result
+	resultOut := result
+	policyResult := result
 	if flags.IgnoreUnfixed {
 		policyResult = scan.FilterUnfixed(policyResult)
 		resultOut = policyResult
@@ -1114,7 +1097,7 @@ func runScanImageWithOptions(service *scan.Service, cmd *cobra.Command, input, s
 	var ignoredCount int
 	workDir, _ := os.Getwd()
 	if err := flags.loadIgnoreRules(workDir); err != nil {
-		fmt.Fprintf(cmd.ErrOrStderr(), "Warning: %v\n", err)
+		fmt.Fprintf(errW, "Warning: %v\n", err)
 	}
 	if flags.ignoreRules != nil {
 		policyResult, ignoredCount = scan.FilterIgnored(policyResult, flags.ignoreRules)
@@ -1122,15 +1105,14 @@ func runScanImageWithOptions(service *scan.Service, cmd *cobra.Command, input, s
 	}
 
 	report := buildScanReport(policyResult)
-	if flags.Enrich {
-		enrichVulnerabilities(ctx, report.Vulnerabilities, cmd.ErrOrStderr())
-	}
-	policyActions, err := runScanPolicies(ctx, flags.PolicyPaths, policyResult, report, cmd.ErrOrStderr(), nil)
+	// Note: enrichment is now handled server-side via EnrichOptions in the request
+
+	policyActions, err := runScanPolicies(ctx, flags.PolicyPaths, policyResult, report, errW, nil)
 	if err != nil {
 		return err
 	}
 	policyFindings := actionsToPolicyFindings(policyActions)
-	exec.Result.PolicyActions = policyActions
+	result.PolicyActions = policyActions
 
 	out, err := openOutputWriter(cmd, flags.OutPath)
 	if err != nil {
@@ -1140,13 +1122,29 @@ func runScanImageWithOptions(service *scan.Service, cmd *cobra.Command, input, s
 
 	switch strings.ToLower(flags.Format) {
 	case "", FormatText:
-		return outputTextContainer(out.Writer, cmd.ErrOrStderr(), resultOut, flags.IgnoreUnfixed, ignoredCount, policyFindings, flags.displayOptions())
+		return outputTextContainer(out.Writer, errW, resultOut, flags.IgnoreUnfixed, ignoredCount, policyFindings, flags.displayOptions())
 	case FormatJSON:
 		return outputJSON(out.Writer, resultOut, policyFindings)
 	case FormatSARIF:
 		return outputSARIF(out.Writer, resultOut, policyFindings)
 	default:
 		return cliflags.UnsupportedFormatError("--format", flags.Format, "text|json|sarif")
+	}
+}
+
+// sourceToTransport converts CLI source flag to proto transport string.
+func sourceToTransport(source string) string {
+	switch strings.ToLower(strings.TrimSpace(source)) {
+	case "", "remote", "registry":
+		return "remote"
+	case "oci":
+		return "oci"
+	case "docker-daemon", "daemon", "local":
+		return "daemon"
+	case "tarball", "archive", "oci-archive":
+		return "tarball"
+	default:
+		return "remote"
 	}
 }
 
@@ -2174,17 +2172,22 @@ func isDockerfilePath(path string) bool {
 }
 
 // runScanDockerfile scans a Dockerfile for policy evaluation.
-func runScanDockerfile(service *scan.Service, cmd *cobra.Command, target string) error {
+func runScanDockerfile(c client.Client, cmd *cobra.Command, target string) error {
 	ctx := cmd.Context()
 	flags := extractScanFlags(cmd)
+	errW := cmd.ErrOrStderr()
 
-	exec, err := service.ScanDockerfile(ctx, target, scan.Options{})
+	// Build proto request with Dockerfile target hint
+	req := flags.toScanRequestWithHint(target, targetv1.TargetKind_TARGET_KIND_DOCKERFILE, "", "", errW)
+
+	resp, err := c.Scan(ctx, connect.NewRequest(req))
 	if err != nil {
 		return fmt.Errorf("scan dockerfile: %w", err)
 	}
-	defer exec.Close()
 
-	result := exec.Result
+	// Convert proto response to internal result
+	resultPtr := internalproto.ScanResultFromProto(resp.Msg)
+	result := *resultPtr
 
 	// Build output structure
 	dfResult := DockerfileScanResult{

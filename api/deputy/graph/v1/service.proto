@@ -1,0 +1,318 @@
+// Copyright 2025 Kent "picat" Gruber. All rights reserved.
+// SPDX-License-Identifier: MIT
+
+syntax = "proto3";
+
+package deputy.graph.v1;
+
+import "buf/validate/validate.proto";
+import "google/protobuf/timestamp.proto";
+import "deputy/target/v1/target.proto";
+import "deputy/vulnerability/v1/vulnerability.proto";
+
+option go_package = "github.com/picatz/deputy/gen/deputy/graph/v1;graphv1";
+
+// GraphService provides dependency graph analysis capabilities.
+//
+// This service builds and queries dependency graphs, enabling:
+//   - Understanding the full dependency tree
+//   - Finding paths to specific dependencies (why does X depend on Y?)
+//   - Analyzing transitive dependency depth and exposure
+//   - Identifying vulnerable dependency chains
+//
+// Security Model:
+// The service follows the same security constraints as ScanService:
+//
+// In-Process / Local Daemon Mode:
+//   - Full filesystem access for lockfile parsing
+//   - Access to package registries for resolution
+//
+// Remote Server Mode:
+//   - Only remote-accessible targets (git URLs, container registries)
+//   - Local paths are rejected
+service GraphService {
+  // BuildGraph constructs a dependency graph for a target.
+  rpc BuildGraph(BuildGraphRequest) returns (BuildGraphResponse);
+
+  // WhyDependency finds paths explaining why a dependency exists.
+  // Useful for understanding transitive dependency chains.
+  rpc WhyDependency(WhyDependencyRequest) returns (WhyDependencyResponse);
+
+  // QueryGraph returns a filtered subset of a dependency graph.
+  rpc QueryGraph(QueryGraphRequest) returns (QueryGraphResponse);
+}
+
+// BuildGraphRequest specifies graph construction parameters.
+message BuildGraphRequest {
+  // Target is the source to build the graph from.
+  string target = 1;
+
+  // Options configure graph building behavior.
+  GraphOptions options = 2;
+}
+
+// GraphOptions configures graph construction.
+message GraphOptions {
+  // Ecosystems filters to specific package ecosystems.
+  // Empty means include all detected ecosystems.
+  repeated string ecosystems = 1;
+
+  // UseProxy enables fetching module metadata from package registries.
+  // This provides more accurate dependency resolution.
+  bool use_proxy = 2;
+
+  // UseGit enables cloning repositories for private module resolution.
+  bool use_git = 3;
+
+  // PrivatePatterns specifies glob patterns for private modules.
+  // These are resolved via git clone rather than public proxy.
+  repeated string private_patterns = 4;
+
+  // IncludeVulnerabilities adds vulnerability information to nodes.
+  bool include_vulnerabilities = 5;
+
+  // Ref is a Git reference for repository targets.
+  string ref = 6;
+
+  // Platform specifies target platform for container images.
+  string platform = 7;
+
+  // TargetHint provides disambiguation when the target string is ambiguous.
+  deputy.target.v1.TargetKind target_hint = 8;
+}
+
+// BuildGraphResponse contains the constructed dependency graph.
+message BuildGraphResponse {
+  // Target describes what the graph represents.
+  deputy.target.v1.Target target = 1;
+
+  // GeneratedAt is when this graph was built.
+  google.protobuf.Timestamp generated_at = 2;
+
+  // Nodes are all packages in the dependency graph.
+  repeated Node nodes = 3;
+
+  // Edges represent dependency relationships.
+  repeated Edge edges = 4;
+
+  // Roots are PURLs of direct dependencies (depth 0).
+  repeated string roots = 5;
+
+  // Stats summarizes the graph.
+  GraphStats stats = 6;
+
+  // Warnings contains non-fatal issues encountered during graph building.
+  repeated string warnings = 7;
+}
+
+// Node represents a package in the dependency graph.
+message Node {
+  // Purl is the Package URL identifier.
+  string purl = 1 [(buf.validate.field).string.min_len = 1];
+
+  // Name is the package name.
+  string name = 2;
+
+  // Version is the package version.
+  string version = 3;
+
+  // Ecosystem is the package ecosystem (e.g., "go", "npm").
+  string ecosystem = 4;
+
+  // Direct indicates whether this is a direct dependency.
+  bool direct = 5;
+
+  // Depth is the shortest path length from any root.
+  // Values:
+  //   0: Direct dependency
+  //   1+: Transitive dependency (N hops from nearest root)
+  //   -1: Synthetic root node (the project itself)
+  //   999: Disconnected node (no path from any root)
+  int32 depth = 6;
+
+  // Locations lists file paths where this dependency was declared.
+  repeated string locations = 7;
+
+  // VulnCount summarizes vulnerabilities affecting this package.
+  VulnCount vuln_count = 8;
+
+  // Vulnerabilities contains full findings when include_vulnerabilities is set.
+  repeated deputy.vulnerability.v1.Finding vulnerabilities = 9;
+}
+
+// VulnCount summarizes vulnerability counts by severity.
+message VulnCount {
+  // Critical vulnerabilities.
+  int32 critical = 1;
+  // High severity vulnerabilities.
+  int32 high = 2;
+  // Medium severity vulnerabilities.
+  int32 medium = 3;
+  // Low severity vulnerabilities.
+  int32 low = 4;
+  // Unknown severity vulnerabilities.
+  int32 unknown = 5;
+  // Total vulnerability count.
+  int32 total = 6;
+}
+
+// Edge represents a dependency relationship.
+message Edge {
+  // From is the PURL of the dependent package (parent).
+  string from = 1;
+
+  // To is the PURL of the dependency (child).
+  string to = 2;
+
+  // Constraint is the version constraint if known (e.g., "^1.0.0").
+  string constraint = 3;
+
+  // Scope indicates dependency context.
+  Scope scope = 4;
+}
+
+// Scope indicates the context in which a dependency is used.
+enum Scope {
+  // Unspecified scope.
+  SCOPE_UNSPECIFIED = 0;
+  // Runtime dependency.
+  SCOPE_RUNTIME = 1;
+  // Development dependency.
+  SCOPE_DEV = 2;
+  // Optional dependency.
+  SCOPE_OPTIONAL = 3;
+  // Build-time dependency.
+  SCOPE_BUILD = 4;
+  // Test dependency.
+  SCOPE_TEST = 5;
+}
+
+// GraphStats provides statistics about a graph.
+message GraphStats {
+  // TotalNodes is the total package count.
+  int32 total_nodes = 1;
+
+  // DirectNodes is the count of direct dependencies.
+  int32 direct_nodes = 2;
+
+  // TransitiveNodes is the count of transitive dependencies.
+  int32 transitive_nodes = 3;
+
+  // MaxDepth is the maximum dependency depth.
+  int32 max_depth = 4;
+
+  // VulnerableNodes is the count of packages with vulnerabilities.
+  int32 vulnerable_nodes = 5;
+
+  // Ecosystems maps ecosystem names to package counts.
+  map<string, int32> ecosystems = 6;
+}
+
+// WhyDependencyRequest asks why a specific dependency exists.
+message WhyDependencyRequest {
+  // Target is the source to analyze.
+  string target = 1;
+
+  // Dependency identifies the dependency to explain.
+  // Can be a PURL, package name, or name@version.
+  string dependency = 2 [(buf.validate.field).string.min_len = 1];
+
+  // Options configure graph building behavior.
+  GraphOptions options = 3;
+}
+
+// WhyDependencyResponse explains dependency paths.
+message WhyDependencyResponse {
+  // Target describes what was analyzed.
+  deputy.target.v1.Target target = 1;
+
+  // Dependency is the resolved dependency identifier.
+  string dependency = 2;
+
+  // Paths are all paths from root to the dependency.
+  repeated DependencyPath paths = 3;
+
+  // Found indicates whether the dependency was found.
+  bool found = 4;
+
+  // Warnings contains non-fatal issues.
+  repeated string warnings = 5;
+}
+
+// DependencyPath represents a path through the dependency graph.
+message DependencyPath {
+  // Nodes are the packages in the path, from root to target.
+  repeated PathNode nodes = 1;
+
+  // Length is the path length (number of edges).
+  int32 length = 2;
+}
+
+// PathNode is a node in a dependency path.
+message PathNode {
+  // Purl is the Package URL.
+  string purl = 1;
+
+  // Name is the package name.
+  string name = 2;
+
+  // Version is the package version.
+  string version = 3;
+}
+
+// QueryGraphRequest filters a dependency graph.
+message QueryGraphRequest {
+  // Target is the source to query.
+  string target = 1;
+
+  // Options configure graph building.
+  GraphOptions options = 2;
+
+  // Filter specifies what to include in the result.
+  GraphFilter filter = 3;
+}
+
+// GraphFilter specifies query criteria.
+message GraphFilter {
+  // Ecosystems filters to specific ecosystems.
+  repeated string ecosystems = 1;
+
+  // MinDepth filters to nodes with depth >= this value.
+  int32 min_depth = 2;
+
+  // MaxDepth filters to nodes with depth <= this value.
+  int32 max_depth = 3;
+
+  // OnlyDirect returns only direct dependencies.
+  bool only_direct = 4;
+
+  // OnlyTransitive returns only transitive dependencies.
+  bool only_transitive = 5;
+
+  // OnlyVulnerable returns only packages with vulnerabilities.
+  bool only_vulnerable = 6;
+
+  // NamePattern filters by package name pattern (glob).
+  string name_pattern = 7;
+
+  // RootPurl returns only the subgraph rooted at this PURL.
+  string root_purl = 8;
+}
+
+// QueryGraphResponse contains filtered graph results.
+message QueryGraphResponse {
+  // Target describes what was queried.
+  deputy.target.v1.Target target = 1;
+
+  // Nodes are the filtered packages.
+  repeated Node nodes = 2;
+
+  // Edges are relationships between filtered nodes.
+  repeated Edge edges = 3;
+
+  // Stats summarizes the filtered graph.
+  GraphStats stats = 4;
+
+  // Warnings contains non-fatal issues.
+  repeated string warnings = 5;
+}

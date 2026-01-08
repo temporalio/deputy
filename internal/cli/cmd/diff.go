@@ -12,9 +12,12 @@ import (
 	"strings"
 	"sync"
 
+	"connectrpc.com/connect"
 	pb "deps.dev/api/v3"
 	"github.com/go-git/go-git/v5/plumbing"
 	"github.com/google/osv-scalibr/extractor"
+	scanv1 "github.com/picatz/deputy/gen/deputy/scan/v1"
+	vulnerabilityv1 "github.com/picatz/deputy/gen/deputy/vulnerability/v1"
 	"github.com/picatz/deputy/internal/cli/flags"
 	"github.com/picatz/deputy/internal/client"
 	"github.com/picatz/deputy/internal/compare"
@@ -24,6 +27,7 @@ import (
 	"github.com/picatz/deputy/internal/otel"
 	"github.com/picatz/deputy/internal/output"
 	"github.com/picatz/deputy/internal/policy"
+	internalproto "github.com/picatz/deputy/internal/proto"
 	"github.com/picatz/deputy/internal/report"
 	"github.com/picatz/deputy/internal/report/render"
 	"github.com/picatz/deputy/internal/repository"
@@ -31,13 +35,13 @@ import (
 	"github.com/picatz/deputy/internal/scan"
 	ui "github.com/picatz/deputy/internal/ui"
 	"github.com/picatz/deputy/internal/vulnerability"
-	vulnerabilityv1 "github.com/picatz/deputy/gen/deputy/vulnerability/v1"
 	"github.com/spf13/cobra"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
 	"golang.org/x/sync/errgroup"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
+	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
 // AddDiffCommand registers the diff subcommand which compares dependency
@@ -59,9 +63,6 @@ func AddDiffCommand(root *cobra.Command, c client.Client) {
 		useLocalDaemon                                 bool
 		outputFormat                                   string
 	)
-
-	// Extract service for operations not yet exposed via client interface
-	service := getService(c)
 
 	cmd := &cobra.Command{
 		Use:           "diff [base] [target]",
@@ -137,7 +138,7 @@ Can be disabled with --skip-vuln-scan for faster execution.`,
 					useLocalDaemon: useLocalDaemon,
 					format:         outputFormat,
 				}
-				return runContainerDiff(cmd.Context(), service, args[0], args[1], opts, cmd.OutOrStdout(), cmd.ErrOrStderr())
+				return runContainerDiff(cmd.Context(), c, args[0], args[1], opts, cmd.OutOrStdout(), cmd.ErrOrStderr())
 			}
 			scanOpts := inv.ScanOptions{Ecosystems: ecosystems}
 			matcher, matcherErr := inv.GetDependencyMatcher(scanOpts)
@@ -148,7 +149,7 @@ Can be disabled with --skip-vuln-scan for faster execution.`,
 			if err != nil {
 				return fmt.Errorf("failed to parse references: %w", err)
 			}
-			return runDiffAnalysis(cmd.Context(), service, repo, baseRef, targetRef, !skipVulnScan, enrichLicenses, licenseSource, publishedAfterStr, publishedBeforeStr, asOfStr, ignoreUnfixed, showUnchanged, unchangedThreshold, policyPaths, scanOpts, matcher, debugMatcher, outputFormat, cmd.OutOrStdout(), cmd.ErrOrStderr())
+			return runDiffAnalysis(cmd.Context(), c, repo, baseRef, targetRef, !skipVulnScan, enrichLicenses, licenseSource, publishedAfterStr, publishedBeforeStr, asOfStr, ignoreUnfixed, showUnchanged, unchangedThreshold, policyPaths, scanOpts, matcher, debugMatcher, outputFormat, cmd.OutOrStdout(), cmd.ErrOrStderr())
 		},
 		Example: `BASIC USAGE:
   # Compare current work with default branch (beginner-friendly)
@@ -300,7 +301,7 @@ type DiffPolicyReport struct {
 // runDiffAnalysis orchestrates dependency inventory collection for the base and
 // target references, computes a dependency diff, and optionally queries OSV to
 // enrich added/updated modules with vulnerability data.
-func runDiffAnalysis(ctx context.Context, service *scan.Service, repoPath, baseRef, targetRef string, enableVulnScan bool, enrichLicenses bool, licenseSource string, publishedAfterStr, publishedBeforeStr, asOfStr string, ignoreUnfixed bool, showUnchanged bool, unchangedThreshold string, policyPaths []string, scanOpts inv.ScanOptions, matcher *inv.DependencyMatcher, debugMatcher bool, outputFormat string, outW io.Writer, errW io.Writer) error {
+func runDiffAnalysis(ctx context.Context, c client.Client, repoPath, baseRef, targetRef string, enableVulnScan bool, enrichLicenses bool, licenseSource string, publishedAfterStr, publishedBeforeStr, asOfStr string, ignoreUnfixed bool, showUnchanged bool, unchangedThreshold string, policyPaths []string, scanOpts inv.ScanOptions, matcher *inv.DependencyMatcher, debugMatcher bool, outputFormat string, outW io.Writer, errW io.Writer) error {
 	ctx, span := otel.StartSpan(ctx, "deputy.diff",
 		trace.WithAttributes(
 			attribute.String("deputy.target.path", repoPath),
@@ -317,9 +318,6 @@ func runDiffAnalysis(ctx context.Context, service *scan.Service, repoPath, baseR
 	}
 	if errW == nil {
 		errW = io.Discard
-	}
-	if service == nil {
-		service = scan.NewService()
 	}
 
 	// Validate and normalize output format early
@@ -465,8 +463,6 @@ func runDiffAnalysis(ctx context.Context, service *scan.Service, repoPath, baseR
 	basePkgInputs := scan.PackagesToInputs(basePackages, scan.PackageInputOptions{GoDirect: baseGoDirect, Resolver: baseManifestRes})
 	pkgDirect := scan.MergeDirectMaps(scan.BuildPackageDirectMap(basePkgInputs), scan.BuildPackageDirectMap(targetPkgInputs))
 	goDirect := mergeGoDirectMaps(baseGoDirect, targetGoDirect)
-	manifestRes := targetManifestRes
-	pkgInputs := targetPkgInputs
 
 	// Collect main modules to exclude from comparison (the project itself shouldn't appear as a dependency)
 	excludeMainModules := compare.CollectMainModulesFromWorkspace(repoSrc.Workspace())
@@ -528,25 +524,36 @@ func runDiffAnalysis(ctx context.Context, service *scan.Service, repoPath, baseR
 			progress.Start(ctx)
 		}
 
-		inputs := pkgInputs
-		if inputs == nil {
-			inputs = scan.PackagesToInputs(targetPackages, scan.PackageInputOptions{GoDirect: goDirect, Resolver: manifestRes})
-		}
 		beforeT, afterT := flags.ParsePublishedFilters(errW, asOfStr, publishedBeforeStr, publishedAfterStr)
-		result := service.ScanInputs(
-			ctx,
-			scan.Target{DisplayPath: repoPath, LocalPath: repoPath, Ref: targetRef, EffectiveRef: targetRef},
-			targetPackages,
-			pkgDirect,
-			inputs,
-			scan.Options{PublishedBefore: beforeT, PublishedAfter: afterT},
-		)
 
+		// Build scan request using client interface
+		scanOpts := &scanv1.ScanOptions{
+			Ref: targetRef,
+		}
+		if !beforeT.IsZero() {
+			scanOpts.PublishedBefore = timestamppb.New(beforeT)
+		}
+		if !afterT.IsZero() {
+			scanOpts.PublishedAfter = timestamppb.New(afterT)
+		}
+		req := &scanv1.ScanRequest{
+			Target:  repoPath,
+			Options: scanOpts,
+		}
+
+		resp, err := c.Scan(ctx, connect.NewRequest(req))
 		if progress != nil {
 			progress.Clear()
 			// Move cursor up to clear the blank line we added for spacing
 			fmt.Fprint(errW, "\033[A\033[K")
 		}
+		if err != nil {
+			return fmt.Errorf("vulnerability scan failed: %w", err)
+		}
+
+		// Convert proto response to internal result
+		resultPtr := internalproto.ScanResultFromProto(resp.Msg)
+		result := *resultPtr
 
 		for _, warning := range result.Warnings {
 			fmt.Fprintf(errW, "Warning: %s\n", warning)

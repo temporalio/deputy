@@ -13,6 +13,7 @@ import (
 	"github.com/google/osv-scalibr/purl"
 	vulnerabilityv1 "github.com/picatz/deputy/gen/deputy/vulnerability/v1"
 	"github.com/picatz/deputy/internal/analysis/osv"
+	"github.com/picatz/deputy/internal/client"
 	inv "github.com/picatz/deputy/internal/inventory"
 	"github.com/picatz/deputy/internal/scan"
 	"github.com/picatz/deputy/internal/vulnerability"
@@ -45,7 +46,10 @@ func TestRunScanHonorsEcosystemFilter(t *testing.T) {
 	mustSetFlag(t, cmd, "format", "json")
 	mustSetFlag(t, cmd, "output", outPath)
 
-	if err := runScan(service, cmd, []string{tmpDir}); err != nil {
+	// Wrap service in InProcess client
+	c := client.NewInProcess(service)
+
+	if err := runScan(c, cmd, []string{tmpDir}); err != nil {
 		t.Fatalf("runScan: %v", err)
 	}
 	want := []string{"go", "npm"}
@@ -92,7 +96,10 @@ func TestRunScanEmitsMultiEcosystemInputs(t *testing.T) {
 	mustSetFlag(t, cmd, "format", "json")
 	mustSetFlag(t, cmd, "output", outPath)
 
-	if err := runScan(service, cmd, []string{tmpDir}); err != nil {
+	// Wrap service in InProcess client
+	c := client.NewInProcess(service)
+
+	if err := runScan(c, cmd, []string{tmpDir}); err != nil {
 		t.Fatalf("runScan: %v", err)
 	}
 	if len(captured) != 2 {

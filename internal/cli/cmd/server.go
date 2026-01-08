@@ -24,7 +24,9 @@ type serverFlags struct {
 }
 
 // AddServerCommand adds the server command to the root command.
-func AddServerCommand(root *cobra.Command, scanService *scan.Service) {
+// The scanner parameter allows injecting a custom scan.Scanner implementation.
+// If nil, the server will create a default scanner.
+func AddServerCommand(root *cobra.Command, scanner scan.Scanner) {
 	flags := &serverFlags{}
 
 	cmd := &cobra.Command{
@@ -97,7 +99,7 @@ Examples (curl):
     -H "Content-Type: application/json" \
     -d '{"target": "github.com/example/repo"}'`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runServer(cmd.Context(), flags, scanService)
+			return runServer(cmd.Context(), flags, scanner)
 		},
 	}
 
@@ -110,10 +112,10 @@ Examples (curl):
 	root.AddCommand(cmd)
 }
 
-func runServer(ctx context.Context, flags *serverFlags, scanService *scan.Service) error {
+func runServer(ctx context.Context, flags *serverFlags, scanner scan.Scanner) error {
 	cfg := server.Config{
 		Addr:         flags.addr,
-		Scanner:      scanService,
+		Scanner:      scanner,
 		ReadTimeout:  flags.readTimeout,
 		WriteTimeout: flags.writeTimeout,
 		IdleTimeout:  flags.idleTimeout,
