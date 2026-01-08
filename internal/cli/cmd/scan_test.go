@@ -11,6 +11,7 @@ import (
 	git "github.com/go-git/go-git/v5"
 	"github.com/google/osv-scalibr/extractor"
 	"github.com/google/osv-scalibr/purl"
+	vulnerabilityv1 "github.com/picatz/deputy/gen/deputy/vulnerability/v1"
 	"github.com/picatz/deputy/internal/analysis/osv"
 	inv "github.com/picatz/deputy/internal/inventory"
 	"github.com/picatz/deputy/internal/scan"
@@ -18,7 +19,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
-func TestScannerRunScanHonorsEcosystemFilter(t *testing.T) {
+func TestRunScanHonorsEcosystemFilter(t *testing.T) {
 	t.Parallel()
 
 	tmpDir := t.TempDir()
@@ -27,24 +28,24 @@ func TestScannerRunScanHonorsEcosystemFilter(t *testing.T) {
 	outPath := filepath.Join(tmpDir, "scan.json")
 
 	var captured inv.ScanOptions
-	scanner := &Scanner{service: scan.NewServiceWithConfig(&scan.ServiceConfig{
+	service := scan.NewServiceWithConfig(&scan.ServiceConfig{
 		CollectInventory: func(ctx context.Context, repoPath, gitRef string, opts inv.ScanOptions) ([]*extractor.Package, error) {
 			captured = opts
 			return []*extractor.Package{
 				{Name: "github.com/acme/lib", Version: "v1.0.0", PURLType: purl.TypeGolang},
 			}, nil
 		},
-		QueryVulnerabilities: func(ctx context.Context, client osv.Client, inputs []osv.PkgInput) ([]vulnerability.Finding, map[string]vulnerability.Advisory, error) {
+		QueryVulnerabilities: func(ctx context.Context, client osv.Client, inputs []osv.PkgInput) ([]vulnerability.Finding, map[string]vulnerabilityv1.Advisory, error) {
 			return nil, nil, nil
 		},
-	})}
+	})
 
 	cmd := newScanTestCommand(t)
 	mustSetFlag(t, cmd, "ecosystems", "go,npm")
 	mustSetFlag(t, cmd, "format", "json")
 	mustSetFlag(t, cmd, "output", outPath)
 
-	if err := scanner.runScan(cmd, []string{tmpDir}); err != nil {
+	if err := runScan(service, cmd, []string{tmpDir}); err != nil {
 		t.Fatalf("runScan: %v", err)
 	}
 	want := []string{"go", "npm"}
@@ -53,7 +54,7 @@ func TestScannerRunScanHonorsEcosystemFilter(t *testing.T) {
 	}
 }
 
-func TestScannerRunScanEmitsMultiEcosystemInputs(t *testing.T) {
+func TestRunScanEmitsMultiEcosystemInputs(t *testing.T) {
 	t.Parallel()
 
 	tmpDir := t.TempDir()
@@ -76,22 +77,22 @@ func TestScannerRunScanEmitsMultiEcosystemInputs(t *testing.T) {
 	}
 
 	var captured []osv.PkgInput
-	scanner := &Scanner{service: scan.NewServiceWithConfig(&scan.ServiceConfig{
+	service := scan.NewServiceWithConfig(&scan.ServiceConfig{
 		CollectInventory: func(ctx context.Context, repoPath, gitRef string, opts inv.ScanOptions) ([]*extractor.Package, error) {
 			return []*extractor.Package{goPkg, npmPkg}, nil
 		},
-		QueryVulnerabilities: func(ctx context.Context, client osv.Client, inputs []osv.PkgInput) ([]vulnerability.Finding, map[string]vulnerability.Advisory, error) {
+		QueryVulnerabilities: func(ctx context.Context, client osv.Client, inputs []osv.PkgInput) ([]vulnerability.Finding, map[string]vulnerabilityv1.Advisory, error) {
 			captured = append([]osv.PkgInput(nil), inputs...)
 			return nil, nil, nil
 		},
-	})}
+	})
 
 	cmd := newScanTestCommand(t)
 	mustSetFlag(t, cmd, "ecosystems", "go,npm")
 	mustSetFlag(t, cmd, "format", "json")
 	mustSetFlag(t, cmd, "output", outPath)
 
-	if err := scanner.runScan(cmd, []string{tmpDir}); err != nil {
+	if err := runScan(service, cmd, []string{tmpDir}); err != nil {
 		t.Fatalf("runScan: %v", err)
 	}
 	if len(captured) != 2 {

@@ -3,6 +3,7 @@ package scan
 import (
 	"testing"
 
+	vulnerabilityv1 "github.com/picatz/deputy/gen/deputy/vulnerability/v1"
 	"github.com/picatz/deputy/internal/dependency"
 	"github.com/picatz/deputy/internal/ignore"
 	"github.com/picatz/deputy/internal/vulnerability"
@@ -19,8 +20,8 @@ func TestFilterUnfixed_EmptyResult(t *testing.T) {
 func TestFilterUnfixed_NoFindings(t *testing.T) {
 	t.Parallel()
 	result := FilterUnfixed(Result{
-		Advisories: map[string]vulnerability.Advisory{
-			"CVE-2024-1234": {ID: "CVE-2024-1234", FixedVersions: []string{"1.0.1"}},
+		Advisories: map[string]vulnerabilityv1.Advisory{
+			"CVE-2024-1234": {Id: "CVE-2024-1234", FixedVersions: []string{"1.0.1"}},
 		},
 	})
 	if len(result.Findings) != 0 {
@@ -39,8 +40,8 @@ func TestFilterUnfixed_KeepsFixable(t *testing.T) {
 				Affected:   true,
 			},
 		},
-		Advisories: map[string]vulnerability.Advisory{
-			"CVE-2024-1234": {ID: "CVE-2024-1234", FixedVersions: []string{"1.0.1"}},
+		Advisories: map[string]vulnerabilityv1.Advisory{
+			"CVE-2024-1234": {Id: "CVE-2024-1234", FixedVersions: []string{"1.0.1"}},
 		},
 	})
 	if len(result.Findings) != 1 {
@@ -59,8 +60,8 @@ func TestFilterUnfixed_DropsUnfixable(t *testing.T) {
 				Affected:   true,
 			},
 		},
-		Advisories: map[string]vulnerability.Advisory{
-			"CVE-2024-1234": {ID: "CVE-2024-1234"}, // No fixed versions
+		Advisories: map[string]vulnerabilityv1.Advisory{
+			"CVE-2024-1234": {Id: "CVE-2024-1234"}, // No fixed versions
 		},
 	})
 	if len(result.Findings) != 0 {
@@ -79,8 +80,8 @@ func TestFilterUnfixed_DropsNoUpgradePath(t *testing.T) {
 				Affected:   true,
 			},
 		},
-		Advisories: map[string]vulnerability.Advisory{
-			"CVE-2024-1234": {ID: "CVE-2024-1234", FixedVersions: []string{"1.0.1"}},
+		Advisories: map[string]vulnerabilityv1.Advisory{
+			"CVE-2024-1234": {Id: "CVE-2024-1234", FixedVersions: []string{"1.0.1"}},
 		},
 	})
 	if len(result.Findings) != 0 {
@@ -111,10 +112,10 @@ func TestFilterUnfixed_MixedResults(t *testing.T) {
 				Affected:   true,
 			},
 		},
-		Advisories: map[string]vulnerability.Advisory{
-			"CVE-2024-1111": {ID: "CVE-2024-1111", FixedVersions: []string{"1.0.1"}},        // Fixable
-			"CVE-2024-2222": {ID: "CVE-2024-2222"},                                           // No fix
-			"CVE-2024-3333": {ID: "CVE-2024-3333", FixedVersions: []string{"0.5.0", "1.1.0"}}, // Has upgrades
+		Advisories: map[string]vulnerabilityv1.Advisory{
+			"CVE-2024-1111": {Id: "CVE-2024-1111", FixedVersions: []string{"1.0.1"}},        // Fixable
+			"CVE-2024-2222": {Id: "CVE-2024-2222"},                                           // No fix
+			"CVE-2024-3333": {Id: "CVE-2024-3333", FixedVersions: []string{"0.5.0", "1.1.0"}}, // Has upgrades
 		},
 	})
 	if len(result.Findings) != 2 {
@@ -137,7 +138,7 @@ func TestFilterUnfixed_MissingAdvisory(t *testing.T) {
 				Affected:   true,
 			},
 		},
-		Advisories: map[string]vulnerability.Advisory{},
+		Advisories: map[string]vulnerabilityv1.Advisory{},
 	})
 	if len(result.Findings) != 0 {
 		t.Errorf("expected 0 findings (missing advisory), got %d", len(result.Findings))
@@ -161,10 +162,10 @@ func TestFilterAdvisories_KeepsReferencedOnly(t *testing.T) {
 		{AdvisoryID: "CVE-2024-1111"},
 		{AdvisoryID: "CVE-2024-3333"},
 	}
-	advisories := map[string]vulnerability.Advisory{
-		"CVE-2024-1111": {ID: "CVE-2024-1111"},
-		"CVE-2024-2222": {ID: "CVE-2024-2222"}, // Not referenced
-		"CVE-2024-3333": {ID: "CVE-2024-3333"},
+	advisories := map[string]vulnerabilityv1.Advisory{
+		"CVE-2024-1111": {Id: "CVE-2024-1111"},
+		"CVE-2024-2222": {Id: "CVE-2024-2222"}, // Not referenced
+		"CVE-2024-3333": {Id: "CVE-2024-3333"},
 	}
 
 	result := filterAdvisories(findings, advisories)
@@ -218,9 +219,9 @@ func TestFilterIgnored_MatchesID(t *testing.T) {
 			{AdvisoryID: "CVE-2024-1234", Dependency: dependency.ID{Name: "pkg1", Ecosystem: "go"}},
 			{AdvisoryID: "CVE-2024-5678", Dependency: dependency.ID{Name: "pkg2", Ecosystem: "go"}},
 		},
-		Advisories: map[string]vulnerability.Advisory{
-			"CVE-2024-1234": {ID: "CVE-2024-1234"},
-			"CVE-2024-5678": {ID: "CVE-2024-5678"},
+		Advisories: map[string]vulnerabilityv1.Advisory{
+			"CVE-2024-1234": {Id: "CVE-2024-1234"},
+			"CVE-2024-5678": {Id: "CVE-2024-5678"},
 		},
 	}
 
@@ -246,9 +247,9 @@ func TestFilterIgnored_MatchesPackage(t *testing.T) {
 			{AdvisoryID: "CVE-2024-1111", Dependency: dependency.ID{Name: "vulnerable-pkg", Ecosystem: "npm"}},
 			{AdvisoryID: "CVE-2024-2222", Dependency: dependency.ID{Name: "safe-pkg", Ecosystem: "npm"}},
 		},
-		Advisories: map[string]vulnerability.Advisory{
-			"CVE-2024-1111": {ID: "CVE-2024-1111"},
-			"CVE-2024-2222": {ID: "CVE-2024-2222"},
+		Advisories: map[string]vulnerabilityv1.Advisory{
+			"CVE-2024-1111": {Id: "CVE-2024-1111"},
+			"CVE-2024-2222": {Id: "CVE-2024-2222"},
 		},
 	}
 
@@ -271,9 +272,9 @@ func TestFilterIgnored_MatchesEcosystem(t *testing.T) {
 			{AdvisoryID: "CVE-2024-1111", Dependency: dependency.ID{Name: "pkg1", Ecosystem: "npm"}},
 			{AdvisoryID: "CVE-2024-2222", Dependency: dependency.ID{Name: "pkg2", Ecosystem: "go"}},
 		},
-		Advisories: map[string]vulnerability.Advisory{
-			"CVE-2024-1111": {ID: "CVE-2024-1111"},
-			"CVE-2024-2222": {ID: "CVE-2024-2222"},
+		Advisories: map[string]vulnerabilityv1.Advisory{
+			"CVE-2024-1111": {Id: "CVE-2024-1111"},
+			"CVE-2024-2222": {Id: "CVE-2024-2222"},
 		},
 	}
 
@@ -298,8 +299,8 @@ func TestFilterIgnored_NoMatches(t *testing.T) {
 		Findings: []vulnerability.Finding{
 			{AdvisoryID: "CVE-2024-1234", Dependency: dependency.ID{Name: "pkg1", Ecosystem: "go"}},
 		},
-		Advisories: map[string]vulnerability.Advisory{
-			"CVE-2024-1234": {ID: "CVE-2024-1234"},
+		Advisories: map[string]vulnerabilityv1.Advisory{
+			"CVE-2024-1234": {Id: "CVE-2024-1234"},
 		},
 	}
 

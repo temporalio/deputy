@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/google/osv-scalibr/extractor"
+	vulnerabilityv1 "github.com/picatz/deputy/gen/deputy/vulnerability/v1"
 	"github.com/picatz/deputy/internal/dependency"
 	"github.com/picatz/deputy/internal/vulnerability"
 )
@@ -434,9 +435,9 @@ func TestAnnotateVulns(t *testing.T) {
 			Dependency: dependency.ID{PURL: "pkg:npm/lodash@4.17.20"},
 		},
 	}
-	advisories := map[string]vulnerability.Advisory{
+	advisories := map[string]vulnerabilityv1.Advisory{
 		"CVE-2021-23337": {
-			ID:       "CVE-2021-23337",
+			Id:       "CVE-2021-23337",
 			Severity: vulnerability.NewSeverity("HIGH", "GHSA"),
 		},
 	}

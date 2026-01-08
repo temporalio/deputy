@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	vulnerabilityv1 "github.com/picatz/deputy/gen/deputy/vulnerability/v1"
 	"github.com/picatz/deputy/internal/dependency"
 	"github.com/picatz/deputy/internal/scan"
 	"github.com/picatz/deputy/internal/vulnerability"
@@ -60,9 +61,9 @@ func TestFromScanResult(t *testing.T) {
 				Affected:   true,
 			},
 		},
-		Advisories: map[string]vulnerability.Advisory{
+		Advisories: map[string]vulnerabilityv1.Advisory{
 			"CVE-2024-1234": {
-				ID:            "CVE-2024-1234",
+				Id:            "CVE-2024-1234",
 				Summary:       "Test vulnerability",
 				FixedVersions: []string{"v1.0.1"},
 			},
@@ -95,7 +96,7 @@ func TestFromScanResultEmpty(t *testing.T) {
 			DisplayPath: "empty-project",
 		},
 		Findings:   []vulnerability.Finding{},
-		Advisories: map[string]vulnerability.Advisory{},
+		Advisories: map[string]vulnerabilityv1.Advisory{},
 	}
 
 	doc := FromScanResult(result, DefaultOptions())

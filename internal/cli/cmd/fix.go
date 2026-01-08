@@ -12,11 +12,17 @@ import (
 	"runtime"
 	"strings"
 
+	"connectrpc.com/connect"
+	"google.golang.org/protobuf/types/known/timestamppb"
+
+	scanv1 "github.com/picatz/deputy/gen/deputy/scan/v1"
 	"github.com/picatz/deputy/internal/cli/flags"
+	"github.com/picatz/deputy/internal/client"
 	deputyerrors "github.com/picatz/deputy/internal/errors"
 	"github.com/picatz/deputy/internal/otel"
 	"github.com/picatz/deputy/internal/output"
 	"github.com/picatz/deputy/internal/policy"
+	internalproto "github.com/picatz/deputy/internal/proto"
 	remediation "github.com/picatz/deputy/internal/remediation"
 	"github.com/picatz/deputy/internal/report"
 	"github.com/picatz/deputy/internal/report/render"
@@ -44,8 +50,7 @@ type remediationPlanSummary struct {
 
 // AddFixCommand registers the fix subcommand with the root command.
 // It configures flags for report input, plan input, and AI agent options.
-func AddFixCommand(root *cobra.Command, service *scan.Service) {
-	scanner := NewScanner(service)
+func AddFixCommand(root *cobra.Command, c client.Client) {
 	fixCmd := &cobra.Command{
 		Use:           "fix [repo]",
 		Aliases:       []string{"f"},
@@ -101,7 +106,7 @@ AI ASSISTANCE:
   # Run AI in full-auto mode (dangerous!)
   deputy fix --agent codex --agent-full-auto`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runFixPlan(scanner, cmd, args)
+			return runFixPlan(c, cmd, args)
 		},
 	}
 	fixCmd.Flags().String("report", "", "Path to JSON output from 'deputy scan --format json'; omit to run a fresh scan (use '-' for stdin)")
@@ -129,7 +134,7 @@ AI ASSISTANCE:
 // runFixPlan executes the fix command logic. It handles plan generation from
 // reports, existing plans, or fresh scans, and optionally applies fixes or
 // invokes AI agents.
-func runFixPlan(scanner *Scanner, cmd *cobra.Command, args []string) error {
+func runFixPlan(c client.Client, cmd *cobra.Command, args []string) error {
 	ctx, span := otel.StartSpan(cmd.Context(), "deputy.fix",
 		trace.WithAttributes(
 			attribute.String("deputy.command", "fix"),
@@ -160,9 +165,9 @@ func runFixPlan(scanner *Scanner, cmd *cobra.Command, args []string) error {
 	}
 
 	var (
-		plan        remediationPlan
-		applyDir    string
-		scannedExec *scan.Execution
+		plan       remediationPlan
+		applyDir   string
+		wasCloned  bool
 	)
 
 	switch {
@@ -200,25 +205,56 @@ func runFixPlan(scanner *Scanner, cmd *cobra.Command, args []string) error {
 		commands, stdlib := remediation.CommandsFromConsolidated(cons)
 		plan = buildRemediationPlan(result, commands, stdlib)
 	default:
-		ctx := cmd.Context()
 		ref, _ := cmd.Flags().GetString("ref")
 		ecos, _ := cmd.Flags().GetStringSlice("ecosystems")
 		publishedBeforeStr, _ := cmd.Flags().GetString("published-before")
 		publishedAfterStr, _ := cmd.Flags().GetString("published-after")
 		asOfStr, _ := cmd.Flags().GetString("as-of")
 		beforeT, afterT := flags.ParsePublishedFilters(cmd.ErrOrStderr(), asOfStr, publishedBeforeStr, publishedAfterStr)
-		exec, err := scanner.service.ScanRepository(ctx, repoArg, ref, cmd.Flags().Changed("ref"), scan.Options{
-			Ecosystems:      ecos,
-			PublishedBefore: beforeT,
-			PublishedAfter:  afterT,
-		})
-		if err != nil {
-			return err
+
+		// Build scan request
+		scanOpts := &scanv1.ScanOptions{
+			Ecosystems: ecos,
 		}
-		defer exec.Close()
-		scannedExec = exec
-		applyDir = exec.Result.Target.LocalPath
-		resultOut := exec.Result
+		if !beforeT.IsZero() {
+			scanOpts.PublishedBefore = timestamppb.New(beforeT)
+		}
+		if !afterT.IsZero() {
+			scanOpts.PublishedAfter = timestamppb.New(afterT)
+		}
+		if ref != "" {
+			scanOpts.Ref = ref
+		}
+
+		// Resolve target
+		target := repoArg
+		if target == "" {
+			cwd, err := os.Getwd()
+			if err != nil {
+				return fmt.Errorf("failed to get current directory: %w", err)
+			}
+			target = cwd
+		}
+
+		// Call client.Scan
+		resp, err := c.Scan(ctx, connect.NewRequest(&scanv1.ScanRequest{
+			Target:  target,
+			Options: scanOpts,
+		}))
+		if err != nil {
+			return fmt.Errorf("scan failed: %w", err)
+		}
+
+		// Convert proto response to internal types
+		scanResult := internalproto.ScanResultFromProto(resp.Msg)
+		if scanResult == nil {
+			return fmt.Errorf("scan returned empty result")
+		}
+
+		applyDir = scanResult.Target.LocalPath
+		wasCloned = scanResult.Target.Cloned
+
+		resultOut := *scanResult
 		if ignoreUnfixed {
 			resultOut = scan.FilterUnfixed(resultOut)
 		}
@@ -251,7 +287,7 @@ func runFixPlan(scanner *Scanner, cmd *cobra.Command, args []string) error {
 		if err != nil {
 			return err
 		}
-		if scannedExec != nil && scannedExec.Result.Target.Cloned {
+		if wasCloned {
 			return fmt.Errorf("mutations are only supported for local repositories (clone detected)")
 		}
 	}

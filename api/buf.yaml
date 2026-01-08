@@ -1,0 +1,21 @@
+version: v2
+name: buf.build/picatz/deputy
+deps:
+  - buf.build/bufbuild/protovalidate
+lint:
+  use:
+    - STANDARD
+    - COMMENTS
+  except:
+    # Allow service methods without google.api.http annotations for now
+    # We'll add REST transcoding in Phase 2
+    - RPC_REQUEST_STANDARD_NAME
+    - RPC_RESPONSE_STANDARD_NAME
+    # Allow reusing response types for streaming RPCs (ExecuteWithAgent and ResumeAgent both return AgentEvent)
+    - RPC_REQUEST_RESPONSE_UNIQUE
+    # Relax field/enum documentation requirements for now - will add iteratively
+    - COMMENT_FIELD
+    - COMMENT_ENUM_VALUE
+breaking:
+  use:
+    - FILE

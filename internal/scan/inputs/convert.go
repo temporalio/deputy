@@ -10,6 +10,8 @@ import (
 
 	"github.com/BurntSushi/toml"
 	"github.com/google/osv-scalibr/extractor"
+	containerv1 "github.com/picatz/deputy/gen/deputy/container/v1"
+	dependencyv1 "github.com/picatz/deputy/gen/deputy/dependency/v1"
 	"github.com/picatz/deputy/internal/analysis/osv"
 	"github.com/picatz/deputy/internal/collections"
 	"github.com/picatz/deputy/internal/compare"
@@ -81,11 +83,12 @@ func Convert(pkgs []*extractor.Package, opts Options) []osv.PkgInput {
 		entry.Locations = appendUnique(entry.Locations, pkg.Locations...)
 
 		// Preserve layer details from SCALIBR for container image scans.
+		// Note: SCALIBR uses DiffID/ChainID (Go naming), we use DiffId/ChainId (proto naming).
 		if entry.LayerDetails == nil && pkg.LayerDetails != nil {
-			entry.LayerDetails = &dependency.LayerDetails{
-				Index:       pkg.LayerDetails.Index,
-				DiffID:      pkg.LayerDetails.DiffID,
-				ChainID:     pkg.LayerDetails.ChainID,
+			entry.LayerDetails = &containerv1.LayerDetails{
+				Index:       int32(pkg.LayerDetails.Index),
+				DiffId:      pkg.LayerDetails.DiffID,
+				ChainId:     pkg.LayerDetails.ChainID,
 				Command:     pkg.LayerDetails.Command,
 				InBaseImage: pkg.LayerDetails.InBaseImage,
 			}
@@ -110,7 +113,7 @@ func Convert(pkgs []*extractor.Package, opts Options) []osv.PkgInput {
 			if !ok {
 				continue
 			}
-			ref := dependency.ManifestRef{Path: manifestPath, Manager: manager}
+			ref := dependencyv1.ManifestRef{Path: manifestPath, Manager: manager}
 			switch manager {
 			case "go":
 				// direct already handled via GoDirect map

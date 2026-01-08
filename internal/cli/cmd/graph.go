@@ -16,6 +16,7 @@ import (
 	"github.com/google/osv-scalibr/extractor"
 	"github.com/picatz/deputy/internal/auth"
 	"github.com/picatz/deputy/internal/cli/flags"
+	"github.com/picatz/deputy/internal/client"
 	"github.com/picatz/deputy/internal/compare"
 	"github.com/picatz/deputy/internal/dependency/graph"
 	"github.com/picatz/deputy/internal/gitutil"
@@ -51,7 +52,9 @@ type GraphResult struct {
 }
 
 // AddGraphCommand registers the graph subcommand.
-func AddGraphCommand(root *cobra.Command) {
+// The client parameter is accepted for API consistency but graph building
+// currently uses direct inventory/repository operations.
+func AddGraphCommand(root *cobra.Command, _ client.Client) {
 	var (
 		ref, format, outPath string
 		ecos                 []string

@@ -1,0 +1,154 @@
+// Copyright 2025 Kent "picat" Gruber. All rights reserved.
+// SPDX-License-Identifier: MIT
+
+syntax = "proto3";
+
+package deputy.sbom.v1;
+
+import "google/protobuf/timestamp.proto";
+import "deputy/target/v1/target.proto";
+import "deputy/dependency/v1/dependency.proto";
+
+option go_package = "github.com/picatz/deputy/gen/deputy/sbom/v1;sbomv1";
+
+// SBOMService provides Software Bill of Materials generation capabilities.
+service SBOMService {
+  // Generate creates an SBOM for a target.
+  rpc Generate(GenerateRequest) returns (GenerateResponse);
+
+  // Diff compares two SBOMs and returns the differences.
+  rpc Diff(DiffRequest) returns (DiffResponse);
+}
+
+// GenerateRequest specifies SBOM generation parameters.
+message GenerateRequest {
+  // Target is the source to generate SBOM from (path, URL, image reference, etc.).
+  string target = 1;
+
+  // Format specifies the output format.
+  Format format = 2;
+
+  // Options configure SBOM generation behavior.
+  GenerateOptions options = 3;
+}
+
+// Format specifies the SBOM output format.
+enum Format {
+  // Unspecified format, defaults to CycloneDX JSON.
+  FORMAT_UNSPECIFIED = 0;
+  // CycloneDX JSON format.
+  FORMAT_CYCLONEDX_JSON = 1;
+  // CycloneDX XML format.
+  FORMAT_CYCLONEDX_XML = 2;
+  // SPDX JSON format.
+  FORMAT_SPDX_JSON = 3;
+  // SPDX tag-value format.
+  FORMAT_SPDX_TV = 4;
+  // Protobom JSON format (internal).
+  FORMAT_PROTOBOM_JSON = 5;
+}
+
+// GenerateOptions configure SBOM generation.
+message GenerateOptions {
+  // IncludeLicenses enriches packages with license information.
+  bool include_licenses = 1;
+
+  // IncludeHashes computes and includes file hashes.
+  bool include_hashes = 2;
+
+  // Ref is a Git reference for repository targets.
+  string ref = 3;
+
+  // Platform specifies target platform for container images.
+  string platform = 4;
+}
+
+// GenerateResponse contains the generated SBOM.
+message GenerateResponse {
+  // Sbom is the generated SBOM in the requested format.
+  bytes sbom = 1;
+
+  // Format is the format of the generated SBOM.
+  Format format = 2;
+
+  // Target describes what the SBOM represents.
+  deputy.target.v1.Target target = 3;
+
+  // GeneratedAt is when this SBOM was generated.
+  google.protobuf.Timestamp generated_at = 4;
+
+  // Stats summarizes SBOM contents.
+  Stats stats = 5;
+}
+
+// Stats provides statistics about an SBOM.
+message Stats {
+  // TotalComponents is the total number of components.
+  int32 total_components = 1;
+
+  // DirectDependencies is the count of direct dependencies.
+  int32 direct_dependencies = 2;
+
+  // TransitiveDependencies is the count of transitive dependencies.
+  int32 transitive_dependencies = 3;
+
+  // Ecosystems maps ecosystem names to component counts.
+  map<string, int32> ecosystems = 4;
+}
+
+// DiffRequest specifies two SBOMs to compare.
+message DiffRequest {
+  // Base is the baseline SBOM (older version).
+  bytes base = 1;
+
+  // Target is the target SBOM to compare against base (newer version).
+  bytes target = 2;
+
+  // BaseFormat is the format of the base SBOM.
+  Format base_format = 3;
+
+  // TargetFormat is the format of the target SBOM.
+  Format target_format = 4;
+}
+
+// DiffResponse contains the differences between two SBOMs.
+message DiffResponse {
+  // Added lists components added in target.
+  repeated deputy.dependency.v1.Package added = 1;
+
+  // Removed lists components removed from base.
+  repeated deputy.dependency.v1.Package removed = 2;
+
+  // Modified lists components with version changes.
+  repeated PackageChange modified = 3;
+
+  // Stats summarizes the diff.
+  DiffStats stats = 4;
+}
+
+// PackageChange describes a modification to a package.
+message PackageChange {
+  // Package identifies the changed package.
+  deputy.dependency.v1.Package package = 1;
+
+  // PreviousVersion is the version in the base SBOM.
+  string previous_version = 2;
+
+  // NewVersion is the version in the target SBOM.
+  string new_version = 3;
+}
+
+// DiffStats summarizes SBOM differences.
+message DiffStats {
+  // AddedCount is the number of added components.
+  int32 added_count = 1;
+
+  // RemovedCount is the number of removed components.
+  int32 removed_count = 2;
+
+  // ModifiedCount is the number of modified components.
+  int32 modified_count = 3;
+
+  // UnchangedCount is the number of unchanged components.
+  int32 unchanged_count = 4;
+}

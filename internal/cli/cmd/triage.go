@@ -5,10 +5,17 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"os"
 	"strings"
 
+	"connectrpc.com/connect"
+	"google.golang.org/protobuf/types/known/timestamppb"
+
+	scanv1 "github.com/picatz/deputy/gen/deputy/scan/v1"
 	"github.com/picatz/deputy/internal/cli/flags"
+	"github.com/picatz/deputy/internal/client"
 	"github.com/picatz/deputy/internal/policy"
+	internalproto "github.com/picatz/deputy/internal/proto"
 	"github.com/picatz/deputy/internal/report"
 	"github.com/picatz/deputy/internal/report/render"
 	"github.com/picatz/deputy/internal/scan"
@@ -18,8 +25,7 @@ import (
 )
 
 // AddTriageCommand registers the triage subcommand.
-func AddTriageCommand(root *cobra.Command, service *scan.Service) {
-	scanner := NewScanner(service)
+func AddTriageCommand(root *cobra.Command, c client.Client) {
 	triageCmd := &cobra.Command{
 		Use:           "triage [repo]",
 		Aliases:       []string{"t", "tri"},
@@ -65,7 +71,7 @@ AI ASSISTANCE:
   # Resume a previous triage session
   deputy triage --agent codex --agent-thread <thread-id>`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runTriage(scanner, cmd, args)
+			return runTriage(c, cmd, args)
 		},
 	}
 	triageCmd.Flags().String("report", "", "Path to JSON output from 'deputy scan --format json'; use '-' for stdin")
@@ -91,7 +97,8 @@ AI ASSISTANCE:
 // runTriage executes the triage command logic.
 // It reads a report or runs a scan, filters vulnerabilities, and generates a summary.
 // Optionally, it sends the summary to an AI agent.
-func runTriage(scanner *Scanner, cmd *cobra.Command, args []string) error {
+func runTriage(c client.Client, cmd *cobra.Command, args []string) error {
+	ctx := cmd.Context()
 	reportPath, _ := cmd.Flags().GetString("report")
 	ignoreUnfixed, _ := cmd.Flags().GetBool("ignore-unfixed")
 	format, _ := cmd.Flags().GetString("format")
@@ -133,33 +140,64 @@ func runTriage(scanner *Scanner, cmd *cobra.Command, args []string) error {
 		cons := vulnerability.Consolidate(scanResult.Findings, scanResult.Advisories)
 		triageReport = report.BuildTriageReport(report.Target{Repo: scanReport.Repo, Ref: scanReport.Ref, Commit: scanReport.Commit}, scanResult.Stats, cons)
 	} else {
-		ctx := cmd.Context()
 		ref, _ := cmd.Flags().GetString("ref")
 		ecos, _ := cmd.Flags().GetStringSlice("ecosystems")
 		publishedBeforeStr, _ := cmd.Flags().GetString("published-before")
 		publishedAfterStr, _ := cmd.Flags().GetString("published-after")
 		asOfStr, _ := cmd.Flags().GetString("as-of")
 		beforeT, afterT := flags.ParsePublishedFilters(cmd.ErrOrStderr(), asOfStr, publishedBeforeStr, publishedAfterStr)
-		exec, err := scanner.service.ScanRepository(ctx, repoArg, ref, cmd.Flags().Changed("ref"), scan.Options{
-			Ecosystems:      ecos,
-			PublishedBefore: beforeT,
-			PublishedAfter:  afterT,
-		})
-		if err != nil {
-			return err
+
+		// Build scan request
+		scanOpts := &scanv1.ScanOptions{
+			Ecosystems: ecos,
 		}
-		defer exec.Close()
-		for _, warning := range exec.Result.Warnings {
+		if !beforeT.IsZero() {
+			scanOpts.PublishedBefore = timestamppb.New(beforeT)
+		}
+		if !afterT.IsZero() {
+			scanOpts.PublishedAfter = timestamppb.New(afterT)
+		}
+		if ref != "" {
+			scanOpts.Ref = ref
+		}
+
+		// Resolve target
+		target := repoArg
+		if target == "" {
+			cwd, err := os.Getwd()
+			if err != nil {
+				return fmt.Errorf("failed to get current directory: %w", err)
+			}
+			target = cwd
+		}
+
+		// Call client.Scan
+		resp, err := c.Scan(ctx, connect.NewRequest(&scanv1.ScanRequest{
+			Target:  target,
+			Options: scanOpts,
+		}))
+		if err != nil {
+			return fmt.Errorf("scan failed: %w", err)
+		}
+
+		// Convert proto response to internal types
+		scanResult := internalproto.ScanResultFromProto(resp.Msg)
+		if scanResult == nil {
+			return fmt.Errorf("scan returned empty result")
+		}
+
+		for _, warning := range scanResult.Warnings {
 			fmt.Fprintf(cmd.ErrOrStderr(), "Warning: %s\n", warning)
 		}
-		repoPath = exec.Result.Target.LocalPath
-		resultOut := exec.Result
+
+		repoPath = scanResult.Target.LocalPath
+		resultOut := *scanResult
 		if ignoreUnfixed {
 			resultOut = scan.FilterUnfixed(resultOut)
 		}
 		cons := vulnerability.Consolidate(resultOut.Findings, resultOut.Advisories)
-		target := report.Target{Repo: exec.Result.Target.DisplayPath, Ref: ref, Commit: exec.Result.Target.CommitHash}
-		triageReport = report.BuildTriageReport(target, resultOut.Stats, cons)
+		target2 := report.Target{Repo: scanResult.Target.DisplayPath, Ref: ref, Commit: scanResult.Target.CommitHash}
+		triageReport = report.BuildTriageReport(target2, resultOut.Stats, cons)
 	}
 
 	if err := runTriagePolicies(cmd.Context(), policyPaths, triageReport, cmd.ErrOrStderr()); err != nil {

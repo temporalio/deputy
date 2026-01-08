@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/google/osv-scalibr/extractor"
+	vulnerabilityv1 "github.com/picatz/deputy/gen/deputy/vulnerability/v1"
 	"github.com/picatz/deputy/internal/dependency"
 	"github.com/picatz/deputy/internal/vulnerability"
 )
@@ -26,8 +27,8 @@ func TestMergeResults(t *testing.T) {
 				Affected:   true,
 			},
 		},
-		Advisories: map[string]vulnerability.Advisory{
-			"ADV-1": {ID: "ADV-1"},
+		Advisories: map[string]vulnerabilityv1.Advisory{
+			"ADV-1": {Id: "ADV-1"},
 		},
 		Warnings: []string{"base warning"},
 	}
@@ -46,8 +47,8 @@ func TestMergeResults(t *testing.T) {
 				Affected:   true,
 			},
 		},
-		Advisories: map[string]vulnerability.Advisory{
-			"ADV-2": {ID: "ADV-2"},
+		Advisories: map[string]vulnerabilityv1.Advisory{
+			"ADV-2": {Id: "ADV-2"},
 		},
 		Warnings: []string{"extra warning"},
 	}
@@ -71,7 +72,7 @@ func TestMergeResults(t *testing.T) {
 	if merged.GeneratedAt != extra.GeneratedAt {
 		t.Fatalf("expected latest GeneratedAt, got %s", merged.GeneratedAt)
 	}
-	if merged.Stats.TotalVulns != 2 {
-		t.Fatalf("expected 2 consolidated vulns, got %d", merged.Stats.TotalVulns)
+	if merged.Stats.Total != 2 {
+		t.Fatalf("expected 2 consolidated vulns, got %d", merged.Stats.Total)
 	}
 }

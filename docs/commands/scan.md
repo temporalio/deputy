@@ -70,12 +70,15 @@ can plug into the same scan flow as providers are added.
 | `--format` | `-f` | `text` | Output format: `text`, `json`, `sarif` |
 | `--output` | `-o` | stdout | Output file path |
 | `--ignore-unfixed` | | `false` | Hide vulnerabilities without a known fix |
+| `--ignore-file` | | | Path to ignore rules file (`.deputyignore.yaml`) |
 | `--published-before` | | | Only show vulns published before this date |
 | `--published-after` | | | Only show vulns published on/after this date |
 | `--as-of` | | | Historical view up to this date (implies `--published-before`) |
 | `--policy` | | | CEL policy file(s) to evaluate (repeatable) |
 | `--ecosystems` | `-e` | all | Limit to specific ecosystems (see [supported ecosystems](#supported-ecosystems)) |
 | `--enrich` | | `false` | Enrich with EPSS scores and KEV status (requires network) |
+| `--with-graph` | | `false` | Build dependency graph to show paths to vulnerable packages |
+| `--secrets` | | `false` | Scan for leaked secrets and credentials alongside vulnerabilities |
 | `--show-symbols` | | `false` | Show affected symbols in text output |
 | `--show-db-info` | | `false` | Show database metadata (e.g., review_status) |
 | `--show-unfixable-guidance` | | `false` | Show actionable guidance for unfixable vulnerabilities |
@@ -351,6 +354,31 @@ Detected filename patterns:
 - `*.dockerfile`, `*.containerfile` (suffixes)
 
 See [Dockerfile scanning guide](../guides/dockerfile.md) for policy examples and variables.
+
+### Dependency Graph
+
+```console
+# Show paths to vulnerable packages (how vulnerabilities reach your code)
+$ deputy scan --with-graph
+
+# Combine with JSON for detailed path analysis
+$ deputy scan --with-graph --format json | jq '.vulnerabilities[].path'
+```
+
+The `--with-graph` flag builds the dependency graph to show:
+- How transitive vulnerabilities reach your project
+- The dependency chain from root to vulnerable package
+- Depth information (0 = direct, 1+ = transitive)
+
+### Secret Scanning
+
+```console
+# Scan for both vulnerabilities and secrets
+$ deputy scan --secrets
+
+# Secrets-only scanning (use the secrets command)
+$ deputy secrets
+```
 
 ### With Policies
 

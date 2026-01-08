@@ -3,6 +3,7 @@ package report
 import (
 	"testing"
 
+	vulnerabilityv1 "github.com/picatz/deputy/gen/deputy/vulnerability/v1"
 	"github.com/picatz/deputy/internal/vulnerability"
 )
 
@@ -12,7 +13,7 @@ func TestBuildTriageReportAggregatesPackages(t *testing.T) {
 		{Package: "pkg/a", Version: "1.0.0", Severity: "MEDIUM", Summary: "other", PrimaryID: "CVE-2", IsDirect: true},
 		{Package: "pkg/b", Version: "2.0.0", Severity: "CRITICAL", Summary: "serious", FixedVersions: []string{"2.1.0"}, PrimaryID: "CVE-3", IsDirect: false},
 	}
-	report := BuildTriageReport(Target{}, vulnerability.Stats{}, cons)
+	report := BuildTriageReport(Target{}, vulnerabilityv1.Stats{}, cons)
 	if len(report.TopPackages) != 2 {
 		t.Fatalf("expected 2 package summaries, got %d", len(report.TopPackages))
 	}
@@ -33,16 +34,16 @@ func TestBuildTriageReportMergesImports(t *testing.T) {
 			Package:         "pkg/a",
 			Version:         "1.0.0",
 			Severity:        "HIGH",
-			AffectedImports: []vulnerability.AffectedImport{{Path: "net/http", Symbols: []string{"Serve"}}},
+			AffectedImports: []vulnerabilityv1.AffectedImport{{Path: "net/http", Symbols: []string{"Serve"}}},
 		},
 		{
 			Package:         "pkg/a",
 			Version:         "1.0.0",
 			Severity:        "LOW",
-			AffectedImports: []vulnerability.AffectedImport{{Path: "crypto/tls"}, {Path: "net/http", Symbols: []string{"Serve"}}},
+			AffectedImports: []vulnerabilityv1.AffectedImport{{Path: "crypto/tls"}, {Path: "net/http", Symbols: []string{"Serve"}}},
 		},
 	}
-	report := BuildTriageReport(Target{}, vulnerability.Stats{}, cons)
+	report := BuildTriageReport(Target{}, vulnerabilityv1.Stats{}, cons)
 	if len(report.TopPackages) != 1 {
 		t.Fatalf("expected 1 package summary, got %d", len(report.TopPackages))
 	}

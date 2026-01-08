@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/google/osv-scalibr/extractor"
+	vulnerabilityv1 "github.com/picatz/deputy/gen/deputy/vulnerability/v1"
 	"github.com/picatz/deputy/internal/container/image"
 	"github.com/picatz/deputy/internal/dependency/graph"
 	"github.com/picatz/deputy/internal/dockerfile"
@@ -42,6 +43,25 @@ type Options struct {
 	// When enabled, the scan result includes a fully-resolved dependency graph
 	// with edges showing which packages depend on which.
 	Graph GraphOptions
+
+	// TargetHint disambiguates the target type when auto-detection fails.
+	// Leave as zero value for auto-detection (recommended in most cases).
+	TargetHint TargetHint
+
+	// Platform specifies the target platform for container images (e.g., "linux/amd64").
+	// Only applies to container image targets.
+	Platform string
+}
+
+// TargetHint provides explicit target type hints when auto-detection is insufficient.
+type TargetHint struct {
+	// Kind explicitly specifies the target type.
+	// Zero value means auto-detect.
+	Kind targets.Kind
+
+	// ImageTransport specifies how to fetch container images.
+	// Values: "remote" (default), "daemon", "tarball", "oci-archive", "oci-layout".
+	ImageTransport string
 }
 
 // GraphOptions configures dependency graph resolution during scans.
@@ -83,8 +103,8 @@ type Result struct {
 	Inventory       Inventory
 
 	Findings   []vulnerability.Finding
-	Advisories map[string]vulnerability.Advisory
-	Stats      vulnerability.Stats
+	Advisories map[string]vulnerabilityv1.Advisory
+	Stats      vulnerabilityv1.Stats
 
 	// Graph contains the resolved dependency graph with edges showing
 	// relationships between packages. When populated, it enables path-based

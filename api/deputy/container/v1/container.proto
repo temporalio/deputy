@@ -1,0 +1,22 @@
+// Copyright 2025 Kent "picat" Gruber. All rights reserved.
+// SPDX-License-Identifier: MIT
+
+syntax = "proto3";
+
+package deputy.container.v1;
+
+option go_package = "github.com/picatz/deputy/gen/deputy/container/v1;containerv1";
+
+// LayerDetails describes the container image layer where a package was found.
+message LayerDetails {
+  // Index is the position of the layer in the image (0 = oldest/base layer).
+  int32 index = 1;
+  // DiffId is the digest of the uncompressed layer content.
+  string diff_id = 2;
+  // ChainId is the cumulative hash identifying this layer in context of its parents.
+  string chain_id = 3;
+  // Command is the Dockerfile instruction that created this layer.
+  string command = 4;
+  // InBaseImage indicates whether this layer is part of the base image.
+  bool in_base_image = 5;
+}

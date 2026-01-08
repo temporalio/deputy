@@ -3,7 +3,7 @@ package remediation
 import (
 	"testing"
 
-	"github.com/picatz/deputy/internal/dependency"
+	dependencyv1 "github.com/picatz/deputy/gen/deputy/dependency/v1"
 	"github.com/picatz/deputy/internal/vulnerability"
 )
 
@@ -21,14 +21,14 @@ func TestCommandsFromConsolidatedGeneratesPlan(t *testing.T) {
 			Version:       "v1.0.0",
 			FixedVersions: []string{"v1.1.0"},
 			IsDirect:      true,
-			ManifestRefs:  []dependency.ManifestRef{{Manager: "go", Path: "./go.mod"}},
+			ManifestRefs:  []dependencyv1.ManifestRef{{Manager: "go", Path: "./go.mod"}},
 		},
 		{
 			PrimaryID:     "RUBY-1",
 			Package:       "rexml",
 			Version:       "3.2.3",
 			FixedVersions: []string{"3.3.9"},
-			ManifestRefs:  []dependency.ManifestRef{{Manager: "gem", Path: "vagrant.gemspec"}},
+			ManifestRefs:  []dependencyv1.ManifestRef{{Manager: "gem", Path: "vagrant.gemspec"}},
 		},
 	}
 	commands, stdlib := CommandsFromConsolidated(cons)

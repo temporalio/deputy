@@ -7,11 +7,11 @@ import (
 	"strings"
 	"testing"
 
+	vulnerabilityv1 "github.com/picatz/deputy/gen/deputy/vulnerability/v1"
 	"github.com/picatz/deputy/internal/output"
 	"github.com/picatz/deputy/internal/remediation"
 	"github.com/picatz/deputy/internal/report"
 	"github.com/picatz/deputy/internal/report/render"
-	"github.com/picatz/deputy/internal/vulnerability"
 )
 
 func TestOutputDocs_Golden(t *testing.T) {
@@ -56,16 +56,16 @@ func TestOutputDocs_Golden(t *testing.T) {
 						Ref:    "main",
 						Commit: "deadbeef",
 					},
-					Stats: vulnerability.Stats{
-						UniqueVulns:     2,
-						CriticalSev:     1,
-						HighSeverity:    1,
-						MedSeverity:     0,
-						LowSeverity:     1,
-						FixAvailable:    2,
-						DirectDeps:      1,
-						IndirectDeps:    4,
-						DuplicatesFound: 0,
+					Stats: vulnerabilityv1.Stats{
+						Unique:       2,
+						Critical:     1,
+						High:         1,
+						Medium:       0,
+						Low:          1,
+						FixAvailable: 2,
+						DirectDeps:   1,
+						IndirectDeps: 4,
+						Duplicates:   0,
 					},
 					TopPackages: []report.TriagePackageSummary{
 						{Package: "a", Version: "1", Severity: "HIGH", SeverityType: "GHSA"},

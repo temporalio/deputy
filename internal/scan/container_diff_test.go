@@ -4,6 +4,8 @@ import (
 	"testing"
 
 	"github.com/google/osv-scalibr/extractor"
+	containerv1 "github.com/picatz/deputy/gen/deputy/container/v1"
+	vulnerabilityv1 "github.com/picatz/deputy/gen/deputy/vulnerability/v1"
 	"github.com/picatz/deputy/internal/compare"
 	"github.com/picatz/deputy/internal/container/image"
 	"github.com/picatz/deputy/internal/dependency"
@@ -132,7 +134,7 @@ func TestCompareImageVulnerabilities(t *testing.T) {
 	t.Run("added vulnerability", func(t *testing.T) {
 		base := &Result{
 			Findings:   []vulnerability.Finding{},
-			Advisories: map[string]vulnerability.Advisory{},
+			Advisories: map[string]vulnerabilityv1.Advisory{},
 		}
 		target := &Result{
 			Findings: []vulnerability.Finding{
@@ -142,10 +144,10 @@ func TestCompareImageVulnerabilities(t *testing.T) {
 					Version:    "1.1.1",
 				},
 			},
-			Advisories: map[string]vulnerability.Advisory{
+			Advisories: map[string]vulnerabilityv1.Advisory{
 				"CVE-2024-1234": {
-					ID:       "CVE-2024-1234",
-					Severity: vulnerability.Severity{Level: vulnerability.SeverityHigh},
+					Id:       "CVE-2024-1234",
+					Severity: &vulnerabilityv1.Severity{Level: vulnerability.SeverityHigh},
 					Summary:  "Test vulnerability",
 				},
 			},
@@ -175,10 +177,10 @@ func TestCompareImageVulnerabilities(t *testing.T) {
 					Version:    "1.1.1",
 				},
 			},
-			Advisories: map[string]vulnerability.Advisory{
+			Advisories: map[string]vulnerabilityv1.Advisory{
 				"CVE-2024-1234": {
-					ID:       "CVE-2024-1234",
-					Severity: vulnerability.Severity{Level: vulnerability.SeverityCritical},
+					Id:       "CVE-2024-1234",
+					Severity: &vulnerabilityv1.Severity{Level: vulnerability.SeverityCritical},
 					Summary:  "Test vulnerability",
 				},
 			},
@@ -186,7 +188,7 @@ func TestCompareImageVulnerabilities(t *testing.T) {
 		}
 		target := &Result{
 			Findings:   []vulnerability.Finding{},
-			Advisories: map[string]vulnerability.Advisory{},
+			Advisories: map[string]vulnerabilityv1.Advisory{},
 			Inventory:  Inventory{},
 		}
 
@@ -258,10 +260,10 @@ func TestConvertLayerDetails(t *testing.T) {
 	})
 
 	t.Run("with details", func(t *testing.T) {
-		ld := &dependency.LayerDetails{
+		ld := &containerv1.LayerDetails{
 			Index:       2,
-			DiffID:      "sha256:abc",
-			ChainID:     "sha256:def",
+			DiffId:      "sha256:abc",
+			ChainId:     "sha256:def",
 			Command:     "RUN apt-get install",
 			InBaseImage: true,
 		}
@@ -272,11 +274,11 @@ func TestConvertLayerDetails(t *testing.T) {
 		if result.Index != 2 {
 			t.Errorf("expected index 2, got %d", result.Index)
 		}
-		if result.DiffID != "sha256:abc" {
-			t.Errorf("expected DiffID %q, got %q", "sha256:abc", result.DiffID)
+		if result.DiffId != "sha256:abc" {
+			t.Errorf("expected DiffId %q, got %q", "sha256:abc", result.DiffId)
 		}
-		if result.ChainID != "sha256:def" {
-			t.Errorf("expected ChainID %q, got %q", "sha256:def", result.ChainID)
+		if result.ChainId != "sha256:def" {
+			t.Errorf("expected ChainId %q, got %q", "sha256:def", result.ChainId)
 		}
 		if result.Command != "RUN apt-get install" {
 			t.Errorf("expected command %q, got %q", "RUN apt-get install", result.Command)

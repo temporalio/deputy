@@ -460,6 +460,7 @@ func buildProtobomDocument(ctx context.Context, ws workspace.FS, repoRef, ref, n
 		// Persist container image layer details for round-trip SBOM scanning.
 		// These properties enable layer-aware vulnerability analysis and policy
 		// evaluation when scanning SBOMs generated from container images.
+		// Note: p.LayerDetails is extractor.LayerDetails (SCALIBR type) which uses DiffID/ChainID.
 		if p.LayerDetails != nil {
 			n.Properties = append(n.Properties, &sbom.Property{
 				Name: "deputy:layer-index",

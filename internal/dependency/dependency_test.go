@@ -3,13 +3,16 @@ package dependency
 import (
 	"reflect"
 	"testing"
+
+	containerv1 "github.com/picatz/deputy/gen/deputy/container/v1"
+	dependencyv1 "github.com/picatz/deputy/gen/deputy/dependency/v1"
 )
 
 func TestCloneLayerDetails(t *testing.T) {
 	tests := []struct {
 		name string
-		src  *LayerDetails
-		want *LayerDetails
+		src  *containerv1.LayerDetails
+		want *containerv1.LayerDetails
 	}{
 		{
 			name: "nil input",
@@ -18,33 +21,33 @@ func TestCloneLayerDetails(t *testing.T) {
 		},
 		{
 			name: "empty struct",
-			src:  &LayerDetails{},
-			want: &LayerDetails{},
+			src:  &containerv1.LayerDetails{},
+			want: &containerv1.LayerDetails{},
 		},
 		{
 			name: "full struct",
-			src: &LayerDetails{
+			src: &containerv1.LayerDetails{
 				Index:       2,
-				DiffID:      "sha256:abc123",
-				ChainID:     "sha256:def456",
+				DiffId:      "sha256:abc123",
+				ChainId:     "sha256:def456",
 				Command:     "RUN apt-get install -y curl",
 				InBaseImage: true,
 			},
-			want: &LayerDetails{
+			want: &containerv1.LayerDetails{
 				Index:       2,
-				DiffID:      "sha256:abc123",
-				ChainID:     "sha256:def456",
+				DiffId:      "sha256:abc123",
+				ChainId:     "sha256:def456",
 				Command:     "RUN apt-get install -y curl",
 				InBaseImage: true,
 			},
 		},
 		{
 			name: "partial struct",
-			src: &LayerDetails{
+			src: &containerv1.LayerDetails{
 				Index:   0,
 				Command: "FROM alpine:3.19",
 			},
-			want: &LayerDetails{
+			want: &containerv1.LayerDetails{
 				Index:   0,
 				Command: "FROM alpine:3.19",
 			},
@@ -79,8 +82,8 @@ func TestCloneLayerDetails(t *testing.T) {
 func TestCloneManifestRefs(t *testing.T) {
 	tests := []struct {
 		name string
-		refs []ManifestRef
-		want []ManifestRef
+		refs []dependencyv1.ManifestRef
+		want []dependencyv1.ManifestRef
 	}{
 		{
 			name: "nil input",
@@ -89,35 +92,35 @@ func TestCloneManifestRefs(t *testing.T) {
 		},
 		{
 			name: "empty slice",
-			refs: []ManifestRef{},
+			refs: []dependencyv1.ManifestRef{},
 			want: nil, // empty returns nil per implementation
 		},
 		{
 			name: "single ref no groups",
-			refs: []ManifestRef{
+			refs: []dependencyv1.ManifestRef{
 				{Path: "go.mod", Manager: "gomod"},
 			},
-			want: []ManifestRef{
+			want: []dependencyv1.ManifestRef{
 				{Path: "go.mod", Manager: "gomod"},
 			},
 		},
 		{
 			name: "single ref with groups",
-			refs: []ManifestRef{
+			refs: []dependencyv1.ManifestRef{
 				{Path: "package.json", Manager: "npm", Groups: []string{"dependencies", "devDependencies"}},
 			},
-			want: []ManifestRef{
+			want: []dependencyv1.ManifestRef{
 				{Path: "package.json", Manager: "npm", Groups: []string{"dependencies", "devDependencies"}},
 			},
 		},
 		{
 			name: "multiple refs",
-			refs: []ManifestRef{
+			refs: []dependencyv1.ManifestRef{
 				{Path: "go.mod", Manager: "gomod"},
 				{Path: "go.sum", Manager: "gomod", Groups: []string{"indirect"}},
 				{Path: "package.json", Manager: "npm", Groups: []string{"dependencies"}},
 			},
-			want: []ManifestRef{
+			want: []dependencyv1.ManifestRef{
 				{Path: "go.mod", Manager: "gomod"},
 				{Path: "go.sum", Manager: "gomod", Groups: []string{"indirect"}},
 				{Path: "package.json", Manager: "npm", Groups: []string{"dependencies"}},

@@ -849,11 +849,11 @@ func TestConvert_LayerDetails(t *testing.T) {
 		if ld.Index != 2 {
 			t.Errorf("LayerDetails.Index = %d, want 2", ld.Index)
 		}
-		if ld.DiffID != "sha256:abc123" {
-			t.Errorf("LayerDetails.DiffID = %q, want sha256:abc123", ld.DiffID)
+		if ld.DiffId != "sha256:abc123" {
+			t.Errorf("LayerDetails.DiffId = %q, want sha256:abc123", ld.DiffId)
 		}
-		if ld.ChainID != "sha256:def456" {
-			t.Errorf("LayerDetails.ChainID = %q, want sha256:def456", ld.ChainID)
+		if ld.ChainId != "sha256:def456" {
+			t.Errorf("LayerDetails.ChainId = %q, want sha256:def456", ld.ChainId)
 		}
 		if ld.Command != "RUN apt-get install openssl" {
 			t.Errorf("LayerDetails.Command = %q, want RUN apt-get install openssl", ld.Command)

@@ -10,6 +10,7 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/ossf/osv-schema/bindings/go/osvschema"
+	vulnerabilityv1 "github.com/picatz/deputy/gen/deputy/vulnerability/v1"
 	"github.com/picatz/deputy/internal/analysis/osv"
 	"github.com/picatz/deputy/internal/dependency/graph"
 	"github.com/picatz/deputy/internal/logs"
@@ -884,7 +885,7 @@ func (s *Server) scanPackage(ctx context.Context, req *mcp.CallToolRequest, args
 			continue
 		}
 		result.Vulnerabilities = append(result.Vulnerabilities, VulnExplanation{
-			ID:            advisory.ID,
+			ID:            advisory.Id,
 			Aliases:       advisory.Aliases,
 			Summary:       advisory.Summary,
 			Details:       advisory.Details,
@@ -942,13 +943,13 @@ func (s *Server) scanDirectory(ctx context.Context, req *mcp.CallToolRequest, ar
 		Path:            args.Path,
 		PackagesScanned: exec.Result.PackagesScanned,
 		VulnerabilitiesBy: map[string]int{
-			"critical": exec.Result.Stats.CriticalSev,
-			"high":     exec.Result.Stats.HighSeverity,
-			"medium":   exec.Result.Stats.MedSeverity,
-			"low":      exec.Result.Stats.LowSeverity,
+			"critical": int(exec.Result.Stats.Critical),
+			"high":     int(exec.Result.Stats.High),
+			"medium":   int(exec.Result.Stats.Medium),
+			"low":      int(exec.Result.Stats.Low),
 		},
 		Vulnerabilities: make([]VulnExplanation, 0),
-		Clean:           exec.Result.Stats.UniqueVulns == 0,
+		Clean:           exec.Result.Stats.Unique == 0,
 		ScanTime:        time.Since(startTime).String(),
 	}
 
@@ -965,7 +966,7 @@ func (s *Server) scanDirectory(ctx context.Context, req *mcp.CallToolRequest, ar
 			continue
 		}
 		result.Vulnerabilities = append(result.Vulnerabilities, VulnExplanation{
-			ID:            advisory.ID,
+			ID:            advisory.Id,
 			Aliases:       advisory.Aliases,
 			Summary:       advisory.Summary,
 			Details:       advisory.Details,
@@ -977,11 +978,11 @@ func (s *Server) scanDirectory(ctx context.Context, req *mcp.CallToolRequest, ar
 
 	span.SetAttributes(
 		otel.AttrMCPPackageCount.Int(result.PackagesScanned),
-		otel.AttrMCPVulnCount.Int(exec.Result.Stats.UniqueVulns),
+		otel.AttrMCPVulnCount.Int(int(exec.Result.Stats.Unique)),
 	)
 	otel.SetSpanOK(span)
 	otel.RecordMCPToolCall(ctx, "scan_directory", time.Since(startTime).Seconds(), true)
-	logs.Debug(ctx, "MCP tool completed", "tool", "scan_directory", "path", args.Path, "packages", result.PackagesScanned, "vulns", exec.Result.Stats.UniqueVulns, "clean", result.Clean)
+	logs.Debug(ctx, "MCP tool completed", "tool", "scan_directory", "path", args.Path, "packages", result.PackagesScanned, "vulns", exec.Result.Stats.Unique, "clean", result.Clean)
 
 	return nil, result, nil
 }
@@ -1233,7 +1234,7 @@ func (s *Server) getRemediation(ctx context.Context, req *mcp.CallToolRequest, a
 
 	result := GetRemediationResult{
 		Path:                 args.Path,
-		VulnerabilitiesFound: exec.Result.Stats.UniqueVulns,
+		VulnerabilitiesFound: int(exec.Result.Stats.Unique),
 		RemediableCount:      remediableCount,
 		UnfixableCount:       len(unfixable),
 		Commands:             make([]RemediationCommand, 0, len(commands)),
@@ -1850,13 +1851,13 @@ func (s *Server) scanContainer(ctx context.Context, req *mcp.CallToolRequest, ar
 		Platform:        args.Platform,
 		PackagesScanned: exec.Result.PackagesScanned,
 		VulnerabilitiesBy: map[string]int{
-			"critical": exec.Result.Stats.CriticalSev,
-			"high":     exec.Result.Stats.HighSeverity,
-			"medium":   exec.Result.Stats.MedSeverity,
-			"low":      exec.Result.Stats.LowSeverity,
+			"critical": int(exec.Result.Stats.Critical),
+			"high":     int(exec.Result.Stats.High),
+			"medium":   int(exec.Result.Stats.Medium),
+			"low":      int(exec.Result.Stats.Low),
 		},
 		Vulnerabilities: make([]VulnExplanation, 0),
-		Clean:           exec.Result.Stats.UniqueVulns == 0,
+		Clean:           exec.Result.Stats.Unique == 0,
 		ScanTime:        time.Since(startTime).String(),
 	}
 
@@ -1873,7 +1874,7 @@ func (s *Server) scanContainer(ctx context.Context, req *mcp.CallToolRequest, ar
 			continue
 		}
 		result.Vulnerabilities = append(result.Vulnerabilities, VulnExplanation{
-			ID:            advisory.ID,
+			ID:            advisory.Id,
 			Aliases:       advisory.Aliases,
 			Summary:       advisory.Summary,
 			Details:       advisory.Details,
@@ -1885,11 +1886,11 @@ func (s *Server) scanContainer(ctx context.Context, req *mcp.CallToolRequest, ar
 
 	span.SetAttributes(
 		otel.AttrMCPPackageCount.Int(result.PackagesScanned),
-		otel.AttrMCPVulnCount.Int(exec.Result.Stats.UniqueVulns),
+		otel.AttrMCPVulnCount.Int(int(exec.Result.Stats.Unique)),
 	)
 	otel.SetSpanOK(span)
 	otel.RecordMCPToolCall(ctx, "scan_container", time.Since(startTime).Seconds(), true)
-	logs.Debug(ctx, "MCP tool completed", "tool", "scan_container", "image", args.Image, "packages", result.PackagesScanned, "vulns", exec.Result.Stats.UniqueVulns, "clean", result.Clean)
+	logs.Debug(ctx, "MCP tool completed", "tool", "scan_container", "image", args.Image, "packages", result.PackagesScanned, "vulns", exec.Result.Stats.Unique, "clean", result.Clean)
 
 	return nil, result, nil
 }
@@ -2040,10 +2041,10 @@ func (s *Server) diffContainerImages(ctx context.Context, args DiffRefsInput) (*
 	}
 
 	// Add vulnerability summary from target
-	result.VulnSummary["critical"] = targetExec.Result.Stats.CriticalSev
-	result.VulnSummary["high"] = targetExec.Result.Stats.HighSeverity
-	result.VulnSummary["medium"] = targetExec.Result.Stats.MedSeverity
-	result.VulnSummary["low"] = targetExec.Result.Stats.LowSeverity
+	result.VulnSummary["critical"] = int(targetExec.Result.Stats.Critical)
+	result.VulnSummary["high"] = int(targetExec.Result.Stats.High)
+	result.VulnSummary["medium"] = int(targetExec.Result.Stats.Medium)
+	result.VulnSummary["low"] = int(targetExec.Result.Stats.Low)
 
 	return nil, result, nil
 }
@@ -2147,10 +2148,10 @@ func (s *Server) diffGitRefs(ctx context.Context, args DiffRefsInput) (*mcp.Call
 	}
 
 	// Add vulnerability summary from target
-	result.VulnSummary["critical"] = targetExec.Result.Stats.CriticalSev
-	result.VulnSummary["high"] = targetExec.Result.Stats.HighSeverity
-	result.VulnSummary["medium"] = targetExec.Result.Stats.MedSeverity
-	result.VulnSummary["low"] = targetExec.Result.Stats.LowSeverity
+	result.VulnSummary["critical"] = int(targetExec.Result.Stats.Critical)
+	result.VulnSummary["high"] = int(targetExec.Result.Stats.High)
+	result.VulnSummary["medium"] = int(targetExec.Result.Stats.Medium)
+	result.VulnSummary["low"] = int(targetExec.Result.Stats.Low)
 
 	return nil, result, nil
 }
@@ -2283,9 +2284,9 @@ func findBestMatchingNode(g *graph.Graph, query string) *graph.Node {
 // === Helper Functions ===
 
 // extractSeverity extracts the severity from an OSV vulnerability.
-func extractSeverity(vuln *osvschema.Vulnerability) vulnerability.Severity {
+func extractSeverity(vuln *osvschema.Vulnerability) *vulnerabilityv1.Severity {
 	if vuln == nil {
-		return vulnerability.Severity{}
+		return &vulnerabilityv1.Severity{}
 	}
 
 	for _, sev := range vuln.Severity {
@@ -2302,7 +2303,7 @@ func extractSeverity(vuln *osvschema.Vulnerability) vulnerability.Severity {
 		}
 	}
 
-	return vulnerability.Severity{}
+	return &vulnerabilityv1.Severity{}
 }
 
 // pathToStrings converts a graph.Path to a slice of node names.

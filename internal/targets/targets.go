@@ -3,23 +3,28 @@ package targets
 import (
 	"context"
 	"io/fs"
+
+	targetv1 "github.com/picatz/deputy/gen/deputy/target/v1"
 )
 
-// Kind identifies the input type being scanned.
-type Kind string
+// Kind is an alias for targetv1.TargetKind.
+type Kind = targetv1.TargetKind
 
+// Kind constants - these map directly to proto enum values.
+// Use these instead of the targetv1.TargetKind_* constants for cleaner code.
 const (
-	KindDir               Kind = "dir"
-	KindFile              Kind = "file"
-	KindBinary            Kind = "binary"
-	KindGit               Kind = "git"
-	KindContainerImage    Kind = "container-image"
-	KindContainerInstance Kind = "container-instance"
-	KindVMImage           Kind = "vm-image"
-	KindExtension         Kind = "extension"
-	KindSBOM              Kind = "sbom"
-	KindPURL              Kind = "purl"
-	KindDockerfile        Kind = "dockerfile"
+	KindUnspecified       = targetv1.TargetKind_TARGET_KIND_UNSPECIFIED
+	KindDir               = targetv1.TargetKind_TARGET_KIND_DIR
+	KindFile              = targetv1.TargetKind_TARGET_KIND_FILE
+	KindBinary            = targetv1.TargetKind_TARGET_KIND_BINARY
+	KindGit               = targetv1.TargetKind_TARGET_KIND_GIT
+	KindContainerImage    = targetv1.TargetKind_TARGET_KIND_CONTAINER_IMAGE
+	KindContainerInstance = targetv1.TargetKind_TARGET_KIND_CONTAINER_INSTANCE
+	KindVMImage           = targetv1.TargetKind_TARGET_KIND_VM_IMAGE
+	KindExtension         = targetv1.TargetKind_TARGET_KIND_EXTENSION
+	KindSBOM              = targetv1.TargetKind_TARGET_KIND_SBOM
+	KindPURL              = targetv1.TargetKind_TARGET_KIND_PURL
+	KindDockerfile        = targetv1.TargetKind_TARGET_KIND_DOCKERFILE
 )
 
 // Descriptor captures normalized user input (Target) alongside inferred or

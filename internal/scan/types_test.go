@@ -3,6 +3,8 @@ package scan
 import (
 	"testing"
 	"time"
+
+	"github.com/picatz/deputy/internal/targets"
 )
 
 func TestOptions_Validate(t *testing.T) {
@@ -135,8 +137,8 @@ func TestTarget_ZeroValue(t *testing.T) {
 	t.Parallel()
 
 	var target Target
-	if target.Kind != "" {
-		t.Errorf("zero Target.Kind should be empty, got %q", target.Kind)
+	if target.Kind != targets.KindUnspecified {
+		t.Errorf("zero Target.Kind should be KindUnspecified, got %v", target.Kind)
 	}
 	if target.DisplayPath != "" {
 		t.Errorf("zero Target.DisplayPath should be empty, got %q", target.DisplayPath)

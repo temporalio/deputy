@@ -1,0 +1,36 @@
+// Copyright 2025 Kent "picat" Gruber. All rights reserved.
+// SPDX-License-Identifier: MIT
+
+syntax = "proto3";
+
+package deputy.policy.v1;
+
+option go_package = "github.com/picatz/deputy/gen/deputy/policy/v1;policyv1";
+
+// ActionType represents a policy evaluation outcome.
+enum ActionType {
+  // Unspecified action.
+  ACTION_TYPE_UNSPECIFIED = 0;
+  // Explicitly allow the operation.
+  ACTION_TYPE_ALLOW = 1;
+  // Deny the operation.
+  ACTION_TYPE_DENY = 2;
+  // Allow but emit a warning.
+  ACTION_TYPE_WARN = 3;
+}
+
+// Action captures a single policy evaluation result.
+message Action {
+  // Type is the action type (allow, deny, warn).
+  ActionType type = 1;
+  // PolicyName is the name of the policy that triggered this action.
+  string policy_name = 2;
+  // RuleName is the name of the specific rule within the policy.
+  string rule_name = 3;
+  // Reason explains why this action was triggered.
+  string reason = 4;
+  // Remediation suggests how to resolve the issue.
+  string remediation = 5;
+  // Entrypoint is the policy entrypoint that evaluated this action.
+  string entrypoint = 6;
+}

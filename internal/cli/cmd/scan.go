@@ -20,11 +20,12 @@ import (
 	"github.com/google/go-containerregistry/pkg/name"
 	"github.com/google/osv-scalibr/extractor"
 	packageurl "github.com/package-url/packageurl-go"
+	"github.com/picatz/deputy/internal/client"
 	cliflags "github.com/picatz/deputy/internal/cli/flags"
-	deperrors "github.com/picatz/deputy/internal/errors"
 	"github.com/picatz/deputy/internal/collections"
 	"github.com/picatz/deputy/internal/container/image"
 	"github.com/picatz/deputy/internal/dockerfile"
+	deperrors "github.com/picatz/deputy/internal/errors"
 	gitx "github.com/picatz/deputy/internal/gitutil"
 	"github.com/picatz/deputy/internal/output"
 	"github.com/picatz/deputy/internal/policy"
@@ -36,7 +37,7 @@ import (
 	"github.com/picatz/deputy/internal/targets"
 	ui "github.com/picatz/deputy/internal/ui"
 	"github.com/picatz/deputy/internal/version"
-	"github.com/picatz/deputy/internal/vulnerability"
+	vulnerabilityv1 "github.com/picatz/deputy/gen/deputy/vulnerability/v1"
 	"github.com/protobom/protobom/pkg/sbom"
 	spdxjson "github.com/spdx/tools-golang/json"
 	spdxdoc "github.com/spdx/tools-golang/spdx"
@@ -60,7 +61,7 @@ type ScanResult struct {
 	// PackagesScanned is the total number of packages analyzed for vulnerabilities.
 	PackagesScanned int `json:"packagesScanned"`
 	// Stats provides aggregate vulnerability counts and severity breakdown.
-	Stats vulnerability.Stats `json:"stats"`
+	Stats vulnerabilityv1.Stats `json:"stats"`
 	// Vulnerabilities is the list of security vulnerabilities found in dependencies.
 	Vulnerabilities []report.Vulnerability `json:"vulnerabilities"`
 	// PolicyFindings contains policy evaluation results (deny/warn actions).
@@ -78,23 +79,23 @@ type ModuleDeprecation struct {
 	URL     string `json:"url,omitempty"`
 }
 
-// Scanner bridges CLI commands to the scan service.
-type Scanner struct {
-	service *scan.Service
-}
-
-// NewScanner returns a Scanner configured with the provided scan service.
-func NewScanner(service *scan.Service) *Scanner {
-	if service == nil {
-		service = scan.NewService()
+// getService extracts the scan.Service from a client for operations not yet
+// exposed via the client interface. Falls back to creating a new service if
+// extraction fails.
+func getService(c client.Client) *scan.Service {
+	if ip, ok := c.(*client.InProcess); ok {
+		if s, ok := ip.Scanner().(*scan.Service); ok {
+			return s
+		}
 	}
-	return &Scanner{service: service}
+	return scan.NewService()
 }
 
 // AddScanCommand registers the scan subcommand with the root command.
 // It configures the command flags and usage examples.
-func AddScanCommand(root *cobra.Command, service *scan.Service) {
-	scanner := NewScanner(service)
+func AddScanCommand(root *cobra.Command, c client.Client) {
+	// Extract service for operations not yet exposed via client interface
+	service := getService(c)
 
 	scanCmd := &cobra.Command{
 		Use:           "scan [target]",
@@ -123,7 +124,9 @@ known vulnerabilities. It respects go.mod files and understands Go module versio
 If you omit a target, Deputy scans the current Git repo (or the current directory
 when no repo is present). PURLs and common container image references are also
 recognized at the top level.`,
-		RunE: scanner.runScan,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runScan(service, cmd, args)
+		},
 		Example: `BASIC VULNERABILITY SCANNING:
   # Scan current repository at HEAD
   deputy scan
@@ -258,7 +261,9 @@ FILESYSTEM ANALYSIS:
 Scans go.mod files and other package manifests in the specified directory tree.
 Does not require Git repository context, making it suitable for CI/CD environments
 where only source code (not Git history) is available.`,
-		RunE: scanner.runScanDir,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runScanDir(service, cmd, args)
+		},
 		Example: `DIRECTORY SCANNING:
   # Scan current directory
   deputy scan dir .
@@ -326,7 +331,9 @@ and available fixes where applicable.
 IMAGE REFERENCES:
 If the SBOM includes docker/oci PURLs, Deputy will also resolve and scan
 those container images.`,
-		RunE: scanner.runScanSBOM,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runScanSBOM(service, cmd, args)
+		},
 		Example: `SBOM FILE SCANNING:
   # Scan SBOM file
   deputy scan sbom software-bill-of-materials.json
@@ -395,7 +402,9 @@ WORKFLOW EXAMPLES:
 
 PURLs provide a canonical identifier for a package in a specific ecosystem.
 The scan command uses the PURL to query OSV directly, so a version is required.`,
-		RunE: scanner.runScanPURL,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runScanPURL(service, cmd, args)
+		},
 		Example: `PURL SCANNING:
   # Scan a single package by PURL
   deputy scan purl pkg:npm/lodash@4.17.21
@@ -449,7 +458,9 @@ CEL policy evaluation. Use --policy to enforce security requirements like:
 • Enforce layer count or size limits
 
 See 'deputy policy' and policy/examples/ for container image policy examples.`,
-		RunE: scanner.runScanImage,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runScanImage(service, cmd, args)
+		},
 		Example: `CONTAINER IMAGE SCANNING:
   # Scan a remote image
   deputy scan image docker://ghcr.io/owner/app:1.2.3
@@ -499,7 +510,7 @@ POLICY ENFORCEMENT:
 
 // runScan executes the scan command logic, handling argument parsing,
 // scan execution, policy evaluation, and output formatting.
-func (s *Scanner) runScan(cmd *cobra.Command, args []string) error {
+func runScan(service *scan.Service, cmd *cobra.Command, args []string) error {
 	target := ""
 	if len(args) > 0 {
 		target = strings.TrimSpace(args[0])
@@ -518,19 +529,19 @@ func (s *Scanner) runScan(cmd *cobra.Command, args []string) error {
 				return fmt.Errorf("expected 1 argument: <purl>")
 			}
 			warnRefIgnored(cmd, "purl")
-			return s.runScanPURL(cmd, []string{target})
+			return runScanPURL(service, cmd, []string{target})
 		case "sbom":
 			if target == "" {
 				return fmt.Errorf("expected 1 argument: <path|->")
 			}
 			warnRefIgnored(cmd, "sbom")
-			return s.runScanSBOM(cmd, []string{target})
+			return runScanSBOM(service, cmd, []string{target})
 		case "dir":
 			if target == "" {
 				target = "."
 			}
 			warnRefIgnored(cmd, "directory")
-			return s.runScanDir(cmd, []string{target})
+			return runScanDir(service, cmd, []string{target})
 		case "git":
 			if target == "" {
 				target = "."
@@ -538,19 +549,19 @@ func (s *Scanner) runScan(cmd *cobra.Command, args []string) error {
 			if root, ok := gitRoot(target); ok {
 				target = root
 			}
-			return s.runScanRepository(cmd, target)
+			return runScanRepository(service, cmd, target)
 		case "image":
 			if target == "" {
 				return fmt.Errorf("expected 1 argument: <image>")
 			}
 			warnRefIgnored(cmd, "container image")
-			return s.runScanImageWithOptions(cmd, target, imageSource, platform)
+			return runScanImageWithOptions(service, cmd, target, imageSource, platform)
 		case "dockerfile":
 			if target == "" {
 				return fmt.Errorf("expected 1 argument: <path>")
 			}
 			warnRefIgnored(cmd, "dockerfile")
-			return s.runScanDockerfile(cmd, target)
+			return runScanDockerfile(service, cmd, target)
 		default:
 			return fmt.Errorf("unknown --source %q", source)
 		}
@@ -562,41 +573,41 @@ func (s *Scanner) runScan(cmd *cobra.Command, args []string) error {
 			return fmt.Errorf("failed to get current directory: %w", err)
 		}
 		if root, ok := gitRoot(wd); ok {
-			return s.runScanRepository(cmd, root)
+			return runScanRepository(service, cmd, root)
 		}
 		warnRefIgnored(cmd, "directory")
-		return s.runScanDir(cmd, []string{wd})
+		return runScanDir(service, cmd, []string{wd})
 	}
 
 	if isPURLTarget(target) {
 		warnRefIgnored(cmd, "purl")
-		return s.runScanPURL(cmd, []string{target})
+		return runScanPURL(service, cmd, []string{target})
 	}
 
 	if isImageTargetScheme(target) {
 		warnRefIgnored(cmd, "container image")
-		return s.runScanImage(cmd, []string{target})
+		return runScanImage(service, cmd, []string{target})
 	}
 
 	if target == "-" {
 		warnRefIgnored(cmd, "sbom")
-		return s.runScanSBOM(cmd, []string{target})
+		return runScanSBOM(service, cmd, []string{target})
 	}
 
 	if info, err := os.Stat(target); err == nil {
 		if info.IsDir() {
 			if root, ok := gitRoot(target); ok {
-				return s.runScanRepository(cmd, root)
+				return runScanRepository(service, cmd, root)
 			}
 			warnRefIgnored(cmd, "directory")
-			return s.runScanDir(cmd, []string{target})
+			return runScanDir(service, cmd, []string{target})
 		}
 		// Check if file is a Dockerfile
 		if isDockerfilePath(target) {
-			return s.runScanDockerfile(cmd, target)
+			return runScanDockerfile(service, cmd, target)
 		}
 		warnRefIgnored(cmd, "sbom")
-		return s.runScanSBOM(cmd, []string{target})
+		return runScanSBOM(service, cmd, []string{target})
 	}
 
 	if isAmbiguousDockerHubReference(target) {
@@ -605,13 +616,13 @@ func (s *Scanner) runScan(cmd *cobra.Command, args []string) error {
 
 	if looksLikeContainerReference(target) {
 		warnRefIgnored(cmd, "container image")
-		return s.runScanImageWithOptions(cmd, target, "", platform)
+		return runScanImageWithOptions(service, cmd, target, "", platform)
 	}
 
-	return s.runScanRepository(cmd, target)
+	return runScanRepository(service, cmd, target)
 }
 
-func (s *Scanner) runScanRepository(cmd *cobra.Command, repoArg string) error {
+func runScanRepository(service *scan.Service, cmd *cobra.Command, repoArg string) error {
 	ctx := cmd.Context()
 	flags := extractScanFlags(cmd)
 
@@ -626,7 +637,7 @@ func (s *Scanner) runScanRepository(cmd *cobra.Command, repoArg string) error {
 		progress.Start(ctx)
 	}
 
-	exec, err := s.service.ScanRepository(ctx, repoArg, flags.Ref, cmd.Flags().Changed("ref"), scan.Options{
+	exec, err := service.ScanRepository(ctx, repoArg, flags.Ref, cmd.Flags().Changed("ref"), scan.Options{
 		Ecosystems:      scanOpts.Ecosystems,
 		PublishedBefore: beforeT,
 		PublishedAfter:  afterT,
@@ -685,18 +696,18 @@ func (s *Scanner) runScanRepository(cmd *cobra.Command, repoArg string) error {
 
 	switch strings.ToLower(flags.Format) {
 	case "", FormatText:
-		return s.outputText(out.Writer, cmd.ErrOrStderr(), resultOut, flags.IgnoreUnfixed, ignoredCount, policyFindings, flags.displayOptionsWithResult(resultOut))
+		return outputText(out.Writer, cmd.ErrOrStderr(), resultOut, flags.IgnoreUnfixed, ignoredCount, policyFindings, flags.displayOptionsWithResult(resultOut))
 	case FormatJSON:
-		return s.outputJSON(out.Writer, resultOut, policyFindings)
+		return outputJSON(out.Writer, resultOut, policyFindings)
 	case FormatSARIF:
-		return s.outputSARIF(out.Writer, resultOut, policyFindings)
+		return outputSARIF(out.Writer, resultOut, policyFindings)
 	default:
 		return cliflags.UnsupportedFormatError("--format", flags.Format, "text|json|sarif")
 	}
 }
 
 // runScanDir executes the directory scan command logic.
-func (s *Scanner) runScanDir(cmd *cobra.Command, args []string) error {
+func runScanDir(service *scan.Service, cmd *cobra.Command, args []string) error {
 	if len(args) != 1 {
 		return fmt.Errorf("expected 1 argument: <path>")
 	}
@@ -716,7 +727,7 @@ func (s *Scanner) runScanDir(cmd *cobra.Command, args []string) error {
 		progress.Start(ctx)
 	}
 
-	exec, err := s.service.ScanDirectory(ctx, path, scan.Options{
+	exec, err := service.ScanDirectory(ctx, path, scan.Options{
 		Ecosystems:      scanOpts.Ecosystems,
 		PublishedBefore: beforeT,
 		PublishedAfter:  afterT,
@@ -779,7 +790,7 @@ func (s *Scanner) runScanDir(cmd *cobra.Command, args []string) error {
 
 	switch strings.ToLower(flags.Format) {
 	case "", FormatText:
-		if err := s.outputTextDir(out.Writer, cmd.ErrOrStderr(), resultOut, flags.IgnoreUnfixed, ignoredCount, policyFindings, flags.displayOptionsWithResult(resultOut)); err != nil {
+		if err := outputTextDir(out.Writer, cmd.ErrOrStderr(), resultOut, flags.IgnoreUnfixed, ignoredCount, policyFindings, flags.displayOptionsWithResult(resultOut)); err != nil {
 			return err
 		}
 		// Append secrets findings if enabled
@@ -788,16 +799,16 @@ func (s *Scanner) runScanDir(cmd *cobra.Command, args []string) error {
 		}
 		return nil
 	case FormatJSON:
-		return s.outputJSON(out.Writer, resultOut, policyFindings)
+		return outputJSON(out.Writer, resultOut, policyFindings)
 	case FormatSARIF:
-		return s.outputSARIF(out.Writer, resultOut, policyFindings)
+		return outputSARIF(out.Writer, resultOut, policyFindings)
 	default:
 		return cliflags.UnsupportedFormatError("--format", flags.Format, "text|json|sarif")
 	}
 }
 
 // runScanSBOM executes the SBOM scan command logic.
-func (s *Scanner) runScanSBOM(cmd *cobra.Command, args []string) error {
+func runScanSBOM(service *scan.Service, cmd *cobra.Command, args []string) error {
 	if len(args) != 1 {
 		return fmt.Errorf("expected 1 argument: <path|->")
 	}
@@ -830,7 +841,7 @@ func (s *Scanner) runScanSBOM(cmd *cobra.Command, args []string) error {
 
 	beforeT, afterT := flags.parsePublishedTimes(cmd.ErrOrStderr())
 	scanOpts := flags.scanOptions()
-	exec, err := s.service.ScanSBOM(ctx, pkgs, direct, scan.Options{
+	exec, err := service.ScanSBOM(ctx, pkgs, direct, scan.Options{
 		Ecosystems:      scanOpts.Ecosystems,
 		PublishedBefore: beforeT,
 		PublishedAfter:  afterT,
@@ -868,7 +879,7 @@ func (s *Scanner) runScanSBOM(cmd *cobra.Command, args []string) error {
 				if ref.Platform != "" {
 					targetOpts["platform"] = ref.Platform
 				}
-				imgExec, err := s.service.ScanContainerImage(groupCtx, ref.Ref, targetOpts, scan.Options{
+				imgExec, err := service.ScanContainerImage(groupCtx, ref.Ref, targetOpts, scan.Options{
 					Ecosystems:      scanOpts.Ecosystems,
 					PublishedBefore: beforeT,
 					PublishedAfter:  afterT,
@@ -959,16 +970,16 @@ func (s *Scanner) runScanSBOM(cmd *cobra.Command, args []string) error {
 		render.PolicyFindings(out.Writer, policyFindings)
 		return nil
 	case FormatJSON:
-		return s.outputJSON(out.Writer, resultOut, policyFindings)
+		return outputJSON(out.Writer, resultOut, policyFindings)
 	case FormatSARIF:
-		return s.outputSARIF(out.Writer, resultOut, policyFindings)
+		return outputSARIF(out.Writer, resultOut, policyFindings)
 	default:
 		return cliflags.UnsupportedFormatError("--format", flags.Format, "text|json|sarif")
 	}
 }
 
 // runScanPURL executes the PURL scan command logic.
-func (s *Scanner) runScanPURL(cmd *cobra.Command, args []string) error {
+func runScanPURL(service *scan.Service, cmd *cobra.Command, args []string) error {
 	if len(args) != 1 {
 		return fmt.Errorf("expected 1 argument: <purl>")
 	}
@@ -979,7 +990,7 @@ func (s *Scanner) runScanPURL(cmd *cobra.Command, args []string) error {
 
 	beforeT, afterT := flags.parsePublishedTimes(cmd.ErrOrStderr())
 	scanOpts := flags.scanOptions()
-	exec, err := s.service.ScanPURL(ctx, input, scan.Options{
+	exec, err := service.ScanPURL(ctx, input, scan.Options{
 		Ecosystems:      scanOpts.Ecosystems,
 		PublishedBefore: beforeT,
 		PublishedAfter:  afterT,
@@ -1030,18 +1041,18 @@ func (s *Scanner) runScanPURL(cmd *cobra.Command, args []string) error {
 
 	switch strings.ToLower(flags.Format) {
 	case "", FormatText:
-		return s.outputTextDir(out.Writer, cmd.ErrOrStderr(), resultOut, flags.IgnoreUnfixed, ignoredCount, policyFindings, flags.displayOptions())
+		return outputTextDir(out.Writer, cmd.ErrOrStderr(), resultOut, flags.IgnoreUnfixed, ignoredCount, policyFindings, flags.displayOptions())
 	case FormatJSON:
-		return s.outputJSON(out.Writer, resultOut, policyFindings)
+		return outputJSON(out.Writer, resultOut, policyFindings)
 	case FormatSARIF:
-		return s.outputSARIF(out.Writer, resultOut, policyFindings)
+		return outputSARIF(out.Writer, resultOut, policyFindings)
 	default:
 		return cliflags.UnsupportedFormatError("--format", flags.Format, "text|json|sarif")
 	}
 }
 
 // runScanImage executes the container image scan command logic.
-func (s *Scanner) runScanImage(cmd *cobra.Command, args []string) error {
+func runScanImage(service *scan.Service, cmd *cobra.Command, args []string) error {
 	if len(args) != 1 {
 		return fmt.Errorf("expected 1 argument: <image>")
 	}
@@ -1049,10 +1060,10 @@ func (s *Scanner) runScanImage(cmd *cobra.Command, args []string) error {
 	input := strings.TrimSpace(args[0])
 	source, _ := cmd.Flags().GetString("source")
 	platform, _ := cmd.Flags().GetString("platform")
-	return s.runScanImageWithOptions(cmd, input, source, platform)
+	return runScanImageWithOptions(service, cmd, input, source, platform)
 }
 
-func (s *Scanner) runScanImageWithOptions(cmd *cobra.Command, input, source, platform string) error {
+func runScanImageWithOptions(service *scan.Service, cmd *cobra.Command, input, source, platform string) error {
 	ctx := cmd.Context()
 	flags := extractScanFlags(cmd)
 	target, err := normalizeImageTarget(input, source)
@@ -1075,7 +1086,7 @@ func (s *Scanner) runScanImageWithOptions(cmd *cobra.Command, input, source, pla
 		progress.Start(ctx)
 	}
 
-	exec, err := s.service.ScanContainerImage(ctx, target, targetOpts, scan.Options{
+	exec, err := service.ScanContainerImage(ctx, target, targetOpts, scan.Options{
 		Ecosystems:      scanOpts.Ecosystems,
 		PublishedBefore: beforeT,
 		PublishedAfter:  afterT,
@@ -1129,11 +1140,11 @@ func (s *Scanner) runScanImageWithOptions(cmd *cobra.Command, input, source, pla
 
 	switch strings.ToLower(flags.Format) {
 	case "", FormatText:
-		return s.outputTextContainer(out.Writer, cmd.ErrOrStderr(), resultOut, flags.IgnoreUnfixed, ignoredCount, policyFindings, flags.displayOptions())
+		return outputTextContainer(out.Writer, cmd.ErrOrStderr(), resultOut, flags.IgnoreUnfixed, ignoredCount, policyFindings, flags.displayOptions())
 	case FormatJSON:
-		return s.outputJSON(out.Writer, resultOut, policyFindings)
+		return outputJSON(out.Writer, resultOut, policyFindings)
 	case FormatSARIF:
-		return s.outputSARIF(out.Writer, resultOut, policyFindings)
+		return outputSARIF(out.Writer, resultOut, policyFindings)
 	default:
 		return cliflags.UnsupportedFormatError("--format", flags.Format, "text|json|sarif")
 	}
@@ -1172,7 +1183,7 @@ func normalizeImageTarget(input, source string) (string, error) {
 }
 
 // outputText writes the scan results in a human-readable text format to the provided writer.
-func (s *Scanner) outputText(w io.Writer, errW io.Writer, result scan.Result, ignoreUnfixed bool, ignoredCount int, policyFindings []report.PolicyFinding, displayOpts render.VulnerabilityDisplayOptions) error {
+func outputText(w io.Writer, errW io.Writer, result scan.Result, ignoreUnfixed bool, ignoredCount int, policyFindings []report.PolicyFinding, displayOpts render.VulnerabilityDisplayOptions) error {
 	displayPath := result.Target.DisplayPath
 	localPath := result.Target.LocalPath
 	shortRef := shortGitRef(refOrHEAD(result.Target.Ref))
@@ -1221,7 +1232,7 @@ func (s *Scanner) outputText(w io.Writer, errW io.Writer, result scan.Result, ig
 }
 
 // outputTextDir writes the directory scan results in a human-readable text format.
-func (s *Scanner) outputTextDir(w io.Writer, errW io.Writer, result scan.Result, ignoreUnfixed bool, ignoredCount int, policyFindings []report.PolicyFinding, displayOpts render.VulnerabilityDisplayOptions) error {
+func outputTextDir(w io.Writer, errW io.Writer, result scan.Result, ignoreUnfixed bool, ignoredCount int, policyFindings []report.PolicyFinding, displayOpts render.VulnerabilityDisplayOptions) error {
 	doc := render.ScanResultsHeaderDoc(result.Target.DisplayPath, "", "", "")
 	_ = doc.Render(w, output.UIStyles())
 
@@ -1238,7 +1249,7 @@ func (s *Scanner) outputTextDir(w io.Writer, errW io.Writer, result scan.Result,
 }
 
 // outputTextContainer writes container image scan results with container-specific context.
-func (s *Scanner) outputTextContainer(w io.Writer, errW io.Writer, result scan.Result, ignoreUnfixed bool, ignoredCount int, policyFindings []report.PolicyFinding, displayOpts render.VulnerabilityDisplayOptions) error {
+func outputTextContainer(w io.Writer, errW io.Writer, result scan.Result, ignoreUnfixed bool, ignoredCount int, policyFindings []report.PolicyFinding, displayOpts render.VulnerabilityDisplayOptions) error {
 	// Use container-specific header with image metadata
 	doc := render.ContainerScanHeaderDoc(result.Target.DisplayPath, result.ImageInfo)
 	_ = doc.Render(w, output.UIStyles())
@@ -1262,7 +1273,7 @@ func (s *Scanner) outputTextContainer(w io.Writer, errW io.Writer, result scan.R
 }
 
 // outputJSON writes the scan results in JSON format to the provided writer.
-func (s *Scanner) outputJSON(w io.Writer, result scan.Result, policyFindings []report.PolicyFinding) error {
+func outputJSON(w io.Writer, result scan.Result, policyFindings []report.PolicyFinding) error {
 	report := buildScanReport(result)
 	report.PolicyFindings = policyFindings
 
@@ -1272,7 +1283,7 @@ func (s *Scanner) outputJSON(w io.Writer, result scan.Result, policyFindings []r
 }
 
 // outputSARIF writes the scan results in SARIF format for GitHub Security tab integration.
-func (s *Scanner) outputSARIF(w io.Writer, result scan.Result, policyFindings []report.PolicyFinding) error {
+func outputSARIF(w io.Writer, result scan.Result, policyFindings []report.PolicyFinding) error {
 	vulns := report.FlattenResult(result)
 
 	opts := sarif.Options{
@@ -2163,11 +2174,11 @@ func isDockerfilePath(path string) bool {
 }
 
 // runScanDockerfile scans a Dockerfile for policy evaluation.
-func (s *Scanner) runScanDockerfile(cmd *cobra.Command, target string) error {
+func runScanDockerfile(service *scan.Service, cmd *cobra.Command, target string) error {
 	ctx := cmd.Context()
 	flags := extractScanFlags(cmd)
 
-	exec, err := s.service.ScanDockerfile(ctx, target, scan.Options{})
+	exec, err := service.ScanDockerfile(ctx, target, scan.Options{})
 	if err != nil {
 		return fmt.Errorf("scan dockerfile: %w", err)
 	}

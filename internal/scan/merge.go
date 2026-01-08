@@ -2,6 +2,7 @@ package scan
 
 import (
 	"github.com/google/osv-scalibr/extractor"
+	vulnerabilityv1 "github.com/picatz/deputy/gen/deputy/vulnerability/v1"
 	"github.com/picatz/deputy/internal/policy"
 	"github.com/picatz/deputy/internal/vulnerability"
 )
@@ -47,11 +48,11 @@ func mergeInventory(base, extra Inventory) Inventory {
 	return out
 }
 
-func mergeAdvisories(base, extra map[string]vulnerability.Advisory) map[string]vulnerability.Advisory {
+func mergeAdvisories(base, extra map[string]vulnerabilityv1.Advisory) map[string]vulnerabilityv1.Advisory {
 	if len(base) == 0 && len(extra) == 0 {
-		return map[string]vulnerability.Advisory{}
+		return map[string]vulnerabilityv1.Advisory{}
 	}
-	out := make(map[string]vulnerability.Advisory, len(base)+len(extra))
+	out := make(map[string]vulnerabilityv1.Advisory, len(base)+len(extra))
 	for id, adv := range base {
 		out[id] = adv
 	}

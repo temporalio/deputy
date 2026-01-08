@@ -5,7 +5,7 @@ import (
 	"slices"
 	"time"
 
-	"github.com/picatz/deputy/internal/dependency"
+	containerv1 "github.com/picatz/deputy/gen/deputy/container/v1"
 )
 
 // ImageRef identifies a container image for comparison.
@@ -84,11 +84,11 @@ type ImagePackageChange struct {
 
 	// BaseLayerDetails indicates which layer the package was in the base image.
 	// Nil if the package was not in the base image (added).
-	BaseLayerDetails *dependency.LayerDetails `json:"baseLayerDetails,omitempty"`
+	BaseLayerDetails *containerv1.LayerDetails `json:"baseLayerDetails,omitempty"`
 
 	// TargetLayerDetails indicates which layer the package is in the target image.
 	// Nil if the package is not in the target image (removed).
-	TargetLayerDetails *dependency.LayerDetails `json:"targetLayerDetails,omitempty"`
+	TargetLayerDetails *containerv1.LayerDetails `json:"targetLayerDetails,omitempty"`
 }
 
 // VulnerabilityChange represents a vulnerability difference between two container images.
@@ -127,11 +127,11 @@ type VulnerabilityChange struct {
 
 	// BaseLayerDetails describes the layer where the vulnerable package existed in the base image.
 	// Nil if the vulnerability was not present in the base image (i.e., VulnAdded).
-	BaseLayerDetails *dependency.LayerDetails `json:"baseLayerDetails,omitempty"`
+	BaseLayerDetails *containerv1.LayerDetails `json:"baseLayerDetails,omitempty"`
 
 	// TargetLayerDetails describes the layer where the vulnerable package exists in the target image.
 	// Nil if the vulnerability is not present in the target image (i.e., VulnRemoved or VulnFixed).
-	TargetLayerDetails *dependency.LayerDetails `json:"targetLayerDetails,omitempty"`
+	TargetLayerDetails *containerv1.LayerDetails `json:"targetLayerDetails,omitempty"`
 
 	// Summary is a brief description of the vulnerability.
 	Summary string `json:"summary,omitempty"`

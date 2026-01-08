@@ -23,6 +23,7 @@ import (
 	githttp "github.com/go-git/go-git/v5/plumbing/transport/http"
 	"github.com/go-git/go-git/v5/storage/memory"
 	"github.com/ossf/osv-schema/bindings/go/osvschema"
+	vulnerabilityv1 "github.com/picatz/deputy/gen/deputy/vulnerability/v1"
 	"github.com/picatz/deputy/internal/cache/disk"
 	"github.com/picatz/deputy/internal/collections"
 	"github.com/picatz/deputy/internal/httputil"
@@ -181,7 +182,7 @@ func queryOSVGHABucketBatch(ctx context.Context, client Client, pkgs []PkgInput)
 				base.Severity, base.SeverityType = sev, typ
 			}
 			fixSet := collections.NewSet[string]()
-			var importSets [][]vulnerability.AffectedImport
+			var importSets [][]vulnerabilityv1.AffectedImport
 			if len(base.AffectedImports) > 0 {
 				importSets = append(importSets, base.AffectedImports)
 			}

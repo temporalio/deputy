@@ -4,14 +4,19 @@
 // it was found, independent of vulnerability analysis:
 //
 //   - [ID]: Identity of a dependency (name, ecosystem, PURL)
-//   - [ManifestRef]: Where a dependency is declared in source (manifest path, manager)
-//   - [LayerDetails]: Where a dependency was found in a container image (layer info)
+//   - [dependencyv1.ManifestRef]: Where a dependency is declared in source (manifest path, manager)
+//   - [containerv1.LayerDetails]: Where a dependency was found in a container image (layer info)
 //
 // These types are used throughout Deputy to track dependencies from extraction
 // through vulnerability analysis and reporting.
 package dependency
 
-import "slices"
+import (
+	"slices"
+
+	containerv1 "github.com/picatz/deputy/gen/deputy/container/v1"
+	dependencyv1 "github.com/picatz/deputy/gen/deputy/dependency/v1"
+)
 
 // ID captures the identity of a dependency independently of a scan.
 type ID struct {
@@ -20,40 +25,16 @@ type ID struct {
 	PURL      string
 }
 
-// ManifestRef describes where a dependency is declared in a manifest or lockfile.
-type ManifestRef struct {
-	Path    string
-	Manager string
-	Groups  []string
-}
-
-// LayerDetails describes the container image layer where a package was found.
-// This information is populated when scanning container images and enables
-// layer-aware analysis, base image detection, and layer-specific policy evaluation.
-type LayerDetails struct {
-	// Index is the position of the layer in the image (0 = oldest/base layer).
-	Index int `json:"index"`
-	// DiffID is the digest of the uncompressed layer content.
-	DiffID string `json:"diffId,omitempty"`
-	// ChainID is the cumulative hash identifying this layer in context of its parents.
-	// See: https://github.com/opencontainers/image-spec/blob/main/config.md#layer-chainid
-	ChainID string `json:"chainId,omitempty"`
-	// Command is the Dockerfile instruction that created this layer (e.g., "RUN apt-get install...").
-	Command string `json:"command,omitempty"`
-	// InBaseImage indicates whether this layer is part of the base image (FROM instruction).
-	InBaseImage bool `json:"inBaseImage,omitempty"`
-}
-
 // CloneLayerDetails returns a deep copy of LayerDetails.
 // Returns nil if src is nil.
-func CloneLayerDetails(src *LayerDetails) *LayerDetails {
+func CloneLayerDetails(src *containerv1.LayerDetails) *containerv1.LayerDetails {
 	if src == nil {
 		return nil
 	}
-	return &LayerDetails{
+	return &containerv1.LayerDetails{
 		Index:       src.Index,
-		DiffID:      src.DiffID,
-		ChainID:     src.ChainID,
+		DiffId:      src.DiffId,
+		ChainId:     src.ChainId,
 		Command:     src.Command,
 		InBaseImage: src.InBaseImage,
 	}
@@ -61,13 +42,13 @@ func CloneLayerDetails(src *LayerDetails) *LayerDetails {
 
 // CloneManifestRefs deep clones a slice of ManifestRef.
 // Returns nil if refs is empty or nil.
-func CloneManifestRefs(refs []ManifestRef) []ManifestRef {
+func CloneManifestRefs(refs []dependencyv1.ManifestRef) []dependencyv1.ManifestRef {
 	if len(refs) == 0 {
 		return nil
 	}
-	out := make([]ManifestRef, len(refs))
+	out := make([]dependencyv1.ManifestRef, len(refs))
 	for i, ref := range refs {
-		out[i] = ManifestRef{
+		out[i] = dependencyv1.ManifestRef{
 			Path:    ref.Path,
 			Manager: ref.Manager,
 			Groups:  slices.Clone(ref.Groups),

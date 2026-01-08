@@ -7,8 +7,8 @@ import (
 	"slices"
 	"strings"
 
+	dependencyv1 "github.com/picatz/deputy/gen/deputy/dependency/v1"
 	"github.com/picatz/deputy/internal/collections"
-	"github.com/picatz/deputy/internal/dependency"
 	"github.com/picatz/deputy/internal/ecosystem"
 	"github.com/picatz/deputy/internal/vulnerability"
 	"golang.org/x/mod/semver"
@@ -43,7 +43,7 @@ type packageUpgrade struct {
 	Recommended string
 	IsDirect    bool
 	Ecosystem   string
-	References  []dependency.ManifestRef
+	References  []dependencyv1.ManifestRef
 	Locations   []string
 }
 
@@ -156,9 +156,9 @@ func normalizeVersion(v string) string {
 }
 
 // mergeManifestRefs combines two slices of manifest references, deduplicating by path+manager.
-func mergeManifestRefs(a, b []dependency.ManifestRef) []dependency.ManifestRef {
+func mergeManifestRefs(a, b []dependencyv1.ManifestRef) []dependencyv1.ManifestRef {
 	seen := collections.NewSet[string]()
-	result := make([]dependency.ManifestRef, 0, len(a)+len(b))
+	result := make([]dependencyv1.ManifestRef, 0, len(a)+len(b))
 	for _, ref := range a {
 		key := ref.Path + "|" + ref.Manager
 		if seen.Add(key) {

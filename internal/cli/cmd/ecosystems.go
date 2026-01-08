@@ -1,16 +1,20 @@
 package cmd
 
 import (
+	"encoding/json"
 	"fmt"
 	"strings"
 
+	"connectrpc.com/connect"
 	"github.com/charmbracelet/lipgloss"
-	"github.com/picatz/deputy/internal/ecosystem"
+
+	listv1 "github.com/picatz/deputy/gen/deputy/list/v1"
+	"github.com/picatz/deputy/internal/client"
 	"github.com/spf13/cobra"
 )
 
 // AddEcosystemsCommand adds the ecosystems command to the root.
-func AddEcosystemsCommand(root *cobra.Command) {
+func AddEcosystemsCommand(root *cobra.Command, c client.Client) {
 	ecosystemsCmd := &cobra.Command{
 		Use:     "ecosystems",
 		Aliases: []string{"eco"},
@@ -27,15 +31,12 @@ Each ecosystem may support different features:
 		Example: `  # List all ecosystems
   deputy ecosystems
 
-  # Show ecosystems with proxy support
-  deputy ecosystems --capability proxy
-
   # List ecosystems as JSON
   deputy ecosystems --format json`,
 	}
 
 	// List subcommand (default behavior, can be explicit)
-	listCmd := newEcosystemsListCommand()
+	listCmd := newEcosystemsListCommand(c)
 	ecosystemsCmd.AddCommand(listCmd)
 
 	// Make list the default when running "deputy ecosystems" with no subcommand
@@ -45,164 +46,81 @@ Each ecosystem may support different features:
 	root.AddCommand(ecosystemsCmd)
 }
 
-func newEcosystemsListCommand() *cobra.Command {
-	var (
-		formatFlag     string
-		capabilityFlag string
-	)
+func newEcosystemsListCommand(c client.Client) *cobra.Command {
+	var formatFlag string
 
 	cmd := &cobra.Command{
 		Use:   "list",
 		Short: "List supported ecosystems",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			reg := ecosystem.Default()
-			registrations := reg.All()
+			ctx := cmd.Context()
 
-			// Filter by capability if specified
-			if capabilityFlag != "" {
-				cap := parseCapability(capabilityFlag)
-				if cap == 0 {
-					return fmt.Errorf("unknown capability: %s (valid: inventory, graph, proxy, license, fix, sbom)", capabilityFlag)
-				}
-				registrations = reg.WithCapability(cap)
+			// Call client API
+			resp, err := c.ListEcosystems(ctx, connect.NewRequest(&listv1.ListEcosystemsRequest{}))
+			if err != nil {
+				return fmt.Errorf("list ecosystems failed: %w", err)
 			}
 
 			switch formatFlag {
 			case "json":
-				return printEcosystemsJSON(cmd, registrations)
+				return printEcosystemsJSON(cmd, resp.Msg.Ecosystems)
 			default:
-				return printEcosystemsTable(cmd, registrations)
+				return printEcosystemsTable(cmd, resp.Msg.Ecosystems)
 			}
 		},
 	}
 
 	cmd.Flags().StringVarP(&formatFlag, "format", "f", "table", "Output format (table, json)")
-	cmd.Flags().StringVarP(&capabilityFlag, "capability", "c", "", "Filter by capability (inventory, graph, proxy, license, fix, sbom)")
 
 	return cmd
 }
 
-func parseCapability(s string) ecosystem.Capability {
-	switch strings.ToLower(strings.TrimSpace(s)) {
-	case "inventory", "inv":
-		return ecosystem.CapInventory
-	case "graph":
-		return ecosystem.CapGraph
-	case "proxy":
-		return ecosystem.CapProxy
-	case "license", "lic":
-		return ecosystem.CapLicense
-	case "fix":
-		return ecosystem.CapFix
-	case "sbom":
-		return ecosystem.CapSBOM
-	default:
-		return 0
-	}
-}
-
-func printEcosystemsTable(cmd *cobra.Command, registrations []ecosystem.Registration) error {
+func printEcosystemsTable(cmd *cobra.Command, ecosystems []*listv1.EcosystemInfo) error {
 	w := cmd.OutOrStdout()
 
 	// Styles
 	headerStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("12"))
 	ecoStyle := lipgloss.NewStyle().Bold(true)
-	checkStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("10"))
-	dashStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("8"))
-
-	check := checkStyle.Render("✓")
-	dash := dashStyle.Render("·")
 
 	// Header
-	fmt.Fprintf(w, "%s  %s  %s  %s  %s  %s  %s  %s\n",
+	fmt.Fprintf(w, "%s  %s  %s  %s\n",
 		headerStyle.Render(padRight("Ecosystem", 12)),
 		headerStyle.Render(padRight("Description", 32)),
-		headerStyle.Render("Inv"),
-		headerStyle.Render("Grp"),
-		headerStyle.Render("Prx"),
-		headerStyle.Render("Lic"),
-		headerStyle.Render("Fix"),
-		headerStyle.Render("SBM"),
+		headerStyle.Render(padRight("Manifests", 30)),
+		headerStyle.Render("Lockfiles"),
 	)
-	fmt.Fprintln(w, strings.Repeat("─", 80))
+	fmt.Fprintln(w, strings.Repeat("─", 100))
 
-	for _, reg := range registrations {
-		caps := reg.Capabilities
+	for _, eco := range ecosystems {
+		manifests := strings.Join(eco.ManifestFiles, ", ")
+		lockfiles := strings.Join(eco.LockFiles, ", ")
 
-		fmt.Fprintf(w, "%s  %s  %s   %s   %s   %s   %s   %s\n",
-			ecoStyle.Render(padRight(reg.DisplayName, 12)),
-			padRight(truncate(reg.Description, 32), 32),
-			capMark(caps&ecosystem.CapInventory != 0, check, dash),
-			capMark(caps&ecosystem.CapGraph != 0, check, dash),
-			capMark(caps&ecosystem.CapProxy != 0, check, dash),
-			capMark(caps&ecosystem.CapLicense != 0, check, dash),
-			capMark(caps&ecosystem.CapFix != 0, check, dash),
-			capMark(caps&ecosystem.CapSBOM != 0, check, dash),
+		fmt.Fprintf(w, "%s  %s  %s  %s\n",
+			ecoStyle.Render(padRight(eco.DisplayName, 12)),
+			padRight(truncate(eco.Description, 32), 32),
+			padRight(truncate(manifests, 30), 30),
+			lockfiles,
 		)
 	}
 
 	fmt.Fprintln(w)
-	fmt.Fprintf(w, "Capabilities: Inv=Inventory, Grp=Graph, Prx=Proxy, Lic=License, Fix=Fix, SBM=SBOM\n")
-	fmt.Fprintf(w, "Total: %d ecosystems\n", len(registrations))
+	fmt.Fprintf(w, "Total: %d ecosystems\n", len(ecosystems))
 
 	return nil
 }
 
-func printEcosystemsJSON(cmd *cobra.Command, registrations []ecosystem.Registration) error {
+func printEcosystemsJSON(cmd *cobra.Command, ecosystems []*listv1.EcosystemInfo) error {
 	w := cmd.OutOrStdout()
 
-	fmt.Fprintln(w, "{")
-	fmt.Fprintln(w, `  "ecosystems": [`)
-
-	for i, reg := range registrations {
-		caps := reg.CapabilityList()
-		capStrs := make([]string, len(caps))
-		for j, c := range caps {
-			capStrs[j] = fmt.Sprintf("%q", strings.ToLower(c.String()))
-		}
-
-		aliasStrs := make([]string, len(reg.Aliases))
-		for j, a := range reg.Aliases {
-			aliasStrs[j] = fmt.Sprintf("%q", a)
-		}
-
-		lockfileStrs := make([]string, len(reg.Lockfiles))
-		for j, l := range reg.Lockfiles {
-			lockfileStrs[j] = fmt.Sprintf("%q", l)
-		}
-
-		comma := ","
-		if i == len(registrations)-1 {
-			comma = ""
-		}
-
-		fmt.Fprintf(w, `    {
-      "id": %q,
-      "name": %q,
-      "description": %q,
-      "aliases": [%s],
-      "capabilities": [%s],
-      "lockfiles": [%s],
-      "upstream": %q,
-      "osv_name": %q
-    }%s
-`,
-			reg.Ecosystem,
-			reg.DisplayName,
-			reg.Description,
-			strings.Join(aliasStrs, ", "),
-			strings.Join(capStrs, ", "),
-			strings.Join(lockfileStrs, ", "),
-			reg.UpstreamURL,
-			reg.OSVName,
-			comma,
-		)
+	output := struct {
+		Ecosystems []*listv1.EcosystemInfo `json:"ecosystems"`
+	}{
+		Ecosystems: ecosystems,
 	}
 
-	fmt.Fprintln(w, "  ]")
-	fmt.Fprintln(w, "}")
-
-	return nil
+	enc := json.NewEncoder(w)
+	enc.SetIndent("", "  ")
+	return enc.Encode(output)
 }
 
 func capMark(has bool, check, dash string) string {

@@ -11,7 +11,8 @@ import (
 	pathpkg "path"
 
 	"github.com/charmbracelet/lipgloss"
-	"github.com/picatz/deputy/internal/dependency"
+	containerv1 "github.com/picatz/deputy/gen/deputy/container/v1"
+	vulnerabilityv1 "github.com/picatz/deputy/gen/deputy/vulnerability/v1"
 	"github.com/picatz/deputy/internal/dependency/graph"
 	"github.com/picatz/deputy/internal/output"
 	"github.com/picatz/deputy/internal/remediation"
@@ -195,7 +196,7 @@ func VulnerabilityList(w io.Writer, cons []vulnerability.Consolidated, opts Vuln
 
 // VulnerabilitySummaryAndActions writes the summary and recommended
 // actions for a set of vulnerabilities without reprinting the list header.
-func VulnerabilitySummaryAndActions(w io.Writer, cons []vulnerability.Consolidated, stats vulnerability.Stats, opts ...VulnerabilityDisplayOptions) {
+func VulnerabilitySummaryAndActions(w io.Writer, cons []vulnerability.Consolidated, stats vulnerabilityv1.Stats, opts ...VulnerabilityDisplayOptions) {
 	displayOpts := resolveVulnerabilityDisplayOptions(opts)
 	summary := report.BuildSummary(cons, stats)
 	if !summary.HasVulnerabilities {
@@ -301,7 +302,7 @@ func renderManifestContext(w io.Writer, list []vulnerability.Consolidated) {
 
 // formatLayerTag returns a concise layer context tag for container vulnerability display.
 // Examples: "[BASE layer 0]", "[layer 5]", "[APP layer 12]"
-func formatLayerTag(ld *dependency.LayerDetails) string {
+func formatLayerTag(ld *containerv1.LayerDetails) string {
 	if ld == nil {
 		return ""
 	}

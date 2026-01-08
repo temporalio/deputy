@@ -106,10 +106,10 @@ func (s *Service) ScanPURL(ctx context.Context, purlStr string, opts Options) (*
 		Ecosystem:    string(targets.KindPURL),
 		PackageCount: result.PackagesScanned,
 		Severity: otel.SeverityCounts{
-			Critical: result.Stats.CriticalSev,
-			High:     result.Stats.HighSeverity,
-			Medium:   result.Stats.MedSeverity,
-			Low:      result.Stats.LowSeverity,
+			Critical: int(result.Stats.Critical),
+			High:     int(result.Stats.High),
+			Medium:   int(result.Stats.Medium),
+			Low:      int(result.Stats.Low),
 		},
 	})
 

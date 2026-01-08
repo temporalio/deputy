@@ -11,11 +11,11 @@ import (
 	"github.com/charmbracelet/fang"
 	"github.com/go-git/go-git/v5"
 	"github.com/picatz/deputy/internal/cli/cmd"
+	"github.com/picatz/deputy/internal/client"
 	"github.com/picatz/deputy/internal/config"
 	deputyerrors "github.com/picatz/deputy/internal/errors"
 	"github.com/picatz/deputy/internal/logs"
 	"github.com/picatz/deputy/internal/otel"
-	"github.com/picatz/deputy/internal/scan"
 	_ "github.com/picatz/deputy/internal/targets/providers"
 	"github.com/picatz/deputy/internal/version"
 	"github.com/spf13/cobra"
@@ -86,14 +86,16 @@ func silentErrorHandler(w io.Writer, styles fang.Styles, err error) {
 func newRoot() *cobra.Command {
 	logLevel := defaultLogLevel()
 	logFormat := defaultLogFormat()
+	var serverAddr string
+	var daemonSocket string
 
 	rootCmd := &cobra.Command{
 		Use:           "deputy",
 		Short:         "Secure your dependencies with policy enforcement, vulnerability scanning, and automated remediation",
 		SilenceErrors: true,
 		SilenceUsage:  true,
-		Long: `Deputy is a comprehensive security tool for modern development workflows. It integrates 
-dependency analysis, vulnerability scanning, policy enforcement, and automated remediation 
+		Long: `Deputy is a comprehensive security tool for modern development workflows. It integrates
+dependency analysis, vulnerability scanning, policy enforcement, and automated remediation
 into a single CLI.
 
 CORE CAPABILITIES:
@@ -111,6 +113,16 @@ COMMAND OVERVIEW:
 • diff:    Compare dependency changes between Git references
 • list:    List dependencies in a repository
 • sbom:    Generate Software Bills of Materials (SBOMs)
+• server:  Run the Deputy API server
+
+CONNECTION MODES:
+Deputy can operate in three modes:
+• In-process (default): Direct execution with zero network overhead
+• Local daemon: Connect to a running 'deputy server' via Unix socket
+• Remote: Connect to a remote Deputy server via HTTP/2
+
+Mode is auto-detected (remote if DEPUTY_SERVER is set, daemon if socket exists),
+or can be forced with --server or --daemon flags.
 
 DEFAULT EXECUTION:
 Running 'deputy' without arguments defaults to 'deputy diff' if inside a Git repository.`,
@@ -154,16 +166,52 @@ DEPENDENCY ANALYSIS:
 
 SUPPLY CHAIN:
   # Generate an SBOM
-  deputy sbom --format spdx`,
+  deputy sbom --format spdx
+
+CONNECTION MODES:
+  # Use in-process mode (default)
+  deputy scan
+
+  # Connect to a remote server
+  deputy --server https://deputy.example.com:8090 scan
+
+  # Connect to a local daemon
+  deputy --daemon /tmp/deputy.sock scan
+
+  # Start a server for others to connect to
+  deputy server --addr :8090`,
 	}
 
 	rootCmd.PersistentFlags().StringVar(&logLevel, "log-level", logLevel, "Logging level: debug, info, warn, error (default: warn). Override with DEPUTY_LOG_LEVEL")
 	rootCmd.PersistentFlags().StringVar(&logFormat, "log-format", logFormat, "Logging format (text, json). Override with DEPUTY_LOG_FORMAT")
+	rootCmd.PersistentFlags().StringVar(&serverAddr, "server", "", "Connect to remote Deputy server (e.g., https://deputy.example.com:8090). Override with DEPUTY_SERVER")
+	rootCmd.PersistentFlags().StringVar(&daemonSocket, "daemon", "", "Connect to local daemon via Unix socket path")
 	rootCmd.PersistentPreRunE = func(cmd *cobra.Command, args []string) error {
 		return configureLogging(logLevel, logFormat)
 	}
-	cmd.RegisterCommands(rootCmd, cmd.Dependencies{ScanService: scan.NewService()})
+
+	// Build client options from flags
+	clientOpts := buildClientOptions(serverAddr, daemonSocket)
+	cmd.RegisterCommands(rootCmd, cmd.Dependencies{ClientOptions: clientOpts})
 	return rootCmd
+}
+
+// buildClientOptions creates client.Options from CLI flags.
+func buildClientOptions(serverAddr, daemonSocket string) client.Options {
+	opts := client.Options{}
+
+	if serverAddr != "" {
+		opts.Mode = client.ModeRemote
+		opts.ForceMode = true
+		opts.ServerAddress = serverAddr
+	} else if daemonSocket != "" {
+		opts.Mode = client.ModeLocalDaemon
+		opts.ForceMode = true
+		opts.DaemonSocket = daemonSocket
+	}
+	// Otherwise, auto-detect mode (checks DEPUTY_SERVER env, daemon socket, falls back to in-process)
+
+	return opts
 }
 
 // isInGitRepo checks if the current working directory is inside a git repository.

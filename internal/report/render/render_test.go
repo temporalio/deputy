@@ -5,7 +5,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/picatz/deputy/internal/dependency"
+	containerv1 "github.com/picatz/deputy/gen/deputy/container/v1"
+	vulnerabilityv1 "github.com/picatz/deputy/gen/deputy/vulnerability/v1"
 	"github.com/picatz/deputy/internal/remediation"
 	"github.com/picatz/deputy/internal/report"
 	"github.com/picatz/deputy/internal/scan"
@@ -104,7 +105,7 @@ func TestVulnerabilityList(t *testing.T) {
 				PrimaryID: "CVE-1",
 				Package:   "pkg",
 				Version:   "1.0.0",
-				LayerDetails: &dependency.LayerDetails{
+				LayerDetails: &containerv1.LayerDetails{
 					Index:       5,
 					InBaseImage: true,
 				},
@@ -127,7 +128,7 @@ func TestVulnerabilityList(t *testing.T) {
 				PrimaryID: "CVE-1",
 				Package:   "pkg",
 				Version:   "1.0.0",
-				AffectedImports: []vulnerability.AffectedImport{
+				AffectedImports: []vulnerabilityv1.AffectedImport{
 					{Path: "pkg/vulnerable", Symbols: []string{"UnsafeFunc"}},
 				},
 			},
@@ -154,15 +155,15 @@ func TestFormatLayerTag(t *testing.T) {
 
 	tests := []struct {
 		name   string
-		ld     *dependency.LayerDetails
+		ld     *containerv1.LayerDetails
 		expect string
 	}{
 		{"nil", nil, ""},
-		{"layer 0", &dependency.LayerDetails{Index: 0}, "[layer 0]"},
-		{"layer 5", &dependency.LayerDetails{Index: 5}, "[layer 5]"},
-		{"base image layer 0", &dependency.LayerDetails{Index: 0, InBaseImage: true}, "[BASE layer 0]"},
-		{"base image layer 3", &dependency.LayerDetails{Index: 3, InBaseImage: true}, "[BASE layer 3]"},
-		{"app layer", &dependency.LayerDetails{Index: 12, InBaseImage: false}, "[layer 12]"},
+		{"layer 0", &containerv1.LayerDetails{Index: 0}, "[layer 0]"},
+		{"layer 5", &containerv1.LayerDetails{Index: 5}, "[layer 5]"},
+		{"base image layer 0", &containerv1.LayerDetails{Index: 0, InBaseImage: true}, "[BASE layer 0]"},
+		{"base image layer 3", &containerv1.LayerDetails{Index: 3, InBaseImage: true}, "[BASE layer 3]"},
+		{"app layer", &containerv1.LayerDetails{Index: 12, InBaseImage: false}, "[layer 12]"},
 	}
 
 	for _, tt := range tests {
@@ -297,7 +298,7 @@ func TestTriageSummary(t *testing.T) {
 		triageReport := report.TriageReport{
 			Target:            report.Target{Repo: "test/repo", Ref: "main"},
 			PackagesWithVulns: 2,
-			Stats:             vulnerability.Stats{TotalVulns: 3},
+			Stats:             vulnerabilityv1.Stats{Total: 3},
 			TopPackages: []report.TriagePackageSummary{
 				{
 					Package:            "lodash",
@@ -364,7 +365,7 @@ func TestFormatImportSummaries(t *testing.T) {
 	})
 
 	t.Run("path only", func(t *testing.T) {
-		imps := []vulnerability.AffectedImport{
+		imps := []vulnerabilityv1.AffectedImport{
 			{Path: "pkg/vuln"},
 		}
 		lines := FormatImportSummaries(imps, 3, 4)
@@ -374,7 +375,7 @@ func TestFormatImportSummaries(t *testing.T) {
 	})
 
 	t.Run("path with symbols", func(t *testing.T) {
-		imps := []vulnerability.AffectedImport{
+		imps := []vulnerabilityv1.AffectedImport{
 			{Path: "pkg/vuln", Symbols: []string{"Func1", "Func2"}},
 		}
 		lines := FormatImportSummaries(imps, 3, 4)
@@ -387,7 +388,7 @@ func TestFormatImportSummaries(t *testing.T) {
 	})
 
 	t.Run("truncates paths", func(t *testing.T) {
-		imps := []vulnerability.AffectedImport{
+		imps := []vulnerabilityv1.AffectedImport{
 			{Path: "pkg1"},
 			{Path: "pkg2"},
 			{Path: "pkg3"},
@@ -404,7 +405,7 @@ func TestFormatImportSummaries(t *testing.T) {
 	})
 
 	t.Run("truncates symbols", func(t *testing.T) {
-		imps := []vulnerability.AffectedImport{
+		imps := []vulnerabilityv1.AffectedImport{
 			{Path: "pkg", Symbols: []string{"S1", "S2", "S3", "S4", "S5", "S6"}},
 		}
 		lines := FormatImportSummaries(imps, 3, 2)
@@ -417,7 +418,7 @@ func TestFormatImportSummaries(t *testing.T) {
 	})
 
 	t.Run("skips empty paths", func(t *testing.T) {
-		imps := []vulnerability.AffectedImport{
+		imps := []vulnerabilityv1.AffectedImport{
 			{Path: ""},
 			{Path: "  "},
 			{Path: "valid"},
@@ -519,7 +520,7 @@ func TestVulnerabilitySummaryAndActions(t *testing.T) {
 
 	t.Run("no vulnerabilities", func(t *testing.T) {
 		var buf bytes.Buffer
-		VulnerabilitySummaryAndActions(&buf, nil, vulnerability.Stats{})
+		VulnerabilitySummaryAndActions(&buf, nil, vulnerabilityv1.Stats{})
 		out := buf.String()
 		if !strings.Contains(out, "No vulnerabilities found") {
 			t.Errorf("expected no vulns message, got: %s", out)
@@ -532,7 +533,7 @@ func TestVulnerabilitySummaryAndActions(t *testing.T) {
 			{PrimaryID: "CVE-2", Severity: "HIGH"},
 			{PrimaryID: "CVE-3", Severity: "HIGH"},
 		}
-		stats := vulnerability.Stats{TotalVulns: 3, CriticalSev: 1, HighSeverity: 2}
+		stats := vulnerabilityv1.Stats{Total: 3, Critical: 1, High: 2}
 		var buf bytes.Buffer
 		VulnerabilitySummaryAndActions(&buf, cons, stats)
 		out := buf.String()
@@ -546,7 +547,7 @@ func TestVulnerabilitySummaryAndActions(t *testing.T) {
 			{PrimaryID: "CVE-1", FixedVersions: []string{"1.0.1"}},
 			{PrimaryID: "CVE-2", FixedVersions: []string{"2.0.0"}},
 		}
-		stats := vulnerability.Stats{TotalVulns: 2}
+		stats := vulnerabilityv1.Stats{Total: 2}
 		var buf bytes.Buffer
 		VulnerabilitySummaryAndActions(&buf, cons, stats)
 		out := buf.String()

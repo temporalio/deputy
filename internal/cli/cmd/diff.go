@@ -16,6 +16,7 @@ import (
 	"github.com/go-git/go-git/v5/plumbing"
 	"github.com/google/osv-scalibr/extractor"
 	"github.com/picatz/deputy/internal/cli/flags"
+	"github.com/picatz/deputy/internal/client"
 	"github.com/picatz/deputy/internal/compare"
 	gitx "github.com/picatz/deputy/internal/gitutil"
 	inv "github.com/picatz/deputy/internal/inventory"
@@ -30,6 +31,7 @@ import (
 	"github.com/picatz/deputy/internal/scan"
 	ui "github.com/picatz/deputy/internal/ui"
 	"github.com/picatz/deputy/internal/vulnerability"
+	vulnerabilityv1 "github.com/picatz/deputy/gen/deputy/vulnerability/v1"
 	"github.com/spf13/cobra"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
@@ -41,7 +43,7 @@ import (
 // AddDiffCommand registers the diff subcommand which compares dependency
 // inventories between two Git references (or working tree) and optionally
 // performs vulnerability scanning on changed modules.
-func AddDiffCommand(root *cobra.Command, service *scan.Service) {
+func AddDiffCommand(root *cobra.Command, c client.Client) {
 	var (
 		repoPath                                       string
 		skipVulnScan                                   bool
@@ -58,9 +60,8 @@ func AddDiffCommand(root *cobra.Command, service *scan.Service) {
 		outputFormat                                   string
 	)
 
-	if service == nil {
-		service = scan.NewService()
-	}
+	// Extract service for operations not yet exposed via client interface
+	service := getService(c)
 
 	cmd := &cobra.Command{
 		Use:           "diff [base] [target]",
@@ -588,27 +589,27 @@ func runDiffAnalysis(ctx context.Context, service *scan.Service, repoPath, baseR
 			thr := strings.ToLower(strings.TrimSpace(unchangedThreshold))
 			switch thr {
 			case "", "critical":
-				if unchangedStats.CriticalSev > 0 {
+				if unchangedStats.Critical > 0 {
 					showUnchangedEff = true
 					reason = "Critical severity present"
 				}
 			case "high":
-				if unchangedStats.CriticalSev+unchangedStats.HighSeverity > 0 {
+				if unchangedStats.Critical+unchangedStats.High > 0 {
 					showUnchangedEff = true
 					reason = ">= High severity present"
 				}
 			case "med", "medium", "moderate":
-				if unchangedStats.CriticalSev+unchangedStats.HighSeverity+unchangedStats.MedSeverity > 0 {
+				if unchangedStats.Critical+unchangedStats.High+unchangedStats.Medium > 0 {
 					showUnchangedEff = true
 					reason = ">= Medium severity present"
 				}
 			case "low":
-				if unchangedStats.CriticalSev+unchangedStats.HighSeverity+unchangedStats.MedSeverity+unchangedStats.LowSeverity > 0 {
+				if unchangedStats.Critical+unchangedStats.High+unchangedStats.Medium+unchangedStats.Low > 0 {
 					showUnchangedEff = true
 					reason = ">= Low severity present"
 				}
 			case "any", "all":
-				if unchangedStats.UniqueVulns > 0 {
+				if unchangedStats.Unique > 0 {
 					showUnchangedEff = true
 					reason = "Vulnerabilities present"
 				}
@@ -616,7 +617,7 @@ func runDiffAnalysis(ctx context.Context, service *scan.Service, repoPath, baseR
 				// never auto-show
 			default:
 				// fallback to critical if unknown value
-				if unchangedStats.CriticalSev > 0 {
+				if unchangedStats.Critical > 0 {
 					showUnchangedEff = true
 					reason = "Critical severity present"
 				}
@@ -997,7 +998,7 @@ func resultFromReportVulnerabilities(vulns []report.Vulnerability) (scan.Result,
 	}, cons
 }
 
-func consolidateReportVulnerabilities(vulns []report.Vulnerability) ([]vulnerability.Consolidated, vulnerability.Stats) {
+func consolidateReportVulnerabilities(vulns []report.Vulnerability) ([]vulnerability.Consolidated, vulnerabilityv1.Stats) {
 	result, cons := resultFromReportVulnerabilities(vulns)
 	return cons, result.Stats
 }

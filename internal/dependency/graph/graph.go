@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/google/osv-scalibr/extractor"
+	vulnerabilityv1 "github.com/picatz/deputy/gen/deputy/vulnerability/v1"
 	"github.com/picatz/deputy/internal/dependency"
 	"github.com/picatz/deputy/internal/vulnerability"
 )
@@ -649,7 +650,7 @@ func pathKey(p Path) string {
 }
 
 // AnnotateVulns adds vulnerability information to graph nodes.
-func (g *Graph) AnnotateVulns(findings []vulnerability.Finding, advisories map[string]vulnerability.Advisory) {
+func (g *Graph) AnnotateVulns(findings []vulnerability.Finding, advisories map[string]vulnerabilityv1.Advisory) {
 	// Group findings by PURL
 	vulnsByPURL := make(map[string][]vulnerability.Finding)
 	for _, f := range findings {
@@ -666,7 +667,7 @@ func (g *Graph) AnnotateVulns(findings []vulnerability.Finding, advisories map[s
 	}
 }
 
-func countVulns(findings []vulnerability.Finding, advisories map[string]vulnerability.Advisory) VulnCount {
+func countVulns(findings []vulnerability.Finding, advisories map[string]vulnerabilityv1.Advisory) VulnCount {
 	count := VulnCount{Total: len(findings)}
 
 	for _, f := range findings {
@@ -676,14 +677,19 @@ func countVulns(findings []vulnerability.Finding, advisories map[string]vulnerab
 			continue
 		}
 
-		switch adv.Severity.Level.String() {
-		case "CRITICAL":
+		if adv.Severity == nil {
+			count.Unknown++
+			continue
+		}
+
+		switch adv.Severity.Level {
+		case vulnerability.SeverityCritical:
 			count.Critical++
-		case "HIGH":
+		case vulnerability.SeverityHigh:
 			count.High++
-		case "MEDIUM":
+		case vulnerability.SeverityMedium:
 			count.Medium++
-		case "LOW":
+		case vulnerability.SeverityLow:
 			count.Low++
 		default:
 			count.Unknown++

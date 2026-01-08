@@ -4,9 +4,10 @@ import (
 	"context"
 	"fmt"
 
+	containerv1 "github.com/picatz/deputy/gen/deputy/container/v1"
+	vulnerabilityv1 "github.com/picatz/deputy/gen/deputy/vulnerability/v1"
 	"github.com/picatz/deputy/internal/compare"
 	"github.com/picatz/deputy/internal/container/image"
-	"github.com/picatz/deputy/internal/dependency"
 	"github.com/picatz/deputy/internal/vulnerability"
 )
 
@@ -192,18 +193,18 @@ func compareImagePackages(baseResult, targetResult *Result) []compare.ImagePacka
 	return changes
 }
 
-func buildPackageLayerMap(result *Result) map[string]*dependency.LayerDetails {
-	layerMap := make(map[string]*dependency.LayerDetails)
+func buildPackageLayerMap(result *Result) map[string]*containerv1.LayerDetails {
+	layerMap := make(map[string]*containerv1.LayerDetails)
 
 	for _, finding := range result.Findings {
 		if finding.LayerDetails == nil {
 			continue
 		}
 		// Each finding is for a single dependency
-		layerMap[finding.Dependency.Name] = &dependency.LayerDetails{
+		layerMap[finding.Dependency.Name] = &containerv1.LayerDetails{
 			Index:       finding.LayerDetails.Index,
-			DiffID:      finding.LayerDetails.DiffID,
-			ChainID:     finding.LayerDetails.ChainID,
+			DiffId:      finding.LayerDetails.DiffId,
+			ChainId:     finding.LayerDetails.ChainId,
 			Command:     finding.LayerDetails.Command,
 			InBaseImage: finding.LayerDetails.InBaseImage,
 		}
@@ -280,15 +281,20 @@ func compareImageVulnerabilities(baseResult, targetResult *Result) []compare.Vul
 func buildVulnerabilityChange(
 	advisoryID string,
 	changeType compare.VulnChangeType,
-	advisory vulnerability.Advisory,
+	advisory vulnerabilityv1.Advisory,
 	pkgName, ecosystem, baseVersion, targetVersion string,
-	baseLayerDetails, targetLayerDetails *dependency.LayerDetails,
+	baseLayerDetails, targetLayerDetails *containerv1.LayerDetails,
 ) compare.VulnerabilityChange {
+	var sevLevel, sevType string
+	if advisory.Severity != nil {
+		sevLevel = advisory.Severity.Level.String()
+		sevType = advisory.Severity.Type.String()
+	}
 	change := compare.VulnerabilityChange{
 		ID:                 advisoryID,
 		ChangeType:         changeType,
-		Severity:           advisory.Severity.Level.String(),
-		SeverityType:       advisory.Severity.Type.String(),
+		Severity:           sevLevel,
+		SeverityType:       sevType,
 		PackageName:        pkgName,
 		Ecosystem:          ecosystem,
 		BaseVersion:        baseVersion,
@@ -301,8 +307,8 @@ func buildVulnerabilityChange(
 	}
 
 	// Format published date if available
-	if !advisory.Published.IsZero() {
-		change.Published = advisory.Published.Format("2006-01-02")
+	if pub := vulnerability.AdvisoryPublished(&advisory); !pub.IsZero() {
+		change.Published = pub.Format("2006-01-02")
 	}
 
 	return change
@@ -336,14 +342,14 @@ func wasFixedByUpgrade(finding vulnerability.Finding, targetResult *Result) bool
 	return false
 }
 
-func convertLayerDetails(ld *dependency.LayerDetails) *dependency.LayerDetails {
+func convertLayerDetails(ld *containerv1.LayerDetails) *containerv1.LayerDetails {
 	if ld == nil {
 		return nil
 	}
-	return &dependency.LayerDetails{
+	return &containerv1.LayerDetails{
 		Index:       ld.Index,
-		DiffID:      ld.DiffID,
-		ChainID:     ld.ChainID,
+		DiffId:      ld.DiffId,
+		ChainId:     ld.ChainId,
 		Command:     ld.Command,
 		InBaseImage: ld.InBaseImage,
 	}
@@ -446,11 +452,11 @@ func BuildContainerDiffPayload(report *compare.ImageDiffReport) map[string]any {
 	return payload
 }
 
-func layerDetailsToMap(ld *dependency.LayerDetails) map[string]any {
+func layerDetailsToMap(ld *containerv1.LayerDetails) map[string]any {
 	return map[string]any{
 		"index":         ld.Index,
-		"diff_id":       ld.DiffID,
-		"chain_id":      ld.ChainID,
+		"diff_id":       ld.DiffId,
+		"chain_id":      ld.ChainId,
 		"command":       ld.Command,
 		"in_base_image": ld.InBaseImage,
 	}

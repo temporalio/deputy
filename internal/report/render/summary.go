@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"strings"
 
+	vulnerabilityv1 "github.com/picatz/deputy/gen/deputy/vulnerability/v1"
 	"github.com/picatz/deputy/internal/output"
-	"github.com/picatz/deputy/internal/vulnerability"
 )
 
 // TargetSummary identifies the repository and reference for a summary.
@@ -29,7 +29,7 @@ func DiffHeaderDoc(baseRef, targetRef string) output.Doc {
 }
 
 // TriageSummaryDoc builds the summary header for triage output.
-func TriageSummaryDoc(target TargetSummary, stats vulnerability.Stats, packagesWithVulns int) output.Doc {
+func TriageSummaryDoc(target TargetSummary, stats vulnerabilityv1.Stats, packagesWithVulns int) output.Doc {
 	var doc output.Doc
 	doc.AddLine(output.Span{Text: "Triage Summary:", Style: output.StyleHeader})
 	if repo := strings.TrimSpace(target.Repo); repo != "" {
@@ -42,9 +42,9 @@ func TriageSummaryDoc(target TargetSummary, stats vulnerability.Stats, packagesW
 	if target.Commit != "" {
 		doc.AddLine(output.Span{Text: "  Commit: "}, output.Span{Text: target.Commit, Style: output.StyleVersion})
 	}
-	doc.AddLine(output.Span{Text: fmt.Sprintf("  Critical/High: %d", stats.CriticalSev+stats.HighSeverity)})
-	doc.AddLine(output.Span{Text: fmt.Sprintf("  Medium: %d", stats.MedSeverity)})
-	doc.AddLine(output.Span{Text: fmt.Sprintf("  Low: %d", stats.LowSeverity)})
+	doc.AddLine(output.Span{Text: fmt.Sprintf("  Critical/High: %d", stats.Critical+stats.High)})
+	doc.AddLine(output.Span{Text: fmt.Sprintf("  Medium: %d", stats.Medium)})
+	doc.AddLine(output.Span{Text: fmt.Sprintf("  Low: %d", stats.Low)})
 	doc.AddLine(output.Span{Text: fmt.Sprintf("  Fixable: %d", stats.FixAvailable)})
 	doc.AddLine(output.Span{Text: fmt.Sprintf("  Direct deps affected: %d", stats.DirectDeps)})
 	if packagesWithVulns > 0 {

@@ -9,6 +9,7 @@ import (
 
 	scalibrimage "github.com/google/osv-scalibr/artifact/image"
 	"github.com/google/osv-scalibr/extractor"
+	vulnerabilityv1 "github.com/picatz/deputy/gen/deputy/vulnerability/v1"
 	"github.com/picatz/deputy/internal/analysis/osv"
 	"github.com/picatz/deputy/internal/compare"
 	"github.com/picatz/deputy/internal/container/image"
@@ -52,14 +53,14 @@ var _ Scanner = (*Service)(nil)
 // Service orchestrates vulnerability scans by combining inventory collection and OSV lookups.
 type Service struct {
 	collectInventory     func(ctx context.Context, repoPath, gitRef string, opts inv.ScanOptions) ([]*extractor.Package, error)
-	queryVulnerabilities func(ctx context.Context, client osv.Client, pkgs []osv.PkgInput) ([]vulnerability.Finding, map[string]vulnerability.Advisory, error)
+	queryVulnerabilities func(ctx context.Context, client osv.Client, pkgs []osv.PkgInput) ([]vulnerability.Finding, map[string]vulnerabilityv1.Advisory, error)
 	osvClient            osv.Client
 }
 
 // ServiceConfig controls scan service dependencies.
 type ServiceConfig struct {
 	CollectInventory     func(ctx context.Context, repoPath, gitRef string, opts inv.ScanOptions) ([]*extractor.Package, error)
-	QueryVulnerabilities func(ctx context.Context, client osv.Client, pkgs []osv.PkgInput) ([]vulnerability.Finding, map[string]vulnerability.Advisory, error)
+	QueryVulnerabilities func(ctx context.Context, client osv.Client, pkgs []osv.PkgInput) ([]vulnerability.Finding, map[string]vulnerabilityv1.Advisory, error)
 	OSVClient            osv.Client
 }
 
@@ -90,7 +91,7 @@ func NewServiceWithConfig(cfg *ServiceConfig) *Service {
 	return service
 }
 
-func (s *Service) queryOSV(ctx context.Context, inputs []osv.PkgInput) ([]vulnerability.Finding, map[string]vulnerability.Advisory, error) {
+func (s *Service) queryOSV(ctx context.Context, inputs []osv.PkgInput) ([]vulnerability.Finding, map[string]vulnerabilityv1.Advisory, error) {
 	ctx, span := otel.StartSpan(ctx, "deputy.scan.query_vulnerabilities",
 		trace.WithAttributes(
 			attribute.Int("deputy.osv.batch_size", len(inputs)),
@@ -194,20 +195,20 @@ func (s *Service) ScanRepository(ctx context.Context, repoArg, ref string, refPr
 		Ecosystem:    "go",
 		PackageCount: result.PackagesScanned,
 		Severity: otel.SeverityCounts{
-			Critical: result.Stats.CriticalSev,
-			High:     result.Stats.HighSeverity,
-			Medium:   result.Stats.MedSeverity,
-			Low:      result.Stats.LowSeverity,
+			Critical: int(result.Stats.Critical),
+			High:     int(result.Stats.High),
+			Medium:   int(result.Stats.Medium),
+			Low:      int(result.Stats.Low),
 		},
 	})
 
 	logs.Info(ctx, "scan completed",
 		"packages_scanned", result.PackagesScanned,
-		"vulnerabilities_found", result.Stats.UniqueVulns,
-		"critical", result.Stats.CriticalSev,
-		"high", result.Stats.HighSeverity,
-		"medium", result.Stats.MedSeverity,
-		"low", result.Stats.LowSeverity,
+		"vulnerabilities_found", result.Stats.Unique,
+		"critical", result.Stats.Critical,
+		"high", result.Stats.High,
+		"medium", result.Stats.Medium,
+		"low", result.Stats.Low,
 		"duration_seconds", time.Since(startTime).Seconds(),
 	)
 
@@ -265,10 +266,10 @@ func (s *Service) ScanDirectory(ctx context.Context, path string, opts Options) 
 		Ecosystem:    "go",
 		PackageCount: result.PackagesScanned,
 		Severity: otel.SeverityCounts{
-			Critical: result.Stats.CriticalSev,
-			High:     result.Stats.HighSeverity,
-			Medium:   result.Stats.MedSeverity,
-			Low:      result.Stats.LowSeverity,
+			Critical: int(result.Stats.Critical),
+			High:     int(result.Stats.High),
+			Medium:   int(result.Stats.Medium),
+			Low:      int(result.Stats.Low),
 		},
 	})
 
@@ -311,10 +312,10 @@ func (s *Service) ScanSBOM(ctx context.Context, pkgs []*extractor.Package, direc
 		Ecosystem:    "sbom",
 		PackageCount: result.PackagesScanned,
 		Severity: otel.SeverityCounts{
-			Critical: result.Stats.CriticalSev,
-			High:     result.Stats.HighSeverity,
-			Medium:   result.Stats.MedSeverity,
-			Low:      result.Stats.LowSeverity,
+			Critical: int(result.Stats.Critical),
+			High:     int(result.Stats.High),
+			Medium:   int(result.Stats.Medium),
+			Low:      int(result.Stats.Low),
 		},
 	})
 
@@ -423,10 +424,10 @@ func (s *Service) ScanContainerImage(ctx context.Context, target string, targetO
 		Ecosystem:    string(targets.KindContainerImage),
 		PackageCount: result.PackagesScanned,
 		Severity: otel.SeverityCounts{
-			Critical: result.Stats.CriticalSev,
-			High:     result.Stats.HighSeverity,
-			Medium:   result.Stats.MedSeverity,
-			Low:      result.Stats.LowSeverity,
+			Critical: int(result.Stats.Critical),
+			High:     int(result.Stats.High),
+			Medium:   int(result.Stats.Medium),
+			Low:      int(result.Stats.Low),
 		},
 	})
 
@@ -503,7 +504,7 @@ type buildResultInput struct {
 	pkgs       []*extractor.Package
 	direct     map[string]bool
 	findings   []vulnerability.Finding
-	advisories map[string]vulnerability.Advisory
+	advisories map[string]vulnerabilityv1.Advisory
 	queryErr   error
 	opts       Options
 	graph      *graph.Graph

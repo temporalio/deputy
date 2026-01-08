@@ -51,6 +51,12 @@ Stable, "look it up" documentation for Deputy configuration.
 | `DEPUTY_PROXY_ADDR` | Address to bind proxy server (default: `:8080`) |
 | `DEPUTY_PROXY_POLICIES` | Comma-separated policy file paths |
 
+### Server / Connection
+
+| Variable | Description |
+| --- | --- |
+| `DEPUTY_SERVER` | Remote Deputy server address (e.g., `http://localhost:8090`) |
+
 ### External Services
 
 | Variable | Description |

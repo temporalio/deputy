@@ -15,6 +15,7 @@ import (
 	"github.com/google/go-containerregistry/pkg/v1/empty"
 	"github.com/google/go-containerregistry/pkg/v1/mutate"
 	"github.com/google/go-containerregistry/pkg/v1/tarball"
+	vulnerabilityv1 "github.com/picatz/deputy/gen/deputy/vulnerability/v1"
 	"github.com/picatz/deputy/internal/analysis/osv"
 	sbomx "github.com/picatz/deputy/internal/sbom"
 	"github.com/picatz/deputy/internal/scan"
@@ -52,7 +53,7 @@ func TestSBOMImageRoundTrip(t *testing.T) {
 
 	var calls [][]osv.PkgInput
 	svc := scan.NewServiceWithConfig(&scan.ServiceConfig{
-		QueryVulnerabilities: func(ctx context.Context, client osv.Client, inputs []osv.PkgInput) ([]vulnerability.Finding, map[string]vulnerability.Advisory, error) {
+		QueryVulnerabilities: func(ctx context.Context, client osv.Client, inputs []osv.PkgInput) ([]vulnerability.Finding, map[string]vulnerabilityv1.Advisory, error) {
 			copied := append([]osv.PkgInput(nil), inputs...)
 			calls = append(calls, copied)
 			return nil, nil, nil

@@ -11,8 +11,8 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/go-git/go-git/v5"
 	"github.com/google/osv-scalibr/extractor"
+	containerv1 "github.com/picatz/deputy/gen/deputy/container/v1"
 	"github.com/picatz/deputy/internal/compare"
-	"github.com/picatz/deputy/internal/dependency"
 	gitx "github.com/picatz/deputy/internal/gitutil"
 	"github.com/picatz/deputy/internal/otel"
 	"github.com/picatz/deputy/internal/output"
@@ -474,7 +474,7 @@ func buildFixablePackagesJSON(changes []compare.VulnerabilityChange) []PackageFi
 			}
 			if ld != nil {
 				pf.hasLayer = true
-				pf.layerIdx = ld.Index
+				pf.layerIdx = int(ld.Index)
 				pf.layerCmd = ld.Command
 				pf.inBaseImage = ld.InBaseImage
 			}
@@ -698,7 +698,7 @@ func renderContainerPackageChanges(w io.Writer, changes []compare.ImagePackageCh
 	fmt.Fprintln(w)
 }
 
-func formatLayerInfo(ld *dependency.LayerDetails) string {
+func formatLayerInfo(ld *containerv1.LayerDetails) string {
 	if ld == nil {
 		return ""
 	}
@@ -1973,7 +1973,7 @@ func renderFixablePackages(w io.Writer, changes []compare.VulnerabilityChange) {
 				ld = v.BaseLayerDetails
 			}
 			if ld != nil {
-				pf.layerIdx = ld.Index
+				pf.layerIdx = int(ld.Index)
 				pf.layerCmd = ld.Command
 				pf.inBaseImage = ld.InBaseImage
 			}

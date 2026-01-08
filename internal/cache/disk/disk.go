@@ -125,14 +125,16 @@ func Write(subdir, key string, v any) {
 }
 
 // SetBaseDirForTest overrides the cache base dir for tests and returns a restore func.
-// Note: This resets the sync.Once, so the restore func creates a new Once rather than
-// restoring the original state. This is acceptable for test isolation.
+// The test path is preserved by marking the sync.Once as completed (via Do with empty func),
+// preventing BaseDir() from re-initializing cacheDirPath during the test.
 func SetBaseDirForTest(dir string) func() {
 	prevPath := cacheDirPath
+	prevOnce := cacheDirOnce
 	cacheDirPath = dir
-	cacheDirOnce = sync.Once{} // Reset to allow re-initialization
+	cacheDirOnce = sync.Once{}
+	cacheDirOnce.Do(func() {}) // Mark as completed so BaseDir() won't overwrite
 	return func() {
 		cacheDirPath = prevPath
-		cacheDirOnce = sync.Once{} // Reset again for clean state
+		cacheDirOnce = prevOnce
 	}
 }

@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/google/osv-scalibr/extractor"
+	vulnerabilityv1 "github.com/picatz/deputy/gen/deputy/vulnerability/v1"
 	"github.com/picatz/deputy/internal/vulnerability"
 )
 
@@ -75,7 +76,7 @@ func TestBuildResultWithGraph(t *testing.T) {
 		pkgs:       pkgs,
 		direct:     direct,
 		findings:   []vulnerability.Finding{},
-		advisories: map[string]vulnerability.Advisory{},
+		advisories: map[string]vulnerabilityv1.Advisory{},
 		queryErr:   nil,
 		opts:       Options{},
 		graph:      nil,

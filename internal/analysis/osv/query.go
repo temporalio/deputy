@@ -12,6 +12,9 @@ import (
 	"github.com/google/osv-scalibr/purl"
 	"github.com/google/osv-scalibr/semantic"
 	"github.com/ossf/osv-schema/bindings/go/osvschema"
+	containerv1 "github.com/picatz/deputy/gen/deputy/container/v1"
+	dependencyv1 "github.com/picatz/deputy/gen/deputy/dependency/v1"
+	vulnerabilityv1 "github.com/picatz/deputy/gen/deputy/vulnerability/v1"
 	"github.com/picatz/deputy/internal/cache/disk"
 	"github.com/picatz/deputy/internal/collections"
 	"github.com/picatz/deputy/internal/dependency"
@@ -54,10 +57,10 @@ type PackageContext struct {
 	// Locations lists file paths where the dependency was found.
 	Locations []string
 	// ManifestRefs describes manifest files declaring this dependency.
-	ManifestRefs []dependency.ManifestRef
+	ManifestRefs []dependencyv1.ManifestRef
 	// LayerDetails contains information about the container image layer where
 	// the package was found. Nil for non-container-image scans.
-	LayerDetails *dependency.LayerDetails
+	LayerDetails *containerv1.LayerDetails
 }
 
 // PkgInput represents a single package@version query along with scan-time context.
@@ -101,7 +104,7 @@ const osvConcurrencyLimit = 10
 
 // Query performs a batched OSV vulnerability lookup and returns domain types.
 // This is the primary API for scan operations that need findings and advisories.
-func Query(ctx context.Context, client Client, pkgs []PkgInput) ([]vulnerability.Finding, map[string]vulnerability.Advisory, error) {
+func Query(ctx context.Context, client Client, pkgs []PkgInput) ([]vulnerability.Finding, map[string]vulnerabilityv1.Advisory, error) {
 	vulns, err := QueryRaw(ctx, client, pkgs)
 	if err != nil {
 		return nil, nil, err
@@ -117,19 +120,19 @@ func QueryRaw(ctx context.Context, client Client, pkgs []PkgInput) ([]Vulnerabil
 }
 
 // splitVulnerabilities converts flat Vulnerability records to domain types.
-func splitVulnerabilities(vulns []Vulnerability) ([]vulnerability.Finding, map[string]vulnerability.Advisory, error) {
+func splitVulnerabilities(vulns []Vulnerability) ([]vulnerability.Finding, map[string]vulnerabilityv1.Advisory, error) {
 	if len(vulns) == 0 {
-		return nil, map[string]vulnerability.Advisory{}, nil
+		return nil, map[string]vulnerabilityv1.Advisory{}, nil
 	}
-	advisories := make(map[string]vulnerability.Advisory, len(vulns))
+	advisories := make(map[string]vulnerabilityv1.Advisory, len(vulns))
 	findings := make([]vulnerability.Finding, 0, len(vulns))
 	for _, v := range vulns {
 		advisory, finding := splitVulnerability(v)
-		if advisory.ID != "" {
-			if existing, ok := advisories[advisory.ID]; ok {
-				advisories[advisory.ID] = vulnerability.MergeAdvisory(existing, advisory)
+		if advisory.Id != "" {
+			if existing, ok := advisories[advisory.Id]; ok {
+				advisories[advisory.Id] = vulnerability.MergeAdvisory(existing, advisory)
 			} else {
-				advisories[advisory.ID] = advisory
+				advisories[advisory.Id] = advisory
 			}
 		}
 		findings = append(findings, finding)
@@ -138,23 +141,23 @@ func splitVulnerabilities(vulns []Vulnerability) ([]vulnerability.Finding, map[s
 }
 
 // splitVulnerability converts a flat Vulnerability to domain types.
-func splitVulnerability(v Vulnerability) (vulnerability.Advisory, vulnerability.Finding) {
-	advisory := vulnerability.Advisory{
-		ID:               v.ID,
+func splitVulnerability(v Vulnerability) (vulnerabilityv1.Advisory, vulnerability.Finding) {
+	advisory := vulnerabilityv1.Advisory{
+		Id:               v.ID,
 		Aliases:          slices.Clone(v.Aliases),
 		Summary:          v.Summary,
 		Details:          v.Details,
-		CVE:              v.CVE,
+		Cve:              v.CVE,
 		Severity:         vulnerability.NewSeverity(v.Severity, v.SeverityType),
 		References:       slices.Clone(v.References),
 		FixedVersions:    slices.Clone(v.FixedVersions),
 		DatabaseSpecific: maps.Clone(v.DatabaseSpecific),
 	}
 	if t := vulnerability.ParseTimeRFC3339(v.Published); !t.IsZero() {
-		advisory.Published = t
+		vulnerability.SetAdvisoryPublished(&advisory, t)
 	}
 	if t := vulnerability.ParseTimeRFC3339(v.Modified); !t.IsZero() {
-		advisory.Modified = t
+		vulnerability.SetAdvisoryModified(&advisory, t)
 	}
 
 	finding := vulnerability.Finding{
@@ -355,7 +358,7 @@ func queryOSVAPIBatch(ctx context.Context, client Client, pkgs []PkgInput) ([]Vu
 					base.Severity, base.SeverityType = sev, typ
 				}
 				fixSet := collections.NewSet[string]()
-				var importSets [][]vulnerability.AffectedImport
+				var importSets [][]vulnerabilityv1.AffectedImport
 				if len(base.AffectedImports) > 0 {
 					importSets = append(importSets, base.AffectedImports)
 				}

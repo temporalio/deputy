@@ -190,6 +190,11 @@ deputy secrets                                 # scan current directory for secr
 deputy secrets /path/to/project                # scan specific directory
 deputy secrets --format json                   # JSON output for CI/CD
 deputy scan --secrets                          # combined vuln + secrets scan
+
+# Server mode (for remote clients)
+deputy server                                  # start API server on :8090
+deputy server --addr :9000                     # custom port
+deputy --server http://localhost:8090 scan    # connect to remote server
 ```
 
 ## Project Structure
@@ -234,6 +239,248 @@ policy/examples/             # 30+ CEL policy examples
 ```
 
 Key entry points: [`main.go`](main.go) → [`internal/cli/cli.go`](internal/cli/cli.go) → [`internal/cli/cmd/root.go`](internal/cli/cmd/root.go)
+
+## Client Architecture
+
+Deputy uses a client interface to abstract how commands communicate with services. This enables three execution modes with different security characteristics.
+
+```mermaid
+flowchart TB
+    subgraph CLI["<b>CLI Layer</b>"]
+        direction TB
+        cmd["Command<br/>(scan, list, sbom)"]
+        detect["Target Detection<br/><i>scan_target.go</i><br/>filesystem-aware"]
+    end
+
+    subgraph Client["<b>Client Layer</b>"]
+        direction TB
+        factory["client.New()<br/><i>Mode Detection</i>"]
+
+        subgraph Modes["Execution Modes"]
+            direction LR
+            inproc["<b>InProcess</b><br/>Direct calls<br/>Zero overhead"]
+            daemon["<b>Daemon</b><br/>Unix socket<br/>Shared cache"]
+            remote["<b>Remote</b><br/>HTTP/2 gRPC<br/>Enterprise"]
+        end
+    end
+
+    subgraph Shared["<b>Shared Logic</b>"]
+        direction LR
+        targets["targets.DetectKind()<br/><i>Pattern-based routing</i>"]
+        validate["ValidateRemoteTarget()<br/><i>Security validation</i>"]
+    end
+
+    subgraph Scanner["<b>Scanner Layer</b>"]
+        direction LR
+        repo["ScanRepository"]
+        purl["ScanPURL"]
+        image["ScanContainerImage"]
+        dockerfile["ScanDockerfile"]
+    end
+
+    cmd --> detect
+    detect -->|"In-Process"| inproc
+    detect -->|"Remote/Daemon"| factory
+    factory --> Modes
+
+    inproc --> targets
+    daemon --> targets
+    remote --> validate
+    validate --> targets
+
+    targets --> Scanner
+
+    classDef cli fill:#e3f2fd,stroke:#1565c0
+    classDef client fill:#e8f5e9,stroke:#2e7d32
+    classDef shared fill:#fff3e0,stroke:#e65100
+    classDef scanner fill:#f3e5f5,stroke:#7b1fa2
+
+    class CLI,cmd,detect cli
+    class Client,factory,Modes,inproc,daemon,remote client
+    class Shared,targets,validate shared
+    class Scanner,repo,purl,image,dockerfile scanner
+```
+
+### Execution Modes
+
+| Mode | Transport | Use Case |
+|------|-----------|----------|
+| **In-Process** | Direct function calls | CLI default, zero overhead |
+| **Local Daemon** | Unix socket | Shared caching, background service |
+| **Remote Server** | HTTP/2 (ConnectRPC) | Centralized policy, enterprise |
+
+Mode is auto-detected:
+1. If `DEPUTY_SERVER` is set → Remote mode
+2. If daemon socket exists → Daemon mode
+3. Otherwise → In-process mode
+
+### Security Model
+
+```mermaid
+flowchart LR
+    subgraph Local["<b>Local Modes</b><br/>(In-Process, Daemon)"]
+        direction TB
+        L1["✓ Filesystem paths"]
+        L2["✓ Stdin SBOM (-)"]
+        L3["✓ docker-daemon://"]
+        L4["✓ tarball://, oci-archive://"]
+        L5["✓ Git URLs"]
+        L6["✓ Container registries"]
+        L7["✓ PURLs"]
+    end
+
+    subgraph Remote["<b>Remote Server</b>"]
+        direction TB
+        R1["✗ Filesystem paths"]
+        R2["✗ Stdin SBOM (-)"]
+        R3["✗ docker-daemon://"]
+        R4["✗ tarball://, oci-archive://"]
+        R5["✓ Git URLs"]
+        R6["✓ Container registries"]
+        R7["✓ PURLs"]
+    end
+
+    validate["ValidateRemoteTarget()"]
+
+    Remote --> validate
+    validate -->|"Rejects local targets"| rejected["Error with guidance"]
+
+    classDef allowed fill:#c8e6c9,stroke:#2e7d32
+    classDef denied fill:#ffcdd2,stroke:#c62828
+    classDef validator fill:#fff3e0,stroke:#e65100
+
+    class L1,L2,L3,L4,L5,L6,L7 allowed
+    class R1,R2,R3,R4 denied
+    class R5,R6,R7 allowed
+    class validate validator
+```
+
+**Security rationale:** Remote servers cannot access the client's local filesystem. Attempts to scan local paths, stdin, or local container transports are rejected with clear error messages guiding users to remote-accessible alternatives.
+
+### Target Detection (Two-Layer Design)
+
+Deputy uses two complementary detection strategies:
+
+| Layer | Function | Purpose | Filesystem Access |
+|-------|----------|---------|-------------------|
+| **CLI** | `scan_target.go` | Rich UX: git root detection, ambiguity errors, interactive hints | Yes |
+| **Client/Server** | `targets.DetectKind()` | Deterministic routing for RPC | No |
+
+```mermaid
+flowchart TB
+    subgraph CLI["CLI Detection (scan_target.go)"]
+        direction TB
+        C1["Check explicit --source flag"]
+        C2["Probe filesystem (os.Stat)"]
+        C3["Find git root (.git walk)"]
+        C4["Validate with go-containerregistry"]
+        C5["Handle ambiguity (owner/repo)"]
+        C1 --> C2 --> C3 --> C4 --> C5
+    end
+
+    subgraph Shared["Shared Detection (targets.DetectKind)"]
+        direction TB
+        S1["Pattern matching only"]
+        S2["pkg: → PURL"]
+        S3["docker://, oci:// → Image"]
+        S4["*.json, *.spdx → SBOM"]
+        S5["Dockerfile → Dockerfile"]
+        S1 --> S2 & S3 & S4 & S5
+    end
+
+    CLI -->|"In-Process mode"| Scanner["Scanner Methods"]
+    Shared -->|"RPC routing"| Scanner
+
+    note1["CLI uses rich detection for<br/>interactive user experience"]
+    note2["Shared detection is simple,<br/>fast, no I/O"]
+
+    CLI -.-> note1
+    Shared -.-> note2
+
+    classDef cli fill:#e3f2fd,stroke:#1565c0
+    classDef shared fill:#fff3e0,stroke:#e65100
+    classDef note fill:#fafafa,stroke:#9e9e9e,stroke-dasharray: 5 5
+
+    class CLI,C1,C2,C3,C4,C5 cli
+    class Shared,S1,S2,S3,S4,S5 shared
+    class note1,note2 note
+```
+
+**Design rationale:** The CLI needs filesystem awareness (git roots, file existence) and can prompt for clarification. The client/server layer needs deterministic, I/O-free routing for RPC.
+
+### Target Routing
+
+| Target Pattern | Detected As | Scanner Method |
+|----------------|-------------|----------------|
+| `pkg:golang/...` | PURL | `ScanPURL` |
+| `docker://`, `ghcr.io/...`, `nginx:1.25` | Container Image | `ScanContainerImage` |
+| `*.json`, `*.spdx`, `*.cdx` | SBOM | `ScanRepository` (file detection) |
+| `Dockerfile`, `*.dockerfile` | Dockerfile | `ScanDockerfile` |
+| `github.com/owner/repo`, `.` | Git/Directory | `ScanRepository` |
+
+Use `TargetHint` in `ScanOptions` when auto-detection is ambiguous:
+```go
+opts := &deputyv1.ScanOptions{
+    TargetHint: &deputyv1.TargetHint{
+        Kind: deputyv1.TargetKind_TARGET_KIND_CONTAINER_IMAGE,
+        ImageTransport: "daemon",  // Use local Docker daemon
+    },
+}
+```
+
+### Proto-First Design
+
+The client layer uses Protocol Buffers at the API boundary, enabling:
+- **Type-safe RPC** with ConnectRPC (HTTP/2 + gRPC)
+- **Language-agnostic clients** (future: TypeScript, Python SDKs)
+- **Versioned API contracts** with backward compatibility
+
+```mermaid
+flowchart LR
+    subgraph Internal["Internal Types"]
+        scan_result["scan.Result"]
+        scan_opts["scan.Options"]
+        image_info["image.Info"]
+    end
+
+    subgraph Proto["Proto Types"]
+        scan_resp["ScanResponse"]
+        scan_req["ScanRequest"]
+        image_proto["ImageInfo"]
+    end
+
+    subgraph Converters["internal/proto/"]
+        to_proto["*ToProto()"]
+        from_proto["*FromProto()"]
+    end
+
+    Internal -->|"Serialize"| to_proto --> Proto
+    Proto -->|"Deserialize"| from_proto --> Internal
+
+    note["In-process mode: conversions<br/>only at API boundary"]
+    Converters -.-> note
+
+    classDef internal fill:#e8f5e9,stroke:#2e7d32
+    classDef proto fill:#e3f2fd,stroke:#1565c0
+    classDef converter fill:#fff3e0,stroke:#e65100
+
+    class Internal,scan_result,scan_opts,image_info internal
+    class Proto,scan_resp,scan_req,image_proto proto
+    class Converters,to_proto,from_proto converter
+```
+
+### Key Files
+
+| File | Purpose |
+|------|---------|
+| [`internal/client/client.go`](internal/client/client.go) | Client interface definition |
+| [`internal/client/inprocess.go`](internal/client/inprocess.go) | In-process implementation with target routing |
+| [`internal/client/remote.go`](internal/client/remote.go) | Remote/daemon implementation |
+| [`internal/client/new.go`](internal/client/new.go) | Factory with auto-detection |
+| [`internal/targets/detect.go`](internal/targets/detect.go) | Shared target detection and validation |
+| [`internal/server/scan_handler.go`](internal/server/scan_handler.go) | Server handler with security validation |
+| [`internal/proto/`](internal/proto/) | Proto ↔ internal type converters |
+| [`api/deputy/v1/scan.proto`](api/deputy/v1/scan.proto) | Proto service definitions |
 
 ## Tech Stack
 
@@ -1083,6 +1330,7 @@ See JWT policy examples for more patterns:
 | `DEPUTY_LOG_LEVEL` | `debug`, `info`, `warn` (default), `error` ([`internal/cli/cli.go`](internal/cli/cli.go)) |
 | `DEPUTY_LOG_FORMAT` | `text` (default), `json` for structured logs ([`internal/logs/logs.go`](internal/logs/logs.go)) |
 | `DEPUTY_CONFIG` | Path to config file (default: `.deputy.yaml`) ([`internal/config/config.go`](internal/config/config.go)) |
+| `DEPUTY_SERVER` | Remote Deputy server address for client mode ([`internal/client/new.go`](internal/client/new.go)) |
 | `DEPUTY_OTEL_ENABLED` | Enable OpenTelemetry instrumentation ([`internal/otel/otel.go`](internal/otel/otel.go)) |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | OTel collector endpoint, e.g., `localhost:4317` ([`internal/otel/config.go`](internal/otel/config.go)) |
 | `DEPUTY_SBOM_IMAGE_SCAN_CONCURRENCY` | Max concurrent image scans when scanning SBOMs with container PURLs (default: 4) |

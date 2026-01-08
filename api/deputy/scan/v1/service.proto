@@ -1,0 +1,330 @@
+// Copyright 2025 Kent "picat" Gruber. All rights reserved.
+// SPDX-License-Identifier: MIT
+
+syntax = "proto3";
+
+package deputy.scan.v1;
+
+import "buf/validate/validate.proto";
+import "google/protobuf/timestamp.proto";
+import "deputy/target/v1/target.proto";
+import "deputy/dependency/v1/dependency.proto";
+import "deputy/vulnerability/v1/vulnerability.proto";
+import "deputy/policy/v1/policy.proto";
+
+option go_package = "github.com/picatz/deputy/gen/deputy/scan/v1;scanv1";
+
+// ScanService provides vulnerability scanning capabilities.
+//
+// Security Model:
+// The service supports different target types with mode-specific security constraints:
+//
+// In-Process / Local Daemon Mode:
+//   - Full filesystem access (local directories, files, SBOMs)
+//   - Local Docker daemon access (docker-daemon://)
+//   - Local archives (tarball://, oci-archive://, oci-layout://)
+//   - Stdin SBOM input (target="-")
+//
+// Remote Server Mode:
+//   - Only remote-accessible targets are allowed
+//   - Accepted: git URLs, container registry refs, PURLs
+//   - Rejected: local paths (/path, ./path, ~/path, .)
+//   - Rejected: local transports (docker-daemon://, tarball://, etc.)
+//   - For SBOM analysis, use GenerateSBOM/DiffSBOM with uploaded bytes
+service ScanService {
+  // Scan performs a vulnerability scan on a target.
+  // The target can be a directory, Git repository, container image, SBOM, etc.
+  // See service-level documentation for mode-specific security constraints.
+  rpc Scan(ScanRequest) returns (ScanResponse);
+
+  // StreamScan performs a vulnerability scan with streaming progress updates.
+  // Useful for long-running scans where clients want real-time feedback.
+  // See service-level documentation for mode-specific security constraints.
+  rpc StreamScan(StreamScanRequest) returns (stream ScanProgress);
+}
+
+// ScanRequest specifies what to scan and how.
+message ScanRequest {
+  // Target is the scan target (path, URL, image reference, etc.).
+  // When empty, defaults to current working directory.
+  string target = 1;
+
+  // Options configure scan behavior.
+  ScanOptions options = 2;
+}
+
+// StreamScanRequest specifies what to scan with streaming progress.
+message StreamScanRequest {
+  // Target is the scan target (path, URL, image reference, etc.).
+  string target = 1;
+
+  // Options configure scan behavior.
+  ScanOptions options = 2;
+}
+
+// ScanOptions configures scan behavior.
+message ScanOptions {
+  // Ecosystems filters scanning to specific package ecosystems.
+  // Empty means scan all detected ecosystems.
+  repeated string ecosystems = 1;
+
+  // PublishedBefore filters to vulnerabilities published before this timestamp.
+  google.protobuf.Timestamp published_before = 2;
+
+  // PublishedAfter filters to vulnerabilities published after this timestamp.
+  google.protobuf.Timestamp published_after = 3;
+
+  // GraphOptions configures dependency graph resolution.
+  GraphOptions graph_options = 4;
+
+  // EnrichOptions configures vulnerability enrichment.
+  EnrichOptions enrich_options = 5;
+
+  // PolicyPaths are paths to policy files to evaluate.
+  repeated string policy_paths = 6;
+
+  // Ref is a Git reference to scan (branch, tag, commit).
+  // Only applies to git/repository targets.
+  string ref = 7;
+
+  // Platform specifies the target platform for container images (e.g., "linux/amd64").
+  // Only applies to container image targets.
+  string platform = 8;
+
+  // IncludeSecrets enables secret scanning alongside vulnerability scanning.
+  bool include_secrets = 9;
+
+  // TargetHint provides disambiguation when the target string is ambiguous.
+  // The scanner auto-detects target type from the target string in most cases:
+  //   - "pkg:golang/..." -> PURL
+  //   - "docker://...", "ghcr.io/..." -> container image
+  //   - "./path", "/path" -> directory or SBOM file
+  //   - "github.com/owner/repo" -> git repository
+  // Use TargetHint only when auto-detection fails or is ambiguous.
+  TargetHint target_hint = 10;
+}
+
+// TargetHint disambiguates the target type when auto-detection is insufficient.
+//
+// Security Note: When connecting to a remote server, certain combinations are rejected:
+//   - KIND_DIR with local paths
+//   - KIND_SBOM with stdin ("-")
+//   - KIND_CONTAINER_IMAGE with local transports ("daemon", "tarball", "oci-archive", "oci-layout")
+// Remote servers can only access remote-accessible resources (git URLs, registries, PURLs).
+message TargetHint {
+  // Kind explicitly specifies the target type.
+  deputy.target.v1.TargetKind kind = 1;
+
+  // ImageTransport specifies how to fetch container images.
+  // Only used when kind is TARGET_KIND_CONTAINER_IMAGE.
+  // Values: "remote" (default), "daemon", "tarball", "oci-archive", "oci-layout".
+  //
+  // Security: "daemon", "tarball", "oci-archive", and "oci-layout" are only
+  // available in in-process or local daemon mode. Remote servers reject these.
+  string image_transport = 2;
+}
+
+// GraphOptions configures dependency graph resolution during scans.
+message GraphOptions {
+  // Enabled controls whether to build the dependency graph.
+  bool enabled = 1;
+
+  // UseProxy enables fetching module metadata from package registries.
+  bool use_proxy = 2;
+
+  // UseGit enables cloning repositories for private module resolution.
+  bool use_git = 3;
+
+  // PrivatePatterns specifies glob patterns for private modules.
+  repeated string private_patterns = 4;
+}
+
+// EnrichOptions configures vulnerability enrichment with threat intelligence.
+message EnrichOptions {
+  // Enabled controls whether to enrich vulnerabilities with threat intel.
+  bool enabled = 1;
+
+  // IncludeEpss adds EPSS scores to findings.
+  bool include_epss = 2;
+
+  // IncludeKev adds CISA KEV catalog data to findings.
+  bool include_kev = 3;
+}
+
+// ScanResponse contains the complete scan results.
+message ScanResponse {
+  // Target describes what was scanned.
+  deputy.target.v1.Target target = 1;
+
+  // GeneratedAt is when this report was generated.
+  google.protobuf.Timestamp generated_at = 2;
+
+  // PackagesScanned is the count of packages analyzed.
+  int32 packages_scanned = 3;
+
+  // Packages lists all discovered packages.
+  repeated deputy.dependency.v1.Package packages = 4;
+
+  // Findings lists all vulnerability occurrences.
+  repeated deputy.vulnerability.v1.Finding findings = 5;
+
+  // Advisories maps advisory IDs to full advisory details.
+  // This deduplicates advisory data when multiple packages share vulnerabilities.
+  map<string, deputy.vulnerability.v1.Advisory> advisories = 6;
+
+  // Stats summarizes vulnerability counts by severity.
+  deputy.vulnerability.v1.Stats stats = 7;
+
+  // PolicyActions lists policy evaluation outcomes.
+  repeated deputy.policy.v1.Action policy_actions = 8;
+
+  // Warnings contains non-fatal issues encountered during scanning.
+  repeated string warnings = 9;
+
+  // ImageInfo contains container image configuration when scanning images.
+  ImageInfo image_info = 10;
+}
+
+// ScanProgress provides streaming updates during a scan.
+message ScanProgress {
+  // Phase indicates the current scan phase.
+  ScanPhase phase = 1;
+
+  // Message provides human-readable progress information.
+  string message = 2;
+
+  // Progress is the completion percentage (0-100) for the current phase.
+  int32 progress = 3 [(buf.validate.field).int32 = {gte: 0, lte: 100}];
+
+  // PackagesFound is the running count of discovered packages.
+  int32 packages_found = 4 [(buf.validate.field).int32.gte = 0];
+
+  // VulnerabilitiesFound is the running count of discovered vulnerabilities.
+  int32 vulnerabilities_found = 5 [(buf.validate.field).int32.gte = 0];
+
+  // Result is populated only in the final message when phase is SCAN_PHASE_COMPLETE.
+  ScanResponse result = 10;
+
+  // Error is populated if the scan failed.
+  string error = 11;
+}
+
+// ScanPhase indicates the current phase of a scan operation.
+enum ScanPhase {
+  // Unspecified phase.
+  SCAN_PHASE_UNSPECIFIED = 0;
+  // Initializing scan resources.
+  SCAN_PHASE_INITIALIZING = 1;
+  // Resolving the scan target (cloning, downloading, etc.).
+  SCAN_PHASE_RESOLVING_TARGET = 2;
+  // Extracting package inventory from manifests and lockfiles.
+  SCAN_PHASE_EXTRACTING_INVENTORY = 3;
+  // Resolving the dependency graph.
+  SCAN_PHASE_RESOLVING_GRAPH = 4;
+  // Querying vulnerability databases.
+  SCAN_PHASE_QUERYING_VULNERABILITIES = 5;
+  // Enriching findings with threat intelligence (EPSS, KEV).
+  SCAN_PHASE_ENRICHING_FINDINGS = 6;
+  // Evaluating policies against findings.
+  SCAN_PHASE_EVALUATING_POLICIES = 7;
+  // Scan completed successfully.
+  SCAN_PHASE_COMPLETE = 8;
+  // Scan failed with an error.
+  SCAN_PHASE_FAILED = 9;
+}
+
+// ImageInfo contains container image configuration and metadata.
+message ImageInfo {
+  // Config contains the image configuration.
+  ImageConfig config = 1;
+
+  // Metadata contains image metadata.
+  ImageMetadata metadata = 2;
+
+  // History contains build history entries.
+  repeated HistoryEntry history = 3;
+}
+
+// ImageConfig contains container image configuration from Dockerfile settings.
+message ImageConfig {
+  // User to run as (empty = root).
+  string user = 1;
+
+  // IsRoot indicates whether running as root.
+  bool is_root = 2;
+
+  // Env are environment variables.
+  repeated string env = 3;
+
+  // SensitiveEnv are env vars that may contain secrets.
+  repeated string sensitive_env = 4;
+
+  // Entrypoint is the container entrypoint command.
+  repeated string entrypoint = 5;
+
+  // Cmd are default command arguments.
+  repeated string cmd = 6;
+
+  // ExposedPorts are exposed ports.
+  repeated string exposed_ports = 7;
+
+  // Volumes are defined volumes.
+  repeated string volumes = 8;
+
+  // Labels are image labels.
+  map<string, string> labels = 9;
+
+  // WorkingDir is the working directory.
+  string working_dir = 10;
+
+  // Healthcheck configuration if defined.
+  Healthcheck healthcheck = 11;
+}
+
+// Healthcheck contains HEALTHCHECK instruction configuration.
+message Healthcheck {
+  // Test is the health check command.
+  repeated string test = 1;
+
+  // Interval is time between checks (Go duration format).
+  string interval = 2;
+
+  // Timeout is timeout for each check.
+  string timeout = 3;
+
+  // Retries is consecutive failures before unhealthy.
+  int32 retries = 4;
+}
+
+// ImageMetadata contains image metadata.
+message ImageMetadata {
+  // Architecture is the CPU architecture.
+  string architecture = 1;
+
+  // Os is the operating system.
+  string os = 2;
+
+  // LayerCount is the number of layers.
+  int32 layer_count = 3;
+
+  // Size is total size in bytes.
+  int64 size = 4;
+
+  // Created is the creation timestamp (Unix).
+  int64 created = 5;
+
+  // Digest is the image digest.
+  string digest = 6;
+}
+
+// HistoryEntry contains build history information.
+message HistoryEntry {
+  // CreatedBy is the command that created this layer.
+  string created_by = 1;
+
+  // Created is the creation timestamp (Unix).
+  int64 created = 2;
+
+  // EmptyLayer indicates this is a metadata-only layer.
+  bool empty_layer = 3;
+}

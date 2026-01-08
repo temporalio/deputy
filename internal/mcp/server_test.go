@@ -11,8 +11,10 @@ import (
 
 	"github.com/google/osv-scalibr/extractor"
 	"github.com/ossf/osv-schema/bindings/go/osvschema"
+	vulnerabilityv1 "github.com/picatz/deputy/gen/deputy/vulnerability/v1"
 	"github.com/picatz/deputy/internal/scan"
 	"github.com/picatz/deputy/internal/vulnerability"
+	"github.com/picatz/deputy/internal/vulnerability/severity"
 	"osv.dev/bindings/go/osvdev"
 )
 
@@ -259,9 +261,9 @@ func TestScanDirectory(t *testing.T) {
 		result: &scan.Result{
 			PackagesScanned: 10,
 			Findings:        []vulnerability.Finding{},
-			Advisories:      map[string]vulnerability.Advisory{},
-			Stats: vulnerability.Stats{
-				UniqueVulns: 0,
+			Advisories:      map[string]vulnerabilityv1.Advisory{},
+			Stats: vulnerabilityv1.Stats{
+				Unique: 0,
 			},
 			Inventory: scan.Inventory{
 				Packages: []*extractor.Package{},
@@ -298,16 +300,16 @@ func TestScanDirectory(t *testing.T) {
 			Findings: []vulnerability.Finding{
 				{AdvisoryID: "CVE-2021-44228"},
 			},
-			Advisories: map[string]vulnerability.Advisory{
+			Advisories: map[string]vulnerabilityv1.Advisory{
 				"CVE-2021-44228": {
-					ID:       "CVE-2021-44228",
+					Id:       "CVE-2021-44228",
 					Summary:  "Test vulnerability",
 					Severity: vulnerability.NewSeverity("CRITICAL", ""),
 				},
 			},
-			Stats: vulnerability.Stats{
-				UniqueVulns: 1,
-				CriticalSev: 1,
+			Stats: vulnerabilityv1.Stats{
+				Unique: 1,
+				Critical: 1,
 			},
 			Inventory: scan.Inventory{
 				Packages: []*extractor.Package{},
@@ -390,9 +392,9 @@ func TestGetRemediation(t *testing.T) {
 	mockScan := &mockScanner{
 		result: &scan.Result{
 			Findings:   []vulnerability.Finding{},
-			Advisories: map[string]vulnerability.Advisory{},
-			Stats: vulnerability.Stats{
-				UniqueVulns: 0,
+			Advisories: map[string]vulnerabilityv1.Advisory{},
+			Stats: vulnerabilityv1.Stats{
+				Unique: 0,
 			},
 			Inventory: scan.Inventory{
 				Packages: []*extractor.Package{},
@@ -425,9 +427,9 @@ func TestAnalyzeDependencyGraph(t *testing.T) {
 	mockScan := &mockScanner{
 		result: &scan.Result{
 			Findings:   []vulnerability.Finding{},
-			Advisories: map[string]vulnerability.Advisory{},
-			Stats: vulnerability.Stats{
-				UniqueVulns: 0,
+			Advisories: map[string]vulnerabilityv1.Advisory{},
+			Stats: vulnerabilityv1.Stats{
+				Unique: 0,
 			},
 			Inventory: scan.Inventory{
 				Packages: []*extractor.Package{
@@ -504,8 +506,8 @@ func TestExtractSeverity(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			sev := extractSeverity(tt.vuln)
-			if sev.Level.String() != tt.expected {
-				t.Errorf("expected severity %q, got %q", tt.expected, sev.Level.String())
+			if severity.LevelString(sev.Level) != tt.expected {
+				t.Errorf("expected severity %q, got %q", tt.expected, severity.LevelString(sev.Level))
 			}
 		})
 	}

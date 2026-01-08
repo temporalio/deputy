@@ -5,9 +5,9 @@ import (
 	"fmt"
 	"time"
 
+	vulnerabilityv1 "github.com/picatz/deputy/gen/deputy/vulnerability/v1"
 	"github.com/picatz/deputy/internal/report"
 	"github.com/picatz/deputy/internal/sarif"
-	"github.com/picatz/deputy/internal/vulnerability"
 )
 
 // Example_basic demonstrates basic SARIF conversion from Deputy scan results.
@@ -153,7 +153,7 @@ func ExampleConvert_withCodeFlows() {
 			Package:   "vulnerable-pkg",
 			Version:   "1.0.0",
 			Locations: []string{"go.mod"},
-			AffectedImports: []vulnerability.AffectedImport{
+			AffectedImports: []vulnerabilityv1.AffectedImport{
 				{Path: "vulnerable-pkg/internal", Symbols: []string{"UnsafeFunc"}},
 			},
 		},

@@ -5,6 +5,7 @@ import (
 	"slices"
 	"strings"
 
+	dependencyv1 "github.com/picatz/deputy/gen/deputy/dependency/v1"
 	"github.com/picatz/deputy/internal/collections"
 )
 
@@ -14,7 +15,7 @@ type manifestRefKey struct {
 }
 
 // MergeManifestRef adds a manifest reference to the list, merging groups if it already exists.
-func MergeManifestRef(existing []ManifestRef, ref ManifestRef) []ManifestRef {
+func MergeManifestRef(existing []dependencyv1.ManifestRef, ref dependencyv1.ManifestRef) []dependencyv1.ManifestRef {
 	if ref.Path == "" || ref.Manager == "" {
 		return existing
 	}
@@ -30,26 +31,26 @@ func MergeManifestRef(existing []ManifestRef, ref ManifestRef) []ManifestRef {
 }
 
 // SortAndUniqueManifestRefs deduplicates and sorts manifest references.
-func SortAndUniqueManifestRefs(refs []ManifestRef) []ManifestRef {
+func SortAndUniqueManifestRefs(refs []dependencyv1.ManifestRef) []dependencyv1.ManifestRef {
 	if len(refs) == 0 {
 		return refs
 	}
-	merged := map[manifestRefKey]ManifestRef{}
+	merged := map[manifestRefKey]dependencyv1.ManifestRef{}
 	for _, ref := range refs {
 		key := manifestRefKey{manager: ref.Manager, path: ref.Path}
 		cur, ok := merged[key]
 		if !ok {
-			cur = ManifestRef{Manager: ref.Manager, Path: ref.Path}
+			cur = dependencyv1.ManifestRef{Manager: ref.Manager, Path: ref.Path}
 		}
 		cur.Groups = mergeGroups(cur.Groups, ref.Groups)
 		merged[key] = cur
 	}
-	out := make([]ManifestRef, 0, len(merged))
+	out := make([]dependencyv1.ManifestRef, 0, len(merged))
 	for _, ref := range merged {
 		ref.Groups = sortedUniqueStrings(ref.Groups)
 		out = append(out, ref)
 	}
-	slices.SortFunc(out, func(a, b ManifestRef) int {
+	slices.SortFunc(out, func(a, b dependencyv1.ManifestRef) int {
 		if c := cmp.Compare(a.Manager, b.Manager); c != 0 {
 			return c
 		}
