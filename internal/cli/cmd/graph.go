@@ -364,9 +364,10 @@ func renderWhyOutput(w io.Writer, g *graph.Graph, match *graph.Node, showAll boo
 	if len(paths) == 0 {
 		// Show where this package was detected if we have location info
 		if len(match.Locations) > 0 {
-			// Determine source type from location path
+			// Determine source type from location path and generate appropriate message
 			sourceDesc := describePackageSource(match.Locations)
-			fmt.Fprintf(w, "%s\n", graphStyleMeta.Render(fmt.Sprintf("(found in %s, no dependency path through source code)", sourceDesc)))
+			msg := formatNoPathMessage(sourceDesc)
+			fmt.Fprintf(w, "%s\n", graphStyleMeta.Render(msg))
 			for _, loc := range match.Locations {
 				fmt.Fprintf(w, "  %s\n", graphStyleMeta.Render(loc))
 			}
@@ -869,22 +870,41 @@ func deduplicatePaths(paths []graph.Path) []graph.Path {
 	return result
 }
 
+// formatNoPathMessage generates a contextual message for packages without dependency paths.
+// The message is tailored to the source type (e.g., Dockerfile vs compiled binary).
+func formatNoPathMessage(sourceDesc string) string {
+	switch sourceDesc {
+	case "Dockerfile":
+		return "(base image referenced in Dockerfile)"
+	case "compiled binary":
+		return "(found in compiled binary, no dependency path through source code)"
+	case "go.mod", "go.sum":
+		return fmt.Sprintf("(declared in %s)", sourceDesc)
+	case "package-lock.json", "yarn.lock", "pnpm-lock.yaml":
+		return fmt.Sprintf("(found in %s)", sourceDesc)
+	case "Cargo.lock", "Gemfile.lock", "poetry.lock", "uv.lock":
+		return fmt.Sprintf("(found in %s)", sourceDesc)
+	case "requirements.txt", "pyproject.toml":
+		return fmt.Sprintf("(declared in %s)", sourceDesc)
+	default:
+		return fmt.Sprintf("(found in %s)", sourceDesc)
+	}
+}
+
 // describePackageSource analyzes location paths to describe where a package was found.
 // This helps users understand why a package appears in the inventory even without
-// a dependency path through source code (e.g., from compiled binaries).
+// a dependency path through source code (e.g., from compiled binaries or Dockerfiles).
 func describePackageSource(locations []string) string {
 	for _, loc := range locations {
-		// Check for Go binary (executable files with no lockfile extension)
-		if !strings.HasSuffix(loc, ".mod") &&
-			!strings.HasSuffix(loc, ".sum") &&
-			!strings.HasSuffix(loc, ".lock") &&
-			!strings.HasSuffix(loc, ".json") &&
-			!strings.HasSuffix(loc, ".yaml") &&
-			!strings.HasSuffix(loc, ".yml") &&
-			!strings.HasSuffix(loc, ".toml") {
-			// Likely a binary file
-			return "compiled binary"
+		locLower := strings.ToLower(loc)
+
+		// Check for Dockerfiles first (container base images)
+		if strings.HasSuffix(locLower, "dockerfile") ||
+			strings.HasSuffix(locLower, ".dockerfile") ||
+			strings.Contains(locLower, "dockerfile") {
+			return "Dockerfile"
 		}
+		// Check for known manifest/lockfile types
 		if strings.HasSuffix(loc, "go.mod") {
 			return "go.mod"
 		}
@@ -905,6 +925,30 @@ func describePackageSource(locations []string) string {
 		}
 		if strings.HasSuffix(loc, "Gemfile.lock") {
 			return "Gemfile.lock"
+		}
+		if strings.HasSuffix(loc, "requirements.txt") {
+			return "requirements.txt"
+		}
+		if strings.HasSuffix(loc, "pyproject.toml") {
+			return "pyproject.toml"
+		}
+		if strings.HasSuffix(loc, "poetry.lock") {
+			return "poetry.lock"
+		}
+		if strings.HasSuffix(loc, "uv.lock") {
+			return "uv.lock"
+		}
+		// Check for Go binary (executable files with no lockfile/manifest extension)
+		if !strings.HasSuffix(loc, ".mod") &&
+			!strings.HasSuffix(loc, ".sum") &&
+			!strings.HasSuffix(loc, ".lock") &&
+			!strings.HasSuffix(loc, ".json") &&
+			!strings.HasSuffix(loc, ".yaml") &&
+			!strings.HasSuffix(loc, ".yml") &&
+			!strings.HasSuffix(loc, ".toml") &&
+			!strings.HasSuffix(loc, ".txt") {
+			// Likely a binary file
+			return "compiled binary"
 		}
 	}
 	return "unknown source"
