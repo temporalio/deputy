@@ -1479,6 +1479,256 @@ See JWT policy examples for more patterns:
 - [jwt-audit-logging.yaml](policy/examples/jwt-audit-logging.yaml) - Token age and audit policies
 - [jwt-service-account.yaml](policy/examples/jwt-service-account.yaml) - Service account validation
 
+## Server Authentication & Multi-Tenancy
+
+When Deputy runs as a shared service (ECS, EKS, k8s, etc.), it supports the same JWT/OIDC infrastructure as the proxy, plus service-level policy entrypoints for RBAC/ABAC authorization.
+
+### Server Auth Configuration
+
+```yaml
+# Server config (passed to internal/server.Config)
+auth:
+  mode: "required"  # "required" | "disabled" (no "optional" for servers)
+
+  jwks:
+    url: "https://auth.example.com/.well-known/jwks.json"
+    oidc_discovery: true
+    refresh_interval: 1h
+
+  issuers: ["https://auth.example.com"]
+  audiences: ["deputy-server"]
+  required_claims: ["sub", "tenant"]
+
+# Authorization policies
+policies:
+  - "policies/server-authz.yaml"
+```
+
+### Service-Level Entrypoints
+
+These entrypoints are evaluated **before** each API operation executes, enabling request-level authorization based on JWT claims:
+
+| Entrypoint | Triggered By | Use Case |
+|------------|--------------|----------|
+| `service_scan_request` | `ScanService/Scan`, `ScanService/StreamScan` | Control who can scan which targets |
+| `service_list_request` | `ListService/ListPackages`, `ListService/ListEcosystems` | Control package enumeration |
+| `service_sbom_request` | `SBOMService/Generate`, `SBOMService/Diff` | Control SBOM generation |
+| `service_diff_request` | `DiffService/Diff` | Control diff operations |
+| `service_secrets_request` | `SecretsService/Scan` | Control secrets scanning |
+| `service_graph_request` | `GraphService/Resolve`, `GraphService/Why` | Control graph operations |
+
+### Service Policy Variables
+
+At service entrypoints, the following variables are available:
+
+| Variable | Type | Description |
+|----------|------|-------------|
+| `jwt` | `map` | JWT claims (same as proxy: `jwt.sub`, `jwt.tenant`, `jwt.roles`, etc.) |
+| `request` | `map` | Request metadata: `request.procedure`, `request.target` |
+| `target` | `map` | Target info: `target.display` (extracted from request) |
+| `env` | `map` | Context: `env.command` = "server", `env.entrypoint` |
+
+### Multi-Tenant Policy Examples
+
+```yaml
+# policies/server-authz.yaml
+policies:
+  # Tenant isolation - users can only scan their tenant's resources
+  - name: tenant-isolation
+    entrypoints: ["service_scan_request", "service_sbom_request"]
+    rules:
+      - action: deny
+        when: |
+          !jwt.anonymous &&
+          has(jwt.tenant) &&
+          has(request.target) &&
+          !request.target.contains(jwt.tenant)
+        reason: "Cross-tenant access denied"
+
+  # Role-based access control
+  - name: require-scanner-role
+    entrypoints: ["service_scan_request", "service_secrets_request"]
+    rules:
+      - action: deny
+        when: |
+          !jwt.?roles.orValue([]).exists(r, r in ["scanner", "admin"])
+        reason: "Scanner role required"
+
+  # Service account scoping
+  - name: service-account-scope
+    entrypoints: ["service_scan_request", "service_sbom_request"]
+    rules:
+      - action: deny
+        when: |
+          jwt.?sub.orValue("").startsWith("sa:") &&
+          !jwt.?scopes.orValue([]).exists(s, s == "scan")
+        reason: "Service account lacks 'scan' scope"
+
+  # Admin override
+  - name: admin-full-access
+    entrypoints: ["service_scan_request", "service_list_request",
+                  "service_sbom_request", "service_diff_request",
+                  "service_secrets_request", "service_graph_request"]
+    rules:
+      - action: allow
+        when: jwt.?roles.orValue([]).exists(r, r == "admin")
+        reason: "Admin access granted"
+```
+
+### JWT Token Structure for Multi-Tenancy
+
+Design your tokens to include tenant/org information:
+
+```json
+{
+  "sub": "user:alice@acme.com",
+  "iss": "https://auth.example.com",
+  "aud": "deputy-server",
+  "tenant": "acme-corp",
+  "org_id": "org_123",
+  "roles": ["developer", "scanner"],
+  "teams": ["platform", "security"],
+  "scopes": ["scan", "sbom"],
+  "exp": 1700000000
+}
+```
+
+### OIDC Identity Federation
+
+Deputy server supports workload identity federation from CI/CD platforms and cloud providers. Instead of managing long-lived secrets, workloads authenticate with short-lived OIDC tokens from their platform's identity provider.
+
+**Supported OIDC Providers:**
+
+| Provider | Issuer URL | Common Claims |
+|----------|------------|---------------|
+| **GitHub Actions** | `https://token.actions.githubusercontent.com` | `repository`, `repository_owner`, `workflow`, `ref`, `actor` |
+| **GitLab CI/CD** | `https://gitlab.com` (or self-hosted) | `namespace_path`, `project_path`, `ref`, `environment` |
+| **Google Cloud** | `https://accounts.google.com` | `email` (service account), `azp` |
+| **Azure AD** | `https://login.microsoftonline.com/{tenant}/v2.0` | `tid`, `oid`, `roles`, `groups` |
+| **Kubernetes** | Cluster-specific | `kubernetes.io/serviceaccount/namespace` |
+
+**GitHub Actions Example:**
+
+```yaml
+# Server auth config
+auth:
+  mode: required
+  jwks:
+    url: https://token.actions.githubusercontent.com/.well-known/jwks
+  issuers:
+    - https://token.actions.githubusercontent.com
+  audiences:
+    - https://deputy.example.com
+
+# GitHub Actions workflow
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write   # Required for OIDC
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - name: Get OIDC Token
+        id: token
+        run: |
+          TOKEN=$(curl -sLS \
+            -H "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
+            "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=https://deputy.example.com" \
+            | jq -r '.value')
+          echo "token=$TOKEN" >> $GITHUB_OUTPUT
+
+      - name: Scan with Deputy
+        run: deputy --server https://deputy.example.com scan .
+        env:
+          DEPUTY_AUTH_TOKEN: ${{ steps.token.outputs.token }}
+```
+
+**Policy Example (GitHub Actions):**
+
+```yaml
+policies:
+  - name: github-org-restriction
+    entrypoints: ["service_scan_request"]
+    rules:
+      - action: deny
+        when: |
+          jwt.?iss.orValue("") == "https://token.actions.githubusercontent.com" &&
+          jwt.?repository_owner.orValue("") != "your-organization"
+        reason: "Only workflows from your-organization allowed"
+
+  - name: require-protected-branch
+    entrypoints: ["service_secrets_request"]
+    rules:
+      - action: deny
+        when: |
+          jwt.?iss.orValue("") == "https://token.actions.githubusercontent.com" &&
+          !jwt.?ref.orValue("").matches("^refs/(heads/main|tags/v[0-9]+)")
+        reason: "Secrets scanning requires main branch or release tag"
+```
+
+**Human vs Machine Identity Patterns:**
+
+```yaml
+policies:
+  # Machine identity: GitHub Actions
+  - name: allow-github-actions
+    rules:
+      - action: allow
+        when: |
+          jwt.?iss.orValue("") == "https://token.actions.githubusercontent.com" &&
+          jwt.?repository_owner.orValue("") in ["acme-corp", "acme-infra"]
+
+  # Machine identity: GCP Service Account
+  - name: allow-gcp-service-accounts
+    rules:
+      - action: allow
+        when: |
+          jwt.?email.orValue("").endsWith(".iam.gserviceaccount.com") &&
+          jwt.?email.orValue("").matches("@acme-(prod|staging)\\.iam")
+
+  # Human identity: Require MFA for sensitive operations
+  - name: human-require-mfa
+    entrypoints: ["service_secrets_request"]
+    rules:
+      - action: deny
+        when: |
+          !jwt.anonymous &&
+          jwt.?email.orValue("") != "" &&
+          !jwt.?amr.orValue([]).exists(a, a in ["mfa", "otp", "hwk"])
+        reason: "MFA required for secrets scanning"
+
+  # Human identity: Group-based access
+  - name: human-security-team
+    entrypoints: ["service_secrets_request"]
+    rules:
+      - action: allow
+        when: |
+          jwt.?groups.orValue([]).exists(g, g in ["security-team", "sre-oncall"])
+```
+
+See [`policy/examples/service-oidc-federation.yaml`](policy/examples/service-oidc-federation.yaml) for comprehensive OIDC patterns and [`policy/examples/server-github-actions.yaml`](policy/examples/server-github-actions.yaml) for GitHub Actions-specific policies.
+
+### Security Model Comparison
+
+| Aspect | Proxy | Server |
+|--------|-------|--------|
+| Auth mode | `required` / `optional` / `disabled` | `required` / `disabled` |
+| Policy entrypoints | `*_artifact_request` | `service_*_request` |
+| JWT in policies | Yes (`jwt.*`) | Yes (`jwt.*`) |
+| Target validation | Remote targets only | Remote targets only |
+| Multi-tenant isolation | Via policies | Via policies |
+| OIDC federation | Yes | Yes |
+
+### Key Files
+
+| File | Purpose |
+|------|---------|
+| [`internal/server/server.go`](internal/server/server.go) | Server config, auth/policy interceptors |
+| [`internal/auth/jwt/`](internal/auth/jwt/) | Shared JWT validation infrastructure |
+| [`internal/policy/entrypoints.go`](internal/policy/entrypoints.go) | Service entrypoint definitions |
+| [`internal/policy/bindings.go`](internal/policy/bindings.go) | Variable bindings for service entrypoints |
+
 ## Environment Variables
 
 | Variable | Purpose |

@@ -239,6 +239,46 @@ var BindingProfiles = map[Entrypoint]BindingProfile{
 		Optional:    append([]string{"report"}, targetVars...),
 		Description: "Triggers for each secret found during a scan",
 	},
+
+	// Service entrypoints - for API request authorization (RBAC/ABAC).
+	// These are evaluated BEFORE the operation executes, enabling access control
+	// based on JWT claims (jwt.*), target, and request metadata.
+	EntrypointServiceScanRequest: {
+		Entrypoint:  EntrypointServiceScanRequest,
+		Required:    append([]string{"request"}, envVars...),
+		Optional:    append(targetVars, jwtVars...),
+		Description: "Triggers before a scan is executed via the API",
+	},
+	EntrypointServiceListRequest: {
+		Entrypoint:  EntrypointServiceListRequest,
+		Required:    append([]string{"request"}, envVars...),
+		Optional:    append(targetVars, jwtVars...),
+		Description: "Triggers before a list operation via the API",
+	},
+	EntrypointServiceSBOMRequest: {
+		Entrypoint:  EntrypointServiceSBOMRequest,
+		Required:    append([]string{"request"}, envVars...),
+		Optional:    append(targetVars, jwtVars...),
+		Description: "Triggers before SBOM generation via the API",
+	},
+	EntrypointServiceDiffRequest: {
+		Entrypoint:  EntrypointServiceDiffRequest,
+		Required:    append([]string{"request"}, envVars...),
+		Optional:    append(targetVars, jwtVars...),
+		Description: "Triggers before a diff operation via the API",
+	},
+	EntrypointServiceSecretsRequest: {
+		Entrypoint:  EntrypointServiceSecretsRequest,
+		Required:    append([]string{"request"}, envVars...),
+		Optional:    append(targetVars, jwtVars...),
+		Description: "Triggers before a secrets scan via the API",
+	},
+	EntrypointServiceGraphRequest: {
+		Entrypoint:  EntrypointServiceGraphRequest,
+		Required:    append([]string{"request"}, envVars...),
+		Optional:    append(targetVars, jwtVars...),
+		Description: "Triggers before a graph operation via the API",
+	},
 }
 
 // GetBindingProfile returns the binding profile for an entrypoint.

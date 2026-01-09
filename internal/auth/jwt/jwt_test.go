@@ -538,3 +538,415 @@ func TestDefaultAllowedAlgorithms_NoSymmetricOrNone(t *testing.T) {
 		}
 	}
 }
+
+func TestAuthenticator_IssuerValidation(t *testing.T) {
+	// Security test: Verify issuer validation works correctly.
+	privateKey, publicKeyPEM := generateTestKeyPair(t)
+
+	cfg := &Config{
+		Mode: "required",
+		StaticKeys: []StaticKeyConfig{
+			{KeyID: "test-key", Algorithm: "ES256", PublicKey: publicKeyPEM},
+		},
+		Issuers: []string{"https://trusted.example.com", "https://also-trusted.example.com"},
+	}
+
+	auth, err := NewAuthenticator(cfg)
+	if err != nil {
+		t.Fatalf("failed to create authenticator: %v", err)
+	}
+	defer auth.Close()
+
+	t.Run("trusted issuer allowed", func(t *testing.T) {
+		token := createTestToken(t, privateKey, josejwt.ClaimsSet{
+			josejwt.Subject:        "user123",
+			josejwt.Issuer:         "https://trusted.example.com",
+			josejwt.ExpirationTime: time.Now().Add(time.Hour).Unix(),
+		})
+
+		req := httptest.NewRequest(http.MethodGet, "/", nil)
+		req.Header.Set("Authorization", "Bearer "+token)
+
+		claims, err := auth.Authenticate(context.Background(), req)
+		if err != nil {
+			t.Errorf("unexpected error for trusted issuer: %v", err)
+		}
+		if claims == nil || claims.Issuer != "https://trusted.example.com" {
+			t.Errorf("expected issuer claim to be preserved")
+		}
+	})
+
+	t.Run("untrusted issuer rejected", func(t *testing.T) {
+		token := createTestToken(t, privateKey, josejwt.ClaimsSet{
+			josejwt.Subject:        "attacker",
+			josejwt.Issuer:         "https://evil.example.com",
+			josejwt.ExpirationTime: time.Now().Add(time.Hour).Unix(),
+		})
+
+		req := httptest.NewRequest(http.MethodGet, "/", nil)
+		req.Header.Set("Authorization", "Bearer "+token)
+
+		_, err := auth.Authenticate(context.Background(), req)
+		if err == nil {
+			t.Fatal("expected error for untrusted issuer")
+		}
+		authErr, ok := err.(*Error)
+		if !ok {
+			t.Fatalf("expected *Error, got %T", err)
+		}
+		if authErr.Code != CodeInvalidIssuer {
+			t.Errorf("expected error code %q, got %q", CodeInvalidIssuer, authErr.Code)
+		}
+	})
+
+	t.Run("empty issuer when required rejected", func(t *testing.T) {
+		token := createTestToken(t, privateKey, josejwt.ClaimsSet{
+			josejwt.Subject:        "user123",
+			josejwt.ExpirationTime: time.Now().Add(time.Hour).Unix(),
+			// No issuer claim
+		})
+
+		req := httptest.NewRequest(http.MethodGet, "/", nil)
+		req.Header.Set("Authorization", "Bearer "+token)
+
+		_, err := auth.Authenticate(context.Background(), req)
+		if err == nil {
+			t.Fatal("expected error for missing issuer when issuers configured")
+		}
+		authErr, ok := err.(*Error)
+		if !ok {
+			t.Fatalf("expected *Error, got %T", err)
+		}
+		if authErr.Code != CodeInvalidIssuer {
+			t.Errorf("expected error code %q, got %q", CodeInvalidIssuer, authErr.Code)
+		}
+	})
+}
+
+func TestAuthenticator_AudienceValidation(t *testing.T) {
+	// Security test: Verify audience validation works correctly.
+	privateKey, publicKeyPEM := generateTestKeyPair(t)
+
+	cfg := &Config{
+		Mode: "required",
+		StaticKeys: []StaticKeyConfig{
+			{KeyID: "test-key", Algorithm: "ES256", PublicKey: publicKeyPEM},
+		},
+		Audiences: []string{"https://deputy.example.com", "deputy-api"},
+	}
+
+	auth, err := NewAuthenticator(cfg)
+	if err != nil {
+		t.Fatalf("failed to create authenticator: %v", err)
+	}
+	defer auth.Close()
+
+	t.Run("single matching audience allowed", func(t *testing.T) {
+		token := createTestToken(t, privateKey, josejwt.ClaimsSet{
+			josejwt.Subject:        "user123",
+			josejwt.Audience:       "https://deputy.example.com",
+			josejwt.ExpirationTime: time.Now().Add(time.Hour).Unix(),
+		})
+
+		req := httptest.NewRequest(http.MethodGet, "/", nil)
+		req.Header.Set("Authorization", "Bearer "+token)
+
+		claims, err := auth.Authenticate(context.Background(), req)
+		if err != nil {
+			t.Errorf("unexpected error for matching audience: %v", err)
+		}
+		if claims == nil {
+			t.Error("expected non-nil claims")
+		}
+	})
+
+	t.Run("multiple audiences with one matching allowed", func(t *testing.T) {
+		token := createTestToken(t, privateKey, josejwt.ClaimsSet{
+			josejwt.Subject:        "user123",
+			josejwt.Audience:       []string{"other-service", "deputy-api", "another-service"},
+			josejwt.ExpirationTime: time.Now().Add(time.Hour).Unix(),
+		})
+
+		req := httptest.NewRequest(http.MethodGet, "/", nil)
+		req.Header.Set("Authorization", "Bearer "+token)
+
+		claims, err := auth.Authenticate(context.Background(), req)
+		if err != nil {
+			t.Errorf("unexpected error when one audience matches: %v", err)
+		}
+		if claims == nil {
+			t.Error("expected non-nil claims")
+		}
+	})
+
+	t.Run("wrong audience rejected", func(t *testing.T) {
+		token := createTestToken(t, privateKey, josejwt.ClaimsSet{
+			josejwt.Subject:        "user123",
+			josejwt.Audience:       "https://other-service.example.com",
+			josejwt.ExpirationTime: time.Now().Add(time.Hour).Unix(),
+		})
+
+		req := httptest.NewRequest(http.MethodGet, "/", nil)
+		req.Header.Set("Authorization", "Bearer "+token)
+
+		_, err := auth.Authenticate(context.Background(), req)
+		if err == nil {
+			t.Fatal("expected error for wrong audience")
+		}
+		authErr, ok := err.(*Error)
+		if !ok {
+			t.Fatalf("expected *Error, got %T", err)
+		}
+		if authErr.Code != CodeInvalidAudience {
+			t.Errorf("expected error code %q, got %q", CodeInvalidAudience, authErr.Code)
+		}
+	})
+
+	t.Run("empty audience when required rejected", func(t *testing.T) {
+		token := createTestToken(t, privateKey, josejwt.ClaimsSet{
+			josejwt.Subject:        "user123",
+			josejwt.ExpirationTime: time.Now().Add(time.Hour).Unix(),
+			// No audience claim
+		})
+
+		req := httptest.NewRequest(http.MethodGet, "/", nil)
+		req.Header.Set("Authorization", "Bearer "+token)
+
+		_, err := auth.Authenticate(context.Background(), req)
+		if err == nil {
+			t.Fatal("expected error for missing audience when audiences configured")
+		}
+		authErr, ok := err.(*Error)
+		if !ok {
+			t.Fatalf("expected *Error, got %T", err)
+		}
+		if authErr.Code != CodeInvalidAudience {
+			t.Errorf("expected error code %q, got %q", CodeInvalidAudience, authErr.Code)
+		}
+	})
+}
+
+func TestAuthenticator_RequiredClaims(t *testing.T) {
+	// Security test: Verify required claims validation.
+	privateKey, publicKeyPEM := generateTestKeyPair(t)
+
+	cfg := &Config{
+		Mode: "required",
+		StaticKeys: []StaticKeyConfig{
+			{KeyID: "test-key", Algorithm: "ES256", PublicKey: publicKeyPEM},
+		},
+		RequiredClaims: []string{"email", "groups"},
+	}
+
+	auth, err := NewAuthenticator(cfg)
+	if err != nil {
+		t.Fatalf("failed to create authenticator: %v", err)
+	}
+	defer auth.Close()
+
+	t.Run("all required claims present", func(t *testing.T) {
+		token := createTestToken(t, privateKey, josejwt.ClaimsSet{
+			josejwt.Subject:        "user123",
+			josejwt.ExpirationTime: time.Now().Add(time.Hour).Unix(),
+			"email":                "user@example.com",
+			"groups":               []string{"developers"},
+		})
+
+		req := httptest.NewRequest(http.MethodGet, "/", nil)
+		req.Header.Set("Authorization", "Bearer "+token)
+
+		claims, err := auth.Authenticate(context.Background(), req)
+		if err != nil {
+			t.Errorf("unexpected error: %v", err)
+		}
+		if claims == nil {
+			t.Error("expected non-nil claims")
+		}
+	})
+
+	t.Run("missing required claim rejected", func(t *testing.T) {
+		token := createTestToken(t, privateKey, josejwt.ClaimsSet{
+			josejwt.Subject:        "user123",
+			josejwt.ExpirationTime: time.Now().Add(time.Hour).Unix(),
+			"email":                "user@example.com",
+			// Missing 'groups' claim
+		})
+
+		req := httptest.NewRequest(http.MethodGet, "/", nil)
+		req.Header.Set("Authorization", "Bearer "+token)
+
+		_, err := auth.Authenticate(context.Background(), req)
+		if err == nil {
+			t.Fatal("expected error for missing required claim")
+		}
+		authErr, ok := err.(*Error)
+		if !ok {
+			t.Fatalf("expected *Error, got %T", err)
+		}
+		if authErr.Code != CodeMissingClaim {
+			t.Errorf("expected error code %q, got %q", CodeMissingClaim, authErr.Code)
+		}
+	})
+}
+
+func TestAuthenticator_TokenSizeLimit(t *testing.T) {
+	// Security test: Verify token size limits prevent DoS attacks.
+	privateKey, publicKeyPEM := generateTestKeyPair(t)
+
+	cfg := &Config{
+		Mode: "required",
+		StaticKeys: []StaticKeyConfig{
+			{KeyID: "test-key", Algorithm: "ES256", PublicKey: publicKeyPEM},
+		},
+		MaxTokenSize: 1024, // 1KB limit for testing
+	}
+
+	auth, err := NewAuthenticator(cfg)
+	if err != nil {
+		t.Fatalf("failed to create authenticator: %v", err)
+	}
+	defer auth.Close()
+
+	t.Run("oversized token rejected", func(t *testing.T) {
+		// Create a token with a large custom claim to exceed the limit
+		largeClaim := strings.Repeat("x", 2048) // 2KB string
+		token := createTestToken(t, privateKey, josejwt.ClaimsSet{
+			josejwt.Subject:        "user123",
+			josejwt.ExpirationTime: time.Now().Add(time.Hour).Unix(),
+			"large_data":           largeClaim,
+		})
+
+		req := httptest.NewRequest(http.MethodGet, "/", nil)
+		req.Header.Set("Authorization", "Bearer "+token)
+
+		_, err := auth.Authenticate(context.Background(), req)
+		if err == nil {
+			t.Fatal("expected error for oversized token")
+		}
+		authErr, ok := err.(*Error)
+		if !ok {
+			t.Fatalf("expected *Error, got %T", err)
+		}
+		if authErr.Code != CodeInvalidToken {
+			t.Errorf("expected error code %q, got %q", CodeInvalidToken, authErr.Code)
+		}
+	})
+}
+
+func TestAuthenticator_ClockSkew(t *testing.T) {
+	// Security test: Verify clock skew is properly bounded.
+	_, publicKeyPEM := generateTestKeyPair(t)
+
+	t.Run("excessive clock skew rejected at config", func(t *testing.T) {
+		cfg := &Config{
+			Mode: "required",
+			StaticKeys: []StaticKeyConfig{
+				{KeyID: "test-key", Algorithm: "ES256", PublicKey: publicKeyPEM},
+			},
+			ClockSkew: 10 * time.Minute, // Exceeds MaxClockSkew (5 minutes)
+		}
+
+		_, err := NewAuthenticator(cfg)
+		if err == nil {
+			t.Fatal("expected error for excessive clock skew")
+		}
+	})
+
+	t.Run("max clock skew boundary", func(t *testing.T) {
+		cfg := &Config{
+			Mode: "required",
+			StaticKeys: []StaticKeyConfig{
+				{KeyID: "test-key", Algorithm: "ES256", PublicKey: publicKeyPEM},
+			},
+			ClockSkew: MaxClockSkew, // Exactly at the limit (5 minutes)
+		}
+
+		auth, err := NewAuthenticator(cfg)
+		if err != nil {
+			t.Fatalf("max clock skew should be accepted: %v", err)
+		}
+		auth.Close()
+	})
+
+	t.Run("slightly over max clock skew rejected", func(t *testing.T) {
+		cfg := &Config{
+			Mode: "required",
+			StaticKeys: []StaticKeyConfig{
+				{KeyID: "test-key", Algorithm: "ES256", PublicKey: publicKeyPEM},
+			},
+			ClockSkew: MaxClockSkew + time.Second, // Just over the limit
+		}
+
+		_, err := NewAuthenticator(cfg)
+		if err == nil {
+			t.Fatal("expected error for clock skew exceeding max")
+		}
+	})
+}
+
+func TestAuthenticator_NotBeforeValidation(t *testing.T) {
+	// Security test: Verify nbf (not before) claim is validated.
+	// Note: The jose library validates nbf during token verification, so the
+	// error comes from signature verification (which includes time checks).
+	privateKey, publicKeyPEM := generateTestKeyPair(t)
+
+	cfg := &Config{
+		Mode: "required",
+		StaticKeys: []StaticKeyConfig{
+			{KeyID: "test-key", Algorithm: "ES256", PublicKey: publicKeyPEM},
+		},
+	}
+
+	auth, err := NewAuthenticator(cfg)
+	if err != nil {
+		t.Fatalf("failed to create authenticator: %v", err)
+	}
+	defer auth.Close()
+
+	t.Run("future nbf rejected", func(t *testing.T) {
+		// Token not valid for another hour
+		token := createTestToken(t, privateKey, josejwt.ClaimsSet{
+			josejwt.Subject:        "user123",
+			josejwt.NotBefore:      time.Now().Add(time.Hour).Unix(),
+			josejwt.ExpirationTime: time.Now().Add(2 * time.Hour).Unix(),
+		})
+
+		req := httptest.NewRequest(http.MethodGet, "/", nil)
+		req.Header.Set("Authorization", "Bearer "+token)
+
+		_, err := auth.Authenticate(context.Background(), req)
+		if err == nil {
+			t.Fatal("expected error for token not yet valid")
+		}
+		// The jose library validates nbf during verification, so the error
+		// comes back as signature_invalid (which includes time validation)
+		authErr, ok := err.(*Error)
+		if !ok {
+			t.Fatalf("expected *Error, got %T", err)
+		}
+		// Accept either signature_invalid (jose lib validation) or invalid_token (our validation)
+		if authErr.Code != CodeSignatureInvalid && authErr.Code != CodeInvalidToken {
+			t.Errorf("expected error code %q or %q, got %q", CodeSignatureInvalid, CodeInvalidToken, authErr.Code)
+		}
+	})
+
+	t.Run("valid nbf accepted", func(t *testing.T) {
+		// Token valid from past time
+		token := createTestToken(t, privateKey, josejwt.ClaimsSet{
+			josejwt.Subject:        "user123",
+			josejwt.NotBefore:      time.Now().Add(-time.Hour).Unix(),
+			josejwt.ExpirationTime: time.Now().Add(time.Hour).Unix(),
+		})
+
+		req := httptest.NewRequest(http.MethodGet, "/", nil)
+		req.Header.Set("Authorization", "Bearer "+token)
+
+		claims, err := auth.Authenticate(context.Background(), req)
+		if err != nil {
+			t.Errorf("token with past nbf should be accepted: %v", err)
+		}
+		if claims == nil {
+			t.Error("expected non-nil claims")
+		}
+	})
+}

@@ -1,0 +1,402 @@
+# OIDC Identity Federation Policies for Deputy Server
+#
+# These policies demonstrate how to secure Deputy server deployments using
+# OIDC workload identity federation from various identity providers.
+#
+# OIDC federation allows CI/CD systems and cloud workloads to authenticate
+# without managing secrets - they get short-lived tokens from their platform's
+# identity provider that Deputy validates against the provider's JWKS endpoint.
+#
+# Common OIDC issuers:
+#   - GitHub Actions: https://token.actions.githubusercontent.com
+#   - GitLab CI/CD: https://gitlab.com (or self-hosted)
+#   - Google Cloud: https://accounts.google.com
+#   - AWS STS: https://sts.amazonaws.com (with web identity)
+#   - Azure AD: https://login.microsoftonline.com/{tenant}/v2.0
+#   - Kubernetes: https://kubernetes.default.svc.cluster.local
+#
+# JWT claims vary by provider. See examples below for provider-specific patterns.
+
+policies:
+  # =============================================================================
+  # GitHub Actions OIDC
+  # =============================================================================
+  # GitHub Actions can request OIDC tokens with rich claims about the workflow.
+  # See: https://docs.github.com/en/actions/deployment/security-hardening-your-deployments
+  #
+  # Key claims in GitHub Actions OIDC tokens:
+  #   - sub: repo:<owner>/<repo>:ref:refs/heads/<branch>
+  #   - repository: <owner>/<repo>
+  #   - repository_owner: <owner>
+  #   - repository_owner_id: <numeric_id>
+  #   - workflow: <workflow_filename>
+  #   - ref: refs/heads/<branch> or refs/tags/<tag>
+  #   - actor: GitHub username that triggered the workflow
+  #   - event_name: push, pull_request, workflow_dispatch, etc.
+  #   - job_workflow_ref: <owner>/<repo>/.github/workflows/<file>@<ref>
+  #   - runner_environment: github-hosted or self-hosted
+
+  - name: github-actions-organization-allowlist
+    description: Only allow workflows from trusted GitHub organizations
+    entrypoints:
+      - service_scan_request
+      - service_sbom_request
+      - service_secrets_request
+    rules:
+      - action: deny
+        when: |
+          jwt.?iss.orValue("") == "https://token.actions.githubusercontent.com" &&
+          !jwt.?repository_owner.orValue("").matches("^(acme-corp|acme-infra|acme-security)$")
+        reason: "Only workflows from trusted organizations are allowed"
+        remediation: "Contact security team to add your organization to the allowlist"
+
+  - name: github-actions-repository-allowlist
+    description: Restrict to specific repositories for security-sensitive operations
+    entrypoints:
+      - service_secrets_request
+    rules:
+      - action: deny
+        when: |
+          jwt.?iss.orValue("") == "https://token.actions.githubusercontent.com" &&
+          !jwt.?repository.orValue("") in [
+            "acme-corp/security-scanner",
+            "acme-corp/compliance-checks",
+            "acme-infra/container-hardening"
+          ]
+        reason: "Secrets scanning restricted to approved repositories"
+        remediation: "Request repository access in #security-requests"
+
+  - name: github-actions-protected-branch
+    description: Only allow production scans from protected branches
+    entrypoints:
+      - service_scan_request
+    rules:
+      - action: warn
+        when: |
+          jwt.?iss.orValue("") == "https://token.actions.githubusercontent.com" &&
+          !jwt.?ref.orValue("").matches("^refs/(heads/main|tags/v[0-9]+)")
+        reason: "Production scans should run from main branch or release tags"
+        remediation: "Merge to main or create a release tag for production scans"
+
+  - name: github-actions-no-pull-request-secrets
+    description: Block secrets scanning on pull requests (may leak to forks)
+    entrypoints:
+      - service_secrets_request
+    rules:
+      - action: deny
+        when: |
+          jwt.?iss.orValue("") == "https://token.actions.githubusercontent.com" &&
+          jwt.?event_name.orValue("") == "pull_request"
+        reason: "Secrets scanning not allowed on pull requests"
+        remediation: "Use workflow_dispatch or push events for secrets scanning"
+
+  - name: github-actions-require-reusable-workflow
+    description: Require scans to use the official reusable workflow
+    entrypoints:
+      - service_scan_request
+    rules:
+      - action: warn
+        when: |
+          jwt.?iss.orValue("") == "https://token.actions.githubusercontent.com" &&
+          !jwt.?job_workflow_ref.orValue("").startsWith("acme-corp/workflows/.github/workflows/security-scan.yml@")
+        reason: "Consider using the official reusable workflow for consistent scanning"
+        remediation: "See https://github.com/acme-corp/workflows/blob/main/.github/workflows/security-scan.yml"
+
+  # =============================================================================
+  # GitLab CI/CD OIDC
+  # =============================================================================
+  # GitLab provides OIDC tokens for CI/CD jobs.
+  # See: https://docs.gitlab.com/ee/ci/secrets/id_token_authentication.html
+  #
+  # Key claims in GitLab CI OIDC tokens:
+  #   - sub: project_path:<namespace>/<project>:ref_type:<type>:ref:<ref>
+  #   - namespace_path: <namespace>
+  #   - project_path: <namespace>/<project>
+  #   - ref: <branch_or_tag>
+  #   - ref_type: branch or tag
+  #   - pipeline_source: push, web, api, schedule, etc.
+  #   - user_login: GitLab username
+  #   - user_email: User email
+  #   - environment: Deployment environment name
+
+  - name: gitlab-namespace-restriction
+    description: Only allow GitLab projects from trusted namespaces
+    entrypoints:
+      - service_scan_request
+      - service_sbom_request
+    rules:
+      - action: deny
+        when: |
+          jwt.?iss.orValue("").contains("gitlab") &&
+          !jwt.?namespace_path.orValue("").matches("^(acme|acme-security|acme-platform)(/.*)?$")
+        reason: "Only projects from trusted GitLab namespaces allowed"
+
+  - name: gitlab-protected-environment
+    description: Restrict production operations to protected environments
+    entrypoints:
+      - service_secrets_request
+    rules:
+      - action: deny
+        when: |
+          jwt.?iss.orValue("").contains("gitlab") &&
+          jwt.?environment.orValue("") != "" &&
+          !jwt.?environment.orValue("") in ["production", "staging"]
+        reason: "Secrets scanning requires protected environment"
+
+  # =============================================================================
+  # Google Cloud Workload Identity
+  # =============================================================================
+  # GCP service accounts can federate with external OIDC providers.
+  # See: https://cloud.google.com/iam/docs/workload-identity-federation
+  #
+  # Key claims for GCP service account tokens:
+  #   - sub: <service_account_unique_id>
+  #   - email: <sa-name>@<project>.iam.gserviceaccount.com
+  #   - aud: Usually the target service URL
+  #   - azp: Authorized party (for user tokens)
+
+  - name: gcp-service-account-allowlist
+    description: Only allow specific GCP service accounts
+    entrypoints:
+      - service_scan_request
+      - service_sbom_request
+      - service_secrets_request
+    rules:
+      - action: deny
+        when: |
+          jwt.?iss.orValue("") == "https://accounts.google.com" &&
+          jwt.?email.orValue("").endsWith(".iam.gserviceaccount.com") &&
+          !jwt.?email.orValue("") in [
+            "deputy-scanner@acme-prod.iam.gserviceaccount.com",
+            "deputy-scanner@acme-staging.iam.gserviceaccount.com",
+            "ci-pipeline@acme-ci.iam.gserviceaccount.com"
+          ]
+        reason: "Service account not in allowlist"
+
+  - name: gcp-project-restriction
+    description: Restrict to service accounts from specific GCP projects
+    entrypoints:
+      - service_scan_request
+    rules:
+      - action: deny
+        when: |
+          jwt.?iss.orValue("") == "https://accounts.google.com" &&
+          jwt.?email.orValue("").endsWith(".iam.gserviceaccount.com") &&
+          !jwt.?email.orValue("").matches("@(acme-prod|acme-staging|acme-ci)\\.iam\\.gserviceaccount\\.com$")
+        reason: "Service account must be from approved GCP project"
+
+  # =============================================================================
+  # AWS IAM / STS Web Identity
+  # =============================================================================
+  # AWS supports OIDC federation through IAM roles and STS AssumeRoleWithWebIdentity.
+  # See: https://docs.aws.amazon.com/IAM/latest/UserGuide/id_roles_providers_oidc.html
+  #
+  # AWS doesn't have a single OIDC issuer - tokens come from the external IdP.
+  # The AWS account/role context is in the assumed role ARN.
+
+  - name: aws-account-restriction
+    description: Restrict based on AWS account ID in assumed role claims
+    entrypoints:
+      - service_scan_request
+    rules:
+      - action: deny
+        when: |
+          has(jwt.amr) &&
+          jwt.?amr.orValue([]).exists(a, a.startsWith("arn:aws:sts::")) &&
+          !jwt.?amr.orValue([]).exists(a,
+            a.matches("^arn:aws:sts::(123456789012|234567890123):assumed-role/"))
+        reason: "AWS role must be from approved accounts"
+        remediation: "Request access for your AWS account ID"
+
+  # =============================================================================
+  # Azure AD / Entra ID
+  # =============================================================================
+  # Azure AD provides OIDC tokens for both users and managed identities.
+  # See: https://learn.microsoft.com/en-us/azure/active-directory/develop/v2-protocols-oidc
+  #
+  # Key claims in Azure AD tokens:
+  #   - tid: Tenant ID
+  #   - oid: Object ID (unique user/app ID)
+  #   - sub: Subject (user-specific)
+  #   - appid: Application (client) ID (for app tokens)
+  #   - roles: App roles assigned
+  #   - groups: Group memberships (if configured)
+
+  - name: azure-tenant-restriction
+    description: Only allow tokens from specific Azure AD tenants
+    entrypoints:
+      - service_scan_request
+      - service_sbom_request
+    rules:
+      - action: deny
+        when: |
+          jwt.?iss.orValue("").contains("login.microsoftonline.com") &&
+          !jwt.?tid.orValue("") in [
+            "12345678-1234-1234-1234-123456789abc",  # Production tenant
+            "87654321-4321-4321-4321-cba987654321"   # Development tenant
+          ]
+        reason: "Token must be from approved Azure AD tenant"
+
+  - name: azure-managed-identity
+    description: Restrict to specific Azure managed identities
+    entrypoints:
+      - service_secrets_request
+    rules:
+      - action: deny
+        when: |
+          jwt.?iss.orValue("").contains("login.microsoftonline.com") &&
+          jwt.?idtyp.orValue("") == "app" &&
+          !jwt.?oid.orValue("") in [
+            "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"  # deputy-scanner managed identity
+          ]
+        reason: "Managed identity not authorized for secrets scanning"
+
+  # =============================================================================
+  # Kubernetes Service Account Tokens
+  # =============================================================================
+  # Kubernetes 1.21+ issues projected service account tokens with OIDC structure.
+  # See: https://kubernetes.io/docs/tasks/configure-pod-container/configure-service-account/
+  #
+  # Key claims in Kubernetes service account tokens:
+  #   - sub: system:serviceaccount:<namespace>:<name>
+  #   - kubernetes.io/serviceaccount/namespace: <namespace>
+  #   - kubernetes.io/serviceaccount/name: <name>
+  #   - kubernetes.io/pod/name: <pod_name>
+  #   - kubernetes.io/pod/uid: <pod_uid>
+
+  - name: kubernetes-namespace-restriction
+    description: Only allow workloads from specific Kubernetes namespaces
+    entrypoints:
+      - service_scan_request
+      - service_sbom_request
+    rules:
+      - action: deny
+        when: |
+          jwt.?sub.orValue("").startsWith("system:serviceaccount:") &&
+          !jwt.?["kubernetes.io/serviceaccount/namespace"].orValue("") in [
+            "security", "ci-cd", "production"
+          ]
+        reason: "Kubernetes workload must be in approved namespace"
+
+  - name: kubernetes-service-account-allowlist
+    description: Restrict to specific Kubernetes service accounts
+    entrypoints:
+      - service_secrets_request
+    rules:
+      - action: deny
+        when: |
+          jwt.?sub.orValue("").startsWith("system:serviceaccount:") &&
+          !jwt.?sub.orValue("").matches("^system:serviceaccount:(security|ci-cd):(deputy-scanner|security-bot)$")
+        reason: "Service account not authorized for secrets scanning"
+
+  # =============================================================================
+  # Human Identity Policies (Okta, Auth0, etc.)
+  # =============================================================================
+  # Human users typically authenticate through identity providers like Okta, Auth0,
+  # or corporate Azure AD with user tokens (not service principals).
+  #
+  # These tokens contain user-specific claims like email, groups, roles.
+
+  - name: human-require-mfa
+    description: Require MFA for human users accessing sensitive operations
+    entrypoints:
+      - service_secrets_request
+    rules:
+      - action: deny
+        when: |
+          !jwt.anonymous &&
+          !jwt.?sub.orValue("").startsWith("system:") &&
+          !jwt.?sub.orValue("").startsWith("sa:") &&
+          !jwt.?sub.orValue("").startsWith("repo:") &&
+          !jwt.?amr.orValue([]).exists(a, a in ["mfa", "otp", "hwk", "swk"])
+        reason: "Multi-factor authentication required for secrets scanning"
+        remediation: "Re-authenticate with MFA enabled"
+
+  - name: human-group-restriction
+    description: Require security group membership for sensitive operations
+    entrypoints:
+      - service_secrets_request
+    rules:
+      - action: deny
+        when: |
+          !jwt.anonymous &&
+          jwt.?email.orValue("") != "" &&
+          !jwt.?groups.orValue([]).exists(g, g in ["security-team", "sre-oncall", "platform-admins"])
+        reason: "Security group membership required"
+        remediation: "Request access in #security-access channel"
+
+  # =============================================================================
+  # Combined Human + Machine Policy
+  # =============================================================================
+  # Unified authorization that works for both identity types
+
+  - name: unified-identity-authorization
+    description: |
+      Unified policy supporting both human and machine identities.
+      Determines identity type from token claims and applies appropriate rules.
+    entrypoints:
+      - service_scan_request
+      - service_sbom_request
+    rules:
+      # GitHub Actions: allow from trusted repos
+      - action: allow
+        when: |
+          jwt.?iss.orValue("") == "https://token.actions.githubusercontent.com" &&
+          jwt.?repository_owner.orValue("") in ["acme-corp", "acme-infra"]
+        reason: "Trusted GitHub Actions workflow"
+
+      # GitLab CI: allow from trusted namespaces
+      - action: allow
+        when: |
+          jwt.?iss.orValue("").contains("gitlab") &&
+          jwt.?namespace_path.orValue("").startsWith("acme")
+        reason: "Trusted GitLab CI pipeline"
+
+      # GCP Service Account: allow from trusted projects
+      - action: allow
+        when: |
+          jwt.?email.orValue("").endsWith(".iam.gserviceaccount.com") &&
+          jwt.?email.orValue("").matches("@acme-(prod|staging|ci)\\.iam")
+        reason: "Trusted GCP service account"
+
+      # Kubernetes: allow from security namespace
+      - action: allow
+        when: |
+          jwt.?sub.orValue("").startsWith("system:serviceaccount:security:")
+        reason: "Trusted Kubernetes security workload"
+
+      # Humans: allow with appropriate group membership
+      - action: allow
+        when: |
+          jwt.?email.orValue("") != "" &&
+          jwt.?groups.orValue([]).exists(g, g in ["developers", "security-team", "platform"])
+        reason: "Authorized human user"
+
+      # Deny everything else that's not anonymous (anonymous handled by auth)
+      - action: deny
+        when: "!jwt.anonymous"
+        reason: "Identity not authorized"
+        remediation: "Contact security team for access"
+
+  # =============================================================================
+  # Audit Logging Policies
+  # =============================================================================
+
+  - name: audit-privileged-machine-identity
+    description: Log when privileged machine identities access the system
+    entrypoints:
+      - service_scan_request
+      - service_sbom_request
+      - service_secrets_request
+    rules:
+      - action: warn
+        when: |
+          jwt.?iss.orValue("") == "https://token.actions.githubusercontent.com" &&
+          jwt.?repository.orValue("").contains("security")
+        reason: "Security repository workflow accessing Deputy - audit log entry"
+
+      - action: warn
+        when: |
+          jwt.?email.orValue("").endsWith(".iam.gserviceaccount.com") &&
+          jwt.?email.orValue("").contains("admin")
+        reason: "Admin service account accessing Deputy - audit log entry"

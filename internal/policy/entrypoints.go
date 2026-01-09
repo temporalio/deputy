@@ -41,6 +41,10 @@ func (e Entrypoint) Category() string {
 		return "dockerfile"
 	case EntrypointSecretsReport, EntrypointSecretsFinding:
 		return "secrets"
+	case EntrypointServiceScanRequest, EntrypointServiceListRequest,
+		EntrypointServiceSBOMRequest, EntrypointServiceDiffRequest,
+		EntrypointServiceSecretsRequest, EntrypointServiceGraphRequest:
+		return "server"
 	default:
 		return ""
 	}
@@ -109,6 +113,23 @@ const (
 	EntrypointSecretsReport Entrypoint = "secrets_report"
 	// EntrypointSecretsFinding triggers for each secret found during a scan.
 	EntrypointSecretsFinding Entrypoint = "secrets_finding"
+
+	// Service entrypoints - for API request authorization when Deputy runs as a server.
+	// These enable RBAC/ABAC policies based on JWT claims (jwt.*) for multi-tenant deployments.
+
+	// EntrypointServiceScanRequest triggers before a scan is executed via the API.
+	// Use this to authorize which targets a user/service can scan.
+	EntrypointServiceScanRequest Entrypoint = "service_scan_request"
+	// EntrypointServiceListRequest triggers before a list operation via the API.
+	EntrypointServiceListRequest Entrypoint = "service_list_request"
+	// EntrypointServiceSBOMRequest triggers before SBOM generation via the API.
+	EntrypointServiceSBOMRequest Entrypoint = "service_sbom_request"
+	// EntrypointServiceDiffRequest triggers before a diff operation via the API.
+	EntrypointServiceDiffRequest Entrypoint = "service_diff_request"
+	// EntrypointServiceSecretsRequest triggers before a secrets scan via the API.
+	EntrypointServiceSecretsRequest Entrypoint = "service_secrets_request"
+	// EntrypointServiceGraphRequest triggers before a graph operation via the API.
+	EntrypointServiceGraphRequest Entrypoint = "service_graph_request"
 )
 
 var (
@@ -164,12 +185,22 @@ var (
 		EntrypointSecretsReport,
 		EntrypointSecretsFinding,
 	}
+	// EntrypointsService lists all entrypoints related to API request authorization.
+	// These enable RBAC/ABAC when Deputy runs as a shared service (server mode).
+	EntrypointsService = []Entrypoint{
+		EntrypointServiceScanRequest,
+		EntrypointServiceListRequest,
+		EntrypointServiceSBOMRequest,
+		EntrypointServiceDiffRequest,
+		EntrypointServiceSecretsRequest,
+		EntrypointServiceGraphRequest,
+	}
 
 	// AllEntrypoints contains every canonical entrypoint defined in Deputy.
-	AllEntrypoints = slices.Concat(EntrypointsProxy, EntrypointsScan, EntrypointsDiff, EntrypointsContainerDiff, EntrypointsSBOM, EntrypointsFix, EntrypointsTriage, EntrypointsDockerfile, EntrypointsSecrets)
+	AllEntrypoints = slices.Concat(EntrypointsProxy, EntrypointsScan, EntrypointsDiff, EntrypointsContainerDiff, EntrypointsSBOM, EntrypointsFix, EntrypointsTriage, EntrypointsDockerfile, EntrypointsSecrets, EntrypointsService)
 
 	allowedEntrypointsSet = buildEntrypointSet(AllEntrypoints)
-	allowedCommands       = []string{"proxy", "scan", "diff", "sbom", "fix", "triage", "secrets"}
+	allowedCommands       = []string{"proxy", "scan", "diff", "sbom", "fix", "triage", "secrets", "server"}
 	allowedCommandsSet    = buildSet(allowedCommands)
 )
 

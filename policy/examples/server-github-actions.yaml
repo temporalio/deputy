@@ -1,0 +1,216 @@
+# Deputy Server Configuration for GitHub Actions OIDC
+#
+# This example shows how to configure Deputy server to accept GitHub Actions
+# OIDC tokens, enabling CI/CD pipelines to scan repositories without managing
+# long-lived secrets.
+#
+# GitHub Actions can request OIDC tokens using the `id-token: write` permission.
+# These tokens are short-lived (default 10 minutes) and contain claims about
+# the workflow execution context.
+#
+# SETUP INSTRUCTIONS:
+#
+# 1. Configure your Deputy server with this auth configuration:
+#
+#    auth:
+#      mode: required
+#      jwks:
+#        url: https://token.actions.githubusercontent.com/.well-known/jwks
+#      issuers:
+#        - https://token.actions.githubusercontent.com
+#      audiences:
+#        - https://deputy.example.com  # Your Deputy server URL
+#
+# 2. In your GitHub Actions workflow:
+#
+#    jobs:
+#      scan:
+#        runs-on: ubuntu-latest
+#        permissions:
+#          id-token: write   # Required for OIDC
+#          contents: read    # For checking out code
+#        steps:
+#          - uses: actions/checkout@v4
+#
+#          - name: Get OIDC Token
+#            id: token
+#            run: |
+#              TOKEN=$(curl -sLS -H "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
+#                "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=https://deputy.example.com" | jq -r '.value')
+#              echo "token=$TOKEN" >> $GITHUB_OUTPUT
+#
+#          - name: Scan with Deputy
+#            run: |
+#              deputy --server https://deputy.example.com scan .
+#            env:
+#              DEPUTY_AUTH_TOKEN: ${{ steps.token.outputs.token }}
+#
+# The policies below restrict access based on GitHub Actions token claims.
+
+policies:
+  # =============================================================================
+  # Organization and Repository Restrictions
+  # =============================================================================
+
+  - name: require-trusted-organization
+    description: Only allow workflows from your GitHub organization
+    entrypoints:
+      - service_scan_request
+      - service_list_request
+      - service_sbom_request
+      - service_diff_request
+      - service_secrets_request
+      - service_graph_request
+    rules:
+      - action: deny
+        when: |
+          jwt.?iss.orValue("") == "https://token.actions.githubusercontent.com" &&
+          jwt.?repository_owner.orValue("") != "your-organization"
+        reason: "Only workflows from your-organization are allowed"
+        remediation: |
+          This Deputy server only accepts requests from workflows in the
+          'your-organization' GitHub organization. If you need access,
+          contact the security team.
+
+  # =============================================================================
+  # Branch and Tag Restrictions
+  # =============================================================================
+
+  - name: production-scan-from-main
+    description: Production vulnerability scans must run from main branch
+    entrypoints:
+      - service_scan_request
+    rules:
+      - action: warn
+        when: |
+          jwt.?iss.orValue("") == "https://token.actions.githubusercontent.com" &&
+          jwt.?ref.orValue("") != "refs/heads/main" &&
+          !jwt.?ref.orValue("").startsWith("refs/tags/v")
+        reason: |
+          Scan running from non-production branch. Results may differ from
+          production. Consider scanning from main branch or a release tag.
+
+  # =============================================================================
+  # Workflow Restrictions
+  # =============================================================================
+
+  - name: require-security-workflow
+    description: Secrets scanning must use the official security workflow
+    entrypoints:
+      - service_secrets_request
+    rules:
+      - action: deny
+        when: |
+          jwt.?iss.orValue("") == "https://token.actions.githubusercontent.com" &&
+          !jwt.?job_workflow_ref.orValue("").matches(
+            "^your-organization/\\.github/.github/workflows/security-scan\\.yml@refs/heads/main$"
+          )
+        reason: "Secrets scanning requires the official reusable workflow"
+        remediation: |
+          Use the official security scanning workflow:
+
+          jobs:
+            secrets-scan:
+              uses: your-organization/.github/.github/workflows/security-scan.yml@main
+              permissions:
+                id-token: write
+
+  # =============================================================================
+  # Pull Request Security
+  # =============================================================================
+
+  - name: restrict-pr-secrets-scan
+    description: |
+      Prevent secrets scanning on PRs from forks which could exfiltrate data.
+      Only allow from PRs within the same repository.
+    entrypoints:
+      - service_secrets_request
+    rules:
+      - action: deny
+        when: |
+          jwt.?iss.orValue("") == "https://token.actions.githubusercontent.com" &&
+          jwt.?event_name.orValue("") == "pull_request" &&
+          jwt.?head_ref.orValue("") != "" &&
+          !jwt.?head_ref.orValue("").startsWith("refs/heads/")
+        reason: "Secrets scanning not allowed on pull requests from forks"
+        remediation: |
+          Secrets scanning is restricted on pull requests to prevent
+          exfiltration in fork-based PRs. Use the repository's main branch
+          for secrets scanning, or configure pull_request_target with
+          appropriate safeguards.
+
+  # =============================================================================
+  # Runner Environment Restrictions
+  # =============================================================================
+
+  - name: require-github-hosted-runners
+    description: Require GitHub-hosted runners for sensitive operations
+    entrypoints:
+      - service_secrets_request
+    rules:
+      - action: deny
+        when: |
+          jwt.?iss.orValue("") == "https://token.actions.githubusercontent.com" &&
+          jwt.?runner_environment.orValue("") == "self-hosted"
+        reason: "Secrets scanning requires GitHub-hosted runners"
+        remediation: |
+          Self-hosted runners may have cached secrets or network access
+          that could leak scan results. Use GitHub-hosted runners for
+          secrets scanning.
+
+  # =============================================================================
+  # Actor Restrictions
+  # =============================================================================
+
+  - name: restrict-bot-accounts
+    description: Restrict certain operations from bot accounts
+    entrypoints:
+      - service_secrets_request
+    rules:
+      - action: warn
+        when: |
+          jwt.?iss.orValue("") == "https://token.actions.githubusercontent.com" &&
+          jwt.?actor.orValue("").endsWith("[bot]")
+        reason: |
+          Secrets scan triggered by bot account. Ensure this is expected
+          automated behavior and audit logs are being monitored.
+
+  # =============================================================================
+  # Audit and Compliance
+  # =============================================================================
+
+  - name: audit-security-scans
+    description: Log all security-related scans for compliance
+    entrypoints:
+      - service_scan_request
+      - service_secrets_request
+    rules:
+      - action: warn
+        when: |
+          jwt.?iss.orValue("") == "https://token.actions.githubusercontent.com" &&
+          jwt.?repository.orValue("").matches(".*-(prod|production|prd).*")
+        reason: |
+          Security scan on production repository.
+          Repository: ${jwt.repository}
+          Workflow: ${jwt.workflow}
+          Actor: ${jwt.actor}
+          Ref: ${jwt.ref}
+
+  # =============================================================================
+  # Allow Rule (Final)
+  # =============================================================================
+
+  - name: allow-github-actions
+    description: Allow authenticated GitHub Actions workflows
+    entrypoints:
+      - service_scan_request
+      - service_list_request
+      - service_sbom_request
+      - service_diff_request
+      - service_graph_request
+    rules:
+      - action: allow
+        when: |
+          jwt.?iss.orValue("") == "https://token.actions.githubusercontent.com" &&
+          jwt.?repository_owner.orValue("") == "your-organization"
+        reason: "Authenticated GitHub Actions workflow from trusted organization"

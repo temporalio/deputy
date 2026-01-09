@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"crypto/tls"
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
@@ -22,8 +23,10 @@ import (
 	"github.com/picatz/deputy/gen/deputy/sbom/v1/sbomv1connect"
 	"github.com/picatz/deputy/gen/deputy/scan/v1/scanv1connect"
 	"github.com/picatz/deputy/gen/deputy/secrets/v1/secretsv1connect"
+	"github.com/picatz/deputy/internal/auth/jwt"
 	"github.com/picatz/deputy/internal/logs"
 	"github.com/picatz/deputy/internal/otel"
+	"github.com/picatz/deputy/internal/policy"
 )
 
 // Config configures the Deputy server.
@@ -54,6 +57,11 @@ type Config struct {
 
 	// MaxRequestBodyBytes limits request body size (default: 10MB).
 	MaxRequestBodyBytes int64
+
+	// Policies lists paths to policy files for service-level authorization.
+	// These policies are evaluated at service_* entrypoints to control
+	// which users/services can perform which operations on which targets.
+	Policies []string
 }
 
 // TLSConfig configures TLS for the server.
@@ -95,19 +103,69 @@ type CORSConfig struct {
 	MaxAge int
 }
 
-// AuthConfig configures authentication.
+// AuthConfig configures authentication for the server.
+// This uses the same JWT infrastructure as the proxy (internal/auth/jwt).
 type AuthConfig struct {
+	// Mode determines how authentication is enforced.
+	// - "required": requests without valid tokens are rejected (401)
+	// - "optional": tokens are validated if present, anonymous access allowed
+	// - "disabled": no authentication (default for backward compatibility)
+	Mode string
+
+	// JWKS configures JSON Web Key Set endpoints for key discovery.
+	JWKS *JWKSConfig
+
+	// StaticKeys provides inline public keys for validation.
+	// Useful for development, testing, or air-gapped environments.
+	StaticKeys []StaticKeyConfig
+
+	// Issuers lists trusted token issuers (iss claim).
+	// If empty, issuer validation is skipped.
+	Issuers []string
+
+	// Audiences lists expected audiences (aud claim).
+	// If empty, audience validation is skipped.
+	Audiences []string
+
+	// RequiredClaims specifies claims that must be present in tokens.
+	RequiredClaims []string
+
+	// ClockSkew allows for clock drift when validating exp/nbf/iat.
+	// Defaults to 0 (no skew allowed). Maximum 5 minutes.
+	ClockSkew time.Duration
+
+	// Deprecated: Use Mode="required" or Mode="optional" instead.
 	// Enabled turns authentication on/off.
 	Enabled bool
 
+	// Deprecated: Use JWKS.URL instead.
 	// JWKSURL is the URL to fetch JSON Web Key Sets.
 	JWKSURL string
+}
 
-	// Issuers is a list of allowed token issuers.
-	Issuers []string
+// JWKSConfig configures JWKS endpoint discovery.
+type JWKSConfig struct {
+	// URL is the JWKS endpoint (e.g., https://issuer/.well-known/jwks.json).
+	URL string
 
-	// Audiences is a list of allowed token audiences.
-	Audiences []string
+	// OIDCDiscovery enables OIDC discovery from issuer URL.
+	// When true, URL should be the issuer URL; JWKS URI is auto-discovered.
+	OIDCDiscovery bool
+
+	// RefreshInterval controls background JWKS refresh (default: 1h).
+	RefreshInterval time.Duration
+}
+
+// StaticKeyConfig defines an inline public key.
+type StaticKeyConfig struct {
+	// KeyID is the key identifier (matches JWT header "kid").
+	KeyID string
+
+	// Algorithm specifies the signing algorithm (e.g., RS256, ES256, EdDSA).
+	Algorithm string
+
+	// PublicKey is the PEM-encoded public key.
+	PublicKey string
 }
 
 // RateLimitConfig configures rate limiting.
@@ -135,9 +193,11 @@ func DefaultConfig() Config {
 
 // Server is the Deputy gRPC/Connect server.
 type Server struct {
-	config     Config
-	httpServer *http.Server
-	mux        *http.ServeMux
+	config        Config
+	httpServer    *http.Server
+	mux           *http.ServeMux
+	authenticator jwt.Authenticator  // JWT authenticator (nil if auth disabled)
+	policies      []policy.Source    // Loaded policy sources (nil if no policies)
 }
 
 // New creates a new Deputy server with the given configuration.
@@ -167,6 +227,37 @@ func New(cfg Config) *Server {
 	// Add OpenTelemetry tracing middleware
 	handler = otel.InstrumentedMiddleware("deputy.server")(handler)
 
+	// Initialize JWT authenticator if auth is configured
+	var authenticator jwt.Authenticator
+	authMode := getAuthMode(cfg.Auth)
+
+	if authMode != jwt.ModeDisabled {
+		jwtConfig := buildJWTConfig(cfg.Auth)
+		if jwtConfig != nil {
+			auth, err := jwt.NewAuthenticator(jwtConfig)
+			if err != nil {
+				logs.Error(context.Background(), "failed to create JWT authenticator", "error", err)
+			} else {
+				authenticator = auth
+			}
+		}
+	}
+
+	// Load policies if configured
+	var policies []policy.Source
+	if len(cfg.Policies) > 0 {
+		var err error
+		policies, err = policy.LoadSources(cfg.Policies)
+		if err != nil {
+			logs.Error(context.Background(), "failed to load policies", "error", err, "paths", cfg.Policies)
+		} else {
+			logs.Info(context.Background(), "loaded server policies",
+				"count", len(policies),
+				"paths", cfg.Policies,
+			)
+		}
+	}
+
 	// Create Connect interceptors
 	otelInterceptor, _ := otelconnect.NewInterceptor()
 	interceptors := []connect.Interceptor{
@@ -176,8 +267,13 @@ func New(cfg Config) *Server {
 	}
 
 	// Add auth interceptor if configured
-	if cfg.Auth != nil && cfg.Auth.Enabled {
-		interceptors = append(interceptors, authInterceptor(cfg.Auth))
+	if authenticator != nil {
+		interceptors = append(interceptors, authInterceptor(authenticator, authMode))
+	}
+
+	// Add policy interceptor if policies are configured
+	if len(policies) > 0 {
+		interceptors = append(interceptors, policyInterceptor(policies))
 	}
 
 	// Create service handlers
@@ -270,9 +366,11 @@ func New(cfg Config) *Server {
 	}
 
 	return &Server{
-		config:     cfg,
-		httpServer: httpServer,
-		mux:        mux,
+		config:        cfg,
+		httpServer:    httpServer,
+		mux:           mux,
+		authenticator: authenticator,
+		policies:      policies,
 	}
 }
 
@@ -311,6 +409,74 @@ func buildTLSConfig(cfg *TLSConfig) (*tls.Config, error) {
 	}
 
 	return tlsConfig, nil
+}
+
+// getAuthMode returns the effective auth mode from config.
+// For servers, we only support "required" or "disabled" (not "optional").
+func getAuthMode(cfg *AuthConfig) jwt.Mode {
+	if cfg == nil {
+		return jwt.ModeDisabled
+	}
+
+	// Handle deprecated Enabled field for backward compatibility
+	if cfg.Enabled && cfg.Mode == "" {
+		return jwt.ModeRequired
+	}
+
+	switch strings.ToLower(cfg.Mode) {
+	case "required":
+		return jwt.ModeRequired
+	case "disabled", "":
+		return jwt.ModeDisabled
+	default:
+		// For server mode, treat unknown modes as disabled
+		logs.Warn(context.Background(), "unknown auth mode, defaulting to disabled",
+			"mode", cfg.Mode,
+			"hint", "server supports 'required' or 'disabled'")
+		return jwt.ModeDisabled
+	}
+}
+
+// buildJWTConfig converts server AuthConfig to the jwt.Config used by internal/auth/jwt.
+func buildJWTConfig(cfg *AuthConfig) *jwt.Config {
+	if cfg == nil {
+		return nil
+	}
+
+	jwtCfg := &jwt.Config{
+		Mode:           cfg.Mode,
+		Issuers:        cfg.Issuers,
+		Audiences:      cfg.Audiences,
+		RequiredClaims: cfg.RequiredClaims,
+		ClockSkew:      cfg.ClockSkew,
+	}
+
+	// Handle deprecated JWKSURL field
+	if cfg.JWKSURL != "" && cfg.JWKS == nil {
+		jwtCfg.JWKS = &jwt.JWKSConfig{
+			URL: cfg.JWKSURL,
+		}
+	}
+
+	// Copy JWKS config if present
+	if cfg.JWKS != nil {
+		jwtCfg.JWKS = &jwt.JWKSConfig{
+			URL:             cfg.JWKS.URL,
+			OIDCDiscovery:   cfg.JWKS.OIDCDiscovery,
+			RefreshInterval: cfg.JWKS.RefreshInterval,
+		}
+	}
+
+	// Copy static keys if present
+	for _, sk := range cfg.StaticKeys {
+		jwtCfg.StaticKeys = append(jwtCfg.StaticKeys, jwt.StaticKeyConfig{
+			KeyID:     sk.KeyID,
+			Algorithm: sk.Algorithm,
+			PublicKey: sk.PublicKey,
+		})
+	}
+
+	return jwtCfg
 }
 
 // ListenAndServe starts the server and blocks until it stops.
@@ -518,35 +684,215 @@ func recoveryInterceptor() connect.UnaryInterceptorFunc {
 	}
 }
 
-// authInterceptor validates JWT tokens.
-func authInterceptor(cfg *AuthConfig) connect.UnaryInterceptorFunc {
+// authInterceptor validates JWT tokens using the shared jwt.Authenticator.
+// It validates signatures, expiration, issuer, audience, and required claims.
+// On success, claims are stored in context via jwt.ContextWithClaims for handlers.
+func authInterceptor(auth jwt.Authenticator, mode jwt.Mode) connect.UnaryInterceptorFunc {
 	return func(next connect.UnaryFunc) connect.UnaryFunc {
 		return func(ctx context.Context, req connect.AnyRequest) (connect.AnyResponse, error) {
-			// Skip auth for health endpoints (handled at HTTP level)
 			procedure := req.Spec().Procedure
 
-			// Get authorization header
-			authHeader := req.Header().Get("Authorization")
-			if authHeader == "" {
-				return nil, connect.NewError(connect.CodeUnauthenticated, fmt.Errorf("missing authorization header"))
+			// Create a minimal http.Request for the authenticator
+			// (it needs the Authorization header)
+			httpReq := &http.Request{
+				Header: http.Header{},
+			}
+			if authHeader := req.Header().Get("Authorization"); authHeader != "" {
+				httpReq.Header.Set("Authorization", authHeader)
 			}
 
-			// Extract token
-			parts := strings.SplitN(authHeader, " ", 2)
-			if len(parts) != 2 || !strings.EqualFold(parts[0], "bearer") {
-				return nil, connect.NewError(connect.CodeUnauthenticated, fmt.Errorf("invalid authorization header format"))
+			// Authenticate using the shared JWT infrastructure
+			claims, err := auth.Authenticate(ctx, httpReq)
+			if err != nil {
+				// Convert jwt.Error to Connect error
+				var jwtErr *jwt.Error
+				if errors.As(err, &jwtErr) {
+					code := connect.CodeUnauthenticated
+					if jwtErr.Code == jwt.CodeInvalidIssuer ||
+						jwtErr.Code == jwt.CodeInvalidAudience ||
+						jwtErr.Code == jwt.CodeMissingClaim {
+						code = connect.CodePermissionDenied
+					}
+					logs.Warn(ctx, "authentication failed",
+						"procedure", procedure,
+						"code", jwtErr.Code,
+						"message", jwtErr.Message,
+					)
+					return nil, connect.NewError(code, fmt.Errorf("%s: %s", jwtErr.Code, jwtErr.Message))
+				}
+				logs.Error(ctx, "authentication error", "procedure", procedure, "error", err)
+				return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("authentication error"))
 			}
-			token := parts[1]
 
-			// TODO: Validate JWT token against JWKS
-			// For now, just check that a token exists
-			if token == "" {
-				return nil, connect.NewError(connect.CodeUnauthenticated, fmt.Errorf("empty token"))
+			// Check if auth is required but no token was provided
+			if claims == nil && mode == jwt.ModeRequired {
+				logs.Debug(ctx, "authentication required but no token provided", "procedure", procedure)
+				return nil, connect.NewError(connect.CodeUnauthenticated, fmt.Errorf("authentication required"))
 			}
 
-			logs.Debug(ctx, "request authenticated", "procedure", procedure)
+			// Store claims in context for handlers to access
+			if claims != nil {
+				ctx = jwt.ContextWithClaims(ctx, claims)
+				logs.Debug(ctx, "request authenticated",
+					"procedure", procedure,
+					"subject", claims.Subject,
+				)
+			}
 
 			return next(ctx, req)
 		}
 	}
 }
+
+// policyInterceptor evaluates service-level policies for authorization.
+// It maps RPC procedures to policy entrypoints and evaluates policies with
+// JWT claims (jwt.*), request metadata, and target information.
+func policyInterceptor(policies []policy.Source) connect.UnaryInterceptorFunc {
+	// Map RPC procedures to policy entrypoints
+	procedureToEntrypoint := map[string]policy.Entrypoint{
+		"/deputy.scan.v1.ScanService/Scan":           policy.EntrypointServiceScanRequest,
+		"/deputy.scan.v1.ScanService/StreamScan":     policy.EntrypointServiceScanRequest,
+		"/deputy.list.v1.ListService/ListPackages":   policy.EntrypointServiceListRequest,
+		"/deputy.list.v1.ListService/ListEcosystems": policy.EntrypointServiceListRequest,
+		"/deputy.sbom.v1.SBOMService/Generate":       policy.EntrypointServiceSBOMRequest,
+		"/deputy.sbom.v1.SBOMService/Diff":           policy.EntrypointServiceSBOMRequest,
+		"/deputy.diff.v1.DiffService/Diff":           policy.EntrypointServiceDiffRequest,
+		"/deputy.secrets.v1.SecretsService/Scan":     policy.EntrypointServiceSecretsRequest,
+		"/deputy.graph.v1.GraphService/Resolve":      policy.EntrypointServiceGraphRequest,
+		"/deputy.graph.v1.GraphService/Why":          policy.EntrypointServiceGraphRequest,
+	}
+
+	return func(next connect.UnaryFunc) connect.UnaryFunc {
+		return func(ctx context.Context, req connect.AnyRequest) (connect.AnyResponse, error) {
+			procedure := req.Spec().Procedure
+
+			// Get the entrypoint for this procedure
+			entrypoint, ok := procedureToEntrypoint[procedure]
+			if !ok {
+				// No policy entrypoint for this procedure, allow by default
+				return next(ctx, req)
+			}
+
+			// Build the policy payload
+			payload := buildPolicyPayload(ctx, req, entrypoint)
+
+			// Evaluate policies
+			actions, err := policy.EvaluateAll(ctx, policies, payload)
+			if err != nil {
+				logs.Error(ctx, "policy evaluation failed",
+					"procedure", procedure,
+					"entrypoint", entrypoint,
+					"error", err,
+				)
+				// On policy error, fail closed (deny)
+				return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("policy evaluation error"))
+			}
+
+			// Check for deny actions
+			for _, action := range actions {
+				if policy.ActionTypeIs(action.Type, policy.ActionDeny) {
+					logs.Warn(ctx, "request denied by policy",
+						"procedure", procedure,
+						"entrypoint", entrypoint,
+						"policy", action.Source,
+						"reason", action.Reason,
+					)
+					code := connect.CodePermissionDenied
+					if action.Status != nil {
+						switch *action.Status {
+						case 401:
+							code = connect.CodeUnauthenticated
+						case 403:
+							code = connect.CodePermissionDenied
+						case 400:
+							code = connect.CodeInvalidArgument
+						}
+					}
+					msg := action.Reason
+					if msg == "" {
+						msg = "denied by policy"
+					}
+					return nil, connect.NewError(code, fmt.Errorf("%s", msg))
+				}
+			}
+
+			// Log warnings but allow the request
+			for _, action := range actions {
+				if policy.ActionTypeIs(action.Type, policy.ActionWarn) {
+					logs.Warn(ctx, "policy warning",
+						"procedure", procedure,
+						"entrypoint", entrypoint,
+						"policy", action.Source,
+						"reason", action.Reason,
+					)
+				}
+			}
+
+			return next(ctx, req)
+		}
+	}
+}
+
+// buildPolicyPayload constructs the payload map for policy evaluation.
+// It includes JWT claims, request metadata, target info, and env context.
+func buildPolicyPayload(ctx context.Context, req connect.AnyRequest, entrypoint policy.Entrypoint) map[string]any {
+	payload := make(map[string]any)
+
+	// Add env context
+	payload["env"] = map[string]any{
+		"command":    "server",
+		"entrypoint": entrypoint.String(),
+	}
+
+	// Add JWT claims if present
+	if claims := jwt.ClaimsFromContext(ctx); claims != nil {
+		payload["jwt"] = claims.ToMap()
+	} else {
+		payload["jwt"] = jwt.AnonymousClaims()
+	}
+
+	// Add request metadata
+	// The request object contains information about what operation is being requested
+	requestInfo := map[string]any{
+		"procedure": req.Spec().Procedure,
+	}
+
+	// Try to extract target from the request message
+	// This is a best-effort extraction from protobuf messages
+	if msg := req.Any(); msg != nil {
+		if target := extractTargetFromMessage(msg); target != "" {
+			requestInfo["target"] = target
+			payload["target"] = map[string]any{
+				"display": target,
+			}
+		}
+	}
+
+	payload["request"] = requestInfo
+
+	return payload
+}
+
+// extractTargetFromMessage attempts to extract the target field from request messages.
+// This uses type assertions for known request types with GetTarget/GetPath methods.
+func extractTargetFromMessage(msg any) string {
+	// Check for Target field (most scan/list/sbom requests)
+	if m, ok := msg.(interface{ GetTarget() string }); ok {
+		return m.GetTarget()
+	}
+
+	// Check for BaseTarget (diff requests)
+	if m, ok := msg.(interface{ GetBaseTarget() string }); ok {
+		if base := m.GetBaseTarget(); base != "" {
+			return base
+		}
+	}
+
+	// Check for Path (secrets requests)
+	if m, ok := msg.(interface{ GetPath() string }); ok {
+		return m.GetPath()
+	}
+
+	return ""
+}
+

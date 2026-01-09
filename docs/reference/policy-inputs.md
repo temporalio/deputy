@@ -60,6 +60,7 @@ Each command emits one or more entrypoints when `--policy` is provided:
 | `deputy fix` | `fix_plan`, `fix_plan_step` |
 | `deputy triage` | `triage_report`, `triage_cluster` |
 | `deputy proxy` | `go_artifact_request`, `npm_artifact_request`, `pypi_artifact_request`, `rubygems_artifact_request`, `oci_artifact_request` |
+| `deputy server` (API requests) | `service_scan_request`, `service_list_request`, `service_sbom_request`, `service_diff_request`, `service_secrets_request`, `service_graph_request` |
 
 > **Note**: `deputy diff` auto-detects whether you're comparing git refs or container images based on the reference format. Container image refs look like `image:tag` or contain registry paths (e.g., `ghcr.io/org/app:v1`).
 

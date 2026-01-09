@@ -134,9 +134,10 @@ For local filesystem analysis, use in-process mode (the default) instead.
 For production deployments, consider:
 
 1. **TLS termination**: Use a reverse proxy (nginx, Caddy) for HTTPS
-2. **Authentication**: Implement JWT/OIDC at the proxy layer
-3. **Rate limiting**: Protect against abuse
-4. **Monitoring**: Enable OpenTelemetry for observability
+2. **Authentication**: Enable JWT/OIDC authentication (see below)
+3. **Authorization**: Use CEL policies for RBAC/ABAC
+4. **Rate limiting**: Protect against abuse
+5. **Monitoring**: Enable OpenTelemetry for observability
 
 ```console
 # Enable OpenTelemetry
@@ -144,6 +145,54 @@ $ DEPUTY_OTEL_ENABLED=true \
   OTEL_EXPORTER_OTLP_ENDPOINT=localhost:4317 \
   deputy server
 ```
+
+### Authentication & Authorization
+
+The server supports JWT/OIDC authentication and CEL-based authorization policies for multi-tenant deployments:
+
+```yaml
+# Server configuration
+auth:
+  mode: "required"  # "required" or "disabled"
+  jwks:
+    url: "https://auth.example.com/.well-known/jwks.json"
+    oidc_discovery: true
+  issuers: ["https://auth.example.com"]
+  audiences: ["deputy-server"]
+  required_claims: ["sub", "tenant"]
+
+policies:
+  - "policies/server-authz.yaml"
+```
+
+Service-level policy entrypoints enable authorization based on JWT claims:
+
+| Entrypoint | Operations |
+|------------|------------|
+| `service_scan_request` | Scan, StreamScan |
+| `service_list_request` | ListPackages, ListEcosystems |
+| `service_sbom_request` | Generate, Diff |
+| `service_diff_request` | Diff |
+| `service_secrets_request` | Scan |
+| `service_graph_request` | Resolve, Why |
+
+Example authorization policy:
+
+```yaml
+# policies/server-authz.yaml
+policies:
+  - name: tenant-isolation
+    entrypoints: ["service_scan_request"]
+    rules:
+      - action: deny
+        when: |
+          has(jwt.tenant) &&
+          has(request.target) &&
+          !request.target.contains(jwt.tenant)
+        reason: "Cross-tenant access denied"
+```
+
+See [AGENTS.md](../../AGENTS.md#server-authentication--multi-tenancy) for comprehensive multi-tenant configuration.
 
 ## Exit Codes
 

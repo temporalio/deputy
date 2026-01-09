@@ -1,0 +1,167 @@
+# Service-level authorization policies for multi-tenant Deputy deployments.
+#
+# These policies evaluate at service_* entrypoints BEFORE operations execute,
+# enabling RBAC/ABAC based on JWT claims for shared service deployments.
+#
+# Variables available at service entrypoints:
+#   - jwt: JWT claims (jwt.sub, jwt.tenant, jwt.roles, jwt.teams, jwt.scopes, etc.)
+#   - request: Request metadata (request.procedure, request.target)
+#   - target: Target info (target.display)
+#   - env: Context (env.command = "server", env.entrypoint)
+#
+# Example JWT token structure:
+# {
+#   "sub": "user:alice@acme.com",
+#   "tenant": "acme-corp",
+#   "roles": ["developer", "scanner"],
+#   "teams": ["platform"],
+#   "scopes": ["scan", "sbom"]
+# }
+#
+# SECURITY CONSIDERATIONS:
+#
+# 1. Tenant Isolation: The tenant-isolation policy below uses path-based matching.
+#    For strict isolation, ensure your target naming convention includes the tenant
+#    as a distinct path component (e.g., "github.com/acme-corp/repo") rather than
+#    a substring. The policy uses matches() with word boundaries for safety.
+#
+# 2. Required Claims: Consider adding 'tenant' to auth.required_claims in your
+#    server config to ensure all authenticated requests have a tenant claim.
+#
+# 3. Admin Override: The admin-full-access policy allows admins to bypass tenant
+#    isolation. Audit log admin actions carefully in production.
+
+policies:
+  # Require tenant claim for authenticated users (defense in depth)
+  - name: require-tenant-claim
+    description: Ensure all authenticated users have a tenant identifier
+    entrypoints:
+      - service_scan_request
+      - service_sbom_request
+      - service_diff_request
+      - service_secrets_request
+      - service_graph_request
+    rules:
+      - action: deny
+        when: |
+          !jwt.anonymous &&
+          (!has(jwt.tenant) || jwt.tenant == "")
+        reason: "Tenant claim required for multi-tenant access"
+        remediation: "Ensure your identity provider includes a 'tenant' claim in tokens"
+
+  # Tenant isolation - users can only access their tenant's resources
+  # Uses path-based matching with word boundaries for security
+  - name: tenant-isolation
+    description: |
+      Restricts users to resources within their tenant namespace.
+      Uses regex matching with word boundaries to prevent bypass via substring matching.
+      Example: tenant "acme" can access "github.com/acme/repo" but NOT "github.com/acme-competitor/repo"
+    entrypoints:
+      - service_scan_request
+      - service_sbom_request
+      - service_diff_request
+      - service_secrets_request
+    rules:
+      - action: deny
+        when: |
+          !jwt.anonymous &&
+          has(jwt.tenant) &&
+          jwt.tenant != "" &&
+          has(request.target) &&
+          request.target != "" &&
+          !request.target.matches("(^|[/:])" + jwt.tenant + "([/:]|$)")
+        reason: "Cross-tenant access denied - target does not belong to your tenant"
+        remediation: "You can only access resources within your tenant namespace"
+
+  # Require authentication for all operations
+  - name: require-authentication
+    entrypoints:
+      - service_scan_request
+      - service_list_request
+      - service_sbom_request
+      - service_diff_request
+      - service_secrets_request
+      - service_graph_request
+    rules:
+      - action: deny
+        when: jwt.anonymous
+        reason: "Authentication required"
+        remediation: "Provide a valid JWT token in the Authorization header"
+
+  # Role-based access for scanning operations
+  - name: require-scanner-role
+    entrypoints:
+      - service_scan_request
+      - service_secrets_request
+    rules:
+      - action: deny
+        when: |
+          !jwt.anonymous &&
+          !jwt.?roles.orValue([]).exists(r, r in ["scanner", "security", "admin"])
+        reason: "Scanner, security, or admin role required for scan operations"
+        remediation: "Request the 'scanner' role from your administrator"
+
+  # Team-based access for sensitive operations
+  - name: secrets-requires-security-team
+    entrypoints:
+      - service_secrets_request
+    rules:
+      - action: deny
+        when: |
+          !jwt.anonymous &&
+          !jwt.?teams.orValue([]).exists(t, t in ["security", "sre", "platform"])
+        reason: "Security, SRE, or platform team membership required"
+        remediation: "Secrets scanning is restricted to security-related teams"
+
+  # Service account scope validation
+  - name: service-account-scopes
+    entrypoints:
+      - service_scan_request
+      - service_sbom_request
+      - service_diff_request
+      - service_secrets_request
+      - service_graph_request
+    rules:
+      - action: deny
+        when: |
+          jwt.?sub.orValue("").startsWith("sa:") &&
+          env.entrypoint == "service_scan_request" &&
+          !jwt.?scopes.orValue([]).exists(s, s == "scan")
+        reason: "Service account lacks 'scan' scope"
+      - action: deny
+        when: |
+          jwt.?sub.orValue("").startsWith("sa:") &&
+          env.entrypoint == "service_sbom_request" &&
+          !jwt.?scopes.orValue([]).exists(s, s == "sbom")
+        reason: "Service account lacks 'sbom' scope"
+      - action: deny
+        when: |
+          jwt.?sub.orValue("").startsWith("sa:") &&
+          env.entrypoint == "service_secrets_request" &&
+          !jwt.?scopes.orValue([]).exists(s, s == "secrets")
+        reason: "Service account lacks 'secrets' scope"
+
+  # Admin override - admins can do everything
+  - name: admin-full-access
+    entrypoints:
+      - service_scan_request
+      - service_list_request
+      - service_sbom_request
+      - service_diff_request
+      - service_secrets_request
+      - service_graph_request
+    rules:
+      - action: allow
+        when: jwt.?roles.orValue([]).exists(r, r == "admin")
+        reason: "Admin access granted"
+
+  # Audit logging hint - add warning for high-privilege operations
+  - name: audit-privileged-access
+    entrypoints:
+      - service_secrets_request
+    rules:
+      - action: warn
+        when: |
+          !jwt.anonymous &&
+          jwt.?roles.orValue([]).exists(r, r == "admin")
+        reason: "Admin performing secrets scan - ensure audit logging is enabled"
