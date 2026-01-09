@@ -76,7 +76,7 @@ func TestBuildResultWithGraph(t *testing.T) {
 		pkgs:       pkgs,
 		direct:     direct,
 		findings:   []vulnerability.Finding{},
-		advisories: map[string]vulnerabilityv1.Advisory{},
+		advisories: map[string]*vulnerabilityv1.Advisory{},
 		queryErr:   nil,
 		opts:       Options{},
 		graph:      nil,

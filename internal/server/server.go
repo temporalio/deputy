@@ -33,7 +33,7 @@ type Config struct {
 	Addr string
 
 	// Scanner is the scan service to use. If nil, a default is created.
-	Scanner scan.Scanner
+	Scanner *scan.Service
 
 	// ReadTimeout is the maximum duration for reading the request.
 	ReadTimeout time.Duration

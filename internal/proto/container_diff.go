@@ -233,8 +233,7 @@ func compareContainerVulnerabilities(baseResult, targetResult *scan.Result) ([]*
 				baseFinding.Version, "",
 				baseFinding.LayerDetails, nil)
 			changes = append(changes, change)
-			advCopy := baseAdvisory
-			advisories[advisoryID] = &advCopy
+			advisories[advisoryID] = baseAdvisory
 		} else {
 			// Vulnerability persists
 			targetFinding := targetFindings[advisoryID]
@@ -244,8 +243,7 @@ func compareContainerVulnerabilities(baseResult, targetResult *scan.Result) ([]*
 				baseFinding.Version, targetFinding.Version,
 				baseFinding.LayerDetails, targetFinding.LayerDetails)
 			changes = append(changes, change)
-			advCopy := targetAdvisory
-			advisories[advisoryID] = &advCopy
+			advisories[advisoryID] = targetAdvisory
 		}
 	}
 
@@ -258,8 +256,7 @@ func compareContainerVulnerabilities(baseResult, targetResult *scan.Result) ([]*
 				"", targetFinding.Version,
 				nil, targetFinding.LayerDetails)
 			changes = append(changes, change)
-			advCopy := targetAdvisory
-			advisories[advisoryID] = &advCopy
+			advisories[advisoryID] = targetAdvisory
 		}
 	}
 
@@ -284,14 +281,22 @@ func wasVulnFixedByUpgrade(finding vulnerability.Finding, targetResult *scan.Res
 func buildVulnChangeProto(
 	advisoryID string,
 	changeKind diffv1.VulnerabilityChangeKind,
-	advisory vulnerabilityv1.Advisory,
+	advisory *vulnerabilityv1.Advisory,
 	pkgName, ecosystem, baseVersion, targetVersion string,
 	baseLayerDetails, targetLayerDetails *containerv1.LayerDetails,
 ) *diffv1.ContainerVulnerabilityChange {
 	var sevLevel, sevType string
-	if advisory.Severity != nil {
-		sevLevel = advisory.Severity.Level.String()
-		sevType = advisory.Severity.Type.String()
+	var fixedVersions []string
+	var summary string
+	var aliases []string
+	if advisory != nil {
+		if advisory.Severity != nil {
+			sevLevel = advisory.Severity.Level.String()
+			sevType = advisory.Severity.Type.String()
+		}
+		fixedVersions = advisory.FixedVersions
+		summary = advisory.Summary
+		aliases = advisory.Aliases
 	}
 
 	change := &diffv1.ContainerVulnerabilityChange{
@@ -303,13 +308,13 @@ func buildVulnChangeProto(
 		Ecosystem:     ecosystem,
 		BaseVersion:   baseVersion,
 		TargetVersion: targetVersion,
-		FixedVersions: advisory.FixedVersions,
-		Summary:       advisory.Summary,
-		Aliases:       advisory.Aliases,
+		FixedVersions: fixedVersions,
+		Summary:       summary,
+		Aliases:       aliases,
 	}
 
 	// Format published date if available
-	if pub := vulnerability.AdvisoryPublished(&advisory); !pub.IsZero() {
+	if pub := vulnerability.AdvisoryPublished(advisory); !pub.IsZero() {
 		change.Published = pub.Format("2006-01-02")
 	}
 

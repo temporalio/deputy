@@ -48,11 +48,11 @@ func mergeInventory(base, extra Inventory) Inventory {
 	return out
 }
 
-func mergeAdvisories(base, extra map[string]vulnerabilityv1.Advisory) map[string]vulnerabilityv1.Advisory {
+func mergeAdvisories(base, extra map[string]*vulnerabilityv1.Advisory) map[string]*vulnerabilityv1.Advisory {
 	if len(base) == 0 && len(extra) == 0 {
-		return map[string]vulnerabilityv1.Advisory{}
+		return map[string]*vulnerabilityv1.Advisory{}
 	}
-	out := make(map[string]vulnerabilityv1.Advisory, len(base)+len(extra))
+	out := make(map[string]*vulnerabilityv1.Advisory, len(base)+len(extra))
 	for id, adv := range base {
 		out[id] = adv
 	}

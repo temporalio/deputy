@@ -1,5 +1,7 @@
 buf.build/gen/go/bufbuild/protovalidate/protocolbuffers/go v1.36.10-20251209175733-2a1774d88802.1 h1:ZnX3qpF/pDiYrf+Q3p+/zCzZ5ELSpszy5hdVarDMSV4=
 buf.build/gen/go/bufbuild/protovalidate/protocolbuffers/go v1.36.10-20251209175733-2a1774d88802.1/go.mod h1:fUl8CEN/6ZAMk6bP8ahBJPUJw7rbp+j4x+wCcYi2IG4=
+buf.build/gen/go/pluginrpc/pluginrpc/protocolbuffers/go v1.34.2-20240828222655-5345c0a56177.2 h1:oSi+Adw4xvIjXrW8eY8QGR3sBdfWeY5HN/RefnRt52M=
+buf.build/gen/go/pluginrpc/pluginrpc/protocolbuffers/go v1.34.2-20240828222655-5345c0a56177.2/go.mod h1:GjH0gjlY/ns16X8d6eaXV2W+6IFwsO5Ly9WVnzyd1E0=
 buf.build/go/protovalidate v1.1.0 h1:pQqEQRpOo4SqS60qkvmhLTTQU9JwzEvdyiqAtXa5SeY=
 buf.build/go/protovalidate v1.1.0/go.mod h1:bGZcPiAQDC3ErCHK3t74jSoJDFOs2JH3d7LWuTEIdss=
 cel.dev/expr v0.24.0 h1:56OvJKSH3hDGL0ml5uSxZmz3/3Pq4tJ+fb1unVLAFcY=
@@ -719,6 +721,8 @@ modernc.org/token v1.1.0 h1:Xl7Ap9dKaEs5kLoOQeQmPWevfnk/DM5qcLcYlA8ys6Y=
 modernc.org/token v1.1.0/go.mod h1:UGzOrNV1mAFSEB63lOFHIpNRUVMvYTc6yu1SMY/XTDM=
 osv.dev/bindings/go v0.0.0-20250905014459-96958296f6f2 h1:He5Bz8d3bmbmG3m/rQL+rMU4ScJfOscPj6/kyceP4qU=
 osv.dev/bindings/go v0.0.0-20250905014459-96958296f6f2/go.mod h1:O/1EJT4Z1wm5S6h0BxKx7MyONP3zkJsHIZhqyF7JUJI=
+pluginrpc.com/pluginrpc v0.5.0 h1:tOQj2D35hOmvHyPu8e7ohW2/QvAnEtKscy2IJYWQ2yo=
+pluginrpc.com/pluginrpc v0.5.0/go.mod h1:UNWZ941hcVAoOZUn8YZsMmOZBzbUjQa3XMns8RQLp9o=
 sigs.k8s.io/release-utils v0.12.1 h1:3p9w137wBTTApHlL8izdJHcCuaBe8wZhQz+B0QIAaBE=
 sigs.k8s.io/release-utils v0.12.1/go.mod h1:0z7JOb7iQcuDQcemQw5CSVrkH8evRHY0DMMjcyRB1e4=
 sigs.k8s.io/yaml v1.4.0/go.mod h1:Ejl7/uTz7PSA4eKMyQCUTnhZYNmLIl+5c2lQPGR2BPY=

@@ -17,7 +17,7 @@ import (
 
 	scanv1 "github.com/picatz/deputy/gen/deputy/scan/v1"
 	"github.com/picatz/deputy/internal/cli/flags"
-	"github.com/picatz/deputy/internal/client"
+	"github.com/picatz/deputy/internal/services"
 	deputyerrors "github.com/picatz/deputy/internal/errors"
 	"github.com/picatz/deputy/internal/otel"
 	"github.com/picatz/deputy/internal/output"
@@ -50,7 +50,7 @@ type remediationPlanSummary struct {
 
 // AddFixCommand registers the fix subcommand with the root command.
 // It configures flags for report input, plan input, and AI agent options.
-func AddFixCommand(root *cobra.Command, c client.Client) {
+func AddFixCommand(root *cobra.Command, c *services.Clients) {
 	fixCmd := &cobra.Command{
 		Use:           "fix [repo]",
 		Aliases:       []string{"f"},
@@ -134,7 +134,7 @@ AI ASSISTANCE:
 // runFixPlan executes the fix command logic. It handles plan generation from
 // reports, existing plans, or fresh scans, and optionally applies fixes or
 // invokes AI agents.
-func runFixPlan(c client.Client, cmd *cobra.Command, args []string) error {
+func runFixPlan(c *services.Clients, cmd *cobra.Command, args []string) error {
 	ctx, span := otel.StartSpan(cmd.Context(), "deputy.fix",
 		trace.WithAttributes(
 			attribute.String("deputy.command", "fix"),
@@ -236,8 +236,8 @@ func runFixPlan(c client.Client, cmd *cobra.Command, args []string) error {
 			target = cwd
 		}
 
-		// Call client.Scan
-		resp, err := c.Scan(ctx, connect.NewRequest(&scanv1.ScanRequest{
+		// Call vulnerability scanner
+		resp, err := c.Vulns.Scan(ctx, connect.NewRequest(&scanv1.ScanRequest{
 			Target:  target,
 			Options: scanOpts,
 		}))

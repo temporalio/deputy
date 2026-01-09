@@ -16,19 +16,35 @@ import (
 
 // ScanHandler implements the ScanService ConnectRPC service.
 type ScanHandler struct {
-	scanner scan.Scanner
+	scanner   *scan.Service
+	localMode bool // Skip remote target validation for in-process usage
 }
 
 // Ensure ScanHandler implements the ScanServiceHandler interface.
 var _ scanv1connect.ScanServiceHandler = (*ScanHandler)(nil)
 
+// ScanHandlerOption configures a ScanHandler.
+type ScanHandlerOption func(*ScanHandler)
+
+// WithLocalMode enables local mode which skips remote target validation.
+// Use this for in-process clients that need to access local filesystems.
+func WithLocalMode() ScanHandlerOption {
+	return func(h *ScanHandler) {
+		h.localMode = true
+	}
+}
+
 // NewScanHandler creates a new ScanHandler with the provided scanner.
 // If scanner is nil, a default scan.Service is created.
-func NewScanHandler(scanner scan.Scanner) *ScanHandler {
+func NewScanHandler(scanner *scan.Service, opts ...ScanHandlerOption) *ScanHandler {
 	if scanner == nil {
 		scanner = scan.NewService()
 	}
-	return &ScanHandler{scanner: scanner}
+	h := &ScanHandler{scanner: scanner}
+	for _, opt := range opts {
+		opt(h)
+	}
+	return h
 }
 
 // Scan performs a vulnerability scan on a target.
@@ -41,9 +57,11 @@ func (h *ScanHandler) Scan(
 		return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("target is required"))
 	}
 
-	// Security: Validate target before processing
-	if err := validateTarget(target); err != nil {
-		return nil, connect.NewError(connect.CodeInvalidArgument, err)
+	// Security: Validate target before processing (skip in local mode)
+	if !h.localMode {
+		if err := validateTarget(target); err != nil {
+			return nil, connect.NewError(connect.CodeInvalidArgument, err)
+		}
 	}
 
 	logs.Info(ctx, "received scan request", "target", target)
@@ -139,9 +157,11 @@ func (h *ScanHandler) StreamScan(
 		return connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("target is required"))
 	}
 
-	// Security: Validate target before processing
-	if err := validateTarget(target); err != nil {
-		return connect.NewError(connect.CodeInvalidArgument, err)
+	// Security: Validate target before processing (skip in local mode)
+	if !h.localMode {
+		if err := validateTarget(target); err != nil {
+			return connect.NewError(connect.CodeInvalidArgument, err)
+		}
 	}
 
 	logs.Info(ctx, "received streaming scan request", "target", target)

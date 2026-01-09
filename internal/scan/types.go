@@ -162,7 +162,7 @@ type Result struct {
 	Inventory       Inventory
 
 	Findings   []vulnerability.Finding
-	Advisories map[string]vulnerabilityv1.Advisory
+	Advisories map[string]*vulnerabilityv1.Advisory
 	Stats      vulnerabilityv1.Stats
 
 	// Graph contains the resolved dependency graph with edges showing

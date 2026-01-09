@@ -14,7 +14,7 @@ import (
 	"github.com/google/osv-scalibr/extractor"
 	containerv1 "github.com/picatz/deputy/gen/deputy/container/v1"
 	diffv1 "github.com/picatz/deputy/gen/deputy/diff/v1"
-	"github.com/picatz/deputy/internal/client"
+	"github.com/picatz/deputy/internal/services"
 	"github.com/picatz/deputy/internal/compare"
 	gitx "github.com/picatz/deputy/internal/gitutil"
 	"github.com/picatz/deputy/internal/otel"
@@ -100,7 +100,7 @@ type containerDiffOpts struct {
 
 // runContainerDiff performs a semantic diff between two container images.
 // It compares packages, vulnerabilities, configuration, and layers.
-func runContainerDiff(ctx context.Context, c client.Client, baseRef, targetRef string, opts containerDiffOpts, outW, errW io.Writer) error {
+func runContainerDiff(ctx context.Context, c *services.Clients, baseRef, targetRef string, opts containerDiffOpts, outW, errW io.Writer) error {
 	ctx, span := otel.StartSpan(ctx, "deputy.container_diff",
 		trace.WithAttributes(
 			attribute.String("deputy.container_diff.base_ref", baseRef),
@@ -152,7 +152,7 @@ func runContainerDiff(ctx context.Context, c client.Client, baseRef, targetRef s
 	})
 
 	// Perform the diff via client
-	resp, err := c.DiffContainerImages(ctx, req)
+	resp, err := c.Diff.DiffContainerImages(ctx, req)
 	if err != nil {
 		otel.SetSpanError(span, err)
 		return fmt.Errorf("compare container images: %w", err)

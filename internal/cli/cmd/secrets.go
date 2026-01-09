@@ -13,7 +13,7 @@ import (
 	"connectrpc.com/connect"
 	git "github.com/go-git/go-git/v5"
 	secretsv1 "github.com/picatz/deputy/gen/deputy/secrets/v1"
-	"github.com/picatz/deputy/internal/client"
+	"github.com/picatz/deputy/internal/services"
 	"github.com/picatz/deputy/internal/container/image"
 	gitx "github.com/picatz/deputy/internal/gitutil"
 	internalproto "github.com/picatz/deputy/internal/proto"
@@ -43,7 +43,7 @@ type SecretsResult struct {
 }
 
 // AddSecretsCommand registers the secrets subcommand with the root command.
-func AddSecretsCommand(root *cobra.Command, c client.Client) {
+func AddSecretsCommand(root *cobra.Command, c *services.Clients) {
 	var (
 		formatFlag     string
 		includeGlob    string
@@ -322,7 +322,7 @@ FILTERING:
 			}
 
 			// Call the secrets service via client
-			resp, err := c.ScanSecrets(ctx, connect.NewRequest(&secretsv1.ScanRequest{
+			resp, err := c.Secrets.Scan(ctx, connect.NewRequest(&secretsv1.ScanRequest{
 				Target:  target,
 				Options: scanOpts,
 			}))

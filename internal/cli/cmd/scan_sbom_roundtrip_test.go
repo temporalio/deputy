@@ -53,7 +53,7 @@ func TestSBOMImageRoundTrip(t *testing.T) {
 
 	var calls [][]osv.PkgInput
 	svc := scan.NewServiceWithConfig(&scan.ServiceConfig{
-		QueryVulnerabilities: func(ctx context.Context, client osv.Client, inputs []osv.PkgInput) ([]vulnerability.Finding, map[string]vulnerabilityv1.Advisory, error) {
+		QueryVulnerabilities: func(ctx context.Context, client osv.Client, inputs []osv.PkgInput) ([]vulnerability.Finding, map[string]*vulnerabilityv1.Advisory, error) {
 			copied := append([]osv.PkgInput(nil), inputs...)
 			calls = append(calls, copied)
 			return nil, nil, nil

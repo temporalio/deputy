@@ -13,7 +13,7 @@ import (
 
 	scanv1 "github.com/picatz/deputy/gen/deputy/scan/v1"
 	"github.com/picatz/deputy/internal/cli/flags"
-	"github.com/picatz/deputy/internal/client"
+	"github.com/picatz/deputy/internal/services"
 	"github.com/picatz/deputy/internal/policy"
 	internalproto "github.com/picatz/deputy/internal/proto"
 	"github.com/picatz/deputy/internal/report"
@@ -25,7 +25,7 @@ import (
 )
 
 // AddTriageCommand registers the triage subcommand.
-func AddTriageCommand(root *cobra.Command, c client.Client) {
+func AddTriageCommand(root *cobra.Command, c *services.Clients) {
 	triageCmd := &cobra.Command{
 		Use:           "triage [repo]",
 		Aliases:       []string{"t", "tri"},
@@ -97,7 +97,7 @@ AI ASSISTANCE:
 // runTriage executes the triage command logic.
 // It reads a report or runs a scan, filters vulnerabilities, and generates a summary.
 // Optionally, it sends the summary to an AI agent.
-func runTriage(c client.Client, cmd *cobra.Command, args []string) error {
+func runTriage(c *services.Clients, cmd *cobra.Command, args []string) error {
 	ctx := cmd.Context()
 	reportPath, _ := cmd.Flags().GetString("report")
 	ignoreUnfixed, _ := cmd.Flags().GetBool("ignore-unfixed")
@@ -171,8 +171,8 @@ func runTriage(c client.Client, cmd *cobra.Command, args []string) error {
 			target = cwd
 		}
 
-		// Call client.Scan
-		resp, err := c.Scan(ctx, connect.NewRequest(&scanv1.ScanRequest{
+		// Call vulnerability scanner
+		resp, err := c.Vulns.Scan(ctx, connect.NewRequest(&scanv1.ScanRequest{
 			Target:  target,
 			Options: scanOpts,
 		}))

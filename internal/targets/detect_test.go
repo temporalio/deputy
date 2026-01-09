@@ -19,6 +19,22 @@ func TestLooksLikeContainerRef(t *testing.T) {
 		{"docker hub library image with tag", "nginx:1.25", true},
 		{"docker hub library image with latest", "alpine:latest", true},
 
+		// Docker Hub user/org images with tag (owner/repo:tag pattern)
+		{"docker hub user image with semver", "temporalio/server:1.28.1", true},
+		{"docker hub user image with v-prefix", "hashicorp/consul:v1.18.0", true},
+		{"docker hub user image with latest", "bitnami/redis:latest", true},
+		{"docker hub user image with version dot", "library/nginx:1.25.3", true},
+		{"docker hub user image with sha prefix", "myorg/app:sha-abc123", true},
+		{"docker hub user image with stable", "myorg/app:stable", true},
+		{"docker hub user image with edge", "myorg/app:edge", true},
+		{"docker hub user image with dev", "myorg/app:dev", true},
+		{"docker hub user image with main", "myorg/app:main", true},
+		{"docker hub user image with master", "myorg/app:master", true},
+
+		// NOT container refs - ambiguous owner/repo:ref patterns
+		{"owner/repo no tag", "owner/repo", false},                       // no tag - could be git repo
+		{"owner/repo with feature branch", "owner/repo:feature-xyz", false}, // doesn't look like version
+
 		// Well-known registries
 		{"ghcr.io image", "ghcr.io/owner/repo:v1.0.0", true},
 		{"gcr.io image", "gcr.io/project/image:tag", true},
@@ -92,6 +108,8 @@ func TestDetectKind(t *testing.T) {
 		{"bare docker hub image", "alpine:3.19", targets.KindContainerImage},
 		{"bare registry image", "ghcr.io/owner/repo:v1.0.0", targets.KindContainerImage},
 		{"bare ecr image", "123456789012.dkr.ecr.us-east-1.amazonaws.com/repo:tag", targets.KindContainerImage},
+		{"bare docker hub user image", "temporalio/server:1.28.1", targets.KindContainerImage},
+		{"bare docker hub user image v-prefix", "hashicorp/consul:v1.18.0", targets.KindContainerImage},
 
 		// SBOM detection
 		{"stdin sbom", "-", targets.KindSBOM},

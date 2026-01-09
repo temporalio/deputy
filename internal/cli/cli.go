@@ -11,7 +11,6 @@ import (
 	"github.com/charmbracelet/fang"
 	"github.com/go-git/go-git/v5"
 	"github.com/picatz/deputy/internal/cli/cmd"
-	"github.com/picatz/deputy/internal/client"
 	"github.com/picatz/deputy/internal/config"
 	deputyerrors "github.com/picatz/deputy/internal/errors"
 	"github.com/picatz/deputy/internal/logs"
@@ -185,33 +184,17 @@ CONNECTION MODES:
 	rootCmd.PersistentFlags().StringVar(&logLevel, "log-level", logLevel, "Logging level: debug, info, warn, error (default: warn). Override with DEPUTY_LOG_LEVEL")
 	rootCmd.PersistentFlags().StringVar(&logFormat, "log-format", logFormat, "Logging format (text, json). Override with DEPUTY_LOG_FORMAT")
 	rootCmd.PersistentFlags().StringVar(&serverAddr, "server", "", "Connect to remote Deputy server (e.g., https://deputy.example.com:8090). Override with DEPUTY_SERVER")
-	rootCmd.PersistentFlags().StringVar(&daemonSocket, "daemon", "", "Connect to local daemon via Unix socket path")
-	rootCmd.PersistentPreRunE = func(cmd *cobra.Command, args []string) error {
+	rootCmd.PersistentFlags().StringVar(&daemonSocket, "daemon", "", "Connect to local daemon via Unix socket path (reserved for future use)")
+	rootCmd.PersistentPreRunE = func(c *cobra.Command, args []string) error {
 		return configureLogging(logLevel, logFormat)
 	}
 
-	// Build client options from flags
-	clientOpts := buildClientOptions(serverAddr, daemonSocket)
-	cmd.RegisterCommands(rootCmd, cmd.Dependencies{ClientOptions: clientOpts})
+	// Register commands with server address from flags
+	// Clients will be created by RegisterCommands based on environment/flags
+	cmd.RegisterCommands(rootCmd, cmd.Dependencies{
+		ServerAddress: serverAddr,
+	})
 	return rootCmd
-}
-
-// buildClientOptions creates client.Options from CLI flags.
-func buildClientOptions(serverAddr, daemonSocket string) client.Options {
-	opts := client.Options{}
-
-	if serverAddr != "" {
-		opts.Mode = client.ModeRemote
-		opts.ForceMode = true
-		opts.ServerAddress = serverAddr
-	} else if daemonSocket != "" {
-		opts.Mode = client.ModeLocalDaemon
-		opts.ForceMode = true
-		opts.DaemonSocket = daemonSocket
-	}
-	// Otherwise, auto-detect mode (checks DEPUTY_SERVER env, daemon socket, falls back to in-process)
-
-	return opts
 }
 
 // isInGitRepo checks if the current working directory is inside a git repository.

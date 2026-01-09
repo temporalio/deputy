@@ -1,0 +1,159 @@
+// Copyright 2025 Kent "picat" Gruber. All rights reserved.
+// SPDX-License-Identifier: MIT
+
+syntax = "proto3";
+
+package deputy.plugin.v1;
+
+import "deputy/dependency/v1/dependency.proto";
+
+option go_package = "github.com/picatz/deputy/gen/deputy/plugin/v1;pluginv1";
+
+// ExtractorService defines the interface for custom inventory extractors.
+//
+// Plugins implement this service to add support for new package ecosystems,
+// manifest formats, or custom extraction logic. Deputy invokes plugins via
+// pluginrpc (subprocess invocation with protobuf serialization).
+//
+// # Plugin Lifecycle
+//
+//  1. Deputy discovers plugins via configuration or PATH lookup
+//  2. Deputy calls Info() to get extractor metadata
+//  3. For each file in the scan:
+//     a. Deputy calls FileRequired() with file metadata
+//     b. If FileRequired returns true, Deputy calls Extract() with file contents
+//  4. Deputy aggregates packages from all extractors
+//
+// # Design Principles
+//
+// The interface mirrors OSV-SCALIBR's filesystem.Extractor for consistency:
+//
+//   type Extractor interface {
+//       Name() string
+//       Version() int
+//       FileRequired(api FileAPI) bool
+//       Extract(ctx, input *ScanInput) (Inventory, error)
+//   }
+//
+// This allows plugins to efficiently filter files before reading them,
+// minimizing I/O and subprocess overhead.
+//
+// # Example Plugin (Go)
+//
+//   package main
+//
+//   import (
+//       "github.com/picatz/deputy/sdk/plugin"
+//       pluginv1 "github.com/picatz/deputy/gen/deputy/plugin/v1"
+//   )
+//
+//   func main() {
+//       plugin.Main(&myExtractor{})
+//   }
+//
+//   type myExtractor struct{}
+//
+//   func (e *myExtractor) Info() *pluginv1.ExtractorInfo { ... }
+//   func (e *myExtractor) FileRequired(path string, isDir bool) bool { ... }
+//   func (e *myExtractor) Extract(path string, contents []byte) ([]*dependencyv1.Package, error) { ... }
+//
+// # Distributed Tracing
+//
+// When OTEL_EXPORTER_OTLP_ENDPOINT is set, plugins should initialize
+// OpenTelemetry and create child spans for their operations. Trace context
+// is propagated via the TraceContext field in requests.
+service ExtractorService {
+  // Info returns extractor metadata.
+  // Called once at startup for registration and logging.
+  rpc Info(InfoRequest) returns (InfoResponse);
+
+  // FileRequired checks if this extractor should process a file.
+  // Return true to receive an Extract call for this file.
+  // Called for every file in the scan - keep it fast (no I/O).
+  rpc FileRequired(FileRequiredRequest) returns (FileRequiredResponse);
+
+  // Extract extracts packages from a file's contents.
+  // Called only for files where FileRequired returned true.
+  rpc Extract(ExtractRequest) returns (ExtractResponse);
+}
+
+// InfoRequest is empty - extractors return metadata unconditionally.
+message InfoRequest {}
+
+// InfoResponse contains extractor metadata.
+message InfoResponse {
+  // Info describes the extractor.
+  ExtractorInfo info = 1;
+}
+
+// ExtractorInfo describes an inventory extractor.
+message ExtractorInfo {
+  // Name is the extractor identifier.
+  // Convention: "<ecosystem>/<format>" (e.g., "ruby/gemspec", "custom/myformat").
+  string name = 1;
+
+  // DisplayName is a human-readable name for UI display.
+  string display_name = 2;
+
+  // Ecosystem is the package ecosystem this extractor supports.
+  // Use standard ecosystem names: go, npm, pypi, maven, rubygems, cargo, etc.
+  string ecosystem = 3;
+
+  // Version is the extractor version (incremented on behavior changes).
+  int32 version = 4;
+
+  // Description provides context about what this extractor does.
+  string description = 5;
+
+  // FilePatterns lists glob patterns for files this extractor handles.
+  // Examples: ["Gemfile.lock", "*.gemspec", "vendor/*/Gemfile"]
+  repeated string file_patterns = 6;
+}
+
+// FileRequiredRequest provides file metadata for filtering.
+message FileRequiredRequest {
+  // Path is the file path relative to the scan root.
+  string path = 1;
+
+  // IsDir indicates if the path is a directory.
+  bool is_dir = 2;
+
+  // Mode is the file permission mode (Unix-style).
+  uint32 mode = 3;
+
+  // Size is the file size in bytes.
+  int64 size = 4;
+
+  // TraceContext contains W3C Trace Context for distributed tracing.
+  // Format: "traceparent" header value (e.g., "00-<trace-id>-<span-id>-01").
+  // Plugins should use this to create child spans.
+  string trace_context = 5;
+}
+
+// FileRequiredResponse indicates if the extractor wants to process the file.
+message FileRequiredResponse {
+  // Required is true if Extract should be called for this file.
+  bool required = 1;
+}
+
+// ExtractRequest provides file contents for extraction.
+message ExtractRequest {
+  // Path is the file path relative to the scan root.
+  string path = 1;
+
+  // Contents is the file's raw bytes.
+  bytes contents = 2;
+
+  // Root is the absolute path to the scan root directory.
+  // Use this to resolve relative paths if needed.
+  string root = 3;
+
+  // TraceContext contains W3C Trace Context for distributed tracing.
+  string trace_context = 4;
+}
+
+// ExtractResponse contains packages discovered in a file.
+message ExtractResponse {
+  // Packages are the dependencies discovered in this file.
+  repeated deputy.dependency.v1.Package packages = 1;
+}

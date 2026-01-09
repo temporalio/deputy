@@ -25,50 +25,17 @@ import (
 	"go.opentelemetry.io/otel/trace"
 )
 
-// Scanner defines the interface for vulnerability scanning operations.
-// This interface enables dependency injection and testing of scan consumers.
-//
-// For inventory-only operations (list, sbom, graph), use the inventory package
-// directly instead of Scanner - this provides better separation of concerns:
-//
-//	import "github.com/picatz/deputy/internal/inventory"
-//	exec, err := inventory.Collect(ctx, target, opts)
-//
-// Scanner is focused on vulnerability scanning which requires OSV API queries.
-type Scanner interface {
-	// ScanRepository scans a repository target (local path or remote) for vulnerabilities.
-	ScanRepository(ctx context.Context, repoArg, ref string, refProvided bool, opts Options) (*Execution, error)
-
-	// ScanDirectory scans a local directory for vulnerabilities.
-	ScanDirectory(ctx context.Context, path string, opts Options) (*Execution, error)
-
-	// ScanSBOM scans pre-extracted packages for vulnerabilities.
-	ScanSBOM(ctx context.Context, pkgs []*extractor.Package, direct map[string]bool, opts Options) (*Execution, error)
-
-	// ScanContainerImage scans a container image for vulnerabilities.
-	ScanContainerImage(ctx context.Context, target string, targetOpts map[string]string, opts Options) (*Execution, error)
-
-	// ScanDockerfile scans images referenced in a Dockerfile.
-	ScanDockerfile(ctx context.Context, target string, opts Options) (*Execution, error)
-
-	// ScanPURL scans a single package URL for vulnerabilities.
-	ScanPURL(ctx context.Context, purlStr string, opts Options) (*Execution, error)
-}
-
-// Ensure Service implements Scanner at compile time.
-var _ Scanner = (*Service)(nil)
-
 // Service orchestrates vulnerability scans by combining inventory collection and OSV lookups.
 type Service struct {
 	collectInventory     func(ctx context.Context, repoPath, gitRef string, opts inv.ScanOptions) ([]*extractor.Package, error)
-	queryVulnerabilities func(ctx context.Context, client osv.Client, pkgs []osv.PkgInput) ([]vulnerability.Finding, map[string]vulnerabilityv1.Advisory, error)
+	queryVulnerabilities func(ctx context.Context, client osv.Client, pkgs []osv.PkgInput) ([]vulnerability.Finding, map[string]*vulnerabilityv1.Advisory, error)
 	osvClient            osv.Client
 }
 
 // ServiceConfig controls scan service dependencies.
 type ServiceConfig struct {
 	CollectInventory     func(ctx context.Context, repoPath, gitRef string, opts inv.ScanOptions) ([]*extractor.Package, error)
-	QueryVulnerabilities func(ctx context.Context, client osv.Client, pkgs []osv.PkgInput) ([]vulnerability.Finding, map[string]vulnerabilityv1.Advisory, error)
+	QueryVulnerabilities func(ctx context.Context, client osv.Client, pkgs []osv.PkgInput) ([]vulnerability.Finding, map[string]*vulnerabilityv1.Advisory, error)
 	OSVClient            osv.Client
 }
 
@@ -99,7 +66,7 @@ func NewServiceWithConfig(cfg *ServiceConfig) *Service {
 	return service
 }
 
-func (s *Service) queryOSV(ctx context.Context, inputs []osv.PkgInput) ([]vulnerability.Finding, map[string]vulnerabilityv1.Advisory, error) {
+func (s *Service) queryOSV(ctx context.Context, inputs []osv.PkgInput) ([]vulnerability.Finding, map[string]*vulnerabilityv1.Advisory, error) {
 	ctx, span := otel.StartSpan(ctx, "deputy.scan.query_vulnerabilities",
 		trace.WithAttributes(
 			attribute.Int("deputy.osv.batch_size", len(inputs)),
@@ -389,7 +356,7 @@ func (s *Service) ScanRepository(ctx context.Context, repoArg, ref string, refPr
 
 	// Skip vulnerability scanning if only inventory is needed (e.g., for 'list' command)
 	var findings []vulnerability.Finding
-	var advisories map[string]vulnerabilityv1.Advisory
+	var advisories map[string]*vulnerabilityv1.Advisory
 	var queryErr error
 	if !opts.SkipVulnScan {
 		inputs := PackagesToInputs(pkgs, PackageInputOptions{GoDirect: modInfo.goDirect, Resolver: modInfo.resolver})
@@ -397,7 +364,7 @@ func (s *Service) ScanRepository(ctx context.Context, repoArg, ref string, refPr
 		findings, advisories, queryErr = s.queryOSV(ctx, inputs)
 	} else {
 		logs.Debug(ctx, "skipping vulnerability scan (inventory-only mode)")
-		advisories = make(map[string]vulnerabilityv1.Advisory)
+		advisories = make(map[string]*vulnerabilityv1.Advisory)
 	}
 
 	// Build dependency graph if enabled
@@ -743,7 +710,7 @@ type buildResultInput struct {
 	pkgs       []*extractor.Package
 	direct     map[string]bool
 	findings   []vulnerability.Finding
-	advisories map[string]vulnerabilityv1.Advisory
+	advisories map[string]*vulnerabilityv1.Advisory
 	queryErr   error
 	opts       Options
 	graph      *graph.Graph

@@ -9,10 +9,15 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/google/osv-scalibr/extractor"
+	"connectrpc.com/connect"
 	"github.com/ossf/osv-schema/bindings/go/osvschema"
+	dependencyv1 "github.com/picatz/deputy/gen/deputy/dependency/v1"
+	listv1 "github.com/picatz/deputy/gen/deputy/list/v1"
+	scanv1 "github.com/picatz/deputy/gen/deputy/scan/v1"
+	"github.com/picatz/deputy/gen/deputy/scan/v1/scanv1connect"
+	"github.com/picatz/deputy/gen/deputy/list/v1/listv1connect"
 	vulnerabilityv1 "github.com/picatz/deputy/gen/deputy/vulnerability/v1"
-	"github.com/picatz/deputy/internal/scan"
+	"github.com/picatz/deputy/internal/services"
 	"github.com/picatz/deputy/internal/vulnerability"
 	"github.com/picatz/deputy/internal/vulnerability/severity"
 	"osv.dev/bindings/go/osvdev"
@@ -34,52 +39,54 @@ func (m *mockOSVClient) QueryBatch(ctx context.Context, queries []*osvdev.Query)
 	return &osvdev.BatchedResponse{}, nil
 }
 
-// mockScanner is a mock implementation of scan.Scanner for testing.
-type mockScanner struct {
-	result *scan.Result
-	err    error
+// mockScanHandler is a mock scan service handler for testing.
+type mockScanHandler struct {
+	scanv1connect.UnimplementedScanServiceHandler
+	scanResponse *scanv1.ScanResponse
+	err          error
 }
 
-func (m *mockScanner) ScanRepository(ctx context.Context, repoArg, ref string, refProvided bool, opts scan.Options) (*scan.Execution, error) {
+func (m *mockScanHandler) Scan(ctx context.Context, req *connect.Request[scanv1.ScanRequest]) (*connect.Response[scanv1.ScanResponse], error) {
 	if m.err != nil {
 		return nil, m.err
 	}
-	return &scan.Execution{Result: *m.result}, nil
+	return connect.NewResponse(m.scanResponse), nil
 }
 
-func (m *mockScanner) ScanDirectory(ctx context.Context, path string, opts scan.Options) (*scan.Execution, error) {
+// mockListHandler is a mock list service handler for testing.
+type mockListHandler struct {
+	listv1connect.UnimplementedListServiceHandler
+	listResponse *listv1.ListPackagesResponse
+	err          error
+}
+
+func (m *mockListHandler) ListPackages(ctx context.Context, req *connect.Request[listv1.ListPackagesRequest]) (*connect.Response[listv1.ListPackagesResponse], error) {
 	if m.err != nil {
 		return nil, m.err
 	}
-	return &scan.Execution{Result: *m.result}, nil
+	return connect.NewResponse(m.listResponse), nil
 }
 
-func (m *mockScanner) ScanSBOM(ctx context.Context, pkgs []*extractor.Package, direct map[string]bool, opts scan.Options) (*scan.Execution, error) {
-	if m.err != nil {
-		return nil, m.err
-	}
-	return &scan.Execution{Result: *m.result}, nil
-}
+// newMockClients creates mock clients with the given handlers for testing.
+func newMockClients(scanHandler *mockScanHandler, listHandler *mockListHandler) *services.Clients {
+	mux := http.NewServeMux()
 
-func (m *mockScanner) ScanContainerImage(ctx context.Context, target string, targetOpts map[string]string, opts scan.Options) (*scan.Execution, error) {
-	if m.err != nil {
-		return nil, m.err
+	if scanHandler != nil {
+		path, handler := scanv1connect.NewScanServiceHandler(scanHandler)
+		mux.Handle(path, handler)
 	}
-	return &scan.Execution{Result: *m.result}, nil
-}
+	if listHandler != nil {
+		path, handler := listv1connect.NewListServiceHandler(listHandler)
+		mux.Handle(path, handler)
+	}
 
-func (m *mockScanner) ScanDockerfile(ctx context.Context, target string, opts scan.Options) (*scan.Execution, error) {
-	if m.err != nil {
-		return nil, m.err
-	}
-	return &scan.Execution{Result: *m.result}, nil
-}
+	transport := services.NewInProcessTransport(mux)
+	httpClient := transport.HTTPClient()
 
-func (m *mockScanner) ScanPURL(ctx context.Context, purlStr string, opts scan.Options) (*scan.Execution, error) {
-	if m.err != nil {
-		return nil, m.err
+	return &services.Clients{
+		Vulns:     scanv1connect.NewScanServiceClient(httpClient, ""),
+		Inventory: listv1connect.NewListServiceClient(httpClient, ""),
 	}
-	return &scan.Execution{Result: *m.result}, nil
 }
 
 func TestNewServer(t *testing.T) {
@@ -93,18 +100,18 @@ func TestNewServer(t *testing.T) {
 	if s.osv == nil {
 		t.Error("osv field is nil")
 	}
-	if s.scanner == nil {
-		t.Error("scanner field is nil")
+	if s.clients == nil {
+		t.Error("clients field is nil")
 	}
 }
 
 func TestNewServer_WithOptions(t *testing.T) {
 	mockOSV := &mockOSVClient{}
-	mockScan := &mockScanner{}
+	mockClients := newMockClients(&mockScanHandler{}, &mockListHandler{})
 
 	s := NewServer(
 		WithOSVClient(mockOSV),
-		WithScanner(mockScan),
+		WithClients(mockClients),
 	)
 
 	// Check that options were applied (can't compare interfaces directly,
@@ -112,8 +119,8 @@ func TestNewServer_WithOptions(t *testing.T) {
 	if s.osv == nil {
 		t.Error("WithOSVClient option not applied")
 	}
-	if s.scanner == nil {
-		t.Error("WithScanner option not applied")
+	if s.clients == nil {
+		t.Error("WithClients option not applied")
 	}
 }
 
@@ -257,21 +264,19 @@ func TestScanPackage(t *testing.T) {
 }
 
 func TestScanDirectory(t *testing.T) {
-	mockScan := &mockScanner{
-		result: &scan.Result{
+	mockScan := &mockScanHandler{
+		scanResponse: &scanv1.ScanResponse{
 			PackagesScanned: 10,
-			Findings:        []vulnerability.Finding{},
-			Advisories:      map[string]vulnerabilityv1.Advisory{},
-			Stats: vulnerabilityv1.Stats{
+			Findings:        []*vulnerabilityv1.Finding{},
+			Advisories:      map[string]*vulnerabilityv1.Advisory{},
+			Stats: &vulnerabilityv1.Stats{
 				Unique: 0,
 			},
-			Inventory: scan.Inventory{
-				Packages: []*extractor.Package{},
-			},
+			Packages: []*dependencyv1.Package{},
 		},
 	}
 
-	s := NewServer(WithScanner(mockScan))
+	s := NewServer(WithClients(newMockClients(mockScan, nil)))
 	ctx := context.Background()
 
 	t.Run("missing path", func(t *testing.T) {
@@ -295,25 +300,23 @@ func TestScanDirectory(t *testing.T) {
 	})
 
 	t.Run("with vulnerabilities", func(t *testing.T) {
-		mockScan.result = &scan.Result{
+		mockScan.scanResponse = &scanv1.ScanResponse{
 			PackagesScanned: 5,
-			Findings: []vulnerability.Finding{
-				{AdvisoryID: "CVE-2021-44228"},
+			Findings: []*vulnerabilityv1.Finding{
+				{AdvisoryId: "CVE-2021-44228"},
 			},
-			Advisories: map[string]vulnerabilityv1.Advisory{
+			Advisories: map[string]*vulnerabilityv1.Advisory{
 				"CVE-2021-44228": {
 					Id:       "CVE-2021-44228",
 					Summary:  "Test vulnerability",
 					Severity: vulnerability.NewSeverity("CRITICAL", ""),
 				},
 			},
-			Stats: vulnerabilityv1.Stats{
-				Unique: 1,
+			Stats: &vulnerabilityv1.Stats{
+				Unique:   1,
 				Critical: 1,
 			},
-			Inventory: scan.Inventory{
-				Packages: []*extractor.Package{},
-			},
+			Packages: []*dependencyv1.Package{},
 		}
 
 		_, result, err := s.scanDirectory(ctx, nil, ScanDirectoryInput{Path: "/test/path"})
@@ -333,19 +336,19 @@ func TestScanDirectory(t *testing.T) {
 }
 
 func TestListDependencies(t *testing.T) {
-	mockScan := &mockScanner{
-		result: &scan.Result{
-			Inventory: scan.Inventory{
-				Packages: []*extractor.Package{
-					{Name: "pkg1", Version: "1.0.0"},
-					{Name: "pkg2", Version: "2.0.0"},
-				},
-				Direct: map[string]bool{},
+	mockList := &mockListHandler{
+		listResponse: &listv1.ListPackagesResponse{
+			Packages: []*dependencyv1.Package{
+				{Name: "pkg1", Version: "1.0.0", Ecosystem: "go"},
+				{Name: "pkg2", Version: "2.0.0", Ecosystem: "go"},
+			},
+			Stats: &listv1.ListStats{
+				TotalPackages: 2,
 			},
 		},
 	}
 
-	s := NewServer(WithScanner(mockScan))
+	s := NewServer(WithClients(newMockClients(nil, mockList)))
 	ctx := context.Background()
 
 	t.Run("missing path", func(t *testing.T) {
@@ -389,20 +392,18 @@ func TestGenerateSBOM(t *testing.T) {
 }
 
 func TestGetRemediation(t *testing.T) {
-	mockScan := &mockScanner{
-		result: &scan.Result{
-			Findings:   []vulnerability.Finding{},
-			Advisories: map[string]vulnerabilityv1.Advisory{},
-			Stats: vulnerabilityv1.Stats{
+	mockScan := &mockScanHandler{
+		scanResponse: &scanv1.ScanResponse{
+			Findings:   []*vulnerabilityv1.Finding{},
+			Advisories: map[string]*vulnerabilityv1.Advisory{},
+			Stats: &vulnerabilityv1.Stats{
 				Unique: 0,
 			},
-			Inventory: scan.Inventory{
-				Packages: []*extractor.Package{},
-			},
+			Packages: []*dependencyv1.Package{},
 		},
 	}
 
-	s := NewServer(WithScanner(mockScan))
+	s := NewServer(WithClients(newMockClients(mockScan, nil)))
 	ctx := context.Background()
 
 	t.Run("missing path", func(t *testing.T) {
@@ -424,24 +425,21 @@ func TestGetRemediation(t *testing.T) {
 }
 
 func TestAnalyzeDependencyGraph(t *testing.T) {
-	mockScan := &mockScanner{
-		result: &scan.Result{
-			Findings:   []vulnerability.Finding{},
-			Advisories: map[string]vulnerabilityv1.Advisory{},
-			Stats: vulnerabilityv1.Stats{
+	mockScan := &mockScanHandler{
+		scanResponse: &scanv1.ScanResponse{
+			Findings:   []*vulnerabilityv1.Finding{},
+			Advisories: map[string]*vulnerabilityv1.Advisory{},
+			Stats: &vulnerabilityv1.Stats{
 				Unique: 0,
 			},
-			Inventory: scan.Inventory{
-				Packages: []*extractor.Package{
-					{Name: "pkg1", Version: "1.0.0"},
-					{Name: "pkg2", Version: "2.0.0"},
-				},
-				Direct: map[string]bool{},
+			Packages: []*dependencyv1.Package{
+				{Name: "pkg1", Version: "1.0.0", Ecosystem: "go"},
+				{Name: "pkg2", Version: "2.0.0", Ecosystem: "go"},
 			},
 		},
 	}
 
-	s := NewServer(WithScanner(mockScan))
+	s := NewServer(WithClients(newMockClients(mockScan, nil)))
 	ctx := context.Background()
 
 	t.Run("missing path", func(t *testing.T) {

@@ -3,6 +3,7 @@ package cmd
 import (
 	"context"
 	"io"
+	"net/http"
 	"os"
 	"path/filepath"
 	"slices"
@@ -11,11 +12,14 @@ import (
 	git "github.com/go-git/go-git/v5"
 	"github.com/google/osv-scalibr/extractor"
 	"github.com/google/osv-scalibr/purl"
+
+	"github.com/picatz/deputy/gen/deputy/scan/v1/scanv1connect"
 	vulnerabilityv1 "github.com/picatz/deputy/gen/deputy/vulnerability/v1"
 	"github.com/picatz/deputy/internal/analysis/osv"
-	"github.com/picatz/deputy/internal/client"
 	inv "github.com/picatz/deputy/internal/inventory"
 	"github.com/picatz/deputy/internal/scan"
+	"github.com/picatz/deputy/internal/server"
+	"github.com/picatz/deputy/internal/services"
 	"github.com/picatz/deputy/internal/vulnerability"
 	"github.com/spf13/cobra"
 )
@@ -36,7 +40,7 @@ func TestRunScanHonorsEcosystemFilter(t *testing.T) {
 				{Name: "github.com/acme/lib", Version: "v1.0.0", PURLType: purl.TypeGolang},
 			}, nil
 		},
-		QueryVulnerabilities: func(ctx context.Context, client osv.Client, inputs []osv.PkgInput) ([]vulnerability.Finding, map[string]vulnerabilityv1.Advisory, error) {
+		QueryVulnerabilities: func(ctx context.Context, client osv.Client, inputs []osv.PkgInput) ([]vulnerability.Finding, map[string]*vulnerabilityv1.Advisory, error) {
 			return nil, nil, nil
 		},
 	})
@@ -46,8 +50,8 @@ func TestRunScanHonorsEcosystemFilter(t *testing.T) {
 	mustSetFlag(t, cmd, "format", "json")
 	mustSetFlag(t, cmd, "output", outPath)
 
-	// Wrap service in InProcess client
-	c := client.NewInProcess(service)
+	// Create clients with custom scan service
+	c := newScanTestClients(t, service)
 
 	if err := runScan(c, cmd, []string{tmpDir}); err != nil {
 		t.Fatalf("runScan: %v", err)
@@ -85,7 +89,7 @@ func TestRunScanEmitsMultiEcosystemInputs(t *testing.T) {
 		CollectInventory: func(ctx context.Context, repoPath, gitRef string, opts inv.ScanOptions) ([]*extractor.Package, error) {
 			return []*extractor.Package{goPkg, npmPkg}, nil
 		},
-		QueryVulnerabilities: func(ctx context.Context, client osv.Client, inputs []osv.PkgInput) ([]vulnerability.Finding, map[string]vulnerabilityv1.Advisory, error) {
+		QueryVulnerabilities: func(ctx context.Context, osvClient osv.Client, inputs []osv.PkgInput) ([]vulnerability.Finding, map[string]*vulnerabilityv1.Advisory, error) {
 			captured = append([]osv.PkgInput(nil), inputs...)
 			return nil, nil, nil
 		},
@@ -96,8 +100,8 @@ func TestRunScanEmitsMultiEcosystemInputs(t *testing.T) {
 	mustSetFlag(t, cmd, "format", "json")
 	mustSetFlag(t, cmd, "output", outPath)
 
-	// Wrap service in InProcess client
-	c := client.NewInProcess(service)
+	// Create clients with custom scan service
+	c := newScanTestClients(t, service)
 
 	if err := runScan(c, cmd, []string{tmpDir}); err != nil {
 		t.Fatalf("runScan: %v", err)
@@ -180,5 +184,29 @@ func mustSetFlag(t *testing.T, cmd *cobra.Command, name, value string) {
 	t.Helper()
 	if err := cmd.Flags().Set(name, value); err != nil {
 		t.Fatalf("set flag %s: %v", name, err)
+	}
+}
+
+// newScanTestClients creates a services.Clients with a custom scan service for testing.
+// This allows tests to inject custom inventory collection and vulnerability query functions.
+func newScanTestClients(t *testing.T, scanService *scan.Service) *services.Clients {
+	t.Helper()
+
+	// Create a scan handler with the custom service
+	scanHandler := server.NewScanHandler(scanService, server.WithLocalMode())
+
+	// Build HTTP mux with the scan handler
+	mux := http.NewServeMux()
+	path, handler := scanv1connect.NewScanServiceHandler(scanHandler)
+	mux.Handle(path, handler)
+
+	// Create in-process transport
+	transport := services.NewInProcessTransport(mux)
+	httpClient := transport.HTTPClient()
+
+	// Return clients with only the scan client wired up
+	// Other clients are nil but tests only use the scan client
+	return &services.Clients{
+		Vulns: scanv1connect.NewScanServiceClient(httpClient, ""),
 	}
 }

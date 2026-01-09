@@ -31,11 +31,11 @@ func FilterUnfixed(result Result) Result {
 	return result
 }
 
-func filterAdvisories(findings []vulnerability.Finding, advisories map[string]vulnerabilityv1.Advisory) map[string]vulnerabilityv1.Advisory {
+func filterAdvisories(findings []vulnerability.Finding, advisories map[string]*vulnerabilityv1.Advisory) map[string]*vulnerabilityv1.Advisory {
 	if len(findings) == 0 {
-		return map[string]vulnerabilityv1.Advisory{}
+		return map[string]*vulnerabilityv1.Advisory{}
 	}
-	out := make(map[string]vulnerabilityv1.Advisory, len(advisories))
+	out := make(map[string]*vulnerabilityv1.Advisory, len(advisories))
 	for _, f := range findings {
 		if adv, ok := advisories[f.AdvisoryID]; ok {
 			out[f.AdvisoryID] = adv

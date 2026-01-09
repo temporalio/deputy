@@ -24,9 +24,9 @@ type serverFlags struct {
 }
 
 // AddServerCommand adds the server command to the root command.
-// The scanner parameter allows injecting a custom scan.Scanner implementation.
+// The scanner parameter allows injecting a custom scan.Service implementation.
 // If nil, the server will create a default scanner.
-func AddServerCommand(root *cobra.Command, scanner scan.Scanner) {
+func AddServerCommand(root *cobra.Command, scanner *scan.Service) {
 	flags := &serverFlags{}
 
 	cmd := &cobra.Command{
@@ -112,7 +112,7 @@ Examples (curl):
 	root.AddCommand(cmd)
 }
 
-func runServer(ctx context.Context, flags *serverFlags, scanner scan.Scanner) error {
+func runServer(ctx context.Context, flags *serverFlags, scanner *scan.Service) error {
 	cfg := server.Config{
 		Addr:         flags.addr,
 		Scanner:      scanner,

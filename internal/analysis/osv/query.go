@@ -104,7 +104,7 @@ const osvConcurrencyLimit = 10
 
 // Query performs a batched OSV vulnerability lookup and returns domain types.
 // This is the primary API for scan operations that need findings and advisories.
-func Query(ctx context.Context, client Client, pkgs []PkgInput) ([]vulnerability.Finding, map[string]vulnerabilityv1.Advisory, error) {
+func Query(ctx context.Context, client Client, pkgs []PkgInput) ([]vulnerability.Finding, map[string]*vulnerabilityv1.Advisory, error) {
 	vulns, err := QueryRaw(ctx, client, pkgs)
 	if err != nil {
 		return nil, nil, err
@@ -119,12 +119,150 @@ func QueryRaw(ctx context.Context, client Client, pkgs []PkgInput) ([]Vulnerabil
 	return queryBatch(ctx, client, pkgs)
 }
 
-// splitVulnerabilities converts flat Vulnerability records to domain types.
-func splitVulnerabilities(vulns []Vulnerability) ([]vulnerability.Finding, map[string]vulnerabilityv1.Advisory, error) {
-	if len(vulns) == 0 {
-		return nil, map[string]vulnerabilityv1.Advisory{}, nil
+// QueryProto performs a batched OSV vulnerability lookup and returns proto types directly.
+// This is the proto-first API for scan operations, eliminating intermediate domain types.
+//
+// Parameters:
+//   - pkgs: slice of proto Package messages representing the packages to scan
+//
+// Returns:
+//   - findings: slice of proto Finding messages
+//   - advisories: map of advisory IDs to proto Advisory messages
+//   - error: any error encountered during the query
+func QueryProto(ctx context.Context, client Client, pkgs []*dependencyv1.Package) ([]*vulnerabilityv1.Finding, map[string]*vulnerabilityv1.Advisory, error) {
+	if len(pkgs) == 0 {
+		return nil, map[string]*vulnerabilityv1.Advisory{}, nil
 	}
-	advisories := make(map[string]vulnerabilityv1.Advisory, len(vulns))
+
+	// Convert proto packages to PkgInput for the existing query infrastructure
+	inputs := make([]PkgInput, len(pkgs))
+	for i, pkg := range pkgs {
+		if pkg == nil {
+			continue
+		}
+
+		var manifestRefs []dependencyv1.ManifestRef
+		for _, ref := range pkg.ManifestRefs {
+			if ref != nil {
+				manifestRefs = append(manifestRefs, *ref)
+			}
+		}
+
+		inputs[i] = PkgInput{
+			QueryKey: QueryKey{
+				Name:      pkg.Name,
+				Version:   pkg.Version,
+				Ecosystem: pkg.Ecosystem,
+				PURL:      pkg.Purl,
+			},
+			PackageContext: PackageContext{
+				IsDirect:     pkg.Direct,
+				Locations:    pkg.Locations,
+				ManifestRefs: manifestRefs,
+				LayerDetails: pkg.LayerDetails,
+			},
+		}
+	}
+
+	// Query using existing infrastructure
+	vulns, err := queryBatch(ctx, client, inputs)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	// Convert to proto types
+	return splitVulnerabilitiesToProto(vulns)
+}
+
+// splitVulnerabilitiesToProto converts flat Vulnerability records to proto types.
+func splitVulnerabilitiesToProto(vulns []Vulnerability) ([]*vulnerabilityv1.Finding, map[string]*vulnerabilityv1.Advisory, error) {
+	if len(vulns) == 0 {
+		return nil, map[string]*vulnerabilityv1.Advisory{}, nil
+	}
+
+	advisories := make(map[string]*vulnerabilityv1.Advisory, len(vulns))
+	findings := make([]*vulnerabilityv1.Finding, 0, len(vulns))
+
+	for _, v := range vulns {
+		advisory, finding := splitVulnerabilityToProto(v)
+		if advisory.Id != "" {
+			if existing, ok := advisories[advisory.Id]; ok {
+				advisories[advisory.Id] = vulnerability.MergeAdvisory(existing, advisory)
+			} else {
+				advisories[advisory.Id] = advisory
+			}
+		}
+		findings = append(findings, finding)
+	}
+
+	return findings, advisories, nil
+}
+
+// splitVulnerabilityToProto converts a flat Vulnerability to proto types.
+func splitVulnerabilityToProto(v Vulnerability) (*vulnerabilityv1.Advisory, *vulnerabilityv1.Finding) {
+	advisory := &vulnerabilityv1.Advisory{
+		Id:               v.ID,
+		Aliases:          slices.Clone(v.Aliases),
+		Summary:          v.Summary,
+		Details:          v.Details,
+		Cve:              v.CVE,
+		Severity:         vulnerability.NewSeverity(v.Severity, v.SeverityType),
+		References:       slices.Clone(v.References),
+		FixedVersions:    slices.Clone(v.FixedVersions),
+		DatabaseSpecific: maps.Clone(v.DatabaseSpecific),
+	}
+	if t := vulnerability.ParseTimeRFC3339(v.Published); !t.IsZero() {
+		vulnerability.SetAdvisoryPublished(advisory, t)
+	}
+	if t := vulnerability.ParseTimeRFC3339(v.Modified); !t.IsZero() {
+		vulnerability.SetAdvisoryModified(advisory, t)
+	}
+
+	// Convert manifest refs to pointer slice
+	manifestRefs := make([]*dependencyv1.ManifestRef, len(v.ManifestRefs))
+	for i := range v.ManifestRefs {
+		manifestRefs[i] = &dependencyv1.ManifestRef{
+			Path:    v.ManifestRefs[i].Path,
+			Manager: v.ManifestRefs[i].Manager,
+			Groups:  v.ManifestRefs[i].Groups,
+		}
+	}
+
+	// Convert affected imports to pointer slice
+	affectedImports := make([]*vulnerabilityv1.AffectedImport, len(v.AffectedImports))
+	for i := range v.AffectedImports {
+		affectedImports[i] = &vulnerabilityv1.AffectedImport{
+			Path:    v.AffectedImports[i].Path,
+			Symbols: v.AffectedImports[i].Symbols,
+		}
+	}
+
+	finding := &vulnerabilityv1.Finding{
+		AdvisoryId: v.ID,
+		Package: &dependencyv1.Package{
+			Name:         v.Package,
+			Ecosystem:    v.Ecosystem,
+			Version:      v.Version,
+			Purl:         v.PURL,
+			Direct:       v.IsDirect,
+			Locations:    slices.Clone(v.Locations),
+			ManifestRefs: manifestRefs,
+			LayerDetails: v.LayerDetails,
+		},
+		Affected:        v.Affected,
+		AffectedImports: affectedImports,
+		Advisory:        advisory,
+	}
+
+	return advisory, finding
+}
+
+// splitVulnerabilities converts flat Vulnerability records to domain types.
+func splitVulnerabilities(vulns []Vulnerability) ([]vulnerability.Finding, map[string]*vulnerabilityv1.Advisory, error) {
+	if len(vulns) == 0 {
+		return nil, map[string]*vulnerabilityv1.Advisory{}, nil
+	}
+	advisories := make(map[string]*vulnerabilityv1.Advisory, len(vulns))
 	findings := make([]vulnerability.Finding, 0, len(vulns))
 	for _, v := range vulns {
 		advisory, finding := splitVulnerability(v)
@@ -141,8 +279,8 @@ func splitVulnerabilities(vulns []Vulnerability) ([]vulnerability.Finding, map[s
 }
 
 // splitVulnerability converts a flat Vulnerability to domain types.
-func splitVulnerability(v Vulnerability) (vulnerabilityv1.Advisory, vulnerability.Finding) {
-	advisory := vulnerabilityv1.Advisory{
+func splitVulnerability(v Vulnerability) (*vulnerabilityv1.Advisory, vulnerability.Finding) {
+	advisory := &vulnerabilityv1.Advisory{
 		Id:               v.ID,
 		Aliases:          slices.Clone(v.Aliases),
 		Summary:          v.Summary,
@@ -154,10 +292,10 @@ func splitVulnerability(v Vulnerability) (vulnerabilityv1.Advisory, vulnerabilit
 		DatabaseSpecific: maps.Clone(v.DatabaseSpecific),
 	}
 	if t := vulnerability.ParseTimeRFC3339(v.Published); !t.IsZero() {
-		vulnerability.SetAdvisoryPublished(&advisory, t)
+		vulnerability.SetAdvisoryPublished(advisory, t)
 	}
 	if t := vulnerability.ParseTimeRFC3339(v.Modified); !t.IsZero() {
-		vulnerability.SetAdvisoryModified(&advisory, t)
+		vulnerability.SetAdvisoryModified(advisory, t)
 	}
 
 	finding := vulnerability.Finding{

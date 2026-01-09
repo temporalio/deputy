@@ -435,7 +435,7 @@ func TestAnnotateVulns(t *testing.T) {
 			Dependency: dependency.ID{PURL: "pkg:npm/lodash@4.17.20"},
 		},
 	}
-	advisories := map[string]vulnerabilityv1.Advisory{
+	advisories := map[string]*vulnerabilityv1.Advisory{
 		"CVE-2021-23337": {
 			Id:       "CVE-2021-23337",
 			Severity: vulnerability.NewSeverity("HIGH", "GHSA"),

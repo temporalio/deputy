@@ -15,7 +15,7 @@ import (
 	dependencyv1 "github.com/picatz/deputy/gen/deputy/dependency/v1"
 	listv1 "github.com/picatz/deputy/gen/deputy/list/v1"
 	"github.com/picatz/deputy/internal/cli/flags"
-	"github.com/picatz/deputy/internal/client"
+	"github.com/picatz/deputy/internal/services"
 	ui "github.com/picatz/deputy/internal/ui"
 	"github.com/spf13/cobra"
 )
@@ -41,7 +41,7 @@ type ListResult struct {
 }
 
 // AddListCommand registers the list (ls) subcommand.
-func AddListCommand(root *cobra.Command, c client.Client) {
+func AddListCommand(root *cobra.Command, c *services.Clients) {
 	var (
 		ref, format, outPath string
 		source, platform     string
@@ -150,7 +150,7 @@ FILTERING & FORMATTING:
 			}
 
 			// Call client API
-			resp, err := c.ListPackages(ctx, connect.NewRequest(&listv1.ListPackagesRequest{
+			resp, err := c.Inventory.ListPackages(ctx, connect.NewRequest(&listv1.ListPackagesRequest{
 				Target:  target,
 				Options: opts,
 			}))

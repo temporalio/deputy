@@ -46,7 +46,7 @@ func (b *GraphBuilder) Build(
 	pkgs []*extractor.Package,
 	direct map[string]bool,
 	findings []vulnerability.Finding,
-	advisories map[string]vulnerabilityv1.Advisory,
+	advisories map[string]*vulnerabilityv1.Advisory,
 	files graph.FileReader,
 ) (*graph.Graph, error) {
 	ctx, span := otel.StartSpan(ctx, "deputy.scan.build_graph",
@@ -87,7 +87,7 @@ func (b *GraphBuilder) BuildFromWorkspace(
 	pkgs []*extractor.Package,
 	direct map[string]bool,
 	findings []vulnerability.Finding,
-	advisories map[string]vulnerabilityv1.Advisory,
+	advisories map[string]*vulnerabilityv1.Advisory,
 	ws workspace.FS,
 ) (*graph.Graph, error) {
 	files := graph.NewWorkspaceFileReader(ws)

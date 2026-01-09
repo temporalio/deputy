@@ -8,7 +8,7 @@ import (
 	"strings"
 
 	"github.com/picatz/deputy/internal/cli/flags"
-	"github.com/picatz/deputy/internal/client"
+	"github.com/picatz/deputy/internal/services"
 	"github.com/picatz/deputy/internal/policy"
 	sbomx "github.com/picatz/deputy/internal/sbom"
 	"github.com/picatz/deputy/internal/targets"
@@ -17,7 +17,7 @@ import (
 )
 
 // AddSBOMCommand registers the sbom subcommand
-func AddSBOMCommand(root *cobra.Command, c client.Client) {
+func AddSBOMCommand(root *cobra.Command, c *services.Clients) {
 	// Client available for future use when SBOM operations move to proto API
 	_ = c
 

@@ -650,7 +650,7 @@ func pathKey(p Path) string {
 }
 
 // AnnotateVulns adds vulnerability information to graph nodes.
-func (g *Graph) AnnotateVulns(findings []vulnerability.Finding, advisories map[string]vulnerabilityv1.Advisory) {
+func (g *Graph) AnnotateVulns(findings []vulnerability.Finding, advisories map[string]*vulnerabilityv1.Advisory) {
 	// Group findings by PURL
 	vulnsByPURL := make(map[string][]vulnerability.Finding)
 	for _, f := range findings {
@@ -667,7 +667,7 @@ func (g *Graph) AnnotateVulns(findings []vulnerability.Finding, advisories map[s
 	}
 }
 
-func countVulns(findings []vulnerability.Finding, advisories map[string]vulnerabilityv1.Advisory) VulnCount {
+func countVulns(findings []vulnerability.Finding, advisories map[string]*vulnerabilityv1.Advisory) VulnCount {
 	count := VulnCount{Total: len(findings)}
 
 	for _, f := range findings {

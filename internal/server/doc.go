@@ -46,7 +46,7 @@
 //
 //	cfg := server.Config{
 //	    Addr:         ":8090",           // Listen address
-//	    Scanner:      scanService,       // Custom scan.Scanner implementation
+//	    Scanner:      scanService,       // Custom scan.Service implementation
 //	    ReadTimeout:  30 * time.Second,  // Request read timeout
 //	    WriteTimeout: 5 * time.Minute,   // Response write timeout
 //	    IdleTimeout:  2 * time.Minute,   // Idle connection timeout

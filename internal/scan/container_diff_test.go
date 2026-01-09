@@ -134,7 +134,7 @@ func TestCompareImageVulnerabilities(t *testing.T) {
 	t.Run("added vulnerability", func(t *testing.T) {
 		base := &Result{
 			Findings:   []vulnerability.Finding{},
-			Advisories: map[string]vulnerabilityv1.Advisory{},
+			Advisories: map[string]*vulnerabilityv1.Advisory{},
 		}
 		target := &Result{
 			Findings: []vulnerability.Finding{
@@ -144,7 +144,7 @@ func TestCompareImageVulnerabilities(t *testing.T) {
 					Version:    "1.1.1",
 				},
 			},
-			Advisories: map[string]vulnerabilityv1.Advisory{
+			Advisories: map[string]*vulnerabilityv1.Advisory{
 				"CVE-2024-1234": {
 					Id:       "CVE-2024-1234",
 					Severity: &vulnerabilityv1.Severity{Level: vulnerability.SeverityHigh},
@@ -177,7 +177,7 @@ func TestCompareImageVulnerabilities(t *testing.T) {
 					Version:    "1.1.1",
 				},
 			},
-			Advisories: map[string]vulnerabilityv1.Advisory{
+			Advisories: map[string]*vulnerabilityv1.Advisory{
 				"CVE-2024-1234": {
 					Id:       "CVE-2024-1234",
 					Severity: &vulnerabilityv1.Severity{Level: vulnerability.SeverityCritical},
@@ -188,7 +188,7 @@ func TestCompareImageVulnerabilities(t *testing.T) {
 		}
 		target := &Result{
 			Findings:   []vulnerability.Finding{},
-			Advisories: map[string]vulnerabilityv1.Advisory{},
+			Advisories: map[string]*vulnerabilityv1.Advisory{},
 			Inventory:  Inventory{},
 		}
 

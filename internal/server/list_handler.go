@@ -5,9 +5,7 @@ import (
 	"fmt"
 
 	"connectrpc.com/connect"
-	"github.com/google/osv-scalibr/extractor"
 
-	dependencyv1 "github.com/picatz/deputy/gen/deputy/dependency/v1"
 	listv1 "github.com/picatz/deputy/gen/deputy/list/v1"
 	"github.com/picatz/deputy/gen/deputy/list/v1/listv1connect"
 	protoconv "github.com/picatz/deputy/internal/proto"
@@ -17,18 +15,33 @@ import (
 
 // ListHandler implements the ListService gRPC handler.
 type ListHandler struct {
-	scanner scan.Scanner
+	scanner   *scan.Service
+	localMode bool
 }
 
 // Ensure ListHandler implements the ListServiceHandler interface.
 var _ listv1connect.ListServiceHandler = (*ListHandler)(nil)
 
+// ListHandlerOption configures a ListHandler.
+type ListHandlerOption func(*ListHandler)
+
+// WithListLocalMode enables local mode for ListHandler.
+func WithListLocalMode() ListHandlerOption {
+	return func(h *ListHandler) {
+		h.localMode = true
+	}
+}
+
 // NewListHandler creates a new List service handler.
-func NewListHandler(scanner scan.Scanner) *ListHandler {
+func NewListHandler(scanner *scan.Service, opts ...ListHandlerOption) *ListHandler {
 	if scanner == nil {
 		scanner = scan.NewService()
 	}
-	return &ListHandler{scanner: scanner}
+	h := &ListHandler{scanner: scanner}
+	for _, opt := range opts {
+		opt(h)
+	}
+	return h
 }
 
 // ListPackages enumerates packages in a target.
@@ -40,9 +53,11 @@ func (h *ListHandler) ListPackages(
 		return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("target is required"))
 	}
 
-	// Security: Validate target is accessible from remote server
-	if err := targets.ValidateRemoteTarget(req.Msg.GetTarget()); err != nil {
-		return nil, connect.NewError(connect.CodeInvalidArgument, err)
+	// Security: Validate target is accessible from remote server (skip in local mode)
+	if !h.localMode {
+		if err := targets.ValidateRemoteTarget(req.Msg.GetTarget()); err != nil {
+			return nil, connect.NewError(connect.CodeInvalidArgument, err)
+		}
 	}
 
 	opts := scan.Options{}
@@ -68,15 +83,14 @@ func (h *ListHandler) ListPackages(
 
 	// Convert packages to proto
 	packages := execution.Result.Inventory.Packages
-	protoPackages := make([]*dependencyv1.Package, 0, len(packages))
+	direct := execution.Result.Inventory.Direct
+	protoPackages := protoconv.ExtractorPackagesToProto(packages, direct)
+
 	ecosystemCounts := make(map[string]int32)
 	directCount := int32(0)
 	transitiveCount := int32(0)
 
 	for _, pkg := range packages {
-		protoPkg := extractorPackageToProto(pkg, execution.Result.Inventory.Direct)
-		protoPackages = append(protoPackages, protoPkg)
-
 		// Count by ecosystem
 		eco := pkg.Ecosystem()
 		if eco != "" {
@@ -84,7 +98,7 @@ func (h *ListHandler) ListPackages(
 		}
 
 		// Count direct vs transitive
-		if execution.Result.Inventory.Direct[pkg.PURL().String()] {
+		if direct[pkg.PURL().String()] {
 			directCount++
 		} else {
 			transitiveCount++
@@ -103,33 +117,6 @@ func (h *ListHandler) ListPackages(
 	}
 
 	return connect.NewResponse(resp), nil
-}
-
-// extractorPackageToProto converts an osv-scalibr Package to proto Package.
-func extractorPackageToProto(pkg *extractor.Package, direct map[string]bool) *dependencyv1.Package {
-	if pkg == nil {
-		return nil
-	}
-
-	purl := pkg.PURL()
-	purlStr := ""
-	if purl != nil {
-		purlStr = purl.String()
-	}
-
-	isDirect := false
-	if direct != nil {
-		isDirect = direct[purlStr]
-	}
-
-	return &dependencyv1.Package{
-		Name:      pkg.Name,
-		Ecosystem: pkg.Ecosystem(),
-		Version:   pkg.Version,
-		Purl:      purlStr,
-		Direct:    isDirect,
-		Locations: pkg.Locations,
-	}
 }
 
 // ListEcosystems returns supported ecosystems with their file patterns.

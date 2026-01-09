@@ -25,3 +25,9 @@ plugins:
     out: ../gen
     opt:
       - paths=source_relative
+  # PluginRPC for plugin service stubs (ExtractorService)
+  - local: protoc-gen-pluginrpc-go
+    out: ../gen
+    opt:
+      - paths=source_relative
+      - streaming=ignore

@@ -24,7 +24,7 @@ import (
 	packageurl "github.com/package-url/packageurl-go"
 	targetv1 "github.com/picatz/deputy/gen/deputy/target/v1"
 	vulnerabilityv1 "github.com/picatz/deputy/gen/deputy/vulnerability/v1"
-	"github.com/picatz/deputy/internal/client"
+	"github.com/picatz/deputy/internal/services"
 	cliflags "github.com/picatz/deputy/internal/cli/flags"
 	"github.com/picatz/deputy/internal/collections"
 	"github.com/picatz/deputy/internal/container/image"
@@ -85,7 +85,7 @@ type ModuleDeprecation struct {
 
 // AddScanCommand registers the scan subcommand with the root command.
 // It configures the command flags and usage examples.
-func AddScanCommand(root *cobra.Command, c client.Client) {
+func AddScanCommand(root *cobra.Command, c *services.Clients) {
 	scanCmd := &cobra.Command{
 		Use:           "scan [target]",
 		Aliases:       []string{"s"},
@@ -499,7 +499,7 @@ POLICY ENFORCEMENT:
 
 // runScan executes the scan command logic, handling argument parsing,
 // scan execution, policy evaluation, and output formatting.
-func runScan(c client.Client, cmd *cobra.Command, args []string) error {
+func runScan(c *services.Clients, cmd *cobra.Command, args []string) error {
 	target := ""
 	if len(args) > 0 {
 		target = strings.TrimSpace(args[0])
@@ -611,7 +611,7 @@ func runScan(c client.Client, cmd *cobra.Command, args []string) error {
 	return runScanRepository(c, cmd, target)
 }
 
-func runScanRepository(c client.Client, cmd *cobra.Command, repoArg string) error {
+func runScanRepository(c *services.Clients, cmd *cobra.Command, repoArg string) error {
 	ctx := cmd.Context()
 	flags := extractScanFlags(cmd)
 	errW := cmd.ErrOrStderr()
@@ -627,7 +627,7 @@ func runScanRepository(c client.Client, cmd *cobra.Command, repoArg string) erro
 	}
 
 	// Call the client
-	resp, err := c.Scan(ctx, connect.NewRequest(req))
+	resp, err := c.Vulns.Scan(ctx, connect.NewRequest(req))
 	if progress != nil {
 		progress.Clear()
 	}
@@ -696,7 +696,7 @@ func runScanRepository(c client.Client, cmd *cobra.Command, repoArg string) erro
 }
 
 // runScanDir executes the directory scan command logic.
-func runScanDir(c client.Client, cmd *cobra.Command, args []string) error {
+func runScanDir(c *services.Clients, cmd *cobra.Command, args []string) error {
 	if len(args) != 1 {
 		return fmt.Errorf("expected 1 argument: <path>")
 	}
@@ -716,7 +716,7 @@ func runScanDir(c client.Client, cmd *cobra.Command, args []string) error {
 		progress.Start(ctx)
 	}
 
-	resp, err := c.Scan(ctx, connect.NewRequest(req))
+	resp, err := c.Vulns.Scan(ctx, connect.NewRequest(req))
 	if progress != nil {
 		progress.Clear()
 	}
@@ -794,7 +794,7 @@ func runScanDir(c client.Client, cmd *cobra.Command, args []string) error {
 }
 
 // runScanSBOM executes the SBOM scan command logic.
-func runScanSBOM(c client.Client, cmd *cobra.Command, args []string) error {
+func runScanSBOM(c *services.Clients, cmd *cobra.Command, args []string) error {
 	if len(args) != 1 {
 		return fmt.Errorf("expected 1 argument: <path|->")
 	}
@@ -832,7 +832,7 @@ func runScanSBOM(c client.Client, cmd *cobra.Command, args []string) error {
 	req := flags.toScanRequestWithHint(input, targetv1.TargetKind_TARGET_KIND_SBOM, "", "", errW)
 
 	// Scan the packages from the SBOM
-	resp, err := c.Scan(ctx, connect.NewRequest(req))
+	resp, err := c.Vulns.Scan(ctx, connect.NewRequest(req))
 	if err != nil {
 		return err
 	}
@@ -867,7 +867,7 @@ func runScanSBOM(c client.Client, cmd *cobra.Command, args []string) error {
 				sem <- struct{}{}
 				defer func() { <-sem }()
 				imgReq := flags.toScanRequestWithHint(ref.Ref, targetv1.TargetKind_TARGET_KIND_CONTAINER_IMAGE, "remote", ref.Platform, errW)
-				imgResp, err := c.Scan(groupCtx, connect.NewRequest(imgReq))
+				imgResp, err := c.Vulns.Scan(groupCtx, connect.NewRequest(imgReq))
 				outcome := imageScanOutcome{err: err}
 				if imgResp != nil {
 					imgResultPtr := internalproto.ScanResultFromProto(imgResp.Msg)
@@ -968,7 +968,7 @@ func runScanSBOM(c client.Client, cmd *cobra.Command, args []string) error {
 }
 
 // runScanPURL executes the PURL scan command logic.
-func runScanPURL(c client.Client, cmd *cobra.Command, args []string) error {
+func runScanPURL(c *services.Clients, cmd *cobra.Command, args []string) error {
 	if len(args) != 1 {
 		return fmt.Errorf("expected 1 argument: <purl>")
 	}
@@ -981,7 +981,7 @@ func runScanPURL(c client.Client, cmd *cobra.Command, args []string) error {
 	// Build proto request with PURL target hint
 	req := flags.toScanRequestWithHint(input, targetv1.TargetKind_TARGET_KIND_PURL, "", "", errW)
 
-	resp, err := c.Scan(ctx, connect.NewRequest(req))
+	resp, err := c.Vulns.Scan(ctx, connect.NewRequest(req))
 	if err != nil {
 		return err
 	}
@@ -1041,7 +1041,7 @@ func runScanPURL(c client.Client, cmd *cobra.Command, args []string) error {
 }
 
 // runScanImage executes the container image scan command logic.
-func runScanImage(c client.Client, cmd *cobra.Command, args []string) error {
+func runScanImage(c *services.Clients, cmd *cobra.Command, args []string) error {
 	if len(args) != 1 {
 		return fmt.Errorf("expected 1 argument: <image>")
 	}
@@ -1052,7 +1052,7 @@ func runScanImage(c client.Client, cmd *cobra.Command, args []string) error {
 	return runScanImageWithOptions(c, cmd, input, source, platform)
 }
 
-func runScanImageWithOptions(c client.Client, cmd *cobra.Command, input, source, platform string) error {
+func runScanImageWithOptions(c *services.Clients, cmd *cobra.Command, input, source, platform string) error {
 	ctx := cmd.Context()
 	flags := extractScanFlags(cmd)
 	errW := cmd.ErrOrStderr()
@@ -1070,7 +1070,7 @@ func runScanImageWithOptions(c client.Client, cmd *cobra.Command, input, source,
 		progress.Start(ctx)
 	}
 
-	resp, err := c.Scan(ctx, connect.NewRequest(req))
+	resp, err := c.Vulns.Scan(ctx, connect.NewRequest(req))
 	if progress != nil {
 		progress.Clear()
 	}
@@ -2172,7 +2172,7 @@ func isDockerfilePath(path string) bool {
 }
 
 // runScanDockerfile scans a Dockerfile for policy evaluation.
-func runScanDockerfile(c client.Client, cmd *cobra.Command, target string) error {
+func runScanDockerfile(c *services.Clients, cmd *cobra.Command, target string) error {
 	ctx := cmd.Context()
 	flags := extractScanFlags(cmd)
 	errW := cmd.ErrOrStderr()
@@ -2180,7 +2180,7 @@ func runScanDockerfile(c client.Client, cmd *cobra.Command, target string) error
 	// Build proto request with Dockerfile target hint
 	req := flags.toScanRequestWithHint(target, targetv1.TargetKind_TARGET_KIND_DOCKERFILE, "", "", errW)
 
-	resp, err := c.Scan(ctx, connect.NewRequest(req))
+	resp, err := c.Vulns.Scan(ctx, connect.NewRequest(req))
 	if err != nil {
 		return fmt.Errorf("scan dockerfile: %w", err)
 	}

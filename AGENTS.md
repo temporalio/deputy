@@ -242,78 +242,72 @@ policy/examples/             # 30+ CEL policy examples
 
 Key entry points: [`main.go`](main.go) → [`internal/cli/cli.go`](internal/cli/cli.go) → [`internal/cli/cmd/root.go`](internal/cli/cmd/root.go)
 
-## Client Architecture
+## Services Architecture
 
-Deputy uses a client interface to abstract how commands communicate with services. This enables three execution modes with different security characteristics.
+Deputy uses a proto-first design where CLI, MCP, and SDK all consume the same ConnectRPC-generated service interfaces. This enables three execution modes with different security characteristics.
 
 ```mermaid
 flowchart TB
-    subgraph CLI["<b>CLI Layer</b>"]
-        direction TB
-        cmd["Command<br/>(scan, list, sbom)"]
-        detect["Target Detection<br/><i>scan_target.go</i><br/>filesystem-aware"]
-    end
-
-    subgraph Client["<b>Client Layer</b>"]
-        direction TB
-        factory["client.New()<br/><i>Mode Detection</i>"]
-
-        subgraph Modes["Execution Modes"]
-            direction LR
-            inproc["<b>InProcess</b><br/>Direct calls<br/>Zero overhead"]
-            daemon["<b>Daemon</b><br/>Unix socket<br/>Shared cache"]
-            remote["<b>Remote</b><br/>HTTP/2 gRPC<br/>Enterprise"]
-        end
-    end
-
-    subgraph Shared["<b>Shared Logic</b>"]
+    subgraph Consumers["<b>Service Consumers</b>"]
         direction LR
-        targets["targets.DetectKind()<br/><i>Pattern-based routing</i>"]
-        validate["ValidateRemoteTarget()<br/><i>Security validation</i>"]
+        cli["CLI Commands"]
+        mcp["MCP Server"]
+        sdk["Go SDK"]
     end
 
-    subgraph Scanner["<b>Scanner Layer</b>"]
+    subgraph Services["<b>services.Clients</b>"]
+        direction TB
+        vulns["Vulns<br/><i>ScanServiceClient</i>"]
+        inventory["Inventory<br/><i>ListServiceClient</i>"]
+        sbom["SBOM<br/><i>SBOMServiceClient</i>"]
+        secrets["Secrets<br/><i>SecretsServiceClient</i>"]
+        diff["Diff<br/><i>DiffServiceClient</i>"]
+        graph["Graph<br/><i>GraphServiceClient</i>"]
+    end
+
+    subgraph Transport["<b>Transport Layer</b>"]
         direction LR
-        repo["ScanRepository"]
-        purl["ScanPURL"]
-        image["ScanContainerImage"]
-        dockerfile["ScanDockerfile"]
+        inproc["<b>InProcessTransport</b><br/>Direct handler calls<br/>Zero network overhead"]
+        daemon["<b>Unix Socket</b><br/>Local daemon<br/>Shared cache + OTel"]
+        remote["<b>HTTP/2</b><br/>ConnectRPC<br/>Remote server"]
     end
 
-    cmd --> detect
-    detect -->|"In-Process"| inproc
-    detect -->|"Remote/Daemon"| factory
-    factory --> Modes
+    subgraph Handlers["<b>Service Handlers</b>"]
+        direction TB
+        scan_h["ScanHandler"]
+        list_h["ListHandler"]
+        sbom_h["SBOMHandler"]
+        secrets_h["SecretsHandler"]
+    end
 
-    inproc --> targets
-    daemon --> targets
-    remote --> validate
-    validate --> targets
+    cli & mcp & sdk --> Services
+    Services --> Transport
+    inproc --> Handlers
+    daemon -->|"Unix socket"| Handlers
+    remote -->|"Network"| Handlers
 
-    targets --> Scanner
+    classDef consumer fill:#e3f2fd,stroke:#1565c0
+    classDef services fill:#e8f5e9,stroke:#2e7d32
+    classDef transport fill:#fff3e0,stroke:#e65100
+    classDef handler fill:#f3e5f5,stroke:#7b1fa2
 
-    classDef cli fill:#e3f2fd,stroke:#1565c0
-    classDef client fill:#e8f5e9,stroke:#2e7d32
-    classDef shared fill:#fff3e0,stroke:#e65100
-    classDef scanner fill:#f3e5f5,stroke:#7b1fa2
-
-    class CLI,cmd,detect cli
-    class Client,factory,Modes,inproc,daemon,remote client
-    class Shared,targets,validate shared
-    class Scanner,repo,purl,image,dockerfile scanner
+    class Consumers,cli,mcp,sdk consumer
+    class Services,vulns,inventory,sbom,secrets,diff,graph services
+    class Transport,inproc,daemon,remote transport
+    class Handlers,scan_h,list_h,sbom_h,secrets_h handler
 ```
 
 ### Execution Modes
 
 | Mode | Transport | Use Case |
 |------|-----------|----------|
-| **In-Process** | Direct function calls | CLI default, zero overhead |
-| **Local Daemon** | Unix socket | Shared caching, background service |
+| **In-Process** | `InProcessTransport` | CLI/MCP default, zero overhead |
+| **Local Daemon** | Unix socket | Shared caching, OTel collection, local observability |
 | **Remote Server** | HTTP/2 (ConnectRPC) | Centralized policy, enterprise |
 
 Mode is auto-detected:
 1. If `DEPUTY_SERVER` is set → Remote mode
-2. If daemon socket exists → Daemon mode
+2. If `DEPUTY_DAEMON` is set or `/tmp/deputy.sock` exists → Local daemon mode
 3. Otherwise → In-process mode
 
 ### Security Model
@@ -475,14 +469,176 @@ flowchart LR
 
 | File | Purpose |
 |------|---------|
-| [`internal/client/client.go`](internal/client/client.go) | Client interface definition |
-| [`internal/client/inprocess.go`](internal/client/inprocess.go) | In-process implementation with target routing |
-| [`internal/client/remote.go`](internal/client/remote.go) | Remote/daemon implementation |
-| [`internal/client/new.go`](internal/client/new.go) | Factory with auto-detection |
+| [`internal/services/services.go`](internal/services/services.go) | Services and Clients structs, InProcessTransport |
+| [`internal/services/transport.go`](internal/services/transport.go) | InProcessTransport implementation |
+| [`internal/server/scan_handler.go`](internal/server/scan_handler.go) | ScanServiceHandler with security validation |
+| [`internal/server/list_handler.go`](internal/server/list_handler.go) | ListServiceHandler for package enumeration |
 | [`internal/targets/detect.go`](internal/targets/detect.go) | Shared target detection and validation |
-| [`internal/server/scan_handler.go`](internal/server/scan_handler.go) | Server handler with security validation |
 | [`internal/proto/`](internal/proto/) | Proto ↔ internal type converters |
-| [`api/deputy/v1/scan.proto`](api/deputy/v1/scan.proto) | Proto service definitions |
+| [`api/deputy/`](api/deputy/) | Proto service definitions |
+| [`sdk/deputy.go`](sdk/deputy.go) | Go SDK wrapping services.Clients |
+
+## Plugin System
+
+Deputy supports external extractor plugins for custom package detection. Plugins run as separate processes using [pluginrpc](https://github.com/pluginrpc/pluginrpc), enabling any-language implementations with isolated execution.
+
+```mermaid
+flowchart TB
+    subgraph Deputy["<b>Deputy Process</b>"]
+        direction TB
+        scan["scan command"]
+        client["plugin.Client"]
+        inventory["inventory extraction"]
+
+        scan --> inventory
+        inventory --> client
+    end
+
+    subgraph Plugin["<b>Plugin Process</b>"]
+        direction TB
+        server["pluginrpc.Server"]
+        extractor["Extractor impl"]
+        sdk["sdk/plugin"]
+
+        server --> extractor
+        extractor --> sdk
+    end
+
+    subgraph Protocol["<b>pluginrpc Protocol</b>"]
+        direction TB
+        stdin["stdin (protobuf)"]
+        stdout["stdout (protobuf)"]
+        trace["TraceContext (W3C)"]
+    end
+
+    client -->|"spawn"| server
+    client -->|"FileRequired"| stdin
+    client -->|"Extract"| stdin
+    stdin --> server
+    server --> stdout
+    stdout --> client
+
+    classDef deputy fill:#e3f2fd,stroke:#1565c0
+    classDef plugin fill:#e8f5e9,stroke:#2e7d32
+    classDef protocol fill:#fff3e0,stroke:#e65100
+
+    class Deputy,scan,client,inventory deputy
+    class Plugin,server,extractor,sdk plugin
+    class Protocol,stdin,stdout,trace protocol
+```
+
+### Three Types of Extractors
+
+| Type | Location | Language | Discovery |
+|------|----------|----------|-----------|
+| **OSV-SCALIBR** | Built-in | Go | Automatic |
+| **Deputy Built-in** | `internal/inventory/plugins/` | Go | Automatic |
+| **Plugins** | External executables | Any | PATH or config |
+
+### Plugin SDK (Go)
+
+```go
+package main
+
+import "github.com/picatz/deputy/sdk/plugin"
+
+func main() {
+    plugin.Main(&myExtractor{})
+}
+
+type myExtractor struct{}
+
+func (e *myExtractor) Name() string           { return "custom/myformat" }
+func (e *myExtractor) DisplayName() string    { return "My Format" }
+func (e *myExtractor) Ecosystem() string      { return "custom" }
+func (e *myExtractor) Version() int           { return 1 }
+func (e *myExtractor) Description() string    { return "Extracts .myformat files" }
+func (e *myExtractor) FilePatterns() []string { return []string{"*.myformat"} }
+
+func (e *myExtractor) FileRequired(path string, isDir bool, mode uint32, size int64) bool {
+    return strings.HasSuffix(path, ".myformat")
+}
+
+func (e *myExtractor) Extract(path string, contents []byte, root string) ([]*plugin.Package, error) {
+    return []*plugin.Package{
+        plugin.NewPackage("example-pkg", "1.0.0", "custom"),
+    }, nil
+}
+```
+
+### Plugin Registration
+
+```yaml
+# .deputy.yaml
+plugins:
+  extractors:
+    - path: /usr/local/bin/deputy-extractor-myformat
+    - name: deputy-extractor-gemspec  # searches PATH
+```
+
+Plugins named `deputy-extractor-*` in PATH are auto-discovered.
+
+### Distributed Tracing
+
+Plugins automatically participate in distributed traces via W3C TraceContext:
+
+```
+Deputy Scan (parent span)
+├── inventory.Extract
+│   └── plugin.client.FileRequired ─────────────┐
+│       └── [subprocess: plugin.FileRequired] ◄─┘
+│   └── plugin.client.Extract ──────────────────┐
+│       └── [subprocess: plugin.Extract] ◄──────┘
+```
+
+When `OTEL_EXPORTER_OTLP_ENDPOINT` is set, trace context flows across process boundaries via the `TraceContext` field in plugin requests.
+
+### Plugin Protocol
+
+Plugins implement the `ExtractorService` from `api/deputy/plugin/v1/extractor.proto`:
+
+```protobuf
+service ExtractorService {
+  rpc Info(InfoRequest) returns (InfoResponse);
+  rpc FileRequired(FileRequiredRequest) returns (FileRequiredResponse);
+  rpc Extract(ExtractRequest) returns (ExtractResponse);
+}
+```
+
+Protocol requirements:
+- `--protocol` flag → returns `1`
+- `--spec` flag → returns procedure spec (binary)
+- Subcommands: `info`, `file-required`, `extract`
+- I/O: protobuf on stdin/stdout
+
+### Testing Plugins
+
+```bash
+# Build
+go build -o deputy-extractor-myformat .
+
+# Test protocol
+./deputy-extractor-myformat --protocol        # → 1
+./deputy-extractor-myformat --spec            # → procedure spec
+
+# Test info
+./deputy-extractor-myformat info --format json
+
+# Integration test with Deputy
+deputy scan --debug  # shows plugin invocations
+```
+
+### Key Files
+
+| File | Purpose |
+|------|---------|
+| [`api/deputy/plugin/v1/extractor.proto`](api/deputy/plugin/v1/extractor.proto) | Plugin service definition |
+| [`sdk/plugin/`](sdk/plugin/) | Go SDK for building plugins |
+| [`sdk/plugin/extractor.go`](sdk/plugin/extractor.go) | `Main()` entry point, `Extractor` interface |
+| [`sdk/plugin/package.go`](sdk/plugin/package.go) | `NewPackage()`, `PackageBuilder` |
+| [`sdk/plugin/trace.go`](sdk/plugin/trace.go) | OTel trace context extraction |
+| [`internal/inventory/plugin/client.go`](internal/inventory/plugin/client.go) | Plugin client for invoking plugins |
+| [`examples/plugins/dotenv-extractor/`](examples/plugins/dotenv-extractor/) | Example plugin |
 
 ## Tech Stack
 

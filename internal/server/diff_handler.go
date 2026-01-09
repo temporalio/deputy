@@ -21,18 +21,33 @@ import (
 
 // DiffHandler implements the DiffService gRPC handler.
 type DiffHandler struct {
-	scanner scan.Scanner
+	scanner   *scan.Service
+	localMode bool
 }
 
 // Ensure DiffHandler implements the DiffServiceHandler interface.
 var _ diffv1connect.DiffServiceHandler = (*DiffHandler)(nil)
 
+// DiffHandlerOption configures a DiffHandler.
+type DiffHandlerOption func(*DiffHandler)
+
+// WithDiffLocalMode enables local mode for DiffHandler.
+func WithDiffLocalMode() DiffHandlerOption {
+	return func(h *DiffHandler) {
+		h.localMode = true
+	}
+}
+
 // NewDiffHandler creates a new Diff service handler.
-func NewDiffHandler(scanner scan.Scanner) *DiffHandler {
+func NewDiffHandler(scanner *scan.Service, opts ...DiffHandlerOption) *DiffHandler {
 	if scanner == nil {
 		scanner = scan.NewService()
 	}
-	return &DiffHandler{scanner: scanner}
+	h := &DiffHandler{scanner: scanner}
+	for _, opt := range opts {
+		opt(h)
+	}
+	return h
 }
 
 // DiffPackages compares dependencies between two targets.
@@ -50,12 +65,14 @@ func (h *DiffHandler) DiffPackages(
 		return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("target_target is required"))
 	}
 
-	// Security: Validate targets are accessible from remote server
-	if err := targets.ValidateRemoteTarget(baseTarget); err != nil {
-		return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("invalid base_target: %w", err))
-	}
-	if err := targets.ValidateRemoteTarget(targetTarget); err != nil {
-		return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("invalid target_target: %w", err))
+	// Security: Validate targets are accessible from remote server (skip in local mode)
+	if !h.localMode {
+		if err := targets.ValidateRemoteTarget(baseTarget); err != nil {
+			return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("invalid base_target: %w", err))
+		}
+		if err := targets.ValidateRemoteTarget(targetTarget); err != nil {
+			return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("invalid target_target: %w", err))
+		}
 	}
 
 	// Build inventory options
@@ -148,12 +165,14 @@ func (h *DiffHandler) DiffVulnerabilities(
 		return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("target_target is required"))
 	}
 
-	// Security: Validate targets are accessible from remote server
-	if err := targets.ValidateRemoteTarget(baseTarget); err != nil {
-		return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("invalid base_target: %w", err))
-	}
-	if err := targets.ValidateRemoteTarget(targetTarget); err != nil {
-		return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("invalid target_target: %w", err))
+	// Security: Validate targets are accessible from remote server (skip in local mode)
+	if !h.localMode {
+		if err := targets.ValidateRemoteTarget(baseTarget); err != nil {
+			return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("invalid base_target: %w", err))
+		}
+		if err := targets.ValidateRemoteTarget(targetTarget); err != nil {
+			return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("invalid target_target: %w", err))
+		}
 	}
 
 	// Convert proto options to internal options
@@ -197,9 +216,9 @@ func (h *DiffHandler) DiffVulnerabilities(
 	for _, f := range targetExec.Result.Findings {
 		if !baseVulnIDs[f.AdvisoryID] {
 			adv := targetExec.Result.Advisories[f.AdvisoryID]
-			protoFinding := internalproto.FindingToProto(f, &adv)
+			protoFinding := internalproto.FindingToProto(f, adv)
 			addedFindings = append(addedFindings, protoFinding)
-			if adv.Severity != nil {
+			if adv != nil && adv.Severity != nil {
 				addedBySeverity[adv.Severity.Level.String()]++
 			}
 		}
@@ -211,16 +230,16 @@ func (h *DiffHandler) DiffVulnerabilities(
 	for _, f := range baseExec.Result.Findings {
 		if !targetVulnIDs[f.AdvisoryID] {
 			adv := baseExec.Result.Advisories[f.AdvisoryID]
-			protoFinding := internalproto.FindingToProto(f, &adv)
+			protoFinding := internalproto.FindingToProto(f, adv)
 			removedFindings = append(removedFindings, protoFinding)
-			if adv.Severity != nil {
+			if adv != nil && adv.Severity != nil {
 				removedBySeverity[adv.Severity.Level.String()]++
 			}
 		}
 	}
 
 	// Merge advisories from both scans
-	mergedAdvisories := make(map[string]vulnerabilityv1.Advisory)
+	mergedAdvisories := make(map[string]*vulnerabilityv1.Advisory)
 	for id, adv := range baseExec.Result.Advisories {
 		mergedAdvisories[id] = adv
 	}

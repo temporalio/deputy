@@ -1,11 +1,12 @@
 package cmd
 
 import (
-	"context"
 	"log/slog"
+	"net/http"
+	"os"
 
-	"github.com/picatz/deputy/internal/client"
 	"github.com/picatz/deputy/internal/scan"
+	"github.com/picatz/deputy/internal/services"
 	"github.com/spf13/cobra"
 
 	// Import AI providers to register them via init()
@@ -15,44 +16,56 @@ import (
 
 // Dependencies bundles shared services for CLI commands.
 type Dependencies struct {
-	// Client is the Deputy API client for service calls.
-	// If nil, a default in-process client is created.
-	Client client.Client
+	// Clients provides access to Deputy services.
+	// If nil, default in-process clients are created.
+	Clients *services.Clients
 
-	// ClientOptions allows overriding client creation options.
-	// Used when --server or --daemon flags are specified.
-	ClientOptions client.Options
+	// ServerAddress is the remote server address (for remote mode).
+	// Can also be set via DEPUTY_SERVER environment variable.
+	ServerAddress string
 }
 
 // RegisterCommands attaches all first-class subcommands to the provided root
 // Cobra command. It centralizes subcommand registration for use by both the
 // CLI entry point and tests.
 func RegisterCommands(root *cobra.Command, deps Dependencies) {
-	// Initialize client if not provided
-	if deps.Client == nil {
-		var err error
-		deps.Client, err = client.New(context.Background(), deps.ClientOptions)
-		if err != nil {
-			// Fall back to in-process if auto-detection fails
-			slog.Debug("client creation failed, falling back to in-process", "error", err)
-			deps.Client = client.NewInProcess(nil)
+	// Initialize clients if not provided
+	if deps.Clients == nil {
+		// Check for remote server
+		serverAddr := deps.ServerAddress
+		if serverAddr == "" {
+			serverAddr = os.Getenv("DEPUTY_SERVER")
 		}
-		slog.Debug("client initialized", "mode", deps.Client.Mode().String())
+
+		if serverAddr != "" {
+			// Remote mode
+			deps.Clients = services.RemoteClients(http.DefaultClient, serverAddr)
+			slog.Debug("clients initialized", "mode", "remote", "server", serverAddr)
+		} else {
+			// In-process mode (default)
+			svc, err := services.New()
+			if err != nil {
+				slog.Error("failed to create services", "error", err)
+				os.Exit(1)
+			}
+			deps.Clients = svc.InProcessClients()
+			slog.Debug("clients initialized", "mode", "in-process")
+		}
 	}
 
 	// Core workflow commands
-	AddScanCommand(root, deps.Client)
-	AddFixCommand(root, deps.Client)
-	AddTriageCommand(root, deps.Client)
-	AddDiffCommand(root, deps.Client)
-	AddGraphCommand(root, deps.Client)
+	AddScanCommand(root, deps.Clients)
+	AddFixCommand(root, deps.Clients)
+	AddTriageCommand(root, deps.Clients)
+	AddDiffCommand(root, deps.Clients)
+	AddGraphCommand(root, deps.Clients)
 
 	// Supply chain commands
-	AddSBOMCommand(root, deps.Client)
-	AddListCommand(root, deps.Client)
+	AddSBOMCommand(root, deps.Clients)
+	AddListCommand(root, deps.Clients)
 
 	// Security scanning commands
-	AddSecretsCommand(root, deps.Client)
+	AddSecretsCommand(root, deps.Clients)
 
 	// Policy and enforcement commands
 	AddPolicyCommand(root)
@@ -64,12 +77,12 @@ func RegisterCommands(root *cobra.Command, deps Dependencies) {
 
 	// Informational commands
 	AddVersionCommand(root)
-	AddEcosystemsCommand(root, deps.Client)
+	AddEcosystemsCommand(root, deps.Clients)
 	AddExplainCommand(root)
 
 	// Integration commands
 	AddMCPCommand(root)
 
-	// Server command (uses scan.Scanner for handling requests)
+	// Server command (uses scan.Service for handling requests)
 	AddServerCommand(root, scan.NewService())
 }

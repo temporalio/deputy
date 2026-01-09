@@ -2,6 +2,7 @@ package proto
 
 import (
 	graphv1 "github.com/picatz/deputy/gen/deputy/graph/v1"
+	scanv1 "github.com/picatz/deputy/gen/deputy/scan/v1"
 	"github.com/picatz/deputy/internal/dependency/graph"
 )
 
@@ -265,4 +266,39 @@ func GraphToProto(g *graph.Graph) (nodes []*graphv1.Node, edges []*graphv1.Edge,
 	}
 
 	return nodes, edges, roots
+}
+
+// DependencyGraphToScanProto converts an internal graph to scanv1.DependencyGraph.
+// This is used when embedding the graph in ScanResponse.
+func DependencyGraphToScanProto(g *graph.Graph) *scanv1.DependencyGraph {
+	if g == nil {
+		return nil
+	}
+
+	nodes, edges, roots := GraphToProto(g)
+	return &scanv1.DependencyGraph{
+		Nodes: nodes,
+		Edges: edges,
+		Roots: roots,
+		Stats: GraphStatsToProto(g.Stats()),
+	}
+}
+
+// DependencyGraphFromScanProto converts scanv1.DependencyGraph to internal graph.
+func DependencyGraphFromScanProto(dg *scanv1.DependencyGraph) *graph.Graph {
+	if dg == nil {
+		return nil
+	}
+
+	g := graph.New()
+	for _, n := range dg.Nodes {
+		node := NodeFromProto(n)
+		g.AddNode(node)
+	}
+	for _, e := range dg.Edges {
+		g.AddEdge(EdgeFromProto(e))
+	}
+	// Note: roots are derived from nodes with Direct=true, not stored separately
+
+	return g
 }

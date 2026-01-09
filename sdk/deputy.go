@@ -31,6 +31,10 @@ package sdk
 import (
 	"context"
 	"io"
+	"net"
+	"net/http"
+	"net/http/httputil"
+	"os"
 
 	"connectrpc.com/connect"
 
@@ -41,7 +45,7 @@ import (
 	sbomv1 "github.com/picatz/deputy/gen/deputy/sbom/v1"
 	scanv1 "github.com/picatz/deputy/gen/deputy/scan/v1"
 	vulnerabilityv1 "github.com/picatz/deputy/gen/deputy/vulnerability/v1"
-	"github.com/picatz/deputy/internal/client"
+	"github.com/picatz/deputy/internal/services"
 )
 
 // Re-export commonly used proto types for convenience.
@@ -74,37 +78,92 @@ type (
 
 // Client is the Deputy SDK client.
 type Client struct {
-	inner client.Client
+	clients *services.Clients
+	mode    Mode
 }
+
+// DefaultDaemonSocket is the default Unix socket path for the local daemon.
+const DefaultDaemonSocket = "/tmp/deputy.sock"
 
 // NewClient creates a new Deputy client with automatic mode detection.
 //
 // The client will automatically select the best connection mode:
 //   - Remote if DEPUTY_SERVER environment variable is set
-//   - Local daemon if a daemon socket exists and is responsive
+//   - Local daemon if DEPUTY_DAEMON is set or default socket exists
 //   - In-process otherwise (default)
 //
 // Use NewClientWithOptions for more control over the connection mode.
 func NewClient(ctx context.Context) (*Client, error) {
-	c, err := client.New(ctx, client.Options{})
+	// Check for remote server
+	if serverAddr := os.Getenv("DEPUTY_SERVER"); serverAddr != "" {
+		return &Client{
+			clients: services.RemoteClients(http.DefaultClient, serverAddr),
+			mode:    ModeRemote,
+		}, nil
+	}
+
+	// Check for local daemon
+	if daemonSocket := os.Getenv("DEPUTY_DAEMON"); daemonSocket != "" {
+		return connectToDaemon(daemonSocket)
+	}
+
+	// Check if default daemon socket exists
+	if _, err := os.Stat(DefaultDaemonSocket); err == nil {
+		return connectToDaemon(DefaultDaemonSocket)
+	}
+
+	// Default to in-process
+	svc, err := services.New()
 	if err != nil {
 		return nil, err
 	}
-	return &Client{inner: c}, nil
+	return &Client{
+		clients: svc.InProcessClients(),
+		mode:    ModeInProcess,
+	}, nil
+}
+
+// connectToDaemon creates a client connected to a local daemon via Unix socket.
+func connectToDaemon(socket string) (*Client, error) {
+	// Unix socket uses http:// scheme with custom transport
+	return &Client{
+		clients: services.RemoteClients(
+			&http.Client{Transport: &unixSocketTransport{socket: socket}},
+			"http://localhost",
+		),
+		mode: ModeLocalDaemon,
+	}, nil
 }
 
 // NewClientWithOptions creates a new Deputy client with explicit options.
 func NewClientWithOptions(ctx context.Context, opts Options) (*Client, error) {
-	c, err := client.New(ctx, client.Options{
-		Mode:          client.Mode(opts.Mode),
-		ForceMode:     opts.ForceMode,
-		ServerAddress: opts.ServerAddress,
-		DaemonSocket:  opts.DaemonSocket,
-	})
-	if err != nil {
-		return nil, err
+	if opts.ForceMode {
+		switch opts.Mode {
+		case ModeRemote:
+			return &Client{
+				clients: services.RemoteClients(http.DefaultClient, opts.ServerAddress),
+				mode:    ModeRemote,
+			}, nil
+		case ModeLocalDaemon:
+			socket := opts.DaemonSocket
+			if socket == "" {
+				socket = DefaultDaemonSocket
+			}
+			return connectToDaemon(socket)
+		default: // ModeInProcess
+			svc, err := services.New()
+			if err != nil {
+				return nil, err
+			}
+			return &Client{
+				clients: svc.InProcessClients(),
+				mode:    ModeInProcess,
+			}, nil
+		}
 	}
-	return &Client{inner: c}, nil
+
+	// Auto-detect
+	return NewClient(ctx)
 }
 
 // ConnectToServer creates a client connected to a remote Deputy server.
@@ -113,35 +172,44 @@ func NewClientWithOptions(ctx context.Context, opts Options) (*Client, error) {
 //
 //	client, err := sdk.ConnectToServer(ctx, "https://deputy.example.com:8090")
 func ConnectToServer(ctx context.Context, addr string) (*Client, error) {
-	return NewClientWithOptions(ctx, Options{
-		Mode:          ModeRemote,
-		ForceMode:     true,
-		ServerAddress: addr,
-	})
+	return &Client{
+		clients: services.RemoteClients(http.DefaultClient, addr),
+		mode:    ModeRemote,
+	}, nil
 }
 
 // ConnectToDaemon creates a client connected to a local Deputy daemon.
 // If socket is empty, uses the default socket path.
 //
+// The daemon mode is useful for:
+//   - Shared caching across multiple CLI invocations
+//   - Centralized OTel collection and observability
+//   - Running Deputy in a local Docker container
+//
 // Example:
 //
 //	client, err := sdk.ConnectToDaemon(ctx, "")  // default socket
+//	client, err := sdk.ConnectToDaemon(ctx, "/var/run/deputy.sock")
 func ConnectToDaemon(ctx context.Context, socket string) (*Client, error) {
-	return NewClientWithOptions(ctx, Options{
-		Mode:         ModeLocalDaemon,
-		ForceMode:    true,
-		DaemonSocket: socket,
-	})
+	if socket == "" {
+		socket = DefaultDaemonSocket
+	}
+	return connectToDaemon(socket)
 }
 
 // Close releases any resources held by the client.
 func (c *Client) Close() error {
-	return c.inner.Close()
+	return nil
 }
 
 // Mode returns the current client connection mode.
 func (c *Client) Mode() Mode {
-	return Mode(c.inner.Mode())
+	return c.mode
+}
+
+// Clients returns the underlying services.Clients for advanced usage.
+func (c *Client) Clients() *services.Clients {
+	return c.clients
 }
 
 // --- Scan Operations ---
@@ -149,7 +217,7 @@ func (c *Client) Mode() Mode {
 // Scan performs a vulnerability scan on a target.
 // The target can be a local directory path, git ref, or remote repository.
 func (c *Client) Scan(ctx context.Context, target string) (*ScanResponse, error) {
-	resp, err := c.inner.Scan(ctx, connect.NewRequest(&scanv1.ScanRequest{
+	resp, err := c.clients.Vulns.Scan(ctx, connect.NewRequest(&scanv1.ScanRequest{
 		Target: target,
 	}))
 	if err != nil {
@@ -160,7 +228,7 @@ func (c *Client) Scan(ctx context.Context, target string) (*ScanResponse, error)
 
 // ScanWithOptions performs a vulnerability scan with additional options.
 func (c *Client) ScanWithOptions(ctx context.Context, target string, opts *ScanOptions) (*ScanResponse, error) {
-	resp, err := c.inner.Scan(ctx, connect.NewRequest(&scanv1.ScanRequest{
+	resp, err := c.clients.Vulns.Scan(ctx, connect.NewRequest(&scanv1.ScanRequest{
 		Target:  target,
 		Options: opts,
 	}))
@@ -173,7 +241,7 @@ func (c *Client) ScanWithOptions(ctx context.Context, target string, opts *ScanO
 // StreamScan performs a scan with streaming progress updates.
 // The returned stream must be closed when done.
 func (c *Client) StreamScan(ctx context.Context, target string) (*ScanStream, error) {
-	stream, err := c.inner.StreamScan(ctx, connect.NewRequest(&scanv1.StreamScanRequest{
+	stream, err := c.clients.Vulns.StreamScan(ctx, connect.NewRequest(&scanv1.StreamScanRequest{
 		Target: target,
 	}))
 	if err != nil {
@@ -186,7 +254,7 @@ func (c *Client) StreamScan(ctx context.Context, target string) (*ScanStream, er
 
 // ListPackages lists all packages in a target.
 func (c *Client) ListPackages(ctx context.Context, target string) (*listv1.ListPackagesResponse, error) {
-	resp, err := c.inner.ListPackages(ctx, connect.NewRequest(&listv1.ListPackagesRequest{
+	resp, err := c.clients.Inventory.ListPackages(ctx, connect.NewRequest(&listv1.ListPackagesRequest{
 		Target: target,
 	}))
 	if err != nil {
@@ -197,7 +265,7 @@ func (c *Client) ListPackages(ctx context.Context, target string) (*listv1.ListP
 
 // ListEcosystems lists all supported package ecosystems.
 func (c *Client) ListEcosystems(ctx context.Context) (*listv1.ListEcosystemsResponse, error) {
-	resp, err := c.inner.ListEcosystems(ctx, connect.NewRequest(&listv1.ListEcosystemsRequest{}))
+	resp, err := c.clients.Inventory.ListEcosystems(ctx, connect.NewRequest(&listv1.ListEcosystemsRequest{}))
 	if err != nil {
 		return nil, err
 	}
@@ -208,7 +276,7 @@ func (c *Client) ListEcosystems(ctx context.Context) (*listv1.ListEcosystemsResp
 
 // GenerateSBOM generates a Software Bill of Materials for a target.
 func (c *Client) GenerateSBOM(ctx context.Context, target string, format sbomv1.Format) (*sbomv1.GenerateResponse, error) {
-	resp, err := c.inner.GenerateSBOM(ctx, connect.NewRequest(&sbomv1.GenerateRequest{
+	resp, err := c.clients.SBOM.Generate(ctx, connect.NewRequest(&sbomv1.GenerateRequest{
 		Target: target,
 		Format: format,
 	}))
@@ -220,7 +288,7 @@ func (c *Client) GenerateSBOM(ctx context.Context, target string, format sbomv1.
 
 // DiffSBOM computes differences between two SBOMs.
 func (c *Client) DiffSBOM(ctx context.Context, base, target []byte) (*sbomv1.DiffResponse, error) {
-	resp, err := c.inner.DiffSBOM(ctx, connect.NewRequest(&sbomv1.DiffRequest{
+	resp, err := c.clients.SBOM.Diff(ctx, connect.NewRequest(&sbomv1.DiffRequest{
 		Base:   base,
 		Target: target,
 	}))
@@ -234,7 +302,7 @@ func (c *Client) DiffSBOM(ctx context.Context, base, target []byte) (*sbomv1.Dif
 
 // ListAgents returns available AI agents for remediation.
 func (c *Client) ListAgents(ctx context.Context) (*remediationv1.ListAgentsResponse, error) {
-	resp, err := c.inner.ListAgents(ctx, connect.NewRequest(&remediationv1.ListAgentsRequest{}))
+	resp, err := c.clients.Remediation.ListAgents(ctx, connect.NewRequest(&remediationv1.ListAgentsRequest{}))
 	if err != nil {
 		return nil, err
 	}
@@ -266,7 +334,7 @@ type Options struct {
 	ServerAddress string
 
 	// DaemonSocket is the Unix socket path for Mode == ModeLocalDaemon.
-	// If empty, uses the default location.
+	// If empty, uses DefaultDaemonSocket.
 	DaemonSocket string
 }
 
@@ -278,6 +346,7 @@ const (
 	ModeInProcess Mode = iota
 
 	// ModeLocalDaemon connects via Unix socket to a local daemon.
+	// Useful for shared caching, OTel collection, and local observability.
 	ModeLocalDaemon
 
 	// ModeRemote connects via HTTP/2 to a remote server.
@@ -300,13 +369,19 @@ func (m Mode) String() string {
 
 // ScanStream is a streaming scan result.
 type ScanStream struct {
-	stream client.Stream[scanv1.ScanProgress]
+	stream *connect.ServerStreamForClient[scanv1.ScanProgress]
 }
 
 // Receive returns the next progress update.
 // Returns io.EOF when the stream is complete.
 func (s *ScanStream) Receive() (*ScanProgress, error) {
-	return s.stream.Receive()
+	if s.stream.Receive() {
+		return s.stream.Msg(), nil
+	}
+	if err := s.stream.Err(); err != nil {
+		return nil, err
+	}
+	return nil, io.EOF
 }
 
 // Close closes the stream.
@@ -320,7 +395,7 @@ func (s *ScanStream) Collect() (*ScanResponse, error) {
 	defer s.Close()
 	var lastProgress *scanv1.ScanProgress
 	for {
-		progress, err := s.stream.Receive()
+		progress, err := s.Receive()
 		if err == io.EOF {
 			break
 		}
@@ -341,3 +416,22 @@ const (
 	SBOMFormatSPDXJSON      = sbomv1.Format_FORMAT_SPDX_JSON
 	SBOMFormatProtobomJSON  = sbomv1.Format_FORMAT_PROTOBOM_JSON
 )
+
+// unixSocketTransport is an http.RoundTripper that connects via Unix socket.
+type unixSocketTransport struct {
+	socket string
+}
+
+func (t *unixSocketTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	// Dial Unix socket and use it for the HTTP connection
+	conn, err := net.Dial("unix", t.socket)
+	if err != nil {
+		return nil, err
+	}
+
+	// Create HTTP client connection over the Unix socket
+	clientConn := httputil.NewClientConn(conn, nil)
+	defer clientConn.Close()
+
+	return clientConn.Do(req)
+}

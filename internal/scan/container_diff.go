@@ -281,14 +281,22 @@ func compareImageVulnerabilities(baseResult, targetResult *Result) []compare.Vul
 func buildVulnerabilityChange(
 	advisoryID string,
 	changeType compare.VulnChangeType,
-	advisory vulnerabilityv1.Advisory,
+	advisory *vulnerabilityv1.Advisory,
 	pkgName, ecosystem, baseVersion, targetVersion string,
 	baseLayerDetails, targetLayerDetails *containerv1.LayerDetails,
 ) compare.VulnerabilityChange {
 	var sevLevel, sevType string
-	if advisory.Severity != nil {
-		sevLevel = advisory.Severity.Level.String()
-		sevType = advisory.Severity.Type.String()
+	var fixedVersions []string
+	var summary string
+	var aliases []string
+	if advisory != nil {
+		if advisory.Severity != nil {
+			sevLevel = advisory.Severity.Level.String()
+			sevType = advisory.Severity.Type.String()
+		}
+		fixedVersions = advisory.FixedVersions
+		summary = advisory.Summary
+		aliases = advisory.Aliases
 	}
 	change := compare.VulnerabilityChange{
 		ID:                 advisoryID,
@@ -299,15 +307,15 @@ func buildVulnerabilityChange(
 		Ecosystem:          ecosystem,
 		BaseVersion:        baseVersion,
 		TargetVersion:      targetVersion,
-		FixedVersions:      advisory.FixedVersions,
-		Summary:            advisory.Summary,
-		Aliases:            advisory.Aliases,
+		FixedVersions:      fixedVersions,
+		Summary:            summary,
+		Aliases:            aliases,
 		BaseLayerDetails:   convertLayerDetails(baseLayerDetails),
 		TargetLayerDetails: convertLayerDetails(targetLayerDetails),
 	}
 
 	// Format published date if available
-	if pub := vulnerability.AdvisoryPublished(&advisory); !pub.IsZero() {
+	if pub := vulnerability.AdvisoryPublished(advisory); !pub.IsZero() {
 		change.Published = pub.Format("2006-01-02")
 	}
 

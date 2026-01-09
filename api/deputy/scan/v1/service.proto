@@ -12,6 +12,8 @@ import "deputy/dependency/v1/dependency.proto";
 import "deputy/vulnerability/v1/vulnerability.proto";
 import "deputy/policy/v1/policy.proto";
 import "deputy/secrets/v1/secrets.proto";
+import "deputy/graph/v1/service.proto";
+import "deputy/inventory/v1/service.proto";
 
 option go_package = "github.com/picatz/deputy/gen/deputy/scan/v1;scanv1";
 
@@ -190,6 +192,13 @@ message ScanResponse {
 
   // SecretStats summarizes secret scan results when include_secrets is enabled.
   deputy.secrets.v1.Stats secret_stats = 12;
+
+  // Graph contains the resolved dependency graph when graph_options.enabled is true.
+  // Enables path-based analysis like "why is this vulnerable package in my dependencies?"
+  DependencyGraph graph = 13;
+
+  // DockerfileInfo contains parsed Dockerfile data when scanning Dockerfiles.
+  deputy.inventory.v1.DockerfileInfo dockerfile_info = 14;
 }
 
 // ScanProgress provides streaming updates during a scan.
@@ -336,4 +345,21 @@ message HistoryEntry {
 
   // EmptyLayer indicates this is a metadata-only layer.
   bool empty_layer = 3;
+}
+
+// DependencyGraph contains the resolved dependency graph.
+// This is a subset of graph.v1.BuildGraphResponse, included inline in scan results
+// when graph resolution is enabled via GraphOptions.
+message DependencyGraph {
+  // Nodes are all packages in the dependency graph.
+  repeated deputy.graph.v1.Node nodes = 1;
+
+  // Edges represent dependency relationships.
+  repeated deputy.graph.v1.Edge edges = 2;
+
+  // Roots are PURLs of direct dependencies (depth 0).
+  repeated string roots = 3;
+
+  // Stats summarizes the graph.
+  deputy.graph.v1.GraphStats stats = 4;
 }

@@ -27,7 +27,7 @@ func TestMergeResults(t *testing.T) {
 				Affected:   true,
 			},
 		},
-		Advisories: map[string]vulnerabilityv1.Advisory{
+		Advisories: map[string]*vulnerabilityv1.Advisory{
 			"ADV-1": {Id: "ADV-1"},
 		},
 		Warnings: []string{"base warning"},
@@ -47,7 +47,7 @@ func TestMergeResults(t *testing.T) {
 				Affected:   true,
 			},
 		},
-		Advisories: map[string]vulnerabilityv1.Advisory{
+		Advisories: map[string]*vulnerabilityv1.Advisory{
 			"ADV-2": {Id: "ADV-2"},
 		},
 		Warnings: []string{"extra warning"},

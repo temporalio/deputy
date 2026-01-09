@@ -106,17 +106,13 @@ func FindingFromProto(f *vulnerabilityv1.Finding) vulnerability.Finding {
 }
 
 // FindingsToProto converts a slice of internal Findings to proto.
-func FindingsToProto(findings []vulnerability.Finding, advisories map[string]vulnerabilityv1.Advisory) []*vulnerabilityv1.Finding {
+func FindingsToProto(findings []vulnerability.Finding, advisories map[string]*vulnerabilityv1.Advisory) []*vulnerabilityv1.Finding {
 	if len(findings) == 0 {
 		return nil
 	}
 	out := make([]*vulnerabilityv1.Finding, len(findings))
 	for i, f := range findings {
-		var advisory *vulnerabilityv1.Advisory
-		if a, ok := advisories[f.AdvisoryID]; ok {
-			advisory = &a
-		}
-		out[i] = FindingToProto(f, advisory)
+		out[i] = FindingToProto(f, advisories[f.AdvisoryID])
 	}
 	return out
 }
@@ -134,30 +130,15 @@ func FindingsFromProto(findings []*vulnerabilityv1.Finding) []vulnerability.Find
 }
 
 // AdvisoriesToProto converts a map of internal advisories to proto.
-func AdvisoriesToProto(advisories map[string]vulnerabilityv1.Advisory) map[string]*vulnerabilityv1.Advisory {
-	if len(advisories) == 0 {
-		return nil
-	}
-	out := make(map[string]*vulnerabilityv1.Advisory, len(advisories))
-	for id, a := range advisories {
-		copy := a // avoid aliasing
-		out[id] = &copy
-	}
-	return out
+// Since internal advisories are now pointers, this is essentially a pass-through.
+func AdvisoriesToProto(advisories map[string]*vulnerabilityv1.Advisory) map[string]*vulnerabilityv1.Advisory {
+	return advisories
 }
 
 // AdvisoriesFromProto converts a map of proto advisories to internal.
-func AdvisoriesFromProto(advisories map[string]*vulnerabilityv1.Advisory) map[string]vulnerabilityv1.Advisory {
-	if len(advisories) == 0 {
-		return nil
-	}
-	out := make(map[string]vulnerabilityv1.Advisory, len(advisories))
-	for id, a := range advisories {
-		if a != nil {
-			out[id] = *a
-		}
-	}
-	return out
+// Since internal advisories are now pointers, this is essentially a pass-through.
+func AdvisoriesFromProto(advisories map[string]*vulnerabilityv1.Advisory) map[string]*vulnerabilityv1.Advisory {
+	return advisories
 }
 
 // ScanOptionsFromProto converts proto ScanOptions to internal scan.Options.
@@ -238,6 +219,8 @@ func ScanResultToProto(r *scan.Result) *scanv1.ScanResponse {
 		Stats:           StatsToProto(r.Stats),
 		Warnings:        r.Warnings,
 		ImageInfo:       ImageInfoToScanProto(r.ImageInfo),
+		Graph:           DependencyGraphToScanProto(r.Graph),
+		DockerfileInfo:  DockerfileInfoToProto(r.DockerfileInfo),
 	}
 }
 
@@ -261,6 +244,8 @@ func ScanResultFromProto(r *scanv1.ScanResponse) *scan.Result {
 		Stats:           StatsFromProto(r.Stats),
 		Warnings:        r.Warnings,
 		ImageInfo:       ImageInfoFromScanProto(r.ImageInfo),
+		Graph:           DependencyGraphFromScanProto(r.Graph),
+		DockerfileInfo:  DockerfileInfoFromProto(r.DockerfileInfo),
 	}
 }
 

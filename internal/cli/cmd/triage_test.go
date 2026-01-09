@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -11,19 +12,15 @@ import (
 
 	"connectrpc.com/connect"
 
-	diffv1 "github.com/picatz/deputy/gen/deputy/diff/v1"
-	graphv1 "github.com/picatz/deputy/gen/deputy/graph/v1"
-	listv1 "github.com/picatz/deputy/gen/deputy/list/v1"
-	remediationv1 "github.com/picatz/deputy/gen/deputy/remediation/v1"
-	sbomv1 "github.com/picatz/deputy/gen/deputy/sbom/v1"
 	scanv1 "github.com/picatz/deputy/gen/deputy/scan/v1"
-	secretsv1 "github.com/picatz/deputy/gen/deputy/secrets/v1"
+	"github.com/picatz/deputy/gen/deputy/scan/v1/scanv1connect"
 	vulnerabilityv1 "github.com/picatz/deputy/gen/deputy/vulnerability/v1"
-	"github.com/picatz/deputy/internal/client"
 	"github.com/picatz/deputy/internal/dependency"
 	internalproto "github.com/picatz/deputy/internal/proto"
 	"github.com/picatz/deputy/internal/report"
 	"github.com/picatz/deputy/internal/scan"
+	"github.com/picatz/deputy/internal/services"
+	"github.com/picatz/deputy/internal/targets"
 	"github.com/picatz/deputy/internal/vulnerability"
 	"github.com/spf13/cobra"
 )
@@ -35,14 +32,14 @@ func TestTriageCommandTextOutput(t *testing.T) {
 	writeGoModule(t, tmpDir)
 	initGitRepo(t, tmpDir)
 
-	mockClient := newMockTriageClient(t, triageMockData{
+	mockClients := newMockTriageClients(t, triageMockData{
 		Findings: []vulnerability.Finding{{
 			AdvisoryID: "GHSA-1234-5678-9012",
 			Dependency: dependency.ID{Name: "github.com/acme/lib", Ecosystem: "Go"},
 			Version:    "v1.0.0",
 			Affected:   true,
 		}},
-		Advisories: map[string]vulnerabilityv1.Advisory{
+		Advisories: map[string]*vulnerabilityv1.Advisory{
 			"GHSA-1234-5678-9012": {
 				Id:       "GHSA-1234-5678-9012",
 				Severity: vulnerability.NewSeverity("HIGH", "GHSA"),
@@ -54,7 +51,7 @@ func TestTriageCommandTextOutput(t *testing.T) {
 	var stdout bytes.Buffer
 	cmd.SetOut(&stdout)
 
-	if err := runTriage(mockClient, cmd, []string{tmpDir}); err != nil {
+	if err := runTriage(mockClients, cmd, []string{tmpDir}); err != nil {
 		t.Fatalf("runTriage: %v", err)
 	}
 
@@ -78,16 +75,17 @@ func TestTriageCommandJSONOutput(t *testing.T) {
 	writeGoModule(t, tmpDir)
 	initGitRepo(t, tmpDir)
 
-	mockClient := newMockTriageClient(t, triageMockData{
+	mockClients := newMockTriageClients(t, triageMockData{
 		Findings: []vulnerability.Finding{{
-			AdvisoryID: "CVE-2024-1234",
+			AdvisoryID: "GHSA-1234-5678-9012",
+			Dependency: dependency.ID{Name: "github.com/acme/lib", Ecosystem: "Go"},
 			Version:    "v1.0.0",
 			Affected:   true,
 		}},
-		Advisories: map[string]vulnerabilityv1.Advisory{
-			"CVE-2024-1234": {
-				Id:       "CVE-2024-1234",
-				Severity: vulnerability.NewSeverity("CRITICAL", "GHSA"),
+		Advisories: map[string]*vulnerabilityv1.Advisory{
+			"GHSA-1234-5678-9012": {
+				Id:       "GHSA-1234-5678-9012",
+				Severity: vulnerability.NewSeverity("HIGH", "GHSA"),
 			},
 		},
 	})
@@ -97,7 +95,7 @@ func TestTriageCommandJSONOutput(t *testing.T) {
 	var stdout bytes.Buffer
 	cmd.SetOut(&stdout)
 
-	if err := runTriage(mockClient, cmd, []string{tmpDir}); err != nil {
+	if err := runTriage(mockClients, cmd, []string{tmpDir}); err != nil {
 		t.Fatalf("runTriage: %v", err)
 	}
 
@@ -107,10 +105,10 @@ func TestTriageCommandJSONOutput(t *testing.T) {
 	}
 
 	if triageReport.Stats.Total != 1 {
-		t.Errorf("expected 1 total vulnerability, got %d", triageReport.Stats.Total)
+		t.Errorf("expected 1 vulnerability, got %d", triageReport.Stats.Total)
 	}
-	if triageReport.Stats.Critical != 1 {
-		t.Errorf("expected 1 critical vulnerability, got %d", triageReport.Stats.Critical)
+	if triageReport.Stats.High != 1 {
+		t.Errorf("expected 1 high severity vuln, got %d", triageReport.Stats.High)
 	}
 }
 
@@ -121,10 +119,11 @@ func TestTriageCommandIgnoreUnfixed(t *testing.T) {
 	writeGoModule(t, tmpDir)
 	initGitRepo(t, tmpDir)
 
-	mockClient := newMockTriageClient(t, triageMockData{
+	mockClients := newMockTriageClients(t, triageMockData{
 		Findings: []vulnerability.Finding{
 			{
 				AdvisoryID: "GHSA-unfixed",
+				Dependency: dependency.ID{Name: "github.com/acme/lib", Ecosystem: "Go"},
 				Version:    "v1.0.0",
 				Affected:   true,
 			},
@@ -134,7 +133,7 @@ func TestTriageCommandIgnoreUnfixed(t *testing.T) {
 				Affected:   true,
 			},
 		},
-		Advisories: map[string]vulnerabilityv1.Advisory{
+		Advisories: map[string]*vulnerabilityv1.Advisory{
 			"GHSA-unfixed": {
 				Id:            "GHSA-unfixed",
 				Severity:      vulnerability.NewSeverity("HIGH", "GHSA"),
@@ -154,7 +153,7 @@ func TestTriageCommandIgnoreUnfixed(t *testing.T) {
 	var stdout bytes.Buffer
 	cmd.SetOut(&stdout)
 
-	if err := runTriage(mockClient, cmd, []string{tmpDir}); err != nil {
+	if err := runTriage(mockClients, cmd, []string{tmpDir}); err != nil {
 		t.Fatalf("runTriage: %v", err)
 	}
 
@@ -201,8 +200,8 @@ func TestTriageCommandFromReport(t *testing.T) {
 		t.Fatalf("failed to write report: %v", err)
 	}
 
-	// Create mock client (won't be used when reading from report)
-	mockClient := newMockTriageClient(t, triageMockData{})
+	// Create mock clients (won't be used when reading from report)
+	mockClients := newMockTriageClients(t, triageMockData{})
 
 	cmd := newTriageTestCommand(t)
 	mustSetFlag(t, cmd, "report", reportPath)
@@ -210,7 +209,7 @@ func TestTriageCommandFromReport(t *testing.T) {
 	var stdout bytes.Buffer
 	cmd.SetOut(&stdout)
 
-	if err := runTriage(mockClient, cmd, nil); err != nil {
+	if err := runTriage(mockClients, cmd, nil); err != nil {
 		t.Fatalf("runTriage from report: %v", err)
 	}
 
@@ -231,14 +230,14 @@ func TestTriageCommandNoVulnerabilities(t *testing.T) {
 	writeGoModule(t, tmpDir)
 	initGitRepo(t, tmpDir)
 
-	mockClient := newMockTriageClient(t, triageMockData{}) // No vulnerabilities
+	mockClients := newMockTriageClients(t, triageMockData{})
 
 	cmd := newTriageTestCommand(t)
 	mustSetFlag(t, cmd, "format", "json")
 	var stdout bytes.Buffer
 	cmd.SetOut(&stdout)
 
-	if err := runTriage(mockClient, cmd, []string{tmpDir}); err != nil {
+	if err := runTriage(mockClients, cmd, []string{tmpDir}); err != nil {
 		t.Fatalf("runTriage: %v", err)
 	}
 
@@ -259,12 +258,12 @@ func TestTriageCommandInvalidFormat(t *testing.T) {
 	writeGoModule(t, tmpDir)
 	initGitRepo(t, tmpDir)
 
-	mockClient := newMockTriageClient(t, triageMockData{})
+	mockClients := newMockTriageClients(t, triageMockData{})
 
 	cmd := newTriageTestCommand(t)
 	mustSetFlag(t, cmd, "format", "xml")
 
-	err := runTriage(mockClient, cmd, []string{tmpDir})
+	err := runTriage(mockClients, cmd, []string{tmpDir})
 	if err == nil {
 		t.Fatal("expected error for invalid format")
 	}
@@ -312,24 +311,16 @@ func newTriageTestCommand(t *testing.T) *cobra.Command {
 // triageMockData holds mock findings and advisories for test clients.
 type triageMockData struct {
 	Findings   []vulnerability.Finding
-	Advisories map[string]vulnerabilityv1.Advisory
+	Advisories map[string]*vulnerabilityv1.Advisory
 }
 
-// mockTriageClient is a mock client.Client for testing triage command.
-type mockTriageClient struct {
+// mockTriageScanHandler is a mock ScanServiceHandler for testing.
+type mockTriageScanHandler struct {
+	scanv1connect.UnimplementedScanServiceHandler
 	data triageMockData
 }
 
-// Ensure mockTriageClient implements client.Client at compile time.
-var _ client.Client = (*mockTriageClient)(nil)
-
-// newMockTriageClient creates a mock client that returns mock vulnerability data.
-func newMockTriageClient(t *testing.T, mock triageMockData) *mockTriageClient {
-	t.Helper()
-	return &mockTriageClient{data: mock}
-}
-
-func (m *mockTriageClient) Scan(ctx context.Context, req *connect.Request[scanv1.ScanRequest]) (*connect.Response[scanv1.ScanResponse], error) {
+func (m *mockTriageScanHandler) Scan(ctx context.Context, req *connect.Request[scanv1.ScanRequest]) (*connect.Response[scanv1.ScanResponse], error) {
 	// Compute stats from findings and advisories
 	cons := vulnerability.Consolidate(m.data.Findings, m.data.Advisories)
 	stats := vulnerability.StatsFromConsolidated(cons, len(m.data.Findings))
@@ -337,6 +328,7 @@ func (m *mockTriageClient) Scan(ctx context.Context, req *connect.Request[scanv1
 	// Build a scan.Result with the mock data
 	result := &scan.Result{
 		Target: scan.Target{
+			Kind:        targets.KindDir,
 			LocalPath:   req.Msg.Target,
 			DisplayPath: req.Msg.Target,
 		},
@@ -350,102 +342,23 @@ func (m *mockTriageClient) Scan(ctx context.Context, req *connect.Request[scanv1
 	return connect.NewResponse(response), nil
 }
 
-func (m *mockTriageClient) StreamScan(ctx context.Context, req *connect.Request[scanv1.StreamScanRequest]) (client.Stream[scanv1.ScanProgress], error) {
-	return nil, nil
-}
+// newMockTriageClients creates mock clients that return mock vulnerability data.
+func newMockTriageClients(t *testing.T, mock triageMockData) *services.Clients {
+	t.Helper()
 
-func (m *mockTriageClient) ListPackages(ctx context.Context, req *connect.Request[listv1.ListPackagesRequest]) (*connect.Response[listv1.ListPackagesResponse], error) {
-	return nil, nil
-}
+	// Create mock handler
+	handler := &mockTriageScanHandler{data: mock}
 
-func (m *mockTriageClient) ListEcosystems(ctx context.Context, req *connect.Request[listv1.ListEcosystemsRequest]) (*connect.Response[listv1.ListEcosystemsResponse], error) {
-	return nil, nil
-}
+	// Build HTTP mux with the mock handler
+	mux := http.NewServeMux()
+	path, h := scanv1connect.NewScanServiceHandler(handler)
+	mux.Handle(path, h)
 
-func (m *mockTriageClient) GenerateSBOM(ctx context.Context, req *connect.Request[sbomv1.GenerateRequest]) (*connect.Response[sbomv1.GenerateResponse], error) {
-	return nil, nil
-}
+	// Create in-process transport
+	transport := services.NewInProcessTransport(mux)
+	httpClient := transport.HTTPClient()
 
-func (m *mockTriageClient) DiffSBOM(ctx context.Context, req *connect.Request[sbomv1.DiffRequest]) (*connect.Response[sbomv1.DiffResponse], error) {
-	return nil, nil
-}
-
-func (m *mockTriageClient) GeneratePlan(ctx context.Context, req *connect.Request[remediationv1.GeneratePlanRequest]) (*connect.Response[remediationv1.GeneratePlanResponse], error) {
-	return nil, nil
-}
-
-func (m *mockTriageClient) ExecutePlan(ctx context.Context, req *connect.Request[remediationv1.ExecutePlanRequest]) (client.Stream[remediationv1.ExecutionEvent], error) {
-	return nil, nil
-}
-
-func (m *mockTriageClient) ExecuteWithAgent(ctx context.Context, req *connect.Request[remediationv1.ExecuteWithAgentRequest]) (client.Stream[remediationv1.AgentEvent], error) {
-	return nil, nil
-}
-
-func (m *mockTriageClient) ResumeAgent(ctx context.Context, req *connect.Request[remediationv1.ResumeAgentRequest]) (client.Stream[remediationv1.AgentEvent], error) {
-	return nil, nil
-}
-
-func (m *mockTriageClient) ListAgents(ctx context.Context, req *connect.Request[remediationv1.ListAgentsRequest]) (*connect.Response[remediationv1.ListAgentsResponse], error) {
-	return nil, nil
-}
-
-func (m *mockTriageClient) ApproveStep(ctx context.Context, req *connect.Request[remediationv1.ApproveStepRequest]) (*connect.Response[remediationv1.ApproveStepResponse], error) {
-	return nil, nil
-}
-
-func (m *mockTriageClient) ScanSecrets(ctx context.Context, req *connect.Request[secretsv1.ScanRequest]) (*connect.Response[secretsv1.ScanResponse], error) {
-	return nil, nil
-}
-
-func (m *mockTriageClient) StreamScanSecrets(ctx context.Context, req *connect.Request[secretsv1.StreamScanRequest]) (client.Stream[secretsv1.ScanProgress], error) {
-	return nil, nil
-}
-
-func (m *mockTriageClient) ScanSecretsHistory(ctx context.Context, req *connect.Request[secretsv1.ScanHistoryRequest]) (*connect.Response[secretsv1.ScanHistoryResponse], error) {
-	return nil, nil
-}
-
-func (m *mockTriageClient) ScanSecretsDiff(ctx context.Context, req *connect.Request[secretsv1.ScanDiffRequest]) (*connect.Response[secretsv1.ScanDiffResponse], error) {
-	return nil, nil
-}
-
-func (m *mockTriageClient) VerifySecrets(ctx context.Context, req *connect.Request[secretsv1.VerifyRequest]) (*connect.Response[secretsv1.VerifyResponse], error) {
-	return nil, nil
-}
-
-func (m *mockTriageClient) ListDetectors(ctx context.Context, req *connect.Request[secretsv1.ListDetectorsRequest]) (*connect.Response[secretsv1.ListDetectorsResponse], error) {
-	return nil, nil
-}
-
-func (m *mockTriageClient) DiffPackages(ctx context.Context, req *connect.Request[diffv1.DiffPackagesRequest]) (*connect.Response[diffv1.DiffPackagesResponse], error) {
-	return nil, nil
-}
-
-func (m *mockTriageClient) DiffVulnerabilities(ctx context.Context, req *connect.Request[diffv1.DiffVulnerabilitiesRequest]) (*connect.Response[diffv1.DiffVulnerabilitiesResponse], error) {
-	return nil, nil
-}
-
-func (m *mockTriageClient) DiffContainerImages(ctx context.Context, req *connect.Request[diffv1.DiffContainerImagesRequest]) (*connect.Response[diffv1.DiffContainerImagesResponse], error) {
-	return nil, nil
-}
-
-func (m *mockTriageClient) BuildGraph(ctx context.Context, req *connect.Request[graphv1.BuildGraphRequest]) (*connect.Response[graphv1.BuildGraphResponse], error) {
-	return nil, nil
-}
-
-func (m *mockTriageClient) WhyDependency(ctx context.Context, req *connect.Request[graphv1.WhyDependencyRequest]) (*connect.Response[graphv1.WhyDependencyResponse], error) {
-	return nil, nil
-}
-
-func (m *mockTriageClient) QueryGraph(ctx context.Context, req *connect.Request[graphv1.QueryGraphRequest]) (*connect.Response[graphv1.QueryGraphResponse], error) {
-	return nil, nil
-}
-
-func (m *mockTriageClient) Mode() client.Mode {
-	return client.ModeInProcess
-}
-
-func (m *mockTriageClient) Close() error {
-	return nil
+	return &services.Clients{
+		Vulns: scanv1connect.NewScanServiceClient(httpClient, ""),
+	}
 }

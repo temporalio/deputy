@@ -61,7 +61,7 @@ func TestFromScanResult(t *testing.T) {
 				Affected:   true,
 			},
 		},
-		Advisories: map[string]vulnerabilityv1.Advisory{
+		Advisories: map[string]*vulnerabilityv1.Advisory{
 			"CVE-2024-1234": {
 				Id:            "CVE-2024-1234",
 				Summary:       "Test vulnerability",
@@ -96,7 +96,7 @@ func TestFromScanResultEmpty(t *testing.T) {
 			DisplayPath: "empty-project",
 		},
 		Findings:   []vulnerability.Finding{},
-		Advisories: map[string]vulnerabilityv1.Advisory{},
+		Advisories: map[string]*vulnerabilityv1.Advisory{},
 	}
 
 	doc := FromScanResult(result, DefaultOptions())

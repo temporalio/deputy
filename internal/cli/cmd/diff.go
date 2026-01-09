@@ -19,7 +19,7 @@ import (
 	scanv1 "github.com/picatz/deputy/gen/deputy/scan/v1"
 	vulnerabilityv1 "github.com/picatz/deputy/gen/deputy/vulnerability/v1"
 	"github.com/picatz/deputy/internal/cli/flags"
-	"github.com/picatz/deputy/internal/client"
+	"github.com/picatz/deputy/internal/services"
 	"github.com/picatz/deputy/internal/compare"
 	gitx "github.com/picatz/deputy/internal/gitutil"
 	inv "github.com/picatz/deputy/internal/inventory"
@@ -47,7 +47,7 @@ import (
 // AddDiffCommand registers the diff subcommand which compares dependency
 // inventories between two Git references (or working tree) and optionally
 // performs vulnerability scanning on changed modules.
-func AddDiffCommand(root *cobra.Command, c client.Client) {
+func AddDiffCommand(root *cobra.Command, c *services.Clients) {
 	var (
 		repoPath                                       string
 		skipVulnScan                                   bool
@@ -301,7 +301,7 @@ type DiffPolicyReport struct {
 // runDiffAnalysis orchestrates dependency inventory collection for the base and
 // target references, computes a dependency diff, and optionally queries OSV to
 // enrich added/updated modules with vulnerability data.
-func runDiffAnalysis(ctx context.Context, c client.Client, repoPath, baseRef, targetRef string, enableVulnScan bool, enrichLicenses bool, licenseSource string, publishedAfterStr, publishedBeforeStr, asOfStr string, ignoreUnfixed bool, showUnchanged bool, unchangedThreshold string, policyPaths []string, scanOpts inv.ScanOptions, matcher *inv.DependencyMatcher, debugMatcher bool, outputFormat string, outW io.Writer, errW io.Writer) error {
+func runDiffAnalysis(ctx context.Context, c *services.Clients, repoPath, baseRef, targetRef string, enableVulnScan bool, enrichLicenses bool, licenseSource string, publishedAfterStr, publishedBeforeStr, asOfStr string, ignoreUnfixed bool, showUnchanged bool, unchangedThreshold string, policyPaths []string, scanOpts inv.ScanOptions, matcher *inv.DependencyMatcher, debugMatcher bool, outputFormat string, outW io.Writer, errW io.Writer) error {
 	ctx, span := otel.StartSpan(ctx, "deputy.diff",
 		trace.WithAttributes(
 			attribute.String("deputy.target.path", repoPath),
@@ -527,8 +527,14 @@ func runDiffAnalysis(ctx context.Context, c client.Client, repoPath, baseRef, ta
 		beforeT, afterT := flags.ParsePublishedFilters(errW, asOfStr, publishedBeforeStr, publishedAfterStr)
 
 		// Build scan request using client interface
+		// When scanning the working tree, use HEAD~0 to scan the working directory
+		// rather than passing "WORKING" which the scan service doesn't understand.
+		scanRef := targetRef
+		if isWorkingPseudoRef(targetRef) {
+			scanRef = "HEAD~0"
+		}
 		scanOpts := &scanv1.ScanOptions{
-			Ref: targetRef,
+			Ref: scanRef,
 		}
 		if !beforeT.IsZero() {
 			scanOpts.PublishedBefore = timestamppb.New(beforeT)
@@ -541,7 +547,7 @@ func runDiffAnalysis(ctx context.Context, c client.Client, repoPath, baseRef, ta
 			Options: scanOpts,
 		}
 
-		resp, err := c.Scan(ctx, connect.NewRequest(req))
+		resp, err := c.Vulns.Scan(ctx, connect.NewRequest(req))
 		if progress != nil {
 			progress.Clear()
 			// Move cursor up to clear the blank line we added for spacing

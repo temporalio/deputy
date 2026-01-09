@@ -9,12 +9,12 @@ import (
 	"github.com/charmbracelet/lipgloss"
 
 	listv1 "github.com/picatz/deputy/gen/deputy/list/v1"
-	"github.com/picatz/deputy/internal/client"
+	"github.com/picatz/deputy/internal/services"
 	"github.com/spf13/cobra"
 )
 
 // AddEcosystemsCommand adds the ecosystems command to the root.
-func AddEcosystemsCommand(root *cobra.Command, c client.Client) {
+func AddEcosystemsCommand(root *cobra.Command, c *services.Clients) {
 	ecosystemsCmd := &cobra.Command{
 		Use:     "ecosystems",
 		Aliases: []string{"eco"},
@@ -46,7 +46,7 @@ Each ecosystem may support different features:
 	root.AddCommand(ecosystemsCmd)
 }
 
-func newEcosystemsListCommand(c client.Client) *cobra.Command {
+func newEcosystemsListCommand(c *services.Clients) *cobra.Command {
 	var formatFlag string
 
 	cmd := &cobra.Command{
@@ -56,7 +56,7 @@ func newEcosystemsListCommand(c client.Client) *cobra.Command {
 			ctx := cmd.Context()
 
 			// Call client API
-			resp, err := c.ListEcosystems(ctx, connect.NewRequest(&listv1.ListEcosystemsRequest{}))
+			resp, err := c.Inventory.ListEcosystems(ctx, connect.NewRequest(&listv1.ListEcosystemsRequest{}))
 			if err != nil {
 				return fmt.Errorf("list ecosystems failed: %w", err)
 			}

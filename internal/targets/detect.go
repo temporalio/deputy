@@ -114,6 +114,38 @@ func LooksLikeContainerRef(target string) bool {
 		}
 	}
 
+	// Docker Hub user/org images with tag (e.g., "temporalio/server:1.28.1", "library/nginx:1.25")
+	// Pattern: exactly one slash, colon after the slash, tag looks like a version
+	slashCount := strings.Count(target, "/")
+	if slashCount == 1 && strings.Contains(target, ":") {
+		parts := strings.SplitN(target, "/", 2)
+		if len(parts) == 2 {
+			// Check that the colon is after the slash (in the image:tag part)
+			afterSlash := parts[1]
+			if strings.Contains(afterSlash, ":") {
+				tag := strings.SplitN(afterSlash, ":", 2)[1]
+				// Container tags are typically versions or simple names
+				// Git branches wouldn't typically be: refs/*, contain .., or be common version patterns
+				if !strings.HasPrefix(tag, "refs/") && !strings.Contains(tag, "..") {
+					// Additional heuristic: common version patterns
+					// Most container tags start with v, a digit, or are common keywords
+					if len(tag) > 0 && (tag[0] >= '0' && tag[0] <= '9' ||
+						tag[0] == 'v' ||
+						tag == "latest" ||
+						tag == "stable" ||
+						tag == "edge" ||
+						tag == "dev" ||
+						tag == "main" ||
+						tag == "master" ||
+						strings.HasPrefix(tag, "sha-") ||
+						strings.Contains(tag, ".")) {
+						return true
+					}
+				}
+			}
+		}
+	}
+
 	return false
 }
 

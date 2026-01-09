@@ -12,6 +12,8 @@ package scanv1
 import (
 	_ "buf.build/gen/go/bufbuild/protovalidate/protocolbuffers/go/buf/validate"
 	v11 "github.com/picatz/deputy/gen/deputy/dependency/v1"
+	v16 "github.com/picatz/deputy/gen/deputy/graph/v1"
+	v15 "github.com/picatz/deputy/gen/deputy/inventory/v1"
 	v13 "github.com/picatz/deputy/gen/deputy/policy/v1"
 	v14 "github.com/picatz/deputy/gen/deputy/secrets/v1"
 	v1 "github.com/picatz/deputy/gen/deputy/target/v1"
@@ -595,9 +597,14 @@ type ScanResponse struct {
 	// SecretFindings lists detected secrets when include_secrets is enabled.
 	SecretFindings []*v14.Finding `protobuf:"bytes,11,rep,name=secret_findings,json=secretFindings,proto3" json:"secret_findings,omitempty"`
 	// SecretStats summarizes secret scan results when include_secrets is enabled.
-	SecretStats   *v14.Stats `protobuf:"bytes,12,opt,name=secret_stats,json=secretStats,proto3" json:"secret_stats,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	SecretStats *v14.Stats `protobuf:"bytes,12,opt,name=secret_stats,json=secretStats,proto3" json:"secret_stats,omitempty"`
+	// Graph contains the resolved dependency graph when graph_options.enabled is true.
+	// Enables path-based analysis like "why is this vulnerable package in my dependencies?"
+	Graph *DependencyGraph `protobuf:"bytes,13,opt,name=graph,proto3" json:"graph,omitempty"`
+	// DockerfileInfo contains parsed Dockerfile data when scanning Dockerfiles.
+	DockerfileInfo *v15.DockerfileInfo `protobuf:"bytes,14,opt,name=dockerfile_info,json=dockerfileInfo,proto3" json:"dockerfile_info,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
 }
 
 func (x *ScanResponse) Reset() {
@@ -710,6 +717,20 @@ func (x *ScanResponse) GetSecretFindings() []*v14.Finding {
 func (x *ScanResponse) GetSecretStats() *v14.Stats {
 	if x != nil {
 		return x.SecretStats
+	}
+	return nil
+}
+
+func (x *ScanResponse) GetGraph() *DependencyGraph {
+	if x != nil {
+		return x.Graph
+	}
+	return nil
+}
+
+func (x *ScanResponse) GetDockerfileInfo() *v15.DockerfileInfo {
+	if x != nil {
+		return x.DockerfileInfo
 	}
 	return nil
 }
@@ -1242,11 +1263,86 @@ func (x *HistoryEntry) GetEmptyLayer() bool {
 	return false
 }
 
+// DependencyGraph contains the resolved dependency graph.
+// This is a subset of graph.v1.BuildGraphResponse, included inline in scan results
+// when graph resolution is enabled via GraphOptions.
+type DependencyGraph struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Nodes are all packages in the dependency graph.
+	Nodes []*v16.Node `protobuf:"bytes,1,rep,name=nodes,proto3" json:"nodes,omitempty"`
+	// Edges represent dependency relationships.
+	Edges []*v16.Edge `protobuf:"bytes,2,rep,name=edges,proto3" json:"edges,omitempty"`
+	// Roots are PURLs of direct dependencies (depth 0).
+	Roots []string `protobuf:"bytes,3,rep,name=roots,proto3" json:"roots,omitempty"`
+	// Stats summarizes the graph.
+	Stats         *v16.GraphStats `protobuf:"bytes,4,opt,name=stats,proto3" json:"stats,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *DependencyGraph) Reset() {
+	*x = DependencyGraph{}
+	mi := &file_deputy_scan_v1_service_proto_msgTypes[13]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *DependencyGraph) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*DependencyGraph) ProtoMessage() {}
+
+func (x *DependencyGraph) ProtoReflect() protoreflect.Message {
+	mi := &file_deputy_scan_v1_service_proto_msgTypes[13]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use DependencyGraph.ProtoReflect.Descriptor instead.
+func (*DependencyGraph) Descriptor() ([]byte, []int) {
+	return file_deputy_scan_v1_service_proto_rawDescGZIP(), []int{13}
+}
+
+func (x *DependencyGraph) GetNodes() []*v16.Node {
+	if x != nil {
+		return x.Nodes
+	}
+	return nil
+}
+
+func (x *DependencyGraph) GetEdges() []*v16.Edge {
+	if x != nil {
+		return x.Edges
+	}
+	return nil
+}
+
+func (x *DependencyGraph) GetRoots() []string {
+	if x != nil {
+		return x.Roots
+	}
+	return nil
+}
+
+func (x *DependencyGraph) GetStats() *v16.GraphStats {
+	if x != nil {
+		return x.Stats
+	}
+	return nil
+}
+
 var File_deputy_scan_v1_service_proto protoreflect.FileDescriptor
 
 const file_deputy_scan_v1_service_proto_rawDesc = "" +
 	"\n" +
-	"\x1cdeputy/scan/v1/service.proto\x12\x0edeputy.scan.v1\x1a\x1bbuf/validate/validate.proto\x1a\x1fgoogle/protobuf/timestamp.proto\x1a\x1ddeputy/target/v1/target.proto\x1a%deputy/dependency/v1/dependency.proto\x1a+deputy/vulnerability/v1/vulnerability.proto\x1a\x1ddeputy/policy/v1/policy.proto\x1a\x1fdeputy/secrets/v1/secrets.proto\"\\\n" +
+	"\x1cdeputy/scan/v1/service.proto\x12\x0edeputy.scan.v1\x1a\x1bbuf/validate/validate.proto\x1a\x1fgoogle/protobuf/timestamp.proto\x1a\x1ddeputy/target/v1/target.proto\x1a%deputy/dependency/v1/dependency.proto\x1a+deputy/vulnerability/v1/vulnerability.proto\x1a\x1ddeputy/policy/v1/policy.proto\x1a\x1fdeputy/secrets/v1/secrets.proto\x1a\x1ddeputy/graph/v1/service.proto\x1a!deputy/inventory/v1/service.proto\"\\\n" +
 	"\vScanRequest\x12\x16\n" +
 	"\x06target\x18\x01 \x01(\tR\x06target\x125\n" +
 	"\aoptions\x18\x02 \x01(\v2\x1b.deputy.scan.v1.ScanOptionsR\aoptions\"b\n" +
@@ -1281,7 +1377,7 @@ const file_deputy_scan_v1_service_proto_rawDesc = "" +
 	"\aenabled\x18\x01 \x01(\bR\aenabled\x12!\n" +
 	"\finclude_epss\x18\x02 \x01(\bR\vincludeEpss\x12\x1f\n" +
 	"\vinclude_kev\x18\x03 \x01(\bR\n" +
-	"includeKev\"\xa2\x06\n" +
+	"includeKev\"\xa7\a\n" +
 	"\fScanResponse\x120\n" +
 	"\x06target\x18\x01 \x01(\v2\x18.deputy.target.v1.TargetR\x06target\x12=\n" +
 	"\fgenerated_at\x18\x02 \x01(\v2\x1a.google.protobuf.TimestampR\vgeneratedAt\x12)\n" +
@@ -1298,7 +1394,9 @@ const file_deputy_scan_v1_service_proto_rawDesc = "" +
 	"image_info\x18\n" +
 	" \x01(\v2\x19.deputy.scan.v1.ImageInfoR\timageInfo\x12C\n" +
 	"\x0fsecret_findings\x18\v \x03(\v2\x1a.deputy.secrets.v1.FindingR\x0esecretFindings\x12;\n" +
-	"\fsecret_stats\x18\f \x01(\v2\x18.deputy.secrets.v1.StatsR\vsecretStats\x1a`\n" +
+	"\fsecret_stats\x18\f \x01(\v2\x18.deputy.secrets.v1.StatsR\vsecretStats\x125\n" +
+	"\x05graph\x18\r \x01(\v2\x1f.deputy.scan.v1.DependencyGraphR\x05graph\x12L\n" +
+	"\x0fdockerfile_info\x18\x0e \x01(\v2#.deputy.inventory.v1.DockerfileInfoR\x0edockerfileInfo\x1a`\n" +
 	"\x0fAdvisoriesEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x127\n" +
 	"\x05value\x18\x02 \x01(\v2!.deputy.vulnerability.v1.AdvisoryR\x05value:\x028\x01\"\xba\x02\n" +
@@ -1352,7 +1450,12 @@ const file_deputy_scan_v1_service_proto_rawDesc = "" +
 	"created_by\x18\x01 \x01(\tR\tcreatedBy\x12\x18\n" +
 	"\acreated\x18\x02 \x01(\x03R\acreated\x12\x1f\n" +
 	"\vempty_layer\x18\x03 \x01(\bR\n" +
-	"emptyLayer*\xeb\x02\n" +
+	"emptyLayer\"\xb4\x01\n" +
+	"\x0fDependencyGraph\x12+\n" +
+	"\x05nodes\x18\x01 \x03(\v2\x15.deputy.graph.v1.NodeR\x05nodes\x12+\n" +
+	"\x05edges\x18\x02 \x03(\v2\x15.deputy.graph.v1.EdgeR\x05edges\x12\x14\n" +
+	"\x05roots\x18\x03 \x03(\tR\x05roots\x121\n" +
+	"\x05stats\x18\x04 \x01(\v2\x1b.deputy.graph.v1.GraphStatsR\x05stats*\xeb\x02\n" +
 	"\tScanPhase\x12\x1a\n" +
 	"\x16SCAN_PHASE_UNSPECIFIED\x10\x00\x12\x1b\n" +
 	"\x17SCAN_PHASE_INITIALIZING\x10\x01\x12\x1f\n" +
@@ -1385,7 +1488,7 @@ func file_deputy_scan_v1_service_proto_rawDescGZIP() []byte {
 }
 
 var file_deputy_scan_v1_service_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
-var file_deputy_scan_v1_service_proto_msgTypes = make([]protoimpl.MessageInfo, 15)
+var file_deputy_scan_v1_service_proto_msgTypes = make([]protoimpl.MessageInfo, 16)
 var file_deputy_scan_v1_service_proto_goTypes = []any{
 	(ScanPhase)(0),                // 0: deputy.scan.v1.ScanPhase
 	(*ScanRequest)(nil),           // 1: deputy.scan.v1.ScanRequest
@@ -1401,55 +1504,65 @@ var file_deputy_scan_v1_service_proto_goTypes = []any{
 	(*Healthcheck)(nil),           // 11: deputy.scan.v1.Healthcheck
 	(*ImageMetadata)(nil),         // 12: deputy.scan.v1.ImageMetadata
 	(*HistoryEntry)(nil),          // 13: deputy.scan.v1.HistoryEntry
-	nil,                           // 14: deputy.scan.v1.ScanResponse.AdvisoriesEntry
-	nil,                           // 15: deputy.scan.v1.ImageConfig.LabelsEntry
-	(*timestamppb.Timestamp)(nil), // 16: google.protobuf.Timestamp
-	(v1.TargetKind)(0),            // 17: deputy.target.v1.TargetKind
-	(*v1.Target)(nil),             // 18: deputy.target.v1.Target
-	(*v11.Package)(nil),           // 19: deputy.dependency.v1.Package
-	(*v12.Finding)(nil),           // 20: deputy.vulnerability.v1.Finding
-	(*v12.Stats)(nil),             // 21: deputy.vulnerability.v1.Stats
-	(*v13.Action)(nil),            // 22: deputy.policy.v1.Action
-	(*v14.Finding)(nil),           // 23: deputy.secrets.v1.Finding
-	(*v14.Stats)(nil),             // 24: deputy.secrets.v1.Stats
-	(*v12.Advisory)(nil),          // 25: deputy.vulnerability.v1.Advisory
+	(*DependencyGraph)(nil),       // 14: deputy.scan.v1.DependencyGraph
+	nil,                           // 15: deputy.scan.v1.ScanResponse.AdvisoriesEntry
+	nil,                           // 16: deputy.scan.v1.ImageConfig.LabelsEntry
+	(*timestamppb.Timestamp)(nil), // 17: google.protobuf.Timestamp
+	(v1.TargetKind)(0),            // 18: deputy.target.v1.TargetKind
+	(*v1.Target)(nil),             // 19: deputy.target.v1.Target
+	(*v11.Package)(nil),           // 20: deputy.dependency.v1.Package
+	(*v12.Finding)(nil),           // 21: deputy.vulnerability.v1.Finding
+	(*v12.Stats)(nil),             // 22: deputy.vulnerability.v1.Stats
+	(*v13.Action)(nil),            // 23: deputy.policy.v1.Action
+	(*v14.Finding)(nil),           // 24: deputy.secrets.v1.Finding
+	(*v14.Stats)(nil),             // 25: deputy.secrets.v1.Stats
+	(*v15.DockerfileInfo)(nil),    // 26: deputy.inventory.v1.DockerfileInfo
+	(*v16.Node)(nil),              // 27: deputy.graph.v1.Node
+	(*v16.Edge)(nil),              // 28: deputy.graph.v1.Edge
+	(*v16.GraphStats)(nil),        // 29: deputy.graph.v1.GraphStats
+	(*v12.Advisory)(nil),          // 30: deputy.vulnerability.v1.Advisory
 }
 var file_deputy_scan_v1_service_proto_depIdxs = []int32{
 	3,  // 0: deputy.scan.v1.ScanRequest.options:type_name -> deputy.scan.v1.ScanOptions
 	3,  // 1: deputy.scan.v1.StreamScanRequest.options:type_name -> deputy.scan.v1.ScanOptions
-	16, // 2: deputy.scan.v1.ScanOptions.published_before:type_name -> google.protobuf.Timestamp
-	16, // 3: deputy.scan.v1.ScanOptions.published_after:type_name -> google.protobuf.Timestamp
+	17, // 2: deputy.scan.v1.ScanOptions.published_before:type_name -> google.protobuf.Timestamp
+	17, // 3: deputy.scan.v1.ScanOptions.published_after:type_name -> google.protobuf.Timestamp
 	5,  // 4: deputy.scan.v1.ScanOptions.graph_options:type_name -> deputy.scan.v1.GraphOptions
 	6,  // 5: deputy.scan.v1.ScanOptions.enrich_options:type_name -> deputy.scan.v1.EnrichOptions
 	4,  // 6: deputy.scan.v1.ScanOptions.target_hint:type_name -> deputy.scan.v1.TargetHint
-	17, // 7: deputy.scan.v1.TargetHint.kind:type_name -> deputy.target.v1.TargetKind
-	18, // 8: deputy.scan.v1.ScanResponse.target:type_name -> deputy.target.v1.Target
-	16, // 9: deputy.scan.v1.ScanResponse.generated_at:type_name -> google.protobuf.Timestamp
-	19, // 10: deputy.scan.v1.ScanResponse.packages:type_name -> deputy.dependency.v1.Package
-	20, // 11: deputy.scan.v1.ScanResponse.findings:type_name -> deputy.vulnerability.v1.Finding
-	14, // 12: deputy.scan.v1.ScanResponse.advisories:type_name -> deputy.scan.v1.ScanResponse.AdvisoriesEntry
-	21, // 13: deputy.scan.v1.ScanResponse.stats:type_name -> deputy.vulnerability.v1.Stats
-	22, // 14: deputy.scan.v1.ScanResponse.policy_actions:type_name -> deputy.policy.v1.Action
+	18, // 7: deputy.scan.v1.TargetHint.kind:type_name -> deputy.target.v1.TargetKind
+	19, // 8: deputy.scan.v1.ScanResponse.target:type_name -> deputy.target.v1.Target
+	17, // 9: deputy.scan.v1.ScanResponse.generated_at:type_name -> google.protobuf.Timestamp
+	20, // 10: deputy.scan.v1.ScanResponse.packages:type_name -> deputy.dependency.v1.Package
+	21, // 11: deputy.scan.v1.ScanResponse.findings:type_name -> deputy.vulnerability.v1.Finding
+	15, // 12: deputy.scan.v1.ScanResponse.advisories:type_name -> deputy.scan.v1.ScanResponse.AdvisoriesEntry
+	22, // 13: deputy.scan.v1.ScanResponse.stats:type_name -> deputy.vulnerability.v1.Stats
+	23, // 14: deputy.scan.v1.ScanResponse.policy_actions:type_name -> deputy.policy.v1.Action
 	9,  // 15: deputy.scan.v1.ScanResponse.image_info:type_name -> deputy.scan.v1.ImageInfo
-	23, // 16: deputy.scan.v1.ScanResponse.secret_findings:type_name -> deputy.secrets.v1.Finding
-	24, // 17: deputy.scan.v1.ScanResponse.secret_stats:type_name -> deputy.secrets.v1.Stats
-	0,  // 18: deputy.scan.v1.ScanProgress.phase:type_name -> deputy.scan.v1.ScanPhase
-	7,  // 19: deputy.scan.v1.ScanProgress.result:type_name -> deputy.scan.v1.ScanResponse
-	10, // 20: deputy.scan.v1.ImageInfo.config:type_name -> deputy.scan.v1.ImageConfig
-	12, // 21: deputy.scan.v1.ImageInfo.metadata:type_name -> deputy.scan.v1.ImageMetadata
-	13, // 22: deputy.scan.v1.ImageInfo.history:type_name -> deputy.scan.v1.HistoryEntry
-	15, // 23: deputy.scan.v1.ImageConfig.labels:type_name -> deputy.scan.v1.ImageConfig.LabelsEntry
-	11, // 24: deputy.scan.v1.ImageConfig.healthcheck:type_name -> deputy.scan.v1.Healthcheck
-	25, // 25: deputy.scan.v1.ScanResponse.AdvisoriesEntry.value:type_name -> deputy.vulnerability.v1.Advisory
-	1,  // 26: deputy.scan.v1.ScanService.Scan:input_type -> deputy.scan.v1.ScanRequest
-	2,  // 27: deputy.scan.v1.ScanService.StreamScan:input_type -> deputy.scan.v1.StreamScanRequest
-	7,  // 28: deputy.scan.v1.ScanService.Scan:output_type -> deputy.scan.v1.ScanResponse
-	8,  // 29: deputy.scan.v1.ScanService.StreamScan:output_type -> deputy.scan.v1.ScanProgress
-	28, // [28:30] is the sub-list for method output_type
-	26, // [26:28] is the sub-list for method input_type
-	26, // [26:26] is the sub-list for extension type_name
-	26, // [26:26] is the sub-list for extension extendee
-	0,  // [0:26] is the sub-list for field type_name
+	24, // 16: deputy.scan.v1.ScanResponse.secret_findings:type_name -> deputy.secrets.v1.Finding
+	25, // 17: deputy.scan.v1.ScanResponse.secret_stats:type_name -> deputy.secrets.v1.Stats
+	14, // 18: deputy.scan.v1.ScanResponse.graph:type_name -> deputy.scan.v1.DependencyGraph
+	26, // 19: deputy.scan.v1.ScanResponse.dockerfile_info:type_name -> deputy.inventory.v1.DockerfileInfo
+	0,  // 20: deputy.scan.v1.ScanProgress.phase:type_name -> deputy.scan.v1.ScanPhase
+	7,  // 21: deputy.scan.v1.ScanProgress.result:type_name -> deputy.scan.v1.ScanResponse
+	10, // 22: deputy.scan.v1.ImageInfo.config:type_name -> deputy.scan.v1.ImageConfig
+	12, // 23: deputy.scan.v1.ImageInfo.metadata:type_name -> deputy.scan.v1.ImageMetadata
+	13, // 24: deputy.scan.v1.ImageInfo.history:type_name -> deputy.scan.v1.HistoryEntry
+	16, // 25: deputy.scan.v1.ImageConfig.labels:type_name -> deputy.scan.v1.ImageConfig.LabelsEntry
+	11, // 26: deputy.scan.v1.ImageConfig.healthcheck:type_name -> deputy.scan.v1.Healthcheck
+	27, // 27: deputy.scan.v1.DependencyGraph.nodes:type_name -> deputy.graph.v1.Node
+	28, // 28: deputy.scan.v1.DependencyGraph.edges:type_name -> deputy.graph.v1.Edge
+	29, // 29: deputy.scan.v1.DependencyGraph.stats:type_name -> deputy.graph.v1.GraphStats
+	30, // 30: deputy.scan.v1.ScanResponse.AdvisoriesEntry.value:type_name -> deputy.vulnerability.v1.Advisory
+	1,  // 31: deputy.scan.v1.ScanService.Scan:input_type -> deputy.scan.v1.ScanRequest
+	2,  // 32: deputy.scan.v1.ScanService.StreamScan:input_type -> deputy.scan.v1.StreamScanRequest
+	7,  // 33: deputy.scan.v1.ScanService.Scan:output_type -> deputy.scan.v1.ScanResponse
+	8,  // 34: deputy.scan.v1.ScanService.StreamScan:output_type -> deputy.scan.v1.ScanProgress
+	33, // [33:35] is the sub-list for method output_type
+	31, // [31:33] is the sub-list for method input_type
+	31, // [31:31] is the sub-list for extension type_name
+	31, // [31:31] is the sub-list for extension extendee
+	0,  // [0:31] is the sub-list for field type_name
 }
 
 func init() { file_deputy_scan_v1_service_proto_init() }
@@ -1463,7 +1576,7 @@ func file_deputy_scan_v1_service_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_deputy_scan_v1_service_proto_rawDesc), len(file_deputy_scan_v1_service_proto_rawDesc)),
 			NumEnums:      1,
-			NumMessages:   15,
+			NumMessages:   16,
 			NumExtensions: 0,
 			NumServices:   1,
 		},
