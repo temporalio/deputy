@@ -8,6 +8,7 @@ import (
 
 	listv1 "github.com/picatz/deputy/gen/deputy/list/v1"
 	"github.com/picatz/deputy/gen/deputy/list/v1/listv1connect"
+	"github.com/picatz/deputy/internal/compare"
 	"github.com/picatz/deputy/internal/inventory"
 	protoconv "github.com/picatz/deputy/internal/proto"
 	"github.com/picatz/deputy/internal/targets"
@@ -93,7 +94,29 @@ func (h *ListHandler) ListPackages(
 		}
 
 		// Count direct vs transitive
-		if direct[pkg.PURL().String()] {
+		// Direct map contains Go module roots (e.g., "github.com/google/osv-scalibr"),
+		// not PURL strings. For Go packages, use the module root for lookup.
+		purl := pkg.PURL()
+		isDirect := false
+		if purl != nil && direct != nil {
+			if purl.Type == "golang" {
+				// Reconstruct module path from PURL namespace + name
+				modulePath := pkg.Name
+				if modulePath == "" {
+					if purl.Namespace != "" {
+						modulePath = purl.Namespace + "/" + purl.Name
+					} else {
+						modulePath = purl.Name
+					}
+				}
+				moduleRoot := compare.GetModuleRoot(modulePath)
+				isDirect = direct[moduleRoot]
+			} else {
+				// For non-Go ecosystems, use PURL string as key
+				isDirect = direct[purl.String()]
+			}
+		}
+		if isDirect {
 			directCount++
 		} else {
 			transitiveCount++

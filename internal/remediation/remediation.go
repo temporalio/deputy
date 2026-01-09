@@ -289,6 +289,7 @@ func buildGoToolchainCommand(version string) (Command, bool) {
 		Command:     cmd,
 		Path:        "go.mod",
 		Hint:        "updates go directive",
+		IsDirect:    true, // Go toolchain is always a direct dependency (declared in go.mod)
 		Executable:  true,
 	}, true
 }

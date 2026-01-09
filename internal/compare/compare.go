@@ -519,13 +519,23 @@ func summarizePackage(p *extractor.Package) (string, pkgSummary) {
 		return meta.key, meta
 	}
 	name := strings.ToLower(p.Name)
+	// Apply ecosystem-specific name normalization
+	normalizedEcos := normalizeEcosystemForComparison(ecos)
+	switch {
+	case isPyPIEcosystem(normalizedEcos):
+		name = normalizePyPIName(name)
+	case isCargoEcosystem(normalizedEcos):
+		name = normalizeCargoName(name)
+	case isNpmEcosystem(normalizedEcos):
+		// npm names are already case-insensitive; ToLower above handles it
+		// No additional normalization needed beyond lowercasing
+	}
 	meta.canonical = name
 	if ecos == "" {
 		meta.key = name
 		return meta.key, meta
 	}
 	// Use normalized ecosystem for key to match packages across OS versions
-	normalizedEcos := normalizeEcosystemForComparison(ecos)
 	meta.key = normalizedEcos + "|" + name
 	return meta.key, meta
 }
@@ -536,6 +546,76 @@ func (s pkgSummary) ecosystemName() string {
 		return s.ecosystem
 	}
 	return "unknown"
+}
+
+// isPyPIEcosystem returns true if the ecosystem is a PyPI/Python ecosystem.
+func isPyPIEcosystem(eco string) bool {
+	switch strings.ToLower(eco) {
+	case "pypi", "pip", "pipenv", "poetry", "python":
+		return true
+	}
+	return false
+}
+
+// isCargoEcosystem returns true if the ecosystem is a Cargo/Rust ecosystem.
+func isCargoEcosystem(eco string) bool {
+	switch strings.ToLower(eco) {
+	case "cargo", "crates.io", "rust":
+		return true
+	}
+	return false
+}
+
+// isNpmEcosystem returns true if the ecosystem is an npm/Node.js ecosystem.
+func isNpmEcosystem(eco string) bool {
+	switch strings.ToLower(eco) {
+	case "npm", "yarn", "pnpm", "node":
+		return true
+	}
+	return false
+}
+
+// normalizePyPIName normalizes a PyPI package name according to PEP 503.
+// Per PEP 503, valid package names must be lowercase and consecutive runs of
+// underscores, hyphens, and periods are replaced with a single hyphen.
+// This ensures that "My_Package", "my-package", and "my.package" all match.
+func normalizePyPIName(name string) string {
+	if name == "" {
+		return name
+	}
+	// Already lowercased by caller, but ensure it
+	name = strings.ToLower(name)
+	// Replace consecutive runs of [-_.] with a single hyphen
+	var result strings.Builder
+	result.Grow(len(name))
+	inSeparator := false
+	for _, r := range name {
+		if r == '-' || r == '_' || r == '.' {
+			if !inSeparator {
+				result.WriteByte('-')
+				inSeparator = true
+			}
+			// Skip additional separators in a run
+		} else {
+			result.WriteRune(r)
+			inSeparator = false
+		}
+	}
+	return result.String()
+}
+
+// normalizeCargoName normalizes a Cargo/crates.io package name per RFC 940.
+// On crates.io, hyphens and underscores are equivalent: "serde-json" and
+// "serde_json" refer to the same crate. We normalize to underscores to match
+// Rust's internal convention (crate names in code use underscores).
+func normalizeCargoName(name string) string {
+	if name == "" {
+		return name
+	}
+	// Crate names are case-insensitive on crates.io
+	name = strings.ToLower(name)
+	// Replace hyphens with underscores (Rust convention)
+	return strings.ReplaceAll(name, "-", "_")
 }
 
 // CompareOptions configures package comparison behavior.

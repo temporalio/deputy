@@ -9,6 +9,7 @@ import (
 
 	"github.com/google/osv-scalibr/extractor"
 	vulnerabilityv1 "github.com/picatz/deputy/gen/deputy/vulnerability/v1"
+	"github.com/picatz/deputy/internal/compare"
 	"github.com/picatz/deputy/internal/dependency"
 	"github.com/picatz/deputy/internal/vulnerability"
 )
@@ -200,7 +201,9 @@ func New() *Graph {
 }
 
 // FromInventory constructs a graph from inventory extraction results.
-// The direct map indicates which PURLs are direct dependencies.
+// The direct map indicates which packages are direct dependencies. For Go packages,
+// the map keys are module roots (e.g., "github.com/google/osv-scalibr"). For other
+// ecosystems, keys are PURL strings.
 func FromInventory(pkgs []*extractor.Package, direct map[string]bool) *Graph {
 	g := New()
 
@@ -216,7 +219,24 @@ func FromInventory(pkgs []*extractor.Package, direct map[string]bool) *Graph {
 
 		isDirect := false
 		if direct != nil {
-			isDirect = direct[purl]
+			// Direct map contains Go module roots (e.g., "github.com/google/osv-scalibr"),
+			// not PURL strings. For Go packages, use the module root for lookup.
+			if purlObj.Type == "golang" {
+				// Reconstruct module path from PURL namespace + name
+				modulePath := pkg.Name
+				if modulePath == "" {
+					if purlObj.Namespace != "" {
+						modulePath = purlObj.Namespace + "/" + purlObj.Name
+					} else {
+						modulePath = purlObj.Name
+					}
+				}
+				moduleRoot := compare.GetModuleRoot(modulePath)
+				isDirect = direct[moduleRoot]
+			} else {
+				// For non-Go ecosystems, use PURL string as key
+				isDirect = direct[purl]
+			}
 		}
 
 		node := &Node{

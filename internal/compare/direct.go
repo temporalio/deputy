@@ -14,9 +14,11 @@ import (
 
 // CollectGoDirectModulesFromWorkspace scans the provided workspace for go.mod files
 // and extracts the set of direct dependencies. It skips vendor directories and
-// the .git folder. The "stdlib" pseudo-dependency is always included.
+// the .git folder. The Go stdlib pseudo-dependency is always included under both
+// "stdlib" (for OSV vulnerability matching) and "go" (for PURL matching, as OSV-SCALIBR
+// uses pkg:golang/go@version for the stdlib package).
 func CollectGoDirectModulesFromWorkspace(ws workspace.FS) map[string]bool {
-	deps := map[string]bool{"stdlib": true}
+	deps := map[string]bool{"stdlib": true, "go": true}
 	if ws == nil {
 		return deps
 	}
@@ -49,9 +51,10 @@ func CollectGoDirectModulesFromWorkspace(ws workspace.FS) map[string]bool {
 
 // CollectGoDirectModulesFromCommit extracts direct dependencies from go.mod files
 // present in a specific Git commit. It traverses the file tree of the commit,
-// parsing any go.mod files found.
+// parsing any go.mod files found. The Go stdlib pseudo-dependency is always included
+// under both "stdlib" and "go" (see CollectGoDirectModulesFromWorkspace for details).
 func CollectGoDirectModulesFromCommit(repo *git.Repository, hash plumbing.Hash) (map[string]bool, error) {
-	deps := map[string]bool{"stdlib": true}
+	deps := map[string]bool{"stdlib": true, "go": true}
 	if repo == nil {
 		return deps, nil
 	}

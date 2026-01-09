@@ -15,6 +15,7 @@ import (
 	dependencyv1 "github.com/picatz/deputy/gen/deputy/dependency/v1"
 	vulnerabilityv1 "github.com/picatz/deputy/gen/deputy/vulnerability/v1"
 	"github.com/picatz/deputy/internal/analysis/osv"
+	"github.com/picatz/deputy/internal/compare"
 	"github.com/picatz/deputy/internal/container/image"
 	"github.com/picatz/deputy/internal/dependency/graph"
 	"github.com/picatz/deputy/internal/dockerfile"
@@ -415,7 +416,24 @@ func packagesToInputs(pkgs []*extractor.Package, direct map[string]bool) []osv.P
 
 		isDirect := false
 		if direct != nil {
-			isDirect = direct[purl.String()]
+			// Direct map contains Go module roots (e.g., "github.com/google/osv-scalibr"),
+			// not PURL strings. For Go packages, use the module root for lookup.
+			if purl.Type == "golang" {
+				// Reconstruct module path from PURL namespace + name
+				modulePath := pkg.Name
+				if modulePath == "" {
+					if purl.Namespace != "" {
+						modulePath = purl.Namespace + "/" + purl.Name
+					} else {
+						modulePath = purl.Name
+					}
+				}
+				moduleRoot := compare.GetModuleRoot(modulePath)
+				isDirect = direct[moduleRoot]
+			} else {
+				// For non-Go ecosystems, use PURL string as key
+				isDirect = direct[purl.String()]
+			}
 		}
 
 		locs := make([]string, len(pkg.Locations))

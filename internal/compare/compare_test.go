@@ -256,6 +256,185 @@ func TestComparePackages_NonGo(t *testing.T) {
 	}
 }
 
+func TestNormalizePyPIName(t *testing.T) {
+	cases := []struct {
+		name, in, want string
+	}{
+		{name: "lowercase only", in: "requests", want: "requests"},
+		{name: "with underscore", in: "my_package", want: "my-package"},
+		{name: "with hyphen", in: "my-package", want: "my-package"},
+		{name: "with period", in: "my.package", want: "my-package"},
+		{name: "mixed separators", in: "my_package-name.foo", want: "my-package-name-foo"},
+		{name: "consecutive underscores", in: "my__package", want: "my-package"},
+		{name: "consecutive mixed", in: "my_.-package", want: "my-package"},
+		{name: "uppercase", in: "My_Package", want: "my-package"},
+		{name: "empty", in: "", want: ""},
+		{name: "real example Django", in: "Django", want: "django"},
+		{name: "real example Pillow", in: "Pillow", want: "pillow"},
+		{name: "real example scikit-learn", in: "scikit-learn", want: "scikit-learn"},
+		{name: "real example scikit_learn", in: "scikit_learn", want: "scikit-learn"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := normalizePyPIName(tc.in)
+			if got != tc.want {
+				t.Errorf("normalizePyPIName(%q) = %q, want %q", tc.in, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestComparePackages_PyPINameNormalization(t *testing.T) {
+	// Test that PyPI packages with different name formats are recognized as the same package
+	oldPkgs := []*extractor.Package{
+		{Name: "scikit_learn", Version: "1.0.0", PURLType: scalpurl.TypePyPi},
+	}
+	newPkgs := []*extractor.Package{
+		{Name: "scikit-learn", Version: "1.1.0", PURLType: scalpurl.TypePyPi},
+	}
+	changes := ComparePackages(oldPkgs, newPkgs, nil, nil, nil)
+	// Should be 1 change (upgrade), not 2 changes (remove + add)
+	if len(changes) != 1 {
+		t.Fatalf("expected 1 change (upgrade) got %d: %+v", len(changes), changes)
+	}
+	if changes[0].ChangeType != Upgraded {
+		t.Fatalf("expected Upgraded change type, got %v: %+v", changes[0].ChangeType, changes[0])
+	}
+	if changes[0].BaseVersion != "1.0.0" || changes[0].TargetVersion != "1.1.0" {
+		t.Fatalf("unexpected versions: %+v", changes[0])
+	}
+}
+
+func TestComparePackages_GoMajorVersionCoexistence(t *testing.T) {
+	// Test that lipgloss v1 and lipgloss/v2 coexistence is handled correctly.
+	// When both exist in the same go.mod, they should be treated as the same
+	// logical module (canonical form). This is the current design decision.
+	oldPkgs := []*extractor.Package{
+		{Name: "github.com/charmbracelet/lipgloss", Version: "v1.0.0", PURLType: scalpurl.TypeGolang},
+		{Name: "github.com/charmbracelet/lipgloss/v2", Version: "v2.0.0", PURLType: scalpurl.TypeGolang},
+	}
+	newPkgs := []*extractor.Package{
+		{Name: "github.com/charmbracelet/lipgloss", Version: "v1.0.0", PURLType: scalpurl.TypeGolang},
+		{Name: "github.com/charmbracelet/lipgloss/v2", Version: "v2.0.0", PURLType: scalpurl.TypeGolang},
+	}
+	changes := ComparePackages(oldPkgs, newPkgs, nil, nil, nil)
+	// With canonical keying, both map to same key, so we see 0 changes
+	// because the "winner" (deterministically lipgloss v1 due to sorted input)
+	// is the same in both old and new
+	if len(changes) != 0 {
+		t.Fatalf("expected 0 changes for identical coexisting major versions, got %d: %+v", len(changes), changes)
+	}
+}
+
+func TestComparePackages_GoMajorVersionUpgrade(t *testing.T) {
+	// Test upgrade within a coexisting major version scenario
+	oldPkgs := []*extractor.Package{
+		{Name: "github.com/charmbracelet/lipgloss", Version: "v1.0.0", PURLType: scalpurl.TypeGolang},
+		{Name: "github.com/charmbracelet/lipgloss/v2", Version: "v2.0.0", PURLType: scalpurl.TypeGolang},
+	}
+	newPkgs := []*extractor.Package{
+		{Name: "github.com/charmbracelet/lipgloss", Version: "v1.1.0", PURLType: scalpurl.TypeGolang},
+		{Name: "github.com/charmbracelet/lipgloss/v2", Version: "v2.1.0", PURLType: scalpurl.TypeGolang},
+	}
+	changes := ComparePackages(oldPkgs, newPkgs, nil, nil, nil)
+	// With canonical keying and deterministic ordering (lipgloss < lipgloss/v2 by PURL),
+	// both maps will have lipgloss as the final entry for the canonical key.
+	// So we should see 1 upgrade: v1.0.0 -> v1.1.0
+	if len(changes) != 1 {
+		t.Fatalf("expected 1 change got %d: %+v", len(changes), changes)
+	}
+	if changes[0].ChangeType != Upgraded {
+		t.Fatalf("expected Upgraded, got %v: %+v", changes[0].ChangeType, changes[0])
+	}
+}
+
+func TestComparePackages_GoGopkgInNormalization(t *testing.T) {
+	// Test that gopkg.in packages are normalized to their GitHub equivalents
+	oldPkgs := []*extractor.Package{
+		{Name: "gopkg.in/yaml.v3", Version: "v3.0.0", PURLType: scalpurl.TypeGolang},
+	}
+	newPkgs := []*extractor.Package{
+		{Name: "github.com/go-yaml/yaml", Version: "v3.0.1", PURLType: scalpurl.TypeGolang},
+	}
+	changes := ComparePackages(oldPkgs, newPkgs, nil, nil, nil)
+	// Should be 1 change (upgrade), not 2 changes (remove + add)
+	// because gopkg.in/yaml.v3 normalizes to github.com/go-yaml/yaml
+	if len(changes) != 1 {
+		t.Fatalf("expected 1 change got %d: %+v", len(changes), changes)
+	}
+	if changes[0].ChangeType != Upgraded {
+		t.Fatalf("expected Upgraded change type, got %v: %+v", changes[0].ChangeType, changes[0])
+	}
+	if changes[0].OldName != "gopkg.in/yaml.v3" {
+		t.Fatalf("expected OldName to be gopkg.in/yaml.v3, got %q", changes[0].OldName)
+	}
+}
+
+func TestNormalizeCargoName(t *testing.T) {
+	cases := []struct {
+		name, in, want string
+	}{
+		{name: "lowercase only", in: "serde", want: "serde"},
+		{name: "with hyphen", in: "serde-json", want: "serde_json"},
+		{name: "with underscore", in: "serde_json", want: "serde_json"},
+		{name: "multiple hyphens", in: "tokio-stream-utils", want: "tokio_stream_utils"},
+		{name: "mixed hyphen underscore", in: "my-crate_name", want: "my_crate_name"},
+		{name: "uppercase", in: "Serde-JSON", want: "serde_json"},
+		{name: "empty", in: "", want: ""},
+		{name: "real example rand", in: "rand", want: "rand"},
+		{name: "real example rand-core", in: "rand-core", want: "rand_core"},
+		{name: "real example rand_core", in: "rand_core", want: "rand_core"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := normalizeCargoName(tc.in)
+			if got != tc.want {
+				t.Errorf("normalizeCargoName(%q) = %q, want %q", tc.in, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestComparePackages_CargoNameNormalization(t *testing.T) {
+	// Test that Cargo packages with different name formats (hyphen vs underscore) are recognized as the same package
+	oldPkgs := []*extractor.Package{
+		{Name: "serde-json", Version: "1.0.0", PURLType: "cargo"},
+	}
+	newPkgs := []*extractor.Package{
+		{Name: "serde_json", Version: "1.1.0", PURLType: "cargo"},
+	}
+	changes := ComparePackages(oldPkgs, newPkgs, nil, nil, nil)
+	// Should be 1 change (upgrade), not 2 changes (remove + add)
+	if len(changes) != 1 {
+		t.Fatalf("expected 1 change (upgrade) got %d: %+v", len(changes), changes)
+	}
+	if changes[0].ChangeType != Upgraded {
+		t.Fatalf("expected Upgraded change type, got %v: %+v", changes[0].ChangeType, changes[0])
+	}
+	if changes[0].BaseVersion != "1.0.0" || changes[0].TargetVersion != "1.1.0" {
+		t.Fatalf("unexpected versions: %+v", changes[0])
+	}
+}
+
+func TestComparePackages_NpmCaseNormalization(t *testing.T) {
+	// Test that npm packages with different case are recognized as the same package
+	// npm names are case-insensitive (all stored lowercase on registry)
+	oldPkgs := []*extractor.Package{
+		{Name: "Lodash", Version: "4.17.20", PURLType: scalpurl.TypeNPM},
+	}
+	newPkgs := []*extractor.Package{
+		{Name: "lodash", Version: "4.17.21", PURLType: scalpurl.TypeNPM},
+	}
+	changes := ComparePackages(oldPkgs, newPkgs, nil, nil, nil)
+	// Should be 1 change (upgrade), not 2 changes (remove + add)
+	if len(changes) != 1 {
+		t.Fatalf("expected 1 change (upgrade) got %d: %+v", len(changes), changes)
+	}
+	if changes[0].ChangeType != Upgraded {
+		t.Fatalf("expected Upgraded change type, got %v: %+v", changes[0].ChangeType, changes[0])
+	}
+}
+
 func TestComparePackages_NonGoDirectness(t *testing.T) {
 	oldPkgs := []*extractor.Package{
 		{Name: "react", Version: "1.0.0", PURLType: scalpurl.TypeNPM},

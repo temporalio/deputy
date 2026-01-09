@@ -96,10 +96,10 @@ func VulnerabilityList(w io.Writer, cons []vulnerability.Consolidated, opts Vuln
 			return v.IsDirect
 		})
 		depType := "[indirect]"
-		depStyle := output.StyleVersion
+		depStyle := output.StyleIndirect
 		if hasDirect {
 			depType = "[direct]"
-			depStyle = output.StyleUpgraded
+			depStyle = output.StyleDirect
 		}
 		{
 			var doc output.Doc

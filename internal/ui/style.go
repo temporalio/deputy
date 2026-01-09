@@ -35,10 +35,16 @@ var (
 
 	// StylePackageName is used for displaying package names.
 	StylePackageName = lipgloss.NewStyle().Foreground(lipgloss.Color("#FFFFFF"))
-	// StyleVersion is used for displaying package versions.
+	// StyleVersion is used for displaying package versions (old/base version in diffs).
 	StyleVersion = lipgloss.NewStyle().Foreground(lipgloss.Color("#A9A9A9")).Faint(true)
+	// StyleVersionNew is used for displaying new/target versions in diffs (slightly brighter).
+	StyleVersionNew = lipgloss.NewStyle().Foreground(lipgloss.Color("#C8C8C8"))
 	// StyleLicense is used for displaying package licenses.
 	StyleLicense = lipgloss.NewStyle().Foreground(lipgloss.Color("#A9A9A9")).Faint(true)
+	// StyleDirect is used for [direct] dependency labels (brighter, more prominent).
+	StyleDirect = lipgloss.NewStyle().Foreground(lipgloss.Color("#87CEEB")) // Sky blue
+	// StyleIndirect is used for [indirect] dependency labels (dimmer).
+	StyleIndirect = lipgloss.NewStyle().Foreground(lipgloss.Color("#808080")).Faint(true)
 	// StyleUpdateArrow is used for the arrow in upgrade paths.
 	StyleUpdateArrow = lipgloss.NewStyle().Foreground(lipgloss.Color("#00CED1")).Faint(true)
 	// StyleDowngradeArrow is used for the arrow in downgrade paths.

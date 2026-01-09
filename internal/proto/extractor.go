@@ -8,10 +8,13 @@ import (
 
 	containerv1 "github.com/picatz/deputy/gen/deputy/container/v1"
 	dependencyv1 "github.com/picatz/deputy/gen/deputy/dependency/v1"
+	"github.com/picatz/deputy/internal/compare"
 )
 
 // ExtractorPackageToProto converts an OSV-SCALIBR extractor.Package to proto Package.
-// The direct map indicates which packages are direct dependencies (by PURL string key).
+// The direct map indicates which packages are direct dependencies. For Go packages,
+// the map keys are module roots (e.g., "github.com/google/osv-scalibr"). For other
+// ecosystems, keys are PURL strings.
 func ExtractorPackageToProto(pkg *extractor.Package, direct map[string]bool) *dependencyv1.Package {
 	if pkg == nil {
 		return nil
@@ -24,8 +27,25 @@ func ExtractorPackageToProto(pkg *extractor.Package, direct map[string]bool) *de
 	}
 
 	isDirect := false
-	if direct != nil {
-		isDirect = direct[purlStr]
+	if direct != nil && purl != nil {
+		// Direct map contains Go module roots (e.g., "github.com/google/osv-scalibr"),
+		// not PURL strings. For Go packages, use the module root for lookup.
+		if purl.Type == "golang" {
+			// Reconstruct module path from PURL namespace + name
+			modulePath := pkg.Name
+			if modulePath == "" {
+				if purl.Namespace != "" {
+					modulePath = purl.Namespace + "/" + purl.Name
+				} else {
+					modulePath = purl.Name
+				}
+			}
+			moduleRoot := compare.GetModuleRoot(modulePath)
+			isDirect = direct[moduleRoot]
+		} else {
+			// For non-Go ecosystems, use PURL string as key
+			isDirect = direct[purlStr]
+		}
 	}
 
 	var layerDetails *containerv1.LayerDetails
@@ -52,7 +72,9 @@ func ExtractorPackageToProto(pkg *extractor.Package, direct map[string]bool) *de
 }
 
 // ExtractorPackagesToProto converts a slice of OSV-SCALIBR packages to proto Packages.
-// The direct map indicates which packages are direct dependencies (by PURL string key).
+// The direct map indicates which packages are direct dependencies. For Go packages,
+// the map keys are module roots (e.g., "github.com/google/osv-scalibr"). For other
+// ecosystems, keys are PURL strings.
 func ExtractorPackagesToProto(pkgs []*extractor.Package, direct map[string]bool) []*dependencyv1.Package {
 	if len(pkgs) == 0 {
 		return nil

@@ -893,17 +893,19 @@ func displayDetailedDependencyChanges(ctx context.Context, ws workspace.FS, chan
 
 		// Format the combined license and direct/indirect annotation
 		var licAndDepStr string
-		directness := "(indirect)"
+		var directnessStr string
 		if c.IsDirect {
-			directness = "(direct)"
+			directnessStr = ui.StyleDirect.Render("[direct]")
+		} else {
+			directnessStr = ui.StyleIndirect.Render("[indirect]")
 		}
 
 		if len(licenses) > 0 && licenses[0] != "?" {
 			licenseStr := strings.Join(licenses, ", ")
-			licAndDepStr = ui.StyleLicense.Render("["+licenseStr+"]") + " " + ui.StyleVersion.Render(directness)
+			licAndDepStr = ui.StyleLicense.Render("["+licenseStr+"]") + " " + directnessStr
 		} else {
 			// If no licenses are available, just show the directness
-			licAndDepStr = ui.StyleVersion.Render(directness)
+			licAndDepStr = directnessStr
 		}
 
 		switch c.ChangeType {
@@ -912,11 +914,13 @@ func displayDetailedDependencyChanges(ctx context.Context, ws workspace.FS, chan
 			addedN++
 		case compare.Removed:
 			// For removed dependencies, we don't have target version license info, so just show directness
-			removedDirectness := "(indirect)"
+			var removedDirectnessStr string
 			if c.IsDirect {
-				removedDirectness = "(direct)"
+				removedDirectnessStr = ui.StyleDirect.Render("[direct]")
+			} else {
+				removedDirectnessStr = ui.StyleIndirect.Render("[indirect]")
 			}
-			fmt.Fprintf(outW, "  %s %s @ %s %s\n", ui.StyleRemoved.Render("-"), ui.StyleRemoved.Render(c.Name), ui.StyleVersion.Render(c.BaseVersion), ui.StyleVersion.Render(removedDirectness))
+			fmt.Fprintf(outW, "  %s %s @ %s %s\n", ui.StyleRemoved.Render("-"), ui.StyleRemoved.Render(c.Name), ui.StyleVersion.Render(c.BaseVersion), removedDirectnessStr)
 			removedN++
 		case compare.Upgraded:
 			updatedN++
@@ -925,7 +929,7 @@ func displayDetailedDependencyChanges(ctx context.Context, ws workspace.FS, chan
 			if c.OldName != "" && c.OldName != c.Name {
 				oldNamePart = ui.StyleDim.Render(c.OldName) + " " + ui.StyleUpdateArrow.Render("→ ")
 			}
-			fmt.Fprintf(outW, "  %s %s%s @ %s %s %s %s\n", ui.StyleUpgraded.Render("↑"), oldNamePart, ui.StyleBold.Render(c.Name), ui.StyleVersion.Render(c.BaseVersion), ui.StyleUpdateArrow.Render("→"), ui.StyleVersion.Render(c.TargetVersion), licAndDepStr)
+			fmt.Fprintf(outW, "  %s %s%s @ %s %s %s %s\n", ui.StyleUpgraded.Render("↑"), oldNamePart, ui.StyleBold.Render(c.Name), ui.StyleVersion.Render(c.BaseVersion), ui.StyleUpdateArrow.Render("→"), ui.StyleVersionNew.Render(c.TargetVersion), licAndDepStr)
 		case compare.Downgraded:
 			updatedN++
 			downgradedN++
@@ -933,7 +937,7 @@ func displayDetailedDependencyChanges(ctx context.Context, ws workspace.FS, chan
 			if c.OldName != "" && c.OldName != c.Name {
 				oldNamePart = ui.StyleDim.Render(c.OldName) + " " + ui.StyleDowngradeArrow.Render("→ ")
 			}
-			fmt.Fprintf(outW, "  %s %s%s @ %s %s %s %s\n", ui.StyleDowngraded.Render("↓"), oldNamePart, ui.StyleBold.Render(c.Name), ui.StyleVersion.Render(c.BaseVersion), ui.StyleDowngradeArrow.Render("→"), ui.StyleVersion.Render(c.TargetVersion), licAndDepStr)
+			fmt.Fprintf(outW, "  %s %s%s @ %s %s %s %s\n", ui.StyleDowngraded.Render("↓"), oldNamePart, ui.StyleBold.Render(c.Name), ui.StyleVersion.Render(c.BaseVersion), ui.StyleDowngradeArrow.Render("→"), ui.StyleVersionNew.Render(c.TargetVersion), licAndDepStr)
 		case compare.Updated:
 			updatedN++
 			arrowStyle := ui.StyleUpdateArrow
@@ -942,7 +946,7 @@ func displayDetailedDependencyChanges(ctx context.Context, ws workspace.FS, chan
 			if c.OldName != "" && c.OldName != c.Name {
 				oldNamePart = ui.StyleDim.Render(c.OldName) + " " + arrowStyle.Render("→ ")
 			}
-			fmt.Fprintf(outW, "  %s %s%s @ %s %s %s %s\n", symbol, oldNamePart, ui.StyleBold.Render(c.Name), ui.StyleVersion.Render(c.BaseVersion), arrowStyle.Render("→"), ui.StyleVersion.Render(c.TargetVersion), licAndDepStr)
+			fmt.Fprintf(outW, "  %s %s%s @ %s %s %s %s\n", symbol, oldNamePart, ui.StyleBold.Render(c.Name), ui.StyleVersion.Render(c.BaseVersion), arrowStyle.Render("→"), ui.StyleVersionNew.Render(c.TargetVersion), licAndDepStr)
 		}
 	}
 

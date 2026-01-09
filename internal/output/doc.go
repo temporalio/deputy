@@ -24,6 +24,8 @@ const (
 	StyleUpgraded
 	StyleRemoved
 	StyleSymbol
+	StyleDirect
+	StyleIndirect
 )
 
 // Span is a piece of text with an associated style.
@@ -85,6 +87,10 @@ func (d Doc) Render(w io.Writer, styles Styles) error {
 				text = styles.Removed(text)
 			case StyleSymbol:
 				text = styles.Symbol(text)
+			case StyleDirect:
+				text = styles.Direct(text)
+			case StyleIndirect:
+				text = styles.Indirect(text)
 			case StyleNone:
 				// no-op
 			default:
