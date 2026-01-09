@@ -24,16 +24,12 @@ import (
 	"github.com/picatz/deputy/gen/deputy/secrets/v1/secretsv1connect"
 	"github.com/picatz/deputy/internal/logs"
 	"github.com/picatz/deputy/internal/otel"
-	"github.com/picatz/deputy/internal/scan"
 )
 
 // Config configures the Deputy server.
 type Config struct {
 	// Addr is the address to listen on (e.g., ":8090", "localhost:8090").
 	Addr string
-
-	// Scanner is the scan service to use. If nil, a default is created.
-	Scanner *scan.Service
 
 	// ReadTimeout is the maximum duration for reading the request.
 	ReadTimeout time.Duration
@@ -185,12 +181,12 @@ func New(cfg Config) *Server {
 	}
 
 	// Create service handlers
-	scanHandler := NewScanHandler(cfg.Scanner)
+	scanHandler := NewScanHandler()
 	sbomHandler := NewSBOMHandler()
-	listHandler := NewListHandler(cfg.Scanner)
+	listHandler := NewListHandler()
 	remediationHandler := NewRemediationHandler()
 	secretsHandler, _ := NewSecretsHandler()
-	diffHandler := NewDiffHandler(cfg.Scanner)
+	diffHandler := NewDiffHandler()
 	graphHandler := NewGraphHandler()
 
 	// Register ConnectRPC handlers

@@ -1527,7 +1527,7 @@ See JWT policy examples for more patterns:
 | Ecosystem support | [`internal/inventory/`](internal/inventory/), [`internal/purlx/`](internal/purlx/), [`internal/proxy/`](internal/proxy/) |
 | Policy features | [`internal/policy/entrypoints.go`](internal/policy/entrypoints.go), [`internal/policy/engine.go`](internal/policy/engine.go), [Policy examples](policy/examples/) |
 | License resolution | [`internal/license/license.go`](internal/license/license.go) (implements `Resolver` interface) |
-| Scanning | [`internal/scan/service.go`](internal/scan/service.go) (implements `Scanner` interface) |
+| Scanning | [`internal/scanning/`](internal/scanning/) (scan orchestration, filtering, results) |
 
 ## Debugging Tips
 

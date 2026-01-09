@@ -35,7 +35,6 @@ import (
 	"github.com/picatz/deputy/internal/purlx"
 	"github.com/picatz/deputy/internal/repository"
 	"github.com/picatz/deputy/internal/repository/workspace"
-	"github.com/picatz/deputy/internal/scan"
 	"github.com/picatz/deputy/internal/targets"
 	"github.com/picatz/deputy/internal/version"
 	"github.com/protobom/protobom/pkg/formats"
@@ -100,7 +99,7 @@ type Result struct {
 	// Document is the generated Protobom SBOM document.
 	Document *sbom.Document
 	// Target captures the normalized scan target metadata for policies and context output.
-	Target scan.Target
+	Target inventory.Target
 	// RepoPath is the local or remote repository path that was scanned.
 	RepoPath string
 	// Ref is the git reference that was resolved (may differ from input if normalized).
@@ -267,7 +266,7 @@ func Generate(ctx context.Context, repoRef string, opts Options) (Result, error)
 	result.Origin = origin
 	result.Document = doc
 	result.Packages = pkgs
-	result.Target = scan.Target{
+	result.Target = inventory.Target{
 		Kind:         targets.KindGit,
 		DisplayPath:  repoDisplay,
 		LocalPath:    localPath,

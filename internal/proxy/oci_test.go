@@ -11,7 +11,7 @@ import (
 
 	"github.com/google/go-containerregistry/pkg/name"
 	"github.com/picatz/deputy/internal/policy"
-	"github.com/picatz/deputy/internal/scan"
+	"github.com/picatz/deputy/internal/scanning"
 )
 
 func TestParseOCIRequestPath(t *testing.T) {
@@ -175,7 +175,7 @@ type stubImageScanner struct {
 	t *testing.T
 }
 
-func (s stubImageScanner) ScanContainerImage(context.Context, string, map[string]string, scan.Options) (*scan.Execution, error) {
+func (s stubImageScanner) ScanContainerImage(context.Context, string, map[string]string, scanning.Options) (*scanning.Execution, error) {
 	if s.t != nil {
 		s.t.Fatalf("unexpected image scan")
 	}

@@ -14,7 +14,7 @@ import (
 	"github.com/picatz/deputy/internal/ignore"
 	inv "github.com/picatz/deputy/internal/inventory"
 	"github.com/picatz/deputy/internal/report/render"
-	"github.com/picatz/deputy/internal/scan"
+	"github.com/picatz/deputy/internal/scanning"
 	"github.com/spf13/cobra"
 )
 
@@ -90,7 +90,7 @@ func (f scanFlags) displayOptions() render.VulnerabilityDisplayOptions {
 }
 
 // displayOptionsWithResult returns VulnerabilityDisplayOptions including the graph from a scan result.
-func (f scanFlags) displayOptionsWithResult(result scan.Result) render.VulnerabilityDisplayOptions {
+func (f scanFlags) displayOptionsWithResult(result scanning.Result) render.VulnerabilityDisplayOptions {
 	opts := f.displayOptions()
 	opts.Graph = result.Graph
 	return opts
@@ -99,15 +99,6 @@ func (f scanFlags) displayOptionsWithResult(result scan.Result) render.Vulnerabi
 // scanOptions returns the inventory scan options derived from scan flags.
 func (f scanFlags) scanOptions() inv.ScanOptions {
 	return inv.ScanOptions{Ecosystems: f.Ecosystems}
-}
-
-// graphOptions returns graph resolution options.
-// When enabled, uses proxy.golang.org for Go module resolution by default.
-func (f scanFlags) graphOptions() scan.GraphOptions {
-	return scan.GraphOptions{
-		Enabled:  f.WithGraph,
-		UseProxy: true,
-	}
 }
 
 // parsePublishedTimes parses the published time filters and returns before/after times.

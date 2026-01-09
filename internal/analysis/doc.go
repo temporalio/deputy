@@ -8,5 +8,5 @@
 //   - osv.Client: client interface for OSV API
 //
 // Downstream processing (consolidation, severity classification, reporting)
-// is handled by internal/vulnerability and internal/scan.
+// is handled by internal/vulnerability and internal/scanning.
 package analysis

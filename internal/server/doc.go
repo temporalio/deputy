@@ -23,7 +23,7 @@
 // handle translation between proto messages and internal domain types.
 //
 // Handler implementations:
-//   - scan_handler.go: Vulnerability scanning via internal/scan
+//   - scan_handler.go: Vulnerability scanning via internal/scanning
 //   - list_handler.go: Package listing via internal/inventory
 //   - sbom_handler.go: SBOM generation via internal/sbom
 //   - remediation_handler.go: Fix planning via internal/remediation
@@ -46,7 +46,6 @@
 //
 //	cfg := server.Config{
 //	    Addr:         ":8090",           // Listen address
-//	    Scanner:      scanService,       // Custom scan.Service implementation
 //	    ReadTimeout:  30 * time.Second,  // Request read timeout
 //	    WriteTimeout: 5 * time.Minute,   // Response write timeout
 //	    IdleTimeout:  2 * time.Minute,   // Idle connection timeout

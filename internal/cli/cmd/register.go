@@ -5,7 +5,6 @@ import (
 	"net/http"
 	"os"
 
-	"github.com/picatz/deputy/internal/scan"
 	"github.com/picatz/deputy/internal/services"
 	"github.com/spf13/cobra"
 
@@ -83,6 +82,6 @@ func RegisterCommands(root *cobra.Command, deps Dependencies) {
 	// Integration commands
 	AddMCPCommand(root)
 
-	// Server command (uses scan.Service for handling requests)
-	AddServerCommand(root, scan.NewService())
+	// Server command
+	AddServerCommand(root)
 }

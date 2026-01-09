@@ -19,7 +19,7 @@
 //     - Detects packages from OS and language package managers
 //     - Tracks which layer introduced each package
 //
-//  4. Vulnerability Analysis ([github.com/picatz/deputy/internal/scan])
+//  4. Vulnerability Analysis ([github.com/picatz/deputy/internal/scanning])
 //     - Queries OSV database for package vulnerabilities
 //     - Attaches layer details to findings for provenance
 //
@@ -39,7 +39,7 @@
 //	           │      └─ Config, Metadata, History
 //	           └─ inventory.ScanPackagesContainerImage(...)
 //	                  └─ []*extractor.Package (with layer info)
-//	                         └─ scan.PackagesToInputs(...)
+//	                         └─ inputs.Convert(...)
 //	                                └─ []osv.PkgInput
 //	                                       └─ osv.Query(...)
 //	                                              └─ Finding + Advisory

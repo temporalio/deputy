@@ -8,7 +8,8 @@ import (
 
 	vulnerabilityv1 "github.com/picatz/deputy/gen/deputy/vulnerability/v1"
 	"github.com/picatz/deputy/internal/dependency"
-	"github.com/picatz/deputy/internal/scan"
+	"github.com/picatz/deputy/internal/inventory"
+	"github.com/picatz/deputy/internal/scanning"
 	"github.com/picatz/deputy/internal/vulnerability"
 )
 
@@ -48,8 +49,8 @@ func TestJustification(t *testing.T) {
 }
 
 func TestFromScanResult(t *testing.T) {
-	result := scan.Result{
-		Target: scan.Target{
+	result := scanning.Result{
+		Target: inventory.Target{
 			DisplayPath: "github.com/example/repo",
 		},
 		Findings: []vulnerability.Finding{
@@ -91,8 +92,8 @@ func TestFromScanResult(t *testing.T) {
 }
 
 func TestFromScanResultEmpty(t *testing.T) {
-	result := scan.Result{
-		Target: scan.Target{
+	result := scanning.Result{
+		Target: inventory.Target{
 			DisplayPath: "empty-project",
 		},
 		Findings:   []vulnerability.Finding{},

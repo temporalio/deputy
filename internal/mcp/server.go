@@ -1237,7 +1237,7 @@ func (s *Server) getRemediation(ctx context.Context, req *mcp.CallToolRequest, a
 	}
 
 	// Convert proto response to internal types for remediation analysis
-	scanResult := internalproto.ScanResultFromProto(resp.Msg)
+	scanResult := internalproto.ScanningResultFromProto(resp.Msg)
 
 	// Consolidate vulnerabilities for remediation analysis
 	consolidated := vulnerability.ConsolidateAll(scanResult.Findings, scanResult.Advisories)
@@ -1335,7 +1335,7 @@ func (s *Server) analyzeDependencyGraph(ctx context.Context, req *mcp.CallToolRe
 	}
 
 	// Convert proto response to internal types for graph analysis
-	scanResult := internalproto.ScanResultFromProto(resp.Msg)
+	scanResult := internalproto.ScanningResultFromProto(resp.Msg)
 
 	result := AnalyzeGraphResult{
 		Path: args.Path,
@@ -1344,7 +1344,7 @@ func (s *Server) analyzeDependencyGraph(ctx context.Context, req *mcp.CallToolRe
 	// If no graph was built, build one from inventory
 	depGraph := scanResult.Graph
 	if depGraph == nil {
-		depGraph = graph.FromInventory(scanResult.Inventory.Packages, scanResult.Inventory.Direct)
+		depGraph = graph.FromInventory(scanResult.Packages, scanResult.Direct)
 		depGraph.AnnotateVulns(scanResult.Findings, scanResult.Advisories)
 	}
 
@@ -1454,12 +1454,12 @@ func (s *Server) graphWhy(ctx context.Context, req *mcp.CallToolRequest, args Gr
 	}
 
 	// Convert proto response to internal types for graph analysis
-	scanResult := internalproto.ScanResultFromProto(resp.Msg)
+	scanResult := internalproto.ScanningResultFromProto(resp.Msg)
 
 	// Build graph from inventory if not already built
 	depGraph := scanResult.Graph
 	if depGraph == nil {
-		depGraph = graph.FromInventory(scanResult.Inventory.Packages, scanResult.Inventory.Direct)
+		depGraph = graph.FromInventory(scanResult.Packages, scanResult.Direct)
 	}
 
 	// Find matching nodes using ranked matching
@@ -1602,12 +1602,12 @@ func (s *Server) graphNeeds(ctx context.Context, req *mcp.CallToolRequest, args 
 	}
 
 	// Convert proto response to internal types for graph analysis
-	scanResult := internalproto.ScanResultFromProto(resp.Msg)
+	scanResult := internalproto.ScanningResultFromProto(resp.Msg)
 
 	// Build graph from inventory if not already built
 	depGraph := scanResult.Graph
 	if depGraph == nil {
-		depGraph = graph.FromInventory(scanResult.Inventory.Packages, scanResult.Inventory.Direct)
+		depGraph = graph.FromInventory(scanResult.Packages, scanResult.Direct)
 	}
 
 	// Find best matching node
@@ -1722,7 +1722,7 @@ func (s *Server) triageVulnerabilities(ctx context.Context, req *mcp.CallToolReq
 	}
 
 	// Convert proto response to internal types
-	scanResult := internalproto.ScanResultFromProto(resp.Msg)
+	scanResult := internalproto.ScanningResultFromProto(resp.Msg)
 
 	result := TriageResult{
 		Path:            args.Path,

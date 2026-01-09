@@ -18,7 +18,7 @@ import (
 	internalproto "github.com/picatz/deputy/internal/proto"
 	"github.com/picatz/deputy/internal/report"
 	"github.com/picatz/deputy/internal/report/render"
-	"github.com/picatz/deputy/internal/scan"
+	"github.com/picatz/deputy/internal/scanning"
 	ui "github.com/picatz/deputy/internal/ui"
 	"github.com/picatz/deputy/internal/vulnerability"
 	"github.com/spf13/cobra"
@@ -129,13 +129,13 @@ func runTriage(c *services.Clients, cmd *cobra.Command, args []string) error {
 			return fmt.Errorf("failed to parse report: %w", err)
 		}
 		findings, advisories := report.SplitVulnerabilities(scanReport.Vulnerabilities)
-		scanResult := scan.Result{
+		scanResult := scanning.Result{
 			Findings:   findings,
 			Advisories: advisories,
 			Stats:      scanReport.Stats,
 		}
 		if ignoreUnfixed {
-			scanResult = scan.FilterUnfixed(scanResult)
+			scanResult = scanning.FilterUnfixed(scanResult)
 		}
 		cons := vulnerability.Consolidate(scanResult.Findings, scanResult.Advisories)
 		triageReport = report.BuildTriageReport(report.Target{Repo: scanReport.Repo, Ref: scanReport.Ref, Commit: scanReport.Commit}, scanResult.Stats, cons)
@@ -181,7 +181,7 @@ func runTriage(c *services.Clients, cmd *cobra.Command, args []string) error {
 		}
 
 		// Convert proto response to internal types
-		scanResult := internalproto.ScanResultFromProto(resp.Msg)
+		scanResult := internalproto.ScanningResultFromProto(resp.Msg)
 		if scanResult == nil {
 			return fmt.Errorf("scan returned empty result")
 		}
@@ -193,7 +193,7 @@ func runTriage(c *services.Clients, cmd *cobra.Command, args []string) error {
 		repoPath = scanResult.Target.LocalPath
 		resultOut := *scanResult
 		if ignoreUnfixed {
-			resultOut = scan.FilterUnfixed(resultOut)
+			resultOut = scanning.FilterUnfixed(resultOut)
 		}
 		cons := vulnerability.Consolidate(resultOut.Findings, resultOut.Advisories)
 		target2 := report.Target{Repo: scanResult.Target.DisplayPath, Ref: ref, Commit: scanResult.Target.CommitHash}

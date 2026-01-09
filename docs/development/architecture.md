@@ -22,7 +22,7 @@ flowchart TB
   end
 
   subgraph Core["Core Packages"]
-    Scan[internal/scan]
+    Scanning[internal/scanning]
     Inv[internal/inventory]
     Analysis[internal/analysis]
     Remed[internal/remediation]
@@ -50,9 +50,9 @@ flowchart TB
   CLI --> CMD
   CMD --> ClientPkg
   ClientPkg --> InProcess & Remote
-  InProcess --> Scan
+  InProcess --> Scanning
   Remote --> Server
-  Scan --> Inv & Analysis & Remed & SBOM & Policy & Targets
+  Scanning --> Inv & Analysis & Remed & SBOM & Policy & Targets
   Inv --> PURL & Git
   Analysis --> OSV
   SBOM --> DepsD & GH

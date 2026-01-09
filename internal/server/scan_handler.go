@@ -10,13 +10,12 @@ import (
 	"github.com/picatz/deputy/gen/deputy/scan/v1/scanv1connect"
 	"github.com/picatz/deputy/internal/logs"
 	internalproto "github.com/picatz/deputy/internal/proto"
-	"github.com/picatz/deputy/internal/scan"
+	"github.com/picatz/deputy/internal/scanning"
 	"github.com/picatz/deputy/internal/targets"
 )
 
 // ScanHandler implements the ScanService ConnectRPC service.
 type ScanHandler struct {
-	scanner   *scan.Service
 	localMode bool // Skip remote target validation for in-process usage
 }
 
@@ -34,13 +33,9 @@ func WithLocalMode() ScanHandlerOption {
 	}
 }
 
-// NewScanHandler creates a new ScanHandler with the provided scanner.
-// If scanner is nil, a default scan.Service is created.
-func NewScanHandler(scanner *scan.Service, opts ...ScanHandlerOption) *ScanHandler {
-	if scanner == nil {
-		scanner = scan.NewService()
-	}
-	h := &ScanHandler{scanner: scanner}
+// NewScanHandler creates a new ScanHandler.
+func NewScanHandler(opts ...ScanHandlerOption) *ScanHandler {
+	h := &ScanHandler{}
 	for _, opt := range opts {
 		opt(h)
 	}
@@ -66,8 +61,12 @@ func (h *ScanHandler) Scan(
 
 	logs.Info(ctx, "received scan request", "target", target)
 
-	// Convert proto options to internal options
-	opts := internalproto.ScanOptionsFromProto(req.Msg.Options)
+	// Build scanning options from proto
+	opts := scanning.Options{}
+	if req.Msg.Options != nil {
+		opts.Ecosystems = req.Msg.Options.Ecosystems
+		opts.Platform = req.Msg.Options.Platform
+	}
 
 	// Extract ref from options if provided
 	ref := ""
@@ -77,8 +76,23 @@ func (h *ScanHandler) Scan(
 		refProvided = true
 	}
 
-	// Route to appropriate scanner method based on target hint or auto-detection
-	execution, err := h.routeScan(ctx, target, ref, refProvided, opts)
+	// Detect target kind using explicit hint or auto-detection
+	kind := targets.KindUnspecified
+	if req.Msg.Options != nil && req.Msg.Options.TargetHint != nil {
+		kind = targets.Kind(req.Msg.Options.TargetHint.Kind)
+	}
+	if kind == targets.KindUnspecified {
+		kind = targets.DetectKind(target)
+	}
+
+	// Get image transport hint if provided
+	imageTransport := ""
+	if req.Msg.Options != nil && req.Msg.Options.TargetHint != nil {
+		imageTransport = req.Msg.Options.TargetHint.ImageTransport
+	}
+
+	// Route to appropriate scanner based on target type
+	execution, err := h.routeScan(ctx, target, ref, refProvided, kind, imageTransport, opts)
 	if err != nil {
 		logs.Error(ctx, "scan failed", "target", target, "error", err)
 		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("scan failed: %w", err))
@@ -90,7 +104,7 @@ func (h *ScanHandler) Scan(
 	}
 
 	// Convert result to proto
-	response := internalproto.ScanResultToProto(&execution.Result)
+	response := internalproto.ScanningResultToProto(&execution.Result)
 
 	logs.Info(ctx, "scan completed",
 		"target", target,
@@ -107,36 +121,30 @@ func (h *ScanHandler) Scan(
 //   - Local filesystem paths are rejected by validateTarget before this is called
 //   - Only remote-accessible targets are allowed: git URLs, container registries, PURLs
 //   - stdin SBOM ("-") is rejected; clients must upload SBOM bytes instead
-func (h *ScanHandler) routeScan(ctx context.Context, target, ref string, refProvided bool, opts scan.Options) (*scan.Execution, error) {
-	// Use explicit hint if provided, otherwise auto-detect using shared logic
-	kind := opts.TargetHint.Kind
-	if kind == targets.KindUnspecified {
-		kind = targets.DetectKind(target)
-	}
-
+func (h *ScanHandler) routeScan(ctx context.Context, target, ref string, refProvided bool, kind targets.Kind, imageTransport string, opts scanning.Options) (*scanning.Execution, error) {
 	// For server mode, we only support remote-accessible targets.
 	// Local-only types (Dir, SBOM files, Dockerfiles) are rejected by validateTarget
 	// or fall through to repository scan.
 	switch kind {
 	case targets.KindPURL:
-		return h.scanner.ScanPURL(ctx, target, opts)
+		return scanning.ScanPURL(ctx, target, opts)
 
 	case targets.KindContainerImage:
 		targetOpts := map[string]string{}
 		if opts.Platform != "" {
 			targetOpts["platform"] = opts.Platform
 		}
-		if opts.TargetHint.ImageTransport != "" {
-			targetOpts["transport"] = opts.TargetHint.ImageTransport
+		if imageTransport != "" {
+			targetOpts["transport"] = imageTransport
 		}
-		return h.scanner.ScanContainerImage(ctx, target, targetOpts, opts)
+		return scanning.ScanContainerImage(ctx, target, targetOpts, opts)
 
 	case targets.KindGit:
-		return h.scanner.ScanRepository(ctx, target, ref, refProvided, opts)
+		return scanning.ScanRepository(ctx, target, ref, refProvided, opts)
 
 	default:
 		// Default: try repository scan (handles remote repos)
-		return h.scanner.ScanRepository(ctx, target, ref, refProvided, opts)
+		return scanning.ScanRepository(ctx, target, ref, refProvided, opts)
 	}
 }
 
@@ -174,8 +182,12 @@ func (h *ScanHandler) StreamScan(
 		return err
 	}
 
-	// Convert proto options to internal options
-	opts := internalproto.ScanOptionsFromProto(req.Msg.Options)
+	// Build scanning options from proto
+	opts := scanning.Options{}
+	if req.Msg.Options != nil {
+		opts.Ecosystems = req.Msg.Options.Ecosystems
+		opts.Platform = req.Msg.Options.Platform
+	}
 
 	// Send resolving target phase
 	if err := stream.Send(&scanv1.ScanProgress{
@@ -193,6 +205,21 @@ func (h *ScanHandler) StreamScan(
 		refProvided = true
 	}
 
+	// Detect target kind using explicit hint or auto-detection
+	kind := targets.KindUnspecified
+	if req.Msg.Options != nil && req.Msg.Options.TargetHint != nil {
+		kind = targets.Kind(req.Msg.Options.TargetHint.Kind)
+	}
+	if kind == targets.KindUnspecified {
+		kind = targets.DetectKind(target)
+	}
+
+	// Get image transport hint if provided
+	imageTransport := ""
+	if req.Msg.Options != nil && req.Msg.Options.TargetHint != nil {
+		imageTransport = req.Msg.Options.TargetHint.ImageTransport
+	}
+
 	// Send extracting inventory phase
 	if err := stream.Send(&scanv1.ScanProgress{
 		Phase:   scanv1.ScanPhase_SCAN_PHASE_EXTRACTING_INVENTORY,
@@ -202,7 +229,7 @@ func (h *ScanHandler) StreamScan(
 	}
 
 	// Perform the scan using unified routing
-	execution, err := h.routeScan(ctx, target, ref, refProvided, opts)
+	execution, err := h.routeScan(ctx, target, ref, refProvided, kind, imageTransport, opts)
 	if err != nil {
 		// Send failed phase
 		_ = stream.Send(&scanv1.ScanProgress{
@@ -219,7 +246,7 @@ func (h *ScanHandler) StreamScan(
 	}
 
 	// Convert result to proto
-	response := internalproto.ScanResultToProto(&execution.Result)
+	response := internalproto.ScanningResultToProto(&execution.Result)
 
 	// Send complete phase with result
 	if err := stream.Send(&scanv1.ScanProgress{

@@ -8,8 +8,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/picatz/deputy/internal/inventory"
 	"github.com/picatz/deputy/internal/report"
-	"github.com/picatz/deputy/internal/scan"
+	"github.com/picatz/deputy/internal/scanning"
 	"github.com/picatz/deputy/internal/vulnerability"
 	"github.com/spf13/cobra"
 )
@@ -58,15 +59,14 @@ func TestCLIOutput_TriageFromReport_WritesToCommandOut(t *testing.T) {
 		IsDirect: true,
 	}
 	findings, advisories := report.SplitVulnerabilities([]report.Vulnerability{v})
-	result := scan.Result{
-		Target: scan.Target{
+	result := scanning.Result{
+		Target: inventory.Target{
 			DisplayPath: "github.com/acme/repo",
 			Ref:         "HEAD",
 			CommitHash:  "deadbeef",
 		},
-		PackagesScanned: 1,
-		Findings:        findings,
-		Advisories:      advisories,
+		Findings:   findings,
+		Advisories: advisories,
 	}
 	cons := vulnerability.Consolidate(result.Findings, result.Advisories)
 	result.Stats = vulnerability.StatsFromConsolidated(cons, len(result.Findings))
@@ -105,15 +105,14 @@ func TestCLIOutput_FixFromReport_WritesToCommandOut(t *testing.T) {
 		IsDirect: true,
 	}
 	findings, advisories := report.SplitVulnerabilities([]report.Vulnerability{v})
-	result := scan.Result{
-		Target: scan.Target{
+	result := scanning.Result{
+		Target: inventory.Target{
 			DisplayPath: "github.com/acme/repo",
 			Ref:         "HEAD",
 			CommitHash:  "deadbeef",
 		},
-		PackagesScanned: 1,
-		Findings:        findings,
-		Advisories:      advisories,
+		Findings:   findings,
+		Advisories: advisories,
 	}
 	cons := vulnerability.Consolidate(result.Findings, result.Advisories)
 	result.Stats = vulnerability.StatsFromConsolidated(cons, len(result.Findings))

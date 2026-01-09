@@ -1,4 +1,4 @@
-package scan
+package graph
 
 import (
 	"context"
@@ -6,7 +6,6 @@ import (
 
 	"github.com/google/osv-scalibr/extractor"
 	vulnerabilityv1 "github.com/picatz/deputy/gen/deputy/vulnerability/v1"
-	"github.com/picatz/deputy/internal/dependency/graph"
 	"github.com/picatz/deputy/internal/otel"
 	"github.com/picatz/deputy/internal/repository/workspace"
 	"github.com/picatz/deputy/internal/vulnerability"
@@ -14,49 +13,63 @@ import (
 	"go.opentelemetry.io/otel/trace"
 )
 
-// GraphBuilder resolves dependency graph edges for scan results.
-// It wraps the graph.ResolverRegistry with scan-specific configuration.
-type GraphBuilder struct {
-	registry *graph.ResolverRegistry
+// BuilderOptions configures graph construction.
+type BuilderOptions struct {
+	// UseProxy enables fetching module metadata from package registries
+	// (e.g., proxy.golang.org for Go).
+	UseProxy bool
+
+	// UseGit enables cloning repositories for private module resolution.
+	UseGit bool
+
+	// PrivatePatterns specifies glob patterns for private modules
+	// (similar to GOPRIVATE).
+	PrivatePatterns []string
 }
 
-// NewGraphBuilder creates a GraphBuilder configured from scan options.
-func NewGraphBuilder(opts GraphOptions) *GraphBuilder {
-	var registryOpts []graph.RegistryOption
+// Builder resolves dependency graph edges from inventory.
+// It wraps the ResolverRegistry with configuration options.
+type Builder struct {
+	registry *ResolverRegistry
+}
+
+// NewBuilder creates a Builder configured from options.
+func NewBuilder(opts BuilderOptions) *Builder {
+	var registryOpts []RegistryOption
 
 	if opts.UseProxy {
-		registryOpts = append(registryOpts, graph.WithGoProxyEnabled(""))
+		registryOpts = append(registryOpts, WithGoProxyEnabled(""))
 	}
 	if opts.UseGit {
-		registryOpts = append(registryOpts, graph.WithGoGitEnabled())
+		registryOpts = append(registryOpts, WithGoGitEnabled())
 	}
 	if len(opts.PrivatePatterns) > 0 {
-		registryOpts = append(registryOpts, graph.WithGoPrivate(opts.PrivatePatterns...))
+		registryOpts = append(registryOpts, WithGoPrivate(opts.PrivatePatterns...))
 	}
 
-	return &GraphBuilder{
-		registry: graph.NewResolverRegistry(registryOpts...),
+	return &Builder{
+		registry: NewResolverRegistry(registryOpts...),
 	}
 }
 
 // Build constructs a dependency graph from inventory and resolves edges.
 // The returned graph includes vulnerability annotations when findings are provided.
-func (b *GraphBuilder) Build(
+func (b *Builder) Build(
 	ctx context.Context,
 	pkgs []*extractor.Package,
 	direct map[string]bool,
 	findings []vulnerability.Finding,
 	advisories map[string]*vulnerabilityv1.Advisory,
-	files graph.FileReader,
-) (*graph.Graph, error) {
-	ctx, span := otel.StartSpan(ctx, "deputy.scan.build_graph",
+	files FileReader,
+) (*Graph, error) {
+	ctx, span := otel.StartSpan(ctx, "deputy.graph.build",
 		trace.WithAttributes(
 			attribute.Int("deputy.package.count", len(pkgs)),
 		))
 	defer span.End()
 
 	// Build graph from inventory
-	g := graph.FromInventory(pkgs, direct)
+	g := FromInventory(pkgs, direct)
 
 	// Resolve edges using ecosystem-specific resolvers
 	if err := b.registry.ResolveAll(ctx, g, files); err != nil {
@@ -82,34 +95,25 @@ func (b *GraphBuilder) Build(
 }
 
 // BuildFromWorkspace is a convenience method that creates a FileReader from a workspace.
-func (b *GraphBuilder) BuildFromWorkspace(
+func (b *Builder) BuildFromWorkspace(
 	ctx context.Context,
 	pkgs []*extractor.Package,
 	direct map[string]bool,
 	findings []vulnerability.Finding,
 	advisories map[string]*vulnerabilityv1.Advisory,
 	ws workspace.FS,
-) (*graph.Graph, error) {
-	files := graph.NewWorkspaceFileReader(ws)
+) (*Graph, error) {
+	files := NewWorkspaceFileReader(ws)
 	return b.Build(ctx, pkgs, direct, findings, advisories, files)
 }
 
-// VulnerablePaths returns all paths from direct dependencies to vulnerable packages.
-// This is useful for understanding how vulnerabilities enter the dependency tree.
-func VulnerablePaths(g *graph.Graph) []graph.Path {
-	if g == nil {
-		return nil
-	}
-	return g.VulnerablePaths()
-}
-
 // PathsToVulnerability returns all paths to packages affected by a specific vulnerability ID.
-func PathsToVulnerability(g *graph.Graph, vulnID string) []graph.Path {
+func PathsToVulnerability(g *Graph, vulnID string) []Path {
 	if g == nil {
 		return nil
 	}
 
-	var paths []graph.Path
+	var paths []Path
 	for node := range g.VulnerableNodes() {
 		for _, f := range node.Vulns {
 			if f.AdvisoryID == vulnID {
@@ -123,7 +127,7 @@ func PathsToVulnerability(g *graph.Graph, vulnID string) []graph.Path {
 
 // ShortestPathToVulnerability returns the shortest path to any package
 // affected by the given vulnerability ID.
-func ShortestPathToVulnerability(g *graph.Graph, vulnID string) graph.Path {
+func ShortestPathToVulnerability(g *Graph, vulnID string) Path {
 	paths := PathsToVulnerability(g, vulnID)
 	if len(paths) == 0 {
 		return nil

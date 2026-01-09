@@ -23,7 +23,7 @@ import (
 	inv "github.com/picatz/deputy/internal/inventory"
 	"github.com/picatz/deputy/internal/otel"
 	"github.com/picatz/deputy/internal/repository"
-	"github.com/picatz/deputy/internal/scan"
+	"github.com/picatz/deputy/internal/inputs"
 	ui "github.com/picatz/deputy/internal/ui"
 	"github.com/spf13/cobra"
 	"go.opentelemetry.io/otel/attribute"
@@ -1216,23 +1216,23 @@ func buildGraph(ctx context.Context, repoPath, ref string, ecosystems []string) 
 
 	// Determine direct dependencies
 	goDirect := map[string]bool{"stdlib": true}
-	var manifestRes scan.ManifestResolver
+	var manifestRes inputs.Resolver
 	switch {
 	case strings.EqualFold(effRef, "HEAD") || strings.EqualFold(effRef, "HEAD~0"):
 		goDirect = compare.CollectGoDirectModulesFromWorkspace(ws)
-		manifestRes = scan.NewWorkspaceManifestResolver(ws)
+		manifestRes = inputs.NewWorkspaceResolver(ws)
 	case targetHash != nil:
 		if direct, err := compare.CollectGoDirectModulesFromCommit(repo, *targetHash); err == nil {
 			goDirect = direct
 		}
-		manifestRes = scan.NewGitManifestResolver(repo, *targetHash)
+		manifestRes = inputs.NewGitResolver(repo, *targetHash)
 	default:
 		goDirect = compare.CollectGoDirectModulesFromWorkspace(ws)
-		manifestRes = scan.NewWorkspaceManifestResolver(ws)
+		manifestRes = inputs.NewWorkspaceResolver(ws)
 	}
 
-	pkgInputs := scan.PackagesToInputs(pkgs, scan.PackageInputOptions{GoDirect: goDirect, Resolver: manifestRes})
-	pkgDirect := scan.BuildPackageDirectMap(pkgInputs)
+	pkgInputs := inputs.Convert(pkgs, inputs.Options{GoDirect: goDirect, Resolver: manifestRes})
+	pkgDirect := inputs.BuildDirectMap(pkgInputs)
 
 	// Build the graph from inventory
 	g := graph.FromInventory(pkgs, pkgDirect)

@@ -17,7 +17,7 @@ import (
 	"github.com/picatz/deputy/internal/output"
 	"github.com/picatz/deputy/internal/remediation"
 	"github.com/picatz/deputy/internal/report"
-	"github.com/picatz/deputy/internal/scan"
+	"github.com/picatz/deputy/internal/scanning"
 	ui "github.com/picatz/deputy/internal/ui"
 	"github.com/picatz/deputy/internal/vulnerability"
 )
@@ -40,12 +40,12 @@ func resolveVulnerabilityDisplayOptions(opts []VulnerabilityDisplayOptions) Vuln
 }
 
 // DisplayVulnerabilities writes a styled vulnerability report to w with the default heading.
-func DisplayVulnerabilities(w io.Writer, result scan.Result, opts ...VulnerabilityDisplayOptions) {
+func DisplayVulnerabilities(w io.Writer, result scanning.Result, opts ...VulnerabilityDisplayOptions) {
 	DisplayVulnerabilitiesWithHeader(w, result, "Vulnerabilities Found:", opts...)
 }
 
 // DisplayVulnerabilitiesWithHeader writes a styled vulnerability report to w using the provided heading.
-func DisplayVulnerabilitiesWithHeader(w io.Writer, result scan.Result, heading string, opts ...VulnerabilityDisplayOptions) {
+func DisplayVulnerabilitiesWithHeader(w io.Writer, result scanning.Result, heading string, opts ...VulnerabilityDisplayOptions) {
 	displayOpts := resolveVulnerabilityDisplayOptions(opts)
 	cons := vulnerability.Consolidate(result.Findings, result.Advisories)
 	if len(cons) == 0 {

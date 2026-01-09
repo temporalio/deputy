@@ -8,14 +8,13 @@ import (
 
 	listv1 "github.com/picatz/deputy/gen/deputy/list/v1"
 	"github.com/picatz/deputy/gen/deputy/list/v1/listv1connect"
+	"github.com/picatz/deputy/internal/inventory"
 	protoconv "github.com/picatz/deputy/internal/proto"
-	"github.com/picatz/deputy/internal/scan"
 	"github.com/picatz/deputy/internal/targets"
 )
 
 // ListHandler implements the ListService gRPC handler.
 type ListHandler struct {
-	scanner   *scan.Service
 	localMode bool
 }
 
@@ -33,11 +32,8 @@ func WithListLocalMode() ListHandlerOption {
 }
 
 // NewListHandler creates a new List service handler.
-func NewListHandler(scanner *scan.Service, opts ...ListHandlerOption) *ListHandler {
-	if scanner == nil {
-		scanner = scan.NewService()
-	}
-	h := &ListHandler{scanner: scanner}
+func NewListHandler(opts ...ListHandlerOption) *ListHandler {
+	h := &ListHandler{}
 	for _, opt := range opts {
 		opt(h)
 	}
@@ -60,8 +56,7 @@ func (h *ListHandler) ListPackages(
 		}
 	}
 
-	opts := scan.Options{}
-
+	opts := inventory.Options{}
 	if req.Msg.GetOptions() != nil {
 		opts.Ecosystems = req.Msg.Options.GetEcosystems()
 	}
@@ -73,17 +68,17 @@ func (h *ListHandler) ListPackages(
 		refProvided = true
 	}
 
-	execution, err := h.scanner.ScanRepository(ctx, req.Msg.GetTarget(), ref, refProvided, opts)
+	exec, err := inventory.CollectRepository(ctx, req.Msg.GetTarget(), ref, refProvided, opts)
 	if err != nil {
 		return nil, connect.NewError(connect.CodeInternal, err)
 	}
-	if execution != nil {
-		defer execution.Close()
+	if exec != nil {
+		defer exec.Close()
 	}
 
 	// Convert packages to proto
-	packages := execution.Result.Inventory.Packages
-	direct := execution.Result.Inventory.Direct
+	packages := exec.Result.Packages
+	direct := exec.Result.Direct
 	protoPackages := protoconv.ExtractorPackagesToProto(packages, direct)
 
 	ecosystemCounts := make(map[string]int32)
@@ -106,7 +101,7 @@ func (h *ListHandler) ListPackages(
 	}
 
 	resp := &listv1.ListPackagesResponse{
-		Target:   protoconv.TargetToProto(execution.Result.Target),
+		Target:   protoconv.InventoryTargetToProto(exec.Result.Target),
 		Packages: protoPackages,
 		Stats: &listv1.ListStats{
 			TotalPackages:      int32(len(packages)),

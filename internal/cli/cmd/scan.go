@@ -31,6 +31,7 @@ import (
 	"github.com/picatz/deputy/internal/dockerfile"
 	deperrors "github.com/picatz/deputy/internal/errors"
 	gitx "github.com/picatz/deputy/internal/gitutil"
+	"github.com/picatz/deputy/internal/inventory"
 	"github.com/picatz/deputy/internal/output"
 	"github.com/picatz/deputy/internal/policy"
 	internalproto "github.com/picatz/deputy/internal/proto"
@@ -38,7 +39,7 @@ import (
 	"github.com/picatz/deputy/internal/report"
 	"github.com/picatz/deputy/internal/report/render"
 	"github.com/picatz/deputy/internal/sarif"
-	"github.com/picatz/deputy/internal/scan"
+	"github.com/picatz/deputy/internal/scanning"
 	"github.com/picatz/deputy/internal/targets"
 	ui "github.com/picatz/deputy/internal/ui"
 	"github.com/picatz/deputy/internal/version"
@@ -636,7 +637,7 @@ func runScanRepository(c *services.Clients, cmd *cobra.Command, repoArg string) 
 	}
 
 	// Convert proto response to internal result
-	resultPtr := internalproto.ScanResultFromProto(resp.Msg)
+	resultPtr := internalproto.ScanningResultFromProto(resp.Msg)
 	result := *resultPtr
 
 	for _, warning := range result.Warnings {
@@ -646,7 +647,7 @@ func runScanRepository(c *services.Clients, cmd *cobra.Command, repoArg string) 
 	resultOut := result
 	policyResult := result
 	if flags.IgnoreUnfixed {
-		policyResult = scan.FilterUnfixed(policyResult)
+		policyResult = scanning.FilterUnfixed(policyResult)
 		resultOut = policyResult
 	}
 
@@ -660,7 +661,7 @@ func runScanRepository(c *services.Clients, cmd *cobra.Command, repoArg string) 
 		fmt.Fprintf(errW, "Warning: %v\n", err)
 	}
 	if flags.ignoreRules != nil {
-		policyResult, ignoredCount = scan.FilterIgnored(policyResult, flags.ignoreRules)
+		policyResult, ignoredCount = scanning.FilterIgnored(policyResult, flags.ignoreRules)
 		resultOut = policyResult
 	}
 
@@ -725,7 +726,7 @@ func runScanDir(c *services.Clients, cmd *cobra.Command, args []string) error {
 	}
 
 	// Convert proto response to internal result
-	resultPtr := internalproto.ScanResultFromProto(resp.Msg)
+	resultPtr := internalproto.ScanningResultFromProto(resp.Msg)
 	result := *resultPtr
 
 	for _, warning := range result.Warnings {
@@ -735,7 +736,7 @@ func runScanDir(c *services.Clients, cmd *cobra.Command, args []string) error {
 	resultOut := result
 	policyResult := result
 	if flags.IgnoreUnfixed {
-		policyResult = scan.FilterUnfixed(policyResult)
+		policyResult = scanning.FilterUnfixed(policyResult)
 		resultOut = policyResult
 	}
 
@@ -745,7 +746,7 @@ func runScanDir(c *services.Clients, cmd *cobra.Command, args []string) error {
 		fmt.Fprintf(errW, "Warning: %v\n", err)
 	}
 	if flags.ignoreRules != nil {
-		policyResult, ignoredCount = scan.FilterIgnored(policyResult, flags.ignoreRules)
+		policyResult, ignoredCount = scanning.FilterIgnored(policyResult, flags.ignoreRules)
 		resultOut = policyResult
 	}
 
@@ -838,7 +839,7 @@ func runScanSBOM(c *services.Clients, cmd *cobra.Command, args []string) error {
 	}
 
 	// Convert proto response to internal result
-	resultPtr := internalproto.ScanResultFromProto(resp.Msg)
+	resultPtr := internalproto.ScanningResultFromProto(resp.Msg)
 	result := *resultPtr
 
 	// Handle container images referenced in SBOM
@@ -854,7 +855,7 @@ func runScanSBOM(c *services.Clients, cmd *cobra.Command, args []string) error {
 		sem := make(chan struct{}, sbomImageScanConcurrency)
 		var mu sync.Mutex
 		type imageScanOutcome struct {
-			result scan.Result
+			result scanning.Result
 			err    error
 		}
 		cache := map[string]imageScanOutcome{}
@@ -870,7 +871,7 @@ func runScanSBOM(c *services.Clients, cmd *cobra.Command, args []string) error {
 				imgResp, err := c.Vulns.Scan(groupCtx, connect.NewRequest(imgReq))
 				outcome := imageScanOutcome{err: err}
 				if imgResp != nil {
-					imgResultPtr := internalproto.ScanResultFromProto(imgResp.Msg)
+					imgResultPtr := internalproto.ScanningResultFromProto(imgResp.Msg)
 					outcome.result = *imgResultPtr
 				}
 				mu.Lock()
@@ -893,14 +894,14 @@ func runScanSBOM(c *services.Clients, cmd *cobra.Command, args []string) error {
 				result.Warnings = append(result.Warnings, fmt.Sprintf("image scan failed for %s: %v", ref.Ref, outcome.err))
 				continue
 			}
-			result = scan.MergeResults(result, outcome.result)
+			result = scanning.MergeResults(result, outcome.result)
 		}
 	}
 
 	// Merge SBOM packages if not already included from server response
-	if len(pkgs) > 0 && len(result.Inventory.Packages) == 0 {
-		result.Inventory.Packages = pkgs
-		result.Inventory.Direct = direct
+	if len(pkgs) > 0 && len(result.Packages) == 0 {
+		result.Packages = pkgs
+		result.Direct = direct
 	}
 
 	for _, warning := range result.Warnings {
@@ -910,7 +911,7 @@ func runScanSBOM(c *services.Clients, cmd *cobra.Command, args []string) error {
 	resultOut := result
 	policyResult := result
 	if flags.IgnoreUnfixed {
-		policyResult = scan.FilterUnfixed(policyResult)
+		policyResult = scanning.FilterUnfixed(policyResult)
 		resultOut = policyResult
 	}
 
@@ -921,7 +922,7 @@ func runScanSBOM(c *services.Clients, cmd *cobra.Command, args []string) error {
 		fmt.Fprintf(errW, "Warning: %v\n", err)
 	}
 	if flags.ignoreRules != nil {
-		policyResult, ignoredCount = scan.FilterIgnored(policyResult, flags.ignoreRules)
+		policyResult, ignoredCount = scanning.FilterIgnored(policyResult, flags.ignoreRules)
 		resultOut = policyResult
 	}
 
@@ -987,7 +988,7 @@ func runScanPURL(c *services.Clients, cmd *cobra.Command, args []string) error {
 	}
 
 	// Convert proto response to internal result
-	resultPtr := internalproto.ScanResultFromProto(resp.Msg)
+	resultPtr := internalproto.ScanningResultFromProto(resp.Msg)
 	result := *resultPtr
 
 	for _, warning := range result.Warnings {
@@ -997,7 +998,7 @@ func runScanPURL(c *services.Clients, cmd *cobra.Command, args []string) error {
 	resultOut := result
 	policyResult := result
 	if flags.IgnoreUnfixed {
-		policyResult = scan.FilterUnfixed(policyResult)
+		policyResult = scanning.FilterUnfixed(policyResult)
 		resultOut = policyResult
 	}
 
@@ -1008,7 +1009,7 @@ func runScanPURL(c *services.Clients, cmd *cobra.Command, args []string) error {
 		fmt.Fprintf(errW, "Warning: %v\n", err)
 	}
 	if flags.ignoreRules != nil {
-		policyResult, ignoredCount = scan.FilterIgnored(policyResult, flags.ignoreRules)
+		policyResult, ignoredCount = scanning.FilterIgnored(policyResult, flags.ignoreRules)
 		resultOut = policyResult
 	}
 
@@ -1079,7 +1080,7 @@ func runScanImageWithOptions(c *services.Clients, cmd *cobra.Command, input, sou
 	}
 
 	// Convert proto response to internal result
-	resultPtr := internalproto.ScanResultFromProto(resp.Msg)
+	resultPtr := internalproto.ScanningResultFromProto(resp.Msg)
 	result := *resultPtr
 
 	for _, warning := range result.Warnings {
@@ -1089,7 +1090,7 @@ func runScanImageWithOptions(c *services.Clients, cmd *cobra.Command, input, sou
 	resultOut := result
 	policyResult := result
 	if flags.IgnoreUnfixed {
-		policyResult = scan.FilterUnfixed(policyResult)
+		policyResult = scanning.FilterUnfixed(policyResult)
 		resultOut = policyResult
 	}
 
@@ -1100,7 +1101,7 @@ func runScanImageWithOptions(c *services.Clients, cmd *cobra.Command, input, sou
 		fmt.Fprintf(errW, "Warning: %v\n", err)
 	}
 	if flags.ignoreRules != nil {
-		policyResult, ignoredCount = scan.FilterIgnored(policyResult, flags.ignoreRules)
+		policyResult, ignoredCount = scanning.FilterIgnored(policyResult, flags.ignoreRules)
 		resultOut = policyResult
 	}
 
@@ -1181,7 +1182,7 @@ func normalizeImageTarget(input, source string) (string, error) {
 }
 
 // outputText writes the scan results in a human-readable text format to the provided writer.
-func outputText(w io.Writer, errW io.Writer, result scan.Result, ignoreUnfixed bool, ignoredCount int, policyFindings []report.PolicyFinding, displayOpts render.VulnerabilityDisplayOptions) error {
+func outputText(w io.Writer, errW io.Writer, result scanning.Result, ignoreUnfixed bool, ignoredCount int, policyFindings []report.PolicyFinding, displayOpts render.VulnerabilityDisplayOptions) error {
 	displayPath := result.Target.DisplayPath
 	localPath := result.Target.LocalPath
 	shortRef := shortGitRef(refOrHEAD(result.Target.Ref))
@@ -1215,7 +1216,7 @@ func outputText(w io.Writer, errW io.Writer, result scan.Result, ignoreUnfixed b
 	render.PolicyFindings(w, policyFindings)
 
 	// Show module deprecations
-	if deps := detectModuleDeprecations(result.Inventory.Packages, result.Inventory.Direct); len(deps) > 0 {
+	if deps := detectModuleDeprecations(result.Packages, result.Direct); len(deps) > 0 {
 		fmt.Fprintf(w, "\n%s\n", ui.StyleHeader.Render("Module Deprecations:"))
 		for _, d := range deps {
 			line := fmt.Sprintf("  %s %s -> %s", ui.StyleVersion.Render("•"), ui.StyleBold.Render(d.Module), ui.StyleVersion.Render(d.Suggest))
@@ -1230,7 +1231,7 @@ func outputText(w io.Writer, errW io.Writer, result scan.Result, ignoreUnfixed b
 }
 
 // outputTextDir writes the directory scan results in a human-readable text format.
-func outputTextDir(w io.Writer, errW io.Writer, result scan.Result, ignoreUnfixed bool, ignoredCount int, policyFindings []report.PolicyFinding, displayOpts render.VulnerabilityDisplayOptions) error {
+func outputTextDir(w io.Writer, errW io.Writer, result scanning.Result, ignoreUnfixed bool, ignoredCount int, policyFindings []report.PolicyFinding, displayOpts render.VulnerabilityDisplayOptions) error {
 	doc := render.ScanResultsHeaderDoc(result.Target.DisplayPath, "", "", "")
 	_ = doc.Render(w, output.UIStyles())
 
@@ -1247,7 +1248,7 @@ func outputTextDir(w io.Writer, errW io.Writer, result scan.Result, ignoreUnfixe
 }
 
 // outputTextContainer writes container image scan results with container-specific context.
-func outputTextContainer(w io.Writer, errW io.Writer, result scan.Result, ignoreUnfixed bool, ignoredCount int, policyFindings []report.PolicyFinding, displayOpts render.VulnerabilityDisplayOptions) error {
+func outputTextContainer(w io.Writer, errW io.Writer, result scanning.Result, ignoreUnfixed bool, ignoredCount int, policyFindings []report.PolicyFinding, displayOpts render.VulnerabilityDisplayOptions) error {
 	// Use container-specific header with image metadata
 	doc := render.ContainerScanHeaderDoc(result.Target.DisplayPath, result.ImageInfo)
 	_ = doc.Render(w, output.UIStyles())
@@ -1271,7 +1272,7 @@ func outputTextContainer(w io.Writer, errW io.Writer, result scan.Result, ignore
 }
 
 // outputJSON writes the scan results in JSON format to the provided writer.
-func outputJSON(w io.Writer, result scan.Result, policyFindings []report.PolicyFinding) error {
+func outputJSON(w io.Writer, result scanning.Result, policyFindings []report.PolicyFinding) error {
 	report := buildScanReport(result)
 	report.PolicyFindings = policyFindings
 
@@ -1281,8 +1282,8 @@ func outputJSON(w io.Writer, result scan.Result, policyFindings []report.PolicyF
 }
 
 // outputSARIF writes the scan results in SARIF format for GitHub Security tab integration.
-func outputSARIF(w io.Writer, result scan.Result, policyFindings []report.PolicyFinding) error {
-	vulns := report.FlattenResult(result)
+func outputSARIF(w io.Writer, result scanning.Result, policyFindings []report.PolicyFinding) error {
+	vulns := report.FlattenScanningResult(result)
 
 	opts := sarif.Options{
 		ToolVersion: version.Value,
@@ -1883,7 +1884,7 @@ func dedupeImageRefs(refs []imageSBOMRef) []imageSBOMRef {
 }
 
 // buildScanReport constructs a ScanResult from the scan metadata and findings.
-func buildScanReport(result scan.Result) ScanResult {
+func buildScanReport(result scanning.Result) ScanResult {
 	ref := strings.TrimSpace(result.Target.Ref)
 	if ref != "" {
 		ref = shortGitRef(ref)
@@ -1897,18 +1898,18 @@ func buildScanReport(result scan.Result) ScanResult {
 		Ref:             ref,
 		Commit:          result.Target.CommitHash,
 		Generated:       generated.Format(time.RFC3339),
-		PackagesScanned: result.PackagesScanned,
+		PackagesScanned: len(result.Packages),
 		Stats:           result.Stats,
-		Vulnerabilities: report.FlattenResult(result),
+		Vulnerabilities: report.FlattenScanningResult(result),
 		ImageInfo:       result.ImageInfo, // Container image config/metadata (nil for non-image scans)
 	}
 }
 
-func buildScanTargetPayload(result scan.Result) map[string]any {
+func buildScanTargetPayload(result scanning.Result) map[string]any {
 	return buildTargetPayload(result.Target)
 }
 
-func buildTargetPayload(target scan.Target) map[string]any {
+func buildTargetPayload(target inventory.Target) map[string]any {
 	provenance := map[string]any{}
 	for k, v := range target.Provenance {
 		provenance[k] = v
@@ -1926,7 +1927,7 @@ func buildTargetPayload(target scan.Target) map[string]any {
 	}
 }
 
-func buildScanImagePayload(target scan.Target) map[string]any {
+func buildScanImagePayload(target inventory.Target) map[string]any {
 	if target.Kind != targets.KindContainerImage {
 		return nil
 	}
@@ -1938,7 +1939,7 @@ func buildScanImagePayload(target scan.Target) map[string]any {
 }
 
 // runScanPolicies evaluates the provided policies against the scan report and individual vulnerabilities.
-func runScanPolicies(ctx context.Context, policyPaths []string, result scan.Result, report ScanResult, errW io.Writer, extra map[string]any) ([]policy.Action, error) {
+func runScanPolicies(ctx context.Context, policyPaths []string, result scanning.Result, report ScanResult, errW io.Writer, extra map[string]any) ([]policy.Action, error) {
 	if len(policyPaths) == 0 {
 		return nil, nil
 	}
@@ -2186,7 +2187,7 @@ func runScanDockerfile(c *services.Clients, cmd *cobra.Command, target string) e
 	}
 
 	// Convert proto response to internal result
-	resultPtr := internalproto.ScanResultFromProto(resp.Msg)
+	resultPtr := internalproto.ScanningResultFromProto(resp.Msg)
 	result := *resultPtr
 
 	// Build output structure
@@ -2361,7 +2362,7 @@ func renderDockerfileResult(w io.Writer, result DockerfileScanResult, findings [
 	}
 }
 
-func runDockerfilePolicies(ctx context.Context, policyPaths []string, result scan.Result, errW io.Writer) ([]policy.Action, error) {
+func runDockerfilePolicies(ctx context.Context, policyPaths []string, result scanning.Result, errW io.Writer) ([]policy.Action, error) {
 	if len(policyPaths) == 0 || result.DockerfileInfo == nil {
 		return nil, nil
 	}

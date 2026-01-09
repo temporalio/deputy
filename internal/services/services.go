@@ -33,9 +33,6 @@ type Services struct {
 
 // Config configures service creation.
 type Config struct {
-	// Scanner is the shared scan service. If nil, defaults are created.
-	Scanner interface{} // *scan.Service - using interface{} to avoid import cycle
-
 	// LocalMode enables local mode which skips remote target validation.
 	// Use this for in-process clients that need to access local filesystems.
 	LocalMode bool
@@ -62,22 +59,22 @@ func NewWithConfig(cfg Config) (*Services, error) {
 
 	if cfg.LocalMode {
 		return &Services{
-			Scan:        server.NewScanHandler(nil, server.WithLocalMode()),
-			List:        server.NewListHandler(nil, server.WithListLocalMode()),
+			Scan:        server.NewScanHandler(server.WithLocalMode()),
+			List:        server.NewListHandler(server.WithListLocalMode()),
 			SBOM:        server.NewSBOMHandler(),
 			Secrets:     secretsHandler,
-			Diff:        server.NewDiffHandler(nil, server.WithDiffLocalMode()),
+			Diff:        server.NewDiffHandler(server.WithDiffLocalMode()),
 			Graph:       server.NewGraphHandler(),
 			Remediation: server.NewRemediationHandler(),
 		}, nil
 	}
 
 	return &Services{
-		Scan:        server.NewScanHandler(nil),
-		List:        server.NewListHandler(nil),
+		Scan:        server.NewScanHandler(),
+		List:        server.NewListHandler(),
 		SBOM:        server.NewSBOMHandler(),
 		Secrets:     secretsHandler,
-		Diff:        server.NewDiffHandler(nil),
+		Diff:        server.NewDiffHandler(),
 		Graph:       server.NewGraphHandler(),
 		Remediation: server.NewRemediationHandler(),
 	}, nil

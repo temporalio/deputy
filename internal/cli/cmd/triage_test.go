@@ -16,9 +16,10 @@ import (
 	"github.com/picatz/deputy/gen/deputy/scan/v1/scanv1connect"
 	vulnerabilityv1 "github.com/picatz/deputy/gen/deputy/vulnerability/v1"
 	"github.com/picatz/deputy/internal/dependency"
+	"github.com/picatz/deputy/internal/inventory"
 	internalproto "github.com/picatz/deputy/internal/proto"
 	"github.com/picatz/deputy/internal/report"
-	"github.com/picatz/deputy/internal/scan"
+	"github.com/picatz/deputy/internal/scanning"
 	"github.com/picatz/deputy/internal/services"
 	"github.com/picatz/deputy/internal/targets"
 	"github.com/picatz/deputy/internal/vulnerability"
@@ -325,9 +326,9 @@ func (m *mockTriageScanHandler) Scan(ctx context.Context, req *connect.Request[s
 	cons := vulnerability.Consolidate(m.data.Findings, m.data.Advisories)
 	stats := vulnerability.StatsFromConsolidated(cons, len(m.data.Findings))
 
-	// Build a scan.Result with the mock data
-	result := &scan.Result{
-		Target: scan.Target{
+	// Build a scanning.Result with the mock data
+	result := &scanning.Result{
+		Target: inventory.Target{
 			Kind:        targets.KindDir,
 			LocalPath:   req.Msg.Target,
 			DisplayPath: req.Msg.Target,
@@ -338,7 +339,7 @@ func (m *mockTriageScanHandler) Scan(ctx context.Context, req *connect.Request[s
 	}
 
 	// Convert to proto
-	response := internalproto.ScanResultToProto(result)
+	response := internalproto.ScanningResultToProto(result)
 	return connect.NewResponse(response), nil
 }
 

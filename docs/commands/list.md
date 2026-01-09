@@ -188,4 +188,4 @@ Unlike `deputy scan`, `list` does not query the OSV vulnerability database, maki
 
 - CLI: [`internal/cli/cmd/list.go`](../../internal/cli/cmd/list.go)
 - Inventory: [`internal/inventory`](../../internal/inventory)
-- Container extraction: [`internal/scan/service.go`](../../internal/scan/service.go) (`CollectInventoryContainerImage`)
+- Container extraction: [`internal/server/list_handler.go`](../../internal/server/list_handler.go)

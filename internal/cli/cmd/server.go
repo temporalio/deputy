@@ -11,7 +11,6 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/picatz/deputy/internal/logs"
-	"github.com/picatz/deputy/internal/scan"
 	"github.com/picatz/deputy/internal/server"
 )
 
@@ -24,9 +23,7 @@ type serverFlags struct {
 }
 
 // AddServerCommand adds the server command to the root command.
-// The scanner parameter allows injecting a custom scan.Service implementation.
-// If nil, the server will create a default scanner.
-func AddServerCommand(root *cobra.Command, scanner *scan.Service) {
+func AddServerCommand(root *cobra.Command) {
 	flags := &serverFlags{}
 
 	cmd := &cobra.Command{
@@ -99,7 +96,7 @@ Examples (curl):
     -H "Content-Type: application/json" \
     -d '{"target": "github.com/example/repo"}'`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runServer(cmd.Context(), flags, scanner)
+			return runServer(cmd.Context(), flags)
 		},
 	}
 
@@ -112,10 +109,9 @@ Examples (curl):
 	root.AddCommand(cmd)
 }
 
-func runServer(ctx context.Context, flags *serverFlags, scanner *scan.Service) error {
+func runServer(ctx context.Context, flags *serverFlags) error {
 	cfg := server.Config{
 		Addr:         flags.addr,
-		Scanner:      scanner,
 		ReadTimeout:  flags.readTimeout,
 		WriteTimeout: flags.writeTimeout,
 		IdleTimeout:  flags.idleTimeout,

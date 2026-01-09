@@ -15,13 +15,12 @@ import (
 	"github.com/picatz/deputy/internal/compare"
 	"github.com/picatz/deputy/internal/inventory"
 	internalproto "github.com/picatz/deputy/internal/proto"
-	"github.com/picatz/deputy/internal/scan"
+	"github.com/picatz/deputy/internal/scanning"
 	"github.com/picatz/deputy/internal/targets"
 )
 
 // DiffHandler implements the DiffService gRPC handler.
 type DiffHandler struct {
-	scanner   *scan.Service
 	localMode bool
 }
 
@@ -39,11 +38,8 @@ func WithDiffLocalMode() DiffHandlerOption {
 }
 
 // NewDiffHandler creates a new Diff service handler.
-func NewDiffHandler(scanner *scan.Service, opts ...DiffHandlerOption) *DiffHandler {
-	if scanner == nil {
-		scanner = scan.NewService()
-	}
-	h := &DiffHandler{scanner: scanner}
+func NewDiffHandler(opts ...DiffHandlerOption) *DiffHandler {
+	h := &DiffHandler{}
 	for _, opt := range opts {
 		opt(h)
 	}
@@ -175,14 +171,14 @@ func (h *DiffHandler) DiffVulnerabilities(
 		}
 	}
 
-	// Convert proto options to internal options
-	opts := scan.Options{}
+	// Build scan options
+	opts := scanning.Options{}
 	if req.Msg.ScanOptions != nil {
-		opts = internalproto.ScanOptionsFromProto(req.Msg.ScanOptions)
+		opts.Ecosystems = req.Msg.ScanOptions.Ecosystems
 	}
 
-	// Scan base target
-	baseExec, err := h.scanner.ScanRepository(ctx, baseTarget, "HEAD", false, opts)
+	// Scan base target using scanning package
+	baseExec, err := scanning.Scan(ctx, baseTarget, opts)
 	if err != nil {
 		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to scan base target: %w", err))
 	}
@@ -191,7 +187,7 @@ func (h *DiffHandler) DiffVulnerabilities(
 	}
 
 	// Scan target target
-	targetExec, err := h.scanner.ScanRepository(ctx, targetTarget, "HEAD", false, opts)
+	targetExec, err := scanning.Scan(ctx, targetTarget, opts)
 	if err != nil {
 		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to scan target target: %w", err))
 	}
@@ -290,9 +286,9 @@ func (h *DiffHandler) DiffContainerImages(ctx context.Context, req *connect.Requ
 	}
 
 	// Build scan options
-	scanOpts := scan.Options{}
+	scanOpts := scanning.Options{}
 	if opts.ScanOptions != nil {
-		scanOpts = internalproto.ScanOptionsFromProto(opts.ScanOptions)
+		scanOpts.Ecosystems = opts.ScanOptions.Ecosystems
 	}
 
 	// Normalize image references based on transport
@@ -301,7 +297,7 @@ func (h *DiffHandler) DiffContainerImages(ctx context.Context, req *connect.Requ
 
 	// Scan both images in parallel
 	type scanResult struct {
-		exec *scan.Execution
+		exec *scanning.Execution
 		err  error
 	}
 
@@ -309,12 +305,12 @@ func (h *DiffHandler) DiffContainerImages(ctx context.Context, req *connect.Requ
 	targetCh := make(chan scanResult, 1)
 
 	go func() {
-		exec, err := h.scanner.ScanContainerImage(ctx, baseRef, nil, scanOpts)
+		exec, err := scanning.ScanContainerImage(ctx, baseRef, nil, scanOpts)
 		baseCh <- scanResult{exec: exec, err: err}
 	}()
 
 	go func() {
-		exec, err := h.scanner.ScanContainerImage(ctx, targetRef, nil, scanOpts)
+		exec, err := scanning.ScanContainerImage(ctx, targetRef, nil, scanOpts)
 		targetCh <- scanResult{exec: exec, err: err}
 	}()
 
@@ -335,8 +331,8 @@ func (h *DiffHandler) DiffContainerImages(ctx context.Context, req *connect.Requ
 	defer baseRes.exec.Close()
 	defer targetRes.exec.Close()
 
-	// Build the response - using shared helper from internal/proto
-	response := internalproto.BuildContainerDiffResponse(&baseRes.exec.Result, &targetRes.exec.Result)
+	// Build the response using the scanning results
+	response := internalproto.BuildContainerDiffResponseFromScanning(&baseRes.exec.Result, &targetRes.exec.Result)
 
 	return connect.NewResponse(response), nil
 }

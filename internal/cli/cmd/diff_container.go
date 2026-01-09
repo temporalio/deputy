@@ -22,7 +22,6 @@ import (
 	"github.com/picatz/deputy/internal/policy"
 	internalproto "github.com/picatz/deputy/internal/proto"
 	"github.com/picatz/deputy/internal/report/render"
-	"github.com/picatz/deputy/internal/scan"
 	ui "github.com/picatz/deputy/internal/ui"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
@@ -2214,7 +2213,7 @@ func runContainerDiffPolicies(ctx context.Context, policyPaths []string, report 
 	}
 
 	// Build full report payload
-	payload := scan.BuildContainerDiffPayload(report)
+	payload := compare.BuildContainerDiffPayload(report)
 	if _, err := evaluatePoliciesForCommand(ctx, policyPaths, payload, "diff", policy.EntrypointContainerDiffReport, errW); err != nil {
 		return err
 	}

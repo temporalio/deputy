@@ -9,7 +9,7 @@ import (
 	vulnerabilityv1 "github.com/picatz/deputy/gen/deputy/vulnerability/v1"
 	"github.com/picatz/deputy/internal/remediation"
 	"github.com/picatz/deputy/internal/report"
-	"github.com/picatz/deputy/internal/scan"
+	"github.com/picatz/deputy/internal/scanning"
 	"github.com/picatz/deputy/internal/vulnerability"
 )
 
@@ -18,7 +18,7 @@ func TestDisplayVulnerabilitiesWithHeader(t *testing.T) {
 
 	t.Run("no vulnerabilities", func(t *testing.T) {
 		var buf bytes.Buffer
-		DisplayVulnerabilitiesWithHeader(&buf, scan.Result{}, "Custom Header:")
+		DisplayVulnerabilitiesWithHeader(&buf, scanning.Result{}, "Custom Header:")
 		out := buf.String()
 		if !strings.Contains(out, "No vulnerabilities found") {
 			t.Errorf("expected 'No vulnerabilities found', got: %s", out)

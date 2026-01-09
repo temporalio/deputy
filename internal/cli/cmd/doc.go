@@ -15,7 +15,7 @@
 //
 // Commands receive shared services through the [Dependencies] struct, enabling
 // dependency injection for testing and composition. The primary dependency is
-// [scan.Service] which orchestrates vulnerability scanning workflows.
+// [services.Clients] which provides access to ConnectRPC service clients.
 //
 // # Output Formats
 //

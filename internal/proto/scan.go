@@ -7,45 +7,11 @@ import (
 
 	dependencyv1 "github.com/picatz/deputy/gen/deputy/dependency/v1"
 	scanv1 "github.com/picatz/deputy/gen/deputy/scan/v1"
-	targetv1 "github.com/picatz/deputy/gen/deputy/target/v1"
 	vulnerabilityv1 "github.com/picatz/deputy/gen/deputy/vulnerability/v1"
 	"github.com/picatz/deputy/internal/dependency"
-	"github.com/picatz/deputy/internal/scan"
+	"github.com/picatz/deputy/internal/scanning"
 	"github.com/picatz/deputy/internal/vulnerability"
 )
-
-// TargetToProto converts internal scan.Target to proto Target.
-func TargetToProto(t scan.Target) *targetv1.Target {
-	return &targetv1.Target{
-		Kind:         targetv1.TargetKind(t.Kind),
-		DisplayPath:  t.DisplayPath,
-		LocalPath:    t.LocalPath,
-		Ref:          t.Ref,
-		EffectiveRef: t.EffectiveRef,
-		CommitHash:   t.CommitHash,
-		OriginUrl:    t.OriginURL,
-		Cloned:       t.Cloned,
-		Provenance:   t.Provenance,
-	}
-}
-
-// TargetFromProto converts proto Target to internal scan.Target.
-func TargetFromProto(t *targetv1.Target) scan.Target {
-	if t == nil {
-		return scan.Target{}
-	}
-	return scan.Target{
-		Kind:         targetv1.TargetKind(t.Kind),
-		DisplayPath:  t.DisplayPath,
-		LocalPath:    t.LocalPath,
-		Ref:          t.Ref,
-		EffectiveRef: t.EffectiveRef,
-		CommitHash:   t.CommitHash,
-		OriginURL:    t.OriginUrl,
-		Cloned:       t.Cloned,
-		Provenance:   t.Provenance,
-	}
-}
 
 // PackageToProto converts internal finding data to proto Package.
 func PackageToProto(f vulnerability.Finding) *dependencyv1.Package {
@@ -141,91 +107,30 @@ func AdvisoriesFromProto(advisories map[string]*vulnerabilityv1.Advisory) map[st
 	return advisories
 }
 
-// ScanOptionsFromProto converts proto ScanOptions to internal scan.Options.
-func ScanOptionsFromProto(o *scanv1.ScanOptions) scan.Options {
-	if o == nil {
-		return scan.Options{}
-	}
-
-	opts := scan.Options{
-		Ecosystems: o.Ecosystems,
-		Platform:   o.Platform,
-	}
-
-	if o.PublishedBefore != nil {
-		opts.PublishedBefore = o.PublishedBefore.AsTime()
-	}
-	if o.PublishedAfter != nil {
-		opts.PublishedAfter = o.PublishedAfter.AsTime()
-	}
-
-	if o.GraphOptions != nil {
-		opts.Graph = scan.GraphOptions{
-			Enabled:         o.GraphOptions.Enabled,
-			UseProxy:        o.GraphOptions.UseProxy,
-			UseGit:          o.GraphOptions.UseGit,
-			PrivatePatterns: o.GraphOptions.PrivatePatterns,
-		}
-	}
-
-	if o.TargetHint != nil {
-		opts.TargetHint = scan.TargetHint{
-			Kind:           targetv1.TargetKind(o.TargetHint.Kind),
-			ImageTransport: o.TargetHint.ImageTransport,
-		}
-	}
-
-	return opts
-}
-
-// ScanOptionsToProto converts internal scan.Options to proto ScanOptions.
-func ScanOptionsToProto(o scan.Options) *scanv1.ScanOptions {
-	opts := &scanv1.ScanOptions{
-		Ecosystems: o.Ecosystems,
-		Platform:   o.Platform,
-	}
-
-	if !o.PublishedBefore.IsZero() {
-		opts.PublishedBefore = timestamppb.New(o.PublishedBefore)
-	}
-	if !o.PublishedAfter.IsZero() {
-		opts.PublishedAfter = timestamppb.New(o.PublishedAfter)
-	}
-
-	if o.Graph.Enabled {
-		opts.GraphOptions = &scanv1.GraphOptions{
-			Enabled:         o.Graph.Enabled,
-			UseProxy:        o.Graph.UseProxy,
-			UseGit:          o.Graph.UseGit,
-			PrivatePatterns: o.Graph.PrivatePatterns,
-		}
-	}
-
-	return opts
-}
-
-// ScanResultToProto converts internal scan.Result to proto ScanResponse.
-func ScanResultToProto(r *scan.Result) *scanv1.ScanResponse {
+// ScanningResultToProto converts scanning.Result to proto ScanResponse.
+// This is used by handlers that use the scanning package directly.
+func ScanningResultToProto(r *scanning.Result) *scanv1.ScanResponse {
 	if r == nil {
 		return nil
 	}
 
+	// Calculate stats from findings using consolidation
+	stats := vulnerability.ConsolidateAll(r.Findings, r.Advisories).Stats
+
 	return &scanv1.ScanResponse{
-		Target:          TargetToProto(r.Target),
+		Target:          InventoryTargetToProto(r.Target),
 		GeneratedAt:     timestamppb.New(r.GeneratedAt),
-		PackagesScanned: int32(r.PackagesScanned),
+		PackagesScanned: int32(len(r.Packages)),
 		Findings:        FindingsToProto(r.Findings, r.Advisories),
 		Advisories:      AdvisoriesToProto(r.Advisories),
-		Stats:           StatsToProto(r.Stats),
-		Warnings:        r.Warnings,
+		Stats:           StatsToProto(stats),
 		ImageInfo:       ImageInfoToScanProto(r.ImageInfo),
-		Graph:           DependencyGraphToScanProto(r.Graph),
-		DockerfileInfo:  DockerfileInfoToProto(r.DockerfileInfo),
 	}
 }
 
-// ScanResultFromProto converts proto ScanResponse to internal scan.Result.
-func ScanResultFromProto(r *scanv1.ScanResponse) *scan.Result {
+// ScanningResultFromProto converts proto ScanResponse to scanning.Result.
+// This enables CLI commands to work directly with the scanning package.
+func ScanningResultFromProto(r *scanv1.ScanResponse) *scanning.Result {
 	if r == nil {
 		return nil
 	}
@@ -235,17 +140,22 @@ func ScanResultFromProto(r *scanv1.ScanResponse) *scan.Result {
 		generatedAt = r.GeneratedAt.AsTime()
 	}
 
-	return &scan.Result{
-		Target:          TargetFromProto(r.Target),
-		GeneratedAt:     generatedAt,
-		PackagesScanned: int(r.PackagesScanned),
-		Findings:        FindingsFromProto(r.Findings),
-		Advisories:      AdvisoriesFromProto(r.Advisories),
-		Stats:           StatsFromProto(r.Stats),
-		Warnings:        r.Warnings,
-		ImageInfo:       ImageInfoFromScanProto(r.ImageInfo),
-		Graph:           DependencyGraphFromScanProto(r.Graph),
-		DockerfileInfo:  DockerfileInfoFromProto(r.DockerfileInfo),
+	findings := FindingsFromProto(r.Findings)
+	advisories := AdvisoriesFromProto(r.Advisories)
+	stats := StatsFromProto(r.Stats)
+
+	return &scanning.Result{
+		Target:             InventoryTargetFromProto(r.Target),
+		Packages:           nil, // Not in proto response
+		Direct:             nil, // Not in proto response
+		Findings:           findings,
+		Advisories:         advisories,
+		Stats:              stats,
+		ImageInfo:          ImageInfoFromScanProto(r.ImageInfo),
+		DockerfileInfo:     DockerfileInfoFromProto(r.DockerfileInfo),
+		DockerfileAnalysis: nil, // Not in proto response
+		Warnings:           r.Warnings,
+		GeneratedAt:        generatedAt,
 	}
 }
 

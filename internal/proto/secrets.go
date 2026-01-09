@@ -8,7 +8,7 @@ import (
 	policyv1 "github.com/picatz/deputy/gen/deputy/policy/v1"
 	secretsv1 "github.com/picatz/deputy/gen/deputy/secrets/v1"
 	targetv1 "github.com/picatz/deputy/gen/deputy/target/v1"
-	"github.com/picatz/deputy/internal/scan"
+	"github.com/picatz/deputy/internal/inventory"
 	"github.com/picatz/deputy/internal/secrets"
 )
 
@@ -304,7 +304,7 @@ func SecretsScanOptionsToProto(c secrets.EngineConfig) *secretsv1.ScanOptions {
 }
 
 // SecretsScanResultToProto converts internal scan results to proto ScanResponse.
-func SecretsScanResultToProto(target scan.Target, findings []secrets.Finding, policyActions []policyv1.Action, warnings []string) *secretsv1.ScanResponse {
+func SecretsScanResultToProto(target inventory.Target, findings []secrets.Finding, policyActions []policyv1.Action, warnings []string) *secretsv1.ScanResponse {
 	return &secretsv1.ScanResponse{
 		Target: &targetv1.Target{
 			Kind:        target.Kind,
@@ -337,12 +337,12 @@ func policyActionsToProtoPointers(actions []policyv1.Action) []*policyv1.Action 
 	return out
 }
 
-// SecretsTargetHintFromProto converts proto TargetHint to internal scan.TargetHint.
-func SecretsTargetHintFromProto(h *secretsv1.TargetHint) scan.TargetHint {
+// SecretsTargetHintFromProto converts proto TargetHint to internal inventory.TargetHint.
+func SecretsTargetHintFromProto(h *secretsv1.TargetHint) inventory.TargetHint {
 	if h == nil {
-		return scan.TargetHint{}
+		return inventory.TargetHint{}
 	}
-	return scan.TargetHint{
+	return inventory.TargetHint{
 		Kind:           h.Kind,
 		ImageTransport: h.ImageTransport,
 	}

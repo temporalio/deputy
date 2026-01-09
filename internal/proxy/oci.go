@@ -15,7 +15,7 @@ import (
 	"github.com/picatz/deputy/internal/container/image"
 	"github.com/picatz/deputy/internal/policy"
 	"github.com/picatz/deputy/internal/report"
-	"github.com/picatz/deputy/internal/scan"
+	"github.com/picatz/deputy/internal/scanning"
 	"github.com/picatz/deputy/internal/targets"
 	"go.opentelemetry.io/otel/trace"
 )
@@ -38,7 +38,7 @@ type ociHandlerOptions struct {
 }
 
 type imageScanner interface {
-	ScanContainerImage(context.Context, string, map[string]string, scan.Options) (*scan.Execution, error)
+	ScanContainerImage(context.Context, string, map[string]string, scanning.Options) (*scanning.Execution, error)
 }
 
 type ociHandler struct {
@@ -61,7 +61,7 @@ func newOCIHandler(upstream string, policies PolicyEvaluator, opts *ociHandlerOp
 	if err != nil {
 		return nil, fmt.Errorf("parse upstream %q: %w", upstream, err)
 	}
-	var scanner imageScanner = scan.NewService()
+	var scanner imageScanner = defaultImageScanner{}
 	imgCache := getImageScanCache(nil)
 	digCache := getDigestResolutionCache(nil)
 	resolveHead := resolveRemoteDigest
@@ -395,14 +395,14 @@ func (h *ociHandler) scanImageForPolicy(ctx context.Context, info ociRequestInfo
 	scanCtx, cancel := context.WithTimeout(ctx, GetImageScanTimeout())
 	defer cancel()
 
-	exec, err := h.scanner.ScanContainerImage(scanCtx, target, nil, scan.Options{})
+	exec, err := h.scanner.ScanContainerImage(scanCtx, target, nil, scanning.Options{})
 	if err != nil {
 		RecordImageScanError(ctx, span, target, err)
 		return scanResult{Digest: digest}, err
 	}
 	defer exec.Close()
 
-	vulns := report.FlattenResult(exec.Result)
+	vulns := report.FlattenScanningResult(exec.Result)
 	vulnMaps := scanVulnerabilitiesToMaps(vulns)
 
 	// Extract ImageInfo for policy evaluation (config, metadata, history)
@@ -483,4 +483,11 @@ func scanVulnerabilitiesToMaps(vulns []report.Vulnerability) []map[string]any {
 		out = append(out, m)
 	}
 	return out
+}
+
+// defaultImageScanner implements imageScanner using the scanning package.
+type defaultImageScanner struct{}
+
+func (defaultImageScanner) ScanContainerImage(ctx context.Context, target string, targetOpts map[string]string, opts scanning.Options) (*scanning.Execution, error) {
+	return scanning.ScanContainerImage(ctx, target, targetOpts, opts)
 }

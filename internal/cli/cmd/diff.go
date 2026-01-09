@@ -32,7 +32,8 @@ import (
 	"github.com/picatz/deputy/internal/report/render"
 	"github.com/picatz/deputy/internal/repository"
 	"github.com/picatz/deputy/internal/repository/workspace"
-	"github.com/picatz/deputy/internal/scan"
+	"github.com/picatz/deputy/internal/inputs"
+	"github.com/picatz/deputy/internal/scanning"
 	ui "github.com/picatz/deputy/internal/ui"
 	"github.com/picatz/deputy/internal/vulnerability"
 	"github.com/spf13/cobra"
@@ -430,38 +431,38 @@ func runDiffAnalysis(ctx context.Context, c *services.Clients, repoPath, baseRef
 
 	// Determine direct dependencies from target go.mod for accurate classification
 	targetGoDirect := map[string]bool{"stdlib": true}
-	var targetManifestRes scan.ManifestResolver
+	var targetManifestRes inputs.Resolver
 	switch {
 	case isWorkingPseudoRef(targetRef):
 		targetGoDirect = compare.CollectGoDirectModulesFromWorkspace(repoSrc.Workspace())
-		targetManifestRes = scan.NewWorkspaceManifestResolver(repoSrc.Workspace())
+		targetManifestRes = inputs.NewWorkspaceResolver(repoSrc.Workspace())
 	case targetHash != nil:
 		if direct, err := compare.CollectGoDirectModulesFromCommit(repo, *targetHash); err == nil {
 			targetGoDirect = direct
 		}
-		targetManifestRes = scan.NewGitManifestResolver(repo, *targetHash)
+		targetManifestRes = inputs.NewGitResolver(repo, *targetHash)
 	default:
 		// Fallback: use workspace for current state
 		targetGoDirect = compare.CollectGoDirectModulesFromWorkspace(repoSrc.Workspace())
-		targetManifestRes = scan.NewWorkspaceManifestResolver(repoSrc.Workspace())
+		targetManifestRes = inputs.NewWorkspaceResolver(repoSrc.Workspace())
 	}
 
-	targetPkgInputs := scan.PackagesToInputs(targetPackages, scan.PackageInputOptions{GoDirect: targetGoDirect, Resolver: targetManifestRes})
+	targetPkgInputs := inputs.Convert(targetPackages, inputs.Options{GoDirect: targetGoDirect, Resolver: targetManifestRes})
 
 	baseGoDirect := map[string]bool{"stdlib": true}
-	var baseManifestRes scan.ManifestResolver
+	var baseManifestRes inputs.Resolver
 	if isWorkingPseudoRef(baseRef) {
 		baseGoDirect = compare.CollectGoDirectModulesFromWorkspace(repoSrc.Workspace())
-		baseManifestRes = scan.NewWorkspaceManifestResolver(repoSrc.Workspace())
+		baseManifestRes = inputs.NewWorkspaceResolver(repoSrc.Workspace())
 	} else {
-		baseManifestRes = scan.NewGitManifestResolver(repo, *baseHash)
+		baseManifestRes = inputs.NewGitResolver(repo, *baseHash)
 		if direct, err := compare.CollectGoDirectModulesFromCommit(repo, *baseHash); err == nil {
 			baseGoDirect = direct
 		}
 	}
 
-	basePkgInputs := scan.PackagesToInputs(basePackages, scan.PackageInputOptions{GoDirect: baseGoDirect, Resolver: baseManifestRes})
-	pkgDirect := scan.MergeDirectMaps(scan.BuildPackageDirectMap(basePkgInputs), scan.BuildPackageDirectMap(targetPkgInputs))
+	basePkgInputs := inputs.Convert(basePackages, inputs.Options{GoDirect: baseGoDirect, Resolver: baseManifestRes})
+	pkgDirect := inputs.MergeDirectMaps(inputs.BuildDirectMap(basePkgInputs), inputs.BuildDirectMap(targetPkgInputs))
 	goDirect := mergeGoDirectMaps(baseGoDirect, targetGoDirect)
 
 	// Collect main modules to exclude from comparison (the project itself shouldn't appear as a dependency)
@@ -558,18 +559,18 @@ func runDiffAnalysis(ctx context.Context, c *services.Clients, repoPath, baseRef
 		}
 
 		// Convert proto response to internal result
-		resultPtr := internalproto.ScanResultFromProto(resp.Msg)
+		resultPtr := internalproto.ScanningResultFromProto(resp.Msg)
 		result := *resultPtr
 
 		for _, warning := range result.Warnings {
 			fmt.Fprintf(errW, "Warning: %s\n", warning)
 		}
 		if ignoreUnfixed {
-			result = scan.FilterUnfixed(result)
+			result = scanning.FilterUnfixed(result)
 			fmt.Fprintf(errW, "  %s\n", ui.StyleMeta.Render("Note: ignoring unfixed vulnerabilities (--ignore-unfixed)"))
 		}
 
-		reportVulns := report.FlattenResult(result)
+		reportVulns := report.FlattenScanningResult(result)
 
 		policyReport := DiffPolicyReport{
 			Repo:            repoPath,
@@ -697,7 +698,7 @@ func runDiffAnalysis(ctx context.Context, c *services.Clients, repoPath, baseRef
 	}
 
 	// Display results (no vulnerabilities scanned)
-	render.DisplayVulnerabilities(outW, scan.Result{})
+	render.DisplayVulnerabilities(outW, scanning.Result{})
 	otel.SetSpanOK(span)
 	return nil
 }
@@ -997,14 +998,14 @@ func splitVulnsByChange(vulns []report.Vulnerability, changes []compare.Change) 
 	return changed, unchanged
 }
 
-func resultFromReportVulnerabilities(vulns []report.Vulnerability) (scan.Result, []vulnerability.Consolidated) {
+func resultFromReportVulnerabilities(vulns []report.Vulnerability) (scanning.Result, []vulnerability.Consolidated) {
 	if len(vulns) == 0 {
-		return scan.Result{}, nil
+		return scanning.Result{}, nil
 	}
 	findings, advisories := report.SplitVulnerabilities(vulns)
 	cons := vulnerability.Consolidate(findings, advisories)
 	stats := vulnerability.StatsFromConsolidated(cons, len(findings))
-	return scan.Result{
+	return scanning.Result{
 		Findings:   findings,
 		Advisories: advisories,
 		Stats:      stats,

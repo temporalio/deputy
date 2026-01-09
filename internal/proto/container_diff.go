@@ -3,6 +3,7 @@ package proto
 import (
 	"strings"
 
+	"github.com/google/osv-scalibr/extractor"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	containerv1 "github.com/picatz/deputy/gen/deputy/container/v1"
@@ -10,27 +11,28 @@ import (
 	vulnerabilityv1 "github.com/picatz/deputy/gen/deputy/vulnerability/v1"
 	"github.com/picatz/deputy/internal/compare"
 	"github.com/picatz/deputy/internal/container/image"
-	"github.com/picatz/deputy/internal/scan"
+	"github.com/picatz/deputy/internal/scanning"
 	"github.com/picatz/deputy/internal/vulnerability"
 )
 
-// BuildContainerDiffResponse constructs the proto response from scan results.
-func BuildContainerDiffResponse(baseResult, targetResult *scan.Result) *diffv1.DiffContainerImagesResponse {
+// BuildContainerDiffResponseFromScanning constructs the proto response from scanning.Result.
+// This is used by the DiffHandler which uses the scanning package directly.
+func BuildContainerDiffResponseFromScanning(baseResult, targetResult *scanning.Result) *diffv1.DiffContainerImagesResponse {
 	now := timestamppb.Now()
 
 	response := &diffv1.DiffContainerImagesResponse{
-		BaseImage:     extractContainerImageRef(baseResult),
-		TargetImage:   extractContainerImageRef(targetResult),
+		BaseImage:     extractContainerImageRefFromScanning(baseResult),
+		TargetImage:   extractContainerImageRefFromScanning(targetResult),
 		GeneratedAt:   now,
-		BaseContext:   extractContainerContext(baseResult),
-		TargetContext: extractContainerContext(targetResult),
+		BaseContext:   extractContainerContextFromScanning(baseResult),
+		TargetContext: extractContainerContextFromScanning(targetResult),
 	}
 
 	// Compare packages
-	response.PackageChanges = compareContainerPackages(baseResult, targetResult)
+	response.PackageChanges = compareContainerPackagesFromScanning(baseResult, targetResult)
 
 	// Compare vulnerabilities
-	response.VulnerabilityChanges, response.Advisories = compareContainerVulnerabilities(baseResult, targetResult)
+	response.VulnerabilityChanges, response.Advisories = compareContainerVulnerabilitiesFromScanning(baseResult, targetResult)
 
 	// Compare configuration
 	if baseResult != nil && targetResult != nil &&
@@ -45,7 +47,9 @@ func BuildContainerDiffResponse(baseResult, targetResult *scan.Result) *diffv1.D
 	return response
 }
 
-func extractContainerImageRef(result *scan.Result) *diffv1.ContainerImageRef {
+// Helper functions for scanning.Result (used by DiffHandler)
+
+func extractContainerImageRefFromScanning(result *scanning.Result) *diffv1.ContainerImageRef {
 	if result == nil {
 		return &diffv1.ContainerImageRef{}
 	}
@@ -61,17 +65,17 @@ func extractContainerImageRef(result *scan.Result) *diffv1.ContainerImageRef {
 	return ref
 }
 
-func extractContainerContext(result *scan.Result) *diffv1.ContainerImageContext {
+func extractContainerContextFromScanning(result *scanning.Result) *diffv1.ContainerImageContext {
 	if result == nil {
 		return &diffv1.ContainerImageContext{}
 	}
 
 	ctx := &diffv1.ContainerImageContext{
-		PackageCount: int32(len(result.Inventory.Packages)),
+		PackageCount: int32(len(result.Packages)),
 	}
 
 	// Extract distro from packages
-	ctx.Distro = extractDistroFromResult(result)
+	ctx.Distro = extractDistroFromPackages(result.Packages)
 
 	// Extract metadata from ImageInfo
 	if result.ImageInfo != nil {
@@ -82,14 +86,14 @@ func extractContainerContext(result *scan.Result) *diffv1.ContainerImageContext 
 	return ctx
 }
 
-func extractDistroFromResult(result *scan.Result) string {
-	if result == nil || len(result.Inventory.Packages) == 0 {
+func extractDistroFromPackages(pkgs []*extractor.Package) string {
+	if len(pkgs) == 0 {
 		return ""
 	}
 
 	// Count ecosystems to find the most common one
 	ecosystemCounts := make(map[string]int)
-	for _, pkg := range result.Inventory.Packages {
+	for _, pkg := range pkgs {
 		eco := pkg.Ecosystem()
 		if eco == "" {
 			continue
@@ -123,21 +127,21 @@ func extractDistroFromResult(result *scan.Result) string {
 	return ""
 }
 
-func compareContainerPackages(baseResult, targetResult *scan.Result) []*diffv1.ContainerPackageChange {
+func compareContainerPackagesFromScanning(baseResult, targetResult *scanning.Result) []*diffv1.ContainerPackageChange {
 	if baseResult == nil || targetResult == nil {
 		return nil
 	}
 
 	// Use existing ComparePackages logic
 	baseChanges := compare.ComparePackages(
-		baseResult.Inventory.Packages,
-		targetResult.Inventory.Packages,
+		baseResult.Packages,
+		targetResult.Packages,
 		nil, nil, nil,
 	)
 
 	// Build layer lookup maps
-	baseLayerMap := buildPackageLayerMapForProto(baseResult)
-	targetLayerMap := buildPackageLayerMapForProto(targetResult)
+	baseLayerMap := buildPackageLayerMapFromScanning(baseResult)
+	targetLayerMap := buildPackageLayerMapFromScanning(targetResult)
 
 	// Convert to proto
 	changes := make([]*diffv1.ContainerPackageChange, 0, len(baseChanges))
@@ -163,24 +167,7 @@ func compareContainerPackages(baseResult, targetResult *scan.Result) []*diffv1.C
 	return changes
 }
 
-func convertChangeKind(ct compare.ChangeType) diffv1.ChangeKind {
-	switch ct {
-	case compare.Added:
-		return diffv1.ChangeKind_CHANGE_KIND_ADDED
-	case compare.Removed:
-		return diffv1.ChangeKind_CHANGE_KIND_REMOVED
-	case compare.Upgraded:
-		return diffv1.ChangeKind_CHANGE_KIND_UPGRADED
-	case compare.Downgraded:
-		return diffv1.ChangeKind_CHANGE_KIND_DOWNGRADED
-	case compare.Updated:
-		return diffv1.ChangeKind_CHANGE_KIND_UPDATED
-	default:
-		return diffv1.ChangeKind_CHANGE_KIND_UNSPECIFIED
-	}
-}
-
-func buildPackageLayerMapForProto(result *scan.Result) map[string]*containerv1.LayerDetails {
+func buildPackageLayerMapFromScanning(result *scanning.Result) map[string]*containerv1.LayerDetails {
 	layerMap := make(map[string]*containerv1.LayerDetails)
 
 	for _, finding := range result.Findings {
@@ -199,7 +186,7 @@ func buildPackageLayerMapForProto(result *scan.Result) map[string]*containerv1.L
 	return layerMap
 }
 
-func compareContainerVulnerabilities(baseResult, targetResult *scan.Result) ([]*diffv1.ContainerVulnerabilityChange, map[string]*vulnerabilityv1.Advisory) {
+func compareContainerVulnerabilitiesFromScanning(baseResult, targetResult *scanning.Result) ([]*diffv1.ContainerVulnerabilityChange, map[string]*vulnerabilityv1.Advisory) {
 	if baseResult == nil || targetResult == nil {
 		return nil, nil
 	}
@@ -225,7 +212,7 @@ func compareContainerVulnerabilities(baseResult, targetResult *scan.Result) ([]*
 		if !exists {
 			changeKind := diffv1.VulnerabilityChangeKind_VULNERABILITY_CHANGE_KIND_REMOVED
 			// Check if it was fixed by an upgrade
-			if wasVulnFixedByUpgrade(baseFinding, targetResult) {
+			if wasVulnFixedByUpgradeFromScanning(baseFinding, targetResult) {
 				changeKind = diffv1.VulnerabilityChangeKind_VULNERABILITY_CHANGE_KIND_FIXED
 			}
 			change := buildVulnChangeProto(advisoryID, changeKind, baseAdvisory,
@@ -263,11 +250,11 @@ func compareContainerVulnerabilities(baseResult, targetResult *scan.Result) ([]*
 	return changes, advisories
 }
 
-func wasVulnFixedByUpgrade(finding vulnerability.Finding, targetResult *scan.Result) bool {
+func wasVulnFixedByUpgradeFromScanning(finding vulnerability.Finding, targetResult *scanning.Result) bool {
 	pkgName := finding.Dependency.Name
 	baseVersion := finding.Version
 
-	for _, pkg := range targetResult.Inventory.Packages {
+	for _, pkg := range targetResult.Packages {
 		if pkg.Name == pkgName {
 			if pkg.Version != baseVersion {
 				return true
@@ -276,6 +263,23 @@ func wasVulnFixedByUpgrade(finding vulnerability.Finding, targetResult *scan.Res
 		}
 	}
 	return false
+}
+
+func convertChangeKind(ct compare.ChangeType) diffv1.ChangeKind {
+	switch ct {
+	case compare.Added:
+		return diffv1.ChangeKind_CHANGE_KIND_ADDED
+	case compare.Removed:
+		return diffv1.ChangeKind_CHANGE_KIND_REMOVED
+	case compare.Upgraded:
+		return diffv1.ChangeKind_CHANGE_KIND_UPGRADED
+	case compare.Downgraded:
+		return diffv1.ChangeKind_CHANGE_KIND_DOWNGRADED
+	case compare.Updated:
+		return diffv1.ChangeKind_CHANGE_KIND_UPDATED
+	default:
+		return diffv1.ChangeKind_CHANGE_KIND_UNSPECIFIED
+	}
 }
 
 func buildVulnChangeProto(

@@ -84,6 +84,17 @@ type Target struct {
 	Provenance   map[string]string
 }
 
+// TargetHint provides explicit target type hints when auto-detection is insufficient.
+type TargetHint struct {
+	// Kind explicitly specifies the target type.
+	// Zero value means auto-detect.
+	Kind targets.Kind
+
+	// ImageTransport specifies how to fetch container images.
+	// Values: "remote" (default), "daemon", "tarball", "oci-archive", "oci-layout".
+	ImageTransport string
+}
+
 // Execution wraps an inventory result and cleanup function.
 // Always call Close() when done to release temporary resources.
 type Execution struct {

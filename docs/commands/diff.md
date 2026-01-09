@@ -570,6 +570,6 @@ github.com/example/pkg v1.1.0:
 
 ### Container Diff
 - CLI: [`internal/cli/cmd/diff_container.go`](../../internal/cli/cmd/diff_container.go)
-- Container diff logic: [`internal/scan/container_diff.go`](../../internal/scan/container_diff.go)
+- Container diff proto: [`internal/proto/container_diff.go`](../../internal/proto/container_diff.go)
 - Image comparison: [`internal/compare/container_image.go`](../../internal/compare/container_image.go)
 - Container image provider: [`internal/targets/providers/container_image.go`](../../internal/targets/providers/container_image.go)

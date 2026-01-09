@@ -17,8 +17,9 @@ import (
 	"github.com/google/go-containerregistry/pkg/authn"
 	"github.com/google/go-containerregistry/pkg/name"
 	"github.com/google/go-containerregistry/pkg/v1/remote"
+	vulnerabilityv1 "github.com/picatz/deputy/gen/deputy/vulnerability/v1"
 	"github.com/picatz/deputy/internal/container/image"
-	"github.com/picatz/deputy/internal/scan"
+	"github.com/picatz/deputy/internal/scanning"
 	"github.com/picatz/deputy/internal/vulnerability"
 )
 
@@ -45,8 +46,8 @@ func TestOCIProxy_PullImageThroughProxy(t *testing.T) {
 	// Use a stub scanner to avoid actual vulnerability scanning in this test
 	// (that's tested separately)
 	stubScanner := &integrationStubScanner{
-		result: &scan.Execution{
-			Result: scan.Result{},
+		result: &scanning.Execution{
+			Result: scanning.Result{},
 		},
 	}
 
@@ -131,7 +132,7 @@ func TestOCIProxy_PolicyBlocksLatestTag(t *testing.T) {
 
 	// Create handler with stub scanner (no vulns to focus on tag policy)
 	stubScanner := &integrationStubScanner{
-		result: &scan.Execution{Result: scan.Result{}},
+		result: &scanning.Execution{Result: scanning.Result{}},
 	}
 
 	handler, err := newOCIHandler(upstream.URL, engine, &ociHandlerOptions{
@@ -197,7 +198,7 @@ func TestOCIProxy_PolicyAllowsSemverTag(t *testing.T) {
 	policyEval := &capturePolicyEvaluator{}
 
 	stubScanner := &integrationStubScanner{
-		result: &scan.Execution{Result: scan.Result{}},
+		result: &scanning.Execution{Result: scanning.Result{}},
 	}
 
 	handler, err := newOCIHandler(upstream.URL, policyEval, &ociHandlerOptions{
@@ -284,17 +285,17 @@ policies:
 	// Note: The scan result uses vulnerability.Finding and Advisory types.
 	// The proxy converts these to maps for policy evaluation via scanVulnerabilitiesToMaps.
 	stubScanner := &integrationStubScanner{
-		result: &scan.Execution{
-			Result: scan.Result{
+		result: &scanning.Execution{
+			Result: scanning.Result{
 				Findings: []vulnerability.Finding{
 					{
 						AdvisoryID: "CVE-2024-9999",
 						Version:    "1.0.0",
 					},
 				},
-				Advisories: map[string]vulnerability.Advisory{
+				Advisories: map[string]*vulnerabilityv1.Advisory{
 					"CVE-2024-9999": {
-						ID:       "CVE-2024-9999",
+						Id:       "CVE-2024-9999",
 						Severity: vulnerability.NewSeverity("CRITICAL", ""),
 						Summary:  "Test critical vulnerability",
 					},
@@ -378,8 +379,8 @@ policies:
 
 	// Scanner that returns image info with root user
 	stubScanner := &integrationStubScanner{
-		result: &scan.Execution{
-			Result: scan.Result{
+		result: &scanning.Execution{
+			Result: scanning.Result{
 				ImageInfo: &image.Info{
 					Config: image.Config{
 						User: "", // empty user means root
@@ -442,7 +443,7 @@ func TestOCIProxy_RealGCRImage(t *testing.T) {
 
 	// Use stub scanner to avoid slow vuln scanning
 	stubScanner := &integrationStubScanner{
-		result: &scan.Execution{Result: scan.Result{}},
+		result: &scanning.Execution{Result: scanning.Result{}},
 	}
 
 	handler, err := newOCIHandler(upstream.String(), policyEval, &ociHandlerOptions{
@@ -507,11 +508,11 @@ func writeTestFile(path, content string) error {
 // integrationStubScanner is a configurable test stub for the imageScanner interface.
 // It returns configured results/errors for testing policy evaluation.
 type integrationStubScanner struct {
-	result *scan.Execution
+	result *scanning.Execution
 	err    error
 }
 
-func (s *integrationStubScanner) ScanContainerImage(ctx context.Context, target string, opts map[string]string, scanOpts scan.Options) (*scan.Execution, error) {
+func (s *integrationStubScanner) ScanContainerImage(ctx context.Context, target string, opts map[string]string, scanOpts scanning.Options) (*scanning.Execution, error) {
 	if s.err != nil {
 		return nil, s.err
 	}

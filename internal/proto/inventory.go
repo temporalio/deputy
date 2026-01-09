@@ -29,7 +29,7 @@ func InventoryResultToProto(r *inventory.Result) *inventoryv1.CollectInventoryRe
 	stats := buildInventoryStats(r.Packages, r.Direct)
 
 	// Convert target
-	target := inventoryTargetToProto(r.Target)
+	target := InventoryTargetToProto(r.Target)
 
 	// Convert image info if present
 	var imageInfo *containerv1.ImageInfo
@@ -53,8 +53,8 @@ func InventoryResultToProto(r *inventory.Result) *inventoryv1.CollectInventoryRe
 	}
 }
 
-// inventoryTargetToProto converts internal inventory.Target to proto Target.
-func inventoryTargetToProto(t inventory.Target) *targetv1.Target {
+// InventoryTargetToProto converts internal inventory.Target to proto Target.
+func InventoryTargetToProto(t inventory.Target) *targetv1.Target {
 	return &targetv1.Target{
 		Kind:         targetv1.TargetKind(t.Kind),
 		DisplayPath:  t.DisplayPath,
@@ -63,6 +63,24 @@ func inventoryTargetToProto(t inventory.Target) *targetv1.Target {
 		EffectiveRef: t.EffectiveRef,
 		CommitHash:   t.CommitHash,
 		OriginUrl:    t.OriginURL,
+		Cloned:       t.Cloned,
+		Provenance:   t.Provenance,
+	}
+}
+
+// InventoryTargetFromProto converts proto Target to internal inventory.Target.
+func InventoryTargetFromProto(t *targetv1.Target) inventory.Target {
+	if t == nil {
+		return inventory.Target{}
+	}
+	return inventory.Target{
+		Kind:         targetv1.TargetKind(t.Kind),
+		DisplayPath:  t.DisplayPath,
+		LocalPath:    t.LocalPath,
+		Ref:          t.Ref,
+		EffectiveRef: t.EffectiveRef,
+		CommitHash:   t.CommitHash,
+		OriginURL:    t.OriginUrl,
 		Cloned:       t.Cloned,
 		Provenance:   t.Provenance,
 	}
