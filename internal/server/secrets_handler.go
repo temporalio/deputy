@@ -27,21 +27,37 @@ type SecretsHandler struct {
 
 	engine          *secrets.Engine
 	customDetectors []secrets.PatternDetector
+	localMode       bool // Skip remote target validation for in-process usage
+}
+
+// SecretsHandlerOption configures a SecretsHandler.
+type SecretsHandlerOption func(*SecretsHandler)
+
+// WithSecretsLocalMode enables local mode which skips remote target validation.
+// Use this for in-process clients that need to access local filesystems.
+func WithSecretsLocalMode() SecretsHandlerOption {
+	return func(h *SecretsHandler) {
+		h.localMode = true
+	}
 }
 
 // Ensure SecretsHandler implements the SecretsServiceHandler interface.
 var _ secretsv1connect.SecretsServiceHandler = (*SecretsHandler)(nil)
 
 // NewSecretsHandler creates a new SecretsHandler with default configuration.
-func NewSecretsHandler() (*SecretsHandler, error) {
+func NewSecretsHandler(opts ...SecretsHandlerOption) (*SecretsHandler, error) {
 	engine, err := secrets.NewEngine()
 	if err != nil {
 		return nil, fmt.Errorf("failed to create secrets engine: %w", err)
 	}
-	return &SecretsHandler{
+	h := &SecretsHandler{
 		engine:          engine,
 		customDetectors: make([]secrets.PatternDetector, 0),
-	}, nil
+	}
+	for _, opt := range opts {
+		opt(h)
+	}
+	return h, nil
 }
 
 // NewSecretsHandlerWithConfig creates a new SecretsHandler with custom configuration.
@@ -66,9 +82,11 @@ func (h *SecretsHandler) Scan(
 		target = "."
 	}
 
-	// Security: Validate target before processing (for remote server mode)
-	if err := validateTarget(target); err != nil {
-		return nil, connect.NewError(connect.CodeInvalidArgument, err)
+	// Security: Validate target before processing (skip in local mode)
+	if !h.localMode {
+		if err := validateTarget(target); err != nil {
+			return nil, connect.NewError(connect.CodeInvalidArgument, err)
+		}
 	}
 
 	logs.Info(ctx, "received secrets scan request", "target", target)
@@ -114,9 +132,11 @@ func (h *SecretsHandler) StreamScan(
 		target = "."
 	}
 
-	// Security: Validate target before processing
-	if err := validateTarget(target); err != nil {
-		return connect.NewError(connect.CodeInvalidArgument, err)
+	// Security: Validate target before processing (skip in local mode)
+	if !h.localMode {
+		if err := validateTarget(target); err != nil {
+			return connect.NewError(connect.CodeInvalidArgument, err)
+		}
 	}
 
 	logs.Info(ctx, "received streaming secrets scan request", "target", target)
@@ -199,6 +219,13 @@ func (h *SecretsHandler) ScanHistory(
 		target = "."
 	}
 
+	// Security: Validate target before processing (skip in local mode)
+	if !h.localMode {
+		if err := validateTarget(target); err != nil {
+			return nil, connect.NewError(connect.CodeInvalidArgument, err)
+		}
+	}
+
 	logs.Info(ctx, "received secrets history scan request", "target", target)
 
 	// Use the existing git history scanning from internal/secrets
@@ -246,6 +273,13 @@ func (h *SecretsHandler) ScanDiff(
 
 	baseRef := req.Msg.BaseRef
 	targetRef := req.Msg.TargetRef
+
+	// Security: Validate target before processing (skip in local mode)
+	if !h.localMode {
+		if err := validateTarget(target); err != nil {
+			return nil, connect.NewError(connect.CodeInvalidArgument, err)
+		}
+	}
 
 	logs.Info(ctx, "received secrets diff scan request",
 		"target", target,

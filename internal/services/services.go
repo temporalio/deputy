@@ -51,22 +51,26 @@ func NewForServer() (*Services, error) {
 
 // NewWithConfig creates a new Services with the given configuration.
 func NewWithConfig(cfg Config) (*Services, error) {
-	// Create secrets handler (can fail)
-	secretsHandler, err := server.NewSecretsHandler()
-	if err != nil {
-		return nil, err
-	}
-
 	if cfg.LocalMode {
+		secretsHandler, err := server.NewSecretsHandler(server.WithSecretsLocalMode())
+		if err != nil {
+			return nil, err
+		}
 		return &Services{
 			Scan:        server.NewScanHandler(server.WithLocalMode()),
 			List:        server.NewListHandler(server.WithListLocalMode()),
-			SBOM:        server.NewSBOMHandler(),
+			SBOM:        server.NewSBOMHandler(server.WithSBOMLocalMode()),
 			Secrets:     secretsHandler,
 			Diff:        server.NewDiffHandler(server.WithDiffLocalMode()),
-			Graph:       server.NewGraphHandler(),
+			Graph:       server.NewGraphHandler(server.WithGraphLocalMode()),
 			Remediation: server.NewRemediationHandler(),
 		}, nil
+	}
+
+	// Remote server mode - create handlers without local mode
+	secretsHandler, err := server.NewSecretsHandler()
+	if err != nil {
+		return nil, err
 	}
 
 	return &Services{

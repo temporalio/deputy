@@ -19,14 +19,31 @@ import (
 )
 
 // GraphHandler implements the GraphService gRPC handler.
-type GraphHandler struct{}
+type GraphHandler struct {
+	localMode bool // Skip remote target validation for in-process usage
+}
 
 // Ensure GraphHandler implements the GraphServiceHandler interface.
 var _ graphv1connect.GraphServiceHandler = (*GraphHandler)(nil)
 
+// GraphHandlerOption configures a GraphHandler.
+type GraphHandlerOption func(*GraphHandler)
+
+// WithGraphLocalMode enables local mode which skips remote target validation.
+// Use this for in-process clients that need to access local filesystems.
+func WithGraphLocalMode() GraphHandlerOption {
+	return func(h *GraphHandler) {
+		h.localMode = true
+	}
+}
+
 // NewGraphHandler creates a new Graph service handler.
-func NewGraphHandler() *GraphHandler {
-	return &GraphHandler{}
+func NewGraphHandler(opts ...GraphHandlerOption) *GraphHandler {
+	h := &GraphHandler{}
+	for _, opt := range opts {
+		opt(h)
+	}
+	return h
 }
 
 // BuildGraph constructs a dependency graph for a target.
@@ -36,12 +53,14 @@ func (h *GraphHandler) BuildGraph(
 ) (*connect.Response[graphv1.BuildGraphResponse], error) {
 	target := req.Msg.GetTarget()
 	if target == "" {
-		return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("target is required"))
+		target = "."
 	}
 
-	// Security: Validate target is accessible from remote server
-	if err := targets.ValidateRemoteTarget(target); err != nil {
-		return nil, connect.NewError(connect.CodeInvalidArgument, err)
+	// Security: Validate target is accessible from remote server (skip in local mode)
+	if !h.localMode {
+		if err := targets.ValidateRemoteTarget(target); err != nil {
+			return nil, connect.NewError(connect.CodeInvalidArgument, err)
+		}
 	}
 
 	// Build inventory options
@@ -112,7 +131,7 @@ func (h *GraphHandler) WhyDependency(
 ) (*connect.Response[graphv1.WhyDependencyResponse], error) {
 	target := req.Msg.GetTarget()
 	if target == "" {
-		return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("target is required"))
+		target = "."
 	}
 
 	dependency := req.Msg.GetDependency()
@@ -120,9 +139,11 @@ func (h *GraphHandler) WhyDependency(
 		return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("dependency is required"))
 	}
 
-	// Security: Validate target is accessible from remote server
-	if err := targets.ValidateRemoteTarget(target); err != nil {
-		return nil, connect.NewError(connect.CodeInvalidArgument, err)
+	// Security: Validate target is accessible from remote server (skip in local mode)
+	if !h.localMode {
+		if err := targets.ValidateRemoteTarget(target); err != nil {
+			return nil, connect.NewError(connect.CodeInvalidArgument, err)
+		}
 	}
 
 	// Build inventory options
@@ -182,12 +203,14 @@ func (h *GraphHandler) QueryGraph(
 ) (*connect.Response[graphv1.QueryGraphResponse], error) {
 	target := req.Msg.GetTarget()
 	if target == "" {
-		return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("target is required"))
+		target = "."
 	}
 
-	// Security: Validate target is accessible from remote server
-	if err := targets.ValidateRemoteTarget(target); err != nil {
-		return nil, connect.NewError(connect.CodeInvalidArgument, err)
+	// Security: Validate target is accessible from remote server (skip in local mode)
+	if !h.localMode {
+		if err := targets.ValidateRemoteTarget(target); err != nil {
+			return nil, connect.NewError(connect.CodeInvalidArgument, err)
+		}
 	}
 
 	// Build inventory options

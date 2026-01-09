@@ -19,14 +19,31 @@ import (
 )
 
 // SBOMHandler implements the SBOMService gRPC handler.
-type SBOMHandler struct{}
+type SBOMHandler struct {
+	localMode bool // Skip remote target validation for in-process usage
+}
 
 // Ensure SBOMHandler implements the SBOMServiceHandler interface.
 var _ sbomv1connect.SBOMServiceHandler = (*SBOMHandler)(nil)
 
+// SBOMHandlerOption configures a SBOMHandler.
+type SBOMHandlerOption func(*SBOMHandler)
+
+// WithSBOMLocalMode enables local mode which skips remote target validation.
+// Use this for in-process clients that need to access local filesystems.
+func WithSBOMLocalMode() SBOMHandlerOption {
+	return func(h *SBOMHandler) {
+		h.localMode = true
+	}
+}
+
 // NewSBOMHandler creates a new SBOM service handler.
-func NewSBOMHandler() *SBOMHandler {
-	return &SBOMHandler{}
+func NewSBOMHandler(opts ...SBOMHandlerOption) *SBOMHandler {
+	h := &SBOMHandler{}
+	for _, opt := range opts {
+		opt(h)
+	}
+	return h
 }
 
 // Generate creates an SBOM for a target.
@@ -34,13 +51,16 @@ func (h *SBOMHandler) Generate(
 	ctx context.Context,
 	req *connect.Request[sbomv1.GenerateRequest],
 ) (*connect.Response[sbomv1.GenerateResponse], error) {
-	if req.Msg.GetTarget() == "" {
-		return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("target is required"))
+	target := req.Msg.GetTarget()
+	if target == "" {
+		target = "."
 	}
 
-	// Security: Validate target is accessible from remote server
-	if err := targets.ValidateRemoteTarget(req.Msg.GetTarget()); err != nil {
-		return nil, connect.NewError(connect.CodeInvalidArgument, err)
+	// Security: Validate target is accessible from remote server (skip in local mode)
+	if !h.localMode {
+		if err := targets.ValidateRemoteTarget(target); err != nil {
+			return nil, connect.NewError(connect.CodeInvalidArgument, err)
+		}
 	}
 
 	opts := sbomx.Options{}
@@ -50,7 +70,7 @@ func (h *SBOMHandler) Generate(
 		opts.Ref = req.Msg.Options.GetRef()
 	}
 
-	result, err := sbomx.Generate(ctx, req.Msg.GetTarget(), opts)
+	result, err := sbomx.Generate(ctx, target, opts)
 	if err != nil {
 		return nil, connect.NewError(connect.CodeInternal, err)
 	}
