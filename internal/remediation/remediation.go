@@ -27,6 +27,9 @@ type Command struct {
 	Groups []string
 	// Hint provides additional context (e.g., "run bundle install afterwards").
 	Hint string
+	// FollowUp is an optional executable command to run after the main command
+	// (e.g., "go mod tidy" after "go get", "uv lock" after "uv add").
+	FollowUp string
 	// IsDirect indicates if the vulnerable package is a direct dependency.
 	IsDirect bool
 	// Executable indicates if Command can be run directly (true) or requires manual action (false).
@@ -86,7 +89,11 @@ func buildUpgradeRecommendations(cons []vulnerability.Consolidated) ([]packageUp
 		if best == "" {
 			continue
 		}
-		if strings.EqualFold(v.Package, "stdlib") {
+		// Both "stdlib" (standard library) and "toolchain" (go command) vulnerabilities
+		// are fixed by upgrading the Go version. OSV uses these package names:
+		// - stdlib: vulnerabilities in standard library packages (crypto/tls, net/http, etc.)
+		// - toolchain: vulnerabilities in the go command itself
+		if strings.EqualFold(v.Package, "stdlib") || strings.EqualFold(v.Package, "toolchain") {
 			if stdlibRec == "" || compareVersions(best, stdlibRec) > 0 {
 				stdlibRec = best
 			}
@@ -202,8 +209,8 @@ func dedupeCommands(upgrades []packageUpgrade) []Command {
 
 	for _, u := range upgrades {
 		for _, ref := range u.References {
-			cmd, hint, executable := recommendCommand(ref.Manager, ref.Path, u.Name, u.Recommended, ref.Groups)
-			if cmd == "" {
+			rec := recommendCommand(ref.Manager, ref.Path, u.Name, u.Recommended, ref.Groups)
+			if rec.command == "" {
 				continue
 			}
 			pathStr := strings.TrimSpace(ref.Path)
@@ -211,10 +218,10 @@ func dedupeCommands(upgrades []packageUpgrade) []Command {
 			groupsKey := strings.Join(groups, ",")
 			key := strings.Join([]string{
 				collections.NormalizeLower(ref.Manager),
-				cmd,
+				rec.command,
 				pathStr,
 				groupsKey,
-				hint,
+				rec.hint,
 				fmt.Sprintf("%t", u.IsDirect),
 			}, "|")
 			if !seen.Add(key) {
@@ -224,12 +231,13 @@ func dedupeCommands(upgrades []packageUpgrade) []Command {
 			commands = append(commands, Command{
 				Manager:     manager,
 				managerRank: ecosystem.ManagerRank(manager),
-				Command:     cmd,
+				Command:     rec.command,
 				Path:        pathStr,
 				Groups:      groups,
-				Hint:        hint,
+				Hint:        rec.hint,
+				FollowUp:    rec.followUp,
 				IsDirect:    u.IsDirect,
-				Executable:  executable,
+				Executable:  rec.executable,
 			})
 			if strings.EqualFold(manager, "go") {
 				goManagerPresent = true
@@ -293,20 +301,30 @@ var jsPackageManagerCommands = map[string]string{
 }
 
 // pythonPackageManagerCommands maps Python package managers to their install patterns.
-// Each entry specifies the command template with %s placeholders for package and version.
+// Each entry specifies the command template with %s placeholders for package and version,
+// plus an optional follow-up command and hint for manual steps.
 var pythonPackageManagerCommands = map[string]struct {
 	template string // fmt template: package, version
-	hint     string
+	followUp string // executable follow-up command (e.g., lockfile sync)
+	hint     string // hint for non-executable guidance
 }{
-	"pip":    {template: "pip install --upgrade %s==%s", hint: ""},
-	"pipenv": {template: "pipenv install %s==%s", hint: ""},
-	"poetry": {template: "poetry add %s@%s", hint: ""},
-	"uv":     {template: "uv add \"%s>=%s\"", hint: "run uv lock afterwards to update lockfile"},
-	"pdm":    {template: "pdm add %s@%s", hint: ""},
-	"conda":  {template: "conda install %s=%s", hint: "use -c conda-forge if needed"},
+	"pip":    {template: "pip install --upgrade %s==%s", followUp: "", hint: ""},
+	"pipenv": {template: "pipenv install %s==%s", followUp: "pipenv lock", hint: ""},
+	"poetry": {template: "poetry add %s@%s", followUp: "poetry lock", hint: ""},
+	"uv":     {template: "uv add \"%s>=%s\"", followUp: "uv lock", hint: ""},
+	"pdm":    {template: "pdm add %s@%s", followUp: "pdm lock", hint: ""},
+	"conda":  {template: "conda install %s=%s", followUp: "", hint: "use -c conda-forge if needed"},
 }
 
-func recommendCommand(manager, manifestPath, pkg, version string, groups []string) (string, string, bool) {
+// commandResult holds the result of a command recommendation.
+type commandResult struct {
+	command    string
+	followUp   string
+	hint       string
+	executable bool
+}
+
+func recommendCommand(manager, manifestPath, pkg, version string, groups []string) commandResult {
 	m := strings.ToLower(manager)
 
 	// Handle JS package managers with a unified approach
@@ -315,7 +333,7 @@ func recommendCommand(manager, manifestPath, pkg, version string, groups []strin
 		if flag := dependencyGroupFlag(m, groups); flag != "" {
 			cmd = fmt.Sprintf("%s %s", cmd, flag)
 		}
-		return cmd, "", true
+		return commandResult{command: cmd, executable: true}
 	}
 
 	// Handle Python package managers with a unified approach
@@ -326,38 +344,38 @@ func recommendCommand(manager, manifestPath, pkg, version string, groups []strin
 		if strings.Contains(hint, "%s") {
 			hint = fmt.Sprintf(hint, pkg, version)
 		}
-		return cmd, hint, true
+		return commandResult{command: cmd, followUp: pyCmd.followUp, hint: hint, executable: true}
 	}
 
 	switch m {
 	case "go":
-		return fmt.Sprintf("go get %s@%s", pkg, version), "", true
+		return commandResult{command: fmt.Sprintf("go get %s@%s", pkg, version), executable: true}
 
 	// Ruby/Bundler
 	case "gem", "bundler":
 		base := strings.ToLower(path.Base(manifestPath))
 		switch {
 		case base == "gemfile.lock" || base == "gems.locked":
-			return fmt.Sprintf("bundle update %s", pkg), "", true
+			return commandResult{command: fmt.Sprintf("bundle update %s", pkg), executable: true}
 		case base == "gemfile":
-			return fmt.Sprintf("Edit Gemfile to require %s >= %s", pkg, version), "run bundle install afterwards", false
+			return commandResult{command: fmt.Sprintf("Edit Gemfile to require %s >= %s", pkg, version), followUp: "bundle install", hint: "edit Gemfile first", executable: false}
 		case strings.HasSuffix(strings.ToLower(manifestPath), ".gemspec"):
-			return fmt.Sprintf("Edit %s to require %s >= %s", path.Base(manifestPath), pkg, version), "", false
+			return commandResult{command: fmt.Sprintf("Edit %s to require %s >= %s", path.Base(manifestPath), pkg, version), executable: false}
 		default:
-			return fmt.Sprintf("Update Ruby dependency for %s to %s", pkg, version), "", false
+			return commandResult{command: fmt.Sprintf("Update Ruby dependency for %s to %s", pkg, version), executable: false}
 		}
 
 	// PHP/Composer
 	case "composer":
-		return fmt.Sprintf("composer require %s:%s", pkg, version), "", true
+		return commandResult{command: fmt.Sprintf("composer require %s:%s", pkg, version), executable: true}
 
 	// Rust/Cargo
 	case "cargo":
-		return fmt.Sprintf("cargo update -p %s --precise %s", pkg, version), "", true
+		return commandResult{command: fmt.Sprintf("cargo update -p %s --precise %s", pkg, version), executable: true}
 
 	// Java/Maven
 	case "maven":
-		return fmt.Sprintf("mvn versions:use-dep-version -Dincludes=%s -DdepVersion=%s", pkg, version), "consider running mvn versions:commit afterwards", true
+		return commandResult{command: fmt.Sprintf("mvn versions:use-dep-version -Dincludes=%s -DdepVersion=%s", pkg, version), followUp: "mvn versions:commit", executable: true}
 
 	// Java/Gradle - now executable via gradle CLI
 	case "gradle":
@@ -365,11 +383,11 @@ func recommendCommand(manager, manifestPath, pkg, version string, groups []strin
 		switch {
 		case base == "gradle.lockfile" || base == "buildscript-gradle.lockfile":
 			// For lockfiles, update via gradle command then regenerate lockfile
-			return "./gradlew dependencies --write-locks", "update dependency version in build.gradle first", true
+			return commandResult{command: "./gradlew dependencies --write-locks", hint: "update dependency version in build.gradle first", executable: true}
 		case base == "build.gradle" || base == "build.gradle.kts":
-			return fmt.Sprintf("Update %s to %s in %s", pkg, version, path.Base(manifestPath)), "run ./gradlew dependencies --write-locks afterwards", false
+			return commandResult{command: fmt.Sprintf("Update %s to %s in %s", pkg, version, path.Base(manifestPath)), followUp: "./gradlew dependencies --write-locks", executable: false}
 		default:
-			return fmt.Sprintf("Update dependency %s to %s", pkg, version), "", false
+			return commandResult{command: fmt.Sprintf("Update dependency %s to %s", pkg, version), executable: false}
 		}
 
 	// .NET/NuGet
@@ -378,14 +396,14 @@ func recommendCommand(manager, manifestPath, pkg, version string, groups []strin
 		switch {
 		case base == "packages.lock.json":
 			// Modern PackageReference format - use dotnet CLI
-			return fmt.Sprintf("dotnet add package %s --version %s", pkg, version), "run dotnet restore afterwards", true
+			return commandResult{command: fmt.Sprintf("dotnet add package %s --version %s", pkg, version), followUp: "dotnet restore", executable: true}
 		case base == "packages.config":
 			// Legacy packages.config format
-			return fmt.Sprintf("Update-Package %s -Version %s", pkg, version), "run in Package Manager Console", true
+			return commandResult{command: fmt.Sprintf("Update-Package %s -Version %s", pkg, version), hint: "run in Package Manager Console", executable: true}
 		case strings.HasSuffix(base, ".csproj") || strings.HasSuffix(base, ".fsproj") || strings.HasSuffix(base, ".vbproj"):
-			return fmt.Sprintf("dotnet add package %s --version %s", pkg, version), "", true
+			return commandResult{command: fmt.Sprintf("dotnet add package %s --version %s", pkg, version), executable: true}
 		default:
-			return fmt.Sprintf("dotnet add package %s --version %s", pkg, version), "", true
+			return commandResult{command: fmt.Sprintf("dotnet add package %s --version %s", pkg, version), executable: true}
 		}
 
 	// Elixir/Hex
@@ -393,11 +411,11 @@ func recommendCommand(manager, manifestPath, pkg, version string, groups []strin
 		base := strings.ToLower(path.Base(manifestPath))
 		switch {
 		case base == "mix.lock":
-			return fmt.Sprintf("mix deps.update %s", pkg), "ensure mix.exs has correct version constraint", true
+			return commandResult{command: fmt.Sprintf("mix deps.update %s", pkg), hint: "ensure mix.exs has correct version constraint", executable: true}
 		case base == "mix.exs":
-			return fmt.Sprintf("Update %s to ~> %s in mix.exs", pkg, version), "run mix deps.get afterwards", false
+			return commandResult{command: fmt.Sprintf("Update %s to ~> %s in mix.exs", pkg, version), followUp: "mix deps.get", executable: false}
 		default:
-			return fmt.Sprintf("mix deps.update %s", pkg), "", true
+			return commandResult{command: fmt.Sprintf("mix deps.update %s", pkg), executable: true}
 		}
 
 	// Dart/Flutter/Pub
@@ -405,11 +423,11 @@ func recommendCommand(manager, manifestPath, pkg, version string, groups []strin
 		base := strings.ToLower(path.Base(manifestPath))
 		switch {
 		case base == "pubspec.lock":
-			return fmt.Sprintf("dart pub upgrade %s", pkg), "ensure pubspec.yaml has correct version constraint", true
+			return commandResult{command: fmt.Sprintf("dart pub upgrade %s", pkg), hint: "ensure pubspec.yaml has correct version constraint", executable: true}
 		case base == "pubspec.yaml":
-			return fmt.Sprintf("Update %s to ^%s in pubspec.yaml", pkg, version), "run dart pub get afterwards", false
+			return commandResult{command: fmt.Sprintf("Update %s to ^%s in pubspec.yaml", pkg, version), followUp: "dart pub get", executable: false}
 		default:
-			return fmt.Sprintf("dart pub upgrade %s", pkg), "", true
+			return commandResult{command: fmt.Sprintf("dart pub upgrade %s", pkg), executable: true}
 		}
 
 	// Swift/CocoaPods
@@ -417,32 +435,32 @@ func recommendCommand(manager, manifestPath, pkg, version string, groups []strin
 		base := strings.ToLower(path.Base(manifestPath))
 		switch {
 		case base == "podfile.lock":
-			return fmt.Sprintf("pod update %s", pkg), "", true
+			return commandResult{command: fmt.Sprintf("pod update %s", pkg), executable: true}
 		case base == "podfile":
-			return fmt.Sprintf("Update %s to ~> %s in Podfile", pkg, version), "run pod install afterwards", false
+			return commandResult{command: fmt.Sprintf("Update %s to ~> %s in Podfile", pkg, version), followUp: "pod install", executable: false}
 		default:
-			return fmt.Sprintf("pod update %s", pkg), "", true
+			return commandResult{command: fmt.Sprintf("pod update %s", pkg), executable: true}
 		}
 
 	// Swift Package Manager
 	case "swift", "spm":
-		return fmt.Sprintf("Update Package.swift to use %s version %s", pkg, version), "run swift package update afterwards", false
+		return commandResult{command: fmt.Sprintf("Update Package.swift to use %s version %s", pkg, version), followUp: "swift package update", executable: false}
 
 	// Haskell/Cabal
 	case "cabal":
-		return fmt.Sprintf("Update %s to %s in cabal file", pkg, version), "run cabal update && cabal build afterwards", false
+		return commandResult{command: fmt.Sprintf("Update %s to %s in cabal file", pkg, version), followUp: "cabal update && cabal build", executable: false}
 
 	// Haskell/Stack
 	case "stack":
-		return fmt.Sprintf("Update %s to %s in stack.yaml or package.yaml", pkg, version), "run stack build afterwards", false
+		return commandResult{command: fmt.Sprintf("Update %s to %s in stack.yaml or package.yaml", pkg, version), followUp: "stack build", executable: false}
 
 	// R/renv
 	case "renv":
-		return fmt.Sprintf("renv::install(\"%s@%s\")", pkg, version), "", true
+		return commandResult{command: fmt.Sprintf("renv::install(\"%s@%s\")", pkg, version), executable: true}
 
 	// C++/Conan
 	case "conan":
-		return fmt.Sprintf("conan install %s/%s@", pkg, version), "update conanfile.txt or conanfile.py first", true
+		return commandResult{command: fmt.Sprintf("conan install %s/%s@", pkg, version), hint: "update conanfile.txt or conanfile.py first", executable: true}
 
 	// GitHub Actions
 	case "github-actions", "githubactions":
@@ -453,15 +471,15 @@ func recommendCommand(manager, manifestPath, pkg, version string, groups []strin
 		case strings.HasSuffix(base, ".yml") || strings.HasSuffix(base, ".yaml"):
 			// Provide specific version pinning advice
 			if isCommitSHA(version) {
-				return fmt.Sprintf("Action %s/%s is pinned to commit %s", owner, repo, version[:12]), "verify this commit in the action repository", false
+				return commandResult{command: fmt.Sprintf("Action %s/%s is pinned to commit %s", owner, repo, version[:12]), hint: "verify this commit in the action repository", executable: false}
 			}
 			// Return a deputy-internal command that will be handled by the fix applier
 			// Format: deputy:action:update <file> <owner/repo> <new-version>
 			actionRef := fmt.Sprintf("%s/%s", owner, repo)
 			cmd := fmt.Sprintf("deputy:action:update %s %s %s", manifestPath, actionRef, version)
-			return cmd, fmt.Sprintf("consider pinning to full commit SHA: %s/%s@<sha> # %s", owner, repo, version), true
+			return commandResult{command: cmd, hint: fmt.Sprintf("consider pinning to full commit SHA: %s/%s@<sha> # %s", owner, repo, version), executable: true}
 		default:
-			return fmt.Sprintf("Update action %s to %s", pkg, version), "edit workflow YAML file", false
+			return commandResult{command: fmt.Sprintf("Update action %s to %s", pkg, version), hint: "edit workflow YAML file", executable: false}
 		}
 
 	// Dockerfile / Container Images
@@ -471,13 +489,13 @@ func recommendCommand(manager, manifestPath, pkg, version string, groups []strin
 			// Return a deputy-internal command that will be handled by the fix applier
 			// Format: deputy:dockerfile:update <file> <image> <new-version>
 			cmd := fmt.Sprintf("deputy:dockerfile:update %s %s %s", manifestPath, pkg, version)
-			return cmd, "pin to digest for reproducibility: FROM image@sha256:...", true
+			return commandResult{command: cmd, hint: "pin to digest for reproducibility: FROM image@sha256:...", executable: true}
 		}
 		// Generic container image update (e.g., docker-compose.yml, k8s manifests)
-		return fmt.Sprintf("Update container image %s to %s", pkg, version), "", false
+		return commandResult{command: fmt.Sprintf("Update container image %s to %s", pkg, version), executable: false}
 	}
 
-	return "", "", false
+	return commandResult{}
 }
 
 // parseGitHubActionRef extracts owner and repo from action reference.

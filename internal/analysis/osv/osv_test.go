@@ -176,13 +176,14 @@ func Test_QueryRaw_awssdkv1(t *testing.T) {
 	// Verify at least one has a fix version
 	hasFixV1340 := false
 	for _, v := range vulns {
-		if fix := vulnerability.FindBestFixedVersion(v.FixedVersions, "1.33.0"); fix == "v1.34.0" {
+		// FindBestFixedVersion now preserves original format, so check for "1.34.0" (no v prefix)
+		if fix := vulnerability.FindBestFixedVersion(v.FixedVersions, "1.33.0"); fix == "1.34.0" {
 			hasFixV1340 = true
 			break
 		}
 	}
 	if !hasFixV1340 {
-		t.Fatalf("expected at least one vuln with fix v1.34.0")
+		t.Fatalf("expected at least one vuln with fix 1.34.0")
 	}
 }
 

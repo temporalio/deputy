@@ -12,6 +12,7 @@ import (
 
 	"github.com/google/osv-scalibr/extractor"
 	packageurl "github.com/package-url/packageurl-go"
+	dependencyv1 "github.com/picatz/deputy/gen/deputy/dependency/v1"
 	vulnerabilityv1 "github.com/picatz/deputy/gen/deputy/vulnerability/v1"
 	"github.com/picatz/deputy/internal/analysis/osv"
 	"github.com/picatz/deputy/internal/container/image"
@@ -19,6 +20,7 @@ import (
 	"github.com/picatz/deputy/internal/dockerfile"
 	"github.com/picatz/deputy/internal/ecosystem"
 	"github.com/picatz/deputy/internal/inventory"
+	"github.com/picatz/deputy/internal/inventory/manifests"
 	"github.com/picatz/deputy/internal/otel"
 	"github.com/picatz/deputy/internal/policy"
 	"github.com/picatz/deputy/internal/purlx"
@@ -421,6 +423,19 @@ func packagesToInputs(pkgs []*extractor.Package, direct map[string]bool) []osv.P
 			locs[i] = loc
 		}
 
+		// Build manifest references from locations
+		var manifestRefs []dependencyv1.ManifestRef
+		for _, loc := range pkg.Locations {
+			manager, manifestPath, ok := manifests.DetectManager(loc, pkg.PURLType)
+			if !ok {
+				continue
+			}
+			manifestRefs = append(manifestRefs, dependencyv1.ManifestRef{
+				Path:    manifestPath,
+				Manager: manager,
+			})
+		}
+
 		inputs = append(inputs, osv.NewPkgInput(
 			osv.QueryKey{
 				Name:      pkg.Name,
@@ -429,8 +444,9 @@ func packagesToInputs(pkgs []*extractor.Package, direct map[string]bool) []osv.P
 				PURL:      purl.String(),
 			},
 			osv.PackageContext{
-				IsDirect:  isDirect,
-				Locations: locs,
+				IsDirect:     isDirect,
+				Locations:    locs,
+				ManifestRefs: manifestRefs,
 			},
 		))
 	}

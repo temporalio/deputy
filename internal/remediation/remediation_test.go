@@ -32,8 +32,9 @@ func TestCommandsFromConsolidatedGeneratesPlan(t *testing.T) {
 		},
 	}
 	commands, stdlib := CommandsFromConsolidated(cons)
-	if stdlib != "v1.21.0" {
-		t.Fatalf("expected stdlib recommendation v1.21.0, got %q", stdlib)
+	// Version is preserved from FixedVersions, so "1.21.0" stays as-is
+	if stdlib != "1.21.0" {
+		t.Fatalf("expected stdlib recommendation 1.21.0, got %q", stdlib)
 	}
 	if len(commands) != 4 {
 		for _, c := range commands {
@@ -44,7 +45,8 @@ func TestCommandsFromConsolidatedGeneratesPlan(t *testing.T) {
 	assertCommand(t, commands, "go get go@1.21.0", true)
 	assertCommand(t, commands, "go get github.com/acme/lib@v1.1.0", true)
 	assertCommand(t, commands, "go mod tidy", true)
-	assertCommand(t, commands, "Edit vagrant.gemspec to require rexml >= v3.3.9", false)
+	// Version preserved: 3.3.9 without v prefix
+	assertCommand(t, commands, "Edit vagrant.gemspec to require rexml >= 3.3.9", false)
 }
 
 func assertCommand(t *testing.T, commands []Command, want string, expectExecutable bool) {
@@ -111,6 +113,139 @@ func sliceToString(s []string) string {
 		return "empty"
 	}
 	return s[0]
+}
+
+func TestCommandsFromConsolidatedUV(t *testing.T) {
+	cons := []vulnerability.Consolidated{
+		{
+			PrimaryID:     "PYSEC-1",
+			Package:       "urllib3",
+			Version:       "2.0.0",
+			FixedVersions: []string{"2.6.3"},
+			IsDirect:      true,
+			ManifestRefs:  []dependencyv1.ManifestRef{{Manager: "uv", Path: "uv.lock"}},
+		},
+	}
+	commands, _ := CommandsFromConsolidated(cons)
+	if len(commands) == 0 {
+		t.Fatalf("expected at least 1 command for UV remediation, got 0")
+	}
+	found := false
+	for _, c := range commands {
+		t.Logf("command: %s (manager=%s path=%s followUp=%s)", c.Command, c.Manager, c.Path, c.FollowUp)
+		// Version should preserve original format (no "v" prefix for Python)
+		if c.Manager == "uv" && c.Command == `uv add "urllib3>=2.6.3"` {
+			found = true
+			if c.FollowUp != "uv lock" {
+				t.Errorf("expected uv follow-up 'uv lock', got %q", c.FollowUp)
+			}
+		}
+	}
+	if !found {
+		t.Errorf("expected UV command 'uv add \"urllib3>=2.6.3\"' not found in: %v", commands)
+	}
+}
+
+func TestCommandsFromConsolidatedMultiplePythonManagers(t *testing.T) {
+	cons := []vulnerability.Consolidated{
+		{
+			PrimaryID:     "PYSEC-1",
+			Package:       "requests",
+			Version:       "2.25.0",
+			FixedVersions: []string{"2.32.3"},
+			IsDirect:      true,
+			ManifestRefs: []dependencyv1.ManifestRef{
+				{Manager: "pip", Path: "requirements.txt"},
+				{Manager: "poetry", Path: "pyproject.toml"},
+			},
+		},
+	}
+	commands, _ := CommandsFromConsolidated(cons)
+	if len(commands) < 2 {
+		for _, c := range commands {
+			t.Logf("command: %s (manager=%s)", c.Command, c.Manager)
+		}
+		t.Fatalf("expected at least 2 commands for pip and poetry, got %d", len(commands))
+	}
+	var foundPip, foundPoetry bool
+	for _, c := range commands {
+		if c.Manager == "pip" && c.Command == "pip install --upgrade requests==2.32.3" {
+			foundPip = true
+		}
+		if c.Manager == "poetry" && c.Command == "poetry add requests@2.32.3" {
+			foundPoetry = true
+		}
+	}
+	if !foundPip {
+		t.Error("pip command not found")
+	}
+	if !foundPoetry {
+		t.Error("poetry command not found")
+	}
+}
+
+func TestCommandsFromConsolidatedGoToolchain(t *testing.T) {
+	// Test that both "stdlib" and "toolchain" package names trigger Go upgrade
+	// OSV uses "stdlib" for standard library vulns and "toolchain" for go command vulns
+	cons := []vulnerability.Consolidated{
+		{
+			PrimaryID:     "GO-2025-1234",
+			Package:       "toolchain", // Go command vulnerability
+			Version:       "1.24.0",
+			FixedVersions: []string{"1.24.9"},
+		},
+		{
+			PrimaryID:     "GO-2025-5678",
+			Package:       "stdlib", // Standard library vulnerability
+			Version:       "1.24.0",
+			FixedVersions: []string{"1.24.8"},
+		},
+	}
+	commands, stdlib := CommandsFromConsolidated(cons)
+
+	// Should pick the highest version needed (1.24.9 > 1.24.8)
+	if stdlib != "1.24.9" {
+		t.Errorf("expected stdlib recommendation 1.24.9, got %q", stdlib)
+	}
+
+	// Should generate exactly one Go toolchain upgrade command
+	found := false
+	for _, c := range commands {
+		t.Logf("command: %s (manager=%s)", c.Command, c.Manager)
+		if c.Command == "go get go@1.24.9" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("expected 'go get go@1.24.9' command for toolchain/stdlib upgrade")
+	}
+}
+
+func TestCommandsFromConsolidatedGoToolchainOnly(t *testing.T) {
+	// Test toolchain-only vulnerability (without stdlib)
+	cons := []vulnerability.Consolidated{
+		{
+			PrimaryID:     "GO-2025-0001",
+			Package:       "toolchain",
+			Version:       "1.23.0",
+			FixedVersions: []string{"1.23.4"},
+		},
+	}
+	commands, stdlib := CommandsFromConsolidated(cons)
+
+	if stdlib != "1.23.4" {
+		t.Errorf("expected stdlib recommendation 1.23.4 for toolchain vuln, got %q", stdlib)
+	}
+
+	found := false
+	for _, c := range commands {
+		if c.Command == "go get go@1.23.4" {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("expected go get command for toolchain vulnerability")
+	}
 }
 
 func TestIsContainerfilePath(t *testing.T) {

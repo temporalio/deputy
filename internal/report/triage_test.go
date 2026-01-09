@@ -20,8 +20,8 @@ func TestBuildTriageReportAggregatesPackages(t *testing.T) {
 	if report.TopPackages[0].Package != "pkg/b" {
 		t.Fatalf("expected pkg/b first, got %s", report.TopPackages[0].Package)
 	}
-	if report.TopPackages[0].FixVersion != "v2.1.0" {
-		t.Fatalf("expected pkg/b fix v2.1.0, got %s", report.TopPackages[0].FixVersion)
+	if report.TopPackages[0].FixVersion != "2.1.0" {
+		t.Fatalf("expected pkg/b fix 2.1.0, got %s", report.TopPackages[0].FixVersion)
 	}
 	if len(report.TopPackages[0].SampleIDs) != 1 {
 		t.Fatalf("expected sample id for pkg/b")

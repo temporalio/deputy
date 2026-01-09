@@ -93,11 +93,11 @@ func scanWorkspace(ctx context.Context, ws workspace.FS, opts ScanOptions) ([]*e
 	}
 	if scanErr := summarizeScanFailures(results); scanErr != nil {
 		if len(pkgs) > 0 {
-			return pkgs, scanErr
+			return deduplicatePackages(pkgs), scanErr
 		}
 		return nil, scanErr
 	}
-	return pkgs, nil
+	return deduplicatePackages(pkgs), nil
 }
 
 // defaultCapabilities returns the default capabilities for the current environment.
@@ -362,4 +362,87 @@ func DefaultScanner() func(ctx context.Context, ws workspace.FS, ecosystems []st
 	return func(ctx context.Context, ws workspace.FS, ecosystems []string) ([]*extractor.Package, error) {
 		return ScanPackagesWorking(ctx, ws, ScanOptions{Ecosystems: ecosystems})
 	}
+}
+
+// deduplicatePackages collapses packages with identical PURLs, merging their locations.
+// This handles cases where multiple extractors discover the same package (e.g., go.mod and go.sum).
+func deduplicatePackages(pkgs []*extractor.Package) []*extractor.Package {
+	if len(pkgs) == 0 {
+		return pkgs
+	}
+
+	// Use PURL as the deduplication key since it uniquely identifies a package
+	seen := make(map[string]*extractor.Package, len(pkgs))
+	for _, pkg := range pkgs {
+		if pkg == nil {
+			continue
+		}
+		purl := pkg.PURL()
+		if purl == nil {
+			// Keep packages without PURLs as-is (shouldn't happen in practice)
+			continue
+		}
+		key := purl.String()
+		if existing, ok := seen[key]; ok {
+			// Merge locations from duplicate
+			existing.Locations = mergeLocations(existing.Locations, pkg.Locations)
+			// Merge licenses (take non-empty)
+			if len(existing.Licenses) == 0 && len(pkg.Licenses) > 0 {
+				existing.Licenses = pkg.Licenses
+			}
+		} else {
+			seen[key] = pkg
+		}
+	}
+
+	out := make([]*extractor.Package, 0, len(seen))
+	for _, pkg := range seen {
+		out = append(out, pkg)
+	}
+
+	// Sort for deterministic output - map iteration order is randomized in Go.
+	// This ensures consistent diff results regardless of iteration order.
+	slices.SortFunc(out, func(a, b *extractor.Package) int {
+		// Primary sort by PURL string for deterministic ordering
+		aPURL, bPURL := a.PURL(), b.PURL()
+		if aPURL != nil && bPURL != nil {
+			return strings.Compare(aPURL.String(), bPURL.String())
+		}
+		// Fallback to name if PURL is nil
+		if n := strings.Compare(a.Name, b.Name); n != 0 {
+			return n
+		}
+		return strings.Compare(a.Version, b.Version)
+	})
+
+	return out
+}
+
+// mergeLocations combines two location slices, removing duplicates.
+// The result is sorted for deterministic output.
+func mergeLocations(a, b []string) []string {
+	if len(b) == 0 {
+		if len(a) > 1 {
+			slices.Sort(a)
+		}
+		return a
+	}
+	if len(a) == 0 {
+		if len(b) > 1 {
+			slices.Sort(b)
+		}
+		return b
+	}
+	seen := make(map[string]struct{}, len(a)+len(b))
+	for _, loc := range a {
+		seen[loc] = struct{}{}
+	}
+	for _, loc := range b {
+		if _, ok := seen[loc]; !ok {
+			a = append(a, loc)
+			seen[loc] = struct{}{}
+		}
+	}
+	slices.Sort(a)
+	return a
 }
