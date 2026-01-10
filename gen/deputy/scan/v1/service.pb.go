@@ -1119,8 +1119,8 @@ type ImageMetadata struct {
 	LayerCount int32 `protobuf:"varint,3,opt,name=layer_count,json=layerCount,proto3" json:"layer_count,omitempty"`
 	// Size is total size in bytes.
 	Size int64 `protobuf:"varint,4,opt,name=size,proto3" json:"size,omitempty"`
-	// Created is the creation timestamp (Unix).
-	Created int64 `protobuf:"varint,5,opt,name=created,proto3" json:"created,omitempty"`
+	// Created is when the image was created.
+	Created *timestamppb.Timestamp `protobuf:"bytes,5,opt,name=created,proto3" json:"created,omitempty"`
 	// Digest is the image digest.
 	Digest        string `protobuf:"bytes,6,opt,name=digest,proto3" json:"digest,omitempty"`
 	unknownFields protoimpl.UnknownFields
@@ -1185,11 +1185,11 @@ func (x *ImageMetadata) GetSize() int64 {
 	return 0
 }
 
-func (x *ImageMetadata) GetCreated() int64 {
+func (x *ImageMetadata) GetCreated() *timestamppb.Timestamp {
 	if x != nil {
 		return x.Created
 	}
-	return 0
+	return nil
 }
 
 func (x *ImageMetadata) GetDigest() string {
@@ -1204,8 +1204,8 @@ type HistoryEntry struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// CreatedBy is the command that created this layer.
 	CreatedBy string `protobuf:"bytes,1,opt,name=created_by,json=createdBy,proto3" json:"created_by,omitempty"`
-	// Created is the creation timestamp (Unix).
-	Created int64 `protobuf:"varint,2,opt,name=created,proto3" json:"created,omitempty"`
+	// Created is when this layer was created.
+	Created *timestamppb.Timestamp `protobuf:"bytes,2,opt,name=created,proto3" json:"created,omitempty"`
 	// EmptyLayer indicates this is a metadata-only layer.
 	EmptyLayer    bool `protobuf:"varint,3,opt,name=empty_layer,json=emptyLayer,proto3" json:"empty_layer,omitempty"`
 	unknownFields protoimpl.UnknownFields
@@ -1249,11 +1249,11 @@ func (x *HistoryEntry) GetCreatedBy() string {
 	return ""
 }
 
-func (x *HistoryEntry) GetCreated() int64 {
+func (x *HistoryEntry) GetCreated() *timestamppb.Timestamp {
 	if x != nil {
 		return x.Created
 	}
-	return 0
+	return nil
 }
 
 func (x *HistoryEntry) GetEmptyLayer() bool {
@@ -1436,19 +1436,19 @@ const file_deputy_scan_v1_service_proto_rawDesc = "" +
 	"\x04test\x18\x01 \x03(\tR\x04test\x12\x1a\n" +
 	"\binterval\x18\x02 \x01(\tR\binterval\x12\x18\n" +
 	"\atimeout\x18\x03 \x01(\tR\atimeout\x12\x18\n" +
-	"\aretries\x18\x04 \x01(\x05R\aretries\"\xaa\x01\n" +
+	"\aretries\x18\x04 \x01(\x05R\aretries\"\xc6\x01\n" +
 	"\rImageMetadata\x12\"\n" +
 	"\farchitecture\x18\x01 \x01(\tR\farchitecture\x12\x0e\n" +
 	"\x02os\x18\x02 \x01(\tR\x02os\x12\x1f\n" +
 	"\vlayer_count\x18\x03 \x01(\x05R\n" +
 	"layerCount\x12\x12\n" +
-	"\x04size\x18\x04 \x01(\x03R\x04size\x12\x18\n" +
-	"\acreated\x18\x05 \x01(\x03R\acreated\x12\x16\n" +
-	"\x06digest\x18\x06 \x01(\tR\x06digest\"h\n" +
+	"\x04size\x18\x04 \x01(\x03R\x04size\x124\n" +
+	"\acreated\x18\x05 \x01(\v2\x1a.google.protobuf.TimestampR\acreated\x12\x16\n" +
+	"\x06digest\x18\x06 \x01(\tR\x06digest\"\x84\x01\n" +
 	"\fHistoryEntry\x12\x1d\n" +
 	"\n" +
-	"created_by\x18\x01 \x01(\tR\tcreatedBy\x12\x18\n" +
-	"\acreated\x18\x02 \x01(\x03R\acreated\x12\x1f\n" +
+	"created_by\x18\x01 \x01(\tR\tcreatedBy\x124\n" +
+	"\acreated\x18\x02 \x01(\v2\x1a.google.protobuf.TimestampR\acreated\x12\x1f\n" +
 	"\vempty_layer\x18\x03 \x01(\bR\n" +
 	"emptyLayer\"\xb4\x01\n" +
 	"\x0fDependencyGraph\x12+\n" +
@@ -1550,19 +1550,21 @@ var file_deputy_scan_v1_service_proto_depIdxs = []int32{
 	13, // 24: deputy.scan.v1.ImageInfo.history:type_name -> deputy.scan.v1.HistoryEntry
 	16, // 25: deputy.scan.v1.ImageConfig.labels:type_name -> deputy.scan.v1.ImageConfig.LabelsEntry
 	11, // 26: deputy.scan.v1.ImageConfig.healthcheck:type_name -> deputy.scan.v1.Healthcheck
-	27, // 27: deputy.scan.v1.DependencyGraph.nodes:type_name -> deputy.graph.v1.Node
-	28, // 28: deputy.scan.v1.DependencyGraph.edges:type_name -> deputy.graph.v1.Edge
-	29, // 29: deputy.scan.v1.DependencyGraph.stats:type_name -> deputy.graph.v1.GraphStats
-	30, // 30: deputy.scan.v1.ScanResponse.AdvisoriesEntry.value:type_name -> deputy.vulnerability.v1.Advisory
-	1,  // 31: deputy.scan.v1.ScanService.Scan:input_type -> deputy.scan.v1.ScanRequest
-	2,  // 32: deputy.scan.v1.ScanService.StreamScan:input_type -> deputy.scan.v1.StreamScanRequest
-	7,  // 33: deputy.scan.v1.ScanService.Scan:output_type -> deputy.scan.v1.ScanResponse
-	8,  // 34: deputy.scan.v1.ScanService.StreamScan:output_type -> deputy.scan.v1.ScanProgress
-	33, // [33:35] is the sub-list for method output_type
-	31, // [31:33] is the sub-list for method input_type
-	31, // [31:31] is the sub-list for extension type_name
-	31, // [31:31] is the sub-list for extension extendee
-	0,  // [0:31] is the sub-list for field type_name
+	17, // 27: deputy.scan.v1.ImageMetadata.created:type_name -> google.protobuf.Timestamp
+	17, // 28: deputy.scan.v1.HistoryEntry.created:type_name -> google.protobuf.Timestamp
+	27, // 29: deputy.scan.v1.DependencyGraph.nodes:type_name -> deputy.graph.v1.Node
+	28, // 30: deputy.scan.v1.DependencyGraph.edges:type_name -> deputy.graph.v1.Edge
+	29, // 31: deputy.scan.v1.DependencyGraph.stats:type_name -> deputy.graph.v1.GraphStats
+	30, // 32: deputy.scan.v1.ScanResponse.AdvisoriesEntry.value:type_name -> deputy.vulnerability.v1.Advisory
+	1,  // 33: deputy.scan.v1.ScanService.Scan:input_type -> deputy.scan.v1.ScanRequest
+	2,  // 34: deputy.scan.v1.ScanService.StreamScan:input_type -> deputy.scan.v1.StreamScanRequest
+	7,  // 35: deputy.scan.v1.ScanService.Scan:output_type -> deputy.scan.v1.ScanResponse
+	8,  // 36: deputy.scan.v1.ScanService.StreamScan:output_type -> deputy.scan.v1.ScanProgress
+	35, // [35:37] is the sub-list for method output_type
+	33, // [33:35] is the sub-list for method input_type
+	33, // [33:33] is the sub-list for extension type_name
+	33, // [33:33] is the sub-list for extension extendee
+	0,  // [0:33] is the sub-list for field type_name
 }
 
 func init() { file_deputy_scan_v1_service_proto_init() }

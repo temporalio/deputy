@@ -170,7 +170,7 @@ func TestNuGetResolver_ResolveEdges_PackagesConfig(t *testing.T) {
 	// All should be marked as direct
 	for node := range g.Nodes() {
 		if !node.Direct {
-			t.Errorf("Expected %s to be marked as direct in packages.config", node.PURL)
+			t.Errorf("Expected %s to be marked as direct in packages.config", node.Purl)
 		}
 	}
 }

@@ -239,8 +239,8 @@ func (r *NpmResolver) processPackageLock(ctx context.Context, g *Graph, files Fi
 		rootPURL = npmPkgToPURL(rootName, lock.Version)
 		if g.Node(rootPURL) == nil {
 			g.AddNode(&Node{
-				PURL:      rootPURL,
-				Name:      rootName,
+				Purl:      rootPURL,
+			Name:      rootName,
 				Version:   lock.Version,
 				Ecosystem: "npm",
 				Direct:    true,
@@ -322,7 +322,7 @@ func (r *NpmResolver) resolveFromPackages(g *Graph, packages map[string]packageL
 		if node == nil {
 			// Create new node
 			g.AddNode(&Node{
-				PURL:      purl,
+				Purl:      purl,
 				Name:      name,
 				Version:   entry.Version,
 				Ecosystem: "npm",
@@ -336,8 +336,8 @@ func (r *NpmResolver) resolveFromPackages(g *Graph, packages map[string]packageL
 			// Update existing node's direct status
 			if isDirect {
 				node.Direct = true
-				if !containsRoot(g.roots, node.PURL) {
-					g.roots = append(g.roots, node.PURL)
+				if !containsRoot(g.roots, node.Purl) {
+					g.roots = append(g.roots, node.Purl)
 				}
 			}
 		}
@@ -388,7 +388,7 @@ func (r *NpmResolver) resolveFromPackages(g *Graph, packages map[string]packageL
 				continue
 			}
 
-			edgeKey := parentPURL + "->" + childNode.PURL
+			edgeKey := parentPURL + "->" + childNode.Purl
 			if !edgeSet[edgeKey] {
 				scope := ScopeRuntime
 				if entry.Dev {
@@ -399,7 +399,7 @@ func (r *NpmResolver) resolveFromPackages(g *Graph, packages map[string]packageL
 
 				g.AddEdge(&Edge{
 					From:       parentPURL,
-					To:         childNode.PURL,
+					To:         childNode.Purl,
 					Constraint: depVersion,
 					Scope:      scope,
 				})
@@ -453,7 +453,7 @@ func (r *NpmResolver) resolveFromLegacyDeps(g *Graph, deps map[string]legacyDep,
 		}
 		if node == nil {
 			node = &Node{
-				PURL:      purl,
+				Purl:      purl,
 				Name:      name,
 				Version:   dep.Version,
 				Ecosystem: "npm",
@@ -499,7 +499,7 @@ func (r *NpmResolver) processLegacyDepTree(g *Graph, parent *legacyDep, parentPU
 		}
 		if childNode == nil {
 			childNode = &Node{
-				PURL:      childPURL,
+				Purl:      childPURL,
 				Name:      name,
 				Version:   version,
 				Ecosystem: "npm",
@@ -508,11 +508,11 @@ func (r *NpmResolver) processLegacyDepTree(g *Graph, parent *legacyDep, parentPU
 			g.AddNode(childNode)
 		}
 
-		edgeKey := parentPURL + "->" + childNode.PURL
+		edgeKey := parentPURL + "->" + childNode.Purl
 		if !edgeSet[edgeKey] {
 			g.AddEdge(&Edge{
 				From:  parentPURL,
-				To:    childNode.PURL,
+				To:    childNode.Purl,
 				Scope: ScopeRuntime,
 			})
 			edgeSet[edgeKey] = true
@@ -526,7 +526,7 @@ func (r *NpmResolver) processLegacyDepTree(g *Graph, parent *legacyDep, parentPU
 		childNode := g.Node(childPURL)
 		if childNode == nil {
 			childNode = &Node{
-				PURL:      childPURL,
+				Purl:      childPURL,
 				Name:      name,
 				Version:   nested.Version,
 				Ecosystem: "npm",
@@ -686,7 +686,7 @@ func (r *NpmResolver) processYarnLock(ctx context.Context, g *Graph, files FileR
 		rootPURL = npmPkgToPURL(rootName, rootVersion)
 		if g.Node(rootPURL) == nil {
 			g.AddNode(&Node{
-				PURL:      rootPURL,
+				Purl:      rootPURL,
 				Name:      rootName,
 				Version:   rootVersion,
 				Ecosystem: "npm",
@@ -714,7 +714,7 @@ func (r *NpmResolver) processYarnLock(ctx context.Context, g *Graph, files FileR
 			if node == nil {
 				isDirect := rootDeps[entry.name]
 				g.AddNode(&Node{
-					PURL:      purl,
+					Purl:      purl,
 					Name:      entry.name,
 					Version:   entry.version,
 					Ecosystem: "npm",
@@ -726,8 +726,8 @@ func (r *NpmResolver) processYarnLock(ctx context.Context, g *Graph, files FileR
 				}
 			} else if rootDeps[entry.name] {
 				node.Direct = true
-				if !containsRoot(g.roots, node.PURL) {
-					g.roots = append(g.roots, node.PURL)
+				if !containsRoot(g.roots, node.Purl) {
+					g.roots = append(g.roots, node.Purl)
 				}
 			}
 		}
@@ -769,7 +769,7 @@ func (r *NpmResolver) processYarnLock(ctx context.Context, g *Graph, files FileR
 			if !ok {
 				// Try to find in graph by name
 				if node := r.findNodeByName(g, depName); node != nil {
-					childPURL = node.PURL
+					childPURL = node.Purl
 				} else {
 					continue
 				}
@@ -988,7 +988,7 @@ func (r *NpmResolver) processPnpmLock(ctx context.Context, g *Graph, files FileR
 		rootPURL = npmPkgToPURL(rootName, rootVersion)
 		if g.Node(rootPURL) == nil {
 			g.AddNode(&Node{
-				PURL:      rootPURL,
+				Purl:      rootPURL,
 				Name:      rootName,
 				Version:   rootVersion,
 				Ecosystem: "npm",
@@ -1030,7 +1030,7 @@ func (r *NpmResolver) processPnpmLock(ctx context.Context, g *Graph, files FileR
 		if node == nil {
 			isDirect := rootDeps[name]
 			g.AddNode(&Node{
-				PURL:      purl,
+				Purl:      purl,
 				Name:      name,
 				Version:   version,
 				Ecosystem: "npm",
@@ -1042,8 +1042,8 @@ func (r *NpmResolver) processPnpmLock(ctx context.Context, g *Graph, files FileR
 			}
 		} else if rootDeps[name] {
 			node.Direct = true
-			if !containsRoot(g.roots, node.PURL) {
-				g.roots = append(g.roots, node.PURL)
+			if !containsRoot(g.roots, node.Purl) {
+				g.roots = append(g.roots, node.Purl)
 			}
 		}
 	}
@@ -1094,7 +1094,7 @@ func (r *NpmResolver) processPnpmLock(ctx context.Context, g *Graph, files FileR
 			if childPURL == "" {
 				// Try graph lookup
 				if node := r.findNodeByName(g, depName); node != nil {
-					childPURL = node.PURL
+					childPURL = node.Purl
 				} else {
 					continue
 				}

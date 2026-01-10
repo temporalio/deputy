@@ -266,9 +266,10 @@ func TestServerAuthIssuerValidation(t *testing.T) {
 		if !ok {
 			t.Fatalf("expected connect.Error, got %T", err)
 		}
-		// Invalid issuer should return PermissionDenied (403), not Unauthenticated (401)
-		if connectErr.Code() != connect.CodePermissionDenied {
-			t.Errorf("expected CodePermissionDenied, got %v", connectErr.Code())
+		// Invalid issuer returns Unauthenticated (401) - token is invalid
+		// This is correct HTTP semantics: 401 = "I don't know who you are"
+		if connectErr.Code() != connect.CodeUnauthenticated {
+			t.Errorf("expected CodeUnauthenticated, got %v", connectErr.Code())
 		}
 	})
 }
@@ -328,8 +329,10 @@ func TestServerAuthAudienceValidation(t *testing.T) {
 		if !ok {
 			t.Fatalf("expected connect.Error, got %T", err)
 		}
-		if connectErr.Code() != connect.CodePermissionDenied {
-			t.Errorf("expected CodePermissionDenied, got %v", connectErr.Code())
+		// Invalid audience returns Unauthenticated (401) - token is invalid
+		// This is correct HTTP semantics: 401 = "I don't know who you are"
+		if connectErr.Code() != connect.CodeUnauthenticated {
+			t.Errorf("expected CodeUnauthenticated, got %v", connectErr.Code())
 		}
 	})
 }
@@ -1035,9 +1038,10 @@ policies:
 		if !ok {
 			t.Fatalf("expected connect.Error, got %T", err)
 		}
-		// Wrong issuer returns PermissionDenied (403), not Unauthenticated (401)
-		if connectErr.Code() != connect.CodePermissionDenied {
-			t.Errorf("expected CodePermissionDenied for wrong issuer, got %v", connectErr.Code())
+		// Wrong issuer returns Unauthenticated (401) - token is invalid
+		// This is correct HTTP semantics: 401 = "I don't know who you are"
+		if connectErr.Code() != connect.CodeUnauthenticated {
+			t.Errorf("expected CodeUnauthenticated for wrong issuer, got %v", connectErr.Code())
 		}
 	})
 

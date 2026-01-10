@@ -10,12 +10,10 @@ import (
 
 	"connectrpc.com/connect"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
-	"github.com/ossf/osv-schema/bindings/go/osvschema"
 	listv1 "github.com/picatz/deputy/gen/deputy/list/v1"
 	scanv1 "github.com/picatz/deputy/gen/deputy/scan/v1"
 	targetv1 "github.com/picatz/deputy/gen/deputy/target/v1"
 	vulnerabilityv1 "github.com/picatz/deputy/gen/deputy/vulnerability/v1"
-	"github.com/picatz/deputy/internal/analysis/osv"
 	"github.com/picatz/deputy/internal/dependency/graph"
 	"github.com/picatz/deputy/internal/logs"
 	"github.com/picatz/deputy/internal/otel"
@@ -61,7 +59,6 @@ func DefaultToolTimeouts() ToolTimeouts {
 // Server wraps the MCP server with Deputy-specific tools.
 type Server struct {
 	server       *mcp.Server
-	osv          osv.Client
 	clients      *services.Clients
 	toolNames    []string     // registered tool names for /info endpoint
 	toolTimeouts ToolTimeouts // configurable timeouts for tool operations
@@ -69,13 +66,6 @@ type Server struct {
 
 // ServerOption configures a Server.
 type ServerOption func(*Server)
-
-// WithOSVClient configures a custom OSV client for the server.
-func WithOSVClient(client osv.Client) ServerOption {
-	return func(s *Server) {
-		s.osv = client
-	}
-}
 
 // WithClients configures custom clients for the server.
 func WithClients(c *services.Clients) ServerOption {
@@ -114,7 +104,6 @@ func NewServer(opts ...ServerOption) *Server {
 	server := mcp.NewServer(impl, nil)
 	s := &Server{
 		server:       server,
-		osv:          osv.NewClient(),
 		toolTimeouts: DefaultToolTimeouts(),
 	}
 
@@ -443,7 +432,7 @@ type VulnExplanation struct {
 	Summary       string   `json:"summary"`
 	Details       string   `json:"details,omitempty"`
 	Severity      string   `json:"severity"`
-	FixedVersions []string `json:"fixed_versions,omitempty"`
+	FixedVersions []string `json:"fixedVersions,omitempty"`
 	References    []string `json:"references,omitempty"`
 	Published     string   `json:"published,omitempty"`
 	Modified      string   `json:"modified,omitempty"`
@@ -484,18 +473,18 @@ type ScanDirectoryInput struct {
 
 // DirectoryScanResult is the output for directory scanning.
 type DirectoryScanResult struct {
-	Path              string            `json:"path"`
-	PackagesScanned   int               `json:"packages_scanned"`
-	VulnerabilitiesBy map[string]int    `json:"vulnerabilities_by_severity"`
-	Vulnerabilities   []VulnExplanation `json:"vulnerabilities"`
-	Clean             bool              `json:"clean"`
-	ScanTime          string            `json:"scan_time"`
+	Path                      string            `json:"path"`
+	PackagesScanned           int               `json:"packagesScanned"`
+	VulnerabilitiesBySeverity map[string]int    `json:"vulnerabilitiesBySeverity"`
+	Vulnerabilities           []VulnExplanation `json:"vulnerabilities"`
+	Clean                     bool              `json:"clean"`
+	ScanTime                  string            `json:"scanTime"`
 }
 
 // ListDependenciesInput is the input for the list_dependencies tool.
 type ListDependenciesInput struct {
 	Path       string   `json:"path" jsonschema:"Path to the directory to analyze"`
-	DirectOnly bool     `json:"direct_only,omitempty" jsonschema:"If true, only list direct dependencies"`
+	DirectOnly bool     `json:"directOnly,omitempty" jsonschema:"If true, only list direct dependencies"`
 	Ecosystems []string `json:"ecosystems,omitempty" jsonschema:"Optional list of ecosystems to include"`
 }
 
@@ -523,7 +512,7 @@ type GenerateSBOMInput struct {
 	Path           string   `json:"path" jsonschema:"Path to the directory or repository"`
 	Ref            string   `json:"ref,omitempty" jsonschema:"Git reference (branch, tag, commit). Defaults to HEAD."`
 	Format         string   `json:"format,omitempty" jsonschema:"Output format: cyclonedx-json, spdx-json, or protobom-json. Defaults to cyclonedx-json."`
-	EnrichLicenses bool     `json:"enrich_licenses,omitempty" jsonschema:"Enrich SBOM with license information from deps.dev"`
+	EnrichLicenses bool     `json:"enrichLicenses,omitempty" jsonschema:"Enrich SBOM with license information from deps.dev"`
 	Ecosystems     []string `json:"ecosystems,omitempty" jsonschema:"Optional list of ecosystems to include"`
 }
 
@@ -549,7 +538,7 @@ type RemediationCommand struct {
 	Command    string   `json:"command"`
 	Path       string   `json:"path,omitempty"`
 	Hint       string   `json:"hint,omitempty"`
-	IsDirect   bool     `json:"is_direct"`
+	IsDirect   bool     `json:"isDirect"`
 	Executable bool     `json:"executable"`
 	Groups     []string `json:"groups,omitempty"`
 }
@@ -557,18 +546,18 @@ type RemediationCommand struct {
 // GetRemediationResult is the output for the get_remediation tool.
 type GetRemediationResult struct {
 	Path                  string               `json:"path"`
-	VulnerabilitiesFound  int                  `json:"vulnerabilities_found"`
-	RemediableCount       int                  `json:"remediable_count"`
-	UnfixableCount        int                  `json:"unfixable_count"`
+	VulnerabilitiesFound  int                  `json:"vulnerabilitiesFound"`
+	RemediableCount       int                  `json:"remediableCount"`
+	UnfixableCount        int                  `json:"unfixableCount"`
 	Commands              []RemediationCommand `json:"commands"`
-	StdlibUpgrade         string               `json:"stdlib_upgrade,omitempty"`
-	UnfixableVulns        []string             `json:"unfixable_vulns,omitempty"`
+	StdlibUpgrade         string               `json:"stdlibUpgrade,omitempty"`
+	UnfixableVulnerabilities []string          `json:"unfixableVulnerabilities,omitempty"`
 }
 
 // AnalyzeGraphInput is the input for the analyze_dependency_graph tool.
 type AnalyzeGraphInput struct {
 	Path       string   `json:"path" jsonschema:"Path to the directory to analyze"`
-	TargetPURL string   `json:"target_purl,omitempty" jsonschema:"Optional PURL to find paths to (e.g., pkg:npm/lodash@4.17.15)"`
+	TargetPURL string   `json:"targetPurl,omitempty" jsonschema:"Optional PURL to find paths to (e.g., pkg:npm/lodash@4.17.15)"`
 	Ecosystems []string `json:"ecosystems,omitempty" jsonschema:"Optional list of ecosystems to include"`
 }
 
@@ -580,11 +569,11 @@ type GraphPath struct {
 
 // GraphStats contains statistics about the dependency graph.
 type GraphStats struct {
-	TotalNodes      int            `json:"total_nodes"`
-	DirectNodes     int            `json:"direct_nodes"`
-	TransitiveNodes int            `json:"transitive_nodes"`
-	MaxDepth        int            `json:"max_depth"`
-	VulnerableNodes int            `json:"vulnerable_nodes"`
+	TotalNodes      int            `json:"totalNodes"`
+	DirectNodes     int            `json:"directNodes"`
+	TransitiveNodes int            `json:"transitiveNodes"`
+	MaxDepth        int            `json:"maxDepth"`
+	VulnerableNodes int            `json:"vulnerableNodes"`
 	Ecosystems      map[string]int `json:"ecosystems"`
 }
 
@@ -592,15 +581,15 @@ type GraphStats struct {
 type AnalyzeGraphResult struct {
 	Path            string      `json:"path"`
 	Stats           GraphStats  `json:"stats"`
-	VulnerablePaths []GraphPath `json:"vulnerable_paths,omitempty"`
-	PathsToTarget   []GraphPath `json:"paths_to_target,omitempty"`
+	VulnerablePaths []GraphPath `json:"vulnerablePaths,omitempty"`
+	PathsToTarget   []GraphPath `json:"pathsToTarget,omitempty"`
 }
 
 // GraphWhyInput is the input for the graph_why tool.
 type GraphWhyInput struct {
 	Path       string   `json:"path" jsonschema:"Path to the directory to analyze"`
 	Package    string   `json:"package" jsonschema:"Package name to trace (e.g., lodash, golang.org/x/crypto)"`
-	ShowAll    bool     `json:"show_all,omitempty" jsonschema:"Show all dependency paths, not just the shortest"`
+	ShowAll    bool     `json:"showAll,omitempty" jsonschema:"Show all dependency paths, not just the shortest"`
 	Ecosystems []string `json:"ecosystems,omitempty" jsonschema:"Optional list of ecosystems to include"`
 }
 
@@ -612,7 +601,7 @@ type GraphWhyResult struct {
 	Direct     bool        `json:"direct"`
 	Found      bool        `json:"found"`
 	Paths      []GraphPath `json:"paths,omitempty"`
-	PathCount  int         `json:"path_count"`
+	PathCount  int         `json:"pathCount"`
 	Message    string      `json:"message,omitempty"`
 }
 
@@ -630,8 +619,8 @@ type GraphNeedsResult struct {
 	PURL           string           `json:"purl,omitempty"`
 	Found          bool             `json:"found"`
 	Dependents     []DependencyInfo `json:"dependents"`
-	DirectCount    int              `json:"direct_count"`
-	TransitiveCount int             `json:"transitive_count"`
+	DirectCount    int              `json:"directCount"`
+	TransitiveCount int             `json:"transitiveCount"`
 }
 
 // TriageInput is the input for the triage_vulnerabilities tool.
@@ -646,28 +635,28 @@ type TriagedVuln struct {
 	Severity      string   `json:"severity"`
 	Package       string   `json:"package"`
 	Version       string   `json:"version"`
-	IsDirect      bool     `json:"is_direct"`
-	HasFix        bool     `json:"has_fix"`
-	FixedVersions []string `json:"fixed_versions,omitempty"`
+	IsDirect      bool     `json:"isDirect"`
+	HasFix        bool     `json:"hasFix"`
+	FixedVersions []string `json:"fixedVersions,omitempty"`
 	Summary       string   `json:"summary"`
 	Priority      string   `json:"priority"` // "critical", "high", "medium", "low"
-	PriorityReason string  `json:"priority_reason"`
+	PriorityReason string  `json:"priorityReason"`
 }
 
 // TriageResult is the output for the triage_vulnerabilities tool.
 type TriageResult struct {
-	Path             string        `json:"path"`
-	TotalVulns       int           `json:"total_vulns"`
-	CriticalCount    int           `json:"critical_count"`
-	HighCount        int           `json:"high_count"`
-	MediumCount      int           `json:"medium_count"`
-	LowCount         int           `json:"low_count"`
-	FixableCount     int           `json:"fixable_count"`
-	UnfixableCount   int           `json:"unfixable_count"`
-	DirectVulns      int           `json:"direct_vulns"`
-	TransitiveVulns  int           `json:"transitive_vulns"`
-	Vulnerabilities  []TriagedVuln `json:"vulnerabilities"`
-	Recommendations  []string      `json:"recommendations"`
+	Path                      string        `json:"path"`
+	TotalVulnerabilities      int           `json:"totalVulnerabilities"`
+	CriticalCount             int           `json:"criticalCount"`
+	HighCount                 int           `json:"highCount"`
+	MediumCount               int           `json:"mediumCount"`
+	LowCount                  int           `json:"lowCount"`
+	FixableCount              int           `json:"fixableCount"`
+	UnfixableCount            int           `json:"unfixableCount"`
+	DirectVulnerabilities     int           `json:"directVulnerabilities"`
+	TransitiveVulnerabilities int           `json:"transitiveVulnerabilities"`
+	Vulnerabilities           []TriagedVuln `json:"vulnerabilities"`
+	Recommendations           []string      `json:"recommendations"`
 }
 
 // ScanContainerInput is the input for the scan_container tool.
@@ -678,45 +667,45 @@ type ScanContainerInput struct {
 
 // ContainerScanResult is the output for container scanning.
 type ContainerScanResult struct {
-	Image             string            `json:"image"`
-	Platform          string            `json:"platform,omitempty"`
-	PackagesScanned   int               `json:"packages_scanned"`
-	VulnerabilitiesBy map[string]int    `json:"vulnerabilities_by_severity"`
-	Vulnerabilities   []VulnExplanation `json:"vulnerabilities"`
-	Clean             bool              `json:"clean"`
-	ScanTime          string            `json:"scan_time"`
+	Image                     string            `json:"image"`
+	Platform                  string            `json:"platform,omitempty"`
+	PackagesScanned           int               `json:"packagesScanned"`
+	VulnerabilitiesBySeverity map[string]int    `json:"vulnerabilitiesBySeverity"`
+	Vulnerabilities           []VulnExplanation `json:"vulnerabilities"`
+	Clean                     bool              `json:"clean"`
+	ScanTime                  string            `json:"scanTime"`
 }
 
 // DiffRefsInput is the input for the diff_refs tool.
 type DiffRefsInput struct {
 	Path       string   `json:"path" jsonschema:"Path to the repository (for Git refs) or base image reference (for container diff)"`
-	BaseRef    string   `json:"base_ref" jsonschema:"Base Git reference (branch, tag, commit) or container image reference"`
-	TargetRef  string   `json:"target_ref" jsonschema:"Target Git reference or container image reference to compare against"`
+	BaseRef    string   `json:"baseRef" jsonschema:"Base Git reference (branch, tag, commit) or container image reference"`
+	TargetRef  string   `json:"targetRef" jsonschema:"Target Git reference or container image reference to compare against"`
 	Ecosystems []string `json:"ecosystems,omitempty" jsonschema:"Optional list of ecosystems to include (for Git diffs)"`
 }
 
 // DependencyChange represents a change to a dependency.
 type DependencyChange struct {
 	Name          string `json:"name"`
-	BaseVersion   string `json:"base_version,omitempty"`
-	TargetVersion string `json:"target_version,omitempty"`
-	ChangeType    string `json:"change_type"` // "added", "removed", "upgraded", "downgraded", "updated"
-	IsDirect      bool   `json:"is_direct"`
+	BaseVersion   string `json:"baseVersion,omitempty"`
+	TargetVersion string `json:"targetVersion,omitempty"`
+	ChangeType    string `json:"changeType"` // "added", "removed", "upgraded", "downgraded", "updated"
+	IsDirect      bool   `json:"isDirect"`
 	Ecosystem     string `json:"ecosystem"`
 }
 
 // DiffRefsResult is the output for the diff_refs tool.
 type DiffRefsResult struct {
-	Path            string             `json:"path"`
-	BaseRef         string             `json:"base_ref"`
-	TargetRef       string             `json:"target_ref"`
-	IsContainerDiff bool               `json:"is_container_diff"`
-	Changes         []DependencyChange `json:"changes"`
-	AddedCount      int                `json:"added_count"`
-	RemovedCount    int                `json:"removed_count"`
-	UpdatedCount    int                `json:"updated_count"`
-	Vulnerabilities []VulnExplanation  `json:"vulnerabilities,omitempty"`
-	VulnSummary     map[string]int     `json:"vuln_summary,omitempty"`
+	Path                 string             `json:"path"`
+	BaseRef              string             `json:"baseRef"`
+	TargetRef            string             `json:"targetRef"`
+	IsContainerDiff      bool               `json:"isContainerDiff"`
+	Changes              []DependencyChange `json:"changes"`
+	AddedCount           int                `json:"addedCount"`
+	RemovedCount         int                `json:"removedCount"`
+	UpdatedCount         int                `json:"updatedCount"`
+	Vulnerabilities      []VulnExplanation  `json:"vulnerabilities,omitempty"`
+	VulnerabilitySummary map[string]int     `json:"vulnerabilitySummary,omitempty"`
 }
 
 // === Tool Implementations ===
@@ -741,9 +730,14 @@ func (s *Server) explainVulnerability(ctx context.Context, req *mcp.CallToolRequ
 		return nil, VulnExplanation{}, err
 	}
 
-	span.SetAttributes(otel.AttrMCPVulnID.String(args.ID))
+	span.SetAttributes(otel.AttrMCPVulnerabilityID.String(args.ID))
 
-	vuln, err := s.osv.GetVulnByID(ctx, args.ID)
+	// Use the VulnerabilityService via clients.Advisory
+	advisoryReq := connect.NewRequest(&vulnerabilityv1.GetAdvisoryRequest{
+		Id: args.ID,
+	})
+
+	resp, err := s.clients.Advisory.GetAdvisory(ctx, advisoryReq)
 	if err != nil {
 		err = fmt.Errorf("failed to fetch vulnerability %s: %w", args.ID, err)
 		otel.SetSpanError(span, err)
@@ -751,49 +745,17 @@ func (s *Server) explainVulnerability(ctx context.Context, req *mcp.CallToolRequ
 		logs.Warn(ctx, "Failed to fetch vulnerability", "vuln_id", args.ID, "error", err)
 		return nil, VulnExplanation{}, err
 	}
-	if vuln == nil {
+
+	if !resp.Msg.GetFound() {
 		err = fmt.Errorf("vulnerability %s not found", args.ID)
 		otel.SetSpanError(span, err)
 		otel.RecordMCPToolCall(ctx, "explain_vulnerability", time.Since(startTime).Seconds(), false)
 		return nil, VulnExplanation{}, err
 	}
 
-	severity := extractSeverity(vuln)
-
-	var refs []string
-	for _, ref := range vuln.References {
-		refs = append(refs, ref.URL)
-	}
-
-	explanation := VulnExplanation{
-		ID:         vuln.ID,
-		Aliases:    vuln.Aliases,
-		Summary:    vuln.Summary,
-		Details:    vuln.Details,
-		Severity:   severity.Level.String(),
-		References: refs,
-	}
-
-	if !vuln.Published.IsZero() {
-		explanation.Published = vuln.Published.Format("2006-01-02")
-	}
-	if !vuln.Modified.IsZero() {
-		explanation.Modified = vuln.Modified.Format("2006-01-02")
-	}
-
-	fixedSet := make(map[string]struct{})
-	for _, affected := range vuln.Affected {
-		for _, r := range affected.Ranges {
-			for _, event := range r.Events {
-				if event.Fixed != "" {
-					fixedSet[event.Fixed] = struct{}{}
-				}
-			}
-		}
-	}
-	for v := range fixedSet {
-		explanation.FixedVersions = append(explanation.FixedVersions, v)
-	}
+	// Convert proto Advisory to MCP VulnExplanation
+	advisory := resp.Msg.GetAdvisory()
+	explanation := advisoryToExplanation(advisory)
 
 	otel.SetSpanOK(span)
 	otel.RecordMCPToolCall(ctx, "explain_vulnerability", time.Since(startTime).Seconds(), true)
@@ -822,7 +784,7 @@ func (s *Server) explainVulnerabilities(ctx context.Context, req *mcp.CallToolRe
 		return nil, VulnsExplanation{}, err
 	}
 
-	span.SetAttributes(otel.AttrMCPVulnCount.Int(len(args.IDs)))
+	span.SetAttributes(otel.AttrMCPVulnerabilityCount.Int(len(args.IDs)))
 
 	result := VulnsExplanation{
 		Vulnerabilities: make([]VulnExplanation, 0, len(args.IDs)),
@@ -882,15 +844,21 @@ func (s *Server) scanPackage(ctx context.Context, req *mcp.CallToolRequest, args
 		attribute.String("deputy.mcp.ecosystem", args.Ecosystem),
 	)
 
-	pkgInput := osv.PkgInput{
-		QueryKey: osv.QueryKey{
-			Name:      args.Name,
-			Version:   args.Version,
-			Ecosystem: args.Ecosystem,
-		},
-	}
+	// Build PURL from package name, version, and ecosystem
+	// Format: pkg:<ecosystem>/<name>@<version>
+	purl := fmt.Sprintf("pkg:%s/%s@%s", strings.ToLower(args.Ecosystem), args.Name, args.Version)
 
-	findings, advisories, err := osv.Query(ctx, s.osv, []osv.PkgInput{pkgInput})
+	// Use the scan service via clients
+	scanReq := connect.NewRequest(&scanv1.ScanRequest{
+		Target: purl,
+		Options: &scanv1.ScanOptions{
+			TargetHint: &scanv1.TargetHint{
+				Kind: targetv1.TargetKind_TARGET_KIND_PURL,
+			},
+		},
+	})
+
+	resp, err := s.clients.Vulns.Scan(ctx, scanReq)
 	if err != nil {
 		err = fmt.Errorf("failed to scan package: %w", err)
 		otel.SetSpanError(span, err)
@@ -904,26 +872,28 @@ func (s *Server) scanPackage(ctx context.Context, req *mcp.CallToolRequest, args
 		Version:         args.Version,
 		Ecosystem:       args.Ecosystem,
 		Vulnerabilities: make([]VulnExplanation, 0),
-		Clean:           len(findings) == 0,
 	}
 
-	for _, finding := range findings {
-		advisory, ok := advisories[finding.AdvisoryID]
-		if !ok {
-			continue
+	// Convert advisories from response
+	for id, advisory := range resp.Msg.GetAdvisories() {
+		severityStr := ""
+		if advisory.GetSeverity() != nil {
+			severityStr = advisory.GetSeverity().GetLevel().String()
 		}
 		result.Vulnerabilities = append(result.Vulnerabilities, VulnExplanation{
-			ID:            advisory.Id,
-			Aliases:       advisory.Aliases,
-			Summary:       advisory.Summary,
-			Details:       advisory.Details,
-			Severity:      advisory.Severity.Level.String(),
-			FixedVersions: advisory.FixedVersions,
-			References:    advisory.References,
+			ID:            id,
+			Aliases:       advisory.GetAliases(),
+			Summary:       advisory.GetSummary(),
+			Details:       advisory.GetDetails(),
+			Severity:      severityStr,
+			FixedVersions: advisory.GetFixedVersions(),
+			References:    advisory.GetReferences(),
 		})
 	}
 
-	span.SetAttributes(otel.AttrMCPVulnCount.Int(len(result.Vulnerabilities)))
+	result.Clean = len(result.Vulnerabilities) == 0
+
+	span.SetAttributes(otel.AttrMCPVulnerabilityCount.Int(len(result.Vulnerabilities)))
 	otel.SetSpanOK(span)
 	otel.RecordMCPToolCall(ctx, "scan_package", time.Since(startTime).Seconds(), true)
 	logs.Debug(ctx, "MCP tool completed", "tool", "scan_package", "package", args.Name, "vulns", len(result.Vulnerabilities), "clean", result.Clean)
@@ -977,7 +947,7 @@ func (s *Server) scanDirectory(ctx context.Context, req *mcp.CallToolRequest, ar
 	result := DirectoryScanResult{
 		Path:            args.Path,
 		PackagesScanned: int(scanResult.PackagesScanned),
-		VulnerabilitiesBy: map[string]int{
+		VulnerabilitiesBySeverity: map[string]int{
 			"critical": int(scanResult.Stats.GetCritical()),
 			"high":     int(scanResult.Stats.GetHigh()),
 			"medium":   int(scanResult.Stats.GetMedium()),
@@ -1013,7 +983,7 @@ func (s *Server) scanDirectory(ctx context.Context, req *mcp.CallToolRequest, ar
 
 	span.SetAttributes(
 		otel.AttrMCPPackageCount.Int(int(scanResult.PackagesScanned)),
-		otel.AttrMCPVulnCount.Int(int(scanResult.Stats.GetUnique())),
+		otel.AttrMCPVulnerabilityCount.Int(int(scanResult.Stats.GetUnique())),
 	)
 	otel.SetSpanOK(span)
 	otel.RecordMCPToolCall(ctx, "scan_directory", time.Since(startTime).Seconds(), true)
@@ -1263,7 +1233,7 @@ func (s *Server) getRemediation(ctx context.Context, req *mcp.CallToolRequest, a
 		UnfixableCount:       len(unfixable),
 		Commands:             make([]RemediationCommand, 0, len(commands)),
 		StdlibUpgrade:        stdlibUpgrade,
-		UnfixableVulns:       unfixable,
+		UnfixableVulnerabilities: unfixable,
 	}
 
 	for _, cmd := range commands {
@@ -1279,7 +1249,7 @@ func (s *Server) getRemediation(ctx context.Context, req *mcp.CallToolRequest, a
 	}
 
 	span.SetAttributes(
-		otel.AttrMCPVulnCount.Int(result.VulnerabilitiesFound),
+		otel.AttrMCPVulnerabilityCount.Int(result.VulnerabilitiesFound),
 		attribute.Int("deputy.mcp.remediable_count", result.RemediableCount),
 	)
 	otel.SetSpanOK(span)
@@ -1350,13 +1320,17 @@ func (s *Server) analyzeDependencyGraph(ctx context.Context, req *mcp.CallToolRe
 
 	// Get stats
 	stats := depGraph.Stats()
+	ecosystems := make(map[string]int)
+	for k, v := range stats.Ecosystems {
+		ecosystems[k] = int(v)
+	}
 	result.Stats = GraphStats{
-		TotalNodes:      stats.TotalNodes,
-		DirectNodes:     stats.DirectNodes,
-		TransitiveNodes: stats.TransitiveNodes,
-		MaxDepth:        stats.MaxDepth,
-		VulnerableNodes: stats.VulnerableNodes,
-		Ecosystems:      stats.Ecosystems,
+		TotalNodes:      int(stats.TotalNodes),
+		DirectNodes:     int(stats.DirectNodes),
+		TransitiveNodes: int(stats.TransitiveNodes),
+		MaxDepth:        int(stats.MaxDepth),
+		VulnerableNodes: int(stats.VulnerableNodes),
+		Ecosystems:      ecosystems,
 	}
 
 	// Find vulnerable paths
@@ -1481,7 +1455,7 @@ func (s *Server) graphWhy(ctx context.Context, req *mcp.CallToolRequest, args Gr
 	result := GraphWhyResult{
 		Package: match.Name,
 		Version: match.Version,
-		PURL:    match.PURL,
+		PURL:    match.Purl,
 		Direct:  match.Direct,
 		Found:   true,
 	}
@@ -1500,7 +1474,7 @@ func (s *Server) graphWhy(ctx context.Context, req *mcp.CallToolRequest, args Gr
 	}
 
 	// Find paths to the package
-	paths := depGraph.PathsTo(match.PURL)
+	paths := depGraph.PathsTo(match.Purl)
 	if len(paths) == 0 {
 		result.Message = "No dependency path found (may be from compiled binary or lockfile)"
 		span.SetAttributes(
@@ -1626,17 +1600,17 @@ func (s *Server) graphNeeds(ctx context.Context, req *mcp.CallToolRequest, args 
 	result := GraphNeedsResult{
 		Package: match.Name,
 		Version: match.Version,
-		PURL:    match.PURL,
+		PURL:    match.Purl,
 		Found:   true,
 	}
 
 	// Collect ancestors (packages that depend on this one)
-	for ancestor := range depGraph.Ancestors(match.PURL) {
+	for ancestor := range depGraph.Ancestors(match.Purl) {
 		dep := DependencyInfo{
 			Name:      ancestor.Name,
 			Version:   ancestor.Version,
 			Ecosystem: ancestor.Ecosystem,
-			PURL:      ancestor.PURL,
+			PURL:      ancestor.Purl,
 			Direct:    ancestor.Direct,
 			Locations: ancestor.Locations,
 		}
@@ -1650,12 +1624,12 @@ func (s *Server) graphNeeds(ctx context.Context, req *mcp.CallToolRequest, args 
 
 	// If no ancestors, check direct parents via edges
 	if len(result.Dependents) == 0 {
-		for parent := range depGraph.Parents(match.PURL) {
+		for parent := range depGraph.Parents(match.Purl) {
 			dep := DependencyInfo{
 				Name:      parent.Name,
 				Version:   parent.Version,
 				Ecosystem: parent.Ecosystem,
-				PURL:      parent.PURL,
+				PURL:      parent.Purl,
 				Direct:    parent.Direct,
 				Locations: parent.Locations,
 			}
@@ -1778,13 +1752,13 @@ func (s *Server) triageVulnerabilities(ctx context.Context, req *mcp.CallToolReq
 		}
 
 		if v.IsDirect {
-			result.DirectVulns++
+			result.DirectVulnerabilities++
 		} else {
-			result.TransitiveVulns++
+			result.TransitiveVulnerabilities++
 		}
 	}
 
-	result.TotalVulns = len(consolidated.Vulnerabilities)
+	result.TotalVulnerabilities = len(consolidated.Vulnerabilities)
 
 	// Sort by priority (critical first)
 	sortTriagedVulns(result.Vulnerabilities)
@@ -1793,13 +1767,13 @@ func (s *Server) triageVulnerabilities(ctx context.Context, req *mcp.CallToolReq
 	result.Recommendations = generateRecommendations(result)
 
 	span.SetAttributes(
-		otel.AttrMCPTriageCount.Int(result.TotalVulns),
+		otel.AttrMCPTriageCount.Int(result.TotalVulnerabilities),
 		attribute.Int("deputy.mcp.critical_count", result.CriticalCount),
 		attribute.Int("deputy.mcp.fixable_count", result.FixableCount),
 	)
 	otel.SetSpanOK(span)
 	otel.RecordMCPToolCall(ctx, "triage_vulnerabilities", time.Since(startTime).Seconds(), true)
-	logs.Debug(ctx, "MCP tool completed", "tool", "triage_vulnerabilities", "path", args.Path, "total", result.TotalVulns, "critical", result.CriticalCount, "fixable", result.FixableCount)
+	logs.Debug(ctx, "MCP tool completed", "tool", "triage_vulnerabilities", "path", args.Path, "total", result.TotalVulnerabilities, "critical", result.CriticalCount, "fixable", result.FixableCount)
 
 	return nil, result, nil
 }
@@ -1852,16 +1826,16 @@ func generateRecommendations(result TriageResult) []string {
 	if result.CriticalCount > 0 {
 		recs = append(recs, fmt.Sprintf("Address %d critical vulnerability(ies) immediately", result.CriticalCount))
 	}
-	if result.DirectVulns > 0 && result.FixableCount > 0 {
-		recs = append(recs, fmt.Sprintf("Update direct dependencies to fix %d vulnerability(ies)", min(result.DirectVulns, result.FixableCount)))
+	if result.DirectVulnerabilities > 0 && result.FixableCount > 0 {
+		recs = append(recs, fmt.Sprintf("Update direct dependencies to fix %d vulnerability(ies)", min(result.DirectVulnerabilities, result.FixableCount)))
 	}
-	if result.TransitiveVulns > 0 {
-		recs = append(recs, fmt.Sprintf("Review %d transitive dependency vulnerability(ies) - may require updating direct dependencies", result.TransitiveVulns))
+	if result.TransitiveVulnerabilities > 0 {
+		recs = append(recs, fmt.Sprintf("Review %d transitive dependency vulnerability(ies) - may require updating direct dependencies", result.TransitiveVulnerabilities))
 	}
 	if result.UnfixableCount > 0 {
 		recs = append(recs, fmt.Sprintf("Monitor %d vulnerability(ies) without fixes for updates", result.UnfixableCount))
 	}
-	if result.TotalVulns == 0 {
+	if result.TotalVulnerabilities == 0 {
 		recs = append(recs, "No vulnerabilities found - continue regular dependency updates")
 	}
 
@@ -1915,7 +1889,7 @@ func (s *Server) scanContainer(ctx context.Context, req *mcp.CallToolRequest, ar
 		Image:           args.Image,
 		Platform:        args.Platform,
 		PackagesScanned: int(scanResult.PackagesScanned),
-		VulnerabilitiesBy: map[string]int{
+		VulnerabilitiesBySeverity: map[string]int{
 			"critical": int(scanResult.Stats.GetCritical()),
 			"high":     int(scanResult.Stats.GetHigh()),
 			"medium":   int(scanResult.Stats.GetMedium()),
@@ -1951,7 +1925,7 @@ func (s *Server) scanContainer(ctx context.Context, req *mcp.CallToolRequest, ar
 
 	span.SetAttributes(
 		otel.AttrMCPPackageCount.Int(int(scanResult.PackagesScanned)),
-		otel.AttrMCPVulnCount.Int(int(scanResult.Stats.GetUnique())),
+		otel.AttrMCPVulnerabilityCount.Int(int(scanResult.Stats.GetUnique())),
 	)
 	otel.SetSpanOK(span)
 	otel.RecordMCPToolCall(ctx, "scan_container", time.Since(startTime).Seconds(), true)
@@ -2059,7 +2033,7 @@ func (s *Server) diffContainerImages(ctx context.Context, args DiffRefsInput) (*
 		TargetRef:       args.TargetRef,
 		IsContainerDiff: true,
 		Changes:         make([]DependencyChange, 0),
-		VulnSummary:     make(map[string]int),
+		VulnerabilitySummary:     make(map[string]int),
 	}
 
 	// Build package maps for comparison
@@ -2118,10 +2092,10 @@ func (s *Server) diffContainerImages(ctx context.Context, args DiffRefsInput) (*
 	}
 
 	// Add vulnerability summary from target
-	result.VulnSummary["critical"] = int(targetScan.Stats.GetCritical())
-	result.VulnSummary["high"] = int(targetScan.Stats.GetHigh())
-	result.VulnSummary["medium"] = int(targetScan.Stats.GetMedium())
-	result.VulnSummary["low"] = int(targetScan.Stats.GetLow())
+	result.VulnerabilitySummary["critical"] = int(targetScan.Stats.GetCritical())
+	result.VulnerabilitySummary["high"] = int(targetScan.Stats.GetHigh())
+	result.VulnerabilitySummary["medium"] = int(targetScan.Stats.GetMedium())
+	result.VulnerabilitySummary["low"] = int(targetScan.Stats.GetLow())
 
 	return nil, result, nil
 }
@@ -2173,7 +2147,7 @@ func (s *Server) diffGitRefs(ctx context.Context, args DiffRefsInput) (*mcp.Call
 		TargetRef:       args.TargetRef,
 		IsContainerDiff: false,
 		Changes:         make([]DependencyChange, 0),
-		VulnSummary:     make(map[string]int),
+		VulnerabilitySummary:     make(map[string]int),
 	}
 
 	// Build package maps for comparison
@@ -2234,10 +2208,10 @@ func (s *Server) diffGitRefs(ctx context.Context, args DiffRefsInput) (*mcp.Call
 	}
 
 	// Add vulnerability summary from target
-	result.VulnSummary["critical"] = int(targetScan.Stats.GetCritical())
-	result.VulnSummary["high"] = int(targetScan.Stats.GetHigh())
-	result.VulnSummary["medium"] = int(targetScan.Stats.GetMedium())
-	result.VulnSummary["low"] = int(targetScan.Stats.GetLow())
+	result.VulnerabilitySummary["critical"] = int(targetScan.Stats.GetCritical())
+	result.VulnerabilitySummary["high"] = int(targetScan.Stats.GetHigh())
+	result.VulnerabilitySummary["medium"] = int(targetScan.Stats.GetMedium())
+	result.VulnerabilitySummary["low"] = int(targetScan.Stats.GetLow())
 
 	return nil, result, nil
 }
@@ -2369,27 +2343,35 @@ func findBestMatchingNode(g *graph.Graph, query string) *graph.Node {
 
 // === Helper Functions ===
 
-// extractSeverity extracts the severity from an OSV vulnerability.
-func extractSeverity(vuln *osvschema.Vulnerability) *vulnerabilityv1.Severity {
-	if vuln == nil {
-		return &vulnerabilityv1.Severity{}
+// advisoryToExplanation converts a proto Advisory to the MCP VulnExplanation type.
+func advisoryToExplanation(advisory *vulnerabilityv1.Advisory) VulnExplanation {
+	if advisory == nil {
+		return VulnExplanation{}
 	}
 
-	for _, sev := range vuln.Severity {
-		if sev.Score != "" {
-			return vulnerability.NewSeverity(sev.Score, string(sev.Type))
-		}
+	explanation := VulnExplanation{
+		ID:            advisory.GetId(),
+		Aliases:       advisory.GetAliases(),
+		Summary:       advisory.GetSummary(),
+		Details:       advisory.GetDetails(),
+		FixedVersions: advisory.GetFixedVersions(),
+		References:    advisory.GetReferences(),
 	}
 
-	if vuln.DatabaseSpecific != nil {
-		if sevRaw, ok := vuln.DatabaseSpecific["severity"]; ok {
-			if sevStr, ok := sevRaw.(string); ok {
-				return vulnerability.NewSeverity(strings.ToUpper(sevStr), "GHSA")
-			}
-		}
+	// Extract severity level string
+	if advisory.GetSeverity() != nil {
+		explanation.Severity = advisory.GetSeverity().GetLevel().String()
 	}
 
-	return &vulnerabilityv1.Severity{}
+	// Format timestamps
+	if advisory.GetPublished() != nil {
+		explanation.Published = advisory.GetPublished().AsTime().Format("2006-01-02")
+	}
+	if advisory.GetModified() != nil {
+		explanation.Modified = advisory.GetModified().AsTime().Format("2006-01-02")
+	}
+
+	return explanation
 }
 
 // pathToStrings converts a graph.Path to a slice of node names.

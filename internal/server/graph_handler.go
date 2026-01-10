@@ -14,6 +14,7 @@ import (
 	targetv1 "github.com/picatz/deputy/gen/deputy/target/v1"
 	"github.com/picatz/deputy/internal/dependency/graph"
 	"github.com/picatz/deputy/internal/inventory"
+	"github.com/picatz/deputy/internal/otel"
 	internalproto "github.com/picatz/deputy/internal/proto"
 	"github.com/picatz/deputy/internal/targets"
 )
@@ -51,14 +52,26 @@ func (h *GraphHandler) BuildGraph(
 	ctx context.Context,
 	req *connect.Request[graphv1.BuildGraphRequest],
 ) (*connect.Response[graphv1.BuildGraphResponse], error) {
+	// Get span from otelconnect interceptor - don't create a new one
+	span := otel.SpanFromContext(ctx)
+
+	if err := internalproto.Validate(req.Msg); err != nil {
+		otel.SetSpanError(span, err)
+		return nil, connect.NewError(connect.CodeInvalidArgument, err)
+	}
+
 	target := req.Msg.GetTarget()
 	if target == "" {
 		target = "."
 	}
 
+	// Add business attributes to the otelconnect span
+	span.SetAttributes(otel.AttrTargetPath.String(target))
+
 	// Security: Validate target is accessible from remote server (skip in local mode)
 	if !h.localMode {
 		if err := targets.ValidateRemoteTarget(target); err != nil {
+			otel.SetSpanError(span, err)
 			return nil, connect.NewError(connect.CodeInvalidArgument, err)
 		}
 	}
@@ -73,6 +86,7 @@ func (h *GraphHandler) BuildGraph(
 	// Collect inventory
 	exec, err := h.collectInventory(ctx, target, opts)
 	if err != nil {
+		otel.SetSpanError(span, err)
 		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to collect inventory: %w", err))
 	}
 	if exec != nil {
@@ -83,8 +97,8 @@ func (h *GraphHandler) BuildGraph(
 	g := graph.FromInventory(exec.Result.Packages, exec.Result.Direct)
 	g.UpdateDepths()
 
-	// Convert to proto
-	nodes, edges, roots := internalproto.GraphToProto(g)
+	// Record graph stats on span
+	span.SetAttributes(otel.AttrPackageCount.Int(len(g.GetNodesSlice())))
 
 	response := &graphv1.BuildGraphResponse{
 		Target: &targetv1.Target{
@@ -92,10 +106,10 @@ func (h *GraphHandler) BuildGraph(
 			DisplayPath: exec.Result.Target.DisplayPath,
 		},
 		GeneratedAt: timestamppb.Now(),
-		Nodes:       nodes,
-		Edges:       edges,
-		Roots:       roots,
-		Stats:       internalproto.GraphStatsToProto(g.Stats()),
+		Nodes:       g.GetNodesSlice(),
+		Edges:       g.GetEdgesSlice(),
+		Roots:       g.GetRoots(),
+		Stats:       g.Stats(),
 	}
 
 	return connect.NewResponse(response), nil
@@ -129,6 +143,14 @@ func (h *GraphHandler) WhyDependency(
 	ctx context.Context,
 	req *connect.Request[graphv1.WhyDependencyRequest],
 ) (*connect.Response[graphv1.WhyDependencyResponse], error) {
+	// Get span from otelconnect interceptor - don't create a new one
+	span := otel.SpanFromContext(ctx)
+
+	if err := internalproto.Validate(req.Msg); err != nil {
+		otel.SetSpanError(span, err)
+		return nil, connect.NewError(connect.CodeInvalidArgument, err)
+	}
+
 	target := req.Msg.GetTarget()
 	if target == "" {
 		target = "."
@@ -136,12 +158,21 @@ func (h *GraphHandler) WhyDependency(
 
 	dependency := req.Msg.GetDependency()
 	if dependency == "" {
-		return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("dependency is required"))
+		err := fmt.Errorf("dependency is required")
+		otel.SetSpanError(span, err)
+		return nil, connect.NewError(connect.CodeInvalidArgument, err)
 	}
+
+	// Add business attributes to the otelconnect span
+	span.SetAttributes(
+		otel.AttrTargetPath.String(target),
+		otel.AttrMCPGraphPackage.String(dependency),
+	)
 
 	// Security: Validate target is accessible from remote server (skip in local mode)
 	if !h.localMode {
 		if err := targets.ValidateRemoteTarget(target); err != nil {
+			otel.SetSpanError(span, err)
 			return nil, connect.NewError(connect.CodeInvalidArgument, err)
 		}
 	}
@@ -156,6 +187,7 @@ func (h *GraphHandler) WhyDependency(
 	// Collect inventory
 	exec, err := h.collectInventory(ctx, target, opts)
 	if err != nil {
+		otel.SetSpanError(span, err)
 		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to collect inventory: %w", err))
 	}
 	if exec != nil {
@@ -170,7 +202,7 @@ func (h *GraphHandler) WhyDependency(
 	var targetNode *graph.Node
 	for n := range g.Nodes() {
 		if strings.EqualFold(n.Name, dependency) ||
-			strings.EqualFold(n.PURL, dependency) ||
+			strings.EqualFold(n.Purl, dependency) ||
 			strings.Contains(strings.ToLower(n.Name), strings.ToLower(dependency)) {
 			targetNode = n
 			break
@@ -188,9 +220,18 @@ func (h *GraphHandler) WhyDependency(
 
 	if targetNode != nil {
 		// Find paths from roots to the target
-		paths := g.PathsTo(targetNode.PURL)
-		response.Paths = internalproto.PathsToProto(paths)
-		response.Dependency = targetNode.PURL
+		paths := g.PathsTo(targetNode.Purl)
+		response.Paths = graph.PathsToProto(paths)
+		response.Dependency = targetNode.Purl
+
+		// Record results on span
+		span.SetAttributes(
+			otel.AttrMCPGraphFound.Bool(true),
+			otel.AttrMCPGraphDirect.Bool(targetNode.Direct),
+			otel.AttrMCPGraphPathCount.Int(len(paths)),
+		)
+	} else {
+		span.SetAttributes(otel.AttrMCPGraphFound.Bool(false))
 	}
 
 	return connect.NewResponse(response), nil
@@ -201,14 +242,26 @@ func (h *GraphHandler) QueryGraph(
 	ctx context.Context,
 	req *connect.Request[graphv1.QueryGraphRequest],
 ) (*connect.Response[graphv1.QueryGraphResponse], error) {
+	// Get span from otelconnect interceptor - don't create a new one
+	span := otel.SpanFromContext(ctx)
+
+	if err := internalproto.Validate(req.Msg); err != nil {
+		otel.SetSpanError(span, err)
+		return nil, connect.NewError(connect.CodeInvalidArgument, err)
+	}
+
 	target := req.Msg.GetTarget()
 	if target == "" {
 		target = "."
 	}
 
+	// Add business attributes to the otelconnect span
+	span.SetAttributes(otel.AttrTargetPath.String(target))
+
 	// Security: Validate target is accessible from remote server (skip in local mode)
 	if !h.localMode {
 		if err := targets.ValidateRemoteTarget(target); err != nil {
+			otel.SetSpanError(span, err)
 			return nil, connect.NewError(connect.CodeInvalidArgument, err)
 		}
 	}
@@ -223,6 +276,7 @@ func (h *GraphHandler) QueryGraph(
 	// Collect inventory
 	exec, err := h.collectInventory(ctx, target, opts)
 	if err != nil {
+		otel.SetSpanError(span, err)
 		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to collect inventory: %w", err))
 	}
 	if exec != nil {
@@ -259,10 +313,10 @@ func (h *GraphHandler) QueryGraph(
 			}
 
 			// Depth filters
-			if filter.MinDepth > 0 && n.Depth < int(filter.MinDepth) {
+			if filter.MinDepth > 0 && n.Depth < filter.MinDepth {
 				return false
 			}
-			if filter.MaxDepth > 0 && n.Depth > int(filter.MaxDepth) {
+			if filter.MaxDepth > 0 && n.Depth > filter.MaxDepth {
 				return false
 			}
 
@@ -275,7 +329,7 @@ func (h *GraphHandler) QueryGraph(
 			}
 
 			// Vulnerable filter
-			if filter.OnlyVulnerable && n.VulnCount.Total == 0 {
+			if filter.OnlyVulnerable && n.GetVulnerabilityCount().GetTotal() == 0 {
 				return false
 			}
 
@@ -291,17 +345,17 @@ func (h *GraphHandler) QueryGraph(
 		})
 	}
 
-	// Convert to proto
-	nodes, edges, _ := internalproto.GraphToProto(g)
+	// Record filtered graph stats on span
+	span.SetAttributes(otel.AttrPackageCount.Int(len(g.GetNodesSlice())))
 
 	response := &graphv1.QueryGraphResponse{
 		Target: &targetv1.Target{
 			Kind:        exec.Result.Target.Kind,
 			DisplayPath: exec.Result.Target.DisplayPath,
 		},
-		Nodes: nodes,
-		Edges: edges,
-		Stats: internalproto.GraphStatsToProto(g.Stats()),
+		Nodes: g.GetNodesSlice(),
+		Edges: g.GetEdgesSlice(),
+		Stats: g.Stats(),
 	}
 
 	return connect.NewResponse(response), nil

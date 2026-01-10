@@ -14,6 +14,8 @@ import (
 
 	sbomv1 "github.com/picatz/deputy/gen/deputy/sbom/v1"
 	"github.com/picatz/deputy/gen/deputy/sbom/v1/sbomv1connect"
+	"github.com/picatz/deputy/internal/otel"
+	internalproto "github.com/picatz/deputy/internal/proto"
 	sbomx "github.com/picatz/deputy/internal/sbom"
 	"github.com/picatz/deputy/internal/targets"
 )
@@ -51,14 +53,26 @@ func (h *SBOMHandler) Generate(
 	ctx context.Context,
 	req *connect.Request[sbomv1.GenerateRequest],
 ) (*connect.Response[sbomv1.GenerateResponse], error) {
+	// Get span from otelconnect interceptor - don't create a new one
+	span := otel.SpanFromContext(ctx)
+
+	if err := internalproto.Validate(req.Msg); err != nil {
+		otel.SetSpanError(span, err)
+		return nil, connect.NewError(connect.CodeInvalidArgument, err)
+	}
+
 	target := req.Msg.GetTarget()
 	if target == "" {
 		target = "."
 	}
 
+	// Add business attributes to the otelconnect span
+	span.SetAttributes(otel.AttrTargetPath.String(target))
+
 	// Security: Validate target is accessible from remote server (skip in local mode)
 	if !h.localMode {
 		if err := targets.ValidateRemoteTarget(target); err != nil {
+			otel.SetSpanError(span, err)
 			return nil, connect.NewError(connect.CodeInvalidArgument, err)
 		}
 	}
@@ -72,6 +86,7 @@ func (h *SBOMHandler) Generate(
 
 	result, err := sbomx.Generate(ctx, target, opts)
 	if err != nil {
+		otel.SetSpanError(span, err)
 		return nil, connect.NewError(connect.CodeInternal, err)
 	}
 
@@ -80,6 +95,7 @@ func (h *SBOMHandler) Generate(
 	var buf bytes.Buffer
 	w := writer.New(writer.WithFormat(format))
 	if err := w.WriteStream(result.Document, &buf); err != nil {
+		otel.SetSpanError(span, err)
 		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("serialize SBOM: %w", err))
 	}
 
@@ -97,6 +113,9 @@ func (h *SBOMHandler) Generate(
 		}
 	}
 
+	// Record component count on the span
+	span.SetAttributes(otel.AttrPackageCount.Int(int(stats.TotalComponents)))
+
 	resp := &sbomv1.GenerateResponse{
 		Sbom:        buf.Bytes(),
 		Format:      req.Msg.GetFormat(),
@@ -112,15 +131,29 @@ func (h *SBOMHandler) Diff(
 	ctx context.Context,
 	req *connect.Request[sbomv1.DiffRequest],
 ) (*connect.Response[sbomv1.DiffResponse], error) {
+	// Get span from otelconnect interceptor - don't create a new one
+	span := otel.SpanFromContext(ctx)
+
+	if err := internalproto.Validate(req.Msg); err != nil {
+		otel.SetSpanError(span, err)
+		return nil, connect.NewError(connect.CodeInvalidArgument, err)
+	}
+
 	if len(req.Msg.GetBase()) == 0 {
-		return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("base SBOM is required"))
+		err := fmt.Errorf("base SBOM is required")
+		otel.SetSpanError(span, err)
+		return nil, connect.NewError(connect.CodeInvalidArgument, err)
 	}
 	if len(req.Msg.GetTarget()) == 0 {
-		return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("target SBOM is required"))
+		err := fmt.Errorf("target SBOM is required")
+		otel.SetSpanError(span, err)
+		return nil, connect.NewError(connect.CodeInvalidArgument, err)
 	}
 
 	// TODO: Implement SBOM diff using internal/sbom package
-	return nil, connect.NewError(connect.CodeUnimplemented, fmt.Errorf("SBOM diff not yet implemented"))
+	err := fmt.Errorf("SBOM diff not yet implemented")
+	otel.SetSpanError(span, err)
+	return nil, connect.NewError(connect.CodeUnimplemented, err)
 }
 
 // protoFormatToProtobom converts proto SBOM format to protobom format.

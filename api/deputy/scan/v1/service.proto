@@ -328,8 +328,8 @@ message ImageMetadata {
   // Size is total size in bytes.
   int64 size = 4;
 
-  // Created is the creation timestamp (Unix).
-  int64 created = 5;
+  // Created is when the image was created.
+  google.protobuf.Timestamp created = 5;
 
   // Digest is the image digest.
   string digest = 6;
@@ -340,8 +340,8 @@ message HistoryEntry {
   // CreatedBy is the command that created this layer.
   string created_by = 1;
 
-  // Created is the creation timestamp (Unix).
-  int64 created = 2;
+  // Created is when this layer was created.
+  google.protobuf.Timestamp created = 2;
 
   // EmptyLayer indicates this is a metadata-only layer.
   bool empty_layer = 3;

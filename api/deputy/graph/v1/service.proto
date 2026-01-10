@@ -133,15 +133,15 @@ message Node {
   // Locations lists file paths where this dependency was declared.
   repeated string locations = 7;
 
-  // VulnCount summarizes vulnerabilities affecting this package.
-  VulnCount vuln_count = 8;
+  // VulnerabilityCount summarizes vulnerabilities affecting this package.
+  VulnerabilityCount vulnerability_count = 8;
 
   // Vulnerabilities contains full findings when include_vulnerabilities is set.
   repeated deputy.vulnerability.v1.Finding vulnerabilities = 9;
 }
 
-// VulnCount summarizes vulnerability counts by severity.
-message VulnCount {
+// VulnerabilityCount summarizes vulnerability counts by severity.
+message VulnerabilityCount {
   // Critical vulnerabilities.
   int32 critical = 1;
   // High severity vulnerabilities.

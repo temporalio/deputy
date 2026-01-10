@@ -51,19 +51,19 @@ require (
 	// Create a graph with some nodes from "inventory"
 	g := New()
 	g.AddNode(&Node{
-		PURL:      "pkg:golang/github.com/pkg/errors@0.9.1",
+		Purl:      "pkg:golang/github.com/pkg/errors@0.9.1",
 		Name:      "github.com/pkg/errors",
 		Version:   "0.9.1",
 		Ecosystem: "Go",
 	})
 	g.AddNode(&Node{
-		PURL:      "pkg:golang/github.com/stretchr/testify@1.8.4",
+		Purl:      "pkg:golang/github.com/stretchr/testify@1.8.4",
 		Name:      "github.com/stretchr/testify",
 		Version:   "1.8.4",
 		Ecosystem: "Go",
 	})
 	g.AddNode(&Node{
-		PURL:      "pkg:golang/github.com/davecgh/go-spew@1.1.1",
+		Purl:      "pkg:golang/github.com/davecgh/go-spew@1.1.1",
 		Name:      "github.com/davecgh/go-spew",
 		Version:   "1.1.1",
 		Ecosystem: "Go",
@@ -137,7 +137,7 @@ require github.com/pkg/errors v0.9.1
 
 	g := New()
 	g.AddNode(&Node{
-		PURL:      "pkg:golang/github.com/pkg/errors@0.9.1",
+		Purl:      "pkg:golang/github.com/pkg/errors@0.9.1",
 		Name:      "github.com/pkg/errors",
 		Version:   "0.9.1",
 		Ecosystem: "Go",
@@ -176,7 +176,7 @@ require github.com/pkg/errors v0.9.1
 	rootPURL := "pkg:golang/github.com/example/myapp"
 	foundEdge := false
 	for edge := range g.Edges() {
-		if edge.From == rootPURL && edge.To == stdlibNode.PURL {
+		if edge.From == rootPURL && edge.To == stdlibNode.Purl {
 			foundEdge = true
 			if edge.Constraint != "1.21" {
 				t.Errorf("expected stdlib edge constraint to be '1.21', got %q", edge.Constraint)

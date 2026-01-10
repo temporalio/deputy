@@ -13,13 +13,13 @@ import (
 	"github.com/ossf/osv-schema/bindings/go/osvschema"
 	dependencyv1 "github.com/picatz/deputy/gen/deputy/dependency/v1"
 	listv1 "github.com/picatz/deputy/gen/deputy/list/v1"
+	"github.com/picatz/deputy/gen/deputy/list/v1/listv1connect"
 	scanv1 "github.com/picatz/deputy/gen/deputy/scan/v1"
 	"github.com/picatz/deputy/gen/deputy/scan/v1/scanv1connect"
-	"github.com/picatz/deputy/gen/deputy/list/v1/listv1connect"
 	vulnerabilityv1 "github.com/picatz/deputy/gen/deputy/vulnerability/v1"
+	"github.com/picatz/deputy/gen/deputy/vulnerability/v1/vulnerabilityv1connect"
 	"github.com/picatz/deputy/internal/services"
 	"github.com/picatz/deputy/internal/vulnerability"
-	"github.com/picatz/deputy/internal/vulnerability/severity"
 	"osv.dev/bindings/go/osvdev"
 )
 
@@ -67,16 +67,90 @@ func (m *mockListHandler) ListPackages(ctx context.Context, req *connect.Request
 	return connect.NewResponse(m.listResponse), nil
 }
 
+// mockVulnerabilityHandler is a mock vulnerability service handler for testing.
+type mockVulnerabilityHandler struct {
+	osvClient *mockOSVClient
+}
+
+func (m *mockVulnerabilityHandler) GetAdvisory(ctx context.Context, req *connect.Request[vulnerabilityv1.GetAdvisoryRequest]) (*connect.Response[vulnerabilityv1.GetAdvisoryResponse], error) {
+	id := req.Msg.GetId()
+	if id == "" {
+		return nil, connect.NewError(connect.CodeInvalidArgument, nil)
+	}
+
+	vuln, _ := m.osvClient.GetVulnByID(ctx, id)
+	if vuln == nil {
+		return connect.NewResponse(&vulnerabilityv1.GetAdvisoryResponse{Found: false}), nil
+	}
+
+	// Convert to proto Advisory
+	advisory := &vulnerabilityv1.Advisory{
+		Id:      vuln.ID,
+		Aliases: vuln.Aliases,
+		Summary: vuln.Summary,
+		Details: vuln.Details,
+	}
+
+	// Extract references
+	for _, ref := range vuln.References {
+		advisory.References = append(advisory.References, ref.URL)
+	}
+
+	// Extract severity
+	for _, sev := range vuln.Severity {
+		if sev.Score != "" {
+			advisory.Severity = vulnerability.NewSeverity(sev.Score, string(sev.Type))
+			break
+		}
+	}
+
+	return connect.NewResponse(&vulnerabilityv1.GetAdvisoryResponse{
+		Advisory: advisory,
+		Found:    true,
+	}), nil
+}
+
+func (m *mockVulnerabilityHandler) GetAdvisories(ctx context.Context, req *connect.Request[vulnerabilityv1.GetAdvisoriesRequest]) (*connect.Response[vulnerabilityv1.GetAdvisoriesResponse], error) {
+	resp := &vulnerabilityv1.GetAdvisoriesResponse{
+		Advisories: make(map[string]*vulnerabilityv1.Advisory),
+	}
+	for _, id := range req.Msg.GetIds() {
+		vuln, _ := m.osvClient.GetVulnByID(ctx, id)
+		if vuln != nil {
+			resp.Advisories[id] = &vulnerabilityv1.Advisory{
+				Id:      vuln.ID,
+				Aliases: vuln.Aliases,
+				Summary: vuln.Summary,
+				Details: vuln.Details,
+			}
+		} else {
+			resp.NotFound = append(resp.NotFound, id)
+		}
+	}
+	return connect.NewResponse(resp), nil
+}
+
+// mockClientsConfig configures mock clients for testing.
+type mockClientsConfig struct {
+	scanHandler          *mockScanHandler
+	listHandler          *mockListHandler
+	vulnerabilityHandler *mockVulnerabilityHandler
+}
+
 // newMockClients creates mock clients with the given handlers for testing.
-func newMockClients(scanHandler *mockScanHandler, listHandler *mockListHandler) *services.Clients {
+func newMockClients(cfg mockClientsConfig) *services.Clients {
 	mux := http.NewServeMux()
 
-	if scanHandler != nil {
-		path, handler := scanv1connect.NewScanServiceHandler(scanHandler)
+	if cfg.scanHandler != nil {
+		path, handler := scanv1connect.NewScanServiceHandler(cfg.scanHandler)
 		mux.Handle(path, handler)
 	}
-	if listHandler != nil {
-		path, handler := listv1connect.NewListServiceHandler(listHandler)
+	if cfg.listHandler != nil {
+		path, handler := listv1connect.NewListServiceHandler(cfg.listHandler)
+		mux.Handle(path, handler)
+	}
+	if cfg.vulnerabilityHandler != nil {
+		path, handler := vulnerabilityv1connect.NewVulnerabilityServiceHandler(cfg.vulnerabilityHandler)
 		mux.Handle(path, handler)
 	}
 
@@ -86,6 +160,7 @@ func newMockClients(scanHandler *mockScanHandler, listHandler *mockListHandler) 
 	return &services.Clients{
 		Vulns:     scanv1connect.NewScanServiceClient(httpClient, ""),
 		Inventory: listv1connect.NewListServiceClient(httpClient, ""),
+		Advisory:  vulnerabilityv1connect.NewVulnerabilityServiceClient(httpClient, ""),
 	}
 }
 
@@ -97,28 +172,19 @@ func TestNewServer(t *testing.T) {
 	if s.server == nil {
 		t.Error("server field is nil")
 	}
-	if s.osv == nil {
-		t.Error("osv field is nil")
-	}
 	if s.clients == nil {
 		t.Error("clients field is nil")
 	}
 }
 
 func TestNewServer_WithOptions(t *testing.T) {
-	mockOSV := &mockOSVClient{}
-	mockClients := newMockClients(&mockScanHandler{}, &mockListHandler{})
+	mockClients := newMockClients(mockClientsConfig{
+		scanHandler: &mockScanHandler{},
+		listHandler: &mockListHandler{},
+	})
 
-	s := NewServer(
-		WithOSVClient(mockOSV),
-		WithClients(mockClients),
-	)
+	s := NewServer(WithClients(mockClients))
 
-	// Check that options were applied (can't compare interfaces directly,
-	// but we can verify by testing behavior)
-	if s.osv == nil {
-		t.Error("WithOSVClient option not applied")
-	}
 	if s.clients == nil {
 		t.Error("WithClients option not applied")
 	}
@@ -142,7 +208,10 @@ func TestExplainVulnerability(t *testing.T) {
 		},
 	}
 
-	s := NewServer(WithOSVClient(mockOSV))
+	mockClients := newMockClients(mockClientsConfig{
+		vulnerabilityHandler: &mockVulnerabilityHandler{osvClient: mockOSV},
+	})
+	s := NewServer(WithClients(mockClients))
 	ctx := context.Background()
 
 	t.Run("valid vulnerability", func(t *testing.T) {
@@ -190,7 +259,10 @@ func TestExplainVulnerabilities(t *testing.T) {
 		},
 	}
 
-	s := NewServer(WithOSVClient(mockOSV))
+	mockClients := newMockClients(mockClientsConfig{
+		vulnerabilityHandler: &mockVulnerabilityHandler{osvClient: mockOSV},
+	})
+	s := NewServer(WithClients(mockClients))
 	ctx := context.Background()
 
 	t.Run("multiple vulnerabilities", func(t *testing.T) {
@@ -276,7 +348,7 @@ func TestScanDirectory(t *testing.T) {
 		},
 	}
 
-	s := NewServer(WithClients(newMockClients(mockScan, nil)))
+	s := NewServer(WithClients(newMockClients(mockClientsConfig{scanHandler: mockScan})))
 	ctx := context.Background()
 
 	t.Run("missing path", func(t *testing.T) {
@@ -329,8 +401,8 @@ func TestScanDirectory(t *testing.T) {
 		if len(result.Vulnerabilities) != 1 {
 			t.Errorf("expected 1 vulnerability, got %d", len(result.Vulnerabilities))
 		}
-		if result.VulnerabilitiesBy["critical"] != 1 {
-			t.Errorf("expected 1 critical, got %d", result.VulnerabilitiesBy["critical"])
+		if result.VulnerabilitiesBySeverity["critical"] != 1 {
+			t.Errorf("expected 1 critical, got %d", result.VulnerabilitiesBySeverity["critical"])
 		}
 	})
 }
@@ -348,7 +420,7 @@ func TestListDependencies(t *testing.T) {
 		},
 	}
 
-	s := NewServer(WithClients(newMockClients(nil, mockList)))
+	s := NewServer(WithClients(newMockClients(mockClientsConfig{listHandler: mockList})))
 	ctx := context.Background()
 
 	t.Run("missing path", func(t *testing.T) {
@@ -403,7 +475,7 @@ func TestGetRemediation(t *testing.T) {
 		},
 	}
 
-	s := NewServer(WithClients(newMockClients(mockScan, nil)))
+	s := NewServer(WithClients(newMockClients(mockClientsConfig{scanHandler: mockScan})))
 	ctx := context.Background()
 
 	t.Run("missing path", func(t *testing.T) {
@@ -439,7 +511,7 @@ func TestAnalyzeDependencyGraph(t *testing.T) {
 		},
 	}
 
-	s := NewServer(WithClients(newMockClients(mockScan, nil)))
+	s := NewServer(WithClients(newMockClients(mockClientsConfig{scanHandler: mockScan})))
 	ctx := context.Background()
 
 	t.Run("missing path", func(t *testing.T) {
@@ -461,54 +533,6 @@ func TestAnalyzeDependencyGraph(t *testing.T) {
 			t.Errorf("expected path /test/path, got %s", result.Path)
 		}
 	})
-}
-
-func TestExtractSeverity(t *testing.T) {
-	tests := []struct {
-		name     string
-		vuln     *osvschema.Vulnerability
-		expected string
-	}{
-		{
-			name:     "nil vulnerability",
-			vuln:     nil,
-			expected: "UNKNOWN", // Default severity level is UNKNOWN
-		},
-		{
-			name: "CVSS severity",
-			vuln: &osvschema.Vulnerability{
-				Severity: []osvschema.Severity{
-					{Type: "CVSS_V3", Score: "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:C/C:H/I:H/A:H"},
-				},
-			},
-			expected: "CRITICAL",
-		},
-		{
-			name: "database specific severity",
-			vuln: &osvschema.Vulnerability{
-				DatabaseSpecific: map[string]interface{}{
-					"severity": "HIGH",
-				},
-			},
-			expected: "HIGH",
-		},
-		{
-			name: "no severity",
-			vuln: &osvschema.Vulnerability{
-				ID: "TEST-123",
-			},
-			expected: "UNKNOWN", // Default severity level is UNKNOWN
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			sev := extractSeverity(tt.vuln)
-			if severity.LevelString(sev.Level) != tt.expected {
-				t.Errorf("expected severity %q, got %q", tt.expected, severity.LevelString(sev.Level))
-			}
-		})
-	}
 }
 
 func TestPathToStrings(t *testing.T) {

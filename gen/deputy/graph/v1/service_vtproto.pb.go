@@ -319,8 +319,8 @@ func (m *Node) MarshalToSizedBufferVT(dAtA []byte) (int, error) {
 			dAtA[i] = 0x4a
 		}
 	}
-	if m.VulnCount != nil {
-		size, err := m.VulnCount.MarshalToSizedBufferVT(dAtA[:i])
+	if m.VulnerabilityCount != nil {
+		size, err := m.VulnerabilityCount.MarshalToSizedBufferVT(dAtA[:i])
 		if err != nil {
 			return 0, err
 		}
@@ -384,7 +384,7 @@ func (m *Node) MarshalToSizedBufferVT(dAtA []byte) (int, error) {
 	return len(dAtA) - i, nil
 }
 
-func (m *VulnCount) MarshalVT() (dAtA []byte, err error) {
+func (m *VulnerabilityCount) MarshalVT() (dAtA []byte, err error) {
 	if m == nil {
 		return nil, nil
 	}
@@ -397,12 +397,12 @@ func (m *VulnCount) MarshalVT() (dAtA []byte, err error) {
 	return dAtA[:n], nil
 }
 
-func (m *VulnCount) MarshalToVT(dAtA []byte) (int, error) {
+func (m *VulnerabilityCount) MarshalToVT(dAtA []byte) (int, error) {
 	size := m.SizeVT()
 	return m.MarshalToSizedBufferVT(dAtA[:size])
 }
 
-func (m *VulnCount) MarshalToSizedBufferVT(dAtA []byte) (int, error) {
+func (m *VulnerabilityCount) MarshalToSizedBufferVT(dAtA []byte) (int, error) {
 	if m == nil {
 		return 0, nil
 	}
@@ -1205,8 +1205,8 @@ func (m *Node) SizeVT() (n int) {
 			n += 1 + l + protohelpers.SizeOfVarint(uint64(l))
 		}
 	}
-	if m.VulnCount != nil {
-		l = m.VulnCount.SizeVT()
+	if m.VulnerabilityCount != nil {
+		l = m.VulnerabilityCount.SizeVT()
 		n += 1 + l + protohelpers.SizeOfVarint(uint64(l))
 	}
 	if len(m.Vulnerabilities) > 0 {
@@ -1219,7 +1219,7 @@ func (m *Node) SizeVT() (n int) {
 	return n
 }
 
-func (m *VulnCount) SizeVT() (n int) {
+func (m *VulnerabilityCount) SizeVT() (n int) {
 	if m == nil {
 		return 0
 	}
@@ -2396,7 +2396,7 @@ func (m *Node) UnmarshalVT(dAtA []byte) error {
 			iNdEx = postIndex
 		case 8:
 			if wireType != 2 {
-				return fmt.Errorf("proto: wrong wireType = %d for field VulnCount", wireType)
+				return fmt.Errorf("proto: wrong wireType = %d for field VulnerabilityCount", wireType)
 			}
 			var msglen int
 			for shift := uint(0); ; shift += 7 {
@@ -2423,10 +2423,10 @@ func (m *Node) UnmarshalVT(dAtA []byte) error {
 			if postIndex > l {
 				return io.ErrUnexpectedEOF
 			}
-			if m.VulnCount == nil {
-				m.VulnCount = &VulnCount{}
+			if m.VulnerabilityCount == nil {
+				m.VulnerabilityCount = &VulnerabilityCount{}
 			}
-			if err := m.VulnCount.UnmarshalVT(dAtA[iNdEx:postIndex]); err != nil {
+			if err := m.VulnerabilityCount.UnmarshalVT(dAtA[iNdEx:postIndex]); err != nil {
 				return err
 			}
 			iNdEx = postIndex
@@ -2486,7 +2486,7 @@ func (m *Node) UnmarshalVT(dAtA []byte) error {
 	}
 	return nil
 }
-func (m *VulnCount) UnmarshalVT(dAtA []byte) error {
+func (m *VulnerabilityCount) UnmarshalVT(dAtA []byte) error {
 	l := len(dAtA)
 	iNdEx := 0
 	for iNdEx < l {
@@ -2509,10 +2509,10 @@ func (m *VulnCount) UnmarshalVT(dAtA []byte) error {
 		fieldNum := int32(wire >> 3)
 		wireType := int(wire & 0x7)
 		if wireType == 4 {
-			return fmt.Errorf("proto: VulnCount: wiretype end group for non-group")
+			return fmt.Errorf("proto: VulnerabilityCount: wiretype end group for non-group")
 		}
 		if fieldNum <= 0 {
-			return fmt.Errorf("proto: VulnCount: illegal tag %d (wire type %d)", fieldNum, wire)
+			return fmt.Errorf("proto: VulnerabilityCount: illegal tag %d (wire type %d)", fieldNum, wire)
 		}
 		switch fieldNum {
 		case 1:

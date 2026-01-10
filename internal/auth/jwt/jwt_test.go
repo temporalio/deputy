@@ -950,3 +950,174 @@ func TestAuthenticator_NotBeforeValidation(t *testing.T) {
 		}
 	})
 }
+
+func TestTenantFromContext(t *testing.T) {
+	t.Run("nil context", func(t *testing.T) {
+		// Intentionally testing nil context handling
+		tenant := TenantFromContext(nil) //nolint:staticcheck // testing nil context behavior
+		if tenant != "" {
+			t.Errorf("expected empty string for nil context, got %q", tenant)
+		}
+	})
+
+	t.Run("context without claims (anonymous)", func(t *testing.T) {
+		ctx := context.Background()
+		tenant := TenantFromContext(ctx)
+		if tenant != "" {
+			t.Errorf("expected empty string for context without claims, got %q", tenant)
+		}
+	})
+
+	t.Run("claims without tenant", func(t *testing.T) {
+		claims := &Claims{
+			Subject: "user123",
+			Custom:  map[string]any{},
+		}
+		ctx := ContextWithClaims(context.Background(), claims)
+		tenant := TenantFromContext(ctx)
+		if tenant != "" {
+			t.Errorf("expected empty string for claims without tenant, got %q", tenant)
+		}
+	})
+
+	t.Run("claims with string tenant", func(t *testing.T) {
+		claims := &Claims{
+			Subject: "user123",
+			Custom: map[string]any{
+				"tenant": "acme-corp",
+			},
+		}
+		ctx := ContextWithClaims(context.Background(), claims)
+		tenant := TenantFromContext(ctx)
+		if tenant != "acme-corp" {
+			t.Errorf("expected tenant 'acme-corp', got %q", tenant)
+		}
+	})
+
+	t.Run("claims with bytes tenant", func(t *testing.T) {
+		claims := &Claims{
+			Subject: "user123",
+			Custom: map[string]any{
+				"tenant": []byte("byte-tenant"),
+			},
+		}
+		ctx := ContextWithClaims(context.Background(), claims)
+		tenant := TenantFromContext(ctx)
+		if tenant != "byte-tenant" {
+			t.Errorf("expected tenant 'byte-tenant', got %q", tenant)
+		}
+	})
+
+	t.Run("claims with non-string tenant", func(t *testing.T) {
+		claims := &Claims{
+			Subject: "user123",
+			Custom: map[string]any{
+				"tenant": 12345, // integer, not string
+			},
+		}
+		ctx := ContextWithClaims(context.Background(), claims)
+		tenant := TenantFromContext(ctx)
+		if tenant != "" {
+			t.Errorf("expected empty string for non-string tenant, got %q", tenant)
+		}
+	})
+
+	t.Run("claims with nil tenant value", func(t *testing.T) {
+		claims := &Claims{
+			Subject: "user123",
+			Custom: map[string]any{
+				"tenant": nil,
+			},
+		}
+		ctx := ContextWithClaims(context.Background(), claims)
+		tenant := TenantFromContext(ctx)
+		if tenant != "" {
+			t.Errorf("expected empty string for nil tenant value, got %q", tenant)
+		}
+	})
+}
+
+func TestTenantFromContextWithKey(t *testing.T) {
+	t.Run("nil context", func(t *testing.T) {
+		// Intentionally testing nil context handling
+		tenant := TenantFromContextWithKey(nil, "org_id") //nolint:staticcheck // testing nil context behavior
+		if tenant != "" {
+			t.Errorf("expected empty string for nil context, got %q", tenant)
+		}
+	})
+
+	t.Run("custom claim key", func(t *testing.T) {
+		claims := &Claims{
+			Subject: "user123",
+			Custom: map[string]any{
+				"org_id": "organization-456",
+			},
+		}
+		ctx := ContextWithClaims(context.Background(), claims)
+		tenant := TenantFromContextWithKey(ctx, "org_id")
+		if tenant != "organization-456" {
+			t.Errorf("expected tenant 'organization-456', got %q", tenant)
+		}
+	})
+
+	t.Run("missing custom claim key", func(t *testing.T) {
+		claims := &Claims{
+			Subject: "user123",
+			Custom: map[string]any{
+				"tenant": "acme-corp",
+			},
+		}
+		ctx := ContextWithClaims(context.Background(), claims)
+		tenant := TenantFromContextWithKey(ctx, "org_id")
+		if tenant != "" {
+			t.Errorf("expected empty string for missing key, got %q", tenant)
+		}
+	})
+
+	t.Run("empty claim key", func(t *testing.T) {
+		claims := &Claims{
+			Subject: "user123",
+			Custom: map[string]any{
+				"tenant": "acme-corp",
+			},
+		}
+		ctx := ContextWithClaims(context.Background(), claims)
+		tenant := TenantFromContextWithKey(ctx, "")
+		if tenant != "" {
+			t.Errorf("expected empty string for empty key, got %q", tenant)
+		}
+	})
+
+	t.Run("standard claim as tenant key", func(t *testing.T) {
+		// Some systems use 'sub' as tenant identifier
+		claims := &Claims{
+			Subject: "tenant-from-subject",
+			Custom:  map[string]any{},
+		}
+		ctx := ContextWithClaims(context.Background(), claims)
+		tenant := TenantFromContextWithKey(ctx, "sub")
+		if tenant != "tenant-from-subject" {
+			t.Errorf("expected tenant 'tenant-from-subject', got %q", tenant)
+		}
+	})
+
+	t.Run("issuer as tenant key", func(t *testing.T) {
+		// Some systems use issuer to determine tenant
+		claims := &Claims{
+			Subject: "user123",
+			Issuer:  "https://acme.auth.com",
+			Custom:  map[string]any{},
+		}
+		ctx := ContextWithClaims(context.Background(), claims)
+		tenant := TenantFromContextWithKey(ctx, "iss")
+		if tenant != "https://acme.auth.com" {
+			t.Errorf("expected tenant 'https://acme.auth.com', got %q", tenant)
+		}
+	})
+}
+
+func TestDefaultTenantClaimKey(t *testing.T) {
+	if DefaultTenantClaimKey != "tenant" {
+		t.Errorf("expected DefaultTenantClaimKey to be 'tenant', got %q", DefaultTenantClaimKey)
+	}
+}

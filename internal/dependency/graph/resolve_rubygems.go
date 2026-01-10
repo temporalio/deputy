@@ -168,7 +168,7 @@ func (r *RubyGemsResolver) processGemfileLock(ctx context.Context, g *Graph, fil
 		if node == nil {
 			isDirect := directGems[spec.name]
 			node = &Node{
-				PURL:      purl,
+				Purl:      purl,
 				Name:      spec.name,
 				Version:   spec.version,
 				Ecosystem: "RubyGems",
@@ -180,8 +180,8 @@ func (r *RubyGemsResolver) processGemfileLock(ctx context.Context, g *Graph, fil
 
 		if directGems[spec.name] {
 			node.Direct = true
-			if !containsRoot(g.roots, node.PURL) {
-				g.roots = append(g.roots, node.PURL)
+			if !containsRoot(g.roots, node.Purl) {
+				g.roots = append(g.roots, node.Purl)
 			}
 		}
 
@@ -201,11 +201,11 @@ func (r *RubyGemsResolver) processGemfileLock(ctx context.Context, g *Graph, fil
 				continue
 			}
 
-			edgeKey := purl + "->" + childNode.PURL
+			edgeKey := purl + "->" + childNode.Purl
 			if !edgeSet[edgeKey] {
 				g.AddEdge(&Edge{
 					From:  purl,
-					To:    childNode.PURL,
+					To:    childNode.Purl,
 					Scope: ScopeRuntime,
 				})
 				edgeSet[edgeKey] = true

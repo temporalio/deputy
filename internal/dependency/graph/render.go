@@ -168,16 +168,16 @@ func (g *Graph) renderDOT(w io.Writer, cfg *renderConfig) error {
 	// Generate node definitions
 	for i, n := range nodes {
 		id := fmt.Sprintf("n%d", i)
-		nodeIDs[n.PURL] = id
+		nodeIDs[n.GetPurl()] = id
 
 		label := g.nodeLabel(n, cfg)
 		attrs := []string{fmt.Sprintf("label=%q", label)}
 
 		// Styling based on vulnerability status
-		if cfg.highlightVulns && n.VulnCount.Total > 0 {
-			if n.VulnCount.Critical > 0 {
+		if cfg.highlightVulns && n.GetVulnerabilityCount().GetTotal() > 0 {
+			if n.GetVulnerabilityCount().GetCritical() > 0 {
 				attrs = append(attrs, "color=red", "penwidth=2")
-			} else if n.VulnCount.High > 0 {
+			} else if n.GetVulnerabilityCount().GetHigh() > 0 {
 				attrs = append(attrs, "color=orange", "penwidth=2")
 			} else {
 				attrs = append(attrs, "color=yellow", "penwidth=1.5")
@@ -185,7 +185,7 @@ func (g *Graph) renderDOT(w io.Writer, cfg *renderConfig) error {
 		}
 
 		// Direct dependencies styled differently
-		if n.Direct {
+		if n.GetDirect() {
 			attrs = append(attrs, "style=bold")
 		}
 
@@ -196,8 +196,8 @@ func (g *Graph) renderDOT(w io.Writer, cfg *renderConfig) error {
 
 	// Generate edges
 	for _, e := range g.edges {
-		fromID, fromOK := nodeIDs[e.From]
-		toID, toOK := nodeIDs[e.To]
+		fromID, fromOK := nodeIDs[e.GetFrom()]
+		toID, toOK := nodeIDs[e.GetTo()]
 		if fromOK && toOK {
 			fmt.Fprintf(w, "  %s -> %s;\n", fromID, toID)
 		}
@@ -216,7 +216,7 @@ func (g *Graph) renderMermaid(w io.Writer, cfg *renderConfig) error {
 	// Generate node definitions with subgraphs for ecosystems
 	ecosystems := make(map[string][]*Node)
 	for _, n := range nodes {
-		eco := n.Ecosystem
+		eco := n.GetEcosystem()
 		if eco == "" {
 			eco = "other"
 		}
@@ -228,7 +228,7 @@ func (g *Graph) renderMermaid(w io.Writer, cfg *renderConfig) error {
 		fmt.Fprintf(w, "    subgraph %s[%s]\n", sanitizeMermaidID(eco), eco)
 		for _, n := range ecoNodes {
 			nodeID := fmt.Sprintf("n%d", id)
-			nodeIDs[n.PURL] = nodeID
+			nodeIDs[n.GetPurl()] = nodeID
 			id++
 
 			label := g.nodeLabel(n, cfg)
@@ -240,8 +240,8 @@ func (g *Graph) renderMermaid(w io.Writer, cfg *renderConfig) error {
 
 	// Generate edges
 	for _, e := range g.edges {
-		fromID, fromOK := nodeIDs[e.From]
-		toID, toOK := nodeIDs[e.To]
+		fromID, fromOK := nodeIDs[e.GetFrom()]
+		toID, toOK := nodeIDs[e.GetTo()]
 		if fromOK && toOK {
 			fmt.Fprintf(w, "    %s --> %s\n", fromID, toID)
 		}
@@ -251,12 +251,12 @@ func (g *Graph) renderMermaid(w io.Writer, cfg *renderConfig) error {
 	if cfg.highlightVulns {
 		var critical, high, medium []string
 		for _, n := range nodes {
-			nodeID := nodeIDs[n.PURL]
-			if n.VulnCount.Critical > 0 {
+			nodeID := nodeIDs[n.GetPurl()]
+			if n.GetVulnerabilityCount().GetCritical() > 0 {
 				critical = append(critical, nodeID)
-			} else if n.VulnCount.High > 0 {
+			} else if n.GetVulnerabilityCount().GetHigh() > 0 {
 				high = append(high, nodeID)
-			} else if n.VulnCount.Medium > 0 || n.VulnCount.Low > 0 {
+			} else if n.GetVulnerabilityCount().GetMedium() > 0 || n.GetVulnerabilityCount().GetLow() > 0 {
 				medium = append(medium, nodeID)
 			}
 		}
@@ -275,13 +275,13 @@ func (g *Graph) renderMermaid(w io.Writer, cfg *renderConfig) error {
 }
 
 func (g *Graph) mermaidNodeShape(n *Node, cfg *renderConfig) func(string) string {
-	if n.Direct {
+	if n.GetDirect() {
 		// Stadium shape for direct deps
 		return func(label string) string {
 			return fmt.Sprintf("([%s])", escapeMermaid(label))
 		}
 	}
-	if cfg.highlightVulns && n.VulnCount.Total > 0 {
+	if cfg.highlightVulns && n.GetVulnerabilityCount().GetTotal() > 0 {
 		// Hexagon for vulnerable
 		return func(label string) string {
 			return fmt.Sprintf("{{%s}}", escapeMermaid(label))
@@ -301,25 +301,25 @@ func (g *Graph) renderD3(w io.Writer, cfg *renderConfig) error {
 	fmt.Fprintf(w, "  \"nodes\": [\n")
 
 	for i, n := range nodes {
-		nodeIndices[n.PURL] = i
+		nodeIndices[n.GetPurl()] = i
 		if i > 0 {
 			fmt.Fprintf(w, ",\n")
 		}
 
 		group := 1
-		if n.Direct {
+		if n.GetDirect() {
 			group = 0
 		}
-		if n.VulnCount.Critical > 0 {
+		if n.GetVulnerabilityCount().GetCritical() > 0 {
 			group = 4
-		} else if n.VulnCount.High > 0 {
+		} else if n.GetVulnerabilityCount().GetHigh() > 0 {
 			group = 3
-		} else if n.VulnCount.Total > 0 {
+		} else if n.GetVulnerabilityCount().GetTotal() > 0 {
 			group = 2
 		}
 
 		fmt.Fprintf(w, "    {\"id\": %q, \"name\": %q, \"version\": %q, \"group\": %d, \"vulns\": %d}",
-			n.PURL, n.Name, n.Version, group, n.VulnCount.Total)
+			n.GetPurl(), n.GetName(), n.GetVersion(), group, n.GetVulnerabilityCount().GetTotal())
 	}
 
 	fmt.Fprintf(w, "\n  ],\n")
@@ -327,8 +327,8 @@ func (g *Graph) renderD3(w io.Writer, cfg *renderConfig) error {
 
 	first := true
 	for _, e := range g.edges {
-		srcIdx, srcOK := nodeIndices[e.From]
-		tgtIdx, tgtOK := nodeIndices[e.To]
+		srcIdx, srcOK := nodeIndices[e.GetFrom()]
+		tgtIdx, tgtOK := nodeIndices[e.GetTo()]
 		if srcOK && tgtOK {
 			if !first {
 				fmt.Fprintf(w, ",\n")
@@ -354,7 +354,7 @@ func (g *Graph) renderText(w io.Writer, cfg *renderConfig) error {
 
 	// Sort roots for deterministic output
 	slices.SortFunc(roots, func(a, b *Node) int {
-		return strings.Compare(a.Name, b.Name)
+		return strings.Compare(a.GetName(), b.GetName())
 	})
 
 	for i, root := range roots {
@@ -369,16 +369,16 @@ func (g *Graph) renderTextNode(w io.Writer, n *Node, prefix string, isLast bool,
 		return
 	}
 
-	if visited[n.PURL] {
+	if visited[n.GetPurl()] {
 		// Indicate cycle
 		connector := "├── "
 		if isLast {
 			connector = "└── "
 		}
-		fmt.Fprintf(w, "%s%s%s (circular)\n", prefix, connector, n.Name)
+		fmt.Fprintf(w, "%s%s%s (circular)\n", prefix, connector, n.GetName())
 		return
 	}
-	visited[n.PURL] = true
+	visited[n.GetPurl()] = true
 
 	connector := "├── "
 	if isLast {
@@ -393,7 +393,7 @@ func (g *Graph) renderTextNode(w io.Writer, n *Node, prefix string, isLast bool,
 
 	// Get children
 	var children []*Node
-	for child := range g.Children(n.PURL) {
+	for child := range g.Children(n.GetPurl()) {
 		if cfg.filterPred == nil || cfg.filterPred(child) {
 			children = append(children, child)
 		}
@@ -401,7 +401,7 @@ func (g *Graph) renderTextNode(w io.Writer, n *Node, prefix string, isLast bool,
 
 	// Sort children for deterministic output
 	slices.SortFunc(children, func(a, b *Node) int {
-		return strings.Compare(a.Name, b.Name)
+		return strings.Compare(a.GetName(), b.GetName())
 	})
 
 	// Compute new prefix
@@ -415,7 +415,7 @@ func (g *Graph) renderTextNode(w io.Writer, n *Node, prefix string, isLast bool,
 	}
 
 	// Check if collapsed
-	if cfg.collapsed[n.PURL] && len(children) > 0 {
+	if cfg.collapsed[n.GetPurl()] && len(children) > 0 {
 		fmt.Fprintf(w, "%s└── ... (%d dependencies)\n", newPrefix, len(children))
 		return
 	}
@@ -424,7 +424,7 @@ func (g *Graph) renderTextNode(w io.Writer, n *Node, prefix string, isLast bool,
 		g.renderTextNode(w, child, newPrefix, i == len(children)-1, visited, cfg, depth+1)
 	}
 
-	delete(visited, n.PURL)
+	delete(visited, n.GetPurl())
 }
 
 // jsonNode is the JSON representation of a graph node.
@@ -435,12 +435,12 @@ type jsonNode struct {
 	Ecosystem string        `json:"ecosystem"`
 	Direct    bool          `json:"direct"`
 	Depth     int           `json:"depth"`
-	VulnCount jsonVulnCount `json:"vuln_count"`
+	VulnerabilityCount jsonVulnerabilityCount `json:"vulnerability_count"`
 	Locations []string      `json:"locations,omitempty"`
 }
 
-// jsonVulnCount is the JSON representation of vulnerability counts.
-type jsonVulnCount struct {
+// jsonVulnerabilityCount is the JSON representation of vulnerability counts.
+type jsonVulnerabilityCount struct {
 	Critical int `json:"critical"`
 	High     int `json:"high"`
 	Medium   int `json:"medium"`
@@ -466,39 +466,39 @@ func (g *Graph) renderJSON(w io.Writer, cfg *renderConfig) error {
 	nodes := g.filteredNodes(cfg)
 	nodeSet := make(map[string]bool)
 	for _, n := range nodes {
-		nodeSet[n.PURL] = true
+		nodeSet[n.GetPurl()] = true
 	}
 
 	// Build JSON nodes
 	jsonNodes := make([]jsonNode, 0, len(nodes))
 	for _, n := range nodes {
 		jsonNodes = append(jsonNodes, jsonNode{
-			PURL:      n.PURL,
-			Name:      n.Name,
-			Version:   n.Version,
-			Ecosystem: n.Ecosystem,
-			Direct:    n.Direct,
-			Depth:     n.Depth,
-			VulnCount: jsonVulnCount{
-				Critical: n.VulnCount.Critical,
-				High:     n.VulnCount.High,
-				Medium:   n.VulnCount.Medium,
-				Low:      n.VulnCount.Low,
-				Total:    n.VulnCount.Total,
+			PURL:      n.GetPurl(),
+			Name:      n.GetName(),
+			Version:   n.GetVersion(),
+			Ecosystem: n.GetEcosystem(),
+			Direct:    n.GetDirect(),
+			Depth:     int(n.GetDepth()),
+			VulnerabilityCount: jsonVulnerabilityCount{
+				Critical: int(n.GetVulnerabilityCount().GetCritical()),
+				High:     int(n.GetVulnerabilityCount().GetHigh()),
+				Medium:   int(n.GetVulnerabilityCount().GetMedium()),
+				Low:      int(n.GetVulnerabilityCount().GetLow()),
+				Total:    int(n.GetVulnerabilityCount().GetTotal()),
 			},
-			Locations: n.Locations,
+			Locations: n.GetLocations(),
 		})
 	}
 
 	// Build JSON edges (only for nodes in the filtered set)
 	var jsonEdges []jsonEdge
 	for _, e := range g.edges {
-		if nodeSet[e.From] && nodeSet[e.To] {
+		if nodeSet[e.GetFrom()] && nodeSet[e.GetTo()] {
 			jsonEdges = append(jsonEdges, jsonEdge{
-				From:       e.From,
-				To:         e.To,
-				Constraint: e.Constraint,
-				Scope:      string(e.Scope),
+				From:       e.GetFrom(),
+				To:         e.GetTo(),
+				Constraint: e.GetConstraint(),
+				Scope:      e.GetScope().String(),
 			})
 		}
 	}
@@ -516,7 +516,7 @@ func (g *Graph) renderJSON(w io.Writer, cfg *renderConfig) error {
 func (g *Graph) filteredNodes(cfg *renderConfig) []*Node {
 	var nodes []*Node
 	for _, n := range g.nodes {
-		if cfg.maxDepth >= 0 && n.Depth > cfg.maxDepth {
+		if cfg.maxDepth >= 0 && int(n.GetDepth()) > cfg.maxDepth {
 			continue
 		}
 		if cfg.filterPred != nil && !cfg.filterPred(n) {
@@ -527,19 +527,19 @@ func (g *Graph) filteredNodes(cfg *renderConfig) []*Node {
 
 	// Sort for deterministic output
 	slices.SortFunc(nodes, func(a, b *Node) int {
-		return strings.Compare(a.PURL, b.PURL)
+		return strings.Compare(a.GetPurl(), b.GetPurl())
 	})
 
 	return nodes
 }
 
 func (g *Graph) nodeLabel(n *Node, cfg *renderConfig) string {
-	label := n.Name
-	if cfg.showVersions && n.Version != "" {
-		label += "@" + n.Version
+	label := n.GetName()
+	if cfg.showVersions && n.GetVersion() != "" {
+		label += "@" + n.GetVersion()
 	}
-	if cfg.showVulnCounts && n.VulnCount.Total > 0 {
-		label += fmt.Sprintf(" [%dV]", n.VulnCount.Total)
+	if cfg.showVulnCounts && n.GetVulnerabilityCount().GetTotal() > 0 {
+		label += fmt.Sprintf(" [%dV]", n.GetVulnerabilityCount().GetTotal())
 	}
 	return label
 }

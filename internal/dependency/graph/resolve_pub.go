@@ -189,7 +189,7 @@ func (r *PubResolver) processPubspecLock(ctx context.Context, g *Graph, files Fi
 		}
 		if node == nil {
 			node = &Node{
-				PURL:      purl,
+				Purl:      purl,
 				Name:      name,
 				Version:   pkg.Version,
 				Ecosystem: "Pub",
@@ -205,8 +205,8 @@ func (r *PubResolver) processPubspecLock(ctx context.Context, g *Graph, files Fi
 		}
 
 		// Add to roots if direct
-		if isDirect && !containsRoot(g.roots, node.PURL) {
-			g.roots = append(g.roots, node.PURL)
+		if isDirect && !containsRoot(g.roots, node.Purl) {
+			g.roots = append(g.roots, node.Purl)
 		}
 	}
 

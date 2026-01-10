@@ -57,6 +57,18 @@ var (
 		"secret",
 		"secrets",
 		"report",
+		// Graph specific variables
+		"graph",      // Full graph data (stats, nodes, edges)
+		"node",       // Current node in graph_node entrypoint
+		"edge",       // Current edge in graph_edge entrypoint
+		"from_node",  // Source node for edge
+		"to_node",    // Target node for edge
+		"nodes",      // All nodes in graph
+		"edges",      // All edges in graph
+		"stats",      // Graph statistics
+		"roots",      // Root (direct) dependencies
+		"ancestors",  // Ancestor nodes for current node
+		"descendants", // Descendant nodes for current node
 	}
 )
 

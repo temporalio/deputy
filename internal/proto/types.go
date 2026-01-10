@@ -181,7 +181,7 @@ func ImageMetadataToScanProto(m *image.Metadata) *scanv1.ImageMetadata {
 		Os:           m.OS,
 		LayerCount:   int32(m.LayerCount),
 		Size:         m.Size,
-		Created:      m.Created.Unix(),
+		Created:      timestampOrNil(m.Created),
 		Digest:       m.Digest,
 	}
 }
@@ -196,7 +196,7 @@ func ImageMetadataFromScanProto(m *scanv1.ImageMetadata) image.Metadata {
 		OS:           m.Os,
 		LayerCount:   int(m.LayerCount),
 		Size:         m.Size,
-		Created:      time.Unix(m.Created, 0),
+		Created:      timeFromProto(m.Created),
 		Digest:       m.Digest,
 	}
 }
@@ -233,7 +233,7 @@ func HealthcheckFromScanProto(h *scanv1.Healthcheck) *image.HealthcheckConfig {
 func HistoryEntryToScanProto(h image.HistoryEntry) *scanv1.HistoryEntry {
 	return &scanv1.HistoryEntry{
 		CreatedBy:  h.CreatedBy,
-		Created:    h.Created.Unix(),
+		Created:    timestampOrNil(h.Created),
 		EmptyLayer: h.EmptyLayer,
 	}
 }
@@ -245,7 +245,7 @@ func HistoryEntryFromScanProto(h *scanv1.HistoryEntry) image.HistoryEntry {
 	}
 	return image.HistoryEntry{
 		CreatedBy:  h.CreatedBy,
-		Created:    time.Unix(h.Created, 0),
+		Created:    timeFromProto(h.Created),
 		EmptyLayer: h.EmptyLayer,
 	}
 }

@@ -8,7 +8,9 @@ import (
 
 	scanv1 "github.com/picatz/deputy/gen/deputy/scan/v1"
 	"github.com/picatz/deputy/gen/deputy/scan/v1/scanv1connect"
+	vulnerabilityv1 "github.com/picatz/deputy/gen/deputy/vulnerability/v1"
 	"github.com/picatz/deputy/internal/logs"
+	"github.com/picatz/deputy/internal/otel"
 	internalproto "github.com/picatz/deputy/internal/proto"
 	"github.com/picatz/deputy/internal/scanning"
 	"github.com/picatz/deputy/internal/targets"
@@ -47,14 +49,28 @@ func (h *ScanHandler) Scan(
 	ctx context.Context,
 	req *connect.Request[scanv1.ScanRequest],
 ) (*connect.Response[scanv1.ScanResponse], error) {
+	// Get span from otelconnect interceptor - don't create a new one
+	span := otel.SpanFromContext(ctx)
+
+	if err := internalproto.Validate(req.Msg); err != nil {
+		otel.SetSpanError(span, err)
+		return nil, connect.NewError(connect.CodeInvalidArgument, err)
+	}
+
 	target := req.Msg.Target
 	if target == "" {
-		return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("target is required"))
+		err := fmt.Errorf("target is required")
+		otel.SetSpanError(span, err)
+		return nil, connect.NewError(connect.CodeInvalidArgument, err)
 	}
+
+	// Add business attributes to the otelconnect span
+	span.SetAttributes(otel.AttrTargetPath.String(target))
 
 	// Security: Validate target before processing (skip in local mode)
 	if !h.localMode {
 		if err := validateTarget(target); err != nil {
+			otel.SetSpanError(span, err)
 			return nil, connect.NewError(connect.CodeInvalidArgument, err)
 		}
 	}
@@ -94,6 +110,7 @@ func (h *ScanHandler) Scan(
 	// Route to appropriate scanner based on target type
 	execution, err := h.routeScan(ctx, target, ref, refProvided, kind, imageTransport, opts)
 	if err != nil {
+		otel.SetSpanError(span, err)
 		logs.Error(ctx, "scan failed", "target", target, "error", err)
 		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("scan failed: %w", err))
 	}
@@ -105,6 +122,16 @@ func (h *ScanHandler) Scan(
 
 	// Convert result to proto
 	response := internalproto.ScanningResultToProto(&execution.Result)
+
+	// Record scan results on the span
+	otel.RecordScanResults(span,
+		int(response.PackagesScanned),
+		len(response.Findings),
+		countBySeverity(response.Findings, vulnerabilityv1.SeverityLevel_SEVERITY_LEVEL_CRITICAL),
+		countBySeverity(response.Findings, vulnerabilityv1.SeverityLevel_SEVERITY_LEVEL_HIGH),
+		countBySeverity(response.Findings, vulnerabilityv1.SeverityLevel_SEVERITY_LEVEL_MEDIUM),
+		countBySeverity(response.Findings, vulnerabilityv1.SeverityLevel_SEVERITY_LEVEL_LOW),
+	)
 
 	logs.Info(ctx, "scan completed",
 		"target", target,
@@ -160,14 +187,28 @@ func (h *ScanHandler) StreamScan(
 	req *connect.Request[scanv1.StreamScanRequest],
 	stream *connect.ServerStream[scanv1.ScanProgress],
 ) error {
+	// Get span from otelconnect interceptor - don't create a new one
+	span := otel.SpanFromContext(ctx)
+
+	if err := internalproto.Validate(req.Msg); err != nil {
+		otel.SetSpanError(span, err)
+		return connect.NewError(connect.CodeInvalidArgument, err)
+	}
+
 	target := req.Msg.Target
 	if target == "" {
-		return connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("target is required"))
+		err := fmt.Errorf("target is required")
+		otel.SetSpanError(span, err)
+		return connect.NewError(connect.CodeInvalidArgument, err)
 	}
+
+	// Add business attributes to the otelconnect span
+	span.SetAttributes(otel.AttrTargetPath.String(target))
 
 	// Security: Validate target before processing (skip in local mode)
 	if !h.localMode {
 		if err := validateTarget(target); err != nil {
+			otel.SetSpanError(span, err)
 			return connect.NewError(connect.CodeInvalidArgument, err)
 		}
 	}
@@ -231,6 +272,7 @@ func (h *ScanHandler) StreamScan(
 	// Perform the scan using unified routing
 	execution, err := h.routeScan(ctx, target, ref, refProvided, kind, imageTransport, opts)
 	if err != nil {
+		otel.SetSpanError(span, err)
 		// Send failed phase
 		_ = stream.Send(&scanv1.ScanProgress{
 			Phase:   scanv1.ScanPhase_SCAN_PHASE_FAILED,
@@ -259,6 +301,16 @@ func (h *ScanHandler) StreamScan(
 		return err
 	}
 
+	// Record scan results on the span
+	otel.RecordScanResults(span,
+		int(response.PackagesScanned),
+		len(response.Findings),
+		countBySeverity(response.Findings, vulnerabilityv1.SeverityLevel_SEVERITY_LEVEL_CRITICAL),
+		countBySeverity(response.Findings, vulnerabilityv1.SeverityLevel_SEVERITY_LEVEL_HIGH),
+		countBySeverity(response.Findings, vulnerabilityv1.SeverityLevel_SEVERITY_LEVEL_MEDIUM),
+		countBySeverity(response.Findings, vulnerabilityv1.SeverityLevel_SEVERITY_LEVEL_LOW),
+	)
+
 	logs.Info(ctx, "streaming scan completed",
 		"target", target,
 		"packages_scanned", response.PackagesScanned,
@@ -266,4 +318,15 @@ func (h *ScanHandler) StreamScan(
 	)
 
 	return nil
+}
+
+// countBySeverity counts findings with the given severity level.
+func countBySeverity(findings []*vulnerabilityv1.Finding, level vulnerabilityv1.SeverityLevel) int {
+	count := 0
+	for _, f := range findings {
+		if f.GetAdvisory().GetSeverity().GetLevel() == level {
+			count++
+		}
+	}
+	return count
 }

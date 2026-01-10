@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	graphv1 "github.com/picatz/deputy/gen/deputy/graph/v1"
 	"github.com/picatz/deputy/internal/dependency/graph"
 )
 
@@ -13,21 +14,21 @@ func TestWriteGraphFlatList(t *testing.T) {
 
 	g := graph.New()
 	g.AddNode(&graph.Node{
-		PURL:      "pkg:npm/lodash@4.17.21",
+		Purl:      "pkg:npm/lodash@4.17.21",
 		Name:      "lodash",
 		Version:   "4.17.21",
 		Ecosystem: "npm",
 		Direct:    true,
 	})
 	g.AddNode(&graph.Node{
-		PURL:      "pkg:npm/express@4.18.2",
+		Purl:      "pkg:npm/express@4.18.2",
 		Name:      "express",
 		Version:   "4.18.2",
 		Ecosystem: "npm",
 		Direct:    false,
 	})
 	g.AddNode(&graph.Node{
-		PURL:      "pkg:golang/github.com/spf13/cobra@1.8.0",
+		Purl:      "pkg:golang/github.com/spf13/cobra@1.8.0",
 		Name:      "github.com/spf13/cobra",
 		Version:   "1.8.0",
 		Ecosystem: "Go",
@@ -75,13 +76,13 @@ func TestWriteGraphFlatList(t *testing.T) {
 func TestWriteGraphStats(t *testing.T) {
 	t.Parallel()
 
-	stats := graph.Stats{
+	stats := &graphv1.GraphStats{
 		TotalNodes:      100,
 		DirectNodes:     20,
 		TransitiveNodes: 80,
 		MaxDepth:        5,
 		VulnerableNodes: 3,
-		Ecosystems: map[string]int{
+		Ecosystems: map[string]int32{
 			"npm": 60,
 			"Go":  40,
 		},
@@ -145,10 +146,10 @@ func TestDeduplicatePaths(t *testing.T) {
 	t.Parallel()
 
 	// Create nodes for testing
-	nodeA := &graph.Node{PURL: "pkg:npm/a@1.0.0", Name: "a", Version: "1.0.0"}
-	nodeB := &graph.Node{PURL: "pkg:npm/b@1.0.0", Name: "b", Version: "1.0.0"}
-	nodeC := &graph.Node{PURL: "pkg:npm/c@1.0.0", Name: "c", Version: "1.0.0"}
-	nodeB2 := &graph.Node{PURL: "pkg:npm/b@2.0.0", Name: "b", Version: "2.0.0"} // Same name, different version
+	nodeA := &graph.Node{Purl: "pkg:npm/a@1.0.0", Name: "a", Version: "1.0.0"}
+	nodeB := &graph.Node{Purl: "pkg:npm/b@1.0.0", Name: "b", Version: "1.0.0"}
+	nodeC := &graph.Node{Purl: "pkg:npm/c@1.0.0", Name: "c", Version: "1.0.0"}
+	nodeB2 := &graph.Node{Purl: "pkg:npm/b@2.0.0", Name: "b", Version: "2.0.0"} // Same name, different version
 
 	tests := []struct {
 		name     string
@@ -260,14 +261,14 @@ func TestFindMatchingNodes(t *testing.T) {
 	t.Parallel()
 
 	g := graph.New()
-	g.AddNode(&graph.Node{PURL: "pkg:golang/golang.org/x/net@0.47.0", Name: "golang.org/x/net", Version: "0.47.0"})
-	g.AddNode(&graph.Node{PURL: "pkg:golang/github.com/goccy/go-yaml@1.12.0", Name: "github.com/goccy/go-yaml", Version: "1.12.0"})
-	g.AddNode(&graph.Node{PURL: "pkg:golang/gopkg.in/yaml.v3@3.0.1", Name: "gopkg.in/yaml.v3", Version: "3.0.1"})
-	g.AddNode(&graph.Node{PURL: "pkg:golang/sigs.k8s.io/yaml@1.6.0", Name: "sigs.k8s.io/yaml", Version: "1.6.0"})
-	g.AddNode(&graph.Node{PURL: "pkg:golang/go.yaml.in/yaml/v2@2.4.2", Name: "go.yaml.in/yaml/v2", Version: "2.4.2"})
-	g.AddNode(&graph.Node{PURL: "pkg:npm/express@4.18.2", Name: "express", Version: "4.18.2"})
-	g.AddNode(&graph.Node{PURL: "pkg:npm/network-utils@1.0.0", Name: "network-utils", Version: "1.0.0"})
-	g.AddNode(&graph.Node{PURL: "pkg:golang/go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp@0.63.0", Name: "go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp", Version: "0.63.0"})
+	g.AddNode(&graph.Node{Purl: "pkg:golang/golang.org/x/net@0.47.0", Name: "golang.org/x/net", Version: "0.47.0"})
+	g.AddNode(&graph.Node{Purl: "pkg:golang/github.com/goccy/go-yaml@1.12.0", Name: "github.com/goccy/go-yaml", Version: "1.12.0"})
+	g.AddNode(&graph.Node{Purl: "pkg:golang/gopkg.in/yaml.v3@3.0.1", Name: "gopkg.in/yaml.v3", Version: "3.0.1"})
+	g.AddNode(&graph.Node{Purl: "pkg:golang/sigs.k8s.io/yaml@1.6.0", Name: "sigs.k8s.io/yaml", Version: "1.6.0"})
+	g.AddNode(&graph.Node{Purl: "pkg:golang/go.yaml.in/yaml/v2@2.4.2", Name: "go.yaml.in/yaml/v2", Version: "2.4.2"})
+	g.AddNode(&graph.Node{Purl: "pkg:npm/express@4.18.2", Name: "express", Version: "4.18.2"})
+	g.AddNode(&graph.Node{Purl: "pkg:npm/network-utils@1.0.0", Name: "network-utils", Version: "1.0.0"})
+	g.AddNode(&graph.Node{Purl: "pkg:golang/go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp@0.63.0", Name: "go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp", Version: "0.63.0"})
 
 	tests := []struct {
 		query       string
@@ -299,65 +300,6 @@ func TestFindMatchingNodes(t *testing.T) {
 					t.Errorf("findMatchingNodes(%q) returned no matches, want first=%q", tt.query, tt.wantFirst)
 				} else if matches[0].Name != tt.wantFirst {
 					t.Errorf("findMatchingNodes(%q) first match = %q, want %q", tt.query, matches[0].Name, tt.wantFirst)
-				}
-			}
-		})
-	}
-}
-
-func TestRenderWhyOutput(t *testing.T) {
-	t.Parallel()
-
-	g := graph.New()
-
-	// Add a direct dependency
-	g.AddNode(&graph.Node{
-		PURL:    "pkg:npm/direct@1.0.0",
-		Name:    "direct",
-		Version: "1.0.0",
-		Direct:  true,
-	})
-
-	// Add a transitive dependency with path
-	g.AddNode(&graph.Node{
-		PURL:    "pkg:npm/transitive@1.0.0",
-		Name:    "transitive",
-		Version: "1.0.0",
-		Direct:  false,
-	})
-	g.AddEdge(&graph.Edge{
-		From: "pkg:npm/direct@1.0.0",
-		To:   "pkg:npm/transitive@1.0.0",
-	})
-
-	tests := []struct {
-		name     string
-		node     *graph.Node
-		showAll  bool
-		contains []string
-	}{
-		{
-			name:     "direct dependency",
-			node:     g.Node("pkg:npm/direct@1.0.0"),
-			showAll:  false,
-			contains: []string{"direct", "1.0.0", "(direct dependency)"},
-		},
-		{
-			name:     "transitive dependency",
-			node:     g.Node("pkg:npm/transitive@1.0.0"),
-			showAll:  false,
-			contains: []string{"transitive", "1.0.0"},
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			var buf bytes.Buffer
-			renderWhyOutput(&buf, g, tt.node, tt.showAll)
-			output := buf.String()
-			for _, s := range tt.contains {
-				if !strings.Contains(output, s) {
-					t.Errorf("renderWhyOutput() = %q, expected to contain %q", output, s)
 				}
 			}
 		})

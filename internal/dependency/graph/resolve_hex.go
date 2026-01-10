@@ -161,7 +161,7 @@ func (r *HexResolver) processMixLock(ctx context.Context, g *Graph, files FileRe
 			// mix.lock doesn't indicate direct/transitive, so default to false
 			// The inventory will set the correct value based on mix.exs
 			node = &Node{
-				PURL:      purl,
+				Purl:      purl,
 				Name:      pkg.name,
 				Version:   pkg.version,
 				Ecosystem: "Hex",

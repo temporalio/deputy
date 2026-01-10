@@ -184,6 +184,26 @@ var BindingProfiles = map[Entrypoint]BindingProfile{
 		Description: "Triggers for each component in an SBOM",
 	},
 
+	// Graph entrypoints
+	EntrypointGraphReport: {
+		Entrypoint:  EntrypointGraphReport,
+		Required:    append([]string{"graph", "nodes", "edges", "stats", "roots"}, envVars...),
+		Optional:    targetVars,
+		Description: "Triggers after a dependency graph is built with full graph data",
+	},
+	EntrypointGraphNode: {
+		Entrypoint:  EntrypointGraphNode,
+		Required:    append([]string{"node"}, envVars...),
+		Optional:    append([]string{"nodes", "edges", "stats", "ancestors", "descendants"}, targetVars...),
+		Description: "Triggers for each node in the dependency graph",
+	},
+	EntrypointGraphEdge: {
+		Entrypoint:  EntrypointGraphEdge,
+		Required:    append([]string{"edge", "from_node", "to_node"}, envVars...),
+		Optional:    append([]string{"nodes", "edges", "stats"}, targetVars...),
+		Description: "Triggers for each edge in the dependency graph",
+	},
+
 	// Fix entrypoints
 	EntrypointFixPlan: {
 		Entrypoint:  EntrypointFixPlan,

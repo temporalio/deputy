@@ -644,6 +644,7 @@ deputy scan --debug  # shows plugin invocations
 
 - [Go] 1.21+ (uses [`toolchain`](https://go.dev/doc/toolchain) directive); use modern features like [generics](https://go.dev/blog/intro-generics), and packages like [`slices`](https://pkg.go.dev/slices), [`maps`](https://pkg.go.dev/maps), [`iter`](https://pkg.go.dev/iter), [`cmp`](https://pkg.go.dev/cmp), [`log/slog`](https://pkg.go.dev/log/slog), etc.
 - [Cobra] for CLI; [Charm] for [Fang], [Lipgloss], etc. Prefer avoiding emojis in output, use ASCII or Unicode symbols, only if they add clarity; when in doubt, don't use them. Avoid them in most machine-readable output.
+- [ConnectRPC] for gRPC/HTTP services with ecosystem libraries: [authn-go] (JWT authentication), [validate-go] (protovalidate), [cors-go] (CORS headers), [otelconnect] (OpenTelemetry).
 - [CEL] (Common Expression Language) for policies in a [YAML]-based [DSL].
 - [OSV] API and [GCS] buckets for vulnerability data.
 - [OSV-SCALIBR] for SCA inventory extraction (see [`internal/inventory/`](internal/inventory/)).
@@ -658,6 +659,11 @@ deputy scan --debug  # shows plugin invocations
 [Charm]: https://charm.sh/
 [Fang]: https://github.com/charmbracelet/fang
 [Lipgloss]: https://github.com/charmbracelet/lipgloss
+[ConnectRPC]: https://connectrpc.com/
+[authn-go]: https://github.com/connectrpc/authn-go
+[validate-go]: https://github.com/connectrpc/validate-go
+[cors-go]: https://github.com/connectrpc/cors-go
+[otelconnect]: https://github.com/connectrpc/otelconnect-go
 [CEL]: https://cel.dev/
 [YAML]: https://yaml.org/
 [DSL]: https://en.wikipedia.org/wiki/Domain-specific_language
@@ -836,6 +842,8 @@ When scanning with `--with-graph`, the dependency graph is resolved to show how 
 *   Identify vulnerabilities with long dependency chains (supply chain risk):
     `vulnerability.?depth.orValue(0) > 3`
 
+**Note:** For full dependency graph analysis (graph statistics, node/edge policies, traversal), use the `graph_report`, `graph_node`, and `graph_edge` entrypoints with the `deputy graph` command. See the [Graph Helper Functions](#graph-helper-functions) section below.
+
 ---
 
 #### `vulnerabilities` list
@@ -912,7 +920,7 @@ When a container image defines a HEALTHCHECK instruction, the following fields a
 | `metadata.os` | `string` | Operating system | `"linux"` |
 | `metadata.layer_count` | `int` | Number of layers | `15` |
 | `metadata.size` | `int` | Total size in bytes | `104857600` |
-| `metadata.created` | `int` | Creation timestamp (Unix) | `1704067200` |
+| `metadata.created` | `timestamp` | When the image was created | `timestamp("2024-01-01T00:00:00Z")` |
 | `metadata.digest` | `string` | Image digest | `"sha256:abc..."` |
 
 **Image History (`image.history`):**
@@ -922,7 +930,7 @@ List of build history entries showing Dockerfile commands:
 | Field | Type | Description |
 |---|---|---|
 | `history[].created_by` | `string` | Command that created the layer |
-| `history[].created` | `int` | Creation timestamp (Unix) |
+| `history[].created` | `timestamp` | When this layer was created |
 | `history[].empty_layer` | `bool` | Whether this is a metadata-only layer |
 
 **Example Expressions for `image`:**
@@ -940,7 +948,7 @@ List of build history entries showing Dockerfile commands:
 *   Require OCI labels for traceability:
     `has(image.config) && !('org.opencontainers.image.source' in image.config.labels)`
 *   Block images older than 90 days:
-    `has(image.metadata) && age(image.metadata.created) > duration('2160h')`
+    `has(image.metadata) && now() - image.metadata.created > duration('2160h')`
 
 ---
 
@@ -1350,6 +1358,155 @@ policies:
         reason: "KEV vulnerability with high SSVC priority"
 ```
 
+#### Graph Helper Functions
+
+These functions provide dependency graph analysis for `graph_report`, `graph_node`, and `graph_edge` entrypoints.
+
+| Function | Signature | Description |
+|----------|-----------|-------------|
+| `graphMatch()` | `graphMatch(string, pattern) bool` | Glob-like pattern matching (supports `*`, `*prefix`, `suffix*`, `*contains*`) |
+| `isDirectDep()` | `isDirectDep(node) bool` | Check if node is a direct dependency |
+| `nodeDepth()` | `nodeDepth(node) int` | Get dependency depth (0 = direct, 1+ = transitive) |
+| `nodeEcosystem()` | `nodeEcosystem(node) string` | Get ecosystem (e.g., "npm", "Go", "PyPI") |
+| `hasVulnerabilities()` | `hasVulnerabilities(node) bool` | Check if node has any vulnerabilities |
+| `vulnerabilityCount()` | `vulnerabilityCount(node) int` | Get total vulnerability count for node |
+
+**Path Analysis Functions:**
+
+These work with `vulnerability.path` (when `--with-graph` is enabled) and graph traversal results:
+
+| Function | Signature | Description |
+|----------|-----------|-------------|
+| `pathLength()` | `pathLength(list) int` | Get length of a dependency path (number of nodes) |
+| `pathContains()` | `pathContains(list, pattern) bool` | Check if any path element matches the glob pattern |
+| `pathDepth()` | `pathDepth(list) int` | Get dependency depth from path (path length - 1). Direct = 0 |
+
+**Node Accessor Functions:**
+
+Convenient accessors for node fields, composable with `filter`/`map`:
+
+| Function | Signature | Description |
+|----------|-----------|-------------|
+| `nodePurl()` | `nodePurl(node) string` | Get PURL of a node |
+| `nodeName()` | `nodeName(node) string` | Get name of a node |
+| `nodeVersion()` | `nodeVersion(node) string` | Get version of a node |
+
+**Edge Functions:**
+
+| Function | Signature | Description |
+|----------|-----------|-------------|
+| `edgeScope()` | `edgeScope(edge) string` | Get scope of an edge (runtime, dev, test, build, optional) |
+
+**Vulnerability Helper Functions:**
+
+These work with vulnerability objects in `scan_vulnerability` and `scan_report` entrypoints:
+
+| Function | Signature | Description |
+|----------|-----------|-------------|
+| `vulnerabilitySeverity()` | `vulnerabilitySeverity(vulnerability) string` | Get severity level (CRITICAL, HIGH, MEDIUM, LOW) |
+| `vulnerabilityId()` | `vulnerabilityId(vulnerability) string` | Get advisory ID (CVE-xxx, GHSA-xxx) |
+| `hasFix()` | `hasFix(vulnerability) bool` | Check if vulnerability has a known fix |
+| `inKEV()` | `inKEV(vulnerability) bool` | Check if vulnerability is in CISA's KEV catalog |
+| `epssScore()` | `epssScore(vulnerability) double` | Get EPSS score (0.0-1.0), returns 0 if unavailable |
+
+<a id="graph-policy-variables"></a>
+**Graph Policy Variables:**
+
+Available in `graph_report` entrypoint (whole-graph policies):
+
+| Variable | Type | Description |
+|----------|------|-------------|
+| `graph` | `object` | Full graph data |
+| `nodes` | `list` | All dependency nodes |
+| `edges` | `list` | All dependency edges |
+| `roots` | `list` | Direct dependencies (root nodes) |
+| `stats` | `object` | Graph statistics (see below) |
+
+**Stats Object Fields:**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `stats.total_nodes` | `int` | Total number of dependencies |
+| `stats.total_edges` | `int` | Total number of dependency relationships |
+| `stats.direct_count` | `int` | Number of direct dependencies |
+| `stats.transitive_count` | `int` | Number of transitive dependencies |
+| `stats.max_depth` | `int` | Maximum dependency tree depth |
+| `stats.ecosystems` | `map` | Map of ecosystem to count |
+
+Available in `graph_node` entrypoint (per-node policies):
+
+| Variable | Type | Description |
+|----------|------|-------------|
+| `node` | `object` | Current node being evaluated |
+| `node.name` | `string` | Package name |
+| `node.version` | `string` | Package version |
+| `node.ecosystem` | `string` | Package ecosystem |
+| `node.direct` | `bool` | Whether this is a direct dependency |
+| `node.depth` | `int` | Dependency depth (0 = direct) |
+| `node.vulnerabilities` | `list` | Vulnerabilities affecting this node |
+
+Available in `graph_edge` entrypoint (per-edge policies):
+
+| Variable | Type | Description |
+|----------|------|-------------|
+| `edge` | `object` | Current edge being evaluated |
+| `from_node` | `object` | Source node of the edge |
+| `to_node` | `object` | Target node of the edge |
+
+**Graph Policy Examples:**
+
+```yaml
+# Limit total dependency count
+policies:
+  - name: dependency-count-limit
+    entrypoints: ["graph_report"]
+    rules:
+      - action: warn
+        when: stats.total_nodes > 500
+        reason: "Project has more than 500 dependencies"
+
+# Block deprecated packages
+  - name: block-deprecated
+    entrypoints: ["graph_node"]
+    vars:
+      deprecatedPackages: ["request", "left-pad", "event-stream"]
+    rules:
+      - action: deny
+        when: node.name in deprecatedPackages
+        reason: "Package is deprecated"
+
+# Warn on deep transitive dependencies
+  - name: depth-warning
+    entrypoints: ["graph_node"]
+    rules:
+      - action: warn
+        when: nodeDepth(node) > 5
+        reason: "Dependency is too deep in the tree"
+
+# Block vulnerable direct dependencies
+  - name: vulnerable-direct-deps
+    entrypoints: ["graph_report"]
+    rules:
+      - action: deny
+        when: |
+          nodes.filter(n, isDirectDep(n) && hasVulnerabilities(n)).size() > 0
+        reason: "Direct dependencies have vulnerabilities"
+
+# Typosquatting protection
+  - name: typosquat-protection
+    entrypoints: ["graph_node"]
+    vars:
+      knownPackages: ["lodash", "express", "react"]
+    rules:
+      - action: warn
+        when: |
+          knownPackages.exists(known,
+            known != node.name && levenshteinWithin(known, node.name, 2))
+        reason: "Package name similar to known package (possible typosquat)"
+```
+
+See [graph-report-policies.yaml](policy/examples/graph-report-policies.yaml) and [graph-node-policies.yaml](policy/examples/graph-node-policies.yaml) for more examples.
+
 Full spec: [Policy spec](docs/reference/policy-spec.md) • Examples: [Policy examples](policy/examples/)
 
 ## Proxy Authentication
@@ -1724,8 +1881,9 @@ See [`policy/examples/service-oidc-federation.yaml`](policy/examples/service-oid
 
 | File | Purpose |
 |------|---------|
-| [`internal/server/server.go`](internal/server/server.go) | Server config, auth/policy interceptors |
-| [`internal/auth/jwt/`](internal/auth/jwt/) | Shared JWT validation infrastructure |
+| [`internal/server/server.go`](internal/server/server.go) | Server config, authn middleware, policy interceptors |
+| [`internal/auth/jwt/`](internal/auth/jwt/) | JWT validation with JWKS/OIDC, authn-go adapter |
+| [`internal/auth/jwt/authn.go`](internal/auth/jwt/authn.go) | `AuthnFunc` adapter for connectrpc/authn-go |
 | [`internal/policy/entrypoints.go`](internal/policy/entrypoints.go) | Service entrypoint definitions |
 | [`internal/policy/bindings.go`](internal/policy/bindings.go) | Variable bindings for service entrypoints |
 

@@ -383,8 +383,8 @@ type Node struct {
 	Depth int32 `protobuf:"varint,6,opt,name=depth,proto3" json:"depth,omitempty"`
 	// Locations lists file paths where this dependency was declared.
 	Locations []string `protobuf:"bytes,7,rep,name=locations,proto3" json:"locations,omitempty"`
-	// VulnCount summarizes vulnerabilities affecting this package.
-	VulnCount *VulnCount `protobuf:"bytes,8,opt,name=vuln_count,json=vulnCount,proto3" json:"vuln_count,omitempty"`
+	// VulnerabilityCount summarizes vulnerabilities affecting this package.
+	VulnerabilityCount *VulnerabilityCount `protobuf:"bytes,8,opt,name=vulnerability_count,json=vulnerabilityCount,proto3" json:"vulnerability_count,omitempty"`
 	// Vulnerabilities contains full findings when include_vulnerabilities is set.
 	Vulnerabilities []*v11.Finding `protobuf:"bytes,9,rep,name=vulnerabilities,proto3" json:"vulnerabilities,omitempty"`
 	unknownFields   protoimpl.UnknownFields
@@ -470,9 +470,9 @@ func (x *Node) GetLocations() []string {
 	return nil
 }
 
-func (x *Node) GetVulnCount() *VulnCount {
+func (x *Node) GetVulnerabilityCount() *VulnerabilityCount {
 	if x != nil {
-		return x.VulnCount
+		return x.VulnerabilityCount
 	}
 	return nil
 }
@@ -484,8 +484,8 @@ func (x *Node) GetVulnerabilities() []*v11.Finding {
 	return nil
 }
 
-// VulnCount summarizes vulnerability counts by severity.
-type VulnCount struct {
+// VulnerabilityCount summarizes vulnerability counts by severity.
+type VulnerabilityCount struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Critical vulnerabilities.
 	Critical int32 `protobuf:"varint,1,opt,name=critical,proto3" json:"critical,omitempty"`
@@ -503,20 +503,20 @@ type VulnCount struct {
 	sizeCache     protoimpl.SizeCache
 }
 
-func (x *VulnCount) Reset() {
-	*x = VulnCount{}
+func (x *VulnerabilityCount) Reset() {
+	*x = VulnerabilityCount{}
 	mi := &file_deputy_graph_v1_service_proto_msgTypes[4]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *VulnCount) String() string {
+func (x *VulnerabilityCount) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*VulnCount) ProtoMessage() {}
+func (*VulnerabilityCount) ProtoMessage() {}
 
-func (x *VulnCount) ProtoReflect() protoreflect.Message {
+func (x *VulnerabilityCount) ProtoReflect() protoreflect.Message {
 	mi := &file_deputy_graph_v1_service_proto_msgTypes[4]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -528,47 +528,47 @@ func (x *VulnCount) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use VulnCount.ProtoReflect.Descriptor instead.
-func (*VulnCount) Descriptor() ([]byte, []int) {
+// Deprecated: Use VulnerabilityCount.ProtoReflect.Descriptor instead.
+func (*VulnerabilityCount) Descriptor() ([]byte, []int) {
 	return file_deputy_graph_v1_service_proto_rawDescGZIP(), []int{4}
 }
 
-func (x *VulnCount) GetCritical() int32 {
+func (x *VulnerabilityCount) GetCritical() int32 {
 	if x != nil {
 		return x.Critical
 	}
 	return 0
 }
 
-func (x *VulnCount) GetHigh() int32 {
+func (x *VulnerabilityCount) GetHigh() int32 {
 	if x != nil {
 		return x.High
 	}
 	return 0
 }
 
-func (x *VulnCount) GetMedium() int32 {
+func (x *VulnerabilityCount) GetMedium() int32 {
 	if x != nil {
 		return x.Medium
 	}
 	return 0
 }
 
-func (x *VulnCount) GetLow() int32 {
+func (x *VulnerabilityCount) GetLow() int32 {
 	if x != nil {
 		return x.Low
 	}
 	return 0
 }
 
-func (x *VulnCount) GetUnknown() int32 {
+func (x *VulnerabilityCount) GetUnknown() int32 {
 	if x != nil {
 		return x.Unknown
 	}
 	return 0
 }
 
-func (x *VulnCount) GetTotal() int32 {
+func (x *VulnerabilityCount) GetTotal() int32 {
 	if x != nil {
 		return x.Total
 	}
@@ -1287,7 +1287,7 @@ const file_deputy_graph_v1_service_proto_rawDesc = "" +
 	"\x05edges\x18\x04 \x03(\v2\x15.deputy.graph.v1.EdgeR\x05edges\x12\x14\n" +
 	"\x05roots\x18\x05 \x03(\tR\x05roots\x121\n" +
 	"\x05stats\x18\x06 \x01(\v2\x1b.deputy.graph.v1.GraphStatsR\x05stats\x12\x1a\n" +
-	"\bwarnings\x18\a \x03(\tR\bwarnings\"\xc2\x02\n" +
+	"\bwarnings\x18\a \x03(\tR\bwarnings\"\xdd\x02\n" +
 	"\x04Node\x12\x1b\n" +
 	"\x04purl\x18\x01 \x01(\tB\a\xbaH\x04r\x02\x10\x01R\x04purl\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12\x18\n" +
@@ -1295,11 +1295,10 @@ const file_deputy_graph_v1_service_proto_rawDesc = "" +
 	"\tecosystem\x18\x04 \x01(\tR\tecosystem\x12\x16\n" +
 	"\x06direct\x18\x05 \x01(\bR\x06direct\x12\x14\n" +
 	"\x05depth\x18\x06 \x01(\x05R\x05depth\x12\x1c\n" +
-	"\tlocations\x18\a \x03(\tR\tlocations\x129\n" +
-	"\n" +
-	"vuln_count\x18\b \x01(\v2\x1a.deputy.graph.v1.VulnCountR\tvulnCount\x12J\n" +
-	"\x0fvulnerabilities\x18\t \x03(\v2 .deputy.vulnerability.v1.FindingR\x0fvulnerabilities\"\x95\x01\n" +
-	"\tVulnCount\x12\x1a\n" +
+	"\tlocations\x18\a \x03(\tR\tlocations\x12T\n" +
+	"\x13vulnerability_count\x18\b \x01(\v2#.deputy.graph.v1.VulnerabilityCountR\x12vulnerabilityCount\x12J\n" +
+	"\x0fvulnerabilities\x18\t \x03(\v2 .deputy.vulnerability.v1.FindingR\x0fvulnerabilities\"\x9e\x01\n" +
+	"\x12VulnerabilityCount\x12\x1a\n" +
 	"\bcritical\x18\x01 \x01(\x05R\bcritical\x12\x12\n" +
 	"\x04high\x18\x02 \x01(\x05R\x04high\x12\x16\n" +
 	"\x06medium\x18\x03 \x01(\x05R\x06medium\x12\x10\n" +
@@ -1406,7 +1405,7 @@ var file_deputy_graph_v1_service_proto_goTypes = []any{
 	(*GraphOptions)(nil),          // 2: deputy.graph.v1.GraphOptions
 	(*BuildGraphResponse)(nil),    // 3: deputy.graph.v1.BuildGraphResponse
 	(*Node)(nil),                  // 4: deputy.graph.v1.Node
-	(*VulnCount)(nil),             // 5: deputy.graph.v1.VulnCount
+	(*VulnerabilityCount)(nil),    // 5: deputy.graph.v1.VulnerabilityCount
 	(*Edge)(nil),                  // 6: deputy.graph.v1.Edge
 	(*GraphStats)(nil),            // 7: deputy.graph.v1.GraphStats
 	(*WhyDependencyRequest)(nil),  // 8: deputy.graph.v1.WhyDependencyRequest
@@ -1430,7 +1429,7 @@ var file_deputy_graph_v1_service_proto_depIdxs = []int32{
 	4,  // 4: deputy.graph.v1.BuildGraphResponse.nodes:type_name -> deputy.graph.v1.Node
 	6,  // 5: deputy.graph.v1.BuildGraphResponse.edges:type_name -> deputy.graph.v1.Edge
 	7,  // 6: deputy.graph.v1.BuildGraphResponse.stats:type_name -> deputy.graph.v1.GraphStats
-	5,  // 7: deputy.graph.v1.Node.vuln_count:type_name -> deputy.graph.v1.VulnCount
+	5,  // 7: deputy.graph.v1.Node.vulnerability_count:type_name -> deputy.graph.v1.VulnerabilityCount
 	19, // 8: deputy.graph.v1.Node.vulnerabilities:type_name -> deputy.vulnerability.v1.Finding
 	0,  // 9: deputy.graph.v1.Edge.scope:type_name -> deputy.graph.v1.Scope
 	15, // 10: deputy.graph.v1.GraphStats.ecosystems:type_name -> deputy.graph.v1.GraphStats.EcosystemsEntry

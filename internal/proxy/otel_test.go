@@ -504,7 +504,7 @@ func TestRecordVulnerabilityCount(t *testing.T) {
 	span.End()
 
 	spans := recorder.Ended()
-	assertAttribute(t, spans[0], "deputy.proxy.vuln.count", 5)
+	assertAttribute(t, spans[0], "deputy.proxy.vulnerability.count", 5)
 }
 
 func TestProxyRequestRecorder(t *testing.T) {
@@ -593,7 +593,7 @@ func TestAttributeKeyConsistency(t *testing.T) {
 		attrPolicyResult,   // Local: deputy.proxy.policy.result
 		attrPolicyReason,   // Local: deputy.proxy.policy.reason
 		attrPolicyWarnings, // Local: deputy.proxy.policy.warnings
-		attrVulnCount,      // Local: deputy.proxy.vuln.count
+		attrVulnerabilityCount, // Local: deputy.proxy.vulnerability.count
 	}
 
 	for _, key := range proxySpecificKeys {

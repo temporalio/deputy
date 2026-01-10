@@ -326,9 +326,12 @@ func (r structuredRule) toRuleExpr(ecosystems []string) (string, error) {
 }
 
 // escapeComment escapes characters in a string to make it safe for inclusion
-// in a generated CEL comment.
+// in a generated CEL comment. Multi-line strings (from YAML | or >) must have
+// newlines escaped to avoid breaking the single-line comment format.
 func escapeComment(s string) string {
 	s = strings.ReplaceAll(s, "\\", "\\\\")
 	s = strings.ReplaceAll(s, "\"", "\\\"")
+	s = strings.ReplaceAll(s, "\n", "\\n")
+	s = strings.ReplaceAll(s, "\r", "\\r")
 	return s
 }

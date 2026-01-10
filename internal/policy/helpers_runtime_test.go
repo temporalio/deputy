@@ -872,3 +872,670 @@ func TestNativeCEL_HistoryAnalysis(t *testing.T) {
 		})
 	}
 }
+
+// ===== Graph Helper Function Tests =====
+
+func TestGraphMatch_ViaEvaluate(t *testing.T) {
+	tests := []struct {
+		name     string
+		expr     string
+		expected bool
+	}{
+		// Exact match
+		{
+			name:     "exact match",
+			expr:     `graphMatch("lodash", "lodash")`,
+			expected: true,
+		},
+		{
+			name:     "exact match different case",
+			expr:     `graphMatch("Lodash", "lodash")`,
+			expected: true,
+		},
+		{
+			name:     "exact match fails",
+			expr:     `graphMatch("lodash-es", "lodash")`,
+			expected: false,
+		},
+
+		// Prefix match (pattern*)
+		{
+			name:     "prefix match",
+			expr:     `graphMatch("lodash-es", "lodash*")`,
+			expected: true,
+		},
+		{
+			name:     "prefix match exact",
+			expr:     `graphMatch("lodash", "lodash*")`,
+			expected: true,
+		},
+		{
+			name:     "prefix match fails",
+			expr:     `graphMatch("express", "lodash*")`,
+			expected: false,
+		},
+
+		// Suffix match (*pattern)
+		{
+			name:     "suffix match",
+			expr:     `graphMatch("x/crypto", "*crypto")`,
+			expected: true,
+		},
+		{
+			name:     "suffix match exact",
+			expr:     `graphMatch("crypto", "*crypto")`,
+			expected: true,
+		},
+		{
+			name:     "suffix match fails",
+			expr:     `graphMatch("crypto-js", "*crypto")`,
+			expected: false,
+		},
+
+		// Contains match (*pattern*)
+		{
+			name:     "contains match",
+			expr:     `graphMatch("core-util-is", "*util*")`,
+			expected: true,
+		},
+		{
+			name:     "contains match at start",
+			expr:     `graphMatch("util-deprecate", "*util*")`,
+			expected: true,
+		},
+		{
+			name:     "contains match at end",
+			expr:     `graphMatch("lodash.util", "*util*")`,
+			expected: true,
+		},
+		{
+			name:     "contains match fails",
+			expr:     `graphMatch("express", "*util*")`,
+			expected: false,
+		},
+
+		// Empty pattern
+		{
+			name:     "empty pattern always false",
+			expr:     `graphMatch("anything", "")`,
+			expected: false,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			result, err := Evaluate(t.Context(), tc.expr, nil)
+			if err != nil {
+				t.Fatalf("Evaluate() error: %v", err)
+			}
+			got, ok := result.(bool)
+			if !ok {
+				t.Fatalf("expected bool result, got %T (%v)", result, result)
+			}
+			if got != tc.expected {
+				t.Errorf("%s = %v, want %v", tc.expr, got, tc.expected)
+			}
+		})
+	}
+}
+
+func TestGraphNodeHelpers_ViaEvaluate(t *testing.T) {
+	// Sample node data similar to what graph_node entrypoint would provide
+	node := map[string]any{
+		"purl":      "pkg:npm/lodash@4.17.21",
+		"name":      "lodash",
+		"version":   "4.17.21",
+		"ecosystem": "npm",
+		"direct":    true,
+		"depth":     int32(0),
+		"vulnerability_count": map[string]any{
+			"total":    int64(3),
+			"critical": int64(1),
+			"high":     int64(1),
+			"medium":   int64(1),
+			"low":      int64(0),
+		},
+	}
+
+	transitiveNode := map[string]any{
+		"purl":      "pkg:npm/ms@2.1.3",
+		"name":      "ms",
+		"version":   "2.1.3",
+		"ecosystem": "npm",
+		"direct":    false,
+		"depth":     int32(3),
+		"vulnerability_count": map[string]any{
+			"total": int64(0),
+		},
+	}
+
+	tests := []struct {
+		name     string
+		expr     string
+		input    map[string]any
+		expected any
+	}{
+		// isDirectDep
+		{
+			name:     "isDirectDep true for direct",
+			expr:     `isDirectDep(node)`,
+			input:    map[string]any{"node": node},
+			expected: true,
+		},
+		{
+			name:     "isDirectDep false for transitive",
+			expr:     `isDirectDep(node)`,
+			input:    map[string]any{"node": transitiveNode},
+			expected: false,
+		},
+
+		// nodeDepth
+		{
+			name:     "nodeDepth for direct dep",
+			expr:     `nodeDepth(node)`,
+			input:    map[string]any{"node": node},
+			expected: int64(0),
+		},
+		{
+			name:     "nodeDepth for transitive dep",
+			expr:     `nodeDepth(node)`,
+			input:    map[string]any{"node": transitiveNode},
+			expected: int64(3),
+		},
+
+		// nodeEcosystem
+		{
+			name:     "nodeEcosystem npm",
+			expr:     `nodeEcosystem(node)`,
+			input:    map[string]any{"node": node},
+			expected: "npm",
+		},
+
+		// hasVulnerabilities
+		{
+			name:     "hasVulnerabilities true",
+			expr:     `hasVulnerabilities(node)`,
+			input:    map[string]any{"node": node},
+			expected: true,
+		},
+		{
+			name:     "hasVulnerabilities false",
+			expr:     `hasVulnerabilities(node)`,
+			input:    map[string]any{"node": transitiveNode},
+			expected: false,
+		},
+
+		// vulnerabilityCount
+		{
+			name:     "vulnerabilityCount with vulnerabilities",
+			expr:     `vulnerabilityCount(node)`,
+			input:    map[string]any{"node": node},
+			expected: int64(3),
+		},
+		{
+			name:     "vulnerabilityCount without vulnerabilities",
+			expr:     `vulnerabilityCount(node)`,
+			input:    map[string]any{"node": transitiveNode},
+			expected: int64(0),
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			result, err := Evaluate(t.Context(), tc.expr, tc.input)
+			if err != nil {
+				t.Fatalf("Evaluate() error: %v", err)
+			}
+			if result != tc.expected {
+				t.Errorf("%s = %v (%T), want %v (%T)", tc.expr, result, result, tc.expected, tc.expected)
+			}
+		})
+	}
+}
+
+func TestGraphHelpers_Composability(t *testing.T) {
+	// Sample nodes list
+	nodes := []map[string]any{
+		{
+			"purl":      "pkg:npm/lodash@4.17.21",
+			"name":      "lodash",
+			"version":   "4.17.21",
+			"ecosystem": "npm",
+			"direct":    true,
+			"depth":     int32(0),
+			"vulnerability_count": map[string]any{
+				"total": int64(3),
+			},
+		},
+		{
+			"purl":      "pkg:npm/express@4.18.2",
+			"name":      "express",
+			"version":   "4.18.2",
+			"ecosystem": "npm",
+			"direct":    true,
+			"depth":     int32(0),
+			"vulnerability_count": map[string]any{
+				"total": int64(0),
+			},
+		},
+		{
+			"purl":      "pkg:npm/ms@2.1.3",
+			"name":      "ms",
+			"version":   "2.1.3",
+			"ecosystem": "npm",
+			"direct":    false,
+			"depth":     int32(3),
+			"vulnerability_count": map[string]any{
+				"total": int64(0),
+			},
+		},
+		{
+			"purl":      "pkg:golang/github.com/example/mod@v1.0.0",
+			"name":      "github.com/example/mod",
+			"version":   "v1.0.0",
+			"ecosystem": "Go",
+			"direct":    false,
+			"depth":     int32(5),
+			"vulnerability_count": map[string]any{
+				"total": int64(1),
+			},
+		},
+	}
+
+	input := map[string]any{"nodes": nodes}
+
+	tests := []struct {
+		name     string
+		expr     string
+		expected any
+	}{
+		// Filter direct dependencies
+		{
+			name:     "count direct deps",
+			expr:     `nodes.filter(n, isDirectDep(n)).size()`,
+			expected: int64(2),
+		},
+
+		// Filter by ecosystem
+		{
+			name:     "count npm deps",
+			expr:     `nodes.filter(n, nodeEcosystem(n) == "npm").size()`,
+			expected: int64(3),
+		},
+
+		// Filter by depth
+		{
+			name:     "count deep deps (depth > 2)",
+			expr:     `nodes.filter(n, nodeDepth(n) > 2).size()`,
+			expected: int64(2),
+		},
+
+		// Filter by vulnerabilities
+		{
+			name:     "count vulnerable deps",
+			expr:     `nodes.filter(n, hasVulnerabilities(n)).size()`,
+			expected: int64(2),
+		},
+
+		// Combine filters
+		{
+			name:     "direct npm deps with vulns",
+			expr:     `nodes.filter(n, isDirectDep(n) && nodeEcosystem(n) == "npm" && hasVulnerabilities(n)).size()`,
+			expected: int64(1),
+		},
+
+		// Use graphMatch for pattern matching
+		{
+			name:     "match lodash pattern",
+			expr:     `nodes.filter(n, graphMatch(n.name, "lodash*")).size()`,
+			expected: int64(1),
+		},
+
+		// Check if any node matches pattern
+		{
+			name:     "exists with pattern",
+			expr:     `nodes.exists(n, graphMatch(n.name, "*express*"))`,
+			expected: true,
+		},
+
+		// Check count of nodes with high vulnerability counts (>= 2)
+		{
+			name:     "high vuln count nodes",
+			expr:     `nodes.filter(n, vulnerabilityCount(n) >= 2).size()`,
+			expected: int64(1), // Only express has 2 vulns
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			result, err := Evaluate(t.Context(), tc.expr, input)
+			if err != nil {
+				t.Fatalf("Evaluate() error: %v", err)
+			}
+			if result != tc.expected {
+				t.Errorf("%s = %v (%T), want %v (%T)", tc.expr, result, result, tc.expected, tc.expected)
+			}
+		})
+	}
+}
+
+// TestPathHelpers_ViaEvaluate tests path analysis helpers through the Evaluate function.
+func TestPathHelpers_ViaEvaluate(t *testing.T) {
+	// Create a vulnerability with path data (simulating --with-graph output)
+	input := map[string]any{
+		"vulnerability": map[string]any{
+			"id":       "CVE-2024-1234",
+			"severity": "HIGH",
+			"path":     []any{"myapp", "express", "body-parser", "qs"},
+			"depth":    3,
+		},
+	}
+
+	tests := []struct {
+		name     string
+		expr     string
+		expected any
+	}{
+		// pathLength tests
+		{
+			name:     "pathLength of vulnerability path",
+			expr:     `pathLength(vulnerability.path)`,
+			expected: int64(4),
+		},
+		{
+			name:     "pathLength of empty list",
+			expr:     `pathLength([])`,
+			expected: int64(0),
+		},
+
+		// pathDepth tests
+		{
+			name:     "pathDepth of vulnerability path",
+			expr:     `pathDepth(vulnerability.path)`,
+			expected: int64(3), // 4 nodes - 1 = depth 3
+		},
+		{
+			name:     "pathDepth of single node (direct dep)",
+			expr:     `pathDepth(["myapp"])`,
+			expected: int64(0),
+		},
+
+		// pathContains tests
+		{
+			name:     "pathContains exact match",
+			expr:     `pathContains(vulnerability.path, "express")`,
+			expected: true,
+		},
+		{
+			name:     "pathContains prefix pattern",
+			expr:     `pathContains(vulnerability.path, "body-*")`,
+			expected: true,
+		},
+		{
+			name:     "pathContains suffix pattern",
+			expr:     `pathContains(vulnerability.path, "*parser")`,
+			expected: true,
+		},
+		{
+			name:     "pathContains contains pattern",
+			expr:     `pathContains(vulnerability.path, "*pars*")`,
+			expected: true,
+		},
+		{
+			name:     "pathContains no match",
+			expr:     `pathContains(vulnerability.path, "lodash")`,
+			expected: false,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			result, err := Evaluate(t.Context(), tc.expr, input)
+			if err != nil {
+				t.Fatalf("Evaluate() error: %v", err)
+			}
+			if result != tc.expected {
+				t.Errorf("%s = %v (%T), want %v (%T)", tc.expr, result, result, tc.expected, tc.expected)
+			}
+		})
+	}
+}
+
+// TestNodeAccessors_ViaEvaluate tests node accessor helpers.
+func TestNodeAccessors_ViaEvaluate(t *testing.T) {
+	input := map[string]any{
+		"node": map[string]any{
+			"purl":      "pkg:npm/lodash@4.17.21",
+			"name":      "lodash",
+			"version":   "4.17.21",
+			"ecosystem": "npm",
+			"direct":    true,
+			"depth":     int64(0),
+		},
+		"edge": map[string]any{
+			"from":  "pkg:npm/myapp@1.0.0",
+			"to":    "pkg:npm/lodash@4.17.21",
+			"scope": int32(1), // RUNTIME
+		},
+	}
+
+	tests := []struct {
+		name     string
+		expr     string
+		expected any
+	}{
+		// Node accessor tests
+		{
+			name:     "nodePurl",
+			expr:     `nodePurl(node)`,
+			expected: "pkg:npm/lodash@4.17.21",
+		},
+		{
+			name:     "nodeName",
+			expr:     `nodeName(node)`,
+			expected: "lodash",
+		},
+		{
+			name:     "nodeVersion",
+			expr:     `nodeVersion(node)`,
+			expected: "4.17.21",
+		},
+		{
+			name:     "nodePurl with contains",
+			expr:     `nodePurl(node).contains("lodash")`,
+			expected: true,
+		},
+		{
+			name:     "nodeVersion startsWith",
+			expr:     `nodeVersion(node).startsWith("4.")`,
+			expected: true,
+		},
+
+		// Edge accessor tests
+		{
+			name:     "edgeScope runtime",
+			expr:     `edgeScope(edge)`,
+			expected: "runtime",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			result, err := Evaluate(t.Context(), tc.expr, input)
+			if err != nil {
+				t.Fatalf("Evaluate() error: %v", err)
+			}
+			if result != tc.expected {
+				t.Errorf("%s = %v (%T), want %v (%T)", tc.expr, result, result, tc.expected, tc.expected)
+			}
+		})
+	}
+}
+
+// TestVulnHelpers_ViaEvaluate tests vulnerability helper functions.
+func TestVulnHelpers_ViaEvaluate(t *testing.T) {
+	input := map[string]any{
+		"vulnerability": map[string]any{
+			"id":            "CVE-2024-1234",
+			"severity":      "CRITICAL",
+			"fixedVersions": []any{"1.0.1", "2.0.0"},
+			"inKEV":         true,
+			"epss":          0.85,
+		},
+		"vulnNoFix": map[string]any{
+			"id":       "CVE-2024-5678",
+			"severity": "MEDIUM",
+		},
+	}
+
+	tests := []struct {
+		name     string
+		expr     string
+		expected any
+	}{
+		// vulnerabilitySeverity tests
+		{
+			name:     "vulnerabilitySeverity critical",
+			expr:     `vulnerabilitySeverity(vulnerability)`,
+			expected: "CRITICAL",
+		},
+
+		// vulnerabilityId tests
+		{
+			name:     "vulnerabilityId",
+			expr:     `vulnerabilityId(vulnerability)`,
+			expected: "CVE-2024-1234",
+		},
+		{
+			name:     "vulnerabilityId startsWith CVE",
+			expr:     `vulnerabilityId(vulnerability).startsWith("CVE-")`,
+			expected: true,
+		},
+
+		// hasFix tests
+		{
+			name:     "hasFix with fixes",
+			expr:     `hasFix(vulnerability)`,
+			expected: true,
+		},
+		{
+			name:     "hasFix without fixes",
+			expr:     `hasFix(vulnNoFix)`,
+			expected: false,
+		},
+
+		// inKEV tests
+		{
+			name:     "inKEV true",
+			expr:     `inKEV(vulnerability)`,
+			expected: true,
+		},
+		{
+			name:     "inKEV false (missing field)",
+			expr:     `inKEV(vulnNoFix)`,
+			expected: false,
+		},
+
+		// epssScore tests
+		{
+			name:     "epssScore with value",
+			expr:     `epssScore(vulnerability)`,
+			expected: 0.85,
+		},
+		{
+			name:     "epssScore missing returns 0",
+			expr:     `epssScore(vulnNoFix)`,
+			expected: 0.0,
+		},
+		{
+			name:     "epssScore comparison",
+			expr:     `epssScore(vulnerability) > 0.5`,
+			expected: true,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			result, err := Evaluate(t.Context(), tc.expr, input)
+			if err != nil {
+				t.Fatalf("Evaluate() error: %v", err)
+			}
+			if result != tc.expected {
+				t.Errorf("%s = %v (%T), want %v (%T)", tc.expr, result, result, tc.expected, tc.expected)
+			}
+		})
+	}
+}
+
+// TestGraphHelpers_WithVulnerabilityPath tests graph helpers in a realistic scan_vulnerability scenario.
+func TestGraphHelpers_WithVulnerabilityPath(t *testing.T) {
+	// Simulate a vulnerability found in a transitive dependency with --with-graph enabled
+	input := map[string]any{
+		"vulnerability": map[string]any{
+			"id":            "CVE-2024-9999",
+			"severity":      "HIGH",
+			"fixedVersions": []any{"2.0.0"},
+			"path":          []any{"myapp", "express", "send", "mime-types", "mime"},
+			"depth":         4,
+			"inKEV":         false,
+			"epss":          0.42,
+		},
+		"pkg": map[string]any{
+			"name":      "mime",
+			"version":   "1.4.0",
+			"ecosystem": "npm",
+		},
+	}
+
+	tests := []struct {
+		name     string
+		expr     string
+		expected any
+	}{
+		// Combined path analysis
+		{
+			name:     "deep vulnerability path",
+			expr:     `pathDepth(vulnerability.path) > 3`,
+			expected: true,
+		},
+		{
+			name:     "path contains express",
+			expr:     `pathContains(vulnerability.path, "express")`,
+			expected: true,
+		},
+		{
+			name:     "path contains send",
+			expr:     `pathContains(vulnerability.path, "send")`,
+			expected: true,
+		},
+
+		// Realistic policy expressions
+		{
+			name:     "allow deep low-risk vulns",
+			expr:     `pathDepth(vulnerability.path) > 3 && vulnerabilitySeverity(vulnerability) != "CRITICAL" && !inKEV(vulnerability)`,
+			expected: true,
+		},
+		{
+			name:     "high epss deep vuln",
+			expr:     `epssScore(vulnerability) > 0.3 && pathDepth(vulnerability.path) > 2`,
+			expected: true,
+		},
+		{
+			name:     "fixable deep vuln",
+			expr:     `hasFix(vulnerability) && pathDepth(vulnerability.path) > 3`,
+			expected: true,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			result, err := Evaluate(t.Context(), tc.expr, input)
+			if err != nil {
+				t.Fatalf("Evaluate() error: %v", err)
+			}
+			if result != tc.expected {
+				t.Errorf("%s = %v (%T), want %v (%T)", tc.expr, result, result, tc.expected, tc.expected)
+			}
+		})
+	}
+}

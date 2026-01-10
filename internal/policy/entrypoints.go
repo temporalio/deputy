@@ -41,6 +41,8 @@ func (e Entrypoint) Category() string {
 		return "dockerfile"
 	case EntrypointSecretsReport, EntrypointSecretsFinding:
 		return "secrets"
+	case EntrypointGraphReport, EntrypointGraphNode, EntrypointGraphEdge:
+		return "graph"
 	case EntrypointServiceScanRequest, EntrypointServiceListRequest,
 		EntrypointServiceSBOMRequest, EntrypointServiceDiffRequest,
 		EntrypointServiceSecretsRequest, EntrypointServiceGraphRequest:
@@ -114,6 +116,16 @@ const (
 	// EntrypointSecretsFinding triggers for each secret found during a scan.
 	EntrypointSecretsFinding Entrypoint = "secrets_finding"
 
+	// Graph entrypoints - for dependency graph analysis and policies
+	// EntrypointGraphReport triggers after a graph is built, providing the full graph.
+	EntrypointGraphReport Entrypoint = "graph_report"
+	// EntrypointGraphNode triggers for each node in the dependency graph.
+	// Available variables: node (with purl, name, version, ecosystem, direct, depth, etc.)
+	EntrypointGraphNode Entrypoint = "graph_node"
+	// EntrypointGraphEdge triggers for each edge in the dependency graph.
+	// Available variables: edge (with from, to PURLs), from_node, to_node
+	EntrypointGraphEdge Entrypoint = "graph_edge"
+
 	// Service entrypoints - for API request authorization when Deputy runs as a server.
 	// These enable RBAC/ABAC policies based on JWT claims (jwt.*) for multi-tenant deployments.
 
@@ -185,6 +197,12 @@ var (
 		EntrypointSecretsReport,
 		EntrypointSecretsFinding,
 	}
+	// EntrypointsGraph lists all entrypoints related to dependency graph analysis.
+	EntrypointsGraph = []Entrypoint{
+		EntrypointGraphReport,
+		EntrypointGraphNode,
+		EntrypointGraphEdge,
+	}
 	// EntrypointsService lists all entrypoints related to API request authorization.
 	// These enable RBAC/ABAC when Deputy runs as a shared service (server mode).
 	EntrypointsService = []Entrypoint{
@@ -197,10 +215,10 @@ var (
 	}
 
 	// AllEntrypoints contains every canonical entrypoint defined in Deputy.
-	AllEntrypoints = slices.Concat(EntrypointsProxy, EntrypointsScan, EntrypointsDiff, EntrypointsContainerDiff, EntrypointsSBOM, EntrypointsFix, EntrypointsTriage, EntrypointsDockerfile, EntrypointsSecrets, EntrypointsService)
+	AllEntrypoints = slices.Concat(EntrypointsProxy, EntrypointsScan, EntrypointsDiff, EntrypointsContainerDiff, EntrypointsSBOM, EntrypointsFix, EntrypointsTriage, EntrypointsDockerfile, EntrypointsSecrets, EntrypointsGraph, EntrypointsService)
 
 	allowedEntrypointsSet = buildEntrypointSet(AllEntrypoints)
-	allowedCommands       = []string{"proxy", "scan", "diff", "sbom", "fix", "triage", "secrets", "server"}
+	allowedCommands       = []string{"proxy", "scan", "diff", "sbom", "fix", "triage", "secrets", "graph", "server"}
 	allowedCommandsSet    = buildSet(allowedCommands)
 )
 

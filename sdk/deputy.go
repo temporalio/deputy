@@ -39,11 +39,14 @@ import (
 	"connectrpc.com/connect"
 
 	dependencyv1 "github.com/picatz/deputy/gen/deputy/dependency/v1"
+	diffv1 "github.com/picatz/deputy/gen/deputy/diff/v1"
+	graphv1 "github.com/picatz/deputy/gen/deputy/graph/v1"
 	listv1 "github.com/picatz/deputy/gen/deputy/list/v1"
 	policyv1 "github.com/picatz/deputy/gen/deputy/policy/v1"
 	remediationv1 "github.com/picatz/deputy/gen/deputy/remediation/v1"
 	sbomv1 "github.com/picatz/deputy/gen/deputy/sbom/v1"
 	scanv1 "github.com/picatz/deputy/gen/deputy/scan/v1"
+	secretsv1 "github.com/picatz/deputy/gen/deputy/secrets/v1"
 	vulnerabilityv1 "github.com/picatz/deputy/gen/deputy/vulnerability/v1"
 	"github.com/picatz/deputy/internal/services"
 )
@@ -303,6 +306,165 @@ func (c *Client) DiffSBOM(ctx context.Context, base, target []byte) (*sbomv1.Dif
 // ListAgents returns available AI agents for remediation.
 func (c *Client) ListAgents(ctx context.Context) (*remediationv1.ListAgentsResponse, error) {
 	resp, err := c.clients.Remediation.ListAgents(ctx, connect.NewRequest(&remediationv1.ListAgentsRequest{}))
+	if err != nil {
+		return nil, err
+	}
+	return resp.Msg, nil
+}
+
+// --- Graph Operations ---
+
+// BuildGraphOptions configures dependency graph construction.
+type BuildGraphOptions = graphv1.GraphOptions
+
+// BuildGraph constructs a dependency graph for a target.
+// The target can be a local directory, git repository, or container image.
+//
+// Example:
+//
+//	graph, err := client.BuildGraph(ctx, ".", nil)
+//	for _, node := range graph.GetNodes() {
+//	    fmt.Printf("%s@%s (depth: %d)\n", node.Name, node.Version, node.Depth)
+//	}
+func (c *Client) BuildGraph(ctx context.Context, target string, opts *BuildGraphOptions) (*graphv1.BuildGraphResponse, error) {
+	resp, err := c.clients.Graph.BuildGraph(ctx, connect.NewRequest(&graphv1.BuildGraphRequest{
+		Target:  target,
+		Options: opts,
+	}))
+	if err != nil {
+		return nil, err
+	}
+	return resp.Msg, nil
+}
+
+// WhyDependency explains why a specific dependency exists in a target.
+// Returns all paths from the project root to the specified dependency.
+//
+// The dependency parameter can be a PURL, package name, or name@version.
+//
+// Example:
+//
+//	why, err := client.WhyDependency(ctx, ".", "golang.org/x/crypto")
+//	for _, path := range why.GetPaths() {
+//	    fmt.Printf("Path (length %d): ", path.Length)
+//	    for _, node := range path.Nodes {
+//	        fmt.Printf("%s -> ", node.Name)
+//	    }
+//	    fmt.Println()
+//	}
+func (c *Client) WhyDependency(ctx context.Context, target, dependency string) (*graphv1.WhyDependencyResponse, error) {
+	resp, err := c.clients.Graph.WhyDependency(ctx, connect.NewRequest(&graphv1.WhyDependencyRequest{
+		Target:     target,
+		Dependency: dependency,
+	}))
+	if err != nil {
+		return nil, err
+	}
+	return resp.Msg, nil
+}
+
+// --- Diff Operations ---
+
+// DiffPackages compares package dependencies between two targets.
+// Targets can be git refs, container image tags, or directory paths.
+//
+// Example:
+//
+//	diff, err := client.DiffPackages(ctx, "main", "HEAD")
+//	for _, change := range diff.GetChanges() {
+//	    fmt.Printf("%s: %s %s -> %s\n",
+//	        change.ChangeKind, change.Package.Name,
+//	        change.BaseVersion, change.TargetVersion)
+//	}
+func (c *Client) DiffPackages(ctx context.Context, base, target string) (*diffv1.DiffPackagesResponse, error) {
+	resp, err := c.clients.Diff.DiffPackages(ctx, connect.NewRequest(&diffv1.DiffPackagesRequest{
+		BaseTarget:   base,
+		TargetTarget: target,
+	}))
+	if err != nil {
+		return nil, err
+	}
+	return resp.Msg, nil
+}
+
+// DiffVulnerabilities compares vulnerabilities between two targets.
+// This performs vulnerability scans on both targets and computes the difference.
+//
+// Example:
+//
+//	diff, err := client.DiffVulnerabilities(ctx, "v1.0.0", "v2.0.0")
+//	fmt.Printf("Added: %d, Fixed: %d\n",
+//	    len(diff.GetAddedVulnerabilities()),
+//	    len(diff.GetRemovedVulnerabilities()))
+func (c *Client) DiffVulnerabilities(ctx context.Context, base, target string) (*diffv1.DiffVulnerabilitiesResponse, error) {
+	resp, err := c.clients.Diff.DiffVulnerabilities(ctx, connect.NewRequest(&diffv1.DiffVulnerabilitiesRequest{
+		BaseTarget:   base,
+		TargetTarget: target,
+	}))
+	if err != nil {
+		return nil, err
+	}
+	return resp.Msg, nil
+}
+
+// DiffContainerImages compares two container images comprehensively.
+// This includes package changes, vulnerability changes, layer analysis, and config changes.
+//
+// Example:
+//
+//	diff, err := client.DiffContainerImages(ctx, "nginx:1.24", "nginx:1.25")
+//	fmt.Printf("Package changes: %d\n", len(diff.GetPackageChanges()))
+//	if diff.Summary != nil {
+//	    fmt.Printf("Size delta: %d bytes\n", diff.Summary.SizeDelta)
+//	}
+func (c *Client) DiffContainerImages(ctx context.Context, base, target string) (*diffv1.DiffContainerImagesResponse, error) {
+	resp, err := c.clients.Diff.DiffContainerImages(ctx, connect.NewRequest(&diffv1.DiffContainerImagesRequest{
+		BaseImage:   base,
+		TargetImage: target,
+	}))
+	if err != nil {
+		return nil, err
+	}
+	return resp.Msg, nil
+}
+
+// --- Secrets Operations ---
+
+// ScanSecretsOptions configures secret scanning behavior.
+type ScanSecretsOptions = secretsv1.ScanOptions
+
+// ScanSecrets scans a target for secrets and sensitive data.
+// The target can be a directory, git repository, or container image.
+//
+// Example:
+//
+//	result, err := client.ScanSecrets(ctx, ".", nil)
+//	for _, finding := range result.GetFindings() {
+//	    fmt.Printf("%s: %s in %s:%d\n",
+//	        finding.DetectorId, finding.Description,
+//	        finding.Location.Path, finding.Location.Line)
+//	}
+func (c *Client) ScanSecrets(ctx context.Context, target string, opts *ScanSecretsOptions) (*secretsv1.ScanResponse, error) {
+	resp, err := c.clients.Secrets.Scan(ctx, connect.NewRequest(&secretsv1.ScanRequest{
+		Target:  target,
+		Options: opts,
+	}))
+	if err != nil {
+		return nil, err
+	}
+	return resp.Msg, nil
+}
+
+// ListDetectors returns available secret detectors.
+//
+// Example:
+//
+//	detectors, err := client.ListDetectors(ctx)
+//	for _, d := range detectors.GetDetectors() {
+//	    fmt.Printf("%s: %s\n", d.Id, d.Description)
+//	}
+func (c *Client) ListDetectors(ctx context.Context) (*secretsv1.ListDetectorsResponse, error) {
+	resp, err := c.clients.Secrets.ListDetectors(ctx, connect.NewRequest(&secretsv1.ListDetectorsRequest{}))
 	if err != nil {
 		return nil, err
 	}

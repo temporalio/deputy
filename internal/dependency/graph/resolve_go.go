@@ -249,7 +249,7 @@ func (r *GoResolver) processGoMod(ctx context.Context, g *Graph, files FileReade
 	if rootNode == nil {
 		// Create a synthetic root node for the project
 		rootNode = &Node{
-			PURL:      rootPURL,
+			Purl:      rootPURL,
 			Name:      rootModule,
 			Version:   "(local)",
 			Ecosystem: "Go",
@@ -272,7 +272,7 @@ func (r *GoResolver) processGoMod(ctx context.Context, g *Graph, files FileReade
 		stdlibNode := g.Node(stdlibPURL)
 		if stdlibNode == nil {
 			stdlibNode = &Node{
-				PURL:      stdlibPURL,
+				Purl:      stdlibPURL,
 				Name:      "stdlib",
 				Version:   mf.Go.Version,
 				Ecosystem: "Go",
@@ -312,7 +312,7 @@ func (r *GoResolver) processGoMod(ctx context.Context, g *Graph, files FileReade
 		if depNode == nil {
 			// Create the node if it doesn't exist
 			depNode = &Node{
-				PURL:      depPURL,
+				Purl:      depPURL,
 				Name:      modulePath,
 				Version:   moduleVersion,
 				Ecosystem: "Go",
@@ -324,12 +324,12 @@ func (r *GoResolver) processGoMod(ctx context.Context, g *Graph, files FileReade
 		// Update direct status and add edge from root to direct deps
 		if isDirect {
 			depNode.Direct = true
-			if !containsRoot(g.roots, depNode.PURL) {
-				g.roots = append(g.roots, depNode.PURL)
+			if !containsRoot(g.roots, depNode.Purl) {
+				g.roots = append(g.roots, depNode.Purl)
 			}
 			g.AddEdge(&Edge{
 				From:       rootPURL,
-				To:         depNode.PURL,
+				To:         depNode.Purl,
 				Constraint: moduleVersion,
 				Scope:      ScopeRuntime,
 			})
@@ -554,7 +554,7 @@ func (r *GoResolver) resolveTransitiveEdgesViaProxy(ctx context.Context, g *Grap
 				if childNode != nil {
 					g.AddEdge(&Edge{
 						From:  item.parentPURL,
-						To:    childNode.PURL,
+						To:    childNode.Purl,
 						Scope: ScopeRuntime,
 					})
 					edgeSet[edgeKey] = true
@@ -690,7 +690,7 @@ func (r *GoResolver) resolveTransitiveEdgesFromVendor(ctx context.Context, g *Gr
 				if childNode != nil {
 					g.AddEdge(&Edge{
 						From:  item.parentPURL,
-						To:    childNode.PURL,
+						To:    childNode.Purl,
 						Scope: ScopeRuntime,
 					})
 					edgeSet[edgeKey] = true
@@ -716,7 +716,7 @@ func (r *GoResolver) findNodeByModulePath(g *Graph, modulePath string) *Node {
 			return node
 		}
 		// Also check if PURL contains this module
-		if strings.Contains(strings.ToLower(node.PURL), lowerPath) {
+		if strings.Contains(strings.ToLower(node.Purl), lowerPath) {
 			return node
 		}
 	}

@@ -58,11 +58,11 @@ policies:
       - action: deny
         when: |
           jwt.?iss.orValue("") == "https://token.actions.githubusercontent.com" &&
-          !jwt.?repository.orValue("") in [
+          !(jwt.?repository.orValue("") in [
             "acme-corp/security-scanner",
             "acme-corp/compliance-checks",
             "acme-infra/container-hardening"
-          ]
+          ])
         reason: "Secrets scanning restricted to approved repositories"
         remediation: "Request repository access in #security-requests"
 
@@ -140,7 +140,7 @@ policies:
         when: |
           jwt.?iss.orValue("").contains("gitlab") &&
           jwt.?environment.orValue("") != "" &&
-          !jwt.?environment.orValue("") in ["production", "staging"]
+          !(jwt.?environment.orValue("") in ["production", "staging"])
         reason: "Secrets scanning requires protected environment"
 
   # =============================================================================
@@ -166,11 +166,11 @@ policies:
         when: |
           jwt.?iss.orValue("") == "https://accounts.google.com" &&
           jwt.?email.orValue("").endsWith(".iam.gserviceaccount.com") &&
-          !jwt.?email.orValue("") in [
+          !(jwt.?email.orValue("") in [
             "deputy-scanner@acme-prod.iam.gserviceaccount.com",
             "deputy-scanner@acme-staging.iam.gserviceaccount.com",
             "ci-pipeline@acme-ci.iam.gserviceaccount.com"
-          ]
+          ])
         reason: "Service account not in allowlist"
 
   - name: gcp-project-restriction
@@ -231,10 +231,10 @@ policies:
       - action: deny
         when: |
           jwt.?iss.orValue("").contains("login.microsoftonline.com") &&
-          !jwt.?tid.orValue("") in [
-            "12345678-1234-1234-1234-123456789abc",  # Production tenant
-            "87654321-4321-4321-4321-cba987654321"   # Development tenant
-          ]
+          !(jwt.?tid.orValue("") in [
+            "12345678-1234-1234-1234-123456789abc",
+            "87654321-4321-4321-4321-cba987654321"
+          ])
         reason: "Token must be from approved Azure AD tenant"
 
   - name: azure-managed-identity
@@ -246,9 +246,9 @@ policies:
         when: |
           jwt.?iss.orValue("").contains("login.microsoftonline.com") &&
           jwt.?idtyp.orValue("") == "app" &&
-          !jwt.?oid.orValue("") in [
-            "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"  # deputy-scanner managed identity
-          ]
+          !(jwt.?oid.orValue("") in [
+            "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+          ])
         reason: "Managed identity not authorized for secrets scanning"
 
   # =============================================================================
@@ -273,9 +273,8 @@ policies:
       - action: deny
         when: |
           jwt.?sub.orValue("").startsWith("system:serviceaccount:") &&
-          !jwt.?["kubernetes.io/serviceaccount/namespace"].orValue("") in [
-            "security", "ci-cd", "production"
-          ]
+          !("kubernetes.io/serviceaccount/namespace" in jwt &&
+            jwt["kubernetes.io/serviceaccount/namespace"] in ["security", "ci-cd", "production"])
         reason: "Kubernetes workload must be in approved namespace"
 
   - name: kubernetes-service-account-allowlist

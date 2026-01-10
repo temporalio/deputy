@@ -82,7 +82,7 @@ var (
 	attrCacheKey  = deputyotel.AttrCacheKey  // Reuse: deputy.cache.key
 
 	// Vulnerability attributes - proxy-specific
-	attrVulnCount = attribute.Key("deputy.proxy.vuln.count")
+	attrVulnerabilityCount = attribute.Key("deputy.proxy.vulnerability.count")
 )
 
 // AuthResult represents the outcome of an authentication attempt.
@@ -346,7 +346,7 @@ func RecordImageScanCacheMiss(ctx context.Context, span trace.Span, key string) 
 // RecordVulnerabilityCount adds vulnerability count to the span.
 // Call this when vulnerability lookup completes.
 func RecordVulnerabilityCount(span trace.Span, count int) {
-	span.SetAttributes(attrVulnCount.Int(count))
+	span.SetAttributes(attrVulnerabilityCount.Int(count))
 }
 
 // RecordDigestResolutionFailure records when tag-to-digest resolution fails.
@@ -380,7 +380,7 @@ func RecordImageScanError(ctx context.Context, span trace.Span, target string, e
 func RecordImageScanSuccess(ctx context.Context, span trace.Span, target string, vulnCount int, cached bool) {
 	attrs := []attribute.KeyValue{
 		attribute.String("deputy.image.target", target),
-		attribute.Int("deputy.image.vuln_count", vulnCount),
+		attribute.Int("deputy.image.vulnerability_count", vulnCount),
 		attribute.Bool("deputy.image.cached", cached),
 	}
 	span.AddEvent("image.scan_completed", trace.WithAttributes(attrs...))

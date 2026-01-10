@@ -53,19 +53,19 @@ func TestNpmResolver_ResolveEdges_PackageLockV3(t *testing.T) {
 	// Create a graph with some nodes from "inventory"
 	g := New()
 	g.AddNode(&Node{
-		PURL:      "pkg:npm/express@4.18.2",
+		Purl:      "pkg:npm/express@4.18.2",
 		Name:      "express",
 		Version:   "4.18.2",
 		Ecosystem: "npm",
 	})
 	g.AddNode(&Node{
-		PURL:      "pkg:npm/body-parser@1.20.1",
+		Purl:      "pkg:npm/body-parser@1.20.1",
 		Name:      "body-parser",
 		Version:   "1.20.1",
 		Ecosystem: "npm",
 	})
 	g.AddNode(&Node{
-		PURL:      "pkg:npm/bytes@3.1.2",
+		Purl:      "pkg:npm/bytes@3.1.2",
 		Name:      "bytes",
 		Version:   "3.1.2",
 		Ecosystem: "npm",
@@ -137,19 +137,19 @@ func TestNpmResolver_ResolveEdges_PackageLockV1(t *testing.T) {
 
 	g := New()
 	g.AddNode(&Node{
-		PURL:      "pkg:npm/lodash@4.17.21",
+		Purl:      "pkg:npm/lodash@4.17.21",
 		Name:      "lodash",
 		Version:   "4.17.21",
 		Ecosystem: "npm",
 	})
 	g.AddNode(&Node{
-		PURL:      "pkg:npm/axios@1.4.0",
+		Purl:      "pkg:npm/axios@1.4.0",
 		Name:      "axios",
 		Version:   "1.4.0",
 		Ecosystem: "npm",
 	})
 	g.AddNode(&Node{
-		PURL:      "pkg:npm/follow-redirects@1.15.2",
+		Purl:      "pkg:npm/follow-redirects@1.15.2",
 		Name:      "follow-redirects",
 		Version:   "1.15.2",
 		Ecosystem: "npm",
@@ -209,7 +209,7 @@ func TestNpmResolver_ScopedPackages(t *testing.T) {
 
 	g := New()
 	g.AddNode(&Node{
-		PURL:      "pkg:npm/@types/node@18.15.0",
+		Purl:      "pkg:npm/@types/node@18.15.0",
 		Name:      "@types/node",
 		Version:   "18.15.0",
 		Ecosystem: "npm",
@@ -345,19 +345,19 @@ inherits@^2.0.3:
 	g := New()
 	// Pre-populate with nodes from "inventory"
 	g.AddNode(&Node{
-		PURL:      "pkg:npm/concat-stream@1.6.2",
+		Purl:      "pkg:npm/concat-stream@1.6.2",
 		Name:      "concat-stream",
 		Version:   "1.6.2",
 		Ecosystem: "npm",
 	})
 	g.AddNode(&Node{
-		PURL:      "pkg:npm/buffer-from@1.1.2",
+		Purl:      "pkg:npm/buffer-from@1.1.2",
 		Name:      "buffer-from",
 		Version:   "1.1.2",
 		Ecosystem: "npm",
 	})
 	g.AddNode(&Node{
-		PURL:      "pkg:npm/inherits@2.0.4",
+		Purl:      "pkg:npm/inherits@2.0.4",
 		Name:      "inherits",
 		Version:   "2.0.4",
 		Ecosystem: "npm",
@@ -531,13 +531,13 @@ packages:
 
 	g := New()
 	g.AddNode(&Node{
-		PURL:      "pkg:npm/acorn@8.7.0",
+		Purl:      "pkg:npm/acorn@8.7.0",
 		Name:      "acorn",
 		Version:   "8.7.0",
 		Ecosystem: "npm",
 	})
 	g.AddNode(&Node{
-		PURL:      "pkg:npm/acorn-jsx@5.3.2",
+		Purl:      "pkg:npm/acorn-jsx@5.3.2",
 		Name:      "acorn-jsx",
 		Version:   "5.3.2",
 		Ecosystem: "npm",

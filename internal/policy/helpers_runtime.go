@@ -222,6 +222,476 @@ func customHelperFunctions() []cel.EnvOption {
 				}),
 			),
 		),
+
+		// ===== Graph Helper Functions =====
+		//
+		// These functions provide graph analysis capabilities for dependency policies.
+		// They work with the graph, node, and nodes variables available in graph entrypoints.
+
+		// graphMatch(pattern) checks if a string matches a glob-like pattern.
+		// Patterns support:
+		//   - Exact: "lodash" matches "lodash"
+		//   - Prefix: "lodash*" matches "lodash-es", "lodash.merge"
+		//   - Suffix: "*crypto" matches "x/crypto", "node-crypto"
+		//   - Contains: "*util*" matches "core-util-is", "util-deprecate"
+		//
+		// Example usage in CEL:
+		//   graphMatch(node.name, "lodash*")
+		//   nodes.filter(n, graphMatch(n.purl, "*crypto*"))
+		cel.Function("graphMatch",
+			cel.Overload("graphMatch_string_string",
+				[]*cel.Type{cel.StringType, cel.StringType},
+				cel.BoolType,
+				cel.BinaryBinding(func(value, pattern ref.Val) ref.Val {
+					return types.Bool(graphMatchesPattern(toString(value), toString(pattern)))
+				}),
+			),
+		),
+
+		// isDirectDep(node) checks if a node is a direct dependency.
+		// Convenience wrapper around node.direct.
+		//
+		// Example usage in CEL:
+		//   isDirectDep(node)
+		//   nodes.filter(n, isDirectDep(n))
+		cel.Function("isDirectDep",
+			cel.Overload("isDirectDep_map",
+				[]*cel.Type{cel.DynType},
+				cel.BoolType,
+				cel.UnaryBinding(func(val ref.Val) ref.Val {
+					node := extractNodeFromMap(val)
+					if node == nil {
+						return types.Bool(false)
+					}
+					return types.Bool(getBoolField(node, "direct"))
+				}),
+			),
+		),
+
+		// nodeDepth(node) returns the dependency depth of a node.
+		// Direct dependencies have depth 0, their dependencies have depth 1, etc.
+		//
+		// Example usage in CEL:
+		//   nodeDepth(node) > 2
+		//   nodes.filter(n, nodeDepth(n) <= 1)
+		cel.Function("nodeDepth",
+			cel.Overload("nodeDepth_map",
+				[]*cel.Type{cel.DynType},
+				cel.IntType,
+				cel.UnaryBinding(func(val ref.Val) ref.Val {
+					node := extractNodeFromMap(val)
+					if node == nil {
+						return types.Int(0)
+					}
+					if depth, ok := node["depth"]; ok {
+						switch d := depth.(type) {
+						case int64:
+							return types.Int(d)
+						case int32:
+							return types.Int(d)
+						case int:
+							return types.Int(d)
+						case float64:
+							return types.Int(int64(d))
+						}
+					}
+					return types.Int(0)
+				}),
+			),
+		),
+
+		// nodeEcosystem(node) returns the ecosystem of a node (e.g., "npm", "Go", "PyPI").
+		//
+		// Example usage in CEL:
+		//   nodeEcosystem(node) == "npm"
+		//   nodes.filter(n, nodeEcosystem(n) in ["npm", "PyPI"])
+		cel.Function("nodeEcosystem",
+			cel.Overload("nodeEcosystem_map",
+				[]*cel.Type{cel.DynType},
+				cel.StringType,
+				cel.UnaryBinding(func(val ref.Val) ref.Val {
+					node := extractNodeFromMap(val)
+					if node == nil {
+						return types.String("")
+					}
+					return types.String(getStringField(node, "ecosystem"))
+				}),
+			),
+		),
+
+		// hasVulnerabilities(node) checks if a node has any known vulnerabilities.
+		// Returns true if vulnerability_count.total > 0.
+		//
+		// Example usage in CEL:
+		//   hasVulnerabilities(node)
+		//   nodes.filter(n, hasVulnerabilities(n) && isDirectDep(n))
+		cel.Function("hasVulnerabilities",
+			cel.Overload("hasVulnerabilities_map",
+				[]*cel.Type{cel.DynType},
+				cel.BoolType,
+				cel.UnaryBinding(func(val ref.Val) ref.Val {
+					node := extractNodeFromMap(val)
+					if node == nil {
+						return types.Bool(false)
+					}
+					// Check vulnerability_count.total (also vuln_count for backwards compat)
+					vulnCount, ok := node["vulnerability_count"].(map[string]any)
+					if !ok {
+						vulnCount, ok = node["vuln_count"].(map[string]any)
+					}
+					if ok {
+						if total, ok := vulnCount["total"]; ok {
+							switch t := total.(type) {
+							case int64:
+								return types.Bool(t > 0)
+							case int32:
+								return types.Bool(t > 0)
+							case int:
+								return types.Bool(t > 0)
+							case float64:
+								return types.Bool(t > 0)
+							}
+						}
+					}
+					return types.Bool(false)
+				}),
+			),
+		),
+
+		// vulnerabilityCount(node) returns the total vulnerability count for a node.
+		//
+		// Example usage in CEL:
+		//   vulnerabilityCount(node) > 5
+		//   nodes.filter(n, vulnerabilityCount(n) > 0).size()
+		cel.Function("vulnerabilityCount",
+			cel.Overload("vulnerabilityCount_map",
+				[]*cel.Type{cel.DynType},
+				cel.IntType,
+				cel.UnaryBinding(func(val ref.Val) ref.Val {
+					node := extractNodeFromMap(val)
+					if node == nil {
+						return types.Int(0)
+					}
+					// Check vulnerability_count.total (also vuln_count for backwards compat)
+					vulnCount, ok := node["vulnerability_count"].(map[string]any)
+					if !ok {
+						vulnCount, ok = node["vuln_count"].(map[string]any)
+					}
+					if ok {
+						if total, ok := vulnCount["total"]; ok {
+							switch t := total.(type) {
+							case int64:
+								return types.Int(t)
+							case int32:
+								return types.Int(int64(t))
+							case int:
+								return types.Int(int64(t))
+							case float64:
+								return types.Int(int64(t))
+							}
+						}
+					}
+					return types.Int(0)
+				}),
+			),
+		),
+
+		// ===== Advanced Graph CEL Functions =====
+		//
+		// These functions provide path analysis and graph queries for dependency
+		// graph policies. They work with the nodes/edges variables at graph entrypoints.
+
+		// pathLength(path) returns the length of a dependency path (number of nodes).
+		//
+		// Example usage in CEL:
+		//   pathLength(vulnerability.path) > 5
+		//   vulnerability.?path.orValue([]).size() > 3  // equivalent using CEL builtin
+		cel.Function("pathLength",
+			cel.Overload("pathLength_list",
+				[]*cel.Type{cel.ListType(cel.DynType)},
+				cel.IntType,
+				cel.UnaryBinding(func(val ref.Val) ref.Val {
+					if lister, ok := val.(traits.Lister); ok {
+						return lister.Size()
+					}
+					return types.Int(0)
+				}),
+			),
+		),
+
+		// pathContains(path, pattern) checks if any element in the path matches the pattern.
+		// Uses the same glob matching as graphMatch.
+		//
+		// Example usage in CEL:
+		//   pathContains(vulnerability.path, "*lodash*")
+		//   pathContains(vulnerability.path, "express")
+		cel.Function("pathContains",
+			cel.Overload("pathContains_list_string",
+				[]*cel.Type{cel.ListType(cel.DynType), cel.StringType},
+				cel.BoolType,
+				cel.BinaryBinding(func(pathVal, patternVal ref.Val) ref.Val {
+					pattern := toString(patternVal)
+					if pattern == "" {
+						return types.Bool(false)
+					}
+					path := extractStringList(pathVal)
+					for _, elem := range path {
+						if graphMatchesPattern(elem, pattern) {
+							return types.Bool(true)
+						}
+					}
+					return types.Bool(false)
+				}),
+			),
+		),
+
+		// pathDepth(path) returns the dependency depth (path length - 1).
+		// Direct dependencies have depth 0.
+		//
+		// Example usage in CEL:
+		//   pathDepth(vulnerability.path) > 3
+		cel.Function("pathDepth",
+			cel.Overload("pathDepth_list",
+				[]*cel.Type{cel.ListType(cel.DynType)},
+				cel.IntType,
+				cel.UnaryBinding(func(val ref.Val) ref.Val {
+					if lister, ok := val.(traits.Lister); ok {
+						size := lister.Size()
+						if sizeInt, ok := size.(types.Int); ok {
+							depth := int64(sizeInt) - 1
+							if depth < 0 {
+								return types.Int(0)
+							}
+							return types.Int(depth)
+						}
+					}
+					return types.Int(0)
+				}),
+			),
+		),
+
+		// nodePurl(node) returns the PURL of a node.
+		//
+		// Example usage in CEL:
+		//   nodePurl(node).contains("lodash")
+		cel.Function("nodePurl",
+			cel.Overload("nodePurl_map",
+				[]*cel.Type{cel.DynType},
+				cel.StringType,
+				cel.UnaryBinding(func(val ref.Val) ref.Val {
+					node := extractNodeFromMap(val)
+					if node == nil {
+						return types.String("")
+					}
+					if purl, ok := node["purl"].(string); ok {
+						return types.String(purl)
+					}
+					return types.String("")
+				}),
+			),
+		),
+
+		// nodeName(node) returns the name of a node.
+		//
+		// Example usage in CEL:
+		//   nodeName(node) == "lodash"
+		cel.Function("nodeName",
+			cel.Overload("nodeName_map",
+				[]*cel.Type{cel.DynType},
+				cel.StringType,
+				cel.UnaryBinding(func(val ref.Val) ref.Val {
+					node := extractNodeFromMap(val)
+					if node == nil {
+						return types.String("")
+					}
+					if name, ok := node["name"].(string); ok {
+						return types.String(name)
+					}
+					return types.String("")
+				}),
+			),
+		),
+
+		// nodeVersion(node) returns the version of a node.
+		//
+		// Example usage in CEL:
+		//   nodeVersion(node).startsWith("1.")
+		cel.Function("nodeVersion",
+			cel.Overload("nodeVersion_map",
+				[]*cel.Type{cel.DynType},
+				cel.StringType,
+				cel.UnaryBinding(func(val ref.Val) ref.Val {
+					node := extractNodeFromMap(val)
+					if node == nil {
+						return types.String("")
+					}
+					if version, ok := node["version"].(string); ok {
+						return types.String(version)
+					}
+					return types.String("")
+				}),
+			),
+		),
+
+		// edgeScope(edge) returns the scope of an edge (runtime, dev, test, etc.).
+		//
+		// Example usage in CEL:
+		//   edgeScope(edge) == "dev"
+		//   edges.filter(e, edgeScope(e) == "runtime")
+		cel.Function("edgeScope",
+			cel.Overload("edgeScope_map",
+				[]*cel.Type{cel.DynType},
+				cel.StringType,
+				cel.UnaryBinding(func(val ref.Val) ref.Val {
+					edge := extractNodeFromMap(val)
+					if edge == nil {
+						return types.String("")
+					}
+					// Scope is stored as int in proto, map to string
+					if scope, ok := edge["scope"]; ok {
+						switch s := scope.(type) {
+						case int32:
+							return types.String(scopeToString(s))
+						case int64:
+							return types.String(scopeToString(int32(s)))
+						case int:
+							return types.String(scopeToString(int32(s)))
+						case string:
+							return types.String(s)
+						}
+					}
+					return types.String("")
+				}),
+			),
+		),
+
+		// vulnerabilitySeverity(vulnerability) returns the severity level as a string.
+		//
+		// Example usage in CEL:
+		//   vulnerabilitySeverity(vulnerability) == "CRITICAL"
+		cel.Function("vulnerabilitySeverity",
+			cel.Overload("vulnerabilitySeverity_map",
+				[]*cel.Type{cel.DynType},
+				cel.StringType,
+				cel.UnaryBinding(func(val ref.Val) ref.Val {
+					vuln := extractNodeFromMap(val)
+					if vuln == nil {
+						return types.String("")
+					}
+					// Try direct severity field (flattened vulnerability)
+					if severity, ok := vuln["severity"].(string); ok {
+						return types.String(strings.ToUpper(severity))
+					}
+					// Try advisory.severity.level (nested structure)
+					if advisory, ok := vuln["advisory"].(map[string]any); ok {
+						if severity, ok := advisory["severity"].(map[string]any); ok {
+							if level, ok := severity["level"]; ok {
+								return types.String(severityLevelToString(level))
+							}
+						}
+					}
+					return types.String("")
+				}),
+			),
+		),
+
+		// vulnerabilityId(vulnerability) returns the advisory ID of a vulnerability.
+		//
+		// Example usage in CEL:
+		//   vulnerabilityId(vulnerability).startsWith("CVE-")
+		cel.Function("vulnerabilityId",
+			cel.Overload("vulnerabilityId_map",
+				[]*cel.Type{cel.DynType},
+				cel.StringType,
+				cel.UnaryBinding(func(val ref.Val) ref.Val {
+					vuln := extractNodeFromMap(val)
+					if vuln == nil {
+						return types.String("")
+					}
+					// Try id field (common in flattened structures)
+					if id, ok := vuln["id"].(string); ok {
+						return types.String(id)
+					}
+					// Try advisory_id field (proto field name)
+					if id, ok := vuln["advisory_id"].(string); ok {
+						return types.String(id)
+					}
+					return types.String("")
+				}),
+			),
+		),
+
+		// hasFix(vuln) returns true if the vulnerability has a known fix.
+		//
+		// Example usage in CEL:
+		//   hasFix(vulnerability)
+		//   vulnerabilities.filter(v, !hasFix(v)).size()
+		cel.Function("hasFix",
+			cel.Overload("hasFix_map",
+				[]*cel.Type{cel.DynType},
+				cel.BoolType,
+				cel.UnaryBinding(func(val ref.Val) ref.Val {
+					vuln := extractNodeFromMap(val)
+					if vuln == nil {
+						return types.Bool(false)
+					}
+					// Check fixedVersions field
+					if fixed, ok := vuln["fixedVersions"].([]any); ok && len(fixed) > 0 {
+						return types.Bool(true)
+					}
+					if fixed, ok := vuln["fixed_versions"].([]any); ok && len(fixed) > 0 {
+						return types.Bool(true)
+					}
+					// Check advisory.fixed_versions
+					if advisory, ok := vuln["advisory"].(map[string]any); ok {
+						if fixed, ok := advisory["fixed_versions"].([]any); ok && len(fixed) > 0 {
+							return types.Bool(true)
+						}
+					}
+					return types.Bool(false)
+				}),
+			),
+		),
+
+		// inKEV(vuln) returns true if the vulnerability is in CISA's KEV catalog.
+		//
+		// Example usage in CEL:
+		//   inKEV(vulnerability)
+		//   vulnerabilities.filter(v, inKEV(v))
+		cel.Function("inKEV",
+			cel.Overload("inKEV_map",
+				[]*cel.Type{cel.DynType},
+				cel.BoolType,
+				cel.UnaryBinding(func(val ref.Val) ref.Val {
+					vuln := extractNodeFromMap(val)
+					if vuln == nil {
+						return types.Bool(false)
+					}
+					return types.Bool(getBoolField(vuln, "inKEV") || getBoolField(vuln, "in_kev"))
+				}),
+			),
+		),
+
+		// epssScore(vuln) returns the EPSS score (0.0-1.0) or 0 if not available.
+		//
+		// Example usage in CEL:
+		//   epssScore(vulnerability) > 0.5
+		cel.Function("epssScore",
+			cel.Overload("epssScore_map",
+				[]*cel.Type{cel.DynType},
+				cel.DoubleType,
+				cel.UnaryBinding(func(val ref.Val) ref.Val {
+					vuln := extractNodeFromMap(val)
+					if vuln == nil {
+						return types.Double(0.0)
+					}
+					if epss := getFloatField(vuln, "epss"); epss > 0 {
+						return types.Double(epss)
+					}
+					return types.Double(0.0)
+				}),
+			),
+		),
 	}
 }
 
@@ -478,4 +948,158 @@ func extractBaseImage(cmd string) string {
 	}
 
 	return strings.TrimSpace(rest)
+}
+
+// ===== Graph CEL Helper Functions =====
+//
+// These functions provide graph traversal and querying capabilities for
+// dependency graph policies. They work with the graph variable binding
+// at graph_report, graph_node, and graph_edge entrypoints.
+
+// extractNodeFromMap safely extracts a node-like map from a CEL value.
+func extractNodeFromMap(val ref.Val) map[string]any {
+	if val == nil {
+		return nil
+	}
+	// Try traits.Mapper (CEL map)
+	if m, ok := val.(traits.Mapper); ok {
+		result := map[string]any{}
+		it := m.Iterator()
+		for it.HasNext() == types.True {
+			key := it.Next()
+			if keyStr := toString(key); keyStr != "" {
+				if v, found := m.Find(key); found {
+					result[keyStr] = extractNativeValue(v)
+				}
+			}
+		}
+		return result
+	}
+	// Try native map
+	if native, err := val.ConvertToNative(mapStringAnyType); err == nil {
+		if m, ok := native.(map[string]any); ok {
+			return m
+		}
+	}
+	return nil
+}
+
+// graphMatchesPattern checks if a PURL or name matches a pattern.
+// Supports:
+//   - Exact match: "pkg:npm/lodash@4.17.21"
+//   - Prefix match: "pkg:npm/lodash*" or "lodash*"
+//   - Contains match: "*lodash*"
+//   - Suffix match: "*@4.17.21"
+func graphMatchesPattern(value, pattern string) bool {
+	if pattern == "" {
+		return false
+	}
+	value = strings.ToLower(value)
+	pattern = strings.ToLower(pattern)
+
+	// Handle wildcard patterns
+	hasPrefix := strings.HasPrefix(pattern, "*")
+	hasSuffix := strings.HasSuffix(pattern, "*")
+
+	if hasPrefix && hasSuffix {
+		// Contains match: *pattern*
+		core := pattern[1 : len(pattern)-1]
+		return strings.Contains(value, core)
+	} else if hasPrefix {
+		// Suffix match: *pattern
+		core := pattern[1:]
+		return strings.HasSuffix(value, core)
+	} else if hasSuffix {
+		// Prefix match: pattern*
+		core := pattern[:len(pattern)-1]
+		return strings.HasPrefix(value, core)
+	}
+	// Exact match
+	return value == pattern
+}
+
+// extractStringList extracts a list of strings from a CEL value.
+func extractStringList(val ref.Val) []string {
+	if val == nil {
+		return nil
+	}
+	// Try traits.Lister (CEL list)
+	if lister, ok := val.(traits.Lister); ok {
+		result := make([]string, 0)
+		it := lister.Iterator()
+		for it.HasNext() == types.True {
+			elem := it.Next()
+			if s := toString(elem); s != "" {
+				result = append(result, s)
+			}
+		}
+		return result
+	}
+	// Try native slice
+	if native, err := val.ConvertToNative(reflect.TypeOf([]any{})); err == nil {
+		if slice, ok := native.([]any); ok {
+			result := make([]string, 0, len(slice))
+			for _, elem := range slice {
+				if s, ok := elem.(string); ok {
+					result = append(result, s)
+				}
+			}
+			return result
+		}
+	}
+	return nil
+}
+
+// scopeToString converts a proto scope enum value to a string.
+func scopeToString(scope int32) string {
+	switch scope {
+	case 0:
+		return "unspecified"
+	case 1:
+		return "runtime"
+	case 2:
+		return "dev"
+	case 3:
+		return "optional"
+	case 4:
+		return "build"
+	case 5:
+		return "test"
+	default:
+		return "unknown"
+	}
+}
+
+// severityLevelToString converts a severity level to a string.
+func severityLevelToString(level any) string {
+	switch l := level.(type) {
+	case int32:
+		return severityIntToString(l)
+	case int64:
+		return severityIntToString(int32(l))
+	case int:
+		return severityIntToString(int32(l))
+	case string:
+		return strings.ToUpper(l)
+	default:
+		return ""
+	}
+}
+
+// severityIntToString converts a severity level int to a string.
+func severityIntToString(level int32) string {
+	switch level {
+	case 0:
+		return "UNSPECIFIED"
+	case 1:
+		return "LOW"
+	case 2:
+		return "MEDIUM"
+	case 3:
+		return "HIGH"
+	case 4:
+		return "CRITICAL"
+	default:
+		return "UNKNOWN"
+	}
 }

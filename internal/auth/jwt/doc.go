@@ -6,6 +6,7 @@
 //   - OIDC discovery for automatic key endpoint resolution
 //   - Background key refresh with configurable intervals
 //   - Pluggable metrics and observability hooks
+//   - Integration with connectrpc/authn-go for idiomatic Connect authentication
 //
 // # Basic Usage
 //
@@ -31,6 +32,36 @@
 //	handler := jwt.Middleware(authenticator, jwt.MiddlewareConfig{
 //		Mode: jwt.ModeRequired,
 //	})(yourHandler)
+//
+// # ConnectRPC Integration (authn-go)
+//
+// For ConnectRPC services, use [AuthnFunc] to create an [authn.AuthFunc] that wraps
+// the JWT authenticator. This enables idiomatic authentication at the HTTP layer
+// before request deserialization:
+//
+//	authenticator, _ := jwt.NewAuthenticator(cfg)
+//	authFunc := jwt.AuthnFunc(authenticator, jwt.ModeRequired)
+//	middleware := authn.NewMiddleware(authFunc)
+//	handler := middleware.Wrap(mux)
+//
+// Retrieve claims in handlers or interceptors:
+//
+//	claims := jwt.ClaimsFromAuthn(ctx)
+//	if claims != nil {
+//		fmt.Println("User:", claims.Subject)
+//	}
+//
+// Check for anonymous access:
+//
+//	if jwt.IsAnonymousAuthn(ctx) {
+//		// Handle anonymous request
+//	}
+//
+// Benefits of authn-go integration:
+//   - Authentication before request deserialization (more efficient rejections)
+//   - Proper Connect error format with metadata (WWW-Authenticate, X-Auth-Error)
+//   - Context propagation via authn.GetInfo/SetInfo
+//   - Consistent with ConnectRPC ecosystem patterns
 //
 // # Static Keys (Development/Testing)
 //
@@ -75,6 +106,6 @@
 //
 // Always use HTTPS in production to protect tokens in transit.
 //
-// This package is used by Deputy's proxy server and MCP server for consistent
-// authentication across all HTTP-based services.
+// This package is used by Deputy's proxy server, gRPC server, and MCP server
+// for consistent authentication across all HTTP-based services.
 package jwt

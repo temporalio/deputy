@@ -10,6 +10,7 @@ import (
 	"github.com/picatz/deputy/gen/deputy/list/v1/listv1connect"
 	"github.com/picatz/deputy/internal/compare"
 	"github.com/picatz/deputy/internal/inventory"
+	"github.com/picatz/deputy/internal/otel"
 	protoconv "github.com/picatz/deputy/internal/proto"
 	"github.com/picatz/deputy/internal/targets"
 )
@@ -46,13 +47,28 @@ func (h *ListHandler) ListPackages(
 	ctx context.Context,
 	req *connect.Request[listv1.ListPackagesRequest],
 ) (*connect.Response[listv1.ListPackagesResponse], error) {
-	if req.Msg.GetTarget() == "" {
-		return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("target is required"))
+	// Get span from otelconnect interceptor - don't create a new one
+	span := otel.SpanFromContext(ctx)
+
+	if err := protoconv.Validate(req.Msg); err != nil {
+		otel.SetSpanError(span, err)
+		return nil, connect.NewError(connect.CodeInvalidArgument, err)
 	}
+
+	target := req.Msg.GetTarget()
+	if target == "" {
+		err := fmt.Errorf("target is required")
+		otel.SetSpanError(span, err)
+		return nil, connect.NewError(connect.CodeInvalidArgument, err)
+	}
+
+	// Add business attributes to the otelconnect span
+	span.SetAttributes(otel.AttrTargetPath.String(target))
 
 	// Security: Validate target is accessible from remote server (skip in local mode)
 	if !h.localMode {
-		if err := targets.ValidateRemoteTarget(req.Msg.GetTarget()); err != nil {
+		if err := targets.ValidateRemoteTarget(target); err != nil {
+			otel.SetSpanError(span, err)
 			return nil, connect.NewError(connect.CodeInvalidArgument, err)
 		}
 	}
@@ -69,8 +85,9 @@ func (h *ListHandler) ListPackages(
 		refProvided = true
 	}
 
-	exec, err := inventory.CollectRepository(ctx, req.Msg.GetTarget(), ref, refProvided, opts)
+	exec, err := inventory.CollectRepository(ctx, target, ref, refProvided, opts)
 	if err != nil {
+		otel.SetSpanError(span, err)
 		return nil, connect.NewError(connect.CodeInternal, err)
 	}
 	if exec != nil {
@@ -123,6 +140,9 @@ func (h *ListHandler) ListPackages(
 		}
 	}
 
+	// Record package count on the span
+	span.SetAttributes(otel.AttrPackageCount.Int(len(packages)))
+
 	resp := &listv1.ListPackagesResponse{
 		Target:   protoconv.InventoryTargetToProto(exec.Result.Target),
 		Packages: protoPackages,
@@ -142,6 +162,14 @@ func (h *ListHandler) ListEcosystems(
 	ctx context.Context,
 	req *connect.Request[listv1.ListEcosystemsRequest],
 ) (*connect.Response[listv1.ListEcosystemsResponse], error) {
+	// Get span from otelconnect interceptor - don't create a new one
+	span := otel.SpanFromContext(ctx)
+
+	if err := protoconv.Validate(req.Msg); err != nil {
+		otel.SetSpanError(span, err)
+		return nil, connect.NewError(connect.CodeInvalidArgument, err)
+	}
+
 	ecosystems := []*listv1.EcosystemInfo{
 		{
 			Name:          "go",

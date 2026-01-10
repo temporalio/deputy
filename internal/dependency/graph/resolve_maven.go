@@ -265,7 +265,7 @@ func (r *MavenResolver) processPomXML(ctx context.Context, g *Graph, files FileR
 		rootPURL = mavenPkgToPURL(groupID, project.ArtifactID, version)
 		if g.Node(rootPURL) == nil {
 			g.AddNode(&Node{
-				PURL:      rootPURL,
+				Purl:      rootPURL,
 				Name:      groupID + ":" + project.ArtifactID,
 				Version:   version,
 				Ecosystem: "Maven",
@@ -321,7 +321,7 @@ func (r *MavenResolver) processPomXML(ctx context.Context, g *Graph, files FileR
 		}
 		if node == nil {
 			node = &Node{
-				PURL:      purl,
+				Purl:      purl,
 				Name:      name,
 				Version:   version,
 				Ecosystem: "Maven",
@@ -333,13 +333,13 @@ func (r *MavenResolver) processPomXML(ctx context.Context, g *Graph, files FileR
 
 		// Mark as direct and add to roots
 		node.Direct = true
-		if !containsRoot(g.roots, node.PURL) {
-			g.roots = append(g.roots, node.PURL)
+		if !containsRoot(g.roots, node.Purl) {
+			g.roots = append(g.roots, node.Purl)
 		}
 
 		// Add edge from root
 		if rootPURL != "" {
-			edgeKey := rootPURL + "->" + node.PURL
+			edgeKey := rootPURL + "->" + node.Purl
 			if !edgeSet[edgeKey] {
 				edgeScope := ScopeRuntime
 				if scope == "compile" || scope == "" {
@@ -351,7 +351,7 @@ func (r *MavenResolver) processPomXML(ctx context.Context, g *Graph, files FileR
 				}
 				g.AddEdge(&Edge{
 					From:       rootPURL,
-					To:         node.PURL,
+					To:         node.Purl,
 					Constraint: version,
 					Scope:      edgeScope,
 				})
@@ -451,7 +451,7 @@ func (r *MavenResolver) processGradleLockfile(ctx context.Context, g *Graph, fil
 		}
 		if node == nil {
 			node = &Node{
-				PURL:      purl,
+				Purl:      purl,
 				Name:      name,
 				Version:   versionPart,
 				Ecosystem: "Maven",
@@ -461,8 +461,8 @@ func (r *MavenResolver) processGradleLockfile(ctx context.Context, g *Graph, fil
 			g.AddNode(node)
 		}
 
-		if !containsRoot(g.roots, node.PURL) {
-			g.roots = append(g.roots, node.PURL)
+		if !containsRoot(g.roots, node.Purl) {
+			g.roots = append(g.roots, node.Purl)
 		}
 	}
 
@@ -508,7 +508,7 @@ func (r *MavenResolver) resolveTransitiveDeps(ctx context.Context, g *Graph, gro
 		// Ensure node exists in graph
 		if g.Node(purl) == nil {
 			g.AddNode(&Node{
-				PURL:      purl,
+				Purl:      purl,
 				Name:      vk.Name,
 				Version:   vk.Version,
 				Ecosystem: "Maven",

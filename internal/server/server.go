@@ -3,15 +3,16 @@ package server
 import (
 	"context"
 	"crypto/tls"
-	"errors"
 	"fmt"
 	"net/http"
 	"strings"
-	"sync"
 	"time"
 
+	"connectrpc.com/authn"
 	"connectrpc.com/connect"
+	"connectrpc.com/cors"
 	"connectrpc.com/otelconnect"
+	"connectrpc.com/validate"
 	"golang.org/x/net/http2"
 	"golang.org/x/net/http2/h2c"
 	"golang.org/x/time/rate"
@@ -24,6 +25,7 @@ import (
 	"github.com/picatz/deputy/gen/deputy/scan/v1/scanv1connect"
 	"github.com/picatz/deputy/gen/deputy/secrets/v1/secretsv1connect"
 	"github.com/picatz/deputy/internal/auth/jwt"
+	"github.com/picatz/deputy/internal/cache/memory"
 	"github.com/picatz/deputy/internal/logs"
 	"github.com/picatz/deputy/internal/otel"
 	"github.com/picatz/deputy/internal/policy"
@@ -195,7 +197,7 @@ func DefaultConfig() Config {
 type Server struct {
 	config        Config
 	httpServer    *http.Server
-	mux           *http.ServeMux
+	handler       http.Handler       // The fully wrapped handler with all middleware
 	authenticator jwt.Authenticator  // JWT authenticator (nil if auth disabled)
 	policies      []policy.Source    // Loaded policy sources (nil if no policies)
 }
@@ -206,12 +208,40 @@ func New(cfg Config) *Server {
 
 	mux := http.NewServeMux()
 
+	// Initialize JWT authenticator if auth is configured
+	var authenticator jwt.Authenticator
+	var authnMiddleware *authn.Middleware
+	authMode := getAuthMode(cfg.Auth)
+
+	if authMode != jwt.ModeDisabled {
+		jwtConfig := buildJWTConfig(cfg.Auth)
+		if jwtConfig != nil {
+			auth, err := jwt.NewAuthenticator(jwtConfig)
+			if err != nil {
+				logs.Error(context.Background(), "failed to create JWT authenticator", "error", err)
+			} else {
+				authenticator = auth
+				// Create authn middleware using our JWT authenticator
+				// This validates tokens at the HTTP layer before request deserialization
+				authFunc := jwt.AuthnFunc(authenticator, authMode)
+				authnMiddleware = authn.NewMiddleware(authFunc)
+			}
+		}
+	}
+
 	// Build middleware chain
 	var handler http.Handler = mux
 
 	// Add CORS middleware if configured
 	if cfg.CORS != nil {
 		handler = corsMiddleware(cfg.CORS)(handler)
+	}
+
+	// Add authn middleware if configured (before rate limiting for efficiency)
+	// This uses connectrpc/authn-go for idiomatic Connect authentication
+	// Health endpoints are exempt from authentication
+	if authnMiddleware != nil {
+		handler = skipAuthForHealth(authnMiddleware.Wrap(handler), mux)
 	}
 
 	// Add rate limiting middleware if configured
@@ -226,22 +256,6 @@ func New(cfg Config) *Server {
 
 	// Add OpenTelemetry tracing middleware
 	handler = otel.InstrumentedMiddleware("deputy.server")(handler)
-
-	// Initialize JWT authenticator if auth is configured
-	var authenticator jwt.Authenticator
-	authMode := getAuthMode(cfg.Auth)
-
-	if authMode != jwt.ModeDisabled {
-		jwtConfig := buildJWTConfig(cfg.Auth)
-		if jwtConfig != nil {
-			auth, err := jwt.NewAuthenticator(jwtConfig)
-			if err != nil {
-				logs.Error(context.Background(), "failed to create JWT authenticator", "error", err)
-			} else {
-				authenticator = auth
-			}
-		}
-	}
 
 	// Load policies if configured
 	var policies []policy.Source
@@ -260,16 +274,16 @@ func New(cfg Config) *Server {
 
 	// Create Connect interceptors
 	otelInterceptor, _ := otelconnect.NewInterceptor()
+	validateInterceptor := validate.NewInterceptor()
 	interceptors := []connect.Interceptor{
 		otelInterceptor,
+		validateInterceptor, // Validates requests against protovalidate constraints
 		loggingInterceptor(),
 		recoveryInterceptor(),
 	}
 
-	// Add auth interceptor if configured
-	if authenticator != nil {
-		interceptors = append(interceptors, authInterceptor(authenticator, authMode))
-	}
+	// Note: Authentication is now handled at the HTTP layer via authn middleware.
+	// Claims are accessible via jwt.ClaimsFromAuthn(ctx) in handlers and interceptors.
 
 	// Add policy interceptor if policies are configured
 	if len(policies) > 0 {
@@ -368,7 +382,7 @@ func New(cfg Config) *Server {
 	return &Server{
 		config:        cfg,
 		httpServer:    httpServer,
-		mux:           mux,
+		handler:       handler, // The wrapped handler with all middleware
 		authenticator: authenticator,
 		policies:      policies,
 	}
@@ -502,8 +516,9 @@ func (s *Server) Addr() string {
 }
 
 // Handler returns the HTTP handler for testing.
+// This returns the fully wrapped handler including all middleware (auth, CORS, rate limiting, etc.).
 func (s *Server) Handler() http.Handler {
-	return s.mux
+	return s.handler
 }
 
 // IsTLS returns true if TLS is configured.
@@ -534,7 +549,24 @@ func versionHandler(w http.ResponseWriter, r *http.Request) {
 // Middleware
 
 // corsMiddleware adds CORS headers to responses.
+// Uses connectrpc.com/cors for ConnectRPC-compatible headers.
 func corsMiddleware(cfg *CORSConfig) func(http.Handler) http.Handler {
+	// Merge user-configured headers with ConnectRPC required headers
+	allowedMethods := cfg.AllowedMethods
+	if len(allowedMethods) == 0 {
+		allowedMethods = cors.AllowedMethods()
+	}
+
+	allowedHeaders := cfg.AllowedHeaders
+	if len(allowedHeaders) == 0 {
+		allowedHeaders = cors.AllowedHeaders()
+	}
+
+	exposedHeaders := cfg.ExposedHeaders
+	if len(exposedHeaders) == 0 {
+		exposedHeaders = cors.ExposedHeaders()
+	}
+
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			origin := r.Header.Get("Origin")
@@ -555,19 +587,15 @@ func corsMiddleware(cfg *CORSConfig) func(http.Handler) http.Handler {
 					w.Header().Set("Access-Control-Allow-Credentials", "true")
 				}
 
-				if len(cfg.ExposedHeaders) > 0 {
-					w.Header().Set("Access-Control-Expose-Headers", strings.Join(cfg.ExposedHeaders, ", "))
+				if len(exposedHeaders) > 0 {
+					w.Header().Set("Access-Control-Expose-Headers", strings.Join(exposedHeaders, ", "))
 				}
 			}
 
 			// Handle preflight requests
 			if r.Method == http.MethodOptions {
-				if len(cfg.AllowedMethods) > 0 {
-					w.Header().Set("Access-Control-Allow-Methods", strings.Join(cfg.AllowedMethods, ", "))
-				}
-				if len(cfg.AllowedHeaders) > 0 {
-					w.Header().Set("Access-Control-Allow-Headers", strings.Join(cfg.AllowedHeaders, ", "))
-				}
+				w.Header().Set("Access-Control-Allow-Methods", strings.Join(allowedMethods, ", "))
+				w.Header().Set("Access-Control-Allow-Headers", strings.Join(allowedHeaders, ", "))
 				if cfg.MaxAge > 0 {
 					w.Header().Set("Access-Control-Max-Age", fmt.Sprintf("%d", cfg.MaxAge))
 				}
@@ -581,22 +609,24 @@ func corsMiddleware(cfg *CORSConfig) func(http.Handler) http.Handler {
 }
 
 // rateLimitMiddleware implements per-client rate limiting using token bucket.
+// Uses a bounded LRU cache to prevent memory exhaustion from many unique IPs.
 func rateLimitMiddleware(cfg *RateLimitConfig) func(http.Handler) http.Handler {
-	// Per-client rate limiters
-	var (
-		mu       sync.Mutex
-		limiters = make(map[string]*rate.Limiter)
+	// Per-client rate limiters with bounded size and TTL.
+	// Max 10,000 entries with 1 hour TTL prevents memory exhaustion from
+	// attackers using many unique IP addresses.
+	const (
+		maxLimiters = 10000
+		limiterTTL  = 1 * time.Hour
 	)
+	limiters := memory.NewTTLCache[string, *rate.Limiter](maxLimiters, limiterTTL)
 
 	getLimiter := func(key string) *rate.Limiter {
-		mu.Lock()
-		defer mu.Unlock()
-
-		limiter, exists := limiters[key]
-		if !exists {
-			limiter = rate.NewLimiter(rate.Limit(cfg.RequestsPerSecond), cfg.Burst)
-			limiters[key] = limiter
+		if limiter, ok := limiters.Get(key); ok {
+			return limiter
 		}
+		// Create new limiter and cache it
+		limiter := rate.NewLimiter(rate.Limit(cfg.RequestsPerSecond), cfg.Burst)
+		limiters.Set(key, limiter)
 		return limiter
 	}
 
@@ -622,6 +652,20 @@ func rateLimitMiddleware(cfg *RateLimitConfig) func(http.Handler) http.Handler {
 			next.ServeHTTP(w, r)
 		})
 	}
+}
+
+// skipAuthForHealth bypasses authentication for health check endpoints.
+// Health endpoints (/health, /ready, /version) should be accessible without auth
+// for load balancers and orchestration systems.
+func skipAuthForHealth(authedHandler, unauthHandler http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/health", "/ready", "/version":
+			unauthHandler.ServeHTTP(w, r)
+		default:
+			authedHandler.ServeHTTP(w, r)
+		}
+	})
 }
 
 // maxBytesMiddleware limits request body size.
@@ -679,66 +723,6 @@ func recoveryInterceptor() connect.UnaryInterceptorFunc {
 					err = connect.NewError(connect.CodeInternal, fmt.Errorf("internal server error"))
 				}
 			}()
-			return next(ctx, req)
-		}
-	}
-}
-
-// authInterceptor validates JWT tokens using the shared jwt.Authenticator.
-// It validates signatures, expiration, issuer, audience, and required claims.
-// On success, claims are stored in context via jwt.ContextWithClaims for handlers.
-func authInterceptor(auth jwt.Authenticator, mode jwt.Mode) connect.UnaryInterceptorFunc {
-	return func(next connect.UnaryFunc) connect.UnaryFunc {
-		return func(ctx context.Context, req connect.AnyRequest) (connect.AnyResponse, error) {
-			procedure := req.Spec().Procedure
-
-			// Create a minimal http.Request for the authenticator
-			// (it needs the Authorization header)
-			httpReq := &http.Request{
-				Header: http.Header{},
-			}
-			if authHeader := req.Header().Get("Authorization"); authHeader != "" {
-				httpReq.Header.Set("Authorization", authHeader)
-			}
-
-			// Authenticate using the shared JWT infrastructure
-			claims, err := auth.Authenticate(ctx, httpReq)
-			if err != nil {
-				// Convert jwt.Error to Connect error
-				var jwtErr *jwt.Error
-				if errors.As(err, &jwtErr) {
-					code := connect.CodeUnauthenticated
-					if jwtErr.Code == jwt.CodeInvalidIssuer ||
-						jwtErr.Code == jwt.CodeInvalidAudience ||
-						jwtErr.Code == jwt.CodeMissingClaim {
-						code = connect.CodePermissionDenied
-					}
-					logs.Warn(ctx, "authentication failed",
-						"procedure", procedure,
-						"code", jwtErr.Code,
-						"message", jwtErr.Message,
-					)
-					return nil, connect.NewError(code, fmt.Errorf("%s: %s", jwtErr.Code, jwtErr.Message))
-				}
-				logs.Error(ctx, "authentication error", "procedure", procedure, "error", err)
-				return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("authentication error"))
-			}
-
-			// Check if auth is required but no token was provided
-			if claims == nil && mode == jwt.ModeRequired {
-				logs.Debug(ctx, "authentication required but no token provided", "procedure", procedure)
-				return nil, connect.NewError(connect.CodeUnauthenticated, fmt.Errorf("authentication required"))
-			}
-
-			// Store claims in context for handlers to access
-			if claims != nil {
-				ctx = jwt.ContextWithClaims(ctx, claims)
-				logs.Debug(ctx, "request authenticated",
-					"procedure", procedure,
-					"subject", claims.Subject,
-				)
-			}
-
 			return next(ctx, req)
 		}
 	}
@@ -844,8 +828,8 @@ func buildPolicyPayload(ctx context.Context, req connect.AnyRequest, entrypoint 
 		"entrypoint": entrypoint.String(),
 	}
 
-	// Add JWT claims if present
-	if claims := jwt.ClaimsFromContext(ctx); claims != nil {
+	// Add JWT claims if present (from authn middleware)
+	if claims := jwt.ClaimsFromAuthn(ctx); claims != nil {
 		payload["jwt"] = claims.ToMap()
 	} else {
 		payload["jwt"] = jwt.AnonymousClaims()

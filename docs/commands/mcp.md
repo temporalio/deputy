@@ -381,13 +381,14 @@ Scan a local directory for vulnerabilities.
   "path": "/path/to/project",
   "packagesScanned": 142,
   "clean": false,
-  "vulnerabilitiesBy": {
+  "vulnerabilitiesBySeverity": {
     "critical": 1,
     "high": 3,
     "medium": 5,
     "low": 2
   },
-  "vulnerabilities": [...]
+  "vulnerabilities": [...],
+  "scanTime": "2.3s"
 }
 ```
 
@@ -584,7 +585,7 @@ Get commands to fix vulnerabilities.
       "package": "github.com/example/pkg",
       "fromVersion": "1.2.3",
       "toVersion": "1.2.4",
-      "vulnIds": ["CVE-2024-1234"],
+      "affectedVulnerabilities": ["CVE-2024-1234"],
       "isDirect": true
     }
   ]

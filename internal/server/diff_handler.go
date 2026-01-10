@@ -51,6 +51,10 @@ func (h *DiffHandler) DiffPackages(
 	ctx context.Context,
 	req *connect.Request[diffv1.DiffPackagesRequest],
 ) (*connect.Response[diffv1.DiffPackagesResponse], error) {
+	if err := internalproto.Validate(req.Msg); err != nil {
+		return nil, connect.NewError(connect.CodeInvalidArgument, err)
+	}
+
 	baseTarget := req.Msg.GetBaseTarget()
 	targetTarget := req.Msg.GetTargetTarget()
 
@@ -151,6 +155,10 @@ func (h *DiffHandler) DiffVulnerabilities(
 	ctx context.Context,
 	req *connect.Request[diffv1.DiffVulnerabilitiesRequest],
 ) (*connect.Response[diffv1.DiffVulnerabilitiesResponse], error) {
+	if err := internalproto.Validate(req.Msg); err != nil {
+		return nil, connect.NewError(connect.CodeInvalidArgument, err)
+	}
+
 	baseTarget := req.Msg.GetBaseTarget()
 	targetTarget := req.Msg.GetTargetTarget()
 
@@ -270,6 +278,10 @@ func (h *DiffHandler) DiffVulnerabilities(
 
 // DiffContainerImages performs a comprehensive diff between two container images.
 func (h *DiffHandler) DiffContainerImages(ctx context.Context, req *connect.Request[diffv1.DiffContainerImagesRequest]) (*connect.Response[diffv1.DiffContainerImagesResponse], error) {
+	if err := internalproto.Validate(req.Msg); err != nil {
+		return nil, connect.NewError(connect.CodeInvalidArgument, err)
+	}
+
 	baseImage := req.Msg.BaseImage
 	targetImage := req.Msg.TargetImage
 

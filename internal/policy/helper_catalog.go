@@ -60,6 +60,41 @@ var helperFunctions = []HelperFunction{
 	// and macros (exists, filter, map) for pattern matching and iteration.
 	{Name: "imageRef", Signature: "imageRef(string) map", Doc: "Parse container image reference into components (registry, repository, name, tag, digest). Handles implicit docker.io, port vs tag disambiguation, and scheme stripping."},
 	{Name: "baseImage", Signature: "baseImage(list) string", Doc: "Extract base image reference from build history (first FROM). Handles multi-stage builds, --platform flags, and Docker's nop format."},
+
+	// SSVC (Stakeholder-Specific Vulnerability Categorization)
+	{Name: "ssvc", Signature: "ssvc(vulnerability) map", Doc: "Evaluate vulnerability using CISA SSVC decision tree. Returns map with decision (act/attend/track*/track), reasoning, and input factors."},
+
+	// Graph Helper Functions
+	// These provide dependency graph analysis for graph_report, graph_node, and graph_edge entrypoints.
+	{Name: "graphMatch", Signature: "graphMatch(string, pattern) bool", Doc: "Check if string matches glob pattern. Supports exact, prefix (*), suffix (*), and contains (*x*) matching."},
+	{Name: "isDirectDep", Signature: "isDirectDep(node) bool", Doc: "Check if node is a direct dependency."},
+	{Name: "nodeDepth", Signature: "nodeDepth(node) int", Doc: "Get dependency depth of node (0 = direct, 1+ = transitive)."},
+	{Name: "nodeEcosystem", Signature: "nodeEcosystem(node) string", Doc: "Get ecosystem of node (e.g., 'npm', 'Go', 'PyPI')."},
+	{Name: "hasVulnerabilities", Signature: "hasVulnerabilities(node) bool", Doc: "Check if node has any known vulnerabilities."},
+	{Name: "vulnerabilityCount", Signature: "vulnerabilityCount(node) int", Doc: "Get total vulnerability count for node."},
+
+	// Path Analysis Functions
+	// These work with vulnerability.path (when --with-graph is enabled) and graph traversal results.
+	{Name: "pathLength", Signature: "pathLength(list) int", Doc: "Get length of a dependency path (number of nodes)."},
+	{Name: "pathContains", Signature: "pathContains(list, pattern) bool", Doc: "Check if any path element matches the glob pattern."},
+	{Name: "pathDepth", Signature: "pathDepth(list) int", Doc: "Get dependency depth from path (path length - 1). Direct = 0."},
+
+	// Node Accessor Functions
+	// Convenient accessors for node fields, composable with filter/map.
+	{Name: "nodePurl", Signature: "nodePurl(node) string", Doc: "Get PURL of a node."},
+	{Name: "nodeName", Signature: "nodeName(node) string", Doc: "Get name of a node."},
+	{Name: "nodeVersion", Signature: "nodeVersion(node) string", Doc: "Get version of a node."},
+
+	// Edge Functions
+	{Name: "edgeScope", Signature: "edgeScope(edge) string", Doc: "Get scope of an edge (runtime, dev, test, build, optional)."},
+
+	// Vulnerability Helper Functions
+	// These work with vulnerability objects in scan_vulnerability and scan_report entrypoints.
+	{Name: "vulnerabilitySeverity", Signature: "vulnerabilitySeverity(vulnerability) string", Doc: "Get severity level (CRITICAL, HIGH, MEDIUM, LOW)."},
+	{Name: "vulnerabilityId", Signature: "vulnerabilityId(vulnerability) string", Doc: "Get advisory ID (CVE-xxx, GHSA-xxx)."},
+	{Name: "hasFix", Signature: "hasFix(vulnerability) bool", Doc: "Check if vulnerability has a known fix."},
+	{Name: "inKEV", Signature: "inKEV(vulnerability) bool", Doc: "Check if vulnerability is in CISA's KEV catalog."},
+	{Name: "epssScore", Signature: "epssScore(vulnerability) double", Doc: "Get EPSS score (0.0-1.0), returns 0 if unavailable."},
 }
 
 // HelperCatalog returns the CEL helper catalog.

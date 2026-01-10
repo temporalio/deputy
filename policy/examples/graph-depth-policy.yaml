@@ -9,6 +9,18 @@
 # Available graph fields in vulnerability object:
 #   - path: list(string)  - Dependency chain from root to vulnerable package
 #   - depth: int          - Distance from root (0 = direct, 1+ = transitive)
+#
+# Path Analysis Helper Functions:
+#   - pathLength(path)           - Get length of dependency path (number of nodes)
+#   - pathContains(path, glob)   - Check if any path element matches glob pattern
+#   - pathDepth(path)            - Get dependency depth from path (length - 1)
+#
+# Vulnerability Helper Functions:
+#   - vulnerabilitySeverity(vuln)  - Get severity level (CRITICAL, HIGH, MEDIUM, LOW)
+#   - vulnerabilityId(vuln)        - Get advisory ID (CVE-xxx, GHSA-xxx)
+#   - hasFix(vuln)        - Check if vulnerability has a known fix
+#   - inKEV(vuln)         - Check if vulnerability is in CISA's KEV catalog
+#   - epssScore(vuln)     - Get EPSS score (0.0-1.0), returns 0 if unavailable
 
 policies:
   # Block critical vulnerabilities in direct dependencies
@@ -89,3 +101,147 @@ policies:
           vulnerabilities.filter(v, v.?depth.orValue(0) > 3).size() > 10
         reason: "More than 10 vulnerabilities deep in the dependency tree"
         remediation: "Consider auditing and reducing dependency tree complexity"
+
+  # =============================================================================
+  # Examples using Path Analysis Helper Functions
+  # =============================================================================
+
+  # Use pathLength() to identify long dependency chains
+  - name: warn-long-path-length
+    description: "Long dependency paths indicate supply chain complexity"
+    entrypoints: ["scan_vulnerability"]
+    rules:
+      - action: warn
+        when: |
+          pathLength(vulnerability.?path.orValue([])) > 6
+        reason: "Dependency path has more than 6 nodes"
+        remediation: "Review if intermediate dependencies can be eliminated"
+
+  # Use pathContains() with glob patterns to find specific packages in path
+  - name: block-path-through-legacy
+    description: "Block vulnerabilities flowing through legacy or deprecated packages"
+    entrypoints: ["scan_vulnerability"]
+    rules:
+      - action: deny
+        when: |
+          pathContains(vulnerability.?path.orValue([]), "*-legacy*") ||
+          pathContains(vulnerability.?path.orValue([]), "*deprecated*")
+        reason: "Vulnerability flows through a legacy/deprecated package"
+        remediation: "Migrate to a modern alternative for the legacy dependency"
+
+  # Use pathContains() with prefix/suffix matching
+  - name: warn-path-through-unmaintained
+    description: "Warn on packages from unmaintained organizations"
+    entrypoints: ["scan_vulnerability"]
+    vars:
+      unmaintainedOrgs:
+        - "abandoned-org/*"
+        - "*/unmaintained-*"
+    rules:
+      - action: warn
+        when: |
+          unmaintainedOrgs.exists(pattern,
+            pathContains(vulnerability.?path.orValue([]), pattern))
+        reason: "Vulnerability path includes potentially unmaintained package"
+
+  # Use pathDepth() to calculate depth from path
+  - name: compare-path-depth
+    description: "Use pathDepth helper for depth calculation from path"
+    entrypoints: ["scan_vulnerability"]
+    rules:
+      - action: warn
+        when: |
+          pathDepth(vulnerability.?path.orValue([])) != vulnerability.?depth.orValue(-1) &&
+          vulnerability.?depth.orValue(-1) >= 0
+        reason: "Path and depth fields are inconsistent (diagnostic)"
+
+  # =============================================================================
+  # Examples using Vulnerability Helper Functions
+  # =============================================================================
+
+  # Use vulnerabilitySeverity() for cleaner severity checks
+  - name: block-critical-with-helper
+    description: "Block critical vulnerabilities using helper function"
+    entrypoints: ["scan_vulnerability"]
+    rules:
+      - action: deny
+        when: |
+          vulnerabilitySeverity(vulnerability) == "CRITICAL"
+        reason: "Critical vulnerability found"
+
+  # Use inKEV() and epssScore() for threat intelligence
+  - name: block-actively-exploited
+    description: "Block vulnerabilities with evidence of active exploitation"
+    entrypoints: ["scan_vulnerability"]
+    rules:
+      - action: deny
+        when: |
+          inKEV(vulnerability) || epssScore(vulnerability) > 0.7
+        reason: "Vulnerability is actively exploited (KEV or high EPSS)"
+        remediation: "This vulnerability requires immediate attention"
+
+  # Use hasFix() to prioritize fixable vulnerabilities
+  - name: block-fixable-critical
+    description: "Block critical vulnerabilities that have available fixes"
+    entrypoints: ["scan_vulnerability"]
+    rules:
+      - action: deny
+        when: |
+          vulnerabilitySeverity(vulnerability) == "CRITICAL" && hasFix(vulnerability)
+        reason: "Critical vulnerability with available fix must be addressed"
+        remediation: "Update to a fixed version immediately"
+
+  # Use vulnerabilityId() for specific vulnerability handling
+  - name: block-specific-cves
+    description: "Block specific high-profile vulnerabilities by ID"
+    entrypoints: ["scan_vulnerability"]
+    vars:
+      blockedVulns:
+        - "CVE-2021-44228"  # Log4Shell
+        - "CVE-2021-45046"  # Log4j follow-up
+        - "CVE-2022-22965"  # Spring4Shell
+    rules:
+      - action: deny
+        when: |
+          blockedVulns.exists(id, vulnerabilityId(vulnerability) == id)
+        reason: "High-profile vulnerability explicitly blocked"
+
+  # Combine helper functions for sophisticated policies
+  - name: risk-based-triage
+    description: "Sophisticated risk-based vulnerability triage"
+    entrypoints: ["scan_vulnerability"]
+    rules:
+      # Highest priority: KEV + fixable + direct dependency
+      - action: deny
+        when: |
+          inKEV(vulnerability) &&
+          hasFix(vulnerability) &&
+          vulnerability.?depth.orValue(0) == 0
+        reason: "KEV vulnerability with fix in direct dependency - immediate action required"
+
+      # High priority: High EPSS + shallow depth
+      - action: deny
+        when: |
+          epssScore(vulnerability) > 0.5 &&
+          vulnerability.?depth.orValue(0) <= 2 &&
+          vulnerabilitySeverity(vulnerability) in ["CRITICAL", "HIGH"]
+        reason: "High exploitation probability in shallow dependency"
+
+      # Medium priority: Any critical in path through specific packages
+      - action: warn
+        when: |
+          vulnerabilitySeverity(vulnerability) == "CRITICAL" &&
+          pathContains(vulnerability.?path.orValue([]), "*crypto*")
+        reason: "Critical vulnerability in cryptography-related dependency chain"
+
+  # Report-level: count unfixed vs fixable vulnerabilities
+  - name: fixable-ratio-check
+    description: "Warn if most vulnerabilities are fixable but not fixed"
+    entrypoints: ["scan_report"]
+    rules:
+      - action: warn
+        when: |
+          vulnerabilities.size() > 5 &&
+          vulnerabilities.filter(v, hasFix(v)).size() * 10 > vulnerabilities.size() * 8
+        reason: "Over 80% of vulnerabilities have available fixes"
+        remediation: "Run 'deputy fix' to generate a remediation plan"

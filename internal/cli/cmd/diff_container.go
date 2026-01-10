@@ -309,11 +309,11 @@ type RecommendationJSON struct {
 
 // PackageFixJSON represents a package with available fix.
 type PackageFixJSON struct {
-	Package        string            `json:"package"`
-	CurrentVersion string            `json:"currentVersion"`
-	FixedVersion   string            `json:"fixedVersion"`
-	VulnCount      int               `json:"vulnCount"`
-	LayerContext   *LayerContextJSON `json:"layerContext,omitempty"`
+	Package            string            `json:"package"`
+	CurrentVersion     string            `json:"currentVersion"`
+	FixedVersion       string            `json:"fixedVersion"`
+	VulnerabilityCount int               `json:"vulnerabilityCount"`
+	LayerContext       *LayerContextJSON `json:"layerContext,omitempty"`
 }
 
 type LayerContextJSON struct {
@@ -503,10 +503,10 @@ func buildFixablePackagesJSON(changes []compare.VulnerabilityChange) []PackageFi
 	result := make([]PackageFixJSON, 0, len(sorted))
 	for _, pf := range sorted {
 		fix := PackageFixJSON{
-			Package:        pf.pkg,
-			CurrentVersion: pf.version,
-			FixedVersion:   pf.fix,
-			VulnCount:      pf.count,
+			Package:            pf.pkg,
+			CurrentVersion:     pf.version,
+			FixedVersion:       pf.fix,
+			VulnerabilityCount: pf.count,
 		}
 		if pf.hasLayer {
 			fix.LayerContext = &LayerContextJSON{

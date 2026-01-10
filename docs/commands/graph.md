@@ -61,7 +61,7 @@ Full graph structure with nodes and edges:
       "ecosystem": "Go",
       "direct": true,
       "depth": 0,
-      "vuln_count": {"critical": 0, "high": 0, "medium": 0, "low": 0, "total": 0}
+      "vulnerability_count": {"critical": 0, "high": 0, "medium": 0, "low": 0, "total": 0}
     }
   ],
   "edges": [

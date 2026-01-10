@@ -241,7 +241,7 @@ $ deputy diff --format json nginx:1.24 nginx:1.25
           "package": "openssl",
           "currentVersion": "1.1.1k",
           "fixedVersion": "1.1.1w",
-          "vulnCount": 2,
+          "vulnerabilityCount": 2,
           "layerContext": {
             "layerIndex": 3,
             "inBaseImage": true

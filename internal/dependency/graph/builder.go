@@ -87,8 +87,8 @@ func (b *Builder) Build(
 
 	span.SetAttributes(
 		attribute.Int("deputy.graph.nodes", g.Size()),
-		attribute.Int("deputy.graph.direct", g.Stats().DirectNodes),
-		attribute.Int("deputy.graph.vulnerable", g.Stats().VulnerableNodes),
+		attribute.Int("deputy.graph.direct", int(g.Stats().DirectNodes)),
+		attribute.Int("deputy.graph.vulnerable", int(g.Stats().VulnerableNodes)),
 	)
 
 	return g, nil
@@ -115,9 +115,9 @@ func PathsToVulnerability(g *Graph, vulnID string) []Path {
 
 	var paths []Path
 	for node := range g.VulnerableNodes() {
-		for _, f := range node.Vulns {
-			if f.AdvisoryID == vulnID {
-				paths = append(paths, g.PathsTo(node.PURL)...)
+		for _, f := range node.GetVulnerabilities() {
+			if f.GetAdvisoryId() == vulnID {
+				paths = append(paths, g.PathsTo(node.GetPurl())...)
 				break
 			}
 		}

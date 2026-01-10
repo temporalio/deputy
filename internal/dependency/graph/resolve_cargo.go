@@ -183,7 +183,7 @@ func (r *CargoResolver) processCargoLock(ctx context.Context, g *Graph, files Fi
 			rootPURL = cargoPkgToPURL(manifest.Package.Name, manifest.Package.Version)
 			if g.Node(rootPURL) == nil {
 				g.AddNode(&Node{
-					PURL:      rootPURL,
+					Purl:      rootPURL,
 					Name:      manifest.Package.Name,
 					Version:   manifest.Package.Version,
 					Ecosystem: "crates.io",
@@ -215,7 +215,7 @@ func (r *CargoResolver) processCargoLock(ctx context.Context, g *Graph, files Fi
 		if node == nil {
 			isDirect := directDeps[pkg.Name]
 			node = &Node{
-				PURL:      purl,
+				Purl:      purl,
 				Name:      pkg.Name,
 				Version:   pkg.Version,
 				Ecosystem: "crates.io",
@@ -228,17 +228,17 @@ func (r *CargoResolver) processCargoLock(ctx context.Context, g *Graph, files Fi
 		// Mark as direct if in Cargo.toml
 		if directDeps[pkg.Name] {
 			node.Direct = true
-			if !containsRoot(g.roots, node.PURL) {
-				g.roots = append(g.roots, node.PURL)
+			if !containsRoot(g.roots, node.Purl) {
+				g.roots = append(g.roots, node.Purl)
 			}
 
 			// Add edge from root
 			if rootPURL != "" {
-				edgeKey := rootPURL + "->" + node.PURL
+				edgeKey := rootPURL + "->" + node.Purl
 				if !edgeSet[edgeKey] {
 					g.AddEdge(&Edge{
 						From:  rootPURL,
-						To:    node.PURL,
+						To:    node.Purl,
 						Scope: ScopeRuntime,
 					})
 					edgeSet[edgeKey] = true
@@ -267,11 +267,11 @@ func (r *CargoResolver) processCargoLock(ctx context.Context, g *Graph, files Fi
 				continue
 			}
 
-			edgeKey := purl + "->" + childNode.PURL
+			edgeKey := purl + "->" + childNode.Purl
 			if !edgeSet[edgeKey] {
 				g.AddEdge(&Edge{
 					From:  purl,
-					To:    childNode.PURL,
+					To:    childNode.Purl,
 					Scope: ScopeRuntime,
 				})
 				edgeSet[edgeKey] = true

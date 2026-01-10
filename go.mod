@@ -7,8 +7,11 @@ toolchain go1.25.0
 require (
 	buf.build/gen/go/bufbuild/protovalidate/protocolbuffers/go v1.36.10-20251209175733-2a1774d88802.1
 	buf.build/go/protovalidate v1.1.0
+	connectrpc.com/authn v0.2.0
 	connectrpc.com/connect v1.19.1
+	connectrpc.com/cors v0.1.0
 	connectrpc.com/otelconnect v0.9.0
+	connectrpc.com/validate v0.6.0
 	deps.dev/api/v3 v3.0.0-20250903005441-604c45d5b44b
 	github.com/BurntSushi/toml v1.5.0
 	github.com/CycloneDX/cyclonedx-go v0.9.2

@@ -1,0 +1,156 @@
+# Graph Report Policies
+#
+# These policies use the graph_report entrypoint to evaluate the entire
+# dependency graph as a whole. Use these for supply chain metrics,
+# dependency hygiene checks, and organizational compliance.
+#
+# Usage:
+#   deputy graph --policy policy/examples/graph-report-policies.yaml
+#
+# Available variables in graph_report entrypoint:
+#   - graph: Full graph object
+#   - nodes: List of all dependency nodes
+#   - edges: List of all dependency edges
+#   - roots: List of direct dependencies (root nodes)
+#   - stats: Graph statistics
+#     - stats.total_nodes: Total number of dependencies
+#     - stats.total_edges: Total number of dependency relationships
+#     - stats.direct_count: Number of direct dependencies
+#     - stats.transitive_count: Number of transitive dependencies
+#     - stats.max_depth: Maximum dependency tree depth
+#     - stats.ecosystems: Map of ecosystem to count
+#   - target: The scanned target information
+#
+# Available helper functions:
+#   - graphMatch(string, pattern): Glob-like pattern matching
+#   - isDirectDep(node): Check if node is direct dependency
+#   - nodeDepth(node): Get dependency depth
+#   - nodeEcosystem(node): Get ecosystem
+#   - hasVulnerabilities(node): Check for vulnerabilities
+#   - vulnerabilityCount(node): Get total vulnerability count
+
+policies:
+  # Limit total dependency count
+  - name: dependency-count-limit
+    description: "Warn when dependency count exceeds threshold"
+    entrypoints: ["graph_report"]
+    rules:
+      - action: warn
+        when: |
+          stats.total_nodes > 500
+        reason: "Project has more than 500 dependencies"
+        remediation: "Review dependencies and remove unused ones to reduce supply chain risk"
+
+  # Limit direct dependency count
+  - name: direct-dependency-limit
+    description: "Warn when direct dependency count exceeds threshold"
+    entrypoints: ["graph_report"]
+    rules:
+      - action: warn
+        when: |
+          stats.direct_count > 50
+        reason: "Project has more than 50 direct dependencies"
+        remediation: "Consider consolidating or removing unnecessary direct dependencies"
+
+  # Limit dependency tree depth
+  - name: depth-limit
+    description: "Warn when dependency tree is too deep"
+    entrypoints: ["graph_report"]
+    rules:
+      - action: warn
+        when: |
+          stats.max_depth > 8
+        reason: "Dependency tree depth exceeds 8 levels"
+        remediation: "Deep dependency trees increase supply chain risk; consider flattening"
+
+  # Transitive dependency ratio check
+  - name: transitive-ratio
+    description: "Warn when transitive dependencies dominate"
+    entrypoints: ["graph_report"]
+    rules:
+      - action: warn
+        when: |
+          stats.direct_count > 0 &&
+          stats.transitive_count > stats.direct_count * 20
+        reason: "Transitive dependencies are 20x the direct dependencies"
+        remediation: "High transitive ratio indicates dependency bloat; audit and trim"
+
+  # Multi-ecosystem warning
+  - name: multi-ecosystem-check
+    description: "Warn when project mixes many ecosystems"
+    entrypoints: ["graph_report"]
+    rules:
+      - action: warn
+        when: |
+          size(stats.ecosystems) > 3
+        reason: "Project uses dependencies from more than 3 ecosystems"
+        remediation: "Multiple ecosystems increase complexity; ensure all are necessary"
+
+  # Vulnerable dependency percentage
+  - name: vulnerable-percentage
+    description: "Warn if too many dependencies have vulnerabilities"
+    entrypoints: ["graph_report"]
+    rules:
+      - action: warn
+        when: |
+          stats.total_nodes > 0 &&
+          nodes.filter(n, hasVulnerabilities(n)).size() > stats.total_nodes / 10
+        reason: "More than 10% of dependencies have vulnerabilities"
+        remediation: "Update vulnerable dependencies to reduce overall risk"
+
+  # Vulnerable direct dependencies
+  - name: vulnerable-direct-deps
+    description: "Deny if any direct dependency has vulnerabilities"
+    entrypoints: ["graph_report"]
+    vars:
+      maxVulnerableDirectDeps: 3
+    rules:
+      - action: deny
+        when: |
+          nodes.filter(n, isDirectDep(n) && hasVulnerabilities(n)).size() > maxVulnerableDirectDeps
+        reason: "More than 3 direct dependencies have vulnerabilities"
+        remediation: "Direct dependencies with vulnerabilities need immediate attention"
+
+  # Block specific package patterns across the graph
+  - name: block-package-patterns
+    description: "Block dependencies matching certain patterns"
+    entrypoints: ["graph_report"]
+    vars:
+      blockedPatterns:
+        - "*-malware*"
+        - "*backdoor*"
+        - "*test-*-exploit*"
+    rules:
+      - action: deny
+        when: |
+          nodes.exists(n,
+            blockedPatterns.exists(p, graphMatch(n.name, p)))
+        reason: "Dependency matches blocked pattern"
+        remediation: "Remove dependencies matching security-sensitive patterns"
+
+  # Ecosystem balance check
+  - name: ecosystem-balance
+    description: "Warn if one ecosystem dominates while others are present"
+    entrypoints: ["graph_report"]
+    rules:
+      - action: warn
+        when: |
+          size(stats.ecosystems) > 1 &&
+          stats.total_nodes > 50 &&
+          nodes.filter(n, nodeEcosystem(n) == "npm").size() > stats.total_nodes * 0.9
+        reason: "npm dependencies are >90% of total while other ecosystems are present"
+        remediation: "Consider whether the ecosystem mix is intentional"
+
+  # Direct dependency update needed
+  - name: outdated-direct-deps
+    description: "Check for direct dependencies that might need updates"
+    entrypoints: ["graph_report"]
+    rules:
+      - action: warn
+        when: |
+          nodes.filter(n,
+            isDirectDep(n) &&
+            (n.version.startsWith("0.") || vulnerabilityCount(n) > 0)
+          ).size() > 5
+        reason: "Multiple direct dependencies are pre-1.0 or have vulnerabilities"
+        remediation: "Review and update direct dependencies regularly"

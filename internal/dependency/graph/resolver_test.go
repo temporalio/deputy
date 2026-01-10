@@ -104,7 +104,7 @@ require github.com/pkg/errors v0.9.1
 
 	g := New()
 	g.AddNode(&Node{
-		PURL:      "pkg:golang/github.com/pkg/errors@0.9.1",
+		Purl:      "pkg:golang/github.com/pkg/errors@0.9.1",
 		Name:      "github.com/pkg/errors",
 		Version:   "0.9.1",
 		Ecosystem: "Go",

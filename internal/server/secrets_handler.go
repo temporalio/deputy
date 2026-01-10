@@ -16,6 +16,7 @@ import (
 	"github.com/picatz/deputy/gen/deputy/secrets/v1/secretsv1connect"
 	targetv1 "github.com/picatz/deputy/gen/deputy/target/v1"
 	"github.com/picatz/deputy/internal/logs"
+	"github.com/picatz/deputy/internal/otel"
 	internalproto "github.com/picatz/deputy/internal/proto"
 	"github.com/picatz/deputy/internal/secrets"
 	"github.com/picatz/deputy/internal/targets"
@@ -77,14 +78,26 @@ func (h *SecretsHandler) Scan(
 	ctx context.Context,
 	req *connect.Request[secretsv1.ScanRequest],
 ) (*connect.Response[secretsv1.ScanResponse], error) {
+	// Get span from otelconnect interceptor - don't create a new one
+	span := otel.SpanFromContext(ctx)
+
+	if err := internalproto.Validate(req.Msg); err != nil {
+		otel.SetSpanError(span, err)
+		return nil, connect.NewError(connect.CodeInvalidArgument, err)
+	}
+
 	target := req.Msg.Target
 	if target == "" {
 		target = "."
 	}
 
+	// Add business attributes to the otelconnect span
+	span.SetAttributes(otel.AttrTargetPath.String(target))
+
 	// Security: Validate target before processing (skip in local mode)
 	if !h.localMode {
 		if err := validateTarget(target); err != nil {
+			otel.SetSpanError(span, err)
 			return nil, connect.NewError(connect.CodeInvalidArgument, err)
 		}
 	}
@@ -97,6 +110,7 @@ func (h *SecretsHandler) Scan(
 	// Detect target type and scan accordingly
 	findings, warnings, err := h.scanTarget(ctx, target, opts)
 	if err != nil {
+		otel.SetSpanError(span, err)
 		logs.Error(ctx, "secrets scan failed", "target", target, "error", err)
 		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("secrets scan failed: %w", err))
 	}
@@ -127,14 +141,26 @@ func (h *SecretsHandler) StreamScan(
 	req *connect.Request[secretsv1.StreamScanRequest],
 	stream *connect.ServerStream[secretsv1.ScanProgress],
 ) error {
+	// Get span from otelconnect interceptor - don't create a new one
+	span := otel.SpanFromContext(ctx)
+
+	if err := internalproto.Validate(req.Msg); err != nil {
+		otel.SetSpanError(span, err)
+		return connect.NewError(connect.CodeInvalidArgument, err)
+	}
+
 	target := req.Msg.Target
 	if target == "" {
 		target = "."
 	}
 
+	// Add business attributes to the otelconnect span
+	span.SetAttributes(otel.AttrTargetPath.String(target))
+
 	// Security: Validate target before processing (skip in local mode)
 	if !h.localMode {
 		if err := validateTarget(target); err != nil {
+			otel.SetSpanError(span, err)
 			return connect.NewError(connect.CodeInvalidArgument, err)
 		}
 	}
@@ -171,6 +197,7 @@ func (h *SecretsHandler) StreamScan(
 	// Perform the scan
 	findings, warnings, err := h.scanTarget(ctx, target, opts)
 	if err != nil {
+		otel.SetSpanError(span, err)
 		_ = stream.Send(&secretsv1.ScanProgress{
 			Phase:   secretsv1.ScanPhase_SCAN_PHASE_FAILED,
 			Message: fmt.Sprintf("Secrets scan failed: %v", err),
@@ -214,14 +241,26 @@ func (h *SecretsHandler) ScanHistory(
 	ctx context.Context,
 	req *connect.Request[secretsv1.ScanHistoryRequest],
 ) (*connect.Response[secretsv1.ScanHistoryResponse], error) {
+	// Get span from otelconnect interceptor - don't create a new one
+	span := otel.SpanFromContext(ctx)
+
+	if err := internalproto.Validate(req.Msg); err != nil {
+		otel.SetSpanError(span, err)
+		return nil, connect.NewError(connect.CodeInvalidArgument, err)
+	}
+
 	target := req.Msg.Target
 	if target == "" {
 		target = "."
 	}
 
+	// Add business attributes to the otelconnect span
+	span.SetAttributes(otel.AttrTargetPath.String(target))
+
 	// Security: Validate target before processing (skip in local mode)
 	if !h.localMode {
 		if err := validateTarget(target); err != nil {
+			otel.SetSpanError(span, err)
 			return nil, connect.NewError(connect.CodeInvalidArgument, err)
 		}
 	}
@@ -237,6 +276,7 @@ func (h *SecretsHandler) ScanHistory(
 		IncludeRemoved: req.Msg.IncludeRemoved,
 	})
 	if err != nil {
+		otel.SetSpanError(span, err)
 		logs.Error(ctx, "secrets history scan failed", "target", target, "error", err)
 		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("secrets history scan failed: %w", err))
 	}
@@ -266,6 +306,14 @@ func (h *SecretsHandler) ScanDiff(
 	ctx context.Context,
 	req *connect.Request[secretsv1.ScanDiffRequest],
 ) (*connect.Response[secretsv1.ScanDiffResponse], error) {
+	// Get span from otelconnect interceptor - don't create a new one
+	span := otel.SpanFromContext(ctx)
+
+	if err := internalproto.Validate(req.Msg); err != nil {
+		otel.SetSpanError(span, err)
+		return nil, connect.NewError(connect.CodeInvalidArgument, err)
+	}
+
 	target := req.Msg.Target
 	if target == "" {
 		target = "."
@@ -274,9 +322,17 @@ func (h *SecretsHandler) ScanDiff(
 	baseRef := req.Msg.BaseRef
 	targetRef := req.Msg.TargetRef
 
+	// Add business attributes to the otelconnect span
+	span.SetAttributes(
+		otel.AttrTargetPath.String(target),
+		otel.AttrMCPBaseRef.String(baseRef),
+		otel.AttrMCPTargetRef.String(targetRef),
+	)
+
 	// Security: Validate target before processing (skip in local mode)
 	if !h.localMode {
 		if err := validateTarget(target); err != nil {
+			otel.SetSpanError(span, err)
 			return nil, connect.NewError(connect.CodeInvalidArgument, err)
 		}
 	}
@@ -290,9 +346,15 @@ func (h *SecretsHandler) ScanDiff(
 	// Use the existing diff scanning from internal/secrets
 	diffResult, err := secrets.ScanGitDiff(ctx, target, baseRef, targetRef)
 	if err != nil {
+		otel.SetSpanError(span, err)
 		logs.Error(ctx, "secrets diff scan failed", "target", target, "error", err)
 		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("secrets diff scan failed: %w", err))
 	}
+
+	// Record results on span
+	otel.AddSpanEvent(span, "secrets.diff_complete",
+		otel.AttrMCPChangeCount.Int(len(diffResult.Added)+len(diffResult.Removed)),
+	)
 
 	response := &secretsv1.ScanDiffResponse{
 		Target: &targetv1.Target{
@@ -315,6 +377,14 @@ func (h *SecretsHandler) Verify(
 	ctx context.Context,
 	req *connect.Request[secretsv1.VerifyRequest],
 ) (*connect.Response[secretsv1.VerifyResponse], error) {
+	// Get span from otelconnect interceptor - don't create a new one
+	span := otel.SpanFromContext(ctx)
+
+	if err := internalproto.Validate(req.Msg); err != nil {
+		otel.SetSpanError(span, err)
+		return nil, connect.NewError(connect.CodeInvalidArgument, err)
+	}
+
 	findings := internalproto.SecretsFindingsFromProto(req.Msg.Findings)
 
 	logs.Info(ctx, "received secrets verify request", "findings_count", len(findings))
@@ -325,6 +395,7 @@ func (h *SecretsHandler) Verify(
 		Timeout:   time.Duration(req.Msg.TimeoutSeconds) * time.Second,
 	})
 	if err != nil {
+		otel.SetSpanError(span, err)
 		logs.Error(ctx, "secrets verify failed", "error", err)
 		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("secrets verify failed: %w", err))
 	}
@@ -339,6 +410,11 @@ func (h *SecretsHandler) Verify(
 			skippedCount++ // Simplified; would need more detailed tracking
 		}
 	}
+
+	// Record verification results on span
+	otel.AddSpanEvent(span, "secrets.verify_complete",
+		otel.AttrMCPVulnerabilityCount.Int(len(findings)),
+	)
 
 	response := &secretsv1.VerifyResponse{
 		Results:       internalproto.SecretsFindingsToProto(verifiedFindings),
@@ -355,6 +431,14 @@ func (h *SecretsHandler) ListDetectors(
 	ctx context.Context,
 	req *connect.Request[secretsv1.ListDetectorsRequest],
 ) (*connect.Response[secretsv1.ListDetectorsResponse], error) {
+	// Get span from otelconnect interceptor - don't create a new one
+	span := otel.SpanFromContext(ctx)
+
+	if err := internalproto.Validate(req.Msg); err != nil {
+		otel.SetSpanError(span, err)
+		return nil, connect.NewError(connect.CodeInvalidArgument, err)
+	}
+
 	detectors := h.getDetectorInfos(req.Msg.IncludeDisabled)
 
 	// Filter by sources if specified
@@ -382,19 +466,32 @@ func (h *SecretsHandler) RegisterDetector(
 	ctx context.Context,
 	req *connect.Request[secretsv1.RegisterDetectorRequest],
 ) (*connect.Response[secretsv1.RegisterDetectorResponse], error) {
+	// Get span from otelconnect interceptor - don't create a new one
+	span := otel.SpanFromContext(ctx)
+
+	if err := internalproto.Validate(req.Msg); err != nil {
+		otel.SetSpanError(span, err)
+		return nil, connect.NewError(connect.CodeInvalidArgument, err)
+	}
+
 	info := req.Msg.Detector
 	pattern := req.Msg.Pattern
 
 	if info == nil {
-		return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("detector info is required"))
+		err := fmt.Errorf("detector info is required")
+		otel.SetSpanError(span, err)
+		return nil, connect.NewError(connect.CodeInvalidArgument, err)
 	}
 	if pattern == "" {
-		return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("pattern is required for pattern-based detectors"))
+		err := fmt.Errorf("pattern is required for pattern-based detectors")
+		otel.SetSpanError(span, err)
+		return nil, connect.NewError(connect.CodeInvalidArgument, err)
 	}
 
 	// Compile the pattern
 	re, err := regexp.Compile(pattern)
 	if err != nil {
+		otel.SetSpanError(span, err)
 		return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("invalid regex pattern: %w", err))
 	}
 
