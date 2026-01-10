@@ -1408,6 +1408,38 @@ These work with vulnerability objects in `scan_vulnerability` and `scan_report` 
 | `hasFix()` | `hasFix(vulnerability) bool` | Check if vulnerability has a known fix |
 | `inKEV()` | `inKEV(vulnerability) bool` | Check if vulnerability is in CISA's KEV catalog |
 | `epssScore()` | `epssScore(vulnerability) double` | Get EPSS score (0.0-1.0), returns 0 if unavailable |
+| `severityAtLeast()` | `severityAtLeast(vulnerability, level) bool` | Check if severity is at or above the specified level. Order: CRITICAL > HIGH > MEDIUM > LOW |
+| `isCritical()` | `isCritical(vulnerability) bool` | Shorthand for `severityAtLeast(vuln, "CRITICAL")` |
+| `isHighOrAbove()` | `isHighOrAbove(vulnerability) bool` | Shorthand for `severityAtLeast(vuln, "HIGH")`. Returns true for HIGH or CRITICAL |
+
+**Constants for Policy Authoring:**
+
+Deputy provides constant objects for cleaner policy expressions:
+
+| Constant | Values | Description |
+|----------|--------|-------------|
+| `severity.*` | `CRITICAL`, `HIGH`, `MEDIUM`, `LOW`, `UNSPECIFIED` | Severity level constants |
+| `scope.*` | `RUNTIME`, `DEV`, `TEST`, `BUILD`, `OPTIONAL`, `UNSPECIFIED` | Dependency scope constants |
+
+**Example using constants:**
+```yaml
+# Instead of: vulnerability.severity == "CRITICAL"
+# Write:      vulnerability.severity == severity.CRITICAL
+rules:
+  - action: deny
+    when: vulnerability.severity == severity.CRITICAL
+    reason: "Critical vulnerability found"
+
+# Using severity comparison helpers
+  - action: deny
+    when: isHighOrAbove(vulnerability)
+    reason: "High or critical severity"
+
+# Filter with severityAtLeast
+  - action: deny
+    when: vulnerabilities.exists(v, severityAtLeast(v, severity.HIGH))
+    reason: "High severity or above found"
+```
 
 <a id="graph-policy-variables"></a>
 **Graph Policy Variables:**
@@ -1427,10 +1459,10 @@ Available in `graph_report` entrypoint (whole-graph policies):
 | Field | Type | Description |
 |-------|------|-------------|
 | `stats.total_nodes` | `int` | Total number of dependencies |
-| `stats.total_edges` | `int` | Total number of dependency relationships |
-| `stats.direct_count` | `int` | Number of direct dependencies |
-| `stats.transitive_count` | `int` | Number of transitive dependencies |
+| `stats.direct_nodes` | `int` | Number of direct dependencies |
+| `stats.transitive_nodes` | `int` | Number of transitive dependencies |
 | `stats.max_depth` | `int` | Maximum dependency tree depth |
+| `stats.vulnerable_nodes` | `int` | Number of packages with vulnerabilities |
 | `stats.ecosystems` | `map` | Map of ecosystem to count |
 
 Available in `graph_node` entrypoint (per-node policies):

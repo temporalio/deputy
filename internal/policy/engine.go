@@ -224,6 +224,9 @@ func seedDefaultVariables(input map[string]any) {
 			input["pkg"] = pkg
 		}
 	}
+	// Inject constant objects for cleaner policy authoring
+	input["severity"] = severityConstants
+	input["scope"] = scopeConstants
 }
 
 // downgradeAdvisory converts "deny" actions to "warn" actions for policies

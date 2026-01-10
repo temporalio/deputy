@@ -15,6 +15,7 @@ require (
 	deps.dev/api/v3 v3.0.0-20250903005441-604c45d5b44b
 	github.com/BurntSushi/toml v1.5.0
 	github.com/CycloneDX/cyclonedx-go v0.9.2
+	github.com/alecthomas/chroma/v2 v2.19.0
 	github.com/charmbracelet/fang v0.4.0
 	github.com/charmbracelet/glamour v0.10.0
 	github.com/charmbracelet/lipgloss v1.1.1-0.20250404203927-76690c660834
@@ -72,7 +73,6 @@ require (
 
 require (
 	buf.build/gen/go/pluginrpc/pluginrpc/protocolbuffers/go v1.34.2-20240828222655-5345c0a56177.2 // indirect
-	github.com/alecthomas/chroma/v2 v2.19.0 // indirect
 	github.com/aymerick/douceur v0.2.0 // indirect
 	github.com/charmbracelet/x/exp/slice v0.0.0-20250702191427-5bdfc8f2e4ff // indirect
 	github.com/dlclark/regexp2 v1.11.5 // indirect

@@ -10,6 +10,9 @@
 package policyv1
 
 import (
+	v11 "github.com/picatz/deputy/gen/deputy/dependency/v1"
+	v12 "github.com/picatz/deputy/gen/deputy/target/v1"
+	v1 "github.com/picatz/deputy/gen/deputy/vulnerability/v1"
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 	reflect "reflect"
@@ -172,11 +175,495 @@ func (x *Action) GetEntrypoint() string {
 	return ""
 }
 
+// Environment provides context about the execution environment.
+type Environment struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Command is the deputy command being executed (e.g., "scan", "proxy").
+	Command string `protobuf:"bytes,1,opt,name=command,proto3" json:"command,omitempty"`
+	// Entrypoint is the policy entrypoint being evaluated.
+	Entrypoint    string `protobuf:"bytes,2,opt,name=entrypoint,proto3" json:"entrypoint,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *Environment) Reset() {
+	*x = Environment{}
+	mi := &file_deputy_policy_v1_policy_proto_msgTypes[1]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *Environment) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*Environment) ProtoMessage() {}
+
+func (x *Environment) ProtoReflect() protoreflect.Message {
+	mi := &file_deputy_policy_v1_policy_proto_msgTypes[1]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use Environment.ProtoReflect.Descriptor instead.
+func (*Environment) Descriptor() ([]byte, []int) {
+	return file_deputy_policy_v1_policy_proto_rawDescGZIP(), []int{1}
+}
+
+func (x *Environment) GetCommand() string {
+	if x != nil {
+		return x.Command
+	}
+	return ""
+}
+
+func (x *Environment) GetEntrypoint() string {
+	if x != nil {
+		return x.Entrypoint
+	}
+	return ""
+}
+
+// JWTClaims contains verified JWT claims from authenticated requests.
+type JWTClaims struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Anonymous is true if no token was provided.
+	Anonymous bool `protobuf:"varint,1,opt,name=anonymous,proto3" json:"anonymous,omitempty"`
+	// Sub is the subject (user/service ID).
+	Sub string `protobuf:"bytes,2,opt,name=sub,proto3" json:"sub,omitempty"`
+	// Iss is the token issuer.
+	Iss string `protobuf:"bytes,3,opt,name=iss,proto3" json:"iss,omitempty"`
+	// Aud contains the audiences.
+	Aud []string `protobuf:"bytes,4,rep,name=aud,proto3" json:"aud,omitempty"`
+	// Exp is the expiration timestamp (Unix).
+	Exp int64 `protobuf:"varint,5,opt,name=exp,proto3" json:"exp,omitempty"`
+	// Iat is the issued-at timestamp (Unix).
+	Iat int64 `protobuf:"varint,6,opt,name=iat,proto3" json:"iat,omitempty"`
+	// Nbf is the not-before timestamp (Unix).
+	Nbf int64 `protobuf:"varint,7,opt,name=nbf,proto3" json:"nbf,omitempty"`
+	// Jti is the JWT ID.
+	Jti string `protobuf:"bytes,8,opt,name=jti,proto3" json:"jti,omitempty"`
+	// CustomClaims contains any additional claims from the token.
+	CustomClaims  map[string]string `protobuf:"bytes,9,rep,name=custom_claims,json=customClaims,proto3" json:"custom_claims,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *JWTClaims) Reset() {
+	*x = JWTClaims{}
+	mi := &file_deputy_policy_v1_policy_proto_msgTypes[2]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *JWTClaims) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*JWTClaims) ProtoMessage() {}
+
+func (x *JWTClaims) ProtoReflect() protoreflect.Message {
+	mi := &file_deputy_policy_v1_policy_proto_msgTypes[2]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use JWTClaims.ProtoReflect.Descriptor instead.
+func (*JWTClaims) Descriptor() ([]byte, []int) {
+	return file_deputy_policy_v1_policy_proto_rawDescGZIP(), []int{2}
+}
+
+func (x *JWTClaims) GetAnonymous() bool {
+	if x != nil {
+		return x.Anonymous
+	}
+	return false
+}
+
+func (x *JWTClaims) GetSub() string {
+	if x != nil {
+		return x.Sub
+	}
+	return ""
+}
+
+func (x *JWTClaims) GetIss() string {
+	if x != nil {
+		return x.Iss
+	}
+	return ""
+}
+
+func (x *JWTClaims) GetAud() []string {
+	if x != nil {
+		return x.Aud
+	}
+	return nil
+}
+
+func (x *JWTClaims) GetExp() int64 {
+	if x != nil {
+		return x.Exp
+	}
+	return 0
+}
+
+func (x *JWTClaims) GetIat() int64 {
+	if x != nil {
+		return x.Iat
+	}
+	return 0
+}
+
+func (x *JWTClaims) GetNbf() int64 {
+	if x != nil {
+		return x.Nbf
+	}
+	return 0
+}
+
+func (x *JWTClaims) GetJti() string {
+	if x != nil {
+		return x.Jti
+	}
+	return ""
+}
+
+func (x *JWTClaims) GetCustomClaims() map[string]string {
+	if x != nil {
+		return x.CustomClaims
+	}
+	return nil
+}
+
+// ProxyRequest contains information about a package being requested through the proxy.
+type ProxyRequest struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Package is the name of the package being requested.
+	Package string `protobuf:"bytes,1,opt,name=package,proto3" json:"package,omitempty"`
+	// Module is the Go module path (for Go ecosystem).
+	Module string `protobuf:"bytes,2,opt,name=module,proto3" json:"module,omitempty"`
+	// Version is the version being requested.
+	Version string `protobuf:"bytes,3,opt,name=version,proto3" json:"version,omitempty"`
+	// Ecosystem identifies the package ecosystem.
+	Ecosystem string `protobuf:"bytes,4,opt,name=ecosystem,proto3" json:"ecosystem,omitempty"`
+	// Operation describes what's being requested (e.g., "download", "info").
+	Operation     string `protobuf:"bytes,5,opt,name=operation,proto3" json:"operation,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ProxyRequest) Reset() {
+	*x = ProxyRequest{}
+	mi := &file_deputy_policy_v1_policy_proto_msgTypes[3]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ProxyRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ProxyRequest) ProtoMessage() {}
+
+func (x *ProxyRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_deputy_policy_v1_policy_proto_msgTypes[3]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ProxyRequest.ProtoReflect.Descriptor instead.
+func (*ProxyRequest) Descriptor() ([]byte, []int) {
+	return file_deputy_policy_v1_policy_proto_rawDescGZIP(), []int{3}
+}
+
+func (x *ProxyRequest) GetPackage() string {
+	if x != nil {
+		return x.Package
+	}
+	return ""
+}
+
+func (x *ProxyRequest) GetModule() string {
+	if x != nil {
+		return x.Module
+	}
+	return ""
+}
+
+func (x *ProxyRequest) GetVersion() string {
+	if x != nil {
+		return x.Version
+	}
+	return ""
+}
+
+func (x *ProxyRequest) GetEcosystem() string {
+	if x != nil {
+		return x.Ecosystem
+	}
+	return ""
+}
+
+func (x *ProxyRequest) GetOperation() string {
+	if x != nil {
+		return x.Operation
+	}
+	return ""
+}
+
+// ScanVulnerabilityContext is the CEL evaluation context for scan_vulnerability entrypoint.
+// This is the canonical proto-first context for per-vulnerability policy evaluation.
+type ScanVulnerabilityContext struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Vulnerability is the current vulnerability being evaluated.
+	Vulnerability *v1.Finding `protobuf:"bytes,1,opt,name=vulnerability,proto3" json:"vulnerability,omitempty"`
+	// Pkg is the affected package.
+	Pkg *v11.Package `protobuf:"bytes,2,opt,name=pkg,proto3" json:"pkg,omitempty"`
+	// Env provides execution environment context.
+	Env *Environment `protobuf:"bytes,3,opt,name=env,proto3" json:"env,omitempty"`
+	// Target describes what was scanned.
+	Target        *v12.Target `protobuf:"bytes,4,opt,name=target,proto3" json:"target,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ScanVulnerabilityContext) Reset() {
+	*x = ScanVulnerabilityContext{}
+	mi := &file_deputy_policy_v1_policy_proto_msgTypes[4]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ScanVulnerabilityContext) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ScanVulnerabilityContext) ProtoMessage() {}
+
+func (x *ScanVulnerabilityContext) ProtoReflect() protoreflect.Message {
+	mi := &file_deputy_policy_v1_policy_proto_msgTypes[4]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ScanVulnerabilityContext.ProtoReflect.Descriptor instead.
+func (*ScanVulnerabilityContext) Descriptor() ([]byte, []int) {
+	return file_deputy_policy_v1_policy_proto_rawDescGZIP(), []int{4}
+}
+
+func (x *ScanVulnerabilityContext) GetVulnerability() *v1.Finding {
+	if x != nil {
+		return x.Vulnerability
+	}
+	return nil
+}
+
+func (x *ScanVulnerabilityContext) GetPkg() *v11.Package {
+	if x != nil {
+		return x.Pkg
+	}
+	return nil
+}
+
+func (x *ScanVulnerabilityContext) GetEnv() *Environment {
+	if x != nil {
+		return x.Env
+	}
+	return nil
+}
+
+func (x *ScanVulnerabilityContext) GetTarget() *v12.Target {
+	if x != nil {
+		return x.Target
+	}
+	return nil
+}
+
+// ScanReportContext is the CEL evaluation context for scan_report entrypoint.
+type ScanReportContext struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Vulnerabilities is the list of all findings.
+	Vulnerabilities []*v1.Finding `protobuf:"bytes,1,rep,name=vulnerabilities,proto3" json:"vulnerabilities,omitempty"`
+	// Packages is the list of all scanned packages.
+	Packages []*v11.Package `protobuf:"bytes,2,rep,name=packages,proto3" json:"packages,omitempty"`
+	// Env provides execution environment context.
+	Env *Environment `protobuf:"bytes,3,opt,name=env,proto3" json:"env,omitempty"`
+	// Target describes what was scanned.
+	Target *v12.Target `protobuf:"bytes,4,opt,name=target,proto3" json:"target,omitempty"`
+	// Stats summarizes vulnerability counts.
+	Stats         *v1.Stats `protobuf:"bytes,5,opt,name=stats,proto3" json:"stats,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ScanReportContext) Reset() {
+	*x = ScanReportContext{}
+	mi := &file_deputy_policy_v1_policy_proto_msgTypes[5]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ScanReportContext) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ScanReportContext) ProtoMessage() {}
+
+func (x *ScanReportContext) ProtoReflect() protoreflect.Message {
+	mi := &file_deputy_policy_v1_policy_proto_msgTypes[5]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ScanReportContext.ProtoReflect.Descriptor instead.
+func (*ScanReportContext) Descriptor() ([]byte, []int) {
+	return file_deputy_policy_v1_policy_proto_rawDescGZIP(), []int{5}
+}
+
+func (x *ScanReportContext) GetVulnerabilities() []*v1.Finding {
+	if x != nil {
+		return x.Vulnerabilities
+	}
+	return nil
+}
+
+func (x *ScanReportContext) GetPackages() []*v11.Package {
+	if x != nil {
+		return x.Packages
+	}
+	return nil
+}
+
+func (x *ScanReportContext) GetEnv() *Environment {
+	if x != nil {
+		return x.Env
+	}
+	return nil
+}
+
+func (x *ScanReportContext) GetTarget() *v12.Target {
+	if x != nil {
+		return x.Target
+	}
+	return nil
+}
+
+func (x *ScanReportContext) GetStats() *v1.Stats {
+	if x != nil {
+		return x.Stats
+	}
+	return nil
+}
+
+// ProxyRequestContext is the CEL evaluation context for proxy entrypoints.
+type ProxyRequestContext struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Request contains the package request details.
+	Request *ProxyRequest `protobuf:"bytes,1,opt,name=request,proto3" json:"request,omitempty"`
+	// Jwt contains verified JWT claims (if authenticated).
+	Jwt *JWTClaims `protobuf:"bytes,2,opt,name=jwt,proto3" json:"jwt,omitempty"`
+	// Env provides execution environment context.
+	Env *Environment `protobuf:"bytes,3,opt,name=env,proto3" json:"env,omitempty"`
+	// Vulnerabilities associated with the requested package.
+	Vulnerabilities []*v1.Finding `protobuf:"bytes,4,rep,name=vulnerabilities,proto3" json:"vulnerabilities,omitempty"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
+}
+
+func (x *ProxyRequestContext) Reset() {
+	*x = ProxyRequestContext{}
+	mi := &file_deputy_policy_v1_policy_proto_msgTypes[6]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ProxyRequestContext) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ProxyRequestContext) ProtoMessage() {}
+
+func (x *ProxyRequestContext) ProtoReflect() protoreflect.Message {
+	mi := &file_deputy_policy_v1_policy_proto_msgTypes[6]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ProxyRequestContext.ProtoReflect.Descriptor instead.
+func (*ProxyRequestContext) Descriptor() ([]byte, []int) {
+	return file_deputy_policy_v1_policy_proto_rawDescGZIP(), []int{6}
+}
+
+func (x *ProxyRequestContext) GetRequest() *ProxyRequest {
+	if x != nil {
+		return x.Request
+	}
+	return nil
+}
+
+func (x *ProxyRequestContext) GetJwt() *JWTClaims {
+	if x != nil {
+		return x.Jwt
+	}
+	return nil
+}
+
+func (x *ProxyRequestContext) GetEnv() *Environment {
+	if x != nil {
+		return x.Env
+	}
+	return nil
+}
+
+func (x *ProxyRequestContext) GetVulnerabilities() []*v1.Finding {
+	if x != nil {
+		return x.Vulnerabilities
+	}
+	return nil
+}
+
 var File_deputy_policy_v1_policy_proto protoreflect.FileDescriptor
 
 const file_deputy_policy_v1_policy_proto_rawDesc = "" +
 	"\n" +
-	"\x1ddeputy/policy/v1/policy.proto\x12\x10deputy.policy.v1\"\xd2\x01\n" +
+	"\x1ddeputy/policy/v1/policy.proto\x12\x10deputy.policy.v1\x1a%deputy/dependency/v1/dependency.proto\x1a\x1ddeputy/target/v1/target.proto\x1a+deputy/vulnerability/v1/vulnerability.proto\"\xd2\x01\n" +
 	"\x06Action\x120\n" +
 	"\x04type\x18\x01 \x01(\x0e2\x1c.deputy.policy.v1.ActionTypeR\x04type\x12\x1f\n" +
 	"\vpolicy_name\x18\x02 \x01(\tR\n" +
@@ -186,7 +673,47 @@ const file_deputy_policy_v1_policy_proto_rawDesc = "" +
 	"\vremediation\x18\x05 \x01(\tR\vremediation\x12\x1e\n" +
 	"\n" +
 	"entrypoint\x18\x06 \x01(\tR\n" +
-	"entrypoint*l\n" +
+	"entrypoint\"G\n" +
+	"\vEnvironment\x12\x18\n" +
+	"\acommand\x18\x01 \x01(\tR\acommand\x12\x1e\n" +
+	"\n" +
+	"entrypoint\x18\x02 \x01(\tR\n" +
+	"entrypoint\"\xbc\x02\n" +
+	"\tJWTClaims\x12\x1c\n" +
+	"\tanonymous\x18\x01 \x01(\bR\tanonymous\x12\x10\n" +
+	"\x03sub\x18\x02 \x01(\tR\x03sub\x12\x10\n" +
+	"\x03iss\x18\x03 \x01(\tR\x03iss\x12\x10\n" +
+	"\x03aud\x18\x04 \x03(\tR\x03aud\x12\x10\n" +
+	"\x03exp\x18\x05 \x01(\x03R\x03exp\x12\x10\n" +
+	"\x03iat\x18\x06 \x01(\x03R\x03iat\x12\x10\n" +
+	"\x03nbf\x18\a \x01(\x03R\x03nbf\x12\x10\n" +
+	"\x03jti\x18\b \x01(\tR\x03jti\x12R\n" +
+	"\rcustom_claims\x18\t \x03(\v2-.deputy.policy.v1.JWTClaims.CustomClaimsEntryR\fcustomClaims\x1a?\n" +
+	"\x11CustomClaimsEntry\x12\x10\n" +
+	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\x96\x01\n" +
+	"\fProxyRequest\x12\x18\n" +
+	"\apackage\x18\x01 \x01(\tR\apackage\x12\x16\n" +
+	"\x06module\x18\x02 \x01(\tR\x06module\x12\x18\n" +
+	"\aversion\x18\x03 \x01(\tR\aversion\x12\x1c\n" +
+	"\tecosystem\x18\x04 \x01(\tR\tecosystem\x12\x1c\n" +
+	"\toperation\x18\x05 \x01(\tR\toperation\"\xf6\x01\n" +
+	"\x18ScanVulnerabilityContext\x12F\n" +
+	"\rvulnerability\x18\x01 \x01(\v2 .deputy.vulnerability.v1.FindingR\rvulnerability\x12/\n" +
+	"\x03pkg\x18\x02 \x01(\v2\x1d.deputy.dependency.v1.PackageR\x03pkg\x12/\n" +
+	"\x03env\x18\x03 \x01(\v2\x1d.deputy.policy.v1.EnvironmentR\x03env\x120\n" +
+	"\x06target\x18\x04 \x01(\v2\x18.deputy.target.v1.TargetR\x06target\"\xb3\x02\n" +
+	"\x11ScanReportContext\x12J\n" +
+	"\x0fvulnerabilities\x18\x01 \x03(\v2 .deputy.vulnerability.v1.FindingR\x0fvulnerabilities\x129\n" +
+	"\bpackages\x18\x02 \x03(\v2\x1d.deputy.dependency.v1.PackageR\bpackages\x12/\n" +
+	"\x03env\x18\x03 \x01(\v2\x1d.deputy.policy.v1.EnvironmentR\x03env\x120\n" +
+	"\x06target\x18\x04 \x01(\v2\x18.deputy.target.v1.TargetR\x06target\x124\n" +
+	"\x05stats\x18\x05 \x01(\v2\x1e.deputy.vulnerability.v1.StatsR\x05stats\"\xfb\x01\n" +
+	"\x13ProxyRequestContext\x128\n" +
+	"\arequest\x18\x01 \x01(\v2\x1e.deputy.policy.v1.ProxyRequestR\arequest\x12-\n" +
+	"\x03jwt\x18\x02 \x01(\v2\x1b.deputy.policy.v1.JWTClaimsR\x03jwt\x12/\n" +
+	"\x03env\x18\x03 \x01(\v2\x1d.deputy.policy.v1.EnvironmentR\x03env\x12J\n" +
+	"\x0fvulnerabilities\x18\x04 \x03(\v2 .deputy.vulnerability.v1.FindingR\x0fvulnerabilities*l\n" +
 	"\n" +
 	"ActionType\x12\x1b\n" +
 	"\x17ACTION_TYPE_UNSPECIFIED\x10\x00\x12\x15\n" +
@@ -208,18 +735,43 @@ func file_deputy_policy_v1_policy_proto_rawDescGZIP() []byte {
 }
 
 var file_deputy_policy_v1_policy_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
-var file_deputy_policy_v1_policy_proto_msgTypes = make([]protoimpl.MessageInfo, 1)
+var file_deputy_policy_v1_policy_proto_msgTypes = make([]protoimpl.MessageInfo, 8)
 var file_deputy_policy_v1_policy_proto_goTypes = []any{
-	(ActionType)(0), // 0: deputy.policy.v1.ActionType
-	(*Action)(nil),  // 1: deputy.policy.v1.Action
+	(ActionType)(0),                  // 0: deputy.policy.v1.ActionType
+	(*Action)(nil),                   // 1: deputy.policy.v1.Action
+	(*Environment)(nil),              // 2: deputy.policy.v1.Environment
+	(*JWTClaims)(nil),                // 3: deputy.policy.v1.JWTClaims
+	(*ProxyRequest)(nil),             // 4: deputy.policy.v1.ProxyRequest
+	(*ScanVulnerabilityContext)(nil), // 5: deputy.policy.v1.ScanVulnerabilityContext
+	(*ScanReportContext)(nil),        // 6: deputy.policy.v1.ScanReportContext
+	(*ProxyRequestContext)(nil),      // 7: deputy.policy.v1.ProxyRequestContext
+	nil,                              // 8: deputy.policy.v1.JWTClaims.CustomClaimsEntry
+	(*v1.Finding)(nil),               // 9: deputy.vulnerability.v1.Finding
+	(*v11.Package)(nil),              // 10: deputy.dependency.v1.Package
+	(*v12.Target)(nil),               // 11: deputy.target.v1.Target
+	(*v1.Stats)(nil),                 // 12: deputy.vulnerability.v1.Stats
 }
 var file_deputy_policy_v1_policy_proto_depIdxs = []int32{
-	0, // 0: deputy.policy.v1.Action.type:type_name -> deputy.policy.v1.ActionType
-	1, // [1:1] is the sub-list for method output_type
-	1, // [1:1] is the sub-list for method input_type
-	1, // [1:1] is the sub-list for extension type_name
-	1, // [1:1] is the sub-list for extension extendee
-	0, // [0:1] is the sub-list for field type_name
+	0,  // 0: deputy.policy.v1.Action.type:type_name -> deputy.policy.v1.ActionType
+	8,  // 1: deputy.policy.v1.JWTClaims.custom_claims:type_name -> deputy.policy.v1.JWTClaims.CustomClaimsEntry
+	9,  // 2: deputy.policy.v1.ScanVulnerabilityContext.vulnerability:type_name -> deputy.vulnerability.v1.Finding
+	10, // 3: deputy.policy.v1.ScanVulnerabilityContext.pkg:type_name -> deputy.dependency.v1.Package
+	2,  // 4: deputy.policy.v1.ScanVulnerabilityContext.env:type_name -> deputy.policy.v1.Environment
+	11, // 5: deputy.policy.v1.ScanVulnerabilityContext.target:type_name -> deputy.target.v1.Target
+	9,  // 6: deputy.policy.v1.ScanReportContext.vulnerabilities:type_name -> deputy.vulnerability.v1.Finding
+	10, // 7: deputy.policy.v1.ScanReportContext.packages:type_name -> deputy.dependency.v1.Package
+	2,  // 8: deputy.policy.v1.ScanReportContext.env:type_name -> deputy.policy.v1.Environment
+	11, // 9: deputy.policy.v1.ScanReportContext.target:type_name -> deputy.target.v1.Target
+	12, // 10: deputy.policy.v1.ScanReportContext.stats:type_name -> deputy.vulnerability.v1.Stats
+	4,  // 11: deputy.policy.v1.ProxyRequestContext.request:type_name -> deputy.policy.v1.ProxyRequest
+	3,  // 12: deputy.policy.v1.ProxyRequestContext.jwt:type_name -> deputy.policy.v1.JWTClaims
+	2,  // 13: deputy.policy.v1.ProxyRequestContext.env:type_name -> deputy.policy.v1.Environment
+	9,  // 14: deputy.policy.v1.ProxyRequestContext.vulnerabilities:type_name -> deputy.vulnerability.v1.Finding
+	15, // [15:15] is the sub-list for method output_type
+	15, // [15:15] is the sub-list for method input_type
+	15, // [15:15] is the sub-list for extension type_name
+	15, // [15:15] is the sub-list for extension extendee
+	0,  // [0:15] is the sub-list for field type_name
 }
 
 func init() { file_deputy_policy_v1_policy_proto_init() }
@@ -233,7 +785,7 @@ func file_deputy_policy_v1_policy_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_deputy_policy_v1_policy_proto_rawDesc), len(file_deputy_policy_v1_policy_proto_rawDesc)),
 			NumEnums:      1,
-			NumMessages:   1,
+			NumMessages:   8,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

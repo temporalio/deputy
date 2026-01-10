@@ -1539,3 +1539,185 @@ func TestGraphHelpers_WithVulnerabilityPath(t *testing.T) {
 		})
 	}
 }
+
+func TestSeverityConstants_ViaEvaluate(t *testing.T) {
+	tests := []struct {
+		name     string
+		expr     string
+		expected any
+	}{
+		{
+			name:     "severity.CRITICAL constant",
+			expr:     `severity.CRITICAL`,
+			expected: "CRITICAL",
+		},
+		{
+			name:     "severity.HIGH constant",
+			expr:     `severity.HIGH`,
+			expected: "HIGH",
+		},
+		{
+			name:     "severity.MEDIUM constant",
+			expr:     `severity.MEDIUM`,
+			expected: "MEDIUM",
+		},
+		{
+			name:     "severity.LOW constant",
+			expr:     `severity.LOW`,
+			expected: "LOW",
+		},
+		{
+			name:     "compare with severity constant",
+			expr:     `vulnerability.severity == severity.CRITICAL`,
+			expected: true,
+		},
+		{
+			name:     "compare severity mismatch",
+			expr:     `vulnerability.severity == severity.LOW`,
+			expected: false,
+		},
+		{
+			name:     "scope.RUNTIME constant",
+			expr:     `scope.RUNTIME`,
+			expected: "runtime",
+		},
+		{
+			name:     "scope.DEV constant",
+			expr:     `scope.DEV`,
+			expected: "dev",
+		},
+	}
+
+	input := map[string]any{
+		"vulnerability": map[string]any{
+			"id":       "CVE-2021-44228",
+			"severity": "CRITICAL",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			result, err := Evaluate(t.Context(), tc.expr, input)
+			if err != nil {
+				t.Fatalf("Evaluate() error: %v", err)
+			}
+			if result != tc.expected {
+				t.Errorf("%s = %v (%T), want %v (%T)", tc.expr, result, result, tc.expected, tc.expected)
+			}
+		})
+	}
+}
+
+func TestSeverityAtLeast_ViaEvaluate(t *testing.T) {
+	tests := []struct {
+		name     string
+		expr     string
+		input    map[string]any
+		expected bool
+	}{
+		{
+			name: "CRITICAL >= CRITICAL",
+			expr: `severityAtLeast(vulnerability, "CRITICAL")`,
+			input: map[string]any{
+				"vulnerability": map[string]any{"severity": "CRITICAL"},
+			},
+			expected: true,
+		},
+		{
+			name: "CRITICAL >= HIGH",
+			expr: `severityAtLeast(vulnerability, "HIGH")`,
+			input: map[string]any{
+				"vulnerability": map[string]any{"severity": "CRITICAL"},
+			},
+			expected: true,
+		},
+		{
+			name: "HIGH >= HIGH",
+			expr: `severityAtLeast(vulnerability, "HIGH")`,
+			input: map[string]any{
+				"vulnerability": map[string]any{"severity": "HIGH"},
+			},
+			expected: true,
+		},
+		{
+			name: "MEDIUM not >= HIGH",
+			expr: `severityAtLeast(vulnerability, "HIGH")`,
+			input: map[string]any{
+				"vulnerability": map[string]any{"severity": "MEDIUM"},
+			},
+			expected: false,
+		},
+		{
+			name: "LOW not >= MEDIUM",
+			expr: `severityAtLeast(vulnerability, "MEDIUM")`,
+			input: map[string]any{
+				"vulnerability": map[string]any{"severity": "LOW"},
+			},
+			expected: false,
+		},
+		{
+			name: "using severity constant",
+			expr: `severityAtLeast(vulnerability, severity.HIGH)`,
+			input: map[string]any{
+				"vulnerability": map[string]any{"severity": "CRITICAL"},
+			},
+			expected: true,
+		},
+		{
+			name: "isCritical shorthand true",
+			expr: `isCritical(vulnerability)`,
+			input: map[string]any{
+				"vulnerability": map[string]any{"severity": "CRITICAL"},
+			},
+			expected: true,
+		},
+		{
+			name: "isCritical shorthand false",
+			expr: `isCritical(vulnerability)`,
+			input: map[string]any{
+				"vulnerability": map[string]any{"severity": "HIGH"},
+			},
+			expected: false,
+		},
+		{
+			name: "isHighOrAbove for CRITICAL",
+			expr: `isHighOrAbove(vulnerability)`,
+			input: map[string]any{
+				"vulnerability": map[string]any{"severity": "CRITICAL"},
+			},
+			expected: true,
+		},
+		{
+			name: "isHighOrAbove for HIGH",
+			expr: `isHighOrAbove(vulnerability)`,
+			input: map[string]any{
+				"vulnerability": map[string]any{"severity": "HIGH"},
+			},
+			expected: true,
+		},
+		{
+			name: "isHighOrAbove for MEDIUM",
+			expr: `isHighOrAbove(vulnerability)`,
+			input: map[string]any{
+				"vulnerability": map[string]any{"severity": "MEDIUM"},
+			},
+			expected: false,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			result, err := Evaluate(t.Context(), tc.expr, tc.input)
+			if err != nil {
+				t.Fatalf("Evaluate() error: %v", err)
+			}
+			got, ok := result.(bool)
+			if !ok {
+				t.Fatalf("expected bool result, got %T (%v)", result, result)
+			}
+			if got != tc.expected {
+				t.Errorf("%s = %v, want %v", tc.expr, got, tc.expected)
+			}
+		})
+	}
+}

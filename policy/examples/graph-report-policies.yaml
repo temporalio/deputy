@@ -14,10 +14,10 @@
 #   - roots: List of direct dependencies (root nodes)
 #   - stats: Graph statistics
 #     - stats.total_nodes: Total number of dependencies
-#     - stats.total_edges: Total number of dependency relationships
-#     - stats.direct_count: Number of direct dependencies
-#     - stats.transitive_count: Number of transitive dependencies
+#     - stats.direct_nodes: Number of direct dependencies
+#     - stats.transitive_nodes: Number of transitive dependencies
 #     - stats.max_depth: Maximum dependency tree depth
+#     - stats.vulnerable_nodes: Number of packages with vulnerabilities
 #     - stats.ecosystems: Map of ecosystem to count
 #   - target: The scanned target information
 #
@@ -48,7 +48,7 @@ policies:
     rules:
       - action: warn
         when: |
-          stats.direct_count > 50
+          stats.direct_nodes > 50
         reason: "Project has more than 50 direct dependencies"
         remediation: "Consider consolidating or removing unnecessary direct dependencies"
 
@@ -70,8 +70,8 @@ policies:
     rules:
       - action: warn
         when: |
-          stats.direct_count > 0 &&
-          stats.transitive_count > stats.direct_count * 20
+          stats.direct_nodes > 0 &&
+          stats.transitive_nodes > stats.direct_nodes * 20
         reason: "Transitive dependencies are 20x the direct dependencies"
         remediation: "High transitive ratio indicates dependency bloat; audit and trim"
 

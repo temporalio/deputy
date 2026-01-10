@@ -95,6 +95,12 @@ var helperFunctions = []HelperFunction{
 	{Name: "hasFix", Signature: "hasFix(vulnerability) bool", Doc: "Check if vulnerability has a known fix."},
 	{Name: "inKEV", Signature: "inKEV(vulnerability) bool", Doc: "Check if vulnerability is in CISA's KEV catalog."},
 	{Name: "epssScore", Signature: "epssScore(vulnerability) double", Doc: "Get EPSS score (0.0-1.0), returns 0 if unavailable."},
+
+	// Severity Comparison Functions
+	// These simplify severity-based filtering in policies.
+	{Name: "severityAtLeast", Signature: "severityAtLeast(vulnerability, level) bool", Doc: "Check if severity is at or above the specified level. Order: CRITICAL > HIGH > MEDIUM > LOW."},
+	{Name: "isCritical", Signature: "isCritical(vulnerability) bool", Doc: "Shorthand for severityAtLeast(vuln, \"CRITICAL\")."},
+	{Name: "isHighOrAbove", Signature: "isHighOrAbove(vulnerability) bool", Doc: "Shorthand for severityAtLeast(vuln, \"HIGH\"). Returns true for HIGH or CRITICAL."},
 }
 
 // HelperCatalog returns the CEL helper catalog.

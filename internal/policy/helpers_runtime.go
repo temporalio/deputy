@@ -692,7 +692,115 @@ func customHelperFunctions() []cel.EnvOption {
 				}),
 			),
 		),
+
+		// severityAtLeast(vuln, level) returns true if the vulnerability's severity
+		// is at or above the specified level. This enables ordered comparisons without
+		// repeating severity lists.
+		//
+		// Severity order (highest to lowest): CRITICAL > HIGH > MEDIUM > LOW > UNSPECIFIED
+		//
+		// Example usage in CEL:
+		//   severityAtLeast(vulnerability, "HIGH")  // true for HIGH or CRITICAL
+		//   severityAtLeast(vulnerability, severity.HIGH)  // same, using constant
+		//   vulnerabilities.filter(v, severityAtLeast(v, severity.MEDIUM))
+		cel.Function("severityAtLeast",
+			cel.Overload("severityAtLeast_map_string",
+				[]*cel.Type{cel.DynType, cel.StringType},
+				cel.BoolType,
+				cel.BinaryBinding(func(vulnVal, levelVal ref.Val) ref.Val {
+					vuln := extractNodeFromMap(vulnVal)
+					if vuln == nil {
+						return types.Bool(false)
+					}
+					threshold := strings.ToUpper(toString(levelVal))
+					// Get actual severity
+					var actual string
+					if severity, ok := vuln["severity"].(string); ok {
+						actual = strings.ToUpper(severity)
+					} else if advisory, ok := vuln["advisory"].(map[string]any); ok {
+						if severity, ok := advisory["severity"].(map[string]any); ok {
+							if level, ok := severity["level"]; ok {
+								actual = severityLevelToString(level)
+							}
+						}
+					}
+					return types.Bool(severityRank(actual) >= severityRank(threshold))
+				}),
+			),
+		),
+
+		// isCritical(vuln) is a shorthand for severityAtLeast(vuln, "CRITICAL").
+		//
+		// Example usage in CEL:
+		//   isCritical(vulnerability)
+		//   vulnerabilities.filter(v, isCritical(v))
+		cel.Function("isCritical",
+			cel.Overload("isCritical_map",
+				[]*cel.Type{cel.DynType},
+				cel.BoolType,
+				cel.UnaryBinding(func(val ref.Val) ref.Val {
+					vuln := extractNodeFromMap(val)
+					if vuln == nil {
+						return types.Bool(false)
+					}
+					severity := extractSeverity(vuln)
+					return types.Bool(strings.ToUpper(severity) == "CRITICAL")
+				}),
+			),
+		),
+
+		// isHighOrAbove(vuln) is a shorthand for severityAtLeast(vuln, "HIGH").
+		//
+		// Example usage in CEL:
+		//   isHighOrAbove(vulnerability)
+		//   vulnerabilities.filter(v, isHighOrAbove(v))
+		cel.Function("isHighOrAbove",
+			cel.Overload("isHighOrAbove_map",
+				[]*cel.Type{cel.DynType},
+				cel.BoolType,
+				cel.UnaryBinding(func(val ref.Val) ref.Val {
+					vuln := extractNodeFromMap(val)
+					if vuln == nil {
+						return types.Bool(false)
+					}
+					severity := extractSeverity(vuln)
+					return types.Bool(severityRank(strings.ToUpper(severity)) >= severityRank("HIGH"))
+				}),
+			),
+		),
 	}
+}
+
+// severityRank returns a numeric rank for severity ordering.
+// Higher rank = more severe. CRITICAL=4, HIGH=3, MEDIUM=2, LOW=1, UNSPECIFIED=0.
+func severityRank(s string) int {
+	switch strings.ToUpper(s) {
+	case "CRITICAL":
+		return 4
+	case "HIGH":
+		return 3
+	case "MEDIUM":
+		return 2
+	case "LOW":
+		return 1
+	default:
+		return 0
+	}
+}
+
+// extractSeverity extracts the severity string from a vulnerability map.
+func extractSeverity(vuln map[string]any) string {
+	if severity, ok := vuln["severity"].(string); ok {
+		return severity
+	}
+	if advisory, ok := vuln["advisory"].(map[string]any); ok {
+		if severity, ok := advisory["severity"].(map[string]any); ok {
+			if level, ok := severity["level"]; ok {
+				return severityLevelToString(level)
+			}
+		}
+	}
+	return ""
 }
 
 // evaluateSSVC derives SSVC decision from vulnerability data.

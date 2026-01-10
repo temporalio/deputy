@@ -12,6 +12,10 @@ import (
 	"github.com/google/cel-go/checker/decls"
 	"github.com/google/cel-go/common/types/ref"
 	"github.com/google/cel-go/ext"
+	dependencyv1 "github.com/picatz/deputy/gen/deputy/dependency/v1"
+	policyv1 "github.com/picatz/deputy/gen/deputy/policy/v1"
+	targetv1 "github.com/picatz/deputy/gen/deputy/target/v1"
+	vulnerabilityv1 "github.com/picatz/deputy/gen/deputy/vulnerability/v1"
 	exprpb "google.golang.org/genproto/googleapis/api/expr/v1alpha1"
 )
 
@@ -58,17 +62,43 @@ var (
 		"secrets",
 		"report",
 		// Graph specific variables
-		"graph",      // Full graph data (stats, nodes, edges)
-		"node",       // Current node in graph_node entrypoint
-		"edge",       // Current edge in graph_edge entrypoint
-		"from_node",  // Source node for edge
-		"to_node",    // Target node for edge
-		"nodes",      // All nodes in graph
-		"edges",      // All edges in graph
-		"stats",      // Graph statistics
-		"roots",      // Root (direct) dependencies
-		"ancestors",  // Ancestor nodes for current node
+		"graph",       // Full graph data (stats, nodes, edges)
+		"node",        // Current node in graph_node entrypoint
+		"edge",        // Current edge in graph_edge entrypoint
+		"from_node",   // Source node for edge
+		"to_node",     // Target node for edge
+		"nodes",       // All nodes in graph
+		"edges",       // All edges in graph
+		"stats",       // Graph statistics
+		"roots",       // Root (direct) dependencies
+		"ancestors",   // Ancestor nodes for current node
 		"descendants", // Descendant nodes for current node
+		// Constants for policy authoring
+		"severity", // Severity constants: severity.CRITICAL, severity.HIGH, etc.
+		"scope",    // Dependency scope constants: scope.RUNTIME, scope.DEV, etc.
+	}
+
+	// severityConstants provides named severity levels for cleaner policy expressions.
+	// Instead of: vulnerability.severity == "CRITICAL"
+	// Authors can write: vulnerability.severity == severity.CRITICAL
+	severityConstants = map[string]any{
+		"CRITICAL":    "CRITICAL",
+		"HIGH":        "HIGH",
+		"MEDIUM":      "MEDIUM",
+		"LOW":         "LOW",
+		"UNSPECIFIED": "UNSPECIFIED",
+	}
+
+	// scopeConstants provides named dependency scopes for graph policies.
+	// Instead of: edgeScope(edge) == "runtime"
+	// Authors can write: edgeScope(edge) == scope.RUNTIME
+	scopeConstants = map[string]any{
+		"RUNTIME":     "runtime",
+		"DEV":         "dev",
+		"TEST":        "test",
+		"BUILD":       "build",
+		"OPTIONAL":    "optional",
+		"UNSPECIFIED": "unspecified",
 	}
 )
 
@@ -144,6 +174,27 @@ func envWithNames(extra []string) (*cel.Env, error) {
 	opts := []cel.EnvOption{
 		cel.OptionalTypes(),
 		cel.Declarations(declSlice...),
+		// Register proto types for native proto support in CEL expressions.
+		// This enables policies to work directly with proto messages, providing:
+		// - Type-safe field access (e.g., finding.advisory.severity.level)
+		// - Proto enum support (e.g., SeverityLevel_SEVERITY_LEVEL_HIGH)
+		// - Proper nested message handling
+		cel.Types(
+			// Core domain types
+			&vulnerabilityv1.Finding{},
+			&vulnerabilityv1.Advisory{},
+			&vulnerabilityv1.Severity{},
+			&vulnerabilityv1.Stats{},
+			&dependencyv1.Package{},
+			&targetv1.Target{},
+			// Policy evaluation context types (proto-first)
+			&policyv1.Environment{},
+			&policyv1.JWTClaims{},
+			&policyv1.ProxyRequest{},
+			&policyv1.ScanVulnerabilityContext{},
+			&policyv1.ScanReportContext{},
+			&policyv1.ProxyRequestContext{},
+		),
 		// Standard extensions
 		ext.Strings(),
 		ext.Lists(),
