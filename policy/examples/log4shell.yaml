@@ -1,6 +1,12 @@
+# Block Log4Shell vulnerabilities
+#
+# Structure:
+#   v.advisory.aliases - Alternative identifiers for the vulnerability
+#
 policies:
   - name: block-log4shell
     description: Deny any artifact that is still vulnerable to Log4Shell
+    entrypoints: ["scan_report"]
     vars:
       log4shellAliases:
         - CVE-2021-44228
@@ -8,7 +14,7 @@ policies:
         - GHSA-jfh8-c2jp-5v3q
     rules:
       - action: deny
-        when: vulnerabilities.exists(v, v.aliases.exists(a, a in log4shellAliases))
+        when: vulnerabilities.orValue([]).exists(v, v.advisory.?aliases.orValue([]).exists(a, a in log4shellAliases))
         reason: dependency still vulnerable to Log4Shell
         status: 451
         headers:

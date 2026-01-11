@@ -79,6 +79,23 @@ message GraphOptions {
 
   // TargetHint provides disambiguation when the target string is ambiguous.
   deputy.target.v1.TargetKind target_hint = 8;
+
+  // Extended enables "extended mode" which includes the full module requirement
+  // graph, not just packages that end up in the final build.
+  //
+  // In Go, this parses `go mod graph` output to include:
+  //   - DECLARED dependencies: modules required by transitive deps but not
+  //     selected by MVS (these could become active if deps change)
+  //   - Differentiates IMPORTED (in binary) vs REQUIRED (in go.mod) vs DECLARED
+  //
+  // Use cases:
+  //   - Supply chain risk analysis: "what COULD be pulled in?"
+  //   - Proactive vulnerability scanning: find issues before they affect you
+  //   - OSSF MAL package detection in any declared dependency
+  //   - Understanding the full dependency surface area
+  //
+  // Default is false (standard mode showing only packages in final build).
+  bool extended = 9;
 }
 
 // BuildGraphResponse contains the constructed dependency graph.
@@ -138,6 +155,12 @@ message Node {
 
   // Vulnerabilities contains full findings when include_vulnerabilities is set.
   repeated deputy.vulnerability.v1.Finding vulnerabilities = 9;
+
+  // ImportStatus indicates how this dependency is included.
+  // Only populated when extended graph mode is enabled.
+  // See ImportStatus enum for details on the distinction between
+  // IMPORTED, REQUIRED, and DECLARED dependencies.
+  ImportStatus import_status = 10;
 }
 
 // VulnerabilityCount summarizes vulnerability counts by severity.
@@ -187,6 +210,37 @@ enum Scope {
   SCOPE_TEST = 5;
 }
 
+// ImportStatus indicates how a dependency is included in the project.
+// This is critical for understanding supply chain risk:
+//   - IMPORTED: Actively used by your code (highest risk if vulnerable)
+//   - REQUIRED: Listed in go.mod but not directly imported (medium risk)
+//   - DECLARED: In full module graph but not in final build (latent risk)
+//
+// The distinction matters for security scanning:
+//   - Traditional SCA scans REQUIRED dependencies (what's in go.mod/lockfile)
+//   - Extended mode adds DECLARED dependencies (full supply chain surface)
+//   - Reachability analysis focuses on IMPORTED (actual runtime risk)
+enum ImportStatus {
+  // Unspecified import status.
+  IMPORT_STATUS_UNSPECIFIED = 0;
+
+  // Package is actively imported by the project's source code.
+  // These packages are compiled into the final binary and represent
+  // the actual runtime attack surface.
+  IMPORT_STATUS_IMPORTED = 1;
+
+  // Package is listed in go.mod/lockfile but not directly imported.
+  // These packages are selected by MVS but may only be used by
+  // transitive dependencies. They appear in go list -m all output.
+  IMPORT_STATUS_REQUIRED = 2;
+
+  // Package appears in the full module graph (go mod graph) but is
+  // not in the final dependency selection. These represent "phantom"
+  // dependencies - they could be pulled in if a transitive dependency
+  // changes or if new imports are added.
+  IMPORT_STATUS_DECLARED = 3;
+}
+
 // GraphStats provides statistics about a graph.
 message GraphStats {
   // TotalNodes is the total package count.
@@ -198,7 +252,9 @@ message GraphStats {
   // TransitiveNodes is the count of transitive dependencies.
   int32 transitive_nodes = 3;
 
-  // MaxDepth is the maximum dependency depth.
+  // MaxDepth is the maximum dependency depth across all nodes.
+  // Note: Includes disconnected nodes (depth=999). Use max_connected_depth
+  // for the actual graph depth.
   int32 max_depth = 4;
 
   // VulnerableNodes is the count of packages with vulnerabilities.
@@ -206,6 +262,37 @@ message GraphStats {
 
   // Ecosystems maps ecosystem names to package counts.
   map<string, int32> ecosystems = 6;
+
+  // MaxConnectedDepth is the maximum depth among connected nodes only.
+  // Excludes disconnected nodes (depth=999) which are packages discovered
+  // but not reachable from any direct dependency (e.g., GitHub Actions,
+  // container base images from Dockerfiles).
+  int32 max_connected_depth = 7;
+
+  // DisconnectedNodes is the count of packages with no path from any root.
+  // These are typically packages from non-dependency sources like GitHub
+  // Actions workflows, Dockerfile base images, or binary extraction.
+  int32 disconnected_nodes = 8;
+
+  // ImportStatusCounts tracks node counts by import status.
+  // Only populated when extended mode is enabled.
+  ImportStatusCounts import_status_counts = 9;
+}
+
+// ImportStatusCounts tracks node counts by import status.
+// Only populated when extended graph mode is enabled.
+message ImportStatusCounts {
+  // Imported is the count of packages actively imported by source code.
+  // These are compiled into the binary (highest security relevance).
+  int32 imported = 1;
+
+  // Required is the count of packages in go.mod/lockfile but not imported.
+  // These are selected by MVS but may only be transitive deps.
+  int32 required = 2;
+
+  // Declared is the count of packages in full module graph but not selected.
+  // These are "phantom" dependencies - latent supply chain risk.
+  int32 declared = 3;
 }
 
 // WhyDependencyRequest asks why a specific dependency exists.
@@ -258,6 +345,29 @@ message PathNode {
 
   // Version is the package version.
   string version = 3;
+}
+
+// WhyDependencyListResponse wraps multiple WhyDependencyResponse objects.
+// Used when a CLI search matches multiple packages (fuzzy matching).
+message WhyDependencyListResponse {
+  // Results contains a response for each matched dependency.
+  repeated WhyDependencyResponse results = 1;
+}
+
+// NeedsDependencyResponse shows what packages depend on a given package.
+// Used by the "graph needs" command for reverse dependency lookup.
+message NeedsDependencyResponse {
+  // Package is the queried package name.
+  string package = 1;
+
+  // Version is the package version if specified.
+  string version = 2;
+
+  // Purl is the Package URL of the queried package.
+  string purl = 3;
+
+  // Dependents are packages that depend on this package.
+  repeated Node dependents = 4;
 }
 
 // QueryGraphRequest filters a dependency graph.

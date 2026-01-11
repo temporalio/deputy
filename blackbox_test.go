@@ -13,6 +13,13 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"google.golang.org/protobuf/encoding/protojson"
+
+	dependencyv1 "github.com/picatz/deputy/gen/deputy/dependency/v1"
+	scanv1 "github.com/picatz/deputy/gen/deputy/scan/v1"
+	targetv1 "github.com/picatz/deputy/gen/deputy/target/v1"
+	vulnerabilityv1 "github.com/picatz/deputy/gen/deputy/vulnerability/v1"
 )
 
 func TestMain(m *testing.M) {
@@ -136,36 +143,39 @@ func TestBlackbox_SilenceUsageOnFlagError(t *testing.T) {
 }
 
 func TestBlackbox_TriageFromReport_StdoutOnly(t *testing.T) {
-	reportPath := writeScanReportJSON(t, map[string]any{
-		"repo":            "github.com/acme/repo",
-		"ref":             "HEAD",
-		"commit":          "deadbeef",
-		"generated":       "2025-01-01T00:00:00Z",
-		"packagesScanned": 1,
-		"stats": map[string]any{
-			"uniqueVulns":     1,
-			"criticalSev":     1,
-			"highSeverity":    0,
-			"medSeverity":     0,
-			"lowSeverity":     0,
-			"fixAvailable":    1,
-			"directDeps":      1,
-			"indirectDeps":    0,
-			"duplicatesFound": 0,
+	resp := &scanv1.ScanResponse{
+		Target: &targetv1.Target{
+			DisplayPath: "github.com/acme/repo",
+			CommitHash:  "deadbeef",
 		},
-		"vulnerabilities": []map[string]any{
+		Findings: []*vulnerabilityv1.Finding{
 			{
-				"id":            "OSV-TEST-1",
-				"package":       "github.com/acme/mod",
-				"version":       "v1.0.0",
-				"ecosystem":     "Go",
-				"severity":      "9.8",
-				"severityType":  "CVSS_V3",
-				"fixedVersions": []string{"v1.0.1"},
-				"isDirect":      true,
+				AdvisoryId: "OSV-TEST-1",
+				Package: &dependencyv1.Package{
+					Name:      "github.com/acme/mod",
+					Version:   "v1.0.0",
+					Ecosystem: "Go",
+					Direct:    true,
+				},
+				Advisory: &vulnerabilityv1.Advisory{
+					Id:      "OSV-TEST-1",
+					Summary: "Test vulnerability",
+					Severity: &vulnerabilityv1.Severity{
+						Score: 9.8,
+						Level: vulnerabilityv1.SeverityLevel_SEVERITY_LEVEL_CRITICAL,
+						Type:  vulnerabilityv1.SeverityType_SEVERITY_TYPE_CVSS_V3,
+					},
+					FixedVersions: []string{"v1.0.1"},
+				},
 			},
 		},
-	})
+		Stats: &vulnerabilityv1.Stats{
+			Unique:       1,
+			Critical:     1,
+			FixAvailable: 1,
+		},
+	}
+	reportPath := writeScanReportProtoJSON(t, resp)
 	stdout, stderr, code := runDeputy(t, "triage", "--report", reportPath, "--format", "text")
 	if code != 0 {
 		t.Fatalf("exit=%d stderr=%q", code, stderr)
@@ -179,36 +189,39 @@ func TestBlackbox_TriageFromReport_StdoutOnly(t *testing.T) {
 }
 
 func TestBlackbox_FixFromReport_StdoutOnly(t *testing.T) {
-	reportPath := writeScanReportJSON(t, map[string]any{
-		"repo":            "github.com/acme/repo",
-		"ref":             "HEAD",
-		"commit":          "deadbeef",
-		"generated":       "2025-01-01T00:00:00Z",
-		"packagesScanned": 1,
-		"stats": map[string]any{
-			"uniqueVulns":     1,
-			"criticalSev":     1,
-			"highSeverity":    0,
-			"medSeverity":     0,
-			"lowSeverity":     0,
-			"fixAvailable":    1,
-			"directDeps":      1,
-			"indirectDeps":    0,
-			"duplicatesFound": 0,
+	resp := &scanv1.ScanResponse{
+		Target: &targetv1.Target{
+			DisplayPath: "github.com/acme/repo",
+			CommitHash:  "deadbeef",
 		},
-		"vulnerabilities": []map[string]any{
+		Findings: []*vulnerabilityv1.Finding{
 			{
-				"id":            "OSV-TEST-1",
-				"package":       "github.com/acme/mod",
-				"version":       "v1.0.0",
-				"ecosystem":     "Go",
-				"severity":      "9.8",
-				"severityType":  "CVSS_V3",
-				"fixedVersions": []string{"v1.0.1"},
-				"isDirect":      true,
+				AdvisoryId: "OSV-TEST-1",
+				Package: &dependencyv1.Package{
+					Name:      "github.com/acme/mod",
+					Version:   "v1.0.0",
+					Ecosystem: "Go",
+					Direct:    true,
+				},
+				Advisory: &vulnerabilityv1.Advisory{
+					Id:      "OSV-TEST-1",
+					Summary: "Test vulnerability",
+					Severity: &vulnerabilityv1.Severity{
+						Score: 9.8,
+						Level: vulnerabilityv1.SeverityLevel_SEVERITY_LEVEL_CRITICAL,
+						Type:  vulnerabilityv1.SeverityType_SEVERITY_TYPE_CVSS_V3,
+					},
+					FixedVersions: []string{"v1.0.1"},
+				},
 			},
 		},
-	})
+		Stats: &vulnerabilityv1.Stats{
+			Unique:       1,
+			Critical:     1,
+			FixAvailable: 1,
+		},
+	}
+	reportPath := writeScanReportProtoJSON(t, resp)
 	stdout, stderr, code := runDeputy(t, "fix", "--report", reportPath, "--format", "text")
 	if code != 0 {
 		t.Fatalf("exit=%d stderr=%q", code, stderr)
@@ -228,6 +241,27 @@ func writeScanReportJSON(t *testing.T, v any) string {
 	b, err := json.MarshalIndent(v, "", "  ")
 	if err != nil {
 		t.Fatalf("marshal: %v", err)
+	}
+	if err := os.WriteFile(p, append(b, '\n'), 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	return p
+}
+
+// writeScanReportProtoJSON writes a scanv1.ScanResponse as proto JSON format.
+func writeScanReportProtoJSON(t *testing.T, resp *scanv1.ScanResponse) string {
+	t.Helper()
+	dir := t.TempDir()
+	p := filepath.Join(dir, "scan-report.json")
+	opts := protojson.MarshalOptions{
+		Multiline:       true,
+		Indent:          "  ",
+		EmitUnpopulated: false,
+		UseProtoNames:   true,
+	}
+	b, err := opts.Marshal(resp)
+	if err != nil {
+		t.Fatalf("marshal proto: %v", err)
 	}
 	if err := os.WriteFile(p, append(b, '\n'), 0o644); err != nil {
 		t.Fatalf("write: %v", err)

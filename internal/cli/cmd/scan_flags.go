@@ -51,6 +51,7 @@ type scanFlags struct {
 	PublishedBeforeStr string
 	PublishedAfterStr  string
 	AsOfStr            string
+	Filter             string // CEL expression for filtering vulnerabilities
 
 	// Policy configuration
 	PolicyPaths []string
@@ -75,6 +76,10 @@ type scanFlags struct {
 
 	// Secrets option - scan for leaked secrets in addition to vulnerabilities
 	Secrets bool
+
+	// DetectBaseImage enables base image detection for container image scans.
+	// When enabled, queries deps.dev to determine if layers belong to known base images.
+	DetectBaseImage bool
 
 	// Cached ignore rules (populated by loadIgnoreRules)
 	ignoreRules *ignore.Rules
@@ -121,6 +126,7 @@ func extractScanFlags(cmd *cobra.Command) scanFlags {
 	f.PublishedBeforeStr, _ = cmd.Flags().GetString("published-before")
 	f.PublishedAfterStr, _ = cmd.Flags().GetString("published-after")
 	f.AsOfStr, _ = cmd.Flags().GetString("as-of")
+	f.Filter, _ = cmd.Flags().GetString("filter")
 
 	// Policy flags
 	f.PolicyPaths, _ = cmd.Flags().GetStringArray("policy")
@@ -145,6 +151,9 @@ func extractScanFlags(cmd *cobra.Command) scanFlags {
 
 	// Secrets option
 	f.Secrets, _ = cmd.Flags().GetBool("secrets")
+
+	// Base image detection option
+	f.DetectBaseImage, _ = cmd.Flags().GetBool("detect-base-image")
 
 	return f
 }
@@ -214,10 +223,11 @@ func (f scanFlags) toScanRequest(target string, errW io.Writer) *scanv1.ScanRequ
 	beforeT, afterT := f.parsePublishedTimes(errW)
 
 	opts := &scanv1.ScanOptions{
-		Ecosystems:   f.Ecosystems,
-		Ref:          f.Ref,
-		PolicyPaths:  f.PolicyPaths,
-		IncludeSecrets: f.Secrets,
+		Ecosystems:      f.Ecosystems,
+		Ref:             f.Ref,
+		PolicyPaths:     f.PolicyPaths,
+		IncludeSecrets:  f.Secrets,
+		DetectBaseImage: f.DetectBaseImage,
 	}
 
 	// Set published time filters

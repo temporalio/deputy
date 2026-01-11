@@ -1,12 +1,12 @@
 package cmd
 
 import (
-	"encoding/json"
 	"fmt"
 	"strings"
 
 	"connectrpc.com/connect"
 	"github.com/charmbracelet/lipgloss"
+	"google.golang.org/protobuf/encoding/protojson"
 
 	listv1 "github.com/picatz/deputy/gen/deputy/list/v1"
 	"github.com/picatz/deputy/internal/services"
@@ -56,7 +56,7 @@ func newEcosystemsListCommand(c *services.Clients) *cobra.Command {
 			ctx := cmd.Context()
 
 			// Call client API
-			resp, err := c.Inventory.ListEcosystems(ctx, connect.NewRequest(&listv1.ListEcosystemsRequest{}))
+			resp, err := c.Packages.ListEcosystems(ctx, connect.NewRequest(&listv1.ListEcosystemsRequest{}))
 			if err != nil {
 				return fmt.Errorf("list ecosystems failed: %w", err)
 			}
@@ -112,22 +112,28 @@ func printEcosystemsTable(cmd *cobra.Command, ecosystems []*listv1.EcosystemInfo
 func printEcosystemsJSON(cmd *cobra.Command, ecosystems []*listv1.EcosystemInfo) error {
 	w := cmd.OutOrStdout()
 
-	output := struct {
-		Ecosystems []*listv1.EcosystemInfo `json:"ecosystems"`
-	}{
+	resp := &listv1.ListEcosystemsResponse{
 		Ecosystems: ecosystems,
 	}
 
-	enc := json.NewEncoder(w)
-	enc.SetIndent("", "  ")
-	return enc.Encode(output)
-}
-
-func capMark(has bool, check, dash string) string {
-	if has {
-		return check
+	opts := protojson.MarshalOptions{
+		Multiline:       true,
+		Indent:          "  ",
+		EmitUnpopulated: false,
+		UseProtoNames:   true,
 	}
-	return dash
+
+	data, err := opts.Marshal(resp)
+	if err != nil {
+		return fmt.Errorf("marshal ecosystems: %w", err)
+	}
+
+	_, err = w.Write(data)
+	if err != nil {
+		return err
+	}
+	_, err = w.Write([]byte("\n"))
+	return err
 }
 
 func padRight(s string, n int) string {

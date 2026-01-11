@@ -12,6 +12,7 @@ import (
 
 	"github.com/google/osv-scalibr/extractor"
 	packageurl "github.com/package-url/packageurl-go"
+	containerv1 "github.com/picatz/deputy/gen/deputy/container/v1"
 	dependencyv1 "github.com/picatz/deputy/gen/deputy/dependency/v1"
 	vulnerabilityv1 "github.com/picatz/deputy/gen/deputy/vulnerability/v1"
 	"github.com/picatz/deputy/internal/analysis/osv"
@@ -37,7 +38,12 @@ type Result struct {
 	Target inventory.Target
 
 	// Packages is the list of discovered dependencies.
+	// May be nil when result is deserialized from proto (use PackagesScanned for count).
 	Packages []*extractor.Package
+
+	// PackagesScanned is the count of packages that were analyzed.
+	// This is set explicitly and survives proto round-trips (unlike len(Packages)).
+	PackagesScanned int
 
 	// Direct maps package keys to whether they are direct dependencies.
 	Direct map[string]bool
@@ -94,6 +100,12 @@ type Options struct {
 
 	// Platform specifies container image platform (e.g., "linux/amd64").
 	Platform string
+
+	// DetectBaseImage enables base image detection for container image scans.
+	// When true, the baseimage enricher queries deps.dev to determine if layers
+	// belong to known base images, populating LayerDetails.InBaseImage.
+	// This requires network access and adds latency to the scan.
+	DetectBaseImage bool
 }
 
 // ScanRepository scans a repository for vulnerabilities.
@@ -131,13 +143,14 @@ func ScanRepository(ctx context.Context, target, ref string, refProvided bool, o
 
 	return &Execution{
 		Result: Result{
-			Target:      invExec.Result.Target,
-			Packages:    invExec.Result.Packages,
-			Direct:      invExec.Result.Direct,
-			Findings:    findings,
-			Advisories:  advisories,
-			Stats:       stats,
-			GeneratedAt: time.Now().UTC(),
+			Target:          invExec.Result.Target,
+			Packages:        invExec.Result.Packages,
+			PackagesScanned: len(invExec.Result.Packages),
+			Direct:          invExec.Result.Direct,
+			Findings:        findings,
+			Advisories:      advisories,
+			Stats:           stats,
+			GeneratedAt:     time.Now().UTC(),
 		},
 		cleanup: cleanup,
 	}, nil
@@ -153,8 +166,9 @@ func ScanContainerImage(ctx context.Context, target string, targetOpts map[strin
 
 	// Collect inventory
 	invOpts := inventory.Options{
-		Ecosystems: opts.Ecosystems,
-		Platform:   opts.Platform,
+		Ecosystems:      opts.Ecosystems,
+		Platform:        opts.Platform,
+		DetectBaseImage: opts.DetectBaseImage,
 	}
 	invExec, err := inventory.CollectContainerImage(ctx, target, targetOpts, invOpts)
 	if err != nil {
@@ -180,14 +194,15 @@ func ScanContainerImage(ctx context.Context, target string, targetOpts map[strin
 
 	return &Execution{
 		Result: Result{
-			Target:      invExec.Result.Target,
-			Packages:    invExec.Result.Packages,
-			Direct:      invExec.Result.Direct,
-			Findings:    findings,
-			Advisories:  advisories,
-			Stats:       stats,
-			ImageInfo:   invExec.Result.ImageInfo,
-			GeneratedAt: time.Now().UTC(),
+			Target:          invExec.Result.Target,
+			Packages:        invExec.Result.Packages,
+			PackagesScanned: len(invExec.Result.Packages),
+			Direct:          invExec.Result.Direct,
+			Findings:        findings,
+			Advisories:      advisories,
+			Stats:           stats,
+			ImageInfo:       invExec.Result.ImageInfo,
+			GeneratedAt:     time.Now().UTC(),
 		},
 		cleanup: cleanup,
 	}, nil
@@ -227,13 +242,14 @@ func ScanDirectory(ctx context.Context, path string, opts Options) (*Execution, 
 
 	return &Execution{
 		Result: Result{
-			Target:      invExec.Result.Target,
-			Packages:    invExec.Result.Packages,
-			Direct:      invExec.Result.Direct,
-			Findings:    findings,
-			Advisories:  advisories,
-			Stats:       stats,
-			GeneratedAt: time.Now().UTC(),
+			Target:          invExec.Result.Target,
+			Packages:        invExec.Result.Packages,
+			PackagesScanned: len(invExec.Result.Packages),
+			Direct:          invExec.Result.Direct,
+			Findings:        findings,
+			Advisories:      advisories,
+			Stats:           stats,
+			GeneratedAt:     time.Now().UTC(),
 		},
 		cleanup: cleanup,
 	}, nil
@@ -345,12 +361,13 @@ func ScanPURL(ctx context.Context, purlStr string, opts Options) (*Execution, er
 				Kind:        targets.KindPURL,
 				DisplayPath: canonical,
 			},
-			Packages:    pkgs,
-			Direct:      direct,
-			Findings:    findings,
-			Advisories:  advisories,
-			Stats:       stats,
-			GeneratedAt: time.Now().UTC(),
+			Packages:        pkgs,
+			PackagesScanned: len(pkgs),
+			Direct:          direct,
+			Findings:        findings,
+			Advisories:      advisories,
+			Stats:           stats,
+			GeneratedAt:     time.Now().UTC(),
 		},
 	}, nil
 }
@@ -416,8 +433,14 @@ func packagesToInputs(pkgs []*extractor.Package, direct map[string]bool) []osv.P
 
 		isDirect := false
 		if direct != nil {
-			// Direct map contains Go module roots (e.g., "github.com/google/osv-scalibr"),
-			// not PURL strings. For Go packages, use the module root for lookup.
+			// For Go packages, check both exact module path and module root.
+			// The direct map may contain:
+			//   - Exact module paths with true (direct) or false (indirect)
+			//   - Module roots with true (for subpackage matching)
+			//
+			// We first check the exact module path, then fall back to module root.
+			// This handles Go submodules correctly: if go.mod has "foo" as direct
+			// but "foo/loader" as indirect, "foo/loader" should be indirect.
 			if purl.Type == "golang" {
 				// Reconstruct module path from PURL namespace + name
 				modulePath := pkg.Name
@@ -428,8 +451,14 @@ func packagesToInputs(pkgs []*extractor.Package, direct map[string]bool) []osv.P
 						modulePath = purl.Name
 					}
 				}
-				moduleRoot := compare.GetModuleRoot(modulePath)
-				isDirect = direct[moduleRoot]
+				// First check exact module path (handles submodules correctly)
+				if val, exists := direct[modulePath]; exists {
+					isDirect = val
+				} else {
+					// Fall back to module root for subpackage import paths
+					moduleRoot := compare.GetModuleRoot(modulePath)
+					isDirect = direct[moduleRoot]
+				}
 			} else {
 				// For non-Go ecosystems, use PURL string as key
 				isDirect = direct[purl.String()]
@@ -454,6 +483,19 @@ func packagesToInputs(pkgs []*extractor.Package, direct map[string]bool) []osv.P
 			})
 		}
 
+		// Convert layer details from SCALIBR for container image scans.
+		// Note: SCALIBR uses DiffID/ChainID (Go naming), we use DiffId/ChainId (proto naming).
+		var layerDetails *containerv1.LayerDetails
+		if pkg.LayerDetails != nil {
+			layerDetails = &containerv1.LayerDetails{
+				Index:       int32(pkg.LayerDetails.Index),
+				DiffId:      pkg.LayerDetails.DiffID,
+				ChainId:     pkg.LayerDetails.ChainID,
+				Command:     pkg.LayerDetails.Command,
+				InBaseImage: pkg.LayerDetails.InBaseImage,
+			}
+		}
+
 		inputs = append(inputs, osv.NewPkgInput(
 			osv.QueryKey{
 				Name:      pkg.Name,
@@ -465,6 +507,7 @@ func packagesToInputs(pkgs []*extractor.Package, direct map[string]bool) []osv.P
 				IsDirect:     isDirect,
 				Locations:    locs,
 				ManifestRefs: manifestRefs,
+				LayerDetails: layerDetails,
 			},
 		))
 	}

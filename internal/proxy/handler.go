@@ -122,8 +122,8 @@ func (h *baseHandler) buildPayload(ctx context.Context, info requestInfo, path s
 
 	// Add vulnerability and license data if version is known
 	if info.HasVersion {
-		if vulnMaps := vulnerabilitiesToMaps(ctx, h.lookups, info.Ecosystem, info.Name, rawVersion); len(vulnMaps) > 0 {
-			payload["vulnerabilities"] = vulnMaps
+		if findings := lookupVulnerabilities(ctx, h.lookups, info.Ecosystem, info.Name, rawVersion); len(findings) > 0 {
+			payload["vulnerabilities"] = findings
 		}
 		if licenses := lookupLicenses(ctx, h.lookups, info.Name, rawVersion); len(licenses) > 0 {
 			payload["licenses"] = licenses

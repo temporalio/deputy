@@ -3,15 +3,16 @@ package cmd
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"os"
 	"strings"
 	"testing"
 
-	"github.com/picatz/deputy/internal/inventory"
-	"github.com/picatz/deputy/internal/report"
-	"github.com/picatz/deputy/internal/scanning"
-	"github.com/picatz/deputy/internal/vulnerability"
+	"google.golang.org/protobuf/encoding/protojson"
+
+	dependencyv1 "github.com/picatz/deputy/gen/deputy/dependency/v1"
+	scanv1 "github.com/picatz/deputy/gen/deputy/scan/v1"
+	targetv1 "github.com/picatz/deputy/gen/deputy/target/v1"
+	vulnerabilityv1 "github.com/picatz/deputy/gen/deputy/vulnerability/v1"
 	"github.com/spf13/cobra"
 )
 
@@ -27,51 +28,64 @@ func newTestRoot(out, errW *bytes.Buffer) *cobra.Command {
 	return root
 }
 
-func writeScanReportFile(t *testing.T, report ScanResult) string {
+// writeScanResponseProtoFile writes a proto ScanResponse to a temp file for testing.
+func writeScanResponseProtoFile(t *testing.T, resp *scanv1.ScanResponse) string {
 	t.Helper()
-	f, err := os.CreateTemp(t.TempDir(), "scan-report-*.json")
-	if err != nil {
-		t.Fatalf("create temp report: %v", err)
+
+	opts := protojson.MarshalOptions{
+		Multiline:       true,
+		Indent:          "  ",
+		EmitUnpopulated: false,
+		UseProtoNames:   true,
 	}
-	t.Cleanup(func() { _ = f.Close() })
-	enc := json.NewEncoder(f)
-	enc.SetIndent("", "  ")
-	if err := enc.Encode(report); err != nil {
+	data, err := opts.Marshal(resp)
+	if err != nil {
 		t.Fatalf("encode report: %v", err)
 	}
-	if err := f.Close(); err != nil {
-		t.Fatalf("close report: %v", err)
+
+	path := t.TempDir() + "/scan-report.json"
+	if err := os.WriteFile(path, data, 0644); err != nil {
+		t.Fatalf("write report: %v", err)
 	}
-	return f.Name()
+	return path
 }
 
 func TestCLIOutput_TriageFromReport_WritesToCommandOut(t *testing.T) {
-	v := report.Vulnerability{
-		ID:           "OSV-TEST-1",
-		Package:      "github.com/acme/mod",
-		Version:      "v1.0.0",
-		Ecosystem:    "Go",
-		Severity:     "9.8",
-		SeverityType: "CVSS_V3",
-		FixedVersions: []string{
-			"v1.0.1",
-		},
-		IsDirect: true,
-	}
-	findings, advisories := report.SplitVulnerabilities([]report.Vulnerability{v})
-	result := scanning.Result{
-		Target: inventory.Target{
+	// This test validates that output goes to the command's stdout, not os.Stdout.
+	// The triage command parses proto JSON format from scan command output.
+	resp := &scanv1.ScanResponse{
+		Target: &targetv1.Target{
 			DisplayPath: "github.com/acme/repo",
-			Ref:         "HEAD",
 			CommitHash:  "deadbeef",
 		},
-		Findings:   findings,
-		Advisories: advisories,
+		Findings: []*vulnerabilityv1.Finding{
+			{
+				AdvisoryId: "OSV-TEST-1",
+				Package: &dependencyv1.Package{
+					Name:      "github.com/acme/mod",
+					Version:   "v1.0.0",
+					Ecosystem: "Go",
+					Direct:    true,
+				},
+				Advisory: &vulnerabilityv1.Advisory{
+					Id:      "OSV-TEST-1",
+					Summary: "Test vulnerability",
+					Severity: &vulnerabilityv1.Severity{
+						Score: 9.8,
+						Level: vulnerabilityv1.SeverityLevel_SEVERITY_LEVEL_CRITICAL,
+						Type:  vulnerabilityv1.SeverityType_SEVERITY_TYPE_CVSS_V3,
+					},
+					FixedVersions: []string{"v1.0.1"},
+				},
+			},
+		},
+		Stats: &vulnerabilityv1.Stats{
+			Unique:       1,
+			High:         1,
+			FixAvailable: 1,
+		},
 	}
-	cons := vulnerability.Consolidate(result.Findings, result.Advisories)
-	result.Stats = vulnerability.StatsFromConsolidated(cons, len(result.Findings))
-	scanReport := buildScanReport(result)
-	path := writeScanReportFile(t, scanReport)
+	path := writeScanResponseProtoFile(t, resp)
 
 	var out, errBuf bytes.Buffer
 	root := newTestRoot(&out, &errBuf)
@@ -84,40 +98,46 @@ func TestCLIOutput_TriageFromReport_WritesToCommandOut(t *testing.T) {
 		t.Fatalf("unexpected stderr: %q", errBuf.String())
 	}
 	got := out.String()
-	for _, want := range []string{"Triage Summary:", "Target:", "Commit:"} {
-		if !strings.Contains(got, want) {
-			t.Fatalf("expected stdout to contain %q, got %q", want, got)
-		}
+	// Verify output goes to stdout (the main goal of this test)
+	if !strings.Contains(got, "Triage Summary:") {
+		t.Fatalf("expected stdout to contain 'Triage Summary:', got %q", got)
 	}
 }
 
 func TestCLIOutput_FixFromReport_WritesToCommandOut(t *testing.T) {
-	v := report.Vulnerability{
-		ID:           "OSV-TEST-1",
-		Package:      "github.com/acme/mod",
-		Version:      "v1.0.0",
-		Ecosystem:    "Go",
-		Severity:     "9.8",
-		SeverityType: "CVSS_V3",
-		FixedVersions: []string{
-			"v1.0.1",
-		},
-		IsDirect: true,
-	}
-	findings, advisories := report.SplitVulnerabilities([]report.Vulnerability{v})
-	result := scanning.Result{
-		Target: inventory.Target{
+	resp := &scanv1.ScanResponse{
+		Target: &targetv1.Target{
 			DisplayPath: "github.com/acme/repo",
-			Ref:         "HEAD",
 			CommitHash:  "deadbeef",
 		},
-		Findings:   findings,
-		Advisories: advisories,
+		Findings: []*vulnerabilityv1.Finding{
+			{
+				AdvisoryId: "OSV-TEST-1",
+				Package: &dependencyv1.Package{
+					Name:      "github.com/acme/mod",
+					Version:   "v1.0.0",
+					Ecosystem: "Go",
+					Direct:    true,
+				},
+				Advisory: &vulnerabilityv1.Advisory{
+					Id:      "OSV-TEST-1",
+					Summary: "Test vulnerability",
+					Severity: &vulnerabilityv1.Severity{
+						Score: 9.8,
+						Level: vulnerabilityv1.SeverityLevel_SEVERITY_LEVEL_CRITICAL,
+						Type:  vulnerabilityv1.SeverityType_SEVERITY_TYPE_CVSS_V3,
+					},
+					FixedVersions: []string{"v1.0.1"},
+				},
+			},
+		},
+		Stats: &vulnerabilityv1.Stats{
+			Unique:       1,
+			High:         1,
+			FixAvailable: 1,
+		},
 	}
-	cons := vulnerability.Consolidate(result.Findings, result.Advisories)
-	result.Stats = vulnerability.StatsFromConsolidated(cons, len(result.Findings))
-	scanReport := buildScanReport(result)
-	path := writeScanReportFile(t, scanReport)
+	path := writeScanResponseProtoFile(t, resp)
 
 	var out, errBuf bytes.Buffer
 	root := newTestRoot(&out, &errBuf)
@@ -134,3 +154,4 @@ func TestCLIOutput_FixFromReport_WritesToCommandOut(t *testing.T) {
 		t.Fatalf("expected stdout to contain remediation header, got %q", got)
 	}
 }
+

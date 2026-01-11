@@ -15,12 +15,14 @@
 #   - pathContains(path, glob)   - Check if any path element matches glob pattern
 #   - pathDepth(path)            - Get dependency depth from path (length - 1)
 #
-# Vulnerability Helper Functions:
-#   - vulnerabilitySeverity(vuln)  - Get severity level (CRITICAL, HIGH, MEDIUM, LOW)
-#   - vulnerabilityId(vuln)        - Get advisory ID (CVE-xxx, GHSA-xxx)
-#   - hasFix(vuln)        - Check if vulnerability has a known fix
-#   - inKEV(vuln)         - Check if vulnerability is in CISA's KEV catalog
-#   - epssScore(vuln)     - Get EPSS score (0.0-1.0), returns 0 if unavailable
+# Severity constants: severity.critical, severity.high, severity.medium, severity.low
+# Access via: vulnerability.advisory.severity.level
+#
+# Proto field access:
+#   - vulnerability.advisory_id     - Get advisory ID (CVE-xxx, GHSA-xxx)
+#   - vulnerability.in_kev          - Check if vulnerability is in CISA's KEV catalog
+#   - vulnerability.epss            - Get EPSS score (0.0-1.0)
+#   - vulnerability.advisory.fixed_versions - List of fixed versions
 
 policies:
   # Block critical vulnerabilities in direct dependencies
@@ -31,7 +33,7 @@ policies:
     rules:
       - action: deny
         when: |
-          vulnerability.severity == "CRITICAL" &&
+          vulnerability.advisory.severity.level == severity.critical &&
           vulnerability.?depth.orValue(0) == 0
         reason: "Critical vulnerability in direct dependency"
         remediation: "Update the direct dependency to a fixed version"
@@ -44,7 +46,7 @@ policies:
     rules:
       - action: warn
         when: |
-          vulnerability.severity == "HIGH" &&
+          vulnerability.advisory.severity.level == severity.high &&
           vulnerability.?depth.orValue(0) > 0 &&
           vulnerability.?depth.orValue(0) <= 2
         reason: "High-severity vulnerability in shallow transitive dependency"
@@ -58,7 +60,7 @@ policies:
     rules:
       - action: allow
         when: |
-          vulnerability.severity in ["MEDIUM", "LOW"] &&
+          vulnerability.advisory.severity.level in [severity.medium, severity.low] &&
           vulnerability.?depth.orValue(0) > 3
         reason: "Deep transitive dependency with lower severity - acceptable risk"
 
@@ -156,42 +158,43 @@ policies:
         reason: "Path and depth fields are inconsistent (diagnostic)"
 
   # =============================================================================
-  # Examples using Vulnerability Helper Functions
+  # Examples using Severity Constants
   # =============================================================================
 
-  # Use vulnerabilitySeverity() for cleaner severity checks
-  - name: block-critical-with-helper
-    description: "Block critical vulnerabilities using helper function"
+  # Use severity constants for cleaner expressions
+  - name: block-critical-native
+    description: "Block critical vulnerabilities using severity constants"
     entrypoints: ["scan_vulnerability"]
     rules:
       - action: deny
         when: |
-          vulnerabilitySeverity(vulnerability) == "CRITICAL"
+          vulnerability.advisory.severity.level == severity.critical
         reason: "Critical vulnerability found"
 
-  # Use inKEV() and epssScore() for threat intelligence
+  # Block vulnerabilities with evidence of active exploitation
   - name: block-actively-exploited
     description: "Block vulnerabilities with evidence of active exploitation"
     entrypoints: ["scan_vulnerability"]
     rules:
       - action: deny
         when: |
-          inKEV(vulnerability) || epssScore(vulnerability) > 0.7
+          vulnerability.?in_kev.orValue(false) || vulnerability.?epss.orValue(0.0) > 0.7
         reason: "Vulnerability is actively exploited (KEV or high EPSS)"
         remediation: "This vulnerability requires immediate attention"
 
-  # Use hasFix() to prioritize fixable vulnerabilities
+  # Block critical vulnerabilities that have available fixes
   - name: block-fixable-critical
     description: "Block critical vulnerabilities that have available fixes"
     entrypoints: ["scan_vulnerability"]
     rules:
       - action: deny
         when: |
-          vulnerabilitySeverity(vulnerability) == "CRITICAL" && hasFix(vulnerability)
+          vulnerability.advisory.severity.level == severity.critical &&
+          size(vulnerability.?advisory.fixed_versions.orValue([])) > 0
         reason: "Critical vulnerability with available fix must be addressed"
         remediation: "Update to a fixed version immediately"
 
-  # Use vulnerabilityId() for specific vulnerability handling
+  # Block specific high-profile vulnerabilities by ID
   - name: block-specific-cves
     description: "Block specific high-profile vulnerabilities by ID"
     entrypoints: ["scan_vulnerability"]
@@ -203,10 +206,10 @@ policies:
     rules:
       - action: deny
         when: |
-          blockedVulns.exists(id, vulnerabilityId(vulnerability) == id)
+          blockedVulns.exists(id, vulnerability.?advisory_id.orValue("") == id)
         reason: "High-profile vulnerability explicitly blocked"
 
-  # Combine helper functions for sophisticated policies
+  # Combine proto access for sophisticated policies
   - name: risk-based-triage
     description: "Sophisticated risk-based vulnerability triage"
     entrypoints: ["scan_vulnerability"]
@@ -214,23 +217,23 @@ policies:
       # Highest priority: KEV + fixable + direct dependency
       - action: deny
         when: |
-          inKEV(vulnerability) &&
-          hasFix(vulnerability) &&
+          vulnerability.?in_kev.orValue(false) &&
+          size(vulnerability.?advisory.fixed_versions.orValue([])) > 0 &&
           vulnerability.?depth.orValue(0) == 0
         reason: "KEV vulnerability with fix in direct dependency - immediate action required"
 
       # High priority: High EPSS + shallow depth
       - action: deny
         when: |
-          epssScore(vulnerability) > 0.5 &&
+          vulnerability.?epss.orValue(0.0) > 0.5 &&
           vulnerability.?depth.orValue(0) <= 2 &&
-          vulnerabilitySeverity(vulnerability) in ["CRITICAL", "HIGH"]
+          vulnerability.advisory.severity.level in [severity.critical, severity.high]
         reason: "High exploitation probability in shallow dependency"
 
       # Medium priority: Any critical in path through specific packages
       - action: warn
         when: |
-          vulnerabilitySeverity(vulnerability) == "CRITICAL" &&
+          vulnerability.advisory.severity.level == severity.critical &&
           pathContains(vulnerability.?path.orValue([]), "*crypto*")
         reason: "Critical vulnerability in cryptography-related dependency chain"
 
@@ -242,6 +245,6 @@ policies:
       - action: warn
         when: |
           vulnerabilities.size() > 5 &&
-          vulnerabilities.filter(v, hasFix(v)).size() * 10 > vulnerabilities.size() * 8
+          vulnerabilities.filter(v, size(v.?advisory.fixed_versions.orValue([])) > 0).size() * 10 > vulnerabilities.size() * 8
         reason: "Over 80% of vulnerabilities have available fixes"
         remediation: "Run 'deputy fix' to generate a remediation plan"

@@ -683,6 +683,8 @@ deputy scan --debug  # shows plugin invocations
 Entrypoints define when a policy is evaluated. See [`internal/policy/entrypoints.go`](internal/policy/entrypoints.go) for canonical definitions.
 See [`internal/policy/evaluator.go`](internal/policy/evaluator.go) for CEL activation and variable bindings.
 
+**Proto-First Design:** Deputy uses a proto-first design for policy evaluation. Variables like `vulnerability`, `pkg`, and `image` are protocol buffer messages, enabling type-safe field access with CEL's native proto support. Field names use **snake_case** as defined in the proto files (e.g., `vulnerability.advisory.fixed_versions`, `vulnerability.package.layer_details.in_base_image`). Severity checks use the canonical proto path with severity constants (e.g., `vulnerability.advisory.severity.level == severity.critical`, `vulnerability.advisory.severity.level in [severity.critical, severity.high]`). See proto definitions in [`api/deputy/`](api/deputy/) for authoritative field names.
+
 **Type-safe Entrypoints:** The `policy.Entrypoint` type provides compile-time safety when passing entrypoints in Go code. Use constants like `policy.EntrypointScanReport` instead of string literals. The `Entrypoint` type provides `String()`, `IsValid()`, and `Category()` methods.
 
 ### Policy Examples
@@ -693,7 +695,7 @@ policies:
   - name: block-critical
     rules:
       - action: deny
-        when: vulnerabilities.exists(v, v.severity == "CRITICAL")
+        when: vulnerabilities.exists(v, v.advisory.severity.level == severity.critical)
         reason: "Critical vulnerability found"
 ```
 
@@ -741,84 +743,130 @@ Note: The `pkg` helper provides sensible defaults (`name`, `version`, `ecosystem
 
 #### `vulnerability` object
 
-Represents a single vulnerability affecting a package. Available in the `scan_vulnerability` entrypoint.
+Represents a single vulnerability affecting a package. Available in the `scan_vulnerability` entrypoint. The `vulnerability` variable is a proto message (`vulnerabilityv1.Finding`).
+
+**Proto-First Field Access:**
+Deputy uses a proto-first design with snake_case field names. Access fields using the proto structure:
+- `vulnerability.advisory_id` - the advisory ID
+- `vulnerability.advisory.severity.level` - severity level enum
+- `vulnerability.package.direct` - whether this is a direct dependency
+- `vulnerability.advisory.fixed_versions` - list of fixed versions
 
 | Field | Type | Description | Example Value |
 |---|---|---|---|
-| `id` | `string` | Vulnerability ID (e.g., CVE, GHSA) | `"CVE-2021-44228"` |
-| `severity` | `string` | `CRITICAL`, `HIGH`, `MEDIUM`, `LOW` | `"CRITICAL"` |
-| `isDirect` | `bool` | If the vulnerability is in a direct dependency | `true` |
-| `fixedVersions` | `list(string)` | Versions containing a fix | `["2.15.0"]` |
-| `layerDetails` | `object` | Container image layer info (nil for non-image scans) | see below |
+| `vulnerability.advisory_id` | `string` | Vulnerability ID (e.g., CVE, GHSA) | `"CVE-2021-44228"` |
+| `vulnerability.advisory.id` | `string` | Primary advisory ID | `"CVE-2021-44228"` |
+| `vulnerability.advisory.aliases` | `list(string)` | Alternative identifiers (CVE, GHSA cross-references) | `["GHSA-jfh8-c2jp-5v3q"]` |
+| `vulnerability.advisory.summary` | `string` | Brief description | `"Remote code execution..."` |
+| `vulnerability.advisory.details` | `string` | Full vulnerability description | `"Apache Log4j2..."` |
+| `vulnerability.advisory.cve` | `string` | CVE identifier if available | `"CVE-2021-44228"` |
+| `vulnerability.advisory.severity.level` | `enum` | Severity enum (use `severity.critical`, `severity.high`, etc.) | `SEVERITY_LEVEL_CRITICAL` |
+| `vulnerability.advisory.fixed_versions` | `list(string)` | Versions containing a fix | `["2.15.0"]` |
+| `vulnerability.advisory.references` | `list(string)` | URLs with additional information | `["https://nvd.nist.gov/..."]` |
+| `vulnerability.advisory.cwes` | `list(string)` | CWE identifiers | `["CWE-502", "CWE-400"]` |
+| `vulnerability.package.direct` | `bool` | If the vulnerability is in a direct dependency | `true` |
+| `vulnerability.package.layer_details` | `object` | Container image layer info (nil for non-image scans) | see below |
+
+**Severity Checks (canonical proto access):**
+Use the proto path with severity constants for type-safe severity checks:
+
+```cel
+# Check for CRITICAL severity
+vulnerability.advisory.severity.level == severity.critical
+
+# Check for HIGH or CRITICAL
+vulnerability.advisory.severity.level in [severity.critical, severity.high]
+
+# Check for MEDIUM and above
+vulnerability.advisory.severity.level in [severity.critical, severity.high, severity.medium]
+
+# In filter/map expressions
+vulnerabilities.filter(v, v.advisory.severity.level == severity.critical)
+vulnerabilities.exists(v, v.advisory.severity.level in [severity.critical, severity.high])
+```
+
+**Severity Constants:**
+Deputy provides lowercase severity constants that map to proto enum values:
+- `severity.critical` - SEVERITY_LEVEL_CRITICAL
+- `severity.high` - SEVERITY_LEVEL_HIGH
+- `severity.medium` - SEVERITY_LEVEL_MEDIUM
+- `severity.low` - SEVERITY_LEVEL_LOW
+- `severity.unspecified` - SEVERITY_LEVEL_UNSPECIFIED
 
 **Enrichment Fields (when `--enrich` is enabled):**
 
 | Field | Type | Description | Example Value |
 |---|---|---|---|
-| `epss` | `float` | EPSS score (0.0-1.0): probability of exploitation in next 30 days | `0.97` |
-| `epssPercentile` | `float` | EPSS percentile (0.0-1.0): % of CVEs with lower EPSS score | `0.99` |
-| `inKEV` | `bool` | Whether CVE is in CISA's Known Exploited Vulnerabilities catalog | `true` |
-| `kevDateAdded` | `string` | Date CVE was added to KEV catalog (YYYY-MM-DD) | `"2021-12-10"` |
-| `kevDueDate` | `string` | Federal agency compliance deadline (YYYY-MM-DD) | `"2021-12-24"` |
-| `kevRequiredAction` | `string` | CISA's required remediation action | `"Apply updates..."` |
-| `kevKnownRansomwareCampaignUse` | `string` | Ransomware involvement: `"Known"` or `"Unknown"` | `"Known"` |
+| `vulnerability.epss` | `float` | EPSS score (0.0-1.0): probability of exploitation in next 30 days | `0.97` |
+| `vulnerability.epss_percentile` | `float` | EPSS percentile (0.0-1.0): % of CVEs with lower EPSS score | `0.99` |
+| `vulnerability.in_kev` | `bool` | Whether CVE is in CISA's Known Exploited Vulnerabilities catalog | `true` |
+| `vulnerability.kev_date_added` | `string` | Date CVE was added to KEV catalog (YYYY-MM-DD) | `"2021-12-10"` |
+| `vulnerability.kev_due_date` | `string` | Federal agency compliance deadline (YYYY-MM-DD) | `"2021-12-24"` |
+| `vulnerability.kev_required_action` | `string` | CISA's required remediation action | `"Apply updates..."` |
+| `vulnerability.kev_known_ransomware_campaign_use` | `string` | Ransomware involvement: `"Known"` or `"Unknown"` | `"Known"` |
 
 **Layer Details (container images only):**
 
-When scanning container images, `vulnerability.layerDetails` provides information about which layer introduced the vulnerable package:
+When scanning container images, `vulnerability.package.layer_details` provides information about which layer introduced the vulnerable package:
 
 | Field | Type | Description | Example Value |
 |---|---|---|---|
-| `layerDetails.index` | `int` | Layer position (0 = oldest/base layer) | `2` |
-| `layerDetails.diffId` | `string` | Digest of uncompressed layer content | `"sha256:abc..."` |
-| `layerDetails.chainId` | `string` | Cumulative layer chain ID (see below) | `"sha256:def..."` |
-| `layerDetails.command` | `string` | Dockerfile instruction that created layer | `"RUN apt-get install..."` |
-| `layerDetails.inBaseImage` | `bool` | Whether layer is from base image (FROM) | `true` |
+| `layer_details.index` | `int` | Layer position (0 = oldest/base layer) | `2` |
+| `layer_details.diff_id` | `string` | Digest of uncompressed layer content | `"sha256:abc..."` |
+| `layer_details.chain_id` | `string` | Cumulative layer chain ID (see below) | `"sha256:def..."` |
+| `layer_details.command` | `string` | Dockerfile instruction that created layer | `"RUN apt-get install..."` |
+| `layer_details.in_base_image` | `bool` | Whether layer is from base image (FROM) | `true` |
 
-**Understanding ChainID:**
+**Understanding chain_id:**
 
-The `chainId` uniquely identifies a layer in the context of all its parent layers, per the [OCI Image Spec](https://github.com/opencontainers/image-spec/blob/main/config.md#layer-chainid). Unlike `diffId` (which identifies layer content), `chainId` is calculated as:
-- For the first layer: `chainId = diffId`
-- For subsequent layers: `chainId = sha256(parentChainId + " " + diffId)`
+The `chain_id` uniquely identifies a layer in the context of all its parent layers, per the [OCI Image Spec](https://github.com/opencontainers/image-spec/blob/main/config.md#layer-chainid). Unlike `diff_id` (which identifies layer content), `chain_id` is calculated as:
+- For the first layer: `chain_id = diff_id`
+- For subsequent layers: `chain_id = sha256(parent_chain_id + " " + diff_id)`
 
-Use `chainId` when you need to identify a specific layer stack (e.g., for caching or comparing layers across images with shared bases). Use `diffId` when you only care about the layer content itself.
+Use `chain_id` when you need to identify a specific layer stack (e.g., for caching or comparing layers across images with shared bases). Use `diff_id` when you only care about the layer content itself.
 
 **Example Expressions for `vulnerability`:**
 
 *   Deny critical vulnerabilities:
-    `vulnerability.severity == 'CRITICAL'`
+    `vulnerability.advisory.severity.level == severity.critical`
+*   Deny high or above severity:
+    `vulnerability.advisory.severity.level in [severity.critical, severity.high]`
 *   Deny vulnerabilities in direct dependencies that have a fix:
-    `vulnerability.isDirect && vulnerability.fixedVersions.size() > 0`
+    `vulnerability.package.direct && size(vulnerability.advisory.fixed_versions) > 0`
 *   Deny a specific vulnerability by ID:
-    `vulnerability.id == 'GHSA-jfh8-c2j2-2hch'`
-*   Deny if a vulnerability has no fix and is `HIGH` or `CRITICAL`:
-    `(!has(vulnerability.fixedVersions) || vulnerability.fixedVersions.size() == 0) && (has(vulnerability.severity) && vulnerability.severity in ['HIGH', 'CRITICAL'])`
-*   Deny if a vulnerability has no fix and is `HIGH` or `CRITICAL` (using optionals):
-    `size(vulnerability.?fixedVersions.orValue([])) == 0 && vulnerability.?severity.orValue('').upperAscii() in ['HIGH', 'CRITICAL']`
+    `vulnerability.advisory_id == 'GHSA-jfh8-c2j2-2hch'`
+*   Deny if a vulnerability has no fix and is HIGH or CRITICAL:
+    `size(vulnerability.advisory.fixed_versions) == 0 && vulnerability.advisory.severity.level in [severity.critical, severity.high]`
+*   Block deprecated/unmaintained packages by advisory text:
+    `vulnerability.advisory.summary.lowerAscii().matches("deprecated|unmaintained|end.of.life")`
+*   Block Log4Shell by alias (CVE cross-reference):
+    `vulnerability.advisory.aliases.exists(a, a == "CVE-2021-44228")`
+*   Block injection vulnerabilities by CWE:
+    `vulnerability.advisory.cwes.exists(c, c in ["CWE-89", "CWE-79", "CWE-94"])`
 
 **Layer-Aware Examples (container images):**
 
 *   Block critical vulnerabilities in base image layers:
-    `has(vulnerability.layerDetails) && vulnerability.layerDetails.inBaseImage && vulnerability.severity == 'CRITICAL'`
+    `has(vulnerability.package.layer_details) && vulnerability.package.layer_details.in_base_image && vulnerability.advisory.severity.level == severity.critical`
 *   Warn on vulnerabilities from application layers (not base image):
-    `has(vulnerability.layerDetails) && !vulnerability.layerDetails.inBaseImage && vulnerability.severity in ['HIGH', 'CRITICAL']`
+    `has(vulnerability.package.layer_details) && !vulnerability.package.layer_details.in_base_image && vulnerability.advisory.severity.level in [severity.critical, severity.high]`
 *   Detect vulnerabilities from apt-get install commands:
-    `has(vulnerability.layerDetails) && vulnerability.layerDetails.command.contains('apt-get install')`
+    `has(vulnerability.package.layer_details) && vulnerability.package.layer_details.command.contains('apt-get install')`
 *   Flag vulnerabilities in early base layers (likely system packages):
-    `has(vulnerability.layerDetails) && vulnerability.layerDetails.index < 3 && vulnerability.severity == 'CRITICAL'`
+    `has(vulnerability.package.layer_details) && vulnerability.package.layer_details.index < 3 && vulnerability.advisory.severity.level == severity.critical`
 
 **Enrichment-Based Examples (when `--enrich` is enabled):**
 
 *   Block vulnerabilities in CISA KEV catalog:
-    `vulnerability.inKEV == true`
+    `vulnerability.in_kev == true`
 *   Block high-probability exploitation (EPSS > 0.7):
-    `vulnerability.?epss.orValue(0.0) > 0.7`
+    `vulnerability.epss > 0.7`
 *   Block KEV vulnerabilities used in ransomware campaigns:
-    `vulnerability.inKEV == true && vulnerability.kevKnownRansomwareCampaignUse == 'Known'`
+    `vulnerability.in_kev == true && vulnerability.kev_known_ransomware_campaign_use == 'Known'`
 *   Block KEV vulnerabilities past their due date:
-    `vulnerability.inKEV == true && vulnerability.kevDueDate != '' && vulnerability.kevDueDate < now().format('2006-01-02')`
+    `vulnerability.in_kev == true && vulnerability.kev_due_date != '' && vulnerability.kev_due_date < now().format('2006-01-02')`
 *   Prioritize by EPSS percentile (top 5% most likely to be exploited):
-    `vulnerability.?epssPercentile.orValue(0.0) > 0.95`
+    `vulnerability.epss_percentile > 0.95`
 
 **Graph Fields (when `--with-graph` is enabled):**
 
@@ -826,21 +874,21 @@ When scanning with `--with-graph`, the dependency graph is resolved to show how 
 
 | Field | Type | Description | Example Value |
 |---|---|---|---|
-| `path` | `list(string)` | Dependency chain from root to vulnerable package | `["myapp", "go-git/v5", "x/crypto"]` |
-| `depth` | `int` | Distance from root (0 = direct, 1+ = transitive) | `2` |
+| `vulnerability.path` | `list(string)` | Dependency chain from root to vulnerable package | `["myapp", "go-git/v5", "x/crypto"]` |
+| `vulnerability.depth` | `int` | Distance from root (0 = direct, 1+ = transitive) | `2` |
 
 **Graph-Based Examples (when `--with-graph` is enabled):**
 
 *   Allow deep transitive vulnerabilities (focus on direct deps):
-    `vulnerability.?depth.orValue(0) > 2 && vulnerability.severity != 'CRITICAL'`
+    `vulnerability.depth > 2 && vulnerability.advisory.severity.level != severity.critical`
 *   Block critical vulnerabilities regardless of depth:
-    `vulnerability.severity == 'CRITICAL'`
+    `vulnerability.advisory.severity.level == severity.critical`
 *   Warn on vulnerabilities introduced through specific packages:
-    `vulnerability.?path.orValue([]).exists(p, p.contains('legacy-lib'))`
+    `vulnerability.path.exists(p, p.contains('legacy-lib'))`
 *   Prioritize vulnerabilities in shallow dependencies:
-    `vulnerability.?depth.orValue(0) <= 1 && vulnerability.severity in ['HIGH', 'CRITICAL']`
+    `vulnerability.depth <= 1 && vulnerability.advisory.severity.level in [severity.critical, severity.high]`
 *   Identify vulnerabilities with long dependency chains (supply chain risk):
-    `vulnerability.?depth.orValue(0) > 3`
+    `vulnerability.depth > 3`
 
 **Note:** For full dependency graph analysis (graph statistics, node/edge policies, traversal), use the `graph_report`, `graph_node`, and `graph_edge` entrypoints with the `deputy graph` command. See the [Graph Helper Functions](#graph-helper-functions) section below.
 
@@ -853,11 +901,11 @@ A list of all `vulnerability` objects found in a scan report. Available in the `
 **Example Expressions for `vulnerabilities`:**
 
 *   Deny if any critical vulnerabilities exist in the report:
-    `vulnerabilities.exists(v, v.severity == 'CRITICAL')`
+    `vulnerabilities.exists(v, v.advisory.severity.level == severity.critical)`
 *   Deny if there are more than 5 vulnerabilities in total:
     `vulnerabilities.size() > 5`
-*   Deny if all vulnerabilities are high severity (a strange but possible policy):
-    `vulnerabilities.all(v, v.severity == 'HIGH')`
+*   Deny if all vulnerabilities are high severity:
+    `vulnerabilities.all(v, v.advisory.severity.level == severity.high)`
 
 ---
 
@@ -933,6 +981,17 @@ List of build history entries showing Dockerfile commands:
 | `history[].created` | `timestamp` | When this layer was created |
 | `history[].empty_layer` | `bool` | Whether this is a metadata-only layer |
 
+**Base Image Information (`image.base_image`):**
+
+When available, contains base image information extracted from OCI annotations. This is populated automatically from `org.opencontainers.image.base.name` and `org.opencontainers.image.base.digest` annotations per the [OCI Image Spec](https://github.com/opencontainers/image-spec/blob/main/annotations.md).
+
+| Field | Type | Description | Example Value |
+|---|---|---|---|
+| `base_image.name` | `string` | Base image reference | `"docker.io/library/alpine:3.19"` |
+| `base_image.digest` | `string` | Base image digest | `"sha256:abc123..."` |
+
+**Note:** `image.base_image` is `null` if the image does not have OCI base image annotations. Use `has(image.base_image)` to check for presence. This provides a no-network way to identify base images when the image builder sets the standard annotations (e.g., Docker BuildKit, ko, crane).
+
 **Example Expressions for `image`:**
 
 *   Block images running as root:
@@ -949,6 +1008,10 @@ List of build history entries showing Dockerfile commands:
     `has(image.config) && !('org.opencontainers.image.source' in image.config.labels)`
 *   Block images older than 90 days:
     `has(image.metadata) && now() - image.metadata.created > duration('2160h')`
+*   Validate base image from OCI annotations (no network required):
+    `has(image.base_image) && !image.base_image.name.contains("distroless") && !image.base_image.name.contains("alpine")`
+*   Require base image annotations for supply chain traceability:
+    `!has(image.base_image) || image.base_image.name == ""`
 
 ---
 
@@ -1353,7 +1416,7 @@ policies:
     rules:
       - action: deny
         when: |
-          vulnerability.inKEV == true &&
+          vulnerability.in_kev == true &&
           ssvc(vulnerability).decision in ["act", "attend"]
         reason: "KEV vulnerability with high SSVC priority"
 ```
@@ -1401,45 +1464,32 @@ Convenient accessors for node fields, composable with `filter`/`map`:
 
 These work with vulnerability objects in `scan_vulnerability` and `scan_report` entrypoints:
 
-| Function | Signature | Description |
-|----------|-----------|-------------|
-| `vulnerabilitySeverity()` | `vulnerabilitySeverity(vulnerability) string` | Get severity level (CRITICAL, HIGH, MEDIUM, LOW) |
-| `vulnerabilityId()` | `vulnerabilityId(vulnerability) string` | Get advisory ID (CVE-xxx, GHSA-xxx) |
-| `hasFix()` | `hasFix(vulnerability) bool` | Check if vulnerability has a known fix |
-| `inKEV()` | `inKEV(vulnerability) bool` | Check if vulnerability is in CISA's KEV catalog |
-| `epssScore()` | `epssScore(vulnerability) double` | Get EPSS score (0.0-1.0), returns 0 if unavailable |
-| `severityAtLeast()` | `severityAtLeast(vulnerability, level) bool` | Check if severity is at or above the specified level. Order: CRITICAL > HIGH > MEDIUM > LOW |
-| `isCritical()` | `isCritical(vulnerability) bool` | Shorthand for `severityAtLeast(vuln, "CRITICAL")` |
-| `isHighOrAbove()` | `isHighOrAbove(vulnerability) bool` | Shorthand for `severityAtLeast(vuln, "HIGH")`. Returns true for HIGH or CRITICAL |
+**Canonical proto severity access with constants:**
 
-**Constants for Policy Authoring:**
-
-Deputy provides constant objects for cleaner policy expressions:
-
-| Constant | Values | Description |
-|----------|--------|-------------|
-| `severity.*` | `CRITICAL`, `HIGH`, `MEDIUM`, `LOW`, `UNSPECIFIED` | Severity level constants |
-| `scope.*` | `RUNTIME`, `DEV`, `TEST`, `BUILD`, `OPTIONAL`, `UNSPECIFIED` | Dependency scope constants |
-
-**Example using constants:**
 ```yaml
-# Instead of: vulnerability.severity == "CRITICAL"
-# Write:      vulnerability.severity == severity.CRITICAL
+# Use canonical proto path with severity constants
 rules:
   - action: deny
-    when: vulnerability.severity == severity.CRITICAL
+    when: vulnerability.advisory.severity.level == severity.critical
     reason: "Critical vulnerability found"
 
-# Using severity comparison helpers
   - action: deny
-    when: isHighOrAbove(vulnerability)
+    when: vulnerability.advisory.severity.level in [severity.critical, severity.high]
     reason: "High or critical severity"
 
-# Filter with severityAtLeast
+# Filter in report-level policies
   - action: deny
-    when: vulnerabilities.exists(v, severityAtLeast(v, severity.HIGH))
+    when: vulnerabilities.exists(v, v.advisory.severity.level in [severity.critical, severity.high])
     reason: "High severity or above found"
 ```
+
+**Accessor helpers (for complex field access):**
+
+| Function | Signature | Description |
+|----------|-----------|-------------|
+| `hasFix()` | `hasFix(vulnerability) bool` | Check if `vulnerability.advisory.fixed_versions` is non-empty |
+| `inKEV()` | `inKEV(vulnerability) bool` | Check if `vulnerability.in_kev` is true |
+| `epssScore()` | `epssScore(vulnerability) double` | Get `vulnerability.epss` or 0 if unavailable |
 
 <a id="graph-policy-variables"></a>
 **Graph Policy Variables:**
@@ -1658,7 +1708,7 @@ policies:
       - action: deny
         when: |
           jwt.anonymous &&
-          vulnerabilities.orValue([]).exists(v, v.severity == "CRITICAL")
+          vulnerabilities.exists(v, v.advisory.severity.level == severity.critical)
         reason: "Authenticate to download packages with critical vulnerabilities"
 ```
 
@@ -1919,6 +1969,94 @@ See [`policy/examples/service-oidc-federation.yaml`](policy/examples/service-oid
 | [`internal/policy/entrypoints.go`](internal/policy/entrypoints.go) | Service entrypoint definitions |
 | [`internal/policy/bindings.go`](internal/policy/bindings.go) | Variable bindings for service entrypoints |
 
+## Configuration
+
+Deputy supports configuration from multiple sources with clear precedence:
+
+**Precedence (highest to lowest):**
+1. CLI flags (e.g., `--addr :9000`)
+2. Environment variables (e.g., `DEPUTY_SERVER_ADDR=:9000`)
+3. Config file (`.deputy.yaml`)
+4. Built-in defaults
+
+### Config File Locations
+
+Deputy searches for config files in this order:
+1. `DEPUTY_CONFIG` environment variable (explicit path)
+2. Current directory: `.deputy.yaml`, `.deputy.yml`, `deputy.yaml`, `deputy.yml`
+3. Home directory: `~/.deputy.yaml`, etc.
+
+### Server Configuration Example
+
+```yaml
+# .deputy.yaml
+server:
+  addr: ":8090"
+  read_timeout: 30s
+  write_timeout: 5m
+  idle_timeout: 2m
+  max_request_body_bytes: 10485760  # 10MB
+
+  tls:
+    cert_file: "/path/to/cert.pem"
+    key_file: "/path/to/key.pem"
+    client_ca_file: "/path/to/ca.pem"  # enables mTLS
+
+  cors:
+    allowed_origins: ["https://app.example.com"]
+    allowed_methods: ["GET", "POST", "OPTIONS"]
+    allowed_headers: ["Content-Type", "Authorization"]
+    allow_credentials: true
+    max_age: 3600
+
+  auth:
+    enabled: true
+    jwks_url: "https://auth.example.com/.well-known/jwks.json"
+    issuers: ["https://auth.example.com"]
+    audiences: ["deputy-server"]
+
+  rate_limit:
+    enabled: true
+    requests_per_second: 10
+    burst: 20
+
+# Policy paths applied to server authorization
+policy:
+  paths: ["policies/server-authz.yaml"]
+  mode: "enforce"
+
+# Logging
+logging:
+  level: "info"
+  format: "json"
+```
+
+### Overriding Config with Flags
+
+CLI flags always take precedence. For example:
+
+```bash
+# Config file says addr: ":8090", but flag overrides to :9000
+deputy server --addr :9000
+
+# Config file enables auth, but flag disables it
+deputy server --auth-mode disabled
+```
+
+### Overriding Config with Environment Variables
+
+Environment variables override config file values:
+
+```bash
+# Override server address
+DEPUTY_SERVER_ADDR=:9000 deputy server
+
+# Enable TLS via env vars
+DEPUTY_SERVER_TLS_CERT=/path/to/cert.pem \
+DEPUTY_SERVER_TLS_KEY=/path/to/key.pem \
+deputy server
+```
+
 ## Environment Variables
 
 | Variable | Purpose |
@@ -1936,6 +2074,15 @@ See [`policy/examples/service-oidc-federation.yaml`](policy/examples/service-oid
 | `DEPUTY_PROXY_IMAGE_CACHE_TTL` | TTL for proxy image scan cache (default: 30m) |
 | `DEPUTY_PROXY_IMAGE_CACHE_SIZE` | Max items in proxy image scan cache (default: 1024) |
 | `DEPUTY_CACHE_DIR` | Override cache directory for KEV/EPSS data (default: `~/.deputy/cache`) |
+| `DEPUTY_AUTH_TOKEN` | Bearer token for authenticating with remote Deputy servers ([`internal/cli/cmd/register.go`](internal/cli/cmd/register.go)) |
+| `DEPUTY_SERVER_ADDR` | Server listen address (default: `:8090`) ([`internal/config/config.go`](internal/config/config.go)) |
+| `DEPUTY_SERVER_TLS_CERT` | Path to TLS certificate file for server |
+| `DEPUTY_SERVER_TLS_KEY` | Path to TLS private key file for server |
+| `DEPUTY_SERVER_AUTH_ENABLED` | Enable JWT authentication on server (`true`/`false`) |
+| `DEPUTY_SERVER_AUTH_JWKS_URL` | JWKS endpoint URL for JWT validation |
+| `DEPUTY_SERVER_CORS_ORIGINS` | Comma-separated allowed CORS origins |
+| `DEPUTY_SERVER_RATE_LIMIT_ENABLED` | Enable rate limiting (`true`/`false`) |
+| `DEPUTY_SERVER_RATE_LIMIT_RPS` | Requests per second limit (default: 10) |
 
 ## Exit Codes
 

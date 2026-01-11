@@ -2,6 +2,9 @@
 #
 # Policies for controlling what anonymous (unauthenticated) users can access.
 # Use with auth.mode: "optional" to allow both authenticated and anonymous access.
+#
+# Severity constants: severity.critical, severity.high, severity.medium, severity.low
+# Access via: vulnerability.advisory.severity.level (for vulnerability contexts)
 
 policies:
   - name: jwt-block-anonymous-critical
@@ -11,7 +14,7 @@ policies:
       - action: deny
         when: |
           jwt.anonymous &&
-          vulnerabilities.orValue([]).exists(v, v.severity == "CRITICAL")
+          vulnerabilities.orValue([]).exists(v, v.advisory.severity.level == severity.critical)
         reason: "Anonymous users cannot download packages with critical vulnerabilities"
         remediation: "Authenticate with a valid token to download this package"
 

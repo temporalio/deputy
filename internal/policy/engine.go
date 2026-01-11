@@ -10,6 +10,8 @@ import (
 
 	"github.com/google/cel-go/cel"
 	"github.com/google/cel-go/common/types/ref"
+	dependencyv1 "github.com/picatz/deputy/gen/deputy/dependency/v1"
+	policyv1 "github.com/picatz/deputy/gen/deputy/policy/v1"
 	"github.com/picatz/deputy/internal/collections"
 	"github.com/picatz/deputy/internal/otel"
 )
@@ -204,6 +206,9 @@ func shouldSkip(pol compiledPolicy, command, entrypoint string) bool {
 // seedDefaultVariables ensures that standard variables expected by policies
 // are present in the input map. It populates missing variables with nil or
 // default values to prevent runtime errors during CEL evaluation.
+//
+// Proto-first design: Callers should pass proto messages directly in the input map.
+// CEL's native proto support provides type-safe field access.
 func seedDefaultVariables(input map[string]any) {
 	if input == nil {
 		return
@@ -213,20 +218,164 @@ func seedDefaultVariables(input map[string]any) {
 			input[name] = nil
 		}
 	}
-	if target := buildTargetHelper(input); target != nil {
-		input["target"] = target
-	}
-	if image := buildImageHelper(input); image != nil {
-		input["image"] = image
-	}
-	if val, ok := input["pkg"]; !ok || val == nil {
-		if pkg := buildPkgHelper(input); pkg != nil {
-			input["pkg"] = pkg
-		}
-	}
 	// Inject constant objects for cleaner policy authoring
 	input["severity"] = severityConstants
 	input["scope"] = scopeConstants
+
+	// Synthesize pkg from component or request for backward compatibility with policies
+	// that use pkg.name, pkg.version, pkg.ecosystem, pkg.licenses, etc.
+	if input["pkg"] == nil {
+		input["pkg"] = buildPkgFromInput(input)
+	}
+
+	// Synthesize image from image_info and request for backward compatibility with policies
+	// that use image.config, image.metadata, image.history, etc.
+	if input["image"] == nil {
+		if img := buildImageFromInput(input); len(img) > 0 {
+			input["image"] = img
+		}
+	}
+}
+
+// buildPkgFromInput synthesizes a Package proto from component or request.
+// This provides backward compatibility for policies using pkg.licenses, pkg.name, etc.
+func buildPkgFromInput(input map[string]any) *dependencyv1.Package {
+	// Default empty package - CEL will see zero values for all fields
+	pkg := &dependencyv1.Package{}
+
+	// Try component first (sbom, diff entrypoints)
+	if comp := input["component"]; comp != nil {
+		if p, ok := comp.(*dependencyv1.Package); ok {
+			return p
+		}
+		// Handle map[string]any from legacy callers
+		if m, ok := comp.(map[string]any); ok {
+			extractPackageFields(pkg, m)
+			return pkg
+		}
+	}
+
+	// Try request (proxy entrypoints)
+	if req := input["request"]; req != nil {
+		// Handle proto ProxyRequest directly
+		if pr, ok := req.(*policyv1.ProxyRequest); ok {
+			pkg.Name = pr.Package
+			if pkg.Name == "" {
+				pkg.Name = pr.Module
+			}
+			pkg.Version = pr.Version
+			pkg.Ecosystem = pr.Ecosystem
+			return pkg
+		}
+		// Handle map[string]any from legacy callers
+		if m, ok := req.(map[string]any); ok {
+			extractPackageFields(pkg, m)
+			return pkg
+		}
+	}
+
+	return pkg
+}
+
+// extractPackageFields populates a Package proto from a map[string]any.
+func extractPackageFields(pkg *dependencyv1.Package, m map[string]any) {
+	// Try various keys for the package name
+	if name, ok := m["package"].(string); ok && name != "" {
+		pkg.Name = name
+	} else if name, ok := m["module"].(string); ok && name != "" {
+		pkg.Name = name
+	} else if name, ok := m["name"].(string); ok && name != "" {
+		pkg.Name = name
+	}
+
+	if ver, ok := m["version"].(string); ok {
+		pkg.Version = ver
+	}
+	if eco, ok := m["ecosystem"].(string); ok {
+		pkg.Ecosystem = eco
+	}
+
+	// Handle licenses - can be []string or []any
+	switch lic := m["licenses"].(type) {
+	case []string:
+		pkg.Licenses = lic
+	case []any:
+		for _, l := range lic {
+			if s, ok := l.(string); ok {
+				pkg.Licenses = append(pkg.Licenses, s)
+			}
+		}
+	}
+}
+
+// buildImageFromInput synthesizes an image map from image_info, request, and target.
+// This provides backward compatibility for policies using image.config, image.metadata, etc.
+func buildImageFromInput(input map[string]any) map[string]any {
+	// Start with empty image structure
+	image := map[string]any{}
+
+	// Extract provenance from request if available
+	if req, ok := input["request"].(map[string]any); ok {
+		copyImageFields(image, req)
+	}
+
+	// Also check target.provenance for scan contexts
+	if target, ok := input["target"].(map[string]any); ok {
+		if prov, ok := target["provenance"].(map[string]any); ok {
+			copyImageFields(image, prov)
+		}
+	}
+
+	// Copy config, metadata, and history from image_info
+	if info, ok := input["image_info"].(map[string]any); ok {
+		if config, ok := info["config"]; ok {
+			image["config"] = config
+		}
+		if meta, ok := info["metadata"]; ok {
+			image["metadata"] = meta
+		}
+		if hist, ok := info["history"]; ok {
+			image["history"] = hist
+		}
+	}
+
+	// Compute reference field (digest takes precedence over tag)
+	if digest, ok := image["digest"].(string); ok && digest != "" {
+		image["reference"] = digest
+	} else if tag, ok := image["tag"].(string); ok && tag != "" {
+		image["reference"] = tag
+	}
+
+	// Compute composite image field (registry/repository:tag or @digest)
+	if reg, ok := image["registry"].(string); ok {
+		if repo, ok := image["repository"].(string); ok {
+			composite := reg + "/" + repo
+			if digest, ok := image["digest"].(string); ok && digest != "" {
+				composite += "@" + digest
+			} else if tag, ok := image["tag"].(string); ok && tag != "" {
+				composite += ":" + tag
+			}
+			image["image"] = composite
+		}
+	}
+
+	return image
+}
+
+// copyImageFields copies registry, repository, tag, digest from src to dst.
+func copyImageFields(dst, src map[string]any) {
+	if reg, ok := src["registry"].(string); ok {
+		dst["registry"] = reg
+	}
+	if repo, ok := src["repository"].(string); ok {
+		dst["repository"] = repo
+	}
+	if tag, ok := src["tag"].(string); ok {
+		dst["tag"] = tag
+	}
+	if digest, ok := src["digest"].(string); ok {
+		dst["digest"] = digest
+	}
 }
 
 // downgradeAdvisory converts "deny" actions to "warn" actions for policies

@@ -10,6 +10,11 @@ import (
 	"time"
 )
 
+// REMOVED: StructToMap and normalizeMapKeys
+// Proto-first design: pass proto messages directly to CEL evaluation.
+// CEL's native proto support provides type-safe field access with
+// snake_case naming from proto definitions.
+
 const bundleSchemaVersion = "policy.deputy.sh/v1alpha1"
 
 // Source represents an individual CEL policy ready for evaluation.
@@ -110,44 +115,6 @@ func BuildBundle(paths []string) (*Bundle, error) {
 		Generated:     time.Now().UTC().Format(time.RFC3339),
 		Policies:      policies,
 	}, nil
-}
-
-// StructToMap marshals any Go struct into a generic map for CEL inputs.
-func StructToMap(v any) (map[string]any, error) {
-	data, err := json.Marshal(v)
-	if err != nil {
-		return nil, err
-	}
-	var out map[string]any
-	if err := json.Unmarshal(data, &out); err != nil {
-		return nil, err
-	}
-	normalizeMapKeys(out)
-	return out, nil
-}
-
-// normalizeMapKeys adds lowercased duplicates of top-level keys (recursively) to
-// improve CEL ergonomics without breaking existing fields.
-func normalizeMapKeys(m map[string]any) {
-	for k, v := range m {
-		// Recurse into nested maps and slices
-		switch t := v.(type) {
-		case map[string]any:
-			normalizeMapKeys(t)
-		case []any:
-			for _, elem := range t {
-				if em, ok := elem.(map[string]any); ok {
-					normalizeMapKeys(em)
-				}
-			}
-		}
-		lower := strings.ToLower(k)
-		if lower != k {
-			if _, exists := m[lower]; !exists {
-				m[lower] = v
-			}
-		}
-	}
 }
 
 func tryParseBundle(data []byte) (*Bundle, bool) {

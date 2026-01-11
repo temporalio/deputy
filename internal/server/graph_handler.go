@@ -93,9 +93,39 @@ func (h *GraphHandler) BuildGraph(
 		defer exec.Close()
 	}
 
-	// Build graph from inventory
-	g := graph.FromInventory(exec.Result.Packages, exec.Result.Direct)
-	g.UpdateDepths()
+	// Build graph with edge resolution
+	builderOpts := graph.BuilderOptions{}
+	if req.Msg.Options != nil {
+		builderOpts.UseProxy = req.Msg.Options.UseProxy
+		builderOpts.UseGit = req.Msg.Options.UseGit
+	}
+	builder := graph.NewBuilder(builderOpts)
+
+	// Use workspace for edge resolution if available
+	var g *graph.Graph
+	if exec.Workspace != nil {
+		g, err = builder.BuildFromWorkspace(ctx, exec.Result.Packages, exec.Result.Direct, nil, nil, exec.Workspace)
+	} else {
+		// Fallback to basic graph without edge resolution
+		g = graph.FromInventory(exec.Result.Packages, exec.Result.Direct)
+		g.UpdateDepths()
+	}
+	if err != nil {
+		otel.SetSpanError(span, err)
+		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to build graph: %w", err))
+	}
+
+	// Extended mode: add declared-only dependencies from full module graph
+	if req.Msg.Options != nil && req.Msg.Options.Extended {
+		// Only works for local directories with Go modules currently
+		if exec.Workspace != nil && targets.DetectKind(target) == targets.KindDir {
+			extResult, extErr := graph.AnalyzeExtendedGraph(ctx, target)
+			if extErr == nil && extResult != nil {
+				graph.MergeExtendedIntoGraph(g, extResult)
+			}
+			// Non-fatal: if extended analysis fails, we still return the standard graph
+		}
+	}
 
 	// Record graph stats on span
 	span.SetAttributes(otel.AttrPackageCount.Int(len(g.GetNodesSlice())))
@@ -194,9 +224,27 @@ func (h *GraphHandler) WhyDependency(
 		defer exec.Close()
 	}
 
-	// Build graph from inventory
-	g := graph.FromInventory(exec.Result.Packages, exec.Result.Direct)
-	g.UpdateDepths()
+	// Build graph with edge resolution
+	builderOpts := graph.BuilderOptions{}
+	if req.Msg.Options != nil {
+		builderOpts.UseProxy = req.Msg.Options.UseProxy
+		builderOpts.UseGit = req.Msg.Options.UseGit
+	}
+	builder := graph.NewBuilder(builderOpts)
+
+	// Use workspace for edge resolution if available
+	var g *graph.Graph
+	if exec.Workspace != nil {
+		g, err = builder.BuildFromWorkspace(ctx, exec.Result.Packages, exec.Result.Direct, nil, nil, exec.Workspace)
+	} else {
+		// Fallback to basic graph without edge resolution
+		g = graph.FromInventory(exec.Result.Packages, exec.Result.Direct)
+		g.UpdateDepths()
+	}
+	if err != nil {
+		otel.SetSpanError(span, err)
+		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to build graph: %w", err))
+	}
 
 	// Find the dependency node
 	var targetNode *graph.Node

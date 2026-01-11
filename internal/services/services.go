@@ -7,7 +7,9 @@ import (
 
 	"github.com/picatz/deputy/gen/deputy/diff/v1/diffv1connect"
 	"github.com/picatz/deputy/gen/deputy/graph/v1/graphv1connect"
+	"github.com/picatz/deputy/gen/deputy/inventory/v1/inventoryv1connect"
 	"github.com/picatz/deputy/gen/deputy/list/v1/listv1connect"
+	"github.com/picatz/deputy/gen/deputy/policy/v1/policyv1connect"
 	"github.com/picatz/deputy/gen/deputy/remediation/v1/remediationv1connect"
 	"github.com/picatz/deputy/gen/deputy/sbom/v1/sbomv1connect"
 	"github.com/picatz/deputy/gen/deputy/scan/v1/scanv1connect"
@@ -25,12 +27,14 @@ import (
 type Services struct {
 	Scan          scanv1connect.ScanServiceHandler
 	List          listv1connect.ListServiceHandler
+	Inventory     inventoryv1connect.InventoryServiceHandler
 	SBOM          sbomv1connect.SBOMServiceHandler
 	Secrets       secretsv1connect.SecretsServiceHandler
 	Diff          diffv1connect.DiffServiceHandler
 	Graph         graphv1connect.GraphServiceHandler
 	Remediation   remediationv1connect.RemediationServiceHandler
 	Vulnerability vulnerabilityv1connect.VulnerabilityServiceHandler
+	Policy        policyv1connect.PolicyServiceHandler
 }
 
 // Config configures service creation.
@@ -71,12 +75,14 @@ func NewWithConfig(cfg Config) (*Services, error) {
 		return &Services{
 			Scan:          server.NewScanHandler(server.WithLocalMode()),
 			List:          server.NewListHandler(server.WithListLocalMode()),
+			Inventory:     server.NewInventoryHandler(server.WithInventoryLocalMode()),
 			SBOM:          server.NewSBOMHandler(server.WithSBOMLocalMode()),
 			Secrets:       secretsHandler,
 			Diff:          server.NewDiffHandler(server.WithDiffLocalMode()),
 			Graph:         server.NewGraphHandler(server.WithGraphLocalMode()),
 			Remediation:   server.NewRemediationHandler(),
 			Vulnerability: vulnHandler,
+			Policy:        server.NewPolicyHandler(server.WithPolicyLocalMode()),
 		}, nil
 	}
 
@@ -89,12 +95,14 @@ func NewWithConfig(cfg Config) (*Services, error) {
 	return &Services{
 		Scan:          server.NewScanHandler(),
 		List:          server.NewListHandler(),
+		Inventory:     server.NewInventoryHandler(),
 		SBOM:          server.NewSBOMHandler(),
 		Secrets:       secretsHandler,
 		Diff:          server.NewDiffHandler(),
 		Graph:         server.NewGraphHandler(),
 		Remediation:   server.NewRemediationHandler(),
 		Vulnerability: vulnHandler,
+		Policy:        server.NewPolicyHandler(),
 	}, nil
 }
 
@@ -108,6 +116,10 @@ func (s *Services) RegisterHandlers(mux *http.ServeMux, opts ...connect.HandlerO
 	paths = append(paths, path)
 
 	path, handler = listv1connect.NewListServiceHandler(s.List, opts...)
+	mux.Handle(path, handler)
+	paths = append(paths, path)
+
+	path, handler = inventoryv1connect.NewInventoryServiceHandler(s.Inventory, opts...)
 	mux.Handle(path, handler)
 	paths = append(paths, path)
 
@@ -135,6 +147,10 @@ func (s *Services) RegisterHandlers(mux *http.ServeMux, opts ...connect.HandlerO
 	mux.Handle(path, handler)
 	paths = append(paths, path)
 
+	path, handler = policyv1connect.NewPolicyServiceHandler(s.Policy, opts...)
+	mux.Handle(path, handler)
+	paths = append(paths, path)
+
 	return paths
 }
 
@@ -143,17 +159,19 @@ func (s *Services) RegisterHandlers(mux *http.ServeMux, opts ...connect.HandlerO
 //
 // Field names are chosen to minimize "type stuttering" in calls:
 //   - c.Vulns.Scan() instead of c.Scan.Scan()
-//   - c.Inventory.ListPackages() instead of c.List.ListPackages()
+//   - c.Packages.ListPackages() instead of c.List.ListPackages()
 //   - c.Advisory.GetAdvisory() instead of c.Vulnerability.GetAdvisory()
 type Clients struct {
-	Vulns       scanv1connect.ScanServiceClient                  // Vulnerability scanning
-	Inventory   listv1connect.ListServiceClient                  // Package enumeration
-	SBOM        sbomv1connect.SBOMServiceClient                  // SBOM generation
-	Secrets     secretsv1connect.SecretsServiceClient            // Secret detection
-	Diff        diffv1connect.DiffServiceClient                  // Diff comparisons
-	Graph       graphv1connect.GraphServiceClient                // Dependency graphs
-	Remediation remediationv1connect.RemediationServiceClient    // Remediation planning
+	Vulns       scanv1connect.ScanServiceClient                   // Vulnerability scanning
+	Packages    listv1connect.ListServiceClient                   // Package enumeration (ListService)
+	Inventory   inventoryv1connect.InventoryServiceClient         // Inventory extraction with plugin support
+	SBOM        sbomv1connect.SBOMServiceClient                   // SBOM generation
+	Secrets     secretsv1connect.SecretsServiceClient             // Secret detection
+	Diff        diffv1connect.DiffServiceClient                   // Diff comparisons
+	Graph       graphv1connect.GraphServiceClient                 // Dependency graphs
+	Remediation remediationv1connect.RemediationServiceClient     // Remediation planning
 	Advisory    vulnerabilityv1connect.VulnerabilityServiceClient // Advisory lookup
+	Policy      policyv1connect.PolicyServiceClient               // Policy evaluation
 }
 
 // InProcessClients creates clients that call handlers directly without network overhead.
@@ -172,13 +190,15 @@ func (s *Services) InProcessClients(opts ...connect.ClientOption) *Clients {
 
 	return &Clients{
 		Vulns:       scanv1connect.NewScanServiceClient(httpClient, baseURL, opts...),
-		Inventory:   listv1connect.NewListServiceClient(httpClient, baseURL, opts...),
+		Packages:    listv1connect.NewListServiceClient(httpClient, baseURL, opts...),
+		Inventory:   inventoryv1connect.NewInventoryServiceClient(httpClient, baseURL, opts...),
 		SBOM:        sbomv1connect.NewSBOMServiceClient(httpClient, baseURL, opts...),
 		Secrets:     secretsv1connect.NewSecretsServiceClient(httpClient, baseURL, opts...),
 		Diff:        diffv1connect.NewDiffServiceClient(httpClient, baseURL, opts...),
 		Graph:       graphv1connect.NewGraphServiceClient(httpClient, baseURL, opts...),
 		Remediation: remediationv1connect.NewRemediationServiceClient(httpClient, baseURL, opts...),
 		Advisory:    vulnerabilityv1connect.NewVulnerabilityServiceClient(httpClient, baseURL, opts...),
+		Policy:      policyv1connect.NewPolicyServiceClient(httpClient, baseURL, opts...),
 	}
 }
 
@@ -186,13 +206,15 @@ func (s *Services) InProcessClients(opts ...connect.ClientOption) *Clients {
 func RemoteClients(httpClient connect.HTTPClient, baseURL string, opts ...connect.ClientOption) *Clients {
 	return &Clients{
 		Vulns:       scanv1connect.NewScanServiceClient(httpClient, baseURL, opts...),
-		Inventory:   listv1connect.NewListServiceClient(httpClient, baseURL, opts...),
+		Packages:    listv1connect.NewListServiceClient(httpClient, baseURL, opts...),
+		Inventory:   inventoryv1connect.NewInventoryServiceClient(httpClient, baseURL, opts...),
 		SBOM:        sbomv1connect.NewSBOMServiceClient(httpClient, baseURL, opts...),
 		Secrets:     secretsv1connect.NewSecretsServiceClient(httpClient, baseURL, opts...),
 		Diff:        diffv1connect.NewDiffServiceClient(httpClient, baseURL, opts...),
 		Graph:       graphv1connect.NewGraphServiceClient(httpClient, baseURL, opts...),
 		Remediation: remediationv1connect.NewRemediationServiceClient(httpClient, baseURL, opts...),
 		Advisory:    vulnerabilityv1connect.NewVulnerabilityServiceClient(httpClient, baseURL, opts...),
+		Policy:      policyv1connect.NewPolicyServiceClient(httpClient, baseURL, opts...),
 	}
 }
 

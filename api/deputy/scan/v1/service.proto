@@ -105,6 +105,12 @@ message ScanOptions {
   //   - "github.com/owner/repo" -> git repository
   // Use TargetHint only when auto-detection fails or is ambiguous.
   TargetHint target_hint = 10;
+
+  // DetectBaseImage enables base image detection for container image scans.
+  // When enabled, queries deps.dev to determine if layers belong to known base images,
+  // populating layer_details.in_base_image in the response packages.
+  // Only applies to container image targets. Requires network access and adds latency.
+  bool detect_base_image = 11;
 }
 
 // TargetHint disambiguates the target type when auto-detection is insufficient.

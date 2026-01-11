@@ -95,7 +95,7 @@ func (h *ociHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	payload := h.buildPayload(r.Context(), info, r.URL.Path)
 	if info.Operation == ociOperationManifest && info.Repository != "" && info.Reference != "" {
 		result, scanErr := h.scanImageForPolicy(r.Context(), info)
-		if len(result.Vulnerabilities) > 0 {
+		if result.Vulnerabilities != nil {
 			payload["vulnerabilities"] = result.Vulnerabilities
 		}
 		if target, ok := payload["target"].(map[string]any); ok {
@@ -311,7 +311,8 @@ func buildOCITarget(info ociRequestInfo, registry, imageName string) map[string]
 
 // scanResult contains the data returned from scanImageForPolicy.
 type scanResult struct {
-	Vulnerabilities []map[string]any
+	// Vulnerabilities holds proto Finding messages for policy evaluation.
+	Vulnerabilities any
 	ImageInfo       map[string]any
 	Cached          bool
 	Digest          string
@@ -403,7 +404,7 @@ func (h *ociHandler) scanImageForPolicy(ctx context.Context, info ociRequestInfo
 	defer exec.Close()
 
 	vulns := report.FlattenScanningResult(exec.Result)
-	vulnMaps := scanVulnerabilitiesToMaps(vulns)
+	findings := scanVulnerabilitiesToFindings(vulns)
 
 	// Extract ImageInfo for policy evaluation (config, metadata, history)
 	var imageInfoMap map[string]any
@@ -413,13 +414,13 @@ func (h *ociHandler) scanImageForPolicy(ctx context.Context, info ociRequestInfo
 
 	if cacheKey != "" {
 		h.imageCache.Set(cacheKey, ImageScanResult{
-			Vulnerabilities: vulnMaps,
+			Vulnerabilities: findings,
 			ImageInfo:       imageInfoMap,
 		})
 	}
-	RecordImageScanSuccess(ctx, span, target, len(vulnMaps), false)
+	RecordImageScanSuccess(ctx, span, target, len(vulns), false)
 	return scanResult{
-		Vulnerabilities: vulnMaps,
+		Vulnerabilities: findings,
 		ImageInfo:       imageInfoMap,
 		Cached:          false,
 		Digest:          digest,
@@ -470,19 +471,13 @@ func resolveRemoteDigest(ctx context.Context, ref name.Reference) (string, error
 	return desc.Digest.String(), nil
 }
 
-func scanVulnerabilitiesToMaps(vulns []report.Vulnerability) []map[string]any {
-	if len(vulns) == 0 {
+// scanVulnerabilitiesToFindings converts scan vulnerabilities to proto Finding messages.
+func scanVulnerabilitiesToFindings(vulns []report.Vulnerability) any {
+	findings := report.VulnerabilitiesToFindings(vulns)
+	if len(findings) == 0 {
 		return nil
 	}
-	out := make([]map[string]any, 0, len(vulns))
-	for _, v := range vulns {
-		m, err := policy.StructToMap(v)
-		if err != nil {
-			continue
-		}
-		out = append(out, m)
-	}
-	return out
+	return findings
 }
 
 // defaultImageScanner implements imageScanner using the scanning package.

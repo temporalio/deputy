@@ -2,11 +2,13 @@ package cmd
 
 import (
 	"bytes"
-	"encoding/json"
 	"os"
 	"path/filepath"
 	"testing"
 
+	"google.golang.org/protobuf/encoding/protojson"
+
+	sbomv1 "github.com/picatz/deputy/gen/deputy/sbom/v1"
 	sbomx "github.com/picatz/deputy/internal/sbom"
 	"github.com/picatz/deputy/internal/sbom/diff"
 )
@@ -129,8 +131,8 @@ func TestOutputDiffJSON(t *testing.T) {
 		t.Fatalf("outputDiffJSON: %v", err)
 	}
 
-	var parsed JSONOutput
-	if err := json.Unmarshal(buf.Bytes(), &parsed); err != nil {
+	var parsed sbomv1.DiffResponse
+	if err := protojson.Unmarshal(buf.Bytes(), &parsed); err != nil {
 		t.Fatalf("failed to parse JSON output: %v", err)
 	}
 

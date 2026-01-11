@@ -88,19 +88,28 @@ var helperFunctions = []HelperFunction{
 	// Edge Functions
 	{Name: "edgeScope", Signature: "edgeScope(edge) string", Doc: "Get scope of an edge (runtime, dev, test, build, optional)."},
 
-	// Vulnerability Helper Functions
-	// These work with vulnerability objects in scan_vulnerability and scan_report entrypoints.
-	{Name: "vulnerabilitySeverity", Signature: "vulnerabilitySeverity(vulnerability) string", Doc: "Get severity level (CRITICAL, HIGH, MEDIUM, LOW)."},
-	{Name: "vulnerabilityId", Signature: "vulnerabilityId(vulnerability) string", Doc: "Get advisory ID (CVE-xxx, GHSA-xxx)."},
-	{Name: "hasFix", Signature: "hasFix(vulnerability) bool", Doc: "Check if vulnerability has a known fix."},
-	{Name: "inKEV", Signature: "inKEV(vulnerability) bool", Doc: "Check if vulnerability is in CISA's KEV catalog."},
-	{Name: "epssScore", Signature: "epssScore(vulnerability) double", Doc: "Get EPSS score (0.0-1.0), returns 0 if unavailable."},
-
 	// Severity Comparison Functions
-	// These simplify severity-based filtering in policies.
-	{Name: "severityAtLeast", Signature: "severityAtLeast(vulnerability, level) bool", Doc: "Check if severity is at or above the specified level. Order: CRITICAL > HIGH > MEDIUM > LOW."},
-	{Name: "isCritical", Signature: "isCritical(vulnerability) bool", Doc: "Shorthand for severityAtLeast(vuln, \"CRITICAL\")."},
-	{Name: "isHighOrAbove", Signature: "isHighOrAbove(vulnerability) bool", Doc: "Shorthand for severityAtLeast(vuln, \"HIGH\"). Returns true for HIGH or CRITICAL."},
+	// Note: For simple field access, use proto fields directly:
+	//   vulnerability.advisory_id, vulnerability.in_kev, vulnerability.epss,
+	//   vulnerability.advisory.fixed_versions, vulnerability.advisory.severity.level
+	// These helpers provide ordered severity comparisons that CEL can't do natively.
+	// Both global function and method syntax are supported:
+	//   severityAtLeast(vulnerability, "HIGH")  // global function
+	//   vulnerability.severityAtLeast("HIGH")   // method syntax
+	{Name: "severityAtLeast", Signature: "severityAtLeast(v, level) / v.severityAtLeast(level)", Doc: "Check if severity >= level. Both syntaxes supported. Order: CRITICAL > HIGH > MEDIUM > LOW."},
+	{Name: "isCritical", Signature: "isCritical(v) / v.isCritical()", Doc: "Check if CRITICAL severity. Both global and method syntax supported."},
+	{Name: "isHighOrAbove", Signature: "isHighOrAbove(v) / v.isHighOrAbove()", Doc: "Check if HIGH or CRITICAL severity. Both global and method syntax supported."},
+
+	// Import Status Functions (Extended Graph Mode)
+	// These help filter and analyze dependencies by their import status in the module graph.
+	// Import status indicates whether a dependency is:
+	//   IMPORTED - actively used by source code (highest risk if vulnerable)
+	//   REQUIRED - in go.mod but not directly imported (medium risk)
+	//   DECLARED - in full module graph but not selected by MVS (latent risk)
+	{Name: "isImported", Signature: "isImported(node) bool", Doc: "Check if node is actively imported by source code (compiled into binary). Highest security relevance."},
+	{Name: "isRequired", Signature: "isRequired(node) bool", Doc: "Check if node is in go.mod/lockfile but not directly imported. Medium security relevance."},
+	{Name: "isDeclared", Signature: "isDeclared(node) bool", Doc: "Check if node is in full module graph but not selected by MVS. Latent supply chain risk."},
+	{Name: "importStatus", Signature: "importStatus(node) string", Doc: "Get import status of node: 'imported', 'required', 'declared', or 'unknown'."},
 }
 
 // HelperCatalog returns the CEL helper catalog.

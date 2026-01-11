@@ -17,6 +17,7 @@ import (
 	vulnerabilityv1 "github.com/picatz/deputy/gen/deputy/vulnerability/v1"
 	"github.com/picatz/deputy/internal/compare"
 	"github.com/picatz/deputy/internal/dependency"
+	"github.com/picatz/deputy/internal/purlx"
 	"github.com/picatz/deputy/internal/vulnerability"
 )
 
@@ -50,6 +51,18 @@ const (
 	// but no dependency path could be resolved to it.
 	DepthDisconnected int32 = 999
 )
+
+// ecosystemFromPURLType returns an OSV ecosystem name for PURL types that
+// OSV-SCALIBR doesn't handle (returns empty string). This fills gaps for
+// ecosystems like GitHub Actions that Deputy supports but SCALIBR doesn't.
+func ecosystemFromPURLType(purlType string) string {
+	switch purlType {
+	case purlx.TypeGitHubActions:
+		return "GitHub Actions"
+	default:
+		return ""
+	}
+}
 
 // FileReader provides access to files for edge resolution.
 // This abstraction allows resolvers to work with workspaces, git commits, or other sources.
@@ -223,8 +236,14 @@ func FromInventory(pkgs []*extractor.Package, direct map[string]bool) *Graph {
 
 		isDirect := false
 		if direct != nil {
-			// Direct map contains Go module roots (e.g., "github.com/google/osv-scalibr"),
-			// not PURL strings. For Go packages, use the module root for lookup.
+			// For Go packages, check both exact module path and module root.
+			// The direct map may contain:
+			//   - Exact module paths with true (direct) or false (indirect)
+			//   - Module roots with true (for subpackage matching)
+			//
+			// We first check the exact module path, then fall back to module root.
+			// This handles Go submodules correctly: if go.mod has "foo" as direct
+			// but "foo/loader" as indirect, "foo/loader" should be indirect.
 			if purlObj.Type == "golang" {
 				// Reconstruct module path from PURL namespace + name
 				modulePath := pkg.Name
@@ -235,8 +254,14 @@ func FromInventory(pkgs []*extractor.Package, direct map[string]bool) *Graph {
 						modulePath = purlObj.Name
 					}
 				}
-				moduleRoot := compare.GetModuleRoot(modulePath)
-				isDirect = direct[moduleRoot]
+				// First check exact module path (handles submodules correctly)
+				if val, exists := direct[modulePath]; exists {
+					isDirect = val
+				} else {
+					// Fall back to module root for subpackage import paths
+					moduleRoot := compare.GetModuleRoot(modulePath)
+					isDirect = direct[moduleRoot]
+				}
 			} else {
 				// For non-Go ecosystems, use PURL string as key
 				isDirect = direct[purl]
@@ -248,11 +273,18 @@ func FromInventory(pkgs []*extractor.Package, direct map[string]bool) *Graph {
 			depth = 0
 		}
 
+		// Get ecosystem from SCALIBR, falling back to custom mapping for
+		// PURL types SCALIBR doesn't recognize (e.g., GitHub Actions)
+		ecosystem := pkg.Ecosystem()
+		if ecosystem == "" {
+			ecosystem = ecosystemFromPURLType(purlObj.Type)
+		}
+
 		node := &Node{
 			Purl:      purl,
 			Name:      pkg.Name,
 			Version:   pkg.Version,
-			Ecosystem: pkg.Ecosystem(),
+			Ecosystem: ecosystem,
 			Direct:    isDirect,
 			Depth:     depth,
 			Locations: pkg.Locations,
@@ -595,15 +627,32 @@ func (g *Graph) Stats() *graphv1.GraphStats {
 		Ecosystems: make(map[string]int32),
 	}
 
+	// Track import status counts (only populated in extended mode)
+	var hasImportStatus bool
+	importCounts := &graphv1.ImportStatusCounts{}
+
 	for _, n := range g.nodes {
+		depth := n.GetDepth()
+
 		if n.GetDirect() {
 			stats.DirectNodes++
 		} else {
 			stats.TransitiveNodes++
 		}
 
-		if n.GetDepth() > stats.MaxDepth {
-			stats.MaxDepth = n.GetDepth()
+		// Track max depth across all nodes (including disconnected)
+		if depth > stats.MaxDepth {
+			stats.MaxDepth = depth
+		}
+
+		// Track max connected depth (exclude disconnected nodes with depth=999)
+		if depth != DepthDisconnected && depth >= 0 && depth > stats.MaxConnectedDepth {
+			stats.MaxConnectedDepth = depth
+		}
+
+		// Count disconnected nodes
+		if depth == DepthDisconnected {
+			stats.DisconnectedNodes++
 		}
 
 		if n.GetVulnerabilityCount().GetTotal() > 0 {
@@ -613,6 +662,24 @@ func (g *Graph) Stats() *graphv1.GraphStats {
 		if eco := n.GetEcosystem(); eco != "" {
 			stats.Ecosystems[eco]++
 		}
+
+		// Count import statuses (extended mode feature)
+		switch n.GetImportStatus() {
+		case graphv1.ImportStatus_IMPORT_STATUS_IMPORTED:
+			importCounts.Imported++
+			hasImportStatus = true
+		case graphv1.ImportStatus_IMPORT_STATUS_REQUIRED:
+			importCounts.Required++
+			hasImportStatus = true
+		case graphv1.ImportStatus_IMPORT_STATUS_DECLARED:
+			importCounts.Declared++
+			hasImportStatus = true
+		}
+	}
+
+	// Only include import status counts if any nodes have import status set
+	if hasImportStatus {
+		stats.ImportStatusCounts = importCounts
 	}
 
 	return stats

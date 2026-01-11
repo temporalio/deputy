@@ -1,9 +1,14 @@
 package proto
 
 import (
+	"google.golang.org/protobuf/types/known/timestamppb"
+
 	dependencyv1 "github.com/picatz/deputy/gen/deputy/dependency/v1"
 	diffv1 "github.com/picatz/deputy/gen/deputy/diff/v1"
+	targetv1 "github.com/picatz/deputy/gen/deputy/target/v1"
+	vulnerabilityv1 "github.com/picatz/deputy/gen/deputy/vulnerability/v1"
 	"github.com/picatz/deputy/internal/compare"
+	"github.com/picatz/deputy/internal/vulnerability"
 )
 
 // ChangeKindToProto converts internal compare.ChangeType to proto diffv1.ChangeKind.
@@ -121,4 +126,39 @@ func DiffStatsToProto(changes []compare.Change) *diffv1.DiffStats {
 		}
 	}
 	return stats
+}
+
+// GitDiffReportToProto creates a DiffVulnerabilitiesResponse from git diff data.
+// This is used for proto-first JSON output in the diff command.
+func GitDiffReportToProto(
+	repo, baseRef, targetRef string,
+	changes []compare.Change,
+	findings []vulnerability.Finding,
+	advisories map[string]*vulnerabilityv1.Advisory,
+) *diffv1.DiffVulnerabilitiesResponse {
+	resp := &diffv1.DiffVulnerabilitiesResponse{
+		BaseTarget: &targetv1.Target{
+			DisplayPath: baseRef,
+		},
+		TargetTarget: &targetv1.Target{
+			DisplayPath: targetRef,
+		},
+		GeneratedAt: timestamppb.Now(),
+		Advisories:  advisories,
+	}
+
+	// All findings from the diff are considered "added" since we're scanning the target
+	// The actual comparison logic is handled elsewhere
+	protoFindings := make([]*vulnerabilityv1.Finding, 0, len(findings))
+	for _, f := range findings {
+		protoFindings = append(protoFindings, FindingToProto(f, advisories[f.AdvisoryID]))
+	}
+	resp.AddedVulnerabilities = protoFindings
+
+	// Calculate stats
+	resp.Stats = &diffv1.VulnerabilityDiffStats{
+		AddedCount: int32(len(findings)),
+	}
+
+	return resp
 }

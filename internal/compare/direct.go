@@ -86,11 +86,22 @@ func CollectGoDirectModulesFromCommit(repo *git.Repository, hash plumbing.Hash) 
 	return deps, nil
 }
 
-// mergeDirectDependencies adds all direct dependencies from src to dst.
+// mergeDirectDependencies merges dependency information from src to dst.
+// Direct dependencies (true) always override indirect (false).
+// Indirect dependencies (false) are only added if the module isn't already known.
+// This ensures proper handling of Go submodules: if one go.mod has "foo" as
+// direct and another has "foo/loader" as indirect, both are tracked correctly.
 func mergeDirectDependencies(dst, src map[string]bool) {
-	for mod, direct := range src {
-		if direct {
+	for mod, isDirect := range src {
+		if isDirect {
+			// Direct always wins
 			dst[mod] = true
+		} else {
+			// Only add indirect if not already known
+			// (don't override a direct with an indirect)
+			if _, exists := dst[mod]; !exists {
+				dst[mod] = false
+			}
 		}
 	}
 }

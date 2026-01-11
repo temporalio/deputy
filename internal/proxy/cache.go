@@ -8,10 +8,10 @@ import (
 	"strings"
 	"time"
 
+	vulnerabilityv1 "github.com/picatz/deputy/gen/deputy/vulnerability/v1"
 	"github.com/picatz/deputy/internal/analysis/osv"
 	"github.com/picatz/deputy/internal/cache/memory"
 	"github.com/picatz/deputy/internal/license"
-	"github.com/picatz/deputy/internal/policy"
 	"go.opentelemetry.io/otel/trace"
 )
 
@@ -143,7 +143,9 @@ type LicenseCache interface {
 // ImageScanResult stores cached scan data for a container image.
 // This includes vulnerabilities and image configuration/metadata for policy evaluation.
 type ImageScanResult struct {
-	Vulnerabilities []map[string]any
+	// Vulnerabilities holds proto Finding messages for policy evaluation.
+	// Type is any to avoid import cycles; actual type is []*vulnerabilityv1.Finding.
+	Vulnerabilities any
 	// ImageInfo contains extracted configuration, metadata, and build history.
 	// This is nil when ImageInfo could not be extracted from the scan result.
 	ImageInfo map[string]any
@@ -416,11 +418,11 @@ type handlerLookups struct {
 	licenseLookup func(context.Context, string, string) ([]string, error)
 }
 
-// vulnerabilitiesToMaps converts a list of vulnerabilities to a slice of maps
-// suitable for policy evaluation. Returns nil if no vulnerabilities are found or on error.
+// lookupVulnerabilities queries for vulnerabilities and returns proto Finding messages.
+// Returns nil if no vulnerabilities are found or on error.
 //
 // Span enrichment: Records the vulnerability count on the current span.
-func vulnerabilitiesToMaps(ctx context.Context, lookups handlerLookups, ecosystem, name, version string) []map[string]any {
+func lookupVulnerabilities(ctx context.Context, lookups handlerLookups, ecosystem, name, version string) []*vulnerabilityv1.Finding {
 	span := trace.SpanFromContext(ctx)
 	var vulns []osv.Vulnerability
 	var err error
@@ -450,16 +452,8 @@ func vulnerabilitiesToMaps(ctx context.Context, lookups handlerLookups, ecosyste
 	if len(vulns) == 0 {
 		return nil
 	}
-	result := make([]map[string]any, 0, len(vulns))
-	for _, v := range vulns {
-		m, err := policy.StructToMap(v)
-		if err != nil {
-			slog.Debug("failed to map vulnerability", "id", v.ID, "error", err)
-			continue
-		}
-		result = append(result, m)
-	}
-	return result
+	// Convert to proto Findings for policy evaluation
+	return osv.VulnerabilitiesToFindings(vulns)
 }
 
 // lookupLicenses retrieves license information using the provided lookup function.

@@ -1,0 +1,719 @@
+// Copyright 2025 Kent "picat" Gruber. All rights reserved.
+// SPDX-License-Identifier: MIT
+
+syntax = "proto3";
+
+package deputy.risk.v1;
+
+import "buf/validate/validate.proto";
+import "google/protobuf/timestamp.proto";
+import "deputy/target/v1/target.proto";
+import "deputy/dependency/v1/dependency.proto";
+import "deputy/vulnerability/v1/vulnerability.proto";
+import "deputy/policy/v1/policy.proto";
+import "deputy/secrets/v1/secrets.proto";
+
+option go_package = "github.com/picatz/deputy/gen/deputy/risk/v1;riskv1";
+
+// RiskService provides comprehensive supply chain risk analysis.
+//
+// This service aggregates multiple security signals to provide a holistic
+// view of supply chain risk:
+// - Vulnerabilities (CVEs, GHSAs) from OSV
+// - Malicious packages (OSSF MAL, typosquats)
+// - License compliance issues
+// - Maintainer health (abandoned, compromised)
+// - Dependency freshness (outdated packages)
+// - Secrets (leaked credentials)
+//
+// The same security model as ScanService applies: remote servers can only
+// access remote-accessible targets (git URLs, registries, PURLs).
+service RiskService {
+  // AnalyzeRisk performs comprehensive supply chain risk analysis.
+  // Returns aggregated risk scores across all signal categories.
+  rpc AnalyzeRisk(AnalyzeRiskRequest) returns (AnalyzeRiskResponse);
+
+  // InvestigatePackage provides deep-dive analysis of a single package.
+  // Useful for understanding why a package is risky and what to do about it.
+  rpc InvestigatePackage(InvestigatePackageRequest) returns (InvestigatePackageResponse);
+
+  // StreamRiskAnalysis provides streaming progress for long-running analyses.
+  // Useful for large projects with many dependencies.
+  rpc StreamRiskAnalysis(AnalyzeRiskRequest) returns (stream RiskAnalysisProgress);
+}
+
+// AnalyzeRiskRequest specifies what to analyze and how.
+message AnalyzeRiskRequest {
+  // Target is the analysis target (path, URL, image reference, etc.).
+  // When empty, defaults to current working directory.
+  string target = 1;
+
+  // Options configure analysis behavior.
+  RiskAnalysisOptions options = 2;
+}
+
+// RiskAnalysisOptions configures which signals to analyze.
+message RiskAnalysisOptions {
+  // IncludeVulnerabilities enables vulnerability analysis (default: true).
+  bool include_vulnerabilities = 1;
+
+  // IncludeMalicious enables malicious package detection (default: true).
+  bool include_malicious = 2;
+
+  // IncludeLicenses enables license compliance analysis (default: true).
+  bool include_licenses = 3;
+
+  // IncludeMaintainerHealth enables maintainer health analysis (default: true).
+  bool include_maintainer_health = 4;
+
+  // IncludeFreshness enables dependency freshness analysis (default: true).
+  bool include_freshness = 5;
+
+  // IncludeSecrets enables secret scanning (default: false, slow).
+  bool include_secrets = 6;
+
+  // QuickMode skips slow enrichments for faster results.
+  // Disables: GitHub API calls, some license lookups, EPSS/KEV enrichment.
+  bool quick_mode = 7;
+
+  // PolicyPaths are paths to policy files to evaluate.
+  repeated string policy_paths = 8;
+
+  // Ref is a Git reference to analyze (branch, tag, commit).
+  // Only applies to git/repository targets.
+  string ref = 9;
+
+  // Platform specifies the target platform for container images (e.g., "linux/amd64").
+  // Only applies to container image targets.
+  string platform = 10;
+
+  // FocusPackage limits deep analysis to a specific package (PURL or name).
+  // Other packages will have minimal analysis for context.
+  string focus_package = 11;
+
+  // LicenseAllowlist specifies allowed SPDX license identifiers.
+  // Packages with licenses not in this list will be flagged.
+  repeated string license_allowlist = 12;
+
+  // LicenseDenylist specifies forbidden SPDX license identifiers.
+  // Packages with these licenses will be flagged.
+  repeated string license_denylist = 13;
+}
+
+// AnalyzeRiskResponse contains comprehensive risk analysis results.
+message AnalyzeRiskResponse {
+  // Target describes what was analyzed.
+  deputy.target.v1.Target target = 1;
+
+  // GeneratedAt is when this analysis was performed.
+  google.protobuf.Timestamp generated_at = 2;
+
+  // Summary provides aggregated risk metrics.
+  ProjectRiskSummary summary = 3;
+
+  // Packages lists per-package risk assessments.
+  // Sorted by total risk score descending.
+  repeated PackageRiskAssessment packages = 4;
+
+  // PolicyActions lists policy evaluation outcomes.
+  repeated deputy.policy.v1.Action policy_actions = 5;
+
+  // Warnings contains non-fatal issues encountered during analysis.
+  repeated string warnings = 6;
+}
+
+// ProjectRiskSummary provides aggregate risk metrics for the entire project.
+message ProjectRiskSummary {
+  // OverallScore is the weighted composite risk score (0-100).
+  double overall_score = 1 [(buf.validate.field).double = {gte: 0, lte: 100}];
+
+  // OverallLevel is the risk classification.
+  RiskLevel overall_level = 2;
+
+  // VulnerabilityRisk summarizes vulnerability-related risk.
+  VulnerabilityRiskSummary vulnerability_risk = 3;
+
+  // MaliciousRisk summarizes malicious package risk.
+  MaliciousRiskSummary malicious_risk = 4;
+
+  // LicenseRisk summarizes license compliance risk.
+  LicenseRiskSummary license_risk = 5;
+
+  // MaintainerRisk summarizes maintainer health risk.
+  MaintainerRiskSummary maintainer_risk = 6;
+
+  // FreshnessRisk summarizes dependency freshness risk.
+  FreshnessRiskSummary freshness_risk = 7;
+
+  // SecretsRisk summarizes secrets detection risk.
+  SecretsRiskSummary secrets_risk = 8;
+
+  // TotalPackages is the count of analyzed packages.
+  int32 total_packages = 10 [(buf.validate.field).int32.gte = 0];
+
+  // HighRiskPackages is the count of packages with score > 50.
+  int32 high_risk_packages = 11 [(buf.validate.field).int32.gte = 0];
+
+  // Recommendations are prioritized actions to reduce risk.
+  repeated RiskRecommendation recommendations = 12;
+}
+
+// RiskLevel classifies overall risk severity.
+enum RiskLevel {
+  RISK_LEVEL_UNSPECIFIED = 0;
+  // Low risk (score 0-25).
+  RISK_LEVEL_LOW = 1;
+  // Medium risk (score 26-50).
+  RISK_LEVEL_MEDIUM = 2;
+  // High risk (score 51-75).
+  RISK_LEVEL_HIGH = 3;
+  // Critical risk (score 76-100).
+  RISK_LEVEL_CRITICAL = 4;
+}
+
+// VulnerabilityRiskSummary aggregates vulnerability-related metrics.
+message VulnerabilityRiskSummary {
+  // Score is the vulnerability contribution to risk (0-40 max).
+  double score = 1;
+
+  // TotalCount is the total vulnerability count.
+  int32 total_count = 2;
+
+  // CriticalCount is the count of critical severity.
+  int32 critical_count = 3;
+
+  // HighCount is the count of high severity.
+  int32 high_count = 4;
+
+  // MediumCount is the count of medium severity.
+  int32 medium_count = 5;
+
+  // LowCount is the count of low severity.
+  int32 low_count = 6;
+
+  // KevCount is the count of vulnerabilities in CISA KEV.
+  int32 kev_count = 7;
+
+  // HighEpssCount is the count with EPSS > 0.1.
+  int32 high_epss_count = 8;
+
+  // FixAvailableCount is the count with known fixes.
+  int32 fix_available_count = 9;
+}
+
+// MaliciousRiskSummary aggregates malicious package metrics.
+message MaliciousRiskSummary {
+  // Score is the malicious package contribution to risk (0-30 max).
+  double score = 1;
+
+  // TotalCount is the total malicious package count.
+  int32 total_count = 2;
+
+  // MalwareCount is packages with malware indicators.
+  int32 malware_count = 3;
+
+  // TyposquatCount is potential typosquats.
+  int32 typosquat_count = 4;
+
+  // CompromisedCount is compromised maintainer packages.
+  int32 compromised_count = 5;
+
+  // MaliciousPackages lists PURLs of detected malicious packages.
+  repeated string malicious_packages = 6;
+}
+
+// LicenseRiskSummary aggregates license compliance metrics.
+message LicenseRiskSummary {
+  // Score is the license contribution to risk (0-10 max).
+  double score = 1;
+
+  // TotalIssues is the count of license issues found.
+  int32 total_issues = 2;
+
+  // ForbiddenCount is packages with forbidden licenses.
+  int32 forbidden_count = 3;
+
+  // UnknownCount is packages with unknown licenses.
+  int32 unknown_count = 4;
+
+  // CopyleftCount is packages with copyleft licenses.
+  int32 copyleft_count = 5;
+
+  // ConflictCount is packages with license conflicts.
+  int32 conflict_count = 6;
+}
+
+// MaintainerRiskSummary aggregates maintainer health metrics.
+message MaintainerRiskSummary {
+  // Score is the maintainer health contribution to risk (0-10 max).
+  double score = 1;
+
+  // TotalIssues is the count of maintainer health issues.
+  int32 total_issues = 2;
+
+  // AbandonedCount is packages with no activity in 2+ years.
+  int32 abandoned_count = 3;
+
+  // StaleCount is packages with no activity in 6+ months.
+  int32 stale_count = 4;
+
+  // DeprecatedCount is explicitly deprecated packages.
+  int32 deprecated_count = 5;
+
+  // ArchivedCount is archived repositories.
+  int32 archived_count = 6;
+
+  // LowBusFactorCount is packages with only 1 maintainer.
+  int32 low_bus_factor_count = 7;
+}
+
+// FreshnessRiskSummary aggregates dependency freshness metrics.
+message FreshnessRiskSummary {
+  // Score is the freshness contribution to risk (0-5 max).
+  double score = 1;
+
+  // OutdatedCount is packages behind latest version.
+  int32 outdated_count = 2;
+
+  // MajorBehindCount is packages 1+ major versions behind.
+  int32 major_behind_count = 3;
+
+  // VeryStaleCount is packages 2+ major versions behind.
+  int32 very_stale_count = 4;
+
+  // YankedCount is packages using yanked/retracted versions.
+  int32 yanked_count = 5;
+}
+
+// SecretsRiskSummary aggregates secret detection metrics.
+message SecretsRiskSummary {
+  // Score is the secrets contribution to risk (0-5 max).
+  double score = 1;
+
+  // TotalCount is the total secrets detected.
+  int32 total_count = 2;
+
+  // HighConfidenceCount is high-confidence secret matches.
+  int32 high_confidence_count = 3;
+
+  // CredentialCount is detected credentials (API keys, passwords).
+  int32 credential_count = 4;
+}
+
+// PackageRiskAssessment provides per-package risk analysis.
+message PackageRiskAssessment {
+  // Purl is the Package URL identifier.
+  string purl = 1;
+
+  // Package contains the dependency details.
+  deputy.dependency.v1.Package package = 2;
+
+  // TotalScore is the composite risk score (0-100).
+  double total_score = 3 [(buf.validate.field).double = {gte: 0, lte: 100}];
+
+  // Level is the risk classification based on total_score.
+  RiskLevel level = 4;
+
+  // VulnerabilityRisk is the vulnerability score contribution (0-40).
+  double vulnerability_risk = 5;
+
+  // MaliciousRisk is the malicious package score contribution (0-30).
+  double malicious_risk = 6;
+
+  // LicenseRisk is the license compliance score contribution (0-10).
+  double license_risk = 7;
+
+  // MaintainerRisk is the maintainer health score contribution (0-10).
+  double maintainer_risk = 8;
+
+  // FreshnessRisk is the freshness score contribution (0-5).
+  double freshness_risk = 9;
+
+  // SecretsRisk is the secrets detection score contribution (0-5).
+  double secrets_risk = 10;
+
+  // Factors lists individual risk factors contributing to the score.
+  repeated RiskFactor factors = 11;
+
+  // Vulnerabilities lists vulnerability findings for this package.
+  repeated deputy.vulnerability.v1.Finding vulnerabilities = 12;
+
+  // MaliciousInfo contains malicious package detection details.
+  MaliciousPackageInfo malicious_info = 13;
+
+  // LicenseInfo contains license analysis details.
+  LicenseInfo license_info = 14;
+
+  // MaintainerHealth contains maintainer health details.
+  MaintainerHealth maintainer_health = 15;
+
+  // Freshness contains version freshness details.
+  DependencyFreshness freshness = 16;
+}
+
+// RiskFactor describes a single contributing factor to risk score.
+message RiskFactor {
+  // Category is the signal category (vulnerability, malicious, license, etc.).
+  string category = 1;
+
+  // Severity indicates factor severity (critical, high, medium, low, info).
+  string severity = 2;
+
+  // Description explains the risk factor.
+  string description = 3;
+
+  // Source identifies where this factor was detected.
+  string source = 4;
+
+  // Score is the point contribution from this factor.
+  double score = 5;
+
+  // Remediation suggests how to address this factor.
+  string remediation = 6;
+}
+
+// RiskRecommendation provides actionable guidance to reduce risk.
+message RiskRecommendation {
+  // Priority indicates urgency (1 = highest).
+  int32 priority = 1;
+
+  // Severity indicates the risk level addressed.
+  string severity = 2;
+
+  // Category is the signal category addressed.
+  string category = 3;
+
+  // Action describes what to do.
+  string action = 4;
+
+  // Impact describes the risk reduction from this action.
+  string impact = 5;
+
+  // AffectedPackages lists PURLs that would benefit.
+  repeated string affected_packages = 6;
+}
+
+// MaliciousPackageInfo contains malicious package detection details.
+message MaliciousPackageInfo {
+  // Detected indicates if malicious indicators were found.
+  bool detected = 1;
+
+  // Type classifies the malicious activity.
+  MaliciousType type = 2;
+
+  // Source identifies the detection source (e.g., ossf-mal, osv-mal).
+  string source = 3;
+
+  // Indicators lists specific malicious indicators found.
+  repeated string indicators = 4;
+
+  // Details provides additional context.
+  string details = 5;
+
+  // DetectedAt is when the malicious activity was detected.
+  google.protobuf.Timestamp detected_at = 6;
+
+  // AdvisoryId is the OSV/GHSA advisory ID if applicable.
+  string advisory_id = 7;
+}
+
+// MaliciousType classifies malicious package activity.
+enum MaliciousType {
+  MALICIOUS_TYPE_UNSPECIFIED = 0;
+  // Malware: Package contains malicious code.
+  MALICIOUS_TYPE_MALWARE = 1;
+  // Typosquat: Package name similar to popular package.
+  MALICIOUS_TYPE_TYPOSQUAT = 2;
+  // Dependency confusion: Internal package name collision.
+  MALICIOUS_TYPE_DEPENDENCY_CONFUSION = 3;
+  // Protestware: Package with intentionally disruptive behavior.
+  MALICIOUS_TYPE_PROTESTWARE = 4;
+  // Compromised maintainer: Legitimate package taken over.
+  MALICIOUS_TYPE_COMPROMISED_MAINTAINER = 5;
+}
+
+// LicenseInfo contains license analysis details.
+message LicenseInfo {
+  // SpdxIds lists detected SPDX license identifiers.
+  repeated string spdx_ids = 1;
+
+  // RiskLevel classifies license risk.
+  LicenseRiskLevel risk_level = 2;
+
+  // Conflicts lists licenses that conflict with project license.
+  repeated string conflicts = 3;
+
+  // Copyleft indicates if any license has copyleft requirements.
+  bool copyleft = 4;
+
+  // RequiresAttribution indicates if attribution is required.
+  bool requires_attribution = 5;
+
+  // Source identifies where license was detected (deps.dev, github, scancode).
+  string source = 6;
+
+  // Unknown indicates if license could not be determined.
+  bool unknown = 7;
+
+  // Forbidden indicates if license is in the deny list.
+  bool forbidden = 8;
+}
+
+// LicenseRiskLevel classifies license compliance risk.
+enum LicenseRiskLevel {
+  LICENSE_RISK_LEVEL_UNSPECIFIED = 0;
+  // None: Permissive license (MIT, Apache-2.0, BSD).
+  LICENSE_RISK_LEVEL_NONE = 1;
+  // Low: Weak copyleft (LGPL, MPL).
+  LICENSE_RISK_LEVEL_LOW = 2;
+  // Medium: Strong copyleft (GPL).
+  LICENSE_RISK_LEVEL_MEDIUM = 3;
+  // High: Restrictive or problematic (AGPL, SSPL).
+  LICENSE_RISK_LEVEL_HIGH = 4;
+  // Critical: No license, unknown, or forbidden.
+  LICENSE_RISK_LEVEL_CRITICAL = 5;
+}
+
+// MaintainerHealth contains maintainer activity analysis.
+message MaintainerHealth {
+  // Status classifies maintainer health.
+  MaintainerHealthStatus status = 1;
+
+  // DaysSinceLastRelease is days since most recent version.
+  int32 days_since_last_release = 2;
+
+  // DaysSinceLastCommit is days since most recent commit.
+  int32 days_since_last_commit = 3;
+
+  // OpenIssues is the count of open issues.
+  int32 open_issues = 4;
+
+  // OpenSecurityIssues is the count of open security issues.
+  int32 open_security_issues = 5;
+
+  // Archived indicates if repository is archived.
+  bool archived = 6;
+
+  // Deprecated indicates if package is deprecated.
+  bool deprecated = 7;
+
+  // DeprecationMessage is the deprecation notice if available.
+  string deprecation_message = 8;
+
+  // MaintainerCount is the number of active maintainers.
+  int32 maintainer_count = 9;
+
+  // BusFactorRisk indicates single-maintainer risk (0.0-1.0).
+  double bus_factor_risk = 10;
+
+  // Source identifies the data source (deps.dev, github, npm).
+  string source = 11;
+}
+
+// MaintainerHealthStatus classifies maintainer activity level.
+enum MaintainerHealthStatus {
+  MAINTAINER_HEALTH_STATUS_UNSPECIFIED = 0;
+  // Healthy: Active maintenance.
+  MAINTAINER_HEALTH_STATUS_HEALTHY = 1;
+  // Stale: No activity in 6+ months.
+  MAINTAINER_HEALTH_STATUS_STALE = 2;
+  // Abandoned: No activity in 2+ years.
+  MAINTAINER_HEALTH_STATUS_ABANDONED = 3;
+  // Deprecated: Explicitly marked deprecated.
+  MAINTAINER_HEALTH_STATUS_DEPRECATED = 4;
+  // Archived: Repository is archived.
+  MAINTAINER_HEALTH_STATUS_ARCHIVED = 5;
+}
+
+// DependencyFreshness contains version freshness analysis.
+message DependencyFreshness {
+  // CurrentVersion is the version in use.
+  string current_version = 1;
+
+  // LatestVersion is the most recent stable version.
+  string latest_version = 2;
+
+  // VersionsBehind is how many versions behind latest.
+  int32 versions_behind = 3;
+
+  // MajorVersionsBehind is major versions behind.
+  int32 major_versions_behind = 4;
+
+  // DaysSinceCurrentRelease is age of current version.
+  int32 days_since_current_release = 5;
+
+  // DaysSinceLatestRelease is age of latest version.
+  int32 days_since_latest_release = 6;
+
+  // Risk classifies freshness risk.
+  FreshnessRiskLevel risk = 7;
+
+  // IsPrerelease indicates if current version is prerelease.
+  bool is_prerelease = 8;
+
+  // IsYanked indicates if current version is yanked/retracted.
+  bool is_yanked = 9;
+
+  // LatestPrerelease is the latest prerelease version if newer.
+  string latest_prerelease = 10;
+}
+
+// FreshnessRiskLevel classifies dependency freshness risk.
+enum FreshnessRiskLevel {
+  FRESHNESS_RISK_LEVEL_UNSPECIFIED = 0;
+  // Current: Within 1 minor version.
+  FRESHNESS_RISK_LEVEL_CURRENT = 1;
+  // SlightlyStale: 1-2 minor versions behind.
+  FRESHNESS_RISK_LEVEL_SLIGHTLY_STALE = 2;
+  // Stale: 1 major version behind.
+  FRESHNESS_RISK_LEVEL_STALE = 3;
+  // VeryStale: 2+ major versions behind.
+  FRESHNESS_RISK_LEVEL_VERY_STALE = 4;
+  // Critical: 3+ major versions behind or yanked.
+  FRESHNESS_RISK_LEVEL_CRITICAL = 5;
+}
+
+// InvestigatePackageRequest specifies a package for deep-dive analysis.
+message InvestigatePackageRequest {
+  // Purl is the Package URL to investigate.
+  // Can also be a package name (will resolve to latest or contextual version).
+  string purl = 1 [(buf.validate.field).string.min_len = 1];
+
+  // Target provides context for dependency path analysis.
+  // If empty, only package-level analysis is performed.
+  string target = 2;
+
+  // IncludeDependents shows what depends on this package.
+  bool include_dependents = 3;
+
+  // IncludeAlternatives suggests similar packages with lower risk.
+  bool include_alternatives = 4;
+
+  // IncludeHistory shows version history and risk trends.
+  bool include_history = 5;
+}
+
+// InvestigatePackageResponse provides deep-dive package analysis.
+message InvestigatePackageResponse {
+  // Risk contains the full risk assessment.
+  PackageRiskAssessment risk = 1;
+
+  // Paths shows how this package enters the dependency graph.
+  repeated DependencyPath paths = 2;
+
+  // Dependents lists packages that depend on this one.
+  repeated string dependents = 3;
+
+  // Alternatives suggests similar packages with lower risk.
+  repeated PackageAlternative alternatives = 4;
+
+  // Recommendations provides actionable guidance.
+  repeated string recommendations = 5;
+
+  // History shows risk trend across versions.
+  repeated VersionRiskHistory history = 6;
+}
+
+// DependencyPath shows how a package is reached in the dependency graph.
+message DependencyPath {
+  // Path is the list of PURLs from root to target.
+  repeated string path = 1;
+
+  // IntroducedBy is the direct dependency that brings in this package.
+  string introduced_by = 2;
+
+  // Depth is the distance from root (0 = direct).
+  int32 depth = 3;
+}
+
+// PackageAlternative suggests a replacement package.
+message PackageAlternative {
+  // Purl is the alternative package.
+  string purl = 1;
+
+  // Name is the package name.
+  string name = 2;
+
+  // RiskScore is the alternative's risk score.
+  double risk_score = 3;
+
+  // Similarity describes API/functionality similarity.
+  string similarity = 4;
+
+  // MigrationDifficulty indicates effort to migrate (low, medium, high).
+  string migration_difficulty = 5;
+
+  // Notes provides migration guidance.
+  string notes = 6;
+}
+
+// VersionRiskHistory tracks risk changes across versions.
+message VersionRiskHistory {
+  // Version is the package version.
+  string version = 1;
+
+  // RiskScore is the risk score at this version.
+  double risk_score = 2;
+
+  // ReleasedAt is when this version was released.
+  google.protobuf.Timestamp released_at = 3;
+
+  // VulnerabilityCount is vulns affecting this version.
+  int32 vulnerability_count = 4;
+
+  // Notes describes significant changes.
+  string notes = 5;
+}
+
+// RiskAnalysisProgress provides streaming updates during analysis.
+message RiskAnalysisProgress {
+  // Phase indicates the current analysis phase.
+  RiskAnalysisPhase phase = 1;
+
+  // Message provides human-readable progress information.
+  string message = 2;
+
+  // Progress is the completion percentage (0-100) for the current phase.
+  int32 progress = 3 [(buf.validate.field).int32 = {gte: 0, lte: 100}];
+
+  // PackagesAnalyzed is the running count of analyzed packages.
+  int32 packages_analyzed = 4 [(buf.validate.field).int32.gte = 0];
+
+  // IssuesFound is the running count of risk issues found.
+  int32 issues_found = 5 [(buf.validate.field).int32.gte = 0];
+
+  // Result is populated only when phase is COMPLETE.
+  AnalyzeRiskResponse result = 10;
+
+  // Error is populated if analysis failed.
+  string error = 11;
+}
+
+// RiskAnalysisPhase indicates the current phase of risk analysis.
+enum RiskAnalysisPhase {
+  RISK_ANALYSIS_PHASE_UNSPECIFIED = 0;
+  // Initializing analysis resources.
+  RISK_ANALYSIS_PHASE_INITIALIZING = 1;
+  // Extracting package inventory.
+  RISK_ANALYSIS_PHASE_EXTRACTING_INVENTORY = 2;
+  // Analyzing vulnerabilities.
+  RISK_ANALYSIS_PHASE_ANALYZING_VULNERABILITIES = 3;
+  // Checking for malicious packages.
+  RISK_ANALYSIS_PHASE_CHECKING_MALICIOUS = 4;
+  // Analyzing licenses.
+  RISK_ANALYSIS_PHASE_ANALYZING_LICENSES = 5;
+  // Checking maintainer health.
+  RISK_ANALYSIS_PHASE_CHECKING_MAINTAINER_HEALTH = 6;
+  // Analyzing dependency freshness.
+  RISK_ANALYSIS_PHASE_ANALYZING_FRESHNESS = 7;
+  // Scanning for secrets.
+  RISK_ANALYSIS_PHASE_SCANNING_SECRETS = 8;
+  // Computing risk scores.
+  RISK_ANALYSIS_PHASE_COMPUTING_SCORES = 9;
+  // Evaluating policies.
+  RISK_ANALYSIS_PHASE_EVALUATING_POLICIES = 10;
+  // Analysis completed successfully.
+  RISK_ANALYSIS_PHASE_COMPLETE = 11;
+  // Analysis failed with an error.
+  RISK_ANALYSIS_PHASE_FAILED = 12;
+}

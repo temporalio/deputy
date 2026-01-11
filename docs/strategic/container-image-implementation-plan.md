@@ -15,7 +15,7 @@ Deputy becomes the go-to tool for container image dependency management, securit
 ### 1.1 Complete ImageInfo Wiring [DONE]
 - [x] Wire `scan.Result.ImageInfo` to policy evaluation in `runScanPolicies()`
 - [x] Add `image_info` to default CEL variable names
-- [x] Update LSP completions for `image.config.*`, `image.metadata.*`, `vulnerability.layerDetails.*`
+- [x] Update LSP completions for `image.config.*`, `image.metadata.*`, `vulnerability.layer_details.*`
 
 ### 1.2 Remaining Bug Fixes
 
@@ -335,7 +335,7 @@ policies:
       - action: deny
         when: |
           vulnerability.changeContext == 'added' &&
-          vulnerability.severity == 'CRITICAL'
+          vulnerability.advisory.severity.level == severity.critical
         reason: "Image update introduces new critical vulnerability"
 
   # Warn on unexpected package additions in app layers

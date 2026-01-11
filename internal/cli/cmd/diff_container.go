@@ -2,7 +2,6 @@ package cmd
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"io"
 	"slices"
@@ -12,9 +11,10 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/go-git/go-git/v5"
 	"github.com/google/osv-scalibr/extractor"
+	"google.golang.org/protobuf/encoding/protojson"
+
 	containerv1 "github.com/picatz/deputy/gen/deputy/container/v1"
 	diffv1 "github.com/picatz/deputy/gen/deputy/diff/v1"
-	"github.com/picatz/deputy/internal/services"
 	"github.com/picatz/deputy/internal/compare"
 	gitx "github.com/picatz/deputy/internal/gitutil"
 	"github.com/picatz/deputy/internal/otel"
@@ -22,6 +22,7 @@ import (
 	"github.com/picatz/deputy/internal/policy"
 	internalproto "github.com/picatz/deputy/internal/proto"
 	"github.com/picatz/deputy/internal/report/render"
+	"github.com/picatz/deputy/internal/services"
 	ui "github.com/picatz/deputy/internal/ui"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
@@ -184,7 +185,7 @@ func runContainerDiff(ctx context.Context, c *services.Clients, baseRef, targetR
 
 	// Output based on format
 	if isJSON {
-		return renderContainerDiffJSON(outW, ctx2)
+		return renderContainerDiffProtoJSON(outW, resp.Msg)
 	}
 	renderContainerDiffResult(outW, ctx2)
 
@@ -269,255 +270,24 @@ func normalizeImageReference(ref string, useLocalDaemon bool) string {
 	return "oci://" + ref
 }
 
-// ContainerDiffJSONOutput represents the JSON output for container diff.
-type ContainerDiffJSONOutput struct {
-	BaseImage       compare.ImageRef              `json:"baseImage"`
-	TargetImage     compare.ImageRef              `json:"targetImage"`
-	BaseContext     ImageContext                  `json:"baseContext,omitempty"`
-	TargetContext   ImageContext                  `json:"targetContext,omitempty"`
-	PackageChanges  []compare.ImagePackageChange  `json:"packageChanges,omitempty"`
-	Vulnerabilities []compare.VulnerabilityChange `json:"vulnerabilities,omitempty"`
-	ConfigChanges   *compare.ImageConfigDiff      `json:"configChanges,omitempty"`
-	LayerAnalysis   *compare.LayerDiffAnalysis    `json:"layerAnalysis,omitempty"`
-	Summary         compare.ImageDiffSummary      `json:"summary"`
-	VulnSummary     *VulnSummaryJSON              `json:"vulnerabilitySummary,omitempty"`
-	Recommendations []RecommendationJSON          `json:"recommendations,omitempty"`
-}
-
-// ImageContext provides additional context about an image.
-type ImageContext struct {
-	Distro       string `json:"distro,omitempty"`
-	PackageCount int    `json:"packageCount"`
-	Size         int64  `json:"size,omitempty"`
-	Architecture string `json:"architecture,omitempty"`
-}
-
-// VulnSummaryJSON provides vulnerability summary counts.
-type VulnSummaryJSON struct {
-	CriticalHighCount int `json:"criticalHighCount"`
-	FixableCount      int `json:"fixableCount"`
-	UnfixedCount      int `json:"unfixedCount"`
-}
-
-// RecommendationJSON represents a recommended action.
-type RecommendationJSON struct {
-	Priority    int              `json:"priority"`
-	Action      string           `json:"action"`
-	Description string           `json:"description,omitempty"`
-	Packages    []PackageFixJSON `json:"packages,omitempty"`
-}
-
-// PackageFixJSON represents a package with available fix.
-type PackageFixJSON struct {
-	Package            string            `json:"package"`
-	CurrentVersion     string            `json:"currentVersion"`
-	FixedVersion       string            `json:"fixedVersion"`
-	VulnerabilityCount int               `json:"vulnerabilityCount"`
-	LayerContext       *LayerContextJSON `json:"layerContext,omitempty"`
-}
-
-type LayerContextJSON struct {
-	LayerIndex  int    `json:"layerIndex"`
-	InBaseImage bool   `json:"inBaseImage"`
-	Command     string `json:"command,omitempty"`
-}
-
-// renderContainerDiffJSON outputs the container diff as JSON.
-func renderContainerDiffJSON(w io.Writer, ctx containerDiffContext) error {
-	output := ContainerDiffJSONOutput{
-		Summary: compare.ImageDiffSummary{},
+// renderContainerDiffProtoJSON outputs the container diff as JSON using protojson.
+// This uses the proto response directly for consistent, type-safe JSON output.
+func renderContainerDiffProtoJSON(w io.Writer, resp *diffv1.DiffContainerImagesResponse) error {
+	opts := protojson.MarshalOptions{
+		Multiline:       true,
+		Indent:          "  ",
+		EmitUnpopulated: false,
+		UseProtoNames:   true,
 	}
-
-	if ctx.Report != nil {
-		output.BaseImage = ctx.Report.BaseImage
-		output.TargetImage = ctx.Report.TargetImage
-		output.PackageChanges = ctx.Report.PackageChanges
-		output.Vulnerabilities = ctx.Report.VulnerabilityChanges
-		output.ConfigChanges = ctx.Report.ConfigChanges
-		output.LayerAnalysis = ctx.Report.LayerAnalysis
-		output.Summary = ctx.Report.Summary
+	data, err := opts.Marshal(resp)
+	if err != nil {
+		return fmt.Errorf("marshal proto to JSON: %w", err)
 	}
-
-	output.BaseContext = ImageContext{
-		Distro:       ctx.BaseDistro,
-		PackageCount: ctx.BasePackageCount,
-		Size:         ctx.BaseSize,
-		Architecture: ctx.BaseArch,
+	if _, err := w.Write(data); err != nil {
+		return err
 	}
-	output.TargetContext = ImageContext{
-		Distro:       ctx.TargetDistro,
-		PackageCount: ctx.TargetPackageCount,
-		Size:         ctx.TargetSize,
-		Architecture: ctx.TargetArch,
-	}
-
-	// Build vulnerability summary
-	if len(output.Vulnerabilities) > 0 {
-		vulnSummary := buildVulnSummaryJSON(output.Vulnerabilities)
-		output.VulnSummary = &vulnSummary
-		output.Recommendations = buildRecommendationsJSON(output.Vulnerabilities, vulnSummary)
-	}
-
-	enc := json.NewEncoder(w)
-	enc.SetIndent("", "  ")
-	return enc.Encode(output)
-}
-
-func buildVulnSummaryJSON(changes []compare.VulnerabilityChange) VulnSummaryJSON {
-	var summary VulnSummaryJSON
-	for _, v := range changes {
-		if v.ChangeType != compare.VulnAdded && v.ChangeType != compare.VulnPersisted {
-			continue
-		}
-		sev := strings.ToUpper(v.Severity)
-		if sev == "CRITICAL" || sev == "HIGH" {
-			summary.CriticalHighCount++
-		}
-		if len(v.FixedVersions) > 0 {
-			summary.FixableCount++
-		} else {
-			summary.UnfixedCount++
-		}
-	}
-	return summary
-}
-
-func buildRecommendationsJSON(changes []compare.VulnerabilityChange, summary VulnSummaryJSON) []RecommendationJSON {
-	var recs []RecommendationJSON
-	priority := 1
-
-	// Check for persisted critical/high vulnerabilities suggesting base image update
-	var persistedCriticalHigh int
-	for _, v := range changes {
-		if v.ChangeType == compare.VulnPersisted {
-			sev := strings.ToUpper(v.Severity)
-			if sev == "CRITICAL" || sev == "HIGH" {
-				persistedCriticalHigh++
-			}
-		}
-	}
-	if persistedCriticalHigh > 0 {
-		recs = append(recs, RecommendationJSON{
-			Priority:    priority,
-			Action:      "Consider a newer base image",
-			Description: fmt.Sprintf("%d critical/high vulnerabilities persist", persistedCriticalHigh),
-		})
-		priority++
-	}
-
-	// Fixable packages
-	if summary.FixableCount > 0 {
-		rec := RecommendationJSON{
-			Priority:    priority,
-			Action:      "Upgrade packages with available fixes",
-			Description: fmt.Sprintf("%d vulnerabilities can be resolved", summary.FixableCount),
-		}
-		rec.Packages = buildFixablePackagesJSON(changes)
-		recs = append(recs, rec)
-		priority++
-	}
-
-	// Unfixed
-	if summary.UnfixedCount > 0 {
-		recs = append(recs, RecommendationJSON{
-			Priority:    priority,
-			Action:      "Monitor unfixed vulnerabilities",
-			Description: "Check upstream for patches or consider alternatives",
-		})
-	}
-
-	return recs
-}
-
-func buildFixablePackagesJSON(changes []compare.VulnerabilityChange) []PackageFixJSON {
-	type pkgFix struct {
-		pkg         string
-		version     string
-		fix         string
-		count       int
-		layerIdx    int
-		layerCmd    string
-		inBaseImage bool
-		hasLayer    bool
-	}
-	pkgFixes := make(map[string]*pkgFix)
-
-	for _, v := range changes {
-		if len(v.FixedVersions) == 0 {
-			continue
-		}
-		if v.ChangeType != compare.VulnAdded && v.ChangeType != compare.VulnPersisted {
-			continue
-		}
-		key := v.PackageName
-		if pf, ok := pkgFixes[key]; ok {
-			pf.count++
-			// Update fix version if this vuln has a better in-band fix
-			currentVersion := v.TargetVersion
-			if currentVersion == "" {
-				currentVersion = v.BaseVersion
-			}
-			betterFix := findBestFixVersion(v.FixedVersions, currentVersion)
-			if betterFix != "" && (pf.fix == "" || compareVersionStrings(betterFix, pf.fix) > 0) {
-				pf.fix = betterFix
-			}
-		} else {
-			version := v.TargetVersion
-			if version == "" {
-				version = v.BaseVersion
-			}
-			// Use findBestFixVersion for in-band preference
-			fix := findBestFixVersion(v.FixedVersions, version)
-			pf := &pkgFix{
-				pkg:     v.PackageName,
-				version: version,
-				fix:     fix,
-				count:   1,
-			}
-			// Capture layer info if available (prefer target, fall back to base)
-			ld := v.TargetLayerDetails
-			if ld == nil {
-				ld = v.BaseLayerDetails
-			}
-			if ld != nil {
-				pf.hasLayer = true
-				pf.layerIdx = int(ld.Index)
-				pf.layerCmd = ld.Command
-				pf.inBaseImage = ld.InBaseImage
-			}
-			pkgFixes[key] = pf
-		}
-	}
-
-	sorted := make([]*pkgFix, 0, len(pkgFixes))
-	for _, pf := range pkgFixes {
-		sorted = append(sorted, pf)
-	}
-	slices.SortFunc(sorted, func(a, b *pkgFix) int {
-		if a.count != b.count {
-			return b.count - a.count
-		}
-		return strings.Compare(a.pkg, b.pkg)
-	})
-
-	result := make([]PackageFixJSON, 0, len(sorted))
-	for _, pf := range sorted {
-		fix := PackageFixJSON{
-			Package:            pf.pkg,
-			CurrentVersion:     pf.version,
-			FixedVersion:       pf.fix,
-			VulnerabilityCount: pf.count,
-		}
-		if pf.hasLayer {
-			fix.LayerContext = &LayerContextJSON{
-				LayerIndex:  pf.layerIdx,
-				InBaseImage: pf.inBaseImage,
-				Command:     pf.layerCmd,
-			}
-		}
-		result = append(result, fix)
-	}
-	return result
+	_, err = w.Write([]byte("\n"))
+	return err
 }
 
 // renderContainerDiffResult renders the container diff report to output.
@@ -2212,55 +1982,55 @@ func runContainerDiffPolicies(ctx context.Context, policyPaths []string, report 
 		return nil
 	}
 
-	// Build full report payload
-	payload := compare.BuildContainerDiffPayload(report)
+	// Convert to proto for CEL evaluation
+	protoReport := internalproto.ImageDiffReportToProto(report)
+
+	// Build full report payload with proto messages
+	payload := map[string]any{
+		"report":                protoReport,
+		"base_image":            protoReport.BaseImage,
+		"target_image":          protoReport.TargetImage,
+		"package_changes":       protoReport.PackageChanges,
+		"vulnerability_changes": protoReport.VulnerabilityChanges,
+		"config_changes":        protoReport.ConfigChanges,
+		"layer_analysis":        protoReport.LayerAnalysis,
+		"summary":               protoReport.Summary,
+	}
 	if _, err := evaluatePoliciesForCommand(ctx, policyPaths, payload, "diff", policy.EntrypointContainerDiffReport, errW); err != nil {
 		return err
 	}
 
-	// Evaluate per-change policies
-	for _, change := range report.PackageChanges {
-		changeMap, err := structToMap(change)
-		if err != nil {
-			continue
-		}
+	// Evaluate per-change policies (pass proto messages directly)
+	for _, change := range protoReport.PackageChanges {
 		changePayload := map[string]any{
-			"base_image":   payload["base_image"],
-			"target_image": payload["target_image"],
-			"change":       changeMap,
+			"base_image":   protoReport.BaseImage,
+			"target_image": protoReport.TargetImage,
+			"change":       change,
 		}
 		if _, err := evaluatePoliciesForCommand(ctx, policyPaths, changePayload, "diff", policy.EntrypointContainerDiffChange, errW); err != nil {
 			return err
 		}
 	}
 
-	// Evaluate per-vulnerability policies
-	for _, vuln := range report.VulnerabilityChanges {
-		vulnMap, err := structToMap(vuln)
-		if err != nil {
-			continue
-		}
+	// Evaluate per-vulnerability policies (pass proto messages directly)
+	for _, vuln := range protoReport.VulnerabilityChanges {
 		vulnPayload := map[string]any{
-			"base_image":    payload["base_image"],
-			"target_image":  payload["target_image"],
-			"vulnerability": vulnMap,
+			"base_image":    protoReport.BaseImage,
+			"target_image":  protoReport.TargetImage,
+			"vulnerability": vuln,
 		}
 		if _, err := evaluatePoliciesForCommand(ctx, policyPaths, vulnPayload, "diff", policy.EntrypointContainerDiffVulnerability, errW); err != nil {
 			return err
 		}
 	}
 
-	// Evaluate layer policies
-	if report.LayerAnalysis != nil {
-		for _, layer := range report.LayerAnalysis.LayerChanges {
-			layerMap, err := structToMap(layer)
-			if err != nil {
-				continue
-			}
+	// Evaluate layer policies (pass proto messages directly)
+	if protoReport.LayerAnalysis != nil {
+		for _, layer := range protoReport.LayerAnalysis.LayerChanges {
 			layerPayload := map[string]any{
-				"base_image":   payload["base_image"],
-				"target_image": payload["target_image"],
-				"layer":        layerMap,
+				"base_image":   protoReport.BaseImage,
+				"target_image": protoReport.TargetImage,
+				"layer":        layer,
 			}
 			if _, err := evaluatePoliciesForCommand(ctx, policyPaths, layerPayload, "diff", policy.EntrypointContainerDiffLayer, errW); err != nil {
 				return err
@@ -2268,12 +2038,12 @@ func runContainerDiffPolicies(ctx context.Context, policyPaths []string, report 
 		}
 	}
 
-	// Evaluate config policy
-	if report.ConfigChanges != nil {
+	// Evaluate config policy (pass proto messages directly)
+	if protoReport.ConfigChanges != nil {
 		configPayload := map[string]any{
-			"base_image":     payload["base_image"],
-			"target_image":   payload["target_image"],
-			"config_changes": payload["config_changes"],
+			"base_image":     protoReport.BaseImage,
+			"target_image":   protoReport.TargetImage,
+			"config_changes": protoReport.ConfigChanges,
 		}
 		if _, err := evaluatePoliciesForCommand(ctx, policyPaths, configPayload, "diff", policy.EntrypointContainerDiffConfig, errW); err != nil {
 			return err

@@ -10,8 +10,10 @@ import (
 	"github.com/google/cel-go/common/types"
 	"github.com/google/cel-go/common/types/ref"
 	"github.com/google/cel-go/common/types/traits"
+	vulnerabilityv1 "github.com/picatz/deputy/gen/deputy/vulnerability/v1"
 	"github.com/picatz/deputy/internal/purlx"
 	"github.com/picatz/deputy/internal/vulnerability/ssvc"
+	"google.golang.org/protobuf/proto"
 )
 
 // levenshteinMaxInputLen is the maximum string length accepted by the levenshtein
@@ -565,210 +567,180 @@ func customHelperFunctions() []cel.EnvOption {
 			),
 		),
 
-		// vulnerabilitySeverity(vulnerability) returns the severity level as a string.
+		// ===== Severity Comparison Helpers =====
 		//
-		// Example usage in CEL:
-		//   vulnerabilitySeverity(vulnerability) == "CRITICAL"
-		cel.Function("vulnerabilitySeverity",
-			cel.Overload("vulnerabilitySeverity_map",
-				[]*cel.Type{cel.DynType},
-				cel.StringType,
-				cel.UnaryBinding(func(val ref.Val) ref.Val {
-					vuln := extractNodeFromMap(val)
-					if vuln == nil {
-						return types.String("")
-					}
-					// Try direct severity field (flattened vulnerability)
-					if severity, ok := vuln["severity"].(string); ok {
-						return types.String(strings.ToUpper(severity))
-					}
-					// Try advisory.severity.level (nested structure)
-					if advisory, ok := vuln["advisory"].(map[string]any); ok {
-						if severity, ok := advisory["severity"].(map[string]any); ok {
-							if level, ok := severity["level"]; ok {
-								return types.String(severityLevelToString(level))
-							}
-						}
-					}
-					return types.String("")
-				}),
-			),
-		),
-
-		// vulnerabilityId(vulnerability) returns the advisory ID of a vulnerability.
+		// These helpers provide ordered severity comparisons that CEL can't do natively.
+		// For simple equality checks, use proto field access directly:
+		//   vulnerability.advisory.severity.level == deputy.vulnerability.v1.SeverityLevel.SEVERITY_LEVEL_CRITICAL
 		//
-		// Example usage in CEL:
-		//   vulnerabilityId(vulnerability).startsWith("CVE-")
-		cel.Function("vulnerabilityId",
-			cel.Overload("vulnerabilityId_map",
-				[]*cel.Type{cel.DynType},
-				cel.StringType,
-				cel.UnaryBinding(func(val ref.Val) ref.Val {
-					vuln := extractNodeFromMap(val)
-					if vuln == nil {
-						return types.String("")
-					}
-					// Try id field (common in flattened structures)
-					if id, ok := vuln["id"].(string); ok {
-						return types.String(id)
-					}
-					// Try advisory_id field (proto field name)
-					if id, ok := vuln["advisory_id"].(string); ok {
-						return types.String(id)
-					}
-					return types.String("")
-				}),
-			),
-		),
-
-		// hasFix(vuln) returns true if the vulnerability has a known fix.
-		//
-		// Example usage in CEL:
-		//   hasFix(vulnerability)
-		//   vulnerabilities.filter(v, !hasFix(v)).size()
-		cel.Function("hasFix",
-			cel.Overload("hasFix_map",
-				[]*cel.Type{cel.DynType},
-				cel.BoolType,
-				cel.UnaryBinding(func(val ref.Val) ref.Val {
-					vuln := extractNodeFromMap(val)
-					if vuln == nil {
-						return types.Bool(false)
-					}
-					// Check fixedVersions field
-					if fixed, ok := vuln["fixedVersions"].([]any); ok && len(fixed) > 0 {
-						return types.Bool(true)
-					}
-					if fixed, ok := vuln["fixed_versions"].([]any); ok && len(fixed) > 0 {
-						return types.Bool(true)
-					}
-					// Check advisory.fixed_versions
-					if advisory, ok := vuln["advisory"].(map[string]any); ok {
-						if fixed, ok := advisory["fixed_versions"].([]any); ok && len(fixed) > 0 {
-							return types.Bool(true)
-						}
-					}
-					return types.Bool(false)
-				}),
-			),
-		),
-
-		// inKEV(vuln) returns true if the vulnerability is in CISA's KEV catalog.
-		//
-		// Example usage in CEL:
-		//   inKEV(vulnerability)
-		//   vulnerabilities.filter(v, inKEV(v))
-		cel.Function("inKEV",
-			cel.Overload("inKEV_map",
-				[]*cel.Type{cel.DynType},
-				cel.BoolType,
-				cel.UnaryBinding(func(val ref.Val) ref.Val {
-					vuln := extractNodeFromMap(val)
-					if vuln == nil {
-						return types.Bool(false)
-					}
-					return types.Bool(getBoolField(vuln, "inKEV") || getBoolField(vuln, "in_kev"))
-				}),
-			),
-		),
-
-		// epssScore(vuln) returns the EPSS score (0.0-1.0) or 0 if not available.
-		//
-		// Example usage in CEL:
-		//   epssScore(vulnerability) > 0.5
-		cel.Function("epssScore",
-			cel.Overload("epssScore_map",
-				[]*cel.Type{cel.DynType},
-				cel.DoubleType,
-				cel.UnaryBinding(func(val ref.Val) ref.Val {
-					vuln := extractNodeFromMap(val)
-					if vuln == nil {
-						return types.Double(0.0)
-					}
-					if epss := getFloatField(vuln, "epss"); epss > 0 {
-						return types.Double(epss)
-					}
-					return types.Double(0.0)
-				}),
-			),
-		),
+		// For ordered comparisons (>= HIGH means HIGH or CRITICAL), use these helpers.
 
 		// severityAtLeast(vuln, level) returns true if the vulnerability's severity
 		// is at or above the specified level. This enables ordered comparisons without
 		// repeating severity lists.
+		// Works with proto Finding messages and map-based vulnerability objects.
 		//
 		// Severity order (highest to lowest): CRITICAL > HIGH > MEDIUM > LOW > UNSPECIFIED
 		//
-		// Example usage in CEL:
-		//   severityAtLeast(vulnerability, "HIGH")  // true for HIGH or CRITICAL
-		//   severityAtLeast(vulnerability, severity.HIGH)  // same, using constant
-		//   vulnerabilities.filter(v, severityAtLeast(v, severity.MEDIUM))
+		// Example usage in CEL (both syntaxes supported):
+		//   severityAtLeast(vulnerability, "HIGH")       // global function syntax
+		//   vulnerability.severityAtLeast("HIGH")        // method syntax
+		//   vulnerabilities.filter(v, v.severityAtLeast("MEDIUM"))
 		cel.Function("severityAtLeast",
-			cel.Overload("severityAtLeast_map_string",
+			// Global function syntax: severityAtLeast(vuln, level)
+			cel.Overload("severityAtLeast_finding_string",
 				[]*cel.Type{cel.DynType, cel.StringType},
 				cel.BoolType,
-				cel.BinaryBinding(func(vulnVal, levelVal ref.Val) ref.Val {
-					vuln := extractNodeFromMap(vulnVal)
-					if vuln == nil {
-						return types.Bool(false)
-					}
-					threshold := strings.ToUpper(toString(levelVal))
-					// Get actual severity
-					var actual string
-					if severity, ok := vuln["severity"].(string); ok {
-						actual = strings.ToUpper(severity)
-					} else if advisory, ok := vuln["advisory"].(map[string]any); ok {
-						if severity, ok := advisory["severity"].(map[string]any); ok {
-							if level, ok := severity["level"]; ok {
-								actual = severityLevelToString(level)
-							}
-						}
-					}
-					return types.Bool(severityRank(actual) >= severityRank(threshold))
-				}),
+				cel.BinaryBinding(severityAtLeastBinding),
+			),
+			// Method syntax: vuln.severityAtLeast(level)
+			cel.MemberOverload("finding_severityAtLeast_string",
+				[]*cel.Type{cel.DynType, cel.StringType},
+				cel.BoolType,
+				cel.BinaryBinding(severityAtLeastBinding),
 			),
 		),
 
 		// isCritical(vuln) is a shorthand for severityAtLeast(vuln, "CRITICAL").
+		// Works with proto Finding messages and map-based vulnerability objects.
 		//
-		// Example usage in CEL:
-		//   isCritical(vulnerability)
-		//   vulnerabilities.filter(v, isCritical(v))
+		// Example usage in CEL (both syntaxes supported):
+		//   isCritical(vulnerability)        // global function syntax
+		//   vulnerability.isCritical()       // method syntax
+		//   vulnerabilities.filter(v, v.isCritical())
 		cel.Function("isCritical",
-			cel.Overload("isCritical_map",
+			// Global function syntax: isCritical(vuln)
+			cel.Overload("isCritical_finding",
 				[]*cel.Type{cel.DynType},
 				cel.BoolType,
-				cel.UnaryBinding(func(val ref.Val) ref.Val {
-					vuln := extractNodeFromMap(val)
-					if vuln == nil {
-						return types.Bool(false)
-					}
-					severity := extractSeverity(vuln)
-					return types.Bool(strings.ToUpper(severity) == "CRITICAL")
-				}),
+				cel.UnaryBinding(isCriticalBinding),
+			),
+			// Method syntax: vuln.isCritical()
+			cel.MemberOverload("finding_isCritical",
+				[]*cel.Type{cel.DynType},
+				cel.BoolType,
+				cel.UnaryBinding(isCriticalBinding),
 			),
 		),
 
 		// isHighOrAbove(vuln) is a shorthand for severityAtLeast(vuln, "HIGH").
+		// Works with proto Finding messages and map-based vulnerability objects.
+		//
+		// Example usage in CEL (both syntaxes supported):
+		//   isHighOrAbove(vulnerability)        // global function syntax
+		//   vulnerability.isHighOrAbove()       // method syntax
+		//   vulnerabilities.filter(v, v.isHighOrAbove())
+		cel.Function("isHighOrAbove",
+			// Global function syntax: isHighOrAbove(vuln)
+			cel.Overload("isHighOrAbove_finding",
+				[]*cel.Type{cel.DynType},
+				cel.BoolType,
+				cel.UnaryBinding(isHighOrAboveBinding),
+			),
+			// Method syntax: vuln.isHighOrAbove()
+			cel.MemberOverload("finding_isHighOrAbove",
+				[]*cel.Type{cel.DynType},
+				cel.BoolType,
+				cel.UnaryBinding(isHighOrAboveBinding),
+			),
+		),
+
+		// ===== Import Status Helpers (Extended Graph Mode) =====
+		//
+		// These helpers check the import status of nodes in extended graph mode.
+		// Import status indicates how a dependency is included:
+		//   IMPORTED (1) - actively used by source code (highest risk)
+		//   REQUIRED (2) - in go.mod but not directly imported (medium risk)
+		//   DECLARED (3) - in full module graph but not selected (latent risk)
+
+		// isImported(node) returns true if the node is actively imported by source code.
+		// These packages are compiled into the binary (highest security relevance).
 		//
 		// Example usage in CEL:
-		//   isHighOrAbove(vulnerability)
-		//   vulnerabilities.filter(v, isHighOrAbove(v))
-		cel.Function("isHighOrAbove",
-			cel.Overload("isHighOrAbove_map",
+		//   isImported(node)
+		//   nodes.filter(n, isImported(n) && hasVulnerabilities(n))
+		cel.Function("isImported",
+			cel.Overload("isImported_node",
 				[]*cel.Type{cel.DynType},
 				cel.BoolType,
 				cel.UnaryBinding(func(val ref.Val) ref.Val {
-					vuln := extractNodeFromMap(val)
-					if vuln == nil {
-						return types.Bool(false)
-					}
-					severity := extractSeverity(vuln)
-					return types.Bool(severityRank(strings.ToUpper(severity)) >= severityRank("HIGH"))
+					status := extractImportStatus(val)
+					return types.Bool(status == 1) // IMPORT_STATUS_IMPORTED
+				}),
+			),
+		),
+
+		// isRequired(node) returns true if the node is in go.mod/lockfile but not imported.
+		// These packages are selected by MVS but may only be transitive deps.
+		//
+		// Example usage in CEL:
+		//   isRequired(node)
+		//   nodes.filter(n, isRequired(n))
+		cel.Function("isRequired",
+			cel.Overload("isRequired_node",
+				[]*cel.Type{cel.DynType},
+				cel.BoolType,
+				cel.UnaryBinding(func(val ref.Val) ref.Val {
+					status := extractImportStatus(val)
+					return types.Bool(status == 2) // IMPORT_STATUS_REQUIRED
+				}),
+			),
+		),
+
+		// isDeclared(node) returns true if the node is in the full module graph but not selected.
+		// These are "phantom" dependencies - latent supply chain risk.
+		//
+		// Example usage in CEL:
+		//   isDeclared(node)
+		//   nodes.filter(n, isDeclared(n) && hasVulnerabilities(n))
+		cel.Function("isDeclared",
+			cel.Overload("isDeclared_node",
+				[]*cel.Type{cel.DynType},
+				cel.BoolType,
+				cel.UnaryBinding(func(val ref.Val) ref.Val {
+					status := extractImportStatus(val)
+					return types.Bool(status == 3) // IMPORT_STATUS_DECLARED
+				}),
+			),
+		),
+
+		// importStatus(node) returns the import status as a string.
+		// Returns: "imported", "required", "declared", or "unknown".
+		//
+		// Example usage in CEL:
+		//   importStatus(node) == "declared"
+		//   nodes.filter(n, importStatus(n) in ["imported", "required"])
+		cel.Function("importStatus",
+			cel.Overload("importStatus_node",
+				[]*cel.Type{cel.DynType},
+				cel.StringType,
+				cel.UnaryBinding(func(val ref.Val) ref.Val {
+					status := extractImportStatus(val)
+					return types.String(importStatusToString(status))
 				}),
 			),
 		),
 	}
+}
+
+// severityAtLeastBinding is the CEL binding for severityAtLeast function.
+func severityAtLeastBinding(vulnVal, levelVal ref.Val) ref.Val {
+	threshold := strings.ToUpper(toString(levelVal))
+	actual := extractSeverityString(vulnVal)
+	return types.Bool(severityRank(actual) >= severityRank(threshold))
+}
+
+// isCriticalBinding is the CEL binding for isCritical function.
+func isCriticalBinding(val ref.Val) ref.Val {
+	actual := extractSeverityString(val)
+	return types.Bool(severityRank(actual) == 4) // CRITICAL = 4
+}
+
+// isHighOrAboveBinding is the CEL binding for isHighOrAbove function.
+func isHighOrAboveBinding(val ref.Val) ref.Val {
+	actual := extractSeverityString(val)
+	rank := severityRank(actual)
+	return types.Bool(rank >= 3) // HIGH = 3, CRITICAL = 4
 }
 
 // severityRank returns a numeric rank for severity ordering.
@@ -788,60 +760,61 @@ func severityRank(s string) int {
 	}
 }
 
-// extractSeverity extracts the severity string from a vulnerability map.
-func extractSeverity(vuln map[string]any) string {
-	if severity, ok := vuln["severity"].(string); ok {
-		return severity
+// extractSeverityString extracts the severity level as a string from a proto Finding.
+func extractSeverityString(val ref.Val) string {
+	finding := extractFindingProto(val)
+	if finding == nil {
+		return ""
 	}
-	if advisory, ok := vuln["advisory"].(map[string]any); ok {
-		if severity, ok := advisory["severity"].(map[string]any); ok {
-			if level, ok := severity["level"]; ok {
-				return severityLevelToString(level)
-			}
+	if advisory := finding.GetAdvisory(); advisory != nil {
+		if severity := advisory.GetSeverity(); severity != nil {
+			return severityLevelProtoToString(severity.GetLevel())
 		}
 	}
 	return ""
 }
 
-// evaluateSSVC derives SSVC decision from vulnerability data.
+// evaluateSSVC derives SSVC decision from a proto Finding message.
 func evaluateSSVC(val ref.Val) map[string]any {
-	// Extract vulnerability data
-	vuln := extractVulnMap(val)
+	finding := extractFindingProto(val)
+	if finding == nil {
+		return map[string]any{
+			"decision":  "track",
+			"reasoning": "Unable to evaluate: not a valid Finding proto",
+		}
+	}
 
 	input := ssvc.Input{
-		VulnerabilityID: getStringField(vuln, "id"),
+		VulnerabilityID: finding.GetAdvisoryId(),
 	}
 
 	// Derive exploitation status from KEV and EPSS
-	if getBoolField(vuln, "inKEV") {
+	if finding.GetInKev() {
 		input.Exploitation = ssvc.ExploitationActive
-	} else if epss := getFloatField(vuln, "epss"); epss > 0.1 {
+	} else if finding.GetEpss() > 0.1 {
 		input.Exploitation = ssvc.ExploitationPoC
 	} else {
 		input.Exploitation = ssvc.ExploitationNone
 	}
 
 	// Derive automatable from EPSS (high EPSS suggests automatable exploit)
-	if epss := getFloatField(vuln, "epss"); epss > 0.5 {
+	if finding.GetEpss() > 0.5 {
 		input.Automatable = ssvc.AutomatableYes
 	} else {
 		input.Automatable = ssvc.AutomatableNo
 	}
 
 	// Derive technical impact from severity
-	severity := strings.ToUpper(getStringField(vuln, "severity"))
-	if severity == "CRITICAL" || severity == "HIGH" {
-		input.TechnicalImpact = ssvc.TechnicalImpactTotal
-	} else {
-		input.TechnicalImpact = ssvc.TechnicalImpactPartial
-	}
-
-	// Allow explicit overrides if provided
-	if mp := getStringField(vuln, "mission_prevalence"); mp != "" {
-		input.MissionPrevalence = ssvc.MissionPrevalence(mp)
-	}
-	if pwi := getStringField(vuln, "public_wellbeing_impact"); pwi != "" {
-		input.PublicWellbeingImpact = ssvc.PublicWellbeingImpact(pwi)
+	if advisory := finding.GetAdvisory(); advisory != nil {
+		if severity := advisory.GetSeverity(); severity != nil {
+			level := severity.GetLevel()
+			if level == vulnerabilityv1.SeverityLevel_SEVERITY_LEVEL_CRITICAL ||
+				level == vulnerabilityv1.SeverityLevel_SEVERITY_LEVEL_HIGH {
+				input.TechnicalImpact = ssvc.TechnicalImpactTotal
+			} else {
+				input.TechnicalImpact = ssvc.TechnicalImpactPartial
+			}
+		}
 	}
 
 	// Evaluate using the deployer decision tree
@@ -849,6 +822,27 @@ func evaluateSSVC(val ref.Val) map[string]any {
 	result := tree.Decide(context.Background(), input)
 
 	return result.ToMap()
+}
+
+// extractFindingProto attempts to extract a *vulnerabilityv1.Finding from a CEL value.
+// Returns nil if the value is not a Finding proto.
+func extractFindingProto(val ref.Val) *vulnerabilityv1.Finding {
+	if val == nil {
+		return nil
+	}
+	// Try direct proto message extraction
+	if msg, ok := val.Value().(proto.Message); ok {
+		if finding, ok := msg.(*vulnerabilityv1.Finding); ok {
+			return finding
+		}
+	}
+	// Try native conversion
+	if native, err := val.ConvertToNative(reflect.TypeOf((*vulnerabilityv1.Finding)(nil))); err == nil {
+		if finding, ok := native.(*vulnerabilityv1.Finding); ok {
+			return finding
+		}
+	}
+	return nil
 }
 
 // extractVulnMap extracts a map from a CEL value.
@@ -1209,5 +1203,67 @@ func severityIntToString(level int32) string {
 		return "CRITICAL"
 	default:
 		return "UNKNOWN"
+	}
+}
+
+// severityLevelProtoToString converts a proto SeverityLevel enum to a string.
+func severityLevelProtoToString(level vulnerabilityv1.SeverityLevel) string {
+	switch level {
+	case vulnerabilityv1.SeverityLevel_SEVERITY_LEVEL_CRITICAL:
+		return "CRITICAL"
+	case vulnerabilityv1.SeverityLevel_SEVERITY_LEVEL_HIGH:
+		return "HIGH"
+	case vulnerabilityv1.SeverityLevel_SEVERITY_LEVEL_MEDIUM:
+		return "MEDIUM"
+	case vulnerabilityv1.SeverityLevel_SEVERITY_LEVEL_LOW:
+		return "LOW"
+	default:
+		return "UNSPECIFIED"
+	}
+}
+
+// extractImportStatus extracts the import_status field from a node.
+// Returns the numeric value: 0=unspecified, 1=imported, 2=required, 3=declared.
+func extractImportStatus(val ref.Val) int32 {
+	node := extractNodeFromMap(val)
+	if node == nil {
+		return 0
+	}
+	// Try import_status field (snake_case from proto)
+	if status, ok := node["import_status"]; ok {
+		switch s := status.(type) {
+		case int32:
+			return s
+		case int64:
+			return int32(s)
+		case int:
+			return int32(s)
+		}
+	}
+	// Try importStatus field (camelCase)
+	if status, ok := node["importStatus"]; ok {
+		switch s := status.(type) {
+		case int32:
+			return s
+		case int64:
+			return int32(s)
+		case int:
+			return int32(s)
+		}
+	}
+	return 0
+}
+
+// importStatusToString converts an import status int to a string.
+func importStatusToString(status int32) string {
+	switch status {
+	case 1:
+		return "imported"
+	case 2:
+		return "required"
+	case 3:
+		return "declared"
+	default:
+		return "unknown"
 	}
 }

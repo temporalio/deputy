@@ -1,0 +1,112 @@
+// Copyright 2025 Kent "picat" Gruber. All rights reserved.
+// SPDX-License-Identifier: MIT
+
+syntax = "proto3";
+
+package deputy.triage.v1;
+
+import "buf/validate/validate.proto";
+import "google/protobuf/timestamp.proto";
+import "deputy/target/v1/target.proto";
+import "deputy/vulnerability/v1/vulnerability.proto";
+
+option go_package = "github.com/picatz/deputy/gen/deputy/triage/v1;triagev1";
+
+// TriageService provides vulnerability triage and prioritization capabilities.
+//
+// Triage aggregates vulnerabilities by package, prioritizes by severity and
+// exploitability, and provides actionable summaries for security teams.
+service TriageService {
+  // Triage analyzes vulnerabilities and produces a prioritized summary.
+  rpc Triage(TriageRequest) returns (TriageResponse);
+}
+
+// TriageRequest specifies what to triage and how.
+message TriageRequest {
+  // Target is the scan target (path, URL, image reference, etc.).
+  string target = 1;
+
+  // Options configure triage behavior.
+  TriageOptions options = 2;
+}
+
+// TriageOptions configures triage behavior.
+message TriageOptions {
+  // Ecosystems filters to specific package ecosystems.
+  repeated string ecosystems = 1;
+
+  // PublishedBefore filters to vulnerabilities published before this timestamp.
+  google.protobuf.Timestamp published_before = 2;
+
+  // PublishedAfter filters to vulnerabilities published after this timestamp.
+  google.protobuf.Timestamp published_after = 3;
+
+  // IgnoreUnfixed excludes vulnerabilities without available fixes.
+  bool ignore_unfixed = 4;
+
+  // Ref is a Git reference to scan (branch, tag, commit).
+  string ref = 5;
+
+  // MaxPackages limits the number of packages in the summary (default: 10).
+  int32 max_packages = 6;
+}
+
+// TriageResponse contains the triage analysis results.
+message TriageResponse {
+  // Target describes what was triaged.
+  deputy.target.v1.Target target = 1;
+
+  // Stats summarizes vulnerability counts.
+  deputy.vulnerability.v1.Stats stats = 2;
+
+  // TopPackages are the most important packages to address, sorted by priority.
+  repeated PackageSummary top_packages = 3;
+
+  // PackagesWithVulns is the total number of packages with vulnerabilities.
+  int32 packages_with_vulns = 4;
+
+  // GeneratedAt is when this triage was performed.
+  google.protobuf.Timestamp generated_at = 5;
+
+  // Warnings contains non-fatal issues encountered during triage.
+  repeated string warnings = 6;
+}
+
+// PackageSummary represents a summary of a single package's vulnerabilities.
+message PackageSummary {
+  // Package is the package name.
+  string package = 1;
+
+  // Version is the installed version.
+  string version = 2;
+
+  // Severity is the highest severity affecting this package.
+  string severity = 3;
+
+  // SeverityType indicates the severity source (CVSS_V3, CVSS_V2, GHSA, etc.).
+  string severity_type = 4;
+
+  // FixVersion is the recommended version to upgrade to.
+  string fix_version = 5;
+
+  // IsDirect indicates whether this is a direct dependency.
+  bool is_direct = 6;
+
+  // Summary is a brief description of the most critical vulnerability.
+  string summary = 7;
+
+  // SampleIds contains example vulnerability IDs (CVE/GHSA) affecting this package.
+  repeated string sample_ids = 8;
+
+  // AffectedImports lists vulnerable imports/symbols (primarily for Go).
+  repeated deputy.vulnerability.v1.AffectedImport affected_imports = 9;
+
+  // DatabaseSpecific contains ecosystem-specific metadata (e.g., review_status).
+  map<string, string> database_specific = 10;
+
+  // VulnerabilityCount is the total number of vulnerabilities in this package.
+  int32 vulnerability_count = 11;
+
+  // SeverityCounts maps severity level to count (CRITICAL, HIGH, MED, LOW).
+  map<string, int32> severity_counts = 12;
+}

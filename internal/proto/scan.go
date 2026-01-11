@@ -1,14 +1,17 @@
 package proto
 
 import (
+	"strings"
 	"time"
 
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	dependencyv1 "github.com/picatz/deputy/gen/deputy/dependency/v1"
+	policyv1 "github.com/picatz/deputy/gen/deputy/policy/v1"
 	scanv1 "github.com/picatz/deputy/gen/deputy/scan/v1"
 	vulnerabilityv1 "github.com/picatz/deputy/gen/deputy/vulnerability/v1"
 	"github.com/picatz/deputy/internal/dependency"
+	"github.com/picatz/deputy/internal/policy"
 	"github.com/picatz/deputy/internal/scanning"
 	"github.com/picatz/deputy/internal/vulnerability"
 )
@@ -34,6 +37,10 @@ func FindingToProto(f vulnerability.Finding, advisory *vulnerabilityv1.Advisory)
 		Package:         PackageToProto(f),
 		Affected:        f.Affected,
 		AffectedImports: AffectedImportsToProto(f.AffectedImports),
+		// Enrichment fields
+		Epss:           f.EPSS,
+		EpssPercentile: f.EPSSPercentile,
+		InKev:          f.InKEV,
 	}
 
 	if advisory != nil {
@@ -53,6 +60,10 @@ func FindingFromProto(f *vulnerabilityv1.Finding) vulnerability.Finding {
 		AdvisoryID:      f.AdvisoryId,
 		Affected:        f.Affected,
 		AffectedImports: AffectedImportsFromProto(f.AffectedImports),
+		// Enrichment fields
+		EPSS:           f.Epss,
+		EPSSPercentile: f.EpssPercentile,
+		InKEV:          f.InKev,
 	}
 
 	if f.Package != nil {
@@ -117,14 +128,22 @@ func ScanningResultToProto(r *scanning.Result) *scanv1.ScanResponse {
 	// Calculate stats from findings using consolidation
 	stats := vulnerability.ConsolidateAll(r.Findings, r.Advisories).Stats
 
+	// Use PackagesScanned if set (survives proto round-trips), else fall back to len(Packages)
+	pkgCount := r.PackagesScanned
+	if pkgCount == 0 && len(r.Packages) > 0 {
+		pkgCount = len(r.Packages)
+	}
+
 	return &scanv1.ScanResponse{
 		Target:          InventoryTargetToProto(r.Target),
 		GeneratedAt:     timestamppb.New(r.GeneratedAt),
-		PackagesScanned: int32(len(r.Packages)),
+		PackagesScanned: int32(pkgCount),
 		Findings:        FindingsToProto(r.Findings, r.Advisories),
 		Advisories:      AdvisoriesToProto(r.Advisories),
 		Stats:           StatsToProto(stats),
 		ImageInfo:       ImageInfoToScanProto(r.ImageInfo),
+		DockerfileInfo:  DockerfileInfoWithAnalysisToProto(r.DockerfileInfo, r.DockerfileAnalysis),
+		Warnings:        r.Warnings,
 	}
 }
 
@@ -147,13 +166,14 @@ func ScanningResultFromProto(r *scanv1.ScanResponse) *scanning.Result {
 	return &scanning.Result{
 		Target:             InventoryTargetFromProto(r.Target),
 		Packages:           nil, // Not in proto response
+		PackagesScanned:    int(r.PackagesScanned),
 		Direct:             nil, // Not in proto response
 		Findings:           findings,
 		Advisories:         advisories,
 		Stats:              stats,
 		ImageInfo:          ImageInfoFromScanProto(r.ImageInfo),
 		DockerfileInfo:     DockerfileInfoFromProto(r.DockerfileInfo),
-		DockerfileAnalysis: nil, // Not in proto response
+		DockerfileAnalysis: DockerfileAnalysisFromProtoNested(r.DockerfileInfo),
 		Warnings:           r.Warnings,
 		GeneratedAt:        generatedAt,
 	}
@@ -181,4 +201,36 @@ func StatsFromProto(s *vulnerabilityv1.Stats) vulnerabilityv1.Stats {
 		return vulnerabilityv1.Stats{}
 	}
 	return *s
+}
+
+// PolicyActionsToProto converts internal policy.Action slice to proto Action slice.
+func PolicyActionsToProto(actions []policy.Action) []*policyv1.Action {
+	if len(actions) == 0 {
+		return nil
+	}
+	out := make([]*policyv1.Action, len(actions))
+	for i, a := range actions {
+		out[i] = &policyv1.Action{
+			Type:        policyActionTypeToProto(a.Type),
+			PolicyName:  a.Source,
+			RuleName:    "", // internal Action doesn't have a separate rule name
+			Reason:      a.Reason,
+			Remediation: a.Remediation,
+		}
+	}
+	return out
+}
+
+// policyActionTypeToProto converts action type string to proto enum.
+func policyActionTypeToProto(actionType string) policyv1.ActionType {
+	switch strings.ToLower(actionType) {
+	case "deny":
+		return policyv1.ActionType_ACTION_TYPE_DENY
+	case "warn":
+		return policyv1.ActionType_ACTION_TYPE_WARN
+	case "allow":
+		return policyv1.ActionType_ACTION_TYPE_ALLOW
+	default:
+		return policyv1.ActionType_ACTION_TYPE_UNSPECIFIED
+	}
 }

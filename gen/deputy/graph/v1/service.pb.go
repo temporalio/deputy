@@ -93,6 +93,79 @@ func (Scope) EnumDescriptor() ([]byte, []int) {
 	return file_deputy_graph_v1_service_proto_rawDescGZIP(), []int{0}
 }
 
+// ImportStatus indicates how a dependency is included in the project.
+// This is critical for understanding supply chain risk:
+//   - IMPORTED: Actively used by your code (highest risk if vulnerable)
+//   - REQUIRED: Listed in go.mod but not directly imported (medium risk)
+//   - DECLARED: In full module graph but not in final build (latent risk)
+//
+// The distinction matters for security scanning:
+//   - Traditional SCA scans REQUIRED dependencies (what's in go.mod/lockfile)
+//   - Extended mode adds DECLARED dependencies (full supply chain surface)
+//   - Reachability analysis focuses on IMPORTED (actual runtime risk)
+type ImportStatus int32
+
+const (
+	// Unspecified import status.
+	ImportStatus_IMPORT_STATUS_UNSPECIFIED ImportStatus = 0
+	// Package is actively imported by the project's source code.
+	// These packages are compiled into the final binary and represent
+	// the actual runtime attack surface.
+	ImportStatus_IMPORT_STATUS_IMPORTED ImportStatus = 1
+	// Package is listed in go.mod/lockfile but not directly imported.
+	// These packages are selected by MVS but may only be used by
+	// transitive dependencies. They appear in go list -m all output.
+	ImportStatus_IMPORT_STATUS_REQUIRED ImportStatus = 2
+	// Package appears in the full module graph (go mod graph) but is
+	// not in the final dependency selection. These represent "phantom"
+	// dependencies - they could be pulled in if a transitive dependency
+	// changes or if new imports are added.
+	ImportStatus_IMPORT_STATUS_DECLARED ImportStatus = 3
+)
+
+// Enum value maps for ImportStatus.
+var (
+	ImportStatus_name = map[int32]string{
+		0: "IMPORT_STATUS_UNSPECIFIED",
+		1: "IMPORT_STATUS_IMPORTED",
+		2: "IMPORT_STATUS_REQUIRED",
+		3: "IMPORT_STATUS_DECLARED",
+	}
+	ImportStatus_value = map[string]int32{
+		"IMPORT_STATUS_UNSPECIFIED": 0,
+		"IMPORT_STATUS_IMPORTED":    1,
+		"IMPORT_STATUS_REQUIRED":    2,
+		"IMPORT_STATUS_DECLARED":    3,
+	}
+)
+
+func (x ImportStatus) Enum() *ImportStatus {
+	p := new(ImportStatus)
+	*p = x
+	return p
+}
+
+func (x ImportStatus) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (ImportStatus) Descriptor() protoreflect.EnumDescriptor {
+	return file_deputy_graph_v1_service_proto_enumTypes[1].Descriptor()
+}
+
+func (ImportStatus) Type() protoreflect.EnumType {
+	return &file_deputy_graph_v1_service_proto_enumTypes[1]
+}
+
+func (x ImportStatus) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use ImportStatus.Descriptor instead.
+func (ImportStatus) EnumDescriptor() ([]byte, []int) {
+	return file_deputy_graph_v1_service_proto_rawDescGZIP(), []int{1}
+}
+
 // BuildGraphRequest specifies graph construction parameters.
 type BuildGraphRequest struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
@@ -169,7 +242,23 @@ type GraphOptions struct {
 	// Platform specifies target platform for container images.
 	Platform string `protobuf:"bytes,7,opt,name=platform,proto3" json:"platform,omitempty"`
 	// TargetHint provides disambiguation when the target string is ambiguous.
-	TargetHint    v1.TargetKind `protobuf:"varint,8,opt,name=target_hint,json=targetHint,proto3,enum=deputy.target.v1.TargetKind" json:"target_hint,omitempty"`
+	TargetHint v1.TargetKind `protobuf:"varint,8,opt,name=target_hint,json=targetHint,proto3,enum=deputy.target.v1.TargetKind" json:"target_hint,omitempty"`
+	// Extended enables "extended mode" which includes the full module requirement
+	// graph, not just packages that end up in the final build.
+	//
+	// In Go, this parses `go mod graph` output to include:
+	//   - DECLARED dependencies: modules required by transitive deps but not
+	//     selected by MVS (these could become active if deps change)
+	//   - Differentiates IMPORTED (in binary) vs REQUIRED (in go.mod) vs DECLARED
+	//
+	// Use cases:
+	//   - Supply chain risk analysis: "what COULD be pulled in?"
+	//   - Proactive vulnerability scanning: find issues before they affect you
+	//   - OSSF MAL package detection in any declared dependency
+	//   - Understanding the full dependency surface area
+	//
+	// Default is false (standard mode showing only packages in final build).
+	Extended      bool `protobuf:"varint,9,opt,name=extended,proto3" json:"extended,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -258,6 +347,13 @@ func (x *GraphOptions) GetTargetHint() v1.TargetKind {
 		return x.TargetHint
 	}
 	return v1.TargetKind(0)
+}
+
+func (x *GraphOptions) GetExtended() bool {
+	if x != nil {
+		return x.Extended
+	}
+	return false
 }
 
 // BuildGraphResponse contains the constructed dependency graph.
@@ -387,8 +483,13 @@ type Node struct {
 	VulnerabilityCount *VulnerabilityCount `protobuf:"bytes,8,opt,name=vulnerability_count,json=vulnerabilityCount,proto3" json:"vulnerability_count,omitempty"`
 	// Vulnerabilities contains full findings when include_vulnerabilities is set.
 	Vulnerabilities []*v11.Finding `protobuf:"bytes,9,rep,name=vulnerabilities,proto3" json:"vulnerabilities,omitempty"`
-	unknownFields   protoimpl.UnknownFields
-	sizeCache       protoimpl.SizeCache
+	// ImportStatus indicates how this dependency is included.
+	// Only populated when extended graph mode is enabled.
+	// See ImportStatus enum for details on the distinction between
+	// IMPORTED, REQUIRED, and DECLARED dependencies.
+	ImportStatus  ImportStatus `protobuf:"varint,10,opt,name=import_status,json=importStatus,proto3,enum=deputy.graph.v1.ImportStatus" json:"import_status,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *Node) Reset() {
@@ -482,6 +583,13 @@ func (x *Node) GetVulnerabilities() []*v11.Finding {
 		return x.Vulnerabilities
 	}
 	return nil
+}
+
+func (x *Node) GetImportStatus() ImportStatus {
+	if x != nil {
+		return x.ImportStatus
+	}
+	return ImportStatus_IMPORT_STATUS_UNSPECIFIED
 }
 
 // VulnerabilityCount summarizes vulnerability counts by severity.
@@ -657,14 +765,28 @@ type GraphStats struct {
 	DirectNodes int32 `protobuf:"varint,2,opt,name=direct_nodes,json=directNodes,proto3" json:"direct_nodes,omitempty"`
 	// TransitiveNodes is the count of transitive dependencies.
 	TransitiveNodes int32 `protobuf:"varint,3,opt,name=transitive_nodes,json=transitiveNodes,proto3" json:"transitive_nodes,omitempty"`
-	// MaxDepth is the maximum dependency depth.
+	// MaxDepth is the maximum dependency depth across all nodes.
+	// Note: Includes disconnected nodes (depth=999). Use max_connected_depth
+	// for the actual graph depth.
 	MaxDepth int32 `protobuf:"varint,4,opt,name=max_depth,json=maxDepth,proto3" json:"max_depth,omitempty"`
 	// VulnerableNodes is the count of packages with vulnerabilities.
 	VulnerableNodes int32 `protobuf:"varint,5,opt,name=vulnerable_nodes,json=vulnerableNodes,proto3" json:"vulnerable_nodes,omitempty"`
 	// Ecosystems maps ecosystem names to package counts.
-	Ecosystems    map[string]int32 `protobuf:"bytes,6,rep,name=ecosystems,proto3" json:"ecosystems,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"varint,2,opt,name=value"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	Ecosystems map[string]int32 `protobuf:"bytes,6,rep,name=ecosystems,proto3" json:"ecosystems,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"varint,2,opt,name=value"`
+	// MaxConnectedDepth is the maximum depth among connected nodes only.
+	// Excludes disconnected nodes (depth=999) which are packages discovered
+	// but not reachable from any direct dependency (e.g., GitHub Actions,
+	// container base images from Dockerfiles).
+	MaxConnectedDepth int32 `protobuf:"varint,7,opt,name=max_connected_depth,json=maxConnectedDepth,proto3" json:"max_connected_depth,omitempty"`
+	// DisconnectedNodes is the count of packages with no path from any root.
+	// These are typically packages from non-dependency sources like GitHub
+	// Actions workflows, Dockerfile base images, or binary extraction.
+	DisconnectedNodes int32 `protobuf:"varint,8,opt,name=disconnected_nodes,json=disconnectedNodes,proto3" json:"disconnected_nodes,omitempty"`
+	// ImportStatusCounts tracks node counts by import status.
+	// Only populated when extended mode is enabled.
+	ImportStatusCounts *ImportStatusCounts `protobuf:"bytes,9,opt,name=import_status_counts,json=importStatusCounts,proto3" json:"import_status_counts,omitempty"`
+	unknownFields      protoimpl.UnknownFields
+	sizeCache          protoimpl.SizeCache
 }
 
 func (x *GraphStats) Reset() {
@@ -739,6 +861,95 @@ func (x *GraphStats) GetEcosystems() map[string]int32 {
 	return nil
 }
 
+func (x *GraphStats) GetMaxConnectedDepth() int32 {
+	if x != nil {
+		return x.MaxConnectedDepth
+	}
+	return 0
+}
+
+func (x *GraphStats) GetDisconnectedNodes() int32 {
+	if x != nil {
+		return x.DisconnectedNodes
+	}
+	return 0
+}
+
+func (x *GraphStats) GetImportStatusCounts() *ImportStatusCounts {
+	if x != nil {
+		return x.ImportStatusCounts
+	}
+	return nil
+}
+
+// ImportStatusCounts tracks node counts by import status.
+// Only populated when extended graph mode is enabled.
+type ImportStatusCounts struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Imported is the count of packages actively imported by source code.
+	// These are compiled into the binary (highest security relevance).
+	Imported int32 `protobuf:"varint,1,opt,name=imported,proto3" json:"imported,omitempty"`
+	// Required is the count of packages in go.mod/lockfile but not imported.
+	// These are selected by MVS but may only be transitive deps.
+	Required int32 `protobuf:"varint,2,opt,name=required,proto3" json:"required,omitempty"`
+	// Declared is the count of packages in full module graph but not selected.
+	// These are "phantom" dependencies - latent supply chain risk.
+	Declared      int32 `protobuf:"varint,3,opt,name=declared,proto3" json:"declared,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ImportStatusCounts) Reset() {
+	*x = ImportStatusCounts{}
+	mi := &file_deputy_graph_v1_service_proto_msgTypes[7]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ImportStatusCounts) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ImportStatusCounts) ProtoMessage() {}
+
+func (x *ImportStatusCounts) ProtoReflect() protoreflect.Message {
+	mi := &file_deputy_graph_v1_service_proto_msgTypes[7]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ImportStatusCounts.ProtoReflect.Descriptor instead.
+func (*ImportStatusCounts) Descriptor() ([]byte, []int) {
+	return file_deputy_graph_v1_service_proto_rawDescGZIP(), []int{7}
+}
+
+func (x *ImportStatusCounts) GetImported() int32 {
+	if x != nil {
+		return x.Imported
+	}
+	return 0
+}
+
+func (x *ImportStatusCounts) GetRequired() int32 {
+	if x != nil {
+		return x.Required
+	}
+	return 0
+}
+
+func (x *ImportStatusCounts) GetDeclared() int32 {
+	if x != nil {
+		return x.Declared
+	}
+	return 0
+}
+
 // WhyDependencyRequest asks why a specific dependency exists.
 type WhyDependencyRequest struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
@@ -755,7 +966,7 @@ type WhyDependencyRequest struct {
 
 func (x *WhyDependencyRequest) Reset() {
 	*x = WhyDependencyRequest{}
-	mi := &file_deputy_graph_v1_service_proto_msgTypes[7]
+	mi := &file_deputy_graph_v1_service_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -767,7 +978,7 @@ func (x *WhyDependencyRequest) String() string {
 func (*WhyDependencyRequest) ProtoMessage() {}
 
 func (x *WhyDependencyRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_deputy_graph_v1_service_proto_msgTypes[7]
+	mi := &file_deputy_graph_v1_service_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -780,7 +991,7 @@ func (x *WhyDependencyRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use WhyDependencyRequest.ProtoReflect.Descriptor instead.
 func (*WhyDependencyRequest) Descriptor() ([]byte, []int) {
-	return file_deputy_graph_v1_service_proto_rawDescGZIP(), []int{7}
+	return file_deputy_graph_v1_service_proto_rawDescGZIP(), []int{8}
 }
 
 func (x *WhyDependencyRequest) GetTarget() string {
@@ -823,7 +1034,7 @@ type WhyDependencyResponse struct {
 
 func (x *WhyDependencyResponse) Reset() {
 	*x = WhyDependencyResponse{}
-	mi := &file_deputy_graph_v1_service_proto_msgTypes[8]
+	mi := &file_deputy_graph_v1_service_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -835,7 +1046,7 @@ func (x *WhyDependencyResponse) String() string {
 func (*WhyDependencyResponse) ProtoMessage() {}
 
 func (x *WhyDependencyResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_deputy_graph_v1_service_proto_msgTypes[8]
+	mi := &file_deputy_graph_v1_service_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -848,7 +1059,7 @@ func (x *WhyDependencyResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use WhyDependencyResponse.ProtoReflect.Descriptor instead.
 func (*WhyDependencyResponse) Descriptor() ([]byte, []int) {
-	return file_deputy_graph_v1_service_proto_rawDescGZIP(), []int{8}
+	return file_deputy_graph_v1_service_proto_rawDescGZIP(), []int{9}
 }
 
 func (x *WhyDependencyResponse) GetTarget() *v1.Target {
@@ -899,7 +1110,7 @@ type DependencyPath struct {
 
 func (x *DependencyPath) Reset() {
 	*x = DependencyPath{}
-	mi := &file_deputy_graph_v1_service_proto_msgTypes[9]
+	mi := &file_deputy_graph_v1_service_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -911,7 +1122,7 @@ func (x *DependencyPath) String() string {
 func (*DependencyPath) ProtoMessage() {}
 
 func (x *DependencyPath) ProtoReflect() protoreflect.Message {
-	mi := &file_deputy_graph_v1_service_proto_msgTypes[9]
+	mi := &file_deputy_graph_v1_service_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -924,7 +1135,7 @@ func (x *DependencyPath) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DependencyPath.ProtoReflect.Descriptor instead.
 func (*DependencyPath) Descriptor() ([]byte, []int) {
-	return file_deputy_graph_v1_service_proto_rawDescGZIP(), []int{9}
+	return file_deputy_graph_v1_service_proto_rawDescGZIP(), []int{10}
 }
 
 func (x *DependencyPath) GetNodes() []*PathNode {
@@ -956,7 +1167,7 @@ type PathNode struct {
 
 func (x *PathNode) Reset() {
 	*x = PathNode{}
-	mi := &file_deputy_graph_v1_service_proto_msgTypes[10]
+	mi := &file_deputy_graph_v1_service_proto_msgTypes[11]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -968,7 +1179,7 @@ func (x *PathNode) String() string {
 func (*PathNode) ProtoMessage() {}
 
 func (x *PathNode) ProtoReflect() protoreflect.Message {
-	mi := &file_deputy_graph_v1_service_proto_msgTypes[10]
+	mi := &file_deputy_graph_v1_service_proto_msgTypes[11]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -981,7 +1192,7 @@ func (x *PathNode) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PathNode.ProtoReflect.Descriptor instead.
 func (*PathNode) Descriptor() ([]byte, []int) {
-	return file_deputy_graph_v1_service_proto_rawDescGZIP(), []int{10}
+	return file_deputy_graph_v1_service_proto_rawDescGZIP(), []int{11}
 }
 
 func (x *PathNode) GetPurl() string {
@@ -1005,6 +1216,127 @@ func (x *PathNode) GetVersion() string {
 	return ""
 }
 
+// WhyDependencyListResponse wraps multiple WhyDependencyResponse objects.
+// Used when a CLI search matches multiple packages (fuzzy matching).
+type WhyDependencyListResponse struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Results contains a response for each matched dependency.
+	Results       []*WhyDependencyResponse `protobuf:"bytes,1,rep,name=results,proto3" json:"results,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *WhyDependencyListResponse) Reset() {
+	*x = WhyDependencyListResponse{}
+	mi := &file_deputy_graph_v1_service_proto_msgTypes[12]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *WhyDependencyListResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*WhyDependencyListResponse) ProtoMessage() {}
+
+func (x *WhyDependencyListResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_deputy_graph_v1_service_proto_msgTypes[12]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use WhyDependencyListResponse.ProtoReflect.Descriptor instead.
+func (*WhyDependencyListResponse) Descriptor() ([]byte, []int) {
+	return file_deputy_graph_v1_service_proto_rawDescGZIP(), []int{12}
+}
+
+func (x *WhyDependencyListResponse) GetResults() []*WhyDependencyResponse {
+	if x != nil {
+		return x.Results
+	}
+	return nil
+}
+
+// NeedsDependencyResponse shows what packages depend on a given package.
+// Used by the "graph needs" command for reverse dependency lookup.
+type NeedsDependencyResponse struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Package is the queried package name.
+	Package string `protobuf:"bytes,1,opt,name=package,proto3" json:"package,omitempty"`
+	// Version is the package version if specified.
+	Version string `protobuf:"bytes,2,opt,name=version,proto3" json:"version,omitempty"`
+	// Purl is the Package URL of the queried package.
+	Purl string `protobuf:"bytes,3,opt,name=purl,proto3" json:"purl,omitempty"`
+	// Dependents are packages that depend on this package.
+	Dependents    []*Node `protobuf:"bytes,4,rep,name=dependents,proto3" json:"dependents,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *NeedsDependencyResponse) Reset() {
+	*x = NeedsDependencyResponse{}
+	mi := &file_deputy_graph_v1_service_proto_msgTypes[13]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *NeedsDependencyResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*NeedsDependencyResponse) ProtoMessage() {}
+
+func (x *NeedsDependencyResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_deputy_graph_v1_service_proto_msgTypes[13]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use NeedsDependencyResponse.ProtoReflect.Descriptor instead.
+func (*NeedsDependencyResponse) Descriptor() ([]byte, []int) {
+	return file_deputy_graph_v1_service_proto_rawDescGZIP(), []int{13}
+}
+
+func (x *NeedsDependencyResponse) GetPackage() string {
+	if x != nil {
+		return x.Package
+	}
+	return ""
+}
+
+func (x *NeedsDependencyResponse) GetVersion() string {
+	if x != nil {
+		return x.Version
+	}
+	return ""
+}
+
+func (x *NeedsDependencyResponse) GetPurl() string {
+	if x != nil {
+		return x.Purl
+	}
+	return ""
+}
+
+func (x *NeedsDependencyResponse) GetDependents() []*Node {
+	if x != nil {
+		return x.Dependents
+	}
+	return nil
+}
+
 // QueryGraphRequest filters a dependency graph.
 type QueryGraphRequest struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
@@ -1020,7 +1352,7 @@ type QueryGraphRequest struct {
 
 func (x *QueryGraphRequest) Reset() {
 	*x = QueryGraphRequest{}
-	mi := &file_deputy_graph_v1_service_proto_msgTypes[11]
+	mi := &file_deputy_graph_v1_service_proto_msgTypes[14]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1032,7 +1364,7 @@ func (x *QueryGraphRequest) String() string {
 func (*QueryGraphRequest) ProtoMessage() {}
 
 func (x *QueryGraphRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_deputy_graph_v1_service_proto_msgTypes[11]
+	mi := &file_deputy_graph_v1_service_proto_msgTypes[14]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1045,7 +1377,7 @@ func (x *QueryGraphRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use QueryGraphRequest.ProtoReflect.Descriptor instead.
 func (*QueryGraphRequest) Descriptor() ([]byte, []int) {
-	return file_deputy_graph_v1_service_proto_rawDescGZIP(), []int{11}
+	return file_deputy_graph_v1_service_proto_rawDescGZIP(), []int{14}
 }
 
 func (x *QueryGraphRequest) GetTarget() string {
@@ -1094,7 +1426,7 @@ type GraphFilter struct {
 
 func (x *GraphFilter) Reset() {
 	*x = GraphFilter{}
-	mi := &file_deputy_graph_v1_service_proto_msgTypes[12]
+	mi := &file_deputy_graph_v1_service_proto_msgTypes[15]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1106,7 +1438,7 @@ func (x *GraphFilter) String() string {
 func (*GraphFilter) ProtoMessage() {}
 
 func (x *GraphFilter) ProtoReflect() protoreflect.Message {
-	mi := &file_deputy_graph_v1_service_proto_msgTypes[12]
+	mi := &file_deputy_graph_v1_service_proto_msgTypes[15]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1119,7 +1451,7 @@ func (x *GraphFilter) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GraphFilter.ProtoReflect.Descriptor instead.
 func (*GraphFilter) Descriptor() ([]byte, []int) {
-	return file_deputy_graph_v1_service_proto_rawDescGZIP(), []int{12}
+	return file_deputy_graph_v1_service_proto_rawDescGZIP(), []int{15}
 }
 
 func (x *GraphFilter) GetEcosystems() []string {
@@ -1197,7 +1529,7 @@ type QueryGraphResponse struct {
 
 func (x *QueryGraphResponse) Reset() {
 	*x = QueryGraphResponse{}
-	mi := &file_deputy_graph_v1_service_proto_msgTypes[13]
+	mi := &file_deputy_graph_v1_service_proto_msgTypes[16]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1209,7 +1541,7 @@ func (x *QueryGraphResponse) String() string {
 func (*QueryGraphResponse) ProtoMessage() {}
 
 func (x *QueryGraphResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_deputy_graph_v1_service_proto_msgTypes[13]
+	mi := &file_deputy_graph_v1_service_proto_msgTypes[16]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1222,7 +1554,7 @@ func (x *QueryGraphResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use QueryGraphResponse.ProtoReflect.Descriptor instead.
 func (*QueryGraphResponse) Descriptor() ([]byte, []int) {
-	return file_deputy_graph_v1_service_proto_rawDescGZIP(), []int{13}
+	return file_deputy_graph_v1_service_proto_rawDescGZIP(), []int{16}
 }
 
 func (x *QueryGraphResponse) GetTarget() *v1.Target {
@@ -1267,7 +1599,7 @@ const file_deputy_graph_v1_service_proto_rawDesc = "" +
 	"\x1ddeputy/graph/v1/service.proto\x12\x0fdeputy.graph.v1\x1a\x1bbuf/validate/validate.proto\x1a\x1fgoogle/protobuf/timestamp.proto\x1a\x1ddeputy/target/v1/target.proto\x1a+deputy/vulnerability/v1/vulnerability.proto\"d\n" +
 	"\x11BuildGraphRequest\x12\x16\n" +
 	"\x06target\x18\x01 \x01(\tR\x06target\x127\n" +
-	"\aoptions\x18\x02 \x01(\v2\x1d.deputy.graph.v1.GraphOptionsR\aoptions\"\xb5\x02\n" +
+	"\aoptions\x18\x02 \x01(\v2\x1d.deputy.graph.v1.GraphOptionsR\aoptions\"\xd1\x02\n" +
 	"\fGraphOptions\x12\x1e\n" +
 	"\n" +
 	"ecosystems\x18\x01 \x03(\tR\n" +
@@ -1279,7 +1611,8 @@ const file_deputy_graph_v1_service_proto_rawDesc = "" +
 	"\x03ref\x18\x06 \x01(\tR\x03ref\x12\x1a\n" +
 	"\bplatform\x18\a \x01(\tR\bplatform\x12=\n" +
 	"\vtarget_hint\x18\b \x01(\x0e2\x1c.deputy.target.v1.TargetKindR\n" +
-	"targetHint\"\xc4\x02\n" +
+	"targetHint\x12\x1a\n" +
+	"\bextended\x18\t \x01(\bR\bextended\"\xc4\x02\n" +
 	"\x12BuildGraphResponse\x120\n" +
 	"\x06target\x18\x01 \x01(\v2\x18.deputy.target.v1.TargetR\x06target\x12=\n" +
 	"\fgenerated_at\x18\x02 \x01(\v2\x1a.google.protobuf.TimestampR\vgeneratedAt\x12+\n" +
@@ -1287,7 +1620,7 @@ const file_deputy_graph_v1_service_proto_rawDesc = "" +
 	"\x05edges\x18\x04 \x03(\v2\x15.deputy.graph.v1.EdgeR\x05edges\x12\x14\n" +
 	"\x05roots\x18\x05 \x03(\tR\x05roots\x121\n" +
 	"\x05stats\x18\x06 \x01(\v2\x1b.deputy.graph.v1.GraphStatsR\x05stats\x12\x1a\n" +
-	"\bwarnings\x18\a \x03(\tR\bwarnings\"\xdd\x02\n" +
+	"\bwarnings\x18\a \x03(\tR\bwarnings\"\xa1\x03\n" +
 	"\x04Node\x12\x1b\n" +
 	"\x04purl\x18\x01 \x01(\tB\a\xbaH\x04r\x02\x10\x01R\x04purl\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12\x18\n" +
@@ -1297,7 +1630,9 @@ const file_deputy_graph_v1_service_proto_rawDesc = "" +
 	"\x05depth\x18\x06 \x01(\x05R\x05depth\x12\x1c\n" +
 	"\tlocations\x18\a \x03(\tR\tlocations\x12T\n" +
 	"\x13vulnerability_count\x18\b \x01(\v2#.deputy.graph.v1.VulnerabilityCountR\x12vulnerabilityCount\x12J\n" +
-	"\x0fvulnerabilities\x18\t \x03(\v2 .deputy.vulnerability.v1.FindingR\x0fvulnerabilities\"\x9e\x01\n" +
+	"\x0fvulnerabilities\x18\t \x03(\v2 .deputy.vulnerability.v1.FindingR\x0fvulnerabilities\x12B\n" +
+	"\rimport_status\x18\n" +
+	" \x01(\x0e2\x1d.deputy.graph.v1.ImportStatusR\fimportStatus\"\x9e\x01\n" +
 	"\x12VulnerabilityCount\x12\x1a\n" +
 	"\bcritical\x18\x01 \x01(\x05R\bcritical\x12\x12\n" +
 	"\x04high\x18\x02 \x01(\x05R\x04high\x12\x16\n" +
@@ -1311,7 +1646,7 @@ const file_deputy_graph_v1_service_proto_rawDesc = "" +
 	"\n" +
 	"constraint\x18\x03 \x01(\tR\n" +
 	"constraint\x12,\n" +
-	"\x05scope\x18\x04 \x01(\x0e2\x16.deputy.graph.v1.ScopeR\x05scope\"\xcf\x02\n" +
+	"\x05scope\x18\x04 \x01(\x0e2\x16.deputy.graph.v1.ScopeR\x05scope\"\x85\x04\n" +
 	"\n" +
 	"GraphStats\x12\x1f\n" +
 	"\vtotal_nodes\x18\x01 \x01(\x05R\n" +
@@ -1322,10 +1657,17 @@ const file_deputy_graph_v1_service_proto_rawDesc = "" +
 	"\x10vulnerable_nodes\x18\x05 \x01(\x05R\x0fvulnerableNodes\x12K\n" +
 	"\n" +
 	"ecosystems\x18\x06 \x03(\v2+.deputy.graph.v1.GraphStats.EcosystemsEntryR\n" +
-	"ecosystems\x1a=\n" +
+	"ecosystems\x12.\n" +
+	"\x13max_connected_depth\x18\a \x01(\x05R\x11maxConnectedDepth\x12-\n" +
+	"\x12disconnected_nodes\x18\b \x01(\x05R\x11disconnectedNodes\x12U\n" +
+	"\x14import_status_counts\x18\t \x01(\v2#.deputy.graph.v1.ImportStatusCountsR\x12importStatusCounts\x1a=\n" +
 	"\x0fEcosystemsEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
-	"\x05value\x18\x02 \x01(\x05R\x05value:\x028\x01\"\x90\x01\n" +
+	"\x05value\x18\x02 \x01(\x05R\x05value:\x028\x01\"h\n" +
+	"\x12ImportStatusCounts\x12\x1a\n" +
+	"\bimported\x18\x01 \x01(\x05R\bimported\x12\x1a\n" +
+	"\brequired\x18\x02 \x01(\x05R\brequired\x12\x1a\n" +
+	"\bdeclared\x18\x03 \x01(\x05R\bdeclared\"\x90\x01\n" +
 	"\x14WhyDependencyRequest\x12\x16\n" +
 	"\x06target\x18\x01 \x01(\tR\x06target\x12'\n" +
 	"\n" +
@@ -1346,7 +1688,16 @@ const file_deputy_graph_v1_service_proto_rawDesc = "" +
 	"\bPathNode\x12\x12\n" +
 	"\x04purl\x18\x01 \x01(\tR\x04purl\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12\x18\n" +
-	"\aversion\x18\x03 \x01(\tR\aversion\"\x9a\x01\n" +
+	"\aversion\x18\x03 \x01(\tR\aversion\"]\n" +
+	"\x19WhyDependencyListResponse\x12@\n" +
+	"\aresults\x18\x01 \x03(\v2&.deputy.graph.v1.WhyDependencyResponseR\aresults\"\x98\x01\n" +
+	"\x17NeedsDependencyResponse\x12\x18\n" +
+	"\apackage\x18\x01 \x01(\tR\apackage\x12\x18\n" +
+	"\aversion\x18\x02 \x01(\tR\aversion\x12\x12\n" +
+	"\x04purl\x18\x03 \x01(\tR\x04purl\x125\n" +
+	"\n" +
+	"dependents\x18\x04 \x03(\v2\x15.deputy.graph.v1.NodeR\n" +
+	"dependents\"\x9a\x01\n" +
 	"\x11QueryGraphRequest\x12\x16\n" +
 	"\x06target\x18\x01 \x01(\tR\x06target\x127\n" +
 	"\aoptions\x18\x02 \x01(\v2\x1d.deputy.graph.v1.GraphOptionsR\aoptions\x124\n" +
@@ -1376,7 +1727,12 @@ const file_deputy_graph_v1_service_proto_rawDesc = "" +
 	"\x0eSCOPE_OPTIONAL\x10\x03\x12\x0f\n" +
 	"\vSCOPE_BUILD\x10\x04\x12\x0e\n" +
 	"\n" +
-	"SCOPE_TEST\x10\x052\x9c\x02\n" +
+	"SCOPE_TEST\x10\x05*\x81\x01\n" +
+	"\fImportStatus\x12\x1d\n" +
+	"\x19IMPORT_STATUS_UNSPECIFIED\x10\x00\x12\x1a\n" +
+	"\x16IMPORT_STATUS_IMPORTED\x10\x01\x12\x1a\n" +
+	"\x16IMPORT_STATUS_REQUIRED\x10\x02\x12\x1a\n" +
+	"\x16IMPORT_STATUS_DECLARED\x10\x032\x9c\x02\n" +
 	"\fGraphService\x12U\n" +
 	"\n" +
 	"BuildGraph\x12\".deputy.graph.v1.BuildGraphRequest\x1a#.deputy.graph.v1.BuildGraphResponse\x12^\n" +
@@ -1397,63 +1753,71 @@ func file_deputy_graph_v1_service_proto_rawDescGZIP() []byte {
 	return file_deputy_graph_v1_service_proto_rawDescData
 }
 
-var file_deputy_graph_v1_service_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
-var file_deputy_graph_v1_service_proto_msgTypes = make([]protoimpl.MessageInfo, 15)
+var file_deputy_graph_v1_service_proto_enumTypes = make([]protoimpl.EnumInfo, 2)
+var file_deputy_graph_v1_service_proto_msgTypes = make([]protoimpl.MessageInfo, 18)
 var file_deputy_graph_v1_service_proto_goTypes = []any{
-	(Scope)(0),                    // 0: deputy.graph.v1.Scope
-	(*BuildGraphRequest)(nil),     // 1: deputy.graph.v1.BuildGraphRequest
-	(*GraphOptions)(nil),          // 2: deputy.graph.v1.GraphOptions
-	(*BuildGraphResponse)(nil),    // 3: deputy.graph.v1.BuildGraphResponse
-	(*Node)(nil),                  // 4: deputy.graph.v1.Node
-	(*VulnerabilityCount)(nil),    // 5: deputy.graph.v1.VulnerabilityCount
-	(*Edge)(nil),                  // 6: deputy.graph.v1.Edge
-	(*GraphStats)(nil),            // 7: deputy.graph.v1.GraphStats
-	(*WhyDependencyRequest)(nil),  // 8: deputy.graph.v1.WhyDependencyRequest
-	(*WhyDependencyResponse)(nil), // 9: deputy.graph.v1.WhyDependencyResponse
-	(*DependencyPath)(nil),        // 10: deputy.graph.v1.DependencyPath
-	(*PathNode)(nil),              // 11: deputy.graph.v1.PathNode
-	(*QueryGraphRequest)(nil),     // 12: deputy.graph.v1.QueryGraphRequest
-	(*GraphFilter)(nil),           // 13: deputy.graph.v1.GraphFilter
-	(*QueryGraphResponse)(nil),    // 14: deputy.graph.v1.QueryGraphResponse
-	nil,                           // 15: deputy.graph.v1.GraphStats.EcosystemsEntry
-	(v1.TargetKind)(0),            // 16: deputy.target.v1.TargetKind
-	(*v1.Target)(nil),             // 17: deputy.target.v1.Target
-	(*timestamppb.Timestamp)(nil), // 18: google.protobuf.Timestamp
-	(*v11.Finding)(nil),           // 19: deputy.vulnerability.v1.Finding
+	(Scope)(0),                        // 0: deputy.graph.v1.Scope
+	(ImportStatus)(0),                 // 1: deputy.graph.v1.ImportStatus
+	(*BuildGraphRequest)(nil),         // 2: deputy.graph.v1.BuildGraphRequest
+	(*GraphOptions)(nil),              // 3: deputy.graph.v1.GraphOptions
+	(*BuildGraphResponse)(nil),        // 4: deputy.graph.v1.BuildGraphResponse
+	(*Node)(nil),                      // 5: deputy.graph.v1.Node
+	(*VulnerabilityCount)(nil),        // 6: deputy.graph.v1.VulnerabilityCount
+	(*Edge)(nil),                      // 7: deputy.graph.v1.Edge
+	(*GraphStats)(nil),                // 8: deputy.graph.v1.GraphStats
+	(*ImportStatusCounts)(nil),        // 9: deputy.graph.v1.ImportStatusCounts
+	(*WhyDependencyRequest)(nil),      // 10: deputy.graph.v1.WhyDependencyRequest
+	(*WhyDependencyResponse)(nil),     // 11: deputy.graph.v1.WhyDependencyResponse
+	(*DependencyPath)(nil),            // 12: deputy.graph.v1.DependencyPath
+	(*PathNode)(nil),                  // 13: deputy.graph.v1.PathNode
+	(*WhyDependencyListResponse)(nil), // 14: deputy.graph.v1.WhyDependencyListResponse
+	(*NeedsDependencyResponse)(nil),   // 15: deputy.graph.v1.NeedsDependencyResponse
+	(*QueryGraphRequest)(nil),         // 16: deputy.graph.v1.QueryGraphRequest
+	(*GraphFilter)(nil),               // 17: deputy.graph.v1.GraphFilter
+	(*QueryGraphResponse)(nil),        // 18: deputy.graph.v1.QueryGraphResponse
+	nil,                               // 19: deputy.graph.v1.GraphStats.EcosystemsEntry
+	(v1.TargetKind)(0),                // 20: deputy.target.v1.TargetKind
+	(*v1.Target)(nil),                 // 21: deputy.target.v1.Target
+	(*timestamppb.Timestamp)(nil),     // 22: google.protobuf.Timestamp
+	(*v11.Finding)(nil),               // 23: deputy.vulnerability.v1.Finding
 }
 var file_deputy_graph_v1_service_proto_depIdxs = []int32{
-	2,  // 0: deputy.graph.v1.BuildGraphRequest.options:type_name -> deputy.graph.v1.GraphOptions
-	16, // 1: deputy.graph.v1.GraphOptions.target_hint:type_name -> deputy.target.v1.TargetKind
-	17, // 2: deputy.graph.v1.BuildGraphResponse.target:type_name -> deputy.target.v1.Target
-	18, // 3: deputy.graph.v1.BuildGraphResponse.generated_at:type_name -> google.protobuf.Timestamp
-	4,  // 4: deputy.graph.v1.BuildGraphResponse.nodes:type_name -> deputy.graph.v1.Node
-	6,  // 5: deputy.graph.v1.BuildGraphResponse.edges:type_name -> deputy.graph.v1.Edge
-	7,  // 6: deputy.graph.v1.BuildGraphResponse.stats:type_name -> deputy.graph.v1.GraphStats
-	5,  // 7: deputy.graph.v1.Node.vulnerability_count:type_name -> deputy.graph.v1.VulnerabilityCount
-	19, // 8: deputy.graph.v1.Node.vulnerabilities:type_name -> deputy.vulnerability.v1.Finding
-	0,  // 9: deputy.graph.v1.Edge.scope:type_name -> deputy.graph.v1.Scope
-	15, // 10: deputy.graph.v1.GraphStats.ecosystems:type_name -> deputy.graph.v1.GraphStats.EcosystemsEntry
-	2,  // 11: deputy.graph.v1.WhyDependencyRequest.options:type_name -> deputy.graph.v1.GraphOptions
-	17, // 12: deputy.graph.v1.WhyDependencyResponse.target:type_name -> deputy.target.v1.Target
-	10, // 13: deputy.graph.v1.WhyDependencyResponse.paths:type_name -> deputy.graph.v1.DependencyPath
-	11, // 14: deputy.graph.v1.DependencyPath.nodes:type_name -> deputy.graph.v1.PathNode
-	2,  // 15: deputy.graph.v1.QueryGraphRequest.options:type_name -> deputy.graph.v1.GraphOptions
-	13, // 16: deputy.graph.v1.QueryGraphRequest.filter:type_name -> deputy.graph.v1.GraphFilter
-	17, // 17: deputy.graph.v1.QueryGraphResponse.target:type_name -> deputy.target.v1.Target
-	4,  // 18: deputy.graph.v1.QueryGraphResponse.nodes:type_name -> deputy.graph.v1.Node
-	6,  // 19: deputy.graph.v1.QueryGraphResponse.edges:type_name -> deputy.graph.v1.Edge
-	7,  // 20: deputy.graph.v1.QueryGraphResponse.stats:type_name -> deputy.graph.v1.GraphStats
-	1,  // 21: deputy.graph.v1.GraphService.BuildGraph:input_type -> deputy.graph.v1.BuildGraphRequest
-	8,  // 22: deputy.graph.v1.GraphService.WhyDependency:input_type -> deputy.graph.v1.WhyDependencyRequest
-	12, // 23: deputy.graph.v1.GraphService.QueryGraph:input_type -> deputy.graph.v1.QueryGraphRequest
-	3,  // 24: deputy.graph.v1.GraphService.BuildGraph:output_type -> deputy.graph.v1.BuildGraphResponse
-	9,  // 25: deputy.graph.v1.GraphService.WhyDependency:output_type -> deputy.graph.v1.WhyDependencyResponse
-	14, // 26: deputy.graph.v1.GraphService.QueryGraph:output_type -> deputy.graph.v1.QueryGraphResponse
-	24, // [24:27] is the sub-list for method output_type
-	21, // [21:24] is the sub-list for method input_type
-	21, // [21:21] is the sub-list for extension type_name
-	21, // [21:21] is the sub-list for extension extendee
-	0,  // [0:21] is the sub-list for field type_name
+	3,  // 0: deputy.graph.v1.BuildGraphRequest.options:type_name -> deputy.graph.v1.GraphOptions
+	20, // 1: deputy.graph.v1.GraphOptions.target_hint:type_name -> deputy.target.v1.TargetKind
+	21, // 2: deputy.graph.v1.BuildGraphResponse.target:type_name -> deputy.target.v1.Target
+	22, // 3: deputy.graph.v1.BuildGraphResponse.generated_at:type_name -> google.protobuf.Timestamp
+	5,  // 4: deputy.graph.v1.BuildGraphResponse.nodes:type_name -> deputy.graph.v1.Node
+	7,  // 5: deputy.graph.v1.BuildGraphResponse.edges:type_name -> deputy.graph.v1.Edge
+	8,  // 6: deputy.graph.v1.BuildGraphResponse.stats:type_name -> deputy.graph.v1.GraphStats
+	6,  // 7: deputy.graph.v1.Node.vulnerability_count:type_name -> deputy.graph.v1.VulnerabilityCount
+	23, // 8: deputy.graph.v1.Node.vulnerabilities:type_name -> deputy.vulnerability.v1.Finding
+	1,  // 9: deputy.graph.v1.Node.import_status:type_name -> deputy.graph.v1.ImportStatus
+	0,  // 10: deputy.graph.v1.Edge.scope:type_name -> deputy.graph.v1.Scope
+	19, // 11: deputy.graph.v1.GraphStats.ecosystems:type_name -> deputy.graph.v1.GraphStats.EcosystemsEntry
+	9,  // 12: deputy.graph.v1.GraphStats.import_status_counts:type_name -> deputy.graph.v1.ImportStatusCounts
+	3,  // 13: deputy.graph.v1.WhyDependencyRequest.options:type_name -> deputy.graph.v1.GraphOptions
+	21, // 14: deputy.graph.v1.WhyDependencyResponse.target:type_name -> deputy.target.v1.Target
+	12, // 15: deputy.graph.v1.WhyDependencyResponse.paths:type_name -> deputy.graph.v1.DependencyPath
+	13, // 16: deputy.graph.v1.DependencyPath.nodes:type_name -> deputy.graph.v1.PathNode
+	11, // 17: deputy.graph.v1.WhyDependencyListResponse.results:type_name -> deputy.graph.v1.WhyDependencyResponse
+	5,  // 18: deputy.graph.v1.NeedsDependencyResponse.dependents:type_name -> deputy.graph.v1.Node
+	3,  // 19: deputy.graph.v1.QueryGraphRequest.options:type_name -> deputy.graph.v1.GraphOptions
+	17, // 20: deputy.graph.v1.QueryGraphRequest.filter:type_name -> deputy.graph.v1.GraphFilter
+	21, // 21: deputy.graph.v1.QueryGraphResponse.target:type_name -> deputy.target.v1.Target
+	5,  // 22: deputy.graph.v1.QueryGraphResponse.nodes:type_name -> deputy.graph.v1.Node
+	7,  // 23: deputy.graph.v1.QueryGraphResponse.edges:type_name -> deputy.graph.v1.Edge
+	8,  // 24: deputy.graph.v1.QueryGraphResponse.stats:type_name -> deputy.graph.v1.GraphStats
+	2,  // 25: deputy.graph.v1.GraphService.BuildGraph:input_type -> deputy.graph.v1.BuildGraphRequest
+	10, // 26: deputy.graph.v1.GraphService.WhyDependency:input_type -> deputy.graph.v1.WhyDependencyRequest
+	16, // 27: deputy.graph.v1.GraphService.QueryGraph:input_type -> deputy.graph.v1.QueryGraphRequest
+	4,  // 28: deputy.graph.v1.GraphService.BuildGraph:output_type -> deputy.graph.v1.BuildGraphResponse
+	11, // 29: deputy.graph.v1.GraphService.WhyDependency:output_type -> deputy.graph.v1.WhyDependencyResponse
+	18, // 30: deputy.graph.v1.GraphService.QueryGraph:output_type -> deputy.graph.v1.QueryGraphResponse
+	28, // [28:31] is the sub-list for method output_type
+	25, // [25:28] is the sub-list for method input_type
+	25, // [25:25] is the sub-list for extension type_name
+	25, // [25:25] is the sub-list for extension extendee
+	0,  // [0:25] is the sub-list for field type_name
 }
 
 func init() { file_deputy_graph_v1_service_proto_init() }
@@ -1466,8 +1830,8 @@ func file_deputy_graph_v1_service_proto_init() {
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_deputy_graph_v1_service_proto_rawDesc), len(file_deputy_graph_v1_service_proto_rawDesc)),
-			NumEnums:      1,
-			NumMessages:   15,
+			NumEnums:      2,
+			NumMessages:   18,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

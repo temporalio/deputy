@@ -6,6 +6,10 @@ import (
 	"slices"
 	"strings"
 	"testing"
+
+	dependencyv1 "github.com/picatz/deputy/gen/deputy/dependency/v1"
+	policyv1 "github.com/picatz/deputy/gen/deputy/policy/v1"
+	vulnerabilityv1 "github.com/picatz/deputy/gen/deputy/vulnerability/v1"
 )
 
 // findExample returns the path to a named example policy in policy/examples.
@@ -428,14 +432,24 @@ func TestDirectHighFixBlock(t *testing.T) {
 		t.Fatalf("LoadSources: %v", err)
 	}
 
+	// Proto-first: The policy uses vulnerability.package.direct and
+	// vulnerability.advisory.fixed_versions, so we must use proto types.
 	t.Run("deny direct high with fix", func(t *testing.T) {
 		payload := map[string]any{
-			"vulnerability": map[string]any{
-				"severity":      "HIGH",
-				"isDirect":      true,
-				"fixedVersions": []any{"v1.2.3"},
+			"vulnerability": &vulnerabilityv1.Finding{
+				Advisory: &vulnerabilityv1.Advisory{
+					Id: "CVE-2024-1234",
+					Severity: &vulnerabilityv1.Severity{
+						Level: vulnerabilityv1.SeverityLevel_SEVERITY_LEVEL_HIGH,
+					},
+					FixedVersions: []string{"v1.2.3"},
+				},
+				Package: &dependencyv1.Package{
+					Name:   "example-pkg",
+					Direct: true,
+				},
 			},
-			"env": map[string]any{"command": "scan", "entrypoint": "scan_vulnerability"},
+			"env": &policyv1.Environment{Command: "scan", Entrypoint: "scan_vulnerability"},
 		}
 		actions, err := EvaluateAll(context.Background(), sources, payload)
 		if err != nil {
@@ -454,12 +468,20 @@ func TestDirectHighFixBlock(t *testing.T) {
 
 	t.Run("allow medium", func(t *testing.T) {
 		payload := map[string]any{
-			"vulnerability": map[string]any{
-				"severity":      "MEDIUM",
-				"isDirect":      true,
-				"fixedVersions": []any{"v1.2.3"},
+			"vulnerability": &vulnerabilityv1.Finding{
+				Advisory: &vulnerabilityv1.Advisory{
+					Id: "CVE-2024-5678",
+					Severity: &vulnerabilityv1.Severity{
+						Level: vulnerabilityv1.SeverityLevel_SEVERITY_LEVEL_MEDIUM,
+					},
+					FixedVersions: []string{"v1.2.3"},
+				},
+				Package: &dependencyv1.Package{
+					Name:   "example-pkg",
+					Direct: true,
+				},
 			},
-			"env": map[string]any{"command": "scan", "entrypoint": "scan_vulnerability"},
+			"env": &policyv1.Environment{Command: "scan", Entrypoint: "scan_vulnerability"},
 		}
 		actions, err := EvaluateAll(context.Background(), sources, payload)
 		if err != nil {
@@ -785,11 +807,19 @@ func TestNoFixEscalator(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadSources: %v", err)
 	}
+	// Proto-first: uses vulnerability.package.direct, vulnerability.advisory.fixed_versions,
+	// vulnerability.advisory.severity.level
 	payload := map[string]any{
 		"vulnerability": map[string]any{
-			"severity":      "HIGH",
-			"isDirect":      true,
-			"fixedVersions": []any{},
+			"package": map[string]any{
+				"direct": true,
+			},
+			"advisory": map[string]any{
+				"fixed_versions": []any{},
+				"severity": map[string]any{
+					"level": int64(vulnerabilityv1.SeverityLevel_SEVERITY_LEVEL_HIGH),
+				},
+			},
 		},
 		"env": map[string]any{"command": "scan", "entrypoint": "scan_vulnerability"},
 	}
@@ -814,11 +844,18 @@ func TestProdManifestGate(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadSources: %v", err)
 	}
+	// Proto-first: uses vulnerability.package.manifest_refs, vulnerability.advisory.severity.level
 	payload := map[string]any{
 		"vulnerability": map[string]any{
-			"severity": "CRITICAL",
-			"manifestRefs": []any{
-				map[string]any{"groups": []any{"prod"}},
+			"package": map[string]any{
+				"manifest_refs": []any{
+					map[string]any{"groups": []any{"prod"}},
+				},
+			},
+			"advisory": map[string]any{
+				"severity": map[string]any{
+					"level": int64(vulnerabilityv1.SeverityLevel_SEVERITY_LEVEL_CRITICAL),
+				},
 			},
 		},
 		"env": map[string]any{"command": "scan", "entrypoint": "scan_vulnerability"},
@@ -906,11 +943,16 @@ func TestExploitAvailableBlocker(t *testing.T) {
 		t.Fatalf("LoadSources: %v", err)
 	}
 
+	// Proto-first: uses vulnerability.advisory.references, vulnerability.advisory.severity.level
 	t.Run("deny when exploit referenced", func(t *testing.T) {
 		payload := map[string]any{
 			"vulnerability": map[string]any{
-				"severity":   "HIGH",
-				"references": []any{"https://exploit-db.com/poc"},
+				"advisory": map[string]any{
+					"references": []any{"https://exploit-db.com/poc"},
+					"severity": map[string]any{
+						"level": int64(vulnerabilityv1.SeverityLevel_SEVERITY_LEVEL_HIGH),
+					},
+				},
 			},
 			"env": map[string]any{"command": "scan", "entrypoint": "scan_vulnerability"},
 		}
@@ -932,8 +974,12 @@ func TestExploitAvailableBlocker(t *testing.T) {
 	t.Run("allow when no exploit indicators", func(t *testing.T) {
 		payload := map[string]any{
 			"vulnerability": map[string]any{
-				"severity":   "HIGH",
-				"references": []any{"https://advisory.example.com"},
+				"advisory": map[string]any{
+					"references": []any{"https://advisory.example.com"},
+					"severity": map[string]any{
+						"level": int64(vulnerabilityv1.SeverityLevel_SEVERITY_LEVEL_HIGH),
+					},
+				},
 			},
 			"env": map[string]any{"command": "scan", "entrypoint": "scan_vulnerability"},
 		}
@@ -956,11 +1002,13 @@ func TestDeprecatedModuleBlock(t *testing.T) {
 		t.Fatalf("LoadSources: %v", err)
 	}
 
+	// Proto-first: uses vulnerability.advisory.summary, vulnerability.advisory.details
 	t.Run("deny deprecated in summary", func(t *testing.T) {
 		payload := map[string]any{
 			"vulnerability": map[string]any{
-				"summary":  "Package deprecated and no longer maintained",
-				"severity": "MEDIUM",
+				"advisory": map[string]any{
+					"summary": "Package deprecated and no longer maintained",
+				},
 			},
 			"env": map[string]any{"command": "scan", "entrypoint": "scan_vulnerability"},
 		}
@@ -982,8 +1030,9 @@ func TestDeprecatedModuleBlock(t *testing.T) {
 	t.Run("allow when not deprecated", func(t *testing.T) {
 		payload := map[string]any{
 			"vulnerability": map[string]any{
-				"summary":  "Buffer overflow in parser",
-				"severity": "HIGH",
+				"advisory": map[string]any{
+					"summary": "Buffer overflow in parser",
+				},
 			},
 			"env": map[string]any{"command": "scan", "entrypoint": "scan_vulnerability"},
 		}
@@ -1086,9 +1135,14 @@ func TestLog4ShellPolicy(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadSources: %v", err)
 	}
+	// Proto-first: aliases are nested under advisory
 	payload := map[string]any{
 		"vulnerabilities": []any{
-			map[string]any{"aliases": []any{"CVE-2021-44228"}},
+			map[string]any{
+				"advisory": map[string]any{
+					"aliases": []any{"CVE-2021-44228"},
+				},
+			},
 		},
 	}
 	actions, err := EvaluateAll(context.Background(), sources, payload)
@@ -1162,9 +1216,16 @@ func TestProxyCriticalAdvisory(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadSources: %v", err)
 	}
+	// Proto-first: Use nested advisory.severity.level structure with severity constants
 	payload := map[string]any{
 		"vulnerabilities": []any{
-			map[string]any{"Severity": "CRITICAL"},
+			map[string]any{
+				"advisory": map[string]any{
+					"severity": map[string]any{
+						"level": int64(vulnerabilityv1.SeverityLevel_SEVERITY_LEVEL_CRITICAL),
+					},
+				},
+			},
 		},
 		"env": map[string]any{"command": "proxy", "entrypoint": "go_artifact_request"},
 	}
@@ -1214,9 +1275,16 @@ func TestSeverityGuardrail(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadSources: %v", err)
 	}
+	// Use proto Finding messages for proto-first design
 	payload := map[string]any{
-		"vulnerabilities": []any{
-			map[string]any{"severity": "HIGH"},
+		"vulnerabilities": []*vulnerabilityv1.Finding{
+			{
+				Advisory: &vulnerabilityv1.Advisory{
+					Severity: &vulnerabilityv1.Severity{
+						Level: vulnerabilityv1.SeverityLevel_SEVERITY_LEVEL_HIGH,
+					},
+				},
+			},
 		},
 		"env": map[string]any{"command": "scan", "entrypoint": "scan_vulnerability"},
 	}

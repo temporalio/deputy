@@ -23,7 +23,7 @@ func TestInProcessTransport(t *testing.T) {
 
 	// Test ListEcosystems (doesn't require target validation)
 	ctx := context.Background()
-	resp, err := clients.Inventory.ListEcosystems(ctx, connect.NewRequest(&listv1.ListEcosystemsRequest{}))
+	resp, err := clients.Packages.ListEcosystems(ctx, connect.NewRequest(&listv1.ListEcosystemsRequest{}))
 	if err != nil {
 		t.Fatalf("ListEcosystems failed: %v", err)
 	}

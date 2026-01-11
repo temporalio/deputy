@@ -3,6 +3,8 @@ package policy
 import (
 	"testing"
 	"time"
+
+	vulnerabilityv1 "github.com/picatz/deputy/gen/deputy/vulnerability/v1"
 )
 
 func TestLevenshtein(t *testing.T) {
@@ -1372,118 +1374,18 @@ func TestNodeAccessors_ViaEvaluate(t *testing.T) {
 	}
 }
 
-// TestVulnHelpers_ViaEvaluate tests vulnerability helper functions.
-func TestVulnHelpers_ViaEvaluate(t *testing.T) {
-	input := map[string]any{
-		"vulnerability": map[string]any{
-			"id":            "CVE-2024-1234",
-			"severity":      "CRITICAL",
-			"fixedVersions": []any{"1.0.1", "2.0.0"},
-			"inKEV":         true,
-			"epss":          0.85,
-		},
-		"vulnNoFix": map[string]any{
-			"id":       "CVE-2024-5678",
-			"severity": "MEDIUM",
-		},
-	}
+// Proto-first: Vulnerability field accessors were removed in favor of direct proto field access.
+// Use vulnerability.advisory_id, vulnerability.in_kev, vulnerability.epss,
+// vulnerability.advisory.fixed_versions, vulnerability.advisory.severity.level
+// See policy examples in policy/examples/ for proto-first patterns.
 
-	tests := []struct {
-		name     string
-		expr     string
-		expected any
-	}{
-		// vulnerabilitySeverity tests
-		{
-			name:     "vulnerabilitySeverity critical",
-			expr:     `vulnerabilitySeverity(vulnerability)`,
-			expected: "CRITICAL",
-		},
-
-		// vulnerabilityId tests
-		{
-			name:     "vulnerabilityId",
-			expr:     `vulnerabilityId(vulnerability)`,
-			expected: "CVE-2024-1234",
-		},
-		{
-			name:     "vulnerabilityId startsWith CVE",
-			expr:     `vulnerabilityId(vulnerability).startsWith("CVE-")`,
-			expected: true,
-		},
-
-		// hasFix tests
-		{
-			name:     "hasFix with fixes",
-			expr:     `hasFix(vulnerability)`,
-			expected: true,
-		},
-		{
-			name:     "hasFix without fixes",
-			expr:     `hasFix(vulnNoFix)`,
-			expected: false,
-		},
-
-		// inKEV tests
-		{
-			name:     "inKEV true",
-			expr:     `inKEV(vulnerability)`,
-			expected: true,
-		},
-		{
-			name:     "inKEV false (missing field)",
-			expr:     `inKEV(vulnNoFix)`,
-			expected: false,
-		},
-
-		// epssScore tests
-		{
-			name:     "epssScore with value",
-			expr:     `epssScore(vulnerability)`,
-			expected: 0.85,
-		},
-		{
-			name:     "epssScore missing returns 0",
-			expr:     `epssScore(vulnNoFix)`,
-			expected: 0.0,
-		},
-		{
-			name:     "epssScore comparison",
-			expr:     `epssScore(vulnerability) > 0.5`,
-			expected: true,
-		},
-	}
-
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			result, err := Evaluate(t.Context(), tc.expr, input)
-			if err != nil {
-				t.Fatalf("Evaluate() error: %v", err)
-			}
-			if result != tc.expected {
-				t.Errorf("%s = %v (%T), want %v (%T)", tc.expr, result, result, tc.expected, tc.expected)
-			}
-		})
-	}
-}
-
-// TestGraphHelpers_WithVulnerabilityPath tests graph helpers in a realistic scan_vulnerability scenario.
+// TestGraphHelpers_WithVulnerabilityPath tests path analysis helpers with vulnerability data.
 func TestGraphHelpers_WithVulnerabilityPath(t *testing.T) {
 	// Simulate a vulnerability found in a transitive dependency with --with-graph enabled
 	input := map[string]any{
 		"vulnerability": map[string]any{
-			"id":            "CVE-2024-9999",
-			"severity":      "HIGH",
-			"fixedVersions": []any{"2.0.0"},
-			"path":          []any{"myapp", "express", "send", "mime-types", "mime"},
-			"depth":         4,
-			"inKEV":         false,
-			"epss":          0.42,
-		},
-		"pkg": map[string]any{
-			"name":      "mime",
-			"version":   "1.4.0",
-			"ecosystem": "npm",
+			"path":  []any{"myapp", "express", "send", "mime-types", "mime"},
+			"depth": 4,
 		},
 	}
 
@@ -1492,7 +1394,7 @@ func TestGraphHelpers_WithVulnerabilityPath(t *testing.T) {
 		expr     string
 		expected any
 	}{
-		// Combined path analysis
+		// Path analysis helpers
 		{
 			name:     "deep vulnerability path",
 			expr:     `pathDepth(vulnerability.path) > 3`,
@@ -1508,21 +1410,14 @@ func TestGraphHelpers_WithVulnerabilityPath(t *testing.T) {
 			expr:     `pathContains(vulnerability.path, "send")`,
 			expected: true,
 		},
-
-		// Realistic policy expressions
 		{
-			name:     "allow deep low-risk vulns",
-			expr:     `pathDepth(vulnerability.path) > 3 && vulnerabilitySeverity(vulnerability) != "CRITICAL" && !inKEV(vulnerability)`,
-			expected: true,
+			name:     "pathLength",
+			expr:     `pathLength(vulnerability.path)`,
+			expected: int64(5),
 		},
 		{
-			name:     "high epss deep vuln",
-			expr:     `epssScore(vulnerability) > 0.3 && pathDepth(vulnerability.path) > 2`,
-			expected: true,
-		},
-		{
-			name:     "fixable deep vuln",
-			expr:     `hasFix(vulnerability) && pathDepth(vulnerability.path) > 3`,
+			name:     "pathContains with glob",
+			expr:     `pathContains(vulnerability.path, "*mime*")`,
 			expected: true,
 		},
 	}
@@ -1541,40 +1436,47 @@ func TestGraphHelpers_WithVulnerabilityPath(t *testing.T) {
 }
 
 func TestSeverityConstants_ViaEvaluate(t *testing.T) {
+	// severity constants map to proto enum values (lowercase keys)
+	// CEL represents proto enums as int64 values
 	tests := []struct {
 		name     string
 		expr     string
 		expected any
 	}{
 		{
-			name:     "severity.CRITICAL constant",
-			expr:     `severity.CRITICAL`,
-			expected: "CRITICAL",
+			name:     "severity.critical constant",
+			expr:     `severity.critical`,
+			expected: int64(vulnerabilityv1.SeverityLevel_SEVERITY_LEVEL_CRITICAL),
 		},
 		{
-			name:     "severity.HIGH constant",
-			expr:     `severity.HIGH`,
-			expected: "HIGH",
+			name:     "severity.high constant",
+			expr:     `severity.high`,
+			expected: int64(vulnerabilityv1.SeverityLevel_SEVERITY_LEVEL_HIGH),
 		},
 		{
-			name:     "severity.MEDIUM constant",
-			expr:     `severity.MEDIUM`,
-			expected: "MEDIUM",
+			name:     "severity.medium constant",
+			expr:     `severity.medium`,
+			expected: int64(vulnerabilityv1.SeverityLevel_SEVERITY_LEVEL_MEDIUM),
 		},
 		{
-			name:     "severity.LOW constant",
-			expr:     `severity.LOW`,
-			expected: "LOW",
+			name:     "severity.low constant",
+			expr:     `severity.low`,
+			expected: int64(vulnerabilityv1.SeverityLevel_SEVERITY_LEVEL_LOW),
 		},
 		{
-			name:     "compare with severity constant",
-			expr:     `vulnerability.severity == severity.CRITICAL`,
+			name:     "compare proto severity with constant",
+			expr:     `vulnerability.advisory.severity.level == severity.critical`,
 			expected: true,
 		},
 		{
-			name:     "compare severity mismatch",
-			expr:     `vulnerability.severity == severity.LOW`,
+			name:     "compare proto severity mismatch",
+			expr:     `vulnerability.advisory.severity.level == severity.low`,
 			expected: false,
+		},
+		{
+			name:     "severity in list comparison",
+			expr:     `vulnerability.advisory.severity.level in [severity.critical, severity.high]`,
+			expected: true,
 		},
 		{
 			name:     "scope.RUNTIME constant",
@@ -1588,10 +1490,15 @@ func TestSeverityConstants_ViaEvaluate(t *testing.T) {
 		},
 	}
 
+	// Use proto Finding message with nested severity
 	input := map[string]any{
-		"vulnerability": map[string]any{
-			"id":       "CVE-2021-44228",
-			"severity": "CRITICAL",
+		"vulnerability": &vulnerabilityv1.Finding{
+			Advisory: &vulnerabilityv1.Advisory{
+				Id: "CVE-2021-44228",
+				Severity: &vulnerabilityv1.Severity{
+					Level: vulnerabilityv1.SeverityLevel_SEVERITY_LEVEL_CRITICAL,
+				},
+			},
 		},
 	}
 
@@ -1608,116 +1515,6 @@ func TestSeverityConstants_ViaEvaluate(t *testing.T) {
 	}
 }
 
-func TestSeverityAtLeast_ViaEvaluate(t *testing.T) {
-	tests := []struct {
-		name     string
-		expr     string
-		input    map[string]any
-		expected bool
-	}{
-		{
-			name: "CRITICAL >= CRITICAL",
-			expr: `severityAtLeast(vulnerability, "CRITICAL")`,
-			input: map[string]any{
-				"vulnerability": map[string]any{"severity": "CRITICAL"},
-			},
-			expected: true,
-		},
-		{
-			name: "CRITICAL >= HIGH",
-			expr: `severityAtLeast(vulnerability, "HIGH")`,
-			input: map[string]any{
-				"vulnerability": map[string]any{"severity": "CRITICAL"},
-			},
-			expected: true,
-		},
-		{
-			name: "HIGH >= HIGH",
-			expr: `severityAtLeast(vulnerability, "HIGH")`,
-			input: map[string]any{
-				"vulnerability": map[string]any{"severity": "HIGH"},
-			},
-			expected: true,
-		},
-		{
-			name: "MEDIUM not >= HIGH",
-			expr: `severityAtLeast(vulnerability, "HIGH")`,
-			input: map[string]any{
-				"vulnerability": map[string]any{"severity": "MEDIUM"},
-			},
-			expected: false,
-		},
-		{
-			name: "LOW not >= MEDIUM",
-			expr: `severityAtLeast(vulnerability, "MEDIUM")`,
-			input: map[string]any{
-				"vulnerability": map[string]any{"severity": "LOW"},
-			},
-			expected: false,
-		},
-		{
-			name: "using severity constant",
-			expr: `severityAtLeast(vulnerability, severity.HIGH)`,
-			input: map[string]any{
-				"vulnerability": map[string]any{"severity": "CRITICAL"},
-			},
-			expected: true,
-		},
-		{
-			name: "isCritical shorthand true",
-			expr: `isCritical(vulnerability)`,
-			input: map[string]any{
-				"vulnerability": map[string]any{"severity": "CRITICAL"},
-			},
-			expected: true,
-		},
-		{
-			name: "isCritical shorthand false",
-			expr: `isCritical(vulnerability)`,
-			input: map[string]any{
-				"vulnerability": map[string]any{"severity": "HIGH"},
-			},
-			expected: false,
-		},
-		{
-			name: "isHighOrAbove for CRITICAL",
-			expr: `isHighOrAbove(vulnerability)`,
-			input: map[string]any{
-				"vulnerability": map[string]any{"severity": "CRITICAL"},
-			},
-			expected: true,
-		},
-		{
-			name: "isHighOrAbove for HIGH",
-			expr: `isHighOrAbove(vulnerability)`,
-			input: map[string]any{
-				"vulnerability": map[string]any{"severity": "HIGH"},
-			},
-			expected: true,
-		},
-		{
-			name: "isHighOrAbove for MEDIUM",
-			expr: `isHighOrAbove(vulnerability)`,
-			input: map[string]any{
-				"vulnerability": map[string]any{"severity": "MEDIUM"},
-			},
-			expected: false,
-		},
-	}
-
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			result, err := Evaluate(t.Context(), tc.expr, tc.input)
-			if err != nil {
-				t.Fatalf("Evaluate() error: %v", err)
-			}
-			got, ok := result.(bool)
-			if !ok {
-				t.Fatalf("expected bool result, got %T (%v)", result, result)
-			}
-			if got != tc.expected {
-				t.Errorf("%s = %v, want %v", tc.expr, got, tc.expected)
-			}
-		})
-	}
-}
+// Proto-first: severityAtLeast, isCritical, isHighOrAbove work only with proto Finding messages.
+// Tests for these functions are in engine_test.go using proto-based contexts.
+// See TestEvaluateAll_ProtoFirst for proto-based severity tests.

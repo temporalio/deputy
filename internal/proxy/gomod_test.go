@@ -148,7 +148,7 @@ func (denyPolicyEngine) Evaluate(ctx context.Context, entrypoint string, payload
 
 func TestGoModuleHandlerBlocksCriticalVulnerability(t *testing.T) {
 	tmp := t.TempDir()
-	policyPath := writeBundle(t, tmp, "block-critical", `vulnerabilities.exists(v, v.Severity == "CRITICAL")`, "critical vuln", "deny")
+	policyPath := writeBundle(t, tmp, "block-critical", `vulnerabilities.exists(v, v.advisory.severity.level == severity.critical)`, "critical vuln", "deny")
 	engine, err := NewPolicyEngine([]string{policyPath})
 	if err != nil {
 		t.Fatalf("NewPolicyEngine: %v", err)

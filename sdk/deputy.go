@@ -95,12 +95,19 @@ const DefaultDaemonSocket = "/tmp/deputy.sock"
 //   - Local daemon if DEPUTY_DAEMON is set or default socket exists
 //   - In-process otherwise (default)
 //
+// Authentication is automatically configured if DEPUTY_AUTH_TOKEN is set.
+//
 // Use NewClientWithOptions for more control over the connection mode.
 func NewClient(ctx context.Context) (*Client, error) {
 	// Check for remote server
 	if serverAddr := os.Getenv("DEPUTY_SERVER"); serverAddr != "" {
+		authToken := os.Getenv("DEPUTY_AUTH_TOKEN")
+		var opts []connect.ClientOption
+		if authToken != "" {
+			opts = append(opts, connect.WithInterceptors(authInterceptor(authToken)))
+		}
 		return &Client{
-			clients: services.RemoteClients(http.DefaultClient, serverAddr),
+			clients: services.RemoteClients(http.DefaultClient, serverAddr, opts...),
 			mode:    ModeRemote,
 		}, nil
 	}
@@ -140,11 +147,21 @@ func connectToDaemon(socket string) (*Client, error) {
 
 // NewClientWithOptions creates a new Deputy client with explicit options.
 func NewClientWithOptions(ctx context.Context, opts Options) (*Client, error) {
+	// Get auth token from options or environment
+	authToken := opts.AuthToken
+	if authToken == "" {
+		authToken = os.Getenv("DEPUTY_AUTH_TOKEN")
+	}
+
 	if opts.ForceMode {
 		switch opts.Mode {
 		case ModeRemote:
+			var clientOpts []connect.ClientOption
+			if authToken != "" {
+				clientOpts = append(clientOpts, connect.WithInterceptors(authInterceptor(authToken)))
+			}
 			return &Client{
-				clients: services.RemoteClients(http.DefaultClient, opts.ServerAddress),
+				clients: services.RemoteClients(http.DefaultClient, opts.ServerAddress, clientOpts...),
 				mode:    ModeRemote,
 			}, nil
 		case ModeLocalDaemon:
@@ -175,8 +192,21 @@ func NewClientWithOptions(ctx context.Context, opts Options) (*Client, error) {
 //
 //	client, err := sdk.ConnectToServer(ctx, "https://deputy.example.com:8090")
 func ConnectToServer(ctx context.Context, addr string) (*Client, error) {
+	return ConnectToServerWithAuth(ctx, addr, "")
+}
+
+// ConnectToServerWithAuth creates a client connected to a remote Deputy server with authentication.
+//
+// Example:
+//
+//	client, err := sdk.ConnectToServerWithAuth(ctx, "https://deputy.example.com:8090", "my-token")
+func ConnectToServerWithAuth(ctx context.Context, addr, authToken string) (*Client, error) {
+	var opts []connect.ClientOption
+	if authToken != "" {
+		opts = append(opts, connect.WithInterceptors(authInterceptor(authToken)))
+	}
 	return &Client{
-		clients: services.RemoteClients(http.DefaultClient, addr),
+		clients: services.RemoteClients(http.DefaultClient, addr, opts...),
 		mode:    ModeRemote,
 	}, nil
 }
@@ -257,7 +287,7 @@ func (c *Client) StreamScan(ctx context.Context, target string) (*ScanStream, er
 
 // ListPackages lists all packages in a target.
 func (c *Client) ListPackages(ctx context.Context, target string) (*listv1.ListPackagesResponse, error) {
-	resp, err := c.clients.Inventory.ListPackages(ctx, connect.NewRequest(&listv1.ListPackagesRequest{
+	resp, err := c.clients.Packages.ListPackages(ctx, connect.NewRequest(&listv1.ListPackagesRequest{
 		Target: target,
 	}))
 	if err != nil {
@@ -268,7 +298,7 @@ func (c *Client) ListPackages(ctx context.Context, target string) (*listv1.ListP
 
 // ListEcosystems lists all supported package ecosystems.
 func (c *Client) ListEcosystems(ctx context.Context) (*listv1.ListEcosystemsResponse, error) {
-	resp, err := c.clients.Inventory.ListEcosystems(ctx, connect.NewRequest(&listv1.ListEcosystemsRequest{}))
+	resp, err := c.clients.Packages.ListEcosystems(ctx, connect.NewRequest(&listv1.ListEcosystemsRequest{}))
 	if err != nil {
 		return nil, err
 	}
@@ -471,6 +501,146 @@ func (c *Client) ListDetectors(ctx context.Context) (*secretsv1.ListDetectorsRes
 	return resp.Msg, nil
 }
 
+// --- Policy Operations ---
+
+// PolicySource specifies where to load a policy from.
+type PolicySource = policyv1.PolicySource
+
+// EvaluateResponse contains policy evaluation results.
+type EvaluateResponse = policyv1.EvaluateResponse
+
+// ValidateResponse contains policy validation results.
+type ValidateResponse = policyv1.ValidateResponse
+
+// ActionType represents the type of policy action.
+type ActionType = policyv1.ActionType
+
+// Action type constants for convenience.
+const (
+	ActionAllow = policyv1.ActionType_ACTION_TYPE_ALLOW
+	ActionDeny  = policyv1.ActionType_ACTION_TYPE_DENY
+	ActionWarn  = policyv1.ActionType_ACTION_TYPE_WARN
+)
+
+// EvaluatePolicy evaluates policies against provided context.
+// Returns all triggered actions (allow, deny, warn).
+//
+// The policies can be provided as inline YAML or file paths.
+// Use NewInlinePolicy or NewPolicyFromPath to create PolicySource values.
+//
+// Example:
+//
+//	policy := sdk.NewInlinePolicy(`
+//	  policies:
+//	    - name: block-critical
+//	      rules:
+//	        - action: deny
+//	          when: vulnerabilities.exists(v, v.advisory.severity.level == severity.critical)
+//	`)
+//	result, err := client.EvaluatePolicy(ctx, []*sdk.PolicySource{policy}, &policyv1.ScanReportContext{
+//	    Vulnerabilities: findings,
+//	})
+func (c *Client) EvaluatePolicy(ctx context.Context, policies []*PolicySource, scanReportCtx *policyv1.ScanReportContext) (*EvaluateResponse, error) {
+	req := &policyv1.EvaluateRequest{
+		Policies: policies,
+		Context:  &policyv1.EvaluateRequest_ScanReport{ScanReport: scanReportCtx},
+	}
+	resp, err := c.clients.Policy.Evaluate(ctx, connect.NewRequest(req))
+	if err != nil {
+		return nil, err
+	}
+	return resp.Msg, nil
+}
+
+// EvaluatePolicyForVulnerability evaluates policies for a single vulnerability.
+// This is useful for per-vulnerability policy checks.
+//
+// Example:
+//
+//	for _, finding := range scanResult.GetFindings() {
+//	    result, err := client.EvaluatePolicyForVulnerability(ctx, policies, finding)
+//	    if result.Outcome == sdk.ActionDeny {
+//	        // Handle policy violation
+//	    }
+//	}
+func (c *Client) EvaluatePolicyForVulnerability(ctx context.Context, policies []*PolicySource, vuln *vulnerabilityv1.Finding) (*EvaluateResponse, error) {
+	req := &policyv1.EvaluateRequest{
+		Policies: policies,
+		Context: &policyv1.EvaluateRequest_ScanVulnerability{
+			ScanVulnerability: &policyv1.ScanVulnerabilityContext{
+				Vulnerability: vuln,
+			},
+		},
+	}
+	resp, err := c.clients.Policy.Evaluate(ctx, connect.NewRequest(req))
+	if err != nil {
+		return nil, err
+	}
+	return resp.Msg, nil
+}
+
+// ValidatePolicy validates policy syntax and CEL expressions without evaluating.
+// Use this to catch errors before deploying policies.
+//
+// Example:
+//
+//	result, err := client.ValidatePolicy(ctx, []*sdk.PolicySource{policy})
+//	if !result.Valid {
+//	    for _, err := range result.Errors {
+//	        fmt.Printf("Error in %s: %s\n", err.PolicyName, err.Message)
+//	    }
+//	}
+func (c *Client) ValidatePolicy(ctx context.Context, policies []*PolicySource) (*ValidateResponse, error) {
+	resp, err := c.clients.Policy.Validate(ctx, connect.NewRequest(&policyv1.ValidateRequest{
+		Policies: policies,
+	}))
+	if err != nil {
+		return nil, err
+	}
+	return resp.Msg, nil
+}
+
+// ListEntrypoints returns all available policy entrypoints and their bindings.
+// Useful for policy authoring tools and documentation generation.
+//
+// Example:
+//
+//	entrypoints, err := client.ListEntrypoints(ctx, "")
+//	for _, ep := range entrypoints.GetEntrypoints() {
+//	    fmt.Printf("%s (%s): %s\n", ep.Name, ep.Category, ep.Description)
+//	}
+func (c *Client) ListEntrypoints(ctx context.Context, category string) (*policyv1.ListEntrypointsResponse, error) {
+	resp, err := c.clients.Policy.ListEntrypoints(ctx, connect.NewRequest(&policyv1.ListEntrypointsRequest{
+		Category: category,
+	}))
+	if err != nil {
+		return nil, err
+	}
+	return resp.Msg, nil
+}
+
+// NewInlinePolicy creates a PolicySource from inline YAML content.
+func NewInlinePolicy(yaml string) *PolicySource {
+	return &PolicySource{
+		Source: &policyv1.PolicySource_Inline{Inline: yaml},
+	}
+}
+
+// NewPolicyFromPath creates a PolicySource that loads from a file path.
+// Note: File paths only work in local/in-process mode, not with remote servers.
+func NewPolicyFromPath(path string) *PolicySource {
+	return &PolicySource{
+		Source: &policyv1.PolicySource_Path{Path: path},
+	}
+}
+
+// NewPolicyFromURL creates a PolicySource that loads from a URL.
+func NewPolicyFromURL(url string) *PolicySource {
+	return &PolicySource{
+		Source: &policyv1.PolicySource_Url{Url: url},
+	}
+}
+
 // --- Types ---
 
 // Options configures client creation.
@@ -498,6 +668,10 @@ type Options struct {
 	// DaemonSocket is the Unix socket path for Mode == ModeLocalDaemon.
 	// If empty, uses DefaultDaemonSocket.
 	DaemonSocket string
+
+	// AuthToken is the bearer token for authenticating with remote servers.
+	// Can also be set via DEPUTY_AUTH_TOKEN environment variable.
+	AuthToken string
 }
 
 // Mode indicates how the client connects to Deputy services.
@@ -596,4 +770,14 @@ func (t *unixSocketTransport) RoundTrip(req *http.Request) (*http.Response, erro
 	defer clientConn.Close()
 
 	return clientConn.Do(req)
+}
+
+// authInterceptor returns a Connect interceptor that adds Bearer authentication.
+func authInterceptor(token string) connect.UnaryInterceptorFunc {
+	return func(next connect.UnaryFunc) connect.UnaryFunc {
+		return func(ctx context.Context, req connect.AnyRequest) (connect.AnyResponse, error) {
+			req.Header().Set("Authorization", "Bearer "+token)
+			return next(ctx, req)
+		}
+	}
 }

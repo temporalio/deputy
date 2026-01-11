@@ -3,7 +3,12 @@ package policy
 import "testing"
 
 // TestHelperFunctions_EdgeCases tests edge cases for helper functions including
-// nil inputs, empty values, and nested advisory structures.
+// nil inputs, empty values, and type coercion.
+//
+// Proto-first: Vulnerability field accessors (vulnerabilitySeverity, vulnerabilityId,
+// hasFix, inKEV, epssScore) were removed in favor of direct proto field access.
+// Use vulnerability.advisory_id, vulnerability.in_kev, vulnerability.epss,
+// vulnerability.advisory.fixed_versions, vulnerability.advisory.severity.level
 func TestHelperFunctions_EdgeCases(t *testing.T) {
 	t.Parallel()
 
@@ -13,7 +18,7 @@ func TestHelperFunctions_EdgeCases(t *testing.T) {
 		expr     string
 		expected any
 	}{
-		// Empty list edge cases
+		// Path helper edge cases
 		{
 			name:     "pathLength_empty_list",
 			input:    map[string]any{"path": []string{}},
@@ -45,87 +50,7 @@ func TestHelperFunctions_EdgeCases(t *testing.T) {
 			expr:     "pathDepth(path)",
 			expected: int64(0), // Direct dependency
 		},
-		// Nested advisory structure for vulnerabilitySeverity
-		{
-			name: "vulnerabilitySeverity_nested_advisory_severity",
-			input: map[string]any{
-				"vulnerability": map[string]any{
-					"advisory": map[string]any{
-						"severity": map[string]any{
-							"level": int32(4), // CRITICAL
-						},
-					},
-				},
-			},
-			expr:     "vulnerabilitySeverity(vulnerability)",
-			expected: "CRITICAL",
-		},
-		{
-			name: "vulnerabilitySeverity_nested_advisory_severity_high",
-			input: map[string]any{
-				"vulnerability": map[string]any{
-					"advisory": map[string]any{
-						"severity": map[string]any{
-							"level": int32(3), // HIGH
-						},
-					},
-				},
-			},
-			expr:     "vulnerabilitySeverity(vulnerability)",
-			expected: "HIGH",
-		},
-		// vulnerabilityId field access (advisory_id is the main field)
-		{
-			name: "vulnerabilityId_advisory_id_field",
-			input: map[string]any{
-				"vulnerability": map[string]any{
-					"advisory_id": "GHSA-1234-5678-abcd",
-				},
-			},
-			expr:     "vulnerabilityId(vulnerability)",
-			expected: "GHSA-1234-5678-abcd",
-		},
-		{
-			name: "vulnerabilityId_id_field",
-			input: map[string]any{
-				"vulnerability": map[string]any{
-					"id": "CVE-2024-9999",
-				},
-			},
-			expr:     "vulnerabilityId(vulnerability)",
-			expected: "CVE-2024-9999",
-		},
-		// hasFix checks fixedVersions field (uses []any internally)
-		{
-			name: "hasFix_fixedVersions_camelCase",
-			input: map[string]any{
-				"vulnerability": map[string]any{
-					"fixedVersions": []any{"1.2.3"},
-				},
-			},
-			expr:     "hasFix(vulnerability)",
-			expected: true,
-		},
-		{
-			name: "hasFix_fixed_versions_snake_case",
-			input: map[string]any{
-				"vulnerability": map[string]any{
-					"fixed_versions": []any{"2.0.0"},
-				},
-			},
-			expr:     "hasFix(vulnerability)",
-			expected: true,
-		},
-		{
-			name: "hasFix_empty_fixedVersions",
-			input: map[string]any{
-				"vulnerability": map[string]any{
-					"fixedVersions": []any{},
-				},
-			},
-			expr:     "hasFix(vulnerability)",
-			expected: false,
-		},
+
 		// Edge scope enumeration values (matches proto: 0=unspecified, 1=runtime, 2=dev, 3=optional, 4=build, 5=test)
 		{
 			name: "edgeScope_unspecified",
@@ -175,27 +100,8 @@ func TestHelperFunctions_EdgeCases(t *testing.T) {
 			expr:     "edgeScope(edge)",
 			expected: "test",
 		},
-		// Missing fields return safe defaults
-		{
-			name: "vulnerabilitySeverity_missing_returns_empty",
-			input: map[string]any{
-				"vulnerability": map[string]any{
-					"id": "CVE-2024-1234", // No severity field
-				},
-			},
-			expr:     "vulnerabilitySeverity(vulnerability)",
-			expected: "",
-		},
-		{
-			name: "vulnerabilityId_missing_returns_empty",
-			input: map[string]any{
-				"vulnerability": map[string]any{
-					"severity": "HIGH", // No id field
-				},
-			},
-			expr:     "vulnerabilityId(vulnerability)",
-			expected: "",
-		},
+
+		// Node helper edge cases
 		{
 			name: "nodePurl_missing_returns_empty",
 			input: map[string]any{
@@ -206,6 +112,7 @@ func TestHelperFunctions_EdgeCases(t *testing.T) {
 			expr:     "nodePurl(node)",
 			expected: "",
 		},
+
 		// Type coercion for numeric fields
 		{
 			name: "edgeScope_int64_coercion",
@@ -222,27 +129,6 @@ func TestHelperFunctions_EdgeCases(t *testing.T) {
 			},
 			expr:     "edgeScope(edge)",
 			expected: "custom-scope",
-		},
-		// epssScore type coercion
-		{
-			name: "epssScore_float32",
-			input: map[string]any{
-				"vulnerability": map[string]any{
-					"epss": float32(0.75),
-				},
-			},
-			expr:     "epssScore(vulnerability) > 0.7",
-			expected: true,
-		},
-		{
-			name: "epssScore_int_coercion",
-			input: map[string]any{
-				"vulnerability": map[string]any{
-					"epss": 1, // int instead of float
-				},
-			},
-			expr:     "epssScore(vulnerability)",
-			expected: float64(1),
 		},
 	}
 

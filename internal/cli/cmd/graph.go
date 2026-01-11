@@ -1,7 +1,6 @@
 package cmd
 
 import (
-	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -10,6 +9,8 @@ import (
 
 	"connectrpc.com/connect"
 	"github.com/charmbracelet/lipgloss"
+	"google.golang.org/protobuf/encoding/protojson"
+
 	graphv1 "github.com/picatz/deputy/gen/deputy/graph/v1"
 	"github.com/picatz/deputy/internal/cli/flags"
 	"github.com/picatz/deputy/internal/dependency/graph"
@@ -29,16 +30,6 @@ const (
 	GraphFormatD3      GraphFormat = "d3"
 )
 
-// GraphResult captures graph command output for machine consumption.
-type GraphResult struct {
-	Repo      string                `json:"repo"`
-	Ref       string                `json:"ref"`
-	Commit    string                `json:"commit"`
-	Generated string                `json:"generated"`
-	Stats     *graphv1.GraphStats   `json:"stats"`
-	Graph     *graph.Graph
-}
-
 // AddGraphCommand registers the graph subcommand.
 // Uses the service layer for graph operations, supporting both local and remote modes.
 func AddGraphCommand(root *cobra.Command, c *services.Clients) {
@@ -53,6 +44,8 @@ func AddGraphCommand(root *cobra.Command, c *services.Clients) {
 		direction            string
 		focusPkg             string
 		statsOnly            bool
+		extended             bool
+		onlyDeclared         bool
 	)
 
 	cmd := &cobra.Command{
@@ -75,7 +68,21 @@ OUTPUT FORMATS:
 The graph shows:
   - Direct dependencies (marked or styled distinctly)
   - Transitive dependencies and their relationships
-  - Vulnerability counts when available (via --show-vulns)`,
+  - Vulnerability counts when available (via --show-vulns)
+
+EXTENDED MODE (--extended):
+  By default, deputy shows packages that end up in your final build.
+  Extended mode adds "phantom" dependencies from the full module graph:
+
+  IMPORTED  - Packages actively imported by your code (runtime risk)
+  REQUIRED  - Packages in go.mod but not directly imported (medium risk)
+  DECLARED  - Packages in full module graph but not selected (latent risk)
+
+  Use cases for extended mode:
+  - Supply chain risk: "What COULD be pulled in if a dependency changes?"
+  - Proactive scanning: Find vulnerabilities before they affect you
+  - OSSF MAL detection: Check for malicious packages in any declared dep
+  - Audit: Understand the full dependency surface area`,
 		Example: `BASIC USAGE:
   # Show dependency tree for current repo
   deputy graph
@@ -95,6 +102,19 @@ FILTERING:
 
   # Filter by ecosystem
   deputy graph --ecosystems go
+
+EXTENDED MODE (supply chain analysis):
+  # Show full module graph including phantom dependencies
+  deputy graph --extended
+
+  # Show only declared-but-unused dependencies (latent risk)
+  deputy graph --extended --declared
+
+  # JSON output with import status for each package
+  deputy graph --extended --format json | jq '.nodes[] | select(.import_status == "IMPORT_STATUS_DECLARED")'
+
+  # Quick stats showing import status breakdown
+  deputy graph --extended --stats
 
 OUTPUT FORMATS:
   # Generate Graphviz DOT (can pipe to dot)
@@ -137,6 +157,7 @@ OUTPUT FORMATS:
 					Ref:        ref,
 					UseProxy:   true,
 					UseGit:     true,
+					Extended:   extended,
 				},
 			}
 
@@ -157,6 +178,10 @@ OUTPUT FORMATS:
 			}
 			if onlyVulnerable {
 				g = g.Filter(func(n *graph.Node) bool { return n.VulnerabilityCount.GetTotal() > 0 })
+			}
+			if onlyDeclared {
+				// Filter to show only declared-but-unused dependencies (phantom deps)
+				g = g.FilterByImportStatus(graph.ImportStatusDeclared)
 			}
 			if focusPkg != "" {
 				// Find best matching node using ranked matching (same as "graph why")
@@ -232,6 +257,8 @@ OUTPUT FORMATS:
 	cmd.Flags().BoolVar(&showVulnCounts, "show-vulns", false, "Show vulnerability counts per package")
 	cmd.Flags().StringVar(&direction, "direction", "TB", "Graph direction: TB (top-bottom), LR (left-right), BT, RL")
 	cmd.Flags().StringVar(&focusPkg, "focus", "", "Focus on a specific package (shows its subgraph)")
+	cmd.Flags().BoolVar(&extended, "extended", false, "Include full module graph (declared but unused dependencies)")
+	cmd.Flags().BoolVar(&onlyDeclared, "declared", false, "Show only declared-but-unused dependencies (requires --extended)")
 	cmd.Flags().BoolVar(&statsOnly, "stats", false, "Show only graph statistics")
 
 	// Add subcommands
@@ -931,58 +958,58 @@ func describePackageSource(locations []string) string {
 	return "unknown source"
 }
 
-// writeWhyJSON outputs the why information as JSON.
+// writeWhyJSON outputs the why information as JSON using proto types.
 func writeWhyJSON(w io.Writer, g *graph.Graph, matches []*graph.Node) error {
-	type pathNode struct {
-		Name    string `json:"name"`
-		Version string `json:"version,omitempty"`
-		PURL    string `json:"purl"`
-		Direct  bool   `json:"direct,omitempty"`
-	}
-	type whyResult struct {
-		Package   string       `json:"package"`
-		Version   string       `json:"version,omitempty"`
-		PURL      string       `json:"purl"`
-		Direct    bool         `json:"direct"`
-		Locations []string     `json:"locations,omitempty"`
-		Source    string       `json:"source,omitempty"`
-		Paths     [][]pathNode `json:"paths"`
-	}
-
-	var results []whyResult
+	// Build a list of WhyDependencyResponse protos for each match
+	var results []*graphv1.WhyDependencyResponse
 	for _, match := range matches {
-		r := whyResult{
-			Package:   match.Name,
-			Version:   match.Version,
-			PURL:      match.Purl,
-			Direct:    match.Direct,
-			Locations: match.Locations,
-		}
-
-		// Add source description when locations are available
-		if len(match.Locations) > 0 {
-			r.Source = describePackageSource(match.Locations)
+		resp := &graphv1.WhyDependencyResponse{
+			Dependency: match.Purl,
+			Found:      true,
 		}
 
 		paths := g.PathsTo(match.Purl)
 		for _, path := range paths {
-			var jsonPath []pathNode
+			depPath := &graphv1.DependencyPath{
+				Length: int32(len(path) - 1), // edges = nodes - 1
+			}
 			for _, node := range path {
-				jsonPath = append(jsonPath, pathNode{
+				depPath.Nodes = append(depPath.Nodes, &graphv1.PathNode{
+					Purl:    node.Purl,
 					Name:    node.Name,
 					Version: node.Version,
-					PURL:    node.Purl,
-					Direct:  node.Direct,
 				})
 			}
-			r.Paths = append(r.Paths, jsonPath)
+			resp.Paths = append(resp.Paths, depPath)
 		}
-		results = append(results, r)
+		results = append(results, resp)
 	}
 
-	enc := json.NewEncoder(w)
-	enc.SetIndent("", "  ")
-	return enc.Encode(results)
+	// Use protojson for consistent formatting
+	opts := protojson.MarshalOptions{
+		Multiline:       true,
+		Indent:          "  ",
+		EmitUnpopulated: false,
+		UseProtoNames:   true,
+	}
+
+	// Marshal as a list wrapper since proto doesn't have a native list type
+	// Create a wrapper response for multiple matches
+	wrapper := &graphv1.WhyDependencyListResponse{
+		Results: results,
+	}
+
+	data, err := opts.Marshal(wrapper)
+	if err != nil {
+		return fmt.Errorf("marshal why results: %w", err)
+	}
+
+	_, err = w.Write(data)
+	if err != nil {
+		return err
+	}
+	_, err = w.Write([]byte("\n"))
+	return err
 }
 
 // addGraphNeedsCommand adds the "graph needs" subcommand.
@@ -1132,25 +1159,12 @@ impact of upgrading or removing a package.`,
 	parent.AddCommand(cmd)
 }
 
-// writeNeedsJSON outputs the needs information as JSON.
+// writeNeedsJSON outputs the needs information as JSON using proto types.
 func writeNeedsJSON(w io.Writer, match *graph.Node, ancestors, parents []*graph.Node) error {
-	type dependent struct {
-		Name    string `json:"name"`
-		Version string `json:"version,omitempty"`
-		PURL    string `json:"purl"`
-		Direct  bool   `json:"direct,omitempty"`
-	}
-	type needsResult struct {
-		Package    string      `json:"package"`
-		Version    string      `json:"version,omitempty"`
-		PURL       string      `json:"purl"`
-		Dependents []dependent `json:"dependents"`
-	}
-
-	result := needsResult{
+	resp := &graphv1.NeedsDependencyResponse{
 		Package: match.Name,
 		Version: match.Version,
-		PURL:    match.Purl,
+		Purl:    match.Purl,
 	}
 
 	// Use ancestors if available, otherwise parents
@@ -1160,17 +1174,32 @@ func writeNeedsJSON(w io.Writer, match *graph.Node, ancestors, parents []*graph.
 	}
 
 	for _, d := range deps {
-		result.Dependents = append(result.Dependents, dependent{
+		resp.Dependents = append(resp.Dependents, &graphv1.Node{
 			Name:    d.Name,
 			Version: d.Version,
-			PURL:    d.Purl,
+			Purl:    d.Purl,
 			Direct:  d.Direct,
 		})
 	}
 
-	enc := json.NewEncoder(w)
-	enc.SetIndent("", "  ")
-	return enc.Encode(result)
+	opts := protojson.MarshalOptions{
+		Multiline:       true,
+		Indent:          "  ",
+		EmitUnpopulated: false,
+		UseProtoNames:   true,
+	}
+
+	data, err := opts.Marshal(resp)
+	if err != nil {
+		return fmt.Errorf("marshal needs result: %w", err)
+	}
+
+	_, err = w.Write(data)
+	if err != nil {
+		return err
+	}
+	_, err = w.Write([]byte("\n"))
+	return err
 }
 
 // writeGraphFlatList outputs the graph as a flat list when no edge data is available.
@@ -1232,9 +1261,22 @@ func writeGraphFlatList(w io.Writer, g *graph.Graph, showVersions, showVulnCount
 func writeGraphStats(w io.Writer, stats *graphv1.GraphStats, format string) error {
 	switch GraphFormat(strings.ToLower(format)) {
 	case GraphFormatJSON:
-		enc := json.NewEncoder(w)
-		enc.SetIndent("", "  ")
-		return enc.Encode(stats)
+		opts := protojson.MarshalOptions{
+			Multiline:       true,
+			Indent:          "  ",
+			EmitUnpopulated: false,
+			UseProtoNames:   true,
+		}
+		data, err := opts.Marshal(stats)
+		if err != nil {
+			return err
+		}
+		_, err = w.Write(data)
+		if err != nil {
+			return err
+		}
+		_, err = w.Write([]byte("\n"))
+		return err
 	default:
 		// Text format - CLI friendly
 		fmt.Fprintf(w, "%s\n", ui.StyleHeader.Render("Dependency Graph Statistics"))
@@ -1242,11 +1284,26 @@ func writeGraphStats(w io.Writer, stats *graphv1.GraphStats, format string) erro
 		fmt.Fprintf(w, "  Total packages:      %d\n", stats.GetTotalNodes())
 		fmt.Fprintf(w, "  Direct dependencies: %d\n", stats.GetDirectNodes())
 		fmt.Fprintf(w, "  Transitive:          %d\n", stats.GetTransitiveNodes())
-		fmt.Fprintf(w, "  Max depth:           %d\n", stats.GetMaxDepth())
+		// Show max connected depth (meaningful for actual dependency analysis)
+		// rather than max_depth which includes disconnected nodes (depth=999)
+		fmt.Fprintf(w, "  Max depth:           %d\n", stats.GetMaxConnectedDepth())
+		if stats.GetDisconnectedNodes() > 0 {
+			fmt.Fprintf(w, "  Disconnected:        %d\n", stats.GetDisconnectedNodes())
+		}
 		if stats.GetVulnerableNodes() > 0 {
 			fmt.Fprintf(w, "  Vulnerable packages: %d\n", stats.GetVulnerableNodes())
 		}
 		fmt.Fprintf(w, "\n")
+
+		// Import status breakdown (extended mode only)
+		if importCounts := stats.GetImportStatusCounts(); importCounts != nil {
+			fmt.Fprintf(w, "%s\n", ui.StyleHeader.Render("By Import Status (Extended Mode)"))
+			fmt.Fprintf(w, "  Imported (in binary): %d\n", importCounts.GetImported())
+			fmt.Fprintf(w, "  Required (in go.mod): %d\n", importCounts.GetRequired())
+			fmt.Fprintf(w, "  Declared (phantom):   %d\n", importCounts.GetDeclared())
+			fmt.Fprintf(w, "\n")
+		}
+
 		if len(stats.GetEcosystems()) > 0 {
 			fmt.Fprintf(w, "%s\n", ui.StyleHeader.Render("By Ecosystem"))
 			// Sort ecosystems for deterministic output

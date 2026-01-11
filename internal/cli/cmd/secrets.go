@@ -12,12 +12,14 @@ import (
 
 	"connectrpc.com/connect"
 	git "github.com/go-git/go-git/v5"
+	"google.golang.org/protobuf/encoding/protojson"
+
 	secretsv1 "github.com/picatz/deputy/gen/deputy/secrets/v1"
-	"github.com/picatz/deputy/internal/services"
 	"github.com/picatz/deputy/internal/container/image"
 	gitx "github.com/picatz/deputy/internal/gitutil"
 	internalproto "github.com/picatz/deputy/internal/proto"
 	"github.com/picatz/deputy/internal/secrets"
+	"github.com/picatz/deputy/internal/services"
 	"github.com/picatz/deputy/internal/targets"
 	"github.com/picatz/deputy/internal/targets/providers"
 	ui "github.com/picatz/deputy/internal/ui"
@@ -293,9 +295,70 @@ FILTERING:
 				return runContainerSecretsScan(ctx, out, errW, target, formatFlag, noRedact, deepScan)
 			}
 
+			// Check if target is a remote Git URL (e.g., github.com/owner/repo)
+			// This must be checked before os.Stat() since remote URLs don't exist locally
+			isRemoteGit := gitx.ToHTTPSGitURL(target) != "" || strings.HasPrefix(target, "git@")
+
 			// Determine if target is a file or directory
 			info, err := os.Stat(target)
 			if err != nil {
+				// If target doesn't exist locally and looks like a Git URL, pass to service
+				if isRemoteGit {
+					fmt.Fprintln(errW, ui.StyleMeta.Render("Cloning remote repository..."))
+					// Build scan options
+					scanOpts := &secretsv1.ScanOptions{}
+					if includeGlob != "" {
+						scanOpts.IncludePatterns = strings.Split(includeGlob, ",")
+					}
+					if excludeGlob != "" {
+						scanOpts.ExcludePatterns = strings.Split(excludeGlob, ",")
+					}
+
+					// Call the secrets service which will handle cloning
+					resp, err := c.Secrets.Scan(ctx, connect.NewRequest(&secretsv1.ScanRequest{
+						Target:  target,
+						Options: scanOpts,
+					}))
+					if err != nil {
+						return fmt.Errorf("scanning remote repository: %w", err)
+					}
+
+					// Convert proto findings back to internal types for rendering
+					findings := internalproto.SecretsFindingsFromProto(resp.Msg.Findings)
+					filesScanned := 0
+					if resp.Msg.Stats != nil {
+						filesScanned = int(resp.Msg.Stats.FilesScanned)
+					}
+
+					// Build result and render
+					stats := make(map[secrets.SecretType]int)
+					highConfCount := 0
+					for _, f := range findings {
+						stats[f.Type]++
+						if f.Confidence >= 0.9 {
+							highConfCount++
+						}
+					}
+
+					result := SecretsResult{
+						Target:              target,
+						Generated:           time.Now().UTC().Format(time.RFC3339),
+						FilesScanned:        filesScanned,
+						SecretsFound:        len(findings),
+						HighConfidenceCount: highConfCount,
+						Findings:            findings,
+						Stats:               stats,
+					}
+
+					switch formatFlag {
+					case "json":
+						return outputSecretsProtoJSON(out, resp.Msg)
+					case "sarif":
+						return renderSecretsSARIF(out, result, target)
+					default:
+						return renderSecretsTextWithVerification(out, result, noRedact, nil)
+					}
+				}
 				return fmt.Errorf("accessing target: %w", err)
 			}
 
@@ -379,6 +442,10 @@ FILTERING:
 
 			switch formatFlag {
 			case "json":
+				// Use proto-first JSON when no post-processing was needed
+				if baselinePath == "" && !verifyFlag {
+					return outputSecretsProtoJSON(out, resp.Msg)
+				}
 				return renderSecretsJSONWithVerification(out, result, verificationResults)
 			case "sarif":
 				return renderSecretsSARIF(out, result, target)
@@ -642,11 +709,23 @@ func isBinaryContent(content []byte) bool {
 	return false
 }
 
-// renderSecretsJSON outputs the result as JSON.
-func renderSecretsJSON(out io.Writer, result SecretsResult) error {
-	enc := json.NewEncoder(out)
-	enc.SetIndent("", "  ")
-	return enc.Encode(result)
+// outputSecretsProtoJSON writes a secrets response as JSON using protojson.
+func outputSecretsProtoJSON(w io.Writer, resp *secretsv1.ScanResponse) error {
+	opts := protojson.MarshalOptions{
+		Multiline:       true,
+		Indent:          "  ",
+		EmitUnpopulated: false,
+		UseProtoNames:   true,
+	}
+	data, err := opts.Marshal(resp)
+	if err != nil {
+		return fmt.Errorf("marshal proto to JSON: %w", err)
+	}
+	if _, err := w.Write(data); err != nil {
+		return err
+	}
+	_, err = w.Write([]byte("\n"))
+	return err
 }
 
 // renderSecretsSARIF outputs the result as SARIF for GitHub Code Scanning.
@@ -1005,11 +1084,21 @@ type SecretsDiffResult struct {
 	Findings   []secrets.Finding `json:"findings"`
 }
 
-// renderDiffSecretsJSON outputs diff results as JSON.
+// renderDiffSecretsJSON outputs diff results as JSON using protojson.
 func renderDiffSecretsJSON(out io.Writer, result SecretsDiffResult) error {
-	enc := json.NewEncoder(out)
-	enc.SetIndent("", "  ")
-	return enc.Encode(result)
+	// Convert to proto for consistent JSON output
+	resp := &secretsv1.ScanDiffResponse{
+		BaseRef:       result.BaseRef,
+		TargetRef:     result.TargetRef,
+		AddedFindings: internalproto.SecretsFindingsToProto(result.Findings),
+		Stats: &secretsv1.Stats{
+			Total: int32(result.NewSecrets),
+		},
+	}
+	return outputSecretsProtoJSON(out, &secretsv1.ScanResponse{
+		Findings: resp.AddedFindings,
+		Stats:    resp.Stats,
+	})
 }
 
 // renderDiffSecretsText outputs diff results as human-readable text.
@@ -1299,32 +1388,33 @@ func formatDuration(d time.Duration) string {
 	return d.String()
 }
 
-// renderSecretsJSONWithVerification outputs findings with verification results as JSON.
+// renderSecretsJSONWithVerification outputs findings with verification results as JSON using protojson.
 func renderSecretsJSONWithVerification(out io.Writer, result SecretsResult, verifications map[int]secrets.VerificationResult) error {
-	// Build combined output
-	type findingWithVerification struct {
-		secrets.Finding
-		Verification *secrets.VerificationResult `json:"verification,omitempty"`
-	}
-
-	output := struct {
-		SecretsResult
-		Findings []findingWithVerification `json:"findings"`
-	}{
-		SecretsResult: result,
-		Findings:      make([]findingWithVerification, len(result.Findings)),
-	}
-
+	// Convert findings to proto with verification data
+	protoFindings := make([]*secretsv1.Finding, len(result.Findings))
 	for i, f := range result.Findings {
-		output.Findings[i] = findingWithVerification{Finding: f}
-		if v, ok := verifications[i]; ok {
-			output.Findings[i].Verification = &v
+		var v *secrets.VerificationResult
+		if vr, ok := verifications[i]; ok {
+			v = &vr
 		}
+		protoFindings[i] = internalproto.SecretsFindingWithVerificationToProto(f, v)
 	}
 
-	enc := json.NewEncoder(out)
-	enc.SetIndent("", "  ")
-	return enc.Encode(output)
+	// Build proto response
+	resp := &secretsv1.ScanResponse{
+		Findings: protoFindings,
+		Stats: &secretsv1.Stats{
+			Total:               int32(result.SecretsFound),
+			HighConfidenceCount: int32(result.HighConfidenceCount),
+			FilesScanned:        int32(result.FilesScanned),
+			CountByType:         make(map[string]int32),
+		},
+	}
+	for t, count := range result.Stats {
+		resp.Stats.CountByType[string(t)] = int32(count)
+	}
+
+	return outputSecretsProtoJSON(out, resp)
 }
 
 // renderSecretsTextWithVerification outputs findings with verification results as text.

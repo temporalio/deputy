@@ -14,6 +14,8 @@ import (
 	internalproto "github.com/picatz/deputy/internal/proto"
 	"github.com/picatz/deputy/internal/scanning"
 	"github.com/picatz/deputy/internal/targets"
+	"github.com/picatz/deputy/internal/vulnerability/id/cve"
+	"github.com/picatz/deputy/internal/vulnerability/intel"
 )
 
 // ScanHandler implements the ScanService ConnectRPC service.
@@ -82,6 +84,7 @@ func (h *ScanHandler) Scan(
 	if req.Msg.Options != nil {
 		opts.Ecosystems = req.Msg.Options.Ecosystems
 		opts.Platform = req.Msg.Options.Platform
+		opts.DetectBaseImage = req.Msg.Options.DetectBaseImage
 	}
 
 	// Extract ref from options if provided
@@ -122,6 +125,11 @@ func (h *ScanHandler) Scan(
 
 	// Convert result to proto
 	response := internalproto.ScanningResultToProto(&execution.Result)
+
+	// Enrich vulnerabilities with EPSS/KEV data if requested
+	if req.Msg.Options != nil && req.Msg.Options.EnrichOptions != nil && req.Msg.Options.EnrichOptions.Enabled {
+		enrichFindings(ctx, response.Findings, req.Msg.Options.EnrichOptions)
+	}
 
 	// Record scan results on the span
 	otel.RecordScanResults(span,
@@ -228,6 +236,7 @@ func (h *ScanHandler) StreamScan(
 	if req.Msg.Options != nil {
 		opts.Ecosystems = req.Msg.Options.Ecosystems
 		opts.Platform = req.Msg.Options.Platform
+		opts.DetectBaseImage = req.Msg.Options.DetectBaseImage
 	}
 
 	// Send resolving target phase
@@ -290,6 +299,11 @@ func (h *ScanHandler) StreamScan(
 	// Convert result to proto
 	response := internalproto.ScanningResultToProto(&execution.Result)
 
+	// Enrich vulnerabilities with EPSS/KEV data if requested
+	if req.Msg.Options != nil && req.Msg.Options.EnrichOptions != nil && req.Msg.Options.EnrichOptions.Enabled {
+		enrichFindings(ctx, response.Findings, req.Msg.Options.EnrichOptions)
+	}
+
 	// Send complete phase with result
 	if err := stream.Send(&scanv1.ScanProgress{
 		Phase:                scanv1.ScanPhase_SCAN_PHASE_COMPLETE,
@@ -329,4 +343,88 @@ func countBySeverity(findings []*vulnerabilityv1.Finding, level vulnerabilityv1.
 		}
 	}
 	return count
+}
+
+// enrichFindings enriches vulnerability findings with EPSS and KEV data.
+func enrichFindings(ctx context.Context, findings []*vulnerabilityv1.Finding, opts *scanv1.EnrichOptions) {
+	if len(findings) == 0 {
+		return
+	}
+
+	// Collect CVE IDs for batch lookup
+	cveIDs := make([]string, 0, len(findings))
+	cveToIndices := make(map[string][]int) // CVE -> finding indices
+
+	for i, f := range findings {
+		cveID := extractCVE(f)
+		if cveID != "" {
+			if _, seen := cveToIndices[cveID]; !seen {
+				cveIDs = append(cveIDs, cveID)
+			}
+			cveToIndices[cveID] = append(cveToIndices[cveID], i)
+		}
+	}
+
+	if len(cveIDs) == 0 {
+		return
+	}
+
+	// Batch enrichment
+	enricher := intel.NewEnricher(&intel.EnricherConfig{DiskCache: true})
+	results := enricher.EnrichBatch(ctx, cveIDs)
+
+	// Apply enrichment results to findings
+	for cveID, indices := range cveToIndices {
+		enrichment, ok := results[cveID]
+		if !ok {
+			continue
+		}
+
+		for _, idx := range indices {
+			f := findings[idx]
+
+			// Apply EPSS data if requested
+			if opts.IncludeEpss || opts.Enabled {
+				if enrichment.EPSS != nil {
+					f.Epss = enrichment.EPSS
+				}
+				if enrichment.EPSSPercentile != nil {
+					f.EpssPercentile = enrichment.EPSSPercentile
+				}
+			}
+
+			// Apply KEV data if requested
+			if opts.IncludeKev || opts.Enabled {
+				if enrichment.InKEV != nil {
+					f.InKev = enrichment.InKEV
+				}
+			}
+		}
+	}
+}
+
+// extractCVE extracts CVE ID from a finding.
+func extractCVE(f *vulnerabilityv1.Finding) string {
+	if f == nil || f.Advisory == nil {
+		return ""
+	}
+
+	// Check the CVE field first
+	if f.Advisory.Cve != "" && cve.IsValid(f.Advisory.Cve) {
+		return f.Advisory.Cve
+	}
+
+	// Check the primary ID
+	if cve.IsValid(f.AdvisoryId) {
+		return f.AdvisoryId
+	}
+
+	// Check aliases
+	for _, alias := range f.Advisory.Aliases {
+		if cve.IsValid(alias) {
+			return alias
+		}
+	}
+
+	return ""
 }

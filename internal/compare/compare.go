@@ -422,11 +422,22 @@ func GetMainModuleFromGoMod(data []byte) string {
 	return ""
 }
 
-// GetDirectDependenciesFromGoMod parses a go.mod file and returns module roots
+// GetDirectDependenciesFromGoMod parses a go.mod file and returns module paths
 // for direct dependencies (those without "// indirect"). The returned set
-// always includes "stdlib".
+// always includes "stdlib" and "go".
+//
+// The map stores:
+//   - Exact module paths from go.mod marked as direct (value = true)
+//   - Module roots for matching subpackage import paths (value = true, if any
+//     direct module has that root)
+//
+// Indirect modules (those with "// indirect") are stored with value = false
+// to explicitly mark them as NOT direct. This allows proper handling of Go
+// submodules: if go.mod has "github.com/bytedance/sonic" as direct but
+// "github.com/bytedance/sonic/loader" as indirect, only "sonic" is marked
+// direct, not "sonic/loader".
 func GetDirectDependenciesFromGoMod(data []byte) map[string]bool {
-	deps := map[string]bool{"stdlib": true}
+	deps := map[string]bool{"stdlib": true, "go": true}
 	if len(data) == 0 {
 		return deps
 	}
@@ -435,9 +446,7 @@ func GetDirectDependenciesFromGoMod(data []byte) map[string]bool {
 		if ln == "" || strings.HasPrefix(ln, "//") {
 			continue
 		}
-		if strings.Contains(ln, "// indirect") {
-			continue
-		}
+		isIndirect := strings.Contains(ln, "// indirect")
 		fields := strings.Fields(ln)
 		if len(fields) < 2 {
 			continue
@@ -448,7 +457,28 @@ func GetDirectDependenciesFromGoMod(data []byte) map[string]bool {
 		}
 		if strings.Contains(candidate, "/") {
 			info := ParseGoPackage(&extractor.Package{Name: candidate})
-			deps[GetModuleRoot(info.CanonicalName)] = true
+			// Store exact module path with its direct/indirect status.
+			// For indirect modules, we explicitly store false so that
+			// submodules like "foo/bar/loader" don't inherit the direct
+			// status from their parent module "foo/bar".
+			if isIndirect {
+				// Only set to false if not already marked as direct
+				// (a module appearing both as direct and indirect should be direct)
+				if _, exists := deps[info.CanonicalName]; !exists {
+					deps[info.CanonicalName] = false
+				}
+			} else {
+				deps[info.CanonicalName] = true
+				// For direct modules, also store module root for matching
+				// subpackage import paths within the module
+				root := GetModuleRoot(info.CanonicalName)
+				if root != info.CanonicalName {
+					// Only set root if not already explicitly set by an exact match
+					if _, exists := deps[root]; !exists {
+						deps[root] = true
+					}
+				}
+			}
 		}
 	}
 	return deps

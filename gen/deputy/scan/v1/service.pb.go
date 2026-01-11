@@ -261,9 +261,14 @@ type ScanOptions struct {
 	//   - "github.com/owner/repo" -> git repository
 	//
 	// Use TargetHint only when auto-detection fails or is ambiguous.
-	TargetHint    *TargetHint `protobuf:"bytes,10,opt,name=target_hint,json=targetHint,proto3" json:"target_hint,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	TargetHint *TargetHint `protobuf:"bytes,10,opt,name=target_hint,json=targetHint,proto3" json:"target_hint,omitempty"`
+	// DetectBaseImage enables base image detection for container image scans.
+	// When enabled, queries deps.dev to determine if layers belong to known base images,
+	// populating layer_details.in_base_image in the response packages.
+	// Only applies to container image targets. Requires network access and adds latency.
+	DetectBaseImage bool `protobuf:"varint,11,opt,name=detect_base_image,json=detectBaseImage,proto3" json:"detect_base_image,omitempty"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
 }
 
 func (x *ScanOptions) Reset() {
@@ -364,6 +369,13 @@ func (x *ScanOptions) GetTargetHint() *TargetHint {
 		return x.TargetHint
 	}
 	return nil
+}
+
+func (x *ScanOptions) GetDetectBaseImage() bool {
+	if x != nil {
+		return x.DetectBaseImage
+	}
+	return false
 }
 
 // TargetHint disambiguates the target type when auto-detection is insufficient.
@@ -1348,7 +1360,7 @@ const file_deputy_scan_v1_service_proto_rawDesc = "" +
 	"\aoptions\x18\x02 \x01(\v2\x1b.deputy.scan.v1.ScanOptionsR\aoptions\"b\n" +
 	"\x11StreamScanRequest\x12\x16\n" +
 	"\x06target\x18\x01 \x01(\tR\x06target\x125\n" +
-	"\aoptions\x18\x02 \x01(\v2\x1b.deputy.scan.v1.ScanOptionsR\aoptions\"\xf9\x03\n" +
+	"\aoptions\x18\x02 \x01(\v2\x1b.deputy.scan.v1.ScanOptionsR\aoptions\"\xa5\x04\n" +
 	"\vScanOptions\x12\x1e\n" +
 	"\n" +
 	"ecosystems\x18\x01 \x03(\tR\n" +
@@ -1363,7 +1375,8 @@ const file_deputy_scan_v1_service_proto_rawDesc = "" +
 	"\x0finclude_secrets\x18\t \x01(\bR\x0eincludeSecrets\x12;\n" +
 	"\vtarget_hint\x18\n" +
 	" \x01(\v2\x1a.deputy.scan.v1.TargetHintR\n" +
-	"targetHint\"g\n" +
+	"targetHint\x12*\n" +
+	"\x11detect_base_image\x18\v \x01(\bR\x0fdetectBaseImage\"g\n" +
 	"\n" +
 	"TargetHint\x120\n" +
 	"\x04kind\x18\x01 \x01(\x0e2\x1c.deputy.target.v1.TargetKindR\x04kind\x12'\n" +

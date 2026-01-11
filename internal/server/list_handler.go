@@ -6,6 +6,7 @@ import (
 
 	"connectrpc.com/connect"
 
+	dependencyv1 "github.com/picatz/deputy/gen/deputy/dependency/v1"
 	listv1 "github.com/picatz/deputy/gen/deputy/list/v1"
 	"github.com/picatz/deputy/gen/deputy/list/v1/listv1connect"
 	"github.com/picatz/deputy/internal/compare"
@@ -40,6 +41,25 @@ func NewListHandler(opts ...ListHandlerOption) *ListHandler {
 		opt(h)
 	}
 	return h
+}
+
+// routeCollection routes to the appropriate inventory collector based on target type.
+func (h *ListHandler) routeCollection(ctx context.Context, target, ref string, refProvided bool, platform string, opts inventory.Options) (*inventory.Execution, error) {
+	kind := targets.DetectKind(target)
+
+	switch kind {
+	case targets.KindContainerImage:
+		targetOpts := map[string]string{}
+		if platform != "" {
+			targetOpts["platform"] = platform
+		}
+		return inventory.CollectContainerImage(ctx, target, targetOpts, opts)
+
+	default:
+		// Repository, directory, PURL, or unspecified - use repository collector
+		// Note: PURLs are handled by repository collector which will fail gracefully
+		return inventory.CollectRepository(ctx, target, ref, refProvided, opts)
+	}
 }
 
 // ListPackages enumerates packages in a target.
@@ -85,7 +105,14 @@ func (h *ListHandler) ListPackages(
 		refProvided = true
 	}
 
-	exec, err := inventory.CollectRepository(ctx, target, ref, refProvided, opts)
+	// Get platform hint if provided
+	platform := ""
+	if req.Msg.GetOptions() != nil {
+		platform = req.Msg.Options.GetPlatform()
+	}
+
+	// Route to appropriate collector based on target type
+	exec, err := h.routeCollection(ctx, target, ref, refProvided, platform, opts)
 	if err != nil {
 		otel.SetSpanError(span, err)
 		return nil, connect.NewError(connect.CodeInternal, err)
@@ -99,6 +126,18 @@ func (h *ListHandler) ListPackages(
 	direct := exec.Result.Direct
 	protoPackages := protoconv.ExtractorPackagesToProto(packages, direct)
 
+	// Filter to only direct dependencies if requested
+	onlyDirect := req.Msg.GetOptions().GetOnlyDirect()
+	if onlyDirect {
+		filtered := make([]*dependencyv1.Package, 0, len(protoPackages))
+		for _, pkg := range protoPackages {
+			if pkg.GetDirect() {
+				filtered = append(filtered, pkg)
+			}
+		}
+		protoPackages = filtered
+	}
+
 	ecosystemCounts := make(map[string]int32)
 	directCount := int32(0)
 	transitiveCount := int32(0)
@@ -111,8 +150,14 @@ func (h *ListHandler) ListPackages(
 		}
 
 		// Count direct vs transitive
-		// Direct map contains Go module roots (e.g., "github.com/google/osv-scalibr"),
-		// not PURL strings. For Go packages, use the module root for lookup.
+		// For Go packages, check both exact module path and module root.
+		// The direct map may contain:
+		//   - Exact module paths with true (direct) or false (indirect)
+		//   - Module roots with true (for subpackage matching)
+		//
+		// We first check the exact module path, then fall back to module root.
+		// This handles Go submodules correctly: if go.mod has "foo" as direct
+		// but "foo/loader" as indirect, "foo/loader" should be indirect.
 		purl := pkg.PURL()
 		isDirect := false
 		if purl != nil && direct != nil {
@@ -126,8 +171,14 @@ func (h *ListHandler) ListPackages(
 						modulePath = purl.Name
 					}
 				}
-				moduleRoot := compare.GetModuleRoot(modulePath)
-				isDirect = direct[moduleRoot]
+				// First check exact module path (handles submodules correctly)
+				if val, exists := direct[modulePath]; exists {
+					isDirect = val
+				} else {
+					// Fall back to module root for subpackage import paths
+					moduleRoot := compare.GetModuleRoot(modulePath)
+					isDirect = direct[moduleRoot]
+				}
 			} else {
 				// For non-Go ecosystems, use PURL string as key
 				isDirect = direct[purl.String()]

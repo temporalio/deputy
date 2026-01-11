@@ -87,6 +87,7 @@ func newRoot() *cobra.Command {
 	logFormat := defaultLogFormat()
 	var serverAddr string
 	var daemonSocket string
+	var authToken string
 
 	rootCmd := &cobra.Command{
 		Use:           "deputy",
@@ -185,6 +186,7 @@ CONNECTION MODES:
 	rootCmd.PersistentFlags().StringVar(&logFormat, "log-format", logFormat, "Logging format (text, json). Override with DEPUTY_LOG_FORMAT")
 	rootCmd.PersistentFlags().StringVar(&serverAddr, "server", "", "Connect to remote Deputy server (e.g., https://deputy.example.com:8090). Override with DEPUTY_SERVER")
 	rootCmd.PersistentFlags().StringVar(&daemonSocket, "daemon", "", "Connect to local daemon via Unix socket path (reserved for future use)")
+	rootCmd.PersistentFlags().StringVar(&authToken, "auth-token", "", "Bearer token for authenticating with remote server. Override with DEPUTY_AUTH_TOKEN")
 	rootCmd.PersistentPreRunE = func(c *cobra.Command, args []string) error {
 		return configureLogging(logLevel, logFormat)
 	}
@@ -193,6 +195,7 @@ CONNECTION MODES:
 	// Clients will be created by RegisterCommands based on environment/flags
 	cmd.RegisterCommands(rootCmd, cmd.Dependencies{
 		ServerAddress: serverAddr,
+		AuthToken:     authToken,
 	})
 	return rootCmd
 }

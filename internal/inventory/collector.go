@@ -98,8 +98,9 @@ type TargetHint struct {
 // Execution wraps an inventory result and cleanup function.
 // Always call Close() when done to release temporary resources.
 type Execution struct {
-	Result  Result
-	cleanup func()
+	Result    Result
+	Workspace workspace.FS // Optional: file access for graph edge resolution
+	cleanup   func()
 }
 
 // Close releases any temporary resources (e.g., cloned repos).
@@ -118,6 +119,12 @@ type Options struct {
 
 	// Platform specifies container image platform (e.g., "linux/amd64").
 	Platform string
+
+	// DetectBaseImage enables base image detection for container image scans.
+	// When true, the baseimage enricher queries deps.dev to determine if layers
+	// belong to known base images, populating LayerDetails.InBaseImage.
+	// This requires network access and adds latency to the scan.
+	DetectBaseImage bool
 }
 
 // Collect extracts package inventory from any supported target type.
@@ -197,8 +204,8 @@ func CollectRepository(ctx context.Context, target, ref string, refProvided bool
 	}
 	span.SetAttributes(attribute.Int("deputy.package.count", len(pkgs)))
 
-	// Resolve direct dependencies
-	direct := compare.CollectGoDirectModulesFromWorkspace(resolved.workspace)
+	// Resolve direct dependencies (multi-ecosystem: Go, npm, Cargo, PyPI)
+	direct := compare.CollectDirectDependenciesFromWorkspace(resolved.workspace)
 
 	result := Result{
 		Target: Target{
@@ -218,7 +225,7 @@ func CollectRepository(ctx context.Context, target, ref string, refProvided bool
 	// Get commit metadata if available
 	result.Target.CommitHash, result.Target.OriginURL = getRepoMetadata(resolved.localPath, ref)
 
-	return &Execution{Result: result, cleanup: resolved.cleanup}, nil
+	return &Execution{Result: result, Workspace: resolved.workspace, cleanup: resolved.cleanup}, nil
 }
 
 // CollectDirectory extracts inventory from a local directory (no git context).
@@ -243,7 +250,8 @@ func CollectDirectory(ctx context.Context, path string, opts Options) (*Executio
 	}
 	span.SetAttributes(attribute.Int("deputy.package.count", len(pkgs)))
 
-	direct := compare.CollectGoDirectModulesFromWorkspace(ws)
+	// Resolve direct dependencies (multi-ecosystem: Go, npm, Cargo, PyPI)
+	direct := compare.CollectDirectDependenciesFromWorkspace(ws)
 
 	result := Result{
 		Target: Target{
@@ -257,8 +265,9 @@ func CollectDirectory(ctx context.Context, path string, opts Options) (*Executio
 	}
 
 	return &Execution{
-		Result:  result,
-		cleanup: func() { _ = ws.Close() },
+		Result:    result,
+		Workspace: ws,
+		cleanup:   func() { _ = ws.Close() },
 	}, nil
 }
 
@@ -316,7 +325,10 @@ func CollectContainerImage(ctx context.Context, target string, targetOpts map[st
 		return nil, err
 	}
 
-	pkgs, err := ScanPackagesContainerImage(ctx, img, ScanOptions{Ecosystems: opts.Ecosystems})
+	pkgs, err := ScanPackagesContainerImage(ctx, img, ScanOptions{
+		Ecosystems:      opts.Ecosystems,
+		DetectBaseImage: opts.DetectBaseImage,
+	})
 	if err != nil {
 		cleanup()
 		otel.SetSpanError(span, err)

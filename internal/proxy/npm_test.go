@@ -37,7 +37,7 @@ func TestNPMHandlerBlocksVulnerability(t *testing.T) {
 	defer upstream.Close()
 
 	tmp := t.TempDir()
-	path := writeNPMBundle(t, tmp, "deny-critical", `vulnerabilities.exists(v, v.Severity == "CRITICAL")`, "critical vuln", "deny")
+	path := writeNPMBundle(t, tmp, "deny-critical", `vulnerabilities.exists(v, v.advisory.severity.level == severity.critical)`, "critical vuln", "deny")
 	engine, err := NewPolicyEngine([]string{path})
 	if err != nil {
 		t.Fatalf("NewPolicyEngine: %v", err)

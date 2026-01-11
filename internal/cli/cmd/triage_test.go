@@ -11,9 +11,12 @@ import (
 	"testing"
 
 	"connectrpc.com/connect"
+	"google.golang.org/protobuf/encoding/protojson"
 
+	dependencyv1 "github.com/picatz/deputy/gen/deputy/dependency/v1"
 	scanv1 "github.com/picatz/deputy/gen/deputy/scan/v1"
 	"github.com/picatz/deputy/gen/deputy/scan/v1/scanv1connect"
+	targetv1 "github.com/picatz/deputy/gen/deputy/target/v1"
 	vulnerabilityv1 "github.com/picatz/deputy/gen/deputy/vulnerability/v1"
 	"github.com/picatz/deputy/internal/dependency"
 	"github.com/picatz/deputy/internal/inventory"
@@ -174,29 +177,50 @@ func TestTriageCommandFromReport(t *testing.T) {
 
 	tmpDir := t.TempDir()
 
-	// Create a mock scan report JSON file
-	scanReport := ScanResult{
-		Vulnerabilities: []report.Vulnerability{
+	// Create a mock scan report in proto JSON format
+	scanResp := &scanv1.ScanResponse{
+		Target: &targetv1.Target{
+			DisplayPath: "github.com/test/repo",
+			CommitHash:  "abc123",
+		},
+		Findings: []*vulnerabilityv1.Finding{
 			{
-				ID:           "CVE-2024-5678",
-				Package:      "lodash",
-				Version:      "4.17.20",
-				Severity:     "HIGH",
-				SeverityType: "GHSA",
-				Affected:     true,
+				AdvisoryId: "CVE-2024-5678",
+				Package: &dependencyv1.Package{
+					Name:      "lodash",
+					Version:   "4.17.20",
+					Ecosystem: "npm",
+					Direct:    true,
+				},
+				Advisory: &vulnerabilityv1.Advisory{
+					Id:      "CVE-2024-5678",
+					Summary: "Test vulnerability",
+					Severity: &vulnerabilityv1.Severity{
+						Level: vulnerabilityv1.SeverityLevel_SEVERITY_LEVEL_HIGH,
+						Type:  vulnerabilityv1.SeverityType_SEVERITY_TYPE_GHSA,
+					},
+				},
+				Affected: true,
 			},
 		},
-		Stats: vulnerabilityv1.Stats{
+		Stats: &vulnerabilityv1.Stats{
 			Total:  1,
 			Unique: 1,
 			High:   1,
 		},
 	}
-	reportPath := filepath.Join(tmpDir, "report.json")
-	reportData, err := json.Marshal(scanReport)
+
+	opts := protojson.MarshalOptions{
+		Multiline:       true,
+		Indent:          "  ",
+		EmitUnpopulated: false,
+		UseProtoNames:   true,
+	}
+	reportData, err := opts.Marshal(scanResp)
 	if err != nil {
 		t.Fatalf("failed to marshal report: %v", err)
 	}
+	reportPath := filepath.Join(tmpDir, "report.json")
 	if err := os.WriteFile(reportPath, reportData, 0644); err != nil {
 		t.Fatalf("failed to write report: %v", err)
 	}

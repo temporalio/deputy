@@ -157,6 +157,16 @@ func (m *ScanOptions) MarshalToSizedBufferVT(dAtA []byte) (int, error) {
 		i -= len(m.unknownFields)
 		copy(dAtA[i:], m.unknownFields)
 	}
+	if m.DetectBaseImage {
+		i--
+		if m.DetectBaseImage {
+			dAtA[i] = 1
+		} else {
+			dAtA[i] = 0
+		}
+		i--
+		dAtA[i] = 0x58
+	}
 	if m.TargetHint != nil {
 		size, err := m.TargetHint.MarshalToSizedBufferVT(dAtA[:i])
 		if err != nil {
@@ -1257,6 +1267,9 @@ func (m *ScanOptions) SizeVT() (n int) {
 		l = m.TargetHint.SizeVT()
 		n += 1 + l + protohelpers.SizeOfVarint(uint64(l))
 	}
+	if m.DetectBaseImage {
+		n += 2
+	}
 	n += len(m.unknownFields)
 	return n
 }
@@ -2240,6 +2253,26 @@ func (m *ScanOptions) UnmarshalVT(dAtA []byte) error {
 				return err
 			}
 			iNdEx = postIndex
+		case 11:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field DetectBaseImage", wireType)
+			}
+			var v int
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return protohelpers.ErrIntOverflow
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				v |= int(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			m.DetectBaseImage = bool(v != 0)
 		default:
 			iNdEx = preIndex
 			skippy, err := protohelpers.Skip(dAtA[iNdEx:])

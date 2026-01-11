@@ -2,15 +2,14 @@ package cmd
 
 import (
 	"cmp"
-	"encoding/json"
 	"fmt"
 	"io"
 	"os"
 	"slices"
 	"strings"
-	"time"
 
 	"connectrpc.com/connect"
+	"google.golang.org/protobuf/encoding/protojson"
 
 	dependencyv1 "github.com/picatz/deputy/gen/deputy/dependency/v1"
 	listv1 "github.com/picatz/deputy/gen/deputy/list/v1"
@@ -28,16 +27,6 @@ type ListItem struct {
 	IsDirect  bool   `json:"isDirect"`
 	PURL      string `json:"purl,omitempty"`
 	Sources   string `json:"sources,omitempty"`
-}
-
-// ListResult captures list command output for machine consumption.
-type ListResult struct {
-	Target    string     `json:"target"`
-	Ref       string     `json:"ref"`
-	Commit    string     `json:"commit"`
-	Generated string     `json:"generated"`
-	Count     int        `json:"count"`
-	Items     []ListItem `json:"items"`
 }
 
 // AddListCommand registers the list (ls) subcommand.
@@ -150,7 +139,7 @@ FILTERING & FORMATTING:
 			}
 
 			// Call client API
-			resp, err := c.Inventory.ListPackages(ctx, connect.NewRequest(&listv1.ListPackagesRequest{
+			resp, err := c.Packages.ListPackages(ctx, connect.NewRequest(&listv1.ListPackagesRequest{
 				Target:  target,
 				Options: opts,
 			}))
@@ -191,21 +180,22 @@ FILTERING & FORMATTING:
 			case FormatTSV:
 				return writeListTSV(w, items, !noHeader, false)
 			case FormatJSON:
-				commitHash := ""
-				if resp.Msg.Target != nil {
-					commitHash = resp.Msg.Target.CommitHash
+				// Use protojson for consistent JSON output from proto response
+				opts := protojson.MarshalOptions{
+					Multiline:       true,
+					Indent:          "  ",
+					EmitUnpopulated: false,
+					UseProtoNames:   true,
 				}
-				result := ListResult{
-					Target:    target,
-					Ref:       shortGitRef(refOrHEAD(ref)),
-					Commit:    commitHash,
-					Generated: timeNowUTC(),
-					Count:     len(items),
-					Items:     items,
+				data, err := opts.Marshal(resp.Msg)
+				if err != nil {
+					return fmt.Errorf("marshal proto to JSON: %w", err)
 				}
-				enc := json.NewEncoder(w)
-				enc.SetIndent("", "  ")
-				return enc.Encode(result)
+				if _, err := w.Write(data); err != nil {
+					return err
+				}
+				_, err = w.Write([]byte("\n"))
+				return err
 			default:
 				return flags.UnsupportedFormatError("--format", format, "text|tsv|json")
 			}
@@ -380,6 +370,3 @@ func filterOnlyDirect(items []ListItem) []ListItem {
 	}
 	return out
 }
-
-// timeNowUTC is isolated for testability.
-func timeNowUTC() string { return time.Now().UTC().Format(time.RFC3339) }

@@ -9,6 +9,11 @@ import (
 	"github.com/google/cel-go/cel"
 	"github.com/google/cel-go/common/types/ref"
 	"github.com/picatz/deputy/internal/collections"
+
+	dependencyv1 "github.com/picatz/deputy/gen/deputy/dependency/v1"
+	policyv1 "github.com/picatz/deputy/gen/deputy/policy/v1"
+	targetv1 "github.com/picatz/deputy/gen/deputy/target/v1"
+	vulnerabilityv1 "github.com/picatz/deputy/gen/deputy/vulnerability/v1"
 )
 
 func TestNewEngine_Empty(t *testing.T) {
@@ -730,6 +735,243 @@ func TestEvaluateAll_ProgramError(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "error-policy") {
 		t.Errorf("error should contain policy name, got: %v", err)
+	}
+}
+
+// TestEvaluateAll_ProtoFirst verifies that proto messages can be passed directly
+// to the policy engine and accessed via CEL's native proto support.
+func TestEvaluateAll_ProtoFirst(t *testing.T) {
+	tests := []struct {
+		name       string
+		policyBody string
+		payload    map[string]any
+		wantAction string
+		wantReason string
+	}{
+		{
+			name: "access vulnerability finding proto",
+			policyBody: `
+vulnerability.advisory.id == "CVE-2021-44228"
+  ? [{"action": "deny", "reason": "Log4Shell detected"}]
+  : [{"action": "allow"}]`,
+			payload: map[string]any{
+				"vulnerability": &vulnerabilityv1.Finding{
+					Advisory: &vulnerabilityv1.Advisory{
+						Id: "CVE-2021-44228",
+					},
+				},
+			},
+			wantAction: "deny",
+			wantReason: "Log4Shell detected",
+		},
+		{
+			name: "access package proto fields",
+			policyBody: `
+pkg.name == "lodash" && pkg.ecosystem == "npm"
+  ? [{"action": "deny", "reason": "lodash blocked"}]
+  : [{"action": "allow"}]`,
+			payload: map[string]any{
+				"pkg": &dependencyv1.Package{
+					Name:      "lodash",
+					Version:   "4.17.21",
+					Ecosystem: "npm",
+				},
+			},
+			wantAction: "deny",
+			wantReason: "lodash blocked",
+		},
+		{
+			name: "access target proto fields via field",
+			policyBody: `
+target.display_path.contains("github.com")
+  ? [{"action": "allow", "reason": "github allowed"}]
+  : [{"action": "deny"}]`,
+			payload: map[string]any{
+				"target": &targetv1.Target{
+					DisplayPath: "github.com/foo/bar",
+				},
+			},
+			wantAction: "allow",
+			wantReason: "github allowed",
+		},
+		{
+			name: "access env proto fields",
+			policyBody: `
+env.command == "scan" && env.entrypoint == "scan_vulnerability"
+  ? [{"action": "allow"}]
+  : [{"action": "deny"}]`,
+			payload: map[string]any{
+				"env": &policyv1.Environment{
+					Command:    "scan",
+					Entrypoint: "scan_vulnerability",
+				},
+			},
+			wantAction: "allow",
+		},
+		{
+			name: "access severity level enum",
+			policyBody: `
+vulnerability.advisory.severity.level == deputy.vulnerability.v1.SeverityLevel.SEVERITY_LEVEL_CRITICAL
+  ? [{"action": "deny", "reason": "critical vuln"}]
+  : [{"action": "allow"}]`,
+			payload: map[string]any{
+				"vulnerability": &vulnerabilityv1.Finding{
+					Advisory: &vulnerabilityv1.Advisory{
+						Severity: &vulnerabilityv1.Severity{
+							Level: vulnerabilityv1.SeverityLevel_SEVERITY_LEVEL_CRITICAL,
+						},
+					},
+				},
+			},
+			wantAction: "deny",
+			wantReason: "critical vuln",
+		},
+		{
+			name: "list of vulnerability protos",
+			policyBody: `
+vulnerabilities.exists(v, v.advisory.id == "CVE-2023-1234")
+  ? [{"action": "deny", "reason": "known vuln found"}]
+  : [{"action": "allow"}]`,
+			payload: map[string]any{
+				"vulnerabilities": []*vulnerabilityv1.Finding{
+					{Advisory: &vulnerabilityv1.Advisory{Id: "CVE-2021-1111"}},
+					{Advisory: &vulnerabilityv1.Advisory{Id: "CVE-2023-1234"}},
+				},
+			},
+			wantAction: "deny",
+			wantReason: "known vuln found",
+		},
+		{
+			name: "scan vulnerability context proto",
+			policyBody: `
+ctx.vulnerability.advisory.id == "CVE-2024-5678" && ctx.pkg.name == "example"
+  ? [{"action": "deny", "reason": "context match"}]
+  : [{"action": "allow"}]`,
+			payload: map[string]any{
+				"ctx": &policyv1.ScanVulnerabilityContext{
+					Vulnerability: &vulnerabilityv1.Finding{
+						Advisory: &vulnerabilityv1.Advisory{Id: "CVE-2024-5678"},
+					},
+					Pkg: &dependencyv1.Package{Name: "example"},
+				},
+			},
+			wantAction: "deny",
+			wantReason: "context match",
+		},
+		// Severity helper function tests - global function syntax
+		{
+			name: "severityAtLeast global function syntax",
+			policyBody: `
+severityAtLeast(vulnerability, "HIGH")
+  ? [{"action": "deny", "reason": "high or above"}]
+  : [{"action": "allow"}]`,
+			payload: map[string]any{
+				"vulnerability": &vulnerabilityv1.Finding{
+					Advisory: &vulnerabilityv1.Advisory{
+						Severity: &vulnerabilityv1.Severity{
+							Level: vulnerabilityv1.SeverityLevel_SEVERITY_LEVEL_CRITICAL,
+						},
+					},
+				},
+			},
+			wantAction: "deny",
+			wantReason: "high or above",
+		},
+		// Severity helper function tests - method syntax
+		{
+			name: "severityAtLeast method syntax",
+			policyBody: `
+vulnerability.severityAtLeast("HIGH")
+  ? [{"action": "deny", "reason": "high or above method"}]
+  : [{"action": "allow"}]`,
+			payload: map[string]any{
+				"vulnerability": &vulnerabilityv1.Finding{
+					Advisory: &vulnerabilityv1.Advisory{
+						Severity: &vulnerabilityv1.Severity{
+							Level: vulnerabilityv1.SeverityLevel_SEVERITY_LEVEL_CRITICAL,
+						},
+					},
+				},
+			},
+			wantAction: "deny",
+			wantReason: "high or above method",
+		},
+		{
+			name: "isCritical method syntax",
+			policyBody: `
+vulnerability.isCritical()
+  ? [{"action": "deny", "reason": "critical method"}]
+  : [{"action": "allow"}]`,
+			payload: map[string]any{
+				"vulnerability": &vulnerabilityv1.Finding{
+					Advisory: &vulnerabilityv1.Advisory{
+						Severity: &vulnerabilityv1.Severity{
+							Level: vulnerabilityv1.SeverityLevel_SEVERITY_LEVEL_CRITICAL,
+						},
+					},
+				},
+			},
+			wantAction: "deny",
+			wantReason: "critical method",
+		},
+		{
+			name: "isHighOrAbove method syntax",
+			policyBody: `
+vulnerability.isHighOrAbove()
+  ? [{"action": "deny", "reason": "high or above method"}]
+  : [{"action": "allow"}]`,
+			payload: map[string]any{
+				"vulnerability": &vulnerabilityv1.Finding{
+					Advisory: &vulnerabilityv1.Advisory{
+						Severity: &vulnerabilityv1.Severity{
+							Level: vulnerabilityv1.SeverityLevel_SEVERITY_LEVEL_HIGH,
+						},
+					},
+				},
+			},
+			wantAction: "deny",
+			wantReason: "high or above method",
+		},
+		{
+			name: "method syntax in filter",
+			policyBody: `
+vulnerabilities.filter(v, v.isCritical()).size() > 0
+  ? [{"action": "deny", "reason": "has critical"}]
+  : [{"action": "allow"}]`,
+			payload: map[string]any{
+				"vulnerabilities": []*vulnerabilityv1.Finding{
+					{Advisory: &vulnerabilityv1.Advisory{Severity: &vulnerabilityv1.Severity{Level: vulnerabilityv1.SeverityLevel_SEVERITY_LEVEL_LOW}}},
+					{Advisory: &vulnerabilityv1.Advisory{Severity: &vulnerabilityv1.Severity{Level: vulnerabilityv1.SeverityLevel_SEVERITY_LEVEL_CRITICAL}}},
+				},
+			},
+			wantAction: "deny",
+			wantReason: "has critical",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			sources := []Source{{Name: "proto-test", Body: tc.policyBody}}
+			eng, err := NewEngine(sources)
+			if err != nil {
+				t.Fatalf("NewEngine() error: %v", err)
+			}
+
+			actions, err := eng.EvaluateAll(t.Context(), tc.payload, "", "")
+			if err != nil {
+				t.Fatalf("EvaluateAll() error: %v", err)
+			}
+
+			if len(actions) != 1 {
+				t.Fatalf("expected 1 action, got %d: %+v", len(actions), actions)
+			}
+			if actions[0].Type != tc.wantAction {
+				t.Errorf("action type = %q, want %q", actions[0].Type, tc.wantAction)
+			}
+			if tc.wantReason != "" && actions[0].Reason != tc.wantReason {
+				t.Errorf("action reason = %q, want %q", actions[0].Reason, tc.wantReason)
+			}
+		})
 	}
 }
 

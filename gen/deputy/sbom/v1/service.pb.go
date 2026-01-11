@@ -92,6 +92,67 @@ func (Format) EnumDescriptor() ([]byte, []int) {
 	return file_deputy_sbom_v1_service_proto_rawDescGZIP(), []int{0}
 }
 
+// ChangeKind indicates the semantic versioning change type.
+type ChangeKind int32
+
+const (
+	// Unspecified change type.
+	ChangeKind_CHANGE_KIND_UNSPECIFIED ChangeKind = 0
+	// Major version change (breaking).
+	ChangeKind_CHANGE_KIND_MAJOR ChangeKind = 1
+	// Minor version change (feature).
+	ChangeKind_CHANGE_KIND_MINOR ChangeKind = 2
+	// Patch version change (fix).
+	ChangeKind_CHANGE_KIND_PATCH ChangeKind = 3
+	// Version downgrade.
+	ChangeKind_CHANGE_KIND_DOWNGRADE ChangeKind = 4
+)
+
+// Enum value maps for ChangeKind.
+var (
+	ChangeKind_name = map[int32]string{
+		0: "CHANGE_KIND_UNSPECIFIED",
+		1: "CHANGE_KIND_MAJOR",
+		2: "CHANGE_KIND_MINOR",
+		3: "CHANGE_KIND_PATCH",
+		4: "CHANGE_KIND_DOWNGRADE",
+	}
+	ChangeKind_value = map[string]int32{
+		"CHANGE_KIND_UNSPECIFIED": 0,
+		"CHANGE_KIND_MAJOR":       1,
+		"CHANGE_KIND_MINOR":       2,
+		"CHANGE_KIND_PATCH":       3,
+		"CHANGE_KIND_DOWNGRADE":   4,
+	}
+)
+
+func (x ChangeKind) Enum() *ChangeKind {
+	p := new(ChangeKind)
+	*p = x
+	return p
+}
+
+func (x ChangeKind) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (ChangeKind) Descriptor() protoreflect.EnumDescriptor {
+	return file_deputy_sbom_v1_service_proto_enumTypes[1].Descriptor()
+}
+
+func (ChangeKind) Type() protoreflect.EnumType {
+	return &file_deputy_sbom_v1_service_proto_enumTypes[1]
+}
+
+func (x ChangeKind) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use ChangeKind.Descriptor instead.
+func (ChangeKind) EnumDescriptor() ([]byte, []int) {
+	return file_deputy_sbom_v1_service_proto_rawDescGZIP(), []int{1}
+}
+
 // GenerateRequest specifies SBOM generation parameters.
 type GenerateRequest struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
@@ -538,7 +599,11 @@ type PackageChange struct {
 	// PreviousVersion is the version in the base SBOM.
 	PreviousVersion string `protobuf:"bytes,2,opt,name=previous_version,json=previousVersion,proto3" json:"previous_version,omitempty"`
 	// NewVersion is the version in the target SBOM.
-	NewVersion    string `protobuf:"bytes,3,opt,name=new_version,json=newVersion,proto3" json:"new_version,omitempty"`
+	NewVersion string `protobuf:"bytes,3,opt,name=new_version,json=newVersion,proto3" json:"new_version,omitempty"`
+	// Kind indicates the type of version change.
+	Kind ChangeKind `protobuf:"varint,4,opt,name=kind,proto3,enum=deputy.sbom.v1.ChangeKind" json:"kind,omitempty"`
+	// LicenseChange tracks license modifications.
+	LicenseChange *LicenseChange `protobuf:"bytes,5,opt,name=license_change,json=licenseChange,proto3" json:"license_change,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -594,6 +659,75 @@ func (x *PackageChange) GetNewVersion() string {
 	return ""
 }
 
+func (x *PackageChange) GetKind() ChangeKind {
+	if x != nil {
+		return x.Kind
+	}
+	return ChangeKind_CHANGE_KIND_UNSPECIFIED
+}
+
+func (x *PackageChange) GetLicenseChange() *LicenseChange {
+	if x != nil {
+		return x.LicenseChange
+	}
+	return nil
+}
+
+// LicenseChange tracks license modifications.
+type LicenseChange struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Added contains licenses added in the new version.
+	Added []string `protobuf:"bytes,1,rep,name=added,proto3" json:"added,omitempty"`
+	// Removed contains licenses removed in the new version.
+	Removed       []string `protobuf:"bytes,2,rep,name=removed,proto3" json:"removed,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *LicenseChange) Reset() {
+	*x = LicenseChange{}
+	mi := &file_deputy_sbom_v1_service_proto_msgTypes[7]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *LicenseChange) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*LicenseChange) ProtoMessage() {}
+
+func (x *LicenseChange) ProtoReflect() protoreflect.Message {
+	mi := &file_deputy_sbom_v1_service_proto_msgTypes[7]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use LicenseChange.ProtoReflect.Descriptor instead.
+func (*LicenseChange) Descriptor() ([]byte, []int) {
+	return file_deputy_sbom_v1_service_proto_rawDescGZIP(), []int{7}
+}
+
+func (x *LicenseChange) GetAdded() []string {
+	if x != nil {
+		return x.Added
+	}
+	return nil
+}
+
+func (x *LicenseChange) GetRemoved() []string {
+	if x != nil {
+		return x.Removed
+	}
+	return nil
+}
+
 // DiffStats summarizes SBOM differences.
 type DiffStats struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
@@ -605,13 +739,19 @@ type DiffStats struct {
 	ModifiedCount int32 `protobuf:"varint,3,opt,name=modified_count,json=modifiedCount,proto3" json:"modified_count,omitempty"`
 	// UnchangedCount is the number of unchanged components.
 	UnchangedCount int32 `protobuf:"varint,4,opt,name=unchanged_count,json=unchangedCount,proto3" json:"unchanged_count,omitempty"`
-	unknownFields  protoimpl.UnknownFields
-	sizeCache      protoimpl.SizeCache
+	// BreakingCount is the number of major version changes.
+	BreakingCount int32 `protobuf:"varint,5,opt,name=breaking_count,json=breakingCount,proto3" json:"breaking_count,omitempty"`
+	// DowngradeCount is the number of version downgrades.
+	DowngradeCount int32 `protobuf:"varint,6,opt,name=downgrade_count,json=downgradeCount,proto3" json:"downgrade_count,omitempty"`
+	// LicenseChangeCount is the number of packages with license changes.
+	LicenseChangeCount int32 `protobuf:"varint,7,opt,name=license_change_count,json=licenseChangeCount,proto3" json:"license_change_count,omitempty"`
+	unknownFields      protoimpl.UnknownFields
+	sizeCache          protoimpl.SizeCache
 }
 
 func (x *DiffStats) Reset() {
 	*x = DiffStats{}
-	mi := &file_deputy_sbom_v1_service_proto_msgTypes[7]
+	mi := &file_deputy_sbom_v1_service_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -623,7 +763,7 @@ func (x *DiffStats) String() string {
 func (*DiffStats) ProtoMessage() {}
 
 func (x *DiffStats) ProtoReflect() protoreflect.Message {
-	mi := &file_deputy_sbom_v1_service_proto_msgTypes[7]
+	mi := &file_deputy_sbom_v1_service_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -636,7 +776,7 @@ func (x *DiffStats) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DiffStats.ProtoReflect.Descriptor instead.
 func (*DiffStats) Descriptor() ([]byte, []int) {
-	return file_deputy_sbom_v1_service_proto_rawDescGZIP(), []int{7}
+	return file_deputy_sbom_v1_service_proto_rawDescGZIP(), []int{8}
 }
 
 func (x *DiffStats) GetAddedCount() int32 {
@@ -663,6 +803,27 @@ func (x *DiffStats) GetModifiedCount() int32 {
 func (x *DiffStats) GetUnchangedCount() int32 {
 	if x != nil {
 		return x.UnchangedCount
+	}
+	return 0
+}
+
+func (x *DiffStats) GetBreakingCount() int32 {
+	if x != nil {
+		return x.BreakingCount
+	}
+	return 0
+}
+
+func (x *DiffStats) GetDowngradeCount() int32 {
+	if x != nil {
+		return x.DowngradeCount
+	}
+	return 0
+}
+
+func (x *DiffStats) GetLicenseChangeCount() int32 {
+	if x != nil {
+		return x.LicenseChangeCount
 	}
 	return 0
 }
@@ -707,25 +868,40 @@ const file_deputy_sbom_v1_service_proto_rawDesc = "" +
 	"\x05added\x18\x01 \x03(\v2\x1d.deputy.dependency.v1.PackageR\x05added\x127\n" +
 	"\aremoved\x18\x02 \x03(\v2\x1d.deputy.dependency.v1.PackageR\aremoved\x129\n" +
 	"\bmodified\x18\x03 \x03(\v2\x1d.deputy.sbom.v1.PackageChangeR\bmodified\x12/\n" +
-	"\x05stats\x18\x04 \x01(\v2\x19.deputy.sbom.v1.DiffStatsR\x05stats\"\x94\x01\n" +
+	"\x05stats\x18\x04 \x01(\v2\x19.deputy.sbom.v1.DiffStatsR\x05stats\"\x8a\x02\n" +
 	"\rPackageChange\x127\n" +
 	"\apackage\x18\x01 \x01(\v2\x1d.deputy.dependency.v1.PackageR\apackage\x12)\n" +
 	"\x10previous_version\x18\x02 \x01(\tR\x0fpreviousVersion\x12\x1f\n" +
 	"\vnew_version\x18\x03 \x01(\tR\n" +
-	"newVersion\"\xa1\x01\n" +
+	"newVersion\x12.\n" +
+	"\x04kind\x18\x04 \x01(\x0e2\x1a.deputy.sbom.v1.ChangeKindR\x04kind\x12D\n" +
+	"\x0elicense_change\x18\x05 \x01(\v2\x1d.deputy.sbom.v1.LicenseChangeR\rlicenseChange\"?\n" +
+	"\rLicenseChange\x12\x14\n" +
+	"\x05added\x18\x01 \x03(\tR\x05added\x12\x18\n" +
+	"\aremoved\x18\x02 \x03(\tR\aremoved\"\xa3\x02\n" +
 	"\tDiffStats\x12\x1f\n" +
 	"\vadded_count\x18\x01 \x01(\x05R\n" +
 	"addedCount\x12#\n" +
 	"\rremoved_count\x18\x02 \x01(\x05R\fremovedCount\x12%\n" +
 	"\x0emodified_count\x18\x03 \x01(\x05R\rmodifiedCount\x12'\n" +
-	"\x0funchanged_count\x18\x04 \x01(\x05R\x0eunchangedCount*\x99\x01\n" +
+	"\x0funchanged_count\x18\x04 \x01(\x05R\x0eunchangedCount\x12%\n" +
+	"\x0ebreaking_count\x18\x05 \x01(\x05R\rbreakingCount\x12'\n" +
+	"\x0fdowngrade_count\x18\x06 \x01(\x05R\x0edowngradeCount\x120\n" +
+	"\x14license_change_count\x18\a \x01(\x05R\x12licenseChangeCount*\x99\x01\n" +
 	"\x06Format\x12\x16\n" +
 	"\x12FORMAT_UNSPECIFIED\x10\x00\x12\x19\n" +
 	"\x15FORMAT_CYCLONEDX_JSON\x10\x01\x12\x18\n" +
 	"\x14FORMAT_CYCLONEDX_XML\x10\x02\x12\x14\n" +
 	"\x10FORMAT_SPDX_JSON\x10\x03\x12\x12\n" +
 	"\x0eFORMAT_SPDX_TV\x10\x04\x12\x18\n" +
-	"\x14FORMAT_PROTOBOM_JSON\x10\x052\x9f\x01\n" +
+	"\x14FORMAT_PROTOBOM_JSON\x10\x05*\x89\x01\n" +
+	"\n" +
+	"ChangeKind\x12\x1b\n" +
+	"\x17CHANGE_KIND_UNSPECIFIED\x10\x00\x12\x15\n" +
+	"\x11CHANGE_KIND_MAJOR\x10\x01\x12\x15\n" +
+	"\x11CHANGE_KIND_MINOR\x10\x02\x12\x15\n" +
+	"\x11CHANGE_KIND_PATCH\x10\x03\x12\x19\n" +
+	"\x15CHANGE_KIND_DOWNGRADE\x10\x042\x9f\x01\n" +
 	"\vSBOMService\x12M\n" +
 	"\bGenerate\x12\x1f.deputy.sbom.v1.GenerateRequest\x1a .deputy.sbom.v1.GenerateResponse\x12A\n" +
 	"\x04Diff\x12\x1b.deputy.sbom.v1.DiffRequest\x1a\x1c.deputy.sbom.v1.DiffResponseB\xb0\x01\n" +
@@ -743,47 +919,51 @@ func file_deputy_sbom_v1_service_proto_rawDescGZIP() []byte {
 	return file_deputy_sbom_v1_service_proto_rawDescData
 }
 
-var file_deputy_sbom_v1_service_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
-var file_deputy_sbom_v1_service_proto_msgTypes = make([]protoimpl.MessageInfo, 9)
+var file_deputy_sbom_v1_service_proto_enumTypes = make([]protoimpl.EnumInfo, 2)
+var file_deputy_sbom_v1_service_proto_msgTypes = make([]protoimpl.MessageInfo, 10)
 var file_deputy_sbom_v1_service_proto_goTypes = []any{
 	(Format)(0),                   // 0: deputy.sbom.v1.Format
-	(*GenerateRequest)(nil),       // 1: deputy.sbom.v1.GenerateRequest
-	(*GenerateOptions)(nil),       // 2: deputy.sbom.v1.GenerateOptions
-	(*GenerateResponse)(nil),      // 3: deputy.sbom.v1.GenerateResponse
-	(*Stats)(nil),                 // 4: deputy.sbom.v1.Stats
-	(*DiffRequest)(nil),           // 5: deputy.sbom.v1.DiffRequest
-	(*DiffResponse)(nil),          // 6: deputy.sbom.v1.DiffResponse
-	(*PackageChange)(nil),         // 7: deputy.sbom.v1.PackageChange
-	(*DiffStats)(nil),             // 8: deputy.sbom.v1.DiffStats
-	nil,                           // 9: deputy.sbom.v1.Stats.EcosystemsEntry
-	(*v1.Target)(nil),             // 10: deputy.target.v1.Target
-	(*timestamppb.Timestamp)(nil), // 11: google.protobuf.Timestamp
-	(*v11.Package)(nil),           // 12: deputy.dependency.v1.Package
+	(ChangeKind)(0),               // 1: deputy.sbom.v1.ChangeKind
+	(*GenerateRequest)(nil),       // 2: deputy.sbom.v1.GenerateRequest
+	(*GenerateOptions)(nil),       // 3: deputy.sbom.v1.GenerateOptions
+	(*GenerateResponse)(nil),      // 4: deputy.sbom.v1.GenerateResponse
+	(*Stats)(nil),                 // 5: deputy.sbom.v1.Stats
+	(*DiffRequest)(nil),           // 6: deputy.sbom.v1.DiffRequest
+	(*DiffResponse)(nil),          // 7: deputy.sbom.v1.DiffResponse
+	(*PackageChange)(nil),         // 8: deputy.sbom.v1.PackageChange
+	(*LicenseChange)(nil),         // 9: deputy.sbom.v1.LicenseChange
+	(*DiffStats)(nil),             // 10: deputy.sbom.v1.DiffStats
+	nil,                           // 11: deputy.sbom.v1.Stats.EcosystemsEntry
+	(*v1.Target)(nil),             // 12: deputy.target.v1.Target
+	(*timestamppb.Timestamp)(nil), // 13: google.protobuf.Timestamp
+	(*v11.Package)(nil),           // 14: deputy.dependency.v1.Package
 }
 var file_deputy_sbom_v1_service_proto_depIdxs = []int32{
 	0,  // 0: deputy.sbom.v1.GenerateRequest.format:type_name -> deputy.sbom.v1.Format
-	2,  // 1: deputy.sbom.v1.GenerateRequest.options:type_name -> deputy.sbom.v1.GenerateOptions
+	3,  // 1: deputy.sbom.v1.GenerateRequest.options:type_name -> deputy.sbom.v1.GenerateOptions
 	0,  // 2: deputy.sbom.v1.GenerateResponse.format:type_name -> deputy.sbom.v1.Format
-	10, // 3: deputy.sbom.v1.GenerateResponse.target:type_name -> deputy.target.v1.Target
-	11, // 4: deputy.sbom.v1.GenerateResponse.generated_at:type_name -> google.protobuf.Timestamp
-	4,  // 5: deputy.sbom.v1.GenerateResponse.stats:type_name -> deputy.sbom.v1.Stats
-	9,  // 6: deputy.sbom.v1.Stats.ecosystems:type_name -> deputy.sbom.v1.Stats.EcosystemsEntry
+	12, // 3: deputy.sbom.v1.GenerateResponse.target:type_name -> deputy.target.v1.Target
+	13, // 4: deputy.sbom.v1.GenerateResponse.generated_at:type_name -> google.protobuf.Timestamp
+	5,  // 5: deputy.sbom.v1.GenerateResponse.stats:type_name -> deputy.sbom.v1.Stats
+	11, // 6: deputy.sbom.v1.Stats.ecosystems:type_name -> deputy.sbom.v1.Stats.EcosystemsEntry
 	0,  // 7: deputy.sbom.v1.DiffRequest.base_format:type_name -> deputy.sbom.v1.Format
 	0,  // 8: deputy.sbom.v1.DiffRequest.target_format:type_name -> deputy.sbom.v1.Format
-	12, // 9: deputy.sbom.v1.DiffResponse.added:type_name -> deputy.dependency.v1.Package
-	12, // 10: deputy.sbom.v1.DiffResponse.removed:type_name -> deputy.dependency.v1.Package
-	7,  // 11: deputy.sbom.v1.DiffResponse.modified:type_name -> deputy.sbom.v1.PackageChange
-	8,  // 12: deputy.sbom.v1.DiffResponse.stats:type_name -> deputy.sbom.v1.DiffStats
-	12, // 13: deputy.sbom.v1.PackageChange.package:type_name -> deputy.dependency.v1.Package
-	1,  // 14: deputy.sbom.v1.SBOMService.Generate:input_type -> deputy.sbom.v1.GenerateRequest
-	5,  // 15: deputy.sbom.v1.SBOMService.Diff:input_type -> deputy.sbom.v1.DiffRequest
-	3,  // 16: deputy.sbom.v1.SBOMService.Generate:output_type -> deputy.sbom.v1.GenerateResponse
-	6,  // 17: deputy.sbom.v1.SBOMService.Diff:output_type -> deputy.sbom.v1.DiffResponse
-	16, // [16:18] is the sub-list for method output_type
-	14, // [14:16] is the sub-list for method input_type
-	14, // [14:14] is the sub-list for extension type_name
-	14, // [14:14] is the sub-list for extension extendee
-	0,  // [0:14] is the sub-list for field type_name
+	14, // 9: deputy.sbom.v1.DiffResponse.added:type_name -> deputy.dependency.v1.Package
+	14, // 10: deputy.sbom.v1.DiffResponse.removed:type_name -> deputy.dependency.v1.Package
+	8,  // 11: deputy.sbom.v1.DiffResponse.modified:type_name -> deputy.sbom.v1.PackageChange
+	10, // 12: deputy.sbom.v1.DiffResponse.stats:type_name -> deputy.sbom.v1.DiffStats
+	14, // 13: deputy.sbom.v1.PackageChange.package:type_name -> deputy.dependency.v1.Package
+	1,  // 14: deputy.sbom.v1.PackageChange.kind:type_name -> deputy.sbom.v1.ChangeKind
+	9,  // 15: deputy.sbom.v1.PackageChange.license_change:type_name -> deputy.sbom.v1.LicenseChange
+	2,  // 16: deputy.sbom.v1.SBOMService.Generate:input_type -> deputy.sbom.v1.GenerateRequest
+	6,  // 17: deputy.sbom.v1.SBOMService.Diff:input_type -> deputy.sbom.v1.DiffRequest
+	4,  // 18: deputy.sbom.v1.SBOMService.Generate:output_type -> deputy.sbom.v1.GenerateResponse
+	7,  // 19: deputy.sbom.v1.SBOMService.Diff:output_type -> deputy.sbom.v1.DiffResponse
+	18, // [18:20] is the sub-list for method output_type
+	16, // [16:18] is the sub-list for method input_type
+	16, // [16:16] is the sub-list for extension type_name
+	16, // [16:16] is the sub-list for extension extendee
+	0,  // [0:16] is the sub-list for field type_name
 }
 
 func init() { file_deputy_sbom_v1_service_proto_init() }
@@ -796,8 +976,8 @@ func file_deputy_sbom_v1_service_proto_init() {
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_deputy_sbom_v1_service_proto_rawDesc), len(file_deputy_sbom_v1_service_proto_rawDesc)),
-			NumEnums:      1,
-			NumMessages:   9,
+			NumEnums:      2,
+			NumMessages:   10,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

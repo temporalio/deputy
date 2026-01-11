@@ -136,6 +136,34 @@ message PackageChange {
 
   // NewVersion is the version in the target SBOM.
   string new_version = 3;
+
+  // Kind indicates the type of version change.
+  ChangeKind kind = 4;
+
+  // LicenseChange tracks license modifications.
+  LicenseChange license_change = 5;
+}
+
+// ChangeKind indicates the semantic versioning change type.
+enum ChangeKind {
+  // Unspecified change type.
+  CHANGE_KIND_UNSPECIFIED = 0;
+  // Major version change (breaking).
+  CHANGE_KIND_MAJOR = 1;
+  // Minor version change (feature).
+  CHANGE_KIND_MINOR = 2;
+  // Patch version change (fix).
+  CHANGE_KIND_PATCH = 3;
+  // Version downgrade.
+  CHANGE_KIND_DOWNGRADE = 4;
+}
+
+// LicenseChange tracks license modifications.
+message LicenseChange {
+  // Added contains licenses added in the new version.
+  repeated string added = 1;
+  // Removed contains licenses removed in the new version.
+  repeated string removed = 2;
 }
 
 // DiffStats summarizes SBOM differences.
@@ -151,4 +179,13 @@ message DiffStats {
 
   // UnchangedCount is the number of unchanged components.
   int32 unchanged_count = 4;
+
+  // BreakingCount is the number of major version changes.
+  int32 breaking_count = 5;
+
+  // DowngradeCount is the number of version downgrades.
+  int32 downgrade_count = 6;
+
+  // LicenseChangeCount is the number of packages with license changes.
+  int32 license_change_count = 7;
 }

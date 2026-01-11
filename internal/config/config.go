@@ -602,6 +602,9 @@ func (l *Loader) loadFromEnv(cfg *Config) {
 		cfg.Policy.Mode = val
 	}
 
+	// Server configuration
+	l.loadServerFromEnv(cfg)
+
 	// OTel configuration
 	if val := os.Getenv(l.envPrefix + "OTEL_ENABLED"); val != "" {
 		cfg.OTel.Enabled = val == "true" || val == "1"
@@ -691,6 +694,135 @@ func (l *Loader) loadHTTPFromEnv(cfg *Config) {
 	if val := os.Getenv(l.envPrefix + "HTTP_RETRY_ENABLED"); val != "" {
 		enabled := val == "true" || val == "1"
 		cfg.HTTP.Retry.Enabled = &enabled
+	}
+}
+
+// loadServerFromEnv loads server configuration from environment variables.
+func (l *Loader) loadServerFromEnv(cfg *Config) {
+	// Basic server settings
+	if val := os.Getenv(l.envPrefix + "SERVER_ADDR"); val != "" {
+		cfg.Server.Addr = val
+	}
+	if val := os.Getenv(l.envPrefix + "SERVER_READ_TIMEOUT"); val != "" {
+		if d, err := time.ParseDuration(val); err == nil {
+			cfg.Server.ReadTimeout = d
+		}
+	}
+	if val := os.Getenv(l.envPrefix + "SERVER_WRITE_TIMEOUT"); val != "" {
+		if d, err := time.ParseDuration(val); err == nil {
+			cfg.Server.WriteTimeout = d
+		}
+	}
+	if val := os.Getenv(l.envPrefix + "SERVER_IDLE_TIMEOUT"); val != "" {
+		if d, err := time.ParseDuration(val); err == nil {
+			cfg.Server.IdleTimeout = d
+		}
+	}
+	if val := os.Getenv(l.envPrefix + "SERVER_MAX_REQUEST_BODY_BYTES"); val != "" {
+		if n, err := strconv.ParseInt(val, 10, 64); err == nil && n > 0 {
+			cfg.Server.MaxRequestBodyBytes = n
+		}
+	}
+
+	// TLS configuration
+	tlsCert := os.Getenv(l.envPrefix + "SERVER_TLS_CERT")
+	tlsKey := os.Getenv(l.envPrefix + "SERVER_TLS_KEY")
+	if tlsCert != "" && tlsKey != "" {
+		if cfg.Server.TLS == nil {
+			cfg.Server.TLS = &ServerTLSConfig{}
+		}
+		cfg.Server.TLS.CertFile = tlsCert
+		cfg.Server.TLS.KeyFile = tlsKey
+	}
+	if val := os.Getenv(l.envPrefix + "SERVER_TLS_CLIENT_CA"); val != "" {
+		if cfg.Server.TLS == nil {
+			cfg.Server.TLS = &ServerTLSConfig{}
+		}
+		cfg.Server.TLS.ClientCAFile = val
+	}
+
+	// CORS configuration
+	if val := os.Getenv(l.envPrefix + "SERVER_CORS_ORIGINS"); val != "" {
+		if cfg.Server.CORS == nil {
+			cfg.Server.CORS = &ServerCORSConfig{}
+		}
+		cfg.Server.CORS.AllowedOrigins = strings.Split(val, ",")
+	}
+	if val := os.Getenv(l.envPrefix + "SERVER_CORS_METHODS"); val != "" {
+		if cfg.Server.CORS == nil {
+			cfg.Server.CORS = &ServerCORSConfig{}
+		}
+		cfg.Server.CORS.AllowedMethods = strings.Split(val, ",")
+	}
+	if val := os.Getenv(l.envPrefix + "SERVER_CORS_HEADERS"); val != "" {
+		if cfg.Server.CORS == nil {
+			cfg.Server.CORS = &ServerCORSConfig{}
+		}
+		cfg.Server.CORS.AllowedHeaders = strings.Split(val, ",")
+	}
+	if val := os.Getenv(l.envPrefix + "SERVER_CORS_CREDENTIALS"); val != "" {
+		if cfg.Server.CORS == nil {
+			cfg.Server.CORS = &ServerCORSConfig{}
+		}
+		cfg.Server.CORS.AllowCredentials = val == "true" || val == "1"
+	}
+	if val := os.Getenv(l.envPrefix + "SERVER_CORS_MAX_AGE"); val != "" {
+		if n, err := strconv.Atoi(val); err == nil && n > 0 {
+			if cfg.Server.CORS == nil {
+				cfg.Server.CORS = &ServerCORSConfig{}
+			}
+			cfg.Server.CORS.MaxAge = n
+		}
+	}
+
+	// Auth configuration
+	if val := os.Getenv(l.envPrefix + "SERVER_AUTH_ENABLED"); val != "" {
+		if cfg.Server.Auth == nil {
+			cfg.Server.Auth = &ServerAuthConfig{}
+		}
+		cfg.Server.Auth.Enabled = val == "true" || val == "1"
+	}
+	if val := os.Getenv(l.envPrefix + "SERVER_AUTH_JWKS_URL"); val != "" {
+		if cfg.Server.Auth == nil {
+			cfg.Server.Auth = &ServerAuthConfig{}
+		}
+		cfg.Server.Auth.JWKSURL = val
+	}
+	if val := os.Getenv(l.envPrefix + "SERVER_AUTH_ISSUERS"); val != "" {
+		if cfg.Server.Auth == nil {
+			cfg.Server.Auth = &ServerAuthConfig{}
+		}
+		cfg.Server.Auth.Issuers = strings.Split(val, ",")
+	}
+	if val := os.Getenv(l.envPrefix + "SERVER_AUTH_AUDIENCES"); val != "" {
+		if cfg.Server.Auth == nil {
+			cfg.Server.Auth = &ServerAuthConfig{}
+		}
+		cfg.Server.Auth.Audiences = strings.Split(val, ",")
+	}
+
+	// Rate limit configuration
+	if val := os.Getenv(l.envPrefix + "SERVER_RATE_LIMIT_ENABLED"); val != "" {
+		if cfg.Server.RateLimit == nil {
+			cfg.Server.RateLimit = &ServerRateLimitConfig{}
+		}
+		cfg.Server.RateLimit.Enabled = val == "true" || val == "1"
+	}
+	if val := os.Getenv(l.envPrefix + "SERVER_RATE_LIMIT_RPS"); val != "" {
+		if f, err := strconv.ParseFloat(val, 64); err == nil && f > 0 {
+			if cfg.Server.RateLimit == nil {
+				cfg.Server.RateLimit = &ServerRateLimitConfig{}
+			}
+			cfg.Server.RateLimit.RequestsPerSecond = f
+		}
+	}
+	if val := os.Getenv(l.envPrefix + "SERVER_RATE_LIMIT_BURST"); val != "" {
+		if n, err := strconv.Atoi(val); err == nil && n > 0 {
+			if cfg.Server.RateLimit == nil {
+				cfg.Server.RateLimit = &ServerRateLimitConfig{}
+			}
+			cfg.Server.RateLimit.Burst = n
+		}
 	}
 }
 

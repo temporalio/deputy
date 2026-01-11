@@ -1,10 +1,12 @@
 package cmd
 
 import (
+	"context"
 	"log/slog"
 	"net/http"
 	"os"
 
+	"connectrpc.com/connect"
 	"github.com/picatz/deputy/internal/services"
 	"github.com/spf13/cobra"
 
@@ -22,6 +24,10 @@ type Dependencies struct {
 	// ServerAddress is the remote server address (for remote mode).
 	// Can also be set via DEPUTY_SERVER environment variable.
 	ServerAddress string
+
+	// AuthToken is the bearer token for authenticating with remote servers.
+	// Can also be set via DEPUTY_AUTH_TOKEN environment variable.
+	AuthToken string
 }
 
 // RegisterCommands attaches all first-class subcommands to the provided root
@@ -36,9 +42,20 @@ func RegisterCommands(root *cobra.Command, deps Dependencies) {
 			serverAddr = os.Getenv("DEPUTY_SERVER")
 		}
 
+		// Check for auth token
+		authToken := deps.AuthToken
+		if authToken == "" {
+			authToken = os.Getenv("DEPUTY_AUTH_TOKEN")
+		}
+
 		if serverAddr != "" {
-			// Remote mode
-			deps.Clients = services.RemoteClients(http.DefaultClient, serverAddr)
+			// Remote mode - create clients with optional auth
+			var opts []connect.ClientOption
+			if authToken != "" {
+				opts = append(opts, connect.WithInterceptors(authInterceptor(authToken)))
+				slog.Debug("auth token configured for remote server")
+			}
+			deps.Clients = services.RemoteClients(http.DefaultClient, serverAddr, opts...)
 			slog.Debug("clients initialized", "mode", "remote", "server", serverAddr)
 		} else {
 			// In-process mode (default)
@@ -84,4 +101,14 @@ func RegisterCommands(root *cobra.Command, deps Dependencies) {
 
 	// Server command
 	AddServerCommand(root)
+}
+
+// authInterceptor returns a Connect interceptor that adds Bearer authentication.
+func authInterceptor(token string) connect.UnaryInterceptorFunc {
+	return func(next connect.UnaryFunc) connect.UnaryFunc {
+		return func(ctx context.Context, req connect.AnyRequest) (connect.AnyResponse, error) {
+			req.Header().Set("Authorization", "Bearer "+token)
+			return next(ctx, req)
+		}
+	}
 }

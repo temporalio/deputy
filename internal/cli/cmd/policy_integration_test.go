@@ -8,6 +8,9 @@ import (
 	"slices"
 	"testing"
 
+	dependencyv1 "github.com/picatz/deputy/gen/deputy/dependency/v1"
+	policyv1 "github.com/picatz/deputy/gen/deputy/policy/v1"
+	vulnerabilityv1 "github.com/picatz/deputy/gen/deputy/vulnerability/v1"
 	"github.com/picatz/deputy/internal/policy"
 )
 
@@ -128,10 +131,15 @@ func TestPolicyIntegration_RuntimeCriticalBaseline(t *testing.T) {
 
 func TestPolicyIntegration_ExploitAvailableBlocker(t *testing.T) {
 	pol := filepath.Clean(filepath.Join("..", "..", "..", "policy", "examples", "exploit-available-blocker.yaml"))
+	// Proto-first: Use proto Finding message directly
 	payload := map[string]any{
-		"vulnerability": map[string]any{
-			"severity":   "CRITICAL",
-			"references": []any{"https://exploit-db.com/awesome-poc"},
+		"vulnerability": &vulnerabilityv1.Finding{
+			Advisory: &vulnerabilityv1.Advisory{
+				Severity: &vulnerabilityv1.Severity{
+					Level: vulnerabilityv1.SeverityLevel_SEVERITY_LEVEL_CRITICAL,
+				},
+				References: []string{"https://exploit-db.com/awesome-poc"},
+			},
 		},
 	}
 	if _, err := evaluatePoliciesForCommand(context.Background(), []string{pol}, payload, "scan", policy.EntrypointScanVulnerability, &bytes.Buffer{}); err == nil {
@@ -141,9 +149,12 @@ func TestPolicyIntegration_ExploitAvailableBlocker(t *testing.T) {
 
 func TestPolicyIntegration_DeprecatedModuleBlock(t *testing.T) {
 	pol := filepath.Clean(filepath.Join("..", "..", "..", "policy", "examples", "deprecated-module-block.yaml"))
+	// Proto-first: Use proto Finding message directly
 	payload := map[string]any{
-		"vulnerability": map[string]any{
-			"summary": "Module is deprecated and unmaintained",
+		"vulnerability": &vulnerabilityv1.Finding{
+			Advisory: &vulnerabilityv1.Advisory{
+				Summary: "Module is deprecated and unmaintained",
+			},
 		},
 	}
 	if _, err := evaluatePoliciesForCommand(context.Background(), []string{pol}, payload, "scan", policy.EntrypointScanVulnerability, &bytes.Buffer{}); err == nil {
@@ -163,9 +174,10 @@ func TestPolicyIntegration_DependencyCountGuard(t *testing.T) {
 
 func TestPolicyIntegration_LicensePresentBlocker(t *testing.T) {
 	pol := filepath.Clean(filepath.Join("..", "..", "..", "policy", "examples", "license-present-blocker.yaml"))
+	// Proto-first: Use proto Package message directly
 	payload := map[string]any{
-		"pkg": map[string]any{
-			"licenses": []any{},
+		"pkg": &dependencyv1.Package{
+			Licenses: []string{}, // Empty licenses
 		},
 	}
 	if _, err := evaluatePoliciesForCommand(context.Background(), []string{pol}, payload, "proxy", policy.EntrypointGoArtifactRequest, &bytes.Buffer{}); err == nil {
@@ -175,11 +187,18 @@ func TestPolicyIntegration_LicensePresentBlocker(t *testing.T) {
 
 func TestPolicyIntegration_NoFixEscalator(t *testing.T) {
 	pol := filepath.Clean(filepath.Join("..", "..", "..", "policy", "examples", "no-fix-escalator.yaml"))
+	// Proto-first: Use proto Finding message directly
 	payload := map[string]any{
-		"vulnerability": map[string]any{
-			"severity":      "HIGH",
-			"isDirect":      true,
-			"fixedVersions": []any{},
+		"vulnerability": &vulnerabilityv1.Finding{
+			Package: &dependencyv1.Package{
+				Direct: true,
+			},
+			Advisory: &vulnerabilityv1.Advisory{
+				Severity: &vulnerabilityv1.Severity{
+					Level: vulnerabilityv1.SeverityLevel_SEVERITY_LEVEL_HIGH,
+				},
+				FixedVersions: []string{}, // No fix available
+			},
 		},
 	}
 	actions, err := evaluatePoliciesForCommand(context.Background(), []string{pol}, payload, "scan", policy.EntrypointScanVulnerability, &bytes.Buffer{})
@@ -193,11 +212,18 @@ func TestPolicyIntegration_NoFixEscalator(t *testing.T) {
 
 func TestPolicyIntegration_ProdManifestGate(t *testing.T) {
 	pol := filepath.Clean(filepath.Join("..", "..", "..", "policy", "examples", "prod-manifest-gate.yaml"))
+	// Proto-first: Use proto Finding message directly
 	payload := map[string]any{
-		"vulnerability": map[string]any{
-			"severity": "CRITICAL",
-			"manifestRefs": []any{
-				map[string]any{"groups": []any{"prod"}},
+		"vulnerability": &vulnerabilityv1.Finding{
+			Advisory: &vulnerabilityv1.Advisory{
+				Severity: &vulnerabilityv1.Severity{
+					Level: vulnerabilityv1.SeverityLevel_SEVERITY_LEVEL_CRITICAL,
+				},
+			},
+			Package: &dependencyv1.Package{
+				ManifestRefs: []*dependencyv1.ManifestRef{
+					{Groups: []string{"prod"}},
+				},
 			},
 		},
 	}
@@ -208,9 +234,10 @@ func TestPolicyIntegration_ProdManifestGate(t *testing.T) {
 
 func TestPolicyIntegration_DomainBrandedPackageGuard(t *testing.T) {
 	pol := filepath.Clean(filepath.Join("..", "..", "..", "policy", "examples", "domain-branded-package-guard.yaml"))
+	// Proto-first: Use proto ProxyRequest message directly
 	payload := map[string]any{
-		"request": map[string]any{
-			"package": "aws-helper",
+		"request": &policyv1.ProxyRequest{
+			Package: "aws-helper",
 		},
 	}
 	if _, err := evaluatePoliciesForCommand(context.Background(), []string{pol}, payload, "proxy", policy.EntrypointNpmArtifactRequest, &bytes.Buffer{}); err == nil {
@@ -253,11 +280,21 @@ func TestPolicyIntegration_SbomSizeShapeSanity(t *testing.T) {
 
 func TestPolicyIntegration_CriticalTransitiveSpotlight(t *testing.T) {
 	pol := filepath.Clean(filepath.Join("..", "..", "..", "policy", "examples", "critical-transitive-spotlight.yaml"))
+	// Proto-first: The policy uses vulnerability.?package.direct and severityAtLeast()
 	payload := map[string]any{
-		"vulnerability": map[string]any{
-			"severity": "CRITICAL",
-			"isDirect": false,
+		"vulnerability": &vulnerabilityv1.Finding{
+			Advisory: &vulnerabilityv1.Advisory{
+				Id: "CVE-2024-1234",
+				Severity: &vulnerabilityv1.Severity{
+					Level: vulnerabilityv1.SeverityLevel_SEVERITY_LEVEL_CRITICAL,
+				},
+			},
+			Package: &dependencyv1.Package{
+				Name:   "indirect-dep",
+				Direct: false, // transitive dependency
+			},
 		},
+		"env": &policyv1.Environment{Command: "scan", Entrypoint: "scan_vulnerability"},
 	}
 	if actions, err := evaluatePoliciesForCommand(context.Background(), []string{pol}, payload, "scan", policy.EntrypointScanVulnerability, &bytes.Buffer{}); err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -270,20 +307,22 @@ func TestPolicyIntegration_CriticalTransitiveSpotlight(t *testing.T) {
 
 func TestPolicyIntegration_TyposquatLevenshteinGuard(t *testing.T) {
 	pol := filepath.Clean(filepath.Join("..", "..", "..", "policy", "examples", "typosquat-levenshtein-guard.yaml"))
+	// Proto-first: Use proto ProxyRequest message directly
 	payload := map[string]any{
-		"request": map[string]any{
-			"package":   "lodas",
-			"ecosystem": "npm",
+		"request": &policyv1.ProxyRequest{
+			Package:   "lodas",
+			Ecosystem: "npm",
 		},
 	}
 	if _, err := evaluatePoliciesForCommand(context.Background(), []string{pol}, payload, "proxy", policy.EntrypointNpmArtifactRequest, &bytes.Buffer{}); err == nil {
 		t.Fatalf("expected denial for typosquat package")
 	}
 
+	// Proto-first: Safe package
 	allowPayload := map[string]any{
-		"request": map[string]any{
-			"package":   "teamlib",
-			"ecosystem": "npm",
+		"request": &policyv1.ProxyRequest{
+			Package:   "teamlib",
+			Ecosystem: "npm",
 		},
 	}
 	if actions, err := evaluatePoliciesForCommand(context.Background(), []string{pol}, allowPayload, "proxy", policy.EntrypointNpmArtifactRequest, &bytes.Buffer{}); err != nil {
@@ -299,6 +338,7 @@ func TestPolicyIntegration_TyposquatLevenshteinGuard(t *testing.T) {
 
 func TestPolicyIntegration_CWEBlocker(t *testing.T) {
 	// Test that CWEs are accessible in vulnerability policies
+	// Proto-first: Use vulnerability.advisory.cwes path
 	polContent := `
 policies:
   - name: block-injection-cwes
@@ -306,8 +346,9 @@ policies:
     rules:
       - action: deny
         when: |
-          has(vulnerability.cwes) &&
-          vulnerability.cwes.exists(c, c in ["CWE-89", "CWE-79", "CWE-78"])
+          has(vulnerability.advisory) &&
+          has(vulnerability.advisory.cwes) &&
+          vulnerability.advisory.cwes.exists(c, c in ["CWE-89", "CWE-79", "CWE-78"])
         reason: "Injection vulnerability (SQL/XSS/Command)"
 `
 	pol := filepath.Join(t.TempDir(), "cwe-blocker.yaml")
@@ -315,24 +356,32 @@ policies:
 		t.Fatalf("failed to write policy file: %v", err)
 	}
 
-	// Vulnerability with SQL injection CWE should be denied
+	// Proto-first: Vulnerability with SQL injection CWE should be denied
 	payloadWithCWE := map[string]any{
-		"vulnerability": map[string]any{
-			"id":       "CVE-2024-1234",
-			"severity": "HIGH",
-			"cwes":     []any{"CWE-89", "CWE-20"}, // SQL injection
+		"vulnerability": &vulnerabilityv1.Finding{
+			Advisory: &vulnerabilityv1.Advisory{
+				Id: "CVE-2024-1234",
+				Severity: &vulnerabilityv1.Severity{
+					Level: vulnerabilityv1.SeverityLevel_SEVERITY_LEVEL_HIGH,
+				},
+				Cwes: []string{"CWE-89", "CWE-20"}, // SQL injection
+			},
 		},
 	}
 	if _, err := evaluatePoliciesForCommand(context.Background(), []string{pol}, payloadWithCWE, "scan", policy.EntrypointScanVulnerability, &bytes.Buffer{}); err == nil {
 		t.Fatal("expected denial for vulnerability with injection CWE")
 	}
 
-	// Vulnerability without injection CWEs should pass
+	// Proto-first: Vulnerability without injection CWEs should pass
 	payloadSafeCWE := map[string]any{
-		"vulnerability": map[string]any{
-			"id":       "CVE-2024-5678",
-			"severity": "MEDIUM",
-			"cwes":     []any{"CWE-20", "CWE-400"}, // Input validation, resource consumption
+		"vulnerability": &vulnerabilityv1.Finding{
+			Advisory: &vulnerabilityv1.Advisory{
+				Id: "CVE-2024-5678",
+				Severity: &vulnerabilityv1.Severity{
+					Level: vulnerabilityv1.SeverityLevel_SEVERITY_LEVEL_MEDIUM,
+				},
+				Cwes: []string{"CWE-20", "CWE-400"}, // Input validation, resource consumption
+			},
 		},
 	}
 	actions, err := evaluatePoliciesForCommand(context.Background(), []string{pol}, payloadSafeCWE, "scan", policy.EntrypointScanVulnerability, &bytes.Buffer{})
@@ -345,11 +394,15 @@ policies:
 		}
 	}
 
-	// Vulnerability without CWEs should pass
+	// Proto-first: Vulnerability without CWEs should pass
 	payloadNoCWE := map[string]any{
-		"vulnerability": map[string]any{
-			"id":       "CVE-2024-9999",
-			"severity": "LOW",
+		"vulnerability": &vulnerabilityv1.Finding{
+			Advisory: &vulnerabilityv1.Advisory{
+				Id: "CVE-2024-9999",
+				Severity: &vulnerabilityv1.Severity{
+					Level: vulnerabilityv1.SeverityLevel_SEVERITY_LEVEL_LOW,
+				},
+			},
 		},
 	}
 	actions, err = evaluatePoliciesForCommand(context.Background(), []string{pol}, payloadNoCWE, "scan", policy.EntrypointScanVulnerability, &bytes.Buffer{})
@@ -365,6 +418,7 @@ policies:
 
 func TestPolicyIntegration_KEVBlocker(t *testing.T) {
 	// Test that KEV status is accessible in vulnerability policies
+	// Proto-first: Use vulnerability.in_kev (snake_case)
 	polContent := `
 policies:
   - name: block-kev
@@ -372,8 +426,8 @@ policies:
     rules:
       - action: deny
         when: |
-          has(vulnerability.inKEV) &&
-          vulnerability.inKEV == true
+          has(vulnerability.in_kev) &&
+          vulnerability.in_kev == true
         reason: "CVE is in CISA's Known Exploited Vulnerabilities catalog"
 `
 	pol := filepath.Join(t.TempDir(), "kev-blocker.yaml")
@@ -381,24 +435,34 @@ policies:
 		t.Fatalf("failed to write policy file: %v", err)
 	}
 
-	// Vulnerability in KEV should be denied
+	// Proto-first: Vulnerability in KEV should be denied
+	inKEV := true
 	payloadInKEV := map[string]any{
-		"vulnerability": map[string]any{
-			"id":       "CVE-2024-1234",
-			"severity": "HIGH",
-			"inKEV":    true,
+		"vulnerability": &vulnerabilityv1.Finding{
+			Advisory: &vulnerabilityv1.Advisory{
+				Id: "CVE-2024-1234",
+				Severity: &vulnerabilityv1.Severity{
+					Level: vulnerabilityv1.SeverityLevel_SEVERITY_LEVEL_HIGH,
+				},
+			},
+			InKev: &inKEV,
 		},
 	}
 	if _, err := evaluatePoliciesForCommand(context.Background(), []string{pol}, payloadInKEV, "scan", policy.EntrypointScanVulnerability, &bytes.Buffer{}); err == nil {
 		t.Fatal("expected denial for vulnerability in KEV")
 	}
 
-	// Vulnerability not in KEV should pass
+	// Proto-first: Vulnerability not in KEV should pass
+	notInKEV := false
 	payloadNotInKEV := map[string]any{
-		"vulnerability": map[string]any{
-			"id":       "CVE-2024-5678",
-			"severity": "MEDIUM",
-			"inKEV":    false,
+		"vulnerability": &vulnerabilityv1.Finding{
+			Advisory: &vulnerabilityv1.Advisory{
+				Id: "CVE-2024-5678",
+				Severity: &vulnerabilityv1.Severity{
+					Level: vulnerabilityv1.SeverityLevel_SEVERITY_LEVEL_MEDIUM,
+				},
+			},
+			InKev: &notInKEV,
 		},
 	}
 	actions, err := evaluatePoliciesForCommand(context.Background(), []string{pol}, payloadNotInKEV, "scan", policy.EntrypointScanVulnerability, &bytes.Buffer{})
@@ -411,11 +475,16 @@ policies:
 		}
 	}
 
-	// Vulnerability without KEV status should pass (field not present)
+	// Proto-first: Vulnerability without KEV status should pass (field not present)
 	payloadNoKEV := map[string]any{
-		"vulnerability": map[string]any{
-			"id":       "CVE-2024-9999",
-			"severity": "LOW",
+		"vulnerability": &vulnerabilityv1.Finding{
+			Advisory: &vulnerabilityv1.Advisory{
+				Id: "CVE-2024-9999",
+				Severity: &vulnerabilityv1.Severity{
+					Level: vulnerabilityv1.SeverityLevel_SEVERITY_LEVEL_LOW,
+				},
+			},
+			// InKev is nil (not set)
 		},
 	}
 	actions, err = evaluatePoliciesForCommand(context.Background(), []string{pol}, payloadNoKEV, "scan", policy.EntrypointScanVulnerability, &bytes.Buffer{})
@@ -431,6 +500,7 @@ policies:
 
 func TestPolicyIntegration_EPSSThreshold(t *testing.T) {
 	// Test that EPSS scores are accessible in vulnerability policies
+	// Proto-first: Use vulnerability.epss (snake_case)
 	polContent := `
 policies:
   - name: block-high-epss
@@ -456,24 +526,34 @@ policies:
 		t.Fatalf("failed to write policy file: %v", err)
 	}
 
-	// Vulnerability with high EPSS should be denied
+	// Proto-first: Vulnerability with high EPSS should be denied
+	highEPSS := 0.15 // 15% exploitation probability
 	payloadHighEPSS := map[string]any{
-		"vulnerability": map[string]any{
-			"id":       "CVE-2024-1234",
-			"severity": "HIGH",
-			"epss":     0.15, // 15% exploitation probability
+		"vulnerability": &vulnerabilityv1.Finding{
+			Advisory: &vulnerabilityv1.Advisory{
+				Id: "CVE-2024-1234",
+				Severity: &vulnerabilityv1.Severity{
+					Level: vulnerabilityv1.SeverityLevel_SEVERITY_LEVEL_HIGH,
+				},
+			},
+			Epss: &highEPSS,
 		},
 	}
 	if _, err := evaluatePoliciesForCommand(context.Background(), []string{pol}, payloadHighEPSS, "scan", policy.EntrypointScanVulnerability, &bytes.Buffer{}); err == nil {
 		t.Fatal("expected denial for vulnerability with high EPSS")
 	}
 
-	// Vulnerability with medium EPSS should warn
+	// Proto-first: Vulnerability with medium EPSS should warn
+	mediumEPSS := 0.07 // 7% exploitation probability
 	payloadMediumEPSS := map[string]any{
-		"vulnerability": map[string]any{
-			"id":       "CVE-2024-5678",
-			"severity": "MEDIUM",
-			"epss":     0.07, // 7% exploitation probability
+		"vulnerability": &vulnerabilityv1.Finding{
+			Advisory: &vulnerabilityv1.Advisory{
+				Id: "CVE-2024-5678",
+				Severity: &vulnerabilityv1.Severity{
+					Level: vulnerabilityv1.SeverityLevel_SEVERITY_LEVEL_MEDIUM,
+				},
+			},
+			Epss: &mediumEPSS,
 		},
 	}
 	actions, err := evaluatePoliciesForCommand(context.Background(), []string{pol}, payloadMediumEPSS, "scan", policy.EntrypointScanVulnerability, &bytes.Buffer{})
@@ -484,12 +564,17 @@ policies:
 		t.Fatalf("expected warn for vulnerability with medium EPSS, got %+v", actions)
 	}
 
-	// Vulnerability with low EPSS should pass
+	// Proto-first: Vulnerability with low EPSS should pass
+	lowEPSS := 0.01 // 1% exploitation probability
 	payloadLowEPSS := map[string]any{
-		"vulnerability": map[string]any{
-			"id":       "CVE-2024-9999",
-			"severity": "LOW",
-			"epss":     0.01, // 1% exploitation probability
+		"vulnerability": &vulnerabilityv1.Finding{
+			Advisory: &vulnerabilityv1.Advisory{
+				Id: "CVE-2024-9999",
+				Severity: &vulnerabilityv1.Severity{
+					Level: vulnerabilityv1.SeverityLevel_SEVERITY_LEVEL_LOW,
+				},
+			},
+			Epss: &lowEPSS,
 		},
 	}
 	actions, err = evaluatePoliciesForCommand(context.Background(), []string{pol}, payloadLowEPSS, "scan", policy.EntrypointScanVulnerability, &bytes.Buffer{})
@@ -502,11 +587,16 @@ policies:
 		}
 	}
 
-	// Vulnerability without EPSS should pass
+	// Proto-first: Vulnerability without EPSS should pass
 	payloadNoEPSS := map[string]any{
-		"vulnerability": map[string]any{
-			"id":       "CVE-2024-0000",
-			"severity": "MEDIUM",
+		"vulnerability": &vulnerabilityv1.Finding{
+			Advisory: &vulnerabilityv1.Advisory{
+				Id: "CVE-2024-0000",
+				Severity: &vulnerabilityv1.Severity{
+					Level: vulnerabilityv1.SeverityLevel_SEVERITY_LEVEL_MEDIUM,
+				},
+			},
+			// Epss is nil (not set)
 		},
 	}
 	actions, err = evaluatePoliciesForCommand(context.Background(), []string{pol}, payloadNoEPSS, "scan", policy.EntrypointScanVulnerability, &bytes.Buffer{})
@@ -522,6 +612,7 @@ policies:
 
 func TestPolicyIntegration_CompositeRiskScore(t *testing.T) {
 	// Test composite risk scoring using multiple factors (KEV, EPSS, severity)
+	// Proto-first: Use vulnerability.in_kev, vulnerability.epss, vulnerability.advisory.severity.level
 	polContent := `
 policies:
   - name: composite-risk
@@ -530,16 +621,16 @@ policies:
       # Highest priority: Known Exploited + Critical
       - action: deny
         when: |
-          has(vulnerability.inKEV) &&
-          vulnerability.inKEV == true &&
-          vulnerability.severity == "CRITICAL"
+          has(vulnerability.in_kev) &&
+          vulnerability.in_kev == true &&
+          vulnerability.advisory.severity.level == severity.critical
         reason: "Critical + actively exploited"
       # High priority: High EPSS + Critical/High severity
       - action: deny
         when: |
           has(vulnerability.epss) &&
           vulnerability.epss >= 0.5 &&
-          vulnerability.severity in ["CRITICAL", "HIGH"]
+          vulnerability.advisory.severity.level in [severity.critical, severity.high]
         reason: "High/Critical with very high exploitation probability"
 `
 	pol := filepath.Join(t.TempDir(), "composite-risk.yaml")
@@ -547,39 +638,55 @@ policies:
 		t.Fatalf("failed to write policy file: %v", err)
 	}
 
-	// Critical + KEV should be denied
+	// Proto-first: Critical + KEV should be denied
+	inKEV := true
+	epss03 := 0.3
 	payloadCriticalKEV := map[string]any{
-		"vulnerability": map[string]any{
-			"id":       "CVE-2024-1234",
-			"severity": "CRITICAL",
-			"inKEV":    true,
-			"epss":     0.3,
+		"vulnerability": &vulnerabilityv1.Finding{
+			Advisory: &vulnerabilityv1.Advisory{
+				Id: "CVE-2024-1234",
+				Severity: &vulnerabilityv1.Severity{
+					Level: vulnerabilityv1.SeverityLevel_SEVERITY_LEVEL_CRITICAL,
+				},
+			},
+			InKev: &inKEV,
+			Epss:  &epss03,
 		},
 	}
 	if _, err := evaluatePoliciesForCommand(context.Background(), []string{pol}, payloadCriticalKEV, "scan", policy.EntrypointScanVulnerability, &bytes.Buffer{}); err == nil {
 		t.Fatal("expected denial for Critical + KEV vulnerability")
 	}
 
-	// High + very high EPSS should be denied
+	// Proto-first: High + very high EPSS should be denied
+	notInKEV := false
+	epss06 := 0.6
 	payloadHighEPSS := map[string]any{
-		"vulnerability": map[string]any{
-			"id":       "CVE-2024-5678",
-			"severity": "HIGH",
-			"inKEV":    false,
-			"epss":     0.6,
+		"vulnerability": &vulnerabilityv1.Finding{
+			Advisory: &vulnerabilityv1.Advisory{
+				Id: "CVE-2024-5678",
+				Severity: &vulnerabilityv1.Severity{
+					Level: vulnerabilityv1.SeverityLevel_SEVERITY_LEVEL_HIGH,
+				},
+			},
+			InKev: &notInKEV,
+			Epss:  &epss06,
 		},
 	}
 	if _, err := evaluatePoliciesForCommand(context.Background(), []string{pol}, payloadHighEPSS, "scan", policy.EntrypointScanVulnerability, &bytes.Buffer{}); err == nil {
 		t.Fatal("expected denial for High severity + very high EPSS")
 	}
 
-	// Medium severity + high EPSS should pass (not in rules)
+	// Proto-first: Medium severity + high EPSS should pass (not in rules)
 	payloadMediumHighEPSS := map[string]any{
-		"vulnerability": map[string]any{
-			"id":       "CVE-2024-9999",
-			"severity": "MEDIUM",
-			"inKEV":    false,
-			"epss":     0.6,
+		"vulnerability": &vulnerabilityv1.Finding{
+			Advisory: &vulnerabilityv1.Advisory{
+				Id: "CVE-2024-9999",
+				Severity: &vulnerabilityv1.Severity{
+					Level: vulnerabilityv1.SeverityLevel_SEVERITY_LEVEL_MEDIUM,
+				},
+			},
+			InKev: &notInKEV,
+			Epss:  &epss06,
 		},
 	}
 	actions, err := evaluatePoliciesForCommand(context.Background(), []string{pol}, payloadMediumHighEPSS, "scan", policy.EntrypointScanVulnerability, &bytes.Buffer{})

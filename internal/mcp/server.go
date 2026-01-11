@@ -1023,7 +1023,7 @@ func (s *Server) listDependencies(ctx context.Context, req *mcp.CallToolRequest,
 		},
 	})
 
-	resp, err := s.clients.Inventory.ListPackages(ctx, listReq)
+	resp, err := s.clients.Packages.ListPackages(ctx, listReq)
 	if err != nil {
 		err = fmt.Errorf("failed to analyze dependencies: %w", err)
 		otel.SetSpanError(span, err)

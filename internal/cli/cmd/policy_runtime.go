@@ -76,15 +76,3 @@ func firstNonEmpty(values ...string) string {
 	}
 	return ""
 }
-
-// structToMap converts a struct to a map[string]any using the policy package's helper.
-// If the input is already a map, it is returned as is.
-func structToMap(v any) (map[string]any, error) {
-	if v == nil {
-		return map[string]any{}, nil
-	}
-	if m, ok := v.(map[string]any); ok {
-		return m, nil
-	}
-	return policy.StructToMap(v)
-}

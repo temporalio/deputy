@@ -408,9 +408,14 @@ func versionAffectedByGHARanges(v osvschema.Vulnerability, pkg PkgInput, version
 			}
 			foundComparableRange = true
 			introduced := "v0.0.0"
+			introducedSet := false // Track whether an "introduced" event was encountered
 			for _, e := range r.Events {
 				if e.Introduced != "" {
-					if intro := normalizeSemverVersion(e.Introduced); intro != "" {
+					introducedSet = true
+					// "0" means "all versions from the beginning"
+					if e.Introduced == "0" {
+						introduced = "v0.0.0"
+					} else if intro := normalizeSemverVersion(e.Introduced); intro != "" {
 						introduced = intro
 					}
 				}
@@ -420,9 +425,11 @@ func versionAffectedByGHARanges(v osvschema.Vulnerability, pkg PkgInput, version
 						return true
 					}
 					introduced = "v0.0.0"
+					introducedSet = false
 				}
 			}
-			if introduced != "v0.0.0" && semver.Compare(cur, introduced) >= 0 {
+			// Check if we're still in an open-ended "introduced" range (no fixed event)
+			if introducedSet && semver.Compare(cur, introduced) >= 0 {
 				return true
 			}
 		}

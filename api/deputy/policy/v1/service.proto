@@ -1,0 +1,200 @@
+// Copyright 2025 Kent "picat" Gruber. All rights reserved.
+// SPDX-License-Identifier: MIT
+
+syntax = "proto3";
+
+package deputy.policy.v1;
+
+import "deputy/policy/v1/policy.proto";
+import "deputy/vulnerability/v1/vulnerability.proto";
+import "deputy/dependency/v1/dependency.proto";
+import "deputy/target/v1/target.proto";
+
+option go_package = "github.com/picatz/deputy/gen/deputy/policy/v1;policyv1";
+
+// PolicyService provides policy evaluation and management capabilities.
+//
+// This service enables:
+// - Evaluating CEL policies against scan results or proxy requests
+// - Validating policy syntax before deployment
+// - Listing available policy entrypoints and their variables
+//
+// Policies are defined in YAML with CEL expressions and can be loaded from
+// files or provided inline.
+service PolicyService {
+  // Evaluate runs policy evaluation against provided context.
+  // Returns all triggered actions (allow, deny, warn).
+  rpc Evaluate(EvaluateRequest) returns (EvaluateResponse);
+
+  // Validate checks policy syntax and CEL expressions without evaluating.
+  // Use this to catch errors before deploying policies.
+  rpc Validate(ValidateRequest) returns (ValidateResponse);
+
+  // ListEntrypoints returns all available policy entrypoints and their bindings.
+  // Useful for policy authoring tools and documentation generation.
+  rpc ListEntrypoints(ListEntrypointsRequest) returns (ListEntrypointsResponse);
+}
+
+// EvaluateRequest specifies the policies and context for evaluation.
+message EvaluateRequest {
+  // Policies to evaluate. Can be inline YAML or file paths.
+  // When using file paths, the service must be in local mode.
+  repeated PolicySource policies = 1;
+
+  // Context for evaluation - exactly one must be set.
+  oneof context {
+    // ScanVulnerability context for per-vulnerability evaluation.
+    ScanVulnerabilityContext scan_vulnerability = 10;
+
+    // ScanReport context for report-level evaluation.
+    ScanReportContext scan_report = 11;
+
+    // ProxyRequest context for proxy entrypoint evaluation.
+    ProxyRequestContext proxy_request = 12;
+  }
+
+  // Entrypoints to evaluate. If empty, evaluates all matching entrypoints.
+  repeated string entrypoints = 20;
+}
+
+// PolicySource specifies where to load a policy from.
+message PolicySource {
+  oneof source {
+    // Inline YAML policy content.
+    string inline = 1;
+
+    // File path to policy YAML (local mode only).
+    string path = 2;
+
+    // URL to fetch policy from (remote-accessible only).
+    string url = 3;
+  }
+}
+
+// EvaluateResponse contains all policy evaluation results.
+message EvaluateResponse {
+  // Actions triggered by policy evaluation.
+  repeated Action actions = 1;
+
+  // Overall outcome based on triggered actions.
+  // DENY if any deny action, WARN if any warn action, ALLOW otherwise.
+  ActionType outcome = 2;
+
+  // Errors encountered during evaluation (syntax errors, missing vars, etc).
+  repeated PolicyError errors = 3;
+}
+
+// PolicyError describes an error encountered during policy processing.
+message PolicyError {
+  // PolicyName is the name of the policy with the error.
+  string policy_name = 1;
+
+  // RuleName is the rule with the error (if applicable).
+  string rule_name = 2;
+
+  // Message describes the error.
+  string message = 3;
+
+  // Line number in policy source (if known).
+  int32 line = 4;
+
+  // Column in policy source (if known).
+  int32 column = 5;
+}
+
+// ValidateRequest specifies policies to validate.
+message ValidateRequest {
+  // Policies to validate.
+  repeated PolicySource policies = 1;
+}
+
+// ValidateResponse contains validation results.
+message ValidateResponse {
+  // Valid is true if all policies passed validation.
+  bool valid = 1;
+
+  // Errors found during validation.
+  repeated PolicyError errors = 2;
+
+  // Warnings for non-fatal issues (e.g., deprecated features).
+  repeated PolicyError warnings = 3;
+
+  // PolicySummaries describes each validated policy.
+  repeated PolicySummary summaries = 4;
+}
+
+// PolicySummary describes a validated policy.
+message PolicySummary {
+  // Name of the policy.
+  string name = 1;
+
+  // Description of the policy.
+  string description = 2;
+
+  // Entrypoints this policy applies to.
+  repeated string entrypoints = 3;
+
+  // RuleCount is the number of rules in the policy.
+  int32 rule_count = 4;
+
+  // Variables defined in the policy.
+  repeated string variables = 5;
+}
+
+// ListEntrypointsRequest requests available entrypoints.
+message ListEntrypointsRequest {
+  // Category filters to specific entrypoint categories.
+  // Empty returns all entrypoints.
+  string category = 1;
+}
+
+// ListEntrypointsResponse lists all available entrypoints.
+message ListEntrypointsResponse {
+  // Entrypoints lists all available policy entrypoints.
+  repeated EntrypointInfo entrypoints = 1;
+}
+
+// EntrypointInfo describes a policy entrypoint.
+message EntrypointInfo {
+  // Name is the entrypoint identifier (e.g., "scan_vulnerability").
+  string name = 1;
+
+  // Category groups related entrypoints (e.g., "scan", "proxy", "graph").
+  string category = 2;
+
+  // Description explains when this entrypoint is evaluated.
+  string description = 3;
+
+  // Variables available in CEL expressions at this entrypoint.
+  repeated VariableInfo variables = 4;
+
+  // Helpers lists custom functions available at this entrypoint.
+  repeated string helpers = 5;
+}
+
+// VariableInfo describes a CEL variable available at an entrypoint.
+message VariableInfo {
+  // Name is the variable name in CEL expressions.
+  string name = 1;
+
+  // Type is the CEL type (e.g., "vulnerability", "list(vulnerability)").
+  string type = 2;
+
+  // Description explains what the variable contains.
+  string description = 3;
+
+  // Fields lists notable sub-fields for complex types.
+  repeated FieldInfo fields = 4;
+}
+
+// FieldInfo describes a field within a variable.
+message FieldInfo {
+  // Name is the field path (e.g., "advisory.severity.level").
+  string name = 1;
+
+  // Type is the field type.
+  string type = 2;
+
+  // Description explains what the field contains.
+  string description = 3;
+}

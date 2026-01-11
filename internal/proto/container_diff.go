@@ -892,3 +892,171 @@ func protoLayerChangeKindToCompare(kind diffv1.LayerChangeKind) compare.LayerCha
 		return compare.LayerSame
 	}
 }
+
+// ImageDiffReportToProto converts an internal ImageDiffReport to proto DiffContainerImagesResponse.
+// This is used for proto-first policy evaluation.
+func ImageDiffReportToProto(report *compare.ImageDiffReport) *diffv1.DiffContainerImagesResponse {
+	if report == nil {
+		return nil
+	}
+
+	resp := &diffv1.DiffContainerImagesResponse{
+		BaseImage:   imageRefToProto(report.BaseImage),
+		TargetImage: imageRefToProto(report.TargetImage),
+	}
+
+	// Convert package changes
+	for _, pc := range report.PackageChanges {
+		resp.PackageChanges = append(resp.PackageChanges, &diffv1.ContainerPackageChange{
+			Name:               pc.Name,
+			Ecosystem:          pc.Ecosystem,
+			ChangeKind:         ChangeKindToProto(pc.ChangeType),
+			BaseVersion:        pc.BaseVersion,
+			TargetVersion:      pc.TargetVersion,
+			OldName:            pc.OldName,
+			IsDirect:           pc.IsDirect,
+			BaseLayerDetails:   pc.BaseLayerDetails,
+			TargetLayerDetails: pc.TargetLayerDetails,
+		})
+	}
+
+	// Convert vulnerability changes
+	for _, vc := range report.VulnerabilityChanges {
+		resp.VulnerabilityChanges = append(resp.VulnerabilityChanges, &diffv1.ContainerVulnerabilityChange{
+			Id:                 vc.ID,
+			ChangeKind:         vulnChangeTypeToProto(vc.ChangeType),
+			Severity:           vc.Severity,
+			SeverityType:       vc.SeverityType,
+			PackageName:        vc.PackageName,
+			Ecosystem:          vc.Ecosystem,
+			BaseVersion:        vc.BaseVersion,
+			TargetVersion:      vc.TargetVersion,
+			FixedVersions:      vc.FixedVersions,
+			Summary:            vc.Summary,
+			Aliases:            vc.Aliases,
+			Published:          vc.Published,
+			BaseLayerDetails:   vc.BaseLayerDetails,
+			TargetLayerDetails: vc.TargetLayerDetails,
+		})
+	}
+
+	// Convert config changes
+	if report.ConfigChanges != nil {
+		cc := report.ConfigChanges
+		resp.ConfigChanges = &diffv1.ContainerConfigDiff{
+			UserChanged:        cc.UserChanged,
+			BaseUser:           cc.BaseUser,
+			TargetUser:         cc.TargetUser,
+			RootChanged:        cc.RootChanged,
+			BaseIsRoot:         cc.BaseIsRoot,
+			TargetIsRoot:       cc.TargetIsRoot,
+			PortsChanged:       cc.PortsChanged,
+			PortsAdded:         cc.PortsAdded,
+			PortsRemoved:       cc.PortsRemoved,
+			VolumesChanged:     cc.VolumesChanged,
+			VolumesAdded:       cc.VolumesAdded,
+			VolumesRemoved:     cc.VolumesRemoved,
+			EntrypointChanged:  cc.EntrypointChanged,
+			BaseEntrypoint:     cc.BaseEntrypoint,
+			TargetEntrypoint:   cc.TargetEntrypoint,
+			CmdChanged:         cc.CmdChanged,
+			BaseCmd:            cc.BaseCmd,
+			TargetCmd:          cc.TargetCmd,
+			WorkingDirChanged:  cc.WorkingDirChanged,
+			BaseWorkingDir:     cc.BaseWorkingDir,
+			TargetWorkingDir:   cc.TargetWorkingDir,
+			HealthcheckChanged: cc.HealthcheckChanged,
+		}
+		for _, ec := range cc.EnvChanges {
+			resp.ConfigChanges.EnvChanges = append(resp.ConfigChanges.EnvChanges, &diffv1.EnvChange{
+				Name:        ec.Name,
+				ChangeKind:  ChangeKindToProto(ec.ChangeType),
+				BaseValue:   ec.BaseValue,
+				TargetValue: ec.TargetValue,
+				IsSensitive: ec.IsSensitive,
+			})
+		}
+		for _, lc := range cc.LabelChanges {
+			resp.ConfigChanges.LabelChanges = append(resp.ConfigChanges.LabelChanges, &diffv1.LabelChange{
+				Key:         lc.Key,
+				ChangeKind:  ChangeKindToProto(lc.ChangeType),
+				BaseValue:   lc.BaseValue,
+				TargetValue: lc.TargetValue,
+			})
+		}
+	}
+
+	// Convert layer analysis
+	if report.LayerAnalysis != nil {
+		la := report.LayerAnalysis
+		resp.LayerAnalysis = &diffv1.LayerDiffAnalysis{
+			BaseLayerCount:   int32(la.BaseLayerCount),
+			TargetLayerCount: int32(la.TargetLayerCount),
+			CommonLayers:     int32(la.CommonLayers),
+		}
+		for _, lc := range la.LayerChanges {
+			resp.LayerAnalysis.LayerChanges = append(resp.LayerAnalysis.LayerChanges, &diffv1.LayerChange{
+				Index:         int32(lc.Index),
+				ChangeKind:    layerChangeTypeToProto(lc.ChangeType),
+				BaseCommand:   lc.BaseCommand,
+				TargetCommand: lc.TargetCommand,
+			})
+		}
+	}
+
+	// Convert summary
+	resp.Summary = &diffv1.ContainerDiffSummary{
+		PackagesAdded:          int32(report.Summary.PackagesAdded),
+		PackagesRemoved:        int32(report.Summary.PackagesRemoved),
+		PackagesUpgraded:       int32(report.Summary.PackagesUpgraded),
+		PackagesDowngraded:     int32(report.Summary.PackagesDowngraded),
+		VulnerabilitiesAdded:   int32(report.Summary.VulnerabilitiesAdded),
+		VulnerabilitiesRemoved: int32(report.Summary.VulnerabilitiesRemoved),
+		VulnerabilitiesFixed:   int32(report.Summary.VulnerabilitiesFixed),
+		LayersAdded:            int32(report.Summary.LayersAdded),
+		LayersRemoved:          int32(report.Summary.LayersRemoved),
+		ConfigChanged:          report.Summary.ConfigChanged,
+	}
+
+	return resp
+}
+
+func imageRefToProto(ref compare.ImageRef) *diffv1.ContainerImageRef {
+	return &diffv1.ContainerImageRef{
+		Reference:  ref.Reference,
+		Registry:   ref.Registry,
+		Repository: ref.Repository,
+		Tag:        ref.Tag,
+		Digest:     ref.Digest,
+	}
+}
+
+func vulnChangeTypeToProto(ct compare.VulnChangeType) diffv1.VulnerabilityChangeKind {
+	switch ct {
+	case compare.VulnAdded:
+		return diffv1.VulnerabilityChangeKind_VULNERABILITY_CHANGE_KIND_ADDED
+	case compare.VulnRemoved:
+		return diffv1.VulnerabilityChangeKind_VULNERABILITY_CHANGE_KIND_REMOVED
+	case compare.VulnFixed:
+		return diffv1.VulnerabilityChangeKind_VULNERABILITY_CHANGE_KIND_FIXED
+	case compare.VulnPersisted:
+		return diffv1.VulnerabilityChangeKind_VULNERABILITY_CHANGE_KIND_PERSISTED
+	default:
+		return diffv1.VulnerabilityChangeKind_VULNERABILITY_CHANGE_KIND_UNSPECIFIED
+	}
+}
+
+func layerChangeTypeToProto(ct compare.LayerChangeType) diffv1.LayerChangeKind {
+	switch ct {
+	case compare.LayerAdded:
+		return diffv1.LayerChangeKind_LAYER_CHANGE_KIND_ADDED
+	case compare.LayerRemoved:
+		return diffv1.LayerChangeKind_LAYER_CHANGE_KIND_REMOVED
+	case compare.LayerModified:
+		return diffv1.LayerChangeKind_LAYER_CHANGE_KIND_MODIFIED
+	case compare.LayerSame:
+		return diffv1.LayerChangeKind_LAYER_CHANGE_KIND_UNCHANGED
+	default:
+		return diffv1.LayerChangeKind_LAYER_CHANGE_KIND_UNSPECIFIED
+	}
+}

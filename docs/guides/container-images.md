@@ -172,27 +172,43 @@ $ deputy scan --platform linux/arm/v7 debian:bookworm
 
 ### Layer-Aware Vulnerabilities
 
-When scanning container images, each vulnerability includes layer details:
+When scanning container images, each vulnerability includes layer details. To enable base image detection (determining whether a package came from your base image vs. your Dockerfile), use the `--detect-base-image` flag:
+
+```console
+# Enable base image detection for layer-aware analysis
+$ deputy scan --detect-base-image nginx:1.25
+
+# Combine with layer-aware policies
+$ deputy scan --detect-base-image --policy policy/examples/container-layer-vulnerability.yaml ghcr.io/org/app:v1
+```
+
+Each vulnerability then includes layer details:
 
 ```json
 {
-  "id": "CVE-2024-1234",
-  "severity": "HIGH",
-  "package": "openssl",
-  "layerDetails": {
+  "advisory": {
+    "id": "CVE-2024-1234",
+    "severity": {"level": "SEVERITY_LEVEL_HIGH"}
+  },
+  "package": {
+    "name": "openssl",
+    "version": "1.1.1k",
+    "ecosystem": "deb"
+  },
+  "layer_details": {
     "index": 3,
-    "diffId": "sha256:abc...",
+    "diff_id": "sha256:abc...",
     "command": "RUN apt-get install -y openssl",
-    "inBaseImage": true
+    "in_base_image": true
   }
 }
 ```
 
 This tells you:
 - **index**: Which layer introduced the package (0 = base layer)
-- **diffId**: The layer's content hash
+- **diff_id**: The layer's content hash
 - **command**: The Dockerfile instruction that created the layer
-- **inBaseImage**: Whether it came from your base image (FROM instruction)
+- **in_base_image**: Whether it came from your base image (FROM instruction)
 
 ### Image Configuration
 
@@ -271,10 +287,10 @@ image.metadata.created      # Creation timestamp (Unix)
 
 **Layer details** on vulnerabilities:
 ```yaml
-vulnerability.layerDetails.index       # Layer position
-vulnerability.layerDetails.inBaseImage # true if from base image
-vulnerability.layerDetails.command     # Dockerfile command
-vulnerability.layerDetails.diffId      # Layer content hash
+vulnerability.layer_details.index         # Layer position
+vulnerability.layer_details.in_base_image # true if from base image
+vulnerability.layer_details.command       # Dockerfile command
+vulnerability.layer_details.diff_id       # Layer content hash
 ```
 
 ### Example Policies
@@ -338,9 +354,9 @@ policies:
     rules:
       - action: deny
         when: |
-          has(vulnerability.layerDetails) &&
-          vulnerability.layerDetails.inBaseImage == true &&
-          vulnerability.severity == "CRITICAL"
+          has(vulnerability.layer_details) &&
+          vulnerability.layer_details.in_base_image == true &&
+          vulnerability.advisory.severity.level == severity.critical
         reason: "Critical vulnerability in base image"
         remediation: "Update to a patched base image"
 ```
@@ -611,20 +627,20 @@ $ deputy scan oci://localhost:5000/myapp:latest --policy policy/container-config
 
 ### Layer Attribution Heuristics
 
-The `inBaseImage` field on vulnerability layer details uses heuristics to determine whether a package came from the base image (FROM instruction) or was added by the Dockerfile.
+The `in_base_image` field on vulnerability layer details uses heuristics to determine whether a package came from the base image (FROM instruction) or was added by the Dockerfile.
 
 **Limitations**:
 - Multi-stage builds may cause misattribution
 - Non-standard base images may not be recognized
 - Empty layer commands (metadata-only) can confuse detection
 
-**Best practice**: Use `layerDetails.index < N` for more deterministic layer targeting:
+**Best practice**: Use `layer_details.index < N` for more deterministic layer targeting:
 ```yaml
 # Target first 3 layers (typically base image)
 when: |
-  has(vulnerability.layerDetails) &&
-  vulnerability.layerDetails.index < 3 &&
-  vulnerability.severity == "CRITICAL"
+  has(vulnerability.layer_details) &&
+  vulnerability.layer_details.index < 3 &&
+  vulnerability.advisory.severity.level == severity.critical
 ```
 
 ## Policy Examples

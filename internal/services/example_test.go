@@ -24,7 +24,7 @@ func Example_inProcess() {
 
 	// Use the generated client interface
 	ctx := context.Background()
-	resp, err := clients.Inventory.ListEcosystems(ctx, connect.NewRequest(&listv1.ListEcosystemsRequest{}))
+	resp, err := clients.Packages.ListEcosystems(ctx, connect.NewRequest(&listv1.ListEcosystemsRequest{}))
 	if err != nil {
 		panic(err)
 	}

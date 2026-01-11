@@ -13,6 +13,7 @@ type mockImage struct {
 	configFile *v1.ConfigFile
 	layers     []v1.Layer
 	digest     v1.Hash
+	manifest   *v1.Manifest
 }
 
 func (m *mockImage) Layers() ([]v1.Layer, error) {
@@ -44,7 +45,7 @@ func (m *mockImage) Digest() (v1.Hash, error) {
 }
 
 func (m *mockImage) Manifest() (*v1.Manifest, error) {
-	return nil, nil
+	return m.manifest, nil
 }
 
 func (m *mockImage) RawManifest() ([]byte, error) {
@@ -169,6 +170,145 @@ func TestExtractImageInfoNil(t *testing.T) {
 	if info != nil {
 		t.Error("ExtractImageInfo(nil) should return nil")
 	}
+}
+
+func TestExtractBaseImageAnnotations(t *testing.T) {
+	tests := []struct {
+		name       string
+		manifest   *v1.Manifest
+		labels     map[string]string
+		wantName   string
+		wantDigest string
+	}{
+		{
+			name:     "no annotations",
+			manifest: &v1.Manifest{},
+			wantName: "",
+		},
+		{
+			name: "manifest annotations",
+			manifest: &v1.Manifest{
+				Annotations: map[string]string{
+					"org.opencontainers.image.base.name":   "docker.io/library/alpine:3.19",
+					"org.opencontainers.image.base.digest": "sha256:abc123",
+				},
+			},
+			wantName:   "docker.io/library/alpine:3.19",
+			wantDigest: "sha256:abc123",
+		},
+		{
+			name:     "labels fallback",
+			manifest: &v1.Manifest{},
+			labels: map[string]string{
+				"org.opencontainers.image.base.name":   "gcr.io/distroless/static:nonroot",
+				"org.opencontainers.image.base.digest": "sha256:def456",
+			},
+			wantName:   "gcr.io/distroless/static:nonroot",
+			wantDigest: "sha256:def456",
+		},
+		{
+			name: "manifest takes precedence over labels",
+			manifest: &v1.Manifest{
+				Annotations: map[string]string{
+					"org.opencontainers.image.base.name": "from-manifest",
+				},
+			},
+			labels: map[string]string{
+				"org.opencontainers.image.base.name": "from-labels",
+			},
+			wantName: "from-manifest",
+		},
+		{
+			name: "name only without digest",
+			manifest: &v1.Manifest{
+				Annotations: map[string]string{
+					"org.opencontainers.image.base.name": "alpine:3.19",
+				},
+			},
+			wantName:   "alpine:3.19",
+			wantDigest: "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			img := &mockImage{
+				configFile: &v1.ConfigFile{
+					Config: v1.Config{
+						Labels: tt.labels,
+					},
+				},
+				manifest: tt.manifest,
+			}
+			info, err := Extract(img)
+			if err != nil {
+				t.Fatalf("Extract() error = %v", err)
+			}
+
+			if tt.wantName == "" && tt.wantDigest == "" {
+				if info.BaseImage != nil {
+					t.Errorf("BaseImage = %+v, want nil", info.BaseImage)
+				}
+				return
+			}
+
+			if info.BaseImage == nil {
+				t.Fatal("BaseImage is nil, want non-nil")
+			}
+			if info.BaseImage.Name != tt.wantName {
+				t.Errorf("BaseImage.Name = %q, want %q", info.BaseImage.Name, tt.wantName)
+			}
+			if info.BaseImage.Digest != tt.wantDigest {
+				t.Errorf("BaseImage.Digest = %q, want %q", info.BaseImage.Digest, tt.wantDigest)
+			}
+		})
+	}
+}
+
+func TestBaseImageToMap(t *testing.T) {
+	t.Run("with base image", func(t *testing.T) {
+		info := &Info{
+			BaseImage: &BaseImageRef{
+				Name:   "alpine:3.19",
+				Digest: "sha256:abc",
+			},
+		}
+		m := info.ToMap()
+		baseImg, ok := m["base_image"].(map[string]any)
+		if !ok || baseImg == nil {
+			t.Fatal("base_image not in map or wrong type")
+		}
+		if baseImg["name"] != "alpine:3.19" {
+			t.Errorf("base_image.name = %v, want alpine:3.19", baseImg["name"])
+		}
+		if baseImg["digest"] != "sha256:abc" {
+			t.Errorf("base_image.digest = %v, want sha256:abc", baseImg["digest"])
+		}
+	})
+
+	t.Run("without base image", func(t *testing.T) {
+		info := &Info{}
+		m := info.ToMap()
+		// When BaseImage is nil, baseImageToMap returns nil (typed as map[string]any).
+		// Due to Go's interface semantics, this becomes a non-nil interface holding
+		// a nil map. CEL handles this correctly (accessing nil map returns nil).
+		baseImg, ok := m["base_image"].(map[string]any)
+		if !ok {
+			t.Fatal("base_image should be convertible to map[string]any")
+		}
+		if baseImg != nil {
+			// This checks if the underlying map is nil
+			t.Errorf("base_image map = %v, want nil map", baseImg)
+		}
+	})
+
+	t.Run("nil info", func(t *testing.T) {
+		var info *Info
+		m := info.ToMap()
+		if m["base_image"] != nil {
+			t.Errorf("base_image = %v, want nil", m["base_image"])
+		}
+	})
 }
 
 func TestImageConfigSensitiveEnv(t *testing.T) {

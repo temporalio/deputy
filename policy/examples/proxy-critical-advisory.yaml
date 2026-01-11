@@ -1,12 +1,18 @@
+# Warn (not block) when CRITICAL vulnerabilities are seen at the proxy
+#
+# Structure:
+#   v.advisory.severity.level - Severity enum
+#
+# Severity constants: severity.critical, severity.high, severity.medium, severity.low
+#
 policies:
   - name: proxy-critical-advisory
     description: Warn (not block) when CRITICAL vulnerabilities are seen at the proxy
     mode: advisory
     entrypoints: ["go_artifact_request", "npm_artifact_request", "pypi_artifact_request", "rubygems_artifact_request"]
     vars:
-      criticalSev: '["CRITICAL"]'
       vulns: 'vulnerabilities.orValue([])'
     rules:
       - action: deny
-        when: vulns.exists(v, v.Severity in criticalSev)
+        when: vulns.exists(v, v.advisory.severity.level == severity.critical)
         reason: critical vulnerability present in requested artifact

@@ -9,7 +9,6 @@ import (
 
 	vulnerabilityv1 "github.com/picatz/deputy/gen/deputy/vulnerability/v1"
 	"github.com/picatz/deputy/internal/output"
-	"github.com/picatz/deputy/internal/remediation"
 	"github.com/picatz/deputy/internal/report"
 	"github.com/picatz/deputy/internal/report/render"
 )
@@ -93,24 +92,19 @@ func TestOutputDocs_Golden(t *testing.T) {
 			name:   "FixSummary",
 			golden: "fix_summary.golden",
 			render: func() (string, error) {
-				plan := remediationPlan{
-					Target: report.Target{
-						Repo:   "github.com/acme/repo",
-						Ref:    "main",
-						Commit: "deadbeef",
-					},
-					StdlibUpgrade: "v1.23.0",
-					Commands:      []remediation.Command{{Command: "go get example.com/a@v1.2.3"}},
-					Stats: remediationPlanSummary{
-						TotalCommands:    3,
-						RunnableCommands: 2,
-					},
-				}
+				// Use simple values directly - golden test is for render output, not proto structure
+				repo := "github.com/acme/repo"
+				commit := "deadbeef"
+				stdlibUpgrade := "v1.23.0"
+				totalCommands := 3
+				runnableCommands := 2
+				commandCount := 1
+
 				doc, _ := render.FixSummaryDoc(render.TargetSummary{
-					Repo:   plan.Target.Repo,
-					Ref:    plan.Target.Ref,
-					Commit: plan.Target.Commit,
-				}, plan.StdlibUpgrade, plan.Stats.TotalCommands, plan.Stats.RunnableCommands, len(plan.Commands))
+					Repo:   repo,
+					Ref:    "main",
+					Commit: commit,
+				}, stdlibUpgrade, totalCommands, runnableCommands, commandCount)
 
 				var buf bytes.Buffer
 				if err := doc.Render(&buf, output.PlainStyles()); err != nil {

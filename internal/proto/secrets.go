@@ -347,3 +347,47 @@ func SecretsTargetHintFromProto(h *secretsv1.TargetHint) inventory.TargetHint {
 		ImageTransport: h.ImageTransport,
 	}
 }
+
+// SecretsVerificationResultToProto converts internal secrets.VerificationResult to proto VerificationStatus.
+func SecretsVerificationResultToProto(v secrets.VerificationResult) *secretsv1.VerificationStatus {
+	status := &secretsv1.VerificationStatus{
+		Status:   secretsVerificationStatusToProto(v.Status),
+		Message:  v.Message,
+		Identity: v.Identity,
+		Scopes:   v.Scopes,
+	}
+	if v.ExpiresAt != nil {
+		status.ExpiresAt = v.ExpiresAt.Format(time.RFC3339)
+	}
+	if !v.VerifiedAt.IsZero() {
+		status.VerifiedAt = v.VerifiedAt.Format(time.RFC3339)
+	}
+	return status
+}
+
+// secretsVerificationStatusToProto converts internal VerificationStatus to proto VerificationResult.
+func secretsVerificationStatusToProto(s secrets.VerificationStatus) secretsv1.VerificationResult {
+	switch s {
+	case secrets.StatusValid:
+		return secretsv1.VerificationResult_VERIFICATION_RESULT_VALID
+	case secrets.StatusInvalid:
+		return secretsv1.VerificationResult_VERIFICATION_RESULT_INVALID
+	case secrets.StatusExpired:
+		return secretsv1.VerificationResult_VERIFICATION_RESULT_EXPIRED
+	case secrets.StatusRateLimited:
+		return secretsv1.VerificationResult_VERIFICATION_RESULT_RATE_LIMITED
+	case secrets.StatusError:
+		return secretsv1.VerificationResult_VERIFICATION_RESULT_ERROR
+	default:
+		return secretsv1.VerificationResult_VERIFICATION_RESULT_SKIPPED
+	}
+}
+
+// SecretsFindingWithVerificationToProto converts internal secrets.Finding with optional VerificationResult to proto.
+func SecretsFindingWithVerificationToProto(f secrets.Finding, v *secrets.VerificationResult) *secretsv1.Finding {
+	proto := SecretsFindingToProto(f)
+	if v != nil {
+		proto.Verification = SecretsVerificationResultToProto(*v)
+	}
+	return proto
+}

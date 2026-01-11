@@ -1,9 +1,15 @@
 package scanning
 
 import (
+	"context"
+	"fmt"
+
+	"github.com/google/cel-go/cel"
 	"github.com/google/osv-scalibr/extractor"
+	dependencyv1 "github.com/picatz/deputy/gen/deputy/dependency/v1"
 	vulnerabilityv1 "github.com/picatz/deputy/gen/deputy/vulnerability/v1"
 	"github.com/picatz/deputy/internal/ignore"
+	"github.com/picatz/deputy/internal/policy"
 	"github.com/picatz/deputy/internal/vulnerability"
 )
 
@@ -122,4 +128,96 @@ func mergeAdvisories(base, extra map[string]*vulnerabilityv1.Advisory) map[strin
 		out[id] = adv
 	}
 	return out
+}
+
+// FilterByCEL filters findings using a CEL expression. The expression is evaluated
+// per-vulnerability with the `vulnerability` variable bound to each finding's proto
+// representation. Findings where the expression evaluates to true are kept.
+//
+// Example expressions:
+//   - "vulnerability.advisory.severity.level == severity.critical"
+//   - "vulnerability.package.direct && vulnerability.epss > 0.5"
+//   - "vulnerability.in_kev || vulnerability.advisory.severity.level in [severity.critical, severity.high]"
+//
+// Returns the filtered result and an error if the CEL expression is invalid.
+func FilterByCEL(ctx context.Context, result Result, expr string) (Result, error) {
+	if expr == "" || len(result.Findings) == 0 {
+		return result, nil
+	}
+
+	// Compile the CEL expression once
+	program, err := compileCELFilter(expr)
+	if err != nil {
+		return result, fmt.Errorf("invalid filter expression: %w", err)
+	}
+
+	// Filter findings
+	filtered := make([]vulnerability.Finding, 0, len(result.Findings))
+	for _, f := range result.Findings {
+		adv := result.Advisories[f.AdvisoryID]
+
+		// Build the payload for this finding (same structure as policy evaluation)
+		payload := buildFindingPayload(f, adv)
+
+		// Evaluate the expression
+		out, _, err := program.ContextEval(ctx, payload)
+		if err != nil {
+			return result, fmt.Errorf("filter expression evaluation error: %w", err)
+		}
+
+		// Check if the result is truthy
+		if keep, ok := out.Value().(bool); ok && keep {
+			filtered = append(filtered, f)
+		}
+	}
+
+	result.Findings = filtered
+	result.Advisories = filterAdvisories(filtered, result.Advisories)
+	result.Stats = vulnerability.ConsolidateAll(result.Findings, result.Advisories).Stats
+	return result, nil
+}
+
+// compileCELFilter compiles a CEL filter expression for vulnerability filtering.
+func compileCELFilter(expr string) (cel.Program, error) {
+	env, err := policy.NewFilterEnv()
+	if err != nil {
+		return nil, err
+	}
+
+	ast, iss := env.Compile(expr)
+	if iss != nil && iss.Err() != nil {
+		return nil, iss.Err()
+	}
+
+	return env.Program(ast)
+}
+
+// buildFindingPayload creates the CEL evaluation context for a single finding.
+// This mirrors the payload structure used in policy evaluation.
+func buildFindingPayload(f vulnerability.Finding, adv *vulnerabilityv1.Advisory) map[string]any {
+	// Build package proto
+	pkg := &dependencyv1.Package{
+		Name:         f.Dependency.Name,
+		Ecosystem:    f.Dependency.Ecosystem,
+		Purl:         f.Dependency.PURL,
+		Version:      f.Version,
+		Direct:       f.Direct,
+		LayerDetails: f.LayerDetails,
+	}
+
+	// Build vulnerability proto for consistent field access
+	vuln := &vulnerabilityv1.Finding{
+		AdvisoryId:     f.AdvisoryID,
+		Advisory:       adv,
+		Package:        pkg,
+		Affected:       f.Affected,
+		Epss:           f.EPSS,
+		EpssPercentile: f.EPSSPercentile,
+		InKev:          f.InKEV,
+	}
+
+	return map[string]any{
+		"vulnerability": vuln,
+		"severity":      policy.SeverityConstants(),
+	}
 }

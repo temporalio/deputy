@@ -198,6 +198,19 @@ func splitVulnerabilitiesToProto(vulns []Vulnerability) ([]*vulnerabilityv1.Find
 	return findings, advisories, nil
 }
 
+// VulnerabilitiesToFindings converts flat Vulnerability records to proto Findings.
+// This is the proto-first API for policy evaluation.
+func VulnerabilitiesToFindings(vulns []Vulnerability) []*vulnerabilityv1.Finding {
+	if len(vulns) == 0 {
+		return nil
+	}
+	findings := make([]*vulnerabilityv1.Finding, len(vulns))
+	for i, v := range vulns {
+		_, findings[i] = splitVulnerabilityToProto(v)
+	}
+	return findings
+}
+
 // splitVulnerabilityToProto converts a flat Vulnerability to proto types.
 func splitVulnerabilityToProto(v Vulnerability) (*vulnerabilityv1.Advisory, *vulnerabilityv1.Finding) {
 	advisory := &vulnerabilityv1.Advisory{

@@ -208,6 +208,11 @@ func HistoryEntriesToContainerProto(entries []image.HistoryEntry) []*containerv1
 
 // DockerfileInfoToProto converts internal dockerfile.Info to proto.
 func DockerfileInfoToProto(info *dockerfile.Info) *inventoryv1.DockerfileInfo {
+	return DockerfileInfoWithAnalysisToProto(info, nil)
+}
+
+// DockerfileInfoWithAnalysisToProto converts internal dockerfile.Info and Analysis to proto.
+func DockerfileInfoWithAnalysisToProto(info *dockerfile.Info, analysis *dockerfile.Analysis) *inventoryv1.DockerfileInfo {
 	if info == nil {
 		return nil
 	}
@@ -227,6 +232,7 @@ func DockerfileInfoToProto(info *dockerfile.Info) *inventoryv1.DockerfileInfo {
 		Stages:     stages,
 		FinalStage: finalStage,
 		Args:       info.Args,
+		Analysis:   DockerfileAnalysisToProto(analysis),
 	}
 }
 
@@ -330,4 +336,33 @@ func DockerfileStageFromProto(s *inventoryv1.DockerfileStage) *dockerfile.Stage 
 		ExposedPorts:      s.ExposedPorts,
 		Labels:            s.Labels,
 	}
+}
+
+// DockerfileAnalysisFromProtoNested extracts analysis from nested DockerfileInfo proto.
+func DockerfileAnalysisFromProtoNested(info *inventoryv1.DockerfileInfo) *dockerfile.Analysis {
+	if info == nil || info.Analysis == nil {
+		return nil
+	}
+	return DockerfileAnalysisFromProto(info.Analysis)
+}
+
+// DockerfileAnalysisFromProto converts proto DockerfileAnalysis to internal dockerfile.Analysis.
+func DockerfileAnalysisFromProto(a *inventoryv1.DockerfileAnalysis) *dockerfile.Analysis {
+	if a == nil {
+		return nil
+	}
+	return &dockerfile.Analysis{
+		StageCount:          int(a.StageCount),
+		HasMultiStage:       a.HasMultiStage,
+		BuilderStageCount:   int(a.BuilderStageCount),
+		FinalStageIsRoot:    a.FinalStageIsRoot,
+		FinalStageIsScratch: a.FinalStageIsScratch,
+		SensitiveEnvVars:    a.SensitiveEnvVars,
+		HasAddURL:           a.HasAddUrl,
+	}
+}
+
+// ImageInfoToProto is an alias for ImageInfoToContainerProto for convenience.
+func ImageInfoToProto(info *image.Info) *containerv1.ImageInfo {
+	return ImageInfoToContainerProto(info)
 }

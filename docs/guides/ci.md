@@ -283,7 +283,7 @@ policies:
   - name: ci-vulnerability-gate
     rules:
       - action: deny
-        when: vulnerabilities.exists(v, v.severity in ["CRITICAL", "HIGH"])
+        when: vulnerabilities.exists(v, v.advisory.severity.level in [severity.critical, severity.high])
         reason: "Critical/high severity vulnerabilities must be addressed before merge"
 ```
 

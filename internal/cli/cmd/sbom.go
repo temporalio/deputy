@@ -351,17 +351,27 @@ func runSBOMPolicies(ctx context.Context, policyPaths []string, result sbomx.Res
 	if len(policyPaths) == 0 {
 		return nil
 	}
-	reportMap, err := structToMap(result)
-	if err != nil {
+	// Build target payload for CEL evaluation
+	targetPayload := buildTargetPayload(result.Target)
+	var imagePayload any
+	if img := buildScanImagePayload(result.Target); img != nil {
+		imagePayload = img
+	}
+
+	// Pass Go struct directly to CEL
+	reportPayload := map[string]any{
+		"sbom":     result,
+		"target":   targetPayload,
+		"packages": result.Packages,
+	}
+	if imagePayload != nil {
+		reportPayload["image"] = imagePayload
+	}
+	if _, err := evaluatePoliciesForCommand(ctx, policyPaths, reportPayload, "sbom", policy.EntrypointSBOMReport, errW); err != nil {
 		return err
 	}
-	reportMap["target"] = buildTargetPayload(result.Target)
-	if image := buildScanImagePayload(result.Target); image != nil {
-		reportMap["image"] = image
-	}
-	if _, err := evaluatePoliciesForCommand(ctx, policyPaths, reportMap, "sbom", policy.EntrypointSBOMReport, errW); err != nil {
-		return err
-	}
+
+	// Extract context fields
 	repo := strings.TrimSpace(result.RepoPath)
 	if repo == "" {
 		repo = strings.TrimSpace(result.Target.DisplayPath)
@@ -374,22 +384,20 @@ func runSBOMPolicies(ctx context.Context, policyPaths []string, result sbomx.Res
 	if commit == "" {
 		commit = strings.TrimSpace(result.Target.CommitHash)
 	}
+
+	// Evaluate per-component policies with Go structs directly
 	for _, pkg := range result.Packages {
-		pkgMap, err := structToMap(pkg)
-		if err != nil {
-			return err
-		}
-		payload := map[string]any{
+		compPayload := map[string]any{
 			"repo":      repo,
 			"ref":       ref,
 			"commit":    commit,
-			"component": pkgMap,
+			"component": pkg, // Pass extractor.Package directly
+			"target":    targetPayload,
 		}
-		payload["target"] = reportMap["target"]
-		if image := reportMap["image"]; image != nil {
-			payload["image"] = image
+		if imagePayload != nil {
+			compPayload["image"] = imagePayload
 		}
-		if _, err := evaluatePoliciesForCommand(ctx, policyPaths, payload, "sbom", policy.EntrypointSBOMComponent, errW); err != nil {
+		if _, err := evaluatePoliciesForCommand(ctx, policyPaths, compPayload, "sbom", policy.EntrypointSBOMComponent, errW); err != nil {
 			return err
 		}
 	}

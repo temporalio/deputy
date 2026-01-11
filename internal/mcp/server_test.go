@@ -158,9 +158,9 @@ func newMockClients(cfg mockClientsConfig) *services.Clients {
 	httpClient := transport.HTTPClient()
 
 	return &services.Clients{
-		Vulns:     scanv1connect.NewScanServiceClient(httpClient, ""),
-		Inventory: listv1connect.NewListServiceClient(httpClient, ""),
-		Advisory:  vulnerabilityv1connect.NewVulnerabilityServiceClient(httpClient, ""),
+		Vulns:    scanv1connect.NewScanServiceClient(httpClient, ""),
+		Packages: listv1connect.NewListServiceClient(httpClient, ""),
+		Advisory: vulnerabilityv1connect.NewVulnerabilityServiceClient(httpClient, ""),
 	}
 }
 

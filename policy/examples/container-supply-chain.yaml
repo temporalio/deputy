@@ -1,0 +1,360 @@
+# Container Supply Chain Policies
+#
+# Policies for enforcing supply chain security requirements on container images.
+# These policies evaluate image metadata, labels, and provenance information.
+#
+# NOTE: Some features (SLSA provenance, signature verification) are planned for
+# future releases. This file documents the intended policy patterns.
+#
+# Available Variables:
+#   image.image           - Full image reference
+#   image.registry        - Registry hostname
+#   image.repository      - Repository path
+#   image.tag             - Tag portion
+#   image.digest          - Digest (sha256:...)
+#   image.config.labels   - Image labels map
+#   image.metadata.created - Image creation timestamp
+#
+# Helper Functions:
+#   imageRef(string) map  - Parse image reference into components
+#   baseImage(list) string - Extract base image from build history
+#
+# Entrypoints:
+#   scan_report           - After image scan completes
+#   oci_artifact_request  - At OCI proxy request time (pre-pull enforcement)
+
+policies:
+  # ==========================================
+  # Registry Governance
+  # ==========================================
+
+  - name: approved-registries-strict
+    description: Only allow images from explicitly approved registries
+    entrypoints: ["scan_report", "oci_artifact_request"]
+    vars:
+      # Tier 1: Fully trusted registries
+      trustedRegistries:
+        - "gcr.io"
+        - "ghcr.io"
+        - "public.ecr.aws"
+      # Tier 2: Conditionally trusted (with additional checks)
+      conditionalRegistries:
+        - "docker.io"
+    rules:
+      - action: deny
+        when: |
+          has(image.image) && image.image != "" &&
+          cel.bind(reg, imageRef(image.image).registry,
+            !(reg in trustedRegistries) &&
+            !(reg in conditionalRegistries) &&
+            !reg.endsWith(".gcr.io") &&
+            !reg.endsWith(".azurecr.io") &&
+            !reg.matches(".*\\.dkr\\.ecr\\..*\\.amazonaws\\.com") &&
+            !reg.endsWith(".pkg.dev"))
+        reason: "Image from unapproved registry"
+        remediation: "Use images from approved registries: gcr.io, ghcr.io, public.ecr.aws, or approved cloud registries"
+
+  - name: block-docker-hub-library-for-prod
+    description: Block Docker Hub library images in production (prefer official vendor images)
+    entrypoints: ["scan_report"]
+    rules:
+      - action: warn
+        when: |
+          has(image.image) && image.image != "" &&
+          cel.bind(ref, imageRef(image.image),
+            ref.registry == "docker.io" &&
+            ref.repository.startsWith("library/"))
+        reason: "Docker Hub library images are community-maintained, not vendor-supported"
+        remediation: "Use vendor-provided images or internally-vetted base images"
+
+  # ==========================================
+  # Image Provenance Labels (OCI Standard)
+  # ==========================================
+
+  - name: require-source-label
+    description: Require org.opencontainers.image.source label for traceability
+    entrypoints: ["scan_report"]
+    rules:
+      - action: warn
+        when: |
+          has(image.config) &&
+          has(image.config.labels) &&
+          !("org.opencontainers.image.source" in image.config.labels)
+        reason: "Image missing source code reference label"
+        remediation: "Add LABEL org.opencontainers.image.source=https://github.com/org/repo"
+
+  - name: require-revision-label
+    description: Require git commit SHA for build traceability
+    entrypoints: ["scan_report"]
+    rules:
+      - action: warn
+        when: |
+          has(image.config) &&
+          has(image.config.labels) &&
+          !("org.opencontainers.image.revision" in image.config.labels)
+        reason: "Image missing git revision label"
+        remediation: "Add LABEL org.opencontainers.image.revision=$GIT_SHA"
+
+  - name: require-build-labels-for-production
+    description: Production images must have complete build metadata
+    entrypoints: ["scan_report", "oci_artifact_request"]
+    vars:
+      requiredLabels:
+        - "org.opencontainers.image.source"
+        - "org.opencontainers.image.revision"
+        - "org.opencontainers.image.created"
+        - "org.opencontainers.image.version"
+      productionRegistries:
+        - "gcr.io/prod"
+        - "ghcr.io/myorg"
+    rules:
+      - action: deny
+        when: |
+          has(image.image) && image.image != "" &&
+          productionRegistries.exists(r, imageRef(image.image).registry.startsWith(r.split("/")[0])) &&
+          has(image.config) &&
+          has(image.config.labels) &&
+          !requiredLabels.all(l, l in image.config.labels)
+        reason: "Production images must have complete OCI build metadata labels"
+        remediation: "Add all required OCI labels during image build"
+
+  # ==========================================
+  # Version and Tag Policies
+  # ==========================================
+
+  - name: no-latest-in-production
+    description: Block :latest tag in production environments
+    entrypoints: ["scan_report", "oci_artifact_request"]
+    rules:
+      - action: deny
+        when: |
+          has(image.image) && image.image != "" &&
+          cel.bind(ref, imageRef(image.image),
+            ref.tag == "latest" || (ref.tag == "" && ref.digest == ""))
+        reason: "The :latest tag is mutable and unpredictable"
+        remediation: "Use a specific version tag (v1.2.3) or digest reference (@sha256:...)"
+
+  - name: require-digest-for-critical-workloads
+    description: Critical workloads must use immutable digest references
+    entrypoints: ["scan_report"]
+    rules:
+      - action: warn
+        when: |
+          has(image.image) && image.image != "" &&
+          imageRef(image.image).digest == ""
+        reason: "Image should be pinned by digest for reproducibility"
+        remediation: "Use digest reference: image@sha256:... instead of tags"
+
+  - name: enforce-semver-tags
+    description: Tags should follow semantic versioning
+    entrypoints: ["scan_report"]
+    rules:
+      - action: warn
+        when: |
+          has(image.image) && image.image != "" &&
+          cel.bind(ref, imageRef(image.image),
+            ref.digest == "" &&
+            ref.tag != "" &&
+            !ref.tag.matches("^v?[0-9]+\\.[0-9]+\\.[0-9]+(-[a-zA-Z0-9]+)?(\\.[0-9]+)?$"))
+        reason: "Image tag does not follow semantic versioning"
+        remediation: "Use semver tags (v1.2.3 or 1.2.3) for predictable versioning"
+
+  # ==========================================
+  # Image Freshness
+  # ==========================================
+
+  - name: image-age-limit-90-days
+    description: Images older than 90 days may have unpatched vulnerabilities
+    entrypoints: ["scan_report"]
+    vars:
+      maxAgeDays: 90
+    rules:
+      - action: warn
+        when: |
+          has(image.metadata) &&
+          image.metadata.created > 0 &&
+          age(image.metadata.created) > duration(string(maxAgeDays * 24) + "h")
+        reason: "Image is older than 90 days"
+        remediation: "Rebuild image with latest base and security patches"
+
+  - name: base-image-freshness
+    description: Base image layers should be recent
+    entrypoints: ["scan_report"]
+    vars:
+      maxAgeDays: 180
+    rules:
+      - action: warn
+        when: |
+          has(image.history) &&
+          size(image.history) > 0 &&
+          image.history[0].created > 0 &&
+          age(image.history[0].created) > duration(string(maxAgeDays * 24) + "h")
+        reason: "Base image layers are older than 180 days"
+        remediation: "Update to a more recent base image version"
+
+  # ==========================================
+  # Base Image Governance
+  # ==========================================
+
+  - name: require-minimal-base-images
+    description: Prefer minimal base images (distroless, Alpine, scratch)
+    entrypoints: ["scan_report"]
+    vars:
+      minimalBases:
+        - "distroless"
+        - "chainguard"
+        - "alpine"
+        - "scratch"
+        - "slim"
+        - "static"
+    rules:
+      - action: warn
+        when: |
+          has(image.history) &&
+          cel.bind(base, baseImage(image.history),
+            base != "" &&
+            !minimalBases.exists(m, base.contains(m)))
+        reason: "Consider using a minimal base image to reduce attack surface"
+        remediation: "Use gcr.io/distroless/*, cgr.dev/chainguard/*, or alpine as base"
+
+  - name: block-deprecated-base-images
+    description: Block known deprecated or EOL base images
+    entrypoints: ["scan_report", "oci_artifact_request"]
+    vars:
+      deprecatedPatterns:
+        # Ubuntu EOL
+        - ":14.04"
+        - ":16.04"
+        - ":trusty"
+        - ":xenial"
+        # Debian EOL
+        - ":stretch"
+        - ":jessie"
+        - ":8"
+        - ":9"
+        # Alpine EOL
+        - "alpine:3.12"
+        - "alpine:3.13"
+        - "alpine:3.14"
+        # Node.js EOL
+        - "node:12"
+        - "node:14"
+        - "node:16"
+        # Python EOL
+        - "python:2"
+        - "python:3.6"
+        - "python:3.7"
+    rules:
+      - action: deny
+        when: |
+          has(image.history) &&
+          cel.bind(base, baseImage(image.history),
+            base != "" &&
+            deprecatedPatterns.exists(p, base.contains(p)))
+        reason: "Base image is deprecated or end-of-life"
+        remediation: "Upgrade to a supported base image version"
+
+  # ==========================================
+  # Build Hygiene
+  # ==========================================
+
+  - name: no-secrets-in-build-history
+    description: Block images with potential secrets in build commands
+    entrypoints: ["scan_report"]
+    vars:
+      secretPatterns:
+        - "password="
+        - "passwd="
+        - "secret="
+        - "api_key="
+        - "apikey="
+        - "token="
+        - "private_key"
+        - "-----begin"
+        - "credentials"
+        - "aws_secret"
+        - "aws_access"
+    rules:
+      - action: deny
+        when: |
+          has(image.history) &&
+          image.history.exists(h,
+            secretPatterns.exists(p, h.created_by.lowerAscii().contains(p)))
+        reason: "Potential secrets detected in image build history"
+        remediation: "Use --secret mounts or multi-stage builds to avoid leaking secrets"
+
+  - name: no-curl-pipe-bash
+    description: Warn about curl|bash patterns (supply chain risk)
+    entrypoints: ["scan_report"]
+    rules:
+      - action: warn
+        when: |
+          has(image.history) &&
+          image.history.exists(h,
+            (h.created_by.contains("curl") || h.created_by.contains("wget")) &&
+            h.created_by.contains("|"))
+        reason: "Image contains curl|sh or wget|sh pattern (supply chain risk)"
+        remediation: "Download files and verify checksums before execution"
+
+  - name: require-package-manager-cleanup
+    description: Warn if package manager cache not cleaned
+    entrypoints: ["scan_report"]
+    rules:
+      - action: warn
+        when: |
+          has(image.history) &&
+          image.history.exists(h,
+            h.created_by.contains("apt-get install") ||
+            h.created_by.contains("apt install")) &&
+          !image.history.exists(h,
+            h.created_by.contains("rm -rf /var/lib/apt"))
+        reason: "APT cache not cleaned (increases image size and attack surface)"
+        remediation: "Add 'rm -rf /var/lib/apt/lists/*' after apt-get install"
+
+  # ==========================================
+  # Future: Signature and Attestation Policies
+  # (These are planned features - policies documented for reference)
+  # ==========================================
+
+  # - name: require-cosign-signature
+  #   description: Require images to be signed with cosign
+  #   entrypoints: ["oci_artifact_request"]
+  #   rules:
+  #     - action: deny
+  #       when: |
+  #         !has(image.signatures) ||
+  #         !image.signatures.exists(s, s.verified && s.type == "cosign")
+  #       reason: "Image must be signed with cosign"
+  #       remediation: "Sign the image using: cosign sign image:tag"
+
+  # - name: require-slsa-provenance
+  #   description: Require SLSA provenance attestation
+  #   entrypoints: ["oci_artifact_request"]
+  #   rules:
+  #     - action: deny
+  #       when: |
+  #         !has(image.attestations) ||
+  #         !image.attestations.exists(a,
+  #           a.predicateType.startsWith("https://slsa.dev/provenance/") &&
+  #           a.verified)
+  #       reason: "Image requires SLSA provenance attestation"
+  #       remediation: "Build image with SLSA-compliant builder (e.g., slsa-github-generator)"
+
+  # - name: require-trusted-builder
+  #   description: Only accept images from trusted CI/CD builders
+  #   entrypoints: ["oci_artifact_request"]
+  #   vars:
+  #     trustedBuilders:
+  #       - "https://github.com/slsa-framework/slsa-github-generator"
+  #       - "https://cloudbuild.googleapis.com/GoogleHostedWorker@v0.3"
+  #       - "https://tekton.dev/chains"
+  #   rules:
+  #     - action: deny
+  #       when: |
+  #         has(image.attestations) &&
+  #         image.attestations.exists(a, a.predicateType.startsWith("https://slsa.dev/provenance/")) &&
+  #         !image.attestations.exists(a,
+  #           a.predicateType.startsWith("https://slsa.dev/provenance/") &&
+  #           trustedBuilders.exists(b, a.builder.id == b))
+  #       reason: "Image not built by trusted builder"
+  #       remediation: "Use an approved CI/CD builder for image builds"

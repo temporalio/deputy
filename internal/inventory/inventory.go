@@ -25,6 +25,7 @@ import (
 	"github.com/picatz/deputy/internal/ecosystem"
 	dockerfilex "github.com/picatz/deputy/internal/inventory/plugins/docker/dockerfilex"
 	ghactions "github.com/picatz/deputy/internal/inventory/plugins/github/actionsx"
+	"github.com/picatz/deputy/internal/inventory/registry"
 	rubygemspec "github.com/picatz/deputy/internal/inventory/plugins/ruby/gemspecx"
 	"github.com/picatz/deputy/internal/repository/workspace"
 )
@@ -32,6 +33,11 @@ import (
 // ScanOptions configures how scalibr scans a workspace.
 type ScanOptions struct {
 	Ecosystems []string
+	// DetectBaseImage enables base image detection for container image scans.
+	// When true, the baseimage enricher queries deps.dev to determine if layers
+	// belong to known base images, populating LayerDetails.InBaseImage.
+	// This requires network access and adds latency to the scan.
+	DetectBaseImage bool
 }
 
 // ScanPackagesWorking scans the provided workspace and returns the discovered
@@ -181,6 +187,8 @@ func resolvePlugins(opts ScanOptions, cap *plugin.Capabilities) ([]plugin.Plugin
 		if includeDockerfile {
 			plugins = append(plugins, dockerfilex.New())
 		}
+		// Add registered external plugins
+		plugins = appendRegisteredPlugins(plugins)
 		return plugins, nil
 	}
 	plugins, err := pl.FromNames(names)
@@ -193,7 +201,17 @@ func resolvePlugins(opts ScanOptions, cap *plugin.Capabilities) ([]plugin.Plugin
 	if includeDockerfile {
 		plugins = append(plugins, dockerfilex.New())
 	}
+	// Add registered external plugins
+	plugins = appendRegisteredPlugins(plugins)
 	return plugin.FilterByCapabilities(plugins, cap), nil
+}
+
+// appendRegisteredPlugins adds SCALIBR-adapted plugins from the registry.
+func appendRegisteredPlugins(plugins []plugin.Plugin) []plugin.Plugin {
+	for _, ext := range registry.ToScalibrPlugins() {
+		plugins = append(plugins, ext)
+	}
+	return plugins
 }
 
 // filterInventoryPlugins filters out plugins that are not relevant for inventory scanning or are explicitly excluded.

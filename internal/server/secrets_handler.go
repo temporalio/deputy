@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strings"
 	"time"
 
 	"connectrpc.com/connect"
@@ -15,11 +16,15 @@ import (
 	secretsv1 "github.com/picatz/deputy/gen/deputy/secrets/v1"
 	"github.com/picatz/deputy/gen/deputy/secrets/v1/secretsv1connect"
 	targetv1 "github.com/picatz/deputy/gen/deputy/target/v1"
+	"github.com/picatz/deputy/internal/gitutil"
 	"github.com/picatz/deputy/internal/logs"
 	"github.com/picatz/deputy/internal/otel"
 	internalproto "github.com/picatz/deputy/internal/proto"
 	"github.com/picatz/deputy/internal/secrets"
 	"github.com/picatz/deputy/internal/targets"
+
+	// Register target providers for remote Git, containers, etc.
+	_ "github.com/picatz/deputy/internal/targets/providers"
 )
 
 // SecretsHandler implements the SecretsService ConnectRPC service.
@@ -529,6 +534,11 @@ func (h *SecretsHandler) scanTarget(ctx context.Context, target string, opts sca
 	case targets.KindGit:
 		return h.scanRepository(ctx, target, opts)
 	default:
+		// Check if target looks like a remote Git URL
+		if gitutil.ToHTTPSGitURL(target) != "" || strings.HasPrefix(target, "git@") {
+			return h.scanRepository(ctx, target, opts)
+		}
+
 		// Try as file or directory
 		info, err := os.Stat(target)
 		if err != nil {
@@ -637,10 +647,29 @@ func (h *SecretsHandler) scanContainerImage(ctx context.Context, ref string, opt
 }
 
 // scanRepository scans a git repository for secrets.
+// For remote Git URLs (e.g., github.com/owner/repo), this clones the repo first.
+// For local repos, it scans directly.
 func (h *SecretsHandler) scanRepository(ctx context.Context, target string, opts scanOptions) ([]secrets.Finding, []string, error) {
-	// For now, just scan the directory
-	// Future: clone if remote, scan history if requested
-	return h.scanDirectory(ctx, target, opts)
+	// Check if target is a local path
+	if info, err := os.Stat(target); err == nil && info.IsDir() {
+		// Local directory - scan directly
+		return h.scanDirectory(ctx, target, opts)
+	}
+
+	// Remote target - use targets provider system to materialize (clone)
+	logs.Info(ctx, "materializing remote git target", "target", target)
+
+	mat, err := targets.Open(ctx, target, nil)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to materialize target %q: %w", target, err)
+	}
+	// Ensure cleanup of temporary clone
+	if mat.Cleanup != nil {
+		defer mat.Cleanup()
+	}
+
+	// Now scan the materialized path
+	return h.scanDirectory(ctx, mat.Path, opts)
 }
 
 // scanOptions holds processed scan options.

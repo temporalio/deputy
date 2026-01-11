@@ -125,6 +125,58 @@ require (
 	}
 }
 
+// TestGetDirectDependenciesFromGoMod_Submodules verifies that Go submodules
+// are correctly classified as direct or indirect based on their explicit
+// declaration in go.mod, not by inheriting from parent modules.
+//
+// This test covers the bug where github.com/bytedance/sonic/loader was
+// incorrectly marked as direct because its parent github.com/bytedance/sonic
+// was direct, even though sonic/loader itself was marked // indirect.
+func TestGetDirectDependenciesFromGoMod_Submodules(t *testing.T) {
+	goMod := `module example.com/app
+
+go 1.21.0
+
+require (
+    github.com/bytedance/sonic v1.14.2
+    github.com/gin-contrib/sse v1.1.0
+)
+
+require (
+    github.com/bytedance/gopkg v0.1.3 // indirect
+    github.com/bytedance/sonic/loader v0.4.0 // indirect
+)`
+	deps := GetDirectDependenciesFromGoMod([]byte(goMod))
+
+	// Direct dependencies should be marked true
+	if !deps["github.com/bytedance/sonic"] {
+		t.Errorf("github.com/bytedance/sonic should be direct, got false")
+	}
+	if !deps["github.com/gin-contrib/sse"] {
+		t.Errorf("github.com/gin-contrib/sse should be direct, got false")
+	}
+
+	// Indirect submodule should NOT inherit direct status from parent
+	// sonic/loader is a SEPARATE module from sonic, explicitly marked indirect
+	if val, exists := deps["github.com/bytedance/sonic/loader"]; !exists {
+		t.Errorf("github.com/bytedance/sonic/loader should exist in deps map")
+	} else if val {
+		t.Errorf("github.com/bytedance/sonic/loader should be indirect (false), got true")
+	}
+
+	// Other indirect dependencies should also be false
+	if val, exists := deps["github.com/bytedance/gopkg"]; !exists {
+		t.Errorf("github.com/bytedance/gopkg should exist in deps map")
+	} else if val {
+		t.Errorf("github.com/bytedance/gopkg should be indirect (false), got true")
+	}
+
+	// Module root for sonic should be true (for matching subpackages, not submodules)
+	if !deps["github.com/bytedance/sonic"] {
+		t.Errorf("github.com/bytedance/sonic root should be direct")
+	}
+}
+
 func Test_ComparePackages_basic(t *testing.T) {
 	ws, err := workspace.NewTempDir("cmp-compare")
 	if err != nil {

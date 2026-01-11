@@ -1,11 +1,14 @@
 package graph
 
 import (
-	"encoding/json"
 	"fmt"
 	"io"
 	"slices"
 	"strings"
+
+	"google.golang.org/protobuf/encoding/protojson"
+
+	graphv1 "github.com/picatz/deputy/gen/deputy/graph/v1"
 )
 
 // Format specifies the output format for graph rendering.
@@ -427,41 +430,6 @@ func (g *Graph) renderTextNode(w io.Writer, n *Node, prefix string, isLast bool,
 	delete(visited, n.GetPurl())
 }
 
-// jsonNode is the JSON representation of a graph node.
-type jsonNode struct {
-	PURL      string        `json:"purl"`
-	Name      string        `json:"name"`
-	Version   string        `json:"version"`
-	Ecosystem string        `json:"ecosystem"`
-	Direct    bool          `json:"direct"`
-	Depth     int           `json:"depth"`
-	VulnerabilityCount jsonVulnerabilityCount `json:"vulnerability_count"`
-	Locations []string      `json:"locations,omitempty"`
-}
-
-// jsonVulnerabilityCount is the JSON representation of vulnerability counts.
-type jsonVulnerabilityCount struct {
-	Critical int `json:"critical"`
-	High     int `json:"high"`
-	Medium   int `json:"medium"`
-	Low      int `json:"low"`
-	Total    int `json:"total"`
-}
-
-// jsonEdge is the JSON representation of a graph edge.
-type jsonEdge struct {
-	From       string `json:"from"`
-	To         string `json:"to"`
-	Constraint string `json:"constraint,omitempty"`
-	Scope      string `json:"scope,omitempty"`
-}
-
-// jsonGraph is the JSON representation of the entire graph.
-type jsonGraph struct {
-	Nodes []jsonNode `json:"nodes"`
-	Edges []jsonEdge `json:"edges"`
-}
-
 func (g *Graph) renderJSON(w io.Writer, cfg *renderConfig) error {
 	nodes := g.filteredNodes(cfg)
 	nodeSet := make(map[string]bool)
@@ -469,48 +437,38 @@ func (g *Graph) renderJSON(w io.Writer, cfg *renderConfig) error {
 		nodeSet[n.GetPurl()] = true
 	}
 
-	// Build JSON nodes
-	jsonNodes := make([]jsonNode, 0, len(nodes))
-	for _, n := range nodes {
-		jsonNodes = append(jsonNodes, jsonNode{
-			PURL:      n.GetPurl(),
-			Name:      n.GetName(),
-			Version:   n.GetVersion(),
-			Ecosystem: n.GetEcosystem(),
-			Direct:    n.GetDirect(),
-			Depth:     int(n.GetDepth()),
-			VulnerabilityCount: jsonVulnerabilityCount{
-				Critical: int(n.GetVulnerabilityCount().GetCritical()),
-				High:     int(n.GetVulnerabilityCount().GetHigh()),
-				Medium:   int(n.GetVulnerabilityCount().GetMedium()),
-				Low:      int(n.GetVulnerabilityCount().GetLow()),
-				Total:    int(n.GetVulnerabilityCount().GetTotal()),
-			},
-			Locations: n.GetLocations(),
-		})
-	}
-
-	// Build JSON edges (only for nodes in the filtered set)
-	var jsonEdges []jsonEdge
+	// Filter edges to only include nodes in the filtered set
+	var filteredEdges []*graphv1.Edge
 	for _, e := range g.edges {
 		if nodeSet[e.GetFrom()] && nodeSet[e.GetTo()] {
-			jsonEdges = append(jsonEdges, jsonEdge{
-				From:       e.GetFrom(),
-				To:         e.GetTo(),
-				Constraint: e.GetConstraint(),
-				Scope:      e.GetScope().String(),
-			})
+			filteredEdges = append(filteredEdges, e)
 		}
 	}
 
-	output := jsonGraph{
-		Nodes: jsonNodes,
-		Edges: jsonEdges,
+	// Build a QueryGraphResponse-like structure using proto types directly.
+	// This ensures consistent JSON field names (snake_case) with the proto schema.
+	resp := &graphv1.QueryGraphResponse{
+		Nodes: nodes,
+		Edges: filteredEdges,
+		Stats: g.Stats(),
 	}
 
-	enc := json.NewEncoder(w)
-	enc.SetIndent("", "  ")
-	return enc.Encode(output)
+	opts := protojson.MarshalOptions{
+		Multiline:       true,
+		Indent:          "  ",
+		EmitUnpopulated: true, // Include zero values like depth=0 for direct deps
+		UseProtoNames:   true, // snake_case field names
+	}
+	data, err := opts.Marshal(resp)
+	if err != nil {
+		return err
+	}
+	_, err = w.Write(data)
+	if err != nil {
+		return err
+	}
+	_, err = w.Write([]byte("\n"))
+	return err
 }
 
 func (g *Graph) filteredNodes(cfg *renderConfig) []*Node {

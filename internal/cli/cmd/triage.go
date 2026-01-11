@@ -2,23 +2,25 @@ package cmd
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"io"
 	"os"
 	"strings"
 
 	"connectrpc.com/connect"
+	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	scanv1 "github.com/picatz/deputy/gen/deputy/scan/v1"
+	targetv1 "github.com/picatz/deputy/gen/deputy/target/v1"
+	triagev1 "github.com/picatz/deputy/gen/deputy/triage/v1"
 	"github.com/picatz/deputy/internal/cli/flags"
-	"github.com/picatz/deputy/internal/services"
 	"github.com/picatz/deputy/internal/policy"
 	internalproto "github.com/picatz/deputy/internal/proto"
 	"github.com/picatz/deputy/internal/report"
 	"github.com/picatz/deputy/internal/report/render"
 	"github.com/picatz/deputy/internal/scanning"
+	"github.com/picatz/deputy/internal/services"
 	ui "github.com/picatz/deputy/internal/ui"
 	"github.com/picatz/deputy/internal/vulnerability"
 	"github.com/spf13/cobra"
@@ -112,8 +114,8 @@ func runTriage(c *services.Clients, cmd *cobra.Command, args []string) error {
 	}
 
 	var (
-		triageReport report.TriageReport
-		repoPath     string
+		triageResp *triagev1.TriageResponse
+		repoPath   string
 	)
 
 	if strings.TrimSpace(reportPath) != "" {
@@ -124,21 +126,31 @@ func runTriage(c *services.Clients, cmd *cobra.Command, args []string) error {
 		if len(strings.TrimSpace(string(data))) == 0 {
 			return fmt.Errorf("report %q is empty", reportPath)
 		}
-		var scanReport ScanResult
-		if err := json.Unmarshal(data, &scanReport); err != nil {
+		// Parse proto JSON format from scan command output
+		var scanResp scanv1.ScanResponse
+		if err := protojson.Unmarshal(data, &scanResp); err != nil {
 			return fmt.Errorf("failed to parse report: %w", err)
 		}
-		findings, advisories := report.SplitVulnerabilities(scanReport.Vulnerabilities)
-		scanResult := scanning.Result{
-			Findings:   findings,
-			Advisories: advisories,
-			Stats:      scanReport.Stats,
+		// Convert proto to internal types for processing
+		scanResult := internalproto.ScanningResultFromProto(&scanResp)
+		if scanResult == nil {
+			return fmt.Errorf("failed to convert scan response")
 		}
 		if ignoreUnfixed {
-			scanResult = scanning.FilterUnfixed(scanResult)
+			*scanResult = scanning.FilterUnfixed(*scanResult)
 		}
 		cons := vulnerability.Consolidate(scanResult.Findings, scanResult.Advisories)
-		triageReport = report.BuildTriageReport(report.Target{Repo: scanReport.Repo, Ref: scanReport.Ref, Commit: scanReport.Commit}, scanResult.Stats, cons)
+		displayPath := ""
+		commit := ""
+		if scanResp.Target != nil {
+			displayPath = scanResp.Target.DisplayPath
+			commit = scanResp.Target.CommitHash
+		}
+		triageResp = internalproto.BuildTriageResponse(displayPath, &scanResult.Stats, cons, 10)
+		triageResp.Target = &targetv1.Target{
+			DisplayPath: displayPath,
+			CommitHash:  commit,
+		}
 	} else {
 		ref, _ := cmd.Flags().GetString("ref")
 		ecos, _ := cmd.Flags().GetStringSlice("ecosystems")
@@ -180,7 +192,7 @@ func runTriage(c *services.Clients, cmd *cobra.Command, args []string) error {
 			return fmt.Errorf("scan failed: %w", err)
 		}
 
-		// Convert proto response to internal types
+		// Convert proto response to internal types for consolidation
 		scanResult := internalproto.ScanningResultFromProto(resp.Msg)
 		if scanResult == nil {
 			return fmt.Errorf("scan returned empty result")
@@ -196,19 +208,23 @@ func runTriage(c *services.Clients, cmd *cobra.Command, args []string) error {
 			resultOut = scanning.FilterUnfixed(resultOut)
 		}
 		cons := vulnerability.Consolidate(resultOut.Findings, resultOut.Advisories)
-		target2 := report.Target{Repo: scanResult.Target.DisplayPath, Ref: ref, Commit: scanResult.Target.CommitHash}
-		triageReport = report.BuildTriageReport(target2, resultOut.Stats, cons)
+		triageResp = internalproto.BuildTriageResponse(scanResult.Target.DisplayPath, &resultOut.Stats, cons, 10)
+		triageResp.Target = &targetv1.Target{
+			DisplayPath: scanResult.Target.DisplayPath,
+			LocalPath:   scanResult.Target.LocalPath,
+			CommitHash:  scanResult.Target.CommitHash,
+		}
 	}
 
-	if err := runTriagePolicies(cmd.Context(), policyPaths, triageReport, cmd.ErrOrStderr()); err != nil {
+	if err := runTriagePoliciesProto(ctx, policyPaths, triageResp, cmd.ErrOrStderr()); err != nil {
 		return err
 	}
 
 	switch strings.ToLower(strings.TrimSpace(format)) {
 	case "", FormatText:
-		render.TriageSummary(cmd.OutOrStdout(), triageReport, showDBInfo)
+		renderTriageText(cmd.OutOrStdout(), triageResp, showDBInfo)
 	case FormatJSON:
-		if err := outputTriageJSON(cmd.OutOrStdout(), triageReport); err != nil {
+		if err := outputTriageProtoJSON(cmd.OutOrStdout(), triageResp); err != nil {
 			return err
 		}
 	default:
@@ -224,13 +240,13 @@ func runTriage(c *services.Clients, cmd *cobra.Command, args []string) error {
 				return err
 			}
 		}
-		prompt, err := buildTriagePrompt(triageReport)
+		prompt, err := buildTriagePromptProto(triageResp)
 		if err != nil {
 			return err
 		}
 		fmt.Fprintln(cmd.OutOrStdout())
 		fmt.Fprintln(cmd.OutOrStdout(), ui.StyleHeader.Render("Agent Analysis"))
-		if err := runAgentAnalysis(cmd.Context(), agentName, prompt, targetRepo, agentOpts, cmd.OutOrStdout()); err != nil {
+		if err := runAgentAnalysis(ctx, agentName, prompt, targetRepo, agentOpts, cmd.OutOrStdout()); err != nil {
 			return err
 		}
 	}
@@ -238,42 +254,115 @@ func runTriage(c *services.Clients, cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-// runTriagePolicies evaluates policies against the triage report.
-// It checks both the overall report and individual top packages.
-func runTriagePolicies(ctx context.Context, policyPaths []string, triageReport report.TriageReport, errW io.Writer) error {
+// runTriagePoliciesProto evaluates policies against the proto triage response.
+func runTriagePoliciesProto(ctx context.Context, policyPaths []string, triageResp *triagev1.TriageResponse, errW io.Writer) error {
 	if len(policyPaths) == 0 {
 		return nil
 	}
-	reportMap, err := structToMap(triageReport)
-	if err != nil {
+	// Pass proto message directly to CEL
+	reportPayload := map[string]any{
+		"report":       triageResp,
+		"target":       triageResp.Target,
+		"stats":        triageResp.Stats,
+		"top_packages": triageResp.TopPackages,
+	}
+	if _, err := evaluatePoliciesForCommand(ctx, policyPaths, reportPayload, "triage", policy.EntrypointTriageReport, errW); err != nil {
 		return err
 	}
-	if _, err := evaluatePoliciesForCommand(ctx, policyPaths, reportMap, "triage", policy.EntrypointTriageReport, errW); err != nil {
-		return err
-	}
-	targetMap, err := structToMap(triageReport.Target)
-	if err != nil {
-		return err
-	}
-	for _, pkg := range triageReport.TopPackages {
-		pkgMap, err := structToMap(pkg)
-		if err != nil {
-			return err
+	// Evaluate per-cluster policies
+	for _, pkg := range triageResp.TopPackages {
+		clusterPayload := map[string]any{
+			"target":  triageResp.Target,
+			"cluster": pkg,
 		}
-		payload := map[string]any{
-			"target":  targetMap,
-			"cluster": pkgMap,
-		}
-		if _, err := evaluatePoliciesForCommand(ctx, policyPaths, payload, "triage", policy.EntrypointTriageCluster, errW); err != nil {
+		if _, err := evaluatePoliciesForCommand(ctx, policyPaths, clusterPayload, "triage", policy.EntrypointTriageCluster, errW); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-// outputTriageJSON writes the triage report as JSON to the provided writer.
-func outputTriageJSON(w io.Writer, report report.TriageReport) error {
-	enc := json.NewEncoder(w)
-	enc.SetIndent("", "  ")
-	return enc.Encode(report)
+// outputTriageProtoJSON writes the triage response as JSON using protojson.
+func outputTriageProtoJSON(w io.Writer, resp *triagev1.TriageResponse) error {
+	opts := protojson.MarshalOptions{
+		Multiline:       true,
+		Indent:          "  ",
+		EmitUnpopulated: false,
+		UseProtoNames:   true,
+	}
+	data, err := opts.Marshal(resp)
+	if err != nil {
+		return fmt.Errorf("marshal proto to JSON: %w", err)
+	}
+	if _, err := w.Write(data); err != nil {
+		return err
+	}
+	_, err = w.Write([]byte("\n"))
+	return err
+}
+
+// renderTriageText outputs the triage response as human-readable text.
+func renderTriageText(w io.Writer, resp *triagev1.TriageResponse, showDBInfo bool) {
+	// Convert proto to the render format
+	triageReport := report.TriageReport{
+		Stats:             *resp.Stats,
+		PackagesWithVulns: int(resp.PackagesWithVulns),
+	}
+	if resp.Target != nil {
+		triageReport.Target = report.Target{
+			Repo:   resp.Target.DisplayPath,
+			Commit: resp.Target.CommitHash,
+		}
+	}
+	for _, pkg := range resp.TopPackages {
+		summary := report.TriagePackageSummary{
+			Package:            pkg.Package,
+			Version:            pkg.Version,
+			Severity:           pkg.Severity,
+			SeverityType:       pkg.SeverityType,
+			FixVersion:         pkg.FixVersion,
+			IsDirect:           pkg.IsDirect,
+			Summary:            pkg.Summary,
+			SampleIDs:          pkg.SampleIds,
+			DatabaseSpecific:   pkg.DatabaseSpecific,
+			VulnerabilityCount: int(pkg.VulnerabilityCount),
+		}
+		if len(pkg.AffectedImports) > 0 {
+			for _, imp := range pkg.AffectedImports {
+				summary.AffectedImports = append(summary.AffectedImports, *imp)
+			}
+		}
+		if pkg.SeverityCounts != nil {
+			summary.SeverityCounts = make(map[string]int)
+			for k, v := range pkg.SeverityCounts {
+				summary.SeverityCounts[k] = int(v)
+			}
+		}
+		triageReport.TopPackages = append(triageReport.TopPackages, summary)
+	}
+	render.TriageSummary(w, triageReport, showDBInfo)
+}
+
+// buildTriagePromptProto creates a prompt for the AI agent from the proto triage response.
+func buildTriagePromptProto(resp *triagev1.TriageResponse) (string, error) {
+	// Use protojson for consistent formatting
+	opts := protojson.MarshalOptions{
+		Multiline:       true,
+		Indent:          "  ",
+		EmitUnpopulated: false,
+		UseProtoNames:   true,
+	}
+	data, err := opts.Marshal(resp)
+	if err != nil {
+		return "", err
+	}
+	return fmt.Sprintf(`Analyze this vulnerability triage report and provide prioritized recommendations:
+
+%s
+
+Focus on:
+1. Which vulnerabilities should be addressed first and why
+2. Potential exploit paths or attack vectors
+3. Quick wins (easy fixes with high impact)
+4. Any patterns or systemic issues`, string(data)), nil
 }
