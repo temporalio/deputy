@@ -20,24 +20,31 @@
 #   repo                   - Repository path or URL
 #   base_ref               - Base Git reference
 #   target_ref             - Target Git reference
-#   change.name            - Package name (canonical path)
-#   change.old_name        - Previous package name (if renamed)
-#   change.target_version  - Version in target ref
-#   change.base_version    - Version in base ref
+#   change                 - Full change object (PackageChange proto)
 #   change.type            - Change type: "added", "removed", "updated", "upgraded", "downgraded"
-#   change.ecosystem       - Package ecosystem (go, npm, etc.)
-#   change.direct          - Whether this is a direct dependency
+#   change.base_version    - Version in base ref
+#   change.target_version  - Version in target ref
+#   pkg                    - Package being changed (alias for change.package)
+#   pkg.name               - Package name (canonical path)
+#   pkg.version            - Package version (same as target_version for changes)
+#   pkg.ecosystem          - Package ecosystem (go, npm, etc.)
+#   pkg.licenses           - List of SPDX license identifiers
+#   pkg.direct             - Whether this is a direct dependency
 #
 # Available variables for diff_vulnerability:
 #   repo                   - Repository path or URL
 #   base_ref               - Base Git reference
 #   target_ref             - Target Git reference
+#   vulnerability          - Vulnerability finding (proto)
 #   vulnerability.advisory_id - CVE/GHSA identifier
-#   vulnerability.package  - Affected package (proto)
 #   vulnerability.advisory.fixed_versions - Versions containing the fix
+#   vulnerability.advisory.severity.level - Severity level (use severity.* constants)
+#   pkg                    - Affected package (alias for vulnerability.package)
+#   pkg.name               - Package name
+#   pkg.version            - Package version
+#   pkg.direct             - Whether this is a direct dependency
 #
 # Severity constants: severity.critical, severity.high, severity.medium, severity.low
-# Access via: vulnerability.advisory.severity.level
 
 policies:
   # Report-level policies
@@ -109,7 +116,7 @@ policies:
     entrypoints: ["diff_dependency_change"]
     rules:
       - action: deny
-        when: change.type == "added" && change.direct
+        when: change.type == "added" && pkg.direct
         reason: "New direct dependency requires approval"
         remediation: "Add dependency to allowlist or get approval from security team"
 

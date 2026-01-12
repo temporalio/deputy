@@ -1106,6 +1106,7 @@ func runDiffPolicies(ctx context.Context, policyPaths []string, diffReport DiffP
 			"baseRef":   diffReport.BaseRef,
 			"targetRef": diffReport.TargetRef,
 			"change":    protoChange,
+			"pkg":       protoChange.Package, // Alias for consistency with scan entrypoints
 		}
 		if _, err := evaluatePoliciesForCommand(ctx, policyPaths, changePayload, "diff", policy.EntrypointDiffDependencyChange, errW); err != nil {
 			return err
@@ -1119,6 +1120,7 @@ func runDiffPolicies(ctx context.Context, policyPaths []string, diffReport DiffP
 			"baseRef":       diffReport.BaseRef,
 			"targetRef":     diffReport.TargetRef,
 			"vulnerability": finding,
+			"pkg":           finding.Package, // Alias for consistency with scan entrypoints
 		}
 		if _, err := evaluatePoliciesForCommand(ctx, policyPaths, vulnPayload, "diff", policy.EntrypointDiffVulnerability, errW); err != nil {
 			return err

@@ -127,7 +127,7 @@ var BindingProfiles = map[Entrypoint]BindingProfile{
 	},
 	EntrypointDiffDependencyChange: {
 		Entrypoint:  EntrypointDiffDependencyChange,
-		Required:    append([]string{"change", "dependency"}, envVars...),
+		Required:    append([]string{"change", "dependency", "pkg"}, envVars...),
 		Optional:    targetVars,
 		Description: "Triggers for each dependency change in a diff",
 	},

@@ -521,11 +521,12 @@ func TestNewDependencyReview(t *testing.T) {
 	}
 
 	t.Run("deny unapproved addition", func(t *testing.T) {
+		pkg := &dependencyv1.Package{Name: "github.com/unapproved/module", Ecosystem: "go"}
 		payload := map[string]any{
 			"change": map[string]any{
 				"type": "added",
-				"name": "github.com/unapproved/module",
 			},
+			"pkg": pkg,
 			"env": &policyv1.Environment{Command: "diff", Entrypoint: "diff_dependency_change"},
 		}
 		actions, err := EvaluateMap(context.Background(), sources, payload)
@@ -544,11 +545,12 @@ func TestNewDependencyReview(t *testing.T) {
 	})
 
 	t.Run("allow approved addition", func(t *testing.T) {
+		pkg := &dependencyv1.Package{Name: "github.com/acme/lib", Ecosystem: "go"}
 		payload := map[string]any{
 			"change": map[string]any{
 				"type": "added",
-				"name": "github.com/acme/lib",
 			},
+			"pkg": pkg,
 			"env": &policyv1.Environment{Command: "diff", Entrypoint: "diff_dependency_change"},
 		}
 		actions, err := EvaluateMap(context.Background(), sources, payload)
@@ -918,12 +920,13 @@ func TestCriticalRuntimePinning(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadSources: %v", err)
 	}
+	pkg := &dependencyv1.Package{Name: "golang.org/x/crypto", Version: "v0.24.0", Ecosystem: "go"}
 	payload := map[string]any{
 		"change": map[string]any{
-			"name":          "golang.org/x/crypto",
-			"baseVersion":   "v0.24.0",
-			"targetVersion": "v0.24.0",
+			"base_version":   "v0.24.0",
+			"target_version": "v0.24.0",
 		},
+		"pkg": pkg,
 		"env": &policyv1.Environment{Command: "diff", Entrypoint: "diff_dependency_change"},
 	}
 	if actions, err := EvaluateMap(context.Background(), sources, payload); err != nil {
@@ -1103,11 +1106,12 @@ func TestGoDowngradeGuard(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadSources: %v", err)
 	}
+	pkg := &dependencyv1.Package{Name: "golang.org/x/net", Ecosystem: "go"}
 	denyPayload := map[string]any{
 		"change": map[string]any{
-			"type":      "downgraded",
-			"ecosystem": "go",
+			"type": "downgraded",
 		},
+		"pkg": pkg,
 		"env": &policyv1.Environment{Command: "diff", Entrypoint: "diff_dependency_change"},
 	}
 	if actions, err := EvaluateMap(context.Background(), sources, denyPayload); err != nil || len(actions) == 0 || actions[0].Type != "deny" {
@@ -1115,9 +1119,9 @@ func TestGoDowngradeGuard(t *testing.T) {
 	}
 	allowPayload := map[string]any{
 		"change": map[string]any{
-			"type":      "upgraded",
-			"ecosystem": "go",
+			"type": "upgraded",
 		},
+		"pkg": pkg,
 		"env": &policyv1.Environment{Command: "diff", Entrypoint: "diff_dependency_change"},
 	}
 	if actions, err := EvaluateMap(context.Background(), sources, allowPayload); err != nil {
@@ -1283,11 +1287,12 @@ func TestRuntimeCriticalBaseline(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadSources: %v", err)
 	}
+	pkg := &dependencyv1.Package{Name: "github.com/google/uuid", Ecosystem: "go"}
 	payload := map[string]any{
 		"change": map[string]any{
 			"type": "removed",
-			"name": "github.com/google/uuid",
 		},
+		"pkg": pkg,
 		"env": &policyv1.Environment{Command: "diff", Entrypoint: "diff_dependency_change"},
 	}
 	actions, err := EvaluateMap(context.Background(), sources, payload)

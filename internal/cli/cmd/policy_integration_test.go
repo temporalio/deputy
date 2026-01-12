@@ -264,10 +264,10 @@ func TestPolicyIntegration_CriticalRuntimePinning(t *testing.T) {
 	pol := filepath.Clean(filepath.Join("..", "..", "..", "policy", "examples", "critical-runtime-pinning.yaml"))
 	payload := map[string]any{
 		"change": map[string]any{
-			"name":          "golang.org/x/crypto",
-			"baseVersion":   "v0.24.0",
-			"targetVersion": "v0.24.0",
+			"base_version":   "v0.24.0",
+			"target_version": "v0.24.0",
 		},
+		"pkg": &dependencyv1.Package{Name: "golang.org/x/crypto", Version: "v0.24.0", Ecosystem: "go"},
 	}
 	actions, err := evaluatePoliciesForCommand(context.Background(), []string{pol}, payload, "diff", policy.EntrypointDiffDependencyChange, &bytes.Buffer{})
 	if err != nil {

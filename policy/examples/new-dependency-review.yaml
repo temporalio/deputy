@@ -7,8 +7,8 @@ policies:
         - github.com/corp
         - npm:@acme
         - pypi:acme_
-      isAddition: 'change.?type.orValue("").lowerAscii() == "added"'
-      name: 'change.?name.orValue("")'
+      isAddition: 'change.type == "added"'
+      name: 'pkg.name'
       matchesPrefix: 'approvedPrefixes.exists(p, name.lowerAscii().startsWith(p.lowerAscii()))'
     rules:
       - action: deny
