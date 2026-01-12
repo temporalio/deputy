@@ -29,30 +29,78 @@ import (
 )
 
 // isContainerDiffInContext returns true if both arguments appear to be container image references,
-// taking into account the Git repository context. If we're in a Git repo and the refs look like
-// valid Git refs (tags, branches), we prefer Git diff over container diff.
+// taking into account the Git repository context. When we're in a Git repo, we prefer Git diff
+// unless we have explicit container schemes (docker://, oci://, etc.) or refs that clearly look
+// like container images (contain : with a tag, or registry domain with /).
 func isContainerDiffInContext(base, target, repoPath string) bool {
 	// If either ref has an explicit image scheme, it's definitely a container diff
 	if isImageTargetScheme(base) || isImageTargetScheme(target) {
 		return true
 	}
 
-	// Check if we're in a Git repository and the refs might be Git refs
+	// Check if we're in a Git repository
 	if repoPath != "" {
-		if repo, err := git.PlainOpen(repoPath); err == nil {
-			// Check if both refs resolve as Git refs
-			baseIsGitRef := isValidGitRef(repo, base)
-			targetIsGitRef := isValidGitRef(repo, target)
-
-			// If both are valid Git refs, prefer Git diff
-			if baseIsGitRef && targetIsGitRef {
+		if _, err := git.PlainOpen(repoPath); err == nil {
+			// We're in a git repository context.
+			// Prefer git diff unless both refs clearly look like container images.
+			// Simple names like "main", "develop", "proto-first" should be treated as git refs
+			// even if they parse as valid Docker Hub image names.
+			//
+			// Container images that should be detected:
+			// - nginx:1.25, alpine:3.19 (have explicit tags)
+			// - ghcr.io/owner/app, gcr.io/project/image (have registry domains)
+			// - localhost:5000/myimage (have localhost with port)
+			//
+			// Git refs that should NOT be treated as container images:
+			// - main, develop, feature-branch (simple names without tags/domains)
+			// - v1.0.0, release-2024 (version tags without :)
+			// - HEAD, HEAD~1, origin/main (git-specific syntax)
+			if !looksLikeExplicitContainerImage(base) || !looksLikeExplicitContainerImage(target) {
 				return false
 			}
 		}
 	}
 
-	// Fall back to the standard container detection
+	// Not in a git repo context, fall back to standard container detection
 	return isContainerDiff(base, target)
+}
+
+// looksLikeExplicitContainerImage returns true if the ref looks unambiguously like a container
+// image reference (has a tag with :, has a registry domain, etc.) rather than something that
+// might be a git ref.
+func looksLikeExplicitContainerImage(ref string) bool {
+	ref = strings.TrimSpace(ref)
+	if ref == "" {
+		return false
+	}
+
+	// Explicit schemes are definitely container images (handled by isImageTargetScheme earlier)
+	if strings.Contains(ref, "://") {
+		return true
+	}
+
+	// Has a tag separator - likely a container image (nginx:1.25, alpine:latest)
+	// But exclude git-like refs (HEAD:file, etc.)
+	if colonIdx := strings.LastIndex(ref, ":"); colonIdx != -1 {
+		afterColon := ref[colonIdx+1:]
+		// If it looks like a version/tag, it's a container image
+		// If it's empty or looks like a path, it's not
+		if afterColon != "" && !strings.Contains(afterColon, "/") {
+			return true
+		}
+	}
+
+	// Has a registry domain (contains . before first /)
+	if slashIdx := strings.Index(ref, "/"); slashIdx != -1 {
+		host := ref[:slashIdx]
+		// Registry domains have dots (ghcr.io, gcr.io, docker.io) or ports (localhost:5000)
+		if strings.Contains(host, ".") || strings.Contains(host, ":") {
+			return true
+		}
+	}
+
+	// Simple names without tags or domains are ambiguous - prefer git ref interpretation
+	return false
 }
 
 // isValidGitRef checks if a reference is a valid Git ref (tag, branch, commit, or special ref).
