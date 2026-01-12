@@ -66,6 +66,12 @@ type Runtime interface {
 	Cleanup(ctx context.Context, executionID string) error
 }
 
+// RuntimeInfoLister allows runtimes to expose multiple RuntimeInfo entries.
+// This is useful for plugin-based runtimes that may represent multiple backends.
+type RuntimeInfoLister interface {
+	RuntimeInfos(ctx context.Context, includeUnavailable bool) ([]*sandboxv1.RuntimeInfo, error)
+}
+
 // RuntimeRegistry holds available sandbox runtimes.
 // Used by the Manager for runtime discovery and selection.
 type RuntimeRegistry interface {

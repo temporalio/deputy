@@ -8,6 +8,9 @@ import (
 	"fmt"
 	"iter"
 	"log/slog"
+	"os"
+	"runtime"
+	"strings"
 	"sync"
 	"time"
 
@@ -52,9 +55,14 @@ type Config struct {
 
 // DefaultConfig returns a sensible default configuration.
 func DefaultConfig() *Config {
+	fallbacks := []sandboxv1.Runtime{sandboxv1.Runtime_RUNTIME_GVISOR, sandboxv1.Runtime_RUNTIME_NONE}
+	if runtime.GOOS == "darwin" {
+		fallbacks = []sandboxv1.Runtime{sandboxv1.Runtime_RUNTIME_SANDBOX_EXEC, sandboxv1.Runtime_RUNTIME_NONE}
+	}
+
 	return &Config{
 		DefaultRuntime:     sandboxv1.Runtime_RUNTIME_DOCKER,
-		FallbackRuntimes:   []sandboxv1.Runtime{sandboxv1.Runtime_RUNTIME_GVISOR, sandboxv1.Runtime_RUNTIME_NONE},
+		FallbackRuntimes:   fallbacks,
 		DefaultMode:        sandboxv1.Mode_MODE_WORKSPACE_WRITE,
 		DefaultNetworkMode: sandboxv1.NetworkMode_NETWORK_MODE_NONE,
 		DefaultLimits: &sandboxv1.ResourceLimits{
@@ -139,6 +147,26 @@ func (m *Manager) ListRuntimes(ctx context.Context, includeUnavailable bool) (*s
 	var infos []*sandboxv1.RuntimeInfo
 
 	for _, rt := range runtimes {
+		if lister, ok := rt.(RuntimeInfoLister); ok {
+			list, err := lister.RuntimeInfos(ctx, includeUnavailable)
+			if err != nil {
+				if includeUnavailable {
+					infos = append(infos, &sandboxv1.RuntimeInfo{
+						Runtime:           rt.Name(),
+						Available:         false,
+						UnavailableReason: err.Error(),
+					})
+				}
+				continue
+			}
+			for _, info := range list {
+				if info.GetAvailable() || includeUnavailable {
+					infos = append(infos, info)
+				}
+			}
+			continue
+		}
+
 		info, err := rt.Info(ctx)
 		if err != nil {
 			if includeUnavailable {
@@ -228,6 +256,8 @@ func (m *Manager) Execute(ctx context.Context, req *sandboxv1.ExecuteRequest) it
 			}
 		}
 
+		m.logEnvFiltered(ctx, executionID, runtimeType, req)
+
 		// Audit: Log execution started
 		m.auditor.LogExecutionStarted(ctx, executionID, runtimeType)
 
@@ -292,6 +322,7 @@ func (m *Manager) normalizeConfig(cfg *sandboxv1.SandboxConfig) *sandboxv1.Sandb
 		HiddenPaths:      cfg.HiddenPaths,
 		PluginName:       cfg.PluginName,
 		ExtraOptions:     cfg.ExtraOptions,
+		ExecAllowlist:    cfg.ExecAllowlist,
 	}
 
 	// Apply defaults
@@ -425,4 +456,39 @@ func (m *Manager) AvailableRuntimes(ctx context.Context) []Runtime {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	return m.registry.Available(ctx)
+}
+
+func (m *Manager) logEnvFiltered(ctx context.Context, executionID string, runtime sandboxv1.Runtime, req *sandboxv1.ExecuteRequest) {
+	if runtime == sandboxv1.Runtime_RUNTIME_NONE {
+		return
+	}
+
+	env := req.GetEnv()
+	if runtime == sandboxv1.Runtime_RUNTIME_SANDBOX_EXEC {
+		env = mergeEnv(os.Environ(), env)
+	}
+
+	_, removed := FilterEnvVars(env)
+	m.auditor.LogEnvFiltered(ctx, executionID, runtime, removed)
+}
+
+func mergeEnv(base []string, extra map[string]string) map[string]string {
+	merged := make(map[string]string, len(base)+len(extra))
+	for _, entry := range base {
+		key, value, ok := strings.Cut(entry, "=")
+		if !ok {
+			continue
+		}
+		if key == "" {
+			continue
+		}
+		merged[key] = value
+	}
+	for key, value := range extra {
+		if key == "" {
+			continue
+		}
+		merged[key] = value
+	}
+	return merged
 }

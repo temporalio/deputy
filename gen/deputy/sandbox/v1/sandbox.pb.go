@@ -934,7 +934,10 @@ type SandboxConfig struct {
 	// For plugin runtimes: the plugin name to use.
 	PluginName string `protobuf:"bytes,15,opt,name=plugin_name,json=pluginName,proto3" json:"plugin_name,omitempty"`
 	// Extra runtime-specific options (key-value pairs).
-	ExtraOptions  map[string]string `protobuf:"bytes,16,rep,name=extra_options,json=extraOptions,proto3" json:"extra_options,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
+	ExtraOptions map[string]string `protobuf:"bytes,16,rep,name=extra_options,json=extraOptions,proto3" json:"extra_options,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
+	// Explicit allowlist of executable paths or directories.
+	// Runtimes that restrict exec can use this to expand allowed executables.
+	ExecAllowlist []string `protobuf:"bytes,17,rep,name=exec_allowlist,json=execAllowlist,proto3" json:"exec_allowlist,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1077,6 +1080,13 @@ func (x *SandboxConfig) GetPluginName() string {
 func (x *SandboxConfig) GetExtraOptions() map[string]string {
 	if x != nil {
 		return x.ExtraOptions
+	}
+	return nil
+}
+
+func (x *SandboxConfig) GetExecAllowlist() []string {
+	if x != nil {
+		return x.ExecAllowlist
 	}
 	return nil
 }
@@ -2321,7 +2331,7 @@ const file_deputy_sandbox_v1_sandbox_proto_rawDesc = "" +
 	"\rworkspace_dir\x18\b \x01(\tB\a\xbaH\x04r\x02\x10\x01R\fworkspaceDir\x1a6\n" +
 	"\bEnvEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
-	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\x96\x06\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\xbd\x06\n" +
 	"\rSandboxConfig\x124\n" +
 	"\aruntime\x18\x01 \x01(\x0e2\x1a.deputy.sandbox.v1.RuntimeR\aruntime\x12+\n" +
 	"\x04mode\x18\x02 \x01(\x0e2\x17.deputy.sandbox.v1.ModeR\x04mode\x12A\n" +
@@ -2340,7 +2350,8 @@ const file_deputy_sandbox_v1_sandbox_proto_rawDesc = "" +
 	"\fhidden_paths\x18\x0e \x03(\tR\vhiddenPaths\x12\x1f\n" +
 	"\vplugin_name\x18\x0f \x01(\tR\n" +
 	"pluginName\x12W\n" +
-	"\rextra_options\x18\x10 \x03(\v22.deputy.sandbox.v1.SandboxConfig.ExtraOptionsEntryR\fextraOptions\x1a?\n" +
+	"\rextra_options\x18\x10 \x03(\v22.deputy.sandbox.v1.SandboxConfig.ExtraOptionsEntryR\fextraOptions\x12%\n" +
+	"\x0eexec_allowlist\x18\x11 \x03(\tR\rexecAllowlist\x1a?\n" +
 	"\x11ExtraOptionsEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\xc7\x01\n" +

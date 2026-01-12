@@ -19,6 +19,7 @@
 //
 //   - Docker: Container isolation via Docker Engine/Desktop (cross-platform)
 //   - gVisor: Application-level sandboxing with user-space kernel (Linux)
+//   - sandbox-exec: macOS seatbelt sandbox (deprecated, best-effort)
 //   - None: No sandboxing for trusted execution
 //
 // External plugin runtimes can be added via executables named `deputy-sandbox-*`
@@ -87,6 +88,8 @@
 // The sandbox system provides defense-in-depth but is not a complete security
 // boundary. Container escapes are possible with sufficient privileges or
 // vulnerabilities. For maximum isolation, use gVisor or Firecracker (future).
+// macOS sandbox-exec is deprecated by Apple and should be treated as
+// best-effort isolation only.
 //
 // Key security features:
 //

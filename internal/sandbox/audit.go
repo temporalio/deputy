@@ -195,14 +195,14 @@ func (a *Auditor) LogExecutionRequested(ctx context.Context, executionID string,
 	}
 
 	a.Log(ctx, AuditEvent{
-		EventType:      AuditEventExecutionRequested,
-		ExecutionID:    executionID,
-		Runtime:        runtime,
-		Command:        cmd,
+		EventType:       AuditEventExecutionRequested,
+		ExecutionID:     executionID,
+		Runtime:         runtime,
+		Command:         cmd,
 		CommandArgCount: argCount,
-		WorkspaceDir:   req.GetWorkspaceDir(),
-		NetworkMode:    networkMode,
-		FilesystemMode: fsMode,
+		WorkspaceDir:    req.GetWorkspaceDir(),
+		NetworkMode:     networkMode,
+		FilesystemMode:  fsMode,
 	})
 }
 
@@ -259,7 +259,6 @@ func (a *Auditor) LogEnvFiltered(ctx context.Context, executionID string, runtim
 		ExecutionID:     executionID,
 		Runtime:         runtime,
 		FilteredEnvVars: filtered,
-		SecurityEvent:   true,
 	})
 }
 

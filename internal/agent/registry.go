@@ -95,9 +95,29 @@ func (r *Registry) RegisterBuiltin(name string, handler agentv1connect.AgentPlug
 	})
 }
 
+// RegisterSandboxed registers a sandboxed plugin handler.
+func (r *Registry) RegisterSandboxed(name string, opts SandboxOptions) error {
+	handler, err := NewSandboxedHandler(name, opts)
+	if err != nil {
+		return err
+	}
+	return r.Register(&PluginEntry{
+		Name:    name,
+		Type:    PluginTypeSandboxed,
+		Handler: handler,
+	})
+}
+
 // MustRegisterBuiltin registers a builtin plugin, panicking on error.
 func (r *Registry) MustRegisterBuiltin(name string, handler agentv1connect.AgentPluginHandler) {
 	if err := r.RegisterBuiltin(name, handler); err != nil {
+		panic(err)
+	}
+}
+
+// MustRegisterSandboxed registers a sandboxed plugin, panicking on error.
+func (r *Registry) MustRegisterSandboxed(name string, opts SandboxOptions) {
+	if err := r.RegisterSandboxed(name, opts); err != nil {
 		panic(err)
 	}
 }
@@ -482,6 +502,16 @@ func RegisterBuiltin(name string, handler agentv1connect.AgentPluginHandler) err
 // MustRegisterBuiltin registers a builtin plugin, panicking on error.
 func MustRegisterBuiltin(name string, handler agentv1connect.AgentPluginHandler) {
 	DefaultRegistry.MustRegisterBuiltin(name, handler)
+}
+
+// RegisterSandboxed registers a sandboxed plugin to the default registry.
+func RegisterSandboxed(name string, opts SandboxOptions) error {
+	return DefaultRegistry.RegisterSandboxed(name, opts)
+}
+
+// MustRegisterSandboxed registers a sandboxed plugin to the default registry, panicking on error.
+func MustRegisterSandboxed(name string, opts SandboxOptions) {
+	DefaultRegistry.MustRegisterSandboxed(name, opts)
 }
 
 // Get retrieves a plugin from the default registry.

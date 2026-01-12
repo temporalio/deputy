@@ -41,7 +41,8 @@
 //
 // Plugins can be run in sandboxed environments:
 //
-//	plugin := agent.NewSandboxedPlugin(plugin, agent.SandboxOptions{
+//	registry := agent.NewRegistry()
+//	_ = registry.RegisterSandboxed("claude", agent.SandboxOptions{
 //	    Runtime: agent.RuntimeDocker,
 //	    Image:   "deputy-agent:latest",
 //	})

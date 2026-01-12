@@ -86,6 +86,7 @@ func RegisterCommands(root *cobra.Command, deps Dependencies) {
 	// Policy and enforcement commands
 	AddPolicyCommand(root)
 	AddProxyCommand(root)
+	AddExecCommand(root, deps)
 
 	// Setup and configuration commands
 	AddInitCommand(root)

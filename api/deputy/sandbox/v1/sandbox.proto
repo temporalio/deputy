@@ -348,6 +348,10 @@ message SandboxConfig {
 
   // Extra runtime-specific options (key-value pairs).
   map<string, string> extra_options = 16;
+
+  // Explicit allowlist of executable paths or directories.
+  // Runtimes that restrict exec can use this to expand allowed executables.
+  repeated string exec_allowlist = 17;
 }
 
 // ResourceLimits sets resource constraints for the sandbox.

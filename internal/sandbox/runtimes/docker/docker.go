@@ -32,6 +32,8 @@ package docker
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"iter"
@@ -42,9 +44,12 @@ import (
 	"time"
 
 	"github.com/docker/docker/api/types/container"
+	imagetypes "github.com/docker/docker/api/types/image"
 	"github.com/docker/docker/api/types/mount"
 	"github.com/docker/docker/api/types/network"
 	"github.com/docker/docker/client"
+	"github.com/docker/docker/errdefs"
+	"github.com/docker/docker/pkg/jsonmessage"
 	"github.com/docker/docker/pkg/stdcopy"
 	"github.com/docker/go-connections/nat"
 	sandboxv1 "github.com/picatz/deputy/gen/deputy/sandbox/v1"
@@ -331,13 +336,7 @@ func (r *Runtime) Execute(ctx context.Context, req *sandboxv1.ExecuteRequest) it
 		}
 
 		// Filter dangerous environment variables
-		filteredEnv, removedEnv := sandbox.FilterEnvVars(req.GetEnv())
-		if len(removedEnv) > 0 {
-			logger.WarnContext(ctx, "environment variables filtered for security",
-				"execution_id", executionID,
-				"filtered_vars", removedEnv,
-			)
-		}
+		filteredEnv, _ := sandbox.FilterEnvVars(req.GetEnv())
 
 		// Get Docker client
 		cli, err := r.getClient(ctx)
@@ -368,6 +367,26 @@ func (r *Runtime) Execute(ctx context.Context, req *sandboxv1.ExecuteRequest) it
 						Message: fmt.Sprintf("failed to build container config: %v", err),
 						Code:    "CONFIG_ERROR",
 						IsFatal: true,
+					},
+				},
+			}, nil)
+			return
+		}
+
+		if err := r.ensureImage(ctx, cli, containerConfig.Image); err != nil {
+			code := "IMAGE_PULL_FAILED"
+			if errdefs.IsNotFound(err) {
+				code = "IMAGE_NOT_FOUND"
+			}
+			yield(&sandboxv1.ExecuteEvent{
+				ExecutionId: executionID,
+				Timestamp:   timestamppb.Now(),
+				Details: &sandboxv1.ExecuteEvent_Error{
+					Error: &sandboxv1.ErrorEvent{
+						Message:     fmt.Sprintf("failed to ensure image %q: %v", containerConfig.Image, err),
+						Code:        code,
+						IsFatal:     true,
+						IsRetriable: code == "IMAGE_PULL_FAILED",
 					},
 				},
 			}, nil)
@@ -553,6 +572,60 @@ func (r *Runtime) Execute(ctx context.Context, req *sandboxv1.ExecuteRequest) it
 	}
 }
 
+func (r *Runtime) ensureImage(ctx context.Context, cli *client.Client, image string) error {
+	image = strings.TrimSpace(image)
+	if image == "" {
+		return fmt.Errorf("image is required")
+	}
+
+	if _, _, err := cli.ImageInspectWithRaw(ctx, image); err == nil {
+		return nil
+	} else if !errdefs.IsNotFound(err) {
+		return fmt.Errorf("inspect image %q: %w", image, err)
+	}
+
+	slog.Debug("pulling docker image", "image", image)
+
+	pullResp, err := cli.ImagePull(ctx, image, imagetypes.PullOptions{})
+	if err != nil {
+		return fmt.Errorf("pull image %q: %w", image, err)
+	}
+
+	if err := drainPullMessages(pullResp); err != nil {
+		return fmt.Errorf("pull image %q: %w", image, err)
+	}
+
+	if _, _, err := cli.ImageInspectWithRaw(ctx, image); err != nil {
+		if errdefs.IsNotFound(err) {
+			return fmt.Errorf("image %q not found after pull: %w", image, err)
+		}
+		return fmt.Errorf("inspect image %q after pull: %w", image, err)
+	}
+
+	return nil
+}
+
+func drainPullMessages(reader io.ReadCloser) error {
+	defer reader.Close()
+
+	dec := json.NewDecoder(reader)
+	for {
+		var msg jsonmessage.JSONMessage
+		if err := dec.Decode(&msg); err != nil {
+			if errors.Is(err, io.EOF) {
+				return nil
+			}
+			return err
+		}
+		if msg.Error != nil {
+			return msg.Error
+		}
+		if msg.ErrorMessage != "" {
+			return fmt.Errorf("%s", msg.ErrorMessage)
+		}
+	}
+}
+
 // buildContainerConfig creates the container configuration from the request.
 // The filteredEnv parameter contains environment variables that have been
 // sanitized by removing dangerous variables like LD_PRELOAD.
@@ -560,7 +633,7 @@ func (r *Runtime) buildContainerConfig(req *sandboxv1.ExecuteRequest, executionI
 	cfg := req.GetConfig()
 
 	// Image
-	image := cfg.GetImage()
+	image := strings.TrimSpace(cfg.GetImage())
 	if image == "" {
 		image = r.DefaultImage
 	}

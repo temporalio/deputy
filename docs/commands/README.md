@@ -16,6 +16,7 @@ Deputy is intentionally pipeline-friendly: commands compose well with each other
 | [`graph`](graph.md) | Visualize dependency graph | `--format`, `--depth`, `--focus`, subcommands: `why`, `needs` |
 | [`sbom`](sbom.md) | Generate CycloneDX/SPDX SBOMs | `--format`, `--ref`, `--enrich-licenses` |
 | [`list`](list.md) | Dump PURLs for scripting | `--format`, `--only-direct`, `--source`, `--platform` |
+| [`exec`](exec.md) | Run a command in a sandboxed runtime | `--runtime`, `--mode`, `--network`, `--exec-allow` |
 | [`policy`](policy.md) | Lint, test, bundle, evaluate policies | subcommands: `lint`, `test`, `eval`, `bundle` |
 | [`proxy`](proxy.md) | Run policy-enforcing package proxy | subcommands: `serve`, `template` |
 | [`server`](server.md) | Run Deputy API server | `--addr`, `--read-timeout`, `--write-timeout` |
@@ -88,6 +89,7 @@ Use exit codes for CI gating.
 - [Graph](graph.md) — Dependency graph visualization
 - [SBOM](sbom.md) — SBOM generation
 - [List](list.md) — Dependency listing
+- [Exec](exec.md) — Sandboxed command execution
 
 ### Enforcement & Platform
 

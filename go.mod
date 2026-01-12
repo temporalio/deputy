@@ -72,12 +72,15 @@ require (
 
 require (
 	buf.build/gen/go/pluginrpc/pluginrpc/protocolbuffers/go v1.34.2-20240828222655-5345c0a56177.2 // indirect
+	github.com/Azure/go-ansiterm v0.0.0-20250102033503-faa5f7b0171c // indirect
 	github.com/aymerick/douceur v0.2.0 // indirect
 	github.com/charmbracelet/x/exp/slice v0.0.0-20250702191427-5bdfc8f2e4ff // indirect
 	github.com/dlclark/regexp2 v1.11.5 // indirect
 	github.com/google/jsonschema-go v0.3.0 // indirect
 	github.com/gorilla/css v1.0.1 // indirect
 	github.com/microcosm-cc/bluemonday v1.0.27 // indirect
+	github.com/moby/term v0.5.2 // indirect
+	github.com/morikuni/aec v1.0.0 // indirect
 	github.com/muesli/reflow v0.3.0 // indirect
 	github.com/yosida95/uritemplate/v3 v3.0.2 // indirect
 	github.com/yuin/goldmark v1.7.12 // indirect
@@ -134,9 +137,9 @@ require (
 	github.com/distribution/reference v0.6.0 // indirect
 	github.com/docker/cli v28.5.0+incompatible // indirect
 	github.com/docker/distribution v2.8.3+incompatible // indirect
-	github.com/docker/docker v28.4.0+incompatible // indirect
+	github.com/docker/docker v28.4.0+incompatible
 	github.com/docker/docker-credential-helpers v0.9.3 // indirect
-	github.com/docker/go-connections v0.6.0 // indirect
+	github.com/docker/go-connections v0.6.0
 	github.com/docker/go-events v0.0.0-20250808211157-605354379745 // indirect
 	github.com/docker/go-units v0.5.0 // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect

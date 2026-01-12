@@ -99,12 +99,12 @@ type Runtime struct {
 // See: https://github.com/opencontainers/runtime-spec/blob/main/config.md
 
 type ociConfig struct {
-	OCIVersion string      `json:"ociVersion"`
-	Process    ociProcess  `json:"process"`
-	Root       ociRoot     `json:"root"`
-	Hostname   string      `json:"hostname"`
-	Mounts     []ociMount  `json:"mounts"`
-	Linux      *ociLinux   `json:"linux,omitempty"`
+	OCIVersion string     `json:"ociVersion"`
+	Process    ociProcess `json:"process"`
+	Root       ociRoot    `json:"root"`
+	Hostname   string     `json:"hostname"`
+	Mounts     []ociMount `json:"mounts"`
+	Linux      *ociLinux  `json:"linux,omitempty"`
 }
 
 type ociProcess struct {
@@ -350,7 +350,7 @@ func (r *Runtime) Capabilities() *sandboxv1.RuntimeCapabilities {
 		Apparmor:            false, // Not applicable with gVisor
 		Selinux:             false, // Not applicable with gVisor
 		UserNamespaces:      true,
-		Rootless:            true, // Supports rootless mode
+		Rootless:            true,  // Supports rootless mode
 		GpuSupport:          false, // gVisor has limited GPU support
 		StreamingOutput:     true,
 		InteractiveStdin:    true,
@@ -435,13 +435,7 @@ func (r *Runtime) Execute(ctx context.Context, req *sandboxv1.ExecuteRequest) it
 		}
 
 		// Filter dangerous environment variables
-		filteredEnv, removedEnv := sandbox.FilterEnvVars(req.GetEnv())
-		if len(removedEnv) > 0 {
-			logger.WarnContext(ctx, "environment variables filtered for security",
-				"execution_id", executionID,
-				"filtered_vars", removedEnv,
-			)
-		}
+		filteredEnv, _ := sandbox.FilterEnvVars(req.GetEnv())
 
 		// Check availability
 		if !r.Available(ctx) {

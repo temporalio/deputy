@@ -10,6 +10,7 @@ import (
 	"connectrpc.com/connect"
 	agentv1 "github.com/picatz/deputy/gen/deputy/agent/v1"
 	"github.com/picatz/deputy/gen/deputy/agent/v1/agentv1connect"
+	"github.com/picatz/deputy/internal/sandbox"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
@@ -122,7 +123,21 @@ func (h *SandboxedHandler) Execute(ctx context.Context, req *connect.Request[age
 	}
 
 	// Build container command
-	args := h.buildContainerArgs(msg)
+	args, err := h.buildContainerArgs(msg)
+	if err != nil {
+		return stream.Send(&agentv1.ExecuteEvent{
+			SessionId: sessionID,
+			Timestamp: timestamppb.Now(),
+			Phase:     agentv1.ExecutionPhase_EXECUTION_PHASE_FAILED,
+			Details: &agentv1.ExecuteEvent_Error{
+				Error: &agentv1.ErrorEvent{
+					Message:     fmt.Sprintf("invalid sandbox configuration: %v", err),
+					IsFatal:     true,
+					IsRetriable: false,
+				},
+			},
+		})
+	}
 
 	cmd := exec.CommandContext(ctx, string(h.opts.Runtime), args...)
 	if msg.GetWorkDir() != "" {
@@ -174,7 +189,7 @@ func (h *SandboxedHandler) Execute(ctx context.Context, req *connect.Request[age
 }
 
 // buildContainerArgs constructs container runtime arguments.
-func (h *SandboxedHandler) buildContainerArgs(req *agentv1.ExecuteRequest) []string {
+func (h *SandboxedHandler) buildContainerArgs(req *agentv1.ExecuteRequest) ([]string, error) {
 	args := []string{"run", "--rm"}
 
 	// Network isolation
@@ -200,8 +215,10 @@ func (h *SandboxedHandler) buildContainerArgs(req *agentv1.ExecuteRequest) []str
 		if strings.ContainsAny(workDir, "\x00\n\r:") {
 			// Colon is particularly dangerous as it separates host:container paths
 			// Null/newlines could confuse argument parsing
-			// Return empty args to fail safely
-			return []string{"error: invalid work directory path"}
+			return nil, fmt.Errorf("invalid work directory path")
+		}
+		if err := sandbox.ValidatePath(workDir); err != nil {
+			return nil, err
 		}
 
 		mountOpt := "ro" // Read-only by default
@@ -236,7 +253,7 @@ func (h *SandboxedHandler) buildContainerArgs(req *agentv1.ExecuteRequest) []str
 	// Image
 	args = append(args, h.opts.Image)
 
-	return args
+	return args, nil
 }
 
 // Resume continues a previous session.
