@@ -84,6 +84,202 @@ func TestLooksLikeContainerRef(t *testing.T) {
 	}
 }
 
+func TestValidateRemoteTarget_SSRFProtection(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		target  string
+		wantErr bool
+		errMsg  string
+	}{
+		// Valid remote targets
+		{
+			name:    "valid github repo",
+			target:  "github.com/owner/repo",
+			wantErr: false,
+		},
+		{
+			name:    "valid container image",
+			target:  "nginx:1.25",
+			wantErr: false,
+		},
+		{
+			name:    "valid GHCR image",
+			target:  "ghcr.io/owner/app:v1.0.0",
+			wantErr: false,
+		},
+		{
+			name:    "valid with oci scheme",
+			target:  "oci://gcr.io/project/image:tag",
+			wantErr: false,
+		},
+
+		// Loopback bypass attempts
+		{
+			name:    "plain localhost",
+			target:  "localhost:5000/image",
+			wantErr: true,
+			errMsg:  "localhost",
+		},
+		{
+			name:    "127.0.0.1 direct",
+			target:  "127.0.0.1:5000/image",
+			wantErr: true,
+			errMsg:  "loopback",
+		},
+		{
+			name:    "127.0.0.1 with oci scheme",
+			target:  "oci://127.0.0.1/malicious",
+			wantErr: true,
+			errMsg:  "loopback",
+		},
+		{
+			name:    "IPv6 loopback ::1",
+			target:  "oci://[::1]/malicious",
+			wantErr: true,
+			errMsg:  "loopback",
+		},
+		{
+			name:    "0.0.0.0 unspecified",
+			target:  "0.0.0.0:5000/image",
+			wantErr: true,
+			errMsg:  "loopback",
+		},
+
+		// Metadata endpoint bypass attempts
+		{
+			name:    "AWS metadata IP",
+			target:  "169.254.169.254/latest/meta-data",
+			wantErr: true,
+			errMsg:  "metadata",
+		},
+		{
+			name:    "AWS metadata with scheme",
+			target:  "http://169.254.169.254/latest/meta-data",
+			wantErr: true,
+			errMsg:  "metadata",
+		},
+		{
+			name:    "GCP metadata hostname",
+			target:  "metadata.google.internal/computeMetadata",
+			wantErr: true,
+			errMsg:  "metadata",
+		},
+		{
+			name:    "Azure metadata",
+			target:  "metadata.azure.com/metadata/instance",
+			wantErr: true,
+			errMsg:  "metadata",
+		},
+
+		// Private network bypass attempts
+		{
+			name:    "10.x.x.x private",
+			target:  "10.0.0.1:5000/internal",
+			wantErr: true,
+			errMsg:  "private",
+		},
+		{
+			name:    "10.x.x.x with scheme",
+			target:  "oci://10.255.255.255/internal",
+			wantErr: true,
+			errMsg:  "private",
+		},
+		{
+			name:    "172.16.x.x private",
+			target:  "172.16.0.1:5000/internal",
+			wantErr: true,
+			errMsg:  "private",
+		},
+		{
+			name:    "172.31.x.x private (edge of range)",
+			target:  "oci://172.31.255.255/internal",
+			wantErr: true,
+			errMsg:  "private",
+		},
+		{
+			name:    "172.32.x.x is NOT private",
+			target:  "172.32.0.1:5000/public",
+			wantErr: false, // 172.32+ is not private
+		},
+		{
+			name:    "192.168.x.x private",
+			target:  "192.168.1.1:5000/internal",
+			wantErr: true,
+			errMsg:  "private",
+		},
+		{
+			name:    "192.168.x.x with scheme",
+			target:  "oci://192.168.0.1/internal",
+			wantErr: true,
+			errMsg:  "private",
+		},
+
+		// Local filesystem (already covered but verify)
+		{
+			name:    "absolute path",
+			target:  "/etc/passwd",
+			wantErr: true,
+			errMsg:  "absolute",
+		},
+		{
+			name:    "relative path",
+			target:  "./local/file",
+			wantErr: true,
+			errMsg:  "relative",
+		},
+		{
+			name:    "docker daemon",
+			target:  "docker-daemon://myimage:latest",
+			wantErr: true,
+			errMsg:  "docker-daemon",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			err := targets.ValidateRemoteTarget(tt.target)
+			if tt.wantErr {
+				if err == nil {
+					t.Errorf("ValidateRemoteTarget(%q) = nil, want error containing %q", tt.target, tt.errMsg)
+				} else if tt.errMsg != "" && !containsIgnoreCase(err.Error(), tt.errMsg) {
+					t.Errorf("ValidateRemoteTarget(%q) error = %q, want error containing %q", tt.target, err.Error(), tt.errMsg)
+				}
+			} else {
+				if err != nil {
+					t.Errorf("ValidateRemoteTarget(%q) = %v, want nil", tt.target, err)
+				}
+			}
+		})
+	}
+}
+
+func containsIgnoreCase(s, substr string) bool {
+	for i := 0; i <= len(s)-len(substr); i++ {
+		match := true
+		for j := 0; j < len(substr); j++ {
+			sc := s[i+j]
+			subc := substr[j]
+			if sc >= 'A' && sc <= 'Z' {
+				sc += 'a' - 'A'
+			}
+			if subc >= 'A' && subc <= 'Z' {
+				subc += 'a' - 'A'
+			}
+			if sc != subc {
+				match = false
+				break
+			}
+		}
+		if match {
+			return true
+		}
+	}
+	return false
+}
+
 func TestDetectKind(t *testing.T) {
 	t.Parallel()
 

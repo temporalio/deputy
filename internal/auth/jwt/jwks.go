@@ -11,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/picatz/deputy/internal/network"
 	"github.com/picatz/jose/pkg/jwk"
 )
 
@@ -86,7 +87,8 @@ func NewJWKSCache(cfg *JWKSConfig, opts ...JWKSCacheOption) (*JWKSCache, error) 
 		refreshInterval: refreshInterval,
 		metrics:         NoopMetrics{},
 		httpClient: &http.Client{
-			Timeout: defaultJWKSHTTPTimeout,
+			Transport: network.SafeTransport(),
+			Timeout:   defaultJWKSHTTPTimeout,
 		},
 		stopCh: make(chan struct{}),
 	}

@@ -3,8 +3,11 @@ package server
 import (
 	"context"
 	"crypto/tls"
+	"crypto/x509"
 	"fmt"
+	"net"
 	"net/http"
+	"os"
 	"strings"
 	"time"
 
@@ -183,6 +186,17 @@ type RateLimitConfig struct {
 
 	// Burst is the maximum burst size.
 	Burst int
+
+	// TrustXFF enables trusting X-Forwarded-For header from all sources.
+	// WARNING: Only enable this if ALL traffic goes through a trusted proxy.
+	// Default: false (XFF headers are ignored to prevent spoofing).
+	TrustXFF bool
+
+	// TrustedProxies is a list of IP addresses or CIDR ranges that are trusted
+	// to provide accurate X-Forwarded-For headers.
+	// Example: ["10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "127.0.0.1"]
+	// If empty and TrustXFF is false, X-Forwarded-For is never trusted.
+	TrustedProxies []string
 }
 
 // DefaultConfig returns a Config with sensible defaults.
@@ -425,6 +439,18 @@ func buildTLSConfig(cfg *TLSConfig) (*tls.Config, error) {
 		tlsConfig.ClientAuth = cfg.ClientAuth
 	}
 
+	// Load client CA certificate pool for mTLS
+	if cfg.ClientCAFile != "" {
+		caCert, err := os.ReadFile(cfg.ClientCAFile)
+		if err != nil {
+			return nil, fmt.Errorf("reading client CA file: %w", err)
+		}
+		tlsConfig.ClientCAs = x509.NewCertPool()
+		if !tlsConfig.ClientCAs.AppendCertsFromPEM(caCert) {
+			return nil, fmt.Errorf("failed to parse client CA certificate")
+		}
+	}
+
 	return tlsConfig, nil
 }
 
@@ -623,6 +649,9 @@ func rateLimitMiddleware(cfg *RateLimitConfig) func(http.Handler) http.Handler {
 	)
 	limiters := memory.NewTTLCache[string, *rate.Limiter](maxLimiters, limiterTTL)
 
+	// Parse trusted proxies once at middleware creation time
+	trustedChecker := newTrustedProxyChecker(cfg.TrustedProxies)
+
 	getLimiter := func(key string) *rate.Limiter {
 		if limiter, ok := limiters.Get(key); ok {
 			return limiter
@@ -637,12 +666,18 @@ func rateLimitMiddleware(cfg *RateLimitConfig) func(http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			// Use client IP as rate limit key
 			clientIP := r.RemoteAddr
-			if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
-				// Use first IP in X-Forwarded-For chain
-				if idx := strings.Index(xff, ","); idx != -1 {
-					clientIP = strings.TrimSpace(xff[:idx])
-				} else {
-					clientIP = strings.TrimSpace(xff)
+
+			// Only trust X-Forwarded-For if:
+			// 1. TrustXFF is explicitly enabled (trust all sources), OR
+			// 2. The request comes from a trusted proxy IP
+			if cfg.TrustXFF || trustedChecker.isTrusted(r.RemoteAddr) {
+				if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
+					// Use first IP in X-Forwarded-For chain (original client)
+					if idx := strings.Index(xff, ","); idx != -1 {
+						clientIP = strings.TrimSpace(xff[:idx])
+					} else {
+						clientIP = strings.TrimSpace(xff)
+					}
 				}
 			}
 
@@ -655,6 +690,94 @@ func rateLimitMiddleware(cfg *RateLimitConfig) func(http.Handler) http.Handler {
 			next.ServeHTTP(w, r)
 		})
 	}
+}
+
+// trustedProxyChecker validates whether a remote address is from a trusted proxy.
+type trustedProxyChecker struct {
+	ips   map[string]struct{}
+	cidrs []*net.IPNet
+}
+
+// newTrustedProxyChecker creates a checker from a list of IP addresses and CIDR ranges.
+// Invalid entries are logged and skipped.
+func newTrustedProxyChecker(proxies []string) *trustedProxyChecker {
+	checker := &trustedProxyChecker{
+		ips:   make(map[string]struct{}),
+		cidrs: make([]*net.IPNet, 0),
+	}
+
+	for _, proxy := range proxies {
+		proxy = strings.TrimSpace(proxy)
+		if proxy == "" {
+			continue
+		}
+
+		// Try to parse as CIDR first
+		if strings.Contains(proxy, "/") {
+			_, ipNet, err := net.ParseCIDR(proxy)
+			if err != nil {
+				logs.Warn(context.Background(), "invalid trusted proxy CIDR, skipping",
+					"cidr", proxy, "error", err)
+				continue
+			}
+			checker.cidrs = append(checker.cidrs, ipNet)
+		} else {
+			// Parse as plain IP address
+			ip := net.ParseIP(proxy)
+			if ip == nil {
+				logs.Warn(context.Background(), "invalid trusted proxy IP, skipping",
+					"ip", proxy)
+				continue
+			}
+			// Normalize IPv4-mapped IPv6 to IPv4
+			if v4 := ip.To4(); v4 != nil {
+				checker.ips[v4.String()] = struct{}{}
+			} else {
+				checker.ips[ip.String()] = struct{}{}
+			}
+		}
+	}
+
+	return checker
+}
+
+// isTrusted checks if the given remote address is from a trusted proxy.
+// The remoteAddr is expected to be in "ip:port" or "[ip]:port" format.
+func (c *trustedProxyChecker) isTrusted(remoteAddr string) bool {
+	if len(c.ips) == 0 && len(c.cidrs) == 0 {
+		return false
+	}
+
+	// Extract IP from "ip:port" or "[ip]:port" format
+	host, _, err := net.SplitHostPort(remoteAddr)
+	if err != nil {
+		// Try parsing as plain IP (in case there's no port)
+		host = remoteAddr
+	}
+
+	ip := net.ParseIP(host)
+	if ip == nil {
+		return false
+	}
+
+	// Normalize IPv4-mapped IPv6 to IPv4
+	if v4 := ip.To4(); v4 != nil {
+		ip = v4
+	}
+
+	// Check exact IP match
+	if _, ok := c.ips[ip.String()]; ok {
+		return true
+	}
+
+	// Check CIDR ranges
+	for _, cidr := range c.cidrs {
+		if cidr.Contains(ip) {
+			return true
+		}
+	}
+
+	return false
 }
 
 // skipAuthForHealth bypasses authentication for health check endpoints.

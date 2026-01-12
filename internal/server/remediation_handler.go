@@ -2,7 +2,13 @@ package server
 
 import (
 	"context"
+	crypto_rand "crypto/rand"
+	"encoding/hex"
 	"fmt"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"time"
@@ -34,6 +40,10 @@ func validateRequest(msg proto.Message) error {
 type RemediationHandler struct {
 	remediationv1connect.UnimplementedRemediationServiceHandler
 
+	// localMode skips security validation for in-process usage.
+	// When false (remote server), ExecutePlan is disabled for security.
+	localMode bool
+
 	// registry is the agent plugin registry (defaults to agent.DefaultRegistry)
 	registry *agent.Registry
 
@@ -52,20 +62,41 @@ type agentSession struct {
 // Ensure RemediationHandler implements the RemediationServiceHandler interface.
 var _ remediationv1connect.RemediationServiceHandler = (*RemediationHandler)(nil)
 
-// NewRemediationHandler creates a new RemediationHandler.
-func NewRemediationHandler() *RemediationHandler {
-	return &RemediationHandler{
-		registry: agent.DefaultRegistry,
-		sessions: make(map[string]*agentSession),
+// RemediationHandlerOption configures a RemediationHandler.
+type RemediationHandlerOption func(*RemediationHandler)
+
+// WithRemediationLocalMode enables local mode which allows plan execution.
+// Use this for in-process clients that need to execute remediation steps.
+// SECURITY: Never enable this for remote servers - it allows arbitrary code execution.
+func WithRemediationLocalMode() RemediationHandlerOption {
+	return func(h *RemediationHandler) {
+		h.localMode = true
 	}
 }
 
-// NewRemediationHandlerWithRegistry creates a RemediationHandler with a custom registry.
-func NewRemediationHandlerWithRegistry(registry *agent.Registry) *RemediationHandler {
-	return &RemediationHandler{
-		registry: registry,
+// WithRemediationRegistry sets a custom agent registry.
+func WithRemediationRegistry(registry *agent.Registry) RemediationHandlerOption {
+	return func(h *RemediationHandler) {
+		h.registry = registry
+	}
+}
+
+// NewRemediationHandler creates a new RemediationHandler.
+func NewRemediationHandler(opts ...RemediationHandlerOption) *RemediationHandler {
+	h := &RemediationHandler{
+		registry: agent.DefaultRegistry,
 		sessions: make(map[string]*agentSession),
 	}
+	for _, opt := range opts {
+		opt(h)
+	}
+	return h
+}
+
+// NewRemediationHandlerWithRegistry creates a RemediationHandler with a custom registry.
+// Deprecated: Use NewRemediationHandler(WithRemediationRegistry(r)) instead.
+func NewRemediationHandlerWithRegistry(registry *agent.Registry) *RemediationHandler {
+	return NewRemediationHandler(WithRemediationRegistry(registry))
 }
 
 // GeneratePlan creates a remediation plan from scan results.
@@ -141,17 +172,42 @@ func (h *RemediationHandler) GeneratePlan(
 }
 
 // ExecutePlan applies a previously generated remediation plan.
+//
+// SECURITY: This method executes shell commands on the local filesystem.
+// It is only available in local mode (in-process clients). Remote servers
+// MUST NOT enable local mode, as this would allow arbitrary code execution.
 func (h *RemediationHandler) ExecutePlan(
 	ctx context.Context,
 	req *connect.Request[remediationv1.ExecutePlanRequest],
 	stream *connect.ServerStream[remediationv1.ExecutionEvent],
 ) error {
+	// Security: ExecutePlan is only allowed in local mode
+	if !h.localMode {
+		return connect.NewError(connect.CodePermissionDenied,
+			fmt.Errorf("ExecutePlan is not available on remote servers; use local CLI or daemon mode"))
+	}
+
 	plan := req.Msg.GetPlan()
 	if plan == nil {
 		return connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("plan is required"))
 	}
 
-	logs.Info(ctx, "executing remediation plan", "plan_id", plan.GetId())
+	targetPath := req.Msg.GetTargetPath()
+	if targetPath == "" {
+		targetPath = "."
+	}
+
+	// Resolve to absolute path
+	absWorkDir, err := resolveWorkDir(targetPath)
+	if err != nil {
+		return connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("invalid work directory: %w", err))
+	}
+
+	logs.Info(ctx, "executing remediation plan",
+		"plan_id", plan.GetId(),
+		"steps", len(plan.GetSteps()),
+		"work_dir", absWorkDir,
+	)
 
 	// Send preparing phase
 	if err := stream.Send(&remediationv1.ExecutionEvent{
@@ -162,17 +218,170 @@ func (h *RemediationHandler) ExecutePlan(
 		return err
 	}
 
-	// TODO: Implement plan execution
-	// For now, return unimplemented
-	return connect.NewError(connect.CodeUnimplemented, fmt.Errorf("ExecutePlan is not yet fully implemented"))
+	steps := plan.GetSteps()
+	if len(steps) == 0 {
+		// No steps to execute
+		if err := stream.Send(&remediationv1.ExecutionEvent{
+			Phase:     remediationv1.ExecutionPhase_EXECUTION_PHASE_COMPLETED,
+			Message:   "No steps to execute",
+			Timestamp: timestamppb.Now(),
+		}); err != nil {
+			return err
+		}
+		return nil
+	}
+
+	// Execute each step
+	for i, step := range steps {
+		stepID := step.GetId()
+		if stepID == "" {
+			stepID = fmt.Sprintf("step-%d", i+1)
+		}
+
+		// Send step starting event
+		if err := stream.Send(&remediationv1.ExecutionEvent{
+			Phase:     remediationv1.ExecutionPhase_EXECUTION_PHASE_EXECUTING,
+			StepId:    stepID,
+			Message:   fmt.Sprintf("Executing step %d/%d: %s", i+1, len(steps), step.GetTitle()),
+			Timestamp: timestamppb.Now(),
+		}); err != nil {
+			return err
+		}
+
+		// Execute the step
+		output, execErr := executeStep(ctx, absWorkDir, step)
+
+		if execErr != nil {
+			// Send failure event with output in message
+			failMsg := fmt.Sprintf("Step failed: %v", execErr)
+			if output != "" {
+				failMsg = fmt.Sprintf("Step failed: %v\n%s", execErr, output)
+			}
+			if err := stream.Send(&remediationv1.ExecutionEvent{
+				Phase:     remediationv1.ExecutionPhase_EXECUTION_PHASE_FAILED,
+				StepId:    stepID,
+				Message:   failMsg,
+				Timestamp: timestamppb.Now(),
+			}); err != nil {
+				return err
+			}
+			// Return the error to stop execution
+			return connect.NewError(connect.CodeInternal, fmt.Errorf("step %s failed: %w", stepID, execErr))
+		}
+
+		// Send step completed event
+		completeMsg := fmt.Sprintf("Completed step %d/%d", i+1, len(steps))
+		if output != "" {
+			completeMsg = fmt.Sprintf("Completed step %d/%d\n%s", i+1, len(steps), output)
+		}
+		if err := stream.Send(&remediationv1.ExecutionEvent{
+			Phase:     remediationv1.ExecutionPhase_EXECUTION_PHASE_EXECUTING,
+			StepId:    stepID,
+			Message:   completeMsg,
+			Timestamp: timestamppb.Now(),
+		}); err != nil {
+			return err
+		}
+	}
+
+	// Send completion event
+	if err := stream.Send(&remediationv1.ExecutionEvent{
+		Phase:     remediationv1.ExecutionPhase_EXECUTION_PHASE_COMPLETED,
+		Message:   fmt.Sprintf("Successfully executed %d steps", len(steps)),
+		Timestamp: timestamppb.Now(),
+	}); err != nil {
+		return err
+	}
+
+	logs.Info(ctx, "remediation plan executed successfully",
+		"plan_id", plan.GetId(),
+		"steps_executed", len(steps),
+	)
+
+	return nil
+}
+
+// resolveWorkDir resolves and validates the working directory.
+func resolveWorkDir(dir string) (string, error) {
+	absPath, err := filepath.Abs(dir)
+	if err != nil {
+		return "", err
+	}
+	info, err := os.Stat(absPath)
+	if err != nil {
+		return "", err
+	}
+	if !info.IsDir() {
+		return "", fmt.Errorf("%s is not a directory", absPath)
+	}
+	return absPath, nil
+}
+
+// executeStep runs a single remediation step and returns output.
+func executeStep(ctx context.Context, workDir string, step *remediationv1.Step) (string, error) {
+	cmd := step.GetCommand()
+	if cmd == "" {
+		return "", nil // Nothing to execute
+	}
+
+	// Skip non-executable steps
+	if !step.GetExecutable() {
+		return fmt.Sprintf("Skipped (manual step): %s", cmd), nil
+	}
+
+	// Handle deputy internal commands
+	if remediation.IsDeputyInternalCommand(cmd) {
+		if err := remediation.ApplyDeputyCommand(workDir, cmd); err != nil {
+			return "", err
+		}
+		return fmt.Sprintf("Applied: %s", cmd), nil
+	}
+
+	// Determine execution directory
+	execDir := workDir
+	if manifestPath := step.GetManifestPath(); manifestPath != "" {
+		relDir := filepath.Dir(manifestPath)
+		if relDir != "." && relDir != "" {
+			execDir = filepath.Join(workDir, relDir)
+		}
+	}
+
+	// Execute shell command
+	execCmd := shellCommand(ctx, cmd)
+	execCmd.Dir = execDir
+
+	output, err := execCmd.CombinedOutput()
+	if err != nil {
+		return string(output), fmt.Errorf("command failed: %w", err)
+	}
+
+	return string(output), nil
+}
+
+// shellCommand creates an exec.Cmd to run a shell command.
+func shellCommand(ctx context.Context, command string) *exec.Cmd {
+	if runtime.GOOS == "windows" {
+		return exec.CommandContext(ctx, "cmd.exe", "/C", command)
+	}
+	return exec.CommandContext(ctx, "sh", "-c", command)
 }
 
 // ExecuteWithAgent uses an AI agent plugin to generate and apply fixes interactively.
+//
+// SECURITY: This method uses AI agents that can execute shell commands and modify files.
+// It is only available in local mode (in-process clients). Remote servers
+// MUST NOT enable local mode, as this would allow arbitrary code execution.
 func (h *RemediationHandler) ExecuteWithAgent(
 	ctx context.Context,
 	req *connect.Request[remediationv1.ExecuteWithAgentRequest],
 	stream *connect.ServerStream[remediationv1.AgentEvent],
 ) error {
+	// Security: ExecuteWithAgent is only allowed in local mode
+	if !h.localMode {
+		return connect.NewError(connect.CodePermissionDenied,
+			fmt.Errorf("ExecuteWithAgent is not available on remote servers; use local CLI or daemon mode"))
+	}
+
 	// Validate request using protovalidate rules
 	if err := validateRequest(req.Msg); err != nil {
 		return err
@@ -469,9 +678,14 @@ func generatePlanID() string {
 	return fmt.Sprintf("plan-%d", time.Now().UnixNano())
 }
 
-// generateSessionID creates a unique session identifier.
+// generateSessionID creates a unique session identifier using cryptographically secure random bytes.
 func generateSessionID() string {
-	return fmt.Sprintf("session-%d", time.Now().UnixNano())
+	b := make([]byte, 16)
+	if _, err := crypto_rand.Read(b); err != nil {
+		// Fallback to time-based only if crypto/rand fails (shouldn't happen)
+		return fmt.Sprintf("session-%d", time.Now().UnixNano())
+	}
+	return fmt.Sprintf("session-%s", hex.EncodeToString(b))
 }
 
 // buildAgentExecuteRequest constructs an agentv1.ExecuteRequest from the proto request.

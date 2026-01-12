@@ -23,6 +23,12 @@ import (
 	"github.com/picatz/jose/pkg/jwt"
 )
 
+// testHTTPClient returns an HTTP client without SSRF protection for tests that use httptest servers.
+// The SafeDialer blocks localhost by default, which is correct for production but breaks tests.
+func testHTTPClient() *http.Client {
+	return &http.Client{Timeout: 30 * time.Second}
+}
+
 func TestAuthConfig_GetMode(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -465,11 +471,11 @@ func TestJWKSServer(t *testing.T) {
 	}))
 	defer jwksServer.Close()
 
-	// Create JWKS cache
+	// Create JWKS cache with test HTTP client to bypass SafeDialer
 	cache, err := NewJWKSCache(&JWKSConfig{
 		URL:             jwksServer.URL,
 		RefreshInterval: 1 * time.Hour,
-	})
+	}, WithJWKSHTTPClient(testHTTPClient()))
 	if err != nil {
 		t.Fatalf("failed to create JWKS cache: %v", err)
 	}
@@ -1019,11 +1025,11 @@ func TestJWKSCache_ConcurrentAccess(t *testing.T) {
 	}))
 	defer jwksServer.Close()
 
-	// Create JWKS cache
+	// Create JWKS cache with test HTTP client to bypass SafeDialer
 	cache, err := NewJWKSCache(&JWKSConfig{
 		URL:             jwksServer.URL,
 		RefreshInterval: 100 * time.Millisecond,
-	})
+	}, WithJWKSHTTPClient(testHTTPClient()))
 	if err != nil {
 		t.Fatalf("failed to create JWKS cache: %v", err)
 	}
@@ -1254,7 +1260,8 @@ func TestNewAuthenticator_CleanupOnStaticKeyError(t *testing.T) {
 	}
 
 	// NewAuthenticator should fail but should NOT leak the JWKS cache goroutine
-	auth, err := NewAuthenticator(cfg)
+	// Use testHTTPClient to bypass SafeDialer which blocks localhost in production
+	auth, err := NewAuthenticator(cfg, WithJWKSCacheOptions(WithJWKSHTTPClient(testHTTPClient())))
 	if err == nil {
 		auth.Close()
 		t.Fatal("expected error for invalid static key")
@@ -1402,7 +1409,7 @@ func TestJWKSCache_DoubleClose(t *testing.T) {
 	}))
 	defer jwksServer.Close()
 
-	cache, err := NewJWKSCache(&JWKSConfig{URL: jwksServer.URL})
+	cache, err := NewJWKSCache(&JWKSConfig{URL: jwksServer.URL}, WithJWKSHTTPClient(testHTTPClient()))
 	if err != nil {
 		t.Fatalf("failed to create cache: %v", err)
 	}

@@ -324,6 +324,8 @@ Mode is auto-detected:
 
 ### Security Model
 
+Deputy's security model distinguishes between **local modes** (in-process, daemon) and **remote server mode**. The core principle: remote servers must never execute arbitrary code or access local filesystems.
+
 ```mermaid
 flowchart LR
     subgraph Local["<b>Local Modes</b><br/>(In-Process, Daemon)"]
@@ -335,6 +337,8 @@ flowchart LR
         L5["✓ Git URLs"]
         L6["✓ Container registries"]
         L7["✓ PURLs"]
+        L8["✓ Execute remediation plans"]
+        L9["✓ AI agent execution"]
     end
 
     subgraph Remote["<b>Remote Server</b>"]
@@ -346,24 +350,69 @@ flowchart LR
         R5["✓ Git URLs"]
         R6["✓ Container registries"]
         R7["✓ PURLs"]
+        R8["✗ Execute remediation plans"]
+        R9["✗ AI agent execution"]
     end
 
     validate["ValidateRemoteTarget()"]
+    localMode["localMode check"]
 
     Remote --> validate
     validate -->|"Rejects local targets"| rejected["Error with guidance"]
+    Remote --> localMode
+    localMode -->|"Blocks code execution"| blocked["PermissionDenied"]
 
     classDef allowed fill:#c8e6c9,stroke:#2e7d32
     classDef denied fill:#ffcdd2,stroke:#c62828
     classDef validator fill:#fff3e0,stroke:#e65100
 
-    class L1,L2,L3,L4,L5,L6,L7 allowed
-    class R1,R2,R3,R4 denied
+    class L1,L2,L3,L4,L5,L6,L7,L8,L9 allowed
+    class R1,R2,R3,R4,R8,R9 denied
     class R5,R6,R7 allowed
-    class validate validator
+    class validate,localMode validator
 ```
 
-**Security rationale:** Remote servers cannot access the client's local filesystem. Attempts to scan local paths, stdin, or local container transports are rejected with clear error messages guiding users to remote-accessible alternatives.
+**Two security mechanisms:**
+
+1. **Target validation** (`ValidateRemoteTarget()`): Blocks filesystem paths, stdin, and local container transports on remote servers. Ensures servers only access network-reachable resources.
+
+2. **Local mode gating** (`localMode` field): Controls code execution capabilities. Handlers that execute shell commands or AI agents check `localMode` and return `PermissionDenied` if disabled.
+
+**Handler Security Classification:**
+
+| Handler | Method | Filesystem Access | Code Execution | Remote Safe |
+|---------|--------|-------------------|----------------|-------------|
+| Scan | `Scan()` | Via target validation | No | Yes (with validation) |
+| List | `ListPackages()` | Via target validation | No | Yes (with validation) |
+| SBOM | `Generate()` | Via target validation | No | Yes (with validation) |
+| SBOM | `Diff()` | No (byte arrays) | No | **Yes** |
+| Remediation | `GeneratePlan()` | No (in-memory) | No | **Yes** |
+| Remediation | `ExecutePlan()` | Yes | **Yes** | **No** - requires `localMode` |
+| Remediation | `ExecuteWithAgent()` | Yes | **Yes** | **No** - requires `localMode` |
+| Secrets | `Scan()` | Via target validation | No | Yes (with validation) |
+
+**Implementation pattern:**
+
+```go
+// Handler with localMode protection
+type RemediationHandler struct {
+    localMode bool  // Set via WithRemediationLocalMode()
+}
+
+func (h *RemediationHandler) ExecutePlan(...) error {
+    // Security: Block on remote servers
+    if !h.localMode {
+        return connect.NewError(connect.CodePermissionDenied,
+            fmt.Errorf("ExecutePlan is not available on remote servers; use local CLI or daemon mode"))
+    }
+    // ... execute shell commands
+}
+```
+
+**For developers adding new handlers:**
+- Read-only operations on network resources: Safe for remote servers
+- Operations requiring local filesystem: Add `localMode` check or use `ValidateRemoteTarget()`
+- Operations executing code (shell, AI agents): **Must** require `localMode=true`
 
 ### Target Detection (Two-Layer Design)
 
@@ -481,11 +530,13 @@ flowchart LR
 
 | File | Purpose |
 |------|---------|
-| [`internal/services/services.go`](internal/services/services.go) | Services and Clients structs, InProcessTransport |
+| [`internal/services/services.go`](internal/services/services.go) | Services and Clients structs, `localMode` configuration |
 | [`internal/services/transport.go`](internal/services/transport.go) | InProcessTransport implementation |
-| [`internal/server/scan_handler.go`](internal/server/scan_handler.go) | ScanServiceHandler with security validation |
+| [`internal/server/scan_handler.go`](internal/server/scan_handler.go) | ScanServiceHandler with `ValidateRemoteTarget()` |
 | [`internal/server/list_handler.go`](internal/server/list_handler.go) | ListServiceHandler for package enumeration |
-| [`internal/targets/detect.go`](internal/targets/detect.go) | Shared target detection and validation |
+| [`internal/server/sbom_handler.go`](internal/server/sbom_handler.go) | SBOMServiceHandler (Generate, Diff) |
+| [`internal/server/remediation_handler.go`](internal/server/remediation_handler.go) | RemediationServiceHandler with `localMode` security gates |
+| [`internal/targets/detect.go`](internal/targets/detect.go) | Shared target detection and `ValidateRemoteTarget()` |
 | [`internal/proto/`](internal/proto/) | Proto ↔ internal type converters |
 | [`api/deputy/`](api/deputy/) | Proto service definitions |
 | [`sdk/deputy.go`](sdk/deputy.go) | Go SDK wrapping services.Clients |

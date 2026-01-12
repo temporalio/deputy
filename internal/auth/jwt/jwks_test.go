@@ -18,6 +18,12 @@ import (
 	"github.com/picatz/jose/pkg/jwk"
 )
 
+// testHTTPClient returns an HTTP client without SSRF protection for tests that use httptest servers.
+// The SafeDialer blocks localhost by default, which is correct for production but breaks tests.
+func testHTTPClient() *http.Client {
+	return &http.Client{Timeout: 30 * time.Second}
+}
+
 func TestJWKSCache_BasicFetch(t *testing.T) {
 	// Generate ECDSA key for testing
 	privateKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
@@ -45,7 +51,7 @@ func TestJWKSCache_BasicFetch(t *testing.T) {
 	cache, err := NewJWKSCache(&JWKSConfig{
 		URL:             jwksServer.URL,
 		RefreshInterval: 1 * time.Hour,
-	})
+	}, WithJWKSHTTPClient(testHTTPClient()))
 	if err != nil {
 		t.Fatalf("failed to create JWKS cache: %v", err)
 	}
@@ -94,7 +100,7 @@ func TestJWKSCache_RSAKey(t *testing.T) {
 	cache, err := NewJWKSCache(&JWKSConfig{
 		URL:             jwksServer.URL,
 		RefreshInterval: 1 * time.Hour,
-	})
+	}, WithJWKSHTTPClient(testHTTPClient()))
 	if err != nil {
 		t.Fatalf("failed to create JWKS cache: %v", err)
 	}
@@ -125,7 +131,7 @@ func TestJWKSCache_KeyNotFound(t *testing.T) {
 	}))
 	defer jwksServer.Close()
 
-	cache, err := NewJWKSCache(&JWKSConfig{URL: jwksServer.URL})
+	cache, err := NewJWKSCache(&JWKSConfig{URL: jwksServer.URL}, WithJWKSHTTPClient(testHTTPClient()))
 	if err != nil {
 		t.Fatalf("failed to create JWKS cache: %v", err)
 	}
@@ -163,7 +169,7 @@ func TestJWKSCache_DoubleClose(t *testing.T) {
 	}))
 	defer jwksServer.Close()
 
-	cache, err := NewJWKSCache(&JWKSConfig{URL: jwksServer.URL})
+	cache, err := NewJWKSCache(&JWKSConfig{URL: jwksServer.URL}, WithJWKSHTTPClient(testHTTPClient()))
 	if err != nil {
 		t.Fatalf("failed to create JWKS cache: %v", err)
 	}
@@ -191,7 +197,7 @@ func TestJWKSCache_ConcurrentAccess(t *testing.T) {
 	}))
 	defer jwksServer.Close()
 
-	cache, err := NewJWKSCache(&JWKSConfig{URL: jwksServer.URL})
+	cache, err := NewJWKSCache(&JWKSConfig{URL: jwksServer.URL}, WithJWKSHTTPClient(testHTTPClient()))
 	if err != nil {
 		t.Fatalf("failed to create JWKS cache: %v", err)
 	}
@@ -248,7 +254,7 @@ func TestJWKSCache_OIDCDiscovery(t *testing.T) {
 	cache, err := NewJWKSCache(&JWKSConfig{
 		URL:           discoveryServer.URL,
 		OIDCDiscovery: true,
-	})
+	}, WithJWKSHTTPClient(testHTTPClient()))
 	if err != nil {
 		t.Fatalf("failed to create JWKS cache with OIDC discovery: %v", err)
 	}
@@ -279,7 +285,7 @@ func TestJWKSCache_OIDCDiscoveryMissingJWKSURI(t *testing.T) {
 	_, err := NewJWKSCache(&JWKSConfig{
 		URL:           discoveryServer.URL,
 		OIDCDiscovery: true,
-	})
+	}, WithJWKSHTTPClient(testHTTPClient()))
 	if err == nil {
 		t.Error("expected error when jwks_uri is missing")
 	}
@@ -296,7 +302,7 @@ func TestJWKSCache_LastRefreshAndError(t *testing.T) {
 	}))
 	defer jwksServer.Close()
 
-	cache, err := NewJWKSCache(&JWKSConfig{URL: jwksServer.URL})
+	cache, err := NewJWKSCache(&JWKSConfig{URL: jwksServer.URL}, WithJWKSHTTPClient(testHTTPClient()))
 	if err != nil {
 		t.Fatalf("failed to create JWKS cache: %v", err)
 	}
@@ -326,7 +332,7 @@ func TestJWKSCache_ForceRefresh(t *testing.T) {
 	}))
 	defer jwksServer.Close()
 
-	cache, err := NewJWKSCache(&JWKSConfig{URL: jwksServer.URL})
+	cache, err := NewJWKSCache(&JWKSConfig{URL: jwksServer.URL}, WithJWKSHTTPClient(testHTTPClient()))
 	if err != nil {
 		t.Fatalf("failed to create JWKS cache: %v", err)
 	}
@@ -373,7 +379,7 @@ func TestJWKSCache_WithMetrics(t *testing.T) {
 		},
 	}
 
-	cache, err := NewJWKSCache(&JWKSConfig{URL: jwksServer.URL}, WithJWKSMetrics(metrics))
+	cache, err := NewJWKSCache(&JWKSConfig{URL: jwksServer.URL}, WithJWKSMetrics(metrics), WithJWKSHTTPClient(testHTTPClient()))
 	if err != nil {
 		t.Fatalf("failed to create JWKS cache: %v", err)
 	}

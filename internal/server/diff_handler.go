@@ -277,6 +277,9 @@ func (h *DiffHandler) DiffVulnerabilities(
 }
 
 // DiffContainerImages performs a comprehensive diff between two container images.
+//
+// SECURITY: This method can access local Docker daemon when transport is "daemon".
+// Local transports (docker-daemon://, tarball://, oci-archive://) require localMode.
 func (h *DiffHandler) DiffContainerImages(ctx context.Context, req *connect.Request[diffv1.DiffContainerImagesRequest]) (*connect.Response[diffv1.DiffContainerImagesResponse], error) {
 	if err := internalproto.Validate(req.Msg); err != nil {
 		return nil, connect.NewError(connect.CodeInvalidArgument, err)
@@ -295,6 +298,22 @@ func (h *DiffHandler) DiffContainerImages(ctx context.Context, req *connect.Requ
 	opts := req.Msg.Options
 	if opts == nil {
 		opts = &diffv1.ContainerDiffOptions{}
+	}
+
+	// Security: Block local transports on remote servers
+	if !h.localMode {
+		transport := strings.ToLower(opts.ImageTransport)
+		if transport == "daemon" || transport == "docker-daemon" {
+			return nil, connect.NewError(connect.CodePermissionDenied,
+				fmt.Errorf("docker-daemon transport is not available on remote servers; use remote registry references"))
+		}
+		// Validate both image references don't use local schemes
+		if err := targets.ValidateRemoteTarget(baseImage); err != nil {
+			return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("invalid base_image: %w", err))
+		}
+		if err := targets.ValidateRemoteTarget(targetImage); err != nil {
+			return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("invalid target_image: %w", err))
+		}
 	}
 
 	// Build scan options

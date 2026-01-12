@@ -194,24 +194,43 @@ func (h *SandboxedHandler) buildContainerArgs(req *agentv1.ExecuteRequest) []str
 	}
 
 	// Mount working directory
-	if req.GetWorkDir() != "" {
+	if workDir := req.GetWorkDir(); workDir != "" {
+		// Security: Validate workDir to prevent injection via volume mount
+		// Reject paths with control characters or shell metacharacters
+		if strings.ContainsAny(workDir, "\x00\n\r:") {
+			// Colon is particularly dangerous as it separates host:container paths
+			// Null/newlines could confuse argument parsing
+			// Return empty args to fail safely
+			return []string{"error: invalid work directory path"}
+		}
+
 		mountOpt := "ro" // Read-only by default
 		sandbox := req.GetSandbox()
 		if sandbox == agentv1.SandboxMode_SANDBOX_MODE_WORKSPACE_WRITE ||
 			sandbox == agentv1.SandboxMode_SANDBOX_MODE_FULL_ACCESS {
 			mountOpt = "rw"
 		}
-		args = append(args, "-v", fmt.Sprintf("%s:/workspace:%s", req.GetWorkDir(), mountOpt))
+		args = append(args, "-v", fmt.Sprintf("%s:/workspace:%s", workDir, mountOpt))
 		args = append(args, "-w", "/workspace")
 	}
 
 	// Environment variables
-	args = append(args, "-e", fmt.Sprintf("PROMPT=%s", req.GetPrompt()))
-	if req.GetSystem() != "" {
-		args = append(args, "-e", fmt.Sprintf("SYSTEM=%s", req.GetSystem()))
+	// Security: Sanitize values to prevent injection via environment variables
+	// Newlines could be used to inject additional env vars or commands
+	prompt := strings.ReplaceAll(req.GetPrompt(), "\n", "\\n")
+	prompt = strings.ReplaceAll(prompt, "\r", "\\r")
+	args = append(args, "-e", fmt.Sprintf("PROMPT=%s", prompt))
+
+	if system := req.GetSystem(); system != "" {
+		system = strings.ReplaceAll(system, "\n", "\\n")
+		system = strings.ReplaceAll(system, "\r", "\\r")
+		args = append(args, "-e", fmt.Sprintf("SYSTEM=%s", system))
 	}
-	if req.GetModel() != "" {
-		args = append(args, "-e", fmt.Sprintf("MODEL=%s", req.GetModel()))
+	if model := req.GetModel(); model != "" {
+		// Model names shouldn't have newlines, but sanitize defensively
+		model = strings.ReplaceAll(model, "\n", "")
+		model = strings.ReplaceAll(model, "\r", "")
+		args = append(args, "-e", fmt.Sprintf("MODEL=%s", model))
 	}
 
 	// Image

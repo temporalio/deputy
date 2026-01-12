@@ -4,12 +4,14 @@
 package httputil
 
 import (
+	"context"
 	"net"
 	"net/http"
 	"time"
 
 	"github.com/hashicorp/go-cleanhttp"
 	"github.com/hashicorp/go-retryablehttp"
+	"github.com/picatz/deputy/internal/network"
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 )
 
@@ -58,11 +60,73 @@ func NewTransport() *http.Transport {
 	}
 }
 
+// NewSafeTransport returns an http.Transport with SSRF protection using network.SafeDialer.
+// It blocks connections to private networks, loopback addresses, link-local addresses,
+// and common cloud metadata endpoints. Use this for any HTTP requests to user-controlled URLs.
+//
+// The transport uses the same production-friendly defaults as NewTransport.
+func NewSafeTransport() *http.Transport {
+	dialer := network.NewSafeDialerWithOptions(
+		network.WithDialer(&net.Dialer{
+			Timeout:   DefaultDialTimeout,
+			KeepAlive: DefaultKeepAlive,
+		}),
+	)
+	return &http.Transport{
+		Proxy:                 http.ProxyFromEnvironment,
+		DialContext:           dialer.DialContext,
+		ForceAttemptHTTP2:     true,
+		MaxIdleConns:          DefaultMaxIdleConns,
+		MaxIdleConnsPerHost:   DefaultMaxIdleConnsPerHost,
+		IdleConnTimeout:       DefaultIdleConnTimeout,
+		TLSHandshakeTimeout:   DefaultTLSHandshakeTimeout,
+		ResponseHeaderTimeout: DefaultResponseHeaderTimeout,
+	}
+}
+
+// NewSafeTransportWithOptions returns an http.Transport with SSRF protection and custom SafeDialer options.
+// Use this when you need to customize the SafeDialer behavior (e.g., allow private networks).
+//
+// Example:
+//
+//	transport := NewSafeTransportWithOptions(network.WithAllowPrivate())
+func NewSafeTransportWithOptions(opts ...network.Option) *http.Transport {
+	dialer := network.NewSafeDialerWithOptions(
+		network.WithDialer(&net.Dialer{
+			Timeout:   DefaultDialTimeout,
+			KeepAlive: DefaultKeepAlive,
+		}),
+	)
+	for _, opt := range opts {
+		opt(dialer)
+	}
+	return &http.Transport{
+		Proxy:                 http.ProxyFromEnvironment,
+		DialContext:           dialer.DialContext,
+		ForceAttemptHTTP2:     true,
+		MaxIdleConns:          DefaultMaxIdleConns,
+		MaxIdleConnsPerHost:   DefaultMaxIdleConnsPerHost,
+		IdleConnTimeout:       DefaultIdleConnTimeout,
+		TLSHandshakeTimeout:   DefaultTLSHandshakeTimeout,
+		ResponseHeaderTimeout: DefaultResponseHeaderTimeout,
+	}
+}
+
 // NewClient returns an http.Client with the given timeout and a production transport.
 func NewClient(timeout time.Duration) *http.Client {
 	return &http.Client{
 		Timeout:   timeout,
 		Transport: NewTransport(),
+	}
+}
+
+// NewSafeClient returns an http.Client with SSRF protection using network.SafeDialer.
+// It blocks connections to private networks, loopback addresses, link-local addresses,
+// and common cloud metadata endpoints. Use this for any HTTP requests to user-controlled URLs.
+func NewSafeClient(timeout time.Duration) *http.Client {
+	return &http.Client{
+		Timeout:   timeout,
+		Transport: NewSafeTransport(),
 	}
 }
 
@@ -114,6 +178,26 @@ func NewRetryableClientWithConfig(timeout time.Duration, retryMax int, retryWait
 	return client
 }
 
+// NewSafeRetryableClient returns an http.Client with automatic retry support and SSRF protection.
+// It combines exponential backoff for transient failures with SafeDialer to block connections
+// to private networks, loopback addresses, link-local addresses, and cloud metadata endpoints.
+//
+// Use this for external API calls to user-controlled URLs that need retry support.
+func NewSafeRetryableClient(timeout time.Duration) *http.Client {
+	rc := retryablehttp.NewClient()
+	rc.Logger = nil
+	rc.HTTPClient = &http.Client{
+		Timeout:   timeout,
+		Transport: NewSafeTransport(),
+	}
+	rc.RetryMax = DefaultRetryMax
+	rc.RetryWaitMin = DefaultRetryWaitMin
+	rc.RetryWaitMax = DefaultRetryWaitMax
+	client := rc.StandardClient()
+	client.Timeout = timeout
+	return client
+}
+
 // InstrumentedTransport wraps an http.RoundTripper with OpenTelemetry tracing.
 // Creates client spans for outgoing HTTP requests with proper context propagation.
 // If base is nil, uses http.DefaultTransport.
@@ -141,6 +225,33 @@ func NewInstrumentedRetryableClient(timeout time.Duration) *http.Client {
 	rc.HTTPClient = cleanhttp.DefaultPooledClient()
 	rc.HTTPClient.Timeout = timeout
 	rc.HTTPClient.Transport = InstrumentedTransport(rc.HTTPClient.Transport)
+	rc.RetryMax = DefaultRetryMax
+	rc.RetryWaitMin = DefaultRetryWaitMin
+	rc.RetryWaitMax = DefaultRetryWaitMax
+	client := rc.StandardClient()
+	client.Timeout = timeout
+	return client
+}
+
+// NewSafeInstrumentedClient returns an http.Client with both SSRF protection and OTel tracing.
+// Combines SafeDialer protection with distributed tracing for user-controlled URLs.
+func NewSafeInstrumentedClient(timeout time.Duration) *http.Client {
+	return &http.Client{
+		Timeout:   timeout,
+		Transport: InstrumentedTransport(NewSafeTransport()),
+	}
+}
+
+// NewSafeInstrumentedRetryableClient returns a retryable http.Client with SSRF protection and OTel tracing.
+// Combines SafeDialer protection, automatic retry support, and distributed tracing.
+// Use this for external API calls to user-controlled URLs that need both retry and observability.
+func NewSafeInstrumentedRetryableClient(timeout time.Duration) *http.Client {
+	rc := retryablehttp.NewClient()
+	rc.Logger = nil
+	rc.HTTPClient = &http.Client{
+		Timeout:   timeout,
+		Transport: InstrumentedTransport(NewSafeTransport()),
+	}
 	rc.RetryMax = DefaultRetryMax
 	rc.RetryWaitMin = DefaultRetryWaitMin
 	rc.RetryWaitMax = DefaultRetryWaitMax
@@ -185,6 +296,16 @@ type ClientConfig struct {
 
 	// Instrumentation
 	EnableOTel bool
+
+	// Security
+	// EnableSSRFProtection enables SafeDialer to block connections to private networks,
+	// loopback addresses, link-local addresses, and cloud metadata endpoints.
+	// Use this for clients that make requests to user-controlled URLs.
+	EnableSSRFProtection bool
+
+	// SafeDialerOptions allows customizing SafeDialer behavior when EnableSSRFProtection is true.
+	// For example, use network.WithAllowPrivate() to allow internal network access.
+	SafeDialerOptions []network.Option
 }
 
 // DefaultClientConfig returns a ClientConfig with production-ready defaults.
@@ -207,13 +328,30 @@ func DefaultClientConfig() ClientConfig {
 }
 
 // NewTransportFromConfig creates an http.Transport from the provided configuration.
+// If EnableSSRFProtection is true, the transport uses SafeDialer for SSRF protection.
 func NewTransportFromConfig(cfg ClientConfig) *http.Transport {
-	return &http.Transport{
-		Proxy: http.ProxyFromEnvironment,
-		DialContext: (&net.Dialer{
+	var dialContext func(ctx context.Context, network, address string) (net.Conn, error)
+
+	if cfg.EnableSSRFProtection {
+		// Use SafeDialer with custom options
+		opts := append([]network.Option{
+			network.WithDialer(&net.Dialer{
+				Timeout:   cfg.DialTimeout,
+				KeepAlive: cfg.KeepAlive,
+			}),
+		}, cfg.SafeDialerOptions...)
+		dialer := network.NewSafeDialerWithOptions(opts...)
+		dialContext = dialer.DialContext
+	} else {
+		dialContext = (&net.Dialer{
 			Timeout:   cfg.DialTimeout,
 			KeepAlive: cfg.KeepAlive,
-		}).DialContext,
+		}).DialContext
+	}
+
+	return &http.Transport{
+		Proxy:                 http.ProxyFromEnvironment,
+		DialContext:           dialContext,
 		ForceAttemptHTTP2:     true,
 		MaxIdleConns:          cfg.MaxIdleConns,
 		MaxIdleConnsPerHost:   cfg.MaxIdleConnsPerHost,
@@ -221,6 +359,13 @@ func NewTransportFromConfig(cfg ClientConfig) *http.Transport {
 		TLSHandshakeTimeout:   cfg.TLSHandshakeTimeout,
 		ResponseHeaderTimeout: cfg.ResponseHeaderTimeout,
 	}
+}
+
+// NewSafeTransportFromConfig creates an http.Transport with SSRF protection from the provided configuration.
+// This is a convenience function equivalent to setting EnableSSRFProtection=true in the config.
+func NewSafeTransportFromConfig(cfg ClientConfig) *http.Transport {
+	cfg.EnableSSRFProtection = true
+	return NewTransportFromConfig(cfg)
 }
 
 // NewClientFromConfig creates an http.Client configured from ClientConfig.
@@ -255,10 +400,22 @@ func newRetryableClientFromConfig(cfg ClientConfig) *http.Client {
 
 	// Apply transport configuration
 	if t, ok := pooledClient.Transport.(*http.Transport); ok {
-		t.DialContext = (&net.Dialer{
-			Timeout:   cfg.DialTimeout,
-			KeepAlive: cfg.KeepAlive,
-		}).DialContext
+		if cfg.EnableSSRFProtection {
+			// Use SafeDialer with custom options
+			opts := append([]network.Option{
+				network.WithDialer(&net.Dialer{
+					Timeout:   cfg.DialTimeout,
+					KeepAlive: cfg.KeepAlive,
+				}),
+			}, cfg.SafeDialerOptions...)
+			dialer := network.NewSafeDialerWithOptions(opts...)
+			t.DialContext = dialer.DialContext
+		} else {
+			t.DialContext = (&net.Dialer{
+				Timeout:   cfg.DialTimeout,
+				KeepAlive: cfg.KeepAlive,
+			}).DialContext
+		}
 		t.MaxIdleConns = cfg.MaxIdleConns
 		t.MaxIdleConnsPerHost = cfg.MaxIdleConnsPerHost
 		t.IdleConnTimeout = cfg.IdleConnTimeout

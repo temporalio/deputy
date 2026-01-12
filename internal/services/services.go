@@ -80,7 +80,7 @@ func NewWithConfig(cfg Config) (*Services, error) {
 			Secrets:       secretsHandler,
 			Diff:          server.NewDiffHandler(server.WithDiffLocalMode()),
 			Graph:         server.NewGraphHandler(server.WithGraphLocalMode()),
-			Remediation:   server.NewRemediationHandler(),
+			Remediation:   server.NewRemediationHandler(server.WithRemediationLocalMode()),
 			Vulnerability: vulnHandler,
 			Policy:        server.NewPolicyHandler(server.WithPolicyLocalMode()),
 		}, nil

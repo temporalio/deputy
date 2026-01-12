@@ -339,6 +339,12 @@ func (h *InventoryHandler) RegisterExtractor(
 ) (*connect.Response[inventoryv1.RegisterExtractorResponse], error) {
 	span := otel.SpanFromContext(ctx)
 
+	// Security: RegisterExtractor requires local mode since plugins run locally
+	if !h.localMode {
+		return nil, connect.NewError(connect.CodePermissionDenied,
+			fmt.Errorf("RegisterExtractor is not available on remote servers"))
+	}
+
 	if err := protoconv.Validate(req.Msg); err != nil {
 		otel.SetSpanError(span, err)
 		return nil, connect.NewError(connect.CodeInvalidArgument, err)
@@ -377,6 +383,12 @@ func (h *InventoryHandler) UnregisterExtractor(
 	req *connect.Request[inventoryv1.UnregisterExtractorRequest],
 ) (*connect.Response[inventoryv1.UnregisterExtractorResponse], error) {
 	span := otel.SpanFromContext(ctx)
+
+	// Security: UnregisterExtractor requires local mode since plugins run locally
+	if !h.localMode {
+		return nil, connect.NewError(connect.CodePermissionDenied,
+			fmt.Errorf("UnregisterExtractor is not available on remote servers"))
+	}
 
 	if err := protoconv.Validate(req.Msg); err != nil {
 		otel.SetSpanError(span, err)
