@@ -19,6 +19,7 @@ import (
 	targetv1 "github.com/picatz/deputy/gen/deputy/target/v1"
 	vulnerabilityv1 "github.com/picatz/deputy/gen/deputy/vulnerability/v1"
 	exprpb "google.golang.org/genproto/googleapis/api/expr/v1alpha1"
+	"google.golang.org/protobuf/proto"
 )
 
 var (
@@ -126,13 +127,19 @@ func NewFilterEnv() (*cel.Env, error) {
 
 // Evaluate compiles the provided CEL source and evaluates it against the input
 // document. Input keys are exposed to the CEL program as top-level identifiers.
+// This is a low-level function for ad-hoc CEL evaluation; prefer Engine.EvaluateAll
+// with typed PolicyInput protos for policy evaluation.
 func Evaluate(ctx context.Context, source string, input map[string]any) (any, error) {
 	// Clone input to avoid side effects on the caller's map.
 	input = maps.Clone(input)
 	if input == nil {
 		input = map[string]any{}
 	}
-	seedDefaultVariables(input)
+	// Convert any proto messages in the input map to native maps for CEL evaluation.
+	// This allows tests to pass proto objects directly in the input map.
+	input = convertProtosInMap(input)
+	// Inject constants for cleaner policy authoring
+	seedConstants(input)
 	env, err := envForInput(input)
 	if err != nil {
 		return nil, err
@@ -150,6 +157,49 @@ func Evaluate(ctx context.Context, source string, input map[string]any) (any, er
 		return nil, err
 	}
 	return convertRefVal(out)
+}
+
+// convertProtosInMap recursively converts any proto.Message values in the map to
+// map[string]any for CEL evaluation. This enables tests to pass proto objects
+// directly in input maps.
+func convertProtosInMap(m map[string]any) map[string]any {
+	if m == nil {
+		return nil
+	}
+	out := make(map[string]any, len(m))
+	for k, v := range m {
+		out[k] = convertProtoValue(v)
+	}
+	return out
+}
+
+// convertProtoValue converts a value, recursively handling proto messages, maps, and slices.
+func convertProtoValue(v any) any {
+	if v == nil {
+		return nil
+	}
+	// Check if it's a proto message
+	if msg, ok := v.(proto.Message); ok {
+		converted, err := ProtoToMap(msg)
+		if err != nil {
+			// If conversion fails, return the original value
+			return v
+		}
+		return converted
+	}
+	// Handle maps
+	if m, ok := v.(map[string]any); ok {
+		return convertProtosInMap(m)
+	}
+	// Handle slices
+	if s, ok := v.([]any); ok {
+		out := make([]any, len(s))
+		for i, elem := range s {
+			out[i] = convertProtoValue(elem)
+		}
+		return out
+	}
+	return v
 }
 
 // Compile verifies that the CEL source parses and type-checks using the

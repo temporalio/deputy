@@ -16,8 +16,9 @@ func examplePolicyPath(name string) string {
 
 func TestEvaluatePoliciesForCommand_SbomComponentLicenses(t *testing.T) {
 	pol := examplePolicyPath("license-allowlist.yaml")
+	// Proto-first: pkg is the canonical variable for package info
 	payload := map[string]any{
-		"component": map[string]any{
+		"pkg": map[string]any{
 			"licenses": []any{"GPL-3.0"},
 		},
 	}
@@ -29,7 +30,12 @@ func TestEvaluatePoliciesForCommand_SbomComponentLicenses(t *testing.T) {
 
 func TestEvaluatePoliciesForCommand_Scan_NoPanic(t *testing.T) {
 	pol := examplePolicyPath("license-allowlist.yaml")
-	payload := map[string]any{} // no licenses present
+	// Proto-first: pkg must be present with empty licenses for the policy to evaluate
+	payload := map[string]any{
+		"pkg": map[string]any{
+			"licenses": []any{}, // empty licenses - should trigger warn, not deny
+		},
+	}
 	actions, err := evaluatePoliciesForCommand(context.Background(), []string{pol}, payload, "scan", policy.EntrypointScanReport, &bytes.Buffer{})
 	if err != nil {
 		t.Fatalf("evaluatePoliciesForCommand: %v", err)

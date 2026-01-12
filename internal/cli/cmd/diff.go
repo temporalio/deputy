@@ -63,8 +63,11 @@ func AddDiffCommand(root *cobra.Command, c *services.Clients) {
 		ecosystems                                     []string
 		debugMatcher                                   bool
 		policyPaths                                    []string
-		useLocalDaemon                                 bool
+		useLocalDaemon                                 bool   // deprecated, use --source
+		source                                         string // source type: remote, docker-daemon
 		outputFormat                                   string
+		outPath                                        string
+		platform                                       string
 	)
 
 	cmd := &cobra.Command{
@@ -132,16 +135,30 @@ Can be disabled with --skip-vuln-scan for faster execution.`,
 				}
 			}
 
+			// Set up output writer
+			var outW io.Writer = cmd.OutOrStdout()
+			if outPath != "" && outPath != "-" {
+				f, err := os.Create(outPath)
+				if err != nil {
+					return fmt.Errorf("failed to create output file: %w", err)
+				}
+				defer f.Close()
+				outW = f
+			}
+
 			// Check if both arguments are container image references
 			// BUT only if they don't look like Git refs in the current repo context
 			if len(args) == 2 && isContainerDiffInContext(args[0], args[1], repo) {
+				// Determine if using local daemon (--source docker-daemon or deprecated --local-daemon)
+				useDaemon := useLocalDaemon || source == "docker-daemon" || source == "daemon" || source == "local"
 				opts := containerDiffOpts{
 					skipVulnScan:   skipVulnScan,
 					policyPaths:    policyPaths,
-					useLocalDaemon: useLocalDaemon,
+					useLocalDaemon: useDaemon,
 					format:         outputFormat,
+					platform:       platform,
 				}
-				return runContainerDiff(cmd.Context(), c, args[0], args[1], opts, cmd.OutOrStdout(), cmd.ErrOrStderr())
+				return runContainerDiff(cmd.Context(), c, args[0], args[1], opts, outW, cmd.ErrOrStderr())
 			}
 			scanOpts := inv.ScanOptions{Ecosystems: ecosystems}
 			matcher, matcherErr := inv.GetDependencyMatcher(scanOpts)
@@ -152,7 +169,7 @@ Can be disabled with --skip-vuln-scan for faster execution.`,
 			if err != nil {
 				return fmt.Errorf("failed to parse references: %w", err)
 			}
-			return runDiffAnalysis(cmd.Context(), c, repo, baseRef, targetRef, !skipVulnScan, enrichLicenses, licenseSource, publishedAfterStr, publishedBeforeStr, asOfStr, ignoreUnfixed, showUnchanged, unchangedThreshold, policyPaths, scanOpts, matcher, debugMatcher, outputFormat, cmd.OutOrStdout(), cmd.ErrOrStderr())
+			return runDiffAnalysis(cmd.Context(), c, repo, baseRef, targetRef, !skipVulnScan, enrichLicenses, licenseSource, publishedAfterStr, publishedBeforeStr, asOfStr, ignoreUnfixed, showUnchanged, unchangedThreshold, policyPaths, scanOpts, matcher, debugMatcher, outputFormat, outW, cmd.ErrOrStderr())
 		},
 		Example: `BASIC USAGE:
   # Compare current work with default branch (beginner-friendly)
@@ -258,10 +275,14 @@ CONTAINER IMAGE EXAMPLES:
 
   # Use locally cached images from Docker daemon (avoids rate limits)
   docker pull nginx:1.24 && docker pull nginx:1.25
-  deputy diff --local-daemon nginx:1.24 nginx:1.25
+  deputy diff --source docker-daemon nginx:1.24 nginx:1.25
+  deputy diff -s docker-daemon nginx:1.24 nginx:1.25
 
-  # Explicit docker-daemon scheme (equivalent to --local-daemon)
+  # Explicit docker-daemon scheme (equivalent to --source docker-daemon)
   deputy diff docker-daemon://nginx:1.24 docker-daemon://nginx:1.25
+
+  # Specify platform for multi-arch images
+  deputy diff --platform linux/amd64 nginx:1.24 nginx:1.25
 
 ERROR HANDLING:
 If you specify an invalid reference, deputy will suggest similar valid references
@@ -273,8 +294,8 @@ PERFORMANCE TIPS:
 • Remote branch comparisons are cached locally for better performance`,
 	}
 
-	cmd.Flags().StringVarP(&repoPath, "repo", "r", "", "Path to the repository (defaults to current directory)")
-	cmd.Flags().BoolVarP(&skipVulnScan, "skip-vuln-scan", "s", false, "Skip vulnerability scanning (faster execution)")
+	cmd.Flags().StringVar(&repoPath, "repo", "", "Path to the repository (defaults to current directory)")
+	cmd.Flags().BoolVar(&skipVulnScan, "skip-vuln-scan", false, "Skip vulnerability scanning (faster execution)")
 	cmd.Flags().BoolVar(&enrichLicenses, "licenses", false, "Include license information for changed dependencies")
 	cmd.Flags().StringVar(&licenseSource, "license-source", "depsdev", "License information source: depsdev | scan | both")
 	cmd.Flags().StringVar(&publishedBeforeStr, "published-before", "", "Only include vulnerabilities published before this date (YYYY, YYYY-MM, YYYY-MM-DD, or RFC3339)")
@@ -283,11 +304,14 @@ PERFORMANCE TIPS:
 	cmd.Flags().BoolVar(&ignoreUnfixed, "ignore-unfixed", false, "Ignore vulnerabilities without fixes in diff scan output")
 	cmd.Flags().BoolVar(&showUnchanged, "show-unchanged", false, "Always show vulnerabilities in unchanged dependencies (overrides quiet behavior)")
 	cmd.Flags().StringVar(&unchangedThreshold, "unchanged-threshold", "critical", "Auto-show unchanged vulns at or above this severity: none|low|med|high|critical|any")
-	cmd.Flags().StringSliceVar(&ecosystems, "ecosystems", []string{"all"}, "Ecosystems to include: go, npm, pypi, maven, rubygems, cargo, nuget, hex, pub, cocoapods, packagist, github-actions, haskell, r, cpp (default: all)")
+	cmd.Flags().StringSliceVarP(&ecosystems, "ecosystems", "e", []string{"all"}, "Ecosystems to include: go, npm, pypi, maven, rubygems, cargo, nuget, hex, pub, cocoapods, packagist, github-actions, haskell, r, cpp (default: all)")
 	cmd.Flags().BoolVar(&debugMatcher, "debug-matcher", false, "Print which changed files were considered dependency manifests/lockfiles")
 	cmd.Flags().StringArrayVar(&policyPaths, "policy", nil, "Path to CEL policy files or bundles to evaluate against diff results (repeatable)")
-	cmd.Flags().BoolVar(&useLocalDaemon, "local-daemon", false, "Use local Docker daemon instead of pulling from remote registry (requires 'docker pull' first)")
-	cmd.Flags().StringVar(&outputFormat, "format", "text", "Output format: text | json")
+	cmd.Flags().BoolVar(&useLocalDaemon, "local-daemon", false, "Use local Docker daemon instead of pulling from remote registry (deprecated: use --source docker-daemon)")
+	cmd.Flags().StringVarP(&source, "source", "s", "", "Target source type for container images: remote, docker-daemon")
+	cmd.Flags().StringVarP(&outputFormat, "format", "f", "text", "Output format: text | json")
+	cmd.Flags().StringVarP(&outPath, "output", "o", "-", "Output file path or '-' for stdout")
+	cmd.Flags().StringVar(&platform, "platform", "", "Platform for container images (os/arch[/variant])")
 
 	root.AddCommand(cmd)
 }

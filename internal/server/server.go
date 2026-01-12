@@ -25,11 +25,13 @@ import (
 	"github.com/picatz/deputy/gen/deputy/sbom/v1/sbomv1connect"
 	"github.com/picatz/deputy/gen/deputy/scan/v1/scanv1connect"
 	"github.com/picatz/deputy/gen/deputy/secrets/v1/secretsv1connect"
+	targetv1 "github.com/picatz/deputy/gen/deputy/target/v1"
 	"github.com/picatz/deputy/internal/auth/jwt"
 	"github.com/picatz/deputy/internal/cache/memory"
 	"github.com/picatz/deputy/internal/logs"
 	"github.com/picatz/deputy/internal/otel"
 	"github.com/picatz/deputy/internal/policy"
+	"google.golang.org/protobuf/proto"
 )
 
 // Config configures the Deputy server.
@@ -820,41 +822,107 @@ func policyInterceptor(policies []policy.Source) connect.UnaryInterceptorFunc {
 
 // buildPolicyPayload constructs the payload map for policy evaluation.
 // It includes JWT claims, request metadata, target info, and env context.
-func buildPolicyPayload(ctx context.Context, req connect.AnyRequest, entrypoint policy.Entrypoint) map[string]any {
-	payload := make(map[string]any)
-
-	payload["env"] = &policyv1.Environment{
+func buildPolicyPayload(ctx context.Context, req connect.AnyRequest, entrypoint policy.Entrypoint) proto.Message {
+	// Build common fields
+	env := &policyv1.Environment{
 		Command:    "server",
 		Entrypoint: entrypoint.String(),
 	}
 
-	// Add JWT claims if present (from authn middleware)
+	// Build JWT claims proto
+	var jwtClaims *policyv1.JWTClaims
 	if claims := jwt.ClaimsFromAuthn(ctx); claims != nil {
-		payload["jwt"] = claims.ToMap()
+		jwtClaims = &policyv1.JWTClaims{
+			Anonymous: false,
+			Sub:       claims.Subject,
+			Iss:       claims.Issuer,
+			Aud:       claims.Audience,
+			Exp:       claims.ExpiresAt,
+			Iat:       claims.IssuedAt,
+			Nbf:       claims.NotBefore,
+			Jti:       claims.JWTID,
+		}
+		if len(claims.Custom) > 0 {
+			jwtClaims.CustomClaims = make(map[string]string, len(claims.Custom))
+			for k, v := range claims.Custom {
+				jwtClaims.CustomClaims[k] = fmt.Sprint(v)
+			}
+		}
 	} else {
-		payload["jwt"] = jwt.AnonymousClaims()
+		jwtClaims = &policyv1.JWTClaims{Anonymous: true}
 	}
 
-	// Add request metadata
-	// The request object contains information about what operation is being requested
-	requestInfo := map[string]any{
-		"procedure": req.Spec().Procedure,
+	// Build service request
+	svcReq := &policyv1.ServiceRequest{
+		Procedure: req.Spec().Procedure,
 	}
 
-	// Try to extract target from the request message
-	// This is a best-effort extraction from protobuf messages
+	// Build target if extractable
+	var target *targetv1.Target
 	if msg := req.Any(); msg != nil {
-		if target := extractTargetFromMessage(msg); target != "" {
-			requestInfo["target"] = target
-			payload["target"] = map[string]any{
-				"display": target,
+		if targetStr := extractTargetFromMessage(msg); targetStr != "" {
+			svcReq.Target = targetStr
+			target = &targetv1.Target{
+				DisplayPath: targetStr,
 			}
 		}
 	}
 
-	payload["request"] = requestInfo
-
-	return payload
+	// Return the appropriate typed input based on entrypoint
+	switch entrypoint {
+	case policy.EntrypointServiceScanRequest:
+		return &policyv1.ServiceScanRequestPolicyInput{
+			Jwt:     jwtClaims,
+			Request: svcReq,
+			Target:  target,
+			Env:     env,
+		}
+	case policy.EntrypointServiceListRequest:
+		return &policyv1.ServiceListRequestPolicyInput{
+			Jwt:     jwtClaims,
+			Request: svcReq,
+			Target:  target,
+			Env:     env,
+		}
+	case policy.EntrypointServiceSBOMRequest:
+		return &policyv1.ServiceSbomRequestPolicyInput{
+			Jwt:     jwtClaims,
+			Request: svcReq,
+			Target:  target,
+			Env:     env,
+		}
+	case policy.EntrypointServiceDiffRequest:
+		// Diff has base_target and target_target instead of target
+		return &policyv1.ServiceDiffRequestPolicyInput{
+			Jwt:          jwtClaims,
+			Request:      svcReq,
+			BaseTarget:   target,
+			TargetTarget: target,
+			Env:          env,
+		}
+	case policy.EntrypointServiceSecretsRequest:
+		return &policyv1.ServiceSecretsRequestPolicyInput{
+			Jwt:     jwtClaims,
+			Request: svcReq,
+			Target:  target,
+			Env:     env,
+		}
+	case policy.EntrypointServiceGraphRequest:
+		return &policyv1.ServiceGraphRequestPolicyInput{
+			Jwt:     jwtClaims,
+			Request: svcReq,
+			Target:  target,
+			Env:     env,
+		}
+	default:
+		// Fallback to scan request for unknown entrypoints
+		return &policyv1.ServiceScanRequestPolicyInput{
+			Jwt:     jwtClaims,
+			Request: svcReq,
+			Target:  target,
+			Env:     env,
+		}
+	}
 }
 
 // extractTargetFromMessage attempts to extract the target field from request messages.

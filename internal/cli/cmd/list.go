@@ -4,6 +4,7 @@ import (
 	"cmp"
 	"fmt"
 	"io"
+	"net/url"
 	"os"
 	"slices"
 	"strings"
@@ -50,14 +51,18 @@ func AddListCommand(root *cobra.Command, c *services.Clients) {
 SUPPORTED TARGETS:
 • Local directory or repository (default: current directory)
 • Remote Git repository (https://github.com/owner/repo)
+• Specific Git ref (--ref v1.0.0) - scans that exact snapshot
 • Container image (docker://nginx:1.25 or --source remote nginx:1.25)
-• Specific Git ref (--ref v1.0.0)
+• Go/Rust binary file (./myapp, /usr/local/bin/tool)
+• SBOM file (sbom.json, sbom.cdx, sbom.spdx)
+• Single PURL (pkg:golang/github.com/foo/bar@v1.0.0)
 
 This command provides a flat list of all discovered dependencies, including
 transitive ones. It is designed for:
 • Scripting and automation (easy to grep/jq)
 • Inventory auditing
 • Verifying dependency detection
+• Comparing dependencies across git refs
 
 OUTPUT FORMATS:
 • text: Tab-separated values (PURL, Direct/Indirect)
@@ -71,8 +76,14 @@ The output mirrors what would be included in an SBOM but in a more lightweight f
   # List dependencies in a remote repo
   deputy list https://github.com/example/repo
 
-  # List dependencies at a specific Git ref
+  # List dependencies at a specific Git ref (scans that snapshot)
   deputy list --ref v1.0.0
+  deputy list --ref main
+  deputy list --ref abc1234
+
+  # List dependencies in the current working tree (uncommitted changes)
+  deputy list --ref WORKING
+  deputy list --ref HEAD
 
 CONTAINER IMAGES:
   # List packages in a container image
@@ -86,6 +97,18 @@ CONTAINER IMAGES:
 
   # Specify platform for multi-arch images
   deputy list --source remote --platform linux/amd64 nginx:latest
+
+BINARIES & SBOMS:
+  # List dependencies compiled into a Go binary
+  deputy list ./myapp
+  deputy list /usr/local/bin/deputy
+
+  # List packages from an SBOM file
+  deputy list sbom.json
+  deputy list sbom.cdx
+
+  # List from a single PURL
+  deputy list pkg:golang/github.com/spf13/cobra@v1.8.0
 
 FILTERING & FORMATTING:
   # Output as JSON
@@ -202,13 +225,13 @@ FILTERING & FORMATTING:
 		},
 	}
 
-	cmd.Flags().StringVar(&ref, "ref", "HEAD", "Git reference (commit, tag, branch)")
-	cmd.Flags().StringSliceVar(&ecos, "ecosystems", []string{"all"}, "Ecosystems to include: go, npm, pypi, maven, rubygems, cargo, nuget, hex, pub, cocoapods, packagist, github-actions, haskell, r, cpp (default: all)")
+	cmd.Flags().StringVarP(&ref, "ref", "r", "HEAD", "Git reference (commit, tag, branch)")
+	cmd.Flags().StringSliceVarP(&ecos, "ecosystems", "e", []string{"all"}, "Ecosystems to include: go, npm, pypi, maven, rubygems, cargo, nuget, hex, pub, cocoapods, packagist, github-actions, haskell, r, cpp (default: all)")
 	cmd.Flags().StringVarP(&format, "format", "f", "text", "Output format: text | tsv | json")
 	cmd.Flags().StringVarP(&outPath, "output", "o", "-", "Output file path or '-' for stdout")
 	cmd.Flags().BoolVar(&noHeader, "no-header", false, "Omit header row for text/tsv formats")
 	cmd.Flags().BoolVar(&onlyDirect, "only-direct", false, "Only include direct dependencies")
-	cmd.Flags().StringVar(&source, "source", "", "Target source type: remote, docker-daemon, tarball, oci-archive, oci-layout")
+	cmd.Flags().StringVarP(&source, "source", "s", "", "Target source type: remote, docker-daemon, tarball, oci-archive, oci-layout")
 	cmd.Flags().StringVar(&platform, "platform", "", "Platform for container images (os/arch[/variant])")
 
 	root.AddCommand(cmd)
@@ -252,11 +275,27 @@ func protoPackagesToListItems(pkgs []*dependencyv1.Package) []ListItem {
 			Name:      pkg.Name,
 			Version:   pkg.Version,
 			IsDirect:  pkg.Direct,
-			PURL:      pkg.Purl,
+			PURL:      decodePURLForDisplay(pkg.Purl),
 			Sources:   strings.Join(pkg.Locations, ", "),
 		})
 	}
 	return items
+}
+
+// decodePURLForDisplay decodes percent-encoded characters in a PURL for
+// human-readable display. This converts %2F to /, %28 to (, etc.
+// If decoding fails, returns the original string.
+func decodePURLForDisplay(purl string) string {
+	if purl == "" {
+		return purl
+	}
+	// URL decode to make PURLs more readable
+	// e.g., "pkg:docker/library%2Fgolang@1.25" -> "pkg:docker/library/golang@1.25"
+	decoded, err := url.PathUnescape(purl)
+	if err != nil {
+		return purl
+	}
+	return decoded
 }
 
 // writeListText prints a simple space-separated table (with optional header).

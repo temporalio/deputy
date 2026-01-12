@@ -16,6 +16,33 @@ import (
 	vulnerabilityv1 "github.com/picatz/deputy/gen/deputy/vulnerability/v1"
 )
 
+// deepCloneMap creates a deep copy of a map[string]any for testing.
+func deepCloneMap(m map[string]any) map[string]any {
+	if m == nil {
+		return map[string]any{}
+	}
+	out := make(map[string]any, len(m))
+	for k, v := range m {
+		out[k] = deepCloneValue(v)
+	}
+	return out
+}
+
+func deepCloneValue(v any) any {
+	switch val := v.(type) {
+	case map[string]any:
+		return deepCloneMap(val)
+	case []any:
+		clone := make([]any, len(val))
+		for i, elem := range val {
+			clone[i] = deepCloneValue(elem)
+		}
+		return clone
+	default:
+		return v
+	}
+}
+
 func TestNewEngine_Empty(t *testing.T) {
 	eng, err := NewEngine(nil)
 	if err != nil {
@@ -332,7 +359,7 @@ func TestEvaluateAll_PayloadNotModified(t *testing.T) {
 		"key": "value",
 	}
 
-	_, err = eng.EvaluateAll(t.Context(), original, "scan", "scan_report")
+	_, err = eng.EvaluateAllMap(t.Context(), original, "scan", "scan_report")
 	if err != nil {
 		t.Fatalf("EvaluateAll() error: %v", err)
 	}
@@ -690,20 +717,20 @@ func TestDowngradeAdvisory(t *testing.T) {
 	}
 }
 
-func TestDeepCloneMap(t *testing.T) {
+func TestCloneMap(t *testing.T) {
 	t.Run("nil map returns empty", func(t *testing.T) {
-		result := deepCloneMap(nil)
+		result := cloneMap(nil)
 		if result == nil {
-			t.Error("deepCloneMap(nil) should return empty map, not nil")
+			t.Error("cloneMap(nil) should return empty map, not nil")
 		}
 		if len(result) != 0 {
-			t.Error("deepCloneMap(nil) should return empty map")
+			t.Error("cloneMap(nil) should return empty map")
 		}
 	})
 
 	t.Run("shallow clone is independent", func(t *testing.T) {
 		original := map[string]any{"key": "value"}
-		clone := deepCloneMap(original)
+		clone := cloneMap(original)
 
 		clone["key"] = "modified"
 		if original["key"] != "value" {
@@ -711,68 +738,48 @@ func TestDeepCloneMap(t *testing.T) {
 		}
 	})
 
-	t.Run("deep clone is independent for nested maps", func(t *testing.T) {
-		original := map[string]any{
-			"nested": map[string]any{
-				"key": "value",
-			},
-		}
-		clone := deepCloneMap(original)
+	t.Run("adding keys to clone does not affect original", func(t *testing.T) {
+		original := map[string]any{"key": "value"}
+		clone := cloneMap(original)
 
-		// Modify the nested map in the clone
+		clone["new_key"] = "new_value"
+		if _, exists := original["new_key"]; exists {
+			t.Error("adding key to clone should not affect original")
+		}
+	})
+
+	t.Run("shallow clone shares nested references", func(t *testing.T) {
+		// This is expected behavior for shallow clone - nested maps are shared
+		nested := map[string]any{"key": "value"}
+		original := map[string]any{"nested": nested}
+		clone := cloneMap(original)
+
+		// Verify both point to same nested map (shallow clone behavior)
 		nestedClone := clone["nested"].(map[string]any)
+		nestedOriginal := original["nested"].(map[string]any)
 		nestedClone["key"] = "modified"
 
-		// Original should be unaffected
-		nestedOriginal := original["nested"].(map[string]any)
-		if nestedOriginal["key"] != "value" {
-			t.Error("modifying nested clone should not affect original")
+		// With shallow clone, original IS affected (this is expected)
+		if nestedOriginal["key"] != "modified" {
+			t.Error("shallow clone should share nested map references")
 		}
 	})
 
-	t.Run("deep clone is independent for slices", func(t *testing.T) {
+	t.Run("preserves all keys", func(t *testing.T) {
 		original := map[string]any{
-			"list": []any{"a", "b", "c"},
+			"a": 1,
+			"b": "two",
+			"c": true,
 		}
-		clone := deepCloneMap(original)
+		clone := cloneMap(original)
 
-		// Modify the slice in the clone
-		listClone := clone["list"].([]any)
-		listClone[0] = "modified"
-
-		// Original should be unaffected
-		listOriginal := original["list"].([]any)
-		if listOriginal[0] != "a" {
-			t.Error("modifying slice clone should not affect original")
+		if len(clone) != len(original) {
+			t.Errorf("clone has %d keys, want %d", len(clone), len(original))
 		}
-	})
-
-	t.Run("deeply nested structures are cloned", func(t *testing.T) {
-		original := map[string]any{
-			"level1": map[string]any{
-				"level2": map[string]any{
-					"level3": []any{
-						map[string]any{"key": "value"},
-					},
-				},
-			},
-		}
-		clone := deepCloneMap(original)
-
-		// Navigate to deeply nested value and modify
-		l1 := clone["level1"].(map[string]any)
-		l2 := l1["level2"].(map[string]any)
-		l3 := l2["level3"].([]any)
-		innerMap := l3[0].(map[string]any)
-		innerMap["key"] = "modified"
-
-		// Original should be unaffected
-		origL1 := original["level1"].(map[string]any)
-		origL2 := origL1["level2"].(map[string]any)
-		origL3 := origL2["level3"].([]any)
-		origInnerMap := origL3[0].(map[string]any)
-		if origInnerMap["key"] != "value" {
-			t.Error("modifying deeply nested clone should not affect original")
+		for k, v := range original {
+			if clone[k] != v {
+				t.Errorf("clone[%q] = %v, want %v", k, clone[k], v)
+			}
 		}
 	})
 }
@@ -801,7 +808,7 @@ func TestEvaluateAll_ProgramError(t *testing.T) {
 		},
 	}
 
-	_, err := eng.EvaluateAll(t.Context(), nil, "", "")
+	_, err := eng.EvaluateAllMap(t.Context(), nil, "", "")
 	if err == nil {
 		t.Fatal("expected error from failing program")
 	}
@@ -1027,7 +1034,7 @@ vulnerabilities.filter(v, v.isCritical()).size() > 0
 				t.Fatalf("NewEngine() error: %v", err)
 			}
 
-			actions, err := eng.EvaluateAll(t.Context(), tc.payload, "", "")
+			actions, err := eng.EvaluateAllMap(t.Context(), tc.payload, "", "")
 			if err != nil {
 				t.Fatalf("EvaluateAll() error: %v", err)
 			}

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"connectrpc.com/connect"
@@ -246,15 +247,11 @@ func (h *GraphHandler) WhyDependency(
 		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to build graph: %w", err))
 	}
 
-	// Find the dependency node
+	// Find matching dependency nodes
+	matches := findMatchingNodes(g, dependency)
 	var targetNode *graph.Node
-	for n := range g.Nodes() {
-		if strings.EqualFold(n.Name, dependency) ||
-			strings.EqualFold(n.Purl, dependency) ||
-			strings.Contains(strings.ToLower(n.Name), strings.ToLower(dependency)) {
-			targetNode = n
-			break
-		}
+	if len(matches) > 0 {
+		targetNode = matches[0]
 	}
 
 	response := &graphv1.WhyDependencyResponse{
@@ -264,6 +261,34 @@ func (h *GraphHandler) WhyDependency(
 		},
 		Dependency: dependency,
 		Found:      targetNode != nil,
+	}
+
+	// Add warning if multiple packages matched the query
+	if len(matches) > 1 {
+		// Only show alternatives if there are other high-quality matches (score >= 2)
+		// This avoids showing noisy substring matches as suggestions
+		queryLower := strings.ToLower(dependency)
+		var goodAlternatives []string
+		for i := 1; i < len(matches) && len(goodAlternatives) < 3; i++ {
+			if matchScore(matches[i].Name, queryLower) >= 2 {
+				goodAlternatives = append(goodAlternatives, lastNSegments(matches[i].Name, 2))
+			}
+		}
+
+		if len(goodAlternatives) > 0 {
+			// There are other good matches - suggest them
+			hint := fmt.Sprintf("%d packages match %q. Also try:", len(matches), dependency)
+			response.Warnings = append(response.Warnings, hint)
+			for _, alt := range goodAlternatives {
+				response.Warnings = append(response.Warnings, fmt.Sprintf("  → %s", alt))
+			}
+		} else if len(matches) > 5 {
+			// Many matches but none are great - just mention --list
+			hint := fmt.Sprintf("%d packages match %q. Use --list to see all.", len(matches), dependency)
+			response.Warnings = append(response.Warnings, hint)
+		}
+		// For 2-5 matches with no great alternatives, don't show a warning at all
+		// The user got what they wanted
 	}
 
 	if targetNode != nil {
@@ -407,4 +432,94 @@ func (h *GraphHandler) QueryGraph(
 	}
 
 	return connect.NewResponse(response), nil
+}
+
+// findMatchingNodes finds nodes matching the query pattern.
+// Supports glob patterns via path.Match or simple substring matching.
+// Results are sorted with best matches first: exact matches, then final segment
+// matches, then substring matches, all sorted alphabetically within each tier.
+//
+// Examples:
+//   - "cobra" matches any package containing "cobra", prefers github.com/spf13/cobra
+//   - "*/cobra" matches packages ending with /cobra
+//   - "spf13/*" matches all packages under spf13
+func findMatchingNodes(g *graph.Graph, query string) []*graph.Node {
+	queryLower := strings.ToLower(query)
+	isGlob := strings.ContainsAny(query, "*?[")
+
+	var matches []*graph.Node
+
+	for node := range g.Nodes() {
+		nameLower := strings.ToLower(node.Name)
+
+		if isGlob {
+			// Use path.Match for glob patterns
+			if matched, _ := filepath.Match(queryLower, nameLower); matched {
+				matches = append(matches, node)
+			}
+		} else {
+			// Simple substring matching - case insensitive
+			if strings.Contains(nameLower, queryLower) {
+				matches = append(matches, node)
+			}
+		}
+	}
+
+	// Sort by match quality: exact > final segment > substring, then alphabetically
+	slices.SortFunc(matches, func(a, b *graph.Node) int {
+		scoreA := matchScore(a.Name, queryLower)
+		scoreB := matchScore(b.Name, queryLower)
+		if scoreA != scoreB {
+			return scoreB - scoreA // Higher score first
+		}
+		return strings.Compare(a.Name, b.Name)
+	})
+
+	return matches
+}
+
+// lastNSegments returns the last n segments of a package path.
+// E.g., lastNSegments("github.com/go-git/go-git/v5", 2) returns "go-git/v5"
+func lastNSegments(name string, n int) string {
+	parts := strings.Split(name, "/")
+	if len(parts) <= n {
+		return name
+	}
+	return strings.Join(parts[len(parts)-n:], "/")
+}
+
+// matchScore returns a quality score for how well a package name matches a query.
+// Higher scores indicate better matches:
+//   - 3: exact match (name equals query)
+//   - 2: final segment match (query matches the last path component)
+//   - 1: substring match
+func matchScore(name, queryLower string) int {
+	nameLower := strings.ToLower(name)
+
+	// Exact match
+	if nameLower == queryLower {
+		return 3
+	}
+
+	// Final segment match (e.g., "cobra" matches "github.com/spf13/cobra")
+	// Also handles versioned paths like "go-git/v5" → match "go-git"
+	finalSegment := nameLower
+	if idx := strings.LastIndex(nameLower, "/"); idx >= 0 {
+		finalSegment = nameLower[idx+1:]
+	}
+	// Strip version suffix for comparison (v5, v2, etc.)
+	if strings.HasPrefix(finalSegment, "v") && len(finalSegment) <= 3 {
+		// This is a version segment like /v5, check the segment before it
+		if idx := strings.LastIndex(strings.TrimSuffix(nameLower, "/"+finalSegment), "/"); idx >= 0 {
+			finalSegment = strings.TrimSuffix(nameLower, "/"+finalSegment)[idx+1:]
+		} else {
+			finalSegment = strings.TrimSuffix(nameLower, "/"+finalSegment)
+		}
+	}
+	if finalSegment == queryLower {
+		return 2
+	}
+
+	// Substring match
+	return 1
 }

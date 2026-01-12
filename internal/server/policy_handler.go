@@ -10,6 +10,7 @@ import (
 	policyv1 "github.com/picatz/deputy/gen/deputy/policy/v1"
 	"github.com/picatz/deputy/gen/deputy/policy/v1/policyv1connect"
 	"github.com/picatz/deputy/internal/policy"
+	"google.golang.org/protobuf/proto"
 )
 
 // PolicyHandler implements the PolicyService.
@@ -57,17 +58,9 @@ func (h *PolicyHandler) Evaluate(
 	}
 
 	// Build CEL activation based on context type
-	activation, entrypoint, err := h.buildActivation(msg)
+	input, entrypoint, command, err := h.buildActivation(msg)
 	if err != nil {
 		return nil, connect.NewError(connect.CodeInvalidArgument, err)
-	}
-
-	// Determine command from environment if present
-	command := ""
-	if env, ok := activation["env"].(map[string]any); ok {
-		if cmd, ok := env["command"].(string); ok {
-			command = cmd
-		}
 	}
 
 	// Create engine and evaluate
@@ -76,7 +69,7 @@ func (h *PolicyHandler) Evaluate(
 		return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("compile policies: %w", err))
 	}
 
-	actions, err := engine.EvaluateAll(ctx, activation, command, entrypoint)
+	actions, err := engine.EvaluateAll(ctx, input, command, entrypoint)
 	if err != nil {
 		policyErrors = append(policyErrors, &policyv1.PolicyError{
 			Message: fmt.Sprintf("evaluation error: %v", err),
@@ -238,62 +231,51 @@ func (h *PolicyHandler) loadPolicySources(protoSources []*policyv1.PolicySource)
 	return sources, errors
 }
 
-// buildActivation constructs CEL activation from request input.
-func (h *PolicyHandler) buildActivation(msg *policyv1.EvaluateRequest) (map[string]any, string, error) {
+// buildActivation constructs the policy input proto from request input.
+// Returns the typed proto, entrypoint, and command.
+func (h *PolicyHandler) buildActivation(msg *policyv1.EvaluateRequest) (proto.Message, string, string, error) {
 	switch input := msg.Input.(type) {
 	case *policyv1.EvaluateRequest_ScanVulnerability:
-		return map[string]any{
-			"vulnerability": input.ScanVulnerability.Vulnerability,
-			"pkg":           input.ScanVulnerability.Pkg,
-			"env":           input.ScanVulnerability.Env,
-			"target":        input.ScanVulnerability.Target,
-		}, string(policy.EntrypointScanVulnerability), nil
+		return input.ScanVulnerability,
+			string(policy.EntrypointScanVulnerability),
+			commandFromEnv(input.ScanVulnerability.Env), nil
 
 	case *policyv1.EvaluateRequest_ScanReport:
-		return map[string]any{
-			"vulnerabilities": input.ScanReport.Vulnerabilities,
-			"packages":        input.ScanReport.Packages,
-			"env":             input.ScanReport.Env,
-			"target":          input.ScanReport.Target,
-			"stats":           input.ScanReport.Stats,
-		}, string(policy.EntrypointScanReport), nil
+		return input.ScanReport,
+			string(policy.EntrypointScanReport),
+			commandFromEnv(input.ScanReport.Env), nil
 
 	case *policyv1.EvaluateRequest_GoArtifactRequest:
-		return map[string]any{
-			"request":         input.GoArtifactRequest.Request,
-			"jwt":             input.GoArtifactRequest.Jwt,
-			"env":             input.GoArtifactRequest.Env,
-			"vulnerabilities": input.GoArtifactRequest.Vulnerabilities,
-		}, string(policy.EntrypointGoArtifactRequest), nil
+		return input.GoArtifactRequest,
+			string(policy.EntrypointGoArtifactRequest),
+			commandFromEnv(input.GoArtifactRequest.Env), nil
 
 	case *policyv1.EvaluateRequest_NpmArtifactRequest:
-		return map[string]any{
-			"request":         input.NpmArtifactRequest.Request,
-			"jwt":             input.NpmArtifactRequest.Jwt,
-			"env":             input.NpmArtifactRequest.Env,
-			"vulnerabilities": input.NpmArtifactRequest.Vulnerabilities,
-		}, string(policy.EntrypointNpmArtifactRequest), nil
+		return input.NpmArtifactRequest,
+			string(policy.EntrypointNpmArtifactRequest),
+			commandFromEnv(input.NpmArtifactRequest.Env), nil
 
 	case *policyv1.EvaluateRequest_PypiArtifactRequest:
-		return map[string]any{
-			"request":         input.PypiArtifactRequest.Request,
-			"jwt":             input.PypiArtifactRequest.Jwt,
-			"env":             input.PypiArtifactRequest.Env,
-			"vulnerabilities": input.PypiArtifactRequest.Vulnerabilities,
-		}, string(policy.EntrypointPypiArtifactRequest), nil
+		return input.PypiArtifactRequest,
+			string(policy.EntrypointPypiArtifactRequest),
+			commandFromEnv(input.PypiArtifactRequest.Env), nil
 
 	case *policyv1.EvaluateRequest_OciArtifactRequest:
-		return map[string]any{
-			"request":         input.OciArtifactRequest.Request,
-			"jwt":             input.OciArtifactRequest.Jwt,
-			"env":             input.OciArtifactRequest.Env,
-			"vulnerabilities": input.OciArtifactRequest.Vulnerabilities,
-			"image":           input.OciArtifactRequest.Image,
-		}, string(policy.EntrypointOCIArtifactRequest), nil
+		return input.OciArtifactRequest,
+			string(policy.EntrypointOCIArtifactRequest),
+			commandFromEnv(input.OciArtifactRequest.Env), nil
 
 	default:
-		return nil, "", fmt.Errorf("no evaluation input provided")
+		return nil, "", "", fmt.Errorf("no evaluation input provided")
 	}
+}
+
+// commandFromEnv extracts the command from the environment proto.
+func commandFromEnv(env *policyv1.Environment) string {
+	if env == nil {
+		return ""
+	}
+	return env.Command
 }
 
 // Helper functions

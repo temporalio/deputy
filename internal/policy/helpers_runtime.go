@@ -760,18 +760,34 @@ func severityRank(s string) int {
 	}
 }
 
-// extractSeverityString extracts the severity level as a string from a proto Finding.
+// extractSeverityString extracts the severity level as a string from a proto Finding or map.
+// Works with both proto Finding messages and map-based vulnerability objects (after ProtoToMap conversion).
 func extractSeverityString(val ref.Val) string {
+	// Try proto extraction first
 	finding := extractFindingProto(val)
-	if finding == nil {
+	if finding != nil {
+		if advisory := finding.GetAdvisory(); advisory != nil {
+			if severity := advisory.GetSeverity(); severity != nil {
+				return severityLevelProtoToString(severity.GetLevel())
+			}
+		}
 		return ""
 	}
-	if advisory := finding.GetAdvisory(); advisory != nil {
-		if severity := advisory.GetSeverity(); severity != nil {
-			return severityLevelProtoToString(severity.GetLevel())
-		}
+	// Fall back to map extraction (for data that went through ProtoToMap)
+	vulnMap := extractVulnMap(val)
+	if vulnMap == nil || len(vulnMap) == 0 {
+		return ""
 	}
-	return ""
+	// Navigate: vulnerability.advisory.severity.level
+	advisory, ok := vulnMap["advisory"].(map[string]any)
+	if !ok {
+		return ""
+	}
+	severity, ok := advisory["severity"].(map[string]any)
+	if !ok {
+		return ""
+	}
+	return severityLevelToString(severity["level"])
 }
 
 // evaluateSSVC derives SSVC decision from a proto Finding message.
@@ -836,12 +852,10 @@ func extractFindingProto(val ref.Val) *vulnerabilityv1.Finding {
 			return finding
 		}
 	}
-	// Try native conversion
-	if native, err := val.ConvertToNative(reflect.TypeOf((*vulnerabilityv1.Finding)(nil))); err == nil {
-		if finding, ok := native.(*vulnerabilityv1.Finding); ok {
-			return finding
-		}
-	}
+	// NOTE: We intentionally do NOT call ConvertToNative here.
+	// When the input is a map (after ProtoToMap conversion), ConvertToNative can panic
+	// with "reflect: call of reflect.Value.Set on zero Value". Instead, we return nil
+	// and let callers fall back to map-based extraction.
 	return nil
 }
 

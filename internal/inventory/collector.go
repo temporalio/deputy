@@ -3,8 +3,15 @@ package inventory
 import (
 	"context"
 	"fmt"
+	"io"
 	"log/slog"
+	"os"
+	"path/filepath"
+	"strings"
 	"time"
+
+	"github.com/package-url/packageurl-go"
+	"github.com/protobom/protobom/pkg/sbom"
 
 	git "github.com/go-git/go-git/v5"
 	"github.com/go-git/go-git/v5/plumbing"
@@ -19,6 +26,7 @@ import (
 	"github.com/picatz/deputy/internal/targets"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
+	"google.golang.org/protobuf/encoding/protojson"
 )
 
 // workspaceProvider is implemented by types that provide a workspace.FS.
@@ -419,6 +427,9 @@ func CollectAtCommit(ctx context.Context, repo *git.Repository, commitHash plumb
 	}
 	span.SetAttributes(attribute.Int("deputy.package.count", len(pkgs)))
 
+	// Try to get direct dependencies from the commit snapshot
+	direct, _ := compare.CollectGoDirectModulesFromCommit(repo, commitHash)
+
 	result := Result{
 		Target: Target{
 			Kind:       targets.KindGit,
@@ -426,9 +437,349 @@ func CollectAtCommit(ctx context.Context, repo *git.Repository, commitHash plumb
 		},
 		GeneratedAt: time.Now().UTC(),
 		Packages:    pkgs,
+		Direct:      direct,
 	}
 
 	return &Execution{Result: result}, nil
+}
+
+// CollectRepositoryAtRef extracts inventory from a git repository at a specific reference.
+// Unlike CollectRepository which scans the working tree, this function materializes
+// the tree at the specified ref into memory and scans that snapshot.
+//
+// This provides consistent behavior with `deputy diff` which properly scans at refs.
+func CollectRepositoryAtRef(ctx context.Context, target, ref string, opts Options) (*Execution, error) {
+	ctx, span := otel.StartSpan(ctx, "deputy.inventory.repository_at_ref",
+		trace.WithAttributes(
+			attribute.String("deputy.target.path", target),
+			attribute.String("deputy.target.ref", ref),
+		))
+	defer span.End()
+
+	// Resolve target to get repo path
+	resolved, err := resolveRepositoryTarget(ctx, target, ref)
+	if err != nil {
+		otel.SetSpanError(span, err)
+		return nil, err
+	}
+	defer resolved.cleanup()
+
+	// Open the git repository
+	repo, err := git.PlainOpen(resolved.localPath)
+	if err != nil {
+		otel.SetSpanError(span, err)
+		return nil, fmt.Errorf("failed to open git repository: %w", err)
+	}
+
+	// Resolve the ref to a commit hash
+	hash, err := repo.ResolveRevision(plumbing.Revision(ref))
+	if err != nil {
+		otel.SetSpanError(span, err)
+		return nil, fmt.Errorf("failed to resolve ref %q: %w", ref, err)
+	}
+	span.SetAttributes(attribute.String("deputy.target.commit", hash.String()))
+
+	// Scan at the specific commit
+	pkgs, err := ScanPackagesAtCommitSnapshot(ctx, repo, *hash, ScanOptions{Ecosystems: opts.Ecosystems})
+	if err != nil {
+		otel.SetSpanError(span, err)
+		return nil, fmt.Errorf("failed to scan packages at ref %q: %w", ref, err)
+	}
+	span.SetAttributes(attribute.Int("deputy.package.count", len(pkgs)))
+
+	// Get direct dependencies from the commit
+	direct, _ := compare.CollectGoDirectModulesFromCommit(repo, *hash)
+
+	// Get origin URL
+	originURL := ""
+	if remote, err := repo.Remote("origin"); err == nil && remote != nil {
+		if urls := remote.Config().URLs; len(urls) > 0 {
+			originURL = urls[0]
+		}
+	}
+
+	result := Result{
+		Target: Target{
+			Kind:         targets.KindGit,
+			DisplayPath:  resolved.displayPath,
+			LocalPath:    resolved.localPath,
+			Ref:          ref,
+			EffectiveRef: ref,
+			CommitHash:   hash.String(),
+			OriginURL:    originURL,
+			Cloned:       resolved.cloned,
+			Provenance:   resolved.provenance,
+		},
+		GeneratedAt: time.Now().UTC(),
+		Packages:    pkgs,
+		Direct:      direct,
+	}
+
+	return &Execution{Result: result}, nil
+}
+
+// CollectBinary extracts inventory from a Go or Rust binary file.
+// It uses SCALIBR's gobinary and cargoauditable extractors.
+//
+// For Go binaries, this extracts the embedded buildinfo which includes:
+//   - The main module path and version
+//   - All dependency module paths and versions
+//
+// For Rust binaries built with cargo-auditable, this extracts:
+//   - All crate dependencies with versions
+//
+// Note: Standard Rust binaries without cargo-auditable metadata will return
+// an empty inventory, not an error.
+func CollectBinary(ctx context.Context, path string, opts Options) (*Execution, error) {
+	ctx, span := otel.StartSpan(ctx, "deputy.inventory.binary",
+		trace.WithAttributes(
+			attribute.String("deputy.target.path", path),
+		))
+	defer span.End()
+
+	// Detect binary type
+	binType := targets.DetectBinaryType(path)
+	span.SetAttributes(attribute.String("deputy.binary.type", binType.String()))
+
+	var pkgs []*extractor.Package
+	var err error
+
+	switch binType {
+	case targets.BinaryTypeGo:
+		pkgs, err = scanGoBinary(ctx, path)
+	default:
+		// Try SCALIBR scan for any binary (handles Rust and unknown types)
+		pkgs, err = scanBinaryWithSCALIBR(ctx, path, opts)
+	}
+
+	if err != nil {
+		otel.SetSpanError(span, err)
+		return nil, err
+	}
+
+	span.SetAttributes(attribute.Int("deputy.package.count", len(pkgs)))
+
+	result := Result{
+		Target: Target{
+			Kind:        targets.KindBinary,
+			DisplayPath: path,
+			LocalPath:   path,
+		},
+		GeneratedAt: time.Now().UTC(),
+		Packages:    pkgs,
+		Direct:      make(map[string]bool), // Binary deps are all "direct" in the sense they're compiled in
+	}
+
+	return &Execution{Result: result}, nil
+}
+
+// scanGoBinary extracts dependencies from a Go binary using debug/buildinfo.
+// This is more efficient than SCALIBR for Go binaries since it uses the stdlib directly.
+func scanGoBinary(ctx context.Context, path string) ([]*extractor.Package, error) {
+	info, err := targets.ReadGoBinaryInfo(path)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read Go binary info: %w", err)
+	}
+
+	// Count: main module + all deps
+	pkgs := make([]*extractor.Package, 0, 1+len(info.Deps))
+
+	// Add main module if present
+	if info.Main.Path != "" {
+		pkgs = append(pkgs, &extractor.Package{
+			Name:      info.Main.Path,
+			Version:   info.Main.Version,
+			PURLType:  "golang",
+			Locations: []string{path},
+		})
+	}
+
+	// Add all dependencies
+	for _, dep := range info.Deps {
+		if dep.Path == "" {
+			continue
+		}
+		// Skip replaced modules - use the replacement instead
+		if dep.Replace != nil {
+			dep = dep.Replace
+		}
+		pkgs = append(pkgs, &extractor.Package{
+			Name:      dep.Path,
+			Version:   dep.Version,
+			PURLType:  "golang",
+			Locations: []string{path},
+		})
+	}
+
+	return pkgs, nil
+}
+
+// scanBinaryWithSCALIBR scans a binary file using SCALIBR extractors.
+// This handles Rust binaries with cargo-auditable and serves as a fallback.
+func scanBinaryWithSCALIBR(ctx context.Context, path string, opts Options) ([]*extractor.Package, error) {
+	// Create a workspace containing just the binary's parent directory
+	// This allows SCALIBR's FileRequired to properly filter
+	ws, err := workspace.NewDir(filepath.Dir(path))
+	if err != nil {
+		return nil, fmt.Errorf("failed to create workspace: %w", err)
+	}
+	defer ws.Close()
+
+	// Use specific binary extractors
+	return ScanPackagesWorking(ctx, ws, ScanOptions{
+		Ecosystems: []string{"go/binary", "rust/cargoauditable"},
+	})
+}
+
+// CollectPURL extracts inventory for a single PURL.
+// This creates a minimal inventory with just the one package.
+func CollectPURL(ctx context.Context, purlStr string, opts Options) (*Execution, error) {
+	ctx, span := otel.StartSpan(ctx, "deputy.inventory.purl",
+		trace.WithAttributes(
+			attribute.String("deputy.target.purl", purlStr),
+		))
+	defer span.End()
+
+	pu, err := parsePURL(purlStr)
+	if err != nil {
+		otel.SetSpanError(span, err)
+		return nil, err
+	}
+
+	// Create a single package entry
+	pkg := &extractor.Package{
+		Name:     purlDisplayName(pu),
+		Version:  pu.Version,
+		PURLType: pu.Type,
+	}
+
+	result := Result{
+		Target: Target{
+			Kind:        targets.KindPURL,
+			DisplayPath: purlStr,
+		},
+		GeneratedAt: time.Now().UTC(),
+		Packages:    []*extractor.Package{pkg},
+		Direct:      map[string]bool{purlStr: true}, // PURLs are always direct
+	}
+
+	span.SetAttributes(attribute.Int("deputy.package.count", 1))
+
+	return &Execution{Result: result}, nil
+}
+
+// parsePURL parses a PURL string into a PackageURL.
+func parsePURL(purlStr string) (packageurl.PackageURL, error) {
+	// Handle pkg: prefix
+	if strings.HasPrefix(purlStr, "pkg:") {
+		return packageurl.FromString(purlStr)
+	}
+	// Try with pkg: prefix if not already present
+	return packageurl.FromString("pkg:" + purlStr)
+}
+
+// purlDisplayName returns a human-readable display name for a package URL.
+func purlDisplayName(pu packageurl.PackageURL) string {
+	name := pu.Name
+	if pu.Namespace != "" {
+		name = pu.Namespace + "/" + pu.Name
+	}
+	return name
+}
+
+// CollectSBOM extracts inventory from an SBOM file or stdin.
+// Supports protobom-json, cyclonedx-json, and spdx-json formats.
+func CollectSBOM(ctx context.Context, target string, opts Options) (*Execution, error) {
+	ctx, span := otel.StartSpan(ctx, "deputy.inventory.sbom",
+		trace.WithAttributes(
+			attribute.String("deputy.target.sbom", target),
+		))
+	defer span.End()
+
+	var data []byte
+	var err error
+	var displayPath string
+
+	if target == "-" {
+		// Read from stdin
+		data, err = io.ReadAll(os.Stdin)
+		displayPath = "<stdin>"
+	} else {
+		data, err = os.ReadFile(target)
+		displayPath = target
+	}
+	if err != nil {
+		otel.SetSpanError(span, err)
+		return nil, fmt.Errorf("failed to read SBOM: %w", err)
+	}
+
+	doc, err := parseSBOMDocument(data)
+	if err != nil {
+		otel.SetSpanError(span, err)
+		return nil, fmt.Errorf("failed to parse SBOM: %w", err)
+	}
+
+	pkgs := sbomDocToPackages(doc)
+
+	result := Result{
+		Target: Target{
+			Kind:        targets.KindSBOM,
+			DisplayPath: displayPath,
+		},
+		GeneratedAt: time.Now().UTC(),
+		Packages:    pkgs,
+		Direct:      make(map[string]bool), // SBOM doesn't distinguish direct/transitive
+	}
+
+	span.SetAttributes(attribute.Int("deputy.package.count", len(pkgs)))
+
+	return &Execution{Result: result}, nil
+}
+
+// parseSBOMDocument parses SBOM data into a protobom Document.
+// Supports protobom-json, cyclonedx-json, and spdx-json formats.
+func parseSBOMDocument(data []byte) (*sbom.Document, error) {
+	// Try protobom format first
+	doc := &sbom.Document{}
+	if err := protojson.Unmarshal(data, doc); err == nil && doc.NodeList != nil {
+		return doc, nil
+	}
+	// For other formats, we'd need additional parsing
+	// For now, only support protobom-json to avoid import cycle with sbomx
+	return nil, fmt.Errorf("unsupported SBOM format (only protobom-json supported in inventory collector)")
+}
+
+// sbomDocToPackages converts a protobom Document to extractor.Package slice.
+func sbomDocToPackages(doc *sbom.Document) []*extractor.Package {
+	if doc == nil || doc.NodeList == nil {
+		return nil
+	}
+
+	pkgs := make([]*extractor.Package, 0, len(doc.NodeList.Nodes))
+	for _, node := range doc.NodeList.Nodes {
+		if node == nil {
+			continue
+		}
+
+		pkg := &extractor.Package{
+			Name:     node.Name,
+			Version:  node.Version,
+			Licenses: node.Licenses,
+		}
+
+		// Extract PURL if available
+		if node.Identifiers != nil {
+			if purl, ok := node.Identifiers[int32(sbom.SoftwareIdentifierType_PURL)]; ok {
+				if pu, err := packageurl.FromString(purl); err == nil {
+					pkg.PURLType = pu.Type
+				}
+			}
+		}
+
+		pkgs = append(pkgs, pkg)
+	}
+
+	return pkgs
 }
 
 // resolvedTarget holds the result of target resolution.

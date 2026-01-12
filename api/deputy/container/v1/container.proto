@@ -35,6 +35,20 @@ message ImageInfo {
 
   // History contains build history entries showing Dockerfile commands.
   repeated HistoryEntry history = 3;
+
+  // Image is the full image reference including registry, repository, and tag/digest.
+  // Example: "gcr.io/myproject/app:v1.2.3" or "ghcr.io/owner/repo@sha256:abc123"
+  // This field is used by policy expressions with imageRef() helper.
+  string image = 4;
+
+  // Registry is the container registry hostname (e.g., "docker.io", "gcr.io").
+  string registry = 5;
+
+  // Repository is the image repository path (e.g., "library/nginx", "myproject/app").
+  string repository = 6;
+
+  // Tag is the image tag if specified (e.g., "latest", "v1.2.3").
+  string tag = 7;
 }
 
 // ImageConfig represents the extracted configuration from a container image.

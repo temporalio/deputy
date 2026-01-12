@@ -78,39 +78,35 @@ func TestCelExtensions(t *testing.T) {
 }
 
 func TestEvaluatePkgHelper(t *testing.T) {
+	// Proto-first: Tests pass pkg directly in the input map.
+	// The typed PolicyInput protos (e.g., ScanVulnerabilityPolicyInput) have pkg as a first-class field.
 	tests := []struct {
 		name     string
 		input    map[string]any
 		expected string // expected pkg.name
 	}{
 		{
-			name: "component package proto",
+			name: "pkg from package proto",
 			input: map[string]any{
-				"component": &dependencyv1.Package{Name: "comp-pkg", Version: "1.0.0"},
+				"pkg": &dependencyv1.Package{Name: "test-pkg", Version: "1.0.0"},
 			},
-			expected: "comp-pkg",
+			expected: "test-pkg",
 		},
 		{
-			name: "request proxy proto fallback",
+			name: "pkg with component also present",
 			input: map[string]any{
-				"request": &policyv1.ProxyRequest{Package: "req-pkg", Version: "2.0.0"},
-			},
-			expected: "req-pkg",
-		},
-		{
-			name: "request module name fallback",
-			input: map[string]any{
-				"request": &policyv1.ProxyRequest{Module: "mod-name", Version: "1.0.0"},
-			},
-			expected: "mod-name",
-		},
-		{
-			name: "component takes precedence over request",
-			input: map[string]any{
+				"pkg":       &dependencyv1.Package{Name: "pkg-name"},
 				"component": &dependencyv1.Package{Name: "comp-pkg"},
-				"request":   &policyv1.ProxyRequest{Package: "req-pkg"},
 			},
-			expected: "comp-pkg",
+			expected: "pkg-name",
+		},
+		{
+			name: "pkg with request also present",
+			input: map[string]any{
+				"pkg":     &dependencyv1.Package{Name: "pkg-name"},
+				"request": &policyv1.ProxyRequest{Package: "req-pkg"},
+			},
+			expected: "pkg-name",
 		},
 	}
 
@@ -130,11 +126,11 @@ func TestEvaluatePkgHelper(t *testing.T) {
 }
 
 func TestPkgHelperDefaults(t *testing.T) {
-	// Test that pkg fields have sensible defaults when not provided,
-	// allowing policies to use them directly without ?.orValue() boilerplate.
+	// Proto-first: Tests pass pkg directly in the input map.
+	// Tests verify that Package proto fields have expected default values.
 	t.Run("licenses defaults to empty list", func(t *testing.T) {
 		input := map[string]any{
-			"component": &dependencyv1.Package{Name: "test-pkg"},
+			"pkg": &dependencyv1.Package{Name: "test-pkg"},
 		}
 		// This should work without ?.orValue() because licenses defaults to []
 		src := `pkg.licenses.size() == 0`
@@ -149,7 +145,7 @@ func TestPkgHelperDefaults(t *testing.T) {
 
 	t.Run("licenses exists works without orValue", func(t *testing.T) {
 		input := map[string]any{
-			"component": &dependencyv1.Package{Name: "test-pkg"},
+			"pkg": &dependencyv1.Package{Name: "test-pkg"},
 		}
 		// This should work without ?.orValue()
 		src := `!pkg.licenses.exists(l, l == "GPL-3.0")`
@@ -164,7 +160,7 @@ func TestPkgHelperDefaults(t *testing.T) {
 
 	t.Run("version defaults to empty string", func(t *testing.T) {
 		input := map[string]any{
-			"component": &dependencyv1.Package{Name: "test-pkg"},
+			"pkg": &dependencyv1.Package{Name: "test-pkg"},
 		}
 		src := `pkg.version == ""`
 		val, err := Evaluate(t.Context(), src, input)
@@ -178,7 +174,7 @@ func TestPkgHelperDefaults(t *testing.T) {
 
 	t.Run("ecosystem defaults to empty string", func(t *testing.T) {
 		input := map[string]any{
-			"component": &dependencyv1.Package{Name: "test-pkg"},
+			"pkg": &dependencyv1.Package{Name: "test-pkg"},
 		}
 		src := `pkg.ecosystem == ""`
 		val, err := Evaluate(t.Context(), src, input)
@@ -192,7 +188,7 @@ func TestPkgHelperDefaults(t *testing.T) {
 
 	t.Run("actual values override defaults", func(t *testing.T) {
 		input := map[string]any{
-			"component": &dependencyv1.Package{
+			"pkg": &dependencyv1.Package{
 				Name:      "test-pkg",
 				Version:   "1.2.3",
 				Ecosystem: "npm",
@@ -211,7 +207,7 @@ func TestPkgHelperDefaults(t *testing.T) {
 
 	t.Run("string methods work on default version", func(t *testing.T) {
 		input := map[string]any{
-			"component": &dependencyv1.Package{Name: "test-pkg"},
+			"pkg": &dependencyv1.Package{Name: "test-pkg"},
 		}
 		// String methods should work on empty string default
 		src := `!pkg.version.startsWith("v") && !pkg.version.matches(".*alpha.*")`
@@ -224,10 +220,10 @@ func TestPkgHelperDefaults(t *testing.T) {
 		}
 	})
 
-	t.Run("pkg always exists with defaults even without component/request", func(t *testing.T) {
-		// When there's no component or request, pkg should still exist with all defaults
+	t.Run("pkg with all defaults", func(t *testing.T) {
+		// Empty package proto should have empty fields
 		input := map[string]any{
-			"env": &policyv1.Environment{Command: "scan"},
+			"pkg": &dependencyv1.Package{},
 		}
 		src := `pkg.name == "" && pkg.version == "" && pkg.ecosystem == "" && pkg.licenses.size() == 0`
 		val, err := Evaluate(t.Context(), src, input)
@@ -235,14 +231,14 @@ func TestPkgHelperDefaults(t *testing.T) {
 			t.Fatalf("Evaluate() error = %v", err)
 		}
 		if b, ok := val.(bool); !ok || !b {
-			t.Errorf("expected pkg to exist with all defaults when no component/request present")
+			t.Errorf("expected pkg to have all empty defaults")
 		}
 	})
 
 	t.Run("name defaults to empty string with empty package", func(t *testing.T) {
 		// Empty package proto should have empty name
 		input := map[string]any{
-			"component": &dependencyv1.Package{Licenses: []string{"MIT"}},
+			"pkg": &dependencyv1.Package{Licenses: []string{"MIT"}},
 		}
 		src := `pkg.name == ""`
 		val, err := Evaluate(t.Context(), src, input)
@@ -256,21 +252,28 @@ func TestPkgHelperDefaults(t *testing.T) {
 }
 
 func TestImageHelper(t *testing.T) {
-	t.Run("image nil when no image data", func(t *testing.T) {
+	// Proto-first: image is passed directly as containerv1.ImageInfo.
+	// Image provenance (registry, repository, tag) is accessed via target.provenance.
+
+	t.Run("image nil when not provided", func(t *testing.T) {
+		// Proto-first: when image is not provided, it's a null value.
+		// Use optional types to check: image.?config returns optional empty.
 		input := map[string]any{
-			"env": &policyv1.Environment{Command: "scan"},
+			"image": nil, // Explicitly null
+			"env":   &policyv1.Environment{Command: "scan"},
 		}
+		// Check that image is null/empty using CEL optional chaining
 		src := `image == null`
 		val, err := Evaluate(t.Context(), src, input)
 		if err != nil {
 			t.Fatalf("Evaluate() error = %v", err)
 		}
 		if b, ok := val.(bool); !ok || !b {
-			t.Errorf("expected image to be null when no image data present")
+			t.Errorf("expected image == null to be true when nil")
 		}
 	})
 
-	t.Run("image from target proto with provenance", func(t *testing.T) {
+	t.Run("target.provenance for image registry/repository", func(t *testing.T) {
 		input := map[string]any{
 			"target": &targetv1.Target{
 				Kind:        targetv1.TargetKind_TARGET_KIND_CONTAINER_IMAGE,
@@ -282,56 +285,34 @@ func TestImageHelper(t *testing.T) {
 				},
 			},
 		}
-		src := `image.registry == "ghcr.io" && image.repository == "acme/app" && image.tag == "v1.0.0"`
+		src := `target.provenance["registry"] == "ghcr.io" && target.provenance["repository"] == "acme/app"`
 		val, err := Evaluate(t.Context(), src, input)
 		if err != nil {
 			t.Fatalf("Evaluate() error = %v", err)
 		}
 		if b, ok := val.(bool); !ok || !b {
-			t.Errorf("expected image fields to match target provenance data")
+			t.Errorf("expected target.provenance to contain registry and repository")
 		}
 	})
 
-	t.Run("image reference from target provenance with digest", func(t *testing.T) {
-		input := map[string]any{
-			"target": &targetv1.Target{
-				Kind:        targetv1.TargetKind_TARGET_KIND_CONTAINER_IMAGE,
-				DisplayPath: "docker.io/library/alpine@sha256:abc123",
-				Provenance: map[string]string{
-					"registry":   "docker.io",
-					"repository": "library/alpine",
-					"digest":     "sha256:abc123",
-				},
-			},
-		}
-		src := `image.reference == "sha256:abc123"`
-		val, err := Evaluate(t.Context(), src, input)
-		if err != nil {
-			t.Fatalf("Evaluate() error = %v", err)
-		}
-		if b, ok := val.(bool); !ok || !b {
-			t.Errorf("expected image.reference to be digest")
-		}
-	})
-
-	t.Run("image.image from target display_path", func(t *testing.T) {
+	t.Run("target.display_path for image reference", func(t *testing.T) {
 		input := map[string]any{
 			"target": &targetv1.Target{
 				Kind:        targetv1.TargetKind_TARGET_KIND_CONTAINER_IMAGE,
 				DisplayPath: "ghcr.io/owner/repo:v1.2.3",
 			},
 		}
-		src := `image.image == "ghcr.io/owner/repo:v1.2.3"`
+		src := `target.display_path == "ghcr.io/owner/repo:v1.2.3"`
 		val, err := Evaluate(t.Context(), src, input)
 		if err != nil {
 			t.Fatalf("Evaluate() error = %v", err)
 		}
 		if b, ok := val.(bool); !ok || !b {
-			t.Errorf("expected image.image to be from target.display_path")
+			t.Errorf("expected target.display_path to contain image reference")
 		}
 	})
 
-	t.Run("image.image from target reference", func(t *testing.T) {
+	t.Run("target.reference for image reference", func(t *testing.T) {
 		input := map[string]any{
 			"target": &targetv1.Target{
 				Kind:        targetv1.TargetKind_TARGET_KIND_CONTAINER_IMAGE,
@@ -339,17 +320,17 @@ func TestImageHelper(t *testing.T) {
 				DisplayPath: "gcr.io/project/app:v1.2.3",
 			},
 		}
-		src := `image.image == "gcr.io/project/app:v1.2.3"`
+		src := `target.reference == "gcr.io/project/app:v1.2.3"`
 		val, err := Evaluate(t.Context(), src, input)
 		if err != nil {
 			t.Fatalf("Evaluate() error = %v", err)
 		}
 		if b, ok := val.(bool); !ok || !b {
-			t.Errorf("expected image.image to be from target.reference")
+			t.Errorf("expected target.reference to contain image reference")
 		}
 	})
 
-	t.Run("image.image composite from provenance with digest", func(t *testing.T) {
+	t.Run("target.provenance for digest", func(t *testing.T) {
 		input := map[string]any{
 			"target": &targetv1.Target{
 				Kind: targetv1.TargetKind_TARGET_KIND_CONTAINER_IMAGE,
@@ -360,48 +341,22 @@ func TestImageHelper(t *testing.T) {
 				},
 			},
 		}
-		src := `image.image == "docker.io/library/nginx@sha256:abc123def456"`
+		src := `target.provenance["digest"] == "sha256:abc123def456"`
 		val, err := Evaluate(t.Context(), src, input)
 		if err != nil {
 			t.Fatalf("Evaluate() error = %v", err)
 		}
 		if b, ok := val.(bool); !ok || !b {
-			t.Errorf("expected image.image to include digest from provenance")
-		}
-	})
-
-	t.Run("image.image prefers digest over tag in provenance", func(t *testing.T) {
-		input := map[string]any{
-			"target": &targetv1.Target{
-				Kind: targetv1.TargetKind_TARGET_KIND_CONTAINER_IMAGE,
-				Provenance: map[string]string{
-					"registry":   "ghcr.io",
-					"repository": "owner/app",
-					"tag":        "latest",
-					"digest":     "sha256:xyz789",
-				},
-			},
-		}
-		// Digest should take precedence over tag
-		src := `image.image == "ghcr.io/owner/app@sha256:xyz789"`
-		val, err := Evaluate(t.Context(), src, input)
-		if err != nil {
-			t.Fatalf("Evaluate() error = %v", err)
-		}
-		if b, ok := val.(bool); !ok || !b {
-			t.Errorf("expected image.image to prefer digest over tag")
+			t.Errorf("expected target.provenance to contain digest")
 		}
 	})
 }
 
 func TestImageConfigHelper(t *testing.T) {
+	// Proto-first: image is passed directly as scanv1.ImageInfo.
 	t.Run("image.config.user", func(t *testing.T) {
 		input := map[string]any{
-			"target": &targetv1.Target{
-				Kind:        targetv1.TargetKind_TARGET_KIND_CONTAINER_IMAGE,
-				DisplayPath: "ghcr.io/acme/app:v1.0.0",
-			},
-			"image_info": &scanv1.ImageInfo{
+			"image": &scanv1.ImageInfo{
 				Config: &scanv1.ImageConfig{
 					User:   "app",
 					IsRoot: false,
@@ -420,11 +375,7 @@ func TestImageConfigHelper(t *testing.T) {
 
 	t.Run("image.config.is_root for root user", func(t *testing.T) {
 		input := map[string]any{
-			"target": &targetv1.Target{
-				Kind:        targetv1.TargetKind_TARGET_KIND_CONTAINER_IMAGE,
-				DisplayPath: "ghcr.io/acme/app:v1.0.0",
-			},
-			"image_info": &scanv1.ImageInfo{
+			"image": &scanv1.ImageInfo{
 				Config: &scanv1.ImageConfig{
 					User:   "",
 					IsRoot: true,
@@ -443,11 +394,7 @@ func TestImageConfigHelper(t *testing.T) {
 
 	t.Run("image.config.env", func(t *testing.T) {
 		input := map[string]any{
-			"target": &targetv1.Target{
-				Kind:        targetv1.TargetKind_TARGET_KIND_CONTAINER_IMAGE,
-				DisplayPath: "ghcr.io/acme/app:v1.0.0",
-			},
-			"image_info": &scanv1.ImageInfo{
+			"image": &scanv1.ImageInfo{
 				Config: &scanv1.ImageConfig{
 					Env: []string{"PATH=/usr/bin", "HOME=/home/app"},
 				},
@@ -465,11 +412,7 @@ func TestImageConfigHelper(t *testing.T) {
 
 	t.Run("image.config.sensitive_env detection", func(t *testing.T) {
 		input := map[string]any{
-			"target": &targetv1.Target{
-				Kind:        targetv1.TargetKind_TARGET_KIND_CONTAINER_IMAGE,
-				DisplayPath: "ghcr.io/acme/app:v1.0.0",
-			},
-			"image_info": &scanv1.ImageInfo{
+			"image": &scanv1.ImageInfo{
 				Config: &scanv1.ImageConfig{
 					Env:          []string{"PATH=/usr/bin", "DATABASE_PASSWORD=secret"},
 					SensitiveEnv: []string{"DATABASE_PASSWORD"},
@@ -488,11 +431,7 @@ func TestImageConfigHelper(t *testing.T) {
 
 	t.Run("image.config.entrypoint and cmd", func(t *testing.T) {
 		input := map[string]any{
-			"target": &targetv1.Target{
-				Kind:        targetv1.TargetKind_TARGET_KIND_CONTAINER_IMAGE,
-				DisplayPath: "ghcr.io/acme/app:v1.0.0",
-			},
-			"image_info": &scanv1.ImageInfo{
+			"image": &scanv1.ImageInfo{
 				Config: &scanv1.ImageConfig{
 					Entrypoint: []string{"/app"},
 					Cmd:        []string{"serve", "--port=8080"},
@@ -511,11 +450,7 @@ func TestImageConfigHelper(t *testing.T) {
 
 	t.Run("image.config.exposed_ports", func(t *testing.T) {
 		input := map[string]any{
-			"target": &targetv1.Target{
-				Kind:        targetv1.TargetKind_TARGET_KIND_CONTAINER_IMAGE,
-				DisplayPath: "ghcr.io/acme/app:v1.0.0",
-			},
-			"image_info": &scanv1.ImageInfo{
+			"image": &scanv1.ImageInfo{
 				Config: &scanv1.ImageConfig{
 					ExposedPorts: []string{"8080/tcp", "443/tcp"},
 				},
@@ -533,11 +468,7 @@ func TestImageConfigHelper(t *testing.T) {
 
 	t.Run("image.config.labels", func(t *testing.T) {
 		input := map[string]any{
-			"target": &targetv1.Target{
-				Kind:        targetv1.TargetKind_TARGET_KIND_CONTAINER_IMAGE,
-				DisplayPath: "ghcr.io/acme/app:v1.0.0",
-			},
-			"image_info": &scanv1.ImageInfo{
+			"image": &scanv1.ImageInfo{
 				Config: &scanv1.ImageConfig{
 					Labels: map[string]string{
 						"version":    "1.0.0",
@@ -558,13 +489,10 @@ func TestImageConfigHelper(t *testing.T) {
 }
 
 func TestImageMetadataHelper(t *testing.T) {
+	// Proto-first: image is passed directly as scanv1.ImageInfo.
 	t.Run("image.metadata.architecture", func(t *testing.T) {
 		input := map[string]any{
-			"target": &targetv1.Target{
-				Kind:        targetv1.TargetKind_TARGET_KIND_CONTAINER_IMAGE,
-				DisplayPath: "ghcr.io/acme/app:v1.0.0",
-			},
-			"image_info": &scanv1.ImageInfo{
+			"image": &scanv1.ImageInfo{
 				Metadata: &scanv1.ImageMetadata{
 					Architecture: "amd64",
 					Os:           "linux",
@@ -583,11 +511,7 @@ func TestImageMetadataHelper(t *testing.T) {
 
 	t.Run("image.metadata.layer_count and size", func(t *testing.T) {
 		input := map[string]any{
-			"target": &targetv1.Target{
-				Kind:        targetv1.TargetKind_TARGET_KIND_CONTAINER_IMAGE,
-				DisplayPath: "ghcr.io/acme/app:v1.0.0",
-			},
-			"image_info": &scanv1.ImageInfo{
+			"image": &scanv1.ImageInfo{
 				Metadata: &scanv1.ImageMetadata{
 					LayerCount: 12,
 					Size:       104857600, // 100MB
@@ -606,13 +530,10 @@ func TestImageMetadataHelper(t *testing.T) {
 }
 
 func TestImageHistoryHelper(t *testing.T) {
+	// Proto-first: image is passed directly as scanv1.ImageInfo.
 	t.Run("image.history entries", func(t *testing.T) {
 		input := map[string]any{
-			"target": &targetv1.Target{
-				Kind:        targetv1.TargetKind_TARGET_KIND_CONTAINER_IMAGE,
-				DisplayPath: "ghcr.io/acme/app:v1.0.0",
-			},
-			"image_info": &scanv1.ImageInfo{
+			"image": &scanv1.ImageInfo{
 				History: []*scanv1.HistoryEntry{
 					{CreatedBy: "FROM alpine:3.19", EmptyLayer: true},
 					{CreatedBy: "RUN apk add curl", EmptyLayer: false},
@@ -631,11 +552,7 @@ func TestImageHistoryHelper(t *testing.T) {
 
 	t.Run("image.history command inspection", func(t *testing.T) {
 		input := map[string]any{
-			"target": &targetv1.Target{
-				Kind:        targetv1.TargetKind_TARGET_KIND_CONTAINER_IMAGE,
-				DisplayPath: "ghcr.io/acme/app:v1.0.0",
-			},
-			"image_info": &scanv1.ImageInfo{
+			"image": &scanv1.ImageInfo{
 				History: []*scanv1.HistoryEntry{
 					{CreatedBy: "FROM ubuntu:22.04"},
 					{CreatedBy: "RUN apt-get update && apt-get install -y curl"},
@@ -862,7 +779,7 @@ func TestImagePolicyExpressions(t *testing.T) {
 				Kind:        targetv1.TargetKind_TARGET_KIND_CONTAINER_IMAGE,
 				DisplayPath: "ghcr.io/acme/app:v1.0.0",
 			},
-			"image_info": &scanv1.ImageInfo{
+			"image": &scanv1.ImageInfo{
 				Config: &scanv1.ImageConfig{
 					User:   "",
 					IsRoot: true,
@@ -885,13 +802,13 @@ func TestImagePolicyExpressions(t *testing.T) {
 				Kind:        targetv1.TargetKind_TARGET_KIND_CONTAINER_IMAGE,
 				DisplayPath: "ghcr.io/acme/app:v1.0.0",
 			},
-			"image_info": &scanv1.ImageInfo{
+			"image": &scanv1.ImageInfo{
 				Config: &scanv1.ImageConfig{
 					SensitiveEnv: []string{"AWS_SECRET_KEY", "DATABASE_PASSWORD"},
 				},
 			},
 		}
-		src := `image != null && has(image.config.sensitive_env) && size(image.config.sensitive_env) > 0`
+		src := `image != null && size(image.config.sensitive_env) > 0`
 		val, err := Evaluate(t.Context(), src, input)
 		if err != nil {
 			t.Fatalf("Evaluate() error = %v", err)
@@ -907,7 +824,7 @@ func TestImagePolicyExpressions(t *testing.T) {
 				Kind:        targetv1.TargetKind_TARGET_KIND_CONTAINER_IMAGE,
 				DisplayPath: "ghcr.io/acme/bloated-app:v1.0.0",
 			},
-			"image_info": &scanv1.ImageInfo{
+			"image": &scanv1.ImageInfo{
 				Metadata: &scanv1.ImageMetadata{
 					Size:       1073741824, // 1GB
 					LayerCount: 25,
@@ -925,6 +842,7 @@ func TestImagePolicyExpressions(t *testing.T) {
 	})
 
 	t.Run("registry allowlist policy", func(t *testing.T) {
+		// Proto-first: registry info comes from target.provenance, not image
 		input := map[string]any{
 			"target": &targetv1.Target{
 				Kind:        targetv1.TargetKind_TARGET_KIND_CONTAINER_IMAGE,
@@ -936,7 +854,8 @@ func TestImagePolicyExpressions(t *testing.T) {
 			},
 		}
 		allowedRegistries := []string{"ghcr.io", "gcr.io", "registry-1.docker.io"}
-		src := `image != null && !(image.registry in ["ghcr.io", "gcr.io", "registry-1.docker.io"])`
+		// Use map indexing with "in" for provenance check (has() only works on proto fields)
+		src := `"registry" in target.provenance && !(target.provenance["registry"] in ["ghcr.io", "gcr.io", "registry-1.docker.io"])`
 		_ = allowedRegistries // used for documentation
 		val, err := Evaluate(t.Context(), src, input)
 		if err != nil {

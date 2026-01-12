@@ -63,8 +63,8 @@ func TestWriteGraphFlatList(t *testing.T) {
 	}
 
 	// Check that direct dependencies are marked
-	if !strings.Contains(output, "(direct)") {
-		t.Error("expected (direct) marker in output")
+	if !strings.Contains(output, "[direct]") {
+		t.Error("expected [direct] marker in output")
 	}
 
 	// Check summary
@@ -209,7 +209,7 @@ func TestFormatNodeLabel(t *testing.T) {
 		{
 			name:     "direct node",
 			node:     &graph.Node{Name: "express", Version: "4.18.2", Direct: true},
-			contains: []string{"express", "4.18.2", "(direct)"},
+			contains: []string{"express", "4.18.2", "[direct]"},
 		},
 		{
 			name:     "no version",
@@ -230,28 +230,36 @@ func TestFormatNodeLabel(t *testing.T) {
 	}
 }
 
-func TestContainsPathSegment(t *testing.T) {
+func TestMatchScore(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
-		name  string
-		query string
-		want  bool
+		name      string
+		query     string
+		wantScore int
 	}{
-		{"gopkg.in/yaml.v3", "yaml", true},       // /yaml.
-		{"go.yaml.in/yaml/v2", "yaml", true},     // /yaml/
-		{"github.com/goccy/go-yaml", "yaml", false}, // -yaml not /yaml
-		{"sigs.k8s.io/yaml", "yaml", false},      // ends with /yaml, not internal
-		{"otelhttp/net/http", "net", true},       // /net/
-		{"golang.org/x/net", "net", false},       // ends with /net
-		{"express", "express", false},            // no path segments
+		// Exact matches (score 3)
+		{"express", "express", 3},
+		{"lodash", "lodash", 3},
+
+		// Final segment matches (score 2)
+		{"github.com/spf13/cobra", "cobra", 2},
+		{"golang.org/x/net", "net", 2},
+		{"sigs.k8s.io/yaml", "yaml", 2},
+		// Versioned paths - "go-git" matches github.com/go-git/go-git/v5
+		{"github.com/go-git/go-git/v5", "go-git", 2},
+
+		// Substring matches (score 1)
+		{"github.com/goccy/go-yaml", "yaml", 1},     // yaml is substring but not final segment
+		{"network-utils", "net", 1},                  // substring match
+		{"gopkg.in/yaml.v3", "yaml", 1},             // yaml.v3 as segment, not yaml alone
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name+"_"+tt.query, func(t *testing.T) {
-			got := containsPathSegment(tt.name, tt.query)
-			if got != tt.want {
-				t.Errorf("containsPathSegment(%q, %q) = %v, want %v", tt.name, tt.query, got, tt.want)
+			got := matchScore(tt.name, strings.ToLower(tt.query))
+			if got != tt.wantScore {
+				t.Errorf("matchScore(%q, %q) = %d, want %d", tt.name, tt.query, got, tt.wantScore)
 			}
 		})
 	}
@@ -269,6 +277,8 @@ func TestFindMatchingNodes(t *testing.T) {
 	g.AddNode(&graph.Node{Purl: "pkg:npm/express@4.18.2", Name: "express", Version: "4.18.2"})
 	g.AddNode(&graph.Node{Purl: "pkg:npm/network-utils@1.0.0", Name: "network-utils", Version: "1.0.0"})
 	g.AddNode(&graph.Node{Purl: "pkg:golang/go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp@0.63.0", Name: "go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp", Version: "0.63.0"})
+	g.AddNode(&graph.Node{Purl: "pkg:golang/github.com/spf13/cobra@1.10.0", Name: "github.com/spf13/cobra", Version: "1.10.0"})
+	g.AddNode(&graph.Node{Purl: "pkg:golang/github.com/muesli/mango-cobra@1.2.0", Name: "github.com/muesli/mango-cobra", Version: "1.2.0"})
 
 	tests := []struct {
 		query       string
@@ -276,15 +286,20 @@ func TestFindMatchingNodes(t *testing.T) {
 		wantCount   int    // Expected number of matches (-1 = don't check)
 		description string
 	}{
-		// "net" matches golang.org/x/net and otelhttp (path match), plus network-utils (substring)
-		{"net", "go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp", 3, "path match + substring match"},
-		// "yaml" matches go-yaml (hyphen suffix, higher rank) + 3 path matches
-		{"yaml", "github.com/goccy/go-yaml", 4, "yaml matches go-yaml first, then path matches"},
-		{"go-yaml", "github.com/goccy/go-yaml", 1, "hyphen suffix match"},
+		// "net" matches golang.org/x/net (final segment), network-utils (substring), otelhttp has /net/ internal
+		{"net", "golang.org/x/net", 3, "final segment match preferred over substring"},
+		// "yaml" - go.yaml.in/yaml/v2 wins (final segment, alphabetically first), then other matches
+		{"yaml", "go.yaml.in/yaml/v2", 4, "final segment yaml wins (alphabetically first)"},
+		// "go-yaml" only matches github.com/goccy/go-yaml (substring)
+		{"go-yaml", "github.com/goccy/go-yaml", 1, "substring match"},
+		// Exact match
 		{"gopkg.in/yaml.v3", "gopkg.in/yaml.v3", 1, "exact match"},
 		{"express", "express", 1, "exact match for simple name"},
 		{"nonexistent", "", 0, "no match returns empty"},
-		{"otelhttp", "go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp", 1, "path suffix match"},
+		// Final segment match for otelhttp
+		{"otelhttp", "go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp", 1, "final segment match"},
+		// "cobra" should prefer spf13/cobra (final segment) over mango-cobra (substring)
+		{"cobra", "github.com/spf13/cobra", 2, "final segment cobra wins over substring"},
 	}
 
 	for _, tt := range tests {

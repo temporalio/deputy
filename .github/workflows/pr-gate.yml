@@ -3,16 +3,21 @@
 # Enforces security policies on pull requests by scanning for new vulnerabilities
 # and comparing dependencies between base and head refs.
 #
+# Works with or without GitHub Advanced Security (GHAS):
+# - With GHAS: Uploads SARIF to GitHub Security tab for rich integration
+# - Without GHAS: Posts scan summary as PR comment (automatic fallback)
+#
 # Usage:
 #   jobs:
 #     pr-security:
 #       uses: picatz/deputy/.github/workflows/pr-gate.yml@main
 #       with:
-#         policy: policy/ci/pr-review.yaml
+#         scan-policy: policy/ci/security-gate.yaml
+#         diff-policy: policy/ci/pr-review.yaml
 #       permissions:
-#         security-events: write
+#         security-events: write  # For SARIF upload (optional, gracefully degrades)
 #         contents: read
-#         pull-requests: write
+#         pull-requests: write    # For PR comments
 
 name: PR Gate
 

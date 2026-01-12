@@ -21,6 +21,7 @@ import (
 	"github.com/spf13/cobra"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
+	"google.golang.org/protobuf/types/known/structpb"
 )
 
 // AddPolicyCommand registers the `deputy policy` command tree.
@@ -669,7 +670,12 @@ func newPolicySimulateCommand() *cobra.Command {
 				return err
 			}
 			for i, payload := range payloads {
-				actions, err := policy.EvaluateAll(cmd.Context(), sources, payload)
+				// Wrap arbitrary JSON in structpb.Struct for proto-first evaluation
+				inputProto, err := structpb.NewStruct(payload)
+				if err != nil {
+					return fmt.Errorf("input %d: convert to proto: %w", i, err)
+				}
+				actions, err := policy.EvaluateAll(cmd.Context(), sources, inputProto)
 				if err != nil {
 					return fmt.Errorf("input %d: %w", i, err)
 				}
@@ -802,7 +808,12 @@ func executePolicyTestCase(ctx context.Context, baseDir, file string, tc *policy
 	if err != nil {
 		return fmt.Errorf("%s (%s): %w", name, file, err)
 	}
-	actions, err := policy.EvaluateAll(ctx, sources, inputMap)
+	// Wrap arbitrary JSON in structpb.Struct for proto-first evaluation
+	inputProto, err := structpb.NewStruct(inputMap)
+	if err != nil {
+		return fmt.Errorf("%s (%s): convert to proto: %w", name, file, err)
+	}
+	actions, err := policy.EvaluateAll(ctx, sources, inputProto)
 	if err != nil {
 		return fmt.Errorf("%s (%s): %w", name, file, err)
 	}
@@ -929,6 +940,7 @@ func writeSimulationResult(w io.Writer, format string, index int, payload map[st
 	case FormatJSON:
 		out := map[string]any{
 			"inputIndex": index,
+			"input":      payload,
 			"actions":    actionsToComparable(actions),
 		}
 		enc := json.NewEncoder(w)

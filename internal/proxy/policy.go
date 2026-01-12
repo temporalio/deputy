@@ -7,8 +7,8 @@ import (
 	"net/http"
 	"strings"
 
-	policyv1 "github.com/picatz/deputy/gen/deputy/policy/v1"
 	"github.com/picatz/deputy/internal/policy"
+	"google.golang.org/protobuf/proto"
 )
 
 // PolicyEvaluator is an alias for policy.Evaluator.
@@ -29,18 +29,11 @@ func NewPolicyEngine(paths []string) (policy.Evaluator, error) {
 	return &proxyPolicyEngine{engine: eng}, nil
 }
 
-func (e *proxyPolicyEngine) Evaluate(ctx context.Context, entrypoint string, payload map[string]any) ([]policy.Action, error) {
+func (e *proxyPolicyEngine) Evaluate(ctx context.Context, entrypoint string, input proto.Message) ([]policy.Action, error) {
 	if e == nil || e.engine == nil {
 		return nil, nil
 	}
-	if payload == nil {
-		payload = map[string]any{}
-	}
-	payload["env"] = &policyv1.Environment{
-		Command:    "proxy",
-		Entrypoint: entrypoint,
-	}
-	return e.engine.EvaluateAll(ctx, payload, "proxy", entrypoint)
+	return e.engine.EvaluateAll(ctx, input, "proxy", entrypoint)
 }
 
 func summarizeActions(actions []policy.Action) (deny *policy.Action, warnings []policy.Action, headers map[string]string) {

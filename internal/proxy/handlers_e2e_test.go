@@ -11,7 +11,9 @@ import (
 	"sync/atomic"
 	"testing"
 
+	policyv1 "github.com/picatz/deputy/gen/deputy/policy/v1"
 	"github.com/picatz/deputy/internal/policy"
+	"google.golang.org/protobuf/proto"
 )
 
 type validatingDenyPolicy struct {
@@ -23,9 +25,14 @@ type validatingDenyPolicy struct {
 	wantOperation  string
 }
 
-func (p validatingDenyPolicy) Evaluate(_ context.Context, entrypoint string, payload map[string]any) ([]policy.Action, error) {
+func (p validatingDenyPolicy) Evaluate(_ context.Context, entrypoint string, input proto.Message) ([]policy.Action, error) {
 	if entrypoint != p.wantEntrypoint {
 		return nil, fmt.Errorf("entrypoint=%q want=%q", entrypoint, p.wantEntrypoint)
+	}
+	// Convert proto to map for validation
+	payload, err := policy.ProtoToMap(input)
+	if err != nil {
+		return nil, fmt.Errorf("convert proto to map: %w", err)
 	}
 	reqAny, ok := payload["request"]
 	if !ok {
@@ -213,7 +220,10 @@ func TestProxyHandlers_DenyHeadersIncludeName(t *testing.T) {
 	handler := newUpstreamReverseProxy(u, "test", http.DefaultTransport)
 	req := httptest.NewRequest(http.MethodGet, "http://deputy.local/some/path", nil)
 	rr := httptest.NewRecorder()
-	serveWithPolicy(rr, req, stubPolicyEvaluator{actions: []policy.Action{{Type: "deny", Source: "policy.yaml", Reason: "blocked"}}}, policy.EntrypointGoArtifactRequest, map[string]any{"request": map[string]any{}}, blockMeta{Ecosystem: "test", Name: "pkg", Version: "1.0.0", Operation: "fetch"}, handler)
+	testInput := &policyv1.GoArtifactRequestPolicyInput{
+		Request: &policyv1.ProxyRequest{},
+	}
+	serveWithPolicy(rr, req, stubPolicyEvaluator{actions: []policy.Action{{Type: "deny", Source: "policy.yaml", Reason: "blocked"}}}, policy.EntrypointGoArtifactRequest, testInput, blockMeta{Ecosystem: "test", Name: "pkg", Version: "1.0.0", Operation: "fetch"}, handler)
 	if rr.Code != http.StatusForbidden {
 		t.Fatalf("status=%d want=%d", rr.Code, http.StatusForbidden)
 	}

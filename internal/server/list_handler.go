@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"connectrpc.com/connect"
 
@@ -55,11 +56,44 @@ func (h *ListHandler) routeCollection(ctx context.Context, target, ref string, r
 		}
 		return inventory.CollectContainerImage(ctx, target, targetOpts, opts)
 
+	case targets.KindSBOM:
+		// SBOM file or stdin
+		return inventory.CollectSBOM(ctx, target, opts)
+
+	case targets.KindPURL:
+		// Single PURL - create minimal inventory
+		return inventory.CollectPURL(ctx, target, opts)
+
 	default:
-		// Repository, directory, PURL, or unspecified - use repository collector
-		// Note: PURLs are handled by repository collector which will fail gracefully
+		// Check if target is a binary file (requires file I/O)
+		// This handles Go/Rust binaries given as direct file paths
+		if h.localMode && targets.DetectBinaryType(target) != targets.BinaryTypeUnknown {
+			return inventory.CollectBinary(ctx, target, opts)
+		}
+
+		// Repository, directory, or unspecified
+		// Handle refs consistently with scan and diff:
+		// - WORKING/WORKTREE/WT/. → scan current working tree
+		// - HEAD → scan current working tree (when refProvided, equivalent to HEAD~0)
+		// - other refs (tags, branches, commits) → scan at that exact snapshot
+		if refProvided && ref != "" && !isWorkingTreeRef(ref) {
+			return inventory.CollectRepositoryAtRef(ctx, target, ref, opts)
+		}
+		// Otherwise scan the working tree
 		return inventory.CollectRepository(ctx, target, ref, refProvided, opts)
 	}
+}
+
+// isWorkingTreeRef reports whether the reference should be treated as
+// the current working tree rather than a specific commit snapshot.
+// This is consistent with how diff handles WORKING/WORKTREE/WT/. refs.
+func isWorkingTreeRef(ref string) bool {
+	r := strings.TrimSpace(ref)
+	if r == "" || r == "." {
+		return true
+	}
+	u := strings.ToUpper(r)
+	return u == "HEAD" || u == "WORKING" || u == "WORKTREE" || u == "WT"
 }
 
 // ListPackages enumerates packages in a target.
@@ -121,8 +155,19 @@ func (h *ListHandler) ListPackages(
 		defer exec.Close()
 	}
 
+	// Get main modules for filtering out self-references
+	var mainModules map[string]bool
+	if exec.Workspace != nil {
+		mainModules = compare.CollectMainModulesFromWorkspace(exec.Workspace)
+	}
+
+	// Filter packages to remove self-references and deduplicate stdlib
+	packages := protoconv.FilterPackages(exec.Result.Packages, protoconv.FilterOptions{
+		ExcludeMainModules: mainModules,
+		DeduplicateStdlib:  true,
+	})
+
 	// Convert packages to proto
-	packages := exec.Result.Packages
 	direct := exec.Result.Direct
 	protoPackages := protoconv.ExtractorPackagesToProto(packages, direct)
 

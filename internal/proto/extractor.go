@@ -86,6 +86,14 @@ func ExtractorPackageToProto(pkg *extractor.Package, direct map[string]bool) *de
 			// PyPI: normalize and check package name (PEP 503: lowercase, _ for -)
 			pkgName := normalizePyPIName(purl.Name)
 			isDirect = direct[pkgName]
+		case "docker", "oci":
+			// Docker/OCI: base images from Dockerfile are always direct dependencies
+			// They're explicitly declared in FROM instructions
+			isDirect = true
+		case "githubactions":
+			// GitHub Actions: workflow uses are always direct dependencies
+			// They're explicitly declared in workflow YAML files
+			isDirect = true
 		default:
 			// Fall back to PURL string for unknown ecosystems
 			isDirect = direct[purlStr]
@@ -192,4 +200,121 @@ func normalizePyPIName(name string) string {
 	name = strings.ReplaceAll(name, "-", "_")
 	name = strings.ReplaceAll(name, ".", "_")
 	return name
+}
+
+// FilterOptions configures which packages to exclude from output.
+type FilterOptions struct {
+	// ExcludeMainModules is a set of Go module paths that represent the project
+	// being analyzed. Packages matching these modules are excluded from output
+	// to avoid showing the project as its own dependency.
+	ExcludeMainModules map[string]bool
+
+	// DeduplicateStdlib removes duplicate Go stdlib entries (go vs stdlib,
+	// multiple versions) keeping only a single "stdlib" entry with the highest
+	// version found.
+	DeduplicateStdlib bool
+}
+
+// FilterPackages applies filtering rules to exclude unwanted packages from output.
+// This filters out:
+//   - Main modules (the project itself appearing as a dependency)
+//   - Duplicate Go stdlib entries (go vs stdlib, multiple versions)
+//
+// The original slice is not modified; a new filtered slice is returned.
+func FilterPackages(pkgs []*extractor.Package, opts FilterOptions) []*extractor.Package {
+	if len(pkgs) == 0 {
+		return pkgs
+	}
+
+	// Track best stdlib entry for deduplication
+	var bestStdlib *extractor.Package
+	bestStdlibVersion := ""
+
+	out := make([]*extractor.Package, 0, len(pkgs))
+	for _, pkg := range pkgs {
+		if pkg == nil {
+			continue
+		}
+
+		purl := pkg.PURL()
+		if purl == nil {
+			out = append(out, pkg)
+			continue
+		}
+
+		// Handle Go packages
+		if purl.Type == "golang" {
+			// Check if this is a main module (self-reference)
+			if len(opts.ExcludeMainModules) > 0 {
+				modulePath := pkg.Name
+				if modulePath == "" {
+					if purl.Namespace != "" {
+						modulePath = purl.Namespace + "/" + purl.Name
+					} else {
+						modulePath = purl.Name
+					}
+				}
+				if opts.ExcludeMainModules[modulePath] {
+					continue // Skip self-reference
+				}
+				// Also check module root for nested modules
+				moduleRoot := compare.GetModuleRoot(modulePath)
+				if moduleRoot != modulePath && opts.ExcludeMainModules[moduleRoot] {
+					continue // Skip self-reference
+				}
+			}
+
+			// Handle stdlib deduplication: "go" and "stdlib" are both pseudo-packages
+			// representing the Go runtime. Keep only one, preferring "stdlib" naming
+			// and the highest version found.
+			if opts.DeduplicateStdlib {
+				name := purl.Name
+				if name == "go" || name == "stdlib" {
+					// Compare versions to keep the best one
+					if bestStdlib == nil || compareStdlibEntry(pkg, bestStdlib) > 0 {
+						bestStdlib = pkg
+						bestStdlibVersion = pkg.Version
+					}
+					continue // Don't add yet, will add best one at the end
+				}
+			}
+		}
+
+		out = append(out, pkg)
+	}
+
+	// Add the best stdlib entry if we're deduplicating
+	if opts.DeduplicateStdlib && bestStdlib != nil {
+		// Normalize to "stdlib" name for consistency
+		stdlibPkg := &extractor.Package{
+			Name:      "stdlib",
+			Version:   bestStdlibVersion,
+			PURLType:  "golang",
+			Locations: bestStdlib.Locations,
+			Licenses:  bestStdlib.Licenses,
+		}
+		out = append(out, stdlibPkg)
+	}
+
+	return out
+}
+
+// compareStdlibEntry compares two stdlib package entries.
+// Returns > 0 if a is "better" than b (prefer "stdlib" name, then higher version).
+func compareStdlibEntry(a, b *extractor.Package) int {
+	aPURL := a.PURL()
+	bPURL := b.PURL()
+
+	// Prefer "stdlib" name over "go"
+	aIsStdlib := aPURL != nil && aPURL.Name == "stdlib"
+	bIsStdlib := bPURL != nil && bPURL.Name == "stdlib"
+	if aIsStdlib && !bIsStdlib {
+		return 1
+	}
+	if bIsStdlib && !aIsStdlib {
+		return -1
+	}
+
+	// Compare versions - higher is better
+	return strings.Compare(a.Version, b.Version)
 }

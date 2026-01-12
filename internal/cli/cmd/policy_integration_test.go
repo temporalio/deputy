@@ -17,8 +17,9 @@ import (
 // End-to-end style check: load the composed example bundle and execute the sbom entrypoint payload path.
 func TestPolicyIntegration_ComposedBundleSbomComponent(t *testing.T) {
 	bundlePath := filepath.Clean(filepath.Join("..", "..", "..", "policy", "examples", "license-allowlist-composed.yaml"))
+	// Proto-first: pkg is the canonical variable for package info
 	payload := map[string]any{
-		"component": map[string]any{
+		"pkg": map[string]any{
 			"licenses": []any{"AgPl-3.0-only", "MIT"},
 		},
 	}
@@ -30,8 +31,9 @@ func TestPolicyIntegration_ComposedBundleSbomComponent(t *testing.T) {
 
 func TestPolicyIntegration_ComposedBundleSbomComponent_AllowsPermissive(t *testing.T) {
 	bundlePath := filepath.Clean(filepath.Join("..", "..", "..", "policy", "examples", "license-allowlist-composed.yaml"))
+	// Proto-first: pkg is the canonical variable for package info
 	payload := map[string]any{
-		"component": map[string]any{
+		"pkg": map[string]any{
 			"licenses": []any{"MIT"},
 		},
 	}
@@ -47,9 +49,15 @@ func TestPolicyIntegration_ComposedBundleSbomComponent_AllowsPermissive(t *testi
 }
 
 // Ensure scan command (no licenses) is not denied by the composed bundle.
+// The composed bundle guards on env.command, so scan should be allowed.
 func TestPolicyIntegration_ComposedBundleScanReport_NoDeny(t *testing.T) {
 	bundlePath := filepath.Clean(filepath.Join("..", "..", "..", "policy", "examples", "license-allowlist-composed.yaml"))
-	payload := map[string]any{} // no licenses present
+	// Proto-first: pkg must be present
+	payload := map[string]any{
+		"pkg": map[string]any{
+			"licenses": []any{}, // empty licenses, but scan command is not in_scope
+		},
+	}
 	actions, err := evaluatePoliciesForCommand(context.Background(), []string{bundlePath}, payload, "scan", policy.EntrypointScanReport, &bytes.Buffer{})
 	if err != nil {
 		t.Fatalf("evaluatePoliciesForCommand: %v", err)
@@ -89,10 +97,14 @@ func TestPolicyIntegration_NewDependencyReview_Deny(t *testing.T) {
 
 func TestPolicyIntegration_PypiPrefixAllowlist(t *testing.T) {
 	pol := filepath.Clean(filepath.Join("..", "..", "..", "policy", "examples", "pypi-prefix-allowlist.yaml"))
+	// Policy expects pkg.name to be synthesized from request.package
 	denyPayload := map[string]any{
 		"request": map[string]any{
 			"ecosystem": "pypi",
 			"package":   "randompkg",
+		},
+		"pkg": map[string]any{
+			"name": "randompkg",
 		},
 	}
 	if _, err := evaluatePoliciesForCommand(context.Background(), []string{pol}, denyPayload, "proxy", policy.EntrypointPypiArtifactRequest, &bytes.Buffer{}); err == nil {
@@ -103,6 +115,9 @@ func TestPolicyIntegration_PypiPrefixAllowlist(t *testing.T) {
 		"request": map[string]any{
 			"ecosystem": "pypi",
 			"package":   "acme_toolkit",
+		},
+		"pkg": map[string]any{
+			"name": "acme_toolkit",
 		},
 	}
 	if actions, err := evaluatePoliciesForCommand(context.Background(), []string{pol}, allowPayload, "proxy", policy.EntrypointPypiArtifactRequest, &bytes.Buffer{}); err != nil {
@@ -307,22 +322,28 @@ func TestPolicyIntegration_CriticalTransitiveSpotlight(t *testing.T) {
 
 func TestPolicyIntegration_TyposquatLevenshteinGuard(t *testing.T) {
 	pol := filepath.Clean(filepath.Join("..", "..", "..", "policy", "examples", "typosquat-levenshtein-guard.yaml"))
-	
+
+	// Policy expects pkg.name to be synthesized from request.package
 	payload := map[string]any{
 		"request": &policyv1.ProxyRequest{
 			Package:   "lodas",
 			Ecosystem: "npm",
+		},
+		"pkg": &dependencyv1.Package{
+			Name: "lodas",
 		},
 	}
 	if _, err := evaluatePoliciesForCommand(context.Background(), []string{pol}, payload, "proxy", policy.EntrypointNpmArtifactRequest, &bytes.Buffer{}); err == nil {
 		t.Fatalf("expected denial for typosquat package")
 	}
 
-	
 	allowPayload := map[string]any{
 		"request": &policyv1.ProxyRequest{
 			Package:   "teamlib",
 			Ecosystem: "npm",
+		},
+		"pkg": &dependencyv1.Package{
+			Name: "teamlib",
 		},
 	}
 	if actions, err := evaluatePoliciesForCommand(context.Background(), []string{pol}, allowPayload, "proxy", policy.EntrypointNpmArtifactRequest, &bytes.Buffer{}); err != nil {

@@ -16,7 +16,6 @@ import (
 	dependencyv1 "github.com/picatz/deputy/gen/deputy/dependency/v1"
 	policyv1 "github.com/picatz/deputy/gen/deputy/policy/v1"
 	vulnerabilityv1 "github.com/picatz/deputy/gen/deputy/vulnerability/v1"
-	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
@@ -367,7 +366,7 @@ func generateVulnerability(level ExampleLevel) map[string]any {
 		}
 	}
 
-	return protoToMap(finding)
+	return mustProtoToMap(finding)
 }
 
 // generateVulnerabilities creates a list of vulnerabilities.
@@ -398,7 +397,7 @@ func generateVulnerabilities(level ExampleLevel) []map[string]any {
 				Cwes: []string{"CWE-400"},
 			},
 		}
-		vulns = append(vulns, protoToMap(finding))
+		vulns = append(vulns, mustProtoToMap(finding))
 	}
 
 	return vulns
@@ -426,7 +425,7 @@ func generatePackage(level ExampleLevel, direct bool) map[string]any {
 		}
 	}
 
-	return protoToMap(pkg)
+	return mustProtoToMap(pkg)
 }
 
 // generatePackages creates a list of packages.
@@ -442,7 +441,7 @@ func generatePackages(level ExampleLevel) []map[string]any {
 			Purl:      "pkg:npm/transitive-pkg@2.0.0",
 			Licenses:  []string{"Apache-2.0"},
 		}
-		pkgs = append(pkgs, protoToMap(indirect))
+		pkgs = append(pkgs, mustProtoToMap(indirect))
 	}
 
 	return pkgs
@@ -478,7 +477,7 @@ func generateProxyRequest(ep Entrypoint, level ExampleLevel) map[string]any {
 		req.Ecosystem = "npm"
 	}
 
-	return protoToMap(req)
+	return mustProtoToMap(req)
 }
 
 // generateJWT creates JWT claims.
@@ -506,7 +505,7 @@ func generateJWT(level ExampleLevel) map[string]any {
 		}
 	}
 
-	return protoToMap(jwt)
+	return mustProtoToMap(jwt)
 }
 
 // generateTarget creates target metadata.
@@ -898,24 +897,14 @@ func generateLayerDiff(level ExampleLevel) map[string]any {
 	}
 }
 
-// protoToMap converts a proto message to a map using protojson.
-// Uses UseEnumNumbers so that enums serialize as integers, which is
-// required for CEL policy evaluation (severity.critical == 4, not "SEVERITY_LEVEL_CRITICAL").
-func protoToMap(msg proto.Message) map[string]any {
-	opts := protojson.MarshalOptions{
-		UseProtoNames:   true,
-		EmitUnpopulated: false,
-		UseEnumNumbers:  true, // Critical: CEL compares enums as integers
-	}
-	data, err := opts.Marshal(msg)
+// mustProtoToMap converts a proto message to a map, panicking on error.
+// Used only for example generation where inputs are controlled.
+func mustProtoToMap(msg proto.Message) map[string]any {
+	m, err := ProtoToMap(msg)
 	if err != nil {
-		return nil
+		panic(fmt.Sprintf("mustProtoToMap: %v", err))
 	}
-	var result map[string]any
-	if err := json.Unmarshal(data, &result); err != nil {
-		return nil
-	}
-	return result
+	return m
 }
 
 // ListEntrypoints returns all available entrypoints sorted alphabetically.

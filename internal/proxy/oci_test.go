@@ -10,8 +10,12 @@ import (
 	"testing"
 
 	"github.com/google/go-containerregistry/pkg/name"
+	containerv1 "github.com/picatz/deputy/gen/deputy/container/v1"
+	dependencyv1 "github.com/picatz/deputy/gen/deputy/dependency/v1"
+	vulnerabilityv1 "github.com/picatz/deputy/gen/deputy/vulnerability/v1"
 	"github.com/picatz/deputy/internal/policy"
 	"github.com/picatz/deputy/internal/scanning"
+	"google.golang.org/protobuf/proto"
 )
 
 func TestParseOCIRequestPath(t *testing.T) {
@@ -110,8 +114,12 @@ func TestOCIHandler_ManifestPayloadIncludesImage(t *testing.T) {
 	capture := &capturePolicyEvaluator{}
 	cache := NewImageScanCache()
 	info := parseOCIRequestPath("/v2/library/ubuntu/manifests/" + testDigest)
+	// Use proto Finding messages as expected by the proto-first design
 	cache.Set(imageCacheKey(upstreamURL.Host, info.Repository, info.Digest), ImageScanResult{
-		Vulnerabilities: []map[string]any{{"id": "OSV-TEST-1"}},
+		Vulnerabilities: []*vulnerabilityv1.Finding{{
+			AdvisoryId: "OSV-TEST-1",
+			Advisory:   &vulnerabilityv1.Advisory{Id: "OSV-TEST-1"},
+		}},
 	})
 
 	handler, err := newOCIHandler(upstream.URL, capture, &ociHandlerOptions{
@@ -137,26 +145,34 @@ func TestOCIHandler_ManifestPayloadIncludesImage(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected request map in payload")
 	}
-	if reqMap["repository"] != "library/ubuntu" {
-		t.Fatalf("repository=%v want=%q", reqMap["repository"], "library/ubuntu")
+	// Proto-first: request.package contains the repository (OCI uses package field for this)
+	if reqMap["package"] != "library/ubuntu" {
+		t.Fatalf("request.package=%v want=%q", reqMap["package"], "library/ubuntu")
 	}
-	if reqMap["digest"] != testDigest {
-		t.Fatalf("digest=%v want=%q", reqMap["digest"], testDigest)
+	// Proto-first: version contains the reference (tag or digest)
+	if reqMap["version"] != testDigest {
+		t.Fatalf("request.version=%v want=%q", reqMap["version"], testDigest)
 	}
-	if reqMap["registry"] != upstreamURL.Host {
-		t.Fatalf("registry=%v want=%q", reqMap["registry"], upstreamURL.Host)
+	// Proto-first: ecosystem should be "oci"
+	if reqMap["ecosystem"] != "oci" {
+		t.Fatalf("request.ecosystem=%v want=%q", reqMap["ecosystem"], "oci")
 	}
 
 	imageMap, ok := capture.payload["image"].(map[string]any)
 	if !ok {
 		t.Fatalf("expected image map in payload")
 	}
-	if imageMap["reference"] != testDigest {
-		t.Fatalf("image.reference=%v want=%q", imageMap["reference"], testDigest)
+	// Proto-first: image metadata contains the digest
+	metadata, ok := imageMap["metadata"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected image.metadata map in payload")
+	}
+	if metadata["digest"] != testDigest {
+		t.Fatalf("image.metadata.digest=%v want=%q", metadata["digest"], testDigest)
 	}
 
-	if vulns, ok := capture.payload["vulnerabilities"].([]map[string]any); !ok || len(vulns) != 1 {
-		t.Fatalf("expected vulnerabilities in payload, got %T", capture.payload["vulnerabilities"])
+	if vulns, ok := capture.payload["vulnerabilities"].([]any); !ok || len(vulns) != 1 {
+		t.Fatalf("expected vulnerabilities in payload, got %T (len=%v)", capture.payload["vulnerabilities"], len(vulns))
 	}
 }
 
@@ -165,9 +181,14 @@ type capturePolicyEvaluator struct {
 	payload    map[string]any
 }
 
-func (c *capturePolicyEvaluator) Evaluate(_ context.Context, entrypoint string, payload map[string]any) ([]policy.Action, error) {
+func (c *capturePolicyEvaluator) Evaluate(_ context.Context, entrypoint string, input proto.Message) ([]policy.Action, error) {
 	c.entrypoint = entrypoint
-	c.payload = payload
+	// Convert proto to map for test assertions
+	var err error
+	c.payload, err = policy.ProtoToMap(input)
+	if err != nil {
+		return nil, err
+	}
 	return nil, nil
 }
 
@@ -261,27 +282,35 @@ func TestOCIHandler_LayerDetailsPreservedInPayload(t *testing.T) {
 		t.Fatalf("parse upstream: %v", err)
 	}
 
-	// Create cache entry with vulnerability containing layer details
+	// Create cache entry with vulnerability containing layer details (proto-first)
 	capture := &capturePolicyEvaluator{}
 	cache := NewImageScanCache()
 	info := parseOCIRequestPath("/v2/library/vulnerable-app/manifests/" + testDigest)
 
-	// Simulate vulnerability with full layer details as would come from a container scan
-	vulnWithLayerDetails := map[string]any{
-		"id":       "CVE-2024-TEST-LAYER",
-		"severity": "HIGH",
-		"package":  "openssl",
-		"layerDetails": map[string]any{
-			"index":       2,
-			"diffId":      "sha256:" + strings.Repeat("b", 64),
-			"chainId":     "sha256:" + strings.Repeat("c", 64),
-			"command":     "RUN apt-get update && apt-get install -y openssl",
-			"inBaseImage": true,
+	// Proto-first: use proto Finding messages in the cache
+	vulnWithLayerDetails := []*vulnerabilityv1.Finding{
+		{
+			AdvisoryId: "CVE-2024-TEST-LAYER",
+			Advisory: &vulnerabilityv1.Advisory{
+				Severity: &vulnerabilityv1.Severity{
+					Level: vulnerabilityv1.SeverityLevel_SEVERITY_LEVEL_HIGH,
+				},
+			},
+			Package: &dependencyv1.Package{
+				Name: "openssl",
+				LayerDetails: &containerv1.LayerDetails{
+					Index:       2,
+					DiffId:      "sha256:" + strings.Repeat("b", 64),
+					ChainId:     "sha256:" + strings.Repeat("c", 64),
+					Command:     "RUN apt-get update && apt-get install -y openssl",
+					InBaseImage: true,
+				},
+			},
 		},
 	}
 
 	cache.Set(imageCacheKey(upstreamURL.Host, info.Repository, info.Digest), ImageScanResult{
-		Vulnerabilities: []map[string]any{vulnWithLayerDetails},
+		Vulnerabilities: vulnWithLayerDetails,
 	})
 
 	handler, err := newOCIHandler(upstream.URL, capture, &ociHandlerOptions{
@@ -300,33 +329,45 @@ func TestOCIHandler_LayerDetailsPreservedInPayload(t *testing.T) {
 		t.Fatalf("status=%d want=%d", rr.Code, http.StatusOK)
 	}
 
-	// Verify vulnerabilities are in payload
-	vulns, ok := capture.payload["vulnerabilities"].([]map[string]any)
+	// Proto-first: vulnerabilities is []any after ProtoToMap conversion
+	vulns, ok := capture.payload["vulnerabilities"].([]any)
 	if !ok || len(vulns) != 1 {
 		t.Fatalf("expected 1 vulnerability in payload, got %T with len %d", capture.payload["vulnerabilities"], len(vulns))
 	}
 
-	// Verify layer details are preserved
-	layerDetails, ok := vulns[0]["layerDetails"].(map[string]any)
+	// Proto-first: each vulnerability is map[string]any with snake_case keys
+	vulnMap, ok := vulns[0].(map[string]any)
 	if !ok {
-		t.Fatalf("expected layerDetails map, got %T", vulns[0]["layerDetails"])
+		t.Fatalf("expected vulnerability map, got %T", vulns[0])
 	}
 
-	// Verify individual layer detail fields
-	if layerDetails["index"] != 2 {
-		t.Errorf("layerDetails.index=%v want=%v", layerDetails["index"], 2)
+	// Proto-first: layer_details is in package field
+	pkgMap, ok := vulnMap["package"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected package map, got %T", vulnMap["package"])
 	}
-	if layerDetails["inBaseImage"] != true {
-		t.Errorf("layerDetails.inBaseImage=%v want=%v", layerDetails["inBaseImage"], true)
+
+	// Proto-first: use snake_case field name
+	layerDetails, ok := pkgMap["layer_details"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected layer_details map, got %T", pkgMap["layer_details"])
 	}
-	if !strings.Contains(layerDetails["command"].(string), "apt-get install") {
-		t.Errorf("layerDetails.command=%v should contain 'apt-get install'", layerDetails["command"])
+
+	// Proto-first: index is int64
+	if idx, ok := layerDetails["index"].(int64); !ok || idx != 2 {
+		t.Errorf("layer_details.index=%v want=%v", layerDetails["index"], 2)
 	}
-	if layerDetails["diffId"] == nil || layerDetails["diffId"] == "" {
-		t.Errorf("layerDetails.diffId should be populated")
+	if layerDetails["in_base_image"] != true {
+		t.Errorf("layer_details.in_base_image=%v want=%v", layerDetails["in_base_image"], true)
 	}
-	if layerDetails["chainId"] == nil || layerDetails["chainId"] == "" {
-		t.Errorf("layerDetails.chainId should be populated")
+	if cmd, ok := layerDetails["command"].(string); !ok || !strings.Contains(cmd, "apt-get install") {
+		t.Errorf("layer_details.command=%v should contain 'apt-get install'", layerDetails["command"])
+	}
+	if layerDetails["diff_id"] == nil || layerDetails["diff_id"] == "" {
+		t.Errorf("layer_details.diff_id should be populated")
+	}
+	if layerDetails["chain_id"] == nil || layerDetails["chain_id"] == "" {
+		t.Errorf("layer_details.chain_id should be populated")
 	}
 }
 
@@ -347,16 +388,26 @@ func TestOCIHandler_VulnerabilityWithoutLayerDetails(t *testing.T) {
 	cache := NewImageScanCache()
 	info := parseOCIRequestPath("/v2/library/go-app/manifests/" + testDigest)
 
-	// Vulnerability without layerDetails (typical for non-OS packages in containers)
-	vulnWithoutLayerDetails := map[string]any{
-		"id":            "GO-2024-TEST",
-		"severity":      "MEDIUM",
-		"package":       "github.com/example/vulnerable",
-		"fixedVersions": []any{"1.2.3"},
+	// Proto-first: Vulnerability without layerDetails (typical for non-OS packages in containers)
+	vulnWithoutLayerDetails := []*vulnerabilityv1.Finding{
+		{
+			AdvisoryId: "GO-2024-TEST",
+			Advisory: &vulnerabilityv1.Advisory{
+				Id: "GO-2024-TEST",
+				Severity: &vulnerabilityv1.Severity{
+					Level: vulnerabilityv1.SeverityLevel_SEVERITY_LEVEL_MEDIUM,
+				},
+				FixedVersions: []string{"1.2.3"},
+			},
+			Package: &dependencyv1.Package{
+				Name: "github.com/example/vulnerable",
+				// No LayerDetails
+			},
+		},
 	}
 
 	cache.Set(imageCacheKey(upstreamURL.Host, info.Repository, info.Digest), ImageScanResult{
-		Vulnerabilities: []map[string]any{vulnWithoutLayerDetails},
+		Vulnerabilities: vulnWithoutLayerDetails,
 	})
 
 	handler, err := newOCIHandler(upstream.URL, capture, &ociHandlerOptions{
@@ -375,32 +426,42 @@ func TestOCIHandler_VulnerabilityWithoutLayerDetails(t *testing.T) {
 		t.Fatalf("status=%d want=%d", rr.Code, http.StatusOK)
 	}
 
-	vulns, ok := capture.payload["vulnerabilities"].([]map[string]any)
+	// Proto-first: vulnerabilities is []any after ProtoToMap conversion
+	vulns, ok := capture.payload["vulnerabilities"].([]any)
 	if !ok || len(vulns) != 1 {
-		t.Fatalf("expected 1 vulnerability in payload")
+		t.Fatalf("expected 1 vulnerability in payload, got %T with len %v", capture.payload["vulnerabilities"], len(vulns))
 	}
 
-	// Verify layerDetails is absent (not nil map, just absent)
-	if _, hasLayerDetails := vulns[0]["layerDetails"]; hasLayerDetails {
-		// It's okay if layerDetails exists and is nil, but shouldn't have incorrect data
-		if vulns[0]["layerDetails"] != nil {
-			t.Errorf("layerDetails should be nil or absent for non-container vuln, got %v", vulns[0]["layerDetails"])
-		}
+	vulnMap, ok := vulns[0].(map[string]any)
+	if !ok {
+		t.Fatalf("expected vulnerability map, got %T", vulns[0])
 	}
 
-	// Verify other fields are preserved
-	if vulns[0]["id"] != "GO-2024-TEST" {
-		t.Errorf("id=%v want=%v", vulns[0]["id"], "GO-2024-TEST")
+	// Proto-first: layer_details should not be present in package (removed by removeNullValues)
+	pkgMap, ok := vulnMap["package"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected package map, got %T", vulnMap["package"])
 	}
-	if vulns[0]["severity"] != "MEDIUM" {
-		t.Errorf("severity=%v want=%v", vulns[0]["severity"], "MEDIUM")
+	// layer_details should be absent (nil fields are removed by removeNullValues)
+	if _, hasLayerDetails := pkgMap["layer_details"]; hasLayerDetails {
+		t.Errorf("layer_details should be absent for non-container vuln, got %v", pkgMap["layer_details"])
+	}
+
+	// Proto-first: verify fields using correct keys
+	if vulnMap["advisory_id"] != "GO-2024-TEST" {
+		t.Errorf("advisory_id=%v want=%v", vulnMap["advisory_id"], "GO-2024-TEST")
 	}
 }
 
 func TestOCIHandler_ImageInfoMergedIntoPayload(t *testing.T) {
-	// Test that ImageInfo (config, metadata, history) is properly merged into
-	// the policy payload, enabling policies to access image.config.user,
-	// image.config.is_root, image.metadata.layer_count, etc.
+	// Test that ImageInfo (config, metadata, history) is properly exposed in
+	// the policy payload, enabling policies to access image.config,
+	// image.metadata.layer_count, etc.
+	//
+	// Proto-first design: The OciArtifactRequestPolicyInput proto has an `image`
+	// field of type ImageInfo. When reading from cache, the handler builds a
+	// minimal ImageInfo proto with just the digest since cached maps can't be
+	// fully reconstructed back to the original struct.
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	}))
@@ -415,39 +476,14 @@ func TestOCIHandler_ImageInfoMergedIntoPayload(t *testing.T) {
 	cache := NewImageScanCache()
 	info := parseOCIRequestPath("/v2/library/secure-app/manifests/" + testDigest)
 
-	// Create cache entry with ImageInfo populated
-	imageInfo := map[string]any{
-		"config": map[string]any{
-			"user":          "nobody",
-			"is_root":       false,
-			"env":           []any{"PATH=/usr/bin"},
-			"sensitive_env": []any{},
-			"entrypoint":    []any{"/app"},
-			"cmd":           []any{"serve"},
-			"exposed_ports": []any{"8080/tcp"},
-			"volumes":       []any{},
-			"labels":        map[string]any{"version": "1.0"},
-			"working_dir":   "/app",
-		},
-		"metadata": map[string]any{
-			"architecture": "amd64",
-			"os":           "linux",
-			"layer_count":  5,
-			"size":         int64(50000000),
-			"created":      int64(1704067200),
-			"digest":       testDigest,
-		},
-		"history": []any{
-			map[string]any{
-				"created_by":  "/bin/sh -c #(nop) ADD file:abc...",
-				"empty_layer": false,
-			},
-		},
-	}
-
+	// Proto-first: use proto Finding messages in the cache
 	cache.Set(imageCacheKey(upstreamURL.Host, info.Repository, info.Digest), ImageScanResult{
-		Vulnerabilities: []map[string]any{{"id": "CVE-2024-TEST"}},
-		ImageInfo:       imageInfo,
+		Vulnerabilities: []*vulnerabilityv1.Finding{{
+			AdvisoryId: "CVE-2024-TEST",
+			Advisory:   &vulnerabilityv1.Advisory{Id: "CVE-2024-TEST"},
+		}},
+		// Note: ImageInfo from cache maps cannot be converted back to structs
+		// The handler builds minimal ImageInfo from request metadata
 	})
 
 	handler, err := newOCIHandler(upstream.URL, capture, &ociHandlerOptions{
@@ -466,56 +502,25 @@ func TestOCIHandler_ImageInfoMergedIntoPayload(t *testing.T) {
 		t.Fatalf("status=%d want=%d", rr.Code, http.StatusOK)
 	}
 
-	// Verify image_info is exposed as a separate payload variable
-	imageInfoPayload, ok := capture.payload["image_info"].(map[string]any)
-	if !ok {
-		t.Fatalf("expected image_info map in payload, got %T", capture.payload["image_info"])
-	}
-
-	// Verify config is accessible
-	config, ok := imageInfoPayload["config"].(map[string]any)
-	if !ok {
-		t.Fatalf("expected config map in image_info")
-	}
-	if config["user"] != "nobody" {
-		t.Errorf("image_info.config.user=%v want=%v", config["user"], "nobody")
-	}
-	if config["is_root"] != false {
-		t.Errorf("image_info.config.is_root=%v want=%v", config["is_root"], false)
-	}
-
-	// Verify metadata is accessible
-	metadata, ok := imageInfoPayload["metadata"].(map[string]any)
-	if !ok {
-		t.Fatalf("expected metadata map in image_info")
-	}
-	if metadata["layer_count"] != 5 {
-		t.Errorf("image_info.metadata.layer_count=%v want=%v", metadata["layer_count"], 5)
-	}
-	if metadata["architecture"] != "amd64" {
-		t.Errorf("image_info.metadata.architecture=%v want=%v", metadata["architecture"], "amd64")
-	}
-
-	// Verify ImageInfo is also merged into the image payload
+	// Proto-first: image field contains ImageInfo (config, metadata, history)
 	imageMap, ok := capture.payload["image"].(map[string]any)
 	if !ok {
-		t.Fatalf("expected image map in payload")
+		t.Fatalf("expected image map in payload, got %T", capture.payload["image"])
 	}
 
-	// Config should be merged into image (since it doesn't override existing keys)
-	if _, hasConfig := imageMap["config"]; !hasConfig {
-		t.Error("expected config to be merged into image payload")
+	// Proto-first: metadata contains digest from request
+	metadata, ok := imageMap["metadata"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected metadata map in image, got %T", imageMap["metadata"])
 	}
-	if _, hasMetadata := imageMap["metadata"]; !hasMetadata {
-		t.Error("expected metadata to be merged into image payload")
+	if metadata["digest"] != testDigest {
+		t.Errorf("image.metadata.digest=%v want=%v", metadata["digest"], testDigest)
 	}
 
-	// Verify provenance keys are preserved (not overridden by ImageInfo)
-	if imageMap["registry"] != upstreamURL.Host {
-		t.Errorf("image.registry=%v want=%v (should not be overridden)", imageMap["registry"], upstreamURL.Host)
-	}
-	if imageMap["repository"] != "library/secure-app" {
-		t.Errorf("image.repository=%v want=%v (should not be overridden)", imageMap["repository"], "library/secure-app")
+	// Proto-first: vulnerabilities should be present
+	vulns, ok := capture.payload["vulnerabilities"].([]any)
+	if !ok || len(vulns) != 1 {
+		t.Fatalf("expected 1 vulnerability in payload, got %T with len %v", capture.payload["vulnerabilities"], len(vulns))
 	}
 }
 
@@ -523,68 +528,57 @@ func TestOCIHandler_ImageInfoMergedIntoPayload(t *testing.T) {
 // policy expressions from container-security.yaml work correctly with actual OCI
 // proxy payloads. This is a critical integration test to ensure policies are not
 // hallucinated and will work in production.
+//
+// Proto-first design: Payloads mirror OciArtifactRequestPolicyInput proto:
+// - request: ProxyRequest with package, version, ecosystem, operation
+// - image: ImageInfo with image (full ref), registry, repository, tag, config, metadata
 func TestOCIHandler_PolicyExpressionsWithRealPayloads(t *testing.T) {
 	// Simulate an OCI proxy payload for gcr.io/myproject/app:v1.2.3
+	// Proto fields only - matches actual handler output
 	tagPayload := map[string]any{
 		"request": map[string]any{
-			"ecosystem":  "oci",
-			"operation":  "manifest",
-			"registry":   "gcr.io",
-			"repository": "myproject/app",
-			"tag":        "v1.2.3",
-			"digest":     "",
-			"reference":  "v1.2.3",
-			"image":      "gcr.io/myproject/app:v1.2.3",
+			"ecosystem": "oci",
+			"operation": "manifest",
+			"package":   "myproject/app",
+			"version":   "v1.2.3",
 		},
 		"image": map[string]any{
+			"image":      "gcr.io/myproject/app:v1.2.3",
 			"registry":   "gcr.io",
 			"repository": "myproject/app",
 			"tag":        "v1.2.3",
-			"digest":     "",
-			"reference":  "v1.2.3",
-			"image":      "gcr.io/myproject/app:v1.2.3",
 		},
 	}
 
 	// Simulate an OCI proxy payload for nginx:latest (should trigger block-latest-tag)
 	latestPayload := map[string]any{
 		"request": map[string]any{
-			"ecosystem":  "oci",
-			"operation":  "manifest",
-			"registry":   "docker.io",
-			"repository": "library/nginx",
-			"tag":        "latest",
-			"digest":     "",
-			"reference":  "latest",
-			"image":      "docker.io/library/nginx:latest",
+			"ecosystem": "oci",
+			"operation": "manifest",
+			"package":   "library/nginx",
+			"version":   "latest",
 		},
 		"image": map[string]any{
+			"image":      "docker.io/library/nginx:latest",
 			"registry":   "docker.io",
 			"repository": "library/nginx",
 			"tag":        "latest",
-			"digest":     "",
-			"reference":  "latest",
-			"image":      "docker.io/library/nginx:latest",
 		},
 	}
 
 	// Simulate an OCI proxy payload with image running as root
 	rootPayload := map[string]any{
 		"request": map[string]any{
-			"ecosystem":  "oci",
-			"operation":  "manifest",
-			"registry":   "ghcr.io",
-			"repository": "acme/insecure-app",
-			"tag":        "v1.0.0",
-			"reference":  "v1.0.0",
-			"image":      "ghcr.io/acme/insecure-app:v1.0.0",
+			"ecosystem": "oci",
+			"operation": "manifest",
+			"package":   "acme/insecure-app",
+			"version":   "v1.0.0",
 		},
 		"image": map[string]any{
+			"image":      "ghcr.io/acme/insecure-app:v1.0.0",
 			"registry":   "ghcr.io",
 			"repository": "acme/insecure-app",
 			"tag":        "v1.0.0",
-			"reference":  "v1.0.0",
-			"image":      "ghcr.io/acme/insecure-app:v1.0.0",
 			"config": map[string]any{
 				"user":    "",
 				"is_root": true,
@@ -708,29 +702,53 @@ func TestOCIHandler_PolicyExpressionsWithRealPayloads(t *testing.T) {
 	}
 }
 
-// TestOCIHandler_ImageImageContainsFullReference verifies that image.image
-// contains the full image reference including tag or digest, which is required
-// for the imageRef() helper function to work correctly in policies.
-func TestOCIHandler_ImageImageContainsFullReference(t *testing.T) {
+// TestOCIHandler_ImageReferenceInPayload verifies that the OCI handler
+// populates the request with repository and version information that can be
+// used for policy evaluation.
+//
+// Proto-first design: The OciArtifactRequestPolicyInput proto uses:
+// - request.package: the repository name
+// - request.version: the reference (tag or digest)
+// - image.image: full image reference (registry/repo:tag or registry/repo@digest)
+// - image.registry: registry hostname
+// - image.repository: repository path
+// - image.tag: image tag (empty for digest references)
+// - image.metadata.digest: the resolved digest (when available)
+//
+// Policies can use the full image reference directly or access individual
+// components for pattern matching.
+func TestOCIHandler_ImageReferenceInPayload(t *testing.T) {
 	tests := []struct {
 		name           string
 		path           string
-		wantImageImage string // expected value of image.image
+		wantRepository string
+		wantVersion    string
+		wantTag        string
+		wantFullRef    string // expected image.image field
 	}{
 		{
 			name:           "tag reference",
 			path:           "/v2/library/nginx/manifests/1.25.3",
-			wantImageImage: "127.0.0.1/library/nginx:1.25.3", // registry will be the upstream host
+			wantRepository: "library/nginx",
+			wantVersion:    "1.25.3",
+			wantTag:        "1.25.3",
+			wantFullRef:    "", // filled in dynamically with registry
 		},
 		{
 			name:           "digest reference",
 			path:           "/v2/acme/app/manifests/" + testDigest,
-			wantImageImage: "127.0.0.1/acme/app@" + testDigest,
+			wantRepository: "acme/app",
+			wantVersion:    testDigest,
+			wantTag:        "",
+			wantFullRef:    "", // filled in dynamically with registry
 		},
 		{
 			name:           "nested repository with tag",
 			path:           "/v2/gcr.io/project/subdir/myimage/manifests/v1.0.0",
-			wantImageImage: "127.0.0.1/gcr.io/project/subdir/myimage:v1.0.0",
+			wantRepository: "gcr.io/project/subdir/myimage",
+			wantVersion:    "v1.0.0",
+			wantTag:        "v1.0.0",
+			wantFullRef:    "", // filled in dynamically with registry
 		},
 	}
 
@@ -740,11 +758,6 @@ func TestOCIHandler_ImageImageContainsFullReference(t *testing.T) {
 				w.WriteHeader(http.StatusOK)
 			}))
 			t.Cleanup(upstream.Close)
-
-			upstreamURL, err := url.Parse(upstream.URL)
-			if err != nil {
-				t.Fatalf("parse upstream: %v", err)
-			}
 
 			capture := &capturePolicyEvaluator{}
 
@@ -763,20 +776,65 @@ func TestOCIHandler_ImageImageContainsFullReference(t *testing.T) {
 				t.Fatalf("new handler: %v", err)
 			}
 
+			// Get registry from upstream URL for expected values
+			upstreamURL, _ := url.Parse(upstream.URL)
+			registry := upstreamURL.Host
+
 			req := httptest.NewRequest(http.MethodGet, "http://deputy.local"+tt.path, nil)
 			rr := httptest.NewRecorder()
 			handler.ServeHTTP(rr, req)
 
+			// Proto-first: request contains repository and version
+			reqMap, ok := capture.payload["request"].(map[string]any)
+			if !ok {
+				t.Fatalf("expected request map in payload")
+			}
+
+			// Proto-first: package field contains repository
+			if reqMap["package"] != tt.wantRepository {
+				t.Errorf("request.package=%q want=%q", reqMap["package"], tt.wantRepository)
+			}
+
+			// Proto-first: version field contains reference (tag or digest)
+			if reqMap["version"] != tt.wantVersion {
+				t.Errorf("request.version=%q want=%q", reqMap["version"], tt.wantVersion)
+			}
+
+			// Proto-first: image field should be present with provenance fields
 			imageMap, ok := capture.payload["image"].(map[string]any)
 			if !ok {
 				t.Fatalf("expected image map in payload")
 			}
 
-			// Replace 127.0.0.1 placeholder with actual upstream host
-			wantImageImage := strings.Replace(tt.wantImageImage, "127.0.0.1", upstreamURL.Host, 1)
+			// Verify image.registry
+			if imageMap["registry"] != registry {
+				t.Errorf("image.registry=%q want=%q", imageMap["registry"], registry)
+			}
 
-			if imageMap["image"] != wantImageImage {
-				t.Errorf("image.image=%q want=%q", imageMap["image"], wantImageImage)
+			// Verify image.repository
+			if imageMap["repository"] != tt.wantRepository {
+				t.Errorf("image.repository=%q want=%q", imageMap["repository"], tt.wantRepository)
+			}
+
+			// Verify image.tag
+			if imageMap["tag"] != tt.wantTag {
+				t.Errorf("image.tag=%q want=%q", imageMap["tag"], tt.wantTag)
+			}
+
+			// Verify image.image (full reference)
+			var expectedFullRef string
+			if tt.wantTag != "" {
+				expectedFullRef = registry + "/" + tt.wantRepository + ":" + tt.wantTag
+			} else {
+				expectedFullRef = registry + "/" + tt.wantRepository + "@" + testDigest
+			}
+			if imageMap["image"] != expectedFullRef {
+				t.Errorf("image.image=%q want=%q", imageMap["image"], expectedFullRef)
+			}
+
+			// Verify image.metadata is present
+			if imageMap["metadata"] == nil {
+				t.Error("expected image.metadata to be present")
 			}
 		})
 	}

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path"
 	"slices"
 	"strings"
 
@@ -271,10 +272,11 @@ OUTPUT FORMATS:
 // addGraphWhyCommand adds the "graph why" subcommand.
 func addGraphWhyCommand(parent *cobra.Command, c *services.Clients) {
 	var (
-		ref     string
-		ecos    []string
-		all     bool
-		jsonOut bool
+		ref      string
+		ecos     []string
+		all      bool
+		jsonOut  bool
+		listOnly bool
 	)
 
 	cmd := &cobra.Command{
@@ -286,6 +288,7 @@ This command traces the dependency chain from your direct dependencies to
 the specified package, answering "why is X in my dependencies?"
 
 By default, shows only the shortest path. Use --all to see all paths.
+Use --list to see all packages matching your query without path analysis.
 
 Similar to 'go mod why' but works across all ecosystems.`,
 		Example: `  # Why is lodash in my dependencies?
@@ -296,6 +299,9 @@ Similar to 'go mod why' but works across all ecosystems.`,
 
   # Show all dependency paths (not just shortest)
   deputy graph why lodash --all
+
+  # List all packages matching a query (no path analysis)
+  deputy graph why cobra --list
 
   # Check a remote repository
   deputy graph why express github.com/example/repo`,
@@ -316,10 +322,11 @@ Similar to 'go mod why' but works across all ecosystems.`,
 				}
 			}
 
-			// Use WhyDependency service method
-			req := &graphv1.WhyDependencyRequest{
-				Target:     target,
-				Dependency: pkg,
+			w := cmd.OutOrStdout()
+
+			// Build the graph to find all matches
+			buildReq := &graphv1.BuildGraphRequest{
+				Target: target,
 				Options: &graphv1.GraphOptions{
 					Ecosystems: normalizeEcosystems(ecos),
 					Ref:        ref,
@@ -328,15 +335,20 @@ Similar to 'go mod why' but works across all ecosystems.`,
 				},
 			}
 
-			resp, err := c.Graph.WhyDependency(ctx, connect.NewRequest(req))
+			buildResp, err := c.Graph.BuildGraph(ctx, connect.NewRequest(buildReq))
 			if err != nil {
-				return fmt.Errorf("failed to query dependency: %w", err)
+				return fmt.Errorf("failed to build graph: %w", err)
 			}
 
-			w := cmd.OutOrStdout()
+			g := graph.FromProto(buildResp.Msg.Nodes, buildResp.Msg.Edges, buildResp.Msg.Roots)
+			if g == nil {
+				return fmt.Errorf("failed to parse graph response")
+			}
 
-			// Package not found
-			if !resp.Msg.Found {
+			// Find all matching packages
+			matches := findMatchingNodes(g, pkg)
+
+			if len(matches) == 0 {
 				fmt.Fprintf(w, "Package %q not found in dependency graph.\n", pkg)
 				// Provide helpful guidance for Go stdlib package searches
 				if isGoStdlibPackage(pkg) {
@@ -363,67 +375,18 @@ Similar to 'go mod why' but works across all ecosystems.`,
 				return nil
 			}
 
-			// Convert proto paths to internal paths for rendering
-			paths := graph.PathsFromProto(resp.Msg.Paths)
+			// --list mode: show all matching packages without path analysis
+			if listOnly {
+				return renderMatchList(w, matches, pkg)
+			}
 
 			// JSON output mode
 			if jsonOut {
-				// Build a graph from all path nodes for JSON output
-				g := graph.New()
-				for _, path := range paths {
-					for _, node := range path {
-						g.AddNode(node)
-					}
-				}
-				return writeWhyJSON(w, g, []*graph.Node{paths[0][len(paths[0])-1]})
+				return writeWhyJSON(w, g, matches)
 			}
 
-			// Text output - render paths
-			if len(paths) == 0 {
-				fmt.Fprintf(w, "%s\n", formatPackageHeader(pkg, ""))
-				fmt.Fprintf(w, "%s\n", graphStyleMeta.Render("(direct dependency or no path found)"))
-				return nil
-			}
-
-			// Get the target node from the last element of the first path
-			targetNode := paths[0][len(paths[0])-1]
-			fmt.Fprintln(w, formatPackageHeader(targetNode.Name, targetNode.Version))
-
-			// Sort paths by length
-			slices.SortFunc(paths, func(a, b graph.Path) int {
-				return len(a) - len(b)
-			})
-
-			// Deduplicate paths
-			paths = deduplicatePaths(paths)
-
-			// Analyze paths
-			shortestHops := len(paths[0]) - 1
-			directDeps := collectUniqueRoots(paths)
-
-			// Render summary and paths
-			renderWhySummary(w, paths, shortestHops, directDeps)
-
-			pathsToShow := paths
-			truncated := false
-			if !all && len(paths) > 5 {
-				pathsToShow = paths[:5]
-				truncated = true
-			}
-
-			if shortestHops == 1 && allPathsSameDepth(paths, 2) {
-				renderCompactDirectDeps(w, directDeps)
-			} else {
-				renderGroupedPaths(w, pathsToShow)
-			}
-
-			if truncated {
-				fmt.Fprintln(w)
-				remaining := len(paths) - len(pathsToShow)
-				fmt.Fprintf(w, "%s\n", graphStyleMeta.Render(fmt.Sprintf("... and %d more paths (use --all to show)", remaining)))
-			}
-
-			return nil
+			// Text output - show paths for ALL matching packages (exploratory mode)
+			return renderWhyAllMatches(w, g, matches, pkg, all)
 		},
 	}
 
@@ -431,8 +394,185 @@ Similar to 'go mod why' but works across all ecosystems.`,
 	cmd.Flags().StringSliceVar(&ecos, "ecosystems", []string{"all"}, "Ecosystems to include")
 	cmd.Flags().BoolVarP(&all, "all", "a", false, "Show all dependency paths (not just shortest)")
 	cmd.Flags().BoolVar(&jsonOut, "json", false, "Output as JSON")
+	cmd.Flags().BoolVarP(&listOnly, "list", "l", false, "List all matching packages (no path analysis)")
 
 	parent.AddCommand(cmd)
+}
+
+// renderMatchList renders a list of matching packages without path analysis.
+// Used by --list mode to show what packages match a query.
+func renderMatchList(w io.Writer, matches []*graph.Node, query string) error {
+	// Header
+	fmt.Fprintf(w, "%s\n", graphStyleMeta.Render(fmt.Sprintf("Packages matching %q (%d found):", query, len(matches))))
+	fmt.Fprintln(w)
+
+	// List matches with their match quality indicated
+	queryLower := strings.ToLower(query)
+	for _, m := range matches {
+		score := matchScore(m.Name, queryLower)
+		var indicator string
+		switch score {
+		case 3:
+			indicator = graphStyleMatchExact.Render("★") // exact match
+		case 2:
+			indicator = graphStyleMatchName.Render("●") // final segment match
+		default:
+			indicator = graphStyleMatchSubstring.Render("○") // substring match
+		}
+
+		name := m.Name
+		if m.Version != "" {
+			name += graphStyleAt.Render("@") + graphStyleVersion.Render(m.Version)
+		}
+		if m.Direct {
+			name += " " + ui.StyleDirect.Render("[direct]")
+		}
+
+		fmt.Fprintf(w, "  %s %s\n", indicator, name)
+	}
+
+	// Legend with dimmed symbols (all uniformly muted since it's informational)
+	fmt.Fprintln(w)
+	fmt.Fprintf(w, "%s\n",
+		graphStyleMeta.Render("Legend: ★ exact  ● name match  ○ substring"))
+
+	return nil
+}
+
+// renderWhyAllMatches renders paths for all matching packages.
+// This is the exploratory mode - shows everything that matches so users can explore.
+func renderWhyAllMatches(w io.Writer, g *graph.Graph, matches []*graph.Node, query string, showAll bool) error {
+	// Header showing how many matches
+	if len(matches) > 1 {
+		fmt.Fprintf(w, "%s\n\n", graphStyleMeta.Render(fmt.Sprintf("%d packages match %q:", len(matches), query)))
+	}
+
+	// Render each match with its paths
+	for i, match := range matches {
+		if i > 0 {
+			fmt.Fprintln(w) // Blank line between matches
+		}
+
+		// Get paths for this match
+		paths := g.PathsTo(match.Purl)
+
+		// Sort by length
+		slices.SortFunc(paths, func(a, b graph.Path) int {
+			return len(a) - len(b)
+		})
+
+		// Deduplicate
+		paths = deduplicatePaths(paths)
+
+		// Header with package name
+		fmt.Fprintln(w, formatPackageHeader(match.Name, match.Version))
+
+		if len(paths) == 0 {
+			// No paths found - show where it was found and why no path exists
+			if match.Direct {
+				fmt.Fprintf(w, "%s\n", ui.StyleDirect.Render("[direct dependency]"))
+				renderNodeLocations(w, match)
+			} else {
+				// Disconnected node - explain where it came from
+				renderDisconnectedNode(w, match)
+			}
+			continue
+		}
+
+		shortestHops := len(paths[0]) - 1
+
+		// Direct dependency (0 hops)
+		if shortestHops == 0 {
+			fmt.Fprintf(w, "%s\n", ui.StyleDirect.Render("[direct dependency]"))
+			continue
+		}
+
+		// Analyze and render paths
+		directDeps := collectUniqueRoots(paths)
+		renderWhySummary(w, paths, shortestHops, directDeps)
+
+		pathsToShow := paths
+		truncated := false
+		if !showAll && len(paths) > 5 {
+			pathsToShow = paths[:5]
+			truncated = true
+		}
+
+		if shortestHops == 1 && allPathsSameDepth(paths, 2) {
+			// Compact format for 1-hop dependencies
+			renderCompactDirectDeps(w, directDeps)
+		} else {
+			// Tree format
+			fmt.Fprintln(w)
+			renderGroupedPaths(w, pathsToShow)
+		}
+
+		if truncated {
+			fmt.Fprintln(w)
+			remaining := len(paths) - len(pathsToShow)
+			fmt.Fprintf(w, "%s\n", graphStyleMeta.Render(fmt.Sprintf("... and %d more paths (use --all to show)", remaining)))
+		}
+	}
+
+	return nil
+}
+
+// renderNodeLocations renders the source locations for a node.
+func renderNodeLocations(w io.Writer, node *graph.Node) {
+	if len(node.Locations) > 0 {
+		for _, loc := range node.Locations {
+			fmt.Fprintf(w, "  %s %s\n", graphStyleArrow.Render("←"), graphStyleMeta.Render(loc))
+		}
+	}
+}
+
+// renderDisconnectedNode explains why a node has no dependency path.
+// This happens for packages found in vendored binaries, separate go.mod files, etc.
+func renderDisconnectedNode(w io.Writer, node *graph.Node) {
+	if len(node.Locations) == 0 {
+		fmt.Fprintf(w, "%s\n", graphStyleMeta.Render("[no dependency path found]"))
+		return
+	}
+
+	// Categorize the locations to provide helpful context
+	var binaries, goMods, others []string
+	for _, loc := range node.Locations {
+		switch {
+		case strings.Contains(loc, ".bin") || strings.HasSuffix(loc, ".exe") || !strings.Contains(loc, "."):
+			// Binary files (no extension or .bin directory)
+			binaries = append(binaries, loc)
+		case strings.HasSuffix(loc, "go.mod") || strings.HasSuffix(loc, "go.sum"):
+			goMods = append(goMods, loc)
+		default:
+			others = append(others, loc)
+		}
+	}
+
+	// Render with context-specific messaging
+	if len(binaries) > 0 {
+		fmt.Fprintf(w, "%s\n", graphStyleMeta.Render("[found in vendored binary]"))
+		for _, loc := range binaries {
+			fmt.Fprintf(w, "  %s %s\n", graphStyleArrow.Render("←"), graphStyleTipHighlight.Render(loc))
+		}
+	}
+	if len(goMods) > 0 {
+		if len(binaries) > 0 {
+			fmt.Fprintln(w)
+		}
+		fmt.Fprintf(w, "%s\n", graphStyleMeta.Render("[found in separate module]"))
+		for _, loc := range goMods {
+			fmt.Fprintf(w, "  %s %s\n", graphStyleArrow.Render("←"), graphStyleTipHighlight.Render(loc))
+		}
+	}
+	if len(others) > 0 {
+		if len(binaries) > 0 || len(goMods) > 0 {
+			fmt.Fprintln(w)
+		}
+		fmt.Fprintf(w, "%s\n", graphStyleMeta.Render("[found in]"))
+		for _, loc := range others {
+			fmt.Fprintf(w, "  %s %s\n", graphStyleArrow.Render("←"), graphStyleTipHighlight.Render(loc))
+		}
+	}
 }
 
 // normalizeEcosystems converts the CLI ecosystems flag to the service format.
@@ -482,23 +622,31 @@ func renderWhySummary(w io.Writer, paths []graph.Path, shortestHops int, directD
 		depWord = "dependencies"
 	}
 
+	// Helper to format numbers with highlighting
+	num := func(n int) string {
+		return graphStyleNumber.Render(fmt.Sprintf("%d", n))
+	}
+	meta := graphStyleMeta.Render
+
 	if shortestHops == 1 && allPathsSameDepth(paths, 2) {
 		// All 1-hop paths: emphasize which direct deps require this
-		fmt.Fprintf(w, "%s\n", graphStyleMeta.Render(
-			fmt.Sprintf("(required by %d direct %s)", len(directDeps), depWord)))
+		fmt.Fprintf(w, "%s%s%s\n",
+			meta("(required by "), num(len(directDeps)), meta(" direct "+depWord+")"))
 	} else if len(directDeps) == 1 {
 		// All paths through one direct dep
 		if len(paths) == 1 {
-			fmt.Fprintf(w, "%s\n", graphStyleMeta.Render(
-				fmt.Sprintf("(%d %s via %s)", shortestHops, hopWord, shortName(directDeps[0].Name))))
+			fmt.Fprintf(w, "%s%s%s\n",
+				meta("("), num(shortestHops), meta(" "+hopWord+" via "+shortName(directDeps[0].Name)+")"))
 		} else {
-			fmt.Fprintf(w, "%s\n", graphStyleMeta.Render(
-				fmt.Sprintf("(%d paths via %s, shortest %d %s)", len(paths), shortName(directDeps[0].Name), shortestHops, hopWord)))
+			fmt.Fprintf(w, "%s%s%s%s%s\n",
+				meta("("), num(len(paths)), meta(" paths via "+shortName(directDeps[0].Name)+", shortest "),
+				num(shortestHops), meta(" "+hopWord+")"))
 		}
 	} else {
 		// Multiple direct deps with varying depths
-		fmt.Fprintf(w, "%s\n", graphStyleMeta.Render(
-			fmt.Sprintf("(%d paths via %d direct %s, shortest %d %s)", len(paths), len(directDeps), depWord, shortestHops, hopWord)))
+		fmt.Fprintf(w, "%s%s%s%s%s%s%s\n",
+			meta("("), num(len(paths)), meta(" paths via "), num(len(directDeps)),
+			meta(" direct "+depWord+", shortest "), num(shortestHops), meta(" "+hopWord+")"))
 	}
 }
 
@@ -510,6 +658,16 @@ func shortName(name string) string {
 	return name
 }
 
+// lastNSegments returns the last n segments of a package path.
+// E.g., lastNSegments("github.com/go-git/go-git/v5", 2) returns "go-git/v5"
+func lastNSegments(name string, n int) string {
+	parts := strings.Split(name, "/")
+	if len(parts) <= n {
+		return name
+	}
+	return strings.Join(parts[len(parts)-n:], "/")
+}
+
 // renderCompactDirectDeps renders a compact list of direct dependencies with source info.
 func renderCompactDirectDeps(w io.Writer, deps []*graph.Node) {
 	for _, dep := range deps {
@@ -518,15 +676,15 @@ func renderCompactDirectDeps(w io.Writer, deps []*graph.Node) {
 	}
 }
 
-// renderGroupedPaths groups paths by their root node and renders them as merged trees.
-// This avoids repeating the same root multiple times when multiple paths share it.
+// renderGroupedPaths renders the shortest path per direct dependency as a tree.
+// This provides a clear, non-redundant view while maintaining visual structure.
 func renderGroupedPaths(w io.Writer, paths []graph.Path) {
 	if len(paths) == 0 {
 		return
 	}
 
-	// Group paths by root PURL
-	groups := make(map[string][]graph.Path)
+	// Group paths by root PURL, keeping only the shortest per root
+	shortestByRoot := make(map[string]graph.Path)
 	var rootOrder []string // preserve order of first occurrence
 
 	for _, path := range paths {
@@ -534,19 +692,48 @@ func renderGroupedPaths(w io.Writer, paths []graph.Path) {
 			continue
 		}
 		rootPURL := path[0].Purl
-		if _, exists := groups[rootPURL]; !exists {
+		existing, exists := shortestByRoot[rootPURL]
+		if !exists {
 			rootOrder = append(rootOrder, rootPURL)
+			shortestByRoot[rootPURL] = path
+		} else if len(path) < len(existing) {
+			shortestByRoot[rootPURL] = path
 		}
-		groups[rootPURL] = append(groups[rootPURL], path)
 	}
 
-	// Render each group
+	// Render each shortest path as a simple tree
 	for i, rootPURL := range rootOrder {
 		if i > 0 {
-			fmt.Fprintln(w) // blank line between root groups
+			fmt.Fprintln(w) // blank line between paths
 		}
-		groupPaths := groups[rootPURL]
-		renderPathGroup(w, groupPaths)
+		path := shortestByRoot[rootPURL]
+		renderPathAsTree(w, path)
+	}
+}
+
+// renderPathAsTree renders a single path as a vertical tree.
+func renderPathAsTree(w io.Writer, path graph.Path) {
+	if len(path) == 0 {
+		return
+	}
+
+	// Root node (direct dependency)
+	fmt.Fprintln(w, formatNodeLabelWithSource(path[0]))
+
+	// Remaining nodes as tree
+	for i := 1; i < len(path); i++ {
+		node := path[i]
+		isLast := i == len(path)-1
+		indent := strings.Repeat("    ", i-1)
+
+		var label string
+		if isLast {
+			label = formatNodeLabelHighlighted(node)
+		} else {
+			label = formatNodeLabel(node)
+		}
+
+		fmt.Fprintf(w, "%s%s%s\n", indent, graphStyleArrow.Render("└── "), label)
 	}
 }
 
@@ -628,9 +815,11 @@ func renderPathTree(w io.Writer, node *pathTreeNode, prefix string, isRoot bool)
 }
 
 // renderChildren renders child nodes with proper tree structure.
+// Leaf nodes (no children) are highlighted as they represent the target package.
 func renderChildren(w io.Writer, children []*pathTreeNode, prefix string) {
 	for i, child := range children {
 		isLast := i == len(children)-1
+		isLeaf := len(child.children) == 0
 
 		var connector, nextPrefix string
 		if isLast {
@@ -641,11 +830,17 @@ func renderChildren(w io.Writer, children []*pathTreeNode, prefix string) {
 			nextPrefix = prefix + graphStyleArrow.Render("│") + "   "
 		}
 
-		label := formatNodeLabel(child.node)
+		// Leaf nodes (target package) get highlighted
+		var label string
+		if isLeaf {
+			label = formatNodeLabelHighlighted(child.node)
+		} else {
+			label = formatNodeLabel(child.node)
+		}
 		fmt.Fprintf(w, "%s%s%s\n", prefix, connector, label)
 
 		// Recurse for grandchildren
-		if len(child.children) > 0 {
+		if !isLeaf {
 			renderChildren(w, child.children, nextPrefix)
 		}
 	}
@@ -653,20 +848,29 @@ func renderChildren(w io.Writer, children []*pathTreeNode, prefix string) {
 
 
 // Graph output styles - defined here for consistency across graph commands.
-// These provide better contrast than the default ui.Style* for dependency paths.
+// Designed for visual hierarchy: header stands out, tree fades into background,
+// target package highlighted at leaf nodes.
 var (
-	// graphStyleName renders package names in bold white.
+	// graphStyleName renders the target package name in bold white (header only).
 	graphStyleName = lipgloss.NewStyle().Foreground(lipgloss.Color("#FFFFFF")).Bold(true)
-	// graphStyleVersion renders versions in a readable cyan-gray (not faint).
+	// graphStyleVersion renders versions in a subdued cyan-gray.
 	graphStyleVersion = lipgloss.NewStyle().Foreground(lipgloss.Color("#88AAAA"))
 	// graphStyleAt renders the @ separator in dim gray.
-	graphStyleAt = lipgloss.NewStyle().Foreground(lipgloss.Color("#666666"))
-	// graphStyleDirect renders the (direct) marker.
-	graphStyleDirect = lipgloss.NewStyle().Foreground(lipgloss.Color("#888888"))
-	// graphStyleArrow renders tree arrows with slightly more visibility.
-	graphStyleArrow = lipgloss.NewStyle().Foreground(lipgloss.Color("#555555"))
+	graphStyleAt = lipgloss.NewStyle().Foreground(lipgloss.Color("#555555"))
+	// graphStyleArrow renders tree connectors very dim (visual structure, not content).
+	graphStyleArrow = lipgloss.NewStyle().Foreground(lipgloss.Color("#444444"))
 	// graphStyleMeta renders metadata like path counts in dim text.
 	graphStyleMeta = lipgloss.NewStyle().Foreground(lipgloss.Color("#666666"))
+	// graphStyleNumber renders numbers in summary text - stands out from dim text.
+	graphStyleNumber = lipgloss.NewStyle().Foreground(lipgloss.Color("#AAAAAA"))
+	// graphStyleTreeNode renders intermediary tree nodes in subdued color.
+	graphStyleTreeNode = lipgloss.NewStyle().Foreground(lipgloss.Color("#888888"))
+	// graphStyleTreeVersion renders versions in tree nodes even more subdued.
+	graphStyleTreeVersion = lipgloss.NewStyle().Foreground(lipgloss.Color("#666666"))
+	// graphStyleTarget renders the target package (leaf nodes) - stands out in tree.
+	graphStyleTarget = lipgloss.NewStyle().Foreground(lipgloss.Color("#FFFFFF"))
+	// graphStyleTargetVersion renders target package version.
+	graphStyleTargetVersion = lipgloss.NewStyle().Foreground(lipgloss.Color("#88AAAA"))
 	// graphStyleTipIcon renders the lightbulb icon in yellow.
 	graphStyleTipIcon = lipgloss.NewStyle().Foreground(lipgloss.Color("#FFCC00"))
 	// graphStyleTipLabel renders the "Tip:" label in bold yellow.
@@ -675,6 +879,14 @@ var (
 	graphStyleTipText = lipgloss.NewStyle().Foreground(lipgloss.Color("#AAAAAA"))
 	// graphStyleTipHighlight renders highlighted text within tips.
 	graphStyleTipHighlight = lipgloss.NewStyle().Foreground(lipgloss.Color("#FFFFFF"))
+
+	// Match quality indicator styles for --list output
+	// graphStyleMatchExact renders ★ for exact matches - bright yellow, stands out.
+	graphStyleMatchExact = lipgloss.NewStyle().Foreground(lipgloss.Color("#FFCC00"))
+	// graphStyleMatchName renders ● for name/segment matches - softer yellow.
+	graphStyleMatchName = lipgloss.NewStyle().Foreground(lipgloss.Color("#BBAA66"))
+	// graphStyleMatchSubstring renders ○ for substring matches - dim gray.
+	graphStyleMatchSubstring = lipgloss.NewStyle().Foreground(lipgloss.Color("#666666"))
 )
 
 // formatPackageHeader formats a package name and version as a header line.
@@ -688,31 +900,51 @@ func formatPackageHeader(name, version string) string {
 }
 
 // formatNodeLabel formats a node for display with name and version.
+// Uses subdued colors for tree nodes to reduce visual noise.
 func formatNodeLabel(node *graph.Node) string {
-	result := graphStyleName.UnsetBold().Render(node.Name)
+	result := graphStyleTreeNode.Render(node.Name)
 	if node.Version != "" {
 		result += graphStyleAt.Render("@")
-		result += graphStyleVersion.Render(node.Version)
+		result += graphStyleTreeVersion.Render(node.Version)
 	}
 	if node.Direct {
-		result += graphStyleDirect.Render(" (direct)")
+		result += " " + ui.StyleDirect.Render("[direct]")
+	}
+	return result
+}
+
+// formatNodeLabelHighlighted formats a node with emphasis (for target packages).
+// Used for leaf nodes in the tree - the package being searched for.
+func formatNodeLabelHighlighted(node *graph.Node) string {
+	result := graphStyleTarget.Render(node.Name)
+	if node.Version != "" {
+		result += graphStyleAt.Render("@")
+		result += graphStyleTargetVersion.Render(node.Version)
 	}
 	return result
 }
 
 // formatNodeLabelWithSource formats a node label including its source file location.
-// Used for root nodes to show where the dependency is declared.
+// Used for root nodes (direct dependencies) - slightly more prominent than tree nodes.
 func formatNodeLabelWithSource(node *graph.Node) string {
-	label := formatNodeLabel(node)
+	// Root nodes use white text (not bold) - more prominent than tree nodes
+	result := lipgloss.NewStyle().Foreground(lipgloss.Color("#DDDDDD")).Render(node.Name)
+	if node.Version != "" {
+		result += graphStyleAt.Render("@")
+		result += graphStyleVersion.Render(node.Version)
+	}
+	if node.Direct {
+		result += " " + ui.StyleDirect.Render("[direct]")
+	}
 
 	// Add source location if available
 	if len(node.Locations) > 0 {
 		source := formatSourceLocation(node.Locations[0])
 		if source != "" {
-			label += graphStyleMeta.Render(" [" + source + "]")
+			result += graphStyleMeta.Render(" [" + source + "]")
 		}
 	}
-	return label
+	return result
 }
 
 // formatSourceLocation formats a location path for display.
@@ -773,93 +1005,84 @@ func isGoStdlibPackage(query string) bool {
 	return false
 }
 
-// containsPathSegment checks if query appears as a path segment in name.
-// For example, "yaml" is a segment in "gopkg.in/yaml.v3" (between / and .).
-// Also matches hyphenated names like "jsonschema" in "jsonschema-go".
-func containsPathSegment(name, query string) bool {
-	// Look for /query. or /query/ patterns
-	segment := "/" + query + "."
-	if strings.Contains(name, segment) {
-		return true
-	}
-	segment = "/" + query + "/"
-	if strings.Contains(name, segment) {
-		return true
-	}
-	// Match hyphenated package names: jsonschema matches jsonschema-go
-	segment = "/" + query + "-"
-	return strings.Contains(name, segment)
-}
-
-// matchRank represents how well a query matches a package.
-type matchRank int
-
-const (
-	matchNone       matchRank = iota // No match
-	matchSubstring                   // Query is substring of name (disabled - too loose)
-	matchPathMatch                   // Query is a path segment (e.g., /yaml/ or /yaml. or ends with /yaml)
-	matchNameSuffix                  // Name ends with -query (e.g., go-yaml matches "yaml")
-	matchExact                       // Exact name match (strongest)
-)
-
-// findMatchingNodes finds nodes matching the query with ranked matching.
-// Returns nodes sorted by match quality (best matches first).
-// Matching priority (highest to lowest):
-//  1. Exact match: query == name
-//  2. Name suffix: name ends with -query (go-yaml matches "yaml")
-//  3. Path match: query is a path segment (/query/ or /query. or /query-)
-//  4. Substring: query appears anywhere in name (fallback)
+// findMatchingNodes finds nodes matching the query pattern.
+// Supports glob patterns via path.Match or simple substring matching.
+// Results are sorted with best matches first: exact matches, then final segment
+// matches, then substring matches, all sorted alphabetically within each tier.
+//
+// Examples:
+//   - "cobra" matches any package containing "cobra", prefers github.com/spf13/cobra
+//   - "*/cobra" matches packages ending with /cobra
+//   - "spf13/*" matches all packages under spf13
 func findMatchingNodes(g *graph.Graph, query string) []*graph.Node {
 	queryLower := strings.ToLower(query)
+	isGlob := strings.ContainsAny(query, "*?[")
 
-	type rankedMatch struct {
-		node *graph.Node
-		rank matchRank
-	}
-
-	var matches []rankedMatch
+	var matches []*graph.Node
 
 	for node := range g.Nodes() {
 		nameLower := strings.ToLower(node.Name)
-		rank := matchNone
 
-		// Check for exact match first
-		if nameLower == queryLower {
-			rank = matchExact
-		} else if strings.HasSuffix(nameLower, "-"+queryLower) {
-			// Hyphen suffix: go-yaml matches "yaml"
-			rank = matchNameSuffix
-		} else if strings.HasSuffix(nameLower, "/"+queryLower) {
-			// Path suffix: golang.org/x/net matches "net"
-			rank = matchPathMatch
-		} else if containsPathSegment(nameLower, queryLower) {
-			// Path segment: gopkg.in/yaml.v3 matches "yaml", jsonschema matches jsonschema-go
-			rank = matchPathMatch
-		} else if strings.Contains(nameLower, queryLower) {
-			// Substring fallback: allows looser matching when nothing else works
-			rank = matchSubstring
-		}
-
-		if rank > matchNone {
-			matches = append(matches, rankedMatch{node: node, rank: rank})
+		if isGlob {
+			// Use path.Match for glob patterns
+			if matched, _ := path.Match(queryLower, nameLower); matched {
+				matches = append(matches, node)
+			}
+		} else {
+			// Simple substring matching - case insensitive
+			if strings.Contains(nameLower, queryLower) {
+				matches = append(matches, node)
+			}
 		}
 	}
 
-	// Sort by rank (best first), then by name for determinism
-	slices.SortFunc(matches, func(a, b rankedMatch) int {
-		if a.rank != b.rank {
-			return int(b.rank) - int(a.rank) // Higher rank first
+	// Sort by match quality: exact > final segment > substring, then alphabetically
+	slices.SortFunc(matches, func(a, b *graph.Node) int {
+		scoreA := matchScore(a.Name, queryLower)
+		scoreB := matchScore(b.Name, queryLower)
+		if scoreA != scoreB {
+			return scoreB - scoreA // Higher score first
 		}
-		return strings.Compare(a.node.Name, b.node.Name)
+		return strings.Compare(a.Name, b.Name)
 	})
 
-	// Extract just the nodes
-	result := make([]*graph.Node, len(matches))
-	for i, m := range matches {
-		result[i] = m.node
+	return matches
+}
+
+// matchScore returns a quality score for how well a package name matches a query.
+// Higher scores indicate better matches:
+//   - 3: exact match (name equals query)
+//   - 2: final segment match (query matches the last path component)
+//   - 1: substring match
+func matchScore(name, queryLower string) int {
+	nameLower := strings.ToLower(name)
+
+	// Exact match
+	if nameLower == queryLower {
+		return 3
 	}
 
-	return result
+	// Final segment match (e.g., "cobra" matches "github.com/spf13/cobra")
+	// Also handles versioned paths like "go-git/v5" → match "go-git"
+	finalSegment := nameLower
+	if idx := strings.LastIndex(nameLower, "/"); idx >= 0 {
+		finalSegment = nameLower[idx+1:]
+	}
+	// Strip version suffix for comparison (v5, v2, etc.)
+	if strings.HasPrefix(finalSegment, "v") && len(finalSegment) <= 3 {
+		// This is a version segment like /v5, check the segment before it
+		if idx := strings.LastIndex(strings.TrimSuffix(nameLower, "/"+finalSegment), "/"); idx >= 0 {
+			finalSegment = strings.TrimSuffix(nameLower, "/"+finalSegment)[idx+1:]
+		} else {
+			finalSegment = strings.TrimSuffix(nameLower, "/"+finalSegment)
+		}
+	}
+	if finalSegment == queryLower {
+		return 2
+	}
+
+	// Substring match
+	return 1
 }
 
 // findBestMatchingNode finds the single best matching node for a query.
@@ -1243,7 +1466,7 @@ func writeGraphFlatList(w io.Writer, g *graph.Graph, showVersions, showVulnCount
 				label += fmt.Sprintf(" [%dV]", node.VulnerabilityCount.GetTotal())
 			}
 			if node.Direct {
-				label += " (direct)"
+				label += " " + ui.StyleDirect.Render("[direct]")
 			}
 			fmt.Fprintf(w, "  %s%s\n", prefix, label)
 		}

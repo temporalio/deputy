@@ -189,11 +189,222 @@ runs:
         echo "DEPUTY_EXIT_CODE=$EXIT_CODE" >> "$GITHUB_ENV"
 
     - name: Upload SARIF to GitHub Security
+      id: sarif-upload
       if: inputs.upload-sarif == 'true' && inputs.format == 'sarif' && always()
       uses: github/codeql-action/upload-sarif@v4
       with:
         sarif_file: ${{ inputs.output }}
         category: ${{ inputs.sarif-category }}
+      continue-on-error: true
+
+    - name: Fallback to PR comment when SARIF upload unavailable
+      if: |
+        inputs.upload-sarif == 'true' &&
+        steps.sarif-upload.outcome == 'failure' &&
+        github.event_name == 'pull_request' &&
+        always()
+      uses: actions/github-script@v7
+      env:
+        SARIF_PATH: ${{ inputs.output }}
+        FINDINGS_COUNT: ${{ steps.scan.outputs.findings-count }}
+        CRITICAL_COUNT: ${{ steps.scan.outputs.critical-count }}
+        HIGH_COUNT: ${{ steps.scan.outputs.high-count }}
+        VIOLATIONS_COUNT: ${{ steps.scan.outputs.policy-violations }}
+      with:
+        github-token: ${{ inputs.github-token }}
+        retries: 3
+        script: |
+          const fs = require('fs');
+
+          // Hidden marker for finding/updating this specific comment
+          const COMMENT_MARKER = '<!-- deputy-security-scan -->';
+          const Q = '>'; // Blockquote char (avoids YAML parsing issues)
+          const MAX_COMMENT_LENGTH = 65536; // GitHub comment size limit
+
+          // Get PR number - context.issue.number works for PR events in github-script
+          const prNumber = context.issue?.number || context.payload?.pull_request?.number;
+          if (!prNumber) {
+            console.log('Could not determine PR number, skipping comment');
+            return;
+          }
+
+          // Read counts from env vars (safer than inline expression substitution)
+          const findings = parseInt(process.env.FINDINGS_COUNT) || 0;
+          const critical = parseInt(process.env.CRITICAL_COUNT) || 0;
+          const high = parseInt(process.env.HIGH_COUNT) || 0;
+          const violations = parseInt(process.env.VIOLATIONS_COUNT) || 0;
+          const hasIssues = findings > 0 || violations > 0;
+
+          // Find existing Deputy comment (paginate to handle PRs with many comments)
+          let existingComment = null;
+          try {
+            for await (const response of github.paginate.iterator(
+              github.rest.issues.listComments,
+              { owner: context.repo.owner, repo: context.repo.repo, issue_number: prNumber, per_page: 100 }
+            )) {
+              existingComment = response.data.find(c => c.body?.includes(COMMENT_MARKER));
+              if (existingComment) break;
+            }
+          } catch (e) {
+            console.log('Could not fetch comments:', e.message);
+            // Continue - we'll create a new comment if needed
+          }
+
+          // Determine previous state (handle corrupted/empty body)
+          const commentBody = existingComment?.body || '';
+          const wasResolved = commentBody.includes('[!TIP]');
+          const hadIssues = existingComment && !wasResolved;
+
+          // Decision matrix:
+          // - No issues, no prior comment -> do nothing
+          // - No issues, had issues -> update to resolved
+          // - No issues, was resolved -> do nothing (already resolved)
+          // - Has issues -> create or update with findings
+
+          if (!hasIssues && !existingComment) {
+            console.log('No findings, no prior comment - nothing to do');
+            return;
+          }
+
+          if (!hasIssues && wasResolved) {
+            console.log('Already marked as resolved - nothing to do');
+            return;
+          }
+
+          const timestamp = new Date().toISOString().replace('T', ' ').slice(0, 16) + ' UTC';
+          const footer = `<sub>Deputy · ${timestamp}</sub>`;
+
+          // Helper to create or update comment with retry on conflict
+          async function upsertComment(body) {
+            // Truncate if too long
+            if (body.length > MAX_COMMENT_LENGTH) {
+              const truncateMsg = '\n\n_... truncated due to size limits_\n\n' + footer;
+              body = body.slice(0, MAX_COMMENT_LENGTH - truncateMsg.length) + truncateMsg;
+            }
+
+            if (existingComment) {
+              try {
+                await github.rest.issues.updateComment({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  comment_id: existingComment.id,
+                  body: body
+                });
+                console.log('Updated existing comment');
+                return;
+              } catch (e) {
+                // Comment may have been deleted - fall through to create
+                if (e.status === 404) {
+                  console.log('Previous comment was deleted, creating new one');
+                  existingComment = null;
+                } else {
+                  throw e;
+                }
+              }
+            }
+
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: prNumber,
+              body: body
+            });
+            console.log('Created new comment');
+          }
+
+          let body;
+
+          if (!hasIssues && hadIssues) {
+            // Transition: issues -> resolved
+            body = [
+              COMMENT_MARKER,
+              `${Q} [!TIP]`,
+              `${Q} **All Issues Resolved**`,
+              Q,
+              `${Q} Previously reported security issues have been addressed.`,
+              '',
+              footer
+            ].join('\n');
+
+            await upsertComment(body);
+            return;
+          }
+
+          // Has issues - build the findings comment
+          let alertType = 'WARNING';
+          let title = 'Security Issues Found';
+          if (critical > 0 || violations > 0) {
+            alertType = 'CAUTION';
+            title = 'Critical Security Issues';
+          }
+
+          // Try to read SARIF for detailed findings
+          let details = [];
+          const sarifPath = process.env.SARIF_PATH || '';
+          try {
+            if (sarifPath && fs.existsSync(sarifPath)) {
+              const sarif = JSON.parse(fs.readFileSync(sarifPath, 'utf8'));
+              const results = sarif.runs?.[0]?.results || [];
+              const rules = sarif.runs?.[0]?.tool?.driver?.rules || [];
+
+              if (results.length > 0) {
+                // Group by severity
+                const bySeverity = { critical: [], high: [], medium: [], low: [] };
+
+                for (const result of results) {
+                  const rule = rules.find(r => r.id === result.ruleId);
+                  const sev = rule?.properties?.['security-severity'] || 0;
+                  const id = result.ruleId;
+
+                  if (sev >= 9.0) bySeverity.critical.push(id);
+                  else if (sev >= 7.0) bySeverity.high.push(id);
+                  else if (sev >= 4.0) bySeverity.medium.push(id);
+                  else bySeverity.low.push(id);
+                }
+
+                // Build collapsible details (limit to avoid huge comments)
+                const sections = [];
+                for (const [level, ids] of Object.entries(bySeverity)) {
+                  const unique = [...new Set(ids)];
+                  if (unique.length > 0) {
+                    const maxShow = 10;
+                    const items = unique.slice(0, maxShow).map(id => '`' + id + '`').join(', ');
+                    const more = unique.length > maxShow ? ` +${unique.length - maxShow} more` : '';
+                    sections.push(`**${level.charAt(0).toUpperCase() + level.slice(1)}:** ${items}${more}`);
+                  }
+                }
+
+                if (sections.length > 0) {
+                  details = [
+                    '',
+                    '<details>',
+                    '<summary>Findings by severity</summary>',
+                    '',
+                    ...sections,
+                    '',
+                    '</details>'
+                  ];
+                }
+              }
+            }
+          } catch (e) {
+            console.log('Could not parse SARIF for details:', e.message);
+          }
+
+          body = [
+            COMMENT_MARKER,
+            `${Q} [!${alertType}]`,
+            `${Q} **${title}**`,
+            Q,
+            `${Q} | Vulnerabilities | Critical | High | Policy Violations |`,
+            `${Q} |:---------------:|:--------:|:----:|:-----------------:|`,
+            `${Q} | ${findings} | ${critical} | ${high} | ${violations} |`,
+            ...details,
+            '',
+            footer
+          ].join('\n');
+
+          await upsertComment(body);
       continue-on-error: true
 
     - name: Check failure conditions
@@ -206,14 +417,14 @@ runs:
       run: |
         EXIT_CODE="${DEPUTY_EXIT_CODE:-0}"
 
-        # Check for vulnerability findings
-        if [ "$INPUT_FAIL_ON_FINDINGS" = "true" ] && [ "$FINDINGS" -gt 0 ]; then
+        # Check for vulnerability findings (use default 0 for empty values)
+        if [ "$INPUT_FAIL_ON_FINDINGS" = "true" ] && [ "${FINDINGS:-0}" -gt 0 ]; then
           echo "::error::Found $FINDINGS vulnerabilities"
           exit 1
         fi
 
-        # Check for policy violations
-        if [ "$INPUT_FAIL_ON_POLICY_VIOLATION" = "true" ] && [ "$VIOLATIONS" -gt 0 ]; then
+        # Check for policy violations (use default 0 for empty values)
+        if [ "$INPUT_FAIL_ON_POLICY_VIOLATION" = "true" ] && [ "${VIOLATIONS:-0}" -gt 0 ]; then
           echo "::error::Found $VIOLATIONS policy violations"
           exit 1
         fi

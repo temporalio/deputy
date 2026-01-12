@@ -7,7 +7,6 @@ import (
 	"os"
 	"strings"
 
-	policyv1 "github.com/picatz/deputy/gen/deputy/policy/v1"
 	"github.com/picatz/deputy/internal/policy"
 )
 
@@ -24,19 +23,17 @@ func evaluatePoliciesForCommand(ctx context.Context, policyPaths []string, paylo
 	if payload == nil {
 		payload = map[string]any{}
 	}
-	env := &policyv1.Environment{
-		Command: command,
+	// Set env in the payload map before converting to proto
+	payload["env"] = map[string]any{
+		"command":    command,
+		"entrypoint": entrypoint.String(),
 	}
-	if entrypoint != "" {
-		env.Entrypoint = entrypoint.String()
-	}
-	payload["env"] = env
 
 	engine, err := policy.NewEngineFromPaths(policyPaths)
 	if err != nil {
 		return nil, err
 	}
-	actions, err := engine.EvaluateAll(ctx, payload, command, entrypoint.String())
+	actions, err := engine.EvaluateAllMap(ctx, payload, command, entrypoint.String())
 	if err != nil {
 		return nil, err
 	}

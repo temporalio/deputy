@@ -8,7 +8,9 @@ import (
 	"sync/atomic"
 	"testing"
 
+	policyv1 "github.com/picatz/deputy/gen/deputy/policy/v1"
 	"github.com/picatz/deputy/internal/policy"
+	"google.golang.org/protobuf/proto"
 )
 
 type stubPolicyEvaluator struct {
@@ -16,7 +18,7 @@ type stubPolicyEvaluator struct {
 	err     error
 }
 
-func (s stubPolicyEvaluator) Evaluate(context.Context, string, map[string]any) ([]policy.Action, error) {
+func (s stubPolicyEvaluator) Evaluate(context.Context, string, proto.Message) ([]policy.Action, error) {
 	if s.err != nil {
 		return nil, s.err
 	}
@@ -106,7 +108,7 @@ func TestServeWithPolicy(t *testing.T) {
 				Operation: "fetch",
 			}
 
-			serveWithPolicy(rr, req, tt.policies, policy.EntrypointGoArtifactRequest, map[string]any{"request": map[string]any{}}, meta, upstream)
+			serveWithPolicy(rr, req, tt.policies, policy.EntrypointGoArtifactRequest, &policyv1.GoArtifactRequestPolicyInput{}, meta, upstream)
 
 			if rr.Code != tt.wantStatus {
 				t.Fatalf("status=%d want=%d body=%q", rr.Code, tt.wantStatus, rr.Body.String())

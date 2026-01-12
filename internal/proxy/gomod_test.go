@@ -14,6 +14,7 @@ import (
 
 	"github.com/picatz/deputy/internal/analysis/osv"
 	"github.com/picatz/deputy/internal/policy"
+	"google.golang.org/protobuf/proto"
 )
 
 func writeBundle(t *testing.T, dir, name, when, reason, action string) string {
@@ -142,7 +143,7 @@ func TestGoModuleHandlerPolicyDeny(t *testing.T) {
 
 type denyPolicyEngine struct{}
 
-func (denyPolicyEngine) Evaluate(ctx context.Context, entrypoint string, payload map[string]any) ([]policy.Action, error) {
+func (denyPolicyEngine) Evaluate(ctx context.Context, entrypoint string, input proto.Message) ([]policy.Action, error) {
 	return []policy.Action{{Type: "deny", Reason: "blocked"}}, nil
 }
 

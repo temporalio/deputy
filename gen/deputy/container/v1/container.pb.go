@@ -117,7 +117,17 @@ type ImageInfo struct {
 	// Metadata contains image metadata (architecture, OS, layers).
 	Metadata *ImageMetadata `protobuf:"bytes,2,opt,name=metadata,proto3" json:"metadata,omitempty"`
 	// History contains build history entries showing Dockerfile commands.
-	History       []*HistoryEntry `protobuf:"bytes,3,rep,name=history,proto3" json:"history,omitempty"`
+	History []*HistoryEntry `protobuf:"bytes,3,rep,name=history,proto3" json:"history,omitempty"`
+	// Image is the full image reference including registry, repository, and tag/digest.
+	// Example: "gcr.io/myproject/app:v1.2.3" or "ghcr.io/owner/repo@sha256:abc123"
+	// This field is used by policy expressions with imageRef() helper.
+	Image string `protobuf:"bytes,4,opt,name=image,proto3" json:"image,omitempty"`
+	// Registry is the container registry hostname (e.g., "docker.io", "gcr.io").
+	Registry string `protobuf:"bytes,5,opt,name=registry,proto3" json:"registry,omitempty"`
+	// Repository is the image repository path (e.g., "library/nginx", "myproject/app").
+	Repository string `protobuf:"bytes,6,opt,name=repository,proto3" json:"repository,omitempty"`
+	// Tag is the image tag if specified (e.g., "latest", "v1.2.3").
+	Tag           string `protobuf:"bytes,7,opt,name=tag,proto3" json:"tag,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -171,6 +181,34 @@ func (x *ImageInfo) GetHistory() []*HistoryEntry {
 		return x.History
 	}
 	return nil
+}
+
+func (x *ImageInfo) GetImage() string {
+	if x != nil {
+		return x.Image
+	}
+	return ""
+}
+
+func (x *ImageInfo) GetRegistry() string {
+	if x != nil {
+		return x.Registry
+	}
+	return ""
+}
+
+func (x *ImageInfo) GetRepository() string {
+	if x != nil {
+		return x.Repository
+	}
+	return ""
+}
+
+func (x *ImageInfo) GetTag() string {
+	if x != nil {
+		return x.Tag
+	}
+	return ""
 }
 
 // ImageConfig represents the extracted configuration from a container image.
@@ -620,11 +658,17 @@ const file_deputy_container_v1_container_proto_rawDesc = "" +
 	"\adiff_id\x18\x02 \x01(\tR\x06diffId\x12\x19\n" +
 	"\bchain_id\x18\x03 \x01(\tR\achainId\x12\x18\n" +
 	"\acommand\x18\x04 \x01(\tR\acommand\x12\"\n" +
-	"\rin_base_image\x18\x05 \x01(\bR\vinBaseImage\"\xc2\x01\n" +
+	"\rin_base_image\x18\x05 \x01(\bR\vinBaseImage\"\xa6\x02\n" +
 	"\tImageInfo\x128\n" +
 	"\x06config\x18\x01 \x01(\v2 .deputy.container.v1.ImageConfigR\x06config\x12>\n" +
 	"\bmetadata\x18\x02 \x01(\v2\".deputy.container.v1.ImageMetadataR\bmetadata\x12;\n" +
-	"\ahistory\x18\x03 \x03(\v2!.deputy.container.v1.HistoryEntryR\ahistory\"\xa0\x04\n" +
+	"\ahistory\x18\x03 \x03(\v2!.deputy.container.v1.HistoryEntryR\ahistory\x12\x14\n" +
+	"\x05image\x18\x04 \x01(\tR\x05image\x12\x1a\n" +
+	"\bregistry\x18\x05 \x01(\tR\bregistry\x12\x1e\n" +
+	"\n" +
+	"repository\x18\x06 \x01(\tR\n" +
+	"repository\x12\x10\n" +
+	"\x03tag\x18\a \x01(\tR\x03tag\"\xa0\x04\n" +
 	"\vImageConfig\x12\x12\n" +
 	"\x04user\x18\x01 \x01(\tR\x04user\x12\x17\n" +
 	"\ais_root\x18\x02 \x01(\bR\x06isRoot\x12\x10\n" +

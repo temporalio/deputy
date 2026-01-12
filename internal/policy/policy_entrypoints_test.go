@@ -34,14 +34,14 @@ func TestLicenseAllowlistEntrypoints(t *testing.T) {
 
 	t.Run("sbom component denies copyleft", func(t *testing.T) {
 		payload := map[string]any{
-			"component": &dependencyv1.Package{
+			"pkg": &dependencyv1.Package{
 				Name:     "test-pkg",
 				Version:  "1.0.0",
 				Licenses: []string{"GPL-3.0"},
 			},
 			"env": &policyv1.Environment{Command: "sbom"},
 		}
-		actions, err := EvaluateAll(context.Background(), sources, payload)
+		actions, err := EvaluateMap(context.Background(), sources, payload)
 		if err != nil {
 			t.Fatalf("EvaluateAll: %v", err)
 		}
@@ -51,18 +51,16 @@ func TestLicenseAllowlistEntrypoints(t *testing.T) {
 	})
 
 	t.Run("proxy request denies copyleft", func(t *testing.T) {
-		// For proxy requests, the license info would be on the pkg synthesized from request,
-		// but ProxyRequest doesn't have licenses. The policy uses pkg.licenses which comes
-		// from component. For proxy context, we pass component directly.
+		// For proxy requests, pkg contains the package info with licenses.
 		payload := map[string]any{
-			"component": &dependencyv1.Package{
+			"pkg": &dependencyv1.Package{
 				Name:     "test-pkg",
 				Version:  "1.0.0",
 				Licenses: []string{"AGPL-3.0-only"},
 			},
 			"env": &policyv1.Environment{Command: "proxy"},
 		}
-		actions, err := EvaluateAll(context.Background(), sources, payload)
+		actions, err := EvaluateMap(context.Background(), sources, payload)
 		if err != nil {
 			t.Fatalf("EvaluateAll: %v", err)
 		}
@@ -73,10 +71,10 @@ func TestLicenseAllowlistEntrypoints(t *testing.T) {
 
 	t.Run("sbom warn on missing licenses", func(t *testing.T) {
 		payload := map[string]any{
-			"component": &dependencyv1.Package{Name: "test-pkg"},
-			"env":       &policyv1.Environment{Command: "sbom"},
+			"pkg": &dependencyv1.Package{Name: "test-pkg"},
+			"env": &policyv1.Environment{Command: "sbom"},
 		}
-		actions, err := EvaluateAll(context.Background(), sources, payload)
+		actions, err := EvaluateMap(context.Background(), sources, payload)
 		if err != nil {
 			t.Fatalf("EvaluateAll: %v", err)
 		}
@@ -87,9 +85,10 @@ func TestLicenseAllowlistEntrypoints(t *testing.T) {
 
 	t.Run("scan payload does not error", func(t *testing.T) {
 		payload := map[string]any{
+			"pkg": &dependencyv1.Package{Name: "test-pkg"},
 			"env": &policyv1.Environment{Command: "scan"},
 		}
-		actions, err := EvaluateAll(context.Background(), sources, payload)
+		actions, err := EvaluateMap(context.Background(), sources, payload)
 		if err != nil {
 			t.Fatalf("EvaluateAll: %v", err)
 		}
@@ -117,14 +116,14 @@ func TestLicenseAllowlistComposedEntrypoints(t *testing.T) {
 
 	t.Run("vars compose normalized and license_list", func(t *testing.T) {
 		payload := map[string]any{
-			"component": &dependencyv1.Package{
+			"pkg": &dependencyv1.Package{
 				Name:     "test-pkg",
 				Version:  "1.0.0",
 				Licenses: []string{"AgPl-3.0-only", "mit"},
 			},
 			"env": &policyv1.Environment{Command: "sbom"},
 		}
-		actions, err := EvaluateAll(context.Background(), sources, payload)
+		actions, err := EvaluateMap(context.Background(), sources, payload)
 		if err != nil {
 			t.Fatalf("EvaluateAll: %v", err)
 		}
@@ -138,14 +137,14 @@ func TestLicenseAllowlistComposedEntrypoints(t *testing.T) {
 
 	t.Run("sbom component denies copyleft", func(t *testing.T) {
 		payload := map[string]any{
-			"component": &dependencyv1.Package{
+			"pkg": &dependencyv1.Package{
 				Name:     "test-pkg",
 				Version:  "1.0.0",
 				Licenses: []string{"GPL-3.0"},
 			},
 			"env": &policyv1.Environment{Command: "sbom"},
 		}
-		actions, err := EvaluateAll(context.Background(), sources, payload)
+		actions, err := EvaluateMap(context.Background(), sources, payload)
 		if err != nil {
 			t.Fatalf("EvaluateAll: %v", err)
 		}
@@ -156,14 +155,14 @@ func TestLicenseAllowlistComposedEntrypoints(t *testing.T) {
 
 	t.Run("proxy request denies copyleft", func(t *testing.T) {
 		payload := map[string]any{
-			"component": &dependencyv1.Package{
+			"pkg": &dependencyv1.Package{
 				Name:     "test-pkg",
 				Version:  "1.0.0",
 				Licenses: []string{"AGPL-3.0-ONLY"},
 			},
 			"env": &policyv1.Environment{Command: "proxy"},
 		}
-		actions, err := EvaluateAll(context.Background(), sources, payload)
+		actions, err := EvaluateMap(context.Background(), sources, payload)
 		if err != nil {
 			t.Fatalf("EvaluateAll: %v", err)
 		}
@@ -174,10 +173,10 @@ func TestLicenseAllowlistComposedEntrypoints(t *testing.T) {
 
 	t.Run("sbom warn on missing licenses", func(t *testing.T) {
 		payload := map[string]any{
-			"component": &dependencyv1.Package{Name: "test-pkg"},
+			"pkg": &dependencyv1.Package{Name: "test-pkg"},
 			"env":       &policyv1.Environment{Command: "sbom"},
 		}
-		actions, err := EvaluateAll(context.Background(), sources, payload)
+		actions, err := EvaluateMap(context.Background(), sources, payload)
 		if err != nil {
 			t.Fatalf("EvaluateAll: %v", err)
 		}
@@ -192,13 +191,13 @@ func TestLicenseAllowlistHappySadPaths(t *testing.T) {
 
 	t.Run("happy path allows permissive license", func(t *testing.T) {
 		payload := map[string]any{
-			"component": &dependencyv1.Package{
+			"pkg": &dependencyv1.Package{
 				Name:     "test-pkg",
 				Licenses: []string{"MIT"},
 			},
 			"env": &policyv1.Environment{Command: "sbom"},
 		}
-		actions, err := EvaluateAll(context.Background(), sources, payload)
+		actions, err := EvaluateMap(context.Background(), sources, payload)
 		if err != nil {
 			t.Fatalf("EvaluateAll: %v", err)
 		}
@@ -211,13 +210,13 @@ func TestLicenseAllowlistHappySadPaths(t *testing.T) {
 
 	t.Run("sad path denies copyleft", func(t *testing.T) {
 		payload := map[string]any{
-			"component": &dependencyv1.Package{
+			"pkg": &dependencyv1.Package{
 				Name:     "test-pkg",
 				Licenses: []string{"GPL-3.0-only"},
 			},
 			"env": &policyv1.Environment{Command: "proxy"},
 		}
-		actions, err := EvaluateAll(context.Background(), sources, payload)
+		actions, err := EvaluateMap(context.Background(), sources, payload)
 		if err != nil {
 			t.Fatalf("EvaluateAll: %v", err)
 		}
@@ -243,7 +242,7 @@ func TestDenyAwsSdkV1Policy(t *testing.T) {
 			},
 			"env": &policyv1.Environment{Command: "proxy"},
 		}
-		actions, err := EvaluateAll(context.Background(), sources, payload)
+		actions, err := EvaluateMap(context.Background(), sources, payload)
 		if err != nil {
 			t.Fatalf("EvaluateAll: %v", err)
 		}
@@ -267,7 +266,7 @@ func TestDenyAwsSdkV1Policy(t *testing.T) {
 			},
 			"env": &policyv1.Environment{Command: "proxy"},
 		}
-		actions, err := EvaluateAll(context.Background(), sources, payload)
+		actions, err := EvaluateMap(context.Background(), sources, payload)
 		if err != nil {
 			t.Fatalf("EvaluateAll: %v", err)
 		}
@@ -295,7 +294,7 @@ func TestGoModRegistryAllowlist(t *testing.T) {
 			},
 			"env": &policyv1.Environment{Command: "proxy"},
 		}
-		actions, err := EvaluateAll(context.Background(), sources, payload)
+		actions, err := EvaluateMap(context.Background(), sources, payload)
 		if err != nil {
 			t.Fatalf("EvaluateAll: %v", err)
 		}
@@ -319,7 +318,7 @@ func TestGoModRegistryAllowlist(t *testing.T) {
 			},
 			"env": &policyv1.Environment{Command: "proxy"},
 		}
-		actions, err := EvaluateAll(context.Background(), sources, payload)
+		actions, err := EvaluateMap(context.Background(), sources, payload)
 		if err != nil {
 			t.Fatalf("EvaluateAll: %v", err)
 		}
@@ -346,7 +345,7 @@ func TestGoPseudoVersionDenyPolicy(t *testing.T) {
 				Version:   "v1.2.3-0.20240528123456-deadbeefcafe",
 			},
 		}
-		actions, err := EvaluateAll(context.Background(), sources, payload)
+		actions, err := EvaluateMap(context.Background(), sources, payload)
 		if err != nil {
 			t.Fatalf("EvaluateAll: %v", err)
 		}
@@ -369,7 +368,7 @@ func TestGoPseudoVersionDenyPolicy(t *testing.T) {
 				Version:   "v0.0.0-20170915030341-ba0f2cc1c8ab",
 			},
 		}
-		actions, err := EvaluateAll(context.Background(), sources, payload)
+		actions, err := EvaluateMap(context.Background(), sources, payload)
 		if err != nil {
 			t.Fatalf("EvaluateAll: %v", err)
 		}
@@ -392,7 +391,7 @@ func TestGoPseudoVersionDenyPolicy(t *testing.T) {
 				Version:   "v1.2.3",
 			},
 		}
-		actions, err := EvaluateAll(context.Background(), sources, payload)
+		actions, err := EvaluateMap(context.Background(), sources, payload)
 		if err != nil {
 			t.Fatalf("EvaluateAll: %v", err)
 		}
@@ -417,7 +416,7 @@ func TestPrereleaseGuardPolicy(t *testing.T) {
 				Version: "v1.2.3-beta.1",
 			},
 		}
-		actions, err := EvaluateAll(context.Background(), sources, payload)
+		actions, err := EvaluateMap(context.Background(), sources, payload)
 		if err != nil {
 			t.Fatalf("EvaluateAll: %v", err)
 		}
@@ -432,7 +431,7 @@ func TestPrereleaseGuardPolicy(t *testing.T) {
 				Version: "1.2.3",
 			},
 		}
-		actions, err := EvaluateAll(context.Background(), sources, payload)
+		actions, err := EvaluateMap(context.Background(), sources, payload)
 		if err != nil {
 			t.Fatalf("EvaluateAll: %v", err)
 		}
@@ -470,7 +469,7 @@ func TestDirectHighFixBlock(t *testing.T) {
 			},
 			"env": &policyv1.Environment{Command: "scan", Entrypoint: "scan_vulnerability"},
 		}
-		actions, err := EvaluateAll(context.Background(), sources, payload)
+		actions, err := EvaluateMap(context.Background(), sources, payload)
 		if err != nil {
 			t.Fatalf("EvaluateAll: %v", err)
 		}
@@ -502,7 +501,7 @@ func TestDirectHighFixBlock(t *testing.T) {
 			},
 			"env": &policyv1.Environment{Command: "scan", Entrypoint: "scan_vulnerability"},
 		}
-		actions, err := EvaluateAll(context.Background(), sources, payload)
+		actions, err := EvaluateMap(context.Background(), sources, payload)
 		if err != nil {
 			t.Fatalf("EvaluateAll: %v", err)
 		}
@@ -529,7 +528,7 @@ func TestNewDependencyReview(t *testing.T) {
 			},
 			"env": &policyv1.Environment{Command: "diff", Entrypoint: "diff_dependency_change"},
 		}
-		actions, err := EvaluateAll(context.Background(), sources, payload)
+		actions, err := EvaluateMap(context.Background(), sources, payload)
 		if err != nil {
 			t.Fatalf("EvaluateAll: %v", err)
 		}
@@ -552,7 +551,7 @@ func TestNewDependencyReview(t *testing.T) {
 			},
 			"env": &policyv1.Environment{Command: "diff", Entrypoint: "diff_dependency_change"},
 		}
-		actions, err := EvaluateAll(context.Background(), sources, payload)
+		actions, err := EvaluateMap(context.Background(), sources, payload)
 		if err != nil {
 			t.Fatalf("EvaluateAll: %v", err)
 		}
@@ -579,7 +578,7 @@ func TestFixStepCommandAllowlist(t *testing.T) {
 			},
 			"env": &policyv1.Environment{Command: "fix", Entrypoint: "fix_plan_step"},
 		}
-		actions, err := EvaluateAll(context.Background(), sources, payload)
+		actions, err := EvaluateMap(context.Background(), sources, payload)
 		if err != nil {
 			t.Fatalf("EvaluateAll: %v", err)
 		}
@@ -602,7 +601,7 @@ func TestFixStepCommandAllowlist(t *testing.T) {
 			},
 			"env": &policyv1.Environment{Command: "fix", Entrypoint: "fix_plan_step"},
 		}
-		actions, err := EvaluateAll(context.Background(), sources, payload)
+		actions, err := EvaluateMap(context.Background(), sources, payload)
 		if err != nil {
 			t.Fatalf("EvaluateAll: %v", err)
 		}
@@ -623,13 +622,13 @@ func TestSbomMetadataQuality(t *testing.T) {
 
 	t.Run("warn when version missing", func(t *testing.T) {
 		payload := map[string]any{
-			"component": &dependencyv1.Package{
+			"pkg": &dependencyv1.Package{
 				Name: "example",
 				// Version missing - should trigger warn
 			},
 			"env": &policyv1.Environment{Command: "sbom", Entrypoint: "sbom_component"},
 		}
-		actions, err := EvaluateAll(context.Background(), sources, payload)
+		actions, err := EvaluateMap(context.Background(), sources, payload)
 		if err != nil {
 			t.Fatalf("EvaluateAll: %v", err)
 		}
@@ -646,14 +645,14 @@ func TestSbomMetadataQuality(t *testing.T) {
 
 	t.Run("no warn when metadata present", func(t *testing.T) {
 		payload := map[string]any{
-			"component": &dependencyv1.Package{
+			"pkg": &dependencyv1.Package{
 				Name:      "example",
 				Version:   "1.0.0",
 				Ecosystem: "pypi", // This is what the proto uses instead of purlType
 			},
 			"env": &policyv1.Environment{Command: "sbom", Entrypoint: "sbom_component"},
 		}
-		actions, err := EvaluateAll(context.Background(), sources, payload)
+		actions, err := EvaluateMap(context.Background(), sources, payload)
 		if err != nil {
 			t.Fatalf("EvaluateAll: %v", err)
 		}
@@ -680,7 +679,7 @@ func TestUnstableMajorGuard(t *testing.T) {
 			},
 			"env": &policyv1.Environment{Command: "proxy"},
 		}
-		actions, err := EvaluateAll(context.Background(), sources, payload)
+		actions, err := EvaluateMap(context.Background(), sources, payload)
 		if err != nil {
 			t.Fatalf("EvaluateAll: %v", err)
 		}
@@ -703,7 +702,7 @@ func TestUnstableMajorGuard(t *testing.T) {
 			},
 			"env": &policyv1.Environment{Command: "proxy"},
 		}
-		actions, err := EvaluateAll(context.Background(), sources, payload)
+		actions, err := EvaluateMap(context.Background(), sources, payload)
 		if err != nil {
 			t.Fatalf("EvaluateAll: %v", err)
 		}
@@ -724,13 +723,17 @@ func TestPypiPrefixAllowlist(t *testing.T) {
 
 	t.Run("deny unapproved prefix", func(t *testing.T) {
 		payload := map[string]any{
+			"pkg": &dependencyv1.Package{
+				Name:      "randompkg",
+				Ecosystem: "pypi",
+			},
 			"request": &policyv1.ProxyRequest{
 				Ecosystem: "pypi",
 				Package:   "randompkg",
 			},
 			"env": &policyv1.Environment{Command: "proxy", Entrypoint: "pypi_artifact_request"},
 		}
-		actions, err := EvaluateAll(context.Background(), sources, payload)
+		actions, err := EvaluateMap(context.Background(), sources, payload)
 		if err != nil {
 			t.Fatalf("EvaluateAll: %v", err)
 		}
@@ -747,13 +750,17 @@ func TestPypiPrefixAllowlist(t *testing.T) {
 
 	t.Run("allow approved prefix", func(t *testing.T) {
 		payload := map[string]any{
+			"pkg": &dependencyv1.Package{
+				Name:      "acme_toolkit",
+				Ecosystem: "pypi",
+			},
 			"request": &policyv1.ProxyRequest{
 				Ecosystem: "pypi",
 				Package:   "acme_toolkit",
 			},
 			"env": &policyv1.Environment{Command: "proxy", Entrypoint: "pypi_artifact_request"},
 		}
-		actions, err := EvaluateAll(context.Background(), sources, payload)
+		actions, err := EvaluateMap(context.Background(), sources, payload)
 		if err != nil {
 			t.Fatalf("EvaluateAll: %v", err)
 		}
@@ -776,7 +783,7 @@ func TestDependencyCountGuard(t *testing.T) {
 		"changes": make([]any, 80),
 		"env":     &policyv1.Environment{Command: "diff", Entrypoint: "diff_report"},
 	}
-	if actions, err := EvaluateAll(context.Background(), sources, denyPayload); err != nil || len(actions) == 0 || actions[0].Type != "deny" {
+	if actions, err := EvaluateMap(context.Background(), sources, denyPayload); err != nil || len(actions) == 0 || actions[0].Type != "deny" {
 		t.Fatalf("expected deny for large change set, got %+v err=%v", actions, err)
 	}
 
@@ -784,7 +791,7 @@ func TestDependencyCountGuard(t *testing.T) {
 		"changes": make([]any, 30),
 		"env":     &policyv1.Environment{Command: "diff", Entrypoint: "diff_report"},
 	}
-	actions, err := EvaluateAll(context.Background(), sources, warnPayload)
+	actions, err := EvaluateMap(context.Background(), sources, warnPayload)
 	if err != nil {
 		t.Fatalf("EvaluateAll: %v", err)
 	}
@@ -803,14 +810,14 @@ func TestLicensePresentBlocker(t *testing.T) {
 		"pkg": &dependencyv1.Package{Licenses: []string{}},
 		"env": &policyv1.Environment{Command: "proxy"},
 	}
-	if actions, err := EvaluateAll(context.Background(), sources, denyPayload); err != nil || len(actions) == 0 || actions[0].Type != "deny" {
+	if actions, err := EvaluateMap(context.Background(), sources, denyPayload); err != nil || len(actions) == 0 || actions[0].Type != "deny" {
 		t.Fatalf("expected deny for missing licenses, got %+v err=%v", actions, err)
 	}
 	allowPayload := map[string]any{
 		"pkg": &dependencyv1.Package{Licenses: []string{"MIT"}},
 		"env": &policyv1.Environment{Command: "proxy"},
 	}
-	if actions, err := EvaluateAll(context.Background(), sources, allowPayload); err != nil {
+	if actions, err := EvaluateMap(context.Background(), sources, allowPayload); err != nil {
 		t.Fatalf("EvaluateAll: %v", err)
 	} else {
 		for _, a := range actions {
@@ -843,7 +850,7 @@ func TestNoFixEscalator(t *testing.T) {
 		},
 		"env": &policyv1.Environment{Command: "scan", Entrypoint: "scan_vulnerability"},
 	}
-	actions, err := EvaluateAll(context.Background(), sources, payload)
+	actions, err := EvaluateMap(context.Background(), sources, payload)
 	if err != nil {
 		t.Fatalf("EvaluateAll: %v", err)
 	}
@@ -880,7 +887,7 @@ func TestProdManifestGate(t *testing.T) {
 		},
 		"env": &policyv1.Environment{Command: "scan", Entrypoint: "scan_vulnerability"},
 	}
-	if actions, err := EvaluateAll(context.Background(), sources, payload); err != nil || len(actions) == 0 || actions[0].Type != "deny" {
+	if actions, err := EvaluateMap(context.Background(), sources, payload); err != nil || len(actions) == 0 || actions[0].Type != "deny" {
 		t.Fatalf("expected deny for prod manifest vuln, got %+v err=%v", actions, err)
 	}
 }
@@ -892,12 +899,15 @@ func TestDomainBrandedPackageGuard(t *testing.T) {
 		t.Fatalf("LoadSources: %v", err)
 	}
 	payload := map[string]any{
+		"pkg": &dependencyv1.Package{
+			Name: "aws-helper",
+		},
 		"request": &policyv1.ProxyRequest{
 			Package: "aws-helper",
 		},
 		"env": &policyv1.Environment{Command: "proxy"},
 	}
-	if actions, err := EvaluateAll(context.Background(), sources, payload); err != nil || len(actions) == 0 || actions[0].Type != "deny" {
+	if actions, err := EvaluateMap(context.Background(), sources, payload); err != nil || len(actions) == 0 || actions[0].Type != "deny" {
 		t.Fatalf("expected deny for branded package, got %+v err=%v", actions, err)
 	}
 }
@@ -916,7 +926,7 @@ func TestCriticalRuntimePinning(t *testing.T) {
 		},
 		"env": &policyv1.Environment{Command: "diff", Entrypoint: "diff_dependency_change"},
 	}
-	if actions, err := EvaluateAll(context.Background(), sources, payload); err != nil {
+	if actions, err := EvaluateMap(context.Background(), sources, payload); err != nil {
 		t.Fatalf("EvaluateAll: %v", err)
 	} else {
 		warn := false
@@ -942,7 +952,7 @@ func TestSbomSizeShapeSanity(t *testing.T) {
 		"packages": components,
 		"env":      &policyv1.Environment{Command: "sbom", Entrypoint: "sbom_report"},
 	}
-	if actions, err := EvaluateAll(context.Background(), sources, payload); err != nil {
+	if actions, err := EvaluateMap(context.Background(), sources, payload); err != nil {
 		t.Fatalf("EvaluateAll: %v", err)
 	} else {
 		warn := false
@@ -976,7 +986,7 @@ func TestExploitAvailableBlocker(t *testing.T) {
 			},
 			"env": &policyv1.Environment{Command: "scan", Entrypoint: "scan_vulnerability"},
 		}
-		actions, err := EvaluateAll(context.Background(), sources, payload)
+		actions, err := EvaluateMap(context.Background(), sources, payload)
 		if err != nil {
 			t.Fatalf("EvaluateAll: %v", err)
 		}
@@ -1003,7 +1013,7 @@ func TestExploitAvailableBlocker(t *testing.T) {
 			},
 			"env": &policyv1.Environment{Command: "scan", Entrypoint: "scan_vulnerability"},
 		}
-		actions, err := EvaluateAll(context.Background(), sources, payload)
+		actions, err := EvaluateMap(context.Background(), sources, payload)
 		if err != nil {
 			t.Fatalf("EvaluateAll: %v", err)
 		}
@@ -1032,7 +1042,7 @@ func TestDeprecatedModuleBlock(t *testing.T) {
 			},
 			"env": &policyv1.Environment{Command: "scan", Entrypoint: "scan_vulnerability"},
 		}
-		actions, err := EvaluateAll(context.Background(), sources, payload)
+		actions, err := EvaluateMap(context.Background(), sources, payload)
 		if err != nil {
 			t.Fatalf("EvaluateAll: %v", err)
 		}
@@ -1056,7 +1066,7 @@ func TestDeprecatedModuleBlock(t *testing.T) {
 			},
 			"env": &policyv1.Environment{Command: "scan", Entrypoint: "scan_vulnerability"},
 		}
-		actions, err := EvaluateAll(context.Background(), sources, payload)
+		actions, err := EvaluateMap(context.Background(), sources, payload)
 		if err != nil {
 			t.Fatalf("EvaluateAll: %v", err)
 		}
@@ -1078,7 +1088,7 @@ func TestBlockPackagePolicy(t *testing.T) {
 		"pkg": &dependencyv1.Package{Name: "left-pad"},
 		"env": &policyv1.Environment{Command: "proxy"},
 	}
-	actions, err := EvaluateAll(context.Background(), sources, payload)
+	actions, err := EvaluateMap(context.Background(), sources, payload)
 	if err != nil {
 		t.Fatalf("EvaluateAll: %v", err)
 	}
@@ -1100,7 +1110,7 @@ func TestGoDowngradeGuard(t *testing.T) {
 		},
 		"env": &policyv1.Environment{Command: "diff", Entrypoint: "diff_dependency_change"},
 	}
-	if actions, err := EvaluateAll(context.Background(), sources, denyPayload); err != nil || len(actions) == 0 || actions[0].Type != "deny" {
+	if actions, err := EvaluateMap(context.Background(), sources, denyPayload); err != nil || len(actions) == 0 || actions[0].Type != "deny" {
 		t.Fatalf("expected deny for go downgrade, got %+v err=%v", actions, err)
 	}
 	allowPayload := map[string]any{
@@ -1110,7 +1120,7 @@ func TestGoDowngradeGuard(t *testing.T) {
 		},
 		"env": &policyv1.Environment{Command: "diff", Entrypoint: "diff_dependency_change"},
 	}
-	if actions, err := EvaluateAll(context.Background(), sources, allowPayload); err != nil {
+	if actions, err := EvaluateMap(context.Background(), sources, allowPayload); err != nil {
 		t.Fatalf("EvaluateAll: %v", err)
 	} else {
 		for _, a := range actions {
@@ -1131,7 +1141,7 @@ func TestLicenseAllowlistAdvisory(t *testing.T) {
 		"pkg": &dependencyv1.Package{Licenses: []string{"AGPL-3.0"}},
 		"env": &policyv1.Environment{Command: "proxy"},
 	}
-	actions, err := EvaluateAll(context.Background(), sources, payload)
+	actions, err := EvaluateMap(context.Background(), sources, payload)
 	if err != nil {
 		t.Fatalf("EvaluateAll: %v", err)
 	}
@@ -1165,7 +1175,7 @@ func TestLog4ShellPolicy(t *testing.T) {
 			},
 		},
 	}
-	actions, err := EvaluateAll(context.Background(), sources, payload)
+	actions, err := EvaluateMap(context.Background(), sources, payload)
 	if err != nil {
 		t.Fatalf("EvaluateAll: %v", err)
 	}
@@ -1187,7 +1197,7 @@ func TestMinVersionPolicy(t *testing.T) {
 			Version:   "v0.25.0",
 		},
 	}
-	actions, err := EvaluateAll(context.Background(), sources, payload)
+	actions, err := EvaluateMap(context.Background(), sources, payload)
 	if err != nil {
 		t.Fatalf("EvaluateAll: %v", err)
 	}
@@ -1209,7 +1219,7 @@ func TestNpmScopeAllowlist(t *testing.T) {
 		},
 		"env": &policyv1.Environment{Command: "proxy", Entrypoint: "npm_artifact_request"},
 	}
-	if actions, err := EvaluateAll(context.Background(), sources, denyPayload); err != nil || len(actions) == 0 || actions[0].Type != "deny" {
+	if actions, err := EvaluateMap(context.Background(), sources, denyPayload); err != nil || len(actions) == 0 || actions[0].Type != "deny" {
 		t.Fatalf("expected deny for unapproved npm package, got %+v err=%v", actions, err)
 	}
 	allowPayload := map[string]any{
@@ -1219,7 +1229,7 @@ func TestNpmScopeAllowlist(t *testing.T) {
 		},
 		"env": &policyv1.Environment{Command: "proxy", Entrypoint: "npm_artifact_request"},
 	}
-	if actions, err := EvaluateAll(context.Background(), sources, allowPayload); err != nil {
+	if actions, err := EvaluateMap(context.Background(), sources, allowPayload); err != nil {
 		t.Fatalf("EvaluateAll: %v", err)
 	} else {
 		for _, a := range actions {
@@ -1249,7 +1259,7 @@ func TestProxyCriticalAdvisory(t *testing.T) {
 		},
 		"env": &policyv1.Environment{Command: "proxy", Entrypoint: "go_artifact_request"},
 	}
-	actions, err := EvaluateAll(context.Background(), sources, payload)
+	actions, err := EvaluateMap(context.Background(), sources, payload)
 	if err != nil {
 		t.Fatalf("EvaluateAll: %v", err)
 	}
@@ -1280,7 +1290,7 @@ func TestRuntimeCriticalBaseline(t *testing.T) {
 		},
 		"env": &policyv1.Environment{Command: "diff", Entrypoint: "diff_dependency_change"},
 	}
-	actions, err := EvaluateAll(context.Background(), sources, payload)
+	actions, err := EvaluateMap(context.Background(), sources, payload)
 	if err != nil {
 		t.Fatalf("EvaluateAll: %v", err)
 	}
@@ -1308,7 +1318,7 @@ func TestSeverityGuardrail(t *testing.T) {
 		},
 		"env": &policyv1.Environment{Command: "scan", Entrypoint: "scan_vulnerability"},
 	}
-	actions, err := EvaluateAll(context.Background(), sources, payload)
+	actions, err := EvaluateMap(context.Background(), sources, payload)
 	if err != nil {
 		t.Fatalf("EvaluateAll: %v", err)
 	}
@@ -1331,7 +1341,7 @@ func TestShaiHuludNpm(t *testing.T) {
 		},
 		"env": &policyv1.Environment{Command: "proxy", Entrypoint: "npm_artifact_request"},
 	}
-	actions, err := EvaluateAll(context.Background(), sources, payload)
+	actions, err := EvaluateMap(context.Background(), sources, payload)
 	if err != nil {
 		t.Fatalf("EvaluateAll: %v", err)
 	}
@@ -1354,7 +1364,7 @@ func TestXZBackdoorPolicy(t *testing.T) {
 		},
 		"env": &policyv1.Environment{Command: "proxy"},
 	}
-	actions, err := EvaluateAll(context.Background(), sources, payload)
+	actions, err := EvaluateMap(context.Background(), sources, payload)
 	if err != nil {
 		t.Fatalf("EvaluateAll: %v", err)
 	}

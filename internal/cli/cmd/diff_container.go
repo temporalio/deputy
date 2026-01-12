@@ -96,6 +96,7 @@ type containerDiffOpts struct {
 	policyPaths    []string
 	useLocalDaemon bool   // Use docker-daemon:// instead of oci:// for local Docker images
 	format         string // Output format: text (default) or json
+	platform       string // Platform for multi-arch images (os/arch[/variant])
 }
 
 // runContainerDiff performs a semantic diff between two container images.
@@ -107,6 +108,7 @@ func runContainerDiff(ctx context.Context, c *services.Clients, baseRef, targetR
 			attribute.String("deputy.container_diff.target_ref", targetRef),
 			attribute.Bool("deputy.container_diff.vuln_scan", !opts.skipVulnScan),
 			attribute.Bool("deputy.container_diff.local_daemon", opts.useLocalDaemon),
+			attribute.String("deputy.container_diff.platform", opts.platform),
 		))
 	defer span.End()
 
@@ -148,6 +150,7 @@ func runContainerDiff(ctx context.Context, c *services.Clients, baseRef, targetR
 			ScanVulnerabilities: !opts.skipVulnScan,
 			ImageTransport:      transport,
 			PolicyPaths:         opts.policyPaths,
+			Platform:            opts.platform,
 		},
 	})
 

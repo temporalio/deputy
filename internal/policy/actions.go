@@ -9,6 +9,7 @@ import (
 
 	"github.com/google/cel-go/common/types/ref"
 	"github.com/picatz/deputy/internal/collections"
+	"google.golang.org/protobuf/proto"
 )
 
 // Action type constants represent the standard policy decision types.
@@ -43,14 +44,26 @@ type Action struct {
 	Raw         map[string]any    // Raw is the original map returned by the policy.
 }
 
-// EvaluateAll executes every policy source against the provided input and
-// aggregates the resulting actions.
-func EvaluateAll(ctx context.Context, sources []Source, input map[string]any) ([]Action, error) {
+// EvaluateAll executes every policy source against the provided input proto
+// and aggregates the resulting actions.
+func EvaluateAll(ctx context.Context, sources []Source, input proto.Message) ([]Action, error) {
 	eng, err := NewEngine(sources)
 	if err != nil {
 		return nil, err
 	}
 	return eng.EvaluateAll(ctx, input, "", "")
+}
+
+// EvaluateMap executes policies against a raw map[string]any input.
+// This is intended for CLI testing scenarios where the input is arbitrary JSON
+// rather than a typed proto message. For production use, prefer EvaluateAll
+// with typed proto inputs.
+func EvaluateMap(ctx context.Context, sources []Source, input map[string]any) ([]Action, error) {
+	eng, err := NewEngine(sources)
+	if err != nil {
+		return nil, err
+	}
+	return eng.EvaluateAllMap(ctx, input, "", "")
 }
 
 // toActions converts a raw policy result (map or list of maps) into a slice of Action structs.

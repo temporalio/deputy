@@ -123,8 +123,9 @@ func (h *genericHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		Filename:   parsed.Filename,
 	}
 
-	payload := h.buildPayload(r.Context(), info, r.URL.Path)
-	h.serve(w, r, h.config.Ecosystem.ProxyEntrypoint(), info, payload)
+	entrypoint := h.config.Ecosystem.ProxyEntrypoint()
+	input := h.buildPolicyInput(r.Context(), info, entrypoint)
+	h.serve(w, r, entrypoint, info, input)
 }
 
 // HandlerFactory creates ecosystem-specific proxy handlers using the registry.
