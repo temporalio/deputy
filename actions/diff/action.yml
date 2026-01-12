@@ -125,6 +125,8 @@ runs:
         INPUT_LICENSES: ${{ inputs.licenses }}
         INPUT_POLICY: ${{ inputs.policy }}
         BASE_REF: ${{ steps.refs.outputs.base }}
+        # Force colored output in CI for better readability in logs
+        CLICOLOR_FORCE: '1'
       run: |
         set -euo pipefail
 
@@ -163,15 +165,18 @@ runs:
 
         # Parse output for dependency change counts
         # Deputy output uses: + (added), - (removed), ↑ (upgraded), ↓ (downgraded)
+        # Strip ANSI escape codes for parsing (colors may be present due to CLICOLOR_FORCE)
+        PLAIN_OUTPUT=$(echo "$OUTPUT" | sed 's/\x1b\[[0-9;]*m//g')
+
         # Use explicit default values since grep -c returns empty on no match with || true
-        ADDED=$(echo "$OUTPUT" | grep -cE '^\s*\+ ' 2>/dev/null || echo "0")
-        REMOVED=$(echo "$OUTPUT" | grep -cE '^\s*- ' 2>/dev/null || echo "0")
+        ADDED=$(echo "$PLAIN_OUTPUT" | grep -cE '^\s*\+ ' 2>/dev/null || echo "0")
+        REMOVED=$(echo "$PLAIN_OUTPUT" | grep -cE '^\s*- ' 2>/dev/null || echo "0")
         # Count upgrades and downgrades (lines starting with ↑ or ↓)
-        UPDATED=$(echo "$OUTPUT" | grep -cE '^\s*(↑|↓) ' 2>/dev/null || echo "0")
+        UPDATED=$(echo "$PLAIN_OUTPUT" | grep -cE '^\s*(↑|↓) ' 2>/dev/null || echo "0")
 
         # Count new vulnerabilities by looking for CVE/GHSA/GO- identifiers in added/updated deps
         # This counts unique vulnerability IDs mentioned in the output
-        NEW_VULNS=$(echo "$OUTPUT" | grep -oE '(CVE-[0-9]{4}-[0-9]+|GHSA-[a-z0-9]{4}-[a-z0-9]{4}-[a-z0-9]{4}|GO-[0-9]{4}-[0-9]+)' 2>/dev/null | sort -u | wc -l | tr -d '[:space:]')
+        NEW_VULNS=$(echo "$PLAIN_OUTPUT" | grep -oE '(CVE-[0-9]{4}-[0-9]+|GHSA-[a-z0-9]{4}-[a-z0-9]{4}-[a-z0-9]{4}|GO-[0-9]{4}-[0-9]+)' 2>/dev/null | sort -u | wc -l | tr -d '[:space:]')
         NEW_VULNS="${NEW_VULNS:-0}"
 
         echo "added-count=${ADDED}" >> "$GITHUB_OUTPUT"
@@ -179,14 +184,15 @@ runs:
         echo "updated-count=${UPDATED}" >> "$GITHUB_OUTPUT"
         echo "new-vulnerabilities=${NEW_VULNS}" >> "$GITHUB_OUTPUT"
 
-        # Save summary for PR comment (use heredoc for multiline)
-        # Use a unique delimiter and ensure output doesn't break GitHub Actions format
-        # Replace any potential delimiter occurrences and escape special characters
-        SAFE_OUTPUT=$(printf '%s' "$OUTPUT" | sed 's/DEPUTY_EOF_MARKER/DEPUTY-EOF-MARKER/g')
+        # Save summary for PR comment
+        # GitHub Actions heredoc format: name<<DELIMITER\ncontent\nDELIMITER
+        # Use printf instead of echo to avoid shell interpretation issues
+        # Escape any % characters to prevent printf format interpretation
+        SAFE_OUTPUT="${OUTPUT//%/%%}"
         {
-          echo "summary<<DEPUTY_EOF_MARKER"
+          printf '%s\n' "summary<<GHADELIMITER"
           printf '%s\n' "$SAFE_OUTPUT"
-          echo "DEPUTY_EOF_MARKER"
+          printf '%s\n' "GHADELIMITER"
         } >> "$GITHUB_OUTPUT"
 
         echo "DIFF_EXIT_CODE=$EXIT_CODE" >> "$GITHUB_ENV"
