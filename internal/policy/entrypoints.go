@@ -47,6 +47,8 @@ func (e Entrypoint) Category() string {
 		EntrypointServiceSBOMRequest, EntrypointServiceDiffRequest,
 		EntrypointServiceSecretsRequest, EntrypointServiceGraphRequest:
 		return "server"
+	case EntrypointSandboxExecution, EntrypointSandboxCommand, EntrypointSandboxNetwork:
+		return "sandbox"
 	default:
 		return ""
 	}
@@ -142,6 +144,23 @@ const (
 	EntrypointServiceSecretsRequest Entrypoint = "service_secrets_request"
 	// EntrypointServiceGraphRequest triggers before a graph operation via the API.
 	EntrypointServiceGraphRequest Entrypoint = "service_graph_request"
+
+	// Sandbox entrypoints - for controlling sandboxed execution.
+	// These enable policies to control what can run in sandboxes, with what configuration,
+	// and what network/filesystem access is allowed.
+
+	// EntrypointSandboxExecution triggers before any sandbox execution begins.
+	// Use this to authorize sandbox executions based on source, command, and config.
+	// Available variables: command, workspace_dir, requested_config, context
+	EntrypointSandboxExecution Entrypoint = "sandbox_execution"
+	// EntrypointSandboxCommand triggers for each command executed within a sandbox session.
+	// Use this for fine-grained command-level control within ongoing sandboxes.
+	// Available variables: command, sandbox_config, context
+	EntrypointSandboxCommand Entrypoint = "sandbox_command"
+	// EntrypointSandboxNetwork triggers when a sandbox requests network access.
+	// Use this to implement network allowlists or block specific destinations.
+	// Available variables: host, port, protocol, sandbox_config, context
+	EntrypointSandboxNetwork Entrypoint = "sandbox_network"
 )
 
 var (
@@ -213,12 +232,19 @@ var (
 		EntrypointServiceSecretsRequest,
 		EntrypointServiceGraphRequest,
 	}
+	// EntrypointsSandbox lists all entrypoints related to sandbox execution control.
+	// These enable policies to control what runs in sandboxes and with what permissions.
+	EntrypointsSandbox = []Entrypoint{
+		EntrypointSandboxExecution,
+		EntrypointSandboxCommand,
+		EntrypointSandboxNetwork,
+	}
 
 	// AllEntrypoints contains every canonical entrypoint defined in Deputy.
-	AllEntrypoints = slices.Concat(EntrypointsProxy, EntrypointsScan, EntrypointsDiff, EntrypointsContainerDiff, EntrypointsSBOM, EntrypointsFix, EntrypointsTriage, EntrypointsDockerfile, EntrypointsSecrets, EntrypointsGraph, EntrypointsService)
+	AllEntrypoints = slices.Concat(EntrypointsProxy, EntrypointsScan, EntrypointsDiff, EntrypointsContainerDiff, EntrypointsSBOM, EntrypointsFix, EntrypointsTriage, EntrypointsDockerfile, EntrypointsSecrets, EntrypointsGraph, EntrypointsService, EntrypointsSandbox)
 
 	allowedEntrypointsSet = buildEntrypointSet(AllEntrypoints)
-	allowedCommands       = []string{"proxy", "scan", "diff", "sbom", "fix", "triage", "secrets", "graph", "server"}
+	allowedCommands       = []string{"proxy", "scan", "diff", "sbom", "fix", "triage", "secrets", "graph", "server", "sandbox", "exec"}
 	allowedCommandsSet    = buildSet(allowedCommands)
 )
 

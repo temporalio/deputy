@@ -1,0 +1,590 @@
+// Copyright 2024 Deputy Authors
+// SPDX-License-Identifier: Apache-2.0
+
+syntax = "proto3";
+
+package deputy.sandbox.v1;
+
+option go_package = "github.com/picatz/deputy/gen/deputy/sandbox/v1;sandboxv1";
+
+import "buf/validate/validate.proto";
+import "google/protobuf/duration.proto";
+import "google/protobuf/timestamp.proto";
+
+// SandboxService provides sandbox management and execution.
+// This service enables isolated execution of commands across multiple contexts:
+// plugins, AI agents, remediation commands, and the `deputy exec` command.
+//
+// The service is designed for in-process use but can be exposed over the network
+// for enterprise deployments requiring centralized sandbox infrastructure.
+service SandboxService {
+  // ListRuntimes returns available sandbox runtimes on this host.
+  rpc ListRuntimes(ListRuntimesRequest) returns (ListRuntimesResponse);
+
+  // Execute runs a command in a sandbox and streams execution events.
+  rpc Execute(ExecuteRequest) returns (stream ExecuteEvent);
+
+  // GetCapabilities returns detailed capabilities for a specific runtime.
+  rpc GetCapabilities(GetCapabilitiesRequest) returns (GetCapabilitiesResponse);
+}
+
+// SandboxRuntimeService is implemented by external sandbox runtime plugins.
+// Plugins are discovered via PATH as executables named `deputy-sandbox-<name>`
+// and communicate over Unix sockets using ConnectRPC.
+service SandboxRuntimeService {
+  // GetInfo returns metadata about this sandbox runtime plugin.
+  rpc GetInfo(GetRuntimeInfoRequest) returns (GetRuntimeInfoResponse);
+
+  // Execute runs a command in this runtime and streams events.
+  rpc Execute(RuntimeExecuteRequest) returns (stream ExecuteEvent);
+
+  // Cleanup releases resources from a previous execution.
+  rpc Cleanup(CleanupRequest) returns (CleanupResponse);
+}
+
+// Runtime identifies a sandbox runtime backend.
+// New runtimes can be added without breaking existing clients.
+enum Runtime {
+  // Unspecified runtime - will use default based on platform.
+  RUNTIME_UNSPECIFIED = 0;
+
+  // No sandboxing - trusted execution with full access.
+  // Use for built-in plugins or when sandboxing is explicitly disabled.
+  RUNTIME_NONE = 1;
+
+  // Docker container runtime.
+  // Cross-platform via Docker Desktop (macOS, Windows) or native (Linux).
+  RUNTIME_DOCKER = 2;
+
+  // Podman container runtime.
+  // Rootless containers, alternative to Docker.
+  RUNTIME_PODMAN = 3;
+
+  // gVisor (runsc) for application-level sandboxing.
+  // Provides strong isolation via user-space kernel. Linux only.
+  RUNTIME_GVISOR = 4;
+
+  // containerd runtime (direct, without Docker).
+  RUNTIME_CONTAINERD = 5;
+
+  // Bubblewrap (bwrap) for lightweight Linux sandboxing.
+  // Uses namespaces without full container overhead.
+  RUNTIME_BWRAP = 6;
+
+  // macOS sandbox-exec for native macOS sandboxing.
+  RUNTIME_SANDBOX_EXEC = 7;
+
+  // Linux namespaces (native, no container runtime).
+  RUNTIME_NAMESPACES = 8;
+
+  // Firecracker microVM for maximum isolation.
+  // Future: requires KVM, primarily for Linux cloud environments.
+  RUNTIME_FIRECRACKER = 9;
+
+  // External plugin-provided runtime.
+  // Used when runtime is provided by a deputy-sandbox-* plugin.
+  RUNTIME_PLUGIN = 10;
+}
+
+// Mode controls the sandbox's filesystem access level.
+enum Mode {
+  // Unspecified mode - uses configuration default.
+  MODE_UNSPECIFIED = 0;
+
+  // Read-only filesystem access.
+  // The sandbox can read the workspace but cannot write any files.
+  MODE_READ_ONLY = 1;
+
+  // Read/write within workspace only.
+  // The sandbox can modify files in the workspace directory but nowhere else.
+  // This is the recommended default for most use cases.
+  MODE_WORKSPACE_WRITE = 2;
+
+  // Full access (dangerous).
+  // The sandbox has unrestricted filesystem access.
+  // Only use for trusted code that requires system-wide modifications.
+  MODE_FULL_ACCESS = 3;
+
+  // Network isolated with workspace write.
+  // Combines workspace write access with no network access.
+  // Useful for build processes that shouldn't phone home.
+  MODE_NETWORK_ISOLATED = 4;
+
+  // Ephemeral copy-on-write mode.
+  // All changes are discarded after execution.
+  // Useful for testing or exploring potentially destructive commands.
+  MODE_EPHEMERAL = 5;
+}
+
+// NetworkMode controls network access from the sandbox.
+enum NetworkMode {
+  // Unspecified - uses configuration default.
+  NETWORK_MODE_UNSPECIFIED = 0;
+
+  // No network access.
+  // The sandbox cannot make any network connections.
+  // This is the recommended default for security.
+  NETWORK_MODE_NONE = 1;
+
+  // Host network.
+  // The sandbox shares the host's network namespace.
+  // Use with caution - reduces isolation.
+  NETWORK_MODE_HOST = 2;
+
+  // Bridged network.
+  // The sandbox gets its own network namespace with NAT to host.
+  NETWORK_MODE_BRIDGE = 3;
+
+  // Allowlist-based network access.
+  // Only connections to hosts in network_allowlist are permitted.
+  NETWORK_MODE_ALLOWLIST = 4;
+}
+
+// ExecutionSource identifies what triggered the sandbox execution.
+// Used for policy evaluation and audit logging.
+enum ExecutionSource {
+  // Unspecified source.
+  EXECUTION_SOURCE_UNSPECIFIED = 0;
+
+  // Inventory extractor plugin.
+  // Sandbox is running a plugin to extract package information.
+  EXECUTION_SOURCE_PLUGIN = 1;
+
+  // AI agent execution.
+  // Sandbox is running an AI agent (Claude, Codex, etc.).
+  EXECUTION_SOURCE_AGENT = 2;
+
+  // Remediation execution (deputy fix --apply).
+  // Sandbox is applying vulnerability fixes.
+  EXECUTION_SOURCE_REMEDIATION = 3;
+
+  // Deputy exec command.
+  // User explicitly ran a sandboxed command via `deputy exec`.
+  EXECUTION_SOURCE_EXEC = 4;
+
+  // Server-side execution.
+  // Sandbox is running in a multi-tenant server environment.
+  EXECUTION_SOURCE_SERVER = 5;
+}
+
+// ListRuntimesRequest queries available sandbox runtimes.
+message ListRuntimesRequest {
+  // If true, include runtimes that are not currently available
+  // (e.g., Docker not running) with unavailable_reason set.
+  bool include_unavailable = 1;
+}
+
+// ListRuntimesResponse returns available sandbox runtimes.
+message ListRuntimesResponse {
+  // Available (and optionally unavailable) runtimes.
+  repeated RuntimeInfo runtimes = 1;
+
+  // Default runtime that will be used if none is specified.
+  Runtime default_runtime = 2;
+}
+
+// RuntimeInfo describes an available sandbox runtime.
+message RuntimeInfo {
+  // Runtime identifier.
+  Runtime runtime = 1;
+
+  // Human-readable display name.
+  string display_name = 2;
+
+  // Runtime version (e.g., "24.0.5" for Docker).
+  string version = 3;
+
+  // Whether this runtime is currently available.
+  bool available = 4;
+
+  // Reason runtime is unavailable (if available=false).
+  string unavailable_reason = 5;
+
+  // Modes this runtime supports.
+  repeated Mode supported_modes = 6;
+
+  // Detailed capabilities.
+  RuntimeCapabilities capabilities = 7;
+
+  // For plugin runtimes: the plugin name.
+  string plugin_name = 8;
+}
+
+// RuntimeCapabilities describes what a sandbox runtime can do.
+message RuntimeCapabilities {
+  // Can isolate network access.
+  bool network_isolation = 1;
+
+  // Can isolate filesystem access.
+  bool filesystem_isolation = 2;
+
+  // Can enforce resource limits (memory, CPU).
+  bool resource_limits = 3;
+
+  // Supports seccomp profiles (Linux).
+  bool seccomp = 4;
+
+  // Supports AppArmor profiles (Linux).
+  bool apparmor = 5;
+
+  // Supports SELinux (Linux).
+  bool selinux = 6;
+
+  // Supports user namespaces.
+  bool user_namespaces = 7;
+
+  // Can run rootless (without root/admin privileges).
+  bool rootless = 8;
+
+  // Supports GPU passthrough.
+  bool gpu_support = 9;
+
+  // Supports streaming stdout/stderr in real-time.
+  bool streaming_output = 10;
+
+  // Supports interactive stdin.
+  bool interactive_stdin = 11;
+}
+
+// GetCapabilitiesRequest queries capabilities for a specific runtime.
+message GetCapabilitiesRequest {
+  // Runtime to query.
+  Runtime runtime = 1;
+}
+
+// GetCapabilitiesResponse returns runtime capabilities.
+message GetCapabilitiesResponse {
+  // Detailed capabilities.
+  RuntimeCapabilities capabilities = 1;
+
+  // Human-readable description of limitations.
+  repeated string limitations = 2;
+}
+
+// ExecuteRequest specifies a sandboxed execution.
+message ExecuteRequest {
+  // Command to execute. First element is the executable, rest are arguments.
+  repeated string command = 1 [(buf.validate.field).repeated.min_items = 1];
+
+  // Sandbox configuration.
+  SandboxConfig config = 2;
+
+  // Working directory inside the sandbox.
+  // If unset, defaults to the workspace root (/workspace in containers).
+  string work_dir = 3;
+
+  // Environment variables to set.
+  map<string, string> env = 4;
+
+  // Stdin content (if any).
+  bytes stdin = 5;
+
+  // Timeout for execution.
+  // After this duration, the sandbox will be terminated.
+  google.protobuf.Duration timeout = 6;
+
+  // Execution context for policy evaluation and audit.
+  ExecutionContext context = 7;
+
+  // Workspace directory on the host to mount into the sandbox.
+  // Required for most execution modes except MODE_FULL_ACCESS.
+  string workspace_dir = 8 [(buf.validate.field).string.min_len = 1];
+}
+
+// SandboxConfig configures sandbox behavior.
+message SandboxConfig {
+  // Runtime to use.
+  // If unspecified, uses the configured default (typically Docker).
+  Runtime runtime = 1;
+
+  // Filesystem access mode.
+  Mode mode = 2;
+
+  // Network access mode.
+  NetworkMode network_mode = 3;
+
+  // Container image for container runtimes.
+  // If unset, uses a minimal default (alpine:latest).
+  string image = 4;
+
+  // Resource limits.
+  ResourceLimits limits = 5;
+
+  // Additional host paths to mount.
+  // These are mounted in addition to the workspace.
+  repeated Mount mounts = 6;
+
+  // Network allowlist (when network_mode = ALLOWLIST).
+  // List of allowed hosts/IPs, optionally with ports (e.g., "proxy.golang.org:443").
+  repeated string network_allowlist = 7;
+
+  // Linux capabilities to drop.
+  // If empty, drops ALL capabilities by default for security.
+  repeated string drop_capabilities = 8;
+
+  // Linux capabilities to add back.
+  // Only use when absolutely necessary.
+  repeated string add_capabilities = 9;
+
+  // Seccomp profile path (Linux).
+  // If empty, uses the runtime's default profile.
+  string seccomp_profile = 10;
+
+  // User to run as inside the sandbox.
+  // Format: "user" or "user:group" or numeric UID.
+  string user = 11;
+
+  // Group to run as inside the sandbox.
+  string group = 12;
+
+  // Paths to make read-only (in addition to mode defaults).
+  repeated string read_only_paths = 13;
+
+  // Paths to hide (make inaccessible) from the sandbox.
+  repeated string hidden_paths = 14;
+
+  // For plugin runtimes: the plugin name to use.
+  string plugin_name = 15;
+
+  // Extra runtime-specific options (key-value pairs).
+  map<string, string> extra_options = 16;
+}
+
+// ResourceLimits sets resource constraints for the sandbox.
+message ResourceLimits {
+  // Memory limit (e.g., "512m", "2g").
+  // Empty means no limit.
+  string memory = 1;
+
+  // CPU limit (e.g., "1.0" = 1 core, "0.5" = half core).
+  // Empty means no limit.
+  string cpu = 2;
+
+  // Maximum number of processes/threads.
+  // 0 means no limit.
+  int32 max_pids = 3;
+
+  // Maximum number of open files.
+  // 0 means no limit.
+  int32 max_files = 4;
+
+  // Disk quota in bytes.
+  // 0 means no limit.
+  int64 disk_quota = 5;
+
+  // Maximum execution time.
+  // This overrides the timeout in ExecuteRequest if shorter.
+  google.protobuf.Duration max_time = 6;
+}
+
+// Mount describes a host path to mount in the sandbox.
+message Mount {
+  // Host path to mount.
+  string source = 1 [(buf.validate.field).string.min_len = 1];
+
+  // Path inside the sandbox.
+  string target = 2 [(buf.validate.field).string.min_len = 1];
+
+  // Mount as read-only.
+  bool read_only = 3;
+
+  // Mount type (bind, tmpfs, etc.).
+  // If empty, defaults to "bind".
+  string type = 4;
+
+  // Mount options (e.g., "noexec", "nosuid").
+  repeated string options = 5;
+}
+
+// ExecutionContext provides context for policy evaluation and audit.
+message ExecutionContext {
+  // What triggered this execution.
+  ExecutionSource source = 1;
+
+  // Plugin name (for EXECUTION_SOURCE_PLUGIN).
+  string plugin_name = 2;
+
+  // Agent name (for EXECUTION_SOURCE_AGENT).
+  string agent_name = 3;
+
+  // Command being wrapped (for EXECUTION_SOURCE_EXEC).
+  string wrapped_command = 4;
+
+  // JWT claims from authenticated request (for server-side execution).
+  map<string, string> jwt_claims = 5;
+
+  // Tenant ID for multi-tenant server deployments.
+  string tenant_id = 6;
+
+  // Additional metadata for policy evaluation.
+  map<string, string> metadata = 7;
+
+  // Trace context for distributed tracing (W3C format).
+  string trace_context = 8;
+}
+
+// ExecuteEvent streams execution progress and output.
+message ExecuteEvent {
+  // Unique identifier for this execution.
+  string execution_id = 1;
+
+  // When this event occurred.
+  google.protobuf.Timestamp timestamp = 2;
+
+  // Event details.
+  oneof details {
+    StartedEvent started = 10;
+    OutputEvent output = 11;
+    StatusEvent status = 12;
+    CompletedEvent completed = 13;
+    ErrorEvent error = 14;
+  }
+}
+
+// StartedEvent signals that sandbox execution has started.
+message StartedEvent {
+  // Execution ID (same as in ExecuteEvent).
+  string execution_id = 1;
+
+  // Runtime being used.
+  Runtime runtime = 2;
+
+  // Container/sandbox ID (for container runtimes).
+  string container_id = 3;
+
+  // Effective configuration after applying defaults and policy overrides.
+  SandboxConfig effective_config = 4;
+}
+
+// OutputEvent contains stdout/stderr output.
+message OutputEvent {
+  // True if this is stderr output.
+  bool is_stderr = 1;
+
+  // Output data.
+  bytes data = 2;
+}
+
+// StatusEvent provides progress updates.
+message StatusEvent {
+  // Status message.
+  string status = 1;
+
+  // Detailed message.
+  string message = 2;
+
+  // Progress percentage (0-100), -1 if unknown.
+  int32 progress_percent = 3;
+}
+
+// CompletedEvent signals that execution finished.
+message CompletedEvent {
+  // Exit code from the command.
+  int32 exit_code = 1;
+
+  // Total execution duration.
+  google.protobuf.Duration duration = 2;
+
+  // Resource usage statistics.
+  ResourceUsage resource_usage = 3;
+}
+
+// ErrorEvent reports an error during execution.
+message ErrorEvent {
+  // Error message.
+  string message = 1;
+
+  // Error code for programmatic handling.
+  string code = 2;
+
+  // Whether this error is fatal (execution cannot continue).
+  bool is_fatal = 3;
+
+  // Whether retrying might succeed.
+  bool is_retriable = 4;
+}
+
+// ResourceUsage reports resources consumed during execution.
+message ResourceUsage {
+  // Peak memory usage in bytes.
+  int64 peak_memory_bytes = 1;
+
+  // Total CPU time consumed.
+  google.protobuf.Duration cpu_time = 2;
+
+  // Total bytes read.
+  int64 bytes_read = 3;
+
+  // Total bytes written.
+  int64 bytes_written = 4;
+}
+
+// GetRuntimeInfoRequest is sent to external sandbox runtime plugins.
+message GetRuntimeInfoRequest {}
+
+// GetRuntimeInfoResponse contains plugin metadata.
+message GetRuntimeInfoResponse {
+  // Plugin name (should match the deputy-sandbox-<name> executable name).
+  string name = 1 [(buf.validate.field).string.min_len = 1];
+
+  // Human-readable display name.
+  string display_name = 2;
+
+  // Plugin version.
+  string version = 3;
+
+  // Description of this runtime.
+  string description = 4;
+
+  // Capabilities this runtime provides.
+  RuntimeCapabilities capabilities = 5;
+
+  // Modes this runtime supports.
+  repeated Mode supported_modes = 6;
+}
+
+// RuntimeExecuteRequest is sent to external sandbox runtime plugins.
+// It's similar to ExecuteRequest but includes the resolved workspace path.
+message RuntimeExecuteRequest {
+  // Command to execute.
+  repeated string command = 1 [(buf.validate.field).repeated.min_items = 1];
+
+  // Sandbox configuration.
+  SandboxConfig config = 2;
+
+  // Working directory inside the sandbox.
+  string work_dir = 3;
+
+  // Environment variables.
+  map<string, string> env = 4;
+
+  // Stdin content.
+  bytes stdin = 5;
+
+  // Timeout.
+  google.protobuf.Duration timeout = 6;
+
+  // Workspace directory (absolute path on host).
+  string workspace_dir = 7;
+
+  // Execution ID assigned by the manager.
+  string execution_id = 8;
+
+  // Trace context for distributed tracing.
+  string trace_context = 9;
+}
+
+// CleanupRequest asks a runtime plugin to clean up after an execution.
+message CleanupRequest {
+  // Execution ID to clean up.
+  string execution_id = 1 [(buf.validate.field).string.min_len = 1];
+}
+
+// CleanupResponse confirms cleanup.
+message CleanupResponse {
+  // Whether cleanup was successful.
+  bool success = 1;
+
+  // Error message if cleanup failed.
+  string error = 2;
+}
