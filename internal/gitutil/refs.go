@@ -231,6 +231,12 @@ func validateReference(repo *git.Repository, ref string) error {
 	if _, err := ResolveRevisionEnhanced(repo, ref); err == nil {
 		return nil
 	}
+	// Try with origin/ prefix for CI environments where branch names are remote refs
+	if !strings.Contains(ref, "/") {
+		if _, err := ResolveRevisionEnhanced(repo, "origin/"+ref); err == nil {
+			return nil
+		}
+	}
 	suggestions := GetReferenceSuggestions(repo, ref)
 	if len(suggestions) > 0 {
 		return fmt.Errorf("invalid reference %q\nDid you mean one of these?\n  %s", ref, strings.Join(suggestions, "\n  "))
