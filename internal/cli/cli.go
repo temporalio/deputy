@@ -10,6 +10,7 @@ import (
 
 	"github.com/charmbracelet/fang"
 	"github.com/go-git/go-git/v5"
+	"github.com/picatz/deputy/internal/cache"
 	"github.com/picatz/deputy/internal/cli/cmd"
 	"github.com/picatz/deputy/internal/config"
 	deputyerrors "github.com/picatz/deputy/internal/errors"
@@ -88,6 +89,7 @@ func newRoot() *cobra.Command {
 	var serverAddr string
 	var daemonSocket string
 	var authToken string
+	var noCache string
 
 	rootCmd := &cobra.Command{
 		Use:           "deputy",
@@ -187,8 +189,19 @@ CONNECTION MODES:
 	rootCmd.PersistentFlags().StringVar(&serverAddr, "server", "", "Connect to remote Deputy server (e.g., https://deputy.example.com:8090). Override with DEPUTY_SERVER")
 	rootCmd.PersistentFlags().StringVar(&daemonSocket, "daemon", "", "Connect to local daemon via Unix socket path (reserved for future use)")
 	rootCmd.PersistentFlags().StringVar(&authToken, "auth-token", "", "Bearer token for authenticating with remote server. Override with DEPUTY_AUTH_TOKEN")
+	rootCmd.PersistentFlags().StringVar(&noCache, "no-cache", "", "Bypass cache and fetch fresh data. Use 'true' for all caches, or comma-separated source names (e.g., 'osv,kev')")
 	rootCmd.PersistentPreRunE = func(c *cobra.Command, args []string) error {
-		return configureLogging(logLevel, logFormat)
+		if err := configureLogging(logLevel, logFormat); err != nil {
+			return err
+		}
+
+		// Apply --no-cache flag to context if set
+		if noCache != "" {
+			ctx := cache.ApplyNoCacheFlag(c.Context(), noCache)
+			c.SetContext(ctx)
+		}
+
+		return nil
 	}
 
 	// Register commands with server address from flags

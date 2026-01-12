@@ -10,11 +10,6 @@ import (
 	"time"
 )
 
-// REMOVED: StructToMap and normalizeMapKeys
-// Proto-first design: pass proto messages directly to CEL evaluation.
-// CEL's native proto support provides type-safe field access with
-// snake_case naming from proto definitions.
-
 const bundleSchemaVersion = "policy.deputy.sh/v1alpha1"
 
 // Source represents an individual CEL policy ready for evaluation.

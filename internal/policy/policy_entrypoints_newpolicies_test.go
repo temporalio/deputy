@@ -19,7 +19,7 @@ func TestCriticalTransitiveSpotlight(t *testing.T) {
 		t.Fatalf("LoadSources: %v", err)
 	}
 
-	// Proto-first: The policy uses vulnerability.?package.direct.orValue(false)
+	
 	// and severityAtLeast(vulnerability, "CRITICAL")
 	payload := map[string]any{
 		"vulnerability": &vulnerabilityv1.Finding{
@@ -52,12 +52,11 @@ func TestTyposquatLevenshteinGuard(t *testing.T) {
 		t.Fatalf("LoadSources: %v", err)
 	}
 
-	// Note: This policy uses request.package which is a simple map field,
-	// not a proto. The policy doesn't require protos for request objects.
+	
 	t.Run("deny known close typo", func(t *testing.T) {
 		payload := map[string]any{
-			"request": map[string]any{"package": "lodas", "ecosystem": "npm"},
-			"env":     map[string]any{"command": "proxy"},
+			"request": &policyv1.ProxyRequest{Package: "lodas", Ecosystem: "npm"},
+			"env":     &policyv1.Environment{Command: "proxy"},
 		}
 		if actions, err := EvaluateAll(context.Background(), sources, payload); err != nil || len(actions) == 0 || actions[0].Type != "deny" {
 			t.Fatalf("expected deny for typosquat, got %+v err=%v", actions, err)
@@ -66,8 +65,8 @@ func TestTyposquatLevenshteinGuard(t *testing.T) {
 
 	t.Run("deny another near miss", func(t *testing.T) {
 		payload := map[string]any{
-			"request": map[string]any{"package": "reqeusts", "ecosystem": "npm"},
-			"env":     map[string]any{"command": "proxy"},
+			"request": &policyv1.ProxyRequest{Package: "reqeusts", Ecosystem: "npm"},
+			"env":     &policyv1.Environment{Command: "proxy"},
 		}
 		if actions, err := EvaluateAll(context.Background(), sources, payload); err != nil || len(actions) == 0 || actions[0].Type != "deny" {
 			t.Fatalf("expected deny for typosquat, got %+v err=%v", actions, err)
@@ -76,8 +75,8 @@ func TestTyposquatLevenshteinGuard(t *testing.T) {
 
 	t.Run("allow safe distant name", func(t *testing.T) {
 		payload := map[string]any{
-			"request": map[string]any{"package": "teamlib", "ecosystem": "npm"},
-			"env":     map[string]any{"command": "proxy"},
+			"request": &policyv1.ProxyRequest{Package: "teamlib", Ecosystem: "npm"},
+			"env":     &policyv1.Environment{Command: "proxy"},
 		}
 		actions, err := EvaluateAll(context.Background(), sources, payload)
 		if err != nil {
@@ -92,8 +91,8 @@ func TestTyposquatLevenshteinGuard(t *testing.T) {
 
 	t.Run("allow scoped package", func(t *testing.T) {
 		payload := map[string]any{
-			"request": map[string]any{"package": "@acme/lodas", "ecosystem": "npm"},
-			"env":     map[string]any{"command": "proxy"},
+			"request": &policyv1.ProxyRequest{Package: "@acme/lodas", Ecosystem: "npm"},
+			"env":     &policyv1.Environment{Command: "proxy"},
 		}
 		actions, err := EvaluateAll(context.Background(), sources, payload)
 		if err != nil {
@@ -108,8 +107,8 @@ func TestTyposquatLevenshteinGuard(t *testing.T) {
 
 	t.Run("allow numeric suffix", func(t *testing.T) {
 		payload := map[string]any{
-			"request": map[string]any{"package": "react2", "ecosystem": "npm"},
-			"env":     map[string]any{"command": "proxy"},
+			"request": &policyv1.ProxyRequest{Package: "react2", Ecosystem: "npm"},
+			"env":     &policyv1.Environment{Command: "proxy"},
 		}
 		actions, err := EvaluateAll(context.Background(), sources, payload)
 		if err != nil {
@@ -124,8 +123,8 @@ func TestTyposquatLevenshteinGuard(t *testing.T) {
 
 	t.Run("ignore non-proxy command", func(t *testing.T) {
 		payload := map[string]any{
-			"request": map[string]any{"package": "lodas", "ecosystem": "npm"},
-			"env":     map[string]any{"command": "scan"},
+			"request": &policyv1.ProxyRequest{Package: "lodas", Ecosystem: "npm"},
+			"env":     &policyv1.Environment{Command: "scan"},
 		}
 		actions, err := EvaluateAll(context.Background(), sources, payload)
 		if err != nil {
@@ -146,7 +145,7 @@ func TestContainerLayerVulnerabilityPolicies(t *testing.T) {
 		t.Fatalf("LoadSources: %v", err)
 	}
 
-	// Proto-first: The policy uses vulnerability.package.layer_details fields
+	
 
 	t.Run("deny critical base image vulnerability", func(t *testing.T) {
 		payload := map[string]any{

@@ -5,7 +5,7 @@ import "testing"
 // TestHelperFunctions_EdgeCases tests edge cases for helper functions including
 // nil inputs, empty values, and type coercion.
 //
-// Proto-first: Vulnerability field accessors (vulnerabilitySeverity, vulnerabilityId,
+
 // hasFix, inKEV, epssScore) were removed in favor of direct proto field access.
 // Use vulnerability.advisory_id, vulnerability.in_kev, vulnerability.epss,
 // vulnerability.advisory.fixed_versions, vulnerability.advisory.severity.level

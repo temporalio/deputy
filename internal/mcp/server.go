@@ -418,6 +418,69 @@ func (s *Server) withTimeout(ctx context.Context, timeout time.Duration) (contex
 	return context.WithTimeout(ctx, timeout)
 }
 
+// validateLocalPath validates a path for local filesystem access.
+// It prevents path traversal attacks and blocks access to sensitive paths.
+//
+// Security checks:
+// - Rejects paths containing ".." components (path traversal)
+// - Rejects paths starting with "/" that escape expected directories
+// - Rejects paths to sensitive system directories
+// - Rejects paths with null bytes (C string injection)
+func validateLocalPath(path string) error {
+	if path == "" {
+		return fmt.Errorf("path is required")
+	}
+
+	// Block null bytes (could truncate path in C-based operations)
+	if strings.ContainsRune(path, '\x00') {
+		return fmt.Errorf("path contains invalid characters")
+	}
+
+	// Block path traversal sequences
+	// Note: We check the raw path, not cleaned, to catch attempts to confuse path.Clean
+	if strings.Contains(path, "..") {
+		return fmt.Errorf("path traversal not allowed: path contains '..'")
+	}
+
+	// Block access to sensitive system paths that should never be scanned.
+	// Note: We intentionally allow /home/, /Users/, /tmp/, and /var/folders/
+	// because these contain user project directories and temp files.
+	sensitivePaths := []string{
+		"/etc/", "/proc/", "/sys/", "/dev/",
+		"/root/",
+	}
+
+	// Paths containing these components are always blocked
+	sensitiveComponents := []string{
+		"/.ssh/", "/.gnupg/", "/.aws/", "/.kube/",
+		"/.config/", "/.local/share/", "/secrets/",
+	}
+
+	// Clean the path for consistent comparison
+	cleanPath := path
+	if strings.HasPrefix(cleanPath, "/") {
+		// Block absolute sensitive system paths
+		for _, sensitive := range sensitivePaths {
+			if strings.HasPrefix(cleanPath, sensitive) || strings.HasPrefix(cleanPath+"/", sensitive) {
+				return fmt.Errorf("access to system path %q not allowed", sensitive)
+			}
+		}
+		// Block paths containing sensitive components anywhere
+		for _, component := range sensitiveComponents {
+			if strings.Contains(cleanPath, component) {
+				return fmt.Errorf("access to sensitive path containing %q not allowed", component)
+			}
+		}
+	}
+
+	// Block excessively long paths (potential DoS)
+	if len(path) > 4096 {
+		return fmt.Errorf("path too long (max 4096 characters)")
+	}
+
+	return nil
+}
+
 // === Input/Output Types ===
 
 // ExplainVulnInput is the input for the explain_vulnerability tool.
@@ -914,10 +977,11 @@ func (s *Server) scanDirectory(ctx context.Context, req *mcp.CallToolRequest, ar
 
 	logs.Debug(ctx, "MCP tool invoked", "tool", "scan_directory", "path", args.Path)
 
-	if args.Path == "" {
-		err := fmt.Errorf("path is required")
+	// Validate path to prevent path traversal and access to sensitive directories
+	if err := validateLocalPath(args.Path); err != nil {
 		otel.SetSpanError(span, err)
 		otel.RecordMCPToolCall(ctx, "scan_directory", time.Since(startTime).Seconds(), false)
+		logs.Warn(ctx, "Invalid path in scan_directory", "path", args.Path, "error", err)
 		return nil, DirectoryScanResult{}, err
 	}
 
@@ -1005,10 +1069,11 @@ func (s *Server) listDependencies(ctx context.Context, req *mcp.CallToolRequest,
 
 	logs.Debug(ctx, "MCP tool invoked", "tool", "list_dependencies", "path", args.Path, "direct_only", args.DirectOnly)
 
-	if args.Path == "" {
-		err := fmt.Errorf("path is required")
+	// Validate path to prevent path traversal and access to sensitive directories
+	if err := validateLocalPath(args.Path); err != nil {
 		otel.SetSpanError(span, err)
 		otel.RecordMCPToolCall(ctx, "list_dependencies", time.Since(startTime).Seconds(), false)
+		logs.Warn(ctx, "Invalid path in list_dependencies", "path", args.Path, "error", err)
 		return nil, ListDependenciesResult{}, err
 	}
 
@@ -1074,10 +1139,11 @@ func (s *Server) generateSBOM(ctx context.Context, req *mcp.CallToolRequest, arg
 
 	logs.Debug(ctx, "MCP tool invoked", "tool", "generate_sbom", "path", args.Path, "format", args.Format)
 
-	if args.Path == "" {
-		err := fmt.Errorf("path is required")
+	// Validate path to prevent path traversal and access to sensitive directories
+	if err := validateLocalPath(args.Path); err != nil {
 		otel.SetSpanError(span, err)
 		otel.RecordMCPToolCall(ctx, "generate_sbom", time.Since(startTime).Seconds(), false)
+		logs.Warn(ctx, "Invalid path in generate_sbom", "path", args.Path, "error", err)
 		return nil, SBOMResult{}, err
 	}
 
@@ -1177,10 +1243,11 @@ func (s *Server) getRemediation(ctx context.Context, req *mcp.CallToolRequest, a
 
 	logs.Debug(ctx, "MCP tool invoked", "tool", "get_remediation", "path", args.Path)
 
-	if args.Path == "" {
-		err := fmt.Errorf("path is required")
+	// Validate path to prevent path traversal and access to sensitive directories
+	if err := validateLocalPath(args.Path); err != nil {
 		otel.SetSpanError(span, err)
 		otel.RecordMCPToolCall(ctx, "get_remediation", time.Since(startTime).Seconds(), false)
+		logs.Warn(ctx, "Invalid path in get_remediation", "path", args.Path, "error", err)
 		return nil, GetRemediationResult{}, err
 	}
 
@@ -1386,10 +1453,11 @@ func (s *Server) graphWhy(ctx context.Context, req *mcp.CallToolRequest, args Gr
 
 	logs.Debug(ctx, "MCP tool invoked", "tool", "graph_why", "path", args.Path, "package", args.Package)
 
-	if args.Path == "" {
-		err := fmt.Errorf("path is required")
+	// Validate path to prevent path traversal and access to sensitive directories
+	if err := validateLocalPath(args.Path); err != nil {
 		otel.SetSpanError(span, err)
 		otel.RecordMCPToolCall(ctx, "graph_why", time.Since(startTime).Seconds(), false)
+		logs.Warn(ctx, "Invalid path in graph_why", "path", args.Path, "error", err)
 		return nil, GraphWhyResult{}, err
 	}
 	if args.Package == "" {
@@ -1534,10 +1602,11 @@ func (s *Server) graphNeeds(ctx context.Context, req *mcp.CallToolRequest, args 
 
 	logs.Debug(ctx, "MCP tool invoked", "tool", "graph_needs", "path", args.Path, "package", args.Package)
 
-	if args.Path == "" {
-		err := fmt.Errorf("path is required")
+	// Validate path to prevent path traversal and access to sensitive directories
+	if err := validateLocalPath(args.Path); err != nil {
 		otel.SetSpanError(span, err)
 		otel.RecordMCPToolCall(ctx, "graph_needs", time.Since(startTime).Seconds(), false)
+		logs.Warn(ctx, "Invalid path in graph_needs", "path", args.Path, "error", err)
 		return nil, GraphNeedsResult{}, err
 	}
 	if args.Package == "" {

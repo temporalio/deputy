@@ -175,7 +175,7 @@ func TestGoModuleHandlerBlocksCriticalVulnerability(t *testing.T) {
 
 func TestGoModuleHandlerLicensePolicy(t *testing.T) {
 	tmp := t.TempDir()
-	policyPath := writeBundle(t, tmp, "block-gpl", `licenses.exists(l, l == "GPL-3.0")`, "license policy", "deny")
+	policyPath := writeBundle(t, tmp, "block-gpl", `pkg.licenses.exists(l, l == "GPL-3.0")`, "license policy", "deny")
 	engine, err := NewPolicyEngine([]string{policyPath})
 	if err != nil {
 		t.Fatalf("NewPolicyEngine: %v", err)

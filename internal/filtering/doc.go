@@ -1,8 +1,6 @@
-// Package filtering provides proto-native filter functions for scan results.
+// Package filtering provides filter functions for scan results.
 //
-// All functions operate directly on proto types (scanv1.ScanResponse),
-// eliminating conversion overhead. This is part of the proto-first
-// architecture where proto types are the canonical data representation.
+// All functions operate directly on proto types (scanv1.ScanResponse).
 //
 // # Filter Functions
 //

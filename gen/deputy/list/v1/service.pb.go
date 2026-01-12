@@ -10,6 +10,7 @@
 package listv1
 
 import (
+	_ "buf.build/gen/go/bufbuild/protovalidate/protocolbuffers/go/buf/validate"
 	v11 "github.com/picatz/deputy/gen/deputy/dependency/v1"
 	v1 "github.com/picatz/deputy/gen/deputy/target/v1"
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
@@ -30,6 +31,7 @@ const (
 type ListPackagesRequest struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Target is the path or URL to enumerate (directory, repository, image).
+	// Maximum length prevents denial-of-service via excessively long strings.
 	Target string `protobuf:"bytes,1,opt,name=target,proto3" json:"target,omitempty"`
 	// Options configure listing behavior.
 	Options       *ListOptions `protobuf:"bytes,2,opt,name=options,proto3" json:"options,omitempty"`
@@ -87,10 +89,12 @@ type ListOptions struct {
 	// OnlyDirect filters to only direct dependencies.
 	OnlyDirect bool `protobuf:"varint,1,opt,name=only_direct,json=onlyDirect,proto3" json:"only_direct,omitempty"`
 	// Ecosystems filters to specific ecosystems.
+	// Maximum 50 ecosystems to prevent abuse.
 	Ecosystems []string `protobuf:"bytes,2,rep,name=ecosystems,proto3" json:"ecosystems,omitempty"`
 	// IncludeLicenses enriches packages with license information.
 	IncludeLicenses bool `protobuf:"varint,3,opt,name=include_licenses,json=includeLicenses,proto3" json:"include_licenses,omitempty"`
 	// Ref is a Git reference for repository targets.
+	// Maximum length accommodates SHA-256 commit hashes and long branch names.
 	Ref string `protobuf:"bytes,4,opt,name=ref,proto3" json:"ref,omitempty"`
 	// Platform specifies target platform for container images.
 	Platform      string `protobuf:"bytes,5,opt,name=platform,proto3" json:"platform,omitempty"`
@@ -469,27 +473,27 @@ var File_deputy_list_v1_service_proto protoreflect.FileDescriptor
 
 const file_deputy_list_v1_service_proto_rawDesc = "" +
 	"\n" +
-	"\x1cdeputy/list/v1/service.proto\x12\x0edeputy.list.v1\x1a\x1ddeputy/target/v1/target.proto\x1a%deputy/dependency/v1/dependency.proto\"d\n" +
-	"\x13ListPackagesRequest\x12\x16\n" +
-	"\x06target\x18\x01 \x01(\tR\x06target\x125\n" +
-	"\aoptions\x18\x02 \x01(\v2\x1b.deputy.list.v1.ListOptionsR\aoptions\"\xa7\x01\n" +
+	"\x1cdeputy/list/v1/service.proto\x12\x0edeputy.list.v1\x1a\x1bbuf/validate/validate.proto\x1a\x1ddeputy/target/v1/target.proto\x1a%deputy/dependency/v1/dependency.proto\"n\n" +
+	"\x13ListPackagesRequest\x12 \n" +
+	"\x06target\x18\x01 \x01(\tB\b\xbaH\x05r\x03\x18\x80 R\x06target\x125\n" +
+	"\aoptions\x18\x02 \x01(\v2\x1b.deputy.list.v1.ListOptionsR\aoptions\"\xca\x01\n" +
 	"\vListOptions\x12\x1f\n" +
 	"\vonly_direct\x18\x01 \x01(\bR\n" +
-	"onlyDirect\x12\x1e\n" +
+	"onlyDirect\x12.\n" +
 	"\n" +
-	"ecosystems\x18\x02 \x03(\tR\n" +
+	"ecosystems\x18\x02 \x03(\tB\x0e\xbaH\v\x92\x01\b\x102\"\x04r\x02\x18@R\n" +
 	"ecosystems\x12)\n" +
-	"\x10include_licenses\x18\x03 \x01(\bR\x0fincludeLicenses\x12\x10\n" +
-	"\x03ref\x18\x04 \x01(\tR\x03ref\x12\x1a\n" +
-	"\bplatform\x18\x05 \x01(\tR\bplatform\"\xb4\x01\n" +
+	"\x10include_licenses\x18\x03 \x01(\bR\x0fincludeLicenses\x12\x1a\n" +
+	"\x03ref\x18\x04 \x01(\tB\b\xbaH\x05r\x03\x18\x80\x02R\x03ref\x12#\n" +
+	"\bplatform\x18\x05 \x01(\tB\a\xbaH\x04r\x02\x18@R\bplatform\"\xb4\x01\n" +
 	"\x14ListPackagesResponse\x120\n" +
 	"\x06target\x18\x01 \x01(\v2\x18.deputy.target.v1.TargetR\x06target\x129\n" +
 	"\bpackages\x18\x02 \x03(\v2\x1d.deputy.dependency.v1.PackageR\bpackages\x12/\n" +
-	"\x05stats\x18\x03 \x01(\v2\x19.deputy.list.v1.ListStatsR\x05stats\"\x96\x02\n" +
-	"\tListStats\x12%\n" +
-	"\x0etotal_packages\x18\x01 \x01(\x05R\rtotalPackages\x12'\n" +
-	"\x0fdirect_packages\x18\x02 \x01(\x05R\x0edirectPackages\x12/\n" +
-	"\x13transitive_packages\x18\x03 \x01(\x05R\x12transitivePackages\x12I\n" +
+	"\x05stats\x18\x03 \x01(\v2\x19.deputy.list.v1.ListStatsR\x05stats\"\xb1\x02\n" +
+	"\tListStats\x12.\n" +
+	"\x0etotal_packages\x18\x01 \x01(\x05B\a\xbaH\x04\x1a\x02(\x00R\rtotalPackages\x120\n" +
+	"\x0fdirect_packages\x18\x02 \x01(\x05B\a\xbaH\x04\x1a\x02(\x00R\x0edirectPackages\x128\n" +
+	"\x13transitive_packages\x18\x03 \x01(\x05B\a\xbaH\x04\x1a\x02(\x00R\x12transitivePackages\x12I\n" +
 	"\n" +
 	"ecosystems\x18\x04 \x03(\v2).deputy.list.v1.ListStats.EcosystemsEntryR\n" +
 	"ecosystems\x1a=\n" +
@@ -500,14 +504,14 @@ const file_deputy_list_v1_service_proto_rawDesc = "" +
 	"\x16ListEcosystemsResponse\x12=\n" +
 	"\n" +
 	"ecosystems\x18\x01 \x03(\v2\x1d.deputy.list.v1.EcosystemInfoR\n" +
-	"ecosystems\"\xae\x01\n" +
-	"\rEcosystemInfo\x12\x12\n" +
-	"\x04name\x18\x01 \x01(\tR\x04name\x12!\n" +
-	"\fdisplay_name\x18\x02 \x01(\tR\vdisplayName\x12 \n" +
-	"\vdescription\x18\x03 \x01(\tR\vdescription\x12%\n" +
-	"\x0emanifest_files\x18\x04 \x03(\tR\rmanifestFiles\x12\x1d\n" +
+	"ecosystems\"\xed\x01\n" +
+	"\rEcosystemInfo\x12\x1b\n" +
+	"\x04name\x18\x01 \x01(\tB\a\xbaH\x04r\x02\x18@R\x04name\x12+\n" +
+	"\fdisplay_name\x18\x02 \x01(\tB\b\xbaH\x05r\x03\x18\x80\x01R\vdisplayName\x12*\n" +
+	"\vdescription\x18\x03 \x01(\tB\b\xbaH\x05r\x03\x18\x80\bR\vdescription\x126\n" +
+	"\x0emanifest_files\x18\x04 \x03(\tB\x0f\xbaH\f\x92\x01\t\x102\"\x05r\x03\x18\x80\x02R\rmanifestFiles\x12.\n" +
 	"\n" +
-	"lock_files\x18\x05 \x03(\tR\tlockFiles2\xc9\x01\n" +
+	"lock_files\x18\x05 \x03(\tB\x0f\xbaH\f\x92\x01\t\x102\"\x05r\x03\x18\x80\x02R\tlockFiles2\xc9\x01\n" +
 	"\vListService\x12Y\n" +
 	"\fListPackages\x12#.deputy.list.v1.ListPackagesRequest\x1a$.deputy.list.v1.ListPackagesResponse\x12_\n" +
 	"\x0eListEcosystems\x12%.deputy.list.v1.ListEcosystemsRequest\x1a&.deputy.list.v1.ListEcosystemsResponseB\xb2\x01\n" +

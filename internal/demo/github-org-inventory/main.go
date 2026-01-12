@@ -422,7 +422,7 @@ func parseEcosystems(raw string) []string {
 }
 
 func canonicalEcosystem(p *extractor.Package) string {
-	raw := strings.TrimSpace(p.Ecosystem())
+	raw := strings.TrimSpace(p.Ecosystem().String())
 	if raw == "" || strings.EqualFold(raw, "unknown") {
 		raw = strings.TrimSpace(p.PURLType)
 	}

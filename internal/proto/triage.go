@@ -13,7 +13,6 @@ import (
 )
 
 // BuildTriageResponse constructs a TriageResponse from consolidated vulnerabilities.
-// This is the proto-first API for triage output.
 func BuildTriageResponse(
 	displayPath string,
 	stats *vulnerabilityv1.Stats,

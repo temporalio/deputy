@@ -47,6 +47,55 @@ type ListenerConfig struct {
 	// MaxRequestBodyBytes caps the request body size for this listener.
 	// A value of 0 uses the proxy default; a value < 0 disables the cap.
 	MaxRequestBodyBytes int64 `yaml:"max_request_body_bytes,omitempty"`
+
+	// OCI configures OCI-specific proxy behavior.
+	// Only used when "oci" is in the ecosystems list.
+	OCI *OCIConfig `yaml:"oci,omitempty"`
+}
+
+// OCIConfig holds OCI registry proxy configuration.
+type OCIConfig struct {
+	// AllowMutableTags controls whether mutable tags (e.g., :latest) are allowed.
+	// When false (default in strict mode), requests for mutable tags are blocked
+	// unless the request is rewritten to use a digest.
+	// This mitigates TOCTOU vulnerabilities where a tag's content can change
+	// between policy evaluation and upstream fetch.
+	AllowMutableTags bool `yaml:"allow_mutable_tags,omitempty"`
+
+	// PinDigests enables automatic digest pinning for mutable tag requests.
+	// When true (default), the proxy resolves tags to digests during policy
+	// evaluation and rewrites upstream requests to use the pinned digest.
+	// This ensures the content fetched matches what was scanned.
+	// The resolved digest is returned in the X-Deputy-Pinned-Digest header.
+	PinDigests bool `yaml:"pin_digests,omitempty"`
+
+	// StrictMode enforces secure defaults: AllowMutableTags=false, PinDigests=true.
+	// When set, it overrides individual settings.
+	StrictMode bool `yaml:"strict_mode,omitempty"`
+}
+
+// EffectiveAllowMutableTags returns whether mutable tags are allowed,
+// taking StrictMode into account.
+func (c *OCIConfig) EffectiveAllowMutableTags() bool {
+	if c == nil {
+		return true // Default: allow mutable tags for backward compatibility
+	}
+	if c.StrictMode {
+		return false // Strict mode disallows mutable tags
+	}
+	return c.AllowMutableTags
+}
+
+// EffectivePinDigests returns whether digest pinning is enabled,
+// taking StrictMode into account.
+func (c *OCIConfig) EffectivePinDigests() bool {
+	if c == nil {
+		return true // Default: pin digests for security
+	}
+	if c.StrictMode {
+		return true // Strict mode always pins digests
+	}
+	return c.PinDigests
 }
 
 // LoadConfig loads YAML/JSON configuration from the provided path.
@@ -299,6 +348,9 @@ func MarshalTemplate(ecosystem string) (string, error) {
 					Ecosystems: []string{"oci"},
 					Upstream:   "https://registry-1.docker.io",
 					Policies:   []string{"policy/oci.yaml"},
+					OCI: &OCIConfig{
+						StrictMode: true, // Secure defaults for OCI
+					},
 				},
 			},
 		}
@@ -338,5 +390,23 @@ func MarshalTemplate(ecosystem string) (string, error) {
 #   # allowed_algorithms: ["RS256", "ES256"]
 `
 
-	return string(data) + authExample, nil
+	// Append OCI-specific configuration example for OCI ecosystem
+	ociExample := ""
+	if ecosystem == "oci" {
+		ociExample = `
+# OCI Security (TOCTOU mitigation):
+# The OCI proxy pins image digests during policy evaluation to prevent
+# time-of-check-to-time-of-use vulnerabilities. StrictMode enforces:
+# - pin_digests: true (rewrite tag requests to use resolved digest)
+# - allow_mutable_tags: false (block :latest and other mutable tags)
+#
+# For production, keep strict_mode: true. For development/testing:
+# oci:
+#   strict_mode: false
+#   pin_digests: true           # Still pin digests for security
+#   allow_mutable_tags: true    # But allow :latest for convenience
+`
+	}
+
+	return string(data) + authExample + ociExample, nil
 }

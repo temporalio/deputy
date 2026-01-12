@@ -1,9 +1,8 @@
 // Package services provides the unified service layer for Deputy.
 //
-// This package implements a proto-first architecture where services directly
-// implement ConnectRPC generated handler interfaces. The same implementations
-// work both in-process (via InProcessTransport) and over the network
-// (via standard HTTP/2).
+// Services directly implement ConnectRPC generated handler interfaces. The same
+// implementations work both in-process (via InProcessTransport) and over the
+// network (via standard HTTP/2).
 //
 // # Architecture
 //

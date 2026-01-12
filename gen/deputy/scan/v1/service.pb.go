@@ -123,6 +123,7 @@ type ScanRequest struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Target is the scan target (path, URL, image reference, etc.).
 	// When empty, defaults to current working directory.
+	// Maximum length prevents denial-of-service via excessively long strings.
 	Target string `protobuf:"bytes,1,opt,name=target,proto3" json:"target,omitempty"`
 	// Options configure scan behavior.
 	Options       *ScanOptions `protobuf:"bytes,2,opt,name=options,proto3" json:"options,omitempty"`
@@ -178,6 +179,7 @@ func (x *ScanRequest) GetOptions() *ScanOptions {
 type StreamScanRequest struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Target is the scan target (path, URL, image reference, etc.).
+	// Maximum length prevents denial-of-service via excessively long strings.
 	Target string `protobuf:"bytes,1,opt,name=target,proto3" json:"target,omitempty"`
 	// Options configure scan behavior.
 	Options       *ScanOptions `protobuf:"bytes,2,opt,name=options,proto3" json:"options,omitempty"`
@@ -234,6 +236,7 @@ type ScanOptions struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Ecosystems filters scanning to specific package ecosystems.
 	// Empty means scan all detected ecosystems.
+	// Maximum 50 ecosystems to prevent abuse.
 	Ecosystems []string `protobuf:"bytes,1,rep,name=ecosystems,proto3" json:"ecosystems,omitempty"`
 	// PublishedBefore filters to vulnerabilities published before this timestamp.
 	PublishedBefore *timestamppb.Timestamp `protobuf:"bytes,2,opt,name=published_before,json=publishedBefore,proto3" json:"published_before,omitempty"`
@@ -244,9 +247,11 @@ type ScanOptions struct {
 	// EnrichOptions configures vulnerability enrichment.
 	EnrichOptions *EnrichOptions `protobuf:"bytes,5,opt,name=enrich_options,json=enrichOptions,proto3" json:"enrich_options,omitempty"`
 	// PolicyPaths are paths to policy files to evaluate.
+	// Maximum 20 policy paths to prevent abuse. Each path limited to 1024 chars.
 	PolicyPaths []string `protobuf:"bytes,6,rep,name=policy_paths,json=policyPaths,proto3" json:"policy_paths,omitempty"`
 	// Ref is a Git reference to scan (branch, tag, commit).
 	// Only applies to git/repository targets.
+	// Maximum length accommodates SHA-256 commit hashes and long branch names.
 	Ref string `protobuf:"bytes,7,opt,name=ref,proto3" json:"ref,omitempty"`
 	// Platform specifies the target platform for container images (e.g., "linux/amd64").
 	// Only applies to container image targets.
@@ -455,6 +460,7 @@ type GraphOptions struct {
 	// UseGit enables cloning repositories for private module resolution.
 	UseGit bool `protobuf:"varint,3,opt,name=use_git,json=useGit,proto3" json:"use_git,omitempty"`
 	// PrivatePatterns specifies glob patterns for private modules.
+	// Maximum 100 patterns to prevent abuse. Each pattern limited to 256 chars.
 	PrivatePatterns []string `protobuf:"bytes,4,rep,name=private_patterns,json=privatePatterns,proto3" json:"private_patterns,omitempty"`
 	unknownFields   protoimpl.UnknownFields
 	sizeCache       protoimpl.SizeCache
@@ -1354,47 +1360,48 @@ var File_deputy_scan_v1_service_proto protoreflect.FileDescriptor
 
 const file_deputy_scan_v1_service_proto_rawDesc = "" +
 	"\n" +
-	"\x1cdeputy/scan/v1/service.proto\x12\x0edeputy.scan.v1\x1a\x1bbuf/validate/validate.proto\x1a\x1fgoogle/protobuf/timestamp.proto\x1a\x1ddeputy/target/v1/target.proto\x1a%deputy/dependency/v1/dependency.proto\x1a+deputy/vulnerability/v1/vulnerability.proto\x1a\x1ddeputy/policy/v1/policy.proto\x1a\x1fdeputy/secrets/v1/secrets.proto\x1a\x1ddeputy/graph/v1/service.proto\x1a!deputy/inventory/v1/service.proto\"\\\n" +
-	"\vScanRequest\x12\x16\n" +
-	"\x06target\x18\x01 \x01(\tR\x06target\x125\n" +
-	"\aoptions\x18\x02 \x01(\v2\x1b.deputy.scan.v1.ScanOptionsR\aoptions\"b\n" +
-	"\x11StreamScanRequest\x12\x16\n" +
-	"\x06target\x18\x01 \x01(\tR\x06target\x125\n" +
-	"\aoptions\x18\x02 \x01(\v2\x1b.deputy.scan.v1.ScanOptionsR\aoptions\"\xa5\x04\n" +
-	"\vScanOptions\x12\x1e\n" +
+	"\x1cdeputy/scan/v1/service.proto\x12\x0edeputy.scan.v1\x1a\x1bbuf/validate/validate.proto\x1a\x1fgoogle/protobuf/timestamp.proto\x1a\x1ddeputy/target/v1/target.proto\x1a%deputy/dependency/v1/dependency.proto\x1a+deputy/vulnerability/v1/vulnerability.proto\x1a\x1ddeputy/policy/v1/policy.proto\x1a\x1fdeputy/secrets/v1/secrets.proto\x1a\x1ddeputy/graph/v1/service.proto\x1a!deputy/inventory/v1/service.proto\"f\n" +
+	"\vScanRequest\x12 \n" +
+	"\x06target\x18\x01 \x01(\tB\b\xbaH\x05r\x03\x18\x80 R\x06target\x125\n" +
+	"\aoptions\x18\x02 \x01(\v2\x1b.deputy.scan.v1.ScanOptionsR\aoptions\"l\n" +
+	"\x11StreamScanRequest\x12 \n" +
+	"\x06target\x18\x01 \x01(\tB\b\xbaH\x05r\x03\x18\x80 R\x06target\x125\n" +
+	"\aoptions\x18\x02 \x01(\v2\x1b.deputy.scan.v1.ScanOptionsR\aoptions\"\xd9\x04\n" +
+	"\vScanOptions\x12.\n" +
 	"\n" +
-	"ecosystems\x18\x01 \x03(\tR\n" +
+	"ecosystems\x18\x01 \x03(\tB\x0e\xbaH\v\x92\x01\b\x102\"\x04r\x02\x18@R\n" +
 	"ecosystems\x12E\n" +
 	"\x10published_before\x18\x02 \x01(\v2\x1a.google.protobuf.TimestampR\x0fpublishedBefore\x12C\n" +
 	"\x0fpublished_after\x18\x03 \x01(\v2\x1a.google.protobuf.TimestampR\x0epublishedAfter\x12A\n" +
 	"\rgraph_options\x18\x04 \x01(\v2\x1c.deputy.scan.v1.GraphOptionsR\fgraphOptions\x12D\n" +
-	"\x0eenrich_options\x18\x05 \x01(\v2\x1d.deputy.scan.v1.EnrichOptionsR\renrichOptions\x12!\n" +
-	"\fpolicy_paths\x18\x06 \x03(\tR\vpolicyPaths\x12\x10\n" +
-	"\x03ref\x18\a \x01(\tR\x03ref\x12\x1a\n" +
-	"\bplatform\x18\b \x01(\tR\bplatform\x12'\n" +
+	"\x0eenrich_options\x18\x05 \x01(\v2\x1d.deputy.scan.v1.EnrichOptionsR\renrichOptions\x122\n" +
+	"\fpolicy_paths\x18\x06 \x03(\tB\x0f\xbaH\f\x92\x01\t\x10\x14\"\x05r\x03\x18\x80\bR\vpolicyPaths\x12\x1a\n" +
+	"\x03ref\x18\a \x01(\tB\b\xbaH\x05r\x03\x18\x80\x02R\x03ref\x12#\n" +
+	"\bplatform\x18\b \x01(\tB\a\xbaH\x04r\x02\x18@R\bplatform\x12'\n" +
 	"\x0finclude_secrets\x18\t \x01(\bR\x0eincludeSecrets\x12;\n" +
 	"\vtarget_hint\x18\n" +
 	" \x01(\v2\x1a.deputy.scan.v1.TargetHintR\n" +
 	"targetHint\x12*\n" +
-	"\x11detect_base_image\x18\v \x01(\bR\x0fdetectBaseImage\"g\n" +
+	"\x11detect_base_image\x18\v \x01(\bR\x0fdetectBaseImage\"\xa2\x01\n" +
 	"\n" +
 	"TargetHint\x120\n" +
-	"\x04kind\x18\x01 \x01(\x0e2\x1c.deputy.target.v1.TargetKindR\x04kind\x12'\n" +
-	"\x0fimage_transport\x18\x02 \x01(\tR\x0eimageTransport\"\x89\x01\n" +
+	"\x04kind\x18\x01 \x01(\x0e2\x1c.deputy.target.v1.TargetKindR\x04kind\x12b\n" +
+	"\x0fimage_transport\x18\x02 \x01(\tB9\xbaH6r4R\x00R\x06remoteR\x06daemonR\atarballR\voci-archiveR\n" +
+	"oci-layoutR\x0eimageTransport\"\x9a\x01\n" +
 	"\fGraphOptions\x12\x18\n" +
 	"\aenabled\x18\x01 \x01(\bR\aenabled\x12\x1b\n" +
 	"\tuse_proxy\x18\x02 \x01(\bR\buseProxy\x12\x17\n" +
-	"\ause_git\x18\x03 \x01(\bR\x06useGit\x12)\n" +
-	"\x10private_patterns\x18\x04 \x03(\tR\x0fprivatePatterns\"m\n" +
+	"\ause_git\x18\x03 \x01(\bR\x06useGit\x12:\n" +
+	"\x10private_patterns\x18\x04 \x03(\tB\x0f\xbaH\f\x92\x01\t\x10d\"\x05r\x03\x18\x80\x02R\x0fprivatePatterns\"m\n" +
 	"\rEnrichOptions\x12\x18\n" +
 	"\aenabled\x18\x01 \x01(\bR\aenabled\x12!\n" +
 	"\finclude_epss\x18\x02 \x01(\bR\vincludeEpss\x12\x1f\n" +
 	"\vinclude_kev\x18\x03 \x01(\bR\n" +
-	"includeKev\"\xa7\a\n" +
+	"includeKev\"\xb0\a\n" +
 	"\fScanResponse\x120\n" +
 	"\x06target\x18\x01 \x01(\v2\x18.deputy.target.v1.TargetR\x06target\x12=\n" +
-	"\fgenerated_at\x18\x02 \x01(\v2\x1a.google.protobuf.TimestampR\vgeneratedAt\x12)\n" +
-	"\x10packages_scanned\x18\x03 \x01(\x05R\x0fpackagesScanned\x129\n" +
+	"\fgenerated_at\x18\x02 \x01(\v2\x1a.google.protobuf.TimestampR\vgeneratedAt\x122\n" +
+	"\x10packages_scanned\x18\x03 \x01(\x05B\a\xbaH\x04\x1a\x02(\x00R\x0fpackagesScanned\x129\n" +
 	"\bpackages\x18\x04 \x03(\v2\x1d.deputy.dependency.v1.PackageR\bpackages\x12<\n" +
 	"\bfindings\x18\x05 \x03(\v2 .deputy.vulnerability.v1.FindingR\bfindings\x12L\n" +
 	"\n" +
@@ -1412,55 +1419,55 @@ const file_deputy_scan_v1_service_proto_rawDesc = "" +
 	"\x0fdockerfile_info\x18\x0e \x01(\v2#.deputy.inventory.v1.DockerfileInfoR\x0edockerfileInfo\x1a`\n" +
 	"\x0fAdvisoriesEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x127\n" +
-	"\x05value\x18\x02 \x01(\v2!.deputy.vulnerability.v1.AdvisoryR\x05value:\x028\x01\"\xba\x02\n" +
+	"\x05value\x18\x02 \x01(\v2!.deputy.vulnerability.v1.AdvisoryR\x05value:\x028\x01\"\xce\x02\n" +
 	"\fScanProgress\x12/\n" +
-	"\x05phase\x18\x01 \x01(\x0e2\x19.deputy.scan.v1.ScanPhaseR\x05phase\x12\x18\n" +
-	"\amessage\x18\x02 \x01(\tR\amessage\x12%\n" +
+	"\x05phase\x18\x01 \x01(\x0e2\x19.deputy.scan.v1.ScanPhaseR\x05phase\x12\"\n" +
+	"\amessage\x18\x02 \x01(\tB\b\xbaH\x05r\x03\x18\x80\bR\amessage\x12%\n" +
 	"\bprogress\x18\x03 \x01(\x05B\t\xbaH\x06\x1a\x04\x18d(\x00R\bprogress\x12.\n" +
 	"\x0epackages_found\x18\x04 \x01(\x05B\a\xbaH\x04\x1a\x02(\x00R\rpackagesFound\x12<\n" +
 	"\x15vulnerabilities_found\x18\x05 \x01(\x05B\a\xbaH\x04\x1a\x02(\x00R\x14vulnerabilitiesFound\x124\n" +
 	"\x06result\x18\n" +
-	" \x01(\v2\x1c.deputy.scan.v1.ScanResponseR\x06result\x12\x14\n" +
-	"\x05error\x18\v \x01(\tR\x05error\"\xb3\x01\n" +
+	" \x01(\v2\x1c.deputy.scan.v1.ScanResponseR\x06result\x12\x1e\n" +
+	"\x05error\x18\v \x01(\tB\b\xbaH\x05r\x03\x18\x80 R\x05error\"\xb3\x01\n" +
 	"\tImageInfo\x123\n" +
 	"\x06config\x18\x01 \x01(\v2\x1b.deputy.scan.v1.ImageConfigR\x06config\x129\n" +
 	"\bmetadata\x18\x02 \x01(\v2\x1d.deputy.scan.v1.ImageMetadataR\bmetadata\x126\n" +
-	"\ahistory\x18\x03 \x03(\v2\x1c.deputy.scan.v1.HistoryEntryR\ahistory\"\xbe\x03\n" +
-	"\vImageConfig\x12\x12\n" +
-	"\x04user\x18\x01 \x01(\tR\x04user\x12\x17\n" +
-	"\ais_root\x18\x02 \x01(\bR\x06isRoot\x12\x10\n" +
-	"\x03env\x18\x03 \x03(\tR\x03env\x12#\n" +
-	"\rsensitive_env\x18\x04 \x03(\tR\fsensitiveEnv\x12\x1e\n" +
+	"\ahistory\x18\x03 \x03(\v2\x1c.deputy.scan.v1.HistoryEntryR\ahistory\"\x90\x04\n" +
+	"\vImageConfig\x12\x1c\n" +
+	"\x04user\x18\x01 \x01(\tB\b\xbaH\x05r\x03\x18\x80\x02R\x04user\x12\x17\n" +
+	"\ais_root\x18\x02 \x01(\bR\x06isRoot\x12\x1b\n" +
+	"\x03env\x18\x03 \x03(\tB\t\xbaH\x06\x92\x01\x03\x10\xe8\aR\x03env\x12.\n" +
+	"\rsensitive_env\x18\x04 \x03(\tB\t\xbaH\x06\x92\x01\x03\x10\xe8\aR\fsensitiveEnv\x12(\n" +
 	"\n" +
-	"entrypoint\x18\x05 \x03(\tR\n" +
-	"entrypoint\x12\x10\n" +
-	"\x03cmd\x18\x06 \x03(\tR\x03cmd\x12#\n" +
-	"\rexposed_ports\x18\a \x03(\tR\fexposedPorts\x12\x18\n" +
-	"\avolumes\x18\b \x03(\tR\avolumes\x12?\n" +
-	"\x06labels\x18\t \x03(\v2'.deputy.scan.v1.ImageConfig.LabelsEntryR\x06labels\x12\x1f\n" +
+	"entrypoint\x18\x05 \x03(\tB\b\xbaH\x05\x92\x01\x02\x10dR\n" +
+	"entrypoint\x12\x1a\n" +
+	"\x03cmd\x18\x06 \x03(\tB\b\xbaH\x05\x92\x01\x02\x10dR\x03cmd\x12-\n" +
+	"\rexposed_ports\x18\a \x03(\tB\b\xbaH\x05\x92\x01\x02\x10dR\fexposedPorts\x12\"\n" +
+	"\avolumes\x18\b \x03(\tB\b\xbaH\x05\x92\x01\x02\x10dR\avolumes\x12?\n" +
+	"\x06labels\x18\t \x03(\v2'.deputy.scan.v1.ImageConfig.LabelsEntryR\x06labels\x12)\n" +
 	"\vworking_dir\x18\n" +
-	" \x01(\tR\n" +
+	" \x01(\tB\b\xbaH\x05r\x03\x18\x80 R\n" +
 	"workingDir\x12=\n" +
 	"\vhealthcheck\x18\v \x01(\v2\x1b.deputy.scan.v1.HealthcheckR\vhealthcheck\x1a9\n" +
 	"\vLabelsEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
-	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"q\n" +
-	"\vHealthcheck\x12\x12\n" +
-	"\x04test\x18\x01 \x03(\tR\x04test\x12\x1a\n" +
-	"\binterval\x18\x02 \x01(\tR\binterval\x12\x18\n" +
-	"\atimeout\x18\x03 \x01(\tR\atimeout\x12\x18\n" +
-	"\aretries\x18\x04 \x01(\x05R\aretries\"\xc6\x01\n" +
-	"\rImageMetadata\x12\"\n" +
-	"\farchitecture\x18\x01 \x01(\tR\farchitecture\x12\x0e\n" +
-	"\x02os\x18\x02 \x01(\tR\x02os\x12\x1f\n" +
-	"\vlayer_count\x18\x03 \x01(\x05R\n" +
-	"layerCount\x12\x12\n" +
-	"\x04size\x18\x04 \x01(\x03R\x04size\x124\n" +
-	"\acreated\x18\x05 \x01(\v2\x1a.google.protobuf.TimestampR\acreated\x12\x16\n" +
-	"\x06digest\x18\x06 \x01(\tR\x06digest\"\x84\x01\n" +
-	"\fHistoryEntry\x12\x1d\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\x96\x01\n" +
+	"\vHealthcheck\x12\x1c\n" +
+	"\x04test\x18\x01 \x03(\tB\b\xbaH\x05\x92\x01\x02\x10dR\x04test\x12#\n" +
+	"\binterval\x18\x02 \x01(\tB\a\xbaH\x04r\x02\x18 R\binterval\x12!\n" +
+	"\atimeout\x18\x03 \x01(\tB\a\xbaH\x04r\x02\x18 R\atimeout\x12!\n" +
+	"\aretries\x18\x04 \x01(\x05B\a\xbaH\x04\x1a\x02(\x00R\aretries\"\xf4\x01\n" +
+	"\rImageMetadata\x12+\n" +
+	"\farchitecture\x18\x01 \x01(\tB\a\xbaH\x04r\x02\x18@R\farchitecture\x12\x17\n" +
+	"\x02os\x18\x02 \x01(\tB\a\xbaH\x04r\x02\x18@R\x02os\x12(\n" +
+	"\vlayer_count\x18\x03 \x01(\x05B\a\xbaH\x04\x1a\x02(\x00R\n" +
+	"layerCount\x12\x1b\n" +
+	"\x04size\x18\x04 \x01(\x03B\a\xbaH\x04\"\x02(\x00R\x04size\x124\n" +
+	"\acreated\x18\x05 \x01(\v2\x1a.google.protobuf.TimestampR\acreated\x12 \n" +
+	"\x06digest\x18\x06 \x01(\tB\b\xbaH\x05r\x03\x18\x80\x02R\x06digest\"\x8f\x01\n" +
+	"\fHistoryEntry\x12(\n" +
 	"\n" +
-	"created_by\x18\x01 \x01(\tR\tcreatedBy\x124\n" +
+	"created_by\x18\x01 \x01(\tB\t\xbaH\x06r\x04\x18\x80\x80\x04R\tcreatedBy\x124\n" +
 	"\acreated\x18\x02 \x01(\v2\x1a.google.protobuf.TimestampR\acreated\x12\x1f\n" +
 	"\vempty_layer\x18\x03 \x01(\bR\n" +
 	"emptyLayer\"\xb4\x01\n" +

@@ -101,6 +101,7 @@ type ScanRequest struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Target is the scan target (path, URL, image reference, archive, etc.).
 	// When empty, defaults to current working directory.
+	// Maximum length prevents denial-of-service via excessively long strings.
 	Target string `protobuf:"bytes,1,opt,name=target,proto3" json:"target,omitempty"`
 	// Options configure scan behavior.
 	Options       *ScanOptions `protobuf:"bytes,2,opt,name=options,proto3" json:"options,omitempty"`
@@ -156,17 +157,21 @@ func (x *ScanRequest) GetOptions() *ScanOptions {
 type ScanOptions struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// DetectorIds filters to specific detectors. Empty means all enabled detectors.
+	// Maximum 100 detectors to prevent abuse.
 	DetectorIds []string `protobuf:"bytes,1,rep,name=detector_ids,json=detectorIds,proto3" json:"detector_ids,omitempty"`
 	// SecretTypes filters to specific secret types. Empty means all types.
+	// Maximum 100 types to prevent abuse.
 	SecretTypes []SecretType `protobuf:"varint,2,rep,packed,name=secret_types,json=secretTypes,proto3,enum=deputy.secrets.v1.SecretType" json:"secret_types,omitempty"`
 	// MinConfidence filters findings below this threshold (0.0-1.0).
 	MinConfidence float32 `protobuf:"fixed32,3,opt,name=min_confidence,json=minConfidence,proto3" json:"min_confidence,omitempty"`
 	// Verify enables automatic verification of detected secrets.
 	Verify bool `protobuf:"varint,4,opt,name=verify,proto3" json:"verify,omitempty"`
 	// IncludePatterns are glob patterns for files to include.
+	// Maximum 100 patterns to prevent abuse.
 	IncludePatterns []string `protobuf:"bytes,5,rep,name=include_patterns,json=includePatterns,proto3" json:"include_patterns,omitempty"`
 	// ExcludePatterns are glob patterns for files to exclude.
 	// Defaults include: node_modules, .git, vendor, __pycache__, etc.
+	// Maximum 100 patterns to prevent abuse.
 	ExcludePatterns []string `protobuf:"bytes,6,rep,name=exclude_patterns,json=excludePatterns,proto3" json:"exclude_patterns,omitempty"`
 	// EntropyDetection enables high-entropy string detection.
 	// Disabled by default to reduce false positives.
@@ -177,8 +182,10 @@ type ScanOptions struct {
 	// Deep enables deep scanning (container layer extraction, binary strings).
 	Deep bool `protobuf:"varint,9,opt,name=deep,proto3" json:"deep,omitempty"`
 	// BaselinePath is the path to a baseline file for filtering known secrets.
+	// Maximum length prevents abuse.
 	BaselinePath string `protobuf:"bytes,10,opt,name=baseline_path,json=baselinePath,proto3" json:"baseline_path,omitempty"`
 	// PolicyPaths are paths to policy files to evaluate.
+	// Maximum 20 policy paths to prevent abuse.
 	PolicyPaths []string `protobuf:"bytes,11,rep,name=policy_paths,json=policyPaths,proto3" json:"policy_paths,omitempty"`
 	// Platform specifies the target platform for container images (e.g., "linux/amd64").
 	Platform string `protobuf:"bytes,12,opt,name=platform,proto3" json:"platform,omitempty"`
@@ -315,6 +322,7 @@ type TargetHint struct {
 	// Kind explicitly specifies the target type.
 	Kind v1.TargetKind `protobuf:"varint,1,opt,name=kind,proto3,enum=deputy.target.v1.TargetKind" json:"kind,omitempty"`
 	// ImageTransport specifies how to fetch container images.
+	// Values: "remote" (default), "daemon", "tarball", "oci-archive", "oci-layout".
 	ImageTransport string `protobuf:"bytes,2,opt,name=image_transport,json=imageTransport,proto3" json:"image_transport,omitempty"`
 	unknownFields  protoimpl.UnknownFields
 	sizeCache      protoimpl.SizeCache
@@ -459,6 +467,7 @@ func (x *ScanResponse) GetWarnings() []string {
 type StreamScanRequest struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Target is the scan target.
+	// Maximum length prevents denial-of-service via excessively long strings.
 	Target string `protobuf:"bytes,1,opt,name=target,proto3" json:"target,omitempty"`
 	// Options configure scan behavior.
 	Options       *ScanOptions `protobuf:"bytes,2,opt,name=options,proto3" json:"options,omitempty"`
@@ -623,10 +632,12 @@ func (x *ScanProgress) GetError() string {
 type ScanHistoryRequest struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Target is the git repository to scan.
+	// Maximum length prevents denial-of-service via excessively long strings.
 	Target string `protobuf:"bytes,1,opt,name=target,proto3" json:"target,omitempty"`
 	// Options configure scan behavior.
 	Options *ScanOptions `protobuf:"bytes,2,opt,name=options,proto3" json:"options,omitempty"`
 	// MaxCommits limits the number of commits to scan (0 = unlimited).
+	// Maximum 100000 to prevent excessive scanning.
 	MaxCommits int32 `protobuf:"varint,3,opt,name=max_commits,json=maxCommits,proto3" json:"max_commits,omitempty"`
 	// Since is the start date for history scanning (RFC 3339 format).
 	Since string `protobuf:"bytes,4,opt,name=since,proto3" json:"since,omitempty"`
@@ -823,10 +834,13 @@ func (x *ScanHistoryResponse) GetWarnings() []string {
 type ScanDiffRequest struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Target is the git repository to scan.
+	// Maximum length prevents denial-of-service via excessively long strings.
 	Target string `protobuf:"bytes,1,opt,name=target,proto3" json:"target,omitempty"`
 	// BaseRef is the base reference for comparison (branch, tag, commit).
+	// Required field.
 	BaseRef string `protobuf:"bytes,2,opt,name=base_ref,json=baseRef,proto3" json:"base_ref,omitempty"`
 	// TargetRef is the target reference for comparison.
+	// Required field.
 	TargetRef string `protobuf:"bytes,3,opt,name=target_ref,json=targetRef,proto3" json:"target_ref,omitempty"`
 	// Options configure scan behavior.
 	Options       *ScanOptions `protobuf:"bytes,4,opt,name=options,proto3" json:"options,omitempty"`
@@ -1014,10 +1028,13 @@ func (x *ScanDiffResponse) GetWarnings() []string {
 type VerifyRequest struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Findings to verify. These should come from a previous scan.
+	// Maximum 1000 findings per request to prevent abuse.
 	Findings []*Finding `protobuf:"bytes,1,rep,name=findings,proto3" json:"findings,omitempty"`
 	// RateLimit is max verification requests per second (0 = no limit).
+	// Maximum 100 to prevent API abuse.
 	RateLimit int32 `protobuf:"varint,2,opt,name=rate_limit,json=rateLimit,proto3" json:"rate_limit,omitempty"`
 	// Timeout is max time per verification in seconds.
+	// Maximum 60 seconds per verification.
 	TimeoutSeconds int32 `protobuf:"varint,3,opt,name=timeout_seconds,json=timeoutSeconds,proto3" json:"timeout_seconds,omitempty"`
 	unknownFields  protoimpl.UnknownFields
 	sizeCache      protoimpl.SizeCache
@@ -1153,6 +1170,7 @@ type ListDetectorsRequest struct {
 	// IncludeDisabled includes detectors that are currently disabled.
 	IncludeDisabled bool `protobuf:"varint,1,opt,name=include_disabled,json=includeDisabled,proto3" json:"include_disabled,omitempty"`
 	// Sources filters to specific detector sources.
+	// Maximum 10 sources to prevent abuse.
 	Sources       []DetectorSource `protobuf:"varint,2,rep,packed,name=sources,proto3,enum=deputy.secrets.v1.DetectorSource" json:"sources,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -1252,10 +1270,13 @@ func (x *ListDetectorsResponse) GetDetectors() []*DetectorInfo {
 type RegisterDetectorRequest struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Detector describes the detector to register.
+	// Required field.
 	Detector *DetectorInfo `protobuf:"bytes,1,opt,name=detector,proto3" json:"detector,omitempty"`
 	// Pattern is the regex pattern for detection (required for pattern-based detectors).
+	// Maximum 4096 characters to prevent ReDoS via complex patterns.
 	Pattern string `protobuf:"bytes,2,opt,name=pattern,proto3" json:"pattern,omitempty"`
 	// PluginPath is the path to the plugin binary (required for plugin-based detectors).
+	// Maximum 1024 characters.
 	PluginPath    string `protobuf:"bytes,3,opt,name=plugin_path,json=pluginPath,proto3" json:"plugin_path,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -1362,107 +1383,114 @@ var File_deputy_secrets_v1_service_proto protoreflect.FileDescriptor
 
 const file_deputy_secrets_v1_service_proto_rawDesc = "" +
 	"\n" +
-	"\x1fdeputy/secrets/v1/service.proto\x12\x11deputy.secrets.v1\x1a\x1bbuf/validate/validate.proto\x1a\x1fgoogle/protobuf/timestamp.proto\x1a\x1fdeputy/secrets/v1/secrets.proto\x1a\x1ddeputy/target/v1/target.proto\x1a\x1ddeputy/policy/v1/policy.proto\"_\n" +
-	"\vScanRequest\x12\x16\n" +
-	"\x06target\x18\x01 \x01(\tR\x06target\x128\n" +
-	"\aoptions\x18\x02 \x01(\v2\x1e.deputy.secrets.v1.ScanOptionsR\aoptions\"\xbb\x04\n" +
-	"\vScanOptions\x12!\n" +
-	"\fdetector_ids\x18\x01 \x03(\tR\vdetectorIds\x12@\n" +
-	"\fsecret_types\x18\x02 \x03(\x0e2\x1d.deputy.secrets.v1.SecretTypeR\vsecretTypes\x126\n" +
+	"\x1fdeputy/secrets/v1/service.proto\x12\x11deputy.secrets.v1\x1a\x1bbuf/validate/validate.proto\x1a\x1fgoogle/protobuf/timestamp.proto\x1a\x1fdeputy/secrets/v1/secrets.proto\x1a\x1ddeputy/target/v1/target.proto\x1a\x1ddeputy/policy/v1/policy.proto\"i\n" +
+	"\vScanRequest\x12 \n" +
+	"\x06target\x18\x01 \x01(\tB\b\xbaH\x05r\x03\x18\x80 R\x06target\x128\n" +
+	"\aoptions\x18\x02 \x01(\v2\x1e.deputy.secrets.v1.ScanOptionsR\aoptions\"\x9c\x05\n" +
+	"\vScanOptions\x122\n" +
+	"\fdetector_ids\x18\x01 \x03(\tB\x0f\xbaH\f\x92\x01\t\x10d\"\x05r\x03\x18\x80\x01R\vdetectorIds\x12J\n" +
+	"\fsecret_types\x18\x02 \x03(\x0e2\x1d.deputy.secrets.v1.SecretTypeB\b\xbaH\x05\x92\x01\x02\x10dR\vsecretTypes\x126\n" +
 	"\x0emin_confidence\x18\x03 \x01(\x02B\x0f\xbaH\f\n" +
 	"\n" +
 	"\x1d\x00\x00\x80?-\x00\x00\x00\x00R\rminConfidence\x12\x16\n" +
-	"\x06verify\x18\x04 \x01(\bR\x06verify\x12)\n" +
-	"\x10include_patterns\x18\x05 \x03(\tR\x0fincludePatterns\x12)\n" +
-	"\x10exclude_patterns\x18\x06 \x03(\tR\x0fexcludePatterns\x12+\n" +
+	"\x06verify\x18\x04 \x01(\bR\x06verify\x12:\n" +
+	"\x10include_patterns\x18\x05 \x03(\tB\x0f\xbaH\f\x92\x01\t\x10d\"\x05r\x03\x18\x80\x04R\x0fincludePatterns\x12:\n" +
+	"\x10exclude_patterns\x18\x06 \x03(\tB\x0f\xbaH\f\x92\x01\t\x10d\"\x05r\x03\x18\x80\x04R\x0fexcludePatterns\x12+\n" +
 	"\x11entropy_detection\x18\a \x01(\bR\x10entropyDetection\x12<\n" +
 	"\x11entropy_threshold\x18\b \x01(\x02B\x0f\xbaH\f\n" +
 	"\n" +
 	"\x1d\x00\x00\x00A-\x00\x00\x00\x00R\x10entropyThreshold\x12\x12\n" +
-	"\x04deep\x18\t \x01(\bR\x04deep\x12#\n" +
+	"\x04deep\x18\t \x01(\bR\x04deep\x12-\n" +
 	"\rbaseline_path\x18\n" +
-	" \x01(\tR\fbaselinePath\x12!\n" +
-	"\fpolicy_paths\x18\v \x03(\tR\vpolicyPaths\x12\x1a\n" +
-	"\bplatform\x18\f \x01(\tR\bplatform\x12>\n" +
+	" \x01(\tB\b\xbaH\x05r\x03\x18\x80\bR\fbaselinePath\x122\n" +
+	"\fpolicy_paths\x18\v \x03(\tB\x0f\xbaH\f\x92\x01\t\x10\x14\"\x05r\x03\x18\x80\bR\vpolicyPaths\x12#\n" +
+	"\bplatform\x18\f \x01(\tB\a\xbaH\x04r\x02\x18@R\bplatform\x12>\n" +
 	"\vtarget_hint\x18\r \x01(\v2\x1d.deputy.secrets.v1.TargetHintR\n" +
-	"targetHint\"g\n" +
+	"targetHint\"\xa2\x01\n" +
 	"\n" +
 	"TargetHint\x120\n" +
-	"\x04kind\x18\x01 \x01(\x0e2\x1c.deputy.target.v1.TargetKindR\x04kind\x12'\n" +
-	"\x0fimage_transport\x18\x02 \x01(\tR\x0eimageTransport\"\xc4\x02\n" +
+	"\x04kind\x18\x01 \x01(\x0e2\x1c.deputy.target.v1.TargetKindR\x04kind\x12b\n" +
+	"\x0fimage_transport\x18\x02 \x01(\tB9\xbaH6r4R\x00R\x06remoteR\x06daemonR\atarballR\voci-archiveR\n" +
+	"oci-layoutR\x0eimageTransport\"\xd6\x02\n" +
 	"\fScanResponse\x120\n" +
 	"\x06target\x18\x01 \x01(\v2\x18.deputy.target.v1.TargetR\x06target\x12=\n" +
 	"\fgenerated_at\x18\x02 \x01(\v2\x1a.google.protobuf.TimestampR\vgeneratedAt\x126\n" +
 	"\bfindings\x18\x03 \x03(\v2\x1a.deputy.secrets.v1.FindingR\bfindings\x12.\n" +
 	"\x05stats\x18\x04 \x01(\v2\x18.deputy.secrets.v1.StatsR\x05stats\x12?\n" +
-	"\x0epolicy_actions\x18\x05 \x03(\v2\x18.deputy.policy.v1.ActionR\rpolicyActions\x12\x1a\n" +
-	"\bwarnings\x18\x06 \x03(\tR\bwarnings\"e\n" +
-	"\x11StreamScanRequest\x12\x16\n" +
-	"\x06target\x18\x01 \x01(\tR\x06target\x128\n" +
-	"\aoptions\x18\x02 \x01(\v2\x1e.deputy.secrets.v1.ScanOptionsR\aoptions\"\xd1\x02\n" +
+	"\x0epolicy_actions\x18\x05 \x03(\v2\x18.deputy.policy.v1.ActionR\rpolicyActions\x12,\n" +
+	"\bwarnings\x18\x06 \x03(\tB\x10\xbaH\r\x92\x01\n" +
+	"\x10\xe8\a\"\x05r\x03\x18\x80 R\bwarnings\"o\n" +
+	"\x11StreamScanRequest\x12 \n" +
+	"\x06target\x18\x01 \x01(\tB\b\xbaH\x05r\x03\x18\x80 R\x06target\x128\n" +
+	"\aoptions\x18\x02 \x01(\v2\x1e.deputy.secrets.v1.ScanOptionsR\aoptions\"\xef\x02\n" +
 	"\fScanProgress\x122\n" +
-	"\x05phase\x18\x01 \x01(\x0e2\x1c.deputy.secrets.v1.ScanPhaseR\x05phase\x12\x18\n" +
-	"\amessage\x18\x02 \x01(\tR\amessage\x12%\n" +
+	"\x05phase\x18\x01 \x01(\x0e2\x1c.deputy.secrets.v1.ScanPhaseR\x05phase\x12\"\n" +
+	"\amessage\x18\x02 \x01(\tB\b\xbaH\x05r\x03\x18\x80\bR\amessage\x12%\n" +
 	"\bprogress\x18\x03 \x01(\x05B\t\xbaH\x06\x1a\x04\x18d(\x00R\bprogress\x12,\n" +
 	"\rfiles_scanned\x18\x04 \x01(\x05B\a\xbaH\x04\x1a\x02(\x00R\ffilesScanned\x12,\n" +
-	"\rsecrets_found\x18\x05 \x01(\x05B\a\xbaH\x04\x1a\x02(\x00R\fsecretsFound\x12!\n" +
-	"\fcurrent_file\x18\x06 \x01(\tR\vcurrentFile\x127\n" +
+	"\rsecrets_found\x18\x05 \x01(\x05B\a\xbaH\x04\x1a\x02(\x00R\fsecretsFound\x12+\n" +
+	"\fcurrent_file\x18\x06 \x01(\tB\b\xbaH\x05r\x03\x18\x80 R\vcurrentFile\x127\n" +
 	"\x06result\x18\n" +
-	" \x01(\v2\x1f.deputy.secrets.v1.ScanResponseR\x06result\x12\x14\n" +
-	"\x05error\x18\v \x01(\tR\x05error\"\xfd\x01\n" +
-	"\x12ScanHistoryRequest\x12\x16\n" +
-	"\x06target\x18\x01 \x01(\tR\x06target\x128\n" +
-	"\aoptions\x18\x02 \x01(\v2\x1e.deputy.secrets.v1.ScanOptionsR\aoptions\x12(\n" +
-	"\vmax_commits\x18\x03 \x01(\x05B\a\xbaH\x04\x1a\x02(\x00R\n" +
-	"maxCommits\x12\x14\n" +
-	"\x05since\x18\x04 \x01(\tR\x05since\x12\x14\n" +
-	"\x05until\x18\x05 \x01(\tR\x05until\x12\x16\n" +
-	"\x06branch\x18\x06 \x01(\tR\x06branch\x12'\n" +
-	"\x0finclude_removed\x18\a \x01(\bR\x0eincludeRemoved\"\xf4\x02\n" +
+	" \x01(\v2\x1f.deputy.secrets.v1.ScanResponseR\x06result\x12\x1e\n" +
+	"\x05error\x18\v \x01(\tB\b\xbaH\x05r\x03\x18\x80 R\x05error\"\xa7\x02\n" +
+	"\x12ScanHistoryRequest\x12 \n" +
+	"\x06target\x18\x01 \x01(\tB\b\xbaH\x05r\x03\x18\x80 R\x06target\x128\n" +
+	"\aoptions\x18\x02 \x01(\v2\x1e.deputy.secrets.v1.ScanOptionsR\aoptions\x12,\n" +
+	"\vmax_commits\x18\x03 \x01(\x05B\v\xbaH\b\x1a\x06\x18\xa0\x8d\x06(\x00R\n" +
+	"maxCommits\x12\x1d\n" +
+	"\x05since\x18\x04 \x01(\tB\a\xbaH\x04r\x02\x18@R\x05since\x12\x1d\n" +
+	"\x05until\x18\x05 \x01(\tB\a\xbaH\x04r\x02\x18@R\x05until\x12 \n" +
+	"\x06branch\x18\x06 \x01(\tB\b\xbaH\x05r\x03\x18\x80\x02R\x06branch\x12'\n" +
+	"\x0finclude_removed\x18\a \x01(\bR\x0eincludeRemoved\"\x8f\x03\n" +
 	"\x13ScanHistoryResponse\x120\n" +
 	"\x06target\x18\x01 \x01(\v2\x18.deputy.target.v1.TargetR\x06target\x12=\n" +
 	"\fgenerated_at\x18\x02 \x01(\v2\x1a.google.protobuf.TimestampR\vgeneratedAt\x126\n" +
-	"\bfindings\x18\x03 \x03(\v2\x1a.deputy.secrets.v1.FindingR\bfindings\x12'\n" +
-	"\x0fcommits_scanned\x18\x04 \x01(\x05R\x0ecommitsScanned\x12.\n" +
+	"\bfindings\x18\x03 \x03(\v2\x1a.deputy.secrets.v1.FindingR\bfindings\x120\n" +
+	"\x0fcommits_scanned\x18\x04 \x01(\x05B\a\xbaH\x04\x1a\x02(\x00R\x0ecommitsScanned\x12.\n" +
 	"\x05stats\x18\x05 \x01(\v2\x18.deputy.secrets.v1.StatsR\x05stats\x12?\n" +
-	"\x0epolicy_actions\x18\x06 \x03(\v2\x18.deputy.policy.v1.ActionR\rpolicyActions\x12\x1a\n" +
-	"\bwarnings\x18\a \x03(\tR\bwarnings\"\xaf\x01\n" +
-	"\x0fScanDiffRequest\x12\x16\n" +
-	"\x06target\x18\x01 \x01(\tR\x06target\x12\"\n" +
-	"\bbase_ref\x18\x02 \x01(\tB\a\xbaH\x04r\x02\x10\x01R\abaseRef\x12&\n" +
+	"\x0epolicy_actions\x18\x06 \x03(\v2\x18.deputy.policy.v1.ActionR\rpolicyActions\x12,\n" +
+	"\bwarnings\x18\a \x03(\tB\x10\xbaH\r\x92\x01\n" +
+	"\x10\xe8\a\"\x05r\x03\x18\x80 R\bwarnings\"\xbf\x01\n" +
+	"\x0fScanDiffRequest\x12 \n" +
+	"\x06target\x18\x01 \x01(\tB\b\xbaH\x05r\x03\x18\x80 R\x06target\x12%\n" +
+	"\bbase_ref\x18\x02 \x01(\tB\n" +
+	"\xbaH\ar\x05\x10\x01\x18\x80\x02R\abaseRef\x12)\n" +
 	"\n" +
-	"target_ref\x18\x03 \x01(\tB\a\xbaH\x04r\x02\x10\x01R\ttargetRef\x128\n" +
-	"\aoptions\x18\x04 \x01(\v2\x1e.deputy.secrets.v1.ScanOptionsR\aoptions\"\xd4\x03\n" +
+	"target_ref\x18\x03 \x01(\tB\n" +
+	"\xbaH\ar\x05\x10\x01\x18\x80\x02R\ttargetRef\x128\n" +
+	"\aoptions\x18\x04 \x01(\v2\x1e.deputy.secrets.v1.ScanOptionsR\aoptions\"\xfa\x03\n" +
 	"\x10ScanDiffResponse\x120\n" +
 	"\x06target\x18\x01 \x01(\v2\x18.deputy.target.v1.TargetR\x06target\x12=\n" +
-	"\fgenerated_at\x18\x02 \x01(\v2\x1a.google.protobuf.TimestampR\vgeneratedAt\x12\x19\n" +
-	"\bbase_ref\x18\x03 \x01(\tR\abaseRef\x12\x1d\n" +
+	"\fgenerated_at\x18\x02 \x01(\v2\x1a.google.protobuf.TimestampR\vgeneratedAt\x12#\n" +
+	"\bbase_ref\x18\x03 \x01(\tB\b\xbaH\x05r\x03\x18\x80\x02R\abaseRef\x12'\n" +
 	"\n" +
-	"target_ref\x18\x04 \x01(\tR\ttargetRef\x12A\n" +
+	"target_ref\x18\x04 \x01(\tB\b\xbaH\x05r\x03\x18\x80\x02R\ttargetRef\x12A\n" +
 	"\x0eadded_findings\x18\x05 \x03(\v2\x1a.deputy.secrets.v1.FindingR\raddedFindings\x12E\n" +
 	"\x10removed_findings\x18\x06 \x03(\v2\x1a.deputy.secrets.v1.FindingR\x0fremovedFindings\x12.\n" +
 	"\x05stats\x18\a \x01(\v2\x18.deputy.secrets.v1.StatsR\x05stats\x12?\n" +
-	"\x0epolicy_actions\x18\b \x03(\v2\x18.deputy.policy.v1.ActionR\rpolicyActions\x12\x1a\n" +
-	"\bwarnings\x18\t \x03(\tR\bwarnings\"\xa1\x01\n" +
-	"\rVerifyRequest\x126\n" +
-	"\bfindings\x18\x01 \x03(\v2\x1a.deputy.secrets.v1.FindingR\bfindings\x12&\n" +
+	"\x0epolicy_actions\x18\b \x03(\v2\x18.deputy.policy.v1.ActionR\rpolicyActions\x12,\n" +
+	"\bwarnings\x18\t \x03(\tB\x10\xbaH\r\x92\x01\n" +
+	"\x10\xe8\a\"\x05r\x03\x18\x80 R\bwarnings\"\xb0\x01\n" +
+	"\rVerifyRequest\x12A\n" +
+	"\bfindings\x18\x01 \x03(\v2\x1a.deputy.secrets.v1.FindingB\t\xbaH\x06\x92\x01\x03\x10\xe8\aR\bfindings\x12(\n" +
 	"\n" +
-	"rate_limit\x18\x02 \x01(\x05B\a\xbaH\x04\x1a\x02(\x00R\trateLimit\x120\n" +
-	"\x0ftimeout_seconds\x18\x03 \x01(\x05B\a\xbaH\x04\x1a\x02(\x00R\x0etimeoutSeconds\"\xb5\x01\n" +
+	"rate_limit\x18\x02 \x01(\x05B\t\xbaH\x06\x1a\x04\x18d(\x00R\trateLimit\x122\n" +
+	"\x0ftimeout_seconds\x18\x03 \x01(\x05B\t\xbaH\x06\x1a\x04\x18<(\x00R\x0etimeoutSeconds\"\xd0\x01\n" +
 	"\x0eVerifyResponse\x124\n" +
-	"\aresults\x18\x01 \x03(\v2\x1a.deputy.secrets.v1.FindingR\aresults\x12%\n" +
-	"\x0everified_count\x18\x02 \x01(\x05R\rverifiedCount\x12!\n" +
-	"\ffailed_count\x18\x03 \x01(\x05R\vfailedCount\x12#\n" +
-	"\rskipped_count\x18\x04 \x01(\x05R\fskippedCount\"~\n" +
+	"\aresults\x18\x01 \x03(\v2\x1a.deputy.secrets.v1.FindingR\aresults\x12.\n" +
+	"\x0everified_count\x18\x02 \x01(\x05B\a\xbaH\x04\x1a\x02(\x00R\rverifiedCount\x12*\n" +
+	"\ffailed_count\x18\x03 \x01(\x05B\a\xbaH\x04\x1a\x02(\x00R\vfailedCount\x12,\n" +
+	"\rskipped_count\x18\x04 \x01(\x05B\a\xbaH\x04\x1a\x02(\x00R\fskippedCount\"\x88\x01\n" +
 	"\x14ListDetectorsRequest\x12)\n" +
-	"\x10include_disabled\x18\x01 \x01(\bR\x0fincludeDisabled\x12;\n" +
-	"\asources\x18\x02 \x03(\x0e2!.deputy.secrets.v1.DetectorSourceR\asources\"V\n" +
+	"\x10include_disabled\x18\x01 \x01(\bR\x0fincludeDisabled\x12E\n" +
+	"\asources\x18\x02 \x03(\x0e2!.deputy.secrets.v1.DetectorSourceB\b\xbaH\x05\x92\x01\x02\x10\n" +
+	"R\asources\"V\n" +
 	"\x15ListDetectorsResponse\x12=\n" +
-	"\tdetectors\x18\x01 \x03(\v2\x1f.deputy.secrets.v1.DetectorInfoR\tdetectors\"\x91\x01\n" +
-	"\x17RegisterDetectorRequest\x12;\n" +
-	"\bdetector\x18\x01 \x01(\v2\x1f.deputy.secrets.v1.DetectorInfoR\bdetector\x12\x18\n" +
-	"\apattern\x18\x02 \x01(\tR\apattern\x12\x1f\n" +
-	"\vplugin_path\x18\x03 \x01(\tR\n" +
+	"\tdetectors\x18\x01 \x03(\v2\x1f.deputy.secrets.v1.DetectorInfoR\tdetectors\"\xad\x01\n" +
+	"\x17RegisterDetectorRequest\x12C\n" +
+	"\bdetector\x18\x01 \x01(\v2\x1f.deputy.secrets.v1.DetectorInfoB\x06\xbaH\x03\xc8\x01\x01R\bdetector\x12\"\n" +
+	"\apattern\x18\x02 \x01(\tB\b\xbaH\x05r\x03\x18\x80 R\apattern\x12)\n" +
+	"\vplugin_path\x18\x03 \x01(\tB\b\xbaH\x05r\x03\x18\x80\bR\n" +
 	"pluginPath\"W\n" +
 	"\x18RegisterDetectorResponse\x12;\n" +
 	"\bdetector\x18\x01 \x01(\v2\x1f.deputy.secrets.v1.DetectorInfoR\bdetector*\x8d\x02\n" +

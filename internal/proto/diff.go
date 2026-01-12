@@ -129,7 +129,6 @@ func DiffStatsToProto(changes []compare.Change) *diffv1.DiffStats {
 }
 
 // GitDiffReportToProto creates a DiffVulnerabilitiesResponse from git diff data.
-// This is used for proto-first JSON output in the diff command.
 func GitDiffReportToProto(
 	repo, baseRef, targetRef string,
 	changes []compare.Change,

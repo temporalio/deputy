@@ -1052,7 +1052,7 @@ func mergeGoDirectMaps(maps ...map[string]bool) map[string]bool {
 }
 
 // runDiffPolicies evaluates the configured policies against the diff report.
-// Proto-first: Passes proto messages directly to CEL for type-safe evaluation.
+// Passes proto messages directly to CEL for type-safe evaluation.
 func runDiffPolicies(ctx context.Context, policyPaths []string, diffReport DiffPolicyReport, errW io.Writer) error {
 	if len(policyPaths) == 0 {
 		return nil

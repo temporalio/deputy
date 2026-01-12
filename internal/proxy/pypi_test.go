@@ -92,7 +92,7 @@ func TestPyPIHandlerLicensePolicy(t *testing.T) {
 	defer upstream.Close()
 
 	tmp := t.TempDir()
-	polPath := writePyPIBundle(t, tmp, "license-block", `licenses.exists(l, l == "AGPL-3.0")`, "license", "deny")
+	polPath := writePyPIBundle(t, tmp, "license-block", `pkg.licenses.exists(l, l == "AGPL-3.0")`, "license", "deny")
 	engine, err := NewPolicyEngine([]string{polPath})
 	if err != nil {
 		t.Fatalf("NewPolicyEngine: %v", err)

@@ -1,7 +1,7 @@
 // Package policy provides CEL-based policy evaluation for Deputy.
 //
 // This file provides canonical example inputs for policy development and testing.
-// Examples are proto-first, using real Deputy types with realistic values.
+// Examples use real Deputy proto types with realistic values.
 
 package policy
 

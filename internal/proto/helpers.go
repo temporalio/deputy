@@ -1,23 +1,16 @@
-// Package proto provides helpers for working with deputy proto types directly.
+// Package proto provides helpers for working with Deputy's proto types.
 //
-// Proto-First Architecture:
-//
-// Deputy uses a proto-first approach where proto types defined in api/deputy/*/*.proto
-// are the source of truth for API contracts. This package provides:
+// Proto types defined in api/deputy/*/*.proto are the source of truth for API
+// contracts. This package provides:
 //
 //  1. Validation via protovalidate (see validate.go)
-//  2. Helper functions for working with proto types directly
-//  3. Conversion functions for legacy internal types (see types.go, scan.go, remediation.go)
-//
-// New code should prefer using proto types directly with these helpers rather than
-// converting to/from internal types. Internal types exist for legacy compatibility
-// and domain logic that requires Go-specific features (methods, interfaces, etc.).
+//  2. Helper functions for common proto operations
+//  3. Conversion functions for internal types (see types.go, scan.go, remediation.go)
 //
 // Guidelines:
-//   - Use domain proto types at API boundaries (server handlers, client interfaces)
+//   - Use proto types at API boundaries (server handlers, client interfaces)
 //   - Use protovalidate for input validation instead of manual checks
 //   - Use helper functions in this package for common operations
-//   - Only convert to internal types when needed for legacy code integration
 package proto
 
 import (

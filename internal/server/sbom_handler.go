@@ -107,7 +107,7 @@ func (h *SBOMHandler) Generate(
 
 	// Count packages by ecosystem
 	for _, pkg := range result.Packages {
-		eco := pkg.Ecosystem()
+		eco := pkg.Ecosystem().String()
 		if eco != "" {
 			stats.Ecosystems[eco]++
 		}

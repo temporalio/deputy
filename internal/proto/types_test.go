@@ -163,3 +163,259 @@ func TestProtoEnumValues(t *testing.T) {
 		t.Error("SEVERITY_TYPE_CVSS_V3 should be 2")
 	}
 }
+
+func TestManifestRefsToProto(t *testing.T) {
+	tests := []struct {
+		name string
+		refs []dependencyv1.ManifestRef
+		want []*dependencyv1.ManifestRef
+	}{
+		{
+			name: "nil refs",
+			refs: nil,
+			want: nil,
+		},
+		{
+			name: "empty refs",
+			refs: []dependencyv1.ManifestRef{},
+			want: nil,
+		},
+		{
+			name: "single ref",
+			refs: []dependencyv1.ManifestRef{
+				{Path: "package.json", Manager: "npm"},
+			},
+			want: []*dependencyv1.ManifestRef{
+				{Path: "package.json", Manager: "npm"},
+			},
+		},
+		{
+			name: "multiple refs with groups",
+			refs: []dependencyv1.ManifestRef{
+				{Path: "package.json", Manager: "npm", Groups: []string{"dependencies"}},
+				{Path: "go.mod", Manager: "go", Groups: []string{"require"}},
+			},
+			want: []*dependencyv1.ManifestRef{
+				{Path: "package.json", Manager: "npm", Groups: []string{"dependencies"}},
+				{Path: "go.mod", Manager: "go", Groups: []string{"require"}},
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := ManifestRefsToProto(tt.refs)
+			if len(got) != len(tt.want) {
+				t.Errorf("ManifestRefsToProto() length = %d, want %d", len(got), len(tt.want))
+				return
+			}
+			for i := range got {
+				if got[i].Path != tt.want[i].Path {
+					t.Errorf("[%d] Path = %q, want %q", i, got[i].Path, tt.want[i].Path)
+				}
+				if got[i].Manager != tt.want[i].Manager {
+					t.Errorf("[%d] Manager = %q, want %q", i, got[i].Manager, tt.want[i].Manager)
+				}
+			}
+		})
+	}
+}
+
+func TestManifestRefsFromProto(t *testing.T) {
+	tests := []struct {
+		name string
+		refs []*dependencyv1.ManifestRef
+		want []dependencyv1.ManifestRef
+	}{
+		{
+			name: "nil refs",
+			refs: nil,
+			want: nil,
+		},
+		{
+			name: "empty refs",
+			refs: []*dependencyv1.ManifestRef{},
+			want: nil,
+		},
+		{
+			name: "single ref",
+			refs: []*dependencyv1.ManifestRef{
+				{Path: "package.json", Manager: "npm"},
+			},
+			want: []dependencyv1.ManifestRef{
+				{Path: "package.json", Manager: "npm"},
+			},
+		},
+		{
+			name: "refs with nil element",
+			refs: []*dependencyv1.ManifestRef{
+				{Path: "package.json", Manager: "npm"},
+				nil,
+				{Path: "go.mod", Manager: "go"},
+			},
+			want: []dependencyv1.ManifestRef{
+				{Path: "package.json", Manager: "npm"},
+				{}, // nil becomes zero value
+				{Path: "go.mod", Manager: "go"},
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := ManifestRefsFromProto(tt.refs)
+			if len(got) != len(tt.want) {
+				t.Errorf("ManifestRefsFromProto() length = %d, want %d", len(got), len(tt.want))
+				return
+			}
+			for i := range got {
+				if got[i].Path != tt.want[i].Path {
+					t.Errorf("[%d] Path = %q, want %q", i, got[i].Path, tt.want[i].Path)
+				}
+			}
+		})
+	}
+}
+
+func TestManifestRefsRoundTrip(t *testing.T) {
+	original := []dependencyv1.ManifestRef{
+		{Path: "package.json", Manager: "npm", Groups: []string{"dependencies", "devDependencies"}},
+		{Path: "go.mod", Manager: "go", Groups: []string{"require"}},
+	}
+
+	proto := ManifestRefsToProto(original)
+	roundTripped := ManifestRefsFromProto(proto)
+
+	if len(roundTripped) != len(original) {
+		t.Fatalf("length mismatch: got %d, want %d", len(roundTripped), len(original))
+	}
+
+	for i := range original {
+		if roundTripped[i].Path != original[i].Path {
+			t.Errorf("[%d] Path: got %q, want %q", i, roundTripped[i].Path, original[i].Path)
+		}
+		if roundTripped[i].Manager != original[i].Manager {
+			t.Errorf("[%d] Manager: got %q, want %q", i, roundTripped[i].Manager, original[i].Manager)
+		}
+		if len(roundTripped[i].Groups) != len(original[i].Groups) {
+			t.Errorf("[%d] Groups length: got %d, want %d", i, len(roundTripped[i].Groups), len(original[i].Groups))
+		}
+	}
+}
+
+func TestAffectedImportsToProto(t *testing.T) {
+	tests := []struct {
+		name    string
+		imports []vulnerabilityv1.AffectedImport
+		wantLen int
+	}{
+		{
+			name:    "nil imports",
+			imports: nil,
+			wantLen: 0,
+		},
+		{
+			name:    "empty imports",
+			imports: []vulnerabilityv1.AffectedImport{},
+			wantLen: 0,
+		},
+		{
+			name: "single import",
+			imports: []vulnerabilityv1.AffectedImport{
+				{Path: "net/http", Symbols: []string{"Get", "Post"}},
+			},
+			wantLen: 1,
+		},
+		{
+			name: "multiple imports",
+			imports: []vulnerabilityv1.AffectedImport{
+				{Path: "net/http", Symbols: []string{"Get"}},
+				{Path: "crypto/tls", Symbols: []string{"Dial"}},
+			},
+			wantLen: 2,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := AffectedImportsToProto(tt.imports)
+			if tt.wantLen == 0 && got != nil {
+				t.Error("expected nil for empty/nil imports")
+				return
+			}
+			if len(got) != tt.wantLen {
+				t.Errorf("AffectedImportsToProto() length = %d, want %d", len(got), tt.wantLen)
+			}
+		})
+	}
+}
+
+func TestAffectedImportsFromProto(t *testing.T) {
+	tests := []struct {
+		name    string
+		imports []*vulnerabilityv1.AffectedImport
+		wantLen int
+	}{
+		{
+			name:    "nil imports",
+			imports: nil,
+			wantLen: 0,
+		},
+		{
+			name:    "empty imports",
+			imports: []*vulnerabilityv1.AffectedImport{},
+			wantLen: 0,
+		},
+		{
+			name: "single import",
+			imports: []*vulnerabilityv1.AffectedImport{
+				{Path: "net/http", Symbols: []string{"Get", "Post"}},
+			},
+			wantLen: 1,
+		},
+		{
+			name: "imports with nil element",
+			imports: []*vulnerabilityv1.AffectedImport{
+				{Path: "net/http", Symbols: []string{"Get"}},
+				nil,
+			},
+			wantLen: 2,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := AffectedImportsFromProto(tt.imports)
+			if tt.wantLen == 0 && got != nil {
+				t.Error("expected nil for empty/nil imports")
+				return
+			}
+			if len(got) != tt.wantLen {
+				t.Errorf("AffectedImportsFromProto() length = %d, want %d", len(got), tt.wantLen)
+			}
+		})
+	}
+}
+
+func TestAffectedImportsRoundTrip(t *testing.T) {
+	original := []vulnerabilityv1.AffectedImport{
+		{Path: "net/http", Symbols: []string{"Get", "Post", "Client"}},
+		{Path: "crypto/tls", Symbols: []string{"Dial", "Client"}},
+	}
+
+	proto := AffectedImportsToProto(original)
+	roundTripped := AffectedImportsFromProto(proto)
+
+	if len(roundTripped) != len(original) {
+		t.Fatalf("length mismatch: got %d, want %d", len(roundTripped), len(original))
+	}
+
+	for i := range original {
+		if roundTripped[i].Path != original[i].Path {
+			t.Errorf("[%d] Path: got %q, want %q", i, roundTripped[i].Path, original[i].Path)
+		}
+		if len(roundTripped[i].Symbols) != len(original[i].Symbols) {
+			t.Errorf("[%d] Symbols length: got %d, want %d", i, len(roundTripped[i].Symbols), len(original[i].Symbols))
+		}
+	}
+}

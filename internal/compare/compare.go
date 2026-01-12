@@ -533,7 +533,7 @@ func summarizePackage(p *extractor.Package) (string, pkgSummary) {
 	if p == nil || p.Name == "" {
 		return "", pkgSummary{}
 	}
-	ecos := strings.TrimSpace(p.Ecosystem())
+	ecos := strings.TrimSpace(p.Ecosystem().String())
 	if ecos == "" && p.PURLType != "" {
 		ecos = p.PURLType
 	}

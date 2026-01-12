@@ -1,7 +1,6 @@
 // Package agent provides a plugin registry for AI agent implementations.
 //
-// This package follows a proto-first approach where plugins directly implement
-// the generated agentv1connect.AgentPluginHandler interface.
+// Plugins implement the generated agentv1connect.AgentPluginHandler interface.
 package agent
 
 import (

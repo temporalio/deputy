@@ -144,7 +144,7 @@ func (h *ListHandler) ListPackages(
 
 	for _, pkg := range packages {
 		// Count by ecosystem
-		eco := pkg.Ecosystem()
+		eco := pkg.Ecosystem().String()
 		if eco != "" {
 			ecosystemCounts[eco]++
 		}

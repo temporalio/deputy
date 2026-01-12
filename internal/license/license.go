@@ -52,6 +52,8 @@ var (
 	pubBase       = "https://pub.dev"            // Dart/Flutter packages
 	cocoapodsBase = "https://cocoapods.org"      // iOS/macOS CocoaPods
 	hexpmBase     = "https://hex.pm"             // Erlang/Elixir Hex.pm
+	pypiBase      = "https://pypi.org"           // Python Package Index
+	githubAPIBase = "https://api.github.com"     // GitHub REST API
 )
 
 const (
@@ -432,7 +434,10 @@ func RemoteModuleLicenseScan(ctx context.Context, modulePath, version string) []
 		var ids []string
 		if strings.HasPrefix(modulePath, "github.com/") {
 			if parts := strings.Split(modulePath, "/"); len(parts) >= 3 {
-				if rawIDs, err := fetchLicensesFromGitHubRaw(ctx, parts[1], parts[2], version); err == nil && len(rawIDs) > 0 {
+				// Try GitHub License API first (single fast request with SPDX ID)
+				if apiIDs := fetchLicenseFromGitHubAPI(ctx, parts[1], parts[2]); len(apiIDs) > 0 {
+					ids = apiIDs
+				} else if rawIDs, err := fetchLicensesFromGitHubRaw(ctx, parts[1], parts[2], version); err == nil && len(rawIDs) > 0 {
 					ids = rawIDs
 				} else {
 					repoURL := fmt.Sprintf("https://github.com/%s/%s.git", parts[1], parts[2])
@@ -478,9 +483,25 @@ func LookupLicensesBestEffort(ctx context.Context, ecosystem, name, version stri
 	eco := collections.NormalizeLower(ecosystem)
 	name = strings.TrimSpace(name)
 	version = strings.TrimSpace(version)
-	if eco == "" || name == "" || version == "" {
+	if eco == "" || name == "" {
 		return nil
 	}
+
+	// Check well-known licenses first (no network, instant lookup).
+	// This handles Go stdlib, toolchain, and common packages with known licenses.
+	if lics := wellKnownLicense(eco, name, version); len(lics) > 0 {
+		return lics
+	}
+
+	// Version is required for most registry lookups, but GitHub-based ecosystems
+	// can use the GitHub License API without a version (returns default branch license).
+	isGitHubBased := eco == "github" || eco == "github actions" || eco == "github-actions" ||
+		eco == "githubactions" || eco == "gha" ||
+		(eco == "go" || eco == "golang") && strings.HasPrefix(name, "github.com/")
+	if version == "" && !isGitHubBased {
+		return nil
+	}
+
 	key := eco + "|" + name + "@" + version
 	if cached, ok := registryLicenseMemo.Get(key); ok {
 		return slices.Clone(cached)
@@ -507,6 +528,24 @@ func LookupLicensesBestEffort(ctx context.Context, ecosystem, name, version stri
 	return nil
 }
 
+// wellKnownLicense returns hardcoded licenses for packages that don't have
+// license metadata in any registry. This is a minimal list of truly essential
+// cases where network lookups will never succeed.
+//
+// Sources:
+//   - Go stdlib/toolchain: https://go.dev/LICENSE (BSD-3-Clause)
+func wellKnownLicense(ecosystem, name, version string) []string {
+	switch ecosystem {
+	case "go", "golang":
+		// Go standard library and toolchain - not published to any registry
+		nameLower := strings.ToLower(name)
+		if nameLower == "stdlib" || nameLower == "go" || nameLower == "toolchain" {
+			return []string{"BSD-3-Clause"}
+		}
+	}
+	return nil
+}
+
 func resolveEcosystemLicenses(ctx context.Context, ecosystem, name, version string) []string {
 	switch ecosystem {
 	case "go", "golang":
@@ -522,6 +561,8 @@ func resolveEcosystemLicenses(ctx context.Context, ecosystem, name, version stri
 		return RemoteModuleLicenseScan(ctx, repo, version)
 	case "cargo", "rust", "crates", "crates.io":
 		return LookupCratesLicense(ctx, name, version)
+	case "pypi", "python":
+		return LookupPyPILicense(ctx, name, version)
 	case "php", "composer", "packagist":
 		return LookupPackagistLicense(ctx, name, version)
 	case "dart", "pub":
@@ -584,6 +625,94 @@ func GoProxyLicenseScan(ctx context.Context, modulePath, version string) []strin
 		}
 	}
 	return cleanLicenseList(ids)
+}
+
+// LookupPyPILicense queries PyPI's JSON API for license metadata.
+// It checks both the license_expression field (SPDX, preferred) and classifiers.
+// See: https://docs.pypi.org/api/json/
+func LookupPyPILicense(ctx context.Context, name, version string) []string {
+	name = strings.TrimSpace(name)
+	version = strings.TrimSpace(version)
+	if name == "" || version == "" || ctx.Err() != nil {
+		return nil
+	}
+	// PyPI package names are case-insensitive and normalize - to _
+	normalizedName := strings.ToLower(strings.ReplaceAll(name, "_", "-"))
+	url := fmt.Sprintf("%s/pypi/%s/%s/json", pypiBase, normalizedName, version)
+	var payload struct {
+		Info struct {
+			License           string   `json:"license"`
+			LicenseExpression string   `json:"license_expression"`
+			Classifiers       []string `json:"classifiers"`
+		} `json:"info"`
+	}
+	if err := fetchJSON(ctx, url, nil, &payload); err != nil {
+		return nil
+	}
+	// Prefer license_expression (SPDX standard per PEP 639)
+	if expr := strings.TrimSpace(payload.Info.LicenseExpression); expr != "" {
+		return cleanLicenseList(splitLicenseString(expr))
+	}
+	// Fall back to license field if it looks like an SPDX identifier
+	if lic := strings.TrimSpace(payload.Info.License); lic != "" && looksLikeSPDX(lic) {
+		return cleanLicenseList(splitLicenseString(lic))
+	}
+	// Extract from classifiers as last resort
+	for _, c := range payload.Info.Classifiers {
+		if strings.HasPrefix(c, "License :: OSI Approved :: ") {
+			if spdx := classifierToSPDX(c); spdx != "" {
+				return []string{spdx}
+			}
+		}
+	}
+	return nil
+}
+
+// looksLikeSPDX returns true if the string looks like an SPDX identifier
+// rather than free-form license text.
+func looksLikeSPDX(s string) bool {
+	s = strings.TrimSpace(s)
+	if s == "" || len(s) > 100 {
+		return false
+	}
+	// SPDX identifiers don't have newlines or lots of spaces
+	if strings.Contains(s, "\n") || strings.Count(s, " ") > 5 {
+		return false
+	}
+	// Common SPDX patterns
+	spdxPatterns := []string{"MIT", "Apache", "BSD", "GPL", "LGPL", "MPL", "ISC", "Zlib", "PSF", "Unlicense"}
+	sUpper := strings.ToUpper(s)
+	for _, p := range spdxPatterns {
+		if strings.Contains(sUpper, strings.ToUpper(p)) {
+			return true
+		}
+	}
+	return false
+}
+
+// classifierToSPDX maps PyPI license classifiers to SPDX identifiers.
+func classifierToSPDX(classifier string) string {
+	// Map common classifiers to SPDX
+	mapping := map[string]string{
+		"License :: OSI Approved :: MIT License":                                    "MIT",
+		"License :: OSI Approved :: Apache Software License":                        "Apache-2.0",
+		"License :: OSI Approved :: BSD License":                                    "BSD-3-Clause",
+		"License :: OSI Approved :: GNU General Public License v2 (GPLv2)":          "GPL-2.0-only",
+		"License :: OSI Approved :: GNU General Public License v3 (GPLv3)":          "GPL-3.0-only",
+		"License :: OSI Approved :: GNU Lesser General Public License v2 (LGPLv2)":  "LGPL-2.0-only",
+		"License :: OSI Approved :: GNU Lesser General Public License v3 (LGPLv3)":  "LGPL-3.0-only",
+		"License :: OSI Approved :: ISC License (ISCL)":                             "ISC",
+		"License :: OSI Approved :: Mozilla Public License 2.0 (MPL 2.0)":           "MPL-2.0",
+		"License :: OSI Approved :: Python Software Foundation License":             "PSF-2.0",
+		"License :: OSI Approved :: The Unlicense (Unlicense)":                      "Unlicense",
+		"License :: OSI Approved :: zlib/libpng License":                            "Zlib",
+		"License :: Public Domain":                                                  "CC0-1.0",
+		"License :: CC0 1.0 Universal (CC0 1.0) Public Domain Dedication":           "CC0-1.0",
+	}
+	if spdx, ok := mapping[classifier]; ok {
+		return spdx
+	}
+	return ""
 }
 
 // LookupCratesLicense queries crates.io for license metadata.
@@ -993,6 +1122,61 @@ func getGitHubHTTPClient() *nethttp.Client {
 		githubHTTPClient = httputil.NewRetryableClient(githubHTTPTimeout)
 	})
 	return githubHTTPClient
+}
+
+// fetchLicenseFromGitHubAPI queries the GitHub License API to get the repository's
+// detected license. This is the fastest method as it returns the SPDX ID directly
+// in a single API call. See: https://docs.github.com/rest/reference/licenses
+//
+// Returns nil if the API call fails or no license is detected.
+func fetchLicenseFromGitHubAPI(ctx context.Context, owner, repo string) []string {
+	if owner == "" || repo == "" || ctx.Err() != nil {
+		return nil
+	}
+	client := getGitHubHTTPClient()
+	token := strings.TrimSpace(os.Getenv("GITHUB_TOKEN"))
+
+	url := fmt.Sprintf("%s/repos/%s/%s/license", githubAPIBase, owner, repo)
+	req, err := nethttp.NewRequestWithContext(ctx, nethttp.MethodGet, url, nil)
+	if err != nil {
+		return nil
+	}
+	req.Header.Set("Accept", "application/vnd.github+json")
+	req.Header.Set("User-Agent", "deputy-license-scan")
+	if token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
+	}
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil
+	}
+	defer drainAndClose(resp)
+
+	if resp.StatusCode != nethttp.StatusOK {
+		return nil
+	}
+
+	var payload struct {
+		License struct {
+			Key    string `json:"key"`
+			SPDXID string `json:"spdx_id"`
+			Name   string `json:"name"`
+		} `json:"license"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		return nil
+	}
+
+	// Prefer SPDX ID (e.g., "MIT", "Apache-2.0")
+	if spdx := strings.TrimSpace(payload.License.SPDXID); spdx != "" && spdx != "NOASSERTION" {
+		return []string{spdx}
+	}
+	// Fall back to key which is usually lowercase SPDX-like (e.g., "mit", "apache-2.0")
+	if key := strings.TrimSpace(payload.License.Key); key != "" && key != "other" {
+		return []string{strings.ToUpper(key)}
+	}
+	return nil
 }
 
 // fetchLicensesFromGitHubRaw attempts to download license files directly from

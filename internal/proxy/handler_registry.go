@@ -162,9 +162,17 @@ type HandlerOptions struct {
 	OSVCache OSVCache
 	// LicenseCache overrides the default license cache.
 	LicenseCache LicenseCache
+	// ListenerName is the name of the listener, used for cache scoping.
+	ListenerName string
+	// PolicyPaths are the policy files, used to compute a hash for cache scoping.
+	PolicyPaths []string
 }
 
 // CreateHandlerWithOptions creates a proxy handler with custom options.
+//
+// When ListenerName or PolicyPaths are provided, caches will be scoped to prevent
+// cross-tenant cache poisoning. Per-request tenant isolation is handled by
+// wrapping caches with request-scoped keys based on JWT claims.
 func (f *HandlerFactory) CreateHandlerWithOptions(eco ecosystem.Ecosystem, upstream string, policies PolicyEvaluator, opts *HandlerOptions) (http.Handler, error) {
 	f.mu.RLock()
 	config, ok := f.registry[eco]
@@ -183,8 +191,26 @@ func (f *HandlerFactory) CreateHandlerWithOptions(eco ecosystem.Ecosystem, upstr
 	}
 
 	if opts != nil {
-		baseCfg.osvCache = opts.OSVCache
-		baseCfg.licenseCache = opts.LicenseCache
+		// Build base scope from listener/policy configuration.
+		// Tenant ID is added dynamically per-request by the handler.
+		baseScope := CacheScope{
+			ListenerName: opts.ListenerName,
+			PolicyHash:   HashPolicyPaths(opts.PolicyPaths),
+		}
+
+		// Apply scoping to provided caches, or create scoped defaults
+		// Use RequestScoped*Cache for per-request tenant isolation (via JWT claims)
+		if opts.OSVCache != nil {
+			baseCfg.osvCache = NewRequestScopedOSVCache(baseScope, opts.OSVCache)
+		} else if !baseScope.IsEmpty() {
+			baseCfg.osvCache = NewRequestScopedOSVCache(baseScope, defaultOSVCache)
+		}
+
+		if opts.LicenseCache != nil {
+			baseCfg.licenseCache = NewRequestScopedLicenseCache(baseScope, opts.LicenseCache)
+		} else if !baseScope.IsEmpty() {
+			baseCfg.licenseCache = NewRequestScopedLicenseCache(baseScope, defaultLicenseCache)
+		}
 	}
 
 	base, err := newBaseHandler(baseCfg)
@@ -220,12 +246,24 @@ func NewHandler(eco ecosystem.Ecosystem, upstream string, policies PolicyEvaluat
 
 // NewHandlerFromString creates a proxy handler by parsing the ecosystem string.
 func NewHandlerFromString(ecoString, upstream string, policies PolicyEvaluator) (http.Handler, error) {
+	return NewHandlerFromStringWithOptions(ecoString, upstream, policies, nil)
+}
+
+// NewHandlerFromStringWithOptions creates a proxy handler with options for cache scoping.
+// This is the preferred constructor for production use as it enables cache isolation.
+func NewHandlerFromStringWithOptions(ecoString, upstream string, policies PolicyEvaluator, opts *HandlerOptions) (http.Handler, error) {
 	if strings.EqualFold(strings.TrimSpace(ecoString), "oci") {
+		if opts != nil {
+			return NewOCIHandlerWithOptions(upstream, policies, &OCIHandlerOptions{
+				ListenerName: opts.ListenerName,
+				PolicyPaths:  opts.PolicyPaths,
+			})
+		}
 		return NewOCIHandler(upstream, policies)
 	}
 	eco := ecosystem.Parse(ecoString)
 	if !eco.IsSupported() {
 		return nil, fmt.Errorf("unknown ecosystem: %s", ecoString)
 	}
-	return NewHandler(eco, upstream, policies)
+	return DefaultFactory.CreateHandlerWithOptions(eco, upstream, policies, opts)
 }

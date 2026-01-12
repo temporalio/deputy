@@ -7,11 +7,11 @@ import (
 	"net/http"
 	"strings"
 
+	policyv1 "github.com/picatz/deputy/gen/deputy/policy/v1"
 	"github.com/picatz/deputy/internal/policy"
 )
 
-// PolicyEvaluator is an alias for policy.Evaluator for backward compatibility.
-// Use policy.Evaluator directly in new code.
+// PolicyEvaluator is an alias for policy.Evaluator.
 type PolicyEvaluator = policy.Evaluator
 
 // proxyPolicyEngine wraps policy.Engine to inject proxy-specific context.
@@ -36,14 +36,10 @@ func (e *proxyPolicyEngine) Evaluate(ctx context.Context, entrypoint string, pay
 	if payload == nil {
 		payload = map[string]any{}
 	}
-	env := map[string]any{
-		"command":    "proxy",
-		"entrypoint": entrypoint,
+	payload["env"] = &policyv1.Environment{
+		Command:    "proxy",
+		Entrypoint: entrypoint,
 	}
-	if existing, ok := payload["env"].(map[string]any); ok {
-		maps.Copy(env, existing)
-	}
-	payload["env"] = env
 	return e.engine.EvaluateAll(ctx, payload, "proxy", entrypoint)
 }
 

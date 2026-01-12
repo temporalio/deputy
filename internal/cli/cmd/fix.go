@@ -356,7 +356,7 @@ func buildFixFromReport(r io.Reader, reportPath string, ignoreUnfixed bool) (*fi
 		return nil, fmt.Errorf("report %q is empty", reportPath)
 	}
 
-	// Parse the proto-first scan response
+	// Parse the scan response
 	var scanResp scanv1.ScanResponse
 	if err := protojson.Unmarshal(data, &scanResp); err != nil {
 		return nil, fmt.Errorf("failed to parse report: %w", err)

@@ -1,14 +1,16 @@
-// Package policy provides the core engine for evaluating Deputy policies.
-// It leverages the Common Expression Language (CEL) to define and execute
-// rules against various inputs, such as package metadata, vulnerabilities,
-// and system configurations.
+// Package policy provides the CEL-based policy evaluation engine for Deputy.
 //
-// The package handles:
-//   - Parsing and compiling policy bundles (YAML + CEL).
-//   - Managing policy metadata and entrypoints.
-//   - executing policies against specific targets.
-//   - Aggregating and reporting evaluation results.
+// Policies are defined in YAML with CEL expressions that evaluate against
+// typed proto inputs like vulnerabilities, packages, and container images.
 //
-// The central component is the Engine, which pre-compiles policies for
-// efficient, repeated execution.
+// The package provides:
+//   - Parsing and compiling policy bundles (YAML + CEL)
+//   - Pre-compiled policy execution via Engine
+//   - Entrypoint-based routing for different evaluation contexts
+//   - Custom CEL helper functions for security analysis
+//
+// Example usage:
+//
+//	engine, err := policy.NewEngineFromPaths([]string{"policy.yaml"})
+//	actions, err := engine.EvaluateAll(ctx, payload, "scan", "scan_vulnerability")
 package policy

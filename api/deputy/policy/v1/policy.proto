@@ -5,6 +5,7 @@ syntax = "proto3";
 
 package deputy.policy.v1;
 
+import "deputy/container/v1/container.proto";
 import "deputy/dependency/v1/dependency.proto";
 import "deputy/target/v1/target.proto";
 import "deputy/vulnerability/v1/vulnerability.proto";
@@ -83,21 +84,41 @@ message ProxyRequest {
   string operation = 5;
 }
 
-// ScanVulnerabilityContext is the CEL evaluation context for scan_vulnerability entrypoint.
-// This is the canonical proto-first context for per-vulnerability policy evaluation.
-message ScanVulnerabilityContext {
+// =============================================================================
+// Policy Input Messages
+// =============================================================================
+//
+// These messages define the typed input for each policy entrypoint. They are
+// the single source of truth for what data is available during policy evaluation.
+//
+// Naming convention: <Entrypoint>PolicyInput
+//   - scan_vulnerability → ScanVulnerabilityPolicyInput
+//   - go_artifact_request → GoArtifactRequestPolicyInput
+//
+// All policy inputs include an `env` field for execution context.
+
+// -----------------------------------------------------------------------------
+// Scan Entrypoints
+// -----------------------------------------------------------------------------
+
+// ScanVulnerabilityPolicyInput is the input for the scan_vulnerability entrypoint.
+// Evaluated once per vulnerability finding during a scan.
+message ScanVulnerabilityPolicyInput {
   // Vulnerability is the current vulnerability being evaluated.
   deputy.vulnerability.v1.Finding vulnerability = 1;
-  // Pkg is the affected package.
+  // Pkg is the affected package (synthesized from vulnerability.package).
   deputy.dependency.v1.Package pkg = 2;
   // Env provides execution environment context.
   Environment env = 3;
   // Target describes what was scanned.
   deputy.target.v1.Target target = 4;
+  // Image contains container image info when scanning images.
+  deputy.container.v1.ImageInfo image = 5;
 }
 
-// ScanReportContext is the CEL evaluation context for scan_report entrypoint.
-message ScanReportContext {
+// ScanReportPolicyInput is the input for the scan_report entrypoint.
+// Evaluated once after a scan completes with the full report.
+message ScanReportPolicyInput {
   // Vulnerabilities is the list of all findings.
   repeated deputy.vulnerability.v1.Finding vulnerabilities = 1;
   // Packages is the list of all scanned packages.
@@ -106,12 +127,19 @@ message ScanReportContext {
   Environment env = 3;
   // Target describes what was scanned.
   deputy.target.v1.Target target = 4;
-  // Stats summarizes vulnerability counts.
+  // Stats summarizes vulnerability counts by severity.
   deputy.vulnerability.v1.Stats stats = 5;
+  // Image contains container image info when scanning images.
+  deputy.container.v1.ImageInfo image = 6;
 }
 
-// ProxyRequestContext is the CEL evaluation context for proxy entrypoints.
-message ProxyRequestContext {
+// -----------------------------------------------------------------------------
+// Proxy Entrypoints (Artifact Requests)
+// -----------------------------------------------------------------------------
+
+// GoArtifactRequestPolicyInput is the input for the go_artifact_request entrypoint.
+// Evaluated when the proxy handles a Go module request.
+message GoArtifactRequestPolicyInput {
   // Request contains the package request details.
   ProxyRequest request = 1;
   // Jwt contains verified JWT claims (if authenticated).
@@ -120,4 +148,559 @@ message ProxyRequestContext {
   Environment env = 3;
   // Vulnerabilities associated with the requested package.
   repeated deputy.vulnerability.v1.Finding vulnerabilities = 4;
+  // Pkg is the requested package (synthesized from request).
+  deputy.dependency.v1.Package pkg = 5;
+}
+
+// NpmArtifactRequestPolicyInput is the input for the npm_artifact_request entrypoint.
+// Evaluated when the proxy handles an npm package request.
+message NpmArtifactRequestPolicyInput {
+  // Request contains the package request details.
+  ProxyRequest request = 1;
+  // Jwt contains verified JWT claims (if authenticated).
+  JWTClaims jwt = 2;
+  // Env provides execution environment context.
+  Environment env = 3;
+  // Vulnerabilities associated with the requested package.
+  repeated deputy.vulnerability.v1.Finding vulnerabilities = 4;
+  // Pkg is the requested package (synthesized from request).
+  deputy.dependency.v1.Package pkg = 5;
+}
+
+// PypiArtifactRequestPolicyInput is the input for the pypi_artifact_request entrypoint.
+// Evaluated when the proxy handles a PyPI package request.
+message PypiArtifactRequestPolicyInput {
+  // Request contains the package request details.
+  ProxyRequest request = 1;
+  // Jwt contains verified JWT claims (if authenticated).
+  JWTClaims jwt = 2;
+  // Env provides execution environment context.
+  Environment env = 3;
+  // Vulnerabilities associated with the requested package.
+  repeated deputy.vulnerability.v1.Finding vulnerabilities = 4;
+  // Pkg is the requested package (synthesized from request).
+  deputy.dependency.v1.Package pkg = 5;
+}
+
+// RubygemsArtifactRequestPolicyInput is the input for the rubygems_artifact_request entrypoint.
+// Evaluated when the proxy handles a RubyGems package request.
+message RubygemsArtifactRequestPolicyInput {
+  // Request contains the package request details.
+  ProxyRequest request = 1;
+  // Jwt contains verified JWT claims (if authenticated).
+  JWTClaims jwt = 2;
+  // Env provides execution environment context.
+  Environment env = 3;
+  // Vulnerabilities associated with the requested package.
+  repeated deputy.vulnerability.v1.Finding vulnerabilities = 4;
+  // Pkg is the requested package (synthesized from request).
+  deputy.dependency.v1.Package pkg = 5;
+}
+
+// OciArtifactRequestPolicyInput is the input for the oci_artifact_request entrypoint.
+// Evaluated when the proxy handles an OCI registry request.
+message OciArtifactRequestPolicyInput {
+  // Request contains the image request details.
+  ProxyRequest request = 1;
+  // Jwt contains verified JWT claims (if authenticated).
+  JWTClaims jwt = 2;
+  // Env provides execution environment context.
+  Environment env = 3;
+  // Vulnerabilities found in the container image.
+  repeated deputy.vulnerability.v1.Finding vulnerabilities = 4;
+  // Image contains the container image configuration and metadata.
+  deputy.container.v1.ImageInfo image = 5;
+}
+
+// -----------------------------------------------------------------------------
+// SBOM Entrypoints
+// -----------------------------------------------------------------------------
+
+// SbomReportPolicyInput is the input for the sbom_report entrypoint.
+// Evaluated once after SBOM generation completes.
+message SbomReportPolicyInput {
+  // Components is the list of all SBOM components.
+  repeated deputy.dependency.v1.Package components = 1;
+  // Env provides execution environment context.
+  Environment env = 2;
+  // Target describes what was analyzed.
+  deputy.target.v1.Target target = 3;
+}
+
+// SbomComponentPolicyInput is the input for the sbom_component entrypoint.
+// Evaluated once per component in the SBOM.
+message SbomComponentPolicyInput {
+  // Pkg is the current component (aliased as "pkg" for CEL consistency).
+  deputy.dependency.v1.Package pkg = 1;
+  // Env provides execution environment context.
+  Environment env = 2;
+  // Target describes what was analyzed.
+  deputy.target.v1.Target target = 3;
+}
+
+// -----------------------------------------------------------------------------
+// Diff Entrypoints (Git refs)
+// -----------------------------------------------------------------------------
+
+// DiffReportPolicyInput is the input for the diff_report entrypoint.
+// Evaluated once after a git diff completes.
+message DiffReportPolicyInput {
+  // Changes lists all dependency changes between refs.
+  repeated DependencyChange changes = 1;
+  // BaseTarget is the baseline (older) target.
+  deputy.target.v1.Target base_target = 2;
+  // TargetTarget is the target (newer) being compared.
+  deputy.target.v1.Target target_target = 3;
+  // Env provides execution environment context.
+  Environment env = 4;
+}
+
+// DependencyChange represents a single dependency change for diff policies.
+message DependencyChange {
+  // Pkg is the changed package.
+  deputy.dependency.v1.Package pkg = 1;
+  // ChangeKind is the type of change (added, removed, upgraded, downgraded).
+  string change_kind = 2;
+  // BaseVersion is the version in the base target.
+  string base_version = 3;
+  // TargetVersion is the version in the target.
+  string target_version = 4;
+  // IsDirect indicates if this is a direct dependency.
+  bool is_direct = 5;
+}
+
+// DiffDependencyChangePolicyInput is the input for the diff_dependency_change entrypoint.
+// Evaluated once per dependency change.
+message DiffDependencyChangePolicyInput {
+  // Change is the current dependency change.
+  DependencyChange change = 1;
+  // Env provides execution environment context.
+  Environment env = 2;
+}
+
+// DiffVulnerabilityPolicyInput is the input for the diff_vulnerability entrypoint.
+// Evaluated for each vulnerability that changed between refs.
+message DiffVulnerabilityPolicyInput {
+  // Vulnerability is the vulnerability finding.
+  deputy.vulnerability.v1.Finding vulnerability = 1;
+  // ChangeKind indicates if this is "added" or "removed".
+  string change_kind = 2;
+  // Env provides execution environment context.
+  Environment env = 3;
+}
+
+// -----------------------------------------------------------------------------
+// Container Diff Entrypoints
+// -----------------------------------------------------------------------------
+
+// ContainerDiffReportPolicyInput is the input for the container_diff_report entrypoint.
+message ContainerDiffReportPolicyInput {
+  // PackageChanges lists all package changes between images.
+  repeated ContainerPackageChange package_changes = 1;
+  // VulnerabilityChanges lists vulnerability changes.
+  repeated ContainerVulnerabilityChange vulnerability_changes = 2;
+  // ConfigChanges describes configuration differences.
+  ContainerConfigDiff config_changes = 3;
+  // BaseImage describes the baseline image.
+  ContainerImageRef base_image = 4;
+  // TargetImage describes the target image.
+  ContainerImageRef target_image = 5;
+  // Env provides execution environment context.
+  Environment env = 6;
+}
+
+// ContainerPackageChange represents a package change between container images.
+message ContainerPackageChange {
+  string name = 1;
+  string ecosystem = 2;
+  string change_kind = 3;
+  string base_version = 4;
+  string target_version = 5;
+  bool is_direct = 6;
+  deputy.container.v1.LayerDetails base_layer_details = 7;
+  deputy.container.v1.LayerDetails target_layer_details = 8;
+}
+
+// ContainerVulnerabilityChange represents a vulnerability change between images.
+message ContainerVulnerabilityChange {
+  string id = 1;
+  string change_kind = 2;
+  string severity = 3;
+  string package_name = 4;
+  string ecosystem = 5;
+  string base_version = 6;
+  string target_version = 7;
+  repeated string fixed_versions = 8;
+  string summary = 9;
+}
+
+// ContainerConfigDiff describes configuration differences between images.
+message ContainerConfigDiff {
+  bool user_changed = 1;
+  string base_user = 2;
+  string target_user = 3;
+  bool root_changed = 4;
+  bool base_is_root = 5;
+  bool target_is_root = 6;
+  bool ports_changed = 7;
+  repeated string ports_added = 8;
+  repeated string ports_removed = 9;
+  bool entrypoint_changed = 10;
+  repeated string base_entrypoint = 11;
+  repeated string target_entrypoint = 12;
+}
+
+// ContainerImageRef identifies a container image.
+message ContainerImageRef {
+  string reference = 1;
+  string registry = 2;
+  string repository = 3;
+  string tag = 4;
+  string digest = 5;
+}
+
+// ContainerDiffChangePolicyInput is the input for the container_diff_change entrypoint.
+message ContainerDiffChangePolicyInput {
+  ContainerPackageChange change = 1;
+  Environment env = 2;
+}
+
+// ContainerDiffVulnerabilityPolicyInput is the input for container_diff_vulnerability.
+message ContainerDiffVulnerabilityPolicyInput {
+  ContainerVulnerabilityChange vulnerability_change = 1;
+  Environment env = 2;
+}
+
+// ContainerDiffLayerPolicyInput is the input for the container_diff_layer entrypoint.
+message ContainerDiffLayerPolicyInput {
+  LayerChange layer_change = 1;
+  Environment env = 2;
+}
+
+// LayerChange represents a layer change between container images.
+message LayerChange {
+  int32 index = 1;
+  string change_kind = 2;
+  string base_command = 3;
+  string target_command = 4;
+}
+
+// ContainerDiffConfigPolicyInput is the input for container_diff_config entrypoint.
+message ContainerDiffConfigPolicyInput {
+  ContainerConfigDiff config_diff = 1;
+  Environment env = 2;
+}
+
+// -----------------------------------------------------------------------------
+// Secrets Entrypoints
+// -----------------------------------------------------------------------------
+//
+// Note: Secrets types are defined inline to avoid circular imports with
+// secrets/v1/service.proto which imports policy/v1/policy.proto for Action.
+
+// SecretFinding represents a detected secret for policy evaluation.
+// This mirrors deputy.secrets.v1.Finding but is defined here to avoid cycles.
+message SecretFinding {
+  // Type identifies the kind of secret (e.g., "github_token", "aws_key").
+  string type = 1;
+  // Description provides human-readable context.
+  string description = 2;
+  // File is the source file path.
+  string file = 3;
+  // Line number (1-indexed).
+  int32 line = 4;
+  // Confidence indicates detection certainty (0.0-1.0).
+  float confidence = 5;
+  // Redacted is a safe representation for display.
+  string redacted = 6;
+  // Verified indicates if the secret was validated as active.
+  bool verified = 7;
+  // Source indicates where the secret was found (file, env, layer, etc.).
+  string source = 8;
+}
+
+// SecretStats summarizes a secrets scan for policy evaluation.
+message SecretStats {
+  // Total secrets found.
+  int32 total = 1;
+  // HighConfidenceCount is findings with confidence >= 0.9.
+  int32 high_confidence_count = 2;
+  // VerifiedCount is findings that were verified as valid/active.
+  int32 verified_count = 3;
+  // FilesScanned is the number of files analyzed.
+  int32 files_scanned = 4;
+}
+
+// SecretsReportPolicyInput is the input for the secrets_report entrypoint.
+message SecretsReportPolicyInput {
+  // Findings is the list of all secret findings.
+  repeated SecretFinding findings = 1;
+  // Stats summarizes the scan.
+  SecretStats stats = 2;
+  // Env provides execution environment context.
+  Environment env = 3;
+  // Target describes what was scanned.
+  deputy.target.v1.Target target = 4;
+}
+
+// SecretsFindingPolicyInput is the input for the secrets_finding entrypoint.
+message SecretsFindingPolicyInput {
+  // Finding is the current secret finding.
+  SecretFinding finding = 1;
+  // Env provides execution environment context.
+  Environment env = 2;
+}
+
+// -----------------------------------------------------------------------------
+// Graph Entrypoints
+// -----------------------------------------------------------------------------
+
+// GraphReportPolicyInput is the input for the graph_report entrypoint.
+message GraphReportPolicyInput {
+  // Nodes are all packages in the dependency graph.
+  repeated GraphNode nodes = 1;
+  // Edges are dependency relationships.
+  repeated GraphEdge edges = 2;
+  // Roots are PURLs of direct dependencies.
+  repeated string roots = 3;
+  // Stats summarizes the graph.
+  GraphStats stats = 4;
+  // Env provides execution environment context.
+  Environment env = 5;
+  // Target describes what was analyzed.
+  deputy.target.v1.Target target = 6;
+}
+
+// GraphNode represents a package in the dependency graph for policy evaluation.
+message GraphNode {
+  string purl = 1;
+  string name = 2;
+  string version = 3;
+  string ecosystem = 4;
+  bool direct = 5;
+  int32 depth = 6;
+  repeated string locations = 7;
+  repeated deputy.vulnerability.v1.Finding vulnerabilities = 8;
+}
+
+// GraphEdge represents a dependency relationship.
+message GraphEdge {
+  string from = 1;
+  string to = 2;
+  string constraint = 3;
+  string scope = 4;
+}
+
+// GraphStats provides statistics about a dependency graph.
+message GraphStats {
+  int32 total_nodes = 1;
+  int32 direct_nodes = 2;
+  int32 transitive_nodes = 3;
+  int32 max_depth = 4;
+  int32 vulnerable_nodes = 5;
+  map<string, int32> ecosystems = 6;
+}
+
+// GraphNodePolicyInput is the input for the graph_node entrypoint.
+message GraphNodePolicyInput {
+  GraphNode node = 1;
+  Environment env = 2;
+}
+
+// GraphEdgePolicyInput is the input for the graph_edge entrypoint.
+message GraphEdgePolicyInput {
+  GraphEdge edge = 1;
+  GraphNode from_node = 2;
+  GraphNode to_node = 3;
+  Environment env = 4;
+}
+
+// -----------------------------------------------------------------------------
+// Fix Entrypoints
+// -----------------------------------------------------------------------------
+
+// FixPlanPolicyInput is the input for the fix_plan entrypoint.
+message FixPlanPolicyInput {
+  // Commands are the remediation steps.
+  repeated RemediationCommand commands = 1;
+  // Env provides execution environment context.
+  Environment env = 2;
+  // Target describes what was analyzed.
+  deputy.target.v1.Target target = 3;
+}
+
+// RemediationCommand represents an actionable remediation step.
+message RemediationCommand {
+  string manager = 1;
+  string command = 2;
+  string path = 3;
+  string hint = 4;
+  bool is_direct = 5;
+  bool executable = 6;
+}
+
+// FixPlanStepPolicyInput is the input for the fix_plan_step entrypoint.
+message FixPlanStepPolicyInput {
+  RemediationCommand step = 1;
+  Environment env = 2;
+}
+
+// -----------------------------------------------------------------------------
+// Triage Entrypoints
+// -----------------------------------------------------------------------------
+
+// TriageReportPolicyInput is the input for the triage_report entrypoint.
+message TriageReportPolicyInput {
+  // TopPackages are the prioritized packages to address.
+  repeated TriagePackageSummary top_packages = 1;
+  // Stats summarizes vulnerability counts.
+  deputy.vulnerability.v1.Stats stats = 2;
+  // Env provides execution environment context.
+  Environment env = 3;
+  // Target describes what was analyzed.
+  deputy.target.v1.Target target = 4;
+}
+
+// TriagePackageSummary represents a package in triage results.
+message TriagePackageSummary {
+  string package = 1;
+  string version = 2;
+  string severity = 3;
+  string fix_version = 4;
+  bool is_direct = 5;
+  string summary = 6;
+  int32 vulnerability_count = 7;
+}
+
+// TriageClusterPolicyInput is the input for the triage_cluster entrypoint.
+message TriageClusterPolicyInput {
+  TriagePackageSummary cluster = 1;
+  Environment env = 2;
+}
+
+// -----------------------------------------------------------------------------
+// Dockerfile Entrypoints
+// -----------------------------------------------------------------------------
+
+// DockerfileReportPolicyInput is the input for the dockerfile_report entrypoint.
+message DockerfileReportPolicyInput {
+  // Dockerfile contains the parsed Dockerfile data.
+  DockerfileInfo dockerfile = 1;
+  // DockerfileAnalysis contains static analysis results.
+  DockerfileAnalysis dockerfile_analysis = 2;
+  // Env provides execution environment context.
+  Environment env = 3;
+}
+
+// DockerfileInfo contains parsed Dockerfile data.
+message DockerfileInfo {
+  string path = 1;
+  repeated DockerfileStage stages = 2;
+  DockerfileStage final_stage = 3;
+  map<string, string> args = 4;
+}
+
+// DockerfileStage represents a single build stage.
+message DockerfileStage {
+  int32 index = 1;
+  string name = 2;
+  string base_image = 3;
+  ImageReference base_image_resolved = 4;
+  string platform = 5;
+  bool is_scratch = 6;
+  bool is_builder_stage = 7;
+  string user = 8;
+  bool is_root = 9;
+  string workdir = 10;
+  map<string, string> env_vars = 11;
+  repeated string sensitive_env = 12;
+  repeated string exposed_ports = 13;
+  map<string, string> labels = 14;
+}
+
+// ImageReference is a parsed container image reference.
+message ImageReference {
+  string registry = 1;
+  string repository = 2;
+  string tag = 3;
+  string digest = 4;
+}
+
+// DockerfileAnalysis contains static analysis results.
+message DockerfileAnalysis {
+  int32 stage_count = 1;
+  bool has_multi_stage = 2;
+  int32 builder_stage_count = 3;
+  bool final_stage_is_root = 4;
+  bool final_stage_is_scratch = 5;
+  repeated string sensitive_env_vars = 6;
+  bool has_add_url = 7;
+}
+
+// DockerfileStagePolicyInput is the input for the dockerfile_stage entrypoint.
+message DockerfileStagePolicyInput {
+  DockerfileStage stage = 1;
+  DockerfileInfo dockerfile = 2;
+  Environment env = 3;
+}
+
+// -----------------------------------------------------------------------------
+// Service Entrypoints (Server Authorization)
+// -----------------------------------------------------------------------------
+
+// ServiceRequest contains common fields for service authorization requests.
+message ServiceRequest {
+  // Procedure is the RPC being called (e.g., "ScanService/Scan").
+  string procedure = 1;
+  // Target is the target string from the request.
+  string target = 2;
+}
+
+// ServiceScanRequestPolicyInput is the input for service_scan_request entrypoint.
+message ServiceScanRequestPolicyInput {
+  JWTClaims jwt = 1;
+  ServiceRequest request = 2;
+  deputy.target.v1.Target target = 3;
+  Environment env = 4;
+}
+
+// ServiceListRequestPolicyInput is the input for service_list_request entrypoint.
+message ServiceListRequestPolicyInput {
+  JWTClaims jwt = 1;
+  ServiceRequest request = 2;
+  deputy.target.v1.Target target = 3;
+  Environment env = 4;
+}
+
+// ServiceSbomRequestPolicyInput is the input for service_sbom_request entrypoint.
+message ServiceSbomRequestPolicyInput {
+  JWTClaims jwt = 1;
+  ServiceRequest request = 2;
+  deputy.target.v1.Target target = 3;
+  Environment env = 4;
+}
+
+// ServiceDiffRequestPolicyInput is the input for service_diff_request entrypoint.
+message ServiceDiffRequestPolicyInput {
+  JWTClaims jwt = 1;
+  ServiceRequest request = 2;
+  deputy.target.v1.Target base_target = 3;
+  deputy.target.v1.Target target_target = 4;
+  Environment env = 5;
+}
+
+// ServiceSecretsRequestPolicyInput is the input for service_secrets_request entrypoint.
+message ServiceSecretsRequestPolicyInput {
+  JWTClaims jwt = 1;
+  ServiceRequest request = 2;
+  deputy.target.v1.Target target = 3;
+  Environment env = 4;
+}
+
+// ServiceGraphRequestPolicyInput is the input for service_graph_request entrypoint.
+message ServiceGraphRequestPolicyInput {
+  JWTClaims jwt = 1;
+  ServiceRequest request = 2;
+  deputy.target.v1.Target target = 3;
+  Environment env = 4;
 }

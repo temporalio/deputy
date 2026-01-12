@@ -20,6 +20,7 @@ import (
 	"github.com/picatz/deputy/gen/deputy/diff/v1/diffv1connect"
 	"github.com/picatz/deputy/gen/deputy/graph/v1/graphv1connect"
 	"github.com/picatz/deputy/gen/deputy/list/v1/listv1connect"
+	policyv1 "github.com/picatz/deputy/gen/deputy/policy/v1"
 	"github.com/picatz/deputy/gen/deputy/remediation/v1/remediationv1connect"
 	"github.com/picatz/deputy/gen/deputy/sbom/v1/sbomv1connect"
 	"github.com/picatz/deputy/gen/deputy/scan/v1/scanv1connect"
@@ -822,10 +823,9 @@ func policyInterceptor(policies []policy.Source) connect.UnaryInterceptorFunc {
 func buildPolicyPayload(ctx context.Context, req connect.AnyRequest, entrypoint policy.Entrypoint) map[string]any {
 	payload := make(map[string]any)
 
-	// Add env context
-	payload["env"] = map[string]any{
-		"command":    "server",
-		"entrypoint": entrypoint.String(),
+	payload["env"] = &policyv1.Environment{
+		Command:    "server",
+		Entrypoint: entrypoint.String(),
 	}
 
 	// Add JWT claims if present (from authn middleware)

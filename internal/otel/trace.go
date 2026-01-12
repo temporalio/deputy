@@ -91,11 +91,13 @@ var (
 	AttrPolicyPassed    = attribute.Key("deputy.policy.passed")
 
 	// OSV attributes
-	AttrOSVBatchSize         = attribute.Key("deputy.osv.batch_size")
-	AttrOSVCacheHit          = attribute.Key("deputy.osv.cache_hit")
-	AttrOSVVulnerabilityID   = attribute.Key("deputy.osv.vulnerability_id")
-	AttrOSVQueryType         = attribute.Key("deputy.osv.query_type")
-	AttrOSVResponseLen       = attribute.Key("deputy.osv.response_len")
+	AttrOSVBatchSize           = attribute.Key("deputy.osv.batch_size")
+	AttrOSVCacheHit            = attribute.Key("deputy.osv.cache_hit")
+	AttrOSVVulnerabilityID     = attribute.Key("deputy.osv.vulnerability_id")
+	AttrOSVQueryType           = attribute.Key("deputy.osv.query_type")
+	AttrOSVResponseLen         = attribute.Key("deputy.osv.response_len")
+	AttrOSVDroppedNoVersion    = attribute.Key("deputy.osv.dropped_no_version")
+	AttrOSVDroppedNoIdentifier = attribute.Key("deputy.osv.dropped_no_identifier")
 
 	// Policy attributes
 	AttrPolicyName       = attribute.Key("deputy.policy.name")

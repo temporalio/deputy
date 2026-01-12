@@ -537,13 +537,13 @@ const (
 //	        - action: deny
 //	          when: vulnerabilities.exists(v, v.advisory.severity.level == severity.critical)
 //	`)
-//	result, err := client.EvaluatePolicy(ctx, []*sdk.PolicySource{policy}, &policyv1.ScanReportContext{
+//	result, err := client.EvaluatePolicy(ctx, []*sdk.PolicySource{policy}, &policyv1.ScanReportPolicyInput{
 //	    Vulnerabilities: findings,
 //	})
-func (c *Client) EvaluatePolicy(ctx context.Context, policies []*PolicySource, scanReportCtx *policyv1.ScanReportContext) (*EvaluateResponse, error) {
+func (c *Client) EvaluatePolicy(ctx context.Context, policies []*PolicySource, input *policyv1.ScanReportPolicyInput) (*EvaluateResponse, error) {
 	req := &policyv1.EvaluateRequest{
 		Policies: policies,
-		Context:  &policyv1.EvaluateRequest_ScanReport{ScanReport: scanReportCtx},
+		Input:    &policyv1.EvaluateRequest_ScanReport{ScanReport: input},
 	}
 	resp, err := c.clients.Policy.Evaluate(ctx, connect.NewRequest(req))
 	if err != nil {
@@ -566,8 +566,8 @@ func (c *Client) EvaluatePolicy(ctx context.Context, policies []*PolicySource, s
 func (c *Client) EvaluatePolicyForVulnerability(ctx context.Context, policies []*PolicySource, vuln *vulnerabilityv1.Finding) (*EvaluateResponse, error) {
 	req := &policyv1.EvaluateRequest{
 		Policies: policies,
-		Context: &policyv1.EvaluateRequest_ScanVulnerability{
-			ScanVulnerability: &policyv1.ScanVulnerabilityContext{
+		Input: &policyv1.EvaluateRequest_ScanVulnerability{
+			ScanVulnerability: &policyv1.ScanVulnerabilityPolicyInput{
 				Vulnerability: vuln,
 			},
 		},

@@ -90,6 +90,7 @@ func RegisterCommands(root *cobra.Command, deps Dependencies) {
 	// Setup and configuration commands
 	AddInitCommand(root)
 	AddConfigCommand(root)
+	AddCacheCommand(root)
 
 	// Informational commands
 	AddVersionCommand(root)

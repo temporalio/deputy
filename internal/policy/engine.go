@@ -3,8 +3,6 @@ package policy
 import (
 	"context"
 	"fmt"
-	"maps"
-	"regexp"
 	"strings"
 	"time"
 
@@ -12,6 +10,8 @@ import (
 	"github.com/google/cel-go/common/types/ref"
 	dependencyv1 "github.com/picatz/deputy/gen/deputy/dependency/v1"
 	policyv1 "github.com/picatz/deputy/gen/deputy/policy/v1"
+	scanv1 "github.com/picatz/deputy/gen/deputy/scan/v1"
+	targetv1 "github.com/picatz/deputy/gen/deputy/target/v1"
 	"github.com/picatz/deputy/internal/collections"
 	"github.com/picatz/deputy/internal/otel"
 )
@@ -55,6 +55,12 @@ func NewEngine(sources []Source) (*Engine, error) {
 			return nil, err
 		}
 		meta := parsePolicyMetadata(src.Body)
+
+		// Validate entrypoints at load time - reject unknown entrypoints
+		if err := validateEntrypoints(meta.Entrypoints, src.Name); err != nil {
+			return nil, err
+		}
+
 		compiled = append(compiled, compiledPolicy{
 			source:      src,
 			program:     prog,
@@ -64,6 +70,21 @@ func NewEngine(sources []Source) (*Engine, error) {
 		})
 	}
 	return &Engine{compiled: compiled}, nil
+}
+
+// validateEntrypoints checks that all entrypoints are known canonical values.
+// This prevents typos and injection of arbitrary entrypoint names.
+func validateEntrypoints(entrypoints []string, policyName string) error {
+	for _, ep := range entrypoints {
+		ep = strings.TrimSpace(ep)
+		if ep == "" {
+			continue
+		}
+		if !IsAllowedEntrypoint(ep) {
+			return fmt.Errorf("%s: invalid entrypoint %q (not in allowed set)", policyName, ep)
+		}
+	}
+	return nil
 }
 
 // NewEngineFromPaths loads sources from disk and builds a compiled engine.
@@ -96,12 +117,17 @@ func (e *Engine) EvaluateAll(ctx context.Context, payload map[string]any, comman
 	if e == nil || len(e.compiled) == 0 {
 		return nil, nil
 	}
-	// preserve original map to avoid side effects on callers
-	input := cloneMap(payload)
+	// Validate entrypoint at evaluation time if provided
+	if entrypoint != "" && !IsAllowedEntrypoint(entrypoint) {
+		return nil, fmt.Errorf("invalid entrypoint: %q", entrypoint)
+	}
+
+	// preserve original map to avoid side effects on callers - use deep clone
+	input := deepCloneMap(payload)
 	seedDefaultVariables(input)
 	if command != "" || entrypoint != "" {
 		env, _ := input["env"].(map[string]any)
-		env = maps.Clone(env)
+		env = deepCloneMap(env)
 		if env == nil {
 			env = map[string]any{}
 		}
@@ -206,9 +232,6 @@ func shouldSkip(pol compiledPolicy, command, entrypoint string) bool {
 // seedDefaultVariables ensures that standard variables expected by policies
 // are present in the input map. It populates missing variables with nil or
 // default values to prevent runtime errors during CEL evaluation.
-//
-// Proto-first design: Callers should pass proto messages directly in the input map.
-// CEL's native proto support provides type-safe field access.
 func seedDefaultVariables(input map[string]any) {
 	if input == nil {
 		return
@@ -222,120 +245,153 @@ func seedDefaultVariables(input map[string]any) {
 	input["severity"] = severityConstants
 	input["scope"] = scopeConstants
 
-	// Synthesize pkg from component or request for backward compatibility with policies
-	// that use pkg.name, pkg.version, pkg.ecosystem, pkg.licenses, etc.
+	// Synthesize pkg from component or request for policies that use
+	// pkg.name, pkg.version, pkg.ecosystem, pkg.licenses, etc.
 	if input["pkg"] == nil {
 		input["pkg"] = buildPkgFromInput(input)
 	}
 
-	// Synthesize image from image_info and request for backward compatibility with policies
-	// that use image.config, image.metadata, image.history, etc.
-	if input["image"] == nil {
-		if img := buildImageFromInput(input); len(img) > 0 {
-			input["image"] = img
-		}
+	// Always synthesize image from target and image_info for policies that use
+	// image.image (reference), image.config, image.metadata, image.history, etc.
+	// This combines the image reference from target with configuration from ImageInfo.
+	if img := buildImageFromInput(input); len(img) > 0 {
+		input["image"] = img
 	}
 }
 
-// buildPkgFromInput synthesizes a Package proto from component or request.
-// This provides backward compatibility for policies using pkg.licenses, pkg.name, etc.
+// buildPkgFromInput synthesizes a Package proto from component or request data
+// in the input map. Returns a Package with fields populated from whichever
+// source is available (component takes precedence over request).
 func buildPkgFromInput(input map[string]any) *dependencyv1.Package {
 	// Default empty package - CEL will see zero values for all fields
 	pkg := &dependencyv1.Package{}
 
 	// Try component first (sbom, diff entrypoints)
 	if comp := input["component"]; comp != nil {
-		if p, ok := comp.(*dependencyv1.Package); ok {
-			return p
-		}
-		// Handle map[string]any from legacy callers
-		if m, ok := comp.(map[string]any); ok {
-			extractPackageFields(pkg, m)
+		switch c := comp.(type) {
+		case *dependencyv1.Package:
+			return c
+		case map[string]any:
+			if name, ok := c["name"].(string); ok {
+				pkg.Name = name
+			}
+			if version, ok := c["version"].(string); ok {
+				pkg.Version = version
+			}
+			if ecosystem, ok := c["ecosystem"].(string); ok {
+				pkg.Ecosystem = ecosystem
+			}
+			if licenses, ok := c["licenses"].([]string); ok {
+				pkg.Licenses = licenses
+			} else if licenses, ok := c["licenses"].([]any); ok {
+				for _, l := range licenses {
+					if s, ok := l.(string); ok {
+						pkg.Licenses = append(pkg.Licenses, s)
+					}
+				}
+			}
 			return pkg
 		}
 	}
 
 	// Try request (proxy entrypoints)
 	if req := input["request"]; req != nil {
-		// Handle proto ProxyRequest directly
-		if pr, ok := req.(*policyv1.ProxyRequest); ok {
-			pkg.Name = pr.Package
+		switch r := req.(type) {
+		case *policyv1.ProxyRequest:
+			pkg.Name = r.Package
 			if pkg.Name == "" {
-				pkg.Name = pr.Module
+				pkg.Name = r.Module
 			}
-			pkg.Version = pr.Version
-			pkg.Ecosystem = pr.Ecosystem
-			return pkg
+			pkg.Version = r.Version
+			pkg.Ecosystem = r.Ecosystem
+		case map[string]any:
+			if name, ok := r["package"].(string); ok && name != "" {
+				pkg.Name = name
+			} else if name, ok := r["module"].(string); ok {
+				pkg.Name = name
+			}
+			if version, ok := r["version"].(string); ok {
+				pkg.Version = version
+			}
+			if ecosystem, ok := r["ecosystem"].(string); ok {
+				pkg.Ecosystem = ecosystem
+			}
+			// Licenses may be in the request map
+			if licenses, ok := r["licenses"].([]string); ok {
+				pkg.Licenses = licenses
+			} else if licenses, ok := r["licenses"].([]any); ok {
+				for _, l := range licenses {
+					if s, ok := l.(string); ok {
+						pkg.Licenses = append(pkg.Licenses, s)
+					}
+				}
+			}
 		}
-		// Handle map[string]any from legacy callers
-		if m, ok := req.(map[string]any); ok {
-			extractPackageFields(pkg, m)
-			return pkg
+	}
+
+	// Also check for licenses at input level (proxy adds them there too)
+	if len(pkg.Licenses) == 0 {
+		if licenses, ok := input["licenses"].([]string); ok {
+			pkg.Licenses = licenses
+		} else if licenses, ok := input["licenses"].([]any); ok {
+			for _, l := range licenses {
+				if s, ok := l.(string); ok {
+					pkg.Licenses = append(pkg.Licenses, s)
+				}
+			}
 		}
 	}
 
 	return pkg
 }
 
-// extractPackageFields populates a Package proto from a map[string]any.
-func extractPackageFields(pkg *dependencyv1.Package, m map[string]any) {
-	// Try various keys for the package name
-	if name, ok := m["package"].(string); ok && name != "" {
-		pkg.Name = name
-	} else if name, ok := m["module"].(string); ok && name != "" {
-		pkg.Name = name
-	} else if name, ok := m["name"].(string); ok && name != "" {
-		pkg.Name = name
-	}
 
-	if ver, ok := m["version"].(string); ok {
-		pkg.Version = ver
-	}
-	if eco, ok := m["ecosystem"].(string); ok {
-		pkg.Ecosystem = eco
-	}
-
-	// Handle licenses - can be []string or []any
-	switch lic := m["licenses"].(type) {
-	case []string:
-		pkg.Licenses = lic
-	case []any:
-		for _, l := range lic {
-			if s, ok := l.(string); ok {
-				pkg.Licenses = append(pkg.Licenses, s)
-			}
-		}
-	}
-}
-
-// buildImageFromInput synthesizes an image map from image_info, request, and target.
-// This provides backward compatibility for policies using image.config, image.metadata, etc.
+// buildImageFromInput synthesizes an image map from image_info and target protos.
+// The synthesized map provides fields like image.image, image.config, image.metadata,
+// and image.history for CEL policy expressions.
 func buildImageFromInput(input map[string]any) map[string]any {
 	// Start with empty image structure
 	image := map[string]any{}
 
-	// Extract provenance from request if available
-	if req, ok := input["request"].(map[string]any); ok {
-		copyImageFields(image, req)
-	}
-
-	// Also check target.provenance for scan contexts
-	if target, ok := input["target"].(map[string]any); ok {
-		if prov, ok := target["provenance"].(map[string]any); ok {
-			copyImageFields(image, prov)
+	// Extract image reference from target proto
+	if target := input["target"]; target != nil {
+		if t, ok := target.(*targetv1.Target); ok {
+			// Use Reference field for container images, otherwise DisplayPath
+			ref := t.Reference
+			if ref == "" {
+				ref = t.DisplayPath
+			}
+			if ref != "" {
+				image["image"] = ref
+			}
+			// Copy provenance fields (registry, repository, tag, digest)
+			if t.Provenance != nil {
+				for k, v := range t.Provenance {
+					image[k] = v
+				}
+			}
 		}
 	}
 
-	// Copy config, metadata, and history from image_info
-	if info, ok := input["image_info"].(map[string]any); ok {
-		if config, ok := info["config"]; ok {
-			image["config"] = config
-		}
-		if meta, ok := info["metadata"]; ok {
-			image["metadata"] = meta
-		}
-		if hist, ok := info["history"]; ok {
-			image["history"] = hist
+	// Note: For OCI proxy contexts, image provenance (registry, repository, tag, digest)
+	// should be set directly in the target.Provenance map by the caller.
+	// The ProxyRequest proto is for package requests, not OCI image requests.
+
+	// Handle image_info proto - check both "image_info" and "image" keys
+	for _, key := range []string{"image_info", "image"} {
+		if info := input[key]; info != nil {
+			if imgInfo, ok := info.(*scanv1.ImageInfo); ok {
+				if imgInfo.Config != nil {
+					image["config"] = imgInfo.Config
+				}
+				if imgInfo.Metadata != nil {
+					image["metadata"] = imgInfo.Metadata
+				}
+				if len(imgInfo.History) > 0 {
+					image["history"] = imgInfo.History
+				}
+				break // Found ImageInfo, stop searching
+			}
 		}
 	}
 
@@ -346,37 +402,24 @@ func buildImageFromInput(input map[string]any) map[string]any {
 		image["reference"] = tag
 	}
 
-	// Compute composite image field (registry/repository:tag or @digest)
-	if reg, ok := image["registry"].(string); ok {
-		if repo, ok := image["repository"].(string); ok {
-			composite := reg + "/" + repo
-			if digest, ok := image["digest"].(string); ok && digest != "" {
-				composite += "@" + digest
-			} else if tag, ok := image["tag"].(string); ok && tag != "" {
-				composite += ":" + tag
+	// Compute composite image field if not already set (registry/repository:tag or @digest)
+	if _, hasImage := image["image"]; !hasImage {
+		if reg, ok := image["registry"].(string); ok {
+			if repo, ok := image["repository"].(string); ok {
+				composite := reg + "/" + repo
+				if digest, ok := image["digest"].(string); ok && digest != "" {
+					composite += "@" + digest
+				} else if tag, ok := image["tag"].(string); ok && tag != "" {
+					composite += ":" + tag
+				}
+				image["image"] = composite
 			}
-			image["image"] = composite
 		}
 	}
 
 	return image
 }
 
-// copyImageFields copies registry, repository, tag, digest from src to dst.
-func copyImageFields(dst, src map[string]any) {
-	if reg, ok := src["registry"].(string); ok {
-		dst["registry"] = reg
-	}
-	if repo, ok := src["repository"].(string); ok {
-		dst["repository"] = repo
-	}
-	if tag, ok := src["tag"].(string); ok {
-		dst["tag"] = tag
-	}
-	if digest, ok := src["digest"].(string); ok {
-		dst["digest"] = digest
-	}
-}
 
 // downgradeAdvisory converts "deny" actions to "warn" actions for policies
 // running in advisory mode. This allows policies to report violations without
@@ -399,9 +442,10 @@ func downgradeAdvisory(actions []Action) []Action {
 	return out
 }
 
-// compileSource compiles a raw policy source into a CEL program. It handles
-// dynamic environment generation by detecting undeclared variables and
-// recompiling with the necessary context.
+// compileSource compiles a raw policy source into a CEL program.
+// It uses the default variable set declared in defaultVariableNames.
+// Unknown variables will result in compilation errors - this is intentional
+// to prevent injection of arbitrary variable names through policy content.
 func compileSource(src Source) (celProgram, error) {
 	env, err := envWithNames(nil)
 	if err != nil {
@@ -409,18 +453,7 @@ func compileSource(src Source) (celProgram, error) {
 	}
 	ast, iss := env.Compile(src.Body)
 	if iss != nil && iss.Err() != nil {
-		missing := parseUndeclaredFromIssues(iss)
-		if len(missing) == 0 {
-			return nil, fmt.Errorf("%s: %w", src.Name, iss.Err())
-		}
-		env, err = envWithNames(missing)
-		if err != nil {
-			return nil, err
-		}
-		ast, iss = env.Compile(src.Body)
-		if iss != nil && iss.Err() != nil {
-			return nil, fmt.Errorf("%s: %w", src.Name, iss.Err())
-		}
+		return nil, fmt.Errorf("%s: %w", src.Name, iss.Err())
 	}
 	prog, err := env.Program(ast)
 	if err != nil {
@@ -429,58 +462,54 @@ func compileSource(src Source) (celProgram, error) {
 	return prog, nil
 }
 
-// undeclaredRe matches CEL "undeclared reference" error messages.
-// The pattern captures the variable name from messages like:
-//
-//	"undeclared reference to 'foo'"
-//	"undeclared reference to 'foo' (in container '')"
-var undeclaredRe = regexp.MustCompile(`undeclared reference to '([^']+)'`)
-
-// parseUndeclaredFromIssues extracts undeclared variable names by iterating
-// through individual CEL compilation errors. This is more robust than parsing
-// the full error string because it accesses each error's Message field directly.
-func parseUndeclaredFromIssues(iss *cel.Issues) []string {
-	if iss == nil {
-		return nil
-	}
-	errs := iss.Errors()
-	if len(errs) == 0 {
-		return nil
-	}
-	seen := make(map[string]struct{})
-	var out []string
-	for _, e := range errs {
-		names := parseUndeclared(e.Message)
-		for _, name := range names {
-			if _, ok := seen[name]; !ok {
-				seen[name] = struct{}{}
-				out = append(out, name)
-			}
-		}
-	}
-	return out
-}
-
-// parseUndeclared extracts variable names from a CEL error message string.
-// It handles the standard CEL undeclared reference format:
-//
-//	"undeclared reference to 'varname'"
-//	"undeclared reference to 'varname' (in container '')"
-func parseUndeclared(msg string) []string {
-	matches := undeclaredRe.FindAllStringSubmatch(msg, -1)
-	var out []string
-	for _, m := range matches {
-		if len(m) == 2 {
-			out = append(out, m[1])
-		}
-	}
-	return out
-}
-
-// cloneMap shallow-copies a map[string]any.
-func cloneMap(m map[string]any) map[string]any {
+// deepCloneMap creates a deep copy of a map[string]any, recursively cloning
+// nested maps and slices to prevent side effects from policy evaluation.
+func deepCloneMap(m map[string]any) map[string]any {
 	if m == nil {
 		return map[string]any{}
 	}
-	return maps.Clone(m)
+	out := make(map[string]any, len(m))
+	for k, v := range m {
+		out[k] = deepCloneValue(v)
+	}
+	return out
+}
+
+// deepCloneValue recursively clones a value, handling maps, slices, and primitives.
+// Proto messages and other complex types are not cloned (they are typically immutable
+// or should not be modified by policies).
+func deepCloneValue(v any) any {
+	if v == nil {
+		return nil
+	}
+	switch val := v.(type) {
+	case map[string]any:
+		return deepCloneMap(val)
+	case []any:
+		out := make([]any, len(val))
+		for i, elem := range val {
+			out[i] = deepCloneValue(elem)
+		}
+		return out
+	case []string:
+		out := make([]string, len(val))
+		copy(out, val)
+		return out
+	case []int:
+		out := make([]int, len(val))
+		copy(out, val)
+		return out
+	case []int64:
+		out := make([]int64, len(val))
+		copy(out, val)
+		return out
+	case []float64:
+		out := make([]float64, len(val))
+		copy(out, val)
+		return out
+	default:
+		// Primitives (string, int, bool, etc.) and proto messages are returned as-is.
+		// Proto messages should be treated as immutable by policies.
+		return v
+	}
 }

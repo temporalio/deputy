@@ -146,9 +146,9 @@ func newPolicyExamplesCommand() *cobra.Command {
 		Short: "Generate example input JSON for policy testing",
 		Long: `Generate canonical example inputs for policy development and testing.
 
-Examples are proto-first, using real Deputy types with realistic values that
-match what you'll see in production. This helps you write policies with
-confidence before deploying them.
+Examples use real Deputy proto types with realistic values that match what
+you'll see in production. This helps you write policies with confidence
+before deploying them.
 
 ENTRYPOINT CATEGORIES:
   scan        Vulnerability scanning (scan_vulnerability, scan_report)

@@ -386,6 +386,13 @@ func buildProtobomDocument(ctx context.Context, ws workspace.FS, repoRef, ref, n
 		n.Type = sbom.Node_PACKAGE
 		n.Name = deriveDisplayName(p.Name, purlStr)
 		n.Version = p.Version
+
+		// Copy licenses from SCALIBR extraction (APK, RPM, etc. provide licenses directly).
+		// This enables immediate license visibility for OS packages without enrichment.
+		if len(p.Licenses) > 0 {
+			n.Licenses = append(n.Licenses, p.Licenses...)
+		}
+
 		if purlStr != "" {
 			if n.Identifiers == nil {
 				n.Identifiers = map[int32]string{}
@@ -587,11 +594,14 @@ func enrichProtobomLicensesScanWithFetcher(ctx context.Context, doc *sbom.Docume
 		}
 		eco := collections.NormalizeLower(pu.Type)
 		version := strings.TrimSpace(pu.Version)
-		if eco == "" || version == "" {
+		name := packageNameForLicenseLookup(pu)
+		if eco == "" || name == "" {
 			continue
 		}
-		name := packageNameForLicenseLookup(pu)
-		if name == "" {
+		// Allow version-less lookups for GitHub-based packages (uses GitHub License API)
+		isGitHubBased := eco == "github" || eco == "githubactions" ||
+			(eco == "golang" && strings.HasPrefix(name, "github.com/"))
+		if version == "" && !isGitHubBased {
 			continue
 		}
 		if ids := license.LookupLicensesBestEffort(ctx, eco, name, version); len(ids) > 0 {

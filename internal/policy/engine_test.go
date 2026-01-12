@@ -332,7 +332,7 @@ func TestEvaluateAll_PayloadNotModified(t *testing.T) {
 		"key": "value",
 	}
 
-	_, err = eng.EvaluateAll(t.Context(), original, "cmd", "ep")
+	_, err = eng.EvaluateAll(t.Context(), original, "scan", "scan_report")
 	if err != nil {
 		t.Fatalf("EvaluateAll() error: %v", err)
 	}
@@ -343,111 +343,118 @@ func TestEvaluateAll_PayloadNotModified(t *testing.T) {
 	}
 }
 
-func TestParseUndeclared(t *testing.T) {
+// TestNewEngine_UndeclaredVariableRejected verifies that policies using unknown
+// variables are rejected at compile time - preventing injection attacks.
+func TestNewEngine_UndeclaredVariableRejected(t *testing.T) {
 	tests := []struct {
-		name     string
-		msg      string
-		expected []string
+		name       string
+		policyBody string
+		wantErr    bool
 	}{
 		{
-			name:     "single undeclared",
-			msg:      "ERROR: <input>:1:1: undeclared reference to 'foo'",
-			expected: []string{"foo"},
+			name:       "known variable pkg is allowed",
+			policyBody: `pkg.name == "test" ? [{"action": "deny"}] : [{"action": "allow"}]`,
+			wantErr:    false,
 		},
 		{
-			name:     "multiple undeclared",
-			msg:      "undeclared reference to 'foo'\nundeclared reference to 'bar'",
-			expected: []string{"foo", "bar"},
+			name:       "unknown variable is rejected",
+			policyBody: `injected_var == true ? [{"action": "deny"}] : [{"action": "allow"}]`,
+			wantErr:    true,
 		},
 		{
-			name:     "no undeclared",
-			msg:      "some other error",
-			expected: nil,
+			name:       "undeclared variable in complex expression is rejected",
+			policyBody: `pkg.name == "test" && malicious_payload.execute() ? [{"action": "deny"}] : [{"action": "allow"}]`,
+			wantErr:    true,
 		},
 		{
-			name:     "empty message",
-			msg:      "",
-			expected: nil,
-		},
-		{
-			name:     "complex undeclared name",
-			msg:      "undeclared reference to 'my_variable_123'",
-			expected: []string{"my_variable_123"},
+			name:       "all default variables are allowed",
+			policyBody: `vulnerability != null && pkg != null ? [{"action": "deny"}] : [{"action": "allow"}]`,
+			wantErr:    false,
 		},
 	}
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			result := parseUndeclared(tc.msg)
-			if len(result) != len(tc.expected) {
-				t.Errorf("expected %d undeclared vars, got %d: %v", len(tc.expected), len(result), result)
-				return
+			sources := []Source{{Name: "test-policy", Body: tc.policyBody}}
+			_, err := NewEngine(sources)
+			if tc.wantErr && err == nil {
+				t.Error("expected error for undeclared variable, got nil")
 			}
-			for i, v := range tc.expected {
-				if result[i] != v {
-					t.Errorf("expected result[%d] = %q, got %q", i, v, result[i])
-				}
+			if !tc.wantErr && err != nil {
+				t.Errorf("unexpected error: %v", err)
 			}
 		})
 	}
 }
 
-func TestParseUndeclaredFromIssues(t *testing.T) {
-	// Create a CEL environment with no extra variables to trigger undeclared errors
-	env, err := envWithNames(nil)
+// TestNewEngine_InvalidEntrypointRejected verifies that policies with unknown
+// entrypoints are rejected at load time.
+func TestNewEngine_InvalidEntrypointRejected(t *testing.T) {
+	tests := []struct {
+		name       string
+		policyBody string
+		wantErr    bool
+		errContain string
+	}{
+		{
+			name: "valid entrypoint is allowed",
+			policyBody: `//! policy.entrypoints = scan_report
+[{"action": "allow"}]`,
+			wantErr: false,
+		},
+		{
+			name: "invalid entrypoint is rejected",
+			policyBody: `//! policy.entrypoints = malicious_entrypoint
+[{"action": "allow"}]`,
+			wantErr:    true,
+			errContain: "invalid entrypoint",
+		},
+		{
+			name: "mixed valid and invalid entrypoints is rejected",
+			policyBody: `//! policy.entrypoints = scan_report, fake_entrypoint
+[{"action": "allow"}]`,
+			wantErr:    true,
+			errContain: "invalid entrypoint",
+		},
+		{
+			name:       "no entrypoint restriction is allowed",
+			policyBody: `[{"action": "allow"}]`,
+			wantErr:    false,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			sources := []Source{{Name: "test-policy", Body: tc.policyBody}}
+			_, err := NewEngine(sources)
+			if tc.wantErr {
+				if err == nil {
+					t.Error("expected error for invalid entrypoint, got nil")
+				} else if tc.errContain != "" && !strings.Contains(err.Error(), tc.errContain) {
+					t.Errorf("error should contain %q, got: %v", tc.errContain, err)
+				}
+			} else if err != nil {
+				t.Errorf("unexpected error: %v", err)
+			}
+		})
+	}
+}
+
+// TestEvaluateAll_InvalidEntrypointRejected verifies that invalid entrypoints
+// are rejected at evaluation time.
+func TestEvaluateAll_InvalidEntrypointRejected(t *testing.T) {
+	sources := []Source{{Name: "test", Body: `[{"action": "allow"}]`}}
+	eng, err := NewEngine(sources)
 	if err != nil {
-		t.Fatalf("envWithNames: %v", err)
+		t.Fatalf("NewEngine() error: %v", err)
 	}
 
-	tests := []struct {
-		name     string
-		expr     string
-		expected []string
-	}{
-		{
-			name:     "single undeclared",
-			expr:     "custom_var == true",
-			expected: []string{"custom_var"},
-		},
-		{
-			name:     "multiple undeclared",
-			expr:     "foo && bar && baz",
-			expected: []string{"foo", "bar", "baz"},
-		},
-		{
-			name:     "duplicate undeclared",
-			expr:     "foo && foo",
-			expected: []string{"foo"},
-		},
-		{
-			name:     "valid expression",
-			expr:     "pkg.name == 'test'",
-			expected: nil,
-		},
+	_, err = eng.EvaluateAll(t.Context(), nil, "scan", "fake_entrypoint")
+	if err == nil {
+		t.Error("expected error for invalid entrypoint at evaluation time")
 	}
-
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			_, iss := env.Compile(tc.expr)
-			result := parseUndeclaredFromIssues(iss)
-			if len(result) != len(tc.expected) {
-				t.Errorf("expected %d undeclared vars, got %d: %v", len(tc.expected), len(result), result)
-				return
-			}
-			for i, v := range tc.expected {
-				if result[i] != v {
-					t.Errorf("expected result[%d] = %q, got %q", i, v, result[i])
-				}
-			}
-		})
-	}
-}
-
-func TestParseUndeclaredFromIssues_NilSafety(t *testing.T) {
-	// Test nil safety
-	result := parseUndeclaredFromIssues(nil)
-	if result != nil {
-		t.Errorf("expected nil for nil issues, got %v", result)
+	if !strings.Contains(err.Error(), "invalid entrypoint") {
+		t.Errorf("error should mention invalid entrypoint, got: %v", err)
 	}
 }
 
@@ -683,24 +690,89 @@ func TestDowngradeAdvisory(t *testing.T) {
 	}
 }
 
-func TestCloneMap(t *testing.T) {
+func TestDeepCloneMap(t *testing.T) {
 	t.Run("nil map returns empty", func(t *testing.T) {
-		result := cloneMap(nil)
+		result := deepCloneMap(nil)
 		if result == nil {
-			t.Error("cloneMap(nil) should return empty map, not nil")
+			t.Error("deepCloneMap(nil) should return empty map, not nil")
 		}
 		if len(result) != 0 {
-			t.Error("cloneMap(nil) should return empty map")
+			t.Error("deepCloneMap(nil) should return empty map")
 		}
 	})
 
-	t.Run("clone is independent", func(t *testing.T) {
+	t.Run("shallow clone is independent", func(t *testing.T) {
 		original := map[string]any{"key": "value"}
-		clone := cloneMap(original)
+		clone := deepCloneMap(original)
 
 		clone["key"] = "modified"
 		if original["key"] != "value" {
 			t.Error("modifying clone should not affect original")
+		}
+	})
+
+	t.Run("deep clone is independent for nested maps", func(t *testing.T) {
+		original := map[string]any{
+			"nested": map[string]any{
+				"key": "value",
+			},
+		}
+		clone := deepCloneMap(original)
+
+		// Modify the nested map in the clone
+		nestedClone := clone["nested"].(map[string]any)
+		nestedClone["key"] = "modified"
+
+		// Original should be unaffected
+		nestedOriginal := original["nested"].(map[string]any)
+		if nestedOriginal["key"] != "value" {
+			t.Error("modifying nested clone should not affect original")
+		}
+	})
+
+	t.Run("deep clone is independent for slices", func(t *testing.T) {
+		original := map[string]any{
+			"list": []any{"a", "b", "c"},
+		}
+		clone := deepCloneMap(original)
+
+		// Modify the slice in the clone
+		listClone := clone["list"].([]any)
+		listClone[0] = "modified"
+
+		// Original should be unaffected
+		listOriginal := original["list"].([]any)
+		if listOriginal[0] != "a" {
+			t.Error("modifying slice clone should not affect original")
+		}
+	})
+
+	t.Run("deeply nested structures are cloned", func(t *testing.T) {
+		original := map[string]any{
+			"level1": map[string]any{
+				"level2": map[string]any{
+					"level3": []any{
+						map[string]any{"key": "value"},
+					},
+				},
+			},
+		}
+		clone := deepCloneMap(original)
+
+		// Navigate to deeply nested value and modify
+		l1 := clone["level1"].(map[string]any)
+		l2 := l1["level2"].(map[string]any)
+		l3 := l2["level3"].([]any)
+		innerMap := l3[0].(map[string]any)
+		innerMap["key"] = "modified"
+
+		// Original should be unaffected
+		origL1 := original["level1"].(map[string]any)
+		origL2 := origL1["level2"].(map[string]any)
+		origL3 := origL2["level3"].([]any)
+		origInnerMap := origL3[0].(map[string]any)
+		if origInnerMap["key"] != "value" {
+			t.Error("modifying deeply nested clone should not affect original")
 		}
 	})
 }
@@ -844,16 +916,14 @@ vulnerabilities.exists(v, v.advisory.id == "CVE-2023-1234")
 		{
 			name: "scan vulnerability context proto",
 			policyBody: `
-ctx.vulnerability.advisory.id == "CVE-2024-5678" && ctx.pkg.name == "example"
+vulnerability.advisory.id == "CVE-2024-5678" && pkg.name == "example"
   ? [{"action": "deny", "reason": "context match"}]
   : [{"action": "allow"}]`,
 			payload: map[string]any{
-				"ctx": &policyv1.ScanVulnerabilityContext{
-					Vulnerability: &vulnerabilityv1.Finding{
-						Advisory: &vulnerabilityv1.Advisory{Id: "CVE-2024-5678"},
-					},
-					Pkg: &dependencyv1.Package{Name: "example"},
+				"vulnerability": &vulnerabilityv1.Finding{
+					Advisory: &vulnerabilityv1.Advisory{Id: "CVE-2024-5678"},
 				},
+				"pkg": &dependencyv1.Package{Name: "example"},
 			},
 			wantAction: "deny",
 			wantReason: "context match",

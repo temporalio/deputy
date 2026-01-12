@@ -131,7 +131,7 @@ func TestPolicyIntegration_RuntimeCriticalBaseline(t *testing.T) {
 
 func TestPolicyIntegration_ExploitAvailableBlocker(t *testing.T) {
 	pol := filepath.Clean(filepath.Join("..", "..", "..", "policy", "examples", "exploit-available-blocker.yaml"))
-	// Proto-first: Use proto Finding message directly
+	
 	payload := map[string]any{
 		"vulnerability": &vulnerabilityv1.Finding{
 			Advisory: &vulnerabilityv1.Advisory{
@@ -149,7 +149,7 @@ func TestPolicyIntegration_ExploitAvailableBlocker(t *testing.T) {
 
 func TestPolicyIntegration_DeprecatedModuleBlock(t *testing.T) {
 	pol := filepath.Clean(filepath.Join("..", "..", "..", "policy", "examples", "deprecated-module-block.yaml"))
-	// Proto-first: Use proto Finding message directly
+	
 	payload := map[string]any{
 		"vulnerability": &vulnerabilityv1.Finding{
 			Advisory: &vulnerabilityv1.Advisory{
@@ -174,7 +174,7 @@ func TestPolicyIntegration_DependencyCountGuard(t *testing.T) {
 
 func TestPolicyIntegration_LicensePresentBlocker(t *testing.T) {
 	pol := filepath.Clean(filepath.Join("..", "..", "..", "policy", "examples", "license-present-blocker.yaml"))
-	// Proto-first: Use proto Package message directly
+	
 	payload := map[string]any{
 		"pkg": &dependencyv1.Package{
 			Licenses: []string{}, // Empty licenses
@@ -187,7 +187,7 @@ func TestPolicyIntegration_LicensePresentBlocker(t *testing.T) {
 
 func TestPolicyIntegration_NoFixEscalator(t *testing.T) {
 	pol := filepath.Clean(filepath.Join("..", "..", "..", "policy", "examples", "no-fix-escalator.yaml"))
-	// Proto-first: Use proto Finding message directly
+	
 	payload := map[string]any{
 		"vulnerability": &vulnerabilityv1.Finding{
 			Package: &dependencyv1.Package{
@@ -212,7 +212,7 @@ func TestPolicyIntegration_NoFixEscalator(t *testing.T) {
 
 func TestPolicyIntegration_ProdManifestGate(t *testing.T) {
 	pol := filepath.Clean(filepath.Join("..", "..", "..", "policy", "examples", "prod-manifest-gate.yaml"))
-	// Proto-first: Use proto Finding message directly
+	
 	payload := map[string]any{
 		"vulnerability": &vulnerabilityv1.Finding{
 			Advisory: &vulnerabilityv1.Advisory{
@@ -234,7 +234,7 @@ func TestPolicyIntegration_ProdManifestGate(t *testing.T) {
 
 func TestPolicyIntegration_DomainBrandedPackageGuard(t *testing.T) {
 	pol := filepath.Clean(filepath.Join("..", "..", "..", "policy", "examples", "domain-branded-package-guard.yaml"))
-	// Proto-first: Use proto ProxyRequest message directly
+	
 	payload := map[string]any{
 		"request": &policyv1.ProxyRequest{
 			Package: "aws-helper",
@@ -280,7 +280,7 @@ func TestPolicyIntegration_SbomSizeShapeSanity(t *testing.T) {
 
 func TestPolicyIntegration_CriticalTransitiveSpotlight(t *testing.T) {
 	pol := filepath.Clean(filepath.Join("..", "..", "..", "policy", "examples", "critical-transitive-spotlight.yaml"))
-	// Proto-first: The policy uses vulnerability.?package.direct and severityAtLeast()
+	
 	payload := map[string]any{
 		"vulnerability": &vulnerabilityv1.Finding{
 			Advisory: &vulnerabilityv1.Advisory{
@@ -307,7 +307,7 @@ func TestPolicyIntegration_CriticalTransitiveSpotlight(t *testing.T) {
 
 func TestPolicyIntegration_TyposquatLevenshteinGuard(t *testing.T) {
 	pol := filepath.Clean(filepath.Join("..", "..", "..", "policy", "examples", "typosquat-levenshtein-guard.yaml"))
-	// Proto-first: Use proto ProxyRequest message directly
+	
 	payload := map[string]any{
 		"request": &policyv1.ProxyRequest{
 			Package:   "lodas",
@@ -318,7 +318,7 @@ func TestPolicyIntegration_TyposquatLevenshteinGuard(t *testing.T) {
 		t.Fatalf("expected denial for typosquat package")
 	}
 
-	// Proto-first: Safe package
+	
 	allowPayload := map[string]any{
 		"request": &policyv1.ProxyRequest{
 			Package:   "teamlib",
@@ -338,7 +338,7 @@ func TestPolicyIntegration_TyposquatLevenshteinGuard(t *testing.T) {
 
 func TestPolicyIntegration_CWEBlocker(t *testing.T) {
 	// Test that CWEs are accessible in vulnerability policies
-	// Proto-first: Use vulnerability.advisory.cwes path
+	
 	polContent := `
 policies:
   - name: block-injection-cwes
@@ -356,7 +356,7 @@ policies:
 		t.Fatalf("failed to write policy file: %v", err)
 	}
 
-	// Proto-first: Vulnerability with SQL injection CWE should be denied
+	
 	payloadWithCWE := map[string]any{
 		"vulnerability": &vulnerabilityv1.Finding{
 			Advisory: &vulnerabilityv1.Advisory{
@@ -372,7 +372,7 @@ policies:
 		t.Fatal("expected denial for vulnerability with injection CWE")
 	}
 
-	// Proto-first: Vulnerability without injection CWEs should pass
+	
 	payloadSafeCWE := map[string]any{
 		"vulnerability": &vulnerabilityv1.Finding{
 			Advisory: &vulnerabilityv1.Advisory{
@@ -394,7 +394,7 @@ policies:
 		}
 	}
 
-	// Proto-first: Vulnerability without CWEs should pass
+	
 	payloadNoCWE := map[string]any{
 		"vulnerability": &vulnerabilityv1.Finding{
 			Advisory: &vulnerabilityv1.Advisory{
@@ -418,7 +418,7 @@ policies:
 
 func TestPolicyIntegration_KEVBlocker(t *testing.T) {
 	// Test that KEV status is accessible in vulnerability policies
-	// Proto-first: Use vulnerability.in_kev (snake_case)
+	
 	polContent := `
 policies:
   - name: block-kev
@@ -435,7 +435,7 @@ policies:
 		t.Fatalf("failed to write policy file: %v", err)
 	}
 
-	// Proto-first: Vulnerability in KEV should be denied
+	
 	inKEV := true
 	payloadInKEV := map[string]any{
 		"vulnerability": &vulnerabilityv1.Finding{
@@ -452,7 +452,7 @@ policies:
 		t.Fatal("expected denial for vulnerability in KEV")
 	}
 
-	// Proto-first: Vulnerability not in KEV should pass
+	
 	notInKEV := false
 	payloadNotInKEV := map[string]any{
 		"vulnerability": &vulnerabilityv1.Finding{
@@ -475,7 +475,7 @@ policies:
 		}
 	}
 
-	// Proto-first: Vulnerability without KEV status should pass (field not present)
+	
 	payloadNoKEV := map[string]any{
 		"vulnerability": &vulnerabilityv1.Finding{
 			Advisory: &vulnerabilityv1.Advisory{
@@ -500,7 +500,7 @@ policies:
 
 func TestPolicyIntegration_EPSSThreshold(t *testing.T) {
 	// Test that EPSS scores are accessible in vulnerability policies
-	// Proto-first: Use vulnerability.epss (snake_case)
+	
 	polContent := `
 policies:
   - name: block-high-epss
@@ -526,7 +526,7 @@ policies:
 		t.Fatalf("failed to write policy file: %v", err)
 	}
 
-	// Proto-first: Vulnerability with high EPSS should be denied
+	
 	highEPSS := 0.15 // 15% exploitation probability
 	payloadHighEPSS := map[string]any{
 		"vulnerability": &vulnerabilityv1.Finding{
@@ -543,7 +543,7 @@ policies:
 		t.Fatal("expected denial for vulnerability with high EPSS")
 	}
 
-	// Proto-first: Vulnerability with medium EPSS should warn
+	
 	mediumEPSS := 0.07 // 7% exploitation probability
 	payloadMediumEPSS := map[string]any{
 		"vulnerability": &vulnerabilityv1.Finding{
@@ -564,7 +564,7 @@ policies:
 		t.Fatalf("expected warn for vulnerability with medium EPSS, got %+v", actions)
 	}
 
-	// Proto-first: Vulnerability with low EPSS should pass
+	
 	lowEPSS := 0.01 // 1% exploitation probability
 	payloadLowEPSS := map[string]any{
 		"vulnerability": &vulnerabilityv1.Finding{
@@ -587,7 +587,7 @@ policies:
 		}
 	}
 
-	// Proto-first: Vulnerability without EPSS should pass
+	
 	payloadNoEPSS := map[string]any{
 		"vulnerability": &vulnerabilityv1.Finding{
 			Advisory: &vulnerabilityv1.Advisory{
@@ -612,7 +612,7 @@ policies:
 
 func TestPolicyIntegration_CompositeRiskScore(t *testing.T) {
 	// Test composite risk scoring using multiple factors (KEV, EPSS, severity)
-	// Proto-first: Use vulnerability.in_kev, vulnerability.epss, vulnerability.advisory.severity.level
+	
 	polContent := `
 policies:
   - name: composite-risk
@@ -638,7 +638,7 @@ policies:
 		t.Fatalf("failed to write policy file: %v", err)
 	}
 
-	// Proto-first: Critical + KEV should be denied
+	
 	inKEV := true
 	epss03 := 0.3
 	payloadCriticalKEV := map[string]any{
@@ -657,7 +657,7 @@ policies:
 		t.Fatal("expected denial for Critical + KEV vulnerability")
 	}
 
-	// Proto-first: High + very high EPSS should be denied
+	
 	notInKEV := false
 	epss06 := 0.6
 	payloadHighEPSS := map[string]any{
@@ -676,7 +676,7 @@ policies:
 		t.Fatal("expected denial for High severity + very high EPSS")
 	}
 
-	// Proto-first: Medium severity + high EPSS should pass (not in rules)
+	
 	payloadMediumHighEPSS := map[string]any{
 		"vulnerability": &vulnerabilityv1.Finding{
 			Advisory: &vulnerabilityv1.Advisory{

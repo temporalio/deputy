@@ -2009,7 +2009,7 @@ func buildScanImagePayload(target inventory.Target) map[string]any {
 }
 
 // runScanPolicies evaluates the provided policies against the scan report and individual vulnerabilities.
-// Proto-first: Passes proto messages directly to CEL for type-safe evaluation.
+// Passes proto messages directly to CEL for type-safe evaluation.
 func runScanPolicies(ctx context.Context, policyPaths []string, result scanning.Result, errW io.Writer, extra map[string]any) ([]policy.Action, error) {
 	if len(policyPaths) == 0 {
 		return nil, nil

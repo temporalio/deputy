@@ -31,10 +31,13 @@ const (
 )
 
 type ociHandlerOptions struct {
-	imageCache  ImageScanCache
-	digestCache DigestResolutionCache
-	scanner     imageScanner
-	resolveHead func(context.Context, name.Reference) (string, error)
+	imageCache   ImageScanCache
+	digestCache  DigestResolutionCache
+	scanner      imageScanner
+	resolveHead  func(context.Context, name.Reference) (string, error)
+	ociConfig    *OCIConfig
+	listenerName string   // for cache scoping
+	policyPaths  []string // for cache scoping
 }
 
 type imageScanner interface {
@@ -49,11 +52,40 @@ type ociHandler struct {
 	digestCache DigestResolutionCache
 	resolveHead func(context.Context, name.Reference) (string, error)
 	registry    string
+	ociConfig   *OCIConfig
 }
 
 // NewOCIHandler creates a handler for OCI registry proxying with policy evaluation.
 func NewOCIHandler(upstream string, policies PolicyEvaluator) (http.Handler, error) {
 	return newOCIHandler(upstream, policies, nil)
+}
+
+// NewOCIHandlerWithConfig creates a handler with explicit OCI configuration.
+func NewOCIHandlerWithConfig(upstream string, policies PolicyEvaluator, cfg *OCIConfig) (http.Handler, error) {
+	return newOCIHandler(upstream, policies, &ociHandlerOptions{ociConfig: cfg})
+}
+
+// OCIHandlerOptions configures an OCI proxy handler.
+type OCIHandlerOptions struct {
+	// Config is the OCI-specific configuration.
+	Config *OCIConfig
+	// ListenerName is the name of the listener, used for cache scoping.
+	ListenerName string
+	// PolicyPaths are the policy files, used to compute a hash for cache scoping.
+	PolicyPaths []string
+}
+
+// NewOCIHandlerWithOptions creates a handler with full options support.
+// This is the preferred constructor for production use as it enables cache scoping.
+func NewOCIHandlerWithOptions(upstream string, policies PolicyEvaluator, opts *OCIHandlerOptions) (http.Handler, error) {
+	if opts == nil {
+		return newOCIHandler(upstream, policies, nil)
+	}
+	return newOCIHandler(upstream, policies, &ociHandlerOptions{
+		ociConfig:    opts.Config,
+		listenerName: opts.ListenerName,
+		policyPaths:  opts.PolicyPaths,
+	})
 }
 
 func newOCIHandler(upstream string, policies PolicyEvaluator, opts *ociHandlerOptions) (http.Handler, error) {
@@ -65,18 +97,35 @@ func newOCIHandler(upstream string, policies PolicyEvaluator, opts *ociHandlerOp
 	imgCache := getImageScanCache(nil)
 	digCache := getDigestResolutionCache(nil)
 	resolveHead := resolveRemoteDigest
+	var ociCfg *OCIConfig
 	if opts != nil {
 		if opts.scanner != nil {
 			scanner = opts.scanner
 		}
-		if opts.imageCache != nil {
-			imgCache = getImageScanCache(opts.imageCache)
-		}
-		if opts.digestCache != nil {
-			digCache = getDigestResolutionCache(opts.digestCache)
-		}
 		if opts.resolveHead != nil {
 			resolveHead = opts.resolveHead
+		}
+		ociCfg = opts.ociConfig
+
+		// Build cache scope from listener/policy configuration.
+		// Tenant ID is added dynamically per-request via request context.
+		baseScope := CacheScope{
+			ListenerName: opts.listenerName,
+			PolicyHash:   HashPolicyPaths(opts.policyPaths),
+		}
+
+		// Apply scoping to image and digest caches
+		// Use RequestScoped*Cache for per-request tenant isolation (via JWT claims)
+		if opts.imageCache != nil {
+			imgCache = NewRequestScopedImageScanCache(baseScope, getImageScanCache(opts.imageCache))
+		} else if !baseScope.IsEmpty() {
+			imgCache = NewRequestScopedImageScanCache(baseScope, defaultImageScanCache)
+		}
+
+		if opts.digestCache != nil {
+			digCache = NewRequestScopedDigestResolutionCache(baseScope, getDigestResolutionCache(opts.digestCache))
+		} else if !baseScope.IsEmpty() {
+			digCache = NewRequestScopedDigestResolutionCache(baseScope, defaultDigestResolutionCache)
 		}
 	}
 	return &ociHandler{
@@ -87,12 +136,16 @@ func newOCIHandler(upstream string, policies PolicyEvaluator, opts *ociHandlerOp
 		digestCache: digCache,
 		resolveHead: resolveHead,
 		registry:    u.Host,
+		ociConfig:   ociCfg,
 	}, nil
 }
 
 func (h *ociHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	info := parseOCIRequestPath(r.URL.Path)
 	payload := h.buildPayload(r.Context(), info, r.URL.Path)
+
+	var pinnedDigest string
+
 	if info.Operation == ociOperationManifest && info.Repository != "" && info.Reference != "" {
 		result, scanErr := h.scanImageForPolicy(r.Context(), info)
 		if result.Vulnerabilities != nil {
@@ -110,6 +163,7 @@ func (h *ociHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		if result.Digest != "" {
+			pinnedDigest = result.Digest
 			if req, ok := payload["request"].(map[string]any); ok {
 				req["digest"] = result.Digest
 			}
@@ -135,6 +189,25 @@ func (h *ociHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			// Also expose as image_info for direct access
 			payload["image_info"] = result.ImageInfo
 		}
+
+		// TOCTOU mitigation: check mutable tag policy before proceeding
+		if info.Tag != "" && info.Digest == "" {
+			if err := checkMutableTagPolicy(h.ociConfig, info.Tag, info.Repository, pinnedDigest); err != nil {
+				// Block the request due to mutable tag policy violation
+				w.Header().Set(HeaderMutableTagBlocked, "true")
+				w.Header().Set("X-Deputy-Ecosystem", "oci")
+				w.Header().Set("X-Deputy-Package", info.Repository)
+				w.Header().Set("X-Deputy-Version", info.Tag)
+				http.Error(w, err.Error(), http.StatusForbidden)
+				slog.Warn("mutable tag blocked",
+					"registry", h.registry,
+					"repository", info.Repository,
+					"tag", info.Tag,
+					"error", err,
+				)
+				return
+			}
+		}
 	}
 
 	meta := blockMeta{
@@ -143,7 +216,29 @@ func (h *ociHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		Version:   info.Reference,
 		Operation: info.Operation,
 	}
-	serveWithPolicy(w, r, h.policies, policy.EntrypointOCIArtifactRequest, payload, meta, h.proxy)
+
+	// Determine which proxy to use based on digest pinning configuration
+	var upstream http.Handler = h.proxy
+
+	// If we have a pinned digest and pinning is enabled, use the digest-pinning proxy
+	if pinnedDigest != "" && info.Tag != "" && info.Digest == "" {
+		if h.ociConfig.EffectivePinDigests() {
+			pinnedProxy := newDigestPinningProxy(h.proxy, h.registry, h.ociConfig)
+			upstream = pinnedProxy.withPinnedInfo(&pinnedRequestInfo{
+				OriginalTag:  info.Tag,
+				PinnedDigest: pinnedDigest,
+				Repository:   info.Repository,
+			})
+			slog.Debug("using pinned digest for upstream request",
+				"registry", h.registry,
+				"repository", info.Repository,
+				"tag", info.Tag,
+				"digest", pinnedDigest,
+			)
+		}
+	}
+
+	serveWithPolicy(w, r, h.policies, policy.EntrypointOCIArtifactRequest, payload, meta, upstream)
 }
 
 type ociRequestInfo struct {
@@ -327,7 +422,8 @@ func (h *ociHandler) scanImageForPolicy(ctx context.Context, info ociRequestInfo
 	digest := info.Digest
 	if digest == "" && info.Tag != "" {
 		// Check digest resolution cache first to avoid repeated failed lookups
-		if cached, found, wasFailed := GetCachedDigestResolution(h.digestCache, h.registry, info.Repository, info.Tag); found {
+		// Use context-aware operations for tenant isolation if available
+		if cached, found, wasFailed := GetCachedDigestResolutionWithContext(ctx, h.digestCache, h.registry, info.Repository, info.Tag); found {
 			if wasFailed {
 				// Previously failed - skip resolution attempt, proceed without digest
 				slog.Debug("digest resolution previously failed, skipping",
@@ -360,12 +456,12 @@ func (h *ociHandler) scanImageForPolicy(ctx context.Context, info ociRequestInfo
 				)
 				// Record the failure for observability
 				RecordDigestResolutionFailure(ctx, span, h.registry, info.Repository, info.Tag, err)
-				// Cache the failure to avoid repeated attempts within TTL
-				CacheDigestResolutionFailure(h.digestCache, h.registry, info.Repository, info.Tag)
+				// Cache the failure to avoid repeated attempts within TTL (with tenant isolation)
+				CacheDigestResolutionFailureWithContext(ctx, h.digestCache, h.registry, info.Repository, info.Tag)
 			} else {
 				digest = resolved
-				// Cache successful resolution
-				CacheDigestResolution(h.digestCache, h.registry, info.Repository, info.Tag, digest)
+				// Cache successful resolution (with tenant isolation)
+				CacheDigestResolutionWithContext(ctx, h.digestCache, h.registry, info.Repository, info.Tag, digest)
 			}
 		}
 	}
@@ -374,7 +470,15 @@ func (h *ociHandler) scanImageForPolicy(ctx context.Context, info ociRequestInfo
 		cacheKey = imageCacheKey(h.registry, info.Repository, digest)
 	}
 	if cacheKey != "" {
-		if cached, ok := h.imageCache.Get(cacheKey); ok {
+		// Use context-aware cache operations if available (for tenant isolation)
+		var cached ImageScanResult
+		var ok bool
+		if ctxCache, isCtxAware := h.imageCache.(ContextAwareImageScanCache); isCtxAware {
+			cached, ok = ctxCache.GetWithContext(ctx, cacheKey)
+		} else {
+			cached, ok = h.imageCache.Get(cacheKey)
+		}
+		if ok {
 			RecordImageScanCacheHit(ctx, span, cacheKey)
 			return scanResult{
 				Vulnerabilities: cached.Vulnerabilities,
@@ -413,10 +517,16 @@ func (h *ociHandler) scanImageForPolicy(ctx context.Context, info ociRequestInfo
 	}
 
 	if cacheKey != "" {
-		h.imageCache.Set(cacheKey, ImageScanResult{
+		// Use context-aware cache operations if available (for tenant isolation)
+		cacheValue := ImageScanResult{
 			Vulnerabilities: findings,
 			ImageInfo:       imageInfoMap,
-		})
+		}
+		if ctxCache, isCtxAware := h.imageCache.(ContextAwareImageScanCache); isCtxAware {
+			ctxCache.SetWithContext(ctx, cacheKey, cacheValue)
+		} else {
+			h.imageCache.Set(cacheKey, cacheValue)
+		}
 	}
 	RecordImageScanSuccess(ctx, span, target, len(vulns), false)
 	return scanResult{

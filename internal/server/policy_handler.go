@@ -238,50 +238,61 @@ func (h *PolicyHandler) loadPolicySources(protoSources []*policyv1.PolicySource)
 	return sources, errors
 }
 
-// buildActivation constructs CEL activation from request context.
+// buildActivation constructs CEL activation from request input.
 func (h *PolicyHandler) buildActivation(msg *policyv1.EvaluateRequest) (map[string]any, string, error) {
-	switch ctx := msg.Context.(type) {
+	switch input := msg.Input.(type) {
 	case *policyv1.EvaluateRequest_ScanVulnerability:
 		return map[string]any{
-			"vulnerability": ctx.ScanVulnerability.Vulnerability,
-			"pkg":           ctx.ScanVulnerability.Pkg,
-			"env":           ctx.ScanVulnerability.Env,
-			"target":        ctx.ScanVulnerability.Target,
+			"vulnerability": input.ScanVulnerability.Vulnerability,
+			"pkg":           input.ScanVulnerability.Pkg,
+			"env":           input.ScanVulnerability.Env,
+			"target":        input.ScanVulnerability.Target,
 		}, string(policy.EntrypointScanVulnerability), nil
 
 	case *policyv1.EvaluateRequest_ScanReport:
 		return map[string]any{
-			"vulnerabilities": ctx.ScanReport.Vulnerabilities,
-			"packages":        ctx.ScanReport.Packages,
-			"env":             ctx.ScanReport.Env,
-			"target":          ctx.ScanReport.Target,
-			"stats":           ctx.ScanReport.Stats,
+			"vulnerabilities": input.ScanReport.Vulnerabilities,
+			"packages":        input.ScanReport.Packages,
+			"env":             input.ScanReport.Env,
+			"target":          input.ScanReport.Target,
+			"stats":           input.ScanReport.Stats,
 		}, string(policy.EntrypointScanReport), nil
 
-	case *policyv1.EvaluateRequest_ProxyRequest:
-		// Determine proxy entrypoint based on ecosystem
-		entrypoint := string(policy.EntrypointGoArtifactRequest)
-		if ctx.ProxyRequest.Request != nil {
-			switch ctx.ProxyRequest.Request.Ecosystem {
-			case "npm":
-				entrypoint = string(policy.EntrypointNpmArtifactRequest)
-			case "pypi":
-				entrypoint = string(policy.EntrypointPypiArtifactRequest)
-			case "rubygems":
-				entrypoint = string(policy.EntrypointRubygemsArtifactRequest)
-			case "oci":
-				entrypoint = string(policy.EntrypointOCIArtifactRequest)
-			}
-		}
+	case *policyv1.EvaluateRequest_GoArtifactRequest:
 		return map[string]any{
-			"request":         ctx.ProxyRequest.Request,
-			"jwt":             ctx.ProxyRequest.Jwt,
-			"env":             ctx.ProxyRequest.Env,
-			"vulnerabilities": ctx.ProxyRequest.Vulnerabilities,
-		}, entrypoint, nil
+			"request":         input.GoArtifactRequest.Request,
+			"jwt":             input.GoArtifactRequest.Jwt,
+			"env":             input.GoArtifactRequest.Env,
+			"vulnerabilities": input.GoArtifactRequest.Vulnerabilities,
+		}, string(policy.EntrypointGoArtifactRequest), nil
+
+	case *policyv1.EvaluateRequest_NpmArtifactRequest:
+		return map[string]any{
+			"request":         input.NpmArtifactRequest.Request,
+			"jwt":             input.NpmArtifactRequest.Jwt,
+			"env":             input.NpmArtifactRequest.Env,
+			"vulnerabilities": input.NpmArtifactRequest.Vulnerabilities,
+		}, string(policy.EntrypointNpmArtifactRequest), nil
+
+	case *policyv1.EvaluateRequest_PypiArtifactRequest:
+		return map[string]any{
+			"request":         input.PypiArtifactRequest.Request,
+			"jwt":             input.PypiArtifactRequest.Jwt,
+			"env":             input.PypiArtifactRequest.Env,
+			"vulnerabilities": input.PypiArtifactRequest.Vulnerabilities,
+		}, string(policy.EntrypointPypiArtifactRequest), nil
+
+	case *policyv1.EvaluateRequest_OciArtifactRequest:
+		return map[string]any{
+			"request":         input.OciArtifactRequest.Request,
+			"jwt":             input.OciArtifactRequest.Jwt,
+			"env":             input.OciArtifactRequest.Env,
+			"vulnerabilities": input.OciArtifactRequest.Vulnerabilities,
+			"image":           input.OciArtifactRequest.Image,
+		}, string(policy.EntrypointOCIArtifactRequest), nil
 
 	default:
-		return nil, "", fmt.Errorf("no evaluation context provided")
+		return nil, "", fmt.Errorf("no evaluation input provided")
 	}
 }
 

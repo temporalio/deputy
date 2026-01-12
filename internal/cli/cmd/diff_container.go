@@ -217,12 +217,13 @@ func extractDistroFromPackages(pkgs []*extractor.Package) string {
 	ecosystemCounts := make(map[string]int)
 	for _, pkg := range pkgs {
 		eco := pkg.Ecosystem()
-		if eco == "" {
+		if eco.IsEmpty() {
 			continue
 		}
+		ecoStr := eco.String()
 		// Only count OS-level ecosystems (those with version suffixes like "Debian:11")
-		if strings.Contains(eco, ":") {
-			ecosystemCounts[eco]++
+		if strings.Contains(ecoStr, ":") {
+			ecosystemCounts[ecoStr]++
 		}
 	}
 

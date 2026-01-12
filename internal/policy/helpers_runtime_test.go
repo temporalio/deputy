@@ -1374,10 +1374,10 @@ func TestNodeAccessors_ViaEvaluate(t *testing.T) {
 	}
 }
 
-// Proto-first: Vulnerability field accessors were removed in favor of direct proto field access.
+
 // Use vulnerability.advisory_id, vulnerability.in_kev, vulnerability.epss,
 // vulnerability.advisory.fixed_versions, vulnerability.advisory.severity.level
-// See policy examples in policy/examples/ for proto-first patterns.
+// See policy examples in policy/examples/ for patterns.
 
 // TestGraphHelpers_WithVulnerabilityPath tests path analysis helpers with vulnerability data.
 func TestGraphHelpers_WithVulnerabilityPath(t *testing.T) {
@@ -1515,6 +1515,6 @@ func TestSeverityConstants_ViaEvaluate(t *testing.T) {
 	}
 }
 
-// Proto-first: severityAtLeast, isCritical, isHighOrAbove work only with proto Finding messages.
+
 // Tests for these functions are in engine_test.go using proto-based contexts.
 // See TestEvaluateAll_ProtoFirst for proto-based severity tests.

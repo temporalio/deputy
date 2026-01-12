@@ -27,20 +27,24 @@ const (
 	_ = protoimpl.EnforceVersion(protoimpl.MaxVersion - 20)
 )
 
-// EvaluateRequest specifies the policies and context for evaluation.
+// EvaluateRequest specifies the policies and input for evaluation.
 type EvaluateRequest struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Policies to evaluate. Can be inline YAML or file paths.
 	// When using file paths, the service must be in local mode.
 	Policies []*PolicySource `protobuf:"bytes,1,rep,name=policies,proto3" json:"policies,omitempty"`
-	// Context for evaluation - exactly one must be set.
+	// Input for evaluation - exactly one must be set.
 	//
-	// Types that are valid to be assigned to Context:
+	// Types that are valid to be assigned to Input:
 	//
 	//	*EvaluateRequest_ScanVulnerability
 	//	*EvaluateRequest_ScanReport
-	//	*EvaluateRequest_ProxyRequest
-	Context isEvaluateRequest_Context `protobuf_oneof:"context"`
+	//	*EvaluateRequest_GoArtifactRequest
+	//	*EvaluateRequest_NpmArtifactRequest
+	//	*EvaluateRequest_PypiArtifactRequest
+	//	*EvaluateRequest_OciArtifactRequest
+	//	*EvaluateRequest_CustomPayload
+	Input isEvaluateRequest_Input `protobuf_oneof:"input"`
 	// Entrypoints to evaluate. If empty, evaluates all matching entrypoints.
 	Entrypoints   []string `protobuf:"bytes,20,rep,name=entrypoints,proto3" json:"entrypoints,omitempty"`
 	unknownFields protoimpl.UnknownFields
@@ -84,35 +88,71 @@ func (x *EvaluateRequest) GetPolicies() []*PolicySource {
 	return nil
 }
 
-func (x *EvaluateRequest) GetContext() isEvaluateRequest_Context {
+func (x *EvaluateRequest) GetInput() isEvaluateRequest_Input {
 	if x != nil {
-		return x.Context
+		return x.Input
 	}
 	return nil
 }
 
-func (x *EvaluateRequest) GetScanVulnerability() *ScanVulnerabilityContext {
+func (x *EvaluateRequest) GetScanVulnerability() *ScanVulnerabilityPolicyInput {
 	if x != nil {
-		if x, ok := x.Context.(*EvaluateRequest_ScanVulnerability); ok {
+		if x, ok := x.Input.(*EvaluateRequest_ScanVulnerability); ok {
 			return x.ScanVulnerability
 		}
 	}
 	return nil
 }
 
-func (x *EvaluateRequest) GetScanReport() *ScanReportContext {
+func (x *EvaluateRequest) GetScanReport() *ScanReportPolicyInput {
 	if x != nil {
-		if x, ok := x.Context.(*EvaluateRequest_ScanReport); ok {
+		if x, ok := x.Input.(*EvaluateRequest_ScanReport); ok {
 			return x.ScanReport
 		}
 	}
 	return nil
 }
 
-func (x *EvaluateRequest) GetProxyRequest() *ProxyRequestContext {
+func (x *EvaluateRequest) GetGoArtifactRequest() *GoArtifactRequestPolicyInput {
 	if x != nil {
-		if x, ok := x.Context.(*EvaluateRequest_ProxyRequest); ok {
-			return x.ProxyRequest
+		if x, ok := x.Input.(*EvaluateRequest_GoArtifactRequest); ok {
+			return x.GoArtifactRequest
+		}
+	}
+	return nil
+}
+
+func (x *EvaluateRequest) GetNpmArtifactRequest() *NpmArtifactRequestPolicyInput {
+	if x != nil {
+		if x, ok := x.Input.(*EvaluateRequest_NpmArtifactRequest); ok {
+			return x.NpmArtifactRequest
+		}
+	}
+	return nil
+}
+
+func (x *EvaluateRequest) GetPypiArtifactRequest() *PypiArtifactRequestPolicyInput {
+	if x != nil {
+		if x, ok := x.Input.(*EvaluateRequest_PypiArtifactRequest); ok {
+			return x.PypiArtifactRequest
+		}
+	}
+	return nil
+}
+
+func (x *EvaluateRequest) GetOciArtifactRequest() *OciArtifactRequestPolicyInput {
+	if x != nil {
+		if x, ok := x.Input.(*EvaluateRequest_OciArtifactRequest); ok {
+			return x.OciArtifactRequest
+		}
+	}
+	return nil
+}
+
+func (x *EvaluateRequest) GetCustomPayload() []byte {
+	if x != nil {
+		if x, ok := x.Input.(*EvaluateRequest_CustomPayload); ok {
+			return x.CustomPayload
 		}
 	}
 	return nil
@@ -125,30 +165,58 @@ func (x *EvaluateRequest) GetEntrypoints() []string {
 	return nil
 }
 
-type isEvaluateRequest_Context interface {
-	isEvaluateRequest_Context()
+type isEvaluateRequest_Input interface {
+	isEvaluateRequest_Input()
 }
 
 type EvaluateRequest_ScanVulnerability struct {
-	// ScanVulnerability context for per-vulnerability evaluation.
-	ScanVulnerability *ScanVulnerabilityContext `protobuf:"bytes,10,opt,name=scan_vulnerability,json=scanVulnerability,proto3,oneof"`
+	// ScanVulnerability input for per-vulnerability evaluation.
+	ScanVulnerability *ScanVulnerabilityPolicyInput `protobuf:"bytes,10,opt,name=scan_vulnerability,json=scanVulnerability,proto3,oneof"`
 }
 
 type EvaluateRequest_ScanReport struct {
-	// ScanReport context for report-level evaluation.
-	ScanReport *ScanReportContext `protobuf:"bytes,11,opt,name=scan_report,json=scanReport,proto3,oneof"`
+	// ScanReport input for report-level evaluation.
+	ScanReport *ScanReportPolicyInput `protobuf:"bytes,11,opt,name=scan_report,json=scanReport,proto3,oneof"`
 }
 
-type EvaluateRequest_ProxyRequest struct {
-	// ProxyRequest context for proxy entrypoint evaluation.
-	ProxyRequest *ProxyRequestContext `protobuf:"bytes,12,opt,name=proxy_request,json=proxyRequest,proto3,oneof"`
+type EvaluateRequest_GoArtifactRequest struct {
+	// GoArtifactRequest input for Go proxy evaluation.
+	GoArtifactRequest *GoArtifactRequestPolicyInput `protobuf:"bytes,12,opt,name=go_artifact_request,json=goArtifactRequest,proto3,oneof"`
 }
 
-func (*EvaluateRequest_ScanVulnerability) isEvaluateRequest_Context() {}
+type EvaluateRequest_NpmArtifactRequest struct {
+	// NpmArtifactRequest input for npm proxy evaluation.
+	NpmArtifactRequest *NpmArtifactRequestPolicyInput `protobuf:"bytes,13,opt,name=npm_artifact_request,json=npmArtifactRequest,proto3,oneof"`
+}
 
-func (*EvaluateRequest_ScanReport) isEvaluateRequest_Context() {}
+type EvaluateRequest_PypiArtifactRequest struct {
+	// PypiArtifactRequest input for PyPI proxy evaluation.
+	PypiArtifactRequest *PypiArtifactRequestPolicyInput `protobuf:"bytes,14,opt,name=pypi_artifact_request,json=pypiArtifactRequest,proto3,oneof"`
+}
 
-func (*EvaluateRequest_ProxyRequest) isEvaluateRequest_Context() {}
+type EvaluateRequest_OciArtifactRequest struct {
+	// OciArtifactRequest input for OCI proxy evaluation.
+	OciArtifactRequest *OciArtifactRequestPolicyInput `protobuf:"bytes,15,opt,name=oci_artifact_request,json=ociArtifactRequest,proto3,oneof"`
+}
+
+type EvaluateRequest_CustomPayload struct {
+	// Generic payload for custom entrypoints.
+	CustomPayload []byte `protobuf:"bytes,99,opt,name=custom_payload,json=customPayload,proto3,oneof"`
+}
+
+func (*EvaluateRequest_ScanVulnerability) isEvaluateRequest_Input() {}
+
+func (*EvaluateRequest_ScanReport) isEvaluateRequest_Input() {}
+
+func (*EvaluateRequest_GoArtifactRequest) isEvaluateRequest_Input() {}
+
+func (*EvaluateRequest_NpmArtifactRequest) isEvaluateRequest_Input() {}
+
+func (*EvaluateRequest_PypiArtifactRequest) isEvaluateRequest_Input() {}
+
+func (*EvaluateRequest_OciArtifactRequest) isEvaluateRequest_Input() {}
+
+func (*EvaluateRequest_CustomPayload) isEvaluateRequest_Input() {}
 
 // PolicySource specifies where to load a policy from.
 type PolicySource struct {
@@ -916,16 +984,20 @@ var File_deputy_policy_v1_service_proto protoreflect.FileDescriptor
 
 const file_deputy_policy_v1_service_proto_rawDesc = "" +
 	"\n" +
-	"\x1edeputy/policy/v1/service.proto\x12\x10deputy.policy.v1\x1a\x1ddeputy/policy/v1/policy.proto\x1a+deputy/vulnerability/v1/vulnerability.proto\x1a%deputy/dependency/v1/dependency.proto\x1a\x1ddeputy/target/v1/target.proto\"\xed\x02\n" +
+	"\x1edeputy/policy/v1/service.proto\x12\x10deputy.policy.v1\x1a\x1ddeputy/policy/v1/policy.proto\x1a+deputy/vulnerability/v1/vulnerability.proto\x1a%deputy/dependency/v1/dependency.proto\x1a\x1ddeputy/target/v1/target.proto\"\xe2\x05\n" +
 	"\x0fEvaluateRequest\x12:\n" +
-	"\bpolicies\x18\x01 \x03(\v2\x1e.deputy.policy.v1.PolicySourceR\bpolicies\x12[\n" +
+	"\bpolicies\x18\x01 \x03(\v2\x1e.deputy.policy.v1.PolicySourceR\bpolicies\x12_\n" +
 	"\x12scan_vulnerability\x18\n" +
-	" \x01(\v2*.deputy.policy.v1.ScanVulnerabilityContextH\x00R\x11scanVulnerability\x12F\n" +
-	"\vscan_report\x18\v \x01(\v2#.deputy.policy.v1.ScanReportContextH\x00R\n" +
-	"scanReport\x12L\n" +
-	"\rproxy_request\x18\f \x01(\v2%.deputy.policy.v1.ProxyRequestContextH\x00R\fproxyRequest\x12 \n" +
-	"\ventrypoints\x18\x14 \x03(\tR\ventrypointsB\t\n" +
-	"\acontext\"\\\n" +
+	" \x01(\v2..deputy.policy.v1.ScanVulnerabilityPolicyInputH\x00R\x11scanVulnerability\x12J\n" +
+	"\vscan_report\x18\v \x01(\v2'.deputy.policy.v1.ScanReportPolicyInputH\x00R\n" +
+	"scanReport\x12`\n" +
+	"\x13go_artifact_request\x18\f \x01(\v2..deputy.policy.v1.GoArtifactRequestPolicyInputH\x00R\x11goArtifactRequest\x12c\n" +
+	"\x14npm_artifact_request\x18\r \x01(\v2/.deputy.policy.v1.NpmArtifactRequestPolicyInputH\x00R\x12npmArtifactRequest\x12f\n" +
+	"\x15pypi_artifact_request\x18\x0e \x01(\v20.deputy.policy.v1.PypiArtifactRequestPolicyInputH\x00R\x13pypiArtifactRequest\x12c\n" +
+	"\x14oci_artifact_request\x18\x0f \x01(\v2/.deputy.policy.v1.OciArtifactRequestPolicyInputH\x00R\x12ociArtifactRequest\x12'\n" +
+	"\x0ecustom_payload\x18c \x01(\fH\x00R\rcustomPayload\x12 \n" +
+	"\ventrypoints\x18\x14 \x03(\tR\ventrypointsB\a\n" +
+	"\x05input\"\\\n" +
 	"\fPolicySource\x12\x18\n" +
 	"\x06inline\x18\x01 \x01(\tH\x00R\x06inline\x12\x14\n" +
 	"\x04path\x18\x02 \x01(\tH\x00R\x04path\x12\x12\n" +
@@ -995,50 +1067,56 @@ func file_deputy_policy_v1_service_proto_rawDescGZIP() []byte {
 
 var file_deputy_policy_v1_service_proto_msgTypes = make([]protoimpl.MessageInfo, 12)
 var file_deputy_policy_v1_service_proto_goTypes = []any{
-	(*EvaluateRequest)(nil),          // 0: deputy.policy.v1.EvaluateRequest
-	(*PolicySource)(nil),             // 1: deputy.policy.v1.PolicySource
-	(*EvaluateResponse)(nil),         // 2: deputy.policy.v1.EvaluateResponse
-	(*PolicyError)(nil),              // 3: deputy.policy.v1.PolicyError
-	(*ValidateRequest)(nil),          // 4: deputy.policy.v1.ValidateRequest
-	(*ValidateResponse)(nil),         // 5: deputy.policy.v1.ValidateResponse
-	(*PolicySummary)(nil),            // 6: deputy.policy.v1.PolicySummary
-	(*ListEntrypointsRequest)(nil),   // 7: deputy.policy.v1.ListEntrypointsRequest
-	(*ListEntrypointsResponse)(nil),  // 8: deputy.policy.v1.ListEntrypointsResponse
-	(*EntrypointInfo)(nil),           // 9: deputy.policy.v1.EntrypointInfo
-	(*VariableInfo)(nil),             // 10: deputy.policy.v1.VariableInfo
-	(*FieldInfo)(nil),                // 11: deputy.policy.v1.FieldInfo
-	(*ScanVulnerabilityContext)(nil), // 12: deputy.policy.v1.ScanVulnerabilityContext
-	(*ScanReportContext)(nil),        // 13: deputy.policy.v1.ScanReportContext
-	(*ProxyRequestContext)(nil),      // 14: deputy.policy.v1.ProxyRequestContext
-	(*Action)(nil),                   // 15: deputy.policy.v1.Action
-	(ActionType)(0),                  // 16: deputy.policy.v1.ActionType
+	(*EvaluateRequest)(nil),                // 0: deputy.policy.v1.EvaluateRequest
+	(*PolicySource)(nil),                   // 1: deputy.policy.v1.PolicySource
+	(*EvaluateResponse)(nil),               // 2: deputy.policy.v1.EvaluateResponse
+	(*PolicyError)(nil),                    // 3: deputy.policy.v1.PolicyError
+	(*ValidateRequest)(nil),                // 4: deputy.policy.v1.ValidateRequest
+	(*ValidateResponse)(nil),               // 5: deputy.policy.v1.ValidateResponse
+	(*PolicySummary)(nil),                  // 6: deputy.policy.v1.PolicySummary
+	(*ListEntrypointsRequest)(nil),         // 7: deputy.policy.v1.ListEntrypointsRequest
+	(*ListEntrypointsResponse)(nil),        // 8: deputy.policy.v1.ListEntrypointsResponse
+	(*EntrypointInfo)(nil),                 // 9: deputy.policy.v1.EntrypointInfo
+	(*VariableInfo)(nil),                   // 10: deputy.policy.v1.VariableInfo
+	(*FieldInfo)(nil),                      // 11: deputy.policy.v1.FieldInfo
+	(*ScanVulnerabilityPolicyInput)(nil),   // 12: deputy.policy.v1.ScanVulnerabilityPolicyInput
+	(*ScanReportPolicyInput)(nil),          // 13: deputy.policy.v1.ScanReportPolicyInput
+	(*GoArtifactRequestPolicyInput)(nil),   // 14: deputy.policy.v1.GoArtifactRequestPolicyInput
+	(*NpmArtifactRequestPolicyInput)(nil),  // 15: deputy.policy.v1.NpmArtifactRequestPolicyInput
+	(*PypiArtifactRequestPolicyInput)(nil), // 16: deputy.policy.v1.PypiArtifactRequestPolicyInput
+	(*OciArtifactRequestPolicyInput)(nil),  // 17: deputy.policy.v1.OciArtifactRequestPolicyInput
+	(*Action)(nil),                         // 18: deputy.policy.v1.Action
+	(ActionType)(0),                        // 19: deputy.policy.v1.ActionType
 }
 var file_deputy_policy_v1_service_proto_depIdxs = []int32{
 	1,  // 0: deputy.policy.v1.EvaluateRequest.policies:type_name -> deputy.policy.v1.PolicySource
-	12, // 1: deputy.policy.v1.EvaluateRequest.scan_vulnerability:type_name -> deputy.policy.v1.ScanVulnerabilityContext
-	13, // 2: deputy.policy.v1.EvaluateRequest.scan_report:type_name -> deputy.policy.v1.ScanReportContext
-	14, // 3: deputy.policy.v1.EvaluateRequest.proxy_request:type_name -> deputy.policy.v1.ProxyRequestContext
-	15, // 4: deputy.policy.v1.EvaluateResponse.actions:type_name -> deputy.policy.v1.Action
-	16, // 5: deputy.policy.v1.EvaluateResponse.outcome:type_name -> deputy.policy.v1.ActionType
-	3,  // 6: deputy.policy.v1.EvaluateResponse.errors:type_name -> deputy.policy.v1.PolicyError
-	1,  // 7: deputy.policy.v1.ValidateRequest.policies:type_name -> deputy.policy.v1.PolicySource
-	3,  // 8: deputy.policy.v1.ValidateResponse.errors:type_name -> deputy.policy.v1.PolicyError
-	3,  // 9: deputy.policy.v1.ValidateResponse.warnings:type_name -> deputy.policy.v1.PolicyError
-	6,  // 10: deputy.policy.v1.ValidateResponse.summaries:type_name -> deputy.policy.v1.PolicySummary
-	9,  // 11: deputy.policy.v1.ListEntrypointsResponse.entrypoints:type_name -> deputy.policy.v1.EntrypointInfo
-	10, // 12: deputy.policy.v1.EntrypointInfo.variables:type_name -> deputy.policy.v1.VariableInfo
-	11, // 13: deputy.policy.v1.VariableInfo.fields:type_name -> deputy.policy.v1.FieldInfo
-	0,  // 14: deputy.policy.v1.PolicyService.Evaluate:input_type -> deputy.policy.v1.EvaluateRequest
-	4,  // 15: deputy.policy.v1.PolicyService.Validate:input_type -> deputy.policy.v1.ValidateRequest
-	7,  // 16: deputy.policy.v1.PolicyService.ListEntrypoints:input_type -> deputy.policy.v1.ListEntrypointsRequest
-	2,  // 17: deputy.policy.v1.PolicyService.Evaluate:output_type -> deputy.policy.v1.EvaluateResponse
-	5,  // 18: deputy.policy.v1.PolicyService.Validate:output_type -> deputy.policy.v1.ValidateResponse
-	8,  // 19: deputy.policy.v1.PolicyService.ListEntrypoints:output_type -> deputy.policy.v1.ListEntrypointsResponse
-	17, // [17:20] is the sub-list for method output_type
-	14, // [14:17] is the sub-list for method input_type
-	14, // [14:14] is the sub-list for extension type_name
-	14, // [14:14] is the sub-list for extension extendee
-	0,  // [0:14] is the sub-list for field type_name
+	12, // 1: deputy.policy.v1.EvaluateRequest.scan_vulnerability:type_name -> deputy.policy.v1.ScanVulnerabilityPolicyInput
+	13, // 2: deputy.policy.v1.EvaluateRequest.scan_report:type_name -> deputy.policy.v1.ScanReportPolicyInput
+	14, // 3: deputy.policy.v1.EvaluateRequest.go_artifact_request:type_name -> deputy.policy.v1.GoArtifactRequestPolicyInput
+	15, // 4: deputy.policy.v1.EvaluateRequest.npm_artifact_request:type_name -> deputy.policy.v1.NpmArtifactRequestPolicyInput
+	16, // 5: deputy.policy.v1.EvaluateRequest.pypi_artifact_request:type_name -> deputy.policy.v1.PypiArtifactRequestPolicyInput
+	17, // 6: deputy.policy.v1.EvaluateRequest.oci_artifact_request:type_name -> deputy.policy.v1.OciArtifactRequestPolicyInput
+	18, // 7: deputy.policy.v1.EvaluateResponse.actions:type_name -> deputy.policy.v1.Action
+	19, // 8: deputy.policy.v1.EvaluateResponse.outcome:type_name -> deputy.policy.v1.ActionType
+	3,  // 9: deputy.policy.v1.EvaluateResponse.errors:type_name -> deputy.policy.v1.PolicyError
+	1,  // 10: deputy.policy.v1.ValidateRequest.policies:type_name -> deputy.policy.v1.PolicySource
+	3,  // 11: deputy.policy.v1.ValidateResponse.errors:type_name -> deputy.policy.v1.PolicyError
+	3,  // 12: deputy.policy.v1.ValidateResponse.warnings:type_name -> deputy.policy.v1.PolicyError
+	6,  // 13: deputy.policy.v1.ValidateResponse.summaries:type_name -> deputy.policy.v1.PolicySummary
+	9,  // 14: deputy.policy.v1.ListEntrypointsResponse.entrypoints:type_name -> deputy.policy.v1.EntrypointInfo
+	10, // 15: deputy.policy.v1.EntrypointInfo.variables:type_name -> deputy.policy.v1.VariableInfo
+	11, // 16: deputy.policy.v1.VariableInfo.fields:type_name -> deputy.policy.v1.FieldInfo
+	0,  // 17: deputy.policy.v1.PolicyService.Evaluate:input_type -> deputy.policy.v1.EvaluateRequest
+	4,  // 18: deputy.policy.v1.PolicyService.Validate:input_type -> deputy.policy.v1.ValidateRequest
+	7,  // 19: deputy.policy.v1.PolicyService.ListEntrypoints:input_type -> deputy.policy.v1.ListEntrypointsRequest
+	2,  // 20: deputy.policy.v1.PolicyService.Evaluate:output_type -> deputy.policy.v1.EvaluateResponse
+	5,  // 21: deputy.policy.v1.PolicyService.Validate:output_type -> deputy.policy.v1.ValidateResponse
+	8,  // 22: deputy.policy.v1.PolicyService.ListEntrypoints:output_type -> deputy.policy.v1.ListEntrypointsResponse
+	20, // [20:23] is the sub-list for method output_type
+	17, // [17:20] is the sub-list for method input_type
+	17, // [17:17] is the sub-list for extension type_name
+	17, // [17:17] is the sub-list for extension extendee
+	0,  // [0:17] is the sub-list for field type_name
 }
 
 func init() { file_deputy_policy_v1_service_proto_init() }
@@ -1050,7 +1128,11 @@ func file_deputy_policy_v1_service_proto_init() {
 	file_deputy_policy_v1_service_proto_msgTypes[0].OneofWrappers = []any{
 		(*EvaluateRequest_ScanVulnerability)(nil),
 		(*EvaluateRequest_ScanReport)(nil),
-		(*EvaluateRequest_ProxyRequest)(nil),
+		(*EvaluateRequest_GoArtifactRequest)(nil),
+		(*EvaluateRequest_NpmArtifactRequest)(nil),
+		(*EvaluateRequest_PypiArtifactRequest)(nil),
+		(*EvaluateRequest_OciArtifactRequest)(nil),
+		(*EvaluateRequest_CustomPayload)(nil),
 	}
 	file_deputy_policy_v1_service_proto_msgTypes[1].OneofWrappers = []any{
 		(*PolicySource_Inline)(nil),

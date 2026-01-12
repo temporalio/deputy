@@ -4,12 +4,12 @@ policies:
     vars:
       name: 'pkg.name'
       version: 'pkg.version'
-      purlType: 'component.?purlType.orValue("")'
+      ecosystem: 'pkg.ecosystem'
       missingVersion: 'version == ""'
-      missingPurlType: 'purlType == ""'
+      missingEcosystem: 'ecosystem == ""'
       missingName: 'name == ""'
     rules:
       - action: warn
-        when: env.entrypoint == "sbom_component" && (missingVersion || missingPurlType || missingName)
+        when: env.entrypoint == "sbom_component" && (missingVersion || missingEcosystem || missingName)
         reason: SBOM component is missing key metadata (name, version, or ecosystem)
         remediation: Re-run SBOM generation with enrichment or verify extractor coverage

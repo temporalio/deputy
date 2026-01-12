@@ -50,7 +50,8 @@ service ScanService {
 message ScanRequest {
   // Target is the scan target (path, URL, image reference, etc.).
   // When empty, defaults to current working directory.
-  string target = 1;
+  // Maximum length prevents denial-of-service via excessively long strings.
+  string target = 1 [(buf.validate.field).string.max_len = 4096];
 
   // Options configure scan behavior.
   ScanOptions options = 2;
@@ -59,7 +60,8 @@ message ScanRequest {
 // StreamScanRequest specifies what to scan with streaming progress.
 message StreamScanRequest {
   // Target is the scan target (path, URL, image reference, etc.).
-  string target = 1;
+  // Maximum length prevents denial-of-service via excessively long strings.
+  string target = 1 [(buf.validate.field).string.max_len = 4096];
 
   // Options configure scan behavior.
   ScanOptions options = 2;
@@ -69,7 +71,8 @@ message StreamScanRequest {
 message ScanOptions {
   // Ecosystems filters scanning to specific package ecosystems.
   // Empty means scan all detected ecosystems.
-  repeated string ecosystems = 1;
+  // Maximum 50 ecosystems to prevent abuse.
+  repeated string ecosystems = 1 [(buf.validate.field).repeated = {max_items: 50, items: {string: {max_len: 64}}}];
 
   // PublishedBefore filters to vulnerabilities published before this timestamp.
   google.protobuf.Timestamp published_before = 2;
@@ -84,15 +87,17 @@ message ScanOptions {
   EnrichOptions enrich_options = 5;
 
   // PolicyPaths are paths to policy files to evaluate.
-  repeated string policy_paths = 6;
+  // Maximum 20 policy paths to prevent abuse. Each path limited to 1024 chars.
+  repeated string policy_paths = 6 [(buf.validate.field).repeated = {max_items: 20, items: {string: {max_len: 1024}}}];
 
   // Ref is a Git reference to scan (branch, tag, commit).
   // Only applies to git/repository targets.
-  string ref = 7;
+  // Maximum length accommodates SHA-256 commit hashes and long branch names.
+  string ref = 7 [(buf.validate.field).string.max_len = 256];
 
   // Platform specifies the target platform for container images (e.g., "linux/amd64").
   // Only applies to container image targets.
-  string platform = 8;
+  string platform = 8 [(buf.validate.field).string.max_len = 64];
 
   // IncludeSecrets enables secret scanning alongside vulnerability scanning.
   bool include_secrets = 9;
@@ -130,7 +135,7 @@ message TargetHint {
   //
   // Security: "daemon", "tarball", "oci-archive", and "oci-layout" are only
   // available in in-process or local daemon mode. Remote servers reject these.
-  string image_transport = 2;
+  string image_transport = 2 [(buf.validate.field).string = {in: ["", "remote", "daemon", "tarball", "oci-archive", "oci-layout"]}];
 }
 
 // GraphOptions configures dependency graph resolution during scans.
@@ -145,7 +150,8 @@ message GraphOptions {
   bool use_git = 3;
 
   // PrivatePatterns specifies glob patterns for private modules.
-  repeated string private_patterns = 4;
+  // Maximum 100 patterns to prevent abuse. Each pattern limited to 256 chars.
+  repeated string private_patterns = 4 [(buf.validate.field).repeated = {max_items: 100, items: {string: {max_len: 256}}}];
 }
 
 // EnrichOptions configures vulnerability enrichment with threat intelligence.
@@ -169,7 +175,7 @@ message ScanResponse {
   google.protobuf.Timestamp generated_at = 2;
 
   // PackagesScanned is the count of packages analyzed.
-  int32 packages_scanned = 3;
+  int32 packages_scanned = 3 [(buf.validate.field).int32.gte = 0];
 
   // Packages lists all discovered packages.
   repeated deputy.dependency.v1.Package packages = 4;
@@ -213,7 +219,7 @@ message ScanProgress {
   ScanPhase phase = 1;
 
   // Message provides human-readable progress information.
-  string message = 2;
+  string message = 2 [(buf.validate.field).string.max_len = 1024];
 
   // Progress is the completion percentage (0-100) for the current phase.
   int32 progress = 3 [(buf.validate.field).int32 = {gte: 0, lte: 100}];
@@ -228,7 +234,7 @@ message ScanProgress {
   ScanResponse result = 10;
 
   // Error is populated if the scan failed.
-  string error = 11;
+  string error = 11 [(buf.validate.field).string.max_len = 4096];
 }
 
 // ScanPhase indicates the current phase of a scan operation.
@@ -272,34 +278,34 @@ message ImageInfo {
 // ImageConfig contains container image configuration from Dockerfile settings.
 message ImageConfig {
   // User to run as (empty = root).
-  string user = 1;
+  string user = 1 [(buf.validate.field).string.max_len = 256];
 
   // IsRoot indicates whether running as root.
   bool is_root = 2;
 
   // Env are environment variables.
-  repeated string env = 3;
+  repeated string env = 3 [(buf.validate.field).repeated.max_items = 1000];
 
   // SensitiveEnv are env vars that may contain secrets.
-  repeated string sensitive_env = 4;
+  repeated string sensitive_env = 4 [(buf.validate.field).repeated.max_items = 1000];
 
   // Entrypoint is the container entrypoint command.
-  repeated string entrypoint = 5;
+  repeated string entrypoint = 5 [(buf.validate.field).repeated.max_items = 100];
 
   // Cmd are default command arguments.
-  repeated string cmd = 6;
+  repeated string cmd = 6 [(buf.validate.field).repeated.max_items = 100];
 
   // ExposedPorts are exposed ports.
-  repeated string exposed_ports = 7;
+  repeated string exposed_ports = 7 [(buf.validate.field).repeated.max_items = 100];
 
   // Volumes are defined volumes.
-  repeated string volumes = 8;
+  repeated string volumes = 8 [(buf.validate.field).repeated.max_items = 100];
 
   // Labels are image labels.
   map<string, string> labels = 9;
 
   // WorkingDir is the working directory.
-  string working_dir = 10;
+  string working_dir = 10 [(buf.validate.field).string.max_len = 4096];
 
   // Healthcheck configuration if defined.
   Healthcheck healthcheck = 11;
@@ -308,43 +314,43 @@ message ImageConfig {
 // Healthcheck contains HEALTHCHECK instruction configuration.
 message Healthcheck {
   // Test is the health check command.
-  repeated string test = 1;
+  repeated string test = 1 [(buf.validate.field).repeated.max_items = 100];
 
   // Interval is time between checks (Go duration format).
-  string interval = 2;
+  string interval = 2 [(buf.validate.field).string.max_len = 32];
 
   // Timeout is timeout for each check.
-  string timeout = 3;
+  string timeout = 3 [(buf.validate.field).string.max_len = 32];
 
   // Retries is consecutive failures before unhealthy.
-  int32 retries = 4;
+  int32 retries = 4 [(buf.validate.field).int32.gte = 0];
 }
 
 // ImageMetadata contains image metadata.
 message ImageMetadata {
   // Architecture is the CPU architecture.
-  string architecture = 1;
+  string architecture = 1 [(buf.validate.field).string.max_len = 64];
 
   // Os is the operating system.
-  string os = 2;
+  string os = 2 [(buf.validate.field).string.max_len = 64];
 
   // LayerCount is the number of layers.
-  int32 layer_count = 3;
+  int32 layer_count = 3 [(buf.validate.field).int32.gte = 0];
 
   // Size is total size in bytes.
-  int64 size = 4;
+  int64 size = 4 [(buf.validate.field).int64.gte = 0];
 
   // Created is when the image was created.
   google.protobuf.Timestamp created = 5;
 
   // Digest is the image digest.
-  string digest = 6;
+  string digest = 6 [(buf.validate.field).string.max_len = 256];
 }
 
 // HistoryEntry contains build history information.
 message HistoryEntry {
   // CreatedBy is the command that created this layer.
-  string created_by = 1;
+  string created_by = 1 [(buf.validate.field).string.max_len = 65536];
 
   // Created is when this layer was created.
   google.protobuf.Timestamp created = 2;

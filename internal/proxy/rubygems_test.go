@@ -88,7 +88,7 @@ func TestRubyGemsHandlerBlocksLicense(t *testing.T) {
 	defer upstream.Close()
 
 	tmp := t.TempDir()
-	pol := writeRubyBundle(t, tmp, "block-license", `licenses.exists(l, l == "AGPL-3.0")`, "license", "deny")
+	pol := writeRubyBundle(t, tmp, "block-license", `pkg.licenses.exists(l, l == "AGPL-3.0")`, "license", "deny")
 	engine, err := NewPolicyEngine([]string{pol})
 	if err != nil {
 		t.Fatalf("engine: %v", err)

@@ -1,4 +1,4 @@
-// Package graph provides dependency graph operations using proto-first types.
+// Package graph provides dependency graph operations.
 //
 // The graph package uses Protocol Buffer types from graphv1 as its internal
 // representation, enabling seamless serialization and RPC without conversion.
@@ -275,7 +275,7 @@ func FromInventory(pkgs []*extractor.Package, direct map[string]bool) *Graph {
 
 		// Get ecosystem from SCALIBR, falling back to custom mapping for
 		// PURL types SCALIBR doesn't recognize (e.g., GitHub Actions)
-		ecosystem := pkg.Ecosystem()
+		ecosystem := pkg.Ecosystem().String()
 		if ecosystem == "" {
 			ecosystem = ecosystemFromPURLType(purlObj.Type)
 		}

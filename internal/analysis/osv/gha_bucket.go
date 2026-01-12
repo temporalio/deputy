@@ -24,6 +24,7 @@ import (
 	"github.com/go-git/go-git/v5/storage/memory"
 	"github.com/ossf/osv-schema/bindings/go/osvschema"
 	vulnerabilityv1 "github.com/picatz/deputy/gen/deputy/vulnerability/v1"
+	"github.com/picatz/deputy/internal/cache"
 	"github.com/picatz/deputy/internal/cache/disk"
 	"github.com/picatz/deputy/internal/collections"
 	"github.com/picatz/deputy/internal/httputil"
@@ -461,13 +462,16 @@ func normalizeSemverVersion(v string) string {
 
 // loadGHAVulnIndex memoizes a parsed view of the GitHub Actions all.zip bucket.
 func loadGHAVulnIndex(ctx context.Context) (*ghaVulnIndex, error) {
+	// Check if cache is bypassed via --no-cache flag
+	bypassCache := cache.ShouldBypassSource(ctx, "osv")
+
 	ghaIndexMu.RLock()
 	idx := ghaIndex
 	builtAt := ghaIndexBuiltAt
 	ttl := ghaIndexTTL
 	ghaIndexMu.RUnlock()
 
-	if idx != nil && ttl > 0 && time.Since(builtAt) < ttl {
+	if !bypassCache && idx != nil && ttl > 0 && time.Since(builtAt) < ttl {
 		return idx, nil
 	}
 
@@ -553,6 +557,9 @@ func buildGHAVulnIndex(ctx context.Context) (*ghaVulnIndex, error) {
 // ensureGHACacheZip ensures a recent copy of all.zip exists on disk and returns its path.
 // The zip is refreshed on a TTL to keep results aligned with OSV releases.
 func ensureGHACacheZip(ctx context.Context) (string, error) {
+	// Check if cache is bypassed via --no-cache flag
+	bypassCache := cache.ShouldBypassSource(ctx, "osv")
+
 	base := disk.BaseDir()
 	if base == "" {
 		tmp, err := os.MkdirTemp("", "deputy-osv-gha-*")
@@ -563,9 +570,11 @@ func ensureGHACacheZip(ctx context.Context) (string, error) {
 	}
 	dir := filepath.Join(base, ghaCacheSubdir)
 	path := filepath.Join(dir, ghaZipFilename)
-	if fi, err := os.Stat(path); err == nil && fi.Size() > 0 {
-		if time.Since(fi.ModTime()) < ghaDownloadTTL {
-			return path, nil
+	if !bypassCache {
+		if fi, err := os.Stat(path); err == nil && fi.Size() > 0 {
+			if time.Since(fi.ModTime()) < ghaDownloadTTL {
+				return path, nil
+			}
 		}
 	}
 	if err := os.MkdirAll(dir, 0o755); err != nil {

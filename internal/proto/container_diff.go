@@ -94,7 +94,7 @@ func extractDistroFromPackages(pkgs []*extractor.Package) string {
 	// Count ecosystems to find the most common one
 	ecosystemCounts := make(map[string]int)
 	for _, pkg := range pkgs {
-		eco := pkg.Ecosystem()
+		eco := pkg.Ecosystem().String()
 		if eco == "" {
 			continue
 		}
@@ -894,7 +894,6 @@ func protoLayerChangeKindToCompare(kind diffv1.LayerChangeKind) compare.LayerCha
 }
 
 // ImageDiffReportToProto converts an internal ImageDiffReport to proto DiffContainerImagesResponse.
-// This is used for proto-first policy evaluation.
 func ImageDiffReportToProto(report *compare.ImageDiffReport) *diffv1.DiffContainerImagesResponse {
 	if report == nil {
 		return nil

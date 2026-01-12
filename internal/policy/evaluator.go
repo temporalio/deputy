@@ -12,8 +12,10 @@ import (
 	"github.com/google/cel-go/checker/decls"
 	"github.com/google/cel-go/common/types/ref"
 	"github.com/google/cel-go/ext"
+	containerv1 "github.com/picatz/deputy/gen/deputy/container/v1"
 	dependencyv1 "github.com/picatz/deputy/gen/deputy/dependency/v1"
 	policyv1 "github.com/picatz/deputy/gen/deputy/policy/v1"
+	scanv1 "github.com/picatz/deputy/gen/deputy/scan/v1"
 	targetv1 "github.com/picatz/deputy/gen/deputy/target/v1"
 	vulnerabilityv1 "github.com/picatz/deputy/gen/deputy/vulnerability/v1"
 	exprpb "google.golang.org/genproto/googleapis/api/expr/v1alpha1"
@@ -200,13 +202,87 @@ func envWithNames(extra []string) (*cel.Env, error) {
 			&vulnerabilityv1.Stats{},
 			&dependencyv1.Package{},
 			&targetv1.Target{},
-			// Policy evaluation context types (proto-first)
+			// Common policy types
 			&policyv1.Environment{},
 			&policyv1.JWTClaims{},
 			&policyv1.ProxyRequest{},
-			&policyv1.ScanVulnerabilityContext{},
-			&policyv1.ScanReportContext{},
-			&policyv1.ProxyRequestContext{},
+			&policyv1.ServiceRequest{},
+			// Scan policy inputs
+			&policyv1.ScanVulnerabilityPolicyInput{},
+			&policyv1.ScanReportPolicyInput{},
+			// Proxy policy inputs
+			&policyv1.GoArtifactRequestPolicyInput{},
+			&policyv1.NpmArtifactRequestPolicyInput{},
+			&policyv1.PypiArtifactRequestPolicyInput{},
+			&policyv1.RubygemsArtifactRequestPolicyInput{},
+			&policyv1.OciArtifactRequestPolicyInput{},
+			// SBOM policy inputs
+			&policyv1.SbomReportPolicyInput{},
+			&policyv1.SbomComponentPolicyInput{},
+			// Diff policy inputs
+			&policyv1.DiffReportPolicyInput{},
+			&policyv1.DiffDependencyChangePolicyInput{},
+			&policyv1.DiffVulnerabilityPolicyInput{},
+			&policyv1.DependencyChange{},
+			// Container diff policy inputs
+			&policyv1.ContainerDiffReportPolicyInput{},
+			&policyv1.ContainerDiffChangePolicyInput{},
+			&policyv1.ContainerDiffVulnerabilityPolicyInput{},
+			&policyv1.ContainerDiffLayerPolicyInput{},
+			&policyv1.ContainerDiffConfigPolicyInput{},
+			&policyv1.ContainerPackageChange{},
+			&policyv1.ContainerVulnerabilityChange{},
+			&policyv1.ContainerConfigDiff{},
+			&policyv1.ContainerImageRef{},
+			&policyv1.LayerChange{},
+			// Secrets policy inputs
+			&policyv1.SecretsReportPolicyInput{},
+			&policyv1.SecretsFindingPolicyInput{},
+			// Graph policy inputs
+			&policyv1.GraphReportPolicyInput{},
+			&policyv1.GraphNodePolicyInput{},
+			&policyv1.GraphEdgePolicyInput{},
+			&policyv1.GraphNode{},
+			&policyv1.GraphEdge{},
+			&policyv1.GraphStats{},
+			// Fix policy inputs
+			&policyv1.FixPlanPolicyInput{},
+			&policyv1.FixPlanStepPolicyInput{},
+			&policyv1.RemediationCommand{},
+			// Triage policy inputs
+			&policyv1.TriageReportPolicyInput{},
+			&policyv1.TriageClusterPolicyInput{},
+			&policyv1.TriagePackageSummary{},
+			// Dockerfile policy inputs
+			&policyv1.DockerfileReportPolicyInput{},
+			&policyv1.DockerfileStagePolicyInput{},
+			&policyv1.DockerfileInfo{},
+			&policyv1.DockerfileStage{},
+			&policyv1.DockerfileAnalysis{},
+			&policyv1.ImageReference{},
+			// Service policy inputs (server authorization)
+			&policyv1.ServiceScanRequestPolicyInput{},
+			&policyv1.ServiceListRequestPolicyInput{},
+			&policyv1.ServiceSbomRequestPolicyInput{},
+			&policyv1.ServiceDiffRequestPolicyInput{},
+			&policyv1.ServiceSecretsRequestPolicyInput{},
+			&policyv1.ServiceGraphRequestPolicyInput{},
+			// Scan service types for container image policies
+			&scanv1.ImageInfo{},
+			&scanv1.ImageConfig{},
+			&scanv1.ImageMetadata{},
+			&scanv1.HistoryEntry{},
+			&scanv1.Healthcheck{},
+			// Container types (used by container diff and OCI policies)
+			&containerv1.LayerDetails{},
+			&containerv1.ImageInfo{},
+			&containerv1.ImageConfig{},
+			&containerv1.ImageMetadata{},
+			&containerv1.HistoryEntry{},
+			&containerv1.HealthcheckConfig{},
+			// Secrets policy types (inline definitions to avoid circular imports)
+			&policyv1.SecretFinding{},
+			&policyv1.SecretStats{},
 		),
 		// Standard extensions
 		ext.Strings(),

@@ -5,6 +5,7 @@ syntax = "proto3";
 
 package deputy.sbom.v1;
 
+import "buf/validate/validate.proto";
 import "google/protobuf/timestamp.proto";
 import "deputy/target/v1/target.proto";
 import "deputy/dependency/v1/dependency.proto";
@@ -12,6 +13,11 @@ import "deputy/dependency/v1/dependency.proto";
 option go_package = "github.com/picatz/deputy/gen/deputy/sbom/v1;sbomv1";
 
 // SBOMService provides Software Bill of Materials generation capabilities.
+//
+// Security Model:
+// The same security model as ScanService applies:
+// - In-Process/Local Daemon: Full filesystem access
+// - Remote Server: Only remote-accessible targets (git URLs, registries, PURLs)
 service SBOMService {
   // Generate creates an SBOM for a target.
   rpc Generate(GenerateRequest) returns (GenerateResponse);
@@ -23,10 +29,12 @@ service SBOMService {
 // GenerateRequest specifies SBOM generation parameters.
 message GenerateRequest {
   // Target is the source to generate SBOM from (path, URL, image reference, etc.).
-  string target = 1;
+  // Maximum length prevents denial-of-service via excessively long strings.
+  string target = 1 [(buf.validate.field).string.max_len = 4096];
 
   // Format specifies the output format.
-  Format format = 2;
+  // Must be a valid Format enum value.
+  Format format = 2 [(buf.validate.field).enum.defined_only = true];
 
   // Options configure SBOM generation behavior.
   GenerateOptions options = 3;
@@ -57,16 +65,18 @@ message GenerateOptions {
   bool include_hashes = 2;
 
   // Ref is a Git reference for repository targets.
-  string ref = 3;
+  // Maximum length accommodates SHA-256 commit hashes and long branch names.
+  string ref = 3 [(buf.validate.field).string.max_len = 256];
 
   // Platform specifies target platform for container images.
-  string platform = 4;
+  string platform = 4 [(buf.validate.field).string.max_len = 64];
 }
 
 // GenerateResponse contains the generated SBOM.
 message GenerateResponse {
   // Sbom is the generated SBOM in the requested format.
-  bytes sbom = 1;
+  // Maximum 100MB to prevent memory exhaustion.
+  bytes sbom = 1 [(buf.validate.field).bytes.max_len = 104857600];
 
   // Format is the format of the generated SBOM.
   Format format = 2;
@@ -84,13 +94,13 @@ message GenerateResponse {
 // Stats provides statistics about an SBOM.
 message Stats {
   // TotalComponents is the total number of components.
-  int32 total_components = 1;
+  int32 total_components = 1 [(buf.validate.field).int32.gte = 0];
 
   // DirectDependencies is the count of direct dependencies.
-  int32 direct_dependencies = 2;
+  int32 direct_dependencies = 2 [(buf.validate.field).int32.gte = 0];
 
   // TransitiveDependencies is the count of transitive dependencies.
-  int32 transitive_dependencies = 3;
+  int32 transitive_dependencies = 3 [(buf.validate.field).int32.gte = 0];
 
   // Ecosystems maps ecosystem names to component counts.
   map<string, int32> ecosystems = 4;
@@ -99,16 +109,20 @@ message Stats {
 // DiffRequest specifies two SBOMs to compare.
 message DiffRequest {
   // Base is the baseline SBOM (older version).
-  bytes base = 1;
+  // Maximum 100MB to prevent memory exhaustion.
+  bytes base = 1 [(buf.validate.field).bytes.max_len = 104857600];
 
   // Target is the target SBOM to compare against base (newer version).
-  bytes target = 2;
+  // Maximum 100MB to prevent memory exhaustion.
+  bytes target = 2 [(buf.validate.field).bytes.max_len = 104857600];
 
   // BaseFormat is the format of the base SBOM.
-  Format base_format = 3;
+  // Must be a valid Format enum value.
+  Format base_format = 3 [(buf.validate.field).enum.defined_only = true];
 
   // TargetFormat is the format of the target SBOM.
-  Format target_format = 4;
+  // Must be a valid Format enum value.
+  Format target_format = 4 [(buf.validate.field).enum.defined_only = true];
 }
 
 // DiffResponse contains the differences between two SBOMs.
@@ -132,10 +146,10 @@ message PackageChange {
   deputy.dependency.v1.Package package = 1;
 
   // PreviousVersion is the version in the base SBOM.
-  string previous_version = 2;
+  string previous_version = 2 [(buf.validate.field).string.max_len = 256];
 
   // NewVersion is the version in the target SBOM.
-  string new_version = 3;
+  string new_version = 3 [(buf.validate.field).string.max_len = 256];
 
   // Kind indicates the type of version change.
   ChangeKind kind = 4;
@@ -161,31 +175,31 @@ enum ChangeKind {
 // LicenseChange tracks license modifications.
 message LicenseChange {
   // Added contains licenses added in the new version.
-  repeated string added = 1;
+  repeated string added = 1 [(buf.validate.field).repeated = {max_items: 100, items: {string: {max_len: 64}}}];
   // Removed contains licenses removed in the new version.
-  repeated string removed = 2;
+  repeated string removed = 2 [(buf.validate.field).repeated = {max_items: 100, items: {string: {max_len: 64}}}];
 }
 
 // DiffStats summarizes SBOM differences.
 message DiffStats {
   // AddedCount is the number of added components.
-  int32 added_count = 1;
+  int32 added_count = 1 [(buf.validate.field).int32.gte = 0];
 
   // RemovedCount is the number of removed components.
-  int32 removed_count = 2;
+  int32 removed_count = 2 [(buf.validate.field).int32.gte = 0];
 
   // ModifiedCount is the number of modified components.
-  int32 modified_count = 3;
+  int32 modified_count = 3 [(buf.validate.field).int32.gte = 0];
 
   // UnchangedCount is the number of unchanged components.
-  int32 unchanged_count = 4;
+  int32 unchanged_count = 4 [(buf.validate.field).int32.gte = 0];
 
   // BreakingCount is the number of major version changes.
-  int32 breaking_count = 5;
+  int32 breaking_count = 5 [(buf.validate.field).int32.gte = 0];
 
   // DowngradeCount is the number of version downgrades.
-  int32 downgrade_count = 6;
+  int32 downgrade_count = 6 [(buf.validate.field).int32.gte = 0];
 
   // LicenseChangeCount is the number of packages with license changes.
-  int32 license_change_count = 7;
+  int32 license_change_count = 7 [(buf.validate.field).int32.gte = 0];
 }

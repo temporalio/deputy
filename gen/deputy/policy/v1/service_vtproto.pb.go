@@ -48,7 +48,7 @@ func (m *EvaluateRequest) MarshalToSizedBufferVT(dAtA []byte) (int, error) {
 		i -= len(m.unknownFields)
 		copy(dAtA[i:], m.unknownFields)
 	}
-	if vtmsg, ok := m.Context.(interface {
+	if vtmsg, ok := m.Input.(interface {
 		MarshalToSizedBufferVT([]byte) (int, error)
 	}); ok {
 		size, err := vtmsg.MarshalToSizedBufferVT(dAtA[:i])
@@ -121,15 +121,15 @@ func (m *EvaluateRequest_ScanReport) MarshalToSizedBufferVT(dAtA []byte) (int, e
 	}
 	return len(dAtA) - i, nil
 }
-func (m *EvaluateRequest_ProxyRequest) MarshalToVT(dAtA []byte) (int, error) {
+func (m *EvaluateRequest_GoArtifactRequest) MarshalToVT(dAtA []byte) (int, error) {
 	size := m.SizeVT()
 	return m.MarshalToSizedBufferVT(dAtA[:size])
 }
 
-func (m *EvaluateRequest_ProxyRequest) MarshalToSizedBufferVT(dAtA []byte) (int, error) {
+func (m *EvaluateRequest_GoArtifactRequest) MarshalToSizedBufferVT(dAtA []byte) (int, error) {
 	i := len(dAtA)
-	if m.ProxyRequest != nil {
-		size, err := m.ProxyRequest.MarshalToSizedBufferVT(dAtA[:i])
+	if m.GoArtifactRequest != nil {
+		size, err := m.GoArtifactRequest.MarshalToSizedBufferVT(dAtA[:i])
 		if err != nil {
 			return 0, err
 		}
@@ -138,6 +138,79 @@ func (m *EvaluateRequest_ProxyRequest) MarshalToSizedBufferVT(dAtA []byte) (int,
 		i--
 		dAtA[i] = 0x62
 	}
+	return len(dAtA) - i, nil
+}
+func (m *EvaluateRequest_NpmArtifactRequest) MarshalToVT(dAtA []byte) (int, error) {
+	size := m.SizeVT()
+	return m.MarshalToSizedBufferVT(dAtA[:size])
+}
+
+func (m *EvaluateRequest_NpmArtifactRequest) MarshalToSizedBufferVT(dAtA []byte) (int, error) {
+	i := len(dAtA)
+	if m.NpmArtifactRequest != nil {
+		size, err := m.NpmArtifactRequest.MarshalToSizedBufferVT(dAtA[:i])
+		if err != nil {
+			return 0, err
+		}
+		i -= size
+		i = protohelpers.EncodeVarint(dAtA, i, uint64(size))
+		i--
+		dAtA[i] = 0x6a
+	}
+	return len(dAtA) - i, nil
+}
+func (m *EvaluateRequest_PypiArtifactRequest) MarshalToVT(dAtA []byte) (int, error) {
+	size := m.SizeVT()
+	return m.MarshalToSizedBufferVT(dAtA[:size])
+}
+
+func (m *EvaluateRequest_PypiArtifactRequest) MarshalToSizedBufferVT(dAtA []byte) (int, error) {
+	i := len(dAtA)
+	if m.PypiArtifactRequest != nil {
+		size, err := m.PypiArtifactRequest.MarshalToSizedBufferVT(dAtA[:i])
+		if err != nil {
+			return 0, err
+		}
+		i -= size
+		i = protohelpers.EncodeVarint(dAtA, i, uint64(size))
+		i--
+		dAtA[i] = 0x72
+	}
+	return len(dAtA) - i, nil
+}
+func (m *EvaluateRequest_OciArtifactRequest) MarshalToVT(dAtA []byte) (int, error) {
+	size := m.SizeVT()
+	return m.MarshalToSizedBufferVT(dAtA[:size])
+}
+
+func (m *EvaluateRequest_OciArtifactRequest) MarshalToSizedBufferVT(dAtA []byte) (int, error) {
+	i := len(dAtA)
+	if m.OciArtifactRequest != nil {
+		size, err := m.OciArtifactRequest.MarshalToSizedBufferVT(dAtA[:i])
+		if err != nil {
+			return 0, err
+		}
+		i -= size
+		i = protohelpers.EncodeVarint(dAtA, i, uint64(size))
+		i--
+		dAtA[i] = 0x7a
+	}
+	return len(dAtA) - i, nil
+}
+func (m *EvaluateRequest_CustomPayload) MarshalToVT(dAtA []byte) (int, error) {
+	size := m.SizeVT()
+	return m.MarshalToSizedBufferVT(dAtA[:size])
+}
+
+func (m *EvaluateRequest_CustomPayload) MarshalToSizedBufferVT(dAtA []byte) (int, error) {
+	i := len(dAtA)
+	i -= len(m.CustomPayload)
+	copy(dAtA[i:], m.CustomPayload)
+	i = protohelpers.EncodeVarint(dAtA, i, uint64(len(m.CustomPayload)))
+	i--
+	dAtA[i] = 0x6
+	i--
+	dAtA[i] = 0x9a
 	return len(dAtA) - i, nil
 }
 func (m *PolicySource) MarshalVT() (dAtA []byte, err error) {
@@ -836,7 +909,7 @@ func (m *EvaluateRequest) SizeVT() (n int) {
 			n += 1 + l + protohelpers.SizeOfVarint(uint64(l))
 		}
 	}
-	if vtmsg, ok := m.Context.(interface{ SizeVT() int }); ok {
+	if vtmsg, ok := m.Input.(interface{ SizeVT() int }); ok {
 		n += vtmsg.SizeVT()
 	}
 	if len(m.Entrypoints) > 0 {
@@ -873,16 +946,62 @@ func (m *EvaluateRequest_ScanReport) SizeVT() (n int) {
 	}
 	return n
 }
-func (m *EvaluateRequest_ProxyRequest) SizeVT() (n int) {
+func (m *EvaluateRequest_GoArtifactRequest) SizeVT() (n int) {
 	if m == nil {
 		return 0
 	}
 	var l int
 	_ = l
-	if m.ProxyRequest != nil {
-		l = m.ProxyRequest.SizeVT()
+	if m.GoArtifactRequest != nil {
+		l = m.GoArtifactRequest.SizeVT()
 		n += 1 + l + protohelpers.SizeOfVarint(uint64(l))
 	}
+	return n
+}
+func (m *EvaluateRequest_NpmArtifactRequest) SizeVT() (n int) {
+	if m == nil {
+		return 0
+	}
+	var l int
+	_ = l
+	if m.NpmArtifactRequest != nil {
+		l = m.NpmArtifactRequest.SizeVT()
+		n += 1 + l + protohelpers.SizeOfVarint(uint64(l))
+	}
+	return n
+}
+func (m *EvaluateRequest_PypiArtifactRequest) SizeVT() (n int) {
+	if m == nil {
+		return 0
+	}
+	var l int
+	_ = l
+	if m.PypiArtifactRequest != nil {
+		l = m.PypiArtifactRequest.SizeVT()
+		n += 1 + l + protohelpers.SizeOfVarint(uint64(l))
+	}
+	return n
+}
+func (m *EvaluateRequest_OciArtifactRequest) SizeVT() (n int) {
+	if m == nil {
+		return 0
+	}
+	var l int
+	_ = l
+	if m.OciArtifactRequest != nil {
+		l = m.OciArtifactRequest.SizeVT()
+		n += 1 + l + protohelpers.SizeOfVarint(uint64(l))
+	}
+	return n
+}
+func (m *EvaluateRequest_CustomPayload) SizeVT() (n int) {
+	if m == nil {
+		return 0
+	}
+	var l int
+	_ = l
+	l = len(m.CustomPayload)
+	n += 2 + l + protohelpers.SizeOfVarint(uint64(l))
 	return n
 }
 func (m *PolicySource) SizeVT() (n int) {
@@ -1267,16 +1386,16 @@ func (m *EvaluateRequest) UnmarshalVT(dAtA []byte) error {
 			if postIndex > l {
 				return io.ErrUnexpectedEOF
 			}
-			if oneof, ok := m.Context.(*EvaluateRequest_ScanVulnerability); ok {
+			if oneof, ok := m.Input.(*EvaluateRequest_ScanVulnerability); ok {
 				if err := oneof.ScanVulnerability.UnmarshalVT(dAtA[iNdEx:postIndex]); err != nil {
 					return err
 				}
 			} else {
-				v := &ScanVulnerabilityContext{}
+				v := &ScanVulnerabilityPolicyInput{}
 				if err := v.UnmarshalVT(dAtA[iNdEx:postIndex]); err != nil {
 					return err
 				}
-				m.Context = &EvaluateRequest_ScanVulnerability{ScanVulnerability: v}
+				m.Input = &EvaluateRequest_ScanVulnerability{ScanVulnerability: v}
 			}
 			iNdEx = postIndex
 		case 11:
@@ -1308,21 +1427,21 @@ func (m *EvaluateRequest) UnmarshalVT(dAtA []byte) error {
 			if postIndex > l {
 				return io.ErrUnexpectedEOF
 			}
-			if oneof, ok := m.Context.(*EvaluateRequest_ScanReport); ok {
+			if oneof, ok := m.Input.(*EvaluateRequest_ScanReport); ok {
 				if err := oneof.ScanReport.UnmarshalVT(dAtA[iNdEx:postIndex]); err != nil {
 					return err
 				}
 			} else {
-				v := &ScanReportContext{}
+				v := &ScanReportPolicyInput{}
 				if err := v.UnmarshalVT(dAtA[iNdEx:postIndex]); err != nil {
 					return err
 				}
-				m.Context = &EvaluateRequest_ScanReport{ScanReport: v}
+				m.Input = &EvaluateRequest_ScanReport{ScanReport: v}
 			}
 			iNdEx = postIndex
 		case 12:
 			if wireType != 2 {
-				return fmt.Errorf("proto: wrong wireType = %d for field ProxyRequest", wireType)
+				return fmt.Errorf("proto: wrong wireType = %d for field GoArtifactRequest", wireType)
 			}
 			var msglen int
 			for shift := uint(0); ; shift += 7 {
@@ -1349,16 +1468,139 @@ func (m *EvaluateRequest) UnmarshalVT(dAtA []byte) error {
 			if postIndex > l {
 				return io.ErrUnexpectedEOF
 			}
-			if oneof, ok := m.Context.(*EvaluateRequest_ProxyRequest); ok {
-				if err := oneof.ProxyRequest.UnmarshalVT(dAtA[iNdEx:postIndex]); err != nil {
+			if oneof, ok := m.Input.(*EvaluateRequest_GoArtifactRequest); ok {
+				if err := oneof.GoArtifactRequest.UnmarshalVT(dAtA[iNdEx:postIndex]); err != nil {
 					return err
 				}
 			} else {
-				v := &ProxyRequestContext{}
+				v := &GoArtifactRequestPolicyInput{}
 				if err := v.UnmarshalVT(dAtA[iNdEx:postIndex]); err != nil {
 					return err
 				}
-				m.Context = &EvaluateRequest_ProxyRequest{ProxyRequest: v}
+				m.Input = &EvaluateRequest_GoArtifactRequest{GoArtifactRequest: v}
+			}
+			iNdEx = postIndex
+		case 13:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field NpmArtifactRequest", wireType)
+			}
+			var msglen int
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return protohelpers.ErrIntOverflow
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				msglen |= int(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			if msglen < 0 {
+				return protohelpers.ErrInvalidLength
+			}
+			postIndex := iNdEx + msglen
+			if postIndex < 0 {
+				return protohelpers.ErrInvalidLength
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			if oneof, ok := m.Input.(*EvaluateRequest_NpmArtifactRequest); ok {
+				if err := oneof.NpmArtifactRequest.UnmarshalVT(dAtA[iNdEx:postIndex]); err != nil {
+					return err
+				}
+			} else {
+				v := &NpmArtifactRequestPolicyInput{}
+				if err := v.UnmarshalVT(dAtA[iNdEx:postIndex]); err != nil {
+					return err
+				}
+				m.Input = &EvaluateRequest_NpmArtifactRequest{NpmArtifactRequest: v}
+			}
+			iNdEx = postIndex
+		case 14:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field PypiArtifactRequest", wireType)
+			}
+			var msglen int
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return protohelpers.ErrIntOverflow
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				msglen |= int(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			if msglen < 0 {
+				return protohelpers.ErrInvalidLength
+			}
+			postIndex := iNdEx + msglen
+			if postIndex < 0 {
+				return protohelpers.ErrInvalidLength
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			if oneof, ok := m.Input.(*EvaluateRequest_PypiArtifactRequest); ok {
+				if err := oneof.PypiArtifactRequest.UnmarshalVT(dAtA[iNdEx:postIndex]); err != nil {
+					return err
+				}
+			} else {
+				v := &PypiArtifactRequestPolicyInput{}
+				if err := v.UnmarshalVT(dAtA[iNdEx:postIndex]); err != nil {
+					return err
+				}
+				m.Input = &EvaluateRequest_PypiArtifactRequest{PypiArtifactRequest: v}
+			}
+			iNdEx = postIndex
+		case 15:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field OciArtifactRequest", wireType)
+			}
+			var msglen int
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return protohelpers.ErrIntOverflow
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				msglen |= int(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			if msglen < 0 {
+				return protohelpers.ErrInvalidLength
+			}
+			postIndex := iNdEx + msglen
+			if postIndex < 0 {
+				return protohelpers.ErrInvalidLength
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			if oneof, ok := m.Input.(*EvaluateRequest_OciArtifactRequest); ok {
+				if err := oneof.OciArtifactRequest.UnmarshalVT(dAtA[iNdEx:postIndex]); err != nil {
+					return err
+				}
+			} else {
+				v := &OciArtifactRequestPolicyInput{}
+				if err := v.UnmarshalVT(dAtA[iNdEx:postIndex]); err != nil {
+					return err
+				}
+				m.Input = &EvaluateRequest_OciArtifactRequest{OciArtifactRequest: v}
 			}
 			iNdEx = postIndex
 		case 20:
@@ -1392,6 +1634,39 @@ func (m *EvaluateRequest) UnmarshalVT(dAtA []byte) error {
 				return io.ErrUnexpectedEOF
 			}
 			m.Entrypoints = append(m.Entrypoints, string(dAtA[iNdEx:postIndex]))
+			iNdEx = postIndex
+		case 99:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field CustomPayload", wireType)
+			}
+			var byteLen int
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return protohelpers.ErrIntOverflow
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				byteLen |= int(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			if byteLen < 0 {
+				return protohelpers.ErrInvalidLength
+			}
+			postIndex := iNdEx + byteLen
+			if postIndex < 0 {
+				return protohelpers.ErrInvalidLength
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			v := make([]byte, postIndex-iNdEx)
+			copy(v, dAtA[iNdEx:postIndex])
+			m.Input = &EvaluateRequest_CustomPayload{CustomPayload: v}
 			iNdEx = postIndex
 		default:
 			iNdEx = preIndex

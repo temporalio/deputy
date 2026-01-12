@@ -102,7 +102,7 @@ func collectPURLTypes(pkgs []*extractor.Package) map[string]int {
 		}
 		key := strings.ToLower(strings.TrimSpace(pkg.PURLType))
 		if key == "" {
-			key = strings.ToLower(strings.TrimSpace(pkg.Ecosystem()))
+			key = strings.ToLower(strings.TrimSpace(pkg.Ecosystem().String()))
 		}
 		if key == "" {
 			continue

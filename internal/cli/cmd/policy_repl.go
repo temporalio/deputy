@@ -492,7 +492,7 @@ func buildREPLPayload(request map[string]string, entrypoint string) map[string]a
 
 		payload["vulnerability"] = vulnMap
 		payload["vulnerabilities"] = []any{vulnMap}
-		// Also provide proto-based finding for proto-first policies
+		// Also provide proto-based finding for policies
 		payload["finding"] = finding
 		payload["pkg"] = pkg
 	}

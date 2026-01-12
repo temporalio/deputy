@@ -35,22 +35,34 @@ service PolicyService {
   rpc ListEntrypoints(ListEntrypointsRequest) returns (ListEntrypointsResponse);
 }
 
-// EvaluateRequest specifies the policies and context for evaluation.
+// EvaluateRequest specifies the policies and input for evaluation.
 message EvaluateRequest {
   // Policies to evaluate. Can be inline YAML or file paths.
   // When using file paths, the service must be in local mode.
   repeated PolicySource policies = 1;
 
-  // Context for evaluation - exactly one must be set.
-  oneof context {
-    // ScanVulnerability context for per-vulnerability evaluation.
-    ScanVulnerabilityContext scan_vulnerability = 10;
+  // Input for evaluation - exactly one must be set.
+  oneof input {
+    // ScanVulnerability input for per-vulnerability evaluation.
+    ScanVulnerabilityPolicyInput scan_vulnerability = 10;
 
-    // ScanReport context for report-level evaluation.
-    ScanReportContext scan_report = 11;
+    // ScanReport input for report-level evaluation.
+    ScanReportPolicyInput scan_report = 11;
 
-    // ProxyRequest context for proxy entrypoint evaluation.
-    ProxyRequestContext proxy_request = 12;
+    // GoArtifactRequest input for Go proxy evaluation.
+    GoArtifactRequestPolicyInput go_artifact_request = 12;
+
+    // NpmArtifactRequest input for npm proxy evaluation.
+    NpmArtifactRequestPolicyInput npm_artifact_request = 13;
+
+    // PypiArtifactRequest input for PyPI proxy evaluation.
+    PypiArtifactRequestPolicyInput pypi_artifact_request = 14;
+
+    // OciArtifactRequest input for OCI proxy evaluation.
+    OciArtifactRequestPolicyInput oci_artifact_request = 15;
+
+    // Generic payload for custom entrypoints.
+    bytes custom_payload = 99;
   }
 
   // Entrypoints to evaluate. If empty, evaluates all matching entrypoints.

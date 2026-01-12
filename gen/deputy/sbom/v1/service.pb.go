@@ -10,6 +10,7 @@
 package sbomv1
 
 import (
+	_ "buf.build/gen/go/bufbuild/protovalidate/protocolbuffers/go/buf/validate"
 	v11 "github.com/picatz/deputy/gen/deputy/dependency/v1"
 	v1 "github.com/picatz/deputy/gen/deputy/target/v1"
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
@@ -157,8 +158,10 @@ func (ChangeKind) EnumDescriptor() ([]byte, []int) {
 type GenerateRequest struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Target is the source to generate SBOM from (path, URL, image reference, etc.).
+	// Maximum length prevents denial-of-service via excessively long strings.
 	Target string `protobuf:"bytes,1,opt,name=target,proto3" json:"target,omitempty"`
 	// Format specifies the output format.
+	// Must be a valid Format enum value.
 	Format Format `protobuf:"varint,2,opt,name=format,proto3,enum=deputy.sbom.v1.Format" json:"format,omitempty"`
 	// Options configure SBOM generation behavior.
 	Options       *GenerateOptions `protobuf:"bytes,3,opt,name=options,proto3" json:"options,omitempty"`
@@ -225,6 +228,7 @@ type GenerateOptions struct {
 	// IncludeHashes computes and includes file hashes.
 	IncludeHashes bool `protobuf:"varint,2,opt,name=include_hashes,json=includeHashes,proto3" json:"include_hashes,omitempty"`
 	// Ref is a Git reference for repository targets.
+	// Maximum length accommodates SHA-256 commit hashes and long branch names.
 	Ref string `protobuf:"bytes,3,opt,name=ref,proto3" json:"ref,omitempty"`
 	// Platform specifies target platform for container images.
 	Platform      string `protobuf:"bytes,4,opt,name=platform,proto3" json:"platform,omitempty"`
@@ -294,6 +298,7 @@ func (x *GenerateOptions) GetPlatform() string {
 type GenerateResponse struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Sbom is the generated SBOM in the requested format.
+	// Maximum 100MB to prevent memory exhaustion.
 	Sbom []byte `protobuf:"bytes,1,opt,name=sbom,proto3" json:"sbom,omitempty"`
 	// Format is the format of the generated SBOM.
 	Format Format `protobuf:"varint,2,opt,name=format,proto3,enum=deputy.sbom.v1.Format" json:"format,omitempty"`
@@ -449,12 +454,16 @@ func (x *Stats) GetEcosystems() map[string]int32 {
 type DiffRequest struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Base is the baseline SBOM (older version).
+	// Maximum 100MB to prevent memory exhaustion.
 	Base []byte `protobuf:"bytes,1,opt,name=base,proto3" json:"base,omitempty"`
 	// Target is the target SBOM to compare against base (newer version).
+	// Maximum 100MB to prevent memory exhaustion.
 	Target []byte `protobuf:"bytes,2,opt,name=target,proto3" json:"target,omitempty"`
 	// BaseFormat is the format of the base SBOM.
+	// Must be a valid Format enum value.
 	BaseFormat Format `protobuf:"varint,3,opt,name=base_format,json=baseFormat,proto3,enum=deputy.sbom.v1.Format" json:"base_format,omitempty"`
 	// TargetFormat is the format of the target SBOM.
+	// Must be a valid Format enum value.
 	TargetFormat  Format `protobuf:"varint,4,opt,name=target_format,json=targetFormat,proto3,enum=deputy.sbom.v1.Format" json:"target_format,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -832,62 +841,65 @@ var File_deputy_sbom_v1_service_proto protoreflect.FileDescriptor
 
 const file_deputy_sbom_v1_service_proto_rawDesc = "" +
 	"\n" +
-	"\x1cdeputy/sbom/v1/service.proto\x12\x0edeputy.sbom.v1\x1a\x1fgoogle/protobuf/timestamp.proto\x1a\x1ddeputy/target/v1/target.proto\x1a%deputy/dependency/v1/dependency.proto\"\x94\x01\n" +
-	"\x0fGenerateRequest\x12\x16\n" +
-	"\x06target\x18\x01 \x01(\tR\x06target\x12.\n" +
-	"\x06format\x18\x02 \x01(\x0e2\x16.deputy.sbom.v1.FormatR\x06format\x129\n" +
-	"\aoptions\x18\x03 \x01(\v2\x1f.deputy.sbom.v1.GenerateOptionsR\aoptions\"\x91\x01\n" +
+	"\x1cdeputy/sbom/v1/service.proto\x12\x0edeputy.sbom.v1\x1a\x1bbuf/validate/validate.proto\x1a\x1fgoogle/protobuf/timestamp.proto\x1a\x1ddeputy/target/v1/target.proto\x1a%deputy/dependency/v1/dependency.proto\"\xa8\x01\n" +
+	"\x0fGenerateRequest\x12 \n" +
+	"\x06target\x18\x01 \x01(\tB\b\xbaH\x05r\x03\x18\x80 R\x06target\x128\n" +
+	"\x06format\x18\x02 \x01(\x0e2\x16.deputy.sbom.v1.FormatB\b\xbaH\x05\x82\x01\x02\x10\x01R\x06format\x129\n" +
+	"\aoptions\x18\x03 \x01(\v2\x1f.deputy.sbom.v1.GenerateOptionsR\aoptions\"\xa4\x01\n" +
 	"\x0fGenerateOptions\x12)\n" +
 	"\x10include_licenses\x18\x01 \x01(\bR\x0fincludeLicenses\x12%\n" +
-	"\x0einclude_hashes\x18\x02 \x01(\bR\rincludeHashes\x12\x10\n" +
-	"\x03ref\x18\x03 \x01(\tR\x03ref\x12\x1a\n" +
-	"\bplatform\x18\x04 \x01(\tR\bplatform\"\xf4\x01\n" +
-	"\x10GenerateResponse\x12\x12\n" +
-	"\x04sbom\x18\x01 \x01(\fR\x04sbom\x12.\n" +
+	"\x0einclude_hashes\x18\x02 \x01(\bR\rincludeHashes\x12\x1a\n" +
+	"\x03ref\x18\x03 \x01(\tB\b\xbaH\x05r\x03\x18\x80\x02R\x03ref\x12#\n" +
+	"\bplatform\x18\x04 \x01(\tB\a\xbaH\x04r\x02\x18@R\bplatform\"\x80\x02\n" +
+	"\x10GenerateResponse\x12\x1e\n" +
+	"\x04sbom\x18\x01 \x01(\fB\n" +
+	"\xbaH\az\x05\x18\x80\x80\x802R\x04sbom\x12.\n" +
 	"\x06format\x18\x02 \x01(\x0e2\x16.deputy.sbom.v1.FormatR\x06format\x120\n" +
 	"\x06target\x18\x03 \x01(\v2\x18.deputy.target.v1.TargetR\x06target\x12=\n" +
 	"\fgenerated_at\x18\x04 \x01(\v2\x1a.google.protobuf.TimestampR\vgeneratedAt\x12+\n" +
-	"\x05stats\x18\x05 \x01(\v2\x15.deputy.sbom.v1.StatsR\x05stats\"\xa2\x02\n" +
-	"\x05Stats\x12)\n" +
-	"\x10total_components\x18\x01 \x01(\x05R\x0ftotalComponents\x12/\n" +
-	"\x13direct_dependencies\x18\x02 \x01(\x05R\x12directDependencies\x127\n" +
-	"\x17transitive_dependencies\x18\x03 \x01(\x05R\x16transitiveDependencies\x12E\n" +
+	"\x05stats\x18\x05 \x01(\v2\x15.deputy.sbom.v1.StatsR\x05stats\"\xbd\x02\n" +
+	"\x05Stats\x122\n" +
+	"\x10total_components\x18\x01 \x01(\x05B\a\xbaH\x04\x1a\x02(\x00R\x0ftotalComponents\x128\n" +
+	"\x13direct_dependencies\x18\x02 \x01(\x05B\a\xbaH\x04\x1a\x02(\x00R\x12directDependencies\x12@\n" +
+	"\x17transitive_dependencies\x18\x03 \x01(\x05B\a\xbaH\x04\x1a\x02(\x00R\x16transitiveDependencies\x12E\n" +
 	"\n" +
 	"ecosystems\x18\x04 \x03(\v2%.deputy.sbom.v1.Stats.EcosystemsEntryR\n" +
 	"ecosystems\x1a=\n" +
 	"\x0fEcosystemsEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
-	"\x05value\x18\x02 \x01(\x05R\x05value:\x028\x01\"\xaf\x01\n" +
-	"\vDiffRequest\x12\x12\n" +
-	"\x04base\x18\x01 \x01(\fR\x04base\x12\x16\n" +
-	"\x06target\x18\x02 \x01(\fR\x06target\x127\n" +
-	"\vbase_format\x18\x03 \x01(\x0e2\x16.deputy.sbom.v1.FormatR\n" +
-	"baseFormat\x12;\n" +
-	"\rtarget_format\x18\x04 \x01(\x0e2\x16.deputy.sbom.v1.FormatR\ftargetFormat\"\xe8\x01\n" +
+	"\x05value\x18\x02 \x01(\x05R\x05value:\x028\x01\"\xdb\x01\n" +
+	"\vDiffRequest\x12\x1e\n" +
+	"\x04base\x18\x01 \x01(\fB\n" +
+	"\xbaH\az\x05\x18\x80\x80\x802R\x04base\x12\"\n" +
+	"\x06target\x18\x02 \x01(\fB\n" +
+	"\xbaH\az\x05\x18\x80\x80\x802R\x06target\x12A\n" +
+	"\vbase_format\x18\x03 \x01(\x0e2\x16.deputy.sbom.v1.FormatB\b\xbaH\x05\x82\x01\x02\x10\x01R\n" +
+	"baseFormat\x12E\n" +
+	"\rtarget_format\x18\x04 \x01(\x0e2\x16.deputy.sbom.v1.FormatB\b\xbaH\x05\x82\x01\x02\x10\x01R\ftargetFormat\"\xe8\x01\n" +
 	"\fDiffResponse\x123\n" +
 	"\x05added\x18\x01 \x03(\v2\x1d.deputy.dependency.v1.PackageR\x05added\x127\n" +
 	"\aremoved\x18\x02 \x03(\v2\x1d.deputy.dependency.v1.PackageR\aremoved\x129\n" +
 	"\bmodified\x18\x03 \x03(\v2\x1d.deputy.sbom.v1.PackageChangeR\bmodified\x12/\n" +
-	"\x05stats\x18\x04 \x01(\v2\x19.deputy.sbom.v1.DiffStatsR\x05stats\"\x8a\x02\n" +
+	"\x05stats\x18\x04 \x01(\v2\x19.deputy.sbom.v1.DiffStatsR\x05stats\"\x9e\x02\n" +
 	"\rPackageChange\x127\n" +
-	"\apackage\x18\x01 \x01(\v2\x1d.deputy.dependency.v1.PackageR\apackage\x12)\n" +
-	"\x10previous_version\x18\x02 \x01(\tR\x0fpreviousVersion\x12\x1f\n" +
-	"\vnew_version\x18\x03 \x01(\tR\n" +
+	"\apackage\x18\x01 \x01(\v2\x1d.deputy.dependency.v1.PackageR\apackage\x123\n" +
+	"\x10previous_version\x18\x02 \x01(\tB\b\xbaH\x05r\x03\x18\x80\x02R\x0fpreviousVersion\x12)\n" +
+	"\vnew_version\x18\x03 \x01(\tB\b\xbaH\x05r\x03\x18\x80\x02R\n" +
 	"newVersion\x12.\n" +
 	"\x04kind\x18\x04 \x01(\x0e2\x1a.deputy.sbom.v1.ChangeKindR\x04kind\x12D\n" +
-	"\x0elicense_change\x18\x05 \x01(\v2\x1d.deputy.sbom.v1.LicenseChangeR\rlicenseChange\"?\n" +
-	"\rLicenseChange\x12\x14\n" +
-	"\x05added\x18\x01 \x03(\tR\x05added\x12\x18\n" +
-	"\aremoved\x18\x02 \x03(\tR\aremoved\"\xa3\x02\n" +
-	"\tDiffStats\x12\x1f\n" +
-	"\vadded_count\x18\x01 \x01(\x05R\n" +
-	"addedCount\x12#\n" +
-	"\rremoved_count\x18\x02 \x01(\x05R\fremovedCount\x12%\n" +
-	"\x0emodified_count\x18\x03 \x01(\x05R\rmodifiedCount\x12'\n" +
-	"\x0funchanged_count\x18\x04 \x01(\x05R\x0eunchangedCount\x12%\n" +
-	"\x0ebreaking_count\x18\x05 \x01(\x05R\rbreakingCount\x12'\n" +
-	"\x0fdowngrade_count\x18\x06 \x01(\x05R\x0edowngradeCount\x120\n" +
-	"\x14license_change_count\x18\a \x01(\x05R\x12licenseChangeCount*\x99\x01\n" +
+	"\x0elicense_change\x18\x05 \x01(\v2\x1d.deputy.sbom.v1.LicenseChangeR\rlicenseChange\"_\n" +
+	"\rLicenseChange\x12$\n" +
+	"\x05added\x18\x01 \x03(\tB\x0e\xbaH\v\x92\x01\b\x10d\"\x04r\x02\x18@R\x05added\x12(\n" +
+	"\aremoved\x18\x02 \x03(\tB\x0e\xbaH\v\x92\x01\b\x10d\"\x04r\x02\x18@R\aremoved\"\xe2\x02\n" +
+	"\tDiffStats\x12(\n" +
+	"\vadded_count\x18\x01 \x01(\x05B\a\xbaH\x04\x1a\x02(\x00R\n" +
+	"addedCount\x12,\n" +
+	"\rremoved_count\x18\x02 \x01(\x05B\a\xbaH\x04\x1a\x02(\x00R\fremovedCount\x12.\n" +
+	"\x0emodified_count\x18\x03 \x01(\x05B\a\xbaH\x04\x1a\x02(\x00R\rmodifiedCount\x120\n" +
+	"\x0funchanged_count\x18\x04 \x01(\x05B\a\xbaH\x04\x1a\x02(\x00R\x0eunchangedCount\x12.\n" +
+	"\x0ebreaking_count\x18\x05 \x01(\x05B\a\xbaH\x04\x1a\x02(\x00R\rbreakingCount\x120\n" +
+	"\x0fdowngrade_count\x18\x06 \x01(\x05B\a\xbaH\x04\x1a\x02(\x00R\x0edowngradeCount\x129\n" +
+	"\x14license_change_count\x18\a \x01(\x05B\a\xbaH\x04\x1a\x02(\x00R\x12licenseChangeCount*\x99\x01\n" +
 	"\x06Format\x12\x16\n" +
 	"\x12FORMAT_UNSPECIFIED\x10\x00\x12\x19\n" +
 	"\x15FORMAT_CYCLONEDX_JSON\x10\x01\x12\x18\n" +

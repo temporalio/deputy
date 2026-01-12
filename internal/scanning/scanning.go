@@ -500,7 +500,7 @@ func packagesToInputs(pkgs []*extractor.Package, direct map[string]bool) []osv.P
 			osv.QueryKey{
 				Name:      pkg.Name,
 				Version:   pkg.Version,
-				Ecosystem: pkg.Ecosystem(),
+				Ecosystem: pkg.Ecosystem().String(),
 				PURL:      purl.String(),
 			},
 			osv.PackageContext{

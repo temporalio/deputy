@@ -122,7 +122,7 @@ func (h *InventoryHandler) CollectInventory(
 	transitiveCount := int32(0)
 
 	for _, pkg := range packages {
-		eco := pkg.Ecosystem()
+		eco := pkg.Ecosystem().String()
 		if eco != "" {
 			ecosystemCounts[eco]++
 		}
@@ -262,7 +262,7 @@ func (h *InventoryHandler) StreamCollectInventory(
 	transitiveCount := int32(0)
 
 	for _, pkg := range packages {
-		eco := pkg.Ecosystem()
+		eco := pkg.Ecosystem().String()
 		if eco != "" {
 			ecosystemCounts[eco]++
 		}

@@ -7,6 +7,7 @@ import (
 	"os"
 	"strings"
 
+	policyv1 "github.com/picatz/deputy/gen/deputy/policy/v1"
 	"github.com/picatz/deputy/internal/policy"
 )
 
@@ -23,16 +24,11 @@ func evaluatePoliciesForCommand(ctx context.Context, policyPaths []string, paylo
 	if payload == nil {
 		payload = map[string]any{}
 	}
-	env := map[string]any{
-		"command": command,
+	env := &policyv1.Environment{
+		Command: command,
 	}
 	if entrypoint != "" {
-		env["entrypoint"] = entrypoint.String()
-	}
-	if existing, ok := payload["env"].(map[string]any); ok {
-		for k, v := range existing {
-			env[k] = v
-		}
+		env.Entrypoint = entrypoint.String()
 	}
 	payload["env"] = env
 

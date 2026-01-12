@@ -390,7 +390,7 @@ func matchPackages(pkgs []*extractor.Package, iocs iocSet) []PackageMatch {
 		match := PackageMatch{
 			Package:   p.Name,
 			Version:   p.Version,
-			Ecosystem: p.Ecosystem(),
+			Ecosystem: p.Ecosystem().String(),
 			PURL:      purl,
 		}
 		if len(p.Locations) > 0 {

@@ -105,7 +105,7 @@ func ExtractorPackageToProto(pkg *extractor.Package, direct map[string]bool) *de
 
 	// Get ecosystem from SCALIBR, falling back to our custom mapping for
 	// PURL types SCALIBR doesn't recognize (e.g., GitHub Actions)
-	ecosystem := pkg.Ecosystem()
+	ecosystem := pkg.Ecosystem().String()
 	if ecosystem == "" && purl != nil {
 		ecosystem = ecosystemFromPURLType(purl.Type)
 	}

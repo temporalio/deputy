@@ -50,7 +50,7 @@ func Convert(pkgs []*extractor.Package, opts Options) []osv.PkgInput {
 		if name == "" {
 			continue
 		}
-		ecos := strings.TrimSpace(pkg.Ecosystem())
+		ecos := strings.TrimSpace(pkg.Ecosystem().String())
 		if ecos == "" && pkg.PURLType != "" {
 			ecos = pkg.PURLType
 		}

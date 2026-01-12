@@ -197,6 +197,17 @@ deputy scan --secrets                          # combined vuln + secrets scan
 deputy server                                  # start API server on :8090
 deputy server --addr :9000                     # custom port
 deputy --server http://localhost:8090 scan    # connect to remote server
+
+# Cache management (offline use)
+deputy cache status                            # show cache status and statistics
+deputy cache init                              # download OSV + KEV for offline use
+deputy cache init osv kev                      # download specific sources
+deputy cache update                            # update stale caches
+deputy cache update --force                    # force refresh all caches
+deputy cache clear                             # clear all cached data
+deputy cache clear osv                         # clear specific cache
+deputy scan --no-cache                         # bypass all caches, fetch fresh data
+deputy scan --no-cache=osv,kev                 # bypass specific caches
 ```
 
 ## Project Structure
@@ -212,6 +223,7 @@ internal/
   cache/                     # caching primitives
     memory/                  # in-memory TTL LRU cache
     disk/                    # persistent JSON-on-disk cache
+    sources/                 # cache.Source implementations (osv, kev, epss, depsdev)
   container/                 # container analysis
     image/                   # image config, metadata, extraction
   inventory/                 # dependency detection
@@ -1956,8 +1968,51 @@ See [`policy/examples/service-oidc-federation.yaml`](policy/examples/service-oid
 | Policy entrypoints | `*_artifact_request` | `service_*_request` |
 | JWT in policies | Yes (`jwt.*`) | Yes (`jwt.*`) |
 | Target validation | Remote targets only | Remote targets only |
-| Multi-tenant isolation | Via policies | Via policies |
+| Multi-tenant isolation | Via policies + cache scoping | Via policies |
 | OIDC federation | Yes | Yes |
+
+### Multi-tenant Cache Isolation
+
+When Deputy runs as a shared service in a multi-tenant environment, caches are automatically isolated per-tenant to prevent cross-tenant cache poisoning. This security feature ensures that:
+
+1. **Vulnerability cache** entries from tenant A cannot be seen by tenant B
+2. **License cache** entries are isolated per-tenant
+3. **Image scan cache** results are scoped to the tenant that initiated the scan
+4. **Digest resolution cache** entries are tenant-specific
+
+**How it works:**
+
+Cache keys are prefixed with a scope derived from:
+- **ListenerName**: Isolates caches between different proxy listeners
+- **PolicyHash**: Ensures cache invalidation when policies change
+- **TenantID**: Extracted from JWT claims (`tenant`, `org_id`, or `sub`)
+
+**Example cache key transformation:**
+```
+Original key: npm|lodash@4.17.21
+Scoped key:   go-proxy/abc123/acme-corp/npm|lodash@4.17.21
+              └─listener─┘└─policy┘└─tenant───┘└─original key─┘
+```
+
+**Configuration:** Cache scoping is automatic when listener names and policy paths are provided via `HandlerOptions` or `OCIHandlerOptions`. Tenant isolation uses JWT claims from the request context.
+
+```yaml
+# Proxy config with cache scoping
+listeners:
+  - name: go-proxy          # Used for cache scoping
+    bind: ":8080"
+    ecosystems: ["go"]
+    upstream: "https://proxy.golang.org"
+    policies: ["policy/security.yaml"]  # Hash used for cache invalidation
+    auth:
+      mode: required
+      # ... JWT config (tenant ID extracted from claims)
+```
+
+**Security guarantees:**
+- Empty scopes fall back to global cache (backward compatible)
+- Anonymous requests (no JWT) use base scope without tenant isolation
+- Tenant ID extraction follows precedence: `tenant` > `org_id` > `sub`
 
 ### Key Files
 
@@ -1968,6 +2023,9 @@ See [`policy/examples/service-oidc-federation.yaml`](policy/examples/service-oid
 | [`internal/auth/jwt/authn.go`](internal/auth/jwt/authn.go) | `AuthnFunc` adapter for connectrpc/authn-go |
 | [`internal/policy/entrypoints.go`](internal/policy/entrypoints.go) | Service entrypoint definitions |
 | [`internal/policy/bindings.go`](internal/policy/bindings.go) | Variable bindings for service entrypoints |
+| [`internal/proxy/cache_scope.go`](internal/proxy/cache_scope.go) | Multi-tenant cache scoping, `RequestScoped*Cache` types |
+| [`internal/proxy/cache.go`](internal/proxy/cache.go) | Cache interfaces, `ContextAware*Cache` extensions |
+| [`internal/proxy/oci_toctou.go`](internal/proxy/oci_toctou.go) | TOCTOU mitigation for OCI registry proxy |
 
 ## Configuration
 

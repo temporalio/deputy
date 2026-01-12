@@ -19,6 +19,7 @@ import (
 	"github.com/picatz/deputy/internal/collections"
 	"github.com/picatz/deputy/internal/dependency"
 	"github.com/picatz/deputy/internal/ecosystem"
+	"github.com/picatz/deputy/internal/logs"
 	"github.com/picatz/deputy/internal/otel"
 	"github.com/picatz/deputy/internal/purlx"
 	"github.com/picatz/deputy/internal/vulnerability"
@@ -120,7 +121,6 @@ func QueryRaw(ctx context.Context, client Client, pkgs []PkgInput) ([]Vulnerabil
 }
 
 // QueryProto performs a batched OSV vulnerability lookup and returns proto types directly.
-// This is the proto-first API for scan operations, eliminating intermediate domain types.
 //
 // Parameters:
 //   - pkgs: slice of proto Package messages representing the packages to scan
@@ -199,7 +199,6 @@ func splitVulnerabilitiesToProto(vulns []Vulnerability) ([]*vulnerabilityv1.Find
 }
 
 // VulnerabilitiesToFindings converts flat Vulnerability records to proto Findings.
-// This is the proto-first API for policy evaluation.
 func VulnerabilitiesToFindings(vulns []Vulnerability) []*vulnerabilityv1.Finding {
 	if len(vulns) == 0 {
 		return nil
@@ -394,9 +393,11 @@ func queryOSVAPIBatch(ctx context.Context, client Client, pkgs []PkgInput) ([]Vu
 	startTime := time.Now()
 	queries := make([]*osvdev.Query, 0, len(pkgs))
 	meta := make([]PkgInput, 0, len(pkgs))
+	var droppedNoVersion, droppedNoIdentifier int
 	for _, p := range pkgs {
 		version := strings.TrimSpace(p.Version)
 		if version == "" {
+			droppedNoVersion++
 			continue
 		}
 		normalized := p
@@ -423,6 +424,7 @@ func queryOSVAPIBatch(ctx context.Context, client Client, pkgs []PkgInput) ([]Vu
 			queryVersion = normalized.Version
 		}
 		if pkgQuery.Name == "" && pkgQuery.PURL == "" {
+			droppedNoIdentifier++
 			continue
 		}
 		if queryVersion == "" {
@@ -438,6 +440,26 @@ func queryOSVAPIBatch(ctx context.Context, client Client, pkgs []PkgInput) ([]Vu
 		})
 		meta = append(meta, normalized)
 	}
+
+	// Log telemetry about dropped packages for observability.
+	// Packages can be dropped due to missing versions or identifiers,
+	// which may indicate upstream extraction issues or malformed manifests.
+	if droppedNoVersion > 0 || droppedNoIdentifier > 0 {
+		logs.Debug(ctx, "deputy.osv.packages_dropped",
+			"dropped_no_version", droppedNoVersion,
+			"dropped_no_identifier", droppedNoIdentifier,
+			"queried", len(queries),
+			"total_input", len(pkgs),
+		)
+		// Also add to OTel span for tracing visibility
+		if span := otel.SpanFromContext(ctx); span != nil && span.IsRecording() {
+			span.SetAttributes(
+				otel.AttrOSVDroppedNoVersion.Int(droppedNoVersion),
+				otel.AttrOSVDroppedNoIdentifier.Int(droppedNoIdentifier),
+			)
+		}
+	}
+
 	if len(queries) == 0 {
 		return nil, nil
 	}

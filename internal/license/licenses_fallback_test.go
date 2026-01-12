@@ -310,3 +310,266 @@ func resetLicenseTestState(t *testing.T) {
 	t.Helper()
 	ResetLicenseCachesForTest(t)
 }
+
+func TestLookupLicensesBestEffort_WellKnown(t *testing.T) {
+	resetLicenseTestState(t)
+
+	// Go stdlib should return BSD-3-Clause without any network calls
+	got := LookupLicensesBestEffort(context.Background(), "go", "stdlib", "")
+	if want := []string{"BSD-3-Clause"}; !slices.Equal(got, want) {
+		t.Fatalf("expected Go stdlib license %v, got %v", want, got)
+	}
+
+	// toolchain should also work
+	got = LookupLicensesBestEffort(context.Background(), "golang", "toolchain", "go1.21.0")
+	if want := []string{"BSD-3-Clause"}; !slices.Equal(got, want) {
+		t.Fatalf("expected toolchain license %v, got %v", want, got)
+	}
+}
+
+func TestLookupLicensesBestEffort_GitHubWithoutVersion(t *testing.T) {
+	resetLicenseTestState(t)
+
+	// GitHub Actions can be looked up without a version via the GitHub License API
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.Contains(r.URL.Path, "/repos/actions/checkout/license") {
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"license": map[string]any{
+					"key":     "mit",
+					"spdx_id": "MIT",
+					"name":    "MIT License",
+				},
+			})
+			return
+		}
+		http.NotFound(w, r)
+	}))
+	defer server.Close()
+
+	restoreClient := swapGitHubHTTPClient(server)
+	defer restoreClient()
+
+	// GitHub Actions without version should still work
+	got := LookupLicensesBestEffort(context.Background(), "github", "actions/checkout", "")
+	if want := []string{"MIT"}; !slices.Equal(got, want) {
+		t.Fatalf("expected GitHub Actions license %v without version, got %v", want, got)
+	}
+}
+
+func TestLookupLicensesBestEffort_PyPI(t *testing.T) {
+	resetLicenseTestState(t)
+
+	t.Run("license_expression", func(t *testing.T) {
+		resetLicenseTestState(t)
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"info": map[string]any{
+					"license_expression": "Apache-2.0",
+				},
+			})
+		}))
+		defer server.Close()
+
+		restoreClient := swapHTTPGlobals(server)
+		defer restoreClient()
+		restoreBases := WithLicenseEndpoints(goProxyBase, cratesBase, packagistBase, pubBase, cocoapodsBase, hexpmBase)
+		defer restoreBases()
+
+		// Override pypiBase for testing
+		oldPyPIBase := pypiBase
+		pypiBase = server.URL
+		defer func() { pypiBase = oldPyPIBase }()
+
+		got := LookupLicensesBestEffort(context.Background(), "pypi", "requests", "2.31.0")
+		if want := []string{"Apache-2.0"}; !slices.Equal(got, want) {
+			t.Fatalf("expected PyPI license_expression %v, got %v", want, got)
+		}
+	})
+
+	t.Run("license_field", func(t *testing.T) {
+		resetLicenseTestState(t)
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"info": map[string]any{
+					"license": "MIT",
+				},
+			})
+		}))
+		defer server.Close()
+
+		restoreClient := swapHTTPGlobals(server)
+		defer restoreClient()
+
+		oldPyPIBase := pypiBase
+		pypiBase = server.URL
+		defer func() { pypiBase = oldPyPIBase }()
+
+		got := LookupLicensesBestEffort(context.Background(), "python", "flask", "3.0.0")
+		if want := []string{"MIT"}; !slices.Equal(got, want) {
+			t.Fatalf("expected PyPI license field %v, got %v", want, got)
+		}
+	})
+
+	t.Run("classifiers", func(t *testing.T) {
+		resetLicenseTestState(t)
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"info": map[string]any{
+					"license": "", // empty license field
+					"classifiers": []string{
+						"Development Status :: 5 - Production/Stable",
+						"License :: OSI Approved :: BSD License",
+						"Programming Language :: Python :: 3",
+					},
+				},
+			})
+		}))
+		defer server.Close()
+
+		restoreClient := swapHTTPGlobals(server)
+		defer restoreClient()
+
+		oldPyPIBase := pypiBase
+		pypiBase = server.URL
+		defer func() { pypiBase = oldPyPIBase }()
+
+		got := LookupLicensesBestEffort(context.Background(), "pypi", "numpy", "1.26.0")
+		if want := []string{"BSD-3-Clause"}; !slices.Equal(got, want) {
+			t.Fatalf("expected PyPI classifier license %v, got %v", want, got)
+		}
+	})
+}
+
+func TestLooksLikeSPDX(t *testing.T) {
+	tests := []struct {
+		input string
+		want  bool
+	}{
+		{"MIT", true},
+		{"Apache-2.0", true},
+		{"BSD-3-Clause", true},
+		{"GPL-3.0-only", true},
+		{"LGPL-2.1-or-later", true},
+		{"MIT AND Apache-2.0", true},
+		{"MIT OR Apache-2.0", true},
+		{"", false},
+		{"The MIT License", true},        // contains "MIT" - permissive heuristic
+		{"Apache License Version 2.0", true}, // contains "Apache"
+		{"See LICENSE file", false},
+		{"UNKNOWN", false},
+		{"Proprietary", false},
+	}
+	for _, tc := range tests {
+		got := looksLikeSPDX(tc.input)
+		if got != tc.want {
+			t.Errorf("looksLikeSPDX(%q) = %v, want %v", tc.input, got, tc.want)
+		}
+	}
+}
+
+func TestClassifierToSPDX(t *testing.T) {
+	tests := []struct {
+		classifier string
+		want       string
+	}{
+		{"License :: OSI Approved :: MIT License", "MIT"},
+		{"License :: OSI Approved :: Apache Software License", "Apache-2.0"},
+		{"License :: OSI Approved :: BSD License", "BSD-3-Clause"},
+		{"License :: OSI Approved :: GNU General Public License v3 (GPLv3)", "GPL-3.0-only"},
+		{"License :: OSI Approved :: Mozilla Public License 2.0 (MPL 2.0)", "MPL-2.0"},
+		{"License :: OSI Approved :: ISC License (ISCL)", "ISC"},
+		{"License :: Public Domain", "CC0-1.0"},
+		{"Programming Language :: Python", ""},
+		{"Development Status :: 5 - Production/Stable", ""},
+	}
+	for _, tc := range tests {
+		got := classifierToSPDX(tc.classifier)
+		if got != tc.want {
+			t.Errorf("classifierToSPDX(%q) = %q, want %q", tc.classifier, got, tc.want)
+		}
+	}
+}
+
+func TestFetchLicenseFromGitHubAPI(t *testing.T) {
+	resetLicenseTestState(t)
+
+	t.Run("returns_spdx_id", func(t *testing.T) {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if strings.Contains(r.URL.Path, "/repos/owner/repo/license") {
+				_ = json.NewEncoder(w).Encode(map[string]any{
+					"license": map[string]any{
+						"key":     "mit",
+						"spdx_id": "MIT",
+						"name":    "MIT License",
+					},
+				})
+				return
+			}
+			http.NotFound(w, r)
+		}))
+		defer server.Close()
+
+		restoreClient := swapGitHubHTTPClient(server)
+		defer restoreClient()
+
+		got := fetchLicenseFromGitHubAPI(context.Background(), "owner", "repo")
+		if want := []string{"MIT"}; !slices.Equal(got, want) {
+			t.Fatalf("expected %v, got %v", want, got)
+		}
+	})
+
+	t.Run("falls_back_to_key", func(t *testing.T) {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"license": map[string]any{
+					"key":     "apache-2.0",
+					"spdx_id": "",
+					"name":    "Apache License 2.0",
+				},
+			})
+		}))
+		defer server.Close()
+
+		restoreClient := swapGitHubHTTPClient(server)
+		defer restoreClient()
+
+		got := fetchLicenseFromGitHubAPI(context.Background(), "owner", "repo")
+		if want := []string{"APACHE-2.0"}; !slices.Equal(got, want) {
+			t.Fatalf("expected %v, got %v", want, got)
+		}
+	})
+
+	t.Run("ignores_noassertion", func(t *testing.T) {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"license": map[string]any{
+					"key":     "other",
+					"spdx_id": "NOASSERTION",
+					"name":    "Other",
+				},
+			})
+		}))
+		defer server.Close()
+
+		restoreClient := swapGitHubHTTPClient(server)
+		defer restoreClient()
+
+		got := fetchLicenseFromGitHubAPI(context.Background(), "owner", "repo")
+		if got != nil {
+			t.Fatalf("expected nil for NOASSERTION, got %v", got)
+		}
+	})
+}
+
+func swapGitHubHTTPClient(server *httptest.Server) func() {
+	// Force initialization so we can swap
+	_ = getGitHubHTTPClient()
+	origClient := getGitHubHTTPClientForTest()
+	origBase := githubAPIBase
+	setGitHubHTTPClientForTest(server.Client())
+	githubAPIBase = server.URL
+	return func() {
+		setGitHubHTTPClientForTest(origClient)
+		githubAPIBase = origBase
+	}
+}

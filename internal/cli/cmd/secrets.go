@@ -442,7 +442,7 @@ FILTERING:
 
 			switch formatFlag {
 			case "json":
-				// Use proto-first JSON when no post-processing was needed
+				// JSON output when no post-processing was needed
 				if baselinePath == "" && !verifyFlag {
 					return outputSecretsProtoJSON(out, resp.Msg)
 				}

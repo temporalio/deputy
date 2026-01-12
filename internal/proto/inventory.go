@@ -99,7 +99,7 @@ func buildInventoryStats(pkgs []*extractor.Package, direct map[string]bool) *inv
 		}
 
 		// Count by ecosystem
-		eco := pkg.Ecosystem()
+		eco := pkg.Ecosystem().String()
 		if eco != "" {
 			stats.ByEcosystem[eco]++
 		}
