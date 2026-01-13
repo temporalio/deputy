@@ -16,7 +16,6 @@ import (
 	"github.com/picatz/deputy/internal/sandbox"
 	"github.com/picatz/deputy/internal/sandbox/runtimes/docker"
 	"github.com/picatz/deputy/internal/sandbox/runtimes/gvisor"
-	"github.com/picatz/deputy/internal/sandbox/runtimes/landlock"
 	"github.com/picatz/deputy/internal/sandbox/runtimes/none"
 	"github.com/picatz/deputy/internal/sandbox/runtimes/plugin"
 	"github.com/picatz/deputy/internal/sandbox/runtimes/sandboxexec"
@@ -70,7 +69,7 @@ network access is disabled for safety.`,
 		},
 	}
 
-	cmd.Flags().StringVar(&flags.runtime, "runtime", "docker", "Sandbox runtime (docker|gvisor|landlock|none|sandbox-exec|plugin)")
+	cmd.Flags().StringVar(&flags.runtime, "runtime", "docker", "Sandbox runtime (docker|gvisor|none|sandbox-exec|plugin)")
 	cmd.Flags().StringVar(&flags.mode, "mode", "workspace-write", "Filesystem mode (read-only|workspace-write|full-access|network-isolated|ephemeral)")
 	cmd.Flags().StringVar(&flags.network, "network", "none", "Network mode (none|host|bridge|allowlist)")
 	cmd.Flags().StringArrayVar(&flags.networkAllow, "network-allow", nil, "Allowed hosts for network allowlist mode (repeatable)")
@@ -96,7 +95,6 @@ network access is disabled for safety.`,
 		"deputy exec --mode read-only -- ls -la",
 		"deputy exec --runtime docker --image alpine:3.19 -- echo hello",
 		"deputy exec --runtime sandbox-exec --mode read-only -- ls -la",
-		"deputy exec --runtime sandbox-exec --mode read-only --exec-allow deputy -- deputy list",
 		"deputy exec --network allowlist --network-allow proxy.golang.org:443 -- go env GOPATH",
 	}, "\n")
 	cmd.SilenceUsage = true
@@ -207,7 +205,6 @@ func runExec(ctx context.Context, deps Dependencies, flags *execFlags, command [
 	reg.Register(docker.New())
 	reg.Register(gvisor.New())
 	reg.Register(sandboxexec.New())
-	reg.Register(landlock.New())
 	pluginRuntime := plugin.New()
 	reg.Register(pluginRuntime)
 	defer pluginRuntime.Close()
