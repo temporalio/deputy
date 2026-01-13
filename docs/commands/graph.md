@@ -4,7 +4,7 @@ Visualize and analyze the dependency graph of a repository.
 
 ## Synopsis
 
-```bash
+```
 deputy graph [target] [flags]
 deputy graph why <package> [target] [flags]
 deputy graph needs <package> [target] [flags]
@@ -314,15 +314,23 @@ In DOT and Mermaid formats, nodes are styled based on their characteristics:
 | High vulns | `color=orange, penwidth=2` | Orange fill |
 | Medium/Low vulns | `color=yellow` | Yellow fill |
 
-## Related Commands
+## Exit Codes
 
-- [`deputy scan`](scan.md) - Scan for vulnerabilities
-- [`deputy diff`](diff.md) - Compare dependency changes
-- [`deputy list`](list.md) - List dependencies
-- [`deputy sbom`](sbom.md) - Generate SBOM
+| Code | Meaning |
+| --- | --- |
+| `0` | Success |
+| `1` | Error (target not found, invalid options) |
 
 ## See Also
 
+- [Scan command](scan.md) — Scan for vulnerabilities
+- [List command](list.md) — List dependencies
+- [SBOM command](sbom.md) — Generate SBOM
+- [Graph policies](../reference/policy-inputs.md#graph-entrypoints) — CEL policies for graph analysis
 - [Graphviz Documentation](https://graphviz.org/documentation/)
 - [Mermaid.js Documentation](https://mermaid.js.org/)
-- [D3.js Force-Directed Graph](https://d3js.org/d3-force)
+
+## Code Pointers
+
+- CLI: [`internal/cli/cmd/graph.go`](../../internal/cli/cmd/graph.go)
+- Graph resolution: [`internal/graph`](../../internal/graph)

@@ -1,6 +1,3 @@
-// Copyright 2024 Deputy Authors
-// SPDX-License-Identifier: Apache-2.0
-
 // Package gvisor provides a gVisor sandbox runtime for stronger isolation.
 //
 // gVisor (runsc) provides application-level sandboxing with a user-space

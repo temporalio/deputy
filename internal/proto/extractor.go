@@ -1,6 +1,3 @@
-// Copyright 2025 Kent "picat" Gruber. All rights reserved.
-// SPDX-License-Identifier: MIT
-
 package proto
 
 import (

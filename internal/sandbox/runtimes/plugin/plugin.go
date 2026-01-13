@@ -1,6 +1,3 @@
-// Copyright 2024 Deputy Authors
-// SPDX-License-Identifier: Apache-2.0
-
 // Package plugin provides an external sandbox runtime implemented by plugins.
 //
 // Plugins are executables named deputy-sandbox-<name> discovered via PATH.

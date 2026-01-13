@@ -58,3 +58,22 @@ $ deputy exec --runtime sandbox-exec --mode read-only -- ls -la
 # macOS sandbox-exec with explicit exec allowlist
 $ deputy exec --runtime sandbox-exec --mode read-only --exec-allow deputy -- deputy list
 ```
+
+## Exit Codes
+
+| Code | Meaning |
+| --- | --- |
+| `0` | Command succeeded |
+| `1` | Command failed or sandbox error |
+| `124` | Command timed out (when `--timeout` is set) |
+
+## See Also
+
+- [Fix command](fix.md) — Uses sandboxed execution for AI agents
+- [Sandbox policies](../reference/policy-inputs.md#sandbox-entrypoints) — CEL policies for sandbox control
+- [Agents guide](../guides/agents.md) — AI-assisted workflows with sandboxing
+
+## Code Pointers
+
+- CLI: [`internal/cli/cmd/exec.go`](../../internal/cli/cmd/exec.go)
+- Sandbox: [`internal/sandbox`](../../internal/sandbox)

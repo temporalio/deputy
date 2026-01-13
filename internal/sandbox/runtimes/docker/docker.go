@@ -1,6 +1,3 @@
-// Copyright 2024 Deputy Authors
-// SPDX-License-Identifier: Apache-2.0
-
 // Package docker provides a Docker container sandbox runtime.
 //
 // The Docker runtime provides strong isolation via Linux namespaces, cgroups,

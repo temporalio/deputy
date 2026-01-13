@@ -1,6 +1,3 @@
-// Copyright 2024 Deputy Authors
-// SPDX-License-Identifier: Apache-2.0
-
 // Package sandboxtest provides utilities for testing sandbox runtime plugins
 // in-memory without spawning external processes or using network sockets.
 //

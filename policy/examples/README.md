@@ -2,7 +2,8 @@
 
 Ready-to-use CEL policies for common security scenarios. Copy and customize for your needs.
 
-> **Tip**: Start with the [Policy Cookbook](../../docs/guides/policy-cookbook.md) for step-by-step guidance.
+> [!TIP]
+> Start with the [Policy Cookbook](../../docs/guides/policy-cookbook.md) for step-by-step guidance.
 
 ## Quick Start
 

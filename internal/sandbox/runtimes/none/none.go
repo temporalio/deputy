@@ -1,6 +1,3 @@
-// Copyright 2024 Deputy Authors
-// SPDX-License-Identifier: Apache-2.0
-
 // Package none provides a no-op sandbox runtime for trusted execution.
 //
 // The None runtime executes commands directly without any isolation.

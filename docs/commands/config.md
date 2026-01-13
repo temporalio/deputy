@@ -72,9 +72,9 @@ deputy config show --format json
 deputy config show --format json | jq '.logging.level'
 ```
 
-| Flag | Default | Description |
-|------|---------|-------------|
-| `--format`, `-f` | `yaml` | Output format: `yaml` or `json` |
+| Flag | Short | Default | Description |
+| --- | --- | --- | --- |
+| `--format` | `-f` | `yaml` | Output format: `yaml` or `json` |
 
 ### `config path`
 
@@ -122,7 +122,19 @@ deputy config show --format json | jq -r '.logging.level'
 deputy config show --format json | jq '.performance.cache.disabled'
 ```
 
+## Exit Codes
+
+| Code | Meaning |
+| --- | --- |
+| `0` | Success (config valid) |
+| `1` | Error (invalid config, file not found) |
+
 ## See Also
 
 - [Configuration Reference](../reference/configuration.md)
 - [`deputy init`](init.md) — Generate starter configuration
+
+## Code Pointers
+
+- CLI: [`internal/cli/cmd/config.go`](../../internal/cli/cmd/config.go)
+- Config loading: [`internal/config`](../../internal/config)

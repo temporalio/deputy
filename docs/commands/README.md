@@ -2,7 +2,8 @@
 
 Deputy is intentionally pipeline-friendly: commands compose well with each other and with tools like `jq`.
 
-> **Tip**: `deputy <command> --help` for authoritative flag details.
+> [!TIP]
+> `deputy <command> --help` for authoritative flag details.
 
 ## Command Overview
 

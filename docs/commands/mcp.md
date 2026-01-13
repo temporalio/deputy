@@ -11,9 +11,9 @@ deputy mcp serve [flags]
 ## Flags
 
 | Flag | Default | Description |
-|------|---------|-------------|
+| --- | --- | --- |
 | `--transport` | `stdio` | Transport mode: `stdio` or `http` |
-| `--address` | `:8080` | Address to listen on for HTTP transport |
+| `--address` | | Address to listen on for HTTP transport (e.g., `:8080`) |
 
 ## What is MCP?
 
@@ -167,7 +167,8 @@ args = ["mcp", "serve"]
 DEPUTY_LOG_LEVEL = "debug"
 ```
 
-**Note:** The CLI and VSCode Codex extension share this configuration.
+> [!NOTE]
+> The CLI and VSCode Codex extension share this configuration.
 
 ### Claude Desktop
 

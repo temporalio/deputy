@@ -142,8 +142,9 @@ $ deputy sbom --source tarball ./image.tar
 $ deputy sbom --platform linux/amd64 docker://ghcr.io/acme/app:1.2.3
 ```
 
-Note: `--ref` applies only to Git targets. For images, specify tags/digests in the image reference.
-Tarball input expects a Docker "save" archive (not an OCI image layout directory).
+> [!NOTE]
+> `--ref` applies only to Git targets. For images, specify tags/digests in the image reference.
+> Tarball input expects a Docker "save" archive (not an OCI image layout directory).
 
 ### License Enrichment
 

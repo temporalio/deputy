@@ -800,7 +800,8 @@ Contains information about the dependency being analyzed. Available in `scan_rep
 *   Deny if license information is missing:
     `pkg.licenses.size() == 0`
 
-Note: The `pkg` helper provides sensible defaults (`name`, `version`, `ecosystem` default to `""`, `licenses` defaults to `[]`), so you don't need `?.orValue()` for these fields.
+> [!NOTE]
+> The `pkg` helper provides sensible defaults (`name`, `version`, `ecosystem` default to `""`, `licenses` defaults to `[]`), so you don't need `?.orValue()` for these fields.
 
 ---
 
@@ -953,7 +954,8 @@ When scanning with `--with-graph`, the dependency graph is resolved to show how 
 *   Identify vulnerabilities with long dependency chains (supply chain risk):
     `vulnerability.depth > 3`
 
-**Note:** For full dependency graph analysis (graph statistics, node/edge policies, traversal), use the `graph_report`, `graph_node`, and `graph_edge` entrypoints with the `deputy graph` command. See the [Graph Helper Functions](#graph-helper-functions) section below.
+> [!NOTE]
+> For full dependency graph analysis (graph statistics, node/edge policies, traversal), use the `graph_report`, `graph_node`, and `graph_edge` entrypoints with the `deputy graph` command. See the [Graph Helper Functions](#graph-helper-functions) section below.
 
 ---
 
@@ -1021,7 +1023,8 @@ When a container image defines a HEALTHCHECK instruction, the following fields a
 | `healthcheck.timeout` | `string` | Timeout for each check (Go duration format) | `"10s"` |
 | `healthcheck.retries` | `int` | Consecutive failures before unhealthy | `3` |
 
-**Note:** `healthcheck` is `null` if no HEALTHCHECK is defined in the image.
+> [!NOTE]
+> `healthcheck` is `null` if no HEALTHCHECK is defined in the image.
 
 **Image Metadata (`image.metadata`):**
 
@@ -1053,7 +1056,8 @@ When available, contains base image information extracted from OCI annotations. 
 | `base_image.name` | `string` | Base image reference | `"docker.io/library/alpine:3.19"` |
 | `base_image.digest` | `string` | Base image digest | `"sha256:abc123..."` |
 
-**Note:** `image.base_image` is `null` if the image does not have OCI base image annotations. Use `has(image.base_image)` to check for presence. This provides a no-network way to identify base images when the image builder sets the standard annotations (e.g., Docker BuildKit, ko, crane).
+> [!NOTE]
+> `image.base_image` is `null` if the image does not have OCI base image annotations. Use `has(image.base_image)` to check for presence. This provides a no-network way to identify base images when the image builder sets the standard annotations (e.g., Docker BuildKit, ko, crane).
 
 **Example Expressions for `image`:**
 

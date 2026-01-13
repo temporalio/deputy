@@ -44,14 +44,17 @@ which deputy-sandbox-vz
 
 ### 2. Download Alpine Linux Assets
 
+> [!NOTE]
+> This guide uses Alpine Linux 3.19.0 (aarch64 virt edition). To use a newer stable release,
+> check [alpinelinux.org/downloads](https://alpinelinux.org/downloads/) and update both
+> `v3.19` and `3.19.0` in the URL and filename below.
+
 ```bash
 # Create the asset directory
 mkdir -p ~/.deputy/vz
 cd ~/.deputy/vz
 
-# Download Alpine virt ISO (contains kernel and initramfs).
-# Note: Check https://alpinelinux.org/downloads/ for the latest stable Alpine release
-# and update the version in the URL below if needed.
+# Download Alpine virt ISO (contains kernel and initramfs)
 curl -LO https://dl-cdn.alpinelinux.org/alpine/v3.19/releases/aarch64/alpine-virt-3.19.0-aarch64.iso
 
 # Extract kernel and initramfs from the ISO
@@ -71,8 +74,14 @@ The `vmlinuz-virt` file is an EFI stub. Virtualization.framework needs the raw k
 cd ~/.deputy/vz
 
 # Find the gzip-compressed kernel inside the EFI wrapper
-# The gzip signature (1f 8b 08) is at offset 0xc920 (51488 decimal)
+# The gzip signature (1f 8b 08) marks the start of the compressed kernel
 OFFSET=$(xxd vmlinuz.efi | grep "1f8b 08" | head -1 | cut -d: -f1)
+if [ -z "$OFFSET" ]; then
+    echo "Error: Failed to locate gzip signature in vmlinuz.efi."
+    echo "The kernel format may have changed. Please verify the Alpine ISO version"
+    echo "and check https://github.com/picatz/deputy for updated extraction instructions."
+    exit 1
+fi
 OFFSET_DEC=$((16#${OFFSET}))
 
 # Extract and decompress

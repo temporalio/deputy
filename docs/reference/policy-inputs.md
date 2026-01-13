@@ -62,7 +62,8 @@ Each command emits one or more entrypoints when `--policy` is provided:
 | `deputy proxy` | `go_artifact_request`, `npm_artifact_request`, `pypi_artifact_request`, `rubygems_artifact_request`, `oci_artifact_request` |
 | `deputy server` (API requests) | `service_scan_request`, `service_list_request`, `service_sbom_request`, `service_diff_request`, `service_secrets_request`, `service_graph_request` |
 
-> **Note**: `deputy diff` auto-detects whether you're comparing git refs or container images based on the reference format. Container image refs look like `image:tag` or contain registry paths (e.g., `ghcr.io/org/app:v1`).
+> [!NOTE]
+> `deputy diff` auto-detects whether you're comparing git refs or container images based on the reference format. Container image refs look like `image:tag` or contain registry paths (e.g., `ghcr.io/org/app:v1`).
 
 Every evaluation includes `env.command` and `env.entrypoint`, so a single policy can branch by context. Policies can also prefilter with `entrypoints`, `commands`, and `ecosystems`.
 
@@ -223,7 +224,8 @@ When scanning container images, each vulnerability includes layer information vi
 - `vulnerability.layer_details.command` - Dockerfile instruction that created the layer
 - `vulnerability.layer_details.in_base_image` - Boolean indicating if the layer is from the base image (FROM instruction)
 
-> **Note:** The `in_base_image` field requires the `--detect-base-image` flag when scanning:
+> [!NOTE]
+> The `in_base_image` field requires the `--detect-base-image` flag when scanning:
 > ```console
 > $ deputy scan --detect-base-image nginx:1.25
 > ```

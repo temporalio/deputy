@@ -30,7 +30,7 @@ The `server` command starts Deputy in remote server mode, listening for client c
 ## Flags
 
 | Flag | Default | Description |
-|------|---------|-------------|
+| --- | --- | --- |
 | `--addr` | `:8090` | Address to listen on (host:port) |
 | `--read-timeout` | `30s` | Maximum duration for reading request |
 | `--write-timeout` | `5m` | Maximum duration for writing response |

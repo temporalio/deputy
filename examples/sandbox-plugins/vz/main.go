@@ -1,6 +1,3 @@
-// Copyright 2024 Deputy Authors
-// SPDX-License-Identifier: Apache-2.0
-
 //go:build darwin && arm64
 
 // deputy-sandbox-vz is a sandbox runtime plugin using Apple's Virtualization.framework.

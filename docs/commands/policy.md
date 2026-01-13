@@ -43,11 +43,11 @@ deputy policy eval --policy policy.yaml --input context.json
 
 ### Flags
 
-| Flag | Default | Description |
-| --- | --- | --- |
-| `--policy` | *required* | Path to CEL policy (use `-` for stdin) |
-| `--input` | *required* | Path to JSON input (use `-` for stdin) |
-| `--format` | `json` | Output format: `json` or `text` |
+| Flag | Short | Default | Description |
+| --- | --- | --- | --- |
+| `--policy` | `-p` | *required* | Path to CEL policy (use `-` for stdin) |
+| `--input` | `-i` | *required* | Path to JSON input (use `-` for stdin) |
+| `--format` | `-f` | `json` | Output format: `json` or `text` |
 
 ### Example
 
@@ -70,9 +70,9 @@ deputy policy lint <policy.yaml> [policy2.yaml ...]
 
 ### Flags
 
-| Flag | Default | Description |
-| --- | --- | --- |
-| `--var` | | Additional variable names to declare (repeatable) |
+| Flag | Short | Default | Description |
+| --- | --- | --- | --- |
+| `--var` | | | Additional variable names to declare (repeatable) |
 
 ### Example
 
@@ -136,9 +136,9 @@ deputy policy bundle --out bundle.json <policy.yaml> [policy2.yaml ...]
 
 ### Flags
 
-| Flag | Default | Description |
-| --- | --- | --- |
-| `--out` | *required* | Output bundle path (use `-` for stdout) |
+| Flag | Short | Default | Description |
+| --- | --- | --- | --- |
+| `--out` | `-o` | *required* | Output bundle path (use `-` for stdout) |
 
 ### Example
 
@@ -183,11 +183,11 @@ deputy policy simulate --policy policy.yaml --input requests.json
 
 ### Flags
 
-| Flag | Default | Description |
-| --- | --- | --- |
-| `--policy` | | Policy file or bundle (repeatable) |
-| `--input` | | JSON payload file or `-` for stdin (repeatable) |
-| `--format` | `text` | Output format: `text` or `json` |
+| Flag | Short | Default | Description |
+| --- | --- | --- | --- |
+| `--policy` | `-p` | | Policy file or bundle (repeatable) |
+| `--input` | `-i` | | JSON payload file or `-` for stdin (repeatable) |
+| `--format` | `-f` | `text` | Output format: `text` or `json` |
 
 ### Example
 
@@ -261,7 +261,8 @@ Result: 0
 Result: true
 ```
 
-Note: The `pkg` helper provides sensible defaults (`name`, `version`, `ecosystem` default to `""`, `licenses` defaults to `[]`), so you don't need `?.orValue()` for these fields.
+> [!NOTE]
+> The `pkg` helper provides sensible defaults (`name`, `version`, `ecosystem` default to `""`, `licenses` defaults to `[]`), so you don't need `?.orValue()` for these fields.
 
 **Testing string patterns:**
 
@@ -321,10 +322,10 @@ deputy policy lsp [flags]
 
 ### Flags
 
-| Flag | Default | Description |
-| --- | --- | --- |
-| `--tcp` | | Listen on TCP address instead of stdio (e.g., `127.0.0.1:4389`) |
-| `--log-level` | `info` | Log level: `debug`, `info`, `warn`, `error` |
+| Flag | Short | Default | Description |
+| --- | --- | --- | --- |
+| `--tcp` | | | Listen on TCP address instead of stdio (e.g., `127.0.0.1:4389`) |
+| `--log-level` | | `info` | Log level: `debug`, `info`, `warn`, `error` |
 
 ### Editor Setup
 

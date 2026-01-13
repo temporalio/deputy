@@ -1,6 +1,3 @@
-// Copyright 2024 Deputy Authors
-// SPDX-License-Identifier: Apache-2.0
-
 syntax = "proto3";
 
 package deputy.sandbox.v1;

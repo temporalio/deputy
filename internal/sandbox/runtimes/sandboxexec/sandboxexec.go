@@ -1,6 +1,3 @@
-// Copyright 2024 Deputy Authors
-// SPDX-License-Identifier: Apache-2.0
-
 // Package sandboxexec provides a macOS sandbox-exec runtime.
 //
 // Note: sandbox-exec is deprecated by Apple and provides best-effort isolation.

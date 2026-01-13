@@ -72,8 +72,8 @@ flowchart TB
 
     Base --> PullBase --> BaseInv & BaseConfig & BaseLayers
     Target --> PullTarget --> TargetInv & TargetConfig & TargetLayers
-    Base -.->|"--local-daemon"| LocalBase --> BaseInv & BaseConfig & BaseLayers
-    Target -.->|"--local-daemon"| LocalTarget --> TargetInv & TargetConfig & TargetLayers
+    Base -.->|"--source docker-daemon"| LocalBase --> BaseInv & BaseConfig & BaseLayers
+    Target -.->|"--source docker-daemon"| LocalTarget --> TargetInv & TargetConfig & TargetLayers
 
     BaseInv & TargetInv --> PkgDiff
     PkgDiff --> VulnDiff
@@ -91,16 +91,16 @@ flowchart TB
 
 ### Container Diff Flags
 
-| Flag | Default | Description |
-| --- | --- | --- |
-| `--local-daemon` | `false` | Use local Docker daemon instead of pulling from registry |
-| `--skip-vuln-scan` | `false` | Skip vulnerability scanning (faster) |
-| `--policy` | | CEL policy files (repeatable) |
-| `--format` | `text` | Output format: `text` or `json` |
+| Flag | Short | Default | Description |
+| --- | --- | --- | --- |
+| `--source` | `-s` | `remote` | Target source type: `remote`, `docker-daemon` |
+| `--skip-vuln-scan` | | `false` | Skip vulnerability scanning (faster) |
+| `--policy` | | | CEL policy files (repeatable) |
+| `--format` | `-f` | `text` | Output format: `text` or `json` |
 
 ### Using Local Docker Daemon
 
-The `--local-daemon` flag tells Deputy to load images from your local Docker daemon instead of pulling from remote registries. This is useful for:
+The `--source docker-daemon` flag tells Deputy to load images from your local Docker daemon instead of pulling from remote registries. This is useful for:
 
 - **Avoiding rate limits** (e.g., Docker Hub's pull limits)
 - **Scanning private images** already pulled locally
@@ -113,10 +113,11 @@ $ docker pull temporalio/server:1.28.1
 $ docker pull temporalio/server:1.29.2
 
 # Then compare using local daemon
-$ deputy diff --local-daemon temporalio/server:1.28.1 temporalio/server:1.29.2
+$ deputy diff --source docker-daemon temporalio/server:1.28.1 temporalio/server:1.29.2
 ```
 
-> **Note**: Images must be pulled with `docker pull` before using `--local-daemon`. Deputy does not automatically pull images in this mode.
+> [!NOTE]
+> Images must be pulled with `docker pull` before using `--source docker-daemon`. Deputy does not automatically pull images in this mode.
 
 ### Container Diff Examples
 
@@ -131,7 +132,7 @@ $ deputy diff gcr.io/project/app:v1 gcr.io/project/app:v2
 $ deputy diff --skip-vuln-scan alpine:3.18 alpine:3.19
 
 # Use locally cached images (avoids rate limits)
-$ deputy diff --local-daemon python:3.11 python:3.12
+$ deputy diff --source docker-daemon python:3.11 python:3.12
 
 # Apply policy to container diff
 $ deputy diff --policy policy/container-upgrade.yaml node:18 node:20
@@ -347,15 +348,15 @@ flowchart TB
 
 | Flag | Short | Default | Description |
 | --- | --- | --- | --- |
-| `--skip-vuln-scan` | `-s` | `false` | Skip vulnerability scanning (faster) |
+| `--skip-vuln-scan` | | `false` | Skip vulnerability scanning (faster) |
 | `--policy` | | | CEL policy files (repeatable) |
 
 ### Container Diff Flags
 
-| Flag | Default | Description |
-| --- | --- | --- |
-| `--local-daemon` | `false` | Use local Docker daemon instead of pulling from registry |
-| `--format` | `text` | Output format: `text` or `json` |
+| Flag | Short | Default | Description |
+| --- | --- | --- | --- |
+| `--source` | `-s` | `remote` | Target source type: `remote`, `docker-daemon` |
+| `--format` | `-f` | `text` | Output format: `text`, `json` |
 
 ### Git Diff Flags
 
@@ -426,7 +427,8 @@ Deputy supports many Git reference formats:
 | Time expressions | `HEAD@{yesterday}`, `main@{1.week.ago}` |
 | Working tree | `WORKING`, `WT`, `.` |
 
-> **Note**: Quote time-based refs to avoid shell expansion: `"HEAD@{yesterday}"`
+> [!NOTE]
+> Quote time-based refs to avoid shell expansion: `"HEAD@{yesterday}"`
 
 ## Default Behavior
 
