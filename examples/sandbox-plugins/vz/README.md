@@ -2,6 +2,9 @@
 
 A Deputy sandbox runtime plugin using Apple's Virtualization.framework for VM-based isolation on macOS.
 
+> [!WARNING]
+> **Work in Progress**: This plugin demonstrates the Deputy sandbox plugin architecture but is not yet fully functional for command execution. The VM boots successfully, but command injection and output capture are still being implemented. Use this as a reference for building sandbox plugins or contributing to its development.
+
 ## Overview
 
 This plugin provides maximum isolation by running each sandbox execution in a lightweight VM using the [vz](https://github.com/Code-Hex/vz) Go bindings for macOS Virtualization.framework.
@@ -12,10 +15,19 @@ This plugin provides maximum isolation by running each sandbox execution in a li
 - Native macOS performance on Apple Silicon
 - No root/sudo required
 
+**Current Status:**
+- [x] Plugin discovery and registration
+- [x] VM configuration and boot
+- [x] Virtio device setup (disk, network, console, filesystem sharing)
+- [ ] Command injection into guest
+- [ ] Output capture and streaming
+- [ ] Exit code detection
+
 **Requirements:**
 - macOS 11.0+ (Big Sur or later)
 - Apple Silicon (arm64) - required for Virtualization.framework
 - Code signing with virtualization entitlements
+- Docker (for creating rootfs on macOS)
 
 ## Quick Start (Alpine Linux)
 
@@ -100,20 +112,31 @@ The Alpine initramfs needs a root filesystem to complete its boot sequence.
 
 **Option A: Quick Setup with Docker** (Recommended)
 
+First, download the Alpine minirootfs tarball:
+
+```bash
+cd ~/.deputy/vz
+curl -LO https://dl-cdn.alpinelinux.org/alpine/v3.19/releases/aarch64/alpine-minirootfs-3.19.0-aarch64.tar.gz
+```
+
+Then create the rootfs image using Docker with `--privileged` (required for loop mounting):
+
 ```bash
 # Use Docker to create an ext4 rootfs (macOS can't create ext4 natively)
-docker run --rm -v ~/.deputy/vz:/output alpine:3.19 sh -c '
+# Note: --privileged is required to mount the disk image inside the container
+docker run --rm --privileged -v ~/.deputy/vz:/output alpine:3.19 sh -c '
   apk add --no-cache e2fsprogs
+
+  # Create and format the disk image
   dd if=/dev/zero of=/output/rootfs.img bs=1M count=256
   mkfs.ext4 -F /output/rootfs.img
+
+  # Mount using loop device (needs privileged)
   mkdir -p /mnt/rootfs
-  mount /output/rootfs.img /mnt/rootfs
+  mount -o loop /output/rootfs.img /mnt/rootfs
 
-  # Install a minimal Alpine system
-  apk add --no-cache --root /mnt/rootfs --initdb alpine-base busybox
-
-  # Create essential directories
-  mkdir -p /mnt/rootfs/{dev,proc,sys,tmp,run}
+  # Extract the minirootfs
+  tar -xzf /output/alpine-minirootfs-3.19.0-aarch64.tar.gz -C /mnt/rootfs
 
   # Create a simple init script
   cat > /mnt/rootfs/init << "EOF"
@@ -125,8 +148,11 @@ exec /bin/sh
 EOF
   chmod +x /mnt/rootfs/init
 
+  # Ensure essential directories exist
+  mkdir -p /mnt/rootfs/{dev,proc,sys,tmp,run}
+
   umount /mnt/rootfs
-  echo "Created rootfs.img"
+  echo "SUCCESS: Created rootfs.img with Alpine minirootfs"
 '
 ```
 
@@ -184,11 +210,30 @@ export PATH="$HOME/bin:$PATH"
 cd /path/to/deputy
 go build -o deputy .
 
-# Test plugin discovery (should not fall back to sandbox-exec)
+# Test plugin discovery - verify the plugin starts and responds to GetInfo
+# This confirms the plugin architecture is working
+~/bin/deputy-sandbox-vz --socket /tmp/test-vz.sock &
+VZ_PID=$!
+sleep 2
+ls -la /tmp/test-vz.sock  # Should show the socket file
+kill $VZ_PID
+
+# Test via deputy (plugin will be discovered and started automatically)
+# Note: Currently the VM boots but command execution is not yet implemented
 DEPUTY_LOG_LEVEL=debug ./deputy exec --runtime plugin --plugin vz -- echo hello
 
-# If you see "runtime=RUNTIME_PLUGIN" in the logs, the plugin is working!
+# If you see "runtime=RUNTIME_PLUGIN" and "vz sandbox plugin listening" in the logs,
+# the plugin architecture is working correctly!
 ```
+
+> [!NOTE]
+> Since command injection is not yet implemented, the command will appear to hang
+> as the VM boots to a shell but doesn't execute the requested command. Press
+> Ctrl+C to cancel. This demonstrates that:
+> 1. Deputy discovers the plugin via PATH
+> 2. The plugin starts and creates a Unix socket
+> 3. Deputy communicates with the plugin via ConnectRPC
+> 4. The VM boots successfully with the configured kernel and rootfs
 
 ## Environment Variables
 
@@ -207,6 +252,10 @@ export DEPUTY_VZ_ROOTFS=/path/to/custom/rootfs.img
 ```
 
 ## Usage Examples
+
+> [!WARNING]
+> These examples show the intended interface. Command execution inside the VM
+> is not yet implemented. Currently the VM boots but commands are not injected.
 
 ```bash
 # Run a command in a VM
@@ -465,6 +514,9 @@ ls ~/.deputy/vz/{vmlinuz,rootfs.img}
 cd examples/sandbox-plugins/vz
 go mod tidy
 go build -o deputy-sandbox-vz .
+
+# Sign with virtualization entitlement (required)
+codesign --entitlements entitlements.plist --sign - deputy-sandbox-vz
 ```
 
 ### Running Tests
@@ -472,6 +524,29 @@ go build -o deputy-sandbox-vz .
 ```bash
 go test -v ./...
 ```
+
+### Contributing
+
+The main missing functionality is command injection and output capture. Here's what needs to be implemented:
+
+1. **Command Injection**: Modify the kernel command line or use an init script that:
+   - Reads the command from a configuration source (e.g., kernel parameters, virtio-serial)
+   - Executes the command inside the VM
+   - Captures stdout/stderr
+
+2. **Output Streaming**: Use the virtio-console to stream output back to the host:
+   - The serial port is already configured (`vz.NewFileHandleSerialPortAttachment`)
+   - Need to parse and relay output as `ExecuteEvent_Output` messages
+
+3. **Exit Code Detection**: Determine when the command completes and capture its exit code:
+   - Could use a sentinel value written to the console
+   - Or monitor for VM shutdown
+
+4. **Timeout Handling**: Implement proper timeout support:
+   - Stop the VM if execution exceeds the configured timeout
+   - Return appropriate error events
+
+See [apple/container](https://github.com/apple/container) for reference on how Apple implements similar functionality.
 
 ### Protocol
 
