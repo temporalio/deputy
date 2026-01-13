@@ -271,7 +271,28 @@ FreshnessScore =
     CURRENT: 0
 
 SecretsScore = min(secrets_in_package * 2, 5)
+
+# Risk Level Override Rules
+# Certain conditions automatically escalate the risk level regardless of numeric score:
+
+RiskLevel =
+    IF MaliciousScore > 0:
+        CRITICAL  # Any malicious package detection = automatic CRITICAL
+    ELSE IF VulnerabilityScore >= 30 AND has_kev_vuln:
+        CRITICAL  # High vuln score with KEV = automatic CRITICAL
+    ELSE IF TotalScore >= 76:
+        CRITICAL
+    ELSE IF TotalScore >= 51:
+        HIGH
+    ELSE IF TotalScore >= 26:
+        MEDIUM
+    ELSE:
+        LOW
 ```
+
+**Override Rules Rationale:**
+- **Malicious packages**: Any detection of malware, typosquatting, or compromised maintainers represents an immediate, severe threat that warrants CRITICAL status regardless of other factors. These are not probabilistic risks—they are confirmed attacks.
+- **KEV vulnerabilities with high score**: Vulnerabilities in CISA's Known Exploited Vulnerabilities catalog are actively being exploited in the wild, making them critical regardless of the overall score distribution.
 
 #### 3.2 Aggregate Project Risk Score
 
@@ -806,7 +827,7 @@ lodash@4.17.15
 Total: 36 pts → MEDIUM risk
 ```
 
-### Example 2: Critical Risk Package
+### Example 2: Critical Risk Package (Malicious Override)
 
 ```
 event-stream@3.3.6 (hypothetical malicious version)
@@ -816,5 +837,10 @@ event-stream@3.3.6 (hypothetical malicious version)
 ├─ Maintainer (ABANDONED): 10 pts
 └─ Freshness (VERY_STALE): 4 pts
 
-Total: 54 pts → HIGH risk (but malicious flag = CRITICAL override)
+Numeric Score: 54 pts → Would normally be HIGH risk
+Final Risk Level: CRITICAL (override triggered by MaliciousScore > 0)
+
+Note: Per the Risk Level Override Rules defined in section 3.1, any package
+with MaliciousScore > 0 is automatically classified as CRITICAL regardless
+of the numeric score. This ensures malicious packages are never downplayed.
 ```
