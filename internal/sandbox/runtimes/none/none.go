@@ -112,6 +112,14 @@ func (r *Runtime) Execute(ctx context.Context, req *sandboxv1.ExecuteRequest) it
 			return
 		}
 
+		// Apply timeout from request if specified
+		execCtx := ctx
+		var cancel context.CancelFunc
+		if timeout := req.GetTimeout(); timeout != nil && timeout.AsDuration() > 0 {
+			execCtx, cancel = context.WithTimeout(ctx, timeout.AsDuration())
+			defer cancel()
+		}
+
 		// Send started event
 		if !yield(&sandboxv1.ExecuteEvent{
 			ExecutionId: executionID,
@@ -127,8 +135,8 @@ func (r *Runtime) Execute(ctx context.Context, req *sandboxv1.ExecuteRequest) it
 			return
 		}
 
-		// Build command
-		cmd := exec.CommandContext(ctx, req.GetCommand()[0], req.GetCommand()[1:]...)
+		// Build command with timeout-aware context
+		cmd := exec.CommandContext(execCtx, req.GetCommand()[0], req.GetCommand()[1:]...)
 
 		// Set working directory
 		if req.GetWorkDir() != "" {
@@ -193,6 +201,37 @@ func (r *Runtime) Execute(ctx context.Context, req *sandboxv1.ExecuteRequest) it
 		// Determine exit code
 		exitCode := int32(0)
 		if err != nil {
+			// Check for context cancellation (timeout or manual cancel)
+			if execCtx.Err() == context.DeadlineExceeded {
+				yield(&sandboxv1.ExecuteEvent{
+					ExecutionId: executionID,
+					Timestamp:   timestamppb.Now(),
+					Details: &sandboxv1.ExecuteEvent_Error{
+						Error: &sandboxv1.ErrorEvent{
+							Message:     "execution timed out",
+							Code:        "TIMEOUT",
+							IsFatal:     true,
+							IsRetriable: true,
+						},
+					},
+				}, nil)
+				return
+			}
+			if execCtx.Err() == context.Canceled {
+				yield(&sandboxv1.ExecuteEvent{
+					ExecutionId: executionID,
+					Timestamp:   timestamppb.Now(),
+					Details: &sandboxv1.ExecuteEvent_Error{
+						Error: &sandboxv1.ErrorEvent{
+							Message:     "execution cancelled",
+							Code:        "CANCELLED",
+							IsFatal:     true,
+							IsRetriable: false,
+						},
+					},
+				}, nil)
+				return
+			}
 			if exitErr, ok := err.(*exec.ExitError); ok {
 				exitCode = int32(exitErr.ExitCode())
 			} else {

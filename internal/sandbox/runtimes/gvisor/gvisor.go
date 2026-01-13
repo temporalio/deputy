@@ -214,10 +214,15 @@ func WithOverlayMode(mode string) Option {
 }
 
 // New creates a new gVisor runtime.
+// Configuration can be provided via options or environment variables:
+//   - DEPUTY_DOCKER_CLI: Path to Docker-compatible CLI (docker, nerdctl, finch, podman)
+//   - DEPUTY_RUNSC_PATH: Path to runsc binary
+//
+// See sandbox.EnvDockerCLI and sandbox.EnvRunscPath for documentation.
 func New(opts ...Option) *Runtime {
 	r := &Runtime{
-		runscPath:     "runsc",
-		dockerPath:    "docker",
+		runscPath:     sandbox.GetRunscPath(),
+		dockerPath:    sandbox.GetDockerCLI(),
 		dockerRuntime: "runsc",
 		useDocker:     true,       // Default to Docker mode for simplicity
 		platform:      "",         // Auto-detect (ptrace or kvm)

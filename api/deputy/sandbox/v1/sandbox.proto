@@ -84,6 +84,14 @@ enum Runtime {
   // External plugin-provided runtime.
   // Used when runtime is provided by a deputy-sandbox-* plugin.
   RUNTIME_PLUGIN = 10;
+
+  // Linux Landlock LSM for lightweight filesystem sandboxing.
+  // No root/container overhead, uses kernel security module. Linux 5.13+.
+  RUNTIME_LANDLOCK = 11;
+
+  // Apple Virtualization.framework for VM-based isolation.
+  // macOS 26+ (Tahoe), Apple Silicon only. One VM per container.
+  RUNTIME_APPLE_CONTAINER = 12;
 }
 
 // Mode controls the sandbox's filesystem access level.

@@ -2192,6 +2192,9 @@ deputy server
 | `DEPUTY_SERVER_CORS_ORIGINS` | Comma-separated allowed CORS origins |
 | `DEPUTY_SERVER_RATE_LIMIT_ENABLED` | Enable rate limiting (`true`/`false`) |
 | `DEPUTY_SERVER_RATE_LIMIT_RPS` | Requests per second limit (default: 10) |
+| `DEPUTY_DOCKER_CLI` | Path to Docker-compatible CLI for sandbox runtimes: `docker`, `nerdctl`, `finch`, `podman` (default: `docker`) ([`internal/sandbox/env.go`](internal/sandbox/env.go)) |
+| `DEPUTY_DOCKER_HOST` | Docker daemon socket for sandbox runtimes; takes precedence over `DOCKER_HOST` ([`internal/sandbox/env.go`](internal/sandbox/env.go)) |
+| `DEPUTY_RUNSC_PATH` | Path to runsc (gVisor) binary for gVisor runtime (default: `runsc`) ([`internal/sandbox/env.go`](internal/sandbox/env.go)) |
 
 ## Exit Codes
 

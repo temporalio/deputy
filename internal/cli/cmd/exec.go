@@ -16,6 +16,7 @@ import (
 	"github.com/picatz/deputy/internal/sandbox"
 	"github.com/picatz/deputy/internal/sandbox/runtimes/docker"
 	"github.com/picatz/deputy/internal/sandbox/runtimes/gvisor"
+	"github.com/picatz/deputy/internal/sandbox/runtimes/landlock"
 	"github.com/picatz/deputy/internal/sandbox/runtimes/none"
 	"github.com/picatz/deputy/internal/sandbox/runtimes/plugin"
 	"github.com/picatz/deputy/internal/sandbox/runtimes/sandboxexec"
@@ -24,26 +25,27 @@ import (
 )
 
 type execFlags struct {
-	runtime        string
-	mode           string
-	network        string
-	networkAllow   []string
-	image          string
-	workspace      string
-	noWorkspace    bool
-	workDir        string
-	env            []string
-	stdinPath      string
-	timeout        time.Duration
-	pluginName     string
-	memoryLimit    string
-	cpuLimit       string
-	maxPids        int32
-	maxFiles       int32
-	diskQuotaBytes int64
-	policyPaths    []string
-	verbose        bool
-	execAllow      []string
+	runtime               string
+	mode                  string
+	network               string
+	networkAllow          []string
+	image                 string
+	workspace             string
+	noWorkspace           bool
+	workDir               string
+	env                   []string
+	stdinPath             string
+	timeout               time.Duration
+	pluginName            string
+	memoryLimit           string
+	cpuLimit              string
+	maxPids               int32
+	maxFiles              int32
+	diskQuotaBytes        int64
+	policyPaths           []string
+	verbose               bool
+	execAllow             []string
+	dangerouslySkipPrompt bool
 }
 
 // AddExecCommand adds the exec command to the root command.
@@ -68,7 +70,7 @@ network access is disabled for safety.`,
 		},
 	}
 
-	cmd.Flags().StringVar(&flags.runtime, "runtime", "docker", "Sandbox runtime (docker|gvisor|none|sandbox-exec|plugin)")
+	cmd.Flags().StringVar(&flags.runtime, "runtime", "docker", "Sandbox runtime (docker|gvisor|landlock|none|sandbox-exec|plugin)")
 	cmd.Flags().StringVar(&flags.mode, "mode", "workspace-write", "Filesystem mode (read-only|workspace-write|full-access|network-isolated|ephemeral)")
 	cmd.Flags().StringVar(&flags.network, "network", "none", "Network mode (none|host|bridge|allowlist)")
 	cmd.Flags().StringArrayVar(&flags.networkAllow, "network-allow", nil, "Allowed hosts for network allowlist mode (repeatable)")
@@ -88,6 +90,7 @@ network access is disabled for safety.`,
 	cmd.Flags().StringArrayVar(&flags.policyPaths, "policy", nil, "Policy file or bundle to enforce (repeatable)")
 	cmd.Flags().BoolVar(&flags.verbose, "verbose", false, "Show non-fatal sandbox warnings")
 	cmd.Flags().StringArrayVar(&flags.execAllow, "exec-allow", nil, "Allow additional executables by path or command name (repeatable)")
+	cmd.Flags().BoolVar(&flags.dangerouslySkipPrompt, "dangerously-skip-prompt", false, "Skip confirmation prompt for dangerous modes (full-access, host network)")
 
 	cmd.Example = strings.Join([]string{
 		"deputy exec --mode read-only -- ls -la",
@@ -136,6 +139,19 @@ func runExec(ctx context.Context, deps Dependencies, flags *execFlags, command [
 		workspaceDir, err = filepath.Abs(flags.workspace)
 		if err != nil {
 			return fmt.Errorf("resolve workspace path: %w", err)
+		}
+	}
+
+	// Check if confirmation is required for dangerous modes or commands
+	if !flags.dangerouslySkipPrompt && execConfirmationRequired(mode, networkMode, command) {
+		info := execConfirmationInfo{
+			Mode:        mode,
+			NetworkMode: networkMode,
+			Command:     command,
+			Workspace:   workspaceDir,
+		}
+		if !confirmExecDangerousMode(info, stdin, stdout, stderr) {
+			return fmt.Errorf("operation cancelled")
 		}
 	}
 
@@ -191,6 +207,7 @@ func runExec(ctx context.Context, deps Dependencies, flags *execFlags, command [
 	reg.Register(docker.New())
 	reg.Register(gvisor.New())
 	reg.Register(sandboxexec.New())
+	reg.Register(landlock.New())
 	pluginRuntime := plugin.New()
 	reg.Register(pluginRuntime)
 	defer pluginRuntime.Close()
@@ -265,8 +282,10 @@ func parseSandboxRuntime(value string) (sandboxv1.Runtime, error) {
 		return sandboxv1.Runtime_RUNTIME_SANDBOX_EXEC, nil
 	case "plugin":
 		return sandboxv1.Runtime_RUNTIME_PLUGIN, nil
+	case "landlock":
+		return sandboxv1.Runtime_RUNTIME_LANDLOCK, nil
 	default:
-		return sandboxv1.Runtime_RUNTIME_UNSPECIFIED, fmt.Errorf("unsupported runtime %q (use docker|gvisor|none|sandbox-exec|plugin)", value)
+		return sandboxv1.Runtime_RUNTIME_UNSPECIFIED, fmt.Errorf("unsupported runtime %q (use docker|gvisor|none|sandbox-exec|landlock|plugin)", value)
 	}
 }
 

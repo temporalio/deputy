@@ -61,6 +61,12 @@ const (
 	// External plugin-provided runtime.
 	// Used when runtime is provided by a deputy-sandbox-* plugin.
 	Runtime_RUNTIME_PLUGIN Runtime = 10
+	// Linux Landlock LSM for lightweight filesystem sandboxing.
+	// No root/container overhead, uses kernel security module. Linux 5.13+.
+	Runtime_RUNTIME_LANDLOCK Runtime = 11
+	// Apple Virtualization.framework for VM-based isolation.
+	// macOS 26+ (Tahoe), Apple Silicon only. One VM per container.
+	Runtime_RUNTIME_APPLE_CONTAINER Runtime = 12
 )
 
 // Enum value maps for Runtime.
@@ -77,19 +83,23 @@ var (
 		8:  "RUNTIME_NAMESPACES",
 		9:  "RUNTIME_FIRECRACKER",
 		10: "RUNTIME_PLUGIN",
+		11: "RUNTIME_LANDLOCK",
+		12: "RUNTIME_APPLE_CONTAINER",
 	}
 	Runtime_value = map[string]int32{
-		"RUNTIME_UNSPECIFIED":  0,
-		"RUNTIME_NONE":         1,
-		"RUNTIME_DOCKER":       2,
-		"RUNTIME_PODMAN":       3,
-		"RUNTIME_GVISOR":       4,
-		"RUNTIME_CONTAINERD":   5,
-		"RUNTIME_BWRAP":        6,
-		"RUNTIME_SANDBOX_EXEC": 7,
-		"RUNTIME_NAMESPACES":   8,
-		"RUNTIME_FIRECRACKER":  9,
-		"RUNTIME_PLUGIN":       10,
+		"RUNTIME_UNSPECIFIED":     0,
+		"RUNTIME_NONE":            1,
+		"RUNTIME_DOCKER":          2,
+		"RUNTIME_PODMAN":          3,
+		"RUNTIME_GVISOR":          4,
+		"RUNTIME_CONTAINERD":      5,
+		"RUNTIME_BWRAP":           6,
+		"RUNTIME_SANDBOX_EXEC":    7,
+		"RUNTIME_NAMESPACES":      8,
+		"RUNTIME_FIRECRACKER":     9,
+		"RUNTIME_PLUGIN":          10,
+		"RUNTIME_LANDLOCK":        11,
+		"RUNTIME_APPLE_CONTAINER": 12,
 	}
 )
 
@@ -2450,7 +2460,7 @@ const file_deputy_sandbox_v1_sandbox_proto_rawDesc = "" +
 	"\fexecution_id\x18\x01 \x01(\tB\a\xbaH\x04r\x02\x10\x01R\vexecutionId\"A\n" +
 	"\x0fCleanupResponse\x12\x18\n" +
 	"\asuccess\x18\x01 \x01(\bR\asuccess\x12\x14\n" +
-	"\x05error\x18\x02 \x01(\tR\x05error*\xfa\x01\n" +
+	"\x05error\x18\x02 \x01(\tR\x05error*\xad\x02\n" +
 	"\aRuntime\x12\x17\n" +
 	"\x13RUNTIME_UNSPECIFIED\x10\x00\x12\x10\n" +
 	"\fRUNTIME_NONE\x10\x01\x12\x12\n" +
@@ -2463,7 +2473,9 @@ const file_deputy_sandbox_v1_sandbox_proto_rawDesc = "" +
 	"\x12RUNTIME_NAMESPACES\x10\b\x12\x17\n" +
 	"\x13RUNTIME_FIRECRACKER\x10\t\x12\x12\n" +
 	"\x0eRUNTIME_PLUGIN\x10\n" +
-	"*\x8f\x01\n" +
+	"\x12\x14\n" +
+	"\x10RUNTIME_LANDLOCK\x10\v\x12\x1b\n" +
+	"\x17RUNTIME_APPLE_CONTAINER\x10\f*\x8f\x01\n" +
 	"\x04Mode\x12\x14\n" +
 	"\x10MODE_UNSPECIFIED\x10\x00\x12\x12\n" +
 	"\x0eMODE_READ_ONLY\x10\x01\x12\x18\n" +
