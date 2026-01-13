@@ -14,12 +14,6 @@ plugins:
     out: ../gen
     opt:
       - paths=source_relative
-  # vtprotobuf for high-performance serialization
-  - remote: buf.build/community/planetscale-vtprotobuf
-    out: ../gen
-    opt:
-      - paths=source_relative
-      - features=marshal+unmarshal+size+pool
   # ConnectRPC for service stubs
   - remote: buf.build/connectrpc/go
     out: ../gen
