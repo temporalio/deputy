@@ -49,11 +49,13 @@ which deputy-sandbox-vz
 mkdir -p ~/.deputy/vz
 cd ~/.deputy/vz
 
-# Download Alpine virt ISO (contains kernel and initramfs)
+# Download Alpine virt ISO (contains kernel and initramfs).
+# Note: Check https://alpinelinux.org/downloads/ for the latest stable Alpine release
+# and update the version in the URL below if needed.
 curl -LO https://dl-cdn.alpinelinux.org/alpine/v3.19/releases/aarch64/alpine-virt-3.19.0-aarch64.iso
 
 # Extract kernel and initramfs from the ISO
-bsdtar -xf alpine-virt.iso boot/vmlinuz-virt boot/initramfs-virt
+bsdtar -xf alpine-virt-3.19.0-aarch64.iso boot/vmlinuz-virt boot/initramfs-virt
 
 # Move to expected locations
 mv boot/vmlinuz-virt vmlinuz.efi

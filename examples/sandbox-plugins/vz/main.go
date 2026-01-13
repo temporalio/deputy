@@ -568,15 +568,3 @@ func parseMemoryString(s string) (uint64, error) {
 		return value, nil
 	}
 }
-
-func shellEscape(args []string) string {
-	escaped := ""
-	for i, arg := range args {
-		if i > 0 {
-			escaped += " "
-		}
-		// Simple escaping for shell
-		escaped += "'" + arg + "'"
-	}
-	return escaped
-}
