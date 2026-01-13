@@ -174,9 +174,10 @@ runs:
         # Count upgrades and downgrades (lines starting with ↑ or ↓)
         UPDATED=$(echo "$PLAIN_OUTPUT" | grep -cE '^\s*(↑|↓) ' 2>/dev/null || echo "0")
 
-        # Count new vulnerabilities by looking for CVE/GHSA/GO- identifiers in added/updated deps
-        # This counts unique vulnerability IDs mentioned in the output
-        NEW_VULNS=$(echo "$PLAIN_OUTPUT" | grep -oE '(CVE-[0-9]{4}-[0-9]+|GHSA-[a-z0-9]{4}-[a-z0-9]{4}-[a-z0-9]{4}|GO-[0-9]{4}-[0-9]+)' 2>/dev/null | sort -u | wc -l | tr -d '[:space:]')
+        # Count new vulnerabilities by looking for primary vulnerability entries (lines starting with •)
+        # This avoids double-counting aliases which appear on separate "Aliases:" lines
+        # Format: "  • CVE-2025-13425 [LOW] ..." or "  • GHSA-xxxx-xxxx-xxxx [HIGH] ..."
+        NEW_VULNS=$(echo "$PLAIN_OUTPUT" | grep -cE '^\s*• (CVE-[0-9]{4}-[0-9]+|GHSA-[a-z0-9]{4}-[a-z0-9]{4}-[a-z0-9]{4}|GO-[0-9]{4}-[0-9]+)' 2>/dev/null || echo "0")
         NEW_VULNS="${NEW_VULNS:-0}"
 
         echo "added-count=${ADDED}" >> "$GITHUB_OUTPUT"
@@ -187,7 +188,8 @@ runs:
         # Save summary for PR comment
         # Use base64 encoding to safely pass multiline output with special characters
         # through GitHub Actions outputs (avoids heredoc parsing issues with Unicode)
-        SUMMARY_BASE64=$(printf '%s' "$OUTPUT" | base64 -w 0)
+        # Note: Use tr -d '\n' for portability (GNU base64 uses -w 0, BSD uses -b 0)
+        SUMMARY_BASE64=$(printf '%s' "$OUTPUT" | base64 | tr -d '\n')
         echo "summary_base64=${SUMMARY_BASE64}" >> "$GITHUB_OUTPUT"
 
         # Also save as environment variable for the comment step
