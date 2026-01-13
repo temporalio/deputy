@@ -120,13 +120,9 @@ High-severity proxy blocker:
 ```yaml
 policies:
   - name: proxy-high-sev
-    vars:
-      high: 
-        - "CRITICAL"
-        - "HIGH"
     rules:
       - action: deny
-        when: env.command == "proxy" && vulnerabilities.exists(v, v.severity in high)
+        when: env.command == "proxy" && vulnerabilities.exists(v, v.advisory.severity.level in [severity.critical, severity.high])
         reason: "proxy block: high severity vuln"
 ```
 

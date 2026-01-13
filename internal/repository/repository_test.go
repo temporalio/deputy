@@ -41,10 +41,10 @@ func TestOpen(t *testing.T) {
 		t.Fatalf("Open: %v", err)
 	}
 	defer src.Close()
-	if src.Workspace.RootPath() != dir {
-		t.Fatalf("unexpected root path: %s", src.Workspace.RootPath())
+	if src.Workspace().RootPath() != dir {
+		t.Fatalf("unexpected root path: %s", src.Workspace().RootPath())
 	}
-	if _, err := src.Workspace.ReadFile("go.mod"); err != nil {
+	if _, err := src.Workspace().ReadFile("go.mod"); err != nil {
 		t.Fatalf("read go.mod: %v", err)
 	}
 }
@@ -57,10 +57,10 @@ func TestCloneInMemory_Local(t *testing.T) {
 		t.Fatalf("Clone in memory: %v", err)
 	}
 	defer src.Close()
-	if !src.Workspace.IsVirtual() {
+	if !src.Workspace().IsVirtual() {
 		t.Fatalf("expected virtual workspace")
 	}
-	if _, err := src.Workspace.ReadFile("go.mod"); err != nil {
+	if _, err := src.Workspace().ReadFile("go.mod"); err != nil {
 		t.Fatalf("read go.mod: %v", err)
 	}
 }
@@ -72,7 +72,7 @@ func TestCloneToDir_Local(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Clone to dir: %v", err)
 	}
-	root := src.Workspace.RootPath()
+	root := src.Workspace().RootPath()
 	if root == "" {
 		t.Fatalf("expected non-empty root path")
 	}

@@ -1,0 +1,131 @@
+syntax = "proto3";
+
+package deputy.sandbox.v1;
+
+option go_package = "github.com/picatz/deputy/gen/deputy/sandbox/v1;sandboxv1";
+
+import "deputy/sandbox/v1/sandbox.proto";
+
+// SandboxExecutionPolicyInput is the input for the sandbox_execution entrypoint.
+// This policy is evaluated before any sandbox execution begins.
+message SandboxExecutionPolicyInput {
+  // Context about what triggered this execution.
+  ExecutionContext context = 1;
+
+  // Requested sandbox configuration.
+  SandboxConfig requested_config = 2;
+
+  // Command to execute.
+  repeated string command = 3;
+
+  // Working directory.
+  string work_dir = 4;
+
+  // Environment variables (key-value pairs).
+  map<string, string> env = 5;
+
+  // JWT claims from authenticated request.
+  JWTClaims jwt = 6;
+
+  // Environment info.
+  EnvInfo env_info = 7;
+
+  // Workspace directory on host.
+  string workspace_dir = 8;
+}
+
+// SandboxCommandPolicyInput is the input for the sandbox_command entrypoint.
+// This policy is evaluated for each command executed within a sandbox session.
+message SandboxCommandPolicyInput {
+  // Execution context.
+  ExecutionContext context = 1;
+
+  // The specific command being evaluated.
+  repeated string command = 2;
+
+  // Working directory.
+  string work_dir = 3;
+
+  // JWT claims.
+  JWTClaims jwt = 4;
+
+  // Environment info.
+  EnvInfo env_info = 5;
+
+  // Current sandbox configuration.
+  SandboxConfig config = 6;
+}
+
+// SandboxNetworkPolicyInput is the input for the sandbox_network entrypoint.
+// This policy is evaluated when the sandbox requests network access.
+message SandboxNetworkPolicyInput {
+  // Execution context.
+  ExecutionContext context = 1;
+
+  // Requested network mode.
+  NetworkMode requested_mode = 2;
+
+  // Specific hosts/ports being accessed (if known).
+  repeated NetworkTarget targets = 3;
+
+  // JWT claims.
+  JWTClaims jwt = 4;
+
+  // Environment info.
+  EnvInfo env_info = 5;
+
+  // Current sandbox configuration.
+  SandboxConfig config = 6;
+}
+
+// NetworkTarget describes a network destination.
+message NetworkTarget {
+  // Hostname or IP address.
+  string host = 1;
+
+  // Port number (0 if unknown/any).
+  int32 port = 2;
+
+  // Protocol (tcp, udp).
+  string protocol = 3;
+}
+
+// JWTClaims represents JWT token claims for policy evaluation.
+// This mirrors the structure used in proxy and server policies.
+message JWTClaims {
+  // True if no token was provided (anonymous access).
+  bool anonymous = 1;
+
+  // Subject claim (user/service ID).
+  string sub = 2;
+
+  // Issuer claim.
+  string iss = 3;
+
+  // Audience claims.
+  repeated string aud = 4;
+
+  // Expiration timestamp (Unix seconds).
+  int64 exp = 5;
+
+  // Issued-at timestamp (Unix seconds).
+  int64 iat = 6;
+
+  // Not-before timestamp (Unix seconds).
+  int64 nbf = 7;
+
+  // JWT ID.
+  string jti = 8;
+
+  // Custom claims (flattened to string values).
+  map<string, string> custom_claims = 9;
+}
+
+// EnvInfo provides environment context for policy evaluation.
+message EnvInfo {
+  // Deputy command being executed (exec, fix, scan, etc.).
+  string command = 1;
+
+  // Policy entrypoint being evaluated.
+  string entrypoint = 2;
+}

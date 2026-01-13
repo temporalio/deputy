@@ -1,0 +1,319 @@
+# Unified Supply Chain Risk Analysis Policies
+#
+# These policies demonstrate how to use the new risk analysis entrypoints
+# to create comprehensive supply chain security gates.
+#
+# Entrypoints:
+#   - risk_report: Whole-project risk analysis
+#   - risk_package: Per-package risk assessment
+#
+# Usage:
+#   deputy risk --policy policy/examples/risk-analysis-policies.yaml
+#
+# Variables available in risk_report:
+#   - risk: ProjectRiskSummary with overall_score, overall_level, and signal breakdowns
+#   - packages: List of PackageRiskAssessment
+#   - target: Target information
+#
+# Variables available in risk_package:
+#   - package_risk: PackageRiskAssessment for current package
+#   - pkg: Package details (same as scan_vulnerability)
+#   - target: Target information
+
+policies:
+  # =============================================================================
+  # PROJECT-LEVEL RISK GATES (risk_report entrypoint)
+  # =============================================================================
+
+  - name: critical-risk-gate
+    description: Block builds when overall supply chain risk is critical
+    entrypoints: [risk_report]
+    rules:
+      - action: deny
+        when: risk.overall_level == risk_level.critical
+        reason: "Supply chain risk is CRITICAL - immediate action required"
+        remediation: "Review high-risk packages and address critical issues before deployment"
+
+  - name: malicious-package-gate
+    description: Block any malicious packages
+    entrypoints: [risk_report]
+    rules:
+      - action: deny
+        when: risk.malicious_risk.total_count > 0
+        reason: |
+          Malicious packages detected:
+          {{ risk.malicious_risk.malicious_packages | join(", ") }}
+        remediation: "Remove malicious packages immediately and audit their usage"
+
+  - name: kev-vulnerability-gate
+    description: Block when vulnerabilities are in CISA KEV catalog
+    entrypoints: [risk_report]
+    rules:
+      - action: deny
+        when: risk.vulnerability_risk.kev_count > 0
+        reason: "{{ risk.vulnerability_risk.kev_count }} vulnerabilities are actively exploited (CISA KEV)"
+        remediation: "Prioritize patching KEV vulnerabilities as they are known to be exploited"
+
+  - name: high-risk-score-gate
+    description: Warn when overall risk score exceeds threshold
+    entrypoints: [risk_report]
+    vars:
+      riskScoreThreshold: 50
+    rules:
+      - action: warn
+        when: risk.overall_score > riskScoreThreshold
+        reason: "Supply chain risk score {{ risk.overall_score }}/100 exceeds threshold of {{ riskScoreThreshold }}"
+        remediation: "Review the risk breakdown and address highest-impact issues"
+
+  - name: license-compliance-gate
+    description: Block when forbidden licenses are detected
+    entrypoints: [risk_report]
+    rules:
+      - action: deny
+        when: risk.license_risk.forbidden_count > 0
+        reason: "{{ risk.license_risk.forbidden_count }} packages have forbidden licenses"
+        remediation: "Replace packages with forbidden licenses or obtain legal approval"
+
+      - action: warn
+        when: risk.license_risk.unknown_count > 0
+        reason: "{{ risk.license_risk.unknown_count }} packages have unknown licenses"
+        remediation: "Identify license for packages with unknown licenses"
+
+  - name: abandoned-dependency-gate
+    description: Warn on abandoned dependencies
+    entrypoints: [risk_report]
+    rules:
+      - action: warn
+        when: risk.maintainer_risk.abandoned_count > 0
+        reason: "{{ risk.maintainer_risk.abandoned_count }} packages appear abandoned (no activity in 2+ years)"
+        remediation: "Consider replacing abandoned packages with actively maintained alternatives"
+
+      - action: deny
+        when: |
+          risk.maintainer_risk.abandoned_count > 0 &&
+          risk.vulnerability_risk.total_count > 0
+        reason: "Abandoned packages with known vulnerabilities - high supply chain risk"
+        remediation: "Replace abandoned packages that have unpatched vulnerabilities"
+
+  - name: freshness-gate
+    description: Track outdated dependencies
+    entrypoints: [risk_report]
+    vars:
+      maxMajorBehind: 5
+    rules:
+      - action: warn
+        when: risk.freshness_risk.major_behind_count > maxMajorBehind
+        reason: "{{ risk.freshness_risk.major_behind_count }} packages are major versions behind"
+        remediation: "Schedule dependency updates to reduce technical debt"
+
+  - name: secrets-gate
+    description: Block when secrets are detected
+    entrypoints: [risk_report]
+    rules:
+      - action: deny
+        when: risk.secrets_risk.high_confidence_count > 0
+        reason: "{{ risk.secrets_risk.high_confidence_count }} high-confidence secrets detected"
+        remediation: "Remove secrets from code and rotate affected credentials"
+
+  # =============================================================================
+  # PACKAGE-LEVEL RISK POLICIES (risk_package entrypoint)
+  # =============================================================================
+
+  - name: malicious-package-block
+    description: Block any package flagged as malicious
+    entrypoints: [risk_package]
+    rules:
+      - action: deny
+        when: |
+          has(package_risk.malicious_info) &&
+          package_risk.malicious_info.detected
+        reason: |
+          Package {{ package_risk.purl }} is flagged as malicious
+          Type: {{ package_risk.malicious_info.type }}
+          Source: {{ package_risk.malicious_info.source }}
+        remediation: "Remove this package immediately and audit all code that used it"
+
+  - name: typosquat-detection
+    description: Detect potential typosquatting attacks
+    entrypoints: [risk_package]
+    rules:
+      - action: deny
+        when: |
+          has(package_risk.malicious_info) &&
+          package_risk.malicious_info.type == malicious_type.typosquat
+        reason: "Package {{ pkg.name }} appears to be a typosquat"
+        remediation: "Verify you intended to install this package and not a similarly-named popular package"
+
+  - name: high-risk-package-warning
+    description: Warn on packages with high individual risk scores
+    entrypoints: [risk_package]
+    vars:
+      packageRiskThreshold: 50
+    rules:
+      - action: warn
+        when: package_risk.total_score > packageRiskThreshold
+        reason: |
+          Package {{ package_risk.purl }} has risk score {{ package_risk.total_score }}/100
+          - Vulnerability: {{ package_risk.vulnerability_risk }}/40
+          - Malicious: {{ package_risk.malicious_risk }}/30
+          - License: {{ package_risk.license_risk }}/10
+          - Maintainer: {{ package_risk.maintainer_risk }}/10
+          - Freshness: {{ package_risk.freshness_risk }}/5
+        remediation: "Evaluate if this package is necessary and consider alternatives"
+
+  - name: abandoned-direct-dependency
+    description: Flag abandoned direct dependencies
+    entrypoints: [risk_package]
+    rules:
+      - action: warn
+        when: |
+          pkg.direct &&
+          has(package_risk.maintainer_health) &&
+          package_risk.maintainer_health.status == maintainer_status.abandoned
+        reason: "Direct dependency {{ pkg.name }} appears abandoned"
+        remediation: "Consider replacing with an actively maintained alternative"
+
+      - action: deny
+        when: |
+          pkg.direct &&
+          has(package_risk.maintainer_health) &&
+          package_risk.maintainer_health.status == maintainer_status.abandoned &&
+          package_risk.vulnerability_risk > 0
+        reason: "Abandoned direct dependency {{ pkg.name }} has vulnerabilities"
+        remediation: "Replace {{ pkg.name }} - vulnerabilities will not be patched"
+
+  - name: deprecated-package-warning
+    description: Warn on deprecated packages
+    entrypoints: [risk_package]
+    rules:
+      - action: warn
+        when: |
+          has(package_risk.maintainer_health) &&
+          package_risk.maintainer_health.deprecated
+        reason: |
+          Package {{ pkg.name }} is deprecated
+          {{ package_risk.maintainer_health.deprecation_message }}
+        remediation: "Migrate to the recommended replacement"
+
+  - name: license-compliance
+    description: Check package licenses against allowlist/denylist
+    entrypoints: [risk_package]
+    vars:
+      forbiddenLicenses: ["AGPL-3.0", "GPL-3.0", "SSPL-1.0", "BUSL-1.1"]
+      copyleftLicenses: ["GPL-2.0", "LGPL-2.1", "LGPL-3.0", "MPL-2.0"]
+    rules:
+      - action: deny
+        when: |
+          has(package_risk.license_info) &&
+          package_risk.license_info.forbidden
+        reason: "Package {{ pkg.name }} uses a forbidden license"
+        remediation: "Replace with a package that uses a permissive license"
+
+      - action: warn
+        when: |
+          has(package_risk.license_info) &&
+          package_risk.license_info.unknown
+        reason: "Package {{ pkg.name }} has unknown license"
+        remediation: "Identify the license and evaluate compliance"
+
+      - action: warn
+        when: |
+          has(package_risk.license_info) &&
+          package_risk.license_info.copyleft &&
+          pkg.direct
+        reason: "Direct dependency {{ pkg.name }} uses copyleft license"
+        remediation: "Ensure copyleft license is compatible with your distribution model"
+
+  - name: version-freshness
+    description: Track outdated packages
+    entrypoints: [risk_package]
+    rules:
+      - action: deny
+        when: |
+          has(package_risk.freshness) &&
+          package_risk.freshness.is_yanked
+        reason: "Package {{ pkg.name }}@{{ pkg.version }} is yanked/retracted"
+        remediation: "Update to a non-yanked version immediately"
+
+      - action: warn
+        when: |
+          pkg.direct &&
+          has(package_risk.freshness) &&
+          package_risk.freshness.major_versions_behind >= 2
+        reason: |
+          Direct dependency {{ pkg.name }} is {{ package_risk.freshness.major_versions_behind }} major versions behind
+          Current: {{ package_risk.freshness.current_version }}
+          Latest: {{ package_risk.freshness.latest_version }}
+        remediation: "Plan upgrade to a more recent major version"
+
+  - name: bus-factor-risk
+    description: Flag packages with single maintainer
+    entrypoints: [risk_package]
+    rules:
+      - action: warn
+        when: |
+          pkg.direct &&
+          has(package_risk.maintainer_health) &&
+          package_risk.maintainer_health.maintainer_count == 1 &&
+          package_risk.maintainer_health.bus_factor_risk > 0.7
+        reason: "Package {{ pkg.name }} has high bus factor risk (single maintainer)"
+        remediation: "Consider alternatives or contribute to the project"
+
+  # =============================================================================
+  # COMPOSITE RISK POLICIES
+  # =============================================================================
+
+  - name: supply-chain-attack-indicators
+    description: Detect potential supply chain attack patterns
+    entrypoints: [risk_package]
+    rules:
+      # New package with suspicious characteristics
+      - action: deny
+        when: |
+          has(package_risk.freshness) &&
+          package_risk.freshness.days_since_current_release < 7 &&
+          has(package_risk.maintainer_health) &&
+          package_risk.maintainer_health.maintainer_count == 1 &&
+          (
+            has(package_risk.malicious_info) &&
+            package_risk.malicious_info.type == malicious_type.typosquat
+          )
+        reason: "Potential supply chain attack: New typosquat package"
+        remediation: "Verify package authenticity before use"
+
+      # Compromised maintainer pattern
+      - action: deny
+        when: |
+          has(package_risk.malicious_info) &&
+          package_risk.malicious_info.type == malicious_type.compromised_maintainer
+        reason: "Package {{ pkg.name }} may be compromised"
+        remediation: "Check for signs of account takeover and audit recent versions"
+
+  - name: production-deployment-gate
+    description: Strict gate for production deployments
+    entrypoints: [risk_report]
+    rules:
+      - action: deny
+        when: |
+          risk.overall_level in [risk_level.critical, risk_level.high]
+        reason: "Production deployment blocked: Risk level is {{ risk.overall_level }}"
+        remediation: "Resolve high-risk issues before production deployment"
+
+      - action: deny
+        when: |
+          risk.vulnerability_risk.critical_count > 0
+        reason: "Production deployment blocked: {{ risk.vulnerability_risk.critical_count }} critical vulnerabilities"
+        remediation: "Patch all critical vulnerabilities before production deployment"
+
+      - action: deny
+        when: |
+          risk.malicious_risk.total_count > 0
+        reason: "Production deployment blocked: Malicious packages detected"
+        remediation: "Remove all malicious packages before production deployment"
+
+      - action: warn
+        when: |
+          risk.license_risk.forbidden_count > 0 ||
+          risk.license_risk.unknown_count > 0
+        reason: "License compliance issues detected"
+        remediation: "Resolve license issues before production deployment"

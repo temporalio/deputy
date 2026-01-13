@@ -12,7 +12,14 @@ import (
 	"github.com/google/cel-go/checker/decls"
 	"github.com/google/cel-go/common/types/ref"
 	"github.com/google/cel-go/ext"
+	containerv1 "github.com/picatz/deputy/gen/deputy/container/v1"
+	dependencyv1 "github.com/picatz/deputy/gen/deputy/dependency/v1"
+	policyv1 "github.com/picatz/deputy/gen/deputy/policy/v1"
+	scanv1 "github.com/picatz/deputy/gen/deputy/scan/v1"
+	targetv1 "github.com/picatz/deputy/gen/deputy/target/v1"
+	vulnerabilityv1 "github.com/picatz/deputy/gen/deputy/vulnerability/v1"
 	exprpb "google.golang.org/genproto/googleapis/api/expr/v1alpha1"
+	"google.golang.org/protobuf/proto"
 )
 
 var (
@@ -57,6 +64,45 @@ var (
 		"secret",
 		"secrets",
 		"report",
+		// Graph specific variables
+		"graph",       // Full graph data (stats, nodes, edges)
+		"node",        // Current node in graph_node entrypoint
+		"edge",        // Current edge in graph_edge entrypoint
+		"from_node",   // Source node for edge
+		"to_node",     // Target node for edge
+		"nodes",       // All nodes in graph
+		"edges",       // All edges in graph
+		"stats",       // Graph statistics
+		"roots",       // Root (direct) dependencies
+		"ancestors",   // Ancestor nodes for current node
+		"descendants", // Descendant nodes for current node
+		// Constants for policy authoring
+		"severity", // Severity constants: severity.critical, severity.high, etc.
+		"scope",    // Dependency scope constants: scope.RUNTIME, scope.DEV, etc.
+	}
+
+	// severityConstants provides named severity levels for cleaner policy expressions.
+	// These map to proto enum values for direct comparison with vulnerability.advisory.severity.level.
+	// Instead of: vulnerability.advisory.severity.level == deputy.vulnerability.v1.SeverityLevel.SEVERITY_LEVEL_CRITICAL
+	// Authors can write: vulnerability.advisory.severity.level == severity.critical
+	severityConstants = map[string]any{
+		"critical":    vulnerabilityv1.SeverityLevel_SEVERITY_LEVEL_CRITICAL,
+		"high":        vulnerabilityv1.SeverityLevel_SEVERITY_LEVEL_HIGH,
+		"medium":      vulnerabilityv1.SeverityLevel_SEVERITY_LEVEL_MEDIUM,
+		"low":         vulnerabilityv1.SeverityLevel_SEVERITY_LEVEL_LOW,
+		"unspecified": vulnerabilityv1.SeverityLevel_SEVERITY_LEVEL_UNSPECIFIED,
+	}
+
+	// scopeConstants provides named dependency scopes for graph policies.
+	// Instead of: edgeScope(edge) == "runtime"
+	// Authors can write: edgeScope(edge) == scope.RUNTIME
+	scopeConstants = map[string]any{
+		"RUNTIME":     "runtime",
+		"DEV":         "dev",
+		"TEST":        "test",
+		"BUILD":       "build",
+		"OPTIONAL":    "optional",
+		"UNSPECIFIED": "unspecified",
 	}
 )
 
@@ -67,15 +113,33 @@ func DefaultVariableNames() []string {
 	return slices.Clone(defaultVariableNames)
 }
 
+// SeverityConstants returns the severity constants map for CEL expressions.
+// This allows external packages to use the same constants (severity.critical, etc.)
+func SeverityConstants() map[string]any {
+	return severityConstants
+}
+
+// NewFilterEnv creates a CEL environment suitable for filter expressions.
+// It includes the vulnerability variable and severity constants.
+func NewFilterEnv() (*cel.Env, error) {
+	return envWithNames([]string{"vulnerability", "severity"})
+}
+
 // Evaluate compiles the provided CEL source and evaluates it against the input
 // document. Input keys are exposed to the CEL program as top-level identifiers.
+// This is a low-level function for ad-hoc CEL evaluation; prefer Engine.EvaluateAll
+// with typed PolicyInput protos for policy evaluation.
 func Evaluate(ctx context.Context, source string, input map[string]any) (any, error) {
 	// Clone input to avoid side effects on the caller's map.
 	input = maps.Clone(input)
 	if input == nil {
 		input = map[string]any{}
 	}
-	seedDefaultVariables(input)
+	// Convert any proto messages in the input map to native maps for CEL evaluation.
+	// This allows tests to pass proto objects directly in the input map.
+	input = convertProtosInMap(input)
+	// Inject constants for cleaner policy authoring
+	seedConstants(input)
 	env, err := envForInput(input)
 	if err != nil {
 		return nil, err
@@ -93,6 +157,49 @@ func Evaluate(ctx context.Context, source string, input map[string]any) (any, er
 		return nil, err
 	}
 	return convertRefVal(out)
+}
+
+// convertProtosInMap recursively converts any proto.Message values in the map to
+// map[string]any for CEL evaluation. This enables tests to pass proto objects
+// directly in input maps.
+func convertProtosInMap(m map[string]any) map[string]any {
+	if m == nil {
+		return nil
+	}
+	out := make(map[string]any, len(m))
+	for k, v := range m {
+		out[k] = convertProtoValue(v)
+	}
+	return out
+}
+
+// convertProtoValue converts a value, recursively handling proto messages, maps, and slices.
+func convertProtoValue(v any) any {
+	if v == nil {
+		return nil
+	}
+	// Check if it's a proto message
+	if msg, ok := v.(proto.Message); ok {
+		converted, err := ProtoToMap(msg)
+		if err != nil {
+			// If conversion fails, return the original value
+			return v
+		}
+		return converted
+	}
+	// Handle maps
+	if m, ok := v.(map[string]any); ok {
+		return convertProtosInMap(m)
+	}
+	// Handle slices
+	if s, ok := v.([]any); ok {
+		out := make([]any, len(s))
+		for i, elem := range s {
+			out[i] = convertProtoValue(elem)
+		}
+		return out
+	}
+	return v
 }
 
 // Compile verifies that the CEL source parses and type-checks using the
@@ -132,6 +239,101 @@ func envWithNames(extra []string) (*cel.Env, error) {
 	opts := []cel.EnvOption{
 		cel.OptionalTypes(),
 		cel.Declarations(declSlice...),
+		// Register proto types for native proto support in CEL expressions.
+		// This enables policies to work directly with proto messages, providing:
+		// - Type-safe field access (e.g., finding.advisory.severity.level)
+		// - Proto enum support (e.g., SeverityLevel_SEVERITY_LEVEL_HIGH)
+		// - Proper nested message handling
+		cel.Types(
+			// Core domain types
+			&vulnerabilityv1.Finding{},
+			&vulnerabilityv1.Advisory{},
+			&vulnerabilityv1.Severity{},
+			&vulnerabilityv1.Stats{},
+			&dependencyv1.Package{},
+			&targetv1.Target{},
+			// Common policy types
+			&policyv1.Environment{},
+			&policyv1.JWTClaims{},
+			&policyv1.ProxyRequest{},
+			&policyv1.ServiceRequest{},
+			// Scan policy inputs
+			&policyv1.ScanVulnerabilityPolicyInput{},
+			&policyv1.ScanReportPolicyInput{},
+			// Proxy policy inputs
+			&policyv1.GoArtifactRequestPolicyInput{},
+			&policyv1.NpmArtifactRequestPolicyInput{},
+			&policyv1.PypiArtifactRequestPolicyInput{},
+			&policyv1.RubygemsArtifactRequestPolicyInput{},
+			&policyv1.OciArtifactRequestPolicyInput{},
+			// SBOM policy inputs
+			&policyv1.SbomReportPolicyInput{},
+			&policyv1.SbomComponentPolicyInput{},
+			// Diff policy inputs
+			&policyv1.DiffReportPolicyInput{},
+			&policyv1.DiffDependencyChangePolicyInput{},
+			&policyv1.DiffVulnerabilityPolicyInput{},
+			&policyv1.DependencyChange{},
+			// Container diff policy inputs
+			&policyv1.ContainerDiffReportPolicyInput{},
+			&policyv1.ContainerDiffChangePolicyInput{},
+			&policyv1.ContainerDiffVulnerabilityPolicyInput{},
+			&policyv1.ContainerDiffLayerPolicyInput{},
+			&policyv1.ContainerDiffConfigPolicyInput{},
+			&policyv1.ContainerPackageChange{},
+			&policyv1.ContainerVulnerabilityChange{},
+			&policyv1.ContainerConfigDiff{},
+			&policyv1.ContainerImageRef{},
+			&policyv1.LayerChange{},
+			// Secrets policy inputs
+			&policyv1.SecretsReportPolicyInput{},
+			&policyv1.SecretsFindingPolicyInput{},
+			// Graph policy inputs
+			&policyv1.GraphReportPolicyInput{},
+			&policyv1.GraphNodePolicyInput{},
+			&policyv1.GraphEdgePolicyInput{},
+			&policyv1.GraphNode{},
+			&policyv1.GraphEdge{},
+			&policyv1.GraphStats{},
+			// Fix policy inputs
+			&policyv1.FixPlanPolicyInput{},
+			&policyv1.FixPlanStepPolicyInput{},
+			&policyv1.RemediationCommand{},
+			// Triage policy inputs
+			&policyv1.TriageReportPolicyInput{},
+			&policyv1.TriageClusterPolicyInput{},
+			&policyv1.TriagePackageSummary{},
+			// Dockerfile policy inputs
+			&policyv1.DockerfileReportPolicyInput{},
+			&policyv1.DockerfileStagePolicyInput{},
+			&policyv1.DockerfileInfo{},
+			&policyv1.DockerfileStage{},
+			&policyv1.DockerfileAnalysis{},
+			&policyv1.ImageReference{},
+			// Service policy inputs (server authorization)
+			&policyv1.ServiceScanRequestPolicyInput{},
+			&policyv1.ServiceListRequestPolicyInput{},
+			&policyv1.ServiceSbomRequestPolicyInput{},
+			&policyv1.ServiceDiffRequestPolicyInput{},
+			&policyv1.ServiceSecretsRequestPolicyInput{},
+			&policyv1.ServiceGraphRequestPolicyInput{},
+			// Scan service types for container image policies
+			&scanv1.ImageInfo{},
+			&scanv1.ImageConfig{},
+			&scanv1.ImageMetadata{},
+			&scanv1.HistoryEntry{},
+			&scanv1.Healthcheck{},
+			// Container types (used by container diff and OCI policies)
+			&containerv1.LayerDetails{},
+			&containerv1.ImageInfo{},
+			&containerv1.ImageConfig{},
+			&containerv1.ImageMetadata{},
+			&containerv1.HistoryEntry{},
+			&containerv1.HealthcheckConfig{},
+			// Secrets policy types (inline definitions to avoid circular imports)
+			&policyv1.SecretFinding{},
+			&policyv1.SecretStats{},
+		),
 		// Standard extensions
 		ext.Strings(),
 		ext.Lists(),
@@ -148,261 +350,6 @@ func envWithNames(extra []string) (*cel.Env, error) {
 		return nil, fmt.Errorf("build CEL env: %w", err)
 	}
 	return env, nil
-}
-
-// buildPkgHelper synthesizes a unified package view from common input shapes.
-// It always returns a map with sensible defaults for optional fields so that
-// policy authors can write simpler expressions without excessive ?.orValue() usage:
-//   - name defaults to "" (empty string)
-//   - licenses defaults to [] (empty list)
-//   - version defaults to "" (empty string)
-//   - ecosystem defaults to "" (empty string)
-//
-// This allows policies like `pkg.licenses.exists(l, l == "GPL-3.0")` to work
-// without needing `pkg.?licenses.orValue([]).exists(...)`.
-//
-// Policies that need to guard against "no package data" can check `pkg.name == ""`
-// or use entrypoint filtering to only run when package data is expected.
-func buildPkgHelper(input map[string]any) map[string]any {
-	// Initialize with sensible defaults for all fields.
-	// This simplifies policy expressions by eliminating ?.orValue() boilerplate.
-	pkg := map[string]any{
-		"name":      "",
-		"licenses":  []any{},
-		"version":   "",
-		"ecosystem": "",
-	}
-
-	// Prefer component (sbom/diff) then request (proxy)
-	var src map[string]any
-	if comp, ok := input["component"].(map[string]any); ok {
-		src = comp
-	}
-	if src == nil {
-		if req, ok := input["request"].(map[string]any); ok {
-			src = req
-		}
-	}
-	if src == nil {
-		return pkg
-	}
-
-	// Try various keys for the package name
-	if name, ok := src["package"]; ok {
-		pkg["name"] = name
-	}
-	if pkg["name"] == "" {
-		if name, ok := src["module"]; ok {
-			pkg["name"] = name
-		}
-	}
-	if pkg["name"] == "" {
-		if name, ok := src["name"]; ok {
-			pkg["name"] = name
-		}
-	}
-
-	// Override defaults with actual values if present
-	if ver, ok := src["version"]; ok {
-		pkg["version"] = ver
-	}
-	if eco, ok := src["ecosystem"]; ok {
-		pkg["ecosystem"] = eco
-	}
-	if lic, ok := src["licenses"]; ok {
-		pkg["licenses"] = lic
-	}
-	return pkg
-}
-
-// buildTargetHelper synthesizes a normalized target view with safe defaults.
-// It mirrors the scan/proxy target metadata when available and falls back to
-// repo/ref/commit fields when target metadata is absent.
-func buildTargetHelper(input map[string]any) map[string]any {
-	target := map[string]any{
-		"kind":          "",
-		"display":       "",
-		"ref":           "",
-		"effective_ref": "",
-		"commit":        "",
-		"origin":        "",
-		"local":         "",
-		"cloned":        false,
-		"provenance":    map[string]any{},
-	}
-	if input == nil {
-		return target
-	}
-	if src, ok := input["target"].(map[string]any); ok {
-		maps.Copy(target, src)
-	} else {
-		if repo, ok := input["repo"]; ok {
-			target["display"] = repo
-		}
-		if ref, ok := input["ref"]; ok {
-			target["ref"] = ref
-		}
-		if commit, ok := input["commit"]; ok {
-			target["commit"] = commit
-		}
-	}
-	target["provenance"] = normalizeStringMap(target["provenance"])
-	return target
-}
-
-// buildImageHelper derives normalized image metadata from request/target inputs.
-// It returns nil when no image-related data is available.
-//
-// When image_info is present (from container image scans), the helper merges
-// configuration and metadata into the image object for policy evaluation:
-//   - image.config.user - user to run as (empty = root)
-//   - image.config.is_root - true if running as root
-//   - image.config.env - environment variables
-//   - image.config.sensitive_env - env vars that may contain secrets
-//   - image.config.entrypoint - container entrypoint
-//   - image.config.cmd - default command arguments
-//   - image.config.exposed_ports - exposed ports
-//   - image.config.labels - image labels
-//   - image.metadata.architecture - CPU architecture
-//   - image.metadata.os - operating system
-//   - image.metadata.layer_count - number of layers
-//   - image.metadata.size - total size in bytes
-//   - image.history - build history entries
-func buildImageHelper(input map[string]any) map[string]any {
-	if input == nil {
-		return nil
-	}
-	src, _ := input["image"].(map[string]any)
-	req, _ := input["request"].(map[string]any)
-	tgt, _ := input["target"].(map[string]any)
-	imgInfo, _ := input["image_info"].(map[string]any)
-	var prov map[string]any
-	if tgt != nil {
-		prov, _ = tgt["provenance"].(map[string]any)
-	}
-
-	hasImage := len(src) > 0 || hasImageKeys(req) || hasImageKeys(prov) || len(imgInfo) > 0
-	if !hasImage {
-		return nil
-	}
-
-	image := map[string]any{
-		"registry":   "",
-		"repository": "",
-		"tag":        "",
-		"digest":     "",
-		"reference":  "",
-		"image":      "",
-	}
-	maps.Copy(image, src)
-	mergeImageMap(image, req)
-	mergeImageMap(image, prov)
-
-	if image["reference"] == "" {
-		if digest := stringValue(image["digest"]); digest != "" {
-			image["reference"] = digest
-		} else if tag := stringValue(image["tag"]); tag != "" {
-			image["reference"] = tag
-		}
-	}
-	if image["image"] == "" {
-		reg := stringValue(image["registry"])
-		repo := stringValue(image["repository"])
-		tag := stringValue(image["tag"])
-		digest := stringValue(image["digest"])
-		// Build full image reference: registry/repo:tag or registry/repo@digest
-		var base string
-		if reg != "" && repo != "" {
-			base = reg + "/" + repo
-		} else if repo != "" {
-			base = repo
-		}
-		if base != "" {
-			if digest != "" {
-				image["image"] = base + "@" + digest
-			} else if tag != "" {
-				image["image"] = base + ":" + tag
-			} else {
-				image["image"] = base
-			}
-		}
-	}
-
-	// Merge image_info (config, metadata, history) from container image scans
-	if len(imgInfo) > 0 {
-		if cfg, ok := imgInfo["config"].(map[string]any); ok {
-			image["config"] = cfg
-		}
-		if meta, ok := imgInfo["metadata"].(map[string]any); ok {
-			image["metadata"] = meta
-		}
-		if hist, ok := imgInfo["history"].([]any); ok {
-			image["history"] = hist
-		}
-	}
-
-	return image
-}
-
-func mergeImageMap(dst, src map[string]any) {
-	if dst == nil || src == nil {
-		return
-	}
-	setIfEmpty(dst, "registry", src["registry"])
-	setIfEmpty(dst, "repository", src["repository"])
-	setIfEmpty(dst, "tag", src["tag"])
-	setIfEmpty(dst, "digest", src["digest"])
-	setIfEmpty(dst, "reference", src["reference"])
-	setIfEmpty(dst, "image", src["image"])
-}
-
-func hasImageKeys(src map[string]any) bool {
-	if src == nil {
-		return false
-	}
-	for _, key := range []string{"registry", "repository", "tag", "digest", "reference", "image"} {
-		if stringValue(src[key]) != "" {
-			return true
-		}
-	}
-	return false
-}
-
-func setIfEmpty(dst map[string]any, key string, val any) {
-	if dst == nil {
-		return
-	}
-	if stringValue(dst[key]) != "" {
-		return
-	}
-	if v := stringValue(val); v != "" {
-		dst[key] = v
-	}
-}
-
-func stringValue(v any) string {
-	if v == nil {
-		return ""
-	}
-	if s, ok := v.(string); ok {
-		return s
-	}
-	return ""
-}
-
-func normalizeStringMap(v any) map[string]any {
-	switch t := v.(type) {
-	case map[string]any:
-		return t
-	case map[string]string:
-		out := make(map[string]any, len(t))
-		for k, v := range t {
-			out[k] = v
-		}
-		return out
-	default:
-		return map[string]any{}
-	}
 }
 
 // convertRefVal converts a CEL ref.Val to a native Go value.

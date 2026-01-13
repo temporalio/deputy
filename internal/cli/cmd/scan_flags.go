@@ -6,11 +6,15 @@ import (
 	"os"
 	"time"
 
+	"google.golang.org/protobuf/types/known/timestamppb"
+
+	scanv1 "github.com/picatz/deputy/gen/deputy/scan/v1"
+	targetv1 "github.com/picatz/deputy/gen/deputy/target/v1"
 	"github.com/picatz/deputy/internal/cli/flags"
 	"github.com/picatz/deputy/internal/ignore"
 	inv "github.com/picatz/deputy/internal/inventory"
 	"github.com/picatz/deputy/internal/report/render"
-	"github.com/picatz/deputy/internal/scan"
+	"github.com/picatz/deputy/internal/scanning"
 	"github.com/spf13/cobra"
 )
 
@@ -47,6 +51,7 @@ type scanFlags struct {
 	PublishedBeforeStr string
 	PublishedAfterStr  string
 	AsOfStr            string
+	Filter             string // CEL expression for filtering vulnerabilities
 
 	// Policy configuration
 	PolicyPaths []string
@@ -72,6 +77,10 @@ type scanFlags struct {
 	// Secrets option - scan for leaked secrets in addition to vulnerabilities
 	Secrets bool
 
+	// DetectBaseImage enables base image detection for container image scans.
+	// When enabled, queries deps.dev to determine if layers belong to known base images.
+	DetectBaseImage bool
+
 	// Cached ignore rules (populated by loadIgnoreRules)
 	ignoreRules *ignore.Rules
 }
@@ -86,7 +95,7 @@ func (f scanFlags) displayOptions() render.VulnerabilityDisplayOptions {
 }
 
 // displayOptionsWithResult returns VulnerabilityDisplayOptions including the graph from a scan result.
-func (f scanFlags) displayOptionsWithResult(result scan.Result) render.VulnerabilityDisplayOptions {
+func (f scanFlags) displayOptionsWithResult(result scanning.Result) render.VulnerabilityDisplayOptions {
 	opts := f.displayOptions()
 	opts.Graph = result.Graph
 	return opts
@@ -95,15 +104,6 @@ func (f scanFlags) displayOptionsWithResult(result scan.Result) render.Vulnerabi
 // scanOptions returns the inventory scan options derived from scan flags.
 func (f scanFlags) scanOptions() inv.ScanOptions {
 	return inv.ScanOptions{Ecosystems: f.Ecosystems}
-}
-
-// graphOptions returns graph resolution options.
-// When enabled, uses proxy.golang.org for Go module resolution by default.
-func (f scanFlags) graphOptions() scan.GraphOptions {
-	return scan.GraphOptions{
-		Enabled:  f.WithGraph,
-		UseProxy: true,
-	}
 }
 
 // parsePublishedTimes parses the published time filters and returns before/after times.
@@ -126,6 +126,7 @@ func extractScanFlags(cmd *cobra.Command) scanFlags {
 	f.PublishedBeforeStr, _ = cmd.Flags().GetString("published-before")
 	f.PublishedAfterStr, _ = cmd.Flags().GetString("published-after")
 	f.AsOfStr, _ = cmd.Flags().GetString("as-of")
+	f.Filter, _ = cmd.Flags().GetString("filter")
 
 	// Policy flags
 	f.PolicyPaths, _ = cmd.Flags().GetStringArray("policy")
@@ -150,6 +151,9 @@ func extractScanFlags(cmd *cobra.Command) scanFlags {
 
 	// Secrets option
 	f.Secrets, _ = cmd.Flags().GetBool("secrets")
+
+	// Base image detection option
+	f.DetectBaseImage, _ = cmd.Flags().GetBool("detect-base-image")
 
 	return f
 }
@@ -210,4 +214,67 @@ func (f *scanFlags) loadIgnoreRules(workDir string) error {
 
 	f.ignoreRules = rules
 	return nil
+}
+
+// toScanRequest builds a scanv1.ScanRequest from CLI flags.
+// This enables the CLI to use the Client interface consistently across
+// in-process, daemon, and remote server modes.
+func (f scanFlags) toScanRequest(target string, errW io.Writer) *scanv1.ScanRequest {
+	beforeT, afterT := f.parsePublishedTimes(errW)
+
+	opts := &scanv1.ScanOptions{
+		Ecosystems:      f.Ecosystems,
+		Ref:             f.Ref,
+		PolicyPaths:     f.PolicyPaths,
+		IncludeSecrets:  f.Secrets,
+		DetectBaseImage: f.DetectBaseImage,
+	}
+
+	// Set published time filters
+	if !beforeT.IsZero() {
+		opts.PublishedBefore = timestamppb.New(beforeT)
+	}
+	if !afterT.IsZero() {
+		opts.PublishedAfter = timestamppb.New(afterT)
+	}
+
+	// Set graph options
+	if f.WithGraph {
+		opts.GraphOptions = &scanv1.GraphOptions{
+			Enabled:  true,
+			UseProxy: true,
+		}
+	}
+
+	// Set enrichment options
+	if f.Enrich {
+		opts.EnrichOptions = &scanv1.EnrichOptions{
+			Enabled:     true,
+			IncludeEpss: true,
+			IncludeKev:  true,
+		}
+	}
+
+	return &scanv1.ScanRequest{
+		Target:  target,
+		Options: opts,
+	}
+}
+
+// toScanRequestWithHint builds a scanv1.ScanRequest with explicit target hint.
+func (f scanFlags) toScanRequestWithHint(target string, kind targetv1.TargetKind, transport string, platform string, errW io.Writer) *scanv1.ScanRequest {
+	req := f.toScanRequest(target, errW)
+
+	// Set target hint for disambiguation
+	req.Options.TargetHint = &scanv1.TargetHint{
+		Kind:           kind,
+		ImageTransport: transport,
+	}
+
+	// Set platform for container images
+	if platform != "" {
+		req.Options.Platform = platform
+	}
+
+	return req
 }

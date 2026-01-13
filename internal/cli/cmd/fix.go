@@ -3,7 +3,6 @@ package cmd
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -12,15 +11,22 @@ import (
 	"runtime"
 	"strings"
 
+	"connectrpc.com/connect"
+	"google.golang.org/protobuf/encoding/protojson"
+	"google.golang.org/protobuf/types/known/timestamppb"
+
+	fixv1 "github.com/picatz/deputy/gen/deputy/fix/v1"
+	scanv1 "github.com/picatz/deputy/gen/deputy/scan/v1"
 	"github.com/picatz/deputy/internal/cli/flags"
 	deputyerrors "github.com/picatz/deputy/internal/errors"
 	"github.com/picatz/deputy/internal/otel"
 	"github.com/picatz/deputy/internal/output"
 	"github.com/picatz/deputy/internal/policy"
+	internalproto "github.com/picatz/deputy/internal/proto"
 	remediation "github.com/picatz/deputy/internal/remediation"
-	"github.com/picatz/deputy/internal/report"
 	"github.com/picatz/deputy/internal/report/render"
-	"github.com/picatz/deputy/internal/scan"
+	"github.com/picatz/deputy/internal/scanning"
+	"github.com/picatz/deputy/internal/services"
 	ui "github.com/picatz/deputy/internal/ui"
 	"github.com/picatz/deputy/internal/vulnerability"
 	"github.com/spf13/cobra"
@@ -28,24 +34,9 @@ import (
 	"go.opentelemetry.io/otel/trace"
 )
 
-// remediationPlan represents a structured plan for remediating vulnerabilities.
-type remediationPlan struct {
-	Target        report.Target          `json:"target"`
-	StdlibUpgrade string                 `json:"stdlibUpgrade,omitempty"`
-	Commands      []remediation.Command  `json:"commands"`
-	Stats         remediationPlanSummary `json:"stats"`
-}
-
-// remediationPlanSummary provides statistics about the remediation plan.
-type remediationPlanSummary struct {
-	TotalCommands    int `json:"totalCommands"`
-	RunnableCommands int `json:"runnableCommands"`
-}
-
 // AddFixCommand registers the fix subcommand with the root command.
 // It configures flags for report input, plan input, and AI agent options.
-func AddFixCommand(root *cobra.Command, service *scan.Service) {
-	scanner := NewScanner(service)
+func AddFixCommand(root *cobra.Command, c *services.Clients) {
 	fixCmd := &cobra.Command{
 		Use:           "fix [repo]",
 		Aliases:       []string{"f"},
@@ -101,7 +92,7 @@ AI ASSISTANCE:
   # Run AI in full-auto mode (dangerous!)
   deputy fix --agent codex --agent-full-auto`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runFixPlan(scanner, cmd, args)
+			return runFixPlan(c, cmd, args)
 		},
 	}
 	fixCmd.Flags().String("report", "", "Path to JSON output from 'deputy scan --format json'; omit to run a fresh scan (use '-' for stdin)")
@@ -129,7 +120,7 @@ AI ASSISTANCE:
 // runFixPlan executes the fix command logic. It handles plan generation from
 // reports, existing plans, or fresh scans, and optionally applies fixes or
 // invokes AI agents.
-func runFixPlan(scanner *Scanner, cmd *cobra.Command, args []string) error {
+func runFixPlan(c *services.Clients, cmd *cobra.Command, args []string) error {
 	ctx, span := otel.StartSpan(cmd.Context(), "deputy.fix",
 		trace.WithAttributes(
 			attribute.String("deputy.command", "fix"),
@@ -160,84 +151,102 @@ func runFixPlan(scanner *Scanner, cmd *cobra.Command, args []string) error {
 	}
 
 	var (
-		plan        remediationPlan
-		applyDir    string
-		scannedExec *scan.Execution
+		fixResp   *fixv1.FixResponse
+		applyDir  string
+		wasCloned bool
 	)
 
 	switch {
 	case strings.TrimSpace(planPath) != "":
-		p, err := readPlanSource(cmd.InOrStdin(), planPath)
+		resp, err := readFixPlanProto(cmd.InOrStdin(), planPath)
 		if err != nil {
 			return err
 		}
-		plan = p
+		fixResp = resp
 		if ignoreUnfixed {
 			fmt.Fprintf(cmd.ErrOrStderr(), "Warning: --ignore-unfixed has no effect when --plan is supplied\n")
 		}
 	case strings.TrimSpace(reportPath) != "":
-		data, err := readReportSource(cmd.InOrStdin(), reportPath)
+		resp, err := buildFixFromReport(cmd.InOrStdin(), reportPath, ignoreUnfixed)
 		if err != nil {
 			return err
 		}
-		if len(bytes.TrimSpace(data)) == 0 {
-			return fmt.Errorf("report %q is empty", reportPath)
-		}
-		var result ScanResult
-		if err := json.Unmarshal(data, &result); err != nil {
-			return fmt.Errorf("failed to parse report: %w", err)
-		}
-		findings, advisories := report.SplitVulnerabilities(result.Vulnerabilities)
-		scanResult := scan.Result{
-			Findings:   findings,
-			Advisories: advisories,
-			Stats:      result.Stats,
-		}
-		if ignoreUnfixed {
-			scanResult = scan.FilterUnfixed(scanResult)
-		}
-		cons := vulnerability.Consolidate(scanResult.Findings, scanResult.Advisories)
-		commands, stdlib := remediation.CommandsFromConsolidated(cons)
-		plan = buildRemediationPlan(result, commands, stdlib)
+		fixResp = resp
 	default:
-		ctx := cmd.Context()
 		ref, _ := cmd.Flags().GetString("ref")
 		ecos, _ := cmd.Flags().GetStringSlice("ecosystems")
 		publishedBeforeStr, _ := cmd.Flags().GetString("published-before")
 		publishedAfterStr, _ := cmd.Flags().GetString("published-after")
 		asOfStr, _ := cmd.Flags().GetString("as-of")
 		beforeT, afterT := flags.ParsePublishedFilters(cmd.ErrOrStderr(), asOfStr, publishedBeforeStr, publishedAfterStr)
-		exec, err := scanner.service.ScanRepository(ctx, repoArg, ref, cmd.Flags().Changed("ref"), scan.Options{
-			Ecosystems:      ecos,
-			PublishedBefore: beforeT,
-			PublishedAfter:  afterT,
-		})
-		if err != nil {
-			return err
+
+		// Build scan request
+		scanOpts := &scanv1.ScanOptions{
+			Ecosystems: ecos,
 		}
-		defer exec.Close()
-		scannedExec = exec
-		applyDir = exec.Result.Target.LocalPath
-		resultOut := exec.Result
+		if !beforeT.IsZero() {
+			scanOpts.PublishedBefore = timestamppb.New(beforeT)
+		}
+		if !afterT.IsZero() {
+			scanOpts.PublishedAfter = timestamppb.New(afterT)
+		}
+		if ref != "" {
+			scanOpts.Ref = ref
+		}
+
+		// Resolve target
+		target := repoArg
+		if target == "" {
+			cwd, err := os.Getwd()
+			if err != nil {
+				return fmt.Errorf("failed to get current directory: %w", err)
+			}
+			target = cwd
+		}
+
+		// Call vulnerability scanner
+		resp, err := c.Vulns.Scan(ctx, connect.NewRequest(&scanv1.ScanRequest{
+			Target:  target,
+			Options: scanOpts,
+		}))
+		if err != nil {
+			return fmt.Errorf("scan failed: %w", err)
+		}
+
+		// Convert proto response to internal types
+		scanResult := internalproto.ScanningResultFromProto(resp.Msg)
+		if scanResult == nil {
+			return fmt.Errorf("scan returned empty result")
+		}
+
+		applyDir = scanResult.Target.LocalPath
+		wasCloned = scanResult.Target.Cloned
+
+		resultOut := *scanResult
 		if ignoreUnfixed {
-			resultOut = scan.FilterUnfixed(resultOut)
+			resultOut = scanning.FilterUnfixed(resultOut)
 		}
 		cons := vulnerability.Consolidate(resultOut.Findings, resultOut.Advisories)
 		commands, stdlib := remediation.CommandsFromConsolidated(cons)
-		result := buildScanReport(resultOut)
-		plan = buildRemediationPlan(result, commands, stdlib)
+		fixResp = internalproto.BuildFixResponse(
+			scanResult.Target.DisplayPath,
+			"", // ref not stored in target
+			scanResult.Target.CommitHash,
+			stdlib,
+			commands,
+		)
 	}
 
-	if err := runFixPolicies(cmd.Context(), policyPaths, plan, cmd.ErrOrStderr()); err != nil {
+	if err := runFixPoliciesProto(ctx, policyPaths, fixResp, cmd.ErrOrStderr()); err != nil {
 		return err
 	}
 
 	format, _ := cmd.Flags().GetString("format")
 	switch strings.ToLower(strings.TrimSpace(format)) {
 	case "", FormatText:
-		printFixSummary(cmd.OutOrStdout(), plan)
+		renderFixText(cmd.OutOrStdout(), fixResp)
 	case FormatJSON:
-		if err := outputRemediationPlanJSON(cmd.OutOrStdout(), plan); err != nil {
+		if err := outputFixProtoJSON(cmd.OutOrStdout(), fixResp); err != nil {
 			return err
 		}
 	default:
@@ -251,19 +260,20 @@ func runFixPlan(scanner *Scanner, cmd *cobra.Command, args []string) error {
 		if err != nil {
 			return err
 		}
-		if scannedExec != nil && scannedExec.Result.Target.Cloned {
+		if wasCloned {
 			return fmt.Errorf("mutations are only supported for local repositories (clone detected)")
 		}
 	}
 
 	if apply {
-		if err := applyRemediationCommands(cmd.Context(), repoPathForMutations, plan.Commands, cmd.OutOrStdout(), cmd.ErrOrStderr()); err != nil {
+		commands := internalproto.RemediationCommandsFromProto(fixResp.Commands)
+		if err := applyRemediationCommands(cmd.Context(), repoPathForMutations, commands, cmd.OutOrStdout(), cmd.ErrOrStderr()); err != nil {
 			return err
 		}
 	}
 
 	if strings.TrimSpace(agentName) != "" {
-		agentPrompt, err := buildFixPrompt(plan)
+		agentPrompt, err := buildFixPromptProto(fixResp)
 		if err != nil {
 			return err
 		}
@@ -271,7 +281,7 @@ func runFixPlan(scanner *Scanner, cmd *cobra.Command, args []string) error {
 		fmt.Fprintln(cmd.OutOrStdout())
 		fmt.Fprintln(cmd.OutOrStdout(), ui.StyleHeader.Render("Agent Remediation"))
 
-		result := runAgent(cmd.Context(), agentName, agentPrompt, repoPathForMutations, agentOpts, cmd.OutOrStdout(), cmd.ErrOrStderr())
+		result := runAgent(ctx, agentName, agentPrompt, repoPathForMutations, agentOpts, cmd.OutOrStdout(), cmd.ErrOrStderr())
 
 		// Return error with appropriate exit code based on agent result
 		if result.HasError() {
@@ -303,11 +313,11 @@ func readReportSource(r io.Reader, path string) ([]byte, error) {
 	return data, nil
 }
 
-// readPlanSource reads the remediation plan from the specified path or stdin.
-func readPlanSource(r io.Reader, path string) (remediationPlan, error) {
+// readFixPlanProto reads the remediation plan from the specified path or stdin as proto JSON.
+func readFixPlanProto(r io.Reader, path string) (*fixv1.FixResponse, error) {
 	trimmed := strings.TrimSpace(path)
 	if trimmed == "" {
-		return remediationPlan{}, fmt.Errorf("plan path is empty")
+		return nil, fmt.Errorf("plan path is empty")
 	}
 	var (
 		data []byte
@@ -319,68 +329,108 @@ func readPlanSource(r io.Reader, path string) (remediationPlan, error) {
 		data, err = os.ReadFile(trimmed)
 	}
 	if err != nil {
-		return remediationPlan{}, fmt.Errorf("failed to read plan %q: %w", trimmed, err)
+		return nil, fmt.Errorf("failed to read plan %q: %w", trimmed, err)
 	}
 	if len(bytes.TrimSpace(data)) == 0 {
-		return remediationPlan{}, fmt.Errorf("plan %q is empty", trimmed)
+		return nil, fmt.Errorf("plan %q is empty", trimmed)
 	}
-	var plan remediationPlan
-	if err := json.Unmarshal(data, &plan); err != nil {
-		return remediationPlan{}, fmt.Errorf("failed to parse plan: %w", err)
+	var resp fixv1.FixResponse
+	if err := protojson.Unmarshal(data, &resp); err != nil {
+		return nil, fmt.Errorf("failed to parse plan: %w", err)
 	}
-	refreshRemediationPlanStats(&plan)
-	return plan, nil
+	// Recalculate stats in case plan was edited
+	resp.Stats = &fixv1.RemediationStats{
+		TotalCommands:    int32(len(resp.Commands)),
+		RunnableCommands: int32(countExecutableProto(resp.Commands)),
+	}
+	return &resp, nil
 }
 
-// printFixSummary displays a human-readable summary of the remediation plan.
-func printFixSummary(w io.Writer, plan remediationPlan) {
+// buildFixFromReport reads a scan report and builds a fix response.
+func buildFixFromReport(r io.Reader, reportPath string, ignoreUnfixed bool) (*fixv1.FixResponse, error) {
+	data, err := readReportSource(r, reportPath)
+	if err != nil {
+		return nil, err
+	}
+	if len(bytes.TrimSpace(data)) == 0 {
+		return nil, fmt.Errorf("report %q is empty", reportPath)
+	}
+
+	// Parse the scan response
+	var scanResp scanv1.ScanResponse
+	if err := protojson.Unmarshal(data, &scanResp); err != nil {
+		return nil, fmt.Errorf("failed to parse report: %w", err)
+	}
+
+	// Convert proto response to internal types for consolidation
+	scanResult := internalproto.ScanningResultFromProto(&scanResp)
+	if scanResult == nil {
+		return nil, fmt.Errorf("scan result is empty")
+	}
+
+	resultOut := *scanResult
+	if ignoreUnfixed {
+		resultOut = scanning.FilterUnfixed(resultOut)
+	}
+	cons := vulnerability.Consolidate(resultOut.Findings, resultOut.Advisories)
+	commands, stdlib := remediation.CommandsFromConsolidated(cons)
+
+	displayPath := ""
+	commitHash := ""
+	if scanResp.Target != nil {
+		displayPath = scanResp.Target.DisplayPath
+		commitHash = scanResp.Target.CommitHash
+	}
+
+	return internalproto.BuildFixResponse(displayPath, "", commitHash, stdlib, commands), nil
+}
+
+// renderFixText displays a human-readable summary of the remediation plan.
+func renderFixText(w io.Writer, resp *fixv1.FixResponse) {
+	var repo, commit string
+	if resp.Target != nil {
+		repo = resp.Target.DisplayPath
+		commit = resp.Target.CommitHash
+	}
+	var totalCmds, runnableCmds int32
+	if resp.Stats != nil {
+		totalCmds = resp.Stats.TotalCommands
+		runnableCmds = resp.Stats.RunnableCommands
+	}
 	doc, hasCommands := render.FixSummaryDoc(render.TargetSummary{
-		Repo:   plan.Target.Repo,
-		Ref:    plan.Target.Ref,
-		Commit: plan.Target.Commit,
-	}, plan.StdlibUpgrade, plan.Stats.TotalCommands, plan.Stats.RunnableCommands, len(plan.Commands))
+		Repo:   repo,
+		Commit: commit,
+	}, resp.StdlibUpgrade, int(totalCmds), int(runnableCmds), len(resp.Commands))
 	_ = doc.Render(w, output.UIStyles())
 	if !hasCommands {
 		return
 	}
-	render.RemediationCommands(w, plan.Commands, "       ", "         ")
+	// Convert proto commands to internal for rendering
+	commands := internalproto.RemediationCommandsFromProto(resp.Commands)
+	render.RemediationCommands(w, commands, "       ", "         ")
 }
 
-// buildRemediationPlan constructs a remediation plan from the scan result and generated commands.
-func buildRemediationPlan(result ScanResult, commands []remediation.Command, stdlib string) remediationPlan {
-	plan := remediationPlan{
-		Target: report.Target{
-			Repo:   result.Repo,
-			Ref:    result.Ref,
-			Commit: result.Commit,
-		},
-		StdlibUpgrade: stdlib,
-		Commands:      commands,
+// outputFixProtoJSON writes the fix response as JSON using protojson.
+func outputFixProtoJSON(w io.Writer, resp *fixv1.FixResponse) error {
+	opts := protojson.MarshalOptions{
+		Multiline:       true,
+		Indent:          "  ",
+		EmitUnpopulated: false,
+		UseProtoNames:   true,
 	}
-	refreshRemediationPlanStats(&plan)
-	return plan
-}
-
-// outputRemediationPlanJSON writes the remediation plan to the writer in JSON format.
-func outputRemediationPlanJSON(w io.Writer, plan remediationPlan) error {
-	enc := json.NewEncoder(w)
-	enc.SetIndent("", "  ")
-	return enc.Encode(plan)
-}
-
-// refreshRemediationPlanStats updates the summary statistics of the remediation plan.
-func refreshRemediationPlanStats(plan *remediationPlan) {
-	if plan == nil {
-		return
+	data, err := opts.Marshal(resp)
+	if err != nil {
+		return fmt.Errorf("marshal proto to JSON: %w", err)
 	}
-	plan.Stats = remediationPlanSummary{
-		TotalCommands:    len(plan.Commands),
-		RunnableCommands: countExecutable(plan.Commands),
+	if _, err := w.Write(data); err != nil {
+		return err
 	}
+	_, err = w.Write([]byte("\n"))
+	return err
 }
 
-// countExecutable returns the number of executable commands in the list.
-func countExecutable(commands []remediation.Command) int {
+// countExecutableProto returns the number of executable commands in the proto slice.
+func countExecutableProto(commands []*fixv1.RemediationCommand) int {
 	count := 0
 	for _, cmd := range commands {
 		if cmd.Executable {
@@ -438,29 +488,27 @@ func applyRemediationCommands(ctx context.Context, repoDir string, commands []re
 	return nil
 }
 
-// runFixPolicies evaluates policies against the remediation plan and its steps.
-func runFixPolicies(ctx context.Context, policyPaths []string, plan remediationPlan, errW io.Writer) error {
+// runFixPoliciesProto evaluates policies against the proto fix response.
+func runFixPoliciesProto(ctx context.Context, policyPaths []string, resp *fixv1.FixResponse, errW io.Writer) error {
 	if len(policyPaths) == 0 {
 		return nil
 	}
-	planMap, err := structToMap(plan)
-	if err != nil {
+	// Pass proto message directly to CEL
+	payload := map[string]any{
+		"plan":   resp,
+		"target": resp.Target,
+		"stats":  resp.Stats,
+	}
+	if _, err := evaluatePoliciesForCommand(ctx, policyPaths, payload, "fix", policy.EntrypointFixPlan, errW); err != nil {
 		return err
 	}
-	if _, err := evaluatePoliciesForCommand(ctx, policyPaths, planMap, "fix", policy.EntrypointFixPlan, errW); err != nil {
-		return err
-	}
-	for idx, step := range plan.Commands {
-		stepMap, err := structToMap(step)
-		if err != nil {
-			return err
-		}
-		payload := map[string]any{
-			"plan":  planMap,
-			"step":  stepMap,
+	for idx, step := range resp.Commands {
+		stepPayload := map[string]any{
+			"plan":  resp,
+			"step":  step,
 			"index": idx,
 		}
-		if _, err := evaluatePoliciesForCommand(ctx, policyPaths, payload, "fix", policy.EntrypointFixPlanStep, errW); err != nil {
+		if _, err := evaluatePoliciesForCommand(ctx, policyPaths, stepPayload, "fix", policy.EntrypointFixPlanStep, errW); err != nil {
 			return err
 		}
 	}

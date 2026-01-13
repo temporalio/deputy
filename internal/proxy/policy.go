@@ -8,10 +8,10 @@ import (
 	"strings"
 
 	"github.com/picatz/deputy/internal/policy"
+	"google.golang.org/protobuf/proto"
 )
 
-// PolicyEvaluator is an alias for policy.Evaluator for backward compatibility.
-// Use policy.Evaluator directly in new code.
+// PolicyEvaluator is an alias for policy.Evaluator.
 type PolicyEvaluator = policy.Evaluator
 
 // proxyPolicyEngine wraps policy.Engine to inject proxy-specific context.
@@ -29,22 +29,11 @@ func NewPolicyEngine(paths []string) (policy.Evaluator, error) {
 	return &proxyPolicyEngine{engine: eng}, nil
 }
 
-func (e *proxyPolicyEngine) Evaluate(ctx context.Context, entrypoint string, payload map[string]any) ([]policy.Action, error) {
+func (e *proxyPolicyEngine) Evaluate(ctx context.Context, entrypoint string, input proto.Message) ([]policy.Action, error) {
 	if e == nil || e.engine == nil {
 		return nil, nil
 	}
-	if payload == nil {
-		payload = map[string]any{}
-	}
-	env := map[string]any{
-		"command":    "proxy",
-		"entrypoint": entrypoint,
-	}
-	if existing, ok := payload["env"].(map[string]any); ok {
-		maps.Copy(env, existing)
-	}
-	payload["env"] = env
-	return e.engine.EvaluateAll(ctx, payload, "proxy", entrypoint)
+	return e.engine.EvaluateAll(ctx, input, "proxy", entrypoint)
 }
 
 func summarizeActions(actions []policy.Action) (deny *policy.Action, warnings []policy.Action, headers map[string]string) {

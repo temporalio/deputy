@@ -70,17 +70,22 @@ can plug into the same scan flow as providers are added.
 | `--format` | `-f` | `text` | Output format: `text`, `json`, `sarif` |
 | `--output` | `-o` | stdout | Output file path |
 | `--ignore-unfixed` | | `false` | Hide vulnerabilities without a known fix |
+| `--ignore-file` | | | Path to ignore rules file (`.deputyignore.yaml`) |
 | `--published-before` | | | Only show vulns published before this date |
 | `--published-after` | | | Only show vulns published on/after this date |
 | `--as-of` | | | Historical view up to this date (implies `--published-before`) |
 | `--policy` | | | CEL policy file(s) to evaluate (repeatable) |
 | `--ecosystems` | `-e` | all | Limit to specific ecosystems (see [supported ecosystems](#supported-ecosystems)) |
 | `--enrich` | | `false` | Enrich with EPSS scores and KEV status (requires network) |
+| `--with-graph` | | `false` | Build dependency graph to show paths to vulnerable packages |
+| `--secrets` | | `false` | Scan for leaked secrets and credentials alongside vulnerabilities |
+| `--filter` | | | CEL expression to filter vulnerabilities (e.g., `'vulnerability.advisory.severity.level == severity.critical'`) |
 | `--show-symbols` | | `false` | Show affected symbols in text output |
 | `--show-db-info` | | `false` | Show database metadata (e.g., review_status) |
 | `--show-unfixable-guidance` | | `false` | Show actionable guidance for unfixable vulnerabilities |
 | `--source` | | auto | Target source override: `auto`, `git`, `dir`, `sbom`, `purl`, `dockerfile`, `remote`, `docker-daemon`, `tarball` |
 | `--platform` | | | Platform for remote images (`os/arch[/variant]`) |
+| `--detect-base-image` | | `false` | Detect base image layers in container scans (requires network, queries deps.dev) |
 
 ### Date Format
 
@@ -148,6 +153,49 @@ $ deputy scan --ecosystems go,npm
 # Scan Java and Rust projects
 $ deputy scan --ecosystems maven,cargo
 ```
+
+#### CEL-Based Filtering
+
+The `--filter` flag accepts CEL (Common Expression Language) expressions for flexible filtering.
+This is the recommended approach instead of accumulating severity-specific flags.
+
+```console
+# Filter to critical severity only
+$ deputy scan --filter 'vulnerability.advisory.severity.level == severity.critical'
+
+# Filter to high and critical severity
+$ deputy scan --filter 'vulnerability.advisory.severity.level in [severity.critical, severity.high]'
+
+# Filter to direct dependencies only
+$ deputy scan --filter 'vulnerability.package.direct == true'
+
+# Filter to vulnerabilities with fixes available
+$ deputy scan --filter 'size(vulnerability.advisory.fixed_versions) > 0'
+
+# Combine conditions: critical/high severity with fixes, in direct deps
+$ deputy scan --filter 'vulnerability.advisory.severity.level in [severity.critical, severity.high] && vulnerability.package.direct && size(vulnerability.advisory.fixed_versions) > 0'
+```
+
+**Available variables in filter expressions:**
+
+| Variable | Type | Description |
+|----------|------|-------------|
+| `vulnerability.advisory_id` | `string` | Advisory ID (CVE, GHSA, etc.) |
+| `vulnerability.advisory.severity.level` | `enum` | Severity level (use `severity.critical`, etc.) |
+| `vulnerability.advisory.fixed_versions` | `list(string)` | Versions with fixes |
+| `vulnerability.package.name` | `string` | Package name |
+| `vulnerability.package.version` | `string` | Package version |
+| `vulnerability.package.ecosystem` | `string` | Package ecosystem |
+| `vulnerability.package.direct` | `bool` | Whether it's a direct dependency |
+
+**Severity constants:**
+- `severity.critical`
+- `severity.high`
+- `severity.medium`
+- `severity.low`
+- `severity.unspecified`
+
+See [AGENTS.md](../../AGENTS.md) for the full list of CEL variables and helper functions available in policy expressions.
 
 ### Enrichment and Guidance
 
@@ -271,9 +319,53 @@ Image-specific flags:
 
 - `--source` = `remote` | `docker-daemon` | `tarball`
 - `--platform` = `os/arch[/variant]` (remote images only)
+- `--detect-base-image` = Enable base image layer detection (see below)
 
 Short names are normalized using Docker reference rules. Use explicit tags or
 digests if you want to avoid defaulting to `latest` or the Docker Hub namespace.
+
+#### Base Image Detection
+
+Use `--detect-base-image` to identify which vulnerabilities come from your base image (FROM instruction) versus packages you installed in your Dockerfile:
+
+```console
+# Enable base image detection for layer-aware policies
+$ deputy scan --detect-base-image ghcr.io/owner/app:v1.2.3
+
+# Combine with policies that treat base image vulns differently
+$ deputy scan --detect-base-image \
+    --policy policy/examples/container-layer-vulnerability.yaml \
+    nginx:1.25
+```
+
+When enabled, Deputy queries deps.dev to determine which layers belong to known base images. Each vulnerability then includes `layer_details.in_base_image` (true/false) for use in policies.
+
+**Example policy using base image detection:**
+
+```yaml
+policies:
+  # Warn on base image vulns (update your FROM), deny on app layer vulns
+  - name: layer-aware-vulns
+    entrypoints: ["scan_vulnerability"]
+    rules:
+      - action: warn
+        when: |
+          has(vulnerability.package.layer_details) &&
+          vulnerability.package.layer_details.in_base_image == true &&
+          vulnerability.advisory.severity.level == severity.critical
+        reason: "Critical vulnerability inherited from base image"
+        remediation: "Update your base image to a patched version"
+
+      - action: deny
+        when: |
+          has(vulnerability.package.layer_details) &&
+          vulnerability.package.layer_details.in_base_image == false &&
+          vulnerability.advisory.severity.level == severity.critical
+        reason: "Critical vulnerability in application layer"
+        remediation: "Update the package in your Dockerfile"
+```
+
+See [Container Layer Vulnerability Policies](../../policy/examples/container-layer-vulnerability.yaml) for more examples.
 
 #### Registry Authentication
 
@@ -352,6 +444,31 @@ Detected filename patterns:
 
 See [Dockerfile scanning guide](../guides/dockerfile.md) for policy examples and variables.
 
+### Dependency Graph
+
+```console
+# Show paths to vulnerable packages (how vulnerabilities reach your code)
+$ deputy scan --with-graph
+
+# Combine with JSON for detailed path analysis
+$ deputy scan --with-graph --format json | jq '.vulnerabilities[].path'
+```
+
+The `--with-graph` flag builds the dependency graph to show:
+- How transitive vulnerabilities reach your project
+- The dependency chain from root to vulnerable package
+- Depth information (0 = direct, 1+ = transitive)
+
+### Secret Scanning
+
+```console
+# Scan for both vulnerabilities and secrets
+$ deputy scan --secrets
+
+# Secrets-only scanning (use the secrets command)
+$ deputy secrets
+```
+
 ### With Policies
 
 ```console
@@ -385,22 +502,26 @@ Vulnerability Summary:
 
 ### JSON Format
 
+The JSON output uses proto-first serialization with snake_case field names:
+
 ```json
 {
-  "repo": "/path/to/repo",
-  "ref": "HEAD",
-  "commit": "abc123d...",
-  "generated": "2025-01-15T10:30:00Z",
-  "packagesScanned": 42,
-  "stats": {
-    "total": 5,
-    "critical": 1,
-    "high": 2,
-    "medium": 2,
-    "low": 0,
-    "fixable": 4
+  "target": {
+    "display_path": "/path/to/repo",
+    "commit_hash": "abc123d..."
   },
-  "vulnerabilities": [...]
+  "stats": {
+    "unique_vulns": 5,
+    "critical_severity": 1,
+    "high_severity": 2,
+    "med_severity": 2,
+    "low_severity": 0,
+    "fix_available": 4,
+    "packages_scanned": 42
+  },
+  "findings": [...],
+  "advisories": {...},
+  "generated_at": "2025-01-15T10:30:00Z"
 }
 ```
 

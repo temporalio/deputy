@@ -83,6 +83,77 @@ func Test_parseDigits(t *testing.T) {
 	}
 }
 
+func TestIsRelativePathModule(t *testing.T) {
+	cases := []struct {
+		name string
+		in   string
+		want bool
+	}{
+		{name: "parent traversal", in: "..", want: true},
+		{name: "current dir", in: ".", want: true},
+		{name: "parent path", in: "../foo", want: true},
+		{name: "deep parent path", in: "../../..", want: true},
+		{name: "relative current", in: "./local", want: true},
+		{name: "valid module", in: "github.com/user/repo", want: false},
+		{name: "valid module with dots", in: "example.com/pkg", want: false},
+		{name: "stdlib", in: "net/http", want: false},
+		{name: "empty", in: "", want: false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := IsRelativePathModule(c.in); got != c.want {
+				t.Errorf("IsRelativePathModule(%q) = %v, want %v", c.in, got, c.want)
+			}
+		})
+	}
+}
+
+func Test_summarizePackage_skipsRelativePaths(t *testing.T) {
+	// Relative path modules (from go.mod replace directives) should be skipped
+	cases := []struct {
+		name       string
+		pkgName    string
+		wantKey    string
+		wantSkip   bool
+	}{
+		{
+			name:     "relative parent path",
+			pkgName:  "../../..",
+			wantSkip: true,
+		},
+		{
+			name:     "relative current path",
+			pkgName:  "./local",
+			wantSkip: true,
+		},
+		{
+			name:     "valid go module",
+			pkgName:  "github.com/user/repo",
+			wantKey:  "go|github.com/user/repo",
+			wantSkip: false,
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			pkg := &extractor.Package{
+				Name:     c.pkgName,
+				Version:  "v1.0.0",
+				PURLType: scalpurl.TypeGolang,
+			}
+			key, _ := summarizePackage(pkg)
+			if c.wantSkip {
+				if key != "" {
+					t.Errorf("summarizePackage(%q) returned key %q, want empty (skipped)", c.pkgName, key)
+				}
+			} else {
+				if key != c.wantKey {
+					t.Errorf("summarizePackage(%q) = %q, want %q", c.pkgName, key, c.wantKey)
+				}
+			}
+		})
+	}
+}
+
 func TestGetDirectDependencies(t *testing.T) {
 	ws, err := workspace.NewTempDir("cmp-go-mod")
 	if err != nil {
@@ -122,6 +193,58 @@ require (
 	}
 	if deps["gopkg.in/indirect.v3"] {
 		t.Fatalf("indirect dependency erroneously marked direct")
+	}
+}
+
+// TestGetDirectDependenciesFromGoMod_Submodules verifies that Go submodules
+// are correctly classified as direct or indirect based on their explicit
+// declaration in go.mod, not by inheriting from parent modules.
+//
+// This test covers the bug where github.com/bytedance/sonic/loader was
+// incorrectly marked as direct because its parent github.com/bytedance/sonic
+// was direct, even though sonic/loader itself was marked // indirect.
+func TestGetDirectDependenciesFromGoMod_Submodules(t *testing.T) {
+	goMod := `module example.com/app
+
+go 1.21.0
+
+require (
+    github.com/bytedance/sonic v1.14.2
+    github.com/gin-contrib/sse v1.1.0
+)
+
+require (
+    github.com/bytedance/gopkg v0.1.3 // indirect
+    github.com/bytedance/sonic/loader v0.4.0 // indirect
+)`
+	deps := GetDirectDependenciesFromGoMod([]byte(goMod))
+
+	// Direct dependencies should be marked true
+	if !deps["github.com/bytedance/sonic"] {
+		t.Errorf("github.com/bytedance/sonic should be direct, got false")
+	}
+	if !deps["github.com/gin-contrib/sse"] {
+		t.Errorf("github.com/gin-contrib/sse should be direct, got false")
+	}
+
+	// Indirect submodule should NOT inherit direct status from parent
+	// sonic/loader is a SEPARATE module from sonic, explicitly marked indirect
+	if val, exists := deps["github.com/bytedance/sonic/loader"]; !exists {
+		t.Errorf("github.com/bytedance/sonic/loader should exist in deps map")
+	} else if val {
+		t.Errorf("github.com/bytedance/sonic/loader should be indirect (false), got true")
+	}
+
+	// Other indirect dependencies should also be false
+	if val, exists := deps["github.com/bytedance/gopkg"]; !exists {
+		t.Errorf("github.com/bytedance/gopkg should exist in deps map")
+	} else if val {
+		t.Errorf("github.com/bytedance/gopkg should be indirect (false), got true")
+	}
+
+	// Module root for sonic should be true (for matching subpackages, not submodules)
+	if !deps["github.com/bytedance/sonic"] {
+		t.Errorf("github.com/bytedance/sonic root should be direct")
 	}
 }
 
@@ -253,6 +376,185 @@ func TestComparePackages_NonGo(t *testing.T) {
 	}
 	if !added || !updated {
 		t.Fatalf("missing npm change types added=%v updated=%v", added, updated)
+	}
+}
+
+func TestNormalizePyPIName(t *testing.T) {
+	cases := []struct {
+		name, in, want string
+	}{
+		{name: "lowercase only", in: "requests", want: "requests"},
+		{name: "with underscore", in: "my_package", want: "my-package"},
+		{name: "with hyphen", in: "my-package", want: "my-package"},
+		{name: "with period", in: "my.package", want: "my-package"},
+		{name: "mixed separators", in: "my_package-name.foo", want: "my-package-name-foo"},
+		{name: "consecutive underscores", in: "my__package", want: "my-package"},
+		{name: "consecutive mixed", in: "my_.-package", want: "my-package"},
+		{name: "uppercase", in: "My_Package", want: "my-package"},
+		{name: "empty", in: "", want: ""},
+		{name: "real example Django", in: "Django", want: "django"},
+		{name: "real example Pillow", in: "Pillow", want: "pillow"},
+		{name: "real example scikit-learn", in: "scikit-learn", want: "scikit-learn"},
+		{name: "real example scikit_learn", in: "scikit_learn", want: "scikit-learn"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := normalizePyPIName(tc.in)
+			if got != tc.want {
+				t.Errorf("normalizePyPIName(%q) = %q, want %q", tc.in, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestComparePackages_PyPINameNormalization(t *testing.T) {
+	// Test that PyPI packages with different name formats are recognized as the same package
+	oldPkgs := []*extractor.Package{
+		{Name: "scikit_learn", Version: "1.0.0", PURLType: scalpurl.TypePyPi},
+	}
+	newPkgs := []*extractor.Package{
+		{Name: "scikit-learn", Version: "1.1.0", PURLType: scalpurl.TypePyPi},
+	}
+	changes := ComparePackages(oldPkgs, newPkgs, nil, nil, nil)
+	// Should be 1 change (upgrade), not 2 changes (remove + add)
+	if len(changes) != 1 {
+		t.Fatalf("expected 1 change (upgrade) got %d: %+v", len(changes), changes)
+	}
+	if changes[0].ChangeType != Upgraded {
+		t.Fatalf("expected Upgraded change type, got %v: %+v", changes[0].ChangeType, changes[0])
+	}
+	if changes[0].BaseVersion != "1.0.0" || changes[0].TargetVersion != "1.1.0" {
+		t.Fatalf("unexpected versions: %+v", changes[0])
+	}
+}
+
+func TestComparePackages_GoMajorVersionCoexistence(t *testing.T) {
+	// Test that lipgloss v1 and lipgloss/v2 coexistence is handled correctly.
+	// When both exist in the same go.mod, they should be treated as the same
+	// logical module (canonical form). This is the current design decision.
+	oldPkgs := []*extractor.Package{
+		{Name: "github.com/charmbracelet/lipgloss", Version: "v1.0.0", PURLType: scalpurl.TypeGolang},
+		{Name: "github.com/charmbracelet/lipgloss/v2", Version: "v2.0.0", PURLType: scalpurl.TypeGolang},
+	}
+	newPkgs := []*extractor.Package{
+		{Name: "github.com/charmbracelet/lipgloss", Version: "v1.0.0", PURLType: scalpurl.TypeGolang},
+		{Name: "github.com/charmbracelet/lipgloss/v2", Version: "v2.0.0", PURLType: scalpurl.TypeGolang},
+	}
+	changes := ComparePackages(oldPkgs, newPkgs, nil, nil, nil)
+	// With canonical keying, both map to same key, so we see 0 changes
+	// because the "winner" (deterministically lipgloss v1 due to sorted input)
+	// is the same in both old and new
+	if len(changes) != 0 {
+		t.Fatalf("expected 0 changes for identical coexisting major versions, got %d: %+v", len(changes), changes)
+	}
+}
+
+func TestComparePackages_GoMajorVersionUpgrade(t *testing.T) {
+	// Test upgrade within a coexisting major version scenario
+	oldPkgs := []*extractor.Package{
+		{Name: "github.com/charmbracelet/lipgloss", Version: "v1.0.0", PURLType: scalpurl.TypeGolang},
+		{Name: "github.com/charmbracelet/lipgloss/v2", Version: "v2.0.0", PURLType: scalpurl.TypeGolang},
+	}
+	newPkgs := []*extractor.Package{
+		{Name: "github.com/charmbracelet/lipgloss", Version: "v1.1.0", PURLType: scalpurl.TypeGolang},
+		{Name: "github.com/charmbracelet/lipgloss/v2", Version: "v2.1.0", PURLType: scalpurl.TypeGolang},
+	}
+	changes := ComparePackages(oldPkgs, newPkgs, nil, nil, nil)
+	// With canonical keying and deterministic ordering (lipgloss < lipgloss/v2 by PURL),
+	// both maps will have lipgloss as the final entry for the canonical key.
+	// So we should see 1 upgrade: v1.0.0 -> v1.1.0
+	if len(changes) != 1 {
+		t.Fatalf("expected 1 change got %d: %+v", len(changes), changes)
+	}
+	if changes[0].ChangeType != Upgraded {
+		t.Fatalf("expected Upgraded, got %v: %+v", changes[0].ChangeType, changes[0])
+	}
+}
+
+func TestComparePackages_GoGopkgInNormalization(t *testing.T) {
+	// Test that gopkg.in packages are normalized to their GitHub equivalents
+	oldPkgs := []*extractor.Package{
+		{Name: "gopkg.in/yaml.v3", Version: "v3.0.0", PURLType: scalpurl.TypeGolang},
+	}
+	newPkgs := []*extractor.Package{
+		{Name: "github.com/go-yaml/yaml", Version: "v3.0.1", PURLType: scalpurl.TypeGolang},
+	}
+	changes := ComparePackages(oldPkgs, newPkgs, nil, nil, nil)
+	// Should be 1 change (upgrade), not 2 changes (remove + add)
+	// because gopkg.in/yaml.v3 normalizes to github.com/go-yaml/yaml
+	if len(changes) != 1 {
+		t.Fatalf("expected 1 change got %d: %+v", len(changes), changes)
+	}
+	if changes[0].ChangeType != Upgraded {
+		t.Fatalf("expected Upgraded change type, got %v: %+v", changes[0].ChangeType, changes[0])
+	}
+	if changes[0].OldName != "gopkg.in/yaml.v3" {
+		t.Fatalf("expected OldName to be gopkg.in/yaml.v3, got %q", changes[0].OldName)
+	}
+}
+
+func TestNormalizeCargoName(t *testing.T) {
+	cases := []struct {
+		name, in, want string
+	}{
+		{name: "lowercase only", in: "serde", want: "serde"},
+		{name: "with hyphen", in: "serde-json", want: "serde_json"},
+		{name: "with underscore", in: "serde_json", want: "serde_json"},
+		{name: "multiple hyphens", in: "tokio-stream-utils", want: "tokio_stream_utils"},
+		{name: "mixed hyphen underscore", in: "my-crate_name", want: "my_crate_name"},
+		{name: "uppercase", in: "Serde-JSON", want: "serde_json"},
+		{name: "empty", in: "", want: ""},
+		{name: "real example rand", in: "rand", want: "rand"},
+		{name: "real example rand-core", in: "rand-core", want: "rand_core"},
+		{name: "real example rand_core", in: "rand_core", want: "rand_core"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := normalizeCargoName(tc.in)
+			if got != tc.want {
+				t.Errorf("normalizeCargoName(%q) = %q, want %q", tc.in, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestComparePackages_CargoNameNormalization(t *testing.T) {
+	// Test that Cargo packages with different name formats (hyphen vs underscore) are recognized as the same package
+	oldPkgs := []*extractor.Package{
+		{Name: "serde-json", Version: "1.0.0", PURLType: "cargo"},
+	}
+	newPkgs := []*extractor.Package{
+		{Name: "serde_json", Version: "1.1.0", PURLType: "cargo"},
+	}
+	changes := ComparePackages(oldPkgs, newPkgs, nil, nil, nil)
+	// Should be 1 change (upgrade), not 2 changes (remove + add)
+	if len(changes) != 1 {
+		t.Fatalf("expected 1 change (upgrade) got %d: %+v", len(changes), changes)
+	}
+	if changes[0].ChangeType != Upgraded {
+		t.Fatalf("expected Upgraded change type, got %v: %+v", changes[0].ChangeType, changes[0])
+	}
+	if changes[0].BaseVersion != "1.0.0" || changes[0].TargetVersion != "1.1.0" {
+		t.Fatalf("unexpected versions: %+v", changes[0])
+	}
+}
+
+func TestComparePackages_NpmCaseNormalization(t *testing.T) {
+	// Test that npm packages with different case are recognized as the same package
+	// npm names are case-insensitive (all stored lowercase on registry)
+	oldPkgs := []*extractor.Package{
+		{Name: "Lodash", Version: "4.17.20", PURLType: scalpurl.TypeNPM},
+	}
+	newPkgs := []*extractor.Package{
+		{Name: "lodash", Version: "4.17.21", PURLType: scalpurl.TypeNPM},
+	}
+	changes := ComparePackages(oldPkgs, newPkgs, nil, nil, nil)
+	// Should be 1 change (upgrade), not 2 changes (remove + add)
+	if len(changes) != 1 {
+		t.Fatalf("expected 1 change (upgrade) got %d: %+v", len(changes), changes)
+	}
+	if changes[0].ChangeType != Upgraded {
+		t.Fatalf("expected Upgraded change type, got %v: %+v", changes[0].ChangeType, changes[0])
 	}
 }
 

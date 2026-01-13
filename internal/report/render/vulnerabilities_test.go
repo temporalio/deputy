@@ -5,13 +5,13 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/picatz/deputy/internal/scan"
+	"github.com/picatz/deputy/internal/scanning"
 	"github.com/picatz/deputy/internal/vulnerability"
 )
 
 func TestDisplayVulnerabilities_NoVulns(t *testing.T) {
 	var buf bytes.Buffer
-	DisplayVulnerabilities(&buf, scan.Result{})
+	DisplayVulnerabilities(&buf, scanning.Result{})
 	out := buf.String()
 	if !strings.Contains(out, "No vulnerabilities found") {
 		t.Fatalf("expected output to mention no vulns, got %q", out)

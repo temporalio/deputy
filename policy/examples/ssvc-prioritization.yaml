@@ -58,7 +58,7 @@ policies:
     rules:
       - action: deny
         when: |
-          vulnerability.?inKEV.orValue(false) == true &&
+          vulnerability.?in_kev.orValue(false) == true &&
           ssvc(vulnerability).decision in ["act", "attend"]
         reason: "Known Exploited Vulnerability with high SSVC priority"
         remediation: |
@@ -92,6 +92,6 @@ policies:
   #   rules:
   #     - action: deny
   #       when: |
-  #         essential_packages.exists(p, vulnerability.?package.orValue("").contains(p)) &&
+  #         essential_packages.exists(p, vulnerability.?package.name.orValue("").contains(p)) &&
   #         ssvc(vulnerability).decision in ["act", "attend", "track*"]
   #       reason: "Vulnerability in essential package requires immediate attention"

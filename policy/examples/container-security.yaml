@@ -72,6 +72,7 @@ policies:
     vars:
       allowedRegistries:
         - "docker.io"
+        - "index.docker.io"  # Docker Hub canonical hostname
         - "ghcr.io"
         - "gcr.io"
     rules:
@@ -321,8 +322,8 @@ policies:
       - action: warn
         when: |
           has(image.metadata) &&
-          image.metadata.created > 0 &&
-          age(image.metadata.created) > duration(string(maxAgeDays * 24) + "h")
+          has(image.metadata.created) &&
+          now() - image.metadata.created > duration(string(maxAgeDays * 24) + "h")
         reason: "Image is older than 90 days"
         remediation: "Rebuild image with latest base and security patches"
 

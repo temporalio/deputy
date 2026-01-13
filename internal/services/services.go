@@ -1,0 +1,220 @@
+package services
+
+import (
+	"net/http"
+
+	"connectrpc.com/connect"
+
+	"github.com/picatz/deputy/gen/deputy/diff/v1/diffv1connect"
+	"github.com/picatz/deputy/gen/deputy/graph/v1/graphv1connect"
+	"github.com/picatz/deputy/gen/deputy/inventory/v1/inventoryv1connect"
+	"github.com/picatz/deputy/gen/deputy/list/v1/listv1connect"
+	"github.com/picatz/deputy/gen/deputy/policy/v1/policyv1connect"
+	"github.com/picatz/deputy/gen/deputy/remediation/v1/remediationv1connect"
+	"github.com/picatz/deputy/gen/deputy/sbom/v1/sbomv1connect"
+	"github.com/picatz/deputy/gen/deputy/scan/v1/scanv1connect"
+	"github.com/picatz/deputy/gen/deputy/secrets/v1/secretsv1connect"
+	"github.com/picatz/deputy/gen/deputy/vulnerability/v1/vulnerabilityv1connect"
+	"github.com/picatz/deputy/internal/server"
+)
+
+// Services holds all Deputy service handlers.
+//
+// These handlers implement the ConnectRPC generated interfaces and can be:
+//   - Mounted as HTTP handlers for the server
+//   - Used directly via InProcessTransport for CLI/MCP
+//   - Exposed via pluginrpc for plugin extensibility
+type Services struct {
+	Scan          scanv1connect.ScanServiceHandler
+	List          listv1connect.ListServiceHandler
+	Inventory     inventoryv1connect.InventoryServiceHandler
+	SBOM          sbomv1connect.SBOMServiceHandler
+	Secrets       secretsv1connect.SecretsServiceHandler
+	Diff          diffv1connect.DiffServiceHandler
+	Graph         graphv1connect.GraphServiceHandler
+	Remediation   remediationv1connect.RemediationServiceHandler
+	Vulnerability vulnerabilityv1connect.VulnerabilityServiceHandler
+	Policy        policyv1connect.PolicyServiceHandler
+}
+
+// Config configures service creation.
+type Config struct {
+	// LocalMode enables local mode which skips remote target validation.
+	// Use this for in-process clients that need to access local filesystems.
+	LocalMode bool
+
+	// VulnerabilityHandler optionally provides a custom vulnerability handler.
+	// If nil, a default handler will be created. Useful for testing.
+	VulnerabilityHandler vulnerabilityv1connect.VulnerabilityServiceHandler
+}
+
+// New creates a new Services with default configuration (local mode enabled).
+func New() (*Services, error) {
+	return NewWithConfig(Config{LocalMode: true})
+}
+
+// NewForServer creates Services configured for remote server mode.
+// This enables security validation that rejects local filesystem paths.
+func NewForServer() (*Services, error) {
+	return NewWithConfig(Config{LocalMode: false})
+}
+
+// NewWithConfig creates a new Services with the given configuration.
+func NewWithConfig(cfg Config) (*Services, error) {
+	// Use provided VulnerabilityHandler or create default
+	vulnHandler := cfg.VulnerabilityHandler
+	if vulnHandler == nil {
+		vulnHandler = server.NewVulnerabilityHandler()
+	}
+
+	if cfg.LocalMode {
+		secretsHandler, err := server.NewSecretsHandler(server.WithSecretsLocalMode())
+		if err != nil {
+			return nil, err
+		}
+		return &Services{
+			Scan:          server.NewScanHandler(server.WithLocalMode()),
+			List:          server.NewListHandler(server.WithListLocalMode()),
+			Inventory:     server.NewInventoryHandler(server.WithInventoryLocalMode()),
+			SBOM:          server.NewSBOMHandler(server.WithSBOMLocalMode()),
+			Secrets:       secretsHandler,
+			Diff:          server.NewDiffHandler(server.WithDiffLocalMode()),
+			Graph:         server.NewGraphHandler(server.WithGraphLocalMode()),
+			Remediation:   server.NewRemediationHandler(server.WithRemediationLocalMode()),
+			Vulnerability: vulnHandler,
+			Policy:        server.NewPolicyHandler(server.WithPolicyLocalMode()),
+		}, nil
+	}
+
+	// Remote server mode - create handlers without local mode
+	secretsHandler, err := server.NewSecretsHandler()
+	if err != nil {
+		return nil, err
+	}
+
+	return &Services{
+		Scan:          server.NewScanHandler(),
+		List:          server.NewListHandler(),
+		Inventory:     server.NewInventoryHandler(),
+		SBOM:          server.NewSBOMHandler(),
+		Secrets:       secretsHandler,
+		Diff:          server.NewDiffHandler(),
+		Graph:         server.NewGraphHandler(),
+		Remediation:   server.NewRemediationHandler(),
+		Vulnerability: vulnHandler,
+		Policy:        server.NewPolicyHandler(),
+	}, nil
+}
+
+// RegisterHandlers mounts all service handlers on the given mux.
+// Returns the list of registered path prefixes.
+func (s *Services) RegisterHandlers(mux *http.ServeMux, opts ...connect.HandlerOption) []string {
+	var paths []string
+
+	path, handler := scanv1connect.NewScanServiceHandler(s.Scan, opts...)
+	mux.Handle(path, handler)
+	paths = append(paths, path)
+
+	path, handler = listv1connect.NewListServiceHandler(s.List, opts...)
+	mux.Handle(path, handler)
+	paths = append(paths, path)
+
+	path, handler = inventoryv1connect.NewInventoryServiceHandler(s.Inventory, opts...)
+	mux.Handle(path, handler)
+	paths = append(paths, path)
+
+	path, handler = sbomv1connect.NewSBOMServiceHandler(s.SBOM, opts...)
+	mux.Handle(path, handler)
+	paths = append(paths, path)
+
+	path, handler = secretsv1connect.NewSecretsServiceHandler(s.Secrets, opts...)
+	mux.Handle(path, handler)
+	paths = append(paths, path)
+
+	path, handler = diffv1connect.NewDiffServiceHandler(s.Diff, opts...)
+	mux.Handle(path, handler)
+	paths = append(paths, path)
+
+	path, handler = graphv1connect.NewGraphServiceHandler(s.Graph, opts...)
+	mux.Handle(path, handler)
+	paths = append(paths, path)
+
+	path, handler = remediationv1connect.NewRemediationServiceHandler(s.Remediation, opts...)
+	mux.Handle(path, handler)
+	paths = append(paths, path)
+
+	path, handler = vulnerabilityv1connect.NewVulnerabilityServiceHandler(s.Vulnerability, opts...)
+	mux.Handle(path, handler)
+	paths = append(paths, path)
+
+	path, handler = policyv1connect.NewPolicyServiceHandler(s.Policy, opts...)
+	mux.Handle(path, handler)
+	paths = append(paths, path)
+
+	return paths
+}
+
+// Clients holds generated ConnectRPC client interfaces.
+// These can be used by CLI, MCP, and other consumers.
+//
+// Field names are chosen to minimize "type stuttering" in calls:
+//   - c.Vulns.Scan() instead of c.Scan.Scan()
+//   - c.Packages.ListPackages() instead of c.List.ListPackages()
+//   - c.Advisory.GetAdvisory() instead of c.Vulnerability.GetAdvisory()
+type Clients struct {
+	Vulns       scanv1connect.ScanServiceClient                   // Vulnerability scanning
+	Packages    listv1connect.ListServiceClient                   // Package enumeration (ListService)
+	Inventory   inventoryv1connect.InventoryServiceClient         // Inventory extraction with plugin support
+	SBOM        sbomv1connect.SBOMServiceClient                   // SBOM generation
+	Secrets     secretsv1connect.SecretsServiceClient             // Secret detection
+	Diff        diffv1connect.DiffServiceClient                   // Diff comparisons
+	Graph       graphv1connect.GraphServiceClient                 // Dependency graphs
+	Remediation remediationv1connect.RemediationServiceClient     // Remediation planning
+	Advisory    vulnerabilityv1connect.VulnerabilityServiceClient // Advisory lookup
+	Policy      policyv1connect.PolicyServiceClient               // Policy evaluation
+}
+
+// InProcessClients creates clients that call handlers directly without network overhead.
+// This is the recommended way to use services in CLI and MCP contexts.
+func (s *Services) InProcessClients(opts ...connect.ClientOption) *Clients {
+	// Create a mux and register handlers
+	mux := http.NewServeMux()
+	s.RegisterHandlers(mux)
+
+	// Create transport that routes to handlers
+	transport := NewInProcessTransport(mux)
+	httpClient := transport.HTTPClient()
+
+	// Empty base URL since we're not making real network calls
+	baseURL := ""
+
+	return &Clients{
+		Vulns:       scanv1connect.NewScanServiceClient(httpClient, baseURL, opts...),
+		Packages:    listv1connect.NewListServiceClient(httpClient, baseURL, opts...),
+		Inventory:   inventoryv1connect.NewInventoryServiceClient(httpClient, baseURL, opts...),
+		SBOM:        sbomv1connect.NewSBOMServiceClient(httpClient, baseURL, opts...),
+		Secrets:     secretsv1connect.NewSecretsServiceClient(httpClient, baseURL, opts...),
+		Diff:        diffv1connect.NewDiffServiceClient(httpClient, baseURL, opts...),
+		Graph:       graphv1connect.NewGraphServiceClient(httpClient, baseURL, opts...),
+		Remediation: remediationv1connect.NewRemediationServiceClient(httpClient, baseURL, opts...),
+		Advisory:    vulnerabilityv1connect.NewVulnerabilityServiceClient(httpClient, baseURL, opts...),
+		Policy:      policyv1connect.NewPolicyServiceClient(httpClient, baseURL, opts...),
+	}
+}
+
+// RemoteClients creates clients that connect to a remote server.
+func RemoteClients(httpClient connect.HTTPClient, baseURL string, opts ...connect.ClientOption) *Clients {
+	return &Clients{
+		Vulns:       scanv1connect.NewScanServiceClient(httpClient, baseURL, opts...),
+		Packages:    listv1connect.NewListServiceClient(httpClient, baseURL, opts...),
+		Inventory:   inventoryv1connect.NewInventoryServiceClient(httpClient, baseURL, opts...),
+		SBOM:        sbomv1connect.NewSBOMServiceClient(httpClient, baseURL, opts...),
+		Secrets:     secretsv1connect.NewSecretsServiceClient(httpClient, baseURL, opts...),
+		Diff:        diffv1connect.NewDiffServiceClient(httpClient, baseURL, opts...),
+		Graph:       graphv1connect.NewGraphServiceClient(httpClient, baseURL, opts...),
+		Remediation: remediationv1connect.NewRemediationServiceClient(httpClient, baseURL, opts...),
+		Advisory:    vulnerabilityv1connect.NewVulnerabilityServiceClient(httpClient, baseURL, opts...),
+		Policy:      policyv1connect.NewPolicyServiceClient(httpClient, baseURL, opts...),
+	}
+}
+

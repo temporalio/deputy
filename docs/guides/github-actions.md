@@ -417,8 +417,8 @@ policies:
       - action: deny
         when: |
           vulnerabilities.exists(v,
-            v.severity == "CRITICAL" &&
-            size(v.fixedVersions) > 0
+            v.advisory.severity.level == severity.critical &&
+            size(v.advisory.fixed_versions) > 0
           )
         reason: Critical vulnerability with available fix
         remediation: Upgrade to a fixed version
@@ -429,8 +429,8 @@ policies:
       - action: deny
         when: |
           vulnerabilities.exists(v,
-            v.isDirect &&
-            v.severity in ["CRITICAL", "HIGH"]
+            v.package.direct &&
+            v.advisory.severity.level in [severity.critical, severity.high]
           )
         reason: Direct dependency has high-severity vulnerability
 
@@ -440,8 +440,8 @@ policies:
       - action: warn
         when: |
           vulnerabilities.exists(v,
-            !v.isDirect &&
-            v.severity in ["CRITICAL", "HIGH"]
+            !v.package.direct &&
+            v.advisory.severity.level in [severity.critical, severity.high]
           )
         reason: Transitive dependency has vulnerability
 ```
@@ -563,7 +563,7 @@ policies:
         - GHSA-xxxx-yyyy  # Low impact in our usage, tracking upstream
     rules:
       - action: allow
-        when: vulnerability.id in accepted_vulns
+        when: vulnerability.advisory.id in accepted_vulns
         reason: Accepted risk - see security team documentation
 ```
 
@@ -756,15 +756,16 @@ Unlike tools with simple `--severity` flags, Deputy uses CEL policies for severi
 # policy/severity-gate.yaml
 policies:
   - name: severity-filter
+    entrypoints: [scan_vulnerability]
     rules:
       # Block critical and high severity
       - action: deny
-        when: vulnerability.severity in ["CRITICAL", "HIGH"]
+        when: vulnerability.advisory.severity.level in [severity.critical, severity.high]
         reason: High-severity vulnerability found
 
       # Warn on medium severity
       - action: warn
-        when: vulnerability.severity == "MEDIUM"
+        when: vulnerability.advisory.severity.level == severity.medium
         reason: Medium-severity vulnerability found
 ```
 
@@ -798,10 +799,10 @@ Common variables available in CEL expressions:
 | `pkg.version` | string | Package version |
 | `pkg.ecosystem` | string | go, npm, pypi, etc. |
 | `pkg.licenses` | list | SPDX license IDs |
-| `vulnerability.id` | string | CVE/GHSA ID |
-| `vulnerability.severity` | string | CRITICAL/HIGH/MEDIUM/LOW |
-| `vulnerability.isDirect` | bool | Direct vs transitive |
-| `vulnerability.fixedVersions` | list | Available fixes |
+| `vulnerability.advisory.id` | string | CVE/GHSA ID |
+| `vulnerability.advisory.severity.level` | enum | Use `severity.critical`, `severity.high`, etc. |
+| `vulnerability.package.direct` | bool | Direct vs transitive |
+| `vulnerability.advisory.fixed_versions` | list | Available fixes |
 | `vulnerabilities` | list | All vulns (for `.exists()`) |
 
 ### Custom Policy Examples
@@ -820,8 +821,8 @@ Common variables available in CEL expressions:
 # Medium severity with no fix - monitor upstream
 - action: warn
   when: |
-    vulnerability.severity == "MEDIUM" &&
-    size(vulnerability.fixedVersions) == 0
+    vulnerability.advisory.severity.level == severity.medium &&
+    size(vulnerability.advisory.fixed_versions) == 0
   reason: Medium severity with no fix - monitor upstream
 ```
 
@@ -837,7 +838,7 @@ policies:
       log4shell_cves: ["CVE-2021-44228", "CVE-2021-45046"]
     rules:
       - action: deny
-        when: vulnerabilities.exists(v, v.id in log4shell_cves)
+        when: vulnerabilities.exists(v, v.advisory.id in log4shell_cves)
         reason: Log4Shell vulnerability - must upgrade immediately
 
 # Typosquat detection using Levenshtein distance

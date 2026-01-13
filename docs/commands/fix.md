@@ -32,15 +32,15 @@ deputy fix [repo] [flags]
 
 ### Agent Flags
 
-| Flag | Default | Description |
-| --- | --- | --- |
-| `--agent` | | AI agent to use (e.g., `codex`) |
-| `--agent-model` | | Model identifier |
-| `--agent-sandbox` | `workspace-write` | Sandbox: `read-only`, `workspace-write`, `danger-full-access` |
-| `--agent-full-auto` | `false` | Enable full-auto mode (dangerous) |
-| `--agent-thread` | | Resume a previous thread ID |
-| `--agent-include-plan-tool` | `true` | Allow agent to use plan tool |
-| `--agent-skip-git-check` | `true` | Skip git repository checks |
+| Flag | Short | Default | Description |
+| --- | --- | --- | --- |
+| `--agent` | | | AI agent to use (e.g., `codex`) |
+| `--agent-model` | | | Model identifier |
+| `--agent-sandbox` | | `workspace-write` | Sandbox: `read-only`, `workspace-write`, `danger-full-access` |
+| `--agent-full-auto` | | `false` | Enable full-auto mode (dangerous) |
+| `--agent-thread` | | | Resume a previous thread ID |
+| `--agent-include-plan-tool` | | `true` | Allow agent to use plan tool |
+| `--agent-skip-git-check` | | `true` | Skip git repository checks |
 
 ## Workflow
 

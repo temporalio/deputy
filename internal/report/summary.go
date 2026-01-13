@@ -1,6 +1,7 @@
 package report
 
 import (
+	vulnerabilityv1 "github.com/picatz/deputy/gen/deputy/vulnerability/v1"
 	remediation "github.com/picatz/deputy/internal/remediation"
 	"github.com/picatz/deputy/internal/vulnerability"
 )
@@ -8,7 +9,7 @@ import (
 // Summary captures counts and recommended actions derived from vulnerabilities.
 type Summary struct {
 	HasVulnerabilities   bool
-	Stats                vulnerability.Stats
+	Stats                vulnerabilityv1.Stats
 	CriticalHighCount    int
 	FixAvailableCount    int
 	UnfixedCount         int
@@ -24,15 +25,15 @@ func BuildSummaryFromResult(result vulnerability.ConsolidatedResult) Summary {
 }
 
 // BuildSummary computes summary stats and remediation suggestions for vulnerabilities.
-func BuildSummary(cons []vulnerability.Consolidated, stats vulnerability.Stats) Summary {
+func BuildSummary(cons []vulnerability.Consolidated, stats vulnerabilityv1.Stats) Summary {
 	if len(cons) == 0 {
 		return Summary{HasVulnerabilities: false}
 	}
-	if stats.UniqueVulns == 0 {
+	if stats.Unique == 0 {
 		stats = vulnerability.StatsFromConsolidated(cons, len(cons))
 	}
-	high := stats.CriticalSev + stats.HighSeverity
-	unfixed := stats.UniqueVulns - stats.FixAvailable
+	high := stats.Critical + stats.High
+	unfixed := stats.Unique - stats.FixAvailable
 	if unfixed < 0 {
 		unfixed = 0
 	}
@@ -44,9 +45,9 @@ func BuildSummary(cons []vulnerability.Consolidated, stats vulnerability.Stats) 
 	return Summary{
 		HasVulnerabilities:   true,
 		Stats:                stats,
-		CriticalHighCount:    high,
-		FixAvailableCount:    stats.FixAvailable,
-		UnfixedCount:         unfixed,
+		CriticalHighCount:    int(high),
+		FixAvailableCount:    int(stats.FixAvailable),
+		UnfixedCount:         int(unfixed),
 		StdlibRecommendation: stdlibRec,
 		Commands:             commands,
 		CommandsHeader:       header,

@@ -127,14 +127,14 @@ func buildPathInfo(g *graph.Graph, cv *vulnerability.Consolidated) *PathInfo {
 		return nil
 	}
 
-	paths := g.PathsTo(vulnNode.PURL)
+	paths := g.PathsTo(vulnNode.Purl)
 	if len(paths) == 0 {
 		// Direct dependency case
 		if vulnNode.Direct {
 			return &PathInfo{
 				VulnID:             cv.PrimaryID,
 				VulnerablePackage:  cv.Package,
-				ShortestPath:       []PathNode{{Name: cv.Package, Version: cv.Version, PURL: vulnNode.PURL, Direct: true}},
+				ShortestPath:       []PathNode{{Name: cv.Package, Version: cv.Version, PURL: vulnNode.Purl, Direct: true}},
 				PathCount:          1,
 				DirectDependencies: []string{cv.Package},
 				Depth:              0,
@@ -156,7 +156,7 @@ func buildPathInfo(g *graph.Graph, cv *vulnerability.Consolidated) *PathInfo {
 		pathNodes[i] = PathNode{
 			Name:    n.Name,
 			Version: n.Version,
-			PURL:    n.PURL,
+			PURL:    n.Purl,
 			Direct:  n.Direct,
 		}
 	}
@@ -242,7 +242,7 @@ func findImpactedPackages(g *graph.Graph, pkg string) []string {
 	}
 
 	var impacted []string
-	for parent := range g.Parents(targetNode.PURL) {
+	for parent := range g.Parents(targetNode.Purl) {
 		impacted = append(impacted, parent.Name)
 	}
 

@@ -35,3 +35,13 @@ func ResetLicenseCachesForTest(t *testing.T) {
 	registryLicenseMemo = memory.NewTTLCache[string, []string](licenseMemoMaxItems, licenseMemoTTL)
 	remoteLicenseMemo = memory.NewTTLCache[string, []string](licenseMemoMaxItems, licenseMemoTTL)
 }
+
+// getGitHubHTTPClientForTest returns the current GitHub HTTP client for testing.
+func getGitHubHTTPClientForTest() *http.Client {
+	return githubHTTPClient
+}
+
+// setGitHubHTTPClientForTest sets the GitHub HTTP client for testing.
+func setGitHubHTTPClientForTest(client *http.Client) {
+	githubHTTPClient = client
+}

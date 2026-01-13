@@ -3,6 +3,7 @@ package cmd
 import (
 	"context"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -342,23 +343,27 @@ Use --clean to automatically remove stale entries.`,
 func generateBaselineWithExcludes(ctx context.Context, scanner secrets.Scanner, dir, reason string, excludes []string) (*secrets.Baseline, error) {
 	baseline := secrets.NewBaseline()
 
-	err := filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
+	root, err := os.OpenRoot(dir)
+	if err != nil {
+		return nil, err
+	}
+	defer root.Close()
+	rootFS := root.FS()
+
+	err = fs.WalkDir(rootFS, ".", func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
-		if info.IsDir() {
+		if d.IsDir() {
 			base := filepath.Base(path)
 			if base == ".git" || base == "node_modules" || base == "vendor" || base == ".venv" {
-				return filepath.SkipDir
+				return fs.SkipDir
 			}
 			return nil
 		}
 
 		// Get relative path
-		relPath, err := filepath.Rel(dir, path)
-		if err != nil {
-			relPath = path
-		}
+		relPath := filepath.FromSlash(path)
 
 		// Check excludes
 		for _, pattern := range excludes {
@@ -371,11 +376,11 @@ func generateBaselineWithExcludes(ctx context.Context, scanner secrets.Scanner, 
 		}
 
 		// Skip binary files
-		if isBinaryFileByExtension(path) {
+		if isBinaryFileByExtension(relPath) {
 			return nil
 		}
 
-		content, err := os.ReadFile(path)
+		content, err := fs.ReadFile(rootFS, path)
 		if err != nil {
 			return nil
 		}
@@ -400,14 +405,21 @@ func generateBaselineWithExcludes(ctx context.Context, scanner secrets.Scanner, 
 func scanDirectoryForBaseline(ctx context.Context, scanner secrets.Scanner, dir string) ([]secrets.Finding, error) {
 	var allFindings []secrets.Finding
 
-	err := filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
+	root, err := os.OpenRoot(dir)
+	if err != nil {
+		return nil, err
+	}
+	defer root.Close()
+	rootFS := root.FS()
+
+	err = fs.WalkDir(rootFS, ".", func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
-		if info.IsDir() {
+		if d.IsDir() {
 			base := filepath.Base(path)
 			if base == ".git" || base == "node_modules" || base == "vendor" || base == ".venv" {
-				return filepath.SkipDir
+				return fs.SkipDir
 			}
 			return nil
 		}
@@ -417,15 +429,12 @@ func scanDirectoryForBaseline(ctx context.Context, scanner secrets.Scanner, dir 
 			return nil
 		}
 
-		content, err := os.ReadFile(path)
+		content, err := fs.ReadFile(rootFS, path)
 		if err != nil {
 			return nil
 		}
 
-		relPath, err := filepath.Rel(dir, path)
-		if err != nil {
-			relPath = path
-		}
+		relPath := filepath.FromSlash(path)
 
 		findings, err := scanner.ScanFile(ctx, relPath, content)
 		if err != nil {

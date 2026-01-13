@@ -8,12 +8,13 @@ import (
 
 	"github.com/picatz/deputy/internal/ecosystem"
 	"github.com/picatz/deputy/internal/policy"
+	"google.golang.org/protobuf/proto"
 )
 
 // noopPolicyEvaluator is a test policy evaluator that allows all requests.
 type noopPolicyEvaluator struct{}
 
-func (noopPolicyEvaluator) Evaluate(ctx context.Context, entrypoint string, payload map[string]any) ([]policy.Action, error) {
+func (noopPolicyEvaluator) Evaluate(ctx context.Context, entrypoint string, input proto.Message) ([]policy.Action, error) {
 	return nil, nil
 }
 

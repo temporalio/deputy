@@ -1,11 +1,14 @@
 package cmd
 
 import (
-	"encoding/json"
 	"fmt"
 	"io"
 	"strings"
 
+	"google.golang.org/protobuf/encoding/protojson"
+
+	dependencyv1 "github.com/picatz/deputy/gen/deputy/dependency/v1"
+	sbomv1 "github.com/picatz/deputy/gen/deputy/sbom/v1"
 	sbomx "github.com/picatz/deputy/internal/sbom"
 	"github.com/picatz/deputy/internal/sbom/diff"
 	"github.com/spf13/cobra"
@@ -79,25 +82,100 @@ USAGE:
 	sbomCmd.AddCommand(cmd)
 }
 
-// JSONOutput is the JSON serialization format for diff results.
-type JSONOutput struct {
-	Added   []diff.Package `json:"added,omitempty"`
-	Removed []diff.Package `json:"removed,omitempty"`
-	Changed []diff.Change  `json:"changed,omitempty"`
-	Stats   diff.Stats     `json:"stats"`
+// outputDiffJSON outputs the diff as JSON using proto types.
+func outputDiffJSON(w io.Writer, d *diff.Diff) error {
+	resp := diffToProto(d)
+	opts := protojson.MarshalOptions{
+		Multiline:       true,
+		Indent:          "  ",
+		EmitUnpopulated: false,
+		UseProtoNames:   true,
+	}
+	data, err := opts.Marshal(resp)
+	if err != nil {
+		return fmt.Errorf("marshal proto to JSON: %w", err)
+	}
+	if _, err := w.Write(data); err != nil {
+		return err
+	}
+	_, err = w.Write([]byte("\n"))
+	return err
 }
 
-// outputDiffJSON outputs the diff as JSON.
-func outputDiffJSON(w io.Writer, d *diff.Diff) error {
-	output := JSONOutput{
-		Added:   d.Added,
-		Removed: d.Removed,
-		Changed: d.Changed,
-		Stats:   d.Stats(),
+// diffToProto converts a diff.Diff to sbomv1.DiffResponse.
+func diffToProto(d *diff.Diff) *sbomv1.DiffResponse {
+	resp := &sbomv1.DiffResponse{}
+
+	// Convert added packages
+	for _, pkg := range d.Added {
+		resp.Added = append(resp.Added, &dependencyv1.Package{
+			Purl:      pkg.PURL,
+			Name:      pkg.Name,
+			Version:   pkg.Version,
+			Ecosystem: pkg.Ecosystem,
+			Licenses:  pkg.Licenses,
+		})
 	}
-	enc := json.NewEncoder(w)
-	enc.SetIndent("", "  ")
-	return enc.Encode(output)
+
+	// Convert removed packages
+	for _, pkg := range d.Removed {
+		resp.Removed = append(resp.Removed, &dependencyv1.Package{
+			Purl:      pkg.PURL,
+			Name:      pkg.Name,
+			Version:   pkg.Version,
+			Ecosystem: pkg.Ecosystem,
+			Licenses:  pkg.Licenses,
+		})
+	}
+
+	// Convert changed packages
+	for _, c := range d.Changed {
+		change := &sbomv1.PackageChange{
+			Package: &dependencyv1.Package{
+				Purl: c.PURL,
+				Name: c.Name,
+			},
+			PreviousVersion: c.OldVersion,
+			NewVersion:      c.NewVersion,
+			Kind:            changeKindToProto(c.Kind),
+		}
+		if c.Licenses.HasChange() {
+			change.LicenseChange = &sbomv1.LicenseChange{
+				Added:   c.Licenses.Added,
+				Removed: c.Licenses.Removed,
+			}
+		}
+		resp.Modified = append(resp.Modified, change)
+	}
+
+	// Convert stats
+	stats := d.Stats()
+	resp.Stats = &sbomv1.DiffStats{
+		AddedCount:         int32(stats.Added),
+		RemovedCount:       int32(stats.Removed),
+		ModifiedCount:      int32(stats.Changed),
+		BreakingCount:      int32(stats.Breaking),
+		DowngradeCount:     int32(stats.Downgrades),
+		LicenseChangeCount: int32(stats.LicenseChanges),
+	}
+
+	return resp
+}
+
+// changeKindToProto converts diff.ChangeKind to sbomv1.ChangeKind.
+func changeKindToProto(kind diff.ChangeKind) sbomv1.ChangeKind {
+	switch kind {
+	case diff.ChangeKindMajor:
+		return sbomv1.ChangeKind_CHANGE_KIND_MAJOR
+	case diff.ChangeKindMinor:
+		return sbomv1.ChangeKind_CHANGE_KIND_MINOR
+	case diff.ChangeKindPatch:
+		return sbomv1.ChangeKind_CHANGE_KIND_PATCH
+	case diff.ChangeKindDowngrade:
+		return sbomv1.ChangeKind_CHANGE_KIND_DOWNGRADE
+	default:
+		return sbomv1.ChangeKind_CHANGE_KIND_UNSPECIFIED
+	}
 }
 
 // outputDiffText outputs the diff in human-readable text format.

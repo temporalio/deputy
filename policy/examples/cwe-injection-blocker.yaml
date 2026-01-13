@@ -1,6 +1,9 @@
 # Block vulnerabilities with injection-related CWEs (SQL, XSS, Command Injection, etc.)
 # CWEs are extracted from GHSA records in the OSV database.
 #
+# Structure:
+#   vulnerability.advisory.cwes - CWE identifiers
+#
 # Common injection CWEs:
 #   CWE-78:  OS Command Injection
 #   CWE-79:  Cross-site Scripting (XSS)
@@ -26,6 +29,7 @@ policies:
     rules:
       - action: deny
         when: |
-          has(vulnerability.cwes) &&
-          vulnerability.cwes.exists(c, c in injection_cwes)
+          has(vulnerability.advisory) &&
+          has(vulnerability.advisory.cwes) &&
+          vulnerability.advisory.cwes.exists(c, c in injection_cwes)
         reason: "Injection vulnerability detected"

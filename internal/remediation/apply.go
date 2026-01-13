@@ -28,7 +28,10 @@ func ApplyDeputyCommand(repoDir, cmd string) error {
 		if len(parts) < 4 {
 			return fmt.Errorf("invalid action update command: expected 4 parts, got %d", len(parts))
 		}
-		file := filepath.Join(repoDir, parts[1])
+		file, err := safeJoinPath(repoDir, parts[1])
+		if err != nil {
+			return fmt.Errorf("invalid file path: %w", err)
+		}
 		actionRef := parts[2]
 		newVersion := parts[3]
 		return applyActionUpdate(file, actionRef, newVersion)
@@ -38,7 +41,10 @@ func ApplyDeputyCommand(repoDir, cmd string) error {
 		if len(parts) < 4 {
 			return fmt.Errorf("invalid dockerfile update command: expected 4 parts, got %d", len(parts))
 		}
-		file := filepath.Join(repoDir, parts[1])
+		file, err := safeJoinPath(repoDir, parts[1])
+		if err != nil {
+			return fmt.Errorf("invalid file path: %w", err)
+		}
 		image := parts[2]
 		newVersion := parts[3]
 		return applyDockerfileUpdate(file, image, newVersion)
@@ -46,6 +52,63 @@ func ApplyDeputyCommand(repoDir, cmd string) error {
 	default:
 		return fmt.Errorf("unknown deputy command: %s", parts[0])
 	}
+}
+
+// safeJoinPath joins a base directory with a relative path, ensuring the result
+// stays within the base directory. This prevents path traversal attacks.
+//
+// Note: This function uses filepath.EvalSymlinks to resolve symlinks and prevent
+// symlink-based escapes. This adds a filesystem stat call but is necessary for
+// security when the base directory exists.
+func safeJoinPath(baseDir, relPath string) (string, error) {
+	// Reject obviously malicious paths early
+	if strings.Contains(relPath, "\x00") {
+		return "", fmt.Errorf("path contains null byte")
+	}
+
+	// Clean the base path
+	absBase, err := filepath.Abs(baseDir)
+	if err != nil {
+		return "", fmt.Errorf("invalid base directory: %w", err)
+	}
+
+	// Resolve symlinks in base directory if it exists
+	if realBase, err := filepath.EvalSymlinks(absBase); err == nil {
+		absBase = realBase
+	}
+
+	// Join and clean the result (lexical only, no symlink resolution yet)
+	joined := filepath.Join(absBase, relPath)
+
+	// Check lexically first - catch obvious traversal without filesystem access
+	rel, err := filepath.Rel(absBase, joined)
+	if err != nil || strings.HasPrefix(rel, "..") || rel == ".." {
+		return "", fmt.Errorf("path traversal detected: %s escapes base directory", relPath)
+	}
+
+	// Now resolve symlinks in the full path to catch symlink-based escapes
+	// We need to handle the case where the file doesn't exist yet
+	realJoined := joined
+	if resolved, err := filepath.EvalSymlinks(joined); err == nil {
+		realJoined = resolved
+	} else if !os.IsNotExist(err) {
+		// If error is not "file doesn't exist", it's a real problem
+		return "", fmt.Errorf("cannot resolve path: %w", err)
+	} else {
+		// File doesn't exist - check parent directory for symlink escapes
+		parent := filepath.Dir(joined)
+		if realParent, err := filepath.EvalSymlinks(parent); err == nil {
+			realJoined = filepath.Join(realParent, filepath.Base(joined))
+		}
+	}
+
+	// Final containment check after symlink resolution
+	finalRel, err := filepath.Rel(absBase, realJoined)
+	if err != nil || strings.HasPrefix(finalRel, "..") || finalRel == ".." {
+		return "", fmt.Errorf("path escapes base directory after symlink resolution")
+	}
+
+	return realJoined, nil
 }
 
 // applyActionUpdate updates a GitHub Action reference in a workflow file.

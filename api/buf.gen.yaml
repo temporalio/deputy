@@ -1,0 +1,27 @@
+version: v2
+managed:
+  enabled: true
+  override:
+    - file_option: go_package_prefix
+      value: github.com/picatz/deputy/gen
+  disable:
+    # Don't modify go_package for protovalidate - required for compilation
+    - file_option: go_package
+      module: buf.build/bufbuild/protovalidate
+plugins:
+  # Standard protobuf Go code generation
+  - remote: buf.build/protocolbuffers/go
+    out: ../gen
+    opt:
+      - paths=source_relative
+  # ConnectRPC for service stubs
+  - remote: buf.build/connectrpc/go
+    out: ../gen
+    opt:
+      - paths=source_relative
+  # PluginRPC for plugin service stubs (ExtractorService)
+  - local: protoc-gen-pluginrpc-go
+    out: ../gen
+    opt:
+      - paths=source_relative
+      - streaming=ignore

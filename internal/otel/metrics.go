@@ -376,6 +376,8 @@ var (
 
 	// Cache type attributes - using deputy.cache.type for consistency with trace attributes
 	AttrCacheTypeOSV      = attribute.String("deputy.cache.type", "osv")
+	AttrCacheTypeKEV      = attribute.String("deputy.cache.type", "kev")
+	AttrCacheTypeEPSS     = attribute.String("deputy.cache.type", "epss")
 	AttrCacheTypeLicense  = attribute.String("deputy.cache.type", "license")
 	AttrCacheTypeDisk     = attribute.String("deputy.cache.type", "disk")
 	AttrCacheTypeImage    = attribute.String("deputy.cache.type", "image_scan")

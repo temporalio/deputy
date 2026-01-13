@@ -14,9 +14,11 @@ import (
 
 // CollectGoDirectModulesFromWorkspace scans the provided workspace for go.mod files
 // and extracts the set of direct dependencies. It skips vendor directories and
-// the .git folder. The "stdlib" pseudo-dependency is always included.
+// the .git folder. The Go stdlib pseudo-dependency is always included under both
+// "stdlib" (for OSV vulnerability matching) and "go" (for PURL matching, as OSV-SCALIBR
+// uses pkg:golang/go@version for the stdlib package).
 func CollectGoDirectModulesFromWorkspace(ws workspace.FS) map[string]bool {
-	deps := map[string]bool{"stdlib": true}
+	deps := map[string]bool{"stdlib": true, "go": true}
 	if ws == nil {
 		return deps
 	}
@@ -49,9 +51,10 @@ func CollectGoDirectModulesFromWorkspace(ws workspace.FS) map[string]bool {
 
 // CollectGoDirectModulesFromCommit extracts direct dependencies from go.mod files
 // present in a specific Git commit. It traverses the file tree of the commit,
-// parsing any go.mod files found.
+// parsing any go.mod files found. The Go stdlib pseudo-dependency is always included
+// under both "stdlib" and "go" (see CollectGoDirectModulesFromWorkspace for details).
 func CollectGoDirectModulesFromCommit(repo *git.Repository, hash plumbing.Hash) (map[string]bool, error) {
-	deps := map[string]bool{"stdlib": true}
+	deps := map[string]bool{"stdlib": true, "go": true}
 	if repo == nil {
 		return deps, nil
 	}
@@ -83,11 +86,22 @@ func CollectGoDirectModulesFromCommit(repo *git.Repository, hash plumbing.Hash) 
 	return deps, nil
 }
 
-// mergeDirectDependencies adds all direct dependencies from src to dst.
+// mergeDirectDependencies merges dependency information from src to dst.
+// Direct dependencies (true) always override indirect (false).
+// Indirect dependencies (false) are only added if the module isn't already known.
+// This ensures proper handling of Go submodules: if one go.mod has "foo" as
+// direct and another has "foo/loader" as indirect, both are tracked correctly.
 func mergeDirectDependencies(dst, src map[string]bool) {
-	for mod, direct := range src {
-		if direct {
+	for mod, isDirect := range src {
+		if isDirect {
+			// Direct always wins
 			dst[mod] = true
+		} else {
+			// Only add indirect if not already known
+			// (don't override a direct with an indirect)
+			if _, exists := dst[mod]; !exists {
+				dst[mod] = false
+			}
 		}
 	}
 }

@@ -48,12 +48,16 @@
 //
 // # Server Options
 //
-// The server supports dependency injection for testing:
+// The server uses the services layer for all operations, ensuring consistency
+// with CLI, API, and plugins. Configure with WithServices for best practice:
 //
-//	server := mcp.NewServer(
-//	    mcp.WithOSVClient(customClient),
-//	    mcp.WithScanner(customScanner),
-//	)
+//	svc, _ := services.New()
+//	server := mcp.NewServer(mcp.WithServices(svc))
+//
+// For testing, use WithClients with mock service clients:
+//
+//	mockClients := &services.Clients{...}
+//	server := mcp.NewServer(mcp.WithClients(mockClients))
 //
 // # Integration with AI Tools
 //

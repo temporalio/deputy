@@ -2,6 +2,10 @@
 
 Scan for vulnerabilities and upload results to GitHub Security tab via SARIF.
 
+**Works with or without GitHub Advanced Security (GHAS):**
+- With GHAS: Uploads SARIF to GitHub Security tab for rich integration
+- Without GHAS: Automatically posts scan summary as PR comment
+
 ## Usage
 
 ```yaml
@@ -86,13 +90,16 @@ jobs:
 
 ## Permissions
 
-Required for SARIF upload:
+For full functionality (SARIF upload with PR comment fallback):
 
 ```yaml
 permissions:
-  security-events: write
+  security-events: write  # For SARIF upload to GitHub Security tab
   contents: read
+  pull-requests: write    # For PR comment fallback when GHAS unavailable
 ```
+
+If you only have GHAS (or only want PR comments), you can omit the unused permission.
 
 ## See Also
 

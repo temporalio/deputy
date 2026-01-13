@@ -79,23 +79,25 @@ var (
 	AttrTargetRemote = attribute.Key("deputy.target.remote")
 
 	// Scan attributes
-	AttrEcosystem       = attribute.Key("deputy.ecosystem")
-	AttrPackageCount    = attribute.Key("deputy.package.count")
-	AttrVulnCount       = attribute.Key("deputy.vuln.count")
-	AttrVulnCritical    = attribute.Key("deputy.vuln.critical")
-	AttrVulnHigh        = attribute.Key("deputy.vuln.high")
-	AttrVulnMedium      = attribute.Key("deputy.vuln.medium")
-	AttrVulnLow         = attribute.Key("deputy.vuln.low")
+	AttrEcosystem               = attribute.Key("deputy.ecosystem")
+	AttrPackageCount            = attribute.Key("deputy.package.count")
+	AttrVulnerabilityCount      = attribute.Key("deputy.vulnerability.count")
+	AttrVulnerabilityCritical   = attribute.Key("deputy.vulnerability.critical")
+	AttrVulnerabilityHigh       = attribute.Key("deputy.vulnerability.high")
+	AttrVulnerabilityMedium     = attribute.Key("deputy.vulnerability.medium")
+	AttrVulnerabilityLow        = attribute.Key("deputy.vulnerability.low")
 	AttrDirectDepsOnly  = attribute.Key("deputy.direct_deps_only")
 	AttrPolicyEvaluated = attribute.Key("deputy.policy.evaluated")
 	AttrPolicyPassed    = attribute.Key("deputy.policy.passed")
 
 	// OSV attributes
-	AttrOSVBatchSize   = attribute.Key("deputy.osv.batch_size")
-	AttrOSVCacheHit    = attribute.Key("deputy.osv.cache_hit")
-	AttrOSVVulnID      = attribute.Key("deputy.osv.vuln_id")
-	AttrOSVQueryType   = attribute.Key("deputy.osv.query_type")
-	AttrOSVResponseLen = attribute.Key("deputy.osv.response_len")
+	AttrOSVBatchSize           = attribute.Key("deputy.osv.batch_size")
+	AttrOSVCacheHit            = attribute.Key("deputy.osv.cache_hit")
+	AttrOSVVulnerabilityID     = attribute.Key("deputy.osv.vulnerability_id")
+	AttrOSVQueryType           = attribute.Key("deputy.osv.query_type")
+	AttrOSVResponseLen         = attribute.Key("deputy.osv.response_len")
+	AttrOSVDroppedNoVersion    = attribute.Key("deputy.osv.dropped_no_version")
+	AttrOSVDroppedNoIdentifier = attribute.Key("deputy.osv.dropped_no_identifier")
 
 	// Policy attributes
 	AttrPolicyName       = attribute.Key("deputy.policy.name")
@@ -122,19 +124,19 @@ var (
 	AttrCacheKey  = attribute.Key("deputy.cache.key")
 
 	// MCP attributes
-	AttrMCPTool           = attribute.Key("deputy.mcp.tool")
-	AttrMCPVulnID         = attribute.Key("deputy.mcp.vuln_id")
-	AttrMCPVulnCount      = attribute.Key("deputy.mcp.vuln_count")
-	AttrMCPPackageCount   = attribute.Key("deputy.mcp.package_count")
-	AttrMCPImage          = attribute.Key("deputy.mcp.image")
-	AttrMCPBaseRef        = attribute.Key("deputy.mcp.base_ref")
-	AttrMCPTargetRef      = attribute.Key("deputy.mcp.target_ref")
-	AttrMCPChangeCount    = attribute.Key("deputy.mcp.change_count")
-	AttrMCPTriageCount    = attribute.Key("deputy.mcp.triage_count")
-	AttrMCPGraphPackage   = attribute.Key("deputy.mcp.graph_package")
-	AttrMCPGraphFound     = attribute.Key("deputy.mcp.graph_found")
-	AttrMCPGraphDirect    = attribute.Key("deputy.mcp.graph_direct")
-	AttrMCPGraphPathCount = attribute.Key("deputy.mcp.graph_path_count")
+	AttrMCPTool               = attribute.Key("deputy.mcp.tool")
+	AttrMCPVulnerabilityID    = attribute.Key("deputy.mcp.vulnerability_id")
+	AttrMCPVulnerabilityCount = attribute.Key("deputy.mcp.vulnerability_count")
+	AttrMCPPackageCount       = attribute.Key("deputy.mcp.package_count")
+	AttrMCPImage              = attribute.Key("deputy.mcp.image")
+	AttrMCPBaseRef            = attribute.Key("deputy.mcp.base_ref")
+	AttrMCPTargetRef          = attribute.Key("deputy.mcp.target_ref")
+	AttrMCPChangeCount        = attribute.Key("deputy.mcp.change_count")
+	AttrMCPTriageCount        = attribute.Key("deputy.mcp.triage_count")
+	AttrMCPGraphPackage       = attribute.Key("deputy.mcp.graph_package")
+	AttrMCPGraphFound         = attribute.Key("deputy.mcp.graph_found")
+	AttrMCPGraphDirect        = attribute.Key("deputy.mcp.graph_direct")
+	AttrMCPGraphPathCount     = attribute.Key("deputy.mcp.graph_path_count")
 )
 
 // WithCommandAttrs returns span start options for command spans.
@@ -186,11 +188,11 @@ func WithProxyAttrs(listener, ecosystem, pkg, version string) trace.SpanStartOpt
 func RecordScanResults(span trace.Span, pkgCount, vulnCount, critical, high, medium, low int) {
 	span.SetAttributes(
 		AttrPackageCount.Int(pkgCount),
-		AttrVulnCount.Int(vulnCount),
-		AttrVulnCritical.Int(critical),
-		AttrVulnHigh.Int(high),
-		AttrVulnMedium.Int(medium),
-		AttrVulnLow.Int(low),
+		AttrVulnerabilityCount.Int(vulnCount),
+		AttrVulnerabilityCritical.Int(critical),
+		AttrVulnerabilityHigh.Int(high),
+		AttrVulnerabilityMedium.Int(medium),
+		AttrVulnerabilityLow.Int(low),
 	)
 }
 

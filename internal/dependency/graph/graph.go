@@ -1,3 +1,8 @@
+// Package graph provides dependency graph operations.
+//
+// The graph package uses Protocol Buffer types from graphv1 as its internal
+// representation, enabling seamless serialization and RPC without conversion.
+// The Graph struct provides utility methods for traversal, filtering, and analysis.
 package graph
 
 import (
@@ -8,21 +13,56 @@ import (
 	"strings"
 
 	"github.com/google/osv-scalibr/extractor"
+	graphv1 "github.com/picatz/deputy/gen/deputy/graph/v1"
+	vulnerabilityv1 "github.com/picatz/deputy/gen/deputy/vulnerability/v1"
+	"github.com/picatz/deputy/internal/compare"
 	"github.com/picatz/deputy/internal/dependency"
+	"github.com/picatz/deputy/internal/purlx"
 	"github.com/picatz/deputy/internal/vulnerability"
+)
+
+// Re-export proto types for convenience.
+// These allow consumers to use graph.Node instead of graphv1.Node.
+type (
+	Node               = graphv1.Node
+	Edge               = graphv1.Edge
+	VulnerabilityCount = graphv1.VulnerabilityCount
+	Scope              = graphv1.Scope
+)
+
+// Scope constants re-exported from proto for convenience.
+const (
+	ScopeUnspecified = graphv1.Scope_SCOPE_UNSPECIFIED
+	ScopeRuntime     = graphv1.Scope_SCOPE_RUNTIME
+	ScopeDev         = graphv1.Scope_SCOPE_DEV
+	ScopeOptional    = graphv1.Scope_SCOPE_OPTIONAL
+	ScopeBuild       = graphv1.Scope_SCOPE_BUILD
+	ScopeTest        = graphv1.Scope_SCOPE_TEST
 )
 
 // Depth constants for node positioning in the dependency graph.
 const (
 	// DepthSyntheticRoot marks synthetic root nodes (e.g., the main module itself).
 	// These nodes represent the project being scanned rather than actual dependencies.
-	DepthSyntheticRoot = -1
+	DepthSyntheticRoot int32 = -1
 
 	// DepthDisconnected marks nodes with no path from any root.
 	// This typically means the node was discovered (e.g., in go.sum or a binary)
 	// but no dependency path could be resolved to it.
-	DepthDisconnected = 999
+	DepthDisconnected int32 = 999
 )
+
+// ecosystemFromPURLType returns an OSV ecosystem name for PURL types that
+// OSV-SCALIBR doesn't handle (returns empty string). This fills gaps for
+// ecosystems like GitHub Actions that Deputy supports but SCALIBR doesn't.
+func ecosystemFromPURLType(purlType string) string {
+	switch purlType {
+	case purlx.TypeGitHubActions:
+		return "GitHub Actions"
+	default:
+		return ""
+	}
+}
 
 // FileReader provides access to files for edge resolution.
 // This abstraction allows resolvers to work with workspaces, git commits, or other sources.
@@ -53,6 +93,7 @@ type EdgeResolver interface {
 }
 
 // Graph represents a dependency graph with nodes (packages) and edges (dependencies).
+// It uses proto types internally for seamless serialization.
 type Graph struct {
 	nodes map[string]*Node // keyed by PURL
 	edges []*Edge
@@ -61,93 +102,11 @@ type Graph struct {
 	// Adjacency caches for O(1) lookups (built lazily on first access)
 	childrenIndex map[string][]string // PURL -> list of child PURLs
 	parentsIndex  map[string][]string // PURL -> list of parent PURLs
+
+	// packages stores the original extractor packages for nodes that have them.
+	// This is not serialized but allows access to the underlying package data.
+	packages map[string]*extractor.Package
 }
-
-// Node represents a package in the dependency graph.
-type Node struct {
-	// PURL is the Package URL identifier for this package.
-	PURL string `json:"purl"`
-
-	// Name is the package name (extracted from PURL or package metadata).
-	Name string `json:"name"`
-
-	// Version is the package version.
-	Version string `json:"version"`
-
-	// Ecosystem is the package ecosystem (e.g., "npm", "go", "pypi").
-	Ecosystem string `json:"ecosystem"`
-
-	// Package is the underlying extractor package, if available.
-	Package *extractor.Package `json:"-"`
-
-	// Direct indicates whether this is a direct dependency.
-	Direct bool `json:"direct"`
-
-	// Depth is the shortest path length from any root node.
-	// Values:
-	//   - 0: Direct dependency (root node)
-	//   - 1+: Transitive dependency (N hops from nearest root)
-	//   - [DepthSyntheticRoot] (-1): Synthetic root node (e.g., the main module itself)
-	//   - [DepthDisconnected] (999): Disconnected node (no path from any root)
-	//
-	// Note: Depth is computed by [Graph.UpdateDepths]. Before that call,
-	// non-direct nodes default to depth 1.
-	Depth int `json:"depth"`
-
-	// Locations lists file paths where this dependency was declared.
-	Locations []string `json:"locations,omitempty"`
-
-	// Vulns contains vulnerability findings for this package.
-	Vulns []vulnerability.Finding `json:"vulns,omitempty"`
-
-	// VulnCount summarizes vulnerability counts by severity.
-	VulnCount VulnCount `json:"vuln_count"`
-}
-
-// VulnCount summarizes vulnerability counts by severity level.
-type VulnCount struct {
-	Critical int `json:"critical"`
-	High     int `json:"high"`
-	Medium   int `json:"medium"`
-	Low      int `json:"low"`
-	Unknown  int `json:"unknown"`
-	Total    int `json:"total"`
-}
-
-// Edge represents a dependency relationship between two packages.
-type Edge struct {
-	// From is the PURL of the dependent package (parent).
-	From string `json:"from"`
-
-	// To is the PURL of the dependency (child).
-	To string `json:"to"`
-
-	// Constraint is the version constraint, if known (e.g., "^1.0.0", ">=2.0").
-	Constraint string `json:"constraint,omitempty"`
-
-	// Scope indicates the dependency scope.
-	Scope Scope `json:"scope,omitempty"`
-}
-
-// Scope indicates the context in which a dependency is used.
-type Scope string
-
-const (
-	// ScopeRuntime is for dependencies needed at runtime.
-	ScopeRuntime Scope = "runtime"
-
-	// ScopeDev is for development-only dependencies.
-	ScopeDev Scope = "dev"
-
-	// ScopeOptional is for optional dependencies.
-	ScopeOptional Scope = "optional"
-
-	// ScopeBuild is for build-time dependencies.
-	ScopeBuild Scope = "build"
-
-	// ScopeTest is for test dependencies.
-	ScopeTest Scope = "test"
-)
 
 // Path represents a sequence of nodes from root to target.
 type Path []*Node
@@ -157,9 +116,9 @@ func (p Path) String() string {
 	if len(p) == 0 {
 		return ""
 	}
-	result := p[0].Name
+	result := p[0].GetName()
 	for _, n := range p[1:] {
-		result += " -> " + n.Name
+		result += " -> " + n.GetName()
 	}
 	return result
 }
@@ -168,7 +127,7 @@ func (p Path) String() string {
 func (p Path) PURLs() []string {
 	purls := make([]string, len(p))
 	for i, n := range p {
-		purls[i] = n.PURL
+		purls[i] = n.GetPurl()
 	}
 	return purls
 }
@@ -184,22 +143,84 @@ func (p Path) Len() int {
 // Contains reports whether the path contains a node with the given PURL.
 func (p Path) Contains(purl string) bool {
 	for _, n := range p {
-		if n.PURL == purl {
+		if n.GetPurl() == purl {
 			return true
 		}
 	}
 	return false
 }
 
+// ToProto converts a Path to a graphv1.DependencyPath proto message.
+func (p Path) ToProto() *graphv1.DependencyPath {
+	if len(p) == 0 {
+		return nil
+	}
+	nodes := make([]*graphv1.PathNode, len(p))
+	for i, n := range p {
+		nodes[i] = &graphv1.PathNode{
+			Purl:    n.GetPurl(),
+			Name:    n.GetName(),
+			Version: n.GetVersion(),
+		}
+	}
+	return &graphv1.DependencyPath{
+		Nodes:  nodes,
+		Length: int32(p.Len()),
+	}
+}
+
+// PathsToProto converts multiple paths to proto DependencyPath messages.
+func PathsToProto(paths []Path) []*graphv1.DependencyPath {
+	if len(paths) == 0 {
+		return nil
+	}
+	out := make([]*graphv1.DependencyPath, len(paths))
+	for i, p := range paths {
+		out[i] = p.ToProto()
+	}
+	return out
+}
+
+// PathFromProto converts a proto DependencyPath to a Path.
+func PathFromProto(p *graphv1.DependencyPath) Path {
+	if p == nil || len(p.Nodes) == 0 {
+		return nil
+	}
+	path := make(Path, len(p.Nodes))
+	for i, n := range p.Nodes {
+		path[i] = &Node{
+			Purl:    n.Purl,
+			Name:    n.Name,
+			Version: n.Version,
+		}
+	}
+	return path
+}
+
+// PathsFromProto converts proto DependencyPaths to a Path slice.
+func PathsFromProto(paths []*graphv1.DependencyPath) []Path {
+	if len(paths) == 0 {
+		return nil
+	}
+	out := make([]Path, len(paths))
+	for i, p := range paths {
+		out[i] = PathFromProto(p)
+	}
+	return out
+}
+
 // New creates an empty graph.
 func New() *Graph {
 	return &Graph{
-		nodes: make(map[string]*Node),
+		nodes:    make(map[string]*Node),
+		packages: make(map[string]*extractor.Package),
 	}
 }
 
 // FromInventory constructs a graph from inventory extraction results.
-// The direct map indicates which PURLs are direct dependencies.
+// The direct map indicates which packages are direct dependencies. For Go packages,
+// the map keys are module roots (e.g., "github.com/google/osv-scalibr"). For other
+// ecosystems, keys are PURL strings.
 func FromInventory(pkgs []*extractor.Package, direct map[string]bool) *Graph {
 	g := New()
 
@@ -215,27 +236,66 @@ func FromInventory(pkgs []*extractor.Package, direct map[string]bool) *Graph {
 
 		isDirect := false
 		if direct != nil {
-			isDirect = direct[purl]
+			// For Go packages, check both exact module path and module root.
+			// The direct map may contain:
+			//   - Exact module paths with true (direct) or false (indirect)
+			//   - Module roots with true (for subpackage matching)
+			//
+			// We first check the exact module path, then fall back to module root.
+			// This handles Go submodules correctly: if go.mod has "foo" as direct
+			// but "foo/loader" as indirect, "foo/loader" should be indirect.
+			if purlObj.Type == "golang" {
+				// Reconstruct module path from PURL namespace + name
+				modulePath := pkg.Name
+				if modulePath == "" {
+					if purlObj.Namespace != "" {
+						modulePath = purlObj.Namespace + "/" + purlObj.Name
+					} else {
+						modulePath = purlObj.Name
+					}
+				}
+				// First check exact module path (handles submodules correctly)
+				if val, exists := direct[modulePath]; exists {
+					isDirect = val
+				} else {
+					// Fall back to module root for subpackage import paths
+					moduleRoot := compare.GetModuleRoot(modulePath)
+					isDirect = direct[moduleRoot]
+				}
+			} else {
+				// For non-Go ecosystems, use PURL string as key
+				isDirect = direct[purl]
+			}
+		}
+
+		var depth int32 = 1
+		if isDirect {
+			depth = 0
+		}
+
+		// Get ecosystem from SCALIBR, falling back to custom mapping for
+		// PURL types SCALIBR doesn't recognize (e.g., GitHub Actions)
+		ecosystem := pkg.Ecosystem().String()
+		if ecosystem == "" {
+			ecosystem = ecosystemFromPURLType(purlObj.Type)
 		}
 
 		node := &Node{
-			PURL:      purl,
+			Purl:      purl,
 			Name:      pkg.Name,
 			Version:   pkg.Version,
-			Ecosystem: pkg.Ecosystem(),
-			Package:   pkg,
+			Ecosystem: ecosystem,
 			Direct:    isDirect,
+			Depth:     depth,
 			Locations: pkg.Locations,
 		}
 
-		if isDirect {
-			node.Depth = 0
-			g.roots = append(g.roots, purl)
-		} else {
-			node.Depth = 1 // Default; would need resolver data for accurate depth
-		}
-
 		g.nodes[purl] = node
+		g.packages[purl] = pkg
+
+		if isDirect {
+			g.roots = append(g.roots, purl)
+		}
 	}
 
 	return g
@@ -243,24 +303,24 @@ func FromInventory(pkgs []*extractor.Package, direct map[string]bool) *Graph {
 
 // AddNode adds a node to the graph. If a node with the same PURL exists, it is replaced.
 func (g *Graph) AddNode(n *Node) {
-	if n == nil || n.PURL == "" {
+	if n == nil || n.GetPurl() == "" {
 		return
 	}
-	g.nodes[n.PURL] = n
-	if n.Direct {
+	g.nodes[n.GetPurl()] = n
+	if n.GetDirect() {
 		// Check if already in roots
 		for _, r := range g.roots {
-			if r == n.PURL {
+			if r == n.GetPurl() {
 				return
 			}
 		}
-		g.roots = append(g.roots, n.PURL)
+		g.roots = append(g.roots, n.GetPurl())
 	}
 }
 
 // AddEdge adds an edge to the graph.
 func (g *Graph) AddEdge(e *Edge) {
-	if e == nil || e.From == "" || e.To == "" {
+	if e == nil || e.GetFrom() == "" || e.GetTo() == "" {
 		return
 	}
 	g.edges = append(g.edges, e)
@@ -280,14 +340,19 @@ func (g *Graph) buildAdjacencyIndices() {
 	g.parentsIndex = make(map[string][]string)
 
 	for _, e := range g.edges {
-		g.childrenIndex[e.From] = append(g.childrenIndex[e.From], e.To)
-		g.parentsIndex[e.To] = append(g.parentsIndex[e.To], e.From)
+		g.childrenIndex[e.GetFrom()] = append(g.childrenIndex[e.GetFrom()], e.GetTo())
+		g.parentsIndex[e.GetTo()] = append(g.parentsIndex[e.GetTo()], e.GetFrom())
 	}
 }
 
 // Node returns the node with the given PURL, or nil if not found.
 func (g *Graph) Node(purl string) *Node {
 	return g.nodes[purl]
+}
+
+// Package returns the underlying extractor package for a node, if available.
+func (g *Graph) Package(purl string) *extractor.Package {
+	return g.packages[purl]
 }
 
 // Nodes returns an iterator over all nodes in the graph.
@@ -345,7 +410,7 @@ func (g *Graph) Roots() iter.Seq[*Node] {
 func (g *Graph) Direct() iter.Seq[*Node] {
 	return func(yield func(*Node) bool) {
 		for _, n := range g.nodes {
-			if n.Direct {
+			if n.GetDirect() {
 				if !yield(n) {
 					return
 				}
@@ -358,7 +423,7 @@ func (g *Graph) Direct() iter.Seq[*Node] {
 func (g *Graph) Transitive() iter.Seq[*Node] {
 	return func(yield func(*Node) bool) {
 		for _, n := range g.nodes {
-			if !n.Direct {
+			if !n.GetDirect() {
 				if !yield(n) {
 					return
 				}
@@ -404,14 +469,14 @@ func (g *Graph) Descendants(purl string) iter.Seq[*Node] {
 		var visit func(string) bool
 		visit = func(p string) bool {
 			for child := range g.Children(p) {
-				if visited[child.PURL] {
+				if visited[child.GetPurl()] {
 					continue
 				}
-				visited[child.PURL] = true
+				visited[child.GetPurl()] = true
 				if !yield(child) {
 					return false
 				}
-				if !visit(child.PURL) {
+				if !visit(child.GetPurl()) {
 					return false
 				}
 			}
@@ -428,14 +493,14 @@ func (g *Graph) Ancestors(purl string) iter.Seq[*Node] {
 		var visit func(string) bool
 		visit = func(p string) bool {
 			for parent := range g.Parents(p) {
-				if visited[parent.PURL] {
+				if visited[parent.GetPurl()] {
 					continue
 				}
-				visited[parent.PURL] = true
+				visited[parent.GetPurl()] = true
 				if !yield(parent) {
 					return false
 				}
-				if !visit(parent.PURL) {
+				if !visit(parent.GetPurl()) {
 					return false
 				}
 			}
@@ -471,7 +536,7 @@ func (g *Graph) PathsTo(target string) []Path {
 			continue
 		}
 
-		if node.Direct {
+		if node.GetDirect() {
 			// Found a path to a root - reverse it
 			reversed := make(Path, len(current.path))
 			for i, n := range current.path {
@@ -491,18 +556,18 @@ func (g *Graph) PathsTo(target string) []Path {
 		// Continue searching up to parents
 		for parent := range g.Parents(current.purl) {
 			// Avoid cycles
-			if pathContains(current.path, parent.PURL) {
+			if pathContains(current.path, parent.GetPurl()) {
 				continue
 			}
 			newPath := make([]*Node, len(current.path)+1)
 			copy(newPath, current.path)
 			newPath[len(current.path)] = parent
-			queue = append(queue, pathState{purl: parent.PURL, path: newPath})
+			queue = append(queue, pathState{purl: parent.GetPurl(), path: newPath})
 		}
 	}
 
 	// If no edges exist, check if target is a direct dependency
-	if len(paths) == 0 && g.nodes[target] != nil && g.nodes[target].Direct {
+	if len(paths) == 0 && g.nodes[target] != nil && g.nodes[target].GetDirect() {
 		paths = append(paths, Path{g.nodes[target]})
 	}
 
@@ -511,7 +576,7 @@ func (g *Graph) PathsTo(target string) []Path {
 
 func pathContains(path []*Node, purl string) bool {
 	for _, n := range path {
-		if n.PURL == purl {
+		if n.GetPurl() == purl {
 			return true
 		}
 	}
@@ -544,10 +609,10 @@ func (g *Graph) PathsBetween(source, target string) []Path {
 
 		for child := range g.Children(current) {
 			// Avoid cycles
-			if pathContains(newPath, child.PURL) {
+			if pathContains(newPath, child.GetPurl()) {
 				continue
 			}
-			dfs(child.PURL, newPath)
+			dfs(child.GetPurl(), newPath)
 		}
 	}
 
@@ -555,51 +620,76 @@ func (g *Graph) PathsBetween(source, target string) []Path {
 	return paths
 }
 
-// Stats returns statistics about the graph.
-func (g *Graph) Stats() Stats {
-	stats := Stats{
-		TotalNodes: len(g.nodes),
-		Ecosystems: make(map[string]int),
+// Stats returns statistics about the graph as a proto message.
+func (g *Graph) Stats() *graphv1.GraphStats {
+	stats := &graphv1.GraphStats{
+		TotalNodes: int32(len(g.nodes)),
+		Ecosystems: make(map[string]int32),
 	}
 
+	// Track import status counts (only populated in extended mode)
+	var hasImportStatus bool
+	importCounts := &graphv1.ImportStatusCounts{}
+
 	for _, n := range g.nodes {
-		if n.Direct {
+		depth := n.GetDepth()
+
+		if n.GetDirect() {
 			stats.DirectNodes++
 		} else {
 			stats.TransitiveNodes++
 		}
 
-		if n.Depth > stats.MaxDepth {
-			stats.MaxDepth = n.Depth
+		// Track max depth across all nodes (including disconnected)
+		if depth > stats.MaxDepth {
+			stats.MaxDepth = depth
 		}
 
-		if n.VulnCount.Total > 0 {
+		// Track max connected depth (exclude disconnected nodes with depth=999)
+		if depth != DepthDisconnected && depth >= 0 && depth > stats.MaxConnectedDepth {
+			stats.MaxConnectedDepth = depth
+		}
+
+		// Count disconnected nodes
+		if depth == DepthDisconnected {
+			stats.DisconnectedNodes++
+		}
+
+		if n.GetVulnerabilityCount().GetTotal() > 0 {
 			stats.VulnerableNodes++
 		}
 
-		if n.Ecosystem != "" {
-			stats.Ecosystems[n.Ecosystem]++
+		if eco := n.GetEcosystem(); eco != "" {
+			stats.Ecosystems[eco]++
+		}
+
+		// Count import statuses (extended mode feature)
+		switch n.GetImportStatus() {
+		case graphv1.ImportStatus_IMPORT_STATUS_IMPORTED:
+			importCounts.Imported++
+			hasImportStatus = true
+		case graphv1.ImportStatus_IMPORT_STATUS_REQUIRED:
+			importCounts.Required++
+			hasImportStatus = true
+		case graphv1.ImportStatus_IMPORT_STATUS_DECLARED:
+			importCounts.Declared++
+			hasImportStatus = true
 		}
 	}
 
-	return stats
-}
+	// Only include import status counts if any nodes have import status set
+	if hasImportStatus {
+		stats.ImportStatusCounts = importCounts
+	}
 
-// Stats contains summary statistics about a graph.
-type Stats struct {
-	TotalNodes      int            `json:"total_nodes"`
-	DirectNodes     int            `json:"direct_nodes"`
-	TransitiveNodes int            `json:"transitive_nodes"`
-	MaxDepth        int            `json:"max_depth"`
-	VulnerableNodes int            `json:"vulnerable_nodes"`
-	Ecosystems      map[string]int `json:"ecosystems"`
+	return stats
 }
 
 // VulnerableNodes returns an iterator over nodes that have vulnerabilities.
 func (g *Graph) VulnerableNodes() iter.Seq[*Node] {
 	return func(yield func(*Node) bool) {
 		for _, n := range g.nodes {
-			if n.VulnCount.Total > 0 {
+			if n.GetVulnerabilityCount().GetTotal() > 0 {
 				if !yield(n) {
 					return
 				}
@@ -621,7 +711,7 @@ func (g *Graph) VulnerablePaths() []Path {
 	seen := make(map[string]bool)
 
 	for vuln := range g.VulnerableNodes() {
-		for _, path := range g.PathsTo(vuln.PURL) {
+		for _, path := range g.PathsTo(vuln.GetPurl()) {
 			// Deduplicate paths
 			key := pathKey(path)
 			if !seen[key] {
@@ -643,13 +733,13 @@ func pathKey(p Path) string {
 	}
 	names := make([]string, len(p))
 	for i, node := range p {
-		names[i] = node.Name
+		names[i] = node.GetName()
 	}
 	return strings.Join(names, "→")
 }
 
 // AnnotateVulns adds vulnerability information to graph nodes.
-func (g *Graph) AnnotateVulns(findings []vulnerability.Finding, advisories map[string]vulnerability.Advisory) {
+func (g *Graph) AnnotateVulns(findings []vulnerability.Finding, advisories map[string]*vulnerabilityv1.Advisory) {
 	// Group findings by PURL
 	vulnsByPURL := make(map[string][]vulnerability.Finding)
 	for _, f := range findings {
@@ -660,14 +750,13 @@ func (g *Graph) AnnotateVulns(findings []vulnerability.Finding, advisories map[s
 	// Apply to nodes
 	for purl, vulns := range vulnsByPURL {
 		if node := g.nodes[purl]; node != nil {
-			node.Vulns = vulns
-			node.VulnCount = countVulns(vulns, advisories)
+			node.VulnerabilityCount = countVulns(vulns, advisories)
 		}
 	}
 }
 
-func countVulns(findings []vulnerability.Finding, advisories map[string]vulnerability.Advisory) VulnCount {
-	count := VulnCount{Total: len(findings)}
+func countVulns(findings []vulnerability.Finding, advisories map[string]*vulnerabilityv1.Advisory) *VulnerabilityCount {
+	count := &VulnerabilityCount{Total: int32(len(findings))}
 
 	for _, f := range findings {
 		adv, ok := advisories[f.AdvisoryID]
@@ -676,14 +765,19 @@ func countVulns(findings []vulnerability.Finding, advisories map[string]vulnerab
 			continue
 		}
 
-		switch adv.Severity.Level.String() {
-		case "CRITICAL":
+		if adv.Severity == nil {
+			count.Unknown++
+			continue
+		}
+
+		switch adv.Severity.Level {
+		case vulnerability.SeverityCritical:
 			count.Critical++
-		case "HIGH":
+		case vulnerability.SeverityHigh:
 			count.High++
-		case "MEDIUM":
+		case vulnerability.SeverityMedium:
 			count.Medium++
-		case "LOW":
+		case vulnerability.SeverityLow:
 			count.Low++
 		default:
 			count.Unknown++
@@ -701,11 +795,14 @@ func (g *Graph) Filter(pred func(*Node) bool) *Graph {
 	for _, n := range g.nodes {
 		if pred(n) {
 			filtered.AddNode(n)
+			if pkg := g.packages[n.GetPurl()]; pkg != nil {
+				filtered.packages[n.GetPurl()] = pkg
+			}
 		}
 	}
 
 	for _, e := range g.edges {
-		if filtered.nodes[e.From] != nil && filtered.nodes[e.To] != nil {
+		if filtered.nodes[e.GetFrom()] != nil && filtered.nodes[e.GetTo()] != nil {
 			filtered.AddEdge(e)
 		}
 	}
@@ -723,18 +820,24 @@ func (g *Graph) Subgraph(root string) *Graph {
 	rootNode := g.nodes[root]
 
 	// Clone root node as direct
-	newRoot := *rootNode
+	newRoot := CloneNode(rootNode)
 	newRoot.Direct = true
-	sub.AddNode(&newRoot)
+	sub.AddNode(newRoot)
+	if pkg := g.packages[root]; pkg != nil {
+		sub.packages[root] = pkg
+	}
 
 	// Add all descendants
 	for desc := range g.Descendants(root) {
 		sub.AddNode(desc)
+		if pkg := g.packages[desc.GetPurl()]; pkg != nil {
+			sub.packages[desc.GetPurl()] = pkg
+		}
 	}
 
 	// Add relevant edges
 	for _, e := range g.edges {
-		if sub.nodes[e.From] != nil && sub.nodes[e.To] != nil {
+		if sub.nodes[e.GetFrom()] != nil && sub.nodes[e.GetTo()] != nil {
 			sub.AddEdge(e)
 		}
 	}
@@ -757,32 +860,73 @@ func (g *Graph) Clone() *Graph {
 	clone := New()
 
 	for _, n := range g.nodes {
-		nodeCopy := *n
-		// Deep copy slices
-		if n.Locations != nil {
-			nodeCopy.Locations = slices.Clone(n.Locations)
-		}
-		if n.Vulns != nil {
-			nodeCopy.Vulns = slices.Clone(n.Vulns)
-		}
-		clone.AddNode(&nodeCopy)
+		clone.AddNode(CloneNode(n))
+	}
+
+	// Copy package references (shallow)
+	for purl, pkg := range g.packages {
+		clone.packages[purl] = pkg
 	}
 
 	for _, e := range g.edges {
-		edgeCopy := *e
-		clone.AddEdge(&edgeCopy)
+		clone.AddEdge(CloneEdge(e))
 	}
 
 	return clone
 }
 
+// CloneNode creates a deep copy of a node.
+func CloneNode(n *Node) *Node {
+	if n == nil {
+		return nil
+	}
+	clone := &Node{
+		Purl:      n.Purl,
+		Name:      n.Name,
+		Version:   n.Version,
+		Ecosystem: n.Ecosystem,
+		Direct:    n.Direct,
+		Depth:     n.Depth,
+	}
+	if n.Locations != nil {
+		clone.Locations = slices.Clone(n.Locations)
+	}
+	if n.VulnerabilityCount != nil {
+		clone.VulnerabilityCount = &VulnerabilityCount{
+			Critical: n.VulnerabilityCount.Critical,
+			High:     n.VulnerabilityCount.High,
+			Medium:   n.VulnerabilityCount.Medium,
+			Low:      n.VulnerabilityCount.Low,
+			Unknown:  n.VulnerabilityCount.Unknown,
+			Total:    n.VulnerabilityCount.Total,
+		}
+	}
+	if n.Vulnerabilities != nil {
+		clone.Vulnerabilities = slices.Clone(n.Vulnerabilities)
+	}
+	return clone
+}
+
+// CloneEdge creates a copy of an edge.
+func CloneEdge(e *Edge) *Edge {
+	if e == nil {
+		return nil
+	}
+	return &Edge{
+		From:       e.From,
+		To:         e.To,
+		Constraint: e.Constraint,
+		Scope:      e.Scope,
+	}
+}
+
 // Sort returns nodes sorted by the given comparison function.
-func (g *Graph) Sort(cmp func(a, b *Node) int) []*Node {
+func (g *Graph) Sort(cmpFunc func(a, b *Node) int) []*Node {
 	nodes := make([]*Node, 0, len(g.nodes))
 	for _, n := range g.nodes {
 		nodes = append(nodes, n)
 	}
-	slices.SortFunc(nodes, cmp)
+	slices.SortFunc(nodes, cmpFunc)
 	return nodes
 }
 
@@ -790,25 +934,29 @@ func (g *Graph) Sort(cmp func(a, b *Node) int) []*Node {
 func (g *Graph) SortByVulns() []*Node {
 	return g.Sort(func(a, b *Node) int {
 		// Sort by total vulns descending
-		if a.VulnCount.Total != b.VulnCount.Total {
-			return cmp.Compare(b.VulnCount.Total, a.VulnCount.Total)
+		aTotal := a.GetVulnerabilityCount().GetTotal()
+		bTotal := b.GetVulnerabilityCount().GetTotal()
+		if aTotal != bTotal {
+			return cmp.Compare(bTotal, aTotal)
 		}
 		// Then by critical
-		if a.VulnCount.Critical != b.VulnCount.Critical {
-			return cmp.Compare(b.VulnCount.Critical, a.VulnCount.Critical)
+		aCrit := a.GetVulnerabilityCount().GetCritical()
+		bCrit := b.GetVulnerabilityCount().GetCritical()
+		if aCrit != bCrit {
+			return cmp.Compare(bCrit, aCrit)
 		}
 		// Then by name for stability
-		return cmp.Compare(a.Name, b.Name)
+		return cmp.Compare(a.GetName(), b.GetName())
 	})
 }
 
 // SortByDepth returns nodes sorted by depth (direct first, then transitive).
 func (g *Graph) SortByDepth() []*Node {
 	return g.Sort(func(a, b *Node) int {
-		if a.Depth != b.Depth {
-			return cmp.Compare(a.Depth, b.Depth)
+		if a.GetDepth() != b.GetDepth() {
+			return cmp.Compare(a.GetDepth(), b.GetDepth())
 		}
-		return cmp.Compare(a.Name, b.Name)
+		return cmp.Compare(a.GetName(), b.GetName())
 	})
 }
 
@@ -820,7 +968,7 @@ func (g *Graph) SortByDepth() []*Node {
 func (g *Graph) UpdateDepths() {
 	// Reset all depths
 	for node := range g.Nodes() {
-		if node.Direct {
+		if node.GetDirect() {
 			node.Depth = 0
 		} else {
 			node.Depth = DepthSyntheticRoot // Mark as unvisited
@@ -831,15 +979,15 @@ func (g *Graph) UpdateDepths() {
 	visited := make(map[string]bool)
 	type queueItem struct {
 		purl  string
-		depth int
+		depth int32
 	}
 	var queue []queueItem
 
 	// Start from all direct nodes (depth 0)
 	for node := range g.Nodes() {
-		if node.Direct {
-			queue = append(queue, queueItem{node.PURL, 0})
-			visited[node.PURL] = true
+		if node.GetDirect() {
+			queue = append(queue, queueItem{node.GetPurl(), 0})
+			visited[node.GetPurl()] = true
 		}
 	}
 
@@ -849,15 +997,15 @@ func (g *Graph) UpdateDepths() {
 		queue = queue[1:]
 
 		for child := range g.Children(current.purl) {
-			if visited[child.PURL] {
+			if visited[child.GetPurl()] {
 				continue
 			}
-			visited[child.PURL] = true
+			visited[child.GetPurl()] = true
 			newDepth := current.depth + 1
 			if child.Depth < 0 || newDepth < child.Depth {
 				child.Depth = newDepth
 			}
-			queue = append(queue, queueItem{child.PURL, newDepth})
+			queue = append(queue, queueItem{child.GetPurl(), newDepth})
 		}
 	}
 
@@ -871,10 +1019,46 @@ func (g *Graph) UpdateDepths() {
 
 // ToID converts a Node to a dependency.ID for compatibility with other packages.
 // Note: dependency.ID doesn't include Version; version is embedded in the PURL.
-func (n *Node) ToID() dependency.ID {
+func ToID(n *Node) dependency.ID {
 	return dependency.ID{
-		Name:      n.Name,
-		Ecosystem: n.Ecosystem,
-		PURL:      n.PURL,
+		Name:      n.GetName(),
+		Ecosystem: n.GetEcosystem(),
+		PURL:      n.GetPurl(),
 	}
+}
+
+// GetNodesSlice returns all nodes as a slice (for proto serialization).
+func (g *Graph) GetNodesSlice() []*Node {
+	nodes := make([]*Node, 0, len(g.nodes))
+	for n := range g.NodesSorted() {
+		nodes = append(nodes, n)
+	}
+	return nodes
+}
+
+// GetEdgesSlice returns all edges as a slice (for proto serialization).
+func (g *Graph) GetEdgesSlice() []*Edge {
+	return g.edges
+}
+
+// GetRoots returns the root PURLs (for proto serialization).
+func (g *Graph) GetRoots() []string {
+	return g.roots
+}
+
+// FromProto constructs a Graph from proto components.
+// This is useful when deserializing a graph from RPC responses.
+func FromProto(nodes []*Node, edges []*Edge, roots []string) *Graph {
+	g := New()
+	for _, n := range nodes {
+		g.AddNode(n)
+	}
+	for _, e := range edges {
+		g.AddEdge(e)
+	}
+	// Override roots if provided (some nodes may have Direct=true but not be in roots)
+	if len(roots) > 0 {
+		g.roots = roots
+	}
+	return g
 }

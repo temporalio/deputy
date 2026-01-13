@@ -35,7 +35,6 @@ import (
 	"github.com/picatz/deputy/internal/purlx"
 	"github.com/picatz/deputy/internal/repository"
 	"github.com/picatz/deputy/internal/repository/workspace"
-	"github.com/picatz/deputy/internal/scan"
 	"github.com/picatz/deputy/internal/targets"
 	"github.com/picatz/deputy/internal/version"
 	"github.com/protobom/protobom/pkg/formats"
@@ -100,7 +99,7 @@ type Result struct {
 	// Document is the generated Protobom SBOM document.
 	Document *sbom.Document
 	// Target captures the normalized scan target metadata for policies and context output.
-	Target scan.Target
+	Target inventory.Target
 	// RepoPath is the local or remote repository path that was scanned.
 	RepoPath string
 	// Ref is the git reference that was resolved (may differ from input if normalized).
@@ -192,7 +191,7 @@ func Generate(ctx context.Context, repoRef string, opts Options) (Result, error)
 		effRef = "HEAD~0"
 	}
 
-	pkgs, err := collectInventorySBOM(ctx, src.Repo, src.Workspace, effRef, inventory.ScanOptions{Ecosystems: opts.Ecosystems})
+	pkgs, err := collectInventorySBOM(ctx, src.Repo, src.Workspace(), effRef, inventory.ScanOptions{Ecosystems: opts.Ecosystems})
 	if err != nil {
 		otel.SetSpanError(span, err)
 		return Result{}, err
@@ -201,14 +200,14 @@ func Generate(ctx context.Context, repoRef string, opts Options) (Result, error)
 	var directDeps map[string]bool
 	switch {
 	case strings.EqualFold(effRef, "HEAD") || strings.EqualFold(effRef, "HEAD~0"):
-		directDeps = compare.CollectGoDirectModulesFromWorkspace(src.Workspace)
+		directDeps = compare.CollectGoDirectModulesFromWorkspace(src.Workspace())
 	default:
 		if hash, err := gitx.ResolveRevisionEnhanced(src.Repo, effRef); err == nil {
 			directDeps, _ = compare.CollectGoDirectModulesFromCommit(src.Repo, *hash)
 		}
 	}
 
-	doc, err := buildProtobomDocument(ctx, src.Workspace, repoRef, opts.Ref, opts.Name, pkgs, directDeps)
+	doc, err := buildProtobomDocument(ctx, src.Workspace(), repoRef, opts.Ref, opts.Name, pkgs, directDeps)
 	if err != nil {
 		return Result{}, err
 	}
@@ -220,7 +219,7 @@ func Generate(ctx context.Context, repoRef string, opts Options) (Result, error)
 				return Result{}, err
 			}
 		case "scan":
-			if err := enrichProtobomLicensesScanLocal(ctx, doc, src.Workspace); err != nil {
+			if err := enrichProtobomLicensesScanLocal(ctx, doc, src.Workspace()); err != nil {
 				return Result{}, err
 			}
 			fetcher := &remoteFetcher{Timeout: remoteLicenseFetchTimeout}
@@ -231,7 +230,7 @@ func Generate(ctx context.Context, repoRef string, opts Options) (Result, error)
 			if err := enrichProtobomLicensesDepsDev(ctx, doc); err != nil {
 				return Result{}, err
 			}
-			if err := enrichProtobomLicensesScanLocal(ctx, doc, src.Workspace); err != nil {
+			if err := enrichProtobomLicensesScanLocal(ctx, doc, src.Workspace()); err != nil {
 				return Result{}, err
 			}
 			fetcher := &remoteFetcher{Timeout: remoteLicenseFetchTimeout}
@@ -267,7 +266,7 @@ func Generate(ctx context.Context, repoRef string, opts Options) (Result, error)
 	result.Origin = origin
 	result.Document = doc
 	result.Packages = pkgs
-	result.Target = scan.Target{
+	result.Target = inventory.Target{
 		Kind:         targets.KindGit,
 		DisplayPath:  repoDisplay,
 		LocalPath:    localPath,
@@ -372,6 +371,11 @@ func buildProtobomDocument(ctx context.Context, ws workspace.FS, repoRef, ref, n
 		if p == nil || p.Name == "" {
 			continue
 		}
+		// Skip relative path replace directives (e.g., "../..", "./local").
+		// These are local development artifacts from go.mod replace directives.
+		if p.PURLType == purl.TypeGolang && compare.IsRelativePathModule(p.Name) {
+			continue
+		}
 		n := sbom.NewNode()
 		var purlStr string
 		switch {
@@ -387,6 +391,13 @@ func buildProtobomDocument(ctx context.Context, ws workspace.FS, repoRef, ref, n
 		n.Type = sbom.Node_PACKAGE
 		n.Name = deriveDisplayName(p.Name, purlStr)
 		n.Version = p.Version
+
+		// Copy licenses from SCALIBR extraction (APK, RPM, etc. provide licenses directly).
+		// This enables immediate license visibility for OS packages without enrichment.
+		if len(p.Licenses) > 0 {
+			n.Licenses = append(n.Licenses, p.Licenses...)
+		}
+
 		if purlStr != "" {
 			if n.Identifiers == nil {
 				n.Identifiers = map[int32]string{}
@@ -460,6 +471,7 @@ func buildProtobomDocument(ctx context.Context, ws workspace.FS, repoRef, ref, n
 		// Persist container image layer details for round-trip SBOM scanning.
 		// These properties enable layer-aware vulnerability analysis and policy
 		// evaluation when scanning SBOMs generated from container images.
+		// Note: p.LayerDetails is extractor.LayerDetails (SCALIBR type) which uses DiffID/ChainID.
 		if p.LayerDetails != nil {
 			n.Properties = append(n.Properties, &sbom.Property{
 				Name: "deputy:layer-index",
@@ -587,11 +599,14 @@ func enrichProtobomLicensesScanWithFetcher(ctx context.Context, doc *sbom.Docume
 		}
 		eco := collections.NormalizeLower(pu.Type)
 		version := strings.TrimSpace(pu.Version)
-		if eco == "" || version == "" {
+		name := packageNameForLicenseLookup(pu)
+		if eco == "" || name == "" {
 			continue
 		}
-		name := packageNameForLicenseLookup(pu)
-		if name == "" {
+		// Allow version-less lookups for GitHub-based packages (uses GitHub License API)
+		isGitHubBased := eco == "github" || eco == "githubactions" ||
+			(eco == "golang" && strings.HasPrefix(name, "github.com/"))
+		if version == "" && !isGitHubBased {
 			continue
 		}
 		if ids := license.LookupLicensesBestEffort(ctx, eco, name, version); len(ids) > 0 {

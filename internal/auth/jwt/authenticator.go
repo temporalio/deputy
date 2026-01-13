@@ -33,6 +33,7 @@ type Authenticator interface {
 // authenticator implements Authenticator using the jose library.
 type authenticator struct {
 	jwksCache         *JWKSCache
+	jwksCacheOpts     []JWKSCacheOption
 	staticKeys        map[string]crypto.PublicKey
 	issuers           []string
 	audiences         []string
@@ -52,6 +53,14 @@ func WithMetrics(m MetricsRecorder) Option {
 		if m != nil {
 			a.metrics = m
 		}
+	}
+}
+
+// WithJWKSCacheOptions sets additional options for the JWKS cache.
+// This is primarily useful for testing to inject a custom HTTP client.
+func WithJWKSCacheOptions(opts ...JWKSCacheOption) Option {
+	return func(a *authenticator) {
+		a.jwksCacheOpts = append(a.jwksCacheOpts, opts...)
 	}
 }
 
@@ -101,7 +110,9 @@ func NewAuthenticator(cfg *Config, opts ...Option) (Authenticator, error) {
 
 	// Initialize JWKS cache if configured
 	if cfg.JWKS != nil && cfg.JWKS.URL != "" {
-		cache, err := NewJWKSCache(cfg.JWKS, WithJWKSMetrics(auth.metrics))
+		// Combine default metrics option with any user-provided options
+		jwksCacheOpts := append([]JWKSCacheOption{WithJWKSMetrics(auth.metrics)}, auth.jwksCacheOpts...)
+		cache, err := NewJWKSCache(cfg.JWKS, jwksCacheOpts...)
 		if err != nil {
 			return nil, fmt.Errorf("create JWKS cache: %w", err)
 		}

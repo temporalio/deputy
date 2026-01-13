@@ -46,31 +46,31 @@ BUNDLED WITH
 
 	g := New()
 	g.AddNode(&Node{
-		PURL:      "pkg:gem/rails@7.0.4",
+		Purl:      "pkg:gem/rails@7.0.4",
 		Name:      "rails",
 		Version:   "7.0.4",
 		Ecosystem: "RubyGems",
 	})
 	g.AddNode(&Node{
-		PURL:      "pkg:gem/actioncable@7.0.4",
+		Purl:      "pkg:gem/actioncable@7.0.4",
 		Name:      "actioncable",
 		Version:   "7.0.4",
 		Ecosystem: "RubyGems",
 	})
 	g.AddNode(&Node{
-		PURL:      "pkg:gem/actionpack@7.0.4",
+		Purl:      "pkg:gem/actionpack@7.0.4",
 		Name:      "actionpack",
 		Version:   "7.0.4",
 		Ecosystem: "RubyGems",
 	})
 	g.AddNode(&Node{
-		PURL:      "pkg:gem/nio4r@2.5.8",
+		Purl:      "pkg:gem/nio4r@2.5.8",
 		Name:      "nio4r",
 		Version:   "2.5.8",
 		Ecosystem: "RubyGems",
 	})
 	g.AddNode(&Node{
-		PURL:      "pkg:gem/rack@2.2.6",
+		Purl:      "pkg:gem/rack@2.2.6",
 		Name:      "rack",
 		Version:   "2.2.6",
 		Ecosystem: "RubyGems",

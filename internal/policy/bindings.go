@@ -127,7 +127,7 @@ var BindingProfiles = map[Entrypoint]BindingProfile{
 	},
 	EntrypointDiffDependencyChange: {
 		Entrypoint:  EntrypointDiffDependencyChange,
-		Required:    append([]string{"change", "dependency"}, envVars...),
+		Required:    append([]string{"change", "dependency", "pkg"}, envVars...),
 		Optional:    targetVars,
 		Description: "Triggers for each dependency change in a diff",
 	},
@@ -184,6 +184,26 @@ var BindingProfiles = map[Entrypoint]BindingProfile{
 		Description: "Triggers for each component in an SBOM",
 	},
 
+	// Graph entrypoints
+	EntrypointGraphReport: {
+		Entrypoint:  EntrypointGraphReport,
+		Required:    append([]string{"graph", "nodes", "edges", "stats", "roots"}, envVars...),
+		Optional:    targetVars,
+		Description: "Triggers after a dependency graph is built with full graph data",
+	},
+	EntrypointGraphNode: {
+		Entrypoint:  EntrypointGraphNode,
+		Required:    append([]string{"node"}, envVars...),
+		Optional:    append([]string{"nodes", "edges", "stats", "ancestors", "descendants"}, targetVars...),
+		Description: "Triggers for each node in the dependency graph",
+	},
+	EntrypointGraphEdge: {
+		Entrypoint:  EntrypointGraphEdge,
+		Required:    append([]string{"edge", "from_node", "to_node"}, envVars...),
+		Optional:    append([]string{"nodes", "edges", "stats"}, targetVars...),
+		Description: "Triggers for each edge in the dependency graph",
+	},
+
 	// Fix entrypoints
 	EntrypointFixPlan: {
 		Entrypoint:  EntrypointFixPlan,
@@ -238,6 +258,68 @@ var BindingProfiles = map[Entrypoint]BindingProfile{
 		Required:    append([]string{"secret"}, envVars...),
 		Optional:    append([]string{"report"}, targetVars...),
 		Description: "Triggers for each secret found during a scan",
+	},
+
+	// Service entrypoints - for API request authorization (RBAC/ABAC).
+	// These are evaluated BEFORE the operation executes, enabling access control
+	// based on JWT claims (jwt.*), target, and request metadata.
+	EntrypointServiceScanRequest: {
+		Entrypoint:  EntrypointServiceScanRequest,
+		Required:    append([]string{"request"}, envVars...),
+		Optional:    append(targetVars, jwtVars...),
+		Description: "Triggers before a scan is executed via the API",
+	},
+	EntrypointServiceListRequest: {
+		Entrypoint:  EntrypointServiceListRequest,
+		Required:    append([]string{"request"}, envVars...),
+		Optional:    append(targetVars, jwtVars...),
+		Description: "Triggers before a list operation via the API",
+	},
+	EntrypointServiceSBOMRequest: {
+		Entrypoint:  EntrypointServiceSBOMRequest,
+		Required:    append([]string{"request"}, envVars...),
+		Optional:    append(targetVars, jwtVars...),
+		Description: "Triggers before SBOM generation via the API",
+	},
+	EntrypointServiceDiffRequest: {
+		Entrypoint:  EntrypointServiceDiffRequest,
+		Required:    append([]string{"request"}, envVars...),
+		Optional:    append(targetVars, jwtVars...),
+		Description: "Triggers before a diff operation via the API",
+	},
+	EntrypointServiceSecretsRequest: {
+		Entrypoint:  EntrypointServiceSecretsRequest,
+		Required:    append([]string{"request"}, envVars...),
+		Optional:    append(targetVars, jwtVars...),
+		Description: "Triggers before a secrets scan via the API",
+	},
+	EntrypointServiceGraphRequest: {
+		Entrypoint:  EntrypointServiceGraphRequest,
+		Required:    append([]string{"request"}, envVars...),
+		Optional:    append(targetVars, jwtVars...),
+		Description: "Triggers before a graph operation via the API",
+	},
+
+	// Sandbox entrypoints - for controlling sandboxed execution.
+	// These enable policies to control what can run in sandboxes, with what configuration,
+	// and what network/filesystem access is allowed.
+	EntrypointSandboxExecution: {
+		Entrypoint:  EntrypointSandboxExecution,
+		Required:    append([]string{"command", "workspace_dir", "requested_config"}, envVars...),
+		Optional:    []string{"context", "source"},
+		Description: "Triggers before any sandbox execution begins",
+	},
+	EntrypointSandboxCommand: {
+		Entrypoint:  EntrypointSandboxCommand,
+		Required:    append([]string{"command", "sandbox_config"}, envVars...),
+		Optional:    []string{"context"},
+		Description: "Triggers for each command executed within a sandbox session",
+	},
+	EntrypointSandboxNetwork: {
+		Entrypoint:  EntrypointSandboxNetwork,
+		Required:    append([]string{"host", "port", "protocol", "sandbox_config"}, envVars...),
+		Optional:    []string{"context"},
+		Description: "Triggers when a sandbox requests network access",
 	},
 }
 

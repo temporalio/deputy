@@ -28,7 +28,7 @@ ImageInfo is wired to policy evaluation via the `image_info` variable, enabling 
     - action: deny
       when: |
         has(image.config) && image.config.is_root == true &&
-        vulnerability.severity == 'CRITICAL'
+        vulnerability.advisory.severity.level == severity.critical
       reason: "Critical vulnerability in root container"
 
 # Detect sensitive environment variables
@@ -174,18 +174,18 @@ ImageInfo is wired to policy evaluation via the `image_info` variable, enabling 
 
 ---
 
-## Competitive Analysis
+## Feature Comparison
 
-| Feature | Deputy | Trivy | Grype | Snyk |
-|---------|--------|-------|-------|------|
-| Layer-aware vulns | Yes | Partial | No | Partial |
-| Config in policies | Yes | No | No | Limited |
-| Runtime enforcement | Yes (proxy) | No | No | Yes (limited) |
-| Image diff | Yes | No | No | No |
-| Base image tracking | Partial | No | No | Partial |
-| Build analysis | Partial | No | No | No |
-| Provenance verification | Planned | Partial | No | Partial |
-| Policy language | CEL (powerful) | Rego | None | None |
+| Feature | Deputy | Industry Standard |
+|---------|--------|-------------------|
+| Layer-aware vulns | Yes | Partial/Rare |
+| Config in policies | Yes | Limited/None |
+| Runtime enforcement | Yes (proxy) | Limited |
+| Image diff | Yes | Rare |
+| Base image tracking | Partial | Partial |
+| Build analysis | Partial | Limited |
+| Provenance verification | Planned | Emerging |
+| Policy language | CEL (powerful) | Varies (Rego, custom, none) |
 
 ---
 

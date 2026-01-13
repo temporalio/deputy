@@ -32,6 +32,9 @@ type Config struct {
 	// Proxy configures the package proxy server.
 	Proxy ProxyConfig `yaml:"proxy,omitempty" json:"proxy,omitempty"`
 
+	// Server configures the gRPC/Connect server.
+	Server ServerConfig `yaml:"server,omitempty" json:"server,omitempty"`
+
 	// Scan configures vulnerability scanning behavior.
 	Scan ScanConfig `yaml:"scan,omitempty" json:"scan,omitempty"`
 
@@ -40,6 +43,9 @@ type Config struct {
 
 	// AI configures AI/LLM providers for agentic features.
 	AI AIConfig `yaml:"ai,omitempty" json:"ai,omitempty"`
+
+	// Agents configures agent plugin discovery and behavior.
+	Agents AgentConfig `yaml:"agents,omitempty" json:"agents,omitempty"`
 
 	// OTel configures OpenTelemetry instrumentation.
 	OTel otel.Config `yaml:"otel,omitempty" json:"otel,omitempty"`
@@ -67,6 +73,93 @@ type ProxyConfig struct {
 
 	// PolicyPaths are paths to policy files to enforce.
 	PolicyPaths []string `yaml:"policy_paths" json:"policy_paths"`
+}
+
+// ServerConfig configures the gRPC/Connect server.
+type ServerConfig struct {
+	// Addr is the address to bind the server (e.g., ":8090", "localhost:8090").
+	Addr string `yaml:"addr" json:"addr"`
+
+	// ReadTimeout is the maximum duration for reading the request.
+	ReadTimeout time.Duration `yaml:"read_timeout" json:"read_timeout"`
+
+	// WriteTimeout is the maximum duration for writing the response.
+	WriteTimeout time.Duration `yaml:"write_timeout" json:"write_timeout"`
+
+	// IdleTimeout is the maximum duration to wait for the next request.
+	IdleTimeout time.Duration `yaml:"idle_timeout" json:"idle_timeout"`
+
+	// MaxRequestBodyBytes limits request body size.
+	MaxRequestBodyBytes int64 `yaml:"max_request_body_bytes" json:"max_request_body_bytes"`
+
+	// TLS configures TLS for the server.
+	TLS *ServerTLSConfig `yaml:"tls,omitempty" json:"tls,omitempty"`
+
+	// CORS configures Cross-Origin Resource Sharing.
+	CORS *ServerCORSConfig `yaml:"cors,omitempty" json:"cors,omitempty"`
+
+	// Auth configures authentication.
+	Auth *ServerAuthConfig `yaml:"auth,omitempty" json:"auth,omitempty"`
+
+	// RateLimit configures rate limiting.
+	RateLimit *ServerRateLimitConfig `yaml:"rate_limit,omitempty" json:"rate_limit,omitempty"`
+}
+
+// ServerTLSConfig configures TLS for the server.
+type ServerTLSConfig struct {
+	// CertFile is the path to the TLS certificate file.
+	CertFile string `yaml:"cert_file" json:"cert_file"`
+
+	// KeyFile is the path to the TLS private key file.
+	KeyFile string `yaml:"key_file" json:"key_file"`
+
+	// ClientCAFile is the path to the CA certificate for client verification.
+	ClientCAFile string `yaml:"client_ca_file,omitempty" json:"client_ca_file,omitempty"`
+}
+
+// ServerCORSConfig configures Cross-Origin Resource Sharing.
+type ServerCORSConfig struct {
+	// AllowedOrigins is a list of allowed origins (* for all).
+	AllowedOrigins []string `yaml:"allowed_origins" json:"allowed_origins"`
+
+	// AllowedMethods is a list of allowed HTTP methods.
+	AllowedMethods []string `yaml:"allowed_methods" json:"allowed_methods"`
+
+	// AllowedHeaders is a list of allowed headers.
+	AllowedHeaders []string `yaml:"allowed_headers" json:"allowed_headers"`
+
+	// AllowCredentials indicates whether credentials are allowed.
+	AllowCredentials bool `yaml:"allow_credentials" json:"allow_credentials"`
+
+	// MaxAge is the max age for preflight cache in seconds.
+	MaxAge int `yaml:"max_age" json:"max_age"`
+}
+
+// ServerAuthConfig configures authentication.
+type ServerAuthConfig struct {
+	// Enabled turns authentication on/off.
+	Enabled bool `yaml:"enabled" json:"enabled"`
+
+	// JWKSURL is the URL to fetch JSON Web Key Sets.
+	JWKSURL string `yaml:"jwks_url" json:"jwks_url"`
+
+	// Issuers is a list of allowed token issuers.
+	Issuers []string `yaml:"issuers" json:"issuers"`
+
+	// Audiences is a list of allowed token audiences.
+	Audiences []string `yaml:"audiences" json:"audiences"`
+}
+
+// ServerRateLimitConfig configures rate limiting.
+type ServerRateLimitConfig struct {
+	// Enabled turns rate limiting on/off.
+	Enabled bool `yaml:"enabled" json:"enabled"`
+
+	// RequestsPerSecond is the maximum requests per second per client.
+	RequestsPerSecond float64 `yaml:"requests_per_second" json:"requests_per_second"`
+
+	// Burst is the maximum burst size.
+	Burst int `yaml:"burst" json:"burst"`
 }
 
 // ScanConfig configures vulnerability scanning.
@@ -206,6 +299,62 @@ type AIFileGuardrails struct {
 
 	// DenyActions blocks specific actions (e.g., "delete", "execute").
 	DenyActions []string `yaml:"deny_actions,omitempty" json:"deny_actions,omitempty"`
+}
+
+// AgentConfig configures agent plugin discovery and behavior.
+type AgentConfig struct {
+	// Default is the default agent to use when none is specified.
+	// If empty, uses the first available builtin (typically "claude").
+	Default string `yaml:"default,omitempty" json:"default,omitempty"`
+
+	// DiscoverFromPath enables automatic discovery of plugins from PATH.
+	// Looks for executables named "deputy-plugin-<name>".
+	// Default: true
+	DiscoverFromPath *bool `yaml:"discover_from_path,omitempty" json:"discover_from_path,omitempty"`
+
+	// Plugins configures specific agent plugins.
+	// Keys are plugin names, values are plugin-specific configuration.
+	Plugins map[string]AgentPluginConfig `yaml:"plugins,omitempty" json:"plugins,omitempty"`
+
+	// Remote configures remote agent plugin endpoints.
+	// Keys are plugin names, values are server addresses.
+	Remote map[string]string `yaml:"remote,omitempty" json:"remote,omitempty"`
+}
+
+// DiscoverFromPathEnabled returns whether PATH discovery is enabled (defaults to true).
+func (a AgentConfig) DiscoverFromPathEnabled() bool {
+	if a.DiscoverFromPath == nil {
+		return true
+	}
+	return *a.DiscoverFromPath
+}
+
+// AgentPluginConfig contains settings for a specific agent plugin.
+type AgentPluginConfig struct {
+	// Enabled controls whether this plugin is available.
+	// Default: true
+	Enabled *bool `yaml:"enabled,omitempty" json:"enabled,omitempty"`
+
+	// Path overrides automatic PATH discovery with a specific executable path.
+	Path string `yaml:"path,omitempty" json:"path,omitempty"`
+
+	// Model specifies the default model for this agent.
+	Model string `yaml:"model,omitempty" json:"model,omitempty"`
+
+	// Sandbox sets the default sandbox mode for this agent.
+	// Values: "read-only", "workspace-write", "full-access"
+	Sandbox string `yaml:"sandbox,omitempty" json:"sandbox,omitempty"`
+
+	// Extra contains plugin-specific additional configuration.
+	Extra map[string]any `yaml:"extra,omitempty" json:"extra,omitempty"`
+}
+
+// IsEnabled returns whether the plugin is enabled (defaults to true).
+func (p AgentPluginConfig) IsEnabled() bool {
+	if p.Enabled == nil {
+		return true
+	}
+	return *p.Enabled
 }
 
 // HTTPConfig configures HTTP client behavior across all subsystems.
@@ -453,6 +602,9 @@ func (l *Loader) loadFromEnv(cfg *Config) {
 		cfg.Policy.Mode = val
 	}
 
+	// Server configuration
+	l.loadServerFromEnv(cfg)
+
 	// OTel configuration
 	if val := os.Getenv(l.envPrefix + "OTEL_ENABLED"); val != "" {
 		cfg.OTel.Enabled = val == "true" || val == "1"
@@ -542,6 +694,135 @@ func (l *Loader) loadHTTPFromEnv(cfg *Config) {
 	if val := os.Getenv(l.envPrefix + "HTTP_RETRY_ENABLED"); val != "" {
 		enabled := val == "true" || val == "1"
 		cfg.HTTP.Retry.Enabled = &enabled
+	}
+}
+
+// loadServerFromEnv loads server configuration from environment variables.
+func (l *Loader) loadServerFromEnv(cfg *Config) {
+	// Basic server settings
+	if val := os.Getenv(l.envPrefix + "SERVER_ADDR"); val != "" {
+		cfg.Server.Addr = val
+	}
+	if val := os.Getenv(l.envPrefix + "SERVER_READ_TIMEOUT"); val != "" {
+		if d, err := time.ParseDuration(val); err == nil {
+			cfg.Server.ReadTimeout = d
+		}
+	}
+	if val := os.Getenv(l.envPrefix + "SERVER_WRITE_TIMEOUT"); val != "" {
+		if d, err := time.ParseDuration(val); err == nil {
+			cfg.Server.WriteTimeout = d
+		}
+	}
+	if val := os.Getenv(l.envPrefix + "SERVER_IDLE_TIMEOUT"); val != "" {
+		if d, err := time.ParseDuration(val); err == nil {
+			cfg.Server.IdleTimeout = d
+		}
+	}
+	if val := os.Getenv(l.envPrefix + "SERVER_MAX_REQUEST_BODY_BYTES"); val != "" {
+		if n, err := strconv.ParseInt(val, 10, 64); err == nil && n > 0 {
+			cfg.Server.MaxRequestBodyBytes = n
+		}
+	}
+
+	// TLS configuration
+	tlsCert := os.Getenv(l.envPrefix + "SERVER_TLS_CERT")
+	tlsKey := os.Getenv(l.envPrefix + "SERVER_TLS_KEY")
+	if tlsCert != "" && tlsKey != "" {
+		if cfg.Server.TLS == nil {
+			cfg.Server.TLS = &ServerTLSConfig{}
+		}
+		cfg.Server.TLS.CertFile = tlsCert
+		cfg.Server.TLS.KeyFile = tlsKey
+	}
+	if val := os.Getenv(l.envPrefix + "SERVER_TLS_CLIENT_CA"); val != "" {
+		if cfg.Server.TLS == nil {
+			cfg.Server.TLS = &ServerTLSConfig{}
+		}
+		cfg.Server.TLS.ClientCAFile = val
+	}
+
+	// CORS configuration
+	if val := os.Getenv(l.envPrefix + "SERVER_CORS_ORIGINS"); val != "" {
+		if cfg.Server.CORS == nil {
+			cfg.Server.CORS = &ServerCORSConfig{}
+		}
+		cfg.Server.CORS.AllowedOrigins = strings.Split(val, ",")
+	}
+	if val := os.Getenv(l.envPrefix + "SERVER_CORS_METHODS"); val != "" {
+		if cfg.Server.CORS == nil {
+			cfg.Server.CORS = &ServerCORSConfig{}
+		}
+		cfg.Server.CORS.AllowedMethods = strings.Split(val, ",")
+	}
+	if val := os.Getenv(l.envPrefix + "SERVER_CORS_HEADERS"); val != "" {
+		if cfg.Server.CORS == nil {
+			cfg.Server.CORS = &ServerCORSConfig{}
+		}
+		cfg.Server.CORS.AllowedHeaders = strings.Split(val, ",")
+	}
+	if val := os.Getenv(l.envPrefix + "SERVER_CORS_CREDENTIALS"); val != "" {
+		if cfg.Server.CORS == nil {
+			cfg.Server.CORS = &ServerCORSConfig{}
+		}
+		cfg.Server.CORS.AllowCredentials = val == "true" || val == "1"
+	}
+	if val := os.Getenv(l.envPrefix + "SERVER_CORS_MAX_AGE"); val != "" {
+		if n, err := strconv.Atoi(val); err == nil && n > 0 {
+			if cfg.Server.CORS == nil {
+				cfg.Server.CORS = &ServerCORSConfig{}
+			}
+			cfg.Server.CORS.MaxAge = n
+		}
+	}
+
+	// Auth configuration
+	if val := os.Getenv(l.envPrefix + "SERVER_AUTH_ENABLED"); val != "" {
+		if cfg.Server.Auth == nil {
+			cfg.Server.Auth = &ServerAuthConfig{}
+		}
+		cfg.Server.Auth.Enabled = val == "true" || val == "1"
+	}
+	if val := os.Getenv(l.envPrefix + "SERVER_AUTH_JWKS_URL"); val != "" {
+		if cfg.Server.Auth == nil {
+			cfg.Server.Auth = &ServerAuthConfig{}
+		}
+		cfg.Server.Auth.JWKSURL = val
+	}
+	if val := os.Getenv(l.envPrefix + "SERVER_AUTH_ISSUERS"); val != "" {
+		if cfg.Server.Auth == nil {
+			cfg.Server.Auth = &ServerAuthConfig{}
+		}
+		cfg.Server.Auth.Issuers = strings.Split(val, ",")
+	}
+	if val := os.Getenv(l.envPrefix + "SERVER_AUTH_AUDIENCES"); val != "" {
+		if cfg.Server.Auth == nil {
+			cfg.Server.Auth = &ServerAuthConfig{}
+		}
+		cfg.Server.Auth.Audiences = strings.Split(val, ",")
+	}
+
+	// Rate limit configuration
+	if val := os.Getenv(l.envPrefix + "SERVER_RATE_LIMIT_ENABLED"); val != "" {
+		if cfg.Server.RateLimit == nil {
+			cfg.Server.RateLimit = &ServerRateLimitConfig{}
+		}
+		cfg.Server.RateLimit.Enabled = val == "true" || val == "1"
+	}
+	if val := os.Getenv(l.envPrefix + "SERVER_RATE_LIMIT_RPS"); val != "" {
+		if f, err := strconv.ParseFloat(val, 64); err == nil && f > 0 {
+			if cfg.Server.RateLimit == nil {
+				cfg.Server.RateLimit = &ServerRateLimitConfig{}
+			}
+			cfg.Server.RateLimit.RequestsPerSecond = f
+		}
+	}
+	if val := os.Getenv(l.envPrefix + "SERVER_RATE_LIMIT_BURST"); val != "" {
+		if n, err := strconv.Atoi(val); err == nil && n > 0 {
+			if cfg.Server.RateLimit == nil {
+				cfg.Server.RateLimit = &ServerRateLimitConfig{}
+			}
+			cfg.Server.RateLimit.Burst = n
+		}
 	}
 }
 

@@ -60,7 +60,7 @@ func TestRubyGemsHandlerBlocksVulnerability(t *testing.T) {
 	defer upstream.Close()
 
 	tmp := t.TempDir()
-	pol := writeRubyBundle(t, tmp, "block-critical", `vulnerabilities.exists(v, v.Severity == "CRITICAL")`, "critical vuln", "deny")
+	pol := writeRubyBundle(t, tmp, "block-critical", `vulnerabilities.exists(v, v.advisory.severity.level == severity.critical)`, "critical vuln", "deny")
 	engine, err := NewPolicyEngine([]string{pol})
 	if err != nil {
 		t.Fatalf("NewPolicyEngine: %v", err)
@@ -88,7 +88,7 @@ func TestRubyGemsHandlerBlocksLicense(t *testing.T) {
 	defer upstream.Close()
 
 	tmp := t.TempDir()
-	pol := writeRubyBundle(t, tmp, "block-license", `licenses.exists(l, l == "AGPL-3.0")`, "license", "deny")
+	pol := writeRubyBundle(t, tmp, "block-license", `pkg.licenses.exists(l, l == "AGPL-3.0")`, "license", "deny")
 	engine, err := NewPolicyEngine([]string{pol})
 	if err != nil {
 		t.Fatalf("engine: %v", err)

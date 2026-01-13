@@ -5,6 +5,11 @@ import (
 	"path/filepath"
 	"slices"
 	"testing"
+
+	containerv1 "github.com/picatz/deputy/gen/deputy/container/v1"
+	dependencyv1 "github.com/picatz/deputy/gen/deputy/dependency/v1"
+	policyv1 "github.com/picatz/deputy/gen/deputy/policy/v1"
+	vulnerabilityv1 "github.com/picatz/deputy/gen/deputy/vulnerability/v1"
 )
 
 func TestCriticalTransitiveSpotlight(t *testing.T) {
@@ -13,14 +18,24 @@ func TestCriticalTransitiveSpotlight(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadSources: %v", err)
 	}
-	payload := map[string]any{
-		"vulnerability": map[string]any{
-			"severity": "CRITICAL",
-			"isDirect": false,
+
+	// Test critical transitive vulnerability using typed proto input
+	input := &policyv1.ScanVulnerabilityPolicyInput{
+		Vulnerability: &vulnerabilityv1.Finding{
+			Advisory: &vulnerabilityv1.Advisory{
+				Id: "CVE-2024-1234",
+				Severity: &vulnerabilityv1.Severity{
+					Level: vulnerabilityv1.SeverityLevel_SEVERITY_LEVEL_CRITICAL,
+				},
+			},
+			Package: &dependencyv1.Package{
+				Name:   "indirect-dep",
+				Direct: false, // transitive dependency
+			},
 		},
-		"env": map[string]any{"command": "scan", "entrypoint": "scan_vulnerability"},
+		Env: &policyv1.Environment{Command: "scan", Entrypoint: "scan_vulnerability"},
 	}
-	actions, err := EvaluateAll(context.Background(), sources, payload)
+	actions, err := EvaluateAll(context.Background(), sources, input)
 	if err != nil {
 		t.Fatalf("EvaluateAll: %v", err)
 	}
@@ -35,32 +50,36 @@ func TestTyposquatLevenshteinGuard(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadSources: %v", err)
 	}
+
 	t.Run("deny known close typo", func(t *testing.T) {
-		payload := map[string]any{
-			"request": map[string]any{"package": "lodas", "ecosystem": "npm"},
-			"env":     map[string]any{"command": "proxy"},
+		input := &policyv1.NpmArtifactRequestPolicyInput{
+			Request: &policyv1.ProxyRequest{Package: "lodas", Ecosystem: "npm"},
+			Pkg:     &dependencyv1.Package{Name: "lodas", Ecosystem: "npm"},
+			Env:     &policyv1.Environment{Command: "proxy"},
 		}
-		if actions, err := EvaluateAll(context.Background(), sources, payload); err != nil || len(actions) == 0 || actions[0].Type != "deny" {
+		if actions, err := EvaluateAll(context.Background(), sources, input); err != nil || len(actions) == 0 || actions[0].Type != "deny" {
 			t.Fatalf("expected deny for typosquat, got %+v err=%v", actions, err)
 		}
 	})
 
 	t.Run("deny another near miss", func(t *testing.T) {
-		payload := map[string]any{
-			"request": map[string]any{"package": "reqeusts", "ecosystem": "npm"},
-			"env":     map[string]any{"command": "proxy"},
+		input := &policyv1.NpmArtifactRequestPolicyInput{
+			Request: &policyv1.ProxyRequest{Package: "reqeusts", Ecosystem: "npm"},
+			Pkg:     &dependencyv1.Package{Name: "reqeusts", Ecosystem: "npm"},
+			Env:     &policyv1.Environment{Command: "proxy"},
 		}
-		if actions, err := EvaluateAll(context.Background(), sources, payload); err != nil || len(actions) == 0 || actions[0].Type != "deny" {
+		if actions, err := EvaluateAll(context.Background(), sources, input); err != nil || len(actions) == 0 || actions[0].Type != "deny" {
 			t.Fatalf("expected deny for typosquat, got %+v err=%v", actions, err)
 		}
 	})
 
 	t.Run("allow safe distant name", func(t *testing.T) {
-		payload := map[string]any{
-			"request": map[string]any{"package": "teamlib", "ecosystem": "npm"},
-			"env":     map[string]any{"command": "proxy"},
+		input := &policyv1.NpmArtifactRequestPolicyInput{
+			Request: &policyv1.ProxyRequest{Package: "teamlib", Ecosystem: "npm"},
+			Pkg:     &dependencyv1.Package{Name: "teamlib", Ecosystem: "npm"},
+			Env:     &policyv1.Environment{Command: "proxy"},
 		}
-		actions, err := EvaluateAll(context.Background(), sources, payload)
+		actions, err := EvaluateAll(context.Background(), sources, input)
 		if err != nil {
 			t.Fatalf("EvaluateAll: %v", err)
 		}
@@ -72,11 +91,12 @@ func TestTyposquatLevenshteinGuard(t *testing.T) {
 	})
 
 	t.Run("allow scoped package", func(t *testing.T) {
-		payload := map[string]any{
-			"request": map[string]any{"package": "@acme/lodas", "ecosystem": "npm"},
-			"env":     map[string]any{"command": "proxy"},
+		input := &policyv1.NpmArtifactRequestPolicyInput{
+			Request: &policyv1.ProxyRequest{Package: "@acme/lodas", Ecosystem: "npm"},
+			Pkg:     &dependencyv1.Package{Name: "@acme/lodas", Ecosystem: "npm"},
+			Env:     &policyv1.Environment{Command: "proxy"},
 		}
-		actions, err := EvaluateAll(context.Background(), sources, payload)
+		actions, err := EvaluateAll(context.Background(), sources, input)
 		if err != nil {
 			t.Fatalf("EvaluateAll: %v", err)
 		}
@@ -88,11 +108,12 @@ func TestTyposquatLevenshteinGuard(t *testing.T) {
 	})
 
 	t.Run("allow numeric suffix", func(t *testing.T) {
-		payload := map[string]any{
-			"request": map[string]any{"package": "react2", "ecosystem": "npm"},
-			"env":     map[string]any{"command": "proxy"},
+		input := &policyv1.NpmArtifactRequestPolicyInput{
+			Request: &policyv1.ProxyRequest{Package: "react2", Ecosystem: "npm"},
+			Pkg:     &dependencyv1.Package{Name: "react2", Ecosystem: "npm"},
+			Env:     &policyv1.Environment{Command: "proxy"},
 		}
-		actions, err := EvaluateAll(context.Background(), sources, payload)
+		actions, err := EvaluateAll(context.Background(), sources, input)
 		if err != nil {
 			t.Fatalf("EvaluateAll: %v", err)
 		}
@@ -104,11 +125,12 @@ func TestTyposquatLevenshteinGuard(t *testing.T) {
 	})
 
 	t.Run("ignore non-proxy command", func(t *testing.T) {
-		payload := map[string]any{
-			"request": map[string]any{"package": "lodas", "ecosystem": "npm"},
-			"env":     map[string]any{"command": "scan"},
+		input := &policyv1.NpmArtifactRequestPolicyInput{
+			Request: &policyv1.ProxyRequest{Package: "lodas", Ecosystem: "npm"},
+			Pkg:     &dependencyv1.Package{Name: "lodas", Ecosystem: "npm"},
+			Env:     &policyv1.Environment{Command: "scan"},
 		}
-		actions, err := EvaluateAll(context.Background(), sources, payload)
+		actions, err := EvaluateAll(context.Background(), sources, input)
 		if err != nil {
 			t.Fatalf("EvaluateAll: %v", err)
 		}
@@ -127,20 +149,29 @@ func TestContainerLayerVulnerabilityPolicies(t *testing.T) {
 		t.Fatalf("LoadSources: %v", err)
 	}
 
+	
+
 	t.Run("deny critical base image vulnerability", func(t *testing.T) {
 		payload := map[string]any{
-			"vulnerability": map[string]any{
-				"id":       "CVE-2024-1234",
-				"severity": "CRITICAL",
-				"layerDetails": map[string]any{
-					"index":       1,
-					"inBaseImage": true,
-					"command":     "FROM ubuntu:22.04",
+			"vulnerability": &vulnerabilityv1.Finding{
+				Advisory: &vulnerabilityv1.Advisory{
+					Id: "CVE-2024-1234",
+					Severity: &vulnerabilityv1.Severity{
+						Level: vulnerabilityv1.SeverityLevel_SEVERITY_LEVEL_CRITICAL,
+					},
+				},
+				Package: &dependencyv1.Package{
+					Name: "vulnerable-pkg",
+					LayerDetails: &containerv1.LayerDetails{
+						Index:       1,
+						InBaseImage: true,
+						Command:     "FROM ubuntu:22.04",
+					},
 				},
 			},
-			"env": map[string]any{"command": "scan", "entrypoint": "scan_vulnerability"},
+			"env": &policyv1.Environment{Command: "scan", Entrypoint: "scan_vulnerability"},
 		}
-		actions, err := EvaluateAll(context.Background(), sources, payload)
+		actions, err := EvaluateMap(context.Background(), sources, payload)
 		if err != nil {
 			t.Fatalf("EvaluateAll: %v", err)
 		}
@@ -151,19 +182,26 @@ func TestContainerLayerVulnerabilityPolicies(t *testing.T) {
 
 	t.Run("warn on high severity application layer vulnerability", func(t *testing.T) {
 		payload := map[string]any{
-			"vulnerability": map[string]any{
-				"id":       "CVE-2024-5678",
-				"severity": "HIGH",
-				"isDirect": false, // transitive dependency, not direct
-				"layerDetails": map[string]any{
-					"index":       8,
-					"inBaseImage": false,
-					"command":     "COPY --from=builder /app /app",
+			"vulnerability": &vulnerabilityv1.Finding{
+				Advisory: &vulnerabilityv1.Advisory{
+					Id: "CVE-2024-5678",
+					Severity: &vulnerabilityv1.Severity{
+						Level: vulnerabilityv1.SeverityLevel_SEVERITY_LEVEL_HIGH,
+					},
+				},
+				Package: &dependencyv1.Package{
+					Name:   "app-dep",
+					Direct: false, // transitive dependency, not direct
+					LayerDetails: &containerv1.LayerDetails{
+						Index:       8,
+						InBaseImage: false,
+						Command:     "COPY --from=builder /app /app",
+					},
 				},
 			},
-			"env": map[string]any{"command": "scan", "entrypoint": "scan_vulnerability"},
+			"env": &policyv1.Environment{Command: "scan", Entrypoint: "scan_vulnerability"},
 		}
-		actions, err := EvaluateAll(context.Background(), sources, payload)
+		actions, err := EvaluateMap(context.Background(), sources, payload)
 		if err != nil {
 			t.Fatalf("EvaluateAll: %v", err)
 		}
@@ -174,17 +212,24 @@ func TestContainerLayerVulnerabilityPolicies(t *testing.T) {
 
 	t.Run("warn on early base layer vulnerability", func(t *testing.T) {
 		payload := map[string]any{
-			"vulnerability": map[string]any{
-				"id":       "CVE-2024-0001",
-				"severity": "HIGH",
-				"layerDetails": map[string]any{
-					"index":       1,
-					"inBaseImage": true,
+			"vulnerability": &vulnerabilityv1.Finding{
+				Advisory: &vulnerabilityv1.Advisory{
+					Id: "CVE-2024-0001",
+					Severity: &vulnerabilityv1.Severity{
+						Level: vulnerabilityv1.SeverityLevel_SEVERITY_LEVEL_HIGH,
+					},
+				},
+				Package: &dependencyv1.Package{
+					Name: "base-pkg",
+					LayerDetails: &containerv1.LayerDetails{
+						Index:       1,
+						InBaseImage: true,
+					},
 				},
 			},
-			"env": map[string]any{"command": "scan", "entrypoint": "scan_vulnerability"},
+			"env": &policyv1.Environment{Command: "scan", Entrypoint: "scan_vulnerability"},
 		}
-		actions, err := EvaluateAll(context.Background(), sources, payload)
+		actions, err := EvaluateMap(context.Background(), sources, payload)
 		if err != nil {
 			t.Fatalf("EvaluateAll: %v", err)
 		}
@@ -195,20 +240,26 @@ func TestContainerLayerVulnerabilityPolicies(t *testing.T) {
 
 	t.Run("warn on apt-get installed vulnerability", func(t *testing.T) {
 		payload := map[string]any{
-			"vulnerability": map[string]any{
-				"id":       "CVE-2024-APT1",
-				"severity": "CRITICAL",
-				"package":  "openssl",
-				"isDirect": false, // transitive dependency
-				"layerDetails": map[string]any{
-					"index":       3,
-					"inBaseImage": false,
-					"command":     "RUN apt-get update && apt-get install -y openssl curl",
+			"vulnerability": &vulnerabilityv1.Finding{
+				Advisory: &vulnerabilityv1.Advisory{
+					Id: "CVE-2024-APT1",
+					Severity: &vulnerabilityv1.Severity{
+						Level: vulnerabilityv1.SeverityLevel_SEVERITY_LEVEL_CRITICAL,
+					},
+				},
+				Package: &dependencyv1.Package{
+					Name:   "openssl",
+					Direct: false, // transitive dependency
+					LayerDetails: &containerv1.LayerDetails{
+						Index:       3,
+						InBaseImage: false,
+						Command:     "RUN apt-get update && apt-get install -y openssl curl",
+					},
 				},
 			},
-			"env": map[string]any{"command": "scan", "entrypoint": "scan_vulnerability"},
+			"env": &policyv1.Environment{Command: "scan", Entrypoint: "scan_vulnerability"},
 		}
-		actions, err := EvaluateAll(context.Background(), sources, payload)
+		actions, err := EvaluateMap(context.Background(), sources, payload)
 		if err != nil {
 			t.Fatalf("EvaluateAll: %v", err)
 		}
@@ -219,20 +270,26 @@ func TestContainerLayerVulnerabilityPolicies(t *testing.T) {
 
 	t.Run("warn on pip installed vulnerability", func(t *testing.T) {
 		payload := map[string]any{
-			"vulnerability": map[string]any{
-				"id":       "CVE-2024-PIP1",
-				"severity": "HIGH",
-				"package":  "requests",
-				"isDirect": false, // transitive dependency
-				"layerDetails": map[string]any{
-					"index":       5,
-					"inBaseImage": false,
-					"command":     "RUN pip install requests==2.28.0",
+			"vulnerability": &vulnerabilityv1.Finding{
+				Advisory: &vulnerabilityv1.Advisory{
+					Id: "CVE-2024-PIP1",
+					Severity: &vulnerabilityv1.Severity{
+						Level: vulnerabilityv1.SeverityLevel_SEVERITY_LEVEL_HIGH,
+					},
+				},
+				Package: &dependencyv1.Package{
+					Name:   "requests",
+					Direct: false, // transitive dependency
+					LayerDetails: &containerv1.LayerDetails{
+						Index:       5,
+						InBaseImage: false,
+						Command:     "RUN pip install requests==2.28.0",
+					},
 				},
 			},
-			"env": map[string]any{"command": "scan", "entrypoint": "scan_vulnerability"},
+			"env": &policyv1.Environment{Command: "scan", Entrypoint: "scan_vulnerability"},
 		}
-		actions, err := EvaluateAll(context.Background(), sources, payload)
+		actions, err := EvaluateMap(context.Background(), sources, payload)
 		if err != nil {
 			t.Fatalf("EvaluateAll: %v", err)
 		}
@@ -243,20 +300,26 @@ func TestContainerLayerVulnerabilityPolicies(t *testing.T) {
 
 	t.Run("warn on npm installed vulnerability", func(t *testing.T) {
 		payload := map[string]any{
-			"vulnerability": map[string]any{
-				"id":       "CVE-2024-NPM1",
-				"severity": "CRITICAL",
-				"package":  "lodash",
-				"isDirect": false, // transitive dependency
-				"layerDetails": map[string]any{
-					"index":       6,
-					"inBaseImage": false,
-					"command":     "RUN npm install lodash",
+			"vulnerability": &vulnerabilityv1.Finding{
+				Advisory: &vulnerabilityv1.Advisory{
+					Id: "CVE-2024-NPM1",
+					Severity: &vulnerabilityv1.Severity{
+						Level: vulnerabilityv1.SeverityLevel_SEVERITY_LEVEL_CRITICAL,
+					},
+				},
+				Package: &dependencyv1.Package{
+					Name:   "lodash",
+					Direct: false, // transitive dependency
+					LayerDetails: &containerv1.LayerDetails{
+						Index:       6,
+						InBaseImage: false,
+						Command:     "RUN npm install lodash",
+					},
 				},
 			},
-			"env": map[string]any{"command": "scan", "entrypoint": "scan_vulnerability"},
+			"env": &policyv1.Environment{Command: "scan", Entrypoint: "scan_vulnerability"},
 		}
-		actions, err := EvaluateAll(context.Background(), sources, payload)
+		actions, err := EvaluateMap(context.Background(), sources, payload)
 		if err != nil {
 			t.Fatalf("EvaluateAll: %v", err)
 		}
@@ -267,18 +330,25 @@ func TestContainerLayerVulnerabilityPolicies(t *testing.T) {
 
 	t.Run("deny unfixed critical base image vulnerability", func(t *testing.T) {
 		payload := map[string]any{
-			"vulnerability": map[string]any{
-				"id":            "CVE-2024-NOFIX",
-				"severity":      "CRITICAL",
-				"fixedVersions": []any{},
-				"layerDetails": map[string]any{
-					"index":       2,
-					"inBaseImage": true,
+			"vulnerability": &vulnerabilityv1.Finding{
+				Advisory: &vulnerabilityv1.Advisory{
+					Id: "CVE-2024-NOFIX",
+					Severity: &vulnerabilityv1.Severity{
+						Level: vulnerabilityv1.SeverityLevel_SEVERITY_LEVEL_CRITICAL,
+					},
+					FixedVersions: []string{}, // no fix available
+				},
+				Package: &dependencyv1.Package{
+					Name: "unfixed-pkg",
+					LayerDetails: &containerv1.LayerDetails{
+						Index:       2,
+						InBaseImage: true,
+					},
 				},
 			},
-			"env": map[string]any{"command": "scan", "entrypoint": "scan_vulnerability"},
+			"env": &policyv1.Environment{Command: "scan", Entrypoint: "scan_vulnerability"},
 		}
-		actions, err := EvaluateAll(context.Background(), sources, payload)
+		actions, err := EvaluateMap(context.Background(), sources, payload)
 		if err != nil {
 			t.Fatalf("EvaluateAll: %v", err)
 		}
@@ -289,18 +359,25 @@ func TestContainerLayerVulnerabilityPolicies(t *testing.T) {
 
 	t.Run("deny high severity direct dependency in application layer", func(t *testing.T) {
 		payload := map[string]any{
-			"vulnerability": map[string]any{
-				"id":       "CVE-2024-DIRECT",
-				"severity": "HIGH",
-				"isDirect": true,
-				"layerDetails": map[string]any{
-					"index":       7,
-					"inBaseImage": false,
+			"vulnerability": &vulnerabilityv1.Finding{
+				Advisory: &vulnerabilityv1.Advisory{
+					Id: "CVE-2024-DIRECT",
+					Severity: &vulnerabilityv1.Severity{
+						Level: vulnerabilityv1.SeverityLevel_SEVERITY_LEVEL_HIGH,
+					},
+				},
+				Package: &dependencyv1.Package{
+					Name:   "direct-dep",
+					Direct: true,
+					LayerDetails: &containerv1.LayerDetails{
+						Index:       7,
+						InBaseImage: false,
+					},
 				},
 			},
-			"env": map[string]any{"command": "scan", "entrypoint": "scan_vulnerability"},
+			"env": &policyv1.Environment{Command: "scan", Entrypoint: "scan_vulnerability"},
 		}
-		actions, err := EvaluateAll(context.Background(), sources, payload)
+		actions, err := EvaluateMap(context.Background(), sources, payload)
 		if err != nil {
 			t.Fatalf("EvaluateAll: %v", err)
 		}
@@ -311,161 +388,59 @@ func TestContainerLayerVulnerabilityPolicies(t *testing.T) {
 
 	t.Run("no action on medium severity base image vulnerability", func(t *testing.T) {
 		payload := map[string]any{
-			"vulnerability": map[string]any{
-				"id":       "CVE-2024-MED",
-				"severity": "MEDIUM",
-				"layerDetails": map[string]any{
-					"index":       2,
-					"inBaseImage": true,
+			"vulnerability": &vulnerabilityv1.Finding{
+				Advisory: &vulnerabilityv1.Advisory{
+					Id: "CVE-2024-MED",
+					Severity: &vulnerabilityv1.Severity{
+						Level: vulnerabilityv1.SeverityLevel_SEVERITY_LEVEL_MEDIUM,
+					},
+				},
+				Package: &dependencyv1.Package{
+					Name: "medium-pkg",
+					LayerDetails: &containerv1.LayerDetails{
+						Index:       2,
+						InBaseImage: true,
+					},
 				},
 			},
-			"env": map[string]any{"command": "scan", "entrypoint": "scan_vulnerability"},
+			"env": &policyv1.Environment{Command: "scan", Entrypoint: "scan_vulnerability"},
 		}
-		actions, err := EvaluateAll(context.Background(), sources, payload)
+		actions, err := EvaluateMap(context.Background(), sources, payload)
 		if err != nil {
 			t.Fatalf("EvaluateAll: %v", err)
 		}
-		// Should not trigger deny or warn for medium severity
+		// Should not trigger deny or warn (only HIGH and CRITICAL trigger)
 		for _, a := range actions {
-			if a.Type == "deny" {
-				t.Fatalf("did not expect deny for medium severity: %+v", actions)
+			if a.Type == "deny" || a.Type == "warn" {
+				t.Fatalf("did not expect deny/warn for medium severity vulnerability, got %+v", actions)
 			}
 		}
 	})
 
 	t.Run("no action without layerDetails", func(t *testing.T) {
 		payload := map[string]any{
-			"vulnerability": map[string]any{
-				"id":       "GO-2024-1234",
-				"severity": "CRITICAL",
-			},
-			"env": map[string]any{"command": "scan", "entrypoint": "scan_vulnerability"},
-		}
-		actions, err := EvaluateAll(context.Background(), sources, payload)
-		if err != nil {
-			t.Fatalf("EvaluateAll: %v", err)
-		}
-		// These policies require layerDetails, so no actions expected for regular vulnerabilities
-		for _, a := range actions {
-			if a.Type == "deny" {
-				t.Fatalf("did not expect deny without layerDetails: %+v", actions)
-			}
-		}
-	})
-}
-
-// TestScanVulnerabilityWithImageConfig verifies that image.config is available
-// in scan_vulnerability entrypoint, allowing cross-reference policies that
-// combine vulnerability data with image configuration.
-func TestScanVulnerabilityWithImageConfig(t *testing.T) {
-	// Policy that denies critical vulnerabilities in images running as root
-	policyYAML := `
-policies:
-  - name: root-with-critical-vuln
-    description: Block critical vulnerabilities in images running as root
-    entrypoints: ["scan_vulnerability"]
-    rules:
-      - action: deny
-        when: |
-          has(image.config) &&
-          image.config.is_root == true &&
-          vulnerability.severity == "CRITICAL"
-        reason: "Critical vulnerability in image running as root"
-        remediation: "Use non-root user or fix the vulnerability"
-`
-	sources, err := ParseStructuredSources([]byte(policyYAML), "test-policy.yaml")
-	if err != nil {
-		t.Fatalf("ParseStructuredSources: %v", err)
-	}
-
-	t.Run("deny critical vuln in root image", func(t *testing.T) {
-		payload := map[string]any{
-			"vulnerability": map[string]any{
-				"id":       "CVE-2024-ROOT",
-				"severity": "CRITICAL",
-			},
-			"image_info": map[string]any{
-				"config": map[string]any{
-					"user":    "",
-					"is_root": true,
+			"vulnerability": &vulnerabilityv1.Finding{
+				Advisory: &vulnerabilityv1.Advisory{
+					Id: "CVE-2024-NOLAYER",
+					Severity: &vulnerabilityv1.Severity{
+						Level: vulnerabilityv1.SeverityLevel_SEVERITY_LEVEL_CRITICAL,
+					},
+				},
+				Package: &dependencyv1.Package{
+					Name: "no-layer-pkg",
+					// No LayerDetails - not a container scan
 				},
 			},
-			"env": map[string]any{"command": "scan", "entrypoint": "scan_vulnerability"},
+			"env": &policyv1.Environment{Command: "scan", Entrypoint: "scan_vulnerability"},
 		}
-		actions, err := EvaluateAll(context.Background(), sources, payload)
+		actions, err := EvaluateMap(context.Background(), sources, payload)
 		if err != nil {
 			t.Fatalf("EvaluateAll: %v", err)
 		}
-		if !slices.ContainsFunc(actions, func(a Action) bool { return a.Type == "deny" }) {
-			t.Fatalf("expected deny for critical vuln in root image, got %+v", actions)
-		}
-	})
-
-	t.Run("allow critical vuln in non-root image", func(t *testing.T) {
-		payload := map[string]any{
-			"vulnerability": map[string]any{
-				"id":       "CVE-2024-NONROOT",
-				"severity": "CRITICAL",
-			},
-			"image_info": map[string]any{
-				"config": map[string]any{
-					"user":    "nobody",
-					"is_root": false,
-				},
-			},
-			"env": map[string]any{"command": "scan", "entrypoint": "scan_vulnerability"},
-		}
-		actions, err := EvaluateAll(context.Background(), sources, payload)
-		if err != nil {
-			t.Fatalf("EvaluateAll: %v", err)
-		}
+		// Should not trigger any action since policies check has(vulnerability.package.layer_details)
 		for _, a := range actions {
-			if a.Type == "deny" {
-				t.Fatalf("did not expect deny for non-root image: %+v", actions)
-			}
-		}
-	})
-
-	t.Run("allow medium vuln in root image", func(t *testing.T) {
-		payload := map[string]any{
-			"vulnerability": map[string]any{
-				"id":       "CVE-2024-MED",
-				"severity": "MEDIUM",
-			},
-			"image_info": map[string]any{
-				"config": map[string]any{
-					"user":    "",
-					"is_root": true,
-				},
-			},
-			"env": map[string]any{"command": "scan", "entrypoint": "scan_vulnerability"},
-		}
-		actions, err := EvaluateAll(context.Background(), sources, payload)
-		if err != nil {
-			t.Fatalf("EvaluateAll: %v", err)
-		}
-		for _, a := range actions {
-			if a.Type == "deny" {
-				t.Fatalf("did not expect deny for medium vuln: %+v", actions)
-			}
-		}
-	})
-
-	t.Run("no image config - policy does not match", func(t *testing.T) {
-		payload := map[string]any{
-			"vulnerability": map[string]any{
-				"id":       "CVE-2024-NOIMG",
-				"severity": "CRITICAL",
-			},
-			"env": map[string]any{"command": "scan", "entrypoint": "scan_vulnerability"},
-		}
-		actions, err := EvaluateAll(context.Background(), sources, payload)
-		if err != nil {
-			t.Fatalf("EvaluateAll: %v", err)
-		}
-		for _, a := range actions {
-			if a.Type == "deny" {
-				t.Fatalf("did not expect deny without image config: %+v", actions)
+			if a.Type == "deny" || a.Type == "warn" {
+				t.Fatalf("did not expect deny/warn without layer details, got %+v", actions)
 			}
 		}
 	})

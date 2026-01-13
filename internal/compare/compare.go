@@ -202,6 +202,13 @@ func parseDigits(s string) int {
 	return n
 }
 
+// IsRelativePathModule reports whether name looks like a relative filesystem path
+// rather than a valid Go module path. This detects replace directive targets like
+// "../..", "./local", or "../../.." which are local development artifacts.
+func IsRelativePathModule(name string) bool {
+	return strings.HasPrefix(name, "./") || strings.HasPrefix(name, "../") || name == "." || name == ".."
+}
+
 // ExtractCanonicalPackageName trims superfluous major version suffixes (e.g.
 // /v2, /v3) from an import path except for v0 and v1 which remain part of the
 // canonical module path per Go module path semantics. gopkg.in names are first
@@ -422,11 +429,22 @@ func GetMainModuleFromGoMod(data []byte) string {
 	return ""
 }
 
-// GetDirectDependenciesFromGoMod parses a go.mod file and returns module roots
+// GetDirectDependenciesFromGoMod parses a go.mod file and returns module paths
 // for direct dependencies (those without "// indirect"). The returned set
-// always includes "stdlib".
+// always includes "stdlib" and "go".
+//
+// The map stores:
+//   - Exact module paths from go.mod marked as direct (value = true)
+//   - Module roots for matching subpackage import paths (value = true, if any
+//     direct module has that root)
+//
+// Indirect modules (those with "// indirect") are stored with value = false
+// to explicitly mark them as NOT direct. This allows proper handling of Go
+// submodules: if go.mod has "github.com/bytedance/sonic" as direct but
+// "github.com/bytedance/sonic/loader" as indirect, only "sonic" is marked
+// direct, not "sonic/loader".
 func GetDirectDependenciesFromGoMod(data []byte) map[string]bool {
-	deps := map[string]bool{"stdlib": true}
+	deps := map[string]bool{"stdlib": true, "go": true}
 	if len(data) == 0 {
 		return deps
 	}
@@ -435,9 +453,7 @@ func GetDirectDependenciesFromGoMod(data []byte) map[string]bool {
 		if ln == "" || strings.HasPrefix(ln, "//") {
 			continue
 		}
-		if strings.Contains(ln, "// indirect") {
-			continue
-		}
+		isIndirect := strings.Contains(ln, "// indirect")
 		fields := strings.Fields(ln)
 		if len(fields) < 2 {
 			continue
@@ -448,7 +464,28 @@ func GetDirectDependenciesFromGoMod(data []byte) map[string]bool {
 		}
 		if strings.Contains(candidate, "/") {
 			info := ParseGoPackage(&extractor.Package{Name: candidate})
-			deps[GetModuleRoot(info.CanonicalName)] = true
+			// Store exact module path with its direct/indirect status.
+			// For indirect modules, we explicitly store false so that
+			// submodules like "foo/bar/loader" don't inherit the direct
+			// status from their parent module "foo/bar".
+			if isIndirect {
+				// Only set to false if not already marked as direct
+				// (a module appearing both as direct and indirect should be direct)
+				if _, exists := deps[info.CanonicalName]; !exists {
+					deps[info.CanonicalName] = false
+				}
+			} else {
+				deps[info.CanonicalName] = true
+				// For direct modules, also store module root for matching
+				// subpackage import paths within the module
+				root := GetModuleRoot(info.CanonicalName)
+				if root != info.CanonicalName {
+					// Only set root if not already explicitly set by an exact match
+					if _, exists := deps[root]; !exists {
+						deps[root] = true
+					}
+				}
+			}
 		}
 	}
 	return deps
@@ -503,12 +540,18 @@ func summarizePackage(p *extractor.Package) (string, pkgSummary) {
 	if p == nil || p.Name == "" {
 		return "", pkgSummary{}
 	}
-	ecos := strings.TrimSpace(p.Ecosystem())
+	ecos := strings.TrimSpace(p.Ecosystem().String())
 	if ecos == "" && p.PURLType != "" {
 		ecos = p.PURLType
 	}
 	meta := pkgSummary{pkg: p, ecosystem: ecos}
 	if strings.EqualFold(ecos, "Go") {
+		// Skip relative path replace directives (e.g., "../..", "./local").
+		// These are local development artifacts from go.mod replace directives
+		// pointing to filesystem paths, not actual module dependencies.
+		if IsRelativePathModule(p.Name) {
+			return "", pkgSummary{}
+		}
 		info := ParseGoPackage(p)
 		meta.canonical = strings.ToLower(info.CanonicalName)
 		meta.module = GetModuleRoot(info.CanonicalName)
@@ -519,13 +562,23 @@ func summarizePackage(p *extractor.Package) (string, pkgSummary) {
 		return meta.key, meta
 	}
 	name := strings.ToLower(p.Name)
+	// Apply ecosystem-specific name normalization
+	normalizedEcos := normalizeEcosystemForComparison(ecos)
+	switch {
+	case isPyPIEcosystem(normalizedEcos):
+		name = normalizePyPIName(name)
+	case isCargoEcosystem(normalizedEcos):
+		name = normalizeCargoName(name)
+	case isNpmEcosystem(normalizedEcos):
+		// npm names are already case-insensitive; ToLower above handles it
+		// No additional normalization needed beyond lowercasing
+	}
 	meta.canonical = name
 	if ecos == "" {
 		meta.key = name
 		return meta.key, meta
 	}
 	// Use normalized ecosystem for key to match packages across OS versions
-	normalizedEcos := normalizeEcosystemForComparison(ecos)
 	meta.key = normalizedEcos + "|" + name
 	return meta.key, meta
 }
@@ -536,6 +589,76 @@ func (s pkgSummary) ecosystemName() string {
 		return s.ecosystem
 	}
 	return "unknown"
+}
+
+// isPyPIEcosystem returns true if the ecosystem is a PyPI/Python ecosystem.
+func isPyPIEcosystem(eco string) bool {
+	switch strings.ToLower(eco) {
+	case "pypi", "pip", "pipenv", "poetry", "python":
+		return true
+	}
+	return false
+}
+
+// isCargoEcosystem returns true if the ecosystem is a Cargo/Rust ecosystem.
+func isCargoEcosystem(eco string) bool {
+	switch strings.ToLower(eco) {
+	case "cargo", "crates.io", "rust":
+		return true
+	}
+	return false
+}
+
+// isNpmEcosystem returns true if the ecosystem is an npm/Node.js ecosystem.
+func isNpmEcosystem(eco string) bool {
+	switch strings.ToLower(eco) {
+	case "npm", "yarn", "pnpm", "node":
+		return true
+	}
+	return false
+}
+
+// normalizePyPIName normalizes a PyPI package name according to PEP 503.
+// Per PEP 503, valid package names must be lowercase and consecutive runs of
+// underscores, hyphens, and periods are replaced with a single hyphen.
+// This ensures that "My_Package", "my-package", and "my.package" all match.
+func normalizePyPIName(name string) string {
+	if name == "" {
+		return name
+	}
+	// Already lowercased by caller, but ensure it
+	name = strings.ToLower(name)
+	// Replace consecutive runs of [-_.] with a single hyphen
+	var result strings.Builder
+	result.Grow(len(name))
+	inSeparator := false
+	for _, r := range name {
+		if r == '-' || r == '_' || r == '.' {
+			if !inSeparator {
+				result.WriteByte('-')
+				inSeparator = true
+			}
+			// Skip additional separators in a run
+		} else {
+			result.WriteRune(r)
+			inSeparator = false
+		}
+	}
+	return result.String()
+}
+
+// normalizeCargoName normalizes a Cargo/crates.io package name per RFC 940.
+// On crates.io, hyphens and underscores are equivalent: "serde-json" and
+// "serde_json" refer to the same crate. We normalize to underscores to match
+// Rust's internal convention (crate names in code use underscores).
+func normalizeCargoName(name string) string {
+	if name == "" {
+		return name
+	}
+	// Crate names are case-insensitive on crates.io
+	name = strings.ToLower(name)
+	// Replace hyphens with underscores (Rust convention)
+	return strings.ReplaceAll(name, "-", "_")
 }
 
 // CompareOptions configures package comparison behavior.

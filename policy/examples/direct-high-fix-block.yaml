@@ -1,16 +1,22 @@
+# Structure:
+#   vulnerability.package.direct      - Whether this is a direct dependency
+#   vulnerability.depth               - 0 for direct, 1+ for transitive (when --with-graph)
+#   vulnerability.advisory.fixed_versions - Versions containing the fix
+#   vulnerability.advisory.severity.level - Severity enum
+#
+# Severity constants: severity.critical, severity.high, severity.medium, severity.low
+#
 policies:
   - name: direct-high-fix-block
     description: Block direct dependencies that still carry HIGH/CRITICAL vulns when a fix exists
     vars:
-      highSeverities:
-        - CRITICAL
-        - HIGH
-      severity: 'vulnerability.?severity.orValue("").upperAscii()'
-      isDirect: 'vulnerability.?isDirect.orValue(false)'
-      hasFix: 'size(vulnerability.?fixedVersions.orValue([])) > 0'
       inScope: 'env.entrypoint in ["scan_vulnerability", "diff_vulnerability"]'
+      isDirect: 'vulnerability.package.direct'
+      hasFix: 'size(vulnerability.advisory.fixed_versions) > 0'
     rules:
       - action: deny
-        when: inScope && isDirect && hasFix && severity in highSeverities
+        when: |
+          inScope && isDirect && hasFix &&
+          vulnerability.advisory.severity.level in [severity.critical, severity.high]
         reason: Direct dependency has a HIGH/CRITICAL vulnerability with an available fix
         remediation: Upgrade this dependency to a fixed version before merging

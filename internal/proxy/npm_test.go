@@ -37,7 +37,7 @@ func TestNPMHandlerBlocksVulnerability(t *testing.T) {
 	defer upstream.Close()
 
 	tmp := t.TempDir()
-	path := writeNPMBundle(t, tmp, "deny-critical", `vulnerabilities.exists(v, v.Severity == "CRITICAL")`, "critical vuln", "deny")
+	path := writeNPMBundle(t, tmp, "deny-critical", `vulnerabilities.exists(v, v.advisory.severity.level == severity.critical)`, "critical vuln", "deny")
 	engine, err := NewPolicyEngine([]string{path})
 	if err != nil {
 		t.Fatalf("NewPolicyEngine: %v", err)
@@ -65,7 +65,7 @@ func TestNPMHandlerBlocksLicense(t *testing.T) {
 	defer upstream.Close()
 
 	tmp := t.TempDir()
-	pol := writeNPMBundle(t, tmp, "deny-license", `licenses.exists(l, l == "GPL-3.0")`, "license", "deny")
+	pol := writeNPMBundle(t, tmp, "deny-license", `pkg.licenses.exists(l, l == "GPL-3.0")`, "license", "deny")
 	engine, err := NewPolicyEngine([]string{pol})
 	if err != nil {
 		t.Fatalf("engine: %v", err)

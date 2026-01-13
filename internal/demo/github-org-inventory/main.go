@@ -224,7 +224,7 @@ func scanRepo(ctx context.Context, target repoTarget, token string, inMemory boo
 	}
 	defer src.Close()
 
-	rows, err := inventoryFromWorkspace(ctx, target.name, src.Workspace, ecosystems, resolve)
+	rows, err := inventoryFromWorkspace(ctx, target.name, src.Workspace(), ecosystems, resolve)
 	logs.Info(ctx, "inventory complete",
 		"owner", target.org,
 		"name", target.name,
@@ -422,7 +422,7 @@ func parseEcosystems(raw string) []string {
 }
 
 func canonicalEcosystem(p *extractor.Package) string {
-	raw := strings.TrimSpace(p.Ecosystem())
+	raw := strings.TrimSpace(p.Ecosystem().String())
 	if raw == "" || strings.EqualFold(raw, "unknown") {
 		raw = strings.TrimSpace(p.PURLType)
 	}

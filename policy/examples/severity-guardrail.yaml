@@ -1,13 +1,17 @@
+# Severity Guardrail Policy
+#
+# Severity constants: severity.critical, severity.high, severity.medium, severity.low
+# Access via: vulnerability.advisory.severity.level
+#
 policies:
   - name: deny-critical-and-high
     description: Deny artifacts that still carry CRITICAL/HIGH vulnerabilities
-    vars:
-      blockedSeverities:
-        - CRITICAL
-        - HIGH
+    entrypoints: ["scan_report"]
     rules:
       - action: deny
-        when: vulnerabilities.exists(v, blockedSeverities.exists(s, s == v.severity))
+        when: |
+          vulnerabilities.orValue([]).exists(v,
+            v.advisory.severity.level in [severity.critical, severity.high])
         reason: dependency has unresolved high-severity vulnerabilities
         remediation: Apply the vendor patch or upgrade to a remediated release
         details:

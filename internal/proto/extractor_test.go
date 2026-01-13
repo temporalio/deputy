@@ -1,0 +1,260 @@
+package proto
+
+import (
+	"testing"
+
+	"github.com/google/osv-scalibr/extractor"
+)
+
+func TestNormalizePyPIName(t *testing.T) {
+	tests := []struct {
+		input string
+		want  string
+	}{
+		{"flask", "flask"},
+		{"Flask", "flask"},
+		{"FLASK", "flask"},
+		{"flask-restful", "flask_restful"},
+		{"Flask-RESTful", "flask_restful"},
+		{"google-cloud-storage", "google_cloud_storage"},
+		{"zope.interface", "zope_interface"},
+		{"Zope.Interface", "zope_interface"},
+		{"Flask_RESTful", "flask_restful"},
+		{"some.package-name", "some_package_name"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			got := normalizePyPIName(tt.input)
+			if got != tt.want {
+				t.Errorf("normalizePyPIName(%q) = %q, want %q", tt.input, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestExtractorPackageToProto_DirectDetection(t *testing.T) {
+	tests := []struct {
+		name       string
+		pkg        *extractor.Package
+		direct     map[string]bool
+		wantDirect bool
+	}{
+		{
+			name: "Go direct dependency",
+			pkg: &extractor.Package{
+				Name:     "github.com/stretchr/testify",
+				Version:  "1.8.0",
+				PURLType: "golang",
+			},
+			direct: map[string]bool{
+				"github.com/stretchr/testify": true,
+			},
+			wantDirect: true,
+		},
+		{
+			name: "Go indirect dependency",
+			pkg: &extractor.Package{
+				Name:     "github.com/davecgh/go-spew",
+				Version:  "1.1.1",
+				PURLType: "golang",
+			},
+			direct: map[string]bool{
+				"github.com/stretchr/testify": true,
+				"github.com/davecgh/go-spew": false,
+			},
+			wantDirect: false,
+		},
+		{
+			name: "npm direct dependency",
+			pkg: &extractor.Package{
+				Name:     "react",
+				Version:  "18.2.0",
+				PURLType: "npm",
+			},
+			direct: map[string]bool{
+				"react": true,
+			},
+			wantDirect: true,
+		},
+		{
+			name: "npm scoped package direct",
+			pkg: &extractor.Package{
+				Name:     "@types/node",
+				Version:  "20.0.0",
+				PURLType: "npm",
+			},
+			direct: map[string]bool{
+				"@types/node": true,
+			},
+			wantDirect: true,
+		},
+		{
+			name: "npm transitive dependency",
+			pkg: &extractor.Package{
+				Name:     "loose-envify",
+				Version:  "1.4.0",
+				PURLType: "npm",
+			},
+			direct: map[string]bool{
+				"react": true,
+			},
+			wantDirect: false,
+		},
+		{
+			name: "cargo direct dependency",
+			pkg: &extractor.Package{
+				Name:     "tokio",
+				Version:  "1.28.0",
+				PURLType: "cargo",
+			},
+			direct: map[string]bool{
+				"tokio": true,
+			},
+			wantDirect: true,
+		},
+		{
+			name: "cargo transitive dependency",
+			pkg: &extractor.Package{
+				Name:     "mio",
+				Version:  "0.8.6",
+				PURLType: "cargo",
+			},
+			direct: map[string]bool{
+				"tokio": true,
+			},
+			wantDirect: false,
+		},
+		{
+			name: "pypi direct dependency",
+			pkg: &extractor.Package{
+				Name:     "flask",
+				Version:  "2.0.0",
+				PURLType: "pypi",
+			},
+			direct: map[string]bool{
+				"flask": true,
+			},
+			wantDirect: true,
+		},
+		{
+			name: "pypi normalized name match",
+			pkg: &extractor.Package{
+				Name:     "Flask-SQLAlchemy",
+				Version:  "3.0.0",
+				PURLType: "pypi",
+			},
+			direct: map[string]bool{
+				"flask_sqlalchemy": true,
+			},
+			wantDirect: true,
+		},
+		{
+			name: "pypi transitive dependency",
+			pkg: &extractor.Package{
+				Name:     "werkzeug",
+				Version:  "2.2.0",
+				PURLType: "pypi",
+			},
+			direct: map[string]bool{
+				"flask": true,
+			},
+			wantDirect: false,
+		},
+		{
+			name: "nil direct map",
+			pkg: &extractor.Package{
+				Name:     "react",
+				Version:  "18.2.0",
+				PURLType: "npm",
+			},
+			direct:     nil,
+			wantDirect: false,
+		},
+		{
+			name:       "nil package",
+			pkg:        nil,
+			direct:     map[string]bool{"react": true},
+			wantDirect: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := ExtractorPackageToProto(tt.pkg, tt.direct)
+			if tt.pkg == nil {
+				if result != nil {
+					t.Error("expected nil result for nil package")
+				}
+				return
+			}
+			if result.Direct != tt.wantDirect {
+				t.Errorf("Direct = %v, want %v", result.Direct, tt.wantDirect)
+			}
+		})
+	}
+}
+
+func TestExtractorPackagesToProto(t *testing.T) {
+	t.Run("empty slice", func(t *testing.T) {
+		result := ExtractorPackagesToProto(nil, nil)
+		if result != nil {
+			t.Error("expected nil for empty slice")
+		}
+	})
+
+	t.Run("mixed ecosystems", func(t *testing.T) {
+		pkgs := []*extractor.Package{
+			{Name: "github.com/stretchr/testify", Version: "1.8.0", PURLType: "golang"},
+			{Name: "react", Version: "18.2.0", PURLType: "npm"},
+			{Name: "tokio", Version: "1.28.0", PURLType: "cargo"},
+		}
+		direct := map[string]bool{
+			"github.com/stretchr/testify": true,
+			"react":                       true,
+			"tokio":                       true,
+		}
+
+		result := ExtractorPackagesToProto(pkgs, direct)
+		if len(result) != 3 {
+			t.Errorf("expected 3 packages, got %d", len(result))
+		}
+
+		// All should be marked as direct
+		for i, pkg := range result {
+			if !pkg.Direct {
+				t.Errorf("package %d (%s) should be direct", i, pkg.Name)
+			}
+		}
+	})
+}
+
+func TestExtractorPackagesFromProto(t *testing.T) {
+	t.Run("empty slice", func(t *testing.T) {
+		pkgs, direct := ExtractorPackagesFromProto(nil)
+		if pkgs != nil || direct != nil {
+			t.Error("expected nil for empty slice")
+		}
+	})
+}
+
+func TestEcosystemFromPURLType(t *testing.T) {
+	tests := []struct {
+		purlType string
+		want     string
+	}{
+		{"githubactions", "GitHub Actions"},
+		{"npm", ""},
+		{"golang", ""},
+		{"unknown", ""},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.purlType, func(t *testing.T) {
+			got := ecosystemFromPURLType(tt.purlType)
+			if got != tt.want {
+				t.Errorf("ecosystemFromPURLType(%q) = %q, want %q", tt.purlType, got, tt.want)
+			}
+		})
+	}
+}

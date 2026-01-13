@@ -3,11 +3,12 @@ package report
 import (
 	"testing"
 
+	vulnerabilityv1 "github.com/picatz/deputy/gen/deputy/vulnerability/v1"
 	"github.com/picatz/deputy/internal/vulnerability"
 )
 
 func TestBuildSummary_NoVulns(t *testing.T) {
-	summary := BuildSummary(nil, vulnerability.Stats{})
+	summary := BuildSummary(nil, vulnerabilityv1.Stats{})
 	if summary.HasVulnerabilities {
 		t.Fatalf("expected HasVulnerabilities=false")
 	}
@@ -18,7 +19,7 @@ func TestBuildSummary_WithVulns(t *testing.T) {
 		{PrimaryID: "V1", Severity: "9.8", SeverityType: "CVSS_V3", FixedVersions: []string{"v1.2.0"}, Version: "v1.0.0"},
 		{PrimaryID: "V2", Severity: "HIGH", SeverityType: "GHSA"},
 	}
-	summary := BuildSummary(cons, vulnerability.Stats{})
+	summary := BuildSummary(cons, vulnerabilityv1.Stats{})
 	if !summary.HasVulnerabilities {
 		t.Fatalf("expected HasVulnerabilities=true")
 	}

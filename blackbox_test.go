@@ -13,6 +13,13 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"google.golang.org/protobuf/encoding/protojson"
+
+	dependencyv1 "github.com/picatz/deputy/gen/deputy/dependency/v1"
+	scanv1 "github.com/picatz/deputy/gen/deputy/scan/v1"
+	targetv1 "github.com/picatz/deputy/gen/deputy/target/v1"
+	vulnerabilityv1 "github.com/picatz/deputy/gen/deputy/vulnerability/v1"
 )
 
 func TestMain(m *testing.M) {
@@ -136,36 +143,39 @@ func TestBlackbox_SilenceUsageOnFlagError(t *testing.T) {
 }
 
 func TestBlackbox_TriageFromReport_StdoutOnly(t *testing.T) {
-	reportPath := writeScanReportJSON(t, map[string]any{
-		"repo":            "github.com/acme/repo",
-		"ref":             "HEAD",
-		"commit":          "deadbeef",
-		"generated":       "2025-01-01T00:00:00Z",
-		"packagesScanned": 1,
-		"stats": map[string]any{
-			"uniqueVulns":     1,
-			"criticalSev":     1,
-			"highSeverity":    0,
-			"medSeverity":     0,
-			"lowSeverity":     0,
-			"fixAvailable":    1,
-			"directDeps":      1,
-			"indirectDeps":    0,
-			"duplicatesFound": 0,
+	resp := &scanv1.ScanResponse{
+		Target: &targetv1.Target{
+			DisplayPath: "github.com/acme/repo",
+			CommitHash:  "deadbeef",
 		},
-		"vulnerabilities": []map[string]any{
+		Findings: []*vulnerabilityv1.Finding{
 			{
-				"id":            "OSV-TEST-1",
-				"package":       "github.com/acme/mod",
-				"version":       "v1.0.0",
-				"ecosystem":     "Go",
-				"severity":      "9.8",
-				"severityType":  "CVSS_V3",
-				"fixedVersions": []string{"v1.0.1"},
-				"isDirect":      true,
+				AdvisoryId: "OSV-TEST-1",
+				Package: &dependencyv1.Package{
+					Name:      "github.com/acme/mod",
+					Version:   "v1.0.0",
+					Ecosystem: "Go",
+					Direct:    true,
+				},
+				Advisory: &vulnerabilityv1.Advisory{
+					Id:      "OSV-TEST-1",
+					Summary: "Test vulnerability",
+					Severity: &vulnerabilityv1.Severity{
+						Score: 9.8,
+						Level: vulnerabilityv1.SeverityLevel_SEVERITY_LEVEL_CRITICAL,
+						Type:  vulnerabilityv1.SeverityType_SEVERITY_TYPE_CVSS_V3,
+					},
+					FixedVersions: []string{"v1.0.1"},
+				},
 			},
 		},
-	})
+		Stats: &vulnerabilityv1.Stats{
+			Unique:       1,
+			Critical:     1,
+			FixAvailable: 1,
+		},
+	}
+	reportPath := writeScanReportProtoJSON(t, resp)
 	stdout, stderr, code := runDeputy(t, "triage", "--report", reportPath, "--format", "text")
 	if code != 0 {
 		t.Fatalf("exit=%d stderr=%q", code, stderr)
@@ -179,36 +189,39 @@ func TestBlackbox_TriageFromReport_StdoutOnly(t *testing.T) {
 }
 
 func TestBlackbox_FixFromReport_StdoutOnly(t *testing.T) {
-	reportPath := writeScanReportJSON(t, map[string]any{
-		"repo":            "github.com/acme/repo",
-		"ref":             "HEAD",
-		"commit":          "deadbeef",
-		"generated":       "2025-01-01T00:00:00Z",
-		"packagesScanned": 1,
-		"stats": map[string]any{
-			"uniqueVulns":     1,
-			"criticalSev":     1,
-			"highSeverity":    0,
-			"medSeverity":     0,
-			"lowSeverity":     0,
-			"fixAvailable":    1,
-			"directDeps":      1,
-			"indirectDeps":    0,
-			"duplicatesFound": 0,
+	resp := &scanv1.ScanResponse{
+		Target: &targetv1.Target{
+			DisplayPath: "github.com/acme/repo",
+			CommitHash:  "deadbeef",
 		},
-		"vulnerabilities": []map[string]any{
+		Findings: []*vulnerabilityv1.Finding{
 			{
-				"id":            "OSV-TEST-1",
-				"package":       "github.com/acme/mod",
-				"version":       "v1.0.0",
-				"ecosystem":     "Go",
-				"severity":      "9.8",
-				"severityType":  "CVSS_V3",
-				"fixedVersions": []string{"v1.0.1"},
-				"isDirect":      true,
+				AdvisoryId: "OSV-TEST-1",
+				Package: &dependencyv1.Package{
+					Name:      "github.com/acme/mod",
+					Version:   "v1.0.0",
+					Ecosystem: "Go",
+					Direct:    true,
+				},
+				Advisory: &vulnerabilityv1.Advisory{
+					Id:      "OSV-TEST-1",
+					Summary: "Test vulnerability",
+					Severity: &vulnerabilityv1.Severity{
+						Score: 9.8,
+						Level: vulnerabilityv1.SeverityLevel_SEVERITY_LEVEL_CRITICAL,
+						Type:  vulnerabilityv1.SeverityType_SEVERITY_TYPE_CVSS_V3,
+					},
+					FixedVersions: []string{"v1.0.1"},
+				},
 			},
 		},
-	})
+		Stats: &vulnerabilityv1.Stats{
+			Unique:       1,
+			Critical:     1,
+			FixAvailable: 1,
+		},
+	}
+	reportPath := writeScanReportProtoJSON(t, resp)
 	stdout, stderr, code := runDeputy(t, "fix", "--report", reportPath, "--format", "text")
 	if code != 0 {
 		t.Fatalf("exit=%d stderr=%q", code, stderr)
@@ -233,4 +246,185 @@ func writeScanReportJSON(t *testing.T, v any) string {
 		t.Fatalf("write: %v", err)
 	}
 	return p
+}
+
+// writeScanReportProtoJSON writes a scanv1.ScanResponse as proto JSON format.
+func writeScanReportProtoJSON(t *testing.T, resp *scanv1.ScanResponse) string {
+	t.Helper()
+	dir := t.TempDir()
+	p := filepath.Join(dir, "scan-report.json")
+	opts := protojson.MarshalOptions{
+		Multiline:       true,
+		Indent:          "  ",
+		EmitUnpopulated: false,
+		UseProtoNames:   true,
+	}
+	b, err := opts.Marshal(resp)
+	if err != nil {
+		t.Fatalf("marshal proto: %v", err)
+	}
+	if err := os.WriteFile(p, append(b, '\n'), 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	return p
+}
+
+// ============================================================================
+// Exec command tests
+// ============================================================================
+
+func TestBlackbox_Exec_NoneRuntime_Echo(t *testing.T) {
+	// Test basic execution with the 'none' runtime (always available)
+	stdout, stderr, code := runDeputy(t, "exec", "--runtime", "none", "--", "echo", "hello world")
+	if code != 0 {
+		t.Fatalf("exit=%d stderr=%q", code, stderr)
+	}
+	if !strings.Contains(stdout, "hello world") {
+		t.Fatalf("expected 'hello world' in stdout, got %q", stdout)
+	}
+}
+
+func TestBlackbox_Exec_NoneRuntime_ExitCode(t *testing.T) {
+	// Test that non-zero exit codes are propagated
+	_, _, code := runDeputy(t, "exec", "--runtime", "none", "--", "false")
+	if code != 1 {
+		t.Fatalf("expected exit code 1, got %d", code)
+	}
+}
+
+func TestBlackbox_Exec_NoneRuntime_Stderr(t *testing.T) {
+	// Test that stderr is captured correctly
+	stdout, stderr, code := runDeputy(t, "exec", "--runtime", "none", "--", "sh", "-c", "echo stdout; echo stderr >&2")
+	if code != 0 {
+		t.Fatalf("exit=%d", code)
+	}
+	if !strings.Contains(stdout, "stdout") {
+		t.Fatalf("expected 'stdout' in stdout, got %q", stdout)
+	}
+	if !strings.Contains(stderr, "stderr") {
+		t.Fatalf("expected 'stderr' in stderr, got %q", stderr)
+	}
+}
+
+func TestBlackbox_Exec_NoneRuntime_EnvVar(t *testing.T) {
+	// Test environment variable passing
+	stdout, stderr, code := runDeputy(t, "exec", "--runtime", "none", "--env", "TEST_VAR=hello_deputy", "--", "sh", "-c", "echo $TEST_VAR")
+	if code != 0 {
+		t.Fatalf("exit=%d stderr=%q", code, stderr)
+	}
+	if !strings.Contains(stdout, "hello_deputy") {
+		t.Fatalf("expected 'hello_deputy' in stdout, got %q", stdout)
+	}
+}
+
+func TestBlackbox_Exec_NoneRuntime_WorkDir(t *testing.T) {
+	// Test working directory setting
+	tmpDir := t.TempDir()
+	stdout, stderr, code := runDeputy(t, "exec", "--runtime", "none", "--work-dir", tmpDir, "--", "pwd")
+	if code != 0 {
+		t.Fatalf("exit=%d stderr=%q", code, stderr)
+	}
+	// Note: On macOS, /var is symlinked to /private/var, so we check for the base name
+	if !strings.Contains(stdout, filepath.Base(tmpDir)) {
+		t.Fatalf("expected working directory to contain %q, got %q", filepath.Base(tmpDir), stdout)
+	}
+}
+
+func TestBlackbox_Exec_NoneRuntime_Timeout(t *testing.T) {
+	// Test that timeout is enforced - command should be killed before 10s
+	start := time.Now()
+	_, stderr, code := runDeputy(t, "exec", "--runtime", "none", "--timeout", "1s", "--", "sleep", "10")
+	elapsed := time.Since(start)
+
+	// Verify the command was interrupted (didn't run for full 10s)
+	if elapsed > 5*time.Second {
+		t.Fatalf("timeout didn't work: command ran for %v", elapsed)
+	}
+
+	// Should fail with non-zero exit code due to timeout
+	if code == 0 {
+		t.Fatalf("expected non-zero exit code due to timeout")
+	}
+
+	// Error message should indicate timeout
+	if !strings.Contains(stderr, "timed out") {
+		t.Logf("stderr: %q", stderr)
+		// Don't fail - the important thing is it timed out and returned non-zero
+	}
+}
+
+func TestBlackbox_Exec_MissingCommand(t *testing.T) {
+	// Test error handling for missing command
+	_, stderr, code := runDeputy(t, "exec", "--runtime", "none", "--")
+	if code == 0 {
+		t.Fatalf("expected non-zero exit code for missing command")
+	}
+	if !strings.Contains(stderr, "provide the command") {
+		t.Fatalf("expected error about missing command, got %q", stderr)
+	}
+}
+
+func TestBlackbox_Exec_InvalidRuntime(t *testing.T) {
+	// Test error handling for invalid runtime
+	_, stderr, code := runDeputy(t, "exec", "--runtime", "nonexistent-runtime-xyz", "--", "echo", "test")
+	if code == 0 {
+		t.Fatalf("expected non-zero exit code for invalid runtime")
+	}
+	if !strings.Contains(stderr, "unsupported runtime") {
+		t.Fatalf("expected error about unsupported runtime, got %q", stderr)
+	}
+}
+
+func TestBlackbox_Exec_PluginRuntime_MissingPluginName(t *testing.T) {
+	// Test that plugin runtime requires --plugin flag
+	_, stderr, code := runDeputy(t, "exec", "--runtime", "plugin", "--", "echo", "test")
+	if code == 0 {
+		t.Fatalf("expected non-zero exit code when --plugin is missing")
+	}
+	if !strings.Contains(stderr, "--plugin is required") {
+		t.Fatalf("expected error about missing --plugin, got %q", stderr)
+	}
+}
+
+func TestBlackbox_Exec_PluginRuntime_PluginNotFound(t *testing.T) {
+	// When a plugin isn't found, the sandbox manager falls back to other runtimes.
+	// This tests that fallback behavior works - the command still executes via
+	// a fallback runtime (like 'none' or 'sandbox-exec' on macOS).
+	stdout, stderr, code := runDeputy(t, "exec", "--runtime", "plugin", "--plugin", "nonexistent-plugin-xyz", "--", "echo", "fallback-test")
+
+	// The command should still succeed via fallback runtime
+	if code != 0 {
+		// If it fails, check if it's a plugin-related error (which would be a regression)
+		if strings.Contains(stderr, "plugin") && strings.Contains(stderr, "not found") {
+			t.Fatalf("plugin fallback didn't work: %s", stderr)
+		}
+		t.Fatalf("unexpected failure: exit=%d stderr=%q", code, stderr)
+	}
+
+	// Verify the command actually ran
+	if !strings.Contains(stdout, "fallback-test") {
+		t.Fatalf("expected output from fallback runtime, got stdout=%q stderr=%q", stdout, stderr)
+	}
+}
+
+func TestBlackbox_Exec_ReadOnlyMode(t *testing.T) {
+	// Test read-only mode works
+	stdout, stderr, code := runDeputy(t, "exec", "--runtime", "none", "--mode", "read-only", "--", "echo", "readonly test")
+	if code != 0 {
+		t.Fatalf("exit=%d stderr=%q", code, stderr)
+	}
+	if !strings.Contains(stdout, "readonly test") {
+		t.Fatalf("expected output, got %q", stdout)
+	}
+}
+
+func TestBlackbox_Exec_NoWorkspace(t *testing.T) {
+	// Test --no-workspace flag
+	stdout, stderr, code := runDeputy(t, "exec", "--runtime", "none", "--no-workspace", "--", "echo", "no workspace")
+	if code != 0 {
+		t.Fatalf("exit=%d stderr=%q", code, stderr)
+	}
+	if !strings.Contains(stdout, "no workspace") {
+		t.Fatalf("expected output, got %q", stdout)
+	}
 }

@@ -31,15 +31,15 @@ deputy triage [repo] [flags]
 
 ### Agent Flags
 
-| Flag | Default | Description |
-| --- | --- | --- |
-| `--agent` | | AI agent (e.g., `codex`) |
-| `--agent-model` | | Model identifier |
-| `--agent-sandbox` | `read-only` | Sandbox policy |
-| `--agent-full-auto` | `false` | Full-auto mode |
-| `--agent-thread` | | Resume previous thread |
-| `--agent-include-plan-tool` | `true` | Allow plan tool |
-| `--agent-skip-git-check` | `true` | Skip git checks |
+| Flag | Short | Default | Description |
+| --- | --- | --- | --- |
+| `--agent` | | | AI agent (e.g., `codex`) |
+| `--agent-model` | | | Model identifier |
+| `--agent-sandbox` | | `read-only` | Sandbox policy |
+| `--agent-full-auto` | | `false` | Full-auto mode |
+| `--agent-thread` | | | Resume previous thread |
+| `--agent-include-plan-tool` | | `true` | Allow plan tool |
+| `--agent-skip-git-check` | | `true` | Skip git checks |
 
 ## Examples
 

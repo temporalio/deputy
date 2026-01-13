@@ -1,0 +1,563 @@
+syntax = "proto3";
+
+package deputy.diff.v1;
+
+import "google/protobuf/timestamp.proto";
+import "deputy/target/v1/target.proto";
+import "deputy/dependency/v1/dependency.proto";
+import "deputy/vulnerability/v1/vulnerability.proto";
+import "deputy/container/v1/container.proto";
+import "deputy/scan/v1/service.proto";
+
+option go_package = "github.com/picatz/deputy/gen/deputy/diff/v1;diffv1";
+
+// DiffService provides dependency and vulnerability diff capabilities.
+//
+// This service compares two targets (git refs, container image tags, directories)
+// and identifies what changed between them. It's useful for:
+//   - Understanding dependency changes between releases
+//   - Reviewing security impact of version upgrades
+//   - CI/CD checks on pull requests
+//
+// Security Model:
+// The service follows the same security constraints as ScanService:
+//
+// In-Process / Local Daemon Mode:
+//   - Full filesystem access for local directories
+//   - Local Docker daemon access (docker-daemon://)
+//
+// Remote Server Mode:
+//   - Only remote-accessible targets (git URLs, container registries)
+//   - Local paths and daemon transports are rejected
+service DiffService {
+  // DiffPackages compares dependencies between two targets.
+  // Returns added, removed, upgraded, and downgraded packages.
+  rpc DiffPackages(DiffPackagesRequest) returns (DiffPackagesResponse);
+
+  // DiffVulnerabilities compares vulnerabilities between two targets.
+  // Returns newly introduced and fixed vulnerabilities.
+  rpc DiffVulnerabilities(DiffVulnerabilitiesRequest) returns (DiffVulnerabilitiesResponse);
+
+  // DiffContainerImages performs a comprehensive diff between two container images.
+  // Returns package changes, vulnerability changes, configuration changes, and layer analysis.
+  // This is the recommended RPC for comparing container images as it provides full context.
+  rpc DiffContainerImages(DiffContainerImagesRequest) returns (DiffContainerImagesResponse);
+}
+
+// DiffPackagesRequest specifies the targets to compare for package differences.
+message DiffPackagesRequest {
+  // BaseTarget is the baseline target (older version, e.g., "main", "v1.0.0").
+  // Can be a git ref, container image tag, or directory path.
+  string base_target = 1;
+
+  // TargetTarget is the target to compare against base (newer version, e.g., "HEAD", "v2.0.0").
+  string target_target = 2;
+
+  // Options configure diff behavior.
+  DiffOptions options = 3;
+}
+
+// DiffOptions configures diff behavior.
+message DiffOptions {
+  // Ecosystems filters to specific package ecosystems.
+  // Empty means compare all detected ecosystems.
+  repeated string ecosystems = 1;
+
+  // IncludeTransitive includes transitive dependency changes.
+  // Default is true.
+  bool include_transitive = 2;
+
+  // Platform specifies target platform for container images (e.g., "linux/amd64").
+  string platform = 3;
+
+  // BaseTargetHint provides disambiguation for the base target.
+  deputy.target.v1.TargetKind base_target_hint = 4;
+
+  // TargetTargetHint provides disambiguation for the target target.
+  deputy.target.v1.TargetKind target_target_hint = 5;
+}
+
+// DiffPackagesResponse contains the package differences.
+message DiffPackagesResponse {
+  // BaseTarget describes what was used as the baseline.
+  deputy.target.v1.Target base_target = 1;
+
+  // TargetTarget describes what was compared against the baseline.
+  deputy.target.v1.Target target_target = 2;
+
+  // GeneratedAt is when this diff was computed.
+  google.protobuf.Timestamp generated_at = 3;
+
+  // Changes lists all dependency changes.
+  repeated PackageChange changes = 4;
+
+  // Stats summarizes the diff results.
+  DiffStats stats = 5;
+
+  // Warnings contains non-fatal issues encountered during diffing.
+  repeated string warnings = 6;
+}
+
+// PackageChange represents a single dependency change.
+message PackageChange {
+  // Package identifies the changed dependency.
+  deputy.dependency.v1.Package package = 1;
+
+  // ChangeKind classifies the type of change.
+  ChangeKind change_kind = 2;
+
+  // BaseVersion is the version in the base target (empty for Added).
+  string base_version = 3;
+
+  // TargetVersion is the version in the target target (empty for Removed).
+  string target_version = 4;
+
+  // OldName is the previous package name if it changed (e.g., import path canonicalization).
+  string old_name = 5;
+
+  // IsDirect indicates whether this is a direct dependency.
+  bool is_direct = 6;
+}
+
+// ChangeKind classifies the type of dependency change.
+enum ChangeKind {
+  // Unspecified change kind.
+  CHANGE_KIND_UNSPECIFIED = 0;
+
+  // Added indicates the dependency is new in the target.
+  CHANGE_KIND_ADDED = 1;
+
+  // Removed indicates the dependency was removed from the target.
+  CHANGE_KIND_REMOVED = 2;
+
+  // Upgraded indicates a semantic version upgrade.
+  CHANGE_KIND_UPGRADED = 3;
+
+  // Downgraded indicates a semantic version downgrade.
+  CHANGE_KIND_DOWNGRADED = 4;
+
+  // Updated indicates a non-version change (e.g., path canonicalization).
+  CHANGE_KIND_UPDATED = 5;
+}
+
+// DiffStats summarizes diff results.
+message DiffStats {
+  // AddedCount is the number of added packages.
+  int32 added_count = 1;
+
+  // RemovedCount is the number of removed packages.
+  int32 removed_count = 2;
+
+  // UpgradedCount is the number of upgraded packages.
+  int32 upgraded_count = 3;
+
+  // DowngradedCount is the number of downgraded packages.
+  int32 downgraded_count = 4;
+
+  // UpdatedCount is the number of packages with non-version changes.
+  int32 updated_count = 5;
+
+  // TotalChanges is the total number of changes.
+  int32 total_changes = 6;
+}
+
+// DiffVulnerabilitiesRequest specifies targets for vulnerability comparison.
+message DiffVulnerabilitiesRequest {
+  // BaseTarget is the baseline target.
+  string base_target = 1;
+
+  // TargetTarget is the target to compare against base.
+  string target_target = 2;
+
+  // Options configure diff behavior.
+  DiffOptions diff_options = 3;
+
+  // ScanOptions configure vulnerability scanning behavior.
+  deputy.scan.v1.ScanOptions scan_options = 4;
+}
+
+// DiffVulnerabilitiesResponse contains vulnerability differences.
+message DiffVulnerabilitiesResponse {
+  // BaseTarget describes what was used as the baseline.
+  deputy.target.v1.Target base_target = 1;
+
+  // TargetTarget describes what was compared against the baseline.
+  deputy.target.v1.Target target_target = 2;
+
+  // GeneratedAt is when this diff was computed.
+  google.protobuf.Timestamp generated_at = 3;
+
+  // AddedVulnerabilities are vulnerabilities newly introduced in the target.
+  repeated deputy.vulnerability.v1.Finding added_vulnerabilities = 4;
+
+  // RemovedVulnerabilities are vulnerabilities fixed/removed in the target.
+  repeated deputy.vulnerability.v1.Finding removed_vulnerabilities = 5;
+
+  // Advisories maps advisory IDs to full advisory details.
+  map<string, deputy.vulnerability.v1.Advisory> advisories = 6;
+
+  // Stats summarizes the vulnerability diff.
+  VulnerabilityDiffStats stats = 7;
+
+  // Warnings contains non-fatal issues encountered.
+  repeated string warnings = 8;
+}
+
+// VulnerabilityDiffStats summarizes vulnerability differences.
+message VulnerabilityDiffStats {
+  // AddedCount is the number of new vulnerabilities.
+  int32 added_count = 1;
+
+  // RemovedCount is the number of fixed vulnerabilities.
+  int32 removed_count = 2;
+
+  // AddedBySeverity breaks down added vulnerabilities by severity.
+  map<string, int32> added_by_severity = 3;
+
+  // RemovedBySeverity breaks down fixed vulnerabilities by severity.
+  map<string, int32> removed_by_severity = 4;
+}
+
+// DiffContainerImagesRequest specifies container images to compare.
+message DiffContainerImagesRequest {
+  // BaseImage is the baseline container image reference (e.g., "nginx:1.24", "ghcr.io/org/app:v1.0").
+  string base_image = 1;
+
+  // TargetImage is the target container image reference to compare against base.
+  string target_image = 2;
+
+  // Options configure container diff behavior.
+  ContainerDiffOptions options = 3;
+}
+
+// ContainerDiffOptions configures container image diff behavior.
+message ContainerDiffOptions {
+  // ScanVulnerabilities enables vulnerability scanning during diff.
+  // When enabled, vulnerabilities are compared between the two images.
+  bool scan_vulnerabilities = 1;
+
+  // Platform specifies target platform (e.g., "linux/amd64").
+  // Defaults to the host platform if not specified.
+  string platform = 2;
+
+  // ImageTransport specifies how to fetch images.
+  // Values: "remote" (default), "daemon" (docker-daemon://).
+  // "daemon" is only available in in-process or local daemon mode.
+  string image_transport = 3;
+
+  // PolicyPaths are paths to policy files to evaluate against the diff.
+  repeated string policy_paths = 4;
+
+  // ScanOptions configure vulnerability scanning behavior.
+  deputy.scan.v1.ScanOptions scan_options = 5;
+}
+
+// DiffContainerImagesResponse contains the comprehensive container diff result.
+message DiffContainerImagesResponse {
+  // BaseImage describes the baseline image.
+  ContainerImageRef base_image = 1;
+
+  // TargetImage describes the target image.
+  ContainerImageRef target_image = 2;
+
+  // GeneratedAt is when this diff was computed.
+  google.protobuf.Timestamp generated_at = 3;
+
+  // PackageChanges lists all package changes between the images.
+  repeated ContainerPackageChange package_changes = 4;
+
+  // VulnerabilityChanges lists vulnerability changes (when scan_vulnerabilities is enabled).
+  repeated ContainerVulnerabilityChange vulnerability_changes = 5;
+
+  // Advisories maps advisory IDs to full advisory details.
+  map<string, deputy.vulnerability.v1.Advisory> advisories = 6;
+
+  // ConfigChanges describes configuration differences between the images.
+  ContainerConfigDiff config_changes = 7;
+
+  // LayerAnalysis provides layer-level comparison.
+  LayerDiffAnalysis layer_analysis = 8;
+
+  // Summary provides aggregate statistics.
+  ContainerDiffSummary summary = 9;
+
+  // BaseContext provides additional context about the base image.
+  ContainerImageContext base_context = 10;
+
+  // TargetContext provides additional context about the target image.
+  ContainerImageContext target_context = 11;
+
+  // Warnings contains non-fatal issues encountered.
+  repeated string warnings = 12;
+}
+
+// ContainerImageRef identifies a container image.
+message ContainerImageRef {
+  // Reference is the original reference string.
+  string reference = 1;
+
+  // Registry is the container registry (e.g., "docker.io", "ghcr.io").
+  string registry = 2;
+
+  // Repository is the repository path within the registry.
+  string repository = 3;
+
+  // Tag is the image tag (if specified).
+  string tag = 4;
+
+  // Digest is the image digest (if known).
+  string digest = 5;
+}
+
+// ContainerImageContext provides additional image context for display.
+message ContainerImageContext {
+  // Distro is the detected OS distribution (e.g., "Debian 11", "Alpine 3.19").
+  string distro = 1;
+
+  // PackageCount is the total number of packages in the image.
+  int32 package_count = 2;
+
+  // Size is the image size in bytes.
+  int64 size = 3;
+
+  // Architecture is the CPU architecture (e.g., "amd64", "arm64").
+  string architecture = 4;
+}
+
+// ContainerPackageChange represents a package change between container images.
+message ContainerPackageChange {
+  // Name is the package name.
+  string name = 1;
+
+  // Ecosystem is the package ecosystem (e.g., "Debian:11", "Alpine:3.19", "Go").
+  string ecosystem = 2;
+
+  // ChangeKind classifies the type of change.
+  ChangeKind change_kind = 3;
+
+  // BaseVersion is the version in the base image (empty for Added).
+  string base_version = 4;
+
+  // TargetVersion is the version in the target image (empty for Removed).
+  string target_version = 5;
+
+  // OldName is the previous package name if it changed.
+  string old_name = 6;
+
+  // IsDirect indicates whether this is a direct dependency (vs transitive).
+  bool is_direct = 7;
+
+  // BaseLayerDetails describes which layer introduced this package in the base image.
+  deputy.container.v1.LayerDetails base_layer_details = 8;
+
+  // TargetLayerDetails describes which layer introduced this package in the target image.
+  deputy.container.v1.LayerDetails target_layer_details = 9;
+}
+
+// ContainerVulnerabilityChange represents a vulnerability change between container images.
+message ContainerVulnerabilityChange {
+  // ID is the vulnerability identifier (e.g., "CVE-2024-1234", "GHSA-xxxx").
+  string id = 1;
+
+  // ChangeKind classifies the type of change.
+  VulnerabilityChangeKind change_kind = 2;
+
+  // Severity is the vulnerability severity (e.g., "CRITICAL", "HIGH").
+  string severity = 3;
+
+  // SeverityType indicates the scoring system (e.g., "CVSS_V3").
+  string severity_type = 4;
+
+  // PackageName is the affected package.
+  string package_name = 5;
+
+  // Ecosystem is the package ecosystem.
+  string ecosystem = 6;
+
+  // BaseVersion is the package version in the base image.
+  string base_version = 7;
+
+  // TargetVersion is the package version in the target image.
+  string target_version = 8;
+
+  // FixedVersions lists versions where this vulnerability is fixed.
+  repeated string fixed_versions = 9;
+
+  // Summary is a brief description of the vulnerability.
+  string summary = 10;
+
+  // Aliases are alternative identifiers (e.g., CVE for a GHSA).
+  repeated string aliases = 11;
+
+  // Published is the publication date (YYYY-MM-DD).
+  string published = 12;
+
+  // BaseLayerDetails describes which layer introduced the vulnerable package in base.
+  deputy.container.v1.LayerDetails base_layer_details = 13;
+
+  // TargetLayerDetails describes which layer introduced the vulnerable package in target.
+  deputy.container.v1.LayerDetails target_layer_details = 14;
+}
+
+// VulnerabilityChangeKind classifies how a vulnerability changed.
+enum VulnerabilityChangeKind {
+  // Unspecified change kind.
+  VULNERABILITY_CHANGE_KIND_UNSPECIFIED = 0;
+
+  // Added indicates the vulnerability is newly introduced in the target.
+  VULNERABILITY_CHANGE_KIND_ADDED = 1;
+
+  // Removed indicates the vulnerability was removed (package removed).
+  VULNERABILITY_CHANGE_KIND_REMOVED = 2;
+
+  // Fixed indicates the vulnerability was fixed by a package upgrade.
+  VULNERABILITY_CHANGE_KIND_FIXED = 3;
+
+  // Persisted indicates the vulnerability exists in both images.
+  VULNERABILITY_CHANGE_KIND_PERSISTED = 4;
+}
+
+// ContainerConfigDiff describes configuration differences between container images.
+message ContainerConfigDiff {
+  // UserChanged indicates the USER directive changed.
+  bool user_changed = 1;
+  string base_user = 2;
+  string target_user = 3;
+
+  // RootChanged indicates running-as-root status changed.
+  bool root_changed = 4;
+  bool base_is_root = 5;
+  bool target_is_root = 6;
+
+  // PortsChanged indicates EXPOSE ports changed.
+  bool ports_changed = 7;
+  repeated string ports_added = 8;
+  repeated string ports_removed = 9;
+
+  // VolumesChanged indicates VOLUME declarations changed.
+  bool volumes_changed = 10;
+  repeated string volumes_added = 11;
+  repeated string volumes_removed = 12;
+
+  // EntrypointChanged indicates ENTRYPOINT changed.
+  bool entrypoint_changed = 13;
+  repeated string base_entrypoint = 14;
+  repeated string target_entrypoint = 15;
+
+  // CmdChanged indicates CMD changed.
+  bool cmd_changed = 16;
+  repeated string base_cmd = 17;
+  repeated string target_cmd = 18;
+
+  // WorkingDirChanged indicates WORKDIR changed.
+  bool working_dir_changed = 19;
+  string base_working_dir = 20;
+  string target_working_dir = 21;
+
+  // HealthcheckChanged indicates HEALTHCHECK changed.
+  bool healthcheck_changed = 22;
+
+  // EnvChanges lists environment variable changes.
+  repeated EnvChange env_changes = 23;
+
+  // LabelChanges lists label changes.
+  repeated LabelChange label_changes = 24;
+}
+
+// EnvChange represents an environment variable change.
+message EnvChange {
+  string name = 1;
+  ChangeKind change_kind = 2;
+  string base_value = 3;
+  string target_value = 4;
+  bool is_sensitive = 5;
+}
+
+// LabelChange represents an image label change.
+message LabelChange {
+  string key = 1;
+  ChangeKind change_kind = 2;
+  string base_value = 3;
+  string target_value = 4;
+}
+
+// LayerDiffAnalysis provides layer-level comparison.
+message LayerDiffAnalysis {
+  // BaseLayerCount is the number of layers in the base image.
+  int32 base_layer_count = 1;
+
+  // TargetLayerCount is the number of layers in the target image.
+  int32 target_layer_count = 2;
+
+  // CommonLayers is the number of layers shared between images.
+  int32 common_layers = 3;
+
+  // LayerChanges lists individual layer changes.
+  repeated LayerChange layer_changes = 4;
+}
+
+// LayerChange represents a layer change between images.
+message LayerChange {
+  // Index is the layer position.
+  int32 index = 1;
+
+  // ChangeKind classifies the type of change.
+  LayerChangeKind change_kind = 2;
+
+  // BaseCommand is the Dockerfile command in the base image.
+  string base_command = 3;
+
+  // TargetCommand is the Dockerfile command in the target image.
+  string target_command = 4;
+}
+
+// LayerChangeKind classifies how a layer changed.
+enum LayerChangeKind {
+  // Unspecified change kind.
+  LAYER_CHANGE_KIND_UNSPECIFIED = 0;
+
+  // Added indicates the layer is new in the target.
+  LAYER_CHANGE_KIND_ADDED = 1;
+
+  // Removed indicates the layer was removed from the target.
+  LAYER_CHANGE_KIND_REMOVED = 2;
+
+  // Modified indicates the layer content changed.
+  LAYER_CHANGE_KIND_MODIFIED = 3;
+
+  // Unchanged indicates the layer is identical in both images.
+  LAYER_CHANGE_KIND_UNCHANGED = 4;
+}
+
+// ContainerDiffSummary provides aggregate statistics for a container diff.
+message ContainerDiffSummary {
+  // PackagesAdded is the count of newly added packages.
+  int32 packages_added = 1;
+
+  // PackagesRemoved is the count of removed packages.
+  int32 packages_removed = 2;
+
+  // PackagesUpgraded is the count of upgraded packages.
+  int32 packages_upgraded = 3;
+
+  // PackagesDowngraded is the count of downgraded packages.
+  int32 packages_downgraded = 4;
+
+  // VulnerabilitiesAdded is the count of newly introduced vulnerabilities.
+  int32 vulnerabilities_added = 5;
+
+  // VulnerabilitiesRemoved is the count of removed vulnerabilities (package removed).
+  int32 vulnerabilities_removed = 6;
+
+  // VulnerabilitiesFixed is the count of vulnerabilities fixed by upgrades.
+  int32 vulnerabilities_fixed = 7;
+
+  // LayersAdded is the count of added layers.
+  int32 layers_added = 8;
+
+  // LayersRemoved is the count of removed layers.
+  int32 layers_removed = 9;
+
+  // ConfigChanged indicates if any configuration changed.
+  bool config_changed = 10;
+}

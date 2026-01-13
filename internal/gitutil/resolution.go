@@ -79,12 +79,21 @@ func ParseTimeShorthandToISO(expr string) string {
 // is present, the function walks the commit history from <ref> backwards to find
 // the newest commit whose commit time is <= the timestamp, and returns its hash.
 // If no time selector is present, this defers to go-git's ResolveRevision.
+// For CI environments (GitHub Actions, etc.), if a simple branch name fails to resolve,
+// it will also try origin/<branch> as a fallback.
 func ResolveRevisionEnhanced(repo *git.Repository, ref string) (*plumbing.Hash, error) {
 	r := strings.TrimSpace(ref)
 	before, after, found := strings.Cut(r, "@{")
 	if !found {
 		rn := NormalizeGitRefForGoGit(r)
-		return repo.ResolveRevision(plumbing.Revision(rn))
+		hash, err := repo.ResolveRevision(plumbing.Revision(rn))
+		if err != nil && !strings.Contains(rn, "/") {
+			// Try with origin/ prefix for CI environments
+			if remoteHash, remoteErr := repo.ResolveRevision(plumbing.Revision("origin/" + rn)); remoteErr == nil {
+				return remoteHash, nil
+			}
+		}
+		return hash, err
 	}
 
 	inner, _, found := strings.Cut(after, "}")

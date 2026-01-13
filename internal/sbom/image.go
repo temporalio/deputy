@@ -11,7 +11,6 @@ import (
 	"github.com/picatz/deputy/internal/inventory"
 	"github.com/picatz/deputy/internal/otel"
 	"github.com/picatz/deputy/internal/repository/workspace"
-	"github.com/picatz/deputy/internal/scan"
 	"github.com/picatz/deputy/internal/targets"
 	"github.com/picatz/deputy/internal/targets/providers"
 	"github.com/protobom/protobom/pkg/sbom"
@@ -129,7 +128,7 @@ func GenerateImage(ctx context.Context, target string, targetOpts map[string]str
 		}
 	}
 
-	targetMeta := scan.Target{
+	targetMeta := inventory.Target{
 		Kind:        targets.KindContainerImage,
 		DisplayPath: display,
 		LocalPath:   mat.Path,

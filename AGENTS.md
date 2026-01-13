@@ -174,6 +174,8 @@ deputy sbom docker://nginx:1.25 --format cyclonedx-json  # image SBOM
 # List dependencies
 deputy list                                    # list all dependencies
 deputy list --only-direct                      # direct dependencies only
+deputy list docker://nginx:1.25               # list packages in container image
+deputy list --source remote alpine:3.19       # bare image ref with --source
 
 # Policy development
 deputy policy eval policy.yaml                 # test policy
@@ -190,6 +192,22 @@ deputy secrets                                 # scan current directory for secr
 deputy secrets /path/to/project                # scan specific directory
 deputy secrets --format json                   # JSON output for CI/CD
 deputy scan --secrets                          # combined vuln + secrets scan
+
+# Server mode (for remote clients)
+deputy server                                  # start API server on :8090
+deputy server --addr :9000                     # custom port
+deputy --server http://localhost:8090 scan    # connect to remote server
+
+# Cache management (offline use)
+deputy cache status                            # show cache status and statistics
+deputy cache init                              # download OSV + KEV for offline use
+deputy cache init osv kev                      # download specific sources
+deputy cache update                            # update stale caches
+deputy cache update --force                    # force refresh all caches
+deputy cache clear                             # clear all cached data
+deputy cache clear osv                         # clear specific cache
+deputy scan --no-cache                         # bypass all caches, fetch fresh data
+deputy scan --no-cache=osv,kev                 # bypass specific caches
 ```
 
 ## Project Structure
@@ -205,6 +223,7 @@ internal/
   cache/                     # caching primitives
     memory/                  # in-memory TTL LRU cache
     disk/                    # persistent JSON-on-disk cache
+    sources/                 # cache.Source implementations (osv, kev, epss, depsdev)
   container/                 # container analysis
     image/                   # image config, metadata, extraction
   inventory/                 # dependency detection
@@ -235,10 +254,460 @@ policy/examples/             # 30+ CEL policy examples
 
 Key entry points: [`main.go`](main.go) → [`internal/cli/cli.go`](internal/cli/cli.go) → [`internal/cli/cmd/root.go`](internal/cli/cmd/root.go)
 
+## Services Architecture
+
+Deputy uses a proto-first design where CLI, MCP, and SDK all consume the same ConnectRPC-generated service interfaces. This enables three execution modes with different security characteristics.
+
+```mermaid
+flowchart TB
+    subgraph Consumers["<b>Service Consumers</b>"]
+        direction LR
+        cli["CLI Commands"]
+        mcp["MCP Server"]
+        sdk["Go SDK"]
+    end
+
+    subgraph Services["<b>services.Clients</b>"]
+        direction TB
+        vulns["Vulns<br/><i>ScanServiceClient</i>"]
+        inventory["Inventory<br/><i>ListServiceClient</i>"]
+        sbom["SBOM<br/><i>SBOMServiceClient</i>"]
+        secrets["Secrets<br/><i>SecretsServiceClient</i>"]
+        diff["Diff<br/><i>DiffServiceClient</i>"]
+        graph["Graph<br/><i>GraphServiceClient</i>"]
+    end
+
+    subgraph Transport["<b>Transport Layer</b>"]
+        direction LR
+        inproc["<b>InProcessTransport</b><br/>Direct handler calls<br/>Zero network overhead"]
+        daemon["<b>Unix Socket</b><br/>Local daemon<br/>Shared cache + OTel"]
+        remote["<b>HTTP/2</b><br/>ConnectRPC<br/>Remote server"]
+    end
+
+    subgraph Handlers["<b>Service Handlers</b>"]
+        direction TB
+        scan_h["ScanHandler"]
+        list_h["ListHandler"]
+        sbom_h["SBOMHandler"]
+        secrets_h["SecretsHandler"]
+    end
+
+    cli & mcp & sdk --> Services
+    Services --> Transport
+    inproc --> Handlers
+    daemon -->|"Unix socket"| Handlers
+    remote -->|"Network"| Handlers
+
+    classDef consumer fill:#e3f2fd,stroke:#1565c0
+    classDef services fill:#e8f5e9,stroke:#2e7d32
+    classDef transport fill:#fff3e0,stroke:#e65100
+    classDef handler fill:#f3e5f5,stroke:#7b1fa2
+
+    class Consumers,cli,mcp,sdk consumer
+    class Services,vulns,inventory,sbom,secrets,diff,graph services
+    class Transport,inproc,daemon,remote transport
+    class Handlers,scan_h,list_h,sbom_h,secrets_h handler
+```
+
+### Execution Modes
+
+| Mode | Transport | Use Case |
+|------|-----------|----------|
+| **In-Process** | `InProcessTransport` | CLI/MCP default, zero overhead |
+| **Local Daemon** | Unix socket | Shared caching, OTel collection, local observability |
+| **Remote Server** | HTTP/2 (ConnectRPC) | Centralized policy, enterprise |
+
+Mode is auto-detected:
+1. If `DEPUTY_SERVER` is set → Remote mode
+2. If `DEPUTY_DAEMON` is set or `/tmp/deputy.sock` exists → Local daemon mode
+3. Otherwise → In-process mode
+
+### Security Model
+
+Deputy's security model distinguishes between **local modes** (in-process, daemon) and **remote server mode**. The core principle: remote servers must never execute arbitrary code or access local filesystems.
+
+```mermaid
+flowchart LR
+    subgraph Local["<b>Local Modes</b><br/>(In-Process, Daemon)"]
+        direction TB
+        L1["✓ Filesystem paths"]
+        L2["✓ Stdin SBOM (-)"]
+        L3["✓ docker-daemon://"]
+        L4["✓ tarball://, oci-archive://"]
+        L5["✓ Git URLs"]
+        L6["✓ Container registries"]
+        L7["✓ PURLs"]
+        L8["✓ Execute remediation plans"]
+        L9["✓ AI agent execution"]
+    end
+
+    subgraph Remote["<b>Remote Server</b>"]
+        direction TB
+        R1["✗ Filesystem paths"]
+        R2["✗ Stdin SBOM (-)"]
+        R3["✗ docker-daemon://"]
+        R4["✗ tarball://, oci-archive://"]
+        R5["✓ Git URLs"]
+        R6["✓ Container registries"]
+        R7["✓ PURLs"]
+        R8["✗ Execute remediation plans"]
+        R9["✗ AI agent execution"]
+    end
+
+    validate["ValidateRemoteTarget()"]
+    localMode["localMode check"]
+
+    Remote --> validate
+    validate -->|"Rejects local targets"| rejected["Error with guidance"]
+    Remote --> localMode
+    localMode -->|"Blocks code execution"| blocked["PermissionDenied"]
+
+    classDef allowed fill:#c8e6c9,stroke:#2e7d32
+    classDef denied fill:#ffcdd2,stroke:#c62828
+    classDef validator fill:#fff3e0,stroke:#e65100
+
+    class L1,L2,L3,L4,L5,L6,L7,L8,L9 allowed
+    class R1,R2,R3,R4,R8,R9 denied
+    class R5,R6,R7 allowed
+    class validate,localMode validator
+```
+
+**Two security mechanisms:**
+
+1. **Target validation** (`ValidateRemoteTarget()`): Blocks filesystem paths, stdin, and local container transports on remote servers. Ensures servers only access network-reachable resources.
+
+2. **Local mode gating** (`localMode` field): Controls code execution capabilities. Handlers that execute shell commands or AI agents check `localMode` and return `PermissionDenied` if disabled.
+
+**Handler Security Classification:**
+
+| Handler | Method | Filesystem Access | Code Execution | Remote Safe |
+|---------|--------|-------------------|----------------|-------------|
+| Scan | `Scan()` | Via target validation | No | Yes (with validation) |
+| List | `ListPackages()` | Via target validation | No | Yes (with validation) |
+| SBOM | `Generate()` | Via target validation | No | Yes (with validation) |
+| SBOM | `Diff()` | No (byte arrays) | No | **Yes** |
+| Remediation | `GeneratePlan()` | No (in-memory) | No | **Yes** |
+| Remediation | `ExecutePlan()` | Yes | **Yes** | **No** - requires `localMode` |
+| Remediation | `ExecuteWithAgent()` | Yes | **Yes** | **No** - requires `localMode` |
+| Secrets | `Scan()` | Via target validation | No | Yes (with validation) |
+
+**Implementation pattern:**
+
+```go
+// Handler with localMode protection
+type RemediationHandler struct {
+    localMode bool  // Set via WithRemediationLocalMode()
+}
+
+func (h *RemediationHandler) ExecutePlan(...) error {
+    // Security: Block on remote servers
+    if !h.localMode {
+        return connect.NewError(connect.CodePermissionDenied,
+            fmt.Errorf("ExecutePlan is not available on remote servers; use local CLI or daemon mode"))
+    }
+    // ... execute shell commands
+}
+```
+
+**For developers adding new handlers:**
+- Read-only operations on network resources: Safe for remote servers
+- Operations requiring local filesystem: Add `localMode` check or use `ValidateRemoteTarget()`
+- Operations executing code (shell, AI agents): **Must** require `localMode=true`
+
+### Target Detection (Two-Layer Design)
+
+Deputy uses two complementary detection strategies:
+
+| Layer | Function | Purpose | Filesystem Access |
+|-------|----------|---------|-------------------|
+| **CLI** | `scan_target.go` | Rich UX: git root detection, ambiguity errors, interactive hints | Yes |
+| **Client/Server** | `targets.DetectKind()` | Deterministic routing for RPC | No |
+
+```mermaid
+flowchart TB
+    subgraph CLI["CLI Detection (scan_target.go)"]
+        direction TB
+        C1["Check explicit --source flag"]
+        C2["Probe filesystem (os.Stat)"]
+        C3["Find git root (.git walk)"]
+        C4["Validate with go-containerregistry"]
+        C5["Handle ambiguity (owner/repo)"]
+        C1 --> C2 --> C3 --> C4 --> C5
+    end
+
+    subgraph Shared["Shared Detection (targets.DetectKind)"]
+        direction TB
+        S1["Pattern matching only"]
+        S2["pkg: → PURL"]
+        S3["docker://, oci:// → Image"]
+        S4["*.json, *.spdx → SBOM"]
+        S5["Dockerfile → Dockerfile"]
+        S1 --> S2 & S3 & S4 & S5
+    end
+
+    CLI -->|"In-Process mode"| Scanner["Scanner Methods"]
+    Shared -->|"RPC routing"| Scanner
+
+    note1["CLI uses rich detection for<br/>interactive user experience"]
+    note2["Shared detection is simple,<br/>fast, no I/O"]
+
+    CLI -.-> note1
+    Shared -.-> note2
+
+    classDef cli fill:#e3f2fd,stroke:#1565c0
+    classDef shared fill:#fff3e0,stroke:#e65100
+    classDef note fill:#fafafa,stroke:#9e9e9e,stroke-dasharray: 5 5
+
+    class CLI,C1,C2,C3,C4,C5 cli
+    class Shared,S1,S2,S3,S4,S5 shared
+    class note1,note2 note
+```
+
+**Design rationale:** The CLI needs filesystem awareness (git roots, file existence) and can prompt for clarification. The client/server layer needs deterministic, I/O-free routing for RPC.
+
+### Target Routing
+
+| Target Pattern | Detected As | Scanner Method |
+|----------------|-------------|----------------|
+| `pkg:golang/...` | PURL | `ScanPURL` |
+| `docker://`, `ghcr.io/...`, `nginx:1.25` | Container Image | `ScanContainerImage` |
+| `*.json`, `*.spdx`, `*.cdx` | SBOM | `ScanRepository` (file detection) |
+| `Dockerfile`, `*.dockerfile` | Dockerfile | `ScanDockerfile` |
+| `github.com/owner/repo`, `.` | Git/Directory | `ScanRepository` |
+
+Use `TargetHint` in `ScanOptions` when auto-detection is ambiguous:
+```go
+opts := &deputyv1.ScanOptions{
+    TargetHint: &deputyv1.TargetHint{
+        Kind: deputyv1.TargetKind_TARGET_KIND_CONTAINER_IMAGE,
+        ImageTransport: "daemon",  // Use local Docker daemon
+    },
+}
+```
+
+### Proto-First Design
+
+The client layer uses Protocol Buffers at the API boundary, enabling:
+- **Type-safe RPC** with ConnectRPC (HTTP/2 + gRPC)
+- **Language-agnostic clients** (future: TypeScript, Python SDKs)
+- **Versioned API contracts** with backward compatibility
+
+```mermaid
+flowchart LR
+    subgraph Internal["Internal Types"]
+        scan_result["scan.Result"]
+        scan_opts["scan.Options"]
+        image_info["image.Info"]
+    end
+
+    subgraph Proto["Proto Types"]
+        scan_resp["ScanResponse"]
+        scan_req["ScanRequest"]
+        image_proto["ImageInfo"]
+    end
+
+    subgraph Converters["internal/proto/"]
+        to_proto["*ToProto()"]
+        from_proto["*FromProto()"]
+    end
+
+    Internal -->|"Serialize"| to_proto --> Proto
+    Proto -->|"Deserialize"| from_proto --> Internal
+
+    note["In-process mode: conversions<br/>only at API boundary"]
+    Converters -.-> note
+
+    classDef internal fill:#e8f5e9,stroke:#2e7d32
+    classDef proto fill:#e3f2fd,stroke:#1565c0
+    classDef converter fill:#fff3e0,stroke:#e65100
+
+    class Internal,scan_result,scan_opts,image_info internal
+    class Proto,scan_resp,scan_req,image_proto proto
+    class Converters,to_proto,from_proto converter
+```
+
+### Key Files
+
+| File | Purpose |
+|------|---------|
+| [`internal/services/services.go`](internal/services/services.go) | Services and Clients structs, `localMode` configuration |
+| [`internal/services/transport.go`](internal/services/transport.go) | InProcessTransport implementation |
+| [`internal/server/scan_handler.go`](internal/server/scan_handler.go) | ScanServiceHandler with `ValidateRemoteTarget()` |
+| [`internal/server/list_handler.go`](internal/server/list_handler.go) | ListServiceHandler for package enumeration |
+| [`internal/server/sbom_handler.go`](internal/server/sbom_handler.go) | SBOMServiceHandler (Generate, Diff) |
+| [`internal/server/remediation_handler.go`](internal/server/remediation_handler.go) | RemediationServiceHandler with `localMode` security gates |
+| [`internal/targets/detect.go`](internal/targets/detect.go) | Shared target detection and `ValidateRemoteTarget()` |
+| [`internal/proto/`](internal/proto/) | Proto ↔ internal type converters |
+| [`api/deputy/`](api/deputy/) | Proto service definitions |
+| [`sdk/deputy.go`](sdk/deputy.go) | Go SDK wrapping services.Clients |
+
+## Plugin System
+
+Deputy supports external extractor plugins for custom package detection. Plugins run as separate processes using [pluginrpc](https://github.com/pluginrpc/pluginrpc), enabling any-language implementations with isolated execution.
+
+```mermaid
+flowchart TB
+    subgraph Deputy["<b>Deputy Process</b>"]
+        direction TB
+        scan["scan command"]
+        client["plugin.Client"]
+        inventory["inventory extraction"]
+
+        scan --> inventory
+        inventory --> client
+    end
+
+    subgraph Plugin["<b>Plugin Process</b>"]
+        direction TB
+        server["pluginrpc.Server"]
+        extractor["Extractor impl"]
+        sdk["sdk/plugin"]
+
+        server --> extractor
+        extractor --> sdk
+    end
+
+    subgraph Protocol["<b>pluginrpc Protocol</b>"]
+        direction TB
+        stdin["stdin (protobuf)"]
+        stdout["stdout (protobuf)"]
+        trace["TraceContext (W3C)"]
+    end
+
+    client -->|"spawn"| server
+    client -->|"FileRequired"| stdin
+    client -->|"Extract"| stdin
+    stdin --> server
+    server --> stdout
+    stdout --> client
+
+    classDef deputy fill:#e3f2fd,stroke:#1565c0
+    classDef plugin fill:#e8f5e9,stroke:#2e7d32
+    classDef protocol fill:#fff3e0,stroke:#e65100
+
+    class Deputy,scan,client,inventory deputy
+    class Plugin,server,extractor,sdk plugin
+    class Protocol,stdin,stdout,trace protocol
+```
+
+### Three Types of Extractors
+
+| Type | Location | Language | Discovery |
+|------|----------|----------|-----------|
+| **OSV-SCALIBR** | Built-in | Go | Automatic |
+| **Deputy Built-in** | `internal/inventory/plugins/` | Go | Automatic |
+| **Plugins** | External executables | Any | PATH or config |
+
+### Plugin SDK (Go)
+
+```go
+package main
+
+import "github.com/picatz/deputy/sdk/plugin"
+
+func main() {
+    plugin.Main(&myExtractor{})
+}
+
+type myExtractor struct{}
+
+func (e *myExtractor) Name() string           { return "custom/myformat" }
+func (e *myExtractor) DisplayName() string    { return "My Format" }
+func (e *myExtractor) Ecosystem() string      { return "custom" }
+func (e *myExtractor) Version() int           { return 1 }
+func (e *myExtractor) Description() string    { return "Extracts .myformat files" }
+func (e *myExtractor) FilePatterns() []string { return []string{"*.myformat"} }
+
+func (e *myExtractor) FileRequired(path string, isDir bool, mode uint32, size int64) bool {
+    return strings.HasSuffix(path, ".myformat")
+}
+
+func (e *myExtractor) Extract(path string, contents []byte, root string) ([]*plugin.Package, error) {
+    return []*plugin.Package{
+        plugin.NewPackage("example-pkg", "1.0.0", "custom"),
+    }, nil
+}
+```
+
+### Plugin Registration
+
+```yaml
+# .deputy.yaml
+plugins:
+  extractors:
+    - path: /usr/local/bin/deputy-extractor-myformat
+    - name: deputy-extractor-gemspec  # searches PATH
+```
+
+Plugins named `deputy-extractor-*` in PATH are auto-discovered.
+
+### Distributed Tracing
+
+Plugins automatically participate in distributed traces via W3C TraceContext:
+
+```
+Deputy Scan (parent span)
+├── inventory.Extract
+│   └── plugin.client.FileRequired ─────────────┐
+│       └── [subprocess: plugin.FileRequired] ◄─┘
+│   └── plugin.client.Extract ──────────────────┐
+│       └── [subprocess: plugin.Extract] ◄──────┘
+```
+
+When `OTEL_EXPORTER_OTLP_ENDPOINT` is set, trace context flows across process boundaries via the `TraceContext` field in plugin requests.
+
+### Plugin Protocol
+
+Plugins implement the `ExtractorService` from `api/deputy/plugin/v1/extractor.proto`:
+
+```protobuf
+service ExtractorService {
+  rpc Info(InfoRequest) returns (InfoResponse);
+  rpc FileRequired(FileRequiredRequest) returns (FileRequiredResponse);
+  rpc Extract(ExtractRequest) returns (ExtractResponse);
+}
+```
+
+Protocol requirements:
+- `--protocol` flag → returns `1`
+- `--spec` flag → returns procedure spec (binary)
+- Subcommands: `info`, `file-required`, `extract`
+- I/O: protobuf on stdin/stdout
+
+### Testing Plugins
+
+```bash
+# Build
+go build -o deputy-extractor-myformat .
+
+# Test protocol
+./deputy-extractor-myformat --protocol        # → 1
+./deputy-extractor-myformat --spec            # → procedure spec
+
+# Test info
+./deputy-extractor-myformat info --format json
+
+# Integration test with Deputy
+deputy scan --debug  # shows plugin invocations
+```
+
+### Key Files
+
+| File | Purpose |
+|------|---------|
+| [`api/deputy/plugin/v1/extractor.proto`](api/deputy/plugin/v1/extractor.proto) | Plugin service definition |
+| [`sdk/plugin/`](sdk/plugin/) | Go SDK for building plugins |
+| [`sdk/plugin/extractor.go`](sdk/plugin/extractor.go) | `Main()` entry point, `Extractor` interface |
+| [`sdk/plugin/package.go`](sdk/plugin/package.go) | `NewPackage()`, `PackageBuilder` |
+| [`sdk/plugin/trace.go`](sdk/plugin/trace.go) | OTel trace context extraction |
+| [`internal/inventory/plugin/client.go`](internal/inventory/plugin/client.go) | Plugin client for invoking plugins |
+| [`examples/plugins/dotenv-extractor/`](examples/plugins/dotenv-extractor/) | Example plugin |
+
 ## Tech Stack
 
 - [Go] 1.21+ (uses [`toolchain`](https://go.dev/doc/toolchain) directive); use modern features like [generics](https://go.dev/blog/intro-generics), and packages like [`slices`](https://pkg.go.dev/slices), [`maps`](https://pkg.go.dev/maps), [`iter`](https://pkg.go.dev/iter), [`cmp`](https://pkg.go.dev/cmp), [`log/slog`](https://pkg.go.dev/log/slog), etc.
 - [Cobra] for CLI; [Charm] for [Fang], [Lipgloss], etc. Prefer avoiding emojis in output, use ASCII or Unicode symbols, only if they add clarity; when in doubt, don't use them. Avoid them in most machine-readable output.
+- [ConnectRPC] for gRPC/HTTP services with ecosystem libraries: [authn-go] (JWT authentication), [validate-go] (protovalidate), [cors-go] (CORS headers), [otelconnect] (OpenTelemetry).
 - [CEL] (Common Expression Language) for policies in a [YAML]-based [DSL].
 - [OSV] API and [GCS] buckets for vulnerability data.
 - [OSV-SCALIBR] for SCA inventory extraction (see [`internal/inventory/`](internal/inventory/)).
@@ -253,6 +722,11 @@ Key entry points: [`main.go`](main.go) → [`internal/cli/cli.go`](internal/cli/
 [Charm]: https://charm.sh/
 [Fang]: https://github.com/charmbracelet/fang
 [Lipgloss]: https://github.com/charmbracelet/lipgloss
+[ConnectRPC]: https://connectrpc.com/
+[authn-go]: https://github.com/connectrpc/authn-go
+[validate-go]: https://github.com/connectrpc/validate-go
+[cors-go]: https://github.com/connectrpc/cors-go
+[otelconnect]: https://github.com/connectrpc/otelconnect-go
 [CEL]: https://cel.dev/
 [YAML]: https://yaml.org/
 [DSL]: https://en.wikipedia.org/wiki/Domain-specific_language
@@ -272,6 +746,8 @@ Key entry points: [`main.go`](main.go) → [`internal/cli/cli.go`](internal/cli/
 Entrypoints define when a policy is evaluated. See [`internal/policy/entrypoints.go`](internal/policy/entrypoints.go) for canonical definitions.
 See [`internal/policy/evaluator.go`](internal/policy/evaluator.go) for CEL activation and variable bindings.
 
+**Proto-First Design:** Deputy uses a proto-first design for policy evaluation. Variables like `vulnerability`, `pkg`, and `image` are protocol buffer messages, enabling type-safe field access with CEL's native proto support. Field names use **snake_case** as defined in the proto files (e.g., `vulnerability.advisory.fixed_versions`, `vulnerability.package.layer_details.in_base_image`). Severity checks use the canonical proto path with severity constants (e.g., `vulnerability.advisory.severity.level == severity.critical`, `vulnerability.advisory.severity.level in [severity.critical, severity.high]`). See proto definitions in [`api/deputy/`](api/deputy/) for authoritative field names.
+
 **Type-safe Entrypoints:** The `policy.Entrypoint` type provides compile-time safety when passing entrypoints in Go code. Use constants like `policy.EntrypointScanReport` instead of string literals. The `Entrypoint` type provides `String()`, `IsValid()`, and `Category()` methods.
 
 ### Policy Examples
@@ -282,7 +758,7 @@ policies:
   - name: block-critical
     rules:
       - action: deny
-        when: vulnerabilities.exists(v, v.severity == "CRITICAL")
+        when: vulnerabilities.exists(v, v.advisory.severity.level == severity.critical)
         reason: "Critical vulnerability found"
 ```
 
@@ -324,90 +800,137 @@ Contains information about the dependency being analyzed. Available in `scan_rep
 *   Deny if license information is missing:
     `pkg.licenses.size() == 0`
 
-Note: The `pkg` helper provides sensible defaults (`name`, `version`, `ecosystem` default to `""`, `licenses` defaults to `[]`), so you don't need `?.orValue()` for these fields.
+> [!NOTE]
+> The `pkg` helper provides sensible defaults (`name`, `version`, `ecosystem` default to `""`, `licenses` defaults to `[]`), so you don't need `?.orValue()` for these fields.
 
 ---
 
 #### `vulnerability` object
 
-Represents a single vulnerability affecting a package. Available in the `scan_vulnerability` entrypoint.
+Represents a single vulnerability affecting a package. Available in the `scan_vulnerability` entrypoint. The `vulnerability` variable is a proto message (`vulnerabilityv1.Finding`).
+
+**Proto-First Field Access:**
+Deputy uses a proto-first design with snake_case field names. Access fields using the proto structure:
+- `vulnerability.advisory_id` - the advisory ID
+- `vulnerability.advisory.severity.level` - severity level enum
+- `vulnerability.package.direct` - whether this is a direct dependency
+- `vulnerability.advisory.fixed_versions` - list of fixed versions
 
 | Field | Type | Description | Example Value |
 |---|---|---|---|
-| `id` | `string` | Vulnerability ID (e.g., CVE, GHSA) | `"CVE-2021-44228"` |
-| `severity` | `string` | `CRITICAL`, `HIGH`, `MEDIUM`, `LOW` | `"CRITICAL"` |
-| `isDirect` | `bool` | If the vulnerability is in a direct dependency | `true` |
-| `fixedVersions` | `list(string)` | Versions containing a fix | `["2.15.0"]` |
-| `layerDetails` | `object` | Container image layer info (nil for non-image scans) | see below |
+| `vulnerability.advisory_id` | `string` | Vulnerability ID (e.g., CVE, GHSA) | `"CVE-2021-44228"` |
+| `vulnerability.advisory.id` | `string` | Primary advisory ID | `"CVE-2021-44228"` |
+| `vulnerability.advisory.aliases` | `list(string)` | Alternative identifiers (CVE, GHSA cross-references) | `["GHSA-jfh8-c2jp-5v3q"]` |
+| `vulnerability.advisory.summary` | `string` | Brief description | `"Remote code execution..."` |
+| `vulnerability.advisory.details` | `string` | Full vulnerability description | `"Apache Log4j2..."` |
+| `vulnerability.advisory.cve` | `string` | CVE identifier if available | `"CVE-2021-44228"` |
+| `vulnerability.advisory.severity.level` | `enum` | Severity enum (use `severity.critical`, `severity.high`, etc.) | `SEVERITY_LEVEL_CRITICAL` |
+| `vulnerability.advisory.fixed_versions` | `list(string)` | Versions containing a fix | `["2.15.0"]` |
+| `vulnerability.advisory.references` | `list(string)` | URLs with additional information | `["https://nvd.nist.gov/..."]` |
+| `vulnerability.advisory.cwes` | `list(string)` | CWE identifiers | `["CWE-502", "CWE-400"]` |
+| `vulnerability.package.direct` | `bool` | If the vulnerability is in a direct dependency | `true` |
+| `vulnerability.package.layer_details` | `object` | Container image layer info (nil for non-image scans) | see below |
+
+**Severity Checks (canonical proto access):**
+Use the proto path with severity constants for type-safe severity checks:
+
+```cel
+# Check for CRITICAL severity
+vulnerability.advisory.severity.level == severity.critical
+
+# Check for HIGH or CRITICAL
+vulnerability.advisory.severity.level in [severity.critical, severity.high]
+
+# Check for MEDIUM and above
+vulnerability.advisory.severity.level in [severity.critical, severity.high, severity.medium]
+
+# In filter/map expressions
+vulnerabilities.filter(v, v.advisory.severity.level == severity.critical)
+vulnerabilities.exists(v, v.advisory.severity.level in [severity.critical, severity.high])
+```
+
+**Severity Constants:**
+Deputy provides lowercase severity constants that map to proto enum values:
+- `severity.critical` - SEVERITY_LEVEL_CRITICAL
+- `severity.high` - SEVERITY_LEVEL_HIGH
+- `severity.medium` - SEVERITY_LEVEL_MEDIUM
+- `severity.low` - SEVERITY_LEVEL_LOW
+- `severity.unspecified` - SEVERITY_LEVEL_UNSPECIFIED
 
 **Enrichment Fields (when `--enrich` is enabled):**
 
 | Field | Type | Description | Example Value |
 |---|---|---|---|
-| `epss` | `float` | EPSS score (0.0-1.0): probability of exploitation in next 30 days | `0.97` |
-| `epssPercentile` | `float` | EPSS percentile (0.0-1.0): % of CVEs with lower EPSS score | `0.99` |
-| `inKEV` | `bool` | Whether CVE is in CISA's Known Exploited Vulnerabilities catalog | `true` |
-| `kevDateAdded` | `string` | Date CVE was added to KEV catalog (YYYY-MM-DD) | `"2021-12-10"` |
-| `kevDueDate` | `string` | Federal agency compliance deadline (YYYY-MM-DD) | `"2021-12-24"` |
-| `kevRequiredAction` | `string` | CISA's required remediation action | `"Apply updates..."` |
-| `kevKnownRansomwareCampaignUse` | `string` | Ransomware involvement: `"Known"` or `"Unknown"` | `"Known"` |
+| `vulnerability.epss` | `float` | EPSS score (0.0-1.0): probability of exploitation in next 30 days | `0.97` |
+| `vulnerability.epss_percentile` | `float` | EPSS percentile (0.0-1.0): % of CVEs with lower EPSS score | `0.99` |
+| `vulnerability.in_kev` | `bool` | Whether CVE is in CISA's Known Exploited Vulnerabilities catalog | `true` |
+| `vulnerability.kev_date_added` | `string` | Date CVE was added to KEV catalog (YYYY-MM-DD) | `"2021-12-10"` |
+| `vulnerability.kev_due_date` | `string` | Federal agency compliance deadline (YYYY-MM-DD) | `"2021-12-24"` |
+| `vulnerability.kev_required_action` | `string` | CISA's required remediation action | `"Apply updates..."` |
+| `vulnerability.kev_known_ransomware_campaign_use` | `string` | Ransomware involvement: `"Known"` or `"Unknown"` | `"Known"` |
 
 **Layer Details (container images only):**
 
-When scanning container images, `vulnerability.layerDetails` provides information about which layer introduced the vulnerable package:
+When scanning container images, `vulnerability.package.layer_details` provides information about which layer introduced the vulnerable package:
 
 | Field | Type | Description | Example Value |
 |---|---|---|---|
-| `layerDetails.index` | `int` | Layer position (0 = oldest/base layer) | `2` |
-| `layerDetails.diffId` | `string` | Digest of uncompressed layer content | `"sha256:abc..."` |
-| `layerDetails.chainId` | `string` | Cumulative layer chain ID (see below) | `"sha256:def..."` |
-| `layerDetails.command` | `string` | Dockerfile instruction that created layer | `"RUN apt-get install..."` |
-| `layerDetails.inBaseImage` | `bool` | Whether layer is from base image (FROM) | `true` |
+| `layer_details.index` | `int` | Layer position (0 = oldest/base layer) | `2` |
+| `layer_details.diff_id` | `string` | Digest of uncompressed layer content | `"sha256:abc..."` |
+| `layer_details.chain_id` | `string` | Cumulative layer chain ID (see below) | `"sha256:def..."` |
+| `layer_details.command` | `string` | Dockerfile instruction that created layer | `"RUN apt-get install..."` |
+| `layer_details.in_base_image` | `bool` | Whether layer is from base image (FROM) | `true` |
 
-**Understanding ChainID:**
+**Understanding chain_id:**
 
-The `chainId` uniquely identifies a layer in the context of all its parent layers, per the [OCI Image Spec](https://github.com/opencontainers/image-spec/blob/main/config.md#layer-chainid). Unlike `diffId` (which identifies layer content), `chainId` is calculated as:
-- For the first layer: `chainId = diffId`
-- For subsequent layers: `chainId = sha256(parentChainId + " " + diffId)`
+The `chain_id` uniquely identifies a layer in the context of all its parent layers, per the [OCI Image Spec](https://github.com/opencontainers/image-spec/blob/main/config.md#layer-chainid). Unlike `diff_id` (which identifies layer content), `chain_id` is calculated as:
+- For the first layer: `chain_id = diff_id`
+- For subsequent layers: `chain_id = sha256(parent_chain_id + " " + diff_id)`
 
-Use `chainId` when you need to identify a specific layer stack (e.g., for caching or comparing layers across images with shared bases). Use `diffId` when you only care about the layer content itself.
+Use `chain_id` when you need to identify a specific layer stack (e.g., for caching or comparing layers across images with shared bases). Use `diff_id` when you only care about the layer content itself.
 
 **Example Expressions for `vulnerability`:**
 
 *   Deny critical vulnerabilities:
-    `vulnerability.severity == 'CRITICAL'`
+    `vulnerability.advisory.severity.level == severity.critical`
+*   Deny high or above severity:
+    `vulnerability.advisory.severity.level in [severity.critical, severity.high]`
 *   Deny vulnerabilities in direct dependencies that have a fix:
-    `vulnerability.isDirect && vulnerability.fixedVersions.size() > 0`
+    `vulnerability.package.direct && size(vulnerability.advisory.fixed_versions) > 0`
 *   Deny a specific vulnerability by ID:
-    `vulnerability.id == 'GHSA-jfh8-c2j2-2hch'`
-*   Deny if a vulnerability has no fix and is `HIGH` or `CRITICAL`:
-    `(!has(vulnerability.fixedVersions) || vulnerability.fixedVersions.size() == 0) && (has(vulnerability.severity) && vulnerability.severity in ['HIGH', 'CRITICAL'])`
-*   Deny if a vulnerability has no fix and is `HIGH` or `CRITICAL` (using optionals):
-    `size(vulnerability.?fixedVersions.orValue([])) == 0 && vulnerability.?severity.orValue('').upperAscii() in ['HIGH', 'CRITICAL']`
+    `vulnerability.advisory_id == 'GHSA-jfh8-c2j2-2hch'`
+*   Deny if a vulnerability has no fix and is HIGH or CRITICAL:
+    `size(vulnerability.advisory.fixed_versions) == 0 && vulnerability.advisory.severity.level in [severity.critical, severity.high]`
+*   Block deprecated/unmaintained packages by advisory text:
+    `vulnerability.advisory.summary.lowerAscii().matches("deprecated|unmaintained|end.of.life")`
+*   Block Log4Shell by alias (CVE cross-reference):
+    `vulnerability.advisory.aliases.exists(a, a == "CVE-2021-44228")`
+*   Block injection vulnerabilities by CWE:
+    `vulnerability.advisory.cwes.exists(c, c in ["CWE-89", "CWE-79", "CWE-94"])`
 
 **Layer-Aware Examples (container images):**
 
 *   Block critical vulnerabilities in base image layers:
-    `has(vulnerability.layerDetails) && vulnerability.layerDetails.inBaseImage && vulnerability.severity == 'CRITICAL'`
+    `has(vulnerability.package.layer_details) && vulnerability.package.layer_details.in_base_image && vulnerability.advisory.severity.level == severity.critical`
 *   Warn on vulnerabilities from application layers (not base image):
-    `has(vulnerability.layerDetails) && !vulnerability.layerDetails.inBaseImage && vulnerability.severity in ['HIGH', 'CRITICAL']`
+    `has(vulnerability.package.layer_details) && !vulnerability.package.layer_details.in_base_image && vulnerability.advisory.severity.level in [severity.critical, severity.high]`
 *   Detect vulnerabilities from apt-get install commands:
-    `has(vulnerability.layerDetails) && vulnerability.layerDetails.command.contains('apt-get install')`
+    `has(vulnerability.package.layer_details) && vulnerability.package.layer_details.command.contains('apt-get install')`
 *   Flag vulnerabilities in early base layers (likely system packages):
-    `has(vulnerability.layerDetails) && vulnerability.layerDetails.index < 3 && vulnerability.severity == 'CRITICAL'`
+    `has(vulnerability.package.layer_details) && vulnerability.package.layer_details.index < 3 && vulnerability.advisory.severity.level == severity.critical`
 
 **Enrichment-Based Examples (when `--enrich` is enabled):**
 
 *   Block vulnerabilities in CISA KEV catalog:
-    `vulnerability.inKEV == true`
+    `vulnerability.in_kev == true`
 *   Block high-probability exploitation (EPSS > 0.7):
-    `vulnerability.?epss.orValue(0.0) > 0.7`
+    `vulnerability.epss > 0.7`
 *   Block KEV vulnerabilities used in ransomware campaigns:
-    `vulnerability.inKEV == true && vulnerability.kevKnownRansomwareCampaignUse == 'Known'`
+    `vulnerability.in_kev == true && vulnerability.kev_known_ransomware_campaign_use == 'Known'`
 *   Block KEV vulnerabilities past their due date:
-    `vulnerability.inKEV == true && vulnerability.kevDueDate != '' && vulnerability.kevDueDate < now().format('2006-01-02')`
+    `vulnerability.in_kev == true && vulnerability.kev_due_date != '' && vulnerability.kev_due_date < now().format('2006-01-02')`
 *   Prioritize by EPSS percentile (top 5% most likely to be exploited):
-    `vulnerability.?epssPercentile.orValue(0.0) > 0.95`
+    `vulnerability.epss_percentile > 0.95`
 
 **Graph Fields (when `--with-graph` is enabled):**
 
@@ -415,21 +938,24 @@ When scanning with `--with-graph`, the dependency graph is resolved to show how 
 
 | Field | Type | Description | Example Value |
 |---|---|---|---|
-| `path` | `list(string)` | Dependency chain from root to vulnerable package | `["myapp", "go-git/v5", "x/crypto"]` |
-| `depth` | `int` | Distance from root (0 = direct, 1+ = transitive) | `2` |
+| `vulnerability.path` | `list(string)` | Dependency chain from root to vulnerable package | `["myapp", "go-git/v5", "x/crypto"]` |
+| `vulnerability.depth` | `int` | Distance from root (0 = direct, 1+ = transitive) | `2` |
 
 **Graph-Based Examples (when `--with-graph` is enabled):**
 
 *   Allow deep transitive vulnerabilities (focus on direct deps):
-    `vulnerability.?depth.orValue(0) > 2 && vulnerability.severity != 'CRITICAL'`
+    `vulnerability.depth > 2 && vulnerability.advisory.severity.level != severity.critical`
 *   Block critical vulnerabilities regardless of depth:
-    `vulnerability.severity == 'CRITICAL'`
+    `vulnerability.advisory.severity.level == severity.critical`
 *   Warn on vulnerabilities introduced through specific packages:
-    `vulnerability.?path.orValue([]).exists(p, p.contains('legacy-lib'))`
+    `vulnerability.path.exists(p, p.contains('legacy-lib'))`
 *   Prioritize vulnerabilities in shallow dependencies:
-    `vulnerability.?depth.orValue(0) <= 1 && vulnerability.severity in ['HIGH', 'CRITICAL']`
+    `vulnerability.depth <= 1 && vulnerability.advisory.severity.level in [severity.critical, severity.high]`
 *   Identify vulnerabilities with long dependency chains (supply chain risk):
-    `vulnerability.?depth.orValue(0) > 3`
+    `vulnerability.depth > 3`
+
+> [!NOTE]
+> For full dependency graph analysis (graph statistics, node/edge policies, traversal), use the `graph_report`, `graph_node`, and `graph_edge` entrypoints with the `deputy graph` command. See the [Graph Helper Functions](#graph-helper-functions) section below.
 
 ---
 
@@ -440,11 +966,11 @@ A list of all `vulnerability` objects found in a scan report. Available in the `
 **Example Expressions for `vulnerabilities`:**
 
 *   Deny if any critical vulnerabilities exist in the report:
-    `vulnerabilities.exists(v, v.severity == 'CRITICAL')`
+    `vulnerabilities.exists(v, v.advisory.severity.level == severity.critical)`
 *   Deny if there are more than 5 vulnerabilities in total:
     `vulnerabilities.size() > 5`
-*   Deny if all vulnerabilities are high severity (a strange but possible policy):
-    `vulnerabilities.all(v, v.severity == 'HIGH')`
+*   Deny if all vulnerabilities are high severity:
+    `vulnerabilities.all(v, v.advisory.severity.level == severity.high)`
 
 ---
 
@@ -497,7 +1023,8 @@ When a container image defines a HEALTHCHECK instruction, the following fields a
 | `healthcheck.timeout` | `string` | Timeout for each check (Go duration format) | `"10s"` |
 | `healthcheck.retries` | `int` | Consecutive failures before unhealthy | `3` |
 
-**Note:** `healthcheck` is `null` if no HEALTHCHECK is defined in the image.
+> [!NOTE]
+> `healthcheck` is `null` if no HEALTHCHECK is defined in the image.
 
 **Image Metadata (`image.metadata`):**
 
@@ -507,7 +1034,7 @@ When a container image defines a HEALTHCHECK instruction, the following fields a
 | `metadata.os` | `string` | Operating system | `"linux"` |
 | `metadata.layer_count` | `int` | Number of layers | `15` |
 | `metadata.size` | `int` | Total size in bytes | `104857600` |
-| `metadata.created` | `int` | Creation timestamp (Unix) | `1704067200` |
+| `metadata.created` | `timestamp` | When the image was created | `timestamp("2024-01-01T00:00:00Z")` |
 | `metadata.digest` | `string` | Image digest | `"sha256:abc..."` |
 
 **Image History (`image.history`):**
@@ -517,8 +1044,20 @@ List of build history entries showing Dockerfile commands:
 | Field | Type | Description |
 |---|---|---|
 | `history[].created_by` | `string` | Command that created the layer |
-| `history[].created` | `int` | Creation timestamp (Unix) |
+| `history[].created` | `timestamp` | When this layer was created |
 | `history[].empty_layer` | `bool` | Whether this is a metadata-only layer |
+
+**Base Image Information (`image.base_image`):**
+
+When available, contains base image information extracted from OCI annotations. This is populated automatically from `org.opencontainers.image.base.name` and `org.opencontainers.image.base.digest` annotations per the [OCI Image Spec](https://github.com/opencontainers/image-spec/blob/main/annotations.md).
+
+| Field | Type | Description | Example Value |
+|---|---|---|---|
+| `base_image.name` | `string` | Base image reference | `"docker.io/library/alpine:3.19"` |
+| `base_image.digest` | `string` | Base image digest | `"sha256:abc123..."` |
+
+> [!NOTE]
+> `image.base_image` is `null` if the image does not have OCI base image annotations. Use `has(image.base_image)` to check for presence. This provides a no-network way to identify base images when the image builder sets the standard annotations (e.g., Docker BuildKit, ko, crane).
 
 **Example Expressions for `image`:**
 
@@ -535,7 +1074,11 @@ List of build history entries showing Dockerfile commands:
 *   Require OCI labels for traceability:
     `has(image.config) && !('org.opencontainers.image.source' in image.config.labels)`
 *   Block images older than 90 days:
-    `has(image.metadata) && age(image.metadata.created) > duration('2160h')`
+    `has(image.metadata) && now() - image.metadata.created > duration('2160h')`
+*   Validate base image from OCI annotations (no network required):
+    `has(image.base_image) && !image.base_image.name.contains("distroless") && !image.base_image.name.contains("alpine")`
+*   Require base image annotations for supply chain traceability:
+    `!has(image.base_image) || image.base_image.name == ""`
 
 ---
 
@@ -940,10 +1483,178 @@ policies:
     rules:
       - action: deny
         when: |
-          vulnerability.inKEV == true &&
+          vulnerability.in_kev == true &&
           ssvc(vulnerability).decision in ["act", "attend"]
         reason: "KEV vulnerability with high SSVC priority"
 ```
+
+#### Graph Helper Functions
+
+These functions provide dependency graph analysis for `graph_report`, `graph_node`, and `graph_edge` entrypoints.
+
+| Function | Signature | Description |
+|----------|-----------|-------------|
+| `graphMatch()` | `graphMatch(string, pattern) bool` | Glob-like pattern matching (supports `*`, `*prefix`, `suffix*`, `*contains*`) |
+| `isDirectDep()` | `isDirectDep(node) bool` | Check if node is a direct dependency |
+| `nodeDepth()` | `nodeDepth(node) int` | Get dependency depth (0 = direct, 1+ = transitive) |
+| `nodeEcosystem()` | `nodeEcosystem(node) string` | Get ecosystem (e.g., "npm", "Go", "PyPI") |
+| `hasVulnerabilities()` | `hasVulnerabilities(node) bool` | Check if node has any vulnerabilities |
+| `vulnerabilityCount()` | `vulnerabilityCount(node) int` | Get total vulnerability count for node |
+
+**Path Analysis Functions:**
+
+These work with `vulnerability.path` (when `--with-graph` is enabled) and graph traversal results:
+
+| Function | Signature | Description |
+|----------|-----------|-------------|
+| `pathLength()` | `pathLength(list) int` | Get length of a dependency path (number of nodes) |
+| `pathContains()` | `pathContains(list, pattern) bool` | Check if any path element matches the glob pattern |
+| `pathDepth()` | `pathDepth(list) int` | Get dependency depth from path (path length - 1). Direct = 0 |
+
+**Node Accessor Functions:**
+
+Convenient accessors for node fields, composable with `filter`/`map`:
+
+| Function | Signature | Description |
+|----------|-----------|-------------|
+| `nodePurl()` | `nodePurl(node) string` | Get PURL of a node |
+| `nodeName()` | `nodeName(node) string` | Get name of a node |
+| `nodeVersion()` | `nodeVersion(node) string` | Get version of a node |
+
+**Edge Functions:**
+
+| Function | Signature | Description |
+|----------|-----------|-------------|
+| `edgeScope()` | `edgeScope(edge) string` | Get scope of an edge (runtime, dev, test, build, optional) |
+
+**Vulnerability Helper Functions:**
+
+These work with vulnerability objects in `scan_vulnerability` and `scan_report` entrypoints:
+
+**Canonical proto severity access with constants:**
+
+```yaml
+# Use canonical proto path with severity constants
+rules:
+  - action: deny
+    when: vulnerability.advisory.severity.level == severity.critical
+    reason: "Critical vulnerability found"
+
+  - action: deny
+    when: vulnerability.advisory.severity.level in [severity.critical, severity.high]
+    reason: "High or critical severity"
+
+# Filter in report-level policies
+  - action: deny
+    when: vulnerabilities.exists(v, v.advisory.severity.level in [severity.critical, severity.high])
+    reason: "High severity or above found"
+```
+
+**Accessor helpers (for complex field access):**
+
+| Function | Signature | Description |
+|----------|-----------|-------------|
+| `hasFix()` | `hasFix(vulnerability) bool` | Check if `vulnerability.advisory.fixed_versions` is non-empty |
+| `inKEV()` | `inKEV(vulnerability) bool` | Check if `vulnerability.in_kev` is true |
+| `epssScore()` | `epssScore(vulnerability) double` | Get `vulnerability.epss` or 0 if unavailable |
+
+<a id="graph-policy-variables"></a>
+**Graph Policy Variables:**
+
+Available in `graph_report` entrypoint (whole-graph policies):
+
+| Variable | Type | Description |
+|----------|------|-------------|
+| `graph` | `object` | Full graph data |
+| `nodes` | `list` | All dependency nodes |
+| `edges` | `list` | All dependency edges |
+| `roots` | `list` | Direct dependencies (root nodes) |
+| `stats` | `object` | Graph statistics (see below) |
+
+**Stats Object Fields:**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `stats.total_nodes` | `int` | Total number of dependencies |
+| `stats.direct_nodes` | `int` | Number of direct dependencies |
+| `stats.transitive_nodes` | `int` | Number of transitive dependencies |
+| `stats.max_depth` | `int` | Maximum dependency tree depth |
+| `stats.vulnerable_nodes` | `int` | Number of packages with vulnerabilities |
+| `stats.ecosystems` | `map` | Map of ecosystem to count |
+
+Available in `graph_node` entrypoint (per-node policies):
+
+| Variable | Type | Description |
+|----------|------|-------------|
+| `node` | `object` | Current node being evaluated |
+| `node.name` | `string` | Package name |
+| `node.version` | `string` | Package version |
+| `node.ecosystem` | `string` | Package ecosystem |
+| `node.direct` | `bool` | Whether this is a direct dependency |
+| `node.depth` | `int` | Dependency depth (0 = direct) |
+| `node.vulnerabilities` | `list` | Vulnerabilities affecting this node |
+
+Available in `graph_edge` entrypoint (per-edge policies):
+
+| Variable | Type | Description |
+|----------|------|-------------|
+| `edge` | `object` | Current edge being evaluated |
+| `from_node` | `object` | Source node of the edge |
+| `to_node` | `object` | Target node of the edge |
+
+**Graph Policy Examples:**
+
+```yaml
+# Limit total dependency count
+policies:
+  - name: dependency-count-limit
+    entrypoints: ["graph_report"]
+    rules:
+      - action: warn
+        when: stats.total_nodes > 500
+        reason: "Project has more than 500 dependencies"
+
+# Block deprecated packages
+  - name: block-deprecated
+    entrypoints: ["graph_node"]
+    vars:
+      deprecatedPackages: ["request", "left-pad", "event-stream"]
+    rules:
+      - action: deny
+        when: node.name in deprecatedPackages
+        reason: "Package is deprecated"
+
+# Warn on deep transitive dependencies
+  - name: depth-warning
+    entrypoints: ["graph_node"]
+    rules:
+      - action: warn
+        when: nodeDepth(node) > 5
+        reason: "Dependency is too deep in the tree"
+
+# Block vulnerable direct dependencies
+  - name: vulnerable-direct-deps
+    entrypoints: ["graph_report"]
+    rules:
+      - action: deny
+        when: |
+          nodes.filter(n, isDirectDep(n) && hasVulnerabilities(n)).size() > 0
+        reason: "Direct dependencies have vulnerabilities"
+
+# Typosquatting protection
+  - name: typosquat-protection
+    entrypoints: ["graph_node"]
+    vars:
+      knownPackages: ["lodash", "express", "react"]
+    rules:
+      - action: warn
+        when: |
+          knownPackages.exists(known,
+            known != node.name && levenshteinWithin(known, node.name, 2))
+        reason: "Package name similar to known package (possible typosquat)"
+```
+
+See [graph-report-policies.yaml](policy/examples/graph-report-policies.yaml) and [graph-node-policies.yaml](policy/examples/graph-node-policies.yaml) for more examples.
 
 Full spec: [Policy spec](docs/reference/policy-spec.md) • Examples: [Policy examples](policy/examples/)
 
@@ -1064,7 +1775,7 @@ policies:
       - action: deny
         when: |
           jwt.anonymous &&
-          vulnerabilities.orValue([]).exists(v, v.severity == "CRITICAL")
+          vulnerabilities.exists(v, v.advisory.severity.level == severity.critical)
         reason: "Authenticate to download packages with critical vulnerabilities"
 ```
 
@@ -1073,6 +1784,391 @@ See JWT policy examples for more patterns:
 - [jwt-anonymous-guard.yaml](policy/examples/jwt-anonymous-guard.yaml) - Protecting resources from anonymous access
 - [jwt-audit-logging.yaml](policy/examples/jwt-audit-logging.yaml) - Token age and audit policies
 - [jwt-service-account.yaml](policy/examples/jwt-service-account.yaml) - Service account validation
+
+## Server Authentication & Multi-Tenancy
+
+When Deputy runs as a shared service (ECS, EKS, k8s, etc.), it supports the same JWT/OIDC infrastructure as the proxy, plus service-level policy entrypoints for RBAC/ABAC authorization.
+
+### Server Auth Configuration
+
+```yaml
+# Server config (passed to internal/server.Config)
+auth:
+  mode: "required"  # "required" | "disabled" (no "optional" for servers)
+
+  jwks:
+    url: "https://auth.example.com/.well-known/jwks.json"
+    oidc_discovery: true
+    refresh_interval: 1h
+
+  issuers: ["https://auth.example.com"]
+  audiences: ["deputy-server"]
+  required_claims: ["sub", "tenant"]
+
+# Authorization policies
+policies:
+  - "policies/server-authz.yaml"
+```
+
+### Service-Level Entrypoints
+
+These entrypoints are evaluated **before** each API operation executes, enabling request-level authorization based on JWT claims:
+
+| Entrypoint | Triggered By | Use Case |
+|------------|--------------|----------|
+| `service_scan_request` | `ScanService/Scan`, `ScanService/StreamScan` | Control who can scan which targets |
+| `service_list_request` | `ListService/ListPackages`, `ListService/ListEcosystems` | Control package enumeration |
+| `service_sbom_request` | `SBOMService/Generate`, `SBOMService/Diff` | Control SBOM generation |
+| `service_diff_request` | `DiffService/Diff` | Control diff operations |
+| `service_secrets_request` | `SecretsService/Scan` | Control secrets scanning |
+| `service_graph_request` | `GraphService/Resolve`, `GraphService/Why` | Control graph operations |
+
+### Service Policy Variables
+
+At service entrypoints, the following variables are available:
+
+| Variable | Type | Description |
+|----------|------|-------------|
+| `jwt` | `map` | JWT claims (same as proxy: `jwt.sub`, `jwt.tenant`, `jwt.roles`, etc.) |
+| `request` | `map` | Request metadata: `request.procedure`, `request.target` |
+| `target` | `map` | Target info: `target.display` (extracted from request) |
+| `env` | `map` | Context: `env.command` = "server", `env.entrypoint` |
+
+### Multi-Tenant Policy Examples
+
+```yaml
+# policies/server-authz.yaml
+policies:
+  # Tenant isolation - users can only scan their tenant's resources
+  - name: tenant-isolation
+    entrypoints: ["service_scan_request", "service_sbom_request"]
+    rules:
+      - action: deny
+        when: |
+          !jwt.anonymous &&
+          has(jwt.tenant) &&
+          has(request.target) &&
+          !request.target.contains(jwt.tenant)
+        reason: "Cross-tenant access denied"
+
+  # Role-based access control
+  - name: require-scanner-role
+    entrypoints: ["service_scan_request", "service_secrets_request"]
+    rules:
+      - action: deny
+        when: |
+          !jwt.?roles.orValue([]).exists(r, r in ["scanner", "admin"])
+        reason: "Scanner role required"
+
+  # Service account scoping
+  - name: service-account-scope
+    entrypoints: ["service_scan_request", "service_sbom_request"]
+    rules:
+      - action: deny
+        when: |
+          jwt.?sub.orValue("").startsWith("sa:") &&
+          !jwt.?scopes.orValue([]).exists(s, s == "scan")
+        reason: "Service account lacks 'scan' scope"
+
+  # Admin override
+  - name: admin-full-access
+    entrypoints: ["service_scan_request", "service_list_request",
+                  "service_sbom_request", "service_diff_request",
+                  "service_secrets_request", "service_graph_request"]
+    rules:
+      - action: allow
+        when: jwt.?roles.orValue([]).exists(r, r == "admin")
+        reason: "Admin access granted"
+```
+
+### JWT Token Structure for Multi-Tenancy
+
+Design your tokens to include tenant/org information:
+
+```json
+{
+  "sub": "user:alice@acme.com",
+  "iss": "https://auth.example.com",
+  "aud": "deputy-server",
+  "tenant": "acme-corp",
+  "org_id": "org_123",
+  "roles": ["developer", "scanner"],
+  "teams": ["platform", "security"],
+  "scopes": ["scan", "sbom"],
+  "exp": 1700000000
+}
+```
+
+### OIDC Identity Federation
+
+Deputy server supports workload identity federation from CI/CD platforms and cloud providers. Instead of managing long-lived secrets, workloads authenticate with short-lived OIDC tokens from their platform's identity provider.
+
+**Supported OIDC Providers:**
+
+| Provider | Issuer URL | Common Claims |
+|----------|------------|---------------|
+| **GitHub Actions** | `https://token.actions.githubusercontent.com` | `repository`, `repository_owner`, `workflow`, `ref`, `actor` |
+| **GitLab CI/CD** | `https://gitlab.com` (or self-hosted) | `namespace_path`, `project_path`, `ref`, `environment` |
+| **Google Cloud** | `https://accounts.google.com` | `email` (service account), `azp` |
+| **Azure AD** | `https://login.microsoftonline.com/{tenant}/v2.0` | `tid`, `oid`, `roles`, `groups` |
+| **Kubernetes** | Cluster-specific | `kubernetes.io/serviceaccount/namespace` |
+
+**GitHub Actions Example:**
+
+```yaml
+# Server auth config
+auth:
+  mode: required
+  jwks:
+    url: https://token.actions.githubusercontent.com/.well-known/jwks
+  issuers:
+    - https://token.actions.githubusercontent.com
+  audiences:
+    - https://deputy.example.com
+
+# GitHub Actions workflow
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write   # Required for OIDC
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - name: Get OIDC Token
+        id: token
+        run: |
+          TOKEN=$(curl -sLS \
+            -H "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
+            "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=https://deputy.example.com" \
+            | jq -r '.value')
+          echo "token=$TOKEN" >> $GITHUB_OUTPUT
+
+      - name: Scan with Deputy
+        run: deputy --server https://deputy.example.com scan .
+        env:
+          DEPUTY_AUTH_TOKEN: ${{ steps.token.outputs.token }}
+```
+
+**Policy Example (GitHub Actions):**
+
+```yaml
+policies:
+  - name: github-org-restriction
+    entrypoints: ["service_scan_request"]
+    rules:
+      - action: deny
+        when: |
+          jwt.?iss.orValue("") == "https://token.actions.githubusercontent.com" &&
+          jwt.?repository_owner.orValue("") != "your-organization"
+        reason: "Only workflows from your-organization allowed"
+
+  - name: require-protected-branch
+    entrypoints: ["service_secrets_request"]
+    rules:
+      - action: deny
+        when: |
+          jwt.?iss.orValue("") == "https://token.actions.githubusercontent.com" &&
+          !jwt.?ref.orValue("").matches("^refs/(heads/main|tags/v[0-9]+)")
+        reason: "Secrets scanning requires main branch or release tag"
+```
+
+**Human vs Machine Identity Patterns:**
+
+```yaml
+policies:
+  # Machine identity: GitHub Actions
+  - name: allow-github-actions
+    rules:
+      - action: allow
+        when: |
+          jwt.?iss.orValue("") == "https://token.actions.githubusercontent.com" &&
+          jwt.?repository_owner.orValue("") in ["acme-corp", "acme-infra"]
+
+  # Machine identity: GCP Service Account
+  - name: allow-gcp-service-accounts
+    rules:
+      - action: allow
+        when: |
+          jwt.?email.orValue("").endsWith(".iam.gserviceaccount.com") &&
+          jwt.?email.orValue("").matches("@acme-(prod|staging)\\.iam")
+
+  # Human identity: Require MFA for sensitive operations
+  - name: human-require-mfa
+    entrypoints: ["service_secrets_request"]
+    rules:
+      - action: deny
+        when: |
+          !jwt.anonymous &&
+          jwt.?email.orValue("") != "" &&
+          !jwt.?amr.orValue([]).exists(a, a in ["mfa", "otp", "hwk"])
+        reason: "MFA required for secrets scanning"
+
+  # Human identity: Group-based access
+  - name: human-security-team
+    entrypoints: ["service_secrets_request"]
+    rules:
+      - action: allow
+        when: |
+          jwt.?groups.orValue([]).exists(g, g in ["security-team", "sre-oncall"])
+```
+
+See [`policy/examples/service-oidc-federation.yaml`](policy/examples/service-oidc-federation.yaml) for comprehensive OIDC patterns and [`policy/examples/server-github-actions.yaml`](policy/examples/server-github-actions.yaml) for GitHub Actions-specific policies.
+
+### Security Model Comparison
+
+| Aspect | Proxy | Server |
+|--------|-------|--------|
+| Auth mode | `required` / `optional` / `disabled` | `required` / `disabled` |
+| Policy entrypoints | `*_artifact_request` | `service_*_request` |
+| JWT in policies | Yes (`jwt.*`) | Yes (`jwt.*`) |
+| Target validation | Remote targets only | Remote targets only |
+| Multi-tenant isolation | Via policies + cache scoping | Via policies |
+| OIDC federation | Yes | Yes |
+
+### Multi-tenant Cache Isolation
+
+When Deputy runs as a shared service in a multi-tenant environment, caches are automatically isolated per-tenant to prevent cross-tenant cache poisoning. This security feature ensures that:
+
+1. **Vulnerability cache** entries from tenant A cannot be seen by tenant B
+2. **License cache** entries are isolated per-tenant
+3. **Image scan cache** results are scoped to the tenant that initiated the scan
+4. **Digest resolution cache** entries are tenant-specific
+
+**How it works:**
+
+Cache keys are prefixed with a scope derived from:
+- **ListenerName**: Isolates caches between different proxy listeners
+- **PolicyHash**: Ensures cache invalidation when policies change
+- **TenantID**: Extracted from JWT claims (`tenant`, `org_id`, or `sub`)
+
+**Example cache key transformation:**
+```
+Original key: npm|lodash@4.17.21
+Scoped key:   go-proxy/abc123/acme-corp/npm|lodash@4.17.21
+              └─listener─┘└─policy┘└─tenant───┘└─original key─┘
+```
+
+**Configuration:** Cache scoping is automatic when listener names and policy paths are provided via `HandlerOptions` or `OCIHandlerOptions`. Tenant isolation uses JWT claims from the request context.
+
+```yaml
+# Proxy config with cache scoping
+listeners:
+  - name: go-proxy          # Used for cache scoping
+    bind: ":8080"
+    ecosystems: ["go"]
+    upstream: "https://proxy.golang.org"
+    policies: ["policy/security.yaml"]  # Hash used for cache invalidation
+    auth:
+      mode: required
+      # ... JWT config (tenant ID extracted from claims)
+```
+
+**Security guarantees:**
+- Empty scopes fall back to global cache (backward compatible)
+- Anonymous requests (no JWT) use base scope without tenant isolation
+- Tenant ID extraction follows precedence: `tenant` > `org_id` > `sub`
+
+### Key Files
+
+| File | Purpose |
+|------|---------|
+| [`internal/server/server.go`](internal/server/server.go) | Server config, authn middleware, policy interceptors |
+| [`internal/auth/jwt/`](internal/auth/jwt/) | JWT validation with JWKS/OIDC, authn-go adapter |
+| [`internal/auth/jwt/authn.go`](internal/auth/jwt/authn.go) | `AuthnFunc` adapter for connectrpc/authn-go |
+| [`internal/policy/entrypoints.go`](internal/policy/entrypoints.go) | Service entrypoint definitions |
+| [`internal/policy/bindings.go`](internal/policy/bindings.go) | Variable bindings for service entrypoints |
+| [`internal/proxy/cache_scope.go`](internal/proxy/cache_scope.go) | Multi-tenant cache scoping, `RequestScoped*Cache` types |
+| [`internal/proxy/cache.go`](internal/proxy/cache.go) | Cache interfaces, `ContextAware*Cache` extensions |
+| [`internal/proxy/oci_toctou.go`](internal/proxy/oci_toctou.go) | TOCTOU mitigation for OCI registry proxy |
+
+## Configuration
+
+Deputy supports configuration from multiple sources with clear precedence:
+
+**Precedence (highest to lowest):**
+1. CLI flags (e.g., `--addr :9000`)
+2. Environment variables (e.g., `DEPUTY_SERVER_ADDR=:9000`)
+3. Config file (`.deputy.yaml`)
+4. Built-in defaults
+
+### Config File Locations
+
+Deputy searches for config files in this order:
+1. `DEPUTY_CONFIG` environment variable (explicit path)
+2. Current directory: `.deputy.yaml`, `.deputy.yml`, `deputy.yaml`, `deputy.yml`
+3. Home directory: `~/.deputy.yaml`, etc.
+
+### Server Configuration Example
+
+```yaml
+# .deputy.yaml
+server:
+  addr: ":8090"
+  read_timeout: 30s
+  write_timeout: 5m
+  idle_timeout: 2m
+  max_request_body_bytes: 10485760  # 10MB
+
+  tls:
+    cert_file: "/path/to/cert.pem"
+    key_file: "/path/to/key.pem"
+    client_ca_file: "/path/to/ca.pem"  # enables mTLS
+
+  cors:
+    allowed_origins: ["https://app.example.com"]
+    allowed_methods: ["GET", "POST", "OPTIONS"]
+    allowed_headers: ["Content-Type", "Authorization"]
+    allow_credentials: true
+    max_age: 3600
+
+  auth:
+    enabled: true
+    jwks_url: "https://auth.example.com/.well-known/jwks.json"
+    issuers: ["https://auth.example.com"]
+    audiences: ["deputy-server"]
+
+  rate_limit:
+    enabled: true
+    requests_per_second: 10
+    burst: 20
+
+# Policy paths applied to server authorization
+policy:
+  paths: ["policies/server-authz.yaml"]
+  mode: "enforce"
+
+# Logging
+logging:
+  level: "info"
+  format: "json"
+```
+
+### Overriding Config with Flags
+
+CLI flags always take precedence. For example:
+
+```bash
+# Config file says addr: ":8090", but flag overrides to :9000
+deputy server --addr :9000
+
+# Config file enables auth, but flag disables it
+deputy server --auth-mode disabled
+```
+
+### Overriding Config with Environment Variables
+
+Environment variables override config file values:
+
+```bash
+# Override server address
+DEPUTY_SERVER_ADDR=:9000 deputy server
+
+# Enable TLS via env vars
+DEPUTY_SERVER_TLS_CERT=/path/to/cert.pem \
+DEPUTY_SERVER_TLS_KEY=/path/to/key.pem \
+deputy server
+```
 
 ## Environment Variables
 
@@ -1083,6 +2179,7 @@ See JWT policy examples for more patterns:
 | `DEPUTY_LOG_LEVEL` | `debug`, `info`, `warn` (default), `error` ([`internal/cli/cli.go`](internal/cli/cli.go)) |
 | `DEPUTY_LOG_FORMAT` | `text` (default), `json` for structured logs ([`internal/logs/logs.go`](internal/logs/logs.go)) |
 | `DEPUTY_CONFIG` | Path to config file (default: `.deputy.yaml`) ([`internal/config/config.go`](internal/config/config.go)) |
+| `DEPUTY_SERVER` | Remote Deputy server address for client mode ([`internal/client/new.go`](internal/client/new.go)) |
 | `DEPUTY_OTEL_ENABLED` | Enable OpenTelemetry instrumentation ([`internal/otel/otel.go`](internal/otel/otel.go)) |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | OTel collector endpoint, e.g., `localhost:4317` ([`internal/otel/config.go`](internal/otel/config.go)) |
 | `DEPUTY_SBOM_IMAGE_SCAN_CONCURRENCY` | Max concurrent image scans when scanning SBOMs with container PURLs (default: 4) |
@@ -1090,6 +2187,18 @@ See JWT policy examples for more patterns:
 | `DEPUTY_PROXY_IMAGE_CACHE_TTL` | TTL for proxy image scan cache (default: 30m) |
 | `DEPUTY_PROXY_IMAGE_CACHE_SIZE` | Max items in proxy image scan cache (default: 1024) |
 | `DEPUTY_CACHE_DIR` | Override cache directory for KEV/EPSS data (default: `~/.deputy/cache`) |
+| `DEPUTY_AUTH_TOKEN` | Bearer token for authenticating with remote Deputy servers ([`internal/cli/cmd/register.go`](internal/cli/cmd/register.go)) |
+| `DEPUTY_SERVER_ADDR` | Server listen address (default: `:8090`) ([`internal/config/config.go`](internal/config/config.go)) |
+| `DEPUTY_SERVER_TLS_CERT` | Path to TLS certificate file for server |
+| `DEPUTY_SERVER_TLS_KEY` | Path to TLS private key file for server |
+| `DEPUTY_SERVER_AUTH_ENABLED` | Enable JWT authentication on server (`true`/`false`) |
+| `DEPUTY_SERVER_AUTH_JWKS_URL` | JWKS endpoint URL for JWT validation |
+| `DEPUTY_SERVER_CORS_ORIGINS` | Comma-separated allowed CORS origins |
+| `DEPUTY_SERVER_RATE_LIMIT_ENABLED` | Enable rate limiting (`true`/`false`) |
+| `DEPUTY_SERVER_RATE_LIMIT_RPS` | Requests per second limit (default: 10) |
+| `DEPUTY_DOCKER_CLI` | Path to Docker-compatible CLI for sandbox runtimes: `docker`, `nerdctl`, `finch`, `podman` (default: `docker`) ([`internal/sandbox/env.go`](internal/sandbox/env.go)) |
+| `DEPUTY_DOCKER_HOST` | Docker daemon socket for sandbox runtimes; takes precedence over `DOCKER_HOST` ([`internal/sandbox/env.go`](internal/sandbox/env.go)) |
+| `DEPUTY_RUNSC_PATH` | Path to runsc (gVisor) binary for gVisor runtime (default: `runsc`) ([`internal/sandbox/env.go`](internal/sandbox/env.go)) |
 
 ## Exit Codes
 
@@ -1121,7 +2230,7 @@ See JWT policy examples for more patterns:
 | Ecosystem support | [`internal/inventory/`](internal/inventory/), [`internal/purlx/`](internal/purlx/), [`internal/proxy/`](internal/proxy/) |
 | Policy features | [`internal/policy/entrypoints.go`](internal/policy/entrypoints.go), [`internal/policy/engine.go`](internal/policy/engine.go), [Policy examples](policy/examples/) |
 | License resolution | [`internal/license/license.go`](internal/license/license.go) (implements `Resolver` interface) |
-| Scanning | [`internal/scan/service.go`](internal/scan/service.go) (implements `Scanner` interface) |
+| Scanning | [`internal/scanning/`](internal/scanning/) (scan orchestration, filtering, results) |
 
 ## Debugging Tips
 

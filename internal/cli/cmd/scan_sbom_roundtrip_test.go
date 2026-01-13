@@ -4,7 +4,6 @@ import (
 	"archive/tar"
 	"bytes"
 	"context"
-	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
@@ -15,18 +14,19 @@ import (
 	"github.com/google/go-containerregistry/pkg/v1/empty"
 	"github.com/google/go-containerregistry/pkg/v1/mutate"
 	"github.com/google/go-containerregistry/pkg/v1/tarball"
-	"github.com/picatz/deputy/internal/analysis/osv"
+	"github.com/google/osv-scalibr/extractor"
 	sbomx "github.com/picatz/deputy/internal/sbom"
-	"github.com/picatz/deputy/internal/scan"
-	"github.com/picatz/deputy/internal/vulnerability"
 )
 
+// TestSBOMImageRoundTrip verifies that generating an SBOM from an image
+// and parsing it back produces equivalent package metadata.
 func TestSBOMImageRoundTrip(t *testing.T) {
 	t.Parallel()
 
 	tarPath := buildTestImageTarball(t)
 	target := "tarball://" + tarPath
 
+	// Generate SBOM from image
 	result, err := sbomx.GenerateImage(context.Background(), target, nil, sbomx.Options{
 		Ecosystems: []string{"go"},
 	})
@@ -37,11 +37,19 @@ func TestSBOMImageRoundTrip(t *testing.T) {
 		t.Fatal("expected packages from image SBOM generation")
 	}
 
+	// Extract PURLs from original packages
+	originalPURLs := extractPURLs(result.Packages)
+	if len(originalPURLs) == 0 {
+		t.Fatal("expected PURLs from original packages")
+	}
+
+	// Serialize to SBOM JSON
 	var buf bytes.Buffer
 	if err := sbomx.WriteProtobomJSON(result.Document, &buf); err != nil {
 		t.Fatalf("WriteProtobomJSON: %v", err)
 	}
 
+	// Parse SBOM back to packages
 	pkgs, direct, _, _, err := parseSBOMPackages(buf.Bytes(), "protobom-json")
 	if err != nil {
 		t.Fatalf("parseSBOMPackages: %v", err)
@@ -50,30 +58,36 @@ func TestSBOMImageRoundTrip(t *testing.T) {
 		t.Fatal("expected packages parsed from image SBOM")
 	}
 
-	var calls [][]osv.PkgInput
-	svc := scan.NewServiceWithConfig(&scan.ServiceConfig{
-		QueryVulnerabilities: func(ctx context.Context, client osv.Client, inputs []osv.PkgInput) ([]vulnerability.Finding, map[string]vulnerability.Advisory, error) {
-			copied := append([]osv.PkgInput(nil), inputs...)
-			calls = append(calls, copied)
-			return nil, nil, nil
-		},
-	})
+	// Extract PURLs from parsed packages
+	parsedPURLs := extractPURLs(pkgs)
 
-	if _, err := svc.ScanContainerImage(context.Background(), target, nil, scan.Options{Ecosystems: []string{"go"}}); err != nil {
-		t.Fatalf("ScanContainerImage: %v", err)
-	}
-	if _, err := svc.ScanSBOM(context.Background(), pkgs, direct, scan.Options{Ecosystems: []string{"go"}}); err != nil {
-		t.Fatalf("ScanSBOM: %v", err)
+	// Verify PURLs match
+	if !slices.Equal(originalPURLs, parsedPURLs) {
+		t.Fatalf("PURL mismatch after round-trip:\noriginal=%v\nparsed=%v", originalPURLs, parsedPURLs)
 	}
 
-	if len(calls) != 2 {
-		t.Fatalf("expected 2 OSV query calls, got %d", len(calls))
+	// Verify direct dependency map is populated
+	if direct == nil {
+		t.Error("expected direct dependency map to be non-nil")
 	}
-	imageInputs := inputKeys(calls[0])
-	sbomInputs := inputKeys(calls[1])
-	if !slices.Equal(imageInputs, sbomInputs) {
-		t.Fatalf("image vs sbom inputs mismatch:\nimage=%v\nsbom=%v", imageInputs, sbomInputs)
+
+	t.Logf("Successfully round-tripped %d packages", len(pkgs))
+}
+
+// extractPURLs extracts and sorts PURLs from packages for comparison.
+func extractPURLs(pkgs []*extractor.Package) []string {
+	out := make([]string, 0, len(pkgs))
+	for _, pkg := range pkgs {
+		if pkg == nil {
+			continue
+		}
+		purl := pkg.PURL()
+		if purl != nil {
+			out = append(out, purl.String())
+		}
 	}
+	slices.Sort(out)
+	return out
 }
 
 func buildTestImageTarball(t *testing.T) string {
@@ -141,19 +155,6 @@ func writeTar(t *testing.T, path string, files map[string]string) {
 			t.Fatalf("write tar data: %v", err)
 		}
 	}
-}
-
-func inputKeys(inputs []osv.PkgInput) []string {
-	out := make([]string, 0, len(inputs))
-	for _, in := range inputs {
-		key := strings.TrimSpace(in.PURL)
-		if key == "" {
-			key = fmt.Sprintf("%s|%s|%s", in.Ecosystem, in.Name, in.Version)
-		}
-		out = append(out, key)
-	}
-	slices.Sort(out)
-	return out
 }
 
 // TestSBOMLayerDetailsRoundTrip verifies that container image layer details

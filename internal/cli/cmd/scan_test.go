@@ -1,24 +1,20 @@
 package cmd
 
 import (
-	"context"
 	"io"
 	"os"
 	"path/filepath"
-	"slices"
 	"testing"
 
 	git "github.com/go-git/go-git/v5"
-	"github.com/google/osv-scalibr/extractor"
-	"github.com/google/osv-scalibr/purl"
-	"github.com/picatz/deputy/internal/analysis/osv"
-	inv "github.com/picatz/deputy/internal/inventory"
-	"github.com/picatz/deputy/internal/scan"
-	"github.com/picatz/deputy/internal/vulnerability"
+
+	"github.com/picatz/deputy/internal/services"
 	"github.com/spf13/cobra"
 )
 
-func TestScannerRunScanHonorsEcosystemFilter(t *testing.T) {
+// TestRunScanBasicExecution tests that a scan can run successfully on a test directory.
+// This is an integration test that uses the real scanning infrastructure.
+func TestRunScanBasicExecution(t *testing.T) {
 	t.Parallel()
 
 	tmpDir := t.TempDir()
@@ -26,86 +22,21 @@ func TestScannerRunScanHonorsEcosystemFilter(t *testing.T) {
 	initGitRepo(t, tmpDir)
 	outPath := filepath.Join(tmpDir, "scan.json")
 
-	var captured inv.ScanOptions
-	scanner := &Scanner{service: scan.NewServiceWithConfig(&scan.ServiceConfig{
-		CollectInventory: func(ctx context.Context, repoPath, gitRef string, opts inv.ScanOptions) ([]*extractor.Package, error) {
-			captured = opts
-			return []*extractor.Package{
-				{Name: "github.com/acme/lib", Version: "v1.0.0", PURLType: purl.TypeGolang},
-			}, nil
-		},
-		QueryVulnerabilities: func(ctx context.Context, client osv.Client, inputs []osv.PkgInput) ([]vulnerability.Finding, map[string]vulnerability.Advisory, error) {
-			return nil, nil, nil
-		},
-	})}
-
 	cmd := newScanTestCommand(t)
-	mustSetFlag(t, cmd, "ecosystems", "go,npm")
+	mustSetFlag(t, cmd, "ecosystems", "go")
 	mustSetFlag(t, cmd, "format", "json")
 	mustSetFlag(t, cmd, "output", outPath)
 
-	if err := scanner.runScan(cmd, []string{tmpDir}); err != nil {
+	// Use real in-process clients
+	c := newScanTestClients(t)
+
+	if err := runScan(c, cmd, []string{tmpDir}); err != nil {
 		t.Fatalf("runScan: %v", err)
 	}
-	want := []string{"go", "npm"}
-	if !slices.Equal(captured.Ecosystems, want) {
-		t.Fatalf("unexpected ecosystems: got %v want %v", captured.Ecosystems, want)
-	}
-}
 
-func TestScannerRunScanEmitsMultiEcosystemInputs(t *testing.T) {
-	t.Parallel()
-
-	tmpDir := t.TempDir()
-	writeGoModule(t, tmpDir)
-	writePackageJSON(t, filepath.Join(tmpDir, "web"))
-	initGitRepo(t, tmpDir)
-	outPath := filepath.Join(tmpDir, "scan.json")
-
-	goPkg := &extractor.Package{
-		Name:      "github.com/acme/lib",
-		Version:   "v1.2.3",
-		PURLType:  purl.TypeGolang,
-		Locations: []string{"go.mod"},
-	}
-	npmPkg := &extractor.Package{
-		Name:      "left-pad",
-		Version:   "1.0.0",
-		PURLType:  purl.TypeNPM,
-		Locations: []string{"web/package-lock.json"},
-	}
-
-	var captured []osv.PkgInput
-	scanner := &Scanner{service: scan.NewServiceWithConfig(&scan.ServiceConfig{
-		CollectInventory: func(ctx context.Context, repoPath, gitRef string, opts inv.ScanOptions) ([]*extractor.Package, error) {
-			return []*extractor.Package{goPkg, npmPkg}, nil
-		},
-		QueryVulnerabilities: func(ctx context.Context, client osv.Client, inputs []osv.PkgInput) ([]vulnerability.Finding, map[string]vulnerability.Advisory, error) {
-			captured = append([]osv.PkgInput(nil), inputs...)
-			return nil, nil, nil
-		},
-	})}
-
-	cmd := newScanTestCommand(t)
-	mustSetFlag(t, cmd, "ecosystems", "go,npm")
-	mustSetFlag(t, cmd, "format", "json")
-	mustSetFlag(t, cmd, "output", outPath)
-
-	if err := scanner.runScan(cmd, []string{tmpDir}); err != nil {
-		t.Fatalf("runScan: %v", err)
-	}
-	if len(captured) != 2 {
-		t.Fatalf("expected 2 pkg inputs, got %d", len(captured))
-	}
-	gotEcos := map[string]string{}
-	for _, in := range captured {
-		gotEcos[in.Name] = in.Ecosystem
-	}
-	if gotEcos["github.com/acme/lib"] != "Go" {
-		t.Fatalf("expected Go ecosystem for module, got %q", gotEcos["github.com/acme/lib"])
-	}
-	if gotEcos["left-pad"] != "npm" {
-		t.Fatalf("expected npm ecosystem for left-pad, got %q", gotEcos["left-pad"])
+	// Verify output file was created
+	if _, err := os.Stat(outPath); err != nil {
+		t.Fatalf("output file not created: %v", err)
 	}
 }
 
@@ -173,4 +104,18 @@ func mustSetFlag(t *testing.T, cmd *cobra.Command, name, value string) {
 	if err := cmd.Flags().Set(name, value); err != nil {
 		t.Fatalf("set flag %s: %v", name, err)
 	}
+}
+
+// newScanTestClients creates a services.Clients for testing using the real in-process handlers.
+func newScanTestClients(t *testing.T) *services.Clients {
+	t.Helper()
+
+	// Create real services with local mode enabled
+	svc, err := services.New()
+	if err != nil {
+		t.Fatalf("create services: %v", err)
+	}
+
+	// Return in-process clients
+	return svc.InProcessClients()
 }

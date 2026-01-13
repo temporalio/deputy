@@ -12,13 +12,13 @@ policies:
     rules:
       - action: deny
         when: |
-          has(vulnerability.inKEV) &&
-          vulnerability.inKEV == true
+          has(vulnerability.in_kev) &&
+          vulnerability.in_kev == true
         reason: "CVE is in CISA's Known Exploited Vulnerabilities catalog"
 
       - action: warn
         when: |
-          !has(vulnerability.inKEV) &&
-          has(vulnerability.cve) &&
-          vulnerability.cve != ""
+          !has(vulnerability.in_kev) &&
+          has(vulnerability.advisory) &&
+          vulnerability.advisory.cve != ""
         reason: "KEV status unknown - run with --enrich to check"

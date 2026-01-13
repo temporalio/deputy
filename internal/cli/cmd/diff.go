@@ -3,7 +3,6 @@ package cmd
 import (
 	"context"
 	"crypto/x509"
-	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -12,36 +11,46 @@ import (
 	"strings"
 	"sync"
 
+	"connectrpc.com/connect"
 	pb "deps.dev/api/v3"
 	"github.com/go-git/go-git/v5/plumbing"
 	"github.com/google/osv-scalibr/extractor"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials"
+	"google.golang.org/protobuf/encoding/protojson"
+	"google.golang.org/protobuf/types/known/timestamppb"
+
+	diffv1 "github.com/picatz/deputy/gen/deputy/diff/v1"
+	scanv1 "github.com/picatz/deputy/gen/deputy/scan/v1"
+	vulnerabilityv1 "github.com/picatz/deputy/gen/deputy/vulnerability/v1"
 	"github.com/picatz/deputy/internal/cli/flags"
 	"github.com/picatz/deputy/internal/compare"
 	gitx "github.com/picatz/deputy/internal/gitutil"
+	"github.com/picatz/deputy/internal/inputs"
 	inv "github.com/picatz/deputy/internal/inventory"
 	"github.com/picatz/deputy/internal/license"
 	"github.com/picatz/deputy/internal/otel"
 	"github.com/picatz/deputy/internal/output"
 	"github.com/picatz/deputy/internal/policy"
+	internalproto "github.com/picatz/deputy/internal/proto"
 	"github.com/picatz/deputy/internal/report"
 	"github.com/picatz/deputy/internal/report/render"
 	"github.com/picatz/deputy/internal/repository"
 	"github.com/picatz/deputy/internal/repository/workspace"
-	"github.com/picatz/deputy/internal/scan"
+	"github.com/picatz/deputy/internal/scanning"
+	"github.com/picatz/deputy/internal/services"
 	ui "github.com/picatz/deputy/internal/ui"
 	"github.com/picatz/deputy/internal/vulnerability"
 	"github.com/spf13/cobra"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
 	"golang.org/x/sync/errgroup"
-	"google.golang.org/grpc"
-	"google.golang.org/grpc/credentials"
 )
 
 // AddDiffCommand registers the diff subcommand which compares dependency
 // inventories between two Git references (or working tree) and optionally
 // performs vulnerability scanning on changed modules.
-func AddDiffCommand(root *cobra.Command, service *scan.Service) {
+func AddDiffCommand(root *cobra.Command, c *services.Clients) {
 	var (
 		repoPath                                       string
 		skipVulnScan                                   bool
@@ -54,13 +63,12 @@ func AddDiffCommand(root *cobra.Command, service *scan.Service) {
 		ecosystems                                     []string
 		debugMatcher                                   bool
 		policyPaths                                    []string
-		useLocalDaemon                                 bool
+		useLocalDaemon                                 bool   // deprecated, use --source
+		source                                         string // source type: remote, docker-daemon
 		outputFormat                                   string
+		outPath                                        string
+		platform                                       string
 	)
-
-	if service == nil {
-		service = scan.NewService()
-	}
 
 	cmd := &cobra.Command{
 		Use:           "diff [base] [target]",
@@ -127,16 +135,30 @@ Can be disabled with --skip-vuln-scan for faster execution.`,
 				}
 			}
 
+			// Set up output writer
+			var outW io.Writer = cmd.OutOrStdout()
+			if outPath != "" && outPath != "-" {
+				f, err := os.Create(outPath)
+				if err != nil {
+					return fmt.Errorf("failed to create output file: %w", err)
+				}
+				defer f.Close()
+				outW = f
+			}
+
 			// Check if both arguments are container image references
 			// BUT only if they don't look like Git refs in the current repo context
 			if len(args) == 2 && isContainerDiffInContext(args[0], args[1], repo) {
+				// Determine if using local daemon (--source docker-daemon or deprecated --local-daemon)
+				useDaemon := useLocalDaemon || source == "docker-daemon" || source == "daemon" || source == "local"
 				opts := containerDiffOpts{
 					skipVulnScan:   skipVulnScan,
 					policyPaths:    policyPaths,
-					useLocalDaemon: useLocalDaemon,
+					useLocalDaemon: useDaemon,
 					format:         outputFormat,
+					platform:       platform,
 				}
-				return runContainerDiff(cmd.Context(), service, args[0], args[1], opts, cmd.OutOrStdout(), cmd.ErrOrStderr())
+				return runContainerDiff(cmd.Context(), c, args[0], args[1], opts, outW, cmd.ErrOrStderr())
 			}
 			scanOpts := inv.ScanOptions{Ecosystems: ecosystems}
 			matcher, matcherErr := inv.GetDependencyMatcher(scanOpts)
@@ -147,7 +169,7 @@ Can be disabled with --skip-vuln-scan for faster execution.`,
 			if err != nil {
 				return fmt.Errorf("failed to parse references: %w", err)
 			}
-			return runDiffAnalysis(cmd.Context(), service, repo, baseRef, targetRef, !skipVulnScan, enrichLicenses, licenseSource, publishedAfterStr, publishedBeforeStr, asOfStr, ignoreUnfixed, showUnchanged, unchangedThreshold, policyPaths, scanOpts, matcher, debugMatcher, outputFormat, cmd.OutOrStdout(), cmd.ErrOrStderr())
+			return runDiffAnalysis(cmd.Context(), c, repo, baseRef, targetRef, !skipVulnScan, enrichLicenses, licenseSource, publishedAfterStr, publishedBeforeStr, asOfStr, ignoreUnfixed, showUnchanged, unchangedThreshold, policyPaths, scanOpts, matcher, debugMatcher, outputFormat, outW, cmd.ErrOrStderr())
 		},
 		Example: `BASIC USAGE:
   # Compare current work with default branch (beginner-friendly)
@@ -253,10 +275,14 @@ CONTAINER IMAGE EXAMPLES:
 
   # Use locally cached images from Docker daemon (avoids rate limits)
   docker pull nginx:1.24 && docker pull nginx:1.25
-  deputy diff --local-daemon nginx:1.24 nginx:1.25
+  deputy diff --source docker-daemon nginx:1.24 nginx:1.25
+  deputy diff -s docker-daemon nginx:1.24 nginx:1.25
 
-  # Explicit docker-daemon scheme (equivalent to --local-daemon)
+  # Explicit docker-daemon scheme (equivalent to --source docker-daemon)
   deputy diff docker-daemon://nginx:1.24 docker-daemon://nginx:1.25
+
+  # Specify platform for multi-arch images
+  deputy diff --platform linux/amd64 nginx:1.24 nginx:1.25
 
 ERROR HANDLING:
 If you specify an invalid reference, deputy will suggest similar valid references
@@ -268,8 +294,8 @@ PERFORMANCE TIPS:
 • Remote branch comparisons are cached locally for better performance`,
 	}
 
-	cmd.Flags().StringVarP(&repoPath, "repo", "r", "", "Path to the repository (defaults to current directory)")
-	cmd.Flags().BoolVarP(&skipVulnScan, "skip-vuln-scan", "s", false, "Skip vulnerability scanning (faster execution)")
+	cmd.Flags().StringVar(&repoPath, "repo", "", "Path to the repository (defaults to current directory)")
+	cmd.Flags().BoolVar(&skipVulnScan, "skip-vuln-scan", false, "Skip vulnerability scanning (faster execution)")
 	cmd.Flags().BoolVar(&enrichLicenses, "licenses", false, "Include license information for changed dependencies")
 	cmd.Flags().StringVar(&licenseSource, "license-source", "depsdev", "License information source: depsdev | scan | both")
 	cmd.Flags().StringVar(&publishedBeforeStr, "published-before", "", "Only include vulnerabilities published before this date (YYYY, YYYY-MM, YYYY-MM-DD, or RFC3339)")
@@ -278,11 +304,14 @@ PERFORMANCE TIPS:
 	cmd.Flags().BoolVar(&ignoreUnfixed, "ignore-unfixed", false, "Ignore vulnerabilities without fixes in diff scan output")
 	cmd.Flags().BoolVar(&showUnchanged, "show-unchanged", false, "Always show vulnerabilities in unchanged dependencies (overrides quiet behavior)")
 	cmd.Flags().StringVar(&unchangedThreshold, "unchanged-threshold", "critical", "Auto-show unchanged vulns at or above this severity: none|low|med|high|critical|any")
-	cmd.Flags().StringSliceVar(&ecosystems, "ecosystems", []string{"all"}, "Ecosystems to include: go, npm, pypi, maven, rubygems, cargo, nuget, hex, pub, cocoapods, packagist, github-actions, haskell, r, cpp (default: all)")
+	cmd.Flags().StringSliceVarP(&ecosystems, "ecosystems", "e", []string{"all"}, "Ecosystems to include: go, npm, pypi, maven, rubygems, cargo, nuget, hex, pub, cocoapods, packagist, github-actions, haskell, r, cpp (default: all)")
 	cmd.Flags().BoolVar(&debugMatcher, "debug-matcher", false, "Print which changed files were considered dependency manifests/lockfiles")
 	cmd.Flags().StringArrayVar(&policyPaths, "policy", nil, "Path to CEL policy files or bundles to evaluate against diff results (repeatable)")
-	cmd.Flags().BoolVar(&useLocalDaemon, "local-daemon", false, "Use local Docker daemon instead of pulling from remote registry (requires 'docker pull' first)")
-	cmd.Flags().StringVar(&outputFormat, "format", "text", "Output format: text | json")
+	cmd.Flags().BoolVar(&useLocalDaemon, "local-daemon", false, "Use local Docker daemon instead of pulling from remote registry (deprecated: use --source docker-daemon)")
+	cmd.Flags().StringVarP(&source, "source", "s", "", "Target source type for container images: remote, docker-daemon")
+	cmd.Flags().StringVarP(&outputFormat, "format", "f", "text", "Output format: text | json")
+	cmd.Flags().StringVarP(&outPath, "output", "o", "-", "Output file path or '-' for stdout")
+	cmd.Flags().StringVar(&platform, "platform", "", "Platform for container images (os/arch[/variant])")
 
 	root.AddCommand(cmd)
 }
@@ -299,7 +328,7 @@ type DiffPolicyReport struct {
 // runDiffAnalysis orchestrates dependency inventory collection for the base and
 // target references, computes a dependency diff, and optionally queries OSV to
 // enrich added/updated modules with vulnerability data.
-func runDiffAnalysis(ctx context.Context, service *scan.Service, repoPath, baseRef, targetRef string, enableVulnScan bool, enrichLicenses bool, licenseSource string, publishedAfterStr, publishedBeforeStr, asOfStr string, ignoreUnfixed bool, showUnchanged bool, unchangedThreshold string, policyPaths []string, scanOpts inv.ScanOptions, matcher *inv.DependencyMatcher, debugMatcher bool, outputFormat string, outW io.Writer, errW io.Writer) error {
+func runDiffAnalysis(ctx context.Context, c *services.Clients, repoPath, baseRef, targetRef string, enableVulnScan bool, enrichLicenses bool, licenseSource string, publishedAfterStr, publishedBeforeStr, asOfStr string, ignoreUnfixed bool, showUnchanged bool, unchangedThreshold string, policyPaths []string, scanOpts inv.ScanOptions, matcher *inv.DependencyMatcher, debugMatcher bool, outputFormat string, outW io.Writer, errW io.Writer) error {
 	ctx, span := otel.StartSpan(ctx, "deputy.diff",
 		trace.WithAttributes(
 			attribute.String("deputy.target.path", repoPath),
@@ -316,9 +345,6 @@ func runDiffAnalysis(ctx context.Context, service *scan.Service, repoPath, baseR
 	}
 	if errW == nil {
 		errW = io.Discard
-	}
-	if service == nil {
-		service = scan.NewService()
 	}
 
 	// Validate and normalize output format early
@@ -351,17 +377,9 @@ func runDiffAnalysis(ctx context.Context, service *scan.Service, repoPath, baseR
 
 		if matcher != nil && !matcher.AnyMatch(changedFiles) {
 			if isJSON {
-				emptyReport := DiffPolicyReport{
-					Repo:            repoPath,
-					BaseRef:         baseRef,
-					TargetRef:       targetRef,
-					Changes:         []compare.Change{},
-					Vulnerabilities: []report.Vulnerability{},
-				}
-				enc := json.NewEncoder(outW)
-				enc.SetIndent("", "  ")
+				emptyResp := internalproto.GitDiffReportToProto(repoPath, baseRef, targetRef, nil, nil, nil)
 				otel.SetSpanOK(span)
-				return enc.Encode(emptyReport)
+				return outputDiffProtoJSON(outW, emptyResp)
 			}
 			fmt.Fprintln(outW, ui.StyleAdded.Render("No dependency changes detected."))
 			otel.SetSpanOK(span)
@@ -393,7 +411,7 @@ func runDiffAnalysis(ctx context.Context, service *scan.Service, repoPath, baseR
 	var targetHash *plumbing.Hash
 
 	if isWorkingPseudoRef(targetRef) {
-		tp, err := inv.ScanPackagesWorking(ctx, repoSrc.Workspace, scanOpts)
+		tp, err := inv.ScanPackagesWorking(ctx, repoSrc.Workspace(), scanOpts)
 		if err != nil {
 			otel.SetSpanError(span, err)
 			return fmt.Errorf("error scanning working tree packages: %w", err)
@@ -431,44 +449,42 @@ func runDiffAnalysis(ctx context.Context, service *scan.Service, repoPath, baseR
 
 	// Determine direct dependencies from target go.mod for accurate classification
 	targetGoDirect := map[string]bool{"stdlib": true}
-	var targetManifestRes scan.ManifestResolver
+	var targetManifestRes inputs.Resolver
 	switch {
 	case isWorkingPseudoRef(targetRef):
-		targetGoDirect = compare.CollectGoDirectModulesFromWorkspace(repoSrc.Workspace)
-		targetManifestRes = scan.NewWorkspaceManifestResolver(repoSrc.Workspace)
+		targetGoDirect = compare.CollectGoDirectModulesFromWorkspace(repoSrc.Workspace())
+		targetManifestRes = inputs.NewWorkspaceResolver(repoSrc.Workspace())
 	case targetHash != nil:
 		if direct, err := compare.CollectGoDirectModulesFromCommit(repo, *targetHash); err == nil {
 			targetGoDirect = direct
 		}
-		targetManifestRes = scan.NewGitManifestResolver(repo, *targetHash)
+		targetManifestRes = inputs.NewGitResolver(repo, *targetHash)
 	default:
 		// Fallback: use workspace for current state
-		targetGoDirect = compare.CollectGoDirectModulesFromWorkspace(repoSrc.Workspace)
-		targetManifestRes = scan.NewWorkspaceManifestResolver(repoSrc.Workspace)
+		targetGoDirect = compare.CollectGoDirectModulesFromWorkspace(repoSrc.Workspace())
+		targetManifestRes = inputs.NewWorkspaceResolver(repoSrc.Workspace())
 	}
 
-	targetPkgInputs := scan.PackagesToInputs(targetPackages, scan.PackageInputOptions{GoDirect: targetGoDirect, Resolver: targetManifestRes})
+	targetPkgInputs := inputs.Convert(targetPackages, inputs.Options{GoDirect: targetGoDirect, Resolver: targetManifestRes})
 
 	baseGoDirect := map[string]bool{"stdlib": true}
-	var baseManifestRes scan.ManifestResolver
+	var baseManifestRes inputs.Resolver
 	if isWorkingPseudoRef(baseRef) {
-		baseGoDirect = compare.CollectGoDirectModulesFromWorkspace(repoSrc.Workspace)
-		baseManifestRes = scan.NewWorkspaceManifestResolver(repoSrc.Workspace)
+		baseGoDirect = compare.CollectGoDirectModulesFromWorkspace(repoSrc.Workspace())
+		baseManifestRes = inputs.NewWorkspaceResolver(repoSrc.Workspace())
 	} else {
-		baseManifestRes = scan.NewGitManifestResolver(repo, *baseHash)
+		baseManifestRes = inputs.NewGitResolver(repo, *baseHash)
 		if direct, err := compare.CollectGoDirectModulesFromCommit(repo, *baseHash); err == nil {
 			baseGoDirect = direct
 		}
 	}
 
-	basePkgInputs := scan.PackagesToInputs(basePackages, scan.PackageInputOptions{GoDirect: baseGoDirect, Resolver: baseManifestRes})
-	pkgDirect := scan.MergeDirectMaps(scan.BuildPackageDirectMap(basePkgInputs), scan.BuildPackageDirectMap(targetPkgInputs))
+	basePkgInputs := inputs.Convert(basePackages, inputs.Options{GoDirect: baseGoDirect, Resolver: baseManifestRes})
+	pkgDirect := inputs.MergeDirectMaps(inputs.BuildDirectMap(basePkgInputs), inputs.BuildDirectMap(targetPkgInputs))
 	goDirect := mergeGoDirectMaps(baseGoDirect, targetGoDirect)
-	manifestRes := targetManifestRes
-	pkgInputs := targetPkgInputs
 
 	// Collect main modules to exclude from comparison (the project itself shouldn't appear as a dependency)
-	excludeMainModules := compare.CollectMainModulesFromWorkspace(repoSrc.Workspace)
+	excludeMainModules := compare.CollectMainModulesFromWorkspace(repoSrc.Workspace())
 	if baseHash != nil {
 		if baseMains, err := compare.CollectMainModulesFromCommit(repo, *baseHash); err == nil {
 			for mod := range baseMains {
@@ -492,16 +508,8 @@ func runDiffAnalysis(ctx context.Context, service *scan.Service, repoPath, baseR
 	})
 	if len(changes) == 0 {
 		if isJSON {
-			emptyReport := DiffPolicyReport{
-				Repo:            repoPath,
-				BaseRef:         baseRef,
-				TargetRef:       targetRef,
-				Changes:         []compare.Change{},
-				Vulnerabilities: []report.Vulnerability{},
-			}
-			enc := json.NewEncoder(outW)
-			enc.SetIndent("", "  ")
-			return enc.Encode(emptyReport)
+			emptyResp := internalproto.GitDiffReportToProto(repoPath, baseRef, targetRef, nil, nil, nil)
+			return outputDiffProtoJSON(outW, emptyResp)
 		}
 		fmt.Fprintln(outW, "No package changes detected.")
 		otel.SetSpanOK(span)
@@ -514,7 +522,7 @@ func runDiffAnalysis(ctx context.Context, service *scan.Service, repoPath, baseR
 	// Detailed dependency change rendering (legacy style) with optional enrichment
 	// Skip text rendering in JSON mode
 	if !isJSON {
-		displayDetailedDependencyChanges(ctx, repoSrc.Workspace, changes, enrichLicenses, licenseSource, outW, errW)
+		displayDetailedDependencyChanges(ctx, repoSrc.Workspace(), changes, enrichLicenses, licenseSource, outW, errW)
 	}
 
 	// Scan for vulnerabilities if enabled
@@ -527,35 +535,52 @@ func runDiffAnalysis(ctx context.Context, service *scan.Service, repoPath, baseR
 			progress.Start(ctx)
 		}
 
-		inputs := pkgInputs
-		if inputs == nil {
-			inputs = scan.PackagesToInputs(targetPackages, scan.PackageInputOptions{GoDirect: goDirect, Resolver: manifestRes})
-		}
 		beforeT, afterT := flags.ParsePublishedFilters(errW, asOfStr, publishedBeforeStr, publishedAfterStr)
-		result := service.ScanInputs(
-			ctx,
-			scan.Target{DisplayPath: repoPath, LocalPath: repoPath, Ref: targetRef, EffectiveRef: targetRef},
-			targetPackages,
-			pkgDirect,
-			inputs,
-			scan.Options{PublishedBefore: beforeT, PublishedAfter: afterT},
-		)
 
+		// Build scan request using client interface
+		// When scanning the working tree, use HEAD~0 to scan the working directory
+		// rather than passing "WORKING" which the scan service doesn't understand.
+		scanRef := targetRef
+		if isWorkingPseudoRef(targetRef) {
+			scanRef = "HEAD~0"
+		}
+		scanOpts := &scanv1.ScanOptions{
+			Ref: scanRef,
+		}
+		if !beforeT.IsZero() {
+			scanOpts.PublishedBefore = timestamppb.New(beforeT)
+		}
+		if !afterT.IsZero() {
+			scanOpts.PublishedAfter = timestamppb.New(afterT)
+		}
+		req := &scanv1.ScanRequest{
+			Target:  repoPath,
+			Options: scanOpts,
+		}
+
+		resp, err := c.Vulns.Scan(ctx, connect.NewRequest(req))
 		if progress != nil {
 			progress.Clear()
 			// Move cursor up to clear the blank line we added for spacing
 			fmt.Fprint(errW, "\033[A\033[K")
 		}
+		if err != nil {
+			return fmt.Errorf("vulnerability scan failed: %w", err)
+		}
+
+		// Convert proto response to internal result
+		resultPtr := internalproto.ScanningResultFromProto(resp.Msg)
+		result := *resultPtr
 
 		for _, warning := range result.Warnings {
 			fmt.Fprintf(errW, "Warning: %s\n", warning)
 		}
 		if ignoreUnfixed {
-			result = scan.FilterUnfixed(result)
+			result = scanning.FilterUnfixed(result)
 			fmt.Fprintf(errW, "  %s\n", ui.StyleMeta.Render("Note: ignoring unfixed vulnerabilities (--ignore-unfixed)"))
 		}
 
-		reportVulns := report.FlattenResult(result)
+		reportVulns := report.FlattenScanningResult(result)
 
 		policyReport := DiffPolicyReport{
 			Repo:            repoPath,
@@ -571,10 +596,9 @@ func runDiffAnalysis(ctx context.Context, service *scan.Service, repoPath, baseR
 
 		// JSON output mode
 		if isJSON {
-			enc := json.NewEncoder(outW)
-			enc.SetIndent("", "  ")
+			protoResp := internalproto.GitDiffReportToProto(repoPath, baseRef, targetRef, changes, result.Findings, result.Advisories)
 			otel.SetSpanOK(span)
-			return enc.Encode(policyReport)
+			return outputDiffProtoJSON(outW, protoResp)
 		}
 
 		changedVulns, unchangedVulns := splitVulnsByChange(reportVulns, changes)
@@ -588,27 +612,27 @@ func runDiffAnalysis(ctx context.Context, service *scan.Service, repoPath, baseR
 			thr := strings.ToLower(strings.TrimSpace(unchangedThreshold))
 			switch thr {
 			case "", "critical":
-				if unchangedStats.CriticalSev > 0 {
+				if unchangedStats.Critical > 0 {
 					showUnchangedEff = true
 					reason = "Critical severity present"
 				}
 			case "high":
-				if unchangedStats.CriticalSev+unchangedStats.HighSeverity > 0 {
+				if unchangedStats.Critical+unchangedStats.High > 0 {
 					showUnchangedEff = true
 					reason = ">= High severity present"
 				}
 			case "med", "medium", "moderate":
-				if unchangedStats.CriticalSev+unchangedStats.HighSeverity+unchangedStats.MedSeverity > 0 {
+				if unchangedStats.Critical+unchangedStats.High+unchangedStats.Medium > 0 {
 					showUnchangedEff = true
 					reason = ">= Medium severity present"
 				}
 			case "low":
-				if unchangedStats.CriticalSev+unchangedStats.HighSeverity+unchangedStats.MedSeverity+unchangedStats.LowSeverity > 0 {
+				if unchangedStats.Critical+unchangedStats.High+unchangedStats.Medium+unchangedStats.Low > 0 {
 					showUnchangedEff = true
 					reason = ">= Low severity present"
 				}
 			case "any", "all":
-				if unchangedStats.UniqueVulns > 0 {
+				if unchangedStats.Unique > 0 {
 					showUnchangedEff = true
 					reason = "Vulnerabilities present"
 				}
@@ -616,7 +640,7 @@ func runDiffAnalysis(ctx context.Context, service *scan.Service, repoPath, baseR
 				// never auto-show
 			default:
 				// fallback to critical if unknown value
-				if unchangedStats.CriticalSev > 0 {
+				if unchangedStats.Critical > 0 {
 					showUnchangedEff = true
 					reason = "Critical severity present"
 				}
@@ -669,21 +693,13 @@ func runDiffAnalysis(ctx context.Context, service *scan.Service, repoPath, baseR
 
 	// No vulnerability scanning - output changes only
 	if isJSON {
-		noVulnReport := DiffPolicyReport{
-			Repo:            repoPath,
-			BaseRef:         baseRef,
-			TargetRef:       targetRef,
-			Changes:         changes,
-			Vulnerabilities: []report.Vulnerability{},
-		}
-		enc := json.NewEncoder(outW)
-		enc.SetIndent("", "  ")
+		protoResp := internalproto.GitDiffReportToProto(repoPath, baseRef, targetRef, changes, nil, nil)
 		otel.SetSpanOK(span)
-		return enc.Encode(noVulnReport)
+		return outputDiffProtoJSON(outW, protoResp)
 	}
 
 	// Display results (no vulnerabilities scanned)
-	render.DisplayVulnerabilities(outW, scan.Result{})
+	render.DisplayVulnerabilities(outW, scanning.Result{})
 	otel.SetSpanOK(span)
 	return nil
 }
@@ -878,17 +894,19 @@ func displayDetailedDependencyChanges(ctx context.Context, ws workspace.FS, chan
 
 		// Format the combined license and direct/indirect annotation
 		var licAndDepStr string
-		directness := "(indirect)"
+		var directnessStr string
 		if c.IsDirect {
-			directness = "(direct)"
+			directnessStr = ui.StyleDirect.Render("[direct]")
+		} else {
+			directnessStr = ui.StyleIndirect.Render("[indirect]")
 		}
 
 		if len(licenses) > 0 && licenses[0] != "?" {
 			licenseStr := strings.Join(licenses, ", ")
-			licAndDepStr = ui.StyleLicense.Render("["+licenseStr+"]") + " " + ui.StyleVersion.Render(directness)
+			licAndDepStr = ui.StyleLicense.Render("["+licenseStr+"]") + " " + directnessStr
 		} else {
 			// If no licenses are available, just show the directness
-			licAndDepStr = ui.StyleVersion.Render(directness)
+			licAndDepStr = directnessStr
 		}
 
 		switch c.ChangeType {
@@ -897,11 +915,13 @@ func displayDetailedDependencyChanges(ctx context.Context, ws workspace.FS, chan
 			addedN++
 		case compare.Removed:
 			// For removed dependencies, we don't have target version license info, so just show directness
-			removedDirectness := "(indirect)"
+			var removedDirectnessStr string
 			if c.IsDirect {
-				removedDirectness = "(direct)"
+				removedDirectnessStr = ui.StyleDirect.Render("[direct]")
+			} else {
+				removedDirectnessStr = ui.StyleIndirect.Render("[indirect]")
 			}
-			fmt.Fprintf(outW, "  %s %s @ %s %s\n", ui.StyleRemoved.Render("-"), ui.StyleRemoved.Render(c.Name), ui.StyleVersion.Render(c.BaseVersion), ui.StyleVersion.Render(removedDirectness))
+			fmt.Fprintf(outW, "  %s %s @ %s %s\n", ui.StyleRemoved.Render("-"), ui.StyleRemoved.Render(c.Name), ui.StyleVersion.Render(c.BaseVersion), removedDirectnessStr)
 			removedN++
 		case compare.Upgraded:
 			updatedN++
@@ -910,7 +930,7 @@ func displayDetailedDependencyChanges(ctx context.Context, ws workspace.FS, chan
 			if c.OldName != "" && c.OldName != c.Name {
 				oldNamePart = ui.StyleDim.Render(c.OldName) + " " + ui.StyleUpdateArrow.Render("→ ")
 			}
-			fmt.Fprintf(outW, "  %s %s%s @ %s %s %s %s\n", ui.StyleUpgraded.Render("↑"), oldNamePart, ui.StyleBold.Render(c.Name), ui.StyleVersion.Render(c.BaseVersion), ui.StyleUpdateArrow.Render("→"), ui.StyleVersion.Render(c.TargetVersion), licAndDepStr)
+			fmt.Fprintf(outW, "  %s %s%s @ %s %s %s %s\n", ui.StyleUpgraded.Render("↑"), oldNamePart, ui.StyleBold.Render(c.Name), ui.StyleVersion.Render(c.BaseVersion), ui.StyleUpdateArrow.Render("→"), ui.StyleVersionNew.Render(c.TargetVersion), licAndDepStr)
 		case compare.Downgraded:
 			updatedN++
 			downgradedN++
@@ -918,7 +938,7 @@ func displayDetailedDependencyChanges(ctx context.Context, ws workspace.FS, chan
 			if c.OldName != "" && c.OldName != c.Name {
 				oldNamePart = ui.StyleDim.Render(c.OldName) + " " + ui.StyleDowngradeArrow.Render("→ ")
 			}
-			fmt.Fprintf(outW, "  %s %s%s @ %s %s %s %s\n", ui.StyleDowngraded.Render("↓"), oldNamePart, ui.StyleBold.Render(c.Name), ui.StyleVersion.Render(c.BaseVersion), ui.StyleDowngradeArrow.Render("→"), ui.StyleVersion.Render(c.TargetVersion), licAndDepStr)
+			fmt.Fprintf(outW, "  %s %s%s @ %s %s %s %s\n", ui.StyleDowngraded.Render("↓"), oldNamePart, ui.StyleBold.Render(c.Name), ui.StyleVersion.Render(c.BaseVersion), ui.StyleDowngradeArrow.Render("→"), ui.StyleVersionNew.Render(c.TargetVersion), licAndDepStr)
 		case compare.Updated:
 			updatedN++
 			arrowStyle := ui.StyleUpdateArrow
@@ -927,7 +947,7 @@ func displayDetailedDependencyChanges(ctx context.Context, ws workspace.FS, chan
 			if c.OldName != "" && c.OldName != c.Name {
 				oldNamePart = ui.StyleDim.Render(c.OldName) + " " + arrowStyle.Render("→ ")
 			}
-			fmt.Fprintf(outW, "  %s %s%s @ %s %s %s %s\n", symbol, oldNamePart, ui.StyleBold.Render(c.Name), ui.StyleVersion.Render(c.BaseVersion), arrowStyle.Render("→"), ui.StyleVersion.Render(c.TargetVersion), licAndDepStr)
+			fmt.Fprintf(outW, "  %s %s%s @ %s %s %s %s\n", symbol, oldNamePart, ui.StyleBold.Render(c.Name), ui.StyleVersion.Render(c.BaseVersion), arrowStyle.Render("→"), ui.StyleVersionNew.Render(c.TargetVersion), licAndDepStr)
 		}
 	}
 
@@ -983,21 +1003,21 @@ func splitVulnsByChange(vulns []report.Vulnerability, changes []compare.Change) 
 	return changed, unchanged
 }
 
-func resultFromReportVulnerabilities(vulns []report.Vulnerability) (scan.Result, []vulnerability.Consolidated) {
+func resultFromReportVulnerabilities(vulns []report.Vulnerability) (scanning.Result, []vulnerability.Consolidated) {
 	if len(vulns) == 0 {
-		return scan.Result{}, nil
+		return scanning.Result{}, nil
 	}
 	findings, advisories := report.SplitVulnerabilities(vulns)
 	cons := vulnerability.Consolidate(findings, advisories)
 	stats := vulnerability.StatsFromConsolidated(cons, len(findings))
-	return scan.Result{
+	return scanning.Result{
 		Findings:   findings,
 		Advisories: advisories,
 		Stats:      stats,
 	}, cons
 }
 
-func consolidateReportVulnerabilities(vulns []report.Vulnerability) ([]vulnerability.Consolidated, vulnerability.Stats) {
+func consolidateReportVulnerabilities(vulns []report.Vulnerability) ([]vulnerability.Consolidated, vulnerabilityv1.Stats) {
 	result, cons := resultFromReportVulnerabilities(vulns)
 	return cons, result.Stats
 }
@@ -1056,46 +1076,74 @@ func mergeGoDirectMaps(maps ...map[string]bool) map[string]bool {
 }
 
 // runDiffPolicies evaluates the configured policies against the diff report.
-func runDiffPolicies(ctx context.Context, policyPaths []string, report DiffPolicyReport, errW io.Writer) error {
+// Passes proto messages directly to CEL for type-safe evaluation.
+func runDiffPolicies(ctx context.Context, policyPaths []string, diffReport DiffPolicyReport, errW io.Writer) error {
 	if len(policyPaths) == 0 {
 		return nil
 	}
-	reportMap, err := structToMap(report)
-	if err != nil {
+
+	// Convert to proto types for CEL evaluation
+	protoChanges := internalproto.PackageChangesToProto(diffReport.Changes)
+	protoFindings := report.VulnerabilitiesToFindings(diffReport.Vulnerabilities)
+
+	// Build report-level payload with proto messages
+	payload := map[string]any{
+		"repo":            diffReport.Repo,
+		"baseRef":         diffReport.BaseRef,
+		"targetRef":       diffReport.TargetRef,
+		"changes":         protoChanges,
+		"vulnerabilities": protoFindings,
+	}
+
+	if _, err := evaluatePoliciesForCommand(ctx, policyPaths, payload, "diff", policy.EntrypointDiffReport, errW); err != nil {
 		return err
 	}
-	if _, err := evaluatePoliciesForCommand(ctx, policyPaths, reportMap, "diff", policy.EntrypointDiffReport, errW); err != nil {
-		return err
-	}
-	for _, change := range report.Changes {
-		changeMap, err := structToMap(change)
-		if err != nil {
-			return err
+
+	// Evaluate per-change policies
+	for _, protoChange := range protoChanges {
+		changePayload := map[string]any{
+			"repo":      diffReport.Repo,
+			"baseRef":   diffReport.BaseRef,
+			"targetRef": diffReport.TargetRef,
+			"change":    protoChange,
+			"pkg":       protoChange.Package, // Alias for consistency with scan entrypoints
 		}
-		payload := map[string]any{
-			"repo":      report.Repo,
-			"baseRef":   report.BaseRef,
-			"targetRef": report.TargetRef,
-			"change":    changeMap,
-		}
-		if _, err := evaluatePoliciesForCommand(ctx, policyPaths, payload, "diff", policy.EntrypointDiffDependencyChange, errW); err != nil {
+		if _, err := evaluatePoliciesForCommand(ctx, policyPaths, changePayload, "diff", policy.EntrypointDiffDependencyChange, errW); err != nil {
 			return err
 		}
 	}
-	for _, vuln := range report.Vulnerabilities {
-		vulnMap, err := structToMap(vuln)
-		if err != nil {
-			return err
+
+	// Evaluate per-vulnerability policies
+	for _, finding := range protoFindings {
+		vulnPayload := map[string]any{
+			"repo":          diffReport.Repo,
+			"baseRef":       diffReport.BaseRef,
+			"targetRef":     diffReport.TargetRef,
+			"vulnerability": finding,
+			"pkg":           finding.Package, // Alias for consistency with scan entrypoints
 		}
-		payload := map[string]any{
-			"repo":          report.Repo,
-			"baseRef":       report.BaseRef,
-			"targetRef":     report.TargetRef,
-			"vulnerability": vulnMap,
-		}
-		if _, err := evaluatePoliciesForCommand(ctx, policyPaths, payload, "diff", policy.EntrypointDiffVulnerability, errW); err != nil {
+		if _, err := evaluatePoliciesForCommand(ctx, policyPaths, vulnPayload, "diff", policy.EntrypointDiffVulnerability, errW); err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+// outputDiffProtoJSON writes a diff response as JSON using protojson.
+func outputDiffProtoJSON(w io.Writer, resp *diffv1.DiffVulnerabilitiesResponse) error {
+	opts := protojson.MarshalOptions{
+		Multiline:       true,
+		Indent:          "  ",
+		EmitUnpopulated: false,
+		UseProtoNames:   true,
+	}
+	data, err := opts.Marshal(resp)
+	if err != nil {
+		return fmt.Errorf("marshal proto to JSON: %w", err)
+	}
+	if _, err := w.Write(data); err != nil {
+		return err
+	}
+	_, err = w.Write([]byte("\n"))
+	return err
 }

@@ -14,6 +14,7 @@ import (
 
 	"github.com/picatz/deputy/internal/analysis/osv"
 	"github.com/picatz/deputy/internal/policy"
+	"google.golang.org/protobuf/proto"
 )
 
 func writeBundle(t *testing.T, dir, name, when, reason, action string) string {
@@ -142,13 +143,13 @@ func TestGoModuleHandlerPolicyDeny(t *testing.T) {
 
 type denyPolicyEngine struct{}
 
-func (denyPolicyEngine) Evaluate(ctx context.Context, entrypoint string, payload map[string]any) ([]policy.Action, error) {
+func (denyPolicyEngine) Evaluate(ctx context.Context, entrypoint string, input proto.Message) ([]policy.Action, error) {
 	return []policy.Action{{Type: "deny", Reason: "blocked"}}, nil
 }
 
 func TestGoModuleHandlerBlocksCriticalVulnerability(t *testing.T) {
 	tmp := t.TempDir()
-	policyPath := writeBundle(t, tmp, "block-critical", `vulnerabilities.exists(v, v.Severity == "CRITICAL")`, "critical vuln", "deny")
+	policyPath := writeBundle(t, tmp, "block-critical", `vulnerabilities.exists(v, v.advisory.severity.level == severity.critical)`, "critical vuln", "deny")
 	engine, err := NewPolicyEngine([]string{policyPath})
 	if err != nil {
 		t.Fatalf("NewPolicyEngine: %v", err)
@@ -175,7 +176,7 @@ func TestGoModuleHandlerBlocksCriticalVulnerability(t *testing.T) {
 
 func TestGoModuleHandlerLicensePolicy(t *testing.T) {
 	tmp := t.TempDir()
-	policyPath := writeBundle(t, tmp, "block-gpl", `licenses.exists(l, l == "GPL-3.0")`, "license policy", "deny")
+	policyPath := writeBundle(t, tmp, "block-gpl", `pkg.licenses.exists(l, l == "GPL-3.0")`, "license policy", "deny")
 	engine, err := NewPolicyEngine([]string{policyPath})
 	if err != nil {
 		t.Fatalf("NewPolicyEngine: %v", err)

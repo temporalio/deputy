@@ -174,7 +174,7 @@ func (r *PyPIResolver) processPoetryLock(ctx context.Context, g *Graph, files Fi
 		if node == nil {
 			isDirect := directDeps[strings.ToLower(pkg.Name)]
 			node = &Node{
-				PURL:      purl,
+				Purl:      purl,
 				Name:      pkg.Name,
 				Version:   pkg.Version,
 				Ecosystem: "PyPI",
@@ -186,8 +186,8 @@ func (r *PyPIResolver) processPoetryLock(ctx context.Context, g *Graph, files Fi
 
 		if directDeps[strings.ToLower(pkg.Name)] {
 			node.Direct = true
-			if !containsRoot(g.roots, node.PURL) {
-				g.roots = append(g.roots, node.PURL)
+			if !containsRoot(g.roots, node.Purl) {
+				g.roots = append(g.roots, node.Purl)
 			}
 		}
 
@@ -208,11 +208,11 @@ func (r *PyPIResolver) processPoetryLock(ctx context.Context, g *Graph, files Fi
 				continue
 			}
 
-			edgeKey := purl + "->" + childNode.PURL
+			edgeKey := purl + "->" + childNode.Purl
 			if !edgeSet[edgeKey] {
 				g.AddEdge(&Edge{
 					From:  purl,
-					To:    childNode.PURL,
+					To:    childNode.Purl,
 					Scope: ScopeRuntime,
 				})
 				edgeSet[edgeKey] = true
@@ -367,7 +367,7 @@ func (r *PyPIResolver) processUvLock(ctx context.Context, g *Graph, files FileRe
 		if node == nil {
 			isDirect := directDeps[strings.ToLower(pkg.Name)]
 			node = &Node{
-				PURL:      purl,
+				Purl:      purl,
 				Name:      pkg.Name,
 				Version:   pkg.Version,
 				Ecosystem: "PyPI",
@@ -379,8 +379,8 @@ func (r *PyPIResolver) processUvLock(ctx context.Context, g *Graph, files FileRe
 
 		if directDeps[strings.ToLower(pkg.Name)] {
 			node.Direct = true
-			if !containsRoot(g.roots, node.PURL) {
-				g.roots = append(g.roots, node.PURL)
+			if !containsRoot(g.roots, node.Purl) {
+				g.roots = append(g.roots, node.Purl)
 			}
 		}
 
@@ -401,11 +401,11 @@ func (r *PyPIResolver) processUvLock(ctx context.Context, g *Graph, files FileRe
 				continue
 			}
 
-			edgeKey := purl + "->" + childNode.PURL
+			edgeKey := purl + "->" + childNode.Purl
 			if !edgeSet[edgeKey] {
 				g.AddEdge(&Edge{
 					From:  purl,
-					To:    childNode.PURL,
+					To:    childNode.Purl,
 					Scope: ScopeRuntime,
 				})
 				edgeSet[edgeKey] = true
@@ -449,7 +449,7 @@ func (r *PyPIResolver) processRequirementsTxt(ctx context.Context, g *Graph, fil
 		}
 		if node == nil {
 			node = &Node{
-				PURL:      purl,
+				Purl:      purl,
 				Name:      name,
 				Version:   version,
 				Ecosystem: "PyPI",
@@ -460,8 +460,8 @@ func (r *PyPIResolver) processRequirementsTxt(ctx context.Context, g *Graph, fil
 		}
 
 		node.Direct = true
-		if !containsRoot(g.roots, node.PURL) {
-			g.roots = append(g.roots, node.PURL)
+		if !containsRoot(g.roots, node.Purl) {
+			g.roots = append(g.roots, node.Purl)
 		}
 	}
 

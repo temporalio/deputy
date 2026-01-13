@@ -2,74 +2,78 @@ package cmd
 
 import (
 	"bytes"
-	"encoding/json"
 	"testing"
 
+	"google.golang.org/protobuf/encoding/protojson"
+
+	fixv1 "github.com/picatz/deputy/gen/deputy/fix/v1"
+	targetv1 "github.com/picatz/deputy/gen/deputy/target/v1"
+	internalproto "github.com/picatz/deputy/internal/proto"
 	remediation "github.com/picatz/deputy/internal/remediation"
-	"github.com/picatz/deputy/internal/report"
 )
 
-func TestBuildRemediationPlan(t *testing.T) {
-	scan := ScanResult{Repo: "github.com/example/project", Ref: "main", Commit: "abcdef0"}
+func TestBuildFixResponse(t *testing.T) {
 	commands := []remediation.Command{
 		{Command: "go get example.com/mod@v1.2.3", Executable: true},
 		{Command: "Edit Gemfile to require foo >= 2.0.0", Executable: false},
 		{Command: "go get go@1.22.3", Executable: true},
 	}
-	plan := buildRemediationPlan(scan, commands, "v1.22.3")
-	if plan.Target.Repo != scan.Repo || plan.Target.Ref != scan.Ref || plan.Target.Commit != scan.Commit {
-		t.Fatalf("plan target mismatch: %+v", plan.Target)
+	resp := internalproto.BuildFixResponse("github.com/example/project", "main", "abcdef0", "v1.22.3", commands)
+	if resp.Target.DisplayPath != "github.com/example/project" {
+		t.Fatalf("plan target mismatch: %+v", resp.Target)
 	}
-	if plan.StdlibUpgrade != "v1.22.3" {
-		t.Fatalf("expected stdlib v1.22.3, got %q", plan.StdlibUpgrade)
+	if resp.StdlibUpgrade != "v1.22.3" {
+		t.Fatalf("expected stdlib v1.22.3, got %q", resp.StdlibUpgrade)
 	}
-	if plan.Stats.TotalCommands != 3 {
-		t.Fatalf("expected total commands 3, got %d", plan.Stats.TotalCommands)
+	if resp.Stats.TotalCommands != 3 {
+		t.Fatalf("expected total commands 3, got %d", resp.Stats.TotalCommands)
 	}
-	if plan.Stats.RunnableCommands != 2 {
-		t.Fatalf("expected runnable commands 2, got %d", plan.Stats.RunnableCommands)
+	if resp.Stats.RunnableCommands != 2 {
+		t.Fatalf("expected runnable commands 2, got %d", resp.Stats.RunnableCommands)
 	}
 }
 
-func TestOutputRemediationPlanJSON(t *testing.T) {
-	plan := remediationPlan{
-		Target:        report.Target{Repo: "repo", Ref: "main", Commit: "abc"},
+func TestOutputFixProtoJSON(t *testing.T) {
+	resp := &fixv1.FixResponse{
+		Target:        &targetv1.Target{DisplayPath: "repo", CommitHash: "abc"},
 		StdlibUpgrade: "v1.2.0",
-		Commands:      []remediation.Command{{Command: "npm install foo@1", Executable: true}},
-		Stats:         remediationPlanSummary{TotalCommands: 1, RunnableCommands: 1},
+		Commands: []*fixv1.RemediationCommand{
+			{Command: "npm install foo@1", Executable: true},
+		},
+		Stats: &fixv1.RemediationStats{TotalCommands: 1, RunnableCommands: 1},
 	}
 	var buf bytes.Buffer
-	if err := outputRemediationPlanJSON(&buf, plan); err != nil {
-		t.Fatalf("outputRemediationPlanJSON returned error: %v", err)
+	if err := outputFixProtoJSON(&buf, resp); err != nil {
+		t.Fatalf("outputFixProtoJSON returned error: %v", err)
 	}
-	var roundTrip remediationPlan
-	if err := json.Unmarshal(buf.Bytes(), &roundTrip); err != nil {
+	var roundTrip fixv1.FixResponse
+	if err := protojson.Unmarshal(buf.Bytes(), &roundTrip); err != nil {
 		t.Fatalf("failed to unmarshal plan json: %v", err)
 	}
-	if roundTrip.StdlibUpgrade != plan.StdlibUpgrade || roundTrip.Stats.RunnableCommands != plan.Stats.RunnableCommands {
-		t.Fatalf("round-trip mismatch: %+v vs %+v", roundTrip, plan)
+	if roundTrip.StdlibUpgrade != resp.StdlibUpgrade || roundTrip.Stats.RunnableCommands != resp.Stats.RunnableCommands {
+		t.Fatalf("round-trip mismatch: %+v vs %+v", roundTrip, resp)
 	}
 }
 
-func TestReadPlanSourceFromReader(t *testing.T) {
-	plan := remediationPlan{
-		Target:        report.Target{Repo: "repo", Ref: "main", Commit: "abc"},
+func TestReadFixPlanProtoFromReader(t *testing.T) {
+	resp := &fixv1.FixResponse{
+		Target:        &targetv1.Target{DisplayPath: "repo", CommitHash: "abc"},
 		StdlibUpgrade: "v1.0.0",
-		Commands: []remediation.Command{
+		Commands: []*fixv1.RemediationCommand{
 			{Command: "go get example.com/foo@v1.2.3", Executable: true},
 			{Command: "Edit Gemfile", Executable: false},
 		},
+		Stats: &fixv1.RemediationStats{TotalCommands: 2, RunnableCommands: 1},
 	}
-	refreshRemediationPlanStats(&plan)
 	var buf bytes.Buffer
-	if err := outputRemediationPlanJSON(&buf, plan); err != nil {
+	if err := outputFixProtoJSON(&buf, resp); err != nil {
 		t.Fatalf("failed to encode plan: %v", err)
 	}
-	got, err := readPlanSource(bytes.NewReader(buf.Bytes()), "-")
+	got, err := readFixPlanProto(bytes.NewReader(buf.Bytes()), "-")
 	if err != nil {
-		t.Fatalf("readPlanSource returned error: %v", err)
+		t.Fatalf("readFixPlanProto returned error: %v", err)
 	}
-	if got.Stats.TotalCommands != len(got.Commands) {
+	if got.Stats.TotalCommands != int32(len(got.Commands)) {
 		t.Fatalf("expected stats to refresh, got %+v", got.Stats)
 	}
 }

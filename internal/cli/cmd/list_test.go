@@ -5,152 +5,102 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/google/osv-scalibr/extractor"
-	scalpurl "github.com/google/osv-scalibr/purl"
-	"github.com/picatz/deputy/internal/analysis/osv"
-	"github.com/picatz/deputy/internal/compare"
-	"github.com/picatz/deputy/internal/purlx"
-	"github.com/picatz/deputy/internal/repository/workspace"
-	"github.com/picatz/deputy/internal/scan"
+	dependencyv1 "github.com/picatz/deputy/gen/deputy/dependency/v1"
 )
 
-func TestToListItems_ListAll_NoDedup(t *testing.T) {
-	// Direct: github.com/acme/foo, gopkg.in/yaml.v3
-	goMod := `module example.com/app
-
-require (
-    github.com/acme/foo v1.0.0
-    gopkg.in/yaml.v3 v3.0.1
-)`
-	goDirect := compare.GetDirectDependenciesFromGoMod([]byte(goMod))
-
-	pkgs := []*extractor.Package{
-		{Name: "github.com/acme/foo", Version: "v1.0.0", PURLType: scalpurl.TypeGolang},
-		{Name: "github.com/acme/foo/subpkg", Version: "v1.0.0", PURLType: scalpurl.TypeGolang}, // same module, should dedup at module level
-		{Name: "gopkg.in/yaml.v3", Version: "v3.0.1", PURLType: scalpurl.TypeGolang},
+func TestProtoPackagesToListItems(t *testing.T) {
+	pkgs := []*dependencyv1.Package{
+		{
+			Name:      "github.com/acme/foo",
+			Version:   "v1.0.0",
+			Ecosystem: "golang",
+			Purl:      "pkg:golang/github.com/acme/foo@v1.0.0",
+			Direct:    true,
+			Locations: []string{"go.mod"},
+		},
+		{
+			Name:      "gopkg.in/yaml.v3",
+			Version:   "v3.0.1",
+			Ecosystem: "golang",
+			Purl:      "pkg:golang/gopkg.in/yaml.v3@v3.0.1",
+			Direct:    true,
+			Locations: []string{"go.mod", "go.sum"},
+		},
+		{
+			Name:      "github.com/acme/bar",
+			Version:   "v0.5.0",
+			Ecosystem: "golang",
+			Purl:      "pkg:golang/github.com/acme/bar@v0.5.0",
+			Direct:    false,
+			Locations: []string{"go.sum"},
+		},
 	}
 
-	ws := workspace.NewMemory()
-	defer ws.Close()
-
-	items := toListItems(ws, pkgs, goDirect, nil, nil, false)
+	items := protoPackagesToListItems(pkgs)
 	if len(items) != 3 {
-		t.Fatalf("expected 3 items (no dedup), got %d: %+v", len(items), items)
+		t.Fatalf("expected 3 items, got %d: %+v", len(items), items)
 	}
 
-	// Verify names, versions, direct flag
-	var seenFoo, seenYaml bool
-	for _, it := range items {
-		switch it.Name {
-		case "github.com/acme/foo":
-			seenFoo = true
-			if it.Version != "v1.0.0" || !it.IsDirect {
-				t.Errorf("unexpected foo item: %+v", it)
-			}
-		case "gopkg.in/yaml.v3":
-			seenYaml = true
-			if it.Version != "v3.0.1" || !it.IsDirect {
-				t.Errorf("unexpected yaml item: %+v", it)
-			}
-		case "github.com/acme/foo/subpkg":
-			// also direct via module mapping
-			if it.Version != "v1.0.0" || !it.IsDirect {
-				t.Errorf("unexpected subpkg item: %+v", it)
-			}
-		default:
-			t.Errorf("unexpected item: %+v", it)
-		}
+	// Verify first item
+	if items[0].Name != "github.com/acme/foo" {
+		t.Errorf("expected first item name to be github.com/acme/foo, got %s", items[0].Name)
 	}
-	if !seenFoo || !seenYaml {
-		t.Fatalf("missing expected items: %+v", items)
-	}
-}
-
-func TestToListItems_GitHubActionsDirectness_UsesPkgDirectKey(t *testing.T) {
-	ws := workspace.NewMemory()
-	defer ws.Close()
-
-	inputs := []osv.PkgInput{
-		{
-			QueryKey: osv.QueryKey{
-				Name:      "actions/download-artifact",
-				Version:   "v4",
-				Ecosystem: "GitHub Actions",
-			},
-			PackageContext: osv.PackageContext{
-				IsDirect: true,
-			},
-		},
-	}
-	pkgDirect := scan.BuildPackageDirectMap(inputs)
-	pkgs := []*extractor.Package{
-		{
-			Name:     "actions/download-artifact",
-			Version:  "v4",
-			PURLType: purlx.TypeGitHubActions,
-		},
-	}
-
-	items := toListItems(ws, pkgs, nil, pkgDirect, nil, false)
-	if len(items) != 1 {
-		t.Fatalf("expected 1 item, got %#v", items)
+	if items[0].Version != "v1.0.0" {
+		t.Errorf("expected first item version to be v1.0.0, got %s", items[0].Version)
 	}
 	if !items[0].IsDirect {
-		t.Fatalf("expected GitHub Actions dependency to be direct, got %#v", items[0])
+		t.Errorf("expected first item to be direct")
+	}
+	if items[0].PURL != "pkg:golang/github.com/acme/foo@v1.0.0" {
+		t.Errorf("expected first item PURL to be pkg:golang/github.com/acme/foo@v1.0.0, got %s", items[0].PURL)
+	}
+
+	// Verify indirect item
+	if items[2].IsDirect {
+		t.Errorf("expected third item to be indirect")
+	}
+
+	// Verify locations are joined
+	if items[1].Sources != "go.mod, go.sum" {
+		t.Errorf("expected sources to be 'go.mod, go.sum', got %s", items[1].Sources)
 	}
 }
 
-func TestToListItems_PackageLevel_NoDedup(t *testing.T) {
-	goMod := `module example.com/app
-
-require (
-    github.com/acme/foo v1.0.0
-    gopkg.in/yaml.v3 v3.0.1
-)`
-	goDirect := compare.GetDirectDependenciesFromGoMod([]byte(goMod))
-
-	pkgs := []*extractor.Package{
-		{Name: "github.com/acme/foo", Version: "v1.0.0", PURLType: scalpurl.TypeGolang},
-		{Name: "github.com/acme/foo/subpkg", Version: "v1.0.0", PURLType: scalpurl.TypeGolang},
-		{Name: "gopkg.in/yaml.v3", Version: "v3.0.1", PURLType: scalpurl.TypeGolang},
+func TestProtoPackagesToListItems_NilPackage(t *testing.T) {
+	pkgs := []*dependencyv1.Package{
+		{Name: "foo", Version: "1.0", Ecosystem: "npm", Purl: "pkg:npm/foo@1.0", Direct: true},
+		nil, // should be skipped
+		{Name: "bar", Version: "2.0", Ecosystem: "npm", Purl: "pkg:npm/bar@2.0", Direct: false},
 	}
 
-	ws := workspace.NewMemory()
-	defer ws.Close()
+	items := protoPackagesToListItems(pkgs)
+	if len(items) != 2 {
+		t.Fatalf("expected 2 items (nil skipped), got %d", len(items))
+	}
+}
 
-	items := toListItems(ws, pkgs, goDirect, nil, nil, false)
-	if len(items) != 3 {
-		t.Fatalf("expected 3 package-level items, got %d: %+v", len(items), items)
+func TestProtoPackagesToListItems_Empty(t *testing.T) {
+	items := protoPackagesToListItems(nil)
+	if len(items) != 0 {
+		t.Fatalf("expected 0 items for nil input, got %d", len(items))
 	}
 
-	// Both foo paths should be present and marked direct via module root mapping
-	var foo, sub, yaml bool
-	for _, it := range items {
-		switch it.Name {
-		case "github.com/acme/foo":
-			foo = true
-			if !it.IsDirect {
-				t.Errorf("expected foo to be direct: %+v", it)
-			}
-		case "github.com/acme/foo/subpkg":
-			sub = true
-			if !it.IsDirect {
-				t.Errorf("expected subpkg to be direct via module mapping: %+v", it)
-			}
-		case "gopkg.in/yaml.v3":
-			yaml = true
-			if !it.IsDirect {
-				t.Errorf("expected yaml to be direct: %+v", it)
-			}
-		}
-	}
-	if !foo || !sub || !yaml {
-		t.Fatalf("missing expected names: foo=%v sub=%v yaml=%v; items=%+v", foo, sub, yaml, items)
+	items = protoPackagesToListItems([]*dependencyv1.Package{})
+	if len(items) != 0 {
+		t.Fatalf("expected 0 items for empty input, got %d", len(items))
 	}
 }
 
 func TestWriteListTSV_NoHeader_PURLOnly(t *testing.T) {
-	items := []ListItem{{Ecosystem: "Go", Name: "github.com/acme/foo", Version: "v1.0.0", Module: "github.com/acme/foo", IsDirect: true, PURL: "pkg:golang/github.com/acme/foo@v1.0.0"}}
+	items := []ListItem{
+		{
+			Ecosystem: "Go",
+			Name:      "github.com/acme/foo",
+			Version:   "v1.0.0",
+			IsDirect:  true,
+			PURL:      "pkg:golang/github.com/acme/foo@v1.0.0",
+		},
+	}
 	var buf bytes.Buffer
 	if err := writeListTSV(&buf, items, false, false); err != nil {
 		t.Fatalf("writeListTSV: %v", err)
@@ -164,30 +114,56 @@ func TestWriteListTSV_NoHeader_PURLOnly(t *testing.T) {
 	}
 }
 
-func TestToListItems_DedupeHighestVersion(t *testing.T) {
-	goMod := `module example.com/app
-
-require (
-    cloud.google.com/go v1.24.1
-)`
-	goDirect := compare.GetDirectDependenciesFromGoMod([]byte(goMod))
-
-	pkgs := []*extractor.Package{
-		{Name: "cloud.google.com/go", Version: "v0.6.0", PURLType: scalpurl.TypeGolang},
-		{Name: "cloud.google.com/go", Version: "v1.24.1", PURLType: scalpurl.TypeGolang},
-		{Name: "cloud.google.com/go", Version: "0.2.7", PURLType: scalpurl.TypeGolang}, // missing v prefix
+func TestWriteListTSV_WithHeader(t *testing.T) {
+	items := []ListItem{
+		{Name: "foo", Version: "1.0", IsDirect: true, PURL: "pkg:npm/foo@1.0"},
+		{Name: "bar", Version: "2.0", IsDirect: false, PURL: "pkg:npm/bar@2.0"},
 	}
-	ws := workspace.NewMemory()
-	defer ws.Close()
-
-	items := toListItems(ws, pkgs, goDirect, nil, nil, false)
-	if len(items) != 3 {
-		t.Fatalf("expected 3 items (no dedup), got %d: %+v", len(items), items)
+	var buf bytes.Buffer
+	if err := writeListTSV(&buf, items, true, false); err != nil {
+		t.Fatalf("writeListTSV: %v", err)
 	}
-	// All should be marked direct per module mapping
-	for _, it := range items {
+	out := buf.String()
+	if !strings.HasPrefix(out, "purl\tdirect\n") {
+		t.Fatalf("expected header, got: %q", out)
+	}
+	lines := strings.Split(strings.TrimSpace(out), "\n")
+	if len(lines) != 3 {
+		t.Fatalf("expected 3 lines (header + 2 items), got %d", len(lines))
+	}
+}
+
+func TestWriteListTSV_WithSources(t *testing.T) {
+	items := []ListItem{
+		{Name: "foo", Version: "1.0", IsDirect: true, PURL: "pkg:npm/foo@1.0", Sources: "package.json"},
+	}
+	var buf bytes.Buffer
+	if err := writeListTSV(&buf, items, true, true); err != nil {
+		t.Fatalf("writeListTSV: %v", err)
+	}
+	out := buf.String()
+	if !strings.Contains(out, "purl\tdirect\tsources") {
+		t.Fatalf("expected sources header, got: %q", out)
+	}
+	if !strings.Contains(out, "package.json") {
+		t.Fatalf("expected sources in output, got: %q", out)
+	}
+}
+
+func TestFilterOnlyDirect(t *testing.T) {
+	items := []ListItem{
+		{Name: "foo", IsDirect: true},
+		{Name: "bar", IsDirect: false},
+		{Name: "baz", IsDirect: true},
+		{Name: "qux", IsDirect: false},
+	}
+	filtered := filterOnlyDirect(items)
+	if len(filtered) != 2 {
+		t.Fatalf("expected 2 direct items, got %d", len(filtered))
+	}
+	for _, it := range filtered {
 		if !it.IsDirect {
-			t.Fatalf("expected direct for %s", it.Name)
+			t.Errorf("expected only direct items, got indirect: %s", it.Name)
 		}
 	}
 }

@@ -68,25 +68,25 @@ tokio = "1.32"
 
 	g := New()
 	g.AddNode(&Node{
-		PURL:      "pkg:cargo/serde@1.0.188",
+		Purl:      "pkg:cargo/serde@1.0.188",
 		Name:      "serde",
 		Version:   "1.0.188",
 		Ecosystem: "crates.io",
 	})
 	g.AddNode(&Node{
-		PURL:      "pkg:cargo/serde_derive@1.0.188",
+		Purl:      "pkg:cargo/serde_derive@1.0.188",
 		Name:      "serde_derive",
 		Version:   "1.0.188",
 		Ecosystem: "crates.io",
 	})
 	g.AddNode(&Node{
-		PURL:      "pkg:cargo/proc-macro2@1.0.66",
+		Purl:      "pkg:cargo/proc-macro2@1.0.66",
 		Name:      "proc-macro2",
 		Version:   "1.0.66",
 		Ecosystem: "crates.io",
 	})
 	g.AddNode(&Node{
-		PURL:      "pkg:cargo/tokio@1.32.0",
+		Purl:      "pkg:cargo/tokio@1.32.0",
 		Name:      "tokio",
 		Version:   "1.32.0",
 		Ecosystem: "crates.io",

@@ -220,6 +220,9 @@ DEPUTY_POLICY_MODE=advisory
 # Proxy
 DEPUTY_PROXY_ADDR=:9090
 DEPUTY_PROXY_POLICIES=policy/proxy.yaml
+
+# Server / Connection
+DEPUTY_SERVER=http://localhost:8090
 ```
 
 ## Per-Project vs Global Config

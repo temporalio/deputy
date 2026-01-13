@@ -60,8 +60,10 @@ Each command emits one or more entrypoints when `--policy` is provided:
 | `deputy fix` | `fix_plan`, `fix_plan_step` |
 | `deputy triage` | `triage_report`, `triage_cluster` |
 | `deputy proxy` | `go_artifact_request`, `npm_artifact_request`, `pypi_artifact_request`, `rubygems_artifact_request`, `oci_artifact_request` |
+| `deputy server` (API requests) | `service_scan_request`, `service_list_request`, `service_sbom_request`, `service_diff_request`, `service_secrets_request`, `service_graph_request` |
 
-> **Note**: `deputy diff` auto-detects whether you're comparing git refs or container images based on the reference format. Container image refs look like `image:tag` or contain registry paths (e.g., `ghcr.io/org/app:v1`).
+> [!NOTE]
+> `deputy diff` auto-detects whether you're comparing git refs or container images based on the reference format. Container image refs look like `image:tag` or contain registry paths (e.g., `ghcr.io/org/app:v1`).
 
 Every evaluation includes `env.command` and `env.entrypoint`, so a single policy can branch by context. Policies can also prefilter with `entrypoints`, `commands`, and `ecosystems`.
 
@@ -214,13 +216,20 @@ OCI proxy requests also annotate `target.scan_cached` (bool) and `target.scan_er
 
 ## Vulnerability layer details
 
-When scanning container images, each vulnerability includes layer information via `vulnerability.layerDetails`:
+When scanning container images, each vulnerability includes layer information via `vulnerability.layer_details`:
 
-- `vulnerability.layerDetails.index` - Layer position (0 = oldest/base layer)
-- `vulnerability.layerDetails.diffId` - Digest of uncompressed layer content
-- `vulnerability.layerDetails.chainId` - Cumulative layer chain ID
-- `vulnerability.layerDetails.command` - Dockerfile instruction that created the layer
-- `vulnerability.layerDetails.inBaseImage` - Boolean indicating if the layer is from the base image (FROM instruction)
+- `vulnerability.layer_details.index` - Layer position (0 = oldest/base layer)
+- `vulnerability.layer_details.diff_id` - Digest of uncompressed layer content
+- `vulnerability.layer_details.chain_id` - Cumulative layer chain ID
+- `vulnerability.layer_details.command` - Dockerfile instruction that created the layer
+- `vulnerability.layer_details.in_base_image` - Boolean indicating if the layer is from the base image (FROM instruction)
+
+> [!NOTE]
+> The `in_base_image` field requires the `--detect-base-image` flag when scanning:
+> ```console
+> $ deputy scan --detect-base-image nginx:1.25
+> ```
+> This queries deps.dev to determine which layers belong to known base images.
 
 This enables layer-aware policies such as:
 - Distinguishing base image vulnerabilities from application-introduced vulnerabilities
@@ -243,7 +252,12 @@ Proxy request (simplified):
     "path": "/lodash/-/lodash-4.17.21.tgz"
   },
   "vulnerabilities": [
-    {"id": "CVE-2024-9999", "severity": "CRITICAL"}
+    {
+      "advisory": {
+        "id": "CVE-2024-9999",
+        "severity": {"level": "SEVERITY_LEVEL_CRITICAL"}
+      }
+    }
   ],
   "jwt": {"anonymous": true},
   "env": {"command": "proxy", "entrypoint": "npm_artifact_request"}
@@ -281,7 +295,12 @@ OCI proxy request (simplified):
     "image": "registry-1.docker.io/library/ubuntu"
   },
   "vulnerabilities": [
-    {"id": "CVE-2024-9999", "severity": "CRITICAL"}
+    {
+      "advisory": {
+        "id": "CVE-2024-9999",
+        "severity": {"level": "SEVERITY_LEVEL_CRITICAL"}
+      }
+    }
   ],
   "jwt": {"anonymous": true},
   "env": {"command": "proxy", "entrypoint": "oci_artifact_request"}
@@ -295,7 +314,13 @@ Scan vulnerability (simplified):
   "repo": "github.com/acme/deputy",
   "ref": "main",
   "commit": "abc123",
-  "vulnerability": {"id": "GO-2024-1234", "severity": "MEDIUM"},
+  "vulnerability": {
+    "advisory": {
+      "id": "GO-2024-1234",
+      "severity": {"level": "SEVERITY_LEVEL_MEDIUM"}
+    },
+    "package": {"name": "example.com/pkg", "version": "1.0.0", "ecosystem": "Go"}
+  },
   "env": {"command": "scan", "entrypoint": "scan_vulnerability"}
 }
 ```
@@ -326,14 +351,19 @@ Container image scan vulnerability (with layer details):
     }
   },
   "vulnerability": {
-    "id": "CVE-2024-1234",
-    "severity": "HIGH",
-    "package": "openssl",
-    "version": "1.1.1k",
-    "layerDetails": {
+    "advisory": {
+      "id": "CVE-2024-1234",
+      "severity": {"level": "SEVERITY_LEVEL_HIGH"}
+    },
+    "package": {
+      "name": "openssl",
+      "version": "1.1.1k",
+      "ecosystem": "deb"
+    },
+    "layer_details": {
       "index": 2,
       "command": "RUN apt-get install -y openssl",
-      "inBaseImage": true
+      "in_base_image": true
     }
   },
   "env": {"command": "scan", "entrypoint": "scan_vulnerability"}
@@ -490,13 +520,13 @@ When comparing container images with `deputy diff image1 image2`, the policy eng
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `vulnerability.id` | `string` | CVE/GHSA identifier |
+| `vulnerability.advisory.id` | `string` | CVE/GHSA identifier |
 | `vulnerability.change_type` | `string` | `added`, `removed`, `fixed`, `persisted` |
-| `vulnerability.severity` | `string` | CRITICAL, HIGH, MEDIUM, LOW |
-| `vulnerability.package` | `string` | Affected package name |
+| `vulnerability.advisory.severity.level` | `enum` | Use `severity.critical`, `severity.high`, etc. |
+| `vulnerability.package.name` | `string` | Affected package name |
 | `vulnerability.base_version` | `string` | Package version in base image |
 | `vulnerability.target_version` | `string` | Package version in target image |
-| `vulnerability.summary` | `string` | Vulnerability description |
+| `vulnerability.advisory.summary` | `string` | Vulnerability description |
 | `vulnerability.layer_details` | `object` | Layer where package was introduced |
 
 ### `container_diff_config` variables

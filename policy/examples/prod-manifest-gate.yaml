@@ -1,10 +1,18 @@
+# Block vulnerabilities located in production manifests/groups
+#
+# Structure:
+#   vulnerability.package.manifest_refs - List of manifest references
+#   vulnerability.advisory.severity.level - Severity enum
+#
+# Severity constants: severity.critical, severity.high, severity.medium, severity.low
+#
 policies:
   - name: prod-manifest-gate
     description: Block vulnerabilities located in production manifests/groups
     vars:
-      refs: 'vulnerability.?manifestRefs.orValue([])'
+      refs: 'vulnerability.?package.manifest_refs.orValue([])'
       inProd: 'refs.exists(r, r.?groups.orValue([]).exists(g, g.lowerAscii().matches("prod|production|default")))'
-      highSev: 'vulnerability.?severity.orValue("").upperAscii() in ["CRITICAL","HIGH"]'
+      highSev: 'vulnerability.advisory.severity.level in [severity.critical, severity.high]'
     rules:
       - action: deny
         when: env.entrypoint in ["scan_vulnerability","diff_vulnerability"] && inProd && highSev

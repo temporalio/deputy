@@ -1,0 +1,57 @@
+syntax = "proto3";
+
+package deputy.target.v1;
+
+option go_package = "github.com/picatz/deputy/gen/deputy/target/v1;targetv1";
+
+// TargetKind identifies the type of target being operated on.
+enum TargetKind {
+  // Unspecified target kind.
+  TARGET_KIND_UNSPECIFIED = 0;
+  // Local directory.
+  TARGET_KIND_DIR = 1;
+  // Single file.
+  TARGET_KIND_FILE = 2;
+  // Compiled binary.
+  TARGET_KIND_BINARY = 3;
+  // Git repository.
+  TARGET_KIND_GIT = 4;
+  // Container image (OCI/Docker).
+  TARGET_KIND_CONTAINER_IMAGE = 5;
+  // Running container instance.
+  TARGET_KIND_CONTAINER_INSTANCE = 6;
+  // Virtual machine image.
+  TARGET_KIND_VM_IMAGE = 7;
+  // Browser/IDE extension.
+  TARGET_KIND_EXTENSION = 8;
+  // Software Bill of Materials document.
+  TARGET_KIND_SBOM = 9;
+  // Package URL reference.
+  TARGET_KIND_PURL = 10;
+  // Dockerfile for static analysis.
+  TARGET_KIND_DOCKERFILE = 11;
+}
+
+// Target describes what Deputy is operating on and how it was resolved.
+message Target {
+  // Kind identifies the input type.
+  TargetKind kind = 1;
+  // DisplayPath is the user-facing representation of the target.
+  string display_path = 2;
+  // LocalPath is the filesystem path where the target was materialized.
+  string local_path = 3;
+  // Ref is the user-specified reference (e.g., branch name, tag).
+  string ref = 4;
+  // EffectiveRef is the resolved reference after normalization.
+  string effective_ref = 5;
+  // CommitHash is the resolved Git commit SHA when applicable.
+  string commit_hash = 6;
+  // OriginURL is the source URL (e.g., repository URL).
+  string origin_url = 7;
+  // Cloned indicates whether the target was cloned from a remote source.
+  bool cloned = 8;
+  // Provenance contains additional metadata about target resolution.
+  map<string, string> provenance = 9;
+  // Reference is the container image reference when kind is TARGET_KIND_CONTAINER_IMAGE.
+  string reference = 10;
+}

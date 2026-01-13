@@ -193,7 +193,11 @@ func celFieldCompletions(base string) []string {
 	case "pkg":
 		return []string{"name", "version", "ecosystem", "licenses"}
 	case "vulnerability", "vulnerabilities":
-		return []string{"id", "severity", "summary", "aliases", "fixedVersion"}
+		return []string{"id", "severity", "summary", "aliases", "fixedVersions", "epss", "epssPercentile", "inKEV", "layerDetails", "path", "depth"}
+	case "severity":
+		return []string{"CRITICAL", "HIGH", "MEDIUM", "LOW", "UNSPECIFIED"}
+	case "scope":
+		return []string{"RUNTIME", "DEV", "TEST", "BUILD", "OPTIONAL", "UNSPECIFIED"}
 	case "component":
 		return []string{"name", "version", "ecosystem", "licenses"}
 	case "repo":

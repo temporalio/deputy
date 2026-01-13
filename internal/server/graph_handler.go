@@ -1,0 +1,525 @@
+package server
+
+import (
+	"context"
+	"fmt"
+	"path/filepath"
+	"slices"
+	"strings"
+
+	"connectrpc.com/connect"
+	"google.golang.org/protobuf/types/known/timestamppb"
+
+	graphv1 "github.com/picatz/deputy/gen/deputy/graph/v1"
+	"github.com/picatz/deputy/gen/deputy/graph/v1/graphv1connect"
+	targetv1 "github.com/picatz/deputy/gen/deputy/target/v1"
+	"github.com/picatz/deputy/internal/dependency/graph"
+	"github.com/picatz/deputy/internal/inventory"
+	"github.com/picatz/deputy/internal/otel"
+	internalproto "github.com/picatz/deputy/internal/proto"
+	"github.com/picatz/deputy/internal/targets"
+)
+
+// GraphHandler implements the GraphService gRPC handler.
+type GraphHandler struct {
+	localMode bool // Skip remote target validation for in-process usage
+}
+
+// Ensure GraphHandler implements the GraphServiceHandler interface.
+var _ graphv1connect.GraphServiceHandler = (*GraphHandler)(nil)
+
+// GraphHandlerOption configures a GraphHandler.
+type GraphHandlerOption func(*GraphHandler)
+
+// WithGraphLocalMode enables local mode which skips remote target validation.
+// Use this for in-process clients that need to access local filesystems.
+func WithGraphLocalMode() GraphHandlerOption {
+	return func(h *GraphHandler) {
+		h.localMode = true
+	}
+}
+
+// NewGraphHandler creates a new Graph service handler.
+func NewGraphHandler(opts ...GraphHandlerOption) *GraphHandler {
+	h := &GraphHandler{}
+	for _, opt := range opts {
+		opt(h)
+	}
+	return h
+}
+
+// BuildGraph constructs a dependency graph for a target.
+func (h *GraphHandler) BuildGraph(
+	ctx context.Context,
+	req *connect.Request[graphv1.BuildGraphRequest],
+) (*connect.Response[graphv1.BuildGraphResponse], error) {
+	// Get span from otelconnect interceptor - don't create a new one
+	span := otel.SpanFromContext(ctx)
+
+	if err := internalproto.Validate(req.Msg); err != nil {
+		otel.SetSpanError(span, err)
+		return nil, connect.NewError(connect.CodeInvalidArgument, err)
+	}
+
+	target := req.Msg.GetTarget()
+	if target == "" {
+		target = "."
+	}
+
+	// Add business attributes to the otelconnect span
+	span.SetAttributes(otel.AttrTargetPath.String(target))
+
+	// Security: Validate target is accessible from remote server (skip in local mode)
+	if !h.localMode {
+		if err := targets.ValidateRemoteTarget(target); err != nil {
+			otel.SetSpanError(span, err)
+			return nil, connect.NewError(connect.CodeInvalidArgument, err)
+		}
+	}
+
+	// Build inventory options
+	opts := inventory.Options{}
+	if req.Msg.Options != nil {
+		opts.Ecosystems = req.Msg.Options.Ecosystems
+		opts.Platform = req.Msg.Options.Platform
+	}
+
+	// Collect inventory
+	exec, err := h.collectInventory(ctx, target, opts)
+	if err != nil {
+		otel.SetSpanError(span, err)
+		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to collect inventory: %w", err))
+	}
+	if exec != nil {
+		defer exec.Close()
+	}
+
+	// Build graph with edge resolution
+	builderOpts := graph.BuilderOptions{}
+	if req.Msg.Options != nil {
+		builderOpts.UseProxy = req.Msg.Options.UseProxy
+		builderOpts.UseGit = req.Msg.Options.UseGit
+	}
+	builder := graph.NewBuilder(builderOpts)
+
+	// Use workspace for edge resolution if available
+	var g *graph.Graph
+	if exec.Workspace != nil {
+		g, err = builder.BuildFromWorkspace(ctx, exec.Result.Packages, exec.Result.Direct, nil, nil, exec.Workspace)
+	} else {
+		// Fallback to basic graph without edge resolution
+		g = graph.FromInventory(exec.Result.Packages, exec.Result.Direct)
+		g.UpdateDepths()
+	}
+	if err != nil {
+		otel.SetSpanError(span, err)
+		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to build graph: %w", err))
+	}
+
+	// Extended mode: add declared-only dependencies from full module graph
+	if req.Msg.Options != nil && req.Msg.Options.Extended {
+		// Only works for local directories with Go modules currently
+		if exec.Workspace != nil && targets.DetectKind(target) == targets.KindDir {
+			extResult, extErr := graph.AnalyzeExtendedGraph(ctx, target)
+			if extErr == nil && extResult != nil {
+				graph.MergeExtendedIntoGraph(g, extResult)
+			}
+			// Non-fatal: if extended analysis fails, we still return the standard graph
+		}
+	}
+
+	// Record graph stats on span
+	span.SetAttributes(otel.AttrPackageCount.Int(len(g.GetNodesSlice())))
+
+	response := &graphv1.BuildGraphResponse{
+		Target: &targetv1.Target{
+			Kind:        exec.Result.Target.Kind,
+			DisplayPath: exec.Result.Target.DisplayPath,
+		},
+		GeneratedAt: timestamppb.Now(),
+		Nodes:       g.GetNodesSlice(),
+		Edges:       g.GetEdgesSlice(),
+		Roots:       g.GetRoots(),
+		Stats:       g.Stats(),
+	}
+
+	return connect.NewResponse(response), nil
+}
+
+// collectInventory collects inventory from a target.
+func (h *GraphHandler) collectInventory(ctx context.Context, target string, opts inventory.Options) (*inventory.Execution, error) {
+	kind := targets.DetectKind(target)
+
+	switch kind {
+	case targets.KindContainerImage:
+		targetOpts := map[string]string{}
+		if opts.Platform != "" {
+			targetOpts["platform"] = opts.Platform
+		}
+		return inventory.CollectContainerImage(ctx, target, targetOpts, opts)
+
+	case targets.KindDir:
+		return inventory.CollectDirectory(ctx, target, opts)
+
+	case targets.KindGit:
+		return inventory.CollectRepository(ctx, target, "HEAD", false, opts)
+
+	default:
+		return inventory.CollectRepository(ctx, target, "HEAD", false, opts)
+	}
+}
+
+// WhyDependency finds paths explaining why a dependency exists.
+func (h *GraphHandler) WhyDependency(
+	ctx context.Context,
+	req *connect.Request[graphv1.WhyDependencyRequest],
+) (*connect.Response[graphv1.WhyDependencyResponse], error) {
+	// Get span from otelconnect interceptor - don't create a new one
+	span := otel.SpanFromContext(ctx)
+
+	if err := internalproto.Validate(req.Msg); err != nil {
+		otel.SetSpanError(span, err)
+		return nil, connect.NewError(connect.CodeInvalidArgument, err)
+	}
+
+	target := req.Msg.GetTarget()
+	if target == "" {
+		target = "."
+	}
+
+	dependency := req.Msg.GetDependency()
+	if dependency == "" {
+		err := fmt.Errorf("dependency is required")
+		otel.SetSpanError(span, err)
+		return nil, connect.NewError(connect.CodeInvalidArgument, err)
+	}
+
+	// Add business attributes to the otelconnect span
+	span.SetAttributes(
+		otel.AttrTargetPath.String(target),
+		otel.AttrMCPGraphPackage.String(dependency),
+	)
+
+	// Security: Validate target is accessible from remote server (skip in local mode)
+	if !h.localMode {
+		if err := targets.ValidateRemoteTarget(target); err != nil {
+			otel.SetSpanError(span, err)
+			return nil, connect.NewError(connect.CodeInvalidArgument, err)
+		}
+	}
+
+	// Build inventory options
+	opts := inventory.Options{}
+	if req.Msg.Options != nil {
+		opts.Ecosystems = req.Msg.Options.Ecosystems
+		opts.Platform = req.Msg.Options.Platform
+	}
+
+	// Collect inventory
+	exec, err := h.collectInventory(ctx, target, opts)
+	if err != nil {
+		otel.SetSpanError(span, err)
+		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to collect inventory: %w", err))
+	}
+	if exec != nil {
+		defer exec.Close()
+	}
+
+	// Build graph with edge resolution
+	builderOpts := graph.BuilderOptions{}
+	if req.Msg.Options != nil {
+		builderOpts.UseProxy = req.Msg.Options.UseProxy
+		builderOpts.UseGit = req.Msg.Options.UseGit
+	}
+	builder := graph.NewBuilder(builderOpts)
+
+	// Use workspace for edge resolution if available
+	var g *graph.Graph
+	if exec.Workspace != nil {
+		g, err = builder.BuildFromWorkspace(ctx, exec.Result.Packages, exec.Result.Direct, nil, nil, exec.Workspace)
+	} else {
+		// Fallback to basic graph without edge resolution
+		g = graph.FromInventory(exec.Result.Packages, exec.Result.Direct)
+		g.UpdateDepths()
+	}
+	if err != nil {
+		otel.SetSpanError(span, err)
+		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to build graph: %w", err))
+	}
+
+	// Find matching dependency nodes
+	matches := findMatchingNodes(g, dependency)
+	var targetNode *graph.Node
+	if len(matches) > 0 {
+		targetNode = matches[0]
+	}
+
+	response := &graphv1.WhyDependencyResponse{
+		Target: &targetv1.Target{
+			Kind:        exec.Result.Target.Kind,
+			DisplayPath: exec.Result.Target.DisplayPath,
+		},
+		Dependency: dependency,
+		Found:      targetNode != nil,
+	}
+
+	// Add warning if multiple packages matched the query
+	if len(matches) > 1 {
+		// Only show alternatives if there are other high-quality matches (score >= 2)
+		// This avoids showing noisy substring matches as suggestions
+		queryLower := strings.ToLower(dependency)
+		var goodAlternatives []string
+		for i := 1; i < len(matches) && len(goodAlternatives) < 3; i++ {
+			if matchScore(matches[i].Name, queryLower) >= 2 {
+				goodAlternatives = append(goodAlternatives, lastNSegments(matches[i].Name, 2))
+			}
+		}
+
+		if len(goodAlternatives) > 0 {
+			// There are other good matches - suggest them
+			hint := fmt.Sprintf("%d packages match %q. Also try:", len(matches), dependency)
+			response.Warnings = append(response.Warnings, hint)
+			for _, alt := range goodAlternatives {
+				response.Warnings = append(response.Warnings, fmt.Sprintf("  → %s", alt))
+			}
+		} else if len(matches) > 5 {
+			// Many matches but none are great - just mention --list
+			hint := fmt.Sprintf("%d packages match %q. Use --list to see all.", len(matches), dependency)
+			response.Warnings = append(response.Warnings, hint)
+		}
+		// For 2-5 matches with no great alternatives, don't show a warning at all
+		// The user got what they wanted
+	}
+
+	if targetNode != nil {
+		// Find paths from roots to the target
+		paths := g.PathsTo(targetNode.Purl)
+		response.Paths = graph.PathsToProto(paths)
+		response.Dependency = targetNode.Purl
+
+		// Record results on span
+		span.SetAttributes(
+			otel.AttrMCPGraphFound.Bool(true),
+			otel.AttrMCPGraphDirect.Bool(targetNode.Direct),
+			otel.AttrMCPGraphPathCount.Int(len(paths)),
+		)
+	} else {
+		span.SetAttributes(otel.AttrMCPGraphFound.Bool(false))
+	}
+
+	return connect.NewResponse(response), nil
+}
+
+// QueryGraph returns a filtered subset of a dependency graph.
+func (h *GraphHandler) QueryGraph(
+	ctx context.Context,
+	req *connect.Request[graphv1.QueryGraphRequest],
+) (*connect.Response[graphv1.QueryGraphResponse], error) {
+	// Get span from otelconnect interceptor - don't create a new one
+	span := otel.SpanFromContext(ctx)
+
+	if err := internalproto.Validate(req.Msg); err != nil {
+		otel.SetSpanError(span, err)
+		return nil, connect.NewError(connect.CodeInvalidArgument, err)
+	}
+
+	target := req.Msg.GetTarget()
+	if target == "" {
+		target = "."
+	}
+
+	// Add business attributes to the otelconnect span
+	span.SetAttributes(otel.AttrTargetPath.String(target))
+
+	// Security: Validate target is accessible from remote server (skip in local mode)
+	if !h.localMode {
+		if err := targets.ValidateRemoteTarget(target); err != nil {
+			otel.SetSpanError(span, err)
+			return nil, connect.NewError(connect.CodeInvalidArgument, err)
+		}
+	}
+
+	// Build inventory options
+	opts := inventory.Options{}
+	if req.Msg.Options != nil {
+		opts.Ecosystems = req.Msg.Options.Ecosystems
+		opts.Platform = req.Msg.Options.Platform
+	}
+
+	// Collect inventory
+	exec, err := h.collectInventory(ctx, target, opts)
+	if err != nil {
+		otel.SetSpanError(span, err)
+		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to collect inventory: %w", err))
+	}
+	if exec != nil {
+		defer exec.Close()
+	}
+
+	// Build graph from inventory
+	g := graph.FromInventory(exec.Result.Packages, exec.Result.Direct)
+	g.UpdateDepths()
+
+	// Apply filters if specified
+	if req.Msg.Filter != nil {
+		filter := req.Msg.Filter
+
+		// Filter by subgraph root
+		if filter.RootPurl != "" {
+			g = g.Subgraph(filter.RootPurl)
+		}
+
+		// Filter by predicate
+		g = g.Filter(func(n *graph.Node) bool {
+			// Ecosystem filter
+			if len(filter.Ecosystems) > 0 {
+				found := false
+				for _, eco := range filter.Ecosystems {
+					if strings.EqualFold(n.Ecosystem, eco) {
+						found = true
+						break
+					}
+				}
+				if !found {
+					return false
+				}
+			}
+
+			// Depth filters
+			if filter.MinDepth > 0 && n.Depth < filter.MinDepth {
+				return false
+			}
+			if filter.MaxDepth > 0 && n.Depth > filter.MaxDepth {
+				return false
+			}
+
+			// Direct/transitive filters
+			if filter.OnlyDirect && !n.Direct {
+				return false
+			}
+			if filter.OnlyTransitive && n.Direct {
+				return false
+			}
+
+			// Vulnerable filter
+			if filter.OnlyVulnerable && n.GetVulnerabilityCount().GetTotal() == 0 {
+				return false
+			}
+
+			// Name pattern filter
+			if filter.NamePattern != "" {
+				matched, _ := filepath.Match(filter.NamePattern, n.Name)
+				if !matched {
+					return false
+				}
+			}
+
+			return true
+		})
+	}
+
+	// Record filtered graph stats on span
+	span.SetAttributes(otel.AttrPackageCount.Int(len(g.GetNodesSlice())))
+
+	response := &graphv1.QueryGraphResponse{
+		Target: &targetv1.Target{
+			Kind:        exec.Result.Target.Kind,
+			DisplayPath: exec.Result.Target.DisplayPath,
+		},
+		Nodes: g.GetNodesSlice(),
+		Edges: g.GetEdgesSlice(),
+		Stats: g.Stats(),
+	}
+
+	return connect.NewResponse(response), nil
+}
+
+// findMatchingNodes finds nodes matching the query pattern.
+// Supports glob patterns via path.Match or simple substring matching.
+// Results are sorted with best matches first: exact matches, then final segment
+// matches, then substring matches, all sorted alphabetically within each tier.
+//
+// Examples:
+//   - "cobra" matches any package containing "cobra", prefers github.com/spf13/cobra
+//   - "*/cobra" matches packages ending with /cobra
+//   - "spf13/*" matches all packages under spf13
+func findMatchingNodes(g *graph.Graph, query string) []*graph.Node {
+	queryLower := strings.ToLower(query)
+	isGlob := strings.ContainsAny(query, "*?[")
+
+	var matches []*graph.Node
+
+	for node := range g.Nodes() {
+		nameLower := strings.ToLower(node.Name)
+
+		if isGlob {
+			// Use path.Match for glob patterns
+			if matched, _ := filepath.Match(queryLower, nameLower); matched {
+				matches = append(matches, node)
+			}
+		} else {
+			// Simple substring matching - case insensitive
+			if strings.Contains(nameLower, queryLower) {
+				matches = append(matches, node)
+			}
+		}
+	}
+
+	// Sort by match quality: exact > final segment > substring, then alphabetically
+	slices.SortFunc(matches, func(a, b *graph.Node) int {
+		scoreA := matchScore(a.Name, queryLower)
+		scoreB := matchScore(b.Name, queryLower)
+		if scoreA != scoreB {
+			return scoreB - scoreA // Higher score first
+		}
+		return strings.Compare(a.Name, b.Name)
+	})
+
+	return matches
+}
+
+// lastNSegments returns the last n segments of a package path.
+// E.g., lastNSegments("github.com/go-git/go-git/v5", 2) returns "go-git/v5"
+func lastNSegments(name string, n int) string {
+	parts := strings.Split(name, "/")
+	if len(parts) <= n {
+		return name
+	}
+	return strings.Join(parts[len(parts)-n:], "/")
+}
+
+// matchScore returns a quality score for how well a package name matches a query.
+// Higher scores indicate better matches:
+//   - 3: exact match (name equals query)
+//   - 2: final segment match (query matches the last path component)
+//   - 1: substring match
+func matchScore(name, queryLower string) int {
+	nameLower := strings.ToLower(name)
+
+	// Exact match
+	if nameLower == queryLower {
+		return 3
+	}
+
+	// Final segment match (e.g., "cobra" matches "github.com/spf13/cobra")
+	// Also handles versioned paths like "go-git/v5" → match "go-git"
+	finalSegment := nameLower
+	if idx := strings.LastIndex(nameLower, "/"); idx >= 0 {
+		finalSegment = nameLower[idx+1:]
+	}
+	// Strip version suffix for comparison (v5, v2, etc.)
+	if strings.HasPrefix(finalSegment, "v") && len(finalSegment) <= 3 {
+		// This is a version segment like /v5, check the segment before it
+		if idx := strings.LastIndex(strings.TrimSuffix(nameLower, "/"+finalSegment), "/"); idx >= 0 {
+			finalSegment = strings.TrimSuffix(nameLower, "/"+finalSegment)[idx+1:]
+		} else {
+			finalSegment = strings.TrimSuffix(nameLower, "/"+finalSegment)
+		}
+	}
+	if finalSegment == queryLower {
+		return 2
+	}
+
+	// Substring match
+	return 1
+}

@@ -14,7 +14,7 @@ func buildTestGraph(directCount, depth int) *Graph {
 	for i := 0; i < directCount; i++ {
 		rootPURL := fmt.Sprintf("pkg:test/direct-%d@1.0.0", i)
 		g.AddNode(&Node{
-			PURL:   rootPURL,
+			Purl:   rootPURL,
 			Name:   fmt.Sprintf("direct-%d", i),
 			Direct: true,
 			Depth:  0,
@@ -25,9 +25,9 @@ func buildTestGraph(directCount, depth int) *Graph {
 		for d := 1; d <= depth; d++ {
 			childPURL := fmt.Sprintf("pkg:test/trans-%d-%d@1.0.0", i, d)
 			g.AddNode(&Node{
-				PURL:  childPURL,
+				Purl:  childPURL,
 				Name:  fmt.Sprintf("trans-%d-%d", i, d),
-				Depth: d,
+				Depth: int32(d),
 			})
 			g.AddEdge(&Edge{From: parentPURL, To: childPURL})
 			parentPURL = childPURL
@@ -45,18 +45,18 @@ func buildDiamondGraph(width, depth int) *Graph {
 
 	// Root node
 	rootPURL := "pkg:test/root@1.0.0"
-	g.AddNode(&Node{PURL: rootPURL, Name: "root", Direct: true, Depth: 0})
+	g.AddNode(&Node{Purl: rootPURL, Name: "root", Direct: true, Depth: 0})
 
 	// Create diamond pattern: root -> [a, b, c, ...] -> shared
 	for i := 0; i < width; i++ {
 		midPURL := fmt.Sprintf("pkg:test/mid-%d@1.0.0", i)
-		g.AddNode(&Node{PURL: midPURL, Name: fmt.Sprintf("mid-%d", i), Depth: 1})
+		g.AddNode(&Node{Purl: midPURL, Name: fmt.Sprintf("mid-%d", i), Depth: 1})
 		g.AddEdge(&Edge{From: rootPURL, To: midPURL})
 
 		// Each mid node points to the same shared node
 		sharedPURL := "pkg:test/shared@1.0.0"
 		if g.Node(sharedPURL) == nil {
-			g.AddNode(&Node{PURL: sharedPURL, Name: "shared", Depth: 2})
+			g.AddNode(&Node{Purl: sharedPURL, Name: "shared", Depth: 2})
 		}
 		g.AddEdge(&Edge{From: midPURL, To: sharedPURL})
 	}
@@ -65,7 +65,7 @@ func buildDiamondGraph(width, depth int) *Graph {
 	parentPURL := "pkg:test/shared@1.0.0"
 	for d := 3; d <= depth; d++ {
 		childPURL := fmt.Sprintf("pkg:test/deep-%d@1.0.0", d)
-		g.AddNode(&Node{PURL: childPURL, Name: fmt.Sprintf("deep-%d", d), Depth: d})
+		g.AddNode(&Node{Purl: childPURL, Name: fmt.Sprintf("deep-%d", d), Depth: int32(d)})
 		g.AddEdge(&Edge{From: parentPURL, To: childPURL})
 		parentPURL = childPURL
 	}
@@ -234,12 +234,10 @@ func BenchmarkVulnerablePaths(b *testing.B) {
 
 	// Mark a few nodes as vulnerable
 	if n := g.Node("pkg:test/shared@1.0.0"); n != nil {
-		n.VulnCount.Total = 2
-		n.VulnCount.Critical = 1
+		n.VulnerabilityCount = &VulnerabilityCount{Total: 2, Critical: 1}
 	}
 	if n := g.Node("pkg:test/deep-10@1.0.0"); n != nil {
-		n.VulnCount.Total = 1
-		n.VulnCount.High = 1
+		n.VulnerabilityCount = &VulnerabilityCount{Total: 1, High: 1}
 	}
 
 	b.ResetTimer()

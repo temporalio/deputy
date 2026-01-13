@@ -8,9 +8,12 @@ import (
 	"time"
 
 	"github.com/ossf/osv-schema/bindings/go/osvschema"
+	vulnerabilityv1 "github.com/picatz/deputy/gen/deputy/vulnerability/v1"
 	"github.com/picatz/deputy/internal/dependency"
 	"github.com/picatz/deputy/internal/vulnerability"
+	"github.com/picatz/deputy/internal/vulnerability/severity"
 	"github.com/picatz/deputy/internal/vulnerability/weakness/cwe"
+	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
 // ProcessOSVVulnerability converts a raw OSV schema vulnerability into the
@@ -27,9 +30,9 @@ func ProcessOSVVulnerability(vuln osvschema.Vulnerability, input PkgInput) Vulne
 // ProcessOSVVulnerabilityDomain converts a raw OSV vulnerability into the
 // domain Advisory + Finding pair, keeping the advisory metadata separate from
 // scan-time occurrence details.
-func ProcessOSVVulnerabilityDomain(vuln osvschema.Vulnerability, input PkgInput) (vulnerability.Advisory, vulnerability.Finding) {
-	advisory := vulnerability.Advisory{
-		ID:      vuln.ID,
+func ProcessOSVVulnerabilityDomain(vuln osvschema.Vulnerability, input PkgInput) (vulnerabilityv1.Advisory, vulnerability.Finding) {
+	advisory := vulnerabilityv1.Advisory{
+		Id:      vuln.ID,
 		Summary: vuln.Summary,
 		Details: vuln.Details,
 	}
@@ -48,17 +51,17 @@ func ProcessOSVVulnerabilityDomain(vuln osvschema.Vulnerability, input PkgInput)
 	}
 
 	if !vuln.Published.IsZero() {
-		advisory.Published = vuln.Published
+		advisory.Published = timestamppb.New(vuln.Published)
 	}
 	if !vuln.Modified.IsZero() {
-		advisory.Modified = vuln.Modified
+		advisory.Modified = timestamppb.New(vuln.Modified)
 	}
 	if vuln.Aliases != nil {
 		advisory.Aliases = slices.Clone(vuln.Aliases)
 	}
 
 	// Prefer CVE alias; fallback to GO- or GHSA-
-	advisory.CVE = cmp.Or(
+	advisory.Cve = cmp.Or(
 		findAliasPrefix(advisory.Aliases, "CVE-"),
 		findAliasPrefix(advisory.Aliases, "GO-"),
 		findAliasPrefix(advisory.Aliases, "GHSA-"),
@@ -100,7 +103,7 @@ func ProcessOSVVulnerabilityDomain(vuln osvschema.Vulnerability, input PkgInput)
 	}
 	// Extract CWEs from database_specific.cwe_ids (GHSA records)
 	if cwes := cwe.ExtractFromDatabaseSpecific(vuln.DatabaseSpecific); len(cwes) > 0 {
-		advisory.CWEs = cwes
+		vulnerability.SetAdvisoryCWEs(&advisory, cwes)
 	}
 	return advisory, finding
 }
@@ -180,8 +183,8 @@ func isHighOrCritical(severity string) bool {
 }
 
 // extractGoImports pulls Go ecosystem-specific import/symbol metadata from OSV records.
-func extractGoImports(affected []osvschema.Affected, input PkgInput) []vulnerability.AffectedImport {
-	var imports []vulnerability.AffectedImport
+func extractGoImports(affected []osvschema.Affected, input PkgInput) []vulnerabilityv1.AffectedImport {
+	var imports []vulnerabilityv1.AffectedImport
 	for _, a := range affected {
 		if !matchesPackage(a.Package, input) {
 			continue
@@ -195,7 +198,7 @@ func extractGoImports(affected []osvschema.Affected, input PkgInput) []vulnerabi
 	return vulnerability.MergeAffectedImports(imports)
 }
 
-func parseImports(raw any) []vulnerability.AffectedImport {
+func parseImports(raw any) []vulnerabilityv1.AffectedImport {
 	switch val := raw.(type) {
 	case []any:
 		return parseImportArray(val)
@@ -210,8 +213,8 @@ func parseImports(raw any) []vulnerability.AffectedImport {
 	}
 }
 
-func parseImportArray(items []any) []vulnerability.AffectedImport {
-	var imports []vulnerability.AffectedImport
+func parseImportArray(items []any) []vulnerabilityv1.AffectedImport {
+	var imports []vulnerabilityv1.AffectedImport
 	for _, item := range items {
 		m, ok := item.(map[string]any)
 		if !ok {
@@ -239,7 +242,7 @@ func parseImportArray(items []any) []vulnerability.AffectedImport {
 				}
 			}
 		}
-		imports = append(imports, vulnerability.AffectedImport{Path: pathVal, Symbols: syms})
+		imports = append(imports, vulnerabilityv1.AffectedImport{Path: pathVal, Symbols: syms})
 	}
 	return imports
 }
@@ -268,31 +271,34 @@ func extractDatabaseSpecificStrings(raw map[string]any) map[string]string {
 	return out
 }
 
-func flattenAdvisoryFinding(advisory vulnerability.Advisory, finding vulnerability.Finding) Vulnerability {
-	sev := advisory.Severity.Raw
-	if sev == "" && advisory.Severity.Level != vulnerability.SeverityUnknown {
-		sev = advisory.Severity.Level.String()
-	}
-	sevType := advisory.Severity.RawType
-	if sevType == "" && advisory.Severity.Type != vulnerability.SeverityTypeUnknown {
-		sevType = advisory.Severity.Type.String()
+func flattenAdvisoryFinding(advisory vulnerabilityv1.Advisory, finding vulnerability.Finding) Vulnerability {
+	var sev, sevType string
+	if advisory.Severity != nil {
+		sev = advisory.Severity.Raw
+		if sev == "" && advisory.Severity.Level != vulnerabilityv1.SeverityLevel_SEVERITY_LEVEL_UNSPECIFIED {
+			sev = severity.LevelString(advisory.Severity.Level)
+		}
+		sevType = advisory.Severity.RawType
+		if sevType == "" && advisory.Severity.Type != vulnerabilityv1.SeverityType_SEVERITY_TYPE_UNSPECIFIED {
+			sevType = advisory.Severity.Type.String()
+		}
 	}
 
 	var published string
-	if !advisory.Published.IsZero() {
-		published = advisory.Published.Format(time.RFC3339)
+	if pub := vulnerability.AdvisoryPublished(&advisory); !pub.IsZero() {
+		published = pub.Format(time.RFC3339)
 	}
 	var modified string
-	if !advisory.Modified.IsZero() {
-		modified = advisory.Modified.Format(time.RFC3339)
+	if mod := vulnerability.AdvisoryModified(&advisory); !mod.IsZero() {
+		modified = mod.Format(time.RFC3339)
 	}
 
 	return Vulnerability{
-		ID:              advisory.ID,
+		ID:              advisory.Id,
 		Aliases:         slices.Clone(advisory.Aliases),
 		Summary:         advisory.Summary,
 		Details:         advisory.Details,
-		CVE:             advisory.CVE,
+		CVE:             advisory.Cve,
 		Severity:        sev,
 		SeverityType:    sevType,
 		Package:         finding.Dependency.Name,

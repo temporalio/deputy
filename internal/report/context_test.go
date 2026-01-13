@@ -4,21 +4,21 @@ import (
 	"slices"
 	"testing"
 
-	"github.com/picatz/deputy/internal/dependency"
+	dependencyv1 "github.com/picatz/deputy/gen/deputy/dependency/v1"
 	"github.com/picatz/deputy/internal/vulnerability"
 )
 
 func TestBuildManifestContext(t *testing.T) {
 	list := []vulnerability.Consolidated{
 		{
-			ManifestRefs: []dependency.ManifestRef{
+			ManifestRefs: []dependencyv1.ManifestRef{
 				{Manager: "npm", Path: "package.json", Groups: []string{"dependencies"}},
 				{Manager: "npm", Path: "package.json", Groups: []string{"devDependencies"}},
 			},
 			Locations: []string{"package.json", "src/index.js"},
 		},
 		{
-			ManifestRefs: []dependency.ManifestRef{
+			ManifestRefs: []dependencyv1.ManifestRef{
 				{Manager: "go", Path: "go.mod"},
 			},
 			Locations: []string{"go.mod", "go.sum"},

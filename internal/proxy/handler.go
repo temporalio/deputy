@@ -7,9 +7,38 @@ import (
 	"net/http/httputil"
 	"net/url"
 
+	dependencyv1 "github.com/picatz/deputy/gen/deputy/dependency/v1"
+	policyv1 "github.com/picatz/deputy/gen/deputy/policy/v1"
+	vulnerabilityv1 "github.com/picatz/deputy/gen/deputy/vulnerability/v1"
 	"github.com/picatz/deputy/internal/analysis/osv"
 	"github.com/picatz/deputy/internal/policy"
+	"google.golang.org/protobuf/proto"
 )
+
+// jwtClaimsToProto converts internal JWT claims to the proto JWTClaims type.
+func jwtClaimsToProto(claims *JWTClaims) *policyv1.JWTClaims {
+	if claims == nil {
+		return &policyv1.JWTClaims{Anonymous: true}
+	}
+	pc := &policyv1.JWTClaims{
+		Anonymous: false,
+		Sub:       claims.Subject,
+		Iss:       claims.Issuer,
+		Aud:       claims.Audience,
+		Exp:       claims.ExpiresAt,
+		Iat:       claims.IssuedAt,
+		Nbf:       claims.NotBefore,
+		Jti:       claims.JWTID,
+	}
+	// Convert custom claims to string map (proto limitation)
+	if len(claims.Custom) > 0 {
+		pc.CustomClaims = make(map[string]string, len(claims.Custom))
+		for k, v := range claims.Custom {
+			pc.CustomClaims[k] = fmt.Sprint(v)
+		}
+	}
+	return pc
+}
 
 // baseHandler contains the common fields and initialization logic shared by all
 // ecosystem-specific proxy handlers.
@@ -72,75 +101,104 @@ type requestInfo struct {
 	Filename   string // optional, used by PyPI
 }
 
-// buildPayload constructs the policy evaluation payload from request info.
-// The payload includes request metadata and optionally vulnerability/license data.
-func (h *baseHandler) buildPayload(ctx context.Context, info requestInfo, path string) map[string]any {
+// buildPolicyInput constructs the typed policy input proto from request info.
+// The input includes request metadata and optionally vulnerability/license data.
+func (h *baseHandler) buildPolicyInput(ctx context.Context, info requestInfo, entrypoint policy.Entrypoint) proto.Message {
 	version := info.Version
-	rawVersion := info.Version
 	if !info.HasVersion {
 		version = unknownVersionPlaceholder
 	}
 
-	reqMap := map[string]any{
-		"ecosystem":   info.Ecosystem,
-		"version":     version,
-		"has_version": info.HasVersion,
-		"operation":   info.Operation,
-		"path":        path,
+	// Build the request proto
+	req := &policyv1.ProxyRequest{
+		Ecosystem: info.Ecosystem,
+		Version:   version,
+		Operation: info.Operation,
 	}
-
-	// Set raw_version appropriately
-	if info.HasVersion {
-		reqMap["raw_version"] = rawVersion
-	} else {
-		reqMap["raw_version"] = ""
-	}
-
-	// Use "module" for Go, "package" for others
 	if info.Ecosystem == "go" {
-		reqMap["module"] = info.Name
+		req.Module = info.Name
 	} else {
-		reqMap["package"] = info.Name
+		req.Package = info.Name
 	}
 
-	// Add optional fields
-	if info.FileType != "" {
-		reqMap["fileType"] = info.FileType
-	}
-	if info.Filename != "" {
-		reqMap["filename"] = info.Filename
-	}
+	// Get JWT claims
+	jwt := jwtClaimsToProto(JWTClaimsFromContext(ctx))
 
-	payload := map[string]any{"request": reqMap}
-
-	// Add JWT claims to payload for policy evaluation
-	if claims := JWTClaimsFromContext(ctx); claims != nil {
-		payload["jwt"] = claims.ToMap()
-	} else {
-		payload["jwt"] = AnonymousClaims()
+	// Get environment
+	env := &policyv1.Environment{
+		Command:    "proxy",
+		Entrypoint: entrypoint.String(),
 	}
 
-	// Add vulnerability and license data if version is known
+	// Get vulnerabilities if version is known
+	var vulns []*vulnerabilityv1.Finding
+	var licenses []string
 	if info.HasVersion {
-		if vulnMaps := vulnerabilitiesToMaps(ctx, h.lookups, info.Ecosystem, info.Name, rawVersion); len(vulnMaps) > 0 {
-			payload["vulnerabilities"] = vulnMaps
-		}
-		if licenses := lookupLicenses(ctx, h.lookups, info.Name, rawVersion); len(licenses) > 0 {
-			payload["licenses"] = licenses
-			reqMap["licenses"] = licenses
-		}
+		vulns = lookupVulnerabilities(ctx, h.lookups, info.Ecosystem, info.Name, info.Version)
+		licenses = lookupLicenses(ctx, h.lookups, info.Name, info.Version)
 	}
 
-	return payload
+	// Build the pkg proto
+	pkg := &dependencyv1.Package{
+		Name:      info.Name,
+		Version:   version,
+		Ecosystem: info.Ecosystem,
+		Licenses:  licenses,
+	}
+
+	// Return the appropriate typed input based on ecosystem
+	switch info.Ecosystem {
+	case "go":
+		return &policyv1.GoArtifactRequestPolicyInput{
+			Request:         req,
+			Jwt:             jwt,
+			Env:             env,
+			Vulnerabilities: vulns,
+			Pkg:             pkg,
+		}
+	case "npm":
+		return &policyv1.NpmArtifactRequestPolicyInput{
+			Request:         req,
+			Jwt:             jwt,
+			Env:             env,
+			Vulnerabilities: vulns,
+			Pkg:             pkg,
+		}
+	case "pypi":
+		return &policyv1.PypiArtifactRequestPolicyInput{
+			Request:         req,
+			Jwt:             jwt,
+			Env:             env,
+			Vulnerabilities: vulns,
+			Pkg:             pkg,
+		}
+	case "rubygems":
+		return &policyv1.RubygemsArtifactRequestPolicyInput{
+			Request:         req,
+			Jwt:             jwt,
+			Env:             env,
+			Vulnerabilities: vulns,
+			Pkg:             pkg,
+		}
+	default:
+		// Fallback to Go input for unknown ecosystems
+		return &policyv1.GoArtifactRequestPolicyInput{
+			Request:         req,
+			Jwt:             jwt,
+			Env:             env,
+			Vulnerabilities: vulns,
+			Pkg:             pkg,
+		}
+	}
 }
 
 // serve handles the common pattern of policy evaluation and proxying.
-func (h *baseHandler) serve(w http.ResponseWriter, r *http.Request, entrypoint policy.Entrypoint, info requestInfo, payload map[string]any) {
+func (h *baseHandler) serve(w http.ResponseWriter, r *http.Request, entrypoint policy.Entrypoint, info requestInfo, input proto.Message) {
 	rawVersion := info.Version
 	if !info.HasVersion {
 		rawVersion = ""
 	}
-	serveWithPolicy(w, r, h.policies, entrypoint, payload, blockMeta{
+	serveWithPolicy(w, r, h.policies, entrypoint, input, blockMeta{
 		Ecosystem: info.Ecosystem,
 		Name:      info.Name,
 		Version:   rawVersion,

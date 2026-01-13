@@ -78,5 +78,5 @@
 //
 //   - [internal/policy] - CEL policy evaluation
 //   - [internal/container/image] - Runtime image analysis
-//   - [internal/scan] - Dockerfile scanning via ScanDockerfile
+//   - [internal/server] - Dockerfile scanning via ScanHandler
 package dockerfile

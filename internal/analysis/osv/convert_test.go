@@ -5,7 +5,7 @@ import (
 	"time"
 
 	"github.com/ossf/osv-schema/bindings/go/osvschema"
-	"github.com/picatz/deputy/internal/dependency"
+	containerv1 "github.com/picatz/deputy/gen/deputy/container/v1"
 )
 
 func tTime(tstr string) time.Time { tm, _ := time.Parse(time.RFC3339, tstr); return tm }
@@ -173,10 +173,10 @@ func Test_ProcessOSVVulnerability_LayerDetails(t *testing.T) {
 		},
 		PackageContext: PackageContext{
 			IsDirect: false,
-			LayerDetails: &dependency.LayerDetails{
+			LayerDetails: &containerv1.LayerDetails{
 				Index:       2,
-				DiffID:      "sha256:abc123",
-				ChainID:     "sha256:def456",
+				DiffId:      "sha256:abc123",
+				ChainId:     "sha256:def456",
 				Command:     "RUN apt-get install -y openssl",
 				InBaseImage: true,
 			},
@@ -191,11 +191,11 @@ func Test_ProcessOSVVulnerability_LayerDetails(t *testing.T) {
 	if out.LayerDetails.Index != 2 {
 		t.Errorf("LayerDetails.Index = %d, want 2", out.LayerDetails.Index)
 	}
-	if out.LayerDetails.DiffID != "sha256:abc123" {
-		t.Errorf("LayerDetails.DiffID = %q, want %q", out.LayerDetails.DiffID, "sha256:abc123")
+	if out.LayerDetails.DiffId != "sha256:abc123" {
+		t.Errorf("LayerDetails.DiffId = %q, want %q", out.LayerDetails.DiffId, "sha256:abc123")
 	}
-	if out.LayerDetails.ChainID != "sha256:def456" {
-		t.Errorf("LayerDetails.ChainID = %q, want %q", out.LayerDetails.ChainID, "sha256:def456")
+	if out.LayerDetails.ChainId != "sha256:def456" {
+		t.Errorf("LayerDetails.ChainId = %q, want %q", out.LayerDetails.ChainId, "sha256:def456")
 	}
 	if out.LayerDetails.Command != "RUN apt-get install -y openssl" {
 		t.Errorf("LayerDetails.Command = %q, want %q", out.LayerDetails.Command, "RUN apt-get install -y openssl")
@@ -279,20 +279,20 @@ func Test_ProcessOSVVulnerabilityDomain_ExtractsCWEs(t *testing.T) {
 			advisory, _ := ProcessOSVVulnerabilityDomain(tt.vuln, PkgInput{QueryKey: QueryKey{Name: "test-pkg"}})
 
 			if tt.wantCWEs == nil {
-				if len(advisory.CWEs) != 0 {
-					t.Errorf("expected no CWEs, got %v", advisory.CWEs)
+				if len(advisory.Cwes) != 0 {
+					t.Errorf("expected no CWEs, got %v", advisory.Cwes)
 				}
 				return
 			}
 
-			if len(advisory.CWEs) != len(tt.wantCWEs) {
-				t.Errorf("CWEs count = %d, want %d", len(advisory.CWEs), len(tt.wantCWEs))
+			if len(advisory.Cwes) != len(tt.wantCWEs) {
+				t.Errorf("CWEs count = %d, want %d", len(advisory.Cwes), len(tt.wantCWEs))
 				return
 			}
 
 			for i, want := range tt.wantCWEs {
-				if string(advisory.CWEs[i]) != want {
-					t.Errorf("CWEs[%d] = %q, want %q", i, advisory.CWEs[i], want)
+				if string(advisory.Cwes[i]) != want {
+					t.Errorf("CWEs[%d] = %q, want %q", i, advisory.Cwes[i], want)
 				}
 			}
 		})

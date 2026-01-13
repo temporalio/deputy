@@ -1,0 +1,41 @@
+syntax = "proto3";
+
+package deputy.dependency.v1;
+
+import "buf/validate/validate.proto";
+import "deputy/container/v1/container.proto";
+
+option go_package = "github.com/picatz/deputy/gen/deputy/dependency/v1;dependencyv1";
+
+// Package represents a dependency identified during scanning.
+message Package {
+  // Name is the package name within its ecosystem.
+  string name = 1 [(buf.validate.field).string.min_len = 1];
+  // Version is the resolved version string.
+  string version = 2;
+  // Ecosystem identifies the package ecosystem (e.g., "go", "npm", "pypi").
+  string ecosystem = 3 [(buf.validate.field).string.min_len = 1];
+  // Purl is the Package URL (PURL) for this dependency.
+  // See: https://github.com/package-url/purl-spec
+  string purl = 4;
+  // Licenses contains SPDX license identifiers for this package.
+  repeated string licenses = 5;
+  // Direct indicates whether this is a direct dependency.
+  bool direct = 6;
+  // Locations lists file paths where this package was referenced.
+  repeated string locations = 7;
+  // ManifestRefs describes where the dependency is declared.
+  repeated ManifestRef manifest_refs = 8;
+  // LayerDetails contains container image layer information when applicable.
+  deputy.container.v1.LayerDetails layer_details = 9;
+}
+
+// ManifestRef describes where a dependency is declared in a manifest or lockfile.
+message ManifestRef {
+  // Path is the file path to the manifest or lockfile.
+  string path = 1;
+  // Manager is the package manager that owns this manifest.
+  string manager = 2;
+  // Groups are dependency groups (e.g., "dev", "test", "prod").
+  repeated string groups = 3;
+}

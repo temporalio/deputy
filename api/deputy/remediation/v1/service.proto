@@ -1,0 +1,629 @@
+syntax = "proto3";
+
+package deputy.remediation.v1;
+
+import "buf/validate/validate.proto";
+import "google/protobuf/timestamp.proto";
+import "google/protobuf/duration.proto";
+import "deputy/target/v1/target.proto";
+import "deputy/vulnerability/v1/vulnerability.proto";
+import "deputy/scan/v1/service.proto";
+import "deputy/sbom/v1/service.proto";
+
+option go_package = "github.com/picatz/deputy/gen/deputy/remediation/v1;remediationv1";
+
+// RemediationService provides vulnerability remediation and AI-assisted fix capabilities.
+//
+// Security Model:
+//
+// LOCAL MODE (in-process or local daemon):
+//   - GeneratePlan: Full filesystem access, can read manifests and lockfiles
+//   - ExecutePlan: Full filesystem access, can write files and run commands
+//   - ExecuteWithAgent: Full access within specified sandbox (read-only|workspace-write|full-access)
+//
+// REMOTE SERVER MODE:
+//   - GeneratePlan: Only accepts scan results or SBOM bytes, not filesystem paths
+//   - ExecutePlan: Only on uploaded/prepared artifacts, not arbitrary paths
+//   - ExecuteWithAgent: Agent execution in isolated containers, strict sandboxing
+//
+// KEY PRINCIPLES:
+// 1. Plans are generated, reviewed, and approved separately from execution
+// 2. Long-running agent tasks can be resumed or interrupted
+// 3. Real-time feedback via streaming messages (commands, files, text, status)
+// 4. Plans are deterministic and can be saved/reviewed as JSON before application
+service RemediationService {
+  // GeneratePlan creates a remediation plan from scan results.
+  // This is a read-only operation that proposes fixes without applying them.
+  rpc GeneratePlan(GeneratePlanRequest) returns (GeneratePlanResponse);
+
+  // ExecutePlan applies a previously generated remediation plan.
+  // Returns streaming progress updates and a final execution summary.
+  rpc ExecutePlan(ExecutePlanRequest) returns (stream ExecutionEvent);
+
+  // ExecuteWithAgent uses an AI agent to generate and apply fixes interactively.
+  // Supports streaming events for real-time feedback and session resumption.
+  rpc ExecuteWithAgent(ExecuteWithAgentRequest) returns (stream AgentEvent);
+
+  // ResumeAgent resumes a previous agent execution session.
+  rpc ResumeAgent(ResumeAgentRequest) returns (stream AgentEvent);
+
+  // ListAgents returns available AI agents for remediation.
+  rpc ListAgents(ListAgentsRequest) returns (ListAgentsResponse);
+
+  // ApproveStep approves or denies a pending remediation step.
+  rpc ApproveStep(ApproveStepRequest) returns (ApproveStepResponse);
+}
+
+// ============================================================================
+// Plan Generation
+// ============================================================================
+
+// GeneratePlanRequest specifies how to generate a remediation plan.
+message GeneratePlanRequest {
+  // Source of vulnerability data (one of):
+  oneof source {
+    // ScanResult is a complete scan response to base the plan on.
+    deputy.scan.v1.ScanResponse scan_result = 1;
+
+    // SBOMBytes is raw SBOM data (CycloneDX/SPDX) to analyze.
+    bytes sbom_bytes = 2;
+  }
+
+  // SBOMFormat specifies the format if sbom_bytes is set.
+  deputy.sbom.v1.Format sbom_format = 3;
+
+  // Options configure plan generation behavior.
+  PlanOptions options = 4;
+}
+
+// PlanOptions configures how plans are generated.
+message PlanOptions {
+  // IgnoreUnfixed omits vulnerabilities without available fixes.
+  bool ignore_unfixed = 1;
+
+  // MaxUpgrades limits the number of version bumps in the plan.
+  int32 max_upgrades = 2;
+
+  // PreferMinimalChanges prefers smaller version bumps when multiple fixes exist.
+  bool prefer_minimal_changes = 3;
+
+  // IncludeTransitiveFixes includes upgrades for transitive dependencies.
+  bool include_transitive_fixes = 4;
+
+  // TargetEcosystems filters recommendations to specific package managers.
+  repeated string target_ecosystems = 5;
+
+  // SeverityThreshold omits vulnerabilities below this severity level.
+  deputy.vulnerability.v1.SeverityLevel severity_threshold = 6;
+}
+
+// GeneratePlanResponse contains the generated remediation plan.
+message GeneratePlanResponse {
+  // Plan is the structured remediation plan.
+  Plan plan = 1;
+
+  // Target describes what the plan addresses.
+  deputy.target.v1.Target target = 2;
+
+  // GeneratedAt is when this plan was created.
+  google.protobuf.Timestamp generated_at = 3;
+
+  // Stats summarizes the plan contents.
+  PlanStats stats = 4;
+
+  // Warnings contains non-fatal issues encountered during planning.
+  repeated string warnings = 5;
+}
+
+// Plan is the structured representation of remediation steps.
+message Plan {
+  // Id is a unique identifier for this plan (UUID).
+  string id = 1;
+
+  // Steps are the remediation actions to perform (in order).
+  repeated Step steps = 2;
+
+  // Target describes what this plan addresses.
+  deputy.target.v1.Target target = 3;
+
+  // StdlibUpgrade is a special recommendation for Go toolchain upgrades.
+  string stdlib_upgrade = 4;
+
+  // GeneratedAt is when the plan was created.
+  google.protobuf.Timestamp generated_at = 5;
+
+  // Metadata allows custom fields (e.g., "approved_by", "ticket_id").
+  map<string, string> metadata = 6;
+}
+
+// Step represents a single actionable remediation.
+message Step {
+  // Id uniquely identifies this step within the plan.
+  string id = 1;
+
+  // Kind indicates the type of remediation.
+  StepKind kind = 2;
+
+  // Title is a human-readable summary of the step.
+  string title = 3;
+
+  // Description explains what the step does and why.
+  string description = 4;
+
+  // PackageName is the affected package name (for version_upgrade steps).
+  string package_name = 5;
+
+  // CurrentVersion is the current version (for version_upgrade steps).
+  string current_version = 6;
+
+  // TargetVersion is the recommended version (for version_upgrade steps).
+  string target_version = 7;
+
+  // Manager is the package manager involved (go, npm, pip, cargo, etc.).
+  string manager = 8;
+
+  // ManifestPath is the relative path to the manifest/lockfile.
+  string manifest_path = 9;
+
+  // Command is the shell command to execute (for shell_command steps).
+  string command = 10;
+
+  // RiskLevel indicates the risk of this step.
+  RiskLevel risk_level = 11;
+
+  // AffectedVulnerabilities are the CVE/GHSA IDs this step addresses.
+  repeated string affected_vulnerabilities = 12;
+
+  // Executable indicates if the step can be auto-executed.
+  bool executable = 13;
+
+  // RequiresApproval indicates if this step requires explicit user approval.
+  bool requires_approval = 14;
+
+  // Hint provides additional context for manual steps.
+  string hint = 15;
+
+  // DependsOn lists IDs of steps that must execute before this one.
+  repeated string depends_on = 16;
+}
+
+// StepKind identifies the type of remediation step.
+enum StepKind {
+  STEP_KIND_UNSPECIFIED = 0;
+  STEP_KIND_VERSION_UPGRADE = 1;
+  STEP_KIND_FILE_EDIT = 2;
+  STEP_KIND_SHELL_COMMAND = 3;
+  STEP_KIND_DOCKERFILE_UPDATE = 4;
+  STEP_KIND_ACTION_UPDATE = 5;
+  STEP_KIND_CONFIG_CHANGE = 6;
+  STEP_KIND_CUSTOM_AGENT = 7;
+}
+
+// RiskLevel indicates the risk of a remediation step.
+enum RiskLevel {
+  RISK_LEVEL_UNSPECIFIED = 0;
+  RISK_LEVEL_LOW = 1;
+  RISK_LEVEL_MEDIUM = 2;
+  RISK_LEVEL_HIGH = 3;
+  RISK_LEVEL_CRITICAL = 4;
+}
+
+// PlanStats summarizes plan statistics.
+message PlanStats {
+  int32 total_steps = 1;
+  int32 executable_steps = 2;
+  int32 manual_steps = 3;
+  int32 high_risk_steps = 4;
+  int32 vulnerabilities_addressed = 5;
+  int32 affected_packages = 6;
+  repeated string affected_managers = 7;
+}
+
+// ============================================================================
+// Plan Execution
+// ============================================================================
+
+// ExecutePlanRequest specifies how to apply a remediation plan.
+message ExecutePlanRequest {
+  // Source (one of):
+  oneof source {
+    // PlanBytes is serialized plan JSON to execute.
+    bytes plan_bytes = 1;
+
+    // Plan is an inline remediation plan to execute.
+    Plan plan = 2;
+  }
+
+  // TargetPath is the local filesystem path where changes are applied.
+  // Security: Only available in local/in-process mode.
+  string target_path = 3;
+
+  // Options configure how the plan is applied.
+  ExecutionOptions options = 4;
+}
+
+// ExecutionOptions configures plan execution behavior.
+message ExecutionOptions {
+  // DryRun simulates plan execution without making actual changes.
+  bool dry_run = 1;
+
+  // ApprovalMode specifies how high-risk steps are handled.
+  ApprovalMode approval_mode = 2;
+
+  // StopOnError halts execution if any step fails.
+  bool stop_on_error = 3;
+
+  // Timeout is the maximum duration for the entire execution.
+  google.protobuf.Duration timeout = 4;
+
+  // VerboseOutput includes full command output instead of summaries.
+  bool verbose_output = 5;
+
+  // SkipStepIds specifies steps to skip during execution.
+  repeated string skip_step_ids = 6;
+}
+
+// ApprovalMode specifies how high-risk operations are handled.
+enum ApprovalMode {
+  APPROVAL_MODE_UNSPECIFIED = 0;
+  APPROVAL_MODE_AUTO_APPROVE = 1;
+  APPROVAL_MODE_INTERACTIVE = 2;
+  APPROVAL_MODE_ALL_STEPS = 3;
+  APPROVAL_MODE_SKIP_HIGH_RISK = 4;
+}
+
+// ExecutionEvent provides streaming updates during plan execution.
+message ExecutionEvent {
+  // Phase indicates which phase of execution is active.
+  ExecutionPhase phase = 1;
+
+  // StepId identifies the current step.
+  string step_id = 2;
+
+  // Message is human-readable progress information.
+  string message = 3;
+
+  // Progress is the completion percentage (0-100).
+  int32 progress = 4;
+
+  // Timestamp of the event.
+  google.protobuf.Timestamp timestamp = 5;
+
+  // Details (one of):
+  oneof details {
+    CommandStartedEvent command_started = 10;
+    CommandCompletedEvent command_completed = 11;
+    StepCompletedEvent step_completed = 12;
+    ApprovalNeededEvent approval_needed = 13;
+    ExecutionErrorEvent error = 14;
+    ExecutionSummaryEvent summary = 15;
+  }
+}
+
+// ExecutionPhase indicates the current phase of plan execution.
+enum ExecutionPhase {
+  EXECUTION_PHASE_UNSPECIFIED = 0;
+  EXECUTION_PHASE_PREPARING = 1;
+  EXECUTION_PHASE_EXECUTING = 2;
+  EXECUTION_PHASE_COMPLETED = 3;
+  EXECUTION_PHASE_FAILED = 4;
+  EXECUTION_PHASE_INTERRUPTED = 5;
+}
+
+// CommandStartedEvent indicates a shell command is starting.
+message CommandStartedEvent {
+  string command = 1;
+  string working_directory = 2;
+}
+
+// CommandCompletedEvent indicates a shell command finished.
+message CommandCompletedEvent {
+  string command = 1;
+  int32 exit_code = 2;
+  string stdout = 3;
+  string stderr = 4;
+  google.protobuf.Duration duration = 5;
+}
+
+// StepCompletedEvent indicates a remediation step finished.
+message StepCompletedEvent {
+  string step_id = 1;
+  bool success = 2;
+  google.protobuf.Duration duration = 3;
+  string output = 4;
+}
+
+// ApprovalNeededEvent indicates a step requires user approval.
+message ApprovalNeededEvent {
+  string step_id = 1;
+  string step_title = 2;
+  RiskLevel risk_level = 3;
+  string reason = 4;
+  int32 timeout_seconds = 5;
+}
+
+// ExecutionErrorEvent indicates an error during execution.
+message ExecutionErrorEvent {
+  string message = 1;
+  string step_id = 2;
+  bool is_fatal = 3;
+}
+
+// ExecutionSummaryEvent is the final report of plan execution.
+message ExecutionSummaryEvent {
+  google.protobuf.Timestamp started_at = 1;
+  google.protobuf.Timestamp completed_at = 2;
+  google.protobuf.Duration total_duration = 3;
+  int32 steps_executed = 4;
+  int32 steps_skipped = 5;
+  int32 steps_failed = 6;
+  bool success = 7;
+  string error_message = 8;
+  repeated string modified_files = 9;
+  repeated string commands_executed = 10;
+  int32 vulnerabilities_addressed = 11;
+  repeated string warnings = 12;
+}
+
+// ============================================================================
+// AI Agent-Assisted Remediation
+// ============================================================================
+
+// ExecuteWithAgentRequest specifies parameters for agent-assisted remediation.
+message ExecuteWithAgentRequest {
+  // Agent is the AI agent to use (e.g., "claude", "codex").
+  string agent = 1 [(buf.validate.field).string.min_len = 1];
+
+  // TargetPath is the local filesystem path.
+  // Security: Only available in local/in-process mode.
+  string target_path = 2;
+
+  // Source is what the agent should analyze (one of):
+  oneof source {
+    // ScanResult from a previous scan operation.
+    deputy.scan.v1.ScanResponse scan_result = 3;
+
+    // SBOMBytes is raw SBOM data for analysis.
+    bytes sbom_bytes = 4;
+  }
+
+  // SBOMFormat specifies the format if sbom_bytes is set.
+  deputy.sbom.v1.Format sbom_format = 5;
+
+  // Prompt is a custom prompt to guide the agent's analysis.
+  string prompt = 6;
+
+  // Options configure agent behavior.
+  AgentOptions options = 7;
+}
+
+// AgentOptions configures AI agent behavior.
+message AgentOptions {
+  // Model overrides the agent's default model.
+  string model = 1;
+
+  // Sandbox specifies file/command permissions.
+  // Values: "read-only", "workspace-write", "full-access".
+  string sandbox = 2 [(buf.validate.field).string = {in: ["", "read-only", "workspace-write", "full-access"]}];
+
+  // FullAuto enables full-automation mode (all operations auto-approved).
+  // DANGEROUS: Use only in fully automated, audited environments.
+  bool full_auto = 3;
+
+  // IncludePlanTool allows the agent to use the plan-generation tool.
+  bool include_plan_tool = 4;
+
+  // MaxTurns limits the number of interaction turns (0 = unlimited).
+  int32 max_turns = 5 [(buf.validate.field).int32.gte = 0];
+
+  // Timeout is the maximum duration for the entire agent session.
+  google.protobuf.Duration timeout = 6;
+
+  // VerboseOutput shows full command output instead of summaries.
+  bool verbose_output = 7;
+
+  // SkipRepositoryChecks skips git repository validation.
+  bool skip_repository_checks = 8;
+
+  // SessionId resumes a previous agent session.
+  string session_id = 9;
+}
+
+// AgentEvent provides streaming updates during agent execution.
+message AgentEvent {
+  // Phase indicates which phase of remediation is active.
+  AgentPhase phase = 1;
+
+  // SessionId is the agent session identifier.
+  string session_id = 2;
+
+  // Timestamp of the event.
+  google.protobuf.Timestamp timestamp = 3;
+
+  // The actual event payload (one of):
+  oneof details {
+    // Text output from the agent (analysis, reasoning, etc.).
+    AgentTextEvent text = 10;
+
+    // Command execution event.
+    AgentCommandEvent command = 11;
+
+    // File modification event.
+    AgentFileEvent file = 12;
+
+    // Status update (thinking, planning, executing, etc.).
+    AgentStatusEvent status = 13;
+
+    // Approval required for a risky operation.
+    AgentApprovalEvent approval = 14;
+
+    // Error during execution.
+    AgentErrorEvent error = 15;
+
+    // Session completed with summary.
+    AgentSummaryEvent summary = 16;
+
+    // Token usage update.
+    AgentTokensEvent tokens = 17;
+  }
+}
+
+// AgentPhase indicates the current phase of agent execution.
+enum AgentPhase {
+  AGENT_PHASE_UNSPECIFIED = 0;
+  AGENT_PHASE_ANALYZING = 1;
+  AGENT_PHASE_PLANNING = 2;
+  AGENT_PHASE_AWAITING_APPROVAL = 3;
+  AGENT_PHASE_EXECUTING = 4;
+  AGENT_PHASE_VERIFYING = 5;
+  AGENT_PHASE_COMPLETED = 6;
+  AGENT_PHASE_FAILED = 7;
+  AGENT_PHASE_INTERRUPTED = 8;
+}
+
+// AgentTextEvent is text streamed from the agent.
+message AgentTextEvent {
+  string text = 1;
+  bool is_partial = 2;
+}
+
+// AgentCommandEvent represents a shell command execution.
+message AgentCommandEvent {
+  string command = 1;
+  string status = 2;  // "running", "completed", "failed"
+  optional int32 exit_code = 3;
+  string output = 4;
+  string working_directory = 5;
+  google.protobuf.Duration duration = 6;
+}
+
+// AgentFileEvent represents a file operation.
+message AgentFileEvent {
+  string path = 1;
+  string action = 2;  // "create", "modify", "delete", "read"
+  string status = 3;  // "pending", "completed", "failed"
+  int64 content_size = 4;
+}
+
+// AgentStatusEvent is a progress update.
+message AgentStatusEvent {
+  string status = 1;
+  int32 progress = 2;
+  string current_task = 3;
+}
+
+// AgentApprovalEvent indicates an operation requires approval.
+message AgentApprovalEvent {
+  string request_id = 1;
+  string operation_type = 2;  // "command", "file_write", "file_delete", etc.
+  string description = 3;
+  RiskLevel risk_level = 4;
+  int32 timeout_seconds = 5;
+}
+
+// AgentErrorEvent represents an error during execution.
+message AgentErrorEvent {
+  string message = 1;
+  string code = 2;
+  bool is_fatal = 3;
+  bool can_retry = 4;
+}
+
+// AgentSummaryEvent is the final report of an agent session.
+message AgentSummaryEvent {
+  string session_id = 1;
+  google.protobuf.Timestamp started_at = 2;
+  google.protobuf.Timestamp completed_at = 3;
+  google.protobuf.Duration total_duration = 4;
+  bool success = 5;
+  string overall_message = 6;
+  repeated string commands_executed = 7;
+  repeated string files_modified = 8;
+  int32 vulnerabilities_fixed = 9;
+  int32 turns = 10;
+  string model_used = 11;
+  Plan final_plan = 12;
+  repeated string warnings = 13;
+  string error_message = 14;
+}
+
+// AgentTokensEvent reports token consumption.
+message AgentTokensEvent {
+  int32 prompt_tokens = 1;
+  int32 completion_tokens = 2;
+  int32 total_tokens = 3;
+  int32 running_total = 4;
+}
+
+// ============================================================================
+// Session Management
+// ============================================================================
+
+// ResumeAgentRequest specifies how to resume a previous session.
+message ResumeAgentRequest {
+  // SessionId identifies the session to resume.
+  string session_id = 1 [(buf.validate.field).string.min_len = 1];
+
+  // Message is a follow-up message to send to the agent.
+  string message = 2;
+
+  // ApprovalResponse is the response to a pending approval request.
+  AgentApprovalResponse approval_response = 3;
+
+  // Timeout is the maximum duration for the resumed session.
+  google.protobuf.Duration timeout = 4;
+}
+
+// AgentApprovalResponse is a response to an approval request.
+message AgentApprovalResponse {
+  string request_id = 1;
+  bool approved = 2;
+  string reason = 3;
+}
+
+// ListAgentsRequest requests the list of available agents.
+message ListAgentsRequest {}
+
+// ListAgentsResponse provides the list of available agents.
+message ListAgentsResponse {
+  repeated AgentInfo agents = 1;
+}
+
+// AgentInfo provides metadata about an agent.
+message AgentInfo {
+  string name = 1;
+  string display_name = 2;
+  string description = 3;
+  string default_model = 4;
+  repeated string supported_models = 5;
+  repeated string supported_sandbox_modes = 6;
+  AgentCapabilities capabilities = 7;
+  bool is_available = 8;
+  string unavailable_reason = 9;
+}
+
+// AgentCapabilities describes what an agent can do.
+message AgentCapabilities {
+  bool streaming = 1;
+  bool tool_use = 2;
+  bool agentic = 3;
+  bool session_resumption = 4;
+  bool code_execution = 5;
+  bool file_modification = 6;
+  bool approval_workflows = 7;
+}
+
+// ApproveStepRequest approves or denies a pending step.
+message ApproveStepRequest {
+  string session_id = 1 [(buf.validate.field).string.min_len = 1];
+  string step_id = 2 [(buf.validate.field).string.min_len = 1];
+  bool approved = 3;
+  string reason = 4;
+}
+
+// ApproveStepResponse confirms the approval decision.
+message ApproveStepResponse {
+  bool accepted = 1;
+  string message = 2;
+  bool can_proceed = 3;
+}

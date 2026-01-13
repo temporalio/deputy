@@ -16,9 +16,10 @@ Deputy aims to provide core dependency management primitives along with a unifie
 
 - Local and remote Git repositories
 - Local directories
+- Container images (remote registries, local Docker daemon, tarballs)
 - SBOM files (CycloneDX / SPDX / Protobom)
-
-In the future: container images, artifact registries, container orchestrators, binaries, VSCode extensions, various manifests, etc.
+- PURLs (Package URLs) for single-package queries
+- Dockerfiles (static analysis)
 
 ## Supported Ecosystems
 

@@ -125,9 +125,24 @@ type Metadata struct {
 
 // Info combines configuration and metadata for policy evaluation.
 type Info struct {
-	Config   Config         `json:"config"`
-	Metadata Metadata       `json:"metadata"`
-	History  []HistoryEntry `json:"history,omitempty"`
+	Config    Config         `json:"config"`
+	Metadata  Metadata       `json:"metadata"`
+	History   []HistoryEntry `json:"history,omitempty"`
+	BaseImage *BaseImageRef  `json:"base_image,omitempty"`
+}
+
+// BaseImageRef contains information about the base image from OCI annotations.
+// This is extracted from org.opencontainers.image.base.name and
+// org.opencontainers.image.base.digest annotations per the OCI Image Spec.
+// See: https://github.com/opencontainers/image-spec/blob/main/annotations.md
+type BaseImageRef struct {
+	// Name is the base image reference (from org.opencontainers.image.base.name).
+	// This should be a fully qualified reference without assumed default registry.
+	Name string `json:"name,omitempty"`
+
+	// Digest is the base image digest (from org.opencontainers.image.base.digest).
+	// Format: sha256:...
+	Digest string `json:"digest,omitempty"`
 }
 
 // HistoryEntry represents a single layer's history/build command.
@@ -137,6 +152,15 @@ type HistoryEntry struct {
 	Comment    string    `json:"comment,omitempty"`
 	EmptyLayer bool      `json:"empty_layer,omitempty"`
 }
+
+// OCI Image Spec annotation keys for base image information.
+// See: https://github.com/opencontainers/image-spec/blob/main/annotations.md
+const (
+	// AnnotationBaseImageName is the OCI annotation for the base image reference.
+	AnnotationBaseImageName = "org.opencontainers.image.base.name"
+	// AnnotationBaseImageDigest is the OCI annotation for the base image digest.
+	AnnotationBaseImageDigest = "org.opencontainers.image.base.digest"
+)
 
 // Extract extracts configuration and metadata from a v1.Image.
 func Extract(img v1.Image) (*Info, error) {
@@ -153,11 +177,45 @@ func Extract(img v1.Image) (*Info, error) {
 	}
 
 	info := &Info{
-		Config:   extractConfig(cf.Config),
-		Metadata: extractMetadata(cf, img),
-		History:  extractHistory(cf.History),
+		Config:    extractConfig(cf.Config),
+		Metadata:  extractMetadata(cf, img),
+		History:   extractHistory(cf.History),
+		BaseImage: extractBaseImageAnnotations(img),
 	}
 	return info, nil
+}
+
+// extractBaseImageAnnotations extracts base image information from OCI annotations.
+// This provides a no-network, no-heuristic way to identify base image layers when
+// the image builder has set the standard OCI annotations.
+func extractBaseImageAnnotations(img v1.Image) *BaseImageRef {
+	manifest, err := img.Manifest()
+	if err != nil || manifest == nil {
+		return nil
+	}
+
+	// Check manifest annotations first (preferred per OCI spec)
+	name := manifest.Annotations[AnnotationBaseImageName]
+	digest := manifest.Annotations[AnnotationBaseImageDigest]
+
+	// Fall back to config file labels if manifest annotations are not present.
+	// Some older build tools store these in labels instead of annotations.
+	if name == "" && digest == "" {
+		cf, err := img.ConfigFile()
+		if err == nil && cf != nil && cf.Config.Labels != nil {
+			name = cf.Config.Labels[AnnotationBaseImageName]
+			digest = cf.Config.Labels[AnnotationBaseImageDigest]
+		}
+	}
+
+	if name == "" && digest == "" {
+		return nil
+	}
+
+	return &BaseImageRef{
+		Name:   name,
+		Digest: digest,
+	}
 }
 
 func extractConfig(cfg v1.Config) Config {
@@ -284,15 +342,27 @@ func (i *Info) ToMap() map[string]any {
 		// Return empty structure so CEL can access fields without panicking.
 		// CEL expressions should use has() to check for presence.
 		return map[string]any{
-			"config":   map[string]any{},
-			"metadata": map[string]any{},
-			"history":  []any{},
+			"config":     map[string]any{},
+			"metadata":   map[string]any{},
+			"history":    []any{},
+			"base_image": nil,
 		}
 	}
 	return map[string]any{
-		"config":   i.configToMap(),
-		"metadata": i.metadataToMap(),
-		"history":  i.historyToMaps(),
+		"config":     i.configToMap(),
+		"metadata":   i.metadataToMap(),
+		"history":    i.historyToMaps(),
+		"base_image": i.baseImageToMap(),
+	}
+}
+
+func (i *Info) baseImageToMap() map[string]any {
+	if i.BaseImage == nil {
+		return nil
+	}
+	return map[string]any{
+		"name":   i.BaseImage.Name,
+		"digest": i.BaseImage.Digest,
 	}
 }
 

@@ -3,6 +3,10 @@
 # A composable workflow for vulnerability scanning with Deputy.
 # Call this from any repository to get consistent security scanning.
 #
+# Works with or without GitHub Advanced Security (GHAS):
+# - With GHAS: Uploads SARIF to GitHub Security tab for rich integration
+# - Without GHAS: Posts scan summary as PR comment (automatic fallback)
+#
 # Usage:
 #   jobs:
 #     security:
@@ -10,8 +14,9 @@
 #       with:
 #         policy: policy/ci/security-gate.yaml
 #       permissions:
-#         security-events: write
+#         security-events: write  # For SARIF upload (optional, gracefully degrades)
 #         contents: read
+#         pull-requests: write    # For PR comment fallback
 
 name: Scan
 

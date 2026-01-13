@@ -1,0 +1,379 @@
+syntax = "proto3";
+
+package deputy.agent.v1;
+
+option go_package = "github.com/picatz/deputy/gen/deputy/agent/v1;agentv1";
+
+import "buf/validate/validate.proto";
+import "google/protobuf/timestamp.proto";
+
+// AgentPlugin defines the interface that agent plugins must implement.
+// Plugins can be:
+//   - Builtin: Compiled into the Deputy binary (Claude, Codex)
+//   - External: Separate processes discovered via PATH (deputy-agent-<name>)
+//   - Sandboxed: Running in a container (Docker, gVisor)
+//
+// This service is called BY Deputy TO the plugin. The plugin acts as a server.
+service AgentPlugin {
+  // GetInfo returns metadata about this agent plugin.
+  rpc GetInfo(GetInfoRequest) returns (GetInfoResponse);
+
+  // Execute runs the agent with the given prompt and streams events.
+  // This is the main entry point for agent execution.
+  rpc Execute(ExecuteRequest) returns (stream ExecuteEvent);
+
+  // Resume continues a previous execution session.
+  // Only available if capabilities.session_resumption is true.
+  rpc Resume(ResumeRequest) returns (stream ExecuteEvent);
+
+  // Approve handles approval requests for operations requiring user consent.
+  // Called when the agent emits an ApprovalRequired event.
+  rpc Approve(ApproveRequest) returns (ApproveResponse);
+
+  // Cancel requests graceful termination of an ongoing execution.
+  rpc Cancel(CancelRequest) returns (CancelResponse);
+}
+
+// GetInfoRequest is empty - no parameters needed.
+message GetInfoRequest {}
+
+// GetInfoResponse contains agent metadata.
+message GetInfoResponse {
+  // Name is the unique identifier for this agent.
+  string name = 1 [(buf.validate.field).string.min_len = 1];
+
+  // Display name for UI purposes.
+  string display_name = 2;
+
+  // Description of what this agent does.
+  string description = 3;
+
+  // Version of the agent plugin.
+  string version = 4;
+
+  // Capabilities this agent supports.
+  AgentCapabilities capabilities = 5;
+
+  // Default model to use (if applicable).
+  string default_model = 6;
+
+  // Supported models (if configurable).
+  repeated string supported_models = 7;
+}
+
+// AgentCapabilities describes what the agent can do.
+message AgentCapabilities {
+  // Streaming indicates real-time event streaming support.
+  bool streaming = 1;
+
+  // Tool use indicates function/tool calling support.
+  bool tool_use = 2;
+
+  // Vision indicates image processing capability.
+  bool vision = 3;
+
+  // Agentic indicates autonomous code execution capability.
+  bool agentic = 4;
+
+  // Session resumption indicates conversation continuity support.
+  bool session_resumption = 5;
+
+  // Max context tokens (0 = unknown/unlimited).
+  int32 max_context_tokens = 6;
+
+  // Sandboxable indicates the agent can run in a container.
+  bool sandboxable = 7;
+}
+
+// ExecuteRequest contains parameters for agent execution.
+message ExecuteRequest {
+  // Prompt is the user's instruction to the agent.
+  string prompt = 1 [(buf.validate.field).string.min_len = 1];
+
+  // System prompt to set agent behavior (optional).
+  string system = 2;
+
+  // Working directory for file operations.
+  string work_dir = 3;
+
+  // Sandbox mode for security constraints.
+  SandboxMode sandbox = 4;
+
+  // Model to use (overrides default).
+  string model = 5;
+
+  // Max tokens for response (0 = default).
+  int32 max_tokens = 6;
+
+  // Temperature for generation (negative = default).
+  float temperature = 7;
+
+  // Context from scan results (vulnerabilities to fix).
+  ExecutionContext context = 8;
+
+  // Previous session ID for context (not resumption, just context).
+  string previous_session_id = 9;
+
+  // Timeout in seconds (0 = no timeout).
+  int32 timeout_seconds = 10;
+
+  // Whether to run in fully automated mode (no approval prompts).
+  bool full_auto = 11;
+}
+
+// ExecutionContext provides vulnerability context to the agent.
+message ExecutionContext {
+  // Vulnerabilities to remediate.
+  repeated VulnerabilityContext vulnerabilities = 1;
+
+  // Target information.
+  string target = 2;
+  string ecosystem = 3;
+}
+
+// VulnerabilityContext is a simplified vulnerability for agent context.
+message VulnerabilityContext {
+  string id = 1;
+  string package = 2;
+  string version = 3;
+  string severity = 4;
+  string summary = 5;
+  repeated string fixed_versions = 6;
+}
+
+// SandboxMode controls what the agent can access.
+enum SandboxMode {
+  SANDBOX_MODE_UNSPECIFIED = 0;
+  // Read-only access to workspace.
+  SANDBOX_MODE_READ_ONLY = 1;
+  // Read/write within workspace only.
+  SANDBOX_MODE_WORKSPACE_WRITE = 2;
+  // Full access (dangerous - use with caution).
+  SANDBOX_MODE_FULL_ACCESS = 3;
+}
+
+// ResumeRequest continues a previous session.
+message ResumeRequest {
+  // Session ID to resume.
+  string session_id = 1 [(buf.validate.field).string.min_len = 1];
+
+  // Additional prompt to continue with.
+  string prompt = 2;
+
+  // Working directory (may have changed).
+  string work_dir = 3;
+}
+
+// ApproveRequest handles interactive approval.
+message ApproveRequest {
+  // Session ID the approval belongs to.
+  string session_id = 1 [(buf.validate.field).string.min_len = 1];
+
+  // Operation ID being approved/denied.
+  string operation_id = 2 [(buf.validate.field).string.min_len = 1];
+
+  // Whether the operation is approved.
+  bool approved = 3;
+
+  // Optional feedback for denied operations.
+  string feedback = 4;
+}
+
+// ApproveResponse confirms the approval was processed.
+message ApproveResponse {
+  // Whether the approval was accepted.
+  bool accepted = 1;
+
+  // Message if not accepted (e.g., operation already completed).
+  string message = 2;
+}
+
+// CancelRequest asks the agent to stop gracefully.
+message CancelRequest {
+  // Session ID to cancel.
+  string session_id = 1 [(buf.validate.field).string.min_len = 1];
+
+  // Reason for cancellation (for logging).
+  string reason = 2;
+}
+
+// CancelResponse confirms cancellation.
+message CancelResponse {
+  // Whether cancellation was successful.
+  bool cancelled = 1;
+
+  // Final state of the session.
+  string final_state = 2;
+}
+
+// ExecuteEvent is a streaming event from the agent.
+message ExecuteEvent {
+  // Session ID for this execution.
+  string session_id = 1;
+
+  // When this event occurred.
+  google.protobuf.Timestamp timestamp = 2;
+
+  // Current phase of execution.
+  ExecutionPhase phase = 3;
+
+  // Event details (oneof).
+  oneof details {
+    TextEvent text = 10;
+    CommandEvent command = 11;
+    FileEvent file = 12;
+    ToolCallEvent tool_call = 13;
+    ApprovalRequiredEvent approval_required = 14;
+    StatusEvent status = 15;
+    ErrorEvent error = 16;
+    DoneEvent done = 17;
+  }
+}
+
+// ExecutionPhase indicates the agent's current stage.
+enum ExecutionPhase {
+  EXECUTION_PHASE_UNSPECIFIED = 0;
+  EXECUTION_PHASE_INITIALIZING = 1;
+  EXECUTION_PHASE_ANALYZING = 2;
+  EXECUTION_PHASE_PLANNING = 3;
+  EXECUTION_PHASE_EXECUTING = 4;
+  EXECUTION_PHASE_VERIFYING = 5;
+  EXECUTION_PHASE_WAITING_APPROVAL = 6;
+  EXECUTION_PHASE_COMPLETED = 7;
+  EXECUTION_PHASE_FAILED = 8;
+  EXECUTION_PHASE_CANCELLED = 9;
+}
+
+// TextEvent contains text output from the agent.
+message TextEvent {
+  string text = 1;
+  bool is_thinking = 2;  // True if this is internal reasoning
+}
+
+// CommandEvent represents a shell command execution.
+message CommandEvent {
+  string command = 1;
+  CommandStatus status = 2;
+  int32 exit_code = 3;
+  string stdout = 4;
+  string stderr = 5;
+  string working_dir = 6;
+}
+
+// CommandStatus indicates command execution state.
+enum CommandStatus {
+  COMMAND_STATUS_UNSPECIFIED = 0;
+  COMMAND_STATUS_PENDING = 1;
+  COMMAND_STATUS_RUNNING = 2;
+  COMMAND_STATUS_COMPLETED = 3;
+  COMMAND_STATUS_FAILED = 4;
+  COMMAND_STATUS_CANCELLED = 5;
+}
+
+// FileEvent represents a file operation.
+message FileEvent {
+  string path = 1;
+  FileAction action = 2;
+  FileStatus status = 3;
+  string content_preview = 4;  // First N bytes for display
+  int64 size_bytes = 5;
+}
+
+// FileAction is the type of file operation.
+enum FileAction {
+  FILE_ACTION_UNSPECIFIED = 0;
+  FILE_ACTION_CREATE = 1;
+  FILE_ACTION_MODIFY = 2;
+  FILE_ACTION_DELETE = 3;
+  FILE_ACTION_READ = 4;
+}
+
+// FileStatus is the state of the file operation.
+enum FileStatus {
+  FILE_STATUS_UNSPECIFIED = 0;
+  FILE_STATUS_PENDING = 1;
+  FILE_STATUS_COMPLETED = 2;
+  FILE_STATUS_FAILED = 3;
+}
+
+// ToolCallEvent indicates the agent wants to use a tool.
+message ToolCallEvent {
+  string tool_id = 1;
+  string tool_name = 2;
+  string arguments_json = 3;  // JSON-encoded arguments
+  string result_json = 4;     // JSON-encoded result (if completed)
+  bool completed = 5;
+}
+
+// ApprovalRequiredEvent requests user approval for an operation.
+message ApprovalRequiredEvent {
+  string operation_id = 1;
+  OperationType operation_type = 2;
+  string description = 3;
+  string details = 4;  // JSON with operation-specific details
+  bool is_high_risk = 5;
+  int32 timeout_seconds = 6;  // Auto-deny after timeout (0 = wait forever)
+}
+
+// OperationType categorizes what's being approved.
+enum OperationType {
+  OPERATION_TYPE_UNSPECIFIED = 0;
+  OPERATION_TYPE_COMMAND = 1;
+  OPERATION_TYPE_FILE_WRITE = 2;
+  OPERATION_TYPE_FILE_DELETE = 3;
+  OPERATION_TYPE_NETWORK = 4;
+  OPERATION_TYPE_HIGH_RISK = 5;
+}
+
+// StatusEvent provides progress updates.
+message StatusEvent {
+  string status = 1;
+  string details = 2;
+  int32 progress_percent = 3;  // 0-100, -1 if unknown
+}
+
+// ErrorEvent reports an error during execution.
+message ErrorEvent {
+  string message = 1;
+  string code = 2;
+  bool is_fatal = 3;
+  bool is_retriable = 4;
+}
+
+// DoneEvent signals execution completion.
+message DoneEvent {
+  // Final session ID (for resumption).
+  string session_id = 1;
+
+  // Summary of what was done.
+  string summary = 2;
+
+  // Token usage statistics.
+  TokenUsage usage = 3;
+
+  // Exit reason.
+  DoneReason reason = 4;
+
+  // Files that were modified.
+  repeated string modified_files = 5;
+
+  // Commands that were executed.
+  int32 commands_executed = 6;
+}
+
+// DoneReason explains why execution ended.
+enum DoneReason {
+  DONE_REASON_UNSPECIFIED = 0;
+  DONE_REASON_SUCCESS = 1;
+  DONE_REASON_ERROR = 2;
+  DONE_REASON_CANCELLED = 3;
+  DONE_REASON_TIMEOUT = 4;
+  DONE_REASON_APPROVAL_DENIED = 5;
+}
+
+// TokenUsage tracks API usage.
+message TokenUsage {
+  int32 prompt_tokens = 1;
+  int32 completion_tokens = 2;
+  int32 total_tokens = 3;
+}

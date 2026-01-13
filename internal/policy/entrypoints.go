@@ -41,6 +41,14 @@ func (e Entrypoint) Category() string {
 		return "dockerfile"
 	case EntrypointSecretsReport, EntrypointSecretsFinding:
 		return "secrets"
+	case EntrypointGraphReport, EntrypointGraphNode, EntrypointGraphEdge:
+		return "graph"
+	case EntrypointServiceScanRequest, EntrypointServiceListRequest,
+		EntrypointServiceSBOMRequest, EntrypointServiceDiffRequest,
+		EntrypointServiceSecretsRequest, EntrypointServiceGraphRequest:
+		return "server"
+	case EntrypointSandboxExecution, EntrypointSandboxCommand, EntrypointSandboxNetwork:
+		return "sandbox"
 	default:
 		return ""
 	}
@@ -109,6 +117,50 @@ const (
 	EntrypointSecretsReport Entrypoint = "secrets_report"
 	// EntrypointSecretsFinding triggers for each secret found during a scan.
 	EntrypointSecretsFinding Entrypoint = "secrets_finding"
+
+	// Graph entrypoints - for dependency graph analysis and policies
+	// EntrypointGraphReport triggers after a graph is built, providing the full graph.
+	EntrypointGraphReport Entrypoint = "graph_report"
+	// EntrypointGraphNode triggers for each node in the dependency graph.
+	// Available variables: node (with purl, name, version, ecosystem, direct, depth, etc.)
+	EntrypointGraphNode Entrypoint = "graph_node"
+	// EntrypointGraphEdge triggers for each edge in the dependency graph.
+	// Available variables: edge (with from, to PURLs), from_node, to_node
+	EntrypointGraphEdge Entrypoint = "graph_edge"
+
+	// Service entrypoints - for API request authorization when Deputy runs as a server.
+	// These enable RBAC/ABAC policies based on JWT claims (jwt.*) for multi-tenant deployments.
+
+	// EntrypointServiceScanRequest triggers before a scan is executed via the API.
+	// Use this to authorize which targets a user/service can scan.
+	EntrypointServiceScanRequest Entrypoint = "service_scan_request"
+	// EntrypointServiceListRequest triggers before a list operation via the API.
+	EntrypointServiceListRequest Entrypoint = "service_list_request"
+	// EntrypointServiceSBOMRequest triggers before SBOM generation via the API.
+	EntrypointServiceSBOMRequest Entrypoint = "service_sbom_request"
+	// EntrypointServiceDiffRequest triggers before a diff operation via the API.
+	EntrypointServiceDiffRequest Entrypoint = "service_diff_request"
+	// EntrypointServiceSecretsRequest triggers before a secrets scan via the API.
+	EntrypointServiceSecretsRequest Entrypoint = "service_secrets_request"
+	// EntrypointServiceGraphRequest triggers before a graph operation via the API.
+	EntrypointServiceGraphRequest Entrypoint = "service_graph_request"
+
+	// Sandbox entrypoints - for controlling sandboxed execution.
+	// These enable policies to control what can run in sandboxes, with what configuration,
+	// and what network/filesystem access is allowed.
+
+	// EntrypointSandboxExecution triggers before any sandbox execution begins.
+	// Use this to authorize sandbox executions based on source, command, and config.
+	// Available variables: command, workspace_dir, requested_config, context
+	EntrypointSandboxExecution Entrypoint = "sandbox_execution"
+	// EntrypointSandboxCommand triggers for each command executed within a sandbox session.
+	// Use this for fine-grained command-level control within ongoing sandboxes.
+	// Available variables: command, sandbox_config, context
+	EntrypointSandboxCommand Entrypoint = "sandbox_command"
+	// EntrypointSandboxNetwork triggers when a sandbox requests network access.
+	// Use this to implement network allowlists or block specific destinations.
+	// Available variables: host, port, protocol, sandbox_config, context
+	EntrypointSandboxNetwork Entrypoint = "sandbox_network"
 )
 
 var (
@@ -164,12 +216,35 @@ var (
 		EntrypointSecretsReport,
 		EntrypointSecretsFinding,
 	}
+	// EntrypointsGraph lists all entrypoints related to dependency graph analysis.
+	EntrypointsGraph = []Entrypoint{
+		EntrypointGraphReport,
+		EntrypointGraphNode,
+		EntrypointGraphEdge,
+	}
+	// EntrypointsService lists all entrypoints related to API request authorization.
+	// These enable RBAC/ABAC when Deputy runs as a shared service (server mode).
+	EntrypointsService = []Entrypoint{
+		EntrypointServiceScanRequest,
+		EntrypointServiceListRequest,
+		EntrypointServiceSBOMRequest,
+		EntrypointServiceDiffRequest,
+		EntrypointServiceSecretsRequest,
+		EntrypointServiceGraphRequest,
+	}
+	// EntrypointsSandbox lists all entrypoints related to sandbox execution control.
+	// These enable policies to control what runs in sandboxes and with what permissions.
+	EntrypointsSandbox = []Entrypoint{
+		EntrypointSandboxExecution,
+		EntrypointSandboxCommand,
+		EntrypointSandboxNetwork,
+	}
 
 	// AllEntrypoints contains every canonical entrypoint defined in Deputy.
-	AllEntrypoints = slices.Concat(EntrypointsProxy, EntrypointsScan, EntrypointsDiff, EntrypointsContainerDiff, EntrypointsSBOM, EntrypointsFix, EntrypointsTriage, EntrypointsDockerfile, EntrypointsSecrets)
+	AllEntrypoints = slices.Concat(EntrypointsProxy, EntrypointsScan, EntrypointsDiff, EntrypointsContainerDiff, EntrypointsSBOM, EntrypointsFix, EntrypointsTriage, EntrypointsDockerfile, EntrypointsSecrets, EntrypointsGraph, EntrypointsService, EntrypointsSandbox)
 
 	allowedEntrypointsSet = buildEntrypointSet(AllEntrypoints)
-	allowedCommands       = []string{"proxy", "scan", "diff", "sbom", "fix", "triage", "secrets"}
+	allowedCommands       = []string{"proxy", "scan", "diff", "sbom", "fix", "triage", "secrets", "graph", "server", "sandbox", "exec"}
 	allowedCommandsSet    = buildSet(allowedCommands)
 )
 

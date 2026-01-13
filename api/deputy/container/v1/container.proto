@@ -1,0 +1,158 @@
+syntax = "proto3";
+
+package deputy.container.v1;
+
+import "google/protobuf/duration.proto";
+import "google/protobuf/timestamp.proto";
+
+option go_package = "github.com/picatz/deputy/gen/deputy/container/v1;containerv1";
+
+// LayerDetails describes the container image layer where a package was found.
+message LayerDetails {
+  // Index is the position of the layer in the image (0 = oldest/base layer).
+  int32 index = 1;
+  // DiffId is the digest of the uncompressed layer content.
+  string diff_id = 2;
+  // ChainId is the cumulative hash identifying this layer in context of its parents.
+  string chain_id = 3;
+  // Command is the Dockerfile instruction that created this layer.
+  string command = 4;
+  // InBaseImage indicates whether this layer is part of the base image.
+  bool in_base_image = 5;
+}
+
+// ImageInfo combines configuration and metadata for a container image.
+// This is the complete image data extracted from OCI/Docker images.
+message ImageInfo {
+  // Config contains the image configuration (Dockerfile runtime settings).
+  ImageConfig config = 1;
+
+  // Metadata contains image metadata (architecture, OS, layers).
+  ImageMetadata metadata = 2;
+
+  // History contains build history entries showing Dockerfile commands.
+  repeated HistoryEntry history = 3;
+
+  // Image is the full image reference including registry, repository, and tag/digest.
+  // Example: "gcr.io/myproject/app:v1.2.3" or "ghcr.io/owner/repo@sha256:abc123"
+  // This field is used by policy expressions with imageRef() helper.
+  string image = 4;
+
+  // Registry is the container registry hostname (e.g., "docker.io", "gcr.io").
+  string registry = 5;
+
+  // Repository is the image repository path (e.g., "library/nginx", "myproject/app").
+  string repository = 6;
+
+  // Tag is the image tag if specified (e.g., "latest", "v1.2.3").
+  string tag = 7;
+}
+
+// ImageConfig represents the extracted configuration from a container image.
+message ImageConfig {
+  // User is the user (and optionally group) to run container processes as.
+  // An empty value means root, which is a security concern.
+  string user = 1;
+
+  // IsRoot indicates whether the image runs as root.
+  bool is_root = 2;
+
+  // Env contains environment variables set in the image.
+  repeated string env = 3;
+
+  // SensitiveEnv lists environment variable names that may contain secrets.
+  repeated string sensitive_env = 4;
+
+  // Entrypoint is the command that runs when the container starts.
+  repeated string entrypoint = 5;
+
+  // Cmd provides default arguments to Entrypoint.
+  repeated string cmd = 6;
+
+  // WorkingDir is the working directory for commands.
+  string working_dir = 7;
+
+  // ExposedPorts lists ports the container exposes.
+  repeated string exposed_ports = 8;
+
+  // Volumes lists mount points defined in the image.
+  repeated string volumes = 9;
+
+  // Labels are key-value metadata on the image.
+  map<string, string> labels = 10;
+
+  // Shell is the default shell for RUN commands.
+  repeated string shell = 11;
+
+  // StopSignal is the signal to stop the container.
+  string stop_signal = 12;
+
+  // Healthcheck configuration if defined.
+  HealthcheckConfig healthcheck = 13;
+
+  // OnBuild contains ONBUILD instructions for child images.
+  repeated string on_build = 14;
+}
+
+// HealthcheckConfig represents container health check configuration.
+message HealthcheckConfig {
+  // Test is the health check command.
+  repeated string test = 1;
+
+  // Interval is the time between health checks.
+  google.protobuf.Duration interval = 2;
+
+  // Timeout is the maximum time for a health check.
+  google.protobuf.Duration timeout = 3;
+
+  // Retries is the number of consecutive failures before unhealthy.
+  int32 retries = 4;
+}
+
+// ImageMetadata contains additional metadata about the image.
+message ImageMetadata {
+  // Architecture is the CPU architecture (e.g., amd64, arm64).
+  string architecture = 1;
+
+  // OS is the operating system (e.g., linux, windows).
+  string os = 2;
+
+  // OSVersion is the OS version if specified.
+  string os_version = 3;
+
+  // Variant is the architecture variant (e.g., v8 for arm64).
+  string variant = 4;
+
+  // Created is when the image was created.
+  google.protobuf.Timestamp created = 5;
+
+  // Author is the image author if specified.
+  string author = 6;
+
+  // DockerVersion is the Docker version used to build the image.
+  string docker_version = 7;
+
+  // LayerCount is the number of layers in the image.
+  int32 layer_count = 8;
+
+  // Size is the total size of all layers in bytes.
+  int64 size = 9;
+
+  // Digest is the image manifest digest.
+  string digest = 10;
+}
+
+// HistoryEntry represents a single layer's history/build command.
+message HistoryEntry {
+  // CreatedBy is the command that created this layer.
+  string created_by = 1;
+
+  // Created is when this layer was created.
+  google.protobuf.Timestamp created = 2;
+
+  // Comment is an optional comment about the layer.
+  string comment = 3;
+
+  // EmptyLayer indicates this is a metadata-only layer.
+  bool empty_layer = 4;
+}

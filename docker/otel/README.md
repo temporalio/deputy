@@ -328,7 +328,8 @@ docker compose logs prometheus
    curl -s "http://localhost:9090/api/v1/query_exemplars?query=deputy_scan_duration_seconds_bucket&start=$(date -v-1H +%s)&end=$(date +%s)" | jq .
    ```
 
-Note: Exemplars only appear for histogram metrics when there's an active, sampled trace context during measurement recording.
+> [!NOTE]
+> Exemplars only appear for histogram metrics when there's an active, sampled trace context during measurement recording.
 
 ### Connection refused errors
 

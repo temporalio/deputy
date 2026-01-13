@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
+	vulnerabilityv1 "github.com/picatz/deputy/gen/deputy/vulnerability/v1"
 	"github.com/picatz/deputy/internal/report"
-	"github.com/picatz/deputy/internal/vulnerability"
 )
 
 func TestSchemaForVersion(t *testing.T) {
@@ -1024,7 +1024,7 @@ func TestConvert_RelatedLocations(t *testing.T) {
 			Package:   "test-pkg",
 			Severity:  "HIGH",
 			Locations: []string{"go.mod"},
-			AffectedImports: []vulnerability.AffectedImport{
+			AffectedImports: []vulnerabilityv1.AffectedImport{
 				{Path: "github.com/test/pkg/internal", Symbols: []string{"Foo", "Bar"}},
 				{Path: "github.com/test/pkg/util"},
 			},
@@ -1065,7 +1065,7 @@ func TestConvert_CodeFlows(t *testing.T) {
 			Version:   "1.0.0",
 			Severity:  "HIGH",
 			Locations: []string{"go.mod"},
-			AffectedImports: []vulnerability.AffectedImport{
+			AffectedImports: []vulnerabilityv1.AffectedImport{
 				{Path: "github.com/test/pkg/internal", Symbols: []string{"Vulnerable"}},
 			},
 		},

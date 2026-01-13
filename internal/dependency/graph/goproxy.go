@@ -15,6 +15,7 @@ import (
 	"github.com/go-git/go-git/v5/plumbing"
 	gitmemory "github.com/go-git/go-git/v5/storage/memory"
 	"github.com/picatz/deputy/internal/cache/memory"
+	"github.com/picatz/deputy/internal/httputil"
 	"golang.org/x/mod/modfile"
 	"golang.org/x/mod/module"
 )
@@ -56,16 +57,15 @@ type GoProxyClient struct {
 
 // NewGoProxyClient creates a client for fetching Go module metadata.
 // If proxyURL is empty, it defaults to proxy.golang.org.
+// Uses SafeDialer for SSRF protection against DNS rebinding attacks.
 func NewGoProxyClient(proxyURL string) *GoProxyClient {
 	if proxyURL == "" {
 		proxyURL = DefaultGoProxy
 	}
 	return &GoProxyClient{
-		proxyURL: strings.TrimSuffix(proxyURL, "/"),
-		httpClient: &http.Client{
-			Timeout: goProxyTimeout,
-		},
-		cache: memory.NewTTLCache[string, *modfile.File](defaultGoModCacheSize, defaultGoModCacheTTL),
+		proxyURL:   strings.TrimSuffix(proxyURL, "/"),
+		httpClient: httputil.NewSafeClient(goProxyTimeout),
+		cache:      memory.NewTTLCache[string, *modfile.File](defaultGoModCacheSize, defaultGoModCacheTTL),
 	}
 }
 

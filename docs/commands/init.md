@@ -19,11 +19,11 @@ The generated files include extensive comments explaining each option, making it
 
 ## Flags
 
-| Flag | Default | Description |
-|------|---------|-------------|
-| `--force`, `-f` | `false` | Overwrite existing files |
-| `--config-only` | `false` | Only generate the configuration file |
-| `--policy-only` | `false` | Only generate the policy file |
+| Flag | Short | Default | Description |
+| --- | --- | --- | --- |
+| `--force` | `-f` | `false` | Overwrite existing files |
+| `--config-only` | | `false` | Only generate the configuration file |
+| `--policy-only` | | `false` | Only generate the policy file |
 
 ## Examples
 

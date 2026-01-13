@@ -61,6 +61,26 @@ type DockerfileData struct {
 	Analysis *dockerfile.Analysis
 }
 
+// DockerfileInfo returns the parsed Dockerfile information.
+// This method allows inventory.collector to access Dockerfile data
+// without importing the providers package directly.
+func (d *DockerfileData) DockerfileInfo() *dockerfile.Info {
+	if d == nil {
+		return nil
+	}
+	return d.Info
+}
+
+// DockerfileAnalysis returns the Dockerfile static analysis results.
+// This method allows inventory.collector to access Dockerfile data
+// without importing the providers package directly.
+func (d *DockerfileData) DockerfileAnalysis() *dockerfile.Analysis {
+	if d == nil {
+		return nil
+	}
+	return d.Analysis
+}
+
 // isDockerfile returns true if the path looks like a Dockerfile.
 func isDockerfile(path string) bool {
 	// Must be a file, not a directory

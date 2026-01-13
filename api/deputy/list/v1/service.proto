@@ -1,0 +1,107 @@
+syntax = "proto3";
+
+package deputy.list.v1;
+
+import "buf/validate/validate.proto";
+import "deputy/target/v1/target.proto";
+import "deputy/dependency/v1/dependency.proto";
+
+option go_package = "github.com/picatz/deputy/gen/deputy/list/v1;listv1";
+
+// ListService provides dependency enumeration capabilities.
+//
+// Security Model:
+// The same security model as ScanService applies:
+// - In-Process/Local Daemon: Full filesystem access
+// - Remote Server: Only remote-accessible targets (git URLs, registries, PURLs)
+service ListService {
+  // ListPackages enumerates packages in a target.
+  rpc ListPackages(ListPackagesRequest) returns (ListPackagesResponse);
+
+  // ListEcosystems returns supported ecosystems with their file patterns.
+  rpc ListEcosystems(ListEcosystemsRequest) returns (ListEcosystemsResponse);
+}
+
+// ListPackagesRequest specifies what to enumerate.
+message ListPackagesRequest {
+  // Target is the path or URL to enumerate (directory, repository, image).
+  // Maximum length prevents denial-of-service via excessively long strings.
+  string target = 1 [(buf.validate.field).string.max_len = 4096];
+
+  // Options configure listing behavior.
+  ListOptions options = 2;
+}
+
+// ListOptions configure package listing.
+message ListOptions {
+  // OnlyDirect filters to only direct dependencies.
+  bool only_direct = 1;
+
+  // Ecosystems filters to specific ecosystems.
+  // Maximum 50 ecosystems to prevent abuse.
+  repeated string ecosystems = 2 [(buf.validate.field).repeated = {max_items: 50, items: {string: {max_len: 64}}}];
+
+  // IncludeLicenses enriches packages with license information.
+  bool include_licenses = 3;
+
+  // Ref is a Git reference for repository targets.
+  // Maximum length accommodates SHA-256 commit hashes and long branch names.
+  string ref = 4 [(buf.validate.field).string.max_len = 256];
+
+  // Platform specifies target platform for container images.
+  string platform = 5 [(buf.validate.field).string.max_len = 64];
+}
+
+// ListPackagesResponse contains enumerated packages.
+message ListPackagesResponse {
+  // Target describes what was enumerated.
+  deputy.target.v1.Target target = 1;
+
+  // Packages lists all discovered packages.
+  repeated deputy.dependency.v1.Package packages = 2;
+
+  // Stats summarizes the listing.
+  ListStats stats = 3;
+}
+
+// ListStats provides statistics about the listing.
+message ListStats {
+  // TotalPackages is the total count of packages.
+  int32 total_packages = 1 [(buf.validate.field).int32.gte = 0];
+
+  // DirectPackages is the count of direct dependencies.
+  int32 direct_packages = 2 [(buf.validate.field).int32.gte = 0];
+
+  // TransitivePackages is the count of transitive dependencies.
+  int32 transitive_packages = 3 [(buf.validate.field).int32.gte = 0];
+
+  // Ecosystems maps ecosystem names to package counts.
+  map<string, int32> ecosystems = 4;
+}
+
+// ListEcosystemsRequest is empty as no parameters are needed.
+message ListEcosystemsRequest {}
+
+// ListEcosystemsResponse contains supported ecosystems.
+message ListEcosystemsResponse {
+  // Ecosystems lists all supported ecosystems.
+  repeated EcosystemInfo ecosystems = 1;
+}
+
+// EcosystemInfo describes a supported package ecosystem.
+message EcosystemInfo {
+  // Name is the ecosystem identifier (go, npm, pypi, etc.).
+  string name = 1 [(buf.validate.field).string.max_len = 64];
+
+  // DisplayName is a human-readable name.
+  string display_name = 2 [(buf.validate.field).string.max_len = 128];
+
+  // Description provides ecosystem context.
+  string description = 3 [(buf.validate.field).string.max_len = 1024];
+
+  // ManifestFiles lists recognized manifest file names.
+  repeated string manifest_files = 4 [(buf.validate.field).repeated = {max_items: 50, items: {string: {max_len: 256}}}];
+
+  // LockFiles lists recognized lockfile names.
+  repeated string lock_files = 5 [(buf.validate.field).repeated = {max_items: 50, items: {string: {max_len: 256}}}];
+}

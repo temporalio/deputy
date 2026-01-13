@@ -41,12 +41,14 @@
 # Available variables for container_diff_vulnerability:
 #   vulnerability.id            - CVE/GHSA identifier
 #   vulnerability.change_type   - added, removed, fixed, persisted
-#   vulnerability.severity      - CRITICAL, HIGH, MEDIUM, LOW
+#   vulnerability.advisory.severity.level - Severity enum
 #   vulnerability.package       - Affected package name
 #   vulnerability.base_version  - Package version in base image
 #   vulnerability.target_version - Package version in target image
 #   vulnerability.summary       - Vulnerability description
 #   vulnerability.layer_details - Layer where package was introduced
+#
+# Severity constants: severity.critical, severity.high, severity.medium, severity.low
 #
 # Available variables for container_diff_config:
 #   config_changes.user_changed       - Whether USER changed
@@ -70,7 +72,7 @@ policies:
           size(vulnerability_changes) > 0 &&
           vulnerability_changes.exists(v,
             v.change_type == "added" &&
-            v.severity == "CRITICAL"
+            v.advisory.severity.level == severity.critical
           )
         reason: "Container upgrade introduces critical vulnerabilities"
         remediation: "Choose a different target image version or wait for patches"
@@ -139,7 +141,7 @@ policies:
       - action: warn
         when: |
           vulnerability.change_type == "added" &&
-          vulnerability.severity in ["HIGH", "CRITICAL"]
+          vulnerability.advisory.severity.level in [severity.critical, severity.high]
         reason: "New high/critical vulnerability introduced"
         remediation: "Evaluate vulnerability impact and upgrade timeline"
 
@@ -150,7 +152,7 @@ policies:
       - action: deny
         when: |
           vulnerability.change_type == "persisted" &&
-          vulnerability.severity == "CRITICAL"
+          vulnerability.advisory.severity.level == severity.critical
         reason: "Critical vulnerability persists after upgrade"
         remediation: "Upgrade to a version that fixes the critical vulnerability"
 
@@ -162,7 +164,7 @@ policies:
         when: |
           has(vulnerability.layer_details) &&
           vulnerability.layer_details.in_base_image == true &&
-          vulnerability.severity in ["HIGH", "CRITICAL"]
+          vulnerability.advisory.severity.level in [severity.critical, severity.high]
         reason: "High/Critical vulnerability in base image layer"
         remediation: "Update base image to a patched version"
 

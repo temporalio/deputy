@@ -5,5 +5,5 @@ policies:
       - action: deny
         when: env.entrypoint == "diff_dependency_change" &&
           change.type == "downgraded" &&
-          change.ecosystem.lowerAscii() == "go"
+          pkg.ecosystem.lowerAscii() == "go"
         reason: "downgrade detected for Go module"

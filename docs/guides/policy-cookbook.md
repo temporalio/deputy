@@ -112,13 +112,9 @@ flowchart TD
 policies:
   - name: deny-critical-and-high
     description: Deny artifacts with CRITICAL/HIGH vulnerabilities
-    vars:
-      blockedSeverities:
-        - CRITICAL
-        - HIGH
     rules:
       - action: deny
-        when: vulnerabilities.exists(v, blockedSeverities.exists(s, s == v.severity))
+        when: vulnerabilities.exists(v, v.advisory.severity.level in [severity.critical, severity.high])
         reason: dependency has unresolved high-severity vulnerabilities
         remediation: Apply the vendor patch or upgrade to a remediated release
 ```
@@ -132,17 +128,13 @@ policies:
 policies:
   - name: direct-high-fix-block
     description: Block direct dependencies with HIGH/CRITICAL vulns when a fix exists
+    entrypoints: [scan_vulnerability, diff_vulnerability]
     vars:
-      highSeverities:
-        - CRITICAL
-        - HIGH
-      severity: 'vulnerability.?severity.orValue("").upperAscii()'
-      isDirect: 'vulnerability.?isDirect.orValue(false)'
-      hasFix: 'size(vulnerability.?fixedVersions.orValue([])) > 0'
-      inScope: 'env.entrypoint in ["scan_vulnerability", "diff_vulnerability"]'
+      isDirect: 'vulnerability.package.direct'
+      hasFix: 'size(vulnerability.advisory.fixed_versions) > 0'
     rules:
       - action: deny
-        when: inScope && isDirect && hasFix && severity in highSeverities
+        when: isDirect && hasFix && vulnerability.advisory.severity.level in [severity.critical, severity.high]
         reason: Direct dependency has a HIGH/CRITICAL vulnerability with an available fix
         remediation: Upgrade this dependency to a fixed version
 ```
@@ -158,11 +150,11 @@ policies:
     rules:
       - action: deny
         when: |
-          vulnerabilities.exists(v, 
-            v.severity == "CRITICAL" && 
-            v.?hasExploit.orValue(false)
+          vulnerabilities.exists(v,
+            v.advisory.severity.level == severity.critical &&
+            v.in_kev == true
           )
-        reason: critical vulnerability with known exploit
+        reason: critical vulnerability with known exploit (in CISA KEV)
         remediation: Immediate patching required
 ```
 
@@ -261,9 +253,9 @@ policies:
     rules:
       - action: deny
         when: |
-          vulnerabilities.exists(v, 
-            v.id == "CVE-2021-44228" || 
-            v.?aliases.orValue([]).exists(a, a == "CVE-2021-44228")
+          vulnerabilities.exists(v,
+            v.advisory.id == "CVE-2021-44228" ||
+            v.advisory.aliases.exists(a, a == "CVE-2021-44228")
           )
         reason: Log4Shell vulnerability detected
         remediation: Upgrade log4j to 2.17.0+ or remove dependency
@@ -458,7 +450,7 @@ policies:
       - action: deny
         when: |
           env.command == "proxy" &&
-          vulnerabilities.exists(v, v.severity == "CRITICAL")
+          vulnerabilities.exists(v, v.advisory.severity.level == severity.critical)
         reason: critical vulnerability blocked at download
         remediation: Check OSV for remediation guidance
 ```
@@ -552,9 +544,9 @@ policies:
     rules:
       - action: deny
         when: |
-          has(vulnerability.layerDetails) &&
-          vulnerability.layerDetails.inBaseImage == true &&
-          vulnerability.severity == "CRITICAL"
+          has(vulnerability.layer_details) &&
+          vulnerability.layer_details.in_base_image == true &&
+          vulnerability.advisory.severity.level == severity.critical
         reason: "Critical vulnerability in base image"
         remediation: "Update to a patched base image"
 ```
@@ -636,9 +628,9 @@ policies:
 | `image.metadata.layer_count` | int | Number of layers |
 | `image.metadata.size` | int | Size in bytes |
 | `image.history` | []object | Build history entries |
-| `vulnerability.layerDetails.inBaseImage` | bool | If vuln is from base image |
-| `vulnerability.layerDetails.index` | int | Layer position (0=base) |
-| `vulnerability.layerDetails.command` | string | Dockerfile instruction |
+| `vulnerability.layer_details.in_base_image` | bool | If vuln is from base image |
+| `vulnerability.layer_details.index` | int | Layer position (0=base) |
+| `vulnerability.layer_details.command` | string | Dockerfile instruction |
 
 ### Container Helper Functions
 
@@ -684,9 +676,9 @@ $ deputy scan --policy production-bundle.json
 | `pkg.ecosystem` | string | `go`, `npm`, `pypi`, `rubygems` |
 | `pkg.licenses` | []string | SPDX license identifiers (when available) |
 | `vulnerability` | object | Single vulnerability (in `scan_vulnerability` entrypoint) |
-| `vulnerability.severity` | string | Severity level (CRITICAL/HIGH/MEDIUM/LOW) |
-| `vulnerability.isDirect` | bool | Whether the affected package is a direct dependency |
-| `vulnerability.fixedVersions` | []string | Available fix versions |
+| `vulnerability.advisory.severity.level` | enum | Use `severity.critical`, `severity.high`, etc. |
+| `vulnerability.package.direct` | bool | Whether the affected package is a direct dependency |
+| `vulnerability.advisory.fixed_versions` | []string | Available fix versions |
 | `vulnerabilities` | []object | List of vulnerabilities (in `scan_report` entrypoint) |
 | `env.command` | string | `scan`, `diff`, `proxy`, etc. |
 | `env.entrypoint` | string | Current entrypoint (e.g., `scan_vulnerability`) |
@@ -741,24 +733,23 @@ Avoid these anti-patterns when writing CEL policies.
 ### Mistake 1: Missing Optional Handling for External Data Fields
 
 ```yaml
-# WRONG: Will error if fixedVersions field is not present
+# WRONG: Will error if fixed_versions field is not present
 - action: deny
-  when: vulnerability.fixedVersions.size() > 0
+  when: size(vulnerability.advisory.fixed_versions) > 0
   reason: fix available
 ```
 
 ```yaml
 # CORRECT: Use optional chaining with orValue for fields that may not exist
 - action: deny
-  when: vulnerability.?fixedVersions.orValue([]).size() > 0
+  when: size(vulnerability.advisory.?fixed_versions.orValue([])) > 0
   reason: fix available
 ```
 
 **Why:** Objects representing external data (like `vulnerability`, `change`, `jwt`) may not have all fields present. Use `?.orValue()` for fields that may be absent.
 
 **When to use `?.orValue()`:**
-- `vulnerability.?fixedVersions.orValue([])` — not all vulns have fixes
-- `vulnerability.?severity.orValue("")` — severity may be unknown
+- `vulnerability.advisory.?fixed_versions.orValue([])` — not all vulns have fixes
 - `component.?purlType.orValue("")` — SBOM components may lack type
 - `change.?targetVersion.orValue("")` — diff changes may lack target
 - `jwt.?roles.orValue([])` — JWT custom claims are optional
@@ -780,23 +771,23 @@ The `pkg` helper is synthesized by Deputy and always provides sensible defaults,
   reason: copyleft license
 ```
 
-### Mistake 2: Case Sensitivity Issues
+### Mistake 2: Using String Severity Instead of Constants
 
 ```yaml
-# WRONG: Severity values are uppercase
+# WRONG: Using string severity values
 - action: deny
-  when: vulnerability.severity == "critical"
+  when: vulnerability.advisory.severity.level == "CRITICAL"
   reason: critical vulnerability
 ```
 
 ```yaml
-# CORRECT: Use uppercase
+# CORRECT: Use severity constants
 - action: deny
-  when: vulnerability.severity == "CRITICAL"
+  when: vulnerability.advisory.severity.level == severity.critical
   reason: critical vulnerability
 ```
 
-**Why:** Deputy uses uppercase severity strings (`CRITICAL`, `HIGH`, `MEDIUM`, `LOW`). String comparisons are case-sensitive.
+**Why:** Deputy uses severity constants: `severity.critical`, `severity.high`, `severity.medium`, `severity.low`. These are type-safe and work with the enum values.
 
 ### Mistake 3: Forgetting Entrypoint Context
 
@@ -806,7 +797,7 @@ policies:
   - name: check-vuln
     rules:
       - action: deny
-        when: vulnerability.severity == "CRITICAL"
+        when: vulnerability.advisory.severity.level == severity.critical
 ```
 
 ```yaml
@@ -816,14 +807,14 @@ policies:
     entrypoints: ["scan_vulnerability", "diff_vulnerability"]
     rules:
       - action: deny
-        when: vulnerability.severity == "CRITICAL"
+        when: vulnerability.advisory.severity.level == severity.critical
 
 # OR use env check in the rule:
 policies:
   - name: check-vuln
     rules:
       - action: deny
-        when: env.entrypoint == "scan_vulnerability" && vulnerability.severity == "CRITICAL"
+        when: env.entrypoint == "scan_vulnerability" && vulnerability.advisory.severity.level == severity.critical
 ```
 
 **Why:** Different entrypoints populate different variables. The `vulnerability` (singular) object is only available in per-vulnerability entrypoints like `scan_vulnerability`. Use `vulnerabilities` (list) with `.exists()` in report-level entrypoints like `scan_report`.
@@ -835,7 +826,7 @@ policies:
 policies:
   - name: bad-order
     vars:
-      filtered: 'all.filter(x, x.severity == "HIGH")'  # 'all' not defined yet!
+      filtered: 'all.filter(x, x.advisory.severity.level == severity.high)'  # 'all' not defined yet!
       all: 'vulnerabilities'
     rules:
       - action: deny
@@ -848,7 +839,7 @@ policies:
   - name: good-order
     vars:
       all: 'vulnerabilities'
-      filtered: 'all.filter(x, x.severity == "HIGH")'  # 'all' is now available
+      filtered: 'all.filter(x, x.advisory.severity.level == severity.high)'  # 'all' is now available
     rules:
       - action: deny
         when: size(filtered) > 0
@@ -909,19 +900,19 @@ policies:
 ```yaml
 # WRONG: Returns true when no vulnerabilities exist (vacuous truth)
 - action: allow
-  when: vulnerabilities.all(v, v.severity != "CRITICAL")
+  when: vulnerabilities.all(v, v.advisory.severity.level != severity.critical)
   reason: no critical vulnerabilities
 ```
 
 ```yaml
 # CORRECT: Check for non-empty list first
 - action: allow
-  when: size(vulnerabilities) > 0 && vulnerabilities.all(v, v.severity != "CRITICAL")
+  when: size(vulnerabilities) > 0 && vulnerabilities.all(v, v.advisory.severity.level != severity.critical)
   reason: no critical vulnerabilities in non-empty scan
 
 # BETTER: Use exists() for deny rules (handles empty lists correctly)
 - action: deny
-  when: vulnerabilities.exists(v, v.severity == "CRITICAL")
+  when: vulnerabilities.exists(v, v.advisory.severity.level == severity.critical)
   reason: critical vulnerability found
 ```
 

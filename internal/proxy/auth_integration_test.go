@@ -318,10 +318,11 @@ func TestAuthIntegration_JWKSRefresh(t *testing.T) {
 	defer jwksServer.Close()
 
 	// Create JWKS cache with short refresh interval for testing
+	// Use testHTTPClient to bypass SafeDialer which blocks localhost in production
 	cache, err := NewJWKSCache(&JWKSConfig{
 		URL:             jwksServer.URL,
 		RefreshInterval: 100 * time.Millisecond,
-	})
+	}, WithJWKSHTTPClient(&http.Client{Timeout: 30 * time.Second}))
 	if err != nil {
 		t.Fatalf("failed to create JWKS cache: %v", err)
 	}

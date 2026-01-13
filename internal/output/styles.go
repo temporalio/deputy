@@ -15,6 +15,8 @@ type Styles struct {
 	Upgraded    func(string) string
 	Removed     func(string) string
 	Symbol      func(string) string
+	Direct      func(string) string
+	Indirect    func(string) string
 }
 
 // UIStyles returns styles backed by the internal/ui lipgloss palette.
@@ -33,6 +35,8 @@ func UIStyles() Styles {
 		Upgraded:    wrap(ui.StyleUpgraded.Render),
 		Removed:     wrap(ui.StyleRemoved.Render),
 		Symbol:      wrap(ui.StyleSymbol.Render),
+		Direct:      wrap(ui.StyleDirect.Render),
+		Indirect:    wrap(ui.StyleIndirect.Render),
 	}
 }
 
@@ -50,5 +54,7 @@ func PlainStyles() Styles {
 		Upgraded:    id,
 		Removed:     id,
 		Symbol:      id,
+		Direct:      id,
+		Indirect:    id,
 	}
 }

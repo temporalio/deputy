@@ -11,12 +11,13 @@ import (
 	pathpkg "path"
 
 	"github.com/charmbracelet/lipgloss"
-	"github.com/picatz/deputy/internal/dependency"
+	containerv1 "github.com/picatz/deputy/gen/deputy/container/v1"
+	vulnerabilityv1 "github.com/picatz/deputy/gen/deputy/vulnerability/v1"
 	"github.com/picatz/deputy/internal/dependency/graph"
 	"github.com/picatz/deputy/internal/output"
 	"github.com/picatz/deputy/internal/remediation"
 	"github.com/picatz/deputy/internal/report"
-	"github.com/picatz/deputy/internal/scan"
+	"github.com/picatz/deputy/internal/scanning"
 	ui "github.com/picatz/deputy/internal/ui"
 	"github.com/picatz/deputy/internal/vulnerability"
 )
@@ -39,12 +40,12 @@ func resolveVulnerabilityDisplayOptions(opts []VulnerabilityDisplayOptions) Vuln
 }
 
 // DisplayVulnerabilities writes a styled vulnerability report to w with the default heading.
-func DisplayVulnerabilities(w io.Writer, result scan.Result, opts ...VulnerabilityDisplayOptions) {
+func DisplayVulnerabilities(w io.Writer, result scanning.Result, opts ...VulnerabilityDisplayOptions) {
 	DisplayVulnerabilitiesWithHeader(w, result, "Vulnerabilities Found:", opts...)
 }
 
 // DisplayVulnerabilitiesWithHeader writes a styled vulnerability report to w using the provided heading.
-func DisplayVulnerabilitiesWithHeader(w io.Writer, result scan.Result, heading string, opts ...VulnerabilityDisplayOptions) {
+func DisplayVulnerabilitiesWithHeader(w io.Writer, result scanning.Result, heading string, opts ...VulnerabilityDisplayOptions) {
 	displayOpts := resolveVulnerabilityDisplayOptions(opts)
 	cons := vulnerability.Consolidate(result.Findings, result.Advisories)
 	if len(cons) == 0 {
@@ -95,10 +96,10 @@ func VulnerabilityList(w io.Writer, cons []vulnerability.Consolidated, opts Vuln
 			return v.IsDirect
 		})
 		depType := "[indirect]"
-		depStyle := output.StyleVersion
+		depStyle := output.StyleIndirect
 		if hasDirect {
 			depType = "[direct]"
-			depStyle = output.StyleUpgraded
+			depStyle = output.StyleDirect
 		}
 		{
 			var doc output.Doc
@@ -195,7 +196,7 @@ func VulnerabilityList(w io.Writer, cons []vulnerability.Consolidated, opts Vuln
 
 // VulnerabilitySummaryAndActions writes the summary and recommended
 // actions for a set of vulnerabilities without reprinting the list header.
-func VulnerabilitySummaryAndActions(w io.Writer, cons []vulnerability.Consolidated, stats vulnerability.Stats, opts ...VulnerabilityDisplayOptions) {
+func VulnerabilitySummaryAndActions(w io.Writer, cons []vulnerability.Consolidated, stats vulnerabilityv1.Stats, opts ...VulnerabilityDisplayOptions) {
 	displayOpts := resolveVulnerabilityDisplayOptions(opts)
 	summary := report.BuildSummary(cons, stats)
 	if !summary.HasVulnerabilities {
@@ -301,7 +302,7 @@ func renderManifestContext(w io.Writer, list []vulnerability.Consolidated) {
 
 // formatLayerTag returns a concise layer context tag for container vulnerability display.
 // Examples: "[BASE layer 0]", "[layer 5]", "[APP layer 12]"
-func formatLayerTag(ld *dependency.LayerDetails) string {
+func formatLayerTag(ld *containerv1.LayerDetails) string {
 	if ld == nil {
 		return ""
 	}

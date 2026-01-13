@@ -2,40 +2,42 @@ package dependency
 
 import (
 	"testing"
+
+	dependencyv1 "github.com/picatz/deputy/gen/deputy/dependency/v1"
 )
 
 func TestMergeManifestRef(t *testing.T) {
 	tests := []struct {
 		name     string
-		existing []ManifestRef
-		ref      ManifestRef
+		existing []dependencyv1.ManifestRef
+		ref      dependencyv1.ManifestRef
 		wantLen  int
-		check    func(t *testing.T, result []ManifestRef)
+		check    func(t *testing.T, result []dependencyv1.ManifestRef)
 	}{
 		{
 			name:     "empty path returns existing",
-			existing: []ManifestRef{{Path: "go.mod", Manager: "go"}},
-			ref:      ManifestRef{Path: "", Manager: "go"},
+			existing: []dependencyv1.ManifestRef{{Path: "go.mod", Manager: "go"}},
+			ref:      dependencyv1.ManifestRef{Path: "", Manager: "go"},
 			wantLen:  1,
 		},
 		{
 			name:     "empty manager returns existing",
-			existing: []ManifestRef{{Path: "go.mod", Manager: "go"}},
-			ref:      ManifestRef{Path: "go.mod", Manager: ""},
+			existing: []dependencyv1.ManifestRef{{Path: "go.mod", Manager: "go"}},
+			ref:      dependencyv1.ManifestRef{Path: "go.mod", Manager: ""},
 			wantLen:  1,
 		},
 		{
 			name:     "new ref appended",
-			existing: []ManifestRef{{Path: "go.mod", Manager: "go"}},
-			ref:      ManifestRef{Path: "package.json", Manager: "npm"},
+			existing: []dependencyv1.ManifestRef{{Path: "go.mod", Manager: "go"}},
+			ref:      dependencyv1.ManifestRef{Path: "package.json", Manager: "npm"},
 			wantLen:  2,
 		},
 		{
 			name:     "duplicate merges groups",
-			existing: []ManifestRef{{Path: "go.mod", Manager: "go", Groups: []string{"direct"}}},
-			ref:      ManifestRef{Path: "go.mod", Manager: "go", Groups: []string{"test"}},
+			existing: []dependencyv1.ManifestRef{{Path: "go.mod", Manager: "go", Groups: []string{"direct"}}},
+			ref:      dependencyv1.ManifestRef{Path: "go.mod", Manager: "go", Groups: []string{"test"}},
 			wantLen:  1,
-			check: func(t *testing.T, result []ManifestRef) {
+			check: func(t *testing.T, result []dependencyv1.ManifestRef) {
 				if len(result[0].Groups) != 2 {
 					t.Errorf("Groups len = %d, want 2", len(result[0].Groups))
 				}
@@ -44,7 +46,7 @@ func TestMergeManifestRef(t *testing.T) {
 		{
 			name:     "nil existing creates new slice",
 			existing: nil,
-			ref:      ManifestRef{Path: "go.mod", Manager: "go"},
+			ref:      dependencyv1.ManifestRef{Path: "go.mod", Manager: "go"},
 			wantLen:  1,
 		},
 	}
@@ -65,13 +67,13 @@ func TestMergeManifestRef(t *testing.T) {
 func TestSortAndUniqueManifestRefs(t *testing.T) {
 	tests := []struct {
 		name    string
-		refs    []ManifestRef
+		refs    []dependencyv1.ManifestRef
 		wantLen int
-		check   func(t *testing.T, result []ManifestRef)
+		check   func(t *testing.T, result []dependencyv1.ManifestRef)
 	}{
 		{
 			name:    "empty slice",
-			refs:    []ManifestRef{},
+			refs:    []dependencyv1.ManifestRef{},
 			wantLen: 0,
 		},
 		{
@@ -81,7 +83,7 @@ func TestSortAndUniqueManifestRefs(t *testing.T) {
 		},
 		{
 			name: "removes duplicates",
-			refs: []ManifestRef{
+			refs: []dependencyv1.ManifestRef{
 				{Path: "go.mod", Manager: "go"},
 				{Path: "go.mod", Manager: "go"},
 			},
@@ -89,12 +91,12 @@ func TestSortAndUniqueManifestRefs(t *testing.T) {
 		},
 		{
 			name: "merges groups on duplicate",
-			refs: []ManifestRef{
+			refs: []dependencyv1.ManifestRef{
 				{Path: "go.mod", Manager: "go", Groups: []string{"direct"}},
 				{Path: "go.mod", Manager: "go", Groups: []string{"test"}},
 			},
 			wantLen: 1,
-			check: func(t *testing.T, result []ManifestRef) {
+			check: func(t *testing.T, result []dependencyv1.ManifestRef) {
 				if len(result[0].Groups) != 2 {
 					t.Errorf("Groups len = %d, want 2", len(result[0].Groups))
 				}
@@ -102,13 +104,13 @@ func TestSortAndUniqueManifestRefs(t *testing.T) {
 		},
 		{
 			name: "sorts by manager then path",
-			refs: []ManifestRef{
+			refs: []dependencyv1.ManifestRef{
 				{Path: "package.json", Manager: "npm"},
 				{Path: "go.mod", Manager: "go"},
 				{Path: "Gemfile", Manager: "bundler"},
 			},
 			wantLen: 3,
-			check: func(t *testing.T, result []ManifestRef) {
+			check: func(t *testing.T, result []dependencyv1.ManifestRef) {
 				if result[0].Manager != "bundler" {
 					t.Errorf("first manager = %q, want bundler", result[0].Manager)
 				}

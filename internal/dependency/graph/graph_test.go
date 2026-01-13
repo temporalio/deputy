@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/google/osv-scalibr/extractor"
+	vulnerabilityv1 "github.com/picatz/deputy/gen/deputy/vulnerability/v1"
 	"github.com/picatz/deputy/internal/dependency"
 	"github.com/picatz/deputy/internal/vulnerability"
 )
@@ -25,7 +26,7 @@ func TestNew(t *testing.T) {
 func TestAddNode(t *testing.T) {
 	g := New()
 	g.AddNode(&Node{
-		PURL:    "pkg:npm/lodash@4.17.21",
+		Purl:    "pkg:npm/lodash@4.17.21",
 		Name:    "lodash",
 		Version: "4.17.21",
 		Direct:  true,
@@ -46,8 +47,8 @@ func TestAddNode(t *testing.T) {
 
 func TestAddEdge(t *testing.T) {
 	g := New()
-	g.AddNode(&Node{PURL: "pkg:npm/a@1.0.0", Name: "a", Direct: true})
-	g.AddNode(&Node{PURL: "pkg:npm/b@1.0.0", Name: "b"})
+	g.AddNode(&Node{Purl: "pkg:npm/a@1.0.0", Name: "a", Direct: true})
+	g.AddNode(&Node{Purl: "pkg:npm/b@1.0.0", Name: "b"})
 	g.AddEdge(&Edge{From: "pkg:npm/a@1.0.0", To: "pkg:npm/b@1.0.0"})
 
 	edgeCount := 0
@@ -79,9 +80,9 @@ func TestFromInventory(t *testing.T) {
 
 func TestRoots(t *testing.T) {
 	g := New()
-	g.AddNode(&Node{PURL: "pkg:npm/a@1.0.0", Name: "a", Direct: true})
-	g.AddNode(&Node{PURL: "pkg:npm/b@1.0.0", Name: "b", Direct: true})
-	g.AddNode(&Node{PURL: "pkg:npm/c@1.0.0", Name: "c", Direct: false})
+	g.AddNode(&Node{Purl: "pkg:npm/a@1.0.0", Name: "a", Direct: true})
+	g.AddNode(&Node{Purl: "pkg:npm/b@1.0.0", Name: "b", Direct: true})
+	g.AddNode(&Node{Purl: "pkg:npm/c@1.0.0", Name: "c", Direct: false})
 
 	rootCount := 0
 	for range g.Roots() {
@@ -94,9 +95,9 @@ func TestRoots(t *testing.T) {
 
 func TestDirectAndTransitive(t *testing.T) {
 	g := New()
-	g.AddNode(&Node{PURL: "pkg:npm/a@1.0.0", Name: "a", Direct: true})
-	g.AddNode(&Node{PURL: "pkg:npm/b@1.0.0", Name: "b", Direct: false})
-	g.AddNode(&Node{PURL: "pkg:npm/c@1.0.0", Name: "c", Direct: false})
+	g.AddNode(&Node{Purl: "pkg:npm/a@1.0.0", Name: "a", Direct: true})
+	g.AddNode(&Node{Purl: "pkg:npm/b@1.0.0", Name: "b", Direct: false})
+	g.AddNode(&Node{Purl: "pkg:npm/c@1.0.0", Name: "c", Direct: false})
 
 	directCount := 0
 	for range g.Direct() {
@@ -117,9 +118,9 @@ func TestDirectAndTransitive(t *testing.T) {
 
 func TestChildrenAndParents(t *testing.T) {
 	g := New()
-	g.AddNode(&Node{PURL: "pkg:npm/a@1.0.0", Name: "a", Direct: true})
-	g.AddNode(&Node{PURL: "pkg:npm/b@1.0.0", Name: "b"})
-	g.AddNode(&Node{PURL: "pkg:npm/c@1.0.0", Name: "c"})
+	g.AddNode(&Node{Purl: "pkg:npm/a@1.0.0", Name: "a", Direct: true})
+	g.AddNode(&Node{Purl: "pkg:npm/b@1.0.0", Name: "b"})
+	g.AddNode(&Node{Purl: "pkg:npm/c@1.0.0", Name: "c"})
 	g.AddEdge(&Edge{From: "pkg:npm/a@1.0.0", To: "pkg:npm/b@1.0.0"})
 	g.AddEdge(&Edge{From: "pkg:npm/a@1.0.0", To: "pkg:npm/c@1.0.0"})
 
@@ -144,10 +145,10 @@ func TestChildrenAndParents(t *testing.T) {
 
 func TestDescendants(t *testing.T) {
 	g := New()
-	g.AddNode(&Node{PURL: "pkg:npm/a@1.0.0", Name: "a", Direct: true})
-	g.AddNode(&Node{PURL: "pkg:npm/b@1.0.0", Name: "b"})
-	g.AddNode(&Node{PURL: "pkg:npm/c@1.0.0", Name: "c"})
-	g.AddNode(&Node{PURL: "pkg:npm/d@1.0.0", Name: "d"})
+	g.AddNode(&Node{Purl: "pkg:npm/a@1.0.0", Name: "a", Direct: true})
+	g.AddNode(&Node{Purl: "pkg:npm/b@1.0.0", Name: "b"})
+	g.AddNode(&Node{Purl: "pkg:npm/c@1.0.0", Name: "c"})
+	g.AddNode(&Node{Purl: "pkg:npm/d@1.0.0", Name: "d"})
 	g.AddEdge(&Edge{From: "pkg:npm/a@1.0.0", To: "pkg:npm/b@1.0.0"})
 	g.AddEdge(&Edge{From: "pkg:npm/b@1.0.0", To: "pkg:npm/c@1.0.0"})
 	g.AddEdge(&Edge{From: "pkg:npm/c@1.0.0", To: "pkg:npm/d@1.0.0"})
@@ -163,9 +164,9 @@ func TestDescendants(t *testing.T) {
 
 func TestAncestors(t *testing.T) {
 	g := New()
-	g.AddNode(&Node{PURL: "pkg:npm/a@1.0.0", Name: "a", Direct: true})
-	g.AddNode(&Node{PURL: "pkg:npm/b@1.0.0", Name: "b"})
-	g.AddNode(&Node{PURL: "pkg:npm/c@1.0.0", Name: "c"})
+	g.AddNode(&Node{Purl: "pkg:npm/a@1.0.0", Name: "a", Direct: true})
+	g.AddNode(&Node{Purl: "pkg:npm/b@1.0.0", Name: "b"})
+	g.AddNode(&Node{Purl: "pkg:npm/c@1.0.0", Name: "c"})
 	g.AddEdge(&Edge{From: "pkg:npm/a@1.0.0", To: "pkg:npm/b@1.0.0"})
 	g.AddEdge(&Edge{From: "pkg:npm/b@1.0.0", To: "pkg:npm/c@1.0.0"})
 
@@ -180,9 +181,9 @@ func TestAncestors(t *testing.T) {
 
 func TestPathsTo(t *testing.T) {
 	g := New()
-	g.AddNode(&Node{PURL: "pkg:npm/a@1.0.0", Name: "a", Direct: true})
-	g.AddNode(&Node{PURL: "pkg:npm/b@1.0.0", Name: "b"})
-	g.AddNode(&Node{PURL: "pkg:npm/c@1.0.0", Name: "c"})
+	g.AddNode(&Node{Purl: "pkg:npm/a@1.0.0", Name: "a", Direct: true})
+	g.AddNode(&Node{Purl: "pkg:npm/b@1.0.0", Name: "b"})
+	g.AddNode(&Node{Purl: "pkg:npm/c@1.0.0", Name: "c"})
 	g.AddEdge(&Edge{From: "pkg:npm/a@1.0.0", To: "pkg:npm/b@1.0.0"})
 	g.AddEdge(&Edge{From: "pkg:npm/b@1.0.0", To: "pkg:npm/c@1.0.0"})
 
@@ -204,7 +205,7 @@ func TestPathsTo(t *testing.T) {
 
 func TestPathsToDirectDep(t *testing.T) {
 	g := New()
-	g.AddNode(&Node{PURL: "pkg:npm/a@1.0.0", Name: "a", Direct: true})
+	g.AddNode(&Node{Purl: "pkg:npm/a@1.0.0", Name: "a", Direct: true})
 
 	paths := g.PathsTo("pkg:npm/a@1.0.0")
 	if len(paths) != 1 {
@@ -221,10 +222,10 @@ func TestPathsToWithCycle(t *testing.T) {
 	// Graph: a -> b -> c -> b (cycle back to b)
 	//                  \-> d (target)
 	g := New()
-	g.AddNode(&Node{PURL: "pkg:npm/a@1.0.0", Name: "a", Direct: true})
-	g.AddNode(&Node{PURL: "pkg:npm/b@1.0.0", Name: "b"})
-	g.AddNode(&Node{PURL: "pkg:npm/c@1.0.0", Name: "c"})
-	g.AddNode(&Node{PURL: "pkg:npm/d@1.0.0", Name: "d"})
+	g.AddNode(&Node{Purl: "pkg:npm/a@1.0.0", Name: "a", Direct: true})
+	g.AddNode(&Node{Purl: "pkg:npm/b@1.0.0", Name: "b"})
+	g.AddNode(&Node{Purl: "pkg:npm/c@1.0.0", Name: "c"})
+	g.AddNode(&Node{Purl: "pkg:npm/d@1.0.0", Name: "d"})
 
 	g.AddEdge(&Edge{From: "pkg:npm/a@1.0.0", To: "pkg:npm/b@1.0.0"})
 	g.AddEdge(&Edge{From: "pkg:npm/b@1.0.0", To: "pkg:npm/c@1.0.0"})
@@ -253,8 +254,8 @@ func TestPathsToWithCycle(t *testing.T) {
 func TestPathsToWithSelfCycle(t *testing.T) {
 	// Test self-referential cycle: a -> b -> b (self-cycle)
 	g := New()
-	g.AddNode(&Node{PURL: "pkg:npm/a@1.0.0", Name: "a", Direct: true})
-	g.AddNode(&Node{PURL: "pkg:npm/b@1.0.0", Name: "b"})
+	g.AddNode(&Node{Purl: "pkg:npm/a@1.0.0", Name: "a", Direct: true})
+	g.AddNode(&Node{Purl: "pkg:npm/b@1.0.0", Name: "b"})
 
 	g.AddEdge(&Edge{From: "pkg:npm/a@1.0.0", To: "pkg:npm/b@1.0.0"})
 	g.AddEdge(&Edge{From: "pkg:npm/b@1.0.0", To: "pkg:npm/b@1.0.0"}) // Self-cycle
@@ -281,10 +282,10 @@ func TestPathsToWithDiamondAndCycle(t *testing.T) {
 	//    \ /
 	//     d -> b (creates cycle through diamond)
 	g := New()
-	g.AddNode(&Node{PURL: "pkg:npm/a@1.0.0", Name: "a", Direct: true})
-	g.AddNode(&Node{PURL: "pkg:npm/b@1.0.0", Name: "b"})
-	g.AddNode(&Node{PURL: "pkg:npm/c@1.0.0", Name: "c"})
-	g.AddNode(&Node{PURL: "pkg:npm/d@1.0.0", Name: "d"})
+	g.AddNode(&Node{Purl: "pkg:npm/a@1.0.0", Name: "a", Direct: true})
+	g.AddNode(&Node{Purl: "pkg:npm/b@1.0.0", Name: "b"})
+	g.AddNode(&Node{Purl: "pkg:npm/c@1.0.0", Name: "c"})
+	g.AddNode(&Node{Purl: "pkg:npm/d@1.0.0", Name: "d"})
 
 	g.AddEdge(&Edge{From: "pkg:npm/a@1.0.0", To: "pkg:npm/b@1.0.0"})
 	g.AddEdge(&Edge{From: "pkg:npm/a@1.0.0", To: "pkg:npm/c@1.0.0"})
@@ -302,10 +303,10 @@ func TestPathsToWithDiamondAndCycle(t *testing.T) {
 	for _, path := range paths {
 		seen := make(map[string]bool)
 		for _, node := range path {
-			if seen[node.PURL] {
-				t.Errorf("path %s contains duplicate node %s (cycle not detected)", path.String(), node.PURL)
+			if seen[node.Purl] {
+				t.Errorf("path %s contains duplicate node %s (cycle not detected)", path.String(), node.Purl)
 			}
-			seen[node.PURL] = true
+			seen[node.Purl] = true
 		}
 	}
 }
@@ -314,9 +315,9 @@ func TestPathsToInCyclicGraph(t *testing.T) {
 	// Fully cyclic graph where target is part of the cycle
 	// a -> b -> c -> a (target is b, which is part of cycle)
 	g := New()
-	g.AddNode(&Node{PURL: "pkg:npm/a@1.0.0", Name: "a", Direct: true})
-	g.AddNode(&Node{PURL: "pkg:npm/b@1.0.0", Name: "b"})
-	g.AddNode(&Node{PURL: "pkg:npm/c@1.0.0", Name: "c"})
+	g.AddNode(&Node{Purl: "pkg:npm/a@1.0.0", Name: "a", Direct: true})
+	g.AddNode(&Node{Purl: "pkg:npm/b@1.0.0", Name: "b"})
+	g.AddNode(&Node{Purl: "pkg:npm/c@1.0.0", Name: "c"})
 
 	g.AddEdge(&Edge{From: "pkg:npm/a@1.0.0", To: "pkg:npm/b@1.0.0"})
 	g.AddEdge(&Edge{From: "pkg:npm/b@1.0.0", To: "pkg:npm/c@1.0.0"})
@@ -337,9 +338,9 @@ func TestPathsToInCyclicGraph(t *testing.T) {
 
 func TestPathsBetween(t *testing.T) {
 	g := New()
-	g.AddNode(&Node{PURL: "pkg:npm/a@1.0.0", Name: "a", Direct: true})
-	g.AddNode(&Node{PURL: "pkg:npm/b@1.0.0", Name: "b"})
-	g.AddNode(&Node{PURL: "pkg:npm/c@1.0.0", Name: "c"})
+	g.AddNode(&Node{Purl: "pkg:npm/a@1.0.0", Name: "a", Direct: true})
+	g.AddNode(&Node{Purl: "pkg:npm/b@1.0.0", Name: "b"})
+	g.AddNode(&Node{Purl: "pkg:npm/c@1.0.0", Name: "c"})
 	g.AddEdge(&Edge{From: "pkg:npm/a@1.0.0", To: "pkg:npm/b@1.0.0"})
 	g.AddEdge(&Edge{From: "pkg:npm/b@1.0.0", To: "pkg:npm/c@1.0.0"})
 	g.AddEdge(&Edge{From: "pkg:npm/a@1.0.0", To: "pkg:npm/c@1.0.0"}) // Direct path too
@@ -354,9 +355,9 @@ func TestPathsBetweenWithCycle(t *testing.T) {
 	// Test PathsBetween with cycle in the graph
 	// a -> b -> c -> b (cycle), also a -> c directly
 	g := New()
-	g.AddNode(&Node{PURL: "pkg:npm/a@1.0.0", Name: "a", Direct: true})
-	g.AddNode(&Node{PURL: "pkg:npm/b@1.0.0", Name: "b"})
-	g.AddNode(&Node{PURL: "pkg:npm/c@1.0.0", Name: "c"})
+	g.AddNode(&Node{Purl: "pkg:npm/a@1.0.0", Name: "a", Direct: true})
+	g.AddNode(&Node{Purl: "pkg:npm/b@1.0.0", Name: "b"})
+	g.AddNode(&Node{Purl: "pkg:npm/c@1.0.0", Name: "c"})
 
 	g.AddEdge(&Edge{From: "pkg:npm/a@1.0.0", To: "pkg:npm/b@1.0.0"})
 	g.AddEdge(&Edge{From: "pkg:npm/a@1.0.0", To: "pkg:npm/c@1.0.0"})
@@ -373,19 +374,19 @@ func TestPathsBetweenWithCycle(t *testing.T) {
 	for _, path := range paths {
 		seen := make(map[string]bool)
 		for _, node := range path {
-			if seen[node.PURL] {
-				t.Errorf("path %s contains duplicate node %s", path.String(), node.PURL)
+			if seen[node.Purl] {
+				t.Errorf("path %s contains duplicate node %s", path.String(), node.Purl)
 			}
-			seen[node.PURL] = true
+			seen[node.Purl] = true
 		}
 	}
 }
 
 func TestStats(t *testing.T) {
 	g := New()
-	g.AddNode(&Node{PURL: "pkg:npm/a@1.0.0", Name: "a", Direct: true, Depth: 0, Ecosystem: "npm"})
-	g.AddNode(&Node{PURL: "pkg:npm/b@1.0.0", Name: "b", Depth: 1, Ecosystem: "npm"})
-	g.AddNode(&Node{PURL: "pkg:go/c@1.0.0", Name: "c", Depth: 2, Ecosystem: "go", VulnCount: VulnCount{Total: 1}})
+	g.AddNode(&Node{Purl: "pkg:npm/a@1.0.0", Name: "a", Direct: true, Depth: 0, Ecosystem: "npm"})
+	g.AddNode(&Node{Purl: "pkg:npm/b@1.0.0", Name: "b", Depth: 1, Ecosystem: "npm"})
+	g.AddNode(&Node{Purl: "pkg:go/c@1.0.0", Name: "c", Depth: 2, Ecosystem: "go", VulnerabilityCount: &VulnerabilityCount{Total: 1}})
 
 	stats := g.Stats()
 
@@ -411,9 +412,9 @@ func TestStats(t *testing.T) {
 
 func TestVulnerableNodes(t *testing.T) {
 	g := New()
-	g.AddNode(&Node{PURL: "pkg:npm/a@1.0.0", Name: "a", VulnCount: VulnCount{Total: 0}})
-	g.AddNode(&Node{PURL: "pkg:npm/b@1.0.0", Name: "b", VulnCount: VulnCount{Total: 2, High: 2}})
-	g.AddNode(&Node{PURL: "pkg:npm/c@1.0.0", Name: "c", VulnCount: VulnCount{Total: 1, Critical: 1}})
+	g.AddNode(&Node{Purl: "pkg:npm/a@1.0.0", Name: "a", VulnerabilityCount: &VulnerabilityCount{Total: 0}})
+	g.AddNode(&Node{Purl: "pkg:npm/b@1.0.0", Name: "b", VulnerabilityCount: &VulnerabilityCount{Total: 2, High: 2}})
+	g.AddNode(&Node{Purl: "pkg:npm/c@1.0.0", Name: "c", VulnerabilityCount: &VulnerabilityCount{Total: 1, Critical: 1}})
 
 	vulnCount := 0
 	for range g.VulnerableNodes() {
@@ -426,7 +427,7 @@ func TestVulnerableNodes(t *testing.T) {
 
 func TestAnnotateVulns(t *testing.T) {
 	g := New()
-	g.AddNode(&Node{PURL: "pkg:npm/lodash@4.17.20", Name: "lodash"})
+	g.AddNode(&Node{Purl: "pkg:npm/lodash@4.17.20", Name: "lodash"})
 
 	findings := []vulnerability.Finding{
 		{
@@ -434,9 +435,9 @@ func TestAnnotateVulns(t *testing.T) {
 			Dependency: dependency.ID{PURL: "pkg:npm/lodash@4.17.20"},
 		},
 	}
-	advisories := map[string]vulnerability.Advisory{
+	advisories := map[string]*vulnerabilityv1.Advisory{
 		"CVE-2021-23337": {
-			ID:       "CVE-2021-23337",
+			Id:       "CVE-2021-23337",
 			Severity: vulnerability.NewSeverity("HIGH", "GHSA"),
 		},
 	}
@@ -444,25 +445,25 @@ func TestAnnotateVulns(t *testing.T) {
 	g.AnnotateVulns(findings, advisories)
 
 	n := g.Node("pkg:npm/lodash@4.17.20")
-	if n.VulnCount.Total != 1 {
-		t.Errorf("expected 1 vuln, got %d", n.VulnCount.Total)
+	if n.VulnerabilityCount.Total != 1 {
+		t.Errorf("expected 1 vuln, got %d", n.VulnerabilityCount.Total)
 	}
-	if n.VulnCount.High != 1 {
-		t.Errorf("expected 1 high, got %d", n.VulnCount.High)
+	if n.VulnerabilityCount.High != 1 {
+		t.Errorf("expected 1 high, got %d", n.VulnerabilityCount.High)
 	}
 }
 
 func TestFilter(t *testing.T) {
 	g := New()
-	g.AddNode(&Node{PURL: "pkg:npm/a@1.0.0", Name: "a", Direct: true})
-	g.AddNode(&Node{PURL: "pkg:npm/b@1.0.0", Name: "b", VulnCount: VulnCount{Total: 1}})
-	g.AddNode(&Node{PURL: "pkg:npm/c@1.0.0", Name: "c"})
+	g.AddNode(&Node{Purl: "pkg:npm/a@1.0.0", Name: "a", Direct: true})
+	g.AddNode(&Node{Purl: "pkg:npm/b@1.0.0", Name: "b", VulnerabilityCount: &VulnerabilityCount{Total: 1}})
+	g.AddNode(&Node{Purl: "pkg:npm/c@1.0.0", Name: "c"})
 	g.AddEdge(&Edge{From: "pkg:npm/a@1.0.0", To: "pkg:npm/b@1.0.0"})
 	g.AddEdge(&Edge{From: "pkg:npm/a@1.0.0", To: "pkg:npm/c@1.0.0"})
 
 	// Filter to only vulnerable nodes
 	filtered := g.Filter(func(n *Node) bool {
-		return n.VulnCount.Total > 0 || n.Direct
+		return n.GetVulnerabilityCount().GetTotal() > 0 || n.Direct
 	})
 
 	if filtered.Size() != 2 {
@@ -472,10 +473,10 @@ func TestFilter(t *testing.T) {
 
 func TestSubgraph(t *testing.T) {
 	g := New()
-	g.AddNode(&Node{PURL: "pkg:npm/a@1.0.0", Name: "a", Direct: true})
-	g.AddNode(&Node{PURL: "pkg:npm/b@1.0.0", Name: "b"})
-	g.AddNode(&Node{PURL: "pkg:npm/c@1.0.0", Name: "c"})
-	g.AddNode(&Node{PURL: "pkg:npm/d@1.0.0", Name: "d"})
+	g.AddNode(&Node{Purl: "pkg:npm/a@1.0.0", Name: "a", Direct: true})
+	g.AddNode(&Node{Purl: "pkg:npm/b@1.0.0", Name: "b"})
+	g.AddNode(&Node{Purl: "pkg:npm/c@1.0.0", Name: "c"})
+	g.AddNode(&Node{Purl: "pkg:npm/d@1.0.0", Name: "d"})
 	g.AddEdge(&Edge{From: "pkg:npm/a@1.0.0", To: "pkg:npm/b@1.0.0"})
 	g.AddEdge(&Edge{From: "pkg:npm/b@1.0.0", To: "pkg:npm/c@1.0.0"})
 	g.AddEdge(&Edge{From: "pkg:npm/a@1.0.0", To: "pkg:npm/d@1.0.0"})
@@ -495,8 +496,8 @@ func TestSubgraph(t *testing.T) {
 
 func TestClone(t *testing.T) {
 	g := New()
-	g.AddNode(&Node{PURL: "pkg:npm/a@1.0.0", Name: "a", Locations: []string{"/a"}})
-	g.AddNode(&Node{PURL: "pkg:npm/b@1.0.0", Name: "b"})
+	g.AddNode(&Node{Purl: "pkg:npm/a@1.0.0", Name: "a", Locations: []string{"/a"}})
+	g.AddNode(&Node{Purl: "pkg:npm/b@1.0.0", Name: "b"})
 	g.AddEdge(&Edge{From: "pkg:npm/a@1.0.0", To: "pkg:npm/b@1.0.0"})
 
 	clone := g.Clone()
@@ -512,9 +513,9 @@ func TestClone(t *testing.T) {
 
 func TestPath(t *testing.T) {
 	path := Path{
-		{PURL: "pkg:npm/a@1.0.0", Name: "a"},
-		{PURL: "pkg:npm/b@1.0.0", Name: "b"},
-		{PURL: "pkg:npm/c@1.0.0", Name: "c"},
+		{Purl: "pkg:npm/a@1.0.0", Name: "a"},
+		{Purl: "pkg:npm/b@1.0.0", Name: "b"},
+		{Purl: "pkg:npm/c@1.0.0", Name: "c"},
 	}
 
 	if path.String() != "a -> b -> c" {
@@ -541,9 +542,9 @@ func TestPath(t *testing.T) {
 
 func TestSortByVulns(t *testing.T) {
 	g := New()
-	g.AddNode(&Node{PURL: "pkg:npm/a@1.0.0", Name: "a", VulnCount: VulnCount{Total: 1, Low: 1}})
-	g.AddNode(&Node{PURL: "pkg:npm/b@1.0.0", Name: "b", VulnCount: VulnCount{Total: 3, Critical: 1, High: 2}})
-	g.AddNode(&Node{PURL: "pkg:npm/c@1.0.0", Name: "c", VulnCount: VulnCount{Total: 0}})
+	g.AddNode(&Node{Purl: "pkg:npm/a@1.0.0", Name: "a", VulnerabilityCount: &VulnerabilityCount{Total: 1, Low: 1}})
+	g.AddNode(&Node{Purl: "pkg:npm/b@1.0.0", Name: "b", VulnerabilityCount: &VulnerabilityCount{Total: 3, Critical: 1, High: 2}})
+	g.AddNode(&Node{Purl: "pkg:npm/c@1.0.0", Name: "c", VulnerabilityCount: &VulnerabilityCount{Total: 0}})
 
 	sorted := g.SortByVulns()
 
@@ -557,9 +558,9 @@ func TestSortByVulns(t *testing.T) {
 
 func TestSortByDepth(t *testing.T) {
 	g := New()
-	g.AddNode(&Node{PURL: "pkg:npm/a@1.0.0", Name: "a", Depth: 2})
-	g.AddNode(&Node{PURL: "pkg:npm/b@1.0.0", Name: "b", Depth: 0})
-	g.AddNode(&Node{PURL: "pkg:npm/c@1.0.0", Name: "c", Depth: 1})
+	g.AddNode(&Node{Purl: "pkg:npm/a@1.0.0", Name: "a", Depth: 2})
+	g.AddNode(&Node{Purl: "pkg:npm/b@1.0.0", Name: "b", Depth: 0})
+	g.AddNode(&Node{Purl: "pkg:npm/c@1.0.0", Name: "c", Depth: 1})
 
 	sorted := g.SortByDepth()
 
@@ -573,8 +574,8 @@ func TestSortByDepth(t *testing.T) {
 
 func TestRenderText(t *testing.T) {
 	g := New()
-	g.AddNode(&Node{PURL: "pkg:npm/a@1.0.0", Name: "a", Version: "1.0.0", Direct: true})
-	g.AddNode(&Node{PURL: "pkg:npm/b@1.0.0", Name: "b", Version: "1.0.0"})
+	g.AddNode(&Node{Purl: "pkg:npm/a@1.0.0", Name: "a", Version: "1.0.0", Direct: true})
+	g.AddNode(&Node{Purl: "pkg:npm/b@1.0.0", Name: "b", Version: "1.0.0"})
 	g.AddEdge(&Edge{From: "pkg:npm/a@1.0.0", To: "pkg:npm/b@1.0.0"})
 
 	output := g.ToText()
@@ -589,8 +590,8 @@ func TestRenderText(t *testing.T) {
 
 func TestRenderDOT(t *testing.T) {
 	g := New()
-	g.AddNode(&Node{PURL: "pkg:npm/a@1.0.0", Name: "a", Version: "1.0.0", Direct: true})
-	g.AddNode(&Node{PURL: "pkg:npm/b@1.0.0", Name: "b", Version: "1.0.0"})
+	g.AddNode(&Node{Purl: "pkg:npm/a@1.0.0", Name: "a", Version: "1.0.0", Direct: true})
+	g.AddNode(&Node{Purl: "pkg:npm/b@1.0.0", Name: "b", Version: "1.0.0"})
 	g.AddEdge(&Edge{From: "pkg:npm/a@1.0.0", To: "pkg:npm/b@1.0.0"})
 
 	output := g.ToDOT()
@@ -605,8 +606,8 @@ func TestRenderDOT(t *testing.T) {
 
 func TestRenderMermaid(t *testing.T) {
 	g := New()
-	g.AddNode(&Node{PURL: "pkg:npm/a@1.0.0", Name: "a", Version: "1.0.0", Direct: true, Ecosystem: "npm"})
-	g.AddNode(&Node{PURL: "pkg:npm/b@1.0.0", Name: "b", Version: "1.0.0", Ecosystem: "npm"})
+	g.AddNode(&Node{Purl: "pkg:npm/a@1.0.0", Name: "a", Version: "1.0.0", Direct: true, Ecosystem: "npm"})
+	g.AddNode(&Node{Purl: "pkg:npm/b@1.0.0", Name: "b", Version: "1.0.0", Ecosystem: "npm"})
 	g.AddEdge(&Edge{From: "pkg:npm/a@1.0.0", To: "pkg:npm/b@1.0.0"})
 
 	output := g.ToMermaid()
@@ -621,8 +622,8 @@ func TestRenderMermaid(t *testing.T) {
 
 func TestRenderD3(t *testing.T) {
 	g := New()
-	g.AddNode(&Node{PURL: "pkg:npm/a@1.0.0", Name: "a", Version: "1.0.0", Direct: true})
-	g.AddNode(&Node{PURL: "pkg:npm/b@1.0.0", Name: "b", Version: "1.0.0"})
+	g.AddNode(&Node{Purl: "pkg:npm/a@1.0.0", Name: "a", Version: "1.0.0", Direct: true})
+	g.AddNode(&Node{Purl: "pkg:npm/b@1.0.0", Name: "b", Version: "1.0.0"})
 	g.AddEdge(&Edge{From: "pkg:npm/a@1.0.0", To: "pkg:npm/b@1.0.0"})
 
 	output := string(g.ToD3JSON())
@@ -638,11 +639,11 @@ func TestRenderD3(t *testing.T) {
 func TestRenderWithOptions(t *testing.T) {
 	g := New()
 	g.AddNode(&Node{
-		PURL:      "pkg:npm/a@1.0.0",
+		Purl:      "pkg:npm/a@1.0.0",
 		Name:      "a",
 		Version:   "1.0.0",
 		Direct:    true,
-		VulnCount: VulnCount{Total: 1, Critical: 1},
+		VulnerabilityCount: &VulnerabilityCount{Total: 1, Critical: 1},
 	})
 
 	output := g.ToDOT(
@@ -664,13 +665,13 @@ func TestRenderWithOptions(t *testing.T) {
 
 func TestToID(t *testing.T) {
 	n := &Node{
-		PURL:      "pkg:npm/lodash@4.17.21",
+		Purl:      "pkg:npm/lodash@4.17.21",
 		Name:      "lodash",
 		Version:   "4.17.21",
 		Ecosystem: "npm",
 	}
 
-	id := n.ToID()
+	id := ToID(n)
 
 	if id.Name != "lodash" {
 		t.Errorf("expected name lodash, got %s", id.Name)
@@ -687,11 +688,11 @@ func TestUpdateDepths(t *testing.T) {
 	// Build a graph: a -> b -> c -> d
 	// where a is direct
 	g := New()
-	g.AddNode(&Node{PURL: "pkg:npm/a@1.0.0", Name: "a", Direct: true})
-	g.AddNode(&Node{PURL: "pkg:npm/b@1.0.0", Name: "b"})
-	g.AddNode(&Node{PURL: "pkg:npm/c@1.0.0", Name: "c"})
-	g.AddNode(&Node{PURL: "pkg:npm/d@1.0.0", Name: "d"})
-	g.AddNode(&Node{PURL: "pkg:npm/orphan@1.0.0", Name: "orphan"}) // Not connected
+	g.AddNode(&Node{Purl: "pkg:npm/a@1.0.0", Name: "a", Direct: true})
+	g.AddNode(&Node{Purl: "pkg:npm/b@1.0.0", Name: "b"})
+	g.AddNode(&Node{Purl: "pkg:npm/c@1.0.0", Name: "c"})
+	g.AddNode(&Node{Purl: "pkg:npm/d@1.0.0", Name: "d"})
+	g.AddNode(&Node{Purl: "pkg:npm/orphan@1.0.0", Name: "orphan"}) // Not connected
 
 	g.AddEdge(&Edge{From: "pkg:npm/a@1.0.0", To: "pkg:npm/b@1.0.0"})
 	g.AddEdge(&Edge{From: "pkg:npm/b@1.0.0", To: "pkg:npm/c@1.0.0"})
@@ -702,7 +703,7 @@ func TestUpdateDepths(t *testing.T) {
 	// Check depths
 	tests := []struct {
 		purl  string
-		depth int
+		depth int32
 	}{
 		{"pkg:npm/a@1.0.0", 0},      // direct
 		{"pkg:npm/b@1.0.0", 1},      // 1 hop
@@ -727,10 +728,10 @@ func TestUpdateDepthsDiamond(t *testing.T) {
 	// Diamond pattern: a -> [b, c] -> d
 	// Both b and c depend on d, so d should have depth 2
 	g := New()
-	g.AddNode(&Node{PURL: "pkg:npm/a@1.0.0", Name: "a", Direct: true})
-	g.AddNode(&Node{PURL: "pkg:npm/b@1.0.0", Name: "b"})
-	g.AddNode(&Node{PURL: "pkg:npm/c@1.0.0", Name: "c"})
-	g.AddNode(&Node{PURL: "pkg:npm/d@1.0.0", Name: "d"})
+	g.AddNode(&Node{Purl: "pkg:npm/a@1.0.0", Name: "a", Direct: true})
+	g.AddNode(&Node{Purl: "pkg:npm/b@1.0.0", Name: "b"})
+	g.AddNode(&Node{Purl: "pkg:npm/c@1.0.0", Name: "c"})
+	g.AddNode(&Node{Purl: "pkg:npm/d@1.0.0", Name: "d"})
 
 	g.AddEdge(&Edge{From: "pkg:npm/a@1.0.0", To: "pkg:npm/b@1.0.0"})
 	g.AddEdge(&Edge{From: "pkg:npm/a@1.0.0", To: "pkg:npm/c@1.0.0"})
@@ -749,9 +750,9 @@ func TestUpdateDepthsMultipleRoots(t *testing.T) {
 	// Two roots: a -> b, c -> b
 	// b should have depth 1
 	g := New()
-	g.AddNode(&Node{PURL: "pkg:npm/a@1.0.0", Name: "a", Direct: true})
-	g.AddNode(&Node{PURL: "pkg:npm/c@1.0.0", Name: "c", Direct: true})
-	g.AddNode(&Node{PURL: "pkg:npm/b@1.0.0", Name: "b"})
+	g.AddNode(&Node{Purl: "pkg:npm/a@1.0.0", Name: "a", Direct: true})
+	g.AddNode(&Node{Purl: "pkg:npm/c@1.0.0", Name: "c", Direct: true})
+	g.AddNode(&Node{Purl: "pkg:npm/b@1.0.0", Name: "b"})
 
 	g.AddEdge(&Edge{From: "pkg:npm/a@1.0.0", To: "pkg:npm/b@1.0.0"})
 	g.AddEdge(&Edge{From: "pkg:npm/c@1.0.0", To: "pkg:npm/b@1.0.0"})
@@ -765,9 +766,9 @@ func TestUpdateDepthsMultipleRoots(t *testing.T) {
 
 func TestAdjacencyCacheInvalidation(t *testing.T) {
 	g := New()
-	g.AddNode(&Node{PURL: "pkg:npm/a@1.0.0", Name: "a", Direct: true})
-	g.AddNode(&Node{PURL: "pkg:npm/b@1.0.0", Name: "b"})
-	g.AddNode(&Node{PURL: "pkg:npm/c@1.0.0", Name: "c"})
+	g.AddNode(&Node{Purl: "pkg:npm/a@1.0.0", Name: "a", Direct: true})
+	g.AddNode(&Node{Purl: "pkg:npm/b@1.0.0", Name: "b"})
+	g.AddNode(&Node{Purl: "pkg:npm/c@1.0.0", Name: "c"})
 
 	// Add first edge
 	g.AddEdge(&Edge{From: "pkg:npm/a@1.0.0", To: "pkg:npm/b@1.0.0"})
@@ -798,10 +799,10 @@ func TestVulnerablePaths(t *testing.T) {
 	// a -> b -> c (vulnerable)
 	// a -> d -> c (same vulnerable c)
 	g := New()
-	g.AddNode(&Node{PURL: "pkg:npm/a@1.0.0", Name: "a", Direct: true})
-	g.AddNode(&Node{PURL: "pkg:npm/b@1.0.0", Name: "b"})
-	g.AddNode(&Node{PURL: "pkg:npm/d@1.0.0", Name: "d"})
-	g.AddNode(&Node{PURL: "pkg:npm/c@1.0.0", Name: "c", VulnCount: VulnCount{Total: 1, High: 1}})
+	g.AddNode(&Node{Purl: "pkg:npm/a@1.0.0", Name: "a", Direct: true})
+	g.AddNode(&Node{Purl: "pkg:npm/b@1.0.0", Name: "b"})
+	g.AddNode(&Node{Purl: "pkg:npm/d@1.0.0", Name: "d"})
+	g.AddNode(&Node{Purl: "pkg:npm/c@1.0.0", Name: "c", VulnerabilityCount: &VulnerabilityCount{Total: 1, High: 1}})
 
 	g.AddEdge(&Edge{From: "pkg:npm/a@1.0.0", To: "pkg:npm/b@1.0.0"})
 	g.AddEdge(&Edge{From: "pkg:npm/b@1.0.0", To: "pkg:npm/c@1.0.0"})

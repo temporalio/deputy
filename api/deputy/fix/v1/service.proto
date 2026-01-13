@@ -1,0 +1,103 @@
+syntax = "proto3";
+
+package deputy.fix.v1;
+
+import "google/protobuf/timestamp.proto";
+import "deputy/target/v1/target.proto";
+
+option go_package = "github.com/picatz/deputy/gen/deputy/fix/v1;fixv1";
+
+// FixService provides vulnerability remediation capabilities.
+//
+// The service generates and applies remediation plans for detected vulnerabilities.
+service FixService {
+  // Fix generates a remediation plan for vulnerabilities in a target.
+  rpc Fix(FixRequest) returns (FixResponse);
+}
+
+// FixRequest specifies what to fix and how.
+message FixRequest {
+  // Target is the scan target (path, URL, image reference, etc.).
+  string target = 1;
+
+  // Options configure fix behavior.
+  FixOptions options = 2;
+}
+
+// FixOptions configures fix behavior.
+message FixOptions {
+  // Ecosystems filters to specific package ecosystems.
+  repeated string ecosystems = 1;
+
+  // PublishedBefore filters to vulnerabilities published before this timestamp.
+  google.protobuf.Timestamp published_before = 2;
+
+  // PublishedAfter filters to vulnerabilities published after this timestamp.
+  google.protobuf.Timestamp published_after = 3;
+
+  // IgnoreUnfixed excludes vulnerabilities without available fixes.
+  bool ignore_unfixed = 4;
+
+  // Ref is a Git reference to scan (branch, tag, commit).
+  string ref = 5;
+
+  // Apply executes the remediation commands (local scans only).
+  bool apply = 6;
+}
+
+// FixResponse contains the remediation plan.
+message FixResponse {
+  // Target describes what was analyzed.
+  deputy.target.v1.Target target = 1;
+
+  // StdlibUpgrade is the recommended Go stdlib version upgrade (if applicable).
+  string stdlib_upgrade = 2;
+
+  // Commands are the remediation steps to apply.
+  repeated RemediationCommand commands = 3;
+
+  // Stats summarizes the remediation plan.
+  RemediationStats stats = 4;
+
+  // GeneratedAt is when this plan was generated.
+  google.protobuf.Timestamp generated_at = 5;
+
+  // Warnings contains non-fatal issues encountered during planning.
+  repeated string warnings = 6;
+}
+
+// RemediationCommand represents an actionable remediation step.
+message RemediationCommand {
+  // Manager identifies the package manager (e.g., "go", "npm", "pip", "gem").
+  string manager = 1;
+
+  // Command is the shell command to execute or instruction to follow.
+  string command = 2;
+
+  // Path is the manifest/lockfile path where this command should be run.
+  string path = 3;
+
+  // Groups indicates dependency groups affected (e.g., "dev", "optional" for npm).
+  repeated string groups = 4;
+
+  // Hint provides additional context (e.g., "run bundle install afterwards").
+  string hint = 5;
+
+  // FollowUp is an optional executable command to run after the main command.
+  string follow_up = 6;
+
+  // IsDirect indicates if the vulnerable package is a direct dependency.
+  bool is_direct = 7;
+
+  // Executable indicates if Command can be run directly (true) or requires manual action (false).
+  bool executable = 8;
+}
+
+// RemediationStats provides statistics about the remediation plan.
+message RemediationStats {
+  // TotalCommands is the total number of remediation commands.
+  int32 total_commands = 1;
+
+  // RunnableCommands is the number of commands that can be executed automatically.
+  int32 runnable_commands = 2;
+}

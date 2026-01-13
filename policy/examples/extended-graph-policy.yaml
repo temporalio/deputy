@@ -1,0 +1,90 @@
+# Extended Graph Policy Examples
+#
+# These policies demonstrate import status filtering for extended graph analysis.
+# Use with `deputy graph --extended` or `deputy scan --extended` to enable.
+#
+# Import status indicates how a dependency is included in the project:
+#   IMPORTED (1) - Actively used by source code, compiled into binary
+#   REQUIRED (2) - In go.mod/lockfile but not directly imported
+#   DECLARED (3) - In full module graph but not selected by MVS
+#
+# Run with: deputy graph --extended --policy policy/examples/extended-graph-policy.yaml
+
+version: 1
+policies:
+  # Block critical vulnerabilities in actively imported code
+  # This is the highest priority - these vulns affect your runtime
+  - name: block-critical-in-imported
+    entrypoints: [graph_node]
+    rules:
+      - action: deny
+        when: |
+          isImported(node) &&
+          hasVulnerabilities(node) &&
+          vulnerabilityCount(node) > 0
+        reason: "Critical vulnerability in actively imported dependency"
+        remediation: "Update or replace this dependency immediately - it affects your runtime code"
+
+  # Warn about vulnerabilities in declared-only dependencies
+  # These are "phantom" deps - not in your build but could be pulled in later
+  - name: warn-declared-vulns
+    entrypoints: [graph_node]
+    rules:
+      - action: warn
+        when: |
+          isDeclared(node) &&
+          hasVulnerabilities(node)
+        reason: "Vulnerability in declared-but-unused dependency (latent risk)"
+        remediation: "Consider updating your transitive dependencies to avoid pulling this in"
+
+  # Report on the breakdown of import statuses
+  - name: extended-graph-stats
+    entrypoints: [graph_report]
+    rules:
+      - action: warn
+        when: |
+          stats.import_status_counts != null &&
+          stats.import_status_counts.declared > 10
+        reason: "Large number of declared-only dependencies increases supply chain risk"
+        remediation: "Review transitive dependencies and consider using go mod tidy"
+
+  # Detect typosquatting in declared dependencies
+  # More important for phantom deps since they're less scrutinized
+  - name: typosquat-in-declared
+    entrypoints: [graph_node]
+    vars:
+      popularPackages: ["lodash", "express", "react", "axios", "moment"]
+    rules:
+      - action: warn
+        when: |
+          isDeclared(node) &&
+          popularPackages.exists(p,
+            p != nodeName(node) &&
+            levenshteinWithin(p, nodeName(node), 2)
+          )
+        reason: "Declared dependency name is suspiciously similar to a popular package"
+        remediation: "Verify this is the intended package before any code changes"
+
+  # Block OSSF MAL packages in any dependency (not just imported)
+  # Extended mode catches malicious packages even if not selected by MVS
+  - name: block-mal-everywhere
+    entrypoints: [graph_node]
+    rules:
+      - action: deny
+        when: |
+          nodePurl(node).contains("MAL-") ||
+          nodeName(node).startsWith("ossf-mal-")
+        reason: "OSSF-identified malicious package detected"
+        remediation: "Remove all references to this package from your dependency tree"
+
+  # Filter to show only phantom dependencies with issues
+  - name: phantom-dep-report
+    entrypoints: [graph_report]
+    rules:
+      - action: warn
+        when: |
+          nodes.exists(n, isDeclared(n) && hasVulnerabilities(n))
+        reason: "Phantom dependencies with vulnerabilities detected"
+        remediation: |
+          Run: deputy graph --extended --declared --vulnerable
+          to see the full list of risky phantom dependencies

@@ -23,6 +23,8 @@ import (
 	githttp "github.com/go-git/go-git/v5/plumbing/transport/http"
 	"github.com/go-git/go-git/v5/storage/memory"
 	"github.com/ossf/osv-schema/bindings/go/osvschema"
+	vulnerabilityv1 "github.com/picatz/deputy/gen/deputy/vulnerability/v1"
+	"github.com/picatz/deputy/internal/cache"
 	"github.com/picatz/deputy/internal/cache/disk"
 	"github.com/picatz/deputy/internal/collections"
 	"github.com/picatz/deputy/internal/httputil"
@@ -77,9 +79,10 @@ func writeGHAMeta(zipPath string, meta ghaZipMeta) {
 // ghaHTTPTimeout is the overall request timeout for GHA vulnerability fetches.
 const ghaHTTPTimeout = 30 * time.Second
 
-// ghaHTTPClient uses retryable HTTP for resilience when downloading the GHA
-// vulnerability zip from Google Cloud Storage, which may have transient failures.
-var ghaHTTPClient = httputil.NewRetryableClient(ghaHTTPTimeout)
+// ghaHTTPClient uses retryable HTTP with SSRF protection for resilience when
+// downloading the GHA vulnerability zip from Google Cloud Storage, which may
+// have transient failures. SafeDialer prevents DNS rebinding attacks.
+var ghaHTTPClient = httputil.NewSafeRetryableClient(ghaHTTPTimeout)
 
 var ghaGitHubTokenEnvVar = "GITHUB_TOKEN"
 
@@ -181,7 +184,7 @@ func queryOSVGHABucketBatch(ctx context.Context, client Client, pkgs []PkgInput)
 				base.Severity, base.SeverityType = sev, typ
 			}
 			fixSet := collections.NewSet[string]()
-			var importSets [][]vulnerability.AffectedImport
+			var importSets [][]vulnerabilityv1.AffectedImport
 			if len(base.AffectedImports) > 0 {
 				importSets = append(importSets, base.AffectedImports)
 			}
@@ -407,9 +410,14 @@ func versionAffectedByGHARanges(v osvschema.Vulnerability, pkg PkgInput, version
 			}
 			foundComparableRange = true
 			introduced := "v0.0.0"
+			introducedSet := false // Track whether an "introduced" event was encountered
 			for _, e := range r.Events {
 				if e.Introduced != "" {
-					if intro := normalizeSemverVersion(e.Introduced); intro != "" {
+					introducedSet = true
+					// "0" means "all versions from the beginning"
+					if e.Introduced == "0" {
+						introduced = "v0.0.0"
+					} else if intro := normalizeSemverVersion(e.Introduced); intro != "" {
 						introduced = intro
 					}
 				}
@@ -419,9 +427,11 @@ func versionAffectedByGHARanges(v osvschema.Vulnerability, pkg PkgInput, version
 						return true
 					}
 					introduced = "v0.0.0"
+					introducedSet = false
 				}
 			}
-			if introduced != "v0.0.0" && semver.Compare(cur, introduced) >= 0 {
+			// Check if we're still in an open-ended "introduced" range (no fixed event)
+			if introducedSet && semver.Compare(cur, introduced) >= 0 {
 				return true
 			}
 		}
@@ -453,13 +463,16 @@ func normalizeSemverVersion(v string) string {
 
 // loadGHAVulnIndex memoizes a parsed view of the GitHub Actions all.zip bucket.
 func loadGHAVulnIndex(ctx context.Context) (*ghaVulnIndex, error) {
+	// Check if cache is bypassed via --no-cache flag
+	bypassCache := cache.ShouldBypassSource(ctx, "osv")
+
 	ghaIndexMu.RLock()
 	idx := ghaIndex
 	builtAt := ghaIndexBuiltAt
 	ttl := ghaIndexTTL
 	ghaIndexMu.RUnlock()
 
-	if idx != nil && ttl > 0 && time.Since(builtAt) < ttl {
+	if !bypassCache && idx != nil && ttl > 0 && time.Since(builtAt) < ttl {
 		return idx, nil
 	}
 
@@ -545,6 +558,9 @@ func buildGHAVulnIndex(ctx context.Context) (*ghaVulnIndex, error) {
 // ensureGHACacheZip ensures a recent copy of all.zip exists on disk and returns its path.
 // The zip is refreshed on a TTL to keep results aligned with OSV releases.
 func ensureGHACacheZip(ctx context.Context) (string, error) {
+	// Check if cache is bypassed via --no-cache flag
+	bypassCache := cache.ShouldBypassSource(ctx, "osv")
+
 	base := disk.BaseDir()
 	if base == "" {
 		tmp, err := os.MkdirTemp("", "deputy-osv-gha-*")
@@ -555,9 +571,11 @@ func ensureGHACacheZip(ctx context.Context) (string, error) {
 	}
 	dir := filepath.Join(base, ghaCacheSubdir)
 	path := filepath.Join(dir, ghaZipFilename)
-	if fi, err := os.Stat(path); err == nil && fi.Size() > 0 {
-		if time.Since(fi.ModTime()) < ghaDownloadTTL {
-			return path, nil
+	if !bypassCache {
+		if fi, err := os.Stat(path); err == nil && fi.Size() > 0 {
+			if time.Since(fi.ModTime()) < ghaDownloadTTL {
+				return path, nil
+			}
 		}
 	}
 	if err := os.MkdirAll(dir, 0o755); err != nil {

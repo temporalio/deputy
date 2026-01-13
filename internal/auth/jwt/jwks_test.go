@@ -18,6 +18,12 @@ import (
 	"github.com/picatz/jose/pkg/jwk"
 )
 
+// testHTTPClient returns an HTTP client without SSRF protection for tests that use httptest servers.
+// The SafeDialer blocks localhost by default, which is correct for production but breaks tests.
+func testHTTPClient() *http.Client {
+	return &http.Client{Timeout: 30 * time.Second}
+}
+
 func TestJWKSCache_BasicFetch(t *testing.T) {
 	// Generate ECDSA key for testing
 	privateKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
@@ -45,7 +51,7 @@ func TestJWKSCache_BasicFetch(t *testing.T) {
 	cache, err := NewJWKSCache(&JWKSConfig{
 		URL:             jwksServer.URL,
 		RefreshInterval: 1 * time.Hour,
-	})
+	}, WithJWKSHTTPClient(testHTTPClient()))
 	if err != nil {
 		t.Fatalf("failed to create JWKS cache: %v", err)
 	}
@@ -94,7 +100,7 @@ func TestJWKSCache_RSAKey(t *testing.T) {
 	cache, err := NewJWKSCache(&JWKSConfig{
 		URL:             jwksServer.URL,
 		RefreshInterval: 1 * time.Hour,
-	})
+	}, WithJWKSHTTPClient(testHTTPClient()))
 	if err != nil {
 		t.Fatalf("failed to create JWKS cache: %v", err)
 	}
@@ -125,7 +131,7 @@ func TestJWKSCache_KeyNotFound(t *testing.T) {
 	}))
 	defer jwksServer.Close()
 
-	cache, err := NewJWKSCache(&JWKSConfig{URL: jwksServer.URL})
+	cache, err := NewJWKSCache(&JWKSConfig{URL: jwksServer.URL}, WithJWKSHTTPClient(testHTTPClient()))
 	if err != nil {
 		t.Fatalf("failed to create JWKS cache: %v", err)
 	}
@@ -163,7 +169,7 @@ func TestJWKSCache_DoubleClose(t *testing.T) {
 	}))
 	defer jwksServer.Close()
 
-	cache, err := NewJWKSCache(&JWKSConfig{URL: jwksServer.URL})
+	cache, err := NewJWKSCache(&JWKSConfig{URL: jwksServer.URL}, WithJWKSHTTPClient(testHTTPClient()))
 	if err != nil {
 		t.Fatalf("failed to create JWKS cache: %v", err)
 	}
@@ -191,7 +197,7 @@ func TestJWKSCache_ConcurrentAccess(t *testing.T) {
 	}))
 	defer jwksServer.Close()
 
-	cache, err := NewJWKSCache(&JWKSConfig{URL: jwksServer.URL})
+	cache, err := NewJWKSCache(&JWKSConfig{URL: jwksServer.URL}, WithJWKSHTTPClient(testHTTPClient()))
 	if err != nil {
 		t.Fatalf("failed to create JWKS cache: %v", err)
 	}
@@ -248,7 +254,7 @@ func TestJWKSCache_OIDCDiscovery(t *testing.T) {
 	cache, err := NewJWKSCache(&JWKSConfig{
 		URL:           discoveryServer.URL,
 		OIDCDiscovery: true,
-	})
+	}, WithJWKSHTTPClient(testHTTPClient()))
 	if err != nil {
 		t.Fatalf("failed to create JWKS cache with OIDC discovery: %v", err)
 	}
@@ -279,7 +285,7 @@ func TestJWKSCache_OIDCDiscoveryMissingJWKSURI(t *testing.T) {
 	_, err := NewJWKSCache(&JWKSConfig{
 		URL:           discoveryServer.URL,
 		OIDCDiscovery: true,
-	})
+	}, WithJWKSHTTPClient(testHTTPClient()))
 	if err == nil {
 		t.Error("expected error when jwks_uri is missing")
 	}
@@ -296,7 +302,7 @@ func TestJWKSCache_LastRefreshAndError(t *testing.T) {
 	}))
 	defer jwksServer.Close()
 
-	cache, err := NewJWKSCache(&JWKSConfig{URL: jwksServer.URL})
+	cache, err := NewJWKSCache(&JWKSConfig{URL: jwksServer.URL}, WithJWKSHTTPClient(testHTTPClient()))
 	if err != nil {
 		t.Fatalf("failed to create JWKS cache: %v", err)
 	}
@@ -326,7 +332,7 @@ func TestJWKSCache_ForceRefresh(t *testing.T) {
 	}))
 	defer jwksServer.Close()
 
-	cache, err := NewJWKSCache(&JWKSConfig{URL: jwksServer.URL})
+	cache, err := NewJWKSCache(&JWKSConfig{URL: jwksServer.URL}, WithJWKSHTTPClient(testHTTPClient()))
 	if err != nil {
 		t.Fatalf("failed to create JWKS cache: %v", err)
 	}
@@ -373,7 +379,7 @@ func TestJWKSCache_WithMetrics(t *testing.T) {
 		},
 	}
 
-	cache, err := NewJWKSCache(&JWKSConfig{URL: jwksServer.URL}, WithJWKSMetrics(metrics))
+	cache, err := NewJWKSCache(&JWKSConfig{URL: jwksServer.URL}, WithJWKSMetrics(metrics), WithJWKSHTTPClient(testHTTPClient()))
 	if err != nil {
 		t.Fatalf("failed to create JWKS cache: %v", err)
 	}
@@ -415,4 +421,105 @@ func (m *testMetrics) RecordJWKSKeyLookup(found bool) {
 	if m.onKeyLookup != nil {
 		m.onKeyLookup(found)
 	}
+}
+
+// Security tests for JWKS URL validation
+
+func TestValidateJWKSURL_HTTPSRequired(t *testing.T) {
+	tests := []struct {
+		name    string
+		url     string
+		wantErr bool
+		errMsg  string
+	}{
+		{
+			name:    "HTTPS allowed",
+			url:     "https://auth.example.com/.well-known/jwks.json",
+			wantErr: false,
+		},
+		{
+			name:    "HTTP localhost allowed for testing",
+			url:     "http://localhost:8080/.well-known/jwks.json",
+			wantErr: false,
+		},
+		{
+			name:    "HTTP 127.0.0.1 allowed for testing",
+			url:     "http://127.0.0.1:8080/.well-known/jwks.json",
+			wantErr: false,
+		},
+		{
+			name:    "HTTP ::1 (IPv6 localhost) allowed",
+			url:     "http://[::1]:8080/.well-known/jwks.json",
+			wantErr: false,
+		},
+		{
+			name:    "HTTP remote host rejected",
+			url:     "http://auth.example.com/.well-known/jwks.json",
+			wantErr: true,
+			errMsg:  "must use HTTPS",
+		},
+		{
+			name:    "HTTP with IP address rejected",
+			url:     "http://192.168.1.1/.well-known/jwks.json",
+			wantErr: true,
+			errMsg:  "must use HTTPS",
+		},
+		{
+			name:    "Invalid URL rejected",
+			url:     "not-a-url",
+			wantErr: true,
+			errMsg:  "must use HTTPS",
+		},
+		{
+			name:    "FTP scheme rejected",
+			url:     "ftp://auth.example.com/jwks.json",
+			wantErr: true,
+			errMsg:  "must use HTTPS",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := validateJWKSURL(tt.url)
+			if tt.wantErr {
+				if err == nil {
+					t.Errorf("expected error for URL %q, got nil", tt.url)
+				} else if tt.errMsg != "" && !containsString(err.Error(), tt.errMsg) {
+					t.Errorf("expected error containing %q, got %q", tt.errMsg, err.Error())
+				}
+			} else {
+				if err != nil {
+					t.Errorf("unexpected error for URL %q: %v", tt.url, err)
+				}
+			}
+		})
+	}
+}
+
+func TestJWKSCache_RejectsHTTPRemoteURL(t *testing.T) {
+	// Security test: Ensure JWKS cache rejects HTTP URLs for remote hosts
+	// to prevent MITM attacks where an attacker could inject malicious keys.
+
+	_, err := NewJWKSCache(&JWKSConfig{
+		URL: "http://auth.example.com/.well-known/jwks.json",
+	})
+	if err == nil {
+		t.Fatal("SECURITY: JWKS cache should reject HTTP URLs for remote hosts")
+	}
+	if !containsString(err.Error(), "HTTPS") {
+		t.Errorf("expected error about HTTPS, got: %v", err)
+	}
+}
+
+func containsString(s, substr string) bool {
+	return len(s) >= len(substr) && (s == substr || len(s) > 0 && containsSubstring(s, substr))
+}
+
+func containsSubstring(s, substr string) bool {
+	for i := 0; i <= len(s)-len(substr); i++ {
+		if s[i:i+len(substr)] == substr {
+			return true
+		}
+	}
+	return false
 }

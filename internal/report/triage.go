@@ -6,6 +6,7 @@ import (
 	"slices"
 	"strings"
 
+	vulnerabilityv1 "github.com/picatz/deputy/gen/deputy/vulnerability/v1"
 	"github.com/picatz/deputy/internal/collections"
 	"github.com/picatz/deputy/internal/vulnerability"
 	"github.com/picatz/deputy/internal/vulnerability/severity/cvss"
@@ -13,30 +14,30 @@ import (
 
 // TriageReport represents the summary of a triage analysis.
 type TriageReport struct {
-	Target            Target                 `json:"target"`
-	Stats             vulnerability.Stats    `json:"stats"`
-	TopPackages       []TriagePackageSummary `json:"topPackages"`
-	PackagesWithVulns int                    `json:"packagesWithVulns"`
+	Target            Target                       `json:"target"`
+	Stats             vulnerabilityv1.Stats        `json:"stats"`
+	TopPackages       []TriagePackageSummary       `json:"top_packages"`
+	PackagesWithVulns int                          `json:"packages_with_vulns"`
 }
 
 // TriagePackageSummary represents a summary of a single package's vulnerabilities.
 type TriagePackageSummary struct {
-	Package            string                         `json:"package"`
-	Version            string                         `json:"version"`
-	Severity           string                         `json:"severity"`
-	SeverityType       string                         `json:"severityType"`
-	FixVersion         string                         `json:"fixVersion,omitempty"`
-	IsDirect           bool                           `json:"isDirect"`
-	Summary            string                         `json:"summary,omitempty"`
-	SampleIDs          []string                       `json:"sampleIDs,omitempty"`
-	AffectedImports    []vulnerability.AffectedImport `json:"affectedImports,omitempty"`
-	DatabaseSpecific   map[string]string              `json:"databaseSpecific,omitempty"`
-	VulnerabilityCount int                            `json:"vulnerabilityCount"`
-	SeverityCounts     map[string]int                 `json:"severityCounts,omitempty"`
+	Package            string                           `json:"package"`
+	Version            string                           `json:"version"`
+	Severity           string                           `json:"severity"`
+	SeverityType       string                           `json:"severity_type"`
+	FixVersion         string                           `json:"fix_version,omitempty"`
+	IsDirect           bool                             `json:"is_direct"`
+	Summary            string                           `json:"summary,omitempty"`
+	SampleIDs          []string                         `json:"sample_ids,omitempty"`
+	AffectedImports    []vulnerabilityv1.AffectedImport `json:"affected_imports,omitempty"`
+	DatabaseSpecific   map[string]string                `json:"database_specific,omitempty"`
+	VulnerabilityCount int                              `json:"vulnerability_count"`
+	SeverityCounts     map[string]int                   `json:"severity_counts,omitempty"`
 }
 
 // BuildTriageReport constructs a TriageReport from the target, stats, and consolidated vulnerabilities.
-func BuildTriageReport(target Target, stats vulnerability.Stats, cons []vulnerability.Consolidated) TriageReport {
+func BuildTriageReport(target Target, stats vulnerabilityv1.Stats, cons []vulnerability.Consolidated) TriageReport {
 	report := TriageReport{Target: target, Stats: stats}
 	agg := aggregatePackages(cons)
 	report.PackagesWithVulns = len(agg)
@@ -59,7 +60,7 @@ func aggregatePackages(cons []vulnerability.Consolidated) []TriagePackageSummary
 		summary    string
 		ids        []string
 		isDirect   bool
-		imports    []vulnerability.AffectedImport
+		imports    []vulnerabilityv1.AffectedImport
 		dbSpecific map[string]string
 		counts     map[string]int
 		total      int
@@ -213,7 +214,7 @@ func bestFix(v vulnerability.Consolidated) string {
 	return strings.Join(v.FixedVersions, ",")
 }
 
-func mergeAffectedImports(base []vulnerability.AffectedImport, extra []vulnerability.AffectedImport) []vulnerability.AffectedImport {
+func mergeAffectedImports(base []vulnerabilityv1.AffectedImport, extra []vulnerabilityv1.AffectedImport) []vulnerabilityv1.AffectedImport {
 	if len(extra) == 0 {
 		return base
 	}
@@ -254,11 +255,11 @@ func mergeAffectedImports(base []vulnerability.AffectedImport, extra []vulnerabi
 		return nil
 	}
 	paths := slices.Sorted(maps.Keys(pathMap))
-	out := make([]vulnerability.AffectedImport, 0, len(paths))
+	out := make([]vulnerabilityv1.AffectedImport, 0, len(paths))
 	for _, p := range paths {
 		syms := pathMap[p].Slice()
 		slices.Sort(syms)
-		out = append(out, vulnerability.AffectedImport{Path: p, Symbols: syms})
+		out = append(out, vulnerabilityv1.AffectedImport{Path: p, Symbols: syms})
 	}
 	return out
 }

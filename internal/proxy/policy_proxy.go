@@ -7,6 +7,7 @@ import (
 
 	"github.com/picatz/deputy/internal/policy"
 	"go.opentelemetry.io/otel/trace"
+	"google.golang.org/protobuf/proto"
 )
 
 // serveWithPolicy evaluates policies for a request and, if allowed, forwards it to upstream.
@@ -16,7 +17,9 @@ import (
 //
 // Span enrichment: This function adds policy evaluation events to the current span,
 // recording the evaluation result (allow/deny/warn), entrypoint, and any denial reason.
-func serveWithPolicy(w http.ResponseWriter, r *http.Request, policies PolicyEvaluator, entrypoint policy.Entrypoint, payload map[string]any, meta blockMeta, upstream http.Handler) {
+//
+// The input should be a typed PolicyInput proto message (e.g., *policyv1.GoArtifactRequestPolicyInput).
+func serveWithPolicy(w http.ResponseWriter, r *http.Request, policies PolicyEvaluator, entrypoint policy.Entrypoint, input proto.Message, meta blockMeta, upstream http.Handler) {
 	if w == nil || r == nil || upstream == nil {
 		return
 	}
@@ -36,7 +39,7 @@ func serveWithPolicy(w http.ResponseWriter, r *http.Request, policies PolicyEval
 	if policies != nil {
 		evalStart := time.Now()
 		entrypointStr := entrypoint.String()
-		actions, err := policies.Evaluate(ctx, entrypointStr, payload)
+		actions, err := policies.Evaluate(ctx, entrypointStr, input)
 		evalDuration := time.Since(evalStart)
 
 		if err != nil {

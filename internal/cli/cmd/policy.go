@@ -21,6 +21,7 @@ import (
 	"github.com/spf13/cobra"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
+	"google.golang.org/protobuf/types/known/structpb"
 )
 
 // AddPolicyCommand registers the `deputy policy` command tree.
@@ -61,6 +62,7 @@ These tools help you write robust policies before deploying them to the proxy or
   deputy policy eval --policy policy.yaml --input context.json`,
 	}
 	cmd.AddCommand(newPolicyEvalCommand())
+	cmd.AddCommand(newPolicyExamplesCommand())
 	cmd.AddCommand(newPolicyLintCommand())
 	cmd.AddCommand(newPolicyTestCommand())
 	cmd.AddCommand(newPolicyBundleCommand())
@@ -131,6 +133,175 @@ func newPolicyEvalCommand() *cobra.Command {
 	cmd.Flags().StringVar(&inputPath, "input", "", "Path to JSON input (use '-' for stdin)")
 	cmd.Flags().StringVar(&format, "format", "json", "Output format: json or text")
 	return cmd
+}
+
+// newPolicyExamplesCommand creates the `examples` subcommand for generating example inputs.
+func newPolicyExamplesCommand() *cobra.Command {
+	var (
+		level    string
+		output   string
+		listOnly bool
+	)
+	cmd := &cobra.Command{
+		Use:   "examples [entrypoint]",
+		Short: "Generate example input JSON for policy testing",
+		Long: `Generate canonical example inputs for policy development and testing.
+
+Examples use real Deputy proto types with realistic values that match what
+you'll see in production. This helps you write policies with confidence
+before deploying them.
+
+ENTRYPOINT CATEGORIES:
+  scan        Vulnerability scanning (scan_vulnerability, scan_report)
+  proxy       Package proxy requests (go_artifact_request, npm_artifact_request, ...)
+  diff        Dependency diffs (diff_report, diff_vulnerability, ...)
+  container   Container images (container_diff_report, ...)
+  dockerfile  Dockerfile analysis (dockerfile_report, dockerfile_stage)
+  sbom        SBOM generation (sbom_report, sbom_component)
+  graph       Dependency graphs (graph_report, graph_node, graph_edge)
+  secrets     Secret scanning (secrets_report, secrets_finding)
+  service     API authorization (service_scan_request, ...)
+
+DETAIL LEVELS:
+  minimal       Only required fields with simplest values
+  typical       Common fields users will encounter (default)
+  comprehensive All fields with rich examples including enrichment data`,
+		Example: `# List all available entrypoints
+  deputy policy examples --list
+
+  # Generate typical example for scan_vulnerability
+  deputy policy examples scan_vulnerability
+
+  # Generate comprehensive example with all fields
+  deputy policy examples scan_vulnerability --level comprehensive
+
+  # Save to file for testing
+  deputy policy examples scan_vulnerability -o input.json
+
+  # Quick workflow: generate input, then test policy
+  deputy policy examples scan_vulnerability -o /tmp/input.json
+  deputy policy eval --policy my-policy.yaml --input /tmp/input.json`,
+		SilenceErrors: true,
+		SilenceUsage:  true,
+		Args:          cobra.MaximumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			// List mode
+			if listOnly || len(args) == 0 {
+				return listPolicyEntrypoints(cmd.OutOrStdout())
+			}
+
+			// Generate example mode
+			epName := args[0]
+			ep := policy.Entrypoint(epName)
+
+			// Validate entrypoint
+			profile := policy.GetBindingProfile(ep)
+			if profile == nil {
+				return deperrors.Suggest(
+					fmt.Errorf("unknown entrypoint: %q", epName),
+					"Run 'deputy policy examples --list' to see available entrypoints",
+				)
+			}
+
+			// Parse level
+			var exLevel policy.ExampleLevel
+			switch strings.ToLower(level) {
+			case "minimal", "min":
+				exLevel = policy.ExampleLevelMinimal
+			case "typical", "typ", "":
+				exLevel = policy.ExampleLevelTypical
+			case "comprehensive", "comp", "full":
+				exLevel = policy.ExampleLevelComprehensive
+			default:
+				return deperrors.Suggest(
+					fmt.Errorf("unknown level: %q", level),
+					"Use 'minimal', 'typical', or 'comprehensive'",
+				)
+			}
+
+			// Generate example
+			example, err := policy.GenerateExample(ep, exLevel)
+			if err != nil {
+				return err
+			}
+
+			// Output
+			out := cmd.OutOrStdout()
+			if output != "" && output != "-" {
+				f, err := os.Create(output)
+				if err != nil {
+					return fmt.Errorf("create output file: %w", err)
+				}
+				defer f.Close()
+				out = f
+			}
+
+			// Write header comment if to stdout
+			if output == "" || output == "-" {
+				fmt.Fprintf(out, "// Example input for entrypoint: %s\n", ep)
+				fmt.Fprintf(out, "// Level: %s\n", exLevel)
+				fmt.Fprintf(out, "// %s\n", example.Description)
+				if len(example.Comments) > 0 {
+					fmt.Fprintln(out, "//")
+					fmt.Fprintln(out, "// Variables:")
+					for _, c := range example.Comments {
+						fmt.Fprintf(out, "//   %s\n", c)
+					}
+				}
+				fmt.Fprintln(out, "//")
+				fmt.Fprintln(out, "// Severity constants (use in CEL expressions):")
+				fmt.Fprintln(out, "//   severity.critical    = 4  (CVSS 9.0-10.0)")
+				fmt.Fprintln(out, "//   severity.high        = 3  (CVSS 7.0-8.9)")
+				fmt.Fprintln(out, "//   severity.medium      = 2  (CVSS 4.0-6.9)")
+				fmt.Fprintln(out, "//   severity.low         = 1  (CVSS 0.1-3.9)")
+				fmt.Fprintln(out, "//   severity.unspecified = 0")
+				fmt.Fprintln(out, "//")
+				fmt.Fprintln(out, "// Example CEL expressions:")
+				fmt.Fprintln(out, "//   vulnerability.advisory.severity.level == severity.critical")
+				fmt.Fprintln(out, "//   vulnerability.advisory.severity.level in [severity.critical, severity.high]")
+				fmt.Fprintln(out, "//   vulnerability.package.direct == true")
+				fmt.Fprintln(out, "//   size(vulnerability.advisory.fixed_versions) > 0")
+				fmt.Fprintln(out)
+			}
+
+			fmt.Fprintln(out, example.JSON)
+			return nil
+		},
+	}
+	cmd.Flags().StringVarP(&level, "level", "l", "typical", "Detail level: minimal, typical, comprehensive")
+	cmd.Flags().StringVarP(&output, "output", "o", "", "Output file (default: stdout)")
+	cmd.Flags().BoolVar(&listOnly, "list", false, "List all available entrypoints")
+	return cmd
+}
+
+// listPolicyEntrypoints prints all available entrypoints organized by category.
+func listPolicyEntrypoints(w io.Writer) error {
+	fmt.Fprintln(w, "Available policy entrypoints:")
+	fmt.Fprintln(w)
+
+	for _, cat := range policy.ExampleCategories {
+		fmt.Fprintf(w, "  %s - %s\n", cat.Name, cat.Description)
+		for _, ep := range cat.Entrypoints {
+			profile := policy.GetBindingProfile(ep)
+			if profile != nil {
+				fmt.Fprintf(w, "    • %-30s %s\n", ep, profile.Description)
+			} else {
+				fmt.Fprintf(w, "    • %s\n", ep)
+			}
+		}
+		fmt.Fprintln(w)
+	}
+
+	fmt.Fprintln(w, "Usage:")
+	fmt.Fprintln(w, "  deputy policy examples <entrypoint>              Generate typical example")
+	fmt.Fprintln(w, "  deputy policy examples <entrypoint> --level min  Minimal required fields")
+	fmt.Fprintln(w, "  deputy policy examples <entrypoint> --level comp All fields with enrichment")
+	fmt.Fprintln(w)
+	fmt.Fprintln(w, "Example workflow:")
+	fmt.Fprintln(w, "  deputy policy examples scan_vulnerability -o input.json")
+	fmt.Fprintln(w, "  deputy policy eval --policy policy.yaml --input input.json")
+
+	return nil
 }
 
 // newPolicyLintCommand creates the `lint` subcommand for validating policies.
@@ -499,7 +670,12 @@ func newPolicySimulateCommand() *cobra.Command {
 				return err
 			}
 			for i, payload := range payloads {
-				actions, err := policy.EvaluateAll(cmd.Context(), sources, payload)
+				// Wrap arbitrary JSON in structpb.Struct for proto-first evaluation
+				inputProto, err := structpb.NewStruct(payload)
+				if err != nil {
+					return fmt.Errorf("input %d: convert to proto: %w", i, err)
+				}
+				actions, err := policy.EvaluateAll(cmd.Context(), sources, inputProto)
 				if err != nil {
 					return fmt.Errorf("input %d: %w", i, err)
 				}
@@ -632,7 +808,12 @@ func executePolicyTestCase(ctx context.Context, baseDir, file string, tc *policy
 	if err != nil {
 		return fmt.Errorf("%s (%s): %w", name, file, err)
 	}
-	actions, err := policy.EvaluateAll(ctx, sources, inputMap)
+	// Wrap arbitrary JSON in structpb.Struct for proto-first evaluation
+	inputProto, err := structpb.NewStruct(inputMap)
+	if err != nil {
+		return fmt.Errorf("%s (%s): convert to proto: %w", name, file, err)
+	}
+	actions, err := policy.EvaluateAll(ctx, sources, inputProto)
 	if err != nil {
 		return fmt.Errorf("%s (%s): %w", name, file, err)
 	}
@@ -759,6 +940,7 @@ func writeSimulationResult(w io.Writer, format string, index int, payload map[st
 	case FormatJSON:
 		out := map[string]any{
 			"inputIndex": index,
+			"input":      payload,
 			"actions":    actionsToComparable(actions),
 		}
 		enc := json.NewEncoder(w)

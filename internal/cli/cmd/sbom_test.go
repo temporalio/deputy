@@ -11,6 +11,7 @@ import (
 
 	"github.com/go-git/go-git/v5"
 	"github.com/go-git/go-git/v5/plumbing/object"
+	"github.com/picatz/deputy/internal/services"
 	"github.com/spf13/cobra"
 )
 
@@ -38,7 +39,14 @@ func runSBOMCommand(t *testing.T, repo, outPath string, showContext bool) string
 	root.SetOut(io.Discard)
 	var stderr bytes.Buffer
 	root.SetErr(&stderr)
-	AddSBOMCommand(root)
+
+	// Create in-process clients for testing
+	svc, err := services.New()
+	if err != nil {
+		t.Fatalf("services.New: %v", err)
+	}
+	clients := svc.InProcessClients()
+	AddSBOMCommand(root, clients)
 
 	args := []string{"sbom", repo, "--format", "protobom-json", "--output", outPath}
 	if showContext {

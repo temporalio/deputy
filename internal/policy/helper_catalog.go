@@ -60,6 +60,56 @@ var helperFunctions = []HelperFunction{
 	// and macros (exists, filter, map) for pattern matching and iteration.
 	{Name: "imageRef", Signature: "imageRef(string) map", Doc: "Parse container image reference into components (registry, repository, name, tag, digest). Handles implicit docker.io, port vs tag disambiguation, and scheme stripping."},
 	{Name: "baseImage", Signature: "baseImage(list) string", Doc: "Extract base image reference from build history (first FROM). Handles multi-stage builds, --platform flags, and Docker's nop format."},
+
+	// SSVC (Stakeholder-Specific Vulnerability Categorization)
+	{Name: "ssvc", Signature: "ssvc(vulnerability) map", Doc: "Evaluate vulnerability using CISA SSVC decision tree. Returns map with decision (act/attend/track*/track), reasoning, and input factors."},
+
+	// Graph Helper Functions
+	// These provide dependency graph analysis for graph_report, graph_node, and graph_edge entrypoints.
+	{Name: "graphMatch", Signature: "graphMatch(string, pattern) bool", Doc: "Check if string matches glob pattern. Supports exact, prefix (*), suffix (*), and contains (*x*) matching."},
+	{Name: "isDirectDep", Signature: "isDirectDep(node) bool", Doc: "Check if node is a direct dependency."},
+	{Name: "nodeDepth", Signature: "nodeDepth(node) int", Doc: "Get dependency depth of node (0 = direct, 1+ = transitive)."},
+	{Name: "nodeEcosystem", Signature: "nodeEcosystem(node) string", Doc: "Get ecosystem of node (e.g., 'npm', 'Go', 'PyPI')."},
+	{Name: "hasVulnerabilities", Signature: "hasVulnerabilities(node) bool", Doc: "Check if node has any known vulnerabilities."},
+	{Name: "vulnerabilityCount", Signature: "vulnerabilityCount(node) int", Doc: "Get total vulnerability count for node."},
+
+	// Path Analysis Functions
+	// These work with vulnerability.path (when --with-graph is enabled) and graph traversal results.
+	{Name: "pathLength", Signature: "pathLength(list) int", Doc: "Get length of a dependency path (number of nodes)."},
+	{Name: "pathContains", Signature: "pathContains(list, pattern) bool", Doc: "Check if any path element matches the glob pattern."},
+	{Name: "pathDepth", Signature: "pathDepth(list) int", Doc: "Get dependency depth from path (path length - 1). Direct = 0."},
+
+	// Node Accessor Functions
+	// Convenient accessors for node fields, composable with filter/map.
+	{Name: "nodePurl", Signature: "nodePurl(node) string", Doc: "Get PURL of a node."},
+	{Name: "nodeName", Signature: "nodeName(node) string", Doc: "Get name of a node."},
+	{Name: "nodeVersion", Signature: "nodeVersion(node) string", Doc: "Get version of a node."},
+
+	// Edge Functions
+	{Name: "edgeScope", Signature: "edgeScope(edge) string", Doc: "Get scope of an edge (runtime, dev, test, build, optional)."},
+
+	// Severity Comparison Functions
+	// Note: For simple field access, use proto fields directly:
+	//   vulnerability.advisory_id, vulnerability.in_kev, vulnerability.epss,
+	//   vulnerability.advisory.fixed_versions, vulnerability.advisory.severity.level
+	// These helpers provide ordered severity comparisons that CEL can't do natively.
+	// Both global function and method syntax are supported:
+	//   severityAtLeast(vulnerability, "HIGH")  // global function
+	//   vulnerability.severityAtLeast("HIGH")   // method syntax
+	{Name: "severityAtLeast", Signature: "severityAtLeast(v, level) / v.severityAtLeast(level)", Doc: "Check if severity >= level. Both syntaxes supported. Order: CRITICAL > HIGH > MEDIUM > LOW."},
+	{Name: "isCritical", Signature: "isCritical(v) / v.isCritical()", Doc: "Check if CRITICAL severity. Both global and method syntax supported."},
+	{Name: "isHighOrAbove", Signature: "isHighOrAbove(v) / v.isHighOrAbove()", Doc: "Check if HIGH or CRITICAL severity. Both global and method syntax supported."},
+
+	// Import Status Functions (Extended Graph Mode)
+	// These help filter and analyze dependencies by their import status in the module graph.
+	// Import status indicates whether a dependency is:
+	//   IMPORTED - actively used by source code (highest risk if vulnerable)
+	//   REQUIRED - in go.mod but not directly imported (medium risk)
+	//   DECLARED - in full module graph but not selected by MVS (latent risk)
+	{Name: "isImported", Signature: "isImported(node) bool", Doc: "Check if node is actively imported by source code (compiled into binary). Highest security relevance."},
+	{Name: "isRequired", Signature: "isRequired(node) bool", Doc: "Check if node is in go.mod/lockfile but not directly imported. Medium security relevance."},
+	{Name: "isDeclared", Signature: "isDeclared(node) bool", Doc: "Check if node is in full module graph but not selected by MVS. Latent supply chain risk."},
+	{Name: "importStatus", Signature: "importStatus(node) string", Doc: "Get import status of node: 'imported', 'required', 'declared', or 'unknown'."},
 }
 
 // HelperCatalog returns the CEL helper catalog.

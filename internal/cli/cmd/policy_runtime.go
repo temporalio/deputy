@@ -23,24 +23,17 @@ func evaluatePoliciesForCommand(ctx context.Context, policyPaths []string, paylo
 	if payload == nil {
 		payload = map[string]any{}
 	}
-	env := map[string]any{
-		"command": command,
+	// Set env in the payload map before converting to proto
+	payload["env"] = map[string]any{
+		"command":    command,
+		"entrypoint": entrypoint.String(),
 	}
-	if entrypoint != "" {
-		env["entrypoint"] = entrypoint.String()
-	}
-	if existing, ok := payload["env"].(map[string]any); ok {
-		for k, v := range existing {
-			env[k] = v
-		}
-	}
-	payload["env"] = env
 
 	engine, err := policy.NewEngineFromPaths(policyPaths)
 	if err != nil {
 		return nil, err
 	}
-	actions, err := engine.EvaluateAll(ctx, payload, command, entrypoint.String())
+	actions, err := engine.EvaluateAllMap(ctx, payload, command, entrypoint.String())
 	if err != nil {
 		return nil, err
 	}
@@ -75,16 +68,4 @@ func firstNonEmpty(values ...string) string {
 		}
 	}
 	return ""
-}
-
-// structToMap converts a struct to a map[string]any using the policy package's helper.
-// If the input is already a map, it is returned as is.
-func structToMap(v any) (map[string]any, error) {
-	if v == nil {
-		return map[string]any{}, nil
-	}
-	if m, ok := v.(map[string]any); ok {
-		return m, nil
-	}
-	return policy.StructToMap(v)
 }

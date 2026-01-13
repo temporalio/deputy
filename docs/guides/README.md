@@ -28,6 +28,7 @@ Practical "how do I use this in the real world?" documentation.
 
 | Guide | Description |
 | --- | --- |
+| [Plugins](plugins.md) | Building custom extractor plugins |
 | [Agents](agents.md) | AI-assisted remediation and triage |
 | [Troubleshooting](troubleshooting.md) | Common issues and solutions |
 

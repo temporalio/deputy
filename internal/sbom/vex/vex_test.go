@@ -6,8 +6,10 @@ import (
 	"testing"
 	"time"
 
+	vulnerabilityv1 "github.com/picatz/deputy/gen/deputy/vulnerability/v1"
 	"github.com/picatz/deputy/internal/dependency"
-	"github.com/picatz/deputy/internal/scan"
+	"github.com/picatz/deputy/internal/inventory"
+	"github.com/picatz/deputy/internal/scanning"
 	"github.com/picatz/deputy/internal/vulnerability"
 )
 
@@ -47,8 +49,8 @@ func TestJustification(t *testing.T) {
 }
 
 func TestFromScanResult(t *testing.T) {
-	result := scan.Result{
-		Target: scan.Target{
+	result := scanning.Result{
+		Target: inventory.Target{
 			DisplayPath: "github.com/example/repo",
 		},
 		Findings: []vulnerability.Finding{
@@ -60,9 +62,9 @@ func TestFromScanResult(t *testing.T) {
 				Affected:   true,
 			},
 		},
-		Advisories: map[string]vulnerability.Advisory{
+		Advisories: map[string]*vulnerabilityv1.Advisory{
 			"CVE-2024-1234": {
-				ID:            "CVE-2024-1234",
+				Id:            "CVE-2024-1234",
 				Summary:       "Test vulnerability",
 				FixedVersions: []string{"v1.0.1"},
 			},
@@ -90,12 +92,12 @@ func TestFromScanResult(t *testing.T) {
 }
 
 func TestFromScanResultEmpty(t *testing.T) {
-	result := scan.Result{
-		Target: scan.Target{
+	result := scanning.Result{
+		Target: inventory.Target{
 			DisplayPath: "empty-project",
 		},
 		Findings:   []vulnerability.Finding{},
-		Advisories: map[string]vulnerability.Advisory{},
+		Advisories: map[string]*vulnerabilityv1.Advisory{},
 	}
 
 	doc := FromScanResult(result, DefaultOptions())

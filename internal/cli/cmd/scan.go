@@ -15,28 +15,35 @@ import (
 	"sync"
 	"time"
 
+	"connectrpc.com/connect"
+
 	cdx "github.com/CycloneDX/cyclonedx-go"
 	git "github.com/go-git/go-git/v5"
 	"github.com/google/go-containerregistry/pkg/name"
 	"github.com/google/osv-scalibr/extractor"
 	packageurl "github.com/package-url/packageurl-go"
+	policyv1 "github.com/picatz/deputy/gen/deputy/policy/v1"
+	scanv1 "github.com/picatz/deputy/gen/deputy/scan/v1"
+	targetv1 "github.com/picatz/deputy/gen/deputy/target/v1"
+	"github.com/picatz/deputy/internal/services"
 	cliflags "github.com/picatz/deputy/internal/cli/flags"
-	deperrors "github.com/picatz/deputy/internal/errors"
 	"github.com/picatz/deputy/internal/collections"
 	"github.com/picatz/deputy/internal/container/image"
 	"github.com/picatz/deputy/internal/dockerfile"
+	deperrors "github.com/picatz/deputy/internal/errors"
 	gitx "github.com/picatz/deputy/internal/gitutil"
+	"github.com/picatz/deputy/internal/inventory"
 	"github.com/picatz/deputy/internal/output"
 	"github.com/picatz/deputy/internal/policy"
+	internalproto "github.com/picatz/deputy/internal/proto"
 	"github.com/picatz/deputy/internal/purlx"
 	"github.com/picatz/deputy/internal/report"
 	"github.com/picatz/deputy/internal/report/render"
 	"github.com/picatz/deputy/internal/sarif"
-	"github.com/picatz/deputy/internal/scan"
+	"github.com/picatz/deputy/internal/scanning"
 	"github.com/picatz/deputy/internal/targets"
 	ui "github.com/picatz/deputy/internal/ui"
 	"github.com/picatz/deputy/internal/version"
-	"github.com/picatz/deputy/internal/vulnerability"
 	"github.com/protobom/protobom/pkg/sbom"
 	spdxjson "github.com/spdx/tools-golang/json"
 	spdxdoc "github.com/spdx/tools-golang/spdx"
@@ -46,30 +53,6 @@ import (
 	"google.golang.org/protobuf/encoding/protojson"
 )
 
-// ScanResult is the structured output of a vulnerability scan suitable for
-// serialization to JSON or further aggregation.
-type ScanResult struct {
-	// Repo is the repository path or URL that was scanned.
-	Repo string `json:"repo"`
-	// Ref is the git reference (branch, tag, commit) that was scanned.
-	Ref string `json:"ref"`
-	// Commit is the resolved commit hash of the scanned reference.
-	Commit string `json:"commit"`
-	// Generated is the ISO 8601 timestamp when the scan was performed.
-	Generated string `json:"generated"`
-	// PackagesScanned is the total number of packages analyzed for vulnerabilities.
-	PackagesScanned int `json:"packagesScanned"`
-	// Stats provides aggregate vulnerability counts and severity breakdown.
-	Stats vulnerability.Stats `json:"stats"`
-	// Vulnerabilities is the list of security vulnerabilities found in dependencies.
-	Vulnerabilities []report.Vulnerability `json:"vulnerabilities"`
-	// PolicyFindings contains policy evaluation results (deny/warn actions).
-	PolicyFindings []report.PolicyFinding `json:"policyFindings,omitempty"`
-	// ImageInfo contains container image configuration and metadata when scanning
-	// container images. Nil for non-container scans or when image config is unavailable.
-	ImageInfo *image.Info `json:"imageInfo,omitempty"`
-}
-
 // ModuleDeprecation captures information about a deprecated module and its
 // suggested replacement (future enrichment hook).
 type ModuleDeprecation struct {
@@ -78,24 +61,9 @@ type ModuleDeprecation struct {
 	URL     string `json:"url,omitempty"`
 }
 
-// Scanner bridges CLI commands to the scan service.
-type Scanner struct {
-	service *scan.Service
-}
-
-// NewScanner returns a Scanner configured with the provided scan service.
-func NewScanner(service *scan.Service) *Scanner {
-	if service == nil {
-		service = scan.NewService()
-	}
-	return &Scanner{service: service}
-}
-
 // AddScanCommand registers the scan subcommand with the root command.
 // It configures the command flags and usage examples.
-func AddScanCommand(root *cobra.Command, service *scan.Service) {
-	scanner := NewScanner(service)
-
+func AddScanCommand(root *cobra.Command, c *services.Clients) {
 	scanCmd := &cobra.Command{
 		Use:           "scan [target]",
 		Aliases:       []string{"s"},
@@ -123,7 +91,9 @@ known vulnerabilities. It respects go.mod files and understands Go module versio
 If you omit a target, Deputy scans the current Git repo (or the current directory
 when no repo is present). PURLs and common container image references are also
 recognized at the top level.`,
-		RunE: scanner.runScan,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runScan(c, cmd, args)
+		},
 		Example: `BASIC VULNERABILITY SCANNING:
   # Scan current repository at HEAD
   deputy scan
@@ -232,6 +202,7 @@ WORKFLOW EXAMPLES:
 	scanCmd.Flags().String("published-before", "", "Only include vulnerabilities published before this date (YYYY, YYYY-MM, YYYY-MM-DD, or RFC3339)")
 	scanCmd.Flags().String("published-after", "", "Only include vulnerabilities published on/after this date (YYYY, YYYY-MM, YYYY-MM-DD, or RFC3339)")
 	scanCmd.Flags().String("as-of", "", "Historical view: show vulnerabilities known up to and including this date (implies --published-before)")
+	scanCmd.Flags().String("filter", "", "CEL expression to filter vulnerabilities (e.g., 'vulnerability.advisory.severity.level == severity.critical')")
 	scanCmd.Flags().StringArray("policy", nil, "Path to a CEL policy file or bundle to evaluate against the scan report (repeatable)")
 	scanCmd.Flags().Bool("show-symbols", false, "Show symbol hints (OSV imports) in text output")
 	scanCmd.Flags().Bool("show-db-info", false, "Show database-specific metadata (e.g., review_status) in text output")
@@ -241,6 +212,7 @@ WORKFLOW EXAMPLES:
 	scanCmd.Flags().Bool("enrich", false, "Enrich vulnerabilities with EPSS scores and KEV status (requires network)")
 	scanCmd.Flags().Bool("with-graph", false, "Build dependency graph to show paths to vulnerable packages")
 	scanCmd.Flags().Bool("secrets", false, "Scan for leaked secrets and credentials in addition to vulnerabilities")
+	scanCmd.Flags().Bool("detect-base-image", false, "Detect base image layers in container scans (requires network, queries deps.dev)")
 
 	scanDirCmd := &cobra.Command{
 		Use:           "dir <path>",
@@ -258,7 +230,9 @@ FILESYSTEM ANALYSIS:
 Scans go.mod files and other package manifests in the specified directory tree.
 Does not require Git repository context, making it suitable for CI/CD environments
 where only source code (not Git history) is available.`,
-		RunE: scanner.runScanDir,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runScanDir(c, cmd, args)
+		},
 		Example: `DIRECTORY SCANNING:
   # Scan current directory
   deputy scan dir .
@@ -291,6 +265,7 @@ TYPICAL USE CASES:
 	scanDirCmd.Flags().String("published-before", "", "Only include vulnerabilities published before this date (YYYY, YYYY-MM, YYYY-MM-DD, or RFC3339)")
 	scanDirCmd.Flags().String("published-after", "", "Only include vulnerabilities published on/after this date (YYYY, YYYY-MM, YYYY-MM-DD, or RFC3339)")
 	scanDirCmd.Flags().String("as-of", "", "Historical view: show vulnerabilities known up to and including this date (implies --published-before)")
+	scanDirCmd.Flags().String("filter", "", "CEL expression to filter vulnerabilities (e.g., 'vulnerability.advisory.severity.level == severity.critical')")
 	scanDirCmd.Flags().StringArray("policy", nil, "Path to a CEL policy file or bundle to evaluate against the scan report (repeatable)")
 	scanDirCmd.Flags().Bool("show-symbols", false, "Show symbol hints (OSV imports) in text output")
 	scanDirCmd.Flags().Bool("show-db-info", false, "Show database-specific metadata (e.g., review_status) in text output")
@@ -326,7 +301,9 @@ and available fixes where applicable.
 IMAGE REFERENCES:
 If the SBOM includes docker/oci PURLs, Deputy will also resolve and scan
 those container images.`,
-		RunE: scanner.runScanSBOM,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runScanSBOM(c, cmd, args)
+		},
 		Example: `SBOM FILE SCANNING:
   # Scan SBOM file
   deputy scan sbom software-bill-of-materials.json
@@ -379,6 +356,7 @@ WORKFLOW EXAMPLES:
 	scanSBOMCmd.Flags().String("published-before", "", "Only include vulnerabilities published before this date (YYYY, YYYY-MM, YYYY-MM-DD, or RFC3339)")
 	scanSBOMCmd.Flags().String("published-after", "", "Only include vulnerabilities published on/after this date (YYYY, YYYY-MM, YYYY-MM-DD, or RFC3339)")
 	scanSBOMCmd.Flags().String("as-of", "", "Historical view: show vulnerabilities known up to and including this date (implies --published-before)")
+	scanSBOMCmd.Flags().String("filter", "", "CEL expression to filter vulnerabilities (e.g., 'vulnerability.advisory.severity.level == severity.critical')")
 	scanSBOMCmd.Flags().String("input-format", "auto", "Input SBOM format (auto, protobom-json, cyclonedx-json, spdx-json)")
 	scanSBOMCmd.Flags().StringArray("policy", nil, "Path to a CEL policy file or bundle to evaluate against the scan report (repeatable)")
 	scanSBOMCmd.Flags().Bool("show-symbols", false, "Show symbol hints (OSV imports) in text output")
@@ -395,7 +373,9 @@ WORKFLOW EXAMPLES:
 
 PURLs provide a canonical identifier for a package in a specific ecosystem.
 The scan command uses the PURL to query OSV directly, so a version is required.`,
-		RunE: scanner.runScanPURL,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runScanPURL(c, cmd, args)
+		},
 		Example: `PURL SCANNING:
   # Scan a single package by PURL
   deputy scan purl pkg:npm/lodash@4.17.21
@@ -415,6 +395,7 @@ OUTPUT AND FILTERING:
 	scanPURLCmd.Flags().String("published-before", "", "Only include vulnerabilities published before this date (YYYY, YYYY-MM, YYYY-MM-DD, or RFC3339)")
 	scanPURLCmd.Flags().String("published-after", "", "Only include vulnerabilities published on/after this date (YYYY, YYYY-MM, YYYY-MM-DD, or RFC3339)")
 	scanPURLCmd.Flags().String("as-of", "", "Historical view: show vulnerabilities known up to and including this date (implies --published-before)")
+	scanPURLCmd.Flags().String("filter", "", "CEL expression to filter vulnerabilities (e.g., 'vulnerability.advisory.severity.level == severity.critical')")
 	scanPURLCmd.Flags().StringArray("policy", nil, "Path to a CEL policy file or bundle to evaluate against the scan report (repeatable)")
 	scanPURLCmd.Flags().Bool("show-symbols", false, "Show symbol hints (OSV imports) in text output")
 	scanPURLCmd.Flags().Bool("show-db-info", false, "Show database-specific metadata (e.g., review_status) in text output")
@@ -449,7 +430,9 @@ CEL policy evaluation. Use --policy to enforce security requirements like:
 • Enforce layer count or size limits
 
 See 'deputy policy' and policy/examples/ for container image policy examples.`,
-		RunE: scanner.runScanImage,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runScanImage(c, cmd, args)
+		},
 		Example: `CONTAINER IMAGE SCANNING:
   # Scan a remote image
   deputy scan image docker://ghcr.io/owner/app:1.2.3
@@ -485,6 +468,7 @@ POLICY ENFORCEMENT:
 	scanImageCmd.Flags().String("published-before", "", "Only include vulnerabilities published before this date (YYYY, YYYY-MM, YYYY-MM-DD, or RFC3339)")
 	scanImageCmd.Flags().String("published-after", "", "Only include vulnerabilities published on/after this date (YYYY, YYYY-MM, YYYY-MM-DD, or RFC3339)")
 	scanImageCmd.Flags().String("as-of", "", "Historical view: show vulnerabilities known up to and including this date (implies --published-before)")
+	scanImageCmd.Flags().String("filter", "", "CEL expression to filter vulnerabilities (e.g., 'vulnerability.advisory.severity.level == severity.critical')")
 	scanImageCmd.Flags().StringArray("policy", nil, "Path to a CEL policy file or bundle to evaluate against the scan report (repeatable)")
 	scanImageCmd.Flags().Bool("show-symbols", false, "Show symbol hints (OSV imports) in text output")
 	scanImageCmd.Flags().Bool("show-db-info", false, "Show database-specific metadata (e.g., review_status) in text output")
@@ -499,7 +483,7 @@ POLICY ENFORCEMENT:
 
 // runScan executes the scan command logic, handling argument parsing,
 // scan execution, policy evaluation, and output formatting.
-func (s *Scanner) runScan(cmd *cobra.Command, args []string) error {
+func runScan(c *services.Clients, cmd *cobra.Command, args []string) error {
 	target := ""
 	if len(args) > 0 {
 		target = strings.TrimSpace(args[0])
@@ -518,19 +502,19 @@ func (s *Scanner) runScan(cmd *cobra.Command, args []string) error {
 				return fmt.Errorf("expected 1 argument: <purl>")
 			}
 			warnRefIgnored(cmd, "purl")
-			return s.runScanPURL(cmd, []string{target})
+			return runScanPURL(c, cmd, []string{target})
 		case "sbom":
 			if target == "" {
 				return fmt.Errorf("expected 1 argument: <path|->")
 			}
 			warnRefIgnored(cmd, "sbom")
-			return s.runScanSBOM(cmd, []string{target})
+			return runScanSBOM(c, cmd, []string{target})
 		case "dir":
 			if target == "" {
 				target = "."
 			}
 			warnRefIgnored(cmd, "directory")
-			return s.runScanDir(cmd, []string{target})
+			return runScanDir(c, cmd, []string{target})
 		case "git":
 			if target == "" {
 				target = "."
@@ -538,19 +522,19 @@ func (s *Scanner) runScan(cmd *cobra.Command, args []string) error {
 			if root, ok := gitRoot(target); ok {
 				target = root
 			}
-			return s.runScanRepository(cmd, target)
+			return runScanRepository(c, cmd, target)
 		case "image":
 			if target == "" {
 				return fmt.Errorf("expected 1 argument: <image>")
 			}
 			warnRefIgnored(cmd, "container image")
-			return s.runScanImageWithOptions(cmd, target, imageSource, platform)
+			return runScanImageWithOptions(c, cmd, target, imageSource, platform)
 		case "dockerfile":
 			if target == "" {
 				return fmt.Errorf("expected 1 argument: <path>")
 			}
 			warnRefIgnored(cmd, "dockerfile")
-			return s.runScanDockerfile(cmd, target)
+			return runScanDockerfile(c, cmd, target)
 		default:
 			return fmt.Errorf("unknown --source %q", source)
 		}
@@ -562,41 +546,41 @@ func (s *Scanner) runScan(cmd *cobra.Command, args []string) error {
 			return fmt.Errorf("failed to get current directory: %w", err)
 		}
 		if root, ok := gitRoot(wd); ok {
-			return s.runScanRepository(cmd, root)
+			return runScanRepository(c, cmd, root)
 		}
 		warnRefIgnored(cmd, "directory")
-		return s.runScanDir(cmd, []string{wd})
+		return runScanDir(c, cmd, []string{wd})
 	}
 
 	if isPURLTarget(target) {
 		warnRefIgnored(cmd, "purl")
-		return s.runScanPURL(cmd, []string{target})
+		return runScanPURL(c, cmd, []string{target})
 	}
 
 	if isImageTargetScheme(target) {
 		warnRefIgnored(cmd, "container image")
-		return s.runScanImage(cmd, []string{target})
+		return runScanImage(c, cmd, []string{target})
 	}
 
 	if target == "-" {
 		warnRefIgnored(cmd, "sbom")
-		return s.runScanSBOM(cmd, []string{target})
+		return runScanSBOM(c, cmd, []string{target})
 	}
 
 	if info, err := os.Stat(target); err == nil {
 		if info.IsDir() {
 			if root, ok := gitRoot(target); ok {
-				return s.runScanRepository(cmd, root)
+				return runScanRepository(c, cmd, root)
 			}
 			warnRefIgnored(cmd, "directory")
-			return s.runScanDir(cmd, []string{target})
+			return runScanDir(c, cmd, []string{target})
 		}
 		// Check if file is a Dockerfile
 		if isDockerfilePath(target) {
-			return s.runScanDockerfile(cmd, target)
+			return runScanDockerfile(c, cmd, target)
 		}
 		warnRefIgnored(cmd, "sbom")
-		return s.runScanSBOM(cmd, []string{target})
+		return runScanSBOM(c, cmd, []string{target})
 	}
 
 	if isAmbiguousDockerHubReference(target) {
@@ -605,77 +589,82 @@ func (s *Scanner) runScan(cmd *cobra.Command, args []string) error {
 
 	if looksLikeContainerReference(target) {
 		warnRefIgnored(cmd, "container image")
-		return s.runScanImageWithOptions(cmd, target, "", platform)
+		return runScanImageWithOptions(c, cmd, target, "", platform)
 	}
 
-	return s.runScanRepository(cmd, target)
+	return runScanRepository(c, cmd, target)
 }
 
-func (s *Scanner) runScanRepository(cmd *cobra.Command, repoArg string) error {
+func runScanRepository(c *services.Clients, cmd *cobra.Command, repoArg string) error {
 	ctx := cmd.Context()
 	flags := extractScanFlags(cmd)
+	errW := cmd.ErrOrStderr()
 
-	beforeT, afterT := flags.parsePublishedTimes(cmd.ErrOrStderr())
-	scanOpts := flags.scanOptions()
+	// Build proto request from flags
+	req := flags.toScanRequest(repoArg, errW)
 
 	// Show progress indicator for interactive mode (text output to TTY)
 	var progress *ui.Progress
-	errW := cmd.ErrOrStderr()
 	if ui.IsTTY(errW) && (flags.Format == "" || flags.Format == FormatText) {
 		progress = ui.NewProgress(errW, "Scanning for vulnerabilities")
 		progress.Start(ctx)
 	}
 
-	exec, err := s.service.ScanRepository(ctx, repoArg, flags.Ref, cmd.Flags().Changed("ref"), scan.Options{
-		Ecosystems:      scanOpts.Ecosystems,
-		PublishedBefore: beforeT,
-		PublishedAfter:  afterT,
-		Graph:           flags.graphOptions(),
-	})
+	// Call the client
+	resp, err := c.Vulns.Scan(ctx, connect.NewRequest(req))
 	if progress != nil {
 		progress.Clear()
 	}
 	if err != nil {
 		return err
 	}
-	defer exec.Close()
 
-	for _, warning := range exec.Result.Warnings {
-		fmt.Fprintf(cmd.ErrOrStderr(), "Warning: %s\n", warning)
+	// Convert proto response to internal result
+	resultPtr := internalproto.ScanningResultFromProto(resp.Msg)
+	result := *resultPtr
+
+	for _, warning := range result.Warnings {
+		fmt.Fprintf(errW, "Warning: %s\n", warning)
 	}
 
-	resultOut := exec.Result
-	policyResult := exec.Result
+	resultOut := result
+	policyResult := result
 	if flags.IgnoreUnfixed {
-		policyResult = scan.FilterUnfixed(policyResult)
+		policyResult = scanning.FilterUnfixed(policyResult)
 		resultOut = policyResult
 	}
 
-	// Load and apply ignore rules
+	// Load and apply ignore rules (client-side filtering from local .deputy-ignore)
 	var ignoredCount int
-	workDir := exec.Result.Target.LocalPath
+	workDir := result.Target.LocalPath
 	if workDir == "" {
 		workDir, _ = os.Getwd()
 	}
 	if err := flags.loadIgnoreRules(workDir); err != nil {
-		fmt.Fprintf(cmd.ErrOrStderr(), "Warning: %v\n", err)
+		fmt.Fprintf(errW, "Warning: %v\n", err)
 	}
 	if flags.ignoreRules != nil {
-		policyResult, ignoredCount = scan.FilterIgnored(policyResult, flags.ignoreRules)
+		policyResult, ignoredCount = scanning.FilterIgnored(policyResult, flags.ignoreRules)
 		resultOut = policyResult
 	}
 
-	report := buildScanReport(policyResult)
-	if flags.Enrich {
-		enrichVulnerabilities(ctx, report.Vulnerabilities, cmd.ErrOrStderr())
+	// Apply CEL filter expression if provided
+	if flags.Filter != "" {
+		policyResult, err = scanning.FilterByCEL(ctx, policyResult, flags.Filter)
+		if err != nil {
+			return fmt.Errorf("filter: %w", err)
+		}
+		resultOut = policyResult
 	}
-	policyActions, err := runScanPolicies(ctx, flags.PolicyPaths, policyResult, report, cmd.ErrOrStderr(), nil)
+
+	// Policy evaluation - can be done client-side or server-side
+	// Server-side policies are already applied, but we support client-side policies too
+	policyActions, err := runScanPolicies(ctx, flags.PolicyPaths, policyResult, errW, nil)
 	if err != nil {
 		return err
 	}
 	policyFindings := actionsToPolicyFindings(policyActions)
-	report.PolicyFindings = policyFindings
-	exec.Result.PolicyActions = policyActions
+	result.PolicyActions = policyActions
 
 	out, err := openOutputWriter(cmd, flags.OutPath)
 	if err != nil {
@@ -685,18 +674,27 @@ func (s *Scanner) runScanRepository(cmd *cobra.Command, repoArg string) error {
 
 	switch strings.ToLower(flags.Format) {
 	case "", FormatText:
-		return s.outputText(out.Writer, cmd.ErrOrStderr(), resultOut, flags.IgnoreUnfixed, ignoredCount, policyFindings, flags.displayOptionsWithResult(resultOut))
+		if err := outputText(out.Writer, errW, resultOut, flags.IgnoreUnfixed, ignoredCount, policyFindings, flags.displayOptionsWithResult(resultOut)); err != nil {
+			return err
+		}
+		// Show policy evaluation summary
+		render.PolicyEvaluationSummary(out.Writer, len(flags.PolicyPaths), policyFindings)
+		return nil
 	case FormatJSON:
-		return s.outputJSON(out.Writer, resultOut, policyFindings)
+		// Convert filtered result back to proto for consistent JSON output
+		protoResp := internalproto.ScanningResultToProto(&resultOut)
+		// Add client-side policy actions
+		protoResp.PolicyActions = append(protoResp.PolicyActions, policyActionsToProto(policyActions)...)
+		return outputProtoJSON(out.Writer, protoResp)
 	case FormatSARIF:
-		return s.outputSARIF(out.Writer, resultOut, policyFindings)
+		return outputSARIF(out.Writer, resultOut, policyFindings)
 	default:
 		return cliflags.UnsupportedFormatError("--format", flags.Format, "text|json|sarif")
 	}
 }
 
 // runScanDir executes the directory scan command logic.
-func (s *Scanner) runScanDir(cmd *cobra.Command, args []string) error {
+func runScanDir(c *services.Clients, cmd *cobra.Command, args []string) error {
 	if len(args) != 1 {
 		return fmt.Errorf("expected 1 argument: <path>")
 	}
@@ -704,70 +702,73 @@ func (s *Scanner) runScanDir(cmd *cobra.Command, args []string) error {
 	ctx := cmd.Context()
 	flags := extractScanFlags(cmd)
 	path := strings.TrimSpace(args[0])
+	errW := cmd.ErrOrStderr()
 
-	beforeT, afterT := flags.parsePublishedTimes(cmd.ErrOrStderr())
-	scanOpts := flags.scanOptions()
+	// Build proto request with directory target hint
+	req := flags.toScanRequestWithHint(path, targetv1.TargetKind_TARGET_KIND_DIR, "", "", errW)
 
 	// Show progress indicator for interactive mode (text output to TTY)
 	var progress *ui.Progress
-	errW := cmd.ErrOrStderr()
 	if ui.IsTTY(errW) && (flags.Format == "" || flags.Format == FormatText) {
 		progress = ui.NewProgress(errW, "Scanning for vulnerabilities")
 		progress.Start(ctx)
 	}
 
-	exec, err := s.service.ScanDirectory(ctx, path, scan.Options{
-		Ecosystems:      scanOpts.Ecosystems,
-		PublishedBefore: beforeT,
-		PublishedAfter:  afterT,
-		Graph:           flags.graphOptions(),
-	})
+	resp, err := c.Vulns.Scan(ctx, connect.NewRequest(req))
 	if progress != nil {
 		progress.Clear()
 	}
 	if err != nil {
 		return err
 	}
-	defer exec.Close()
 
-	for _, warning := range exec.Result.Warnings {
-		fmt.Fprintf(cmd.ErrOrStderr(), "Warning: %s\n", warning)
+	// Convert proto response to internal result
+	resultPtr := internalproto.ScanningResultFromProto(resp.Msg)
+	result := *resultPtr
+
+	for _, warning := range result.Warnings {
+		fmt.Fprintf(errW, "Warning: %s\n", warning)
 	}
 
-	resultOut := exec.Result
-	policyResult := exec.Result
+	resultOut := result
+	policyResult := result
 	if flags.IgnoreUnfixed {
-		policyResult = scan.FilterUnfixed(policyResult)
+		policyResult = scanning.FilterUnfixed(policyResult)
 		resultOut = policyResult
 	}
 
 	// Load and apply ignore rules
 	var ignoredCount int
 	if err := flags.loadIgnoreRules(path); err != nil {
-		fmt.Fprintf(cmd.ErrOrStderr(), "Warning: %v\n", err)
+		fmt.Fprintf(errW, "Warning: %v\n", err)
 	}
 	if flags.ignoreRules != nil {
-		policyResult, ignoredCount = scan.FilterIgnored(policyResult, flags.ignoreRules)
+		policyResult, ignoredCount = scanning.FilterIgnored(policyResult, flags.ignoreRules)
 		resultOut = policyResult
 	}
 
-	report := buildScanReport(policyResult)
-	if flags.Enrich {
-		enrichVulnerabilities(ctx, report.Vulnerabilities, cmd.ErrOrStderr())
+	// Apply CEL filter expression if provided
+	if flags.Filter != "" {
+		policyResult, err = scanning.FilterByCEL(ctx, policyResult, flags.Filter)
+		if err != nil {
+			return fmt.Errorf("filter: %w", err)
+		}
+		resultOut = policyResult
 	}
-	policyActions, err := runScanPolicies(ctx, flags.PolicyPaths, policyResult, report, cmd.ErrOrStderr(), nil)
+
+	policyActions, err := runScanPolicies(ctx, flags.PolicyPaths, policyResult, errW, nil)
 	if err != nil {
 		return err
 	}
 	policyFindings := actionsToPolicyFindings(policyActions)
-	exec.Result.PolicyActions = policyActions
+	result.PolicyActions = policyActions
 
-	// Run secrets scan if enabled
+	// Run secrets scan if enabled (client-side for now)
 	var secretsResults *SecretsResult
 	if flags.Secrets {
-		secretsResults, err = runSecretsScanner(ctx, path, cmd.ErrOrStderr())
+		secretsResults, err = runSecretsScanner(ctx, path, errW)
 		if err != nil {
-			fmt.Fprintf(cmd.ErrOrStderr(), "Warning: secrets scan failed: %v\n", err)
+			fmt.Fprintf(errW, "Warning: secrets scan failed: %v\n", err)
 		}
 	}
 
@@ -779,25 +780,31 @@ func (s *Scanner) runScanDir(cmd *cobra.Command, args []string) error {
 
 	switch strings.ToLower(flags.Format) {
 	case "", FormatText:
-		if err := s.outputTextDir(out.Writer, cmd.ErrOrStderr(), resultOut, flags.IgnoreUnfixed, ignoredCount, policyFindings, flags.displayOptionsWithResult(resultOut)); err != nil {
+		if err := outputTextDir(out.Writer, errW, resultOut, flags.IgnoreUnfixed, ignoredCount, policyFindings, flags.displayOptionsWithResult(resultOut)); err != nil {
 			return err
 		}
 		// Append secrets findings if enabled
 		if secretsResults != nil {
 			renderSecretsFindings(out.Writer, secretsResults)
 		}
+		// Show policy evaluation summary
+		render.PolicyEvaluationSummary(out.Writer, len(flags.PolicyPaths), policyFindings)
 		return nil
 	case FormatJSON:
-		return s.outputJSON(out.Writer, resultOut, policyFindings)
+		// Convert filtered result back to proto for consistent JSON output
+		protoResp := internalproto.ScanningResultToProto(&resultOut)
+		// Add client-side policy actions
+		protoResp.PolicyActions = append(protoResp.PolicyActions, policyActionsToProto(policyActions)...)
+		return outputProtoJSON(out.Writer, protoResp)
 	case FormatSARIF:
-		return s.outputSARIF(out.Writer, resultOut, policyFindings)
+		return outputSARIF(out.Writer, resultOut, policyFindings)
 	default:
 		return cliflags.UnsupportedFormatError("--format", flags.Format, "text|json|sarif")
 	}
 }
 
 // runScanSBOM executes the SBOM scan command logic.
-func (s *Scanner) runScanSBOM(cmd *cobra.Command, args []string) error {
+func runScanSBOM(c *services.Clients, cmd *cobra.Command, args []string) error {
 	if len(args) != 1 {
 		return fmt.Errorf("expected 1 argument: <path|->")
 	}
@@ -805,6 +812,7 @@ func (s *Scanner) runScanSBOM(cmd *cobra.Command, args []string) error {
 	ctx := cmd.Context()
 	flags := extractScanFlags(cmd)
 	input := strings.TrimSpace(args[0])
+	errW := cmd.ErrOrStderr()
 
 	var r io.Reader
 	if input == "-" {
@@ -828,18 +836,22 @@ func (s *Scanner) runScanSBOM(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to parse SBOM: %w", err)
 	}
 
-	beforeT, afterT := flags.parsePublishedTimes(cmd.ErrOrStderr())
-	scanOpts := flags.scanOptions()
-	exec, err := s.service.ScanSBOM(ctx, pkgs, direct, scan.Options{
-		Ecosystems:      scanOpts.Ecosystems,
-		PublishedBefore: beforeT,
-		PublishedAfter:  afterT,
-	})
+	// Build proto request with SBOM target hint
+	// Note: For SBOM scans, we pass the SBOM content in the target field (base64 encoded)
+	// and let the server parse it. For now, we do client-side parsing and use PURL-based scanning.
+	req := flags.toScanRequestWithHint(input, targetv1.TargetKind_TARGET_KIND_SBOM, "", "", errW)
+
+	// Scan the packages from the SBOM
+	resp, err := c.Vulns.Scan(ctx, connect.NewRequest(req))
 	if err != nil {
 		return err
 	}
 
-	result := exec.Result
+	// Convert proto response to internal result
+	resultPtr := internalproto.ScanningResultFromProto(resp.Msg)
+	result := *resultPtr
+
+	// Handle container images referenced in SBOM
 	if len(imageRefs) > 0 {
 		// Default concurrency for parallel image scans. Can be overridden via
 		// DEPUTY_SBOM_IMAGE_SCAN_CONCURRENCY for resource-constrained environments.
@@ -852,7 +864,7 @@ func (s *Scanner) runScanSBOM(cmd *cobra.Command, args []string) error {
 		sem := make(chan struct{}, sbomImageScanConcurrency)
 		var mu sync.Mutex
 		type imageScanOutcome struct {
-			result scan.Result
+			result scanning.Result
 			err    error
 		}
 		cache := map[string]imageScanOutcome{}
@@ -864,19 +876,12 @@ func (s *Scanner) runScanSBOM(cmd *cobra.Command, args []string) error {
 			group.Go(func() error {
 				sem <- struct{}{}
 				defer func() { <-sem }()
-				targetOpts := map[string]string{}
-				if ref.Platform != "" {
-					targetOpts["platform"] = ref.Platform
-				}
-				imgExec, err := s.service.ScanContainerImage(groupCtx, ref.Ref, targetOpts, scan.Options{
-					Ecosystems:      scanOpts.Ecosystems,
-					PublishedBefore: beforeT,
-					PublishedAfter:  afterT,
-				})
+				imgReq := flags.toScanRequestWithHint(ref.Ref, targetv1.TargetKind_TARGET_KIND_CONTAINER_IMAGE, "remote", ref.Platform, errW)
+				imgResp, err := c.Vulns.Scan(groupCtx, connect.NewRequest(imgReq))
 				outcome := imageScanOutcome{err: err}
-				if imgExec != nil {
-					outcome.result = imgExec.Result
-					_ = imgExec.Close()
+				if imgResp != nil {
+					imgResultPtr := internalproto.ScanningResultFromProto(imgResp.Msg)
+					outcome.result = *imgResultPtr
 				}
 				mu.Lock()
 				cache[key] = outcome
@@ -898,18 +903,24 @@ func (s *Scanner) runScanSBOM(cmd *cobra.Command, args []string) error {
 				result.Warnings = append(result.Warnings, fmt.Sprintf("image scan failed for %s: %v", ref.Ref, outcome.err))
 				continue
 			}
-			result = scan.MergeResults(result, outcome.result)
+			result = scanning.MergeResults(result, outcome.result)
 		}
 	}
 
+	// Merge SBOM packages if not already included from server response
+	if len(pkgs) > 0 && len(result.Packages) == 0 {
+		result.Packages = pkgs
+		result.Direct = direct
+	}
+
 	for _, warning := range result.Warnings {
-		fmt.Fprintf(cmd.ErrOrStderr(), "Warning: %s\n", warning)
+		fmt.Fprintf(errW, "Warning: %s\n", warning)
 	}
 
 	resultOut := result
 	policyResult := result
 	if flags.IgnoreUnfixed {
-		policyResult = scan.FilterUnfixed(policyResult)
+		policyResult = scanning.FilterUnfixed(policyResult)
 		resultOut = policyResult
 	}
 
@@ -917,27 +928,32 @@ func (s *Scanner) runScanSBOM(cmd *cobra.Command, args []string) error {
 	var ignoredCount int
 	workDir, _ := os.Getwd()
 	if err := flags.loadIgnoreRules(workDir); err != nil {
-		fmt.Fprintf(cmd.ErrOrStderr(), "Warning: %v\n", err)
+		fmt.Fprintf(errW, "Warning: %v\n", err)
 	}
 	if flags.ignoreRules != nil {
-		policyResult, ignoredCount = scan.FilterIgnored(policyResult, flags.ignoreRules)
+		policyResult, ignoredCount = scanning.FilterIgnored(policyResult, flags.ignoreRules)
 		resultOut = policyResult
 	}
 
-	report := buildScanReport(policyResult)
-	if flags.Enrich {
-		enrichVulnerabilities(ctx, report.Vulnerabilities, cmd.ErrOrStderr())
+	// Apply CEL filter expression if provided
+	if flags.Filter != "" {
+		policyResult, err = scanning.FilterByCEL(ctx, policyResult, flags.Filter)
+		if err != nil {
+			return fmt.Errorf("filter: %w", err)
+		}
+		resultOut = policyResult
 	}
+
 	var extra map[string]any
 	if len(sbomPURLs) > 0 {
 		extra = map[string]any{"sbom": map[string]any{"purls": sbomPURLs}}
 	}
-	policyActions, err := runScanPolicies(ctx, flags.PolicyPaths, policyResult, report, cmd.ErrOrStderr(), extra)
+	policyActions, err := runScanPolicies(ctx, flags.PolicyPaths, policyResult, errW, extra)
 	if err != nil {
 		return err
 	}
 	policyFindings := actionsToPolicyFindings(policyActions)
-	exec.Result.PolicyActions = policyActions
+	result.PolicyActions = policyActions
 
 	out, err := openOutputWriter(cmd, flags.OutPath)
 	if err != nil {
@@ -950,25 +966,31 @@ func (s *Scanner) runScanSBOM(cmd *cobra.Command, args []string) error {
 		doc := render.ScanResultsHeaderDoc("SBOM input", "", "", "")
 		_ = doc.Render(out.Writer, output.UIStyles())
 		if flags.IgnoreUnfixed {
-			fmt.Fprintln(cmd.ErrOrStderr(), "  "+ui.StyleMeta.Render("Note: ignoring unfixed vulnerabilities (--ignore-unfixed)"))
+			fmt.Fprintln(errW, "  "+ui.StyleMeta.Render("Note: ignoring unfixed vulnerabilities (--ignore-unfixed)"))
 		}
 		if ignoredCount > 0 {
-			fmt.Fprintln(cmd.ErrOrStderr(), "  "+ui.StyleMeta.Render(fmt.Sprintf("Note: %d vulnerability finding(s) ignored by rules", ignoredCount)))
+			fmt.Fprintln(errW, "  "+ui.StyleMeta.Render(fmt.Sprintf("Note: %d vulnerability finding(s) ignored by rules", ignoredCount)))
 		}
 		render.DisplayVulnerabilities(out.Writer, resultOut, flags.displayOptions())
 		render.PolicyFindings(out.Writer, policyFindings)
+		// Show policy evaluation summary
+		render.PolicyEvaluationSummary(out.Writer, len(flags.PolicyPaths), policyFindings)
 		return nil
 	case FormatJSON:
-		return s.outputJSON(out.Writer, resultOut, policyFindings)
+		// Convert filtered result back to proto for consistent JSON output
+		protoResp := internalproto.ScanningResultToProto(&resultOut)
+		// Add client-side policy actions
+		protoResp.PolicyActions = append(protoResp.PolicyActions, policyActionsToProto(policyActions)...)
+		return outputProtoJSON(out.Writer, protoResp)
 	case FormatSARIF:
-		return s.outputSARIF(out.Writer, resultOut, policyFindings)
+		return outputSARIF(out.Writer, resultOut, policyFindings)
 	default:
 		return cliflags.UnsupportedFormatError("--format", flags.Format, "text|json|sarif")
 	}
 }
 
 // runScanPURL executes the PURL scan command logic.
-func (s *Scanner) runScanPURL(cmd *cobra.Command, args []string) error {
+func runScanPURL(c *services.Clients, cmd *cobra.Command, args []string) error {
 	if len(args) != 1 {
 		return fmt.Errorf("expected 1 argument: <purl>")
 	}
@@ -976,27 +998,28 @@ func (s *Scanner) runScanPURL(cmd *cobra.Command, args []string) error {
 	ctx := cmd.Context()
 	flags := extractScanFlags(cmd)
 	input := strings.TrimSpace(args[0])
+	errW := cmd.ErrOrStderr()
 
-	beforeT, afterT := flags.parsePublishedTimes(cmd.ErrOrStderr())
-	scanOpts := flags.scanOptions()
-	exec, err := s.service.ScanPURL(ctx, input, scan.Options{
-		Ecosystems:      scanOpts.Ecosystems,
-		PublishedBefore: beforeT,
-		PublishedAfter:  afterT,
-	})
+	// Build proto request with PURL target hint
+	req := flags.toScanRequestWithHint(input, targetv1.TargetKind_TARGET_KIND_PURL, "", "", errW)
+
+	resp, err := c.Vulns.Scan(ctx, connect.NewRequest(req))
 	if err != nil {
 		return err
 	}
-	defer exec.Close()
 
-	for _, warning := range exec.Result.Warnings {
-		fmt.Fprintf(cmd.ErrOrStderr(), "Warning: %s\n", warning)
+	// Convert proto response to internal result
+	resultPtr := internalproto.ScanningResultFromProto(resp.Msg)
+	result := *resultPtr
+
+	for _, warning := range result.Warnings {
+		fmt.Fprintf(errW, "Warning: %s\n", warning)
 	}
 
-	resultOut := exec.Result
-	policyResult := exec.Result
+	resultOut := result
+	policyResult := result
 	if flags.IgnoreUnfixed {
-		policyResult = scan.FilterUnfixed(policyResult)
+		policyResult = scanning.FilterUnfixed(policyResult)
 		resultOut = policyResult
 	}
 
@@ -1004,23 +1027,28 @@ func (s *Scanner) runScanPURL(cmd *cobra.Command, args []string) error {
 	var ignoredCount int
 	workDir, _ := os.Getwd()
 	if err := flags.loadIgnoreRules(workDir); err != nil {
-		fmt.Fprintf(cmd.ErrOrStderr(), "Warning: %v\n", err)
+		fmt.Fprintf(errW, "Warning: %v\n", err)
 	}
 	if flags.ignoreRules != nil {
-		policyResult, ignoredCount = scan.FilterIgnored(policyResult, flags.ignoreRules)
+		policyResult, ignoredCount = scanning.FilterIgnored(policyResult, flags.ignoreRules)
 		resultOut = policyResult
 	}
 
-	report := buildScanReport(policyResult)
-	if flags.Enrich {
-		enrichVulnerabilities(ctx, report.Vulnerabilities, cmd.ErrOrStderr())
+	// Apply CEL filter expression if provided
+	if flags.Filter != "" {
+		policyResult, err = scanning.FilterByCEL(ctx, policyResult, flags.Filter)
+		if err != nil {
+			return fmt.Errorf("filter: %w", err)
+		}
+		resultOut = policyResult
 	}
-	policyActions, err := runScanPolicies(ctx, flags.PolicyPaths, policyResult, report, cmd.ErrOrStderr(), nil)
+
+	policyActions, err := runScanPolicies(ctx, flags.PolicyPaths, policyResult, errW, nil)
 	if err != nil {
 		return err
 	}
 	policyFindings := actionsToPolicyFindings(policyActions)
-	exec.Result.PolicyActions = policyActions
+	result.PolicyActions = policyActions
 
 	out, err := openOutputWriter(cmd, flags.OutPath)
 	if err != nil {
@@ -1030,18 +1058,27 @@ func (s *Scanner) runScanPURL(cmd *cobra.Command, args []string) error {
 
 	switch strings.ToLower(flags.Format) {
 	case "", FormatText:
-		return s.outputTextDir(out.Writer, cmd.ErrOrStderr(), resultOut, flags.IgnoreUnfixed, ignoredCount, policyFindings, flags.displayOptions())
+		if err := outputTextDir(out.Writer, errW, resultOut, flags.IgnoreUnfixed, ignoredCount, policyFindings, flags.displayOptions()); err != nil {
+			return err
+		}
+		// Show policy evaluation summary
+		render.PolicyEvaluationSummary(out.Writer, len(flags.PolicyPaths), policyFindings)
+		return nil
 	case FormatJSON:
-		return s.outputJSON(out.Writer, resultOut, policyFindings)
+		// Convert filtered result back to proto for consistent JSON output
+		protoResp := internalproto.ScanningResultToProto(&resultOut)
+		// Add client-side policy actions
+		protoResp.PolicyActions = append(protoResp.PolicyActions, policyActionsToProto(policyActions)...)
+		return outputProtoJSON(out.Writer, protoResp)
 	case FormatSARIF:
-		return s.outputSARIF(out.Writer, resultOut, policyFindings)
+		return outputSARIF(out.Writer, resultOut, policyFindings)
 	default:
 		return cliflags.UnsupportedFormatError("--format", flags.Format, "text|json|sarif")
 	}
 }
 
 // runScanImage executes the container image scan command logic.
-func (s *Scanner) runScanImage(cmd *cobra.Command, args []string) error {
+func runScanImage(c *services.Clients, cmd *cobra.Command, args []string) error {
 	if len(args) != 1 {
 		return fmt.Errorf("expected 1 argument: <image>")
 	}
@@ -1049,53 +1086,47 @@ func (s *Scanner) runScanImage(cmd *cobra.Command, args []string) error {
 	input := strings.TrimSpace(args[0])
 	source, _ := cmd.Flags().GetString("source")
 	platform, _ := cmd.Flags().GetString("platform")
-	return s.runScanImageWithOptions(cmd, input, source, platform)
+	return runScanImageWithOptions(c, cmd, input, source, platform)
 }
 
-func (s *Scanner) runScanImageWithOptions(cmd *cobra.Command, input, source, platform string) error {
+func runScanImageWithOptions(c *services.Clients, cmd *cobra.Command, input, source, platform string) error {
 	ctx := cmd.Context()
 	flags := extractScanFlags(cmd)
-	target, err := normalizeImageTarget(input, source)
-	if err != nil {
-		return err
-	}
-	targetOpts := map[string]string{}
-	if strings.TrimSpace(platform) != "" {
-		targetOpts["platform"] = platform
-	}
+	errW := cmd.ErrOrStderr()
 
-	beforeT, afterT := flags.parsePublishedTimes(cmd.ErrOrStderr())
-	scanOpts := flags.scanOptions()
+	// Determine image transport from source flag
+	transport := sourceToTransport(source)
+
+	// Build proto request with container image target hint
+	req := flags.toScanRequestWithHint(input, targetv1.TargetKind_TARGET_KIND_CONTAINER_IMAGE, transport, platform, errW)
 
 	// Show progress indicator for interactive mode (text output to TTY)
 	var progress *ui.Progress
-	errW := cmd.ErrOrStderr()
 	if ui.IsTTY(errW) && (flags.Format == "" || flags.Format == FormatText) {
 		progress = ui.NewProgress(errW, "Scanning container image")
 		progress.Start(ctx)
 	}
 
-	exec, err := s.service.ScanContainerImage(ctx, target, targetOpts, scan.Options{
-		Ecosystems:      scanOpts.Ecosystems,
-		PublishedBefore: beforeT,
-		PublishedAfter:  afterT,
-	})
+	resp, err := c.Vulns.Scan(ctx, connect.NewRequest(req))
 	if progress != nil {
 		progress.Clear()
 	}
 	if err != nil {
 		return err
 	}
-	defer exec.Close()
 
-	for _, warning := range exec.Result.Warnings {
-		fmt.Fprintf(cmd.ErrOrStderr(), "Warning: %s\n", warning)
+	// Convert proto response to internal result
+	resultPtr := internalproto.ScanningResultFromProto(resp.Msg)
+	result := *resultPtr
+
+	for _, warning := range result.Warnings {
+		fmt.Fprintf(errW, "Warning: %s\n", warning)
 	}
 
-	resultOut := exec.Result
-	policyResult := exec.Result
+	resultOut := result
+	policyResult := result
 	if flags.IgnoreUnfixed {
-		policyResult = scan.FilterUnfixed(policyResult)
+		policyResult = scanning.FilterUnfixed(policyResult)
 		resultOut = policyResult
 	}
 
@@ -1103,23 +1134,28 @@ func (s *Scanner) runScanImageWithOptions(cmd *cobra.Command, input, source, pla
 	var ignoredCount int
 	workDir, _ := os.Getwd()
 	if err := flags.loadIgnoreRules(workDir); err != nil {
-		fmt.Fprintf(cmd.ErrOrStderr(), "Warning: %v\n", err)
+		fmt.Fprintf(errW, "Warning: %v\n", err)
 	}
 	if flags.ignoreRules != nil {
-		policyResult, ignoredCount = scan.FilterIgnored(policyResult, flags.ignoreRules)
+		policyResult, ignoredCount = scanning.FilterIgnored(policyResult, flags.ignoreRules)
 		resultOut = policyResult
 	}
 
-	report := buildScanReport(policyResult)
-	if flags.Enrich {
-		enrichVulnerabilities(ctx, report.Vulnerabilities, cmd.ErrOrStderr())
+	// Apply CEL filter expression if provided
+	if flags.Filter != "" {
+		policyResult, err = scanning.FilterByCEL(ctx, policyResult, flags.Filter)
+		if err != nil {
+			return fmt.Errorf("filter: %w", err)
+		}
+		resultOut = policyResult
 	}
-	policyActions, err := runScanPolicies(ctx, flags.PolicyPaths, policyResult, report, cmd.ErrOrStderr(), nil)
+
+	policyActions, err := runScanPolicies(ctx, flags.PolicyPaths, policyResult, errW, nil)
 	if err != nil {
 		return err
 	}
 	policyFindings := actionsToPolicyFindings(policyActions)
-	exec.Result.PolicyActions = policyActions
+	result.PolicyActions = policyActions
 
 	out, err := openOutputWriter(cmd, flags.OutPath)
 	if err != nil {
@@ -1129,13 +1165,38 @@ func (s *Scanner) runScanImageWithOptions(cmd *cobra.Command, input, source, pla
 
 	switch strings.ToLower(flags.Format) {
 	case "", FormatText:
-		return s.outputTextContainer(out.Writer, cmd.ErrOrStderr(), resultOut, flags.IgnoreUnfixed, ignoredCount, policyFindings, flags.displayOptions())
+		if err := outputTextContainer(out.Writer, errW, resultOut, flags.IgnoreUnfixed, ignoredCount, policyFindings, flags.displayOptions()); err != nil {
+			return err
+		}
+		// Show policy evaluation summary
+		render.PolicyEvaluationSummary(out.Writer, len(flags.PolicyPaths), policyFindings)
+		return nil
 	case FormatJSON:
-		return s.outputJSON(out.Writer, resultOut, policyFindings)
+		// Convert filtered result back to proto for consistent JSON output
+		protoResp := internalproto.ScanningResultToProto(&resultOut)
+		// Add client-side policy actions
+		protoResp.PolicyActions = append(protoResp.PolicyActions, policyActionsToProto(policyActions)...)
+		return outputProtoJSON(out.Writer, protoResp)
 	case FormatSARIF:
-		return s.outputSARIF(out.Writer, resultOut, policyFindings)
+		return outputSARIF(out.Writer, resultOut, policyFindings)
 	default:
 		return cliflags.UnsupportedFormatError("--format", flags.Format, "text|json|sarif")
+	}
+}
+
+// sourceToTransport converts CLI source flag to proto transport string.
+func sourceToTransport(source string) string {
+	switch strings.ToLower(strings.TrimSpace(source)) {
+	case "", "remote", "registry":
+		return "remote"
+	case "oci":
+		return "oci"
+	case "docker-daemon", "daemon", "local":
+		return "daemon"
+	case "tarball", "archive", "oci-archive":
+		return "tarball"
+	default:
+		return "remote"
 	}
 }
 
@@ -1172,7 +1233,7 @@ func normalizeImageTarget(input, source string) (string, error) {
 }
 
 // outputText writes the scan results in a human-readable text format to the provided writer.
-func (s *Scanner) outputText(w io.Writer, errW io.Writer, result scan.Result, ignoreUnfixed bool, ignoredCount int, policyFindings []report.PolicyFinding, displayOpts render.VulnerabilityDisplayOptions) error {
+func outputText(w io.Writer, errW io.Writer, result scanning.Result, ignoreUnfixed bool, ignoredCount int, policyFindings []report.PolicyFinding, displayOpts render.VulnerabilityDisplayOptions) error {
 	displayPath := result.Target.DisplayPath
 	localPath := result.Target.LocalPath
 	shortRef := shortGitRef(refOrHEAD(result.Target.Ref))
@@ -1206,7 +1267,7 @@ func (s *Scanner) outputText(w io.Writer, errW io.Writer, result scan.Result, ig
 	render.PolicyFindings(w, policyFindings)
 
 	// Show module deprecations
-	if deps := detectModuleDeprecations(result.Inventory.Packages, result.Inventory.Direct); len(deps) > 0 {
+	if deps := detectModuleDeprecations(result.Packages, result.Direct); len(deps) > 0 {
 		fmt.Fprintf(w, "\n%s\n", ui.StyleHeader.Render("Module Deprecations:"))
 		for _, d := range deps {
 			line := fmt.Sprintf("  %s %s -> %s", ui.StyleVersion.Render("•"), ui.StyleBold.Render(d.Module), ui.StyleVersion.Render(d.Suggest))
@@ -1221,7 +1282,7 @@ func (s *Scanner) outputText(w io.Writer, errW io.Writer, result scan.Result, ig
 }
 
 // outputTextDir writes the directory scan results in a human-readable text format.
-func (s *Scanner) outputTextDir(w io.Writer, errW io.Writer, result scan.Result, ignoreUnfixed bool, ignoredCount int, policyFindings []report.PolicyFinding, displayOpts render.VulnerabilityDisplayOptions) error {
+func outputTextDir(w io.Writer, errW io.Writer, result scanning.Result, ignoreUnfixed bool, ignoredCount int, policyFindings []report.PolicyFinding, displayOpts render.VulnerabilityDisplayOptions) error {
 	doc := render.ScanResultsHeaderDoc(result.Target.DisplayPath, "", "", "")
 	_ = doc.Render(w, output.UIStyles())
 
@@ -1238,7 +1299,7 @@ func (s *Scanner) outputTextDir(w io.Writer, errW io.Writer, result scan.Result,
 }
 
 // outputTextContainer writes container image scan results with container-specific context.
-func (s *Scanner) outputTextContainer(w io.Writer, errW io.Writer, result scan.Result, ignoreUnfixed bool, ignoredCount int, policyFindings []report.PolicyFinding, displayOpts render.VulnerabilityDisplayOptions) error {
+func outputTextContainer(w io.Writer, errW io.Writer, result scanning.Result, ignoreUnfixed bool, ignoredCount int, policyFindings []report.PolicyFinding, displayOpts render.VulnerabilityDisplayOptions) error {
 	// Use container-specific header with image metadata
 	doc := render.ContainerScanHeaderDoc(result.Target.DisplayPath, result.ImageInfo)
 	_ = doc.Render(w, output.UIStyles())
@@ -1261,19 +1322,60 @@ func (s *Scanner) outputTextContainer(w io.Writer, errW io.Writer, result scan.R
 	return nil
 }
 
-// outputJSON writes the scan results in JSON format to the provided writer.
-func (s *Scanner) outputJSON(w io.Writer, result scan.Result, policyFindings []report.PolicyFinding) error {
-	report := buildScanReport(result)
-	report.PolicyFindings = policyFindings
+// outputProtoJSON writes the scan results in JSON format using protojson for
+// consistent, type-safe serialization directly from the proto response.
+// This is the preferred method for JSON output as it avoids conversion bugs
+// and ensures the JSON structure matches the proto schema exactly.
+func outputProtoJSON(w io.Writer, resp *scanv1.ScanResponse) error {
+	opts := protojson.MarshalOptions{
+		Multiline:       true,
+		Indent:          "  ",
+		EmitUnpopulated: false, // Don't emit zero values
+		UseProtoNames:   true,  // Use snake_case field names from proto
+	}
+	data, err := opts.Marshal(resp)
+	if err != nil {
+		return fmt.Errorf("marshal proto to JSON: %w", err)
+	}
+	_, err = w.Write(data)
+	if err != nil {
+		return err
+	}
+	// Add trailing newline for consistency
+	_, err = w.Write([]byte("\n"))
+	return err
+}
 
-	enc := json.NewEncoder(w)
-	enc.SetIndent("", "  ")
-	return enc.Encode(report)
+// policyActionsToProto converts internal policy actions to proto format.
+func policyActionsToProto(actions []policy.Action) []*policyv1.Action {
+	if len(actions) == 0 {
+		return nil
+	}
+	out := make([]*policyv1.Action, len(actions))
+	for i, a := range actions {
+		var actionType policyv1.ActionType
+		if policy.ActionTypeIs(a.Type, policy.ActionAllow) {
+			actionType = policyv1.ActionType_ACTION_TYPE_ALLOW
+		} else if policy.ActionTypeIs(a.Type, policy.ActionDeny) {
+			actionType = policyv1.ActionType_ACTION_TYPE_DENY
+		} else if policy.ActionTypeIs(a.Type, policy.ActionWarn) {
+			actionType = policyv1.ActionType_ACTION_TYPE_WARN
+		} else {
+			actionType = policyv1.ActionType_ACTION_TYPE_UNSPECIFIED
+		}
+		out[i] = &policyv1.Action{
+			Type:        actionType,
+			PolicyName:  a.Source, // Source is the policy name in internal types
+			Reason:      a.Reason,
+			Remediation: a.Remediation,
+		}
+	}
+	return out
 }
 
 // outputSARIF writes the scan results in SARIF format for GitHub Security tab integration.
-func (s *Scanner) outputSARIF(w io.Writer, result scan.Result, policyFindings []report.PolicyFinding) error {
-	vulns := report.FlattenResult(result)
+func outputSARIF(w io.Writer, result scanning.Result, policyFindings []report.PolicyFinding) error {
+	vulns := report.FlattenScanningResult(result)
 
 	opts := sarif.Options{
 		ToolVersion: version.Value,
@@ -1873,33 +1975,11 @@ func dedupeImageRefs(refs []imageSBOMRef) []imageSBOMRef {
 	return out
 }
 
-// buildScanReport constructs a ScanResult from the scan metadata and findings.
-func buildScanReport(result scan.Result) ScanResult {
-	ref := strings.TrimSpace(result.Target.Ref)
-	if ref != "" {
-		ref = shortGitRef(ref)
-	}
-	generated := time.Now().UTC()
-	if !result.GeneratedAt.IsZero() {
-		generated = result.GeneratedAt
-	}
-	return ScanResult{
-		Repo:            result.Target.DisplayPath,
-		Ref:             ref,
-		Commit:          result.Target.CommitHash,
-		Generated:       generated.Format(time.RFC3339),
-		PackagesScanned: result.PackagesScanned,
-		Stats:           result.Stats,
-		Vulnerabilities: report.FlattenResult(result),
-		ImageInfo:       result.ImageInfo, // Container image config/metadata (nil for non-image scans)
-	}
-}
-
-func buildScanTargetPayload(result scan.Result) map[string]any {
+func buildScanTargetPayload(result scanning.Result) map[string]any {
 	return buildTargetPayload(result.Target)
 }
 
-func buildTargetPayload(target scan.Target) map[string]any {
+func buildTargetPayload(target inventory.Target) map[string]any {
 	provenance := map[string]any{}
 	for k, v := range target.Provenance {
 		provenance[k] = v
@@ -1917,7 +1997,7 @@ func buildTargetPayload(target scan.Target) map[string]any {
 	}
 }
 
-func buildScanImagePayload(target scan.Target) map[string]any {
+func buildScanImagePayload(target inventory.Target) map[string]any {
 	if target.Kind != targets.KindContainerImage {
 		return nil
 	}
@@ -1929,74 +2009,58 @@ func buildScanImagePayload(target scan.Target) map[string]any {
 }
 
 // runScanPolicies evaluates the provided policies against the scan report and individual vulnerabilities.
-func runScanPolicies(ctx context.Context, policyPaths []string, result scan.Result, report ScanResult, errW io.Writer, extra map[string]any) ([]policy.Action, error) {
+// Passes proto messages directly to CEL for type-safe evaluation.
+func runScanPolicies(ctx context.Context, policyPaths []string, result scanning.Result, errW io.Writer, extra map[string]any) ([]policy.Action, error) {
 	if len(policyPaths) == 0 {
 		return nil, nil
 	}
+
+	// Convert scanning result to proto for CEL evaluation
+	scanResponse := internalproto.ScanningResultToProto(&result)
+
+	// Build report-level payload with proto messages
+	payload := map[string]any{
+		"report":          scanResponse,
+		"target":          scanResponse.Target,
+		"findings":        scanResponse.Findings,
+		"vulnerabilities": scanResponse.Findings, // Alias for backward compatibility
+		"stats":           scanResponse.Stats,
+	}
+
+	// Add image info if available
+	if scanResponse.ImageInfo != nil {
+		payload["image"] = scanResponse.ImageInfo
+		payload["image_info"] = scanResponse.ImageInfo
+	}
+
+	// Merge extra context
+	for key, val := range extra {
+		payload[key] = val
+	}
+
 	var out []policy.Action
-	reportMap, err := structToMap(report)
-	if err != nil {
-		return nil, err
-	}
-	if len(extra) > 0 {
-		for key, val := range extra {
-			reportMap[key] = val
-		}
-	}
-	reportMap["target"] = buildScanTargetPayload(result)
-	if image := buildScanImagePayload(result.Target); image != nil {
-		reportMap["image"] = image
-	}
-	// Merge ImageInfo (config, metadata, history) into image payload for container scans.
-	// This makes fields like image.config.user, image.config.is_root, image.metadata.layer_count
-	// available to CEL policies.
-	if result.ImageInfo != nil {
-		imageInfo := result.ImageInfo.ToMap()
-		if reportMap["image"] != nil {
-			// Merge ImageInfo into existing image payload (provenance takes precedence)
-			imageMap := reportMap["image"].(map[string]any)
-			for key, val := range imageInfo {
-				if _, exists := imageMap[key]; !exists {
-					imageMap[key] = val
-				}
-			}
-		} else {
-			reportMap["image"] = imageInfo
-		}
-		// Also add image_info as a separate variable for direct access
-		reportMap["image_info"] = imageInfo
-	}
-	actions, err := evaluatePoliciesForCommand(ctx, policyPaths, reportMap, "scan", policy.EntrypointScanReport, errW)
+	actions, err := evaluatePoliciesForCommand(ctx, policyPaths, payload, "scan", policy.EntrypointScanReport, errW)
 	if err != nil {
 		return nil, err
 	}
 	out = append(out, actions...)
-	for _, vuln := range report.Vulnerabilities {
-		vulnMap, err := structToMap(vuln)
-		if err != nil {
-			return nil, err
+
+	// Evaluate per-vulnerability policies
+	for _, finding := range scanResponse.Findings {
+		vulnPayload := map[string]any{
+			"vulnerability": finding,
+			"target":        scanResponse.Target,
 		}
-		payload := map[string]any{
-			"repo":          report.Repo,
-			"ref":           report.Ref,
-			"commit":        report.Commit,
-			"vulnerability": vulnMap,
-			"target":        reportMap["target"],
+		if scanResponse.ImageInfo != nil {
+			vulnPayload["image"] = scanResponse.ImageInfo
+			vulnPayload["image_info"] = scanResponse.ImageInfo
 		}
-		if len(extra) > 0 {
-			for key, val := range extra {
-				if _, ok := payload[key]; !ok {
-					payload[key] = val
-				}
+		for key, val := range extra {
+			if _, ok := vulnPayload[key]; !ok {
+				vulnPayload[key] = val
 			}
 		}
-		if image := reportMap["image"]; image != nil {
-			payload["image"] = image
-		}
-		if imageInfo := reportMap["image_info"]; imageInfo != nil {
-			payload["image_info"] = imageInfo
-		}
-		actions, err := evaluatePoliciesForCommand(ctx, policyPaths, payload, "scan", policy.EntrypointScanVulnerability, errW)
+		actions, err := evaluatePoliciesForCommand(ctx, policyPaths, vulnPayload, "scan", policy.EntrypointScanVulnerability, errW)
 		if err != nil {
 			return nil, err
 		}
@@ -2163,25 +2227,22 @@ func isDockerfilePath(path string) bool {
 }
 
 // runScanDockerfile scans a Dockerfile for policy evaluation.
-func (s *Scanner) runScanDockerfile(cmd *cobra.Command, target string) error {
+func runScanDockerfile(c *services.Clients, cmd *cobra.Command, target string) error {
 	ctx := cmd.Context()
 	flags := extractScanFlags(cmd)
+	errW := cmd.ErrOrStderr()
 
-	exec, err := s.service.ScanDockerfile(ctx, target, scan.Options{})
+	// Build proto request with Dockerfile target hint
+	req := flags.toScanRequestWithHint(target, targetv1.TargetKind_TARGET_KIND_DOCKERFILE, "", "", errW)
+
+	resp, err := c.Vulns.Scan(ctx, connect.NewRequest(req))
 	if err != nil {
 		return fmt.Errorf("scan dockerfile: %w", err)
 	}
-	defer exec.Close()
 
-	result := exec.Result
-
-	// Build output structure
-	dfResult := DockerfileScanResult{
-		Path:       result.DockerfileInfo.Path,
-		StageCount: len(result.DockerfileInfo.Stages),
-		Stages:     buildDockerfileStagesOutput(result.DockerfileInfo),
-		Analysis:   buildDockerfileAnalysisOutput(result.DockerfileAnalysis),
-	}
+	// Convert proto response to internal result for policy evaluation
+	resultPtr := internalproto.ScanningResultFromProto(resp.Msg)
+	result := *resultPtr
 
 	// Run policies
 	var policyFindings []report.PolicyFinding
@@ -2191,7 +2252,8 @@ func (s *Scanner) runScanDockerfile(cmd *cobra.Command, target string) error {
 			fmt.Fprintf(cmd.ErrOrStderr(), "Warning: policy evaluation failed: %v\n", err)
 		} else {
 			policyFindings = actionsToPolicyFindings(actions)
-			dfResult.PolicyFindings = policyFindings
+			// Add policy actions to proto response for JSON output
+			resp.Msg.PolicyActions = internalproto.PolicyActionsToProto(actions)
 		}
 	}
 
@@ -2199,11 +2261,10 @@ func (s *Scanner) runScanDockerfile(cmd *cobra.Command, target string) error {
 	format := strings.ToLower(flags.Format)
 	switch format {
 	case "json":
-		enc := json.NewEncoder(cmd.OutOrStdout())
-		enc.SetIndent("", "  ")
-		return enc.Encode(dfResult)
+		return outputDockerfileJSON(cmd.OutOrStdout(), resp.Msg)
 	default:
-		// Table/text output
+		// Table/text output (uses internal types for rendering)
+		dfResult := dockerfileResultForText(result, policyFindings)
 		renderDockerfileResult(cmd.OutOrStdout(), dfResult, policyFindings)
 	}
 
@@ -2215,6 +2276,36 @@ func (s *Scanner) runScanDockerfile(cmd *cobra.Command, target string) error {
 	}
 
 	return nil
+}
+
+// outputDockerfileJSON outputs Dockerfile scan results as JSON using protojson.
+func outputDockerfileJSON(w io.Writer, resp *scanv1.ScanResponse) error {
+	opts := protojson.MarshalOptions{
+		Multiline:       true,
+		Indent:          "  ",
+		EmitUnpopulated: false,
+		UseProtoNames:   true,
+	}
+	data, err := opts.Marshal(resp)
+	if err != nil {
+		return fmt.Errorf("marshal proto to JSON: %w", err)
+	}
+	if _, err := w.Write(data); err != nil {
+		return err
+	}
+	_, err = w.Write([]byte("\n"))
+	return err
+}
+
+// dockerfileResultForText builds a DockerfileScanResult for text rendering.
+func dockerfileResultForText(result scanning.Result, policyFindings []report.PolicyFinding) DockerfileScanResult {
+	return DockerfileScanResult{
+		Path:           result.DockerfileInfo.Path,
+		StageCount:     len(result.DockerfileInfo.Stages),
+		Stages:         buildDockerfileStagesOutput(result.DockerfileInfo),
+		Analysis:       buildDockerfileAnalysisOutput(result.DockerfileAnalysis),
+		PolicyFindings: policyFindings,
+	}
 }
 
 // DockerfileScanResult is the structured output of a Dockerfile scan.
@@ -2347,7 +2438,7 @@ func renderDockerfileResult(w io.Writer, result DockerfileScanResult, findings [
 	}
 }
 
-func runDockerfilePolicies(ctx context.Context, policyPaths []string, result scan.Result, errW io.Writer) ([]policy.Action, error) {
+func runDockerfilePolicies(ctx context.Context, policyPaths []string, result scanning.Result, errW io.Writer) ([]policy.Action, error) {
 	if len(policyPaths) == 0 || result.DockerfileInfo == nil {
 		return nil, nil
 	}

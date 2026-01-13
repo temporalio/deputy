@@ -7,9 +7,11 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"sync"
 	"time"
 
+	"github.com/picatz/deputy/internal/network"
 	"github.com/picatz/jose/pkg/jwk"
 )
 
@@ -65,6 +67,12 @@ func NewJWKSCache(cfg *JWKSConfig, opts ...JWKSCacheOption) (*JWKSCache, error) 
 		return nil, fmt.Errorf("JWKS URL is required")
 	}
 
+	// Security: Enforce HTTPS for JWKS URLs in production.
+	// HTTP is only allowed for localhost (testing) to prevent MITM attacks.
+	if err := validateJWKSURL(cfg.URL); err != nil {
+		return nil, err
+	}
+
 	refreshInterval := cfg.RefreshInterval
 	if refreshInterval <= 0 {
 		refreshInterval = defaultJWKSRefreshInterval
@@ -79,7 +87,8 @@ func NewJWKSCache(cfg *JWKSConfig, opts ...JWKSCacheOption) (*JWKSCache, error) 
 		refreshInterval: refreshInterval,
 		metrics:         NoopMetrics{},
 		httpClient: &http.Client{
-			Timeout: defaultJWKSHTTPTimeout,
+			Transport: network.SafeTransport(),
+			Timeout:   defaultJWKSHTTPTimeout,
 		},
 		stopCh: make(chan struct{}),
 	}
@@ -272,4 +281,36 @@ func extractPublicKey(v jwk.Value) (crypto.PublicKey, error) {
 	default:
 		return nil, fmt.Errorf("unsupported key type: %s", kty)
 	}
+}
+
+// validateJWKSURL ensures the JWKS URL is secure.
+// HTTPS is required except for localhost (for testing).
+// This prevents MITM attacks where an attacker could inject malicious keys.
+func validateJWKSURL(rawURL string) error {
+	parsed, err := url.Parse(rawURL)
+	if err != nil {
+		return fmt.Errorf("invalid JWKS URL: %w", err)
+	}
+
+	// Allow localhost for testing (with or without port)
+	host := parsed.Hostname()
+	isLocalhost := host == "localhost" || host == "127.0.0.1" || host == "::1"
+
+	if parsed.Scheme == "https" {
+		return nil // HTTPS is always allowed
+	}
+
+	if parsed.Scheme == "http" && isLocalhost {
+		slog.Warn("JWKS URL using HTTP - only safe for local testing",
+			"url", rawURL,
+			"hint", "use HTTPS in production to prevent MITM attacks")
+		return nil // HTTP localhost allowed for testing
+	}
+
+	if parsed.Scheme == "http" {
+		return fmt.Errorf("JWKS URL must use HTTPS (got http://%s); "+
+			"HTTP is only allowed for localhost to prevent MITM attacks", parsed.Host)
+	}
+
+	return fmt.Errorf("JWKS URL must use HTTPS (got %s://)", parsed.Scheme)
 }

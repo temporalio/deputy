@@ -49,19 +49,19 @@ requests = "^2.28"
 
 	g := New()
 	g.AddNode(&Node{
-		PURL:      "pkg:pypi/requests@2.28.2",
+		Purl:      "pkg:pypi/requests@2.28.2",
 		Name:      "requests",
 		Version:   "2.28.2",
 		Ecosystem: "PyPI",
 	})
 	g.AddNode(&Node{
-		PURL:      "pkg:pypi/urllib3@2.0.4",
+		Purl:      "pkg:pypi/urllib3@2.0.4",
 		Name:      "urllib3",
 		Version:   "2.0.4",
 		Ecosystem: "PyPI",
 	})
 	g.AddNode(&Node{
-		PURL:      "pkg:pypi/certifi@2023.7.22",
+		Purl:      "pkg:pypi/certifi@2023.7.22",
 		Name:      "certifi",
 		Version:   "2023.7.22",
 		Ecosystem: "PyPI",
@@ -133,13 +133,13 @@ pytest>=7.0.0
 
 	g := New()
 	g.AddNode(&Node{
-		PURL:      "pkg:pypi/requests@2.28.2",
+		Purl:      "pkg:pypi/requests@2.28.2",
 		Name:      "requests",
 		Version:   "2.28.2",
 		Ecosystem: "PyPI",
 	})
 	g.AddNode(&Node{
-		PURL:      "pkg:pypi/flask@2.0.0",
+		Purl:      "pkg:pypi/flask@2.0.0",
 		Name:      "flask",
 		Version:   "2.0.0",
 		Ecosystem: "PyPI",

@@ -15,7 +15,7 @@ Deputy becomes the go-to tool for container image dependency management, securit
 ### 1.1 Complete ImageInfo Wiring [DONE]
 - [x] Wire `scan.Result.ImageInfo` to policy evaluation in `runScanPolicies()`
 - [x] Add `image_info` to default CEL variable names
-- [x] Update LSP completions for `image.config.*`, `image.metadata.*`, `vulnerability.layerDetails.*`
+- [x] Update LSP completions for `image.config.*`, `image.metadata.*`, `vulnerability.layer_details.*`
 
 ### 1.2 Remaining Bug Fixes
 
@@ -28,7 +28,7 @@ Currently, the OCI proxy handler only passes vulnerabilities to policies, not Im
 
 ```go
 // In scanImageForPolicy, capture ImageInfo from scan result
-exec, err := h.scanner.ScanContainerImage(scanCtx, target, nil, scan.Options{})
+exec, err := scanning.ScanContainerImage(scanCtx, target, nil, scanning.Options{})
 // ...
 if exec.Result.ImageInfo != nil {
     // Return ImageInfo along with vulnerabilities
@@ -96,7 +96,7 @@ Ensure container-specific metadata in SBOM output:
 package compare
 
 import (
-    "github.com/picatz/deputy/internal/scan"
+    "github.com/picatz/deputy/internal/scanning"
     "github.com/picatz/deputy/internal/vulnerability"
 )
 
@@ -178,10 +178,10 @@ type VulnWithContext struct {
 
 ### 2.2 Image Diff Service
 
-**File**: `internal/scan/image_diff.go` (new)
+**File**: `internal/scanning/image_diff.go` (new)
 
 ```go
-package scan
+package scanning
 
 import (
     "context"
@@ -255,7 +255,7 @@ func (s *Service) DiffContainerImages(ctx context.Context, baseRef, targetRef st
 //   deputy diff --base alpine:3.19 docker://myapp:latest
 //   deputy diff gcr.io/prod/app:stable gcr.io/staging/app:latest
 
-func AddImageDiffCommand(diffCmd *cobra.Command, service *scan.Service) {
+func AddImageDiffCommand(diffCmd *cobra.Command, clients *services.Clients) {
     var (
         skipVulnScan   bool
         skipConfigDiff bool
@@ -269,7 +269,7 @@ func AddImageDiffCommand(diffCmd *cobra.Command, service *scan.Service) {
     diffCmd.PreRunE = func(cmd *cobra.Command, args []string) error {
         if len(args) >= 1 && isImageReference(args[0]) {
             // Route to image diff logic
-            return runImageDiff(cmd, args, service, /* flags */)
+            return runImageDiff(cmd, args, clients, /* flags */)
         }
         // Fall through to git diff
         return nil
@@ -335,7 +335,7 @@ policies:
       - action: deny
         when: |
           vulnerability.changeContext == 'added' &&
-          vulnerability.severity == 'CRITICAL'
+          vulnerability.advisory.severity.level == severity.critical
         reason: "Image update introduces new critical vulnerability"
 
   # Warn on unexpected package additions in app layers
@@ -380,10 +380,10 @@ policies:
 
 ### 3.1 Base Image Detection
 
-**File**: `internal/scan/base_image.go` (new)
+**File**: `internal/scanning/base_image.go` (new)
 
 ```go
-package scan
+package scanning
 
 // BaseImageInfo captures detected base image information.
 type BaseImageInfo struct {

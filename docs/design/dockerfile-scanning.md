@@ -521,7 +521,7 @@ func (s *Service) scanDockerfileDeep(ctx context.Context, info *DockerfileInfo, 
    - `types.go` - DockerfileInfo, DockerfileStage types
    - `analyze.go` - static analysis (detect secrets, identify builders)
 3. Add `dockerfileProvider` to `internal/targets/providers/`
-4. Add `ScanDockerfile` to `internal/scan/service.go`
+4. Add `ScanDockerfile` handler to `internal/server/scan_handler.go`
 5. Add CEL variables for `dockerfile.*`
 6. Add `dockerfile_report` entrypoint
 

@@ -1,0 +1,153 @@
+# Graph Node Policies
+#
+# These policies use the graph_node entrypoint to evaluate each dependency
+# in the dependency graph. Use these for dependency hygiene, supply chain
+# security, and license compliance checks independent of vulnerabilities.
+#
+# Usage:
+#   deputy graph --policy policy/examples/graph-node-policies.yaml
+#
+# Available variables in graph_node entrypoint:
+#   - node: Current node being evaluated
+#     - node.purl: Package URL (e.g., "pkg:npm/lodash@4.17.21")
+#     - node.name: Package name (e.g., "lodash")
+#     - node.version: Package version (e.g., "4.17.21")
+#     - node.ecosystem: Ecosystem (e.g., "npm", "Go", "PyPI")
+#     - node.direct: Whether this is a direct dependency
+#     - node.depth: Distance from root (0 = direct)
+#     - node.locations: File paths where this dependency is declared
+#     - node.vulnerability_count: Vulnerability counts by severity
+#   - graph: Full graph context (stats, roots)
+#   - nodes: All nodes in the graph
+#   - stats: Graph statistics
+#
+# Available helper functions:
+#   - graphMatch(string, pattern): Glob-like pattern matching
+#   - isDirectDep(node): Check if node is direct dependency
+#   - nodeDepth(node): Get dependency depth
+#   - nodeEcosystem(node): Get ecosystem
+#   - hasVulnerabilities(node): Check for vulnerabilities
+#   - vulnerabilityCount(node): Get total vulnerability count
+
+policies:
+  # Block deprecated or problematic packages
+  - name: block-deprecated-packages
+    description: "Block packages known to be deprecated or problematic"
+    entrypoints: ["graph_node"]
+    vars:
+      deprecated:
+        - "request"           # Deprecated npm HTTP client
+        - "mkdirp"            # Use fs.mkdir with recursive
+        - "rimraf"            # Use fs.rm with recursive
+        - "left-pad"          # Historic npm incident
+        - "event-stream"      # Supply chain attack
+        - "colors"            # Sabotaged by maintainer
+        - "faker"             # Sabotaged by maintainer
+    rules:
+      - action: warn
+        when: |
+          deprecated.exists(d, graphMatch(node.name, d))
+        reason: "Dependency uses a deprecated or problematic package"
+        remediation: "Consider migrating to a modern alternative"
+
+  # Block known malicious packages
+  - name: block-malicious-packages
+    description: "Block packages with known supply chain attacks"
+    entrypoints: ["graph_node"]
+    vars:
+      malicious:
+        - "ua-parser-js"      # Historic supply chain attack
+        - "coa"               # Historic supply chain attack
+        - "rc"                # Historic supply chain attack
+    rules:
+      - action: deny
+        when: |
+          malicious.exists(m, node.name == m)
+        reason: "Package has been compromised in supply chain attacks"
+        remediation: "Verify package integrity and consider alternatives"
+
+  # Limit dependency depth
+  - name: limit-dependency-depth
+    description: "Flag dependencies that are too deep in the dependency tree"
+    entrypoints: ["graph_node"]
+    rules:
+      - action: warn
+        when: |
+          nodeDepth(node) > 5
+        reason: "Dependency is very deep in the tree (depth > 5)"
+        remediation: "Consider auditing dependency chain for unnecessary packages"
+
+  # Flag direct dependencies with vulnerabilities
+  - name: direct-deps-vuln-check
+    description: "Direct dependencies with vulnerabilities need immediate attention"
+    entrypoints: ["graph_node"]
+    rules:
+      - action: warn
+        when: |
+          isDirectDep(node) && hasVulnerabilities(node)
+        reason: "Direct dependency has known vulnerabilities"
+        remediation: "Update this direct dependency to a fixed version"
+
+  # Ecosystem consistency check
+  - name: ecosystem-allowlist
+    description: "Only allow dependencies from approved ecosystems"
+    entrypoints: ["graph_node"]
+    vars:
+      allowedEcosystems:
+        - "Go"
+        - "npm"
+        - "PyPI"
+    rules:
+      - action: warn
+        when: |
+          nodeEcosystem(node) != "" &&
+          !(nodeEcosystem(node) in allowedEcosystems)
+        reason: "Dependency uses non-approved ecosystem"
+        remediation: "Ensure all dependencies come from approved ecosystems"
+
+  # Block prerelease versions in production
+  - name: block-prerelease
+    description: "Block prerelease versions (alpha, beta, rc) in direct dependencies"
+    entrypoints: ["graph_node"]
+    rules:
+      - action: warn
+        when: |
+          isDirectDep(node) &&
+          (node.version.contains("-alpha") ||
+           node.version.contains("-beta") ||
+           node.version.contains("-rc") ||
+           node.version.contains("-pre"))
+        reason: "Direct dependency uses prerelease version"
+        remediation: "Use stable release versions for production dependencies"
+
+  # Flag packages with too many vulnerabilities
+  - name: high-vuln-count
+    description: "Flag packages with excessive vulnerability counts"
+    entrypoints: ["graph_node"]
+    rules:
+      - action: warn
+        when: |
+          vulnerabilityCount(node) > 5
+        reason: "Package has more than 5 known vulnerabilities"
+        remediation: "Consider replacing this package with a more secure alternative"
+
+  # Block specific namespace patterns (typosquatting protection)
+  - name: typosquat-protection
+    description: "Block packages that look like typosquats of popular packages"
+    entrypoints: ["graph_node"]
+    vars:
+      protected:
+        - "lodash"
+        - "express"
+        - "react"
+        - "moment"
+        - "axios"
+    rules:
+      - action: warn
+        when: |
+          protected.exists(p,
+            node.name != p &&
+            levenshteinWithin(node.name, p, 2) &&
+            node.name.startsWith(p.substring(0, 3)))
+        reason: "Package name is suspiciously similar to a popular package"
+        remediation: "Verify this is the intended package, not a typosquat"

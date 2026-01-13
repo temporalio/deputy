@@ -64,10 +64,18 @@ func AnonymousClaims() map[string]any {
 // This is a type alias for the shared jwt.Authenticator.
 type Authenticator = jwt.Authenticator
 
+// AuthenticatorOption is a type alias for jwt.Option.
+type AuthenticatorOption = jwt.Option
+
+// WithJWKSCacheOptions is an alias for jwt.WithJWKSCacheOptions.
+var WithJWKSCacheOptions = jwt.WithJWKSCacheOptions
+
 // NewAuthenticator creates a new JWT authenticator from the given configuration.
 // Since AuthConfig is now a type alias for jwt.Config, no conversion is needed.
-func NewAuthenticator(cfg *AuthConfig) (Authenticator, error) {
-	return jwt.NewAuthenticator(cfg, jwt.WithMetrics(authMetrics))
+func NewAuthenticator(cfg *AuthConfig, opts ...AuthenticatorOption) (Authenticator, error) {
+	// Prepend metrics option, then append user-provided options
+	allOpts := append([]AuthenticatorOption{jwt.WithMetrics(authMetrics)}, opts...)
+	return jwt.NewAuthenticator(cfg, allOpts...)
 }
 
 // JWTClaimsFromContext retrieves verified JWT claims from the request context.
@@ -79,10 +87,18 @@ func JWTClaimsFromContext(ctx context.Context) *JWTClaims {
 // JWKSCache is a type alias for the shared jwt.JWKSCache.
 type JWKSCache = jwt.JWKSCache
 
+// JWKSCacheOption is a type alias for jwt.JWKSCacheOption.
+type JWKSCacheOption = jwt.JWKSCacheOption
+
+// WithJWKSHTTPClient is an alias for jwt.WithJWKSHTTPClient.
+var WithJWKSHTTPClient = jwt.WithJWKSHTTPClient
+
 // NewJWKSCache creates a new JWKS cache with the given configuration.
 // Since JWKSConfig is now a type alias for jwt.JWKSConfig, no conversion is needed.
-func NewJWKSCache(cfg *JWKSConfig) (*JWKSCache, error) {
-	return jwt.NewJWKSCache(cfg, jwt.WithJWKSMetrics(authMetrics))
+func NewJWKSCache(cfg *JWKSConfig, opts ...JWKSCacheOption) (*JWKSCache, error) {
+	// Prepend metrics option, then append user-provided options
+	allOpts := append([]JWKSCacheOption{jwt.WithJWKSMetrics(authMetrics)}, opts...)
+	return jwt.NewJWKSCache(cfg, allOpts...)
 }
 
 // parsePublicKey parses a PEM-encoded public key.

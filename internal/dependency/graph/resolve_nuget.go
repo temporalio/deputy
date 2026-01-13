@@ -216,7 +216,7 @@ func (r *NuGetResolver) processPackagesLockJSON(ctx context.Context, g *Graph, f
 			if node == nil {
 				isDirect := info.Type == "Direct"
 				node = &Node{
-					PURL:      purl,
+					Purl:      purl,
 					Name:      pkgName,
 					Version:   info.Resolved,
 					Ecosystem: "NuGet",
@@ -229,8 +229,8 @@ func (r *NuGetResolver) processPackagesLockJSON(ctx context.Context, g *Graph, f
 			// Mark as direct if it's a direct dependency
 			if info.Type == "Direct" {
 				node.Direct = true
-				if !containsRoot(g.roots, node.PURL) {
-					g.roots = append(g.roots, node.PURL)
+				if !containsRoot(g.roots, node.Purl) {
+					g.roots = append(g.roots, node.Purl)
 				}
 			}
 		}
@@ -257,11 +257,11 @@ func (r *NuGetResolver) processPackagesLockJSON(ctx context.Context, g *Graph, f
 					continue
 				}
 
-				edgeKey := parentPURL + "->" + childNode.PURL
+				edgeKey := parentPURL + "->" + childNode.Purl
 				if !edgeSet[edgeKey] {
 					g.AddEdge(&Edge{
 						From:       parentPURL,
-						To:         childNode.PURL,
+						To:         childNode.Purl,
 						Constraint: depVersion,
 						Scope:      ScopeRuntime,
 					})
@@ -319,7 +319,7 @@ func (r *NuGetResolver) processPackagesConfig(ctx context.Context, g *Graph, fil
 		}
 		if node == nil {
 			node = &Node{
-				PURL:      purl,
+				Purl:      purl,
 				Name:      pkg.ID,
 				Version:   pkg.Version,
 				Ecosystem: "NuGet",
@@ -329,8 +329,8 @@ func (r *NuGetResolver) processPackagesConfig(ctx context.Context, g *Graph, fil
 			g.AddNode(node)
 		}
 
-		if !containsRoot(g.roots, node.PURL) {
-			g.roots = append(g.roots, node.PURL)
+		if !containsRoot(g.roots, node.Purl) {
+			g.roots = append(g.roots, node.Purl)
 		}
 
 		// If we have a deps.dev client, fetch transitive dependencies
@@ -370,7 +370,7 @@ func (r *NuGetResolver) resolveTransitiveDeps(ctx context.Context, g *Graph, nam
 		// Ensure node exists in graph
 		if g.Node(purl) == nil {
 			g.AddNode(&Node{
-				PURL:      purl,
+				Purl:      purl,
 				Name:      vk.Name,
 				Version:   vk.Version,
 				Ecosystem: "NuGet",

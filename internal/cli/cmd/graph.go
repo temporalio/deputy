@@ -1,32 +1,23 @@
 package cmd
 
 import (
-	"context"
-	"encoding/json"
 	"fmt"
 	"io"
-	"log/slog"
 	"os"
+	"path"
 	"slices"
 	"strings"
 
+	"connectrpc.com/connect"
 	"github.com/charmbracelet/lipgloss"
-	git "github.com/go-git/go-git/v5"
-	"github.com/go-git/go-git/v5/plumbing"
-	"github.com/google/osv-scalibr/extractor"
-	"github.com/picatz/deputy/internal/auth"
+	"google.golang.org/protobuf/encoding/protojson"
+
+	graphv1 "github.com/picatz/deputy/gen/deputy/graph/v1"
 	"github.com/picatz/deputy/internal/cli/flags"
-	"github.com/picatz/deputy/internal/compare"
 	"github.com/picatz/deputy/internal/dependency/graph"
-	"github.com/picatz/deputy/internal/gitutil"
-	inv "github.com/picatz/deputy/internal/inventory"
-	"github.com/picatz/deputy/internal/otel"
-	"github.com/picatz/deputy/internal/repository"
-	"github.com/picatz/deputy/internal/scan"
+	"github.com/picatz/deputy/internal/services"
 	ui "github.com/picatz/deputy/internal/ui"
 	"github.com/spf13/cobra"
-	"go.opentelemetry.io/otel/attribute"
-	"go.opentelemetry.io/otel/trace"
 )
 
 // GraphFormat represents supported graph output formats.
@@ -40,18 +31,9 @@ const (
 	GraphFormatD3      GraphFormat = "d3"
 )
 
-// GraphResult captures graph command output for machine consumption.
-type GraphResult struct {
-	Repo      string      `json:"repo"`
-	Ref       string      `json:"ref"`
-	Commit    string      `json:"commit"`
-	Generated string      `json:"generated"`
-	Stats     graph.Stats `json:"stats"`
-	Graph     *graph.Graph
-}
-
 // AddGraphCommand registers the graph subcommand.
-func AddGraphCommand(root *cobra.Command) {
+// Uses the service layer for graph operations, supporting both local and remote modes.
+func AddGraphCommand(root *cobra.Command, c *services.Clients) {
 	var (
 		ref, format, outPath string
 		ecos                 []string
@@ -63,6 +45,8 @@ func AddGraphCommand(root *cobra.Command) {
 		direction            string
 		focusPkg             string
 		statsOnly            bool
+		extended             bool
+		onlyDeclared         bool
 	)
 
 	cmd := &cobra.Command{
@@ -85,7 +69,21 @@ OUTPUT FORMATS:
 The graph shows:
   - Direct dependencies (marked or styled distinctly)
   - Transitive dependencies and their relationships
-  - Vulnerability counts when available (via --show-vulns)`,
+  - Vulnerability counts when available (via --show-vulns)
+
+EXTENDED MODE (--extended):
+  By default, deputy shows packages that end up in your final build.
+  Extended mode adds "phantom" dependencies from the full module graph:
+
+  IMPORTED  - Packages actively imported by your code (runtime risk)
+  REQUIRED  - Packages in go.mod but not directly imported (medium risk)
+  DECLARED  - Packages in full module graph but not selected (latent risk)
+
+  Use cases for extended mode:
+  - Supply chain risk: "What COULD be pulled in if a dependency changes?"
+  - Proactive scanning: Find vulnerabilities before they affect you
+  - OSSF MAL detection: Check for malicious packages in any declared dep
+  - Audit: Understand the full dependency surface area`,
 		Example: `BASIC USAGE:
   # Show dependency tree for current repo
   deputy graph
@@ -106,6 +104,19 @@ FILTERING:
   # Filter by ecosystem
   deputy graph --ecosystems go
 
+EXTENDED MODE (supply chain analysis):
+  # Show full module graph including phantom dependencies
+  deputy graph --extended
+
+  # Show only declared-but-unused dependencies (latent risk)
+  deputy graph --extended --declared
+
+  # JSON output with import status for each package
+  deputy graph --extended --format json | jq '.nodes[] | select(.import_status == "IMPORT_STATUS_DECLARED")'
+
+  # Quick stats showing import status breakdown
+  deputy graph --extended --stats
+
 OUTPUT FORMATS:
   # Generate Graphviz DOT (can pipe to dot)
   deputy graph --format dot > deps.dot
@@ -123,13 +134,13 @@ OUTPUT FORMATS:
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := cmd.Context()
 
-			repoPath := ""
+			target := ""
 			if len(args) > 0 && strings.TrimSpace(args[0]) != "" {
-				repoPath = args[0]
+				target = args[0]
 			}
-			if repoPath == "" {
+			if target == "" {
 				var err error
-				repoPath, err = os.Getwd()
+				target, err = os.Getwd()
 				if err != nil {
 					return fmt.Errorf("failed to get current directory: %w", err)
 				}
@@ -139,23 +150,44 @@ OUTPUT FORMATS:
 				ref = "HEAD"
 			}
 
-			result, err := buildGraph(ctx, repoPath, ref, ecos)
+			// Build graph via service layer
+			req := &graphv1.BuildGraphRequest{
+				Target: target,
+				Options: &graphv1.GraphOptions{
+					Ecosystems: normalizeEcosystems(ecos),
+					Ref:        ref,
+					UseProxy:   true,
+					UseGit:     true,
+					Extended:   extended,
+				},
+			}
+
+			resp, err := c.Graph.BuildGraph(ctx, connect.NewRequest(req))
 			if err != nil {
-				return err
+				return fmt.Errorf("failed to build graph: %w", err)
+			}
+
+			// Convert proto response to internal graph
+			g := graph.FromProto(resp.Msg.Nodes, resp.Msg.Edges, resp.Msg.Roots)
+			if g == nil {
+				return fmt.Errorf("failed to parse graph response")
 			}
 
 			// Apply filters
-			g := result.Graph
 			if onlyDirect {
 				g = g.Filter(func(n *graph.Node) bool { return n.Direct })
 			}
 			if onlyVulnerable {
-				g = g.Filter(func(n *graph.Node) bool { return n.VulnCount.Total > 0 })
+				g = g.Filter(func(n *graph.Node) bool { return n.VulnerabilityCount.GetTotal() > 0 })
+			}
+			if onlyDeclared {
+				// Filter to show only declared-but-unused dependencies (phantom deps)
+				g = g.FilterByImportStatus(graph.ImportStatusDeclared)
 			}
 			if focusPkg != "" {
 				// Find best matching node using ranked matching (same as "graph why")
 				if match := findBestMatchingNode(g, focusPkg); match != nil {
-					g = g.Subgraph(match.PURL)
+					g = g.Subgraph(match.Purl)
 				}
 			}
 
@@ -226,22 +258,25 @@ OUTPUT FORMATS:
 	cmd.Flags().BoolVar(&showVulnCounts, "show-vulns", false, "Show vulnerability counts per package")
 	cmd.Flags().StringVar(&direction, "direction", "TB", "Graph direction: TB (top-bottom), LR (left-right), BT, RL")
 	cmd.Flags().StringVar(&focusPkg, "focus", "", "Focus on a specific package (shows its subgraph)")
+	cmd.Flags().BoolVar(&extended, "extended", false, "Include full module graph (declared but unused dependencies)")
+	cmd.Flags().BoolVar(&onlyDeclared, "declared", false, "Show only declared-but-unused dependencies (requires --extended)")
 	cmd.Flags().BoolVar(&statsOnly, "stats", false, "Show only graph statistics")
 
 	// Add subcommands
-	addGraphWhyCommand(cmd)
-	addGraphNeedsCommand(cmd)
+	addGraphWhyCommand(cmd, c)
+	addGraphNeedsCommand(cmd, c)
 
 	root.AddCommand(cmd)
 }
 
 // addGraphWhyCommand adds the "graph why" subcommand.
-func addGraphWhyCommand(parent *cobra.Command) {
+func addGraphWhyCommand(parent *cobra.Command, c *services.Clients) {
 	var (
-		ref     string
-		ecos    []string
-		all     bool
-		jsonOut bool
+		ref      string
+		ecos     []string
+		all      bool
+		jsonOut  bool
+		listOnly bool
 	)
 
 	cmd := &cobra.Command{
@@ -253,6 +288,7 @@ This command traces the dependency chain from your direct dependencies to
 the specified package, answering "why is X in my dependencies?"
 
 By default, shows only the shortest path. Use --all to see all paths.
+Use --list to see all packages matching your query without path analysis.
 
 Similar to 'go mod why' but works across all ecosystems.`,
 		Example: `  # Why is lodash in my dependencies?
@@ -263,6 +299,9 @@ Similar to 'go mod why' but works across all ecosystems.`,
 
   # Show all dependency paths (not just shortest)
   deputy graph why lodash --all
+
+  # List all packages matching a query (no path analysis)
+  deputy graph why cobra --list
 
   # Check a remote repository
   deputy graph why express github.com/example/repo`,
@@ -283,18 +322,33 @@ Similar to 'go mod why' but works across all ecosystems.`,
 				}
 			}
 
-			result, err := buildGraph(ctx, target, ref, ecos)
-			if err != nil {
-				return err
+			w := cmd.OutOrStdout()
+
+			// Build the graph to find all matches
+			buildReq := &graphv1.BuildGraphRequest{
+				Target: target,
+				Options: &graphv1.GraphOptions{
+					Ecosystems: normalizeEcosystems(ecos),
+					Ref:        ref,
+					UseProxy:   true,
+					UseGit:     true,
+				},
 			}
 
-			g := result.Graph
+			buildResp, err := c.Graph.BuildGraph(ctx, connect.NewRequest(buildReq))
+			if err != nil {
+				return fmt.Errorf("failed to build graph: %w", err)
+			}
 
-			// Find matching node(s) with ranked matching
+			g := graph.FromProto(buildResp.Msg.Nodes, buildResp.Msg.Edges, buildResp.Msg.Roots)
+			if g == nil {
+				return fmt.Errorf("failed to parse graph response")
+			}
+
+			// Find all matching packages
 			matches := findMatchingNodes(g, pkg)
 
 			if len(matches) == 0 {
-				w := cmd.OutOrStdout()
 				fmt.Fprintf(w, "Package %q not found in dependency graph.\n", pkg)
 				// Provide helpful guidance for Go stdlib package searches
 				if isGoStdlibPackage(pkg) {
@@ -321,21 +375,18 @@ Similar to 'go mod why' but works across all ecosystems.`,
 				return nil
 			}
 
-			w := cmd.OutOrStdout()
+			// --list mode: show all matching packages without path analysis
+			if listOnly {
+				return renderMatchList(w, matches, pkg)
+			}
 
 			// JSON output mode
 			if jsonOut {
 				return writeWhyJSON(w, g, matches)
 			}
 
-			for i, match := range matches {
-				if i > 0 {
-					fmt.Fprintln(w)
-				}
-				renderWhyOutput(w, g, match, all)
-			}
-
-			return nil
+			// Text output - show paths for ALL matching packages (exploratory mode)
+			return renderWhyAllMatches(w, g, matches, pkg, all)
 		},
 	}
 
@@ -343,76 +394,194 @@ Similar to 'go mod why' but works across all ecosystems.`,
 	cmd.Flags().StringSliceVar(&ecos, "ecosystems", []string{"all"}, "Ecosystems to include")
 	cmd.Flags().BoolVarP(&all, "all", "a", false, "Show all dependency paths (not just shortest)")
 	cmd.Flags().BoolVar(&jsonOut, "json", false, "Output as JSON")
+	cmd.Flags().BoolVarP(&listOnly, "list", "l", false, "List all matching packages (no path analysis)")
 
 	parent.AddCommand(cmd)
 }
 
-// renderWhyOutput renders the "why" output for a single package match.
-func renderWhyOutput(w io.Writer, g *graph.Graph, match *graph.Node, showAll bool) {
-	fmt.Fprintln(w, formatPackageHeader(match.Name, match.Version))
+// renderMatchList renders a list of matching packages without path analysis.
+// Used by --list mode to show what packages match a query.
+func renderMatchList(w io.Writer, matches []*graph.Node, query string) error {
+	// Header
+	fmt.Fprintf(w, "%s\n", graphStyleMeta.Render(fmt.Sprintf("Packages matching %q (%d found):", query, len(matches))))
+	fmt.Fprintln(w)
 
-	// Direct dependency - simple case
-	if match.Direct {
-		fmt.Fprintf(w, "%s\n", graphStyleMeta.Render("(direct dependency)"))
-		return
-	}
-
-	paths := g.PathsTo(match.PURL)
-	if len(paths) == 0 {
-		// Show where this package was detected if we have location info
-		if len(match.Locations) > 0 {
-			// Determine source type from location path
-			sourceDesc := describePackageSource(match.Locations)
-			fmt.Fprintf(w, "%s\n", graphStyleMeta.Render(fmt.Sprintf("(found in %s, no dependency path through source code)", sourceDesc)))
-			for _, loc := range match.Locations {
-				fmt.Fprintf(w, "  %s\n", graphStyleMeta.Render(loc))
-			}
-		} else {
-			fmt.Fprintf(w, "%s\n", graphStyleMeta.Render("(no dependency path found)"))
+	// List matches with their match quality indicated
+	queryLower := strings.ToLower(query)
+	for _, m := range matches {
+		score := matchScore(m.Name, queryLower)
+		var indicator string
+		switch score {
+		case 3:
+			indicator = graphStyleMatchExact.Render("★") // exact match
+		case 2:
+			indicator = graphStyleMatchName.Render("●") // final segment match
+		default:
+			indicator = graphStyleMatchSubstring.Render("○") // substring match
 		}
+
+		name := m.Name
+		if m.Version != "" {
+			name += graphStyleAt.Render("@") + graphStyleVersion.Render(m.Version)
+		}
+		if m.Direct {
+			name += " " + ui.StyleDirect.Render("[direct]")
+		}
+
+		fmt.Fprintf(w, "  %s %s\n", indicator, name)
+	}
+
+	// Legend with dimmed symbols (all uniformly muted since it's informational)
+	fmt.Fprintln(w)
+	fmt.Fprintf(w, "%s\n",
+		graphStyleMeta.Render("Legend: ★ exact  ● name match  ○ substring"))
+
+	return nil
+}
+
+// renderWhyAllMatches renders paths for all matching packages.
+// This is the exploratory mode - shows everything that matches so users can explore.
+func renderWhyAllMatches(w io.Writer, g *graph.Graph, matches []*graph.Node, query string, showAll bool) error {
+	// Header showing how many matches
+	if len(matches) > 1 {
+		fmt.Fprintf(w, "%s\n\n", graphStyleMeta.Render(fmt.Sprintf("%d packages match %q:", len(matches), query)))
+	}
+
+	// Render each match with its paths
+	for i, match := range matches {
+		if i > 0 {
+			fmt.Fprintln(w) // Blank line between matches
+		}
+
+		// Get paths for this match
+		paths := g.PathsTo(match.Purl)
+
+		// Sort by length
+		slices.SortFunc(paths, func(a, b graph.Path) int {
+			return len(a) - len(b)
+		})
+
+		// Deduplicate
+		paths = deduplicatePaths(paths)
+
+		// Header with package name
+		fmt.Fprintln(w, formatPackageHeader(match.Name, match.Version))
+
+		if len(paths) == 0 {
+			// No paths found - show where it was found and why no path exists
+			if match.Direct {
+				fmt.Fprintf(w, "%s\n", ui.StyleDirect.Render("[direct dependency]"))
+				renderNodeLocations(w, match)
+			} else {
+				// Disconnected node - explain where it came from
+				renderDisconnectedNode(w, match)
+			}
+			continue
+		}
+
+		shortestHops := len(paths[0]) - 1
+
+		// Direct dependency (0 hops)
+		if shortestHops == 0 {
+			fmt.Fprintf(w, "%s\n", ui.StyleDirect.Render("[direct dependency]"))
+			continue
+		}
+
+		// Analyze and render paths
+		directDeps := collectUniqueRoots(paths)
+		renderWhySummary(w, paths, shortestHops, directDeps)
+
+		pathsToShow := paths
+		truncated := false
+		if !showAll && len(paths) > 5 {
+			pathsToShow = paths[:5]
+			truncated = true
+		}
+
+		if shortestHops == 1 && allPathsSameDepth(paths, 2) {
+			// Compact format for 1-hop dependencies
+			renderCompactDirectDeps(w, directDeps)
+		} else {
+			// Tree format
+			fmt.Fprintln(w)
+			renderGroupedPaths(w, pathsToShow)
+		}
+
+		if truncated {
+			fmt.Fprintln(w)
+			remaining := len(paths) - len(pathsToShow)
+			fmt.Fprintf(w, "%s\n", graphStyleMeta.Render(fmt.Sprintf("... and %d more paths (use --all to show)", remaining)))
+		}
+	}
+
+	return nil
+}
+
+// renderNodeLocations renders the source locations for a node.
+func renderNodeLocations(w io.Writer, node *graph.Node) {
+	if len(node.Locations) > 0 {
+		for _, loc := range node.Locations {
+			fmt.Fprintf(w, "  %s %s\n", graphStyleArrow.Render("←"), graphStyleMeta.Render(loc))
+		}
+	}
+}
+
+// renderDisconnectedNode explains why a node has no dependency path.
+// This happens for packages found in vendored binaries, separate go.mod files, etc.
+func renderDisconnectedNode(w io.Writer, node *graph.Node) {
+	if len(node.Locations) == 0 {
+		fmt.Fprintf(w, "%s\n", graphStyleMeta.Render("[no dependency path found]"))
 		return
 	}
 
-	// Sort paths by length (shortest first)
-	slices.SortFunc(paths, func(a, b graph.Path) int {
-		return len(a) - len(b)
-	})
-
-	// Deduplicate paths that have same structure
-	paths = deduplicatePaths(paths)
-
-	// Analyze the paths to generate a smart summary
-	shortestHops := len(paths[0]) - 1
-
-	// Count unique direct dependencies (roots) that lead to this package
-	directDeps := collectUniqueRoots(paths)
-
-	// Generate contextual summary based on path structure
-	renderWhySummary(w, paths, shortestHops, directDeps)
-
-	// Determine how many paths to show
-	pathsToShow := paths
-	truncated := false
-	if !showAll && len(paths) > 5 {
-		pathsToShow = paths[:5]
-		truncated = true
+	// Categorize the locations to provide helpful context
+	var binaries, goMods, others []string
+	for _, loc := range node.Locations {
+		switch {
+		case strings.Contains(loc, ".bin") || strings.HasSuffix(loc, ".exe") || !strings.Contains(loc, "."):
+			// Binary files (no extension or .bin directory)
+			binaries = append(binaries, loc)
+		case strings.HasSuffix(loc, "go.mod") || strings.HasSuffix(loc, "go.sum"):
+			goMods = append(goMods, loc)
+		default:
+			others = append(others, loc)
+		}
 	}
 
-	// Render paths based on complexity
-	if shortestHops == 1 && allPathsSameDepth(paths, 2) {
-		// All paths are 1-hop: show compact list of direct deps
-		renderCompactDirectDeps(w, directDeps)
-	} else {
-		// Mixed depths or deeper: show tree structure
-		renderGroupedPaths(w, pathsToShow)
+	// Render with context-specific messaging
+	if len(binaries) > 0 {
+		fmt.Fprintf(w, "%s\n", graphStyleMeta.Render("[found in vendored binary]"))
+		for _, loc := range binaries {
+			fmt.Fprintf(w, "  %s %s\n", graphStyleArrow.Render("←"), graphStyleTipHighlight.Render(loc))
+		}
 	}
+	if len(goMods) > 0 {
+		if len(binaries) > 0 {
+			fmt.Fprintln(w)
+		}
+		fmt.Fprintf(w, "%s\n", graphStyleMeta.Render("[found in separate module]"))
+		for _, loc := range goMods {
+			fmt.Fprintf(w, "  %s %s\n", graphStyleArrow.Render("←"), graphStyleTipHighlight.Render(loc))
+		}
+	}
+	if len(others) > 0 {
+		if len(binaries) > 0 || len(goMods) > 0 {
+			fmt.Fprintln(w)
+		}
+		fmt.Fprintf(w, "%s\n", graphStyleMeta.Render("[found in]"))
+		for _, loc := range others {
+			fmt.Fprintf(w, "  %s %s\n", graphStyleArrow.Render("←"), graphStyleTipHighlight.Render(loc))
+		}
+	}
+}
 
-	// Truncation notice
-	if truncated {
-		fmt.Fprintln(w)
-		remaining := len(paths) - len(pathsToShow)
-		fmt.Fprintf(w, "%s\n", graphStyleMeta.Render(fmt.Sprintf("... and %d more paths (use --all to show)", remaining)))
+// normalizeEcosystems converts the CLI ecosystems flag to the service format.
+// If "all" is specified, returns nil (meaning all ecosystems).
+func normalizeEcosystems(ecos []string) []string {
+	if len(ecos) == 1 && strings.EqualFold(ecos[0], "all") {
+		return nil
 	}
+	return ecos
 }
 
 // collectUniqueRoots returns the unique root nodes (direct dependencies) from paths.
@@ -422,8 +591,8 @@ func collectUniqueRoots(paths []graph.Path) []*graph.Node {
 	for _, path := range paths {
 		if len(path) > 0 {
 			root := path[0]
-			if !seen[root.PURL] {
-				seen[root.PURL] = true
+			if !seen[root.Purl] {
+				seen[root.Purl] = true
 				roots = append(roots, root)
 			}
 		}
@@ -453,23 +622,31 @@ func renderWhySummary(w io.Writer, paths []graph.Path, shortestHops int, directD
 		depWord = "dependencies"
 	}
 
+	// Helper to format numbers with highlighting
+	num := func(n int) string {
+		return graphStyleNumber.Render(fmt.Sprintf("%d", n))
+	}
+	meta := graphStyleMeta.Render
+
 	if shortestHops == 1 && allPathsSameDepth(paths, 2) {
 		// All 1-hop paths: emphasize which direct deps require this
-		fmt.Fprintf(w, "%s\n", graphStyleMeta.Render(
-			fmt.Sprintf("(required by %d direct %s)", len(directDeps), depWord)))
+		fmt.Fprintf(w, "%s%s%s\n",
+			meta("(required by "), num(len(directDeps)), meta(" direct "+depWord+")"))
 	} else if len(directDeps) == 1 {
 		// All paths through one direct dep
 		if len(paths) == 1 {
-			fmt.Fprintf(w, "%s\n", graphStyleMeta.Render(
-				fmt.Sprintf("(%d %s via %s)", shortestHops, hopWord, shortName(directDeps[0].Name))))
+			fmt.Fprintf(w, "%s%s%s\n",
+				meta("("), num(shortestHops), meta(" "+hopWord+" via "+shortName(directDeps[0].Name)+")"))
 		} else {
-			fmt.Fprintf(w, "%s\n", graphStyleMeta.Render(
-				fmt.Sprintf("(%d paths via %s, shortest %d %s)", len(paths), shortName(directDeps[0].Name), shortestHops, hopWord)))
+			fmt.Fprintf(w, "%s%s%s%s%s\n",
+				meta("("), num(len(paths)), meta(" paths via "+shortName(directDeps[0].Name)+", shortest "),
+				num(shortestHops), meta(" "+hopWord+")"))
 		}
 	} else {
 		// Multiple direct deps with varying depths
-		fmt.Fprintf(w, "%s\n", graphStyleMeta.Render(
-			fmt.Sprintf("(%d paths via %d direct %s, shortest %d %s)", len(paths), len(directDeps), depWord, shortestHops, hopWord)))
+		fmt.Fprintf(w, "%s%s%s%s%s%s%s\n",
+			meta("("), num(len(paths)), meta(" paths via "), num(len(directDeps)),
+			meta(" direct "+depWord+", shortest "), num(shortestHops), meta(" "+hopWord+")"))
 	}
 }
 
@@ -481,6 +658,16 @@ func shortName(name string) string {
 	return name
 }
 
+// lastNSegments returns the last n segments of a package path.
+// E.g., lastNSegments("github.com/go-git/go-git/v5", 2) returns "go-git/v5"
+func lastNSegments(name string, n int) string {
+	parts := strings.Split(name, "/")
+	if len(parts) <= n {
+		return name
+	}
+	return strings.Join(parts[len(parts)-n:], "/")
+}
+
 // renderCompactDirectDeps renders a compact list of direct dependencies with source info.
 func renderCompactDirectDeps(w io.Writer, deps []*graph.Node) {
 	for _, dep := range deps {
@@ -489,35 +676,64 @@ func renderCompactDirectDeps(w io.Writer, deps []*graph.Node) {
 	}
 }
 
-// renderGroupedPaths groups paths by their root node and renders them as merged trees.
-// This avoids repeating the same root multiple times when multiple paths share it.
+// renderGroupedPaths renders the shortest path per direct dependency as a tree.
+// This provides a clear, non-redundant view while maintaining visual structure.
 func renderGroupedPaths(w io.Writer, paths []graph.Path) {
 	if len(paths) == 0 {
 		return
 	}
 
-	// Group paths by root PURL
-	groups := make(map[string][]graph.Path)
+	// Group paths by root PURL, keeping only the shortest per root
+	shortestByRoot := make(map[string]graph.Path)
 	var rootOrder []string // preserve order of first occurrence
 
 	for _, path := range paths {
 		if len(path) == 0 {
 			continue
 		}
-		rootPURL := path[0].PURL
-		if _, exists := groups[rootPURL]; !exists {
+		rootPURL := path[0].Purl
+		existing, exists := shortestByRoot[rootPURL]
+		if !exists {
 			rootOrder = append(rootOrder, rootPURL)
+			shortestByRoot[rootPURL] = path
+		} else if len(path) < len(existing) {
+			shortestByRoot[rootPURL] = path
 		}
-		groups[rootPURL] = append(groups[rootPURL], path)
 	}
 
-	// Render each group
+	// Render each shortest path as a simple tree
 	for i, rootPURL := range rootOrder {
 		if i > 0 {
-			fmt.Fprintln(w) // blank line between root groups
+			fmt.Fprintln(w) // blank line between paths
 		}
-		groupPaths := groups[rootPURL]
-		renderPathGroup(w, groupPaths)
+		path := shortestByRoot[rootPURL]
+		renderPathAsTree(w, path)
+	}
+}
+
+// renderPathAsTree renders a single path as a vertical tree.
+func renderPathAsTree(w io.Writer, path graph.Path) {
+	if len(path) == 0 {
+		return
+	}
+
+	// Root node (direct dependency)
+	fmt.Fprintln(w, formatNodeLabelWithSource(path[0]))
+
+	// Remaining nodes as tree
+	for i := 1; i < len(path); i++ {
+		node := path[i]
+		isLast := i == len(path)-1
+		indent := strings.Repeat("    ", i-1)
+
+		var label string
+		if isLast {
+			label = formatNodeLabelHighlighted(node)
+		} else {
+			label = formatNodeLabel(node)
+		}
+
+		fmt.Fprintf(w, "%s%s%s\n", indent, graphStyleArrow.Render("└── "), label)
 	}
 }
 
@@ -564,7 +780,7 @@ func addPathToTree(parent *pathTreeNode, path graph.Path) {
 	// Find or create child for first node in remaining path
 	var child *pathTreeNode
 	for _, c := range parent.children {
-		if c.node.PURL == path[0].PURL {
+		if c.node.Purl == path[0].Purl {
 			child = c
 			break
 		}
@@ -599,9 +815,11 @@ func renderPathTree(w io.Writer, node *pathTreeNode, prefix string, isRoot bool)
 }
 
 // renderChildren renders child nodes with proper tree structure.
+// Leaf nodes (no children) are highlighted as they represent the target package.
 func renderChildren(w io.Writer, children []*pathTreeNode, prefix string) {
 	for i, child := range children {
 		isLast := i == len(children)-1
+		isLeaf := len(child.children) == 0
 
 		var connector, nextPrefix string
 		if isLast {
@@ -612,11 +830,17 @@ func renderChildren(w io.Writer, children []*pathTreeNode, prefix string) {
 			nextPrefix = prefix + graphStyleArrow.Render("│") + "   "
 		}
 
-		label := formatNodeLabel(child.node)
+		// Leaf nodes (target package) get highlighted
+		var label string
+		if isLeaf {
+			label = formatNodeLabelHighlighted(child.node)
+		} else {
+			label = formatNodeLabel(child.node)
+		}
 		fmt.Fprintf(w, "%s%s%s\n", prefix, connector, label)
 
 		// Recurse for grandchildren
-		if len(child.children) > 0 {
+		if !isLeaf {
 			renderChildren(w, child.children, nextPrefix)
 		}
 	}
@@ -624,20 +848,29 @@ func renderChildren(w io.Writer, children []*pathTreeNode, prefix string) {
 
 
 // Graph output styles - defined here for consistency across graph commands.
-// These provide better contrast than the default ui.Style* for dependency paths.
+// Designed for visual hierarchy: header stands out, tree fades into background,
+// target package highlighted at leaf nodes.
 var (
-	// graphStyleName renders package names in bold white.
+	// graphStyleName renders the target package name in bold white (header only).
 	graphStyleName = lipgloss.NewStyle().Foreground(lipgloss.Color("#FFFFFF")).Bold(true)
-	// graphStyleVersion renders versions in a readable cyan-gray (not faint).
+	// graphStyleVersion renders versions in a subdued cyan-gray.
 	graphStyleVersion = lipgloss.NewStyle().Foreground(lipgloss.Color("#88AAAA"))
 	// graphStyleAt renders the @ separator in dim gray.
-	graphStyleAt = lipgloss.NewStyle().Foreground(lipgloss.Color("#666666"))
-	// graphStyleDirect renders the (direct) marker.
-	graphStyleDirect = lipgloss.NewStyle().Foreground(lipgloss.Color("#888888"))
-	// graphStyleArrow renders tree arrows with slightly more visibility.
-	graphStyleArrow = lipgloss.NewStyle().Foreground(lipgloss.Color("#555555"))
+	graphStyleAt = lipgloss.NewStyle().Foreground(lipgloss.Color("#555555"))
+	// graphStyleArrow renders tree connectors very dim (visual structure, not content).
+	graphStyleArrow = lipgloss.NewStyle().Foreground(lipgloss.Color("#444444"))
 	// graphStyleMeta renders metadata like path counts in dim text.
 	graphStyleMeta = lipgloss.NewStyle().Foreground(lipgloss.Color("#666666"))
+	// graphStyleNumber renders numbers in summary text - stands out from dim text.
+	graphStyleNumber = lipgloss.NewStyle().Foreground(lipgloss.Color("#AAAAAA"))
+	// graphStyleTreeNode renders intermediary tree nodes in subdued color.
+	graphStyleTreeNode = lipgloss.NewStyle().Foreground(lipgloss.Color("#888888"))
+	// graphStyleTreeVersion renders versions in tree nodes even more subdued.
+	graphStyleTreeVersion = lipgloss.NewStyle().Foreground(lipgloss.Color("#666666"))
+	// graphStyleTarget renders the target package (leaf nodes) - stands out in tree.
+	graphStyleTarget = lipgloss.NewStyle().Foreground(lipgloss.Color("#FFFFFF"))
+	// graphStyleTargetVersion renders target package version.
+	graphStyleTargetVersion = lipgloss.NewStyle().Foreground(lipgloss.Color("#88AAAA"))
 	// graphStyleTipIcon renders the lightbulb icon in yellow.
 	graphStyleTipIcon = lipgloss.NewStyle().Foreground(lipgloss.Color("#FFCC00"))
 	// graphStyleTipLabel renders the "Tip:" label in bold yellow.
@@ -646,6 +879,14 @@ var (
 	graphStyleTipText = lipgloss.NewStyle().Foreground(lipgloss.Color("#AAAAAA"))
 	// graphStyleTipHighlight renders highlighted text within tips.
 	graphStyleTipHighlight = lipgloss.NewStyle().Foreground(lipgloss.Color("#FFFFFF"))
+
+	// Match quality indicator styles for --list output
+	// graphStyleMatchExact renders ★ for exact matches - bright yellow, stands out.
+	graphStyleMatchExact = lipgloss.NewStyle().Foreground(lipgloss.Color("#FFCC00"))
+	// graphStyleMatchName renders ● for name/segment matches - softer yellow.
+	graphStyleMatchName = lipgloss.NewStyle().Foreground(lipgloss.Color("#BBAA66"))
+	// graphStyleMatchSubstring renders ○ for substring matches - dim gray.
+	graphStyleMatchSubstring = lipgloss.NewStyle().Foreground(lipgloss.Color("#666666"))
 )
 
 // formatPackageHeader formats a package name and version as a header line.
@@ -659,31 +900,51 @@ func formatPackageHeader(name, version string) string {
 }
 
 // formatNodeLabel formats a node for display with name and version.
+// Uses subdued colors for tree nodes to reduce visual noise.
 func formatNodeLabel(node *graph.Node) string {
-	result := graphStyleName.UnsetBold().Render(node.Name)
+	result := graphStyleTreeNode.Render(node.Name)
 	if node.Version != "" {
 		result += graphStyleAt.Render("@")
-		result += graphStyleVersion.Render(node.Version)
+		result += graphStyleTreeVersion.Render(node.Version)
 	}
 	if node.Direct {
-		result += graphStyleDirect.Render(" (direct)")
+		result += " " + ui.StyleDirect.Render("[direct]")
+	}
+	return result
+}
+
+// formatNodeLabelHighlighted formats a node with emphasis (for target packages).
+// Used for leaf nodes in the tree - the package being searched for.
+func formatNodeLabelHighlighted(node *graph.Node) string {
+	result := graphStyleTarget.Render(node.Name)
+	if node.Version != "" {
+		result += graphStyleAt.Render("@")
+		result += graphStyleTargetVersion.Render(node.Version)
 	}
 	return result
 }
 
 // formatNodeLabelWithSource formats a node label including its source file location.
-// Used for root nodes to show where the dependency is declared.
+// Used for root nodes (direct dependencies) - slightly more prominent than tree nodes.
 func formatNodeLabelWithSource(node *graph.Node) string {
-	label := formatNodeLabel(node)
+	// Root nodes use white text (not bold) - more prominent than tree nodes
+	result := lipgloss.NewStyle().Foreground(lipgloss.Color("#DDDDDD")).Render(node.Name)
+	if node.Version != "" {
+		result += graphStyleAt.Render("@")
+		result += graphStyleVersion.Render(node.Version)
+	}
+	if node.Direct {
+		result += " " + ui.StyleDirect.Render("[direct]")
+	}
 
 	// Add source location if available
 	if len(node.Locations) > 0 {
 		source := formatSourceLocation(node.Locations[0])
 		if source != "" {
-			label += graphStyleMeta.Render(" [" + source + "]")
+			result += graphStyleMeta.Render(" [" + source + "]")
 		}
 	}
-	return label
+	return result
 }
 
 // formatSourceLocation formats a location path for display.
@@ -744,93 +1005,84 @@ func isGoStdlibPackage(query string) bool {
 	return false
 }
 
-// containsPathSegment checks if query appears as a path segment in name.
-// For example, "yaml" is a segment in "gopkg.in/yaml.v3" (between / and .).
-// Also matches hyphenated names like "jsonschema" in "jsonschema-go".
-func containsPathSegment(name, query string) bool {
-	// Look for /query. or /query/ patterns
-	segment := "/" + query + "."
-	if strings.Contains(name, segment) {
-		return true
-	}
-	segment = "/" + query + "/"
-	if strings.Contains(name, segment) {
-		return true
-	}
-	// Match hyphenated package names: jsonschema matches jsonschema-go
-	segment = "/" + query + "-"
-	return strings.Contains(name, segment)
-}
-
-// matchRank represents how well a query matches a package.
-type matchRank int
-
-const (
-	matchNone       matchRank = iota // No match
-	matchSubstring                   // Query is substring of name (disabled - too loose)
-	matchPathMatch                   // Query is a path segment (e.g., /yaml/ or /yaml. or ends with /yaml)
-	matchNameSuffix                  // Name ends with -query (e.g., go-yaml matches "yaml")
-	matchExact                       // Exact name match (strongest)
-)
-
-// findMatchingNodes finds nodes matching the query with ranked matching.
-// Returns nodes sorted by match quality (best matches first).
-// Matching priority (highest to lowest):
-//  1. Exact match: query == name
-//  2. Name suffix: name ends with -query (go-yaml matches "yaml")
-//  3. Path match: query is a path segment (/query/ or /query. or /query-)
-//  4. Substring: query appears anywhere in name (fallback)
+// findMatchingNodes finds nodes matching the query pattern.
+// Supports glob patterns via path.Match or simple substring matching.
+// Results are sorted with best matches first: exact matches, then final segment
+// matches, then substring matches, all sorted alphabetically within each tier.
+//
+// Examples:
+//   - "cobra" matches any package containing "cobra", prefers github.com/spf13/cobra
+//   - "*/cobra" matches packages ending with /cobra
+//   - "spf13/*" matches all packages under spf13
 func findMatchingNodes(g *graph.Graph, query string) []*graph.Node {
 	queryLower := strings.ToLower(query)
+	isGlob := strings.ContainsAny(query, "*?[")
 
-	type rankedMatch struct {
-		node *graph.Node
-		rank matchRank
-	}
-
-	var matches []rankedMatch
+	var matches []*graph.Node
 
 	for node := range g.Nodes() {
 		nameLower := strings.ToLower(node.Name)
-		rank := matchNone
 
-		// Check for exact match first
-		if nameLower == queryLower {
-			rank = matchExact
-		} else if strings.HasSuffix(nameLower, "-"+queryLower) {
-			// Hyphen suffix: go-yaml matches "yaml"
-			rank = matchNameSuffix
-		} else if strings.HasSuffix(nameLower, "/"+queryLower) {
-			// Path suffix: golang.org/x/net matches "net"
-			rank = matchPathMatch
-		} else if containsPathSegment(nameLower, queryLower) {
-			// Path segment: gopkg.in/yaml.v3 matches "yaml", jsonschema matches jsonschema-go
-			rank = matchPathMatch
-		} else if strings.Contains(nameLower, queryLower) {
-			// Substring fallback: allows looser matching when nothing else works
-			rank = matchSubstring
-		}
-
-		if rank > matchNone {
-			matches = append(matches, rankedMatch{node: node, rank: rank})
+		if isGlob {
+			// Use path.Match for glob patterns
+			if matched, _ := path.Match(queryLower, nameLower); matched {
+				matches = append(matches, node)
+			}
+		} else {
+			// Simple substring matching - case insensitive
+			if strings.Contains(nameLower, queryLower) {
+				matches = append(matches, node)
+			}
 		}
 	}
 
-	// Sort by rank (best first), then by name for determinism
-	slices.SortFunc(matches, func(a, b rankedMatch) int {
-		if a.rank != b.rank {
-			return int(b.rank) - int(a.rank) // Higher rank first
+	// Sort by match quality: exact > final segment > substring, then alphabetically
+	slices.SortFunc(matches, func(a, b *graph.Node) int {
+		scoreA := matchScore(a.Name, queryLower)
+		scoreB := matchScore(b.Name, queryLower)
+		if scoreA != scoreB {
+			return scoreB - scoreA // Higher score first
 		}
-		return strings.Compare(a.node.Name, b.node.Name)
+		return strings.Compare(a.Name, b.Name)
 	})
 
-	// Extract just the nodes
-	result := make([]*graph.Node, len(matches))
-	for i, m := range matches {
-		result[i] = m.node
+	return matches
+}
+
+// matchScore returns a quality score for how well a package name matches a query.
+// Higher scores indicate better matches:
+//   - 3: exact match (name equals query)
+//   - 2: final segment match (query matches the last path component)
+//   - 1: substring match
+func matchScore(name, queryLower string) int {
+	nameLower := strings.ToLower(name)
+
+	// Exact match
+	if nameLower == queryLower {
+		return 3
 	}
 
-	return result
+	// Final segment match (e.g., "cobra" matches "github.com/spf13/cobra")
+	// Also handles versioned paths like "go-git/v5" → match "go-git"
+	finalSegment := nameLower
+	if idx := strings.LastIndex(nameLower, "/"); idx >= 0 {
+		finalSegment = nameLower[idx+1:]
+	}
+	// Strip version suffix for comparison (v5, v2, etc.)
+	if strings.HasPrefix(finalSegment, "v") && len(finalSegment) <= 3 {
+		// This is a version segment like /v5, check the segment before it
+		if idx := strings.LastIndex(strings.TrimSuffix(nameLower, "/"+finalSegment), "/"); idx >= 0 {
+			finalSegment = strings.TrimSuffix(nameLower, "/"+finalSegment)[idx+1:]
+		} else {
+			finalSegment = strings.TrimSuffix(nameLower, "/"+finalSegment)
+		}
+	}
+	if finalSegment == queryLower {
+		return 2
+	}
+
+	// Substring match
+	return 1
 }
 
 // findBestMatchingNode finds the single best matching node for a query.
@@ -868,20 +1120,18 @@ func deduplicatePaths(paths []graph.Path) []graph.Path {
 
 // describePackageSource analyzes location paths to describe where a package was found.
 // This helps users understand why a package appears in the inventory even without
-// a dependency path through source code (e.g., from compiled binaries).
+// a dependency path through source code (e.g., from compiled binaries or Dockerfiles).
 func describePackageSource(locations []string) string {
 	for _, loc := range locations {
-		// Check for Go binary (executable files with no lockfile extension)
-		if !strings.HasSuffix(loc, ".mod") &&
-			!strings.HasSuffix(loc, ".sum") &&
-			!strings.HasSuffix(loc, ".lock") &&
-			!strings.HasSuffix(loc, ".json") &&
-			!strings.HasSuffix(loc, ".yaml") &&
-			!strings.HasSuffix(loc, ".yml") &&
-			!strings.HasSuffix(loc, ".toml") {
-			// Likely a binary file
-			return "compiled binary"
+		locLower := strings.ToLower(loc)
+
+		// Check for Dockerfiles first (container base images)
+		if strings.HasSuffix(locLower, "dockerfile") ||
+			strings.HasSuffix(locLower, ".dockerfile") ||
+			strings.Contains(locLower, "dockerfile") {
+			return "Dockerfile"
 		}
+		// Check for known manifest/lockfile types
 		if strings.HasSuffix(loc, "go.mod") {
 			return "go.mod"
 		}
@@ -903,66 +1153,90 @@ func describePackageSource(locations []string) string {
 		if strings.HasSuffix(loc, "Gemfile.lock") {
 			return "Gemfile.lock"
 		}
+		if strings.HasSuffix(loc, "requirements.txt") {
+			return "requirements.txt"
+		}
+		if strings.HasSuffix(loc, "pyproject.toml") {
+			return "pyproject.toml"
+		}
+		if strings.HasSuffix(loc, "poetry.lock") {
+			return "poetry.lock"
+		}
+		if strings.HasSuffix(loc, "uv.lock") {
+			return "uv.lock"
+		}
+		// Check for Go binary (executable files with no lockfile/manifest extension)
+		if !strings.HasSuffix(loc, ".mod") &&
+			!strings.HasSuffix(loc, ".sum") &&
+			!strings.HasSuffix(loc, ".lock") &&
+			!strings.HasSuffix(loc, ".json") &&
+			!strings.HasSuffix(loc, ".yaml") &&
+			!strings.HasSuffix(loc, ".yml") &&
+			!strings.HasSuffix(loc, ".toml") &&
+			!strings.HasSuffix(loc, ".txt") {
+			// Likely a binary file
+			return "compiled binary"
+		}
 	}
 	return "unknown source"
 }
 
-// writeWhyJSON outputs the why information as JSON.
+// writeWhyJSON outputs the why information as JSON using proto types.
 func writeWhyJSON(w io.Writer, g *graph.Graph, matches []*graph.Node) error {
-	type pathNode struct {
-		Name    string `json:"name"`
-		Version string `json:"version,omitempty"`
-		PURL    string `json:"purl"`
-		Direct  bool   `json:"direct,omitempty"`
-	}
-	type whyResult struct {
-		Package   string       `json:"package"`
-		Version   string       `json:"version,omitempty"`
-		PURL      string       `json:"purl"`
-		Direct    bool         `json:"direct"`
-		Locations []string     `json:"locations,omitempty"`
-		Source    string       `json:"source,omitempty"`
-		Paths     [][]pathNode `json:"paths"`
-	}
-
-	var results []whyResult
+	// Build a list of WhyDependencyResponse protos for each match
+	var results []*graphv1.WhyDependencyResponse
 	for _, match := range matches {
-		r := whyResult{
-			Package:   match.Name,
-			Version:   match.Version,
-			PURL:      match.PURL,
-			Direct:    match.Direct,
-			Locations: match.Locations,
+		resp := &graphv1.WhyDependencyResponse{
+			Dependency: match.Purl,
+			Found:      true,
 		}
 
-		// Add source description when locations are available
-		if len(match.Locations) > 0 {
-			r.Source = describePackageSource(match.Locations)
-		}
-
-		paths := g.PathsTo(match.PURL)
+		paths := g.PathsTo(match.Purl)
 		for _, path := range paths {
-			var jsonPath []pathNode
+			depPath := &graphv1.DependencyPath{
+				Length: int32(len(path) - 1), // edges = nodes - 1
+			}
 			for _, node := range path {
-				jsonPath = append(jsonPath, pathNode{
+				depPath.Nodes = append(depPath.Nodes, &graphv1.PathNode{
+					Purl:    node.Purl,
 					Name:    node.Name,
 					Version: node.Version,
-					PURL:    node.PURL,
-					Direct:  node.Direct,
 				})
 			}
-			r.Paths = append(r.Paths, jsonPath)
+			resp.Paths = append(resp.Paths, depPath)
 		}
-		results = append(results, r)
+		results = append(results, resp)
 	}
 
-	enc := json.NewEncoder(w)
-	enc.SetIndent("", "  ")
-	return enc.Encode(results)
+	// Use protojson for consistent formatting
+	opts := protojson.MarshalOptions{
+		Multiline:       true,
+		Indent:          "  ",
+		EmitUnpopulated: false,
+		UseProtoNames:   true,
+	}
+
+	// Marshal as a list wrapper since proto doesn't have a native list type
+	// Create a wrapper response for multiple matches
+	wrapper := &graphv1.WhyDependencyListResponse{
+		Results: results,
+	}
+
+	data, err := opts.Marshal(wrapper)
+	if err != nil {
+		return fmt.Errorf("marshal why results: %w", err)
+	}
+
+	_, err = w.Write(data)
+	if err != nil {
+		return err
+	}
+	_, err = w.Write([]byte("\n"))
+	return err
 }
 
 // addGraphNeedsCommand adds the "graph needs" subcommand.
-func addGraphNeedsCommand(parent *cobra.Command) {
+func addGraphNeedsCommand(parent *cobra.Command, c *services.Clients) {
 	var (
 		ref     string
 		ecos    []string
@@ -1002,12 +1276,26 @@ impact of upgrading or removing a package.`,
 				}
 			}
 
-			result, err := buildGraph(ctx, target, ref, ecos)
-			if err != nil {
-				return err
+			// Build graph via service layer
+			req := &graphv1.BuildGraphRequest{
+				Target: target,
+				Options: &graphv1.GraphOptions{
+					Ecosystems: normalizeEcosystems(ecos),
+					Ref:        ref,
+					UseProxy:   true,
+					UseGit:     true,
+				},
 			}
 
-			g := result.Graph
+			resp, err := c.Graph.BuildGraph(ctx, connect.NewRequest(req))
+			if err != nil {
+				return fmt.Errorf("failed to build graph: %w", err)
+			}
+
+			g := graph.FromProto(resp.Msg.Nodes, resp.Msg.Edges, resp.Msg.Roots)
+			if g == nil {
+				return fmt.Errorf("failed to parse graph response")
+			}
 
 			// Find best matching node
 			match := findBestMatchingNode(g, pkg)
@@ -1020,13 +1308,13 @@ impact of upgrading or removing a package.`,
 
 			// Collect ancestors (packages that depend on this one)
 			var ancestors []*graph.Node
-			for ancestor := range g.Ancestors(match.PURL) {
+			for ancestor := range g.Ancestors(match.Purl) {
 				ancestors = append(ancestors, ancestor)
 			}
 
 			// Check direct parents via edges
 			var parents []*graph.Node
-			for parent := range g.Parents(match.PURL) {
+			for parent := range g.Parents(match.Purl) {
 				parents = append(parents, parent)
 			}
 
@@ -1094,25 +1382,12 @@ impact of upgrading or removing a package.`,
 	parent.AddCommand(cmd)
 }
 
-// writeNeedsJSON outputs the needs information as JSON.
+// writeNeedsJSON outputs the needs information as JSON using proto types.
 func writeNeedsJSON(w io.Writer, match *graph.Node, ancestors, parents []*graph.Node) error {
-	type dependent struct {
-		Name    string `json:"name"`
-		Version string `json:"version,omitempty"`
-		PURL    string `json:"purl"`
-		Direct  bool   `json:"direct,omitempty"`
-	}
-	type needsResult struct {
-		Package    string      `json:"package"`
-		Version    string      `json:"version,omitempty"`
-		PURL       string      `json:"purl"`
-		Dependents []dependent `json:"dependents"`
-	}
-
-	result := needsResult{
+	resp := &graphv1.NeedsDependencyResponse{
 		Package: match.Name,
 		Version: match.Version,
-		PURL:    match.PURL,
+		Purl:    match.Purl,
 	}
 
 	// Use ancestors if available, otherwise parents
@@ -1122,162 +1397,32 @@ func writeNeedsJSON(w io.Writer, match *graph.Node, ancestors, parents []*graph.
 	}
 
 	for _, d := range deps {
-		result.Dependents = append(result.Dependents, dependent{
+		resp.Dependents = append(resp.Dependents, &graphv1.Node{
 			Name:    d.Name,
 			Version: d.Version,
-			PURL:    d.PURL,
+			Purl:    d.Purl,
 			Direct:  d.Direct,
 		})
 	}
 
-	enc := json.NewEncoder(w)
-	enc.SetIndent("", "  ")
-	return enc.Encode(result)
-}
-
-// buildGraph constructs the dependency graph for the given repository.
-func buildGraph(ctx context.Context, repoPath, ref string, ecosystems []string) (*GraphResult, error) {
-	ctx, span := otel.StartSpan(ctx, "deputy.graph",
-		trace.WithAttributes(
-			attribute.String("deputy.target.path", repoPath),
-			attribute.String("deputy.target.ref", ref),
-		))
-	defer span.End()
-
-	var (
-		src *repository.Source
-		err error
-	)
-
-	// Open or clone repository
-	if fi, statErr := os.Stat(repoPath); statErr == nil && fi.IsDir() {
-		src, err = repository.Open(repoPath)
-		if err != nil {
-			otel.SetSpanError(span, err)
-			return nil, err
-		}
+	opts := protojson.MarshalOptions{
+		Multiline:       true,
+		Indent:          "  ",
+		EmitUnpopulated: false,
+		UseProtoNames:   true,
 	}
-	if src == nil {
-		u := gitutil.ToHTTPSGitURL(repoPath)
-		if u == "" {
-			return nil, fmt.Errorf("could not interpret target %q as local path or remote Git URL", repoPath)
-		}
-		gitAuth, _ := auth.GitAuthForURL(ctx, u)
-		rn, resolveErr := gitutil.ResolveReferenceName(ctx, u, gitAuth, ref)
-		if resolveErr == nil && rn.String() != "" {
-			ref = rn.String()
-		}
-		cloneOpts := &git.CloneOptions{
-			URL:          u,
-			Depth:        1,
-			SingleBranch: true,
-			Tags:         git.NoTags,
-			Auth:         gitAuth,
-		}
-		if rn.String() != "" {
-			cloneOpts.ReferenceName = rn
-		}
-		src, err = repository.Clone(ctx, cloneOpts, true)
-		if err != nil && cloneOpts.ReferenceName != "" {
-			cloneOpts.ReferenceName = ""
-			src, err = repository.Clone(ctx, cloneOpts, true)
-		}
-		if err != nil {
-			return nil, fmt.Errorf("failed to clone remote repo %s: %w", u, err)
-		}
-	}
-	defer src.Close()
 
-	repo := src.Repo
-	ws := src.Workspace
-
-	effRef := refOrHEAD(ref)
-	var (
-		pkgs       []*extractor.Package
-		targetHash *plumbing.Hash
-	)
-	scanOpts := inv.ScanOptions{Ecosystems: ecosystems}
-
-	if strings.EqualFold(effRef, "HEAD") {
-		pkgs, err = inv.ScanPackagesWorking(ctx, ws, scanOpts)
-	} else {
-		targetHash, err = gitutil.ResolveRevisionEnhanced(repo, effRef)
-		if err != nil {
-			return nil, err
-		}
-		pkgs, err = inv.ScanPackagesAtCommitSnapshot(ctx, repo, *targetHash, scanOpts)
-	}
+	data, err := opts.Marshal(resp)
 	if err != nil {
-		return nil, fmt.Errorf("failed to collect inventory: %w", err)
+		return fmt.Errorf("marshal needs result: %w", err)
 	}
 
-	// Determine direct dependencies
-	goDirect := map[string]bool{"stdlib": true}
-	var manifestRes scan.ManifestResolver
-	switch {
-	case strings.EqualFold(effRef, "HEAD") || strings.EqualFold(effRef, "HEAD~0"):
-		goDirect = compare.CollectGoDirectModulesFromWorkspace(ws)
-		manifestRes = scan.NewWorkspaceManifestResolver(ws)
-	case targetHash != nil:
-		if direct, err := compare.CollectGoDirectModulesFromCommit(repo, *targetHash); err == nil {
-			goDirect = direct
-		}
-		manifestRes = scan.NewGitManifestResolver(repo, *targetHash)
-	default:
-		goDirect = compare.CollectGoDirectModulesFromWorkspace(ws)
-		manifestRes = scan.NewWorkspaceManifestResolver(ws)
+	_, err = w.Write(data)
+	if err != nil {
+		return err
 	}
-
-	pkgInputs := scan.PackagesToInputs(pkgs, scan.PackageInputOptions{GoDirect: goDirect, Resolver: manifestRes})
-	pkgDirect := scan.BuildPackageDirectMap(pkgInputs)
-
-	// Build the graph from inventory
-	g := graph.FromInventory(pkgs, pkgDirect)
-
-	// Resolve edges using ecosystem-specific resolvers
-	// Each resolver parses lockfiles for its ecosystem to determine dependency relationships.
-	// Strategy varies by ecosystem:
-	//   - Go: vendor -> proxy -> git (no lockfile with deps, fetch go.mod)
-	//   - npm: parse package-lock.json (contains full tree)
-	//   - Cargo: parse Cargo.lock (contains full tree)
-	//   - PyPI: parse poetry.lock/uv.lock (contains edges)
-	//   - RubyGems: parse Gemfile.lock (contains edges)
-	fileReader := graph.NewWorkspaceFileReader(ws)
-
-	// Create resolver registry with Go proxy+git enabled for accurate resolution
-	registry := graph.NewResolverRegistry(
-		graph.WithGoProxyEnabled(""), // Use default proxy.golang.org
-		graph.WithGoGitEnabled(),     // Enable git fetch for private modules
-	)
-
-	// Resolve all ecosystems (each resolver handles its own files)
-	// Errors are logged but don't fail the overall operation - partial resolution is acceptable
-	if err := registry.ResolveAll(ctx, g, fileReader); err != nil {
-		slog.Debug("some resolvers failed during edge resolution", "error", err)
-	}
-
-	// Get commit hash for metadata
-	commitHash := ""
-	switch {
-	case strings.EqualFold(effRef, "HEAD"):
-		if head, err := repo.Head(); err == nil {
-			commitHash = head.Hash().String()
-		}
-	case targetHash != nil:
-		commitHash = targetHash.String()
-	}
-
-	span.SetAttributes(attribute.Int("deputy.graph.nodes", g.Size()))
-	otel.SetSpanOK(span)
-
-	return &GraphResult{
-		Repo:      repoPath,
-		Ref:       shortGitRef(effRef),
-		Commit:    commitHash,
-		Generated: timeNowUTC(),
-		Stats:     g.Stats(),
-		Graph:     g,
-	}, nil
+	_, err = w.Write([]byte("\n"))
+	return err
 }
 
 // writeGraphFlatList outputs the graph as a flat list when no edge data is available.
@@ -1317,11 +1462,11 @@ func writeGraphFlatList(w io.Writer, g *graph.Graph, showVersions, showVulnCount
 			if showVersions && node.Version != "" {
 				label += "@" + node.Version
 			}
-			if showVulnCounts && node.VulnCount.Total > 0 {
-				label += fmt.Sprintf(" [%dV]", node.VulnCount.Total)
+			if showVulnCounts && node.VulnerabilityCount.GetTotal() > 0 {
+				label += fmt.Sprintf(" [%dV]", node.VulnerabilityCount.GetTotal())
 			}
 			if node.Direct {
-				label += " (direct)"
+				label += " " + ui.StyleDirect.Render("[direct]")
 			}
 			fmt.Fprintf(w, "  %s%s\n", prefix, label)
 		}
@@ -1336,34 +1481,62 @@ func writeGraphFlatList(w io.Writer, g *graph.Graph, showVersions, showVulnCount
 }
 
 // writeGraphStats outputs graph statistics in the requested format.
-func writeGraphStats(w io.Writer, stats graph.Stats, format string) error {
+func writeGraphStats(w io.Writer, stats *graphv1.GraphStats, format string) error {
 	switch GraphFormat(strings.ToLower(format)) {
 	case GraphFormatJSON:
-		enc := json.NewEncoder(w)
-		enc.SetIndent("", "  ")
-		return enc.Encode(stats)
+		opts := protojson.MarshalOptions{
+			Multiline:       true,
+			Indent:          "  ",
+			EmitUnpopulated: false,
+			UseProtoNames:   true,
+		}
+		data, err := opts.Marshal(stats)
+		if err != nil {
+			return err
+		}
+		_, err = w.Write(data)
+		if err != nil {
+			return err
+		}
+		_, err = w.Write([]byte("\n"))
+		return err
 	default:
 		// Text format - CLI friendly
 		fmt.Fprintf(w, "%s\n", ui.StyleHeader.Render("Dependency Graph Statistics"))
 		fmt.Fprintf(w, "\n")
-		fmt.Fprintf(w, "  Total packages:      %d\n", stats.TotalNodes)
-		fmt.Fprintf(w, "  Direct dependencies: %d\n", stats.DirectNodes)
-		fmt.Fprintf(w, "  Transitive:          %d\n", stats.TransitiveNodes)
-		fmt.Fprintf(w, "  Max depth:           %d\n", stats.MaxDepth)
-		if stats.VulnerableNodes > 0 {
-			fmt.Fprintf(w, "  Vulnerable packages: %d\n", stats.VulnerableNodes)
+		fmt.Fprintf(w, "  Total packages:      %d\n", stats.GetTotalNodes())
+		fmt.Fprintf(w, "  Direct dependencies: %d\n", stats.GetDirectNodes())
+		fmt.Fprintf(w, "  Transitive:          %d\n", stats.GetTransitiveNodes())
+		// Show max connected depth (meaningful for actual dependency analysis)
+		// rather than max_depth which includes disconnected nodes (depth=999)
+		fmt.Fprintf(w, "  Max depth:           %d\n", stats.GetMaxConnectedDepth())
+		if stats.GetDisconnectedNodes() > 0 {
+			fmt.Fprintf(w, "  Disconnected:        %d\n", stats.GetDisconnectedNodes())
+		}
+		if stats.GetVulnerableNodes() > 0 {
+			fmt.Fprintf(w, "  Vulnerable packages: %d\n", stats.GetVulnerableNodes())
 		}
 		fmt.Fprintf(w, "\n")
-		if len(stats.Ecosystems) > 0 {
+
+		// Import status breakdown (extended mode only)
+		if importCounts := stats.GetImportStatusCounts(); importCounts != nil {
+			fmt.Fprintf(w, "%s\n", ui.StyleHeader.Render("By Import Status (Extended Mode)"))
+			fmt.Fprintf(w, "  Imported (in binary): %d\n", importCounts.GetImported())
+			fmt.Fprintf(w, "  Required (in go.mod): %d\n", importCounts.GetRequired())
+			fmt.Fprintf(w, "  Declared (phantom):   %d\n", importCounts.GetDeclared())
+			fmt.Fprintf(w, "\n")
+		}
+
+		if len(stats.GetEcosystems()) > 0 {
 			fmt.Fprintf(w, "%s\n", ui.StyleHeader.Render("By Ecosystem"))
 			// Sort ecosystems for deterministic output
-			ecos := make([]string, 0, len(stats.Ecosystems))
-			for eco := range stats.Ecosystems {
+			ecos := make([]string, 0, len(stats.GetEcosystems()))
+			for eco := range stats.GetEcosystems() {
 				ecos = append(ecos, eco)
 			}
 			slices.Sort(ecos)
 			for _, eco := range ecos {
-				fmt.Fprintf(w, "  %-20s %d\n", eco+":", stats.Ecosystems[eco])
+				fmt.Fprintf(w, "  %-20s %d\n", eco+":", stats.GetEcosystems()[eco])
 			}
 		}
 		return nil

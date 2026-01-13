@@ -9,7 +9,39 @@ import (
 	"github.com/google/cel-go/cel"
 	"github.com/google/cel-go/common/types/ref"
 	"github.com/picatz/deputy/internal/collections"
+
+	dependencyv1 "github.com/picatz/deputy/gen/deputy/dependency/v1"
+	policyv1 "github.com/picatz/deputy/gen/deputy/policy/v1"
+	targetv1 "github.com/picatz/deputy/gen/deputy/target/v1"
+	vulnerabilityv1 "github.com/picatz/deputy/gen/deputy/vulnerability/v1"
 )
+
+// deepCloneMap creates a deep copy of a map[string]any for testing.
+func deepCloneMap(m map[string]any) map[string]any {
+	if m == nil {
+		return map[string]any{}
+	}
+	out := make(map[string]any, len(m))
+	for k, v := range m {
+		out[k] = deepCloneValue(v)
+	}
+	return out
+}
+
+func deepCloneValue(v any) any {
+	switch val := v.(type) {
+	case map[string]any:
+		return deepCloneMap(val)
+	case []any:
+		clone := make([]any, len(val))
+		for i, elem := range val {
+			clone[i] = deepCloneValue(elem)
+		}
+		return clone
+	default:
+		return v
+	}
+}
 
 func TestNewEngine_Empty(t *testing.T) {
 	eng, err := NewEngine(nil)
@@ -327,7 +359,7 @@ func TestEvaluateAll_PayloadNotModified(t *testing.T) {
 		"key": "value",
 	}
 
-	_, err = eng.EvaluateAll(t.Context(), original, "cmd", "ep")
+	_, err = eng.EvaluateAllMap(t.Context(), original, "scan", "scan_report")
 	if err != nil {
 		t.Fatalf("EvaluateAll() error: %v", err)
 	}
@@ -338,111 +370,118 @@ func TestEvaluateAll_PayloadNotModified(t *testing.T) {
 	}
 }
 
-func TestParseUndeclared(t *testing.T) {
+// TestNewEngine_UndeclaredVariableRejected verifies that policies using unknown
+// variables are rejected at compile time - preventing injection attacks.
+func TestNewEngine_UndeclaredVariableRejected(t *testing.T) {
 	tests := []struct {
-		name     string
-		msg      string
-		expected []string
+		name       string
+		policyBody string
+		wantErr    bool
 	}{
 		{
-			name:     "single undeclared",
-			msg:      "ERROR: <input>:1:1: undeclared reference to 'foo'",
-			expected: []string{"foo"},
+			name:       "known variable pkg is allowed",
+			policyBody: `pkg.name == "test" ? [{"action": "deny"}] : [{"action": "allow"}]`,
+			wantErr:    false,
 		},
 		{
-			name:     "multiple undeclared",
-			msg:      "undeclared reference to 'foo'\nundeclared reference to 'bar'",
-			expected: []string{"foo", "bar"},
+			name:       "unknown variable is rejected",
+			policyBody: `injected_var == true ? [{"action": "deny"}] : [{"action": "allow"}]`,
+			wantErr:    true,
 		},
 		{
-			name:     "no undeclared",
-			msg:      "some other error",
-			expected: nil,
+			name:       "undeclared variable in complex expression is rejected",
+			policyBody: `pkg.name == "test" && malicious_payload.execute() ? [{"action": "deny"}] : [{"action": "allow"}]`,
+			wantErr:    true,
 		},
 		{
-			name:     "empty message",
-			msg:      "",
-			expected: nil,
-		},
-		{
-			name:     "complex undeclared name",
-			msg:      "undeclared reference to 'my_variable_123'",
-			expected: []string{"my_variable_123"},
+			name:       "all default variables are allowed",
+			policyBody: `vulnerability != null && pkg != null ? [{"action": "deny"}] : [{"action": "allow"}]`,
+			wantErr:    false,
 		},
 	}
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			result := parseUndeclared(tc.msg)
-			if len(result) != len(tc.expected) {
-				t.Errorf("expected %d undeclared vars, got %d: %v", len(tc.expected), len(result), result)
-				return
+			sources := []Source{{Name: "test-policy", Body: tc.policyBody}}
+			_, err := NewEngine(sources)
+			if tc.wantErr && err == nil {
+				t.Error("expected error for undeclared variable, got nil")
 			}
-			for i, v := range tc.expected {
-				if result[i] != v {
-					t.Errorf("expected result[%d] = %q, got %q", i, v, result[i])
-				}
+			if !tc.wantErr && err != nil {
+				t.Errorf("unexpected error: %v", err)
 			}
 		})
 	}
 }
 
-func TestParseUndeclaredFromIssues(t *testing.T) {
-	// Create a CEL environment with no extra variables to trigger undeclared errors
-	env, err := envWithNames(nil)
+// TestNewEngine_InvalidEntrypointRejected verifies that policies with unknown
+// entrypoints are rejected at load time.
+func TestNewEngine_InvalidEntrypointRejected(t *testing.T) {
+	tests := []struct {
+		name       string
+		policyBody string
+		wantErr    bool
+		errContain string
+	}{
+		{
+			name: "valid entrypoint is allowed",
+			policyBody: `//! policy.entrypoints = scan_report
+[{"action": "allow"}]`,
+			wantErr: false,
+		},
+		{
+			name: "invalid entrypoint is rejected",
+			policyBody: `//! policy.entrypoints = malicious_entrypoint
+[{"action": "allow"}]`,
+			wantErr:    true,
+			errContain: "invalid entrypoint",
+		},
+		{
+			name: "mixed valid and invalid entrypoints is rejected",
+			policyBody: `//! policy.entrypoints = scan_report, fake_entrypoint
+[{"action": "allow"}]`,
+			wantErr:    true,
+			errContain: "invalid entrypoint",
+		},
+		{
+			name:       "no entrypoint restriction is allowed",
+			policyBody: `[{"action": "allow"}]`,
+			wantErr:    false,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			sources := []Source{{Name: "test-policy", Body: tc.policyBody}}
+			_, err := NewEngine(sources)
+			if tc.wantErr {
+				if err == nil {
+					t.Error("expected error for invalid entrypoint, got nil")
+				} else if tc.errContain != "" && !strings.Contains(err.Error(), tc.errContain) {
+					t.Errorf("error should contain %q, got: %v", tc.errContain, err)
+				}
+			} else if err != nil {
+				t.Errorf("unexpected error: %v", err)
+			}
+		})
+	}
+}
+
+// TestEvaluateAll_InvalidEntrypointRejected verifies that invalid entrypoints
+// are rejected at evaluation time.
+func TestEvaluateAll_InvalidEntrypointRejected(t *testing.T) {
+	sources := []Source{{Name: "test", Body: `[{"action": "allow"}]`}}
+	eng, err := NewEngine(sources)
 	if err != nil {
-		t.Fatalf("envWithNames: %v", err)
+		t.Fatalf("NewEngine() error: %v", err)
 	}
 
-	tests := []struct {
-		name     string
-		expr     string
-		expected []string
-	}{
-		{
-			name:     "single undeclared",
-			expr:     "custom_var == true",
-			expected: []string{"custom_var"},
-		},
-		{
-			name:     "multiple undeclared",
-			expr:     "foo && bar && baz",
-			expected: []string{"foo", "bar", "baz"},
-		},
-		{
-			name:     "duplicate undeclared",
-			expr:     "foo && foo",
-			expected: []string{"foo"},
-		},
-		{
-			name:     "valid expression",
-			expr:     "pkg.name == 'test'",
-			expected: nil,
-		},
+	_, err = eng.EvaluateAll(t.Context(), nil, "scan", "fake_entrypoint")
+	if err == nil {
+		t.Error("expected error for invalid entrypoint at evaluation time")
 	}
-
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			_, iss := env.Compile(tc.expr)
-			result := parseUndeclaredFromIssues(iss)
-			if len(result) != len(tc.expected) {
-				t.Errorf("expected %d undeclared vars, got %d: %v", len(tc.expected), len(result), result)
-				return
-			}
-			for i, v := range tc.expected {
-				if result[i] != v {
-					t.Errorf("expected result[%d] = %q, got %q", i, v, result[i])
-				}
-			}
-		})
-	}
-}
-
-func TestParseUndeclaredFromIssues_NilSafety(t *testing.T) {
-	// Test nil safety
-	result := parseUndeclaredFromIssues(nil)
-	if result != nil {
-		t.Errorf("expected nil for nil issues, got %v", result)
+	if !strings.Contains(err.Error(), "invalid entrypoint") {
+		t.Errorf("error should mention invalid entrypoint, got: %v", err)
 	}
 }
 
@@ -689,13 +728,58 @@ func TestCloneMap(t *testing.T) {
 		}
 	})
 
-	t.Run("clone is independent", func(t *testing.T) {
+	t.Run("shallow clone is independent", func(t *testing.T) {
 		original := map[string]any{"key": "value"}
 		clone := cloneMap(original)
 
 		clone["key"] = "modified"
 		if original["key"] != "value" {
 			t.Error("modifying clone should not affect original")
+		}
+	})
+
+	t.Run("adding keys to clone does not affect original", func(t *testing.T) {
+		original := map[string]any{"key": "value"}
+		clone := cloneMap(original)
+
+		clone["new_key"] = "new_value"
+		if _, exists := original["new_key"]; exists {
+			t.Error("adding key to clone should not affect original")
+		}
+	})
+
+	t.Run("shallow clone shares nested references", func(t *testing.T) {
+		// This is expected behavior for shallow clone - nested maps are shared
+		nested := map[string]any{"key": "value"}
+		original := map[string]any{"nested": nested}
+		clone := cloneMap(original)
+
+		// Verify both point to same nested map (shallow clone behavior)
+		nestedClone := clone["nested"].(map[string]any)
+		nestedOriginal := original["nested"].(map[string]any)
+		nestedClone["key"] = "modified"
+
+		// With shallow clone, original IS affected (this is expected)
+		if nestedOriginal["key"] != "modified" {
+			t.Error("shallow clone should share nested map references")
+		}
+	})
+
+	t.Run("preserves all keys", func(t *testing.T) {
+		original := map[string]any{
+			"a": 1,
+			"b": "two",
+			"c": true,
+		}
+		clone := cloneMap(original)
+
+		if len(clone) != len(original) {
+			t.Errorf("clone has %d keys, want %d", len(clone), len(original))
+		}
+		for k, v := range original {
+			if clone[k] != v {
+				t.Errorf("clone[%q] = %v, want %v", k, clone[k], v)
+			}
 		}
 	})
 }
@@ -724,12 +808,247 @@ func TestEvaluateAll_ProgramError(t *testing.T) {
 		},
 	}
 
-	_, err := eng.EvaluateAll(t.Context(), nil, "", "")
+	_, err := eng.EvaluateAllMap(t.Context(), nil, "", "")
 	if err == nil {
 		t.Fatal("expected error from failing program")
 	}
 	if !strings.Contains(err.Error(), "error-policy") {
 		t.Errorf("error should contain policy name, got: %v", err)
+	}
+}
+
+// TestEvaluateAll_ProtoFirst verifies that proto messages can be passed directly
+// to the policy engine and accessed via CEL's native proto support.
+func TestEvaluateAll_ProtoFirst(t *testing.T) {
+	tests := []struct {
+		name       string
+		policyBody string
+		payload    map[string]any
+		wantAction string
+		wantReason string
+	}{
+		{
+			name: "access vulnerability finding proto",
+			policyBody: `
+vulnerability.advisory.id == "CVE-2021-44228"
+  ? [{"action": "deny", "reason": "Log4Shell detected"}]
+  : [{"action": "allow"}]`,
+			payload: map[string]any{
+				"vulnerability": &vulnerabilityv1.Finding{
+					Advisory: &vulnerabilityv1.Advisory{
+						Id: "CVE-2021-44228",
+					},
+				},
+			},
+			wantAction: "deny",
+			wantReason: "Log4Shell detected",
+		},
+		{
+			name: "access package proto fields",
+			policyBody: `
+pkg.name == "lodash" && pkg.ecosystem == "npm"
+  ? [{"action": "deny", "reason": "lodash blocked"}]
+  : [{"action": "allow"}]`,
+			payload: map[string]any{
+				"pkg": &dependencyv1.Package{
+					Name:      "lodash",
+					Version:   "4.17.21",
+					Ecosystem: "npm",
+				},
+			},
+			wantAction: "deny",
+			wantReason: "lodash blocked",
+		},
+		{
+			name: "access target proto fields via field",
+			policyBody: `
+target.display_path.contains("github.com")
+  ? [{"action": "allow", "reason": "github allowed"}]
+  : [{"action": "deny"}]`,
+			payload: map[string]any{
+				"target": &targetv1.Target{
+					DisplayPath: "github.com/foo/bar",
+				},
+			},
+			wantAction: "allow",
+			wantReason: "github allowed",
+		},
+		{
+			name: "access env proto fields",
+			policyBody: `
+env.command == "scan" && env.entrypoint == "scan_vulnerability"
+  ? [{"action": "allow"}]
+  : [{"action": "deny"}]`,
+			payload: map[string]any{
+				"env": &policyv1.Environment{
+					Command:    "scan",
+					Entrypoint: "scan_vulnerability",
+				},
+			},
+			wantAction: "allow",
+		},
+		{
+			name: "access severity level enum",
+			policyBody: `
+vulnerability.advisory.severity.level == deputy.vulnerability.v1.SeverityLevel.SEVERITY_LEVEL_CRITICAL
+  ? [{"action": "deny", "reason": "critical vuln"}]
+  : [{"action": "allow"}]`,
+			payload: map[string]any{
+				"vulnerability": &vulnerabilityv1.Finding{
+					Advisory: &vulnerabilityv1.Advisory{
+						Severity: &vulnerabilityv1.Severity{
+							Level: vulnerabilityv1.SeverityLevel_SEVERITY_LEVEL_CRITICAL,
+						},
+					},
+				},
+			},
+			wantAction: "deny",
+			wantReason: "critical vuln",
+		},
+		{
+			name: "list of vulnerability protos",
+			policyBody: `
+vulnerabilities.exists(v, v.advisory.id == "CVE-2023-1234")
+  ? [{"action": "deny", "reason": "known vuln found"}]
+  : [{"action": "allow"}]`,
+			payload: map[string]any{
+				"vulnerabilities": []*vulnerabilityv1.Finding{
+					{Advisory: &vulnerabilityv1.Advisory{Id: "CVE-2021-1111"}},
+					{Advisory: &vulnerabilityv1.Advisory{Id: "CVE-2023-1234"}},
+				},
+			},
+			wantAction: "deny",
+			wantReason: "known vuln found",
+		},
+		{
+			name: "scan vulnerability context proto",
+			policyBody: `
+vulnerability.advisory.id == "CVE-2024-5678" && pkg.name == "example"
+  ? [{"action": "deny", "reason": "context match"}]
+  : [{"action": "allow"}]`,
+			payload: map[string]any{
+				"vulnerability": &vulnerabilityv1.Finding{
+					Advisory: &vulnerabilityv1.Advisory{Id: "CVE-2024-5678"},
+				},
+				"pkg": &dependencyv1.Package{Name: "example"},
+			},
+			wantAction: "deny",
+			wantReason: "context match",
+		},
+		// Severity helper function tests - global function syntax
+		{
+			name: "severityAtLeast global function syntax",
+			policyBody: `
+severityAtLeast(vulnerability, "HIGH")
+  ? [{"action": "deny", "reason": "high or above"}]
+  : [{"action": "allow"}]`,
+			payload: map[string]any{
+				"vulnerability": &vulnerabilityv1.Finding{
+					Advisory: &vulnerabilityv1.Advisory{
+						Severity: &vulnerabilityv1.Severity{
+							Level: vulnerabilityv1.SeverityLevel_SEVERITY_LEVEL_CRITICAL,
+						},
+					},
+				},
+			},
+			wantAction: "deny",
+			wantReason: "high or above",
+		},
+		// Severity helper function tests - method syntax
+		{
+			name: "severityAtLeast method syntax",
+			policyBody: `
+vulnerability.severityAtLeast("HIGH")
+  ? [{"action": "deny", "reason": "high or above method"}]
+  : [{"action": "allow"}]`,
+			payload: map[string]any{
+				"vulnerability": &vulnerabilityv1.Finding{
+					Advisory: &vulnerabilityv1.Advisory{
+						Severity: &vulnerabilityv1.Severity{
+							Level: vulnerabilityv1.SeverityLevel_SEVERITY_LEVEL_CRITICAL,
+						},
+					},
+				},
+			},
+			wantAction: "deny",
+			wantReason: "high or above method",
+		},
+		{
+			name: "isCritical method syntax",
+			policyBody: `
+vulnerability.isCritical()
+  ? [{"action": "deny", "reason": "critical method"}]
+  : [{"action": "allow"}]`,
+			payload: map[string]any{
+				"vulnerability": &vulnerabilityv1.Finding{
+					Advisory: &vulnerabilityv1.Advisory{
+						Severity: &vulnerabilityv1.Severity{
+							Level: vulnerabilityv1.SeverityLevel_SEVERITY_LEVEL_CRITICAL,
+						},
+					},
+				},
+			},
+			wantAction: "deny",
+			wantReason: "critical method",
+		},
+		{
+			name: "isHighOrAbove method syntax",
+			policyBody: `
+vulnerability.isHighOrAbove()
+  ? [{"action": "deny", "reason": "high or above method"}]
+  : [{"action": "allow"}]`,
+			payload: map[string]any{
+				"vulnerability": &vulnerabilityv1.Finding{
+					Advisory: &vulnerabilityv1.Advisory{
+						Severity: &vulnerabilityv1.Severity{
+							Level: vulnerabilityv1.SeverityLevel_SEVERITY_LEVEL_HIGH,
+						},
+					},
+				},
+			},
+			wantAction: "deny",
+			wantReason: "high or above method",
+		},
+		{
+			name: "method syntax in filter",
+			policyBody: `
+vulnerabilities.filter(v, v.isCritical()).size() > 0
+  ? [{"action": "deny", "reason": "has critical"}]
+  : [{"action": "allow"}]`,
+			payload: map[string]any{
+				"vulnerabilities": []*vulnerabilityv1.Finding{
+					{Advisory: &vulnerabilityv1.Advisory{Severity: &vulnerabilityv1.Severity{Level: vulnerabilityv1.SeverityLevel_SEVERITY_LEVEL_LOW}}},
+					{Advisory: &vulnerabilityv1.Advisory{Severity: &vulnerabilityv1.Severity{Level: vulnerabilityv1.SeverityLevel_SEVERITY_LEVEL_CRITICAL}}},
+				},
+			},
+			wantAction: "deny",
+			wantReason: "has critical",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			sources := []Source{{Name: "proto-test", Body: tc.policyBody}}
+			eng, err := NewEngine(sources)
+			if err != nil {
+				t.Fatalf("NewEngine() error: %v", err)
+			}
+
+			actions, err := eng.EvaluateAllMap(t.Context(), tc.payload, "", "")
+			if err != nil {
+				t.Fatalf("EvaluateAll() error: %v", err)
+			}
+
+			if len(actions) != 1 {
+				t.Fatalf("expected 1 action, got %d: %+v", len(actions), actions)
+			}
+			if actions[0].Type != tc.wantAction {
+				t.Errorf("action type = %q, want %q", actions[0].Type, tc.wantAction)
+			}
+			if tc.wantReason != "" && actions[0].Reason != tc.wantReason {
+				t.Errorf("action reason = %q, want %q", actions[0].Reason, tc.wantReason)
+			}
+		})
 	}
 }
 

@@ -7,11 +7,10 @@ import (
 	"strings"
 	"testing"
 
+	vulnerabilityv1 "github.com/picatz/deputy/gen/deputy/vulnerability/v1"
 	"github.com/picatz/deputy/internal/output"
-	"github.com/picatz/deputy/internal/remediation"
 	"github.com/picatz/deputy/internal/report"
 	"github.com/picatz/deputy/internal/report/render"
-	"github.com/picatz/deputy/internal/vulnerability"
 )
 
 func TestOutputDocs_Golden(t *testing.T) {
@@ -56,16 +55,16 @@ func TestOutputDocs_Golden(t *testing.T) {
 						Ref:    "main",
 						Commit: "deadbeef",
 					},
-					Stats: vulnerability.Stats{
-						UniqueVulns:     2,
-						CriticalSev:     1,
-						HighSeverity:    1,
-						MedSeverity:     0,
-						LowSeverity:     1,
-						FixAvailable:    2,
-						DirectDeps:      1,
-						IndirectDeps:    4,
-						DuplicatesFound: 0,
+					Stats: vulnerabilityv1.Stats{
+						Unique:       2,
+						Critical:     1,
+						High:         1,
+						Medium:       0,
+						Low:          1,
+						FixAvailable: 2,
+						DirectDeps:   1,
+						IndirectDeps: 4,
+						Duplicates:   0,
 					},
 					TopPackages: []report.TriagePackageSummary{
 						{Package: "a", Version: "1", Severity: "HIGH", SeverityType: "GHSA"},
@@ -93,24 +92,19 @@ func TestOutputDocs_Golden(t *testing.T) {
 			name:   "FixSummary",
 			golden: "fix_summary.golden",
 			render: func() (string, error) {
-				plan := remediationPlan{
-					Target: report.Target{
-						Repo:   "github.com/acme/repo",
-						Ref:    "main",
-						Commit: "deadbeef",
-					},
-					StdlibUpgrade: "v1.23.0",
-					Commands:      []remediation.Command{{Command: "go get example.com/a@v1.2.3"}},
-					Stats: remediationPlanSummary{
-						TotalCommands:    3,
-						RunnableCommands: 2,
-					},
-				}
+				// Use simple values directly - golden test is for render output, not proto structure
+				repo := "github.com/acme/repo"
+				commit := "deadbeef"
+				stdlibUpgrade := "v1.23.0"
+				totalCommands := 3
+				runnableCommands := 2
+				commandCount := 1
+
 				doc, _ := render.FixSummaryDoc(render.TargetSummary{
-					Repo:   plan.Target.Repo,
-					Ref:    plan.Target.Ref,
-					Commit: plan.Target.Commit,
-				}, plan.StdlibUpgrade, plan.Stats.TotalCommands, plan.Stats.RunnableCommands, len(plan.Commands))
+					Repo:   repo,
+					Ref:    "main",
+					Commit: commit,
+				}, stdlibUpgrade, totalCommands, runnableCommands, commandCount)
 
 				var buf bytes.Buffer
 				if err := doc.Render(&buf, output.PlainStyles()); err != nil {

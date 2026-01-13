@@ -48,7 +48,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/picatz/deputy/internal/scan"
+	"github.com/picatz/deputy/internal/scanning"
 	"github.com/picatz/deputy/internal/vulnerability"
 )
 
@@ -189,7 +189,7 @@ func DefaultOptions() Options {
 }
 
 // FromScanResult generates a VEX document from a scan result.
-func FromScanResult(result scan.Result, opts Options) *Document {
+func FromScanResult(result scanning.Result, opts Options) *Document {
 	if opts.Author == "" {
 		opts.Author = "deputy"
 	}

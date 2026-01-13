@@ -17,8 +17,8 @@ import (
 // purely virtual in memory, and Source.Close tears them down when the caller is
 // done (removing temporary directories or releasing in-memory scratch space).
 type Source struct {
-	Repo      *git.Repository
-	Workspace workspace.FS
+	Repo *git.Repository
+	ws   workspace.FS
 
 	cleanup   func() error
 	closeOnce sync.Once
@@ -35,8 +35,8 @@ func (s *Source) Close() error {
 		switch {
 		case s.cleanup != nil:
 			s.closeErr = s.cleanup()
-		case s.Workspace != nil:
-			s.closeErr = s.Workspace.Close()
+		case s.ws != nil:
+			s.closeErr = s.ws.Close()
 		}
 	})
 	return s.closeErr
@@ -45,10 +45,19 @@ func (s *Source) Close() error {
 // RootPath returns the workspace root path if it exists on disk, or "" for
 // virtual/in-memory workspaces.
 func (s *Source) RootPath() string {
-	if s == nil || s.Workspace == nil {
+	if s == nil || s.ws == nil {
 		return ""
 	}
-	return s.Workspace.RootPath()
+	return s.ws.RootPath()
+}
+
+// Workspace returns the filesystem workspace for this repository source.
+// This method allows Source to satisfy interfaces that need workspace access.
+func (s *Source) Workspace() workspace.FS {
+	if s == nil {
+		return nil
+	}
+	return s.ws
 }
 
 // Open returns a Source backed by an existing repository on disk.
@@ -62,8 +71,8 @@ func Open(path string) (*Source, error) {
 		return nil, err
 	}
 	src := &Source{
-		Repo:      repo,
-		Workspace: ws,
+		Repo: repo,
+		ws:   ws,
 	}
 	src.cleanup = func() error {
 		return ws.Close()
@@ -85,8 +94,8 @@ func CloneInMemory(ctx context.Context, opts *git.CloneOptions) (*Source, error)
 	}
 	ws := workspace.NewMemoryFromBillyFS(fsys)
 	src := &Source{
-		Repo:      repo,
-		Workspace: ws,
+		Repo: repo,
+		ws:   ws,
 	}
 	src.cleanup = func() error {
 		return ws.Close()
@@ -111,8 +120,8 @@ func CloneToDir(ctx context.Context, opts *git.CloneOptions) (*Source, error) {
 		return nil, err
 	}
 	src := &Source{
-		Repo:      repo,
-		Workspace: ws,
+		Repo: repo,
+		ws:   ws,
 	}
 	src.cleanup = func() error {
 		if closeStorer != nil {
@@ -134,5 +143,5 @@ func Clone(ctx context.Context, opts *git.CloneOptions, inMemory bool) (*Source,
 // WithExistingWorkspace constructs a Source from pre-existing repo/workspace components.
 // The cleanup function is called during Close.
 func WithExistingWorkspace(repo *git.Repository, ws workspace.FS, cleanup func() error) *Source {
-	return &Source{Repo: repo, Workspace: ws, cleanup: cleanup}
+	return &Source{Repo: repo, ws: ws, cleanup: cleanup}
 }

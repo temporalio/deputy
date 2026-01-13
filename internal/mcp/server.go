@@ -8,15 +8,19 @@ import (
 	"strings"
 	"time"
 
+	"connectrpc.com/connect"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
-	"github.com/ossf/osv-schema/bindings/go/osvschema"
-	"github.com/picatz/deputy/internal/analysis/osv"
+	listv1 "github.com/picatz/deputy/gen/deputy/list/v1"
+	scanv1 "github.com/picatz/deputy/gen/deputy/scan/v1"
+	targetv1 "github.com/picatz/deputy/gen/deputy/target/v1"
+	vulnerabilityv1 "github.com/picatz/deputy/gen/deputy/vulnerability/v1"
 	"github.com/picatz/deputy/internal/dependency/graph"
 	"github.com/picatz/deputy/internal/logs"
 	"github.com/picatz/deputy/internal/otel"
+	internalproto "github.com/picatz/deputy/internal/proto"
 	"github.com/picatz/deputy/internal/remediation"
-	"github.com/picatz/deputy/internal/scan"
 	sbomx "github.com/picatz/deputy/internal/sbom"
+	"github.com/picatz/deputy/internal/services"
 	"github.com/picatz/deputy/internal/version"
 	"github.com/picatz/deputy/internal/vulnerability"
 	"go.opentelemetry.io/otel/attribute"
@@ -55,8 +59,7 @@ func DefaultToolTimeouts() ToolTimeouts {
 // Server wraps the MCP server with Deputy-specific tools.
 type Server struct {
 	server       *mcp.Server
-	osv          osv.Client
-	scanner      scan.Scanner
+	clients      *services.Clients
 	toolNames    []string     // registered tool names for /info endpoint
 	toolTimeouts ToolTimeouts // configurable timeouts for tool operations
 }
@@ -64,17 +67,10 @@ type Server struct {
 // ServerOption configures a Server.
 type ServerOption func(*Server)
 
-// WithOSVClient configures a custom OSV client for the server.
-func WithOSVClient(client osv.Client) ServerOption {
+// WithClients configures custom clients for the server.
+func WithClients(c *services.Clients) ServerOption {
 	return func(s *Server) {
-		s.osv = client
-	}
-}
-
-// WithScanner configures a custom scanner for the server.
-func WithScanner(scanner scan.Scanner) ServerOption {
-	return func(s *Server) {
-		s.scanner = scanner
+		s.clients = c
 	}
 }
 
@@ -82,6 +78,19 @@ func WithScanner(scanner scan.Scanner) ServerOption {
 func WithToolTimeouts(timeouts ToolTimeouts) ServerOption {
 	return func(s *Server) {
 		s.toolTimeouts = timeouts
+	}
+}
+
+// WithServices uses services.Services to create in-process clients.
+// This is the recommended way to configure the MCP server.
+//
+// Example:
+//
+//	svc, _ := services.New()
+//	server := mcp.NewServer(mcp.WithServices(svc))
+func WithServices(svc *services.Services) ServerOption {
+	return func(s *Server) {
+		s.clients = svc.InProcessClients()
 	}
 }
 
@@ -95,13 +104,22 @@ func NewServer(opts ...ServerOption) *Server {
 	server := mcp.NewServer(impl, nil)
 	s := &Server{
 		server:       server,
-		osv:          osv.NewClient(),
-		scanner:      scan.NewService(),
 		toolTimeouts: DefaultToolTimeouts(),
 	}
 
 	for _, opt := range opts {
 		opt(s)
+	}
+
+	// Create default clients if not provided
+	if s.clients == nil {
+		svc, err := services.New()
+		if err != nil {
+			// Fall back to nil clients - will fail on first use with clear error
+			s.clients = &services.Clients{}
+		} else {
+			s.clients = svc.InProcessClients()
+		}
 	}
 
 	s.registerTools()
@@ -400,6 +418,69 @@ func (s *Server) withTimeout(ctx context.Context, timeout time.Duration) (contex
 	return context.WithTimeout(ctx, timeout)
 }
 
+// validateLocalPath validates a path for local filesystem access.
+// It prevents path traversal attacks and blocks access to sensitive paths.
+//
+// Security checks:
+// - Rejects paths containing ".." components (path traversal)
+// - Rejects paths starting with "/" that escape expected directories
+// - Rejects paths to sensitive system directories
+// - Rejects paths with null bytes (C string injection)
+func validateLocalPath(path string) error {
+	if path == "" {
+		return fmt.Errorf("path is required")
+	}
+
+	// Block null bytes (could truncate path in C-based operations)
+	if strings.ContainsRune(path, '\x00') {
+		return fmt.Errorf("path contains invalid characters")
+	}
+
+	// Block path traversal sequences
+	// Note: We check the raw path, not cleaned, to catch attempts to confuse path.Clean
+	if strings.Contains(path, "..") {
+		return fmt.Errorf("path traversal not allowed: path contains '..'")
+	}
+
+	// Block access to sensitive system paths that should never be scanned.
+	// Note: We intentionally allow /home/, /Users/, /tmp/, and /var/folders/
+	// because these contain user project directories and temp files.
+	sensitivePaths := []string{
+		"/etc/", "/proc/", "/sys/", "/dev/",
+		"/root/",
+	}
+
+	// Paths containing these components are always blocked
+	sensitiveComponents := []string{
+		"/.ssh/", "/.gnupg/", "/.aws/", "/.kube/",
+		"/.config/", "/.local/share/", "/secrets/",
+	}
+
+	// Clean the path for consistent comparison
+	cleanPath := path
+	if strings.HasPrefix(cleanPath, "/") {
+		// Block absolute sensitive system paths
+		for _, sensitive := range sensitivePaths {
+			if strings.HasPrefix(cleanPath, sensitive) || strings.HasPrefix(cleanPath+"/", sensitive) {
+				return fmt.Errorf("access to system path %q not allowed", sensitive)
+			}
+		}
+		// Block paths containing sensitive components anywhere
+		for _, component := range sensitiveComponents {
+			if strings.Contains(cleanPath, component) {
+				return fmt.Errorf("access to sensitive path containing %q not allowed", component)
+			}
+		}
+	}
+
+	// Block excessively long paths (potential DoS)
+	if len(path) > 4096 {
+		return fmt.Errorf("path too long (max 4096 characters)")
+	}
+
+	return nil
+}
+
 // === Input/Output Types ===
 
 // ExplainVulnInput is the input for the explain_vulnerability tool.
@@ -414,7 +495,7 @@ type VulnExplanation struct {
 	Summary       string   `json:"summary"`
 	Details       string   `json:"details,omitempty"`
 	Severity      string   `json:"severity"`
-	FixedVersions []string `json:"fixed_versions,omitempty"`
+	FixedVersions []string `json:"fixedVersions,omitempty"`
 	References    []string `json:"references,omitempty"`
 	Published     string   `json:"published,omitempty"`
 	Modified      string   `json:"modified,omitempty"`
@@ -455,18 +536,18 @@ type ScanDirectoryInput struct {
 
 // DirectoryScanResult is the output for directory scanning.
 type DirectoryScanResult struct {
-	Path              string            `json:"path"`
-	PackagesScanned   int               `json:"packages_scanned"`
-	VulnerabilitiesBy map[string]int    `json:"vulnerabilities_by_severity"`
-	Vulnerabilities   []VulnExplanation `json:"vulnerabilities"`
-	Clean             bool              `json:"clean"`
-	ScanTime          string            `json:"scan_time"`
+	Path                      string            `json:"path"`
+	PackagesScanned           int               `json:"packagesScanned"`
+	VulnerabilitiesBySeverity map[string]int    `json:"vulnerabilitiesBySeverity"`
+	Vulnerabilities           []VulnExplanation `json:"vulnerabilities"`
+	Clean                     bool              `json:"clean"`
+	ScanTime                  string            `json:"scanTime"`
 }
 
 // ListDependenciesInput is the input for the list_dependencies tool.
 type ListDependenciesInput struct {
 	Path       string   `json:"path" jsonschema:"Path to the directory to analyze"`
-	DirectOnly bool     `json:"direct_only,omitempty" jsonschema:"If true, only list direct dependencies"`
+	DirectOnly bool     `json:"directOnly,omitempty" jsonschema:"If true, only list direct dependencies"`
 	Ecosystems []string `json:"ecosystems,omitempty" jsonschema:"Optional list of ecosystems to include"`
 }
 
@@ -494,7 +575,7 @@ type GenerateSBOMInput struct {
 	Path           string   `json:"path" jsonschema:"Path to the directory or repository"`
 	Ref            string   `json:"ref,omitempty" jsonschema:"Git reference (branch, tag, commit). Defaults to HEAD."`
 	Format         string   `json:"format,omitempty" jsonschema:"Output format: cyclonedx-json, spdx-json, or protobom-json. Defaults to cyclonedx-json."`
-	EnrichLicenses bool     `json:"enrich_licenses,omitempty" jsonschema:"Enrich SBOM with license information from deps.dev"`
+	EnrichLicenses bool     `json:"enrichLicenses,omitempty" jsonschema:"Enrich SBOM with license information from deps.dev"`
 	Ecosystems     []string `json:"ecosystems,omitempty" jsonschema:"Optional list of ecosystems to include"`
 }
 
@@ -520,7 +601,7 @@ type RemediationCommand struct {
 	Command    string   `json:"command"`
 	Path       string   `json:"path,omitempty"`
 	Hint       string   `json:"hint,omitempty"`
-	IsDirect   bool     `json:"is_direct"`
+	IsDirect   bool     `json:"isDirect"`
 	Executable bool     `json:"executable"`
 	Groups     []string `json:"groups,omitempty"`
 }
@@ -528,18 +609,18 @@ type RemediationCommand struct {
 // GetRemediationResult is the output for the get_remediation tool.
 type GetRemediationResult struct {
 	Path                  string               `json:"path"`
-	VulnerabilitiesFound  int                  `json:"vulnerabilities_found"`
-	RemediableCount       int                  `json:"remediable_count"`
-	UnfixableCount        int                  `json:"unfixable_count"`
+	VulnerabilitiesFound  int                  `json:"vulnerabilitiesFound"`
+	RemediableCount       int                  `json:"remediableCount"`
+	UnfixableCount        int                  `json:"unfixableCount"`
 	Commands              []RemediationCommand `json:"commands"`
-	StdlibUpgrade         string               `json:"stdlib_upgrade,omitempty"`
-	UnfixableVulns        []string             `json:"unfixable_vulns,omitempty"`
+	StdlibUpgrade         string               `json:"stdlibUpgrade,omitempty"`
+	UnfixableVulnerabilities []string          `json:"unfixableVulnerabilities,omitempty"`
 }
 
 // AnalyzeGraphInput is the input for the analyze_dependency_graph tool.
 type AnalyzeGraphInput struct {
 	Path       string   `json:"path" jsonschema:"Path to the directory to analyze"`
-	TargetPURL string   `json:"target_purl,omitempty" jsonschema:"Optional PURL to find paths to (e.g., pkg:npm/lodash@4.17.15)"`
+	TargetPURL string   `json:"targetPurl,omitempty" jsonschema:"Optional PURL to find paths to (e.g., pkg:npm/lodash@4.17.15)"`
 	Ecosystems []string `json:"ecosystems,omitempty" jsonschema:"Optional list of ecosystems to include"`
 }
 
@@ -551,11 +632,11 @@ type GraphPath struct {
 
 // GraphStats contains statistics about the dependency graph.
 type GraphStats struct {
-	TotalNodes      int            `json:"total_nodes"`
-	DirectNodes     int            `json:"direct_nodes"`
-	TransitiveNodes int            `json:"transitive_nodes"`
-	MaxDepth        int            `json:"max_depth"`
-	VulnerableNodes int            `json:"vulnerable_nodes"`
+	TotalNodes      int            `json:"totalNodes"`
+	DirectNodes     int            `json:"directNodes"`
+	TransitiveNodes int            `json:"transitiveNodes"`
+	MaxDepth        int            `json:"maxDepth"`
+	VulnerableNodes int            `json:"vulnerableNodes"`
 	Ecosystems      map[string]int `json:"ecosystems"`
 }
 
@@ -563,15 +644,15 @@ type GraphStats struct {
 type AnalyzeGraphResult struct {
 	Path            string      `json:"path"`
 	Stats           GraphStats  `json:"stats"`
-	VulnerablePaths []GraphPath `json:"vulnerable_paths,omitempty"`
-	PathsToTarget   []GraphPath `json:"paths_to_target,omitempty"`
+	VulnerablePaths []GraphPath `json:"vulnerablePaths,omitempty"`
+	PathsToTarget   []GraphPath `json:"pathsToTarget,omitempty"`
 }
 
 // GraphWhyInput is the input for the graph_why tool.
 type GraphWhyInput struct {
 	Path       string   `json:"path" jsonschema:"Path to the directory to analyze"`
 	Package    string   `json:"package" jsonschema:"Package name to trace (e.g., lodash, golang.org/x/crypto)"`
-	ShowAll    bool     `json:"show_all,omitempty" jsonschema:"Show all dependency paths, not just the shortest"`
+	ShowAll    bool     `json:"showAll,omitempty" jsonschema:"Show all dependency paths, not just the shortest"`
 	Ecosystems []string `json:"ecosystems,omitempty" jsonschema:"Optional list of ecosystems to include"`
 }
 
@@ -583,7 +664,7 @@ type GraphWhyResult struct {
 	Direct     bool        `json:"direct"`
 	Found      bool        `json:"found"`
 	Paths      []GraphPath `json:"paths,omitempty"`
-	PathCount  int         `json:"path_count"`
+	PathCount  int         `json:"pathCount"`
 	Message    string      `json:"message,omitempty"`
 }
 
@@ -601,8 +682,8 @@ type GraphNeedsResult struct {
 	PURL           string           `json:"purl,omitempty"`
 	Found          bool             `json:"found"`
 	Dependents     []DependencyInfo `json:"dependents"`
-	DirectCount    int              `json:"direct_count"`
-	TransitiveCount int             `json:"transitive_count"`
+	DirectCount    int              `json:"directCount"`
+	TransitiveCount int             `json:"transitiveCount"`
 }
 
 // TriageInput is the input for the triage_vulnerabilities tool.
@@ -617,28 +698,28 @@ type TriagedVuln struct {
 	Severity      string   `json:"severity"`
 	Package       string   `json:"package"`
 	Version       string   `json:"version"`
-	IsDirect      bool     `json:"is_direct"`
-	HasFix        bool     `json:"has_fix"`
-	FixedVersions []string `json:"fixed_versions,omitempty"`
+	IsDirect      bool     `json:"isDirect"`
+	HasFix        bool     `json:"hasFix"`
+	FixedVersions []string `json:"fixedVersions,omitempty"`
 	Summary       string   `json:"summary"`
 	Priority      string   `json:"priority"` // "critical", "high", "medium", "low"
-	PriorityReason string  `json:"priority_reason"`
+	PriorityReason string  `json:"priorityReason"`
 }
 
 // TriageResult is the output for the triage_vulnerabilities tool.
 type TriageResult struct {
-	Path             string        `json:"path"`
-	TotalVulns       int           `json:"total_vulns"`
-	CriticalCount    int           `json:"critical_count"`
-	HighCount        int           `json:"high_count"`
-	MediumCount      int           `json:"medium_count"`
-	LowCount         int           `json:"low_count"`
-	FixableCount     int           `json:"fixable_count"`
-	UnfixableCount   int           `json:"unfixable_count"`
-	DirectVulns      int           `json:"direct_vulns"`
-	TransitiveVulns  int           `json:"transitive_vulns"`
-	Vulnerabilities  []TriagedVuln `json:"vulnerabilities"`
-	Recommendations  []string      `json:"recommendations"`
+	Path                      string        `json:"path"`
+	TotalVulnerabilities      int           `json:"totalVulnerabilities"`
+	CriticalCount             int           `json:"criticalCount"`
+	HighCount                 int           `json:"highCount"`
+	MediumCount               int           `json:"mediumCount"`
+	LowCount                  int           `json:"lowCount"`
+	FixableCount              int           `json:"fixableCount"`
+	UnfixableCount            int           `json:"unfixableCount"`
+	DirectVulnerabilities     int           `json:"directVulnerabilities"`
+	TransitiveVulnerabilities int           `json:"transitiveVulnerabilities"`
+	Vulnerabilities           []TriagedVuln `json:"vulnerabilities"`
+	Recommendations           []string      `json:"recommendations"`
 }
 
 // ScanContainerInput is the input for the scan_container tool.
@@ -649,45 +730,45 @@ type ScanContainerInput struct {
 
 // ContainerScanResult is the output for container scanning.
 type ContainerScanResult struct {
-	Image             string            `json:"image"`
-	Platform          string            `json:"platform,omitempty"`
-	PackagesScanned   int               `json:"packages_scanned"`
-	VulnerabilitiesBy map[string]int    `json:"vulnerabilities_by_severity"`
-	Vulnerabilities   []VulnExplanation `json:"vulnerabilities"`
-	Clean             bool              `json:"clean"`
-	ScanTime          string            `json:"scan_time"`
+	Image                     string            `json:"image"`
+	Platform                  string            `json:"platform,omitempty"`
+	PackagesScanned           int               `json:"packagesScanned"`
+	VulnerabilitiesBySeverity map[string]int    `json:"vulnerabilitiesBySeverity"`
+	Vulnerabilities           []VulnExplanation `json:"vulnerabilities"`
+	Clean                     bool              `json:"clean"`
+	ScanTime                  string            `json:"scanTime"`
 }
 
 // DiffRefsInput is the input for the diff_refs tool.
 type DiffRefsInput struct {
 	Path       string   `json:"path" jsonschema:"Path to the repository (for Git refs) or base image reference (for container diff)"`
-	BaseRef    string   `json:"base_ref" jsonschema:"Base Git reference (branch, tag, commit) or container image reference"`
-	TargetRef  string   `json:"target_ref" jsonschema:"Target Git reference or container image reference to compare against"`
+	BaseRef    string   `json:"baseRef" jsonschema:"Base Git reference (branch, tag, commit) or container image reference"`
+	TargetRef  string   `json:"targetRef" jsonschema:"Target Git reference or container image reference to compare against"`
 	Ecosystems []string `json:"ecosystems,omitempty" jsonschema:"Optional list of ecosystems to include (for Git diffs)"`
 }
 
 // DependencyChange represents a change to a dependency.
 type DependencyChange struct {
 	Name          string `json:"name"`
-	BaseVersion   string `json:"base_version,omitempty"`
-	TargetVersion string `json:"target_version,omitempty"`
-	ChangeType    string `json:"change_type"` // "added", "removed", "upgraded", "downgraded", "updated"
-	IsDirect      bool   `json:"is_direct"`
+	BaseVersion   string `json:"baseVersion,omitempty"`
+	TargetVersion string `json:"targetVersion,omitempty"`
+	ChangeType    string `json:"changeType"` // "added", "removed", "upgraded", "downgraded", "updated"
+	IsDirect      bool   `json:"isDirect"`
 	Ecosystem     string `json:"ecosystem"`
 }
 
 // DiffRefsResult is the output for the diff_refs tool.
 type DiffRefsResult struct {
-	Path            string             `json:"path"`
-	BaseRef         string             `json:"base_ref"`
-	TargetRef       string             `json:"target_ref"`
-	IsContainerDiff bool               `json:"is_container_diff"`
-	Changes         []DependencyChange `json:"changes"`
-	AddedCount      int                `json:"added_count"`
-	RemovedCount    int                `json:"removed_count"`
-	UpdatedCount    int                `json:"updated_count"`
-	Vulnerabilities []VulnExplanation  `json:"vulnerabilities,omitempty"`
-	VulnSummary     map[string]int     `json:"vuln_summary,omitempty"`
+	Path                 string             `json:"path"`
+	BaseRef              string             `json:"baseRef"`
+	TargetRef            string             `json:"targetRef"`
+	IsContainerDiff      bool               `json:"isContainerDiff"`
+	Changes              []DependencyChange `json:"changes"`
+	AddedCount           int                `json:"addedCount"`
+	RemovedCount         int                `json:"removedCount"`
+	UpdatedCount         int                `json:"updatedCount"`
+	Vulnerabilities      []VulnExplanation  `json:"vulnerabilities,omitempty"`
+	VulnerabilitySummary map[string]int     `json:"vulnerabilitySummary,omitempty"`
 }
 
 // === Tool Implementations ===
@@ -712,9 +793,14 @@ func (s *Server) explainVulnerability(ctx context.Context, req *mcp.CallToolRequ
 		return nil, VulnExplanation{}, err
 	}
 
-	span.SetAttributes(otel.AttrMCPVulnID.String(args.ID))
+	span.SetAttributes(otel.AttrMCPVulnerabilityID.String(args.ID))
 
-	vuln, err := s.osv.GetVulnByID(ctx, args.ID)
+	// Use the VulnerabilityService via clients.Advisory
+	advisoryReq := connect.NewRequest(&vulnerabilityv1.GetAdvisoryRequest{
+		Id: args.ID,
+	})
+
+	resp, err := s.clients.Advisory.GetAdvisory(ctx, advisoryReq)
 	if err != nil {
 		err = fmt.Errorf("failed to fetch vulnerability %s: %w", args.ID, err)
 		otel.SetSpanError(span, err)
@@ -722,49 +808,17 @@ func (s *Server) explainVulnerability(ctx context.Context, req *mcp.CallToolRequ
 		logs.Warn(ctx, "Failed to fetch vulnerability", "vuln_id", args.ID, "error", err)
 		return nil, VulnExplanation{}, err
 	}
-	if vuln == nil {
+
+	if !resp.Msg.GetFound() {
 		err = fmt.Errorf("vulnerability %s not found", args.ID)
 		otel.SetSpanError(span, err)
 		otel.RecordMCPToolCall(ctx, "explain_vulnerability", time.Since(startTime).Seconds(), false)
 		return nil, VulnExplanation{}, err
 	}
 
-	severity := extractSeverity(vuln)
-
-	var refs []string
-	for _, ref := range vuln.References {
-		refs = append(refs, ref.URL)
-	}
-
-	explanation := VulnExplanation{
-		ID:         vuln.ID,
-		Aliases:    vuln.Aliases,
-		Summary:    vuln.Summary,
-		Details:    vuln.Details,
-		Severity:   severity.Level.String(),
-		References: refs,
-	}
-
-	if !vuln.Published.IsZero() {
-		explanation.Published = vuln.Published.Format("2006-01-02")
-	}
-	if !vuln.Modified.IsZero() {
-		explanation.Modified = vuln.Modified.Format("2006-01-02")
-	}
-
-	fixedSet := make(map[string]struct{})
-	for _, affected := range vuln.Affected {
-		for _, r := range affected.Ranges {
-			for _, event := range r.Events {
-				if event.Fixed != "" {
-					fixedSet[event.Fixed] = struct{}{}
-				}
-			}
-		}
-	}
-	for v := range fixedSet {
-		explanation.FixedVersions = append(explanation.FixedVersions, v)
-	}
+	// Convert proto Advisory to MCP VulnExplanation
+	advisory := resp.Msg.GetAdvisory()
+	explanation := advisoryToExplanation(advisory)
 
 	otel.SetSpanOK(span)
 	otel.RecordMCPToolCall(ctx, "explain_vulnerability", time.Since(startTime).Seconds(), true)
@@ -793,7 +847,7 @@ func (s *Server) explainVulnerabilities(ctx context.Context, req *mcp.CallToolRe
 		return nil, VulnsExplanation{}, err
 	}
 
-	span.SetAttributes(otel.AttrMCPVulnCount.Int(len(args.IDs)))
+	span.SetAttributes(otel.AttrMCPVulnerabilityCount.Int(len(args.IDs)))
 
 	result := VulnsExplanation{
 		Vulnerabilities: make([]VulnExplanation, 0, len(args.IDs)),
@@ -853,15 +907,21 @@ func (s *Server) scanPackage(ctx context.Context, req *mcp.CallToolRequest, args
 		attribute.String("deputy.mcp.ecosystem", args.Ecosystem),
 	)
 
-	pkgInput := osv.PkgInput{
-		QueryKey: osv.QueryKey{
-			Name:      args.Name,
-			Version:   args.Version,
-			Ecosystem: args.Ecosystem,
-		},
-	}
+	// Build PURL from package name, version, and ecosystem
+	// Format: pkg:<ecosystem>/<name>@<version>
+	purl := fmt.Sprintf("pkg:%s/%s@%s", strings.ToLower(args.Ecosystem), args.Name, args.Version)
 
-	findings, advisories, err := osv.Query(ctx, s.osv, []osv.PkgInput{pkgInput})
+	// Use the scan service via clients
+	scanReq := connect.NewRequest(&scanv1.ScanRequest{
+		Target: purl,
+		Options: &scanv1.ScanOptions{
+			TargetHint: &scanv1.TargetHint{
+				Kind: targetv1.TargetKind_TARGET_KIND_PURL,
+			},
+		},
+	})
+
+	resp, err := s.clients.Vulns.Scan(ctx, scanReq)
 	if err != nil {
 		err = fmt.Errorf("failed to scan package: %w", err)
 		otel.SetSpanError(span, err)
@@ -875,26 +935,28 @@ func (s *Server) scanPackage(ctx context.Context, req *mcp.CallToolRequest, args
 		Version:         args.Version,
 		Ecosystem:       args.Ecosystem,
 		Vulnerabilities: make([]VulnExplanation, 0),
-		Clean:           len(findings) == 0,
 	}
 
-	for _, finding := range findings {
-		advisory, ok := advisories[finding.AdvisoryID]
-		if !ok {
-			continue
+	// Convert advisories from response
+	for id, advisory := range resp.Msg.GetAdvisories() {
+		severityStr := ""
+		if advisory.GetSeverity() != nil {
+			severityStr = advisory.GetSeverity().GetLevel().String()
 		}
 		result.Vulnerabilities = append(result.Vulnerabilities, VulnExplanation{
-			ID:            advisory.ID,
-			Aliases:       advisory.Aliases,
-			Summary:       advisory.Summary,
-			Details:       advisory.Details,
-			Severity:      advisory.Severity.Level.String(),
-			FixedVersions: advisory.FixedVersions,
-			References:    advisory.References,
+			ID:            id,
+			Aliases:       advisory.GetAliases(),
+			Summary:       advisory.GetSummary(),
+			Details:       advisory.GetDetails(),
+			Severity:      severityStr,
+			FixedVersions: advisory.GetFixedVersions(),
+			References:    advisory.GetReferences(),
 		})
 	}
 
-	span.SetAttributes(otel.AttrMCPVulnCount.Int(len(result.Vulnerabilities)))
+	result.Clean = len(result.Vulnerabilities) == 0
+
+	span.SetAttributes(otel.AttrMCPVulnerabilityCount.Int(len(result.Vulnerabilities)))
 	otel.SetSpanOK(span)
 	otel.RecordMCPToolCall(ctx, "scan_package", time.Since(startTime).Seconds(), true)
 	logs.Debug(ctx, "MCP tool completed", "tool", "scan_package", "package", args.Name, "vulns", len(result.Vulnerabilities), "clean", result.Clean)
@@ -915,20 +977,28 @@ func (s *Server) scanDirectory(ctx context.Context, req *mcp.CallToolRequest, ar
 
 	logs.Debug(ctx, "MCP tool invoked", "tool", "scan_directory", "path", args.Path)
 
-	if args.Path == "" {
-		err := fmt.Errorf("path is required")
+	// Validate path to prevent path traversal and access to sensitive directories
+	if err := validateLocalPath(args.Path); err != nil {
 		otel.SetSpanError(span, err)
 		otel.RecordMCPToolCall(ctx, "scan_directory", time.Since(startTime).Seconds(), false)
+		logs.Warn(ctx, "Invalid path in scan_directory", "path", args.Path, "error", err)
 		return nil, DirectoryScanResult{}, err
 	}
 
 	span.SetAttributes(otel.AttrTargetPath.String(args.Path))
 
-	opts := scan.Options{
-		Ecosystems: args.Ecosystems,
-	}
+	// Build proto request
+	scanReq := connect.NewRequest(&scanv1.ScanRequest{
+		Target: args.Path,
+		Options: &scanv1.ScanOptions{
+			Ecosystems: args.Ecosystems,
+			TargetHint: &scanv1.TargetHint{
+				Kind: targetv1.TargetKind_TARGET_KIND_DIR,
+			},
+		},
+	})
 
-	exec, err := s.scanner.ScanDirectory(ctx, args.Path, opts)
+	resp, err := s.clients.Vulns.Scan(ctx, scanReq)
 	if err != nil {
 		err = fmt.Errorf("scan failed: %w", err)
 		otel.SetSpanError(span, err)
@@ -936,52 +1006,52 @@ func (s *Server) scanDirectory(ctx context.Context, req *mcp.CallToolRequest, ar
 		logs.Warn(ctx, "Directory scan failed", "path", args.Path, "error", err)
 		return nil, DirectoryScanResult{}, err
 	}
-	defer exec.Close()
 
+	scanResult := resp.Msg
 	result := DirectoryScanResult{
 		Path:            args.Path,
-		PackagesScanned: exec.Result.PackagesScanned,
-		VulnerabilitiesBy: map[string]int{
-			"critical": exec.Result.Stats.CriticalSev,
-			"high":     exec.Result.Stats.HighSeverity,
-			"medium":   exec.Result.Stats.MedSeverity,
-			"low":      exec.Result.Stats.LowSeverity,
+		PackagesScanned: int(scanResult.PackagesScanned),
+		VulnerabilitiesBySeverity: map[string]int{
+			"critical": int(scanResult.Stats.GetCritical()),
+			"high":     int(scanResult.Stats.GetHigh()),
+			"medium":   int(scanResult.Stats.GetMedium()),
+			"low":      int(scanResult.Stats.GetLow()),
 		},
 		Vulnerabilities: make([]VulnExplanation, 0),
-		Clean:           exec.Result.Stats.UniqueVulns == 0,
+		Clean:           scanResult.Stats.GetUnique() == 0,
 		ScanTime:        time.Since(startTime).String(),
 	}
 
 	// Convert findings to explanations
 	seen := make(map[string]bool)
-	for _, finding := range exec.Result.Findings {
-		if seen[finding.AdvisoryID] {
+	for _, finding := range scanResult.Findings {
+		if seen[finding.AdvisoryId] {
 			continue
 		}
-		seen[finding.AdvisoryID] = true
+		seen[finding.AdvisoryId] = true
 
-		advisory, ok := exec.Result.Advisories[finding.AdvisoryID]
+		advisory, ok := scanResult.Advisories[finding.AdvisoryId]
 		if !ok {
 			continue
 		}
 		result.Vulnerabilities = append(result.Vulnerabilities, VulnExplanation{
-			ID:            advisory.ID,
+			ID:            advisory.Id,
 			Aliases:       advisory.Aliases,
 			Summary:       advisory.Summary,
 			Details:       advisory.Details,
-			Severity:      advisory.Severity.Level.String(),
+			Severity:      advisory.Severity.GetLevel().String(),
 			FixedVersions: advisory.FixedVersions,
 			References:    advisory.References,
 		})
 	}
 
 	span.SetAttributes(
-		otel.AttrMCPPackageCount.Int(result.PackagesScanned),
-		otel.AttrMCPVulnCount.Int(exec.Result.Stats.UniqueVulns),
+		otel.AttrMCPPackageCount.Int(int(scanResult.PackagesScanned)),
+		otel.AttrMCPVulnerabilityCount.Int(int(scanResult.Stats.GetUnique())),
 	)
 	otel.SetSpanOK(span)
 	otel.RecordMCPToolCall(ctx, "scan_directory", time.Since(startTime).Seconds(), true)
-	logs.Debug(ctx, "MCP tool completed", "tool", "scan_directory", "path", args.Path, "packages", result.PackagesScanned, "vulns", exec.Result.Stats.UniqueVulns, "clean", result.Clean)
+	logs.Debug(ctx, "MCP tool completed", "tool", "scan_directory", "path", args.Path, "packages", result.PackagesScanned, "vulns", scanResult.Stats.GetUnique(), "clean", result.Clean)
 
 	return nil, result, nil
 }
@@ -999,20 +1069,26 @@ func (s *Server) listDependencies(ctx context.Context, req *mcp.CallToolRequest,
 
 	logs.Debug(ctx, "MCP tool invoked", "tool", "list_dependencies", "path", args.Path, "direct_only", args.DirectOnly)
 
-	if args.Path == "" {
-		err := fmt.Errorf("path is required")
+	// Validate path to prevent path traversal and access to sensitive directories
+	if err := validateLocalPath(args.Path); err != nil {
 		otel.SetSpanError(span, err)
 		otel.RecordMCPToolCall(ctx, "list_dependencies", time.Since(startTime).Seconds(), false)
+		logs.Warn(ctx, "Invalid path in list_dependencies", "path", args.Path, "error", err)
 		return nil, ListDependenciesResult{}, err
 	}
 
 	span.SetAttributes(otel.AttrTargetPath.String(args.Path))
 
-	opts := scan.Options{
-		Ecosystems: args.Ecosystems,
-	}
+	// Build proto request for ListPackages
+	listReq := connect.NewRequest(&listv1.ListPackagesRequest{
+		Target: args.Path,
+		Options: &listv1.ListOptions{
+			Ecosystems: args.Ecosystems,
+			OnlyDirect: args.DirectOnly,
+		},
+	})
 
-	exec, err := s.scanner.ScanDirectory(ctx, args.Path, opts)
+	resp, err := s.clients.Packages.ListPackages(ctx, listReq)
 	if err != nil {
 		err = fmt.Errorf("failed to analyze dependencies: %w", err)
 		otel.SetSpanError(span, err)
@@ -1020,52 +1096,27 @@ func (s *Server) listDependencies(ctx context.Context, req *mcp.CallToolRequest,
 		logs.Warn(ctx, "List dependencies failed", "path", args.Path, "error", err)
 		return nil, ListDependenciesResult{}, err
 	}
-	defer exec.Close()
 
+	listResult := resp.Msg
 	result := ListDependenciesResult{
 		Path:         args.Path,
-		Dependencies: make([]DependencyInfo, 0),
+		Dependencies: make([]DependencyInfo, 0, len(listResult.Packages)),
+		Total:        int(listResult.Stats.GetTotalPackages()),
+		Direct:       int(listResult.Stats.GetDirectPackages()),
+		Transitive:   int(listResult.Stats.GetTransitivePackages()),
 	}
 
-	for _, pkg := range exec.Result.Inventory.Packages {
-		if pkg == nil {
-			continue
-		}
-
-		isDirect := false
-		if exec.Result.Inventory.Direct != nil {
-			// Check if it's a direct dependency
-			purl := pkg.PURL()
-			if purl != nil {
-				isDirect = exec.Result.Inventory.Direct[purl.String()]
-			}
-		}
-
-		if args.DirectOnly && !isDirect {
-			continue
-		}
-
+	for _, pkg := range listResult.Packages {
 		dep := DependencyInfo{
 			Name:      pkg.Name,
 			Version:   pkg.Version,
-			Ecosystem: pkg.Ecosystem(),
-			Direct:    isDirect,
+			Ecosystem: pkg.Ecosystem,
+			Direct:    pkg.Direct,
 			Locations: pkg.Locations,
+			PURL:      pkg.Purl,
 		}
-		if purl := pkg.PURL(); purl != nil {
-			dep.PURL = purl.String()
-		}
-
-		if isDirect {
-			result.Direct++
-		} else {
-			result.Transitive++
-		}
-
 		result.Dependencies = append(result.Dependencies, dep)
 	}
-
-	result.Total = len(result.Dependencies)
 
 	span.SetAttributes(otel.AttrMCPPackageCount.Int(result.Total))
 	otel.SetSpanOK(span)
@@ -1088,10 +1139,11 @@ func (s *Server) generateSBOM(ctx context.Context, req *mcp.CallToolRequest, arg
 
 	logs.Debug(ctx, "MCP tool invoked", "tool", "generate_sbom", "path", args.Path, "format", args.Format)
 
-	if args.Path == "" {
-		err := fmt.Errorf("path is required")
+	// Validate path to prevent path traversal and access to sensitive directories
+	if err := validateLocalPath(args.Path); err != nil {
 		otel.SetSpanError(span, err)
 		otel.RecordMCPToolCall(ctx, "generate_sbom", time.Since(startTime).Seconds(), false)
+		logs.Warn(ctx, "Invalid path in generate_sbom", "path", args.Path, "error", err)
 		return nil, SBOMResult{}, err
 	}
 
@@ -1191,20 +1243,28 @@ func (s *Server) getRemediation(ctx context.Context, req *mcp.CallToolRequest, a
 
 	logs.Debug(ctx, "MCP tool invoked", "tool", "get_remediation", "path", args.Path)
 
-	if args.Path == "" {
-		err := fmt.Errorf("path is required")
+	// Validate path to prevent path traversal and access to sensitive directories
+	if err := validateLocalPath(args.Path); err != nil {
 		otel.SetSpanError(span, err)
 		otel.RecordMCPToolCall(ctx, "get_remediation", time.Since(startTime).Seconds(), false)
+		logs.Warn(ctx, "Invalid path in get_remediation", "path", args.Path, "error", err)
 		return nil, GetRemediationResult{}, err
 	}
 
 	span.SetAttributes(otel.AttrTargetPath.String(args.Path))
 
-	opts := scan.Options{
-		Ecosystems: args.Ecosystems,
-	}
+	// Build proto request
+	scanReq := connect.NewRequest(&scanv1.ScanRequest{
+		Target: args.Path,
+		Options: &scanv1.ScanOptions{
+			Ecosystems: args.Ecosystems,
+			TargetHint: &scanv1.TargetHint{
+				Kind: targetv1.TargetKind_TARGET_KIND_DIR,
+			},
+		},
+	})
 
-	exec, err := s.scanner.ScanDirectory(ctx, args.Path, opts)
+	resp, err := s.clients.Vulns.Scan(ctx, scanReq)
 	if err != nil {
 		err = fmt.Errorf("scan failed: %w", err)
 		otel.SetSpanError(span, err)
@@ -1212,10 +1272,12 @@ func (s *Server) getRemediation(ctx context.Context, req *mcp.CallToolRequest, a
 		logs.Warn(ctx, "Remediation scan failed", "path", args.Path, "error", err)
 		return nil, GetRemediationResult{}, err
 	}
-	defer exec.Close()
+
+	// Convert proto response to internal types for remediation analysis
+	scanResult := internalproto.ScanningResultFromProto(resp.Msg)
 
 	// Consolidate vulnerabilities for remediation analysis
-	consolidated := vulnerability.ConsolidateAll(exec.Result.Findings, exec.Result.Advisories)
+	consolidated := vulnerability.ConsolidateAll(scanResult.Findings, scanResult.Advisories)
 
 	// Get remediation commands
 	commands, stdlibUpgrade := remediation.CommandsFromConsolidated(consolidated.Vulnerabilities)
@@ -1233,12 +1295,12 @@ func (s *Server) getRemediation(ctx context.Context, req *mcp.CallToolRequest, a
 
 	result := GetRemediationResult{
 		Path:                 args.Path,
-		VulnerabilitiesFound: exec.Result.Stats.UniqueVulns,
+		VulnerabilitiesFound: int(scanResult.Stats.Unique),
 		RemediableCount:      remediableCount,
 		UnfixableCount:       len(unfixable),
 		Commands:             make([]RemediationCommand, 0, len(commands)),
 		StdlibUpgrade:        stdlibUpgrade,
-		UnfixableVulns:       unfixable,
+		UnfixableVulnerabilities: unfixable,
 	}
 
 	for _, cmd := range commands {
@@ -1254,7 +1316,7 @@ func (s *Server) getRemediation(ctx context.Context, req *mcp.CallToolRequest, a
 	}
 
 	span.SetAttributes(
-		otel.AttrMCPVulnCount.Int(result.VulnerabilitiesFound),
+		otel.AttrMCPVulnerabilityCount.Int(result.VulnerabilitiesFound),
 		attribute.Int("deputy.mcp.remediable_count", result.RemediableCount),
 	)
 	otel.SetSpanOK(span)
@@ -1286,14 +1348,21 @@ func (s *Server) analyzeDependencyGraph(ctx context.Context, req *mcp.CallToolRe
 
 	span.SetAttributes(otel.AttrTargetPath.String(args.Path))
 
-	opts := scan.Options{
-		Ecosystems: args.Ecosystems,
-		Graph: scan.GraphOptions{
-			Enabled: true,
+	// Build proto request with graph enabled
+	scanReq := connect.NewRequest(&scanv1.ScanRequest{
+		Target: args.Path,
+		Options: &scanv1.ScanOptions{
+			Ecosystems: args.Ecosystems,
+			TargetHint: &scanv1.TargetHint{
+				Kind: targetv1.TargetKind_TARGET_KIND_DIR,
+			},
+			GraphOptions: &scanv1.GraphOptions{
+				Enabled: true,
+			},
 		},
-	}
+	})
 
-	exec, err := s.scanner.ScanDirectory(ctx, args.Path, opts)
+	resp, err := s.clients.Vulns.Scan(ctx, scanReq)
 	if err != nil {
 		err = fmt.Errorf("scan failed: %w", err)
 		otel.SetSpanError(span, err)
@@ -1301,28 +1370,34 @@ func (s *Server) analyzeDependencyGraph(ctx context.Context, req *mcp.CallToolRe
 		logs.Warn(ctx, "Graph analysis failed", "path", args.Path, "error", err)
 		return nil, AnalyzeGraphResult{}, err
 	}
-	defer exec.Close()
+
+	// Convert proto response to internal types for graph analysis
+	scanResult := internalproto.ScanningResultFromProto(resp.Msg)
 
 	result := AnalyzeGraphResult{
 		Path: args.Path,
 	}
 
 	// If no graph was built, build one from inventory
-	depGraph := exec.Result.Graph
+	depGraph := scanResult.Graph
 	if depGraph == nil {
-		depGraph = graph.FromInventory(exec.Result.Inventory.Packages, exec.Result.Inventory.Direct)
-		depGraph.AnnotateVulns(exec.Result.Findings, exec.Result.Advisories)
+		depGraph = graph.FromInventory(scanResult.Packages, scanResult.Direct)
+		depGraph.AnnotateVulns(scanResult.Findings, scanResult.Advisories)
 	}
 
 	// Get stats
 	stats := depGraph.Stats()
+	ecosystems := make(map[string]int)
+	for k, v := range stats.Ecosystems {
+		ecosystems[k] = int(v)
+	}
 	result.Stats = GraphStats{
-		TotalNodes:      stats.TotalNodes,
-		DirectNodes:     stats.DirectNodes,
-		TransitiveNodes: stats.TransitiveNodes,
-		MaxDepth:        stats.MaxDepth,
-		VulnerableNodes: stats.VulnerableNodes,
-		Ecosystems:      stats.Ecosystems,
+		TotalNodes:      int(stats.TotalNodes),
+		DirectNodes:     int(stats.DirectNodes),
+		TransitiveNodes: int(stats.TransitiveNodes),
+		MaxDepth:        int(stats.MaxDepth),
+		VulnerableNodes: int(stats.VulnerableNodes),
+		Ecosystems:      ecosystems,
 	}
 
 	// Find vulnerable paths
@@ -1378,10 +1453,11 @@ func (s *Server) graphWhy(ctx context.Context, req *mcp.CallToolRequest, args Gr
 
 	logs.Debug(ctx, "MCP tool invoked", "tool", "graph_why", "path", args.Path, "package", args.Package)
 
-	if args.Path == "" {
-		err := fmt.Errorf("path is required")
+	// Validate path to prevent path traversal and access to sensitive directories
+	if err := validateLocalPath(args.Path); err != nil {
 		otel.SetSpanError(span, err)
 		otel.RecordMCPToolCall(ctx, "graph_why", time.Since(startTime).Seconds(), false)
+		logs.Warn(ctx, "Invalid path in graph_why", "path", args.Path, "error", err)
 		return nil, GraphWhyResult{}, err
 	}
 	if args.Package == "" {
@@ -1396,14 +1472,21 @@ func (s *Server) graphWhy(ctx context.Context, req *mcp.CallToolRequest, args Gr
 		otel.AttrMCPGraphPackage.String(args.Package),
 	)
 
-	opts := scan.Options{
-		Ecosystems: args.Ecosystems,
-		Graph: scan.GraphOptions{
-			Enabled: true,
+	// Build proto request with graph enabled
+	scanReq := connect.NewRequest(&scanv1.ScanRequest{
+		Target: args.Path,
+		Options: &scanv1.ScanOptions{
+			Ecosystems: args.Ecosystems,
+			TargetHint: &scanv1.TargetHint{
+				Kind: targetv1.TargetKind_TARGET_KIND_DIR,
+			},
+			GraphOptions: &scanv1.GraphOptions{
+				Enabled: true,
+			},
 		},
-	}
+	})
 
-	exec, err := s.scanner.ScanDirectory(ctx, args.Path, opts)
+	resp, err := s.clients.Vulns.Scan(ctx, scanReq)
 	if err != nil {
 		err = fmt.Errorf("scan failed: %w", err)
 		otel.SetSpanError(span, err)
@@ -1411,12 +1494,14 @@ func (s *Server) graphWhy(ctx context.Context, req *mcp.CallToolRequest, args Gr
 		logs.Warn(ctx, "Graph why failed", "path", args.Path, "package", args.Package, "error", err)
 		return nil, GraphWhyResult{}, err
 	}
-	defer exec.Close()
+
+	// Convert proto response to internal types for graph analysis
+	scanResult := internalproto.ScanningResultFromProto(resp.Msg)
 
 	// Build graph from inventory if not already built
-	depGraph := exec.Result.Graph
+	depGraph := scanResult.Graph
 	if depGraph == nil {
-		depGraph = graph.FromInventory(exec.Result.Inventory.Packages, exec.Result.Inventory.Direct)
+		depGraph = graph.FromInventory(scanResult.Packages, scanResult.Direct)
 	}
 
 	// Find matching nodes using ranked matching
@@ -1438,7 +1523,7 @@ func (s *Server) graphWhy(ctx context.Context, req *mcp.CallToolRequest, args Gr
 	result := GraphWhyResult{
 		Package: match.Name,
 		Version: match.Version,
-		PURL:    match.PURL,
+		PURL:    match.Purl,
 		Direct:  match.Direct,
 		Found:   true,
 	}
@@ -1457,7 +1542,7 @@ func (s *Server) graphWhy(ctx context.Context, req *mcp.CallToolRequest, args Gr
 	}
 
 	// Find paths to the package
-	paths := depGraph.PathsTo(match.PURL)
+	paths := depGraph.PathsTo(match.Purl)
 	if len(paths) == 0 {
 		result.Message = "No dependency path found (may be from compiled binary or lockfile)"
 		span.SetAttributes(
@@ -1517,10 +1602,11 @@ func (s *Server) graphNeeds(ctx context.Context, req *mcp.CallToolRequest, args 
 
 	logs.Debug(ctx, "MCP tool invoked", "tool", "graph_needs", "path", args.Path, "package", args.Package)
 
-	if args.Path == "" {
-		err := fmt.Errorf("path is required")
+	// Validate path to prevent path traversal and access to sensitive directories
+	if err := validateLocalPath(args.Path); err != nil {
 		otel.SetSpanError(span, err)
 		otel.RecordMCPToolCall(ctx, "graph_needs", time.Since(startTime).Seconds(), false)
+		logs.Warn(ctx, "Invalid path in graph_needs", "path", args.Path, "error", err)
 		return nil, GraphNeedsResult{}, err
 	}
 	if args.Package == "" {
@@ -1535,14 +1621,21 @@ func (s *Server) graphNeeds(ctx context.Context, req *mcp.CallToolRequest, args 
 		otel.AttrMCPGraphPackage.String(args.Package),
 	)
 
-	opts := scan.Options{
-		Ecosystems: args.Ecosystems,
-		Graph: scan.GraphOptions{
-			Enabled: true,
+	// Build proto request with graph enabled
+	scanReq := connect.NewRequest(&scanv1.ScanRequest{
+		Target: args.Path,
+		Options: &scanv1.ScanOptions{
+			Ecosystems: args.Ecosystems,
+			TargetHint: &scanv1.TargetHint{
+				Kind: targetv1.TargetKind_TARGET_KIND_DIR,
+			},
+			GraphOptions: &scanv1.GraphOptions{
+				Enabled: true,
+			},
 		},
-	}
+	})
 
-	exec, err := s.scanner.ScanDirectory(ctx, args.Path, opts)
+	resp, err := s.clients.Vulns.Scan(ctx, scanReq)
 	if err != nil {
 		err = fmt.Errorf("scan failed: %w", err)
 		otel.SetSpanError(span, err)
@@ -1550,12 +1643,14 @@ func (s *Server) graphNeeds(ctx context.Context, req *mcp.CallToolRequest, args 
 		logs.Warn(ctx, "Graph needs failed", "path", args.Path, "package", args.Package, "error", err)
 		return nil, GraphNeedsResult{}, err
 	}
-	defer exec.Close()
+
+	// Convert proto response to internal types for graph analysis
+	scanResult := internalproto.ScanningResultFromProto(resp.Msg)
 
 	// Build graph from inventory if not already built
-	depGraph := exec.Result.Graph
+	depGraph := scanResult.Graph
 	if depGraph == nil {
-		depGraph = graph.FromInventory(exec.Result.Inventory.Packages, exec.Result.Inventory.Direct)
+		depGraph = graph.FromInventory(scanResult.Packages, scanResult.Direct)
 	}
 
 	// Find best matching node
@@ -1574,17 +1669,17 @@ func (s *Server) graphNeeds(ctx context.Context, req *mcp.CallToolRequest, args 
 	result := GraphNeedsResult{
 		Package: match.Name,
 		Version: match.Version,
-		PURL:    match.PURL,
+		PURL:    match.Purl,
 		Found:   true,
 	}
 
 	// Collect ancestors (packages that depend on this one)
-	for ancestor := range depGraph.Ancestors(match.PURL) {
+	for ancestor := range depGraph.Ancestors(match.Purl) {
 		dep := DependencyInfo{
 			Name:      ancestor.Name,
 			Version:   ancestor.Version,
 			Ecosystem: ancestor.Ecosystem,
-			PURL:      ancestor.PURL,
+			PURL:      ancestor.Purl,
 			Direct:    ancestor.Direct,
 			Locations: ancestor.Locations,
 		}
@@ -1598,12 +1693,12 @@ func (s *Server) graphNeeds(ctx context.Context, req *mcp.CallToolRequest, args 
 
 	// If no ancestors, check direct parents via edges
 	if len(result.Dependents) == 0 {
-		for parent := range depGraph.Parents(match.PURL) {
+		for parent := range depGraph.Parents(match.Purl) {
 			dep := DependencyInfo{
 				Name:      parent.Name,
 				Version:   parent.Version,
 				Ecosystem: parent.Ecosystem,
-				PURL:      parent.PURL,
+				PURL:      parent.Purl,
 				Direct:    parent.Direct,
 				Locations: parent.Locations,
 			}
@@ -1649,11 +1744,18 @@ func (s *Server) triageVulnerabilities(ctx context.Context, req *mcp.CallToolReq
 
 	span.SetAttributes(otel.AttrTargetPath.String(args.Path))
 
-	opts := scan.Options{
-		Ecosystems: args.Ecosystems,
-	}
+	// Build proto request
+	scanReq := connect.NewRequest(&scanv1.ScanRequest{
+		Target: args.Path,
+		Options: &scanv1.ScanOptions{
+			Ecosystems: args.Ecosystems,
+			TargetHint: &scanv1.TargetHint{
+				Kind: targetv1.TargetKind_TARGET_KIND_DIR,
+			},
+		},
+	})
 
-	exec, err := s.scanner.ScanDirectory(ctx, args.Path, opts)
+	resp, err := s.clients.Vulns.Scan(ctx, scanReq)
 	if err != nil {
 		err = fmt.Errorf("scan failed: %w", err)
 		otel.SetSpanError(span, err)
@@ -1661,7 +1763,9 @@ func (s *Server) triageVulnerabilities(ctx context.Context, req *mcp.CallToolReq
 		logs.Warn(ctx, "Triage scan failed", "path", args.Path, "error", err)
 		return nil, TriageResult{}, err
 	}
-	defer exec.Close()
+
+	// Convert proto response to internal types
+	scanResult := internalproto.ScanningResultFromProto(resp.Msg)
 
 	result := TriageResult{
 		Path:            args.Path,
@@ -1670,7 +1774,7 @@ func (s *Server) triageVulnerabilities(ctx context.Context, req *mcp.CallToolReq
 	}
 
 	// Consolidate vulnerabilities
-	consolidated := vulnerability.ConsolidateAll(exec.Result.Findings, exec.Result.Advisories)
+	consolidated := vulnerability.ConsolidateAll(scanResult.Findings, scanResult.Advisories)
 
 	// Process each vulnerability
 	for _, v := range consolidated.Vulnerabilities {
@@ -1717,13 +1821,13 @@ func (s *Server) triageVulnerabilities(ctx context.Context, req *mcp.CallToolReq
 		}
 
 		if v.IsDirect {
-			result.DirectVulns++
+			result.DirectVulnerabilities++
 		} else {
-			result.TransitiveVulns++
+			result.TransitiveVulnerabilities++
 		}
 	}
 
-	result.TotalVulns = len(consolidated.Vulnerabilities)
+	result.TotalVulnerabilities = len(consolidated.Vulnerabilities)
 
 	// Sort by priority (critical first)
 	sortTriagedVulns(result.Vulnerabilities)
@@ -1732,13 +1836,13 @@ func (s *Server) triageVulnerabilities(ctx context.Context, req *mcp.CallToolReq
 	result.Recommendations = generateRecommendations(result)
 
 	span.SetAttributes(
-		otel.AttrMCPTriageCount.Int(result.TotalVulns),
+		otel.AttrMCPTriageCount.Int(result.TotalVulnerabilities),
 		attribute.Int("deputy.mcp.critical_count", result.CriticalCount),
 		attribute.Int("deputy.mcp.fixable_count", result.FixableCount),
 	)
 	otel.SetSpanOK(span)
 	otel.RecordMCPToolCall(ctx, "triage_vulnerabilities", time.Since(startTime).Seconds(), true)
-	logs.Debug(ctx, "MCP tool completed", "tool", "triage_vulnerabilities", "path", args.Path, "total", result.TotalVulns, "critical", result.CriticalCount, "fixable", result.FixableCount)
+	logs.Debug(ctx, "MCP tool completed", "tool", "triage_vulnerabilities", "path", args.Path, "total", result.TotalVulnerabilities, "critical", result.CriticalCount, "fixable", result.FixableCount)
 
 	return nil, result, nil
 }
@@ -1791,16 +1895,16 @@ func generateRecommendations(result TriageResult) []string {
 	if result.CriticalCount > 0 {
 		recs = append(recs, fmt.Sprintf("Address %d critical vulnerability(ies) immediately", result.CriticalCount))
 	}
-	if result.DirectVulns > 0 && result.FixableCount > 0 {
-		recs = append(recs, fmt.Sprintf("Update direct dependencies to fix %d vulnerability(ies)", min(result.DirectVulns, result.FixableCount)))
+	if result.DirectVulnerabilities > 0 && result.FixableCount > 0 {
+		recs = append(recs, fmt.Sprintf("Update direct dependencies to fix %d vulnerability(ies)", min(result.DirectVulnerabilities, result.FixableCount)))
 	}
-	if result.TransitiveVulns > 0 {
-		recs = append(recs, fmt.Sprintf("Review %d transitive dependency vulnerability(ies) - may require updating direct dependencies", result.TransitiveVulns))
+	if result.TransitiveVulnerabilities > 0 {
+		recs = append(recs, fmt.Sprintf("Review %d transitive dependency vulnerability(ies) - may require updating direct dependencies", result.TransitiveVulnerabilities))
 	}
 	if result.UnfixableCount > 0 {
 		recs = append(recs, fmt.Sprintf("Monitor %d vulnerability(ies) without fixes for updates", result.UnfixableCount))
 	}
-	if result.TotalVulns == 0 {
+	if result.TotalVulnerabilities == 0 {
 		recs = append(recs, "No vulnerabilities found - continue regular dependency updates")
 	}
 
@@ -1829,13 +1933,18 @@ func (s *Server) scanContainer(ctx context.Context, req *mcp.CallToolRequest, ar
 
 	span.SetAttributes(otel.AttrMCPImage.String(args.Image))
 
-	opts := scan.Options{}
-	targetOpts := map[string]string{}
-	if args.Platform != "" {
-		targetOpts["platform"] = args.Platform
-	}
+	// Build proto request for container image scan
+	scanReq := connect.NewRequest(&scanv1.ScanRequest{
+		Target: args.Image,
+		Options: &scanv1.ScanOptions{
+			Platform: args.Platform,
+			TargetHint: &scanv1.TargetHint{
+				Kind: targetv1.TargetKind_TARGET_KIND_CONTAINER_IMAGE,
+			},
+		},
+	})
 
-	exec, err := s.scanner.ScanContainerImage(ctx, args.Image, targetOpts, opts)
+	resp, err := s.clients.Vulns.Scan(ctx, scanReq)
 	if err != nil {
 		err = fmt.Errorf("container scan failed: %w", err)
 		otel.SetSpanError(span, err)
@@ -1843,53 +1952,53 @@ func (s *Server) scanContainer(ctx context.Context, req *mcp.CallToolRequest, ar
 		logs.Warn(ctx, "Container scan failed", "image", args.Image, "error", err)
 		return nil, ContainerScanResult{}, err
 	}
-	defer exec.Close()
 
+	scanResult := resp.Msg
 	result := ContainerScanResult{
 		Image:           args.Image,
 		Platform:        args.Platform,
-		PackagesScanned: exec.Result.PackagesScanned,
-		VulnerabilitiesBy: map[string]int{
-			"critical": exec.Result.Stats.CriticalSev,
-			"high":     exec.Result.Stats.HighSeverity,
-			"medium":   exec.Result.Stats.MedSeverity,
-			"low":      exec.Result.Stats.LowSeverity,
+		PackagesScanned: int(scanResult.PackagesScanned),
+		VulnerabilitiesBySeverity: map[string]int{
+			"critical": int(scanResult.Stats.GetCritical()),
+			"high":     int(scanResult.Stats.GetHigh()),
+			"medium":   int(scanResult.Stats.GetMedium()),
+			"low":      int(scanResult.Stats.GetLow()),
 		},
 		Vulnerabilities: make([]VulnExplanation, 0),
-		Clean:           exec.Result.Stats.UniqueVulns == 0,
+		Clean:           scanResult.Stats.GetUnique() == 0,
 		ScanTime:        time.Since(startTime).String(),
 	}
 
 	// Convert findings to explanations
 	seen := make(map[string]bool)
-	for _, finding := range exec.Result.Findings {
-		if seen[finding.AdvisoryID] {
+	for _, finding := range scanResult.Findings {
+		if seen[finding.AdvisoryId] {
 			continue
 		}
-		seen[finding.AdvisoryID] = true
+		seen[finding.AdvisoryId] = true
 
-		advisory, ok := exec.Result.Advisories[finding.AdvisoryID]
+		advisory, ok := scanResult.Advisories[finding.AdvisoryId]
 		if !ok {
 			continue
 		}
 		result.Vulnerabilities = append(result.Vulnerabilities, VulnExplanation{
-			ID:            advisory.ID,
+			ID:            advisory.Id,
 			Aliases:       advisory.Aliases,
 			Summary:       advisory.Summary,
 			Details:       advisory.Details,
-			Severity:      advisory.Severity.Level.String(),
+			Severity:      advisory.Severity.GetLevel().String(),
 			FixedVersions: advisory.FixedVersions,
 			References:    advisory.References,
 		})
 	}
 
 	span.SetAttributes(
-		otel.AttrMCPPackageCount.Int(result.PackagesScanned),
-		otel.AttrMCPVulnCount.Int(exec.Result.Stats.UniqueVulns),
+		otel.AttrMCPPackageCount.Int(int(scanResult.PackagesScanned)),
+		otel.AttrMCPVulnerabilityCount.Int(int(scanResult.Stats.GetUnique())),
 	)
 	otel.SetSpanOK(span)
 	otel.RecordMCPToolCall(ctx, "scan_container", time.Since(startTime).Seconds(), true)
-	logs.Debug(ctx, "MCP tool completed", "tool", "scan_container", "image", args.Image, "packages", result.PackagesScanned, "vulns", exec.Result.Stats.UniqueVulns, "clean", result.Clean)
+	logs.Debug(ctx, "MCP tool completed", "tool", "scan_container", "image", args.Image, "packages", result.PackagesScanned, "vulns", scanResult.Stats.GetUnique(), "clean", result.Clean)
 
 	return nil, result, nil
 }
@@ -1956,18 +2065,36 @@ func (s *Server) diffRefs(ctx context.Context, req *mcp.CallToolRequest, args Di
 
 // diffContainerImages compares two container images.
 func (s *Server) diffContainerImages(ctx context.Context, args DiffRefsInput) (*mcp.CallToolResult, DiffRefsResult, error) {
-	// Scan both images
-	baseExec, err := s.scanner.ScanContainerImage(ctx, args.BaseRef, nil, scan.Options{})
+	// Scan base image
+	baseReq := connect.NewRequest(&scanv1.ScanRequest{
+		Target: args.BaseRef,
+		Options: &scanv1.ScanOptions{
+			TargetHint: &scanv1.TargetHint{
+				Kind: targetv1.TargetKind_TARGET_KIND_CONTAINER_IMAGE,
+			},
+		},
+	})
+	baseResp, err := s.clients.Vulns.Scan(ctx, baseReq)
 	if err != nil {
 		return nil, DiffRefsResult{}, fmt.Errorf("failed to scan base image %s: %w", args.BaseRef, err)
 	}
-	defer baseExec.Close()
 
-	targetExec, err := s.scanner.ScanContainerImage(ctx, args.TargetRef, nil, scan.Options{})
+	// Scan target image
+	targetReq := connect.NewRequest(&scanv1.ScanRequest{
+		Target: args.TargetRef,
+		Options: &scanv1.ScanOptions{
+			TargetHint: &scanv1.TargetHint{
+				Kind: targetv1.TargetKind_TARGET_KIND_CONTAINER_IMAGE,
+			},
+		},
+	})
+	targetResp, err := s.clients.Vulns.Scan(ctx, targetReq)
 	if err != nil {
 		return nil, DiffRefsResult{}, fmt.Errorf("failed to scan target image %s: %w", args.TargetRef, err)
 	}
-	defer targetExec.Close()
+
+	baseScan := baseResp.Msg
+	targetScan := targetResp.Msg
 
 	result := DiffRefsResult{
 		Path:            args.BaseRef,
@@ -1975,26 +2102,20 @@ func (s *Server) diffContainerImages(ctx context.Context, args DiffRefsInput) (*
 		TargetRef:       args.TargetRef,
 		IsContainerDiff: true,
 		Changes:         make([]DependencyChange, 0),
-		VulnSummary:     make(map[string]int),
+		VulnerabilitySummary:     make(map[string]int),
 	}
 
 	// Build package maps for comparison
 	basePackages := make(map[string]*PackageInfo)
-	for _, pkg := range baseExec.Result.Inventory.Packages {
-		if pkg == nil {
-			continue
-		}
-		key := pkg.Name + "@" + pkg.Ecosystem()
-		basePackages[key] = &PackageInfo{Name: pkg.Name, Version: pkg.Version, Ecosystem: pkg.Ecosystem()}
+	for _, pkg := range baseScan.Packages {
+		key := pkg.Name + "@" + pkg.Ecosystem
+		basePackages[key] = &PackageInfo{Name: pkg.Name, Version: pkg.Version, Ecosystem: pkg.Ecosystem}
 	}
 
 	targetPackages := make(map[string]*PackageInfo)
-	for _, pkg := range targetExec.Result.Inventory.Packages {
-		if pkg == nil {
-			continue
-		}
-		key := pkg.Name + "@" + pkg.Ecosystem()
-		targetPackages[key] = &PackageInfo{Name: pkg.Name, Version: pkg.Version, Ecosystem: pkg.Ecosystem()}
+	for _, pkg := range targetScan.Packages {
+		key := pkg.Name + "@" + pkg.Ecosystem
+		targetPackages[key] = &PackageInfo{Name: pkg.Name, Version: pkg.Version, Ecosystem: pkg.Ecosystem}
 	}
 
 	// Find added and updated packages
@@ -2040,10 +2161,10 @@ func (s *Server) diffContainerImages(ctx context.Context, args DiffRefsInput) (*
 	}
 
 	// Add vulnerability summary from target
-	result.VulnSummary["critical"] = targetExec.Result.Stats.CriticalSev
-	result.VulnSummary["high"] = targetExec.Result.Stats.HighSeverity
-	result.VulnSummary["medium"] = targetExec.Result.Stats.MedSeverity
-	result.VulnSummary["low"] = targetExec.Result.Stats.LowSeverity
+	result.VulnerabilitySummary["critical"] = int(targetScan.Stats.GetCritical())
+	result.VulnerabilitySummary["high"] = int(targetScan.Stats.GetHigh())
+	result.VulnerabilitySummary["medium"] = int(targetScan.Stats.GetMedium())
+	result.VulnerabilitySummary["low"] = int(targetScan.Stats.GetLow())
 
 	return nil, result, nil
 }
@@ -2055,18 +2176,39 @@ func (s *Server) diffGitRefs(ctx context.Context, args DiffRefsInput) (*mcp.Call
 	}
 
 	// Scan base ref
-	baseExec, err := s.scanner.ScanRepository(ctx, args.Path, args.BaseRef, true, scan.Options{Ecosystems: args.Ecosystems})
+	baseReq := connect.NewRequest(&scanv1.ScanRequest{
+		Target: args.Path,
+		Options: &scanv1.ScanOptions{
+			Ecosystems: args.Ecosystems,
+			Ref:        args.BaseRef,
+			TargetHint: &scanv1.TargetHint{
+				Kind: targetv1.TargetKind_TARGET_KIND_GIT,
+			},
+		},
+	})
+	baseResp, err := s.clients.Vulns.Scan(ctx, baseReq)
 	if err != nil {
 		return nil, DiffRefsResult{}, fmt.Errorf("failed to scan base ref %s: %w", args.BaseRef, err)
 	}
-	defer baseExec.Close()
 
 	// Scan target ref
-	targetExec, err := s.scanner.ScanRepository(ctx, args.Path, args.TargetRef, true, scan.Options{Ecosystems: args.Ecosystems})
+	targetReq := connect.NewRequest(&scanv1.ScanRequest{
+		Target: args.Path,
+		Options: &scanv1.ScanOptions{
+			Ecosystems: args.Ecosystems,
+			Ref:        args.TargetRef,
+			TargetHint: &scanv1.TargetHint{
+				Kind: targetv1.TargetKind_TARGET_KIND_GIT,
+			},
+		},
+	})
+	targetResp, err := s.clients.Vulns.Scan(ctx, targetReq)
 	if err != nil {
 		return nil, DiffRefsResult{}, fmt.Errorf("failed to scan target ref %s: %w", args.TargetRef, err)
 	}
-	defer targetExec.Close()
+
+	baseScan := baseResp.Msg
+	targetScan := targetResp.Msg
 
 	result := DiffRefsResult{
 		Path:            args.Path,
@@ -2074,32 +2216,20 @@ func (s *Server) diffGitRefs(ctx context.Context, args DiffRefsInput) (*mcp.Call
 		TargetRef:       args.TargetRef,
 		IsContainerDiff: false,
 		Changes:         make([]DependencyChange, 0),
-		VulnSummary:     make(map[string]int),
+		VulnerabilitySummary:     make(map[string]int),
 	}
 
 	// Build package maps for comparison
 	basePackages := make(map[string]*PackageInfo)
-	for _, pkg := range baseExec.Result.Inventory.Packages {
-		if pkg == nil {
-			continue
-		}
-		key := pkg.Name + "@" + pkg.Ecosystem()
-		basePackages[key] = &PackageInfo{Name: pkg.Name, Version: pkg.Version, Ecosystem: pkg.Ecosystem()}
+	for _, pkg := range baseScan.Packages {
+		key := pkg.Name + "@" + pkg.Ecosystem
+		basePackages[key] = &PackageInfo{Name: pkg.Name, Version: pkg.Version, Ecosystem: pkg.Ecosystem}
 	}
 
 	targetPackages := make(map[string]*PackageInfo)
-	for _, pkg := range targetExec.Result.Inventory.Packages {
-		if pkg == nil {
-			continue
-		}
-		key := pkg.Name + "@" + pkg.Ecosystem()
-		isDirect := false
-		if targetExec.Result.Inventory.Direct != nil {
-			if purl := pkg.PURL(); purl != nil {
-				isDirect = targetExec.Result.Inventory.Direct[purl.String()]
-			}
-		}
-		targetPackages[key] = &PackageInfo{Name: pkg.Name, Version: pkg.Version, Ecosystem: pkg.Ecosystem(), Direct: isDirect}
+	for _, pkg := range targetScan.Packages {
+		key := pkg.Name + "@" + pkg.Ecosystem
+		targetPackages[key] = &PackageInfo{Name: pkg.Name, Version: pkg.Version, Ecosystem: pkg.Ecosystem, Direct: pkg.Direct}
 	}
 
 	// Find added and updated packages
@@ -2147,10 +2277,10 @@ func (s *Server) diffGitRefs(ctx context.Context, args DiffRefsInput) (*mcp.Call
 	}
 
 	// Add vulnerability summary from target
-	result.VulnSummary["critical"] = targetExec.Result.Stats.CriticalSev
-	result.VulnSummary["high"] = targetExec.Result.Stats.HighSeverity
-	result.VulnSummary["medium"] = targetExec.Result.Stats.MedSeverity
-	result.VulnSummary["low"] = targetExec.Result.Stats.LowSeverity
+	result.VulnerabilitySummary["critical"] = int(targetScan.Stats.GetCritical())
+	result.VulnerabilitySummary["high"] = int(targetScan.Stats.GetHigh())
+	result.VulnerabilitySummary["medium"] = int(targetScan.Stats.GetMedium())
+	result.VulnerabilitySummary["low"] = int(targetScan.Stats.GetLow())
 
 	return nil, result, nil
 }
@@ -2282,27 +2412,35 @@ func findBestMatchingNode(g *graph.Graph, query string) *graph.Node {
 
 // === Helper Functions ===
 
-// extractSeverity extracts the severity from an OSV vulnerability.
-func extractSeverity(vuln *osvschema.Vulnerability) vulnerability.Severity {
-	if vuln == nil {
-		return vulnerability.Severity{}
+// advisoryToExplanation converts a proto Advisory to the MCP VulnExplanation type.
+func advisoryToExplanation(advisory *vulnerabilityv1.Advisory) VulnExplanation {
+	if advisory == nil {
+		return VulnExplanation{}
 	}
 
-	for _, sev := range vuln.Severity {
-		if sev.Score != "" {
-			return vulnerability.NewSeverity(sev.Score, string(sev.Type))
-		}
+	explanation := VulnExplanation{
+		ID:            advisory.GetId(),
+		Aliases:       advisory.GetAliases(),
+		Summary:       advisory.GetSummary(),
+		Details:       advisory.GetDetails(),
+		FixedVersions: advisory.GetFixedVersions(),
+		References:    advisory.GetReferences(),
 	}
 
-	if vuln.DatabaseSpecific != nil {
-		if sevRaw, ok := vuln.DatabaseSpecific["severity"]; ok {
-			if sevStr, ok := sevRaw.(string); ok {
-				return vulnerability.NewSeverity(strings.ToUpper(sevStr), "GHSA")
-			}
-		}
+	// Extract severity level string
+	if advisory.GetSeverity() != nil {
+		explanation.Severity = advisory.GetSeverity().GetLevel().String()
 	}
 
-	return vulnerability.Severity{}
+	// Format timestamps
+	if advisory.GetPublished() != nil {
+		explanation.Published = advisory.GetPublished().AsTime().Format("2006-01-02")
+	}
+	if advisory.GetModified() != nil {
+		explanation.Modified = advisory.GetModified().AsTime().Format("2006-01-02")
+	}
+
+	return explanation
 }
 
 // pathToStrings converts a graph.Path to a slice of node names.

@@ -11,9 +11,9 @@ deputy mcp serve [flags]
 ## Flags
 
 | Flag | Default | Description |
-|------|---------|-------------|
+| --- | --- | --- |
 | `--transport` | `stdio` | Transport mode: `stdio` or `http` |
-| `--address` | `:8080` | Address to listen on for HTTP transport |
+| `--address` | | Address to listen on for HTTP transport (e.g., `:8080`) |
 
 ## What is MCP?
 
@@ -167,7 +167,8 @@ args = ["mcp", "serve"]
 DEPUTY_LOG_LEVEL = "debug"
 ```
 
-**Note:** The CLI and VSCode Codex extension share this configuration.
+> [!NOTE]
+> The CLI and VSCode Codex extension share this configuration.
 
 ### Claude Desktop
 
@@ -381,13 +382,14 @@ Scan a local directory for vulnerabilities.
   "path": "/path/to/project",
   "packagesScanned": 142,
   "clean": false,
-  "vulnerabilitiesBy": {
+  "vulnerabilitiesBySeverity": {
     "critical": 1,
     "high": 3,
     "medium": 5,
     "low": 2
   },
-  "vulnerabilities": [...]
+  "vulnerabilities": [...],
+  "scanTime": "2.3s"
 }
 ```
 
@@ -584,7 +586,7 @@ Get commands to fix vulnerabilities.
       "package": "github.com/example/pkg",
       "fromVersion": "1.2.3",
       "toVersion": "1.2.4",
-      "vulnIds": ["CVE-2024-1234"],
+      "affectedVulnerabilities": ["CVE-2024-1234"],
       "isDirect": true
     }
   ]

@@ -15,7 +15,14 @@ flowchart TB
     CMD[internal/cli/cmd]
   end
 
+  subgraph Client["Client Abstraction"]
+    ClientPkg[internal/client]
+    InProcess[InProcess]
+    Remote[Remote]
+  end
+
   subgraph Core["Core Packages"]
+    Scanning[internal/scanning]
     Inv[internal/inventory]
     Analysis[internal/analysis]
     Remed[internal/remediation]
@@ -36,11 +43,16 @@ flowchart TB
     OSV[(OSV API)]
     DepsD[(deps.dev)]
     GH[(GitHub API)]
+    Server[(Deputy Server)]
   end
 
   Main --> CLI
   CLI --> CMD
-  CMD --> Inv & Analysis & Remed & SBOM & Policy & Proxy & Targets
+  CMD --> ClientPkg
+  ClientPkg --> InProcess & Remote
+  InProcess --> Scanning
+  Remote --> Server
+  Scanning --> Inv & Analysis & Remed & SBOM & Policy & Targets
   Inv --> PURL & Git
   Analysis --> OSV
   SBOM --> DepsD & GH
@@ -48,6 +60,7 @@ flowchart TB
 
   style Entry fill:#e3f2fd,stroke:#1565c0
   style Commands fill:#fff3e0,stroke:#e65100
+  style Client fill:#e1f5fe,stroke:#0288d1
   style Core fill:#e8f5e9,stroke:#2e7d32
   style Support fill:#f3e5f5,stroke:#7b1fa2
   style External fill:#fff9c4,stroke:#f9a825
@@ -83,6 +96,23 @@ flowchart TB
   class Inv,Scan,SBOM,Diff,Proxy process
   class Packages output
 ```
+
+### Client Abstraction
+
+Commands communicate with Deputy's core services through a unified client interface (`internal/client`). This abstraction supports three execution modes:
+
+| Mode | Transport | Use Case |
+|------|-----------|----------|
+| **In-Process** | Direct function calls | CLI usage (default, zero overhead) |
+| **Local Daemon** | Unix socket | Shared caching, faster repeat scans |
+| **Remote Server** | HTTP/2 (ConnectRPC) | Enterprise features, centralized policy |
+
+Mode selection is automatic:
+1. If `DEPUTY_SERVER` is set → Remote mode
+2. If daemon socket exists → Daemon mode
+3. Otherwise → In-process mode (default)
+
+The public SDK (`sdk/`) wraps this client for external Go consumers.
 
 ### Target Resolution and Materialization
 
@@ -182,6 +212,8 @@ Deputy keeps pure domain logic separate from service integrations:
 | `main.go` | Binary entry point |
 | `internal/cli` | CLI initialization, root command, logging setup |
 | `internal/cli/cmd` | Individual Cobra commands (scan, fix, diff, etc.) |
+| `internal/client` | Client abstraction (in-process, daemon, remote modes) |
+| `sdk` | Public Go SDK for external consumers |
 
 ### Core Packages
 
@@ -411,6 +443,9 @@ type Action struct {
 | CLI entry | [main.go](../../main.go) |
 | Root command | [internal/cli/cli.go](../../internal/cli/cli.go) |
 | Command registration | [internal/cli/cmd/register.go](../../internal/cli/cmd/register.go) |
+| Client abstraction | [internal/client/client.go](../../internal/client/client.go) |
+| Client factory | [internal/client/new.go](../../internal/client/new.go) |
+| Public SDK | [sdk/deputy.go](../../sdk/deputy.go) |
 | Scan implementation | [internal/cli/cmd/scan.go](../../internal/cli/cmd/scan.go) |
 | Fix implementation | [internal/cli/cmd/fix.go](../../internal/cli/cmd/fix.go) |
 | Policy evaluator | [internal/policy/evaluator.go](../../internal/policy/evaluator.go) |

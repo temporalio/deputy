@@ -261,7 +261,8 @@ Result: 0
 Result: true
 ```
 
-Note: The `pkg` helper provides sensible defaults (`name`, `version`, `ecosystem` default to `""`, `licenses` defaults to `[]`), so you don't need `?.orValue()` for these fields.
+> [!NOTE]
+> The `pkg` helper provides sensible defaults (`name`, `version`, `ecosystem` default to `""`, `licenses` defaults to `[]`), so you don't need `?.orValue()` for these fields.
 
 **Testing string patterns:**
 
@@ -279,11 +280,11 @@ Result: false
 ```
 > :example
 Loaded example: lodash@4.17.21 (npm) with vulnerability CVE-2021-23337
-> vulnerabilities.exists(v, v.severity == "HIGH")
+> vulnerabilities.exists(v, v.advisory.severity.level == severity.high)
 Result: true
-> vulnerabilities.filter(v, v.severity in ["HIGH", "CRITICAL"])
-Result: [{id: "CVE-2021-23337", severity: "HIGH", ...}]
-> size(vulnerabilities.filter(v, v.severity == "CRITICAL"))
+> vulnerabilities.filter(v, v.advisory.severity.level in [severity.high, severity.critical])
+Result: [{advisory: {id: "CVE-2021-23337", severity: {level: ...}}, ...}]
+> size(vulnerabilities.filter(v, v.advisory.severity.level == severity.critical))
 Result: 0
 ```
 

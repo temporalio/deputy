@@ -199,7 +199,7 @@ func scanRepo(ctx context.Context, target repoTarget, token string, inMemory boo
 	}
 	defer src.Close()
 
-	pkgs, err := inv.ScanPackagesWorking(ctx, src.Workspace, inv.ScanOptions{Ecosystems: ecosystems})
+	pkgs, err := inv.ScanPackagesWorking(ctx, src.Workspace(), inv.ScanOptions{Ecosystems: ecosystems})
 	if err != nil {
 		finding.Error = fmt.Errorf("inventory %s: %w", target.name, err)
 		return finding
@@ -390,7 +390,7 @@ func matchPackages(pkgs []*extractor.Package, iocs iocSet) []PackageMatch {
 		match := PackageMatch{
 			Package:   p.Name,
 			Version:   p.Version,
-			Ecosystem: p.Ecosystem(),
+			Ecosystem: p.Ecosystem().String(),
 			PURL:      purl,
 		}
 		if len(p.Locations) > 0 {

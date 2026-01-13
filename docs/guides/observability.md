@@ -79,7 +79,8 @@ $ DEPUTY_LOG_LEVEL=info deputy scan
 | `OTEL_TRACES_SAMPLER_ARG` | Sample rate (0.0-1.0) | `1.0` |
 | `OTEL_EXPORTER_OTLP_TIMEOUT` | Export timeout | `10s` |
 
-**Note:** The default log level is `warn` to keep CLI output clean for interactive use. Set `DEPUTY_LOG_LEVEL=info` for verbose logs with trace correlation when running pipelines or debugging.
+> [!NOTE]
+> The default log level is `warn` to keep CLI output clean for interactive use. Set `DEPUTY_LOG_LEVEL=info` for verbose logs with trace correlation when running pipelines or debugging.
 
 ### YAML Configuration
 

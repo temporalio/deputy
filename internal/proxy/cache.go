@@ -8,10 +8,10 @@ import (
 	"strings"
 	"time"
 
+	vulnerabilityv1 "github.com/picatz/deputy/gen/deputy/vulnerability/v1"
 	"github.com/picatz/deputy/internal/analysis/osv"
 	"github.com/picatz/deputy/internal/cache/memory"
 	"github.com/picatz/deputy/internal/license"
-	"github.com/picatz/deputy/internal/policy"
 	"go.opentelemetry.io/otel/trace"
 )
 
@@ -132,6 +132,14 @@ type OSVCache interface {
 	Stats() memory.Stats
 }
 
+// ContextAwareOSVCache extends OSVCache with context-aware operations
+// for per-request tenant isolation in multi-tenant deployments.
+type ContextAwareOSVCache interface {
+	OSVCache
+	GetWithContext(ctx context.Context, key string) ([]osv.Vulnerability, bool)
+	SetWithContext(ctx context.Context, key string, value []osv.Vulnerability)
+}
+
 // LicenseCache defines the interface for caching license lookups.
 // This allows dependency injection for testing and custom cache implementations.
 type LicenseCache interface {
@@ -140,10 +148,20 @@ type LicenseCache interface {
 	Stats() memory.Stats
 }
 
+// ContextAwareLicenseCache extends LicenseCache with context-aware operations
+// for per-request tenant isolation in multi-tenant deployments.
+type ContextAwareLicenseCache interface {
+	LicenseCache
+	GetWithContext(ctx context.Context, key string) ([]string, bool)
+	SetWithContext(ctx context.Context, key string, value []string)
+}
+
 // ImageScanResult stores cached scan data for a container image.
 // This includes vulnerabilities and image configuration/metadata for policy evaluation.
 type ImageScanResult struct {
-	Vulnerabilities []map[string]any
+	// Vulnerabilities holds proto Finding messages for policy evaluation.
+	// Type is any to avoid import cycles; actual type is []*vulnerabilityv1.Finding.
+	Vulnerabilities any
 	// ImageInfo contains extracted configuration, metadata, and build history.
 	// This is nil when ImageInfo could not be extracted from the scan result.
 	ImageInfo map[string]any
@@ -154,6 +172,14 @@ type ImageScanCache interface {
 	Get(key string) (ImageScanResult, bool)
 	Set(key string, value ImageScanResult)
 	Stats() memory.Stats
+}
+
+// ContextAwareImageScanCache extends ImageScanCache with context-aware operations
+// for per-request tenant isolation in multi-tenant deployments.
+type ContextAwareImageScanCache interface {
+	ImageScanCache
+	GetWithContext(ctx context.Context, key string) (ImageScanResult, bool)
+	SetWithContext(ctx context.Context, key string, value ImageScanResult)
 }
 
 // defaultOSVCache is the package-level default cache for OSV lookups.
@@ -284,6 +310,14 @@ type DigestResolutionCache interface {
 	Stats() memory.Stats
 }
 
+// ContextAwareDigestResolutionCache extends DigestResolutionCache with context-aware operations
+// for per-request tenant isolation in multi-tenant deployments.
+type ContextAwareDigestResolutionCache interface {
+	DigestResolutionCache
+	GetWithContext(ctx context.Context, key string) (string, bool)
+	SetWithContext(ctx context.Context, key string, value string)
+}
+
 // defaultDigestResolutionCacheTTL is shorter than image scan cache TTL
 // because tags are mutable and we want to eventually retry failed resolutions.
 const defaultDigestResolutionCacheTTL = 2 * time.Minute
@@ -326,6 +360,21 @@ func CacheDigestResolution(c DigestResolutionCache, registry, repository, tag, d
 	getDigestResolutionCache(c).Set(key, digest)
 }
 
+// CacheDigestResolutionWithContext stores a successful digest resolution with tenant isolation.
+// If the cache implements ContextAwareDigestResolutionCache, tenant ID is extracted from context.
+func CacheDigestResolutionWithContext(ctx context.Context, c DigestResolutionCache, registry, repository, tag, digest string) {
+	key := digestResolutionCacheKey(registry, repository, tag)
+	if key == "" || digest == "" {
+		return
+	}
+	cache := getDigestResolutionCache(c)
+	if ctxCache, isCtxAware := cache.(ContextAwareDigestResolutionCache); isCtxAware {
+		ctxCache.SetWithContext(ctx, key, digest)
+	} else {
+		cache.Set(key, digest)
+	}
+}
+
 // CacheDigestResolutionFailure stores a failed digest resolution attempt.
 // This prevents repeated failed lookups for the same tag within the TTL.
 func CacheDigestResolutionFailure(c DigestResolutionCache, registry, repository, tag string) {
@@ -334,6 +383,21 @@ func CacheDigestResolutionFailure(c DigestResolutionCache, registry, repository,
 		return
 	}
 	getDigestResolutionCache(c).Set(key, digestResolutionFailureSentinel)
+}
+
+// CacheDigestResolutionFailureWithContext stores a failed resolution with tenant isolation.
+// If the cache implements ContextAwareDigestResolutionCache, tenant ID is extracted from context.
+func CacheDigestResolutionFailureWithContext(ctx context.Context, c DigestResolutionCache, registry, repository, tag string) {
+	key := digestResolutionCacheKey(registry, repository, tag)
+	if key == "" {
+		return
+	}
+	cache := getDigestResolutionCache(c)
+	if ctxCache, isCtxAware := cache.(ContextAwareDigestResolutionCache); isCtxAware {
+		ctxCache.SetWithContext(ctx, key, digestResolutionFailureSentinel)
+	} else {
+		cache.Set(key, digestResolutionFailureSentinel)
+	}
 }
 
 // GetCachedDigestResolution retrieves a cached digest resolution.
@@ -355,15 +419,55 @@ func GetCachedDigestResolution(c DigestResolutionCache, registry, repository, ta
 	return cached, true, false
 }
 
+// GetCachedDigestResolutionWithContext retrieves a cached digest resolution with tenant isolation.
+// If the cache implements ContextAwareDigestResolutionCache, tenant ID is extracted from context.
+// Returns (digest, true, false) for successful resolution.
+// Returns ("", true, true) for cached failure.
+// Returns ("", false, false) for cache miss.
+func GetCachedDigestResolutionWithContext(ctx context.Context, c DigestResolutionCache, registry, repository, tag string) (digest string, found bool, wasFailed bool) {
+	key := digestResolutionCacheKey(registry, repository, tag)
+	if key == "" {
+		return "", false, false
+	}
+	cache := getDigestResolutionCache(c)
+	var cached string
+	var ok bool
+	if ctxCache, isCtxAware := cache.(ContextAwareDigestResolutionCache); isCtxAware {
+		cached, ok = ctxCache.GetWithContext(ctx, key)
+	} else {
+		cached, ok = cache.Get(key)
+	}
+	if !ok {
+		return "", false, false
+	}
+	if cached == digestResolutionFailureSentinel {
+		return "", true, true
+	}
+	return cached, true, false
+}
+
 // cachedOSVLookupWithCache queries the OSV database using the provided cache.
 // This allows tests to inject isolated cache instances.
+//
+// Multi-tenant support: If the cache implements ContextAwareOSVCache, tenant ID
+// is extracted from the request context (JWT claims) to scope cache keys.
 //
 // Span enrichment: Records cache access events (hit/miss) on the current span.
 func cachedOSVLookupWithCache(ctx context.Context, client osv.Client, c OSVCache, ecosystem, name, version string) ([]osv.Vulnerability, error) {
 	span := trace.SpanFromContext(ctx)
 	osvCache := getOSVCache(c)
 	key := pkgCacheKey(ecosystem, name, version)
-	if cached, ok := osvCache.Get(key); ok {
+
+	// Use context-aware cache operations if available (for tenant isolation)
+	var cached []osv.Vulnerability
+	var ok bool
+	if ctxCache, isCtxAware := osvCache.(ContextAwareOSVCache); isCtxAware {
+		cached, ok = ctxCache.GetWithContext(ctx, key)
+	} else {
+		cached, ok = osvCache.Get(key)
+	}
+
+	if ok {
 		RecordOSVCacheHit(ctx, span, key)
 		slog.Debug("osv cache hit", "package", name, "version", version, "ecosystem", ecosystem, "vulns", len(cached))
 		return cached, nil
@@ -382,7 +486,13 @@ func cachedOSVLookupWithCache(ctx context.Context, client osv.Client, c OSVCache
 		slog.Debug("osv query failed", "package", name, "version", version, "ecosystem", ecosystem, "error", err)
 		return nil, err
 	}
-	osvCache.Set(key, vulns)
+
+	// Use context-aware cache operations if available (for tenant isolation)
+	if ctxCache, isCtxAware := osvCache.(ContextAwareOSVCache); isCtxAware {
+		ctxCache.SetWithContext(ctx, key, vulns)
+	} else {
+		osvCache.Set(key, vulns)
+	}
 	slog.Debug("osv cache populated", "package", name, "version", version, "ecosystem", ecosystem, "vulns", len(vulns))
 	return vulns, nil
 }
@@ -390,12 +500,25 @@ func cachedOSVLookupWithCache(ctx context.Context, client osv.Client, c OSVCache
 // cachedLicenseLookupWithCache retrieves license information using the provided cache.
 // This allows tests to inject isolated cache instances.
 //
+// Multi-tenant support: If the cache implements ContextAwareLicenseCache, tenant ID
+// is extracted from the request context (JWT claims) to scope cache keys.
+//
 // Span enrichment: Records cache access events (hit/miss) on the current span.
 func cachedLicenseLookupWithCache(ctx context.Context, c LicenseCache, ecosystem, name, version string) ([]string, error) {
 	span := trace.SpanFromContext(ctx)
 	licCache := getLicenseCache(c)
 	key := pkgCacheKey(ecosystem, name, version)
-	if cached, ok := licCache.Get(key); ok {
+
+	// Use context-aware cache operations if available (for tenant isolation)
+	var cached []string
+	var ok bool
+	if ctxCache, isCtxAware := licCache.(ContextAwareLicenseCache); isCtxAware {
+		cached, ok = ctxCache.GetWithContext(ctx, key)
+	} else {
+		cached, ok = licCache.Get(key)
+	}
+
+	if ok {
 		RecordLicenseCacheHit(ctx, span, key)
 		slog.Debug("license cache hit", "package", name, "version", version, "ecosystem", ecosystem, "licenses", len(cached))
 		return cached, nil
@@ -403,7 +526,13 @@ func cachedLicenseLookupWithCache(ctx context.Context, c LicenseCache, ecosystem
 	RecordLicenseCacheMiss(ctx, span, key)
 	slog.Debug("license cache miss", "package", name, "version", version, "ecosystem", ecosystem)
 	lics := license.LookupLicensesBestEffort(ctx, ecosystem, name, version)
-	licCache.Set(key, lics)
+
+	// Use context-aware cache operations if available (for tenant isolation)
+	if ctxCache, isCtxAware := licCache.(ContextAwareLicenseCache); isCtxAware {
+		ctxCache.SetWithContext(ctx, key, lics)
+	} else {
+		licCache.Set(key, lics)
+	}
 	slog.Debug("license cache populated", "package", name, "version", version, "ecosystem", ecosystem, "licenses", len(lics))
 	return lics, nil
 }
@@ -416,11 +545,11 @@ type handlerLookups struct {
 	licenseLookup func(context.Context, string, string) ([]string, error)
 }
 
-// vulnerabilitiesToMaps converts a list of vulnerabilities to a slice of maps
-// suitable for policy evaluation. Returns nil if no vulnerabilities are found or on error.
+// lookupVulnerabilities queries for vulnerabilities and returns proto Finding messages.
+// Returns nil if no vulnerabilities are found or on error.
 //
 // Span enrichment: Records the vulnerability count on the current span.
-func vulnerabilitiesToMaps(ctx context.Context, lookups handlerLookups, ecosystem, name, version string) []map[string]any {
+func lookupVulnerabilities(ctx context.Context, lookups handlerLookups, ecosystem, name, version string) []*vulnerabilityv1.Finding {
 	span := trace.SpanFromContext(ctx)
 	var vulns []osv.Vulnerability
 	var err error
@@ -450,16 +579,8 @@ func vulnerabilitiesToMaps(ctx context.Context, lookups handlerLookups, ecosyste
 	if len(vulns) == 0 {
 		return nil
 	}
-	result := make([]map[string]any, 0, len(vulns))
-	for _, v := range vulns {
-		m, err := policy.StructToMap(v)
-		if err != nil {
-			slog.Debug("failed to map vulnerability", "id", v.ID, "error", err)
-			continue
-		}
-		result = append(result, m)
-	}
-	return result
+	// Convert to proto Findings for policy evaluation
+	return osv.VulnerabilitiesToFindings(vulns)
 }
 
 // lookupLicenses retrieves license information using the provided lookup function.

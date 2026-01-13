@@ -154,7 +154,7 @@ policies:
   - name: block-critical
     rules:
       - action: deny
-        when: vulnerabilities.exists(v, v.severity == "CRITICAL")
+        when: vulnerabilities.exists(v, v.advisory.severity.level == severity.critical)
         reason: critical vulnerability found
 ```
 

@@ -11,32 +11,40 @@
 #
 # Available variables for diff_report:
 #   repo                   - Repository path or URL
-#   baseRef                - Base Git reference (e.g., "main", "v1.0.0")
-#   targetRef              - Target Git reference (e.g., "HEAD", "feature-branch")
+#   base_ref               - Base Git reference (e.g., "main", "v1.0.0")
+#   target_ref             - Target Git reference (e.g., "HEAD", "feature-branch")
 #   changes                - List of dependency changes
 #   vulnerabilities        - List of vulnerabilities in changed dependencies
 #
 # Available variables for diff_dependency_change:
 #   repo                   - Repository path or URL
-#   baseRef                - Base Git reference
-#   targetRef              - Target Git reference
-#   change.name            - Package name (canonical path)
-#   change.oldName         - Previous package name (if renamed)
-#   change.targetVersion   - Version in target ref
-#   change.baseVersion     - Version in base ref
+#   base_ref               - Base Git reference
+#   target_ref             - Target Git reference
+#   change                 - Full change object (PackageChange proto)
 #   change.type            - Change type: "added", "removed", "updated", "upgraded", "downgraded"
-#   change.ecosystem       - Package ecosystem (go, npm, etc.)
-#   change.isDirect        - Whether this is a direct dependency
+#   change.base_version    - Version in base ref
+#   change.target_version  - Version in target ref
+#   pkg                    - Package being changed (alias for change.package)
+#   pkg.name               - Package name (canonical path)
+#   pkg.version            - Package version (same as target_version for changes)
+#   pkg.ecosystem          - Package ecosystem (go, npm, etc.)
+#   pkg.licenses           - List of SPDX license identifiers
+#   pkg.direct             - Whether this is a direct dependency
 #
 # Available variables for diff_vulnerability:
 #   repo                   - Repository path or URL
-#   baseRef                - Base Git reference
-#   targetRef              - Target Git reference
-#   vulnerability.id       - CVE/GHSA identifier
-#   vulnerability.severity - CRITICAL, HIGH, MEDIUM, LOW
-#   vulnerability.package  - Affected package name
-#   vulnerability.version  - Affected package version
-#   vulnerability.fixedVersions - Versions containing the fix
+#   base_ref               - Base Git reference
+#   target_ref             - Target Git reference
+#   vulnerability          - Vulnerability finding (proto)
+#   vulnerability.advisory_id - CVE/GHSA identifier
+#   vulnerability.advisory.fixed_versions - Versions containing the fix
+#   vulnerability.advisory.severity.level - Severity level (use severity.* constants)
+#   pkg                    - Affected package (alias for vulnerability.package)
+#   pkg.name               - Package name
+#   pkg.version            - Package version
+#   pkg.direct             - Whether this is a direct dependency
+#
+# Severity constants: severity.critical, severity.high, severity.medium, severity.low
 
 policies:
   # Report-level policies
@@ -57,7 +65,7 @@ policies:
     rules:
       - action: deny
         when: |
-          vulnerabilities.exists(v, v.severity == "CRITICAL")
+          vulnerabilities.orValue([]).exists(v, v.advisory.severity.level == severity.critical)
         reason: "Critical vulnerability introduced by dependency change"
         remediation: "Update to a patched version or choose an alternative package"
 
@@ -67,7 +75,7 @@ policies:
     rules:
       - action: warn
         when: |
-          vulnerabilities.exists(v, v.severity == "HIGH")
+          vulnerabilities.orValue([]).exists(v, v.advisory.severity.level == severity.high)
         reason: "High severity vulnerability found in dependency changes"
         remediation: "Review vulnerabilities and update to patched versions"
 
@@ -88,9 +96,9 @@ policies:
       - action: warn
         when: |
           change.type == "upgraded" &&
-          change.baseVersion != "" &&
-          change.targetVersion != "" &&
-          change.baseVersion.split(".")[0] != change.targetVersion.split(".")[0]
+          change.base_version != "" &&
+          change.target_version != "" &&
+          change.base_version.split(".")[0] != change.target_version.split(".")[0]
         reason: "Major version upgrade may introduce breaking changes"
         remediation: "Review changelog and test thoroughly before merging"
 
@@ -108,7 +116,7 @@ policies:
     entrypoints: ["diff_dependency_change"]
     rules:
       - action: deny
-        when: change.type == "added" && change.isDirect
+        when: change.type == "added" && pkg.direct
         reason: "New direct dependency requires approval"
         remediation: "Add dependency to allowlist or get approval from security team"
 
@@ -118,7 +126,7 @@ policies:
     entrypoints: ["diff_vulnerability"]
     rules:
       - action: deny
-        when: vulnerability.severity == "CRITICAL"
+        when: vulnerability.advisory.severity.level == severity.critical
         reason: "Critical vulnerability detected in changed dependency"
         remediation: "Update to a version that fixes the vulnerability"
 
@@ -128,7 +136,7 @@ policies:
     rules:
       - action: warn
         when: |
-          size(vulnerability.?fixedVersions.orValue([])) > 0
+          size(vulnerability.?advisory.fixed_versions.orValue([])) > 0
         reason: "Vulnerability has available fix"
         remediation: "Update to one of the fixed versions"
 
@@ -137,6 +145,6 @@ policies:
     entrypoints: ["diff_vulnerability"]
     rules:
       - action: warn
-        when: vulnerability.id.startsWith("CVE-")
+        when: vulnerability.advisory_id.startsWith("CVE-")
         reason: "Known CVE detected in dependency"
         remediation: "Document for compliance and plan remediation"

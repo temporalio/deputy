@@ -1,11 +1,18 @@
+# Critical Transitive Spotlight Policy
+#
+# Severity constants: severity.critical, severity.high, severity.medium, severity.low
+# Access via: vulnerability.advisory.severity.level
+
 policies:
   - name: critical-transitive-spotlight
     description: Highlight CRITICAL vulnerabilities in indirect dependencies
     vars:
-      highSev: 'vulnerability.?severity.orValue("").upperAscii() == "CRITICAL"'
-      isDirect: 'vulnerability.?isDirect.orValue(false)'
+      isDirect: 'vulnerability.?package.direct.orValue(false)'
     rules:
       - action: warn
-        when: env.entrypoint in ["scan_vulnerability","diff_vulnerability"] && highSev && !isDirect
+        when: |
+          env.entrypoint in ["scan_vulnerability","diff_vulnerability"] &&
+          vulnerability.advisory.severity.level == severity.critical &&
+          !isDirect
         reason: CRITICAL vulnerability found in an indirect dependency
         remediation: Prioritize upgrading the transitive dependency or its parents
