@@ -205,15 +205,36 @@ func IsLocalTarget(target string) bool {
 //
 // See internal/network/safedialer.go for the connection-time protection.
 func ValidateRemoteTarget(target string) error {
+	return ValidateRemoteTargetWithPolicy(target, nil)
+}
+
+// ValidateRemoteTargetWithPolicy applies remote target validation with allowlist policy.
+func ValidateRemoteTargetWithPolicy(target string, policy *RemoteTargetPolicy) error {
 	if target == "" {
 		return &ValidationError{Target: target, Reason: "target is required"}
 	}
 
+	if isFileSchemeTarget(target) || isUNCPath(target) {
+		return &ValidationError{
+			Target:     target,
+			Reason:     "file:// targets are not supported for remote server",
+			Suggestion: "use a git URL or container registry reference",
+		}
+	}
+
+	if isSSHLikeTarget(target) && (policy == nil || !policy.AllowSSH) {
+		return &ValidationError{
+			Target:     target,
+			Reason:     "non-HTTPS git targets are not allowed on remote server",
+			Suggestion: "use an HTTPS git URL or enable egress.allow_ssh",
+		}
+	}
+
 	if target == "-" {
 		return &ValidationError{
-			Target:      target,
-			Reason:      "stdin target (-) not supported for remote server",
-			Suggestion:  "upload SBOM bytes using DiffSBOM instead",
+			Target:     target,
+			Reason:     "stdin target (-) not supported for remote server",
+			Suggestion: "upload SBOM bytes using DiffSBOM instead",
 		}
 	}
 
@@ -282,16 +303,18 @@ func ValidateRemoteTarget(target string) error {
 	}
 
 	if strings.HasPrefix(target, "localhost:") || strings.HasPrefix(target, "localhost/") {
-		return &ValidationError{
-			Target:     target,
-			Reason:     "localhost registry not accessible from remote server",
-			Suggestion: "push to a remote registry first",
+		if policy == nil || (!policy.AllowLoopback && !policy.allowsHost("localhost")) {
+			return &ValidationError{
+				Target:     target,
+				Reason:     "localhost registry not accessible from remote server",
+				Suggestion: "push to a remote registry first",
+			}
 		}
 	}
 
 	// SSRF Protection: Extract host from target for IP/hostname checks
 	// This handles schemes like oci://127.0.0.1/image, docker://10.0.0.1/app, etc.
-	if err := validateTargetHost(target); err != nil {
+	if err := validateTargetHost(target, policy); err != nil {
 		return err
 	}
 
@@ -300,7 +323,7 @@ func ValidateRemoteTarget(target string) error {
 
 // validateTargetHost extracts the host portion from various target formats
 // and validates it against SSRF blocklists.
-func validateTargetHost(target string) error {
+func validateTargetHost(target string, policy *RemoteTargetPolicy) error {
 	// Normalize: strip common schemes to extract host
 	host := target
 	for _, scheme := range []string{
@@ -338,9 +361,17 @@ func validateTargetHost(target string) error {
 
 	// Normalize IPv6: strip brackets for comparison
 	hostForCheck := strings.TrimPrefix(strings.TrimSuffix(host, "]"), "[")
+	hostAllowed := policy != nil && policy.allowsHost(hostForCheck)
+	allowedAddr := false
+	if addr, err := netip.ParseAddr(hostForCheck); err == nil {
+		allowedAddr = policy != nil && policy.allowsAddr(addr)
+	}
 
 	// Block loopback addresses (SSRF protection)
 	if isLoopbackHost(hostForCheck) {
+		if allowedAddr || hostAllowed || (policy != nil && policy.AllowLoopback) {
+			return nil
+		}
 		return &ValidationError{
 			Target:     target,
 			Reason:     "loopback addresses not accessible from remote server",
@@ -350,6 +381,9 @@ func validateTargetHost(target string) error {
 
 	// Block cloud metadata endpoints (SSRF protection)
 	if isMetadataEndpoint(hostForCheck) {
+		if allowedAddr || hostAllowed {
+			return nil
+		}
 		return &ValidationError{
 			Target:     target,
 			Reason:     "metadata endpoints not allowed",
@@ -360,6 +394,9 @@ func validateTargetHost(target string) error {
 	// Block private network ranges (SSRF protection)
 	// Note: This is defense-in-depth; DNS rebinding attacks still possible
 	if isPrivateNetwork(hostForCheck) {
+		if allowedAddr || hostAllowed {
+			return nil
+		}
 		return &ValidationError{
 			Target:     target,
 			Reason:     "private network addresses not accessible from remote server",
@@ -442,6 +479,30 @@ func isPrivateNetwork(host string) bool {
 	// - 192.168.0.0/16
 	// - fc00::/7 (IPv6 unique local)
 	return addr.IsPrivate()
+}
+
+func isFileSchemeTarget(target string) bool {
+	lower := strings.TrimSpace(strings.ToLower(target))
+	return strings.HasPrefix(lower, "file://") || strings.HasPrefix(lower, "git+file://") || strings.HasPrefix(lower, "file:")
+}
+
+func isUNCPath(target string) bool {
+	return strings.HasPrefix(target, `\\`)
+}
+
+func isSSHLikeTarget(target string) bool {
+	lower := strings.TrimSpace(strings.ToLower(target))
+	if strings.HasPrefix(lower, "ssh://") || strings.HasPrefix(lower, "git+ssh://") || strings.HasPrefix(lower, "git://") {
+		return true
+	}
+	if strings.HasPrefix(lower, "git@") {
+		return true
+	}
+	if strings.Contains(lower, "@") && strings.Contains(lower, ":") && !strings.Contains(lower, "://") {
+		// SCP-style git URL: user@host:repo
+		return true
+	}
+	return false
 }
 
 // ValidationError provides detailed information about why a target is invalid.

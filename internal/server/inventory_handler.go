@@ -19,8 +19,9 @@ import (
 
 // InventoryHandler implements the InventoryService gRPC handler.
 type InventoryHandler struct {
-	localMode bool
-	registry  *registry.Registry
+	localMode    bool
+	registry     *registry.Registry
+	targetPolicy *targets.RemoteTargetPolicy
 }
 
 // Ensure InventoryHandler implements the InventoryServiceHandler interface.
@@ -33,6 +34,13 @@ type InventoryHandlerOption func(*InventoryHandler)
 func WithInventoryLocalMode() InventoryHandlerOption {
 	return func(h *InventoryHandler) {
 		h.localMode = true
+	}
+}
+
+// WithInventoryTargetPolicy sets the remote target policy for server mode validation.
+func WithInventoryTargetPolicy(policy *targets.RemoteTargetPolicy) InventoryHandlerOption {
+	return func(h *InventoryHandler) {
+		h.targetPolicy = policy
 	}
 }
 
@@ -78,7 +86,7 @@ func (h *InventoryHandler) CollectInventory(
 
 	// Security: Validate target is accessible from remote server (skip in local mode)
 	if !h.localMode {
-		if err := targets.ValidateRemoteTarget(target); err != nil {
+		if err := targets.ValidateRemoteTargetWithPolicy(target, h.targetPolicy); err != nil {
 			otel.SetSpanError(span, err)
 			return nil, connect.NewError(connect.CodeInvalidArgument, err)
 		}
@@ -147,9 +155,9 @@ func (h *InventoryHandler) CollectInventory(
 	// we just list the enabled extractors based on ecosystems
 
 	resp := &inventoryv1.CollectInventoryResponse{
-		Target:    protoconv.InventoryTargetToProto(exec.Result.Target),
+		Target:      protoconv.InventoryTargetToProto(exec.Result.Target),
 		GeneratedAt: timestamppb.New(exec.Result.GeneratedAt),
-		Packages:  protoPackages,
+		Packages:    protoPackages,
 		Stats: &inventoryv1.InventoryStats{
 			TotalPackages:      int32(len(packages)),
 			DirectPackages:     directCount,
@@ -197,7 +205,7 @@ func (h *InventoryHandler) StreamCollectInventory(
 
 	// Security: Validate target
 	if !h.localMode {
-		if err := targets.ValidateRemoteTarget(target); err != nil {
+		if err := targets.ValidateRemoteTargetWithPolicy(target, h.targetPolicy); err != nil {
 			otel.SetSpanError(span, err)
 			return connect.NewError(connect.CodeInvalidArgument, err)
 		}

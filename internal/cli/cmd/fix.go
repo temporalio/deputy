@@ -8,7 +8,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"runtime"
 	"strings"
 
 	"connectrpc.com/connect"
@@ -473,7 +472,11 @@ func applyRemediationCommands(ctx context.Context, repoDir string, commands []re
 		}
 		displayDir := relativeOrDot(repoDir, workDir)
 		fmt.Fprintf(out, "%s %s %s\n", ui.StyleUpgraded.Render("↻"), rec.Command, ui.StyleDim.Render(fmt.Sprintf("(in %s)", displayDir)))
-		execCmd := shellCommand(ctx, rec.Command)
+		args, err := remediation.ExecArgs(rec)
+		if err != nil {
+			return fmt.Errorf("cannot apply command %q: %w", rec.Command, err)
+		}
+		execCmd := exec.CommandContext(ctx, args[0], args[1:]...)
 		execCmd.Dir = workDir
 		execCmd.Stdout = out
 		execCmd.Stderr = errW
@@ -513,14 +516,6 @@ func runFixPoliciesProto(ctx context.Context, policyPaths []string, resp *fixv1.
 		}
 	}
 	return nil
-}
-
-// shellCommand creates an exec.Cmd to run a shell command.
-func shellCommand(ctx context.Context, command string) *exec.Cmd {
-	if runtime.GOOS == "windows" {
-		return exec.CommandContext(ctx, "cmd.exe", "/C", command)
-	}
-	return exec.CommandContext(ctx, "sh", "-c", command)
 }
 
 // relativeOrDot returns the relative path from base to target, or "." if they are the same.

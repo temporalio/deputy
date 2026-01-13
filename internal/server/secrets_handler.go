@@ -34,6 +34,7 @@ type SecretsHandler struct {
 	engine          *secrets.Engine
 	customDetectors []secrets.PatternDetector
 	localMode       bool // Skip remote target validation for in-process usage
+	targetPolicy    *targets.RemoteTargetPolicy
 }
 
 // SecretsHandlerOption configures a SecretsHandler.
@@ -44,6 +45,13 @@ type SecretsHandlerOption func(*SecretsHandler)
 func WithSecretsLocalMode() SecretsHandlerOption {
 	return func(h *SecretsHandler) {
 		h.localMode = true
+	}
+}
+
+// WithSecretsTargetPolicy sets the remote target policy for server mode validation.
+func WithSecretsTargetPolicy(policy *targets.RemoteTargetPolicy) SecretsHandlerOption {
+	return func(h *SecretsHandler) {
+		h.targetPolicy = policy
 	}
 }
 
@@ -101,7 +109,7 @@ func (h *SecretsHandler) Scan(
 
 	// Security: Validate target before processing (skip in local mode)
 	if !h.localMode {
-		if err := validateTarget(target); err != nil {
+		if err := targets.ValidateRemoteTargetWithPolicy(target, h.targetPolicy); err != nil {
 			otel.SetSpanError(span, err)
 			return nil, connect.NewError(connect.CodeInvalidArgument, err)
 		}
@@ -164,7 +172,7 @@ func (h *SecretsHandler) StreamScan(
 
 	// Security: Validate target before processing (skip in local mode)
 	if !h.localMode {
-		if err := validateTarget(target); err != nil {
+		if err := targets.ValidateRemoteTargetWithPolicy(target, h.targetPolicy); err != nil {
 			otel.SetSpanError(span, err)
 			return connect.NewError(connect.CodeInvalidArgument, err)
 		}
@@ -264,7 +272,7 @@ func (h *SecretsHandler) ScanHistory(
 
 	// Security: Validate target before processing (skip in local mode)
 	if !h.localMode {
-		if err := validateTarget(target); err != nil {
+		if err := targets.ValidateRemoteTargetWithPolicy(target, h.targetPolicy); err != nil {
 			otel.SetSpanError(span, err)
 			return nil, connect.NewError(connect.CodeInvalidArgument, err)
 		}
@@ -336,7 +344,7 @@ func (h *SecretsHandler) ScanDiff(
 
 	// Security: Validate target before processing (skip in local mode)
 	if !h.localMode {
-		if err := validateTarget(target); err != nil {
+		if err := targets.ValidateRemoteTargetWithPolicy(target, h.targetPolicy); err != nil {
 			otel.SetSpanError(span, err)
 			return nil, connect.NewError(connect.CodeInvalidArgument, err)
 		}
@@ -687,17 +695,17 @@ func (h *SecretsHandler) scanRepository(ctx context.Context, target string, opts
 
 // scanOptions holds processed scan options.
 type scanOptions struct {
-	detectorIDs     []string
-	secretTypes     []secretsv1.SecretType
-	minConfidence   float64
-	verify          bool
-	includePatterns []string
-	excludePatterns []string
-	entropyEnabled  bool
+	detectorIDs      []string
+	secretTypes      []secretsv1.SecretType
+	minConfidence    float64
+	verify           bool
+	includePatterns  []string
+	excludePatterns  []string
+	entropyEnabled   bool
 	entropyThreshold float64
-	deep            bool
-	baselinePath    string
-	platform        string
+	deep             bool
+	baselinePath     string
+	platform         string
 }
 
 // buildScanOptions converts proto options to internal options.
@@ -747,18 +755,18 @@ func (opts scanOptions) matchesExclude(path string) bool {
 // shouldSkipDir returns true for directories that should be skipped.
 func shouldSkipDir(name string) bool {
 	skipDirs := map[string]bool{
-		".git":          true,
-		"node_modules":  true,
-		"vendor":        true,
-		"__pycache__":   true,
-		".venv":         true,
-		"venv":          true,
-		".idea":         true,
-		".vscode":       true,
-		"dist":          true,
-		"build":         true,
-		"target":        true,
-		".terraform":    true,
+		".git":         true,
+		"node_modules": true,
+		"vendor":       true,
+		"__pycache__":  true,
+		".venv":        true,
+		"venv":         true,
+		".idea":        true,
+		".vscode":      true,
+		"dist":         true,
+		"build":        true,
+		"target":       true,
+		".terraform":   true,
 	}
 	return skipDirs[name]
 }

@@ -107,8 +107,11 @@ func (r *Runtime) Info(ctx context.Context) (*sandboxv1.RuntimeInfo, error) {
 func (r *Runtime) RuntimeInfos(ctx context.Context, includeUnavailable bool) ([]*sandboxv1.RuntimeInfo, error) {
 	plugins := discoverPlugins()
 	if len(plugins) == 0 {
+		r.logger.Debug("no plugins discovered")
 		return nil, nil
 	}
+
+	r.logger.Debug("discovered plugins", "count", len(plugins), "plugins", plugins)
 
 	names := make([]string, 0, len(plugins))
 	for name := range plugins {
@@ -119,8 +122,10 @@ func (r *Runtime) RuntimeInfos(ctx context.Context, includeUnavailable bool) ([]
 	var infos []*sandboxv1.RuntimeInfo
 	for _, name := range names {
 		execPath := plugins[name]
+		r.logger.Debug("checking plugin", "name", name, "path", execPath)
 		plugin, err := r.getPlugin(ctx, name, execPath)
 		if err != nil {
+			r.logger.Debug("plugin unavailable", "name", name, "error", err)
 			if includeUnavailable {
 				infos = append(infos, &sandboxv1.RuntimeInfo{
 					Runtime:           sandboxv1.Runtime_RUNTIME_PLUGIN,
@@ -378,15 +383,42 @@ func waitForSocket(path string, timeout time.Duration) error {
 	return fmt.Errorf("timeout waiting for socket")
 }
 
-func discoverPlugins() map[string]string {
-	pathEnv := os.Getenv("PATH")
-	if pathEnv == "" {
-		return nil
+// pluginSearchDirs returns directories to search for plugins, in priority order:
+// 1. Current working directory
+// 2. $GOPATH/bin (if GOPATH is set)
+// 3. $HOME/go/bin (default Go bin location)
+// 4. All directories in PATH
+func pluginSearchDirs() []string {
+	var dirs []string
+
+	// Current working directory (highest priority for development)
+	if cwd, err := os.Getwd(); err == nil {
+		dirs = append(dirs, cwd)
 	}
 
+	// $GOPATH/bin
+	if gopath := os.Getenv("GOPATH"); gopath != "" {
+		dirs = append(dirs, filepath.Join(gopath, "bin"))
+	}
+
+	// $HOME/go/bin (default Go bin location)
+	if home, err := os.UserHomeDir(); err == nil {
+		dirs = append(dirs, filepath.Join(home, "go", "bin"))
+	}
+
+	// PATH directories
+	if pathEnv := os.Getenv("PATH"); pathEnv != "" {
+		dirs = append(dirs, filepath.SplitList(pathEnv)...)
+	}
+
+	return dirs
+}
+
+func discoverPlugins() map[string]string {
 	plugins := make(map[string]string)
 	seen := make(map[string]bool)
-	for _, dir := range filepath.SplitList(pathEnv) {
+
+	for _, dir := range pluginSearchDirs() {
 		entries, err := os.ReadDir(dir)
 		if err != nil {
 			continue

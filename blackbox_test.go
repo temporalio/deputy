@@ -294,7 +294,7 @@ func TestBlackbox_Exec_NoneRuntime_ExitCode(t *testing.T) {
 
 func TestBlackbox_Exec_NoneRuntime_Stderr(t *testing.T) {
 	// Test that stderr is captured correctly
-	stdout, stderr, code := runDeputy(t, "exec", "--runtime", "none", "--", "sh", "-c", "echo stdout; echo stderr >&2")
+	stdout, stderr, code := runDeputy(t, "exec", "--runtime", "none", "--dangerously-skip-prompt", "--", "sh", "-c", "echo stdout; echo stderr >&2")
 	if code != 0 {
 		t.Fatalf("exit=%d", code)
 	}
@@ -308,7 +308,7 @@ func TestBlackbox_Exec_NoneRuntime_Stderr(t *testing.T) {
 
 func TestBlackbox_Exec_NoneRuntime_EnvVar(t *testing.T) {
 	// Test environment variable passing
-	stdout, stderr, code := runDeputy(t, "exec", "--runtime", "none", "--env", "TEST_VAR=hello_deputy", "--", "sh", "-c", "echo $TEST_VAR")
+	stdout, stderr, code := runDeputy(t, "exec", "--runtime", "none", "--env", "TEST_VAR=hello_deputy", "--", "printenv", "TEST_VAR")
 	if code != 0 {
 		t.Fatalf("exit=%d stderr=%q", code, stderr)
 	}
@@ -387,23 +387,13 @@ func TestBlackbox_Exec_PluginRuntime_MissingPluginName(t *testing.T) {
 }
 
 func TestBlackbox_Exec_PluginRuntime_PluginNotFound(t *testing.T) {
-	// When a plugin isn't found, the sandbox manager falls back to other runtimes.
-	// This tests that fallback behavior works - the command still executes via
-	// a fallback runtime (like 'none' or 'sandbox-exec' on macOS).
-	stdout, stderr, code := runDeputy(t, "exec", "--runtime", "plugin", "--plugin", "nonexistent-plugin-xyz", "--", "echo", "fallback-test")
-
-	// The command should still succeed via fallback runtime
-	if code != 0 {
-		// If it fails, check if it's a plugin-related error (which would be a regression)
-		if strings.Contains(stderr, "plugin") && strings.Contains(stderr, "not found") {
-			t.Fatalf("plugin fallback didn't work: %s", stderr)
-		}
-		t.Fatalf("unexpected failure: exit=%d stderr=%q", code, stderr)
+	// When a plugin isn't found, the exec command should fail with a clear error.
+	_, stderr, code := runDeputy(t, "exec", "--runtime", "plugin", "--plugin", "nonexistent-plugin-xyz", "--", "echo", "fallback-test")
+	if code == 0 {
+		t.Fatalf("expected non-zero exit code when plugin is missing")
 	}
-
-	// Verify the command actually ran
-	if !strings.Contains(stdout, "fallback-test") {
-		t.Fatalf("expected output from fallback runtime, got stdout=%q stderr=%q", stdout, stderr)
+	if !strings.Contains(stderr, "plugin") || !strings.Contains(stderr, "not found") {
+		t.Fatalf("expected plugin not found error, got %q", stderr)
 	}
 }
 

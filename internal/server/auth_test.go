@@ -66,6 +66,15 @@ func createTestToken(t *testing.T, privateKey *ecdsa.PrivateKey, claims josejwt.
 	return token.String()
 }
 
+func newTestServer(t *testing.T, cfg Config) *Server {
+	t.Helper()
+	srv, err := New(cfg)
+	if err != nil {
+		t.Fatalf("failed to create server: %v", err)
+	}
+	return srv
+}
+
 // Auth mode tests
 
 func TestServerAuthModeDisabled(t *testing.T) {
@@ -75,7 +84,7 @@ func TestServerAuthModeDisabled(t *testing.T) {
 		Mode: "disabled",
 	}
 
-	srv := New(cfg)
+	srv := newTestServer(t, cfg)
 	ts := httptest.NewServer(srv.Handler())
 	defer ts.Close()
 
@@ -104,7 +113,7 @@ func TestServerAuthModeRequired_NoToken(t *testing.T) {
 		},
 	}
 
-	srv := New(cfg)
+	srv := newTestServer(t, cfg)
 	ts := httptest.NewServer(srv.Handler())
 	defer ts.Close()
 
@@ -136,7 +145,7 @@ func TestServerAuthModeRequired_ValidToken(t *testing.T) {
 		},
 	}
 
-	srv := New(cfg)
+	srv := newTestServer(t, cfg)
 	ts := httptest.NewServer(srv.Handler())
 	defer ts.Close()
 
@@ -176,7 +185,7 @@ func TestServerAuthModeRequired_ExpiredToken(t *testing.T) {
 		},
 	}
 
-	srv := New(cfg)
+	srv := newTestServer(t, cfg)
 	ts := httptest.NewServer(srv.Handler())
 	defer ts.Close()
 
@@ -223,7 +232,7 @@ func TestServerAuthIssuerValidation(t *testing.T) {
 		Issuers: []string{"https://auth.example.com"},
 	}
 
-	srv := New(cfg)
+	srv := newTestServer(t, cfg)
 	ts := httptest.NewServer(srv.Handler())
 	defer ts.Close()
 
@@ -286,7 +295,7 @@ func TestServerAuthAudienceValidation(t *testing.T) {
 		Audiences: []string{"deputy-server"},
 	}
 
-	srv := New(cfg)
+	srv := newTestServer(t, cfg)
 	ts := httptest.NewServer(srv.Handler())
 	defer ts.Close()
 
@@ -353,7 +362,7 @@ func TestServerMultiTenantIdentities(t *testing.T) {
 		Audiences: []string{"deputy-server"},
 	}
 
-	srv := New(cfg)
+	srv := newTestServer(t, cfg)
 	ts := httptest.NewServer(srv.Handler())
 	defer ts.Close()
 
@@ -464,7 +473,7 @@ func TestHealthEndpointsNoAuth(t *testing.T) {
 		},
 	}
 
-	srv := New(cfg)
+	srv := newTestServer(t, cfg)
 
 	// Health endpoints should still work without auth
 	endpoints := []string{"/health", "/ready", "/version"}
@@ -488,19 +497,29 @@ func TestGetAuthMode(t *testing.T) {
 		name     string
 		config   *AuthConfig
 		expected string
+		wantErr  bool
 	}{
-		{"nil config", nil, "disabled"},
-		{"empty mode", &AuthConfig{Mode: ""}, "disabled"},
-		{"disabled mode", &AuthConfig{Mode: "disabled"}, "disabled"},
-		{"required mode", &AuthConfig{Mode: "required"}, "required"},
-		{"case insensitive", &AuthConfig{Mode: "REQUIRED"}, "required"},
-		{"unknown mode defaults to disabled", &AuthConfig{Mode: "optional"}, "disabled"},
-		{"deprecated Enabled field", &AuthConfig{Enabled: true}, "required"},
+		{"nil config", nil, "disabled", false},
+		{"empty mode", &AuthConfig{Mode: ""}, "disabled", false},
+		{"disabled mode", &AuthConfig{Mode: "disabled"}, "disabled", false},
+		{"required mode", &AuthConfig{Mode: "required"}, "required", false},
+		{"case insensitive", &AuthConfig{Mode: "REQUIRED"}, "required", false},
+		{"unknown mode errors", &AuthConfig{Mode: "optional"}, "disabled", true},
+		{"deprecated Enabled field", &AuthConfig{Enabled: true}, "required", false},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := getAuthMode(tt.config)
+			got, err := getAuthMode(tt.config)
+			if tt.wantErr {
+				if err == nil {
+					t.Fatalf("expected error, got nil")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
 			if string(got) != tt.expected {
 				t.Errorf("expected %v, got %v", tt.expected, got)
 			}
@@ -580,7 +599,7 @@ func TestScanServiceAuth(t *testing.T) {
 		},
 	}
 
-	srv := New(cfg)
+	srv := newTestServer(t, cfg)
 	ts := httptest.NewServer(srv.Handler())
 	defer ts.Close()
 
@@ -678,7 +697,7 @@ policies:
 	}
 	cfg.Policies = []string{policyFile}
 
-	srv := New(cfg)
+	srv := newTestServer(t, cfg)
 	ts := httptest.NewServer(srv.Handler())
 	defer ts.Close()
 
@@ -788,7 +807,7 @@ func TestServerSecurity_AlgorithmConfusion(t *testing.T) {
 		},
 	}
 
-	srv := New(cfg)
+	srv := newTestServer(t, cfg)
 	ts := httptest.NewServer(srv.Handler())
 	defer ts.Close()
 
@@ -833,7 +852,7 @@ func TestServerSecurity_TokenReplay(t *testing.T) {
 		},
 	}
 
-	srv := New(cfg)
+	srv := newTestServer(t, cfg)
 	ts := httptest.NewServer(srv.Handler())
 	defer ts.Close()
 
@@ -867,7 +886,7 @@ func TestServerSecurity_WrongKeyID(t *testing.T) {
 		},
 	}
 
-	srv := New(cfg)
+	srv := newTestServer(t, cfg)
 	ts := httptest.NewServer(srv.Handler())
 	defer ts.Close()
 
@@ -952,7 +971,7 @@ policies:
 	}
 	cfg.Policies = []string{policyFile}
 
-	srv := New(cfg)
+	srv := newTestServer(t, cfg)
 	ts := httptest.NewServer(srv.Handler())
 	defer ts.Close()
 
@@ -1101,7 +1120,7 @@ policies:
 	}
 	cfg.Policies = []string{policyFile}
 
-	srv := New(cfg)
+	srv := newTestServer(t, cfg)
 	ts := httptest.NewServer(srv.Handler())
 	defer ts.Close()
 

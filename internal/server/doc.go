@@ -33,9 +33,12 @@
 //
 // # Starting the Server
 //
-//	srv := server.New(server.Config{
+//	srv, err := server.New(server.Config{
 //	    Addr: ":8090",
 //	})
+//	if err != nil {
+//	    log.Fatal(err)
+//	}
 //	if err := srv.ListenAndServe(); err != nil {
 //	    log.Fatal(err)
 //	}

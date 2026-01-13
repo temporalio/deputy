@@ -24,7 +24,8 @@ import (
 
 // SBOMHandler implements the SBOMService gRPC handler.
 type SBOMHandler struct {
-	localMode bool // Skip remote target validation for in-process usage
+	localMode    bool // Skip remote target validation for in-process usage
+	targetPolicy *targets.RemoteTargetPolicy
 }
 
 // Ensure SBOMHandler implements the SBOMServiceHandler interface.
@@ -38,6 +39,13 @@ type SBOMHandlerOption func(*SBOMHandler)
 func WithSBOMLocalMode() SBOMHandlerOption {
 	return func(h *SBOMHandler) {
 		h.localMode = true
+	}
+}
+
+// WithSBOMTargetPolicy sets the remote target policy for server mode validation.
+func WithSBOMTargetPolicy(policy *targets.RemoteTargetPolicy) SBOMHandlerOption {
+	return func(h *SBOMHandler) {
+		h.targetPolicy = policy
 	}
 }
 
@@ -73,7 +81,7 @@ func (h *SBOMHandler) Generate(
 
 	// Security: Validate target is accessible from remote server (skip in local mode)
 	if !h.localMode {
-		if err := targets.ValidateRemoteTarget(target); err != nil {
+		if err := targets.ValidateRemoteTargetWithPolicy(target, h.targetPolicy); err != nil {
 			otel.SetSpanError(span, err)
 			return nil, connect.NewError(connect.CodeInvalidArgument, err)
 		}

@@ -8,7 +8,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"sync"
 	"time"
@@ -347,7 +346,15 @@ func executeStep(ctx context.Context, workDir string, step *remediationv1.Step) 
 	}
 
 	// Execute shell command
-	execCmd := shellCommand(ctx, cmd)
+	args, err := remediation.ExecArgs(remediation.Command{
+		Manager:    step.GetManager(),
+		Command:    cmd,
+		Executable: step.GetExecutable(),
+	})
+	if err != nil {
+		return "", err
+	}
+	execCmd := exec.CommandContext(ctx, args[0], args[1:]...)
 	execCmd.Dir = execDir
 
 	output, err := execCmd.CombinedOutput()
@@ -356,14 +363,6 @@ func executeStep(ctx context.Context, workDir string, step *remediationv1.Step) 
 	}
 
 	return string(output), nil
-}
-
-// shellCommand creates an exec.Cmd to run a shell command.
-func shellCommand(ctx context.Context, command string) *exec.Cmd {
-	if runtime.GOOS == "windows" {
-		return exec.CommandContext(ctx, "cmd.exe", "/C", command)
-	}
-	return exec.CommandContext(ctx, "sh", "-c", command)
 }
 
 // ExecuteWithAgent uses an AI agent plugin to generate and apply fixes interactively.

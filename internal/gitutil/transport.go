@@ -32,6 +32,11 @@ func NewSafeGitTransport() transport.Transport {
 	return githttp.NewClient(newSafeHTTPClient())
 }
 
+// NewSafeGitTransportWithOptions returns a go-git transport.Transport with custom SafeDialer options.
+func NewSafeGitTransportWithOptions(opts ...network.Option) transport.Transport {
+	return githttp.NewClient(newSafeHTTPClientWithOptions(opts...))
+}
+
 // InstallSafeGitTransport registers SSRF-protected HTTP transports
 // as the default for all go-git operations.
 //
@@ -49,10 +54,23 @@ func InstallSafeGitTransport() {
 	client.InstallProtocol("https", safeGitTransport)
 }
 
+// InstallSafeGitTransportWithOptions registers SSRF-protected transports with custom options.
+func InstallSafeGitTransportWithOptions(opts ...network.Option) {
+	httpClient := newSafeHTTPClientWithOptions(opts...)
+	safeGitTransport := githttp.NewClient(httpClient)
+
+	client.InstallProtocol("http", safeGitTransport)
+	client.InstallProtocol("https", safeGitTransport)
+}
+
 // newSafeHTTPClient creates an HTTP client with SSRF protection for git operations.
 func newSafeHTTPClient() *http.Client {
+	return newSafeHTTPClientWithOptions()
+}
+
+func newSafeHTTPClientWithOptions(opts ...network.Option) *http.Client {
 	return &http.Client{
-		Transport: network.SafeTransport(),
+		Transport: network.SafeTransportWithOptions(opts...),
 		Timeout:   5 * time.Minute, // git operations can be slow
 	}
 }

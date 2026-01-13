@@ -19,7 +19,8 @@ import (
 
 // ListHandler implements the ListService gRPC handler.
 type ListHandler struct {
-	localMode bool
+	localMode    bool
+	targetPolicy *targets.RemoteTargetPolicy
 }
 
 // Ensure ListHandler implements the ListServiceHandler interface.
@@ -32,6 +33,13 @@ type ListHandlerOption func(*ListHandler)
 func WithListLocalMode() ListHandlerOption {
 	return func(h *ListHandler) {
 		h.localMode = true
+	}
+}
+
+// WithListTargetPolicy sets the remote target policy for server mode validation.
+func WithListTargetPolicy(policy *targets.RemoteTargetPolicy) ListHandlerOption {
+	return func(h *ListHandler) {
+		h.targetPolicy = policy
 	}
 }
 
@@ -121,7 +129,7 @@ func (h *ListHandler) ListPackages(
 
 	// Security: Validate target is accessible from remote server (skip in local mode)
 	if !h.localMode {
-		if err := targets.ValidateRemoteTarget(target); err != nil {
+		if err := targets.ValidateRemoteTargetWithPolicy(target, h.targetPolicy); err != nil {
 			otel.SetSpanError(span, err)
 			return nil, connect.NewError(connect.CodeInvalidArgument, err)
 		}

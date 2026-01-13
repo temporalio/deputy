@@ -75,7 +75,7 @@ func TestSafeDialer_validateAddr(t *testing.T) {
 				t.Fatalf("invalid test address %q: %v", tt.addr, err)
 			}
 
-			err = d.validateAddr(addr)
+			err = d.validateAddr(addr, false)
 			if tt.wantErr && err == nil {
 				t.Errorf("validateAddr(%s) = nil, want error", tt.addr)
 			}
@@ -121,6 +121,61 @@ func TestSafeDialer_isBlockedHost(t *testing.T) {
 				t.Errorf("isBlockedHost(%q) = %v, want %v", tt.host, got, tt.blocked)
 			}
 		})
+	}
+}
+
+func TestSafeDialer_isAllowedHost(t *testing.T) {
+	t.Parallel()
+
+	d := &SafeDialer{
+		AllowedHosts: []string{"git.internal.corp", ".corp.local", "*.example.com"},
+	}
+
+	tests := []struct {
+		host string
+		want bool
+	}{
+		{"git.internal.corp", true},
+		{"GIT.INTERNAL.CORP", true},
+		{"svc.corp.local", true},
+		{"corp.local", true},
+		{"api.example.com", true},
+		{"example.com", true},
+		{"github.com", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.host, func(t *testing.T) {
+			t.Parallel()
+			if got := d.isAllowedHost(tt.host); got != tt.want {
+				t.Errorf("isAllowedHost(%q) = %v, want %v", tt.host, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestSafeDialer_validateAddr_AllowsAllowedCIDR(t *testing.T) {
+	t.Parallel()
+
+	d := &SafeDialer{
+		AllowedCIDRs: []netip.Prefix{
+			netip.MustParsePrefix("10.0.0.0/8"),
+		},
+	}
+
+	addr := netip.MustParseAddr("10.1.2.3")
+	if err := d.validateAddr(addr, false); err != nil {
+		t.Fatalf("validateAddr(allowed CIDR) = %v, want nil", err)
+	}
+}
+
+func TestSafeDialer_validateAddr_AllowsPrivateForAllowedHost(t *testing.T) {
+	t.Parallel()
+
+	d := &SafeDialer{}
+	addr := netip.MustParseAddr("10.2.3.4")
+	if err := d.validateAddr(addr, true); err != nil {
+		t.Fatalf("validateAddr(allowed host) = %v, want nil", err)
 	}
 }
 
@@ -200,7 +255,7 @@ func TestSafeDialer_DNSRebinding_AllAddressesValidated(t *testing.T) {
 	resolver := &mockResolver{
 		addrs: map[string][]netip.Addr{
 			"attacker.com": {
-				netip.MustParseAddr("93.184.216.34"),  // Public (example.com)
+				netip.MustParseAddr("93.184.216.34"),   // Public (example.com)
 				netip.MustParseAddr("169.254.169.254"), // Private (metadata)
 			},
 		},
@@ -217,12 +272,12 @@ func TestSafeDialer_DNSRebinding_AllAddressesValidated(t *testing.T) {
 	privateAddr := netip.MustParseAddr("169.254.169.254")
 
 	// Public should be allowed
-	if err := d.validateAddr(publicAddr); err != nil {
+	if err := d.validateAddr(publicAddr, false); err != nil {
 		t.Errorf("validateAddr(public) = %v, want nil", err)
 	}
 
 	// Private should be blocked
-	if err := d.validateAddr(privateAddr); err == nil {
+	if err := d.validateAddr(privateAddr, false); err == nil {
 		t.Error("validateAddr(private) = nil, want error")
 	}
 

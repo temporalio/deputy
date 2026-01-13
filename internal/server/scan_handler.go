@@ -20,7 +20,8 @@ import (
 
 // ScanHandler implements the ScanService ConnectRPC service.
 type ScanHandler struct {
-	localMode bool // Skip remote target validation for in-process usage
+	localMode    bool // Skip remote target validation for in-process usage
+	targetPolicy *targets.RemoteTargetPolicy
 }
 
 // Ensure ScanHandler implements the ScanServiceHandler interface.
@@ -34,6 +35,13 @@ type ScanHandlerOption func(*ScanHandler)
 func WithLocalMode() ScanHandlerOption {
 	return func(h *ScanHandler) {
 		h.localMode = true
+	}
+}
+
+// WithScanTargetPolicy sets the remote target policy for server mode validation.
+func WithScanTargetPolicy(policy *targets.RemoteTargetPolicy) ScanHandlerOption {
+	return func(h *ScanHandler) {
+		h.targetPolicy = policy
 	}
 }
 
@@ -71,7 +79,7 @@ func (h *ScanHandler) Scan(
 
 	// Security: Validate target before processing (skip in local mode)
 	if !h.localMode {
-		if err := validateTarget(target); err != nil {
+		if err := h.validateTarget(target); err != nil {
 			otel.SetSpanError(span, err)
 			return nil, connect.NewError(connect.CodeInvalidArgument, err)
 		}
@@ -184,9 +192,8 @@ func (h *ScanHandler) routeScan(ctx context.Context, target, ref string, refProv
 }
 
 // validateTarget performs security validation on the target string for remote server mode.
-// Uses the shared targets.ValidateRemoteTarget function.
-func validateTarget(target string) error {
-	return targets.ValidateRemoteTarget(target)
+func (h *ScanHandler) validateTarget(target string) error {
+	return targets.ValidateRemoteTargetWithPolicy(target, h.targetPolicy)
 }
 
 // StreamScan performs a vulnerability scan with streaming progress updates.
@@ -215,7 +222,7 @@ func (h *ScanHandler) StreamScan(
 
 	// Security: Validate target before processing (skip in local mode)
 	if !h.localMode {
-		if err := validateTarget(target); err != nil {
+		if err := h.validateTarget(target); err != nil {
 			otel.SetSpanError(span, err)
 			return connect.NewError(connect.CodeInvalidArgument, err)
 		}

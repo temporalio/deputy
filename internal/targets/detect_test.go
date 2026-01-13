@@ -32,7 +32,7 @@ func TestLooksLikeContainerRef(t *testing.T) {
 		{"docker hub user image with master", "myorg/app:master", true},
 
 		// NOT container refs - ambiguous owner/repo:ref patterns
-		{"owner/repo no tag", "owner/repo", false},                       // no tag - could be git repo
+		{"owner/repo no tag", "owner/repo", false},                          // no tag - could be git repo
 		{"owner/repo with feature branch", "owner/repo:feature-xyz", false}, // doesn't look like version
 
 		// Well-known registries
@@ -113,6 +113,37 @@ func TestValidateRemoteTarget_SSRFProtection(t *testing.T) {
 			name:    "valid with oci scheme",
 			target:  "oci://gcr.io/project/image:tag",
 			wantErr: false,
+		},
+
+		{
+			name:    "reject file scheme",
+			target:  "file:///etc/passwd",
+			wantErr: true,
+			errMsg:  "file://",
+		},
+		{
+			name:    "reject git+file scheme",
+			target:  "git+file:///etc/passwd",
+			wantErr: true,
+			errMsg:  "file://",
+		},
+		{
+			name:    "reject ssh scheme by default",
+			target:  "ssh://github.com/owner/repo",
+			wantErr: true,
+			errMsg:  "non-HTTPS",
+		},
+		{
+			name:    "reject scp-style git url by default",
+			target:  "git@github.com:owner/repo",
+			wantErr: true,
+			errMsg:  "non-HTTPS",
+		},
+		{
+			name:    "reject git protocol by default",
+			target:  "git://github.com/owner/repo",
+			wantErr: true,
+			errMsg:  "non-HTTPS",
 		},
 
 		// Loopback bypass attempts
@@ -251,6 +282,41 @@ func TestValidateRemoteTarget_SSRFProtection(t *testing.T) {
 				if err != nil {
 					t.Errorf("ValidateRemoteTarget(%q) = %v, want nil", tt.target, err)
 				}
+			}
+		})
+	}
+}
+
+func TestValidateRemoteTargetWithPolicy_AllowsConfiguredTargets(t *testing.T) {
+	t.Parallel()
+
+	allowedCIDRs, err := targets.ParseCIDRs([]string{"10.0.0.0/8"})
+	if err != nil {
+		t.Fatalf("ParseCIDRs failed: %v", err)
+	}
+	policy := &targets.RemoteTargetPolicy{
+		AllowedHosts:  []string{"git.internal.corp"},
+		AllowedCIDRs:  allowedCIDRs,
+		AllowSSH:      true,
+		AllowLoopback: true,
+	}
+
+	tests := []struct {
+		name   string
+		target string
+	}{
+		{"allow private CIDR", "10.1.2.3:5000/image"},
+		{"allow allowlisted host", "git.internal.corp/owner/repo"},
+		{"allow ssh with policy", "ssh://git.internal.corp/owner/repo"},
+		{"allow git protocol with policy", "git://git.internal.corp/owner/repo"},
+		{"allow loopback with policy", "localhost:5000/image"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			if err := targets.ValidateRemoteTargetWithPolicy(tt.target, policy); err != nil {
+				t.Fatalf("ValidateRemoteTargetWithPolicy(%q) = %v, want nil", tt.target, err)
 			}
 		})
 	}

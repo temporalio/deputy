@@ -107,8 +107,8 @@ var safeCommands = map[string]bool{
 	"free":     true,
 	"vmstat":   true,
 	"iostat":   true,
-	"top":      true,  // Interactive but read-only
-	"htop":     true,  // Interactive but read-only
+	"top":      true, // Interactive but read-only
+	"htop":     true, // Interactive but read-only
 	"ps":       true,
 	"pgrep":    true,
 	"lsof":     true,
@@ -156,17 +156,25 @@ var safeCommands = map[string]bool{
 	"getent": true,
 }
 
+// normalCommands are known state-changing commands that are not inherently destructive.
+var normalCommands = map[string]bool{
+	"touch": true,
+	"mkdir": true,
+	"cp":    true,
+	"mv":    true,
+}
+
 // dangerousPatterns are regex patterns that indicate dangerous commands.
 var dangerousPatterns = []*regexp.Regexp{
 	// Destructive file operations
-	regexp.MustCompile(`\brm\s+.*-[rRf]`),       // rm with -r or -f
-	regexp.MustCompile(`\brm\s+-[rRf]`),          // rm -rf, rm -r, rm -f
-	regexp.MustCompile(`\brmdir\b`),              // Remove directories
-	regexp.MustCompile(`\bshred\b`),              // Secure delete
-	regexp.MustCompile(`\bdd\b`),                 // Disk destroyer
-	regexp.MustCompile(`\bmkfs\b`),               // Filesystem creation
-	regexp.MustCompile(`\bfdisk\b`),              // Partition editing
-	regexp.MustCompile(`\bparted\b`),             // Partition editing
+	regexp.MustCompile(`\brm\s+.*-[rRf]`), // rm with -r or -f
+	regexp.MustCompile(`\brm\s+-[rRf]`),   // rm -rf, rm -r, rm -f
+	regexp.MustCompile(`\brmdir\b`),       // Remove directories
+	regexp.MustCompile(`\bshred\b`),       // Secure delete
+	regexp.MustCompile(`\bdd\b`),          // Disk destroyer
+	regexp.MustCompile(`\bmkfs\b`),        // Filesystem creation
+	regexp.MustCompile(`\bfdisk\b`),       // Partition editing
+	regexp.MustCompile(`\bparted\b`),      // Partition editing
 
 	// Privilege escalation
 	regexp.MustCompile(`\bsudo\b`),
@@ -175,18 +183,18 @@ var dangerousPatterns = []*regexp.Regexp{
 	regexp.MustCompile(`\bpkexec\b`),
 
 	// System modification
-	regexp.MustCompile(`\bchmod\s+[0-7]*7`),      // World-writable permissions
-	regexp.MustCompile(`\bchown\b`),              // Change ownership
-	regexp.MustCompile(`\bchgrp\b`),              // Change group
-	regexp.MustCompile(`\bsystemctl\b`),          // Service management
-	regexp.MustCompile(`\bservice\b`),            // Service management
-	regexp.MustCompile(`\blaunchctl\b`),          // macOS service management
+	regexp.MustCompile(`\bchmod\s+[0-7]*7`), // World-writable permissions
+	regexp.MustCompile(`\bchown\b`),         // Change ownership
+	regexp.MustCompile(`\bchgrp\b`),         // Change group
+	regexp.MustCompile(`\bsystemctl\b`),     // Service management
+	regexp.MustCompile(`\bservice\b`),       // Service management
+	regexp.MustCompile(`\blaunchctl\b`),     // macOS service management
 
 	// Network exfiltration patterns
-	regexp.MustCompile(`curl.*\|.*sh`),           // Pipe to shell
-	regexp.MustCompile(`wget.*\|.*sh`),           // Pipe to shell
-	regexp.MustCompile(`curl.*-o\s*/`),           // Download to absolute path
-	regexp.MustCompile(`wget.*-O\s*/`),           // Download to absolute path
+	regexp.MustCompile(`curl.*\|.*sh`), // Pipe to shell
+	regexp.MustCompile(`wget.*\|.*sh`), // Pipe to shell
+	regexp.MustCompile(`curl.*-o\s*/`), // Download to absolute path
+	regexp.MustCompile(`wget.*-O\s*/`), // Download to absolute path
 
 	// Git dangerous operations
 	regexp.MustCompile(`\bgit\s+push\s+.*--force`),
@@ -202,7 +210,7 @@ var dangerousPatterns = []*regexp.Regexp{
 	regexp.MustCompile(`\bgem\s+push\b`),
 	regexp.MustCompile(`\bpip\s+.*upload\b`),
 	regexp.MustCompile(`\btwine\s+upload\b`),
-	regexp.MustCompile(`\bgo\s+.*-mod=mod\b`),    // Modifying go.mod in unexpected ways
+	regexp.MustCompile(`\bgo\s+.*-mod=mod\b`), // Modifying go.mod in unexpected ways
 
 	// Container escape vectors
 	regexp.MustCompile(`\bdocker\s+run\s+.*--privileged`),
@@ -213,55 +221,55 @@ var dangerousPatterns = []*regexp.Regexp{
 // conditionalSafetyRules define commands that are safe only with certain arguments.
 type conditionalRule struct {
 	Command     string
-	SafeArgs    []string   // Subcommands/args that make it safe
-	DangerArgs  []string   // Subcommands/args that make it dangerous
+	SafeArgs    []string // Subcommands/args that make it safe
+	DangerArgs  []string // Subcommands/args that make it dangerous
 	SafePattern *regexp.Regexp
 }
 
 var conditionalRules = []conditionalRule{
 	// git: only certain subcommands are safe
 	{
-		Command:  "git",
-		SafeArgs: []string{"status", "log", "diff", "show", "branch", "tag", "remote", "config", "describe", "rev-parse", "ls-files", "ls-tree", "blame", "shortlog", "stash", "list"},
+		Command:    "git",
+		SafeArgs:   []string{"status", "log", "diff", "show", "branch", "tag", "remote", "config", "describe", "rev-parse", "ls-files", "ls-tree", "blame", "shortlog", "stash", "list"},
 		DangerArgs: []string{"push", "reset", "clean", "rm", "rebase", "merge", "cherry-pick"},
 	},
 	// cargo: only check/clippy/doc are safe
 	{
-		Command:  "cargo",
-		SafeArgs: []string{"check", "clippy", "doc", "tree", "metadata", "version", "search", "info"},
+		Command:    "cargo",
+		SafeArgs:   []string{"check", "clippy", "doc", "tree", "metadata", "version", "search", "info"},
 		DangerArgs: []string{"publish", "install", "uninstall"},
 	},
 	// go: most read operations are safe
 	{
-		Command:  "go",
-		SafeArgs: []string{"version", "env", "list", "doc", "vet", "fmt", "mod", "help"},
+		Command:    "go",
+		SafeArgs:   []string{"version", "env", "list", "doc", "vet", "fmt", "mod", "help"},
 		DangerArgs: []string{"install"},
 	},
 	// npm/yarn/pnpm: limited safe operations
 	{
-		Command:  "npm",
-		SafeArgs: []string{"list", "ls", "view", "info", "search", "outdated", "audit", "config", "help", "version"},
+		Command:    "npm",
+		SafeArgs:   []string{"list", "ls", "view", "info", "search", "outdated", "audit", "config", "help", "version"},
 		DangerArgs: []string{"publish", "unpublish", "deprecate"},
 	},
 	{
-		Command:  "yarn",
-		SafeArgs: []string{"list", "info", "outdated", "audit", "config", "help", "version", "why"},
+		Command:    "yarn",
+		SafeArgs:   []string{"list", "info", "outdated", "audit", "config", "help", "version", "why"},
 		DangerArgs: []string{"publish"},
 	},
 	{
-		Command:  "pnpm",
-		SafeArgs: []string{"list", "ls", "view", "outdated", "audit", "config", "help", "version", "why"},
+		Command:    "pnpm",
+		SafeArgs:   []string{"list", "ls", "view", "outdated", "audit", "config", "help", "version", "why"},
 		DangerArgs: []string{"publish"},
 	},
 	// pip: only query operations are safe
 	{
-		Command:  "pip",
-		SafeArgs: []string{"list", "show", "search", "check", "config", "help", "freeze"},
+		Command:    "pip",
+		SafeArgs:   []string{"list", "show", "search", "check", "config", "help", "freeze"},
 		DangerArgs: []string{"install", "uninstall"},
 	},
 	{
-		Command:  "pip3",
-		SafeArgs: []string{"list", "show", "search", "check", "config", "help", "freeze"},
+		Command:    "pip3",
+		SafeArgs:   []string{"list", "show", "search", "check", "config", "help", "freeze"},
 		DangerArgs: []string{"install", "uninstall"},
 	},
 	// find: dangerous with -exec, -delete
@@ -284,7 +292,7 @@ var conditionalRules = []conditionalRule{
 // ClassifyCommand determines the safety level of a command.
 func ClassifyCommand(cmd []string) CommandSafety {
 	if len(cmd) == 0 {
-		return CommandNormal
+		return CommandDangerous
 	}
 
 	// Get the base command name (without path)
@@ -310,8 +318,12 @@ func ClassifyCommand(cmd []string) CommandSafety {
 		return CommandSafe
 	}
 
-	// Default to normal (may modify files, but not inherently dangerous)
-	return CommandNormal
+	if normalCommands[executable] {
+		return CommandNormal
+	}
+
+	// Default to dangerous for unknown commands
+	return CommandDangerous
 }
 
 // classifyConditional applies conditional safety rules.
@@ -410,6 +422,9 @@ func CommandSafetyReason(cmd []string) string {
 	if safeCommands[executable] {
 		return "known safe command"
 	}
+	if normalCommands[executable] {
+		return "known normal command"
+	}
 
-	return "unknown command, treated as normal"
+	return "unknown command, treated as dangerous"
 }

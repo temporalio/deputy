@@ -18,7 +18,10 @@ import (
 )
 
 func TestHealthEndpoint(t *testing.T) {
-	srv := New(DefaultConfig())
+	srv, err := New(DefaultConfig())
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	req := httptest.NewRequest(http.MethodGet, "/health", nil)
 	rec := httptest.NewRecorder()
@@ -36,7 +39,10 @@ func TestHealthEndpoint(t *testing.T) {
 }
 
 func TestReadyEndpoint(t *testing.T) {
-	srv := New(DefaultConfig())
+	srv, err := New(DefaultConfig())
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	req := httptest.NewRequest(http.MethodGet, "/ready", nil)
 	rec := httptest.NewRecorder()
@@ -54,7 +60,10 @@ func TestReadyEndpoint(t *testing.T) {
 }
 
 func TestScanServiceRegistered(t *testing.T) {
-	srv := New(DefaultConfig())
+	srv, err := New(DefaultConfig())
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	// Start test server
 	ts := httptest.NewServer(srv.Handler())
@@ -67,7 +76,7 @@ func TestScanServiceRegistered(t *testing.T) {
 	)
 
 	// Call with empty target - should return InvalidArgument error
-	_, err := client.Scan(context.Background(), connect.NewRequest(&scanv1.ScanRequest{
+	_, err = client.Scan(context.Background(), connect.NewRequest(&scanv1.ScanRequest{
 		Target: "",
 	}))
 
@@ -88,8 +97,8 @@ func TestScanServiceRegistered(t *testing.T) {
 func TestDefaultConfig(t *testing.T) {
 	cfg := DefaultConfig()
 
-	if cfg.Addr != ":8090" {
-		t.Errorf("expected :8090, got %s", cfg.Addr)
+	if cfg.Addr != "127.0.0.1:8090" {
+		t.Errorf("expected 127.0.0.1:8090, got %s", cfg.Addr)
 	}
 	if cfg.ReadTimeout == 0 {
 		t.Error("expected non-zero ReadTimeout")
@@ -104,15 +113,21 @@ func TestDefaultConfig(t *testing.T) {
 
 func TestNewServerWithEmptyConfig(t *testing.T) {
 	// Should use defaults for empty config
-	srv := New(Config{})
+	srv, err := New(Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
 
-	if srv.Addr() != ":8090" {
-		t.Errorf("expected default addr :8090, got %s", srv.Addr())
+	if srv.Addr() != "127.0.0.1:8090" {
+		t.Errorf("expected default addr 127.0.0.1:8090, got %s", srv.Addr())
 	}
 }
 
 func TestVersionEndpoint(t *testing.T) {
-	srv := New(DefaultConfig())
+	srv, err := New(DefaultConfig())
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	req := httptest.NewRequest(http.MethodGet, "/version", nil)
 	rec := httptest.NewRecorder()
@@ -130,7 +145,10 @@ func TestVersionEndpoint(t *testing.T) {
 }
 
 func TestSecretsServiceRegistered(t *testing.T) {
-	srv := New(DefaultConfig())
+	srv, err := New(DefaultConfig())
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	// Start test server
 	ts := httptest.NewServer(srv.Handler())
@@ -155,7 +173,10 @@ func TestSecretsServiceRegistered(t *testing.T) {
 }
 
 func TestSecretsServiceScanEmptyTarget(t *testing.T) {
-	srv := New(DefaultConfig())
+	srv, err := New(DefaultConfig())
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	// Start test server
 	ts := httptest.NewServer(srv.Handler())
@@ -169,7 +190,7 @@ func TestSecretsServiceScanEmptyTarget(t *testing.T) {
 
 	// Call Scan with empty target - should use "." as default
 	// This will fail validation for remote targets, which is expected
-	_, err := client.Scan(context.Background(), connect.NewRequest(&secretsv1.ScanRequest{
+	_, err = client.Scan(context.Background(), connect.NewRequest(&secretsv1.ScanRequest{
 		Target: "",
 	}))
 
@@ -188,7 +209,10 @@ func TestSecretsServiceScanEmptyTarget(t *testing.T) {
 }
 
 func TestListServiceRegistered(t *testing.T) {
-	srv := New(DefaultConfig())
+	srv, err := New(DefaultConfig())
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	// Start test server
 	ts := httptest.NewServer(srv.Handler())
@@ -213,7 +237,10 @@ func TestListServiceRegistered(t *testing.T) {
 }
 
 func TestAllServicesRegistered(t *testing.T) {
-	srv := New(DefaultConfig())
+	srv, err := New(DefaultConfig())
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	// Start test server
 	ts := httptest.NewServer(srv.Handler())

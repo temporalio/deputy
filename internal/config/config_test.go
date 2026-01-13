@@ -71,6 +71,28 @@ func TestConfigValidation(t *testing.T) {
 			},
 			wantErr: false,
 		},
+		{
+			name: "invalid egress cidr",
+			cfg: func() *Config {
+				cfg := defaultConfig()
+				cfg.Egress = &EgressConfig{
+					AllowedCIDRs: []string{"10.0.0.0/8", "not-a-cidr"},
+				}
+				return cfg
+			}(),
+			wantErr: true,
+		},
+		{
+			name: "invalid server egress cidr",
+			cfg: func() *Config {
+				cfg := defaultConfig()
+				cfg.Server.Egress = &ServerEgressConfig{
+					AllowedCIDRs: []string{"bad-cidr"},
+				}
+				return cfg
+			}(),
+			wantErr: true,
+		},
 	}
 
 	for _, tt := range tests {
@@ -89,16 +111,20 @@ func TestConfigValidation(t *testing.T) {
 func TestLoadFromEnv(t *testing.T) {
 	// Set up environment
 	envVars := map[string]string{
-		"DEPUTY_LOG_LEVEL":       "debug",
-		"DEPUTY_LOG_FORMAT":      "json",
-		"DEPUTY_LOG_COLOR":       "false",
-		"DEPUTY_LOG_SOURCE":      "true",
-		"DEPUTY_PROXY_ADDR":      ":9000",
-		"DEPUTY_PROXY_POLICIES":  "policy1.yaml,policy2.yaml",
-		"DEPUTY_SCAN_ECOSYSTEMS": "npm,pypi",
-		"DEPUTY_SCAN_SKIP_CACHE": "true",
-		"DEPUTY_POLICY_PATHS":    "policies/",
-		"DEPUTY_POLICY_MODE":     "advisory",
+		"DEPUTY_LOG_LEVEL":               "debug",
+		"DEPUTY_LOG_FORMAT":              "json",
+		"DEPUTY_LOG_COLOR":               "false",
+		"DEPUTY_LOG_SOURCE":              "true",
+		"DEPUTY_PROXY_ADDR":              ":9000",
+		"DEPUTY_PROXY_POLICIES":          "policy1.yaml,policy2.yaml",
+		"DEPUTY_SCAN_ECOSYSTEMS":         "npm,pypi",
+		"DEPUTY_SCAN_SKIP_CACHE":         "true",
+		"DEPUTY_POLICY_PATHS":            "policies/",
+		"DEPUTY_POLICY_MODE":             "advisory",
+		"DEPUTY_EGRESS_ALLOW_HOSTS":      ".corp.local,git.internal",
+		"DEPUTY_EGRESS_ALLOW_CIDRS":      "10.0.0.0/8,192.168.0.0/16",
+		"DEPUTY_EGRESS_ALLOW_LOOPBACK":   "true",
+		"DEPUTY_EGRESS_ALLOW_LINK_LOCAL": "true",
 	}
 
 	// Set test env vars (cleanup is automatic)
@@ -139,6 +165,21 @@ func TestLoadFromEnv(t *testing.T) {
 	}
 	if cfg.Policy.Mode != "advisory" {
 		t.Errorf("expected policy mode 'advisory', got %q", cfg.Policy.Mode)
+	}
+	if cfg.Egress == nil {
+		t.Fatal("expected egress config to be set")
+	}
+	if len(cfg.Egress.AllowedHosts) != 2 {
+		t.Errorf("expected 2 egress hosts, got %d", len(cfg.Egress.AllowedHosts))
+	}
+	if len(cfg.Egress.AllowedCIDRs) != 2 {
+		t.Errorf("expected 2 egress CIDRs, got %d", len(cfg.Egress.AllowedCIDRs))
+	}
+	if !cfg.Egress.AllowLoopback {
+		t.Error("expected egress allow_loopback true, got false")
+	}
+	if !cfg.Egress.AllowLinkLocal {
+		t.Error("expected egress allow_link_local true, got false")
 	}
 }
 
@@ -568,18 +609,18 @@ func boolPtr(b bool) *bool {
 
 func TestLoadHTTPFromEnv(t *testing.T) {
 	envVars := map[string]string{
-		"DEPUTY_HTTP_TIMEOUT":               "60s",
-		"DEPUTY_HTTP_DIAL_TIMEOUT":          "15s",
-		"DEPUTY_HTTP_TLS_TIMEOUT":           "20s",
-		"DEPUTY_HTTP_RESPONSE_TIMEOUT":      "30s",
-		"DEPUTY_HTTP_KEEPALIVE":             "45s",
-		"DEPUTY_HTTP_IDLE_TIMEOUT":          "120s",
-		"DEPUTY_HTTP_MAX_IDLE_CONNS":        "50",
+		"DEPUTY_HTTP_TIMEOUT":                 "60s",
+		"DEPUTY_HTTP_DIAL_TIMEOUT":            "15s",
+		"DEPUTY_HTTP_TLS_TIMEOUT":             "20s",
+		"DEPUTY_HTTP_RESPONSE_TIMEOUT":        "30s",
+		"DEPUTY_HTTP_KEEPALIVE":               "45s",
+		"DEPUTY_HTTP_IDLE_TIMEOUT":            "120s",
+		"DEPUTY_HTTP_MAX_IDLE_CONNS":          "50",
 		"DEPUTY_HTTP_MAX_IDLE_CONNS_PER_HOST": "20",
-		"DEPUTY_HTTP_RETRY_MAX":             "5",
-		"DEPUTY_HTTP_RETRY_WAIT_MIN":        "1s",
-		"DEPUTY_HTTP_RETRY_WAIT_MAX":        "10s",
-		"DEPUTY_HTTP_RETRY_ENABLED":         "false",
+		"DEPUTY_HTTP_RETRY_MAX":               "5",
+		"DEPUTY_HTTP_RETRY_WAIT_MIN":          "1s",
+		"DEPUTY_HTTP_RETRY_WAIT_MAX":          "10s",
+		"DEPUTY_HTTP_RETRY_ENABLED":           "false",
 	}
 
 	for k, v := range envVars {
@@ -632,18 +673,18 @@ func TestLoadHTTPFromEnv(t *testing.T) {
 
 func TestLoadPerformanceFromEnv(t *testing.T) {
 	envVars := map[string]string{
-		"DEPUTY_OSV_CONCURRENCY":        "20",
-		"DEPUTY_GRAPH_CONCURRENCY":      "10",
+		"DEPUTY_OSV_CONCURRENCY":         "20",
+		"DEPUTY_GRAPH_CONCURRENCY":       "10",
 		"DEPUTY_SBOM_ENRICH_CONCURRENCY": "8",
 		"DEPUTY_IMAGE_SCAN_CONCURRENCY":  "6",
-		"DEPUTY_CACHE_DIR":              "/tmp/deputy-cache",
-		"DEPUTY_CACHE_TTL":              "2h",
-		"DEPUTY_CACHE_KEV_TTL":          "48h",
-		"DEPUTY_CACHE_EPSS_TTL":         "12h",
-		"DEPUTY_CACHE_OSV_TTL":          "30m",
-		"DEPUTY_CACHE_LICENSE_TTL":      "72h",
-		"DEPUTY_CACHE_MAX_SIZE":         "2048",
-		"DEPUTY_CACHE_DISABLED":         "true",
+		"DEPUTY_CACHE_DIR":               "/tmp/deputy-cache",
+		"DEPUTY_CACHE_TTL":               "2h",
+		"DEPUTY_CACHE_KEV_TTL":           "48h",
+		"DEPUTY_CACHE_EPSS_TTL":          "12h",
+		"DEPUTY_CACHE_OSV_TTL":           "30m",
+		"DEPUTY_CACHE_LICENSE_TTL":       "72h",
+		"DEPUTY_CACHE_MAX_SIZE":          "2048",
+		"DEPUTY_CACHE_DISABLED":          "true",
 	}
 
 	for k, v := range envVars {

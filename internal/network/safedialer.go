@@ -53,6 +53,7 @@ import (
 	"net"
 	"net/netip"
 	"strings"
+	"sync/atomic"
 	"time"
 )
 
@@ -83,6 +84,13 @@ type SafeDialer struct {
 	// This includes cloud metadata endpoints.
 	// Default: false (block link-local)
 	AllowLinkLocal bool
+
+	// AllowedHosts is a list of hostnames allowed to resolve to private IPs.
+	// Entries may be exact hosts or suffixes prefixed with a dot (e.g., ".corp.local").
+	AllowedHosts []string
+
+	// AllowedCIDRs is a list of CIDR ranges allowed for outbound connections.
+	AllowedCIDRs []netip.Prefix
 
 	// BlockedHosts is a list of hostnames to block (case-insensitive).
 	// Common metadata hostnames are blocked by default.
@@ -115,13 +123,17 @@ func DefaultBlockedHosts() []string {
 //	    network.WithDialer(&net.Dialer{Timeout: 10 * time.Second}),
 //	)
 func NewSafeDialer() *SafeDialer {
-	return &SafeDialer{
+	d := &SafeDialer{
 		Dialer: &net.Dialer{
 			Timeout:   30 * time.Second,
 			KeepAlive: 30 * time.Second,
 		},
 		BlockedHosts: DefaultBlockedHosts(),
 	}
+	for _, opt := range defaultSafeDialerOptions() {
+		opt(d)
+	}
+	return d
 }
 
 // NewSafeDialerWithOptions creates a SafeDialer with custom options.
@@ -141,6 +153,28 @@ func NewSafeDialerWithOptions(opts ...Option) *SafeDialer {
 	return d
 }
 
+var defaultSafeDialerOpts atomic.Value
+
+func init() {
+	defaultSafeDialerOpts.Store([]Option(nil))
+}
+
+// SetDefaultSafeDialerOptions sets default SafeDialer options applied to all new dialers.
+// This is intended for process-wide configuration, such as server egress allowlists.
+func SetDefaultSafeDialerOptions(opts ...Option) {
+	copied := append([]Option(nil), opts...)
+	defaultSafeDialerOpts.Store(copied)
+}
+
+func defaultSafeDialerOptions() []Option {
+	if value := defaultSafeDialerOpts.Load(); value != nil {
+		if opts, ok := value.([]Option); ok {
+			return append([]Option(nil), opts...)
+		}
+	}
+	return nil
+}
+
 // DialContext connects to the address on the named network, validating
 // that resolved IPs are not in blocked ranges.
 //
@@ -155,7 +189,8 @@ func (d *SafeDialer) DialContext(ctx context.Context, network, address string) (
 	}
 
 	// Check blocked hostnames first (fast path)
-	if d.isBlockedHost(host) {
+	allowedHost := d.isAllowedHost(host)
+	if !allowedHost && d.isBlockedHost(host) {
 		return nil, &BlockedAddressError{
 			Host:   host,
 			Reason: "hostname is blocked",
@@ -164,7 +199,7 @@ func (d *SafeDialer) DialContext(ctx context.Context, network, address string) (
 
 	// Try to parse as IP address directly (skip DNS for literal IPs)
 	if addr, err := netip.ParseAddr(host); err == nil {
-		if err := d.validateAddr(addr); err != nil {
+		if err := d.validateAddr(addr, allowedHost); err != nil {
 			return nil, err
 		}
 		return d.dial(ctx, network, address)
@@ -188,7 +223,7 @@ func (d *SafeDialer) DialContext(ctx context.Context, network, address string) (
 	// Validate ALL resolved addresses before attempting any connection.
 	// This prevents DNS rebinding where an attacker returns one safe and one unsafe IP.
 	for _, addr := range addrs {
-		if err := d.validateAddr(addr); err != nil {
+		if err := d.validateAddr(addr, allowedHost); err != nil {
 			return nil, err
 		}
 	}
@@ -223,9 +258,13 @@ func (d *SafeDialer) dial(ctx context.Context, network, address string) (net.Con
 }
 
 // validateAddr checks if an IP address is allowed.
-func (d *SafeDialer) validateAddr(addr netip.Addr) error {
+func (d *SafeDialer) validateAddr(addr netip.Addr, allowedHost bool) error {
 	// Unmap IPv4-mapped IPv6 addresses for consistent checking
 	addr = addr.Unmap()
+
+	if d.isAllowedAddr(addr) {
+		return nil
+	}
 
 	if !d.AllowLoopback && (addr.IsLoopback() || addr.IsUnspecified()) {
 		return &BlockedAddressError{
@@ -242,6 +281,9 @@ func (d *SafeDialer) validateAddr(addr netip.Addr) error {
 	}
 
 	if !d.AllowPrivate && addr.IsPrivate() {
+		if allowedHost {
+			return nil
+		}
 		return &BlockedAddressError{
 			Host:   addr.String(),
 			Reason: "private network addresses are blocked",
@@ -261,6 +303,60 @@ func (d *SafeDialer) isBlockedHost(host string) bool {
 		}
 	}
 	return false
+}
+
+// isAllowedHost checks if a hostname is explicitly allowed.
+func (d *SafeDialer) isAllowedHost(host string) bool {
+	if len(d.AllowedHosts) == 0 {
+		return false
+	}
+	normalized := normalizeHost(host)
+	if normalized == "" {
+		return false
+	}
+	for _, entry := range d.AllowedHosts {
+		entry = normalizeHost(entry)
+		if entry == "" {
+			continue
+		}
+		if entry == normalized {
+			return true
+		}
+		if strings.HasPrefix(entry, "*.") {
+			entry = strings.TrimPrefix(entry, "*")
+		}
+		if strings.HasPrefix(entry, ".") {
+			if normalized == strings.TrimPrefix(entry, ".") {
+				return true
+			}
+			if strings.HasSuffix(normalized, entry) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func (d *SafeDialer) isAllowedAddr(addr netip.Addr) bool {
+	if len(d.AllowedCIDRs) == 0 {
+		return false
+	}
+	for _, prefix := range d.AllowedCIDRs {
+		if prefix.Contains(addr) {
+			return true
+		}
+	}
+	return false
+}
+
+func normalizeHost(host string) string {
+	host = strings.TrimSpace(strings.ToLower(host))
+	if host == "" {
+		return ""
+	}
+	host = strings.TrimSuffix(host, ".")
+	host = strings.TrimPrefix(strings.TrimSuffix(host, "]"), "[")
+	return host
 }
 
 // BlockedAddressError is returned when a connection is blocked due to SSRF protection.
@@ -307,13 +403,14 @@ func WrapDialer(dial DialContextFunc, opts ...Option) DialContextFunc {
 		}
 
 		// Check blocked hostnames
-		if d.isBlockedHost(host) {
+		allowedHost := d.isAllowedHost(host)
+		if !allowedHost && d.isBlockedHost(host) {
 			return nil, &BlockedAddressError{Host: host, Reason: "hostname is blocked"}
 		}
 
 		// For IP addresses, validate directly
 		if addr, err := netip.ParseAddr(host); err == nil {
-			if err := d.validateAddr(addr); err != nil {
+			if err := d.validateAddr(addr, allowedHost); err != nil {
 				return nil, err
 			}
 			return dial(ctx, network, address)
@@ -331,7 +428,7 @@ func WrapDialer(dial DialContextFunc, opts ...Option) DialContextFunc {
 		}
 
 		for _, addr := range addrs {
-			if err := d.validateAddr(addr); err != nil {
+			if err := d.validateAddr(addr, allowedHost); err != nil {
 				return nil, err
 			}
 		}

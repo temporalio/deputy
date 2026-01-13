@@ -58,6 +58,17 @@ type serverFlags struct {
 
 	// Other
 	maxRequestBodyMB int64
+
+	// Security
+	allowPublic   bool
+	allowInsecure bool
+
+	// Egress allowlists
+	egressAllowHosts     []string
+	egressAllowCIDRs     []string
+	egressAllowSSH       bool
+	egressAllowLoopback  bool
+	egressAllowLinkLocal bool
 }
 
 // AddServerCommand adds the server command to the root command.
@@ -83,7 +94,7 @@ SERVICES:
   RemediationService - Fix planning and AI-assisted remediation
 
 Examples:
-  # Start server on default port (8090)
+  # Start server on default port (127.0.0.1:8090)
   deputy server
 
   # Start server on custom port
@@ -91,6 +102,14 @@ Examples:
 
   # Start server with custom timeouts
   deputy server --write-timeout 10m
+
+  # Bind publicly with TLS + auth (production)
+  deputy server --public --addr 0.0.0.0:8090 \
+    --tls-cert /path/to/cert.pem --tls-key /path/to/key.pem \
+    --auth-mode required --auth-jwks-url https://issuer/.well-known/jwks.json
+
+  # Allow internal registries/SCM
+  deputy server --egress-allow-host .corp.local --egress-allow-cidr 10.0.0.0/8
 
 ENDPOINTS:
   Vulnerability Scanning (ScanService):
@@ -139,7 +158,7 @@ Examples (curl):
 	}
 
 	// Address and timeout flags
-	cmd.Flags().StringVar(&flags.addr, "addr", ":8090", "Address to listen on")
+	cmd.Flags().StringVar(&flags.addr, "addr", "127.0.0.1:8090", "Address to listen on")
 	cmd.Flags().DurationVar(&flags.readTimeout, "read-timeout", 30*time.Second, "Maximum duration for reading request")
 	cmd.Flags().DurationVar(&flags.writeTimeout, "write-timeout", 5*time.Minute, "Maximum duration for writing response")
 	cmd.Flags().DurationVar(&flags.idleTimeout, "idle-timeout", 2*time.Minute, "Maximum time to wait for next request")
@@ -177,6 +196,17 @@ Examples (curl):
 
 	// Other flags
 	cmd.Flags().Int64Var(&flags.maxRequestBodyMB, "max-request-body-mb", 10, "Maximum request body size in MB")
+
+	// Security flags
+	cmd.Flags().BoolVar(&flags.allowPublic, "public", false, "Allow binding to non-loopback addresses (explicit opt-in)")
+	cmd.Flags().BoolVar(&flags.allowInsecure, "insecure", false, "Allow insecure server modes (no TLS/auth, policy errors)")
+
+	// Egress allowlists
+	cmd.Flags().StringSliceVar(&flags.egressAllowHosts, "egress-allow-host", nil, "Allowlisted egress hostnames (repeatable)")
+	cmd.Flags().StringSliceVar(&flags.egressAllowCIDRs, "egress-allow-cidr", nil, "Allowlisted egress CIDR ranges (repeatable)")
+	cmd.Flags().BoolVar(&flags.egressAllowSSH, "egress-allow-ssh", false, "Allow non-HTTPS git targets (ssh://, git@host, git://)")
+	cmd.Flags().BoolVar(&flags.egressAllowLoopback, "egress-allow-loopback", false, "Allow loopback targets in remote server mode")
+	cmd.Flags().BoolVar(&flags.egressAllowLinkLocal, "egress-allow-link-local", false, "Allow link-local targets in remote server mode")
 
 	root.AddCommand(cmd)
 }
@@ -228,7 +258,7 @@ func loadServerConfig(flags *serverFlags, cmd *cobra.Command) server.Config {
 
 	// Start with defaults, then apply config file values
 	cfg := server.Config{
-		Addr:                ":8090",
+		Addr:                "127.0.0.1:8090",
 		ReadTimeout:         30 * time.Second,
 		WriteTimeout:        5 * time.Minute,
 		IdleTimeout:         2 * time.Minute,
@@ -275,15 +305,24 @@ func loadServerConfig(flags *serverFlags, cmd *cobra.Command) server.Config {
 	}
 
 	// Apply Auth from config file
-	if serverCfg.Auth != nil && serverCfg.Auth.Enabled {
-		cfg.Auth = &server.AuthConfig{
-			Mode:      "required",
-			Issuers:   serverCfg.Auth.Issuers,
-			Audiences: serverCfg.Auth.Audiences,
+	if serverCfg.Auth != nil {
+		mode := strings.TrimSpace(serverCfg.Auth.Mode)
+		if mode == "" && serverCfg.Auth.Enabled {
+			mode = "required"
 		}
-		if serverCfg.Auth.JWKSURL != "" {
-			cfg.Auth.JWKS = &server.JWKSConfig{
-				URL: serverCfg.Auth.JWKSURL,
+		if mode != "" || serverCfg.Auth.Enabled || serverCfg.Auth.JWKSURL != "" {
+			cfg.Auth = &server.AuthConfig{
+				Mode:           mode,
+				Issuers:        serverCfg.Auth.Issuers,
+				Audiences:      serverCfg.Auth.Audiences,
+				RequiredClaims: serverCfg.Auth.RequiredClaims,
+				ClockSkew:      serverCfg.Auth.ClockSkew,
+			}
+			if serverCfg.Auth.JWKSURL != "" {
+				cfg.Auth.JWKS = &server.JWKSConfig{
+					URL:           serverCfg.Auth.JWKSURL,
+					OIDCDiscovery: serverCfg.Auth.OIDCDiscovery,
+				}
 			}
 		}
 	}
@@ -294,6 +333,25 @@ func loadServerConfig(flags *serverFlags, cmd *cobra.Command) server.Config {
 			Enabled:           true,
 			RequestsPerSecond: serverCfg.RateLimit.RequestsPerSecond,
 			Burst:             serverCfg.RateLimit.Burst,
+		}
+	}
+
+	// Apply Security from config file
+	if serverCfg.Security != nil {
+		cfg.Security = &server.SecurityConfig{
+			AllowPublic:   serverCfg.Security.AllowPublic,
+			AllowInsecure: serverCfg.Security.AllowInsecure,
+		}
+	}
+
+	// Apply Egress from config file
+	if serverCfg.Egress != nil {
+		cfg.Egress = &server.EgressConfig{
+			AllowedHosts:   serverCfg.Egress.AllowedHosts,
+			AllowedCIDRs:   serverCfg.Egress.AllowedCIDRs,
+			AllowSSH:       serverCfg.Egress.AllowSSH,
+			AllowLoopback:  serverCfg.Egress.AllowLoopback,
+			AllowLinkLocal: serverCfg.Egress.AllowLinkLocal,
 		}
 	}
 
@@ -438,6 +496,45 @@ func loadServerConfig(flags *serverFlags, cmd *cobra.Command) server.Config {
 		}
 	}
 
+	// Security flags override config file
+	if cmd.Flags().Changed("public") || cmd.Flags().Changed("insecure") {
+		if cfg.Security == nil {
+			cfg.Security = &server.SecurityConfig{}
+		}
+		if cmd.Flags().Changed("public") {
+			cfg.Security.AllowPublic = flags.allowPublic
+		}
+		if cmd.Flags().Changed("insecure") {
+			cfg.Security.AllowInsecure = flags.allowInsecure
+		}
+	}
+
+	// Egress flags override config file
+	if cmd.Flags().Changed("egress-allow-host") ||
+		cmd.Flags().Changed("egress-allow-cidr") ||
+		cmd.Flags().Changed("egress-allow-ssh") ||
+		cmd.Flags().Changed("egress-allow-loopback") ||
+		cmd.Flags().Changed("egress-allow-link-local") {
+		if cfg.Egress == nil {
+			cfg.Egress = &server.EgressConfig{}
+		}
+		if cmd.Flags().Changed("egress-allow-host") {
+			cfg.Egress.AllowedHosts = flags.egressAllowHosts
+		}
+		if cmd.Flags().Changed("egress-allow-cidr") {
+			cfg.Egress.AllowedCIDRs = flags.egressAllowCIDRs
+		}
+		if cmd.Flags().Changed("egress-allow-ssh") {
+			cfg.Egress.AllowSSH = flags.egressAllowSSH
+		}
+		if cmd.Flags().Changed("egress-allow-loopback") {
+			cfg.Egress.AllowLoopback = flags.egressAllowLoopback
+		}
+		if cmd.Flags().Changed("egress-allow-link-local") {
+			cfg.Egress.AllowLinkLocal = flags.egressAllowLinkLocal
+		}
+	}
+
 	return cfg
 }
 
@@ -445,7 +542,10 @@ func runServer(ctx context.Context, flags *serverFlags, cmd *cobra.Command) erro
 	// Load configuration with proper precedence: flags > env > config file > defaults
 	cfg := loadServerConfig(flags, cmd)
 
-	srv := server.New(cfg)
+	srv, err := server.New(cfg)
+	if err != nil {
+		return err
+	}
 
 	// Handle graceful shutdown
 	shutdownCh := make(chan os.Signal, 1)
@@ -459,7 +559,7 @@ func runServer(ctx context.Context, flags *serverFlags, cmd *cobra.Command) erro
 		}
 	}()
 
-	fmt.Fprintf(os.Stderr, "Deputy server listening on %s\n", flags.addr)
+	fmt.Fprintf(os.Stderr, "Deputy server listening on %s\n", cfg.Addr)
 	fmt.Fprintf(os.Stderr, "Press Ctrl+C to stop\n")
 
 	// Wait for shutdown signal or error

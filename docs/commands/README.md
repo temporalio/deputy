@@ -20,7 +20,7 @@ Deputy is intentionally pipeline-friendly: commands compose well with each other
 | [`exec`](exec.md) | Run a command in a sandboxed runtime | `--runtime`, `--mode`, `--network`, `--exec-allow` |
 | [`policy`](policy.md) | Lint, test, bundle, evaluate policies | subcommands: `lint`, `test`, `eval`, `bundle` |
 | [`proxy`](proxy.md) | Run policy-enforcing package proxy | subcommands: `serve`, `template` |
-| [`server`](server.md) | Run Deputy API server | `--addr`, `--read-timeout`, `--write-timeout` |
+| [`server`](server.md) | Run Deputy API server | `--addr`, `--public`, `--insecure`, `--egress-allow-*` |
 | [`mcp`](mcp.md) | MCP server for AI assistants | subcommands: `serve` |
 | [`init`](init.md) | Bootstrap Deputy in a project | `--force`, `--config-only`, `--policy-only` |
 | [`config`](config.md) | Manage configuration files | subcommands: `validate`, `show`, `path` |

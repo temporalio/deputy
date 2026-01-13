@@ -6,6 +6,7 @@ package config
 import (
 	"fmt"
 	"log/slog"
+	"net/netip"
 	"os"
 	"path/filepath"
 	"slices"
@@ -34,6 +35,10 @@ type Config struct {
 
 	// Server configures the gRPC/Connect server.
 	Server ServerConfig `yaml:"server,omitempty" json:"server,omitempty"`
+
+	// Egress configures outbound allowlists for local CLI mode.
+	// These settings apply to in-process clients; use server.egress for remote servers.
+	Egress *EgressConfig `yaml:"egress,omitempty" json:"egress,omitempty"`
 
 	// Scan configures vulnerability scanning behavior.
 	Scan ScanConfig `yaml:"scan,omitempty" json:"scan,omitempty"`
@@ -103,6 +108,12 @@ type ServerConfig struct {
 
 	// RateLimit configures rate limiting.
 	RateLimit *ServerRateLimitConfig `yaml:"rate_limit,omitempty" json:"rate_limit,omitempty"`
+
+	// Security configures explicit security overrides for server mode.
+	Security *ServerSecurityConfig `yaml:"security,omitempty" json:"security,omitempty"`
+
+	// Egress configures outbound allowlists for remote server mode.
+	Egress *ServerEgressConfig `yaml:"egress,omitempty" json:"egress,omitempty"`
 }
 
 // ServerTLSConfig configures TLS for the server.
@@ -140,14 +151,26 @@ type ServerAuthConfig struct {
 	// Enabled turns authentication on/off.
 	Enabled bool `yaml:"enabled" json:"enabled"`
 
+	// Mode determines authentication enforcement ("required" or "disabled").
+	Mode string `yaml:"mode,omitempty" json:"mode,omitempty"`
+
 	// JWKSURL is the URL to fetch JSON Web Key Sets.
-	JWKSURL string `yaml:"jwks_url" json:"jwks_url"`
+	JWKSURL string `yaml:"jwks_url,omitempty" json:"jwks_url,omitempty"`
+
+	// OIDCDiscovery enables OIDC discovery for JWKS URL resolution.
+	OIDCDiscovery bool `yaml:"oidc_discovery,omitempty" json:"oidc_discovery,omitempty"`
 
 	// Issuers is a list of allowed token issuers.
-	Issuers []string `yaml:"issuers" json:"issuers"`
+	Issuers []string `yaml:"issuers,omitempty" json:"issuers,omitempty"`
 
 	// Audiences is a list of allowed token audiences.
-	Audiences []string `yaml:"audiences" json:"audiences"`
+	Audiences []string `yaml:"audiences,omitempty" json:"audiences,omitempty"`
+
+	// RequiredClaims specifies claims required in tokens.
+	RequiredClaims []string `yaml:"required_claims,omitempty" json:"required_claims,omitempty"`
+
+	// ClockSkew allows for clock drift when validating exp/nbf/iat.
+	ClockSkew time.Duration `yaml:"clock_skew,omitempty" json:"clock_skew,omitempty"`
 }
 
 // ServerRateLimitConfig configures rate limiting.
@@ -160,6 +183,78 @@ type ServerRateLimitConfig struct {
 
 	// Burst is the maximum burst size.
 	Burst int `yaml:"burst" json:"burst"`
+}
+
+// ServerSecurityConfig configures explicit security overrides for server mode.
+type ServerSecurityConfig struct {
+	// AllowPublic permits binding to non-loopback addresses.
+	AllowPublic bool `yaml:"allow_public,omitempty" json:"allow_public,omitempty"`
+
+	// AllowInsecure permits insecure server modes (no TLS/auth, policy load errors).
+	AllowInsecure bool `yaml:"allow_insecure,omitempty" json:"allow_insecure,omitempty"`
+}
+
+// EgressConfig configures outbound allowlists for local CLI mode.
+// These settings apply to in-process clients; server mode has separate controls.
+type EgressConfig struct {
+	// AllowedHosts is a list of hostnames allowed to resolve to private IPs.
+	AllowedHosts []string `yaml:"allowed_hosts,omitempty" json:"allowed_hosts,omitempty"`
+
+	// AllowedCIDRs is a list of CIDR ranges allowed for outbound connections.
+	AllowedCIDRs []string `yaml:"allowed_cidrs,omitempty" json:"allowed_cidrs,omitempty"`
+
+	// AllowLoopback permits loopback targets (127.0.0.1, ::1).
+	AllowLoopback bool `yaml:"allow_loopback,omitempty" json:"allow_loopback,omitempty"`
+
+	// AllowLinkLocal permits link-local targets (169.254.0.0/16, fe80::/10).
+	AllowLinkLocal bool `yaml:"allow_link_local,omitempty" json:"allow_link_local,omitempty"`
+}
+
+// Configured reports whether any egress allowlist settings are set.
+func (e *EgressConfig) Configured() bool {
+	if e == nil {
+		return false
+	}
+	if e.AllowLoopback || e.AllowLinkLocal {
+		return true
+	}
+	for _, host := range e.AllowedHosts {
+		if strings.TrimSpace(host) != "" {
+			return true
+		}
+	}
+	for _, cidr := range e.AllowedCIDRs {
+		if strings.TrimSpace(cidr) != "" {
+			return true
+		}
+	}
+	return false
+}
+
+// AllowedCIDRPrefixes parses the configured CIDR strings into netip prefixes.
+func (e *EgressConfig) AllowedCIDRPrefixes() ([]netip.Prefix, error) {
+	if e == nil {
+		return nil, nil
+	}
+	return parseCIDRs(e.AllowedCIDRs)
+}
+
+// ServerEgressConfig configures outbound allowlists for remote server mode.
+type ServerEgressConfig struct {
+	// AllowedHosts is a list of hostnames allowed to resolve to private IPs.
+	AllowedHosts []string `yaml:"allowed_hosts,omitempty" json:"allowed_hosts,omitempty"`
+
+	// AllowedCIDRs is a list of CIDR ranges allowed for outbound connections.
+	AllowedCIDRs []string `yaml:"allowed_cidrs,omitempty" json:"allowed_cidrs,omitempty"`
+
+	// AllowSSH permits SSH-style git targets.
+	AllowSSH bool `yaml:"allow_ssh,omitempty" json:"allow_ssh,omitempty"`
+
+	// AllowLoopback permits loopback targets in remote server mode.
+	AllowLoopback bool `yaml:"allow_loopback,omitempty" json:"allow_loopback,omitempty"`
+
+	// AllowLinkLocal permits link-local targets in remote server mode.
+	AllowLinkLocal bool `yaml:"allow_link_local,omitempty" json:"allow_link_local,omitempty"`
 }
 
 // ScanConfig configures vulnerability scanning.
@@ -602,6 +697,32 @@ func (l *Loader) loadFromEnv(cfg *Config) {
 		cfg.Policy.Mode = val
 	}
 
+	// Local egress configuration
+	if val := os.Getenv(l.envPrefix + "EGRESS_ALLOW_HOSTS"); val != "" {
+		if cfg.Egress == nil {
+			cfg.Egress = &EgressConfig{}
+		}
+		cfg.Egress.AllowedHosts = strings.Split(val, ",")
+	}
+	if val := os.Getenv(l.envPrefix + "EGRESS_ALLOW_CIDRS"); val != "" {
+		if cfg.Egress == nil {
+			cfg.Egress = &EgressConfig{}
+		}
+		cfg.Egress.AllowedCIDRs = strings.Split(val, ",")
+	}
+	if val := os.Getenv(l.envPrefix + "EGRESS_ALLOW_LOOPBACK"); val != "" {
+		if cfg.Egress == nil {
+			cfg.Egress = &EgressConfig{}
+		}
+		cfg.Egress.AllowLoopback = val == "true" || val == "1"
+	}
+	if val := os.Getenv(l.envPrefix + "EGRESS_ALLOW_LINK_LOCAL"); val != "" {
+		if cfg.Egress == nil {
+			cfg.Egress = &EgressConfig{}
+		}
+		cfg.Egress.AllowLinkLocal = val == "true" || val == "1"
+	}
+
 	// Server configuration
 	l.loadServerFromEnv(cfg)
 
@@ -782,11 +903,23 @@ func (l *Loader) loadServerFromEnv(cfg *Config) {
 		}
 		cfg.Server.Auth.Enabled = val == "true" || val == "1"
 	}
+	if val := os.Getenv(l.envPrefix + "SERVER_AUTH_MODE"); val != "" {
+		if cfg.Server.Auth == nil {
+			cfg.Server.Auth = &ServerAuthConfig{}
+		}
+		cfg.Server.Auth.Mode = val
+	}
 	if val := os.Getenv(l.envPrefix + "SERVER_AUTH_JWKS_URL"); val != "" {
 		if cfg.Server.Auth == nil {
 			cfg.Server.Auth = &ServerAuthConfig{}
 		}
 		cfg.Server.Auth.JWKSURL = val
+	}
+	if val := os.Getenv(l.envPrefix + "SERVER_AUTH_OIDC_DISCOVERY"); val != "" {
+		if cfg.Server.Auth == nil {
+			cfg.Server.Auth = &ServerAuthConfig{}
+		}
+		cfg.Server.Auth.OIDCDiscovery = val == "true" || val == "1"
 	}
 	if val := os.Getenv(l.envPrefix + "SERVER_AUTH_ISSUERS"); val != "" {
 		if cfg.Server.Auth == nil {
@@ -799,6 +932,20 @@ func (l *Loader) loadServerFromEnv(cfg *Config) {
 			cfg.Server.Auth = &ServerAuthConfig{}
 		}
 		cfg.Server.Auth.Audiences = strings.Split(val, ",")
+	}
+	if val := os.Getenv(l.envPrefix + "SERVER_AUTH_REQUIRED_CLAIMS"); val != "" {
+		if cfg.Server.Auth == nil {
+			cfg.Server.Auth = &ServerAuthConfig{}
+		}
+		cfg.Server.Auth.RequiredClaims = strings.Split(val, ",")
+	}
+	if val := os.Getenv(l.envPrefix + "SERVER_AUTH_CLOCK_SKEW"); val != "" {
+		if cfg.Server.Auth == nil {
+			cfg.Server.Auth = &ServerAuthConfig{}
+		}
+		if d, err := time.ParseDuration(val); err == nil {
+			cfg.Server.Auth.ClockSkew = d
+		}
 	}
 
 	// Rate limit configuration
@@ -823,6 +970,52 @@ func (l *Loader) loadServerFromEnv(cfg *Config) {
 			}
 			cfg.Server.RateLimit.Burst = n
 		}
+	}
+
+	// Security configuration
+	if val := os.Getenv(l.envPrefix + "SERVER_SECURITY_ALLOW_PUBLIC"); val != "" {
+		if cfg.Server.Security == nil {
+			cfg.Server.Security = &ServerSecurityConfig{}
+		}
+		cfg.Server.Security.AllowPublic = val == "true" || val == "1"
+	}
+	if val := os.Getenv(l.envPrefix + "SERVER_SECURITY_ALLOW_INSECURE"); val != "" {
+		if cfg.Server.Security == nil {
+			cfg.Server.Security = &ServerSecurityConfig{}
+		}
+		cfg.Server.Security.AllowInsecure = val == "true" || val == "1"
+	}
+
+	// Egress configuration
+	if val := os.Getenv(l.envPrefix + "SERVER_EGRESS_ALLOW_HOSTS"); val != "" {
+		if cfg.Server.Egress == nil {
+			cfg.Server.Egress = &ServerEgressConfig{}
+		}
+		cfg.Server.Egress.AllowedHosts = strings.Split(val, ",")
+	}
+	if val := os.Getenv(l.envPrefix + "SERVER_EGRESS_ALLOW_CIDRS"); val != "" {
+		if cfg.Server.Egress == nil {
+			cfg.Server.Egress = &ServerEgressConfig{}
+		}
+		cfg.Server.Egress.AllowedCIDRs = strings.Split(val, ",")
+	}
+	if val := os.Getenv(l.envPrefix + "SERVER_EGRESS_ALLOW_SSH"); val != "" {
+		if cfg.Server.Egress == nil {
+			cfg.Server.Egress = &ServerEgressConfig{}
+		}
+		cfg.Server.Egress.AllowSSH = val == "true" || val == "1"
+	}
+	if val := os.Getenv(l.envPrefix + "SERVER_EGRESS_ALLOW_LOOPBACK"); val != "" {
+		if cfg.Server.Egress == nil {
+			cfg.Server.Egress = &ServerEgressConfig{}
+		}
+		cfg.Server.Egress.AllowLoopback = val == "true" || val == "1"
+	}
+	if val := os.Getenv(l.envPrefix + "SERVER_EGRESS_ALLOW_LINK_LOCAL"); val != "" {
+		if cfg.Server.Egress == nil {
+			cfg.Server.Egress = &ServerEgressConfig{}
+		}
+		cfg.Server.Egress.AllowLinkLocal = val == "true" || val == "1"
 	}
 }
 
@@ -996,6 +1189,16 @@ func (c *Config) Validate() error {
 				Message: fmt.Sprintf("must be one of: %s", strings.Join(validModes, ", ")),
 			}
 		}
+	}
+
+	// Validate local egress configuration
+	if err := validateCIDRList("egress.allowed_cidrs", egressCIDRs(c.Egress)); err != nil {
+		return err
+	}
+
+	// Validate server egress configuration
+	if err := validateCIDRList("server.egress.allowed_cidrs", serverEgressCIDRs(c.Server.Egress)); err != nil {
+		return err
 	}
 
 	// Validate OTel configuration
@@ -1200,6 +1403,54 @@ func FindConfigFile() string {
 	}
 
 	return ""
+}
+
+func egressCIDRs(cfg *EgressConfig) []string {
+	if cfg == nil {
+		return nil
+	}
+	return cfg.AllowedCIDRs
+}
+
+func serverEgressCIDRs(cfg *ServerEgressConfig) []string {
+	if cfg == nil {
+		return nil
+	}
+	return cfg.AllowedCIDRs
+}
+
+func parseCIDRs(values []string) ([]netip.Prefix, error) {
+	if len(values) == 0 {
+		return nil, nil
+	}
+	out := make([]netip.Prefix, 0, len(values))
+	for _, raw := range values {
+		cidr := strings.TrimSpace(raw)
+		if cidr == "" {
+			continue
+		}
+		prefix, err := netip.ParsePrefix(cidr)
+		if err != nil {
+			return nil, fmt.Errorf("invalid CIDR %q: %w", cidr, err)
+		}
+		out = append(out, prefix)
+	}
+	return out, nil
+}
+
+func validateCIDRList(field string, values []string) error {
+	if len(values) == 0 {
+		return nil
+	}
+	if _, err := parseCIDRs(values); err != nil {
+		return &errors.ValidationError{
+			Field:   field,
+			Value:   values,
+			Message: "invalid CIDR",
+			Cause:   err,
+		}
+	}
+	return nil
 }
 
 // contains checks if a string slice contains a value.

@@ -291,11 +291,10 @@ func (v *gitHubVerifier) Verify(ctx context.Context, secret string, _ SecretType
 		}
 
 	default:
-		body, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
 		return VerificationResult{
 			Status:  StatusError,
 			Service: "github",
-			Error:   fmt.Sprintf("unexpected status %d: %s", resp.StatusCode, string(body)),
+			Error:   fmt.Sprintf("unexpected status %d", resp.StatusCode),
 		}
 	}
 }

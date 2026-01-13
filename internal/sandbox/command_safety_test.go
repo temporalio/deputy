@@ -132,8 +132,8 @@ func TestCommandSafetyString(t *testing.T) {
 
 func TestEmptyCommand(t *testing.T) {
 	safety := ClassifyCommand([]string{})
-	if safety != CommandNormal {
-		t.Error("empty command should be classified as normal")
+	if safety != CommandDangerous {
+		t.Error("empty command should be classified as dangerous")
 	}
 }
 

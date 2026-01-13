@@ -62,6 +62,45 @@ proxy:
   # policies:
   #   - policy/proxy-guardrails.yaml
 
+# Local CLI egress allowlists (for in-process mode)
+# egress:
+#   allowed_hosts:            # Hostnames allowed to resolve to private IPs
+#     - ".corp.local"
+#   allowed_cidrs:            # CIDR ranges allowed for outbound connections
+#     - "10.0.0.0/8"
+#   allow_loopback: false     # Allow 127.0.0.1 / ::1
+#   allow_link_local: false   # Allow 169.254.0.0/16 / fe80::/10
+
+# Server configuration (for `deputy server`)
+server:
+  # Default listen address (loopback only by default)
+  # addr: "127.0.0.1:8090"
+
+  # Security overrides for remote server mode
+  # security:
+  #   allow_public: false   # Require explicit opt-in to bind 0.0.0.0
+  #   allow_insecure: false # Allow no TLS/auth or policy load failures
+
+  # Authentication (JWT/OIDC)
+  # auth:
+  #   mode: "required"          # required or disabled
+  #   jwks_url: ""              # JWKS endpoint URL
+  #   oidc_discovery: false     # Discover JWKS via issuer
+  #   issuers: []               # Trusted token issuers
+  #   audiences: []             # Expected audiences
+  #   required_claims: []       # Required claims (e.g., ["sub", "tenant"])
+  #   clock_skew: 0s            # Clock drift allowance
+
+  # Egress allowlists (remote server mode)
+  # egress:
+  #   allowed_hosts:            # Hostnames allowed to resolve to private IPs
+  #     - ".corp.local"
+  #   allowed_cidrs:            # CIDR ranges allowed for outbound connections
+  #     - "10.0.0.0/8"
+  #   allow_ssh: false          # Allow non-HTTPS git targets (ssh://, git://, git@)
+  #   allow_loopback: false     # Allow 127.0.0.1 / ::1
+  #   allow_link_local: false   # Allow 169.254.0.0/16 / fe80::/10
+
 # Agent configuration (for `deputy fix --agent` and `deputy triage --agent`)
 # Requires API keys set via environment variables:
 #   ANTHROPIC_API_KEY for Claude

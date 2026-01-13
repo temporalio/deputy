@@ -62,13 +62,16 @@ func spanHasAttribute(span sdktrace.ReadOnlySpan, key string) bool {
 func TestScanHandler_Trace_InvalidArgument(t *testing.T) {
 	recorder := setupTraceRecorder(t)
 
-	srv := New(DefaultConfig())
+	srv, err := New(DefaultConfig())
+	if err != nil {
+		t.Fatal(err)
+	}
 	ts := httptest.NewServer(srv.Handler())
 	defer ts.Close()
 
 	client := scanv1connect.NewScanServiceClient(http.DefaultClient, ts.URL)
 
-	_, err := client.Scan(context.Background(), connect.NewRequest(&scanv1.ScanRequest{
+	_, err = client.Scan(context.Background(), connect.NewRequest(&scanv1.ScanRequest{
 		Target: "",
 	}))
 	if err == nil {
@@ -93,7 +96,10 @@ func TestScanHandler_Trace_InvalidArgument(t *testing.T) {
 func TestScanHandler_Trace_TargetAttribute(t *testing.T) {
 	recorder := setupTraceRecorder(t)
 
-	srv := New(DefaultConfig())
+	srv, err := New(DefaultConfig())
+	if err != nil {
+		t.Fatal(err)
+	}
 	ts := httptest.NewServer(srv.Handler())
 	defer ts.Close()
 
@@ -122,7 +128,10 @@ func TestScanHandler_Trace_TargetAttribute(t *testing.T) {
 func TestListHandler_Trace_Ecosystems(t *testing.T) {
 	recorder := setupTraceRecorder(t)
 
-	srv := New(DefaultConfig())
+	srv, err := New(DefaultConfig())
+	if err != nil {
+		t.Fatal(err)
+	}
 	ts := httptest.NewServer(srv.Handler())
 	defer ts.Close()
 
@@ -154,7 +163,10 @@ func TestListHandler_Trace_Ecosystems(t *testing.T) {
 func TestSecretsHandler_Trace_ListDetectors(t *testing.T) {
 	recorder := setupTraceRecorder(t)
 
-	srv := New(DefaultConfig())
+	srv, err := New(DefaultConfig())
+	if err != nil {
+		t.Fatal(err)
+	}
 	ts := httptest.NewServer(srv.Handler())
 	defer ts.Close()
 
@@ -186,13 +198,16 @@ func TestSecretsHandler_Trace_ListDetectors(t *testing.T) {
 func TestSecretsHandler_Trace_ScanError(t *testing.T) {
 	recorder := setupTraceRecorder(t)
 
-	srv := New(DefaultConfig())
+	srv, err := New(DefaultConfig())
+	if err != nil {
+		t.Fatal(err)
+	}
 	ts := httptest.NewServer(srv.Handler())
 	defer ts.Close()
 
 	client := secretsv1connect.NewSecretsServiceClient(http.DefaultClient, ts.URL)
 
-	_, err := client.Scan(context.Background(), connect.NewRequest(&secretsv1.ScanRequest{
+	_, err = client.Scan(context.Background(), connect.NewRequest(&secretsv1.ScanRequest{
 		Target: "",
 	}))
 	if err == nil {
@@ -217,13 +232,16 @@ func TestSecretsHandler_Trace_ScanError(t *testing.T) {
 func TestHandler_Trace_SpanParenting(t *testing.T) {
 	recorder := setupTraceRecorder(t)
 
-	srv := New(DefaultConfig())
+	srv, err := New(DefaultConfig())
+	if err != nil {
+		t.Fatal(err)
+	}
 	ts := httptest.NewServer(srv.Handler())
 	defer ts.Close()
 
 	client := listv1connect.NewListServiceClient(http.DefaultClient, ts.URL)
 
-	_, err := client.ListEcosystems(context.Background(), connect.NewRequest(&listv1.ListEcosystemsRequest{}))
+	_, err = client.ListEcosystems(context.Background(), connect.NewRequest(&listv1.ListEcosystemsRequest{}))
 	if err != nil {
 		t.Fatalf("request failed: %v", err)
 	}
@@ -246,7 +264,10 @@ func TestHandler_Trace_SpanParenting(t *testing.T) {
 func TestOtelconnect_Integration(t *testing.T) {
 	recorder := setupTraceRecorder(t)
 
-	srv := New(DefaultConfig())
+	srv, err := New(DefaultConfig())
+	if err != nil {
+		t.Fatal(err)
+	}
 	ts := httptest.NewServer(srv.Handler())
 	defer ts.Close()
 

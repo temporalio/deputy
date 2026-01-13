@@ -31,24 +31,39 @@ The `server` command starts Deputy in remote server mode, listening for client c
 
 | Flag | Default | Description |
 | --- | --- | --- |
-| `--addr` | `:8090` | Address to listen on (host:port) |
+| `--addr` | `127.0.0.1:8090` | Address to listen on (host:port) |
 | `--read-timeout` | `30s` | Maximum duration for reading request |
 | `--write-timeout` | `5m` | Maximum duration for writing response |
 | `--idle-timeout` | `2m` | Maximum time to wait for next request |
+| `--public` | `false` | Allow binding to non-loopback addresses (explicit opt-in) |
+| `--insecure` | `false` | Allow no TLS/auth or policy load failures (dev only) |
+| `--egress-allow-host` | none | Allowlisted egress hostnames (repeatable) |
+| `--egress-allow-cidr` | none | Allowlisted egress CIDR ranges (repeatable) |
+| `--egress-allow-ssh` | `false` | Allow SSH git targets (ssh://, git@host) |
+| `--egress-allow-loopback` | `false` | Allow loopback targets in remote server mode |
+| `--egress-allow-link-local` | `false` | Allow link-local targets in remote server mode |
 
 ## Examples
 
 ### Basic Usage
 
 ```console
-# Start server on default port
+# Start server on default port (loopback only)
 $ deputy server
 
 # Start server on custom port
-$ deputy server --addr :9000
+$ deputy server --addr 127.0.0.1:9000
 
 # Start server with custom timeouts (for large scans)
 $ deputy server --write-timeout 10m
+
+# Bind publicly with TLS + auth (production)
+$ deputy server --public --addr 0.0.0.0:8090 \
+    --tls-cert /path/to/cert.pem --tls-key /path/to/key.pem \
+    --auth-mode required --auth-jwks-url https://issuer/.well-known/jwks.json
+
+# Allow internal registries (egress allowlist)
+$ deputy server --egress-allow-host .corp.local --egress-allow-cidr 10.0.0.0/8
 ```
 
 ### Client Connections
@@ -112,6 +127,12 @@ $ curl -X POST http://localhost:8090/deputy.scan.v1.ScanService/Scan \
 
 ## Security Considerations
 
+### Default Binding and Fail-Closed Behavior
+
+- The server binds to `127.0.0.1:8090` by default (local-only).
+- Public binds require explicit `--public` and TLS + `--auth-mode required`.
+- Auth/policy load failures fail closed unless `--insecure` is set.
+
 ### Remote Mode Restrictions
 
 When connecting to a remote server, certain targets are restricted for security:
@@ -126,8 +147,20 @@ When connecting to a remote server, certain targets are restricted for security:
 - Stdin SBOM input (`-`)
 - Local Docker daemon (`docker-daemon://`)
 - Local archives (`tarball://`, `oci-archive://`, `oci-layout://`)
+- Non-HTTPS git targets (`ssh://`, `git@host`, `git://`) unless explicitly allowed
 
 For local filesystem analysis, use in-process mode (the default) instead.
+
+### Egress Allowlisting
+
+Remote servers can be restricted to approved internal registries/SCM hosts:
+
+```console
+# Allow private Git/OCI hosts and CIDRs
+$ deputy server --egress-allow-host .corp.local --egress-allow-cidr 10.0.0.0/8
+```
+
+Non-HTTPS git targets are blocked by default; enable with `--egress-allow-ssh` if needed.
 
 ### Production Deployment
 

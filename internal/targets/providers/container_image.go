@@ -22,6 +22,7 @@ import (
 	scalibrimage "github.com/google/osv-scalibr/artifact/image"
 	layerimage "github.com/google/osv-scalibr/artifact/image/layerscanning/image"
 	scalibrfs "github.com/google/osv-scalibr/fs"
+	"github.com/picatz/deputy/internal/network"
 	"github.com/picatz/deputy/internal/targets"
 )
 
@@ -835,6 +836,7 @@ func buildRemoteOptions(ctx context.Context, opts map[string]string) ([]remote.O
 	//   - Environment variables (DOCKER_CONFIG)
 	// See: https://pkg.go.dev/github.com/google/go-containerregistry/pkg/authn
 	remoteOpts := []remote.Option{
+		remote.WithTransport(network.SafeTransport()),
 		remote.WithAuthFromKeychain(authn.DefaultKeychain),
 	}
 

@@ -17,9 +17,9 @@ func IsDeputyInternalCommand(cmd string) bool {
 // ApplyDeputyCommand executes a deputy-internal command.
 // Returns an error if the command is not recognized or fails.
 func ApplyDeputyCommand(repoDir, cmd string) error {
-	parts := strings.Fields(cmd)
-	if len(parts) < 1 {
-		return fmt.Errorf("empty command")
+	parts, err := ParseCommandArgs(cmd)
+	if err != nil {
+		return fmt.Errorf("invalid command: %w", err)
 	}
 
 	switch parts[0] {

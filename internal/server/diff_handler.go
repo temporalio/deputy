@@ -21,7 +21,8 @@ import (
 
 // DiffHandler implements the DiffService gRPC handler.
 type DiffHandler struct {
-	localMode bool
+	localMode    bool
+	targetPolicy *targets.RemoteTargetPolicy
 }
 
 // Ensure DiffHandler implements the DiffServiceHandler interface.
@@ -34,6 +35,13 @@ type DiffHandlerOption func(*DiffHandler)
 func WithDiffLocalMode() DiffHandlerOption {
 	return func(h *DiffHandler) {
 		h.localMode = true
+	}
+}
+
+// WithDiffTargetPolicy sets the remote target policy for server mode validation.
+func WithDiffTargetPolicy(policy *targets.RemoteTargetPolicy) DiffHandlerOption {
+	return func(h *DiffHandler) {
+		h.targetPolicy = policy
 	}
 }
 
@@ -67,10 +75,10 @@ func (h *DiffHandler) DiffPackages(
 
 	// Security: Validate targets are accessible from remote server (skip in local mode)
 	if !h.localMode {
-		if err := targets.ValidateRemoteTarget(baseTarget); err != nil {
+		if err := targets.ValidateRemoteTargetWithPolicy(baseTarget, h.targetPolicy); err != nil {
 			return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("invalid base_target: %w", err))
 		}
-		if err := targets.ValidateRemoteTarget(targetTarget); err != nil {
+		if err := targets.ValidateRemoteTargetWithPolicy(targetTarget, h.targetPolicy); err != nil {
 			return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("invalid target_target: %w", err))
 		}
 	}
@@ -171,10 +179,10 @@ func (h *DiffHandler) DiffVulnerabilities(
 
 	// Security: Validate targets are accessible from remote server (skip in local mode)
 	if !h.localMode {
-		if err := targets.ValidateRemoteTarget(baseTarget); err != nil {
+		if err := targets.ValidateRemoteTargetWithPolicy(baseTarget, h.targetPolicy); err != nil {
 			return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("invalid base_target: %w", err))
 		}
-		if err := targets.ValidateRemoteTarget(targetTarget); err != nil {
+		if err := targets.ValidateRemoteTargetWithPolicy(targetTarget, h.targetPolicy); err != nil {
 			return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("invalid target_target: %w", err))
 		}
 	}
@@ -308,10 +316,10 @@ func (h *DiffHandler) DiffContainerImages(ctx context.Context, req *connect.Requ
 				fmt.Errorf("docker-daemon transport is not available on remote servers; use remote registry references"))
 		}
 		// Validate both image references don't use local schemes
-		if err := targets.ValidateRemoteTarget(baseImage); err != nil {
+		if err := targets.ValidateRemoteTargetWithPolicy(baseImage, h.targetPolicy); err != nil {
 			return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("invalid base_image: %w", err))
 		}
-		if err := targets.ValidateRemoteTarget(targetImage); err != nil {
+		if err := targets.ValidateRemoteTargetWithPolicy(targetImage, h.targetPolicy); err != nil {
 			return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("invalid target_image: %w", err))
 		}
 	}

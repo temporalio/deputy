@@ -51,11 +51,30 @@ Stable, "look it up" documentation for Deputy configuration.
 | `DEPUTY_PROXY_ADDR` | Address to bind proxy server (default: `:8080`) |
 | `DEPUTY_PROXY_POLICIES` | Comma-separated policy file paths |
 
+### Egress (Local CLI)
+
+| Variable | Description |
+| --- | --- |
+| `DEPUTY_EGRESS_ALLOW_HOSTS` | Comma-separated egress allowlist hosts for local CLI |
+| `DEPUTY_EGRESS_ALLOW_CIDRS` | Comma-separated egress allowlist CIDRs for local CLI |
+| `DEPUTY_EGRESS_ALLOW_LOOPBACK` | Allow loopback targets for local CLI (`true`/`false`) |
+| `DEPUTY_EGRESS_ALLOW_LINK_LOCAL` | Allow link-local targets for local CLI (`true`/`false`) |
+
 ### Server / Connection
 
 | Variable | Description |
 | --- | --- |
 | `DEPUTY_SERVER` | Remote Deputy server address (e.g., `http://localhost:8090`) |
+| `DEPUTY_SERVER_ADDR` | Address to bind `deputy server` (default: `127.0.0.1:8090`) |
+| `DEPUTY_SERVER_AUTH_MODE` | Authentication mode (`required`, `disabled`) |
+| `DEPUTY_SERVER_AUTH_JWKS_URL` | JWKS endpoint URL |
+| `DEPUTY_SERVER_SECURITY_ALLOW_PUBLIC` | Allow public bind (`true`/`false`) |
+| `DEPUTY_SERVER_SECURITY_ALLOW_INSECURE` | Allow insecure startup (`true`/`false`) |
+| `DEPUTY_SERVER_EGRESS_ALLOW_HOSTS` | Comma-separated egress allowlist hosts |
+| `DEPUTY_SERVER_EGRESS_ALLOW_CIDRS` | Comma-separated egress allowlist CIDRs |
+| `DEPUTY_SERVER_EGRESS_ALLOW_SSH` | Allow SSH git targets (`true`/`false`) |
+| `DEPUTY_SERVER_EGRESS_ALLOW_LOOPBACK` | Allow loopback targets (`true`/`false`) |
+| `DEPUTY_SERVER_EGRESS_ALLOW_LINK_LOCAL` | Allow link-local targets (`true`/`false`) |
 
 ### External Services
 

@@ -14,7 +14,9 @@ import (
 	"github.com/picatz/deputy/internal/cli/cmd"
 	"github.com/picatz/deputy/internal/config"
 	deputyerrors "github.com/picatz/deputy/internal/errors"
+	"github.com/picatz/deputy/internal/gitutil"
 	"github.com/picatz/deputy/internal/logs"
+	"github.com/picatz/deputy/internal/network"
 	"github.com/picatz/deputy/internal/otel"
 	_ "github.com/picatz/deputy/internal/targets/providers"
 	"github.com/picatz/deputy/internal/version"
@@ -25,11 +27,19 @@ import (
 // Run constructs the root command hierarchy and executes it with all
 // subcommands registered. It is the primary entry point used by main.
 func Run(ctx context.Context) error {
-	// Load configuration (includes OTel settings)
-	cfg := loadOTelConfig()
+	// Load configuration for runtime defaults (OTel, egress allowlists).
+	cfg := loadRuntimeConfig()
+
+	// Apply local egress allowlists before services are initialized.
+	applyLocalEgressConfig(cfg)
+
+	otelCfg := otel.DefaultConfig()
+	if cfg != nil {
+		otelCfg = cfg.OTel
+	}
 
 	// Initialize OpenTelemetry (graceful no-op if disabled)
-	provider, err := otel.Init(ctx, cfg)
+	provider, err := otel.Init(ctx, otelCfg)
 	if err != nil {
 		slog.Warn("failed to initialize OpenTelemetry", "error", err)
 	}
@@ -42,18 +52,61 @@ func Run(ctx context.Context) error {
 	return fang.Execute(ctx, newRoot(), fang.WithErrorHandler(silentErrorHandler), fang.WithVersion(version.Value))
 }
 
-// loadOTelConfig returns OTel configuration from environment and config file.
-func loadOTelConfig() otel.Config {
-	// Try to load from config file
+// loadRuntimeConfig loads configuration from environment and config file.
+func loadRuntimeConfig() *config.Config {
 	configPath := config.FindConfigFile()
-	if configPath != "" {
-		loader := config.NewLoader(configPath)
-		if cfg, err := loader.Load(); err == nil {
-			return cfg.OTel
-		}
+	loader := config.NewLoader(configPath)
+	cfg, err := loader.Load()
+	if err != nil {
+		return nil
 	}
-	// Fall back to defaults (env vars are checked in otel.Init)
-	return otel.DefaultConfig()
+	return cfg
+}
+
+func applyLocalEgressConfig(cfg *config.Config) {
+	if cfg == nil || cfg.Egress == nil || !cfg.Egress.Configured() {
+		return
+	}
+
+	allowedHosts := sanitizeHosts(cfg.Egress.AllowedHosts)
+	allowedCIDRs, err := cfg.Egress.AllowedCIDRPrefixes()
+	if err != nil {
+		slog.Warn("invalid egress configuration, skipping local allowlists", "error", err)
+		return
+	}
+
+	var opts []network.Option
+	if len(allowedHosts) > 0 {
+		opts = append(opts, network.WithAllowedHosts(allowedHosts...))
+	}
+	if len(allowedCIDRs) > 0 {
+		opts = append(opts, network.WithAllowedCIDRs(allowedCIDRs...))
+	}
+	if cfg.Egress.AllowLoopback {
+		opts = append(opts, network.WithAllowLoopback())
+	}
+	if cfg.Egress.AllowLinkLocal {
+		opts = append(opts, network.WithAllowLinkLocal())
+	}
+
+	if len(opts) == 0 {
+		return
+	}
+
+	network.SetDefaultSafeDialerOptions(opts...)
+	gitutil.InstallSafeGitTransport()
+}
+
+func sanitizeHosts(values []string) []string {
+	out := make([]string, 0, len(values))
+	for _, host := range values {
+		host = strings.TrimSpace(host)
+		if host == "" {
+			continue
+		}
+		out = append(out, host)
+	}
+	return out
 }
 
 // silentErrorHandler suppresses fang's default styled error output.

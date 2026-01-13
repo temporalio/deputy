@@ -70,6 +70,12 @@
 //	// Allow private networks for internal service mesh
 //	dialer := network.NewSafeDialerWithOptions(network.WithAllowPrivate())
 //
+//	// Allow explicit internal hosts and CIDRs
+//	dialer := network.NewSafeDialerWithOptions(
+//	    network.WithAllowedHosts(".corp.local"),
+//	    network.WithAllowedCIDRs(netip.MustParsePrefix("10.0.0.0/8")),
+//	)
+//
 //	// Allow loopback for development
 //	dialer := network.NewSafeDialerWithOptions(network.WithAllowLoopback())
 //
@@ -81,6 +87,13 @@
 //	// Block additional hostnames
 //	dialer := network.NewSafeDialerWithOptions(
 //	    network.WithBlockedHosts("internal.company.com"),
+//	)
+//
+// Process-wide defaults:
+//
+//	// Apply default options to all new SafeDialer instances
+//	network.SetDefaultSafeDialerOptions(
+//	    network.WithAllowedHosts(".corp.local"),
 //	)
 //
 // # Error Handling

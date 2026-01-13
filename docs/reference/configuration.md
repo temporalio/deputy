@@ -75,6 +75,52 @@ proxy:
   policies:                # Policy files for enforcement
     - policy/proxy.yaml
 
+# Local CLI egress allowlists (for in-process mode)
+egress:
+  allowed_hosts: [".corp.local"]
+  allowed_cidrs: ["10.0.0.0/8"]
+  allow_loopback: false
+  allow_link_local: false
+
+# Server configuration (for `deputy server`)
+server:
+  addr: "127.0.0.1:8090"   # Listen address (loopback by default)
+  read_timeout: 30s
+  write_timeout: 5m
+  idle_timeout: 2m
+  max_request_body_bytes: 10485760
+  tls:
+    cert_file: "/path/to/cert.pem"
+    key_file: "/path/to/key.pem"
+    client_ca_file: ""     # Optional mTLS CA
+  cors:
+    allowed_origins: ["https://app.example.com"]
+    allowed_methods: ["GET", "POST"]
+    allowed_headers: ["Authorization", "Content-Type"]
+    allow_credentials: false
+    max_age: 600
+  auth:
+    mode: "required"       # required or disabled
+    jwks_url: "https://issuer/.well-known/jwks.json"
+    oidc_discovery: false
+    issuers: ["https://issuer"]
+    audiences: ["deputy-server"]
+    required_claims: ["sub", "tenant"]
+    clock_skew: 30s
+  rate_limit:
+    enabled: true
+    requests_per_second: 10
+    burst: 20
+  security:
+    allow_public: false    # Explicit opt-in to bind 0.0.0.0
+    allow_insecure: false  # Allow no TLS/auth or policy errors
+  egress:
+    allowed_hosts: [".corp.local"]
+    allowed_cidrs: ["10.0.0.0/8"]
+    allow_ssh: false          # Allow non-HTTPS git targets (ssh://, git://, git@)
+    allow_loopback: false
+    allow_link_local: false
+
 # AI/Agent configuration
 ai:
   default_provider: ""     # Default AI provider (codex, claude)
@@ -151,6 +197,116 @@ ai:
 - `DEPUTY_PROXY_ADDR`
 - `DEPUTY_PROXY_POLICIES` (comma-separated)
 
+### Egress (Local CLI)
+
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `egress.allowed_hosts` | []string | none | Hostnames allowed to resolve to private IPs in local CLI mode |
+| `egress.allowed_cidrs` | []string | none | CIDR ranges allowed for outbound connections in local CLI mode |
+| `egress.allow_loopback` | bool | `false` | Allow loopback addresses |
+| `egress.allow_link_local` | bool | `false` | Allow link-local addresses |
+
+**Environment variables:**
+- `DEPUTY_EGRESS_ALLOW_HOSTS`
+- `DEPUTY_EGRESS_ALLOW_CIDRS`
+- `DEPUTY_EGRESS_ALLOW_LOOPBACK`
+- `DEPUTY_EGRESS_ALLOW_LINK_LOCAL`
+
+### Server
+
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `server.addr` | string | `127.0.0.1:8090` | Listen address (loopback by default) |
+| `server.read_timeout` | duration | `30s` | Max duration for reading request |
+| `server.write_timeout` | duration | `5m` | Max duration for writing response |
+| `server.idle_timeout` | duration | `2m` | Max time to wait for next request |
+| `server.max_request_body_bytes` | int | `10485760` | Max request body size |
+
+**TLS:**
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `server.tls.cert_file` | string | none | TLS certificate file |
+| `server.tls.key_file` | string | none | TLS private key file |
+| `server.tls.client_ca_file` | string | none | Client CA for mTLS |
+
+**CORS:**
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `server.cors.allowed_origins` | []string | none | Allowed origins (use `*` with care) |
+| `server.cors.allowed_methods` | []string | Connect defaults | Allowed methods |
+| `server.cors.allowed_headers` | []string | Connect defaults | Allowed headers |
+| `server.cors.allow_credentials` | bool | `false` | Allow credentials |
+| `server.cors.max_age` | int | `0` | Preflight max age (seconds) |
+
+**Auth:**
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `server.auth.mode` | string | `disabled` | `required` or `disabled` |
+| `server.auth.jwks_url` | string | none | JWKS endpoint URL |
+| `server.auth.oidc_discovery` | bool | `false` | Use OIDC discovery |
+| `server.auth.issuers` | []string | none | Trusted token issuers |
+| `server.auth.audiences` | []string | none | Expected audiences |
+| `server.auth.required_claims` | []string | none | Required JWT claims |
+| `server.auth.clock_skew` | duration | `0s` | Clock drift allowance (max 5m) |
+
+**Rate Limit:**
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `server.rate_limit.enabled` | bool | `false` | Enable rate limiting |
+| `server.rate_limit.requests_per_second` | float | `10` | Requests per second |
+| `server.rate_limit.burst` | int | `20` | Burst size |
+
+**Security:**
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `server.security.allow_public` | bool | `false` | Allow binding to non-loopback addresses |
+| `server.security.allow_insecure` | bool | `false` | Allow no TLS/auth or policy load failures |
+
+**Egress:**
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `server.egress.allowed_hosts` | []string | none | Hostnames allowed to resolve to private IPs |
+| `server.egress.allowed_cidrs` | []string | none | CIDR ranges allowed for outbound connections |
+| `server.egress.allow_ssh` | bool | `false` | Allow non-HTTPS git targets (ssh://, git://, git@) |
+| `server.egress.allow_loopback` | bool | `false` | Allow loopback addresses |
+| `server.egress.allow_link_local` | bool | `false` | Allow link-local addresses |
+
+**Environment variables:**
+- `DEPUTY_SERVER_ADDR`
+- `DEPUTY_SERVER_READ_TIMEOUT`
+- `DEPUTY_SERVER_WRITE_TIMEOUT`
+- `DEPUTY_SERVER_IDLE_TIMEOUT`
+- `DEPUTY_SERVER_MAX_REQUEST_BODY_BYTES`
+- `DEPUTY_SERVER_TLS_CERT`
+- `DEPUTY_SERVER_TLS_KEY`
+- `DEPUTY_SERVER_TLS_CLIENT_CA`
+- `DEPUTY_SERVER_CORS_ORIGINS`
+- `DEPUTY_SERVER_CORS_METHODS`
+- `DEPUTY_SERVER_CORS_HEADERS`
+- `DEPUTY_SERVER_CORS_CREDENTIALS`
+- `DEPUTY_SERVER_CORS_MAX_AGE`
+- `DEPUTY_SERVER_AUTH_ENABLED`
+- `DEPUTY_SERVER_AUTH_MODE`
+- `DEPUTY_SERVER_AUTH_JWKS_URL`
+- `DEPUTY_SERVER_AUTH_OIDC_DISCOVERY`
+- `DEPUTY_SERVER_AUTH_ISSUERS`
+- `DEPUTY_SERVER_AUTH_AUDIENCES`
+- `DEPUTY_SERVER_AUTH_REQUIRED_CLAIMS`
+- `DEPUTY_SERVER_AUTH_CLOCK_SKEW`
+- `DEPUTY_SERVER_RATE_LIMIT_ENABLED`
+- `DEPUTY_SERVER_RATE_LIMIT_RPS`
+- `DEPUTY_SERVER_RATE_LIMIT_BURST`
+- `DEPUTY_SERVER_SECURITY_ALLOW_PUBLIC`
+- `DEPUTY_SERVER_SECURITY_ALLOW_INSECURE`
+- `DEPUTY_SERVER_EGRESS_ALLOW_HOSTS`
+- `DEPUTY_SERVER_EGRESS_ALLOW_CIDRS`
+- `DEPUTY_SERVER_EGRESS_ALLOW_SSH`
+- `DEPUTY_SERVER_EGRESS_ALLOW_LOOPBACK`
+- `DEPUTY_SERVER_EGRESS_ALLOW_LINK_LOCAL`
+- `DEPUTY_SERVER_EGRESS_ALLOW_SSH`
+- `DEPUTY_SERVER_EGRESS_ALLOW_LOOPBACK`
+- `DEPUTY_SERVER_EGRESS_ALLOW_LINK_LOCAL`
+
 ### AI / Agents
 
 | Key | Type | Default | Description |
@@ -223,6 +379,37 @@ DEPUTY_PROXY_POLICIES=policy/proxy.yaml
 
 # Server / Connection
 DEPUTY_SERVER=http://localhost:8090
+DEPUTY_SERVER_ADDR=127.0.0.1:8090
+DEPUTY_SERVER_READ_TIMEOUT=30s
+DEPUTY_SERVER_WRITE_TIMEOUT=5m
+DEPUTY_SERVER_IDLE_TIMEOUT=2m
+DEPUTY_SERVER_MAX_REQUEST_BODY_BYTES=10485760
+DEPUTY_SERVER_TLS_CERT=/path/to/cert.pem
+DEPUTY_SERVER_TLS_KEY=/path/to/key.pem
+DEPUTY_SERVER_TLS_CLIENT_CA=/path/to/ca.pem
+DEPUTY_SERVER_CORS_ORIGINS=https://app.example.com
+DEPUTY_SERVER_CORS_METHODS=GET,POST
+DEPUTY_SERVER_CORS_HEADERS=Authorization,Content-Type
+DEPUTY_SERVER_CORS_CREDENTIALS=true
+DEPUTY_SERVER_CORS_MAX_AGE=600
+DEPUTY_SERVER_AUTH_ENABLED=true
+DEPUTY_SERVER_AUTH_MODE=required
+DEPUTY_SERVER_AUTH_JWKS_URL=https://issuer/.well-known/jwks.json
+DEPUTY_SERVER_AUTH_OIDC_DISCOVERY=true
+DEPUTY_SERVER_AUTH_ISSUERS=https://issuer
+DEPUTY_SERVER_AUTH_AUDIENCES=deputy-server
+DEPUTY_SERVER_AUTH_REQUIRED_CLAIMS=sub,tenant
+DEPUTY_SERVER_AUTH_CLOCK_SKEW=30s
+DEPUTY_SERVER_RATE_LIMIT_ENABLED=true
+DEPUTY_SERVER_RATE_LIMIT_RPS=10
+DEPUTY_SERVER_RATE_LIMIT_BURST=20
+DEPUTY_SERVER_SECURITY_ALLOW_PUBLIC=false
+DEPUTY_SERVER_SECURITY_ALLOW_INSECURE=false
+DEPUTY_SERVER_EGRESS_ALLOW_HOSTS=.corp.local
+DEPUTY_SERVER_EGRESS_ALLOW_CIDRS=10.0.0.0/8
+DEPUTY_SERVER_EGRESS_ALLOW_SSH=false
+DEPUTY_SERVER_EGRESS_ALLOW_LOOPBACK=false
+DEPUTY_SERVER_EGRESS_ALLOW_LINK_LOCAL=false
 ```
 
 ## Per-Project vs Global Config

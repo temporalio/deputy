@@ -179,6 +179,15 @@ policy:
 #   cache:
 #     ttl: 1h
 #     disabled: false
+
+# Local CLI egress allowlists (optional, for in-process mode)
+# egress:
+#   allowed_hosts:
+#     - ".corp.local"
+#   allowed_cidrs:
+#     - "10.0.0.0/8"
+#   allow_loopback: false
+#   allow_link_local: false
 `
 
 const policyTemplate = `

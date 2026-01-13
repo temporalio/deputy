@@ -22,7 +22,8 @@ import (
 
 // GraphHandler implements the GraphService gRPC handler.
 type GraphHandler struct {
-	localMode bool // Skip remote target validation for in-process usage
+	localMode    bool // Skip remote target validation for in-process usage
+	targetPolicy *targets.RemoteTargetPolicy
 }
 
 // Ensure GraphHandler implements the GraphServiceHandler interface.
@@ -36,6 +37,13 @@ type GraphHandlerOption func(*GraphHandler)
 func WithGraphLocalMode() GraphHandlerOption {
 	return func(h *GraphHandler) {
 		h.localMode = true
+	}
+}
+
+// WithGraphTargetPolicy sets the remote target policy for server mode validation.
+func WithGraphTargetPolicy(policy *targets.RemoteTargetPolicy) GraphHandlerOption {
+	return func(h *GraphHandler) {
+		h.targetPolicy = policy
 	}
 }
 
@@ -71,7 +79,7 @@ func (h *GraphHandler) BuildGraph(
 
 	// Security: Validate target is accessible from remote server (skip in local mode)
 	if !h.localMode {
-		if err := targets.ValidateRemoteTarget(target); err != nil {
+		if err := targets.ValidateRemoteTargetWithPolicy(target, h.targetPolicy); err != nil {
 			otel.SetSpanError(span, err)
 			return nil, connect.NewError(connect.CodeInvalidArgument, err)
 		}
@@ -202,7 +210,7 @@ func (h *GraphHandler) WhyDependency(
 
 	// Security: Validate target is accessible from remote server (skip in local mode)
 	if !h.localMode {
-		if err := targets.ValidateRemoteTarget(target); err != nil {
+		if err := targets.ValidateRemoteTargetWithPolicy(target, h.targetPolicy); err != nil {
 			otel.SetSpanError(span, err)
 			return nil, connect.NewError(connect.CodeInvalidArgument, err)
 		}
@@ -333,7 +341,7 @@ func (h *GraphHandler) QueryGraph(
 
 	// Security: Validate target is accessible from remote server (skip in local mode)
 	if !h.localMode {
-		if err := targets.ValidateRemoteTarget(target); err != nil {
+		if err := targets.ValidateRemoteTargetWithPolicy(target, h.targetPolicy); err != nil {
 			otel.SetSpanError(span, err)
 			return nil, connect.NewError(connect.CodeInvalidArgument, err)
 		}

@@ -3,6 +3,7 @@ package network
 import (
 	"net"
 	"net/http"
+	"net/netip"
 	"time"
 )
 
@@ -31,10 +32,7 @@ func SafeClient() *http.Client {
 
 // SafeTransportWithOptions returns an http.RoundTripper with custom SafeDialer options.
 func SafeTransportWithOptions(opts ...Option) http.RoundTripper {
-	dialer := NewSafeDialer()
-	for _, opt := range opts {
-		opt(dialer)
-	}
+	dialer := NewSafeDialerWithOptions(opts...)
 	return &http.Transport{
 		DialContext:           dialer.DialContext,
 		ForceAttemptHTTP2:     true,
@@ -49,6 +47,20 @@ func SafeTransportWithOptions(opts ...Option) http.RoundTripper {
 func WithAllowPrivate() Option {
 	return func(d *SafeDialer) {
 		d.AllowPrivate = true
+	}
+}
+
+// WithAllowedHosts allows explicit host allowlisting.
+func WithAllowedHosts(hosts ...string) Option {
+	return func(d *SafeDialer) {
+		d.AllowedHosts = append(d.AllowedHosts, hosts...)
+	}
+}
+
+// WithAllowedCIDRs allows explicit CIDR allowlisting.
+func WithAllowedCIDRs(prefixes ...netip.Prefix) Option {
+	return func(d *SafeDialer) {
+		d.AllowedCIDRs = append(d.AllowedCIDRs, prefixes...)
 	}
 }
 

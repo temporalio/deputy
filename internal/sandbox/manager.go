@@ -206,12 +206,15 @@ func (m *Manager) Execute(ctx context.Context, req *sandboxv1.ExecuteRequest) it
 		executionID := GenerateExecutionID("sandbox")
 		startTime := time.Now()
 
+		// Check if runtime was explicitly requested before normalization
+		explicitlyRequested := req.GetConfig().GetRuntime() != sandboxv1.Runtime_RUNTIME_UNSPECIFIED
+
 		// Normalize configuration with defaults
 		cfg := m.normalizeConfig(req.GetConfig())
 		req.Config = cfg
 
 		// Select runtime first to log it properly
-		selectedRuntime, err := m.selectRuntime(ctx, cfg)
+		selectedRuntime, err := m.selectRuntime(ctx, cfg, explicitlyRequested)
 		if err != nil {
 			m.auditor.LogExecutionFailed(ctx, executionID, sandboxv1.Runtime_RUNTIME_UNSPECIFIED, err)
 			yield(&sandboxv1.ExecuteEvent{
@@ -343,7 +346,9 @@ func (m *Manager) normalizeConfig(cfg *sandboxv1.SandboxConfig) *sandboxv1.Sandb
 }
 
 // selectRuntime chooses the best available runtime for the configuration.
-func (m *Manager) selectRuntime(ctx context.Context, cfg *sandboxv1.SandboxConfig) (Runtime, error) {
+// When explicitlyRequested is true, the runtime was specified by the user and
+// we should not fall back to alternatives.
+func (m *Manager) selectRuntime(ctx context.Context, cfg *sandboxv1.SandboxConfig, explicitlyRequested bool) (Runtime, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
@@ -351,25 +356,37 @@ func (m *Manager) selectRuntime(ctx context.Context, cfg *sandboxv1.SandboxConfi
 
 	// Try requested runtime first
 	if requestedRuntime != sandboxv1.Runtime_RUNTIME_UNSPECIFIED {
-		if rt := m.registry.Get(requestedRuntime); rt != nil && rt.Available(ctx) {
+		rt := m.registry.Get(requestedRuntime)
+		if rt == nil {
+			if explicitlyRequested {
+				return nil, fmt.Errorf("runtime %s is not registered", requestedRuntime)
+			}
+		} else if rt.Available(ctx) {
 			return rt, nil
+		} else if explicitlyRequested {
+			// User explicitly requested this runtime but it's not available
+			return nil, fmt.Errorf("runtime %s is not available", requestedRuntime)
 		}
 	}
 
-	// Try fallback runtimes
-	for _, fallback := range m.config.FallbackRuntimes {
-		if rt := m.registry.Get(fallback); rt != nil && rt.Available(ctx) {
-			slog.Debug("using fallback runtime",
-				"requested", requestedRuntime.String(),
-				"fallback", fallback.String(),
-			)
-			return rt, nil
+	// Only try fallback runtimes if not explicitly requested
+	if !explicitlyRequested {
+		for _, fallback := range m.config.FallbackRuntimes {
+			if rt := m.registry.Get(fallback); rt != nil && rt.Available(ctx) {
+				slog.Debug("using fallback runtime",
+					"requested", requestedRuntime.String(),
+					"fallback", fallback.String(),
+				)
+				return rt, nil
+			}
 		}
 	}
 
-	// Try default
-	if def := m.registry.Default(ctx); def != nil {
-		return def, nil
+	// Try default only if not explicitly requested
+	if !explicitlyRequested {
+		if def := m.registry.Default(ctx); def != nil {
+			return def, nil
+		}
 	}
 
 	return nil, fmt.Errorf("no available runtime (requested: %s)", requestedRuntime)

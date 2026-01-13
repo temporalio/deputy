@@ -31,9 +31,12 @@ import (
 	targetv1 "github.com/picatz/deputy/gen/deputy/target/v1"
 	"github.com/picatz/deputy/internal/auth/jwt"
 	"github.com/picatz/deputy/internal/cache/memory"
+	"github.com/picatz/deputy/internal/gitutil"
 	"github.com/picatz/deputy/internal/logs"
+	"github.com/picatz/deputy/internal/network"
 	"github.com/picatz/deputy/internal/otel"
 	"github.com/picatz/deputy/internal/policy"
+	"github.com/picatz/deputy/internal/targets"
 	"google.golang.org/protobuf/proto"
 )
 
@@ -70,6 +73,12 @@ type Config struct {
 	// These policies are evaluated at service_* entrypoints to control
 	// which users/services can perform which operations on which targets.
 	Policies []string
+
+	// Security configures explicit security overrides and public binding behavior.
+	Security *SecurityConfig
+
+	// Egress configures outbound network allowlists for remote server mode.
+	Egress *EgressConfig
 }
 
 // TLSConfig configures TLS for the server.
@@ -116,7 +125,6 @@ type CORSConfig struct {
 type AuthConfig struct {
 	// Mode determines how authentication is enforced.
 	// - "required": requests without valid tokens are rejected (401)
-	// - "optional": tokens are validated if present, anonymous access allowed
 	// - "disabled": no authentication (default for backward compatibility)
 	Mode string
 
@@ -142,7 +150,7 @@ type AuthConfig struct {
 	// Defaults to 0 (no skew allowed). Maximum 5 minutes.
 	ClockSkew time.Duration
 
-	// Deprecated: Use Mode="required" or Mode="optional" instead.
+	// Deprecated: Use Mode="required" or Mode="disabled" instead.
 	// Enabled turns authentication on/off.
 	Enabled bool
 
@@ -199,10 +207,42 @@ type RateLimitConfig struct {
 	TrustedProxies []string
 }
 
+// SecurityConfig controls explicit opt-ins for unsafe server modes.
+type SecurityConfig struct {
+	// AllowPublic permits binding to non-loopback addresses (e.g., 0.0.0.0).
+	// This must be explicitly enabled for remote server deployments.
+	AllowPublic bool
+
+	// AllowInsecure permits starting the server without TLS/auth safeguards
+	// or when configuration validation fails (e.g., policy load errors).
+	// This should only be used for local development.
+	AllowInsecure bool
+}
+
+// EgressConfig restricts outbound access for remote server mode.
+// Use allowlists to permit internal registries or SCM safely.
+type EgressConfig struct {
+	// AllowedHosts is a list of hostnames allowed to resolve to private IPs.
+	// Entries may be exact hosts or suffixes prefixed with a dot (e.g., ".corp.local").
+	AllowedHosts []string
+
+	// AllowedCIDRs is a list of CIDR ranges allowed for outbound connections.
+	AllowedCIDRs []string
+
+	// AllowSSH permits SSH-style git targets (ssh://, git@host:repo).
+	AllowSSH bool
+
+	// AllowLoopback permits loopback targets (127.0.0.1, ::1) for remote server mode.
+	AllowLoopback bool
+
+	// AllowLinkLocal permits link-local targets (169.254.0.0/16, fe80::/10).
+	AllowLinkLocal bool
+}
+
 // DefaultConfig returns a Config with sensible defaults.
 func DefaultConfig() Config {
 	return Config{
-		Addr:                ":8090",
+		Addr:                "127.0.0.1:8090",
 		ReadTimeout:         30 * time.Second,
 		WriteTimeout:        5 * time.Minute, // Scans can take a while
 		IdleTimeout:         2 * time.Minute,
@@ -214,29 +254,44 @@ func DefaultConfig() Config {
 type Server struct {
 	config        Config
 	httpServer    *http.Server
-	handler       http.Handler       // The fully wrapped handler with all middleware
-	authenticator jwt.Authenticator  // JWT authenticator (nil if auth disabled)
-	policies      []policy.Source    // Loaded policy sources (nil if no policies)
+	handler       http.Handler      // The fully wrapped handler with all middleware
+	authenticator jwt.Authenticator // JWT authenticator (nil if auth disabled)
+	policies      []policy.Source   // Loaded policy sources (nil if no policies)
+	egressOptions []network.Option
 }
 
 // New creates a new Deputy server with the given configuration.
-func New(cfg Config) *Server {
+func New(cfg Config) (*Server, error) {
 	applyDefaults(&cfg)
+	if err := validateConfig(cfg); err != nil {
+		return nil, err
+	}
 
 	mux := http.NewServeMux()
 
 	// Initialize JWT authenticator if auth is configured
 	var authenticator jwt.Authenticator
 	var authnMiddleware *authn.Middleware
-	authMode := getAuthMode(cfg.Auth)
+	authMode, err := getAuthMode(cfg.Auth)
+	if err != nil {
+		return nil, err
+	}
 
 	if authMode != jwt.ModeDisabled {
 		jwtConfig := buildJWTConfig(cfg.Auth)
 		if jwtConfig != nil {
 			auth, err := jwt.NewAuthenticator(jwtConfig)
 			if err != nil {
-				logs.Error(context.Background(), "failed to create JWT authenticator", "error", err)
-			} else {
+				if allowInsecure(cfg) {
+					logs.Warn(context.Background(), "authenticator setup failed; continuing without auth (insecure override)",
+						"error", err,
+					)
+					authMode = jwt.ModeDisabled
+				} else {
+					return nil, fmt.Errorf("authenticator setup failed: %w", err)
+				}
+			}
+			if authMode != jwt.ModeDisabled {
 				authenticator = auth
 				// Create authn middleware using our JWT authenticator
 				// This validates tokens at the HTTP layer before request deserialization
@@ -280,12 +335,34 @@ func New(cfg Config) *Server {
 		var err error
 		policies, err = policy.LoadSources(cfg.Policies)
 		if err != nil {
-			logs.Error(context.Background(), "failed to load policies", "error", err, "paths", cfg.Policies)
-		} else {
+			if allowInsecure(cfg) {
+				logs.Warn(context.Background(), "policy load failed; continuing without policies (insecure override)",
+					"error", err,
+					"paths", cfg.Policies,
+				)
+				policies = nil
+			} else {
+				return nil, fmt.Errorf("load policies: %w", err)
+			}
+		}
+		if len(policies) > 0 {
 			logs.Info(context.Background(), "loaded server policies",
 				"count", len(policies),
 				"paths", cfg.Policies,
 			)
+		}
+	}
+
+	targetPolicy, egressOptions, err := buildTargetPolicy(cfg)
+	if err != nil {
+		if allowInsecure(cfg) {
+			logs.Warn(context.Background(), "egress policy configuration failed; continuing with defaults (insecure override)",
+				"error", err,
+			)
+			targetPolicy = nil
+			egressOptions = nil
+		} else {
+			return nil, err
 		}
 	}
 
@@ -308,13 +385,13 @@ func New(cfg Config) *Server {
 	}
 
 	// Create service handlers
-	scanHandler := NewScanHandler()
-	sbomHandler := NewSBOMHandler()
-	listHandler := NewListHandler()
+	scanHandler := NewScanHandler(WithScanTargetPolicy(targetPolicy))
+	sbomHandler := NewSBOMHandler(WithSBOMTargetPolicy(targetPolicy))
+	listHandler := NewListHandler(WithListTargetPolicy(targetPolicy))
 	remediationHandler := NewRemediationHandler()
-	secretsHandler, _ := NewSecretsHandler()
-	diffHandler := NewDiffHandler()
-	graphHandler := NewGraphHandler()
+	secretsHandler, _ := NewSecretsHandler(WithSecretsTargetPolicy(targetPolicy))
+	diffHandler := NewDiffHandler(WithDiffTargetPolicy(targetPolicy))
+	graphHandler := NewGraphHandler(WithGraphTargetPolicy(targetPolicy))
 
 	// Register ConnectRPC handlers
 	scanPath, scanConnectHandler := scanv1connect.NewScanServiceHandler(
@@ -390,10 +467,9 @@ func New(cfg Config) *Server {
 	if cfg.TLS != nil {
 		tlsConfig, err := buildTLSConfig(cfg.TLS)
 		if err != nil {
-			logs.Error(context.Background(), "failed to build TLS config", "error", err)
-		} else {
-			httpServer.TLSConfig = tlsConfig
+			return nil, err
 		}
+		httpServer.TLSConfig = tlsConfig
 	}
 
 	return &Server{
@@ -402,7 +478,8 @@ func New(cfg Config) *Server {
 		handler:       handler, // The wrapped handler with all middleware
 		authenticator: authenticator,
 		policies:      policies,
-	}
+		egressOptions: egressOptions,
+	}, nil
 }
 
 // applyDefaults fills in default values for missing config fields.
@@ -423,6 +500,97 @@ func applyDefaults(cfg *Config) {
 	if cfg.MaxRequestBodyBytes == 0 {
 		cfg.MaxRequestBodyBytes = defaults.MaxRequestBodyBytes
 	}
+}
+
+func allowInsecure(cfg Config) bool {
+	if cfg.Security == nil {
+		return false
+	}
+	return cfg.Security.AllowInsecure
+}
+
+func validateConfig(cfg Config) error {
+	security := SecurityConfig{}
+	if cfg.Security != nil {
+		security = *cfg.Security
+	}
+
+	host, _, err := net.SplitHostPort(cfg.Addr)
+	if err != nil {
+		return fmt.Errorf("invalid server address %q: %w", cfg.Addr, err)
+	}
+
+	authMode, err := getAuthMode(cfg.Auth)
+	if err != nil {
+		return err
+	}
+
+	if !isLoopbackHost(host) {
+		if !security.AllowPublic && !security.AllowInsecure {
+			return fmt.Errorf("public bind %q requires security.allow_public or security.allow_insecure", cfg.Addr)
+		}
+		if !security.AllowInsecure {
+			if cfg.TLS == nil {
+				return fmt.Errorf("public bind %q requires TLS configuration", cfg.Addr)
+			}
+			if authMode != jwt.ModeRequired {
+				return fmt.Errorf("public bind %q requires auth mode 'required'", cfg.Addr)
+			}
+		}
+	}
+
+	return nil
+}
+
+func buildTargetPolicy(cfg Config) (*targets.RemoteTargetPolicy, []network.Option, error) {
+	if cfg.Egress == nil {
+		return nil, nil, nil
+	}
+
+	allowedCIDRs, err := targets.ParseCIDRs(cfg.Egress.AllowedCIDRs)
+	if err != nil {
+		return nil, nil, fmt.Errorf("invalid egress CIDR: %w", err)
+	}
+
+	policy := &targets.RemoteTargetPolicy{
+		AllowedHosts:   cfg.Egress.AllowedHosts,
+		AllowedCIDRs:   allowedCIDRs,
+		AllowSSH:       cfg.Egress.AllowSSH,
+		AllowLoopback:  cfg.Egress.AllowLoopback,
+		AllowLinkLocal: cfg.Egress.AllowLinkLocal,
+	}
+
+	var opts []network.Option
+	if len(cfg.Egress.AllowedHosts) > 0 {
+		opts = append(opts, network.WithAllowedHosts(cfg.Egress.AllowedHosts...))
+	}
+	if len(allowedCIDRs) > 0 {
+		opts = append(opts, network.WithAllowedCIDRs(allowedCIDRs...))
+	}
+	if cfg.Egress.AllowLoopback {
+		opts = append(opts, network.WithAllowLoopback())
+	}
+	if cfg.Egress.AllowLinkLocal {
+		opts = append(opts, network.WithAllowLinkLocal())
+	}
+
+	return policy, opts, nil
+}
+
+func isLoopbackHost(host string) bool {
+	host = strings.TrimSpace(host)
+	if host == "" {
+		return false
+	}
+	host = strings.TrimPrefix(strings.TrimSuffix(host, "]"), "[")
+	if strings.EqualFold(host, "localhost") {
+		return true
+	}
+	ip := net.ParseIP(host)
+	if ip == nil {
+		return false
+	}
+	return ip.IsLoopback()
 }
 
 // buildTLSConfig creates a tls.Config from TLSConfig.
@@ -456,27 +624,23 @@ func buildTLSConfig(cfg *TLSConfig) (*tls.Config, error) {
 
 // getAuthMode returns the effective auth mode from config.
 // For servers, we only support "required" or "disabled" (not "optional").
-func getAuthMode(cfg *AuthConfig) jwt.Mode {
+func getAuthMode(cfg *AuthConfig) (jwt.Mode, error) {
 	if cfg == nil {
-		return jwt.ModeDisabled
+		return jwt.ModeDisabled, nil
 	}
 
 	// Handle deprecated Enabled field for backward compatibility
 	if cfg.Enabled && cfg.Mode == "" {
-		return jwt.ModeRequired
+		return jwt.ModeRequired, nil
 	}
 
 	switch strings.ToLower(cfg.Mode) {
 	case "required":
-		return jwt.ModeRequired
+		return jwt.ModeRequired, nil
 	case "disabled", "":
-		return jwt.ModeDisabled
+		return jwt.ModeDisabled, nil
 	default:
-		// For server mode, treat unknown modes as disabled
-		logs.Warn(context.Background(), "unknown auth mode, defaulting to disabled",
-			"mode", cfg.Mode,
-			"hint", "server supports 'required' or 'disabled'")
-		return jwt.ModeDisabled
+		return jwt.ModeDisabled, fmt.Errorf("unsupported auth mode %q (server supports 'required' or 'disabled')", cfg.Mode)
 	}
 }
 
@@ -525,12 +689,18 @@ func buildJWTConfig(cfg *AuthConfig) *jwt.Config {
 // ListenAndServe starts the server and blocks until it stops.
 func (s *Server) ListenAndServe() error {
 	ctx := context.Background()
+	s.applyEgressOptions()
 	if s.config.TLS != nil {
 		logs.Info(ctx, "starting Deputy server with TLS", "addr", s.config.Addr)
 		return s.httpServer.ListenAndServeTLS(s.config.TLS.CertFile, s.config.TLS.KeyFile)
 	}
 	logs.Info(ctx, "starting Deputy server", "addr", s.config.Addr)
 	return s.httpServer.ListenAndServe()
+}
+
+func (s *Server) applyEgressOptions() {
+	network.SetDefaultSafeDialerOptions(s.egressOptions...)
+	gitutil.InstallSafeGitTransport()
 }
 
 // Shutdown gracefully shuts down the server.
@@ -1070,4 +1240,3 @@ func extractTargetFromMessage(msg any) string {
 
 	return ""
 }
-
