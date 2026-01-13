@@ -299,6 +299,28 @@ var BindingProfiles = map[Entrypoint]BindingProfile{
 		Optional:    append(targetVars, jwtVars...),
 		Description: "Triggers before a graph operation via the API",
 	},
+
+	// Sandbox entrypoints - for controlling sandboxed execution.
+	// These enable policies to control what can run in sandboxes, with what configuration,
+	// and what network/filesystem access is allowed.
+	EntrypointSandboxExecution: {
+		Entrypoint:  EntrypointSandboxExecution,
+		Required:    append([]string{"command", "workspace_dir", "requested_config"}, envVars...),
+		Optional:    []string{"context", "source"},
+		Description: "Triggers before any sandbox execution begins",
+	},
+	EntrypointSandboxCommand: {
+		Entrypoint:  EntrypointSandboxCommand,
+		Required:    append([]string{"command", "sandbox_config"}, envVars...),
+		Optional:    []string{"context"},
+		Description: "Triggers for each command executed within a sandbox session",
+	},
+	EntrypointSandboxNetwork: {
+		Entrypoint:  EntrypointSandboxNetwork,
+		Required:    append([]string{"host", "port", "protocol", "sandbox_config"}, envVars...),
+		Optional:    []string{"context"},
+		Description: "Triggers when a sandbox requests network access",
+	},
 }
 
 // GetBindingProfile returns the binding profile for an entrypoint.
