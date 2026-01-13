@@ -28,9 +28,12 @@
 package main
 
 import (
+	"bytes"
 	"context"
+	"encoding/base64"
 	"flag"
 	"fmt"
+	"io"
 	"log"
 	"log/slog"
 	"net"
@@ -38,12 +41,15 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strconv"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
 
 	"connectrpc.com/connect"
 	"github.com/Code-Hex/vz/v3"
+	"github.com/creack/pty"
 	sandboxv1 "github.com/picatz/deputy/gen/deputy/sandbox/v1"
 	"github.com/picatz/deputy/gen/deputy/sandbox/v1/sandboxv1connect"
 	"golang.org/x/net/http2"
@@ -63,6 +69,15 @@ const (
 
 	// Default locations
 	defaultAssetDir = ".deputy/vz"
+
+	// Protocol markers for parsing VM output
+	// The init script wraps output with these markers so we can distinguish
+	// command output from kernel/boot messages.
+	outputStartMarker = "<<<DEPUTY_OUTPUT_START>>>"
+	outputEndMarker   = "<<<DEPUTY_OUTPUT_END>>>"
+	exitCodeMarker    = "<<<DEPUTY_EXIT_CODE:"
+	stderrMarker      = "<<<DEPUTY_STDERR>>>"
+	stdoutMarker      = "<<<DEPUTY_STDOUT>>>"
 )
 
 func main() {
@@ -166,13 +181,21 @@ func (h *vzHandler) Execute(
 	}
 
 	// Validate assets exist
-	kernelPath, rootfsPath, initrdPath, err := h.resolveAssetPaths()
+	kernelPath, rootfsPath, err := h.resolveAssetPaths()
 	if err != nil {
 		return stream.Send(h.errorEvent(executionID, "ASSET_ERROR", err.Error()))
 	}
 
-	// Create VM configuration
-	vmConfig, err := h.createVMConfig(execReq, kernelPath, rootfsPath, initrdPath)
+	// Create PTY for VM console I/O (PTY works better than pipes with Virtualization.framework)
+	ptyMaster, ptySlave, err := pty.Open()
+	if err != nil {
+		return stream.Send(h.errorEvent(executionID, "PTY_ERROR", fmt.Sprintf("failed to create PTY: %v", err)))
+	}
+	defer ptyMaster.Close()
+	defer ptySlave.Close()
+
+	// Create VM configuration with the PTY slave (VM reads/writes to slave, we read/write to master)
+	vmConfig, err := h.createVMConfig(execReq, kernelPath, rootfsPath, ptySlave, ptySlave)
 	if err != nil {
 		return stream.Send(h.errorEvent(executionID, "CONFIG_ERROR", err.Error()))
 	}
@@ -226,31 +249,80 @@ func (h *vzHandler) Execute(
 		return err
 	}
 
+	// Start output parser goroutine
+	outputDone := make(chan *executionResult, 1)
+	go h.parseVMOutput(vmCtx, ptyMaster, stream, executionID, outputDone)
+
 	// Start the VM
+	startTime := time.Now()
+	h.logger.Info("Starting VM", "executionID", executionID, "kernel", kernelPath, "rootfs", rootfsPath)
 	if err := vm.Start(); err != nil {
 		return stream.Send(h.errorEvent(executionID, "VM_START_ERROR", err.Error()))
 	}
 
-	// Wait for VM to complete or context cancellation
-	startTime := time.Now()
-	var exitCode int32 = 0
+	h.logger.Info("VM started successfully", "executionID", executionID, "state", vm.State())
 
-	// Monitor VM state
+	// Set up timeout if specified
+	var timeoutCh <-chan time.Time
+	if timeout := execReq.GetTimeout(); timeout != nil && timeout.AsDuration() > 0 {
+		timeoutCh = time.After(timeout.AsDuration())
+	}
+
+	// Wait for completion
+	var exitCode int32 = 0
+	var execErr error
+
 	select {
 	case <-vmCtx.Done():
-		// Context cancelled, stop VM
+		// Context cancelled
+		h.logger.Debug("VM context cancelled", "executionID", executionID)
 		if vm.CanStop() {
 			_ = vm.Stop()
 		}
-		exitCode = 137 // Killed
+		exitCode = 137
+
+	case <-timeoutCh:
+		// Timeout reached
+		h.logger.Debug("VM timeout reached", "executionID", executionID)
+		if vm.CanStop() {
+			_ = vm.Stop()
+		}
+		execErr = fmt.Errorf("execution timeout")
+		exitCode = 124
+
+	case result := <-outputDone:
+		// Command completed - we got exit code from parsed output
+		h.logger.Debug("VM command completed", "executionID", executionID, "exitCode", result.exitCode)
+		exitCode = result.exitCode
+		if result.err != nil && exitCode == 0 {
+			exitCode = 1
+		}
+		// Stop the VM now that command is done
+		if vm.CanStop() {
+			_ = vm.Stop()
+		}
+
 	case state := <-waitForVMState(vm):
+		// VM stopped unexpectedly
+		h.logger.Debug("VM state changed", "executionID", executionID, "state", state)
 		switch state {
 		case vz.VirtualMachineStateStopped:
-			exitCode = 0
+			// Check if we got a result
+			select {
+			case result := <-outputDone:
+				exitCode = result.exitCode
+			default:
+				exitCode = 0
+			}
 		case vz.VirtualMachineStateError:
 			exitCode = 1
-		default:
-			exitCode = 0
+			execErr = fmt.Errorf("VM error state")
+		}
+	}
+
+	if execErr != nil {
+		if err := stream.Send(h.errorEvent(executionID, "EXECUTION_ERROR", execErr.Error())); err != nil {
+			return err
 		}
 	}
 
@@ -263,6 +335,141 @@ func (h *vzHandler) Execute(
 			Completed: &sandboxv1.CompletedEvent{
 				ExitCode: exitCode,
 				Duration: durationpb.New(duration),
+			},
+		},
+	})
+}
+
+// executionResult holds the result of parsing VM output
+type executionResult struct {
+	exitCode int32
+	err      error
+}
+
+// parseVMOutput reads the VM console output, filters boot messages,
+// and streams command output back via the gRPC stream.
+func (h *vzHandler) parseVMOutput(
+	ctx context.Context,
+	reader io.Reader,
+	stream *connect.ServerStream[sandboxv1.ExecuteEvent],
+	executionID string,
+	done chan<- *executionResult,
+) {
+	defer close(done)
+	h.logger.Info("parseVMOutput started", "executionID", executionID)
+
+	result := &executionResult{exitCode: 0}
+	var outputBuf bytes.Buffer
+	var allOutput bytes.Buffer
+	inOutput := false
+	isStderr := false
+	buf := make([]byte, 4096)
+
+	for {
+		select {
+		case <-ctx.Done():
+			h.logger.Info("parseVMOutput context done", "totalOutput", allOutput.Len())
+			done <- result
+			return
+		default:
+		}
+
+		n, err := reader.Read(buf)
+		if n > 0 {
+			chunk := string(buf[:n])
+			allOutput.WriteString(chunk)
+			h.logger.Info("RAW_READ", "bytes", n, "data", chunk)
+
+			// Process line by line
+			for _, line := range strings.Split(chunk, "\n") {
+				line = strings.TrimRight(line, "\r")
+				if line == "" {
+					continue
+				}
+
+				// Check for protocol markers
+				if strings.Contains(line, outputStartMarker) {
+					inOutput = true
+					isStderr = false
+					continue
+				}
+				if strings.Contains(line, outputEndMarker) {
+					if outputBuf.Len() > 0 {
+						h.sendOutput(stream, executionID, outputBuf.Bytes(), isStderr)
+						outputBuf.Reset()
+					}
+					inOutput = false
+					continue
+				}
+				if strings.Contains(line, exitCodeMarker) {
+					start := strings.Index(line, exitCodeMarker) + len(exitCodeMarker)
+					end := strings.Index(line[start:], ">>>")
+					if end > 0 {
+						if code, parseErr := strconv.ParseInt(line[start:start+end], 10, 32); parseErr == nil {
+							result.exitCode = int32(code)
+						}
+					}
+					h.logger.Info("parseVMOutput exit code found", "exitCode", result.exitCode)
+					done <- result
+					return
+				}
+				if strings.Contains(line, stderrMarker) {
+					if outputBuf.Len() > 0 && !isStderr {
+						h.sendOutput(stream, executionID, outputBuf.Bytes(), false)
+						outputBuf.Reset()
+					}
+					isStderr = true
+					continue
+				}
+				if strings.Contains(line, stdoutMarker) {
+					if outputBuf.Len() > 0 && isStderr {
+						h.sendOutput(stream, executionID, outputBuf.Bytes(), true)
+						outputBuf.Reset()
+					}
+					isStderr = false
+					continue
+				}
+
+				// Buffer output if in output section
+				if inOutput {
+					outputBuf.WriteString(line)
+					outputBuf.WriteByte('\n')
+					if outputBuf.Len() > 4096 {
+						h.sendOutput(stream, executionID, outputBuf.Bytes(), isStderr)
+						outputBuf.Reset()
+					}
+				}
+			}
+		}
+
+		if err != nil {
+			h.logger.Info("parseVMOutput read error", "err", err, "totalOutput", allOutput.Len())
+			if outputBuf.Len() > 0 {
+				h.sendOutput(stream, executionID, outputBuf.Bytes(), isStderr)
+			}
+			done <- result
+			return
+		}
+	}
+}
+
+func (h *vzHandler) sendOutput(
+	stream *connect.ServerStream[sandboxv1.ExecuteEvent],
+	executionID string,
+	data []byte,
+	isStderr bool,
+) {
+	if len(data) == 0 {
+		return
+	}
+
+	_ = stream.Send(&sandboxv1.ExecuteEvent{
+		ExecutionId: executionID,
+		Timestamp:   timestamppb.Now(),
+		Details: &sandboxv1.ExecuteEvent_Output{
+			Output: &sandboxv1.OutputEvent{
+				Data:     data,
+				IsStderr: isStderr,
 			},
 		},
 	})
@@ -320,20 +527,19 @@ func (h *vzHandler) Shutdown() {
 
 func (h *vzHandler) checkAvailability() error {
 	// Check for required assets (vz library handles availability checks internally)
-	_, _, _, err := h.resolveAssetPaths()
+	_, _, err := h.resolveAssetPaths()
 	return err
 }
 
-func (h *vzHandler) resolveAssetPaths() (kernel, rootfs, initrd string, err error) {
+func (h *vzHandler) resolveAssetPaths() (kernel, rootfs string, err error) {
 	// Check environment variables first
 	kernel = os.Getenv(envKernelPath)
 	rootfs = os.Getenv(envRootfsPath)
-	initrd = os.Getenv(envInitrdPath)
 
 	// Fall back to default locations
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
-		return "", "", "", fmt.Errorf("cannot determine home directory: %w", err)
+		return "", "", fmt.Errorf("cannot determine home directory: %w", err)
 	}
 
 	assetDir := filepath.Join(homeDir, defaultAssetDir)
@@ -344,31 +550,24 @@ func (h *vzHandler) resolveAssetPaths() (kernel, rootfs, initrd string, err erro
 	if rootfs == "" {
 		rootfs = filepath.Join(assetDir, "rootfs.img")
 	}
-	if initrd == "" {
-		initrd = filepath.Join(assetDir, "initrd.img")
-	}
 
 	// Validate kernel exists
 	if _, err := os.Stat(kernel); os.IsNotExist(err) {
-		return "", "", "", fmt.Errorf("kernel not found at %s (set %s)", kernel, envKernelPath)
+		return "", "", fmt.Errorf("kernel not found at %s (set %s)", kernel, envKernelPath)
 	}
 
 	// Validate rootfs exists
 	if _, err := os.Stat(rootfs); os.IsNotExist(err) {
-		return "", "", "", fmt.Errorf("rootfs not found at %s (set %s)", rootfs, envRootfsPath)
+		return "", "", fmt.Errorf("rootfs not found at %s (set %s)", rootfs, envRootfsPath)
 	}
 
-	// Initrd is optional
-	if _, err := os.Stat(initrd); os.IsNotExist(err) {
-		initrd = "" // Optional, clear if not found
-	}
-
-	return kernel, rootfs, initrd, nil
+	return kernel, rootfs, nil
 }
 
 func (h *vzHandler) createVMConfig(
 	req *sandboxv1.RuntimeExecuteRequest,
-	kernelPath, rootfsPath, initrdPath string,
+	kernelPath, rootfsPath string,
+	stdinFile, stdoutFile *os.File,
 ) (*vz.VirtualMachineConfiguration, error) {
 	config := req.GetConfig()
 
@@ -392,10 +591,16 @@ func (h *vzHandler) createVMConfig(
 		}
 	}
 
+	// Encode the command to execute in base64 to safely pass it via kernel cmdline
+	// We use a special kernel parameter "deputy.cmd" to pass the command
+	// Commands are space-separated (the init script uses eval to execute)
+	command := req.GetCommand()
+	cmdEncoded := base64.StdEncoding.EncodeToString([]byte(strings.Join(command, " ")))
+
 	// Build kernel command line
-	// The disk is always attached as /dev/vda. The initramfs will find and mount it.
-	// We use init=/bin/bash to skip systemd/cloud-init and boot directly to a shell.
-	cmdline := "console=hvc0 root=/dev/vda rw init=/bin/bash"
+	// The disk is always attached as /dev/vda.
+	// We use init=/deputy-init which reads the command from the deputy.cmd parameter
+	cmdline := fmt.Sprintf("console=hvc0 root=/dev/vda rw init=/deputy-init deputy.cmd=%s", cmdEncoded)
 
 	// Add quiet boot unless debug logging is enabled
 	if os.Getenv("DEPUTY_LOG_LEVEL") != "debug" {
@@ -405,13 +610,8 @@ func (h *vzHandler) createVMConfig(
 		cmdline += " loglevel=7"
 	}
 
-	// Create bootloader with optional initrd
-	bootloaderOpts := []vz.LinuxBootLoaderOption{vz.WithCommandLine(cmdline)}
-	if initrdPath != "" {
-		bootloaderOpts = append(bootloaderOpts, vz.WithInitrd(initrdPath))
-	}
-
-	bootloader, err := vz.NewLinuxBootLoader(kernelPath, bootloaderOpts...)
+	// Create bootloader (no initrd needed - kernel boots directly to rootfs)
+	bootloader, err := vz.NewLinuxBootLoader(kernelPath, vz.WithCommandLine(cmdline))
 	if err != nil {
 		return nil, fmt.Errorf("create bootloader: %w", err)
 	}
@@ -422,8 +622,8 @@ func (h *vzHandler) createVMConfig(
 		return nil, fmt.Errorf("create VM config: %w", err)
 	}
 
-	// Add serial console (for output streaming)
-	serialAttachment, err := vz.NewFileHandleSerialPortAttachment(os.Stdin, os.Stdout)
+	// Add serial console (for output streaming) using our pipes
+	serialAttachment, err := vz.NewFileHandleSerialPortAttachment(stdinFile, stdoutFile)
 	if err != nil {
 		return nil, fmt.Errorf("create serial attachment: %w", err)
 	}

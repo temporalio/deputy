@@ -2,9 +2,6 @@
 
 A Deputy sandbox runtime plugin using Apple's Virtualization.framework for VM-based isolation on macOS.
 
-> [!WARNING]
-> **Work in Progress**: This plugin demonstrates the Deputy sandbox plugin architecture but is not yet fully functional for command execution. The VM boots successfully, but command injection and output capture are still being implemented. Use this as a reference for building sandbox plugins or contributing to its development.
-
 ## Overview
 
 This plugin provides maximum isolation by running each sandbox execution in a lightweight VM using the [vz](https://github.com/Code-Hex/vz) Go bindings for macOS Virtualization.framework.
@@ -15,23 +12,15 @@ This plugin provides maximum isolation by running each sandbox execution in a li
 - Native macOS performance on Apple Silicon
 - No root/sudo required
 
-**Current Status:**
-- [x] Plugin discovery and registration
-- [x] VM configuration and boot
-- [x] Virtio device setup (disk, network, console, filesystem sharing)
-- [ ] Command injection into guest
-- [ ] Output capture and streaming
-- [ ] Exit code detection
-
 **Requirements:**
 - macOS 11.0+ (Big Sur or later)
 - Apple Silicon (arm64) - required for Virtualization.framework
 - Code signing with virtualization entitlements
 - Docker (for creating rootfs on macOS)
 
-## Quick Start (Alpine Linux)
+## Quick Start (Ubuntu 24.04 LTS)
 
-This section provides exact commands to get a working VM sandbox using Alpine Linux.
+This section provides exact commands to get a working VM sandbox using Ubuntu 24.04 LTS (Noble Numbat).
 
 ### 1. Build and Install the Plugin
 
@@ -54,153 +43,175 @@ export PATH="$HOME/bin:$PATH"
 which deputy-sandbox-vz
 ```
 
-### 2. Download Alpine Linux Assets
+### 2. Download Ubuntu Assets
 
-> [!NOTE]
-> This guide uses Alpine Linux 3.19.0 (aarch64 virt edition). To use a newer stable release,
-> check [alpinelinux.org/downloads](https://alpinelinux.org/downloads/) and update both
-> `v3.19` and `3.19.0` in the URL and filename below.
+Download the kernel, initrd, and root filesystem from Ubuntu's official cloud images:
 
 ```bash
 # Create the asset directory
 mkdir -p ~/.deputy/vz
 cd ~/.deputy/vz
 
-# Download Alpine virt ISO (contains kernel and initramfs)
-curl -LO https://dl-cdn.alpinelinux.org/alpine/v3.19/releases/aarch64/alpine-virt-3.19.0-aarch64.iso
+# Download kernel (vmlinuz) - this is a gzip-compressed file
+curl -LO https://cloud-images.ubuntu.com/releases/24.04/release/unpacked/ubuntu-24.04-server-cloudimg-arm64-vmlinuz-generic
+mv ubuntu-24.04-server-cloudimg-arm64-vmlinuz-generic vmlinuz.gz
 
-# Extract kernel and initramfs from the ISO
-bsdtar -xf alpine-virt-3.19.0-aarch64.iso boot/vmlinuz-virt boot/initramfs-virt
+# Decompress the kernel
+gunzip vmlinuz.gz
 
-# Move to expected locations
-mv boot/vmlinuz-virt vmlinuz.efi
-mv boot/initramfs-virt initrd.img
-rmdir boot
-```
-
-### 3. Extract the Uncompressed Kernel
-
-The `vmlinuz-virt` file is an EFI stub. Virtualization.framework needs the raw kernel image:
-
-```bash
-cd ~/.deputy/vz
-
-# Find the gzip-compressed kernel inside the EFI wrapper
-# The gzip signature (1f 8b 08) marks the start of the compressed kernel
-OFFSET=$(xxd vmlinuz.efi | grep "1f8b 08" | head -1 | cut -d: -f1)
-if [ -z "$OFFSET" ]; then
-    echo "Error: Failed to locate gzip signature in vmlinuz.efi."
-    echo "The kernel format may have changed. Please verify the Alpine ISO version"
-    echo "and check https://github.com/picatz/deputy for updated extraction instructions."
-    exit 1
-fi
-OFFSET_DEC=$((16#${OFFSET}))
-
-# Extract and decompress
-dd if=vmlinuz.efi bs=1 skip=$OFFSET_DEC of=vmlinux.gz 2>/dev/null
-gunzip -f vmlinux.gz 2>/dev/null || true  # Ignore trailing garbage warning
-mv vmlinux vmlinuz
-
-# Verify it's a proper kernel image
+# Verify it's a proper ARM64 kernel
 file vmlinuz
-# Should show: Linux kernel ARM64 boot executable Image, little-endian, 4K pages
+# Expected: Linux kernel ARM64 boot executable Image, little-endian, 4K pages
+
+# Download initrd - this may be zstd or gzip compressed
+curl -LO https://cloud-images.ubuntu.com/releases/24.04/release/unpacked/ubuntu-24.04-server-cloudimg-arm64-initrd-generic
+mv ubuntu-24.04-server-cloudimg-arm64-initrd-generic initrd.img
+
+# Check compression type and decompress if needed
+file initrd.img
+# If it shows "Zstandard compressed", decompress:
+# zstd -d initrd.img -o initrd.cpio && mv initrd.cpio initrd.img
+# If it shows "gzip compressed":
+# mv initrd.img initrd.img.gz && gunzip initrd.img.gz
+
+# Download root filesystem tarball
+curl -LO https://cloud-images.ubuntu.com/releases/24.04/release/ubuntu-24.04-server-cloudimg-arm64-root.tar.xz
 ```
 
-### 4. Create a Root Filesystem
+### 3. Create the Root Filesystem Image
 
-The Alpine initramfs needs a root filesystem to complete its boot sequence.
-
-**Option A: Quick Setup with Docker** (Recommended)
-
-First, download the Alpine minirootfs tarball:
+Use Docker to create an ext4 disk image from the root tarball (macOS can't create ext4 natively):
 
 ```bash
 cd ~/.deputy/vz
-curl -LO https://dl-cdn.alpinelinux.org/alpine/v3.19/releases/aarch64/alpine-minirootfs-3.19.0-aarch64.tar.gz
-```
 
-Then create the rootfs image using Docker with `--privileged` (required for loop mounting):
+# Use Docker to create an ext4 rootfs (requires --privileged for loop mount)
+docker run --rm --privileged -v ~/.deputy/vz:/output ubuntu:24.04 bash -c '
+  set -ex
+  apt-get update && apt-get install -y xz-utils e2fsprogs
 
-```bash
-# Use Docker to create an ext4 rootfs (macOS can't create ext4 natively)
-# Note: --privileged is required to mount the disk image inside the container
-docker run --rm --privileged -v ~/.deputy/vz:/output alpine:3.19 sh -c '
-  apk add --no-cache e2fsprogs
-
-  # Create and format the disk image
-  dd if=/dev/zero of=/output/rootfs.img bs=1M count=256
+  # Create a 1GB disk image (Ubuntu needs more space than Alpine)
+  dd if=/dev/zero of=/output/rootfs.img bs=1M count=1024
   mkfs.ext4 -F /output/rootfs.img
 
-  # Mount using loop device (needs privileged)
+  # Mount the image
   mkdir -p /mnt/rootfs
   mount -o loop /output/rootfs.img /mnt/rootfs
 
-  # Extract the minirootfs
-  tar -xzf /output/alpine-minirootfs-3.19.0-aarch64.tar.gz -C /mnt/rootfs
+  # Extract the Ubuntu root filesystem
+  tar -xJf /output/ubuntu-24.04-server-cloudimg-arm64-root.tar.xz -C /mnt/rootfs
 
-  # Create a simple init script
-  cat > /mnt/rootfs/init << "EOF"
+  # Create deputy-init script for command execution
+  cat > /mnt/rootfs/deputy-init << "INITSCRIPT"
 #!/bin/sh
-mount -t proc proc /proc
-mount -t sysfs sys /sys
-mount -t devtmpfs dev /dev
-exec /bin/sh
-EOF
-  chmod +x /mnt/rootfs/init
+# deputy-init - Init script for Deputy VZ sandbox
+#
+# This script is executed as the init process (PID 1) inside the VM.
+# It reads the base64-encoded command from the kernel cmdline parameter "deputy.cmd",
+# executes it, and reports the exit code via protocol markers.
+
+# Mount essential filesystems
+mount -t proc proc /proc 2>/dev/null
+mount -t sysfs sys /sys 2>/dev/null
+mount -t devtmpfs dev /dev 2>/dev/null
+
+# Get the base64-encoded command from kernel cmdline
+CMD_BASE64=""
+for param in $(cat /proc/cmdline); do
+    case "$param" in
+        deputy.cmd=*)
+            CMD_BASE64="${param#deputy.cmd=}"
+            break
+            ;;
+    esac
+done
+
+if [ -z "$CMD_BASE64" ]; then
+    echo "<<<DEPUTY_OUTPUT_START>>>"
+    echo "<<<DEPUTY_STDERR>>>"
+    echo "Error: No command provided (deputy.cmd not found in kernel cmdline)"
+    echo "<<<DEPUTY_OUTPUT_END>>>"
+    echo "<<<DEPUTY_EXIT_CODE:1>>>"
+    exec /sbin/poweroff -f
+fi
+
+# Decode the command
+CMD_DECODED=$(echo "$CMD_BASE64" | base64 -d 2>/dev/null)
+
+if [ -z "$CMD_DECODED" ]; then
+    echo "<<<DEPUTY_OUTPUT_START>>>"
+    echo "<<<DEPUTY_STDERR>>>"
+    echo "Error: Failed to decode command"
+    echo "<<<DEPUTY_OUTPUT_END>>>"
+    echo "<<<DEPUTY_EXIT_CODE:1>>>"
+    exec /sbin/poweroff -f
+fi
+
+# Parse the null-separated command into arguments
+set --
+OLDIFS="$IFS"
+IFS="
+"
+for arg in $(echo "$CMD_DECODED" | tr "\0" "\n"); do
+    set -- "$@" "$arg"
+done
+IFS="$OLDIFS"
+
+# Signal start of output
+echo "<<<DEPUTY_OUTPUT_START>>>"
+echo "<<<DEPUTY_STDOUT>>>"
+
+# Create temporary files for capturing stdout and stderr
+STDOUT_FILE="/tmp/deputy_stdout"
+STDERR_FILE="/tmp/deputy_stderr"
+
+# Execute the command, capturing stdout and stderr separately
+"$@" >"$STDOUT_FILE" 2>"$STDERR_FILE"
+EXIT_CODE=$?
+
+# Output stdout
+if [ -s "$STDOUT_FILE" ]; then
+    cat "$STDOUT_FILE"
+fi
+
+# Output stderr if any
+if [ -s "$STDERR_FILE" ]; then
+    echo "<<<DEPUTY_STDERR>>>"
+    cat "$STDERR_FILE"
+fi
+
+# Signal end of output and report exit code
+echo "<<<DEPUTY_OUTPUT_END>>>"
+echo "<<<DEPUTY_EXIT_CODE:${EXIT_CODE}>>>"
+
+# Shutdown the VM
+exec /sbin/poweroff -f
+INITSCRIPT
+  chmod +x /mnt/rootfs/deputy-init
 
   # Ensure essential directories exist
   mkdir -p /mnt/rootfs/{dev,proc,sys,tmp,run}
 
   umount /mnt/rootfs
-  echo "SUCCESS: Created rootfs.img with Alpine minirootfs"
+  echo "SUCCESS: Created rootfs.img with Ubuntu and deputy-init"
 '
 ```
 
-**Option B: Use a Linux VM/Machine**
-
-If you have access to a Linux system:
-
-```bash
-# On Linux:
-dd if=/dev/zero of=rootfs.img bs=1M count=256
-mkfs.ext4 -F rootfs.img
-sudo mkdir -p /mnt/rootfs
-sudo mount -o loop rootfs.img /mnt/rootfs
-
-# Download and extract Alpine minirootfs
-curl -LO https://dl-cdn.alpinelinux.org/alpine/v3.19/releases/aarch64/alpine-minirootfs-3.19.0-aarch64.tar.gz
-sudo tar -xzf alpine-minirootfs-3.19.0-aarch64.tar.gz -C /mnt/rootfs
-
-sudo umount /mnt/rootfs
-
-# Copy rootfs.img to your Mac
-scp rootfs.img your-mac:~/.deputy/vz/
-```
-
-**Option C: Minimal Placeholder** (For Testing Plugin Discovery)
-
-If you just want to test plugin discovery without full VM execution:
-
-```bash
-# Create a minimal (empty) placeholder
-dd if=/dev/zero of=~/.deputy/vz/rootfs.img bs=1M count=64
-```
-
-### 5. Verify Your Setup
+### 4. Verify Your Setup
 
 ```bash
 ls -la ~/.deputy/vz/
 # Should show:
-# - vmlinuz      (Linux kernel, ~30-35MB)
-# - initrd.img   (initramfs, ~8MB)
-# - rootfs.img   (root filesystem, 256MB)
+# - vmlinuz      (Linux kernel, ~35-40MB)
+# - initrd.img   (initramfs, ~28MB)
+# - rootfs.img   (root filesystem, 1GB)
 
 # Verify kernel format
 file ~/.deputy/vz/vmlinuz
 # Expected: Linux kernel ARM64 boot executable Image, little-endian, 4K pages
 ```
 
-### 6. Test the Plugin
+### 5. Test the Plugin
 
 ```bash
 # Ensure plugin is in PATH
@@ -210,30 +221,20 @@ export PATH="$HOME/bin:$PATH"
 cd /path/to/deputy
 go build -o deputy .
 
-# Test plugin discovery - verify the plugin starts and responds to GetInfo
-# This confirms the plugin architecture is working
+# Test plugin discovery - start the plugin manually to verify it works
 ~/bin/deputy-sandbox-vz --socket /tmp/test-vz.sock &
 VZ_PID=$!
 sleep 2
 ls -la /tmp/test-vz.sock  # Should show the socket file
 kill $VZ_PID
 
-# Test via deputy (plugin will be discovered and started automatically)
-# Note: Currently the VM boots but command execution is not yet implemented
+# Test via deputy (full end-to-end)
 DEPUTY_LOG_LEVEL=debug ./deputy exec --runtime plugin --plugin vz -- echo hello
 
-# If you see "runtime=RUNTIME_PLUGIN" and "vz sandbox plugin listening" in the logs,
-# the plugin architecture is working correctly!
+# Try more commands
+./deputy exec --runtime plugin --plugin vz -- uname -a
+./deputy exec --runtime plugin --plugin vz -- cat /etc/os-release
 ```
-
-> [!NOTE]
-> Since command injection is not yet implemented, the command will appear to hang
-> as the VM boots to a shell but doesn't execute the requested command. Press
-> Ctrl+C to cancel. This demonstrates that:
-> 1. Deputy discovers the plugin via PATH
-> 2. The plugin starts and creates a Unix socket
-> 3. Deputy communicates with the plugin via ConnectRPC
-> 4. The VM boots successfully with the configured kernel and rootfs
 
 ## Environment Variables
 
@@ -252,10 +253,6 @@ export DEPUTY_VZ_ROOTFS=/path/to/custom/rootfs.img
 ```
 
 ## Usage Examples
-
-> [!WARNING]
-> These examples show the intended interface. Command execution inside the VM
-> is not yet implemented. Currently the VM boots but commands are not injected.
 
 ```bash
 # Run a command in a VM
@@ -279,21 +276,6 @@ deputy exec --runtime plugin --plugin vz --timeout 30s -- long-running-task
 
 ## Using Other Linux Distributions
 
-### Ubuntu
-
-```bash
-# Download Ubuntu cloud image for arm64
-curl -LO https://cloud-images.ubuntu.com/jammy/current/jammy-server-cloudimg-arm64.img
-
-# Extract kernel from the image (requires mounting on Linux)
-# Or download kernel separately:
-curl -LO http://ports.ubuntu.com/ubuntu-ports/dists/jammy/main/installer-arm64/current/legacy-images/netboot/ubuntu-installer/arm64/linux
-mv linux ~/.deputy/vz/vmlinuz
-
-# Use the cloud image as rootfs (convert from qcow2 if needed)
-qemu-img convert -f qcow2 -O raw jammy-server-cloudimg-arm64.img ~/.deputy/vz/rootfs.img
-```
-
 ### Debian
 
 ```bash
@@ -303,6 +285,15 @@ curl -LO https://cloud.debian.org/images/cloud/bookworm/latest/debian-12-generic
 # Extract or download kernel
 # Copy rootfs
 cp debian-12-generic-arm64.raw ~/.deputy/vz/rootfs.img
+```
+
+### Fedora
+
+```bash
+# Download Fedora kernel and initrd
+RELEASE=40
+curl -LO https://download.fedoraproject.org/pub/fedora/linux/releases/${RELEASE}/Everything/aarch64/os/images/pxeboot/vmlinuz
+curl -LO https://download.fedoraproject.org/pub/fedora/linux/releases/${RELEASE}/Everything/aarch64/os/images/pxeboot/initrd.img
 ```
 
 ### Custom Kernel
@@ -411,7 +402,7 @@ The VM boundary provides stronger isolation than containers:
 - **Startup Overhead**: VMs take ~100-500ms to boot (vs ~10ms for containers)
 - **Asset Management**: Requires pre-built kernel and rootfs images
 - **No GPU Passthrough**: GPU workloads not supported
-- **Disk Space**: Rootfs images consume disk space (~256MB minimum)
+- **Disk Space**: Rootfs images consume disk space (~1GB for Ubuntu)
 
 ## Troubleshooting
 
@@ -460,6 +451,20 @@ codesign -dvvv ~/bin/deputy-sandbox-vz
 # Should show entitlements including com.apple.security.virtualization
 ```
 
+### Plugin hangs when installed to ~/bin
+
+If the plugin hangs when run from `~/bin` but works from the build directory, the file may have the `com.apple.provenance` extended attribute:
+
+```bash
+# Check for extended attributes
+xattr ~/bin/deputy-sandbox-vz
+# If you see "com.apple.provenance", remove it:
+xattr -d com.apple.provenance ~/bin/deputy-sandbox-vz
+
+# Re-sign after removing the attribute
+codesign --entitlements entitlements.plist --sign - --force ~/bin/deputy-sandbox-vz
+```
+
 ### "Internal Virtualization error"
 
 This usually means:
@@ -477,33 +482,18 @@ This usually means:
    deputy exec --runtime plugin --plugin vz --memory 1g -- ...
    ```
 
-### VM starts but hangs
+### VM boots but command doesn't execute
 
-The VM is booting but init isn't completing. Common causes:
-
-1. **Empty rootfs**: The rootfs needs actual files, not just an empty ext4 image
-2. **Missing init**: Ensure `/sbin/init` or `/init` exists in rootfs
-3. **initramfs issues**: The initramfs may be waiting for hardware that doesn't exist
-
-Check kernel messages by enabling console output:
+Check that the rootfs contains the `deputy-init` script:
 ```bash
-DEPUTY_LOG_LEVEL=debug deputy exec --runtime plugin --plugin vz -- ...
+# Re-create rootfs with deputy-init (see step 3 above)
 ```
 
-### "using fallback runtime"
+### No output from VM
 
-If you see this in debug logs, the vz plugin wasn't available. Check:
+Enable debug logging to see console output:
 ```bash
-# Verify plugin exists and is signed
-ls -la ~/bin/deputy-sandbox-vz
-codesign -d --entitlements - ~/bin/deputy-sandbox-vz
-
-# Verify assets exist
-ls ~/.deputy/vz/{vmlinuz,rootfs.img}
-
-# Try running plugin directly to see errors
-~/bin/deputy-sandbox-vz --socket /tmp/test.sock &
-# Watch for any error messages
+DEPUTY_LOG_LEVEL=debug deputy exec --runtime plugin --plugin vz -- echo hello
 ```
 
 ## Development
@@ -525,29 +515,6 @@ codesign --entitlements entitlements.plist --sign - deputy-sandbox-vz
 go test -v ./...
 ```
 
-### Contributing
-
-The main missing functionality is command injection and output capture. Here's what needs to be implemented:
-
-1. **Command Injection**: Modify the kernel command line or use an init script that:
-   - Reads the command from a configuration source (e.g., kernel parameters, virtio-serial)
-   - Executes the command inside the VM
-   - Captures stdout/stderr
-
-2. **Output Streaming**: Use the virtio-console to stream output back to the host:
-   - The serial port is already configured (`vz.NewFileHandleSerialPortAttachment`)
-   - Need to parse and relay output as `ExecuteEvent_Output` messages
-
-3. **Exit Code Detection**: Determine when the command completes and capture its exit code:
-   - Could use a sentinel value written to the console
-   - Or monitor for VM shutdown
-
-4. **Timeout Handling**: Implement proper timeout support:
-   - Stop the VM if execution exceeds the configured timeout
-   - Return appropriate error events
-
-See [apple/container](https://github.com/apple/container) for reference on how Apple implements similar functionality.
-
 ### Protocol
 
 The plugin implements the `SandboxRuntimeService` ConnectRPC interface:
@@ -562,11 +529,79 @@ service SandboxRuntimeService {
 
 Communication happens over a Unix socket passed via `--socket` flag.
 
+### Command Execution Protocol
+
+Commands are passed to the VM via kernel command line parameters:
+1. Command and arguments are joined with null bytes
+2. The result is base64-encoded
+3. Passed as `deputy.cmd=<base64>` kernel parameter
+
+The `deputy-init` script inside the VM:
+1. Reads `deputy.cmd` from `/proc/cmdline`
+2. Decodes and executes the command
+3. Outputs results with protocol markers:
+   - `<<<DEPUTY_OUTPUT_START>>>` - marks beginning of output
+   - `<<<DEPUTY_STDOUT>>>` - switches to stdout
+   - `<<<DEPUTY_STDERR>>>` - switches to stderr
+   - `<<<DEPUTY_OUTPUT_END>>>` - marks end of output
+   - `<<<DEPUTY_EXIT_CODE:N>>>` - reports exit code
+
+<details>
+<summary>Historical: Alpine Linux Setup (Experimental)</summary>
+
+> [!WARNING]
+> Alpine Linux support is experimental. The Alpine virt kernel uses modular virtio drivers
+> that require a compatible initrd to load. This can cause "No such device" errors when
+> mounting the rootfs. Ubuntu is recommended instead.
+
+### Alpine Setup (for reference only)
+
+```bash
+mkdir -p ~/.deputy/vz && cd ~/.deputy/vz
+
+# Download Alpine virt ISO
+curl -LO https://dl-cdn.alpinelinux.org/alpine/v3.19/releases/aarch64/alpine-virt-3.19.0-aarch64.iso
+
+# Extract kernel and initramfs
+bsdtar -xf alpine-virt-3.19.0-aarch64.iso boot/vmlinuz-virt boot/initramfs-virt
+mv boot/vmlinuz-virt vmlinuz.efi
+mv boot/initramfs-virt initrd.img
+rmdir boot
+
+# Extract the raw kernel from the EFI stub
+OFFSET=$(xxd vmlinuz.efi | grep "1f8b 08" | head -1 | cut -d: -f1)
+OFFSET_DEC=$((16#${OFFSET}))
+dd if=vmlinuz.efi bs=1 skip=$OFFSET_DEC of=vmlinux.gz 2>/dev/null
+gunzip -f vmlinux.gz 2>/dev/null || true
+mv vmlinux vmlinuz
+
+# Download minirootfs
+curl -LO https://dl-cdn.alpinelinux.org/alpine/v3.19/releases/aarch64/alpine-minirootfs-3.19.0-aarch64.tar.gz
+
+# Create rootfs with Docker
+docker run --rm --privileged -v ~/.deputy/vz:/output alpine:3.19 sh -c '
+  apk add --no-cache e2fsprogs
+  dd if=/dev/zero of=/output/rootfs.img bs=1M count=256
+  mkfs.ext4 -F /output/rootfs.img
+  mkdir -p /mnt/rootfs
+  mount -o loop /output/rootfs.img /mnt/rootfs
+  tar -xzf /output/alpine-minirootfs-3.19.0-aarch64.tar.gz -C /mnt/rootfs
+  mkdir -p /mnt/rootfs/{dev,proc,sys,tmp,run}
+  umount /mnt/rootfs
+'
+```
+
+**Known issues:**
+- The Alpine virt kernel has virtio as a loadable module, not built-in
+- The stock Alpine initrd expects specific boot parameters for module loading
+- Mount errors like "No such device" occur when virtio_blk module isn't loaded
+
+</details>
+
 ## References
 
 - [vz library](https://github.com/Code-Hex/vz) - Go bindings for Virtualization.framework
 - [Apple Virtualization.framework](https://developer.apple.com/documentation/virtualization)
 - [apple/container](https://github.com/apple/container) - Apple's container runtime using the same framework
-- [Alpine Linux Downloads](https://alpinelinux.org/downloads/) - ARM64 images
-- [LinuxKit](https://github.com/linuxkit/linuxkit) - Tool for building minimal Linux images
+- [Ubuntu Cloud Images](https://cloud-images.ubuntu.com/) - Official ARM64 images
 - [Deputy Sandbox Architecture](../../../docs/design/sandbox-architecture.md) - Design documentation

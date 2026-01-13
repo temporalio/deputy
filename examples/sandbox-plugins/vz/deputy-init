@@ -1,0 +1,93 @@
+#!/bin/sh
+# deputy-init - Init script for Deputy VZ sandbox
+#
+# This script is executed as the init process (PID 1) inside the VM.
+# It reads the base64-encoded command from the kernel cmdline parameter "deputy.cmd",
+# executes it, and reports the exit code via protocol markers.
+#
+# Protocol markers allow the host to parse output:
+#   <<<DEPUTY_OUTPUT_START>>> - marks beginning of command output
+#   <<<DEPUTY_OUTPUT_END>>>   - marks end of command output
+#   <<<DEPUTY_STDOUT>>>       - switches to stdout
+#   <<<DEPUTY_STDERR>>>       - switches to stderr
+#   <<<DEPUTY_EXIT_CODE:N>>>  - reports exit code N
+
+# Mount essential filesystems
+mount -t proc proc /proc 2>/dev/null
+mount -t sysfs sys /sys 2>/dev/null
+mount -t devtmpfs dev /dev 2>/dev/null
+
+# Get the base64-encoded command from kernel cmdline
+# Format: deputy.cmd=<base64-encoded-command>
+CMD_BASE64=""
+for param in $(cat /proc/cmdline); do
+    case "$param" in
+        deputy.cmd=*)
+            CMD_BASE64="${param#deputy.cmd=}"
+            break
+            ;;
+    esac
+done
+
+if [ -z "$CMD_BASE64" ]; then
+    echo "<<<DEPUTY_OUTPUT_START>>>"
+    echo "<<<DEPUTY_STDERR>>>"
+    echo "Error: No command provided (deputy.cmd not found in kernel cmdline)"
+    echo "<<<DEPUTY_OUTPUT_END>>>"
+    echo "<<<DEPUTY_EXIT_CODE:1>>>"
+    exec /sbin/poweroff -f
+fi
+
+# Decode the command (arguments separated by null bytes)
+# We use printf and od to handle the base64 decoding on minimal systems
+CMD_DECODED=$(echo "$CMD_BASE64" | base64 -d 2>/dev/null)
+
+if [ -z "$CMD_DECODED" ]; then
+    echo "<<<DEPUTY_OUTPUT_START>>>"
+    echo "<<<DEPUTY_STDERR>>>"
+    echo "Error: Failed to decode command"
+    echo "<<<DEPUTY_OUTPUT_END>>>"
+    echo "<<<DEPUTY_EXIT_CODE:1>>>"
+    exec /sbin/poweroff -f
+fi
+
+# Parse the null-separated command into an array
+# Convert nulls to newlines for processing
+set --
+OLDIFS="$IFS"
+IFS='
+'
+for arg in $(echo "$CMD_DECODED" | tr '\0' '\n'); do
+    set -- "$@" "$arg"
+done
+IFS="$OLDIFS"
+
+# Signal start of output
+echo "<<<DEPUTY_OUTPUT_START>>>"
+echo "<<<DEPUTY_STDOUT>>>"
+
+# Create temporary files for capturing stdout and stderr
+STDOUT_FILE="/tmp/deputy_stdout"
+STDERR_FILE="/tmp/deputy_stderr"
+
+# Execute the command, capturing stdout and stderr separately
+"$@" >"$STDOUT_FILE" 2>"$STDERR_FILE"
+EXIT_CODE=$?
+
+# Output stdout
+if [ -s "$STDOUT_FILE" ]; then
+    cat "$STDOUT_FILE"
+fi
+
+# Output stderr if any
+if [ -s "$STDERR_FILE" ]; then
+    echo "<<<DEPUTY_STDERR>>>"
+    cat "$STDERR_FILE"
+fi
+
+# Signal end of output and report exit code
+echo "<<<DEPUTY_OUTPUT_END>>>"
+echo "<<<DEPUTY_EXIT_CODE:${EXIT_CODE}>>>"
+
+# Shutdown the VM
+exec /sbin/poweroff -f
