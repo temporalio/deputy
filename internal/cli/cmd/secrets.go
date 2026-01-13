@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -602,7 +603,14 @@ func scanDirectory(ctx context.Context, engine *secrets.Engine, dir, includeGlob
 	}
 	excludePatterns = append(excludePatterns, defaultExcludes...)
 
-	err := filepath.WalkDir(dir, func(path string, d os.DirEntry, err error) error {
+	root, err := os.OpenRoot(dir)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer root.Close()
+	rootFS := root.FS()
+
+	err = fs.WalkDir(rootFS, ".", func(path string, d fs.DirEntry, err error) error {
 		// Check context cancellation periodically
 		select {
 		case <-ctx.Done():
@@ -614,29 +622,26 @@ func scanDirectory(ctx context.Context, engine *secrets.Engine, dir, includeGlob
 			return nil // Skip inaccessible files
 		}
 
+		relPath := filepath.FromSlash(path)
+
 		// Skip directories
 		if d.IsDir() {
 			// Skip excluded directories early
 			for _, pattern := range excludePatterns {
 				if matched, _ := filepath.Match(strings.TrimSuffix(pattern, "/**"), d.Name()); matched {
-					return filepath.SkipDir
+					return fs.SkipDir
 				}
 			}
 			return nil
 		}
 
 		// Get relative path for pattern matching
-		relPath, err := filepath.Rel(dir, path)
-		if err != nil {
-			relPath = path
-		}
-
 		// Check exclude patterns
 		for _, pattern := range excludePatterns {
 			if matched, _ := filepath.Match(pattern, relPath); matched {
 				return nil
 			}
-			if matched, _ := filepath.Match(pattern, filepath.Base(path)); matched {
+			if matched, _ := filepath.Match(pattern, filepath.Base(relPath)); matched {
 				return nil
 			}
 		}
@@ -645,7 +650,7 @@ func scanDirectory(ctx context.Context, engine *secrets.Engine, dir, includeGlob
 		if len(includePatterns) > 0 {
 			included := false
 			for _, pattern := range includePatterns {
-				if matched, _ := filepath.Match(pattern, filepath.Base(path)); matched {
+				if matched, _ := filepath.Match(pattern, filepath.Base(relPath)); matched {
 					included = true
 					break
 				}
@@ -665,12 +670,12 @@ func scanDirectory(ctx context.Context, engine *secrets.Engine, dir, includeGlob
 		}
 
 		// Skip symlinks to prevent infinite loops and security issues
-		if info.Mode()&os.ModeSymlink != 0 {
+		if d.Type()&os.ModeSymlink != 0 {
 			return nil
 		}
 
 		// Read file content
-		content, err := os.ReadFile(path)
+		content, err := fs.ReadFile(rootFS, path)
 		if err != nil {
 			return nil // Skip unreadable files
 		}

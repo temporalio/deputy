@@ -9,7 +9,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
+	"path"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -224,13 +226,30 @@ func (b *Baseline) Files() []string {
 func (b *Baseline) Audit(rootDir string) ([]AuditResult, error) {
 	var results []AuditResult
 
+	root, err := os.OpenRoot(rootDir)
+	if err != nil {
+		return nil, err
+	}
+	defer root.Close()
+	rootFS := root.FS()
+
 	for file, entries := range b.Results {
-		fullPath := filepath.Join(rootDir, file)
+		cleanPath, err := cleanBaselinePath(file)
+		if err != nil {
+			for _, entry := range entries {
+				results = append(results, AuditResult{
+					File:   file,
+					Entry:  entry,
+					Status: AuditStatusFileDeleted,
+				})
+			}
+			continue
+		}
 
 		// Check if file exists
-		content, err := os.ReadFile(fullPath)
+		content, err := fs.ReadFile(rootFS, cleanPath)
 		if err != nil {
-			if os.IsNotExist(err) {
+			if errors.Is(err, fs.ErrNotExist) || errors.Is(err, fs.ErrInvalid) {
 				// File was deleted - all entries are stale
 				for _, entry := range entries {
 					results = append(results, AuditResult{
@@ -259,6 +278,31 @@ func (b *Baseline) Audit(rootDir string) ([]AuditResult, error) {
 	}
 
 	return results, nil
+}
+
+func cleanBaselinePath(name string) (string, error) {
+	trimmed := strings.TrimSpace(name)
+	if trimmed == "" {
+		return "", fs.ErrInvalid
+	}
+	if filepath.IsAbs(trimmed) {
+		return "", fs.ErrInvalid
+	}
+	if len(trimmed) >= 2 && trimmed[1] == ':' {
+		return "", fs.ErrInvalid
+	}
+	if strings.HasPrefix(trimmed, "\\\\") || strings.HasPrefix(trimmed, "//") {
+		return "", fs.ErrInvalid
+	}
+	cleanPath := path.Clean(filepath.ToSlash(trimmed))
+	cleanPath = strings.TrimPrefix(cleanPath, "./")
+	if cleanPath == "" || cleanPath == "." {
+		return "", fs.ErrInvalid
+	}
+	if strings.HasPrefix(cleanPath, "../") || cleanPath == ".." || strings.HasPrefix(cleanPath, "/") {
+		return "", fs.ErrInvalid
+	}
+	return cleanPath, nil
 }
 
 // auditEntry checks if a single entry is still valid.
@@ -576,34 +620,38 @@ func (a *Allowlist) Save(path string) error {
 func GenerateBaseline(ctx context.Context, scanner Scanner, dir string, reason string) (*Baseline, error) {
 	baseline := NewBaseline()
 
-	err := filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
+	root, err := os.OpenRoot(dir)
+	if err != nil {
+		return nil, err
+	}
+	defer root.Close()
+	rootFS := root.FS()
+
+	err = fs.WalkDir(rootFS, ".", func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
-		if info.IsDir() {
+		if d.IsDir() {
 			// Skip common non-code directories
-			base := filepath.Base(path)
+			base := d.Name()
 			if base == ".git" || base == "node_modules" || base == "vendor" || base == ".venv" {
-				return filepath.SkipDir
+				return fs.SkipDir
 			}
 			return nil
 		}
 
 		// Skip binary files
-		if isBinaryFileCheck(path) {
+		if isBinaryFileCheck(rootFS, path) {
 			return nil
 		}
 
-		content, err := os.ReadFile(path)
+		content, err := fs.ReadFile(rootFS, path)
 		if err != nil {
 			return nil // Skip unreadable files
 		}
 
 		// Get relative path
-		relPath, err := filepath.Rel(dir, path)
-		if err != nil {
-			relPath = path
-		}
+		relPath := filepath.FromSlash(path)
 
 		findings, err := scanner.ScanFile(ctx, relPath, content)
 		if err != nil {
@@ -622,7 +670,7 @@ func GenerateBaseline(ctx context.Context, scanner Scanner, dir string, reason s
 }
 
 // isBinaryFileCheck checks if a file appears to be binary.
-func isBinaryFileCheck(path string) bool {
+func isBinaryFileCheck(fsys fs.FS, path string) bool {
 	// Check by extension first
 	ext := strings.ToLower(filepath.Ext(path))
 	binaryExts := map[string]bool{
@@ -640,7 +688,7 @@ func isBinaryFileCheck(path string) bool {
 	}
 
 	// Sample first 512 bytes for null characters
-	f, err := os.Open(path)
+	f, err := fsys.Open(path)
 	if err != nil {
 		return false
 	}

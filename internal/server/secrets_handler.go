@@ -556,36 +556,49 @@ func (h *SecretsHandler) scanDirectory(ctx context.Context, dir string, opts sca
 	var findings []secrets.Finding
 	var warnings []string
 
-	err := filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
+	root, err := os.OpenRoot(dir)
+	if err != nil {
+		return nil, nil, err
+	}
+	defer root.Close()
+	rootFS := root.FS()
+
+	err = fs.WalkDir(rootFS, ".", func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
-			warnings = append(warnings, fmt.Sprintf("error accessing %s: %v", path, err))
+			displayPath := filepath.Join(dir, filepath.FromSlash(path))
+			warnings = append(warnings, fmt.Sprintf("error accessing %s: %v", displayPath, err))
 			return nil
 		}
+		relPath := filepath.FromSlash(path)
 
 		// Skip directories and common exclusions
 		if d.IsDir() {
 			if shouldSkipDir(d.Name()) {
-				return filepath.SkipDir
+				return fs.SkipDir
 			}
+			return nil
+		}
+		if d.Type()&os.ModeSymlink != 0 {
 			return nil
 		}
 
 		// Check include/exclude patterns
-		if !opts.matchesInclude(path) || opts.matchesExclude(path) {
+		if !opts.matchesInclude(relPath) || opts.matchesExclude(relPath) {
 			return nil
 		}
 
 		// Read and scan file
-		content, err := os.ReadFile(path)
+		content, err := fs.ReadFile(rootFS, path)
 		if err != nil {
-			warnings = append(warnings, fmt.Sprintf("error reading %s: %v", path, err))
+			displayPath := filepath.Join(dir, relPath)
+			warnings = append(warnings, fmt.Sprintf("error reading %s: %v", displayPath, err))
 			return nil
 		}
 
-		relPath, _ := filepath.Rel(dir, path)
 		fileFindings, err := h.engine.ScanFile(ctx, relPath, content)
 		if err != nil {
-			warnings = append(warnings, fmt.Sprintf("error scanning %s: %v", path, err))
+			displayPath := filepath.Join(dir, relPath)
+			warnings = append(warnings, fmt.Sprintf("error scanning %s: %v", displayPath, err))
 			return nil
 		}
 

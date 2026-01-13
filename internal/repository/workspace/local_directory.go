@@ -24,6 +24,11 @@ func newLocalDirectory(abs string, removeOnClose bool) (*LocalDirectory, error) 
 	if err != nil {
 		return nil, err
 	}
+	rootFS, ok := root.FS().(scalibrfs.FS)
+	if !ok {
+		_ = root.Close()
+		return nil, fmt.Errorf("root filesystem does not implement required interfaces")
+	}
 	cleanup := func() error {
 		err := root.Close()
 		if removeOnClose {
@@ -33,9 +38,10 @@ func newLocalDirectory(abs string, removeOnClose bool) (*LocalDirectory, error) 
 		}
 		return err
 	}
+	scanRoots := []*scalibrfs.ScanRoot{{FS: rootFS, Path: abs}}
 	ws := &LocalDirectory{
-		baseWorkspace: newBaseWorkspace(abs, scalibrfs.RealFSScanRoots(abs), cleanup),
-		fs:            scalibrfs.DirFS(abs),
+		baseWorkspace: newBaseWorkspace(abs, scanRoots, cleanup),
+		fs:            rootFS,
 		root:          root,
 	}
 	return ws, nil

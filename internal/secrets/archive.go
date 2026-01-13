@@ -18,6 +18,7 @@ import (
 	"io/fs"
 	"log/slog"
 	"os"
+	"path"
 	"path/filepath"
 	"strings"
 
@@ -1009,43 +1010,60 @@ func SafeExtractArchive(ctx context.Context, archivePath string, maxSize int64) 
 		return nil, "", fmt.Errorf("detecting format: %w", err)
 	}
 
-	// Extract archive
-	var totalSize int64
-	switch format {
-	case FormatZip:
-		totalSize, err = extractZipSafe(ctx, archivePath, tempDir, maxSize)
-	case FormatTar, FormatTarGz, FormatTarBz2, FormatTarXz:
-		f, ferr := os.Open(archivePath)
-		if ferr != nil {
-			os.RemoveAll(tempDir)
-			return nil, "", fmt.Errorf("opening archive: %w", ferr)
-		}
-		defer f.Close()
-		totalSize, err = extractTarSafe(ctx, f, format, tempDir, maxSize)
-	default:
-		os.RemoveAll(tempDir)
-		return nil, "", fmt.Errorf("unsupported format: %s", format)
-	}
-
-	if err != nil {
-		os.RemoveAll(tempDir)
-		return nil, "", fmt.Errorf("extracting archive: %w", err)
-	}
-
-	slog.Debug("extracted archive", "path", archivePath, "tempDir", tempDir, "totalSize", totalSize)
-
-	// Open with os.Root for safe access
 	root, err := os.OpenRoot(tempDir)
 	if err != nil {
 		os.RemoveAll(tempDir)
 		return nil, "", fmt.Errorf("opening root: %w", err)
 	}
 
+	// Extract archive
+	var totalSize int64
+	switch format {
+	case FormatZip:
+		totalSize, err = extractZipSafe(ctx, archivePath, root, maxSize)
+	case FormatTar, FormatTarGz, FormatTarBz2, FormatTarXz:
+		f, ferr := os.Open(archivePath)
+		if ferr != nil {
+			root.Close()
+			os.RemoveAll(tempDir)
+			return nil, "", fmt.Errorf("opening archive: %w", ferr)
+		}
+		defer f.Close()
+		totalSize, err = extractTarSafe(ctx, f, format, root, maxSize)
+	default:
+		root.Close()
+		os.RemoveAll(tempDir)
+		return nil, "", fmt.Errorf("unsupported format: %s", format)
+	}
+
+	if err != nil {
+		root.Close()
+		os.RemoveAll(tempDir)
+		return nil, "", fmt.Errorf("extracting archive: %w", err)
+	}
+
+	slog.Debug("extracted archive", "path", archivePath, "tempDir", tempDir, "totalSize", totalSize)
+
 	return root, tempDir, nil
 }
 
+func cleanArchiveExtractPath(name string) (string, bool) {
+	if isUnsafePath(name) {
+		return "", false
+	}
+	cleanPath := path.Clean(filepath.ToSlash(name))
+	cleanPath = strings.TrimPrefix(cleanPath, "./")
+	if cleanPath == "" || cleanPath == "." {
+		return "", false
+	}
+	if strings.HasPrefix(cleanPath, "../") || cleanPath == ".." || strings.HasPrefix(cleanPath, "/") {
+		return "", false
+	}
+	return cleanPath, true
+}
+
 // extractZipSafe safely extracts a zip archive.
-func extractZipSafe(ctx context.Context, zipPath, destDir string, maxSize int64) (int64, error) {
+func extractZipSafe(ctx context.Context, zipPath string, root *os.Root, maxSize int64) (int64, error) {
 	zr, err := zip.OpenReader(zipPath)
 	if err != nil {
 		return 0, err
@@ -1061,21 +1079,15 @@ func extractZipSafe(ctx context.Context, zipPath, destDir string, maxSize int64)
 		default:
 		}
 
-		// Security: validate path
-		cleanPath := filepath.Clean(f.Name)
-		if strings.HasPrefix(cleanPath, "..") || filepath.IsAbs(cleanPath) {
-			continue // Skip unsafe paths
-		}
-
-		destPath := filepath.Join(destDir, cleanPath)
-
-		// Ensure the destination is within the target directory
-		if !strings.HasPrefix(destPath, filepath.Clean(destDir)+string(os.PathSeparator)) {
-			continue // Skip path traversal attempts
+		cleanPath, ok := cleanArchiveExtractPath(f.Name)
+		if !ok {
+			continue
 		}
 
 		if f.FileInfo().IsDir() {
-			os.MkdirAll(destPath, 0o755)
+			if err := root.MkdirAll(cleanPath, 0o755); err != nil {
+				continue
+			}
 			continue
 		}
 
@@ -1085,8 +1097,10 @@ func extractZipSafe(ctx context.Context, zipPath, destDir string, maxSize int64)
 		}
 
 		// Create parent directory
-		if err := os.MkdirAll(filepath.Dir(destPath), 0o755); err != nil {
-			continue
+		if parent := filepath.Dir(cleanPath); parent != "." {
+			if err := root.MkdirAll(parent, 0o755); err != nil {
+				continue
+			}
 		}
 
 		// Extract file
@@ -1095,7 +1109,7 @@ func extractZipSafe(ctx context.Context, zipPath, destDir string, maxSize int64)
 			continue
 		}
 
-		out, err := os.OpenFile(destPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, f.Mode().Perm()&0o755)
+		out, err := root.OpenFile(cleanPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, f.Mode().Perm()&0o755)
 		if err != nil {
 			rc.Close()
 			continue
@@ -1115,7 +1129,7 @@ func extractZipSafe(ctx context.Context, zipPath, destDir string, maxSize int64)
 }
 
 // extractTarSafe safely extracts a tar archive.
-func extractTarSafe(ctx context.Context, r io.Reader, format ArchiveFormat, destDir string, maxSize int64) (int64, error) {
+func extractTarSafe(ctx context.Context, r io.Reader, format ArchiveFormat, root *os.Root, maxSize int64) (int64, error) {
 	var tarReader *tar.Reader
 
 	switch format {
@@ -1155,22 +1169,16 @@ func extractTarSafe(ctx context.Context, r io.Reader, format ArchiveFormat, dest
 			break
 		}
 
-		// Security: validate path
-		cleanPath := filepath.Clean(header.Name)
-		if strings.HasPrefix(cleanPath, "..") || filepath.IsAbs(cleanPath) {
-			continue
-		}
-
-		destPath := filepath.Join(destDir, cleanPath)
-
-		// Ensure the destination is within the target directory
-		if !strings.HasPrefix(destPath, filepath.Clean(destDir)+string(os.PathSeparator)) {
+		cleanPath, ok := cleanArchiveExtractPath(header.Name)
+		if !ok {
 			continue
 		}
 
 		switch header.Typeflag {
 		case tar.TypeDir:
-			os.MkdirAll(destPath, 0o755)
+			if err := root.MkdirAll(cleanPath, 0o755); err != nil {
+				continue
+			}
 		case tar.TypeReg:
 			// Check size limit
 			if totalSize+header.Size > maxSize {
@@ -1178,12 +1186,14 @@ func extractTarSafe(ctx context.Context, r io.Reader, format ArchiveFormat, dest
 			}
 
 			// Create parent directory
-			if err := os.MkdirAll(filepath.Dir(destPath), 0o755); err != nil {
-				continue
+			if parent := filepath.Dir(cleanPath); parent != "." {
+				if err := root.MkdirAll(parent, 0o755); err != nil {
+					continue
+				}
 			}
 
 			// Extract file with safe permissions
-			out, err := os.OpenFile(destPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, os.FileMode(header.Mode).Perm()&0o755)
+			out, err := root.OpenFile(cleanPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, os.FileMode(header.Mode).Perm()&0o755)
 			if err != nil {
 				continue
 			}
