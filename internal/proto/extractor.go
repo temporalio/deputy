@@ -241,16 +241,24 @@ func FilterPackages(pkgs []*extractor.Package, opts FilterOptions) []*extractor.
 
 		// Handle Go packages
 		if purl.Type == "golang" {
+			modulePath := pkg.Name
+			if modulePath == "" {
+				if purl.Namespace != "" {
+					modulePath = purl.Namespace + "/" + purl.Name
+				} else {
+					modulePath = purl.Name
+				}
+			}
+
+			// Skip relative path replace directives (e.g., "../..", "./local").
+			// These are local development artifacts from go.mod replace directives
+			// pointing to filesystem paths, not actual module dependencies.
+			if compare.IsRelativePathModule(modulePath) {
+				continue
+			}
+
 			// Check if this is a main module (self-reference)
 			if len(opts.ExcludeMainModules) > 0 {
-				modulePath := pkg.Name
-				if modulePath == "" {
-					if purl.Namespace != "" {
-						modulePath = purl.Namespace + "/" + purl.Name
-					} else {
-						modulePath = purl.Name
-					}
-				}
 				if opts.ExcludeMainModules[modulePath] {
 					continue // Skip self-reference
 				}

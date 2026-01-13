@@ -83,6 +83,77 @@ func Test_parseDigits(t *testing.T) {
 	}
 }
 
+func TestIsRelativePathModule(t *testing.T) {
+	cases := []struct {
+		name string
+		in   string
+		want bool
+	}{
+		{name: "parent traversal", in: "..", want: true},
+		{name: "current dir", in: ".", want: true},
+		{name: "parent path", in: "../foo", want: true},
+		{name: "deep parent path", in: "../../..", want: true},
+		{name: "relative current", in: "./local", want: true},
+		{name: "valid module", in: "github.com/user/repo", want: false},
+		{name: "valid module with dots", in: "example.com/pkg", want: false},
+		{name: "stdlib", in: "net/http", want: false},
+		{name: "empty", in: "", want: false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := IsRelativePathModule(c.in); got != c.want {
+				t.Errorf("IsRelativePathModule(%q) = %v, want %v", c.in, got, c.want)
+			}
+		})
+	}
+}
+
+func Test_summarizePackage_skipsRelativePaths(t *testing.T) {
+	// Relative path modules (from go.mod replace directives) should be skipped
+	cases := []struct {
+		name       string
+		pkgName    string
+		wantKey    string
+		wantSkip   bool
+	}{
+		{
+			name:     "relative parent path",
+			pkgName:  "../../..",
+			wantSkip: true,
+		},
+		{
+			name:     "relative current path",
+			pkgName:  "./local",
+			wantSkip: true,
+		},
+		{
+			name:     "valid go module",
+			pkgName:  "github.com/user/repo",
+			wantKey:  "go|github.com/user/repo",
+			wantSkip: false,
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			pkg := &extractor.Package{
+				Name:     c.pkgName,
+				Version:  "v1.0.0",
+				PURLType: scalpurl.TypeGolang,
+			}
+			key, _ := summarizePackage(pkg)
+			if c.wantSkip {
+				if key != "" {
+					t.Errorf("summarizePackage(%q) returned key %q, want empty (skipped)", c.pkgName, key)
+				}
+			} else {
+				if key != c.wantKey {
+					t.Errorf("summarizePackage(%q) = %q, want %q", c.pkgName, key, c.wantKey)
+				}
+			}
+		})
+	}
+}
+
 func TestGetDirectDependencies(t *testing.T) {
 	ws, err := workspace.NewTempDir("cmp-go-mod")
 	if err != nil {

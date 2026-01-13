@@ -371,6 +371,11 @@ func buildProtobomDocument(ctx context.Context, ws workspace.FS, repoRef, ref, n
 		if p == nil || p.Name == "" {
 			continue
 		}
+		// Skip relative path replace directives (e.g., "../..", "./local").
+		// These are local development artifacts from go.mod replace directives.
+		if p.PURLType == purl.TypeGolang && compare.IsRelativePathModule(p.Name) {
+			continue
+		}
 		n := sbom.NewNode()
 		var purlStr string
 		switch {

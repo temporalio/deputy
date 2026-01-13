@@ -202,6 +202,13 @@ func parseDigits(s string) int {
 	return n
 }
 
+// IsRelativePathModule reports whether name looks like a relative filesystem path
+// rather than a valid Go module path. This detects replace directive targets like
+// "../..", "./local", or "../../.." which are local development artifacts.
+func IsRelativePathModule(name string) bool {
+	return strings.HasPrefix(name, "./") || strings.HasPrefix(name, "../") || name == "." || name == ".."
+}
+
 // ExtractCanonicalPackageName trims superfluous major version suffixes (e.g.
 // /v2, /v3) from an import path except for v0 and v1 which remain part of the
 // canonical module path per Go module path semantics. gopkg.in names are first
@@ -539,6 +546,12 @@ func summarizePackage(p *extractor.Package) (string, pkgSummary) {
 	}
 	meta := pkgSummary{pkg: p, ecosystem: ecos}
 	if strings.EqualFold(ecos, "Go") {
+		// Skip relative path replace directives (e.g., "../..", "./local").
+		// These are local development artifacts from go.mod replace directives
+		// pointing to filesystem paths, not actual module dependencies.
+		if IsRelativePathModule(p.Name) {
+			return "", pkgSummary{}
+		}
 		info := ParseGoPackage(p)
 		meta.canonical = strings.ToLower(info.CanonicalName)
 		meta.module = GetModuleRoot(info.CanonicalName)
