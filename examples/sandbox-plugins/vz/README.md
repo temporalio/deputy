@@ -34,18 +34,23 @@ go build -o deputy-sandbox-vz .
 # Sign with virtualization entitlement (required by macOS)
 codesign --entitlements entitlements.plist --sign - deputy-sandbox-vz
 
-# Install to a directory in your PATH
-mkdir -p ~/bin
-cp deputy-sandbox-vz ~/bin/
+# Install to Go's bin directory (automatically discovered by deputy)
+mkdir -p ~/go/bin
+cp deputy-sandbox-vz ~/go/bin/
 
 # Verify it's discoverable
-export PATH="$HOME/bin:$PATH"
-which deputy-sandbox-vz
+ls ~/go/bin/deputy-sandbox-vz
 ```
+
+**Plugin Discovery:** Deputy searches for sandbox plugins (`deputy-sandbox-*`) in:
+1. Current working directory (for development)
+2. `$GOPATH/bin` (if GOPATH is set)
+3. `$HOME/go/bin` (default Go bin location)
+4. All directories in `PATH`
 
 ### 2. Download Ubuntu Assets
 
-Download the kernel, initrd, and root filesystem from Ubuntu's official cloud images:
+Download the kernel and root filesystem from Ubuntu's official cloud images:
 
 ```bash
 # Create the asset directory
@@ -63,20 +68,11 @@ gunzip vmlinuz.gz
 file vmlinuz
 # Expected: Linux kernel ARM64 boot executable Image, little-endian, 4K pages
 
-# Download initrd - this may be zstd or gzip compressed
-curl -LO https://cloud-images.ubuntu.com/releases/24.04/release/unpacked/ubuntu-24.04-server-cloudimg-arm64-initrd-generic
-mv ubuntu-24.04-server-cloudimg-arm64-initrd-generic initrd.img
-
-# Check compression type and decompress if needed
-file initrd.img
-# If it shows "Zstandard compressed", decompress:
-# zstd -d initrd.img -o initrd.cpio && mv initrd.cpio initrd.img
-# If it shows "gzip compressed":
-# mv initrd.img initrd.img.gz && gunzip initrd.img.gz
-
 # Download root filesystem tarball
 curl -LO https://cloud-images.ubuntu.com/releases/24.04/release/ubuntu-24.04-server-cloudimg-arm64-root.tar.xz
 ```
+
+> **Note:** No initrd is needed! The Ubuntu kernel boots directly to the rootfs with virtio drivers built-in, achieving ~70ms boot times.
 
 ### 3. Create the Root Filesystem Image
 
@@ -90,8 +86,8 @@ docker run --rm --privileged -v ~/.deputy/vz:/output ubuntu:24.04 bash -c '
   set -ex
   apt-get update && apt-get install -y xz-utils e2fsprogs
 
-  # Create a 1GB disk image (Ubuntu needs more space than Alpine)
-  dd if=/dev/zero of=/output/rootfs.img bs=1M count=1024
+  # Create a 2GB disk image (Ubuntu needs more space than Alpine)
+  dd if=/dev/zero of=/output/rootfs.img bs=1M count=2048
   mkfs.ext4 -F /output/rootfs.img
 
   # Mount the image
@@ -103,12 +99,12 @@ docker run --rm --privileged -v ~/.deputy/vz:/output ubuntu:24.04 bash -c '
 
   # Create deputy-init script for command execution
   cat > /mnt/rootfs/deputy-init << "INITSCRIPT"
-#!/bin/sh
+#!/bin/bash
 # deputy-init - Init script for Deputy VZ sandbox
 #
 # This script is executed as the init process (PID 1) inside the VM.
 # It reads the base64-encoded command from the kernel cmdline parameter "deputy.cmd",
-# executes it, and reports the exit code via protocol markers.
+# executes it using eval, and reports the exit code via protocol markers.
 
 # Mount essential filesystems
 mount -t proc proc /proc 2>/dev/null
@@ -135,7 +131,7 @@ if [ -z "$CMD_BASE64" ]; then
     exec /sbin/poweroff -f
 fi
 
-# Decode the command
+# Decode the command (space-separated, executed via eval)
 CMD_DECODED=$(echo "$CMD_BASE64" | base64 -d 2>/dev/null)
 
 if [ -z "$CMD_DECODED" ]; then
@@ -147,16 +143,6 @@ if [ -z "$CMD_DECODED" ]; then
     exec /sbin/poweroff -f
 fi
 
-# Parse the null-separated command into arguments
-set --
-OLDIFS="$IFS"
-IFS="
-"
-for arg in $(echo "$CMD_DECODED" | tr "\0" "\n"); do
-    set -- "$@" "$arg"
-done
-IFS="$OLDIFS"
-
 # Signal start of output
 echo "<<<DEPUTY_OUTPUT_START>>>"
 echo "<<<DEPUTY_STDOUT>>>"
@@ -164,9 +150,10 @@ echo "<<<DEPUTY_STDOUT>>>"
 # Create temporary files for capturing stdout and stderr
 STDOUT_FILE="/tmp/deputy_stdout"
 STDERR_FILE="/tmp/deputy_stderr"
+touch "$STDOUT_FILE" "$STDERR_FILE"
 
-# Execute the command, capturing stdout and stderr separately
-"$@" >"$STDOUT_FILE" 2>"$STDERR_FILE"
+# Execute the command using eval, capturing stdout and stderr separately
+eval "$CMD_DECODED" >"$STDOUT_FILE" 2>"$STDERR_FILE"
 EXIT_CODE=$?
 
 # Output stdout
@@ -203,8 +190,7 @@ INITSCRIPT
 ls -la ~/.deputy/vz/
 # Should show:
 # - vmlinuz      (Linux kernel, ~35-40MB)
-# - initrd.img   (initramfs, ~28MB)
-# - rootfs.img   (root filesystem, 1GB)
+# - rootfs.img   (root filesystem, 2GB)
 
 # Verify kernel format
 file ~/.deputy/vz/vmlinuz
@@ -214,26 +200,26 @@ file ~/.deputy/vz/vmlinuz
 ### 5. Test the Plugin
 
 ```bash
-# Ensure plugin is in PATH
-export PATH="$HOME/bin:$PATH"
-
 # Build deputy if not already built
 cd /path/to/deputy
 go build -o deputy .
 
 # Test plugin discovery - start the plugin manually to verify it works
-~/bin/deputy-sandbox-vz --socket /tmp/test-vz.sock &
+~/go/bin/deputy-sandbox-vz --socket /tmp/test-vz.sock &
 VZ_PID=$!
 sleep 2
 ls -la /tmp/test-vz.sock  # Should show the socket file
 kill $VZ_PID
 
 # Test via deputy (full end-to-end)
-DEPUTY_LOG_LEVEL=debug ./deputy exec --runtime plugin --plugin vz -- echo hello
+./deputy exec --runtime plugin --plugin vz -- echo "hello from VM"
 
 # Try more commands
 ./deputy exec --runtime plugin --plugin vz -- uname -a
+# Expected: Linux (none) 6.8.0-90-generic ... aarch64 GNU/Linux
+
 ./deputy exec --runtime plugin --plugin vz -- cat /etc/os-release
+# Expected: PRETTY_NAME="Ubuntu 24.04.3 LTS" ...
 ```
 
 ## Environment Variables
@@ -242,14 +228,13 @@ DEPUTY_LOG_LEVEL=debug ./deputy exec --runtime plugin --plugin vz -- echo hello
 |----------|-------------|---------|
 | `DEPUTY_VZ_KERNEL` | Path to Linux kernel (vmlinuz) | `~/.deputy/vz/vmlinuz` |
 | `DEPUTY_VZ_ROOTFS` | Path to root filesystem image | `~/.deputy/vz/rootfs.img` |
-| `DEPUTY_VZ_INITRD` | Path to initrd (optional) | `~/.deputy/vz/initrd.img` |
 
 Override the defaults for custom setups:
 
 ```bash
 export DEPUTY_VZ_KERNEL=/path/to/custom/vmlinuz
 export DEPUTY_VZ_ROOTFS=/path/to/custom/rootfs.img
-./deputy exec --runtime plugin --plugin vz -- ls -la
+deputy exec --runtime plugin --plugin vz -- ls -la
 ```
 
 ## Usage Examples
@@ -393,16 +378,16 @@ The VM boundary provides stronger isolation than containers:
 | Isolation Level | None | Process | Namespace | Syscall | VM |
 | Kernel Shared | Yes | Yes | Yes | Partially | No |
 | Escape Risk | High | Medium | Medium | Low | Very Low |
-| Startup Time | ~1ms | ~5ms | ~100ms | ~50ms | ~200ms |
+| Startup Time | ~1ms | ~5ms | ~100ms | ~50ms | ~70ms |
 | Overhead | None | Low | Low | Medium | Medium |
 
 ## Limitations
 
 - **macOS Only**: Requires macOS 11.0+ on Apple Silicon
-- **Startup Overhead**: VMs take ~100-500ms to boot (vs ~10ms for containers)
+- **Startup Overhead**: VMs take ~70-200ms to boot (vs ~10ms for containers)
 - **Asset Management**: Requires pre-built kernel and rootfs images
 - **No GPU Passthrough**: GPU workloads not supported
-- **Disk Space**: Rootfs images consume disk space (~1GB for Ubuntu)
+- **Disk Space**: Rootfs images consume disk space (~2GB for Ubuntu)
 
 ## Troubleshooting
 
@@ -414,18 +399,28 @@ Ensure you're running on:
 
 Intel Macs are **not supported** by Virtualization.framework for Linux VMs.
 
-### "plugin not found in PATH"
+### "plugin not found" or "runtime RUNTIME_PLUGIN is not available"
 
 ```bash
-# Check PATH includes the plugin location
-echo $PATH | tr ':' '\n' | grep -E "bin$"
-
-# Verify plugin is executable
-ls -la ~/bin/deputy-sandbox-vz
+# Check if plugin is installed in ~/go/bin
+ls -la ~/go/bin/deputy-sandbox-vz
 # Should show: -rwxr-xr-x
 
-# Verify plugin name matches expected pattern
-# Must be named: deputy-sandbox-<name>
+# Verify plugin is signed with virtualization entitlement
+codesign -dv ~/go/bin/deputy-sandbox-vz 2>&1 | grep -i entitlement
+# Should show entitlements
+
+# Test plugin starts correctly
+~/go/bin/deputy-sandbox-vz --socket /tmp/test.sock &
+sleep 2
+ls /tmp/test.sock && echo "Plugin started OK"
+kill %1
+
+# If plugin hangs, check for extended attributes
+xattr ~/go/bin/deputy-sandbox-vz
+# If "com.apple.provenance" exists, remove it:
+xattr -d com.apple.provenance ~/go/bin/deputy-sandbox-vz
+codesign --entitlements entitlements.plist --force --sign - ~/go/bin/deputy-sandbox-vz
 ```
 
 ### "kernel not found" or "rootfs not found"
@@ -443,26 +438,13 @@ export DEPUTY_VZ_ROOTFS=/path/to/rootfs.img
 ### "code signature invalid"
 
 ```bash
-# Re-sign with entitlements
-codesign --entitlements entitlements.plist --sign - ~/bin/deputy-sandbox-vz
+# Re-sign with entitlements (from the vz plugin directory)
+cd examples/sandbox-plugins/vz
+codesign --entitlements entitlements.plist --force --sign - ~/go/bin/deputy-sandbox-vz
 
 # Verify signature
-codesign -dvvv ~/bin/deputy-sandbox-vz
+codesign -dvvv ~/go/bin/deputy-sandbox-vz
 # Should show entitlements including com.apple.security.virtualization
-```
-
-### Plugin hangs when installed to ~/bin
-
-If the plugin hangs when run from `~/bin` but works from the build directory, the file may have the `com.apple.provenance` extended attribute:
-
-```bash
-# Check for extended attributes
-xattr ~/bin/deputy-sandbox-vz
-# If you see "com.apple.provenance", remove it:
-xattr -d com.apple.provenance ~/bin/deputy-sandbox-vz
-
-# Re-sign after removing the attribute
-codesign --entitlements entitlements.plist --sign - --force ~/bin/deputy-sandbox-vz
 ```
 
 ### "Internal Virtualization error"
@@ -532,13 +514,13 @@ Communication happens over a Unix socket passed via `--socket` flag.
 ### Command Execution Protocol
 
 Commands are passed to the VM via kernel command line parameters:
-1. Command and arguments are joined with null bytes
+1. Command and arguments are joined with spaces
 2. The result is base64-encoded
 3. Passed as `deputy.cmd=<base64>` kernel parameter
 
 The `deputy-init` script inside the VM:
 1. Reads `deputy.cmd` from `/proc/cmdline`
-2. Decodes and executes the command
+2. Base64 decodes and executes via `eval`
 3. Outputs results with protocol markers:
    - `<<<DEPUTY_OUTPUT_START>>>` - marks beginning of output
    - `<<<DEPUTY_STDOUT>>>` - switches to stdout
