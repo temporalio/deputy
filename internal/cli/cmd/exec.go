@@ -45,6 +45,16 @@ type execFlags struct {
 	verbose               bool
 	execAllow             []string
 	dangerouslySkipPrompt bool
+
+	// Workspace isolation flags
+	workspaceIsolation string
+	isolationSizeLimit string
+	preserveWorkspace  bool
+
+	// File masking flags
+	fileMaskPresets []string
+	fileMaskHide    []string
+	fileMaskExpose  []string
 }
 
 // AddExecCommand adds the exec command to the root command.
@@ -91,11 +101,29 @@ network access is disabled for safety.`,
 	cmd.Flags().StringArrayVar(&flags.execAllow, "exec-allow", nil, "Allow additional executables by path or command name (repeatable)")
 	cmd.Flags().BoolVar(&flags.dangerouslySkipPrompt, "dangerously-skip-prompt", false, "Skip confirmation prompt for dangerous modes (full-access, host network)")
 
+	// Workspace isolation flags
+	cmd.Flags().StringVar(&flags.workspaceIsolation, "workspace-isolation", "", "Workspace isolation mode (direct|snapshot|overlay|tmpfs|git-worktree)")
+	cmd.Flags().StringVar(&flags.isolationSizeLimit, "isolation-size-limit", "", "Size limit for overlay/tmpfs isolation (e.g., 1g, 512m)")
+	cmd.Flags().BoolVar(&flags.preserveWorkspace, "preserve-workspace", false, "Preserve isolated workspace after execution for review")
+
+	// File masking flags
+	cmd.Flags().StringArrayVar(&flags.fileMaskPresets, "mask-preset", nil, "File masking preset (secrets|git|ide|build|node-modules|supply-chain, repeatable)")
+	cmd.Flags().StringArrayVar(&flags.fileMaskHide, "mask-hide", nil, "Glob pattern for files to hide from sandbox (repeatable)")
+	cmd.Flags().StringArrayVar(&flags.fileMaskExpose, "mask-expose", nil, "Glob pattern for files to expose even if masked (repeatable)")
+
 	cmd.Example = strings.Join([]string{
-		"deputy exec --mode read-only -- ls -la",
+		"deputy exec --runtime docker --mode read-only --image alpine:3.19 -- ls -la",
 		"deputy exec --runtime docker --image alpine:3.19 -- echo hello",
 		"deputy exec --runtime sandbox-exec --mode read-only -- ls -la",
-		"deputy exec --network allowlist --network-allow proxy.golang.org:443 -- go env GOPATH",
+		"deputy exec --runtime docker --network allowlist --network-allow proxy.golang.org:443 --image golang:1.22-alpine -- go env GOPATH",
+		"",
+		"# Workspace isolation (copy-on-write style)",
+		"deputy exec --runtime docker --workspace-isolation snapshot --image node:22-alpine -- npm install",
+		"deputy exec --runtime docker --workspace-isolation snapshot --preserve-workspace --image node:22-alpine -- npm test",
+		"",
+		"# File masking (hide secrets, expose lockfiles)",
+		"deputy exec --runtime docker --mask-preset supply-chain --image node:22-alpine -- npm audit",
+		"deputy exec --runtime docker --mask-hide '.env*' --mask-expose 'package*.json' --image node:22-alpine -- npm install",
 	}, "\n")
 	cmd.SilenceUsage = true
 	cmd.SilenceErrors = true
@@ -164,15 +192,36 @@ func runExec(ctx context.Context, deps Dependencies, flags *execFlags, command [
 		}
 	}
 
+	// Build workspace isolation config
+	isolationConfig, err := buildWorkspaceIsolationConfig(flags)
+	if err != nil {
+		return err
+	}
+
+	// Build file mask config
+	fileMaskConfig, err := buildFileMaskConfig(flags)
+	if err != nil {
+		return err
+	}
+
+	// Determine workspace isolation mode for SandboxConfig
+	var wsIsolationMode sandboxv1.WorkspaceIsolationMode
+	if isolationConfig != nil {
+		wsIsolationMode = isolationConfig.Mode
+	}
+
 	config := &sandboxv1.SandboxConfig{
-		Runtime:          runtimeType,
-		Mode:             mode,
-		NetworkMode:      networkMode,
-		Image:            strings.TrimSpace(flags.image),
-		Limits:           limits,
-		NetworkAllowlist: flags.networkAllow,
-		PluginName:       strings.TrimSpace(flags.pluginName),
-		ExecAllowlist:    flags.execAllow,
+		Runtime:                  runtimeType,
+		Mode:                     mode,
+		NetworkMode:              networkMode,
+		Image:                    strings.TrimSpace(flags.image),
+		Limits:                   limits,
+		NetworkAllowlist:         flags.networkAllow,
+		PluginName:               strings.TrimSpace(flags.pluginName),
+		ExecAllowlist:            flags.execAllow,
+		WorkspaceIsolation:       wsIsolationMode,
+		FileMask:                 fileMaskConfig,
+		WorkspaceIsolationConfig: isolationConfig,
 	}
 
 	req := &sandboxv1.ExecuteRequest{
@@ -349,4 +398,103 @@ func readStdinSource(path string, stdin io.Reader) ([]byte, error) {
 		return nil, fmt.Errorf("read stdin file %q: %w", path, err)
 	}
 	return data, nil
+}
+
+func parseWorkspaceIsolation(value string) (sandboxv1.WorkspaceIsolationMode, error) {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "", "direct":
+		return sandboxv1.WorkspaceIsolationMode_WORKSPACE_ISOLATION_MODE_DIRECT, nil
+	case "snapshot", "copy":
+		return sandboxv1.WorkspaceIsolationMode_WORKSPACE_ISOLATION_MODE_SNAPSHOT, nil
+	case "overlay", "cow", "copy-on-write":
+		return sandboxv1.WorkspaceIsolationMode_WORKSPACE_ISOLATION_MODE_OVERLAY, nil
+	case "tmpfs", "memory":
+		return sandboxv1.WorkspaceIsolationMode_WORKSPACE_ISOLATION_MODE_TMPFS, nil
+	case "git-worktree", "worktree", "git":
+		return sandboxv1.WorkspaceIsolationMode_WORKSPACE_ISOLATION_MODE_GIT_WORKTREE, nil
+	default:
+		return sandboxv1.WorkspaceIsolationMode_WORKSPACE_ISOLATION_MODE_UNSPECIFIED,
+			fmt.Errorf("unsupported workspace isolation mode %q (use direct|snapshot|overlay|tmpfs|git-worktree)", value)
+	}
+}
+
+func parseFileMaskPreset(value string) (sandboxv1.FileMaskPreset, error) {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "secrets", "secret":
+		return sandboxv1.FileMaskPreset_FILE_MASK_PRESET_SECRETS, nil
+	case "git":
+		return sandboxv1.FileMaskPreset_FILE_MASK_PRESET_GIT, nil
+	case "ide", "editor":
+		return sandboxv1.FileMaskPreset_FILE_MASK_PRESET_IDE, nil
+	case "build", "build-artifacts":
+		return sandboxv1.FileMaskPreset_FILE_MASK_PRESET_BUILD_ARTIFACTS, nil
+	case "node-modules", "node_modules", "npm":
+		return sandboxv1.FileMaskPreset_FILE_MASK_PRESET_NODE_MODULES, nil
+	case "supply-chain", "supplychain", "lockfiles":
+		return sandboxv1.FileMaskPreset_FILE_MASK_PRESET_SUPPLY_CHAIN, nil
+	default:
+		return sandboxv1.FileMaskPreset_FILE_MASK_PRESET_UNSPECIFIED,
+			fmt.Errorf("unsupported file mask preset %q (use secrets|git|ide|build|node-modules|supply-chain)", value)
+	}
+}
+
+func parseFileMaskPresets(values []string) ([]sandboxv1.FileMaskPreset, error) {
+	if len(values) == 0 {
+		return nil, nil
+	}
+	presets := make([]sandboxv1.FileMaskPreset, 0, len(values))
+	for _, v := range values {
+		preset, err := parseFileMaskPreset(v)
+		if err != nil {
+			return nil, err
+		}
+		presets = append(presets, preset)
+	}
+	return presets, nil
+}
+
+func buildFileMaskConfig(flags *execFlags) (*sandboxv1.FileMaskConfig, error) {
+	// No masking configured
+	if len(flags.fileMaskPresets) == 0 && len(flags.fileMaskHide) == 0 && len(flags.fileMaskExpose) == 0 {
+		return nil, nil
+	}
+
+	presets, err := parseFileMaskPresets(flags.fileMaskPresets)
+	if err != nil {
+		return nil, err
+	}
+
+	// Build mask rules from --mask-hide patterns
+	var rules []*sandboxv1.FileMaskRule
+	for _, pattern := range flags.fileMaskHide {
+		rules = append(rules, &sandboxv1.FileMaskRule{
+			Pattern: pattern,
+			Mode:    sandboxv1.FileMaskMode_FILE_MASK_MODE_HIDDEN,
+		})
+	}
+
+	return &sandboxv1.FileMaskConfig{
+		DefaultMode:    sandboxv1.FileMaskMode_FILE_MASK_MODE_UNSPECIFIED,
+		Presets:        presets,
+		MaskRules:      rules,
+		ExposePatterns: flags.fileMaskExpose,
+	}, nil
+}
+
+func buildWorkspaceIsolationConfig(flags *execFlags) (*sandboxv1.WorkspaceIsolationConfig, error) {
+	// No isolation configured - use direct mode
+	if flags.workspaceIsolation == "" && flags.isolationSizeLimit == "" && !flags.preserveWorkspace {
+		return nil, nil
+	}
+
+	mode, err := parseWorkspaceIsolation(flags.workspaceIsolation)
+	if err != nil {
+		return nil, err
+	}
+
+	return &sandboxv1.WorkspaceIsolationConfig{
+		Mode:                   mode,
+		OverlaySizeLimit:       flags.isolationSizeLimit,
+		PreserveAfterExecution: flags.preserveWorkspace,
+	}, nil
 }

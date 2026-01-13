@@ -51,6 +51,7 @@ import (
 	"github.com/docker/go-connections/nat"
 	sandboxv1 "github.com/picatz/deputy/gen/deputy/sandbox/v1"
 	"github.com/picatz/deputy/internal/sandbox"
+	"github.com/picatz/deputy/internal/sandbox/workspace"
 	"google.golang.org/protobuf/types/known/durationpb"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
@@ -353,8 +354,78 @@ func (r *Runtime) Execute(ctx context.Context, req *sandboxv1.ExecuteRequest) it
 			return
 		}
 
-		// Build container configuration with filtered environment
-		containerConfig, hostConfig, err := r.buildContainerConfig(req, executionID, filteredEnv)
+		// Set up workspace isolation if configured
+		var isolator *workspace.DockerIsolator
+		effectiveWorkspaceDir := req.GetWorkspaceDir()
+
+		cfg := req.GetConfig()
+		isolationMode := cfg.GetWorkspaceIsolation()
+		if isolationMode != sandboxv1.WorkspaceIsolationMode_WORKSPACE_ISOLATION_MODE_UNSPECIFIED &&
+			isolationMode != sandboxv1.WorkspaceIsolationMode_WORKSPACE_ISOLATION_MODE_DIRECT {
+
+			isolator, err = r.setupWorkspaceIsolation(ctx, req, executionID)
+			if err != nil {
+				yield(&sandboxv1.ExecuteEvent{
+					ExecutionId: executionID,
+					Timestamp:   timestamppb.Now(),
+					Details: &sandboxv1.ExecuteEvent_Error{
+						Error: &sandboxv1.ErrorEvent{
+							Message: fmt.Sprintf("failed to setup workspace isolation: %v", err),
+							Code:    "ISOLATION_SETUP_ERROR",
+							IsFatal: true,
+						},
+					},
+				}, nil)
+				return
+			}
+
+			// Setup the isolated workspace
+			isolatedPath, err := isolator.Setup(ctx)
+			if err != nil {
+				yield(&sandboxv1.ExecuteEvent{
+					ExecutionId: executionID,
+					Timestamp:   timestamppb.Now(),
+					Details: &sandboxv1.ExecuteEvent_Error{
+						Error: &sandboxv1.ErrorEvent{
+							Message: fmt.Sprintf("failed to create isolated workspace: %v", err),
+							Code:    "ISOLATION_SETUP_ERROR",
+							IsFatal: true,
+						},
+					},
+				}, nil)
+				return
+			}
+
+			effectiveWorkspaceDir = isolatedPath
+
+			// Ensure cleanup on exit
+			defer func() {
+				preserveChanges := cfg.GetWorkspaceIsolationConfig().GetPreserveAfterExecution()
+				if err := isolator.Teardown(context.Background(), preserveChanges); err != nil {
+					slog.Warn("failed to teardown workspace isolation",
+						"execution_id", executionID,
+						"error", err,
+					)
+				}
+			}()
+
+			// Send status event about isolation setup
+			if !yield(&sandboxv1.ExecuteEvent{
+				ExecutionId: executionID,
+				Timestamp:   timestamppb.Now(),
+				Details: &sandboxv1.ExecuteEvent_Status{
+					Status: &sandboxv1.StatusEvent{
+						Status:  "workspace_isolated",
+						Message: fmt.Sprintf("Workspace isolated using %s mode", isolationMode.String()),
+					},
+				},
+			}, nil) {
+				return
+			}
+		}
+
+		// Build container configuration with filtered environment and effective workspace
+		containerConfig, hostConfig, err := r.buildContainerConfig(req, executionID, filteredEnv, effectiveWorkspaceDir, isolator)
 		if err != nil {
 			yield(&sandboxv1.ExecuteEvent{
 				ExecutionId: executionID,
@@ -623,10 +694,52 @@ func drainPullMessages(reader io.ReadCloser) error {
 	}
 }
 
+// setupWorkspaceIsolation creates a DockerIsolator based on the request configuration.
+func (r *Runtime) setupWorkspaceIsolation(ctx context.Context, req *sandboxv1.ExecuteRequest, executionID string) (*workspace.DockerIsolator, error) {
+	cfg := req.GetConfig()
+	isolationCfg := cfg.GetWorkspaceIsolationConfig()
+
+	// Build file masker from config
+	var masker *workspace.FileMasker
+	if fileMaskCfg := cfg.GetFileMask(); fileMaskCfg != nil {
+		masker = workspace.NewFileMasker(fileMaskCfg)
+	}
+
+	// Determine size limit
+	sizeLimit := "1g"
+	if isolationCfg != nil && isolationCfg.GetOverlaySizeLimit() != "" {
+		sizeLimit = isolationCfg.GetOverlaySizeLimit()
+	}
+
+	// Determine setup timeout
+	setupTimeout := 60 * time.Second
+	if isolationCfg != nil && isolationCfg.GetSetupTimeout() != nil {
+		setupTimeout = isolationCfg.GetSetupTimeout().AsDuration()
+	}
+
+	// Build workspace config
+	workspaceCfg := workspace.Config{
+		Mode:                   cfg.GetWorkspaceIsolation(),
+		OriginalPath:           req.GetWorkspaceDir(),
+		OverlaySizeLimit:       sizeLimit,
+		SetupTimeout:           setupTimeout,
+		PreserveAfterExecution: isolationCfg.GetPreserveAfterExecution(),
+	}
+
+	if isolationCfg != nil {
+		workspaceCfg.SyncPatterns = isolationCfg.GetSyncPatterns()
+		workspaceCfg.ExcludeSyncPatterns = isolationCfg.GetExcludeSyncPatterns()
+	}
+
+	return workspace.NewDockerIsolator(workspaceCfg, masker)
+}
+
 // buildContainerConfig creates the container configuration from the request.
 // The filteredEnv parameter contains environment variables that have been
 // sanitized by removing dangerous variables like LD_PRELOAD.
-func (r *Runtime) buildContainerConfig(req *sandboxv1.ExecuteRequest, executionID string, filteredEnv map[string]string) (*container.Config, *container.HostConfig, error) {
+// The effectiveWorkspaceDir is the workspace path to use (may be isolated).
+// The isolator is optional and provides Docker-specific mount configuration.
+func (r *Runtime) buildContainerConfig(req *sandboxv1.ExecuteRequest, executionID string, filteredEnv map[string]string, effectiveWorkspaceDir string, isolator *workspace.DockerIsolator) (*container.Config, *container.HostConfig, error) {
 	cfg := req.GetConfig()
 
 	// Image
@@ -648,7 +761,7 @@ func (r *Runtime) buildContainerConfig(req *sandboxv1.ExecuteRequest, executionI
 	}
 
 	// Working directory
-	if req.GetWorkspaceDir() != "" {
+	if effectiveWorkspaceDir != "" {
 		containerConfig.WorkingDir = DefaultWorkspaceMount
 	} else if req.GetWorkDir() != "" {
 		containerConfig.WorkingDir = req.GetWorkDir()
@@ -681,6 +794,18 @@ func (r *Runtime) buildContainerConfig(req *sandboxv1.ExecuteRequest, executionI
 		hostConfig.NetworkMode = network.NetworkHost
 	case sandboxv1.NetworkMode_NETWORK_MODE_BRIDGE:
 		hostConfig.NetworkMode = network.NetworkBridge
+	case sandboxv1.NetworkMode_NETWORK_MODE_ALLOWLIST:
+		// Network allowlist mode: use bridge network as base, but note that
+		// true enforcement requires external firewall rules or network policies.
+		// The allowlist is primarily enforced at the application level (e.g., proxy).
+		// For container-level enforcement, use Docker network policies or iptables.
+		hostConfig.NetworkMode = network.NetworkBridge
+		// TODO: Consider adding iptables rules via container capabilities or
+		// using a custom network driver that enforces the allowlist.
+		slog.Debug("network allowlist mode uses bridge network; application-level enforcement only",
+			"execution_id", executionID,
+			"allowlist", cfg.GetNetworkAllowlist(),
+		)
 	default:
 		// Default to no network for security
 		hostConfig.NetworkMode = network.NetworkNone
@@ -731,10 +856,14 @@ func (r *Runtime) buildContainerConfig(req *sandboxv1.ExecuteRequest, executionI
 		hostConfig.SecurityOpt = append(hostConfig.SecurityOpt, "seccomp="+cfg.GetSeccompProfile())
 	}
 
-	// Mounts
-	if workspaceDir := req.GetWorkspaceDir(); workspaceDir != "" {
+	// Mounts - use isolator if available, otherwise use standard mounting
+	if isolator != nil {
+		// Apply isolation-aware mounts via the DockerIsolator
+		isolator.ApplyToHostConfig(hostConfig, DefaultWorkspaceMount, cfg.GetMode())
+	} else if effectiveWorkspaceDir != "" {
+		// Standard workspace mount without isolation
 		// Validate workspace path
-		if strings.ContainsAny(workspaceDir, "\x00\n\r") {
+		if strings.ContainsAny(effectiveWorkspaceDir, "\x00\n\r") {
 			return nil, nil, fmt.Errorf("invalid workspace directory path")
 		}
 
@@ -746,7 +875,7 @@ func (r *Runtime) buildContainerConfig(req *sandboxv1.ExecuteRequest, executionI
 
 		hostConfig.Mounts = append(hostConfig.Mounts, mount.Mount{
 			Type:     mount.TypeBind,
-			Source:   workspaceDir,
+			Source:   effectiveWorkspaceDir,
 			Target:   DefaultWorkspaceMount,
 			ReadOnly: readOnly,
 		})

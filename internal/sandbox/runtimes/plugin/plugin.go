@@ -309,7 +309,7 @@ func startPlugin(ctx context.Context, name, execPath string) (*pluginClient, err
 	socketPath := filepath.Join(tmpDir, "sandbox.sock")
 	cmd := exec.CommandContext(ctx, execPath, "--socket", socketPath)
 	cmd.Stdout = io.Discard
-	cmd.Stderr = io.Discard
+	cmd.Stderr = io.Discard // Note: change to os.Stderr for plugin debugging
 
 	if err := cmd.Start(); err != nil {
 		_ = os.RemoveAll(tmpDir)

@@ -145,6 +145,63 @@ enum NetworkMode {
   NETWORK_MODE_ALLOWLIST = 4;
 }
 
+// WorkspaceIsolationMode controls how workspace files are isolated during execution.
+// This provides defense-in-depth for supply chain security by controlling how
+// commands can interact with the workspace filesystem.
+enum WorkspaceIsolationMode {
+  // Unspecified - uses configuration default (direct).
+  WORKSPACE_ISOLATION_MODE_UNSPECIFIED = 0;
+
+  // Direct mode: workspace is mounted directly with specified read/write access.
+  // Changes are immediately visible on the host filesystem.
+  // This is the simplest mode but provides no rollback capability.
+  WORKSPACE_ISOLATION_MODE_DIRECT = 1;
+
+  // Overlay mode: workspace uses a copy-on-write overlay filesystem.
+  // Writes go to a temporary upper layer, leaving the original workspace intact.
+  // Changes can be reviewed before committing or discarded entirely.
+  // Requires: Docker with overlay2 driver, or Linux with overlayfs.
+  WORKSPACE_ISOLATION_MODE_OVERLAY = 2;
+
+  // Snapshot mode: workspace is copied to a temporary directory.
+  // All operations run on the copy. Changes can be diff'd against original
+  // and selectively applied. Best for git repositories where you want to
+  // review changes before committing.
+  WORKSPACE_ISOLATION_MODE_SNAPSHOT = 3;
+
+  // Git worktree mode: creates a git worktree for isolation.
+  // Requires the workspace to be a git repository.
+  // Changes are isolated in a separate worktree that can be merged or discarded.
+  WORKSPACE_ISOLATION_MODE_GIT_WORKTREE = 4;
+
+  // Tmpfs overlay mode: uses in-memory tmpfs for the overlay upper layer.
+  // Fastest for ephemeral operations but limited by available RAM.
+  // All changes are lost when the sandbox exits.
+  WORKSPACE_ISOLATION_MODE_TMPFS = 5;
+}
+
+// FileMaskMode controls how masked files appear to the sandbox.
+enum FileMaskMode {
+  // Unspecified - uses default (hidden).
+  FILE_MASK_MODE_UNSPECIFIED = 0;
+
+  // Hidden: masked files are completely invisible to the sandbox.
+  // The sandbox cannot see these files exist at all.
+  FILE_MASK_MODE_HIDDEN = 1;
+
+  // Empty: masked files appear as empty (zero-byte) files.
+  // The sandbox can see filenames but not contents.
+  FILE_MASK_MODE_EMPTY = 2;
+
+  // Placeholder: masked files contain a placeholder message.
+  // Useful for debugging to indicate why content is unavailable.
+  FILE_MASK_MODE_PLACEHOLDER = 3;
+
+  // Read-only: files are visible and readable but writes are blocked.
+  // Useful for configuration files that should be readable but not modified.
+  FILE_MASK_MODE_READ_ONLY = 4;
+}
+
 // ExecutionSource identifies what triggered the sandbox execution.
 // Used for policy evaluation and audit logging.
 enum ExecutionSource {
@@ -357,6 +414,117 @@ message SandboxConfig {
   // Explicit allowlist of executable paths or directories.
   // Runtimes that restrict exec can use this to expand allowed executables.
   repeated string exec_allowlist = 17;
+
+  // Workspace isolation mode for copy-on-write, snapshot, or overlay behavior.
+  // When set, enables advanced isolation features beyond simple bind mounts.
+  WorkspaceIsolationMode workspace_isolation = 18;
+
+  // File masking configuration for hiding or protecting sensitive files.
+  // Applied on top of workspace_isolation to provide fine-grained control.
+  FileMaskConfig file_mask = 19;
+
+  // Whether to enable post-execution review workflow.
+  // When true, changes are held for review before being committed.
+  bool review_before_commit = 20;
+
+  // Detailed workspace isolation configuration.
+  // Required when workspace_isolation is not DIRECT or UNSPECIFIED.
+  WorkspaceIsolationConfig workspace_isolation_config = 21;
+}
+
+// FileMaskConfig configures file masking behavior for the sandbox.
+// File masking allows you to selectively hide or protect files while still
+// providing access to necessary files like dependency lockfiles.
+message FileMaskConfig {
+  // Default mask mode for files not explicitly configured.
+  FileMaskMode default_mode = 1;
+
+  // Patterns for files to mask (hide, make empty, or protect).
+  // Uses glob patterns (e.g., "**/.env", "*.pem", ".git/config").
+  repeated FileMaskRule mask_rules = 2;
+
+  // Patterns for files to always expose (whitelist).
+  // These override mask_rules. Useful for dependency lockfiles.
+  // Uses glob patterns (e.g., "package-lock.json", "go.sum", "Cargo.lock").
+  repeated string expose_patterns = 3;
+
+  // Preset masks for common supply chain security scenarios.
+  // These are additive with mask_rules.
+  repeated FileMaskPreset presets = 4;
+}
+
+// FileMaskRule defines a masking rule for specific file patterns.
+message FileMaskRule {
+  // Glob pattern for files this rule applies to.
+  // Examples: "**/.env*", "*.key", ".git/**", "node_modules/**"
+  string pattern = 1;
+
+  // How to mask matching files.
+  FileMaskMode mode = 2;
+
+  // Optional reason for masking (shown when mode is PLACEHOLDER).
+  string reason = 3;
+}
+
+// FileMaskPreset defines predefined file masking configurations.
+enum FileMaskPreset {
+  // Unspecified preset.
+  FILE_MASK_PRESET_UNSPECIFIED = 0;
+
+  // Secrets preset: masks common secret files (.env, *.pem, *.key, credentials.json).
+  FILE_MASK_PRESET_SECRETS = 1;
+
+  // Git preset: masks git internal files except lockfiles and config for commits.
+  FILE_MASK_PRESET_GIT = 2;
+
+  // IDE preset: masks IDE/editor config files (.vscode/, .idea/, *.swp).
+  FILE_MASK_PRESET_IDE = 3;
+
+  // Build artifacts preset: masks common build outputs (dist/, build/, target/).
+  FILE_MASK_PRESET_BUILD_ARTIFACTS = 4;
+
+  // Node modules preset: masks node_modules except package metadata.
+  FILE_MASK_PRESET_NODE_MODULES = 5;
+
+  // Supply chain preset: combines secrets + build artifacts + strict lockfile access.
+  // Recommended for AI agents and automated remediation.
+  FILE_MASK_PRESET_SUPPLY_CHAIN = 6;
+}
+
+// WorkspaceIsolationConfig provides detailed configuration for workspace isolation.
+// Used when workspace_isolation is set to a non-direct mode.
+message WorkspaceIsolationConfig {
+  // Workspace isolation mode.
+  WorkspaceIsolationMode mode = 1;
+
+  // For OVERLAY mode: size limit for the overlay upper layer.
+  // Example: "1g", "512m". Default is "1g".
+  string overlay_size_limit = 2;
+
+  // For SNAPSHOT mode: directory to store snapshots.
+  // Default is a temporary directory.
+  string snapshot_dir = 3;
+
+  // For GIT_WORKTREE mode: branch name for the worktree.
+  // Default is a generated name based on execution ID.
+  string worktree_branch = 4;
+
+  // Whether to preserve the isolated workspace after execution.
+  // Useful for debugging or manual review.
+  bool preserve_after_execution = 5;
+
+  // Maximum time to wait for snapshot/overlay setup.
+  // Default is 60 seconds.
+  google.protobuf.Duration setup_timeout = 6;
+
+  // Files to sync back to original workspace after execution.
+  // Uses glob patterns. If empty and review_before_commit is false,
+  // syncs all modified files.
+  repeated string sync_patterns = 7;
+
+  // Files to never sync back (even if modified).
+  // Uses glob patterns. Applied after sync_patterns.
+  repeated string exclude_sync_patterns = 8;
 }
 
 // ResourceLimits sets resource constraints for the sandbox.

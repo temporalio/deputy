@@ -11,6 +11,13 @@ This plugin provides maximum isolation by running each sandbox execution in a li
 - No container escape vulnerabilities - VMs are a stronger security boundary
 - Native macOS performance on Apple Silicon
 - No root/sudo required
+- **Developer-ready**: Includes Go, Node.js, and build tools for supply chain security workflows
+
+**Use Cases:**
+- Run `npm install`, `go get`, `pip install` in isolated VMs
+- Execute untrusted build scripts safely
+- Test package manager commands without affecting your system
+- AI agent remediation workflows
 
 **Requirements:**
 - macOS 11.0+ (Big Sur or later)
@@ -21,6 +28,32 @@ This plugin provides maximum isolation by running each sandbox execution in a li
 ## Quick Start (Ubuntu 24.04 LTS)
 
 This section provides exact commands to get a working VM sandbox using Ubuntu 24.04 LTS (Noble Numbat).
+
+### One-Command Setup (Recommended)
+
+The fastest way to get started is using the Makefile:
+
+```bash
+# From the deputy repository root
+cd examples/sandbox-plugins/vz
+
+# Full setup: download kernel, build rootfs with Go/Node, install plugin
+make setup
+
+# Test it works
+deputy exec --runtime plugin --plugin vz -- go version
+deputy exec --runtime plugin --plugin vz -- node --version
+```
+
+This creates a developer-ready VM with:
+- Go 1.25.5 toolchain (matches deputy's go.mod)
+- Node.js 22 LTS + npm
+- Build essentials (gcc, make, git)
+- Python 3 with pip
+
+### Manual Setup
+
+If you prefer manual control, follow these steps:
 
 ### 1. Build and Install the Plugin
 
@@ -239,6 +272,8 @@ deputy exec --runtime plugin --plugin vz -- ls -la
 
 ## Usage Examples
 
+### Basic Commands
+
 ```bash
 # Run a command in a VM
 deputy exec --runtime plugin --plugin vz -- ls -la
@@ -258,6 +293,117 @@ deputy exec --runtime plugin --plugin vz --network none -- ./build.sh
 # With timeout
 deputy exec --runtime plugin --plugin vz --timeout 30s -- long-running-task
 ```
+
+### Supply Chain Security (Package Manager Operations)
+
+Run package manager commands safely in VM isolation:
+
+```bash
+# Go: Run go mod tidy in isolated VM
+deputy exec --runtime plugin --plugin vz -- go mod tidy
+
+# Go: Build and test without affecting host
+deputy exec --runtime plugin --plugin vz -- go build ./...
+deputy exec --runtime plugin --plugin vz -- go test ./...
+
+# Node.js: Safe npm install with workspace isolation
+deputy exec --runtime plugin --plugin vz \
+    --workspace-isolation snapshot \
+    --mask-preset supply-chain \
+    -- npm install
+
+# Node.js: Run npm audit to check for vulnerabilities
+deputy exec --runtime plugin --plugin vz -- npm audit
+
+# Python: Install dependencies in isolated environment
+deputy exec --runtime plugin --plugin vz -- pip install -r requirements.txt
+```
+
+### Deputy Development Workflow
+
+Use the vz plugin to develop Deputy itself in an isolated environment:
+
+```bash
+# From the deputy repository root
+
+# Build deputy in VM
+deputy exec --runtime plugin --plugin vz -- go build -o deputy-vm .
+
+# Run tests in VM
+deputy exec --runtime plugin --plugin vz -- go test ./...
+
+# Run a specific test
+deputy exec --runtime plugin --plugin vz -- go test -v -run TestScanCommand ./internal/cli/cmd/...
+
+# Tidy modules safely
+deputy exec --runtime plugin --plugin vz -- go mod tidy
+
+# Run deputy inside deputy (inception!)
+deputy exec --runtime plugin --plugin vz -- ./deputy-vm scan
+```
+
+### Workspace Isolation with VZ
+
+Combine VM isolation with workspace isolation for maximum safety:
+
+```bash
+# Snapshot isolation: changes don't affect original workspace
+deputy exec --runtime plugin --plugin vz \
+    --workspace-isolation snapshot \
+    -- npm install malicious-looking-package
+
+# Review changes before applying (preserved workspace)
+deputy exec --runtime plugin --plugin vz \
+    --workspace-isolation snapshot \
+    --preserve-workspace \
+    -- npm install
+
+# File masking: hide secrets, expose only lockfiles
+deputy exec --runtime plugin --plugin vz \
+    --mask-preset supply-chain \
+    -- npm audit
+```
+
+## Custom Rootfs Builds
+
+The `build-rootfs.sh` script creates customized rootfs images:
+
+```bash
+# Developer rootfs (Go + Node.js + build tools) - default
+./build-rootfs.sh
+
+# Minimal rootfs (Ubuntu base only, smaller)
+./build-rootfs.sh --minimal
+
+# Larger rootfs for more packages
+./build-rootfs.sh --size 4096
+
+# Custom Go version (e.g., match your project's go.mod)
+./build-rootfs.sh --go-version 1.25.5
+
+# Custom output directory
+./build-rootfs.sh --output /path/to/assets
+```
+
+Or use the Makefile targets:
+
+```bash
+make rootfs          # Developer rootfs with Go/Node
+make rootfs-minimal  # Minimal Ubuntu rootfs
+```
+
+### What's Included in Developer Rootfs
+
+| Component | Version | Purpose |
+|-----------|---------|---------|
+| Ubuntu | 24.04 LTS | Base system |
+| Go | 1.25.5 (configurable via `--go-version`) | Go toolchain |
+| Node.js | 22 LTS | JavaScript runtime |
+| npm | Latest | Package manager |
+| gcc/g++ | System | C/C++ compiler |
+| make | System | Build system |
+| git | System | Version control |
+| curl/wget | System | HTTP clients |
 
 ## Using Other Linux Distributions
 
