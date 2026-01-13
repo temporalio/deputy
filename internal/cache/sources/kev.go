@@ -13,6 +13,7 @@ import (
 
 	"github.com/picatz/deputy/internal/cache"
 	"github.com/picatz/deputy/internal/cache/disk"
+	"github.com/picatz/deputy/internal/network"
 	"github.com/picatz/deputy/internal/otel"
 )
 
@@ -55,9 +56,10 @@ type KEVSource struct {
 }
 
 // NewKEVSource creates a new KEV cache source.
+// Uses SafeDialer for SSRF protection against DNS rebinding attacks.
 func NewKEVSource() *KEVSource {
 	return &KEVSource{
-		httpClient: &http.Client{Timeout: 30 * time.Second},
+		httpClient: network.SafeClient(),
 	}
 }
 

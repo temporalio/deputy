@@ -49,6 +49,25 @@ func TestCommandsFromConsolidatedGeneratesPlan(t *testing.T) {
 	assertCommand(t, commands, "Edit vagrant.gemspec to require rexml >= 3.3.9", false)
 }
 
+func TestGoModuleVersionNormalization(t *testing.T) {
+	// Regression test: Go module versions from OSV may lack "v" prefix (e.g., "0.3.4")
+	// but `go get` requires them (e.g., "v0.3.4")
+	cons := []vulnerability.Consolidated{
+		{
+			PrimaryID:     "GO-2024-1234",
+			Package:       "github.com/google/osv-scalibr",
+			Version:       "v0.3.0",
+			FixedVersions: []string{"0.3.4"}, // Note: no "v" prefix, as OSV sometimes returns
+			IsDirect:      true,
+			ManifestRefs:  []dependencyv1.ManifestRef{{Manager: "go", Path: "./go.mod"}},
+		},
+	}
+	commands, _ := CommandsFromConsolidated(cons)
+
+	// Should normalize to v0.3.4
+	assertCommand(t, commands, "go get github.com/google/osv-scalibr@v0.3.4", true)
+}
+
 func assertCommand(t *testing.T, commands []Command, want string, expectExecutable bool) {
 	t.Helper()
 	for _, c := range commands {

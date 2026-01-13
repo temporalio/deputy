@@ -86,8 +86,11 @@ func (p *Provider) Stream(ctx context.Context, req *ai.CompletionRequest) iter.S
 			SandboxMode:      sandboxMode,
 			WorkingDirectory: req.WorkDir,
 			ThreadID:         req.SessionID,
-			FullAuto:         req.Sandbox == ai.SandboxFullAccess,
 			SkipGitRepoCheck: true,
+			// Note: We don't set FullAuto because --full-auto disables network access.
+			// Instead, we use danger-full-access sandbox mode which allows full access
+			// including network. The approval policy is controlled separately via
+			// ai.ApprovalPolicy in the session config.
 		}
 
 		var lastThreadID string

@@ -7,7 +7,6 @@
 package fixv1
 
 import (
-	_ "buf.build/gen/go/bufbuild/protovalidate/protocolbuffers/go/buf/validate"
 	v1 "github.com/picatz/deputy/gen/deputy/target/v1"
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
@@ -429,7 +428,7 @@ var File_deputy_fix_v1_service_proto protoreflect.FileDescriptor
 
 const file_deputy_fix_v1_service_proto_rawDesc = "" +
 	"\n" +
-	"\x1bdeputy/fix/v1/service.proto\x12\rdeputy.fix.v1\x1a\x1bbuf/validate/validate.proto\x1a\x1fgoogle/protobuf/timestamp.proto\x1a\x1ddeputy/target/v1/target.proto\"Y\n" +
+	"\x1bdeputy/fix/v1/service.proto\x12\rdeputy.fix.v1\x1a\x1fgoogle/protobuf/timestamp.proto\x1a\x1ddeputy/target/v1/target.proto\"Y\n" +
 	"\n" +
 	"FixRequest\x12\x16\n" +
 	"\x06target\x18\x01 \x01(\tR\x06target\x123\n" +

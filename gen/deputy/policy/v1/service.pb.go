@@ -7,9 +7,6 @@
 package policyv1
 
 import (
-	_ "github.com/picatz/deputy/gen/deputy/dependency/v1"
-	_ "github.com/picatz/deputy/gen/deputy/target/v1"
-	_ "github.com/picatz/deputy/gen/deputy/vulnerability/v1"
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 	reflect "reflect"
@@ -981,7 +978,7 @@ var File_deputy_policy_v1_service_proto protoreflect.FileDescriptor
 
 const file_deputy_policy_v1_service_proto_rawDesc = "" +
 	"\n" +
-	"\x1edeputy/policy/v1/service.proto\x12\x10deputy.policy.v1\x1a\x1ddeputy/policy/v1/policy.proto\x1a+deputy/vulnerability/v1/vulnerability.proto\x1a%deputy/dependency/v1/dependency.proto\x1a\x1ddeputy/target/v1/target.proto\"\xe2\x05\n" +
+	"\x1edeputy/policy/v1/service.proto\x12\x10deputy.policy.v1\x1a\x1ddeputy/policy/v1/policy.proto\"\xe2\x05\n" +
 	"\x0fEvaluateRequest\x12:\n" +
 	"\bpolicies\x18\x01 \x03(\v2\x1e.deputy.policy.v1.PolicySourceR\bpolicies\x12_\n" +
 	"\x12scan_vulnerability\x18\n" +

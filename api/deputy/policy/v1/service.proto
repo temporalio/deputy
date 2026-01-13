@@ -3,9 +3,6 @@ syntax = "proto3";
 package deputy.policy.v1;
 
 import "deputy/policy/v1/policy.proto";
-import "deputy/vulnerability/v1/vulnerability.proto";
-import "deputy/dependency/v1/dependency.proto";
-import "deputy/target/v1/target.proto";
 
 option go_package = "github.com/picatz/deputy/gen/deputy/policy/v1;policyv1";
 

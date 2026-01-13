@@ -7,7 +7,6 @@
 package triagev1
 
 import (
-	_ "buf.build/gen/go/bufbuild/protovalidate/protocolbuffers/go/buf/validate"
 	v1 "github.com/picatz/deputy/gen/deputy/target/v1"
 	v11 "github.com/picatz/deputy/gen/deputy/vulnerability/v1"
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
@@ -411,7 +410,7 @@ var File_deputy_triage_v1_service_proto protoreflect.FileDescriptor
 
 const file_deputy_triage_v1_service_proto_rawDesc = "" +
 	"\n" +
-	"\x1edeputy/triage/v1/service.proto\x12\x10deputy.triage.v1\x1a\x1bbuf/validate/validate.proto\x1a\x1fgoogle/protobuf/timestamp.proto\x1a\x1ddeputy/target/v1/target.proto\x1a+deputy/vulnerability/v1/vulnerability.proto\"b\n" +
+	"\x1edeputy/triage/v1/service.proto\x12\x10deputy.triage.v1\x1a\x1fgoogle/protobuf/timestamp.proto\x1a\x1ddeputy/target/v1/target.proto\x1a+deputy/vulnerability/v1/vulnerability.proto\"b\n" +
 	"\rTriageRequest\x12\x16\n" +
 	"\x06target\x18\x01 \x01(\tR\x06target\x129\n" +
 	"\aoptions\x18\x02 \x01(\v2\x1f.deputy.triage.v1.TriageOptionsR\aoptions\"\x97\x02\n" +

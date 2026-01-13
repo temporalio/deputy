@@ -2,7 +2,6 @@ syntax = "proto3";
 
 package deputy.triage.v1;
 
-import "buf/validate/validate.proto";
 import "google/protobuf/timestamp.proto";
 import "deputy/target/v1/target.proto";
 import "deputy/vulnerability/v1/vulnerability.proto";

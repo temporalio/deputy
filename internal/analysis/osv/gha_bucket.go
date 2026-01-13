@@ -79,9 +79,10 @@ func writeGHAMeta(zipPath string, meta ghaZipMeta) {
 // ghaHTTPTimeout is the overall request timeout for GHA vulnerability fetches.
 const ghaHTTPTimeout = 30 * time.Second
 
-// ghaHTTPClient uses retryable HTTP for resilience when downloading the GHA
-// vulnerability zip from Google Cloud Storage, which may have transient failures.
-var ghaHTTPClient = httputil.NewRetryableClient(ghaHTTPTimeout)
+// ghaHTTPClient uses retryable HTTP with SSRF protection for resilience when
+// downloading the GHA vulnerability zip from Google Cloud Storage, which may
+// have transient failures. SafeDialer prevents DNS rebinding attacks.
+var ghaHTTPClient = httputil.NewSafeRetryableClient(ghaHTTPTimeout)
 
 var ghaGitHubTokenEnvVar = "GITHUB_TOKEN"
 

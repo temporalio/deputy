@@ -350,7 +350,9 @@ func recommendCommand(manager, manifestPath, pkg, version string, groups []strin
 
 	switch m {
 	case "go":
-		return commandResult{command: fmt.Sprintf("go get %s@%s", pkg, version), executable: true}
+		// Go module versions must have a "v" prefix
+		v := ecosystem.Go.NormalizeVersion(version)
+		return commandResult{command: fmt.Sprintf("go get %s@%s", pkg, v), executable: true}
 
 	// Ruby/Bundler
 	case "gem", "bundler":

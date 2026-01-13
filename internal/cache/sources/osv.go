@@ -43,9 +43,10 @@ type OSVSource struct {
 }
 
 // NewOSVSource creates a new OSV cache source.
+// Uses SafeDialer for SSRF protection against DNS rebinding attacks.
 func NewOSVSource() *OSVSource {
 	return &OSVSource{
-		httpClient: httputil.NewRetryableClient(30 * time.Second),
+		httpClient: httputil.NewSafeRetryableClient(30 * time.Second),
 	}
 }
 

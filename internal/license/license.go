@@ -356,9 +356,10 @@ var (
 	registryLicenseGroup singleflight.Group
 	githubHTTPClientOnce sync.Once
 	githubHTTPClient     *nethttp.Client
-	// licenseHTTPClient uses retryable HTTP for resilience against transient failures
-	// when fetching license data from package registries (crates.io, packagist, etc.)
-	licenseHTTPClient = httputil.NewRetryableClient(licenseHTTPTimeout)
+	// licenseHTTPClient uses retryable HTTP with SSRF protection for resilience
+	// against transient failures when fetching license data from package registries
+	// (crates.io, packagist, etc.). SafeDialer prevents DNS rebinding attacks.
+	licenseHTTPClient = httputil.NewSafeRetryableClient(licenseHTTPTimeout)
 )
 
 // MergeLicenseSources merges deps.dev licenses (primary) with locally scanned
@@ -1115,11 +1116,11 @@ func ExtractLicensesFromReader(r io.Reader) []string {
 }
 
 // getGitHubHTTPClient returns a singleton HTTP client configured with a timeout
-// suitable for GitHub API requests. Uses retryable HTTP for resilience against
-// transient failures and rate limiting.
+// suitable for GitHub API requests. Uses retryable HTTP with SSRF protection
+// for resilience against transient failures and rate limiting.
 func getGitHubHTTPClient() *nethttp.Client {
 	githubHTTPClientOnce.Do(func() {
-		githubHTTPClient = httputil.NewRetryableClient(githubHTTPTimeout)
+		githubHTTPClient = httputil.NewSafeRetryableClient(githubHTTPTimeout)
 	})
 	return githubHTTPClient
 }

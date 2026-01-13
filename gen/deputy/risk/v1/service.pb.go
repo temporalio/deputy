@@ -10,7 +10,6 @@ import (
 	_ "buf.build/gen/go/bufbuild/protovalidate/protocolbuffers/go/buf/validate"
 	v12 "github.com/picatz/deputy/gen/deputy/dependency/v1"
 	v11 "github.com/picatz/deputy/gen/deputy/policy/v1"
-	_ "github.com/picatz/deputy/gen/deputy/secrets/v1"
 	v1 "github.com/picatz/deputy/gen/deputy/target/v1"
 	v13 "github.com/picatz/deputy/gen/deputy/vulnerability/v1"
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
@@ -2786,7 +2785,7 @@ var File_deputy_risk_v1_service_proto protoreflect.FileDescriptor
 
 const file_deputy_risk_v1_service_proto_rawDesc = "" +
 	"\n" +
-	"\x1cdeputy/risk/v1/service.proto\x12\x0edeputy.risk.v1\x1a\x1bbuf/validate/validate.proto\x1a\x1fgoogle/protobuf/timestamp.proto\x1a\x1ddeputy/target/v1/target.proto\x1a%deputy/dependency/v1/dependency.proto\x1a+deputy/vulnerability/v1/vulnerability.proto\x1a\x1ddeputy/policy/v1/policy.proto\x1a\x1fdeputy/secrets/v1/secrets.proto\"k\n" +
+	"\x1cdeputy/risk/v1/service.proto\x12\x0edeputy.risk.v1\x1a\x1bbuf/validate/validate.proto\x1a\x1fgoogle/protobuf/timestamp.proto\x1a\x1ddeputy/target/v1/target.proto\x1a%deputy/dependency/v1/dependency.proto\x1a+deputy/vulnerability/v1/vulnerability.proto\x1a\x1ddeputy/policy/v1/policy.proto\"k\n" +
 	"\x12AnalyzeRiskRequest\x12\x16\n" +
 	"\x06target\x18\x01 \x01(\tR\x06target\x12=\n" +
 	"\aoptions\x18\x02 \x01(\v2#.deputy.risk.v1.RiskAnalysisOptionsR\aoptions\"\xa5\x04\n" +

@@ -8,7 +8,6 @@ import "deputy/target/v1/target.proto";
 import "deputy/dependency/v1/dependency.proto";
 import "deputy/vulnerability/v1/vulnerability.proto";
 import "deputy/policy/v1/policy.proto";
-import "deputy/secrets/v1/secrets.proto";
 
 option go_package = "github.com/picatz/deputy/gen/deputy/risk/v1;riskv1";
 
