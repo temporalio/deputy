@@ -225,11 +225,11 @@ deputy proxy oci-config --url https://proxy.internal:8443 --upstream ghcr.io
 
 ### Flags
 
-| Flag | Short | Default | Description |
-| --- | --- | --- | --- |
-| `--host` | | | Proxy host:port (e.g., `127.0.0.1:8084`) |
-| `--url` | | | Proxy URL (e.g., `https://proxy.internal:8443`) |
-| `--upstream` | `-u` | | Upstream registry host for mirror snippets (e.g., `ghcr.io`) |
+| Flag | Default | Description |
+| --- | --- | --- |
+| `--host` | | Proxy host:port (e.g., `127.0.0.1:8084`) |
+| `--url` | | Proxy URL (e.g., `https://proxy.internal:8443`) |
+| `--upstream` | | Upstream registry host for mirror snippets (e.g., `ghcr.io`) |
 
 Use the emitted snippets to update Docker `daemon.json` or Podman `registries.conf`. They are templates; adapt to your deployment, TLS termination, and multiple-registry setups.
 
@@ -249,10 +249,10 @@ If you pull from multiple registries, run the wrapper once per registry (set `--
 deputy proxy go [flags] -- <go command> [args...]
 ```
 
-| Flag | Short | Default | Description |
-| --- | --- | --- | --- |
-| `--upstream` | `-u` | `https://proxy.golang.org` | Upstream Go module proxy |
-| `--policy` | `-p` | | Additional CEL policy files (repeatable) |
+| Flag | Default | Description |
+| --- | --- | --- |
+| `--upstream` | `https://proxy.golang.org` | Upstream Go module proxy |
+| `--policy` | | Additional CEL policy files (repeatable) |
 
 ```console
 # Download a module
@@ -271,10 +271,10 @@ $ deputy proxy go --policy corp.yaml -- go mod download
 deputy proxy npm [flags] -- <npm/yarn/pnpm command> [args...]
 ```
 
-| Flag | Short | Default | Description |
-| --- | --- | --- | --- |
-| `--upstream` | `-u` | `https://registry.npmjs.org` | Upstream npm registry |
-| `--policy` | `-p` | | Additional CEL policy files (repeatable) |
+| Flag | Default | Description |
+| --- | --- | --- |
+| `--upstream` | `https://registry.npmjs.org` | Upstream npm registry |
+| `--policy` | | Additional CEL policy files (repeatable) |
 
 ```console
 # Install packages
@@ -293,10 +293,10 @@ $ deputy proxy npm -- pnpm install
 deputy proxy pypi [flags] -- <pip command> [args...]
 ```
 
-| Flag | Short | Default | Description |
-| --- | --- | --- | --- |
-| `--upstream` | `-u` | `https://pypi.org` | Upstream PyPI index |
-| `--policy` | `-p` | | Additional CEL policy files (repeatable) |
+| Flag | Default | Description |
+| --- | --- | --- |
+| `--upstream` | `https://pypi.org` | Upstream PyPI index |
+| `--policy` | | Additional CEL policy files (repeatable) |
 
 ```console
 # Install packages
@@ -312,10 +312,10 @@ $ deputy proxy pypi -- pip download flask --no-deps
 deputy proxy rubygems [flags] -- <gem/bundle command> [args...]
 ```
 
-| Flag | Short | Default | Description |
-| --- | --- | --- | --- |
-| `--upstream` | `-u` | `https://rubygems.org` | Upstream RubyGems |
-| `--policy` | `-p` | | Additional CEL policy files (repeatable) |
+| Flag | Default | Description |
+| --- | --- | --- |
+| `--upstream` | `https://rubygems.org` | Upstream RubyGems |
+| `--policy` | | Additional CEL policy files (repeatable) |
 
 ```console
 # Install a gem
@@ -331,10 +331,10 @@ $ deputy proxy rubygems -- bundle install
 deputy proxy oci [flags] -- <container command> [args...]
 ```
 
-| Flag | Short | Default | Description |
-| --- | --- | --- | --- |
-| `--upstream` | `-u` | `https://registry-1.docker.io` | Upstream OCI registry |
-| `--policy` | `-p` | | Additional CEL policy files (repeatable) |
+| Flag | Default | Description |
+| --- | --- | --- |
+| `--upstream` | `https://registry-1.docker.io` | Upstream OCI registry |
+| `--policy` | | Additional CEL policy files (repeatable) |
 
 ```console
 # Pull from Docker Hub through Deputy

@@ -360,19 +360,19 @@ flowchart TB
 
 ### Git Diff Flags
 
-| Flag | Short | Default | Description |
-| --- | --- | --- | --- |
-| `--repo` | `-r` | cwd | Path to the repository |
-| `--licenses` | | `false` | Include license information |
-| `--license-source` | | `depsdev` | License source: `depsdev`, `scan`, `both` |
-| `--published-before` | | | Only show vulns published before this date |
-| `--published-after` | | | Only show vulns published on/after this date |
-| `--as-of` | | | Historical view (implies `--published-before`) |
-| `--ignore-unfixed` | | `false` | Hide unfixable vulnerabilities |
-| `--show-unchanged` | | `false` | Show vulns in unchanged dependencies |
-| `--unchanged-threshold` | | `critical` | Auto-show unchanged vulns at this severity+ |
-| `--ecosystems` | | `all` | Ecosystems to scan |
-| `--debug-matcher` | | `false` | Show which files triggered dependency analysis |
+| Flag | Default | Description |
+| --- | --- | --- |
+| `--repo` | cwd | Path to the repository |
+| `--licenses` | `false` | Include license information |
+| `--license-source` | `depsdev` | License source: `depsdev`, `scan`, `both` |
+| `--published-before` | | Only show vulns published before this date |
+| `--published-after` | | Only show vulns published on/after this date |
+| `--as-of` | | Historical view (implies `--published-before`) |
+| `--ignore-unfixed` | `false` | Hide unfixable vulnerabilities |
+| `--show-unchanged` | `false` | Show vulns in unchanged dependencies |
+| `--unchanged-threshold` | `critical` | Auto-show unchanged vulns at this severity+ |
+| `--ecosystems` | `all` | Ecosystems to scan |
+| `--debug-matcher` | `false` | Show which files triggered dependency analysis |
 
 ### Unchanged Threshold Values
 
