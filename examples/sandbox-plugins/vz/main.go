@@ -181,10 +181,11 @@ func (h *vzHandler) Execute(
 	}
 
 	// Validate assets exist
-	kernelPath, rootfsPath, err := h.resolveAssetPaths()
+	kernelPath, initrdPath, rootfsPath, err := h.resolveAssetPaths()
 	if err != nil {
 		return stream.Send(h.errorEvent(executionID, "ASSET_ERROR", err.Error()))
 	}
+	fmt.Fprintf(os.Stderr, "[VZ] Assets: kernel=%s initrd=%s rootfs=%s\n", kernelPath, initrdPath, rootfsPath)
 
 	// Create PTY for VM console I/O (PTY works better than pipes with Virtualization.framework)
 	ptyMaster, ptySlave, err := pty.Open()
@@ -195,7 +196,7 @@ func (h *vzHandler) Execute(
 	defer ptySlave.Close()
 
 	// Create VM configuration with the PTY slave (VM reads/writes to slave, we read/write to master)
-	vmConfig, err := h.createVMConfig(execReq, kernelPath, rootfsPath, ptySlave, ptySlave)
+	vmConfig, err := h.createVMConfig(execReq, kernelPath, initrdPath, rootfsPath, ptySlave, ptySlave)
 	if err != nil {
 		return stream.Send(h.errorEvent(executionID, "CONFIG_ERROR", err.Error()))
 	}
@@ -527,19 +528,20 @@ func (h *vzHandler) Shutdown() {
 
 func (h *vzHandler) checkAvailability() error {
 	// Check for required assets (vz library handles availability checks internally)
-	_, _, err := h.resolveAssetPaths()
+	_, _, _, err := h.resolveAssetPaths()
 	return err
 }
 
-func (h *vzHandler) resolveAssetPaths() (kernel, rootfs string, err error) {
+func (h *vzHandler) resolveAssetPaths() (kernel, initrd, rootfs string, err error) {
 	// Check environment variables first
 	kernel = os.Getenv(envKernelPath)
+	initrd = os.Getenv(envInitrdPath)
 	rootfs = os.Getenv(envRootfsPath)
 
 	// Fall back to default locations
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
-		return "", "", fmt.Errorf("cannot determine home directory: %w", err)
+		return "", "", "", fmt.Errorf("cannot determine home directory: %w", err)
 	}
 
 	assetDir := filepath.Join(homeDir, defaultAssetDir)
@@ -553,20 +555,35 @@ func (h *vzHandler) resolveAssetPaths() (kernel, rootfs string, err error) {
 
 	// Validate kernel exists
 	if _, err := os.Stat(kernel); os.IsNotExist(err) {
-		return "", "", fmt.Errorf("kernel not found at %s (set %s)", kernel, envKernelPath)
+		return "", "", "", fmt.Errorf("kernel not found at %s (set %s)", kernel, envKernelPath)
 	}
 
 	// Validate rootfs exists
 	if _, err := os.Stat(rootfs); os.IsNotExist(err) {
-		return "", "", fmt.Errorf("rootfs not found at %s (set %s)", rootfs, envRootfsPath)
+		return "", "", "", fmt.Errorf("rootfs not found at %s (set %s)", rootfs, envRootfsPath)
 	}
 
-	return kernel, rootfs, nil
+	// Check for initrd (optional - Alpine needs it, Ubuntu doesn't)
+	// If not set via env, check for initrd.img in same directory as kernel
+	if initrd == "" {
+		defaultInitrd := filepath.Join(assetDir, "alpine", "initrd.img")
+		if _, err := os.Stat(defaultInitrd); err == nil {
+			initrd = defaultInitrd
+		}
+	}
+	// Validate initrd if specified
+	if initrd != "" {
+		if _, err := os.Stat(initrd); os.IsNotExist(err) {
+			return "", "", "", fmt.Errorf("initrd not found at %s (set %s)", initrd, envInitrdPath)
+		}
+	}
+
+	return kernel, initrd, rootfs, nil
 }
 
 func (h *vzHandler) createVMConfig(
 	req *sandboxv1.RuntimeExecuteRequest,
-	kernelPath, rootfsPath string,
+	kernelPath, initrdPath, rootfsPath string,
 	stdinFile, stdoutFile *os.File,
 ) (*vz.VirtualMachineConfiguration, error) {
 	config := req.GetConfig()
@@ -623,8 +640,21 @@ func (h *vzHandler) createVMConfig(
 		cmdline += " loglevel=7"
 	}
 
-	// Create bootloader (no initrd needed - kernel boots directly to rootfs)
-	bootloader, err := vz.NewLinuxBootLoader(kernelPath, vz.WithCommandLine(cmdline))
+	// Create bootloader with optional initrd
+	// Alpine needs initrd (has virtiofs module), Ubuntu boots directly to rootfs
+	slog.Info("creating bootloader",
+		"kernel", kernelPath,
+		"initrd", initrdPath,
+		"cmdline", cmdline)
+	var bootloader *vz.LinuxBootLoader
+	var err error
+	if initrdPath != "" {
+		bootloader, err = vz.NewLinuxBootLoader(kernelPath,
+			vz.WithCommandLine(cmdline),
+			vz.WithInitrd(initrdPath))
+	} else {
+		bootloader, err = vz.NewLinuxBootLoader(kernelPath, vz.WithCommandLine(cmdline))
+	}
 	if err != nil {
 		return nil, fmt.Errorf("create bootloader: %w", err)
 	}

@@ -2,6 +2,13 @@
 
 A Deputy sandbox runtime plugin using Apple's Virtualization.framework for VM-based isolation on macOS.
 
+## Credits
+
+- **[vz library](https://github.com/Code-Hex/vz)** by [@Code-Hex](https://github.com/Code-Hex) - Go bindings for macOS Virtualization.framework
+- **[Lima project](https://github.com/lima-vm/lima)** - Alpine images with virtiofs-enabled kernel
+- **[Ubuntu Cloud Images](https://cloud-images.ubuntu.com/)** - ARM64 cloud images
+- **[Alpine Linux](https://alpinelinux.org/)** - Lightweight Linux distribution
+
 ## Overview
 
 This plugin provides maximum isolation by running each sandbox execution in a lightweight VM using the [vz](https://github.com/Code-Hex/vz) Go bindings for macOS Virtualization.framework.
@@ -260,6 +267,7 @@ kill $VZ_PID
 | Variable | Description | Default |
 |----------|-------------|---------|
 | `DEPUTY_VZ_KERNEL` | Path to Linux kernel (vmlinuz) | `~/.deputy/vz/vmlinuz` |
+| `DEPUTY_VZ_INITRD` | Path to initrd (optional) | `~/.deputy/vz/alpine/initrd.img` (if exists) |
 | `DEPUTY_VZ_ROOTFS` | Path to root filesystem image | `~/.deputy/vz/rootfs.img` |
 
 Override the defaults for custom setups:
@@ -268,6 +276,76 @@ Override the defaults for custom setups:
 export DEPUTY_VZ_KERNEL=/path/to/custom/vmlinuz
 export DEPUTY_VZ_ROOTFS=/path/to/custom/rootfs.img
 deputy exec --runtime plugin --plugin vz -- ls -la
+```
+
+## Dual-OS Setup (Ubuntu + Alpine)
+
+The VZ plugin supports two Linux distributions:
+
+| Distribution | Location | Kernel | virtiofs | Workspace | Status |
+|--------------|----------|--------|----------|-----------|--------|
+| **Ubuntu 24.04** | `~/.deputy/vz/ubuntu/` | 56MB (cloud) | No* | No | **Default** - fast boot, no host dirs |
+| **Alpine 3.23** | `~/.deputy/vz/alpine/` | 34MB (Lima) | Yes | **Yes** | **Working** - virtiofs workspace |
+
+*Ubuntu's cloud kernel lacks `CONFIG_VIRTIO_FS`. Alpine's Lima kernel has virtiofs as a module.
+
+### Directory Structure
+
+```
+~/.deputy/vz/
+├── vmlinuz -> ubuntu/vmlinuz      # Default kernel (symlink)
+├── rootfs.img -> ubuntu/rootfs.img # Default rootfs (symlink)
+├── ubuntu/
+│   ├── vmlinuz                    # Ubuntu cloud kernel
+│   └── rootfs.img                 # Ubuntu rootfs (2GB)
+└── alpine/
+    ├── vmlinuz                    # Lima Alpine kernel (EFI stub)
+    ├── vmlinuz-extracted          # Raw ARM64 kernel (for VZ)
+    ├── initrd.img                 # Alpine initramfs
+    └── rootfs.img                 # Alpine rootfs (1GB)
+```
+
+### Using Alpine (Recommended for Workspace Mounting)
+
+Alpine provides a smaller rootfs with virtiofs support for workspace mounting:
+
+```bash
+# Build Alpine rootfs with virtiofs support
+cd examples/sandbox-plugins/vz
+./build-alpine-rootfs.sh
+
+# The Lima kernel is in EFI stub format - extract raw kernel for VZ
+cd ~/.deputy/vz/alpine
+OFFSET=$(xxd vmlinuz | grep "1f8b 08" | head -1 | cut -d: -f1)
+dd if=vmlinuz bs=1 skip=$((16#${OFFSET})) | gunzip > vmlinuz-extracted
+
+# Use Alpine with virtiofs workspace
+export DEPUTY_VZ_KERNEL=~/.deputy/vz/alpine/vmlinuz-extracted
+export DEPUTY_VZ_ROOTFS=~/.deputy/vz/alpine/rootfs.img
+export DEPUTY_VZ_INITRD=~/.deputy/vz/alpine/initrd-virtiofs.img
+
+# Test without workspace
+deputy exec --runtime plugin --plugin vz --no-workspace -- uname -a
+
+# Test with workspace mounting (virtiofs)
+deputy exec --runtime plugin --plugin vz --workspace . -- ls -la /workspace
+deputy exec --runtime plugin --plugin vz --workspace . -- cat go.mod
+```
+
+**Note:** Alpine requires a custom initrd (`initrd-virtiofs.img`) that loads the virtiofs kernel module before mounting root. See [Creating the Alpine Initrd](#creating-the-alpine-initrd) for setup.
+
+### Switching Between Ubuntu and Alpine
+
+```bash
+# Use Ubuntu (default - fast boot, no workspace mounting)
+unset DEPUTY_VZ_KERNEL DEPUTY_VZ_ROOTFS DEPUTY_VZ_INITRD
+deputy exec --runtime plugin --plugin vz --no-workspace -- uname -a
+
+# Use Alpine (virtiofs workspace mounting)
+export DEPUTY_VZ_KERNEL=~/.deputy/vz/alpine/vmlinuz-extracted
+export DEPUTY_VZ_ROOTFS=~/.deputy/vz/alpine/rootfs.img
+export DEPUTY_VZ_INITRD=~/.deputy/vz/alpine/initrd-virtiofs.img
+deputy exec --runtime plugin --plugin vz --workspace . -- ls /workspace
 ```
 
 ## Usage Examples
@@ -467,7 +545,7 @@ cp arch/arm64/boot/Image ~/.deputy/vz/vmlinuz
 | AppArmor/SELinux | No | N/A for VMs |
 | Streaming Output | Yes | Via virtio-console |
 | Interactive Stdin | Yes | Via virtio-console |
-| Workspace Mounting | Yes | Via virtio-fs |
+| Workspace Mounting | Yes | Alpine kernel with virtiofs (see below) |
 | GPU Passthrough | No | Not yet implemented |
 
 ## Supported Modes
@@ -588,7 +666,139 @@ Mon Jan 13 19:58:00 UTC 2026
 - **No GPU Passthrough**: GPU workloads not supported
 - **Disk Space**: Rootfs images consume disk space (~2GB for Ubuntu)
 - **Network Allowlist Limited**: Fine-grained network allowlists require a custom kernel with netfilter support; basic NAT networking works out of the box
-- **Workspace Mounting Limited**: The Ubuntu cloud kernel doesn't include virtiofs or 9p support, so host directory sharing via `--workspace` doesn't work. Use a custom kernel with `CONFIG_VIRTIO_FS=y` or pre-install dependencies in the rootfs
+- **Ubuntu No Workspace**: Ubuntu kernel lacks virtiofs; use Alpine kernel for workspace mounting. See [Workspace Mounting Status](#workspace-mounting-status)
+
+## Workspace Mounting Status
+
+Workspace mounting (`--workspace`) allows sharing a host directory with the VM via virtiofs. This is critical for supply chain security workflows where you want to run `go build` or `npm install` on your project.
+
+### Current Status
+
+| Kernel | virtiofs | virtio_blk | Workspace | Status |
+|--------|----------|------------|-----------|--------|
+| Ubuntu 24.04 cloud | Not available | Built-in | **No** | Boots fast, no virtiofs |
+| Lima Alpine 6.18 | Module in initrd | Module in initrd | **Yes** | **Working with custom initrd** |
+| Custom kernel | Needs `CONFIG_VIRTIO_FS=y` | Needs `CONFIG_VIRTIO_BLK=y` | **Yes** | Build from source |
+
+### Technical Details
+
+**Ubuntu Cloud Kernel** (`vmlinuz-generic`):
+- Downloads from: `cloud-images.ubuntu.com`
+- Boots directly without initramfs (fast ~70ms)
+- Has `virtio_blk` built-in for disk access
+- **Lacks** `CONFIG_VIRTIO_FS` (virtiofs not available)
+- Best for: Isolated execution without host directory access
+
+**Lima Alpine Kernel** (from Lima project's Alpine ISO):
+- Kernel format: EFI stub, requires extraction for VZ
+- Has `virtiofs.ko` module in initramfs
+- Has `virtio_blk.ko` module (not built-in)
+- **Requires** custom initramfs (`initrd-virtiofs.img`) to load modules
+- **Working**: virtiofs workspace mounting tested and functional
+- Boot time: ~1.5s (includes module loading)
+
+### Creating the Alpine Initrd
+
+The Alpine kernel requires a custom initrd that loads virtiofs, ext4, and virtio_blk modules before mounting root:
+
+```bash
+# Extract the original Lima Alpine initrd
+cd ~/.deputy/vz/alpine
+mkdir -p /tmp/initrd-work && cd /tmp/initrd-work
+gunzip -c ~/.deputy/vz/alpine/initrd.img | cpio -idm
+
+# Create the init script
+cat > init << 'INITSCRIPT'
+#!/bin/sh
+export PATH=/usr/bin:/bin:/usr/sbin:/sbin
+
+# Mount essentials
+/usr/bin/busybox mount -t proc proc /proc
+/usr/bin/busybox mount -t sysfs sys /sys
+/usr/bin/busybox mount -t devtmpfs dev /dev
+exec > /dev/hvc0 2>&1
+
+echo "=== DEPUTY INITRD ==="
+
+# Load required modules
+echo "Loading kernel modules..."
+/usr/sbin/modprobe mbcache 2>&1 || true
+/usr/sbin/modprobe jbd2 2>&1 || true
+/usr/sbin/modprobe ext4 2>&1 || echo "ext4 modprobe result: $?"
+/usr/sbin/modprobe virtio_blk 2>&1 || true
+
+# Load virtiofs module
+echo "Loading virtiofs..."
+/usr/sbin/modprobe fuse 2>&1 || true
+/usr/sbin/modprobe virtiofs 2>&1 || echo "virtiofs modprobe result: $?"
+
+# Wait for device
+/usr/bin/busybox sleep 1
+echo "Block devices:"
+/usr/bin/busybox ls -la /dev/vd* 2>&1 || echo "No /dev/vd*"
+
+# Mount root filesystem
+echo "Mounting /dev/vda..."
+/usr/bin/busybox mkdir -p /mnt
+/usr/bin/busybox mount -t ext4 /dev/vda /mnt 2>&1 || { echo "mount failed"; exec /usr/bin/busybox sh; }
+
+# Mount virtiofs workspace if available
+echo "Checking for virtiofs workspace..."
+/usr/bin/busybox mkdir -p /mnt/workspace
+if /usr/bin/busybox mount -t virtiofs workspace /mnt/workspace 2>&1; then
+    echo "Workspace mounted at /mnt/workspace"
+    /usr/bin/busybox ls -la /mnt/workspace 2>&1 | /usr/bin/busybox head -5
+else
+    echo "No workspace to mount (normal if --no-workspace)"
+fi
+
+# Switch root
+echo "Switching root..."
+exec /usr/bin/busybox switch_root /mnt /deputy-init
+INITSCRIPT
+chmod +x init
+
+# Repack the initrd
+find . | cpio -o -H newc 2>/dev/null | gzip > ~/.deputy/vz/alpine/initrd-virtiofs.img
+echo "Created initrd-virtiofs.img"
+```
+
+### Workarounds for Ubuntu (No Workspace)
+
+If using Ubuntu kernel without virtiofs, these alternatives provide host file access:
+
+1. **Pre-install dependencies in rootfs**: Build a rootfs with all needed tools
+   ```bash
+   make rootfs  # Creates developer rootfs with Go, Node.js, etc.
+   ```
+
+2. **Copy files into VM**: Use `deputy exec` to copy files
+   ```bash
+   # Copy file into VM (placeholder - not yet implemented)
+   deputy exec --runtime plugin --plugin vz -- 'cat > /tmp/file.txt' < local-file.txt
+   ```
+
+3. **Use network for deps**: Fetch dependencies over network instead of host mount
+   ```bash
+   deputy exec --runtime plugin --plugin vz --network host -- \
+       'git clone --depth 1 https://github.com/user/repo && cd repo && go build'
+   ```
+
+### Building a Custom Kernel (Advanced)
+
+To enable workspace mounting, build a kernel with these options built-in (not as modules):
+
+```bash
+# Required kernel config options (=y means built-in, not =m module)
+CONFIG_VIRTIO=y
+CONFIG_VIRTIO_PCI=y
+CONFIG_VIRTIO_BLK=y
+CONFIG_VIRTIO_CONSOLE=y
+CONFIG_VIRTIO_FS=y    # Critical for workspace mounting
+CONFIG_FUSE_FS=y      # Required by virtiofs
+```
+
+See [Custom Kernel](#custom-kernel) section above for build instructions.
 
 ## Troubleshooting
 
@@ -647,6 +857,46 @@ codesign --entitlements entitlements.plist --force --sign - ~/go/bin/deputy-sand
 codesign -dvvv ~/go/bin/deputy-sandbox-vz
 # Should show entitlements including com.apple.security.virtualization
 ```
+
+### Plugin hangs on startup (UE state)
+
+If the plugin process immediately enters "UE" (uninterruptible/exiting) state without creating its socket:
+
+```bash
+# Check process state
+ps aux | grep deputy-sandbox-vz
+# If you see "UE" in the stat column, the plugin is hung
+
+# Debugging checklist:
+# 1. Check code signature is valid
+codesign -dvvv ~/go/bin/deputy-sandbox-vz
+
+# 2. Rebuild from source (in the vz directory)
+cd examples/sandbox-plugins/vz
+go build -o deputy-sandbox-vz .
+codesign --entitlements entitlements.plist --force --sign - deputy-sandbox-vz
+cp deputy-sandbox-vz ~/go/bin/
+
+# 3. Test the local binary first
+./deputy-sandbox-vz --socket /tmp/test.sock &
+sleep 2
+ls -la /tmp/test.sock  # Should exist
+kill %1
+
+# 4. Test the installed binary
+~/go/bin/deputy-sandbox-vz --socket /tmp/test2.sock &
+sleep 2
+ls -la /tmp/test2.sock  # Should exist
+```
+
+**Common causes:**
+- Stale/corrupted binary in ~/go/bin (rebuild and reinstall)
+- Missing entitlements (re-sign with entitlements.plist)
+- Zombie VZ processes from previous runs (try `pkill -9 -f deputy-sandbox-vz`)
+- System Virtualization.framework resource exhaustion (may require reboot)
+
+**Note:** The `com.apple.provenance` extended attribute is normal and does NOT cause issues.
+macOS adds this to track file origin, but it doesn't affect execution.
 
 ### Restricted Entitlements
 
