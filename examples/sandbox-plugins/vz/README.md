@@ -290,6 +290,9 @@ deputy exec --runtime plugin --plugin vz --cpu 2 -- npm install
 # Network isolated (no network interface)
 deputy exec --runtime plugin --plugin vz --network none -- ./build.sh
 
+# With network access (NAT via DHCP)
+deputy exec --runtime plugin --plugin vz --network host -- curl -sS https://example.com
+
 # With timeout
 deputy exec --runtime plugin --plugin vz --timeout 30s -- long-running-task
 ```
@@ -527,6 +530,56 @@ The VM boundary provides stronger isolation than containers:
 | Startup Time | ~1ms | ~5ms | ~100ms | ~50ms | ~70ms |
 | Overhead | None | Low | Low | Medium | Medium |
 
+### Networking
+
+The VZ plugin supports NAT networking via macOS's built-in vmnet framework. When `--network host` or `--network bridge` is specified, the VM obtains an IP address via DHCP from the macOS vmnet DHCP server.
+
+**How it works:**
+1. The VM boots with a virtio-net device attached (`eth0`)
+2. The `deputy-init` script brings up the interface and runs `dhclient`
+3. macOS vmnet assigns an IP from the `192.168.64.0/24` subnet (configurable via `/Library/Preferences/SystemConfiguration/com.apple.vmnet.plist`)
+4. DNS resolution uses public DNS servers (1.1.1.1, 8.8.8.8) since vmnet gateway doesn't forward DNS
+
+**Requirements for network modes:**
+- The rootfs must include a DHCP client (`dhclient` or `udhcpc`)
+- The rootfs built by `build-rootfs.sh` includes `isc-dhcp-client` by default
+
+### Network Filtering Limitations
+
+For fine-grained network control (allowlists), network filtering uses **guest-level nftables** instead of host-level vmnet controls. This has important implications:
+
+| Approach | Host-Level (vmnet) | Guest-Level (nftables) |
+|----------|-------------------|------------------------|
+| Entitlement | `com.apple.vm.networking` (restricted) | None required |
+| Ad-hoc signing | ❌ Not supported | ✅ Works |
+| Enforcement point | macOS kernel | Linux guest kernel |
+| Bypass risk | None (host controls) | Requires guest kernel exploit |
+| DNS filtering | Full control | Requires kernel netfilter support |
+
+**Current Limitations:**
+
+1. **Kernel netfilter required for allowlists**: The guest kernel must have `CONFIG_NETFILTER=y` and related nftables modules. The Ubuntu 24.04 cloud kernel (`vmlinuz-generic`) does **not** include netfilter support by default, causing nftables commands to fail with "Protocol not supported."
+
+2. **Guest-side enforcement**: A malicious process with root inside the guest could theoretically modify or bypass nftables rules. However, this requires kernel-level access inside the VM.
+
+3. **DNS queries may bypass filtering**: Without proper nftables setup, allowlist rules only affect direct IP connections. DNS queries to the default resolver still work, allowing hostname resolution for blocked destinations (though connections will fail if the IP isn't in the allowlist).
+
+**Solutions:**
+
+- **Full isolation**: Use `--network none` for complete network isolation (recommended for untrusted code)
+- **Custom kernel**: Build a kernel with `CONFIG_NETFILTER=y` for nftables support
+- **Application-level proxy**: Future enhancement to route all traffic through a host-side filtering proxy
+
+### Clock Synchronization
+
+The VM automatically synchronizes its clock from the host at boot via the `deputy.time` kernel parameter. This ensures SSL/TLS certificate validation works correctly.
+
+```bash
+# Clock is automatically synced from host
+$ deputy exec --runtime plugin --plugin vz -- date
+Mon Jan 13 19:58:00 UTC 2026
+```
+
 ## Limitations
 
 - **macOS Only**: Requires macOS 11.0+ on Apple Silicon
@@ -534,6 +587,8 @@ The VM boundary provides stronger isolation than containers:
 - **Asset Management**: Requires pre-built kernel and rootfs images
 - **No GPU Passthrough**: GPU workloads not supported
 - **Disk Space**: Rootfs images consume disk space (~2GB for Ubuntu)
+- **Network Allowlist Limited**: Fine-grained network allowlists require a custom kernel with netfilter support; basic NAT networking works out of the box
+- **Workspace Mounting Limited**: The Ubuntu cloud kernel doesn't include virtiofs or 9p support, so host directory sharing via `--workspace` doesn't work. Use a custom kernel with `CONFIG_VIRTIO_FS=y` or pre-install dependencies in the rootfs
 
 ## Troubleshooting
 
@@ -592,6 +647,28 @@ codesign --entitlements entitlements.plist --force --sign - ~/go/bin/deputy-sand
 codesign -dvvv ~/go/bin/deputy-sandbox-vz
 # Should show entitlements including com.apple.security.virtualization
 ```
+
+### Restricted Entitlements
+
+Some Virtualization.framework entitlements are **restricted** and cannot be used with ad-hoc signing (`codesign -s -`). These require either:
+- An Apple Developer account with the entitlement provisioned
+- Distribution through the App Store or notarization
+
+| Entitlement | Restriction | Purpose |
+|-------------|-------------|---------|
+| `com.apple.security.virtualization` | ✅ Ad-hoc OK | Basic VM creation |
+| `com.apple.security.network.client` | ✅ Ad-hoc OK | Outbound network |
+| `com.apple.security.network.server` | ✅ Ad-hoc OK | Inbound network |
+| `com.apple.vm.networking` | ❌ **Restricted** | vmnet/NAT networking with host-level control |
+| `com.apple.vm.device-access` | ❌ **Restricted** | USB device passthrough |
+
+**Symptom**: Adding `com.apple.vm.networking` to `entitlements.plist` and signing with `-s -` causes macOS to kill the process immediately with:
+```
+Error Domain=AppleMobileFileIntegrityError Code=-420
+"The signature on the file is invalid"
+```
+
+**Workaround**: The plugin uses guest-level `nftables` for network filtering instead of host-level vmnet controls. This works with ad-hoc signing but has limitations (see Network Filtering Limitations below).
 
 ### "Internal Virtualization error"
 

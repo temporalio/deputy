@@ -602,6 +602,19 @@ func (h *vzHandler) createVMConfig(
 	// We use init=/deputy-init which reads the command from the deputy.cmd parameter
 	cmdline := fmt.Sprintf("console=hvc0 root=/dev/vda rw init=/deputy-init deputy.cmd=%s", cmdEncoded)
 
+	// Pass host time to VM for clock synchronization (VMs boot at epoch by default)
+	// This fixes SSL/TLS certificate validation which fails when clock is at 1970
+	cmdline += fmt.Sprintf(" deputy.time=%d", time.Now().Unix())
+
+	// Pass workdir to VM - this is the directory to cd into before executing
+	// When workspace is mounted via virtio-fs at /workspace, we use relative paths
+	if workDir := req.GetWorkDir(); workDir != "" {
+		cmdline += fmt.Sprintf(" deputy.workdir=%s", workDir)
+	} else if req.GetWorkspaceDir() != "" {
+		// Default to /workspace if workspace is being shared
+		cmdline += " deputy.workdir=/workspace"
+	}
+
 	// Add quiet boot unless debug logging is enabled
 	if os.Getenv("DEPUTY_LOG_LEVEL") != "debug" {
 		cmdline += " quiet loglevel=3"

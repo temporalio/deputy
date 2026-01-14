@@ -12,19 +12,79 @@
 #   <<<DEPUTY_STDERR>>>       - switches to stderr
 #   <<<DEPUTY_EXIT_CODE:N>>>  - reports exit code N
 
+# Set PATH early for all commands to work
+export PATH="/usr/local/go/bin:/usr/local/bin:/usr/bin:/bin:/sbin:/usr/sbin"
+
 # Mount essential filesystems
 mount -t proc proc /proc 2>/dev/null
 mount -t sysfs sys /sys 2>/dev/null
 mount -t devtmpfs dev /dev 2>/dev/null
+mount -t tmpfs tmpfs /tmp 2>/dev/null
+mount -t tmpfs tmpfs /run 2>/dev/null
 
-# Get the base64-encoded command from kernel cmdline
-# Format: deputy.cmd=<base64-encoded-command>
+# Mount workspace via virtio-fs if the tag exists
+# The VZ plugin shares the workspace directory with tag "workspace"
+mkdir -p /workspace 2>/dev/null
+mount -t virtiofs workspace /workspace 2>/dev/null || true
+
+# Synchronize clock from host time passed via kernel cmdline
+# This fixes SSL/TLS certificate validation (VMs boot at epoch by default)
+for param in $(cat /proc/cmdline); do
+    case "$param" in
+        deputy.time=*)
+            HOST_TIME="${param#deputy.time=}"
+            date -s "@${HOST_TIME}" >/dev/null 2>&1
+            break
+            ;;
+    esac
+done
+
+# Configure networking if eth0 exists
+# macOS Virtualization.framework NAT provides DHCP via the vmnet framework
+if [ -d /sys/class/net/eth0 ]; then
+    ip link set dev lo up 2>/dev/null
+    ip link set dev eth0 up 2>/dev/null
+
+    # Clear any stale DNS config from rootfs build (e.g., Docker's 192.168.65.x)
+    rm -f /etc/resolv.conf 2>/dev/null
+
+    # Use DHCP to get IP address from macOS vmnet
+    # Try dhclient first (Ubuntu/Debian), fall back to udhcpc (BusyBox/Alpine)
+    if command -v dhclient >/dev/null 2>&1; then
+        # Use dhclient with short timeout and minimal output
+        # -1 = try once, -q = quiet, -lf = lease file, -pf = pid file
+        dhclient -1 -q -lf /tmp/dhclient.lease -pf /tmp/dhclient.pid eth0 2>/dev/null
+    elif command -v udhcpc >/dev/null 2>&1; then
+        # BusyBox DHCP client
+        udhcpc -i eth0 -q -n -t 5 2>/dev/null
+    else
+        # Fallback: static IP for older rootfs without DHCP client
+        # macOS vmnet typically uses 192.168.64.0/24 subnet
+        ip addr add 192.168.64.10/24 dev eth0 2>/dev/null
+        ip route add default via 192.168.64.1 2>/dev/null
+    fi
+
+    # Ensure DNS is configured
+    # Note: macOS vmnet gateway does NOT provide DNS forwarding,
+    # so we use public DNS servers (Cloudflare + Google as fallback)
+    if [ ! -s /etc/resolv.conf ]; then
+        cat > /etc/resolv.conf << 'EOF'
+nameserver 1.1.1.1
+nameserver 8.8.8.8
+EOF
+    fi
+fi
+
+# Parse kernel cmdline for deputy parameters
 CMD_BASE64=""
+WORKDIR=""
 for param in $(cat /proc/cmdline); do
     case "$param" in
         deputy.cmd=*)
             CMD_BASE64="${param#deputy.cmd=}"
-            break
+            ;;
+        deputy.workdir=*)
+            WORKDIR="${param#deputy.workdir=}"
             ;;
     esac
 done
@@ -38,8 +98,7 @@ if [ -z "$CMD_BASE64" ]; then
     exec /sbin/poweroff -f
 fi
 
-# Decode the command (arguments separated by null bytes)
-# We use printf and od to handle the base64 decoding on minimal systems
+# Decode the command
 CMD_DECODED=$(echo "$CMD_BASE64" | base64 -d 2>/dev/null)
 
 if [ -z "$CMD_DECODED" ]; then
@@ -51,16 +110,41 @@ if [ -z "$CMD_DECODED" ]; then
     exec /sbin/poweroff -f
 fi
 
-# Parse the null-separated command into an array
-# Convert nulls to newlines for processing
-set --
-OLDIFS="$IFS"
-IFS='
-'
-for arg in $(echo "$CMD_DECODED" | tr '\0' '\n'); do
-    set -- "$@" "$arg"
-done
-IFS="$OLDIFS"
+# Set up environment for development tools
+export HOME="/root"
+export GOPATH="/root/go"
+export GOCACHE="/tmp/go-cache"
+export GOMODCACHE="/tmp/go-mod-cache"
+export npm_config_cache="/tmp/npm-cache"
+export TERM="xterm-256color"
+
+# Source any additional environment setup from rootfs
+if [ -f /etc/profile.d/deputy-dev.sh ]; then
+    . /etc/profile.d/deputy-dev.sh
+fi
+
+# Change to workspace directory if specified and mounted
+if [ -n "$WORKDIR" ]; then
+    # If workdir is relative to workspace, prepend /workspace
+    case "$WORKDIR" in
+        /workspace/*|/workspace)
+            cd "$WORKDIR" 2>/dev/null || cd /workspace
+            ;;
+        *)
+            # Try as-is first (absolute path), then try under /workspace
+            if [ -d "$WORKDIR" ]; then
+                cd "$WORKDIR"
+            elif [ -d "/workspace/$WORKDIR" ]; then
+                cd "/workspace/$WORKDIR"
+            elif [ -d "/workspace" ]; then
+                cd /workspace
+            fi
+            ;;
+    esac
+elif [ -d "/workspace" ] && [ "$(ls -A /workspace 2>/dev/null)" ]; then
+    # Default to workspace if it's mounted and has content
+    cd /workspace
+fi
 
 # Signal start of output
 echo "<<<DEPUTY_OUTPUT_START>>>"
@@ -70,8 +154,8 @@ echo "<<<DEPUTY_STDOUT>>>"
 STDOUT_FILE="/tmp/deputy_stdout"
 STDERR_FILE="/tmp/deputy_stderr"
 
-# Execute the command, capturing stdout and stderr separately
-"$@" >"$STDOUT_FILE" 2>"$STDERR_FILE"
+# Execute the command using eval to handle spaces and quotes properly
+eval "$CMD_DECODED" >"$STDOUT_FILE" 2>"$STDERR_FILE"
 EXIT_CODE=$?
 
 # Output stdout

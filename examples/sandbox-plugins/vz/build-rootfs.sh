@@ -112,6 +112,51 @@ mount -t sysfs sys /sys 2>/dev/null
 mount -t devtmpfs dev /dev 2>/dev/null
 mount -t tmpfs tmpfs /tmp 2>/dev/null
 
+# Synchronize clock from host time passed via kernel cmdline
+# This fixes SSL/TLS certificate validation (VMs boot at epoch by default)
+for param in $(cat /proc/cmdline 2>/dev/null); do
+    case "$param" in
+        deputy.time=*)
+            HOST_TIME="${param#deputy.time=}"
+            date -s "@${HOST_TIME}" >/dev/null 2>&1
+            break
+            ;;
+    esac
+done
+
+# Configure networking if eth0 exists
+# macOS Virtualization.framework NAT provides DHCP via the vmnet framework
+if [ -d /sys/class/net/eth0 ]; then
+    ip link set dev lo up 2>/dev/null
+    ip link set dev eth0 up 2>/dev/null
+
+    # Clear any stale DNS config from rootfs build (e.g., Docker DNS)
+    rm -f /etc/resolv.conf 2>/dev/null
+
+    # Use DHCP to get IP address from macOS vmnet
+    # Try dhclient first (Ubuntu/Debian), fall back to udhcpc (BusyBox/Alpine)
+    if command -v dhclient >/dev/null 2>&1; then
+        # Use dhclient with short timeout and minimal output
+        # -1 = try once, -q = quiet, -lf = lease file, -pf = pid file
+        dhclient -1 -q -lf /tmp/dhclient.lease -pf /tmp/dhclient.pid eth0 2>/dev/null
+    elif command -v udhcpc >/dev/null 2>&1; then
+        # BusyBox DHCP client
+        udhcpc -i eth0 -q -n -t 5 2>/dev/null
+    else
+        # Fallback: static IP for older rootfs without DHCP client
+        # macOS vmnet typically uses 192.168.64.0/24 subnet
+        ip addr add 192.168.64.10/24 dev eth0 2>/dev/null
+        ip route add default via 192.168.64.1 2>/dev/null
+    fi
+
+    # Ensure DNS is configured
+    # Note: macOS vmnet gateway does NOT provide DNS forwarding,
+    # so we use public DNS servers (Cloudflare + Google as fallback)
+    if [ ! -s /etc/resolv.conf ]; then
+        printf "nameserver 1.1.1.1\nnameserver 8.8.8.8\n" > /etc/resolv.conf
+    fi
+fi
+
 # Setup environment for development tools
 export HOME="/root"
 export GOPATH="/root/go"
@@ -249,7 +294,9 @@ apt-get install -y --no-install-recommends \
     ca-certificates \
     jq \
     unzip \
-    openssh-client
+    openssh-client \
+    isc-dhcp-client \
+    iproute2
 
 # Clean up apt cache to save space
 apt-get clean
