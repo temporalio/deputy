@@ -828,6 +828,15 @@ docker run --rm --privileged -v ~/.deputy/vz/alpine:/alpine alpine:3.19 sh -c "
 
 With Go installed and virtiofs workspace mounting, you can run supply chain security workflows in an isolated VM:
 
+```console
+$ deputy exec --runtime plugin --plugin vz --workspace . -- cat go.mod | head -n 3
+module github.com/picatz/deputy
+
+go 1.25.5
+$ deputy exec --runtime plugin --plugin vz --workspace . -- uname -a
+Linux (none) 6.18.2-0-virt #1-Alpine SMP PREEMPT_DYNAMIC 2025-12-29 10:24:58 aarch64 Linux
+```
+
 ```bash
 # Set up Alpine environment
 export DEPUTY_VZ_KERNEL=~/.deputy/vz/alpine/vmlinuz-extracted
@@ -948,6 +957,61 @@ codesign --entitlements entitlements.plist --force --sign - ~/go/bin/deputy-sand
 # Verify signature
 codesign -dvvv ~/go/bin/deputy-sandbox-vz
 # Should show entitlements including com.apple.security.virtualization
+```
+
+### Verifying Code Signatures
+
+When troubleshooting, check the code signatures for both `deputy` and `deputy-sandbox-vz`:
+
+**deputy CLI** (no special entitlements needed):
+```bash
+$ codesign -dv --entitlements - /Users/picat/go/bin/deputy
+Executable=/Users/picat/go/bin/deputy
+Identifier=a.out
+Format=Mach-O thin (arm64)
+CodeDirectory v=20400 size=747422 flags=0x20002(adhoc,linker-signed) hashes=23354+0 location=embedded
+Signature=adhoc
+Info.plist=not bound
+TeamIdentifier=not set
+Sealed Resources=none
+Internal requirements=none
+```
+
+**deputy-sandbox-vz** (requires virtualization entitlements):
+```bash
+$ codesign -dv --entitlements - /Users/picat/go/bin/deputy-sandbox-vz
+Executable=/Users/picat/go/bin/deputy-sandbox-vz
+Identifier=deputy-sandbox-vz-555549449c0df4d405ee3b50d43bbe8b6ff61fc4
+Format=Mach-O thin (arm64)
+CodeDirectory v=20400 size=106963 flags=0x2(adhoc) hashes=3331+7 location=embedded
+Signature=adhoc
+Info.plist=not bound
+TeamIdentifier=not set
+Sealed Resources=none
+Internal requirements count=0 size=12
+[Dict]
+	[Key] com.apple.security.network.client
+	[Value]
+		[Bool] true
+	[Key] com.apple.security.network.server
+	[Value]
+		[Bool] true
+	[Key] com.apple.security.virtualization
+	[Value]
+		[Bool] true
+```
+
+**Key things to verify:**
+- `Signature=adhoc` - Ad-hoc signed (normal for local development)
+- The entitlements dict must include:
+  - `com.apple.security.virtualization` = true (required for VM creation)
+  - `com.apple.security.network.client` = true (for VM network access)
+  - `com.apple.security.network.server` = true (for plugin socket server)
+
+**If entitlements are missing**, re-sign with the entitlements file:
+```bash
+cd examples/sandbox-plugins/vz
+codesign --entitlements entitlements.plist --force --sign - ~/go/bin/deputy-sandbox-vz
 ```
 
 ### Plugin hangs on startup (UE state)

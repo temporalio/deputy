@@ -79,13 +79,13 @@ type execConfirmationInfo struct {
 
 // confirmExecDangerousMode prompts the user to confirm a dangerous sandbox configuration.
 // Returns true if the user confirms, false otherwise.
-// If stdin is not a terminal, returns false (non-interactive mode should use --danger-skip-prompt).
+// If stdin is not a terminal, returns false (non-interactive mode should use --dangerously-skip-prompt).
 func confirmExecDangerousMode(info execConfirmationInfo, stdin io.Reader, stdout, stderr io.Writer) bool {
 	// Check if stdin is a terminal
 	if f, ok := stdin.(*os.File); ok {
 		if !term.IsTerminal(int(f.Fd())) {
 			fmt.Fprintln(stderr, "Error: dangerous mode requires confirmation but stdin is not a terminal")
-			fmt.Fprintln(stderr, "Use --danger-skip-prompt to skip confirmation in non-interactive mode")
+			fmt.Fprintln(stderr, "Use --dangerously-skip-prompt to skip confirmation in non-interactive mode")
 			return false
 		}
 	}

@@ -50,6 +50,7 @@ import (
 	"connectrpc.com/connect"
 	"github.com/Code-Hex/vz/v3"
 	"github.com/creack/pty"
+	"golang.org/x/term"
 	sandboxv1 "github.com/picatz/deputy/gen/deputy/sandbox/v1"
 	"github.com/picatz/deputy/gen/deputy/sandbox/v1/sandboxv1connect"
 	"golang.org/x/net/http2"
@@ -188,15 +189,40 @@ func (h *vzHandler) Execute(
 	slog.Debug("VZ assets resolved", "kernel", kernelPath, "initrd", initrdPath, "rootfs", rootfsPath)
 
 	// Create PTY for VM console I/O (PTY works better than pipes with Virtualization.framework)
-	ptyMaster, ptySlave, err := pty.Open()
+	ptyPrimary, ptySecondary, err := pty.Open()
 	if err != nil {
 		return stream.Send(h.errorEvent(executionID, "PTY_ERROR", fmt.Sprintf("failed to create PTY: %v", err)))
 	}
-	defer ptyMaster.Close()
-	defer ptySlave.Close()
+	defer ptyPrimary.Close()
+	defer ptySecondary.Close()
 
-	// Create VM configuration with the PTY slave (VM reads/writes to slave, we read/write to master)
-	vmConfig, err := h.createVMConfig(execReq, kernelPath, initrdPath, rootfsPath, ptySlave, ptySlave)
+	// Set PTY window size - use host terminal size if available, otherwise use large default.
+	// This prevents spurious line wrapping in command output.
+	//
+	// TODO: Revisit this if we need proper interactive terminal support. Currently we use
+	// a very large column width (32767) as the default to avoid wrapping for non-interactive
+	// commands. For true interactive use (vim, less, etc.), we may need to:
+	// 1. Detect if stdin is a TTY and use its size
+	// 2. Handle SIGWINCH to resize the PTY dynamically
+	// 3. Use the actual host terminal size consistently
+	cols, rows := 32767, 24 // Large default to avoid wrapping
+	if width, height, err := term.GetSize(int(os.Stdout.Fd())); err == nil && width > 0 {
+		cols, rows = width, height
+	}
+	if err := pty.Setsize(ptySecondary, &pty.Winsize{Rows: uint16(rows), Cols: uint16(cols)}); err != nil {
+		h.logger.Debug("failed to set PTY size", "err", err)
+	}
+
+	// Put PTY primary in raw mode to prevent line discipline transformations
+	// This ensures binary-clean output without \n -> \r\n conversion or echo
+	oldState, err := term.MakeRaw(int(ptyPrimary.Fd()))
+	if err != nil {
+		return stream.Send(h.errorEvent(executionID, "PTY_ERROR", fmt.Sprintf("failed to set raw mode: %v", err)))
+	}
+	defer term.Restore(int(ptyPrimary.Fd()), oldState)
+
+	// Create VM configuration with the PTY secondary (VM reads/writes to secondary, we read/write to primary)
+	vmConfig, err := h.createVMConfig(execReq, kernelPath, initrdPath, rootfsPath, ptySecondary, ptySecondary)
 	if err != nil {
 		return stream.Send(h.errorEvent(executionID, "CONFIG_ERROR", err.Error()))
 	}
@@ -252,7 +278,7 @@ func (h *vzHandler) Execute(
 
 	// Start output parser goroutine
 	outputDone := make(chan *executionResult, 1)
-	go h.parseVMOutput(vmCtx, ptyMaster, stream, executionID, outputDone)
+	go h.parseVMOutput(vmCtx, ptyPrimary, stream, executionID, outputDone)
 
 	// Start the VM
 	startTime := time.Now()
@@ -360,11 +386,70 @@ func (h *vzHandler) parseVMOutput(
 	h.logger.Debug("parseVMOutput started", "executionID", executionID)
 
 	result := &executionResult{exitCode: 0}
-	var outputBuf bytes.Buffer
-	var allOutput bytes.Buffer
+	var outputBuf bytes.Buffer  // Buffered user output to send
+	var lineBuf bytes.Buffer    // Partial line buffer for chunk boundary handling
+	var allOutput bytes.Buffer  // Debug: all raw output
 	inOutput := false
 	isStderr := false
 	buf := make([]byte, 4096)
+
+	// processLine handles a complete line (without trailing newline)
+	processLine := func(line string) bool {
+		line = strings.TrimRight(line, "\r")
+
+		// Check for protocol markers
+		if strings.Contains(line, outputStartMarker) {
+			inOutput = true
+			isStderr = false
+			return true
+		}
+		if strings.Contains(line, outputEndMarker) {
+			if outputBuf.Len() > 0 {
+				h.sendOutput(stream, executionID, outputBuf.Bytes(), isStderr)
+				outputBuf.Reset()
+			}
+			inOutput = false
+			return true
+		}
+		if strings.Contains(line, exitCodeMarker) {
+			start := strings.Index(line, exitCodeMarker) + len(exitCodeMarker)
+			end := strings.Index(line[start:], ">>>")
+			if end > 0 {
+				if code, parseErr := strconv.ParseInt(line[start:start+end], 10, 32); parseErr == nil {
+					result.exitCode = int32(code)
+				}
+			}
+			h.logger.Debug("parseVMOutput exit code found", "exitCode", result.exitCode)
+			return false // Signal to exit
+		}
+		if strings.Contains(line, stderrMarker) {
+			if outputBuf.Len() > 0 && !isStderr {
+				h.sendOutput(stream, executionID, outputBuf.Bytes(), false)
+				outputBuf.Reset()
+			}
+			isStderr = true
+			return true
+		}
+		if strings.Contains(line, stdoutMarker) {
+			if outputBuf.Len() > 0 && isStderr {
+				h.sendOutput(stream, executionID, outputBuf.Bytes(), true)
+				outputBuf.Reset()
+			}
+			isStderr = false
+			return true
+		}
+
+		// Buffer output if in output section
+		if inOutput {
+			outputBuf.WriteString(line)
+			outputBuf.WriteByte('\n')
+			if outputBuf.Len() > 4096 {
+				h.sendOutput(stream, executionID, outputBuf.Bytes(), isStderr)
+				outputBuf.Reset()
+			}
+		}
+		return true
+	}
 
 	for {
 		select {
@@ -377,74 +462,31 @@ func (h *vzHandler) parseVMOutput(
 
 		n, err := reader.Read(buf)
 		if n > 0 {
-			chunk := string(buf[:n])
-			allOutput.WriteString(chunk)
-			h.logger.Debug("RAW_READ", "bytes", n, "data", chunk)
+			chunk := buf[:n]
+			allOutput.Write(chunk)
+			h.logger.Debug("RAW_READ", "bytes", n, "data", string(chunk))
 
-			// Process line by line
-			for _, line := range strings.Split(chunk, "\n") {
-				line = strings.TrimRight(line, "\r")
-				if line == "" {
-					continue
-				}
-
-				// Check for protocol markers
-				if strings.Contains(line, outputStartMarker) {
-					inOutput = true
-					isStderr = false
-					continue
-				}
-				if strings.Contains(line, outputEndMarker) {
-					if outputBuf.Len() > 0 {
-						h.sendOutput(stream, executionID, outputBuf.Bytes(), isStderr)
-						outputBuf.Reset()
+			// Process chunk byte by byte, handling line boundaries correctly
+			for _, b := range chunk {
+				if b == '\n' {
+					// Complete line ready
+					if !processLine(lineBuf.String()) {
+						done <- result
+						return
 					}
-					inOutput = false
-					continue
-				}
-				if strings.Contains(line, exitCodeMarker) {
-					start := strings.Index(line, exitCodeMarker) + len(exitCodeMarker)
-					end := strings.Index(line[start:], ">>>")
-					if end > 0 {
-						if code, parseErr := strconv.ParseInt(line[start:start+end], 10, 32); parseErr == nil {
-							result.exitCode = int32(code)
-						}
-					}
-					h.logger.Debug("parseVMOutput exit code found", "exitCode", result.exitCode)
-					done <- result
-					return
-				}
-				if strings.Contains(line, stderrMarker) {
-					if outputBuf.Len() > 0 && !isStderr {
-						h.sendOutput(stream, executionID, outputBuf.Bytes(), false)
-						outputBuf.Reset()
-					}
-					isStderr = true
-					continue
-				}
-				if strings.Contains(line, stdoutMarker) {
-					if outputBuf.Len() > 0 && isStderr {
-						h.sendOutput(stream, executionID, outputBuf.Bytes(), true)
-						outputBuf.Reset()
-					}
-					isStderr = false
-					continue
-				}
-
-				// Buffer output if in output section
-				if inOutput {
-					outputBuf.WriteString(line)
-					outputBuf.WriteByte('\n')
-					if outputBuf.Len() > 4096 {
-						h.sendOutput(stream, executionID, outputBuf.Bytes(), isStderr)
-						outputBuf.Reset()
-					}
+					lineBuf.Reset()
+				} else {
+					lineBuf.WriteByte(b)
 				}
 			}
 		}
 
 		if err != nil {
 			h.logger.Debug("parseVMOutput read error", "err", err, "totalOutput", allOutput.Len())
+			// Process any remaining partial line
+			if lineBuf.Len() > 0 {
+				processLine(lineBuf.String())
+			}
 			if outputBuf.Len() > 0 {
 				h.sendOutput(stream, executionID, outputBuf.Bytes(), isStderr)
 			}
