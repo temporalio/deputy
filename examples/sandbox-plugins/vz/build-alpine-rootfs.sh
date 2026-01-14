@@ -99,13 +99,124 @@ fi
 echo "==> Extracting kernel, initramfs and modules from Lima Alpine ISO..."
 TMPDIR=$(mktemp -d)
 bsdtar -xf "${LIMA_ISO}" -C "${TMPDIR}" boot/vmlinuz-virt boot/initramfs-virt boot/modloop-virt
-cp "${TMPDIR}/boot/vmlinuz-virt" "${OUTPUT_DIR}/vmlinuz"
-cp "${TMPDIR}/boot/initramfs-virt" "${OUTPUT_DIR}/initrd.img"
+cp "${TMPDIR}/boot/initramfs-virt" "${OUTPUT_DIR}/initrd-stock.img"
 cp "${TMPDIR}/boot/modloop-virt" "${OUTPUT_DIR}/modloop-virt"
+
+# Extract raw ARM64 kernel from EFI stub
+# Lima's vmlinuz-virt is an EFI stub (PE32+ executable), but VZ needs the raw ARM64 Image
+# The raw kernel is embedded as gzip-compressed data inside the EFI stub
+echo "==> Extracting raw ARM64 kernel from EFI stub..."
+VMLINUZ_EFI="${TMPDIR}/boot/vmlinuz-virt"
+KERNEL_TYPE=$(file "${VMLINUZ_EFI}" | head -1)
+if echo "${KERNEL_TYPE}" | grep -q "PE32+.*EFI"; then
+    # Find gzip signature (1f 8b 08) using grep with byte offset
+    # LC_ALL=C ensures binary matching works correctly
+    GZIP_OFFSET=$(LC_ALL=C grep -abo $'\x1f\x8b\x08' "${VMLINUZ_EFI}" 2>/dev/null | head -1 | cut -d: -f1)
+    if [ -n "${GZIP_OFFSET}" ]; then
+        echo "    Found gzip data at byte offset ${GZIP_OFFSET}"
+
+        dd if="${VMLINUZ_EFI}" bs=1 skip=${GZIP_OFFSET} of="${OUTPUT_DIR}/vmlinuz.gz" 2>/dev/null
+
+        # Decompress - use Docker for reliability (macOS gzip can have issues with this format)
+        docker run --rm -v "${OUTPUT_DIR}:/output" alpine:${ALPINE_VERSION} sh -c '
+            gzip -dc /output/vmlinuz.gz > /output/vmlinuz && rm /output/vmlinuz.gz
+        '
+        echo "    Extracted raw kernel from EFI stub"
+    else
+        echo "ERROR: Could not find gzip data in EFI stub"
+        exit 1
+    fi
+elif echo "${KERNEL_TYPE}" | grep -q "Linux kernel ARM64"; then
+    # Already a raw ARM64 kernel
+    cp "${VMLINUZ_EFI}" "${OUTPUT_DIR}/vmlinuz"
+    echo "    Kernel is already raw ARM64 format"
+else
+    echo "ERROR: Unknown kernel format: ${KERNEL_TYPE}"
+    exit 1
+fi
+
+# Verify kernel format
+KERNEL_CHECK=$(file "${OUTPUT_DIR}/vmlinuz")
+if ! echo "${KERNEL_CHECK}" | grep -q "Linux kernel ARM64"; then
+    echo "ERROR: Extracted kernel is not ARM64 format: ${KERNEL_CHECK}"
+    exit 1
+fi
+
 rm -rf "${TMPDIR}"
 echo "    Kernel: ${OUTPUT_DIR}/vmlinuz"
-echo "    Initrd: ${OUTPUT_DIR}/initrd.img"
+echo "    Kernel format: $(file "${OUTPUT_DIR}/vmlinuz" | sed 's/.*: //')"
+echo "    Stock initrd: ${OUTPUT_DIR}/initrd-stock.img"
 echo "    Modloop: ${OUTPUT_DIR}/modloop-virt"
+
+# Create custom initrd with virtiofs modules
+# The stock Lima initrd doesn't include virtiofs modules - they're in modloop
+# We need to create a new initrd that includes virtiofs, virtio_blk, ext4 modules
+echo "==> Creating custom initrd with virtiofs modules..."
+docker run --rm --privileged \
+    -v "${OUTPUT_DIR}:/output" \
+    alpine:${ALPINE_VERSION} sh -c '
+set -ex
+apk add --no-cache cpio gzip squashfs-tools
+
+# Extract stock initrd
+mkdir -p /tmp/initrd
+cd /tmp/initrd
+gzip -dc /output/initrd-stock.img | cpio -idm 2>/dev/null || true
+
+# Extract modules from modloop (squashfs)
+mkdir -p /tmp/modloop
+unsquashfs -d /tmp/modloop /output/modloop-virt
+
+# Find the kernel version from modloop
+KVER=$(ls /tmp/modloop/modules/ | head -1)
+echo "Kernel version from modloop: ${KVER}"
+
+# Create modules directory in initrd
+mkdir -p /tmp/initrd/lib/modules/${KVER}/kernel/fs
+mkdir -p /tmp/initrd/lib/modules/${KVER}/kernel/drivers/virtio
+mkdir -p /tmp/initrd/lib/modules/${KVER}/kernel/drivers/block
+
+# Copy essential modules for boot + virtiofs
+# virtio infrastructure
+cp /tmp/modloop/modules/${KVER}/kernel/drivers/virtio/virtio.ko* /tmp/initrd/lib/modules/${KVER}/kernel/drivers/virtio/ 2>/dev/null || true
+cp /tmp/modloop/modules/${KVER}/kernel/drivers/virtio/virtio_ring.ko* /tmp/initrd/lib/modules/${KVER}/kernel/drivers/virtio/ 2>/dev/null || true
+cp /tmp/modloop/modules/${KVER}/kernel/drivers/virtio/virtio_pci.ko* /tmp/initrd/lib/modules/${KVER}/kernel/drivers/virtio/ 2>/dev/null || true
+cp /tmp/modloop/modules/${KVER}/kernel/drivers/virtio/virtio_mmio.ko* /tmp/initrd/lib/modules/${KVER}/kernel/drivers/virtio/ 2>/dev/null || true
+
+# virtio_blk for rootfs
+cp /tmp/modloop/modules/${KVER}/kernel/drivers/block/virtio_blk.ko* /tmp/initrd/lib/modules/${KVER}/kernel/drivers/block/ 2>/dev/null || true
+
+# virtiofs for workspace mounting
+cp /tmp/modloop/modules/${KVER}/kernel/fs/fuse/virtiofs.ko* /tmp/initrd/lib/modules/${KVER}/kernel/fs/ 2>/dev/null || true
+cp /tmp/modloop/modules/${KVER}/kernel/fs/fuse/fuse.ko* /tmp/initrd/lib/modules/${KVER}/kernel/fs/ 2>/dev/null || true
+
+# ext4 for rootfs
+cp /tmp/modloop/modules/${KVER}/kernel/fs/ext4/ext4.ko* /tmp/initrd/lib/modules/${KVER}/kernel/fs/ 2>/dev/null || true
+
+# Copy module dependencies
+cp /tmp/modloop/modules/${KVER}/modules.* /tmp/initrd/lib/modules/${KVER}/ 2>/dev/null || true
+
+# Regenerate module dependencies
+depmod -b /tmp/initrd ${KVER} 2>/dev/null || true
+
+# List what we added
+echo "Modules in new initrd:"
+find /tmp/initrd/lib/modules -name "*.ko*" -exec basename {} \; | sort | uniq
+
+# Repack initrd
+cd /tmp/initrd
+find . | cpio -o -H newc 2>/dev/null | gzip -9 > /output/initrd.img
+echo "Created /output/initrd.img with virtiofs support"
+'
+
+# Verify initrd was created
+if [ ! -f "${OUTPUT_DIR}/initrd.img" ]; then
+    echo "ERROR: Failed to create custom initrd"
+    exit 1
+fi
+
+echo "    Initrd: ${OUTPUT_DIR}/initrd.img (with virtiofs)"
+echo "    Size: $(ls -lh "${OUTPUT_DIR}/initrd.img" | awk '{print $5}')"
 
 # Create the deputy-init script for Alpine
 # Note: Alpine uses busybox, so some commands differ from Ubuntu
@@ -397,6 +508,13 @@ rm -f "${BUILD_SCRIPT}"
 
 # Clean up
 rm -f "${OUTPUT_DIR}/deputy-init"
+
+# Fix permissions - VZ requires read-write access to rootfs.img
+chmod 666 "${OUTPUT_DIR}/rootfs.img"
+# Clear any extended attributes that might interfere
+xattr -c "${OUTPUT_DIR}/rootfs.img" 2>/dev/null || true
+xattr -c "${OUTPUT_DIR}/vmlinuz" 2>/dev/null || true
+xattr -c "${OUTPUT_DIR}/initrd.img" 2>/dev/null || true
 
 # Verify
 echo ""

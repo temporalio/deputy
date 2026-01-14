@@ -2199,6 +2199,98 @@ deputy server
 | `DEPUTY_DOCKER_CLI` | Path to Docker-compatible CLI for sandbox runtimes: `docker`, `nerdctl`, `finch`, `podman` (default: `docker`) ([`internal/sandbox/env.go`](internal/sandbox/env.go)) |
 | `DEPUTY_DOCKER_HOST` | Docker daemon socket for sandbox runtimes; takes precedence over `DOCKER_HOST` ([`internal/sandbox/env.go`](internal/sandbox/env.go)) |
 | `DEPUTY_RUNSC_PATH` | Path to runsc (gVisor) binary for gVisor runtime (default: `runsc`) ([`internal/sandbox/env.go`](internal/sandbox/env.go)) |
+| `DEPUTY_VZ_KERNEL` | Path to Linux kernel for VZ sandbox plugin (default: `~/.deputy/vz/alpine/vmlinuz`). **Must be ARM64 Image format, not EFI stub.** |
+| `DEPUTY_VZ_ROOTFS` | Path to root filesystem image for VZ sandbox plugin (default: `~/.deputy/vz/alpine/rootfs.img`) |
+| `DEPUTY_VZ_INITRD` | Path to initrd for VZ sandbox plugin (default: `~/.deputy/vz/alpine/initrd-virtiofs.img`). **Must include virtiofs module for workspace mounting.** |
+
+## Sandbox: VZ Plugin (macOS Virtualization.framework)
+
+The VZ plugin provides VM-based isolation using Apple's Virtualization.framework. This is the recommended sandbox runtime for maximum isolation on macOS Apple Silicon.
+
+**Full documentation:** See [`examples/sandbox-plugins/vz/README.md`](examples/sandbox-plugins/vz/README.md) for complete setup instructions, architecture diagrams, and troubleshooting.
+
+### Quick Setup (Alpine - Recommended)
+
+Alpine is recommended because it supports virtiofs workspace mounting (Ubuntu cloud kernel does not).
+
+```bash
+# 1. Build and install the plugin
+cd examples/sandbox-plugins/vz
+go build -o deputy-sandbox-vz .
+codesign --entitlements entitlements.plist --sign - deputy-sandbox-vz
+cp deputy-sandbox-vz ~/go/bin/
+
+# 2. Build the Alpine rootfs (requires Docker, ~2-3 minutes)
+./build-alpine-rootfs.sh
+
+# 3. Set environment variables (add to ~/.zshrc for persistence)
+export DEPUTY_VZ_KERNEL=~/.deputy/vz/alpine/vmlinuz
+export DEPUTY_VZ_ROOTFS=~/.deputy/vz/alpine/rootfs.img
+export DEPUTY_VZ_INITRD=~/.deputy/vz/alpine/initrd-virtiofs.img
+```
+
+### Kernel Format Note
+
+VZ requires a raw ARM64 kernel image, **not** an EFI stub. Verify with `file`:
+
+```bash
+# Correct format (works with VZ):
+$ file ~/.deputy/vz/alpine/vmlinuz
+vmlinuz: Linux kernel ARM64 boot executable Image, little-endian, 4K pages
+
+# Wrong format (will fail with "Internal Virtualization error"):
+$ file vmlinuz-efi
+vmlinuz-efi: PE32+ executable (EFI application) Aarch64
+```
+
+The `build-alpine-rootfs.sh` script automatically:
+1. Extracts the raw ARM64 kernel from Lima's EFI stub
+2. Creates a custom initrd with virtiofs modules for workspace mounting
+
+### Usage Examples
+
+```bash
+# Basic command execution in VM
+deputy exec --runtime plugin --plugin vz -- uname -a
+# Output: Linux (none) 6.18.2-0-virt #1-Alpine SMP PREEMPT_DYNAMIC ... aarch64 Linux
+
+# Build Go project with network and workspace access
+deputy exec --runtime plugin --plugin vz \
+    --workspace . \
+    --network host \
+    --dangerously-skip-prompt \
+    --cpu 4 \
+    --memory 4g \
+    -- go build ./...
+
+# Run tests in isolated VM
+deputy exec --runtime plugin --plugin vz \
+    --workspace . \
+    --network host \
+    --cpu 4 \
+    --memory 4g \
+    -- go test ./...
+
+# Write output binary to host filesystem
+deputy exec --runtime plugin --plugin vz \
+    --workspace . \
+    --network host \
+    --mode full-access \
+    --cpu 4 \
+    --memory 4g \
+    -- go build -o /workspace/myapp .
+```
+
+### Key Capabilities
+
+| Feature | Status | Notes |
+|---------|--------|-------|
+| Network access | Yes | NAT via `--network host` |
+| Workspace mounting | Yes | Via virtiofs (Alpine kernel) |
+| Go toolchain | Yes | Go 1.23.5 pre-installed |
+| Node.js | Yes | Node.js 22 pre-installed |
+| CPU/memory limits | Yes | `--cpu N --memory Xg` |
+| Hardware isolation | Yes | Full VM boundary |
 
 ## Exit Codes
 

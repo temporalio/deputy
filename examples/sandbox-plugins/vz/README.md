@@ -1263,19 +1263,26 @@ Workspace mounting (`--workspace`) allows sharing a host directory with the VM v
 - Best for: Isolated execution without host directory access
 
 **Lima Alpine Kernel** (from Lima project's Alpine ISO):
-- Kernel format: EFI stub, requires extraction for VZ
-- Has `virtiofs.ko` module in initramfs
-- Has `virtio_blk.ko` module (not built-in)
-- **Requires** custom initramfs (`initrd-virtiofs.img`) to load modules
+- Kernel format: EFI stub (script extracts raw ARM64 kernel automatically)
+- Has `virtiofs.ko` module in modloop (script creates custom initrd with it)
+- Has `virtio_blk.ko` module (not built-in, loaded via initrd)
 - **Working**: virtiofs workspace mounting tested and functional
 - Boot time: ~1.5s (includes module loading)
 
-### Creating the Alpine Initrd (Advanced)
+### What the Build Script Does
 
-> **Note:** The `build-alpine-rootfs.sh` script handles initrd creation automatically.
-> This section is for reference only if you need to customize the boot process.
+The `build-alpine-rootfs.sh` script handles all the complexity automatically:
 
-The Lima Alpine kernel uses modular drivers, so an initrd is needed to load virtiofs, ext4, and virtio_blk modules before mounting root. The `build-alpine-rootfs.sh` script extracts the initrd from Lima's Alpine ISO which already has these modules.
+1. **Downloads** Lima's Alpine ISO (contains kernel with virtiofs support)
+2. **Extracts raw ARM64 kernel** from the EFI stub (VZ requires raw Image format, not PE32+)
+3. **Creates custom initrd** with virtiofs, virtio_blk, and ext4 modules from the modloop
+4. **Builds rootfs** with Alpine base, Go 1.23.5, and Node.js 22
+5. **Installs deputy-init** script for command execution
+
+The output files are:
+- `vmlinuz` - Raw ARM64 kernel (extracted from EFI stub)
+- `initrd.img` - Custom initrd with virtiofs modules
+- `rootfs.img` - 8GB Alpine rootfs with dev tools
 
 ### Installing Additional Packages in the Alpine Rootfs
 
