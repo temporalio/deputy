@@ -312,6 +312,101 @@ flowchart TB
     style note1 fill:#e3f2fd,stroke:#1565c0
 ```
 
+### Persistent Rootfs Storage Model
+
+> [!WARNING]
+> **Not like Docker!** The VZ plugin uses a persistent rootfs that accumulates state between runs.
+> Unlike Docker containers which start fresh each time, Go toolchain downloads, module caches,
+> and any other filesystem changes persist across executions. This makes subsequent builds faster,
+> but means you may need to rebuild the rootfs (`./build-alpine-rootfs.sh`) to get a clean slate.
+
+Unlike Docker containers which use copy-on-write (COW) filesystems where each container starts fresh, the VZ plugin uses a **persistent rootfs.img** that accumulates state between runs.
+
+```mermaid
+flowchart TB
+    subgraph Docker["Docker Container Model (COW)"]
+        direction TB
+        DI["Base Image<br/><i>read-only layers</i>"]
+        DC1["Container 1<br/><i>ephemeral layer</i>"]
+        DC2["Container 2<br/><i>ephemeral layer</i>"]
+        DC3["Container 3<br/><i>ephemeral layer</i>"]
+
+        DI --> DC1
+        DI --> DC2
+        DI --> DC3
+
+        note_d["Each container starts<br/>completely fresh"]
+        DC1 -.-> note_d
+    end
+
+    subgraph VZ["VZ Plugin Model (Persistent)"]
+        direction TB
+        VR["rootfs.img (8GB ext4)<br/><i>single mutable disk</i>"]
+        VE1["Execution 1<br/>• Downloads Go toolchain<br/>• Caches modules"]
+        VE2["Execution 2<br/>• Uses cached toolchain<br/>• Uses cached modules"]
+        VE3["Execution 3<br/>• All caches warm<br/>• Fast builds!"]
+
+        VR --> VE1
+        VE1 -->|"state persists"| VR
+        VR --> VE2
+        VE2 -->|"state persists"| VR
+        VR --> VE3
+
+        note_v["State accumulates<br/>between executions"]
+        VR -.-> note_v
+    end
+
+    style DI fill:#e3f2fd,stroke:#1565c0
+    style DC1 fill:#ffcdd2,stroke:#c62828
+    style DC2 fill:#ffcdd2,stroke:#c62828
+    style DC3 fill:#ffcdd2,stroke:#c62828
+    style VR fill:#c8e6c9,stroke:#2e7d32
+    style VE1 fill:#e8f5e9,stroke:#2e7d32
+    style VE2 fill:#e8f5e9,stroke:#2e7d32
+    style VE3 fill:#e8f5e9,stroke:#2e7d32
+    style note_d fill:#fff3e0,stroke:#e65100
+    style note_v fill:#fff3e0,stroke:#e65100
+```
+
+**What persists between runs:**
+
+| Data | Location in rootfs | Behavior |
+|------|-------------------|----------|
+| Go toolchain downloads | `/root/go/pkg/mod/cache/download/golang.org/toolchain/` | Downloaded once, reused forever |
+| Go module cache | `/root/go/pkg/mod/` | Modules cached across projects |
+| Go build cache | `/root/.cache/go-build/` | Compilation artifacts cached |
+| npm packages (global) | `/root/.npm/` | Global packages persist |
+| System packages | `/usr/`, `/lib/` | Any `apk add` persists |
+| Home directory | `/root/` | All user data persists |
+
+**Practical implications:**
+
+```bash
+# First run: Downloads Go 1.25.5 toolchain (~150MB), takes 30-60s
+deputy exec --runtime plugin --plugin vz --workspace . --network host \
+    --cpu 4 --memory 4g -- go build ./...
+
+# Second run: Toolchain cached, only builds - much faster!
+deputy exec --runtime plugin --plugin vz --workspace . --network host \
+    --cpu 4 --memory 4g -- go build ./...
+
+# Third run with different project: Module cache warm, even faster
+cd ../other-project
+deputy exec --runtime plugin --plugin vz --workspace . --network host \
+    --cpu 4 --memory 4g -- go build ./...
+```
+
+**When to rebuild rootfs:**
+
+| Scenario | Action |
+|----------|--------|
+| Corrupt cache (zip errors, checksum failures) | `./build-alpine-rootfs.sh` |
+| Want to start fresh | `./build-alpine-rootfs.sh` |
+| Upgrade Go/Node versions | Edit script, then `./build-alpine-rootfs.sh` |
+| Disk full (8GB limit) | `./build-alpine-rootfs.sh` or increase `--size` |
+
+**Future consideration:** A Docker-like COW mode could be implemented using QCOW2 snapshots or overlay filesystems, where each execution starts from a clean base. This would trade build speed for reproducibility. For now, rebuild the rootfs when you need a fresh start.
+
 ### Security Boundary
 
 How VZ provides stronger isolation than containers:
