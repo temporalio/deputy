@@ -222,25 +222,35 @@ func (h *vzHandler) Execute(
 	defer term.Restore(int(ptyPrimary.Fd()), oldState)
 
 	// Create VM configuration with the PTY secondary (VM reads/writes to secondary, we read/write to primary)
+	slog.Debug("Creating VM config", "kernel", kernelPath, "initrd", initrdPath, "rootfs", rootfsPath)
 	vmConfig, err := h.createVMConfig(execReq, kernelPath, initrdPath, rootfsPath, ptySecondary, ptySecondary)
 	if err != nil {
+		slog.Error("VM config creation failed", "error", err)
 		return stream.Send(h.errorEvent(executionID, "CONFIG_ERROR", err.Error()))
 	}
+	slog.Debug("VM config created successfully")
 
 	// Validate configuration
+	slog.Debug("Validating VM config")
 	validated, err := vmConfig.Validate()
 	if err != nil {
+		slog.Error("VM config validation error", "error", err)
 		return stream.Send(h.errorEvent(executionID, "VALIDATION_ERROR", err.Error()))
 	}
 	if !validated {
+		slog.Error("VM config validation returned false")
 		return stream.Send(h.errorEvent(executionID, "VALIDATION_ERROR", "VM configuration validation failed"))
 	}
+	slog.Debug("VM config validated successfully")
 
 	// Create the VM
+	slog.Debug("Creating VirtualMachine instance")
 	vm, err := vz.NewVirtualMachine(vmConfig)
 	if err != nil {
+		slog.Error("VM creation failed", "error", err)
 		return stream.Send(h.errorEvent(executionID, "VM_CREATE_ERROR", err.Error()))
 	}
+	slog.Debug("VirtualMachine instance created")
 
 	// Create cancellable context for the VM
 	vmCtx, vmCancel := context.WithCancel(ctx)
@@ -282,8 +292,9 @@ func (h *vzHandler) Execute(
 
 	// Start the VM
 	startTime := time.Now()
-	h.logger.Debug("Starting VM", "executionID", executionID, "kernel", kernelPath, "rootfs", rootfsPath)
+	h.logger.Debug("Starting VM", "executionID", executionID, "kernel", kernelPath, "rootfs", rootfsPath, "vmState", vm.State())
 	if err := vm.Start(); err != nil {
+		h.logger.Error("VM start failed", "error", err, "vmState", vm.State())
 		return stream.Send(h.errorEvent(executionID, "VM_START_ERROR", err.Error()))
 	}
 
@@ -738,6 +749,11 @@ func (h *vzHandler) createVMConfig(
 	})
 
 	// Add network based on network mode
+	// VZ NAT networking uses Apple's vmnet framework which provides:
+	// - DHCP for IP assignment (192.168.64.x range)
+	// - NAT for outbound connectivity
+	// - Note: vmnet gateway does NOT forward DNS - init script must configure public DNS
+	slog.Debug("VZ network configuration", "networkMode", config.GetNetworkMode(), "networkModeName", config.GetNetworkMode().String())
 	if config.GetNetworkMode() != sandboxv1.NetworkMode_NETWORK_MODE_NONE {
 		natAttachment, err := vz.NewNATNetworkDeviceAttachment()
 		if err != nil {
@@ -748,9 +764,25 @@ func (h *vzHandler) createVMConfig(
 		if err != nil {
 			return nil, fmt.Errorf("create network device: %w", err)
 		}
+
+		// Set a MAC address (required for proper device enumeration, like Lima does)
+		// Using a locally administered MAC address prefix (52:55:55)
+		macAddr, err := net.ParseMAC("52:55:55:00:00:01")
+		if err != nil {
+			return nil, fmt.Errorf("parse MAC address: %w", err)
+		}
+		vzMAC, err := vz.NewMACAddress(macAddr)
+		if err != nil {
+			return nil, fmt.Errorf("create VZ MAC address: %w", err)
+		}
+		networkDevice.SetMACAddress(vzMAC)
+
 		vmConfig.SetNetworkDevicesVirtualMachineConfiguration([]*vz.VirtioNetworkDeviceConfiguration{
 			networkDevice,
 		})
+		slog.Debug("VZ network device added", "type", "NAT", "mac", macAddr.String())
+	} else {
+		slog.Debug("VZ network disabled", "mode", config.GetNetworkMode())
 	}
 
 	// Add entropy device for randomness

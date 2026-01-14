@@ -22,13 +22,13 @@ set -euo pipefail
 
 # Defaults
 OUTPUT_DIR="${HOME}/.deputy/vz/alpine"
-ROOTFS_SIZE_MB=1024
+ROOTFS_SIZE_MB=4096  # 4GB to accommodate Go toolchain downloads and builds
 MINIMAL=false
 ALPINE_VERSION="3.23"
 GO_VERSION="1.23.5"
 NODE_VERSION="22"
 
-# Lima Alpine ISO URL (has kernel with virtiofs support)
+# Lima Alpine ISO URL (has kernel with virtiofs support and matching modules)
 LIMA_ALPINE_VERSION="0.2.47"
 LIMA_ALPINE_ISO_URL="https://github.com/lima-vm/alpine-lima/releases/download/v${LIMA_ALPINE_VERSION}/alpine-lima-std-${ALPINE_VERSION}.0-aarch64.iso"
 
@@ -88,24 +88,24 @@ if ! command -v bsdtar &> /dev/null; then
     exit 1
 fi
 
-# Download Lima Alpine ISO if not present
+# Download Lima Alpine ISO if not present (contains kernel + matching modules)
 LIMA_ISO="${OUTPUT_DIR}/../alpine-lima.iso"
 if [[ ! -f "${LIMA_ISO}" ]]; then
-    echo "==> Downloading Lima Alpine ISO (has virtiofs kernel)..."
+    echo "==> Downloading Lima Alpine ISO (has virtiofs kernel + modules)..."
     curl -L -o "${LIMA_ISO}" "${LIMA_ALPINE_ISO_URL}"
 fi
 
 # Extract kernel and initramfs from ISO
-if [[ ! -f "${OUTPUT_DIR}/vmlinuz" ]] || [[ ! -f "${OUTPUT_DIR}/initrd.img" ]]; then
-    echo "==> Extracting kernel and initramfs from Lima Alpine ISO..."
-    TMPDIR=$(mktemp -d)
-    bsdtar -xf "${LIMA_ISO}" -C "${TMPDIR}" boot/vmlinuz-virt boot/initramfs-virt
-    cp "${TMPDIR}/boot/vmlinuz-virt" "${OUTPUT_DIR}/vmlinuz"
-    cp "${TMPDIR}/boot/initramfs-virt" "${OUTPUT_DIR}/initrd.img"
-    rm -rf "${TMPDIR}"
-    echo "    Kernel: ${OUTPUT_DIR}/vmlinuz"
-    echo "    Initrd: ${OUTPUT_DIR}/initrd.img"
-fi
+echo "==> Extracting kernel, initramfs and modules from Lima Alpine ISO..."
+TMPDIR=$(mktemp -d)
+bsdtar -xf "${LIMA_ISO}" -C "${TMPDIR}" boot/vmlinuz-virt boot/initramfs-virt boot/modloop-virt
+cp "${TMPDIR}/boot/vmlinuz-virt" "${OUTPUT_DIR}/vmlinuz"
+cp "${TMPDIR}/boot/initramfs-virt" "${OUTPUT_DIR}/initrd.img"
+cp "${TMPDIR}/boot/modloop-virt" "${OUTPUT_DIR}/modloop-virt"
+rm -rf "${TMPDIR}"
+echo "    Kernel: ${OUTPUT_DIR}/vmlinuz"
+echo "    Initrd: ${OUTPUT_DIR}/initrd.img"
+echo "    Modloop: ${OUTPUT_DIR}/modloop-virt"
 
 # Create the deputy-init script for Alpine
 # Note: Alpine uses busybox, so some commands differ from Ubuntu
@@ -130,8 +130,14 @@ mount -t devtmpfs dev /dev 2>/dev/null
 mount -t tmpfs tmpfs /tmp 2>/dev/null
 mount -t tmpfs tmpfs /run 2>/dev/null
 
-# Load virtiofs module (key feature from Lima Alpine kernel!)
+# Load virtio modules (required for networking and filesystem)
+# Modules from Lima ISO modloop match the kernel version exactly
+modprobe virtio_pci 2>/dev/null || true
+modprobe virtio_net 2>/dev/null || true
 modprobe virtiofs 2>/dev/null || true
+
+# Give virtio devices time to register
+sleep 0.5
 
 # Sync time from host (fixes TLS certificate validation)
 for param in $(cat /proc/cmdline 2>/dev/null); do
@@ -143,33 +149,48 @@ for param in $(cat /proc/cmdline 2>/dev/null); do
     esac
 done
 
-# Configure networking if eth0 exists
-if [ -d /sys/class/net/eth0 ]; then
-    ip link set dev lo up 2>/dev/null
-    ip link set dev eth0 up 2>/dev/null
+# Configure networking - find actual network interface (not just eth0)
+# VZ/virtio may name it eth0, enp0s1, ens1, etc.
+ip link set dev lo up 2>/dev/null
 
-    # Clear stale DNS
-    rm -f /etc/resolv.conf 2>/dev/null
+NET_IF=""
+for iface in /sys/class/net/*; do
+    ifname=$(basename "$iface")
+    # Skip loopback
+    [ "$ifname" = "lo" ] && continue
+    # Found a network interface
+    NET_IF="$ifname"
+    break
+done
 
-    # Use DHCP (udhcpc is BusyBox DHCP client in Alpine)
+if [ -n "$NET_IF" ]; then
+    ip link set dev "$NET_IF" up 2>/dev/null
+
+    # Use DHCP for IP assignment (udhcpc is BusyBox DHCP client in Alpine)
+    # Note: We ignore DNS from DHCP since vmnet gateway does NOT forward DNS queries
     if command -v udhcpc >/dev/null 2>&1; then
-        udhcpc -i eth0 -q -n -t 5 -s /usr/share/udhcpc/default.script 2>/dev/null || \
-        udhcpc -i eth0 -q -n -t 5 2>/dev/null || true
-    fi
-
-    # Ensure DNS is configured (vmnet gateway does NOT forward DNS)
-    if [ ! -s /etc/resolv.conf ]; then
-        printf "nameserver 1.1.1.1\nnameserver 8.8.8.8\n" > /etc/resolv.conf
+        udhcpc -i "$NET_IF" -q -n -t 5 -s /usr/share/udhcpc/default.script 2>/dev/null || \
+        udhcpc -i "$NET_IF" -q -n -t 5 2>/dev/null || true
     fi
 fi
 
+# IMPORTANT: Always set public DNS servers
+# Apple vmnet NAT gateway (192.168.64.1) does NOT forward DNS queries,
+# so we must use public DNS regardless of what DHCP provides
+printf "nameserver 1.1.1.1\nnameserver 8.8.8.8\n" > /etc/resolv.conf
+
 # Setup environment
+# IMPORTANT: Use rootfs paths (not /tmp) for caches because /tmp is tmpfs (RAM-backed)
+# and has limited space. The rootfs has plenty of space for toolchain downloads.
 export HOME="/root"
 export GOPATH="/root/go"
-export GOCACHE="/tmp/go-cache"
-export GOMODCACHE="/tmp/go-mod-cache"
-export npm_config_cache="/tmp/npm-cache"
+export GOCACHE="/root/.cache/go-build"
+export GOMODCACHE="/root/go/pkg/mod"
+export npm_config_cache="/root/.npm"
 export TERM="xterm-256color"
+
+# Create cache directories on rootfs
+mkdir -p /root/.cache/go-build /root/go/pkg/mod /root/.npm 2>/dev/null
 
 # Parse kernel cmdline for command and options
 CMD_BASE64=""
@@ -245,21 +266,16 @@ chmod +x "${OUTPUT_DIR}/deputy-init"
 # Build rootfs using Docker with Alpine
 echo "==> Creating Alpine rootfs image with Docker..."
 
-docker run --rm --privileged \
-    -v "${OUTPUT_DIR}:/output" \
-    -e ROOTFS_SIZE_MB="${ROOTFS_SIZE_MB}" \
-    -e MINIMAL="${MINIMAL}" \
-    -e GO_VERSION="${GO_VERSION}" \
-    -e NODE_VERSION="${NODE_VERSION}" \
-    -e ALPINE_VERSION="${ALPINE_VERSION}" \
-    alpine:${ALPINE_VERSION} \
-    sh -c '
+# Create the build script
+BUILD_SCRIPT="${OUTPUT_DIR}/build-rootfs-inner.sh"
+cat > "${BUILD_SCRIPT}" << 'DOCKERSCRIPT'
+#!/bin/sh
 set -ex
 
 OUTPUT_DIR="/output"
 
 # Install tools for image creation
-apk add --no-cache e2fsprogs curl
+apk add --no-cache e2fsprogs curl squashfs-tools
 
 # Create disk image
 echo "Creating ${ROOTFS_SIZE_MB}MB disk image..."
@@ -279,23 +295,35 @@ cp /etc/apk/repositories /mnt/rootfs/etc/apk/repositories
 cp -a /etc/apk/keys/* /mnt/rootfs/etc/apk/keys/
 
 # Initialize and install base packages
+# Note: We do NOT install linux-virt here - we use Lima's modloop instead
+# because Alpine 3.23's linux-virt has a kernel/module version mismatch bug
 apk add --root /mnt/rootfs --initdb --no-cache \
     alpine-base \
     busybox \
     musl \
     ca-certificates \
     curl \
-    wget
+    wget \
+    kmod
 
 # Essential directories
 mkdir -p /mnt/rootfs/{dev,proc,sys,tmp,run,workspace,root}
 mkdir -p /mnt/rootfs/usr/share/udhcpc
+mkdir -p /mnt/rootfs/lib/modules
 
 # Copy udhcpc script for DHCP
 if [ -f /usr/share/udhcpc/default.script ]; then
     cp /usr/share/udhcpc/default.script /mnt/rootfs/usr/share/udhcpc/
     chmod +x /mnt/rootfs/usr/share/udhcpc/default.script
 fi
+
+# Extract kernel modules from Lima modloop (squashfs)
+# These modules match the Lima kernel exactly (6.18.2-0-virt)
+echo "Extracting kernel modules from Lima modloop..."
+unsquashfs -d /tmp/modloop "${OUTPUT_DIR}/modloop-virt"
+cp -a /tmp/modloop/modules/* /mnt/rootfs/lib/modules/
+rm -rf /tmp/modloop
+echo "Modules installed: $(ls /mnt/rootfs/lib/modules/)"
 
 if [ "${MINIMAL}" != "true" ]; then
     echo "Installing developer tools..."
@@ -327,7 +355,7 @@ if [ "${MINIMAL}" != "true" ]; then
     fi
 
     # Environment setup
-    cat > /mnt/rootfs/etc/profile.d/deputy-dev.sh << '\''ENVSCRIPT'\''
+    cat > /mnt/rootfs/etc/profile.d/deputy-dev.sh << 'ENVSCRIPT'
 export PATH="/usr/local/go/bin:/usr/local/bin:/usr/bin:/bin:/sbin:/usr/sbin:$PATH"
 export GOPATH="/root/go"
 export GOCACHE="/tmp/go-cache"
@@ -350,7 +378,21 @@ fi
 umount /mnt/rootfs
 
 echo "==> SUCCESS: Created Alpine rootfs.img"
-'
+DOCKERSCRIPT
+chmod +x "${BUILD_SCRIPT}"
+
+docker run --rm --privileged \
+    -v "${OUTPUT_DIR}:/output" \
+    -e ROOTFS_SIZE_MB="${ROOTFS_SIZE_MB}" \
+    -e MINIMAL="${MINIMAL}" \
+    -e GO_VERSION="${GO_VERSION}" \
+    -e NODE_VERSION="${NODE_VERSION}" \
+    -e ALPINE_VERSION="${ALPINE_VERSION}" \
+    alpine:${ALPINE_VERSION} \
+    /output/build-rootfs-inner.sh
+
+# Clean up build script
+rm -f "${BUILD_SCRIPT}"
 
 # Clean up
 rm -f "${OUTPUT_DIR}/deputy-init"

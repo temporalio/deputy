@@ -48,6 +48,11 @@ const (
 // execConfirmationRequired returns true if the given configuration requires
 // user confirmation before proceeding.
 func execConfirmationRequired(mode sandboxv1.Mode, network sandboxv1.NetworkMode, command []string) bool {
+	// Safe commands (read-only like ls, cat, head) never require confirmation
+	// even in permissive modes - they can't cause harm
+	if sandbox.IsSafeCommand(command) {
+		return false
+	}
 	// Full filesystem access is dangerous
 	if mode == sandboxv1.Mode_MODE_FULL_ACCESS {
 		return true
@@ -61,12 +66,6 @@ func execConfirmationRequired(mode sandboxv1.Mode, network sandboxv1.NetworkMode
 		return true
 	}
 	return false
-}
-
-// execCommandIsSafe returns true if the command is classified as safe (read-only).
-// Safe commands don't require confirmation even in permissive modes.
-func execCommandIsSafe(command []string) bool {
-	return sandbox.IsSafeCommand(command)
 }
 
 // execConfirmationInfo holds information for building a confirmation prompt.
@@ -119,10 +118,7 @@ func renderExecConfirmationBox(info execConfirmationInfo, w io.Writer) {
 	line := func(content string) string {
 		// Calculate visible width (accounting for ANSI codes)
 		plainLen := lipgloss.Width(content)
-		padding := boxWidth - plainLen - 2 // -2 for spaces on each side
-		if padding < 0 {
-			padding = 0
-		}
+		padding := max(0, boxWidth-plainLen-2) // -2 for spaces on each side
 		return execBoxBorder.Render(boxVertical) + " " + content + strings.Repeat(" ", padding) + " " + execBoxBorder.Render(boxVertical)
 	}
 
