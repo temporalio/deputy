@@ -115,7 +115,7 @@ func main() {
 		server.Close()
 	}()
 
-	slog.Info("vz sandbox plugin listening", "socket", *socketPath)
+	slog.Debug("vz sandbox plugin listening", "socket", *socketPath)
 	if err := server.Serve(listener); err != nil && err != http.ErrServerClosed {
 		log.Fatalf("server error: %v", err)
 	}
@@ -185,7 +185,7 @@ func (h *vzHandler) Execute(
 	if err != nil {
 		return stream.Send(h.errorEvent(executionID, "ASSET_ERROR", err.Error()))
 	}
-	fmt.Fprintf(os.Stderr, "[VZ] Assets: kernel=%s initrd=%s rootfs=%s\n", kernelPath, initrdPath, rootfsPath)
+	slog.Debug("VZ assets resolved", "kernel", kernelPath, "initrd", initrdPath, "rootfs", rootfsPath)
 
 	// Create PTY for VM console I/O (PTY works better than pipes with Virtualization.framework)
 	ptyMaster, ptySlave, err := pty.Open()
@@ -256,12 +256,12 @@ func (h *vzHandler) Execute(
 
 	// Start the VM
 	startTime := time.Now()
-	h.logger.Info("Starting VM", "executionID", executionID, "kernel", kernelPath, "rootfs", rootfsPath)
+	h.logger.Debug("Starting VM", "executionID", executionID, "kernel", kernelPath, "rootfs", rootfsPath)
 	if err := vm.Start(); err != nil {
 		return stream.Send(h.errorEvent(executionID, "VM_START_ERROR", err.Error()))
 	}
 
-	h.logger.Info("VM started successfully", "executionID", executionID, "state", vm.State())
+	h.logger.Debug("VM started successfully", "executionID", executionID, "state", vm.State())
 
 	// Set up timeout if specified
 	var timeoutCh <-chan time.Time
@@ -357,7 +357,7 @@ func (h *vzHandler) parseVMOutput(
 	done chan<- *executionResult,
 ) {
 	defer close(done)
-	h.logger.Info("parseVMOutput started", "executionID", executionID)
+	h.logger.Debug("parseVMOutput started", "executionID", executionID)
 
 	result := &executionResult{exitCode: 0}
 	var outputBuf bytes.Buffer
@@ -369,7 +369,7 @@ func (h *vzHandler) parseVMOutput(
 	for {
 		select {
 		case <-ctx.Done():
-			h.logger.Info("parseVMOutput context done", "totalOutput", allOutput.Len())
+			h.logger.Debug("parseVMOutput context done", "totalOutput", allOutput.Len())
 			done <- result
 			return
 		default:
@@ -379,7 +379,7 @@ func (h *vzHandler) parseVMOutput(
 		if n > 0 {
 			chunk := string(buf[:n])
 			allOutput.WriteString(chunk)
-			h.logger.Info("RAW_READ", "bytes", n, "data", chunk)
+			h.logger.Debug("RAW_READ", "bytes", n, "data", chunk)
 
 			// Process line by line
 			for _, line := range strings.Split(chunk, "\n") {
@@ -410,7 +410,7 @@ func (h *vzHandler) parseVMOutput(
 							result.exitCode = int32(code)
 						}
 					}
-					h.logger.Info("parseVMOutput exit code found", "exitCode", result.exitCode)
+					h.logger.Debug("parseVMOutput exit code found", "exitCode", result.exitCode)
 					done <- result
 					return
 				}
@@ -444,7 +444,7 @@ func (h *vzHandler) parseVMOutput(
 		}
 
 		if err != nil {
-			h.logger.Info("parseVMOutput read error", "err", err, "totalOutput", allOutput.Len())
+			h.logger.Debug("parseVMOutput read error", "err", err, "totalOutput", allOutput.Len())
 			if outputBuf.Len() > 0 {
 				h.sendOutput(stream, executionID, outputBuf.Bytes(), isStderr)
 			}
@@ -642,7 +642,7 @@ func (h *vzHandler) createVMConfig(
 
 	// Create bootloader with optional initrd
 	// Alpine needs initrd (has virtiofs module), Ubuntu boots directly to rootfs
-	slog.Info("creating bootloader",
+	slog.Debug("creating bootloader",
 		"kernel", kernelPath,
 		"initrd", initrdPath,
 		"cmdline", cmdline)

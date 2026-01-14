@@ -307,32 +307,57 @@ The VZ plugin supports two Linux distributions:
 
 ### Using Alpine (Recommended for Workspace Mounting)
 
-Alpine provides a smaller rootfs with virtiofs support for workspace mounting:
+Alpine provides a smaller rootfs with virtiofs support for workspace mounting. This is the recommended setup for supply chain security workflows.
+
+**Quick Setup:**
 
 ```bash
-# Build Alpine rootfs with virtiofs support
+# 1. Build Alpine rootfs and extract kernel
 cd examples/sandbox-plugins/vz
 ./build-alpine-rootfs.sh
 
-# The Lima kernel is in EFI stub format - extract raw kernel for VZ
+# 2. Extract raw kernel from EFI stub format
 cd ~/.deputy/vz/alpine
 OFFSET=$(xxd vmlinuz | grep "1f8b 08" | head -1 | cut -d: -f1)
 dd if=vmlinuz bs=1 skip=$((16#${OFFSET})) | gunzip > vmlinuz-extracted
 
-# Use Alpine with virtiofs workspace
+# 3. Create custom initrd with virtiofs support (see "Creating the Alpine Initrd" below)
+
+# 4. Install Go toolchain (requires Docker)
+docker run --rm --privileged -v ~/.deputy/vz/alpine:/alpine alpine:3.19 sh -c "
+  mkdir -p /mnt/rootfs && mount -o loop /alpine/rootfs.img /mnt/rootfs
+  apk --root /mnt/rootfs --initdb add go git
+  umount /mnt/rootfs
+"
+
+# 5. Set environment variables
 export DEPUTY_VZ_KERNEL=~/.deputy/vz/alpine/vmlinuz-extracted
 export DEPUTY_VZ_ROOTFS=~/.deputy/vz/alpine/rootfs.img
 export DEPUTY_VZ_INITRD=~/.deputy/vz/alpine/initrd-virtiofs.img
-
-# Test without workspace
-deputy exec --runtime plugin --plugin vz --no-workspace -- uname -a
-
-# Test with workspace mounting (virtiofs)
-deputy exec --runtime plugin --plugin vz --workspace . -- ls -la /workspace
-deputy exec --runtime plugin --plugin vz --workspace . -- cat go.mod
 ```
 
-**Note:** Alpine requires a custom initrd (`initrd-virtiofs.img`) that loads the virtiofs kernel module before mounting root. See [Creating the Alpine Initrd](#creating-the-alpine-initrd) for setup.
+**Verify Setup:**
+
+```bash
+# Test without workspace (basic VM boot)
+deputy exec --runtime plugin --plugin vz --no-workspace -- uname -a
+# Output: Linux localhost 6.18.2-0-virt #1-Alpine SMP ... aarch64 Linux
+
+# Test Go installation
+deputy exec --runtime plugin --plugin vz --no-workspace -- go version
+# Output: go version go1.25.5 linux/arm64
+
+# Test virtiofs workspace mounting
+deputy exec --runtime plugin --plugin vz --workspace . -- ls -la /workspace
+deputy exec --runtime plugin --plugin vz --workspace . -- cat /workspace/go.mod
+
+# Test Go with workspace (supply chain workflow)
+deputy exec --runtime plugin --plugin vz --workspace . -- \
+    sh -c "cd /workspace && go list -m"
+# Output: github.com/picatz/deputy
+```
+
+**Note:** Alpine requires a custom initrd (`initrd-virtiofs.img`) that loads the virtiofs kernel module before mounting root. See [Creating the Alpine Initrd](#creating-the-alpine-initrd) for the init script.
 
 ### Switching Between Ubuntu and Alpine
 
@@ -761,6 +786,73 @@ chmod +x init
 # Repack the initrd
 find . | cpio -o -H newc 2>/dev/null | gzip > ~/.deputy/vz/alpine/initrd-virtiofs.img
 echo "Created initrd-virtiofs.img"
+```
+
+### Installing Go in the Alpine Rootfs
+
+The Alpine rootfs can be extended with the Go toolchain for supply chain security workflows. Use Docker to mount and modify the ext4 image:
+
+```bash
+# Install Go into the Alpine rootfs using Docker
+docker run --rm --privileged -v ~/.deputy/vz/alpine:/alpine alpine:3.19 sh -c "
+  mkdir -p /mnt/rootfs
+  mount -o loop /alpine/rootfs.img /mnt/rootfs
+  apk --root /mnt/rootfs --initdb add go git
+  umount /mnt/rootfs
+"
+
+# Verify Go is installed
+deputy exec --runtime plugin --plugin vz --no-workspace -- go version
+# Output: go version go1.25.5 linux/arm64
+```
+
+Other useful packages to install:
+
+```bash
+# Node.js and npm for JavaScript/TypeScript projects
+docker run --rm --privileged -v ~/.deputy/vz/alpine:/alpine alpine:3.19 sh -c "
+  mount -o loop /alpine/rootfs.img /mnt && mkdir -p /mnt
+  apk --root /mnt --initdb add nodejs npm
+  umount /mnt
+"
+
+# Python for Python projects
+docker run --rm --privileged -v ~/.deputy/vz/alpine:/alpine alpine:3.19 sh -c "
+  mount -o loop /alpine/rootfs.img /mnt && mkdir -p /mnt
+  apk --root /mnt --initdb add python3 py3-pip
+  umount /mnt
+"
+```
+
+### Supply Chain Security Examples (Alpine + Go)
+
+With Go installed and virtiofs workspace mounting, you can run supply chain security workflows in an isolated VM:
+
+```bash
+# Set up Alpine environment
+export DEPUTY_VZ_KERNEL=~/.deputy/vz/alpine/vmlinuz-extracted
+export DEPUTY_VZ_ROOTFS=~/.deputy/vz/alpine/rootfs.img
+export DEPUTY_VZ_INITRD=~/.deputy/vz/alpine/initrd-virtiofs.img
+
+# List module dependencies from your Go project
+deputy exec --runtime plugin --plugin vz --workspace . -- \
+    sh -c "cd /workspace && go list -m all"
+
+# Build a Go project in isolation
+deputy exec --runtime plugin --plugin vz --workspace . -- \
+    sh -c "cd /workspace && go build -o /tmp/app ./cmd/myapp"
+
+# Run go mod tidy in isolation (read-write workspace)
+deputy exec --runtime plugin --plugin vz --workspace . --dangerously-skip-prompt -- \
+    sh -c "cd /workspace && go mod tidy"
+
+# Verify checksums
+deputy exec --runtime plugin --plugin vz --workspace . -- \
+    sh -c "cd /workspace && go mod verify"
+
+# Download dependencies without executing code
+deputy exec --runtime plugin --plugin vz --workspace . -- \
+    sh -c "cd /workspace && go mod download"
 ```
 
 ### Workarounds for Ubuntu (No Workspace)
