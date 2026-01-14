@@ -148,17 +148,17 @@ echo "    Kernel format: $(file "${OUTPUT_DIR}/vmlinuz" | sed 's/.*: //')"
 echo "    Stock initrd: ${OUTPUT_DIR}/initrd-stock.img"
 echo "    Modloop: ${OUTPUT_DIR}/modloop-virt"
 
-# Create custom initrd with virtiofs modules
-# The stock Lima initrd doesn't include virtiofs modules - they're in modloop
-# We need to create a new initrd that includes virtiofs, virtio_blk, ext4 modules
+# Create custom initrd with virtiofs modules and a custom init script
+# The stock Lima initrd has a complex init designed for different boot flow.
+# We need a simple init that: loads modules, mounts rootfs, switch_root to /deputy-init
 echo "==> Creating custom initrd with virtiofs modules..."
 docker run --rm --privileged \
     -v "${OUTPUT_DIR}:/output" \
     alpine:${ALPINE_VERSION} sh -c '
 set -ex
-apk add --no-cache cpio gzip squashfs-tools
+apk add --no-cache cpio gzip squashfs-tools kmod
 
-# Extract stock initrd
+# Extract stock initrd (we need its busybox and libraries)
 mkdir -p /tmp/initrd
 cd /tmp/initrd
 gzip -dc /output/initrd-stock.img | cpio -idm 2>/dev/null || true
@@ -171,42 +171,107 @@ unsquashfs -d /tmp/modloop /output/modloop-virt
 KVER=$(ls /tmp/modloop/modules/ | head -1)
 echo "Kernel version from modloop: ${KVER}"
 
-# Create modules directory in initrd
-mkdir -p /tmp/initrd/lib/modules/${KVER}/kernel/fs
-mkdir -p /tmp/initrd/lib/modules/${KVER}/kernel/drivers/virtio
-mkdir -p /tmp/initrd/lib/modules/${KVER}/kernel/drivers/block
+# Copy ALL modules from modloop to initrd (ensures deps are available)
+rm -rf /tmp/initrd/usr/lib/modules 2>/dev/null || true
+mkdir -p /tmp/initrd/usr/lib/modules
+cp -a /tmp/modloop/modules/${KVER} /tmp/initrd/usr/lib/modules/
 
-# Copy essential modules for boot + virtiofs
-# virtio infrastructure
-cp /tmp/modloop/modules/${KVER}/kernel/drivers/virtio/virtio.ko* /tmp/initrd/lib/modules/${KVER}/kernel/drivers/virtio/ 2>/dev/null || true
-cp /tmp/modloop/modules/${KVER}/kernel/drivers/virtio/virtio_ring.ko* /tmp/initrd/lib/modules/${KVER}/kernel/drivers/virtio/ 2>/dev/null || true
-cp /tmp/modloop/modules/${KVER}/kernel/drivers/virtio/virtio_pci.ko* /tmp/initrd/lib/modules/${KVER}/kernel/drivers/virtio/ 2>/dev/null || true
-cp /tmp/modloop/modules/${KVER}/kernel/drivers/virtio/virtio_mmio.ko* /tmp/initrd/lib/modules/${KVER}/kernel/drivers/virtio/ 2>/dev/null || true
-
-# virtio_blk for rootfs
-cp /tmp/modloop/modules/${KVER}/kernel/drivers/block/virtio_blk.ko* /tmp/initrd/lib/modules/${KVER}/kernel/drivers/block/ 2>/dev/null || true
-
-# virtiofs for workspace mounting
-cp /tmp/modloop/modules/${KVER}/kernel/fs/fuse/virtiofs.ko* /tmp/initrd/lib/modules/${KVER}/kernel/fs/ 2>/dev/null || true
-cp /tmp/modloop/modules/${KVER}/kernel/fs/fuse/fuse.ko* /tmp/initrd/lib/modules/${KVER}/kernel/fs/ 2>/dev/null || true
-
-# ext4 for rootfs
-cp /tmp/modloop/modules/${KVER}/kernel/fs/ext4/ext4.ko* /tmp/initrd/lib/modules/${KVER}/kernel/fs/ 2>/dev/null || true
-
-# Copy module dependencies
-cp /tmp/modloop/modules/${KVER}/modules.* /tmp/initrd/lib/modules/${KVER}/ 2>/dev/null || true
+# Also create symlink at /lib/modules for compatibility
+mkdir -p /tmp/initrd/lib
+ln -sf ../usr/lib/modules /tmp/initrd/lib/modules
 
 # Regenerate module dependencies
 depmod -b /tmp/initrd ${KVER} 2>/dev/null || true
 
-# List what we added
-echo "Modules in new initrd:"
-find /tmp/initrd/lib/modules -name "*.ko*" -exec basename {} \; | sort | uniq
+# Ensure required directories exist
+mkdir -p /tmp/initrd/proc /tmp/initrd/sys /tmp/initrd/dev /tmp/initrd/mnt
+mkdir -p /tmp/initrd/usr/bin /tmp/initrd/usr/sbin /tmp/initrd/bin /tmp/initrd/sbin
+
+# Ensure modprobe exists (link to kmod)
+if [ ! -f /tmp/initrd/usr/sbin/modprobe ]; then
+    ln -sf ../bin/kmod /tmp/initrd/usr/sbin/modprobe 2>/dev/null || true
+fi
+
+# Create custom init script for Deputy VZ boot
+cat > /tmp/initrd/init << "INITSCRIPT"
+#!/bin/sh
+# Deputy VZ initrd init script
+# Loads modules, mounts rootfs, and switches to /deputy-init
+export PATH=/usr/bin:/bin:/usr/sbin:/sbin
+
+# Mount essential filesystems
+/usr/bin/busybox mount -t proc proc /proc
+/usr/bin/busybox mount -t sysfs sys /sys
+/usr/bin/busybox mount -t devtmpfs dev /dev
+
+# Redirect output to virtio console for debugging
+exec > /dev/hvc0 2>&1
+
+echo "=== Deputy VZ initrd starting ==="
+
+# Load kernel modules for boot
+echo "Loading kernel modules..."
+# ext4 dependencies
+/usr/sbin/modprobe mbcache 2>&1 || true
+/usr/sbin/modprobe jbd2 2>&1 || true
+/usr/sbin/modprobe ext4 2>&1 || echo "ext4 load: $?"
+
+# virtio block device
+/usr/sbin/modprobe virtio_blk 2>&1 || echo "virtio_blk load: $?"
+
+# virtiofs for workspace
+/usr/sbin/modprobe fuse 2>&1 || true
+/usr/sbin/modprobe virtiofs 2>&1 || echo "virtiofs load: $?"
+
+# Wait for block devices to appear
+/usr/bin/busybox sleep 1
+echo "Block devices: $(/usr/bin/busybox ls /dev/vd* 2>/dev/null || echo none)"
+
+# Mount rootfs
+echo "Mounting rootfs..."
+/usr/bin/busybox mkdir -p /mnt
+/usr/bin/busybox mount -t ext4 /dev/vda /mnt 2>&1 || {
+    echo "ERROR: Failed to mount /dev/vda"
+    echo "Available devices:"
+    /usr/bin/busybox ls -la /dev/ | /usr/bin/busybox head -20
+    exec /usr/bin/busybox sh
+}
+
+# Mount virtiofs workspace if available
+echo "Mounting workspace..."
+/usr/bin/busybox mkdir -p /mnt/workspace
+if /usr/bin/busybox mount -t virtiofs workspace /mnt/workspace 2>&1; then
+    echo "Workspace mounted successfully"
+else
+    echo "No workspace to mount (normal if --no-workspace)"
+fi
+
+# Verify deputy-init exists
+if [ ! -x /mnt/deputy-init ]; then
+    echo "ERROR: /mnt/deputy-init not found or not executable"
+    /usr/bin/busybox ls -la /mnt/ 2>&1 | /usr/bin/busybox head -10
+    exec /usr/bin/busybox sh
+fi
+
+# Switch to real root
+echo "Switching root..."
+exec /usr/bin/busybox switch_root /mnt /deputy-init
+
+echo "ERROR: switch_root failed"
+exec /usr/bin/busybox sh
+INITSCRIPT
+chmod +x /tmp/initrd/init
+
+# List modules in initrd
+echo "Modules in initrd:"
+find /tmp/initrd/usr/lib/modules -name "*.ko" 2>/dev/null | wc -l
+echo "Key modules:"
+find /tmp/initrd/usr/lib/modules -name "ext4.ko" -o -name "virtio_blk.ko" -o -name "virtiofs.ko" 2>/dev/null
 
 # Repack initrd
 cd /tmp/initrd
 find . | cpio -o -H newc 2>/dev/null | gzip -9 > /output/initrd.img
-echo "Created /output/initrd.img with virtiofs support"
+echo "Created /output/initrd.img with custom init"
 '
 
 # Verify initrd was created
@@ -367,6 +432,10 @@ EXIT_CODE=$?
 echo "<<<DEPUTY_OUTPUT_END>>>"
 echo "<<<DEPUTY_EXIT_CODE:${EXIT_CODE}>>>"
 
+# Sync filesystem before shutdown to ensure all writes are flushed
+# This prevents corrupt caches (e.g., Go toolchain downloads) on next boot
+sync
+
 # Shutdown
 poweroff -f
 '
@@ -510,11 +579,25 @@ rm -f "${BUILD_SCRIPT}"
 rm -f "${OUTPUT_DIR}/deputy-init"
 
 # Fix permissions - VZ requires read-write access to rootfs.img
+# This is critical: without proper permissions, VZ will fail to attach the disk
 chmod 666 "${OUTPUT_DIR}/rootfs.img"
-# Clear any extended attributes that might interfere
+chmod 644 "${OUTPUT_DIR}/vmlinuz"
+chmod 644 "${OUTPUT_DIR}/initrd.img"
+chmod 644 "${OUTPUT_DIR}/initrd-stock.img" 2>/dev/null || true
+
+# Clear any extended attributes that might interfere with VZ
+# macOS adds com.apple.provenance to downloaded/created files
 xattr -c "${OUTPUT_DIR}/rootfs.img" 2>/dev/null || true
 xattr -c "${OUTPUT_DIR}/vmlinuz" 2>/dev/null || true
 xattr -c "${OUTPUT_DIR}/initrd.img" 2>/dev/null || true
+
+# Create convenience symlinks in parent directory (~/.deputy/vz/)
+# This allows the plugin to work with default paths (no env vars needed)
+PARENT_DIR="${OUTPUT_DIR}/.."
+ln -sf alpine/vmlinuz "${PARENT_DIR}/vmlinuz" 2>/dev/null || true
+ln -sf alpine/rootfs.img "${PARENT_DIR}/rootfs.img" 2>/dev/null || true
+# Note: initrd symlink not created at parent level since Ubuntu doesn't need one
+# The plugin checks ~/.deputy/vz/alpine/initrd.img as a fallback
 
 # Verify
 echo ""
@@ -525,24 +608,27 @@ ls -lh "${OUTPUT_DIR}/vmlinuz" "${OUTPUT_DIR}/initrd.img" "${OUTPUT_DIR}/rootfs.
 echo ""
 echo "==> Alpine rootfs with virtiofs + network support!"
 echo ""
-echo "STEP 1: Set environment variables (add to ~/.zshrc for persistence):"
+echo "The build script has created symlinks so the plugin works with default paths."
+echo "No environment variables are required for basic usage."
 echo ""
-echo "  export DEPUTY_VZ_KERNEL=${OUTPUT_DIR}/vmlinuz"
-echo "  export DEPUTY_VZ_INITRD=${OUTPUT_DIR}/initrd.img"
-echo "  export DEPUTY_VZ_ROOTFS=${OUTPUT_DIR}/rootfs.img"
+echo "Test your setup:"
 echo ""
-echo "STEP 2: Test your setup:"
-echo ""
-echo "  # Basic test"
+echo "  # Basic test (uses default paths)"
 echo "  deputy exec --runtime plugin --plugin vz -- uname -a"
 echo ""
-echo "  # Test Go toolchain"
-echo "  deputy exec --runtime plugin --plugin vz -- go version"
+echo "  # Test Go toolchain (requires --network host)"
+echo "  deputy exec --runtime plugin --plugin vz --network host -- go version"
 echo ""
 echo "  # Test workspace mounting"
 echo "  deputy exec --runtime plugin --plugin vz --workspace . -- ls /workspace"
 echo ""
 echo "  # Build a Go project with network access"
 echo "  deputy exec --runtime plugin --plugin vz --workspace . --network host --cpu 4 --memory 4g -- go build ./..."
+echo ""
+echo "Optional: Set environment variables for explicit paths (add to ~/.zshrc):"
+echo ""
+echo "  export DEPUTY_VZ_KERNEL=${OUTPUT_DIR}/vmlinuz"
+echo "  export DEPUTY_VZ_INITRD=${OUTPUT_DIR}/initrd.img"
+echo "  export DEPUTY_VZ_ROOTFS=${OUTPUT_DIR}/rootfs.img"
 echo ""
 echo "For full documentation, see: examples/sandbox-plugins/vz/README.md"

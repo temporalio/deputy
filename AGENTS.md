@@ -2199,9 +2199,9 @@ deputy server
 | `DEPUTY_DOCKER_CLI` | Path to Docker-compatible CLI for sandbox runtimes: `docker`, `nerdctl`, `finch`, `podman` (default: `docker`) ([`internal/sandbox/env.go`](internal/sandbox/env.go)) |
 | `DEPUTY_DOCKER_HOST` | Docker daemon socket for sandbox runtimes; takes precedence over `DOCKER_HOST` ([`internal/sandbox/env.go`](internal/sandbox/env.go)) |
 | `DEPUTY_RUNSC_PATH` | Path to runsc (gVisor) binary for gVisor runtime (default: `runsc`) ([`internal/sandbox/env.go`](internal/sandbox/env.go)) |
-| `DEPUTY_VZ_KERNEL` | Path to Linux kernel for VZ sandbox plugin (default: `~/.deputy/vz/alpine/vmlinuz`). **Must be ARM64 Image format, not EFI stub.** |
-| `DEPUTY_VZ_ROOTFS` | Path to root filesystem image for VZ sandbox plugin (default: `~/.deputy/vz/alpine/rootfs.img`) |
-| `DEPUTY_VZ_INITRD` | Path to initrd for VZ sandbox plugin (default: `~/.deputy/vz/alpine/initrd-virtiofs.img`). **Must include virtiofs module for workspace mounting.** |
+| `DEPUTY_VZ_KERNEL` | Path to Linux kernel for VZ sandbox plugin (default: `~/.deputy/vz/vmlinuz` → symlink to alpine). **Must be ARM64 Image format, not EFI stub.** |
+| `DEPUTY_VZ_ROOTFS` | Path to root filesystem image for VZ sandbox plugin (default: `~/.deputy/vz/rootfs.img` → symlink to alpine) |
+| `DEPUTY_VZ_INITRD` | Path to initrd for VZ sandbox plugin (default: `~/.deputy/vz/alpine/initrd.img`). **Must include virtiofs module for workspace mounting.** |
 
 ## Sandbox: VZ Plugin (macOS Virtualization.framework)
 
@@ -2218,15 +2218,20 @@ Alpine is recommended because it supports virtiofs workspace mounting (Ubuntu cl
 cd examples/sandbox-plugins/vz
 go build -o deputy-sandbox-vz .
 codesign --entitlements entitlements.plist --sign - deputy-sandbox-vz
-cp deputy-sandbox-vz ~/go/bin/
+mkdir -p ~/go/bin && cp deputy-sandbox-vz ~/go/bin/
 
 # 2. Build the Alpine rootfs (requires Docker, ~2-3 minutes)
+# This creates ~/.deputy/vz/alpine/ with vmlinuz, initrd.img, rootfs.img
+# and symlinks in ~/.deputy/vz/ for default path discovery
 ./build-alpine-rootfs.sh
 
-# 3. Set environment variables (add to ~/.zshrc for persistence)
+# 3. Test (no environment variables needed - uses default paths)
+deputy exec --runtime plugin --plugin vz -- uname -a
+
+# Optional: Set explicit paths (add to ~/.zshrc)
 export DEPUTY_VZ_KERNEL=~/.deputy/vz/alpine/vmlinuz
 export DEPUTY_VZ_ROOTFS=~/.deputy/vz/alpine/rootfs.img
-export DEPUTY_VZ_INITRD=~/.deputy/vz/alpine/initrd-virtiofs.img
+export DEPUTY_VZ_INITRD=~/.deputy/vz/alpine/initrd.img
 ```
 
 ### Kernel Format Note

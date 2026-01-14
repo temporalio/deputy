@@ -451,7 +451,7 @@ This is the recommended setup for supply chain security workflows. It provides:
 - **Go 1.23.5 and Node.js 22** pre-installed
 - **8GB rootfs** with room for toolchain caches and builds
 
-### Complete Setup (5 Steps)
+### Complete Setup (3 Steps)
 
 ```bash
 # Step 1: Build and install the VZ plugin
@@ -461,23 +461,42 @@ codesign --entitlements entitlements.plist --sign - deputy-sandbox-vz
 mkdir -p ~/go/bin && cp deputy-sandbox-vz ~/go/bin/
 
 # Step 2: Build the Alpine rootfs (requires Docker, takes ~2-3 minutes)
+# Creates: ~/.deputy/vz/alpine/{vmlinuz, initrd.img, rootfs.img}
+# Also creates symlinks at ~/.deputy/vz/ for default path discovery
 ./build-alpine-rootfs.sh
 
-# Step 3: Set environment variables (add to ~/.zshrc for persistence)
-export DEPUTY_VZ_KERNEL=~/.deputy/vz/alpine/vmlinuz
-export DEPUTY_VZ_ROOTFS=~/.deputy/vz/alpine/rootfs.img
-export DEPUTY_VZ_INITRD=~/.deputy/vz/alpine/initrd.img
-
-# Step 4: Verify setup
+# Step 3: Test (no environment variables needed!)
 deputy exec --runtime plugin --plugin vz -- uname -a
 # Expected: Linux (none) 6.18.2-0-virt #1-Alpine SMP ... aarch64 Linux
 
-deputy exec --runtime plugin --plugin vz -- go version
+# Test Go (requires network for toolchain download)
+deputy exec --runtime plugin --plugin vz --network host -- go version
 # Expected: go version go1.23.5 linux/arm64
 
-# Step 5: Test workspace mounting and network
+# Test workspace mounting
 deputy exec --runtime plugin --plugin vz --workspace . -- ls /workspace
-deputy exec --runtime plugin --plugin vz --network host -- curl -sS https://proxy.golang.org
+
+# Optional: Set explicit paths (add to ~/.zshrc if you prefer)
+# export DEPUTY_VZ_KERNEL=~/.deputy/vz/alpine/vmlinuz
+# export DEPUTY_VZ_ROOTFS=~/.deputy/vz/alpine/rootfs.img
+# export DEPUTY_VZ_INITRD=~/.deputy/vz/alpine/initrd.img
+```
+
+### What the Build Script Creates
+
+The `build-alpine-rootfs.sh` script creates:
+
+| File | Description | Size |
+|------|-------------|------|
+| `~/.deputy/vz/alpine/vmlinuz` | Linux kernel (ARM64 Image format, extracted from Lima EFI stub) | ~34MB |
+| `~/.deputy/vz/alpine/initrd.img` | Custom initrd with virtiofs, virtio_blk, ext4 modules | ~25MB |
+| `~/.deputy/vz/alpine/rootfs.img` | Alpine root filesystem with Go 1.23.5 + Node.js 22 | 8GB |
+| `~/.deputy/vz/vmlinuz` | Symlink → `alpine/vmlinuz` (for default path discovery) | - |
+| `~/.deputy/vz/rootfs.img` | Symlink → `alpine/rootfs.img` (for default path discovery) | - |
+
+**Permissions Note:** The script sets `chmod 666` on `rootfs.img` because VZ requires read-write access to attach the disk. If you see permission errors, run:
+```bash
+chmod 666 ~/.deputy/vz/alpine/rootfs.img
 ```
 
 ### Building Go Projects
@@ -774,15 +793,26 @@ kill $VZ_PID
 
 ## Environment Variables
 
+Environment variables are **optional** when using the Alpine build script, which creates symlinks for default path discovery.
+
 | Variable | Description | Default |
 |----------|-------------|---------|
-| `DEPUTY_VZ_KERNEL` | Path to Linux kernel (vmlinuz) | `~/.deputy/vz/vmlinuz` |
+| `DEPUTY_VZ_KERNEL` | Path to Linux kernel (vmlinuz) | `~/.deputy/vz/vmlinuz` (symlink → alpine/) |
 | `DEPUTY_VZ_INITRD` | Path to initrd (required for Alpine) | `~/.deputy/vz/alpine/initrd.img` |
-| `DEPUTY_VZ_ROOTFS` | Path to root filesystem image | `~/.deputy/vz/rootfs.img` |
+| `DEPUTY_VZ_ROOTFS` | Path to root filesystem image | `~/.deputy/vz/rootfs.img` (symlink → alpine/) |
 
-### Setting Up Environment for Alpine (Recommended)
+### Using Default Paths (Recommended)
 
-After building the Alpine rootfs with `./build-alpine-rootfs.sh`, set these environment variables:
+After running `./build-alpine-rootfs.sh`, the plugin works without any environment variables:
+
+```bash
+# Works immediately after build script completes
+deputy exec --runtime plugin --plugin vz -- uname -a
+```
+
+### Using Explicit Paths (Optional)
+
+If you prefer explicit paths or have multiple rootfs configurations:
 
 ```bash
 # Add to your ~/.zshrc or ~/.bashrc for persistence
@@ -791,18 +821,14 @@ export DEPUTY_VZ_ROOTFS=~/.deputy/vz/alpine/rootfs.img
 export DEPUTY_VZ_INITRD=~/.deputy/vz/alpine/initrd.img
 ```
 
-Then reload your shell or run `source ~/.zshrc`.
-
-### Verifying Your Environment
+### Verifying Your Setup
 
 ```bash
-# Check environment variables are set
-echo "DEPUTY_VZ_KERNEL: $DEPUTY_VZ_KERNEL"
-echo "DEPUTY_VZ_ROOTFS: $DEPUTY_VZ_ROOTFS"
-echo "DEPUTY_VZ_INITRD: $DEPUTY_VZ_INITRD"
+# Check what files exist
+ls -la ~/.deputy/vz/
 
-# Verify files exist
-ls -la $DEPUTY_VZ_KERNEL $DEPUTY_VZ_ROOTFS $DEPUTY_VZ_INITRD
+# Test the plugin
+deputy exec --runtime plugin --plugin vz -- uname -a
 ```
 
 ## Dual-OS Setup (Ubuntu + Alpine)
@@ -818,22 +844,21 @@ The VZ plugin supports two Linux distributions:
 
 ### Directory Structure
 
-After running `./build-alpine-rootfs.sh`, the Alpine assets are at:
+After running `./build-alpine-rootfs.sh`, the directory structure is:
 
 ```
-~/.deputy/vz/alpine/
-├── vmlinuz                    # Lima Alpine kernel (ARM64 Image format)
-├── initrd.img                 # Alpine initramfs with virtiofs/virtio modules
-├── rootfs.img                 # Alpine rootfs (8GB, includes Go 1.23.5 + Node.js 22)
-└── modloop-virt               # Squashfs of kernel modules (used during build)
+~/.deputy/vz/
+├── vmlinuz -> alpine/vmlinuz       # Symlink for default path discovery
+├── rootfs.img -> alpine/rootfs.img # Symlink for default path discovery
+└── alpine/
+    ├── vmlinuz                     # Lima Alpine kernel (ARM64 Image format)
+    ├── initrd.img                  # Custom initramfs with virtiofs/virtio modules
+    ├── rootfs.img                  # Alpine rootfs (8GB, Go 1.23.5 + Node.js 22)
+    ├── initrd-stock.img            # Original Lima initrd (preserved for debugging)
+    └── modloop-virt                # Squashfs of kernel modules (used during build)
 ```
 
-The environment variables point to these files:
-```bash
-export DEPUTY_VZ_KERNEL=~/.deputy/vz/alpine/vmlinuz
-export DEPUTY_VZ_INITRD=~/.deputy/vz/alpine/initrd.img
-export DEPUTY_VZ_ROOTFS=~/.deputy/vz/alpine/rootfs.img
-```
+The plugin uses default paths via symlinks - no environment variables needed!
 
 ### Using Alpine (Recommended for Workspace Mounting)
 
@@ -841,13 +866,16 @@ Alpine provides virtiofs support for workspace mounting. See [Quick Start with A
 
 **What `build-alpine-rootfs.sh` does:**
 1. Downloads Lima's Alpine ISO (which has a kernel with virtiofs support)
-2. Extracts the kernel, initrd, and module archive
-3. Creates an 8GB ext4 rootfs with Alpine base system
-4. Installs Go 1.23.5 and Node.js 22
-5. Embeds `deputy-init` script for command execution
+2. Extracts the raw ARM64 kernel from EFI stub (VZ requires raw format)
+3. Creates a custom initrd with virtiofs, virtio_blk, ext4 modules
+4. Creates an 8GB ext4 rootfs with Alpine base system
+5. Installs Go 1.23.5 and Node.js 22
+6. Creates symlinks at `~/.deputy/vz/` for default path discovery
+7. Sets proper permissions (`chmod 666` on rootfs.img for VZ)
 
-**Environment setup (required):**
+**Environment setup (optional):**
 ```bash
+# Only needed if you want to override defaults
 export DEPUTY_VZ_KERNEL=~/.deputy/vz/alpine/vmlinuz
 export DEPUTY_VZ_INITRD=~/.deputy/vz/alpine/initrd.img
 export DEPUTY_VZ_ROOTFS=~/.deputy/vz/alpine/rootfs.img
@@ -1477,24 +1505,57 @@ codesign --entitlements entitlements.plist --force --sign - ~/go/bin/deputy-sand
 ### "kernel not found" or "rootfs not found"
 
 ```bash
-# Check if environment variables are set
-echo "DEPUTY_VZ_KERNEL=$DEPUTY_VZ_KERNEL"
-echo "DEPUTY_VZ_ROOTFS=$DEPUTY_VZ_ROOTFS"
-echo "DEPUTY_VZ_INITRD=$DEPUTY_VZ_INITRD"
+# Check the directory structure
+ls -la ~/.deputy/vz/
+# Should show: vmlinuz -> alpine/vmlinuz, rootfs.img -> alpine/rootfs.img
 
 # Check Alpine assets exist
 ls -la ~/.deputy/vz/alpine/
 # Should show: vmlinuz, initrd.img, rootfs.img
 
-# Set environment variables for Alpine (the recommended setup)
-export DEPUTY_VZ_KERNEL=~/.deputy/vz/alpine/vmlinuz
-export DEPUTY_VZ_ROOTFS=~/.deputy/vz/alpine/rootfs.img
-export DEPUTY_VZ_INITRD=~/.deputy/vz/alpine/initrd.img
+# If symlinks are missing, recreate them:
+ln -sf alpine/vmlinuz ~/.deputy/vz/vmlinuz
+ln -sf alpine/rootfs.img ~/.deputy/vz/rootfs.img
 
 # If files don't exist, rebuild the rootfs
 cd examples/sandbox-plugins/vz
 ./build-alpine-rootfs.sh
 ```
+
+### "Permission denied" on rootfs.img
+
+VZ requires read-write access to the rootfs image to attach it as a virtual disk.
+
+```bash
+# Fix permissions
+chmod 666 ~/.deputy/vz/alpine/rootfs.img
+
+# Clear quarantine attributes
+xattr -c ~/.deputy/vz/alpine/rootfs.img
+```
+
+### "zip: not a valid zip file" when running Go
+
+This error occurs when the Go toolchain cache gets corrupted. This typically happens if you're using an older version of the VZ plugin that didn't wait for the VM to shut down gracefully.
+
+```
+go: download go1.25.5: unzip /root/go/pkg/mod/cache/download/golang.org/toolchain/@v/v0.0.1-go1.25.5.linux-arm64.zip: zip: not a valid zip file
+```
+
+**Solution:** Rebuild both the plugin and rootfs to get the latest fixes:
+
+```bash
+# Rebuild the plugin (includes graceful shutdown fix)
+cd examples/sandbox-plugins/vz
+go build -o deputy-sandbox-vz .
+codesign --entitlements entitlements.plist --sign - deputy-sandbox-vz
+cp deputy-sandbox-vz ~/go/bin/
+
+# Rebuild the rootfs (clears corrupt cache)
+./build-alpine-rootfs.sh
+```
+
+The fix ensures the VM waits for `sync; poweroff` to complete before the plugin releases the disk image. This prevents filesystem writes (like Go toolchain downloads) from being truncated.
 
 ### "no space left on device" during go build
 

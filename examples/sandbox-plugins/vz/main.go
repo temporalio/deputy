@@ -335,9 +335,24 @@ func (h *vzHandler) Execute(
 		if result.err != nil && exitCode == 0 {
 			exitCode = 1
 		}
-		// Stop the VM now that command is done
-		if vm.CanStop() {
-			_ = vm.Stop()
+		// Wait for VM to stop gracefully (deputy-init runs sync; poweroff -f)
+		// This ensures filesystem writes are flushed before we return
+		h.logger.Debug("Waiting for VM to stop gracefully", "executionID", executionID)
+		select {
+		case <-waitForVMState(vm):
+			h.logger.Debug("VM stopped gracefully", "executionID", executionID)
+		case <-vmCtx.Done():
+			// Context cancelled (e.g., CTRL+C) - force stop immediately
+			h.logger.Debug("Context cancelled, forcing VM stop", "executionID", executionID)
+			if vm.CanStop() {
+				_ = vm.Stop()
+			}
+		case <-time.After(60 * time.Second):
+			// Timeout waiting for graceful shutdown, force stop
+			h.logger.Debug("VM graceful shutdown timeout, forcing stop", "executionID", executionID)
+			if vm.CanStop() {
+				_ = vm.Stop()
+			}
 		}
 
 	case state := <-waitForVMState(vm):
@@ -731,10 +746,15 @@ func (h *vzHandler) createVMConfig(
 		serialConfig,
 	})
 
-	// Add root disk
-	diskAttachment, err := vz.NewDiskImageStorageDeviceAttachment(
+	// Add root disk with proper caching and synchronization settings
+	// Using DiskImageCachingModeCached + DiskImageSynchronizationModeFsync (like Lima)
+	// ensures that filesystem writes are properly flushed to disk, preventing
+	// corrupt caches (e.g., Go toolchain downloads) when the VM shuts down.
+	diskAttachment, err := vz.NewDiskImageStorageDeviceAttachmentWithCacheAndSync(
 		rootfsPath,
 		config.GetMode() == sandboxv1.Mode_MODE_READ_ONLY, // read-only based on mode
+		vz.DiskImageCachingModeCached,
+		vz.DiskImageSynchronizationModeFsync,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("create disk attachment: %w", err)
