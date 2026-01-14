@@ -13,18 +13,19 @@ A Deputy sandbox runtime plugin using Apple's Virtualization.framework for VM-ba
 
 This plugin provides maximum isolation by running each sandbox execution in a lightweight VM using the [vz](https://github.com/Code-Hex/vz) Go bindings for macOS Virtualization.framework.
 
-**Key Benefits:**
-- Hardware-backed isolation (each execution runs in a separate VM)
-- No container escape vulnerabilities - VMs are a stronger security boundary
-- Native macOS performance on Apple Silicon
-- No root/sudo required
-- **Developer-ready**: Includes Go, Node.js, and build tools for supply chain security workflows
+**Key Features (with Alpine rootfs):**
+- **Network access** - Download dependencies, connect to registries
+- **Workspace mounting** - Access your project files via virtiofs
+- **Developer-ready** - Go 1.23.5 and Node.js 22 pre-installed
+- **Hardware isolation** - Each execution runs in a separate VM
+- **No root/sudo required** - Uses user-space virtualization
 
 **Use Cases:**
-- Run `npm install`, `go get`, `pip install` in isolated VMs
+- Run `go build`, `npm install`, `pip install` in isolated VMs
 - Execute untrusted build scripts safely
 - Test package manager commands without affecting your system
 - AI agent remediation workflows
+- Build Deputy inside Deputy ("inception" testing)
 
 **Requirements:**
 - macOS 11.0+ (Big Sur or later)
@@ -32,7 +33,516 @@ This plugin provides maximum isolation by running each sandbox execution in a li
 - Code signing with virtualization entitlements
 - Docker (for creating rootfs on macOS)
 
+## How It Works
+
+### End-to-End Flow
+
+When you run `deputy exec --runtime plugin --plugin vz ...`, here's what happens:
+
+```mermaid
+sequenceDiagram
+    participant User
+    participant Deputy as deputy CLI
+    participant Plugin as deputy-sandbox-vz
+    participant VZ as Virtualization.framework
+    participant VM as Alpine Linux VM
+    participant FS as Host Filesystem
+
+    User->>Deputy: deputy exec --runtime plugin --plugin vz<br/>--workspace . --network host<br/>-- go build ./...
+
+    Note over Deputy: Parse flags, resolve workspace path
+
+    Deputy->>Plugin: Spawn plugin process<br/>(Unix socket IPC)
+    Plugin->>Plugin: Load kernel, initrd, rootfs<br/>from ~/.deputy/vz/alpine/
+
+    Plugin->>VZ: Create VM configuration<br/>(CPU, memory, devices)
+    VZ->>VZ: Attach virtio devices:<br/>• virtio-blk (rootfs)<br/>• virtio-fs (workspace)<br/>• virtio-net (NAT)<br/>• virtio-console (I/O)
+
+    Plugin->>VZ: Start VM
+    VZ->>VM: Boot Linux kernel
+
+    Note over VM: /deputy-init runs as PID 1
+
+    VM->>VM: Mount filesystems<br/>Load virtio modules<br/>Configure networking<br/>Set up DNS (1.1.1.1)
+    VM->>FS: Mount workspace via virtiofs<br/>/workspace ↔ host directory
+
+    VM->>VM: Decode command from<br/>kernel cmdline (base64)
+    VM->>VM: Execute: go build ./...
+
+    VM-->>Plugin: Stream stdout/stderr<br/>via virtio-console
+    Plugin-->>Deputy: Forward output events
+    Deputy-->>User: Display build output
+
+    VM->>VM: poweroff -f
+    VZ->>Plugin: VM terminated
+    Plugin->>Deputy: Exit code
+    Deputy->>User: Command complete
+```
+
+### Plugin Discovery
+
+Deputy discovers sandbox plugins by searching for executables named `deputy-sandbox-*`:
+
+```mermaid
+flowchart LR
+    subgraph Discovery["Plugin Discovery Order"]
+        direction TB
+        D1["Current directory<br/><code>./deputy-sandbox-vz</code>"]
+        D2["GOPATH/bin<br/><code>$GOPATH/bin/deputy-sandbox-vz</code>"]
+        D3["Go default bin<br/><code>~/go/bin/deputy-sandbox-vz</code>"]
+        D4["PATH directories<br/><code>/usr/local/bin/deputy-sandbox-vz</code>"]
+        D1 --> D2 --> D3 --> D4
+    end
+
+    subgraph Validation["Plugin Validation"]
+        direction TB
+        V1["Executable exists?"]
+        V2["Code signed with<br/>virtualization entitlement?"]
+        V3["Responds to health check?"]
+        V1 --> V2 --> V3
+    end
+
+    Discovery --> Validation
+    Validation -->|Valid| Ready["Plugin Ready"]
+    Validation -->|Invalid| Error["Error: plugin not found"]
+
+    style Ready fill:#c8e6c9,stroke:#2e7d32
+    style Error fill:#ffcdd2,stroke:#c62828
+```
+
+### VM Architecture
+
+The VM uses virtio devices for all host communication:
+
+```mermaid
+flowchart TB
+    subgraph macOS["macOS Host"]
+        direction TB
+        Deputy["deputy CLI"]
+        Plugin["deputy-sandbox-vz<br/><i>Go process</i>"]
+        VZF["Virtualization.framework<br/><i>Apple Hypervisor</i>"]
+
+        subgraph HostFS["Host Filesystem"]
+            Workspace["Project Directory<br/><code>/Users/you/project</code>"]
+            Rootfs["rootfs.img<br/><code>~/.deputy/vz/alpine/</code>"]
+            Kernel["vmlinuz + initrd.img"]
+        end
+
+        subgraph Network["macOS Network Stack"]
+            vmnet["vmnet NAT<br/><code>192.168.64.0/24</code>"]
+            Internet["Internet<br/><i>proxy.golang.org, etc.</i>"]
+        end
+    end
+
+    subgraph VM["Alpine Linux VM"]
+        direction TB
+        Init["<b>/deputy-init</b><br/><i>PID 1</i>"]
+
+        subgraph Devices["virtio Devices"]
+            VBlk["virtio-blk<br/><code>/dev/vda</code> → rootfs"]
+            VFS["virtio-fs<br/><code>/workspace</code> → host dir"]
+            VNet["virtio-net<br/><code>eth0</code> → NAT"]
+            VCon["virtio-console<br/><code>/dev/hvc0</code> → I/O"]
+        end
+
+        subgraph Runtime["Runtime Environment"]
+            Go["Go 1.23.5<br/><code>/usr/local/go/bin/go</code>"]
+            Node["Node.js 22<br/><code>/usr/local/bin/node</code>"]
+            Tools["Build tools<br/><i>git, gcc, make</i>"]
+        end
+
+        subgraph Caches["Go Build Caches<br/><i>on 8GB rootfs</i>"]
+            GC["GOCACHE<br/><code>/root/.cache/go-build</code>"]
+            GMC["GOMODCACHE<br/><code>/root/go/pkg/mod</code>"]
+            GTD["GOTMPDIR<br/><code>/root/tmp</code>"]
+        end
+    end
+
+    Deputy -->|"Unix socket<br/>ConnectRPC"| Plugin
+    Plugin -->|"VM lifecycle"| VZF
+    VZF -->|"Hypervisor"| VM
+
+    Kernel -->|"Boot"| Init
+    Rootfs -->|"virtio-blk"| VBlk
+    Workspace <-->|"virtio-fs<br/><i>shared filesystem</i>"| VFS
+    vmnet <-->|"virtio-net<br/><i>DHCP + NAT</i>"| VNet
+    Plugin <-->|"virtio-console<br/><i>stdin/stdout</i>"| VCon
+    vmnet --> Internet
+
+    Init --> Devices
+    Init --> Runtime
+    Runtime --> Caches
+
+    style Deputy fill:#e3f2fd,stroke:#1565c0
+    style Plugin fill:#e3f2fd,stroke:#1565c0
+    style VM fill:#e8f5e9,stroke:#2e7d32
+    style Init fill:#fff3e0,stroke:#e65100
+```
+
+### Boot Sequence
+
+What happens inside the VM from power-on to command execution:
+
+```mermaid
+flowchart TB
+    subgraph Boot["VM Boot Sequence (~1.5s)"]
+        direction TB
+        B1["Kernel loads<br/><code>vmlinuz</code> (Lima 6.18.2-0-virt)"]
+        B2["initrd unpacks<br/>Load virtio modules"]
+        B3["Mount rootfs<br/><code>/dev/vda</code> → <code>/</code>"]
+        B4["switch_root<br/>Execute <code>/deputy-init</code>"]
+    end
+
+    subgraph Init["deputy-init (PID 1)"]
+        direction TB
+        I1["Mount /proc, /sys, /dev, /tmp"]
+        I2["Load kernel modules<br/><code>modprobe virtio_net virtiofs</code>"]
+        I3["Configure networking<br/>DHCP on eth0"]
+        I4["Set DNS servers<br/><code>1.1.1.1, 8.8.8.8</code>"]
+        I5["Mount workspace<br/><code>mount -t virtiofs workspace /workspace</code>"]
+        I6["Set Go environment<br/>GOCACHE, GOMODCACHE, GOTMPDIR"]
+        I7["Decode command<br/>from kernel cmdline"]
+        I8["Execute command<br/><code>eval \$CMD</code>"]
+        I9["Report exit code<br/><code><<<DEPUTY_EXIT_CODE:N>>></code>"]
+        I10["Shutdown<br/><code>poweroff -f</code>"]
+    end
+
+    Boot --> Init
+    B1 --> B2 --> B3 --> B4
+    I1 --> I2 --> I3 --> I4 --> I5 --> I6 --> I7 --> I8 --> I9 --> I10
+
+    style Boot fill:#e3f2fd,stroke:#1565c0
+    style Init fill:#fff3e0,stroke:#e65100
+```
+
+### Network Architecture
+
+How the VM connects to the internet for downloading dependencies:
+
+```mermaid
+flowchart LR
+    subgraph VM["Alpine VM"]
+        App["go build<br/><i>needs proxy.golang.org</i>"]
+        DNS["DNS Query<br/><code>1.1.1.1</code>"]
+        eth0["eth0<br/><code>192.168.64.x</code>"]
+    end
+
+    subgraph macOS["macOS Host"]
+        vmnet["vmnet NAT Gateway<br/><code>192.168.64.1</code>"]
+        DHCP["DHCP Server<br/><i>assigns 192.168.64.x</i>"]
+        NAT["NAT<br/><i>outbound only</i>"]
+    end
+
+    subgraph Internet["Internet"]
+        CF["Cloudflare DNS<br/><code>1.1.1.1</code>"]
+        GoProxy["proxy.golang.org<br/><i>Go modules</i>"]
+        NPM["registry.npmjs.org<br/><i>npm packages</i>"]
+    end
+
+    App -->|"DNS lookup"| DNS
+    DNS -->|"UDP/53"| eth0
+    eth0 <-->|"DHCP"| DHCP
+    DHCP --> vmnet
+    eth0 -->|"Traffic"| vmnet
+    vmnet -->|"NAT"| NAT
+    NAT --> CF
+    NAT --> GoProxy
+    NAT --> NPM
+
+    CF -.->|"Response"| DNS
+    GoProxy -.->|"Modules"| App
+    NPM -.->|"Packages"| App
+
+    note1["vmnet gateway does NOT<br/>forward DNS queries!<br/>Must use public DNS."]
+    vmnet -.-> note1
+
+    style note1 fill:#fff3e0,stroke:#e65100
+    style VM fill:#e8f5e9,stroke:#2e7d32
+```
+
+### Workspace Mounting (virtiofs)
+
+How your project directory is shared between host and VM:
+
+```mermaid
+flowchart TB
+    subgraph Host["macOS Host"]
+        direction TB
+        Project["Your Project<br/><code>/Users/you/myapp/</code>"]
+
+        subgraph Files["Project Files"]
+            GoMod["go.mod"]
+            GoSum["go.sum"]
+            Src["*.go files"]
+            Built["<b>myapp</b><br/><i>built binary</i>"]
+        end
+
+        Project --> Files
+    end
+
+    subgraph VZConfig["VZ Configuration"]
+        VFSShare["VirtioFileSystemDeviceConfiguration<br/><code>tag: 'workspace'</code>"]
+        VFSShare -->|"share directory"| Project
+    end
+
+    subgraph VM["Alpine VM"]
+        direction TB
+        Mount["<code>mount -t virtiofs workspace /workspace</code>"]
+
+        subgraph VMFiles["VM View: /workspace/"]
+            VMGoMod["go.mod"]
+            VMGoSum["go.sum"]
+            VMSrc["*.go files"]
+            VMBuilt["<b>myapp</b><br/><i>written by go build</i>"]
+        end
+
+        GoBuild["<code>go build -o /workspace/myapp .</code>"]
+    end
+
+    VFSShare -->|"virtio-fs"| Mount
+    Mount --> VMFiles
+    GoBuild -->|"writes"| VMBuilt
+    VMBuilt <-->|"<b>instant sync</b><br/><i>shared memory</i>"| Built
+
+    note1["With <code>--mode full-access</code>,<br/>writes in VM appear<br/>immediately on host"]
+    VMBuilt -.-> note1
+
+    style Built fill:#c8e6c9,stroke:#2e7d32
+    style VMBuilt fill:#c8e6c9,stroke:#2e7d32
+    style note1 fill:#e3f2fd,stroke:#1565c0
+```
+
+### Security Boundary
+
+How VZ provides stronger isolation than containers:
+
+```mermaid
+flowchart TB
+    subgraph Container["Container (Docker/Podman)"]
+        direction TB
+        CP["Container Process"]
+        CK["Shared Host Kernel"]
+        CN["Linux Namespaces<br/><i>pid, net, mnt, user</i>"]
+        CC["cgroups<br/><i>resource limits</i>"]
+
+        CP --> CN --> CK
+        CP --> CC --> CK
+    end
+
+    subgraph VM["VZ Virtual Machine"]
+        direction TB
+        VP["VM Process"]
+        VK["<b>Separate Linux Kernel</b><br/><i>6.18.2-0-virt</i>"]
+        VH["Apple Hypervisor.framework<br/><i>hardware isolation</i>"]
+        MK["macOS Kernel"]
+
+        VP --> VK --> VH --> MK
+    end
+
+    subgraph Comparison["Escape Complexity"]
+        direction LR
+        CE["Container Escape:<br/>Kernel exploit<br/>→ Host access"]
+        VE["VM Escape:<br/>Guest kernel exploit<br/>→ Hypervisor exploit<br/>→ Host kernel exploit<br/>→ Host access"]
+    end
+
+    style CK fill:#ffcdd2,stroke:#c62828
+    style VK fill:#c8e6c9,stroke:#2e7d32
+    style VH fill:#c8e6c9,stroke:#2e7d32
+    style CE fill:#ffcdd2,stroke:#c62828
+    style VE fill:#c8e6c9,stroke:#2e7d32
+```
+
+### Asset Files
+
+The files created by `build-alpine-rootfs.sh` and how they're used:
+
+```mermaid
+flowchart TB
+    subgraph Build["build-alpine-rootfs.sh"]
+        direction TB
+        ISO["Lima Alpine ISO<br/><i>downloaded once</i>"]
+        Extract["Extract kernel,<br/>initrd, modloop"]
+        Docker["Docker creates<br/>ext4 rootfs"]
+    end
+
+    subgraph Assets["~/.deputy/vz/alpine/"]
+        direction TB
+        Kernel["<b>vmlinuz</b><br/>34MB Linux kernel<br/><i>ARM64 Image format</i>"]
+        Initrd["<b>initrd.img</b><br/>Initramfs<br/><i>loads virtio modules</i>"]
+        Rootfs["<b>rootfs.img</b><br/>8GB ext4 filesystem<br/><i>Alpine + Go + Node.js</i>"]
+        Modloop["modloop-virt<br/>squashfs modules<br/><i>extracted into rootfs</i>"]
+    end
+
+    subgraph EnvVars["Environment Variables"]
+        E1["DEPUTY_VZ_KERNEL"]
+        E2["DEPUTY_VZ_INITRD"]
+        E3["DEPUTY_VZ_ROOTFS"]
+    end
+
+    subgraph Plugin["deputy-sandbox-vz"]
+        Load["Load assets"]
+        VMCreate["Create VM"]
+    end
+
+    ISO --> Extract --> Docker
+    Extract --> Kernel
+    Extract --> Initrd
+    Extract --> Modloop
+    Docker --> Rootfs
+
+    E1 --> Kernel
+    E2 --> Initrd
+    E3 --> Rootfs
+
+    Kernel --> Load
+    Initrd --> Load
+    Rootfs --> Load
+    Load --> VMCreate
+
+    style Kernel fill:#e3f2fd,stroke:#1565c0
+    style Initrd fill:#e3f2fd,stroke:#1565c0
+    style Rootfs fill:#e3f2fd,stroke:#1565c0
+```
+
+### Why Alpine Over Ubuntu?
+
+```mermaid
+flowchart TB
+    subgraph Ubuntu["Ubuntu 24.04 Cloud Kernel"]
+        direction TB
+        UK["vmlinuz-generic<br/>56MB"]
+        UV["virtio_blk: <b>built-in</b> ✓"]
+        UVF["virtiofs: <b>NOT INCLUDED</b> ✗"]
+        UW["Workspace mounting: <b>NO</b>"]
+        UB["Boot time: ~70ms"]
+    end
+
+    subgraph Alpine["Lima Alpine Kernel"]
+        direction TB
+        AK["vmlinuz-virt<br/>34MB"]
+        AV["virtio_blk: module ✓"]
+        AVF["virtiofs: <b>module</b> ✓"]
+        AW["Workspace mounting: <b>YES</b>"]
+        AB["Boot time: ~1.5s"]
+        AI["Requires initrd to<br/>load modules"]
+    end
+
+    subgraph UseCase["Choose Based on Use Case"]
+        direction LR
+        UC1["Need workspace access?<br/>→ <b>Alpine</b>"]
+        UC2["Just running commands<br/>in isolation?<br/>→ Ubuntu is fine"]
+    end
+
+    Ubuntu --> UseCase
+    Alpine --> UseCase
+
+    style UVF fill:#ffcdd2,stroke:#c62828
+    style UW fill:#ffcdd2,stroke:#c62828
+    style AVF fill:#c8e6c9,stroke:#2e7d32
+    style AW fill:#c8e6c9,stroke:#2e7d32
+    style UC1 fill:#c8e6c9,stroke:#2e7d32
+```
+
+## Quick Start with Alpine (Recommended)
+
+This is the recommended setup for supply chain security workflows. It provides:
+- **Network access** for downloading dependencies (`go build`, `npm install`)
+- **Workspace mounting** via virtiofs (access your project files in the VM)
+- **Go 1.23.5 and Node.js 22** pre-installed
+- **8GB rootfs** with room for toolchain caches and builds
+
+### Complete Setup (5 Steps)
+
+```bash
+# Step 1: Build and install the VZ plugin
+cd examples/sandbox-plugins/vz
+go build -o deputy-sandbox-vz .
+codesign --entitlements entitlements.plist --sign - deputy-sandbox-vz
+mkdir -p ~/go/bin && cp deputy-sandbox-vz ~/go/bin/
+
+# Step 2: Build the Alpine rootfs (requires Docker, takes ~2-3 minutes)
+./build-alpine-rootfs.sh
+
+# Step 3: Set environment variables (add to ~/.zshrc for persistence)
+export DEPUTY_VZ_KERNEL=~/.deputy/vz/alpine/vmlinuz
+export DEPUTY_VZ_ROOTFS=~/.deputy/vz/alpine/rootfs.img
+export DEPUTY_VZ_INITRD=~/.deputy/vz/alpine/initrd.img
+
+# Step 4: Verify setup
+deputy exec --runtime plugin --plugin vz -- uname -a
+# Expected: Linux (none) 6.18.2-0-virt #1-Alpine SMP ... aarch64 Linux
+
+deputy exec --runtime plugin --plugin vz -- go version
+# Expected: go version go1.23.5 linux/arm64
+
+# Step 5: Test workspace mounting and network
+deputy exec --runtime plugin --plugin vz --workspace . -- ls /workspace
+deputy exec --runtime plugin --plugin vz --network host -- curl -sS https://proxy.golang.org
+```
+
+### Building Go Projects
+
+```bash
+# Build your Go project in an isolated VM with network access
+deputy exec --runtime plugin --plugin vz \
+    --workspace . \
+    --network host \
+    --cpu 4 \
+    --memory 4g \
+    -- go build ./...
+
+# Build and output binary to host filesystem
+deputy exec --runtime plugin --plugin vz \
+    --workspace . \
+    --network host \
+    --cpu 4 \
+    --memory 4g \
+    --mode full-access \
+    -- go build -o /workspace/myapp .
+
+# Verify the binary (Linux ELF format, not macOS Mach-O)
+file myapp
+# myapp: ELF 64-bit LSB executable, ARM aarch64, ...
+```
+
+### Deputy-with-Deputy (Inception)
+
+Build and test Deputy itself inside a VM sandbox:
+
+```bash
+# From the deputy repository root
+cd /path/to/deputy
+
+# Build deputy inside the VM
+deputy exec --runtime plugin --plugin vz \
+    --workspace . \
+    --network host \
+    --cpu 4 \
+    --memory 4g \
+    --mode full-access \
+    -- go build -o /workspace/deputy-vm .
+
+# Run deputy inside deputy!
+deputy exec --runtime plugin --plugin vz \
+    --workspace . \
+    --network host \
+    -- ./deputy-vm scan .
+
+# Run tests in the VM
+deputy exec --runtime plugin --plugin vz \
+    --workspace . \
+    --network host \
+    --cpu 4 \
+    --memory 4g \
+    -- go test ./...
+```
+
+---
+
 ## Quick Start (Ubuntu 24.04 LTS)
+
+> **Note:** Ubuntu is simpler to set up but does NOT support workspace mounting (no virtiofs).
+> Use Alpine (above) if you need to access host files in the VM.
 
 This section provides exact commands to get a working VM sandbox using Ubuntu 24.04 LTS (Noble Numbat).
 
@@ -267,109 +777,93 @@ kill $VZ_PID
 | Variable | Description | Default |
 |----------|-------------|---------|
 | `DEPUTY_VZ_KERNEL` | Path to Linux kernel (vmlinuz) | `~/.deputy/vz/vmlinuz` |
-| `DEPUTY_VZ_INITRD` | Path to initrd (optional) | `~/.deputy/vz/alpine/initrd.img` (if exists) |
+| `DEPUTY_VZ_INITRD` | Path to initrd (required for Alpine) | `~/.deputy/vz/alpine/initrd.img` |
 | `DEPUTY_VZ_ROOTFS` | Path to root filesystem image | `~/.deputy/vz/rootfs.img` |
 
-Override the defaults for custom setups:
+### Setting Up Environment for Alpine (Recommended)
+
+After building the Alpine rootfs with `./build-alpine-rootfs.sh`, set these environment variables:
 
 ```bash
-export DEPUTY_VZ_KERNEL=/path/to/custom/vmlinuz
-export DEPUTY_VZ_ROOTFS=/path/to/custom/rootfs.img
-deputy exec --runtime plugin --plugin vz -- ls -la
+# Add to your ~/.zshrc or ~/.bashrc for persistence
+export DEPUTY_VZ_KERNEL=~/.deputy/vz/alpine/vmlinuz
+export DEPUTY_VZ_ROOTFS=~/.deputy/vz/alpine/rootfs.img
+export DEPUTY_VZ_INITRD=~/.deputy/vz/alpine/initrd.img
+```
+
+Then reload your shell or run `source ~/.zshrc`.
+
+### Verifying Your Environment
+
+```bash
+# Check environment variables are set
+echo "DEPUTY_VZ_KERNEL: $DEPUTY_VZ_KERNEL"
+echo "DEPUTY_VZ_ROOTFS: $DEPUTY_VZ_ROOTFS"
+echo "DEPUTY_VZ_INITRD: $DEPUTY_VZ_INITRD"
+
+# Verify files exist
+ls -la $DEPUTY_VZ_KERNEL $DEPUTY_VZ_ROOTFS $DEPUTY_VZ_INITRD
 ```
 
 ## Dual-OS Setup (Ubuntu + Alpine)
 
 The VZ plugin supports two Linux distributions:
 
-| Distribution | Location | Kernel | virtiofs | Workspace | Status |
-|--------------|----------|--------|----------|-----------|--------|
-| **Ubuntu 24.04** | `~/.deputy/vz/ubuntu/` | 56MB (cloud) | No* | No | **Default** - fast boot, no host dirs |
-| **Alpine 3.23** | `~/.deputy/vz/alpine/` | 34MB (Lima) | Yes | **Yes** | **Working** - virtiofs workspace |
+| Distribution | Location | Kernel | virtiofs | Workspace | Network | Status |
+|--------------|----------|--------|----------|-----------|---------|--------|
+| **Alpine 3.23** | `~/.deputy/vz/alpine/` | 34MB (Lima) | Yes | **Yes** | **Yes** | **Recommended** - full features |
+| **Ubuntu 24.04** | `~/.deputy/vz/ubuntu/` | 56MB (cloud) | No* | No | Yes | Fast boot, no workspace |
 
 *Ubuntu's cloud kernel lacks `CONFIG_VIRTIO_FS`. Alpine's Lima kernel has virtiofs as a module.
 
 ### Directory Structure
 
+After running `./build-alpine-rootfs.sh`, the Alpine assets are at:
+
 ```
-~/.deputy/vz/
-├── vmlinuz -> ubuntu/vmlinuz      # Default kernel (symlink)
-├── rootfs.img -> ubuntu/rootfs.img # Default rootfs (symlink)
-├── ubuntu/
-│   ├── vmlinuz                    # Ubuntu cloud kernel
-│   └── rootfs.img                 # Ubuntu rootfs (2GB)
-└── alpine/
-    ├── vmlinuz                    # Lima Alpine kernel (EFI stub)
-    ├── vmlinuz-extracted          # Raw ARM64 kernel (for VZ)
-    ├── initrd.img                 # Alpine initramfs
-    └── rootfs.img                 # Alpine rootfs (1GB)
+~/.deputy/vz/alpine/
+├── vmlinuz                    # Lima Alpine kernel (ARM64 Image format)
+├── initrd.img                 # Alpine initramfs with virtiofs/virtio modules
+├── rootfs.img                 # Alpine rootfs (8GB, includes Go 1.23.5 + Node.js 22)
+└── modloop-virt               # Squashfs of kernel modules (used during build)
+```
+
+The environment variables point to these files:
+```bash
+export DEPUTY_VZ_KERNEL=~/.deputy/vz/alpine/vmlinuz
+export DEPUTY_VZ_INITRD=~/.deputy/vz/alpine/initrd.img
+export DEPUTY_VZ_ROOTFS=~/.deputy/vz/alpine/rootfs.img
 ```
 
 ### Using Alpine (Recommended for Workspace Mounting)
 
-Alpine provides a smaller rootfs with virtiofs support for workspace mounting. This is the recommended setup for supply chain security workflows.
+Alpine provides virtiofs support for workspace mounting. See [Quick Start with Alpine](#quick-start-with-alpine-recommended) for the complete setup.
 
-**Quick Setup:**
+**What `build-alpine-rootfs.sh` does:**
+1. Downloads Lima's Alpine ISO (which has a kernel with virtiofs support)
+2. Extracts the kernel, initrd, and module archive
+3. Creates an 8GB ext4 rootfs with Alpine base system
+4. Installs Go 1.23.5 and Node.js 22
+5. Embeds `deputy-init` script for command execution
 
+**Environment setup (required):**
 ```bash
-# 1. Build Alpine rootfs and extract kernel
-cd examples/sandbox-plugins/vz
-./build-alpine-rootfs.sh
-
-# 2. Extract raw kernel from EFI stub format
-cd ~/.deputy/vz/alpine
-OFFSET=$(xxd vmlinuz | grep "1f8b 08" | head -1 | cut -d: -f1)
-dd if=vmlinuz bs=1 skip=$((16#${OFFSET})) | gunzip > vmlinuz-extracted
-
-# 3. Create custom initrd with virtiofs support (see "Creating the Alpine Initrd" below)
-
-# 4. Install Go toolchain (requires Docker)
-docker run --rm --privileged -v ~/.deputy/vz/alpine:/alpine alpine:3.19 sh -c "
-  mkdir -p /mnt/rootfs && mount -o loop /alpine/rootfs.img /mnt/rootfs
-  apk --root /mnt/rootfs --initdb add go git
-  umount /mnt/rootfs
-"
-
-# 5. Set environment variables
-export DEPUTY_VZ_KERNEL=~/.deputy/vz/alpine/vmlinuz-extracted
+export DEPUTY_VZ_KERNEL=~/.deputy/vz/alpine/vmlinuz
+export DEPUTY_VZ_INITRD=~/.deputy/vz/alpine/initrd.img
 export DEPUTY_VZ_ROOTFS=~/.deputy/vz/alpine/rootfs.img
-export DEPUTY_VZ_INITRD=~/.deputy/vz/alpine/initrd-virtiofs.img
 ```
-
-**Verify Setup:**
-
-```bash
-# Test without workspace (basic VM boot)
-deputy exec --runtime plugin --plugin vz --no-workspace -- uname -a
-# Output: Linux localhost 6.18.2-0-virt #1-Alpine SMP ... aarch64 Linux
-
-# Test Go installation
-deputy exec --runtime plugin --plugin vz --no-workspace -- go version
-# Output: go version go1.25.5 linux/arm64
-
-# Test virtiofs workspace mounting
-deputy exec --runtime plugin --plugin vz --workspace . -- ls -la /workspace
-deputy exec --runtime plugin --plugin vz --workspace . -- cat /workspace/go.mod
-
-# Test Go with workspace (supply chain workflow)
-deputy exec --runtime plugin --plugin vz --workspace . -- \
-    sh -c "cd /workspace && go list -m"
-# Output: github.com/picatz/deputy
-```
-
-**Note:** Alpine requires a custom initrd (`initrd-virtiofs.img`) that loads the virtiofs kernel module before mounting root. See [Creating the Alpine Initrd](#creating-the-alpine-initrd) for the init script.
 
 ### Switching Between Ubuntu and Alpine
 
 ```bash
-# Use Ubuntu (default - fast boot, no workspace mounting)
+# Use Ubuntu (fast boot, no workspace mounting)
 unset DEPUTY_VZ_KERNEL DEPUTY_VZ_ROOTFS DEPUTY_VZ_INITRD
 deputy exec --runtime plugin --plugin vz --no-workspace -- uname -a
 
-# Use Alpine (virtiofs workspace mounting)
-export DEPUTY_VZ_KERNEL=~/.deputy/vz/alpine/vmlinuz-extracted
+# Use Alpine (virtiofs workspace mounting, network access)
+export DEPUTY_VZ_KERNEL=~/.deputy/vz/alpine/vmlinuz
 export DEPUTY_VZ_ROOTFS=~/.deputy/vz/alpine/rootfs.img
-export DEPUTY_VZ_INITRD=~/.deputy/vz/alpine/initrd-virtiofs.img
+export DEPUTY_VZ_INITRD=~/.deputy/vz/alpine/initrd.img
 deputy exec --runtime plugin --plugin vz --workspace . -- ls /workspace
 ```
 
@@ -471,6 +965,60 @@ deputy exec --runtime plugin --plugin vz \
 ```
 
 ## Custom Rootfs Builds
+
+### Customization Points
+
+You can customize the VZ sandbox at several levels:
+
+```mermaid
+flowchart TB
+    subgraph Level1["Level 1: Runtime Flags"]
+        direction LR
+        F1["<code>--cpu 4</code><br/>CPU cores"]
+        F2["<code>--memory 4g</code><br/>RAM allocation"]
+        F3["<code>--network host</code><br/>Network access"]
+        F4["<code>--mode full-access</code><br/>Write to workspace"]
+    end
+
+    subgraph Level2["Level 2: Build Script Options"]
+        direction LR
+        B1["<code>--go-version 1.23</code><br/>Go version"]
+        B2["<code>--size 16384</code><br/>Rootfs size (MB)"]
+        B3["<code>--minimal</code><br/>No dev tools"]
+    end
+
+    subgraph Level3["Level 3: Add Packages"]
+        direction TB
+        P1["Docker + mount rootfs.img"]
+        P2["<code>apk add python3 rust cargo</code>"]
+        P3["Install custom tools"]
+    end
+
+    subgraph Level4["Level 4: Custom Init Script"]
+        direction TB
+        I1["Modify deputy-init in<br/>build-alpine-rootfs.sh"]
+        I2["Add environment variables"]
+        I3["Change boot behavior"]
+    end
+
+    subgraph Level5["Level 5: Custom Kernel"]
+        direction TB
+        K1["Build Linux kernel with<br/>custom CONFIG options"]
+        K2["Add kernel modules"]
+        K3["Enable features like<br/>netfilter for nftables"]
+    end
+
+    Level1 -->|"Easiest"| Level2
+    Level2 --> Level3
+    Level3 --> Level4
+    Level4 -->|"Most Complex"| Level5
+
+    style Level1 fill:#c8e6c9,stroke:#2e7d32
+    style Level2 fill:#e8f5e9,stroke:#2e7d32
+    style Level3 fill:#fff3e0,stroke:#e65100
+    style Level4 fill:#ffecb3,stroke:#ff8f00
+    style Level5 fill:#ffcdd2,stroke:#c62828
+```
 
 The `build-rootfs.sh` script creates customized rootfs images:
 
@@ -722,105 +1270,32 @@ Workspace mounting (`--workspace`) allows sharing a host directory with the VM v
 - **Working**: virtiofs workspace mounting tested and functional
 - Boot time: ~1.5s (includes module loading)
 
-### Creating the Alpine Initrd
+### Creating the Alpine Initrd (Advanced)
 
-The Alpine kernel requires a custom initrd that loads virtiofs, ext4, and virtio_blk modules before mounting root:
+> **Note:** The `build-alpine-rootfs.sh` script handles initrd creation automatically.
+> This section is for reference only if you need to customize the boot process.
 
-```bash
-# Extract the original Lima Alpine initrd
-cd ~/.deputy/vz/alpine
-mkdir -p /tmp/initrd-work && cd /tmp/initrd-work
-gunzip -c ~/.deputy/vz/alpine/initrd.img | cpio -idm
+The Lima Alpine kernel uses modular drivers, so an initrd is needed to load virtiofs, ext4, and virtio_blk modules before mounting root. The `build-alpine-rootfs.sh` script extracts the initrd from Lima's Alpine ISO which already has these modules.
 
-# Create the init script
-cat > init << 'INITSCRIPT'
-#!/bin/sh
-export PATH=/usr/bin:/bin:/usr/sbin:/sbin
+### Installing Additional Packages in the Alpine Rootfs
 
-# Mount essentials
-/usr/bin/busybox mount -t proc proc /proc
-/usr/bin/busybox mount -t sysfs sys /sys
-/usr/bin/busybox mount -t devtmpfs dev /dev
-exec > /dev/hvc0 2>&1
-
-echo "=== DEPUTY INITRD ==="
-
-# Load required modules
-echo "Loading kernel modules..."
-/usr/sbin/modprobe mbcache 2>&1 || true
-/usr/sbin/modprobe jbd2 2>&1 || true
-/usr/sbin/modprobe ext4 2>&1 || echo "ext4 modprobe result: $?"
-/usr/sbin/modprobe virtio_blk 2>&1 || true
-
-# Load virtiofs module
-echo "Loading virtiofs..."
-/usr/sbin/modprobe fuse 2>&1 || true
-/usr/sbin/modprobe virtiofs 2>&1 || echo "virtiofs modprobe result: $?"
-
-# Wait for device
-/usr/bin/busybox sleep 1
-echo "Block devices:"
-/usr/bin/busybox ls -la /dev/vd* 2>&1 || echo "No /dev/vd*"
-
-# Mount root filesystem
-echo "Mounting /dev/vda..."
-/usr/bin/busybox mkdir -p /mnt
-/usr/bin/busybox mount -t ext4 /dev/vda /mnt 2>&1 || { echo "mount failed"; exec /usr/bin/busybox sh; }
-
-# Mount virtiofs workspace if available
-echo "Checking for virtiofs workspace..."
-/usr/bin/busybox mkdir -p /mnt/workspace
-if /usr/bin/busybox mount -t virtiofs workspace /mnt/workspace 2>&1; then
-    echo "Workspace mounted at /mnt/workspace"
-    /usr/bin/busybox ls -la /mnt/workspace 2>&1 | /usr/bin/busybox head -5
-else
-    echo "No workspace to mount (normal if --no-workspace)"
-fi
-
-# Switch root
-echo "Switching root..."
-exec /usr/bin/busybox switch_root /mnt /deputy-init
-INITSCRIPT
-chmod +x init
-
-# Repack the initrd
-find . | cpio -o -H newc 2>/dev/null | gzip > ~/.deputy/vz/alpine/initrd-virtiofs.img
-echo "Created initrd-virtiofs.img"
-```
-
-### Installing Go in the Alpine Rootfs
-
-The Alpine rootfs can be extended with the Go toolchain for supply chain security workflows. Use Docker to mount and modify the ext4 image:
+The `build-alpine-rootfs.sh` script already installs Go 1.23.5 and Node.js 22. To add more packages, use Docker to mount and modify the ext4 image:
 
 ```bash
-# Install Go into the Alpine rootfs using Docker
-docker run --rm --privileged -v ~/.deputy/vz/alpine:/alpine alpine:3.19 sh -c "
+# Add Python to the Alpine rootfs
+docker run --rm --privileged -v ~/.deputy/vz/alpine:/alpine alpine:3.23 sh -c "
   mkdir -p /mnt/rootfs
   mount -o loop /alpine/rootfs.img /mnt/rootfs
-  apk --root /mnt/rootfs --initdb add go git
+  apk --root /mnt/rootfs add python3 py3-pip
   umount /mnt/rootfs
 "
 
-# Verify Go is installed
-deputy exec --runtime plugin --plugin vz --no-workspace -- go version
-# Output: go version go1.25.5 linux/arm64
-```
-
-Other useful packages to install:
-
-```bash
-# Node.js and npm for JavaScript/TypeScript projects
-docker run --rm --privileged -v ~/.deputy/vz/alpine:/alpine alpine:3.19 sh -c "
-  mount -o loop /alpine/rootfs.img /mnt && mkdir -p /mnt
-  apk --root /mnt --initdb add nodejs npm
-  umount /mnt
-"
-
-# Python for Python projects
-docker run --rm --privileged -v ~/.deputy/vz/alpine:/alpine alpine:3.19 sh -c "
-  mount -o loop /alpine/rootfs.img /mnt && mkdir -p /mnt
-  apk --root /mnt --initdb add python3 py3-pip
-  umount /mnt
+# Add Rust toolchain
+docker run --rm --privileged -v ~/.deputy/vz/alpine:/alpine alpine:3.23 sh -c "
+  mkdir -p /mnt/rootfs
+  mount -o loop /alpine/rootfs.img /mnt/rootfs
+  apk --root /mnt/rootfs add rust cargo
+  umount /mnt/rootfs
 "
 ```
 
@@ -837,32 +1312,89 @@ $ deputy exec --runtime plugin --plugin vz --workspace . -- uname -a
 Linux (none) 6.18.2-0-virt #1-Alpine SMP PREEMPT_DYNAMIC 2025-12-29 10:24:58 aarch64 Linux
 ```
 
+#### Building Go Projects with Network Access
+
+For large projects that need to download dependencies, use `--network host` and increase resources:
+
 ```bash
-# Set up Alpine environment
-export DEPUTY_VZ_KERNEL=~/.deputy/vz/alpine/vmlinuz-extracted
-export DEPUTY_VZ_ROOTFS=~/.deputy/vz/alpine/rootfs.img
-export DEPUTY_VZ_INITRD=~/.deputy/vz/alpine/initrd-virtiofs.img
+# Build a Go project with network access (downloads dependencies)
+# Uses 4 CPUs and 4GB RAM for faster compilation
+deputy exec --runtime plugin --plugin vz \
+    --workspace . \
+    --network host \
+    --dangerously-skip-prompt \
+    --cpu 4 \
+    --memory 4g \
+    -- go build ./...
 
-# List module dependencies from your Go project
-deputy exec --runtime plugin --plugin vz --workspace . -- \
-    sh -c "cd /workspace && go list -m all"
+# Build and output binary to host filesystem (writable workspace)
+deputy exec --runtime plugin --plugin vz \
+    --workspace . \
+    --network host \
+    --dangerously-skip-prompt \
+    --cpu 4 \
+    --memory 4g \
+    --mode full-access \
+    -- go build -o /workspace/myapp .
 
-# Build a Go project in isolation
-deputy exec --runtime plugin --plugin vz --workspace . -- \
-    sh -c "cd /workspace && go build -o /tmp/app ./cmd/myapp"
-
-# Run go mod tidy in isolation (read-write workspace)
-deputy exec --runtime plugin --plugin vz --workspace . --dangerously-skip-prompt -- \
-    sh -c "cd /workspace && go mod tidy"
-
-# Verify checksums
-deputy exec --runtime plugin --plugin vz --workspace . -- \
-    sh -c "cd /workspace && go mod verify"
-
-# Download dependencies without executing code
-deputy exec --runtime plugin --plugin vz --workspace . -- \
-    sh -c "cd /workspace && go mod download"
+# Verify the binary was created (Linux ELF, not macOS Mach-O)
+$ file myapp
+myapp: ELF 64-bit LSB executable, ARM aarch64, version 1 (SYSV), dynamically linked, interpreter /lib/ld-musl-aarch64.so.1, ...
 ```
+
+**Resource recommendations:**
+- `--cpu 4 --memory 4g` - Good for most Go projects
+- `--cpu 8 --memory 8g` - Large projects with many dependencies
+- Default (1 CPU, 512MB) - Only suitable for simple commands, not compilation
+
+**Network modes:**
+- `--network host` - Full network access (required for `go build` to download dependencies)
+- `--network none` (default) - No network, most isolated
+
+#### Other Go Operations
+
+```bash
+# List module dependencies
+deputy exec --runtime plugin --plugin vz --workspace . -- \
+    go list -m all
+
+# Run go mod tidy (read-write workspace)
+deputy exec --runtime plugin --plugin vz \
+    --workspace . \
+    --network host \
+    --dangerously-skip-prompt \
+    --mode full-access \
+    -- go mod tidy
+
+# Verify checksums (no network needed)
+deputy exec --runtime plugin --plugin vz --workspace . -- \
+    go mod verify
+
+# Download dependencies without building
+deputy exec --runtime plugin --plugin vz \
+    --workspace . \
+    --network host \
+    --dangerously-skip-prompt \
+    -- go mod download
+```
+
+#### Technical Notes
+
+The Alpine rootfs created by `build-alpine-rootfs.sh` is configured with:
+
+| Configuration | Value | Why |
+|---------------|-------|-----|
+| **Rootfs size** | 8GB | Accommodates Go toolchain downloads and large builds |
+| **GOCACHE** | `/root/.cache/go-build` | On rootfs, not `/tmp` (tmpfs is RAM-backed, limited) |
+| **GOMODCACHE** | `/root/go/pkg/mod` | Persistent module cache on rootfs |
+| **GOTMPDIR** | `/root/tmp` | Build temp files on rootfs, not RAM |
+| **DNS servers** | 1.1.1.1, 8.8.8.8 | Apple's vmnet NAT gateway does NOT forward DNS queries |
+| **Kernel** | Lima 6.18.2-0-virt | Has virtiofs as module (matches modloop) |
+
+**Why these matter:**
+- Without `GOTMPDIR` on rootfs, `go build` fails with "no space left on device" during compilation
+- Without public DNS, `go build` fails with DNS resolution errors (vmnet DHCP provides a gateway IP that doesn't answer DNS)
+- The 8GB size allows building projects with 100+ dependencies without running out of space
 
 ### Workarounds for Ubuntu (No Workspace)
 
@@ -938,13 +1470,65 @@ codesign --entitlements entitlements.plist --force --sign - ~/go/bin/deputy-sand
 ### "kernel not found" or "rootfs not found"
 
 ```bash
-# Check asset directory
-ls -la ~/.deputy/vz/
-# Must contain: vmlinuz, rootfs.img
+# Check if environment variables are set
+echo "DEPUTY_VZ_KERNEL=$DEPUTY_VZ_KERNEL"
+echo "DEPUTY_VZ_ROOTFS=$DEPUTY_VZ_ROOTFS"
+echo "DEPUTY_VZ_INITRD=$DEPUTY_VZ_INITRD"
 
-# Or set environment variables
-export DEPUTY_VZ_KERNEL=/path/to/vmlinuz
-export DEPUTY_VZ_ROOTFS=/path/to/rootfs.img
+# Check Alpine assets exist
+ls -la ~/.deputy/vz/alpine/
+# Should show: vmlinuz, initrd.img, rootfs.img
+
+# Set environment variables for Alpine (the recommended setup)
+export DEPUTY_VZ_KERNEL=~/.deputy/vz/alpine/vmlinuz
+export DEPUTY_VZ_ROOTFS=~/.deputy/vz/alpine/rootfs.img
+export DEPUTY_VZ_INITRD=~/.deputy/vz/alpine/initrd.img
+
+# If files don't exist, rebuild the rootfs
+cd examples/sandbox-plugins/vz
+./build-alpine-rootfs.sh
+```
+
+### "no space left on device" during go build
+
+This happens when Go tries to use `/tmp` for caches or temp files, but `/tmp` is RAM-backed (tmpfs) with limited space.
+
+**Solution:** The `build-alpine-rootfs.sh` script should configure Go caches on the rootfs. If you still see this error, rebuild the rootfs:
+
+```bash
+cd examples/sandbox-plugins/vz
+./build-alpine-rootfs.sh
+```
+
+The init script sets these environment variables to use the 8GB rootfs instead of tmpfs:
+- `GOCACHE=/root/.cache/go-build`
+- `GOMODCACHE=/root/go/pkg/mod`
+- `GOTMPDIR=/root/tmp`
+
+### DNS resolution fails (go build can't reach proxy.golang.org)
+
+Apple's vmnet NAT gateway does NOT forward DNS queries. The init script must set public DNS servers.
+
+**Solution:** Rebuild the rootfs - the latest `build-alpine-rootfs.sh` always sets DNS to 1.1.1.1 and 8.8.8.8:
+
+```bash
+cd examples/sandbox-plugins/vz
+./build-alpine-rootfs.sh
+```
+
+### go build is very slow
+
+Default VM resources (1 CPU, 512MB RAM) are too low for compilation.
+
+**Solution:** Use `--cpu` and `--memory` flags:
+
+```bash
+deputy exec --runtime plugin --plugin vz \
+    --workspace . \
+    --network host \
+    --cpu 4 \
+    --memory 4g \
+    -- go build ./...
 ```
 
 ### "code signature invalid"

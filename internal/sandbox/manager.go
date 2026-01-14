@@ -365,6 +365,10 @@ func (m *Manager) selectRuntime(ctx context.Context, cfg *sandboxv1.SandboxConfi
 			return rt, nil
 		} else if explicitlyRequested {
 			// User explicitly requested this runtime but it's not available
+			// Provide a more specific error for plugin runtime when a plugin name is specified
+			if requestedRuntime == sandboxv1.Runtime_RUNTIME_PLUGIN && cfg.GetPluginName() != "" {
+				return nil, fmt.Errorf("plugin %q not found in PATH", cfg.GetPluginName())
+			}
 			return nil, fmt.Errorf("runtime %s is not available", requestedRuntime)
 		}
 	}
