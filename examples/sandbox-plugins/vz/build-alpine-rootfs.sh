@@ -22,7 +22,7 @@ set -euo pipefail
 
 # Defaults
 OUTPUT_DIR="${HOME}/.deputy/vz/alpine"
-ROOTFS_SIZE_MB=4096  # 4GB to accommodate Go toolchain downloads and builds
+ROOTFS_SIZE_MB=8192  # 8GB to accommodate Go toolchain downloads and large project builds
 MINIMAL=false
 ALPINE_VERSION="3.23"
 GO_VERSION="1.23.5"
@@ -186,11 +186,12 @@ export HOME="/root"
 export GOPATH="/root/go"
 export GOCACHE="/root/.cache/go-build"
 export GOMODCACHE="/root/go/pkg/mod"
+export GOTMPDIR="/root/tmp"
 export npm_config_cache="/root/.npm"
 export TERM="xterm-256color"
 
 # Create cache directories on rootfs
-mkdir -p /root/.cache/go-build /root/go/pkg/mod /root/.npm 2>/dev/null
+mkdir -p /root/.cache/go-build /root/go/pkg/mod /root/.npm /root/tmp 2>/dev/null
 
 # Parse kernel cmdline for command and options
 CMD_BASE64=""
