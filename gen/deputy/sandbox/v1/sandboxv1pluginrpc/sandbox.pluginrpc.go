@@ -27,6 +27,10 @@ const (
 	SandboxRuntimeServiceGetInfoPath = "/deputy.sandbox.v1.SandboxRuntimeService/GetInfo"
 	// SandboxRuntimeServiceCleanupPath is the path of the SandboxRuntimeService's Cleanup RPC.
 	SandboxRuntimeServiceCleanupPath = "/deputy.sandbox.v1.SandboxRuntimeService/Cleanup"
+	// SandboxRuntimeServiceSyncChangesPath is the path of the SandboxRuntimeService's SyncChanges RPC.
+	SandboxRuntimeServiceSyncChangesPath = "/deputy.sandbox.v1.SandboxRuntimeService/SyncChanges"
+	// SandboxRuntimeServiceGetChangesPath is the path of the SandboxRuntimeService's GetChanges RPC.
+	SandboxRuntimeServiceGetChangesPath = "/deputy.sandbox.v1.SandboxRuntimeService/GetChanges"
 )
 
 // SandboxServiceSpecBuilder builds a Spec for the deputy.sandbox.v1.SandboxService service.
@@ -100,19 +104,31 @@ func RegisterSandboxServiceServer(serverRegistrar pluginrpc.ServerRegistrar, san
 // SandboxRuntimeServiceSpecBuilder builds a Spec for the deputy.sandbox.v1.SandboxRuntimeService
 // service.
 type SandboxRuntimeServiceSpecBuilder struct {
-	GetInfo []pluginrpc.ProcedureOption
-	Cleanup []pluginrpc.ProcedureOption
+	GetInfo     []pluginrpc.ProcedureOption
+	Cleanup     []pluginrpc.ProcedureOption
+	SyncChanges []pluginrpc.ProcedureOption
+	GetChanges  []pluginrpc.ProcedureOption
 }
 
 // Build builds a Spec for the deputy.sandbox.v1.SandboxRuntimeService service.
 func (s SandboxRuntimeServiceSpecBuilder) Build() (pluginrpc.Spec, error) {
-	procedures := make([]pluginrpc.Procedure, 0, 2)
+	procedures := make([]pluginrpc.Procedure, 0, 4)
 	procedure, err := pluginrpc.NewProcedure(SandboxRuntimeServiceGetInfoPath, s.GetInfo...)
 	if err != nil {
 		return nil, err
 	}
 	procedures = append(procedures, procedure)
 	procedure, err = pluginrpc.NewProcedure(SandboxRuntimeServiceCleanupPath, s.Cleanup...)
+	if err != nil {
+		return nil, err
+	}
+	procedures = append(procedures, procedure)
+	procedure, err = pluginrpc.NewProcedure(SandboxRuntimeServiceSyncChangesPath, s.SyncChanges...)
+	if err != nil {
+		return nil, err
+	}
+	procedures = append(procedures, procedure)
+	procedure, err = pluginrpc.NewProcedure(SandboxRuntimeServiceGetChangesPath, s.GetChanges...)
 	if err != nil {
 		return nil, err
 	}
@@ -126,6 +142,14 @@ type SandboxRuntimeServiceClient interface {
 	GetInfo(context.Context, *v1.GetRuntimeInfoRequest, ...pluginrpc.CallOption) (*v1.GetRuntimeInfoResponse, error)
 	// Cleanup releases resources from a previous execution.
 	Cleanup(context.Context, *v1.CleanupRequest, ...pluginrpc.CallOption) (*v1.CleanupResponse, error)
+	// SyncChanges copies workspace changes from the sandbox to the original workspace.
+	// This is used after execution when review_before_commit is enabled.
+	// The user reviews the changes, then calls this to accept them.
+	// Note: This does NOT create a git commit - the user commits manually.
+	SyncChanges(context.Context, *v1.SyncChangesRequest, ...pluginrpc.CallOption) (*v1.SyncChangesResponse, error)
+	// GetChanges returns the list of files changed during execution.
+	// This is used for the change review workflow.
+	GetChanges(context.Context, *v1.GetChangesRequest, ...pluginrpc.CallOption) (*v1.GetChangesResponse, error)
 }
 
 // NewSandboxRuntimeServiceClient constructs a client for the
@@ -143,6 +167,14 @@ type SandboxRuntimeServiceHandler interface {
 	GetInfo(context.Context, *v1.GetRuntimeInfoRequest) (*v1.GetRuntimeInfoResponse, error)
 	// Cleanup releases resources from a previous execution.
 	Cleanup(context.Context, *v1.CleanupRequest) (*v1.CleanupResponse, error)
+	// SyncChanges copies workspace changes from the sandbox to the original workspace.
+	// This is used after execution when review_before_commit is enabled.
+	// The user reviews the changes, then calls this to accept them.
+	// Note: This does NOT create a git commit - the user commits manually.
+	SyncChanges(context.Context, *v1.SyncChangesRequest) (*v1.SyncChangesResponse, error)
+	// GetChanges returns the list of files changed during execution.
+	// This is used for the change review workflow.
+	GetChanges(context.Context, *v1.GetChangesRequest) (*v1.GetChangesResponse, error)
 }
 
 // SandboxRuntimeServiceServer serves the deputy.sandbox.v1.SandboxRuntimeService service.
@@ -151,6 +183,14 @@ type SandboxRuntimeServiceServer interface {
 	GetInfo(context.Context, pluginrpc.HandleEnv, ...pluginrpc.HandleOption) error
 	// Cleanup releases resources from a previous execution.
 	Cleanup(context.Context, pluginrpc.HandleEnv, ...pluginrpc.HandleOption) error
+	// SyncChanges copies workspace changes from the sandbox to the original workspace.
+	// This is used after execution when review_before_commit is enabled.
+	// The user reviews the changes, then calls this to accept them.
+	// Note: This does NOT create a git commit - the user commits manually.
+	SyncChanges(context.Context, pluginrpc.HandleEnv, ...pluginrpc.HandleOption) error
+	// GetChanges returns the list of files changed during execution.
+	// This is used for the change review workflow.
+	GetChanges(context.Context, pluginrpc.HandleEnv, ...pluginrpc.HandleOption) error
 }
 
 // NewSandboxRuntimeServiceServer constructs a server for the
@@ -167,6 +207,8 @@ func NewSandboxRuntimeServiceServer(handler pluginrpc.Handler, sandboxRuntimeSer
 func RegisterSandboxRuntimeServiceServer(serverRegistrar pluginrpc.ServerRegistrar, sandboxRuntimeServiceServer SandboxRuntimeServiceServer) {
 	serverRegistrar.Register(SandboxRuntimeServiceGetInfoPath, sandboxRuntimeServiceServer.GetInfo)
 	serverRegistrar.Register(SandboxRuntimeServiceCleanupPath, sandboxRuntimeServiceServer.Cleanup)
+	serverRegistrar.Register(SandboxRuntimeServiceSyncChangesPath, sandboxRuntimeServiceServer.SyncChanges)
+	serverRegistrar.Register(SandboxRuntimeServiceGetChangesPath, sandboxRuntimeServiceServer.GetChanges)
 }
 
 // *** PRIVATE ***
@@ -257,6 +299,24 @@ func (c *sandboxRuntimeServiceClient) Cleanup(ctx context.Context, req *v1.Clean
 	return res, nil
 }
 
+// SyncChanges calls deputy.sandbox.v1.SandboxRuntimeService.SyncChanges.
+func (c *sandboxRuntimeServiceClient) SyncChanges(ctx context.Context, req *v1.SyncChangesRequest, opts ...pluginrpc.CallOption) (*v1.SyncChangesResponse, error) {
+	res := &v1.SyncChangesResponse{}
+	if err := c.client.Call(ctx, SandboxRuntimeServiceSyncChangesPath, req, res, opts...); err != nil {
+		return nil, err
+	}
+	return res, nil
+}
+
+// GetChanges calls deputy.sandbox.v1.SandboxRuntimeService.GetChanges.
+func (c *sandboxRuntimeServiceClient) GetChanges(ctx context.Context, req *v1.GetChangesRequest, opts ...pluginrpc.CallOption) (*v1.GetChangesResponse, error) {
+	res := &v1.GetChangesResponse{}
+	if err := c.client.Call(ctx, SandboxRuntimeServiceGetChangesPath, req, res, opts...); err != nil {
+		return nil, err
+	}
+	return res, nil
+}
+
 // sandboxRuntimeServiceServer implements SandboxRuntimeServiceServer.
 type sandboxRuntimeServiceServer struct {
 	handler                      pluginrpc.Handler
@@ -292,6 +352,40 @@ func (c *sandboxRuntimeServiceServer) Cleanup(ctx context.Context, handleEnv plu
 				return nil, fmt.Errorf("could not cast %T to a *v1.CleanupRequest", anyReq)
 			}
 			return c.sandboxRuntimeServiceHandler.Cleanup(ctx, req)
+		},
+		options...,
+	)
+}
+
+// SyncChanges calls deputy.sandbox.v1.SandboxRuntimeService.SyncChanges.
+func (c *sandboxRuntimeServiceServer) SyncChanges(ctx context.Context, handleEnv pluginrpc.HandleEnv, options ...pluginrpc.HandleOption) error {
+	return c.handler.Handle(
+		ctx,
+		handleEnv,
+		&v1.SyncChangesRequest{},
+		func(ctx context.Context, anyReq any) (any, error) {
+			req, ok := anyReq.(*v1.SyncChangesRequest)
+			if !ok {
+				return nil, fmt.Errorf("could not cast %T to a *v1.SyncChangesRequest", anyReq)
+			}
+			return c.sandboxRuntimeServiceHandler.SyncChanges(ctx, req)
+		},
+		options...,
+	)
+}
+
+// GetChanges calls deputy.sandbox.v1.SandboxRuntimeService.GetChanges.
+func (c *sandboxRuntimeServiceServer) GetChanges(ctx context.Context, handleEnv pluginrpc.HandleEnv, options ...pluginrpc.HandleOption) error {
+	return c.handler.Handle(
+		ctx,
+		handleEnv,
+		&v1.GetChangesRequest{},
+		func(ctx context.Context, anyReq any) (any, error) {
+			req, ok := anyReq.(*v1.GetChangesRequest)
+			if !ok {
+				return nil, fmt.Errorf("could not cast %T to a *v1.GetChangesRequest", anyReq)
+			}
+			return c.sandboxRuntimeServiceHandler.GetChanges(ctx, req)
 		},
 		options...,
 	)

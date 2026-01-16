@@ -37,6 +37,16 @@ service SandboxRuntimeService {
 
   // Cleanup releases resources from a previous execution.
   rpc Cleanup(CleanupRequest) returns (CleanupResponse);
+
+  // SyncChanges copies workspace changes from the sandbox to the original workspace.
+  // This is used after execution when review_before_commit is enabled.
+  // The user reviews the changes, then calls this to accept them.
+  // Note: This does NOT create a git commit - the user commits manually.
+  rpc SyncChanges(SyncChangesRequest) returns (SyncChangesResponse);
+
+  // GetChanges returns the list of files changed during execution.
+  // This is used for the change review workflow.
+  rpc GetChanges(GetChangesRequest) returns (GetChangesResponse);
 }
 
 // Runtime identifies a sandbox runtime backend.
@@ -430,6 +440,94 @@ message SandboxConfig {
   // Detailed workspace isolation configuration.
   // Required when workspace_isolation is not DIRECT or UNSPECIFIED.
   WorkspaceIsolationConfig workspace_isolation_config = 21;
+
+  // Two-phase execution configuration for supply chain security.
+  // When enabled, dependencies are pre-fetched with network access,
+  // then the build runs offline without network access.
+  TwoPhaseExecutionConfig two_phase_config = 22;
+
+  // Network connection audit mode.
+  // When enabled, logs blocked (and optionally allowed) network connections.
+  NetworkAuditMode network_audit = 23;
+}
+
+// TwoPhaseExecutionConfig enables secure two-phase execution for builds.
+// Phase 1 (Pre-fetch): Run dependency resolution commands with network access.
+// Phase 2 (Build): Run the actual build offline (network disabled).
+//
+// This prevents supply chain attacks where malicious code exfiltrates data
+// or downloads additional payloads during the build phase.
+//
+// Example workflow:
+//   Phase 1: "go mod download" (network allowed, no code execution)
+//   Phase 2: "go build" (offline, safe from network-based attacks)
+message TwoPhaseExecutionConfig {
+  // Enable two-phase execution mode.
+  bool enabled = 1;
+
+  // Pre-fetch commands to run in phase 1 (with network access).
+  // Each command should only download dependencies, not execute user code.
+  // Common examples:
+  //   Go: ["go", "mod", "download"]
+  //   Node: ["npm", "ci"]
+  //   Python: ["pip", "download", "-r", "requirements.txt", "-d", ".wheels"]
+  //   Rust: ["cargo", "fetch"]
+  repeated string prefetch_command = 2;
+
+  // Timeout for the pre-fetch phase.
+  // Default: 10 minutes.
+  google.protobuf.Duration prefetch_timeout = 3;
+
+  // Network allowlist for pre-fetch phase (optional).
+  // If set, overrides the main network_allowlist for phase 1.
+  // Useful to restrict pre-fetch to known package registries.
+  repeated string prefetch_network_allowlist = 4;
+
+  // Whether to verify dependency checksums after pre-fetch.
+  // When enabled, the plugin checks go.sum, package-lock.json, etc.
+  // and fails if checksums don't match.
+  bool verify_checksums = 5;
+
+  // Cache directory for downloaded dependencies.
+  // If set, dependencies are cached here across executions.
+  // Helps avoid repeated downloads for the same dependencies.
+  string cache_dir = 6;
+
+  // Whether to audit network connections during pre-fetch.
+  // When enabled, all outbound connections are logged for review.
+  bool audit_prefetch_network = 7;
+}
+
+// NetworkAuditMode controls network connection logging.
+enum NetworkAuditMode {
+  // Unspecified - no network audit logging (default).
+  NETWORK_AUDIT_MODE_UNSPECIFIED = 0;
+
+  // Log blocked connections only (DENY/DROP).
+  // Useful for debugging allowlist issues.
+  NETWORK_AUDIT_MODE_BLOCKED = 1;
+
+  // Log all connections (ALLOW and DROP).
+  // Verbose mode for full visibility into network activity.
+  NETWORK_AUDIT_MODE_ALL = 2;
+}
+
+// NetworkAuditEntry represents a single audited network connection.
+message NetworkAuditEntry {
+  // Action taken: "ALLOW" or "DROP"
+  string action = 1;
+
+  // Protocol: "TCP", "UDP", "ICMP", etc.
+  string protocol = 2;
+
+  // Destination IP address
+  string destination = 3;
+
+  // Destination port (0 if not applicable)
+  int32 port = 4;
+
+  // Timestamp when the connection was attempted
+  google.protobuf.Timestamp timestamp = 5;
 }
 
 // FileMaskConfig configures file masking behavior for the sandbox.
@@ -764,4 +862,62 @@ message CleanupResponse {
 
   // Error message if cleanup failed.
   string error = 2;
+}
+
+// SyncChangesRequest requests syncing workspace changes to the original location.
+message SyncChangesRequest {
+  // Execution ID whose changes should be synced.
+  string execution_id = 1 [(buf.validate.field).string.min_len = 1];
+
+  // Optional: Only sync files matching these glob patterns.
+  // If empty, all changes are synced.
+  repeated string include_patterns = 2;
+
+  // Optional: Exclude files matching these glob patterns.
+  repeated string exclude_patterns = 3;
+}
+
+// SyncChangesResponse confirms the sync operation.
+message SyncChangesResponse {
+  // Whether sync was successful.
+  bool success = 1;
+
+  // Error message if sync failed.
+  string error = 2;
+
+  // Number of files synced.
+  int32 files_synced = 3;
+
+  // List of files that were synced.
+  repeated string synced_files = 4;
+}
+
+// GetChangesRequest requests the list of changed files.
+message GetChangesRequest {
+  // Execution ID to get changes for.
+  string execution_id = 1 [(buf.validate.field).string.min_len = 1];
+}
+
+// GetChangesResponse returns the list of changed files.
+message GetChangesResponse {
+  // List of file changes.
+  repeated FileChange changes = 1;
+
+  // Total count of changes.
+  int32 total_changes = 2;
+}
+
+// FileChange describes a single file change in the workspace.
+message FileChange {
+  // Path relative to workspace root.
+  string path = 1;
+
+  // Type of change: "added", "modified", "deleted", "renamed".
+  string change_type = 2;
+
+  // Size in bytes (0 for deleted files).
+  int64 size = 3;
+
+  // For renamed files, the old path.
+  string old_path = 4;
 }

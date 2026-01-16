@@ -227,10 +227,23 @@ echo "Loading kernel modules..."
 /usr/bin/busybox sleep 1
 echo "Block devices: $(/usr/bin/busybox ls /dev/vd* 2>/dev/null || echo none)"
 
+# Check if read-only mode was requested via kernel cmdline
+# The "ro" parameter tells the kernel to mount rootfs read-only
+# We check for " ro " (with spaces) to avoid matching "root=" etc
+MOUNT_OPTS=""
+if /usr/bin/busybox grep -q ' ro ' /proc/cmdline; then
+    # Read-only mode: use noload to skip journal recovery
+    # (ext4 journal replay requires write access)
+    MOUNT_OPTS="-o ro,noload"
+    echo "Read-only mode: mounting with ro,noload"
+else
+    echo "Read-write mode: mounting normally"
+fi
+
 # Mount rootfs
 echo "Mounting rootfs..."
 /usr/bin/busybox mkdir -p /mnt
-/usr/bin/busybox mount -t ext4 /dev/vda /mnt 2>&1 || {
+/usr/bin/busybox mount -t ext4 $MOUNT_OPTS /dev/vda /mnt 2>&1 || {
     echo "ERROR: Failed to mount /dev/vda"
     echo "Available devices:"
     /usr/bin/busybox ls -la /dev/ | /usr/bin/busybox head -20
@@ -292,38 +305,64 @@ DEPUTY_INIT_SCRIPT='#!/bin/sh
 # 1. Mounts essential filesystems
 # 2. Syncs time from host (for TLS)
 # 3. Configures networking via DHCP
-# 4. Loads virtiofs module and mounts workspace
+# 4. Loads virtiofs module and mounts workspace (direct or overlay mode)
 # 5. Executes the requested command
 # 6. Powers off the VM
+#
+# Workspace modes:
+# - Direct: mounts "workspace" virtiofs tag directly at /workspace
+# - Overlay: mounts "workspace-base" (RO) + "workspace-upper" (RW) with overlayfs
+#   Changes go to workspace-upper, leaving base workspace unchanged.
 
 # Set PATH
 export PATH="/usr/local/go/bin:/usr/local/bin:/usr/bin:/bin:/sbin:/usr/sbin"
 
 # Mount essential filesystems
-mount -t proc proc /proc 2>/dev/null
-mount -t sysfs sys /sys 2>/dev/null
-mount -t devtmpfs dev /dev 2>/dev/null
-mount -t tmpfs tmpfs /tmp 2>/dev/null
-mount -t tmpfs tmpfs /run 2>/dev/null
+# IMPORTANT: In read-only rootfs mode, we cannot redirect to /dev/null until
+# devtmpfs is mounted. Mount filesystems first without redirection.
+mount -t proc proc /proc
+mount -t sysfs sys /sys
+mount -t devtmpfs dev /dev
+mount -t tmpfs tmpfs /tmp
+mount -t tmpfs tmpfs /run
 
-# Load virtio modules (required for networking and filesystem)
-# Modules from Lima ISO modloop match the kernel version exactly
+# Now /dev/null exists and we can use redirections safely
+
+# Load modules (required for networking, filesystem, and overlay)
 modprobe virtio_pci 2>/dev/null || true
 modprobe virtio_net 2>/dev/null || true
 modprobe virtiofs 2>/dev/null || true
+modprobe overlay 2>/dev/null || true  # For workspace overlay mode
 
 # Give virtio devices time to register
 sleep 0.5
 
-# Sync time from host (fixes TLS certificate validation)
+# Parse all kernel cmdline parameters upfront
+CMD_BASE64=""
+WORKDIR=""
+ALLOWLIST_BASE64=""
+HOST_TIME=""
 for param in $(cat /proc/cmdline 2>/dev/null); do
     case "$param" in
+        deputy.cmd=*)
+            CMD_BASE64="${param#deputy.cmd=}"
+            ;;
+        deputy.workdir=*)
+            WORKDIR="${param#deputy.workdir=}"
+            ;;
+        deputy.allowlist=*)
+            ALLOWLIST_BASE64="${param#deputy.allowlist=}"
+            ;;
         deputy.time=*)
             HOST_TIME="${param#deputy.time=}"
-            date -s "@${HOST_TIME}" >/dev/null 2>&1
             ;;
     esac
 done
+
+# Sync time from host (fixes TLS certificate validation)
+if [ -n "$HOST_TIME" ]; then
+    date -s "@${HOST_TIME}" >/dev/null 2>&1
+fi
 
 # Configure networking - find actual network interface (not just eth0)
 # VZ/virtio may name it eth0, enp0s1, ens1, etc.
@@ -363,36 +402,143 @@ export GOPATH="/root/go"
 export GOCACHE="/root/.cache/go-build"
 export GOMODCACHE="/root/go/pkg/mod"
 export GOTMPDIR="/root/tmp"
+export GOTOOLCHAIN="local"  # Prevent auto-downloading newer Go versions
 export npm_config_cache="/root/.npm"
 export TERM="xterm-256color"
 
 # Create cache directories on rootfs
 mkdir -p /root/.cache/go-build /root/go/pkg/mod /root/.npm /root/tmp 2>/dev/null
 
-# Parse kernel cmdline for command and options
-CMD_BASE64=""
-WORKDIR=""
-WORKSPACE_TAG=""
-for param in $(cat /proc/cmdline 2>/dev/null); do
-    case "$param" in
-        deputy.cmd=*)
-            CMD_BASE64="${param#deputy.cmd=}"
-            ;;
-        deputy.workdir=*)
-            WORKDIR="${param#deputy.workdir=}"
-            ;;
-        deputy.workspace=*)
-            WORKSPACE_TAG="${param#deputy.workspace=}"
-            ;;
-    esac
-done
+# Configure network allowlist if specified (ALLOWLIST network mode)
+# The allowlist is a newline-separated list of allowed hosts (host:port or just host)
+# Format: base64-encoded "host1:port1\nhost2:port2\n..."
+# Special marker "__DEPUTY_ALLOWLIST_EMPTY__" signals empty allowlist (DROP all except DNS/DHCP)
+if [ -n "$ALLOWLIST_BASE64" ] && [ -n "$NET_IF" ]; then
+    ALLOWLIST=$(echo "$ALLOWLIST_BASE64" | base64 -d 2>/dev/null || echo "")
+    # Check for empty allowlist marker
+    if [ "$ALLOWLIST" = "__DEPUTY_ALLOWLIST_EMPTY__" ]; then
+        ALLOWLIST=""
+    fi
+    if command -v nft >/dev/null 2>&1; then
+        # Load netfilter modules
+        modprobe nf_tables 2>/dev/null || true
+        modprobe nft_chain_nat 2>/dev/null || true
 
-# Mount workspace via virtiofs if specified
-# The tag "workspace" matches VirtioFileSystemDeviceConfiguration in main.go
-if [ -n "$WORKSPACE_TAG" ] || [ -d /sys/bus/virtio/drivers/virtiofs ]; then
-    mkdir -p /workspace 2>/dev/null
-    # Try mounting with the "workspace" tag (set in main.go)
+        # Create nftables ruleset for egress filtering
+        # Default policy: DROP all outbound connections except allowlisted hosts
+        # Always allow: DNS (53), DHCP (67,68), loopback, established connections
+        nft flush ruleset 2>/dev/null || true
+
+        # Create base table and chains
+        nft add table inet deputy_filter
+        nft add chain inet deputy_filter output "{ type filter hook output priority 0; policy drop; }"
+        nft add chain inet deputy_filter input "{ type filter hook input priority 0; policy accept; }"
+
+        # Allow loopback
+        nft add rule inet deputy_filter output oif lo accept
+
+        # Allow established/related connections (responses to our requests)
+        nft add rule inet deputy_filter output ct state established,related accept
+
+        # Allow DNS queries (UDP and TCP port 53) - needed for hostname resolution
+        nft add rule inet deputy_filter output udp dport 53 accept
+        nft add rule inet deputy_filter output tcp dport 53 accept
+
+        # Allow DHCP (needed for IP assignment)
+        nft add rule inet deputy_filter output udp dport 67 accept
+        nft add rule inet deputy_filter output udp sport 68 accept
+
+        # Parse and add allowlist rules
+        echo "$ALLOWLIST" | while IFS= read -r entry; do
+            [ -z "$entry" ] && continue
+
+            # Parse host:port format
+            case "$entry" in
+                *:*)
+                    HOST="${entry%%:*}"
+                    PORT="${entry#*:}"
+                    ;;
+                *)
+                    HOST="$entry"
+                    PORT=""
+                    ;;
+            esac
+
+            # Resolve hostname to IP if needed
+            # Note: We resolve at boot time since DNS may be blocked later
+            # We prefer IPv4 addresses for simplicity (IPv6 support could be added later)
+            if echo "$HOST" | grep -qE "^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$"; then
+                IP="$HOST"
+            elif echo "$HOST" | grep -qE "^[0-9a-fA-F:]+$"; then
+                # Skip pure IPv6 addresses for now
+                IP=""
+            else
+                # Resolve hostname - try multiple times as DNS may not be ready
+                # Filter for IPv4 addresses only (match lines starting with digits)
+                IP=""
+                for i in 1 2 3; do
+                    IP=$(getent ahostsv4 "$HOST" 2>/dev/null | awk "/STREAM/{print \$1; exit}")
+                    [ -n "$IP" ] && break
+                    sleep 0.5
+                done
+            fi
+
+            if [ -n "$IP" ]; then
+                if [ -n "$PORT" ]; then
+                    # Allow specific port
+                    nft add rule inet deputy_filter output ip daddr "$IP" tcp dport "$PORT" accept 2>/dev/null
+                    nft add rule inet deputy_filter output ip daddr "$IP" udp dport "$PORT" accept 2>/dev/null
+                else
+                    # Allow all ports to this host
+                    nft add rule inet deputy_filter output ip daddr "$IP" accept 2>/dev/null
+                fi
+            fi
+        done
+    fi
+fi
+
+# Mount workspace via virtiofs
+# Check for overlay mode first (workspace-base + workspace-upper tags),
+# then fall back to direct mode (workspace tag).
+mkdir -p /workspace 2>/dev/null
+OVERLAY_MODE=false
+CHANGES_SYNC=false
+
+# Wait for virtiofs devices to be fully ready
+# The host directory sharing takes a moment to initialize after VM boot
+sleep 1
+
+# Try overlay mode: mount workspace-base (RO) via virtiofs
+# In overlay mode, changes are stored on the VM local ext4 rootfs, NOT synced to host.
+# This provides isolation (host workspace protected) without virtiofs workdir issues.
+#
+# Note: virtiofs through macOS VZ.framework has issues with overlayfs workdir operations
+# (EACCES when creating internal directories). Using local ext4 for upper/work avoids this.
+mkdir -p /mnt/workspace-base /mnt/overlay-upper /mnt/overlay-work 2>/dev/null
+
+if mount -t virtiofs workspace-base /mnt/workspace-base 2>/dev/null; then
+    # workspace-base mounted - set up overlayfs with local upper/work dirs
+    # Changes stay in the VM and are discarded on shutdown (ephemeral isolation)
+    if mount -t overlay overlay -o \
+        rw,lowerdir=/mnt/workspace-base,upperdir=/mnt/overlay-upper,workdir=/mnt/overlay-work \
+        /workspace 2>/dev/null; then
+        OVERLAY_MODE=true
+    else
+        # Overlay mount failed, clean up
+        umount /mnt/workspace-base 2>/dev/null
+    fi
+fi
+
+# Fall back to direct mode if overlay mode failed
+if [ "$OVERLAY_MODE" = "false" ]; then
     mount -t virtiofs workspace /workspace 2>/dev/null || true
+fi
+
+# Try to mount workspace-changes for review_before_commit workflow
+# This share is only created when review_before_commit is enabled
+mkdir -p /mnt/workspace-changes 2>/dev/null
+if mount -t virtiofs workspace-changes /mnt/workspace-changes 2>/dev/null; then
+    CHANGES_SYNC=true
 fi
 
 if [ -z "$CMD_BASE64" ]; then
@@ -432,6 +578,57 @@ EXIT_CODE=$?
 echo "<<<DEPUTY_OUTPUT_END>>>"
 echo "<<<DEPUTY_EXIT_CODE:${EXIT_CODE}>>>"
 
+# Sync overlay filesystems before copying changes
+# This ensures all written data is flushed from the overlayfs cache to the upper layer
+sync
+
+# Sync changes for review_before_commit workflow
+# When overlay mode is active and workspace-changes share is mounted,
+# copy changed files from the overlay upper layer to the host-accessible share
+if [ "$OVERLAY_MODE" = "true" ] && [ "$CHANGES_SYNC" = "true" ]; then
+    echo "<<<DEPUTY_CHANGES_START>>>"
+
+    # Find and sync all changed files from the overlay upper layer
+    # The upper layer contains only files that were added or modified
+    if [ -d /mnt/overlay-upper ] && [ "$(ls -A /mnt/overlay-upper 2>/dev/null)" ]; then
+        cd /mnt/overlay-upper
+        find . -type f 2>/dev/null | while read -r file; do
+            # Remove leading ./
+            relpath="${file#./}"
+
+            # Check if file exists in base (modified) or not (added)
+            if [ -f "/mnt/workspace-base/$relpath" ]; then
+                change_type="M"
+            else
+                change_type="A"
+            fi
+
+            # Copy the file to workspace-changes, preserving directory structure
+            target_dir="/mnt/workspace-changes/$(dirname "$relpath")"
+            mkdir -p "$target_dir" 2>/dev/null
+
+            # Use cat for reliable copy across virtiofs
+            cat "$file" > "/mnt/workspace-changes/$relpath"
+
+            # Report the change
+            echo "<<<DEPUTY_CHANGE:${change_type}:${relpath}>>>"
+        done
+
+        # Find deleted files by checking for whiteout files
+        # OverlayFS uses character devices with 0/0 major/minor for whiteouts
+        find . -type c 2>/dev/null | while read -r file; do
+            relpath="${file#./}"
+            # Check if it is a whiteout (char device 0,0)
+            if [ "$(stat -c "%t,%T" "$file" 2>/dev/null)" = "0,0" ]; then
+                # This is a whiteout - the file was deleted
+                echo "<<<DEPUTY_CHANGE:D:${relpath}>>>"
+            fi
+        done
+    fi
+
+    echo "<<<DEPUTY_CHANGES_END>>>"
+fi
+
 # Sync filesystem before shutdown to ensure all writes are flushed
 # This prevents corrupt caches (e.g., Go toolchain downloads) on next boot
 sync
@@ -447,6 +644,13 @@ chmod +x "${OUTPUT_DIR}/deputy-init"
 # Build rootfs using Docker with Alpine
 echo "==> Creating Alpine rootfs image with Docker..."
 
+# Create the disk image on macOS BEFORE Docker runs
+# This ensures the file has proper macOS characteristics for VZ.framework
+# Using truncate creates a sparse file that VZ handles correctly
+echo "Creating ${ROOTFS_SIZE_MB}MB sparse disk image on macOS..."
+rm -f "${OUTPUT_DIR}/rootfs.img"
+truncate -s ${ROOTFS_SIZE_MB}M "${OUTPUT_DIR}/rootfs.img"
+
 # Create the build script
 BUILD_SCRIPT="${OUTPUT_DIR}/build-rootfs-inner.sh"
 cat > "${BUILD_SCRIPT}" << 'DOCKERSCRIPT'
@@ -458,9 +662,8 @@ OUTPUT_DIR="/output"
 # Install tools for image creation
 apk add --no-cache e2fsprogs curl squashfs-tools
 
-# Create disk image
-echo "Creating ${ROOTFS_SIZE_MB}MB disk image..."
-dd if=/dev/zero of="${OUTPUT_DIR}/rootfs.img" bs=1M count="${ROOTFS_SIZE_MB}"
+# Format the pre-created disk image (created by macOS truncate)
+echo "Formatting disk image..."
 mkfs.ext4 -F "${OUTPUT_DIR}/rootfs.img"
 
 # Mount the image
@@ -485,7 +688,9 @@ apk add --root /mnt/rootfs --initdb --no-cache \
     ca-certificates \
     curl \
     wget \
-    kmod
+    kmod \
+    nftables \
+    iptables
 
 # Essential directories
 mkdir -p /mnt/rootfs/{dev,proc,sys,tmp,run,workspace,root}
@@ -541,6 +746,7 @@ export PATH="/usr/local/go/bin:/usr/local/bin:/usr/bin:/bin:/sbin:/usr/sbin:$PAT
 export GOPATH="/root/go"
 export GOCACHE="/tmp/go-cache"
 export GOMODCACHE="/tmp/go-mod-cache"
+export GOTOOLCHAIN="local"
 export npm_config_cache="/tmp/npm-cache"
 ENVSCRIPT
     chmod +x /mnt/rootfs/etc/profile.d/deputy-dev.sh

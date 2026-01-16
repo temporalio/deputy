@@ -52,6 +52,12 @@ const (
 	// SandboxRuntimeServiceCleanupProcedure is the fully-qualified name of the SandboxRuntimeService's
 	// Cleanup RPC.
 	SandboxRuntimeServiceCleanupProcedure = "/deputy.sandbox.v1.SandboxRuntimeService/Cleanup"
+	// SandboxRuntimeServiceSyncChangesProcedure is the fully-qualified name of the
+	// SandboxRuntimeService's SyncChanges RPC.
+	SandboxRuntimeServiceSyncChangesProcedure = "/deputy.sandbox.v1.SandboxRuntimeService/SyncChanges"
+	// SandboxRuntimeServiceGetChangesProcedure is the fully-qualified name of the
+	// SandboxRuntimeService's GetChanges RPC.
+	SandboxRuntimeServiceGetChangesProcedure = "/deputy.sandbox.v1.SandboxRuntimeService/GetChanges"
 )
 
 // SandboxServiceClient is a client for the deputy.sandbox.v1.SandboxService service.
@@ -190,6 +196,14 @@ type SandboxRuntimeServiceClient interface {
 	Execute(context.Context, *connect.Request[v1.RuntimeExecuteRequest]) (*connect.ServerStreamForClient[v1.ExecuteEvent], error)
 	// Cleanup releases resources from a previous execution.
 	Cleanup(context.Context, *connect.Request[v1.CleanupRequest]) (*connect.Response[v1.CleanupResponse], error)
+	// SyncChanges copies workspace changes from the sandbox to the original workspace.
+	// This is used after execution when review_before_commit is enabled.
+	// The user reviews the changes, then calls this to accept them.
+	// Note: This does NOT create a git commit - the user commits manually.
+	SyncChanges(context.Context, *connect.Request[v1.SyncChangesRequest]) (*connect.Response[v1.SyncChangesResponse], error)
+	// GetChanges returns the list of files changed during execution.
+	// This is used for the change review workflow.
+	GetChanges(context.Context, *connect.Request[v1.GetChangesRequest]) (*connect.Response[v1.GetChangesResponse], error)
 }
 
 // NewSandboxRuntimeServiceClient constructs a client for the
@@ -221,14 +235,28 @@ func NewSandboxRuntimeServiceClient(httpClient connect.HTTPClient, baseURL strin
 			connect.WithSchema(sandboxRuntimeServiceMethods.ByName("Cleanup")),
 			connect.WithClientOptions(opts...),
 		),
+		syncChanges: connect.NewClient[v1.SyncChangesRequest, v1.SyncChangesResponse](
+			httpClient,
+			baseURL+SandboxRuntimeServiceSyncChangesProcedure,
+			connect.WithSchema(sandboxRuntimeServiceMethods.ByName("SyncChanges")),
+			connect.WithClientOptions(opts...),
+		),
+		getChanges: connect.NewClient[v1.GetChangesRequest, v1.GetChangesResponse](
+			httpClient,
+			baseURL+SandboxRuntimeServiceGetChangesProcedure,
+			connect.WithSchema(sandboxRuntimeServiceMethods.ByName("GetChanges")),
+			connect.WithClientOptions(opts...),
+		),
 	}
 }
 
 // sandboxRuntimeServiceClient implements SandboxRuntimeServiceClient.
 type sandboxRuntimeServiceClient struct {
-	getInfo *connect.Client[v1.GetRuntimeInfoRequest, v1.GetRuntimeInfoResponse]
-	execute *connect.Client[v1.RuntimeExecuteRequest, v1.ExecuteEvent]
-	cleanup *connect.Client[v1.CleanupRequest, v1.CleanupResponse]
+	getInfo     *connect.Client[v1.GetRuntimeInfoRequest, v1.GetRuntimeInfoResponse]
+	execute     *connect.Client[v1.RuntimeExecuteRequest, v1.ExecuteEvent]
+	cleanup     *connect.Client[v1.CleanupRequest, v1.CleanupResponse]
+	syncChanges *connect.Client[v1.SyncChangesRequest, v1.SyncChangesResponse]
+	getChanges  *connect.Client[v1.GetChangesRequest, v1.GetChangesResponse]
 }
 
 // GetInfo calls deputy.sandbox.v1.SandboxRuntimeService.GetInfo.
@@ -246,6 +274,16 @@ func (c *sandboxRuntimeServiceClient) Cleanup(ctx context.Context, req *connect.
 	return c.cleanup.CallUnary(ctx, req)
 }
 
+// SyncChanges calls deputy.sandbox.v1.SandboxRuntimeService.SyncChanges.
+func (c *sandboxRuntimeServiceClient) SyncChanges(ctx context.Context, req *connect.Request[v1.SyncChangesRequest]) (*connect.Response[v1.SyncChangesResponse], error) {
+	return c.syncChanges.CallUnary(ctx, req)
+}
+
+// GetChanges calls deputy.sandbox.v1.SandboxRuntimeService.GetChanges.
+func (c *sandboxRuntimeServiceClient) GetChanges(ctx context.Context, req *connect.Request[v1.GetChangesRequest]) (*connect.Response[v1.GetChangesResponse], error) {
+	return c.getChanges.CallUnary(ctx, req)
+}
+
 // SandboxRuntimeServiceHandler is an implementation of the deputy.sandbox.v1.SandboxRuntimeService
 // service.
 type SandboxRuntimeServiceHandler interface {
@@ -255,6 +293,14 @@ type SandboxRuntimeServiceHandler interface {
 	Execute(context.Context, *connect.Request[v1.RuntimeExecuteRequest], *connect.ServerStream[v1.ExecuteEvent]) error
 	// Cleanup releases resources from a previous execution.
 	Cleanup(context.Context, *connect.Request[v1.CleanupRequest]) (*connect.Response[v1.CleanupResponse], error)
+	// SyncChanges copies workspace changes from the sandbox to the original workspace.
+	// This is used after execution when review_before_commit is enabled.
+	// The user reviews the changes, then calls this to accept them.
+	// Note: This does NOT create a git commit - the user commits manually.
+	SyncChanges(context.Context, *connect.Request[v1.SyncChangesRequest]) (*connect.Response[v1.SyncChangesResponse], error)
+	// GetChanges returns the list of files changed during execution.
+	// This is used for the change review workflow.
+	GetChanges(context.Context, *connect.Request[v1.GetChangesRequest]) (*connect.Response[v1.GetChangesResponse], error)
 }
 
 // NewSandboxRuntimeServiceHandler builds an HTTP handler from the service implementation. It
@@ -282,6 +328,18 @@ func NewSandboxRuntimeServiceHandler(svc SandboxRuntimeServiceHandler, opts ...c
 		connect.WithSchema(sandboxRuntimeServiceMethods.ByName("Cleanup")),
 		connect.WithHandlerOptions(opts...),
 	)
+	sandboxRuntimeServiceSyncChangesHandler := connect.NewUnaryHandler(
+		SandboxRuntimeServiceSyncChangesProcedure,
+		svc.SyncChanges,
+		connect.WithSchema(sandboxRuntimeServiceMethods.ByName("SyncChanges")),
+		connect.WithHandlerOptions(opts...),
+	)
+	sandboxRuntimeServiceGetChangesHandler := connect.NewUnaryHandler(
+		SandboxRuntimeServiceGetChangesProcedure,
+		svc.GetChanges,
+		connect.WithSchema(sandboxRuntimeServiceMethods.ByName("GetChanges")),
+		connect.WithHandlerOptions(opts...),
+	)
 	return "/deputy.sandbox.v1.SandboxRuntimeService/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case SandboxRuntimeServiceGetInfoProcedure:
@@ -290,6 +348,10 @@ func NewSandboxRuntimeServiceHandler(svc SandboxRuntimeServiceHandler, opts ...c
 			sandboxRuntimeServiceExecuteHandler.ServeHTTP(w, r)
 		case SandboxRuntimeServiceCleanupProcedure:
 			sandboxRuntimeServiceCleanupHandler.ServeHTTP(w, r)
+		case SandboxRuntimeServiceSyncChangesProcedure:
+			sandboxRuntimeServiceSyncChangesHandler.ServeHTTP(w, r)
+		case SandboxRuntimeServiceGetChangesProcedure:
+			sandboxRuntimeServiceGetChangesHandler.ServeHTTP(w, r)
 		default:
 			http.NotFound(w, r)
 		}
@@ -309,4 +371,12 @@ func (UnimplementedSandboxRuntimeServiceHandler) Execute(context.Context, *conne
 
 func (UnimplementedSandboxRuntimeServiceHandler) Cleanup(context.Context, *connect.Request[v1.CleanupRequest]) (*connect.Response[v1.CleanupResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("deputy.sandbox.v1.SandboxRuntimeService.Cleanup is not implemented"))
+}
+
+func (UnimplementedSandboxRuntimeServiceHandler) SyncChanges(context.Context, *connect.Request[v1.SyncChangesRequest]) (*connect.Response[v1.SyncChangesResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("deputy.sandbox.v1.SandboxRuntimeService.SyncChanges is not implemented"))
+}
+
+func (UnimplementedSandboxRuntimeServiceHandler) GetChanges(context.Context, *connect.Request[v1.GetChangesRequest]) (*connect.Response[v1.GetChangesResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("deputy.sandbox.v1.SandboxRuntimeService.GetChanges is not implemented"))
 }

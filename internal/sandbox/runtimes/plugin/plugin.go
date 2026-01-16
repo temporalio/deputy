@@ -198,6 +198,9 @@ func (r *Runtime) Execute(ctx context.Context, req *sandboxv1.ExecuteRequest) it
 		}
 
 		cfg := req.GetConfig()
+		r.logger.Debug("plugin runtime received config",
+			"workspace_isolation", cfg.GetWorkspaceIsolation().String(),
+			"mode", cfg.GetMode().String())
 		pluginName := strings.TrimSpace(cfg.GetPluginName())
 		if pluginName == "" {
 			yield(errorEvent(executionID, "PLUGIN_REQUIRED", "plugin_name is required for plugin runtime"), nil)

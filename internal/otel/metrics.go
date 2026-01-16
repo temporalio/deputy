@@ -57,6 +57,12 @@ type Metrics struct {
 	MCPToolCalls    metric.Int64Counter
 	MCPToolDuration metric.Float64Histogram
 	MCPToolErrors   metric.Int64Counter
+
+	// Sandbox metrics
+	SandboxExecutions       metric.Int64Counter
+	SandboxExecutionDuration metric.Float64Histogram
+	SandboxFilesChanged     metric.Int64Counter
+	SandboxPolicyDenials    metric.Int64Counter
 }
 
 var (
@@ -336,6 +342,40 @@ func newMetrics() (*Metrics, error) {
 		return nil, err
 	}
 
+	// Sandbox metrics
+	metrics.SandboxExecutions, err = m.Int64Counter(
+		"deputy.sandbox.executions",
+		metric.WithDescription("Number of sandbox executions"),
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	metrics.SandboxExecutionDuration, err = m.Float64Histogram(
+		"deputy.sandbox.execution.duration",
+		metric.WithDescription("Duration of sandbox executions in seconds"),
+		metric.WithUnit("s"),
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	metrics.SandboxFilesChanged, err = m.Int64Counter(
+		"deputy.sandbox.files_changed",
+		metric.WithDescription("Number of files changed during sandbox execution"),
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	metrics.SandboxPolicyDenials, err = m.Int64Counter(
+		"deputy.sandbox.policy_denials",
+		metric.WithDescription("Number of sandbox executions denied by policy"),
+	)
+	if err != nil {
+		return nil, err
+	}
+
 	return metrics, nil
 }
 
@@ -391,6 +431,25 @@ var (
 	AttrImageTransportDaemon    = attribute.String("deputy.image.transport", "docker-daemon")
 	AttrImageTransportTarball   = attribute.String("deputy.image.transport", "tarball")
 	AttrImageTransportOCILayout = attribute.String("deputy.image.transport", "oci-layout")
+
+	// Sandbox runtime attributes
+	AttrSandboxRuntimeNone       = attribute.String("deputy.sandbox.runtime", "none")
+	AttrSandboxRuntimeDocker     = attribute.String("deputy.sandbox.runtime", "docker")
+	AttrSandboxRuntimeGVisor     = attribute.String("deputy.sandbox.runtime", "gvisor")
+	AttrSandboxRuntimeSandboxExec = attribute.String("deputy.sandbox.runtime", "sandbox-exec")
+	AttrSandboxRuntimePlugin     = attribute.String("deputy.sandbox.runtime", "plugin")
+
+	// Sandbox network mode attributes
+	AttrSandboxNetworkNone      = attribute.String("deputy.sandbox.network_mode", "none")
+	AttrSandboxNetworkHost      = attribute.String("deputy.sandbox.network_mode", "host")
+	AttrSandboxNetworkBridge    = attribute.String("deputy.sandbox.network_mode", "bridge")
+	AttrSandboxNetworkAllowlist = attribute.String("deputy.sandbox.network_mode", "allowlist")
+
+	// Sandbox workspace isolation attributes
+	AttrSandboxIsolationDirect   = attribute.String("deputy.sandbox.workspace_isolation", "direct")
+	AttrSandboxIsolationOverlay  = attribute.String("deputy.sandbox.workspace_isolation", "overlay")
+	AttrSandboxIsolationSnapshot = attribute.String("deputy.sandbox.workspace_isolation", "snapshot")
+	AttrSandboxIsolationTmpfs    = attribute.String("deputy.sandbox.workspace_isolation", "tmpfs")
 )
 
 // EcosystemAttr returns an ecosystem attribute for the given ecosystem string.
@@ -646,4 +705,111 @@ func RecordMCPToolCall(ctx context.Context, toolName string, duration float64, s
 	if !success {
 		m.MCPToolErrors.Add(ctx, 1, metric.WithAttributes(toolAttr))
 	}
+}
+
+// SandboxExecutionInfo holds information about a sandbox execution for metrics recording.
+type SandboxExecutionInfo struct {
+	Runtime            string  // Runtime name (e.g., "plugin", "docker", "gvisor")
+	PluginName         string  // Plugin name if runtime is "plugin"
+	NetworkMode        string  // Network mode (e.g., "none", "host", "allowlist")
+	WorkspaceIsolation string  // Workspace isolation mode (e.g., "direct", "overlay")
+	Duration           float64 // Execution duration in seconds
+	ExitCode           int32   // Exit code from the execution
+	FilesAdded         int     // Number of files added
+	FilesModified      int     // Number of files modified
+	FilesDeleted       int     // Number of files deleted
+	Success            bool    // Whether execution succeeded
+}
+
+// SandboxRuntimeAttr returns a sandbox runtime attribute.
+func SandboxRuntimeAttr(runtime string) attribute.KeyValue {
+	return attribute.String("deputy.sandbox.runtime", runtime)
+}
+
+// SandboxPluginAttr returns a sandbox plugin name attribute.
+func SandboxPluginAttr(pluginName string) attribute.KeyValue {
+	return attribute.String("deputy.sandbox.plugin", pluginName)
+}
+
+// SandboxNetworkModeAttr returns a sandbox network mode attribute.
+func SandboxNetworkModeAttr(mode string) attribute.KeyValue {
+	return attribute.String("deputy.sandbox.network_mode", mode)
+}
+
+// SandboxWorkspaceIsolationAttr returns a sandbox workspace isolation attribute.
+func SandboxWorkspaceIsolationAttr(isolation string) attribute.KeyValue {
+	return attribute.String("deputy.sandbox.workspace_isolation", isolation)
+}
+
+// RecordSandboxExecution records metrics for a completed sandbox execution.
+func RecordSandboxExecution(ctx context.Context, info SandboxExecutionInfo) {
+	m := getMetricsForRecording("sandbox_execution")
+	if m == nil {
+		return
+	}
+
+	attrs := []attribute.KeyValue{
+		SandboxRuntimeAttr(info.Runtime),
+	}
+
+	if info.PluginName != "" {
+		attrs = append(attrs, SandboxPluginAttr(info.PluginName))
+	}
+	if info.NetworkMode != "" {
+		attrs = append(attrs, SandboxNetworkModeAttr(info.NetworkMode))
+	}
+	if info.WorkspaceIsolation != "" {
+		attrs = append(attrs, SandboxWorkspaceIsolationAttr(info.WorkspaceIsolation))
+	}
+
+	// Record success/failure
+	if info.Success {
+		attrs = append(attrs, AttrStatusSuccess)
+	} else {
+		attrs = append(attrs, AttrStatusError)
+	}
+
+	// Record exit code as attribute for correlation
+	attrs = append(attrs, attribute.Int("deputy.sandbox.exit_code", int(info.ExitCode)))
+
+	m.SandboxExecutions.Add(ctx, 1, metric.WithAttributes(attrs...))
+	m.SandboxExecutionDuration.Record(ctx, info.Duration, metric.WithAttributes(attrs...))
+
+	// Record file changes
+	totalChanges := info.FilesAdded + info.FilesModified + info.FilesDeleted
+	if totalChanges > 0 {
+		changeAttrs := []attribute.KeyValue{
+			SandboxRuntimeAttr(info.Runtime),
+		}
+		if info.PluginName != "" {
+			changeAttrs = append(changeAttrs, SandboxPluginAttr(info.PluginName))
+		}
+
+		// Record by change type
+		if info.FilesAdded > 0 {
+			m.SandboxFilesChanged.Add(ctx, int64(info.FilesAdded),
+				metric.WithAttributes(append(changeAttrs, attribute.String("change_type", "added"))...))
+		}
+		if info.FilesModified > 0 {
+			m.SandboxFilesChanged.Add(ctx, int64(info.FilesModified),
+				metric.WithAttributes(append(changeAttrs, attribute.String("change_type", "modified"))...))
+		}
+		if info.FilesDeleted > 0 {
+			m.SandboxFilesChanged.Add(ctx, int64(info.FilesDeleted),
+				metric.WithAttributes(append(changeAttrs, attribute.String("change_type", "deleted"))...))
+		}
+	}
+}
+
+// RecordSandboxPolicyDenial records a sandbox execution denied by policy.
+func RecordSandboxPolicyDenial(ctx context.Context, runtime, policyName string) {
+	m := getMetricsForRecording("sandbox_policy_denial")
+	if m == nil {
+		return
+	}
+
+	m.SandboxPolicyDenials.Add(ctx, 1, metric.WithAttributes(
+		SandboxRuntimeAttr(runtime),
+		attribute.String("policy", policyName),
+	))
 }

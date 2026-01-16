@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -28,6 +29,7 @@ type execFlags struct {
 	mode                  string
 	network               string
 	networkAllow          []string
+	networkAudit          string
 	image                 string
 	workspace             string
 	noWorkspace           bool
@@ -83,6 +85,7 @@ network access is disabled for safety.`,
 	cmd.Flags().StringVar(&flags.mode, "mode", "workspace-write", "Filesystem mode (read-only|workspace-write|full-access|network-isolated|ephemeral)")
 	cmd.Flags().StringVar(&flags.network, "network", "none", "Network mode (none|host|bridge|allowlist)")
 	cmd.Flags().StringArrayVar(&flags.networkAllow, "network-allow", nil, "Allowed hosts for network allowlist mode (repeatable)")
+	cmd.Flags().StringVar(&flags.networkAudit, "network-audit", "", "Network audit mode (blocked|all) - logs network connection attempts")
 	cmd.Flags().StringVar(&flags.image, "image", "", "Container image for container runtimes")
 	cmd.Flags().StringVar(&flags.workspace, "workspace", ".", "Workspace directory to mount into the sandbox")
 	cmd.Flags().BoolVar(&flags.noWorkspace, "no-workspace", false, "Disable workspace mounting")
@@ -151,6 +154,10 @@ func runExec(ctx context.Context, deps Dependencies, flags *execFlags, command [
 	if err != nil {
 		return err
 	}
+	networkAudit, err := parseNetworkAudit(flags.networkAudit)
+	if err != nil {
+		return err
+	}
 	envVars, err := parseEnvVars(flags.env)
 	if err != nil {
 		return err
@@ -208,12 +215,16 @@ func runExec(ctx context.Context, deps Dependencies, flags *execFlags, command [
 	var wsIsolationMode sandboxv1.WorkspaceIsolationMode
 	if isolationConfig != nil {
 		wsIsolationMode = isolationConfig.Mode
+		slog.Debug("workspace isolation config built",
+			"mode", wsIsolationMode.String(),
+			"isolation_config_mode", isolationConfig.Mode.String())
 	}
 
 	config := &sandboxv1.SandboxConfig{
 		Runtime:                  runtimeType,
 		Mode:                     mode,
 		NetworkMode:              networkMode,
+		NetworkAudit:             networkAudit,
 		Image:                    strings.TrimSpace(flags.image),
 		Limits:                   limits,
 		NetworkAllowlist:         flags.networkAllow,
@@ -364,6 +375,19 @@ func parseSandboxNetwork(value string) (sandboxv1.NetworkMode, error) {
 		return sandboxv1.NetworkMode_NETWORK_MODE_ALLOWLIST, nil
 	default:
 		return sandboxv1.NetworkMode_NETWORK_MODE_UNSPECIFIED, fmt.Errorf("unsupported network mode %q", value)
+	}
+}
+
+func parseNetworkAudit(value string) (sandboxv1.NetworkAuditMode, error) {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "":
+		return sandboxv1.NetworkAuditMode_NETWORK_AUDIT_MODE_UNSPECIFIED, nil
+	case "blocked":
+		return sandboxv1.NetworkAuditMode_NETWORK_AUDIT_MODE_BLOCKED, nil
+	case "all":
+		return sandboxv1.NetworkAuditMode_NETWORK_AUDIT_MODE_ALL, nil
+	default:
+		return sandboxv1.NetworkAuditMode_NETWORK_AUDIT_MODE_UNSPECIFIED, fmt.Errorf("unsupported network audit mode %q (use 'blocked' or 'all')", value)
 	}
 }
 

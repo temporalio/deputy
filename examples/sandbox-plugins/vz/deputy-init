@@ -11,21 +11,93 @@
 #   <<<DEPUTY_STDOUT>>>       - switches to stdout
 #   <<<DEPUTY_STDERR>>>       - switches to stderr
 #   <<<DEPUTY_EXIT_CODE:N>>>  - reports exit code N
+#   <<<DEPUTY_CHANGES_START>>> - marks beginning of changed files list
+#   <<<DEPUTY_CHANGES_END>>>  - marks end of changed files list
+#   <<<DEPUTY_CHANGE:type:path>>> - reports a single file change (type: A=added, M=modified, D=deleted)
+#   <<<DEPUTY_NETAUDIT_START>>> - marks beginning of network audit log
+#   <<<DEPUTY_NETAUDIT_END>>>   - marks end of network audit log
+#   <<<DEPUTY_NETAUDIT:action:proto:dest:port>>> - reports a network connection (action: ALLOW/DROP)
 
 # Set PATH early for all commands to work
 export PATH="/usr/local/go/bin:/usr/local/bin:/usr/bin:/bin:/sbin:/usr/sbin"
 
 # Mount essential filesystems
-mount -t proc proc /proc 2>/dev/null
-mount -t sysfs sys /sys 2>/dev/null
-mount -t devtmpfs dev /dev 2>/dev/null
-mount -t tmpfs tmpfs /tmp 2>/dev/null
-mount -t tmpfs tmpfs /run 2>/dev/null
+# IMPORTANT: In read-only rootfs mode, we cannot redirect to /dev/null until
+# devtmpfs is mounted. Mount filesystems first without redirection.
+mount -t proc proc /proc
+mount -t sysfs sys /sys
+mount -t devtmpfs dev /dev
+mount -t tmpfs tmpfs /tmp
+mount -t tmpfs tmpfs /run
 
-# Mount workspace via virtio-fs if the tag exists
-# The VZ plugin shares the workspace directory with tag "workspace"
+# Now /dev/null exists and we can use redirections safely
+
+# Mount workspace via virtio-fs
+# The VZ plugin may use two modes:
+#   1. Direct mode: single "workspace" virtiofs share
+#   2. Overlay mode: "workspace-base" (RO) + "workspace-upper" (RW) + overlayfs
 mkdir -p /workspace 2>/dev/null
-mount -t virtiofs workspace /workspace 2>/dev/null || true
+OVERLAY_MODE=false
+CHANGES_SYNC=false
+
+# Load overlay kernel module (required for overlayfs)
+modprobe overlay 2>/dev/null || true
+
+# Try overlay mode: mount workspace-base (RO) via virtiofs
+# In overlay mode, changes are stored on the VM local ext4 rootfs, NOT synced to host.
+# This provides isolation (host workspace protected) without virtiofs workdir issues.
+#
+# Note: virtiofs through macOS VZ.framework has issues with overlayfs workdir operations
+# (EACCES when creating internal directories). Using local ext4 for upper/work avoids this.
+mkdir -p /mnt/workspace-base /mnt/overlay-upper /mnt/overlay-work 2>/dev/null
+
+if mount -t virtiofs workspace-base /mnt/workspace-base 2>/dev/null; then
+    # workspace-base mounted - set up overlayfs with local upper/work dirs
+    # Changes stay in the VM and are discarded on shutdown (ephemeral isolation)
+    if mount -t overlay overlay -o \
+        rw,lowerdir=/mnt/workspace-base,upperdir=/mnt/overlay-upper,workdir=/mnt/overlay-work \
+        /workspace 2>/dev/null; then
+        OVERLAY_MODE=true
+    else
+        # Overlay mount failed, clean up
+        umount /mnt/workspace-base 2>/dev/null
+    fi
+fi
+
+# Fall back to direct workspace mount if overlay mode failed
+if [ "$OVERLAY_MODE" = "false" ]; then
+    mount -t virtiofs workspace /workspace 2>/dev/null || true
+fi
+
+# Try to mount workspace-changes for review_before_commit workflow
+# This share is only created when review_before_commit is enabled
+mkdir -p /mnt/workspace-changes 2>/dev/null
+if mount -t virtiofs workspace-changes /mnt/workspace-changes 2>/dev/null; then
+    CHANGES_SYNC=true
+fi
+
+# Git worktree mode: mount the parent repo's .git directory and fix the gitdir path
+# When using git worktree, the .git file in the worktree contains an absolute host path
+# that doesn't work inside the VM. We mount the .git directory and rewrite the path.
+GIT_WORKTREE_MODE=false
+mkdir -p /mnt/workspace-git 2>/dev/null
+if mount -t virtiofs workspace-git /mnt/workspace-git 2>/dev/null; then
+    GIT_WORKTREE_MODE=true
+
+    # Fix the .git file if it exists and contains a gitdir reference
+    if [ -f /workspace/.git ]; then
+        GITDIR_CONTENT=$(cat /workspace/.git 2>/dev/null)
+        if echo "$GITDIR_CONTENT" | grep -q "^gitdir:"; then
+            # Extract the worktree name from the original path
+            # Format: "gitdir: /host/path/.git/worktrees/wt-name"
+            WORKTREE_NAME=$(echo "$GITDIR_CONTENT" | sed -n 's|.*\.git/worktrees/\([^/]*\).*|\1|p')
+            if [ -n "$WORKTREE_NAME" ] && [ -d "/mnt/workspace-git/worktrees/$WORKTREE_NAME" ]; then
+                # Rewrite the .git file to point to the mounted path
+                echo "gitdir: /mnt/workspace-git/worktrees/$WORKTREE_NAME" > /workspace/.git
+            fi
+        fi
+    fi
+fi
 
 # Synchronize clock from host time passed via kernel cmdline
 # This fixes SSL/TLS certificate validation (VMs boot at epoch by default)
@@ -37,6 +109,15 @@ for param in $(cat /proc/cmdline); do
             break
             ;;
     esac
+done
+
+# Load virtio-net module if available (needed for VZ networking)
+modprobe virtio_net 2>/dev/null || true
+
+# Wait briefly for device to appear
+for i in 1 2 3; do
+    [ -d /sys/class/net/eth0 ] && break
+    sleep 0.1 2>/dev/null || usleep 100000 2>/dev/null || true
 done
 
 # Configure networking if eth0 exists
@@ -64,20 +145,25 @@ if [ -d /sys/class/net/eth0 ]; then
         ip route add default via 192.168.64.1 2>/dev/null
     fi
 
-    # Ensure DNS is configured
+    # Configure DNS
     # Note: macOS vmnet gateway does NOT provide DNS forwarding,
-    # so we use public DNS servers (Cloudflare + Google as fallback)
-    if [ ! -s /etc/resolv.conf ]; then
-        cat > /etc/resolv.conf << 'EOF'
+    # so we always use public DNS servers (Cloudflare + Google)
+    # regardless of what DHCP provides
+    cat > /etc/resolv.conf << 'EOF'
 nameserver 1.1.1.1
 nameserver 8.8.8.8
 EOF
-    fi
 fi
 
 # Parse kernel cmdline for deputy parameters
 CMD_BASE64=""
 WORKDIR=""
+ALLOWLIST_BASE64=""
+PROXY_BASE64=""
+STRICT_PROXY=""
+RUN_AS_USER_BASE64=""
+NETAUDIT=""
+USER_ENV_BASE64=""
 for param in $(cat /proc/cmdline); do
     case "$param" in
         deputy.cmd=*)
@@ -86,8 +172,304 @@ for param in $(cat /proc/cmdline); do
         deputy.workdir=*)
             WORKDIR="${param#deputy.workdir=}"
             ;;
+        deputy.allowlist=*)
+            ALLOWLIST_BASE64="${param#deputy.allowlist=}"
+            ;;
+        deputy.proxy=*)
+            PROXY_BASE64="${param#deputy.proxy=}"
+            ;;
+        deputy.strict_proxy=*)
+            STRICT_PROXY="${param#deputy.strict_proxy=}"
+            ;;
+        deputy.user=*)
+            RUN_AS_USER_BASE64="${param#deputy.user=}"
+            ;;
+        deputy.netaudit=*)
+            NETAUDIT="${param#deputy.netaudit=}"
+            ;;
+        deputy.env=*)
+            USER_ENV_BASE64="${param#deputy.env=}"
+            ;;
     esac
 done
+
+# Decode and export user-specified environment variables
+# Format: base64-encoded newline-separated "KEY=VALUE" pairs
+# These are explicitly passed by the user via --env flags
+if [ -n "$USER_ENV_BASE64" ]; then
+    USER_ENV_DECODED=$(echo "$USER_ENV_BASE64" | base64 -d 2>/dev/null || echo "")
+    if [ -n "$USER_ENV_DECODED" ]; then
+        # Save to a file for sourcing (avoids subshell issues with pipes)
+        echo "$USER_ENV_DECODED" > /tmp/deputy_user_env
+        # Export each KEY=VALUE pair using file redirection (not pipe) to stay in main shell
+        while IFS= read -r line; do
+            [ -n "$line" ] && export "$line"
+        done < /tmp/deputy_user_env
+    fi
+fi
+
+# Decode and set up non-root user if specified
+# This provides defense-in-depth by reducing privilege inside the VM
+RUN_AS_USER=""
+if [ -n "$RUN_AS_USER_BASE64" ]; then
+    RUN_AS_USER=$(echo "$RUN_AS_USER_BASE64" | base64 -d 2>/dev/null || echo "")
+    if [ -n "$RUN_AS_USER" ]; then
+        # Create user if it doesn't exist (Alpine uses adduser, other distros use useradd)
+        if ! id "$RUN_AS_USER" >/dev/null 2>&1; then
+            if command -v adduser >/dev/null 2>&1; then
+                # Alpine: adduser with -D (no password), -H (no home), -s /bin/sh
+                adduser -D -H -s /bin/sh "$RUN_AS_USER" 2>/dev/null || true
+            elif command -v useradd >/dev/null 2>&1; then
+                # Ubuntu/Debian: useradd with -M (no home), -s /bin/sh
+                useradd -M -s /bin/sh "$RUN_AS_USER" 2>/dev/null || true
+            fi
+        fi
+
+        # Ensure user exists now
+        if ! id "$RUN_AS_USER" >/dev/null 2>&1; then
+            RUN_AS_USER="" # Fall back to root if creation failed
+        else
+            # Create a home directory for the user in /tmp (writable)
+            USER_HOME="/tmp/home-$RUN_AS_USER"
+            mkdir -p "$USER_HOME" 2>/dev/null
+            chown "$RUN_AS_USER:$RUN_AS_USER" "$USER_HOME" 2>/dev/null || true
+
+            # Grant workspace access to the user
+            if [ -d /workspace ]; then
+                # For overlay mode, the overlay mount needs to be accessible
+                # For direct mode, we can't change host permissions
+                # Best effort: ensure user can read workspace, write to overlay upper
+                chmod o+rx /workspace 2>/dev/null || true
+                if [ "$OVERLAY_MODE" = "true" ] && [ -d /mnt/overlay-upper ]; then
+                    chown -R "$RUN_AS_USER:$RUN_AS_USER" /mnt/overlay-upper 2>/dev/null || true
+                fi
+            fi
+        fi
+    fi
+fi
+
+# Configure Deputy proxy if specified
+# The proxy URL routes package manager traffic through Deputy for policy enforcement.
+# This enables host-side vulnerability scanning and license checks without guest complexity.
+# Supported package managers: Go (GOPROXY), npm (NPM_CONFIG_REGISTRY), pip (PIP_INDEX_URL)
+#
+# Strict proxy mode (STRICT_PROXY=1):
+# - Removes ",direct" fallback from GOPROXY (forces ALL Go traffic through proxy)
+# - When combined with allowlist, DNS is blocked (see nftables section below)
+# - Makes proxy bypass significantly harder for malicious dependencies
+if [ -n "$PROXY_BASE64" ]; then
+    PROXY_URL=$(echo "$PROXY_BASE64" | base64 -d 2>/dev/null || echo "")
+    if [ -n "$PROXY_URL" ]; then
+        # Go proxy configuration
+        if [ "$STRICT_PROXY" = "1" ]; then
+            # Strict mode: NO fallback to direct - all traffic must go through proxy
+            # This prevents malicious code from bypassing proxy by unsetting GOPROXY
+            export GOPROXY="${PROXY_URL}"
+            export GONOSUMDB="*"  # Proxy handles checksums
+            export GOPRIVATE=""   # No private modules bypass
+        else
+            # Standard mode: fallback to direct for modules not in proxy
+            export GOPROXY="${PROXY_URL},direct"
+        fi
+
+        # npm/yarn proxy configuration
+        export NPM_CONFIG_REGISTRY="$PROXY_URL"
+        export YARN_REGISTRY="$PROXY_URL"
+        export NPM_CONFIG_STRICT_SSL="false"
+
+        # pip proxy configuration (PyPI simple index)
+        export PIP_INDEX_URL="${PROXY_URL}/simple"
+        # Extract host:port for trusted-host setting
+        PROXY_HOST=$(echo "$PROXY_URL" | sed -E 's|https?://||' | cut -d'/' -f1)
+        export PIP_TRUSTED_HOST="$PROXY_HOST"
+
+        # In strict mode, also set HTTP_PROXY to catch tools like curl/wget
+        if [ "$STRICT_PROXY" = "1" ]; then
+            export HTTP_PROXY="$PROXY_URL"
+            export HTTPS_PROXY="$PROXY_URL"
+            export http_proxy="$PROXY_URL"
+            export https_proxy="$PROXY_URL"
+            # But allow localhost connections (for local services)
+            export NO_PROXY="localhost,127.0.0.1"
+            export no_proxy="localhost,127.0.0.1"
+        fi
+    fi
+fi
+
+# Configure network allowlist if specified (ALLOWLIST network mode)
+# The allowlist is a newline-separated list of allowed hosts (host:port or just host)
+# Format: base64-encoded "host1:port1\nhost2:port2\n..."
+# Special marker "__DEPUTY_ALLOWLIST_EMPTY__" signals empty allowlist (DROP all except DNS/DHCP)
+#
+# Strict proxy mode (STRICT_PROXY=1):
+# - DNS queries are BLOCKED after initial hostname resolution
+# - This prevents DNS exfiltration attacks (data encoded in DNS queries to attacker domains)
+# - All hostnames in allowlist are resolved at boot before DNS is blocked
+if [ -n "$ALLOWLIST_BASE64" ] && [ -d /sys/class/net/eth0 ]; then
+    ALLOWLIST=$(echo "$ALLOWLIST_BASE64" | base64 -d 2>/dev/null || echo "")
+    # Check for empty allowlist marker
+    if [ "$ALLOWLIST" = "__DEPUTY_ALLOWLIST_EMPTY__" ]; then
+        ALLOWLIST=""
+    fi
+    if command -v nft >/dev/null 2>&1; then
+        # Load netfilter modules
+        modprobe nf_tables 2>/dev/null || true
+        modprobe nft_chain_nat 2>/dev/null || true
+
+        # Create nftables ruleset for egress filtering
+        # Default policy: DROP all outbound connections except allowlisted hosts
+        # Standard mode: Allow DNS (53), DHCP (67,68), loopback, established connections
+        # Strict mode: Block DNS after initial resolution, only allow DHCP
+        nft flush ruleset 2>/dev/null || true
+
+        # Create base table and chains
+        nft add table inet deputy_filter
+        nft add chain inet deputy_filter output '{ type filter hook output priority 0; policy drop; }'
+        nft add chain inet deputy_filter input '{ type filter hook input priority 0; policy accept; }'
+
+        # Allow loopback
+        nft add rule inet deputy_filter output oif lo accept
+
+        # Allow established/related connections (responses to our requests)
+        nft add rule inet deputy_filter output ct state established,related accept
+
+        # DNS handling depends on strict mode
+        if [ "$STRICT_PROXY" = "1" ]; then
+            # STRICT MODE: DNS will be blocked AFTER we resolve allowlist hostnames
+            # We add DNS rules temporarily, then remove them after resolution
+            # This marker helps us identify which rules to remove
+            nft add rule inet deputy_filter output udp dport 53 accept comment \"temp_dns\"
+            nft add rule inet deputy_filter output tcp dport 53 accept comment \"temp_dns\"
+            DNS_TEMP_RULES=1
+        else
+            # Standard mode: Allow DNS queries (needed for hostname resolution at runtime)
+            nft add rule inet deputy_filter output udp dport 53 accept
+            nft add rule inet deputy_filter output tcp dport 53 accept
+            DNS_TEMP_RULES=0
+        fi
+
+        # Allow DHCP (needed for IP assignment) - always allowed even in strict mode
+        nft add rule inet deputy_filter output udp dport 67 accept
+        nft add rule inet deputy_filter output udp sport 68 accept
+
+        # Parse and add allowlist rules
+        echo "$ALLOWLIST" | while IFS= read -r entry; do
+            [ -z "$entry" ] && continue
+
+            # Parse host:port format
+            case "$entry" in
+                *:*)
+                    HOST="${entry%%:*}"
+                    PORT="${entry#*:}"
+                    ;;
+                *)
+                    HOST="$entry"
+                    PORT=""
+                    ;;
+            esac
+
+            # Resolve hostname to IP if needed
+            # Note: We resolve at boot time since DNS may be blocked later
+            # We prefer IPv4 addresses for simplicity (IPv6 support could be added later)
+            if echo "$HOST" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$'; then
+                IP="$HOST"
+            elif echo "$HOST" | grep -qE '^[0-9a-fA-F:]+$'; then
+                # Skip pure IPv6 addresses for now
+                IP=""
+            else
+                # Resolve hostname - try multiple times as DNS may not be ready
+                # Filter for IPv4 addresses only (match lines starting with digits)
+                IP=""
+                for i in 1 2 3; do
+                    IP=$(getent ahostsv4 "$HOST" 2>/dev/null | awk '/STREAM/{print $1; exit}')
+                    [ -n "$IP" ] && break
+                    sleep 0.5
+                done
+            fi
+
+            if [ -n "$IP" ]; then
+                if [ -n "$PORT" ]; then
+                    # Allow specific port
+                    nft add rule inet deputy_filter output ip daddr "$IP" tcp dport "$PORT" accept 2>/dev/null
+                    nft add rule inet deputy_filter output ip daddr "$IP" udp dport "$PORT" accept 2>/dev/null
+                else
+                    # Allow all ports to this host
+                    nft add rule inet deputy_filter output ip daddr "$IP" accept 2>/dev/null
+                fi
+            fi
+        done
+
+        # STRICT MODE: Remove temporary DNS rules now that all hostnames are resolved
+        # This blocks DNS exfiltration (attacker encoding data in DNS queries like secret.evil.com)
+        if [ "$STRICT_PROXY" = "1" ]; then
+            # Delete rules with temp_dns comment by finding and removing them
+            # nft delete doesn't support comment matching, so we flush and rebuild without DNS
+            # This is a bit heavy-handed but reliable
+            nft flush chain inet deputy_filter output 2>/dev/null || true
+
+            # Rebuild the chain WITHOUT DNS rules
+            nft add rule inet deputy_filter output oif lo accept
+            nft add rule inet deputy_filter output ct state established,related accept
+            # NO DNS rules - blocked in strict mode
+            nft add rule inet deputy_filter output udp dport 67 accept  # DHCP client
+            nft add rule inet deputy_filter output udp sport 68 accept  # DHCP server response
+
+            # Re-add all the allowlist IP rules (already resolved)
+            echo "$ALLOWLIST" | while IFS= read -r entry; do
+                [ -z "$entry" ] && continue
+                case "$entry" in
+                    *:*)
+                        HOST="${entry%%:*}"
+                        PORT="${entry#*:}"
+                        ;;
+                    *)
+                        HOST="$entry"
+                        PORT=""
+                        ;;
+                esac
+                # Use IP if it's already an IP, otherwise it was resolved above
+                if echo "$HOST" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$'; then
+                    IP="$HOST"
+                else
+                    IP=$(getent ahostsv4 "$HOST" 2>/dev/null | awk '/STREAM/{print $1; exit}')
+                fi
+                if [ -n "$IP" ]; then
+                    if [ -n "$PORT" ]; then
+                        nft add rule inet deputy_filter output ip daddr "$IP" tcp dport "$PORT" accept 2>/dev/null
+                        nft add rule inet deputy_filter output ip daddr "$IP" udp dport "$PORT" accept 2>/dev/null
+                    else
+                        nft add rule inet deputy_filter output ip daddr "$IP" accept 2>/dev/null
+                    fi
+                fi
+            done
+        fi
+
+        # Network audit logging
+        # When NETAUDIT=1, log all dropped connections to /tmp/netaudit.log
+        # When NETAUDIT=2, also log allowed connections (verbose mode)
+        NETAUDIT_LOG="/tmp/netaudit.log"
+        if [ "$NETAUDIT" = "1" ] || [ "$NETAUDIT" = "2" ]; then
+            # Ensure log file exists
+            touch "$NETAUDIT_LOG"
+
+            # Add logging rule for dropped packets (final catch-all before implicit drop)
+            # The log prefix helps us parse the output later
+            nft add rule inet deputy_filter output log prefix \"DEPUTY_DROP:\" level info
+        fi
+
+        if [ "$NETAUDIT" = "2" ]; then
+            # Verbose mode: also log allowed connections
+            # We need to add logging before each accept rule
+            # Since nftables processes rules in order, we can add a logging chain
+            nft add chain inet deputy_filter log_allowed
+            nft add rule inet deputy_filter log_allowed log prefix \"DEPUTY_ALLOW:\" level info
+
+            # Create a helper rule to log successful connections
+            # This is tricky - we log established connections as they represent successful outbound
+            nft insert rule inet deputy_filter output ct state new log prefix \"DEPUTY_NEW:\" level info
+        fi
+    fi
+fi
 
 if [ -z "$CMD_BASE64" ]; then
     echo "<<<DEPUTY_OUTPUT_START>>>"
@@ -115,6 +497,7 @@ export HOME="/root"
 export GOPATH="/root/go"
 export GOCACHE="/tmp/go-cache"
 export GOMODCACHE="/tmp/go-mod-cache"
+export GOTOOLCHAIN="local"  # Prevent auto-downloading newer Go versions (uses pre-installed toolchain)
 export npm_config_cache="/tmp/npm-cache"
 export TERM="xterm-256color"
 
@@ -155,8 +538,62 @@ STDOUT_FILE="/tmp/deputy_stdout"
 STDERR_FILE="/tmp/deputy_stderr"
 
 # Execute the command using eval to handle spaces and quotes properly
-eval "$CMD_DECODED" >"$STDOUT_FILE" 2>"$STDERR_FILE"
-EXIT_CODE=$?
+# If RUN_AS_USER is set, use su to drop privileges before executing
+if [ -n "$RUN_AS_USER" ]; then
+    # Prepare environment variables to pass to the subprocess
+    # su -s /bin/sh -c runs the command with a clean environment,
+    # so we need to export key variables
+    ENV_EXPORTS="export PATH='$PATH'"
+    ENV_EXPORTS="$ENV_EXPORTS; export HOME='$USER_HOME'"
+    ENV_EXPORTS="$ENV_EXPORTS; export GOPATH='$USER_HOME/go'"
+    ENV_EXPORTS="$ENV_EXPORTS; export GOCACHE='/tmp/go-cache'"
+    ENV_EXPORTS="$ENV_EXPORTS; export GOMODCACHE='/tmp/go-mod-cache'"
+    ENV_EXPORTS="$ENV_EXPORTS; export GOTOOLCHAIN='local'"
+    ENV_EXPORTS="$ENV_EXPORTS; export npm_config_cache='/tmp/npm-cache'"
+    ENV_EXPORTS="$ENV_EXPORTS; export TERM='$TERM'"
+
+    # Include proxy settings if configured
+    [ -n "$GOPROXY" ] && ENV_EXPORTS="$ENV_EXPORTS; export GOPROXY='$GOPROXY'"
+    [ -n "$GONOSUMDB" ] && ENV_EXPORTS="$ENV_EXPORTS; export GONOSUMDB='$GONOSUMDB'"
+    [ -n "$GOPRIVATE" ] && ENV_EXPORTS="$ENV_EXPORTS; export GOPRIVATE='$GOPRIVATE'"
+    [ -n "$NPM_CONFIG_REGISTRY" ] && ENV_EXPORTS="$ENV_EXPORTS; export NPM_CONFIG_REGISTRY='$NPM_CONFIG_REGISTRY'"
+    [ -n "$YARN_REGISTRY" ] && ENV_EXPORTS="$ENV_EXPORTS; export YARN_REGISTRY='$YARN_REGISTRY'"
+    [ -n "$PIP_INDEX_URL" ] && ENV_EXPORTS="$ENV_EXPORTS; export PIP_INDEX_URL='$PIP_INDEX_URL'"
+    [ -n "$PIP_TRUSTED_HOST" ] && ENV_EXPORTS="$ENV_EXPORTS; export PIP_TRUSTED_HOST='$PIP_TRUSTED_HOST'"
+    [ -n "$HTTP_PROXY" ] && ENV_EXPORTS="$ENV_EXPORTS; export HTTP_PROXY='$HTTP_PROXY'"
+    [ -n "$HTTPS_PROXY" ] && ENV_EXPORTS="$ENV_EXPORTS; export HTTPS_PROXY='$HTTPS_PROXY'"
+    [ -n "$http_proxy" ] && ENV_EXPORTS="$ENV_EXPORTS; export http_proxy='$http_proxy'"
+    [ -n "$https_proxy" ] && ENV_EXPORTS="$ENV_EXPORTS; export https_proxy='$https_proxy'"
+    [ -n "$NO_PROXY" ] && ENV_EXPORTS="$ENV_EXPORTS; export NO_PROXY='$NO_PROXY'"
+    [ -n "$no_proxy" ] && ENV_EXPORTS="$ENV_EXPORTS; export no_proxy='$no_proxy'"
+
+    # Include user-specified environment variables
+    if [ -f /tmp/deputy_user_env ]; then
+        while IFS= read -r envline; do
+            [ -n "$envline" ] && ENV_EXPORTS="$ENV_EXPORTS; export $envline"
+        done < /tmp/deputy_user_env
+    fi
+
+    # Ensure temp directories are writable by the user
+    chmod 1777 /tmp 2>/dev/null || true
+    mkdir -p /tmp/go-cache /tmp/go-mod-cache /tmp/npm-cache 2>/dev/null
+    chown -R "$RUN_AS_USER:$RUN_AS_USER" /tmp/go-cache /tmp/go-mod-cache /tmp/npm-cache 2>/dev/null || true
+
+    # Run as the specified user
+    # Use su with -s /bin/sh to ensure consistent shell
+    su -s /bin/sh "$RUN_AS_USER" -c "$ENV_EXPORTS; cd '$(pwd)'; $CMD_DECODED" >"$STDOUT_FILE" 2>"$STDERR_FILE"
+    EXIT_CODE=$?
+else
+    # Run as root (default behavior)
+    # Source user-specified environment variables before execution
+    if [ -f /tmp/deputy_user_env ]; then
+        while IFS= read -r line; do
+            [ -n "$line" ] && export "$line"
+        done < /tmp/deputy_user_env
+    fi
+    eval "$CMD_DECODED" >"$STDOUT_FILE" 2>"$STDERR_FILE"
+    EXIT_CODE=$?
+fi
 
 # Output stdout
 if [ -s "$STDOUT_FILE" ]; then
@@ -172,6 +609,94 @@ fi
 # Signal end of output and report exit code
 echo "<<<DEPUTY_OUTPUT_END>>>"
 echo "<<<DEPUTY_EXIT_CODE:${EXIT_CODE}>>>"
+
+# Sync overlay filesystems before copying changes
+# This ensures all written data is flushed from the overlayfs cache to the upper layer
+sync
+
+# Sync changes for review_before_commit workflow
+# When overlay mode is active and workspace-changes share is mounted,
+# copy changed files from the overlay upper layer to the host-accessible share
+if [ "$OVERLAY_MODE" = "true" ] && [ "$CHANGES_SYNC" = "true" ]; then
+    echo "<<<DEPUTY_CHANGES_START>>>"
+
+    # Find and sync all changed files from the overlay upper layer
+    # The upper layer contains only files that were added or modified
+    if [ -d /mnt/overlay-upper ] && [ "$(ls -A /mnt/overlay-upper 2>/dev/null)" ]; then
+        cd /mnt/overlay-upper
+        find . -type f 2>/dev/null | while read -r file; do
+            # Remove leading ./
+            relpath="${file#./}"
+
+            # Check if file exists in base (modified) or not (added)
+            if [ -f "/mnt/workspace-base/$relpath" ]; then
+                change_type="M"
+            else
+                change_type="A"
+            fi
+
+            # Copy the file to workspace-changes, preserving directory structure
+            target_dir="/mnt/workspace-changes/$(dirname "$relpath")"
+            mkdir -p "$target_dir" 2>/dev/null
+
+            # Use cat for reliable copy across virtiofs
+            cat "$file" > "/mnt/workspace-changes/$relpath"
+
+            # Report the change
+            echo "<<<DEPUTY_CHANGE:${change_type}:${relpath}>>>"
+        done
+
+        # Find deleted files by checking for whiteout files
+        # OverlayFS uses character devices with 0/0 major/minor for whiteouts
+        find . -type c 2>/dev/null | while read -r file; do
+            relpath="${file#./}"
+            # Check if it is a whiteout (char device 0,0)
+            if [ "$(stat -c '%t,%T' "$file" 2>/dev/null)" = "0,0" ]; then
+                # This is a whiteout - the file was deleted
+                echo "<<<DEPUTY_CHANGE:D:${relpath}>>>"
+            fi
+        done
+    fi
+
+    echo "<<<DEPUTY_CHANGES_END>>>"
+
+    # Ensure changes are flushed to the host
+    sync
+fi
+
+# Report network audit log if enabled
+# Parse kernel log for nftables entries and convert to our protocol format
+if [ "$NETAUDIT" = "1" ] || [ "$NETAUDIT" = "2" ]; then
+    echo "<<<DEPUTY_NETAUDIT_START>>>"
+
+    # Extract network log entries from kernel ring buffer
+    # nftables logs go to the kernel log with our prefixes
+    dmesg 2>/dev/null | grep -E "DEPUTY_(DROP|ALLOW|NEW):" | while IFS= read -r line; do
+        # Parse the nftables log format:
+        # Example: DEPUTY_DROP:IN= OUT=eth0 SRC=192.168.64.10 DST=1.2.3.4 ... PROTO=TCP SPT=54321 DPT=443
+        action=""
+        case "$line" in
+            *DEPUTY_DROP:*) action="DROP" ;;
+            *DEPUTY_ALLOW:*|*DEPUTY_NEW:*) action="ALLOW" ;;
+        esac
+
+        if [ -n "$action" ]; then
+            # Extract destination IP
+            dst=$(echo "$line" | grep -oE 'DST=[0-9.]+' | cut -d= -f2)
+            # Extract protocol
+            proto=$(echo "$line" | grep -oE 'PROTO=[A-Z]+' | cut -d= -f2)
+            # Extract destination port (DPT for TCP/UDP)
+            dport=$(echo "$line" | grep -oE 'DPT=[0-9]+' | cut -d= -f2)
+
+            if [ -n "$dst" ]; then
+                # Format: action:proto:dest:port
+                echo "<<<DEPUTY_NETAUDIT:${action}:${proto:-?}:${dst}:${dport:-0}>>>"
+            fi
+        fi
+    done
+
+    echo "<<<DEPUTY_NETAUDIT_END>>>"
+fi
 
 # Shutdown the VM
 exec /sbin/poweroff -f

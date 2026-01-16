@@ -12,6 +12,7 @@ import (
 	"time"
 
 	sandboxv1 "github.com/picatz/deputy/gen/deputy/sandbox/v1"
+	"github.com/picatz/deputy/internal/otel"
 	"github.com/picatz/deputy/internal/policy"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
@@ -241,6 +242,8 @@ func (m *Manager) Execute(ctx context.Context, req *sandboxv1.ExecuteRequest) it
 			if err := m.evaluateExecutionPolicy(ctx, req); err != nil {
 				// Audit: Log policy denial
 				m.auditor.LogPolicyDenied(ctx, executionID, runtimeType, "sandbox_execution", err.Error())
+				// Record OTel metric for policy denial
+				otel.RecordSandboxPolicyDenial(ctx, runtimeType.String(), "sandbox_execution")
 				yield(&sandboxv1.ExecuteEvent{
 					ExecutionId: executionID,
 					Timestamp:   timestamppb.Now(),
@@ -269,7 +272,7 @@ func (m *Manager) Execute(ctx context.Context, req *sandboxv1.ExecuteRequest) it
 			"network", cfg.GetNetworkMode().String(),
 		)
 
-		// Track completion for audit
+		// Track completion for audit and metrics
 		var exitCode int32
 		var execErr error
 
@@ -289,12 +292,23 @@ func (m *Manager) Execute(ctx context.Context, req *sandboxv1.ExecuteRequest) it
 		}
 
 		// Audit: Log completion or failure
+		durationMs := time.Since(startTime).Milliseconds()
 		if execErr != nil {
 			m.auditor.LogExecutionFailed(ctx, executionID, runtimeType, execErr)
 		} else {
-			durationMs := time.Since(startTime).Milliseconds()
 			m.auditor.LogExecutionCompleted(ctx, executionID, runtimeType, exitCode, durationMs)
 		}
+
+		// Record OTel metrics (host-side observability)
+		otel.RecordSandboxExecution(ctx, otel.SandboxExecutionInfo{
+			Runtime:            runtimeType.String(),
+			PluginName:         cfg.GetPluginName(),
+			NetworkMode:        cfg.GetNetworkMode().String(),
+			WorkspaceIsolation: cfg.GetWorkspaceIsolation().String(),
+			Duration:           float64(durationMs) / 1000.0,
+			ExitCode:           exitCode,
+			Success:            execErr == nil,
+		})
 	}
 }
 
@@ -306,23 +320,27 @@ func (m *Manager) normalizeConfig(cfg *sandboxv1.SandboxConfig) *sandboxv1.Sandb
 
 	// Create a copy to avoid modifying the original
 	normalized := &sandboxv1.SandboxConfig{
-		Runtime:          cfg.Runtime,
-		Mode:             cfg.Mode,
-		NetworkMode:      cfg.NetworkMode,
-		Image:            cfg.Image,
-		Limits:           cfg.Limits,
-		Mounts:           cfg.Mounts,
-		NetworkAllowlist: cfg.NetworkAllowlist,
-		DropCapabilities: cfg.DropCapabilities,
-		AddCapabilities:  cfg.AddCapabilities,
-		SeccompProfile:   cfg.SeccompProfile,
-		User:             cfg.User,
-		Group:            cfg.Group,
-		ReadOnlyPaths:    cfg.ReadOnlyPaths,
-		HiddenPaths:      cfg.HiddenPaths,
-		PluginName:       cfg.PluginName,
-		ExtraOptions:     cfg.ExtraOptions,
-		ExecAllowlist:    cfg.ExecAllowlist,
+		Runtime:                  cfg.Runtime,
+		Mode:                     cfg.Mode,
+		NetworkMode:              cfg.NetworkMode,
+		Image:                    cfg.Image,
+		Limits:                   cfg.Limits,
+		Mounts:                   cfg.Mounts,
+		NetworkAllowlist:         cfg.NetworkAllowlist,
+		DropCapabilities:         cfg.DropCapabilities,
+		AddCapabilities:          cfg.AddCapabilities,
+		SeccompProfile:           cfg.SeccompProfile,
+		User:                     cfg.User,
+		Group:                    cfg.Group,
+		ReadOnlyPaths:            cfg.ReadOnlyPaths,
+		HiddenPaths:              cfg.HiddenPaths,
+		PluginName:               cfg.PluginName,
+		ExtraOptions:             cfg.ExtraOptions,
+		ExecAllowlist:            cfg.ExecAllowlist,
+		WorkspaceIsolation:       cfg.WorkspaceIsolation,
+		FileMask:                 cfg.FileMask,
+		ReviewBeforeCommit:       cfg.ReviewBeforeCommit,
+		WorkspaceIsolationConfig: cfg.WorkspaceIsolationConfig,
 	}
 
 	// Apply defaults
