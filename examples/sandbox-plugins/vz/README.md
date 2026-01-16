@@ -937,7 +937,8 @@ Environment variables are **optional** when using the Alpine build script, which
 |----------|-------------|---------|
 | `DEPUTY_VZ_PROXY` | Deputy proxy URL for package manager traffic | (none) |
 | `DEPUTY_VZ_STRICT_PROXY` | Enable strict proxy mode with DNS blocking (`true`/`false`) | `false` |
-| `DEPUTY_VZ_USER` | Run commands as this unprivileged user instead of root | (none - runs as root) |
+
+> **Note:** For non-root execution, use the `--user` CLI flag instead of environment variables. See [Non-Root Execution](#non-root-execution-defense-in-depth) section.
 
 See [Security Considerations](#security-considerations) for details on security levels and strict mode.
 
@@ -946,32 +947,47 @@ See [Security Considerations](#security-considerations) for details on security 
 > [!TIP]
 > **Run as non-root when possible.** While "root inside the VM" doesn't grant host access, it does give full control over the guest filesystem—including the ability to modify cached toolchains, install rootkits in the persistent rootfs, or plant files that persist across executions. Using `--user nobody` adds a meaningful layer of defense for untrusted workloads.
 
-By default, commands run as `root` inside the VM. For defense-in-depth, you can run as an unprivileged user:
+By default, commands run as `root` inside the VM. For defense-in-depth, you can run as an unprivileged user using the `--user` flag:
 
 ```bash
-# Run as "nobody" user
-DEPUTY_VZ_USER=nobody deputy exec --runtime plugin --plugin vz \
+# Run as "nobody" user (recommended for most operations)
+deputy exec --runtime plugin --plugin vz --user nobody \
     --workspace . \
     --network host \
     -- go build ./...
 
 # Run as a custom "deputy" user (created if it doesn't exist)
-DEPUTY_VZ_USER=deputy deputy exec --runtime plugin --plugin vz \
+deputy exec --runtime plugin --plugin vz --user deputy \
     --workspace . \
     -- npm install
+
+# Run tests as non-root
+deputy exec --runtime plugin --plugin vz --user nobody \
+    --workspace . \
+    -- go test ./...
 ```
+
+> [!NOTE]
+> The `--user` flag is the recommended way to specify non-root execution. It works across all sandbox runtimes and is more explicit than environment variables.
 
 **How it works:**
 - The user is created inside the VM if it doesn't exist (via `adduser`/`useradd`)
 - A temporary home directory is created at `/tmp/home-<user>`
 - Go/npm caches are set up in writable directories
-- Proxy environment variables are passed through
+- Environment variables (including `--env` flags) are passed through
 - For overlay workspace mode, the user gets write access to the overlay upper layer
 
 **Security benefits:**
 - Limits damage if a malicious package achieves code execution
 - Prevents modification of system files in the rootfs
 - Follows principle of least privilege
+
+**When you need root:**
+- Installing system packages (`apk add`, `apt install`)
+- Modifying system configuration
+- Debugging certain permission issues
+
+Use `--user root` if you explicitly need root access (not recommended for general use).
 
 ### Using Default Paths (Recommended)
 
@@ -3149,7 +3165,7 @@ This ensures:
 | **Basic** | `--network host` + `DEPUTY_VZ_PROXY` | Policy enforcement only | Development, trusted code |
 | **Standard** | `--network allowlist` + `DEPUTY_VZ_PROXY` | Policy + egress filtering | CI/CD, moderate isolation |
 | **Strict** | `--network allowlist` + `DEPUTY_VZ_PROXY` + `DEPUTY_VZ_STRICT_PROXY=true` | Policy + egress + DNS blocking | Production, untrusted code |
-| **Maximum** | Strict + `DEPUTY_VZ_USER=nobody` | All above + privilege reduction | AI agents, untrusted code |
+| **Maximum** | Strict + `--user nobody` | All above + privilege reduction | AI agents, untrusted code |
 
 #### Attack Vectors by Security Level
 
@@ -3253,9 +3269,9 @@ Maximum security combines all protections: strict proxy + non-root execution:
 # Maximum security: strict proxy + allowlist + non-root user
 export DEPUTY_VZ_PROXY=http://192.168.64.1:8080
 export DEPUTY_VZ_STRICT_PROXY=true
-export DEPUTY_VZ_USER=nobody
 
 deputy exec --runtime plugin --plugin vz \
+    --user nobody \
     --workspace . \
     --network allowlist \
     --network-allow "192.168.64.1:8080" \
@@ -3273,7 +3289,8 @@ This is the recommended configuration for:
 |----------|-------------|---------|
 | `DEPUTY_VZ_PROXY` | Deputy proxy URL | (none) |
 | `DEPUTY_VZ_STRICT_PROXY` | Enable strict proxy mode (`true`/`false`) | `false` |
-| `DEPUTY_VZ_USER` | Run as unprivileged user (e.g., `nobody`) | (root) |
+
+> **Note:** Use `--user nobody` flag instead of environment variables for non-root execution. See [Non-Root Execution](#non-root-execution-defense-in-depth) section.
 
 #### Remaining Attack Surface (Maximum Mode)
 

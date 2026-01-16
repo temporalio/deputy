@@ -48,6 +48,9 @@ type execFlags struct {
 	execAllow             []string
 	dangerouslySkipPrompt bool
 
+	// User privilege flag
+	user string // User to run as inside the sandbox (e.g., "nobody", "deputy", "1000", "root")
+
 	// Workspace isolation flags
 	workspaceIsolation string
 	isolationSizeLimit string
@@ -104,6 +107,9 @@ network access is disabled for safety.`,
 	cmd.Flags().StringArrayVar(&flags.execAllow, "exec-allow", nil, "Allow additional executables by path or command name (repeatable)")
 	cmd.Flags().BoolVar(&flags.dangerouslySkipPrompt, "dangerously-skip-prompt", false, "Skip confirmation prompt for dangerous modes (full-access, host network)")
 
+	// User privilege flag
+	cmd.Flags().StringVar(&flags.user, "user", "", "User to run as inside sandbox (e.g., nobody, deputy, 1000). Use 'root' for root access (not recommended)")
+
 	// Workspace isolation flags
 	cmd.Flags().StringVar(&flags.workspaceIsolation, "workspace-isolation", "", "Workspace isolation mode (direct|snapshot|overlay|tmpfs|git-worktree)")
 	cmd.Flags().StringVar(&flags.isolationSizeLimit, "isolation-size-limit", "", "Size limit for overlay/tmpfs isolation (e.g., 1g, 512m)")
@@ -119,6 +125,10 @@ network access is disabled for safety.`,
 		"deputy exec --runtime docker --image alpine:3.19 -- echo hello",
 		"deputy exec --runtime sandbox-exec --mode read-only -- ls -la",
 		"deputy exec --runtime docker --network allowlist --network-allow proxy.golang.org:443 --image golang:1.22-alpine -- go env GOPATH",
+		"",
+		"# Run as non-root user (defense-in-depth)",
+		"deputy exec --runtime plugin --plugin vz --user nobody -- go build ./...",
+		"deputy exec --runtime docker --user 1000 --image golang:1.22-alpine -- go test ./...",
 		"",
 		"# Workspace isolation (copy-on-write style)",
 		"deputy exec --runtime docker --workspace-isolation snapshot --image node:22-alpine -- npm install",
@@ -220,6 +230,12 @@ func runExec(ctx context.Context, deps Dependencies, flags *execFlags, command [
 			"isolation_config_mode", isolationConfig.Mode.String())
 	}
 
+	// Warn if running as root
+	user := strings.TrimSpace(flags.user)
+	if user == "root" || user == "0" {
+		slog.Warn("Running as root inside sandbox reduces defense-in-depth. Consider using --user nobody instead.")
+	}
+
 	config := &sandboxv1.SandboxConfig{
 		Runtime:                  runtimeType,
 		Mode:                     mode,
@@ -233,6 +249,7 @@ func runExec(ctx context.Context, deps Dependencies, flags *execFlags, command [
 		WorkspaceIsolation:       wsIsolationMode,
 		FileMask:                 fileMaskConfig,
 		WorkspaceIsolationConfig: isolationConfig,
+		User:                     user,
 	}
 
 	req := &sandboxv1.ExecuteRequest{
