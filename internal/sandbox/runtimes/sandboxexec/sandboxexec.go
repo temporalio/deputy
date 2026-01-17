@@ -666,24 +666,7 @@ func withTimeout(ctx context.Context, req *sandboxv1.ExecuteRequest, cfg *sandbo
 }
 
 func filteredEnvironment(extra map[string]string) ([]string, []string) {
-	env := make(map[string]string)
-	for _, entry := range os.Environ() {
-		parts := strings.SplitN(entry, "=", 2)
-		if len(parts) != 2 {
-			continue
-		}
-		env[parts[0]] = parts[1]
-	}
-	for k, v := range extra {
-		env[k] = v
-	}
-	filtered, removed := sandbox.FilterEnvVars(env)
-
-	out := make([]string, 0, len(filtered))
-	for k, v := range filtered {
-		out = append(out, fmt.Sprintf("%s=%s", k, v))
-	}
-	return out, removed
+	return sandbox.SanitizeEnvironment(os.Environ(), extra)
 }
 
 func streamPipe(wg *sync.WaitGroup, reader io.Reader, isStderr bool, executionID string, out chan<- *sandboxv1.ExecuteEvent) {

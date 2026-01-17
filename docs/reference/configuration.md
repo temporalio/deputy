@@ -166,6 +166,7 @@ ai:
 **Environment variables:**
 - `DEPUTY_SCAN_ECOSYSTEMS` (comma-separated)
 - `DEPUTY_SCAN_SKIP_CACHE`
+- `DEPUTY_OSV_BASE_URL` (override OSV API base URL; useful for tests or mirrors)
 
 ### SBOM
 
@@ -368,6 +369,7 @@ DEPUTY_CONFIG=/path/to/config.yaml
 # Scanning
 DEPUTY_SCAN_ECOSYSTEMS=go,npm
 DEPUTY_SCAN_SKIP_CACHE=true
+DEPUTY_OSV_BASE_URL=https://api.osv.dev
 
 # Policy
 DEPUTY_POLICY_PATHS=policy/a.yaml,policy/b.yaml

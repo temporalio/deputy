@@ -122,6 +122,13 @@ deputy config show --format json | jq -r '.logging.level'
 deputy config show --format json | jq '.performance.cache.disabled'
 ```
 
+### Custom OSV Endpoint
+
+```bash
+# Point Deputy at a custom OSV API (test server or mirror)
+DEPUTY_OSV_BASE_URL=https://osv.mirror.local deputy config show
+```
+
 ## Exit Codes
 
 | Code | Meaning |

@@ -9,9 +9,9 @@ import (
 	"time"
 )
 
-// BlockedEnvVars contains environment variables that should never be passed
+// DangerousEnvVars contains environment variables that should never be passed
 // to sandboxed processes as they can be used for code injection or privilege escalation.
-var BlockedEnvVars = map[string]bool{
+var DangerousEnvVars = map[string]bool{
 	// Dynamic linker injection
 	"LD_PRELOAD":      true,
 	"LD_LIBRARY_PATH": true,
@@ -25,30 +25,82 @@ var BlockedEnvVars = map[string]bool{
 	"DYLD_FRAMEWORK_PATH":   true,
 
 	// Language-specific code injection
-	"PYTHONPATH":      true,
-	"PYTHONSTARTUP":   true,
-	"RUBYOPT":         true,
-	"RUBYLIB":         true,
-	"PERL5LIB":        true,
-	"PERL5OPT":        true,
-	"NODE_OPTIONS":    true,
-	"NODE_PATH":       true,
+	"PYTHONPATH":        true,
+	"PYTHONSTARTUP":     true,
+	"RUBYOPT":           true,
+	"RUBYLIB":           true,
+	"PERL5LIB":          true,
+	"PERL5OPT":          true,
+	"NODE_OPTIONS":      true,
+	"NODE_PATH":         true,
 	"JAVA_TOOL_OPTIONS": true,
 
 	// Shell injection vectors
-	"BASH_ENV":    true,
-	"ENV":         true,
-	"CDPATH":      true,
-	"GLOBIGNORE":  true,
+	"BASH_ENV":       true,
+	"ENV":            true,
+	"CDPATH":         true,
+	"GLOBIGNORE":     true,
 	"PROMPT_COMMAND": true,
+}
 
-	// Credential/token leakage prevention
-	"AWS_SECRET_ACCESS_KEY": true,
-	"AWS_SESSION_TOKEN":     true,
-	"GITHUB_TOKEN":          true,
-	"GH_TOKEN":              true,
-	"ANTHROPIC_API_KEY":     true,
-	"OPENAI_API_KEY":        true,
+// BlockedEnvVars is a deprecated alias for DangerousEnvVars.
+var BlockedEnvVars = DangerousEnvVars
+
+// SafeHostEnvVars contains environment variables that are considered safe to inherit
+// from the host environment. All other host variables will be stripped unless
+// explicitly provided by the user.
+var SafeHostEnvVars = map[string]bool{
+	"PATH": true,
+	"TERM": true,
+	"HOME": true,
+	"LANG": true,
+	"TZ":   true,
+}
+
+// SanitizeEnvironment constructs a safe environment for a sandboxed process.
+//
+// It strictly limits inherited host variables to SafeHostEnvVars, then applies
+// user-provided variables. Finally, it ensures no DangerousEnvVars are present
+// in the final result.
+//
+// Returns:
+//   - finalEnv: The safe list of "KEY=VALUE" strings
+//   - removed: List of keys that were blocked/removed (for auditing)
+func SanitizeEnvironment(hostEnv []string, userEnv map[string]string) (finalEnv []string, removed []string) {
+	// 1. Start with safe host variables
+	safeMap := make(map[string]string)
+
+	for _, entry := range hostEnv {
+		k, v, ok := strings.Cut(entry, "=")
+		if !ok || k == "" {
+			continue
+		}
+
+		// Only inherit allowed host variables
+		if SafeHostEnvVars[k] {
+			safeMap[k] = v
+		}
+	}
+
+	// 2. Apply user-provided variables (overriding host vars)
+	for k, v := range userEnv {
+		safeMap[k] = v
+	}
+
+	// 3. Filter out dangerous variables
+	// We do this last to ensure even user-provided vars are checked against the blocklist
+	// (as per existing security policy to prevent accidental privilege escalation)
+	filteredEnv := make([]string, 0, len(safeMap))
+
+	for k, v := range safeMap {
+		if DangerousEnvVars[k] || DangerousEnvVars[strings.ToUpper(k)] {
+			removed = append(removed, k)
+			continue
+		}
+		filteredEnv = append(filteredEnv, fmt.Sprintf("%s=%s", k, v))
+	}
+
+	return filteredEnv, removed
 }
 
 // FilterEnvVars removes dangerous environment variables from the provided map.
@@ -56,7 +108,7 @@ var BlockedEnvVars = map[string]bool{
 func FilterEnvVars(env map[string]string) (filtered map[string]string, removed []string) {
 	filtered = make(map[string]string, len(env))
 	for k, v := range env {
-		if BlockedEnvVars[k] || BlockedEnvVars[strings.ToUpper(k)] {
+		if DangerousEnvVars[k] || DangerousEnvVars[strings.ToUpper(k)] {
 			removed = append(removed, k)
 			continue
 		}
@@ -93,10 +145,10 @@ func ValidatePath(path string) error {
 		"/etc/shadow",
 		"/etc/sudoers",
 		"/root",
-		"/proc/1",        // Host init process
-		"/sys/firmware",  // UEFI/BIOS
-		"/dev/mem",       // Physical memory
-		"/dev/kmem",      // Kernel memory
+		"/proc/1",       // Host init process
+		"/sys/firmware", // UEFI/BIOS
+		"/dev/mem",      // Physical memory
+		"/dev/kmem",     // Kernel memory
 	}
 
 	for _, sensitive := range sensitiveRoots {
@@ -153,12 +205,12 @@ func GenerateExecutionID(prefix string) string {
 // suitable for most sandboxed workloads.
 func MinimalCapabilities() []string {
 	return []string{
-		"CAP_CHOWN",           // Change file ownership
-		"CAP_FOWNER",          // Bypass permission checks for file owner
-		"CAP_FSETID",          // Set file SUID/SGID bits
-		"CAP_KILL",            // Send signals
-		"CAP_SETGID",          // Set GID
-		"CAP_SETUID",          // Set UID
+		"CAP_CHOWN",            // Change file ownership
+		"CAP_FOWNER",           // Bypass permission checks for file owner
+		"CAP_FSETID",           // Set file SUID/SGID bits
+		"CAP_KILL",             // Send signals
+		"CAP_SETGID",           // Set GID
+		"CAP_SETUID",           // Set UID
 		"CAP_NET_BIND_SERVICE", // Bind to ports < 1024
 	}
 }
@@ -175,23 +227,23 @@ func DefaultCapabilities() []string {
 		"CAP_SETGID",
 		"CAP_SETUID",
 		"CAP_NET_BIND_SERVICE",
-		"CAP_NET_RAW",  // Raw sockets (needed for ping, etc.)
-		"CAP_MKNOD",    // Create special files
+		"CAP_NET_RAW", // Raw sockets (needed for ping, etc.)
+		"CAP_MKNOD",   // Create special files
 	}
 }
 
 // DangerousCapabilities that should never be granted in a sandbox.
 var DangerousCapabilities = []string{
-	"CAP_SYS_ADMIN",    // Mount, namespace operations, etc.
-	"CAP_SYS_PTRACE",   // Debug other processes
-	"CAP_SYS_MODULE",   // Load kernel modules
-	"CAP_SYS_RAWIO",    // Direct I/O access
-	"CAP_SYS_BOOT",     // Reboot system
+	"CAP_SYS_ADMIN",       // Mount, namespace operations, etc.
+	"CAP_SYS_PTRACE",      // Debug other processes
+	"CAP_SYS_MODULE",      // Load kernel modules
+	"CAP_SYS_RAWIO",       // Direct I/O access
+	"CAP_SYS_BOOT",        // Reboot system
 	"CAP_DAC_READ_SEARCH", // Bypass file read permission checks
-	"CAP_DAC_OVERRIDE", // Bypass file permission checks (removed from default)
-	"CAP_SYS_CHROOT",   // Can help escape chroot (removed from default)
-	"CAP_SETPCAP",      // Modify process capabilities (removed from default)
-	"CAP_SETFCAP",      // Set file capabilities (removed from default)
+	"CAP_DAC_OVERRIDE",    // Bypass file permission checks (removed from default)
+	"CAP_SYS_CHROOT",      // Can help escape chroot (removed from default)
+	"CAP_SETPCAP",         // Modify process capabilities (removed from default)
+	"CAP_SETFCAP",         // Set file capabilities (removed from default)
 }
 
 // ResourceDefaults provides sensible default resource limits.

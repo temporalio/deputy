@@ -36,6 +36,7 @@ Stable, "look it up" documentation for Deputy configuration.
 | --- | --- |
 | `DEPUTY_SCAN_ECOSYSTEMS` | Comma-separated ecosystems to scan (e.g., `go,npm`) |
 | `DEPUTY_SCAN_SKIP_CACHE` | Disable result caching (`true`/`false`) |
+| `DEPUTY_OSV_BASE_URL` | Override OSV API base URL (tests or mirrors) |
 
 ### Policy
 

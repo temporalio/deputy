@@ -1,8 +1,12 @@
 package cmd
 
 import (
+	"encoding/json"
 	"io"
+	"net/http"
+	"net/http/httptest"
 	"os"
+	"path"
 	"path/filepath"
 	"testing"
 
@@ -15,7 +19,8 @@ import (
 // TestRunScanBasicExecution tests that a scan can run successfully on a test directory.
 // This is an integration test that uses the real scanning infrastructure.
 func TestRunScanBasicExecution(t *testing.T) {
-	t.Parallel()
+	osvServer := newOSVTestServer(t)
+	t.Setenv("DEPUTY_OSV_BASE_URL", osvServer.URL)
 
 	tmpDir := t.TempDir()
 	writeGoModule(t, tmpDir)
@@ -38,6 +43,56 @@ func TestRunScanBasicExecution(t *testing.T) {
 	if _, err := os.Stat(outPath); err != nil {
 		t.Fatalf("output file not created: %v", err)
 	}
+}
+
+func newOSVTestServer(t *testing.T) *httptest.Server {
+	t.Helper()
+
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodPost && r.URL.Path == "/v1/querybatch":
+			var req struct {
+				Queries []json.RawMessage `json:"queries"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+				http.Error(w, "bad request", http.StatusBadRequest)
+				return
+			}
+
+			type minimalResponse struct {
+				Vulns []struct {
+					ID string `json:"id,omitempty"`
+				} `json:"vulns"`
+			}
+
+			results := make([]minimalResponse, len(req.Queries))
+			for i := range results {
+				results[i] = minimalResponse{Vulns: []struct {
+					ID string `json:"id,omitempty"`
+				}{}}
+			}
+
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(struct {
+				Results []minimalResponse `json:"results"`
+			}{Results: results})
+			return
+
+		case r.Method == http.MethodGet && path.Dir(r.URL.Path) == "/v1/vulns":
+			id := path.Base(r.URL.Path)
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(struct {
+				ID string `json:"id"`
+			}{ID: id})
+			return
+		}
+
+		http.NotFound(w, r)
+	})
+
+	server := httptest.NewServer(handler)
+	t.Cleanup(server.Close)
+	return server
 }
 
 func newScanTestCommand(t *testing.T) *cobra.Command {

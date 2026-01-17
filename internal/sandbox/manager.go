@@ -499,12 +499,16 @@ func (m *Manager) logEnvFiltered(ctx context.Context, executionID string, runtim
 		return
 	}
 
-	env := req.GetEnv()
+	var removed []string
 	if runtime == sandboxv1.Runtime_RUNTIME_SANDBOX_EXEC {
-		env = mergeEnv(os.Environ(), env)
+		// Sandbox exec inherits host environment, so we use strict sanitization
+		_, removed = SanitizeEnvironment(os.Environ(), req.GetEnv())
+	} else {
+		// Other runtimes (containers) generally don't inherit host environment,
+		// so we only filter the explicit user-provided environment variables.
+		_, removed = SanitizeEnvironment(nil, req.GetEnv())
 	}
 
-	_, removed := FilterEnvVars(env)
 	m.auditor.LogEnvFiltered(ctx, executionID, runtime, removed)
 }
 
