@@ -7,7 +7,6 @@ import (
 	"log/slog"
 	"os"
 	"runtime"
-	"strings"
 	"sync"
 	"time"
 
@@ -510,25 +509,4 @@ func (m *Manager) logEnvFiltered(ctx context.Context, executionID string, runtim
 	}
 
 	m.auditor.LogEnvFiltered(ctx, executionID, runtime, removed)
-}
-
-func mergeEnv(base []string, extra map[string]string) map[string]string {
-	merged := make(map[string]string, len(base)+len(extra))
-	for _, entry := range base {
-		key, value, ok := strings.Cut(entry, "=")
-		if !ok {
-			continue
-		}
-		if key == "" {
-			continue
-		}
-		merged[key] = value
-	}
-	for key, value := range extra {
-		if key == "" {
-			continue
-		}
-		merged[key] = value
-	}
-	return merged
 }

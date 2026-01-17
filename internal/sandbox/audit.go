@@ -113,8 +113,6 @@ func NewAuditor(logger *slog.Logger) *Auditor {
 
 // Log records an audit event.
 func (a *Auditor) Log(ctx context.Context, event AuditEvent) {
-	event.Timestamp = time.Now()
-
 	level := slog.LevelInfo
 	if event.SecurityEvent || event.PolicyDenied {
 		level = slog.LevelWarn
