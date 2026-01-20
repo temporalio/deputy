@@ -10,13 +10,323 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/charmbracelet/lipgloss"
 	sandboxv1 "github.com/picatz/deputy/gen/deputy/sandbox/v1"
+	"github.com/picatz/deputy/internal/compare"
+	"github.com/picatz/deputy/internal/inventory"
 	"github.com/picatz/deputy/internal/sandbox/workspace"
 	"github.com/picatz/deputy/internal/ui"
 	"golang.org/x/term"
 )
+
+// getTerminalWidth returns the current terminal width, or a sensible default.
+func getTerminalWidth() int {
+	width, _, err := term.GetSize(int(os.Stdout.Fd()))
+	if err == nil && width > 0 {
+		return width
+	}
+	return 80 // sensible default
+}
+
+// minInt returns the smaller of two integers.
+func minInt(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
+}
+
+// truncatePath shortens a path to fit within maxLen, preserving the filename.
+func truncatePath(path string, maxLen int) string {
+	if utf8.RuneCountInString(path) <= maxLen {
+		return path
+	}
+
+	// Keep the filename and as much of the path as possible
+	dir, file := filepath.Split(path)
+	if utf8.RuneCountInString(file) >= maxLen-4 {
+		// Filename alone is too long, truncate it
+		runes := []rune(file)
+		return "..." + string(runes[len(runes)-maxLen+3:])
+	}
+
+	// Truncate directory part
+	remaining := maxLen - utf8.RuneCountInString(file) - 4 // ".../"
+	if remaining < 1 {
+		return file
+	}
+
+	dirRunes := []rune(dir)
+	if len(dirRunes) > remaining {
+		return ".../" + string(dirRunes[len(dirRunes)-remaining:]) + file
+	}
+	return path
+}
+
+// dependencyManifests maps filename patterns to their ecosystem names.
+// These are files that, when modified, indicate dependency changes.
+var dependencyManifests = map[string]string{
+	// Go
+	"go.mod": "go",
+	"go.sum": "go",
+	// Node.js / npm / yarn / pnpm
+	"package.json":      "npm",
+	"package-lock.json": "npm",
+	"yarn.lock":         "npm",
+	"pnpm-lock.yaml":    "npm",
+	// Python
+	"requirements.txt":      "pypi",
+	"Pipfile":               "pypi",
+	"Pipfile.lock":          "pypi",
+	"pyproject.toml":        "pypi",
+	"poetry.lock":           "pypi",
+	"setup.py":              "pypi",
+	"setup.cfg":             "pypi",
+	"conda-environment.yml": "conda",
+	// Rust
+	"Cargo.toml": "cargo",
+	"Cargo.lock": "cargo",
+	// Ruby
+	"Gemfile":      "rubygems",
+	"Gemfile.lock": "rubygems",
+	// Java / Maven / Gradle
+	"pom.xml":           "maven",
+	"build.gradle":      "maven",
+	"build.gradle.kts":  "maven",
+	"gradle.lockfile":   "maven",
+	"settings.gradle":   "maven",
+	// .NET / NuGet
+	"*.csproj":        "nuget",
+	"packages.config": "nuget",
+	"*.fsproj":        "nuget",
+	// PHP
+	"composer.json": "packagist",
+	"composer.lock": "packagist",
+}
+
+// isDependencyManifest checks if a file path is a known dependency manifest.
+func isDependencyManifest(path string) (ecosystem string, ok bool) {
+	filename := filepath.Base(path)
+	if eco, found := dependencyManifests[filename]; found {
+		return eco, true
+	}
+	// Check pattern matches (e.g., *.csproj)
+	for pattern, eco := range dependencyManifests {
+		if suffix, ok := strings.CutPrefix(pattern, "*"); ok {
+			if strings.HasSuffix(filename, suffix) {
+				return eco, true
+			}
+		}
+	}
+	return "", false
+}
+
+// DependencyDiff represents the semantic difference in dependencies.
+type DependencyDiff struct {
+	Ecosystems map[string]bool    // ecosystems with changes
+	Changes    []compare.Change   // semantic dependency changes
+	Error      error              // error during diff (non-fatal)
+}
+
+// hasDependencyChanges checks if any file changes affect dependency manifests.
+func hasDependencyChanges(changes []workspace.FileChange) (ecosystems map[string]bool) {
+	ecosystems = make(map[string]bool)
+	for _, change := range changes {
+		if eco, ok := isDependencyManifest(change.Path); ok {
+			ecosystems[eco] = true
+		}
+	}
+	return ecosystems
+}
+
+// computeDependencyDiff extracts and compares dependencies between original and isolated workspaces.
+// This is best-effort: errors are captured but don't block the review.
+// The context should be used for cancellation (e.g., Ctrl+C); no internal timeout is imposed.
+func computeDependencyDiff(ctx context.Context, originalPath, isolatedPath string) *DependencyDiff {
+	result := &DependencyDiff{
+		Ecosystems: make(map[string]bool),
+	}
+
+	// Extract packages from original workspace
+	oldExec, err := inventory.CollectDirectory(ctx, originalPath, inventory.Options{})
+	if err != nil {
+		result.Error = fmt.Errorf("original workspace: %w", err)
+		return result
+	}
+	defer oldExec.Close()
+
+	// Check for context cancellation
+	if ctx.Err() != nil {
+		result.Error = ctx.Err()
+		return result
+	}
+
+	// Extract packages from isolated (modified) workspace
+	newExec, err := inventory.CollectDirectory(ctx, isolatedPath, inventory.Options{})
+	if err != nil {
+		result.Error = fmt.Errorf("isolated workspace: %w", err)
+		return result
+	}
+	defer newExec.Close()
+
+	// Compare packages
+	changes := compare.ComparePackages(
+		oldExec.Result.Packages,
+		newExec.Result.Packages,
+		oldExec.Result.Direct,
+		newExec.Result.Direct,
+		newExec.Workspace,
+	)
+
+	result.Changes = changes
+
+	// Track which ecosystems have changes
+	for _, change := range changes {
+		if change.Ecosystem != "" {
+			result.Ecosystems[change.Ecosystem] = true
+		}
+	}
+
+	return result
+}
+
+// renderDependencyDiff displays the semantic dependency changes.
+func renderDependencyDiff(out io.Writer, diff *DependencyDiff, termWidth int) {
+	if diff == nil {
+		return
+	}
+
+	lineWidth := minInt(termWidth-2, 80)
+
+	// If there was an error, show it as a warning but continue
+	if diff.Error != nil {
+		fmt.Fprintln(out, ui.StyleStatusWarning.Render("●")+" "+
+			ui.StyleDim.Render("Dependency analysis: "+diff.Error.Error()))
+		fmt.Fprintln(out)
+		return
+	}
+
+	// If no changes, skip the section entirely
+	if len(diff.Changes) == 0 {
+		return
+	}
+
+	// Count by type
+	var added, removed, upgraded, downgraded int
+	for _, c := range diff.Changes {
+		switch c.ChangeType {
+		case compare.Added:
+			added++
+		case compare.Removed:
+			removed++
+		case compare.Upgraded:
+			upgraded++
+		case compare.Downgraded:
+			downgraded++
+		}
+	}
+
+	// Display header
+	fmt.Fprintln(out, ui.StyleHeader.Render("Dependency Changes"))
+	fmt.Fprintln(out, ui.StyleDim.Render(strings.Repeat("─", lineWidth)))
+
+	// Summary line
+	var summaryParts []string
+	if added > 0 {
+		summaryParts = append(summaryParts, ui.StyleAdded.Render(fmt.Sprintf("+%d", added)))
+	}
+	if removed > 0 {
+		summaryParts = append(summaryParts, ui.StyleRemoved.Render(fmt.Sprintf("-%d", removed)))
+	}
+	if upgraded > 0 {
+		summaryParts = append(summaryParts, ui.StyleUpgraded.Render(fmt.Sprintf("↑%d", upgraded)))
+	}
+	if downgraded > 0 {
+		summaryParts = append(summaryParts, ui.StyleDowngraded.Render(fmt.Sprintf("↓%d", downgraded)))
+	}
+
+	// Show ecosystems affected
+	var ecosystemList []string
+	for eco := range diff.Ecosystems {
+		ecosystemList = append(ecosystemList, eco)
+	}
+	ecosystemInfo := ""
+	if len(ecosystemList) > 0 {
+		ecosystemInfo = " " + ui.StyleDim.Render("("+strings.Join(ecosystemList, ", ")+")")
+	}
+
+	fmt.Fprintf(out, "%s %s%s\n",
+		ui.StyleDim.Render(fmt.Sprintf("%d package(s):", len(diff.Changes))),
+		strings.Join(summaryParts, " "),
+		ecosystemInfo)
+	fmt.Fprintln(out)
+
+	// Show individual changes (limit to first 20 for readability in CLI)
+	// TODO: Implement TUI interface for interactive browsing of changes/diffs
+	// across repos, binaries, container images, SBOMs, etc. This would allow
+	// users to expand/collapse sections, search, filter by ecosystem, etc.
+	maxShow := 20
+	for i, change := range diff.Changes {
+		if i >= maxShow {
+			remaining := len(diff.Changes) - maxShow
+			fmt.Fprintln(out, ui.StyleDim.Render(fmt.Sprintf("  ... and %d more (use 'v' to view full diff)", remaining)))
+			break
+		}
+		renderDependencyChange(out, change, termWidth)
+	}
+	fmt.Fprintln(out)
+}
+
+// renderDependencyChange displays a single dependency change.
+func renderDependencyChange(out io.Writer, change compare.Change, termWidth int) {
+	var prefix string
+	var style lipgloss.Style
+	var versionInfo string
+
+	switch change.ChangeType {
+	case compare.Added:
+		prefix = "+"
+		style = ui.StyleAdded
+		versionInfo = change.TargetVersion
+	case compare.Removed:
+		prefix = "-"
+		style = ui.StyleRemoved
+		versionInfo = change.BaseVersion
+	case compare.Upgraded:
+		prefix = "↑"
+		style = ui.StyleUpgraded
+		versionInfo = fmt.Sprintf("%s → %s", change.BaseVersion, change.TargetVersion)
+	case compare.Downgraded:
+		prefix = "↓"
+		style = ui.StyleDowngraded
+		versionInfo = fmt.Sprintf("%s → %s", change.BaseVersion, change.TargetVersion)
+	default:
+		prefix = "~"
+		style = ui.StyleDim
+		versionInfo = fmt.Sprintf("%s → %s", change.BaseVersion, change.TargetVersion)
+	}
+
+	// Truncate package name if needed
+	name := change.Name
+	maxNameWidth := termWidth - 30 // Leave room for version info
+	if len(name) > maxNameWidth {
+		name = "..." + name[len(name)-maxNameWidth+3:]
+	}
+
+	// Direct/indirect indicator
+	directIndicator := ""
+	if change.IsDirect {
+		directIndicator = ui.StyleDirect.Render(" [direct]")
+	}
+
+	fmt.Fprintf(out, "  %s %s %s%s\n",
+		style.Render(prefix),
+		style.Render(name),
+		ui.StyleDim.Render(versionInfo),
+		directIndicator)
+}
 
 // WorkspaceReviewResult indicates what the user decided to do with workspace changes.
 type WorkspaceReviewResult int
@@ -51,11 +361,14 @@ func ReviewWorkspaceChanges(
 		return ReviewAccept, nil
 	}
 
+	// Get terminal width for responsive layout
+	termWidth := getTerminalWidth()
+	lineWidth := minInt(termWidth-2, 80) // Cap at 80 for readability
+
 	// Display header
 	fmt.Fprintln(stdout)
 	fmt.Fprintln(stdout, ui.StyleHeader.Render("Workspace Changes"))
-	fmt.Fprintln(stdout, ui.StyleDim.Render(strings.Repeat("─", 50)))
-	fmt.Fprintln(stdout)
+	fmt.Fprintln(stdout, ui.StyleDim.Render(strings.Repeat("─", lineWidth)))
 
 	// Count changes by type
 	var added, modified, deleted, renamed int
@@ -72,28 +385,39 @@ func ReviewWorkspaceChanges(
 		}
 	}
 
-	// Display summary
-	var summary []string
+	// Display summary in a compact format
+	var summaryParts []string
 	if added > 0 {
-		summary = append(summary, ui.StyleAdded.Render(fmt.Sprintf("+%d added", added)))
+		summaryParts = append(summaryParts, ui.StyleAdded.Render(fmt.Sprintf("+%d", added)))
 	}
 	if modified > 0 {
-		summary = append(summary, ui.StyleDowngraded.Render(fmt.Sprintf("~%d modified", modified)))
+		summaryParts = append(summaryParts, ui.StyleDowngraded.Render(fmt.Sprintf("~%d", modified)))
 	}
 	if deleted > 0 {
-		summary = append(summary, ui.StyleRemoved.Render(fmt.Sprintf("-%d deleted", deleted)))
+		summaryParts = append(summaryParts, ui.StyleRemoved.Render(fmt.Sprintf("-%d", deleted)))
 	}
 	if renamed > 0 {
-		summary = append(summary, ui.StyleUpgraded.Render(fmt.Sprintf(">%d renamed", renamed)))
+		summaryParts = append(summaryParts, ui.StyleUpgraded.Render(fmt.Sprintf(">%d", renamed)))
 	}
-	fmt.Fprintln(stdout, strings.Join(summary, "  "))
+	totalChanges := added + modified + deleted + renamed
+	fmt.Fprintf(stdout, "%s %s\n",
+		ui.StyleDim.Render(fmt.Sprintf("%d file(s):", totalChanges)),
+		strings.Join(summaryParts, " "))
 	fmt.Fprintln(stdout)
 
 	// Display individual changes
 	for _, change := range changes {
-		displayChange(stdout, change)
+		displayChangeWithWidth(stdout, change, termWidth)
 	}
 	fmt.Fprintln(stdout)
+
+	// Check for dependency manifest changes and compute semantic diff
+	depEcosystems := hasDependencyChanges(changes)
+	if len(depEcosystems) > 0 {
+		// Compute and display dependency diff
+		depDiff := computeDependencyDiff(ctx, isolator.OriginalPath(), isolator.IsolatedPath())
+		renderDependencyDiff(stdout, depDiff, termWidth)
+	}
 
 	// Check if stdin is a terminal for interactive prompts
 	if f, ok := stdin.(*os.File); ok && !term.IsTerminal(int(f.Fd())) {
@@ -131,11 +455,14 @@ func ReviewWorkspaceChangesFromEvent(
 		})
 	}
 
+	// Get terminal width for responsive layout
+	termWidth := getTerminalWidth()
+	lineWidth := minInt(termWidth-2, 80) // Cap at 80 for readability
+
 	// Display header
 	fmt.Fprintln(stdout)
 	fmt.Fprintln(stdout, ui.StyleHeader.Render("Workspace Changes"))
-	fmt.Fprintln(stdout, ui.StyleDim.Render(strings.Repeat("─", 50)))
-	fmt.Fprintln(stdout)
+	fmt.Fprintln(stdout, ui.StyleDim.Render(strings.Repeat("─", lineWidth)))
 
 	// Count changes by type
 	var added, modified, deleted, renamed int
@@ -152,28 +479,39 @@ func ReviewWorkspaceChangesFromEvent(
 		}
 	}
 
-	// Display summary
-	var summary []string
+	// Display summary in a compact format
+	var summaryParts []string
 	if added > 0 {
-		summary = append(summary, ui.StyleAdded.Render(fmt.Sprintf("+%d added", added)))
+		summaryParts = append(summaryParts, ui.StyleAdded.Render(fmt.Sprintf("+%d", added)))
 	}
 	if modified > 0 {
-		summary = append(summary, ui.StyleDowngraded.Render(fmt.Sprintf("~%d modified", modified)))
+		summaryParts = append(summaryParts, ui.StyleDowngraded.Render(fmt.Sprintf("~%d", modified)))
 	}
 	if deleted > 0 {
-		summary = append(summary, ui.StyleRemoved.Render(fmt.Sprintf("-%d deleted", deleted)))
+		summaryParts = append(summaryParts, ui.StyleRemoved.Render(fmt.Sprintf("-%d", deleted)))
 	}
 	if renamed > 0 {
-		summary = append(summary, ui.StyleUpgraded.Render(fmt.Sprintf(">%d renamed", renamed)))
+		summaryParts = append(summaryParts, ui.StyleUpgraded.Render(fmt.Sprintf(">%d", renamed)))
 	}
-	fmt.Fprintln(stdout, strings.Join(summary, "  "))
+	totalChanges := added + modified + deleted + renamed
+	fmt.Fprintf(stdout, "%s %s\n",
+		ui.StyleDim.Render(fmt.Sprintf("%d file(s):", totalChanges)),
+		strings.Join(summaryParts, " "))
 	fmt.Fprintln(stdout)
 
 	// Display individual changes
 	for _, change := range changes {
-		displayChange(stdout, change)
+		displayChangeWithWidth(stdout, change, termWidth)
 	}
 	fmt.Fprintln(stdout)
+
+	// Check for dependency manifest changes and compute semantic diff
+	depEcosystems := hasDependencyChanges(changes)
+	if len(depEcosystems) > 0 && event.GetIsolatedPath() != "" && event.GetOriginalPath() != "" {
+		// Compute and display dependency diff
+		depDiff := computeDependencyDiff(ctx, event.GetOriginalPath(), event.GetIsolatedPath())
+		renderDependencyDiff(stdout, depDiff, termWidth)
+	}
 
 	// Check if stdin is a terminal for interactive prompts
 	if f, ok := stdin.(*os.File); ok && !term.IsTerminal(int(f.Fd())) {
@@ -263,6 +601,88 @@ func (p *pathBasedReviewer) SyncChanges(changes []workspace.FileChange) error {
 	return nil
 }
 
+// renderReviewMenu displays the interactive review menu with styled options.
+func renderReviewMenu(out io.Writer) {
+	termWidth := getTerminalWidth()
+	lineWidth := minInt(termWidth-2, 80)
+
+	fmt.Fprintln(out, ui.StyleDim.Render(strings.Repeat("─", lineWidth)))
+	fmt.Fprintln(out, ui.StyleHeader.Render("What would you like to do?"))
+	fmt.Fprintln(out)
+	fmt.Fprintf(out, "  %s %s  %s\n",
+		ui.StyleAdded.Render("a"),
+		ui.StyleDim.Render("│"),
+		"Accept all changes (sync to workspace)")
+	fmt.Fprintf(out, "  %s %s  %s\n",
+		ui.StyleRemoved.Render("r"),
+		ui.StyleDim.Render("│"),
+		"Reject all changes (discard)")
+	fmt.Fprintf(out, "  %s %s  %s\n",
+		ui.StyleDirect.Render("d"),
+		ui.StyleDim.Render("│"),
+		"Show diff for a specific file")
+	fmt.Fprintf(out, "  %s %s  %s\n",
+		ui.StyleDirect.Render("v"),
+		ui.StyleDim.Render("│"),
+		"View full diff (opens in $PAGER)")
+	fmt.Fprintf(out, "  %s %s  %s\n",
+		ui.StyleDim.Render("q"),
+		ui.StyleDim.Render("│"),
+		ui.StyleDim.Render("Quit without action"))
+	fmt.Fprintln(out)
+	fmt.Fprint(out, ui.StyleDirect.Render("Choice: "))
+}
+
+// suggestValidChoice provides a helpful suggestion for invalid input.
+func suggestValidChoice(input string) string {
+	input = strings.ToLower(strings.TrimSpace(input))
+	if input == "" {
+		return "Please enter a choice (a, r, d, v, or q)"
+	}
+
+	// Check for common mistakes and provide helpful suggestions
+	suggestions := map[string]string{
+		// Accept variations
+		"accept": "Did you mean 'a' for accept?",
+		"ok":     "Did you mean 'a' for accept?",
+		"apply":  "Did you mean 'a' for accept?",
+		"sync":   "Did you mean 'a' for accept?",
+		"s":      "Did you mean 'a' for accept?",
+		// Reject variations
+		"reject": "Did you mean 'r' for reject?",
+		"discard": "Did you mean 'r' for reject?",
+		"cancel": "Did you mean 'r' for reject or 'q' for quit?",
+		"c":      "Did you mean 'r' for reject?",
+		"x":      "Did you mean 'r' for reject?",
+		// Diff variations
+		"diff":  "Did you mean 'd' for diff?",
+		"show":  "Did you mean 'd' for diff?",
+		"f":     "Did you mean 'd' for diff (file)?",
+		// View variations
+		"view":  "Did you mean 'v' for view?",
+		"open":  "Did you mean 'v' for view?",
+		"pager": "Did you mean 'v' for view?",
+		"p":     "Did you mean 'v' for view?",
+		"less":  "Did you mean 'v' for view?",
+		// Quit variations
+		"quit":   "Did you mean 'q' for quit?",
+		"exit":   "Did you mean 'q' for quit?",
+		"abort":  "Did you mean 'q' for quit?",
+		"e":      "Did you mean 'q' for quit (exit)?",
+		// Help
+		"help": "Options: a (accept), r (reject), d (diff), v (view), q (quit)",
+		"h":    "Options: a (accept), r (reject), d (diff), v (view), q (quit)",
+		"?":    "Options: a (accept), r (reject), d (diff), v (view), q (quit)",
+	}
+
+	if suggestion, ok := suggestions[input]; ok {
+		return suggestion
+	}
+
+	// Generic message for unrecognized input
+	return fmt.Sprintf("'%s' is not recognized. Valid options: a, r, d, v, q", input)
+}
+
 // promptReviewActionFromPaths handles the review menu using path-based access.
 func promptReviewActionFromPaths(
 	stdin io.Reader,
@@ -273,16 +693,7 @@ func promptReviewActionFromPaths(
 	reader := bufio.NewReader(stdin)
 
 	for {
-		fmt.Fprintln(stdout, ui.StyleDim.Render(strings.Repeat("─", 50)))
-		fmt.Fprintln(stdout, ui.StyleDirect.Render("What would you like to do?"))
-		fmt.Fprintln(stdout)
-		fmt.Fprintln(stdout, "  [a] Accept all changes (sync to workspace)")
-		fmt.Fprintln(stdout, "  [r] Reject all changes (discard)")
-		fmt.Fprintln(stdout, "  [d] Show diff for a specific file")
-		fmt.Fprintln(stdout, "  [v] View full diff (opens in $PAGER or less)")
-		fmt.Fprintln(stdout, "  [q] Quit without action")
-		fmt.Fprintln(stdout)
-		fmt.Fprint(stdout, ui.StyleDirect.Render("Choice [a/r/d/v/q]: "))
+		renderReviewMenu(stdout)
 
 		input, err := reader.ReadString('\n')
 		if err != nil {
@@ -300,10 +711,10 @@ func promptReviewActionFromPaths(
 				fmt.Fprintf(stderr, "Error syncing changes: %v\n", err)
 				return ReviewAbort, err
 			}
-			fmt.Fprintln(stdout, ui.StyleAdded.Render("Changes synced to workspace successfully."))
+			fmt.Fprintln(stdout, ui.StyleStatusSuccess.Render("●")+" "+ui.StyleAdded.Render("Changes synced to workspace successfully."))
 			return ReviewAccept, nil
 		case "r", "reject", "n", "no":
-			fmt.Fprintln(stdout, ui.StyleRemoved.Render("Changes discarded."))
+			fmt.Fprintln(stdout, ui.StyleStatusError.Render("●")+" "+ui.StyleRemoved.Render("Changes discarded."))
 			return ReviewReject, nil
 		case "d", "diff":
 			if err := showFileDiffFromPaths(stdin, stdout, stderr, reviewer, changes); err != nil {
@@ -314,9 +725,11 @@ func promptReviewActionFromPaths(
 				fmt.Fprintf(stderr, "Error showing full diff: %v\n", err)
 			}
 		case "q", "quit":
+			fmt.Fprintln(stdout, ui.StyleDim.Render("Review cancelled."))
 			return ReviewAbort, nil
 		default:
-			fmt.Fprintln(stderr, ui.StyleDim.Render("Invalid choice. Please enter a, r, d, v, or q."))
+			suggestion := suggestValidChoice(choice)
+			fmt.Fprintln(stderr, ui.StyleStatusWarning.Render("●")+" "+ui.StyleDim.Render(suggestion))
 		}
 		fmt.Fprintln(stdout)
 	}
@@ -325,7 +738,7 @@ func promptReviewActionFromPaths(
 // showFileDiffFromPaths prompts for a file and shows its diff using path-based access.
 func showFileDiffFromPaths(
 	stdin io.Reader,
-	stdout, stderr io.Writer,
+	stdout, _ io.Writer,
 	reviewer *pathBasedReviewer,
 	changes []workspace.FileChange,
 ) error {
@@ -371,63 +784,39 @@ func showDiffForFileFromPaths(out io.Writer, reviewer *pathBasedReviewer, change
 
 	switch change.Type {
 	case "added":
-		// Show the new file content
+		// Show the new file content with security checks
 		content, err := os.ReadFile(isolatedPath)
 		if err != nil {
 			return fmt.Errorf("read new file: %w", err)
 		}
-		lines := strings.Split(string(content), "\n")
-		for i, line := range lines {
-			if i < 50 { // Limit to first 50 lines
-				fmt.Fprintln(out, ui.StyleAdded.Render("+ "+line))
-			}
-		}
-		if len(lines) > 50 {
-			fmt.Fprintln(out, ui.StyleDim.Render(fmt.Sprintf("... and %d more lines", len(lines)-50)))
-		}
+		renderFileContent(out, content, ui.StyleAdded, "+ ", 50)
 
 	case "deleted":
-		// Show the original file content
+		// Show the original file content with security checks
 		content, err := os.ReadFile(originalPath)
 		if err != nil {
 			return fmt.Errorf("read deleted file: %w", err)
 		}
-		lines := strings.Split(string(content), "\n")
-		for i, line := range lines {
-			if i < 50 {
-				fmt.Fprintln(out, ui.StyleRemoved.Render("- "+line))
-			}
-		}
-		if len(lines) > 50 {
-			fmt.Fprintln(out, ui.StyleDim.Render(fmt.Sprintf("... and %d more lines", len(lines)-50)))
-		}
+		renderFileContent(out, content, ui.StyleRemoved, "- ", 50)
 
 	case "modified":
-		// Use diff command if available
-		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		defer cancel()
+		// Check both files for security issues first
+		oldContent, _ := os.ReadFile(originalPath)
+		newContent, _ := os.ReadFile(isolatedPath)
 
-		cmd := exec.CommandContext(ctx, "diff", "-u", originalPath, isolatedPath)
-		output, _ := cmd.CombinedOutput()
-		if len(output) > 0 {
-			lines := strings.Split(string(output), "\n")
-			for i, line := range lines {
-				if i < 100 {
-					if strings.HasPrefix(line, "+") && !strings.HasPrefix(line, "+++") {
-						fmt.Fprintln(out, ui.StyleAdded.Render(line))
-					} else if strings.HasPrefix(line, "-") && !strings.HasPrefix(line, "---") {
-						fmt.Fprintln(out, ui.StyleRemoved.Render(line))
-					} else if strings.HasPrefix(line, "@@") {
-						fmt.Fprintln(out, ui.StyleDowngraded.Render(line))
-					} else {
-						fmt.Fprintln(out, line)
-					}
-				}
-			}
-			if len(lines) > 100 {
-				fmt.Fprintln(out, ui.StyleDim.Render(fmt.Sprintf("... and %d more lines", len(lines)-100)))
-			}
+		// Analyze both for security warnings
+		oldWarnings := analyzeContentSecurity(oldContent)
+		newWarnings := analyzeContentSecurity(newContent)
+
+		// Show warnings if either file has issues
+		if len(newWarnings) > 0 {
+			renderContentWarnings(out, newWarnings)
+		} else if len(oldWarnings) > 0 {
+			renderContentWarnings(out, oldWarnings)
 		}
+
+		// Render git-style diff
+		renderGitStyleDiff(out, originalPath, isolatedPath, change.Path)
 
 	case "renamed":
 		fmt.Fprintln(out, ui.StyleUpgraded.Render(fmt.Sprintf("Renamed from: %s", change.OldPath)))
@@ -436,6 +825,116 @@ func showDiffForFileFromPaths(out io.Writer, reviewer *pathBasedReviewer, change
 
 	fmt.Fprintln(out)
 	return nil
+}
+
+// renderGitStyleDiff renders a git-style unified diff with proper headers and line numbers.
+func renderGitStyleDiff(out io.Writer, originalPath, isolatedPath, displayPath string) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, "diff", "-u", originalPath, isolatedPath)
+	output, _ := cmd.CombinedOutput()
+
+	if len(output) == 0 {
+		fmt.Fprintln(out, ui.StyleDim.Render("(no textual differences)"))
+		return
+	}
+
+	lines := strings.Split(string(output), "\n")
+	termWidth := getTerminalWidth()
+	maxLineWidth := termWidth - 10 // Reserve space for line numbers and prefix
+
+	// Track line numbers
+	var oldLine, newLine int
+
+	for i, line := range lines {
+		if i >= 150 { // Limit lines shown
+			remaining := len(lines) - i
+			if remaining > 0 {
+				fmt.Fprintln(out, ui.StyleDim.Render(fmt.Sprintf("... and %d more lines (use 'v' to view full diff)", remaining)))
+			}
+			break
+		}
+
+		// Sanitize the line for safe display
+		safeLine := sanitizeLineForDisplay(line)
+
+		// Truncate long lines
+		if len(safeLine) > maxLineWidth {
+			safeLine = safeLine[:maxLineWidth-3] + "..."
+		}
+
+		switch {
+		case strings.HasPrefix(line, "---"):
+			// Old file header (git style)
+			fmt.Fprintln(out, ui.StyleRemoved.Render("--- a/"+displayPath))
+		case strings.HasPrefix(line, "+++"):
+			// New file header (git style)
+			fmt.Fprintln(out, ui.StyleAdded.Render("+++ b/"+displayPath))
+		case strings.HasPrefix(line, "@@"):
+			// Hunk header - parse line numbers
+			oldLine, newLine = parseHunkHeader(line)
+			fmt.Fprintln(out, ui.StyleDowngraded.Render(safeLine))
+		case strings.HasPrefix(line, "+"):
+			// Added line with line number
+			lineNum := ui.StyleDim.Render(fmt.Sprintf("%4d ", newLine))
+			fmt.Fprintln(out, lineNum+ui.StyleAdded.Render(safeLine))
+			newLine++
+		case strings.HasPrefix(line, "-"):
+			// Removed line with line number
+			lineNum := ui.StyleDim.Render(fmt.Sprintf("%4d ", oldLine))
+			fmt.Fprintln(out, lineNum+ui.StyleRemoved.Render(safeLine))
+			oldLine++
+		case strings.HasPrefix(line, " "):
+			// Context line with line number
+			lineNum := ui.StyleDim.Render(fmt.Sprintf("%4d ", newLine))
+			fmt.Fprintln(out, lineNum+safeLine)
+			oldLine++
+			newLine++
+		default:
+			// Other lines (empty, etc.)
+			if line != "" {
+				fmt.Fprintln(out, safeLine)
+			}
+		}
+	}
+}
+
+// parseHunkHeader extracts starting line numbers from a unified diff hunk header.
+// Format: @@ -old_start,old_count +new_start,new_count @@
+func parseHunkHeader(header string) (oldLine, newLine int) {
+	oldLine, newLine = 1, 1 // defaults
+
+	// Find the @@ markers
+	start := strings.Index(header, "@@")
+	if start == -1 {
+		return
+	}
+	end := strings.Index(header[start+2:], "@@")
+	if end == -1 {
+		return
+	}
+
+	// Extract the range part: -old_start,old_count +new_start,new_count
+	rangePart := strings.TrimSpace(header[start+2 : start+2+end])
+
+	for part := range strings.FieldsSeq(rangePart) {
+		if numPart, ok := strings.CutPrefix(part, "-"); ok {
+			// Parse old line number
+			if commaIdx := strings.Index(numPart, ","); commaIdx != -1 {
+				numPart = numPart[:commaIdx]
+			}
+			fmt.Sscanf(numPart, "%d", &oldLine)
+		} else if numPart, ok := strings.CutPrefix(part, "+"); ok {
+			// Parse new line number
+			if commaIdx := strings.Index(numPart, ","); commaIdx != -1 {
+				numPart = numPart[:commaIdx]
+			}
+			fmt.Sscanf(numPart, "%d", &newLine)
+		}
+	}
+
+	return
 }
 
 // showFullDiffFromPaths opens the full diff in the user's pager using path-based access.
@@ -481,6 +980,11 @@ func showFullDiffFromPaths(reviewer *pathBasedReviewer) error {
 
 // displayChange formats and displays a single file change.
 func displayChange(out io.Writer, change workspace.FileChange) {
+	displayChangeWithWidth(out, change, getTerminalWidth())
+}
+
+// displayChangeWithWidth formats and displays a single file change with explicit width.
+func displayChangeWithWidth(out io.Writer, change workspace.FileChange, termWidth int) {
 	var prefix string
 	var style lipgloss.Style
 
@@ -502,17 +1006,33 @@ func displayChange(out io.Writer, change workspace.FileChange) {
 		style = ui.StyleDim
 	}
 
+	// Calculate available width for path (accounting for prefix, spaces, and size info)
+	// Format: "  + path (size)" -> 4 chars overhead + size info
+	sizeInfo := ""
+	sizeLen := 0
+	if change.Size > 0 {
+		sizeInfo = fmt.Sprintf(" (%s)", formatFileSize(change.Size))
+		sizeLen = len(sizeInfo)
+	}
+
+	availableWidth := max(termWidth-4-sizeLen, 20) // "  + " prefix, minimum 20
+
 	if change.Type == "renamed" && change.OldPath != "" {
+		// For renames: "  > oldpath -> newpath"
+		arrowLen := 4 // " -> "
+		halfWidth := (availableWidth - arrowLen) / 2
+		oldPath := truncatePath(change.OldPath, halfWidth)
+		newPath := truncatePath(change.Path, halfWidth)
 		fmt.Fprintf(out, "  %s %s -> %s\n",
 			style.Render(prefix),
-			ui.StyleDim.Render(change.OldPath),
-			style.Render(change.Path))
+			ui.StyleDim.Render(oldPath),
+			style.Render(newPath))
 	} else {
-		sizeInfo := ""
-		if change.Size > 0 {
-			sizeInfo = ui.StyleDim.Render(fmt.Sprintf(" (%s)", formatFileSize(change.Size)))
-		}
-		fmt.Fprintf(out, "  %s %s%s\n", style.Render(prefix), style.Render(change.Path), sizeInfo)
+		displayPath := truncatePath(change.Path, availableWidth)
+		fmt.Fprintf(out, "  %s %s%s\n",
+			style.Render(prefix),
+			style.Render(displayPath),
+			ui.StyleDim.Render(sizeInfo))
 	}
 }
 
@@ -526,16 +1046,7 @@ func promptReviewAction(
 	reader := bufio.NewReader(stdin)
 
 	for {
-		fmt.Fprintln(stdout, ui.StyleDim.Render(strings.Repeat("─", 50)))
-		fmt.Fprintln(stdout, ui.StyleDirect.Render("What would you like to do?"))
-		fmt.Fprintln(stdout)
-		fmt.Fprintln(stdout, "  [a] Accept all changes (sync to workspace)")
-		fmt.Fprintln(stdout, "  [r] Reject all changes (discard)")
-		fmt.Fprintln(stdout, "  [d] Show diff for a specific file")
-		fmt.Fprintln(stdout, "  [v] View full diff (opens in $PAGER or less)")
-		fmt.Fprintln(stdout, "  [q] Quit without action")
-		fmt.Fprintln(stdout)
-		fmt.Fprint(stdout, ui.StyleDirect.Render("Choice [a/r/d/v/q]: "))
+		renderReviewMenu(stdout)
 
 		input, err := reader.ReadString('\n')
 		if err != nil {
@@ -548,8 +1059,10 @@ func promptReviewAction(
 		choice := strings.TrimSpace(strings.ToLower(input))
 		switch choice {
 		case "a", "accept", "y", "yes":
+			fmt.Fprintln(stdout, ui.StyleStatusSuccess.Render("●")+" "+ui.StyleAdded.Render("Changes accepted."))
 			return ReviewAccept, nil
 		case "r", "reject", "n", "no":
+			fmt.Fprintln(stdout, ui.StyleStatusError.Render("●")+" "+ui.StyleRemoved.Render("Changes discarded."))
 			return ReviewReject, nil
 		case "d", "diff":
 			if err := showFileDiff(stdin, stdout, stderr, isolator, changes); err != nil {
@@ -560,9 +1073,11 @@ func promptReviewAction(
 				fmt.Fprintf(stderr, "Error showing full diff: %v\n", err)
 			}
 		case "q", "quit":
+			fmt.Fprintln(stdout, ui.StyleDim.Render("Review cancelled."))
 			return ReviewAbort, nil
 		default:
-			fmt.Fprintln(stderr, ui.StyleDim.Render("Invalid choice. Please enter a, r, d, v, or q."))
+			suggestion := suggestValidChoice(choice)
+			fmt.Fprintln(stderr, ui.StyleStatusWarning.Render("●")+" "+ui.StyleDim.Render(suggestion))
 		}
 		fmt.Fprintln(stdout)
 	}
@@ -571,7 +1086,7 @@ func promptReviewAction(
 // showFileDiff prompts for a file and shows its diff.
 func showFileDiff(
 	stdin io.Reader,
-	stdout, stderr io.Writer,
+	stdout, _ io.Writer,
 	isolator workspace.Isolator,
 	changes []workspace.FileChange,
 ) error {
@@ -617,63 +1132,39 @@ func showDiffForFile(out io.Writer, isolator workspace.Isolator, change workspac
 
 	switch change.Type {
 	case "added":
-		// Show the new file content
+		// Show the new file content with security checks
 		content, err := os.ReadFile(isolatedPath)
 		if err != nil {
 			return fmt.Errorf("read new file: %w", err)
 		}
-		lines := strings.Split(string(content), "\n")
-		for i, line := range lines {
-			if i < 50 { // Limit to first 50 lines
-				fmt.Fprintln(out, ui.StyleAdded.Render("+ "+line))
-			}
-		}
-		if len(lines) > 50 {
-			fmt.Fprintln(out, ui.StyleDim.Render(fmt.Sprintf("... and %d more lines", len(lines)-50)))
-		}
+		renderFileContent(out, content, ui.StyleAdded, "+ ", 50)
 
 	case "deleted":
-		// Show the original file content
+		// Show the original file content with security checks
 		content, err := os.ReadFile(originalPath)
 		if err != nil {
 			return fmt.Errorf("read deleted file: %w", err)
 		}
-		lines := strings.Split(string(content), "\n")
-		for i, line := range lines {
-			if i < 50 {
-				fmt.Fprintln(out, ui.StyleRemoved.Render("- "+line))
-			}
-		}
-		if len(lines) > 50 {
-			fmt.Fprintln(out, ui.StyleDim.Render(fmt.Sprintf("... and %d more lines", len(lines)-50)))
-		}
+		renderFileContent(out, content, ui.StyleRemoved, "- ", 50)
 
 	case "modified":
-		// Use diff command if available
-		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		defer cancel()
+		// Check both files for security issues first
+		oldContent, _ := os.ReadFile(originalPath)
+		newContent, _ := os.ReadFile(isolatedPath)
 
-		cmd := exec.CommandContext(ctx, "diff", "-u", originalPath, isolatedPath)
-		output, _ := cmd.CombinedOutput()
-		if len(output) > 0 {
-			lines := strings.Split(string(output), "\n")
-			for i, line := range lines {
-				if i < 100 {
-					if strings.HasPrefix(line, "+") && !strings.HasPrefix(line, "+++") {
-						fmt.Fprintln(out, ui.StyleAdded.Render(line))
-					} else if strings.HasPrefix(line, "-") && !strings.HasPrefix(line, "---") {
-						fmt.Fprintln(out, ui.StyleRemoved.Render(line))
-					} else if strings.HasPrefix(line, "@@") {
-						fmt.Fprintln(out, ui.StyleDowngraded.Render(line))
-					} else {
-						fmt.Fprintln(out, line)
-					}
-				}
-			}
-			if len(lines) > 100 {
-				fmt.Fprintln(out, ui.StyleDim.Render(fmt.Sprintf("... and %d more lines", len(lines)-100)))
-			}
+		// Analyze both for security warnings
+		oldWarnings := analyzeContentSecurity(oldContent)
+		newWarnings := analyzeContentSecurity(newContent)
+
+		// Show warnings if either file has issues
+		if len(newWarnings) > 0 {
+			renderContentWarnings(out, newWarnings)
+		} else if len(oldWarnings) > 0 {
+			renderContentWarnings(out, oldWarnings)
 		}
+
+		// Render git-style diff
+		renderGitStyleDiff(out, originalPath, isolatedPath, change.Path)
 
 	case "renamed":
 		fmt.Fprintln(out, ui.StyleUpgraded.Render(fmt.Sprintf("Renamed from: %s", change.OldPath)))
@@ -742,5 +1233,177 @@ func formatFileSize(size int64) string {
 		return fmt.Sprintf("%.1f KB", float64(size)/float64(kb))
 	default:
 		return fmt.Sprintf("%d B", size)
+	}
+}
+
+// ContentWarning represents a security concern found in file content.
+type ContentWarning struct {
+	Type        string // "bidi", "control", "binary", "homoglyph"
+	Description string
+	Severity    string // "high", "medium", "low"
+}
+
+// bidiChars are Unicode bidirectional override characters that can be used
+// in Trojan Source attacks to make code appear different than it executes.
+// See: https://trojansource.codes/
+var bidiChars = map[rune]string{
+	'\u202A': "LRE (Left-to-Right Embedding)",
+	'\u202B': "RLE (Right-to-Left Embedding)",
+	'\u202C': "PDF (Pop Directional Formatting)",
+	'\u202D': "LRO (Left-to-Right Override)",
+	'\u202E': "RLO (Right-to-Left Override)",
+	'\u2066': "LRI (Left-to-Right Isolate)",
+	'\u2067': "RLI (Right-to-Left Isolate)",
+	'\u2068': "FSI (First Strong Isolate)",
+	'\u2069': "PDI (Pop Directional Isolate)",
+}
+
+// dangerousControlChars are control characters that could be used maliciously.
+var dangerousControlChars = map[rune]string{
+	'\x00': "NULL",
+	'\x08': "BACKSPACE",
+	'\x7F': "DELETE",
+	'\x1B': "ESCAPE",
+}
+
+// analyzeContentSecurity checks content for potentially malicious patterns.
+func analyzeContentSecurity(content []byte) []ContentWarning {
+	var warnings []ContentWarning
+
+	// Check for binary content (non-text)
+	if isBinaryContent(content) {
+		warnings = append(warnings, ContentWarning{
+			Type:        "binary",
+			Description: "File appears to contain binary data",
+			Severity:    "medium",
+		})
+		return warnings // Skip further analysis for binary files
+	}
+
+	text := string(content)
+
+	// Check for bidirectional override characters (Trojan Source)
+	for r, name := range bidiChars {
+		if strings.ContainsRune(text, r) {
+			warnings = append(warnings, ContentWarning{
+				Type:        "bidi",
+				Description: fmt.Sprintf("Contains bidirectional text character: %s (U+%04X)", name, r),
+				Severity:    "high",
+			})
+		}
+	}
+
+	// Check for dangerous control characters
+	for r, name := range dangerousControlChars {
+		if strings.ContainsRune(text, r) {
+			warnings = append(warnings, ContentWarning{
+				Type:        "control",
+				Description: fmt.Sprintf("Contains control character: %s (0x%02X)", name, r),
+				Severity:    "medium",
+			})
+		}
+	}
+
+	// Check for zero-width characters that could hide content
+	zeroWidthChars := map[rune]string{
+		'\u200B': "Zero Width Space",
+		'\u200C': "Zero Width Non-Joiner",
+		'\u200D': "Zero Width Joiner",
+		'\uFEFF': "Zero Width No-Break Space (BOM)",
+	}
+	for r, name := range zeroWidthChars {
+		if strings.ContainsRune(text, r) {
+			warnings = append(warnings, ContentWarning{
+				Type:        "hidden",
+				Description: fmt.Sprintf("Contains invisible character: %s (U+%04X)", name, r),
+				Severity:    "medium",
+			})
+		}
+	}
+
+	return warnings
+}
+
+// Note: isBinaryContent is defined in secrets.go and shared across the cmd package.
+
+// sanitizeLineForDisplay makes a line safe for terminal display by escaping
+// dangerous characters while preserving readability.
+func sanitizeLineForDisplay(line string) string {
+	var result strings.Builder
+	result.Grow(len(line))
+
+	for _, r := range line {
+		switch {
+		// Bidirectional override characters - show as escaped
+		case r >= '\u202A' && r <= '\u202E':
+			fmt.Fprintf(&result, "\u2590U+%04X\u258C", r)
+		case r >= '\u2066' && r <= '\u2069':
+			fmt.Fprintf(&result, "\u2590U+%04X\u258C", r)
+		// Zero-width characters - show as markers
+		case r == '\u200B' || r == '\u200C' || r == '\u200D' || r == '\uFEFF':
+			fmt.Fprintf(&result, "\u2590U+%04X\u258C", r)
+		// Control characters (except tab/newline)
+		case r < 0x20 && r != '\t' && r != '\n' && r != '\r':
+			fmt.Fprintf(&result, "\\x%02X", r)
+		case r == 0x7F:
+			result.WriteString("\\x7F")
+		default:
+			result.WriteRune(r)
+		}
+	}
+
+	return result.String()
+}
+
+// renderContentWarnings displays security warnings about file content.
+func renderContentWarnings(out io.Writer, warnings []ContentWarning) {
+	if len(warnings) == 0 {
+		return
+	}
+
+	// Style for security warnings
+	warningStyle := ui.StyleStatusWarning.Bold(true)
+	highStyle := ui.StyleRemoved.Bold(true)
+
+	fmt.Fprintln(out)
+	fmt.Fprintln(out, warningStyle.Render("! Security warnings detected:"))
+
+	for _, w := range warnings {
+		severity := ui.StyleDim.Render(fmt.Sprintf("[%s]", w.Severity))
+		if w.Severity == "high" {
+			severity = highStyle.Render("[HIGH]")
+		}
+		fmt.Fprintf(out, "  %s %s\n", severity, w.Description)
+	}
+	fmt.Fprintln(out)
+}
+
+// renderFileContent displays file content with security checks and proper handling.
+func renderFileContent(out io.Writer, content []byte, style lipgloss.Style, prefix string, maxLines int) {
+	// Handle empty content
+	if len(content) == 0 {
+		fmt.Fprintln(out, ui.StyleDim.Render(prefix+"(empty file)"))
+		return
+	}
+
+	// Check for security issues
+	warnings := analyzeContentSecurity(content)
+	renderContentWarnings(out, warnings)
+
+	// Check for binary content
+	if isBinaryContent(content) {
+		fmt.Fprintln(out, ui.StyleDim.Render(prefix+fmt.Sprintf("(binary file, %s)", formatFileSize(int64(len(content))))))
+		return
+	}
+
+	lines := strings.Split(string(content), "\n")
+	for i, line := range lines {
+		if i >= maxLines {
+			fmt.Fprintln(out, ui.StyleDim.Render(fmt.Sprintf("... and %d more lines", len(lines)-maxLines)))
+			break
+		}
+		// Sanitize line for safe display
+		safeLine := sanitizeLineForDisplay(line)
+		fmt.Fprintln(out, style.Render(prefix+safeLine))
 	}
 }

@@ -645,6 +645,70 @@ func (h *vzHandler) Execute(
 		deputyotel.SetSpanOK(span)
 	}
 
+	// Emit WorkspaceChangesEvent if review_before_commit is enabled and we have changes
+	// This must be sent BEFORE the CompletedEvent so the client can review changes
+	// Note: changesDir is only set for overlay mode, but snapshot mode also supports review
+	// via wsConfig.GetChangesPath() which returns the snapshot directory
+	if config.GetReviewBeforeCommit() && wsConfig != nil {
+		// Get the list of changed files from the workspace config
+		changedFiles, changesErr := wsConfig.GetChangedFiles()
+		if changesErr != nil {
+			slog.Warn("Failed to get changed files for review", "error", changesErr)
+		} else if len(changedFiles) > 0 {
+			// Convert to proto FileChange messages
+			protoChanges := make([]*sandboxv1.FileChange, 0, len(changedFiles))
+			for _, f := range changedFiles {
+				change := &sandboxv1.FileChange{
+					Path:       f,
+					ChangeType: "modified", // Default
+				}
+
+				// Determine change type
+				changesPath := wsConfig.GetChangesPath()
+				if changesPath != "" {
+					fullPath := filepath.Join(changesPath, f)
+					if info, err := os.Stat(fullPath); err == nil {
+						change.Size = info.Size()
+					} else if os.IsNotExist(err) {
+						change.ChangeType = "deleted"
+					}
+				}
+
+				// Check if it's a new file (doesn't exist in original)
+				originalPath := wsConfig.GetOriginalPath()
+				if originalPath != "" && change.ChangeType != "deleted" {
+					origFile := filepath.Join(originalPath, f)
+					if _, err := os.Stat(origFile); os.IsNotExist(err) {
+						change.ChangeType = "added"
+					}
+				}
+
+				protoChanges = append(protoChanges, change)
+			}
+
+			// Send the workspace changes event
+			if err := stream.Send(&sandboxv1.ExecuteEvent{
+				ExecutionId: executionID,
+				Timestamp:   timestamppb.Now(),
+				Details: &sandboxv1.ExecuteEvent_WorkspaceChanges{
+					WorkspaceChanges: &sandboxv1.WorkspaceChangesEvent{
+						Changes:      protoChanges,
+						TotalChanges: int32(len(protoChanges)),
+						IsolatedPath: wsConfig.GetChangesPath(),
+						OriginalPath: wsConfig.GetOriginalPath(),
+					},
+				},
+			}); err != nil {
+				slog.Warn("Failed to send workspace changes event", "error", err)
+			} else {
+				slog.Debug("Sent workspace changes event",
+					"changes", len(protoChanges),
+					"isolatedPath", wsConfig.GetChangesPath(),
+					"originalPath", wsConfig.GetOriginalPath())
+			}
+		}
+	}
+
 	return stream.Send(&sandboxv1.ExecuteEvent{
 		ExecutionId: executionID,
 		Timestamp:   timestamppb.Now(),

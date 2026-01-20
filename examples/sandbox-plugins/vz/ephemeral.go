@@ -4,9 +4,9 @@ package main
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
-	"syscall"
 	"time"
 
 	"golang.org/x/sys/unix"
@@ -99,23 +99,8 @@ func copyFile(src, dst string) error {
 	}
 	defer dstFile.Close()
 
-	// Use sendfile for efficient kernel-level copy
-	srcFd := int(srcFile.Fd())
-	dstFd := int(dstFile.Fd())
-	size := srcInfo.Size()
-
-	for size > 0 {
-		// sendfile on Darwin: dst, src, offset, len
-		// offset nil = use current file position
-		written, err := syscall.Sendfile(dstFd, srcFd, nil, int(size))
-		if err != nil {
-			return fmt.Errorf("sendfile: %w", err)
-		}
-		if written == 0 {
-			break
-		}
-		size -= int64(written)
-	}
-
-	return nil
+	// Use io.Copy which internally uses the most efficient method available
+	// (sendfile, splice, or regular read/write depending on platform)
+	_, err = io.Copy(dstFile, srcFile)
+	return err
 }

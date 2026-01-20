@@ -71,6 +71,38 @@ func DefaultConfig() *Config {
 	}
 }
 
+// RuntimeError is an error with additional context for runtime selection failures.
+// It includes a remediation message to help users resolve the issue.
+type RuntimeError struct {
+	Runtime     sandboxv1.Runtime
+	Message     string
+	Remediation string
+}
+
+func (e *RuntimeError) Error() string {
+	return e.Message
+}
+
+// runtimeRemediation provides helpful guidance for runtime availability issues.
+var runtimeRemediation = map[sandboxv1.Runtime]string{
+	sandboxv1.Runtime_RUNTIME_DOCKER: `Docker is not accessible. Common fixes:
+  1. Ensure Docker Desktop is running
+  2. Check DOCKER_HOST environment variable
+  3. Run 'docker info' to verify Docker is working
+  4. On Linux, ensure your user is in the docker group:
+     sudo usermod -aG docker $USER`,
+	sandboxv1.Runtime_RUNTIME_GVISOR: `gVisor (runsc) is not available. To install:
+  1. Follow https://gvisor.dev/docs/user_guide/install/
+  2. Ensure 'runsc' is in your PATH
+  3. Run 'runsc --version' to verify installation`,
+	sandboxv1.Runtime_RUNTIME_SANDBOX_EXEC: `sandbox-exec is not available (macOS only).
+  This runtime requires macOS with Seatbelt support.`,
+	sandboxv1.Runtime_RUNTIME_PLUGIN: `The requested sandbox plugin is not available.
+  1. Ensure the plugin binary is in your PATH
+  2. Check that the plugin name is correct
+  3. Verify the plugin is executable`,
+}
+
 // ManagerOption configures a Manager.
 type ManagerOption func(*Manager)
 
@@ -217,15 +249,20 @@ func (m *Manager) Execute(ctx context.Context, req *sandboxv1.ExecuteRequest) it
 		selectedRuntime, err := m.selectRuntime(ctx, cfg, explicitlyRequested)
 		if err != nil {
 			m.auditor.LogExecutionFailed(ctx, executionID, sandboxv1.Runtime_RUNTIME_UNSPECIFIED, err)
+			errorEvent := &sandboxv1.ErrorEvent{
+				Message: fmt.Sprintf("no suitable runtime: %v", err),
+				Code:    "NO_RUNTIME",
+				IsFatal: true,
+			}
+			// Include remediation from RuntimeError if available
+			if rtErr, ok := err.(*RuntimeError); ok && rtErr.Remediation != "" {
+				errorEvent.Remediation = rtErr.Remediation
+			}
 			yield(&sandboxv1.ExecuteEvent{
 				ExecutionId: executionID,
 				Timestamp:   timestamppb.Now(),
 				Details: &sandboxv1.ExecuteEvent_Error{
-					Error: &sandboxv1.ErrorEvent{
-						Message: fmt.Sprintf("no suitable runtime: %v", err),
-						Code:    "NO_RUNTIME",
-						IsFatal: true,
-					},
+					Error: errorEvent,
 				},
 			}, nil)
 			return
@@ -376,7 +413,11 @@ func (m *Manager) selectRuntime(ctx context.Context, cfg *sandboxv1.SandboxConfi
 		rt := m.registry.Get(requestedRuntime)
 		if rt == nil {
 			if explicitlyRequested {
-				return nil, fmt.Errorf("runtime %s is not registered", requestedRuntime)
+				return nil, &RuntimeError{
+					Runtime:     requestedRuntime,
+					Message:     fmt.Sprintf("runtime %s is not registered", requestedRuntime),
+					Remediation: runtimeRemediation[requestedRuntime],
+				}
 			}
 		} else if rt.Available(ctx) {
 			return rt, nil
@@ -384,9 +425,17 @@ func (m *Manager) selectRuntime(ctx context.Context, cfg *sandboxv1.SandboxConfi
 			// User explicitly requested this runtime but it's not available
 			// Provide a more specific error for plugin runtime when a plugin name is specified
 			if requestedRuntime == sandboxv1.Runtime_RUNTIME_PLUGIN && cfg.GetPluginName() != "" {
-				return nil, fmt.Errorf("plugin %q not found in PATH", cfg.GetPluginName())
+				return nil, &RuntimeError{
+					Runtime:     requestedRuntime,
+					Message:     fmt.Sprintf("plugin %q not found in PATH", cfg.GetPluginName()),
+					Remediation: runtimeRemediation[sandboxv1.Runtime_RUNTIME_PLUGIN],
+				}
 			}
-			return nil, fmt.Errorf("runtime %s is not available", requestedRuntime)
+			return nil, &RuntimeError{
+				Runtime:     requestedRuntime,
+				Message:     fmt.Sprintf("runtime %s is not available", requestedRuntime),
+				Remediation: runtimeRemediation[requestedRuntime],
+			}
 		}
 	}
 

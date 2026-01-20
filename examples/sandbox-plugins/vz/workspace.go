@@ -542,6 +542,8 @@ func (wc *workspaceConfig) syncNonGitChanges() error {
 }
 
 // GetChangedFiles returns the list of files changed in the workspace.
+// For snapshot mode, this performs a proper diff against the original workspace.
+// For overlay mode, this returns files in the upper layer (which only contains changes).
 func (wc *workspaceConfig) GetChangedFiles() ([]string, error) {
 	if wc == nil {
 		return nil, nil
@@ -572,23 +574,36 @@ func (wc *workspaceConfig) GetChangedFiles() ([]string, error) {
 		return append(changed, untracked...), nil
 	}
 
-	// For overlay/snapshot modes, compare directories
-	// This is a simplified version - just return files in upper/changes dir
-	changesPath := wc.GetChangesPath()
-	if changesPath == "" {
+	// For overlay mode, the upper layer only contains changed files
+	if wc.IsOverlay() {
+		return wc.getOverlayChanges()
+	}
+
+	// For snapshot mode, diff against the original workspace
+	if wc.mode == sandboxv1.WorkspaceIsolationMode_WORKSPACE_ISOLATION_MODE_SNAPSHOT {
+		return wc.getSnapshotChanges()
+	}
+
+	return nil, nil
+}
+
+// getOverlayChanges returns files in the overlay upper layer.
+// The upper layer only contains files that were modified, so we can walk it directly.
+func (wc *workspaceConfig) getOverlayChanges() ([]string, error) {
+	if wc.upperPath == "" {
 		return nil, nil
 	}
 
 	var files []string
-	err := filepath.Walk(changesPath, func(path string, info os.FileInfo, err error) error {
+	err := filepath.Walk(wc.upperPath, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return err
 		}
-		if path == changesPath || info.IsDir() {
+		if path == wc.upperPath || info.IsDir() {
 			return nil
 		}
 
-		relPath, err := filepath.Rel(changesPath, path)
+		relPath, err := filepath.Rel(wc.upperPath, path)
 		if err != nil {
 			return err
 		}
@@ -597,6 +612,174 @@ func (wc *workspaceConfig) GetChangedFiles() ([]string, error) {
 	})
 
 	return files, err
+}
+
+// getSnapshotChanges compares the snapshot against the original workspace
+// to find actual changes (added, modified, deleted files).
+func (wc *workspaceConfig) getSnapshotChanges() ([]string, error) {
+	snapshotPath := wc.directPath
+	originalPath := wc.basePath
+
+	if snapshotPath == "" || originalPath == "" {
+		return nil, nil
+	}
+
+	var changes []string
+
+	// Track files in original to detect deletions
+	originalFiles := make(map[string]os.FileInfo)
+	err := filepath.Walk(originalPath, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			// Skip files we can't access
+			if os.IsPermission(err) {
+				return nil
+			}
+			return err
+		}
+		if path == originalPath {
+			return nil
+		}
+		// Skip .git directory for cleaner diffs
+		relPath, _ := filepath.Rel(originalPath, path)
+		if strings.HasPrefix(relPath, ".git") {
+			if info.IsDir() {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if !info.IsDir() {
+			originalFiles[relPath] = info
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, fmt.Errorf("walk original: %w", err)
+	}
+
+	// Walk snapshot and compare with original
+	err = filepath.Walk(snapshotPath, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			if os.IsPermission(err) {
+				return nil
+			}
+			return err
+		}
+		if path == snapshotPath {
+			return nil
+		}
+
+		relPath, err := filepath.Rel(snapshotPath, path)
+		if err != nil {
+			return err
+		}
+
+		// Skip .git directory
+		if strings.HasPrefix(relPath, ".git") {
+			if info.IsDir() {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+
+		if info.IsDir() {
+			return nil
+		}
+
+		origInfo, existsInOriginal := originalFiles[relPath]
+		if !existsInOriginal {
+			// New file added
+			changes = append(changes, relPath)
+		} else {
+			// File exists in both - check if modified
+			// Compare size and modification time
+			if info.Size() != origInfo.Size() || info.ModTime().After(origInfo.ModTime()) {
+				// Potentially modified - do content comparison for accuracy
+				if filesAreDifferent(filepath.Join(originalPath, relPath), path) {
+					changes = append(changes, relPath)
+				}
+			}
+			// Mark as seen
+			delete(originalFiles, relPath)
+		}
+
+		return nil
+	})
+	if err != nil {
+		return nil, fmt.Errorf("walk snapshot: %w", err)
+	}
+
+	// Any remaining files in originalFiles were deleted in the snapshot
+	for relPath := range originalFiles {
+		changes = append(changes, relPath)
+	}
+
+	return changes, nil
+}
+
+// filesAreDifferent returns true if two files have different content.
+// Uses a fast comparison: first checks size, then compares bytes.
+func filesAreDifferent(path1, path2 string) bool {
+	info1, err := os.Stat(path1)
+	if err != nil {
+		return true // Treat errors as different
+	}
+	info2, err := os.Stat(path2)
+	if err != nil {
+		return true
+	}
+
+	// Different sizes = definitely different
+	if info1.Size() != info2.Size() {
+		return true
+	}
+
+	// Same size = compare content
+	// For very large files, we could sample, but for typical workspace files
+	// a full comparison is fine
+	f1, err := os.Open(path1)
+	if err != nil {
+		return true
+	}
+	defer f1.Close()
+
+	f2, err := os.Open(path2)
+	if err != nil {
+		return true
+	}
+	defer f2.Close()
+
+	// Compare in chunks
+	const chunkSize = 64 * 1024 // 64KB chunks
+	buf1 := make([]byte, chunkSize)
+	buf2 := make([]byte, chunkSize)
+
+	for {
+		n1, err1 := f1.Read(buf1)
+		n2, err2 := f2.Read(buf2)
+
+		if n1 != n2 {
+			return true
+		}
+
+		if n1 > 0 {
+			for i := 0; i < n1; i++ {
+				if buf1[i] != buf2[i] {
+					return true
+				}
+			}
+		}
+
+		if err1 == err2 {
+			if err1 != nil {
+				// Both reached EOF or same error
+				return false
+			}
+			continue
+		}
+
+		// Different errors (one EOF, one not)
+		return true
+	}
 }
 
 // splitLines splits a string into lines, filtering empty lines.
