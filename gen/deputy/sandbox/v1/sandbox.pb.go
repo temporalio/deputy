@@ -1232,7 +1232,15 @@ type SandboxConfig struct {
 	TwoPhaseConfig *TwoPhaseExecutionConfig `protobuf:"bytes,22,opt,name=two_phase_config,json=twoPhaseConfig,proto3" json:"two_phase_config,omitempty"`
 	// Network connection audit mode.
 	// When enabled, logs blocked (and optionally allowed) network connections.
-	NetworkAudit  NetworkAuditMode `protobuf:"varint,23,opt,name=network_audit,json=networkAudit,proto3,enum=deputy.sandbox.v1.NetworkAuditMode" json:"network_audit,omitempty"`
+	NetworkAudit NetworkAuditMode `protobuf:"varint,23,opt,name=network_audit,json=networkAudit,proto3,enum=deputy.sandbox.v1.NetworkAuditMode" json:"network_audit,omitempty"`
+	// Allocate a pseudo-TTY for the sandbox.
+	// When true, enables interactive terminal mode with proper signal handling.
+	// Required for commands that need a terminal (e.g., interactive shells, editors).
+	AllocateTty bool `protobuf:"varint,24,opt,name=allocate_tty,json=allocateTty,proto3" json:"allocate_tty,omitempty"`
+	// Connect stdin to the sandbox.
+	// When true, allows interactive input from the terminal.
+	// Usually combined with allocate_tty for interactive sessions.
+	AttachStdin   bool `protobuf:"varint,25,opt,name=attach_stdin,json=attachStdin,proto3" json:"attach_stdin,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1426,6 +1434,20 @@ func (x *SandboxConfig) GetNetworkAudit() NetworkAuditMode {
 		return x.NetworkAudit
 	}
 	return NetworkAuditMode_NETWORK_AUDIT_MODE_UNSPECIFIED
+}
+
+func (x *SandboxConfig) GetAllocateTty() bool {
+	if x != nil {
+		return x.AllocateTty
+	}
+	return false
+}
+
+func (x *SandboxConfig) GetAttachStdin() bool {
+	if x != nil {
+		return x.AttachStdin
+	}
+	return false
 }
 
 // TwoPhaseExecutionConfig enables secure two-phase execution for builds.
@@ -2202,6 +2224,7 @@ type ExecuteEvent struct {
 	//	*ExecuteEvent_Status
 	//	*ExecuteEvent_Completed
 	//	*ExecuteEvent_Error
+	//	*ExecuteEvent_WorkspaceChanges
 	Details       isExecuteEvent_Details `protobuf_oneof:"details"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -2303,6 +2326,15 @@ func (x *ExecuteEvent) GetError() *ErrorEvent {
 	return nil
 }
 
+func (x *ExecuteEvent) GetWorkspaceChanges() *WorkspaceChangesEvent {
+	if x != nil {
+		if x, ok := x.Details.(*ExecuteEvent_WorkspaceChanges); ok {
+			return x.WorkspaceChanges
+		}
+	}
+	return nil
+}
+
 type isExecuteEvent_Details interface {
 	isExecuteEvent_Details()
 }
@@ -2327,6 +2359,10 @@ type ExecuteEvent_Error struct {
 	Error *ErrorEvent `protobuf:"bytes,14,opt,name=error,proto3,oneof"`
 }
 
+type ExecuteEvent_WorkspaceChanges struct {
+	WorkspaceChanges *WorkspaceChangesEvent `protobuf:"bytes,15,opt,name=workspace_changes,json=workspaceChanges,proto3,oneof"`
+}
+
 func (*ExecuteEvent_Started) isExecuteEvent_Details() {}
 
 func (*ExecuteEvent_Output) isExecuteEvent_Details() {}
@@ -2336,6 +2372,8 @@ func (*ExecuteEvent_Status) isExecuteEvent_Details() {}
 func (*ExecuteEvent_Completed) isExecuteEvent_Details() {}
 
 func (*ExecuteEvent_Error) isExecuteEvent_Details() {}
+
+func (*ExecuteEvent_WorkspaceChanges) isExecuteEvent_Details() {}
 
 // StartedEvent signals that sandbox execution has started.
 type StartedEvent struct {
@@ -2603,7 +2641,12 @@ type ErrorEvent struct {
 	// Whether this error is fatal (execution cannot continue).
 	IsFatal bool `protobuf:"varint,3,opt,name=is_fatal,json=isFatal,proto3" json:"is_fatal,omitempty"`
 	// Whether retrying might succeed.
-	IsRetriable   bool `protobuf:"varint,4,opt,name=is_retriable,json=isRetriable,proto3" json:"is_retriable,omitempty"`
+	IsRetriable bool `protobuf:"varint,4,opt,name=is_retriable,json=isRetriable,proto3" json:"is_retriable,omitempty"`
+	// Actionable guidance for resolving the error.
+	// This provides human-readable suggestions for fixing the issue.
+	Remediation string `protobuf:"bytes,5,opt,name=remediation,proto3" json:"remediation,omitempty"`
+	// Documentation URL for more information about this error.
+	DocsUrl       string `protobuf:"bytes,6,opt,name=docs_url,json=docsUrl,proto3" json:"docs_url,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -2666,6 +2709,94 @@ func (x *ErrorEvent) GetIsRetriable() bool {
 	return false
 }
 
+func (x *ErrorEvent) GetRemediation() string {
+	if x != nil {
+		return x.Remediation
+	}
+	return ""
+}
+
+func (x *ErrorEvent) GetDocsUrl() string {
+	if x != nil {
+		return x.DocsUrl
+	}
+	return ""
+}
+
+// WorkspaceChangesEvent reports file changes in the workspace after execution.
+// Sent when review_before_commit is enabled to allow the user to review changes.
+type WorkspaceChangesEvent struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// List of file changes detected.
+	Changes []*FileChange `protobuf:"bytes,1,rep,name=changes,proto3" json:"changes,omitempty"`
+	// Total count of changes.
+	TotalChanges int32 `protobuf:"varint,2,opt,name=total_changes,json=totalChanges,proto3" json:"total_changes,omitempty"`
+	// Path to the isolated workspace (for diff viewing).
+	IsolatedPath string `protobuf:"bytes,3,opt,name=isolated_path,json=isolatedPath,proto3" json:"isolated_path,omitempty"`
+	// Path to the original workspace.
+	OriginalPath  string `protobuf:"bytes,4,opt,name=original_path,json=originalPath,proto3" json:"original_path,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *WorkspaceChangesEvent) Reset() {
+	*x = WorkspaceChangesEvent{}
+	mi := &file_deputy_sandbox_v1_sandbox_proto_msgTypes[22]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *WorkspaceChangesEvent) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*WorkspaceChangesEvent) ProtoMessage() {}
+
+func (x *WorkspaceChangesEvent) ProtoReflect() protoreflect.Message {
+	mi := &file_deputy_sandbox_v1_sandbox_proto_msgTypes[22]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use WorkspaceChangesEvent.ProtoReflect.Descriptor instead.
+func (*WorkspaceChangesEvent) Descriptor() ([]byte, []int) {
+	return file_deputy_sandbox_v1_sandbox_proto_rawDescGZIP(), []int{22}
+}
+
+func (x *WorkspaceChangesEvent) GetChanges() []*FileChange {
+	if x != nil {
+		return x.Changes
+	}
+	return nil
+}
+
+func (x *WorkspaceChangesEvent) GetTotalChanges() int32 {
+	if x != nil {
+		return x.TotalChanges
+	}
+	return 0
+}
+
+func (x *WorkspaceChangesEvent) GetIsolatedPath() string {
+	if x != nil {
+		return x.IsolatedPath
+	}
+	return ""
+}
+
+func (x *WorkspaceChangesEvent) GetOriginalPath() string {
+	if x != nil {
+		return x.OriginalPath
+	}
+	return ""
+}
+
 // ResourceUsage reports resources consumed during execution.
 type ResourceUsage struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
@@ -2683,7 +2814,7 @@ type ResourceUsage struct {
 
 func (x *ResourceUsage) Reset() {
 	*x = ResourceUsage{}
-	mi := &file_deputy_sandbox_v1_sandbox_proto_msgTypes[22]
+	mi := &file_deputy_sandbox_v1_sandbox_proto_msgTypes[23]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2695,7 +2826,7 @@ func (x *ResourceUsage) String() string {
 func (*ResourceUsage) ProtoMessage() {}
 
 func (x *ResourceUsage) ProtoReflect() protoreflect.Message {
-	mi := &file_deputy_sandbox_v1_sandbox_proto_msgTypes[22]
+	mi := &file_deputy_sandbox_v1_sandbox_proto_msgTypes[23]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2708,7 +2839,7 @@ func (x *ResourceUsage) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ResourceUsage.ProtoReflect.Descriptor instead.
 func (*ResourceUsage) Descriptor() ([]byte, []int) {
-	return file_deputy_sandbox_v1_sandbox_proto_rawDescGZIP(), []int{22}
+	return file_deputy_sandbox_v1_sandbox_proto_rawDescGZIP(), []int{23}
 }
 
 func (x *ResourceUsage) GetPeakMemoryBytes() int64 {
@@ -2748,7 +2879,7 @@ type GetRuntimeInfoRequest struct {
 
 func (x *GetRuntimeInfoRequest) Reset() {
 	*x = GetRuntimeInfoRequest{}
-	mi := &file_deputy_sandbox_v1_sandbox_proto_msgTypes[23]
+	mi := &file_deputy_sandbox_v1_sandbox_proto_msgTypes[24]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2760,7 +2891,7 @@ func (x *GetRuntimeInfoRequest) String() string {
 func (*GetRuntimeInfoRequest) ProtoMessage() {}
 
 func (x *GetRuntimeInfoRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_deputy_sandbox_v1_sandbox_proto_msgTypes[23]
+	mi := &file_deputy_sandbox_v1_sandbox_proto_msgTypes[24]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2773,7 +2904,7 @@ func (x *GetRuntimeInfoRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetRuntimeInfoRequest.ProtoReflect.Descriptor instead.
 func (*GetRuntimeInfoRequest) Descriptor() ([]byte, []int) {
-	return file_deputy_sandbox_v1_sandbox_proto_rawDescGZIP(), []int{23}
+	return file_deputy_sandbox_v1_sandbox_proto_rawDescGZIP(), []int{24}
 }
 
 // GetRuntimeInfoResponse contains plugin metadata.
@@ -2797,7 +2928,7 @@ type GetRuntimeInfoResponse struct {
 
 func (x *GetRuntimeInfoResponse) Reset() {
 	*x = GetRuntimeInfoResponse{}
-	mi := &file_deputy_sandbox_v1_sandbox_proto_msgTypes[24]
+	mi := &file_deputy_sandbox_v1_sandbox_proto_msgTypes[25]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2809,7 +2940,7 @@ func (x *GetRuntimeInfoResponse) String() string {
 func (*GetRuntimeInfoResponse) ProtoMessage() {}
 
 func (x *GetRuntimeInfoResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_deputy_sandbox_v1_sandbox_proto_msgTypes[24]
+	mi := &file_deputy_sandbox_v1_sandbox_proto_msgTypes[25]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2822,7 +2953,7 @@ func (x *GetRuntimeInfoResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetRuntimeInfoResponse.ProtoReflect.Descriptor instead.
 func (*GetRuntimeInfoResponse) Descriptor() ([]byte, []int) {
-	return file_deputy_sandbox_v1_sandbox_proto_rawDescGZIP(), []int{24}
+	return file_deputy_sandbox_v1_sandbox_proto_rawDescGZIP(), []int{25}
 }
 
 func (x *GetRuntimeInfoResponse) GetName() string {
@@ -2895,7 +3026,7 @@ type RuntimeExecuteRequest struct {
 
 func (x *RuntimeExecuteRequest) Reset() {
 	*x = RuntimeExecuteRequest{}
-	mi := &file_deputy_sandbox_v1_sandbox_proto_msgTypes[25]
+	mi := &file_deputy_sandbox_v1_sandbox_proto_msgTypes[26]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2907,7 +3038,7 @@ func (x *RuntimeExecuteRequest) String() string {
 func (*RuntimeExecuteRequest) ProtoMessage() {}
 
 func (x *RuntimeExecuteRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_deputy_sandbox_v1_sandbox_proto_msgTypes[25]
+	mi := &file_deputy_sandbox_v1_sandbox_proto_msgTypes[26]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2920,7 +3051,7 @@ func (x *RuntimeExecuteRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RuntimeExecuteRequest.ProtoReflect.Descriptor instead.
 func (*RuntimeExecuteRequest) Descriptor() ([]byte, []int) {
-	return file_deputy_sandbox_v1_sandbox_proto_rawDescGZIP(), []int{25}
+	return file_deputy_sandbox_v1_sandbox_proto_rawDescGZIP(), []int{26}
 }
 
 func (x *RuntimeExecuteRequest) GetCommand() []string {
@@ -2997,7 +3128,7 @@ type CleanupRequest struct {
 
 func (x *CleanupRequest) Reset() {
 	*x = CleanupRequest{}
-	mi := &file_deputy_sandbox_v1_sandbox_proto_msgTypes[26]
+	mi := &file_deputy_sandbox_v1_sandbox_proto_msgTypes[27]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3009,7 +3140,7 @@ func (x *CleanupRequest) String() string {
 func (*CleanupRequest) ProtoMessage() {}
 
 func (x *CleanupRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_deputy_sandbox_v1_sandbox_proto_msgTypes[26]
+	mi := &file_deputy_sandbox_v1_sandbox_proto_msgTypes[27]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3022,7 +3153,7 @@ func (x *CleanupRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CleanupRequest.ProtoReflect.Descriptor instead.
 func (*CleanupRequest) Descriptor() ([]byte, []int) {
-	return file_deputy_sandbox_v1_sandbox_proto_rawDescGZIP(), []int{26}
+	return file_deputy_sandbox_v1_sandbox_proto_rawDescGZIP(), []int{27}
 }
 
 func (x *CleanupRequest) GetExecutionId() string {
@@ -3045,7 +3176,7 @@ type CleanupResponse struct {
 
 func (x *CleanupResponse) Reset() {
 	*x = CleanupResponse{}
-	mi := &file_deputy_sandbox_v1_sandbox_proto_msgTypes[27]
+	mi := &file_deputy_sandbox_v1_sandbox_proto_msgTypes[28]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3057,7 +3188,7 @@ func (x *CleanupResponse) String() string {
 func (*CleanupResponse) ProtoMessage() {}
 
 func (x *CleanupResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_deputy_sandbox_v1_sandbox_proto_msgTypes[27]
+	mi := &file_deputy_sandbox_v1_sandbox_proto_msgTypes[28]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3070,7 +3201,7 @@ func (x *CleanupResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CleanupResponse.ProtoReflect.Descriptor instead.
 func (*CleanupResponse) Descriptor() ([]byte, []int) {
-	return file_deputy_sandbox_v1_sandbox_proto_rawDescGZIP(), []int{27}
+	return file_deputy_sandbox_v1_sandbox_proto_rawDescGZIP(), []int{28}
 }
 
 func (x *CleanupResponse) GetSuccess() bool {
@@ -3103,7 +3234,7 @@ type SyncChangesRequest struct {
 
 func (x *SyncChangesRequest) Reset() {
 	*x = SyncChangesRequest{}
-	mi := &file_deputy_sandbox_v1_sandbox_proto_msgTypes[28]
+	mi := &file_deputy_sandbox_v1_sandbox_proto_msgTypes[29]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3115,7 +3246,7 @@ func (x *SyncChangesRequest) String() string {
 func (*SyncChangesRequest) ProtoMessage() {}
 
 func (x *SyncChangesRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_deputy_sandbox_v1_sandbox_proto_msgTypes[28]
+	mi := &file_deputy_sandbox_v1_sandbox_proto_msgTypes[29]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3128,7 +3259,7 @@ func (x *SyncChangesRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SyncChangesRequest.ProtoReflect.Descriptor instead.
 func (*SyncChangesRequest) Descriptor() ([]byte, []int) {
-	return file_deputy_sandbox_v1_sandbox_proto_rawDescGZIP(), []int{28}
+	return file_deputy_sandbox_v1_sandbox_proto_rawDescGZIP(), []int{29}
 }
 
 func (x *SyncChangesRequest) GetExecutionId() string {
@@ -3169,7 +3300,7 @@ type SyncChangesResponse struct {
 
 func (x *SyncChangesResponse) Reset() {
 	*x = SyncChangesResponse{}
-	mi := &file_deputy_sandbox_v1_sandbox_proto_msgTypes[29]
+	mi := &file_deputy_sandbox_v1_sandbox_proto_msgTypes[30]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3181,7 +3312,7 @@ func (x *SyncChangesResponse) String() string {
 func (*SyncChangesResponse) ProtoMessage() {}
 
 func (x *SyncChangesResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_deputy_sandbox_v1_sandbox_proto_msgTypes[29]
+	mi := &file_deputy_sandbox_v1_sandbox_proto_msgTypes[30]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3194,7 +3325,7 @@ func (x *SyncChangesResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SyncChangesResponse.ProtoReflect.Descriptor instead.
 func (*SyncChangesResponse) Descriptor() ([]byte, []int) {
-	return file_deputy_sandbox_v1_sandbox_proto_rawDescGZIP(), []int{29}
+	return file_deputy_sandbox_v1_sandbox_proto_rawDescGZIP(), []int{30}
 }
 
 func (x *SyncChangesResponse) GetSuccess() bool {
@@ -3236,7 +3367,7 @@ type GetChangesRequest struct {
 
 func (x *GetChangesRequest) Reset() {
 	*x = GetChangesRequest{}
-	mi := &file_deputy_sandbox_v1_sandbox_proto_msgTypes[30]
+	mi := &file_deputy_sandbox_v1_sandbox_proto_msgTypes[31]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3248,7 +3379,7 @@ func (x *GetChangesRequest) String() string {
 func (*GetChangesRequest) ProtoMessage() {}
 
 func (x *GetChangesRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_deputy_sandbox_v1_sandbox_proto_msgTypes[30]
+	mi := &file_deputy_sandbox_v1_sandbox_proto_msgTypes[31]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3261,7 +3392,7 @@ func (x *GetChangesRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetChangesRequest.ProtoReflect.Descriptor instead.
 func (*GetChangesRequest) Descriptor() ([]byte, []int) {
-	return file_deputy_sandbox_v1_sandbox_proto_rawDescGZIP(), []int{30}
+	return file_deputy_sandbox_v1_sandbox_proto_rawDescGZIP(), []int{31}
 }
 
 func (x *GetChangesRequest) GetExecutionId() string {
@@ -3284,7 +3415,7 @@ type GetChangesResponse struct {
 
 func (x *GetChangesResponse) Reset() {
 	*x = GetChangesResponse{}
-	mi := &file_deputy_sandbox_v1_sandbox_proto_msgTypes[31]
+	mi := &file_deputy_sandbox_v1_sandbox_proto_msgTypes[32]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3296,7 +3427,7 @@ func (x *GetChangesResponse) String() string {
 func (*GetChangesResponse) ProtoMessage() {}
 
 func (x *GetChangesResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_deputy_sandbox_v1_sandbox_proto_msgTypes[31]
+	mi := &file_deputy_sandbox_v1_sandbox_proto_msgTypes[32]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3309,7 +3440,7 @@ func (x *GetChangesResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetChangesResponse.ProtoReflect.Descriptor instead.
 func (*GetChangesResponse) Descriptor() ([]byte, []int) {
-	return file_deputy_sandbox_v1_sandbox_proto_rawDescGZIP(), []int{31}
+	return file_deputy_sandbox_v1_sandbox_proto_rawDescGZIP(), []int{32}
 }
 
 func (x *GetChangesResponse) GetChanges() []*FileChange {
@@ -3343,7 +3474,7 @@ type FileChange struct {
 
 func (x *FileChange) Reset() {
 	*x = FileChange{}
-	mi := &file_deputy_sandbox_v1_sandbox_proto_msgTypes[32]
+	mi := &file_deputy_sandbox_v1_sandbox_proto_msgTypes[33]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3355,7 +3486,7 @@ func (x *FileChange) String() string {
 func (*FileChange) ProtoMessage() {}
 
 func (x *FileChange) ProtoReflect() protoreflect.Message {
-	mi := &file_deputy_sandbox_v1_sandbox_proto_msgTypes[32]
+	mi := &file_deputy_sandbox_v1_sandbox_proto_msgTypes[33]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3368,7 +3499,7 @@ func (x *FileChange) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FileChange.ProtoReflect.Descriptor instead.
 func (*FileChange) Descriptor() ([]byte, []int) {
-	return file_deputy_sandbox_v1_sandbox_proto_rawDescGZIP(), []int{32}
+	return file_deputy_sandbox_v1_sandbox_proto_rawDescGZIP(), []int{33}
 }
 
 func (x *FileChange) GetPath() string {
@@ -3449,7 +3580,7 @@ const file_deputy_sandbox_v1_sandbox_proto_rawDesc = "" +
 	"\rworkspace_dir\x18\b \x01(\tB\a\xbaH\x04r\x02\x10\x01R\fworkspaceDir\x1a6\n" +
 	"\bEnvEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
-	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\x96\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\xdc\n" +
 	"\n" +
 	"\rSandboxConfig\x124\n" +
 	"\aruntime\x18\x01 \x01(\x0e2\x1a.deputy.sandbox.v1.RuntimeR\aruntime\x12+\n" +
@@ -3476,7 +3607,9 @@ const file_deputy_sandbox_v1_sandbox_proto_rawDesc = "" +
 	"\x14review_before_commit\x18\x14 \x01(\bR\x12reviewBeforeCommit\x12i\n" +
 	"\x1aworkspace_isolation_config\x18\x15 \x01(\v2+.deputy.sandbox.v1.WorkspaceIsolationConfigR\x18workspaceIsolationConfig\x12T\n" +
 	"\x10two_phase_config\x18\x16 \x01(\v2*.deputy.sandbox.v1.TwoPhaseExecutionConfigR\x0etwoPhaseConfig\x12H\n" +
-	"\rnetwork_audit\x18\x17 \x01(\x0e2#.deputy.sandbox.v1.NetworkAuditModeR\fnetworkAudit\x1a?\n" +
+	"\rnetwork_audit\x18\x17 \x01(\x0e2#.deputy.sandbox.v1.NetworkAuditModeR\fnetworkAudit\x12!\n" +
+	"\fallocate_tty\x18\x18 \x01(\bR\vallocateTty\x12!\n" +
+	"\fattach_stdin\x18\x19 \x01(\bR\vattachStdin\x1a?\n" +
 	"\x11ExtraOptionsEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\xe0\x02\n" +
@@ -3544,7 +3677,7 @@ const file_deputy_sandbox_v1_sandbox_proto_rawDesc = "" +
 	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\x1a;\n" +
 	"\rMetadataEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
-	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\xa1\x03\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\xfa\x03\n" +
 	"\fExecuteEvent\x12!\n" +
 	"\fexecution_id\x18\x01 \x01(\tR\vexecutionId\x128\n" +
 	"\ttimestamp\x18\x02 \x01(\v2\x1a.google.protobuf.TimestampR\ttimestamp\x12;\n" +
@@ -3553,7 +3686,8 @@ const file_deputy_sandbox_v1_sandbox_proto_rawDesc = "" +
 	"\x06output\x18\v \x01(\v2\x1e.deputy.sandbox.v1.OutputEventH\x00R\x06output\x128\n" +
 	"\x06status\x18\f \x01(\v2\x1e.deputy.sandbox.v1.StatusEventH\x00R\x06status\x12A\n" +
 	"\tcompleted\x18\r \x01(\v2!.deputy.sandbox.v1.CompletedEventH\x00R\tcompleted\x125\n" +
-	"\x05error\x18\x0e \x01(\v2\x1d.deputy.sandbox.v1.ErrorEventH\x00R\x05errorB\t\n" +
+	"\x05error\x18\x0e \x01(\v2\x1d.deputy.sandbox.v1.ErrorEventH\x00R\x05error\x12W\n" +
+	"\x11workspace_changes\x18\x0f \x01(\v2(.deputy.sandbox.v1.WorkspaceChangesEventH\x00R\x10workspaceChangesB\t\n" +
 	"\adetails\"\xd7\x01\n" +
 	"\fStartedEvent\x12!\n" +
 	"\fexecution_id\x18\x01 \x01(\tR\vexecutionId\x124\n" +
@@ -3570,13 +3704,20 @@ const file_deputy_sandbox_v1_sandbox_proto_rawDesc = "" +
 	"\x0eCompletedEvent\x12\x1b\n" +
 	"\texit_code\x18\x01 \x01(\x05R\bexitCode\x125\n" +
 	"\bduration\x18\x02 \x01(\v2\x19.google.protobuf.DurationR\bduration\x12G\n" +
-	"\x0eresource_usage\x18\x03 \x01(\v2 .deputy.sandbox.v1.ResourceUsageR\rresourceUsage\"x\n" +
+	"\x0eresource_usage\x18\x03 \x01(\v2 .deputy.sandbox.v1.ResourceUsageR\rresourceUsage\"\xb5\x01\n" +
 	"\n" +
 	"ErrorEvent\x12\x18\n" +
 	"\amessage\x18\x01 \x01(\tR\amessage\x12\x12\n" +
 	"\x04code\x18\x02 \x01(\tR\x04code\x12\x19\n" +
 	"\bis_fatal\x18\x03 \x01(\bR\aisFatal\x12!\n" +
-	"\fis_retriable\x18\x04 \x01(\bR\visRetriable\"\xb5\x01\n" +
+	"\fis_retriable\x18\x04 \x01(\bR\visRetriable\x12 \n" +
+	"\vremediation\x18\x05 \x01(\tR\vremediation\x12\x19\n" +
+	"\bdocs_url\x18\x06 \x01(\tR\adocsUrl\"\xbf\x01\n" +
+	"\x15WorkspaceChangesEvent\x127\n" +
+	"\achanges\x18\x01 \x03(\v2\x1d.deputy.sandbox.v1.FileChangeR\achanges\x12#\n" +
+	"\rtotal_changes\x18\x02 \x01(\x05R\ftotalChanges\x12#\n" +
+	"\risolated_path\x18\x03 \x01(\tR\fisolatedPath\x12#\n" +
+	"\roriginal_path\x18\x04 \x01(\tR\foriginalPath\"\xb5\x01\n" +
 	"\rResourceUsage\x12*\n" +
 	"\x11peak_memory_bytes\x18\x01 \x01(\x03R\x0fpeakMemoryBytes\x124\n" +
 	"\bcpu_time\x18\x02 \x01(\v2\x19.google.protobuf.DurationR\acpuTime\x12\x1d\n" +
@@ -3716,7 +3857,7 @@ func file_deputy_sandbox_v1_sandbox_proto_rawDescGZIP() []byte {
 }
 
 var file_deputy_sandbox_v1_sandbox_proto_enumTypes = make([]protoimpl.EnumInfo, 8)
-var file_deputy_sandbox_v1_sandbox_proto_msgTypes = make([]protoimpl.MessageInfo, 38)
+var file_deputy_sandbox_v1_sandbox_proto_msgTypes = make([]protoimpl.MessageInfo, 39)
 var file_deputy_sandbox_v1_sandbox_proto_goTypes = []any{
 	(Runtime)(0),                     // 0: deputy.sandbox.v1.Runtime
 	(Mode)(0),                        // 1: deputy.sandbox.v1.Mode
@@ -3748,24 +3889,25 @@ var file_deputy_sandbox_v1_sandbox_proto_goTypes = []any{
 	(*StatusEvent)(nil),              // 27: deputy.sandbox.v1.StatusEvent
 	(*CompletedEvent)(nil),           // 28: deputy.sandbox.v1.CompletedEvent
 	(*ErrorEvent)(nil),               // 29: deputy.sandbox.v1.ErrorEvent
-	(*ResourceUsage)(nil),            // 30: deputy.sandbox.v1.ResourceUsage
-	(*GetRuntimeInfoRequest)(nil),    // 31: deputy.sandbox.v1.GetRuntimeInfoRequest
-	(*GetRuntimeInfoResponse)(nil),   // 32: deputy.sandbox.v1.GetRuntimeInfoResponse
-	(*RuntimeExecuteRequest)(nil),    // 33: deputy.sandbox.v1.RuntimeExecuteRequest
-	(*CleanupRequest)(nil),           // 34: deputy.sandbox.v1.CleanupRequest
-	(*CleanupResponse)(nil),          // 35: deputy.sandbox.v1.CleanupResponse
-	(*SyncChangesRequest)(nil),       // 36: deputy.sandbox.v1.SyncChangesRequest
-	(*SyncChangesResponse)(nil),      // 37: deputy.sandbox.v1.SyncChangesResponse
-	(*GetChangesRequest)(nil),        // 38: deputy.sandbox.v1.GetChangesRequest
-	(*GetChangesResponse)(nil),       // 39: deputy.sandbox.v1.GetChangesResponse
-	(*FileChange)(nil),               // 40: deputy.sandbox.v1.FileChange
-	nil,                              // 41: deputy.sandbox.v1.ExecuteRequest.EnvEntry
-	nil,                              // 42: deputy.sandbox.v1.SandboxConfig.ExtraOptionsEntry
-	nil,                              // 43: deputy.sandbox.v1.ExecutionContext.JwtClaimsEntry
-	nil,                              // 44: deputy.sandbox.v1.ExecutionContext.MetadataEntry
-	nil,                              // 45: deputy.sandbox.v1.RuntimeExecuteRequest.EnvEntry
-	(*durationpb.Duration)(nil),      // 46: google.protobuf.Duration
-	(*timestamppb.Timestamp)(nil),    // 47: google.protobuf.Timestamp
+	(*WorkspaceChangesEvent)(nil),    // 30: deputy.sandbox.v1.WorkspaceChangesEvent
+	(*ResourceUsage)(nil),            // 31: deputy.sandbox.v1.ResourceUsage
+	(*GetRuntimeInfoRequest)(nil),    // 32: deputy.sandbox.v1.GetRuntimeInfoRequest
+	(*GetRuntimeInfoResponse)(nil),   // 33: deputy.sandbox.v1.GetRuntimeInfoResponse
+	(*RuntimeExecuteRequest)(nil),    // 34: deputy.sandbox.v1.RuntimeExecuteRequest
+	(*CleanupRequest)(nil),           // 35: deputy.sandbox.v1.CleanupRequest
+	(*CleanupResponse)(nil),          // 36: deputy.sandbox.v1.CleanupResponse
+	(*SyncChangesRequest)(nil),       // 37: deputy.sandbox.v1.SyncChangesRequest
+	(*SyncChangesResponse)(nil),      // 38: deputy.sandbox.v1.SyncChangesResponse
+	(*GetChangesRequest)(nil),        // 39: deputy.sandbox.v1.GetChangesRequest
+	(*GetChangesResponse)(nil),       // 40: deputy.sandbox.v1.GetChangesResponse
+	(*FileChange)(nil),               // 41: deputy.sandbox.v1.FileChange
+	nil,                              // 42: deputy.sandbox.v1.ExecuteRequest.EnvEntry
+	nil,                              // 43: deputy.sandbox.v1.SandboxConfig.ExtraOptionsEntry
+	nil,                              // 44: deputy.sandbox.v1.ExecutionContext.JwtClaimsEntry
+	nil,                              // 45: deputy.sandbox.v1.ExecutionContext.MetadataEntry
+	nil,                              // 46: deputy.sandbox.v1.RuntimeExecuteRequest.EnvEntry
+	(*durationpb.Duration)(nil),      // 47: google.protobuf.Duration
+	(*timestamppb.Timestamp)(nil),    // 48: google.protobuf.Timestamp
 }
 var file_deputy_sandbox_v1_sandbox_proto_depIdxs = []int32{
 	10, // 0: deputy.sandbox.v1.ListRuntimesResponse.runtimes:type_name -> deputy.sandbox.v1.RuntimeInfo
@@ -3776,70 +3918,72 @@ var file_deputy_sandbox_v1_sandbox_proto_depIdxs = []int32{
 	0,  // 5: deputy.sandbox.v1.GetCapabilitiesRequest.runtime:type_name -> deputy.sandbox.v1.Runtime
 	11, // 6: deputy.sandbox.v1.GetCapabilitiesResponse.capabilities:type_name -> deputy.sandbox.v1.RuntimeCapabilities
 	15, // 7: deputy.sandbox.v1.ExecuteRequest.config:type_name -> deputy.sandbox.v1.SandboxConfig
-	41, // 8: deputy.sandbox.v1.ExecuteRequest.env:type_name -> deputy.sandbox.v1.ExecuteRequest.EnvEntry
-	46, // 9: deputy.sandbox.v1.ExecuteRequest.timeout:type_name -> google.protobuf.Duration
+	42, // 8: deputy.sandbox.v1.ExecuteRequest.env:type_name -> deputy.sandbox.v1.ExecuteRequest.EnvEntry
+	47, // 9: deputy.sandbox.v1.ExecuteRequest.timeout:type_name -> google.protobuf.Duration
 	23, // 10: deputy.sandbox.v1.ExecuteRequest.context:type_name -> deputy.sandbox.v1.ExecutionContext
 	0,  // 11: deputy.sandbox.v1.SandboxConfig.runtime:type_name -> deputy.sandbox.v1.Runtime
 	1,  // 12: deputy.sandbox.v1.SandboxConfig.mode:type_name -> deputy.sandbox.v1.Mode
 	2,  // 13: deputy.sandbox.v1.SandboxConfig.network_mode:type_name -> deputy.sandbox.v1.NetworkMode
 	21, // 14: deputy.sandbox.v1.SandboxConfig.limits:type_name -> deputy.sandbox.v1.ResourceLimits
 	22, // 15: deputy.sandbox.v1.SandboxConfig.mounts:type_name -> deputy.sandbox.v1.Mount
-	42, // 16: deputy.sandbox.v1.SandboxConfig.extra_options:type_name -> deputy.sandbox.v1.SandboxConfig.ExtraOptionsEntry
+	43, // 16: deputy.sandbox.v1.SandboxConfig.extra_options:type_name -> deputy.sandbox.v1.SandboxConfig.ExtraOptionsEntry
 	3,  // 17: deputy.sandbox.v1.SandboxConfig.workspace_isolation:type_name -> deputy.sandbox.v1.WorkspaceIsolationMode
 	18, // 18: deputy.sandbox.v1.SandboxConfig.file_mask:type_name -> deputy.sandbox.v1.FileMaskConfig
 	20, // 19: deputy.sandbox.v1.SandboxConfig.workspace_isolation_config:type_name -> deputy.sandbox.v1.WorkspaceIsolationConfig
 	16, // 20: deputy.sandbox.v1.SandboxConfig.two_phase_config:type_name -> deputy.sandbox.v1.TwoPhaseExecutionConfig
 	6,  // 21: deputy.sandbox.v1.SandboxConfig.network_audit:type_name -> deputy.sandbox.v1.NetworkAuditMode
-	46, // 22: deputy.sandbox.v1.TwoPhaseExecutionConfig.prefetch_timeout:type_name -> google.protobuf.Duration
-	47, // 23: deputy.sandbox.v1.NetworkAuditEntry.timestamp:type_name -> google.protobuf.Timestamp
+	47, // 22: deputy.sandbox.v1.TwoPhaseExecutionConfig.prefetch_timeout:type_name -> google.protobuf.Duration
+	48, // 23: deputy.sandbox.v1.NetworkAuditEntry.timestamp:type_name -> google.protobuf.Timestamp
 	4,  // 24: deputy.sandbox.v1.FileMaskConfig.default_mode:type_name -> deputy.sandbox.v1.FileMaskMode
 	19, // 25: deputy.sandbox.v1.FileMaskConfig.mask_rules:type_name -> deputy.sandbox.v1.FileMaskRule
 	7,  // 26: deputy.sandbox.v1.FileMaskConfig.presets:type_name -> deputy.sandbox.v1.FileMaskPreset
 	4,  // 27: deputy.sandbox.v1.FileMaskRule.mode:type_name -> deputy.sandbox.v1.FileMaskMode
 	3,  // 28: deputy.sandbox.v1.WorkspaceIsolationConfig.mode:type_name -> deputy.sandbox.v1.WorkspaceIsolationMode
-	46, // 29: deputy.sandbox.v1.WorkspaceIsolationConfig.setup_timeout:type_name -> google.protobuf.Duration
-	46, // 30: deputy.sandbox.v1.ResourceLimits.max_time:type_name -> google.protobuf.Duration
+	47, // 29: deputy.sandbox.v1.WorkspaceIsolationConfig.setup_timeout:type_name -> google.protobuf.Duration
+	47, // 30: deputy.sandbox.v1.ResourceLimits.max_time:type_name -> google.protobuf.Duration
 	5,  // 31: deputy.sandbox.v1.ExecutionContext.source:type_name -> deputy.sandbox.v1.ExecutionSource
-	43, // 32: deputy.sandbox.v1.ExecutionContext.jwt_claims:type_name -> deputy.sandbox.v1.ExecutionContext.JwtClaimsEntry
-	44, // 33: deputy.sandbox.v1.ExecutionContext.metadata:type_name -> deputy.sandbox.v1.ExecutionContext.MetadataEntry
-	47, // 34: deputy.sandbox.v1.ExecuteEvent.timestamp:type_name -> google.protobuf.Timestamp
+	44, // 32: deputy.sandbox.v1.ExecutionContext.jwt_claims:type_name -> deputy.sandbox.v1.ExecutionContext.JwtClaimsEntry
+	45, // 33: deputy.sandbox.v1.ExecutionContext.metadata:type_name -> deputy.sandbox.v1.ExecutionContext.MetadataEntry
+	48, // 34: deputy.sandbox.v1.ExecuteEvent.timestamp:type_name -> google.protobuf.Timestamp
 	25, // 35: deputy.sandbox.v1.ExecuteEvent.started:type_name -> deputy.sandbox.v1.StartedEvent
 	26, // 36: deputy.sandbox.v1.ExecuteEvent.output:type_name -> deputy.sandbox.v1.OutputEvent
 	27, // 37: deputy.sandbox.v1.ExecuteEvent.status:type_name -> deputy.sandbox.v1.StatusEvent
 	28, // 38: deputy.sandbox.v1.ExecuteEvent.completed:type_name -> deputy.sandbox.v1.CompletedEvent
 	29, // 39: deputy.sandbox.v1.ExecuteEvent.error:type_name -> deputy.sandbox.v1.ErrorEvent
-	0,  // 40: deputy.sandbox.v1.StartedEvent.runtime:type_name -> deputy.sandbox.v1.Runtime
-	15, // 41: deputy.sandbox.v1.StartedEvent.effective_config:type_name -> deputy.sandbox.v1.SandboxConfig
-	46, // 42: deputy.sandbox.v1.CompletedEvent.duration:type_name -> google.protobuf.Duration
-	30, // 43: deputy.sandbox.v1.CompletedEvent.resource_usage:type_name -> deputy.sandbox.v1.ResourceUsage
-	46, // 44: deputy.sandbox.v1.ResourceUsage.cpu_time:type_name -> google.protobuf.Duration
-	11, // 45: deputy.sandbox.v1.GetRuntimeInfoResponse.capabilities:type_name -> deputy.sandbox.v1.RuntimeCapabilities
-	1,  // 46: deputy.sandbox.v1.GetRuntimeInfoResponse.supported_modes:type_name -> deputy.sandbox.v1.Mode
-	15, // 47: deputy.sandbox.v1.RuntimeExecuteRequest.config:type_name -> deputy.sandbox.v1.SandboxConfig
-	45, // 48: deputy.sandbox.v1.RuntimeExecuteRequest.env:type_name -> deputy.sandbox.v1.RuntimeExecuteRequest.EnvEntry
-	46, // 49: deputy.sandbox.v1.RuntimeExecuteRequest.timeout:type_name -> google.protobuf.Duration
-	40, // 50: deputy.sandbox.v1.GetChangesResponse.changes:type_name -> deputy.sandbox.v1.FileChange
-	8,  // 51: deputy.sandbox.v1.SandboxService.ListRuntimes:input_type -> deputy.sandbox.v1.ListRuntimesRequest
-	14, // 52: deputy.sandbox.v1.SandboxService.Execute:input_type -> deputy.sandbox.v1.ExecuteRequest
-	12, // 53: deputy.sandbox.v1.SandboxService.GetCapabilities:input_type -> deputy.sandbox.v1.GetCapabilitiesRequest
-	31, // 54: deputy.sandbox.v1.SandboxRuntimeService.GetInfo:input_type -> deputy.sandbox.v1.GetRuntimeInfoRequest
-	33, // 55: deputy.sandbox.v1.SandboxRuntimeService.Execute:input_type -> deputy.sandbox.v1.RuntimeExecuteRequest
-	34, // 56: deputy.sandbox.v1.SandboxRuntimeService.Cleanup:input_type -> deputy.sandbox.v1.CleanupRequest
-	36, // 57: deputy.sandbox.v1.SandboxRuntimeService.SyncChanges:input_type -> deputy.sandbox.v1.SyncChangesRequest
-	38, // 58: deputy.sandbox.v1.SandboxRuntimeService.GetChanges:input_type -> deputy.sandbox.v1.GetChangesRequest
-	9,  // 59: deputy.sandbox.v1.SandboxService.ListRuntimes:output_type -> deputy.sandbox.v1.ListRuntimesResponse
-	24, // 60: deputy.sandbox.v1.SandboxService.Execute:output_type -> deputy.sandbox.v1.ExecuteEvent
-	13, // 61: deputy.sandbox.v1.SandboxService.GetCapabilities:output_type -> deputy.sandbox.v1.GetCapabilitiesResponse
-	32, // 62: deputy.sandbox.v1.SandboxRuntimeService.GetInfo:output_type -> deputy.sandbox.v1.GetRuntimeInfoResponse
-	24, // 63: deputy.sandbox.v1.SandboxRuntimeService.Execute:output_type -> deputy.sandbox.v1.ExecuteEvent
-	35, // 64: deputy.sandbox.v1.SandboxRuntimeService.Cleanup:output_type -> deputy.sandbox.v1.CleanupResponse
-	37, // 65: deputy.sandbox.v1.SandboxRuntimeService.SyncChanges:output_type -> deputy.sandbox.v1.SyncChangesResponse
-	39, // 66: deputy.sandbox.v1.SandboxRuntimeService.GetChanges:output_type -> deputy.sandbox.v1.GetChangesResponse
-	59, // [59:67] is the sub-list for method output_type
-	51, // [51:59] is the sub-list for method input_type
-	51, // [51:51] is the sub-list for extension type_name
-	51, // [51:51] is the sub-list for extension extendee
-	0,  // [0:51] is the sub-list for field type_name
+	30, // 40: deputy.sandbox.v1.ExecuteEvent.workspace_changes:type_name -> deputy.sandbox.v1.WorkspaceChangesEvent
+	0,  // 41: deputy.sandbox.v1.StartedEvent.runtime:type_name -> deputy.sandbox.v1.Runtime
+	15, // 42: deputy.sandbox.v1.StartedEvent.effective_config:type_name -> deputy.sandbox.v1.SandboxConfig
+	47, // 43: deputy.sandbox.v1.CompletedEvent.duration:type_name -> google.protobuf.Duration
+	31, // 44: deputy.sandbox.v1.CompletedEvent.resource_usage:type_name -> deputy.sandbox.v1.ResourceUsage
+	41, // 45: deputy.sandbox.v1.WorkspaceChangesEvent.changes:type_name -> deputy.sandbox.v1.FileChange
+	47, // 46: deputy.sandbox.v1.ResourceUsage.cpu_time:type_name -> google.protobuf.Duration
+	11, // 47: deputy.sandbox.v1.GetRuntimeInfoResponse.capabilities:type_name -> deputy.sandbox.v1.RuntimeCapabilities
+	1,  // 48: deputy.sandbox.v1.GetRuntimeInfoResponse.supported_modes:type_name -> deputy.sandbox.v1.Mode
+	15, // 49: deputy.sandbox.v1.RuntimeExecuteRequest.config:type_name -> deputy.sandbox.v1.SandboxConfig
+	46, // 50: deputy.sandbox.v1.RuntimeExecuteRequest.env:type_name -> deputy.sandbox.v1.RuntimeExecuteRequest.EnvEntry
+	47, // 51: deputy.sandbox.v1.RuntimeExecuteRequest.timeout:type_name -> google.protobuf.Duration
+	41, // 52: deputy.sandbox.v1.GetChangesResponse.changes:type_name -> deputy.sandbox.v1.FileChange
+	8,  // 53: deputy.sandbox.v1.SandboxService.ListRuntimes:input_type -> deputy.sandbox.v1.ListRuntimesRequest
+	14, // 54: deputy.sandbox.v1.SandboxService.Execute:input_type -> deputy.sandbox.v1.ExecuteRequest
+	12, // 55: deputy.sandbox.v1.SandboxService.GetCapabilities:input_type -> deputy.sandbox.v1.GetCapabilitiesRequest
+	32, // 56: deputy.sandbox.v1.SandboxRuntimeService.GetInfo:input_type -> deputy.sandbox.v1.GetRuntimeInfoRequest
+	34, // 57: deputy.sandbox.v1.SandboxRuntimeService.Execute:input_type -> deputy.sandbox.v1.RuntimeExecuteRequest
+	35, // 58: deputy.sandbox.v1.SandboxRuntimeService.Cleanup:input_type -> deputy.sandbox.v1.CleanupRequest
+	37, // 59: deputy.sandbox.v1.SandboxRuntimeService.SyncChanges:input_type -> deputy.sandbox.v1.SyncChangesRequest
+	39, // 60: deputy.sandbox.v1.SandboxRuntimeService.GetChanges:input_type -> deputy.sandbox.v1.GetChangesRequest
+	9,  // 61: deputy.sandbox.v1.SandboxService.ListRuntimes:output_type -> deputy.sandbox.v1.ListRuntimesResponse
+	24, // 62: deputy.sandbox.v1.SandboxService.Execute:output_type -> deputy.sandbox.v1.ExecuteEvent
+	13, // 63: deputy.sandbox.v1.SandboxService.GetCapabilities:output_type -> deputy.sandbox.v1.GetCapabilitiesResponse
+	33, // 64: deputy.sandbox.v1.SandboxRuntimeService.GetInfo:output_type -> deputy.sandbox.v1.GetRuntimeInfoResponse
+	24, // 65: deputy.sandbox.v1.SandboxRuntimeService.Execute:output_type -> deputy.sandbox.v1.ExecuteEvent
+	36, // 66: deputy.sandbox.v1.SandboxRuntimeService.Cleanup:output_type -> deputy.sandbox.v1.CleanupResponse
+	38, // 67: deputy.sandbox.v1.SandboxRuntimeService.SyncChanges:output_type -> deputy.sandbox.v1.SyncChangesResponse
+	40, // 68: deputy.sandbox.v1.SandboxRuntimeService.GetChanges:output_type -> deputy.sandbox.v1.GetChangesResponse
+	61, // [61:69] is the sub-list for method output_type
+	53, // [53:61] is the sub-list for method input_type
+	53, // [53:53] is the sub-list for extension type_name
+	53, // [53:53] is the sub-list for extension extendee
+	0,  // [0:53] is the sub-list for field type_name
 }
 
 func init() { file_deputy_sandbox_v1_sandbox_proto_init() }
@@ -3853,6 +3997,7 @@ func file_deputy_sandbox_v1_sandbox_proto_init() {
 		(*ExecuteEvent_Status)(nil),
 		(*ExecuteEvent_Completed)(nil),
 		(*ExecuteEvent_Error)(nil),
+		(*ExecuteEvent_WorkspaceChanges)(nil),
 	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
@@ -3860,7 +4005,7 @@ func file_deputy_sandbox_v1_sandbox_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_deputy_sandbox_v1_sandbox_proto_rawDesc), len(file_deputy_sandbox_v1_sandbox_proto_rawDesc)),
 			NumEnums:      8,
-			NumMessages:   38,
+			NumMessages:   39,
 			NumExtensions: 0,
 			NumServices:   2,
 		},

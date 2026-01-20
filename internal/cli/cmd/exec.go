@@ -21,6 +21,7 @@ import (
 	"github.com/picatz/deputy/internal/sandbox/runtimes/plugin"
 	"github.com/picatz/deputy/internal/sandbox/runtimes/sandboxexec"
 	"github.com/spf13/cobra"
+	"golang.org/x/term"
 	"google.golang.org/protobuf/types/known/durationpb"
 )
 
@@ -60,6 +61,13 @@ type execFlags struct {
 	fileMaskPresets []string
 	fileMaskHide    []string
 	fileMaskExpose  []string
+
+	// Interactive/TTY flags
+	tty         bool // Allocate a pseudo-TTY
+	interactive bool // Keep stdin attached for interactive input
+
+	// Workspace review flag
+	reviewChanges bool // Review workspace changes after execution
 }
 
 // AddExecCommand adds the exec command to the root command.
@@ -69,10 +77,30 @@ func AddExecCommand(root *cobra.Command, deps Dependencies) {
 	cmd := &cobra.Command{
 		Use:   "exec -- <command> [args...]",
 		Short: "Run a command in a sandbox",
-		Long: `Execute a command inside a sandboxed runtime.
+		Long: `Execute a command inside a sandboxed runtime with configurable isolation.
 
-By default, the current working directory is mounted as the workspace and
-network access is disabled for safety.`,
+By default, Deputy mounts the current directory as a workspace (/workspace) and
+disables network access for maximum security. The sandbox prevents untrusted
+code from accessing sensitive files, making network connections, or escaping.
+
+Runtimes:
+  docker        Container-based isolation (recommended, requires Docker)
+  gvisor        Enhanced isolation with gVisor's runsc runtime
+  sandbox-exec  macOS Seatbelt-based isolation (no container needed)
+  plugin        External sandbox plugins (e.g., VZ for macOS VMs)
+  none          No isolation (for testing only)
+
+Security Modes:
+  read-only        Cannot modify workspace files
+  workspace-write  Can write to workspace, read-only elsewhere (default)
+  ephemeral        All writes go to tmpfs, discarded on exit
+  full-access      Full host access (dangerous, requires confirmation)
+
+Common Patterns:
+  • For CI/CD: Use snapshot isolation + review to safely run build scripts
+  • For auditing: Use read-only mode + supply-chain mask preset
+  • For development: Use workspace-write + network host for full tooling
+  • For AI agents: Use snapshot + review to verify AI-generated changes`,
 		Args: func(cmd *cobra.Command, args []string) error {
 			if len(args) == 0 {
 				return errors.New("provide the command to execute after --")
@@ -120,23 +148,51 @@ network access is disabled for safety.`,
 	cmd.Flags().StringArrayVar(&flags.fileMaskHide, "mask-hide", nil, "Glob pattern for files to hide from sandbox (repeatable)")
 	cmd.Flags().StringArrayVar(&flags.fileMaskExpose, "mask-expose", nil, "Glob pattern for files to expose even if masked (repeatable)")
 
+	// Interactive/TTY flags
+	cmd.Flags().BoolVarP(&flags.tty, "tty", "t", false, "Allocate a pseudo-TTY (for interactive commands)")
+	cmd.Flags().BoolVarP(&flags.interactive, "interactive", "i", false, "Keep stdin attached for interactive input")
+
+	// Workspace review flag
+	cmd.Flags().BoolVar(&flags.reviewChanges, "review", false, "Review and confirm workspace changes after execution")
+
 	cmd.Example = strings.Join([]string{
-		"deputy exec --runtime docker --mode read-only --image alpine:3.19 -- ls -la",
-		"deputy exec --runtime docker --image alpine:3.19 -- echo hello",
-		"deputy exec --runtime sandbox-exec --mode read-only -- ls -la",
-		"deputy exec --runtime docker --network allowlist --network-allow proxy.golang.org:443 --image golang:1.22-alpine -- go env GOPATH",
+		"# Quick Start",
+		"deputy exec -- ls -la                               # List files in read-only sandbox",
+		"deputy exec --image alpine:3.19 -- cat /etc/os-release  # Run in specific container",
 		"",
-		"# Run as non-root user (defense-in-depth)",
-		"deputy exec --runtime plugin --plugin vz --user nobody -- go build ./...",
-		"deputy exec --runtime docker --user 1000 --image golang:1.22-alpine -- go test ./...",
+		"# Network Access",
+		"deputy exec --network host --image golang:1.22-alpine -- go get ./...        # Full network",
+		"deputy exec --network allowlist --network-allow api.example.com:443 -- curl  # Allowlist",
 		"",
-		"# Workspace isolation (copy-on-write style)",
-		"deputy exec --runtime docker --workspace-isolation snapshot --image node:22-alpine -- npm install",
-		"deputy exec --runtime docker --workspace-isolation snapshot --preserve-workspace --image node:22-alpine -- npm test",
+		"# Resource Limits",
+		"deputy exec --memory 512m --cpu 1.0 --max-pids 100 --image node:22 -- npm test",
+		"deputy exec --timeout 5m --image golang:1.22-alpine -- go build ./...",
 		"",
-		"# File masking (hide secrets, expose lockfiles)",
-		"deputy exec --runtime docker --mask-preset supply-chain --image node:22-alpine -- npm audit",
-		"deputy exec --runtime docker --mask-hide '.env*' --mask-expose 'package*.json' --image node:22-alpine -- npm install",
+		"# Interactive Mode",
+		"deputy exec -it --image python:3.12 -- python       # Interactive Python REPL",
+		"deputy exec -it --network host --image node:22 -- bash  # Interactive shell with network",
+		"",
+		"# Workspace Isolation (protect host files)",
+		"deputy exec --workspace-isolation snapshot -- npm install          # Copy-on-write snapshot",
+		"deputy exec --workspace-isolation snapshot --review -- npm audit fix  # Review changes before applying",
+		"deputy exec --workspace-isolation tmpfs -- make clean              # All changes in memory",
+		"",
+		"# File Masking (hide sensitive files)",
+		"deputy exec --mask-preset supply-chain -- npm audit                # Hide secrets, expose lockfiles",
+		"deputy exec --mask-hide '.env*' --mask-hide '.git/' -- ./script.sh # Custom patterns",
+		"deputy exec --mask-preset secrets --mask-expose 'config.yaml' -- ./app  # Preset + override",
+		"",
+		"# Defense-in-Depth (run as non-root)",
+		"deputy exec --user nobody --image alpine:3.19 -- id                # Run as nobody user",
+		"deputy exec --user 1000:1000 -- ./build.sh                         # Run as specific UID:GID",
+		"",
+		"# Plugin Runtimes (macOS VMs)",
+		"deputy exec --runtime plugin --plugin vz --cpu 4 --memory 4g -- go build ./...",
+		"deputy exec --runtime plugin --plugin vz --network host -- npm install",
+		"",
+		"# CI/CD Patterns",
+		"deputy exec --workspace-isolation snapshot --review --dangerously-skip-prompt -- ./automerge.sh",
+		"deputy exec --mode read-only --mask-preset supply-chain -- npm audit --json",
 	}, "\n")
 	cmd.SilenceUsage = true
 	cmd.SilenceErrors = true
@@ -250,6 +306,9 @@ func runExec(ctx context.Context, deps Dependencies, flags *execFlags, command [
 		FileMask:                 fileMaskConfig,
 		WorkspaceIsolationConfig: isolationConfig,
 		User:                     user,
+		AllocateTty:              flags.tty,
+		AttachStdin:              flags.interactive,
+		ReviewBeforeCommit:       flags.reviewChanges,
 	}
 
 	req := &sandboxv1.ExecuteRequest{
@@ -303,6 +362,35 @@ func runExec(ctx context.Context, deps Dependencies, flags *execFlags, command [
 		}
 
 		switch details := event.GetDetails().(type) {
+		case *sandboxv1.ExecuteEvent_Status:
+			// Show pull progress in interactive terminals
+			if stderr != nil {
+				status := details.Status
+				if status.GetStatus() == "image_pulling" || status.GetStatus() == "image_pull_started" {
+					// Only show progress updates in interactive terminals
+					if f, ok := stderr.(*os.File); ok && term.IsTerminal(int(f.Fd())) {
+						// Use carriage return to overwrite the line for progress updates
+						if status.GetProgressPercent() >= 0 {
+							fmt.Fprintf(stderr, "\r%-60s [%3d%%]", status.GetMessage(), status.GetProgressPercent())
+						} else {
+							fmt.Fprintf(stderr, "\r%-60s", status.GetMessage())
+						}
+					} else if flags.verbose {
+						// In non-interactive mode with verbose, just print the status
+						fmt.Fprintln(stderr, status.GetMessage())
+					}
+				} else if status.GetStatus() == "image_pull_complete" {
+					// Clear the progress line and show completion
+					if f, ok := stderr.(*os.File); ok && term.IsTerminal(int(f.Fd())) {
+						fmt.Fprintf(stderr, "\r%-70s\n", status.GetMessage())
+					} else if flags.verbose {
+						fmt.Fprintln(stderr, status.GetMessage())
+					}
+				} else if flags.verbose {
+					// Other status events only shown in verbose mode
+					fmt.Fprintln(stderr, status.GetMessage())
+				}
+			}
 		case *sandboxv1.ExecuteEvent_Output:
 			if details.Output.GetIsStderr() {
 				if stderr != nil {
@@ -317,7 +405,13 @@ func runExec(ctx context.Context, deps Dependencies, flags *execFlags, command [
 				message = "sandbox execution failed"
 			}
 			if details.Error.GetIsFatal() {
-				execErr = fmt.Errorf("%s", message)
+				// Include remediation guidance in the error message if available
+				remediation := details.Error.GetRemediation()
+				if remediation != "" {
+					execErr = fmt.Errorf("%s\n\nHow to fix:\n%s", message, remediation)
+				} else {
+					execErr = fmt.Errorf("%s", message)
+				}
 				break
 			}
 			if details.Error.GetCode() == "DEPRECATED_RUNTIME" && !flags.verbose {
@@ -325,6 +419,34 @@ func runExec(ctx context.Context, deps Dependencies, flags *execFlags, command [
 			}
 			if stderr != nil {
 				fmt.Fprintln(stderr, message)
+				// Show remediation for non-fatal errors too
+				if remediation := details.Error.GetRemediation(); remediation != "" && flags.verbose {
+					fmt.Fprintf(stderr, "\nHint: %s\n", remediation)
+				}
+			}
+		case *sandboxv1.ExecuteEvent_WorkspaceChanges:
+			// Handle workspace changes review
+			if flags.reviewChanges && details.WorkspaceChanges != nil {
+				result, reviewErr := ReviewWorkspaceChangesFromEvent(
+					ctx,
+					details.WorkspaceChanges,
+					stdin,
+					stdout,
+					stderr,
+				)
+				if reviewErr != nil {
+					fmt.Fprintf(stderr, "Review error: %v\n", reviewErr)
+				}
+				switch result {
+				case ReviewAccept:
+					// Changes were synced successfully
+				case ReviewReject:
+					// Changes discarded - nothing to do
+				case ReviewAbort:
+					// User cancelled
+					fmt.Fprintln(stderr, "Review cancelled. Changes preserved in isolated workspace.")
+					fmt.Fprintf(stderr, "Isolated workspace: %s\n", details.WorkspaceChanges.GetIsolatedPath())
+				}
 			}
 		case *sandboxv1.ExecuteEvent_Completed:
 			exitCode = details.Completed.GetExitCode()

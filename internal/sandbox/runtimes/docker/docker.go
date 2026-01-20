@@ -69,6 +69,43 @@ const (
 	DefaultWorkspaceMount = "/workspace"
 )
 
+// errorRemediation provides actionable guidance for common error codes.
+var errorRemediation = map[string]string{
+	"INVALID_REQUEST": "Provide a command to execute. Example: deputy exec -- echo hello",
+	"COMMAND_BLOCKED": "The command is blocked by security policy. Use a different command or check the exec allowlist with --exec-allow.",
+	"PATH_BLOCKED":    "The workspace path is blocked by security policy. Use a different path or verify the path is within allowed directories.",
+	"CLIENT_ERROR": `Docker is not accessible. Common fixes:
+  1. Ensure Docker Desktop is running
+  2. Check DOCKER_HOST environment variable
+  3. Run 'docker info' to verify Docker is working
+  4. On Linux, ensure your user is in the docker group: 'sudo usermod -aG docker $USER'`,
+	"ISOLATION_SETUP_ERROR": "Failed to set up workspace isolation. Ensure you have write permissions to the temp directory and sufficient disk space.",
+	"CONFIG_ERROR": `Invalid container configuration. Common fixes:
+  1. Check that the image name is correct
+  2. Verify resource limits are valid (e.g., --memory 512m, --cpu 1.0)
+  3. Ensure network mode is supported`,
+	"IMAGE_PULL_ERROR": `Failed to pull the container image. Common fixes:
+  1. Check that the image name is correct (e.g., alpine:latest, not alpine:latestt)
+  2. Ensure you have network connectivity
+  3. For private registries, run 'docker login' first
+  4. Check if the image exists: 'docker pull <image>' manually`,
+	"CREATE_ERROR": `Failed to create container. Common fixes:
+  1. Check Docker daemon logs: 'docker logs'
+  2. Ensure sufficient disk space
+  3. Verify the image exists locally or can be pulled
+  4. Check resource limits aren't exceeding system capacity`,
+	"ATTACH_ERROR": "Failed to attach to container streams. This may indicate Docker daemon issues. Try restarting Docker.",
+	"START_ERROR": `Failed to start container. Common fixes:
+  1. Check if the command exists in the image
+  2. Verify the working directory exists
+  3. Check Docker daemon logs for details
+  4. Ensure no port conflicts if exposing ports`,
+	"WAIT_ERROR":       "Failed to wait for container completion. The container may have terminated abnormally.",
+	"CONTAINER_ERROR":  "Container exited with an error. Check the command output above for details.",
+	"CANCELLED":        "Operation was cancelled. This typically occurs due to timeout or user interruption.",
+	"STREAM_ERROR":     "Failed to stream container output. The container may have terminated unexpectedly.",
+}
+
 // Runtime implements sandbox.Runtime using Docker containers via the Docker SDK.
 type Runtime struct {
 	// DefaultImage is the image to use if none is specified.
@@ -281,11 +318,7 @@ func (r *Runtime) Execute(ctx context.Context, req *sandboxv1.ExecuteRequest) it
 				ExecutionId: executionID,
 				Timestamp:   timestamppb.Now(),
 				Details: &sandboxv1.ExecuteEvent_Error{
-					Error: &sandboxv1.ErrorEvent{
-						Message: "command is required",
-						Code:    "INVALID_REQUEST",
-						IsFatal: true,
-					},
+					Error: newErrorEvent("command is required", "INVALID_REQUEST", true, false),
 				},
 			}, nil)
 			return
@@ -302,11 +335,7 @@ func (r *Runtime) Execute(ctx context.Context, req *sandboxv1.ExecuteRequest) it
 				ExecutionId: executionID,
 				Timestamp:   timestamppb.Now(),
 				Details: &sandboxv1.ExecuteEvent_Error{
-					Error: &sandboxv1.ErrorEvent{
-						Message: err.Error(),
-						Code:    "COMMAND_BLOCKED",
-						IsFatal: true,
-					},
+					Error: newErrorEvent(err.Error(), "COMMAND_BLOCKED", true, false),
 				},
 			}, nil)
 			return
@@ -323,11 +352,7 @@ func (r *Runtime) Execute(ctx context.Context, req *sandboxv1.ExecuteRequest) it
 				ExecutionId: executionID,
 				Timestamp:   timestamppb.Now(),
 				Details: &sandboxv1.ExecuteEvent_Error{
-					Error: &sandboxv1.ErrorEvent{
-						Message: err.Error(),
-						Code:    "PATH_BLOCKED",
-						IsFatal: true,
-					},
+					Error: newErrorEvent(err.Error(), "PATH_BLOCKED", true, false),
 				},
 			}, nil)
 			return
@@ -343,12 +368,7 @@ func (r *Runtime) Execute(ctx context.Context, req *sandboxv1.ExecuteRequest) it
 				ExecutionId: executionID,
 				Timestamp:   timestamppb.Now(),
 				Details: &sandboxv1.ExecuteEvent_Error{
-					Error: &sandboxv1.ErrorEvent{
-						Message:     fmt.Sprintf("failed to get Docker client: %v", err),
-						Code:        "CLIENT_ERROR",
-						IsFatal:     true,
-						IsRetriable: true,
-					},
+					Error: newErrorEvent(fmt.Sprintf("failed to get Docker client: %v", err), "CLIENT_ERROR", true, true),
 				},
 			}, nil)
 			return
@@ -369,11 +389,7 @@ func (r *Runtime) Execute(ctx context.Context, req *sandboxv1.ExecuteRequest) it
 					ExecutionId: executionID,
 					Timestamp:   timestamppb.Now(),
 					Details: &sandboxv1.ExecuteEvent_Error{
-						Error: &sandboxv1.ErrorEvent{
-							Message: fmt.Sprintf("failed to setup workspace isolation: %v", err),
-							Code:    "ISOLATION_SETUP_ERROR",
-							IsFatal: true,
-						},
+						Error: newErrorEvent(fmt.Sprintf("failed to setup workspace isolation: %v", err), "ISOLATION_SETUP_ERROR", true, false),
 					},
 				}, nil)
 				return
@@ -386,11 +402,7 @@ func (r *Runtime) Execute(ctx context.Context, req *sandboxv1.ExecuteRequest) it
 					ExecutionId: executionID,
 					Timestamp:   timestamppb.Now(),
 					Details: &sandboxv1.ExecuteEvent_Error{
-						Error: &sandboxv1.ErrorEvent{
-							Message: fmt.Sprintf("failed to create isolated workspace: %v", err),
-							Code:    "ISOLATION_SETUP_ERROR",
-							IsFatal: true,
-						},
+						Error: newErrorEvent(fmt.Sprintf("failed to create isolated workspace: %v", err), "ISOLATION_SETUP_ERROR", true, false),
 					},
 				}, nil)
 				return
@@ -399,8 +411,10 @@ func (r *Runtime) Execute(ctx context.Context, req *sandboxv1.ExecuteRequest) it
 			effectiveWorkspaceDir = isolatedPath
 
 			// Ensure cleanup on exit
+			// If review_before_commit is set, we preserve changes for review
 			defer func() {
-				preserveChanges := cfg.GetWorkspaceIsolationConfig().GetPreserveAfterExecution()
+				preserveChanges := cfg.GetWorkspaceIsolationConfig().GetPreserveAfterExecution() ||
+					cfg.GetReviewBeforeCommit()
 				if err := isolator.Teardown(context.Background(), preserveChanges); err != nil {
 					slog.Warn("failed to teardown workspace isolation",
 						"execution_id", executionID,
@@ -431,31 +445,23 @@ func (r *Runtime) Execute(ctx context.Context, req *sandboxv1.ExecuteRequest) it
 				ExecutionId: executionID,
 				Timestamp:   timestamppb.Now(),
 				Details: &sandboxv1.ExecuteEvent_Error{
-					Error: &sandboxv1.ErrorEvent{
-						Message: fmt.Sprintf("failed to build container config: %v", err),
-						Code:    "CONFIG_ERROR",
-						IsFatal: true,
-					},
+					Error: newErrorEvent(fmt.Sprintf("failed to build container config: %v", err), "CONFIG_ERROR", true, false),
 				},
 			}, nil)
 			return
 		}
 
-		if err := r.ensureImage(ctx, cli, containerConfig.Image); err != nil {
-			code := "IMAGE_PULL_FAILED"
+		// Ensure image exists, streaming pull progress if needed
+		if err := r.ensureImageWithProgress(ctx, cli, containerConfig.Image, yield, executionID); err != nil {
+			code := "IMAGE_PULL_ERROR"
 			if errdefs.IsNotFound(err) {
-				code = "IMAGE_NOT_FOUND"
+				code = "IMAGE_PULL_ERROR"
 			}
 			yield(&sandboxv1.ExecuteEvent{
 				ExecutionId: executionID,
 				Timestamp:   timestamppb.Now(),
 				Details: &sandboxv1.ExecuteEvent_Error{
-					Error: &sandboxv1.ErrorEvent{
-						Message:     fmt.Sprintf("failed to ensure image %q: %v", containerConfig.Image, err),
-						Code:        code,
-						IsFatal:     true,
-						IsRetriable: code == "IMAGE_PULL_FAILED",
-					},
+					Error: newErrorEvent(fmt.Sprintf("failed to ensure image %q: %v", containerConfig.Image, err), code, true, code == "IMAGE_PULL_ERROR"),
 				},
 			}, nil)
 			return
@@ -474,12 +480,7 @@ func (r *Runtime) Execute(ctx context.Context, req *sandboxv1.ExecuteRequest) it
 				ExecutionId: executionID,
 				Timestamp:   timestamppb.Now(),
 				Details: &sandboxv1.ExecuteEvent_Error{
-					Error: &sandboxv1.ErrorEvent{
-						Message:     fmt.Sprintf("failed to create container: %v", err),
-						Code:        "CREATE_ERROR",
-						IsFatal:     true,
-						IsRetriable: true,
-					},
+					Error: newErrorEvent(fmt.Sprintf("failed to create container: %v", err), "CREATE_ERROR", true, true),
 				},
 			}, nil)
 			return
@@ -529,12 +530,7 @@ func (r *Runtime) Execute(ctx context.Context, req *sandboxv1.ExecuteRequest) it
 				ExecutionId: executionID,
 				Timestamp:   timestamppb.Now(),
 				Details: &sandboxv1.ExecuteEvent_Error{
-					Error: &sandboxv1.ErrorEvent{
-						Message:     fmt.Sprintf("failed to attach to container: %v", err),
-						Code:        "ATTACH_ERROR",
-						IsFatal:     true,
-						IsRetriable: true,
-					},
+					Error: newErrorEvent(fmt.Sprintf("failed to attach to container: %v", err), "ATTACH_ERROR", true, true),
 				},
 			}, nil)
 			return
@@ -547,12 +543,7 @@ func (r *Runtime) Execute(ctx context.Context, req *sandboxv1.ExecuteRequest) it
 				ExecutionId: executionID,
 				Timestamp:   timestamppb.Now(),
 				Details: &sandboxv1.ExecuteEvent_Error{
-					Error: &sandboxv1.ErrorEvent{
-						Message:     fmt.Sprintf("failed to start container: %v", err),
-						Code:        "START_ERROR",
-						IsFatal:     true,
-						IsRetriable: true,
-					},
+					Error: newErrorEvent(fmt.Sprintf("failed to start container: %v", err), "START_ERROR", true, true),
 				},
 			}, nil)
 			return
@@ -582,12 +573,7 @@ func (r *Runtime) Execute(ctx context.Context, req *sandboxv1.ExecuteRequest) it
 					ExecutionId: executionID,
 					Timestamp:   timestamppb.Now(),
 					Details: &sandboxv1.ExecuteEvent_Error{
-						Error: &sandboxv1.ErrorEvent{
-							Message:     fmt.Sprintf("container wait failed: %v", err),
-							Code:        "WAIT_ERROR",
-							IsFatal:     true,
-							IsRetriable: false,
-						},
+						Error: newErrorEvent(fmt.Sprintf("container wait failed: %v", err), "WAIT_ERROR", true, false),
 					},
 				}, nil)
 				return
@@ -599,12 +585,7 @@ func (r *Runtime) Execute(ctx context.Context, req *sandboxv1.ExecuteRequest) it
 					ExecutionId: executionID,
 					Timestamp:   timestamppb.Now(),
 					Details: &sandboxv1.ExecuteEvent_Error{
-						Error: &sandboxv1.ErrorEvent{
-							Message:     fmt.Sprintf("container error: %s", status.Error.Message),
-							Code:        "CONTAINER_ERROR",
-							IsFatal:     true,
-							IsRetriable: false,
-						},
+						Error: newErrorEvent(fmt.Sprintf("container error: %s", status.Error.Message), "CONTAINER_ERROR", true, false),
 					},
 				}, nil)
 				return
@@ -614,15 +595,42 @@ func (r *Runtime) Execute(ctx context.Context, req *sandboxv1.ExecuteRequest) it
 				ExecutionId: executionID,
 				Timestamp:   timestamppb.Now(),
 				Details: &sandboxv1.ExecuteEvent_Error{
-					Error: &sandboxv1.ErrorEvent{
-						Message:     "context cancelled",
-						Code:        "CANCELLED",
-						IsFatal:     true,
-						IsRetriable: false,
-					},
+					Error: newErrorEvent("context cancelled", "CANCELLED", true, false),
 				},
 			}, nil)
 			return
+		}
+
+		// If review mode is enabled and we have an isolator, emit workspace changes before completion
+		if isolator != nil && cfg.GetReviewBeforeCommit() {
+			changes, changesErr := isolator.Changes(ctx)
+			if changesErr != nil {
+				slog.Warn("failed to get workspace changes for review", "error", changesErr)
+			} else if len(changes) > 0 {
+				// Convert workspace.FileChange to proto FileChange
+				protoChanges := make([]*sandboxv1.FileChange, 0, len(changes))
+				for _, c := range changes {
+					protoChanges = append(protoChanges, &sandboxv1.FileChange{
+						Path:       c.Path,
+						ChangeType: c.Type,
+						Size:       c.Size,
+						OldPath:    c.OldPath,
+					})
+				}
+
+				yield(&sandboxv1.ExecuteEvent{
+					ExecutionId: executionID,
+					Timestamp:   timestamppb.Now(),
+					Details: &sandboxv1.ExecuteEvent_WorkspaceChanges{
+						WorkspaceChanges: &sandboxv1.WorkspaceChangesEvent{
+							Changes:      protoChanges,
+							TotalChanges: int32(len(protoChanges)),
+							IsolatedPath: isolator.IsolatedPath(),
+							OriginalPath: isolator.OriginalPath(),
+						},
+					},
+				}, nil)
+			}
 		}
 
 		// Send completed event
@@ -641,6 +649,15 @@ func (r *Runtime) Execute(ctx context.Context, req *sandboxv1.ExecuteRequest) it
 }
 
 func (r *Runtime) ensureImage(ctx context.Context, cli *client.Client, image string) error {
+	return r.ensureImageWithProgress(ctx, cli, image, nil, "")
+}
+
+// progressYield is a function type for yielding progress events during image pull.
+type progressYield func(event *sandboxv1.ExecuteEvent, err error) bool
+
+// ensureImageWithProgress ensures the image exists, optionally streaming progress events.
+// If yield is non-nil and executionID is set, it will emit StatusEvents for pull progress.
+func (r *Runtime) ensureImageWithProgress(ctx context.Context, cli *client.Client, image string, yield progressYield, executionID string) error {
 	image = strings.TrimSpace(image)
 	if image == "" {
 		return fmt.Errorf("image is required")
@@ -654,13 +671,47 @@ func (r *Runtime) ensureImage(ctx context.Context, cli *client.Client, image str
 
 	slog.Debug("pulling docker image", "image", image)
 
+	// Send initial pull status if streaming
+	if yield != nil && executionID != "" {
+		if !yield(&sandboxv1.ExecuteEvent{
+			ExecutionId: executionID,
+			Timestamp:   timestamppb.Now(),
+			Details: &sandboxv1.ExecuteEvent_Status{
+				Status: &sandboxv1.StatusEvent{
+					Status:          "image_pull_started",
+					Message:         fmt.Sprintf("Pulling image %s", image),
+					ProgressPercent: 0,
+				},
+			},
+		}, nil) {
+			return ctx.Err()
+		}
+	}
+
 	pullResp, err := cli.ImagePull(ctx, image, imagetypes.PullOptions{})
 	if err != nil {
 		return fmt.Errorf("pull image %q: %w", image, err)
 	}
 
-	if err := drainPullMessages(pullResp); err != nil {
+	if err := processPullMessages(pullResp, yield, executionID, image); err != nil {
 		return fmt.Errorf("pull image %q: %w", image, err)
+	}
+
+	// Send completion status if streaming
+	if yield != nil && executionID != "" {
+		if !yield(&sandboxv1.ExecuteEvent{
+			ExecutionId: executionID,
+			Timestamp:   timestamppb.Now(),
+			Details: &sandboxv1.ExecuteEvent_Status{
+				Status: &sandboxv1.StatusEvent{
+					Status:          "image_pull_complete",
+					Message:         fmt.Sprintf("Image %s pulled successfully", image),
+					ProgressPercent: 100,
+				},
+			},
+		}, nil) {
+			return ctx.Err()
+		}
 	}
 
 	if _, _, err := cli.ImageInspectWithRaw(ctx, image); err != nil {
@@ -673,10 +724,16 @@ func (r *Runtime) ensureImage(ctx context.Context, cli *client.Client, image str
 	return nil
 }
 
-func drainPullMessages(reader io.ReadCloser) error {
+// processPullMessages reads Docker pull messages and optionally streams progress.
+func processPullMessages(reader io.ReadCloser, yield progressYield, executionID, image string) error {
 	defer reader.Close()
 
 	dec := json.NewDecoder(reader)
+
+	// Track layer progress for overall percentage calculation
+	layerProgress := make(map[string]*layerStatus)
+	var lastProgressTime time.Time
+
 	for {
 		var msg jsonmessage.JSONMessage
 		if err := dec.Decode(&msg); err != nil {
@@ -691,7 +748,119 @@ func drainPullMessages(reader io.ReadCloser) error {
 		if msg.ErrorMessage != "" {
 			return fmt.Errorf("%s", msg.ErrorMessage)
 		}
+
+		// Stream progress if enabled
+		if yield != nil && executionID != "" && msg.ID != "" {
+			// Update layer progress tracking
+			if layerProgress[msg.ID] == nil {
+				layerProgress[msg.ID] = &layerStatus{}
+			}
+			layer := layerProgress[msg.ID]
+			layer.status = msg.Status
+
+			if msg.Progress != nil {
+				layer.current = msg.Progress.Current
+				layer.total = msg.Progress.Total
+			}
+
+			// Throttle progress updates to avoid overwhelming the consumer
+			// Send at most every 100ms, or on significant status changes
+			now := time.Now()
+			isSignificantChange := msg.Status == "Pull complete" || msg.Status == "Already exists" ||
+				msg.Status == "Download complete" || msg.Status == "Extracting"
+
+			if isSignificantChange || now.Sub(lastProgressTime) >= 100*time.Millisecond {
+				lastProgressTime = now
+
+				// Calculate overall progress
+				percent := calculateOverallProgress(layerProgress)
+				statusMsg := formatPullStatus(layerProgress, image)
+
+				if !yield(&sandboxv1.ExecuteEvent{
+					ExecutionId: executionID,
+					Timestamp:   timestamppb.Now(),
+					Details: &sandboxv1.ExecuteEvent_Status{
+						Status: &sandboxv1.StatusEvent{
+							Status:          "image_pulling",
+							Message:         statusMsg,
+							ProgressPercent: percent,
+						},
+					},
+				}, nil) {
+					return nil // Consumer stopped listening
+				}
+			}
+		}
 	}
+}
+
+// layerStatus tracks the download/extract status of a single layer.
+type layerStatus struct {
+	status  string
+	current int64
+	total   int64
+}
+
+// calculateOverallProgress computes a weighted progress percentage across all layers.
+func calculateOverallProgress(layers map[string]*layerStatus) int32 {
+	if len(layers) == 0 {
+		return 0
+	}
+
+	var completedLayers, totalLayers int
+	var downloadedBytes, totalBytes int64
+
+	for _, layer := range layers {
+		totalLayers++
+		switch layer.status {
+		case "Pull complete", "Already exists":
+			completedLayers++
+		case "Downloading", "Extracting":
+			if layer.total > 0 {
+				downloadedBytes += layer.current
+				totalBytes += layer.total
+			}
+		}
+	}
+
+	// Weight: 80% for downloads, 20% for completion status
+	var percent float64
+	if totalBytes > 0 {
+		percent = 0.8 * float64(downloadedBytes) / float64(totalBytes) * 100
+	}
+	if totalLayers > 0 {
+		percent += 0.2 * float64(completedLayers) / float64(totalLayers) * 100
+	}
+
+	// Clamp to 0-99 (100 is reserved for completion)
+	if percent > 99 {
+		percent = 99
+	}
+	return int32(percent)
+}
+
+// formatPullStatus creates a human-readable status message for pull progress.
+func formatPullStatus(layers map[string]*layerStatus, image string) string {
+	var downloading, extracting, complete int
+	for _, layer := range layers {
+		switch layer.status {
+		case "Downloading":
+			downloading++
+		case "Extracting":
+			extracting++
+		case "Pull complete", "Already exists":
+			complete++
+		}
+	}
+
+	total := len(layers)
+	if extracting > 0 {
+		return fmt.Sprintf("Extracting %s: %d/%d layers", image, complete, total)
+	}
+	if downloading > 0 {
+		return fmt.Sprintf("Downloading %s: %d/%d layers", image, complete, total)
+	}
+	return fmt.Sprintf("Pulling %s: %d/%d layers complete", image, complete, total)
 }
 
 // setupWorkspaceIsolation creates a DockerIsolator based on the request configuration.
@@ -750,9 +919,14 @@ func (r *Runtime) buildContainerConfig(req *sandboxv1.ExecuteRequest, executionI
 
 	// Container config
 	containerConfig := &container.Config{
-		Image: image,
-		Cmd:   req.GetCommand(),
-		Tty:   false,
+		Image:        image,
+		Cmd:          req.GetCommand(),
+		Tty:          cfg.GetAllocateTty(),
+		AttachStdin:  cfg.GetAttachStdin(),
+		AttachStdout: true,
+		AttachStderr: true,
+		OpenStdin:    cfg.GetAttachStdin(),
+		StdinOnce:    cfg.GetAttachStdin(), // Close stdin after first disconnect
 	}
 
 	// Environment variables (use pre-filtered env for security)
@@ -839,7 +1013,30 @@ func (r *Runtime) buildContainerConfig(req *sandboxv1.ExecuteRequest, executionI
 		if limits.MaxPids > 0 {
 			resources.PidsLimit = ptr(int64(limits.MaxPids))
 		}
+		// Max open files (ulimit -n)
+		if limits.MaxFiles > 0 {
+			resources.Ulimits = append(resources.Ulimits, &container.Ulimit{
+				Name: "nofile",
+				Soft: int64(limits.MaxFiles),
+				Hard: int64(limits.MaxFiles),
+			})
+		}
 		hostConfig.Resources = resources
+
+		// Disk quota via tmpfs size limit
+		// This applies when using ephemeral mode or when the workspace is tmpfs-backed
+		if limits.DiskQuota > 0 {
+			// Convert bytes to human-readable format for tmpfs options
+			diskQuotaStr := formatBytes(limits.DiskQuota)
+			if hostConfig.Tmpfs == nil {
+				hostConfig.Tmpfs = make(map[string]string)
+			}
+			// Update /tmp tmpfs with disk quota if present
+			if opts, ok := hostConfig.Tmpfs["/tmp"]; ok {
+				// Parse existing options and update size
+				hostConfig.Tmpfs["/tmp"] = updateTmpfsSize(opts, diskQuotaStr)
+			}
+		}
 	}
 
 	// Capabilities
@@ -1039,6 +1236,51 @@ func ptr[T any](v T) *T {
 	return &v
 }
 
+// formatBytes converts bytes to a human-readable string for tmpfs size options.
+// Returns formats like "64m", "1g", "512k" suitable for tmpfs mount options.
+func formatBytes(bytes int64) string {
+	const (
+		kb = 1024
+		mb = 1024 * kb
+		gb = 1024 * mb
+	)
+
+	switch {
+	case bytes >= gb && bytes%gb == 0:
+		return fmt.Sprintf("%dg", bytes/gb)
+	case bytes >= mb && bytes%mb == 0:
+		return fmt.Sprintf("%dm", bytes/mb)
+	case bytes >= kb && bytes%kb == 0:
+		return fmt.Sprintf("%dk", bytes/kb)
+	default:
+		return fmt.Sprintf("%d", bytes)
+	}
+}
+
+// updateTmpfsSize updates the size option in a tmpfs options string.
+// If size already exists, it's replaced; otherwise it's appended.
+func updateTmpfsSize(opts, newSize string) string {
+	parts := strings.Split(opts, ",")
+	var result []string
+	sizeFound := false
+
+	for _, part := range parts {
+		part = strings.TrimSpace(part)
+		if strings.HasPrefix(part, "size=") {
+			result = append(result, "size="+newSize)
+			sizeFound = true
+		} else if part != "" {
+			result = append(result, part)
+		}
+	}
+
+	if !sizeFound {
+		result = append(result, "size="+newSize)
+	}
+
+	return strings.Join(result, ",")
+}
+
 // Expose ExposedPorts helper for container config.
 func exposePorts(ports []string) (nat.PortSet, nat.PortMap, error) {
 	exposed := nat.PortSet{}
@@ -1053,4 +1295,21 @@ func exposePorts(ports []string) (nat.PortSet, nat.PortMap, error) {
 	}
 
 	return exposed, bindings, nil
+}
+
+// newErrorEvent creates an ErrorEvent with remediation guidance.
+func newErrorEvent(message, code string, isFatal, isRetriable bool) *sandboxv1.ErrorEvent {
+	event := &sandboxv1.ErrorEvent{
+		Message:     message,
+		Code:        code,
+		IsFatal:     isFatal,
+		IsRetriable: isRetriable,
+	}
+
+	// Add remediation guidance if available
+	if remediation, ok := errorRemediation[code]; ok {
+		event.Remediation = remediation
+	}
+
+	return event
 }

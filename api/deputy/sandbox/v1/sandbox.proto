@@ -449,6 +449,16 @@ message SandboxConfig {
   // Network connection audit mode.
   // When enabled, logs blocked (and optionally allowed) network connections.
   NetworkAuditMode network_audit = 23;
+
+  // Allocate a pseudo-TTY for the sandbox.
+  // When true, enables interactive terminal mode with proper signal handling.
+  // Required for commands that need a terminal (e.g., interactive shells, editors).
+  bool allocate_tty = 24;
+
+  // Connect stdin to the sandbox.
+  // When true, allows interactive input from the terminal.
+  // Usually combined with allocate_tty for interactive sessions.
+  bool attach_stdin = 25;
 }
 
 // TwoPhaseExecutionConfig enables secure two-phase execution for builds.
@@ -713,6 +723,7 @@ message ExecuteEvent {
     StatusEvent status = 12;
     CompletedEvent completed = 13;
     ErrorEvent error = 14;
+    WorkspaceChangesEvent workspace_changes = 15;
   }
 }
 
@@ -777,6 +788,29 @@ message ErrorEvent {
 
   // Whether retrying might succeed.
   bool is_retriable = 4;
+
+  // Actionable guidance for resolving the error.
+  // This provides human-readable suggestions for fixing the issue.
+  string remediation = 5;
+
+  // Documentation URL for more information about this error.
+  string docs_url = 6;
+}
+
+// WorkspaceChangesEvent reports file changes in the workspace after execution.
+// Sent when review_before_commit is enabled to allow the user to review changes.
+message WorkspaceChangesEvent {
+  // List of file changes detected.
+  repeated FileChange changes = 1;
+
+  // Total count of changes.
+  int32 total_changes = 2;
+
+  // Path to the isolated workspace (for diff viewing).
+  string isolated_path = 3;
+
+  // Path to the original workspace.
+  string original_path = 4;
 }
 
 // ResourceUsage reports resources consumed during execution.

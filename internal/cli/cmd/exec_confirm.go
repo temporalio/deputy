@@ -14,22 +14,17 @@ import (
 	"golang.org/x/term"
 )
 
-// Exec confirmation styles aligned with Deputy's UI palette (internal/ui/style.go).
-// Uses the same color conventions as explain/style.go for consistency.
+// Exec confirmation styles - uses shared styles from internal/ui/style.go where possible.
+// Only defines styles that are specific to the confirmation box rendering.
 var (
-	// Box drawing - using dim style for subtle borders
-	execBoxBorder = lipgloss.NewStyle().Foreground(lipgloss.Color("#666666")) // StyleDim
+	// execBoxBorder uses the dim color for subtle box borders
+	execBoxBorder = ui.StyleDim
 
-	// Warning header - amber for warnings (StyleStatusWarning)
-	execWarningIcon  = lipgloss.NewStyle().Foreground(lipgloss.Color("#FFB74D")).Bold(true)
-	execWarningTitle = lipgloss.NewStyle().Foreground(lipgloss.Color("#FFFFFF")).Bold(true)
+	// execWarningIcon uses amber for warning indicators (matches StyleStatusWarning)
+	execWarningIcon = ui.StyleStatusWarning.Bold(true)
 
-	// Content styles - reusing existing patterns
-	execDim     = ui.StyleDim                                               // #666666
-	execCommand = lipgloss.NewStyle().Foreground(lipgloss.Color("#87CEEB")) // StylePolicyFile - sky blue
-	execPath    = lipgloss.NewStyle().Foreground(lipgloss.Color("#E6E6FA"))     // StylePath
-	execHint    = lipgloss.NewStyle().Foreground(lipgloss.Color("#A0A0A0"))     // StyleMeta - italic hint
-	execAlt     = lipgloss.NewStyle().Foreground(lipgloss.Color("#7FDBFF"))     // StyleManager - alternatives
+	// execWarningTitle uses neutral bold white for warning text
+	execWarningTitle = ui.StyleNeutral
 )
 
 // Unicode box drawing characters (no emojis, per Deputy style)
@@ -191,17 +186,17 @@ func renderExecConfirmationBox(info execConfirmationInfo, w io.Writer) {
 	fmt.Fprintln(w, line("This mode allows the command to:"))
 
 	for _, point := range warningPoints {
-		fmt.Fprintln(w, line("  "+execDim.Render(boxBullet)+" "+point))
+		fmt.Fprintln(w, line("  "+ui.StyleDim.Render(boxBullet)+" "+point))
 	}
 
 	fmt.Fprintln(w, line(""))
-	fmt.Fprintln(w, line("Command: "+execCommand.Render(commandStr)))
-	fmt.Fprintln(w, line("Workspace: "+execPath.Render(workspaceStr)))
+	fmt.Fprintln(w, line("Command: "+ui.StylePolicyFile.Render(commandStr)))
+	fmt.Fprintln(w, line("Workspace: "+ui.StylePath.Render(workspaceStr)))
 	fmt.Fprintln(w, line(""))
-	fmt.Fprintln(w, line(execHint.Render("Consider safer alternatives:")))
+	fmt.Fprintln(w, line(ui.StyleMeta.Render("Consider safer alternatives:")))
 
 	for _, alt := range alternatives {
-		fmt.Fprintln(w, line("  "+execDim.Render(boxBullet)+" "+execAlt.Render(alt)))
+		fmt.Fprintln(w, line("  "+ui.StyleDim.Render(boxBullet)+" "+ui.StyleManager.Render(alt)))
 	}
 
 	fmt.Fprintln(w, line(""))
