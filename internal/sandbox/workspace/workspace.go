@@ -455,6 +455,14 @@ func (o *overlayIsolator) Changes(ctx context.Context) ([]FileChange, error) {
 			return err
 		}
 
+		// Skip .git directory
+		if relPath == ".git" || strings.HasPrefix(relPath, ".git"+string(filepath.Separator)) {
+			if info.IsDir() {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+
 		changeType := "modified"
 		origPath := filepath.Join(o.cfg.OriginalPath, relPath)
 		if _, err := os.Stat(origPath); os.IsNotExist(err) {
@@ -664,6 +672,16 @@ func diffDirectories(original, modified string) ([]FileChange, error) {
 		if err != nil {
 			return err
 		}
+
+		// Skip .git directory - these are git metadata, not user code changes.
+		// Syncing .git changes could corrupt the git state and is not meaningful for review.
+		if relPath == ".git" || strings.HasPrefix(relPath, ".git"+string(filepath.Separator)) {
+			if info.IsDir() {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+
 		seen[relPath] = true
 
 		origPath := filepath.Join(original, relPath)
@@ -706,6 +724,14 @@ func diffDirectories(original, modified string) ([]FileChange, error) {
 		relPath, err := filepath.Rel(original, path)
 		if err != nil {
 			return err
+		}
+
+		// Skip .git directory
+		if relPath == ".git" || strings.HasPrefix(relPath, ".git"+string(filepath.Separator)) {
+			if info.IsDir() {
+				return filepath.SkipDir
+			}
+			return nil
 		}
 
 		if !seen[relPath] {

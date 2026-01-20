@@ -308,12 +308,17 @@ func (m *Manager) Execute(ctx context.Context, req *sandboxv1.ExecuteRequest) it
 			"network", cfg.GetNetworkMode().String(),
 		)
 
+		// Wrap runtime with workspace isolation if needed
+		// SECURITY: This happens BEFORE any untrusted code runs
+		execRuntime, isolatingWrapper := m.wrapWithIsolation(selectedRuntime, req, cfg)
+		_ = isolatingWrapper // Reserved for future sync operations
+
 		// Track completion for audit and metrics
 		var exitCode int32
 		var execErr error
 
-		// Delegate to runtime
-		for event, err := range selectedRuntime.Execute(ctx, req) {
+		// Delegate to runtime (possibly wrapped with isolation)
+		for event, err := range execRuntime.Execute(ctx, req) {
 			// Capture completion info
 			if completed := event.GetCompleted(); completed != nil {
 				exitCode = completed.ExitCode
@@ -558,4 +563,67 @@ func (m *Manager) logEnvFiltered(ctx context.Context, executionID string, runtim
 	}
 
 	m.auditor.LogEnvFiltered(ctx, executionID, runtime, removed)
+}
+
+// wrapWithIsolation wraps a runtime with workspace isolation if needed.
+// Returns the runtime to use for execution and the wrapper (if created).
+//
+// SECURITY: Isolation is set up BEFORE untrusted code runs. The wrapper:
+// 1. Creates an isolated copy of the workspace (snapshot, overlay, etc.)
+// 2. Rewrites the request to use the isolated path
+// 3. Emits WorkspaceChangesEvent for review workflow
+// 4. Handles teardown based on preserveChanges setting
+func (m *Manager) wrapWithIsolation(rt Runtime, req *sandboxv1.ExecuteRequest, cfg *sandboxv1.SandboxConfig) (Runtime, *IsolatingRuntime) {
+	// Check if workspace isolation is requested
+	isolationMode := cfg.GetWorkspaceIsolation()
+	if isolationMode == sandboxv1.WorkspaceIsolationMode_WORKSPACE_ISOLATION_MODE_UNSPECIFIED ||
+		isolationMode == sandboxv1.WorkspaceIsolationMode_WORKSPACE_ISOLATION_MODE_DIRECT {
+		return rt, nil
+	}
+
+	// Check if this runtime handles isolation internally (containers)
+	if !ShouldWrapWithIsolation(rt.Name()) {
+		slog.Debug("runtime handles isolation internally, skipping wrapper",
+			"runtime", rt.Name().String(),
+			"isolation_mode", isolationMode.String(),
+		)
+		return rt, nil
+	}
+
+	// Check if we have a workspace to isolate
+	workspaceDir := req.GetWorkspaceDir()
+	if workspaceDir == "" {
+		slog.Debug("no workspace directory, skipping isolation wrapper")
+		return rt, nil
+	}
+
+	// Create the isolating wrapper
+	wrapper, err := NewIsolatingRuntime(rt, IsolatingRuntimeConfig{
+		Mode:                   isolationMode,
+		OriginalPath:           workspaceDir,
+		ReviewBeforeCommit:     cfg.GetReviewBeforeCommit(),
+		PreserveAfterExecution: cfg.GetWorkspaceIsolationConfig().GetPreserveAfterExecution(),
+		FileMask:               cfg.GetFileMask(),
+	})
+	if err != nil {
+		slog.Warn("failed to create isolation wrapper, continuing without isolation",
+			"error", err,
+			"runtime", rt.Name().String(),
+		)
+		return rt, nil
+	}
+
+	if wrapper == nil {
+		// NewIsolatingRuntime returns nil for direct/unspecified mode
+		return rt, nil
+	}
+
+	slog.Debug("wrapping runtime with workspace isolation",
+		"runtime", rt.Name().String(),
+		"isolation_mode", isolationMode.String(),
+		"workspace", workspaceDir,
+		"review_before_commit", cfg.GetReviewBeforeCommit(),
+	)
+
+	return wrapper, wrapper
 }

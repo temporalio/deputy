@@ -43,6 +43,31 @@ var (
 		"/usr/local",
 		"/opt/homebrew",
 	}
+	// userConfigPaths returns paths to user config directories.
+	// These are commonly needed by CLI tools for reading configuration.
+	userConfigPaths = func() []string {
+		home, err := os.UserHomeDir()
+		if err != nil || home == "" {
+			return nil
+		}
+		return []string{
+			filepath.Join(home, ".config"),  // XDG config
+			filepath.Join(home, ".local"),   // XDG data/state
+			filepath.Join(home, ".cache"),   // XDG cache
+			filepath.Join(home, ".codex"),   // Codex CLI
+			filepath.Join(home, ".npm"),     // npm
+			filepath.Join(home, ".cargo"),   // Rust/Cargo
+			filepath.Join(home, ".rustup"),  // Rustup
+			filepath.Join(home, ".go"),      // Go
+			filepath.Join(home, "go"),       // Go workspace
+			filepath.Join(home, ".pyenv"),   // Python
+			filepath.Join(home, ".nvm"),     // Node version manager
+			filepath.Join(home, ".rbenv"),   // Ruby
+			filepath.Join(home, ".asdf"),    // asdf version manager
+			filepath.Join(home, ".gitconfig"), // Git config (file, not dir)
+			filepath.Join(home, ".ssh"),     // SSH keys (for git operations)
+		}
+	}
 	defaultExecPaths = []string{
 		"/bin",
 		"/usr/bin",
@@ -50,6 +75,10 @@ var (
 		"/sbin",
 		"/usr/local/bin",
 		"/opt/homebrew/bin",
+		// Homebrew uses symlinks from bin/ to Cellar/ and Caskroom/
+		// We need to allow execution from these directories too
+		"/opt/homebrew/Cellar",
+		"/opt/homebrew/Caskroom",
 	}
 )
 
@@ -393,6 +422,10 @@ func buildProfile(cfg *sandboxv1.SandboxConfig, workspaceDir string) (string, er
 	}
 
 	readSpecs := subpathSpecs(defaultReadPaths)
+	// Add user config paths for common CLI tools
+	if configPaths := userConfigPaths(); len(configPaths) > 0 {
+		readSpecs = append(readSpecs, subpathSpecs(configPaths)...)
+	}
 	execSpecs := subpathSpecs(defaultExecPaths)
 	if workspaceDir != "" {
 		readSpecs = append(readSpecs, pathSpec{Path: workspaceDir})
@@ -435,6 +468,8 @@ func buildProfile(cfg *sandboxv1.SandboxConfig, workspaceDir string) (string, er
 		lines = append(lines, allowPaths("file-read* file-write* file-test-existence", []pathSpec{{Path: "/"}}))
 		lines = append(lines, allowPaths("file-map-executable", []pathSpec{{Path: "/"}}))
 		lines = append(lines, allowPaths("process-exec*", []pathSpec{{Path: "/"}}))
+		// Allow Mach IPC for system services (needed by apps using SystemConfiguration, etc.)
+		lines = append(lines, "(allow mach*)")
 	case sandboxv1.Mode_MODE_EPHEMERAL:
 		lines = append(lines, allowPaths("file-write*", subpathSpecs(tempPaths())))
 	case sandboxv1.Mode_MODE_WORKSPACE_WRITE, sandboxv1.Mode_MODE_NETWORK_ISOLATED:
@@ -461,7 +496,27 @@ func allowNetwork(mode sandboxv1.NetworkMode) bool {
 }
 
 func tempPaths() []string {
-	paths := []string{os.TempDir(), "/tmp", "/var/tmp"}
+	paths := []string{}
+
+	// Add os.TempDir() with symlinks resolved
+	if tmpDir := os.TempDir(); tmpDir != "" {
+		if resolved, err := filepath.EvalSymlinks(tmpDir); err == nil {
+			paths = append(paths, resolved)
+		} else {
+			paths = append(paths, tmpDir)
+		}
+	}
+
+	// Add common temp paths with symlinks resolved
+	// On macOS: /tmp -> /private/tmp, /var/tmp -> /private/var/tmp
+	for _, p := range []string{"/tmp", "/var/tmp"} {
+		if resolved, err := filepath.EvalSymlinks(p); err == nil {
+			paths = append(paths, resolved)
+		} else {
+			paths = append(paths, p)
+		}
+	}
+
 	return uniquePaths(paths)
 }
 
@@ -473,7 +528,21 @@ func normalizePath(path string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("resolve path %q: %w", path, err)
 	}
-	return filepath.Clean(abs), nil
+	// On macOS, /tmp -> /private/tmp and /var -> /private/var
+	// We must resolve symlinks for the sandbox profile to work correctly
+	resolved, err := filepath.EvalSymlinks(abs)
+	if err != nil {
+		// If the path doesn't exist yet, try resolving the parent
+		// This handles cases like creating new files in the workspace
+		parent := filepath.Dir(abs)
+		resolvedParent, parentErr := filepath.EvalSymlinks(parent)
+		if parentErr != nil {
+			// Fall back to cleaned absolute path if we can't resolve
+			return filepath.Clean(abs), nil
+		}
+		return filepath.Join(resolvedParent, filepath.Base(abs)), nil
+	}
+	return resolved, nil
 }
 
 func resolveExecAllowlist(entries []string, workspaceDir string) ([]pathSpec, error) {

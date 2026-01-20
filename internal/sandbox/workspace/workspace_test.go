@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -440,6 +441,49 @@ func TestDiffDirectories(t *testing.T) {
 		t.Errorf("deleted.txt should be 'deleted', got %q", changeMap["deleted.txt"])
 	}
 	// modified.txt might or might not show up depending on mod time
+}
+
+func TestDiffDirectoriesSkipsGitDirectory(t *testing.T) {
+	// Create original directory with .git
+	origDir := t.TempDir()
+	os.WriteFile(filepath.Join(origDir, "code.txt"), []byte("code"), 0644)
+	os.MkdirAll(filepath.Join(origDir, ".git", "objects"), 0755)
+	os.WriteFile(filepath.Join(origDir, ".git", "index"), []byte("git index"), 0644)
+	os.WriteFile(filepath.Join(origDir, ".git", "objects", "abc"), []byte("object"), 0644)
+
+	// Create modified directory with .git changes
+	modDir := t.TempDir()
+	os.WriteFile(filepath.Join(modDir, "code.txt"), []byte("modified code"), 0644)
+	os.WriteFile(filepath.Join(modDir, "new.txt"), []byte("new file"), 0644)
+	os.MkdirAll(filepath.Join(modDir, ".git", "objects"), 0755)
+	os.WriteFile(filepath.Join(modDir, ".git", "index"), []byte("modified index"), 0644)
+	os.WriteFile(filepath.Join(modDir, ".git", "objects", "abc"), []byte("modified object"), 0644)
+	os.WriteFile(filepath.Join(modDir, ".git", "objects", "def"), []byte("new object"), 0644)
+
+	changes, err := diffDirectories(origDir, modDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Check that no .git paths are in the changes
+	for _, c := range changes {
+		if c.Path == ".git" || strings.HasPrefix(c.Path, ".git"+string(filepath.Separator)) {
+			t.Errorf("diffDirectories should skip .git paths, but found: %q", c.Path)
+		}
+	}
+
+	// Verify real changes are still detected
+	changeMap := make(map[string]string)
+	for _, c := range changes {
+		changeMap[c.Path] = c.Type
+	}
+
+	if changeMap["new.txt"] != "added" {
+		t.Errorf("new.txt should be 'added', got %q", changeMap["new.txt"])
+	}
+	if _, found := changeMap["code.txt"]; !found {
+		t.Error("code.txt should be in changes (modified)")
+	}
 }
 
 func TestMatchesAnyPattern(t *testing.T) {
