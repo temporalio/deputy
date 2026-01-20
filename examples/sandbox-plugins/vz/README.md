@@ -1151,6 +1151,57 @@ deputy exec --runtime plugin --plugin vz --network host \
 > [!WARNING]
 > **Environment variables are visible in `/proc/cmdline`.** They are passed via the kernel command line, which is world-readable inside the VM. Do not pass secrets (API keys, tokens, passwords) via `--env`. For sensitive credentials, consider mounting a secrets file via the workspace with restricted permissions.
 
+### Piping Stdin Data
+
+Pass data to commands via stdin using the `--stdin` flag:
+
+```bash
+# Pipe a file's contents to a command
+deputy exec --runtime plugin --plugin vz --stdin data.json -- jq '.name'
+
+# Pipe from actual stdin
+echo "Hello World" | deputy exec --runtime plugin --plugin vz --stdin - -- cat
+
+# Pass HCL config to terraform (useful for IaC tools)
+deputy exec --runtime plugin --plugin vz \
+    --workspace . \
+    --stdin terraform.tfvars \
+    -- terraform plan -var-file=/dev/stdin
+```
+
+> [!NOTE]
+> **Stdin size limit:** Stdin data is currently limited to 32KB due to kernel command line constraints. For larger inputs, write data to a file in the workspace and read it from there.
+
+> [!TIP]
+> For interactive commands that require stdin during execution (like Terraform prompts or password inputs), consider using the workspace to pass data via files, or run with `--dangerously-skip-prompt` for automated workflows.
+
+### Interactive Terminal Support
+
+The VZ plugin supports interactive terminal applications (vim, less, htop, etc.) with automatic PTY resizing:
+
+```bash
+# Run vim in the VM (terminal resize works automatically)
+deputy exec --runtime plugin --plugin vz --workspace . -- vim README.md
+
+# Interactive debugging with less
+deputy exec --runtime plugin --plugin vz -- dmesg | less
+
+# System monitoring
+deputy exec --runtime plugin --plugin vz -- htop
+```
+
+**How it works:**
+- When running from an interactive terminal, the plugin uses actual terminal dimensions
+- SIGWINCH signals (terminal resize) automatically resize the VM's PTY
+- Non-interactive mode uses a large default width (32767 cols) to prevent line wrapping
+
+**Interactive mode detection:**
+- If stdin is a TTY → interactive mode (real terminal size, SIGWINCH handling)
+- If stdin is a pipe/file → non-interactive mode (large default size)
+
+> [!NOTE]
+> Interactive mode is automatically detected. No flags are needed.
+
 ### Supply Chain Security (Package Manager Operations)
 
 Run package manager commands safely in VM isolation:
@@ -1375,6 +1426,7 @@ cp arch/arm64/boot/Image ~/.deputy/vz/vmlinuz
 | AppArmor/SELinux | No | N/A for VMs |
 | Streaming Output | Yes | Via virtio-console |
 | Interactive Stdin | Yes | Via virtio-console |
+| Interactive Terminal | Yes | PTY with SIGWINCH resize |
 | Workspace Mounting | Yes | Alpine kernel with virtiofs (see below) |
 | GPU Passthrough | No | Not yet implemented |
 
@@ -1384,8 +1436,106 @@ cp arch/arm64/boot/Image ~/.deputy/vz/vmlinuz
 |------|-------------|
 | `read-only` | Workspace mounted read-only inside VM |
 | `workspace-write` | Workspace mounted read-write (default) |
-| `ephemeral` | Changes discarded after execution |
+| `full-access` | Workspace mounted read-write with host sync |
+| `ephemeral` | Rootfs changes discarded after execution (APFS clone) |
 | `network-isolated` | No network interface attached |
+
+### Ephemeral Mode (`--mode ephemeral`)
+
+Ephemeral mode provides **copy-on-write rootfs isolation** using APFS clonefile. Each execution starts from a clean rootfs state, with changes discarded after the VM terminates.
+
+**How it works:**
+1. Creates an instant APFS clone of `rootfs.img` (~1ms regardless of size)
+2. VM boots from the cloned rootfs
+3. All changes (package installs, file modifications) go to the clone
+4. Clone is automatically deleted when execution completes
+
+```bash
+# Run in ephemeral mode - rootfs changes are discarded
+deputy exec --runtime plugin --plugin vz \
+    --mode ephemeral \
+    --network host \
+    -- sh -c "apk add curl && curl --version"
+
+# Next execution starts fresh - curl is not installed
+deputy exec --runtime plugin --plugin vz \
+    --mode ephemeral \
+    -- which curl
+# Error: curl not found
+```
+
+**Use cases:**
+- Testing package installations without polluting base rootfs
+- Running untrusted code that might modify system files
+- Reproducible builds where each run should start clean
+- Parallel execution where VMs need isolated rootfs state
+
+**Technical details:**
+- Uses `unix.Clonefile()` system call on APFS filesystems
+- Falls back to regular copy on non-APFS (slower)
+- Clone shares storage with base image until modified (copy-on-write)
+- Ephemeral directory: `<rootfs_dir>/.ephemeral/exec-<timestamp>-<pid>/`
+
+### Timeout (`--timeout`)
+
+Set a maximum execution time for commands. If the timeout is reached, the VM is forcefully terminated.
+
+```bash
+# Set 30 second timeout
+deputy exec --runtime plugin --plugin vz \
+    --timeout 30s \
+    -- long-running-task
+
+# Set 5 minute timeout for builds
+deputy exec --runtime plugin --plugin vz \
+    --timeout 5m \
+    --network host \
+    -- go build ./...
+
+# Set 10 minute timeout with memory limit
+deputy exec --runtime plugin --plugin vz \
+    --timeout 10m \
+    --memory 8g \
+    --cpu 4 \
+    -- npm run build
+```
+
+**Timeout behavior:**
+- VM receives a graceful shutdown signal first
+- If VM doesn't terminate within 5 seconds, it's force-killed
+- Exit code reflects the timeout (non-zero)
+- Works with all modes and network configurations
+
+**Supported duration formats:**
+- Seconds: `30s`, `120s`
+- Minutes: `5m`, `10m`
+- Hours: `1h`
+- Combined: `1h30m`, `90s`
+
+### Resource Limits
+
+Control CPU and memory allocation:
+
+```bash
+# Limit to 2 CPU cores
+deputy exec --runtime plugin --plugin vz --cpu 2 -- make build
+
+# Limit to 4GB memory
+deputy exec --runtime plugin --plugin vz --memory 4g -- npm install
+
+# Combined limits for builds
+deputy exec --runtime plugin --plugin vz \
+    --cpu 4 \
+    --memory 8g \
+    --timeout 10m \
+    -- go build ./...
+```
+
+| Flag | Description | Default |
+|------|-------------|---------|
+| `--cpu N` | Number of virtual CPUs (1-8) | 4 |
+| `--memory Xg` | Memory allocation (256MB-16GB) | 4GB |
+| `--timeout Xs` | Maximum execution time | No limit |
 
 ## Architecture
 
@@ -1988,6 +2138,38 @@ Mon Jan 13 19:58:00 UTC 2026
 - **Disk Space**: Rootfs images consume disk space (~2GB for Ubuntu)
 - **Network Allowlist**: Works with Alpine rootfs (has nftables); uses guest-side filtering
 - **Ubuntu No Workspace**: Ubuntu kernel lacks virtiofs; use Alpine kernel for workspace mounting. See [Workspace Mounting Status](#workspace-mounting-status)
+- **Stdin Size Limit**: Maximum 32KB for stdin data (kernel cmdline constraint)
+- **Output Buffer**: Command output is buffered in memory before streaming
+
+## Future Enhancements
+
+The following improvements are under consideration for future releases:
+
+### Streaming Stdin Support
+
+Currently stdin is passed as a byte buffer (max 32KB). For interactive workflows like Terraform or Ansible that require ongoing stdin interaction, we may implement:
+- **Bidirectional PTY passthrough**: Route host stdin directly to the VM's virtio-console
+- **File-based stdin**: For larger inputs, write to a virtiofs-shared file that the command reads from
+
+### Output Size Limits
+
+For extremely large outputs (e.g., verbose build logs), we may implement:
+- **Configurable output buffer limits**: `--max-output-size` flag to prevent memory exhaustion
+- **Streaming output to file**: Write output to a file in the workspace instead of memory
+- **Truncation with warning**: Log a warning and truncate if output exceeds limit
+
+### OpenTelemetry Metrics
+
+The plugin currently exports OTel tracing spans for VM lifecycle events. Future additions may include:
+- **VM boot time histograms**: Track boot latency distribution
+- **Resource utilization gauges**: CPU/memory usage during execution
+- **Network I/O counters**: Bytes transferred through NAT
+
+### Ephemeral Mode by Default
+
+Currently the rootfs is persistent between executions. For maximum isolation, we may:
+- **Default to ephemeral mode**: Use APFS clonefile for copy-on-write rootfs by default
+- **Opt-in persistence**: Add `--persistent-rootfs` flag for workflows that need cached state
 
 ## Workspace Mounting Status
 
@@ -2967,6 +3149,76 @@ When `DEPUTY_OTEL_ENABLED=true` and `OTEL_EXPORTER_OTLP_ENDPOINT` is set, Deputy
 - `deputy.sandbox.exit_code`: Command exit code
 - `status`: `success` or `error`
 
+### Distributed Tracing
+
+The VZ plugin supports **distributed tracing** with W3C TraceContext propagation. This links VZ plugin spans to the parent Deputy CLI/server spans, providing end-to-end visibility across process boundaries.
+
+**Trace hierarchy:**
+```
+Deputy CLI (parent span)
+└── deputy.sandbox.execute
+    └── deputy.sandbox.vz.execute (VZ plugin)
+        ├── vm.creating
+        ├── vm.starting
+        ├── vm.running
+        └── vm.completed
+```
+
+**How it works:**
+1. Deputy CLI creates a parent span for sandbox execution
+2. Trace context (W3C `traceparent`) is passed to the VZ plugin via the `RuntimeExecuteRequest.trace_context` field
+3. VZ plugin extracts the trace context and creates child spans
+4. All spans share the same `trace_id`, enabling correlation
+
+**Log correlation:**
+The VZ plugin wraps slog with `TraceContextHandler`, automatically adding `trace_id` and `span_id` to log records when a span is active:
+
+```json
+{
+  "level": "DEBUG",
+  "msg": "Creating VM config",
+  "trace_id": "4bf92f3577b34da6a3ce929d0e0e4736",
+  "span_id": "00f067aa0ba902b7",
+  "trace_sampled": true,
+  "kernel": "~/.deputy/vz/alpine/vmlinuz",
+  "rootfs": "~/.deputy/vz/alpine/rootfs.img"
+}
+```
+
+**Span attributes:**
+| Attribute | Description |
+|-----------|-------------|
+| `deputy.sandbox.execution_id` | Unique execution identifier |
+| `deputy.sandbox.runtime` | Always `vz` for this plugin |
+| `deputy.sandbox.mode` | Execution mode (e.g., `MODE_EPHEMERAL`) |
+| `deputy.sandbox.network_mode` | Network mode (e.g., `NETWORK_MODE_HOST`) |
+| `deputy.sandbox.vz.kernel` | Path to kernel image |
+
+**Span events:**
+| Event | When |
+|-------|------|
+| `vm.creating` | VM configuration created |
+| `vm.starting` | VM boot initiated |
+| `vm.running` | VM entered running state |
+| `vm.completed` | VM execution finished |
+| `network.connection` | Network connection allowed (when network audit enabled) |
+| `network.connection.blocked` | Network connection blocked (when network audit enabled) |
+
+**Network audit attributes** (on `network.connection*` events):
+| Attribute | Description |
+|-----------|-------------|
+| `deputy.sandbox.network.action` | `ALLOW` or `DROP` |
+| `deputy.sandbox.network.protocol` | `TCP`, `UDP`, etc. |
+| `deputy.sandbox.network.destination` | Destination IP address |
+| `deputy.sandbox.network.port` | Destination port |
+
+**Network audit summary attributes** (on the main span):
+| Attribute | Description |
+|-----------|-------------|
+| `deputy.sandbox.network.connections_total` | Total network connections attempted |
+| `deputy.sandbox.network.connections_allowed` | Connections that were allowed |
+| `deputy.sandbox.network.connections_blocked` | Connections that were blocked |
+
 ### Enabling Telemetry
 
 ```bash
@@ -2974,10 +3226,26 @@ When `DEPUTY_OTEL_ENABLED=true` and `OTEL_EXPORTER_OTLP_ENDPOINT` is set, Deputy
 export DEPUTY_OTEL_ENABLED=true
 export OTEL_EXPORTER_OTLP_ENDPOINT=localhost:4317
 
-# Run sandbox command
+# Run sandbox command - traces automatically propagate to VZ plugin
 deputy exec --runtime plugin --plugin vz --network host -- go build ./...
 
-# Metrics will be exported to your OTLP collector
+# View traces in your OTel backend (Jaeger, Honeycomb, Grafana Tempo, etc.)
+# Spans from both Deputy CLI and VZ plugin appear in the same trace
+```
+
+**Local testing with Jaeger:**
+```bash
+# Start Jaeger all-in-one
+docker run -d --name jaeger \
+  -p 16686:16686 \
+  -p 4317:4317 \
+  jaegertracing/all-in-one:latest
+
+# Run deputy with OTel enabled
+DEPUTY_OTEL_ENABLED=true OTEL_EXPORTER_OTLP_ENDPOINT=localhost:4317 \
+  deputy exec --runtime plugin --plugin vz --network host -- go version
+
+# View traces at http://localhost:16686
 ```
 
 ### Audit Logging

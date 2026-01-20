@@ -289,14 +289,13 @@ func (wc *workspaceConfig) Cleanup() error {
 		return nil
 	}
 	if wc.preserveChanges {
-		slog.Info("DEBUG: Cleanup skipped - preserveChanges=true")
+		slog.Debug("Cleanup skipped", "reason", "preserveChanges=true")
 		return nil
 	}
 	if wc.tempDir == "" {
-		slog.Info("DEBUG: Cleanup skipped - tempDir is empty")
 		return nil
 	}
-	slog.Info("DEBUG: Cleanup running", "tempDir", wc.tempDir, "mode", wc.mode, "worktreePath", wc.worktreePath)
+	slog.Debug("Cleaning up workspace", "tempDir", wc.tempDir, "mode", wc.mode.String())
 
 	// For git worktree mode, clean up the worktree and branch
 	if wc.IsGitWorktree() && wc.worktreePath != "" && wc.basePath != "" {

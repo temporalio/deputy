@@ -53,6 +53,10 @@ import (
 	"golang.org/x/term"
 	sandboxv1 "github.com/picatz/deputy/gen/deputy/sandbox/v1"
 	"github.com/picatz/deputy/gen/deputy/sandbox/v1/sandboxv1connect"
+	deputyotel "github.com/picatz/deputy/internal/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/propagation"
+	"go.opentelemetry.io/otel/trace"
 	"golang.org/x/net/http2"
 	"golang.org/x/net/http2/h2c"
 	"google.golang.org/protobuf/types/known/durationpb"
@@ -167,9 +171,12 @@ func main() {
 			logLevel = slog.LevelError
 		}
 	}
-	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{
+	// Wrap slog handler with TraceContextHandler for log/trace correlation
+	// This adds trace_id and span_id to log records when a span is active in the context
+	baseHandler := slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{
 		Level: logLevel,
-	}))
+	})
+	logger := slog.New(deputyotel.NewTraceContextHandler(baseHandler))
 	slog.SetDefault(logger)
 
 	handler := &vzHandler{
@@ -266,12 +273,37 @@ func (h *vzHandler) Execute(
 		executionID = fmt.Sprintf("vz-%d", time.Now().UnixNano())
 	}
 
+	// Validate command is provided
+	if len(execReq.GetCommand()) == 0 {
+		return stream.Send(h.errorEvent(executionID, "INVALID_REQUEST", "command is required"))
+	}
+
+	// Extract trace context from request for distributed tracing
+	// This links the VZ plugin span to the parent span from the Deputy CLI/server
+	if traceContext := execReq.GetTraceContext(); traceContext != "" {
+		carrier := propagation.MapCarrier{"traceparent": traceContext}
+		ctx = propagation.TraceContext{}.Extract(ctx, carrier)
+	}
+
+	// Start OTel span for VM execution (as child of extracted trace context)
+	ctx, span := deputyotel.StartSpan(ctx, "deputy.sandbox.vz.execute",
+		trace.WithAttributes(
+			attribute.String("deputy.sandbox.execution_id", executionID),
+			attribute.String("deputy.sandbox.runtime", "vz"),
+			attribute.String("deputy.sandbox.mode", execReq.GetConfig().GetMode().String()),
+			attribute.String("deputy.sandbox.network_mode", execReq.GetConfig().GetNetworkMode().String()),
+		),
+	)
+	defer span.End()
+
 	// Validate assets exist
 	kernelPath, initrdPath, rootfsPath, err := h.resolveAssetPaths()
 	if err != nil {
+		deputyotel.SetSpanError(span, err)
 		return stream.Send(h.errorEvent(executionID, "ASSET_ERROR", err.Error()))
 	}
-	slog.Debug("VZ assets resolved", "kernel", kernelPath, "initrd", initrdPath, "rootfs", rootfsPath)
+	slog.DebugContext(ctx, "VZ assets resolved", "kernel", kernelPath, "initrd", initrdPath, "rootfs", rootfsPath)
+	span.SetAttributes(attribute.String("deputy.sandbox.vz.kernel", kernelPath))
 
 	// For MODE_EPHEMERAL, create an APFS clone of the rootfs
 	// This provides copy-on-write isolation - changes are discarded after execution
@@ -285,7 +317,7 @@ func (h *vzHandler) Execute(
 
 	var ephemeral *ephemeralRootfs
 	if config.GetMode() == sandboxv1.Mode_MODE_EPHEMERAL {
-		slog.Debug("Creating ephemeral rootfs clone", "base", rootfsPath)
+		slog.DebugContext(ctx, "Creating ephemeral rootfs clone", "base", rootfsPath)
 		ephemeral, err = newEphemeralRootfs(rootfsPath)
 		if err != nil {
 			return stream.Send(h.errorEvent(executionID, "EPHEMERAL_ERROR", err.Error()))
@@ -296,20 +328,20 @@ func (h *vzHandler) Execute(
 			}
 		}()
 		rootfsPath = ephemeral.Path()
-		slog.Debug("Using ephemeral rootfs", "path", rootfsPath)
+		slog.DebugContext(ctx, "Using ephemeral rootfs", "path", rootfsPath)
 	}
 
 	// Create workspace configuration FIRST so we know the effective path to mount
 	// For git worktree mode, this creates the worktree and gives us the worktree path
 	wsConfig, err := newWorkspaceConfig(execReq.GetWorkspaceDir(), execReq.GetConfig())
 	if err != nil {
-		slog.Error("Workspace config creation failed", "error", err)
+		slog.ErrorContext(ctx, "Workspace config creation failed", "error", err)
 		return stream.Send(h.errorEvent(executionID, "WORKSPACE_ERROR", err.Error()))
 	}
 	// Defer cleanup of workspace (worktree removal, temp dir cleanup)
 	if wsConfig != nil {
 		defer func() {
-			slog.Debug("Running workspace cleanup defer")
+			slog.DebugContext(ctx, "Running workspace cleanup defer")
 			if cleanupErr := wsConfig.Cleanup(); cleanupErr != nil {
 				slog.Warn("Failed to cleanup workspace", "error", cleanupErr)
 			}
@@ -320,7 +352,7 @@ func (h *vzHandler) Execute(
 	effectiveWorkspacePath := execReq.GetWorkspaceDir()
 	if wsConfig != nil && wsConfig.directPath != "" {
 		effectiveWorkspacePath = wsConfig.directPath
-		slog.Debug("Using effective workspace path from config",
+		slog.DebugContext(ctx, "Using effective workspace path from config",
 			"original", execReq.GetWorkspaceDir(),
 			"effective", effectiveWorkspacePath)
 	}
@@ -333,21 +365,40 @@ func (h *vzHandler) Execute(
 	defer ptyPrimary.Close()
 	defer ptySecondary.Close()
 
-	// Set PTY window size - use host terminal size if available, otherwise use large default.
-	// This prevents spurious line wrapping in command output.
-	//
-	// TODO: Revisit this if we need proper interactive terminal support. Currently we use
-	// a very large column width (32767) as the default to avoid wrapping for non-interactive
-	// commands. For true interactive use (vim, less, etc.), we may need to:
-	// 1. Detect if stdin is a TTY and use its size
-	// 2. Handle SIGWINCH to resize the PTY dynamically
-	// 3. Use the actual host terminal size consistently
-	cols, rows := 32767, 24 // Large default to avoid wrapping
-	if width, height, err := term.GetSize(int(os.Stdout.Fd())); err == nil && width > 0 {
-		cols, rows = width, height
+	// Set initial PTY window size from host terminal
+	// For interactive commands (vim, less, etc.), we use actual terminal size.
+	// For non-interactive, large default prevents spurious line wrapping.
+	isInteractive := term.IsTerminal(int(os.Stdin.Fd()))
+	cols, rows := 32767, 24 // Large default for non-interactive to avoid wrapping
+	if isInteractive {
+		if width, height, err := term.GetSize(int(os.Stdout.Fd())); err == nil && width > 0 {
+			cols, rows = width, height
+		}
 	}
 	if err := pty.Setsize(ptySecondary, &pty.Winsize{Rows: uint16(rows), Cols: uint16(cols)}); err != nil {
 		h.logger.Debug("failed to set PTY size", "err", err)
+	}
+
+	// Set up SIGWINCH handler for dynamic PTY resizing (interactive terminals only)
+	// This enables proper terminal behavior for vim, less, and other TUI applications
+	var winchCh chan os.Signal
+	if isInteractive {
+		winchCh = make(chan os.Signal, 1)
+		signal.Notify(winchCh, syscall.SIGWINCH)
+		defer signal.Stop(winchCh)
+
+		// Goroutine to handle terminal resize events
+		go func() {
+			for range winchCh {
+				if width, height, err := term.GetSize(int(os.Stdout.Fd())); err == nil && width > 0 {
+					if err := pty.Setsize(ptySecondary, &pty.Winsize{Rows: uint16(height), Cols: uint16(width)}); err != nil {
+						slog.Debug("failed to resize PTY on SIGWINCH", "err", err)
+					} else {
+						slog.DebugContext(ctx, "PTY resized", "cols", width, "rows", height)
+					}
+				}
+			}
+		}()
 	}
 
 	// Put PTY primary in raw mode to prevent line discipline transformations
@@ -360,10 +411,10 @@ func (h *vzHandler) Execute(
 
 	// Create VM configuration with the PTY secondary (VM reads/writes to secondary, we read/write to primary)
 	// Pass the effective workspace path (may be worktree path for git-worktree mode)
-	slog.Debug("Creating VM config", "kernel", kernelPath, "initrd", initrdPath, "rootfs", rootfsPath)
+	slog.DebugContext(ctx, "Creating VM config", "kernel", kernelPath, "initrd", initrdPath, "rootfs", rootfsPath)
 	vmConfig, changesDir, err := h.createVMConfigWithWorkspace(execReq, kernelPath, initrdPath, rootfsPath, ptySecondary, ptySecondary, effectiveWorkspacePath)
 	if err != nil {
-		slog.Error("VM config creation failed", "error", err)
+		slog.ErrorContext(ctx, "VM config creation failed", "error", err)
 		return stream.Send(h.errorEvent(executionID, "CONFIG_ERROR", err.Error()))
 	}
 	// Clean up changes directory on function exit if it was created
@@ -375,7 +426,7 @@ func (h *vzHandler) Execute(
 			}
 		}()
 	}
-	slog.Debug("VM config created successfully", "changesDir", changesDir)
+	slog.DebugContext(ctx, "VM config created successfully", "changesDir", changesDir)
 
 	// If changes directory was created, update the workspace config's upper path
 	if changesDir != "" && wsConfig != nil {
@@ -384,26 +435,29 @@ func (h *vzHandler) Execute(
 	}
 
 	// Validate configuration
-	slog.Debug("Validating VM config")
+	slog.DebugContext(ctx, "Validating VM config")
 	validated, err := vmConfig.Validate()
 	if err != nil {
-		slog.Error("VM config validation error", "error", err)
+		slog.ErrorContext(ctx, "VM config validation error", "error", err)
 		return stream.Send(h.errorEvent(executionID, "VALIDATION_ERROR", err.Error()))
 	}
 	if !validated {
-		slog.Error("VM config validation returned false")
+		slog.ErrorContext(ctx, "VM config validation returned false")
 		return stream.Send(h.errorEvent(executionID, "VALIDATION_ERROR", "VM configuration validation failed"))
 	}
-	slog.Debug("VM config validated successfully")
+	slog.DebugContext(ctx, "VM config validated successfully")
 
 	// Create the VM
-	slog.Debug("Creating VirtualMachine instance")
+	slog.DebugContext(ctx, "Creating VirtualMachine instance")
+	deputyotel.AddSpanEvent(span, "vm.creating")
 	vm, err := vz.NewVirtualMachine(vmConfig)
 	if err != nil {
-		slog.Error("VM creation failed", "error", err)
+		slog.ErrorContext(ctx, "VM creation failed", "error", err)
+		deputyotel.SetSpanError(span, err)
 		return stream.Send(h.errorEvent(executionID, "VM_CREATE_ERROR", err.Error()))
 	}
-	slog.Debug("VirtualMachine instance created")
+	slog.DebugContext(ctx, "VirtualMachine instance created")
+	deputyotel.AddSpanEvent(span, "vm.created")
 
 	// Create cancellable context for the VM
 	vmCtx, vmCancel := context.WithCancel(ctx)
@@ -448,12 +502,15 @@ func (h *vzHandler) Execute(
 	// Start the VM
 	startTime := time.Now()
 	h.logger.Debug("Starting VM", "executionID", executionID, "kernel", kernelPath, "rootfs", rootfsPath, "vmState", vm.State())
+	deputyotel.AddSpanEvent(span, "vm.starting")
 	if err := vm.Start(); err != nil {
 		h.logger.Error("VM start failed", "error", err, "vmState", vm.State())
+		deputyotel.SetSpanError(span, err)
 		return stream.Send(h.errorEvent(executionID, "VM_START_ERROR", err.Error()))
 	}
 
 	h.logger.Debug("VM started successfully", "executionID", executionID, "state", vm.State())
+	deputyotel.AddSpanEvent(span, "vm.started")
 
 	// Set up timeout if specified
 	var timeoutCh <-chan time.Time
@@ -464,6 +521,7 @@ func (h *vzHandler) Execute(
 	// Wait for completion
 	var exitCode int32 = 0
 	var execErr error
+	var execResult *executionResult // Store full result for network audit export
 
 	select {
 	case <-vmCtx.Done():
@@ -486,6 +544,7 @@ func (h *vzHandler) Execute(
 	case result := <-outputDone:
 		// Command completed - we got exit code from parsed output
 		h.logger.Debug("VM command completed", "executionID", executionID, "exitCode", result.exitCode)
+		execResult = result
 		exitCode = result.exitCode
 		if result.err != nil && exitCode == 0 {
 			exitCode = 1
@@ -529,6 +588,7 @@ func (h *vzHandler) Execute(
 	}
 
 	if execErr != nil {
+		deputyotel.SetSpanError(span, execErr)
 		if err := stream.Send(h.errorEvent(executionID, "EXECUTION_ERROR", execErr.Error())); err != nil {
 			return err
 		}
@@ -536,6 +596,55 @@ func (h *vzHandler) Execute(
 
 	// Send completed event
 	duration := time.Since(startTime)
+
+	// Export network audit entries as OTel span events
+	// This provides visibility into network connections made by the sandboxed command
+	if execResult != nil && len(execResult.netAudit) > 0 {
+		for _, entry := range execResult.netAudit {
+			eventName := "network.connection"
+			if entry.Action == "DROP" {
+				eventName = "network.connection.blocked"
+			}
+			deputyotel.AddSpanEvent(span, eventName,
+				attribute.String("deputy.sandbox.network.action", entry.Action),
+				attribute.String("deputy.sandbox.network.protocol", entry.Protocol),
+				attribute.String("deputy.sandbox.network.destination", entry.Destination),
+				attribute.Int("deputy.sandbox.network.port", entry.Port),
+			)
+		}
+		// Also record summary attributes on the span
+		var allowCount, dropCount int
+		for _, entry := range execResult.netAudit {
+			if entry.Action == "DROP" {
+				dropCount++
+			} else {
+				allowCount++
+			}
+		}
+		span.SetAttributes(
+			attribute.Int("deputy.sandbox.network.connections_total", len(execResult.netAudit)),
+			attribute.Int("deputy.sandbox.network.connections_allowed", allowCount),
+			attribute.Int("deputy.sandbox.network.connections_blocked", dropCount),
+		)
+		slog.DebugContext(ctx, "Network audit exported to OTel",
+			"total", len(execResult.netAudit),
+			"allowed", allowCount,
+			"blocked", dropCount)
+	}
+
+	// Record final span attributes
+	deputyotel.AddSpanEvent(span, "vm.completed",
+		attribute.Int("exit_code", int(exitCode)),
+		attribute.Int64("duration_ms", duration.Milliseconds()),
+	)
+	span.SetAttributes(
+		attribute.Int("deputy.sandbox.exit_code", int(exitCode)),
+		attribute.Int64("deputy.sandbox.duration_ms", duration.Milliseconds()),
+	)
+	if exitCode == 0 && execErr == nil {
+		deputyotel.SetSpanOK(span)
+	}
+
 	return stream.Send(&sandboxv1.ExecuteEvent{
 		ExecutionId: executionID,
 		Timestamp:   timestamppb.Now(),
@@ -1541,6 +1650,23 @@ func (h *vzHandler) createVMConfigWithWorkspace(
 		slog.Debug("VZ environment variables passed to VM",
 			"count", len(envVars),
 			"keys", keysOnly(envVars))
+	}
+
+	// Pass stdin data to VM if provided
+	// For small data (<32KB), pass via kernel cmdline as base64
+	// For larger data, we'd need to write to a file shared via virtiofs (future enhancement)
+	const maxKernelStdinSize = 32 * 1024 // 32KB limit for kernel cmdline
+	if stdin := req.GetStdin(); len(stdin) > 0 {
+		if len(stdin) > maxKernelStdinSize {
+			slog.Warn("VZ stdin data exceeds kernel cmdline limit, truncating",
+				"size", len(stdin),
+				"limit", maxKernelStdinSize)
+			stdin = stdin[:maxKernelStdinSize]
+		}
+		stdinEncoded := base64.StdEncoding.EncodeToString(stdin)
+		cmdline += fmt.Sprintf(" deputy.stdin=%s", stdinEncoded)
+		slog.Debug("VZ stdin passed to VM",
+			"size", len(stdin))
 	}
 
 	// Add quiet boot unless debug logging is enabled

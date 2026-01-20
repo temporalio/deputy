@@ -190,6 +190,9 @@ for param in $(cat /proc/cmdline); do
         deputy.env=*)
             USER_ENV_BASE64="${param#deputy.env=}"
             ;;
+        deputy.stdin=*)
+            STDIN_BASE64="${param#deputy.stdin=}"
+            ;;
     esac
 done
 
@@ -529,6 +532,14 @@ elif [ -d "/workspace" ] && [ "$(ls -A /workspace 2>/dev/null)" ]; then
     cd /workspace
 fi
 
+# Decode stdin data if provided
+# This allows piping data into commands running in the VM
+STDIN_FILE=""
+if [ -n "$STDIN_BASE64" ]; then
+    STDIN_FILE="/tmp/deputy_stdin"
+    echo "$STDIN_BASE64" | base64 -d > "$STDIN_FILE" 2>/dev/null || true
+fi
+
 # Signal start of output
 echo "<<<DEPUTY_OUTPUT_START>>>"
 echo "<<<DEPUTY_STDOUT>>>"
@@ -581,7 +592,12 @@ if [ -n "$RUN_AS_USER" ]; then
 
     # Run as the specified user
     # Use su with -s /bin/sh to ensure consistent shell
-    su -s /bin/sh "$RUN_AS_USER" -c "$ENV_EXPORTS; cd '$(pwd)'; $CMD_DECODED" >"$STDOUT_FILE" 2>"$STDERR_FILE"
+    # Pipe stdin if provided
+    if [ -n "$STDIN_FILE" ] && [ -f "$STDIN_FILE" ]; then
+        su -s /bin/sh "$RUN_AS_USER" -c "$ENV_EXPORTS; cd '$(pwd)'; $CMD_DECODED" <"$STDIN_FILE" >"$STDOUT_FILE" 2>"$STDERR_FILE"
+    else
+        su -s /bin/sh "$RUN_AS_USER" -c "$ENV_EXPORTS; cd '$(pwd)'; $CMD_DECODED" >"$STDOUT_FILE" 2>"$STDERR_FILE"
+    fi
     EXIT_CODE=$?
 else
     # Run as root (default behavior)
@@ -591,7 +607,12 @@ else
             [ -n "$line" ] && export "$line"
         done < /tmp/deputy_user_env
     fi
-    eval "$CMD_DECODED" >"$STDOUT_FILE" 2>"$STDERR_FILE"
+    # Pipe stdin if provided
+    if [ -n "$STDIN_FILE" ] && [ -f "$STDIN_FILE" ]; then
+        eval "$CMD_DECODED" <"$STDIN_FILE" >"$STDOUT_FILE" 2>"$STDERR_FILE"
+    else
+        eval "$CMD_DECODED" >"$STDOUT_FILE" 2>"$STDERR_FILE"
+    fi
     EXIT_CODE=$?
 fi
 
