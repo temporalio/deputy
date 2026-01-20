@@ -333,11 +333,82 @@ $ deputy fix --agent claude --agent-sandbox read-only
 
 ---
 
+## Workspace Isolation Security Model
+
+Deputy provides several workspace isolation modes for agent sandboxing. Understanding the security properties of each is critical for safe agent operation.
+
+### Isolation Modes
+
+| Mode | Security Properties | Use Case |
+| --- | --- | --- |
+| `direct` | No isolation - changes apply directly | Trusted local development |
+| `snapshot` | Full copy to temp directory | Review changes before applying |
+| `overlay` | Copy-on-write (overlayfs) | Efficient isolation on Linux |
+| `tmpfs` | In-memory, lost on exit | Truly ephemeral operations |
+| `git-worktree` | Git-managed isolation | Git-aware workflows |
+
+### Git Worktree Security Considerations
+
+The `git-worktree` isolation mode uses `git worktree add` to create an isolated workspace. This provides several benefits but also has important security considerations:
+
+**Benefits:**
+- Git tracks all changes automatically
+- Easy review via `git diff` and `git status`
+- Integration with existing Git workflows
+- Efficient for large repositories (uses hardlinks)
+
+**Security Considerations:**
+
+1. **Git Hooks Execution**: Git hooks (`.git/hooks/*`) can execute arbitrary code during operations like commits, checkouts, and merges. When using git-worktree mode:
+   - Pre-existing hooks in the repository will execute
+   - Malicious code could add new hooks that persist
+   - **Mitigation**: The sandbox blocks write access to `.git/hooks/` by default
+
+2. **Git Configuration**: The worktree shares `.git/config` with the main repository:
+   - Configuration changes could affect the main repo
+   - **Mitigation**: Config changes are isolated to the worktree
+
+3. **Submodule Risks**: Git submodules can reference external URLs:
+   - A malicious `.gitmodules` could fetch code from attacker-controlled repos
+   - **Mitigation**: Network isolation prevents submodule fetches; review `.gitmodules` changes
+
+**Recommended Settings for Git Worktree Mode:**
+
+```console
+# Use with network isolation to prevent submodule attacks
+$ deputy exec --workspace-isolation git-worktree --network none -- npm test
+
+# Enable review to inspect changes before syncing
+$ deputy exec --workspace-isolation git-worktree --review-changes -- npm run build
+```
+
+### Symlink Security
+
+All isolation modes implement symlink security validation:
+
+1. **Copy Operations**: Symlinks pointing outside the workspace are skipped
+2. **Sync Operations**: Only symlinks with targets within the workspace are synced
+3. **Path Traversal**: Paths containing `..` are rejected during sync
+
+This prevents escape attacks where malicious code creates symlinks to sensitive files (e.g., `/etc/passwd`, `~/.ssh/id_rsa`).
+
+### Path Validation
+
+Deputy validates paths at multiple levels:
+
+1. **API Level**: Blocks access to sensitive paths (`/etc/shadow`, `/proc/1`, etc.)
+2. **Sandbox Level**: Runtime enforces filesystem restrictions
+3. **Sync Level**: Validates all paths during change synchronization
+
+---
+
 ## See Also
 
 - [Explain command reference](../commands/explain.md) — Agent-assisted vulnerability analysis
 - [Fix command reference](../commands/fix.md) — Agent-assisted remediation
 - [Triage command reference](../commands/triage.md) — Agent-assisted prioritization
+- [Exec command reference](../commands/exec.md) — Direct sandbox execution
 - Code: [`internal/cli/cmd/explain.go`](../../internal/cli/cmd/explain.go)
 - Code: [`internal/cli/cmd/fix.go`](../../internal/cli/cmd/fix.go)
 - Code: [`internal/ai/render/render.go`](../../internal/ai/render/render.go)
+- Code: [`internal/sandbox/workspace/workspace.go`](../../internal/sandbox/workspace/workspace.go)

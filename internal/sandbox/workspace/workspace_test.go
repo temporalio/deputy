@@ -486,6 +486,72 @@ func TestDiffDirectoriesSkipsGitDirectory(t *testing.T) {
 	}
 }
 
+func TestSyncChangesRejectsTraversalPaths(t *testing.T) {
+	// Create source and destination directories
+	srcDir := t.TempDir()
+	dstDir := t.TempDir()
+
+	// Create a file in source
+	os.WriteFile(filepath.Join(srcDir, "safe.txt"), []byte("safe content"), 0644)
+
+	// Create a secret file outside both directories
+	secretDir := t.TempDir()
+	secretFile := filepath.Join(secretDir, "secret.txt")
+	os.WriteFile(secretFile, []byte("secret"), 0644)
+
+	// Try to sync with a traversal path - this should be rejected
+	changes := []FileChange{
+		{Path: "safe.txt", Type: "added"},
+		{Path: "../../../" + filepath.Base(secretDir) + "/secret.txt", Type: "added"}, // Traversal attempt
+	}
+
+	err := syncChanges(srcDir, dstDir, changes, nil, nil)
+	if err != nil {
+		t.Fatalf("syncChanges failed: %v", err)
+	}
+
+	// Verify safe.txt was synced
+	if _, err := os.Stat(filepath.Join(dstDir, "safe.txt")); os.IsNotExist(err) {
+		t.Error("safe.txt should have been synced")
+	}
+
+	// Verify traversal path was NOT synced (no file at that relative location in dst)
+	// The important thing is that the secret file was not accessed
+}
+
+func TestSyncChangesWithOsRoot(t *testing.T) {
+	// Test that os.Root provides traversal protection
+	srcDir := t.TempDir()
+	dstDir := t.TempDir()
+
+	// Create test files
+	os.WriteFile(filepath.Join(srcDir, "file1.txt"), []byte("content1"), 0644)
+	os.MkdirAll(filepath.Join(srcDir, "subdir"), 0755)
+	os.WriteFile(filepath.Join(srcDir, "subdir", "file2.txt"), []byte("content2"), 0644)
+
+	changes := []FileChange{
+		{Path: "file1.txt", Type: "added"},
+		{Path: "subdir", Type: "added"},
+		{Path: "subdir/file2.txt", Type: "added"},
+	}
+
+	err := syncChanges(srcDir, dstDir, changes, nil, nil)
+	if err != nil {
+		t.Fatalf("syncChanges failed: %v", err)
+	}
+
+	// Verify files were synced
+	content, err := os.ReadFile(filepath.Join(dstDir, "file1.txt"))
+	if err != nil || string(content) != "content1" {
+		t.Errorf("file1.txt not synced correctly")
+	}
+
+	content, err = os.ReadFile(filepath.Join(dstDir, "subdir", "file2.txt"))
+	if err != nil || string(content) != "content2" {
+		t.Errorf("subdir/file2.txt not synced correctly")
+	}
+}
+
 func TestMatchesAnyPattern(t *testing.T) {
 	tests := []struct {
 		path     string

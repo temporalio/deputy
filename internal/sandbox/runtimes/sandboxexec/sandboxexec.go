@@ -29,6 +29,8 @@ import (
 const sandboxExecBinary = "sandbox-exec"
 
 var (
+	// defaultReadPaths are system paths needed for basic operation.
+	// User-specific paths should be added via --read-path or --profile flags.
 	defaultReadPaths = []string{
 		"/bin",
 		"/usr/bin",
@@ -43,31 +45,8 @@ var (
 		"/usr/local",
 		"/opt/homebrew",
 	}
-	// userConfigPaths returns paths to user config directories.
-	// These are commonly needed by CLI tools for reading configuration.
-	userConfigPaths = func() []string {
-		home, err := os.UserHomeDir()
-		if err != nil || home == "" {
-			return nil
-		}
-		return []string{
-			filepath.Join(home, ".config"),  // XDG config
-			filepath.Join(home, ".local"),   // XDG data/state
-			filepath.Join(home, ".cache"),   // XDG cache
-			filepath.Join(home, ".codex"),   // Codex CLI
-			filepath.Join(home, ".npm"),     // npm
-			filepath.Join(home, ".cargo"),   // Rust/Cargo
-			filepath.Join(home, ".rustup"),  // Rustup
-			filepath.Join(home, ".go"),      // Go
-			filepath.Join(home, "go"),       // Go workspace
-			filepath.Join(home, ".pyenv"),   // Python
-			filepath.Join(home, ".nvm"),     // Node version manager
-			filepath.Join(home, ".rbenv"),   // Ruby
-			filepath.Join(home, ".asdf"),    // asdf version manager
-			filepath.Join(home, ".gitconfig"), // Git config (file, not dir)
-			filepath.Join(home, ".ssh"),     // SSH keys (for git operations)
-		}
-	}
+	// defaultExecPaths are system paths for executable lookup.
+	// Additional exec paths should be added via --exec-path or --profile flags.
 	defaultExecPaths = []string{
 		"/bin",
 		"/usr/bin",
@@ -422,11 +401,42 @@ func buildProfile(cfg *sandboxv1.SandboxConfig, workspaceDir string) (string, er
 	}
 
 	readSpecs := subpathSpecs(defaultReadPaths)
-	// Add user config paths for common CLI tools
-	if configPaths := userConfigPaths(); len(configPaths) > 0 {
-		readSpecs = append(readSpecs, subpathSpecs(configPaths)...)
-	}
 	execSpecs := subpathSpecs(defaultExecPaths)
+	var writeSpecs []pathSpec
+
+	// Expand profiles to read/exec/write paths
+	profilePaths := expandProfiles(cfg.GetProfiles())
+	if len(profilePaths.Read) > 0 {
+		resolved, _ := resolvePaths(profilePaths.Read)
+		readSpecs = append(readSpecs, subpathSpecs(resolved)...)
+	}
+	if len(profilePaths.Exec) > 0 {
+		resolved, _ := resolvePaths(profilePaths.Exec)
+		execSpecs = append(execSpecs, subpathSpecs(resolved)...)
+	}
+	if len(profilePaths.Write) > 0 {
+		resolved, _ := resolvePaths(profilePaths.Write)
+		writeSpecs = append(writeSpecs, subpathSpecs(resolved)...)
+	}
+
+	// Add explicit read_paths from config
+	if paths := cfg.GetReadPaths(); len(paths) > 0 {
+		resolved, _ := resolvePaths(paths)
+		readSpecs = append(readSpecs, subpathSpecs(resolved)...)
+	}
+
+	// Add explicit exec_paths from config
+	if paths := cfg.GetExecPaths(); len(paths) > 0 {
+		resolved, _ := resolvePaths(paths)
+		execSpecs = append(execSpecs, subpathSpecs(resolved)...)
+	}
+
+	// Add explicit write_paths from config
+	if paths := cfg.GetWritePaths(); len(paths) > 0 {
+		resolved, _ := resolvePaths(paths)
+		writeSpecs = append(writeSpecs, subpathSpecs(resolved)...)
+	}
+
 	if workspaceDir != "" {
 		readSpecs = append(readSpecs, pathSpec{Path: workspaceDir})
 		execSpecs = append(execSpecs, pathSpec{Path: workspaceDir})
@@ -473,12 +483,12 @@ func buildProfile(cfg *sandboxv1.SandboxConfig, workspaceDir string) (string, er
 	case sandboxv1.Mode_MODE_EPHEMERAL:
 		lines = append(lines, allowPaths("file-write*", subpathSpecs(tempPaths())))
 	case sandboxv1.Mode_MODE_WORKSPACE_WRITE, sandboxv1.Mode_MODE_NETWORK_ISOLATED:
-		writePaths := []string{}
+		writePathSpecs := writeSpecs // Start with profile/config write paths
 		if workspaceDir != "" {
-			writePaths = append(writePaths, workspaceDir)
+			writePathSpecs = append(writePathSpecs, pathSpec{Path: workspaceDir})
 		}
-		writePaths = append(writePaths, tempPaths()...)
-		lines = append(lines, allowPaths("file-write*", subpathSpecs(writePaths)))
+		writePathSpecs = append(writePathSpecs, subpathSpecs(tempPaths())...)
+		lines = append(lines, allowPaths("file-write*", writePathSpecs))
 	case sandboxv1.Mode_MODE_READ_ONLY:
 	default:
 	}
@@ -518,6 +528,198 @@ func tempPaths() []string {
 	}
 
 	return uniquePaths(paths)
+}
+
+// ProfilePaths holds paths expanded from a profile.
+type ProfilePaths struct {
+	Read  []string
+	Exec  []string
+	Write []string
+}
+
+// builtinProfiles defines the built-in sandbox profiles.
+// Users can request these via --profile flag. Each profile expands to
+// read/exec/write paths appropriate for that use case.
+//
+// Paths use ~ for home directory, which is expanded at runtime.
+var builtinProfiles = map[string]ProfilePaths{
+	// Git operations: read gitconfig and SSH keys
+	"git": {
+		Read: []string{
+			"~/.gitconfig",
+			"~/.config/git",
+			"~/.ssh",
+		},
+	},
+	// Node.js/npm development
+	"node": {
+		Read: []string{
+			"~/.npm",
+			"~/.npmrc",
+			"~/.nvm",
+			"~/.config/npm",
+		},
+		Write: []string{
+			"~/.npm/_cacache", // npm cache
+		},
+	},
+	// Go development
+	"go": {
+		Read: []string{
+			"~/.go",
+			"~/go",
+			"~/.cache/go-build",
+		},
+		Exec: []string{
+			"~/go/bin",
+		},
+		Write: []string{
+			"~/.cache/go-build",
+		},
+	},
+	// Python development
+	"python": {
+		Read: []string{
+			"~/.pyenv",
+			"~/.local/lib/python*",
+			"~/.config/pip",
+			"~/.pip",
+		},
+		Exec: []string{
+			"~/.pyenv/shims",
+			"~/.local/bin",
+		},
+	},
+	// Rust development
+	"rust": {
+		Read: []string{
+			"~/.cargo",
+			"~/.rustup",
+		},
+		Exec: []string{
+			"~/.cargo/bin",
+			"~/.rustup/toolchains",
+		},
+	},
+	// XDG base directories (common config/cache)
+	"xdg": {
+		Read: []string{
+			"~/.config",
+			"~/.local/share",
+			"~/.cache",
+		},
+		Write: []string{
+			"~/.cache",
+		},
+	},
+	// OpenAI Codex CLI
+	"codex": {
+		Read: []string{
+			"~/.codex",
+			"~/.config/codex",
+		},
+	},
+	// Claude Code / Anthropic tools
+	"claude": {
+		Read: []string{
+			"~/.claude",
+			"~/.config/claude",
+			"~/.anthropic",
+		},
+	},
+}
+
+// AvailableProfiles returns the list of available built-in profile names.
+func AvailableProfiles() []string {
+	profiles := make([]string, 0, len(builtinProfiles))
+	for name := range builtinProfiles {
+		profiles = append(profiles, name)
+	}
+	return profiles
+}
+
+// ValidateProfiles checks if all profile names are valid.
+// Returns an error listing any unknown profiles.
+func ValidateProfiles(profiles []string) error {
+	var unknown []string
+	for _, name := range profiles {
+		name = strings.ToLower(strings.TrimSpace(name))
+		if name == "" {
+			continue
+		}
+		if _, ok := builtinProfiles[name]; !ok {
+			unknown = append(unknown, name)
+		}
+	}
+	if len(unknown) > 0 {
+		available := AvailableProfiles()
+		return fmt.Errorf("unknown sandbox profile(s): %s (available: %s)",
+			strings.Join(unknown, ", "),
+			strings.Join(available, ", "))
+	}
+	return nil
+}
+
+// expandProfiles expands profile names to their path definitions.
+// Unknown profiles are logged at warn level for security visibility.
+func expandProfiles(profiles []string) ProfilePaths {
+	result := ProfilePaths{}
+	for _, name := range profiles {
+		name = strings.ToLower(strings.TrimSpace(name))
+		if name == "" {
+			continue
+		}
+		if profile, ok := builtinProfiles[name]; ok {
+			result.Read = append(result.Read, profile.Read...)
+			result.Exec = append(result.Exec, profile.Exec...)
+			result.Write = append(result.Write, profile.Write...)
+		} else {
+			// Warn rather than silently ignore - security visibility
+			slog.Warn("unknown sandbox profile ignored",
+				"profile", name,
+				"available", AvailableProfiles(),
+			)
+		}
+	}
+	return result
+}
+
+// resolvePaths expands ~ to home directory and resolves symlinks.
+// Returns resolved paths and any paths that couldn't be resolved (logged).
+func resolvePaths(paths []string) ([]string, []string) {
+	home, _ := os.UserHomeDir()
+	var resolved, failed []string
+
+	for _, p := range paths {
+		p = strings.TrimSpace(p)
+		if p == "" {
+			continue
+		}
+
+		// Expand ~ to home directory
+		if strings.HasPrefix(p, "~/") && home != "" {
+			p = filepath.Join(home, p[2:])
+		} else if p == "~" && home != "" {
+			p = home
+		}
+
+		// Resolve to absolute path and handle symlinks
+		abs, err := filepath.Abs(p)
+		if err != nil {
+			failed = append(failed, p)
+			continue
+		}
+
+		// Try to resolve symlinks (but don't fail if path doesn't exist)
+		if r, err := filepath.EvalSymlinks(abs); err == nil {
+			resolved = append(resolved, r)
+		} else {
+			// Path might not exist yet, use the absolute path
+			resolved = append(resolved, abs)
+		}
+	}
+
+	return resolved, failed
 }
 
 func normalizePath(path string) (string, error) {

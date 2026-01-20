@@ -60,6 +60,33 @@ deputy exec -- <command> [args...]
 | `--mask-hide` | | Glob pattern for files to hide (repeatable) |
 | `--mask-expose` | | Glob pattern for files to expose even if masked (repeatable) |
 
+### Host Path Access Flags (Host-native sandboxes)
+
+These flags control access to host filesystem paths for host-native sandboxes
+(`sandbox-exec`, `landlock`, `bwrap`). Container runtimes use `--mount` instead.
+
+| Flag | Default | Description |
+| --- | --- | --- |
+| `--read-path` | | Additional host path to allow reading (repeatable, supports `~`) |
+| `--exec-path` | | Additional host path to allow executing (repeatable, supports `~`) |
+| `--write-path` | | Additional host path to allow writing (repeatable, supports `~`) |
+| `--profile` | | Named profile for common configurations (repeatable) |
+
+### Built-in Profiles
+
+Profiles expand to commonly-needed path configurations:
+
+| Profile | Read Paths | Exec Paths | Write Paths |
+| --- | --- | --- | --- |
+| `git` | `~/.gitconfig`, `~/.config/git`, `~/.ssh` | | |
+| `node` | `~/.npm`, `~/.npmrc`, `~/.nvm`, `~/.config/npm` | | `~/.npm/_cacache` |
+| `go` | `~/.go`, `~/go`, `~/.cache/go-build` | `~/go/bin` | `~/.cache/go-build` |
+| `python` | `~/.pyenv`, `~/.local/lib/python*`, `~/.config/pip` | `~/.pyenv/shims`, `~/.local/bin` | |
+| `rust` | `~/.cargo`, `~/.rustup` | `~/.cargo/bin`, `~/.rustup/toolchains` | |
+| `xdg` | `~/.config`, `~/.local/share`, `~/.cache` | | `~/.cache` |
+| `codex` | `~/.codex`, `~/.config/codex` | | |
+| `claude` | `~/.claude`, `~/.config/claude`, `~/.anthropic` | | |
+
 ## Runtime Comparison
 
 | Runtime | Platform | Network Isolation | Filesystem Isolation | Resource Limits |
@@ -169,15 +196,58 @@ $ deputy exec --runtime docker \
     -- npm install
 ```
 
+## Host Path Access (sandbox-exec, landlock, bwrap)
+
+Host-native sandboxes like `sandbox-exec` run directly on the host filesystem
+rather than in containers. They need explicit permission to access paths outside
+the workspace and default system paths.
+
+### Using Profiles
+
+Profiles are the recommended way to grant access for common tools:
+
+```console
+# Allow git operations (access to ~/.gitconfig, ~/.ssh)
+$ deputy exec --runtime sandbox-exec --profile git -- git status
+
+# Allow Go toolchain paths with network for module downloads
+$ deputy exec --runtime sandbox-exec --profile go --network host -- go build ./...
+
+# Combine multiple profiles
+$ deputy exec --runtime sandbox-exec --profile git --profile node -- npm install
+
+# Run Codex with its config directory
+$ deputy exec --runtime sandbox-exec --profile codex -- codex exec "describe this code"
+```
+
+### Using Explicit Paths
+
+For one-off access or custom tools, use explicit path flags:
+
+```console
+# Allow reading a specific config directory
+$ deputy exec --runtime sandbox-exec --read-path ~/.myapp -- ./myapp
+
+# Allow executing from a custom bin directory
+$ deputy exec --runtime sandbox-exec --exec-path /opt/mycompany/bin -- mytool
+
+# Allow writing to a cache directory
+$ deputy exec --runtime sandbox-exec --write-path ~/.cache/myapp -- ./myapp build
+
+# Combine profiles with explicit paths
+$ deputy exec --runtime sandbox-exec --profile git --read-path ~/.codex -- codex exec "..."
+```
+
 ## macOS `sandbox-exec` Limitations
 
 The `sandbox-exec` runtime is **deprecated by Apple** and provides best-effort
 isolation only.
 
 - No network allowlists (only `none` or full network).
-- No additional mounts, hidden paths, or read-only path rules.
+- No additional mounts (use `--read-path`, `--write-path` instead).
 - No resource limits (memory/CPU/PIDs).
-- Use `--exec-allow` to run binaries outside the default exec allowlist.
+- Use `--exec-allow` or `--exec-path` to run binaries outside the default exec allowlist.
+- Use `--profile` for common tool configurations (git, node, go, etc.).
 
 Prefer container runtimes or the vz plugin when possible.
 

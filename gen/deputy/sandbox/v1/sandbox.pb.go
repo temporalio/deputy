@@ -1233,6 +1233,25 @@ type SandboxConfig struct {
 	// Network connection audit mode.
 	// When enabled, logs blocked (and optionally allowed) network connections.
 	NetworkAudit NetworkAuditMode `protobuf:"varint,23,opt,name=network_audit,json=networkAudit,proto3,enum=deputy.sandbox.v1.NetworkAuditMode" json:"network_audit,omitempty"`
+	// Additional host paths to allow reading (beyond workspace and defaults).
+	// These are NOT mounted into containers but grant read access in host-native
+	// sandboxes (sandbox-exec, landlock, bwrap). Use mounts for container paths.
+	// Examples: ["~/.gitconfig", "~/.ssh", "~/.config/myapp"]
+	ReadPaths []string `protobuf:"bytes,26,rep,name=read_paths,json=readPaths,proto3" json:"read_paths,omitempty"`
+	// Additional host paths to allow executing (beyond system defaults).
+	// For host-native sandboxes only. Containers use exec_allowlist instead.
+	// Examples: ["/opt/mycompany/bin", "~/.local/bin"]
+	ExecPaths []string `protobuf:"bytes,27,rep,name=exec_paths,json=execPaths,proto3" json:"exec_paths,omitempty"`
+	// Additional host paths to allow writing (beyond workspace and temp).
+	// Use with caution - reduces isolation. For host-native sandboxes only.
+	// Examples: ["~/.cache/myapp"]
+	WritePaths []string `protobuf:"bytes,28,rep,name=write_paths,json=writePaths,proto3" json:"write_paths,omitempty"`
+	// Named sandbox profile for common configurations.
+	// Profiles are additive - they expand to read_paths/exec_paths/write_paths.
+	// Use multiple profiles to combine configurations.
+	// Built-in profiles: "git", "node", "go", "python", "rust", "xdg"
+	// Custom profiles can be defined in configuration.
+	Profiles []string `protobuf:"bytes,29,rep,name=profiles,proto3" json:"profiles,omitempty"`
 	// Allocate a pseudo-TTY for the sandbox.
 	// When true, enables interactive terminal mode with proper signal handling.
 	// Required for commands that need a terminal (e.g., interactive shells, editors).
@@ -1434,6 +1453,34 @@ func (x *SandboxConfig) GetNetworkAudit() NetworkAuditMode {
 		return x.NetworkAudit
 	}
 	return NetworkAuditMode_NETWORK_AUDIT_MODE_UNSPECIFIED
+}
+
+func (x *SandboxConfig) GetReadPaths() []string {
+	if x != nil {
+		return x.ReadPaths
+	}
+	return nil
+}
+
+func (x *SandboxConfig) GetExecPaths() []string {
+	if x != nil {
+		return x.ExecPaths
+	}
+	return nil
+}
+
+func (x *SandboxConfig) GetWritePaths() []string {
+	if x != nil {
+		return x.WritePaths
+	}
+	return nil
+}
+
+func (x *SandboxConfig) GetProfiles() []string {
+	if x != nil {
+		return x.Profiles
+	}
+	return nil
 }
 
 func (x *SandboxConfig) GetAllocateTty() bool {
@@ -3580,8 +3627,7 @@ const file_deputy_sandbox_v1_sandbox_proto_rawDesc = "" +
 	"\rworkspace_dir\x18\b \x01(\tB\a\xbaH\x04r\x02\x10\x01R\fworkspaceDir\x1a6\n" +
 	"\bEnvEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
-	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\xdc\n" +
-	"\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\xd7\v\n" +
 	"\rSandboxConfig\x124\n" +
 	"\aruntime\x18\x01 \x01(\x0e2\x1a.deputy.sandbox.v1.RuntimeR\aruntime\x12+\n" +
 	"\x04mode\x18\x02 \x01(\x0e2\x17.deputy.sandbox.v1.ModeR\x04mode\x12A\n" +
@@ -3607,7 +3653,14 @@ const file_deputy_sandbox_v1_sandbox_proto_rawDesc = "" +
 	"\x14review_before_commit\x18\x14 \x01(\bR\x12reviewBeforeCommit\x12i\n" +
 	"\x1aworkspace_isolation_config\x18\x15 \x01(\v2+.deputy.sandbox.v1.WorkspaceIsolationConfigR\x18workspaceIsolationConfig\x12T\n" +
 	"\x10two_phase_config\x18\x16 \x01(\v2*.deputy.sandbox.v1.TwoPhaseExecutionConfigR\x0etwoPhaseConfig\x12H\n" +
-	"\rnetwork_audit\x18\x17 \x01(\x0e2#.deputy.sandbox.v1.NetworkAuditModeR\fnetworkAudit\x12!\n" +
+	"\rnetwork_audit\x18\x17 \x01(\x0e2#.deputy.sandbox.v1.NetworkAuditModeR\fnetworkAudit\x12\x1d\n" +
+	"\n" +
+	"read_paths\x18\x1a \x03(\tR\treadPaths\x12\x1d\n" +
+	"\n" +
+	"exec_paths\x18\x1b \x03(\tR\texecPaths\x12\x1f\n" +
+	"\vwrite_paths\x18\x1c \x03(\tR\n" +
+	"writePaths\x12\x1a\n" +
+	"\bprofiles\x18\x1d \x03(\tR\bprofiles\x12!\n" +
 	"\fallocate_tty\x18\x18 \x01(\bR\vallocateTty\x12!\n" +
 	"\fattach_stdin\x18\x19 \x01(\bR\vattachStdin\x1a?\n" +
 	"\x11ExtraOptionsEntry\x12\x10\n" +

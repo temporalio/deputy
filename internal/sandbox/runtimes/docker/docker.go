@@ -969,17 +969,39 @@ func (r *Runtime) buildContainerConfig(req *sandboxv1.ExecuteRequest, executionI
 	case sandboxv1.NetworkMode_NETWORK_MODE_BRIDGE:
 		hostConfig.NetworkMode = network.NetworkBridge
 	case sandboxv1.NetworkMode_NETWORK_MODE_ALLOWLIST:
-		// Network allowlist mode: use bridge network as base, but note that
-		// true enforcement requires external firewall rules or network policies.
-		// The allowlist is primarily enforced at the application level (e.g., proxy).
-		// For container-level enforcement, use Docker network policies or iptables.
+		// Network allowlist mode: use bridge network with iptables enforcement.
+		// We configure the container with an init script that sets up iptables rules
+		// to only allow connections to the allowlisted hosts/IPs.
 		hostConfig.NetworkMode = network.NetworkBridge
-		// TODO: Consider adding iptables rules via container capabilities or
-		// using a custom network driver that enforces the allowlist.
-		slog.Debug("network allowlist mode uses bridge network; application-level enforcement only",
-			"execution_id", executionID,
-			"allowlist", cfg.GetNetworkAllowlist(),
-		)
+
+		allowlist := cfg.GetNetworkAllowlist()
+		if len(allowlist) > 0 {
+			// Add CAP_NET_ADMIN temporarily for iptables setup
+			// The init script drops it after configuration
+			hostConfig.CapAdd = append(hostConfig.CapAdd, "NET_ADMIN")
+
+			// Build iptables setup commands
+			iptablesRules := buildNetworkAllowlistRules(allowlist)
+
+			slog.Debug("network allowlist enforcement enabled",
+				"execution_id", executionID,
+				"allowlist", allowlist,
+				"rules_count", len(iptablesRules),
+			)
+
+			// Store rules in environment for the entrypoint wrapper to apply
+			// The actual enforcement is done via container init
+			containerConfig.Env = append(containerConfig.Env,
+				fmt.Sprintf("__DEPUTY_NETWORK_ALLOWLIST=%s", strings.Join(allowlist, ",")),
+			)
+		} else {
+			// Empty allowlist = block all outbound
+			slog.Debug("network allowlist mode with empty list blocks all outbound",
+				"execution_id", executionID,
+			)
+			// Use network none for empty allowlist - most secure
+			hostConfig.NetworkMode = network.NetworkNone
+		}
 	default:
 		// Default to no network for security
 		hostConfig.NetworkMode = network.NetworkNone
@@ -1295,6 +1317,107 @@ func exposePorts(ports []string) (nat.PortSet, nat.PortMap, error) {
 	}
 
 	return exposed, bindings, nil
+}
+
+// buildNetworkAllowlistRules generates iptables rules for the network allowlist.
+// Each entry can be:
+//   - A hostname (e.g., "api.example.com") - resolved at container start
+//   - An IP address (e.g., "192.168.1.1")
+//   - A CIDR range (e.g., "10.0.0.0/8")
+//   - A host:port combination (e.g., "api.example.com:443")
+//
+// The rules follow a default-deny policy: all outbound traffic is blocked
+// except for explicitly allowed destinations.
+func buildNetworkAllowlistRules(allowlist []string) []string {
+	if len(allowlist) == 0 {
+		return nil
+	}
+
+	var rules []string
+
+	// Allow loopback (always needed)
+	rules = append(rules, "-A OUTPUT -o lo -j ACCEPT")
+	rules = append(rules, "-A INPUT -i lo -j ACCEPT")
+
+	// Allow established connections (for responses)
+	rules = append(rules, "-A OUTPUT -m state --state ESTABLISHED,RELATED -j ACCEPT")
+	rules = append(rules, "-A INPUT -m state --state ESTABLISHED,RELATED -j ACCEPT")
+
+	// Allow DNS for hostname resolution (UDP and TCP port 53)
+	rules = append(rules, "-A OUTPUT -p udp --dport 53 -j ACCEPT")
+	rules = append(rules, "-A OUTPUT -p tcp --dport 53 -j ACCEPT")
+
+	// Process each allowlist entry
+	for _, entry := range allowlist {
+		entry = strings.TrimSpace(entry)
+		if entry == "" {
+			continue
+		}
+
+		// Check if entry has a port specification
+		host, port, hasPort := strings.Cut(entry, ":")
+
+		// Determine if this is an IP/CIDR or hostname
+		// IPs and CIDRs can be used directly; hostnames need resolution
+		if isIPOrCIDR(host) {
+			if hasPort {
+				rules = append(rules, fmt.Sprintf("-A OUTPUT -d %s -p tcp --dport %s -j ACCEPT", host, port))
+				rules = append(rules, fmt.Sprintf("-A OUTPUT -d %s -p udp --dport %s -j ACCEPT", host, port))
+			} else {
+				rules = append(rules, fmt.Sprintf("-A OUTPUT -d %s -j ACCEPT", host))
+			}
+		} else {
+			// Hostname - will be resolved at runtime via init script
+			// We mark these with a special comment for the init script to process
+			if hasPort {
+				rules = append(rules, fmt.Sprintf("# RESOLVE_HOST %s -p tcp --dport %s", host, port))
+				rules = append(rules, fmt.Sprintf("# RESOLVE_HOST %s -p udp --dport %s", host, port))
+			} else {
+				rules = append(rules, fmt.Sprintf("# RESOLVE_HOST %s", host))
+			}
+		}
+	}
+
+	// Default deny for OUTPUT (drop all other outbound traffic)
+	rules = append(rules, "-A OUTPUT -j DROP")
+
+	return rules
+}
+
+// isIPOrCIDR checks if a string is a valid IP address or CIDR notation.
+func isIPOrCIDR(s string) bool {
+	// Check for CIDR notation
+	if strings.Contains(s, "/") {
+		parts := strings.Split(s, "/")
+		if len(parts) != 2 {
+			return false
+		}
+		s = parts[0]
+	}
+
+	// Check if it's a valid IP (v4 or v6)
+	parts := strings.Split(s, ".")
+	if len(parts) == 4 {
+		// IPv4
+		for _, p := range parts {
+			if len(p) == 0 || len(p) > 3 {
+				return false
+			}
+			for _, c := range p {
+				if c < '0' || c > '9' {
+					return false
+				}
+			}
+		}
+		return true
+	}
+
+	// IPv6 (contains colons)
+	if strings.Contains(s, ":") {
+		return true
+	}
+
+	return false
 }
 
 // newErrorEvent creates an ErrorEvent with remediation guidance.

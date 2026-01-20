@@ -68,6 +68,12 @@ type execFlags struct {
 
 	// Workspace review flag
 	reviewChanges bool // Review workspace changes after execution
+
+	// Host path access flags (for host-native sandboxes like sandbox-exec)
+	readPaths  []string // Additional host paths to allow reading
+	execPaths  []string // Additional host paths to allow executing
+	writePaths []string // Additional host paths to allow writing
+	profiles   []string // Named profiles for common configurations
 }
 
 // AddExecCommand adds the exec command to the root command.
@@ -155,6 +161,12 @@ Common Patterns:
 	// Workspace review flag
 	cmd.Flags().BoolVar(&flags.reviewChanges, "review", false, "Review and confirm workspace changes after execution")
 
+	// Host path access flags (for host-native sandboxes like sandbox-exec, landlock, bwrap)
+	cmd.Flags().StringArrayVar(&flags.readPaths, "read-path", nil, "Additional host path to allow reading (repeatable, supports ~)")
+	cmd.Flags().StringArrayVar(&flags.execPaths, "exec-path", nil, "Additional host path to allow executing (repeatable, supports ~)")
+	cmd.Flags().StringArrayVar(&flags.writePaths, "write-path", nil, "Additional host path to allow writing (repeatable, supports ~)")
+	cmd.Flags().StringArrayVar(&flags.profiles, "profile", nil, "Named profile for common configurations (git|node|go|python|rust|xdg|codex|claude, repeatable)")
+
 	cmd.Example = strings.Join([]string{
 		"# Quick Start",
 		"deputy exec -- ls -la                               # List files in read-only sandbox",
@@ -193,6 +205,12 @@ Common Patterns:
 		"# CI/CD Patterns",
 		"deputy exec --workspace-isolation snapshot --review --dangerously-skip-prompt -- ./automerge.sh",
 		"deputy exec --mode read-only --mask-preset supply-chain -- npm audit --json",
+		"",
+		"# Host Path Access (sandbox-exec, landlock, bwrap)",
+		"deputy exec --runtime sandbox-exec --profile git -- git status              # Allow ~/.gitconfig, ~/.ssh",
+		"deputy exec --runtime sandbox-exec --profile go --network host -- go build # Allow Go toolchain paths",
+		"deputy exec --runtime sandbox-exec --read-path ~/.codex -- codex exec '...'  # Explicit path access",
+		"deputy exec --runtime sandbox-exec --profile git --profile node -- npm install  # Combine profiles",
 	}, "\n")
 	cmd.SilenceUsage = true
 	cmd.SilenceErrors = true
@@ -286,6 +304,13 @@ func runExec(ctx context.Context, deps Dependencies, flags *execFlags, command [
 			"isolation_config_mode", isolationConfig.Mode.String())
 	}
 
+	// Validate sandbox profiles before proceeding
+	if len(flags.profiles) > 0 {
+		if err := sandboxexec.ValidateProfiles(flags.profiles); err != nil {
+			return err
+		}
+	}
+
 	// Warn if running as root
 	user := strings.TrimSpace(flags.user)
 	if user == "root" || user == "0" {
@@ -309,6 +334,10 @@ func runExec(ctx context.Context, deps Dependencies, flags *execFlags, command [
 		AllocateTty:              flags.tty,
 		AttachStdin:              flags.interactive,
 		ReviewBeforeCommit:       flags.reviewChanges,
+		ReadPaths:                flags.readPaths,
+		ExecPaths:                flags.execPaths,
+		WritePaths:               flags.writePaths,
+		Profiles:                 flags.profiles,
 	}
 
 	req := &sandboxv1.ExecuteRequest{

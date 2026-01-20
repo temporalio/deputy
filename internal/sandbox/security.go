@@ -182,19 +182,78 @@ func ValidatePath(path string) error {
 	}
 
 	// Block access to sensitive system paths
+	// This list follows defense-in-depth principles - even if the sandbox
+	// provides isolation, we block these at the API level as well.
 	sensitiveRoots := []string{
+		// Authentication and authorization
 		"/etc/passwd",
 		"/etc/shadow",
 		"/etc/sudoers",
-		"/root",
-		"/proc/1",       // Host init process
-		"/sys/firmware", // UEFI/BIOS
-		"/dev/mem",      // Physical memory
-		"/dev/kmem",     // Kernel memory
+		"/etc/sudoers.d",
+		"/etc/pam.d",
+		"/etc/security",
+		"/etc/gshadow",
+		"/etc/master.passwd", // BSD
+
+		// User directories
+		"/root", // Root user home
+
+		// SSH and crypto keys
+		"/etc/ssh",
+
+		// System configuration that could enable privilege escalation
+		"/etc/crontab",
+		"/etc/cron.d",
+		"/etc/cron.daily",
+		"/etc/cron.hourly",
+		"/etc/cron.weekly",
+		"/etc/cron.monthly",
+		"/var/spool/cron",
+		"/etc/init.d",
+		"/etc/systemd",
+		"/etc/rc.d",
+		"/etc/rc.local",
+
+		// Kernel and hardware access
+		"/proc/1",          // Host init process
+		"/proc/kcore",      // Kernel memory
+		"/proc/kmem",       // Kernel memory
+		"/proc/kallsyms",   // Kernel symbols
+		"/proc/modules",    // Kernel modules
+		"/sys/firmware",    // UEFI/BIOS
+		"/sys/kernel",      // Kernel configuration
+		"/sys/module",      // Kernel modules
+		"/dev/mem",         // Physical memory
+		"/dev/kmem",        // Kernel memory
+		"/dev/port",        // I/O ports
+		"/boot",            // Boot configuration
+
+		// Container/virtualization escape vectors
+		"/var/run/docker.sock",
+		"/run/docker.sock",
+		"/var/run/containerd",
+		"/run/containerd",
+		"/var/lib/docker",
+		"/var/lib/containerd",
+		"/var/lib/kubelet",
+
+		// Package manager configs (supply chain risk)
+		"/etc/apt/sources.list",
+		"/etc/apt/sources.list.d",
+		"/etc/yum.repos.d",
+		"/etc/dnf/dnf.conf",
+
+		// macOS specific
+		"/Library/LaunchDaemons",
+		"/Library/LaunchAgents",
+		"/System/Library/LaunchDaemons",
+		"/private/var/db/dslocal", // Directory Services
 	}
 
 	for _, sensitive := range sensitiveRoots {
-		if strings.HasPrefix(absPath, sensitive) {
+		// Check for exact match or directory prefix match
+		// (e.g., /root matches /root and /root/something, but not /rootfs)
+		if absPath == sensitive || strings.HasPrefix(absPath, sensitive+string(filepath.Separator)) {
 			return fmt.Errorf("access to sensitive path denied: %s", absPath)
 		}
 	}
@@ -202,8 +261,60 @@ func ValidatePath(path string) error {
 	return nil
 }
 
+// DangerousBinaries contains binaries that should not be executed in a sandbox.
+// These can be used for privilege escalation, container escape, or other attacks.
+var DangerousBinaries = map[string]bool{
+	// Namespace and mount manipulation
+	"mount":      true,
+	"umount":     true,
+	"nsenter":    true,
+	"unshare":    true,
+	"chroot":     true,
+	"pivot_root": true,
+
+	// Process debugging (can attach to host processes)
+	"strace":   true,
+	"ltrace":   true,
+	"ptrace":   true,
+	"gdb":      true,
+	"lldb":     true,
+	"debugfs":  true,
+	"perf":     true,
+	"bpftrace": true,
+
+	// Kernel module manipulation
+	"insmod":  true,
+	"rmmod":   true,
+	"modprobe": true,
+	"depmod":  true,
+
+	// Direct hardware/memory access
+	"kexec":   true,
+	"dmsetup": true,
+	"losetup": true,
+
+	// Container/VM escape tools
+	"docker":     true,
+	"podman":     true,
+	"containerd": true,
+	"ctr":        true,
+	"crictl":     true,
+	"kubectl":    true, // Can potentially access host cluster
+	"runc":       true,
+
+	// System administration
+	"init":     true,
+	"systemctl": true,
+	"service":  true,
+	"reboot":   true,
+	"shutdown": true,
+	"halt":     true,
+	"poweroff": true,
+}
+
 // ValidateCommand checks if a command is safe to execute.
 // Returns an error if the command contains suspicious patterns.
+// This validates both absolute paths and bare command names.
 func ValidateCommand(cmd []string) error {
 	if len(cmd) == 0 {
 		return fmt.Errorf("empty command")
@@ -211,21 +322,51 @@ func ValidateCommand(cmd []string) error {
 
 	executable := cmd[0]
 
-	// Block absolute paths to sensitive binaries when executed directly
-	dangerousBinaries := []string{
-		"/bin/mount",
-		"/bin/umount",
-		"/sbin/mount",
-		"/sbin/umount",
-		"/usr/bin/nsenter",
-		"/usr/bin/unshare",
-		"/usr/bin/chroot",
-		"/sbin/pivot_root",
+	// Extract the base name for PATH-resolved commands
+	baseName := filepath.Base(executable)
+
+	// Check if the base name is in the dangerous list
+	if DangerousBinaries[baseName] {
+		return fmt.Errorf("execution of %q is not allowed in sandbox: potentially dangerous binary", executable)
 	}
 
-	for _, dangerous := range dangerousBinaries {
-		if executable == dangerous {
-			return fmt.Errorf("execution of %s is not allowed in sandbox", executable)
+	// Additional check for absolute paths to dangerous locations
+	if filepath.IsAbs(executable) {
+		dangerousPaths := []string{
+			"/bin/mount",
+			"/bin/umount",
+			"/sbin/mount",
+			"/sbin/umount",
+			"/usr/bin/nsenter",
+			"/usr/bin/unshare",
+			"/usr/bin/chroot",
+			"/sbin/pivot_root",
+			"/usr/sbin/chroot",
+			"/usr/bin/docker",
+			"/usr/local/bin/docker",
+		}
+
+		for _, dangerous := range dangerousPaths {
+			if executable == dangerous {
+				return fmt.Errorf("execution of %s is not allowed in sandbox", executable)
+			}
+		}
+	}
+
+	// Check for shell command injection patterns in arguments
+	// These could be used to bypass the command check
+	shellMetachars := []string{"$(", "`", "&&", "||", ";", "|", ">", "<", "\n", "\r"}
+	for i, arg := range cmd {
+		if i == 0 {
+			continue // Skip the executable itself
+		}
+		for _, meta := range shellMetachars {
+			if strings.Contains(arg, meta) {
+				// This is a warning-level check - shells handle this, but it's suspicious
+				// in a direct exec context where we're not going through a shell
+				// For now, we allow it but could be made stricter
+				break
+			}
 		}
 	}
 

@@ -450,6 +450,29 @@ message SandboxConfig {
   // When enabled, logs blocked (and optionally allowed) network connections.
   NetworkAuditMode network_audit = 23;
 
+  // Additional host paths to allow reading (beyond workspace and defaults).
+  // These are NOT mounted into containers but grant read access in host-native
+  // sandboxes (sandbox-exec, landlock, bwrap). Use mounts for container paths.
+  // Examples: ["~/.gitconfig", "~/.ssh", "~/.config/myapp"]
+  repeated string read_paths = 26;
+
+  // Additional host paths to allow executing (beyond system defaults).
+  // For host-native sandboxes only. Containers use exec_allowlist instead.
+  // Examples: ["/opt/mycompany/bin", "~/.local/bin"]
+  repeated string exec_paths = 27;
+
+  // Additional host paths to allow writing (beyond workspace and temp).
+  // Use with caution - reduces isolation. For host-native sandboxes only.
+  // Examples: ["~/.cache/myapp"]
+  repeated string write_paths = 28;
+
+  // Named sandbox profile for common configurations.
+  // Profiles are additive - they expand to read_paths/exec_paths/write_paths.
+  // Use multiple profiles to combine configurations.
+  // Built-in profiles: "git", "node", "go", "python", "rust", "xdg"
+  // Custom profiles can be defined in configuration.
+  repeated string profiles = 29;
+
   // Allocate a pseudo-TTY for the sandbox.
   // When true, enables interactive terminal mode with proper signal handling.
   // Required for commands that need a terminal (e.g., interactive shells, editors).

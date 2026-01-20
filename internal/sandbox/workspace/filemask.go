@@ -3,6 +3,8 @@ package workspace
 
 import (
 	"fmt"
+	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -76,32 +78,52 @@ func (fm *FileMasker) ShouldMask(path string) (sandboxv1.FileMaskMode, string) {
 }
 
 // CreateMaskedWorkspace creates a copy of the workspace with masked files.
+// SECURITY: Uses os.Root (Go 1.24+) for traversal-resistant file operations.
 // Returns the path to the masked workspace.
 func (fm *FileMasker) CreateMaskedWorkspace(srcDir, dstDir string) error {
-	return filepath.Walk(srcDir, func(path string, info os.FileInfo, err error) error {
+	// Open source as a root for traversal-resistant access
+	srcRoot, err := os.OpenRoot(srcDir)
+	if err != nil {
+		return fmt.Errorf("open source root: %w", err)
+	}
+	defer srcRoot.Close()
+
+	srcFS := srcRoot.FS()
+
+	return fs.WalkDir(srcFS, ".", func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
 
-		relPath, err := filepath.Rel(srcDir, path)
+		// Skip root
+		if path == "." {
+			return nil
+		}
+
+		dstPath := filepath.Join(dstDir, path)
+
+		info, err := d.Info()
 		if err != nil {
 			return err
 		}
 
-		dstPath := filepath.Join(dstDir, relPath)
+		// SECURITY: Skip symlinks entirely
+		if info.Mode()&os.ModeSymlink != 0 {
+			return nil
+		}
 
 		// Handle directories
-		if info.IsDir() {
+		if d.IsDir() {
 			// Check if entire directory should be hidden
-			mode, _ := fm.ShouldMask(relPath)
+			mode, _ := fm.ShouldMask(path)
 			if mode == sandboxv1.FileMaskMode_FILE_MASK_MODE_HIDDEN {
-				return filepath.SkipDir
+				return fs.SkipDir
 			}
 			return os.MkdirAll(dstPath, info.Mode())
 		}
 
 		// Handle files based on mask mode
-		mode, reason := fm.ShouldMask(relPath)
+		mode, reason := fm.ShouldMask(path)
 		switch mode {
 		case sandboxv1.FileMaskMode_FILE_MASK_MODE_HIDDEN:
 			// Don't create the file at all
@@ -113,21 +135,43 @@ func (fm *FileMasker) CreateMaskedWorkspace(srcDir, dstDir string) error {
 
 		case sandboxv1.FileMaskMode_FILE_MASK_MODE_PLACEHOLDER:
 			// Create file with placeholder content
-			content := fmt.Sprintf("[MASKED] %s\n\nReason: %s\n", relPath, reason)
+			content := fmt.Sprintf("[MASKED] %s\n\nReason: %s\n", path, reason)
 			return os.WriteFile(dstPath, []byte(content), info.Mode())
 
 		case sandboxv1.FileMaskMode_FILE_MASK_MODE_READ_ONLY:
-			// Copy file but mark read-only
-			if err := copyFile(path, dstPath, info.Mode()&0444); err != nil {
-				return err
-			}
-			return nil
+			// Copy file but mark read-only using os.Root
+			return copyFileWithRootToPath(srcRoot, path, dstPath, info.Mode()&0444)
 
 		default:
-			// No masking - copy file normally
-			return copyFile(path, dstPath, info.Mode())
+			// No masking - copy file normally using os.Root
+			return copyFileWithRootToPath(srcRoot, path, dstPath, info.Mode())
 		}
 	})
+}
+
+// copyFileWithRootToPath copies a file from an os.Root to a destination path.
+func copyFileWithRootToPath(srcRoot *os.Root, relPath, dstPath string, mode os.FileMode) error {
+	// Open source file through root (traversal-resistant)
+	srcFile, err := srcRoot.Open(relPath)
+	if err != nil {
+		return err
+	}
+	defer srcFile.Close()
+
+	// Ensure destination directory exists
+	if err := os.MkdirAll(filepath.Dir(dstPath), 0755); err != nil {
+		return err
+	}
+
+	// Create destination file
+	dstFile, err := os.OpenFile(dstPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, mode)
+	if err != nil {
+		return err
+	}
+	defer dstFile.Close()
+
+	_, err = io.Copy(dstFile, srcFile)
+	return err
 }
 
 // GenerateDockerIgnore generates a .dockerignore-style list of patterns to exclude.
@@ -143,31 +187,44 @@ func (fm *FileMasker) GenerateDockerIgnore() []string {
 }
 
 // GenerateHiddenPaths returns paths that should be hidden via tmpfs mounts.
+// SECURITY: Uses os.Root (Go 1.24+) for traversal-resistant file operations.
 // Useful for Docker's --tmpfs option for hiding paths.
 func (fm *FileMasker) GenerateHiddenPaths(workspaceDir string) []string {
 	var paths []string
 	seen := make(map[string]bool)
 
-	filepath.Walk(workspaceDir, func(path string, info os.FileInfo, err error) error {
+	// Open workspace as a root for traversal-resistant access
+	root, err := os.OpenRoot(workspaceDir)
+	if err != nil {
+		return nil // Return empty on error
+	}
+	defer root.Close()
+
+	rootFS := root.FS()
+
+	fs.WalkDir(rootFS, ".", func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return nil
 		}
 
-		relPath, _ := filepath.Rel(workspaceDir, path)
-		mode, _ := fm.ShouldMask(relPath)
+		if path == "." {
+			return nil
+		}
+
+		mode, _ := fm.ShouldMask(path)
 
 		if mode == sandboxv1.FileMaskMode_FILE_MASK_MODE_HIDDEN {
 			// For directories, we can hide the entire thing
-			if info.IsDir() {
-				absPath := filepath.Join("/workspace", relPath)
+			if d.IsDir() {
+				absPath := filepath.Join("/workspace", path)
 				if !seen[absPath] {
 					paths = append(paths, absPath)
 					seen[absPath] = true
 				}
-				return filepath.SkipDir
+				return fs.SkipDir
 			}
 			// For files, add the file path
-			absPath := filepath.Join("/workspace", relPath)
+			absPath := filepath.Join("/workspace", path)
 			if !seen[absPath] {
 				paths = append(paths, absPath)
 				seen[absPath] = true

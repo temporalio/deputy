@@ -165,8 +165,10 @@ func TestValidateCommand(t *testing.T) {
 		{"normal ls", []string{"ls", "-la"}, false},
 		{"normal echo", []string{"echo", "hello"}, false},
 		{"git status", []string{"git", "status"}, false},
+		{"npm install", []string{"npm", "install"}, false},
+		{"go build", []string{"go", "build", "./..."}, false},
 
-		// Dangerous binaries should be blocked
+		// Dangerous binaries should be blocked (absolute paths)
 		{"bin mount", []string{"/bin/mount", "/dev/sda1", "/mnt"}, true},
 		{"sbin mount", []string{"/sbin/mount", "/dev/sda1", "/mnt"}, true},
 		{"bin umount", []string{"/bin/umount", "/mnt"}, true},
@@ -175,6 +177,18 @@ func TestValidateCommand(t *testing.T) {
 		{"unshare", []string{"/usr/bin/unshare", "--mount"}, true},
 		{"chroot", []string{"/usr/bin/chroot", "/newroot"}, true},
 		{"pivot_root", []string{"/sbin/pivot_root", ".", "oldroot"}, true},
+
+		// Dangerous binaries should also be blocked by name (PATH-resolved)
+		{"mount bare", []string{"mount", "/dev/sda1", "/mnt"}, true},
+		{"umount bare", []string{"umount", "/mnt"}, true},
+		{"nsenter bare", []string{"nsenter", "--target", "1"}, true},
+		{"unshare bare", []string{"unshare", "--mount"}, true},
+		{"chroot bare", []string{"chroot", "/newroot"}, true},
+		{"docker bare", []string{"docker", "run", "alpine"}, true},
+		{"kubectl bare", []string{"kubectl", "exec", "-it", "pod"}, true},
+		{"strace bare", []string{"strace", "-p", "1"}, true},
+		{"gdb bare", []string{"gdb", "-p", "1"}, true},
+		{"insmod bare", []string{"insmod", "module.ko"}, true},
 	}
 
 	for _, tc := range tests {

@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -169,14 +170,29 @@ func (r *ReviewSession) SelectedChanges() []FileChange {
 }
 
 // GetDiff returns the diff for a specific file change.
+// SECURITY: Uses os.Root (Go 1.24+) for traversal-resistant file operations.
 func (r *ReviewSession) GetDiff(change FileChange) (string, error) {
-	originalPath := filepath.Join(r.isolator.OriginalPath(), change.Path)
-	isolatedPath := filepath.Join(r.isolator.IsolatedPath(), change.Path)
+	// Open roots for traversal-resistant access
+	origRoot, err := os.OpenRoot(r.isolator.OriginalPath())
+	if err != nil {
+		return "", fmt.Errorf("open original root: %w", err)
+	}
+	defer origRoot.Close()
+
+	isoRoot, err := os.OpenRoot(r.isolator.IsolatedPath())
+	if err != nil {
+		return "", fmt.Errorf("open isolated root: %w", err)
+	}
+	defer isoRoot.Close()
+
+	// Use fs.ReadFileFS interface for safe file reading
+	origFS := origRoot.FS().(fs.ReadFileFS)
+	isoFS := isoRoot.FS().(fs.ReadFileFS)
 
 	switch change.Type {
 	case "added":
 		// Show full content of new file
-		content, err := os.ReadFile(isolatedPath)
+		content, err := isoFS.ReadFile(change.Path)
 		if err != nil {
 			return "", err
 		}
@@ -184,7 +200,7 @@ func (r *ReviewSession) GetDiff(change FileChange) (string, error) {
 
 	case "deleted":
 		// Show full content of deleted file
-		content, err := os.ReadFile(originalPath)
+		content, err := origFS.ReadFile(change.Path)
 		if err != nil {
 			return "", err
 		}
@@ -192,9 +208,12 @@ func (r *ReviewSession) GetDiff(change FileChange) (string, error) {
 
 	case "modified":
 		if r.diffGenerator != nil {
+			// External diff generator still uses paths - this is a limitation
+			originalPath := filepath.Join(r.isolator.OriginalPath(), change.Path)
+			isolatedPath := filepath.Join(r.isolator.IsolatedPath(), change.Path)
 			return r.diffGenerator.GenerateDiff(originalPath, isolatedPath)
 		}
-		return generateSimpleDiff(originalPath, isolatedPath)
+		return generateSimpleDiffWithRoots(origFS, isoFS, change.Path)
 	}
 
 	return "", fmt.Errorf("unknown change type: %s", change.Type)
@@ -225,6 +244,7 @@ func formatDeletedFileDiff(path, content string) string {
 }
 
 // generateSimpleDiff creates a simple diff between two files.
+// Deprecated: Use generateSimpleDiffWithRoots for traversal-resistant access.
 func generateSimpleDiff(originalPath, modifiedPath string) (string, error) {
 	original, err := os.ReadFile(originalPath)
 	if err != nil && !os.IsNotExist(err) {
@@ -236,11 +256,32 @@ func generateSimpleDiff(originalPath, modifiedPath string) (string, error) {
 		return "", err
 	}
 
+	return formatDiffContent(filepath.Base(originalPath), filepath.Base(modifiedPath), original, modified), nil
+}
+
+// generateSimpleDiffWithRoots creates a simple diff using os.Root for traversal-resistant access.
+// SECURITY: Uses fs.ReadFileFS interface backed by os.Root.
+func generateSimpleDiffWithRoots(origFS, modFS fs.ReadFileFS, path string) (string, error) {
+	original, err := origFS.ReadFile(path)
+	if err != nil && !os.IsNotExist(err) {
+		return "", err
+	}
+
+	modified, err := modFS.ReadFile(path)
+	if err != nil && !os.IsNotExist(err) {
+		return "", err
+	}
+
+	return formatDiffContent(path, path, original, modified), nil
+}
+
+// formatDiffContent formats diff output from file contents.
+func formatDiffContent(origName, modName string, original, modified []byte) string {
 	// For now, just show before/after content
 	// A proper implementation would use a diff algorithm
 	var sb strings.Builder
-	sb.WriteString(fmt.Sprintf("--- a/%s\n", filepath.Base(originalPath)))
-	sb.WriteString(fmt.Sprintf("+++ b/%s\n", filepath.Base(modifiedPath)))
+	sb.WriteString(fmt.Sprintf("--- a/%s\n", origName))
+	sb.WriteString(fmt.Sprintf("+++ b/%s\n", modName))
 	sb.WriteString("@@ modified @@\n")
 
 	origLines := strings.Split(string(original), "\n")
@@ -274,7 +315,7 @@ func generateSimpleDiff(originalPath, modifiedPath string) (string, error) {
 		}
 	}
 
-	return sb.String(), nil
+	return sb.String()
 }
 
 // ApplySelected applies only selected changes to the original workspace.

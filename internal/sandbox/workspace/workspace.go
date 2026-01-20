@@ -17,6 +17,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -590,8 +591,23 @@ func (t *tmpfsIsolator) OriginalPath() string {
 // Helper functions
 
 // copyDir recursively copies a directory.
+// SECURITY: Uses os.Root (Go 1.24+) for traversal-resistant file operations.
+// This provides OS-level guarantees against symlink escape attacks.
+// Uses fs.WalkDir with os.Root.FS() for efficient, secure directory traversal.
+// See: https://go.dev/blog/osroot
 func copyDir(ctx context.Context, src, dst string) error {
-	return filepath.Walk(src, func(path string, info os.FileInfo, err error) error {
+	// Open source as a root for traversal-resistant access
+	srcRoot, err := os.OpenRoot(src)
+	if err != nil {
+		return fmt.Errorf("open source root: %w", err)
+	}
+	defer srcRoot.Close()
+
+	// Use fs.WalkDir with os.Root.FS() for efficient, secure traversal
+	// This is more efficient than filepath.Walk as it doesn't Lstat every file
+	srcFS := srcRoot.FS()
+
+	return fs.WalkDir(srcFS, ".", func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
@@ -603,25 +619,60 @@ func copyDir(ctx context.Context, src, dst string) error {
 		default:
 		}
 
-		relPath, err := filepath.Rel(src, path)
+		// Skip the root directory itself
+		if path == "." {
+			return nil
+		}
+
+		dstPath := filepath.Join(dst, path)
+
+		// Get file info for mode
+		info, err := d.Info()
 		if err != nil {
 			return err
 		}
 
-		dstPath := filepath.Join(dst, relPath)
-
-		if info.IsDir() {
-			return os.MkdirAll(dstPath, info.Mode())
-		}
-
-		// Skip symlinks for security
+		// SECURITY: Skip symlinks entirely
+		// os.Root prevents following symlinks outside the root during operations,
+		// but copying symlinks is still risky. Safer to skip them.
 		if info.Mode()&os.ModeSymlink != 0 {
 			return nil
 		}
 
-		return copyFile(path, dstPath, info.Mode())
+		if d.IsDir() {
+			return os.MkdirAll(dstPath, info.Mode())
+		}
+
+		// Use os.Root to safely open the source file
+		return copyFileWithRoot(srcRoot, path, dstPath, info.Mode())
 	})
 }
+
+// copyFileWithRoot copies a file using os.Root for traversal-resistant source access.
+func copyFileWithRoot(srcRoot *os.Root, relPath, dstPath string, mode os.FileMode) error {
+	// Open source file through root (traversal-resistant)
+	srcFile, err := srcRoot.Open(relPath)
+	if err != nil {
+		return err
+	}
+	defer srcFile.Close()
+
+	// Ensure destination directory exists
+	if err := os.MkdirAll(filepath.Dir(dstPath), 0755); err != nil {
+		return err
+	}
+
+	// Create destination file
+	dstFile, err := os.OpenFile(dstPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, mode)
+	if err != nil {
+		return err
+	}
+	defer dstFile.Close()
+
+	_, err = io.Copy(dstFile, srcFile)
+	return err
+}
+
 
 // copyFile copies a single file.
 func copyFile(src, dst string, mode os.FileMode) error {
@@ -642,54 +693,56 @@ func copyFile(src, dst string, mode os.FileMode) error {
 }
 
 // diffDirectories compares two directories and returns changes.
-// filesEqual returns true if two files have the same content.
-func filesEqual(path1, path2 string) bool {
-	content1, err := os.ReadFile(path1)
-	if err != nil {
-		return false
-	}
-	content2, err := os.ReadFile(path2)
-	if err != nil {
-		return false
-	}
-	return string(content1) == string(content2)
-}
-
+// SECURITY: Uses os.Root (Go 1.24+) for traversal-resistant file operations.
 func diffDirectories(original, modified string) ([]FileChange, error) {
+	// Open both directories as roots for traversal-resistant access
+	origRoot, err := os.OpenRoot(original)
+	if err != nil {
+		return nil, fmt.Errorf("open original root: %w", err)
+	}
+	defer origRoot.Close()
+
+	modRoot, err := os.OpenRoot(modified)
+	if err != nil {
+		return nil, fmt.Errorf("open modified root: %w", err)
+	}
+	defer modRoot.Close()
+
 	var changes []FileChange
 	seen := make(map[string]bool)
 
 	// Walk modified directory to find added/modified files
-	err := filepath.Walk(modified, func(path string, info os.FileInfo, err error) error {
+	modFS := modRoot.FS()
+	err = fs.WalkDir(modFS, ".", func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
-		if path == modified {
+		if path == "." {
 			return nil
-		}
-
-		relPath, err := filepath.Rel(modified, path)
-		if err != nil {
-			return err
 		}
 
 		// Skip .git directory - these are git metadata, not user code changes.
 		// Syncing .git changes could corrupt the git state and is not meaningful for review.
-		if relPath == ".git" || strings.HasPrefix(relPath, ".git"+string(filepath.Separator)) {
-			if info.IsDir() {
-				return filepath.SkipDir
+		if path == ".git" || strings.HasPrefix(path, ".git/") {
+			if d.IsDir() {
+				return fs.SkipDir
 			}
 			return nil
 		}
 
-		seen[relPath] = true
+		seen[path] = true
 
-		origPath := filepath.Join(original, relPath)
-		origInfo, err := os.Stat(origPath)
+		info, err := d.Info()
+		if err != nil {
+			return err
+		}
+
+		// Check if file exists in original using os.Root
+		origInfo, err := origRoot.Stat(path)
 
 		if os.IsNotExist(err) {
 			changes = append(changes, FileChange{
-				Path:    relPath,
+				Path:    path,
 				Type:    "added",
 				Size:    info.Size(),
 				ModTime: info.ModTime(),
@@ -697,9 +750,9 @@ func diffDirectories(original, modified string) ([]FileChange, error) {
 		} else if err == nil && !info.IsDir() {
 			// Check if modified by comparing content
 			// Size difference is a quick check, then compare content
-			if info.Size() != origInfo.Size() || !filesEqual(origPath, path) {
+			if info.Size() != origInfo.Size() || !filesEqualWithRoots(origRoot, modRoot, path) {
 				changes = append(changes, FileChange{
-					Path:    relPath,
+					Path:    path,
 					Type:    "modified",
 					Size:    info.Size(),
 					ModTime: info.ModTime(),
@@ -713,30 +766,26 @@ func diffDirectories(original, modified string) ([]FileChange, error) {
 	}
 
 	// Walk original directory to find deleted files
-	err = filepath.Walk(original, func(path string, info os.FileInfo, err error) error {
+	origFS := origRoot.FS()
+	err = fs.WalkDir(origFS, ".", func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
-		if path == original {
+		if path == "." {
 			return nil
 		}
 
-		relPath, err := filepath.Rel(original, path)
-		if err != nil {
-			return err
-		}
-
 		// Skip .git directory
-		if relPath == ".git" || strings.HasPrefix(relPath, ".git"+string(filepath.Separator)) {
-			if info.IsDir() {
-				return filepath.SkipDir
+		if path == ".git" || strings.HasPrefix(path, ".git/") {
+			if d.IsDir() {
+				return fs.SkipDir
 			}
 			return nil
 		}
 
-		if !seen[relPath] {
+		if !seen[path] {
 			changes = append(changes, FileChange{
-				Path: relPath,
+				Path: path,
 				Type: "deleted",
 			})
 		}
@@ -746,12 +795,28 @@ func diffDirectories(original, modified string) ([]FileChange, error) {
 	return changes, err
 }
 
+// filesEqualWithRoots compares two files using os.Root for traversal-resistant access.
+func filesEqualWithRoots(root1, root2 *os.Root, path string) bool {
+	// Use os.Root.FS() which implements fs.ReadFileFS
+	fsys1 := root1.FS().(fs.ReadFileFS)
+	fsys2 := root2.FS().(fs.ReadFileFS)
+
+	content1, err := fsys1.ReadFile(path)
+	if err != nil {
+		return false
+	}
+	content2, err := fsys2.ReadFile(path)
+	if err != nil {
+		return false
+	}
+	return string(content1) == string(content2)
+}
+
 // parseGitDiff parses git diff --name-status output.
 func parseGitDiff(output string) ([]FileChange, error) {
 	var changes []FileChange
-	lines := strings.Split(strings.TrimSpace(output), "\n")
 
-	for _, line := range lines {
+	for line := range strings.SplitSeq(strings.TrimSpace(output), "\n") {
 		if line == "" {
 			continue
 		}
@@ -794,8 +859,25 @@ func parseGitDiff(output string) ([]FileChange, error) {
 	return changes, nil
 }
 
-// syncChanges copies changes from source to destination.
+// syncChanges copies changes from src to dst, respecting patterns.
+// SECURITY: Uses os.Root (Go 1.24+) for traversal-resistant file operations.
+// This provides OS-level guarantees against symlink escape attacks.
+// See: https://go.dev/blog/osroot
 func syncChanges(src, dst string, changes []FileChange, patterns, excludePatterns []string) error {
+	// Open roots for traversal-resistant file access
+	// os.Root ensures symlinks cannot escape the directory boundary
+	srcRoot, err := os.OpenRoot(src)
+	if err != nil {
+		return fmt.Errorf("open source root: %w", err)
+	}
+	defer srcRoot.Close()
+
+	dstRoot, err := os.OpenRoot(dst)
+	if err != nil {
+		return fmt.Errorf("open destination root: %w", err)
+	}
+	defer dstRoot.Close()
+
 	for _, change := range changes {
 		// Check patterns
 		if len(patterns) > 0 && !matchesAnyPattern(change.Path, patterns) {
@@ -805,30 +887,49 @@ func syncChanges(src, dst string, changes []FileChange, patterns, excludePattern
 			continue
 		}
 
-		srcPath := filepath.Join(src, change.Path)
-		dstPath := filepath.Join(dst, change.Path)
+		// SECURITY: Validate path doesn't contain traversal sequences
+		// os.Root handles symlink traversal, but we still reject explicit ".."
+		if strings.Contains(change.Path, "..") {
+			continue // Skip paths with traversal
+		}
 
 		switch change.Type {
 		case "deleted":
-			if err := os.Remove(dstPath); err != nil && !os.IsNotExist(err) {
+			// Use os.Root for safe removal - prevents symlink escape
+			if err := dstRoot.Remove(change.Path); err != nil && !os.IsNotExist(err) {
 				return fmt.Errorf("delete %s: %w", change.Path, err)
 			}
 		case "added", "modified":
-			srcInfo, err := os.Stat(srcPath)
+			// Use os.Root.Lstat for traversal-resistant stat
+			srcInfo, err := srcRoot.Lstat(change.Path)
 			if err != nil {
-				return fmt.Errorf("stat %s: %w", change.Path, err)
+				// File may have been deleted since diff - skip
+				continue
+			}
+
+			// SECURITY: Skip symlinks entirely when syncing
+			// os.Root prevents following symlinks outside the root during open,
+			// but syncing symlinks is still risky. Safer to skip them.
+			if srcInfo.Mode()&os.ModeSymlink != 0 {
+				continue
 			}
 
 			if srcInfo.IsDir() {
-				if err := os.MkdirAll(dstPath, srcInfo.Mode()); err != nil {
+				// Use Perm() to get just the permission bits, not the full mode
+				if err := dstRoot.Mkdir(change.Path, srcInfo.Mode().Perm()); err != nil && !os.IsExist(err) {
 					return fmt.Errorf("mkdir %s: %w", change.Path, err)
 				}
 			} else {
 				// Ensure parent directory exists
-				if err := os.MkdirAll(filepath.Dir(dstPath), 0755); err != nil {
-					return fmt.Errorf("mkdir parent of %s: %w", change.Path, err)
+				parentDir := filepath.Dir(change.Path)
+				if parentDir != "." && parentDir != "" {
+					if err := mkdirAllWithRoot(dstRoot, parentDir, 0755); err != nil {
+						return fmt.Errorf("mkdir parent of %s: %w", change.Path, err)
+					}
 				}
-				if err := copyFile(srcPath, dstPath, srcInfo.Mode()); err != nil {
+
+				// Copy file using os.Root for both read and write
+				if err := copyFileWithRoots(srcRoot, dstRoot, change.Path, srcInfo.Mode()); err != nil {
 					return fmt.Errorf("copy %s: %w", change.Path, err)
 				}
 			}
@@ -836,6 +937,56 @@ func syncChanges(src, dst string, changes []FileChange, patterns, excludePattern
 	}
 
 	return nil
+}
+
+// mkdirAllWithRoot creates a directory and all parent directories using os.Root.
+// This is a traversal-resistant version of os.MkdirAll.
+func mkdirAllWithRoot(root *os.Root, path string, perm os.FileMode) error {
+	// Split path into components and create each directory
+	parts := strings.Split(filepath.Clean(path), string(filepath.Separator))
+	current := ""
+
+	for _, part := range parts {
+		if part == "" || part == "." {
+			continue
+		}
+		if current == "" {
+			current = part
+		} else {
+			current = filepath.Join(current, part)
+		}
+
+		if err := root.Mkdir(current, perm); err != nil && !os.IsExist(err) {
+			return err
+		}
+	}
+	return nil
+}
+
+// copyFileWithRoots copies a file using os.Root for traversal-resistant access.
+// This ensures neither read nor write can escape the respective directory roots.
+func copyFileWithRoots(srcRoot, dstRoot *os.Root, path string, mode os.FileMode) error {
+	// Open source file through root (traversal-resistant)
+	srcFile, err := srcRoot.Open(path)
+	if err != nil {
+		return err
+	}
+	defer srcFile.Close()
+
+	// Create destination file through root (traversal-resistant)
+	dstFile, err := dstRoot.Create(path)
+	if err != nil {
+		return err
+	}
+	defer dstFile.Close()
+
+	// Copy contents
+	if _, err := io.Copy(dstFile, srcFile); err != nil {
+		return err
+	}
+
+	// Set permissions
+	return dstFile.Chmod(mode)
 }
 
 // matchesAnyPattern checks if path matches any glob pattern.
