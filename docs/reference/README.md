@@ -10,7 +10,6 @@ Stable, "look it up" documentation for Deputy configuration.
 - [Policy framework](policy-framework.md) — Policy bundles, entrypoints, and evaluation context
 - [Policy inputs](policy-inputs.md) — Entrypoints, variables, and payload shapes
 - [Policy spec](policy-spec.md) — Formal schema and validation rules
-- [Proxy design](proxy.md) — Proxy architecture and policy enforcement flow
 - [Environment variables](#environment-variables) — All `DEPUTY_*` variables
 
 ## Environment Variables

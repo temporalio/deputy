@@ -123,15 +123,6 @@ See the [GitHub Actions Guide](docs/guides/github-actions.md) for workflow recip
 
 ## Installation
 
-### Homebrew
-
-```console
-$ brew install --cask picatz/deputy/deputy
-
-# Or add the tap first
-$ brew tap picatz/deputy && brew install --cask deputy
-```
-
 ### Go install
 
 ```console
@@ -139,33 +130,7 @@ $ go install github.com/picatz/deputy@latest
 ```
 
 Pin a specific version for reproducibility: `go install github.com/picatz/deputy@vX.Y.Z`
-
-### Binary releases
-
-Download from [GitHub Releases](https://github.com/picatz/deputy/releases). Each release includes:
-- Cross-platform binaries (Linux, macOS, Windows / amd64, arm64)
-- SHA256 checksums (`checksums.txt`)
-- Cosign signatures for verification
-- SBOMs in CycloneDX and SPDX formats
-
-#### Verify release signatures
-
-Releases are signed with [Sigstore](https://sigstore.dev) (keyless). To verify:
-
-```console
-# Install cosign: https://docs.sigstore.dev/cosign/system_config/installation/
-$ cosign verify-blob \
-    --certificate checksums.txt.pem \
-    --signature checksums.txt.sig \
-    --certificate-oidc-issuer https://token.actions.githubusercontent.com \
-    --certificate-identity-regexp 'https://github.com/picatz/deputy/.github/workflows/release.yml@.*' \
-    checksums.txt
-
-# Then verify your download against checksums.txt
-$ sha256sum -c checksums.txt --ignore-missing
-```
-
-This verifies the checksums file was signed by Deputy's release workflow, not a compromised artifact. See [Verifying Releases](docs/guides/verifying-releases.md) for full details.
+<!-- TODO: Re-enable Homebrew and binary release installation docs once those distribution channels exist. -->
 
 ### Build from source
 
@@ -259,7 +224,7 @@ $ deputy scan --policy policy/examples/severity-guardrail.yaml
 
 If you want preventive controls (not just reactive scanning), run Deputy as a proxy and enforce policies at download time.
 
-- [Proxy design](docs/reference/proxy.md)
+- [Proxy command reference](docs/commands/proxy.md)
 - [Proxy rollout guide](docs/guides/proxy-rollout.md)
 
 ```console

@@ -507,7 +507,6 @@ export npm_config_registry=http://proxy.internal:8080
 
 - [Proxy rollout guide](../guides/proxy-rollout.md)
 - [Policy command reference](policy.md)
-- [Proxy architecture](../reference/proxy.md)
 
 ## Code Pointers
 

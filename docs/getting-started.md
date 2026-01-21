@@ -39,10 +39,6 @@ Notes:
 - Deputy’s `go.mod` uses the Go `toolchain` directive; use Go 1.21+ so `go` can fetch the pinned toolchain automatically.
 - If you prefer a deterministic install, pin a tag/commit: `go install github.com/picatz/deputy@vX.Y.Z`.
 
-### Prebuilt binaries
-
-If your organization prefers prebuilt artifacts, use GitHub Releases (when available) and verify `deputy --version`.
-
 ### Build from source
 
 ```console

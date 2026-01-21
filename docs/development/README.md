@@ -9,7 +9,6 @@ This section is for contributors and maintainers.
 | [Contributing](contributing.md) | Local setup, development workflow, PR checklist |
 | [Architecture](architecture.md) | System design, package structure |
 | [Adding ecosystems](adding-ecosystems.md) | How to add support for a new package ecosystem |
-| [Releases](releases.md) | Release process, signing, GitHub Actions |
 | [Docs style](docs-style.md) | Documentation conventions |
 
 ## Quick Commands

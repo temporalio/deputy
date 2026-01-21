@@ -460,4 +460,3 @@ type Action struct {
 - [Contributing](contributing.md) - Development workflow
 - [AGENTS context](../../AGENTS.md) - Project context for AI agents
 - [Policy framework](../reference/policy-framework.md) - Policy framework design
-- [Proxy design](../reference/proxy.md) - Proxy architecture

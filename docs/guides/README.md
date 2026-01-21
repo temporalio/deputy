@@ -9,7 +9,6 @@ Practical "how do I use this in the real world?" documentation.
 | [Workflows](workflows.md) | Choose the right command for your task |
 | [GitHub Actions](github-actions.md) | Actions, reusable workflows, and CI recipes |
 | [CI Integration](ci.md) | GitLab CI, Azure DevOps, CircleCI |
-| [Verifying Releases](verifying-releases.md) | Cryptographic verification of binary releases |
 
 ## Policies
 

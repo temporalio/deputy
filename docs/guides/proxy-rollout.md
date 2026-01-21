@@ -239,6 +239,6 @@ If issues arise, you can quickly revert:
 
 ## Related
 
-- [Proxy design](../reference/proxy.md)
+- [Proxy command reference](../commands/proxy.md)
 - [Policy framework](../reference/policy-framework.md)
 - [Troubleshooting](troubleshooting.md)

@@ -57,7 +57,7 @@ Requires Go 1.21+. See the [getting started guide](getting-started.md).
 
 ### Do I need Go installed to use Deputy?
 
-Yes, currently. Deputy is distributed as a Go module. Prebuilt binaries may be available in future releases.
+Yes. Deputy is currently distributed only as a Go module via `go install`. Prebuilt binaries/Homebrew are not available yet.
 
 ---
 
