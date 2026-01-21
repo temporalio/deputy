@@ -3,6 +3,7 @@ package workspace
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -116,10 +117,8 @@ func (d *DockerIsolator) cleanup() error {
 			errs = append(errs, err)
 		}
 	}
-	if len(errs) > 0 {
-		return fmt.Errorf("cleanup errors: %v", errs)
-	}
-	return nil
+	// Use errors.Join (Go 1.20+) for cleaner multi-error handling
+	return errors.Join(errs...)
 }
 
 // Changes returns files modified in the isolated workspace.

@@ -30,13 +30,6 @@ func getTerminalWidth() int {
 	return 80 // sensible default
 }
 
-// minInt returns the smaller of two integers.
-func minInt(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
-}
 
 // truncatePath shortens a path to fit within maxLen, preserving the filename.
 func truncatePath(path string, maxLen int) string {
@@ -198,7 +191,7 @@ func renderDependencyDiff(out io.Writer, diff *DependencyDiff, termWidth int) {
 		return
 	}
 
-	lineWidth := minInt(termWidth-2, 80)
+	lineWidth := min(termWidth-2, 80)
 
 	// If there was an error, show it as a warning but continue
 	if diff.Error != nil {
@@ -363,7 +356,7 @@ func ReviewWorkspaceChanges(
 
 	// Get terminal width for responsive layout
 	termWidth := getTerminalWidth()
-	lineWidth := minInt(termWidth-2, 80) // Cap at 80 for readability
+	lineWidth := min(termWidth-2, 80) // Cap at 80 for readability
 
 	// Display header
 	fmt.Fprintln(stdout)
@@ -457,7 +450,7 @@ func ReviewWorkspaceChangesFromEvent(
 
 	// Get terminal width for responsive layout
 	termWidth := getTerminalWidth()
-	lineWidth := minInt(termWidth-2, 80) // Cap at 80 for readability
+	lineWidth := min(termWidth-2, 80) // Cap at 80 for readability
 
 	// Display header
 	fmt.Fprintln(stdout)
@@ -604,7 +597,7 @@ func (p *pathBasedReviewer) SyncChanges(changes []workspace.FileChange) error {
 // renderReviewMenu displays the interactive review menu with styled options.
 func renderReviewMenu(out io.Writer) {
 	termWidth := getTerminalWidth()
-	lineWidth := minInt(termWidth-2, 80)
+	lineWidth := min(termWidth-2, 80)
 
 	fmt.Fprintln(out, ui.StyleDim.Render(strings.Repeat("─", lineWidth)))
 	fmt.Fprintln(out, ui.StyleHeader.Render("What would you like to do?"))

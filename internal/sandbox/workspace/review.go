@@ -222,10 +222,11 @@ func (r *ReviewSession) GetDiff(change FileChange) (string, error) {
 // formatNewFileDiff formats a new file as a unified diff.
 func formatNewFileDiff(path, content string) string {
 	var sb strings.Builder
-	sb.WriteString(fmt.Sprintf("--- /dev/null\n"))
-	sb.WriteString(fmt.Sprintf("+++ b/%s\n", path))
+	sb.WriteString("--- /dev/null\n")
+	fmt.Fprintf(&sb, "+++ b/%s\n", path)
 	sb.WriteString("@@ -0,0 +1 @@\n")
-	for _, line := range strings.Split(content, "\n") {
+	// Use SplitSeq (Go 1.24+) for memory-efficient iteration
+	for line := range strings.SplitSeq(content, "\n") {
 		sb.WriteString("+" + line + "\n")
 	}
 	return sb.String()
@@ -234,29 +235,14 @@ func formatNewFileDiff(path, content string) string {
 // formatDeletedFileDiff formats a deleted file as a unified diff.
 func formatDeletedFileDiff(path, content string) string {
 	var sb strings.Builder
-	sb.WriteString(fmt.Sprintf("--- a/%s\n", path))
-	sb.WriteString(fmt.Sprintf("+++ /dev/null\n"))
+	fmt.Fprintf(&sb, "--- a/%s\n", path)
+	sb.WriteString("+++ /dev/null\n")
 	sb.WriteString("@@ -1 +0,0 @@\n")
-	for _, line := range strings.Split(content, "\n") {
+	// Use SplitSeq (Go 1.24+) for memory-efficient iteration
+	for line := range strings.SplitSeq(content, "\n") {
 		sb.WriteString("-" + line + "\n")
 	}
 	return sb.String()
-}
-
-// generateSimpleDiff creates a simple diff between two files.
-// Deprecated: Use generateSimpleDiffWithRoots for traversal-resistant access.
-func generateSimpleDiff(originalPath, modifiedPath string) (string, error) {
-	original, err := os.ReadFile(originalPath)
-	if err != nil && !os.IsNotExist(err) {
-		return "", err
-	}
-
-	modified, err := os.ReadFile(modifiedPath)
-	if err != nil && !os.IsNotExist(err) {
-		return "", err
-	}
-
-	return formatDiffContent(filepath.Base(originalPath), filepath.Base(modifiedPath), original, modified), nil
 }
 
 // generateSimpleDiffWithRoots creates a simple diff using os.Root for traversal-resistant access.
@@ -280,20 +266,18 @@ func formatDiffContent(origName, modName string, original, modified []byte) stri
 	// For now, just show before/after content
 	// A proper implementation would use a diff algorithm
 	var sb strings.Builder
-	sb.WriteString(fmt.Sprintf("--- a/%s\n", origName))
-	sb.WriteString(fmt.Sprintf("+++ b/%s\n", modName))
+	fmt.Fprintf(&sb, "--- a/%s\n", origName)
+	fmt.Fprintf(&sb, "+++ b/%s\n", modName)
 	sb.WriteString("@@ modified @@\n")
 
 	origLines := strings.Split(string(original), "\n")
 	modLines := strings.Split(string(modified), "\n")
 
-	// Simple line-by-line comparison
-	maxLines := len(origLines)
-	if len(modLines) > maxLines {
-		maxLines = len(modLines)
-	}
+	// Simple line-by-line comparison (using built-in max from Go 1.21+)
+	maxLines := max(len(origLines), len(modLines))
 
-	for i := 0; i < maxLines; i++ {
+	// Use range-over-int (Go 1.22+) for cleaner iteration
+	for i := range maxLines {
 		origLine := ""
 		modLine := ""
 		if i < len(origLines) {

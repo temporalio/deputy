@@ -21,6 +21,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
@@ -441,37 +442,63 @@ func (o *overlayIsolator) Changes(ctx context.Context) ([]FileChange, error) {
 		return nil, fmt.Errorf("overlay not set up")
 	}
 
+	// Open roots for traversal-resistant access
+	// SECURITY: Uses os.Root (Go 1.24+) for traversal-resistant file operations.
+	upperRoot, err := os.OpenRoot(o.upperDir)
+	if err != nil {
+		return nil, fmt.Errorf("open upper root: %w", err)
+	}
+	defer upperRoot.Close()
+
+	origRoot, err := os.OpenRoot(o.cfg.OriginalPath)
+	if err != nil {
+		return nil, fmt.Errorf("open original root: %w", err)
+	}
+	defer origRoot.Close()
+
+	upperFS := upperRoot.FS()
+	origFS := origRoot.FS().(fs.StatFS)
+
 	// The upper directory contains all changes
 	var changes []FileChange
-	err := filepath.Walk(o.upperDir, func(path string, info os.FileInfo, err error) error {
+	err = fs.WalkDir(upperFS, ".", func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
-		if path == o.upperDir {
+		if path == "." {
 			return nil
 		}
 
-		relPath, err := filepath.Rel(o.upperDir, path)
-		if err != nil {
-			return err
+		// Skip symlinks for security - could escape the workspace
+		if d.Type()&fs.ModeSymlink != 0 {
+			return nil
 		}
 
 		// Skip .git directory
-		if relPath == ".git" || strings.HasPrefix(relPath, ".git"+string(filepath.Separator)) {
-			if info.IsDir() {
-				return filepath.SkipDir
+		if path == ".git" || strings.HasPrefix(path, ".git"+string(filepath.Separator)) {
+			if d.IsDir() {
+				return fs.SkipDir
 			}
 			return nil
 		}
 
+		// Skip directories - we only track file changes
+		if d.IsDir() {
+			return nil
+		}
+
 		changeType := "modified"
-		origPath := filepath.Join(o.cfg.OriginalPath, relPath)
-		if _, err := os.Stat(origPath); os.IsNotExist(err) {
+		if _, err := origFS.Stat(path); os.IsNotExist(err) {
 			changeType = "added"
 		}
 
+		info, err := d.Info()
+		if err != nil {
+			return fmt.Errorf("get file info for %s: %w", path, err)
+		}
+
 		changes = append(changes, FileChange{
-			Path:    relPath,
+			Path:    path,
 			Type:    changeType,
 			Size:    info.Size(),
 			ModTime: info.ModTime(),
@@ -673,25 +700,6 @@ func copyFileWithRoot(srcRoot *os.Root, relPath, dstPath string, mode os.FileMod
 	return err
 }
 
-
-// copyFile copies a single file.
-func copyFile(src, dst string, mode os.FileMode) error {
-	srcFile, err := os.Open(src)
-	if err != nil {
-		return err
-	}
-	defer srcFile.Close()
-
-	dstFile, err := os.OpenFile(dst, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, mode)
-	if err != nil {
-		return err
-	}
-	defer dstFile.Close()
-
-	_, err = io.Copy(dstFile, srcFile)
-	return err
-}
-
 // diffDirectories compares two directories and returns changes.
 // SECURITY: Uses os.Root (Go 1.24+) for traversal-resistant file operations.
 func diffDirectories(original, modified string) ([]FileChange, error) {
@@ -809,7 +817,8 @@ func filesEqualWithRoots(root1, root2 *os.Root, path string) bool {
 	if err != nil {
 		return false
 	}
-	return string(content1) == string(content2)
+	// Use slices.Equal (Go 1.21+) for efficient byte comparison
+	return slices.Equal(content1, content2)
 }
 
 // parseGitDiff parses git diff --name-status output.

@@ -7,6 +7,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	sandboxv1 "github.com/picatz/deputy/gen/deputy/sandbox/v1"
@@ -498,9 +499,9 @@ func matchDoubleStarPattern(path, pattern string) bool {
 		if prefix == "" && suffix != "" {
 			// Pattern like "**/.git/**" - match paths containing .git/
 			// or pattern like "**/package.json" - match any path ending with that
-			if strings.HasSuffix(suffix, "/**") {
+			// Use CutSuffix (Go 1.20+) instead of HasSuffix + TrimSuffix
+			if dirName, found := strings.CutSuffix(suffix, "/**"); found {
 				// Pattern like "**/.git/**" - look for directory
-				dirName := strings.TrimSuffix(suffix, "/**")
 				return containsPathComponent(path, dirName)
 			}
 			// Pattern like "**/package.json" - match filename anywhere
@@ -536,14 +537,9 @@ func matchDoubleStarPattern(path, pattern string) bool {
 }
 
 // containsPathComponent checks if path contains a specific directory component.
+// Uses slices.Contains (Go 1.21+) for cleaner code.
 func containsPathComponent(path, component string) bool {
-	parts := strings.Split(path, "/")
-	for _, part := range parts {
-		if part == component {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(strings.Split(path, "/"), component)
 }
 
 // matchMultipleDoubleStars handles patterns with multiple ** segments.
@@ -563,8 +559,9 @@ func matchMultipleDoubleStars(path string, patternParts []string) bool {
 	pathRest = strings.TrimPrefix(pathRest, "/")
 
 	// Try matching rest of pattern at each position
+	// Use range-over-int (Go 1.22+) for cleaner iteration
 	parts := strings.Split(pathRest, "/")
-	for i := 0; i <= len(parts); i++ {
+	for i := range len(parts) + 1 {
 		subPath := strings.Join(parts[i:], "/")
 		if matchPattern(subPath, rest) {
 			return true
