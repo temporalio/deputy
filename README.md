@@ -2,6 +2,9 @@
 
 Deputy enables dependency management at scale.
 
+> [!WARNING]
+> **This is an early, experimental project.** Things will change, and some edges are sharp. If you try it, please share feedback in issues.
+
 - Inventory dependencies across ecosystems, bring your own plugins for custom sources.
 - Scan dependencies using vulnerability sources like OSV to produce actionable findings.
 - Generate SBOMs (CycloneDX / SPDX via Protobom) for supply chain visibility.
