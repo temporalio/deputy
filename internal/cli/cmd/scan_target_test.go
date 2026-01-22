@@ -88,6 +88,51 @@ func TestIsAmbiguousDockerHubReference(t *testing.T) {
 	}
 }
 
+func TestIsVMImageTarget(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		input string
+		want  bool
+	}{
+		// VM schemes
+		{input: "vm:///path/to/disk.qcow2", want: true},
+		{input: "vm://disk.img", want: true},
+		{input: "rootfs:///path/to/rootfs.ext4", want: true},
+		{input: "rootfs://rootfs.img", want: true},
+
+		// VM file extensions
+		{input: "/path/to/disk.qcow2", want: true},
+		{input: "/path/to/disk.qcow", want: true},
+		{input: "/path/to/disk.vmdk", want: true},
+		{input: "/path/to/disk.vhd", want: true},
+		{input: "/path/to/disk.vhdx", want: true},
+		{input: "/path/to/disk.vdi", want: true},
+		{input: "/path/to/rootfs.ext4", want: true},
+		{input: "disk.QCOW2", want: true},
+		{input: "disk.VMDK", want: true},
+
+		// Not VM targets
+		{input: "/path/to/project", want: false},
+		{input: "alpine:latest", want: false},
+		{input: "docker://nginx:1.25", want: false},
+		{input: "pkg:npm/lodash@4.17.21", want: false},
+		{input: "github.com/owner/repo", want: false},
+		{input: "/path/to/file.tar", want: false},
+		{input: "/path/to/image.iso", want: false},
+		{input: "", want: false},
+	}
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.input, func(t *testing.T) {
+			t.Parallel()
+			if got := isVMImageTarget(tt.input); got != tt.want {
+				t.Fatalf("isVMImageTarget(%q)=%t, want %t", tt.input, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestResolveSourceOverride(t *testing.T) {
 	t.Parallel()
 
@@ -109,6 +154,11 @@ func TestResolveSourceOverride(t *testing.T) {
 		{input: "tarball", wantKind: "image", wantImgSrc: "tarball", expectError: false},
 		{input: "oci-layout", wantKind: "image", wantImgSrc: "oci-layout", expectError: false},
 		{input: "layout", wantKind: "image", wantImgSrc: "oci-layout", expectError: false},
+		{input: "vm", wantKind: "vm", wantImgSrc: "", expectError: false},
+		{input: "vm-image", wantKind: "vm", wantImgSrc: "", expectError: false},
+		{input: "disk-image", wantKind: "vm", wantImgSrc: "", expectError: false},
+		{input: "rootfs", wantKind: "rootfs", wantImgSrc: "", expectError: false},
+		{input: "filesystem", wantKind: "rootfs", wantImgSrc: "", expectError: false},
 		{input: "unknown", expectError: true},
 	}
 	for _, tt := range tests {

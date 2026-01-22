@@ -136,6 +136,24 @@ With --deep flag, also scans binary files for embedded strings:
 
 Supported formats: .zip, .jar, .war, .tar, .tar.gz, .tgz, .tar.bz2, .tar.xz
 
+VM AND ROOTFS IMAGE SCANNING:
+Scan virtual machine disk images and rootfs images for secrets:
+• Supports qcow2, vmdk, vhd, vhdx, vdi, and raw disk formats
+• Parses GPT/MBR partition tables to find root filesystem
+• Reads ext4 filesystems directly without mounting
+• Identifies secrets in /etc, /home, /root, and application directories
+
+VM image targets are detected by file extension or scheme:
+• vm:///path/to/disk.qcow2 (explicit VM scheme)
+• rootfs:///path/to/rootfs.ext4 (explicit rootfs scheme)
+• /path/to/disk.qcow2, disk.vmdk, disk.vhd (by extension)
+
+Common secrets found in VM images:
+• SSH keys and authorized_keys
+• Cloud provider credentials
+• Database connection strings
+• API tokens in config files
+
 OUTPUT MODES:
 • text: Human-readable output with redacted secrets (default)
 • json: Machine-readable output for CI/CD integration
@@ -232,6 +250,17 @@ CONTAINER IMAGE SCANNING:
   # JSON output for CI/CD pipelines
   deputy secrets nginx:1.25 --format json
 
+VM AND ROOTFS IMAGES:
+  # Scan a VM disk image for secrets
+  deputy secrets vm:///path/to/disk.qcow2
+  deputy secrets /path/to/disk.vmdk
+
+  # Scan a rootfs image
+  deputy secrets rootfs:///path/to/rootfs.ext4
+
+  # JSON output for CI/CD
+  deputy secrets vm:///path/to/disk.qcow2 --format json
+
 FILTERING:
   # Scan only specific file types
   deputy secrets --include "*.yaml,*.json,*.env"
@@ -289,6 +318,11 @@ FILTERING:
 					includeRemoved: includeRemoved,
 				}
 				return runHistoricalSecretsScan(ctx, out, errW, historyOpts)
+			}
+
+			// Check if target is a VM/rootfs image
+			if isVMImageTarget(target) {
+				return runVMImageSecretsScan(ctx, out, errW, target, formatFlag, noRedact, includeGlob, excludeGlob)
 			}
 
 			// Check if target is a container image reference
@@ -1731,6 +1765,277 @@ func runContainerSecretsScan(ctx context.Context, out io.Writer, errW io.Writer,
 		return renderContainerSecretsJSON(out, result)
 	}
 	return renderContainerSecretsText(out, result, noRedact)
+}
+
+// runVMImageSecretsScan scans a VM disk image or rootfs for secrets.
+// It opens the disk image, extracts the filesystem, and walks it to find secrets.
+func runVMImageSecretsScan(ctx context.Context, out io.Writer, errW io.Writer, target, format string, noRedact bool, includeGlob, excludeGlob string) error {
+	fmt.Fprintln(errW, ui.StyleMeta.Render("Loading VM image..."))
+
+	// Open the VM image using Deputy's target system
+	mat, err := targets.Open(ctx, target, nil)
+	if err != nil {
+		return fmt.Errorf("loading VM image: %w", err)
+	}
+	if mat.Cleanup != nil {
+		defer mat.Cleanup()
+	}
+
+	// Verify we got a filesystem
+	if mat.FS == nil {
+		return fmt.Errorf("VM image %q did not provide a filesystem", target)
+	}
+
+	fmt.Fprintln(errW, ui.StyleMeta.Render("Scanning VM filesystem for secrets..."))
+
+	// Create secret detection engine
+	engine, err := secrets.NewEngine()
+	if err != nil {
+		return fmt.Errorf("creating secrets engine: %w", err)
+	}
+
+	// Scan the filesystem for secrets
+	findings, filesScanned, err := scanFilesystem(ctx, engine, mat.FS, includeGlob, excludeGlob)
+	if err != nil {
+		return fmt.Errorf("scanning VM filesystem: %w", err)
+	}
+
+	// Build stats
+	stats := make(map[secrets.SecretType]int)
+	highConfCount := 0
+	for _, f := range findings {
+		stats[f.Type]++
+		if f.Confidence >= 0.9 {
+			highConfCount++
+		}
+	}
+
+	result := SecretsResult{
+		Target:              target,
+		Generated:           time.Now().UTC().Format(time.RFC3339),
+		FilesScanned:        filesScanned,
+		SecretsFound:        len(findings),
+		HighConfidenceCount: highConfCount,
+		Findings:            findings,
+		Stats:               stats,
+	}
+
+	// Add provenance info if available
+	if mat.Meta.Provenance != nil {
+		if format == "json" {
+			// Include provenance in JSON output
+			type vmSecretsResult struct {
+				SecretsResult
+				Provenance map[string]string `json:"provenance,omitempty"`
+			}
+			vmResult := vmSecretsResult{
+				SecretsResult: result,
+				Provenance:    mat.Meta.Provenance,
+			}
+			enc := json.NewEncoder(out)
+			enc.SetIndent("", "  ")
+			return enc.Encode(vmResult)
+		}
+	}
+
+	if format == "json" {
+		enc := json.NewEncoder(out)
+		enc.SetIndent("", "  ")
+		return enc.Encode(result)
+	}
+
+	return renderVMSecretsText(out, result, mat.Meta.Provenance, noRedact)
+}
+
+// scanFilesystem scans an fs.FS for secrets.
+// This is similar to scanDirectory but works with any fs.FS implementation.
+func scanFilesystem(ctx context.Context, engine *secrets.Engine, fsys fs.FS, includeGlob, excludeGlob string) ([]secrets.Finding, int, error) {
+	var findings []secrets.Finding
+	var filesScanned int
+
+	// Parse include/exclude patterns
+	var includePatterns, excludePatterns []string
+	if includeGlob != "" {
+		includePatterns = strings.Split(includeGlob, ",")
+		for i := range includePatterns {
+			includePatterns[i] = strings.TrimSpace(includePatterns[i])
+		}
+	}
+	if excludeGlob != "" {
+		excludePatterns = strings.Split(excludeGlob, ",")
+		for i := range excludePatterns {
+			excludePatterns[i] = strings.TrimSpace(excludePatterns[i])
+		}
+	}
+
+	// Default exclusions for binary files and common non-source patterns
+	defaultExcludes := []string{
+		// Binary extensions
+		"*.exe", "*.dll", "*.so", "*.dylib", "*.a", "*.o", "*.obj", "*.class", "*.pyc", "*.pyo",
+		// Media files
+		"*.png", "*.jpg", "*.jpeg", "*.gif", "*.ico", "*.svg", "*.webp", "*.bmp",
+		"*.mp3", "*.mp4", "*.wav", "*.avi", "*.mov",
+		// Documents
+		"*.pdf", "*.doc", "*.docx", "*.xls", "*.xlsx", "*.ppt", "*.pptx",
+		// Archives
+		"*.zip", "*.tar", "*.gz", "*.bz2", "*.xz", "*.7z", "*.rar", "*.jar", "*.war",
+		// Database files
+		"*.db", "*.sqlite", "*.sqlite3",
+		// Fonts
+		"*.ttf", "*.otf", "*.woff", "*.woff2", "*.eot",
+	}
+	excludePatterns = append(excludePatterns, defaultExcludes...)
+
+	err := fs.WalkDir(fsys, ".", func(path string, d fs.DirEntry, err error) error {
+		// Check context cancellation
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+		}
+
+		if err != nil {
+			return nil // Skip inaccessible files
+		}
+
+		// Skip directories
+		if d.IsDir() {
+			return nil
+		}
+
+		relPath := filepath.FromSlash(path)
+
+		// Check exclude patterns
+		for _, pattern := range excludePatterns {
+			if matched, _ := filepath.Match(pattern, relPath); matched {
+				return nil
+			}
+			if matched, _ := filepath.Match(pattern, filepath.Base(relPath)); matched {
+				return nil
+			}
+		}
+
+		// Check include patterns (if specified)
+		if len(includePatterns) > 0 {
+			included := false
+			for _, pattern := range includePatterns {
+				if matched, _ := filepath.Match(pattern, filepath.Base(relPath)); matched {
+					included = true
+					break
+				}
+			}
+			if !included {
+				return nil
+			}
+		}
+
+		// Skip large files (> 1MB)
+		info, err := d.Info()
+		if err != nil {
+			return nil
+		}
+		if info.Size() > 1<<20 {
+			return nil
+		}
+
+		// Read file contents
+		content, err := fs.ReadFile(fsys, path)
+		if err != nil {
+			return nil // Skip unreadable files
+		}
+
+		filesScanned++
+
+		// Scan file for secrets
+		fileFindings, err := engine.ScanFile(ctx, relPath, content)
+		if err != nil {
+			return nil // Continue on scan errors
+		}
+
+		findings = append(findings, fileFindings...)
+		return nil
+	})
+
+	return findings, filesScanned, err
+}
+
+// renderVMSecretsText outputs VM scan results as human-readable text.
+func renderVMSecretsText(out io.Writer, result SecretsResult, provenance map[string]string, noRedact bool) error {
+	// Header
+	fmt.Fprintln(out)
+	fmt.Fprintln(out, ui.StyleHeader.Render("VM Image Secrets Scan:"))
+	fmt.Fprintf(out, "  Target: %s\n", ui.StylePackageName.Render(result.Target))
+
+	// Show provenance details
+	if provenance != nil {
+		if format := provenance["format"]; format != "" {
+			fmt.Fprintf(out, "  Format: %s\n", ui.StyleVersion.Render(format))
+		}
+		if pt := provenance["partition_table"]; pt != "" {
+			fmt.Fprintf(out, "  Partition Table: %s\n", ui.StyleVersion.Render(pt))
+		}
+		if fsType := provenance["filesystem_type"]; fsType != "" {
+			fmt.Fprintf(out, "  Filesystem: %s\n", ui.StyleVersion.Render(fsType))
+		}
+	}
+
+	fmt.Fprintf(out, "  Files scanned: %d\n", result.FilesScanned)
+	fmt.Fprintln(out)
+
+	if len(result.Findings) == 0 {
+		fmt.Fprintln(out, ui.StyleMeta.Render("No secrets detected."))
+		return nil
+	}
+
+	// Summary
+	fmt.Fprintln(out, ui.StyleCritical.Render(fmt.Sprintf("Found %d potential secrets (%d high confidence):",
+		result.SecretsFound, result.HighConfidenceCount)))
+	fmt.Fprintln(out)
+
+	// Type breakdown
+	if len(result.Stats) > 0 {
+		fmt.Fprintln(out, "  By type:")
+		for secretType, count := range result.Stats {
+			fmt.Fprintf(out, "    %s: %d\n", secretType, count)
+		}
+		fmt.Fprintln(out)
+	}
+
+	// Individual findings
+	for i, f := range result.Findings {
+		if i >= 20 {
+			fmt.Fprintf(out, "  ... and %d more findings\n", len(result.Findings)-20)
+			break
+		}
+
+		confidenceStyle := ui.StyleMeta
+		if f.Confidence >= 0.9 {
+			confidenceStyle = ui.StyleCritical
+		} else if f.Confidence >= 0.7 {
+			confidenceStyle = ui.StyleDowngraded // Yellow/warning color
+		}
+
+		fmt.Fprintf(out, "  %s %s\n",
+			confidenceStyle.Render(fmt.Sprintf("[%.0f%%]", f.Confidence*100)),
+			ui.StylePackageName.Render(string(f.Type)))
+
+		fmt.Fprintf(out, "    File: %s", ui.StylePath.Render(f.File))
+		if f.Line > 0 {
+			fmt.Fprintf(out, ":%d", f.Line)
+		}
+		fmt.Fprintln(out)
+
+		if f.Redacted != "" {
+			displayed := f.Redacted
+			if !noRedact && len(displayed) > 40 {
+				displayed = displayed[:20] + "..." + displayed[len(displayed)-10:]
+			}
+			fmt.Fprintf(out, "    Match: %s\n", displayed)
+		}
+		fmt.Fprintln(out)
+	}
+
+	return nil
 }
 
 // buildImageConfigForScanner converts image.Info to secrets.ImageConfig for the scanner.

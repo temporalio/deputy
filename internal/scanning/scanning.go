@@ -255,6 +255,54 @@ func ScanDirectory(ctx context.Context, path string, opts Options) (*Execution, 
 	}, nil
 }
 
+// ScanVMImage scans a VM disk image or rootfs image for vulnerabilities.
+// Supported formats: qcow2, vmdk, vhd, vhdx, vdi, raw, and ext4 rootfs images.
+func ScanVMImage(ctx context.Context, target string, targetOpts map[string]string, opts Options) (*Execution, error) {
+	ctx, span := otel.StartSpan(ctx, "deputy.scanning.vm_image",
+		trace.WithAttributes(
+			attribute.String("deputy.target.path", target),
+		))
+	defer span.End()
+
+	// Collect inventory
+	invOpts := inventory.Options{Ecosystems: opts.Ecosystems}
+	invExec, err := inventory.CollectVMImage(ctx, target, targetOpts, invOpts)
+	if err != nil {
+		otel.SetSpanError(span, err)
+		return nil, err
+	}
+
+	cleanup := func() {
+		if invExec != nil {
+			invExec.Close()
+		}
+	}
+
+	// Query vulnerabilities
+	findings, advisories, err := queryVulnerabilities(ctx, invExec.Result.Packages, invExec.Result.Direct)
+	if err != nil {
+		cleanup()
+		otel.SetSpanError(span, err)
+		return nil, fmt.Errorf("query vulnerabilities: %w", err)
+	}
+
+	stats := vulnerability.ConsolidateAll(findings, advisories).Stats
+
+	return &Execution{
+		Result: Result{
+			Target:          invExec.Result.Target,
+			Packages:        invExec.Result.Packages,
+			PackagesScanned: len(invExec.Result.Packages),
+			Direct:          invExec.Result.Direct,
+			Findings:        findings,
+			Advisories:      advisories,
+			Stats:           stats,
+			GeneratedAt:     time.Now().UTC(),
+		},
+		cleanup: cleanup,
+	}, nil
+}
+
 // Scan auto-detects target type and scans for vulnerabilities.
 func Scan(ctx context.Context, target string, opts Options) (*Execution, error) {
 	kind := targets.DetectKind(target)

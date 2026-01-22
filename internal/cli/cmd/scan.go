@@ -535,6 +535,12 @@ func runScan(c *services.Clients, cmd *cobra.Command, args []string) error {
 			}
 			warnRefIgnored(cmd, "dockerfile")
 			return runScanDockerfile(c, cmd, target)
+		case "vm", "rootfs":
+			if target == "" {
+				return fmt.Errorf("expected 1 argument: <path>")
+			}
+			warnRefIgnored(cmd, "vm image")
+			return runScanVMImage(c, cmd, target)
 		default:
 			return fmt.Errorf("unknown --source %q", source)
 		}
@@ -560,6 +566,11 @@ func runScan(c *services.Clients, cmd *cobra.Command, args []string) error {
 	if isImageTargetScheme(target) {
 		warnRefIgnored(cmd, "container image")
 		return runScanImage(c, cmd, []string{target})
+	}
+
+	if isVMImageTarget(target) {
+		warnRefIgnored(cmd, "vm image")
+		return runScanVMImage(c, cmd, target)
 	}
 
 	if target == "-" {
@@ -794,6 +805,103 @@ func runScanDir(c *services.Clients, cmd *cobra.Command, args []string) error {
 		// Convert filtered result back to proto for consistent JSON output
 		protoResp := internalproto.ScanningResultToProto(&resultOut)
 		// Add client-side policy actions
+		protoResp.PolicyActions = append(protoResp.PolicyActions, policyActionsToProto(policyActions)...)
+		return outputProtoJSON(out.Writer, protoResp)
+	case FormatSARIF:
+		return outputSARIF(out.Writer, resultOut, policyFindings)
+	default:
+		return cliflags.UnsupportedFormatError("--format", flags.Format, "text|json|sarif")
+	}
+}
+
+// runScanVMImage executes the VM/rootfs image scan command logic.
+// Supports qcow2, vmdk, vhd, vhdx, vdi, and raw disk images, as well as raw
+// filesystem images (ext4, xfs).
+func runScanVMImage(c *services.Clients, cmd *cobra.Command, target string) error {
+	ctx := cmd.Context()
+	flags := extractScanFlags(cmd)
+	errW := cmd.ErrOrStderr()
+
+	// Normalize VM target path
+	path := strings.TrimSpace(target)
+	if path == "" {
+		return fmt.Errorf("expected a VM image path")
+	}
+
+	// Build proto request with VM image target hint
+	req := flags.toScanRequestWithHint(path, targetv1.TargetKind_TARGET_KIND_VM_IMAGE, "", "", errW)
+
+	// Show progress indicator for interactive mode
+	var progress *ui.Progress
+	if ui.IsTTY(errW) && (flags.Format == "" || flags.Format == FormatText) {
+		progress = ui.NewProgress(errW, "Scanning VM image for vulnerabilities")
+		progress.Start(ctx)
+	}
+
+	resp, err := c.Vulns.Scan(ctx, connect.NewRequest(req))
+	if progress != nil {
+		progress.Clear()
+	}
+	if err != nil {
+		return fmt.Errorf("scan VM image: %w", err)
+	}
+
+	// Convert proto response to internal result
+	resultPtr := internalproto.ScanningResultFromProto(resp.Msg)
+	result := *resultPtr
+
+	for _, warning := range result.Warnings {
+		fmt.Fprintf(errW, "Warning: %s\n", warning)
+	}
+
+	resultOut := result
+	policyResult := result
+	if flags.IgnoreUnfixed {
+		policyResult = scanning.FilterUnfixed(policyResult)
+		resultOut = policyResult
+	}
+
+	// Load and apply ignore rules
+	var ignoredCount int
+	if err := flags.loadIgnoreRules(path); err != nil {
+		fmt.Fprintf(errW, "Warning: %v\n", err)
+	}
+	if flags.ignoreRules != nil {
+		policyResult, ignoredCount = scanning.FilterIgnored(policyResult, flags.ignoreRules)
+		resultOut = policyResult
+	}
+
+	// Apply CEL filter expression if provided
+	if flags.Filter != "" {
+		policyResult, err = scanning.FilterByCEL(ctx, policyResult, flags.Filter)
+		if err != nil {
+			return fmt.Errorf("filter: %w", err)
+		}
+		resultOut = policyResult
+	}
+
+	policyActions, err := runScanPolicies(ctx, flags.PolicyPaths, policyResult, errW, nil)
+	if err != nil {
+		return err
+	}
+	policyFindings := actionsToPolicyFindings(policyActions)
+	result.PolicyActions = policyActions
+
+	out, err := openOutputWriter(cmd, flags.OutPath)
+	if err != nil {
+		return err
+	}
+	defer out.Close()
+
+	switch strings.ToLower(flags.Format) {
+	case "", FormatText:
+		if err := outputTextDir(out.Writer, errW, resultOut, flags.IgnoreUnfixed, ignoredCount, policyFindings, flags.displayOptionsWithResult(resultOut)); err != nil {
+			return err
+		}
+		render.PolicyEvaluationSummary(out.Writer, len(flags.PolicyPaths), policyFindings)
+		return nil
+	case FormatJSON:
+		protoResp := internalproto.ScanningResultToProto(&resultOut)
 		protoResp.PolicyActions = append(protoResp.PolicyActions, policyActionsToProto(policyActions)...)
 		return outputProtoJSON(out.Writer, protoResp)
 	case FormatSARIF:

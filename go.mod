@@ -27,6 +27,9 @@ require (
 	github.com/google/osv-scalibr v0.3.4
 	github.com/hashicorp/go-cleanhttp v0.5.2
 	github.com/hashicorp/go-retryablehttp v0.7.8
+	github.com/lima-vm/go-qcow2reader v0.7.1
+	github.com/masahiro331/go-disk v0.0.0-20240625071113-56c933208fee
+	github.com/masahiro331/go-ext4-filesystem v0.0.0-20240620024024-ca14e6327bbd
 	github.com/modelcontextprotocol/go-sdk v1.2.0
 	github.com/ossf/osv-schema/bindings/go v0.0.0-20250902063920-695987a6b7da
 	github.com/package-url/packageurl-go v0.1.3
@@ -79,6 +82,7 @@ require (
 	github.com/dlclark/regexp2 v1.11.5 // indirect
 	github.com/google/jsonschema-go v0.3.0 // indirect
 	github.com/gorilla/css v1.0.1 // indirect
+	github.com/lunixbochs/struc v0.0.0-20200707160740-784aaebc1d40 // indirect
 	github.com/microcosm-cc/bluemonday v1.0.27 // indirect
 	github.com/moby/term v0.5.2 // indirect
 	github.com/morikuni/aec v1.0.0 // indirect
@@ -87,6 +91,8 @@ require (
 	github.com/yosida95/uritemplate/v3 v3.0.2 // indirect
 	github.com/yuin/goldmark v1.7.12 // indirect
 	github.com/yuin/goldmark-emoji v1.0.6 // indirect
+	go.uber.org/atomic v1.7.0 // indirect
+	go.uber.org/zap v1.23.0 // indirect
 	gotest.tools/v3 v3.4.0 // indirect
 )
 

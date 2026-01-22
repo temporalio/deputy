@@ -83,7 +83,7 @@ can plug into the same scan flow as providers are added.
 | `--show-symbols` | | `false` | Show affected symbols in text output |
 | `--show-db-info` | | `false` | Show database metadata (e.g., review_status) |
 | `--show-unfixable-guidance` | | `false` | Show actionable guidance for unfixable vulnerabilities |
-| `--source` | | auto | Target source override: `auto`, `git`, `dir`, `sbom`, `purl`, `dockerfile`, `remote`, `docker-daemon`, `tarball` |
+| `--source` | | auto | Target source override: `auto`, `git`, `dir`, `sbom`, `purl`, `dockerfile`, `remote`, `docker-daemon`, `tarball`, `vm`, `rootfs` |
 | `--platform` | | | Platform for remote images (`os/arch[/variant]`) |
 | `--detect-base-image` | | `false` | Detect base image layers in container scans (requires network, queries deps.dev) |
 
@@ -116,10 +116,11 @@ input in this order:
 
 1. PURLs (`pkg:` prefix)
 2. Explicit image schemes (`docker://`, `oci://`, `docker-daemon://`, `tarball://`)
-3. SBOM stdin (`-`)
-4. Existing paths (Git repo → repo scan, directory → dir scan, file → SBOM scan)
-5. Container image references (including Docker Hub short names)
-6. Remote Git repositories (`github.com/owner/repo`, `https://...`)
+3. VM/rootfs schemes (`vm://`, `rootfs://`) or VM file extensions (`.qcow2`, `.vmdk`, `.vhd`, `.vhdx`, `.vdi`, `.ext4`)
+4. SBOM stdin (`-`)
+5. Existing paths (Git repo → repo scan, directory → dir scan, file → SBOM scan)
+6. Container image references (including Docker Hub short names)
+7. Remote Git repositories (`github.com/owner/repo`, `https://...`)
 
 If the target is not Git-related, `--ref` is ignored with a warning.
 
@@ -443,6 +444,38 @@ Detected filename patterns:
 - `*.dockerfile`, `*.containerfile` (suffixes)
 
 See [Dockerfile scanning guide](../guides/dockerfile.md) for policy examples and variables.
+
+### VM and Rootfs Images
+
+```console
+# Scan a QCOW2 disk image
+$ deputy scan vm:///path/to/disk.qcow2
+
+# Scan a VMDK image
+$ deputy scan vm:///path/to/disk.vmdk
+
+# Scan a raw rootfs (ext4)
+$ deputy scan rootfs:///path/to/rootfs.ext4
+
+# Auto-detect by extension
+$ deputy scan /path/to/disk.qcow2
+
+# Force VM source type
+$ deputy scan --source vm /path/to/disk.img
+```
+
+VM image scanning extracts packages from the filesystem without requiring root privileges or kernel mounts. Supported formats:
+
+| Format | Extensions |
+|--------|-----------|
+| QCOW2 | `.qcow2`, `.qcow` |
+| VMDK | `.vmdk` |
+| VHD/VHDX | `.vhd`, `.vhdx` |
+| VDI | `.vdi` |
+| Raw | `.raw`, `.img`, `.bin` |
+| ext4 | `.ext4` (rootfs) |
+
+See [VM Images guide](../guides/vm-images.md) for partition selection and advanced usage.
 
 ### Dependency Graph
 

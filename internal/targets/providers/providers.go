@@ -21,6 +21,7 @@ func init() {
 	targets.RegisterProvider(localDirProvider{})
 	targets.RegisterProvider(containerImageProvider{})
 	targets.RegisterProvider(remoteGitProvider{})
+	targets.RegisterProvider(vmImageProvider{})
 }
 
 const (

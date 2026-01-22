@@ -22,6 +22,24 @@ var scanImageSchemes = map[string]struct{}{
 	"oci-layout":    {}, // OCI layout directory (oci-layout:///path/to/layout)
 }
 
+// scanVMImageSchemes are the URL schemes that indicate VM/rootfs image targets.
+// These schemes are handled by the VM image provider.
+var scanVMImageSchemes = map[string]struct{}{
+	"vm":     {}, // VM disk image (vm:///path/to/disk.qcow2)
+	"rootfs": {}, // Rootfs filesystem image (rootfs:///path/to/rootfs.ext4)
+}
+
+// scanVMImageExtensions are file extensions that indicate VM/rootfs images.
+var scanVMImageExtensions = map[string]struct{}{
+	".qcow2": {},
+	".qcow":  {},
+	".vmdk":  {},
+	".vhd":   {},
+	".vhdx":  {},
+	".vdi":   {},
+	".ext4":  {},
+}
+
 // knownGitHosts are hostnames that should be treated as Git repositories, not container registries.
 // This helps disambiguate targets like "github.com/owner/repo" from "owner/repo:tag".
 var knownGitHosts = map[string]struct{}{
@@ -43,6 +61,30 @@ func isImageTargetScheme(target string) bool {
 	}
 	_, ok = scanImageSchemes[strings.ToLower(scheme)]
 	return ok
+}
+
+// isVMImageTarget returns true if the target is a VM disk image or rootfs image.
+// This includes explicit vm:// and rootfs:// schemes, or file paths with VM extensions.
+func isVMImageTarget(target string) bool {
+	target = strings.TrimSpace(target)
+	if target == "" {
+		return false
+	}
+
+	// Check for explicit schemes
+	if scheme, _, ok := strings.Cut(target, "://"); ok {
+		if _, isVM := scanVMImageSchemes[strings.ToLower(scheme)]; isVM {
+			return true
+		}
+	}
+
+	// Check for VM image file extensions
+	ext := strings.ToLower(filepath.Ext(target))
+	if _, isVMExt := scanVMImageExtensions[ext]; isVMExt {
+		return true
+	}
+
+	return false
 }
 
 // looksLikeContainerReference returns true if the target appears to be a container image reference
@@ -196,6 +238,8 @@ func isAmbiguousDockerHubReference(target string) bool {
 //   - docker-daemon: local Docker daemon
 //   - tarball: Docker save tarball
 //   - oci-layout: OCI image layout directory
+//   - vm: VM disk image (qcow2, vmdk, vhd, raw)
+//   - rootfs: Raw filesystem image (ext4, xfs)
 func resolveSourceOverride(source string) (kind string, imageSource string, err error) {
 	switch strings.ToLower(strings.TrimSpace(source)) {
 	case "", "auto":
@@ -218,8 +262,12 @@ func resolveSourceOverride(source string) (kind string, imageSource string, err 
 		return "image", "oci-layout", nil
 	case "dockerfile", "containerfile":
 		return "dockerfile", "", nil
+	case "vm", "vm-image", "disk-image":
+		return "vm", "", nil
+	case "rootfs", "filesystem":
+		return "rootfs", "", nil
 	default:
-		return "", "", fmt.Errorf("unknown --source %q; use auto, git, dir, sbom, purl, dockerfile, remote, docker-daemon, tarball, oci-layout", source)
+		return "", "", fmt.Errorf("unknown --source %q; use auto, git, dir, sbom, purl, dockerfile, remote, docker-daemon, tarball, oci-layout, vm, rootfs", source)
 	}
 }
 

@@ -18,6 +18,7 @@ import (
 	v1 "github.com/google/go-containerregistry/pkg/v1"
 	scalibrimage "github.com/google/osv-scalibr/artifact/image"
 	"github.com/google/osv-scalibr/extractor"
+	scalibrfs "github.com/google/osv-scalibr/fs"
 	"github.com/picatz/deputy/internal/compare"
 	"github.com/picatz/deputy/internal/container/image"
 	"github.com/picatz/deputy/internal/dockerfile"
@@ -360,6 +361,78 @@ func CollectContainerImage(ctx context.Context, target string, targetOpts map[st
 		Packages:    pkgs,
 		Direct:      nil, // Container images don't have direct/transitive distinction
 		ImageInfo:   imageInfo,
+	}
+
+	return &Execution{Result: result, cleanup: cleanup}, nil
+}
+
+// CollectVMImage scans a VM disk image or rootfs image for packages.
+// Supported formats: qcow2, vmdk, vhd, vhdx, vdi, raw, and ext4 rootfs images.
+func CollectVMImage(ctx context.Context, target string, targetOpts map[string]string, opts Options) (*Execution, error) {
+	ctx, span := otel.StartSpan(ctx, "deputy.inventory.vm_image",
+		trace.WithAttributes(
+			attribute.String("deputy.target.path", target),
+		))
+	defer span.End()
+
+	mat, err := targets.Open(ctx, target, targetOpts)
+	if err != nil {
+		otel.SetSpanError(span, err)
+		return nil, err
+	}
+
+	cleanup := func() {}
+	if mat.Cleanup != nil {
+		cleanup = mat.Cleanup
+	}
+
+	// Verify we got a filesystem
+	if mat.FS == nil {
+		cleanup()
+		err := fmt.Errorf("target %q did not provide a filesystem", target)
+		otel.SetSpanError(span, err)
+		return nil, err
+	}
+
+	// Cast to scalibrfs.FS (requires fs.FS, fs.ReadDirFS, fs.StatFS)
+	scalibrFS, ok := mat.FS.(scalibrfs.FS)
+	if !ok {
+		cleanup()
+		err := fmt.Errorf("VM image filesystem does not implement required interfaces")
+		otel.SetSpanError(span, err)
+		return nil, err
+	}
+
+	pkgs, scanErr := ScanPackagesVMImage(ctx, scalibrFS, ScanOptions{
+		Ecosystems: opts.Ecosystems,
+	})
+	// Continue even if there were plugin failures, as long as we found packages
+	if scanErr != nil && len(pkgs) == 0 {
+		cleanup()
+		otel.SetSpanError(span, scanErr)
+		return nil, scanErr
+	}
+	if scanErr != nil {
+		// Log warning but continue with found packages
+		slog.WarnContext(ctx, "VM image scan had partial failures", "error", scanErr, "packages_found", len(pkgs))
+	}
+	span.SetAttributes(attribute.Int("deputy.package.count", len(pkgs)))
+
+	displayPath := target
+	if mat.Meta.Target != "" {
+		displayPath = mat.Meta.Target
+	}
+
+	result := Result{
+		Target: Target{
+			Kind:        mat.Meta.Kind,
+			DisplayPath: displayPath,
+			LocalPath:   mat.Path,
+			Provenance:  mat.Meta.Provenance,
+		},
+		GeneratedAt: time.Now().UTC(),
+		Packages:    pkgs,
+		Direct:      nil, // VM images don't have direct/transitive distinction
 	}
 
 	return &Execution{Result: result, cleanup: cleanup}, nil

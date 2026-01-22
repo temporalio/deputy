@@ -182,6 +182,9 @@ func (h *ScanHandler) routeScan(ctx context.Context, target, ref string, refProv
 		}
 		return scanning.ScanContainerImage(ctx, target, targetOpts, opts)
 
+	case targets.KindVMImage:
+		return scanning.ScanVMImage(ctx, target, nil, opts)
+
 	case targets.KindGit:
 		return scanning.ScanRepository(ctx, target, ref, refProvided, opts)
 

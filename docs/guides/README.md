@@ -10,6 +10,14 @@ Practical "how do I use this in the real world?" documentation.
 | [GitHub Actions](github-actions.md) | Actions, reusable workflows, and CI recipes |
 | [CI Integration](ci.md) | GitLab CI, Azure DevOps, CircleCI |
 
+## Scanning Targets
+
+| Guide | Description |
+| --- | --- |
+| [Container Images](container-images.md) | Scanning container images for vulnerabilities |
+| [VM Images](vm-images.md) | Scanning VM disk images and rootfs images |
+| [Dockerfile](dockerfile.md) | Scanning Dockerfiles for security issues |
+
 ## Policies
 
 | Guide | Description |
