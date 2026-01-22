@@ -195,27 +195,28 @@ func resolvePlugins(opts ScanOptions, cap *plugin.Capabilities) ([]plugin.Plugin
 	includeActions := shouldIncludeGitHubActions(names)
 	includeDockerfile := shouldIncludeDockerfile(names)
 	includeGradle := shouldIncludeGradle(names)
-	names = filterExternalEcosystems(names)
-	if len(names) == 0 {
-		plugins := pl.FromCapabilities(cap)
-		if includeActions {
-			plugins = append(plugins, ghactions.New())
+	scalibrNames := filterExternalEcosystems(names)
+
+	var plugins []plugin.Plugin
+
+	switch {
+	case len(scalibrNames) > 0:
+		// SCALIBR ecosystems specified
+		var err error
+		plugins, err = pl.FromNames(scalibrNames)
+		if err != nil {
+			return nil, fmt.Errorf("error creating plugins: %w", err)
 		}
-		if includeDockerfile {
-			plugins = append(plugins, dockerfilex.New())
-		}
-		if includeGradle {
-			plugins = append(plugins, gradlex.NewBuildGradleExtractor())
-			plugins = append(plugins, gradlex.NewVerificationMetadataExtractor())
-		}
-		// Add registered external plugins
 		plugins = appendRegisteredPlugins(plugins)
-		return plugins, nil
+		plugins = plugin.FilterByCapabilities(plugins, cap)
+	case names != nil:
+		// Only internal ecosystems (user specified something but no SCALIBR names)
+	default:
+		// "all" case
+		plugins = pl.FromCapabilities(cap)
+		plugins = appendRegisteredPlugins(plugins)
 	}
-	plugins, err := pl.FromNames(names)
-	if err != nil {
-		return nil, fmt.Errorf("error creating plugins: %w", err)
-	}
+
 	if includeActions {
 		plugins = append(plugins, ghactions.New())
 	}
@@ -226,9 +227,8 @@ func resolvePlugins(opts ScanOptions, cap *plugin.Capabilities) ([]plugin.Plugin
 		plugins = append(plugins, gradlex.NewBuildGradleExtractor())
 		plugins = append(plugins, gradlex.NewVerificationMetadataExtractor())
 	}
-	// Add registered external plugins
-	plugins = appendRegisteredPlugins(plugins)
-	return plugin.FilterByCapabilities(plugins, cap), nil
+
+	return plugins, nil
 }
 
 // appendRegisteredPlugins adds SCALIBR-adapted plugins from the registry.
