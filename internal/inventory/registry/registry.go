@@ -45,6 +45,7 @@ import (
 	pluginclient "github.com/picatz/deputy/internal/inventory/plugin"
 	dockerfilex "github.com/picatz/deputy/internal/inventory/plugins/docker/dockerfilex"
 	ghactions "github.com/picatz/deputy/internal/inventory/plugins/github/actionsx"
+	gradlex "github.com/picatz/deputy/internal/inventory/plugins/java/gradlex"
 	rubygemspec "github.com/picatz/deputy/internal/inventory/plugins/ruby/gemspecx"
 )
 
@@ -224,6 +225,33 @@ func listDeputyExtractors() []*inventoryv1.ExtractorInfo {
 			FilePatterns: []string{"*.gemspec"},
 			Source:       inventoryv1.ExtractorSource_EXTRACTOR_SOURCE_DEPUTY,
 		},
+		{
+			Name:         gradlex.VerificationMetadataName,
+			DisplayName:  "Gradle Verification Metadata",
+			Ecosystem:    "maven",
+			Version:      1,
+			Description:  "Extracts dependencies from Gradle verification-metadata.xml files",
+			FilePatterns: []string{"gradle/verification-metadata.xml"},
+			Source:       inventoryv1.ExtractorSource_EXTRACTOR_SOURCE_DEPUTY,
+		},
+		{
+			Name:         gradlex.BuildGradleName,
+			DisplayName:  "Gradle Build Script",
+			Ecosystem:    "maven",
+			Version:      1,
+			Description:  "Extracts dependencies from build.gradle and build.gradle.kts files",
+			FilePatterns: []string{"build.gradle", "build.gradle.kts"},
+			Source:       inventoryv1.ExtractorSource_EXTRACTOR_SOURCE_DEPUTY,
+		},
+		{
+			Name:         gradlex.GradleProjectName,
+			DisplayName:  "Gradle Project",
+			Ecosystem:    "maven",
+			Version:      1,
+			Description:  "Comprehensive Gradle project dependency extraction with version catalog and property resolution",
+			FilePatterns: []string{"settings.gradle", "settings.gradle.kts"},
+			Source:       inventoryv1.ExtractorSource_EXTRACTOR_SOURCE_DEPUTY,
+		},
 	}
 }
 
@@ -290,7 +318,8 @@ func (r *Registry) DiscoverAndRegister(ctx context.Context) ([]string, error) {
 		}
 
 		// Create a client to get the plugin info
-		client, err := pluginclient.NewClient(ctx, path)
+		// Pass os.Stderr so plugin debug output is visible
+		client, err := pluginclient.NewClient(ctx, path, pluginclient.WithStderr(os.Stderr))
 		if err != nil {
 			continue
 		}

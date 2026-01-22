@@ -2,10 +2,10 @@ package graph
 
 import (
 	"context"
-	"log/slog"
 
 	"github.com/google/osv-scalibr/extractor"
 	vulnerabilityv1 "github.com/picatz/deputy/gen/deputy/vulnerability/v1"
+	"github.com/picatz/deputy/internal/logs"
 	"github.com/picatz/deputy/internal/otel"
 	"github.com/picatz/deputy/internal/repository/workspace"
 	"github.com/picatz/deputy/internal/vulnerability"
@@ -25,6 +25,10 @@ type BuilderOptions struct {
 	// PrivatePatterns specifies glob patterns for private modules
 	// (similar to GOPRIVATE).
 	PrivatePatterns []string
+
+	// UseDepsDevTransitives enables deps.dev for resolving transitive dependencies
+	// for Maven/Gradle packages. This provides complete dependency graphs.
+	UseDepsDevTransitives bool
 }
 
 // Builder resolves dependency graph edges from inventory.
@@ -45,6 +49,9 @@ func NewBuilder(opts BuilderOptions) *Builder {
 	}
 	if len(opts.PrivatePatterns) > 0 {
 		registryOpts = append(registryOpts, WithGoPrivate(opts.PrivatePatterns...))
+	}
+	if opts.UseDepsDevTransitives {
+		registryOpts = append(registryOpts, WithDepsDevTransitives())
 	}
 
 	return &Builder{
@@ -74,7 +81,7 @@ func (b *Builder) Build(
 	// Resolve edges using ecosystem-specific resolvers
 	if err := b.registry.ResolveAll(ctx, g, files); err != nil {
 		// Log but don't fail - partial resolution is acceptable
-		slog.Debug("some resolvers failed during edge resolution", "error", err)
+		logs.Debug(ctx, "some resolvers failed during edge resolution", "error", err)
 	}
 
 	// Update depths after edge resolution

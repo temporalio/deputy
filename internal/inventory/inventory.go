@@ -24,11 +24,20 @@ import (
 	"github.com/picatz/deputy/internal/collections"
 	"github.com/picatz/deputy/internal/ecosystem"
 	dockerfilex "github.com/picatz/deputy/internal/inventory/plugins/docker/dockerfilex"
+	"github.com/picatz/deputy/internal/logs"
+	"github.com/picatz/deputy/internal/dependency/graph"
 	ghactions "github.com/picatz/deputy/internal/inventory/plugins/github/actionsx"
+	gradlex "github.com/picatz/deputy/internal/inventory/plugins/java/gradlex"
 	"github.com/picatz/deputy/internal/inventory/registry"
 	rubygemspec "github.com/picatz/deputy/internal/inventory/plugins/ruby/gemspecx"
 	"github.com/picatz/deputy/internal/repository/workspace"
 )
+
+func init() {
+	// Initialize the BOM resolver for Gradle projects.
+	// This enables version resolution from deps.dev for BOM-managed dependencies.
+	graph.InitGradleBOMResolver()
+}
 
 // ScanOptions configures how scalibr scans a workspace.
 type ScanOptions struct {
@@ -77,6 +86,13 @@ func ScanPackagesAtCommitSnapshot(ctx context.Context, repo *git.Repository, com
 // scanWorkspace runs the scalibr scan on the provided workspace.
 // It configures plugins, runs the scan, and collects results.
 func scanWorkspace(ctx context.Context, ws workspace.FS, opts ScanOptions) ([]*extractor.Package, error) {
+	// Discover and register external plugins from PATH (deputy-extractor-* binaries)
+	if registered, err := registry.DiscoverAndRegisterDefault(ctx); err != nil {
+		logs.Debug(ctx, "inventory: plugin discovery failed", "error", err)
+	} else if len(registered) > 0 {
+		logs.Debug(ctx, "inventory: discovered external plugins", "plugins", registered)
+	}
+
 	cap := defaultCapabilities(ws)
 	plugins, err := resolvePlugins(opts, cap)
 	if err != nil {
@@ -178,6 +194,7 @@ func resolvePlugins(opts ScanOptions, cap *plugin.Capabilities) ([]plugin.Plugin
 	names := normalizeEcosystems(opts.Ecosystems)
 	includeActions := shouldIncludeGitHubActions(names)
 	includeDockerfile := shouldIncludeDockerfile(names)
+	includeGradle := shouldIncludeGradle(names)
 	names = filterExternalEcosystems(names)
 	if len(names) == 0 {
 		plugins := pl.FromCapabilities(cap)
@@ -186,6 +203,10 @@ func resolvePlugins(opts ScanOptions, cap *plugin.Capabilities) ([]plugin.Plugin
 		}
 		if includeDockerfile {
 			plugins = append(plugins, dockerfilex.New())
+		}
+		if includeGradle {
+			plugins = append(plugins, gradlex.NewBuildGradleExtractor())
+			plugins = append(plugins, gradlex.NewVerificationMetadataExtractor())
 		}
 		// Add registered external plugins
 		plugins = appendRegisteredPlugins(plugins)
@@ -201,6 +222,10 @@ func resolvePlugins(opts ScanOptions, cap *plugin.Capabilities) ([]plugin.Plugin
 	if includeDockerfile {
 		plugins = append(plugins, dockerfilex.New())
 	}
+	if includeGradle {
+		plugins = append(plugins, gradlex.NewBuildGradleExtractor())
+		plugins = append(plugins, gradlex.NewVerificationMetadataExtractor())
+	}
 	// Add registered external plugins
 	plugins = appendRegisteredPlugins(plugins)
 	return plugin.FilterByCapabilities(plugins, cap), nil
@@ -208,7 +233,9 @@ func resolvePlugins(opts ScanOptions, cap *plugin.Capabilities) ([]plugin.Plugin
 
 // appendRegisteredPlugins adds SCALIBR-adapted plugins from the registry.
 func appendRegisteredPlugins(plugins []plugin.Plugin) []plugin.Plugin {
-	for _, ext := range registry.ToScalibrPlugins() {
+	extPlugins := registry.ToScalibrPlugins()
+	for _, ext := range extPlugins {
+		slog.Debug("inventory: adding registered plugin", "name", ext.Name())
 		plugins = append(plugins, ext)
 	}
 	return plugins
@@ -221,29 +248,45 @@ func filterInventoryPlugins(plugins []plugin.Plugin) []plugin.Plugin {
 	}
 	allowedSegments := collections.NewSet(ecosystem.AllScalibrPrefixes()...)
 	excluded := collections.NewSet("rust/cargoauditable")
+	// Deputy-provided custom plugins that bypass the SCALIBR prefix filter.
+	// This includes both built-in Deputy plugins and discovered external plugins.
+	deputyPlugins := collections.NewSet(
+		rubygemspec.Name,
+		dockerfilex.Name,
+		gradlex.BuildGradleName,
+		gradlex.VerificationMetadataName,
+	)
+	// Add discovered external plugins to the allowlist
+	for _, p := range registry.GetPlugins() {
+		if p.Info != nil {
+			deputyPlugins.Add(p.Info.Name)
+			slog.Debug("inventory: adding external plugin to allowlist", "name", p.Info.Name)
+		}
+	}
 	out := make([]plugin.Plugin, 0, len(plugins))
 	for _, p := range plugins {
 		if _, ok := p.(fsx.Extractor); !ok {
+			slog.Debug("inventory: filtering out non-extractor plugin", "name", p.Name())
 			continue
 		}
 		// Deputy-provided custom plugins bypass the SCALIBR prefix filter.
-		if p.Name() == rubygemspec.Name {
-			out = append(out, rubygemspec.New())
-			continue
-		}
-		if p.Name() == dockerfilex.Name {
+		if deputyPlugins.Has(p.Name()) {
+			slog.Debug("inventory: keeping deputy/external plugin", "name", p.Name())
 			out = append(out, p)
 			continue
 		}
 		if excluded.Has(p.Name()) {
+			slog.Debug("inventory: excluding plugin", "name", p.Name())
 			continue
 		}
 		seg, _, _ := strings.Cut(p.Name(), "/")
 		if !allowedSegments.Has(seg) {
+			slog.Debug("inventory: filtering out plugin with unknown prefix", "name", p.Name(), "segment", seg)
 			continue
 		}
 		out = append(out, p)
 	}
+	slog.Debug("inventory: filtered plugins", "count", len(out))
 	return out
 }
 
@@ -306,6 +349,25 @@ func shouldIncludeDockerfile(names []string) bool {
 		return true
 	}
 	return slices.ContainsFunc(names, isDockerfileEcosystem)
+}
+
+// gradleAliases contains all recognized aliases for Gradle/Maven ecosystem.
+var gradleAliases = collections.NewSet(
+	"java", "maven", "gradle", "jvm", "kotlin",
+)
+
+// isGradleEcosystem checks if a name is an alias for Gradle/Maven scanning.
+func isGradleEcosystem(name string) bool {
+	return gradleAliases.Has(name)
+}
+
+// shouldIncludeGradle reports whether the internal Gradle plugins should run.
+// If names is nil (meaning all ecosystems), it returns true.
+func shouldIncludeGradle(names []string) bool {
+	if names == nil {
+		return true
+	}
+	return slices.ContainsFunc(names, isGradleEcosystem)
 }
 
 // filterExternalEcosystems removes internal ecosystem aliases so upstream scalibr

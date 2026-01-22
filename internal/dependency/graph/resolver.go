@@ -3,9 +3,9 @@ package graph
 import (
 	"context"
 	"errors"
-	"log/slog"
 
 	"github.com/picatz/deputy/internal/ecosystem"
+	"github.com/picatz/deputy/internal/logs"
 )
 
 // ResolverRegistry manages edge resolvers for multiple ecosystems.
@@ -42,12 +42,22 @@ func NewResolverRegistry(opts ...RegistryOption) *ResolverRegistry {
 		goOpts = append(goOpts, WithPrivatePatterns(cfg.goPrivatePatterns...))
 	}
 
+	// Create Maven/Gradle resolver with deps.dev client for transitives
+	var mavenOpts []MavenResolverOption
+	if cfg.enableDepsDevTransitives {
+		client, err := NewDepsDevClient()
+		if err == nil {
+			mavenOpts = append(mavenOpts, WithMavenDepsDevClient(client))
+		}
+	}
+
 	r.resolvers = []EdgeResolver{
 		NewGoResolver(goOpts...),
 		NewNpmResolver(),
 		NewCargoResolver(),
 		NewPyPIResolver(),
 		NewRubyGemsResolver(),
+		NewMavenResolver(mavenOpts...),
 	}
 
 	return r
@@ -55,11 +65,12 @@ func NewResolverRegistry(opts ...RegistryOption) *ResolverRegistry {
 
 // registryConfig holds configuration for the resolver registry.
 type registryConfig struct {
-	enableGoProxy     bool
-	enableGoGit       bool
-	goProxyURL        string
-	goConcurrency     int
-	goPrivatePatterns []string
+	enableGoProxy          bool
+	enableGoGit            bool
+	goProxyURL             string
+	goConcurrency          int
+	goPrivatePatterns      []string
+	enableDepsDevTransitives bool
 }
 
 // RegistryOption configures a ResolverRegistry.
@@ -92,6 +103,14 @@ func WithGoPrivate(patterns ...string) RegistryOption {
 func WithGoResolverConcurrency(n int) RegistryOption {
 	return func(c *registryConfig) {
 		c.goConcurrency = n
+	}
+}
+
+// WithDepsDevTransitives enables deps.dev for resolving transitive dependencies.
+// This provides accurate dependency graphs for Maven/Gradle packages.
+func WithDepsDevTransitives() RegistryOption {
+	return func(c *registryConfig) {
+		c.enableDepsDevTransitives = true
 	}
 }
 
@@ -140,7 +159,7 @@ func (r *ResolverRegistry) ResolveAll(ctx context.Context, g *Graph, files FileR
 	var errs []error
 	for _, resolver := range r.resolvers {
 		if err := resolver.ResolveEdges(ctx, g, files); err != nil {
-			slog.Debug("resolver failed",
+			logs.Debug(ctx, "resolver failed",
 				"ecosystem", resolver.Ecosystem(),
 				"error", err,
 			)

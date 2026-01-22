@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	pb "deps.dev/api/v3"
+	"github.com/picatz/deputy/internal/logs"
 )
 
 // MavenResolver resolves dependency edges for Maven/Gradle packages.
@@ -72,10 +73,6 @@ func (r *MavenResolver) ResolveEdges(ctx context.Context, g *Graph, files FileRe
 		return fmt.Errorf("finding Maven files: %w", err)
 	}
 
-	if len(mavenFiles) == 0 {
-		return nil
-	}
-
 	// Process each file based on its type
 	for _, mf := range mavenFiles {
 		var processErr error
@@ -89,6 +86,12 @@ func (r *MavenResolver) ResolveEdges(ctx context.Context, g *Graph, files FileRe
 			// Log but continue - partial resolution is better than none
 			continue
 		}
+	}
+
+	// If no Maven files found but we have Maven nodes in the graph,
+	// resolve transitives using deps.dev for those nodes
+	if len(mavenFiles) == 0 && r.depsDevClient != nil {
+		r.resolveTransitivesForExistingNodes(ctx, g)
 	}
 
 	// Update depths based on resolved edges
@@ -578,6 +581,56 @@ func mavenNameToPURL(name, version string) string {
 		return fmt.Sprintf("pkg:maven/%s@%s", strings.ReplaceAll(name, ":", "/"), version)
 	}
 	return fmt.Sprintf("pkg:maven/%s", strings.ReplaceAll(name, ":", "/"))
+}
+
+// resolveTransitivesForExistingNodes iterates through Maven nodes already in the
+// graph and resolves their transitive dependencies using deps.dev.
+// This is used when no Maven/Gradle lockfiles are found but Maven packages were
+// detected by other extractors (e.g., Gradle build.gradle parsing).
+func (r *MavenResolver) resolveTransitivesForExistingNodes(ctx context.Context, g *Graph) {
+	// Track existing edges to avoid duplicates
+	edgeSet := make(map[string]bool)
+	for edge := range g.Edges() {
+		edgeSet[edge.From+"->"+edge.To] = true
+	}
+
+	// Collect Maven nodes that have resolved versions
+	var mavenNodes []*Node
+	for node := range g.Nodes() {
+		if node.Ecosystem != "Maven" {
+			continue
+		}
+		// Skip nodes without versions - we can't look them up
+		if node.Version == "" {
+			continue
+		}
+		mavenNodes = append(mavenNodes, node)
+	}
+
+	logs.Debug(ctx, "Maven resolver: resolving transitives for existing nodes",
+		"count", len(mavenNodes))
+
+	// Resolve transitives for each Maven node
+	resolved := 0
+	for _, node := range mavenNodes {
+		// Parse groupId:artifactId from the name
+		parts := strings.SplitN(node.Name, ":", 2)
+		if len(parts) != 2 {
+			continue
+		}
+		groupID := parts[0]
+		artifactID := parts[1]
+
+		beforeNodes := g.Size()
+		r.resolveTransitiveDeps(ctx, g, groupID, artifactID, node.Version, edgeSet)
+		if g.Size() > beforeNodes {
+			resolved++
+		}
+	}
+
+	logs.Debug(ctx, "Maven resolver: transitive resolution complete",
+		"resolved", resolved,
+		"total_nodes", g.Size())
 }
 
 // Ensure MavenResolver implements EdgeResolver.

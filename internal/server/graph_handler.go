@@ -103,7 +103,10 @@ func (h *GraphHandler) BuildGraph(
 	}
 
 	// Build graph with edge resolution
-	builderOpts := graph.BuilderOptions{}
+	builderOpts := graph.BuilderOptions{
+		// Enable deps.dev for transitive dependency resolution by default
+		UseDepsDevTransitives: true,
+	}
 	if req.Msg.Options != nil {
 		builderOpts.UseProxy = req.Msg.Options.UseProxy
 		builderOpts.UseGit = req.Msg.Options.UseGit
@@ -234,7 +237,10 @@ func (h *GraphHandler) WhyDependency(
 	}
 
 	// Build graph with edge resolution
-	builderOpts := graph.BuilderOptions{}
+	builderOpts := graph.BuilderOptions{
+		// Enable deps.dev for transitive dependency resolution by default
+		UseDepsDevTransitives: true,
+	}
 	if req.Msg.Options != nil {
 		builderOpts.UseProxy = req.Msg.Options.UseProxy
 		builderOpts.UseGit = req.Msg.Options.UseGit

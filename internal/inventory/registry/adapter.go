@@ -47,6 +47,7 @@ func (e *PluginExtractor) Requirements() *plugin.Capabilities {
 // FileRequired checks if the plugin wants to process this file.
 func (e *PluginExtractor) FileRequired(api fsx.FileAPI) bool {
 	if e.plugin == nil || e.plugin.Client == nil {
+		slog.Debug("plugin extractor: nil plugin or client", "plugin", e.Name())
 		return false
 	}
 
@@ -57,37 +58,47 @@ func (e *PluginExtractor) FileRequired(api fsx.FileAPI) bool {
 		return false
 	}
 
+	path := api.Path()
+	slog.Debug("plugin extractor: checking FileRequired", "plugin", e.Name(), "path", path)
+
 	required, err := e.plugin.Client.FileRequired(
 		ctx,
-		api.Path(),
+		path,
 		info.IsDir(),
 		uint32(info.Mode()),
 		info.Size(),
 	)
 	if err != nil {
-		slog.Debug("plugin extractor: FileRequired error", "plugin", e.Name(), "path", api.Path(), "error", err)
+		slog.Debug("plugin extractor: FileRequired RPC error", "plugin", e.Name(), "path", path, "error", err)
 		return false
 	}
+	slog.Debug("plugin extractor: FileRequired result", "plugin", e.Name(), "path", path, "required", required)
 	return required
 }
 
 // Extract invokes the plugin to extract packages from the file.
 func (e *PluginExtractor) Extract(ctx context.Context, input *fsx.ScanInput) (inventory.Inventory, error) {
+	slog.Debug("plugin extractor: Extract called", "plugin", e.Name(), "path", input.Path, "root", input.Root)
 	if e.plugin == nil || e.plugin.Client == nil {
+		slog.Debug("plugin extractor: nil plugin or client in Extract", "plugin", e.Name())
 		return inventory.Inventory{}, nil
 	}
 
 	// Read file contents
 	contents, err := io.ReadAll(input.Reader)
 	if err != nil {
+		slog.Debug("plugin extractor: error reading contents", "plugin", e.Name(), "path", input.Path, "error", err)
 		return inventory.Inventory{}, err
 	}
+	slog.Debug("plugin extractor: read contents", "plugin", e.Name(), "path", input.Path, "size", len(contents))
 
 	// Call plugin
 	protoPackages, err := e.plugin.Client.ExtractPackages(ctx, input.Path, contents, input.Root)
 	if err != nil {
+		slog.Debug("plugin extractor: ExtractPackages error", "plugin", e.Name(), "path", input.Path, "error", err)
 		return inventory.Inventory{}, err
 	}
+	slog.Debug("plugin extractor: ExtractPackages result", "plugin", e.Name(), "path", input.Path, "count", len(protoPackages))
 
 	// Convert proto packages to SCALIBR packages
 	var packages []*extractor.Package
