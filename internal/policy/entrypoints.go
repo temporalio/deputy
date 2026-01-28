@@ -49,6 +49,10 @@ func (e Entrypoint) Category() string {
 		return "server"
 	case EntrypointSandboxExecution, EntrypointSandboxCommand, EntrypointSandboxNetwork:
 		return "sandbox"
+	case EntrypointCloudScanReport, EntrypointCloudScanVulnerability:
+		return "cloud"
+	case EntrypointServiceCloudScanRequest:
+		return "server"
 	default:
 		return ""
 	}
@@ -161,6 +165,21 @@ const (
 	// Use this to implement network allowlists or block specific destinations.
 	// Available variables: host, port, protocol, sandbox_config, context
 	EntrypointSandboxNetwork Entrypoint = "sandbox_network"
+
+	// Cloud resource entrypoints - for cloud resource scanning policies (AWS, Azure, GCP).
+	// These enable policies based on resource metadata, tags, regions, and accounts.
+
+	// EntrypointCloudScanReport triggers after a cloud resource scan completes.
+	// Available variables: resource (provider, type, id, region, account_id, tags), report
+	EntrypointCloudScanReport Entrypoint = "cloud_scan_report"
+	// EntrypointCloudScanVulnerability triggers for each vulnerability found in a cloud resource.
+	// Use this to enforce different policies based on resource metadata (e.g., production tags).
+	// Available variables: resource (provider, type, id, region, account_id, tags), vulnerability
+	EntrypointCloudScanVulnerability Entrypoint = "cloud_scan_vulnerability"
+	// EntrypointServiceCloudScanRequest triggers before a cloud scan is executed via the API.
+	// Use this to authorize which cloud resources a user/service can scan.
+	// Available variables: resource (provider, type, id, region), jwt.* (when authenticated)
+	EntrypointServiceCloudScanRequest Entrypoint = "service_cloud_scan_request"
 )
 
 var (
@@ -231,6 +250,7 @@ var (
 		EntrypointServiceDiffRequest,
 		EntrypointServiceSecretsRequest,
 		EntrypointServiceGraphRequest,
+		EntrypointServiceCloudScanRequest,
 	}
 	// EntrypointsSandbox lists all entrypoints related to sandbox execution control.
 	// These enable policies to control what runs in sandboxes and with what permissions.
@@ -239,12 +259,18 @@ var (
 		EntrypointSandboxCommand,
 		EntrypointSandboxNetwork,
 	}
+	// EntrypointsCloud lists all entrypoints related to cloud resource scanning.
+	// These enable policies based on cloud resource metadata, tags, and accounts.
+	EntrypointsCloud = []Entrypoint{
+		EntrypointCloudScanReport,
+		EntrypointCloudScanVulnerability,
+	}
 
 	// AllEntrypoints contains every canonical entrypoint defined in Deputy.
-	AllEntrypoints = slices.Concat(EntrypointsProxy, EntrypointsScan, EntrypointsDiff, EntrypointsContainerDiff, EntrypointsSBOM, EntrypointsFix, EntrypointsTriage, EntrypointsDockerfile, EntrypointsSecrets, EntrypointsGraph, EntrypointsService, EntrypointsSandbox)
+	AllEntrypoints = slices.Concat(EntrypointsProxy, EntrypointsScan, EntrypointsDiff, EntrypointsContainerDiff, EntrypointsSBOM, EntrypointsFix, EntrypointsTriage, EntrypointsDockerfile, EntrypointsSecrets, EntrypointsGraph, EntrypointsService, EntrypointsSandbox, EntrypointsCloud)
 
 	allowedEntrypointsSet = buildEntrypointSet(AllEntrypoints)
-	allowedCommands       = []string{"proxy", "scan", "diff", "sbom", "fix", "triage", "secrets", "graph", "server", "sandbox", "exec"}
+	allowedCommands       = []string{"proxy", "scan", "diff", "sbom", "fix", "triage", "secrets", "graph", "server", "sandbox", "exec", "cloud"}
 	allowedCommandsSet    = buildSet(allowedCommands)
 )
 

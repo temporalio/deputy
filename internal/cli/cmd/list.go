@@ -38,15 +38,22 @@ func AddListCommand(root *cobra.Command, c *services.Clients) {
 		ecos                 []string
 		noHeader             bool
 		onlyDirect           bool
+		filter               string
+		pageSize             int32
+		pageToken            string
 	)
 
 	cmd := &cobra.Command{
 		Use:           "list [target]",
 		Aliases:       []string{"ls"},
-		Short:         "List dependencies in a target",
+		Short:         "List dependencies or available targets",
 		SilenceErrors: true,
 		SilenceUsage:  true,
-		Long: `List all dependencies in a target as Package URLs (PURLs).
+		Long: `List dependencies in a target, or list available targets in a collection.
+
+The target URI determines the behavior:
+• Specific targets (aws://ami/ami-xxx) → list packages inside
+• Collection targets (aws://amis) → list available targets
 
 SUPPORTED TARGETS:
 • Local directory or repository (default: current directory)
@@ -56,19 +63,25 @@ SUPPORTED TARGETS:
 • Go/Rust binary file (./myapp, /usr/local/bin/tool)
 • SBOM file (sbom.json, sbom.cdx, sbom.spdx)
 • Single PURL (pkg:golang/github.com/foo/bar@v1.0.0)
+• AWS resources (aws://ami/ami-xxx, aws://ebs-snapshot/snap-xxx)
 
-This command provides a flat list of all discovered dependencies, including
-transitive ones. It is designed for:
+COLLECTION TARGETS (list available targets):
+• aws://amis                     List available AMIs
+• aws://amis?owner=self          List your own AMIs
+• aws://amis?region=us-west-2    List AMIs in a specific region
+• aws://ebs-snapshots            List available EBS snapshots
+• docker://gcr.io/project/       List images in container registry
+• github://myorg/                List repos in GitHub organization
+
+OUTPUT FORMATS:
+• text: Tab-separated values (PURL, Direct/Indirect for packages; URI, Name for targets)
+• json: Structured JSON output with metadata
+
+This command provides a flat list designed for:
 • Scripting and automation (easy to grep/jq)
 • Inventory auditing
 • Verifying dependency detection
-• Comparing dependencies across git refs
-
-OUTPUT FORMATS:
-• text: Tab-separated values (PURL, Direct/Indirect)
-• json: Structured JSON output with metadata
-
-The output mirrors what would be included in an SBOM but in a more lightweight format.`,
+• Discovering cloud resources to scan`,
 		Example: `BASIC USAGE:
   # List dependencies in current repo
   deputy list
@@ -98,6 +111,21 @@ CONTAINER IMAGES:
   # Specify platform for multi-arch images
   deputy list --source remote --platform linux/amd64 nginx:latest
 
+AWS CLOUD RESOURCES:
+  # List available AMIs (collection)
+  deputy list aws://amis
+  deputy list aws://amis?owner=self
+  deputy list aws://amis?region=us-west-2&tags.env=prod
+
+  # List packages in a specific AMI
+  deputy list aws://ami/ami-0123456789abcdef0
+
+  # List available EBS snapshots (collection)
+  deputy list aws://ebs-snapshots?owner=self
+
+  # Scan discovered targets
+  deputy list aws://amis?owner=self -f json | jq -r '.discovered_targets[].uri' | xargs deputy scan
+
 BINARIES & SBOMS:
   # List dependencies compiled into a Go binary
   deputy list ./myapp
@@ -121,6 +149,20 @@ FILTERING & FORMATTING:
   deputy list --ecosystems go,npm
 
   # Save to file
+  deputy list --output deps.txt
+
+COLLECTION FILTERING (CEL expressions):
+  # Filter discovered targets with CEL
+  deputy list aws://amis --filter 'metadata["tags.env"] == "prod"'
+  deputy list github://myorg/ --filter 'name.startsWith("api-")'
+  deputy list docker://gcr.io/project/ --filter 'created_at > timestamp("2024-01-01T00:00:00Z")'
+
+PAGINATION (for large collections):
+  # Limit results
+  deputy list aws://amis --page-size 50
+
+  # Continue from previous page
+  deputy list aws://amis --page-token "next-page-token"
   deputy list --output deps.txt`,
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -156,6 +198,9 @@ FILTERING & FORMATTING:
 				OnlyDirect: onlyDirect,
 				Ref:        ref,
 				Platform:   platform,
+				PageSize:   pageSize,
+				PageToken:  pageToken,
+				Filter:     filter,
 			}
 			if len(ecos) > 0 && !(len(ecos) == 1 && ecos[0] == "all") {
 				opts.Ecosystems = ecos
@@ -168,6 +213,50 @@ FILTERING & FORMATTING:
 			}))
 			if err != nil {
 				return fmt.Errorf("list packages failed: %w", err)
+			}
+
+			var w io.Writer = cmd.OutOrStdout()
+			if outPath != "" && outPath != "-" {
+				f, err := os.Create(outPath)
+				if err != nil {
+					return fmt.Errorf("failed to create output file: %w", err)
+				}
+				defer f.Close()
+				w = f
+			}
+
+			// Handle collection responses (discovered targets) vs package responses
+			if resp.Msg.IsCollection {
+				// Sort discovered targets by URI for stable output
+				targets := resp.Msg.DiscoveredTargets
+				slices.SortFunc(targets, func(a, b *listv1.DiscoveredTarget) int {
+					return cmp.Compare(a.Uri, b.Uri)
+				})
+
+				switch strings.ToLower(format) {
+				case "", FormatText:
+					return writeDiscoveredTargetsText(w, targets, !noHeader)
+				case FormatTSV:
+					return writeDiscoveredTargetsTSV(w, targets, !noHeader)
+				case FormatJSON:
+					jsonOpts := protojson.MarshalOptions{
+						Multiline:       true,
+						Indent:          "  ",
+						EmitUnpopulated: false,
+						UseProtoNames:   true,
+					}
+					data, err := jsonOpts.Marshal(resp.Msg)
+					if err != nil {
+						return fmt.Errorf("marshal proto to JSON: %w", err)
+					}
+					if _, err := w.Write(data); err != nil {
+						return err
+					}
+					_, err = w.Write([]byte("\n"))
+					return err
+				default:
+					return flags.UnsupportedFormatError("--format", format, "text|tsv|json")
+				}
 			}
 
 			// Convert proto packages to ListItems
@@ -187,16 +276,6 @@ FILTERING & FORMATTING:
 				return cmp.Compare(a.Name, b.Name)
 			})
 
-			var w io.Writer = cmd.OutOrStdout()
-			if outPath != "" && outPath != "-" {
-				f, err := os.Create(outPath)
-				if err != nil {
-					return fmt.Errorf("failed to create output file: %w", err)
-				}
-				defer f.Close()
-				w = f
-			}
-
 			switch strings.ToLower(format) {
 			case "", FormatText:
 				return writeListText(w, items, !noHeader, false)
@@ -204,13 +283,13 @@ FILTERING & FORMATTING:
 				return writeListTSV(w, items, !noHeader, false)
 			case FormatJSON:
 				// Use protojson for consistent JSON output from proto response
-				opts := protojson.MarshalOptions{
+				jsonOpts := protojson.MarshalOptions{
 					Multiline:       true,
 					Indent:          "  ",
 					EmitUnpopulated: false,
 					UseProtoNames:   true,
 				}
-				data, err := opts.Marshal(resp.Msg)
+				data, err := jsonOpts.Marshal(resp.Msg)
 				if err != nil {
 					return fmt.Errorf("marshal proto to JSON: %w", err)
 				}
@@ -233,6 +312,11 @@ FILTERING & FORMATTING:
 	cmd.Flags().BoolVar(&onlyDirect, "only-direct", false, "Only include direct dependencies")
 	cmd.Flags().StringVarP(&source, "source", "s", "", "Target source type: remote, docker-daemon, tarball, oci-archive, oci-layout")
 	cmd.Flags().StringVar(&platform, "platform", "", "Platform for container images (os/arch[/variant])")
+
+	// Collection listing options
+	cmd.Flags().StringVar(&filter, "filter", "", "CEL expression to filter discovered targets (collections only)")
+	cmd.Flags().Int32Var(&pageSize, "page-size", 0, "Maximum number of results per page (collections only, default: 100)")
+	cmd.Flags().StringVar(&pageToken, "page-token", "", "Token to continue from a previous list operation (collections only)")
 
 	root.AddCommand(cmd)
 }
@@ -408,4 +492,88 @@ func filterOnlyDirect(items []ListItem) []ListItem {
 		}
 	}
 	return out
+}
+
+// writeDiscoveredTargetsText prints discovered targets in a human-readable table format.
+func writeDiscoveredTargetsText(w io.Writer, targets []*listv1.DiscoveredTarget, header bool) error {
+	uriH, nameH, descH := "TARGET", "NAME", "DESCRIPTION"
+	uriW, nameW := len(uriH), len(nameH)
+
+	for _, t := range targets {
+		if l := len(t.Uri); l > uriW {
+			uriW = l
+		}
+		if l := len(t.Name); l > nameW {
+			nameW = l
+		}
+	}
+
+	// Cap column widths for readability
+	if uriW > 60 {
+		uriW = 60
+	}
+	if nameW > 40 {
+		nameW = 40
+	}
+
+	pad := func(n int) string {
+		if n <= 0 {
+			return ""
+		}
+		return strings.Repeat(" ", n)
+	}
+
+	truncate := func(s string, max int) string {
+		if len(s) <= max {
+			return s
+		}
+		return s[:max-3] + "..."
+	}
+
+	if header {
+		fmt.Fprintf(w, "%s%s%s%s%s\n",
+			ui.StyleHeader.Render(uriH),
+			pad(uriW-len(uriH)+2),
+			ui.StyleHeader.Render(nameH),
+			pad(nameW-len(nameH)+2),
+			ui.StyleHeader.Render(descH))
+	}
+
+	for _, t := range targets {
+		uri := truncate(t.Uri, uriW)
+		name := truncate(t.Name, nameW)
+		desc := t.Description
+		if len(desc) > 60 {
+			desc = desc[:57] + "..."
+		}
+		fmt.Fprintf(w, "%s%s%s%s%s\n",
+			uri,
+			pad(uriW-len(uri)+2),
+			name,
+			pad(nameW-len(name)+2),
+			desc)
+	}
+
+	// Print summary
+	if len(targets) > 0 {
+		fmt.Fprintf(w, "\n%s\n", ui.StyleHeader.Render("Summary:"))
+		fmt.Fprintf(w, "  %d targets discovered\n", len(targets))
+	}
+
+	return nil
+}
+
+// writeDiscoveredTargetsTSV prints discovered targets in TSV format.
+func writeDiscoveredTargetsTSV(w io.Writer, targets []*listv1.DiscoveredTarget, header bool) error {
+	if header {
+		fmt.Fprintln(w, "uri\tname\tdescription\tcreated_at")
+	}
+	for _, t := range targets {
+		createdAt := ""
+		if t.CreatedAt != nil {
+			createdAt = t.CreatedAt.AsTime().Format("2006-01-02T15:04:05Z")
+		}
+		fmt.Fprintf(w, "%s\t%s\t%s\t%s\n", t.Uri, t.Name, t.Description, createdAt)
+	}
+	return nil
 }

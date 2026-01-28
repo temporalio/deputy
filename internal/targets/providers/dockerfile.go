@@ -27,7 +27,7 @@ func (dockerfileProvider) Detect(_ context.Context, target string) bool {
 }
 
 // Open parses and materializes a Dockerfile target.
-func (dockerfileProvider) Open(ctx context.Context, target string, opts map[string]string) (targets.Materialized, error) {
+func (dockerfileProvider) Open(ctx context.Context, target string, opts *targets.OpenOptions) (targets.Materialized, error) {
 	path, err := filepath.Abs(target)
 	if err != nil {
 		return targets.Materialized{}, err

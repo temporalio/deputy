@@ -54,7 +54,7 @@ func (localGitProvider) Detect(_ context.Context, target string) bool {
 }
 
 // Open materializes a local Git repository target.
-func (localGitProvider) Open(ctx context.Context, target string, opts map[string]string) (targets.Materialized, error) {
+func (localGitProvider) Open(ctx context.Context, target string, opts *targets.OpenOptions) (targets.Materialized, error) {
 	path := targetPath(target)
 	if path == "" {
 		return targets.Materialized{}, fmt.Errorf("git target %q not found", target)
@@ -98,7 +98,7 @@ func (localDirProvider) Detect(_ context.Context, target string) bool {
 }
 
 // Open materializes a local directory target.
-func (localDirProvider) Open(ctx context.Context, target string, opts map[string]string) (targets.Materialized, error) {
+func (localDirProvider) Open(ctx context.Context, target string, opts *targets.OpenOptions) (targets.Materialized, error) {
 	path := targetPath(target)
 	if path == "" {
 		return targets.Materialized{}, fmt.Errorf("directory %q not found", target)
@@ -142,10 +142,11 @@ func (remoteGitProvider) Detect(_ context.Context, target string) bool {
 }
 
 // Open materializes a remote Git repository target by cloning it.
-func (remoteGitProvider) Open(ctx context.Context, target string, opts map[string]string) (targets.Materialized, error) {
+func (remoteGitProvider) Open(ctx context.Context, target string, opts *targets.OpenOptions) (targets.Materialized, error) {
 	ref := ""
-	if opts != nil {
-		ref = opts["ref"]
+	if opts != nil && opts.Context != nil {
+		// Git ref can be passed via Extra
+		ref = opts.Context.Extra["ref"]
 	}
 	urlStr := target
 	if !looksLikeRemoteURL(urlStr) {

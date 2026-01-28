@@ -423,9 +423,9 @@ func (h *InventoryHandler) routeCollection(ctx context.Context, target, ref stri
 
 	switch kind {
 	case targets.KindContainerImage:
-		targetOpts := map[string]string{}
+		targetOpts := &targets.OpenOptions{}
 		if opts.Platform != "" {
-			targetOpts["platform"] = opts.Platform
+			targetOpts.Platform = opts.Platform
 		}
 		return inventory.CollectContainerImage(ctx, target, targetOpts, inventory.Options{Ecosystems: opts.Ecosystems})
 

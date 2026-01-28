@@ -118,8 +118,14 @@ func (h *ScanHandler) Scan(
 		imageTransport = req.Msg.Options.TargetHint.ImageTransport
 	}
 
+	// Get cloud options if provided
+	var cloudOpts *scanv1.CloudOptions
+	if req.Msg.Options != nil {
+		cloudOpts = req.Msg.Options.CloudOptions
+	}
+
 	// Route to appropriate scanner based on target type
-	execution, err := h.routeScan(ctx, target, ref, refProvided, kind, imageTransport, opts)
+	execution, err := h.routeScan(ctx, target, ref, refProvided, kind, imageTransport, cloudOpts, opts)
 	if err != nil {
 		otel.SetSpanError(span, err)
 		logs.Error(ctx, "scan failed", "target", target, "error", err)
@@ -164,7 +170,7 @@ func (h *ScanHandler) Scan(
 //   - Local filesystem paths are rejected by validateTarget before this is called
 //   - Only remote-accessible targets are allowed: git URLs, container registries, PURLs
 //   - stdin SBOM ("-") is rejected; clients must upload SBOM bytes instead
-func (h *ScanHandler) routeScan(ctx context.Context, target, ref string, refProvided bool, kind targets.Kind, imageTransport string, opts scanning.Options) (*scanning.Execution, error) {
+func (h *ScanHandler) routeScan(ctx context.Context, target, ref string, refProvided bool, kind targets.Kind, imageTransport string, cloudOpts *scanv1.CloudOptions, opts scanning.Options) (*scanning.Execution, error) {
 	// For server mode, we only support remote-accessible targets.
 	// Local-only types (Dir, SBOM files, Dockerfiles) are rejected by validateTarget
 	// or fall through to repository scan.
@@ -173,17 +179,44 @@ func (h *ScanHandler) routeScan(ctx context.Context, target, ref string, refProv
 		return scanning.ScanPURL(ctx, target, opts)
 
 	case targets.KindContainerImage:
-		targetOpts := map[string]string{}
+		targetOpts := &targets.OpenOptions{}
 		if opts.Platform != "" {
-			targetOpts["platform"] = opts.Platform
+			targetOpts.Platform = opts.Platform
 		}
 		if imageTransport != "" {
-			targetOpts["transport"] = imageTransport
+			if targetOpts.Context == nil {
+				targetOpts.Context = &targets.ProviderContext{}
+			}
+			if targetOpts.Context.Extra == nil {
+				targetOpts.Context.Extra = make(map[string]string)
+			}
+			targetOpts.Context.Extra["transport"] = imageTransport
 		}
 		return scanning.ScanContainerImage(ctx, target, targetOpts, opts)
 
 	case targets.KindVMImage:
 		return scanning.ScanVMImage(ctx, target, nil, opts)
+
+	case targets.KindCloudResource:
+		targetOpts := &targets.OpenOptions{}
+		if cloudOpts != nil {
+			if targetOpts.Context == nil {
+				targetOpts.Context = &targets.ProviderContext{}
+			}
+			if targetOpts.Context.Extra == nil {
+				targetOpts.Context.Extra = make(map[string]string)
+			}
+			if cloudOpts.Profile != "" {
+				targetOpts.Context.Extra["profile"] = cloudOpts.Profile
+			}
+			if cloudOpts.Region != "" {
+				targetOpts.Context.AWSRegion = cloudOpts.Region
+			}
+			if cloudOpts.Account != "" {
+				targetOpts.Context.AWSOwner = cloudOpts.Account
+			}
+		}
+		return scanning.ScanCloudResource(ctx, target, targetOpts, opts)
 
 	case targets.KindGit:
 		return scanning.ScanRepository(ctx, target, ref, refProvided, opts)
@@ -280,6 +313,12 @@ func (h *ScanHandler) StreamScan(
 		imageTransport = req.Msg.Options.TargetHint.ImageTransport
 	}
 
+	// Get cloud options if provided
+	var cloudOpts *scanv1.CloudOptions
+	if req.Msg.Options != nil {
+		cloudOpts = req.Msg.Options.CloudOptions
+	}
+
 	// Send extracting inventory phase
 	if err := stream.Send(&scanv1.ScanProgress{
 		Phase:   scanv1.ScanPhase_SCAN_PHASE_EXTRACTING_INVENTORY,
@@ -289,7 +328,7 @@ func (h *ScanHandler) StreamScan(
 	}
 
 	// Perform the scan using unified routing
-	execution, err := h.routeScan(ctx, target, ref, refProvided, kind, imageTransport, opts)
+	execution, err := h.routeScan(ctx, target, ref, refProvided, kind, imageTransport, cloudOpts, opts)
 	if err != nil {
 		otel.SetSpanError(span, err)
 		// Send failed phase

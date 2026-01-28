@@ -4,6 +4,7 @@ import (
 	"context"
 	"io/fs"
 
+	listv1 "github.com/picatz/deputy/gen/deputy/list/v1"
 	targetv1 "github.com/picatz/deputy/gen/deputy/target/v1"
 )
 
@@ -25,6 +26,7 @@ const (
 	KindSBOM              = targetv1.TargetKind_TARGET_KIND_SBOM
 	KindPURL              = targetv1.TargetKind_TARGET_KIND_PURL
 	KindDockerfile        = targetv1.TargetKind_TARGET_KIND_DOCKERFILE
+	KindCloudResource     = targetv1.TargetKind_TARGET_KIND_CLOUD_RESOURCE
 )
 
 // Descriptor captures normalized user input (Target) alongside inferred or
@@ -33,7 +35,7 @@ const (
 type Descriptor struct {
 	Kind       Kind
 	Target     string            // user-supplied target
-	Options    map[string]string // normalized CLI options
+	Options    *OpenOptions      // typed options for opening/scanning
 	Provenance map[string]string // ref, digest, origin URL, etc.
 }
 
@@ -52,7 +54,7 @@ type Materialized struct {
 // Provider is implemented by adapters for concrete target kinds.
 type Provider interface {
 	Detect(ctx context.Context, target string) bool
-	Open(ctx context.Context, target string, opts map[string]string) (Materialized, error)
+	Open(ctx context.Context, target string, opts *OpenOptions) (Materialized, error)
 }
 
 // PriorityProvider optionally influences provider selection when multiple
@@ -64,5 +66,43 @@ type PriorityProvider interface {
 // Registry holds a set of providers used to discover and open targets.
 type Registry interface {
 	Register(p Provider)
-	Open(ctx context.Context, target string, opts map[string]string) (Materialized, error)
+	Open(ctx context.Context, target string, opts *OpenOptions) (Materialized, error)
+}
+
+
+// ListResult contains the results of a collection List operation.
+// This struct allows providers to return pagination tokens and other
+// metadata alongside the discovered targets.
+type ListResult struct {
+	// Targets are the discovered targets for this page.
+	Targets []*listv1.DiscoveredTarget
+
+	// NextPageToken is set when more results are available.
+	// Pass this value as PageToken in the next request to continue.
+	// Empty string indicates this is the last page.
+	NextPageToken string
+}
+
+// CollectionProvider extends Provider with collection listing support.
+// Providers that can enumerate available targets (e.g., AWS AMIs in an account,
+// images in a container registry) implement this interface.
+//
+// The URI pattern distinguishes collections from specific targets:
+//   - aws://amis           → collection (list available AMIs)
+//   - aws://ami/ami-xxx    → specific target (open for scanning)
+//   - docker://gcr.io/p/   → collection (list images in registry path)
+//   - docker://nginx:1.25  → specific target (open for scanning)
+type CollectionProvider interface {
+	Provider
+
+	// IsCollection returns true if the target URI represents a collection
+	// rather than a specific target. Collection URIs trigger List() instead
+	// of Open().
+	IsCollection(ctx context.Context, target string) bool
+
+	// List enumerates targets within a collection. The target URI may include
+	// query parameters for filtering (e.g., aws://amis?owner=self).
+	// Returns a ListResult containing discovered targets and pagination info.
+	// Uses the proto-defined DiscoveredTarget for CEL filtering compatibility.
+	List(ctx context.Context, target string, opts *ListOptions) (*ListResult, error)
 }

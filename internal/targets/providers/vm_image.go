@@ -48,7 +48,7 @@ func (vmImageProvider) Detect(_ context.Context, target string) bool {
 	return false
 }
 
-func (vmImageProvider) Open(ctx context.Context, target string, opts map[string]string) (targets.Materialized, error) {
+func (vmImageProvider) Open(ctx context.Context, target string, opts *targets.OpenOptions) (targets.Materialized, error) {
 	// Parse target to get the path
 	path, isRootfs := parseVMTarget(target)
 	if path == "" {
@@ -84,7 +84,10 @@ func (vmImageProvider) Open(ctx context.Context, target string, opts map[string]
 	meta.Provenance["format"] = disk.Format()
 
 	// Determine how to handle partitions
-	partitionOpt := strings.TrimSpace(opts["partition"])
+	partitionOpt := ""
+	if opts != nil && opts.Context != nil {
+		partitionOpt = strings.TrimSpace(opts.Context.Extra["partition"])
+	}
 
 	var fsFS fs.FS
 	var cleanup func()

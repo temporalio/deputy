@@ -1,0 +1,154 @@
+// Example: Same plugin using the SDK (simpler API)
+//
+// This file shows how the local-cloud plugin could be written using the SDK.
+// Compare with main.go to see the difference in complexity.
+//
+// To use: rename to main.go and delete the original main.go
+package main
+
+import (
+	"context"
+	"fmt"
+	"iter"
+	"os"
+	"path/filepath"
+	"strings"
+
+	"github.com/picatz/deputy/sdk/cloudplugin"
+	"gopkg.in/yaml.v3"
+)
+
+func main() {
+	cloudplugin.Main(&localProvider{})
+}
+
+type localProvider struct{}
+
+func (p *localProvider) Info() cloudplugin.ProviderInfo {
+	return cloudplugin.ProviderInfo{
+		Name:          "local",
+		DisplayName:   "Local Filesystem",
+		Version:       "1.0.0",
+		Description:   "Treats local directories as cloud resources for testing",
+		Schemes:       []string{"local://"},
+		ResourceTypes: []string{"ami", "snapshot", "disk"},
+		Capabilities: cloudplugin.Capabilities{
+			StreamingProgress: true,
+			SecretsScanning:   true,
+		},
+	}
+}
+
+func (p *localProvider) Detect(ctx context.Context, target string) (*cloudplugin.DetectResult, error) {
+	if !strings.HasPrefix(target, "local://") {
+		return &cloudplugin.DetectResult{Detected: false}, nil
+	}
+
+	rest := strings.TrimPrefix(target, "local://")
+	parts := strings.SplitN(rest, "/", 2)
+	if len(parts) < 2 {
+		return &cloudplugin.DetectResult{Detected: false}, nil
+	}
+
+	return &cloudplugin.DetectResult{
+		Detected:     true,
+		Scheme:       "local://",
+		ResourceType: parts[0],
+		ResourceID:   parts[1],
+	}, nil
+}
+
+func (p *localProvider) Open(ctx context.Context, req cloudplugin.OpenRequest) iter.Seq[cloudplugin.OpenEvent] {
+	return func(yield func(cloudplugin.OpenEvent) bool) {
+		// Parse target
+		rest := strings.TrimPrefix(req.Target, "local://")
+		parts := strings.SplitN(rest, "/", 2)
+		if len(parts) < 2 {
+			yield(cloudplugin.ErrorEvent{
+				Message:     "invalid target format",
+				Code:        "INVALID_TARGET",
+				Remediation: "Use format: local://type/path",
+			})
+			return
+		}
+
+		resourceType := parts[0]
+		resourcePath := parts[1]
+
+		// Resolve and validate path
+		absPath, err := filepath.Abs(resourcePath)
+		if err != nil {
+			yield(cloudplugin.ErrorEvent{
+				Message: fmt.Sprintf("failed to resolve path: %v", err),
+				Code:    "PATH_ERROR",
+			})
+			return
+		}
+
+		info, err := os.Stat(absPath)
+		if err != nil || !info.IsDir() {
+			yield(cloudplugin.ErrorEvent{
+				Message:     "path does not exist or is not a directory",
+				Code:        "NOT_FOUND",
+				Remediation: fmt.Sprintf("Create directory: mkdir -p %s", absPath),
+			})
+			return
+		}
+
+		// Progress
+		if !yield(cloudplugin.ProgressEvent{
+			Phase:   "resolving",
+			Message: "Resolving local resource...",
+			Percent: 50,
+		}) {
+			return
+		}
+
+		// Load metadata
+		metadata := loadMetadata(absPath, resourceType)
+
+		// Ready
+		yield(cloudplugin.ReadyEvent{
+			Resource: cloudplugin.ResourceInfo{
+				Provider:    "local",
+				Type:        resourceType,
+				ID:          absPath,
+				Region:      metadata.Region,
+				AccountID:   metadata.AccountID,
+				Name:        metadata.Name,
+				Description: fmt.Sprintf("Local %s resource", resourceType),
+				Tags:        metadata.Tags,
+			},
+			LocalPath: absPath,
+		})
+	}
+}
+
+func (p *localProvider) Close(ctx context.Context, requestID string) error {
+	return nil // Nothing to clean up for local files
+}
+
+type resourceMetadata struct {
+	Region    string            `yaml:"region"`
+	AccountID string            `yaml:"account_id"`
+	Name      string            `yaml:"name"`
+	Tags      map[string]string `yaml:"tags"`
+}
+
+func loadMetadata(path, resourceType string) *resourceMetadata {
+	metadata := &resourceMetadata{
+		Region:    "local-1",
+		AccountID: "000000000000",
+		Name:      filepath.Base(path),
+		Tags:      make(map[string]string),
+	}
+
+	configPath := filepath.Join(path, ".deputy-cloud.yaml")
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		return metadata
+	}
+
+	yaml.Unmarshal(data, metadata)
+	return metadata
+}

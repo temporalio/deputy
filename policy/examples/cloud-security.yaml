@@ -1,0 +1,275 @@
+# Cloud Resource Security Policies
+#
+# Comprehensive security policies for cloud resource scanning using Deputy's
+# cloud scanning capabilities. These policies enable enforcement based on
+# cloud resource metadata, tags, regions, and vulnerability findings.
+#
+# Available Variables for Cloud Policies:
+#   resource.provider      - Cloud provider: "aws", "azure", "gcp", "plugin:<name>"
+#   resource.resource_type - Resource type: "ami", "ebs-snapshot", "lambda", etc.
+#   resource.resource_id   - Provider-specific resource identifier
+#   resource.region        - Cloud region (e.g., "us-east-1")
+#   resource.account_id    - Account/subscription/project identifier
+#   resource.tags          - Resource tags/labels (map)
+#
+# For vulnerability-specific policies:
+#   vulnerability.*        - Standard vulnerability fields (id, severity, etc.)
+#   pkg.*                  - Package information
+#
+# Entrypoints:
+#   cloud_scan_report          - Full scan report with all vulnerabilities
+#   cloud_scan_vulnerability   - Per-vulnerability evaluation
+#   service_cloud_scan_request - API authorization for cloud scans
+#
+# Example Usage:
+#   deputy scan aws://ami/ami-xxx --policy policy/examples/cloud-security.yaml
+#   deputy scan local://ami/./testdata/rootfs --policy policy/examples/cloud-security.yaml
+
+policies:
+  # ==========================================
+  # Production Resource Security
+  # ==========================================
+
+  - name: production-critical-vulns
+    description: Block production resources with critical vulnerabilities
+    entrypoints: ["cloud_scan_vulnerability"]
+    rules:
+      - action: deny
+        when: |
+          has(resource.tags) &&
+          resource.tags.exists(k, k.lowerAscii() == "environment") &&
+          resource.tags.filter(k, k.lowerAscii() == "environment")[0] in ["production", "prod"] &&
+          vulnerability.severity == severity.CRITICAL
+        reason: "Critical vulnerability found in production cloud resource"
+        remediation: "Address critical vulnerabilities before deploying to production"
+
+  - name: production-high-vulns-warn
+    description: Warn on high-severity vulns in production resources
+    entrypoints: ["cloud_scan_vulnerability"]
+    rules:
+      - action: warn
+        when: |
+          has(resource.tags) &&
+          resource.tags.exists(k, k.lowerAscii() == "environment") &&
+          resource.tags.filter(k, k.lowerAscii() == "environment")[0] in ["production", "prod"] &&
+          vulnerability.severity == severity.HIGH
+        reason: "High-severity vulnerability found in production cloud resource"
+        remediation: "Schedule remediation for high-severity vulnerabilities"
+
+  # ==========================================
+  # Region and Account Governance
+  # ==========================================
+
+  - name: allowed-regions
+    description: Restrict scanning to approved regions
+    entrypoints: ["cloud_scan_report", "service_cloud_scan_request"]
+    vars:
+      allowedRegions:
+        - "us-east-1"
+        - "us-west-2"
+        - "eu-west-1"
+    rules:
+      - action: deny
+        when: |
+          resource.region != "" &&
+          !(resource.region in allowedRegions)
+        reason: "Cloud resource is in unapproved region"
+        remediation: "Only scan resources in approved regions"
+
+  - name: account-allowlist
+    description: Only allow scanning of approved accounts
+    entrypoints: ["service_cloud_scan_request"]
+    vars:
+      allowedAccounts:
+        - "123456789012"
+        - "234567890123"
+        - "000000000000"  # Local plugin test account
+    rules:
+      - action: deny
+        when: |
+          resource.account_id != "" &&
+          !(resource.account_id in allowedAccounts)
+        reason: "Cloud account not in approved list"
+        remediation: "Request access for additional accounts through security team"
+
+  # ==========================================
+  # Resource Type Specific Policies
+  # ==========================================
+
+  - name: ami-vulnerability-baseline
+    description: AMIs must meet vulnerability baseline
+    entrypoints: ["cloud_scan_report"]
+    vars:
+      maxCritical: 0
+      maxHigh: 5
+    rules:
+      - action: deny
+        when: |
+          resource.resource_type == "ami" &&
+          vulnerabilities.filter(v, v.severity == severity.CRITICAL).size() > maxCritical
+        reason: "AMI exceeds critical vulnerability limit"
+        remediation: "Rebuild AMI with patched packages"
+      - action: warn
+        when: |
+          resource.resource_type == "ami" &&
+          vulnerabilities.filter(v, v.severity == severity.HIGH).size() > maxHigh
+        reason: "AMI exceeds high vulnerability threshold"
+        remediation: "Schedule AMI rebuild to address high-severity vulnerabilities"
+
+  - name: ebs-snapshot-encryption-tag
+    description: EBS snapshots should be tagged with encryption status
+    entrypoints: ["cloud_scan_report"]
+    rules:
+      - action: warn
+        when: |
+          resource.resource_type == "ebs-snapshot" &&
+          has(resource.tags) &&
+          !resource.tags.exists(k, k.lowerAscii() == "encrypted")
+        reason: "EBS snapshot missing encryption tag"
+        remediation: "Add 'encrypted' tag to track encryption status"
+
+  - name: lambda-runtime-vulnerabilities
+    description: Lambda functions with runtime vulnerabilities
+    entrypoints: ["cloud_scan_vulnerability"]
+    rules:
+      - action: deny
+        when: |
+          resource.resource_type == "lambda" &&
+          vulnerability.severity in [severity.CRITICAL, severity.HIGH] &&
+          pkg.ecosystem in ["npm", "pypi", "rubygems"]
+        reason: "Lambda function has critical/high vulnerability in runtime dependencies"
+        remediation: "Update Lambda function dependencies"
+
+  # ==========================================
+  # Tag-Based Security Policies
+  # ==========================================
+
+  - name: require-owner-tag
+    description: Require owner tag for governance
+    entrypoints: ["cloud_scan_report"]
+    rules:
+      - action: warn
+        when: |
+          has(resource.tags) &&
+          !resource.tags.exists(k, k.lowerAscii() == "owner")
+        reason: "Cloud resource missing owner tag"
+        remediation: "Add 'owner' tag for accountability and incident response"
+
+  - name: require-data-classification
+    description: Resources handling sensitive data must be classified
+    entrypoints: ["cloud_scan_report"]
+    rules:
+      - action: warn
+        when: |
+          has(resource.tags) &&
+          resource.tags.exists(k, k.lowerAscii() == "data-type") &&
+          resource.tags.filter(k, k.lowerAscii() == "data-type")[0] in ["pii", "phi", "financial"] &&
+          !resource.tags.exists(k, k.lowerAscii() == "data-classification")
+        reason: "Resource handles sensitive data but lacks classification tag"
+        remediation: "Add 'data-classification' tag (public, internal, confidential, restricted)"
+
+  - name: compliance-tagged-resources
+    description: Compliance-tagged resources have stricter requirements
+    entrypoints: ["cloud_scan_vulnerability"]
+    vars:
+      complianceFrameworks:
+        - "pci-dss"
+        - "hipaa"
+        - "sox"
+        - "fedramp"
+    rules:
+      - action: deny
+        when: |
+          has(resource.tags) &&
+          resource.tags.exists(k, k.lowerAscii() == "compliance") &&
+          complianceFrameworks.exists(f,
+            resource.tags.filter(k, k.lowerAscii() == "compliance")[0].lowerAscii().contains(f)) &&
+          vulnerability.severity in [severity.CRITICAL, severity.HIGH]
+        reason: "Compliance-regulated resource has critical/high vulnerability"
+        remediation: "Remediate vulnerability immediately for compliance requirements"
+
+  # ==========================================
+  # Provider-Specific Policies
+  # ==========================================
+
+  - name: aws-gov-cloud-restrictions
+    description: GovCloud resources require enhanced security
+    entrypoints: ["cloud_scan_report"]
+    rules:
+      - action: deny
+        when: |
+          resource.provider == "aws" &&
+          resource.region.startsWith("us-gov-") &&
+          vulnerabilities.exists(v, v.severity == severity.CRITICAL)
+        reason: "GovCloud resource has critical vulnerability"
+        remediation: "Address all critical vulnerabilities for GovCloud compliance"
+
+  - name: azure-sovereign-cloud
+    description: Azure sovereign cloud restrictions
+    entrypoints: ["cloud_scan_report"]
+    rules:
+      - action: deny
+        when: |
+          resource.provider == "azure" &&
+          (resource.region.contains("china") || resource.region.contains("germany")) &&
+          vulnerabilities.exists(v, v.severity == severity.CRITICAL)
+        reason: "Sovereign cloud resource has critical vulnerability"
+        remediation: "Address critical vulnerabilities for sovereign cloud compliance"
+
+  # ==========================================
+  # Age and Freshness Policies
+  # ==========================================
+
+  - name: warn-vulnerable-golden-image
+    description: Golden images should be vulnerability-free
+    entrypoints: ["cloud_scan_report"]
+    rules:
+      - action: warn
+        when: |
+          has(resource.tags) &&
+          resource.tags.exists(k, k.lowerAscii() == "image-type") &&
+          resource.tags.filter(k, k.lowerAscii() == "image-type")[0].lowerAscii() == "golden" &&
+          vulnerabilities.size() > 0
+        reason: "Golden image has vulnerabilities"
+        remediation: "Rebuild golden image with latest security patches"
+
+  - name: deprecated-ami-warning
+    description: Warn when scanning deprecated AMIs
+    entrypoints: ["cloud_scan_report"]
+    rules:
+      - action: warn
+        when: |
+          resource.resource_type == "ami" &&
+          has(resource.tags) &&
+          resource.tags.exists(k, k.lowerAscii() == "deprecated") &&
+          resource.tags.filter(k, k.lowerAscii() == "deprecated")[0].lowerAscii() in ["true", "yes", "1"]
+        reason: "Scanning a deprecated AMI"
+        remediation: "Use the latest version of this AMI"
+
+  # ==========================================
+  # Multi-Tenant / API Authorization
+  # ==========================================
+
+  - name: service-account-region-restriction
+    description: Service accounts can only scan their assigned regions
+    entrypoints: ["service_cloud_scan_request"]
+    rules:
+      - action: deny
+        when: |
+          has(jwt.claims) &&
+          has(jwt.claims.allowed_regions) &&
+          !(resource.region in jwt.claims.allowed_regions)
+        reason: "Service account not authorized for this region"
+        remediation: "Contact admin to expand region access"
+
+  - name: service-account-resource-type-restriction
+    description: Restrict resource types by service account
+    entrypoints: ["service_cloud_scan_request"]
+    rules:
+      - action: deny
+        when: |
+          has(jwt.claims) &&
+          has(jwt.claims.allowed_resource_types) &&
+          !(resource.resource_type in jwt.claims.allowed_resource_types)
+        reason: "Service account not authorized for this resource type"
+        remediation: "Contact admin to expand resource type access"

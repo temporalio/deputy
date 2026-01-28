@@ -9,6 +9,8 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+
+	"github.com/picatz/deputy/internal/targets"
 )
 
 func TestValidateImageTarballPathOCIImageLayout(t *testing.T) {
@@ -427,7 +429,11 @@ func TestSelectOCIManifest(t *testing.T) {
 				Annotations: map[string]string{"org.opencontainers.image.ref.name": "v2.0"},
 			},
 		}
-		got, err := selectOCIManifest(manifests, map[string]string{"tag": "v2.0"})
+		got, err := selectOCIManifest(manifests, &targets.OpenOptions{
+			Context: &targets.ProviderContext{
+				Extra: map[string]string{"tag": "v2.0"},
+			},
+		})
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -449,7 +455,7 @@ func TestSelectOCIManifest(t *testing.T) {
 				Platform: &ociPlatform{OS: "linux", Architecture: "arm64"},
 			},
 		}
-		got, err := selectOCIManifest(manifests, map[string]string{"platform": "linux/arm64"})
+		got, err := selectOCIManifest(manifests, &targets.OpenOptions{Platform: "linux/arm64"})
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -471,7 +477,11 @@ func TestSelectOCIManifest(t *testing.T) {
 				Annotations: map[string]string{"org.opencontainers.image.ref.name": "v2.0"},
 			},
 		}
-		_, err := selectOCIManifest(manifests, map[string]string{"tag": "nonexistent"})
+		_, err := selectOCIManifest(manifests, &targets.OpenOptions{
+			Context: &targets.ProviderContext{
+				Extra: map[string]string{"tag": "nonexistent"},
+			},
+		})
 		if err == nil {
 			t.Fatal("expected error for nonexistent tag")
 		}
@@ -490,7 +500,7 @@ func TestSelectOCIManifest(t *testing.T) {
 				Platform: &ociPlatform{OS: "linux", Architecture: "ppc64le"},
 			},
 		}
-		_, err := selectOCIManifest(manifests, map[string]string{"platform": "linux/arm64"})
+		_, err := selectOCIManifest(manifests, &targets.OpenOptions{Platform: "linux/arm64"})
 		if err == nil {
 			t.Fatal("expected error for nonexistent platform")
 		}
@@ -659,7 +669,7 @@ func TestPlatformNotFoundShowsAvailablePlatforms(t *testing.T) {
 			Platform: &ociPlatform{OS: "linux", Architecture: "arm64", Variant: "v8"},
 		},
 	}
-	_, err := selectOCIManifest(manifests, map[string]string{"platform": "windows/amd64"})
+	_, err := selectOCIManifest(manifests, &targets.OpenOptions{Platform: "windows/amd64"})
 	if err == nil {
 		t.Fatal("expected error for nonexistent platform")
 	}

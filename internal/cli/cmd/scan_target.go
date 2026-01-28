@@ -29,6 +29,15 @@ var scanVMImageSchemes = map[string]struct{}{
 	"rootfs": {}, // Rootfs filesystem image (rootfs:///path/to/rootfs.ext4)
 }
 
+// scanCloudSchemes are the URL schemes that indicate cloud resource targets.
+// These include built-in cloud providers and plugin-provided schemes.
+var scanCloudSchemes = map[string]struct{}{
+	"aws":   {}, // AWS resources (aws://ami/ami-xxx, aws://ebs/snap-xxx)
+	"azure": {}, // Azure resources (azure://disk/subscription/rg/name)
+	"gcp":   {}, // GCP resources (gcp://image/project/image-name)
+	"local": {}, // Local cloud plugin (local://ami/./path)
+}
+
 // scanVMImageExtensions are file extensions that indicate VM/rootfs images.
 var scanVMImageExtensions = map[string]struct{}{
 	".qcow2": {},
@@ -81,6 +90,29 @@ func isVMImageTarget(target string) bool {
 	// Check for VM image file extensions
 	ext := strings.ToLower(filepath.Ext(target))
 	if _, isVMExt := scanVMImageExtensions[ext]; isVMExt {
+		return true
+	}
+
+	return false
+}
+
+// isCloudResourceTarget returns true if the target is a cloud resource.
+// This includes built-in cloud providers (aws://, azure://, gcp://) and
+// plugin-provided cloud schemes (local://, openstack://, etc.).
+func isCloudResourceTarget(target string) bool {
+	target = strings.TrimSpace(target)
+	if target == "" {
+		return false
+	}
+
+	// Check for explicit cloud schemes
+	scheme, _, ok := strings.Cut(target, "://")
+	if !ok {
+		return false
+	}
+
+	// Check built-in cloud schemes
+	if _, isCloud := scanCloudSchemes[strings.ToLower(scheme)]; isCloud {
 		return true
 	}
 
@@ -266,8 +298,10 @@ func resolveSourceOverride(source string) (kind string, imageSource string, err 
 		return "vm", "", nil
 	case "rootfs", "filesystem":
 		return "rootfs", "", nil
+	case "cloud", "cloud-resource":
+		return "cloud", "", nil
 	default:
-		return "", "", fmt.Errorf("unknown --source %q; use auto, git, dir, sbom, purl, dockerfile, remote, docker-daemon, tarball, oci-layout, vm, rootfs", source)
+		return "", "", fmt.Errorf("unknown --source %q; use auto, git, dir, sbom, purl, dockerfile, remote, docker-daemon, tarball, oci-layout, vm, rootfs, cloud", source)
 	}
 }
 

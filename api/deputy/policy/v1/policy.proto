@@ -701,3 +701,34 @@ message ServiceGraphRequestPolicyInput {
   deputy.target.v1.Target target = 3;
   Environment env = 4;
 }
+
+// CloudResourceInfo provides cloud resource context for policy evaluation.
+// This is used in service_cloud_scan_request for authorization decisions.
+message CloudResourceInfo {
+  // Cloud provider name: "aws", "azure", "gcp", or plugin name.
+  string provider = 1;
+  // Resource type: "ami", "ebs-snapshot", "lambda", etc.
+  string resource_type = 2;
+  // Provider-specific resource identifier.
+  string resource_id = 3;
+  // Cloud region.
+  string region = 4;
+  // Account/subscription/project identifier.
+  string account_id = 5;
+  // Resource tags/labels.
+  map<string, string> tags = 6;
+}
+
+// ServiceCloudScanRequestPolicyInput is the input for service_cloud_scan_request entrypoint.
+// This entrypoint authorizes cloud resource scan requests before execution.
+message ServiceCloudScanRequestPolicyInput {
+  // JWT claims from authenticated requests.
+  JWTClaims jwt = 1;
+  // Service request metadata.
+  ServiceRequest request = 2;
+  // Cloud resource metadata for policy evaluation.
+  // Available fields: provider, resource_type, resource_id, region, account_id, tags.
+  CloudResourceInfo resource = 3;
+  // Execution environment context.
+  Environment env = 4;
+}

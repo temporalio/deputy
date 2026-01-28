@@ -58,9 +58,9 @@ func (h *ListHandler) routeCollection(ctx context.Context, target, ref string, r
 
 	switch kind {
 	case targets.KindContainerImage:
-		targetOpts := map[string]string{}
+		targetOpts := &targets.OpenOptions{}
 		if platform != "" {
-			targetOpts["platform"] = platform
+			targetOpts.Platform = platform
 		}
 		return inventory.CollectContainerImage(ctx, target, targetOpts, opts)
 
@@ -104,7 +104,7 @@ func isWorkingTreeRef(ref string) bool {
 	return u == "HEAD" || u == "WORKING" || u == "WORKTREE" || u == "WT"
 }
 
-// ListPackages enumerates packages in a target.
+// ListPackages enumerates packages in a target, or lists available targets for collections.
 func (h *ListHandler) ListPackages(
 	ctx context.Context,
 	req *connect.Request[listv1.ListPackagesRequest],
@@ -133,6 +133,12 @@ func (h *ListHandler) ListPackages(
 			otel.SetSpanError(span, err)
 			return nil, connect.NewError(connect.CodeInvalidArgument, err)
 		}
+	}
+
+	// Check if this is a collection target (e.g., aws://amis)
+	// Collection targets list available resources rather than packages within a resource
+	if targets.IsCollection(ctx, target) {
+		return h.listCollection(ctx, target, req.Msg.GetOptions())
 	}
 
 	opts := inventory.Options{}
@@ -255,6 +261,76 @@ func (h *ListHandler) ListPackages(
 			DirectPackages:     directCount,
 			TransitivePackages: transitiveCount,
 			Ecosystems:         ecosystemCounts,
+		},
+	}
+
+	return connect.NewResponse(resp), nil
+}
+
+// listCollection handles listing targets in a collection (e.g., aws://amis).
+func (h *ListHandler) listCollection(
+	ctx context.Context,
+	target string,
+	opts *listv1.ListOptions,
+) (*connect.Response[listv1.ListPackagesResponse], error) {
+	span := otel.SpanFromContext(ctx)
+
+	// Convert proto options to typed ListOptions
+	listOpts := &targets.ListOptions{}
+	if opts != nil {
+		// Pagination options
+		listOpts.PageSize = opts.PageSize
+		listOpts.PageToken = opts.PageToken
+
+		// CEL filter expression
+		if opts.Filter != "" {
+			listOpts.CELExpression = opts.Filter
+			// Validate the filter expression before proceeding
+			if err := targets.ValidateTargetFilter(opts.Filter); err != nil {
+				otel.SetSpanError(span, err)
+				return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("invalid filter: %w", err))
+			}
+		}
+
+		// Platform hint for context
+		if opts.Platform != "" {
+			if listOpts.Context == nil {
+				listOpts.Context = &targets.ProviderContext{}
+			}
+			if listOpts.Context.Extra == nil {
+				listOpts.Context.Extra = make(map[string]string)
+			}
+			listOpts.Context.Extra["platform"] = opts.Platform
+		}
+	}
+
+	// List targets from the collection
+	listResult, err := targets.List(ctx, target, listOpts)
+	if err != nil {
+		otel.SetSpanError(span, err)
+		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("list collection: %w", err))
+	}
+
+	discoveredTargets := listResult.Targets
+
+	// Apply CEL filter if specified
+	if listOpts.CELExpression != "" {
+		discoveredTargets, err = targets.FilterDiscoveredTargets(ctx, discoveredTargets, listOpts.CELExpression)
+		if err != nil {
+			otel.SetSpanError(span, err)
+			return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("filter targets: %w", err))
+		}
+	}
+
+	// Record count on span
+	span.SetAttributes(otel.AttrTargetPath.String(target))
+
+	resp := &listv1.ListPackagesResponse{
+		IsCollection:      true,
+		DiscoveredTargets: discoveredTargets,
+		NextPageToken:     listResult.NextPageToken,
+		Stats: &listv1.ListStats{
+			TotalPackages: int32(len(discoveredTargets)),
 		},
 	}
 

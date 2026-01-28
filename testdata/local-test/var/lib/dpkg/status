@@ -1,0 +1,27 @@
+Package: libc6
+Status: install ok installed
+Priority: required
+Section: libs
+Installed-Size: 10464
+Maintainer: Ubuntu Developers <ubuntu-devel-discuss@lists.ubuntu.com>
+Architecture: amd64
+Multi-Arch: same
+Source: glibc
+Version: 2.31-0ubuntu9.2
+Description: GNU C Library: Shared libraries
+ Contains the standard libraries that are used by nearly all programs on
+ the system.
+Homepage: https://www.gnu.org/software/libc/libc.html
+
+Package: openssl
+Status: install ok installed
+Priority: optional
+Section: utils
+Installed-Size: 1312
+Maintainer: Ubuntu Developers <ubuntu-devel-discuss@lists.ubuntu.com>
+Architecture: amd64
+Source: openssl
+Version: 1.1.1f-1ubuntu2
+Description: Secure Sockets Layer toolkit - cryptographic utility
+ This package contains the openssl binary and related tools.
+Homepage: https://www.openssl.org/

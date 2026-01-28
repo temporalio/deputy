@@ -1042,6 +1042,12 @@ func policyInterceptor(policies []policy.Source) connect.UnaryInterceptorFunc {
 		"/deputy.graph.v1.GraphService/Why":          policy.EntrypointServiceGraphRequest,
 	}
 
+	// Scan procedures that may be cloud scans
+	scanProcedures := map[string]bool{
+		"/deputy.scan.v1.ScanService/Scan":       true,
+		"/deputy.scan.v1.ScanService/StreamScan": true,
+	}
+
 	return func(next connect.UnaryFunc) connect.UnaryFunc {
 		return func(ctx context.Context, req connect.AnyRequest) (connect.AnyResponse, error) {
 			procedure := req.Spec().Procedure
@@ -1051,6 +1057,16 @@ func policyInterceptor(policies []policy.Source) connect.UnaryInterceptorFunc {
 			if !ok {
 				// No policy entrypoint for this procedure, allow by default
 				return next(ctx, req)
+			}
+
+			// For scan procedures, check if the target is a cloud resource
+			// and use the cloud scan entrypoint instead
+			var targetStr string
+			if msg := req.Any(); msg != nil {
+				targetStr = extractTargetFromMessage(msg)
+			}
+			if scanProcedures[procedure] && isCloudTarget(targetStr) {
+				entrypoint = policy.EntrypointServiceCloudScanRequest
 			}
 
 			// Build the policy payload
@@ -1207,6 +1223,18 @@ func buildPolicyPayload(ctx context.Context, req connect.AnyRequest, entrypoint 
 			Target:  target,
 			Env:     env,
 		}
+	case policy.EntrypointServiceCloudScanRequest:
+		// For cloud scans, parse the target URI to extract resource metadata
+		resource := parseCloudResourceInfo(svcReq.Target)
+		if resource == nil {
+			resource = &policyv1.CloudResourceInfo{}
+		}
+		return &policyv1.ServiceCloudScanRequestPolicyInput{
+			Jwt:      jwtClaims,
+			Request:  svcReq,
+			Resource: resource,
+			Env:      env,
+		}
 	default:
 		// Fallback to scan request for unknown entrypoints
 		return &policyv1.ServiceScanRequestPolicyInput{
@@ -1239,4 +1267,98 @@ func extractTargetFromMessage(msg any) string {
 	}
 
 	return ""
+}
+
+// isCloudTarget returns true if the target string represents a cloud resource.
+// Cloud targets use URI schemes: aws://, azure://, gcp://, local:// (for plugins).
+func isCloudTarget(target string) bool {
+	if target == "" {
+		return false
+	}
+	// Check for cloud provider URI schemes
+	return strings.HasPrefix(target, "aws://") ||
+		strings.HasPrefix(target, "azure://") ||
+		strings.HasPrefix(target, "gcp://") ||
+		strings.HasPrefix(target, "local://") // Plugin-based local cloud provider
+}
+
+// parseCloudResourceInfo extracts cloud resource metadata from a target URI.
+// Returns nil if the target is not a valid cloud resource URI.
+func parseCloudResourceInfo(target string) *policyv1.CloudResourceInfo {
+	if !isCloudTarget(target) {
+		return nil
+	}
+
+	info := &policyv1.CloudResourceInfo{}
+
+	// Parse based on scheme
+	switch {
+	case strings.HasPrefix(target, "aws://"):
+		info.Provider = "aws"
+		parseAWSResourceURI(target, info)
+	case strings.HasPrefix(target, "azure://"):
+		info.Provider = "azure"
+		parseAzureResourceURI(target, info)
+	case strings.HasPrefix(target, "gcp://"):
+		info.Provider = "gcp"
+		parseGCPResourceURI(target, info)
+	case strings.HasPrefix(target, "local://"):
+		info.Provider = "plugin:local"
+		parseLocalResourceURI(target, info)
+	}
+
+	return info
+}
+
+// parseAWSResourceURI extracts AWS resource info from URIs like:
+// aws://ami/ami-xxx, aws://ebs/snap-xxx, aws://lambda/func-name
+func parseAWSResourceURI(target string, info *policyv1.CloudResourceInfo) {
+	// Remove scheme
+	path := strings.TrimPrefix(target, "aws://")
+	parts := strings.SplitN(path, "/", 2)
+	if len(parts) < 2 {
+		return
+	}
+
+	info.ResourceType = parts[0]
+	info.ResourceId = parts[1]
+}
+
+// parseAzureResourceURI extracts Azure resource info from URIs like:
+// azure://disk/subscription/rg/disk-name
+func parseAzureResourceURI(target string, info *policyv1.CloudResourceInfo) {
+	path := strings.TrimPrefix(target, "azure://")
+	parts := strings.SplitN(path, "/", 2)
+	if len(parts) < 2 {
+		return
+	}
+
+	info.ResourceType = parts[0]
+	info.ResourceId = parts[1]
+}
+
+// parseGCPResourceURI extracts GCP resource info from URIs like:
+// gcp://image/project/image-name
+func parseGCPResourceURI(target string, info *policyv1.CloudResourceInfo) {
+	path := strings.TrimPrefix(target, "gcp://")
+	parts := strings.SplitN(path, "/", 2)
+	if len(parts) < 2 {
+		return
+	}
+
+	info.ResourceType = parts[0]
+	info.ResourceId = parts[1]
+}
+
+// parseLocalResourceURI extracts local plugin resource info from URIs like:
+// local://ami/./path/to/test
+func parseLocalResourceURI(target string, info *policyv1.CloudResourceInfo) {
+	path := strings.TrimPrefix(target, "local://")
+	parts := strings.SplitN(path, "/", 2)
+	if len(parts) < 2 {
+		return
+	}
+
+	info.ResourceType = parts[0]
+	info.ResourceId = parts[1]
 }

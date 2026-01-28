@@ -269,8 +269,11 @@ type ScanOptions struct {
 	// populating layer_details.in_base_image in the response packages.
 	// Only applies to container image targets. Requires network access and adds latency.
 	DetectBaseImage bool `protobuf:"varint,11,opt,name=detect_base_image,json=detectBaseImage,proto3" json:"detect_base_image,omitempty"`
-	unknownFields   protoimpl.UnknownFields
-	sizeCache       protoimpl.SizeCache
+	// CloudOptions configures cloud resource scanning.
+	// Only applies when kind is TARGET_KIND_CLOUD_RESOURCE.
+	CloudOptions  *CloudOptions `protobuf:"bytes,12,opt,name=cloud_options,json=cloudOptions,proto3" json:"cloud_options,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *ScanOptions) Reset() {
@@ -380,6 +383,85 @@ func (x *ScanOptions) GetDetectBaseImage() bool {
 	return false
 }
 
+func (x *ScanOptions) GetCloudOptions() *CloudOptions {
+	if x != nil {
+		return x.CloudOptions
+	}
+	return nil
+}
+
+// CloudOptions configures cloud resource scanning behavior.
+// These options are passed to cloud provider plugins and SDKs.
+type CloudOptions struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Profile is the cloud provider profile/credentials name.
+	// For AWS: AWS_PROFILE or named profile from ~/.aws/credentials
+	// For Azure: AZURE_SUBSCRIPTION_ID or managed identity
+	// For GCP: GOOGLE_APPLICATION_CREDENTIALS or service account
+	Profile string `protobuf:"bytes,1,opt,name=profile,proto3" json:"profile,omitempty"`
+	// Region overrides the default cloud region.
+	// Examples: "us-east-1" (AWS), "eastus" (Azure), "us-central1" (GCP)
+	Region string `protobuf:"bytes,2,opt,name=region,proto3" json:"region,omitempty"`
+	// Account is the cloud account identifier.
+	// For AWS: 12-digit account ID
+	// For Azure: subscription ID (UUID)
+	// For GCP: project ID
+	Account       string `protobuf:"bytes,3,opt,name=account,proto3" json:"account,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *CloudOptions) Reset() {
+	*x = CloudOptions{}
+	mi := &file_deputy_scan_v1_service_proto_msgTypes[3]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *CloudOptions) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*CloudOptions) ProtoMessage() {}
+
+func (x *CloudOptions) ProtoReflect() protoreflect.Message {
+	mi := &file_deputy_scan_v1_service_proto_msgTypes[3]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use CloudOptions.ProtoReflect.Descriptor instead.
+func (*CloudOptions) Descriptor() ([]byte, []int) {
+	return file_deputy_scan_v1_service_proto_rawDescGZIP(), []int{3}
+}
+
+func (x *CloudOptions) GetProfile() string {
+	if x != nil {
+		return x.Profile
+	}
+	return ""
+}
+
+func (x *CloudOptions) GetRegion() string {
+	if x != nil {
+		return x.Region
+	}
+	return ""
+}
+
+func (x *CloudOptions) GetAccount() string {
+	if x != nil {
+		return x.Account
+	}
+	return ""
+}
+
 // TargetHint disambiguates the target type when auto-detection is insufficient.
 //
 // Security Note: When connecting to a remote server, certain combinations are rejected:
@@ -405,7 +487,7 @@ type TargetHint struct {
 
 func (x *TargetHint) Reset() {
 	*x = TargetHint{}
-	mi := &file_deputy_scan_v1_service_proto_msgTypes[3]
+	mi := &file_deputy_scan_v1_service_proto_msgTypes[4]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -417,7 +499,7 @@ func (x *TargetHint) String() string {
 func (*TargetHint) ProtoMessage() {}
 
 func (x *TargetHint) ProtoReflect() protoreflect.Message {
-	mi := &file_deputy_scan_v1_service_proto_msgTypes[3]
+	mi := &file_deputy_scan_v1_service_proto_msgTypes[4]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -430,7 +512,7 @@ func (x *TargetHint) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TargetHint.ProtoReflect.Descriptor instead.
 func (*TargetHint) Descriptor() ([]byte, []int) {
-	return file_deputy_scan_v1_service_proto_rawDescGZIP(), []int{3}
+	return file_deputy_scan_v1_service_proto_rawDescGZIP(), []int{4}
 }
 
 func (x *TargetHint) GetKind() v1.TargetKind {
@@ -465,7 +547,7 @@ type GraphOptions struct {
 
 func (x *GraphOptions) Reset() {
 	*x = GraphOptions{}
-	mi := &file_deputy_scan_v1_service_proto_msgTypes[4]
+	mi := &file_deputy_scan_v1_service_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -477,7 +559,7 @@ func (x *GraphOptions) String() string {
 func (*GraphOptions) ProtoMessage() {}
 
 func (x *GraphOptions) ProtoReflect() protoreflect.Message {
-	mi := &file_deputy_scan_v1_service_proto_msgTypes[4]
+	mi := &file_deputy_scan_v1_service_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -490,7 +572,7 @@ func (x *GraphOptions) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GraphOptions.ProtoReflect.Descriptor instead.
 func (*GraphOptions) Descriptor() ([]byte, []int) {
-	return file_deputy_scan_v1_service_proto_rawDescGZIP(), []int{4}
+	return file_deputy_scan_v1_service_proto_rawDescGZIP(), []int{5}
 }
 
 func (x *GraphOptions) GetEnabled() bool {
@@ -536,7 +618,7 @@ type EnrichOptions struct {
 
 func (x *EnrichOptions) Reset() {
 	*x = EnrichOptions{}
-	mi := &file_deputy_scan_v1_service_proto_msgTypes[5]
+	mi := &file_deputy_scan_v1_service_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -548,7 +630,7 @@ func (x *EnrichOptions) String() string {
 func (*EnrichOptions) ProtoMessage() {}
 
 func (x *EnrichOptions) ProtoReflect() protoreflect.Message {
-	mi := &file_deputy_scan_v1_service_proto_msgTypes[5]
+	mi := &file_deputy_scan_v1_service_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -561,7 +643,7 @@ func (x *EnrichOptions) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use EnrichOptions.ProtoReflect.Descriptor instead.
 func (*EnrichOptions) Descriptor() ([]byte, []int) {
-	return file_deputy_scan_v1_service_proto_rawDescGZIP(), []int{5}
+	return file_deputy_scan_v1_service_proto_rawDescGZIP(), []int{6}
 }
 
 func (x *EnrichOptions) GetEnabled() bool {
@@ -624,7 +706,7 @@ type ScanResponse struct {
 
 func (x *ScanResponse) Reset() {
 	*x = ScanResponse{}
-	mi := &file_deputy_scan_v1_service_proto_msgTypes[6]
+	mi := &file_deputy_scan_v1_service_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -636,7 +718,7 @@ func (x *ScanResponse) String() string {
 func (*ScanResponse) ProtoMessage() {}
 
 func (x *ScanResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_deputy_scan_v1_service_proto_msgTypes[6]
+	mi := &file_deputy_scan_v1_service_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -649,7 +731,7 @@ func (x *ScanResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ScanResponse.ProtoReflect.Descriptor instead.
 func (*ScanResponse) Descriptor() ([]byte, []int) {
-	return file_deputy_scan_v1_service_proto_rawDescGZIP(), []int{6}
+	return file_deputy_scan_v1_service_proto_rawDescGZIP(), []int{7}
 }
 
 func (x *ScanResponse) GetTarget() *v1.Target {
@@ -773,7 +855,7 @@ type ScanProgress struct {
 
 func (x *ScanProgress) Reset() {
 	*x = ScanProgress{}
-	mi := &file_deputy_scan_v1_service_proto_msgTypes[7]
+	mi := &file_deputy_scan_v1_service_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -785,7 +867,7 @@ func (x *ScanProgress) String() string {
 func (*ScanProgress) ProtoMessage() {}
 
 func (x *ScanProgress) ProtoReflect() protoreflect.Message {
-	mi := &file_deputy_scan_v1_service_proto_msgTypes[7]
+	mi := &file_deputy_scan_v1_service_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -798,7 +880,7 @@ func (x *ScanProgress) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ScanProgress.ProtoReflect.Descriptor instead.
 func (*ScanProgress) Descriptor() ([]byte, []int) {
-	return file_deputy_scan_v1_service_proto_rawDescGZIP(), []int{7}
+	return file_deputy_scan_v1_service_proto_rawDescGZIP(), []int{8}
 }
 
 func (x *ScanProgress) GetPhase() ScanPhase {
@@ -865,7 +947,7 @@ type ImageInfo struct {
 
 func (x *ImageInfo) Reset() {
 	*x = ImageInfo{}
-	mi := &file_deputy_scan_v1_service_proto_msgTypes[8]
+	mi := &file_deputy_scan_v1_service_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -877,7 +959,7 @@ func (x *ImageInfo) String() string {
 func (*ImageInfo) ProtoMessage() {}
 
 func (x *ImageInfo) ProtoReflect() protoreflect.Message {
-	mi := &file_deputy_scan_v1_service_proto_msgTypes[8]
+	mi := &file_deputy_scan_v1_service_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -890,7 +972,7 @@ func (x *ImageInfo) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ImageInfo.ProtoReflect.Descriptor instead.
 func (*ImageInfo) Descriptor() ([]byte, []int) {
-	return file_deputy_scan_v1_service_proto_rawDescGZIP(), []int{8}
+	return file_deputy_scan_v1_service_proto_rawDescGZIP(), []int{9}
 }
 
 func (x *ImageInfo) GetConfig() *ImageConfig {
@@ -945,7 +1027,7 @@ type ImageConfig struct {
 
 func (x *ImageConfig) Reset() {
 	*x = ImageConfig{}
-	mi := &file_deputy_scan_v1_service_proto_msgTypes[9]
+	mi := &file_deputy_scan_v1_service_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -957,7 +1039,7 @@ func (x *ImageConfig) String() string {
 func (*ImageConfig) ProtoMessage() {}
 
 func (x *ImageConfig) ProtoReflect() protoreflect.Message {
-	mi := &file_deputy_scan_v1_service_proto_msgTypes[9]
+	mi := &file_deputy_scan_v1_service_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -970,7 +1052,7 @@ func (x *ImageConfig) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ImageConfig.ProtoReflect.Descriptor instead.
 func (*ImageConfig) Descriptor() ([]byte, []int) {
-	return file_deputy_scan_v1_service_proto_rawDescGZIP(), []int{9}
+	return file_deputy_scan_v1_service_proto_rawDescGZIP(), []int{10}
 }
 
 func (x *ImageConfig) GetUser() string {
@@ -1067,7 +1149,7 @@ type Healthcheck struct {
 
 func (x *Healthcheck) Reset() {
 	*x = Healthcheck{}
-	mi := &file_deputy_scan_v1_service_proto_msgTypes[10]
+	mi := &file_deputy_scan_v1_service_proto_msgTypes[11]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1079,7 +1161,7 @@ func (x *Healthcheck) String() string {
 func (*Healthcheck) ProtoMessage() {}
 
 func (x *Healthcheck) ProtoReflect() protoreflect.Message {
-	mi := &file_deputy_scan_v1_service_proto_msgTypes[10]
+	mi := &file_deputy_scan_v1_service_proto_msgTypes[11]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1092,7 +1174,7 @@ func (x *Healthcheck) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Healthcheck.ProtoReflect.Descriptor instead.
 func (*Healthcheck) Descriptor() ([]byte, []int) {
-	return file_deputy_scan_v1_service_proto_rawDescGZIP(), []int{10}
+	return file_deputy_scan_v1_service_proto_rawDescGZIP(), []int{11}
 }
 
 func (x *Healthcheck) GetTest() []string {
@@ -1144,7 +1226,7 @@ type ImageMetadata struct {
 
 func (x *ImageMetadata) Reset() {
 	*x = ImageMetadata{}
-	mi := &file_deputy_scan_v1_service_proto_msgTypes[11]
+	mi := &file_deputy_scan_v1_service_proto_msgTypes[12]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1156,7 +1238,7 @@ func (x *ImageMetadata) String() string {
 func (*ImageMetadata) ProtoMessage() {}
 
 func (x *ImageMetadata) ProtoReflect() protoreflect.Message {
-	mi := &file_deputy_scan_v1_service_proto_msgTypes[11]
+	mi := &file_deputy_scan_v1_service_proto_msgTypes[12]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1169,7 +1251,7 @@ func (x *ImageMetadata) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ImageMetadata.ProtoReflect.Descriptor instead.
 func (*ImageMetadata) Descriptor() ([]byte, []int) {
-	return file_deputy_scan_v1_service_proto_rawDescGZIP(), []int{11}
+	return file_deputy_scan_v1_service_proto_rawDescGZIP(), []int{12}
 }
 
 func (x *ImageMetadata) GetArchitecture() string {
@@ -1229,7 +1311,7 @@ type HistoryEntry struct {
 
 func (x *HistoryEntry) Reset() {
 	*x = HistoryEntry{}
-	mi := &file_deputy_scan_v1_service_proto_msgTypes[12]
+	mi := &file_deputy_scan_v1_service_proto_msgTypes[13]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1241,7 +1323,7 @@ func (x *HistoryEntry) String() string {
 func (*HistoryEntry) ProtoMessage() {}
 
 func (x *HistoryEntry) ProtoReflect() protoreflect.Message {
-	mi := &file_deputy_scan_v1_service_proto_msgTypes[12]
+	mi := &file_deputy_scan_v1_service_proto_msgTypes[13]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1254,7 +1336,7 @@ func (x *HistoryEntry) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HistoryEntry.ProtoReflect.Descriptor instead.
 func (*HistoryEntry) Descriptor() ([]byte, []int) {
-	return file_deputy_scan_v1_service_proto_rawDescGZIP(), []int{12}
+	return file_deputy_scan_v1_service_proto_rawDescGZIP(), []int{13}
 }
 
 func (x *HistoryEntry) GetCreatedBy() string {
@@ -1297,7 +1379,7 @@ type DependencyGraph struct {
 
 func (x *DependencyGraph) Reset() {
 	*x = DependencyGraph{}
-	mi := &file_deputy_scan_v1_service_proto_msgTypes[13]
+	mi := &file_deputy_scan_v1_service_proto_msgTypes[14]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1309,7 +1391,7 @@ func (x *DependencyGraph) String() string {
 func (*DependencyGraph) ProtoMessage() {}
 
 func (x *DependencyGraph) ProtoReflect() protoreflect.Message {
-	mi := &file_deputy_scan_v1_service_proto_msgTypes[13]
+	mi := &file_deputy_scan_v1_service_proto_msgTypes[14]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1322,7 +1404,7 @@ func (x *DependencyGraph) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DependencyGraph.ProtoReflect.Descriptor instead.
 func (*DependencyGraph) Descriptor() ([]byte, []int) {
-	return file_deputy_scan_v1_service_proto_rawDescGZIP(), []int{13}
+	return file_deputy_scan_v1_service_proto_rawDescGZIP(), []int{14}
 }
 
 func (x *DependencyGraph) GetNodes() []*v16.Node {
@@ -1363,7 +1445,7 @@ const file_deputy_scan_v1_service_proto_rawDesc = "" +
 	"\aoptions\x18\x02 \x01(\v2\x1b.deputy.scan.v1.ScanOptionsR\aoptions\"l\n" +
 	"\x11StreamScanRequest\x12 \n" +
 	"\x06target\x18\x01 \x01(\tB\b\xbaH\x05r\x03\x18\x80 R\x06target\x125\n" +
-	"\aoptions\x18\x02 \x01(\v2\x1b.deputy.scan.v1.ScanOptionsR\aoptions\"\xd9\x04\n" +
+	"\aoptions\x18\x02 \x01(\v2\x1b.deputy.scan.v1.ScanOptionsR\aoptions\"\x9c\x05\n" +
 	"\vScanOptions\x12.\n" +
 	"\n" +
 	"ecosystems\x18\x01 \x03(\tB\x0e\xbaH\v\x92\x01\b\x102\"\x04r\x02\x18@R\n" +
@@ -1379,7 +1461,12 @@ const file_deputy_scan_v1_service_proto_rawDesc = "" +
 	"\vtarget_hint\x18\n" +
 	" \x01(\v2\x1a.deputy.scan.v1.TargetHintR\n" +
 	"targetHint\x12*\n" +
-	"\x11detect_base_image\x18\v \x01(\bR\x0fdetectBaseImage\"\xa2\x01\n" +
+	"\x11detect_base_image\x18\v \x01(\bR\x0fdetectBaseImage\x12A\n" +
+	"\rcloud_options\x18\f \x01(\v2\x1c.deputy.scan.v1.CloudOptionsR\fcloudOptions\"w\n" +
+	"\fCloudOptions\x12\"\n" +
+	"\aprofile\x18\x01 \x01(\tB\b\xbaH\x05r\x03\x18\x80\x02R\aprofile\x12\x1f\n" +
+	"\x06region\x18\x02 \x01(\tB\a\xbaH\x04r\x02\x18@R\x06region\x12\"\n" +
+	"\aaccount\x18\x03 \x01(\tB\b\xbaH\x05r\x03\x18\x80\x01R\aaccount\"\xa2\x01\n" +
 	"\n" +
 	"TargetHint\x120\n" +
 	"\x04kind\x18\x01 \x01(\x0e2\x1c.deputy.target.v1.TargetKindR\x04kind\x12b\n" +
@@ -1505,83 +1592,85 @@ func file_deputy_scan_v1_service_proto_rawDescGZIP() []byte {
 }
 
 var file_deputy_scan_v1_service_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
-var file_deputy_scan_v1_service_proto_msgTypes = make([]protoimpl.MessageInfo, 16)
+var file_deputy_scan_v1_service_proto_msgTypes = make([]protoimpl.MessageInfo, 17)
 var file_deputy_scan_v1_service_proto_goTypes = []any{
 	(ScanPhase)(0),                // 0: deputy.scan.v1.ScanPhase
 	(*ScanRequest)(nil),           // 1: deputy.scan.v1.ScanRequest
 	(*StreamScanRequest)(nil),     // 2: deputy.scan.v1.StreamScanRequest
 	(*ScanOptions)(nil),           // 3: deputy.scan.v1.ScanOptions
-	(*TargetHint)(nil),            // 4: deputy.scan.v1.TargetHint
-	(*GraphOptions)(nil),          // 5: deputy.scan.v1.GraphOptions
-	(*EnrichOptions)(nil),         // 6: deputy.scan.v1.EnrichOptions
-	(*ScanResponse)(nil),          // 7: deputy.scan.v1.ScanResponse
-	(*ScanProgress)(nil),          // 8: deputy.scan.v1.ScanProgress
-	(*ImageInfo)(nil),             // 9: deputy.scan.v1.ImageInfo
-	(*ImageConfig)(nil),           // 10: deputy.scan.v1.ImageConfig
-	(*Healthcheck)(nil),           // 11: deputy.scan.v1.Healthcheck
-	(*ImageMetadata)(nil),         // 12: deputy.scan.v1.ImageMetadata
-	(*HistoryEntry)(nil),          // 13: deputy.scan.v1.HistoryEntry
-	(*DependencyGraph)(nil),       // 14: deputy.scan.v1.DependencyGraph
-	nil,                           // 15: deputy.scan.v1.ScanResponse.AdvisoriesEntry
-	nil,                           // 16: deputy.scan.v1.ImageConfig.LabelsEntry
-	(*timestamppb.Timestamp)(nil), // 17: google.protobuf.Timestamp
-	(v1.TargetKind)(0),            // 18: deputy.target.v1.TargetKind
-	(*v1.Target)(nil),             // 19: deputy.target.v1.Target
-	(*v11.Package)(nil),           // 20: deputy.dependency.v1.Package
-	(*v12.Finding)(nil),           // 21: deputy.vulnerability.v1.Finding
-	(*v12.Stats)(nil),             // 22: deputy.vulnerability.v1.Stats
-	(*v13.Action)(nil),            // 23: deputy.policy.v1.Action
-	(*v14.Finding)(nil),           // 24: deputy.secrets.v1.Finding
-	(*v14.Stats)(nil),             // 25: deputy.secrets.v1.Stats
-	(*v15.DockerfileInfo)(nil),    // 26: deputy.inventory.v1.DockerfileInfo
-	(*v16.Node)(nil),              // 27: deputy.graph.v1.Node
-	(*v16.Edge)(nil),              // 28: deputy.graph.v1.Edge
-	(*v16.GraphStats)(nil),        // 29: deputy.graph.v1.GraphStats
-	(*v12.Advisory)(nil),          // 30: deputy.vulnerability.v1.Advisory
+	(*CloudOptions)(nil),          // 4: deputy.scan.v1.CloudOptions
+	(*TargetHint)(nil),            // 5: deputy.scan.v1.TargetHint
+	(*GraphOptions)(nil),          // 6: deputy.scan.v1.GraphOptions
+	(*EnrichOptions)(nil),         // 7: deputy.scan.v1.EnrichOptions
+	(*ScanResponse)(nil),          // 8: deputy.scan.v1.ScanResponse
+	(*ScanProgress)(nil),          // 9: deputy.scan.v1.ScanProgress
+	(*ImageInfo)(nil),             // 10: deputy.scan.v1.ImageInfo
+	(*ImageConfig)(nil),           // 11: deputy.scan.v1.ImageConfig
+	(*Healthcheck)(nil),           // 12: deputy.scan.v1.Healthcheck
+	(*ImageMetadata)(nil),         // 13: deputy.scan.v1.ImageMetadata
+	(*HistoryEntry)(nil),          // 14: deputy.scan.v1.HistoryEntry
+	(*DependencyGraph)(nil),       // 15: deputy.scan.v1.DependencyGraph
+	nil,                           // 16: deputy.scan.v1.ScanResponse.AdvisoriesEntry
+	nil,                           // 17: deputy.scan.v1.ImageConfig.LabelsEntry
+	(*timestamppb.Timestamp)(nil), // 18: google.protobuf.Timestamp
+	(v1.TargetKind)(0),            // 19: deputy.target.v1.TargetKind
+	(*v1.Target)(nil),             // 20: deputy.target.v1.Target
+	(*v11.Package)(nil),           // 21: deputy.dependency.v1.Package
+	(*v12.Finding)(nil),           // 22: deputy.vulnerability.v1.Finding
+	(*v12.Stats)(nil),             // 23: deputy.vulnerability.v1.Stats
+	(*v13.Action)(nil),            // 24: deputy.policy.v1.Action
+	(*v14.Finding)(nil),           // 25: deputy.secrets.v1.Finding
+	(*v14.Stats)(nil),             // 26: deputy.secrets.v1.Stats
+	(*v15.DockerfileInfo)(nil),    // 27: deputy.inventory.v1.DockerfileInfo
+	(*v16.Node)(nil),              // 28: deputy.graph.v1.Node
+	(*v16.Edge)(nil),              // 29: deputy.graph.v1.Edge
+	(*v16.GraphStats)(nil),        // 30: deputy.graph.v1.GraphStats
+	(*v12.Advisory)(nil),          // 31: deputy.vulnerability.v1.Advisory
 }
 var file_deputy_scan_v1_service_proto_depIdxs = []int32{
 	3,  // 0: deputy.scan.v1.ScanRequest.options:type_name -> deputy.scan.v1.ScanOptions
 	3,  // 1: deputy.scan.v1.StreamScanRequest.options:type_name -> deputy.scan.v1.ScanOptions
-	17, // 2: deputy.scan.v1.ScanOptions.published_before:type_name -> google.protobuf.Timestamp
-	17, // 3: deputy.scan.v1.ScanOptions.published_after:type_name -> google.protobuf.Timestamp
-	5,  // 4: deputy.scan.v1.ScanOptions.graph_options:type_name -> deputy.scan.v1.GraphOptions
-	6,  // 5: deputy.scan.v1.ScanOptions.enrich_options:type_name -> deputy.scan.v1.EnrichOptions
-	4,  // 6: deputy.scan.v1.ScanOptions.target_hint:type_name -> deputy.scan.v1.TargetHint
-	18, // 7: deputy.scan.v1.TargetHint.kind:type_name -> deputy.target.v1.TargetKind
-	19, // 8: deputy.scan.v1.ScanResponse.target:type_name -> deputy.target.v1.Target
-	17, // 9: deputy.scan.v1.ScanResponse.generated_at:type_name -> google.protobuf.Timestamp
-	20, // 10: deputy.scan.v1.ScanResponse.packages:type_name -> deputy.dependency.v1.Package
-	21, // 11: deputy.scan.v1.ScanResponse.findings:type_name -> deputy.vulnerability.v1.Finding
-	15, // 12: deputy.scan.v1.ScanResponse.advisories:type_name -> deputy.scan.v1.ScanResponse.AdvisoriesEntry
-	22, // 13: deputy.scan.v1.ScanResponse.stats:type_name -> deputy.vulnerability.v1.Stats
-	23, // 14: deputy.scan.v1.ScanResponse.policy_actions:type_name -> deputy.policy.v1.Action
-	9,  // 15: deputy.scan.v1.ScanResponse.image_info:type_name -> deputy.scan.v1.ImageInfo
-	24, // 16: deputy.scan.v1.ScanResponse.secret_findings:type_name -> deputy.secrets.v1.Finding
-	25, // 17: deputy.scan.v1.ScanResponse.secret_stats:type_name -> deputy.secrets.v1.Stats
-	14, // 18: deputy.scan.v1.ScanResponse.graph:type_name -> deputy.scan.v1.DependencyGraph
-	26, // 19: deputy.scan.v1.ScanResponse.dockerfile_info:type_name -> deputy.inventory.v1.DockerfileInfo
-	0,  // 20: deputy.scan.v1.ScanProgress.phase:type_name -> deputy.scan.v1.ScanPhase
-	7,  // 21: deputy.scan.v1.ScanProgress.result:type_name -> deputy.scan.v1.ScanResponse
-	10, // 22: deputy.scan.v1.ImageInfo.config:type_name -> deputy.scan.v1.ImageConfig
-	12, // 23: deputy.scan.v1.ImageInfo.metadata:type_name -> deputy.scan.v1.ImageMetadata
-	13, // 24: deputy.scan.v1.ImageInfo.history:type_name -> deputy.scan.v1.HistoryEntry
-	16, // 25: deputy.scan.v1.ImageConfig.labels:type_name -> deputy.scan.v1.ImageConfig.LabelsEntry
-	11, // 26: deputy.scan.v1.ImageConfig.healthcheck:type_name -> deputy.scan.v1.Healthcheck
-	17, // 27: deputy.scan.v1.ImageMetadata.created:type_name -> google.protobuf.Timestamp
-	17, // 28: deputy.scan.v1.HistoryEntry.created:type_name -> google.protobuf.Timestamp
-	27, // 29: deputy.scan.v1.DependencyGraph.nodes:type_name -> deputy.graph.v1.Node
-	28, // 30: deputy.scan.v1.DependencyGraph.edges:type_name -> deputy.graph.v1.Edge
-	29, // 31: deputy.scan.v1.DependencyGraph.stats:type_name -> deputy.graph.v1.GraphStats
-	30, // 32: deputy.scan.v1.ScanResponse.AdvisoriesEntry.value:type_name -> deputy.vulnerability.v1.Advisory
-	1,  // 33: deputy.scan.v1.ScanService.Scan:input_type -> deputy.scan.v1.ScanRequest
-	2,  // 34: deputy.scan.v1.ScanService.StreamScan:input_type -> deputy.scan.v1.StreamScanRequest
-	7,  // 35: deputy.scan.v1.ScanService.Scan:output_type -> deputy.scan.v1.ScanResponse
-	8,  // 36: deputy.scan.v1.ScanService.StreamScan:output_type -> deputy.scan.v1.ScanProgress
-	35, // [35:37] is the sub-list for method output_type
-	33, // [33:35] is the sub-list for method input_type
-	33, // [33:33] is the sub-list for extension type_name
-	33, // [33:33] is the sub-list for extension extendee
-	0,  // [0:33] is the sub-list for field type_name
+	18, // 2: deputy.scan.v1.ScanOptions.published_before:type_name -> google.protobuf.Timestamp
+	18, // 3: deputy.scan.v1.ScanOptions.published_after:type_name -> google.protobuf.Timestamp
+	6,  // 4: deputy.scan.v1.ScanOptions.graph_options:type_name -> deputy.scan.v1.GraphOptions
+	7,  // 5: deputy.scan.v1.ScanOptions.enrich_options:type_name -> deputy.scan.v1.EnrichOptions
+	5,  // 6: deputy.scan.v1.ScanOptions.target_hint:type_name -> deputy.scan.v1.TargetHint
+	4,  // 7: deputy.scan.v1.ScanOptions.cloud_options:type_name -> deputy.scan.v1.CloudOptions
+	19, // 8: deputy.scan.v1.TargetHint.kind:type_name -> deputy.target.v1.TargetKind
+	20, // 9: deputy.scan.v1.ScanResponse.target:type_name -> deputy.target.v1.Target
+	18, // 10: deputy.scan.v1.ScanResponse.generated_at:type_name -> google.protobuf.Timestamp
+	21, // 11: deputy.scan.v1.ScanResponse.packages:type_name -> deputy.dependency.v1.Package
+	22, // 12: deputy.scan.v1.ScanResponse.findings:type_name -> deputy.vulnerability.v1.Finding
+	16, // 13: deputy.scan.v1.ScanResponse.advisories:type_name -> deputy.scan.v1.ScanResponse.AdvisoriesEntry
+	23, // 14: deputy.scan.v1.ScanResponse.stats:type_name -> deputy.vulnerability.v1.Stats
+	24, // 15: deputy.scan.v1.ScanResponse.policy_actions:type_name -> deputy.policy.v1.Action
+	10, // 16: deputy.scan.v1.ScanResponse.image_info:type_name -> deputy.scan.v1.ImageInfo
+	25, // 17: deputy.scan.v1.ScanResponse.secret_findings:type_name -> deputy.secrets.v1.Finding
+	26, // 18: deputy.scan.v1.ScanResponse.secret_stats:type_name -> deputy.secrets.v1.Stats
+	15, // 19: deputy.scan.v1.ScanResponse.graph:type_name -> deputy.scan.v1.DependencyGraph
+	27, // 20: deputy.scan.v1.ScanResponse.dockerfile_info:type_name -> deputy.inventory.v1.DockerfileInfo
+	0,  // 21: deputy.scan.v1.ScanProgress.phase:type_name -> deputy.scan.v1.ScanPhase
+	8,  // 22: deputy.scan.v1.ScanProgress.result:type_name -> deputy.scan.v1.ScanResponse
+	11, // 23: deputy.scan.v1.ImageInfo.config:type_name -> deputy.scan.v1.ImageConfig
+	13, // 24: deputy.scan.v1.ImageInfo.metadata:type_name -> deputy.scan.v1.ImageMetadata
+	14, // 25: deputy.scan.v1.ImageInfo.history:type_name -> deputy.scan.v1.HistoryEntry
+	17, // 26: deputy.scan.v1.ImageConfig.labels:type_name -> deputy.scan.v1.ImageConfig.LabelsEntry
+	12, // 27: deputy.scan.v1.ImageConfig.healthcheck:type_name -> deputy.scan.v1.Healthcheck
+	18, // 28: deputy.scan.v1.ImageMetadata.created:type_name -> google.protobuf.Timestamp
+	18, // 29: deputy.scan.v1.HistoryEntry.created:type_name -> google.protobuf.Timestamp
+	28, // 30: deputy.scan.v1.DependencyGraph.nodes:type_name -> deputy.graph.v1.Node
+	29, // 31: deputy.scan.v1.DependencyGraph.edges:type_name -> deputy.graph.v1.Edge
+	30, // 32: deputy.scan.v1.DependencyGraph.stats:type_name -> deputy.graph.v1.GraphStats
+	31, // 33: deputy.scan.v1.ScanResponse.AdvisoriesEntry.value:type_name -> deputy.vulnerability.v1.Advisory
+	1,  // 34: deputy.scan.v1.ScanService.Scan:input_type -> deputy.scan.v1.ScanRequest
+	2,  // 35: deputy.scan.v1.ScanService.StreamScan:input_type -> deputy.scan.v1.StreamScanRequest
+	8,  // 36: deputy.scan.v1.ScanService.Scan:output_type -> deputy.scan.v1.ScanResponse
+	9,  // 37: deputy.scan.v1.ScanService.StreamScan:output_type -> deputy.scan.v1.ScanProgress
+	36, // [36:38] is the sub-list for method output_type
+	34, // [34:36] is the sub-list for method input_type
+	34, // [34:34] is the sub-list for extension type_name
+	34, // [34:34] is the sub-list for extension extendee
+	0,  // [0:34] is the sub-list for field type_name
 }
 
 func init() { file_deputy_scan_v1_service_proto_init() }
@@ -1595,7 +1684,7 @@ func file_deputy_scan_v1_service_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_deputy_scan_v1_service_proto_rawDesc), len(file_deputy_scan_v1_service_proto_rawDesc)),
 			NumEnums:      1,
-			NumMessages:   16,
+			NumMessages:   17,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

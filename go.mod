@@ -14,6 +14,10 @@ require (
 	github.com/BurntSushi/toml v1.5.0
 	github.com/CycloneDX/cyclonedx-go v0.9.2
 	github.com/alecthomas/chroma/v2 v2.19.0
+	github.com/aws/aws-sdk-go-v2 v1.41.1
+	github.com/aws/aws-sdk-go-v2/config v1.31.3
+	github.com/aws/aws-sdk-go-v2/service/ebs v1.33.10
+	github.com/aws/aws-sdk-go-v2/service/ec2 v1.281.0
 	github.com/charmbracelet/fang v0.4.0
 	github.com/charmbracelet/glamour v0.10.0
 	github.com/charmbracelet/lipgloss v1.1.1-0.20250404203927-76690c660834
@@ -77,6 +81,18 @@ require (
 	buf.build/gen/go/pluginrpc/pluginrpc/protocolbuffers/go v1.34.2-20240828222655-5345c0a56177.2 // indirect
 	cloud.google.com/go/compute/metadata v0.9.0 // indirect
 	github.com/Azure/go-ansiterm v0.0.0-20250102033503-faa5f7b0171c // indirect
+	github.com/aws/aws-sdk-go-v2/credentials v1.18.7 // indirect
+	github.com/aws/aws-sdk-go-v2/feature/ec2/imds v1.18.4 // indirect
+	github.com/aws/aws-sdk-go-v2/internal/configsources v1.4.17 // indirect
+	github.com/aws/aws-sdk-go-v2/internal/endpoints/v2 v2.7.17 // indirect
+	github.com/aws/aws-sdk-go-v2/internal/ini v1.8.3 // indirect
+	github.com/aws/aws-sdk-go-v2/service/ecr v1.55.1 // indirect
+	github.com/aws/aws-sdk-go-v2/service/internal/accept-encoding v1.13.4 // indirect
+	github.com/aws/aws-sdk-go-v2/service/internal/presigned-url v1.13.17 // indirect
+	github.com/aws/aws-sdk-go-v2/service/sso v1.28.2 // indirect
+	github.com/aws/aws-sdk-go-v2/service/ssooidc v1.34.0 // indirect
+	github.com/aws/aws-sdk-go-v2/service/sts v1.38.0 // indirect
+	github.com/aws/smithy-go v1.24.0 // indirect
 	github.com/aymerick/douceur v0.2.0 // indirect
 	github.com/charmbracelet/x/exp/slice v0.0.0-20250702191427-5bdfc8f2e4ff // indirect
 	github.com/dlclark/regexp2 v1.11.5 // indirect

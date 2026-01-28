@@ -1,0 +1,322 @@
+syntax = "proto3";
+
+package deputy.cloud.v1;
+
+option go_package = "github.com/picatz/deputy/gen/deputy/cloud/v1;cloudv1";
+
+import "buf/validate/validate.proto";
+import "deputy/cloud/v1/cloud.proto";
+import "google/protobuf/duration.proto";
+import "google/protobuf/timestamp.proto";
+
+// CloudProviderService is implemented by external cloud provider plugins.
+// Plugins are discovered as `deputy-cloud-<name>` executables in PATH
+// and communicate over Unix sockets using ConnectRPC.
+//
+// This follows the same pattern as sandbox plugins (deputy-sandbox-*).
+service CloudProviderService {
+  // GetInfo returns metadata about this cloud provider plugin.
+  rpc GetInfo(GetProviderInfoRequest) returns (GetProviderInfoResponse);
+
+  // Detect checks if a target URI is handled by this provider.
+  rpc Detect(DetectRequest) returns (DetectResponse);
+
+  // IsCollection checks if a target URI represents a collection.
+  // Collection URIs enumerate available resources rather than opening one.
+  // Example: "openstack://instances" is a collection, "openstack://instance/uuid" is specific.
+  rpc IsCollection(IsCollectionRequest) returns (IsCollectionResponse);
+
+  // List enumerates resources in a collection.
+  // Only valid when IsCollection returns true for the target.
+  // Requires capabilities.list_resources = true.
+  rpc List(PluginListRequest) returns (PluginListResponse);
+
+  // Open materializes a cloud resource for scanning.
+  // Returns a stream of events: progress updates, then ready or error.
+  rpc Open(OpenResourceRequest) returns (stream OpenResourceEvent);
+
+  // Close releases resources from a previous Open call.
+  rpc Close(CloseResourceRequest) returns (CloseResourceResponse);
+}
+
+// GetProviderInfoRequest requests plugin metadata.
+message GetProviderInfoRequest {}
+
+// GetProviderInfoResponse returns plugin metadata.
+message GetProviderInfoResponse {
+  // Plugin name (should match the deputy-cloud-<name> executable).
+  string name = 1 [(buf.validate.field).string.min_len = 1];
+  // Human-readable display name.
+  string display_name = 2;
+  // Plugin version.
+  string version = 3;
+  // Plugin description.
+  string description = 4;
+  // URI schemes this plugin handles (e.g., "openstack://", "vsphere://").
+  repeated string schemes = 5;
+  // Resource types this plugin supports.
+  repeated string resource_types = 6;
+  // Plugin capabilities.
+  PluginCapabilities capabilities = 7;
+  // Collection types this plugin can list, with their context requirements.
+  repeated CollectionTypeInfo collection_types = 8;
+  // Documentation URL for this plugin.
+  string documentation_url = 9;
+}
+
+// CollectionTypeInfo describes a collection type supported by a plugin.
+message CollectionTypeInfo {
+  // Collection type name (e.g., "instances", "images", "snapshots").
+  string name = 1 [(buf.validate.field).string.min_len = 1];
+  // Human-readable description.
+  string description = 2;
+  // URI pattern for this collection (e.g., "openstack://instances").
+  string uri_pattern = 3;
+  // Resource type returned when listing this collection.
+  string resource_type = 4;
+  // Required ProviderContext fields for this collection.
+  // These must be set when calling List.
+  repeated string required_context = 5;
+  // Optional ProviderContext fields that can refine the listing.
+  repeated string optional_context = 6;
+  // Supported filter fields (subset of ListFilter that this collection supports).
+  repeated string supported_filters = 7;
+  // Example URI with typical filters.
+  string example_uri = 8;
+}
+
+// PluginCapabilities describes what a cloud provider plugin can do.
+message PluginCapabilities {
+  // Supports listing resources.
+  bool list_resources = 1;
+  // Supports smart block downloading (downloading only necessary blocks).
+  bool smart_download = 2;
+  // Supports streaming progress updates.
+  bool streaming_progress = 3;
+  // Supports secrets scanning.
+  bool secrets_scanning = 4;
+}
+
+// DetectRequest asks if the plugin handles a target URI.
+message DetectRequest {
+  // Target URI to check.
+  string target = 1 [(buf.validate.field).string.min_len = 1];
+}
+
+// DetectResponse indicates whether the plugin handles the target.
+message DetectResponse {
+  // Whether this plugin handles the target.
+  bool detected = 1;
+  // The URI scheme that matched.
+  string scheme = 2;
+  // The detected resource type.
+  string resource_type = 3;
+  // Parsed resource ID.
+  string resource_id = 4;
+}
+
+// OpenResourceRequest requests opening a cloud resource.
+message OpenResourceRequest {
+  // Target URI.
+  string target = 1 [(buf.validate.field).string.min_len = 1];
+
+  // Structured open options.
+  OpenOptions open_options = 2;
+
+  // Timeout for the open operation.
+  google.protobuf.Duration timeout = 3;
+
+  // Request ID for correlation.
+  string request_id = 4;
+}
+
+// OpenOptions configures how a cloud resource is opened for scanning.
+message OpenOptions {
+  // Provider context (region, project, etc.).
+  ProviderContext context = 1;
+
+  // Enable smart block downloading for disk/snapshot resources.
+  // When true, only downloads blocks containing package databases.
+  bool smart_download = 2;
+
+  // Ecosystems to scan (empty means all).
+  // Plugins may use this to optimize what they materialize.
+  repeated string ecosystems = 3 [(buf.validate.field).repeated.max_items = 50];
+
+  // Platform for container images (e.g., "linux/amd64").
+  string platform = 4 [(buf.validate.field).string.max_len = 64];
+
+  // Skip signature verification (for testing only).
+  bool skip_verification = 5;
+}
+
+// OpenResourceEvent streams the resource open progress.
+message OpenResourceEvent {
+  // Request ID for correlation.
+  string request_id = 1;
+  // Event details.
+  oneof details {
+    // Progress update.
+    ProgressEvent progress = 10;
+    // Resource is ready for scanning.
+    ReadyEvent ready = 11;
+    // Error occurred.
+    ErrorEvent error = 12;
+  }
+}
+
+// ProgressEvent reports progress during resource opening.
+message ProgressEvent {
+  // Current phase.
+  string phase = 1;
+  // Human-readable message.
+  string message = 2;
+  // Progress percentage (0-100, -1 if unknown).
+  int32 percent = 3;
+  // Bytes transferred.
+  int64 bytes_transferred = 4;
+  // Total bytes (-1 if unknown).
+  int64 bytes_total = 5;
+}
+
+// ReadyEvent indicates the resource is ready for scanning.
+message ReadyEvent {
+  // The opened cloud resource metadata.
+  CloudResource resource = 1;
+  // Unix socket path for filesystem access.
+  // The plugin serves an fs.FS-compatible interface on this socket.
+  string fs_socket = 2;
+  // Alternative: local path where the resource was materialized.
+  // If set, Deputy reads from this path directly instead of fs_socket.
+  string local_path = 3;
+}
+
+// ErrorEvent reports an error during resource opening.
+message ErrorEvent {
+  // Error message.
+  string message = 1;
+  // Error code for programmatic handling.
+  string code = 2;
+  // Whether the error is retriable.
+  bool retriable = 3;
+  // Suggested remediation.
+  string remediation = 4;
+}
+
+// CloseResourceRequest requests closing a previously opened resource.
+message CloseResourceRequest {
+  // Request ID from the Open call.
+  string request_id = 1 [(buf.validate.field).string.min_len = 1];
+}
+
+// CloseResourceResponse confirms resource closure.
+message CloseResourceResponse {
+  // Whether close was successful.
+  bool success = 1;
+  // Error message if close failed.
+  string error = 2;
+}
+
+// IsCollectionRequest asks if a target URI represents a collection.
+message IsCollectionRequest {
+  // Target URI to check.
+  string target = 1 [(buf.validate.field).string.min_len = 1];
+}
+
+// IsCollectionResponse indicates whether the target is a collection.
+message IsCollectionResponse {
+  // Whether the target is a collection URI.
+  bool is_collection = 1;
+  // The collection type (e.g., "instances", "images", "volumes").
+  string collection_type = 2;
+  // Required context fields for this collection type.
+  // Callers should populate these fields in ProviderContext when calling List.
+  // Example: ["gcp_project", "gcp_location"] for GCP zonal resources.
+  repeated string required_context = 3;
+  // Optional context fields that can refine the listing.
+  repeated string optional_context = 4;
+}
+
+// PluginListRequest requests enumeration of resources in a collection.
+message PluginListRequest {
+  // Collection target URI (e.g., "openstack://instances?project=myproject").
+  string target = 1 [(buf.validate.field).string.min_len = 1];
+
+  // Structured filter options for listing.
+  ListFilter filter = 2;
+
+  // Pagination support.
+  string page_token = 3 [(buf.validate.field).string.max_len = 4096];
+  int32 page_size = 4 [(buf.validate.field).int32 = {gte: 0, lte: 1000}];
+}
+
+// ListFilter provides structured filtering for collection listing.
+// This replaces ad-hoc map[string]string options with type-safe fields.
+message ListFilter {
+  // Tag filters: resources must have all specified tags.
+  // Key is tag name, value is expected tag value.
+  // Empty value means "tag exists" (any value).
+  map<string, string> tags = 1;
+
+  // Name pattern filter (glob-style: *, ?).
+  // Example: "my-app-*" matches "my-app-v1", "my-app-prod".
+  string name_pattern = 2 [(buf.validate.field).string.max_len = 256];
+
+  // Created after this timestamp.
+  google.protobuf.Timestamp created_after = 3;
+
+  // Created before this timestamp.
+  google.protobuf.Timestamp created_before = 4;
+
+  // Provider-specific context (required by some providers).
+  // Use typed fields in ProviderContext rather than arbitrary strings.
+  ProviderContext context = 5;
+
+  // CEL expression for advanced filtering (evaluated client-side).
+  // Example: 'resource.tags.env == "prod" && resource.created_at > timestamp("2024-01-01T00:00:00Z")'
+  // Providers may also evaluate server-side if they support it.
+  string cel_expression = 6 [(buf.validate.field).string.max_len = 4096];
+}
+
+// ProviderContext contains provider-specific scoping parameters.
+// These are required context, not filters - they define WHERE to list, not WHAT to list.
+message ProviderContext {
+  // AWS: region to list resources in. Empty means all configured regions.
+  string aws_region = 1 [(buf.validate.field).string.max_len = 64];
+
+  // AWS: owner filter for AMIs (self, amazon, aws-marketplace, or account ID).
+  string aws_owner = 2 [(buf.validate.field).string.max_len = 64];
+
+  // GCP: project ID (required for most GCP resources).
+  string gcp_project = 3 [(buf.validate.field).string.max_len = 128];
+
+  // GCP: zone or region (required for zonal/regional resources).
+  string gcp_location = 4 [(buf.validate.field).string.max_len = 64];
+
+  // Azure: subscription ID (required for Azure resources).
+  string azure_subscription = 5 [(buf.validate.field).string.max_len = 64];
+
+  // Azure: resource group (optional, lists all RGs if empty).
+  string azure_resource_group = 6 [(buf.validate.field).string.max_len = 128];
+
+  // GitHub/GitLab: organization or group name.
+  string scm_organization = 7 [(buf.validate.field).string.max_len = 256];
+
+  // Generic: for plugins that need additional context not covered above.
+  // Plugins should document their expected keys in GetProviderInfoResponse.
+  map<string, string> extra = 15;
+}
+
+// PluginListResponse contains discovered resources.
+message PluginListResponse {
+  // Discovered resources that can be scanned.
+  repeated CloudResource resources = 1;
+
+  // Token for fetching the next page of results.
+  // Empty when there are no more results.
+  string next_page_token = 2;
+
+  // Total count of resources matching the filter (if known).
+  // -1 if the total is unknown or expensive to compute.
+  int32 total_count = 3;
+}

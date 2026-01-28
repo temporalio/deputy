@@ -140,9 +140,9 @@ The --enrich flag adds comprehensive metadata from deps.dev:
 					}
 				}
 				warnRefIgnored(cmd, "image")
-				targetOpts := map[string]string{}
+				targetOpts := &targets.OpenOptions{}
 				if strings.TrimSpace(platform) != "" {
-					targetOpts["platform"] = platform
+					targetOpts.Platform = platform
 				}
 				result, err = sbomx.GenerateImage(ctx, target, targetOpts, sbomx.Options{
 					Ecosystems:        ecos,

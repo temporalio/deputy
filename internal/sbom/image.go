@@ -19,7 +19,7 @@ import (
 )
 
 // GenerateImage builds an SBOM document for a container image target.
-func GenerateImage(ctx context.Context, target string, targetOpts map[string]string, opts Options) (Result, error) {
+func GenerateImage(ctx context.Context, target string, targetOpts *targets.OpenOptions, opts Options) (Result, error) {
 	ctx, span := otel.StartSpan(ctx, "deputy.sbom.generate_image",
 		trace.WithAttributes(
 			attribute.String("deputy.target.path", target),

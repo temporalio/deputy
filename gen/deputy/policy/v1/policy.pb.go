@@ -4399,6 +4399,173 @@ func (x *ServiceGraphRequestPolicyInput) GetEnv() *Environment {
 	return nil
 }
 
+// CloudResourceInfo provides cloud resource context for policy evaluation.
+// This is used in service_cloud_scan_request for authorization decisions.
+type CloudResourceInfo struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Cloud provider name: "aws", "azure", "gcp", or plugin name.
+	Provider string `protobuf:"bytes,1,opt,name=provider,proto3" json:"provider,omitempty"`
+	// Resource type: "ami", "ebs-snapshot", "lambda", etc.
+	ResourceType string `protobuf:"bytes,2,opt,name=resource_type,json=resourceType,proto3" json:"resource_type,omitempty"`
+	// Provider-specific resource identifier.
+	ResourceId string `protobuf:"bytes,3,opt,name=resource_id,json=resourceId,proto3" json:"resource_id,omitempty"`
+	// Cloud region.
+	Region string `protobuf:"bytes,4,opt,name=region,proto3" json:"region,omitempty"`
+	// Account/subscription/project identifier.
+	AccountId string `protobuf:"bytes,5,opt,name=account_id,json=accountId,proto3" json:"account_id,omitempty"`
+	// Resource tags/labels.
+	Tags          map[string]string `protobuf:"bytes,6,rep,name=tags,proto3" json:"tags,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *CloudResourceInfo) Reset() {
+	*x = CloudResourceInfo{}
+	mi := &file_deputy_policy_v1_policy_proto_msgTypes[56]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *CloudResourceInfo) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*CloudResourceInfo) ProtoMessage() {}
+
+func (x *CloudResourceInfo) ProtoReflect() protoreflect.Message {
+	mi := &file_deputy_policy_v1_policy_proto_msgTypes[56]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use CloudResourceInfo.ProtoReflect.Descriptor instead.
+func (*CloudResourceInfo) Descriptor() ([]byte, []int) {
+	return file_deputy_policy_v1_policy_proto_rawDescGZIP(), []int{56}
+}
+
+func (x *CloudResourceInfo) GetProvider() string {
+	if x != nil {
+		return x.Provider
+	}
+	return ""
+}
+
+func (x *CloudResourceInfo) GetResourceType() string {
+	if x != nil {
+		return x.ResourceType
+	}
+	return ""
+}
+
+func (x *CloudResourceInfo) GetResourceId() string {
+	if x != nil {
+		return x.ResourceId
+	}
+	return ""
+}
+
+func (x *CloudResourceInfo) GetRegion() string {
+	if x != nil {
+		return x.Region
+	}
+	return ""
+}
+
+func (x *CloudResourceInfo) GetAccountId() string {
+	if x != nil {
+		return x.AccountId
+	}
+	return ""
+}
+
+func (x *CloudResourceInfo) GetTags() map[string]string {
+	if x != nil {
+		return x.Tags
+	}
+	return nil
+}
+
+// ServiceCloudScanRequestPolicyInput is the input for service_cloud_scan_request entrypoint.
+// This entrypoint authorizes cloud resource scan requests before execution.
+type ServiceCloudScanRequestPolicyInput struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// JWT claims from authenticated requests.
+	Jwt *JWTClaims `protobuf:"bytes,1,opt,name=jwt,proto3" json:"jwt,omitempty"`
+	// Service request metadata.
+	Request *ServiceRequest `protobuf:"bytes,2,opt,name=request,proto3" json:"request,omitempty"`
+	// Cloud resource metadata for policy evaluation.
+	// Available fields: provider, resource_type, resource_id, region, account_id, tags.
+	Resource *CloudResourceInfo `protobuf:"bytes,3,opt,name=resource,proto3" json:"resource,omitempty"`
+	// Execution environment context.
+	Env           *Environment `protobuf:"bytes,4,opt,name=env,proto3" json:"env,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ServiceCloudScanRequestPolicyInput) Reset() {
+	*x = ServiceCloudScanRequestPolicyInput{}
+	mi := &file_deputy_policy_v1_policy_proto_msgTypes[57]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ServiceCloudScanRequestPolicyInput) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ServiceCloudScanRequestPolicyInput) ProtoMessage() {}
+
+func (x *ServiceCloudScanRequestPolicyInput) ProtoReflect() protoreflect.Message {
+	mi := &file_deputy_policy_v1_policy_proto_msgTypes[57]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ServiceCloudScanRequestPolicyInput.ProtoReflect.Descriptor instead.
+func (*ServiceCloudScanRequestPolicyInput) Descriptor() ([]byte, []int) {
+	return file_deputy_policy_v1_policy_proto_rawDescGZIP(), []int{57}
+}
+
+func (x *ServiceCloudScanRequestPolicyInput) GetJwt() *JWTClaims {
+	if x != nil {
+		return x.Jwt
+	}
+	return nil
+}
+
+func (x *ServiceCloudScanRequestPolicyInput) GetRequest() *ServiceRequest {
+	if x != nil {
+		return x.Request
+	}
+	return nil
+}
+
+func (x *ServiceCloudScanRequestPolicyInput) GetResource() *CloudResourceInfo {
+	if x != nil {
+		return x.Resource
+	}
+	return nil
+}
+
+func (x *ServiceCloudScanRequestPolicyInput) GetEnv() *Environment {
+	if x != nil {
+		return x.Env
+	}
+	return nil
+}
+
 var File_deputy_policy_v1_policy_proto protoreflect.FileDescriptor
 
 const file_deputy_policy_v1_policy_proto_rawDesc = "" +
@@ -4782,6 +4949,23 @@ const file_deputy_policy_v1_policy_proto_rawDesc = "" +
 	"\x03jwt\x18\x01 \x01(\v2\x1b.deputy.policy.v1.JWTClaimsR\x03jwt\x12:\n" +
 	"\arequest\x18\x02 \x01(\v2 .deputy.policy.v1.ServiceRequestR\arequest\x120\n" +
 	"\x06target\x18\x03 \x01(\v2\x18.deputy.target.v1.TargetR\x06target\x12/\n" +
+	"\x03env\x18\x04 \x01(\v2\x1d.deputy.policy.v1.EnvironmentR\x03env\"\xa8\x02\n" +
+	"\x11CloudResourceInfo\x12\x1a\n" +
+	"\bprovider\x18\x01 \x01(\tR\bprovider\x12#\n" +
+	"\rresource_type\x18\x02 \x01(\tR\fresourceType\x12\x1f\n" +
+	"\vresource_id\x18\x03 \x01(\tR\n" +
+	"resourceId\x12\x16\n" +
+	"\x06region\x18\x04 \x01(\tR\x06region\x12\x1d\n" +
+	"\n" +
+	"account_id\x18\x05 \x01(\tR\taccountId\x12A\n" +
+	"\x04tags\x18\x06 \x03(\v2-.deputy.policy.v1.CloudResourceInfo.TagsEntryR\x04tags\x1a7\n" +
+	"\tTagsEntry\x12\x10\n" +
+	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\x81\x02\n" +
+	"\"ServiceCloudScanRequestPolicyInput\x12-\n" +
+	"\x03jwt\x18\x01 \x01(\v2\x1b.deputy.policy.v1.JWTClaimsR\x03jwt\x12:\n" +
+	"\arequest\x18\x02 \x01(\v2 .deputy.policy.v1.ServiceRequestR\arequest\x12?\n" +
+	"\bresource\x18\x03 \x01(\v2#.deputy.policy.v1.CloudResourceInfoR\bresource\x12/\n" +
 	"\x03env\x18\x04 \x01(\v2\x1d.deputy.policy.v1.EnvironmentR\x03env*l\n" +
 	"\n" +
 	"ActionType\x12\x1b\n" +
@@ -4804,7 +4988,7 @@ func file_deputy_policy_v1_policy_proto_rawDescGZIP() []byte {
 }
 
 var file_deputy_policy_v1_policy_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
-var file_deputy_policy_v1_policy_proto_msgTypes = make([]protoimpl.MessageInfo, 61)
+var file_deputy_policy_v1_policy_proto_msgTypes = make([]protoimpl.MessageInfo, 64)
 var file_deputy_policy_v1_policy_proto_goTypes = []any{
 	(ActionType)(0),                               // 0: deputy.policy.v1.ActionType
 	(*Action)(nil),                                // 1: deputy.policy.v1.Action
@@ -4863,71 +5047,74 @@ var file_deputy_policy_v1_policy_proto_goTypes = []any{
 	(*ServiceDiffRequestPolicyInput)(nil),         // 54: deputy.policy.v1.ServiceDiffRequestPolicyInput
 	(*ServiceSecretsRequestPolicyInput)(nil),      // 55: deputy.policy.v1.ServiceSecretsRequestPolicyInput
 	(*ServiceGraphRequestPolicyInput)(nil),        // 56: deputy.policy.v1.ServiceGraphRequestPolicyInput
-	nil,                                           // 57: deputy.policy.v1.JWTClaims.CustomClaimsEntry
-	nil,                                           // 58: deputy.policy.v1.GraphStats.EcosystemsEntry
-	nil,                                           // 59: deputy.policy.v1.DockerfileInfo.ArgsEntry
-	nil,                                           // 60: deputy.policy.v1.DockerfileStage.EnvVarsEntry
-	nil,                                           // 61: deputy.policy.v1.DockerfileStage.LabelsEntry
-	(*v1.Finding)(nil),                            // 62: deputy.vulnerability.v1.Finding
-	(*v11.Package)(nil),                           // 63: deputy.dependency.v1.Package
-	(*v12.Target)(nil),                            // 64: deputy.target.v1.Target
-	(*v13.ImageInfo)(nil),                         // 65: deputy.container.v1.ImageInfo
-	(*v1.Stats)(nil),                              // 66: deputy.vulnerability.v1.Stats
-	(*v13.LayerDetails)(nil),                      // 67: deputy.container.v1.LayerDetails
+	(*CloudResourceInfo)(nil),                     // 57: deputy.policy.v1.CloudResourceInfo
+	(*ServiceCloudScanRequestPolicyInput)(nil),    // 58: deputy.policy.v1.ServiceCloudScanRequestPolicyInput
+	nil,                      // 59: deputy.policy.v1.JWTClaims.CustomClaimsEntry
+	nil,                      // 60: deputy.policy.v1.GraphStats.EcosystemsEntry
+	nil,                      // 61: deputy.policy.v1.DockerfileInfo.ArgsEntry
+	nil,                      // 62: deputy.policy.v1.DockerfileStage.EnvVarsEntry
+	nil,                      // 63: deputy.policy.v1.DockerfileStage.LabelsEntry
+	nil,                      // 64: deputy.policy.v1.CloudResourceInfo.TagsEntry
+	(*v1.Finding)(nil),       // 65: deputy.vulnerability.v1.Finding
+	(*v11.Package)(nil),      // 66: deputy.dependency.v1.Package
+	(*v12.Target)(nil),       // 67: deputy.target.v1.Target
+	(*v13.ImageInfo)(nil),    // 68: deputy.container.v1.ImageInfo
+	(*v1.Stats)(nil),         // 69: deputy.vulnerability.v1.Stats
+	(*v13.LayerDetails)(nil), // 70: deputy.container.v1.LayerDetails
 }
 var file_deputy_policy_v1_policy_proto_depIdxs = []int32{
 	0,   // 0: deputy.policy.v1.Action.type:type_name -> deputy.policy.v1.ActionType
-	57,  // 1: deputy.policy.v1.JWTClaims.custom_claims:type_name -> deputy.policy.v1.JWTClaims.CustomClaimsEntry
-	62,  // 2: deputy.policy.v1.ScanVulnerabilityPolicyInput.vulnerability:type_name -> deputy.vulnerability.v1.Finding
-	63,  // 3: deputy.policy.v1.ScanVulnerabilityPolicyInput.pkg:type_name -> deputy.dependency.v1.Package
+	59,  // 1: deputy.policy.v1.JWTClaims.custom_claims:type_name -> deputy.policy.v1.JWTClaims.CustomClaimsEntry
+	65,  // 2: deputy.policy.v1.ScanVulnerabilityPolicyInput.vulnerability:type_name -> deputy.vulnerability.v1.Finding
+	66,  // 3: deputy.policy.v1.ScanVulnerabilityPolicyInput.pkg:type_name -> deputy.dependency.v1.Package
 	2,   // 4: deputy.policy.v1.ScanVulnerabilityPolicyInput.env:type_name -> deputy.policy.v1.Environment
-	64,  // 5: deputy.policy.v1.ScanVulnerabilityPolicyInput.target:type_name -> deputy.target.v1.Target
-	65,  // 6: deputy.policy.v1.ScanVulnerabilityPolicyInput.image:type_name -> deputy.container.v1.ImageInfo
-	62,  // 7: deputy.policy.v1.ScanReportPolicyInput.vulnerabilities:type_name -> deputy.vulnerability.v1.Finding
-	63,  // 8: deputy.policy.v1.ScanReportPolicyInput.packages:type_name -> deputy.dependency.v1.Package
+	67,  // 5: deputy.policy.v1.ScanVulnerabilityPolicyInput.target:type_name -> deputy.target.v1.Target
+	68,  // 6: deputy.policy.v1.ScanVulnerabilityPolicyInput.image:type_name -> deputy.container.v1.ImageInfo
+	65,  // 7: deputy.policy.v1.ScanReportPolicyInput.vulnerabilities:type_name -> deputy.vulnerability.v1.Finding
+	66,  // 8: deputy.policy.v1.ScanReportPolicyInput.packages:type_name -> deputy.dependency.v1.Package
 	2,   // 9: deputy.policy.v1.ScanReportPolicyInput.env:type_name -> deputy.policy.v1.Environment
-	64,  // 10: deputy.policy.v1.ScanReportPolicyInput.target:type_name -> deputy.target.v1.Target
-	66,  // 11: deputy.policy.v1.ScanReportPolicyInput.stats:type_name -> deputy.vulnerability.v1.Stats
-	65,  // 12: deputy.policy.v1.ScanReportPolicyInput.image:type_name -> deputy.container.v1.ImageInfo
+	67,  // 10: deputy.policy.v1.ScanReportPolicyInput.target:type_name -> deputy.target.v1.Target
+	69,  // 11: deputy.policy.v1.ScanReportPolicyInput.stats:type_name -> deputy.vulnerability.v1.Stats
+	68,  // 12: deputy.policy.v1.ScanReportPolicyInput.image:type_name -> deputy.container.v1.ImageInfo
 	4,   // 13: deputy.policy.v1.GoArtifactRequestPolicyInput.request:type_name -> deputy.policy.v1.ProxyRequest
 	3,   // 14: deputy.policy.v1.GoArtifactRequestPolicyInput.jwt:type_name -> deputy.policy.v1.JWTClaims
 	2,   // 15: deputy.policy.v1.GoArtifactRequestPolicyInput.env:type_name -> deputy.policy.v1.Environment
-	62,  // 16: deputy.policy.v1.GoArtifactRequestPolicyInput.vulnerabilities:type_name -> deputy.vulnerability.v1.Finding
-	63,  // 17: deputy.policy.v1.GoArtifactRequestPolicyInput.pkg:type_name -> deputy.dependency.v1.Package
+	65,  // 16: deputy.policy.v1.GoArtifactRequestPolicyInput.vulnerabilities:type_name -> deputy.vulnerability.v1.Finding
+	66,  // 17: deputy.policy.v1.GoArtifactRequestPolicyInput.pkg:type_name -> deputy.dependency.v1.Package
 	4,   // 18: deputy.policy.v1.NpmArtifactRequestPolicyInput.request:type_name -> deputy.policy.v1.ProxyRequest
 	3,   // 19: deputy.policy.v1.NpmArtifactRequestPolicyInput.jwt:type_name -> deputy.policy.v1.JWTClaims
 	2,   // 20: deputy.policy.v1.NpmArtifactRequestPolicyInput.env:type_name -> deputy.policy.v1.Environment
-	62,  // 21: deputy.policy.v1.NpmArtifactRequestPolicyInput.vulnerabilities:type_name -> deputy.vulnerability.v1.Finding
-	63,  // 22: deputy.policy.v1.NpmArtifactRequestPolicyInput.pkg:type_name -> deputy.dependency.v1.Package
+	65,  // 21: deputy.policy.v1.NpmArtifactRequestPolicyInput.vulnerabilities:type_name -> deputy.vulnerability.v1.Finding
+	66,  // 22: deputy.policy.v1.NpmArtifactRequestPolicyInput.pkg:type_name -> deputy.dependency.v1.Package
 	4,   // 23: deputy.policy.v1.PypiArtifactRequestPolicyInput.request:type_name -> deputy.policy.v1.ProxyRequest
 	3,   // 24: deputy.policy.v1.PypiArtifactRequestPolicyInput.jwt:type_name -> deputy.policy.v1.JWTClaims
 	2,   // 25: deputy.policy.v1.PypiArtifactRequestPolicyInput.env:type_name -> deputy.policy.v1.Environment
-	62,  // 26: deputy.policy.v1.PypiArtifactRequestPolicyInput.vulnerabilities:type_name -> deputy.vulnerability.v1.Finding
-	63,  // 27: deputy.policy.v1.PypiArtifactRequestPolicyInput.pkg:type_name -> deputy.dependency.v1.Package
+	65,  // 26: deputy.policy.v1.PypiArtifactRequestPolicyInput.vulnerabilities:type_name -> deputy.vulnerability.v1.Finding
+	66,  // 27: deputy.policy.v1.PypiArtifactRequestPolicyInput.pkg:type_name -> deputy.dependency.v1.Package
 	4,   // 28: deputy.policy.v1.RubygemsArtifactRequestPolicyInput.request:type_name -> deputy.policy.v1.ProxyRequest
 	3,   // 29: deputy.policy.v1.RubygemsArtifactRequestPolicyInput.jwt:type_name -> deputy.policy.v1.JWTClaims
 	2,   // 30: deputy.policy.v1.RubygemsArtifactRequestPolicyInput.env:type_name -> deputy.policy.v1.Environment
-	62,  // 31: deputy.policy.v1.RubygemsArtifactRequestPolicyInput.vulnerabilities:type_name -> deputy.vulnerability.v1.Finding
-	63,  // 32: deputy.policy.v1.RubygemsArtifactRequestPolicyInput.pkg:type_name -> deputy.dependency.v1.Package
+	65,  // 31: deputy.policy.v1.RubygemsArtifactRequestPolicyInput.vulnerabilities:type_name -> deputy.vulnerability.v1.Finding
+	66,  // 32: deputy.policy.v1.RubygemsArtifactRequestPolicyInput.pkg:type_name -> deputy.dependency.v1.Package
 	4,   // 33: deputy.policy.v1.OciArtifactRequestPolicyInput.request:type_name -> deputy.policy.v1.ProxyRequest
 	3,   // 34: deputy.policy.v1.OciArtifactRequestPolicyInput.jwt:type_name -> deputy.policy.v1.JWTClaims
 	2,   // 35: deputy.policy.v1.OciArtifactRequestPolicyInput.env:type_name -> deputy.policy.v1.Environment
-	62,  // 36: deputy.policy.v1.OciArtifactRequestPolicyInput.vulnerabilities:type_name -> deputy.vulnerability.v1.Finding
-	65,  // 37: deputy.policy.v1.OciArtifactRequestPolicyInput.image:type_name -> deputy.container.v1.ImageInfo
-	63,  // 38: deputy.policy.v1.SbomReportPolicyInput.components:type_name -> deputy.dependency.v1.Package
+	65,  // 36: deputy.policy.v1.OciArtifactRequestPolicyInput.vulnerabilities:type_name -> deputy.vulnerability.v1.Finding
+	68,  // 37: deputy.policy.v1.OciArtifactRequestPolicyInput.image:type_name -> deputy.container.v1.ImageInfo
+	66,  // 38: deputy.policy.v1.SbomReportPolicyInput.components:type_name -> deputy.dependency.v1.Package
 	2,   // 39: deputy.policy.v1.SbomReportPolicyInput.env:type_name -> deputy.policy.v1.Environment
-	64,  // 40: deputy.policy.v1.SbomReportPolicyInput.target:type_name -> deputy.target.v1.Target
-	63,  // 41: deputy.policy.v1.SbomComponentPolicyInput.pkg:type_name -> deputy.dependency.v1.Package
+	67,  // 40: deputy.policy.v1.SbomReportPolicyInput.target:type_name -> deputy.target.v1.Target
+	66,  // 41: deputy.policy.v1.SbomComponentPolicyInput.pkg:type_name -> deputy.dependency.v1.Package
 	2,   // 42: deputy.policy.v1.SbomComponentPolicyInput.env:type_name -> deputy.policy.v1.Environment
-	64,  // 43: deputy.policy.v1.SbomComponentPolicyInput.target:type_name -> deputy.target.v1.Target
+	67,  // 43: deputy.policy.v1.SbomComponentPolicyInput.target:type_name -> deputy.target.v1.Target
 	15,  // 44: deputy.policy.v1.DiffReportPolicyInput.changes:type_name -> deputy.policy.v1.DependencyChange
-	64,  // 45: deputy.policy.v1.DiffReportPolicyInput.base_target:type_name -> deputy.target.v1.Target
-	64,  // 46: deputy.policy.v1.DiffReportPolicyInput.target_target:type_name -> deputy.target.v1.Target
+	67,  // 45: deputy.policy.v1.DiffReportPolicyInput.base_target:type_name -> deputy.target.v1.Target
+	67,  // 46: deputy.policy.v1.DiffReportPolicyInput.target_target:type_name -> deputy.target.v1.Target
 	2,   // 47: deputy.policy.v1.DiffReportPolicyInput.env:type_name -> deputy.policy.v1.Environment
-	63,  // 48: deputy.policy.v1.DependencyChange.pkg:type_name -> deputy.dependency.v1.Package
+	66,  // 48: deputy.policy.v1.DependencyChange.pkg:type_name -> deputy.dependency.v1.Package
 	15,  // 49: deputy.policy.v1.DiffDependencyChangePolicyInput.change:type_name -> deputy.policy.v1.DependencyChange
 	2,   // 50: deputy.policy.v1.DiffDependencyChangePolicyInput.env:type_name -> deputy.policy.v1.Environment
-	62,  // 51: deputy.policy.v1.DiffVulnerabilityPolicyInput.vulnerability:type_name -> deputy.vulnerability.v1.Finding
+	65,  // 51: deputy.policy.v1.DiffVulnerabilityPolicyInput.vulnerability:type_name -> deputy.vulnerability.v1.Finding
 	2,   // 52: deputy.policy.v1.DiffVulnerabilityPolicyInput.env:type_name -> deputy.policy.v1.Environment
 	19,  // 53: deputy.policy.v1.ContainerDiffReportPolicyInput.package_changes:type_name -> deputy.policy.v1.ContainerPackageChange
 	20,  // 54: deputy.policy.v1.ContainerDiffReportPolicyInput.vulnerability_changes:type_name -> deputy.policy.v1.ContainerVulnerabilityChange
@@ -4935,8 +5122,8 @@ var file_deputy_policy_v1_policy_proto_depIdxs = []int32{
 	22,  // 56: deputy.policy.v1.ContainerDiffReportPolicyInput.base_image:type_name -> deputy.policy.v1.ContainerImageRef
 	22,  // 57: deputy.policy.v1.ContainerDiffReportPolicyInput.target_image:type_name -> deputy.policy.v1.ContainerImageRef
 	2,   // 58: deputy.policy.v1.ContainerDiffReportPolicyInput.env:type_name -> deputy.policy.v1.Environment
-	67,  // 59: deputy.policy.v1.ContainerPackageChange.base_layer_details:type_name -> deputy.container.v1.LayerDetails
-	67,  // 60: deputy.policy.v1.ContainerPackageChange.target_layer_details:type_name -> deputy.container.v1.LayerDetails
+	70,  // 59: deputy.policy.v1.ContainerPackageChange.base_layer_details:type_name -> deputy.container.v1.LayerDetails
+	70,  // 60: deputy.policy.v1.ContainerPackageChange.target_layer_details:type_name -> deputy.container.v1.LayerDetails
 	19,  // 61: deputy.policy.v1.ContainerDiffChangePolicyInput.change:type_name -> deputy.policy.v1.ContainerPackageChange
 	2,   // 62: deputy.policy.v1.ContainerDiffChangePolicyInput.env:type_name -> deputy.policy.v1.Environment
 	20,  // 63: deputy.policy.v1.ContainerDiffVulnerabilityPolicyInput.vulnerability_change:type_name -> deputy.policy.v1.ContainerVulnerabilityChange
@@ -4948,16 +5135,16 @@ var file_deputy_policy_v1_policy_proto_depIdxs = []int32{
 	28,  // 69: deputy.policy.v1.SecretsReportPolicyInput.findings:type_name -> deputy.policy.v1.SecretFinding
 	29,  // 70: deputy.policy.v1.SecretsReportPolicyInput.stats:type_name -> deputy.policy.v1.SecretStats
 	2,   // 71: deputy.policy.v1.SecretsReportPolicyInput.env:type_name -> deputy.policy.v1.Environment
-	64,  // 72: deputy.policy.v1.SecretsReportPolicyInput.target:type_name -> deputy.target.v1.Target
+	67,  // 72: deputy.policy.v1.SecretsReportPolicyInput.target:type_name -> deputy.target.v1.Target
 	28,  // 73: deputy.policy.v1.SecretsFindingPolicyInput.finding:type_name -> deputy.policy.v1.SecretFinding
 	2,   // 74: deputy.policy.v1.SecretsFindingPolicyInput.env:type_name -> deputy.policy.v1.Environment
 	33,  // 75: deputy.policy.v1.GraphReportPolicyInput.nodes:type_name -> deputy.policy.v1.GraphNode
 	34,  // 76: deputy.policy.v1.GraphReportPolicyInput.edges:type_name -> deputy.policy.v1.GraphEdge
 	35,  // 77: deputy.policy.v1.GraphReportPolicyInput.stats:type_name -> deputy.policy.v1.GraphStats
 	2,   // 78: deputy.policy.v1.GraphReportPolicyInput.env:type_name -> deputy.policy.v1.Environment
-	64,  // 79: deputy.policy.v1.GraphReportPolicyInput.target:type_name -> deputy.target.v1.Target
-	62,  // 80: deputy.policy.v1.GraphNode.vulnerabilities:type_name -> deputy.vulnerability.v1.Finding
-	58,  // 81: deputy.policy.v1.GraphStats.ecosystems:type_name -> deputy.policy.v1.GraphStats.EcosystemsEntry
+	67,  // 79: deputy.policy.v1.GraphReportPolicyInput.target:type_name -> deputy.target.v1.Target
+	65,  // 80: deputy.policy.v1.GraphNode.vulnerabilities:type_name -> deputy.vulnerability.v1.Finding
+	60,  // 81: deputy.policy.v1.GraphStats.ecosystems:type_name -> deputy.policy.v1.GraphStats.EcosystemsEntry
 	33,  // 82: deputy.policy.v1.GraphNodePolicyInput.node:type_name -> deputy.policy.v1.GraphNode
 	2,   // 83: deputy.policy.v1.GraphNodePolicyInput.env:type_name -> deputy.policy.v1.Environment
 	34,  // 84: deputy.policy.v1.GraphEdgePolicyInput.edge:type_name -> deputy.policy.v1.GraphEdge
@@ -4966,13 +5153,13 @@ var file_deputy_policy_v1_policy_proto_depIdxs = []int32{
 	2,   // 87: deputy.policy.v1.GraphEdgePolicyInput.env:type_name -> deputy.policy.v1.Environment
 	39,  // 88: deputy.policy.v1.FixPlanPolicyInput.commands:type_name -> deputy.policy.v1.RemediationCommand
 	2,   // 89: deputy.policy.v1.FixPlanPolicyInput.env:type_name -> deputy.policy.v1.Environment
-	64,  // 90: deputy.policy.v1.FixPlanPolicyInput.target:type_name -> deputy.target.v1.Target
+	67,  // 90: deputy.policy.v1.FixPlanPolicyInput.target:type_name -> deputy.target.v1.Target
 	39,  // 91: deputy.policy.v1.FixPlanStepPolicyInput.step:type_name -> deputy.policy.v1.RemediationCommand
 	2,   // 92: deputy.policy.v1.FixPlanStepPolicyInput.env:type_name -> deputy.policy.v1.Environment
 	42,  // 93: deputy.policy.v1.TriageReportPolicyInput.top_packages:type_name -> deputy.policy.v1.TriagePackageSummary
-	66,  // 94: deputy.policy.v1.TriageReportPolicyInput.stats:type_name -> deputy.vulnerability.v1.Stats
+	69,  // 94: deputy.policy.v1.TriageReportPolicyInput.stats:type_name -> deputy.vulnerability.v1.Stats
 	2,   // 95: deputy.policy.v1.TriageReportPolicyInput.env:type_name -> deputy.policy.v1.Environment
-	64,  // 96: deputy.policy.v1.TriageReportPolicyInput.target:type_name -> deputy.target.v1.Target
+	67,  // 96: deputy.policy.v1.TriageReportPolicyInput.target:type_name -> deputy.target.v1.Target
 	42,  // 97: deputy.policy.v1.TriageClusterPolicyInput.cluster:type_name -> deputy.policy.v1.TriagePackageSummary
 	2,   // 98: deputy.policy.v1.TriageClusterPolicyInput.env:type_name -> deputy.policy.v1.Environment
 	45,  // 99: deputy.policy.v1.DockerfileReportPolicyInput.dockerfile:type_name -> deputy.policy.v1.DockerfileInfo
@@ -4980,43 +5167,48 @@ var file_deputy_policy_v1_policy_proto_depIdxs = []int32{
 	2,   // 101: deputy.policy.v1.DockerfileReportPolicyInput.env:type_name -> deputy.policy.v1.Environment
 	46,  // 102: deputy.policy.v1.DockerfileInfo.stages:type_name -> deputy.policy.v1.DockerfileStage
 	46,  // 103: deputy.policy.v1.DockerfileInfo.final_stage:type_name -> deputy.policy.v1.DockerfileStage
-	59,  // 104: deputy.policy.v1.DockerfileInfo.args:type_name -> deputy.policy.v1.DockerfileInfo.ArgsEntry
+	61,  // 104: deputy.policy.v1.DockerfileInfo.args:type_name -> deputy.policy.v1.DockerfileInfo.ArgsEntry
 	47,  // 105: deputy.policy.v1.DockerfileStage.base_image_resolved:type_name -> deputy.policy.v1.ImageReference
-	60,  // 106: deputy.policy.v1.DockerfileStage.env_vars:type_name -> deputy.policy.v1.DockerfileStage.EnvVarsEntry
-	61,  // 107: deputy.policy.v1.DockerfileStage.labels:type_name -> deputy.policy.v1.DockerfileStage.LabelsEntry
+	62,  // 106: deputy.policy.v1.DockerfileStage.env_vars:type_name -> deputy.policy.v1.DockerfileStage.EnvVarsEntry
+	63,  // 107: deputy.policy.v1.DockerfileStage.labels:type_name -> deputy.policy.v1.DockerfileStage.LabelsEntry
 	46,  // 108: deputy.policy.v1.DockerfileStagePolicyInput.stage:type_name -> deputy.policy.v1.DockerfileStage
 	45,  // 109: deputy.policy.v1.DockerfileStagePolicyInput.dockerfile:type_name -> deputy.policy.v1.DockerfileInfo
 	2,   // 110: deputy.policy.v1.DockerfileStagePolicyInput.env:type_name -> deputy.policy.v1.Environment
 	3,   // 111: deputy.policy.v1.ServiceScanRequestPolicyInput.jwt:type_name -> deputy.policy.v1.JWTClaims
 	50,  // 112: deputy.policy.v1.ServiceScanRequestPolicyInput.request:type_name -> deputy.policy.v1.ServiceRequest
-	64,  // 113: deputy.policy.v1.ServiceScanRequestPolicyInput.target:type_name -> deputy.target.v1.Target
+	67,  // 113: deputy.policy.v1.ServiceScanRequestPolicyInput.target:type_name -> deputy.target.v1.Target
 	2,   // 114: deputy.policy.v1.ServiceScanRequestPolicyInput.env:type_name -> deputy.policy.v1.Environment
 	3,   // 115: deputy.policy.v1.ServiceListRequestPolicyInput.jwt:type_name -> deputy.policy.v1.JWTClaims
 	50,  // 116: deputy.policy.v1.ServiceListRequestPolicyInput.request:type_name -> deputy.policy.v1.ServiceRequest
-	64,  // 117: deputy.policy.v1.ServiceListRequestPolicyInput.target:type_name -> deputy.target.v1.Target
+	67,  // 117: deputy.policy.v1.ServiceListRequestPolicyInput.target:type_name -> deputy.target.v1.Target
 	2,   // 118: deputy.policy.v1.ServiceListRequestPolicyInput.env:type_name -> deputy.policy.v1.Environment
 	3,   // 119: deputy.policy.v1.ServiceSbomRequestPolicyInput.jwt:type_name -> deputy.policy.v1.JWTClaims
 	50,  // 120: deputy.policy.v1.ServiceSbomRequestPolicyInput.request:type_name -> deputy.policy.v1.ServiceRequest
-	64,  // 121: deputy.policy.v1.ServiceSbomRequestPolicyInput.target:type_name -> deputy.target.v1.Target
+	67,  // 121: deputy.policy.v1.ServiceSbomRequestPolicyInput.target:type_name -> deputy.target.v1.Target
 	2,   // 122: deputy.policy.v1.ServiceSbomRequestPolicyInput.env:type_name -> deputy.policy.v1.Environment
 	3,   // 123: deputy.policy.v1.ServiceDiffRequestPolicyInput.jwt:type_name -> deputy.policy.v1.JWTClaims
 	50,  // 124: deputy.policy.v1.ServiceDiffRequestPolicyInput.request:type_name -> deputy.policy.v1.ServiceRequest
-	64,  // 125: deputy.policy.v1.ServiceDiffRequestPolicyInput.base_target:type_name -> deputy.target.v1.Target
-	64,  // 126: deputy.policy.v1.ServiceDiffRequestPolicyInput.target_target:type_name -> deputy.target.v1.Target
+	67,  // 125: deputy.policy.v1.ServiceDiffRequestPolicyInput.base_target:type_name -> deputy.target.v1.Target
+	67,  // 126: deputy.policy.v1.ServiceDiffRequestPolicyInput.target_target:type_name -> deputy.target.v1.Target
 	2,   // 127: deputy.policy.v1.ServiceDiffRequestPolicyInput.env:type_name -> deputy.policy.v1.Environment
 	3,   // 128: deputy.policy.v1.ServiceSecretsRequestPolicyInput.jwt:type_name -> deputy.policy.v1.JWTClaims
 	50,  // 129: deputy.policy.v1.ServiceSecretsRequestPolicyInput.request:type_name -> deputy.policy.v1.ServiceRequest
-	64,  // 130: deputy.policy.v1.ServiceSecretsRequestPolicyInput.target:type_name -> deputy.target.v1.Target
+	67,  // 130: deputy.policy.v1.ServiceSecretsRequestPolicyInput.target:type_name -> deputy.target.v1.Target
 	2,   // 131: deputy.policy.v1.ServiceSecretsRequestPolicyInput.env:type_name -> deputy.policy.v1.Environment
 	3,   // 132: deputy.policy.v1.ServiceGraphRequestPolicyInput.jwt:type_name -> deputy.policy.v1.JWTClaims
 	50,  // 133: deputy.policy.v1.ServiceGraphRequestPolicyInput.request:type_name -> deputy.policy.v1.ServiceRequest
-	64,  // 134: deputy.policy.v1.ServiceGraphRequestPolicyInput.target:type_name -> deputy.target.v1.Target
+	67,  // 134: deputy.policy.v1.ServiceGraphRequestPolicyInput.target:type_name -> deputy.target.v1.Target
 	2,   // 135: deputy.policy.v1.ServiceGraphRequestPolicyInput.env:type_name -> deputy.policy.v1.Environment
-	136, // [136:136] is the sub-list for method output_type
-	136, // [136:136] is the sub-list for method input_type
-	136, // [136:136] is the sub-list for extension type_name
-	136, // [136:136] is the sub-list for extension extendee
-	0,   // [0:136] is the sub-list for field type_name
+	64,  // 136: deputy.policy.v1.CloudResourceInfo.tags:type_name -> deputy.policy.v1.CloudResourceInfo.TagsEntry
+	3,   // 137: deputy.policy.v1.ServiceCloudScanRequestPolicyInput.jwt:type_name -> deputy.policy.v1.JWTClaims
+	50,  // 138: deputy.policy.v1.ServiceCloudScanRequestPolicyInput.request:type_name -> deputy.policy.v1.ServiceRequest
+	57,  // 139: deputy.policy.v1.ServiceCloudScanRequestPolicyInput.resource:type_name -> deputy.policy.v1.CloudResourceInfo
+	2,   // 140: deputy.policy.v1.ServiceCloudScanRequestPolicyInput.env:type_name -> deputy.policy.v1.Environment
+	141, // [141:141] is the sub-list for method output_type
+	141, // [141:141] is the sub-list for method input_type
+	141, // [141:141] is the sub-list for extension type_name
+	141, // [141:141] is the sub-list for extension extendee
+	0,   // [0:141] is the sub-list for field type_name
 }
 
 func init() { file_deputy_policy_v1_policy_proto_init() }
@@ -5030,7 +5222,7 @@ func file_deputy_policy_v1_policy_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_deputy_policy_v1_policy_proto_rawDesc), len(file_deputy_policy_v1_policy_proto_rawDesc)),
 			NumEnums:      1,
-			NumMessages:   61,
+			NumMessages:   64,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

@@ -5,6 +5,7 @@ package deputy.list.v1;
 import "buf/validate/validate.proto";
 import "deputy/target/v1/target.proto";
 import "deputy/dependency/v1/dependency.proto";
+import "google/protobuf/timestamp.proto";
 
 option go_package = "github.com/picatz/deputy/gen/deputy/list/v1;listv1";
 
@@ -50,18 +51,72 @@ message ListOptions {
 
   // Platform specifies target platform for container images.
   string platform = 5 [(buf.validate.field).string.max_len = 64];
+
+  // Collection listing options (used when target is a collection URI).
+
+  // PageSize limits the number of results returned (for collections).
+  // Default is 100, maximum is 1000.
+  int32 page_size = 6 [(buf.validate.field).int32 = {gte: 0, lte: 1000}];
+
+  // PageToken continues from a previous list operation (for collections).
+  string page_token = 7 [(buf.validate.field).string.max_len = 2048];
+
+  // Filter is a CEL expression to filter discovered targets (for collections).
+  // Available fields: uri, name, description, created_at, metadata.
+  // Example: 'metadata["tags.env"] == "prod"'
+  // Example: 'name.startsWith("web-") && created_at > timestamp("2024-01-01T00:00:00Z")'
+  string filter = 8 [(buf.validate.field).string.max_len = 4096];
 }
 
-// ListPackagesResponse contains enumerated packages.
+// ListPackagesResponse contains enumerated packages or discovered targets.
+// The response type depends on whether the request target was a collection URI.
 message ListPackagesResponse {
   // Target describes what was enumerated.
   deputy.target.v1.Target target = 1;
 
-  // Packages lists all discovered packages.
+  // Packages lists all discovered packages (for specific targets).
+  // Empty when is_collection is true.
   repeated deputy.dependency.v1.Package packages = 2;
 
-  // Stats summarizes the listing.
+  // Stats summarizes the listing (for specific targets).
+  // Empty when is_collection is true.
   ListStats stats = 3;
+
+  // IsCollection indicates whether the target was a collection URI.
+  // When true, discovered_targets is populated instead of packages.
+  bool is_collection = 4;
+
+  // DiscoveredTargets lists available targets (for collection URIs).
+  // Empty when is_collection is false.
+  // Example: aws://amis returns AMI targets that can be scanned.
+  repeated DiscoveredTarget discovered_targets = 5;
+
+  // NextPageToken is set when more results are available (for collections).
+  // Pass this value as page_token in the next request to continue.
+  string next_page_token = 6;
+}
+
+// DiscoveredTarget represents a target found during collection listing.
+// When listing a collection (e.g., aws://amis, docker://gcr.io/project/),
+// providers return these to describe available targets.
+message DiscoveredTarget {
+  // URI is the canonical target URI (e.g., aws://ami/ami-0123456789abcdef0).
+  // This URI can be passed to scan, list, or other commands.
+  string uri = 1 [(buf.validate.field).string = {min_len: 1, max_len: 4096}];
+
+  // Name is a human-readable name for the target.
+  string name = 2 [(buf.validate.field).string.max_len = 512];
+
+  // Description provides additional context about the target.
+  string description = 3 [(buf.validate.field).string.max_len = 2048];
+
+  // CreatedAt is when the target was created (if known).
+  google.protobuf.Timestamp created_at = 4;
+
+  // Metadata contains provider-specific attributes.
+  // For AWS: region, account_id, tags.env, etc.
+  // For Docker: digest, size, architecture, etc.
+  map<string, string> metadata = 5;
 }
 
 // ListStats provides statistics about the listing.

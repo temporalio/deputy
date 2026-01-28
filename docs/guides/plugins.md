@@ -539,3 +539,246 @@ DEPUTY_LOG_LEVEL=debug deputy scan . 2>&1 | grep trace
 - [ExtractorService Proto](../../api/deputy/plugin/v1/extractor.proto)
 - [pluginrpc Documentation](https://github.com/pluginrpc/pluginrpc)
 - [Example: Dotenv Extractor](../../examples/plugins/dotenv-extractor/)
+
+---
+
+# Building Cloud Provider Plugins
+
+Cloud provider plugins extend Deputy's target support to additional cloud platforms like OpenStack, VMware vSphere, or custom private clouds.
+
+## Overview
+
+Cloud provider plugins are standalone executables that communicate with Deputy over Unix sockets using ConnectRPC. They enable:
+
+- **Target detection**: Recognize URIs like `openstack://instances`
+- **Collection listing**: Enumerate available resources (VMs, images, snapshots)
+- **Resource opening**: Materialize cloud resources for scanning
+
+## Architecture
+
+```mermaid
+flowchart TB
+    subgraph Deputy["Deputy Process"]
+        scan["scan/list command"]
+        registry["targets.Registry"]
+        provider["CloudPluginProvider"]
+    end
+
+    subgraph Plugin["Plugin Process (deputy-cloud-*)"]
+        server["ConnectRPC Server"]
+        grpc["CloudProviderService"]
+        impl["Your Implementation"]
+    end
+
+    scan --> registry
+    registry --> provider
+    provider -->|"Unix Socket"| server
+    server --> grpc
+    grpc --> impl
+
+    classDef deputy fill:#e3f2fd,stroke:#1565c0
+    classDef plugin fill:#e8f5e9,stroke:#2e7d32
+
+    class Deputy,scan,registry,provider deputy
+    class Plugin,server,grpc,impl plugin
+```
+
+## The CloudProviderService Interface
+
+Implement the `CloudProviderService` from `api/deputy/cloud/v1/plugin.proto`:
+
+```protobuf
+service CloudProviderService {
+  // GetInfo returns metadata about this cloud provider plugin.
+  rpc GetInfo(GetProviderInfoRequest) returns (GetProviderInfoResponse);
+
+  // Detect checks if a target URI is handled by this provider.
+  rpc Detect(DetectRequest) returns (DetectResponse);
+
+  // IsCollection checks if a target URI represents a collection.
+  rpc IsCollection(IsCollectionRequest) returns (IsCollectionResponse);
+
+  // List enumerates resources in a collection.
+  rpc List(PluginListRequest) returns (PluginListResponse);
+
+  // Open materializes a cloud resource for scanning.
+  rpc Open(OpenResourceRequest) returns (stream OpenResourceEvent);
+
+  // Close releases resources from a previous Open call.
+  rpc Close(CloseResourceRequest) returns (CloseResourceResponse);
+}
+```
+
+### RPC Methods
+
+| Method | Purpose | When Called |
+|--------|---------|-------------|
+| `GetInfo` | Return plugin metadata | Plugin startup |
+| `Detect` | Check if URI belongs to this provider | Target resolution |
+| `IsCollection` | Check if URI is a collection (e.g., `openstack://instances`) | Before listing |
+| `List` | Enumerate resources in a collection | `deputy list <collection>` |
+| `Open` | Download/mount resource for scanning | `deputy scan <target>` |
+| `Close` | Clean up after scanning | After scan completes |
+
+## Plugin Discovery
+
+Cloud provider plugins are discovered as executables named `deputy-cloud-<name>` in PATH:
+
+```bash
+# These are auto-discovered
+/usr/local/bin/deputy-cloud-openstack
+/usr/local/bin/deputy-cloud-vsphere
+~/.local/bin/deputy-cloud-mycloud
+```
+
+## Implementing Collection Support
+
+To support `deputy list` for discovering resources, implement `IsCollection` and `List`:
+
+### IsCollection
+
+```go
+func (s *Server) IsCollection(
+    ctx context.Context,
+    req *connect.Request[cloudv1.IsCollectionRequest],
+) (*connect.Response[cloudv1.IsCollectionResponse], error) {
+    target := req.Msg.Target
+
+    // Collection URIs use plural resource names
+    // e.g., "openstack://instances", "openstack://images"
+    isCollection := false
+    collectionType := ""
+
+    if strings.HasPrefix(target, "openstack://") {
+        u, _ := url.Parse(target)
+        switch u.Host {
+        case "instances":
+            isCollection = true
+            collectionType = "instances"
+        case "images":
+            isCollection = true
+            collectionType = "images"
+        case "volumes":
+            isCollection = true
+            collectionType = "volumes"
+        }
+    }
+
+    return connect.NewResponse(&cloudv1.IsCollectionResponse{
+        IsCollection:   isCollection,
+        CollectionType: collectionType,
+    }), nil
+}
+```
+
+### List
+
+```go
+func (s *Server) List(
+    ctx context.Context,
+    req *connect.Request[cloudv1.PluginListRequest],
+) (*connect.Response[cloudv1.PluginListResponse], error) {
+    target := req.Msg.Target
+    opts := req.Msg.Options
+
+    // Parse collection URI
+    u, _ := url.Parse(target)
+    collectionType := u.Host
+
+    var resources []*cloudv1.CloudResource
+
+    switch collectionType {
+    case "instances":
+        instances, err := s.client.ListInstances(ctx, opts)
+        if err != nil {
+            return nil, connect.NewError(connect.CodeInternal, err)
+        }
+        for _, inst := range instances {
+            resources = append(resources, &cloudv1.CloudResource{
+                Id:          inst.ID,
+                Name:        inst.Name,
+                Type:        cloudv1.ResourceType_RESOURCE_TYPE_VM,
+                Provider:    "openstack",
+                Uri:         fmt.Sprintf("openstack://instance/%s", inst.ID),
+                CreatedAt:   timestamppb.New(inst.Created),
+                Description: inst.Description,
+                Metadata: map[string]string{
+                    "project": inst.Project,
+                    "flavor":  inst.Flavor,
+                },
+            })
+        }
+    case "images":
+        // Similar for images...
+    }
+
+    return connect.NewResponse(&cloudv1.PluginListResponse{
+        Resources: resources,
+    }), nil
+}
+```
+
+## URI Design Guidelines
+
+Follow these conventions for consistent CLI experience:
+
+| Pattern | Type | Example |
+|---------|------|---------|
+| `<provider>://<collection>` | Collection | `openstack://instances` |
+| `<provider>://<resource>/<id>` | Specific | `openstack://instance/abc-123` |
+| `?param=value` | Filter/option | `openstack://instances?project=myproj` |
+
+### Collection vs Specific
+
+```
+# Collections (plural) - list resources
+openstack://instances
+openstack://images
+vsphere://vms
+
+# Specific (singular with ID) - scan resource
+openstack://instance/abc-123
+openstack://image/img-456
+vsphere://vm/vm-789
+```
+
+## Example Usage
+
+After implementing a cloud provider plugin:
+
+```bash
+# Discover instances
+$ deputy list openstack://instances
+TARGET                                   NAME              CREATED
+openstack://instance/abc-123             web-server-1      2024-01-15
+openstack://instance/def-456             db-server-1       2024-01-10
+
+# Discover with filters
+$ deputy list openstack://instances?project=production
+
+# Scan a specific instance
+$ deputy scan openstack://instance/abc-123
+
+# Pipeline: discover and scan
+$ deputy list openstack://instances -f json | \
+    jq -r '.targets[].uri' | \
+    xargs -I{} deputy scan {}
+```
+
+## Testing Cloud Plugins
+
+```bash
+# Check plugin is discoverable
+which deputy-cloud-openstack
+
+# Test detection
+deputy scan openstack://instance/test-123 --dry-run
+
+# Debug mode
+DEPUTY_LOG_LEVEL=debug deputy list openstack://instances
+```
+
+## Proto Reference
+
+- [CloudProviderService Proto](../../api/deputy/cloud/v1/plugin.proto)
+- [CloudResource Proto](../../api/deputy/cloud/v1/cloud.proto)

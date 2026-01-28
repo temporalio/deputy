@@ -67,6 +67,10 @@ var (
 		"package_changes", "vulnerability_changes",
 		"config_changes", "layer_analysis", "summary",
 	}
+
+	// cloudResourceVars provide cloud resource metadata
+	// Fields: provider, type, id, region, account_id, tags, name
+	cloudResourceVars = []string{"resource"}
 )
 
 // BindingProfiles maps each entrypoint to its variable bindings.
@@ -320,6 +324,27 @@ var BindingProfiles = map[Entrypoint]BindingProfile{
 		Required:    append([]string{"host", "port", "protocol", "sandbox_config"}, envVars...),
 		Optional:    []string{"context"},
 		Description: "Triggers when a sandbox requests network access",
+	},
+
+	// Cloud resource entrypoints - for policies based on cloud resource metadata.
+	// Available resource fields: provider, type, id, region, account_id, tags
+	EntrypointCloudScanReport: {
+		Entrypoint:  EntrypointCloudScanReport,
+		Required:    append([]string{"resource", "vulnerabilities", "packages"}, envVars...),
+		Optional:    []string{"report"},
+		Description: "Triggers after a cloud resource scan completes with the full report",
+	},
+	EntrypointCloudScanVulnerability: {
+		Entrypoint:  EntrypointCloudScanVulnerability,
+		Required:    append(append([]string{"resource"}, singleVulnerabilityVars...), envVars...),
+		Optional:    nil,
+		Description: "Triggers for each vulnerability found in a cloud resource",
+	},
+	EntrypointServiceCloudScanRequest: {
+		Entrypoint:  EntrypointServiceCloudScanRequest,
+		Required:    append([]string{"request", "resource"}, envVars...),
+		Optional:    jwtVars,
+		Description: "Triggers before a cloud scan is executed via the API",
 	},
 }
 

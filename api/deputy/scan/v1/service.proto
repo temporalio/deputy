@@ -113,6 +113,30 @@ message ScanOptions {
   // populating layer_details.in_base_image in the response packages.
   // Only applies to container image targets. Requires network access and adds latency.
   bool detect_base_image = 11;
+
+  // CloudOptions configures cloud resource scanning.
+  // Only applies when kind is TARGET_KIND_CLOUD_RESOURCE.
+  CloudOptions cloud_options = 12;
+}
+
+// CloudOptions configures cloud resource scanning behavior.
+// These options are passed to cloud provider plugins and SDKs.
+message CloudOptions {
+  // Profile is the cloud provider profile/credentials name.
+  // For AWS: AWS_PROFILE or named profile from ~/.aws/credentials
+  // For Azure: AZURE_SUBSCRIPTION_ID or managed identity
+  // For GCP: GOOGLE_APPLICATION_CREDENTIALS or service account
+  string profile = 1 [(buf.validate.field).string.max_len = 256];
+
+  // Region overrides the default cloud region.
+  // Examples: "us-east-1" (AWS), "eastus" (Azure), "us-central1" (GCP)
+  string region = 2 [(buf.validate.field).string.max_len = 64];
+
+  // Account is the cloud account identifier.
+  // For AWS: 12-digit account ID
+  // For Azure: subscription ID (UUID)
+  // For GCP: project ID
+  string account = 3 [(buf.validate.field).string.max_len = 128];
 }
 
 // TargetHint disambiguates the target type when auto-detection is insufficient.

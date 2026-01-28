@@ -163,9 +163,9 @@ func (h *GraphHandler) collectInventory(ctx context.Context, target string, opts
 
 	switch kind {
 	case targets.KindContainerImage:
-		targetOpts := map[string]string{}
+		targetOpts := &targets.OpenOptions{}
 		if opts.Platform != "" {
-			targetOpts["platform"] = opts.Platform
+			targetOpts.Platform = opts.Platform
 		}
 		return inventory.CollectContainerImage(ctx, target, targetOpts, opts)
 

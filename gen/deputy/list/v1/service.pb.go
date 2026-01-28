@@ -12,6 +12,7 @@ import (
 	v1 "github.com/picatz/deputy/gen/deputy/target/v1"
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
+	timestamppb "google.golang.org/protobuf/types/known/timestamppb"
 	reflect "reflect"
 	sync "sync"
 	unsafe "unsafe"
@@ -94,7 +95,17 @@ type ListOptions struct {
 	// Maximum length accommodates SHA-256 commit hashes and long branch names.
 	Ref string `protobuf:"bytes,4,opt,name=ref,proto3" json:"ref,omitempty"`
 	// Platform specifies target platform for container images.
-	Platform      string `protobuf:"bytes,5,opt,name=platform,proto3" json:"platform,omitempty"`
+	Platform string `protobuf:"bytes,5,opt,name=platform,proto3" json:"platform,omitempty"`
+	// PageSize limits the number of results returned (for collections).
+	// Default is 100, maximum is 1000.
+	PageSize int32 `protobuf:"varint,6,opt,name=page_size,json=pageSize,proto3" json:"page_size,omitempty"`
+	// PageToken continues from a previous list operation (for collections).
+	PageToken string `protobuf:"bytes,7,opt,name=page_token,json=pageToken,proto3" json:"page_token,omitempty"`
+	// Filter is a CEL expression to filter discovered targets (for collections).
+	// Available fields: uri, name, description, created_at, metadata.
+	// Example: 'metadata["tags.env"] == "prod"'
+	// Example: 'name.startsWith("web-") && created_at > timestamp("2024-01-01T00:00:00Z")'
+	Filter        string `protobuf:"bytes,8,opt,name=filter,proto3" json:"filter,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -164,15 +175,49 @@ func (x *ListOptions) GetPlatform() string {
 	return ""
 }
 
-// ListPackagesResponse contains enumerated packages.
+func (x *ListOptions) GetPageSize() int32 {
+	if x != nil {
+		return x.PageSize
+	}
+	return 0
+}
+
+func (x *ListOptions) GetPageToken() string {
+	if x != nil {
+		return x.PageToken
+	}
+	return ""
+}
+
+func (x *ListOptions) GetFilter() string {
+	if x != nil {
+		return x.Filter
+	}
+	return ""
+}
+
+// ListPackagesResponse contains enumerated packages or discovered targets.
+// The response type depends on whether the request target was a collection URI.
 type ListPackagesResponse struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Target describes what was enumerated.
 	Target *v1.Target `protobuf:"bytes,1,opt,name=target,proto3" json:"target,omitempty"`
-	// Packages lists all discovered packages.
+	// Packages lists all discovered packages (for specific targets).
+	// Empty when is_collection is true.
 	Packages []*v11.Package `protobuf:"bytes,2,rep,name=packages,proto3" json:"packages,omitempty"`
-	// Stats summarizes the listing.
-	Stats         *ListStats `protobuf:"bytes,3,opt,name=stats,proto3" json:"stats,omitempty"`
+	// Stats summarizes the listing (for specific targets).
+	// Empty when is_collection is true.
+	Stats *ListStats `protobuf:"bytes,3,opt,name=stats,proto3" json:"stats,omitempty"`
+	// IsCollection indicates whether the target was a collection URI.
+	// When true, discovered_targets is populated instead of packages.
+	IsCollection bool `protobuf:"varint,4,opt,name=is_collection,json=isCollection,proto3" json:"is_collection,omitempty"`
+	// DiscoveredTargets lists available targets (for collection URIs).
+	// Empty when is_collection is false.
+	// Example: aws://amis returns AMI targets that can be scanned.
+	DiscoveredTargets []*DiscoveredTarget `protobuf:"bytes,5,rep,name=discovered_targets,json=discoveredTargets,proto3" json:"discovered_targets,omitempty"`
+	// NextPageToken is set when more results are available (for collections).
+	// Pass this value as page_token in the next request to continue.
+	NextPageToken string `protobuf:"bytes,6,opt,name=next_page_token,json=nextPageToken,proto3" json:"next_page_token,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -228,6 +273,114 @@ func (x *ListPackagesResponse) GetStats() *ListStats {
 	return nil
 }
 
+func (x *ListPackagesResponse) GetIsCollection() bool {
+	if x != nil {
+		return x.IsCollection
+	}
+	return false
+}
+
+func (x *ListPackagesResponse) GetDiscoveredTargets() []*DiscoveredTarget {
+	if x != nil {
+		return x.DiscoveredTargets
+	}
+	return nil
+}
+
+func (x *ListPackagesResponse) GetNextPageToken() string {
+	if x != nil {
+		return x.NextPageToken
+	}
+	return ""
+}
+
+// DiscoveredTarget represents a target found during collection listing.
+// When listing a collection (e.g., aws://amis, docker://gcr.io/project/),
+// providers return these to describe available targets.
+type DiscoveredTarget struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// URI is the canonical target URI (e.g., aws://ami/ami-0123456789abcdef0).
+	// This URI can be passed to scan, list, or other commands.
+	Uri string `protobuf:"bytes,1,opt,name=uri,proto3" json:"uri,omitempty"`
+	// Name is a human-readable name for the target.
+	Name string `protobuf:"bytes,2,opt,name=name,proto3" json:"name,omitempty"`
+	// Description provides additional context about the target.
+	Description string `protobuf:"bytes,3,opt,name=description,proto3" json:"description,omitempty"`
+	// CreatedAt is when the target was created (if known).
+	CreatedAt *timestamppb.Timestamp `protobuf:"bytes,4,opt,name=created_at,json=createdAt,proto3" json:"created_at,omitempty"`
+	// Metadata contains provider-specific attributes.
+	// For AWS: region, account_id, tags.env, etc.
+	// For Docker: digest, size, architecture, etc.
+	Metadata      map[string]string `protobuf:"bytes,5,rep,name=metadata,proto3" json:"metadata,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *DiscoveredTarget) Reset() {
+	*x = DiscoveredTarget{}
+	mi := &file_deputy_list_v1_service_proto_msgTypes[3]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *DiscoveredTarget) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*DiscoveredTarget) ProtoMessage() {}
+
+func (x *DiscoveredTarget) ProtoReflect() protoreflect.Message {
+	mi := &file_deputy_list_v1_service_proto_msgTypes[3]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use DiscoveredTarget.ProtoReflect.Descriptor instead.
+func (*DiscoveredTarget) Descriptor() ([]byte, []int) {
+	return file_deputy_list_v1_service_proto_rawDescGZIP(), []int{3}
+}
+
+func (x *DiscoveredTarget) GetUri() string {
+	if x != nil {
+		return x.Uri
+	}
+	return ""
+}
+
+func (x *DiscoveredTarget) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+func (x *DiscoveredTarget) GetDescription() string {
+	if x != nil {
+		return x.Description
+	}
+	return ""
+}
+
+func (x *DiscoveredTarget) GetCreatedAt() *timestamppb.Timestamp {
+	if x != nil {
+		return x.CreatedAt
+	}
+	return nil
+}
+
+func (x *DiscoveredTarget) GetMetadata() map[string]string {
+	if x != nil {
+		return x.Metadata
+	}
+	return nil
+}
+
 // ListStats provides statistics about the listing.
 type ListStats struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
@@ -245,7 +398,7 @@ type ListStats struct {
 
 func (x *ListStats) Reset() {
 	*x = ListStats{}
-	mi := &file_deputy_list_v1_service_proto_msgTypes[3]
+	mi := &file_deputy_list_v1_service_proto_msgTypes[4]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -257,7 +410,7 @@ func (x *ListStats) String() string {
 func (*ListStats) ProtoMessage() {}
 
 func (x *ListStats) ProtoReflect() protoreflect.Message {
-	mi := &file_deputy_list_v1_service_proto_msgTypes[3]
+	mi := &file_deputy_list_v1_service_proto_msgTypes[4]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -270,7 +423,7 @@ func (x *ListStats) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListStats.ProtoReflect.Descriptor instead.
 func (*ListStats) Descriptor() ([]byte, []int) {
-	return file_deputy_list_v1_service_proto_rawDescGZIP(), []int{3}
+	return file_deputy_list_v1_service_proto_rawDescGZIP(), []int{4}
 }
 
 func (x *ListStats) GetTotalPackages() int32 {
@@ -310,7 +463,7 @@ type ListEcosystemsRequest struct {
 
 func (x *ListEcosystemsRequest) Reset() {
 	*x = ListEcosystemsRequest{}
-	mi := &file_deputy_list_v1_service_proto_msgTypes[4]
+	mi := &file_deputy_list_v1_service_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -322,7 +475,7 @@ func (x *ListEcosystemsRequest) String() string {
 func (*ListEcosystemsRequest) ProtoMessage() {}
 
 func (x *ListEcosystemsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_deputy_list_v1_service_proto_msgTypes[4]
+	mi := &file_deputy_list_v1_service_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -335,7 +488,7 @@ func (x *ListEcosystemsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListEcosystemsRequest.ProtoReflect.Descriptor instead.
 func (*ListEcosystemsRequest) Descriptor() ([]byte, []int) {
-	return file_deputy_list_v1_service_proto_rawDescGZIP(), []int{4}
+	return file_deputy_list_v1_service_proto_rawDescGZIP(), []int{5}
 }
 
 // ListEcosystemsResponse contains supported ecosystems.
@@ -349,7 +502,7 @@ type ListEcosystemsResponse struct {
 
 func (x *ListEcosystemsResponse) Reset() {
 	*x = ListEcosystemsResponse{}
-	mi := &file_deputy_list_v1_service_proto_msgTypes[5]
+	mi := &file_deputy_list_v1_service_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -361,7 +514,7 @@ func (x *ListEcosystemsResponse) String() string {
 func (*ListEcosystemsResponse) ProtoMessage() {}
 
 func (x *ListEcosystemsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_deputy_list_v1_service_proto_msgTypes[5]
+	mi := &file_deputy_list_v1_service_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -374,7 +527,7 @@ func (x *ListEcosystemsResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListEcosystemsResponse.ProtoReflect.Descriptor instead.
 func (*ListEcosystemsResponse) Descriptor() ([]byte, []int) {
-	return file_deputy_list_v1_service_proto_rawDescGZIP(), []int{5}
+	return file_deputy_list_v1_service_proto_rawDescGZIP(), []int{6}
 }
 
 func (x *ListEcosystemsResponse) GetEcosystems() []*EcosystemInfo {
@@ -403,7 +556,7 @@ type EcosystemInfo struct {
 
 func (x *EcosystemInfo) Reset() {
 	*x = EcosystemInfo{}
-	mi := &file_deputy_list_v1_service_proto_msgTypes[6]
+	mi := &file_deputy_list_v1_service_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -415,7 +568,7 @@ func (x *EcosystemInfo) String() string {
 func (*EcosystemInfo) ProtoMessage() {}
 
 func (x *EcosystemInfo) ProtoReflect() protoreflect.Message {
-	mi := &file_deputy_list_v1_service_proto_msgTypes[6]
+	mi := &file_deputy_list_v1_service_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -428,7 +581,7 @@ func (x *EcosystemInfo) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use EcosystemInfo.ProtoReflect.Descriptor instead.
 func (*EcosystemInfo) Descriptor() ([]byte, []int) {
-	return file_deputy_list_v1_service_proto_rawDescGZIP(), []int{6}
+	return file_deputy_list_v1_service_proto_rawDescGZIP(), []int{7}
 }
 
 func (x *EcosystemInfo) GetName() string {
@@ -470,10 +623,10 @@ var File_deputy_list_v1_service_proto protoreflect.FileDescriptor
 
 const file_deputy_list_v1_service_proto_rawDesc = "" +
 	"\n" +
-	"\x1cdeputy/list/v1/service.proto\x12\x0edeputy.list.v1\x1a\x1bbuf/validate/validate.proto\x1a\x1ddeputy/target/v1/target.proto\x1a%deputy/dependency/v1/dependency.proto\"n\n" +
+	"\x1cdeputy/list/v1/service.proto\x12\x0edeputy.list.v1\x1a\x1bbuf/validate/validate.proto\x1a\x1ddeputy/target/v1/target.proto\x1a%deputy/dependency/v1/dependency.proto\x1a\x1fgoogle/protobuf/timestamp.proto\"n\n" +
 	"\x13ListPackagesRequest\x12 \n" +
 	"\x06target\x18\x01 \x01(\tB\b\xbaH\x05r\x03\x18\x80 R\x06target\x125\n" +
-	"\aoptions\x18\x02 \x01(\v2\x1b.deputy.list.v1.ListOptionsR\aoptions\"\xca\x01\n" +
+	"\aoptions\x18\x02 \x01(\v2\x1b.deputy.list.v1.ListOptionsR\aoptions\"\xbe\x02\n" +
 	"\vListOptions\x12\x1f\n" +
 	"\vonly_direct\x18\x01 \x01(\bR\n" +
 	"onlyDirect\x12.\n" +
@@ -482,11 +635,30 @@ const file_deputy_list_v1_service_proto_rawDesc = "" +
 	"ecosystems\x12)\n" +
 	"\x10include_licenses\x18\x03 \x01(\bR\x0fincludeLicenses\x12\x1a\n" +
 	"\x03ref\x18\x04 \x01(\tB\b\xbaH\x05r\x03\x18\x80\x02R\x03ref\x12#\n" +
-	"\bplatform\x18\x05 \x01(\tB\a\xbaH\x04r\x02\x18@R\bplatform\"\xb4\x01\n" +
+	"\bplatform\x18\x05 \x01(\tB\a\xbaH\x04r\x02\x18@R\bplatform\x12'\n" +
+	"\tpage_size\x18\x06 \x01(\x05B\n" +
+	"\xbaH\a\x1a\x05\x18\xe8\a(\x00R\bpageSize\x12'\n" +
+	"\n" +
+	"page_token\x18\a \x01(\tB\b\xbaH\x05r\x03\x18\x80\x10R\tpageToken\x12 \n" +
+	"\x06filter\x18\b \x01(\tB\b\xbaH\x05r\x03\x18\x80 R\x06filter\"\xd2\x02\n" +
 	"\x14ListPackagesResponse\x120\n" +
 	"\x06target\x18\x01 \x01(\v2\x18.deputy.target.v1.TargetR\x06target\x129\n" +
 	"\bpackages\x18\x02 \x03(\v2\x1d.deputy.dependency.v1.PackageR\bpackages\x12/\n" +
-	"\x05stats\x18\x03 \x01(\v2\x19.deputy.list.v1.ListStatsR\x05stats\"\xb1\x02\n" +
+	"\x05stats\x18\x03 \x01(\v2\x19.deputy.list.v1.ListStatsR\x05stats\x12#\n" +
+	"\ris_collection\x18\x04 \x01(\bR\fisCollection\x12O\n" +
+	"\x12discovered_targets\x18\x05 \x03(\v2 .deputy.list.v1.DiscoveredTargetR\x11discoveredTargets\x12&\n" +
+	"\x0fnext_page_token\x18\x06 \x01(\tR\rnextPageToken\"\xbe\x02\n" +
+	"\x10DiscoveredTarget\x12\x1c\n" +
+	"\x03uri\x18\x01 \x01(\tB\n" +
+	"\xbaH\ar\x05\x10\x01\x18\x80 R\x03uri\x12\x1c\n" +
+	"\x04name\x18\x02 \x01(\tB\b\xbaH\x05r\x03\x18\x80\x04R\x04name\x12*\n" +
+	"\vdescription\x18\x03 \x01(\tB\b\xbaH\x05r\x03\x18\x80\x10R\vdescription\x129\n" +
+	"\n" +
+	"created_at\x18\x04 \x01(\v2\x1a.google.protobuf.TimestampR\tcreatedAt\x12J\n" +
+	"\bmetadata\x18\x05 \x03(\v2..deputy.list.v1.DiscoveredTarget.MetadataEntryR\bmetadata\x1a;\n" +
+	"\rMetadataEntry\x12\x10\n" +
+	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\xb1\x02\n" +
 	"\tListStats\x12.\n" +
 	"\x0etotal_packages\x18\x01 \x01(\x05B\a\xbaH\x04\x1a\x02(\x00R\rtotalPackages\x120\n" +
 	"\x0fdirect_packages\x18\x02 \x01(\x05B\a\xbaH\x04\x1a\x02(\x00R\x0edirectPackages\x128\n" +
@@ -526,35 +698,41 @@ func file_deputy_list_v1_service_proto_rawDescGZIP() []byte {
 	return file_deputy_list_v1_service_proto_rawDescData
 }
 
-var file_deputy_list_v1_service_proto_msgTypes = make([]protoimpl.MessageInfo, 8)
+var file_deputy_list_v1_service_proto_msgTypes = make([]protoimpl.MessageInfo, 10)
 var file_deputy_list_v1_service_proto_goTypes = []any{
 	(*ListPackagesRequest)(nil),    // 0: deputy.list.v1.ListPackagesRequest
 	(*ListOptions)(nil),            // 1: deputy.list.v1.ListOptions
 	(*ListPackagesResponse)(nil),   // 2: deputy.list.v1.ListPackagesResponse
-	(*ListStats)(nil),              // 3: deputy.list.v1.ListStats
-	(*ListEcosystemsRequest)(nil),  // 4: deputy.list.v1.ListEcosystemsRequest
-	(*ListEcosystemsResponse)(nil), // 5: deputy.list.v1.ListEcosystemsResponse
-	(*EcosystemInfo)(nil),          // 6: deputy.list.v1.EcosystemInfo
-	nil,                            // 7: deputy.list.v1.ListStats.EcosystemsEntry
-	(*v1.Target)(nil),              // 8: deputy.target.v1.Target
-	(*v11.Package)(nil),            // 9: deputy.dependency.v1.Package
+	(*DiscoveredTarget)(nil),       // 3: deputy.list.v1.DiscoveredTarget
+	(*ListStats)(nil),              // 4: deputy.list.v1.ListStats
+	(*ListEcosystemsRequest)(nil),  // 5: deputy.list.v1.ListEcosystemsRequest
+	(*ListEcosystemsResponse)(nil), // 6: deputy.list.v1.ListEcosystemsResponse
+	(*EcosystemInfo)(nil),          // 7: deputy.list.v1.EcosystemInfo
+	nil,                            // 8: deputy.list.v1.DiscoveredTarget.MetadataEntry
+	nil,                            // 9: deputy.list.v1.ListStats.EcosystemsEntry
+	(*v1.Target)(nil),              // 10: deputy.target.v1.Target
+	(*v11.Package)(nil),            // 11: deputy.dependency.v1.Package
+	(*timestamppb.Timestamp)(nil),  // 12: google.protobuf.Timestamp
 }
 var file_deputy_list_v1_service_proto_depIdxs = []int32{
-	1, // 0: deputy.list.v1.ListPackagesRequest.options:type_name -> deputy.list.v1.ListOptions
-	8, // 1: deputy.list.v1.ListPackagesResponse.target:type_name -> deputy.target.v1.Target
-	9, // 2: deputy.list.v1.ListPackagesResponse.packages:type_name -> deputy.dependency.v1.Package
-	3, // 3: deputy.list.v1.ListPackagesResponse.stats:type_name -> deputy.list.v1.ListStats
-	7, // 4: deputy.list.v1.ListStats.ecosystems:type_name -> deputy.list.v1.ListStats.EcosystemsEntry
-	6, // 5: deputy.list.v1.ListEcosystemsResponse.ecosystems:type_name -> deputy.list.v1.EcosystemInfo
-	0, // 6: deputy.list.v1.ListService.ListPackages:input_type -> deputy.list.v1.ListPackagesRequest
-	4, // 7: deputy.list.v1.ListService.ListEcosystems:input_type -> deputy.list.v1.ListEcosystemsRequest
-	2, // 8: deputy.list.v1.ListService.ListPackages:output_type -> deputy.list.v1.ListPackagesResponse
-	5, // 9: deputy.list.v1.ListService.ListEcosystems:output_type -> deputy.list.v1.ListEcosystemsResponse
-	8, // [8:10] is the sub-list for method output_type
-	6, // [6:8] is the sub-list for method input_type
-	6, // [6:6] is the sub-list for extension type_name
-	6, // [6:6] is the sub-list for extension extendee
-	0, // [0:6] is the sub-list for field type_name
+	1,  // 0: deputy.list.v1.ListPackagesRequest.options:type_name -> deputy.list.v1.ListOptions
+	10, // 1: deputy.list.v1.ListPackagesResponse.target:type_name -> deputy.target.v1.Target
+	11, // 2: deputy.list.v1.ListPackagesResponse.packages:type_name -> deputy.dependency.v1.Package
+	4,  // 3: deputy.list.v1.ListPackagesResponse.stats:type_name -> deputy.list.v1.ListStats
+	3,  // 4: deputy.list.v1.ListPackagesResponse.discovered_targets:type_name -> deputy.list.v1.DiscoveredTarget
+	12, // 5: deputy.list.v1.DiscoveredTarget.created_at:type_name -> google.protobuf.Timestamp
+	8,  // 6: deputy.list.v1.DiscoveredTarget.metadata:type_name -> deputy.list.v1.DiscoveredTarget.MetadataEntry
+	9,  // 7: deputy.list.v1.ListStats.ecosystems:type_name -> deputy.list.v1.ListStats.EcosystemsEntry
+	7,  // 8: deputy.list.v1.ListEcosystemsResponse.ecosystems:type_name -> deputy.list.v1.EcosystemInfo
+	0,  // 9: deputy.list.v1.ListService.ListPackages:input_type -> deputy.list.v1.ListPackagesRequest
+	5,  // 10: deputy.list.v1.ListService.ListEcosystems:input_type -> deputy.list.v1.ListEcosystemsRequest
+	2,  // 11: deputy.list.v1.ListService.ListPackages:output_type -> deputy.list.v1.ListPackagesResponse
+	6,  // 12: deputy.list.v1.ListService.ListEcosystems:output_type -> deputy.list.v1.ListEcosystemsResponse
+	11, // [11:13] is the sub-list for method output_type
+	9,  // [9:11] is the sub-list for method input_type
+	9,  // [9:9] is the sub-list for extension type_name
+	9,  // [9:9] is the sub-list for extension extendee
+	0,  // [0:9] is the sub-list for field type_name
 }
 
 func init() { file_deputy_list_v1_service_proto_init() }
@@ -568,7 +746,7 @@ func file_deputy_list_v1_service_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_deputy_list_v1_service_proto_rawDesc), len(file_deputy_list_v1_service_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   8,
+			NumMessages:   10,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

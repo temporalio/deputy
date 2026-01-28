@@ -15,6 +15,7 @@ import (
 	vulnerabilityv1 "github.com/picatz/deputy/gen/deputy/vulnerability/v1"
 	"github.com/picatz/deputy/internal/policy"
 	"github.com/picatz/deputy/internal/scanning"
+	"github.com/picatz/deputy/internal/targets"
 	"google.golang.org/protobuf/proto"
 )
 
@@ -196,7 +197,7 @@ type stubImageScanner struct {
 	t *testing.T
 }
 
-func (s stubImageScanner) ScanContainerImage(context.Context, string, map[string]string, scanning.Options) (*scanning.Execution, error) {
+func (s stubImageScanner) ScanContainerImage(context.Context, string, *targets.OpenOptions, scanning.Options) (*scanning.Execution, error) {
 	if s.t != nil {
 		s.t.Fatalf("unexpected image scan")
 	}

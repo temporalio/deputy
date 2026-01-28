@@ -30,6 +30,8 @@ enum TargetKind {
   TARGET_KIND_PURL = 10;
   // Dockerfile for static analysis.
   TARGET_KIND_DOCKERFILE = 11;
+  // Cloud resource (AWS AMI, EBS snapshot, Azure disk, GCP image, etc.).
+  TARGET_KIND_CLOUD_RESOURCE = 12;
 }
 
 // Target describes what Deputy is operating on and how it was resolved.

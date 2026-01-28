@@ -10,6 +10,7 @@ import (
 
 	"github.com/google/go-containerregistry/pkg/name"
 	"github.com/picatz/deputy/internal/scanning"
+	"github.com/picatz/deputy/internal/targets"
 )
 
 func TestIsMutableTag(t *testing.T) {
@@ -493,7 +494,7 @@ func TestOCIHandler_DigestReferencePassthrough(t *testing.T) {
 // stubImageScannerAllowScan allows scans without failing
 type stubImageScannerAllowScan struct{}
 
-func (s stubImageScannerAllowScan) ScanContainerImage(ctx context.Context, target string, targetOpts map[string]string, opts scanning.Options) (*scanning.Execution, error) {
+func (s stubImageScannerAllowScan) ScanContainerImage(ctx context.Context, target string, targetOpts *targets.OpenOptions, opts scanning.Options) (*scanning.Execution, error) {
 	return &scanning.Execution{
 		Result: scanning.Result{},
 	}, nil

@@ -45,7 +45,11 @@ func TestTargetsOpenLocalGitRepo(t *testing.T) {
 func TestTargetsOpenRemoteGitFileURL(t *testing.T) {
 	origin := initGitRepo(t, false)
 	remote := fmt.Sprintf("file://%s", origin)
-	mat, err := targets.Open(context.Background(), remote, map[string]string{"ref": "HEAD"})
+	mat, err := targets.Open(context.Background(), remote, &targets.OpenOptions{
+		Context: &targets.ProviderContext{
+			Extra: map[string]string{"ref": "HEAD"},
+		},
+	})
 	if err != nil {
 		t.Fatalf("open remote git repo: %v", err)
 	}

@@ -49,6 +49,8 @@ const (
 	TargetKind_TARGET_KIND_PURL TargetKind = 10
 	// Dockerfile for static analysis.
 	TargetKind_TARGET_KIND_DOCKERFILE TargetKind = 11
+	// Cloud resource (AWS AMI, EBS snapshot, Azure disk, GCP image, etc.).
+	TargetKind_TARGET_KIND_CLOUD_RESOURCE TargetKind = 12
 )
 
 // Enum value maps for TargetKind.
@@ -66,6 +68,7 @@ var (
 		9:  "TARGET_KIND_SBOM",
 		10: "TARGET_KIND_PURL",
 		11: "TARGET_KIND_DOCKERFILE",
+		12: "TARGET_KIND_CLOUD_RESOURCE",
 	}
 	TargetKind_value = map[string]int32{
 		"TARGET_KIND_UNSPECIFIED":        0,
@@ -80,6 +83,7 @@ var (
 		"TARGET_KIND_SBOM":               9,
 		"TARGET_KIND_PURL":               10,
 		"TARGET_KIND_DOCKERFILE":         11,
+		"TARGET_KIND_CLOUD_RESOURCE":     12,
 	}
 )
 
@@ -261,7 +265,7 @@ const file_deputy_target_v1_target_proto_rawDesc = "" +
 	" \x01(\tR\treference\x1a=\n" +
 	"\x0fProvenanceEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
-	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01*\xc3\x02\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01*\xe3\x02\n" +
 	"\n" +
 	"TargetKind\x12\x1b\n" +
 	"\x17TARGET_KIND_UNSPECIFIED\x10\x00\x12\x13\n" +
@@ -276,7 +280,8 @@ const file_deputy_target_v1_target_proto_rawDesc = "" +
 	"\x10TARGET_KIND_SBOM\x10\t\x12\x14\n" +
 	"\x10TARGET_KIND_PURL\x10\n" +
 	"\x12\x1a\n" +
-	"\x16TARGET_KIND_DOCKERFILE\x10\vB\xbd\x01\n" +
+	"\x16TARGET_KIND_DOCKERFILE\x10\v\x12\x1e\n" +
+	"\x1aTARGET_KIND_CLOUD_RESOURCE\x10\fB\xbd\x01\n" +
 	"\x14com.deputy.target.v1B\vTargetProtoP\x01Z6github.com/picatz/deputy/gen/deputy/target/v1;targetv1\xa2\x02\x03DTX\xaa\x02\x10Deputy.Target.V1\xca\x02\x10Deputy\\Target\\V1\xe2\x02\x1cDeputy\\Target\\V1\\GPBMetadata\xea\x02\x12Deputy::Target::V1b\x06proto3"
 
 var (

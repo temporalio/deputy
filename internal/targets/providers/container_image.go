@@ -140,6 +140,10 @@ type containerImageProvider struct{}
 func (containerImageProvider) Priority() int { return priorityContainerImage }
 
 func (containerImageProvider) Detect(_ context.Context, target string) bool {
+	// Collection URIs (ending with /) are handled by containerRegistryProvider
+	if isContainerRegistryCollection(target) {
+		return false
+	}
 	// Check for explicit scheme (docker://, oci://, etc.)
 	if _, _, ok := parseImageTarget(target); ok {
 		return true
@@ -148,7 +152,7 @@ func (containerImageProvider) Detect(_ context.Context, target string) bool {
 	return targets.LooksLikeContainerRef(target)
 }
 
-func (containerImageProvider) Open(ctx context.Context, target string, opts map[string]string) (targets.Materialized, error) {
+func (containerImageProvider) Open(ctx context.Context, target string, opts *targets.OpenOptions) (targets.Materialized, error) {
 	transport, rawRef, ok := parseImageTarget(target)
 	if !ok {
 		return targets.Materialized{}, fmt.Errorf("image target %q is not supported; valid formats: docker://registry/image:tag, docker-daemon://image:tag, oci://registry/image:tag, tarball://path/to/image.tar, oci-layout://path/to/layout", target)
@@ -267,11 +271,11 @@ func (containerImageProvider) Open(ctx context.Context, target string, opts map[
 			"path":      pathRef,
 		}
 	}
-	if platform := strings.TrimSpace(opts["platform"]); platform != "" {
+	if opts != nil && opts.Platform != "" {
 		if meta.Provenance == nil {
 			meta.Provenance = map[string]string{}
 		}
-		meta.Provenance["platform"] = platform
+		meta.Provenance["platform"] = opts.Platform
 	}
 
 	// Wrap the image data with v1.Image for config access
@@ -420,7 +424,7 @@ func isRegularFile(path string) bool {
 	return info.Mode().IsRegular()
 }
 
-func loadRemoteImage(ctx context.Context, ref *imageReference, opts map[string]string) (*layerimage.Image, v1.Image, error) {
+func loadRemoteImage(ctx context.Context, ref *imageReference, opts *targets.OpenOptions) (*layerimage.Image, v1.Image, error) {
 	if ref == nil || ref.ref == nil {
 		return nil, nil, fmt.Errorf("image reference is required")
 	}
@@ -577,7 +581,7 @@ func (e *DockerDaemonError) Unwrap() error {
 // The directory must contain oci-layout and index.json files per the OCI Image Layout spec.
 // If multiple images are present, use the "tag" option to select one by tag/digest.
 // Returns both the SCALIBR image for scanning and v1.Image for config extraction.
-func loadOCILayoutImage(ctx context.Context, path string, opts map[string]string) (*layerimage.Image, v1.Image, error) {
+func loadOCILayoutImage(ctx context.Context, path string, opts *targets.OpenOptions) (*layerimage.Image, v1.Image, error) {
 	if !isOCIImageLayoutDir(path) {
 		return nil, nil, fmt.Errorf("path %q is not a valid OCI image layout directory (missing oci-layout or index.json)", path)
 	}
@@ -687,14 +691,14 @@ type ociPlatform struct {
 }
 
 // selectOCIManifest selects the appropriate manifest based on options.
-func selectOCIManifest(manifests []ociManifest, opts map[string]string) (ociManifest, error) {
+func selectOCIManifest(manifests []ociManifest, opts *targets.OpenOptions) (ociManifest, error) {
 	if len(manifests) == 1 {
 		return manifests[0], nil
 	}
 
 	// Check for tag selection via annotations
-	if opts != nil {
-		if tag := strings.TrimSpace(opts["tag"]); tag != "" {
+	if opts != nil && opts.Context != nil {
+		if tag := strings.TrimSpace(opts.Context.Extra["tag"]); tag != "" {
 			for _, m := range manifests {
 				if refName := m.Annotations["org.opencontainers.image.ref.name"]; refName == tag {
 					return m, nil
@@ -702,9 +706,12 @@ func selectOCIManifest(manifests []ociManifest, opts map[string]string) (ociMani
 			}
 			return ociManifest{}, fmt.Errorf("no manifest with tag %q found", tag)
 		}
+	}
 
-		// Check for platform selection
-		if platform := strings.TrimSpace(opts["platform"]); platform != "" {
+	// Check for platform selection
+	if opts != nil && opts.Platform != "" {
+		platform := strings.TrimSpace(opts.Platform)
+		if platform != "" {
 			parts := strings.Split(platform, "/")
 			if len(parts) >= 2 {
 				wantOS := parts[0]
@@ -828,7 +835,7 @@ func formatPlatform(p *ociPlatform) string {
 	return s
 }
 
-func buildRemoteOptions(ctx context.Context, opts map[string]string) ([]remote.Option, error) {
+func buildRemoteOptions(ctx context.Context, opts *targets.OpenOptions) ([]remote.Option, error) {
 	// Authentication uses the Docker credential keychain by default.
 	// This supports:
 	//   - ~/.docker/config.json credentials
@@ -863,11 +870,11 @@ func buildRemoteOptions(ctx context.Context, opts map[string]string) ([]remote.O
 	if ctx != nil {
 		remoteOpts = append(remoteOpts, remote.WithContext(ctx))
 	}
-	if opts == nil {
+	if opts == nil || opts.Platform == "" {
 		return remoteOpts, nil
 	}
 
-	platform := strings.TrimSpace(opts["platform"])
+	platform := strings.TrimSpace(opts.Platform)
 	if platform == "" {
 		return remoteOpts, nil
 	}

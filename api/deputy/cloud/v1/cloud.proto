@@ -1,0 +1,112 @@
+syntax = "proto3";
+
+package deputy.cloud.v1;
+
+option go_package = "github.com/picatz/deputy/gen/deputy/cloud/v1;cloudv1";
+
+import "buf/validate/validate.proto";
+import "google/protobuf/timestamp.proto";
+
+// CloudProvider identifies the cloud provider.
+enum CloudProvider {
+  // Unspecified cloud provider.
+  CLOUD_PROVIDER_UNSPECIFIED = 0;
+  // Amazon Web Services.
+  CLOUD_PROVIDER_AWS = 1;
+  // Microsoft Azure.
+  CLOUD_PROVIDER_AZURE = 2;
+  // Google Cloud Platform.
+  CLOUD_PROVIDER_GCP = 3;
+  // Plugin-provided cloud provider.
+  CLOUD_PROVIDER_PLUGIN = 4;
+}
+
+// CloudResourceType identifies the type of cloud resource.
+enum CloudResourceType {
+  // Unspecified resource type.
+  CLOUD_RESOURCE_TYPE_UNSPECIFIED = 0;
+
+  // AWS resource types (1-9).
+  // Amazon Machine Image.
+  CLOUD_RESOURCE_TYPE_AWS_AMI = 1;
+  // EBS snapshot.
+  CLOUD_RESOURCE_TYPE_AWS_EBS_SNAPSHOT = 2;
+  // ECR container image.
+  CLOUD_RESOURCE_TYPE_AWS_ECR_IMAGE = 3;
+  // Lambda function.
+  CLOUD_RESOURCE_TYPE_AWS_LAMBDA = 4;
+
+  // Azure resource types (10-19).
+  // Azure VM image.
+  CLOUD_RESOURCE_TYPE_AZURE_VM_IMAGE = 10;
+  // Azure managed disk.
+  CLOUD_RESOURCE_TYPE_AZURE_DISK = 11;
+  // Azure Container Registry image.
+  CLOUD_RESOURCE_TYPE_AZURE_ACR_IMAGE = 12;
+  // Azure Function.
+  CLOUD_RESOURCE_TYPE_AZURE_FUNCTION = 13;
+
+  // GCP resource types (20-29).
+  // GCP Compute Engine image.
+  CLOUD_RESOURCE_TYPE_GCP_IMAGE = 20;
+  // GCP persistent disk.
+  CLOUD_RESOURCE_TYPE_GCP_DISK = 21;
+  // Google Artifact Registry image.
+  CLOUD_RESOURCE_TYPE_GCP_GAR_IMAGE = 22;
+  // Google Cloud Function.
+  CLOUD_RESOURCE_TYPE_GCP_FUNCTION = 23;
+}
+
+// CloudResource describes a cloud resource for scanning.
+message CloudResource {
+  // Cloud provider.
+  CloudProvider provider = 1;
+  // Resource type.
+  CloudResourceType resource_type = 2;
+  // Provider-specific resource identifier.
+  string resource_id = 3 [(buf.validate.field).string.min_len = 1];
+  // Cloud region.
+  string region = 4;
+  // Account/subscription/project identifier.
+  string account_id = 5;
+  // Resource tags/labels.
+  map<string, string> tags = 6;
+  // Resource creation timestamp.
+  google.protobuf.Timestamp created_at = 7;
+  // Resource name (human-readable).
+  string name = 8;
+  // Resource description.
+  string description = 9;
+}
+
+// CloudScanOptions configures cloud resource scanning.
+message CloudScanOptions {
+  // Region to use for API calls (overrides URI).
+  string region = 1 [(buf.validate.field).string.max_len = 64];
+  // Profile name for credential resolution (AWS profile, Azure subscription, GCP project).
+  string profile = 2 [(buf.validate.field).string.max_len = 128];
+  // Enable smart block downloading for EBS snapshots (default: true).
+  // When enabled, only downloads blocks containing package databases.
+  bool smart_download = 3;
+  // Ecosystems to scan (empty means all).
+  repeated string ecosystems = 4;
+  // Account/subscription/project ID override.
+  string account_id = 5;
+}
+
+// CloudResourceInfo provides cloud resource context for policy evaluation.
+// This is used in policy inputs for cloud_scan_* entrypoints.
+message CloudResourceInfo {
+  // Cloud provider name: "aws", "azure", "gcp", or plugin name.
+  string provider = 1;
+  // Resource type: "ami", "ebs-snapshot", "lambda", etc.
+  string resource_type = 2;
+  // Provider-specific resource identifier.
+  string resource_id = 3;
+  // Cloud region.
+  string region = 4;
+  // Account/subscription/project identifier.
+  string account_id = 5;
+  // Resource tags/labels.
+  map<string, string> tags = 6;
+}

@@ -1,0 +1,8 @@
+provider: local
+type: ami
+region: us-east-1
+account_id: "000000000000"
+name: test-image
+tags:
+  environment: development
+  owner: test-user

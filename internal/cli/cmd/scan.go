@@ -22,6 +22,7 @@ import (
 	"github.com/google/go-containerregistry/pkg/name"
 	"github.com/google/osv-scalibr/extractor"
 	packageurl "github.com/package-url/packageurl-go"
+	cloudv1 "github.com/picatz/deputy/gen/deputy/cloud/v1"
 	policyv1 "github.com/picatz/deputy/gen/deputy/policy/v1"
 	scanv1 "github.com/picatz/deputy/gen/deputy/scan/v1"
 	targetv1 "github.com/picatz/deputy/gen/deputy/target/v1"
@@ -178,10 +179,21 @@ SUBCOMMANDS:
   # Scan a single PURL
   deputy scan purl pkg:npm/lodash@4.17.21
 
+CLOUD RESOURCE SCANNING:
+  # Scan AWS AMI
+  deputy scan aws://ami/ami-0123456789abcdef0
+  deputy scan aws://ami/ami-xxx --region us-west-2 --profile production
+
+  # Scan AWS EBS snapshot
+  deputy scan aws://ebs/snap-0123456789abcdef0
+
+  # Scan with AWS profile
+  deputy scan aws://ami/ami-xxx --profile my-profile --region us-east-1
+
 WORKFLOW EXAMPLES:
   # CI/CD pipeline vulnerability check
   deputy scan --format json --ignore-unfixed --output vuln-report.json
-  
+
   # Quick security check before release
   deputy scan --ref release-candidate
 
@@ -213,6 +225,9 @@ WORKFLOW EXAMPLES:
 	scanCmd.Flags().Bool("with-graph", false, "Build dependency graph to show paths to vulnerable packages")
 	scanCmd.Flags().Bool("secrets", false, "Scan for leaked secrets and credentials in addition to vulnerabilities")
 	scanCmd.Flags().Bool("detect-base-image", false, "Detect base image layers in container scans (requires network, queries deps.dev)")
+
+	// Cloud provider flags for scanning AWS/Azure/GCP resources
+	cliflags.AddCloudFlags(scanCmd)
 
 	scanDirCmd := &cobra.Command{
 		Use:           "dir <path>",
@@ -541,6 +556,12 @@ func runScan(c *services.Clients, cmd *cobra.Command, args []string) error {
 			}
 			warnRefIgnored(cmd, "vm image")
 			return runScanVMImage(c, cmd, target)
+		case "cloud":
+			if target == "" {
+				return fmt.Errorf("expected 1 argument: <cloud-resource-uri>")
+			}
+			warnRefIgnored(cmd, "cloud resource")
+			return runScanCloudResource(c, cmd, target)
 		default:
 			return fmt.Errorf("unknown --source %q", source)
 		}
@@ -571,6 +592,11 @@ func runScan(c *services.Clients, cmd *cobra.Command, args []string) error {
 	if isVMImageTarget(target) {
 		warnRefIgnored(cmd, "vm image")
 		return runScanVMImage(c, cmd, target)
+	}
+
+	if isCloudResourceTarget(target) {
+		warnRefIgnored(cmd, "cloud resource")
+		return runScanCloudResource(c, cmd, target)
 	}
 
 	if target == "-" {
@@ -909,6 +935,227 @@ func runScanVMImage(c *services.Clients, cmd *cobra.Command, target string) erro
 	default:
 		return cliflags.UnsupportedFormatError("--format", flags.Format, "text|json|sarif")
 	}
+}
+
+// runScanCloudResource executes the cloud resource scan command logic.
+// It opens cloud resources via built-in providers (AWS, Azure, GCP) or
+// plugin-provided cloud providers (local://, openstack://, etc.).
+func runScanCloudResource(c *services.Clients, cmd *cobra.Command, target string) error {
+	ctx := cmd.Context()
+	flags := extractScanFlags(cmd)
+	errW := cmd.ErrOrStderr()
+
+	// Build proto request with cloud resource target hint
+	req := flags.toScanRequestWithHint(target, targetv1.TargetKind_TARGET_KIND_CLOUD_RESOURCE, "", "", errW)
+
+	// Add cloud-specific options to the request
+	profile, _ := cmd.Flags().GetString("profile")
+	region, _ := cmd.Flags().GetString("region")
+	account, _ := cmd.Flags().GetString("account")
+	if profile != "" || region != "" || account != "" {
+		if req.Options == nil {
+			req.Options = &scanv1.ScanOptions{}
+		}
+		req.Options.CloudOptions = &scanv1.CloudOptions{
+			Profile: profile,
+			Region:  region,
+			Account: account,
+		}
+	}
+
+	// Show progress indicator
+	var progress *ui.Progress
+	if ui.IsTTY(errW) && (flags.Format == "" || flags.Format == FormatText) {
+		progress = ui.NewProgress(errW, "Scanning cloud resource")
+		progress.Start(ctx)
+	}
+
+	resp, err := c.Vulns.Scan(ctx, connect.NewRequest(req))
+	if progress != nil {
+		progress.Clear()
+	}
+	if err != nil {
+		return fmt.Errorf("scan cloud resource: %w", err)
+	}
+
+	// Convert proto response to internal result
+	resultPtr := internalproto.ScanningResultFromProto(resp.Msg)
+	result := *resultPtr
+
+	// Build cloud resource info from response provenance for policy evaluation
+	provenance := make(map[string]string)
+	if resp.Msg.GetTarget() != nil {
+		for k, v := range resp.Msg.GetTarget().GetProvenance() {
+			provenance[k] = v
+		}
+	}
+	cloudResource := buildCloudResourceFromProvenance(provenance)
+
+	for _, warning := range result.Warnings {
+		fmt.Fprintf(errW, "Warning: %s\n", warning)
+	}
+
+	resultOut := result
+	policyResult := result
+	if flags.IgnoreUnfixed {
+		policyResult = scanning.FilterUnfixed(policyResult)
+		resultOut = policyResult
+	}
+
+	// Load and apply ignore rules
+	var ignoredCount int
+	if err := flags.loadIgnoreRules(result.Target.LocalPath); err != nil {
+		fmt.Fprintf(errW, "Warning: %v\n", err)
+	}
+	if flags.ignoreRules != nil {
+		policyResult, ignoredCount = scanning.FilterIgnored(policyResult, flags.ignoreRules)
+		resultOut = policyResult
+	}
+
+	// Apply CEL filter expression if provided
+	if flags.Filter != "" {
+		policyResult, err = scanning.FilterByCEL(ctx, policyResult, flags.Filter)
+		if err != nil {
+			return fmt.Errorf("filter: %w", err)
+		}
+		resultOut = policyResult
+	}
+
+	// Policy evaluation - use cloud-specific entrypoints
+	policyActions, err := runCloudScanPolicies(ctx, flags.PolicyPaths, policyResult, cloudResource, errW)
+	if err != nil {
+		return err
+	}
+	policyFindings := actionsToPolicyFindings(policyActions)
+	result.PolicyActions = policyActions
+
+	out, err := openOutputWriter(cmd, flags.OutPath)
+	if err != nil {
+		return err
+	}
+	defer out.Close()
+
+	switch strings.ToLower(flags.Format) {
+	case "", FormatText:
+		if err := outputTextDir(out.Writer, errW, resultOut, flags.IgnoreUnfixed, ignoredCount, policyFindings, flags.displayOptionsWithResult(resultOut)); err != nil {
+			return err
+		}
+		render.PolicyEvaluationSummary(out.Writer, len(flags.PolicyPaths), policyFindings)
+		return nil
+	case FormatJSON:
+		protoResp := internalproto.ScanningResultToProto(&resultOut)
+		protoResp.PolicyActions = append(protoResp.PolicyActions, policyActionsToProto(policyActions)...)
+		return outputProtoJSON(out.Writer, protoResp)
+	case FormatSARIF:
+		return outputSARIF(out.Writer, resultOut, policyFindings)
+	default:
+		return cliflags.UnsupportedFormatError("--format", flags.Format, "text|json|sarif")
+	}
+}
+
+// buildCloudResourceFromProvenance constructs a CloudResource proto from provenance metadata.
+func buildCloudResourceFromProvenance(provenance map[string]string) *cloudv1.CloudResource {
+	if provenance == nil {
+		return &cloudv1.CloudResource{}
+	}
+
+	resource := &cloudv1.CloudResource{
+		ResourceId: provenance["resource_id"],
+		Region:     provenance["region"],
+		AccountId:  provenance["account_id"],
+		Name:       provenance["name"],
+		Tags:       make(map[string]string),
+	}
+
+	// Parse provider
+	providerStr := provenance["provider"]
+	switch {
+	case providerStr == "aws":
+		resource.Provider = cloudv1.CloudProvider_CLOUD_PROVIDER_AWS
+	case providerStr == "azure":
+		resource.Provider = cloudv1.CloudProvider_CLOUD_PROVIDER_AZURE
+	case providerStr == "gcp":
+		resource.Provider = cloudv1.CloudProvider_CLOUD_PROVIDER_GCP
+	case strings.HasPrefix(providerStr, "plugin:"):
+		resource.Provider = cloudv1.CloudProvider_CLOUD_PROVIDER_PLUGIN
+	default:
+		resource.Provider = cloudv1.CloudProvider_CLOUD_PROVIDER_PLUGIN
+	}
+
+	// Parse resource type
+	resourceTypeStr := provenance["resource_type"]
+	switch resourceTypeStr {
+	case "ami", "CLOUD_RESOURCE_TYPE_AWS_AMI":
+		resource.ResourceType = cloudv1.CloudResourceType_CLOUD_RESOURCE_TYPE_AWS_AMI
+	case "ebs-snapshot", "CLOUD_RESOURCE_TYPE_AWS_EBS_SNAPSHOT":
+		resource.ResourceType = cloudv1.CloudResourceType_CLOUD_RESOURCE_TYPE_AWS_EBS_SNAPSHOT
+	default:
+		resource.ResourceType = cloudv1.CloudResourceType_CLOUD_RESOURCE_TYPE_UNSPECIFIED
+	}
+
+	// Extract tags from provenance (tag:key -> value)
+	for k, v := range provenance {
+		if strings.HasPrefix(k, "tag:") {
+			tagKey := strings.TrimPrefix(k, "tag:")
+			resource.Tags[tagKey] = v
+		}
+	}
+
+	return resource
+}
+
+// runCloudScanPolicies evaluates policies against cloud resource scan results.
+// Uses cloud-specific entrypoints that include resource metadata for policy evaluation.
+func runCloudScanPolicies(ctx context.Context, policyPaths []string, result scanning.Result, cloudResource *cloudv1.CloudResource, errW io.Writer) ([]policy.Action, error) {
+	if len(policyPaths) == 0 {
+		return nil, nil
+	}
+
+	// Convert scanning result to proto for CEL evaluation
+	scanResponse := internalproto.ScanningResultToProto(&result)
+
+	// Build report-level payload with cloud resource info
+	payload := map[string]any{
+		"report":          scanResponse,
+		"resource":        cloudResource, // Cloud resource metadata for policies
+		"target":          scanResponse.Target,
+		"findings":        scanResponse.Findings,
+		"vulnerabilities": scanResponse.Findings, // Alias for backward compatibility
+		"packages":        scanResponse.Packages,
+		"stats":           scanResponse.Stats,
+	}
+
+	var out []policy.Action
+
+	// Evaluate report-level cloud policies
+	actions, err := evaluatePoliciesForCommand(ctx, policyPaths, payload, "scan", policy.EntrypointCloudScanReport, errW)
+	if err != nil {
+		return nil, err
+	}
+	out = append(out, actions...)
+
+	// Evaluate per-vulnerability cloud policies
+	for _, finding := range scanResponse.Findings {
+		vulnPayload := map[string]any{
+			"resource":      cloudResource, // Cloud resource metadata
+			"vulnerability": finding,
+			"target":        scanResponse.Target,
+		}
+		// Find the associated package
+		for _, pkg := range scanResponse.Packages {
+			if pkg.GetName() == finding.GetPackage().GetName() {
+				vulnPayload["pkg"] = pkg
+				break
+			}
+		}
+		actions, err := evaluatePoliciesForCommand(ctx, policyPaths, vulnPayload, "scan", policy.EntrypointCloudScanVulnerability, errW)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, actions...)
+	}
+
+	return out, nil
 }
 
 // runScanSBOM executes the SBOM scan command logic.

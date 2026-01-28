@@ -76,6 +76,8 @@ var (
 		"roots",       // Root (direct) dependencies
 		"ancestors",   // Ancestor nodes for current node
 		"descendants", // Descendant nodes for current node
+		// Cloud resource scanning variables
+		"resource", // Cloud resource metadata (provider, type, id, region, tags)
 		// Constants for policy authoring
 		"severity", // Severity constants: severity.critical, severity.high, etc.
 		"scope",    // Dependency scope constants: scope.RUNTIME, scope.DEV, etc.

@@ -1,0 +1,125 @@
+syntax = "proto3";
+
+package deputy.cloud.v1;
+
+option go_package = "github.com/picatz/deputy/gen/deputy/cloud/v1;cloudv1";
+
+import "buf/validate/validate.proto";
+import "deputy/cloud/v1/cloud.proto";
+import "deputy/policy/v1/policy.proto";
+import "deputy/scan/v1/service.proto";
+
+// CloudService provides cloud resource scanning capabilities.
+service CloudService {
+  // Scan performs a vulnerability scan on a cloud resource.
+  rpc Scan(CloudScanRequest) returns (CloudScanResponse);
+
+  // StreamScan performs a scan with streaming progress updates.
+  rpc StreamScan(CloudScanRequest) returns (stream CloudScanEvent);
+
+  // ListResources lists scannable resources in an account/region.
+  rpc ListResources(ListResourcesRequest) returns (ListResourcesResponse);
+}
+
+// CloudScanRequest requests a scan of a cloud resource.
+message CloudScanRequest {
+  // Target URI: aws://ami/ami-xxx, azure://disk/..., gcp://image/...
+  string target = 1 [(buf.validate.field).string = {min_len: 1, max_len: 4096}];
+  // Scan options.
+  CloudScanOptions options = 2;
+}
+
+// CloudScanResponse contains the results of a cloud resource scan.
+message CloudScanResponse {
+  // The scanned cloud resource.
+  CloudResource resource = 1;
+  // The scan results.
+  deputy.scan.v1.ScanResponse scan_result = 2;
+  // Policy actions triggered by the scan.
+  repeated deputy.policy.v1.Action policy_actions = 3;
+}
+
+// CloudScanEvent streams scan progress and results.
+message CloudScanEvent {
+  // Event details.
+  oneof details {
+    // Progress update.
+    CloudScanProgress progress = 1;
+    // Scan completed successfully.
+    CloudScanResponse result = 2;
+    // Scan failed with error.
+    CloudScanError error = 3;
+  }
+}
+
+// CloudScanProgress reports scan progress.
+message CloudScanProgress {
+  // Current phase of the scan.
+  CloudScanPhase phase = 1;
+  // Human-readable progress message.
+  string message = 2;
+  // Progress percentage (0-100, -1 if unknown).
+  int32 percent = 3;
+  // Bytes downloaded (for block-based scanning).
+  int64 bytes_downloaded = 4;
+  // Total bytes to download (-1 if unknown).
+  int64 bytes_total = 5;
+}
+
+// CloudScanError reports a scan failure.
+message CloudScanError {
+  // Error message.
+  string message = 1;
+  // Error code for programmatic handling.
+  string code = 2;
+  // Whether the error is retriable.
+  bool retriable = 3;
+  // Suggested remediation.
+  string remediation = 4;
+}
+
+// CloudScanPhase identifies the current phase of a cloud scan.
+enum CloudScanPhase {
+  // Unspecified phase.
+  CLOUD_SCAN_PHASE_UNSPECIFIED = 0;
+  // Authenticating with cloud provider.
+  CLOUD_SCAN_PHASE_AUTHENTICATING = 1;
+  // Discovering resource metadata.
+  CLOUD_SCAN_PHASE_DISCOVERING = 2;
+  // Downloading blocks/data.
+  CLOUD_SCAN_PHASE_DOWNLOADING = 3;
+  // Extracting filesystem.
+  CLOUD_SCAN_PHASE_EXTRACTING = 4;
+  // Scanning for packages and vulnerabilities.
+  CLOUD_SCAN_PHASE_SCANNING = 5;
+  // Scan completed successfully.
+  CLOUD_SCAN_PHASE_COMPLETE = 6;
+  // Scan failed.
+  CLOUD_SCAN_PHASE_FAILED = 7;
+}
+
+// ListResourcesRequest requests a list of scannable cloud resources.
+message ListResourcesRequest {
+  // Cloud provider to query.
+  CloudProvider provider = 1;
+  // Resource type to list (empty means all types).
+  CloudResourceType resource_type = 2;
+  // Region to query (empty means all regions).
+  string region = 3;
+  // Filter by tags.
+  map<string, string> tags = 4;
+  // Maximum number of resources to return.
+  int32 limit = 5 [(buf.validate.field).int32 = {gte: 0, lte: 1000}];
+  // Pagination token.
+  string page_token = 6;
+  // Scan options (for authentication).
+  CloudScanOptions options = 7;
+}
+
+// ListResourcesResponse returns a list of cloud resources.
+message ListResourcesResponse {
+  // Discovered resources.
+  repeated CloudResource resources = 1;
+  // Next page token (empty if no more results).
+  string next_page_token = 2;
+}

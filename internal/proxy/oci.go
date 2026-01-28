@@ -20,6 +20,7 @@ import (
 	"github.com/picatz/deputy/internal/proto"
 	"github.com/picatz/deputy/internal/report"
 	"github.com/picatz/deputy/internal/scanning"
+	"github.com/picatz/deputy/internal/targets"
 	"go.opentelemetry.io/otel/trace"
 	goproto "google.golang.org/protobuf/proto"
 )
@@ -45,7 +46,7 @@ type ociHandlerOptions struct {
 }
 
 type imageScanner interface {
-	ScanContainerImage(context.Context, string, map[string]string, scanning.Options) (*scanning.Execution, error)
+	ScanContainerImage(context.Context, string, *targets.OpenOptions, scanning.Options) (*scanning.Execution, error)
 }
 
 type ociHandler struct {
@@ -556,6 +557,6 @@ func scanVulnerabilitiesToFindings(vulns []report.Vulnerability) any {
 // defaultImageScanner implements imageScanner using the scanning package.
 type defaultImageScanner struct{}
 
-func (defaultImageScanner) ScanContainerImage(ctx context.Context, target string, targetOpts map[string]string, opts scanning.Options) (*scanning.Execution, error) {
+func (defaultImageScanner) ScanContainerImage(ctx context.Context, target string, targetOpts *targets.OpenOptions, opts scanning.Options) (*scanning.Execution, error) {
 	return scanning.ScanContainerImage(ctx, target, targetOpts, opts)
 }
