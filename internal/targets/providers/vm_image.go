@@ -120,11 +120,11 @@ func (vmImageProvider) Open(ctx context.Context, target string, opts *targets.Op
 // parseVMTarget extracts the path from a VM target string.
 // Returns the path and a boolean indicating if it's a rootfs image.
 func parseVMTarget(target string) (string, bool) {
-	if strings.HasPrefix(target, "vm://") {
-		return strings.TrimPrefix(target, "vm://"), false
+	if path, found := strings.CutPrefix(target, "vm://"); found {
+		return path, false
 	}
-	if strings.HasPrefix(target, "rootfs://") {
-		return strings.TrimPrefix(target, "rootfs://"), true
+	if path, found := strings.CutPrefix(target, "rootfs://"); found {
+		return path, true
 	}
 	// Bare path - determine type from extension
 	ext := strings.ToLower(filepath.Ext(target))

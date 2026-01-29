@@ -1413,7 +1413,7 @@ func runScanPURL(c *services.Clients, cmd *cobra.Command, args []string) error {
 
 	switch strings.ToLower(flags.Format) {
 	case "", FormatText:
-		if err := outputTextDir(out.Writer, errW, resultOut, flags.IgnoreUnfixed, ignoredCount, policyFindings, flags.displayOptions()); err != nil {
+		if err := outputTextDir(out.Writer, errW, resultOut, flags.IgnoreUnfixed, ignoredCount, policyFindings, flags.displayOptionsWithResult(resultOut)); err != nil {
 			return err
 		}
 		// Show policy evaluation summary
@@ -1520,7 +1520,7 @@ func runScanImageWithOptions(c *services.Clients, cmd *cobra.Command, input, sou
 
 	switch strings.ToLower(flags.Format) {
 	case "", FormatText:
-		if err := outputTextContainer(out.Writer, errW, resultOut, flags.IgnoreUnfixed, ignoredCount, policyFindings, flags.displayOptions()); err != nil {
+		if err := outputTextContainer(out.Writer, errW, resultOut, flags.IgnoreUnfixed, ignoredCount, policyFindings, flags.displayOptionsWithResult(resultOut)); err != nil {
 			return err
 		}
 		// Show policy evaluation summary

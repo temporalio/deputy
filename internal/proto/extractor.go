@@ -210,12 +210,18 @@ type FilterOptions struct {
 	// multiple versions) keeping only a single "stdlib" entry with the highest
 	// version found.
 	DeduplicateStdlib bool
+
+	// DeduplicatePURL removes packages with duplicate PURL strings, keeping
+	// only the first occurrence. This is useful for container images where
+	// the same package may be reported multiple times from different layers.
+	DeduplicatePURL bool
 }
 
 // FilterPackages applies filtering rules to exclude unwanted packages from output.
 // This filters out:
 //   - Main modules (the project itself appearing as a dependency)
 //   - Duplicate Go stdlib entries (go vs stdlib, multiple versions)
+//   - Duplicate PURL entries (same PURL appearing multiple times)
 //
 // The original slice is not modified; a new filtered slice is returned.
 func FilterPackages(pkgs []*extractor.Package, opts FilterOptions) []*extractor.Package {
@@ -227,6 +233,12 @@ func FilterPackages(pkgs []*extractor.Package, opts FilterOptions) []*extractor.
 	var bestStdlib *extractor.Package
 	bestStdlibVersion := ""
 
+	// Track seen PURLs for deduplication
+	var seenPURLs map[string]bool
+	if opts.DeduplicatePURL {
+		seenPURLs = make(map[string]bool)
+	}
+
 	out := make([]*extractor.Package, 0, len(pkgs))
 	for _, pkg := range pkgs {
 		if pkg == nil {
@@ -237,6 +249,15 @@ func FilterPackages(pkgs []*extractor.Package, opts FilterOptions) []*extractor.
 		if purl == nil {
 			out = append(out, pkg)
 			continue
+		}
+
+		// PURL deduplication: skip packages with duplicate PURL strings
+		if opts.DeduplicatePURL {
+			purlStr := purl.String()
+			if seenPURLs[purlStr] {
+				continue // Skip duplicate
+			}
+			seenPURLs[purlStr] = true
 		}
 
 		// Handle Go packages

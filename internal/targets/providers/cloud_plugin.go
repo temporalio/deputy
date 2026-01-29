@@ -405,11 +405,10 @@ func discoverCloudPlugins() map[string]string {
 				continue
 			}
 			name := entry.Name()
-			if !strings.HasPrefix(name, CloudPluginPrefix) {
+			pluginName, found := strings.CutPrefix(name, CloudPluginPrefix)
+			if !found {
 				continue
 			}
-
-			pluginName := strings.TrimPrefix(name, CloudPluginPrefix)
 			if pluginName == "" || seen[pluginName] {
 				continue
 			}

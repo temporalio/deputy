@@ -210,6 +210,12 @@ This tells you:
 - **command**: The Dockerfile instruction that created the layer
 - **in_base_image**: Whether it came from your base image (FROM instruction)
 
+When base image detection is enabled, the output also shows direct/indirect classification:
+- **Direct**: Packages added by your Dockerfile (not in base image)
+- **Indirect**: Packages inherited from the base image
+
+This helps prioritize remediation: vulnerabilities in packages you added can be fixed by updating your Dockerfile, while base image vulnerabilities require updating your FROM image.
+
 ### Image Configuration
 
 Deputy extracts image configuration for policy evaluation:
@@ -642,6 +648,46 @@ when: |
   vulnerability.layer_details.index < 3 &&
   vulnerability.advisory.severity.level == severity.critical
 ```
+
+### Final-State Scanning (Build-Time Dependencies Not Detected)
+
+Deputy scans the **merged/final filesystem** of container images, not individual layer diffs. This means packages that are installed and then removed during the build process are **not detected**:
+
+```dockerfile
+# curl will NOT be detected - it's removed before the final image
+RUN apt-get update && \
+    apt-get install -y curl && \
+    curl -O https://example.com/app.tar.gz && \
+    tar -xzf app.tar.gz && \
+    apt-get remove -y curl && \
+    apt-get autoremove -y && \
+    rm -rf /var/lib/apt/lists/*
+```
+
+**Why this design?**
+- **Runtime accuracy**: The scan reflects what actually runs in production
+- **No false positives**: Removed packages can't be exploited at runtime
+- **Performance**: Scanning the merged filesystem is more efficient than diffing every layer
+
+**What's not detected:**
+- Build-time-only tools (curl, wget used for downloads then removed)
+- Transient build dependencies (gcc, make for compilation then removed)
+- Packages in intermediate multi-stage build stages that aren't copied to the final image
+
+**Security note**: While removed packages don't exist in the running container, their data still physically exists in earlier layers of the image. An attacker with access to pull the image could extract those layers. For sensitive build secrets, use Docker BuildKit secrets or multi-stage builds with `--mount=type=secret`.
+
+> **Future work**: Layer-by-layer diff scanning for build-time supply chain analysis is not currently supported. This would enable detecting all packages that were ever present during the build, generating per-layer SBOMs, and identifying transient dependencies. See [GitHub Issues](https://github.com/picatz/deputy/issues) for tracking.
+
+<!-- TODO: Implement layer-by-layer scanning mode for build-time supply chain analysis
+     This would involve:
+     - Scanning each layer diff independently (not merged filesystem)
+     - Generating per-layer package inventories
+     - Detecting packages installed then removed (transient deps)
+     - Producing layer-aware SBOMs showing build-time vs runtime deps
+     - Enabling policies like "no curl even during build"
+     Use case: Supply chain security requiring visibility into ALL packages
+     that touched the build, not just what's in the final artifact.
+-->
 
 ## Policy Examples
 

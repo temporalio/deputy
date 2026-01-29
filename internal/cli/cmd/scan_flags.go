@@ -6,6 +6,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/google/osv-scalibr/extractor"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	scanv1 "github.com/picatz/deputy/gen/deputy/scan/v1"
@@ -15,6 +16,7 @@ import (
 	inv "github.com/picatz/deputy/internal/inventory"
 	"github.com/picatz/deputy/internal/report/render"
 	"github.com/picatz/deputy/internal/scanning"
+	"github.com/picatz/deputy/internal/targets"
 	"github.com/spf13/cobra"
 )
 
@@ -86,19 +88,53 @@ type scanFlags struct {
 }
 
 // displayOptions returns the VulnerabilityDisplayOptions derived from scan flags.
+// This is a base method - prefer displayOptionsWithResult when target info is available.
 func (f scanFlags) displayOptions() render.VulnerabilityDisplayOptions {
 	return render.VulnerabilityDisplayOptions{
 		ShowSymbols:           f.ShowSymbols,
 		ShowDatabaseInfo:      f.ShowDBInfo,
 		ShowUnfixableGuidance: f.ShowUnfixableGuidance,
+		ShowDirectIndirect:    true, // Default to true for backwards compatibility
 	}
 }
 
 // displayOptionsWithResult returns VulnerabilityDisplayOptions including the graph from a scan result.
+// It automatically sets ShowDirectIndirect based on the target kind and available info.
 func (f scanFlags) displayOptionsWithResult(result scanning.Result) render.VulnerabilityDisplayOptions {
 	opts := f.displayOptions()
 	opts.Graph = result.Graph
+	// Show [direct]/[indirect] labels for:
+	// 1. Repository-like targets (always have direct/indirect from manifest parsing)
+	// 2. Container images when base image detection was used (LayerDetails populated)
+	opts.ShowDirectIndirect = supportsDirectIndirectKind(result.Target.Kind) || hasBaseImageInfoFromPackages(result.Packages)
 	return opts
+}
+
+// supportsDirectIndirectKind returns true if the target kind supports direct/indirect
+// dependency distinction. Only repository-like targets have meaningful direct/indirect
+// semantics; container images, binaries, and other artifact types just have packages "present".
+func supportsDirectIndirectKind(kind targets.Kind) bool {
+	switch kind {
+	case targets.KindDir, targets.KindGit, targets.KindFile:
+		return true
+	default:
+		// Container images, binaries, VM images, cloud resources, SBOMs, etc.
+		// don't have meaningful direct/indirect distinction by default
+		return false
+	}
+}
+
+// hasBaseImageInfoFromPackages returns true if base image detection was used and
+// meaningful direct/indirect info is available. This is indicated by at least one
+// package having InBaseImage=true. Without base image detection, InBaseImage defaults
+// to false for all packages, making the distinction meaningless.
+func hasBaseImageInfoFromPackages(pkgs []*extractor.Package) bool {
+	for _, pkg := range pkgs {
+		if pkg != nil && pkg.LayerDetails != nil && pkg.LayerDetails.InBaseImage {
+			return true
+		}
+	}
+	return false
 }
 
 // scanOptions returns the inventory scan options derived from scan flags.

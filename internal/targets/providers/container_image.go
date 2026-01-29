@@ -362,8 +362,8 @@ func parseImageTarget(target string) (imageTransport, string, bool) {
 		if !ok {
 			return "", "", false
 		}
-		if transport == imageTransportRemote && strings.HasPrefix(rest, "/") {
-			rest = strings.TrimPrefix(rest, "/")
+		if transport == imageTransportRemote {
+			rest, _ = strings.CutPrefix(rest, "/")
 		}
 		return transport, rest, true
 	}

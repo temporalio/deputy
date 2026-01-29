@@ -64,6 +64,11 @@ type ListOptions struct {
 	// Pagination
 	PageSize  int32
 	PageToken string
+
+	// Quick skips fetching additional metadata (digest, created_at) for faster listing.
+	// When true, only basic tag/name information is returned without extra API calls.
+	// Useful when you only need to enumerate available targets quickly.
+	Quick bool
 }
 
 // OpenOptions configures how a target is opened/materialized.

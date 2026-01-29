@@ -105,7 +105,11 @@ type ListOptions struct {
 	// Available fields: uri, name, description, created_at, metadata.
 	// Example: 'metadata["tags.env"] == "prod"'
 	// Example: 'name.startsWith("web-") && created_at > timestamp("2024-01-01T00:00:00Z")'
-	Filter        string `protobuf:"bytes,8,opt,name=filter,proto3" json:"filter,omitempty"`
+	Filter string `protobuf:"bytes,8,opt,name=filter,proto3" json:"filter,omitempty"`
+	// Quick skips fetching additional metadata (digest, created_at) for faster listing.
+	// When true, only basic tag/name information is returned without extra API calls.
+	// Useful for quickly enumerating available targets in container registries.
+	Quick         bool `protobuf:"varint,9,opt,name=quick,proto3" json:"quick,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -194,6 +198,13 @@ func (x *ListOptions) GetFilter() string {
 		return x.Filter
 	}
 	return ""
+}
+
+func (x *ListOptions) GetQuick() bool {
+	if x != nil {
+		return x.Quick
+	}
+	return false
 }
 
 // ListPackagesResponse contains enumerated packages or discovered targets.
@@ -626,7 +637,7 @@ const file_deputy_list_v1_service_proto_rawDesc = "" +
 	"\x1cdeputy/list/v1/service.proto\x12\x0edeputy.list.v1\x1a\x1bbuf/validate/validate.proto\x1a\x1ddeputy/target/v1/target.proto\x1a%deputy/dependency/v1/dependency.proto\x1a\x1fgoogle/protobuf/timestamp.proto\"n\n" +
 	"\x13ListPackagesRequest\x12 \n" +
 	"\x06target\x18\x01 \x01(\tB\b\xbaH\x05r\x03\x18\x80 R\x06target\x125\n" +
-	"\aoptions\x18\x02 \x01(\v2\x1b.deputy.list.v1.ListOptionsR\aoptions\"\xbe\x02\n" +
+	"\aoptions\x18\x02 \x01(\v2\x1b.deputy.list.v1.ListOptionsR\aoptions\"\xd4\x02\n" +
 	"\vListOptions\x12\x1f\n" +
 	"\vonly_direct\x18\x01 \x01(\bR\n" +
 	"onlyDirect\x12.\n" +
@@ -640,7 +651,8 @@ const file_deputy_list_v1_service_proto_rawDesc = "" +
 	"\xbaH\a\x1a\x05\x18\xe8\a(\x00R\bpageSize\x12'\n" +
 	"\n" +
 	"page_token\x18\a \x01(\tB\b\xbaH\x05r\x03\x18\x80\x10R\tpageToken\x12 \n" +
-	"\x06filter\x18\b \x01(\tB\b\xbaH\x05r\x03\x18\x80 R\x06filter\"\xd2\x02\n" +
+	"\x06filter\x18\b \x01(\tB\b\xbaH\x05r\x03\x18\x80 R\x06filter\x12\x14\n" +
+	"\x05quick\x18\t \x01(\bR\x05quick\"\xd2\x02\n" +
 	"\x14ListPackagesResponse\x120\n" +
 	"\x06target\x18\x01 \x01(\v2\x18.deputy.target.v1.TargetR\x06target\x129\n" +
 	"\bpackages\x18\x02 \x03(\v2\x1d.deputy.dependency.v1.PackageR\bpackages\x12/\n" +

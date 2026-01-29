@@ -10,6 +10,7 @@ import (
 
 	inventoryv1 "github.com/picatz/deputy/gen/deputy/inventory/v1"
 	"github.com/picatz/deputy/gen/deputy/inventory/v1/inventoryv1connect"
+	"github.com/picatz/deputy/internal/compare"
 	"github.com/picatz/deputy/internal/inventory"
 	"github.com/picatz/deputy/internal/inventory/registry"
 	"github.com/picatz/deputy/internal/otel"
@@ -119,8 +120,22 @@ func (h *InventoryHandler) CollectInventory(
 	}
 	durationMs := time.Since(startTime).Milliseconds()
 
+	// Get main modules for filtering out self-references
+	var mainModules map[string]bool
+	if exec.Workspace != nil {
+		mainModules = compare.CollectMainModulesFromWorkspace(exec.Workspace)
+	}
+
+	// Filter packages to remove self-references, deduplicate stdlib, and remove duplicate PURLs.
+	// PURL deduplication is particularly important for container images where the same package
+	// may be reported from multiple layers or extractors.
+	packages := protoconv.FilterPackages(exec.Result.Packages, protoconv.FilterOptions{
+		ExcludeMainModules: mainModules,
+		DeduplicateStdlib:  true,
+		DeduplicatePURL:    true,
+	})
+
 	// Convert to proto
-	packages := exec.Result.Packages
 	direct := exec.Result.Direct
 	protoPackages := protoconv.ExtractorPackagesToProto(packages, direct)
 
@@ -259,8 +274,20 @@ func (h *InventoryHandler) StreamCollectInventory(
 	}
 	durationMs := time.Since(startTime).Milliseconds()
 
+	// Get main modules for filtering out self-references
+	var streamMainModules map[string]bool
+	if exec.Workspace != nil {
+		streamMainModules = compare.CollectMainModulesFromWorkspace(exec.Workspace)
+	}
+
+	// Filter packages to remove self-references, deduplicate stdlib, and remove duplicate PURLs.
+	packages := protoconv.FilterPackages(exec.Result.Packages, protoconv.FilterOptions{
+		ExcludeMainModules: streamMainModules,
+		DeduplicateStdlib:  true,
+		DeduplicatePURL:    true,
+	})
+
 	// Convert to proto
-	packages := exec.Result.Packages
 	direct := exec.Result.Direct
 	protoPackages := protoconv.ExtractorPackagesToProto(packages, direct)
 

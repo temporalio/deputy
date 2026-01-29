@@ -30,6 +30,11 @@ type VulnerabilityDisplayOptions struct {
 	// Graph is the dependency graph for showing paths to vulnerable packages.
 	// When non-nil, transitive vulnerabilities will show their dependency path.
 	Graph *graph.Graph
+	// ShowDirectIndirect indicates whether to show [direct]/[indirect] labels.
+	// This should be false for target types where direct/indirect doesn't apply
+	// (container images, binaries, VM images, etc.). Default is true for backwards
+	// compatibility with repository scans.
+	ShowDirectIndirect bool
 }
 
 func resolveVulnerabilityDisplayOptions(opts []VulnerabilityDisplayOptions) VulnerabilityDisplayOptions {
@@ -92,26 +97,37 @@ func VulnerabilityList(w io.Writer, cons []vulnerability.Consolidated, opts Vuln
 			return cmp.Compare(a.PrimaryID, b.PrimaryID)
 		})
 
-		hasDirect := slices.ContainsFunc(list, func(v vulnerability.Consolidated) bool {
-			return v.IsDirect
-		})
-		depType := "[indirect]"
-		depStyle := output.StyleIndirect
-		if hasDirect {
-			depType = "[direct]"
-			depStyle = output.StyleDirect
+		// Build the package header line
+		var headerSpans []output.Span
+		headerSpans = append(headerSpans,
+			output.Span{Text: pkg, Style: output.StylePackageName},
+			output.Span{Text: " "},
+			output.Span{Text: list[0].Version, Style: output.StyleVersion},
+		)
+
+		// Only show [direct]/[indirect] labels for target types where it applies
+		// (repositories, directories). For container images, binaries, etc., omit the label.
+		if opts.ShowDirectIndirect {
+			hasDirect := slices.ContainsFunc(list, func(v vulnerability.Consolidated) bool {
+				return v.IsDirect
+			})
+			depType := "[indirect]"
+			depStyle := output.StyleIndirect
+			if hasDirect {
+				depType = "[direct]"
+				depStyle = output.StyleDirect
+			}
+			headerSpans = append(headerSpans,
+				output.Span{Text: " "},
+				output.Span{Text: depType, Style: depStyle},
+			)
 		}
+		headerSpans = append(headerSpans, output.Span{Text: ":"})
+
 		{
 			var doc output.Doc
 			doc.AddBlank()
-			doc.AddLine(
-				output.Span{Text: pkg, Style: output.StylePackageName},
-				output.Span{Text: " "},
-				output.Span{Text: list[0].Version, Style: output.StyleVersion},
-				output.Span{Text: " "},
-				output.Span{Text: depType, Style: depStyle},
-				output.Span{Text: ":"},
-			)
+			doc.AddLine(headerSpans...)
 			_ = doc.Render(w, output.UIStyles())
 		}
 

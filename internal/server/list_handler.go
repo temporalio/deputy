@@ -175,10 +175,13 @@ func (h *ListHandler) ListPackages(
 		mainModules = compare.CollectMainModulesFromWorkspace(exec.Workspace)
 	}
 
-	// Filter packages to remove self-references and deduplicate stdlib
+	// Filter packages to remove self-references, deduplicate stdlib, and remove duplicate PURLs.
+	// PURL deduplication is particularly important for container images where the same package
+	// may be reported from multiple layers or extractors.
 	packages := protoconv.FilterPackages(exec.Result.Packages, protoconv.FilterOptions{
 		ExcludeMainModules: mainModules,
 		DeduplicateStdlib:  true,
+		DeduplicatePURL:    true,
 	})
 
 	// Convert packages to proto
@@ -281,6 +284,9 @@ func (h *ListHandler) listCollection(
 		// Pagination options
 		listOpts.PageSize = opts.PageSize
 		listOpts.PageToken = opts.PageToken
+
+		// Quick mode skips metadata fetching for faster listing
+		listOpts.Quick = opts.Quick
 
 		// CEL filter expression
 		if opts.Filter != "" {

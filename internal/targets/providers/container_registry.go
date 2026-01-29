@@ -103,6 +103,14 @@ func (containerRegistryProvider) IsCollection(ctx context.Context, target string
 // Performance note: This implementation fetches all tags from the registry,
 // then applies client-side pagination. For repositories with thousands of tags,
 // consider using tag prefix filters or caching the results.
+//
+// TODO(performance): Consider implementing a caching layer for registry metadata.
+// Potential approach:
+//   - Cache tag lists per repository with short TTL (1-5 min)
+//   - Cache digest→metadata mappings with longer TTL (digests are immutable)
+//   - File-based cache (~/.cache/deputy/registry/) or in-memory LRU
+//   - Cache key: repo + tag → (digest, created_at)
+// This would help with rate limiting and improve repeated listing performance.
 func (p containerRegistryProvider) List(ctx context.Context, target string, opts *targets.ListOptions) (*targets.ListResult, error) {
 	// Check context before starting
 	if err := ctx.Err(); err != nil {
@@ -159,23 +167,15 @@ func (p containerRegistryProvider) List(ctx context.Context, target string, opts
 		return nil, fmt.Errorf("list registry tags: %w", err)
 	}
 
-	// Fetch metadata concurrently for better performance
+	// Build results - optionally fetch metadata concurrently
 	results := make([]*listv1.DiscoveredTarget, len(pageTags))
-	g, gCtx := errgroup.WithContext(ctx)
-	g.SetLimit(10) // Limit concurrent requests to avoid overwhelming registries
 
-	for i, tag := range pageTags {
-		i, tag := i, tag // capture loop vars
-		g.Go(func() error {
-			// Check context in each goroutine
-			if err := gCtx.Err(); err != nil {
-				return err
-			}
-
+	if opts.Quick {
+		// Quick mode: skip metadata fetching for faster listing
+		for i, tag := range pageTags {
 			imageRef := fmt.Sprintf("%s:%s", repoPath, tag)
 			uri := fmt.Sprintf("docker://%s", imageRef)
-
-			dt := &listv1.DiscoveredTarget{
+			results[i] = &listv1.DiscoveredTarget{
 				Uri:  uri,
 				Name: tag,
 				Metadata: map[string]string{
@@ -183,25 +183,51 @@ func (p containerRegistryProvider) List(ctx context.Context, target string, opts
 					"tag":        tag,
 				},
 			}
+		}
+	} else {
+		// Full mode: fetch metadata concurrently for better UX
+		g, gCtx := errgroup.WithContext(ctx)
+		g.SetLimit(10) // Limit concurrent requests to avoid overwhelming registries
 
-			// Try to get additional metadata (digest, created time)
-			// This is optional and may fail for some registries
-			if digest, created, err := getTagMetadata(gCtx, imageRef, remoteOpts); err == nil {
-				if digest != "" {
-					dt.Metadata["digest"] = digest
+		for i, tag := range pageTags {
+			i, tag := i, tag // capture loop vars
+			g.Go(func() error {
+				// Check context in each goroutine
+				if err := gCtx.Err(); err != nil {
+					return err
 				}
-				if !created.IsZero() {
-					dt.CreatedAt = timestamppb.New(created)
+
+				imageRef := fmt.Sprintf("%s:%s", repoPath, tag)
+				uri := fmt.Sprintf("docker://%s", imageRef)
+
+				dt := &listv1.DiscoveredTarget{
+					Uri:  uri,
+					Name: tag,
+					Metadata: map[string]string{
+						"repository": repoPath,
+						"tag":        tag,
+					},
 				}
-			}
 
-			results[i] = dt
-			return nil
-		})
-	}
+				// Try to get additional metadata (digest, created time)
+				// This is optional and may fail for some registries
+				if digest, created, err := getTagMetadata(gCtx, imageRef, remoteOpts); err == nil {
+					if digest != "" {
+						dt.Metadata["digest"] = digest
+					}
+					if !created.IsZero() {
+						dt.CreatedAt = timestamppb.New(created)
+					}
+				}
 
-	if err := g.Wait(); err != nil {
-		return nil, fmt.Errorf("fetch tag metadata: %w", err)
+				results[i] = dt
+				return nil
+			})
+		}
+
+		if err := g.Wait(); err != nil {
+			return nil, fmt.Errorf("fetch tag metadata: %w", err)
+		}
 	}
 
 	// Calculate next page token

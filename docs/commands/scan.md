@@ -339,7 +339,11 @@ $ deputy scan --detect-base-image \
     nginx:1.25
 ```
 
-When enabled, Deputy queries deps.dev to determine which layers belong to known base images. Each vulnerability then includes `layer_details.in_base_image` (true/false) for use in policies.
+When enabled, Deputy queries deps.dev to determine which layers belong to known base images. This provides two benefits:
+
+1. **Vulnerability output** shows `[BASE layer N]` for base image packages and `[layer N]` for packages you added
+2. **Direct/indirect classification** becomes meaningful: packages NOT in the base image are "direct" (you added them), while base image packages are "indirect" (inherited)
+3. **Policy evaluation** can use `layer_details.in_base_image` (true/false) to treat base vs app layer vulnerabilities differently
 
 **Example policy using base image detection:**
 

@@ -3,7 +3,6 @@ package providers
 import (
 	"context"
 	"fmt"
-	"log/slog"
 	"net/http"
 	"os"
 	"strconv"
@@ -11,10 +10,13 @@ import (
 	"time"
 
 	"github.com/google/go-github/v63/github"
+	"github.com/hashicorp/go-cleanhttp"
+	"github.com/hashicorp/go-retryablehttp"
 	"golang.org/x/oauth2"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	listv1 "github.com/picatz/deputy/gen/deputy/list/v1"
+	"github.com/picatz/deputy/internal/logs"
 	"github.com/picatz/deputy/internal/targets"
 )
 
@@ -68,9 +70,8 @@ func parseGitHubCollectionOwner(target string) (string, bool) {
 	target = strings.TrimSpace(target)
 
 	// Handle github:// scheme
-	if strings.HasPrefix(target, "github://") {
-		rest := strings.TrimPrefix(target, "github://")
-		rest = strings.TrimSuffix(rest, "/")
+	if rest, found := strings.CutPrefix(target, "github://"); found {
+		rest, _ = strings.CutSuffix(rest, "/")
 		// Should only have owner, not owner/repo
 		if !strings.Contains(rest, "/") && rest != "" {
 			return rest, true
@@ -79,10 +80,17 @@ func parseGitHubCollectionOwner(target string) (string, bool) {
 	}
 
 	// Handle github.com/ URLs
-	if strings.HasPrefix(target, "github.com/") || strings.HasPrefix(target, "https://github.com/") {
-		rest := strings.TrimPrefix(target, "https://")
-		rest = strings.TrimPrefix(rest, "github.com/")
-		rest = strings.TrimSuffix(rest, "/")
+	if rest, found := strings.CutPrefix(target, "https://github.com/"); found {
+		rest, _ = strings.CutSuffix(rest, "/")
+		// Should only have owner, not owner/repo
+		if !strings.Contains(rest, "/") && rest != "" {
+			return rest, true
+		}
+		return "", false
+	}
+
+	if rest, found := strings.CutPrefix(target, "github.com/"); found {
+		rest, _ = strings.CutSuffix(rest, "/")
 		// Should only have owner, not owner/repo
 		if !strings.Contains(rest, "/") && rest != "" {
 			return rest, true
@@ -167,8 +175,8 @@ func (p githubOrgProvider) List(ctx context.Context, target string, opts *target
 		return nil, wrapGitHubListError(err, owner)
 	}
 
-	// Log rate limit state for observability
-	checkGitHubRateLimit(resp)
+	// Log rate limit state for observability (debug level only)
+	checkGitHubRateLimit(ctx, resp)
 
 	// Convert to discovered targets, applying filters
 	results := make([]*listv1.DiscoveredTarget, 0, len(repos))
@@ -239,34 +247,45 @@ func (p githubOrgProvider) List(ctx context.Context, target string, opts *target
 	}, nil
 }
 
-// checkGitHubRateLimit logs rate limit state for observability.
-func checkGitHubRateLimit(resp *github.Response) {
-	if resp == nil {
+// checkGitHubRateLimit logs rate limit state for observability at debug level.
+// This helps with debugging and monitoring without polluting normal CLI output.
+func checkGitHubRateLimit(ctx context.Context, resp *github.Response) {
+	if resp == nil || resp.Rate.Limit == 0 {
 		return
 	}
 
 	remaining := resp.Rate.Remaining
+	limit := resp.Rate.Limit
 	resetTime := resp.Rate.Reset.Time
 
-	// Log warning when rate limit is low
-	if remaining < 100 {
-		slog.Warn("GitHub API rate limit low",
+	// Log at debug level for observability (only visible with --debug flag)
+	// Warn only when less than 10% of rate limit remains
+	percentRemaining := float64(remaining) / float64(limit) * 100
+	if percentRemaining < 10 {
+		logs.Debug(ctx, "GitHub API rate limit low",
 			"remaining", remaining,
+			"limit", limit,
+			"percent_remaining", int(percentRemaining),
 			"reset", resetTime.Format(time.RFC3339),
-			"limit", resp.Rate.Limit,
 		)
 	}
 }
 
 // newGitHubClient creates a GitHub client, optionally authenticated via GITHUB_TOKEN.
+// Uses retryablehttp for automatic retries on transient errors.
 func newGitHubClient(ctx context.Context) *github.Client {
+	retryableClient := retryablehttp.NewClient()
+	retryableClient.Logger = nil // Disable default logging
+	retryableClient.HTTPClient = cleanhttp.DefaultPooledClient()
+
 	token := strings.TrimSpace(os.Getenv("GITHUB_TOKEN"))
 	if token == "" {
 		// Unauthenticated client - lower rate limits
-		return github.NewClient(nil)
+		return github.NewClient(retryableClient.StandardClient())
 	}
 
-	// Authenticated client
+	// Authenticated client with retryable transport
+	ctx = context.WithValue(ctx, oauth2.HTTPClient, retryableClient.StandardClient())
 	ts := oauth2.StaticTokenSource(&oauth2.Token{AccessToken: token})
 	tc := oauth2.NewClient(ctx, ts)
 	return github.NewClient(tc)

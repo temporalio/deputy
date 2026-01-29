@@ -66,6 +66,11 @@ message ListOptions {
   // Example: 'metadata["tags.env"] == "prod"'
   // Example: 'name.startsWith("web-") && created_at > timestamp("2024-01-01T00:00:00Z")'
   string filter = 8 [(buf.validate.field).string.max_len = 4096];
+
+  // Quick skips fetching additional metadata (digest, created_at) for faster listing.
+  // When true, only basic tag/name information is returned without extra API calls.
+  // Useful for quickly enumerating available targets in container registries.
+  bool quick = 9;
 }
 
 // ListPackagesResponse contains enumerated packages or discovered targets.

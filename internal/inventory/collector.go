@@ -350,6 +350,11 @@ func CollectContainerImage(ctx context.Context, target string, targetOpts *targe
 		displayPath = mat.Meta.Target
 	}
 
+	// Build direct dependency map from base image detection when available.
+	// Packages NOT in the base image (added by Dockerfile) are considered "direct",
+	// while packages inherited from the base image are "indirect".
+	direct := buildDirectMapFromLayers(pkgs)
+
 	result := Result{
 		Target: Target{
 			Kind:        mat.Meta.Kind,
@@ -359,7 +364,7 @@ func CollectContainerImage(ctx context.Context, target string, targetOpts *targe
 		},
 		GeneratedAt: time.Now().UTC(),
 		Packages:    pkgs,
-		Direct:      nil, // Container images don't have direct/transitive distinction
+		Direct:      direct,
 		ImageInfo:   imageInfo,
 	}
 
@@ -924,6 +929,55 @@ func sbomDocToPackages(doc *sbom.Document) []*extractor.Package {
 	}
 
 	return pkgs
+}
+
+// buildDirectMapFromLayers builds a direct dependency map from package LayerDetails.
+// For container images with base image detection enabled, packages NOT in the base image
+// (i.e., added by the Dockerfile) are considered "direct" dependencies, while packages
+// inherited from the base image are "indirect".
+//
+// Returns nil if base image detection wasn't used (indicated by no packages having InBaseImage=true).
+// Note: LayerDetails is always populated for container images, but InBaseImage is only
+// meaningful when base image detection is enabled.
+func buildDirectMapFromLayers(pkgs []*extractor.Package) map[string]bool {
+	if len(pkgs) == 0 {
+		return nil
+	}
+
+	// Check if base image detection was actually used by looking for any package
+	// with InBaseImage=true. Without detection, InBaseImage defaults to false for all.
+	hasBaseImageDetection := false
+	for _, pkg := range pkgs {
+		if pkg != nil && pkg.LayerDetails != nil && pkg.LayerDetails.InBaseImage {
+			hasBaseImageDetection = true
+			break
+		}
+	}
+	if !hasBaseImageDetection {
+		return nil
+	}
+
+	direct := make(map[string]bool, len(pkgs))
+	for _, pkg := range pkgs {
+		if pkg == nil {
+			continue
+		}
+		purl := pkg.PURL()
+		if purl == nil {
+			continue
+		}
+		purlStr := purl.String()
+
+		// Package is "direct" if it's NOT in the base image (added by Dockerfile)
+		if pkg.LayerDetails != nil {
+			direct[purlStr] = !pkg.LayerDetails.InBaseImage
+		} else {
+			// No layer details - default to indirect (conservative)
+			direct[purlStr] = false
+		}
+	}
+
+	return direct
 }
 
 // resolvedTarget holds the result of target resolution.

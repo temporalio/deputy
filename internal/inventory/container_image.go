@@ -16,6 +16,23 @@ import (
 // ScanPackagesContainerImage scans a container image using OSV-Scalibr's image pipeline.
 // When opts.DetectBaseImage is true, it also runs the baseimage enricher to populate
 // the InBaseImage field in LayerDetails, which requires network access to query deps.dev.
+//
+// IMPORTANT: This function scans the MERGED/FINAL filesystem of the container image,
+// not individual layer diffs. Packages that are installed and then removed during the
+// build (e.g., `RUN apt-get install curl && ... && apt-get remove curl`) are NOT detected
+// because they don't exist in the final filesystem state.
+//
+// This is correct for runtime vulnerability analysis (removed packages can't be exploited),
+// but means build-time transient dependencies are invisible to the scan.
+//
+// TODO(future): Add layer-by-layer diff scanning mode for build-time supply chain analysis.
+// This would involve scanning each layer independently (not merged), enabling:
+//   - Detection of packages installed then removed (transient build deps)
+//   - Per-layer SBOMs showing build-time vs runtime dependencies
+//   - Policies like "no curl allowed even during build"
+//   - Full visibility into everything that touched the build process
+//
+// See: docs/guides/container-images.md "Final-State Scanning" section for user-facing docs.
 func ScanPackagesContainerImage(ctx context.Context, img scalibrimage.Image, opts ScanOptions) ([]*extractor.Package, error) {
 	if img == nil {
 		return nil, fmt.Errorf("container image is required")

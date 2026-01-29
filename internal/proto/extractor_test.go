@@ -258,3 +258,73 @@ func TestEcosystemFromPURLType(t *testing.T) {
 		})
 	}
 }
+
+func TestFilterPackages_DeduplicatePURL(t *testing.T) {
+	tests := []struct {
+		name    string
+		pkgs    []*extractor.Package
+		opts    FilterOptions
+		wantLen int
+	}{
+		{
+			name: "removes exact duplicate PURLs",
+			pkgs: []*extractor.Package{
+				{Name: "cloud.google.com/go/auth", Version: "0.15.0", PURLType: "golang"},
+				{Name: "cloud.google.com/go/auth", Version: "0.15.0", PURLType: "golang"}, // exact duplicate
+				{Name: "github.com/stretchr/testify", Version: "1.8.0", PURLType: "golang"},
+			},
+			opts:    FilterOptions{DeduplicatePURL: true},
+			wantLen: 2,
+		},
+		{
+			name: "keeps different versions",
+			pkgs: []*extractor.Package{
+				{Name: "cloud.google.com/go/auth", Version: "0.15.0", PURLType: "golang"},
+				{Name: "cloud.google.com/go/auth", Version: "0.16.0", PURLType: "golang"}, // different version
+				{Name: "github.com/stretchr/testify", Version: "1.8.0", PURLType: "golang"},
+			},
+			opts:    FilterOptions{DeduplicatePURL: true},
+			wantLen: 3,
+		},
+		{
+			name: "no deduplication when disabled",
+			pkgs: []*extractor.Package{
+				{Name: "cloud.google.com/go/auth", Version: "0.15.0", PURLType: "golang"},
+				{Name: "cloud.google.com/go/auth", Version: "0.15.0", PURLType: "golang"}, // exact duplicate
+			},
+			opts:    FilterOptions{DeduplicatePURL: false},
+			wantLen: 2,
+		},
+		{
+			name: "handles apk packages with same PURL",
+			pkgs: []*extractor.Package{
+				{Name: "alpine-baselayout", Version: "3.4.3-r2", PURLType: "apk"},
+				{Name: "alpine-baselayout", Version: "3.4.3-r2", PURLType: "apk"}, // exact duplicate
+				{Name: "busybox", Version: "1.36.1-r20", PURLType: "apk"},
+			},
+			opts:    FilterOptions{DeduplicatePURL: true},
+			wantLen: 2,
+		},
+		{
+			name: "keeps packages without PURL",
+			pkgs: []*extractor.Package{
+				{Name: "somepkg", Version: "1.0.0"}, // no PURLType = no PURL
+				{Name: "somepkg", Version: "1.0.0"}, // also no PURL, both kept
+			},
+			opts:    FilterOptions{DeduplicatePURL: true},
+			wantLen: 2,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := FilterPackages(tt.pkgs, tt.opts)
+			if len(result) != tt.wantLen {
+				t.Errorf("FilterPackages() returned %d packages, want %d", len(result), tt.wantLen)
+				for i, pkg := range result {
+					t.Logf("  [%d] %s@%s", i, pkg.Name, pkg.Version)
+				}
+			}
+		})
+	}
+}
