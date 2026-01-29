@@ -200,24 +200,6 @@ func TestSupportsDirectIndirect(t *testing.T) {
 	}
 }
 
-func TestFilterOnlyDirect(t *testing.T) {
-	items := []ListItem{
-		{Name: "foo", IsDirect: true},
-		{Name: "bar", IsDirect: false},
-		{Name: "baz", IsDirect: true},
-		{Name: "qux", IsDirect: false},
-	}
-	filtered := filterOnlyDirect(items)
-	if len(filtered) != 2 {
-		t.Fatalf("expected 2 direct items, got %d", len(filtered))
-	}
-	for _, it := range filtered {
-		if !it.IsDirect {
-			t.Errorf("expected only direct items, got indirect: %s", it.Name)
-		}
-	}
-}
-
 // Tests for collection type detection and text formatters
 
 func TestDetectCollectionType(t *testing.T) {

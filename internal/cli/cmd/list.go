@@ -575,86 +575,47 @@ func hasBaseImageInfo(pkgs []*dependencyv1.Package) bool {
 // When showDirect is false, the DIRECT column is omitted (for targets where
 // direct/indirect doesn't apply, like container images and binaries).
 func writeListText(w io.Writer, items []ListItem, header bool, showSources bool, showDirect bool) error {
-	purlH, dirH := "PURL", "DIRECT"
-	purlW := len(purlH)
-	dirW := len(dirH)
-	sourcesH := "SOURCES"
-	sourcesW := len(sourcesH)
+	// Build columns based on what we're showing
+	cols := []table.Column{
+		{Header: "PURL", Type: table.TypeID, Priority: 2, MinWidth: 20},
+	}
+	if showDirect {
+		cols = append(cols, table.Column{Header: "DIRECT", Type: table.TypeStatus, Priority: 1, MinWidth: 8})
+	}
+	if showSources {
+		cols = append(cols, table.Column{Header: "SOURCES", Type: table.TypePath, Priority: 0, MinWidth: 10})
+	}
+
+	tbl := table.New(cols...)
+
+	// Count direct/indirect for summary
 	directCount, indirectCount := 0, 0
+
 	for _, it := range items {
-		if l := len(it.PURL); l > purlW {
-			purlW = l
-		}
+		row := []string{it.PURL}
+
 		if showDirect {
-			d := "indirect"
 			if it.IsDirect {
-				d = "direct"
+				row = append(row, "direct")
 				directCount++
 			} else {
+				row = append(row, "indirect")
 				indirectCount++
 			}
-			if l := len(d); l > dirW {
-				dirW = l
-			}
 		}
+
 		if showSources {
-			if l := len(it.Sources); l > sourcesW {
-				sourcesW = l
+			sources := it.Sources
+			if sources == "" {
+				sources = "-"
 			}
+			row = append(row, sources)
 		}
+
+		tbl.AddRow(row...)
 	}
-	pad := func(n int) string {
-		if n <= 0 {
-			return ""
-		}
-		return strings.Repeat(" ", n)
-	}
-	if header {
-		if showSources && showDirect {
-			fmt.Fprintf(w, "%s%s%s%s%s%s\n",
-				ui.StyleHeader.Render(purlH),
-				pad(purlW-len(purlH)+2),
-				ui.StyleHeader.Render(dirH),
-				pad(dirW-len(dirH)+2),
-				ui.StyleHeader.Render(sourcesH),
-				pad(sourcesW-len(sourcesH)))
-		} else if showDirect {
-			fmt.Fprintf(w, "%s%s%s\n", ui.StyleHeader.Render(purlH), pad(purlW-len(purlH)+2), ui.StyleHeader.Render(dirH))
-		} else if showSources {
-			fmt.Fprintf(w, "%s%s%s\n", ui.StyleHeader.Render(purlH), pad(purlW-len(purlH)+2), ui.StyleHeader.Render(sourcesH))
-		} else {
-			fmt.Fprintf(w, "%s\n", ui.StyleHeader.Render(purlH))
-		}
-	}
-	for _, it := range items {
-		if showSources && showDirect {
-			d := "indirect"
-			dStyled := ui.StyleDim.Render(d)
-			if it.IsDirect {
-				d = "direct"
-				dStyled = ui.StyleUpgraded.Render(d)
-			}
-			fmt.Fprintf(w, "%s%s%s%s%s%s\n",
-				it.PURL,
-				pad(purlW-len(it.PURL)+2),
-				dStyled,
-				pad(dirW-len(d)+2),
-				it.Sources,
-				pad(sourcesW-len(it.Sources)))
-		} else if showDirect {
-			d := "indirect"
-			dStyled := ui.StyleDim.Render(d)
-			if it.IsDirect {
-				d = "direct"
-				dStyled = ui.StyleUpgraded.Render(d)
-			}
-			fmt.Fprintf(w, "%s%s%s\n", it.PURL, pad(purlW-len(it.PURL)+2), dStyled)
-		} else if showSources {
-			fmt.Fprintf(w, "%s%s%s\n", it.PURL, pad(purlW-len(it.PURL)+2), it.Sources)
-		} else {
-			fmt.Fprintln(w, it.PURL)
-		}
-	}
+
+	tbl.Render(w, header)
 
 	// Print summary line
 	total := len(items)
@@ -707,17 +668,6 @@ func writeListTSV(w io.Writer, items []ListItem, header bool, showSources bool, 
 		}
 	}
 	return nil
-}
-
-// filterOnlyDirect filters the list items to include only direct dependencies.
-func filterOnlyDirect(items []ListItem) []ListItem {
-	out := items[:0]
-	for _, it := range items {
-		if it.IsDirect {
-			out = append(out, it)
-		}
-	}
-	return out
 }
 
 // paginationInfo contains information about pagination state for output formatting.
@@ -935,40 +885,13 @@ func listShortSHA(sha string) string {
 	return sha
 }
 
-// listCell formats a cell value: truncates to maxWidth and pads to width (maxWidth + gap).
-// This ensures columns never overflow and are properly aligned.
-func listCell(s string, maxWidth, gap int) string {
-	truncated := table.Truncate(s, maxWidth)
-	return table.Pad(truncated, maxWidth+gap, table.AlignLeft)
-}
-
-// listCellStyled formats a styled cell: uses raw value for width, styled for display.
-// rawValue is used for width calculation, styledValue is rendered.
-// The style function is applied AFTER truncation.
-func listCellStyled(rawValue, styledValue string, maxWidth, gap int) string {
-	rawTrunc := table.Truncate(rawValue, maxWidth)
-	// If raw was truncated, also truncate the styled display
-	if len(rawTrunc) < len(rawValue) || rawTrunc != rawValue {
-		styledValue = table.Truncate(rawValue, maxWidth)
-	}
-	// Calculate padding based on raw width
-	rawWidth := table.RuneWidth(rawTrunc)
-	padding := max(0, (maxWidth+gap)-rawWidth)
-	return styledValue + strings.Repeat(" ", padding)
-}
-
 // writeGitHubRefsText formats GitHub refs (branches/tags) with REF, TYPE, SHA columns.
 func writeGitHubRefsText(w io.Writer, targets []*listv1.DiscoveredTarget, header bool, summaryNoun string, pagination *paginationInfo) error {
-	const gap = table.ColumnGap
-	const (
-		refMax  = 40 // Branch/tag name
-		typeMax = 10 // "branch" or "tag"
+	tbl := table.New(
+		table.Column{Header: "REF", Type: table.TypeID, Priority: 2, MinWidth: 10},
+		table.Column{Header: "TYPE", Type: table.TypeStatus, Priority: 1, MinWidth: 6},
+		table.Column{Header: "SHA", Type: table.TypeText, Priority: 0, MinWidth: 7, MaxWidth: 7},
 	)
-
-	if header {
-		h := listCell("REF", refMax, gap) + listCell("TYPE", typeMax, gap) + "SHA"
-		fmt.Fprintln(w, ui.StyleHeader.Render(h))
-	}
 
 	for _, t := range targets {
 		refType := ""
@@ -977,25 +900,16 @@ func writeGitHubRefsText(w io.Writer, targets []*listv1.DiscoveredTarget, header
 			refType = t.Metadata["ref_type"]
 			sha = listShortSHA(t.Metadata["sha"])
 		}
-
-		row := listCell(t.Name, refMax, gap) + listCell(refType, typeMax, gap) +
-			ui.StyleDim.Render(sha)
-		fmt.Fprintln(w, row)
+		tbl.AddRow(t.Name, refType, sha)
 	}
 
+	tbl.Render(w, header)
 	writeSummary(w, len(targets), summaryNoun, false, pagination)
 	return nil
 }
 
 // writeGitHubReposText formats GitHub repos with REPO, STARS, LANGUAGE, CREATED columns.
 func writeGitHubReposText(w io.Writer, targets []*listv1.DiscoveredTarget, header bool, summaryNoun string, pagination *paginationInfo) error {
-	const gap = table.ColumnGap
-	const (
-		repoMax  = 35 // Repository name
-		starsMax = 8  // Star count
-		langMax  = 20 // Language name (fits "Jupyter Notebook")
-	)
-
 	// Check if any targets have created_at
 	hasCreated := false
 	for _, t := range targets {
@@ -1005,45 +919,43 @@ func writeGitHubReposText(w io.Writer, targets []*listv1.DiscoveredTarget, heade
 		}
 	}
 
-	if header {
-		h := listCell("REPO", repoMax, gap) + listCell("STARS", starsMax, gap) +
-			listCell("LANGUAGE", langMax, gap)
-		if hasCreated {
-			h += "CREATED"
-		}
-		fmt.Fprintln(w, ui.StyleHeader.Render(h))
+	cols := []table.Column{
+		{Header: "REPO", Type: table.TypeID, Priority: 3, MinWidth: 10},
+		{Header: "STARS", Type: table.TypeNumber, Priority: 1, MinWidth: 5},
+		{Header: "LANGUAGE", Type: table.TypeText, Priority: 2, MinWidth: 8},
 	}
+	if hasCreated {
+		cols = append(cols, table.Column{Header: "CREATED", Type: table.TypeDateFull, Priority: 0, MinWidth: 12})
+	}
+	tbl := table.New(cols...)
 
 	for _, t := range targets {
-		star := ""
+		stars := ""
 		lang := "-"
 		if t.Metadata != nil {
-			star = t.Metadata["stars"]
+			stars = t.Metadata["stars"]
 			if t.Metadata["language"] != "" {
 				lang = t.Metadata["language"]
 			}
 		}
-
-		row := listCell(t.Name, repoMax, gap) + listCell(star, starsMax, gap) +
-			listCell(lang, langMax, gap)
-		if hasCreated && t.CreatedAt != nil {
-			row += t.CreatedAt.AsTime().Format("2006-01-02")
+		row := []string{t.Name, stars, lang}
+		if hasCreated {
+			created := ""
+			if t.CreatedAt != nil {
+				created = t.CreatedAt.AsTime().Format(time.RFC3339)
+			}
+			row = append(row, created)
 		}
-		fmt.Fprintln(w, row)
+		tbl.AddRow(row...)
 	}
 
+	tbl.Render(w, header)
 	writeSummary(w, len(targets), summaryNoun, false, pagination)
 	return nil
 }
 
 // writeContainerTagsText formats container tags with TAG, DIGEST, CREATED columns.
 func writeContainerTagsText(w io.Writer, targets []*listv1.DiscoveredTarget, header bool, summaryNoun string, pagination *paginationInfo) error {
-	const gap = table.ColumnGap
-	const (
-		tagMax    = 40 // Tag name
-		digestMax = 19 // Truncated digest
-	)
-
 	// Analyze what columns we have data for
 	hasDigest := false
 	hasCreated := false
@@ -1061,36 +973,37 @@ func writeContainerTagsText(w io.Writer, targets []*listv1.DiscoveredTarget, hea
 		}
 	}
 
-	if header {
-		h := listCell("TAG", tagMax, gap)
-		if hasDigest {
-			h += listCell("DIGEST", digestMax, gap)
-		}
-		if hasCreated {
-			h += "CREATED"
-		}
-		fmt.Fprintln(w, ui.StyleHeader.Render(h))
+	cols := []table.Column{
+		{Header: "TAG", Type: table.TypeID, Priority: 2, MinWidth: 10},
 	}
+	if hasDigest {
+		cols = append(cols, table.Column{Header: "DIGEST", Type: table.TypeDigest, Priority: 1, MinWidth: 12})
+	}
+	if hasCreated {
+		cols = append(cols, table.Column{Header: "CREATED", Type: table.TypeDateFull, Priority: 0, MinWidth: 12})
+	}
+	tbl := table.New(cols...)
 
 	for _, t := range targets {
-		row := listCell(t.Name, tagMax, gap)
-
+		row := []string{t.Name}
 		if hasDigest {
 			digest := "-"
 			if t.Metadata != nil && t.Metadata["digest"] != "" {
 				digest = t.Metadata["digest"]
 			}
-			row += listCell(digest, digestMax, gap)
+			row = append(row, digest)
 		}
 		if hasCreated {
+			created := ""
 			if t.CreatedAt != nil {
-				row += t.CreatedAt.AsTime().Format("2006-01-02")
-			} else {
-				row += "-"
+				created = t.CreatedAt.AsTime().Format(time.RFC3339)
 			}
+			row = append(row, created)
 		}
-		fmt.Fprintln(w, row)
+		tbl.AddRow(row...)
 	}
+
+	tbl.Render(w, header)
 
 	showTip := !hasDigest && !hasCreated
 	writeSummary(w, len(targets), summaryNoun, showTip, pagination)
@@ -1108,19 +1021,13 @@ func writeContainerTagsText(w io.Writer, targets []*listv1.DiscoveredTarget, hea
 
 // writeGitHubPRsText formats PRs with NUMBER, TITLE, STATE, AUTHOR, CREATED columns.
 func writeGitHubPRsText(w io.Writer, targets []*listv1.DiscoveredTarget, header bool, summaryNoun string, pagination *paginationInfo) error {
-	const gap = table.ColumnGap
-	const (
-		numMax    = 6  // PR number
-		titleMax  = 40 // Title
-		stateMax  = 8  // "open", "closed", "merged"
-		authorMax = 20 // Username
+	tbl := table.New(
+		table.Column{Header: "PR", Type: table.TypeID, Priority: 4, MinWidth: 4},
+		table.Column{Header: "TITLE", Type: table.TypeText, Priority: 3, MinWidth: 15},
+		table.Column{Header: "STATE", Type: table.TypeStatus, Priority: 2, MinWidth: 6},
+		table.Column{Header: "AUTHOR", Type: table.TypeText, Priority: 1, MinWidth: 8},
+		table.Column{Header: "CREATED", Type: table.TypeDateFull, Priority: 0, MinWidth: 12},
 	)
-
-	if header {
-		h := listCell("PR", numMax, gap) + listCell("TITLE", titleMax, gap) +
-			listCell("STATE", stateMax, gap) + listCell("AUTHOR", authorMax, gap) + "CREATED"
-		fmt.Fprintln(w, ui.StyleHeader.Render(h))
-	}
 
 	for _, t := range targets {
 		state := ""
@@ -1129,46 +1036,27 @@ func writeGitHubPRsText(w io.Writer, targets []*listv1.DiscoveredTarget, header 
 			state = t.Metadata["state"]
 			author = t.Metadata["author"]
 		}
-
-		// Style the state
-		stateStyled := state
-		switch state {
-		case "open":
-			stateStyled = ui.StyleUpgraded.Render(state)
-		case "closed":
-			stateStyled = ui.StyleDim.Render(state)
-		case "merged":
-			stateStyled = ui.StyleCritical.Render(state)
-		}
-
-		row := listCell(t.Name, numMax, gap) + listCell(t.Description, titleMax, gap) +
-			listCellStyled(state, stateStyled, stateMax, gap) +
-			listCell(author, authorMax, gap)
+		created := ""
 		if t.CreatedAt != nil {
-			row += t.CreatedAt.AsTime().Format("2006-01-02")
+			created = t.CreatedAt.AsTime().Format(time.RFC3339)
 		}
-		fmt.Fprintln(w, row)
+		tbl.AddRow(t.Name, t.Description, state, author, created)
 	}
 
+	tbl.Render(w, header)
 	writeSummary(w, len(targets), summaryNoun, false, pagination)
 	return nil
 }
 
 // writeGitHubIssuesText formats issues with NUMBER, TITLE, STATE, AUTHOR, CREATED columns.
 func writeGitHubIssuesText(w io.Writer, targets []*listv1.DiscoveredTarget, header bool, summaryNoun string, pagination *paginationInfo) error {
-	const gap = table.ColumnGap
-	const (
-		numMax    = 6  // Issue number
-		titleMax  = 40 // Title
-		stateMax  = 8  // "open", "closed"
-		authorMax = 20 // Username
+	tbl := table.New(
+		table.Column{Header: "ISSUE", Type: table.TypeID, Priority: 4, MinWidth: 4},
+		table.Column{Header: "TITLE", Type: table.TypeText, Priority: 3, MinWidth: 15},
+		table.Column{Header: "STATE", Type: table.TypeStatus, Priority: 2, MinWidth: 6},
+		table.Column{Header: "AUTHOR", Type: table.TypeText, Priority: 1, MinWidth: 8},
+		table.Column{Header: "CREATED", Type: table.TypeDateFull, Priority: 0, MinWidth: 12},
 	)
-
-	if header {
-		h := listCell("ISSUE", numMax, gap) + listCell("TITLE", titleMax, gap) +
-			listCell("STATE", stateMax, gap) + listCell("AUTHOR", authorMax, gap) + "CREATED"
-		fmt.Fprintln(w, ui.StyleHeader.Render(h))
-	}
 
 	for _, t := range targets {
 		state := ""
@@ -1177,124 +1065,92 @@ func writeGitHubIssuesText(w io.Writer, targets []*listv1.DiscoveredTarget, head
 			state = t.Metadata["state"]
 			author = t.Metadata["author"]
 		}
-
-		stateStyled := state
-		if state == "open" {
-			stateStyled = ui.StyleUpgraded.Render(state)
-		} else {
-			stateStyled = ui.StyleDim.Render(state)
-		}
-
-		row := listCell(t.Name, numMax, gap) + listCell(t.Description, titleMax, gap) +
-			listCellStyled(state, stateStyled, stateMax, gap) +
-			listCell(author, authorMax, gap)
+		created := ""
 		if t.CreatedAt != nil {
-			row += t.CreatedAt.AsTime().Format("2006-01-02")
+			created = t.CreatedAt.AsTime().Format(time.RFC3339)
 		}
-		fmt.Fprintln(w, row)
+		tbl.AddRow(t.Name, t.Description, state, author, created)
 	}
 
+	tbl.Render(w, header)
 	writeSummary(w, len(targets), summaryNoun, false, pagination)
 	return nil
 }
 
 // writeGitHubCommitsText formats commits with SHA, MESSAGE, AUTHOR, CREATED columns.
 func writeGitHubCommitsText(w io.Writer, targets []*listv1.DiscoveredTarget, header bool, summaryNoun string, pagination *paginationInfo) error {
-	const gap = table.ColumnGap
-	const (
-		shaMax    = 7  // Short SHA
-		msgMax    = 50 // Commit message
-		authorMax = 20 // Username
+	tbl := table.New(
+		table.Column{Header: "SHA", Type: table.TypeID, Priority: 3, MinWidth: 7, MaxWidth: 7},
+		table.Column{Header: "MESSAGE", Type: table.TypeText, Priority: 2, MinWidth: 20},
+		table.Column{Header: "AUTHOR", Type: table.TypeText, Priority: 1, MinWidth: 8},
+		table.Column{Header: "CREATED", Type: table.TypeDateFull, Priority: 0, MinWidth: 12},
 	)
-
-	if header {
-		h := listCell("SHA", shaMax, gap) + listCell("MESSAGE", msgMax, gap) +
-			listCell("AUTHOR", authorMax, gap) + "CREATED"
-		fmt.Fprintln(w, ui.StyleHeader.Render(h))
-	}
 
 	for _, t := range targets {
 		author := ""
 		if t.Metadata != nil {
 			author = t.Metadata["author"]
 		}
-
-		row := listCell(t.Name, shaMax, gap) + listCell(t.Description, msgMax, gap) +
-			listCell(author, authorMax, gap)
+		created := ""
 		if t.CreatedAt != nil {
-			row += t.CreatedAt.AsTime().Format("2006-01-02")
+			created = t.CreatedAt.AsTime().Format(time.RFC3339)
 		}
-		fmt.Fprintln(w, row)
+		tbl.AddRow(t.Name, t.Description, author, created)
 	}
 
+	tbl.Render(w, header)
 	writeSummary(w, len(targets), summaryNoun, false, pagination)
 	return nil
 }
 
 // writeGitHubContributorsText formats contributors with NAME, CONTRIBUTIONS columns.
 func writeGitHubContributorsText(w io.Writer, targets []*listv1.DiscoveredTarget, header bool, summaryNoun string, pagination *paginationInfo) error {
-	const gap = table.ColumnGap
-	const nameMax = 30 // Username
-
-	if header {
-		h := listCell("CONTRIBUTOR", nameMax, gap) + "COMMITS"
-		fmt.Fprintln(w, ui.StyleHeader.Render(h))
-	}
+	tbl := table.New(
+		table.Column{Header: "CONTRIBUTOR", Type: table.TypeID, Priority: 1, MinWidth: 10},
+		table.Column{Header: "COMMITS", Type: table.TypeNumber, Priority: 0, MinWidth: 6},
+	)
 
 	for _, t := range targets {
 		contrib := ""
 		if t.Metadata != nil {
 			contrib = t.Metadata["contributions"]
 		}
-		row := listCell(t.Name, nameMax, gap) + contrib
-		fmt.Fprintln(w, row)
+		tbl.AddRow(t.Name, contrib)
 	}
 
+	tbl.Render(w, header)
 	writeSummary(w, len(targets), summaryNoun, false, pagination)
 	return nil
 }
 
 // writeGitHubCollaboratorsText formats collaborators with NAME, PERMISSION columns.
 func writeGitHubCollaboratorsText(w io.Writer, targets []*listv1.DiscoveredTarget, header bool, summaryNoun string, pagination *paginationInfo) error {
-	const gap = table.ColumnGap
-	const nameMax = 30 // Username
-
-	if header {
-		h := listCell("COLLABORATOR", nameMax, gap) + "PERMISSION"
-		fmt.Fprintln(w, ui.StyleHeader.Render(h))
-	}
+	tbl := table.New(
+		table.Column{Header: "COLLABORATOR", Type: table.TypeID, Priority: 1, MinWidth: 10},
+		table.Column{Header: "PERMISSION", Type: table.TypeStatus, Priority: 0, MinWidth: 6},
+	)
 
 	for _, t := range targets {
 		perm := ""
 		if t.Metadata != nil {
 			perm = t.Metadata["permission"]
 		}
-		permStyled := perm
-		if perm == "admin" {
-			permStyled = ui.StyleRemoved.Render(perm)
-		}
-		row := listCell(t.Name, nameMax, gap) + permStyled
-		fmt.Fprintln(w, row)
+		tbl.AddRow(t.Name, perm)
 	}
 
+	tbl.Render(w, header)
 	writeSummary(w, len(targets), summaryNoun, false, pagination)
 	return nil
 }
 
 // writeGitHubReleasesText formats releases with NAME, TAG, PRERELEASE, CREATED columns.
 func writeGitHubReleasesText(w io.Writer, targets []*listv1.DiscoveredTarget, header bool, summaryNoun string, pagination *paginationInfo) error {
-	const gap = table.ColumnGap
-	const (
-		nameMax = 30 // Release name
-		tagMax  = 20 // Tag name
-		typeMax = 10 // "stable" or "prerelease"
+	tbl := table.New(
+		table.Column{Header: "RELEASE", Type: table.TypeID, Priority: 3, MinWidth: 10},
+		table.Column{Header: "TAG", Type: table.TypeText, Priority: 2, MinWidth: 8},
+		table.Column{Header: "TYPE", Type: table.TypeStatus, Priority: 1, MinWidth: 6},
+		table.Column{Header: "CREATED", Type: table.TypeDateFull, Priority: 0, MinWidth: 12},
 	)
-
-	if header {
-		h := listCell("RELEASE", nameMax, gap) + listCell("TAG", tagMax, gap) +
-			listCell("TYPE", typeMax, gap) + "CREATED"
-		fmt.Fprintln(w, ui.StyleHeader.Render(h))
-	}
 
 	for _, t := range targets {
 		tag := ""
@@ -1305,77 +1161,54 @@ func writeGitHubReleasesText(w io.Writer, targets []*listv1.DiscoveredTarget, he
 				prerel = "prerelease"
 			}
 		}
-
-		prerelStyled := prerel
-		if prerel == "prerelease" {
-			prerelStyled = ui.StyleDowngraded.Render(prerel)
-		} else {
-			prerelStyled = ui.StyleUpgraded.Render(prerel)
-		}
-
-		row := listCell(t.Name, nameMax, gap) + listCell(tag, tagMax, gap) +
-			listCellStyled(prerel, prerelStyled, typeMax, gap)
+		created := ""
 		if t.CreatedAt != nil {
-			row += t.CreatedAt.AsTime().Format("2006-01-02")
+			created = t.CreatedAt.AsTime().Format(time.RFC3339)
 		}
-		fmt.Fprintln(w, row)
+		tbl.AddRow(t.Name, tag, prerel, created)
 	}
 
+	tbl.Render(w, header)
 	writeSummary(w, len(targets), summaryNoun, false, pagination)
 	return nil
 }
 
 // writeGitHubForksText formats forks with REPO, OWNER, STARS, CREATED columns.
 func writeGitHubForksText(w io.Writer, targets []*listv1.DiscoveredTarget, header bool, summaryNoun string, pagination *paginationInfo) error {
-	const gap = table.ColumnGap
-
-	// Column constraints - these define the max width for each column
-	const (
-		repoMax  = 40 // Fork name can be long
-		ownerMax = 25 // Username
-		starsMax = 6  // Star count
+	tbl := table.New(
+		table.Column{Header: "FORK", Type: table.TypeID, Priority: 3, MinWidth: 10},
+		table.Column{Header: "OWNER", Type: table.TypeText, Priority: 2, MinWidth: 8},
+		table.Column{Header: "STARS", Type: table.TypeNumber, Priority: 1, MinWidth: 5},
+		table.Column{Header: "CREATED", Type: table.TypeDateFull, Priority: 0, MinWidth: 12},
 	)
-
-	if header {
-		h := listCell("FORK", repoMax, gap) + listCell("OWNER", ownerMax, gap) +
-			listCell("STARS", starsMax, gap) + "CREATED"
-		fmt.Fprintln(w, ui.StyleHeader.Render(h))
-	}
 
 	for _, t := range targets {
 		repo := t.Name
 		owner := ""
-		star := ""
+		stars := ""
+		created := ""
 		if t.Metadata != nil {
 			owner = t.Metadata["fork_owner"]
-			star = t.Metadata["stars"]
+			stars = t.Metadata["stars"]
 		}
-
-		row := listCell(repo, repoMax, gap) + listCell(owner, ownerMax, gap) +
-			listCell(star, starsMax, gap)
 		if t.CreatedAt != nil {
-			row += t.CreatedAt.AsTime().Format("2006-01-02")
+			created = t.CreatedAt.AsTime().Format(time.RFC3339)
 		}
-		fmt.Fprintln(w, row)
+		tbl.AddRow(repo, owner, stars, created)
 	}
 
+	tbl.Render(w, header)
 	writeSummary(w, len(targets), summaryNoun, false, pagination)
 	return nil
 }
 
 // writeGitHubWorkflowsText formats workflows with NAME, STATE, PATH columns.
 func writeGitHubWorkflowsText(w io.Writer, targets []*listv1.DiscoveredTarget, header bool, summaryNoun string, pagination *paginationInfo) error {
-	const gap = table.ColumnGap
-	const (
-		nameMax  = 35 // Workflow name
-		stateMax = 12 // "active", "disabled_fork", etc.
-		pathMax  = 40 // File path
+	tbl := table.New(
+		table.Column{Header: "WORKFLOW", Type: table.TypeID, Priority: 2, MinWidth: 15},
+		table.Column{Header: "STATE", Type: table.TypeStatus, Priority: 1, MinWidth: 6},
+		table.Column{Header: "PATH", Type: table.TypePath, Priority: 0, MinWidth: 15},
 	)
-
-	if header {
-		h := listCell("WORKFLOW", nameMax, gap) + listCell("STATE", stateMax, gap) + "PATH"
-		fmt.Fprintln(w, ui.StyleHeader.Render(h))
-	}
 
 	for _, t := range targets {
 		state := ""
@@ -1384,38 +1217,23 @@ func writeGitHubWorkflowsText(w io.Writer, targets []*listv1.DiscoveredTarget, h
 			state = t.Metadata["state"]
 			path = t.Metadata["path"]
 		}
-
-		stateStyled := state
-		if state == "active" {
-			stateStyled = ui.StyleUpgraded.Render(state)
-		} else {
-			stateStyled = ui.StyleDim.Render(state)
-		}
-
-		row := listCell(t.Name, nameMax, gap) + listCellStyled(state, stateStyled, stateMax, gap) +
-			table.Truncate(path, pathMax)
-		fmt.Fprintln(w, row)
+		tbl.AddRow(t.Name, state, path)
 	}
 
+	tbl.Render(w, header)
 	writeSummary(w, len(targets), summaryNoun, false, pagination)
 	return nil
 }
 
 // writeGitHubWorkflowRunsText formats workflow runs with RUN, WORKFLOW, STATUS, BRANCH, CREATED columns.
 func writeGitHubWorkflowRunsText(w io.Writer, targets []*listv1.DiscoveredTarget, header bool, summaryNoun string, pagination *paginationInfo) error {
-	const gap = table.ColumnGap
-	const (
-		runMax      = 10 // Run ID
-		workflowMax = 25 // Workflow name
-		statusMax   = 12 // Status/conclusion
-		branchMax   = 20 // Branch name
+	tbl := table.New(
+		table.Column{Header: "RUN", Type: table.TypeID, Priority: 4, MinWidth: 6},
+		table.Column{Header: "WORKFLOW", Type: table.TypeText, Priority: 2, MinWidth: 10},
+		table.Column{Header: "STATUS", Type: table.TypeStatus, Priority: 3, MinWidth: 6},
+		table.Column{Header: "BRANCH", Type: table.TypeText, Priority: 1, MinWidth: 8},
+		table.Column{Header: "CREATED", Type: table.TypeDateFull, Priority: 0, MinWidth: 12},
 	)
-
-	if header {
-		h := listCell("RUN", runMax, gap) + listCell("WORKFLOW", workflowMax, gap) +
-			listCell("STATUS", statusMax, gap) + listCell("BRANCH", branchMax, gap) + "CREATED"
-		fmt.Fprintln(w, ui.StyleHeader.Render(h))
-	}
 
 	for _, t := range targets {
 		workflow := ""
@@ -1429,46 +1247,26 @@ func writeGitHubWorkflowRunsText(w io.Writer, targets []*listv1.DiscoveredTarget
 			}
 			branch = t.Metadata["branch"]
 		}
-
-		statusStyled := status
-		switch status {
-		case "success":
-			statusStyled = ui.StyleUpgraded.Render(status)
-		case "failure":
-			statusStyled = ui.StyleRemoved.Render(status)
-		case "in_progress", "queued":
-			statusStyled = ui.StyleDowngraded.Render(status)
-		default:
-			statusStyled = ui.StyleDim.Render(status)
-		}
-
-		row := listCell(t.Name, runMax, gap) + listCell(workflow, workflowMax, gap) +
-			listCellStyled(status, statusStyled, statusMax, gap) +
-			listCell(branch, branchMax, gap)
+		created := ""
 		if t.CreatedAt != nil {
-			row += t.CreatedAt.AsTime().Format("2006-01-02")
+			created = t.CreatedAt.AsTime().Format(time.RFC3339)
 		}
-		fmt.Fprintln(w, row)
+		tbl.AddRow(t.Name, workflow, status, branch, created)
 	}
 
+	tbl.Render(w, header)
 	writeSummary(w, len(targets), summaryNoun, false, pagination)
 	return nil
 }
 
 // writeGitHubDependabotText formats Dependabot alerts with PACKAGE, SEVERITY, STATE, CREATED columns.
 func writeGitHubDependabotText(w io.Writer, targets []*listv1.DiscoveredTarget, header bool, summaryNoun string, pagination *paginationInfo) error {
-	const gap = table.ColumnGap
-	const (
-		pkgMax   = 40 // Package name
-		sevMax   = 10 // "critical", "high", etc.
-		stateMax = 12 // "open", "dismissed", etc.
+	tbl := table.New(
+		table.Column{Header: "PACKAGE", Type: table.TypeID, Priority: 3, MinWidth: 15},
+		table.Column{Header: "SEVERITY", Type: table.TypeStatus, Priority: 2, MinWidth: 8},
+		table.Column{Header: "STATE", Type: table.TypeStatus, Priority: 1, MinWidth: 6},
+		table.Column{Header: "CREATED", Type: table.TypeDateFull, Priority: 0, MinWidth: 12},
 	)
-
-	if header {
-		h := listCell("PACKAGE", pkgMax, gap) + listCell("SEVERITY", sevMax, gap) +
-			listCell("STATE", stateMax, gap) + "CREATED"
-		fmt.Fprintln(w, ui.StyleHeader.Render(h))
-	}
 
 	for _, t := range targets {
 		pkg := ""
@@ -1479,42 +1277,27 @@ func writeGitHubDependabotText(w io.Writer, targets []*listv1.DiscoveredTarget, 
 			sev = t.Metadata["severity"]
 			state = t.Metadata["state"]
 		}
-
-		sevStyled := styleSeverity(sev)
-		stateStyled := state
-		if state == "open" {
-			stateStyled = ui.StyleDowngraded.Render(state)
-		} else {
-			stateStyled = ui.StyleDim.Render(state)
-		}
-
-		row := listCell(pkg, pkgMax, gap) + listCellStyled(sev, sevStyled, sevMax, gap) +
-			listCellStyled(state, stateStyled, stateMax, gap)
+		created := ""
 		if t.CreatedAt != nil {
-			row += t.CreatedAt.AsTime().Format("2006-01-02")
+			created = t.CreatedAt.AsTime().Format(time.RFC3339)
 		}
-		fmt.Fprintln(w, row)
+		tbl.AddRow(pkg, sev, state, created)
 	}
 
+	tbl.Render(w, header)
 	writeSummary(w, len(targets), summaryNoun, false, pagination)
 	return nil
 }
 
 // writeGitHubCodeScanningText formats code scanning alerts with RULE, SEVERITY, FILE, STATE, CREATED columns.
 func writeGitHubCodeScanningText(w io.Writer, targets []*listv1.DiscoveredTarget, header bool, summaryNoun string, pagination *paginationInfo) error {
-	const gap = table.ColumnGap
-	const (
-		ruleMax  = 30 // Rule ID
-		sevMax   = 10 // Severity
-		fileMax  = 30 // File path
-		stateMax = 12 // State
+	tbl := table.New(
+		table.Column{Header: "RULE", Type: table.TypeID, Priority: 4, MinWidth: 10},
+		table.Column{Header: "SEVERITY", Type: table.TypeStatus, Priority: 3, MinWidth: 8},
+		table.Column{Header: "FILE", Type: table.TypePath, Priority: 1, MinWidth: 10},
+		table.Column{Header: "STATE", Type: table.TypeStatus, Priority: 2, MinWidth: 6},
+		table.Column{Header: "CREATED", Type: table.TypeDateFull, Priority: 0, MinWidth: 12},
 	)
-
-	if header {
-		h := listCell("RULE", ruleMax, gap) + listCell("SEVERITY", sevMax, gap) +
-			listCell("FILE", fileMax, gap) + listCell("STATE", stateMax, gap) + "CREATED"
-		fmt.Fprintln(w, ui.StyleHeader.Render(h))
-	}
 
 	for _, t := range targets {
 		rule := ""
@@ -1527,39 +1310,25 @@ func writeGitHubCodeScanningText(w io.Writer, targets []*listv1.DiscoveredTarget
 			file = t.Metadata["file"]
 			state = t.Metadata["state"]
 		}
-
-		sevStyled := styleSeverity(sev)
-		stateStyled := state
-		if state == "open" {
-			stateStyled = ui.StyleDowngraded.Render(state)
-		} else {
-			stateStyled = ui.StyleDim.Render(state)
-		}
-
-		row := listCell(rule, ruleMax, gap) + listCellStyled(sev, sevStyled, sevMax, gap) +
-			listCell(file, fileMax, gap) + listCellStyled(state, stateStyled, stateMax, gap)
+		created := ""
 		if t.CreatedAt != nil {
-			row += t.CreatedAt.AsTime().Format("2006-01-02")
+			created = t.CreatedAt.AsTime().Format(time.RFC3339)
 		}
-		fmt.Fprintln(w, row)
+		tbl.AddRow(rule, sev, file, state, created)
 	}
 
+	tbl.Render(w, header)
 	writeSummary(w, len(targets), summaryNoun, false, pagination)
 	return nil
 }
 
 // writeGitHubSecretScanningText formats secret scanning alerts with TYPE, STATE, CREATED columns.
 func writeGitHubSecretScanningText(w io.Writer, targets []*listv1.DiscoveredTarget, header bool, summaryNoun string, pagination *paginationInfo) error {
-	const gap = table.ColumnGap
-	const (
-		typeMax  = 40 // Secret type
-		stateMax = 12 // State
+	tbl := table.New(
+		table.Column{Header: "SECRET TYPE", Type: table.TypeID, Priority: 2, MinWidth: 15},
+		table.Column{Header: "STATE", Type: table.TypeStatus, Priority: 1, MinWidth: 6},
+		table.Column{Header: "CREATED", Type: table.TypeDateFull, Priority: 0, MinWidth: 12},
 	)
-
-	if header {
-		h := listCell("SECRET TYPE", typeMax, gap) + listCell("STATE", stateMax, gap) + "CREATED"
-		fmt.Fprintln(w, ui.StyleHeader.Render(h))
-	}
 
 	for _, t := range targets {
 		secretType := t.Description
@@ -1567,39 +1336,26 @@ func writeGitHubSecretScanningText(w io.Writer, targets []*listv1.DiscoveredTarg
 		if t.Metadata != nil {
 			state = t.Metadata["state"]
 		}
-
-		stateStyled := state
-		if state == "open" {
-			stateStyled = ui.StyleRemoved.Render(state) // secrets are serious
-		} else {
-			stateStyled = ui.StyleDim.Render(state)
-		}
-
-		row := listCell(secretType, typeMax, gap) + listCellStyled(state, stateStyled, stateMax, gap)
+		created := ""
 		if t.CreatedAt != nil {
-			row += t.CreatedAt.AsTime().Format("2006-01-02")
+			created = t.CreatedAt.AsTime().Format(time.RFC3339)
 		}
-		fmt.Fprintln(w, row)
+		tbl.AddRow(secretType, state, created)
 	}
 
+	tbl.Render(w, header)
 	writeSummary(w, len(targets), summaryNoun, false, pagination)
 	return nil
 }
 
 // writeGitHubAdvisoriesText formats security advisories with GHSA, SEVERITY, STATE, CREATED columns.
 func writeGitHubAdvisoriesText(w io.Writer, targets []*listv1.DiscoveredTarget, header bool, summaryNoun string, pagination *paginationInfo) error {
-	const gap = table.ColumnGap
-	const (
-		ghsaMax  = 20 // GHSA ID
-		sevMax   = 10 // Severity
-		stateMax = 12 // State
+	tbl := table.New(
+		table.Column{Header: "GHSA", Type: table.TypeID, Priority: 3, MinWidth: 15},
+		table.Column{Header: "SEVERITY", Type: table.TypeStatus, Priority: 2, MinWidth: 8},
+		table.Column{Header: "STATE", Type: table.TypeStatus, Priority: 1, MinWidth: 6},
+		table.Column{Header: "CREATED", Type: table.TypeDateFull, Priority: 0, MinWidth: 12},
 	)
-
-	if header {
-		h := listCell("GHSA", ghsaMax, gap) + listCell("SEVERITY", sevMax, gap) +
-			listCell("STATE", stateMax, gap) + "CREATED"
-		fmt.Fprintln(w, ui.StyleHeader.Render(h))
-	}
 
 	for _, t := range targets {
 		sev := ""
@@ -1608,35 +1364,26 @@ func writeGitHubAdvisoriesText(w io.Writer, targets []*listv1.DiscoveredTarget, 
 			sev = t.Metadata["severity"]
 			state = t.Metadata["state"]
 		}
-
-		sevStyled := styleSeverity(sev)
-
-		row := listCell(t.Name, ghsaMax, gap) + listCellStyled(sev, sevStyled, sevMax, gap) +
-			listCell(state, stateMax, gap)
+		created := ""
 		if t.CreatedAt != nil {
-			row += t.CreatedAt.AsTime().Format("2006-01-02")
+			created = t.CreatedAt.AsTime().Format(time.RFC3339)
 		}
-		fmt.Fprintln(w, row)
+		tbl.AddRow(t.Name, sev, state, created)
 	}
 
+	tbl.Render(w, header)
 	writeSummary(w, len(targets), summaryNoun, false, pagination)
 	return nil
 }
 
 // writeGitHubReleaseAssetsText formats release assets with NAME, TYPE, SIZE, DOWNLOADS columns.
 func writeGitHubReleaseAssetsText(w io.Writer, targets []*listv1.DiscoveredTarget, header bool, summaryNoun string, pagination *paginationInfo) error {
-	const gap = table.ColumnGap
-	const (
-		nameMax = 50 // Asset filename
-		typeMax = 16 // Asset type
-		sizeMax = 10 // Size
+	tbl := table.New(
+		table.Column{Header: "ASSET", Type: table.TypeID, Priority: 3, MinWidth: 15},
+		table.Column{Header: "TYPE", Type: table.TypeStatus, Priority: 2, MinWidth: 8},
+		table.Column{Header: "SIZE", Type: table.TypeText, Priority: 1, MinWidth: 6},
+		table.Column{Header: "DOWNLOADS", Type: table.TypeNumber, Priority: 0, MinWidth: 6},
 	)
-
-	if header {
-		h := listCell("ASSET", nameMax, gap) + listCell("TYPE", typeMax, gap) +
-			listCell("SIZE", sizeMax, gap) + "DOWNLOADS"
-		fmt.Fprintln(w, ui.StyleHeader.Render(h))
-	}
 
 	for _, t := range targets {
 		assetType := ""
@@ -1651,22 +1398,10 @@ func writeGitHubReleaseAssetsText(w io.Writer, targets []*listv1.DiscoveredTarge
 			}
 			downloads = t.Metadata["download_count"]
 		}
-
-		typeStyled := assetType
-		switch assetType {
-		case "sbom", "attestation":
-			typeStyled = ui.StyleUpgraded.Render(assetType)
-		case "checksum", "signature":
-			typeStyled = ui.StyleDim.Render(assetType)
-		case "linux-binary", "macos-binary", "windows-binary", "binary":
-			typeStyled = ui.StyleCritical.Render(assetType)
-		}
-
-		row := listCell(t.Name, nameMax, gap) + listCellStyled(assetType, typeStyled, typeMax, gap) +
-			listCell(size, sizeMax, gap) + downloads
-		fmt.Fprintln(w, row)
+		tbl.AddRow(t.Name, assetType, size, downloads)
 	}
 
+	tbl.Render(w, header)
 	writeSummary(w, len(targets), summaryNoun, false, pagination)
 	return nil
 }
@@ -1687,19 +1422,13 @@ func formatSizeCompact(bytes int64) string {
 
 // writeGitHubPackagesText formats GitHub packages with NAME, TYPE, VERSIONS, REPO, CREATED columns.
 func writeGitHubPackagesText(w io.Writer, targets []*listv1.DiscoveredTarget, header bool, summaryNoun string, pagination *paginationInfo) error {
-	const gap = table.ColumnGap
-	const (
-		nameMax     = 35 // Package name
-		typeMax     = 12 // Package type
-		versionsMax = 10 // Version count
-		repoMax     = 35 // Repository name
+	tbl := table.New(
+		table.Column{Header: "PACKAGE", Type: table.TypeID, Priority: 4, MinWidth: 15},
+		table.Column{Header: "TYPE", Type: table.TypeStatus, Priority: 2, MinWidth: 8},
+		table.Column{Header: "VERSIONS", Type: table.TypeNumber, Priority: 1, MinWidth: 6},
+		table.Column{Header: "REPO", Type: table.TypeText, Priority: 3, MinWidth: 10},
+		table.Column{Header: "CREATED", Type: table.TypeDateFull, Priority: 0, MinWidth: 12},
 	)
-
-	if header {
-		h := listCell("PACKAGE", nameMax, gap) + listCell("TYPE", typeMax, gap) +
-			listCell("VERSIONS", versionsMax, gap) + listCell("REPO", repoMax, gap) + "CREATED"
-		fmt.Fprintln(w, ui.StyleHeader.Render(h))
-	}
 
 	for _, t := range targets {
 		pkgType := ""
@@ -1714,48 +1443,20 @@ func writeGitHubPackagesText(w io.Writer, targets []*listv1.DiscoveredTarget, he
 				repo = t.Metadata["repository"]
 			}
 		}
-
-		typeStyled := pkgType
-		switch pkgType {
-		case "container":
-			typeStyled = ui.StyleUpgraded.Render(pkgType)
-		case "npm", "maven", "rubygems", "nuget":
-			typeStyled = ui.StyleDim.Render(pkgType)
-		}
-
-		row := listCell(t.Name, nameMax, gap) + listCellStyled(pkgType, typeStyled, typeMax, gap) +
-			listCell(versions, versionsMax, gap) + listCell(repo, repoMax, gap)
+		created := ""
 		if t.CreatedAt != nil {
-			row += t.CreatedAt.AsTime().Format("2006-01-02")
+			created = t.CreatedAt.AsTime().Format(time.RFC3339)
 		}
-		fmt.Fprintln(w, row)
+		tbl.AddRow(t.Name, pkgType, versions, repo, created)
 	}
 
+	tbl.Render(w, header)
 	writeSummary(w, len(targets), summaryNoun, false, pagination)
 	return nil
 }
 
-// styleSeverity returns a styled severity string with color based on level.
-func styleSeverity(sev string) string {
-	switch strings.ToLower(sev) {
-	case "critical":
-		return ui.StyleRemoved.Render(sev)
-	case "high", "error":
-		return ui.StyleRemoved.Render(sev)
-	case "medium", "warning":
-		return ui.StyleDowngraded.Render(sev)
-	case "low", "note":
-		return ui.StyleDim.Render(sev)
-	default:
-		return sev
-	}
-}
-
 // writeGenericTargetsText formats generic targets with NAME, CREATED columns.
 func writeGenericTargetsText(w io.Writer, targets []*listv1.DiscoveredTarget, header bool, summaryNoun string, pagination *paginationInfo) error {
-	const gap = table.ColumnGap
-	const nameMax = 50 // Generic name
-
 	// Check if any targets have created_at
 	hasCreated := false
 	for _, t := range targets {
@@ -1765,22 +1466,27 @@ func writeGenericTargetsText(w io.Writer, targets []*listv1.DiscoveredTarget, he
 		}
 	}
 
-	if header {
-		h := listCell("NAME", nameMax, gap)
-		if hasCreated {
-			h += "CREATED"
-		}
-		fmt.Fprintln(w, ui.StyleHeader.Render(h))
+	cols := []table.Column{
+		{Header: "NAME", Type: table.TypeID, Priority: 1, MinWidth: 15},
 	}
+	if hasCreated {
+		cols = append(cols, table.Column{Header: "CREATED", Type: table.TypeDateFull, Priority: 0, MinWidth: 12})
+	}
+	tbl := table.New(cols...)
 
 	for _, t := range targets {
-		row := listCell(t.Name, nameMax, gap)
-		if hasCreated && t.CreatedAt != nil {
-			row += t.CreatedAt.AsTime().Format("2006-01-02")
+		row := []string{t.Name}
+		if hasCreated {
+			created := ""
+			if t.CreatedAt != nil {
+				created = t.CreatedAt.AsTime().Format(time.RFC3339)
+			}
+			row = append(row, created)
 		}
-		fmt.Fprintln(w, row)
+		tbl.AddRow(row...)
 	}
 
+	tbl.Render(w, header)
 	writeSummary(w, len(targets), summaryNoun, false, pagination)
 	return nil
 }

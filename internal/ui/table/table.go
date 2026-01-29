@@ -15,9 +15,9 @@ import (
 	"strconv"
 	"strings"
 	"time"
-	"unicode/utf8"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/picatz/deputy/internal/ui"
 	"golang.org/x/term"
 )
@@ -38,9 +38,11 @@ const (
 	TypeText     ValueType = iota // Plain text, truncatable
 	TypeID                        // Identifier (name, key) - high priority
 	TypeNumber                    // Numeric value - right aligned, styled
-	TypeDate                      // Timestamp - human-friendly relative format
+	TypeDate                      // Timestamp - human-friendly relative format only
+	TypeDateFull                  // Timestamp - "2022-09-02 [3 years ago]" format
 	TypeStatus                    // Status value - semantic coloring
 	TypePath                      // File path - truncate from left if needed
+	TypeDigest                    // Content digest (sha256:abc123...) - styled hash
 )
 
 // Alignment specifies text alignment within a column.
@@ -164,14 +166,14 @@ func (t *Table) calculateWidths() []int {
 	// First pass: calculate min and ideal widths
 	for i, col := range t.columns {
 		// Minimum is max of: explicit min, header length, MinColWidth
-		minW := max(col.MinWidth, RuneWidth(col.Header), MinColWidth)
+		minW := max(col.MinWidth, ansi.StringWidth(col.Header), MinColWidth)
 		minWidths[i] = minW
 
 		// Ideal is max content width (capped by MaxWidth if set)
 		idealW := minW
 		for _, row := range t.rows {
 			if i < len(row) {
-				contentW := RuneWidth(row[i].Raw)
+				contentW := t.estimateContentWidth(row[i], col.Type)
 				idealW = max(idealW, contentW)
 			}
 		}
@@ -200,6 +202,27 @@ func (t *Table) calculateWidths() []int {
 	t.shrinkToFit(widths, minWidths, available)
 
 	return widths
+}
+
+// estimateContentWidth returns the display width of a cell after formatting.
+// For date types, this accounts for the formatted output being longer than the raw input.
+func (t *Table) estimateContentWidth(cell Cell, colType ValueType) int {
+	raw := cell.Raw
+	if raw == "" {
+		return 1 // "-"
+	}
+
+	// For date types, compute the actual formatted width
+	switch colType {
+	case TypeDateFull:
+		formatted, _ := t.formatDateFull(raw)
+		return ansi.StringWidth(formatted)
+	case TypeDate:
+		formatted, _ := t.formatDate(raw)
+		return ansi.StringWidth(formatted)
+	default:
+		return ansi.StringWidth(raw)
+	}
 }
 
 // shrinkToFit reduces column widths to fit available space.
@@ -259,7 +282,7 @@ func (t *Table) renderRow(w io.Writer, rowIdx int, widths []int) {
 	row := t.rows[rowIdx]
 	var parts []string
 
-	for i, col := range t.columns {
+	for i := range t.columns {
 		cell := Cell{}
 		if i < len(row) {
 			cell = row[i]
@@ -285,6 +308,10 @@ func (t *Table) formatCell(cell Cell, width int) string {
 		if styled == "" {
 			raw, styled = t.formatDate(raw)
 		}
+	case TypeDateFull:
+		if styled == "" {
+			raw, styled = t.formatDateFull(raw)
+		}
 	case TypeNumber:
 		if styled == "" {
 			raw, styled = formatNumber(raw)
@@ -293,6 +320,10 @@ func (t *Table) formatCell(cell Cell, width int) string {
 		if styled == "" {
 			styled = formatStatus(raw)
 		}
+	case TypeDigest:
+		if styled == "" {
+			raw, styled = formatDigest(raw)
+		}
 	}
 
 	if styled == "" {
@@ -300,18 +331,22 @@ func (t *Table) formatCell(cell Cell, width int) string {
 	}
 
 	// Truncate if needed
-	rawWidth := RuneWidth(raw)
+	rawWidth := ansi.StringWidth(raw)
 	if rawWidth > width {
-		truncated := Truncate(raw, width)
-		// If styled matches raw, truncate it too
-		if styled == raw {
-			styled = truncated
-		} else {
-			// Re-format truncated raw for styled output
+		// For date types, use smart truncation that preserves styling
+		switch valueType {
+		case TypeDateFull:
+			raw, styled = t.truncateDateFull(raw, width)
+		case TypeDate:
+			truncated := Truncate(raw, width)
+			raw = truncated
+			styled = StyleDim.Render(truncated)
+		default:
+			truncated := Truncate(raw, width)
+			raw = truncated
 			styled = truncated
 		}
-		raw = truncated
-		rawWidth = RuneWidth(raw)
+		rawWidth = ansi.StringWidth(raw)
 	}
 
 	// Calculate padding
@@ -327,6 +362,45 @@ func (t *Table) formatCell(cell Cell, width int) string {
 	default:
 		return styled + strings.Repeat(" ", padding)
 	}
+}
+
+// truncateDateFull smartly truncates a full date, preserving the date part when possible.
+// Priority: full date+relative > date only > truncated date
+func (t *Table) truncateDateFull(raw string, width int) (string, string) {
+	// Try to find the date part (YYYY-MM-DD) and relative part ([...])
+	// Raw format: "2024-06-15 [1 year ago]"
+	bracketIdx := strings.Index(raw, " [")
+	if bracketIdx == -1 {
+		// No bracket, just truncate
+		truncated := Truncate(raw, width)
+		return truncated, StyleDim.Render(truncated)
+	}
+
+	datePart := raw[:bracketIdx]           // "2024-06-15"
+	relativePart := raw[bracketIdx+2:]     // "1 year ago]"
+	relativePart = strings.TrimSuffix(relativePart, "]") // "1 year ago"
+
+	dateWidth := ansi.StringWidth(datePart)
+
+	// If date alone fits, show just the date (styled)
+	if dateWidth <= width {
+		// Check if we can fit date + some of the relative time
+		fullWidth := ansi.StringWidth(raw)
+		if fullWidth <= width {
+			// Everything fits
+			styled := StyleDim.Render(datePart) + " " +
+				StyleDateBracket.Render("[") +
+				StyleDateRelative.Render(relativePart) +
+				StyleDateBracket.Render("]")
+			return raw, styled
+		}
+		// Just show the date
+		return datePart, StyleDim.Render(datePart)
+	}
+
+	// Date doesn't fit, truncate it
+	truncated := Truncate(datePart, width)
+	return truncated, StyleDim.Render(truncated)
 }
 
 // formatDate converts a timestamp to human-friendly relative format.
@@ -354,6 +428,45 @@ func (t *Table) formatDate(raw string) (string, string) {
 
 	relative := RelativeTime(ts, t.now)
 	return relative, StyleDim.Render(relative)
+}
+
+// formatDateFull converts a timestamp to "2022-09-02 [3 years ago]" format.
+func (t *Table) formatDateFull(raw string) (string, string) {
+	if raw == "" || raw == "-" {
+		return raw, StyleDim.Render(raw)
+	}
+
+	// Try parsing as RFC3339 or date-only
+	var ts time.Time
+	var err error
+	for _, layout := range []string{
+		time.RFC3339,
+		"2006-01-02T15:04:05Z",
+		"2006-01-02",
+	} {
+		ts, err = time.Parse(layout, raw)
+		if err == nil {
+			break
+		}
+	}
+	if err != nil {
+		return raw, StyleDim.Render(raw)
+	}
+
+	// Format: "2022-09-02 [3 years ago]"
+	datePart := ts.Format("2006-01-02")
+	relative := RelativeTime(ts, t.now)
+
+	// Raw is just date + relative for width calculation
+	rawFull := datePart + " [" + relative + "]"
+
+	// Styled: date is dim, brackets are very dim, relative is slightly less dim
+	styled := StyleDim.Render(datePart) + " " +
+		StyleDateBracket.Render("[") +
+		StyleDateRelative.Render(relative) +
+		StyleDateBracket.Render("]")
+
+	return rawFull, styled
 }
 
 // formatNumber styles a numeric value based on magnitude.
@@ -390,7 +503,9 @@ func formatStatus(raw string) string {
 	switch lower {
 	case "open", "active", "success", "passed", "enabled", "stable":
 		return StyleStatusGood.Render(raw)
-	case "closed", "inactive", "disabled", "archived":
+	case "direct":
+		return StyleStatusDirect.Render(raw)
+	case "closed", "inactive", "disabled", "archived", "indirect":
 		return StyleDim.Render(raw)
 	case "merged":
 		return StyleStatusMerged.Render(raw)
@@ -403,16 +518,44 @@ func formatStatus(raw string) string {
 	}
 }
 
+// formatDigest styles a content digest (e.g., "sha256:abc123...").
+// The algorithm prefix is dimmed, and the hash is shown in a subtle monospace style.
+func formatDigest(raw string) (string, string) {
+	if raw == "" || raw == "-" {
+		return raw, StyleDim.Render(raw)
+	}
+
+	// Look for algorithm:hash pattern
+	if idx := strings.Index(raw, ":"); idx > 0 && idx < len(raw)-1 {
+		algo := raw[:idx]   // e.g., "sha256"
+		hash := raw[idx+1:] // e.g., "abc123..."
+
+		styled := StyleDigestAlgo.Render(algo) +
+			StyleDigestColon.Render(":") +
+			StyleDigestHash.Render(hash)
+		return raw, styled
+	}
+
+	// No colon, treat as plain hash
+	return raw, StyleDigestHash.Render(raw)
+}
+
 // Styles for table formatting
 var (
-	StyleDim        = lipgloss.NewStyle().Foreground(lipgloss.Color("#666666"))
-	StyleNumber     = lipgloss.NewStyle().Foreground(lipgloss.Color("#B0B0B0"))
-	StyleNumberMed  = lipgloss.NewStyle().Foreground(lipgloss.Color("#E0E0E0"))
-	StyleNumberHigh = lipgloss.NewStyle().Foreground(lipgloss.Color("#FFD700")) // Gold for high numbers
-	StyleStatusGood = lipgloss.NewStyle().Foreground(lipgloss.Color("#50C878")) // Emerald
-	StyleStatusBad  = lipgloss.NewStyle().Foreground(lipgloss.Color("#E57373")) // Soft red
-	StyleStatusWarn = lipgloss.NewStyle().Foreground(lipgloss.Color("#FFB74D")) // Amber
+	StyleDim          = lipgloss.NewStyle().Foreground(lipgloss.Color("#666666"))
+	StyleNumber       = lipgloss.NewStyle().Foreground(lipgloss.Color("#B0B0B0"))
+	StyleNumberMed    = lipgloss.NewStyle().Foreground(lipgloss.Color("#E0E0E0"))
+	StyleNumberHigh   = lipgloss.NewStyle().Foreground(lipgloss.Color("#FFD700")) // Gold for high numbers
+	StyleStatusGood   = lipgloss.NewStyle().Foreground(lipgloss.Color("#50C878")) // Emerald
+	StyleStatusBad    = lipgloss.NewStyle().Foreground(lipgloss.Color("#E57373")) // Soft red
+	StyleStatusWarn   = lipgloss.NewStyle().Foreground(lipgloss.Color("#FFB74D")) // Amber
 	StyleStatusMerged = lipgloss.NewStyle().Foreground(lipgloss.Color("#A855F7")) // Purple for merged
+	StyleStatusDirect = lipgloss.NewStyle().Foreground(lipgloss.Color("#00CED1")) // Cyan/teal for direct deps
+	StyleDateBracket  = lipgloss.NewStyle().Foreground(lipgloss.Color("#4A4A4A")) // Very dim brackets
+	StyleDateRelative = lipgloss.NewStyle().Foreground(lipgloss.Color("#808080")) // Slightly brighter relative
+	StyleDigestAlgo   = lipgloss.NewStyle().Foreground(lipgloss.Color("#6A6A6A")) // Dim algorithm prefix
+	StyleDigestColon  = lipgloss.NewStyle().Foreground(lipgloss.Color("#4A4A4A")) // Very dim colon
+	StyleDigestHash   = lipgloss.NewStyle().Foreground(lipgloss.Color("#8A8A8A")) // Subtle hash
 )
 
 // RelativeTime formats a timestamp as human-friendly relative time.
@@ -501,13 +644,14 @@ func TerminalWidth() int {
 	return DefaultWidth
 }
 
-// Truncate shortens s to maxWidth runes, adding ellipsis if truncated.
+// Truncate shortens s to maxWidth, adding ellipsis if truncated.
+// Properly handles ANSI escape codes and wide characters.
 func Truncate(s string, maxWidth int) string {
 	if maxWidth <= 0 {
 		return ""
 	}
 
-	width := RuneWidth(s)
+	width := ansi.StringWidth(s)
 	if width <= maxWidth {
 		return s
 	}
@@ -516,21 +660,13 @@ func Truncate(s string, maxWidth int) string {
 		return Ellipsis
 	}
 
-	// Count runes up to maxWidth-1 (leave room for ellipsis)
-	count := 0
-	for i := range s {
-		if count >= maxWidth-1 {
-			return s[:i] + Ellipsis
-		}
-		count++
-	}
-
-	return s + Ellipsis
+	// Use ansi.Truncate which properly preserves ANSI sequences
+	return ansi.Truncate(s, maxWidth-1, Ellipsis)
 }
 
 // Pad pads s to width with spaces according to alignment.
 func Pad(s string, width int, align Alignment) string {
-	displayW := RuneWidth(s)
+	displayW := ansi.StringWidth(s)
 	if displayW >= width {
 		return s
 	}
@@ -548,33 +684,6 @@ func Pad(s string, width int, align Alignment) string {
 	}
 }
 
-// RuneWidth returns the display width of s in runes.
-func RuneWidth(s string) int {
-	return utf8.RuneCountInString(s)
-}
-
-// StripANSI removes ANSI escape codes from a string.
-func StripANSI(s string) string {
-	var buf strings.Builder
-	buf.Grow(len(s))
-
-	i := 0
-	for i < len(s) {
-		if s[i] == '\x1b' && i+1 < len(s) && s[i+1] == '[' {
-			j := i + 2
-			for j < len(s) && s[j] != 'm' {
-				j++
-			}
-			if j < len(s) {
-				i = j + 1
-				continue
-			}
-		}
-		buf.WriteByte(s[i])
-		i++
-	}
-	return buf.String()
-}
 
 // Helper functions
 func sum(vals []int) int {
