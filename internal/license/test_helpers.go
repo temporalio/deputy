@@ -27,6 +27,13 @@ func WithLicenseEndpoints(goProxy, crates, packagist, pub, cocoapods, hexpm stri
 	}
 }
 
+// WithTerraformRegistryEndpoint overrides the Terraform registry base URL for tests.
+func WithTerraformRegistryEndpoint(base string) func() {
+	orig := terraformRegistryBase
+	terraformRegistryBase = base
+	return func() { terraformRegistryBase = orig }
+}
+
 // ResetLicenseCachesForTest clears memoization and on-disk caches for deterministic tests.
 func ResetLicenseCachesForTest(t *testing.T) {
 	t.Helper()

@@ -1,0 +1,54 @@
+[
+  {
+    "name": "deny provider constraint below minimum",
+    "policy": "./terraform-provider-min-versions.yaml",
+    "input_json": {
+      "env": {"entrypoint": "diff_dependency_change", "command": "diff"},
+      "change": {"target_version": ">= 3.75.0", "base_version": ""},
+      "pkg": {
+        "name": "hashicorp/aws",
+        "version": ">= 3.75.0",
+        "ecosystem": "terraform-provider",
+        "metadata": {
+          "kind": "terraform_provider",
+          "constraint": ">= 3.75.0",
+          "source": "hashicorp/aws",
+          "min_version": "3.75.0",
+          "min_major": 3,
+          "min_minor": 75,
+          "min_patch": 0
+        }
+      }
+    },
+    "want": [
+      {
+        "action": "deny",
+        "reason": "Terraform provider constraint is below the approved minimum",
+        "remediation": "Update the provider version constraint to meet the approved minimum"
+      }
+    ]
+  },
+  {
+    "name": "allow provider constraint at or above minimum",
+    "policy": "./terraform-provider-min-versions.yaml",
+    "input_json": {
+      "env": {"entrypoint": "diff_dependency_change", "command": "diff"},
+      "change": {"target_version": ">= 5.2.0", "base_version": ">= 5.0.0"},
+      "pkg": {
+        "name": "hashicorp/aws",
+        "version": ">= 5.2.0",
+        "ecosystem": "terraform-provider",
+        "metadata": {
+          "kind": "terraform_provider",
+          "constraint": ">= 5.2.0",
+          "source": "hashicorp/aws",
+          "min_version": "5.2.0",
+          "min_major": 5,
+          "min_minor": 2,
+          "min_patch": 0
+        }
+      }
+    },
+    "want": []
+  }
+]

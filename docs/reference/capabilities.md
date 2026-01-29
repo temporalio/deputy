@@ -20,6 +20,7 @@ This page documents what Deputy can do across ecosystems, commands, and features
 
 **Additional extractors (via OSV-SCALIBR):**
 - GitHub Actions (.github/workflows/*.yml)
+- Terraform requirements (*.tf, *.tf.json)
 - Haskell (cabal.project.freeze, stack.yaml.lock)
 - R (renv.lock)
 - C++ (conan.lock)

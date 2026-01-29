@@ -175,6 +175,75 @@ func TestLookupLicensesBestEffort_Packagist(t *testing.T) {
 	})
 }
 
+func TestLookupLicensesBestEffort_TerraformProviderRegistry(t *testing.T) {
+	t.Run("registry licenses", func(t *testing.T) {
+		resetLicenseTestState(t)
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Path != "/v1/providers/hashicorp/aws" {
+				http.NotFound(w, r)
+				return
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"source":   "https://github.com/hashicorp/terraform-provider-aws",
+				"licenses": []string{"MPL-2.0"},
+			})
+		}))
+		defer server.Close()
+
+		restoreClient := swapHTTPGlobals(server)
+		defer restoreClient()
+		restoreBase := WithTerraformRegistryEndpoint(server.URL)
+		defer restoreBase()
+
+		got := LookupLicensesBestEffort(context.Background(), "terraform-provider", "hashicorp/aws", ">= 5.0.0")
+		if want := []string{"MPL-2.0"}; !slices.Equal(got, want) {
+			t.Fatalf("expected registry licenses %v, got %v", want, got)
+		}
+	})
+
+	t.Run("fallback to source repo", func(t *testing.T) {
+		resetLicenseTestState(t)
+		registry := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Path != "/v1/providers/hashicorp/aws" {
+				http.NotFound(w, r)
+				return
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"source": "https://github.com/hashicorp/terraform-provider-aws",
+			})
+		}))
+		defer registry.Close()
+
+		restoreClient := swapHTTPGlobals(registry)
+		defer restoreClient()
+		restoreBase := WithTerraformRegistryEndpoint(registry.URL)
+		defer restoreBase()
+
+		github := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if !strings.Contains(r.URL.Path, "/repos/hashicorp/terraform-provider-aws/license") {
+				http.NotFound(w, r)
+				return
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"license": map[string]any{
+					"key":     "mit",
+					"spdx_id": "MIT",
+					"name":    "MIT License",
+				},
+			})
+		}))
+		defer github.Close()
+
+		restoreGitHub := swapGitHubHTTPClient(github)
+		defer restoreGitHub()
+
+		got := LookupLicensesBestEffort(context.Background(), "terraform-provider", "hashicorp/aws", "")
+		if want := []string{"MIT"}; !slices.Equal(got, want) {
+			t.Fatalf("expected fallback license %v, got %v", want, got)
+		}
+	})
+}
+
 func TestLookupLicensesBestEffort_Pub(t *testing.T) {
 	resetLicenseTestState(t)
 	mitText := `MIT License
@@ -453,7 +522,7 @@ func TestLooksLikeSPDX(t *testing.T) {
 		{"MIT AND Apache-2.0", true},
 		{"MIT OR Apache-2.0", true},
 		{"", false},
-		{"The MIT License", true},        // contains "MIT" - permissive heuristic
+		{"The MIT License", true},            // contains "MIT" - permissive heuristic
 		{"Apache License Version 2.0", true}, // contains "Apache"
 		{"See LICENSE file", false},
 		{"UNKNOWN", false},

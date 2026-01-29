@@ -1,0 +1,43 @@
+# Terraform Provider Minimum Versions (Diff)
+#
+# Require minimum versions for selected providers. Uses parsed constraint metadata
+# emitted by the Terraform requirements extractor.
+#
+# Example:
+#   deputy diff --policy policy/examples/terraform-provider-min-versions.yaml
+
+policies:
+  - name: terraform-provider-min-versions
+    description: Require minimum versions for critical Terraform providers
+    entrypoints: ["diff_dependency_change"]
+    vars:
+      providerPins:
+        - source: "hashicorp/aws"
+          minMajor: 5
+          minMinor: 0
+          minPatch: 0
+        - source: "hashicorp/google"
+          minMajor: 4
+          minMinor: 70
+          minPatch: 0
+      hasMeta: 'pkg.metadata != null'
+      isProvider: 'pkg.ecosystem.lowerAscii() == "terraform-provider" && hasMeta && pkg.metadata.kind == "terraform_provider"'
+      hasMin: 'hasMeta && "min_major" in pkg.metadata && "min_minor" in pkg.metadata && "min_patch" in pkg.metadata'
+      belowPinned: |
+        providerPins.exists(p,
+          p.source == pkg.name && (
+            !hasMin ||
+            pkg.metadata.min_major < p.minMajor ||
+            (pkg.metadata.min_major == p.minMajor && pkg.metadata.min_minor < p.minMinor) ||
+            (pkg.metadata.min_major == p.minMajor && pkg.metadata.min_minor == p.minMinor && pkg.metadata.min_patch < p.minPatch)
+          )
+        )
+    rules:
+      - action: deny
+        when: |
+          env.entrypoint == "diff_dependency_change" &&
+          isProvider &&
+          change.target_version != "" &&
+          belowPinned
+        reason: "Terraform provider constraint is below the approved minimum"
+        remediation: "Update the provider version constraint to meet the approved minimum"

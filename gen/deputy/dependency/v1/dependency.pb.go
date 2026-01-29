@@ -11,6 +11,7 @@ import (
 	v1 "github.com/picatz/deputy/gen/deputy/container/v1"
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
+	structpb "google.golang.org/protobuf/types/known/structpb"
 	reflect "reflect"
 	sync "sync"
 	unsafe "unsafe"
@@ -44,7 +45,9 @@ type Package struct {
 	// ManifestRefs describes where the dependency is declared.
 	ManifestRefs []*ManifestRef `protobuf:"bytes,8,rep,name=manifest_refs,json=manifestRefs,proto3" json:"manifest_refs,omitempty"`
 	// LayerDetails contains container image layer information when applicable.
-	LayerDetails  *v1.LayerDetails `protobuf:"bytes,9,opt,name=layer_details,json=layerDetails,proto3" json:"layer_details,omitempty"`
+	LayerDetails *v1.LayerDetails `protobuf:"bytes,9,opt,name=layer_details,json=layerDetails,proto3" json:"layer_details,omitempty"`
+	// Metadata contains structured, ecosystem-specific data when available.
+	Metadata      *structpb.Struct `protobuf:"bytes,10,opt,name=metadata,proto3" json:"metadata,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -142,6 +145,13 @@ func (x *Package) GetLayerDetails() *v1.LayerDetails {
 	return nil
 }
 
+func (x *Package) GetMetadata() *structpb.Struct {
+	if x != nil {
+		return x.Metadata
+	}
+	return nil
+}
+
 // ManifestRef describes where a dependency is declared in a manifest or lockfile.
 type ManifestRef struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
@@ -210,7 +220,7 @@ var File_deputy_dependency_v1_dependency_proto protoreflect.FileDescriptor
 
 const file_deputy_dependency_v1_dependency_proto_rawDesc = "" +
 	"\n" +
-	"%deputy/dependency/v1/dependency.proto\x12\x14deputy.dependency.v1\x1a\x1bbuf/validate/validate.proto\x1a#deputy/container/v1/container.proto\"\xdd\x02\n" +
+	"%deputy/dependency/v1/dependency.proto\x12\x14deputy.dependency.v1\x1a\x1bbuf/validate/validate.proto\x1a#deputy/container/v1/container.proto\x1a\x1cgoogle/protobuf/struct.proto\"\x92\x03\n" +
 	"\aPackage\x12\x1b\n" +
 	"\x04name\x18\x01 \x01(\tB\a\xbaH\x04r\x02\x10\x01R\x04name\x12\x18\n" +
 	"\aversion\x18\x02 \x01(\tR\aversion\x12%\n" +
@@ -220,7 +230,9 @@ const file_deputy_dependency_v1_dependency_proto_rawDesc = "" +
 	"\x06direct\x18\x06 \x01(\bR\x06direct\x12\x1c\n" +
 	"\tlocations\x18\a \x03(\tR\tlocations\x12F\n" +
 	"\rmanifest_refs\x18\b \x03(\v2!.deputy.dependency.v1.ManifestRefR\fmanifestRefs\x12F\n" +
-	"\rlayer_details\x18\t \x01(\v2!.deputy.container.v1.LayerDetailsR\flayerDetails\"S\n" +
+	"\rlayer_details\x18\t \x01(\v2!.deputy.container.v1.LayerDetailsR\flayerDetails\x123\n" +
+	"\bmetadata\x18\n" +
+	" \x01(\v2\x17.google.protobuf.StructR\bmetadata\"S\n" +
 	"\vManifestRef\x12\x12\n" +
 	"\x04path\x18\x01 \x01(\tR\x04path\x12\x18\n" +
 	"\amanager\x18\x02 \x01(\tR\amanager\x12\x16\n" +
@@ -244,15 +256,17 @@ var file_deputy_dependency_v1_dependency_proto_goTypes = []any{
 	(*Package)(nil),         // 0: deputy.dependency.v1.Package
 	(*ManifestRef)(nil),     // 1: deputy.dependency.v1.ManifestRef
 	(*v1.LayerDetails)(nil), // 2: deputy.container.v1.LayerDetails
+	(*structpb.Struct)(nil), // 3: google.protobuf.Struct
 }
 var file_deputy_dependency_v1_dependency_proto_depIdxs = []int32{
 	1, // 0: deputy.dependency.v1.Package.manifest_refs:type_name -> deputy.dependency.v1.ManifestRef
 	2, // 1: deputy.dependency.v1.Package.layer_details:type_name -> deputy.container.v1.LayerDetails
-	2, // [2:2] is the sub-list for method output_type
-	2, // [2:2] is the sub-list for method input_type
-	2, // [2:2] is the sub-list for extension type_name
-	2, // [2:2] is the sub-list for extension extendee
-	0, // [0:2] is the sub-list for field type_name
+	3, // 2: deputy.dependency.v1.Package.metadata:type_name -> google.protobuf.Struct
+	3, // [3:3] is the sub-list for method output_type
+	3, // [3:3] is the sub-list for method input_type
+	3, // [3:3] is the sub-list for extension type_name
+	3, // [3:3] is the sub-list for extension extendee
+	0, // [0:3] is the sub-list for field type_name
 }
 
 func init() { file_deputy_dependency_v1_dependency_proto_init() }

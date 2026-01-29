@@ -4,6 +4,7 @@ package deputy.dependency.v1;
 
 import "buf/validate/validate.proto";
 import "deputy/container/v1/container.proto";
+import "google/protobuf/struct.proto";
 
 option go_package = "github.com/picatz/deputy/gen/deputy/dependency/v1;dependencyv1";
 
@@ -28,6 +29,8 @@ message Package {
   repeated ManifestRef manifest_refs = 8;
   // LayerDetails contains container image layer information when applicable.
   deputy.container.v1.LayerDetails layer_details = 9;
+  // Metadata contains structured, ecosystem-specific data when available.
+  google.protobuf.Struct metadata = 10;
 }
 
 // ManifestRef describes where a dependency is declared in a manifest or lockfile.

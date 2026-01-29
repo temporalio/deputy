@@ -22,6 +22,10 @@ const (
 	// TypeGitHubActions is the emerging PURL type for GitHub Actions dependencies.
 	// This matches the package-url spec proposal and existing ecosystem usage.
 	TypeGitHubActions = "githubactions"
+	// TypeTerraform is the PURL type for Terraform requirements.
+	TypeTerraform = "terraform"
+	// TypeTerraformProvider is the PURL type for Terraform provider requirements.
+	TypeTerraformProvider = "terraform-provider"
 )
 
 // ParseLoose parses a PURL string without validating the type against a
@@ -55,6 +59,16 @@ func EquivalentIgnoringVersion(a, b string) bool {
 func IsGitHubActionsType(t string) bool {
 	switch strings.ToLower(strings.TrimSpace(t)) {
 	case TypeGitHubActions, scalpurl.TypeGithub:
+		return true
+	default:
+		return false
+	}
+}
+
+// IsTerraformType reports whether t is a Terraform-related PURL type.
+func IsTerraformType(t string) bool {
+	switch strings.ToLower(strings.TrimSpace(t)) {
+	case TypeTerraform, TypeTerraformProvider:
 		return true
 	default:
 		return false

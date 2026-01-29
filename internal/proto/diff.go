@@ -1,6 +1,7 @@
 package proto
 
 import (
+	"google.golang.org/protobuf/types/known/structpb"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	dependencyv1 "github.com/picatz/deputy/gen/deputy/dependency/v1"
@@ -49,11 +50,21 @@ func ChangeKindFromProto(ck diffv1.ChangeKind) compare.ChangeType {
 
 // PackageChangeToProto converts an internal compare.Change to proto diffv1.PackageChange.
 func PackageChangeToProto(c compare.Change) *diffv1.PackageChange {
+	var metadata *structpb.Struct
+	if len(c.Metadata) > 0 {
+		normalized := normalizeStructMap(c.Metadata)
+		if len(normalized) > 0 {
+			if st, err := structpb.NewStruct(normalized); err == nil {
+				metadata = st
+			}
+		}
+	}
 	return &diffv1.PackageChange{
 		Package: &dependencyv1.Package{
 			Name:      c.Name,
 			Version:   c.TargetVersion,
 			Ecosystem: c.Ecosystem,
+			Metadata:  metadata,
 		},
 		ChangeKind:    ChangeKindToProto(c.ChangeType),
 		BaseVersion:   c.BaseVersion,
@@ -78,6 +89,9 @@ func PackageChangeFromProto(pc *diffv1.PackageChange) compare.Change {
 	if pc.Package != nil {
 		c.Name = pc.Package.Name
 		c.Ecosystem = pc.Package.Ecosystem
+		if pc.Package.Metadata != nil {
+			c.Metadata = pc.Package.Metadata.AsMap()
+		}
 	}
 	return c
 }

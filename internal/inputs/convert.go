@@ -54,6 +54,9 @@ func Convert(pkgs []*extractor.Package, opts Options) []osv.PkgInput {
 		if ecos == "" && pkg.PURLType != "" {
 			ecos = pkg.PURLType
 		}
+		if purlx.IsTerraformType(pkg.PURLType) || strings.HasPrefix(strings.ToLower(ecos), "terraform") {
+			continue
+		}
 		if strings.EqualFold(ecos, "github") || strings.EqualFold(ecos, purlx.TypeGitHubActions) {
 			ecos = "GitHub Actions"
 		}

@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	nethttp "net/http"
+	neturl "net/url"
 	"os"
 	"path/filepath"
 	"slices"
@@ -46,14 +47,15 @@ var defaultLicenseFilenames = []string{
 // Package registry base URLs for license lookups.
 // These are variables (not constants) to allow test overrides via WithLicenseEndpoints.
 var (
-	goProxyBase   = "https://proxy.golang.org"   // Go module proxy
-	cratesBase    = "https://crates.io"          // Rust crates registry
-	packagistBase = "https://repo.packagist.org" // PHP Composer registry
-	pubBase       = "https://pub.dev"            // Dart/Flutter packages
-	cocoapodsBase = "https://cocoapods.org"      // iOS/macOS CocoaPods
-	hexpmBase     = "https://hex.pm"             // Erlang/Elixir Hex.pm
-	pypiBase      = "https://pypi.org"           // Python Package Index
-	githubAPIBase = "https://api.github.com"     // GitHub REST API
+	goProxyBase           = "https://proxy.golang.org"   // Go module proxy
+	cratesBase            = "https://crates.io"          // Rust crates registry
+	packagistBase         = "https://repo.packagist.org" // PHP Composer registry
+	pubBase               = "https://pub.dev"            // Dart/Flutter packages
+	cocoapodsBase         = "https://cocoapods.org"      // iOS/macOS CocoaPods
+	hexpmBase             = "https://hex.pm"             // Erlang/Elixir Hex.pm
+	pypiBase              = "https://pypi.org"           // Python Package Index
+	githubAPIBase         = "https://api.github.com"     // GitHub REST API
+	terraformRegistryBase = "https://registry.terraform.io"
 )
 
 const (
@@ -496,10 +498,12 @@ func LookupLicensesBestEffort(ctx context.Context, ecosystem, name, version stri
 
 	// Version is required for most registry lookups, but GitHub-based ecosystems
 	// can use the GitHub License API without a version (returns default branch license).
+	// Terraform registry lookups also work without a version.
 	isGitHubBased := eco == "github" || eco == "github actions" || eco == "github-actions" ||
 		eco == "githubactions" || eco == "gha" ||
 		(eco == "go" || eco == "golang") && strings.HasPrefix(name, "github.com/")
-	if version == "" && !isGitHubBased {
+	isTerraformProvider := eco == "terraform-provider" || eco == "terraformprovider"
+	if version == "" && !isGitHubBased && !isTerraformProvider {
 		return nil
 	}
 
@@ -572,9 +576,107 @@ func resolveEcosystemLicenses(ctx context.Context, ecosystem, name, version stri
 		return LookupCocoaPodsLicense(ctx, name, version)
 	case "hex":
 		return LookupHexLicense(ctx, name, version)
+	case "terraform-provider", "terraformprovider":
+		return LookupTerraformProviderLicense(ctx, name, version)
 	default:
 		return RemoteModuleLicenseScan(ctx, name, version)
 	}
+}
+
+type terraformProviderInfo struct {
+	Source   string   `json:"source"`
+	Licenses []string `json:"licenses"`
+	License  string   `json:"license"`
+}
+
+func LookupTerraformProviderLicense(ctx context.Context, name, version string) []string {
+	_ = strings.TrimSpace(version) // version is optional for Terraform registry lookups
+	namespace, provider := parseTerraformProviderName(name)
+	if namespace == "" || provider == "" {
+		return nil
+	}
+	info, err := fetchTerraformProviderInfo(ctx, namespace, provider)
+	if err != nil {
+		return nil
+	}
+	if lics := cleanLicenseList(info.Licenses); len(lics) > 0 {
+		return lics
+	}
+	if lic := strings.TrimSpace(info.License); lic != "" {
+		if lics := cleanLicenseList(splitLicenseString(lic)); len(lics) > 0 {
+			return lics
+		}
+	}
+	source := strings.TrimSpace(info.Source)
+	if source == "" {
+		return nil
+	}
+	modulePath := terraformProviderSourceToModule(source)
+	if modulePath == "" {
+		modulePath = source
+	}
+	if strings.HasPrefix(modulePath, "github.com/") {
+		return RemoteModuleLicenseScan(ctx, modulePath, "")
+	}
+	return RemoteModuleLicenseScan(ctx, modulePath, "")
+}
+
+func fetchTerraformProviderInfo(ctx context.Context, namespace, provider string) (*terraformProviderInfo, error) {
+	if ctx.Err() != nil {
+		return nil, ctx.Err()
+	}
+	if namespace == "" || provider == "" {
+		return nil, fmt.Errorf("invalid terraform provider")
+	}
+	url := fmt.Sprintf("%s/v1/providers/%s/%s", strings.TrimRight(terraformRegistryBase, "/"), namespace, provider)
+	var payload terraformProviderInfo
+	if err := fetchJSON(ctx, url, nil, &payload); err != nil {
+		return nil, err
+	}
+	return &payload, nil
+}
+
+func parseTerraformProviderName(name string) (string, string) {
+	n := strings.TrimSpace(name)
+	if n == "" {
+		return "", ""
+	}
+	n = strings.TrimPrefix(n, "registry.terraform.io/")
+	n = strings.TrimPrefix(n, "https://registry.terraform.io/")
+	n = strings.TrimPrefix(n, "http://registry.terraform.io/")
+	n = strings.TrimPrefix(n, "/")
+	parts := strings.Split(n, "/")
+	if len(parts) < 2 {
+		return "", ""
+	}
+	return strings.TrimSpace(parts[0]), strings.TrimSpace(parts[1])
+}
+
+func terraformProviderSourceToModule(source string) string {
+	s := strings.TrimSpace(source)
+	if s == "" {
+		return ""
+	}
+	s = strings.TrimPrefix(s, "git::")
+	if strings.HasPrefix(s, "https://") || strings.HasPrefix(s, "http://") {
+		if parsed, err := neturl.Parse(s); err == nil {
+			if host := strings.TrimSpace(parsed.Host); host != "" {
+				path := strings.TrimPrefix(parsed.Path, "/")
+				path = strings.TrimSuffix(path, ".git")
+				if host == "github.com" && path != "" {
+					return "github.com/" + path
+				}
+				if path != "" {
+					return host + "/" + path
+				}
+			}
+		}
+	}
+	if strings.HasPrefix(s, "github.com/") {
+		s = strings.TrimSuffix(s, ".git")
+		return s
+	}
+	return strings.TrimSuffix(s, ".git")
 }
 
 // GoProxyLicenseScan downloads the module zip from proxy.golang.org and scans
@@ -695,20 +797,20 @@ func looksLikeSPDX(s string) bool {
 func classifierToSPDX(classifier string) string {
 	// Map common classifiers to SPDX
 	mapping := map[string]string{
-		"License :: OSI Approved :: MIT License":                                    "MIT",
-		"License :: OSI Approved :: Apache Software License":                        "Apache-2.0",
-		"License :: OSI Approved :: BSD License":                                    "BSD-3-Clause",
-		"License :: OSI Approved :: GNU General Public License v2 (GPLv2)":          "GPL-2.0-only",
-		"License :: OSI Approved :: GNU General Public License v3 (GPLv3)":          "GPL-3.0-only",
-		"License :: OSI Approved :: GNU Lesser General Public License v2 (LGPLv2)":  "LGPL-2.0-only",
-		"License :: OSI Approved :: GNU Lesser General Public License v3 (LGPLv3)":  "LGPL-3.0-only",
-		"License :: OSI Approved :: ISC License (ISCL)":                             "ISC",
-		"License :: OSI Approved :: Mozilla Public License 2.0 (MPL 2.0)":           "MPL-2.0",
-		"License :: OSI Approved :: Python Software Foundation License":             "PSF-2.0",
-		"License :: OSI Approved :: The Unlicense (Unlicense)":                      "Unlicense",
-		"License :: OSI Approved :: zlib/libpng License":                            "Zlib",
-		"License :: Public Domain":                                                  "CC0-1.0",
-		"License :: CC0 1.0 Universal (CC0 1.0) Public Domain Dedication":           "CC0-1.0",
+		"License :: OSI Approved :: MIT License":                                   "MIT",
+		"License :: OSI Approved :: Apache Software License":                       "Apache-2.0",
+		"License :: OSI Approved :: BSD License":                                   "BSD-3-Clause",
+		"License :: OSI Approved :: GNU General Public License v2 (GPLv2)":         "GPL-2.0-only",
+		"License :: OSI Approved :: GNU General Public License v3 (GPLv3)":         "GPL-3.0-only",
+		"License :: OSI Approved :: GNU Lesser General Public License v2 (LGPLv2)": "LGPL-2.0-only",
+		"License :: OSI Approved :: GNU Lesser General Public License v3 (LGPLv3)": "LGPL-3.0-only",
+		"License :: OSI Approved :: ISC License (ISCL)":                            "ISC",
+		"License :: OSI Approved :: Mozilla Public License 2.0 (MPL 2.0)":          "MPL-2.0",
+		"License :: OSI Approved :: Python Software Foundation License":            "PSF-2.0",
+		"License :: OSI Approved :: The Unlicense (Unlicense)":                     "Unlicense",
+		"License :: OSI Approved :: zlib/libpng License":                           "Zlib",
+		"License :: Public Domain":                                                 "CC0-1.0",
+		"License :: CC0 1.0 Universal (CC0 1.0) Public Domain Dedication":          "CC0-1.0",
 	}
 	if spdx, ok := mapping[classifier]; ok {
 		return spdx

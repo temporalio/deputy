@@ -1,0 +1,36 @@
+# Terraform Required Version Guard (Diff)
+#
+# Enforce a minimum Terraform core version in required_version constraints.
+# Targets diff entrypoint and checks parsed constraint metadata:
+#   pkg.metadata.kind == "terraform_core"
+#   pkg.metadata.min_* derived from the constraint expression.
+#
+# Example:
+#   deputy diff --policy policy/examples/terraform-min-required-version.yaml
+
+policies:
+  - name: terraform-min-required-version
+    description: Deny Terraform core constraints below the approved minimum
+    entrypoints: ["diff_dependency_change"]
+    vars:
+      minMajor: 1
+      minMinor: 5
+      minPatch: 0
+      hasMeta: 'pkg.metadata != null'
+      isTerraformCore: 'pkg.ecosystem.lowerAscii() == "terraform" && hasMeta && pkg.metadata.kind == "terraform_core"'
+      hasMin: 'hasMeta && "min_major" in pkg.metadata && "min_minor" in pkg.metadata && "min_patch" in pkg.metadata'
+      belowMin: |
+        hasMin && (
+          pkg.metadata.min_major < minMajor ||
+          (pkg.metadata.min_major == minMajor && pkg.metadata.min_minor < minMinor) ||
+          (pkg.metadata.min_major == minMajor && pkg.metadata.min_minor == minMinor && pkg.metadata.min_patch < minPatch)
+        )
+    rules:
+      - action: deny
+        when: |
+          env.entrypoint == "diff_dependency_change" &&
+          isTerraformCore &&
+          change.target_version != "" &&
+          (!hasMin || belowMin)
+        reason: "Terraform required_version must require >= 1.5.0"
+        remediation: "Update terraform.required_version to \">= 1.5.0\" (or higher) in each module"

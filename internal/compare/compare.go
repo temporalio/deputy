@@ -10,6 +10,7 @@ import (
 	"golang.org/x/mod/semver"
 
 	"github.com/picatz/deputy/internal/ecosystem"
+	"github.com/picatz/deputy/internal/purlx"
 	"github.com/picatz/deputy/internal/repository/workspace"
 )
 
@@ -62,13 +63,14 @@ func (c ChangeType) String() string {
 // support. IsDirect is true when the module root appears explicitly (without
 // "// indirect" annotation) in go.mod of the target workspace.
 type Change struct {
-	Name          string     `json:"name"`          // canonical or full import path in target inventory
-	OldName       string     `json:"oldName"`       // previous path (may differ after canonicalization)
-	TargetVersion string     `json:"targetVersion"` // version in target inventory (for Added/Updated)
-	BaseVersion   string     `json:"baseVersion"`   // version in base inventory (for Removed/Updated)
-	ChangeType    ChangeType `json:"changeType"`    // classification of the change
-	Ecosystem     string     `json:"ecosystem"`     // e.g. "go", "npm"
-	IsDirect      bool       `json:"isDirect"`      // true if a direct dependency when known (currently Go)
+	Name          string         `json:"name"`               // canonical or full import path in target inventory
+	OldName       string         `json:"oldName"`            // previous path (may differ after canonicalization)
+	TargetVersion string         `json:"targetVersion"`      // version in target inventory (for Added/Updated)
+	BaseVersion   string         `json:"baseVersion"`        // version in base inventory (for Removed/Updated)
+	ChangeType    ChangeType     `json:"changeType"`         // classification of the change
+	Ecosystem     string         `json:"ecosystem"`          // e.g. "go", "npm"
+	IsDirect      bool           `json:"isDirect"`           // true if a direct dependency when known (currently Go)
+	Metadata      map[string]any `json:"metadata,omitempty"` // optional structured metadata
 }
 
 // GoPackageInfo represents a parsed interpretation of an import path possibly
@@ -729,6 +731,7 @@ func ComparePackagesWithOptions(oldPkgs, newPkgs []*extractor.Package, opts Comp
 				ChangeType:  Removed,
 				Ecosystem:   oldMeta.ecosystemName(),
 				IsDirect:    isDirectForSummary(oldMeta, goDirect, pkgDirect),
+				Metadata:    metadataForPackage(oldMeta.pkg),
 			})
 			continue
 		}
@@ -742,6 +745,7 @@ func ComparePackagesWithOptions(oldPkgs, newPkgs []*extractor.Package, opts Comp
 				ChangeType:    ct,
 				Ecosystem:     newMeta.ecosystemName(),
 				IsDirect:      isDirectForSummary(newMeta, goDirect, pkgDirect),
+				Metadata:      metadataForPackage(newMeta.pkg),
 			})
 		}
 	}
@@ -755,6 +759,7 @@ func ComparePackagesWithOptions(oldPkgs, newPkgs []*extractor.Package, opts Comp
 			ChangeType:    Added,
 			Ecosystem:     newMeta.ecosystemName(),
 			IsDirect:      isDirectForSummary(newMeta, goDirect, pkgDirect),
+			Metadata:      metadataForPackage(newMeta.pkg),
 		})
 	}
 
@@ -817,4 +822,18 @@ func isDirectForSummary(meta pkgSummary, goDirect, pkgDirect map[string]bool) bo
 		return false
 	}
 	return goDirect[meta.module]
+}
+
+func metadataForPackage(pkg *extractor.Package) map[string]any {
+	if pkg == nil || pkg.Metadata == nil {
+		return nil
+	}
+	if !purlx.IsTerraformType(pkg.PURLType) {
+		return nil
+	}
+	meta, ok := pkg.Metadata.(map[string]any)
+	if !ok || len(meta) == 0 {
+		return nil
+	}
+	return meta
 }

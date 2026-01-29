@@ -103,6 +103,9 @@ The `pkg` object provides a unified view of package information across all comma
 | `pkg.version` | `string` | Package version |
 | `pkg.ecosystem` | `string` | Package ecosystem (npm, go, pypi, etc.) |
 | `pkg.licenses` | `list(string)` | SPDX license identifiers |
+| `pkg.metadata` | `map` | Ecosystem-specific structured metadata (when available) |
+
+`pkg.metadata` is only populated for certain ecosystems that emit structured data (for example, Terraform version constraints). Treat it as optional and guard with `has(pkg.metadata)` when used.
 
 ### License data sources
 

@@ -4,11 +4,13 @@ import (
 	"bytes"
 	"context"
 	"crypto/x509"
+	"encoding/json"
 	"fmt"
 	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -500,6 +502,20 @@ func buildProtobomDocument(ctx context.Context, ws workspace.FS, repoRef, ref, n
 					Name: "deputy:layer-in-base-image",
 					Data: "true",
 				})
+			}
+		}
+
+		// Persist structured metadata for ecosystems that expose a stable schema.
+		if purlx.IsTerraformType(p.PURLType) {
+			switch meta := p.Metadata.(type) {
+			case map[string]any:
+				addMetadataProperties(n, meta)
+			case map[string]string:
+				converted := make(map[string]any, len(meta))
+				for k, v := range meta {
+					converted[k] = v
+				}
+				addMetadataProperties(n, converted)
 			}
 		}
 
@@ -1067,6 +1083,63 @@ func sanitizeForSPDXID(s string) string {
 		}
 	}
 	return b.String()
+}
+
+func addMetadataProperties(n *sbom.Node, metadata map[string]any) {
+	if n == nil || len(metadata) == 0 {
+		return
+	}
+	keys := make([]string, 0, len(metadata))
+	for k := range metadata {
+		if strings.TrimSpace(k) == "" {
+			continue
+		}
+		keys = append(keys, k)
+	}
+	if len(keys) == 0 {
+		return
+	}
+	sort.Strings(keys)
+	for _, key := range keys {
+		addMetadataProperty(n, "deputy:metadata."+key, metadata[key])
+	}
+}
+
+func addMetadataProperty(n *sbom.Node, name string, value any) {
+	if n == nil || strings.TrimSpace(name) == "" || value == nil {
+		return
+	}
+	switch v := value.(type) {
+	case string:
+		if strings.TrimSpace(v) == "" {
+			return
+		}
+		n.Properties = append(n.Properties, &sbom.Property{Name: name, Data: v})
+	case bool:
+		n.Properties = append(n.Properties, &sbom.Property{Name: name, Data: strconv.FormatBool(v)})
+	case int:
+		n.Properties = append(n.Properties, &sbom.Property{Name: name, Data: strconv.Itoa(v)})
+	case int32:
+		n.Properties = append(n.Properties, &sbom.Property{Name: name, Data: strconv.FormatInt(int64(v), 10)})
+	case int64:
+		n.Properties = append(n.Properties, &sbom.Property{Name: name, Data: strconv.FormatInt(v, 10)})
+	case float32:
+		n.Properties = append(n.Properties, &sbom.Property{Name: name, Data: strconv.FormatFloat(float64(v), 'f', -1, 32)})
+	case float64:
+		n.Properties = append(n.Properties, &sbom.Property{Name: name, Data: strconv.FormatFloat(v, 'f', -1, 64)})
+	case []string:
+		for _, item := range v {
+			addMetadataProperty(n, name, item)
+		}
+	case []any:
+		for _, item := range v {
+			addMetadataProperty(n, name, item)
+		}
+	default:
+		if b, err := json.Marshal(v); err == nil && len(b) > 0 {
+			n.Properties = append(n.Properties, &sbom.Property{Name: name, Data: string(b)})
+		}
+	}
 }
 
 // Writers

@@ -22,14 +22,15 @@ import (
 	pl "github.com/google/osv-scalibr/plugin/list"
 
 	"github.com/picatz/deputy/internal/collections"
+	"github.com/picatz/deputy/internal/dependency/graph"
 	"github.com/picatz/deputy/internal/ecosystem"
 	dockerfilex "github.com/picatz/deputy/internal/inventory/plugins/docker/dockerfilex"
-	"github.com/picatz/deputy/internal/logs"
-	"github.com/picatz/deputy/internal/dependency/graph"
 	ghactions "github.com/picatz/deputy/internal/inventory/plugins/github/actionsx"
 	gradlex "github.com/picatz/deputy/internal/inventory/plugins/java/gradlex"
-	"github.com/picatz/deputy/internal/inventory/registry"
 	rubygemspec "github.com/picatz/deputy/internal/inventory/plugins/ruby/gemspecx"
+	"github.com/picatz/deputy/internal/inventory/plugins/terraform"
+	"github.com/picatz/deputy/internal/inventory/registry"
+	"github.com/picatz/deputy/internal/logs"
 	"github.com/picatz/deputy/internal/repository/workspace"
 )
 
@@ -195,6 +196,7 @@ func resolvePlugins(opts ScanOptions, cap *plugin.Capabilities) ([]plugin.Plugin
 	includeActions := shouldIncludeGitHubActions(names)
 	includeDockerfile := shouldIncludeDockerfile(names)
 	includeGradle := shouldIncludeGradle(names)
+	includeTerraform := shouldIncludeTerraform(names)
 	scalibrNames := filterExternalEcosystems(names)
 
 	var plugins []plugin.Plugin
@@ -227,6 +229,9 @@ func resolvePlugins(opts ScanOptions, cap *plugin.Capabilities) ([]plugin.Plugin
 		plugins = append(plugins, gradlex.NewBuildGradleExtractor())
 		plugins = append(plugins, gradlex.NewVerificationMetadataExtractor())
 	}
+	if includeTerraform {
+		plugins = append(plugins, terraform.New())
+	}
 
 	return plugins, nil
 }
@@ -255,6 +260,7 @@ func filterInventoryPlugins(plugins []plugin.Plugin) []plugin.Plugin {
 		dockerfilex.Name,
 		gradlex.BuildGradleName,
 		gradlex.VerificationMetadataName,
+		terraform.Name,
 	)
 	// Add discovered external plugins to the allowlist
 	for _, p := range registry.GetPlugins() {
@@ -370,6 +376,25 @@ func shouldIncludeGradle(names []string) bool {
 	return slices.ContainsFunc(names, isGradleEcosystem)
 }
 
+// terraformAliases contains all recognized aliases for Terraform ecosystem.
+var terraformAliases = collections.NewSet(
+	"terraform", "tf", "tofu", "opentofu", "hcl",
+)
+
+// isTerraformEcosystem checks if a name is an alias for Terraform scanning.
+func isTerraformEcosystem(name string) bool {
+	return terraformAliases.Has(name)
+}
+
+// shouldIncludeTerraform reports whether the internal Terraform plugin should run.
+// If names is nil (meaning all ecosystems), it returns true.
+func shouldIncludeTerraform(names []string) bool {
+	if names == nil {
+		return true
+	}
+	return slices.ContainsFunc(names, isTerraformEcosystem)
+}
+
 // filterExternalEcosystems removes internal ecosystem aliases so upstream scalibr
 // plugin resolution does not error on unknown names.
 func filterExternalEcosystems(names []string) []string {
@@ -378,7 +403,7 @@ func filterExternalEcosystems(names []string) []string {
 	}
 	out := make([]string, 0, len(names))
 	for _, n := range names {
-		if isGitHubActionsEcosystem(n) || isDockerfileEcosystem(n) {
+		if isGitHubActionsEcosystem(n) || isDockerfileEcosystem(n) || isTerraformEcosystem(n) {
 			continue
 		}
 		out = append(out, n)

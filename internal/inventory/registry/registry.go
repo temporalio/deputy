@@ -47,6 +47,7 @@ import (
 	ghactions "github.com/picatz/deputy/internal/inventory/plugins/github/actionsx"
 	gradlex "github.com/picatz/deputy/internal/inventory/plugins/java/gradlex"
 	rubygemspec "github.com/picatz/deputy/internal/inventory/plugins/ruby/gemspecx"
+	"github.com/picatz/deputy/internal/inventory/plugins/terraform"
 )
 
 // RegisteredPlugin represents an external plugin that was registered at runtime.
@@ -250,6 +251,15 @@ func listDeputyExtractors() []*inventoryv1.ExtractorInfo {
 			Version:      1,
 			Description:  "Comprehensive Gradle project dependency extraction with version catalog and property resolution",
 			FilePatterns: []string{"settings.gradle", "settings.gradle.kts"},
+			Source:       inventoryv1.ExtractorSource_EXTRACTOR_SOURCE_DEPUTY,
+		},
+		{
+			Name:         terraform.Name,
+			DisplayName:  "Terraform Requirements",
+			Ecosystem:    "terraform",
+			Version:      1,
+			Description:  "Extracts Terraform core and provider version requirements from .tf files",
+			FilePatterns: []string{"*.tf", "*.tf.json"},
 			Source:       inventoryv1.ExtractorSource_EXTRACTOR_SOURCE_DEPUTY,
 		},
 	}

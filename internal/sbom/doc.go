@@ -21,4 +21,6 @@
 //   - "deputy:direct": "true" if the package is a direct dependency.
 //   - "deputy:location": The file path (e.g. "go.mod") where the dependency was found.
 //     This property may appear multiple times if a package is referenced in multiple locations.
+//   - "deputy:metadata.<key>": Structured metadata for ecosystems that emit a stable schema
+//     (e.g. Terraform requirements). List values are repeated with the same key.
 package sbomx

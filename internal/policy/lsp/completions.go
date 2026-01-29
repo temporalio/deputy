@@ -191,7 +191,7 @@ func celFieldCompletions(base string) []string {
 	case "request.client":
 		return []string{"ip", "userAgent", "principal"}
 	case "pkg":
-		return []string{"name", "version", "ecosystem", "licenses"}
+		return []string{"name", "version", "ecosystem", "licenses", "metadata"}
 	case "vulnerability", "vulnerabilities":
 		return []string{"id", "severity", "summary", "aliases", "fixedVersions", "epss", "epssPercentile", "inKEV", "layerDetails", "path", "depth"}
 	case "severity":

@@ -91,6 +91,13 @@ deputy policy lint policy/examples/kev-blocker.yaml
 |--------|-------------|------------|
 | [dockerfile-security.yaml](dockerfile-security.yaml) | Comprehensive Dockerfile policies | `dockerfile_report`, `dockerfile_stage` |
 
+### Infrastructure as Code (Terraform)
+
+| Policy | Description | Entrypoint |
+|--------|-------------|------------|
+| [terraform-min-required-version.yaml](terraform-min-required-version.yaml) | Enforce a minimum Terraform core version | `diff_dependency_change` |
+| [terraform-provider-min-versions.yaml](terraform-provider-min-versions.yaml) | Require minimum versions for critical Terraform providers | `diff_dependency_change` |
+
 ### Proxy & JWT Authentication
 
 | Policy | Description | Entrypoint |

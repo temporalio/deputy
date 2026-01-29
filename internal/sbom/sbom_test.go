@@ -155,6 +155,57 @@ func TestBuildProtobomDocument_GitHubActionsResolutionProperties(t *testing.T) {
 	}
 }
 
+func TestBuildProtobomDocument_TerraformMetadataProperties(t *testing.T) {
+	ws := workspace.NewMemory()
+	defer ws.Close()
+
+	doc, err := buildProtobomDocument(t.Context(), ws, "https://example.invalid/repo.git", "HEAD", "test", []*extractor.Package{
+		{
+			Name:     "hashicorp/aws",
+			Version:  ">= 5.0.0",
+			PURLType: purlx.TypeTerraformProvider,
+			Metadata: map[string]any{
+				"kind":          "terraform_provider",
+				"constraint":    ">= 5.0.0",
+				"min_major":     5,
+				"min_minor":     0,
+				"min_patch":     0,
+				"min_inclusive": true,
+				"excludes":      []string{"5.1.0", "5.1.1"},
+			},
+		},
+	}, nil)
+	if err != nil {
+		t.Fatalf("buildProtobomDocument: %v", err)
+	}
+
+	props := map[string][]string{}
+	for _, n := range doc.GetNodeList().GetNodes() {
+		if n == nil || n.GetVersion() != ">= 5.0.0" {
+			continue
+		}
+		for _, p := range n.GetProperties() {
+			props[p.GetName()] = append(props[p.GetName()], p.GetData())
+		}
+		break
+	}
+	if len(props) == 0 {
+		t.Fatalf("expected terraform provider node with metadata properties")
+	}
+	if got := props["deputy:metadata.kind"]; len(got) != 1 || got[0] != "terraform_provider" {
+		t.Fatalf("metadata.kind=%v", got)
+	}
+	if got := props["deputy:metadata.min_major"]; len(got) != 1 || got[0] != "5" {
+		t.Fatalf("metadata.min_major=%v", got)
+	}
+	if got := props["deputy:metadata.min_inclusive"]; len(got) != 1 || got[0] != "true" {
+		t.Fatalf("metadata.min_inclusive=%v", got)
+	}
+	if got := props["deputy:metadata.excludes"]; len(got) != 2 {
+		t.Fatalf("metadata.excludes=%v", got)
+	}
+}
+
 func Test_appendUniqueLicenses(t *testing.T) {
 	tests := []struct {
 		name string

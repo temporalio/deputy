@@ -4,6 +4,7 @@ import (
 	"strings"
 
 	"github.com/google/osv-scalibr/extractor"
+	"google.golang.org/protobuf/types/known/structpb"
 
 	containerv1 "github.com/picatz/deputy/gen/deputy/container/v1"
 	dependencyv1 "github.com/picatz/deputy/gen/deputy/dependency/v1"
@@ -18,6 +19,10 @@ func ecosystemFromPURLType(purlType string) string {
 	switch purlType {
 	case purlx.TypeGitHubActions:
 		return "GitHub Actions"
+	case purlx.TypeTerraform:
+		return "terraform"
+	case purlx.TypeTerraformProvider:
+		return "terraform-provider"
 	default:
 		return ""
 	}
@@ -91,6 +96,10 @@ func ExtractorPackageToProto(pkg *extractor.Package, direct map[string]bool) *de
 			// GitHub Actions: workflow uses are always direct dependencies
 			// They're explicitly declared in workflow YAML files
 			isDirect = true
+		case purlx.TypeTerraform, purlx.TypeTerraformProvider:
+			// Terraform requirements are explicitly declared in config files.
+			// TODO: Consider marking only root module requirements as direct.
+			isDirect = true
 		default:
 			// Fall back to PURL string for unknown ecosystems
 			isDirect = direct[purlStr]
@@ -124,6 +133,7 @@ func ExtractorPackageToProto(pkg *extractor.Package, direct map[string]bool) *de
 		Locations:    pkg.Locations,
 		Licenses:     pkg.Licenses,
 		LayerDetails: layerDetails,
+		Metadata:     metadataFromPackage(pkg),
 	}
 }
 
@@ -187,6 +197,87 @@ func ExtractorPackagesFromProto(pkgs []*dependencyv1.Package) ([]*extractor.Pack
 		}
 	}
 	return out, direct
+}
+
+func metadataFromPackage(pkg *extractor.Package) *structpb.Struct {
+	if pkg == nil || pkg.Metadata == nil {
+		return nil
+	}
+	if !purlx.IsTerraformType(pkg.PURLType) {
+		return nil
+	}
+	raw, ok := pkg.Metadata.(map[string]any)
+	if !ok || len(raw) == 0 {
+		return nil
+	}
+	normalized := normalizeStructMap(raw)
+	if len(normalized) == 0 {
+		return nil
+	}
+	st, err := structpb.NewStruct(normalized)
+	if err != nil {
+		return nil
+	}
+	return st
+}
+
+func normalizeStructMap(in map[string]any) map[string]any {
+	out := make(map[string]any, len(in))
+	for k, v := range in {
+		if v == nil {
+			continue
+		}
+		nv, ok := normalizeStructValue(v)
+		if !ok {
+			continue
+		}
+		out[k] = nv
+	}
+	return out
+}
+
+func normalizeStructValue(v any) (any, bool) {
+	switch val := v.(type) {
+	case string, bool, float64:
+		return val, true
+	case int:
+		return float64(val), true
+	case int32:
+		return float64(val), true
+	case int64:
+		return float64(val), true
+	case uint:
+		return float64(val), true
+	case uint32:
+		return float64(val), true
+	case uint64:
+		return float64(val), true
+	case []string:
+		out := make([]any, 0, len(val))
+		for _, item := range val {
+			out = append(out, item)
+		}
+		return out, true
+	case []any:
+		out := make([]any, 0, len(val))
+		for _, item := range val {
+			nv, ok := normalizeStructValue(item)
+			if ok {
+				out = append(out, nv)
+			}
+		}
+		return out, true
+	case map[string]string:
+		out := make(map[string]any, len(val))
+		for k, v := range val {
+			out[k] = v
+		}
+		return out, true
+	case map[string]any:
+		return normalizeStructMap(val), true
+	default:
+		return nil, false
+	}
 }
 
 // normalizePyPIName normalizes a PyPI package name per PEP 503:
