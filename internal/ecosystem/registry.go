@@ -1,7 +1,7 @@
 // Package ecosystem provides a single authoritative source for ecosystem
 // identification and normalization across the deputy codebase.
 //
-// Deputy supports 15 ecosystems for dependency scanning:
+// Deputy supports 16 ecosystems for dependency scanning:
 //
 // Core ecosystems with full support (scan, SBOM, policies):
 //   - Go, npm, PyPI, Maven, RubyGems, Cargo, NuGet, Hex, Pub, CocoaPods, Packagist
@@ -13,6 +13,7 @@
 //
 // Ecosystems supported via Deputy's custom extractors:
 //   - GitHub Actions (.github/workflows/*.yml)
+//   - Terraform (*.tf, *.tf.json)
 //
 // Proxy support (download-time policy enforcement) is available for:
 //   - Go, npm, PyPI, RubyGems
@@ -390,6 +391,16 @@ func (r *Registry) registerDefaults() {
 		Lockfiles:       []string{"composer.lock"},
 		UpstreamURL:     "https://packagist.org",
 		OSVName:         "Packagist",
+	})
+
+	r.Register(Registration{
+		Ecosystem:    Terraform,
+		DisplayName:  "Terraform",
+		Description:  "Terraform configuration requirements (registry.terraform.io)",
+		Capabilities: CapInventory | CapGraph | CapLicense | CapSBOM,
+		Aliases:      []string{"tf", "tofu", "opentofu", "hcl"},
+		Lockfiles:    []string{"*.tf", "*.tf.json"},
+		UpstreamURL:  "https://registry.terraform.io",
 	})
 }
 

@@ -58,6 +58,7 @@ func NewResolverRegistry(opts ...RegistryOption) *ResolverRegistry {
 		NewPyPIResolver(),
 		NewRubyGemsResolver(),
 		NewMavenResolver(mavenOpts...),
+		NewTerraformResolver(),
 	}
 
 	return r
@@ -65,11 +66,11 @@ func NewResolverRegistry(opts ...RegistryOption) *ResolverRegistry {
 
 // registryConfig holds configuration for the resolver registry.
 type registryConfig struct {
-	enableGoProxy          bool
-	enableGoGit            bool
-	goProxyURL             string
-	goConcurrency          int
-	goPrivatePatterns      []string
+	enableGoProxy            bool
+	enableGoGit              bool
+	goProxyURL               string
+	goConcurrency            int
+	goPrivatePatterns        []string
 	enableDepsDevTransitives bool
 }
 
@@ -199,5 +200,6 @@ func SupportedEcosystems() []string {
 		"Cargo (crates.io)",
 		"PyPI",
 		"RubyGems",
+		"Terraform",
 	}
 }

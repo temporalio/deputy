@@ -35,19 +35,20 @@ const (
 	Name = "terraform/requirements"
 )
 
-type requirementKind string
+// RequirementKind identifies the Terraform requirement type.
+type RequirementKind string
 
 const (
-	reqTerraformCore     requirementKind = "terraform_core"
-	reqTerraformProvider requirementKind = "terraform_provider"
+	RequirementTerraformCore     RequirementKind = "terraform_core"
+	RequirementTerraformProvider RequirementKind = "terraform_provider"
 )
 
-// requirement captures a Terraform requirement discovered in config.
-type requirement struct {
-	kind    requirementKind
-	name    string
-	version string
-	path    string
+// Requirement captures a Terraform requirement discovered in config.
+type Requirement struct {
+	Kind    RequirementKind
+	Name    string
+	Version string
+	Path    string
 }
 
 // Extractor implements an OSV-Scalibr filesystem extractor for Terraform requirements.
@@ -96,7 +97,7 @@ func (e *Extractor) Extract(ctx context.Context, input *filesystem.ScanInput) (i
 	e.seen[dir] = true
 	e.mu.Unlock()
 
-	reqs, err := parseTerraformDir(ctx, input.FS, dir)
+	reqs, err := ParseDir(ctx, input.FS, dir)
 	if err != nil {
 		slog.WarnContext(ctx, "terraform: parse failed", "path", dir, "error", err)
 		return inventory.Inventory{}, nil
@@ -125,7 +126,8 @@ func isTerraformConfigPath(p string) bool {
 	return strings.HasSuffix(lower, ".tf") || strings.HasSuffix(lower, ".tf.json")
 }
 
-func parseTerraformDir(ctx context.Context, fsys fs.ReadDirFS, dir string) ([]requirement, error) {
+// ParseDir parses Terraform configuration files in dir and returns any requirements found.
+func ParseDir(ctx context.Context, fsys fs.ReadDirFS, dir string) ([]Requirement, error) {
 	readDir := dir
 	if readDir == "" {
 		readDir = "."
@@ -135,7 +137,7 @@ func parseTerraformDir(ctx context.Context, fsys fs.ReadDirFS, dir string) ([]re
 		return nil, err
 	}
 	parser := hclparse.NewParser()
-	var reqs []requirement
+	var reqs []Requirement
 	for _, entry := range entries {
 		if entry.IsDir() {
 			continue
@@ -189,12 +191,12 @@ var terraformSchema = &hcl.BodySchema{
 	},
 }
 
-func extractRequirements(body hcl.Body, filePath string) []requirement {
+func extractRequirements(body hcl.Body, filePath string) []Requirement {
 	if body == nil {
 		return nil
 	}
 	content, _ := body.Content(rootSchema)
-	var reqs []requirement
+	var reqs []Requirement
 	for _, block := range content.Blocks {
 		switch block.Type {
 		case "terraform":
@@ -204,18 +206,18 @@ func extractRequirements(body hcl.Body, filePath string) []requirement {
 	return reqs
 }
 
-func extractTerraformBlock(block *hcl.Block, filePath string) []requirement {
+func extractTerraformBlock(block *hcl.Block, filePath string) []Requirement {
 	if block == nil {
 		return nil
 	}
-	var reqs []requirement
+	var reqs []Requirement
 	attrs, _ := block.Body.JustAttributes()
 	if attr, ok := attrs["required_version"]; ok {
-		reqs = append(reqs, requirement{
-			kind:    reqTerraformCore,
-			name:    "terraform",
-			version: stringValueOrEmpty(attr.Expr),
-			path:    filePath,
+		reqs = append(reqs, Requirement{
+			Kind:    RequirementTerraformCore,
+			Name:    "terraform",
+			Version: stringValueOrEmpty(attr.Expr),
+			Path:    filePath,
 		})
 	}
 	content, _ := block.Body.Content(terraformSchema)
@@ -225,7 +227,7 @@ func extractTerraformBlock(block *hcl.Block, filePath string) []requirement {
 	return reqs
 }
 
-func extractRequiredProviders(block *hcl.Block, filePath string) []requirement {
+func extractRequiredProviders(block *hcl.Block, filePath string) []Requirement {
 	if block == nil {
 		return nil
 	}
@@ -233,14 +235,14 @@ func extractRequiredProviders(block *hcl.Block, filePath string) []requirement {
 	if len(attrs) == 0 {
 		return nil
 	}
-	var reqs []requirement
+	var reqs []Requirement
 	for name, attr := range attrs {
 		source, version := parseProviderRequirement(name, attr.Expr)
-		reqs = append(reqs, requirement{
-			kind:    reqTerraformProvider,
-			name:    source,
-			version: version,
-			path:    filePath,
+		reqs = append(reqs, Requirement{
+			Kind:    RequirementTerraformProvider,
+			Name:    source,
+			Version: version,
+			Path:    filePath,
 		})
 	}
 	return reqs
@@ -350,34 +352,34 @@ func objectStringMap(expr hcl.Expression) map[string]string {
 	return out
 }
 
-func requirementsToPackages(reqs []requirement) []*extractor.Package {
+func requirementsToPackages(reqs []Requirement) []*extractor.Package {
 	if len(reqs) == 0 {
 		return nil
 	}
 	type pkgKey struct {
-		kind    requirementKind
+		kind    RequirementKind
 		name    string
 		version string
 	}
 	seen := make(map[pkgKey]*extractor.Package)
 	for _, req := range reqs {
-		if req.name == "" {
+		if req.Name == "" {
 			continue
 		}
-		key := pkgKey{kind: req.kind, name: req.name, version: req.version}
+		key := pkgKey{kind: req.Kind, name: req.Name, version: req.Version}
 		pkg := seen[key]
 		if pkg == nil {
 			pkg = &extractor.Package{
-				Name:      req.name,
-				Version:   req.version,
-				PURLType:  purlTypeForRequirement(req.kind),
+				Name:      req.Name,
+				Version:   req.Version,
+				PURLType:  purlTypeForRequirement(req.Kind),
 				Locations: nil,
 				Metadata:  requirementMetadata(req),
 			}
 			seen[key] = pkg
 		}
-		if req.path != "" {
-			pkg.Locations = appendUnique(pkg.Locations, req.path)
+		if req.Path != "" {
+			pkg.Locations = appendUnique(pkg.Locations, req.Path)
 		}
 	}
 	out := make([]*extractor.Package, 0, len(seen))
@@ -387,27 +389,27 @@ func requirementsToPackages(reqs []requirement) []*extractor.Package {
 	return out
 }
 
-func purlTypeForRequirement(kind requirementKind) string {
+func purlTypeForRequirement(kind RequirementKind) string {
 	switch kind {
-	case reqTerraformProvider:
+	case RequirementTerraformProvider:
 		return purlx.TypeTerraformProvider
 	default:
 		return purlx.TypeTerraform
 	}
 }
 
-func requirementMetadata(req requirement) map[string]any {
+func requirementMetadata(req Requirement) map[string]any {
 	meta := map[string]any{
-		"kind":       string(req.kind),
-		"constraint": strings.TrimSpace(req.version),
+		"kind":       string(req.Kind),
+		"constraint": strings.TrimSpace(req.Version),
 	}
-	if req.kind == reqTerraformProvider {
-		meta["source"] = strings.TrimSpace(req.name)
+	if req.Kind == RequirementTerraformProvider {
+		meta["source"] = strings.TrimSpace(req.Name)
 	}
-	if req.version == "" {
+	if req.Version == "" {
 		return meta
 	}
-	summary := summarizeConstraint(req.version)
+	summary := summarizeConstraint(req.Version)
 	if summary.min != "" {
 		meta["min_version"] = summary.min
 		meta["min_inclusive"] = summary.minInclusive

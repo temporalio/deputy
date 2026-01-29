@@ -19,7 +19,7 @@ func ecosystemFromPURLType(purlType string) string {
 	switch purlType {
 	case purlx.TypeGitHubActions:
 		return "GitHub Actions"
-	case purlx.TypeTerraform:
+	case purlx.TypeTerraform, purlx.TypeTerraformModule:
 		return "terraform"
 	case purlx.TypeTerraformProvider:
 		return "terraform-provider"

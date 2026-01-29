@@ -484,7 +484,19 @@ func renderWhyAllMatches(w io.Writer, g *graph.Graph, matches []*graph.Node, que
 		// Direct dependency (0 hops)
 		if shortestHops == 0 {
 			fmt.Fprintf(w, "%s\n", ui.StyleDirect.Render("[direct dependency]"))
-			continue
+			nonDirect := make([]graph.Path, 0, len(paths))
+			for _, p := range paths {
+				if len(p) > 1 {
+					nonDirect = append(nonDirect, p)
+				}
+			}
+			if len(nonDirect) == 0 {
+				continue
+			}
+			fmt.Fprintln(w)
+			fmt.Fprintf(w, "%s\n", graphStyleMeta.Render("Also referenced by:"))
+			paths = nonDirect
+			shortestHops = len(paths[0]) - 1
 		}
 
 		// Analyze and render paths

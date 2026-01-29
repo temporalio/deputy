@@ -26,6 +26,8 @@ const (
 	TypeTerraform = "terraform"
 	// TypeTerraformProvider is the PURL type for Terraform provider requirements.
 	TypeTerraformProvider = "terraform-provider"
+	// TypeTerraformModule is the PURL type for Terraform module roots.
+	TypeTerraformModule = "terraform-module"
 )
 
 // ParseLoose parses a PURL string without validating the type against a
@@ -68,7 +70,7 @@ func IsGitHubActionsType(t string) bool {
 // IsTerraformType reports whether t is a Terraform-related PURL type.
 func IsTerraformType(t string) bool {
 	switch strings.ToLower(strings.TrimSpace(t)) {
-	case TypeTerraform, TypeTerraformProvider:
+	case TypeTerraform, TypeTerraformProvider, TypeTerraformModule:
 		return true
 	default:
 		return false

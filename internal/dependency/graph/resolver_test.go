@@ -9,9 +9,9 @@ func TestResolverRegistry_Resolvers(t *testing.T) {
 	registry := NewResolverRegistry()
 	resolvers := registry.Resolvers()
 
-	// Should have all 6 ecosystem resolvers
-	if len(resolvers) != 6 {
-		t.Errorf("expected 6 resolvers, got %d", len(resolvers))
+	// Should have all 7 ecosystem resolvers
+	if len(resolvers) != 7 {
+		t.Errorf("expected 7 resolvers, got %d", len(resolvers))
 	}
 
 	// Verify ecosystems
@@ -20,7 +20,7 @@ func TestResolverRegistry_Resolvers(t *testing.T) {
 		ecosystems[r.Ecosystem()] = true
 	}
 
-	expected := []string{"Go", "npm", "crates.io", "PyPI", "RubyGems", "Maven"}
+	expected := []string{"Go", "npm", "crates.io", "PyPI", "RubyGems", "Maven", "Terraform"}
 	for _, eco := range expected {
 		if !ecosystems[eco] {
 			t.Errorf("missing resolver for ecosystem %q", eco)
@@ -127,8 +127,8 @@ require github.com/pkg/errors v0.9.1
 
 func TestSupportedEcosystems(t *testing.T) {
 	ecosystems := SupportedEcosystems()
-	if len(ecosystems) != 5 {
-		t.Errorf("expected 5 supported ecosystems, got %d", len(ecosystems))
+	if len(ecosystems) != 6 {
+		t.Errorf("expected 6 supported ecosystems, got %d", len(ecosystems))
 	}
 }
 

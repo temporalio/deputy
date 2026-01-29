@@ -223,6 +223,7 @@ func TestScalibrPrefixes(t *testing.T) {
 		{Pub, []string{"dart"}},
 		{CocoaPods, []string{"swift"}},
 		{Packagist, []string{"php"}},
+		{Terraform, nil},
 		{Unknown, nil},
 	}
 
@@ -337,14 +338,14 @@ func TestWithGraphResolution(t *testing.T) {
 
 func TestAll(t *testing.T) {
 	all := All()
-	if len(all) != 11 {
-		t.Errorf("All() returned %d ecosystems, want 11", len(all))
+	if len(all) != 12 {
+		t.Errorf("All() returned %d ecosystems, want 12", len(all))
 	}
 
 	// Verify specific ecosystems are present
 	expected := map[Ecosystem]bool{
 		Go: true, NPM: true, PyPI: true, Maven: true, RubyGems: true,
-		Cargo: true, NuGet: true, Hex: true, Pub: true, CocoaPods: true, Packagist: true,
+		Cargo: true, NuGet: true, Hex: true, Pub: true, CocoaPods: true, Packagist: true, Terraform: true,
 	}
 	for _, eco := range all {
 		delete(expected, eco)

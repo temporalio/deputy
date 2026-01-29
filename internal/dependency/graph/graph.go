@@ -59,6 +59,8 @@ func ecosystemFromPURLType(purlType string) string {
 	switch purlType {
 	case purlx.TypeGitHubActions:
 		return "GitHub Actions"
+	case purlx.TypeTerraform, purlx.TypeTerraformProvider, purlx.TypeTerraformModule:
+		return "Terraform"
 	default:
 		return ""
 	}
@@ -266,6 +268,11 @@ func FromInventory(pkgs []*extractor.Package, direct map[string]bool) *Graph {
 				// For non-Go ecosystems, use PURL string as key
 				isDirect = direct[purl]
 			}
+		}
+		if !isDirect && purlx.IsTerraformType(purlObj.Type) {
+			// Terraform requirements are explicitly declared in config files.
+			// TODO: Consider marking only root module requirements as direct.
+			isDirect = true
 		}
 
 		var depth int32 = 1
@@ -543,7 +550,7 @@ func (g *Graph) PathsTo(target string) []Path {
 				reversed[len(current.path)-1-i] = n
 			}
 			paths = append(paths, reversed)
-			continue
+			// Keep searching parents to surface additional dependency paths.
 		}
 
 		// Create a unique key for this path state to avoid revisiting
