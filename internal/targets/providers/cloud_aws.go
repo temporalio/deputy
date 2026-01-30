@@ -136,13 +136,22 @@ func (awsCloudProvider) List(ctx context.Context, target string, opts *targets.L
 		return nil, fmt.Errorf("create AWS client: %w", err)
 	}
 
+	// Extract pagination options
+	var pageSize int32
+	var pageToken string
+	if opts != nil {
+		pageSize = opts.PageSize
+		pageToken = opts.PageToken
+	}
+
 	// List resources based on type
 	var discoveredTargets []*listv1.DiscoveredTarget
+	var nextToken string
 	switch info.Type {
 	case cloud.ResourceTypeAWSAMI:
-		discoveredTargets, err = listAMIs(ctx, client, info, cloudOpts.Region)
+		discoveredTargets, nextToken, err = listAMIs(ctx, client, info, cloudOpts.Region, pageSize, pageToken)
 	case cloud.ResourceTypeAWSEBSSnapshot:
-		discoveredTargets, err = listSnapshots(ctx, client, info, cloudOpts.Region)
+		discoveredTargets, nextToken, err = listSnapshots(ctx, client, info, cloudOpts.Region, pageSize, pageToken)
 	default:
 		return nil, fmt.Errorf("unsupported AWS collection type: %s", info.Type)
 	}
@@ -150,17 +159,18 @@ func (awsCloudProvider) List(ctx context.Context, target string, opts *targets.L
 		return nil, err
 	}
 
-	// AWS List APIs return all results - no pagination token for now
-	// TODO: Implement pagination using NextToken from AWS APIs
 	return &targets.ListResult{
 		Targets:       discoveredTargets,
-		NextPageToken: "",
+		NextPageToken: nextToken,
 	}, nil
 }
 
 // listAMIs lists AMIs and converts them to DiscoveredTargets.
-func listAMIs(ctx context.Context, client *aws.Client, info *aws.CollectionInfo, region string) ([]*listv1.DiscoveredTarget, error) {
-	listOpts := aws.ListAMIsOptions{}
+func listAMIs(ctx context.Context, client *aws.Client, info *aws.CollectionInfo, region string, pageSize int32, pageToken string) ([]*listv1.DiscoveredTarget, string, error) {
+	listOpts := aws.ListAMIsOptions{
+		MaxResults: pageSize,
+		NextToken:  pageToken,
+	}
 
 	// Apply owner filter
 	if info.Owner != "" {
@@ -175,13 +185,13 @@ func listAMIs(ctx context.Context, client *aws.Client, info *aws.CollectionInfo,
 		}
 	}
 
-	summaries, err := aws.ListAMIs(ctx, client, listOpts)
+	result, err := aws.ListAMIs(ctx, client, listOpts)
 	if err != nil {
-		return nil, fmt.Errorf("list AMIs: %w", err)
+		return nil, "", fmt.Errorf("list AMIs: %w", err)
 	}
 
-	targets := make([]*listv1.DiscoveredTarget, 0, len(summaries))
-	for _, s := range summaries {
+	targets := make([]*listv1.DiscoveredTarget, 0, len(result.Summaries))
+	for _, s := range result.Summaries {
 		t := &listv1.DiscoveredTarget{
 			Uri:         fmt.Sprintf("aws://ami/%s", s.ImageID),
 			Name:        s.Name,
@@ -208,12 +218,15 @@ func listAMIs(ctx context.Context, client *aws.Client, info *aws.CollectionInfo,
 		targets = append(targets, t)
 	}
 
-	return targets, nil
+	return targets, result.NextToken, nil
 }
 
 // listSnapshots lists EBS snapshots and converts them to DiscoveredTargets.
-func listSnapshots(ctx context.Context, client *aws.Client, info *aws.CollectionInfo, region string) ([]*listv1.DiscoveredTarget, error) {
-	listOpts := aws.ListSnapshotsOptions{}
+func listSnapshots(ctx context.Context, client *aws.Client, info *aws.CollectionInfo, region string, pageSize int32, pageToken string) ([]*listv1.DiscoveredTarget, string, error) {
+	listOpts := aws.ListSnapshotsOptions{
+		MaxResults: pageSize,
+		NextToken:  pageToken,
+	}
 
 	// Apply owner filter
 	if info.Owner != "" {
@@ -228,13 +241,13 @@ func listSnapshots(ctx context.Context, client *aws.Client, info *aws.Collection
 		}
 	}
 
-	summaries, err := aws.ListSnapshots(ctx, client, listOpts)
+	result, err := aws.ListSnapshots(ctx, client, listOpts)
 	if err != nil {
-		return nil, fmt.Errorf("list snapshots: %w", err)
+		return nil, "", fmt.Errorf("list snapshots: %w", err)
 	}
 
-	targets := make([]*listv1.DiscoveredTarget, 0, len(summaries))
-	for _, s := range summaries {
+	targets := make([]*listv1.DiscoveredTarget, 0, len(result.Summaries))
+	for _, s := range result.Summaries {
 		// Use Name tag if available, otherwise snapshot ID
 		name := s.SnapshotID
 		if tagName, ok := s.Tags["Name"]; ok && tagName != "" {
@@ -268,7 +281,7 @@ func listSnapshots(ctx context.Context, client *aws.Client, info *aws.Collection
 		targets = append(targets, t)
 	}
 
-	return targets, nil
+	return targets, result.NextToken, nil
 }
 
 // openOptionsToCloudOptions converts targets.OpenOptions to cloud.Options.

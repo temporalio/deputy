@@ -278,7 +278,23 @@ func (h *ListHandler) listCollection(
 ) (*connect.Response[listv1.ListPackagesResponse], error) {
 	span := otel.SpanFromContext(ctx)
 
-	// Convert proto options to typed ListOptions
+	// Validate CEL filter expression before proceeding.
+	// CEL filtering is done client-side after the provider returns results,
+	// because CEL provides flexible cross-provider filtering that individual
+	// providers can't efficiently implement server-side.
+	var celFilter string
+	if opts != nil && opts.Filter != "" {
+		celFilter = opts.Filter
+		if err := targets.ValidateTargetFilter(celFilter); err != nil {
+			otel.SetSpanError(span, err)
+			return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("invalid filter: %w", err))
+		}
+	}
+
+	// Convert proto options to typed ListOptions for the provider.
+	// Note: CEL expression is NOT passed to providers - it's applied client-side
+	// after listing. Providers use structured filters (tags, name patterns) that
+	// can be pushed down to the underlying API for efficiency.
 	listOpts := &targets.ListOptions{}
 	if opts != nil {
 		// Pagination options
@@ -287,16 +303,6 @@ func (h *ListHandler) listCollection(
 
 		// Quick mode skips metadata fetching for faster listing
 		listOpts.Quick = opts.Quick
-
-		// CEL filter expression
-		if opts.Filter != "" {
-			listOpts.CELExpression = opts.Filter
-			// Validate the filter expression before proceeding
-			if err := targets.ValidateTargetFilter(opts.Filter); err != nil {
-				otel.SetSpanError(span, err)
-				return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("invalid filter: %w", err))
-			}
-		}
 
 		// Platform hint for context
 		if opts.Platform != "" {
@@ -319,9 +325,11 @@ func (h *ListHandler) listCollection(
 
 	discoveredTargets := listResult.Targets
 
-	// Apply CEL filter if specified
-	if listOpts.CELExpression != "" {
-		discoveredTargets, err = targets.FilterDiscoveredTargets(ctx, discoveredTargets, listOpts.CELExpression)
+	// Apply CEL filter client-side if specified.
+	// This runs after the provider returns results, allowing flexible
+	// filtering across all target metadata fields.
+	if celFilter != "" {
+		discoveredTargets, err = targets.FilterDiscoveredTargets(ctx, discoveredTargets, celFilter)
 		if err != nil {
 			otel.SetSpanError(span, err)
 			return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("filter targets: %w", err))

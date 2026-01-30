@@ -20,8 +20,19 @@ type ListAMIsOptions struct {
 	OwnerIDs []string
 	// Filters are EC2 filters to apply.
 	Filters map[string][]string
-	// MaxResults limits the number of results.
+	// MaxResults limits the number of results per page. Default is 1000 (AWS max).
 	MaxResults int32
+	// NextToken continues from a previous list operation.
+	NextToken string
+}
+
+// ListAMIsResult contains the results of listing AMIs.
+type ListAMIsResult struct {
+	// Summaries contains the AMI summaries for this page.
+	Summaries []AMISummary
+	// NextToken is set when more results are available.
+	// Pass this value as NextToken in the next request to continue.
+	NextToken string
 }
 
 // AMISummary provides basic info about an AMI without opening it.
@@ -38,7 +49,8 @@ type AMISummary struct {
 }
 
 // ListAMIs lists AMIs accessible to the current credentials.
-func ListAMIs(ctx context.Context, client *Client, opts ListAMIsOptions) ([]AMISummary, error) {
+// Returns a ListAMIsResult with pagination support.
+func ListAMIs(ctx context.Context, client *Client, opts ListAMIsOptions) (*ListAMIsResult, error) {
 	input := &ec2.DescribeImagesInput{}
 
 	// Apply owner filter
@@ -56,9 +68,16 @@ func ListAMIs(ctx context.Context, client *Client, opts ListAMIsOptions) ([]AMIS
 		}
 	}
 
-	// Apply max results
-	if opts.MaxResults > 0 {
-		input.MaxResults = aws.Int32(opts.MaxResults)
+	// Apply max results (default to 100 for reasonable page sizes)
+	maxResults := opts.MaxResults
+	if maxResults <= 0 {
+		maxResults = 100
+	}
+	input.MaxResults = aws.Int32(maxResults)
+
+	// Apply pagination token
+	if opts.NextToken != "" {
+		input.NextToken = aws.String(opts.NextToken)
 	}
 
 	output, err := client.EC2().DescribeImages(ctx, input)
@@ -85,7 +104,10 @@ func ListAMIs(ctx context.Context, client *Client, opts ListAMIsOptions) ([]AMIS
 		summaries = append(summaries, summary)
 	}
 
-	return summaries, nil
+	return &ListAMIsResult{
+		Summaries: summaries,
+		NextToken: aws.ToString(output.NextToken),
+	}, nil
 }
 
 // ListSnapshotsOptions configures snapshot listing.
@@ -94,8 +116,19 @@ type ListSnapshotsOptions struct {
 	OwnerIDs []string
 	// Filters are EC2 filters to apply.
 	Filters map[string][]string
-	// MaxResults limits the number of results.
+	// MaxResults limits the number of results per page. Default is 1000 (AWS max).
 	MaxResults int32
+	// NextToken continues from a previous list operation.
+	NextToken string
+}
+
+// ListSnapshotsResult contains the results of listing snapshots.
+type ListSnapshotsResult struct {
+	// Summaries contains the snapshot summaries for this page.
+	Summaries []SnapshotSummary
+	// NextToken is set when more results are available.
+	// Pass this value as NextToken in the next request to continue.
+	NextToken string
 }
 
 // SnapshotSummary provides basic info about an EBS snapshot.
@@ -112,7 +145,8 @@ type SnapshotSummary struct {
 }
 
 // ListSnapshots lists EBS snapshots accessible to the current credentials.
-func ListSnapshots(ctx context.Context, client *Client, opts ListSnapshotsOptions) ([]SnapshotSummary, error) {
+// Returns a ListSnapshotsResult with pagination support.
+func ListSnapshots(ctx context.Context, client *Client, opts ListSnapshotsOptions) (*ListSnapshotsResult, error) {
 	input := &ec2.DescribeSnapshotsInput{}
 
 	// Apply owner filter
@@ -130,9 +164,16 @@ func ListSnapshots(ctx context.Context, client *Client, opts ListSnapshotsOption
 		}
 	}
 
-	// Apply max results
-	if opts.MaxResults > 0 {
-		input.MaxResults = aws.Int32(opts.MaxResults)
+	// Apply max results (default to 100 for reasonable page sizes)
+	maxResults := opts.MaxResults
+	if maxResults <= 0 {
+		maxResults = 100
+	}
+	input.MaxResults = aws.Int32(maxResults)
+
+	// Apply pagination token
+	if opts.NextToken != "" {
+		input.NextToken = aws.String(opts.NextToken)
 	}
 
 	output, err := client.EC2().DescribeSnapshots(ctx, input)
@@ -161,7 +202,10 @@ func ListSnapshots(ctx context.Context, client *Client, opts ListSnapshotsOption
 		summaries = append(summaries, summary)
 	}
 
-	return summaries, nil
+	return &ListSnapshotsResult{
+		Summaries: summaries,
+		NextToken: aws.ToString(output.NextToken),
+	}, nil
 }
 
 // ToCloudResource converts an AMISummary to a CloudResource proto.

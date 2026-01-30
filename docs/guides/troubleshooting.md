@@ -415,6 +415,147 @@ $ aws ecr get-authorization-token --region us-east-1
 
 4. **GITHUB_TOKEN scope insufficient**: Ensure the token has `read:packages` permission
 
+### Cloud Provider Plugin Authentication
+
+Deputy supports external cloud provider plugins (`deputy-cloud-*`) for scanning resources from platforms like OpenStack, vSphere, and custom cloud environments. Plugin authentication uses each platform's standard credential chain.
+
+#### Plugin Discovery Issues
+
+**Error:**
+```
+no cloud plugin found for target: mycloud://instance/i-123
+```
+
+**Solutions:**
+
+1. **Verify plugin installation**: Plugins must be named `deputy-cloud-<name>` and be in PATH
+   ```console
+   # Check if plugin is discoverable
+   $ which deputy-cloud-mycloud
+   /usr/local/bin/deputy-cloud-mycloud
+
+   # List discovered plugins (if supported)
+   $ deputy list --plugins
+   ```
+
+2. **Verify plugin is executable**:
+   ```console
+   $ ls -la $(which deputy-cloud-mycloud)
+   -rwxr-xr-x 1 user user ... deputy-cloud-mycloud
+   ```
+
+3. **Test plugin directly**:
+   ```console
+   # Start plugin manually to check for errors
+   $ deputy-cloud-mycloud --socket /tmp/test.sock
+   ```
+
+#### OpenStack Plugin
+
+**Error:**
+```
+authentication failed for openstack: Unauthorized
+```
+
+**Solutions:**
+
+1. **Use environment variables** (OpenStack RC file):
+   ```console
+   $ source openstack-rc.sh
+   # Or set manually:
+   $ export OS_AUTH_URL=https://identity.example.com:5000/v3
+   $ export OS_PROJECT_NAME=my-project
+   $ export OS_USERNAME=my-user
+   $ export OS_PASSWORD=my-password
+   $ export OS_REGION_NAME=RegionOne
+   $ deputy scan openstack://instance/xxx
+   ```
+
+2. **Use clouds.yaml**:
+   ```yaml
+   # ~/.config/openstack/clouds.yaml
+   clouds:
+     mycloud:
+       auth:
+         auth_url: https://identity.example.com:5000/v3
+         project_name: my-project
+         username: my-user
+         password: my-password
+       region_name: RegionOne
+   ```
+   ```console
+   $ export OS_CLOUD=mycloud
+   $ deputy scan openstack://instance/xxx
+   ```
+
+3. **Use application credentials** (recommended for automation):
+   ```console
+   $ export OS_AUTH_TYPE=v3applicationcredential
+   $ export OS_APPLICATION_CREDENTIAL_ID=xxx
+   $ export OS_APPLICATION_CREDENTIAL_SECRET=yyy
+   ```
+
+#### vSphere Plugin
+
+**Error:**
+```
+authentication failed for vsphere: Login failure
+```
+
+**Solutions:**
+
+1. **Use environment variables**:
+   ```console
+   $ export VSPHERE_SERVER=vcenter.example.com
+   $ export VSPHERE_USER=administrator@vsphere.local
+   $ export VSPHERE_PASSWORD=my-password
+   $ export VSPHERE_ALLOW_UNVERIFIED_SSL=true  # For self-signed certs
+   $ deputy scan vsphere://vm/vm-123
+   ```
+
+2. **Verify connectivity**:
+   ```console
+   $ curl -k https://vcenter.example.com/sdk
+   ```
+
+#### Plugin Communication Failures
+
+**Error:**
+```
+cloud plugin "mycloud" socket not ready: timeout waiting for socket
+```
+
+**Solutions:**
+
+1. **Check plugin logs**: Plugins log to stderr during startup
+   ```console
+   $ deputy scan --log-level debug mycloud://...
+   ```
+
+2. **Increase timeout** (if plugin takes longer to initialize):
+   ```console
+   # Some plugins support timeout configuration
+   $ export DEPUTY_PLUGIN_TIMEOUT=30s
+   ```
+
+3. **Check for port conflicts**: Plugins use Unix sockets in temp directories
+   ```console
+   $ ls -la /tmp/deputy-cloud-*
+   ```
+
+#### General Plugin Debugging
+
+Enable debug logging to see plugin communication:
+```console
+$ deputy scan --log-level debug mycloud://instance/i-123
+```
+
+This shows:
+- Plugin discovery and selection
+- RPC calls between Deputy and the plugin
+- Progress events during resource materialization
+- Any errors returned by the plugin
+
 ## Rate Limits
 
 ### GitHub rate limits during enrichment

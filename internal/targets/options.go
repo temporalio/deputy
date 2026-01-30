@@ -58,7 +58,11 @@ type ListOptions struct {
 	// NamePattern filters by name using glob patterns (* and ?).
 	NamePattern string
 
-	// CELExpression provides advanced filtering via CEL.
+	// CELExpression provides advanced client-side filtering via CEL.
+	// This filter is evaluated by the handler after providers return results,
+	// NOT by providers themselves. Providers should use Tags and NamePattern
+	// for server-side filtering when possible, as those can be pushed down
+	// to underlying APIs for better performance.
 	CELExpression string
 
 	// Pagination

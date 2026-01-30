@@ -60,6 +60,12 @@ type cloudPluginClient struct {
 	cmd        *exec.Cmd
 	client     cloudv1connect.CloudProviderServiceClient
 	info       *cloudv1.GetProviderInfoResponse
+
+	// Process lifecycle tracking to prevent double-wait panics.
+	// done is closed when the process exits (either naturally or via kill).
+	// waitErr captures the result of cmd.Wait().
+	done    chan struct{}
+	waitErr error
 }
 
 func (p *cloudPluginProvider) Priority() int { return priorityCloudPlugin }
@@ -318,7 +324,8 @@ func startCloudPlugin(ctx context.Context, name, execPath string) (*cloudPluginC
 		return nil, fmt.Errorf("cloud plugin %q info failed: %w", name, err)
 	}
 
-	return &cloudPluginClient{
+	// Create plugin client with lifecycle tracking
+	plugin := &cloudPluginClient{
 		name:       name,
 		execPath:   execPath,
 		socketDir:  tmpDir,
@@ -326,30 +333,57 @@ func startCloudPlugin(ctx context.Context, name, execPath string) (*cloudPluginC
 		cmd:        cmd,
 		client:     client,
 		info:       resp.Msg,
-	}, nil
+		done:       make(chan struct{}),
+	}
+
+	// Start background goroutine to track process exit.
+	// This ensures cmd.Wait() is called exactly once, preventing panics
+	// when close() is called after the process has already exited.
+	go func() {
+		plugin.waitErr = cmd.Wait()
+		close(plugin.done)
+	}()
+
+	return plugin, nil
 }
 
 // close gracefully shuts down the plugin process and cleans up resources.
 // It sends SIGINT first, waits up to 5 seconds for graceful shutdown,
 // then sends SIGKILL if the process hasn't exited. The temporary socket
 // directory is removed regardless of shutdown method.
+//
+// close is safe to call multiple times and handles the case where the
+// process has already exited (e.g., crashed or terminated externally).
 func (c *cloudPluginClient) close() error {
 	if c == nil {
 		return nil
 	}
-	if c.cmd != nil && c.cmd.Process != nil {
-		_ = c.cmd.Process.Signal(os.Interrupt)
-		done := make(chan error, 1)
-		go func() {
-			done <- c.cmd.Wait()
-		}()
+
+	// Shutdown the process if it's still running.
+	// The done channel is closed by the background goroutine when the process exits.
+	if c.cmd != nil && c.cmd.Process != nil && c.done != nil {
+		// Check if already exited
 		select {
-		case <-done:
-		case <-time.After(5 * time.Second):
-			_ = c.cmd.Process.Kill()
+		case <-c.done:
+			// Process already exited, nothing to do
+		default:
+			// Process still running, request graceful shutdown
+			_ = c.cmd.Process.Signal(os.Interrupt)
+
+			// Wait for graceful shutdown or timeout
+			select {
+			case <-c.done:
+				// Graceful shutdown succeeded
+			case <-time.After(5 * time.Second):
+				// Timeout - force kill
+				_ = c.cmd.Process.Kill()
+				// Wait for the kill to complete (will close done channel)
+				<-c.done
+			}
 		}
 	}
 
+	// Clean up socket directory
 	if c.socketDir != "" {
 		_ = os.RemoveAll(c.socketDir)
 	}
