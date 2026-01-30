@@ -658,6 +658,36 @@ func recommendCommand(manager, manifestPath, pkg, version string, groups []strin
 		}
 		// Generic container image update (e.g., docker-compose.yml, k8s manifests)
 		return commandResult{command: fmt.Sprintf("Update container image %s to %s", pkg, version), executable: false}
+
+	// Nix Flakes
+	case "nix", "nixpkgs", "flake":
+		base := strings.ToLower(path.Base(manifestPath))
+		switch {
+		case base == "flake.lock":
+			// For flake.lock, we can use nix flake update with the input name
+			inputName := extractFlakeInputName(pkg)
+			return commandResult{
+				command:    fmt.Sprintf("nix flake lock --update-input %s", inputName),
+				args:       []string{"nix", "flake", "lock", "--update-input", inputName},
+				hint:       fmt.Sprintf("updates %s to latest; use --override-input for specific rev", inputName),
+				executable: true,
+			}
+		case base == "flake.nix":
+			// For flake.nix, user needs to edit the input reference
+			return commandResult{
+				command:      fmt.Sprintf("Update input %s in flake.nix", pkg),
+				followUp:     "nix flake lock",
+				followUpArgs: []string{"nix", "flake", "lock"},
+				hint:         "edit flake.nix inputs, then run nix flake lock",
+				executable:   false,
+			}
+		default:
+			return commandResult{
+				command:    fmt.Sprintf("nix flake lock --update-input %s", pkg),
+				args:       []string{"nix", "flake", "lock", "--update-input", pkg},
+				executable: true,
+			}
+		}
 	}
 
 	return commandResult{}
@@ -685,6 +715,17 @@ func isCommitSHA(version string) bool {
 		}
 	}
 	return true
+}
+
+// extractFlakeInputName extracts the input name from a flake package reference.
+// For GitHub-style refs like "NixOS/nixpkgs", it returns "nixpkgs".
+// For simple names like "nixpkgs", it returns them as-is.
+func extractFlakeInputName(pkg string) string {
+	// If it contains a slash (e.g., "NixOS/nixpkgs"), take the last component
+	if idx := strings.LastIndex(pkg, "/"); idx >= 0 {
+		return pkg[idx+1:]
+	}
+	return pkg
 }
 
 // isContainerfilePath checks if a filename looks like a Dockerfile or Containerfile.

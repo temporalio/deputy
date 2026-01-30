@@ -58,6 +58,7 @@ func NewResolverRegistry(opts ...RegistryOption) *ResolverRegistry {
 		NewPyPIResolver(),
 		NewRubyGemsResolver(),
 		NewMavenResolver(mavenOpts...),
+		NewNixFlakeResolver(),
 	}
 
 	return r

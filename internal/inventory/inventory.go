@@ -22,14 +22,15 @@ import (
 	pl "github.com/google/osv-scalibr/plugin/list"
 
 	"github.com/picatz/deputy/internal/collections"
+	"github.com/picatz/deputy/internal/dependency/graph"
 	"github.com/picatz/deputy/internal/ecosystem"
 	dockerfilex "github.com/picatz/deputy/internal/inventory/plugins/docker/dockerfilex"
-	"github.com/picatz/deputy/internal/logs"
-	"github.com/picatz/deputy/internal/dependency/graph"
+	"github.com/picatz/deputy/internal/inventory/flakelock"
 	ghactions "github.com/picatz/deputy/internal/inventory/plugins/github/actionsx"
 	gradlex "github.com/picatz/deputy/internal/inventory/plugins/java/gradlex"
-	"github.com/picatz/deputy/internal/inventory/registry"
 	rubygemspec "github.com/picatz/deputy/internal/inventory/plugins/ruby/gemspecx"
+	"github.com/picatz/deputy/internal/inventory/registry"
+	"github.com/picatz/deputy/internal/logs"
 	"github.com/picatz/deputy/internal/repository/workspace"
 )
 
@@ -195,6 +196,7 @@ func resolvePlugins(opts ScanOptions, cap *plugin.Capabilities) ([]plugin.Plugin
 	includeActions := shouldIncludeGitHubActions(names)
 	includeDockerfile := shouldIncludeDockerfile(names)
 	includeGradle := shouldIncludeGradle(names)
+	includeNix := shouldIncludeNix(names)
 	scalibrNames := filterExternalEcosystems(names)
 
 	var plugins []plugin.Plugin
@@ -227,6 +229,9 @@ func resolvePlugins(opts ScanOptions, cap *plugin.Capabilities) ([]plugin.Plugin
 		plugins = append(plugins, gradlex.NewBuildGradleExtractor())
 		plugins = append(plugins, gradlex.NewVerificationMetadataExtractor())
 	}
+	if includeNix {
+		plugins = append(plugins, flakelock.New())
+	}
 
 	return plugins, nil
 }
@@ -255,6 +260,7 @@ func filterInventoryPlugins(plugins []plugin.Plugin) []plugin.Plugin {
 		dockerfilex.Name,
 		gradlex.BuildGradleName,
 		gradlex.VerificationMetadataName,
+		flakelock.Name,
 	)
 	// Add discovered external plugins to the allowlist
 	for _, p := range registry.GetPlugins() {
@@ -370,6 +376,25 @@ func shouldIncludeGradle(names []string) bool {
 	return slices.ContainsFunc(names, isGradleEcosystem)
 }
 
+// nixAliases contains all recognized aliases for Nix ecosystem.
+var nixAliases = collections.NewSet(
+	"nix", "nixos", "nixpkgs", "flake",
+)
+
+// isNixEcosystem checks if a name is an alias for Nix scanning.
+func isNixEcosystem(name string) bool {
+	return nixAliases.Has(name)
+}
+
+// shouldIncludeNix reports whether the Nix flakelock plugin should run.
+// If names is nil (meaning all ecosystems), it returns true.
+func shouldIncludeNix(names []string) bool {
+	if names == nil {
+		return true
+	}
+	return slices.ContainsFunc(names, isNixEcosystem)
+}
+
 // filterExternalEcosystems removes internal ecosystem aliases so upstream scalibr
 // plugin resolution does not error on unknown names.
 func filterExternalEcosystems(names []string) []string {
@@ -378,7 +403,7 @@ func filterExternalEcosystems(names []string) []string {
 	}
 	out := make([]string, 0, len(names))
 	for _, n := range names {
-		if isGitHubActionsEcosystem(n) || isDockerfileEcosystem(n) {
+		if isGitHubActionsEcosystem(n) || isDockerfileEcosystem(n) || isNixEcosystem(n) {
 			continue
 		}
 		out = append(out, n)

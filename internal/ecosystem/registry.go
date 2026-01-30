@@ -399,7 +399,7 @@ func (r *Registry) registerDefaults() {
 		Description:     "NixOS/Nixpkgs packages (nixos.org)",
 		Capabilities:    CapInventory | CapSBOM | CapLicense,
 		Aliases:         []string{"nixos", "nixpkgs", "flakes"},
-		ScalibrPrefixes: []string{"os"},
+		ScalibrPrefixes: []string{"os/nix"},
 		Lockfiles:       []string{"flake.lock"},
 		UpstreamURL:     "https://nixos.org",
 		OSVName:         "NixOS",
