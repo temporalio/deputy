@@ -59,6 +59,7 @@ func NewResolverRegistry(opts ...RegistryOption) *ResolverRegistry {
 		NewRubyGemsResolver(),
 		NewMavenResolver(mavenOpts...),
 		NewNixFlakeResolver(),
+		NewNixDBResolver(),
 	}
 
 	return r
@@ -66,11 +67,11 @@ func NewResolverRegistry(opts ...RegistryOption) *ResolverRegistry {
 
 // registryConfig holds configuration for the resolver registry.
 type registryConfig struct {
-	enableGoProxy          bool
-	enableGoGit            bool
-	goProxyURL             string
-	goConcurrency          int
-	goPrivatePatterns      []string
+	enableGoProxy            bool
+	enableGoGit              bool
+	goProxyURL               string
+	goConcurrency            int
+	goPrivatePatterns        []string
 	enableDepsDevTransitives bool
 }
 

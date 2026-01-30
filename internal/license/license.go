@@ -698,20 +698,20 @@ func looksLikeSPDX(s string) bool {
 func classifierToSPDX(classifier string) string {
 	// Map common classifiers to SPDX
 	mapping := map[string]string{
-		"License :: OSI Approved :: MIT License":                                    "MIT",
-		"License :: OSI Approved :: Apache Software License":                        "Apache-2.0",
-		"License :: OSI Approved :: BSD License":                                    "BSD-3-Clause",
-		"License :: OSI Approved :: GNU General Public License v2 (GPLv2)":          "GPL-2.0-only",
-		"License :: OSI Approved :: GNU General Public License v3 (GPLv3)":          "GPL-3.0-only",
-		"License :: OSI Approved :: GNU Lesser General Public License v2 (LGPLv2)":  "LGPL-2.0-only",
-		"License :: OSI Approved :: GNU Lesser General Public License v3 (LGPLv3)":  "LGPL-3.0-only",
-		"License :: OSI Approved :: ISC License (ISCL)":                             "ISC",
-		"License :: OSI Approved :: Mozilla Public License 2.0 (MPL 2.0)":           "MPL-2.0",
-		"License :: OSI Approved :: Python Software Foundation License":             "PSF-2.0",
-		"License :: OSI Approved :: The Unlicense (Unlicense)":                      "Unlicense",
-		"License :: OSI Approved :: zlib/libpng License":                            "Zlib",
-		"License :: Public Domain":                                                  "CC0-1.0",
-		"License :: CC0 1.0 Universal (CC0 1.0) Public Domain Dedication":           "CC0-1.0",
+		"License :: OSI Approved :: MIT License":                                   "MIT",
+		"License :: OSI Approved :: Apache Software License":                       "Apache-2.0",
+		"License :: OSI Approved :: BSD License":                                   "BSD-3-Clause",
+		"License :: OSI Approved :: GNU General Public License v2 (GPLv2)":         "GPL-2.0-only",
+		"License :: OSI Approved :: GNU General Public License v3 (GPLv3)":         "GPL-3.0-only",
+		"License :: OSI Approved :: GNU Lesser General Public License v2 (LGPLv2)": "LGPL-2.0-only",
+		"License :: OSI Approved :: GNU Lesser General Public License v3 (LGPLv3)": "LGPL-3.0-only",
+		"License :: OSI Approved :: ISC License (ISCL)":                            "ISC",
+		"License :: OSI Approved :: Mozilla Public License 2.0 (MPL 2.0)":          "MPL-2.0",
+		"License :: OSI Approved :: Python Software Foundation License":            "PSF-2.0",
+		"License :: OSI Approved :: The Unlicense (Unlicense)":                     "Unlicense",
+		"License :: OSI Approved :: zlib/libpng License":                           "Zlib",
+		"License :: Public Domain":                                                 "CC0-1.0",
+		"License :: CC0 1.0 Universal (CC0 1.0) Public Domain Dedication":          "CC0-1.0",
 	}
 	if spdx, ok := mapping[classifier]; ok {
 		return spdx

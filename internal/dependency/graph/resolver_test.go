@@ -9,9 +9,9 @@ func TestResolverRegistry_Resolvers(t *testing.T) {
 	registry := NewResolverRegistry()
 	resolvers := registry.Resolvers()
 
-	// Should have all 7 ecosystem resolvers (including Nix)
-	if len(resolvers) != 7 {
-		t.Errorf("expected 7 resolvers, got %d", len(resolvers))
+	// Should have 8 ecosystem resolvers (including NixFlake and NixDB)
+	if len(resolvers) != 8 {
+		t.Errorf("expected 8 resolvers, got %d", len(resolvers))
 	}
 
 	// Verify ecosystems

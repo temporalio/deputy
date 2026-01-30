@@ -194,7 +194,7 @@ WORKFLOW EXAMPLES:
 	}
 
 	scanCmd.Flags().StringP("ref", "r", "HEAD", "Git reference to scan (branch, tag, or commit)")
-	scanCmd.PersistentFlags().StringSliceP("ecosystems", "e", []string{"all"}, "Ecosystems to scan: go, npm, pypi, maven, rubygems, cargo, nuget, hex, pub, cocoapods, packagist, github-actions, haskell, r, cpp (default: all)")
+	scanCmd.PersistentFlags().StringSliceP("ecosystems", "e", []string{"all"}, "Ecosystems to scan: go, npm, pypi, maven, rubygems, cargo, nuget, hex, pub, cocoapods, packagist, github-actions, haskell, r, cpp, nix (default: all)")
 	scanCmd.Flags().StringP("output", "o", "", "Output file (default: stdout)")
 	scanCmd.Flags().StringP("format", "f", "text", "Output format (text, json, sarif)")
 	scanCmd.Flags().Bool("ignore-unfixed", false, "Ignore vulnerabilities without fixes")

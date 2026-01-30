@@ -396,9 +396,9 @@ type testFileAPI struct {
 	path string
 }
 
-func (f *testFileAPI) Path() string                     { return f.path }
-func (f *testFileAPI) Stat() (os.FileInfo, error)       { return nil, nil }
-func (f *testFileAPI) Open() (io.ReadCloser, error)     { return nil, nil }
+func (f *testFileAPI) Path() string                 { return f.path }
+func (f *testFileAPI) Stat() (os.FileInfo, error)   { return nil, nil }
+func (f *testFileAPI) Open() (io.ReadCloser, error) { return nil, nil }
 
 func TestExtractGraph(t *testing.T) {
 	lock, err := ParseFlakeLock(strings.NewReader(sampleFlakeLock))

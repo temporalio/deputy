@@ -163,7 +163,7 @@ func TestHasGraphSupport(t *testing.T) {
 		{Pub, true},
 		{CocoaPods, false},
 		{Packagist, false},
-		{Nix, false},
+		{Nix, true},
 		{Unknown, false},
 	}
 

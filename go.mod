@@ -31,6 +31,7 @@ require (
 	github.com/masahiro331/go-disk v0.0.0-20240625071113-56c933208fee
 	github.com/masahiro331/go-ext4-filesystem v0.0.0-20240620024024-ca14e6327bbd
 	github.com/modelcontextprotocol/go-sdk v1.2.0
+	github.com/nix-community/go-nix v0.0.0-20250101154619-4bdde671e0a1
 	github.com/ossf/osv-schema/bindings/go v0.0.0-20250902063920-695987a6b7da
 	github.com/package-url/packageurl-go v0.1.3
 	github.com/pandatix/go-cvss v0.6.2
@@ -247,7 +248,7 @@ require (
 	modernc.org/libc v1.66.8 // indirect
 	modernc.org/mathutil v1.7.1 // indirect
 	modernc.org/memory v1.11.0 // indirect
-	modernc.org/sqlite v1.38.2 // indirect
+	modernc.org/sqlite v1.38.2
 	sigs.k8s.io/release-utils v0.12.1 // indirect
 	sigs.k8s.io/yaml v1.6.0 // indirect
 	www.velocidex.com/golang/regparser v0.0.0-20250203141505-31e704a67ef7 // indirect

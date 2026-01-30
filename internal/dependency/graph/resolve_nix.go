@@ -2,14 +2,19 @@ package graph
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 
 	"github.com/google/osv-scalibr/purl"
 	"github.com/picatz/deputy/internal/inventory/flakelock"
 	"github.com/picatz/deputy/internal/logs"
+
+	// SQLite driver for Nix database.
+	_ "modernc.org/sqlite"
 )
 
 // NixFlakeResolver resolves dependency edges for Nix flakes from flake.lock files.
@@ -254,3 +259,172 @@ func sanitizeURLForPURL(url string) string {
 
 // Ensure NixFlakeResolver implements EdgeResolver.
 var _ EdgeResolver = (*NixFlakeResolver)(nil)
+
+// NixDBResolver resolves dependency edges from the Nix database (db.sqlite).
+// This resolver operates on local filesystem only, looking for the database
+// at the standard /nix/var/nix/db/db.sqlite location.
+type NixDBResolver struct {
+	// dbPath is the path to the Nix database. If empty, uses default location.
+	dbPath string
+}
+
+// NixDBResolverOption configures a NixDBResolver.
+type NixDBResolverOption func(*NixDBResolver)
+
+// WithDBPath sets a custom path to the Nix database.
+func WithDBPath(path string) NixDBResolverOption {
+	return func(r *NixDBResolver) {
+		r.dbPath = path
+	}
+}
+
+// NewNixDBResolver creates a new Nix database resolver.
+func NewNixDBResolver(opts ...NixDBResolverOption) *NixDBResolver {
+	r := &NixDBResolver{
+		dbPath: "/nix/var/nix/db/db.sqlite",
+	}
+	for _, opt := range opts {
+		opt(r)
+	}
+	return r
+}
+
+// Ecosystem returns "Nix" as the ecosystem identifier.
+func (r *NixDBResolver) Ecosystem() string {
+	return "Nix"
+}
+
+// ResolveEdges reads the Nix database to build dependency edges.
+// It connects packages in the graph based on their store path references.
+func (r *NixDBResolver) ResolveEdges(ctx context.Context, g *Graph, files FileReader) error {
+	// Only run if we have Nix packages in the graph
+	hasNixPackages := false
+	for node := range g.Nodes() {
+		if strings.HasPrefix(node.Purl, "pkg:nix/") {
+			hasNixPackages = true
+			break
+		}
+	}
+	if !hasNixPackages {
+		return nil
+	}
+
+	// Check if database exists
+	info, err := os.Stat(r.dbPath)
+	if err != nil || info.IsDir() {
+		logs.Debug(ctx, "nix db resolver: database not found", "path", r.dbPath)
+		return nil // Database not available, skip resolution
+	}
+
+	// Build a map from store path to PURL for edge resolution
+	storePathToPURL := make(map[string]string)
+	for node := range g.Nodes() {
+		if !strings.HasPrefix(node.Purl, "pkg:nix/") {
+			continue
+		}
+		// Locations contain the store path
+		for _, loc := range node.Locations {
+			if strings.HasPrefix(loc, "/nix/store/") {
+				storePathToPURL[loc] = node.Purl
+			}
+		}
+	}
+
+	if len(storePathToPURL) == 0 {
+		logs.Debug(ctx, "nix db resolver: no store paths found in graph")
+		return nil
+	}
+
+	// Query the database for references
+	deps, err := r.queryDependencies(ctx, storePathToPURL)
+	if err != nil {
+		logs.Debug(ctx, "nix db resolver: query failed", "error", err)
+		return nil // Non-fatal
+	}
+
+	// Add edges
+	edgeCount := 0
+	for fromPath, toPaths := range deps {
+		fromPURL := storePathToPURL[fromPath]
+		if fromPURL == "" {
+			continue
+		}
+		for _, toPath := range toPaths {
+			toPURL := storePathToPURL[toPath]
+			if toPURL == "" || fromPURL == toPURL {
+				continue
+			}
+			g.AddEdge(&Edge{
+				From:  fromPURL,
+				To:    toPURL,
+				Scope: ScopeRuntime,
+			})
+			edgeCount++
+		}
+	}
+
+	logs.Debug(ctx, "nix db resolver: added edges", "count", edgeCount)
+	return nil
+}
+
+// queryDependencies queries the Nix database for package dependencies.
+func (r *NixDBResolver) queryDependencies(ctx context.Context, storePathToPURL map[string]string) (map[string][]string, error) {
+	db, err := sql.Open("sqlite", r.dbPath+"?mode=ro")
+	if err != nil {
+		return nil, fmt.Errorf("open database: %w", err)
+	}
+	defer db.Close()
+
+	// Build path to ID mapping
+	pathToID := make(map[string]int64)
+	idToPath := make(map[int64]string)
+
+	rows, err := db.QueryContext(ctx, `SELECT id, path FROM ValidPaths`)
+	if err != nil {
+		return nil, fmt.Errorf("query ValidPaths: %w", err)
+	}
+	for rows.Next() {
+		var id int64
+		var path string
+		if err := rows.Scan(&id, &path); err != nil {
+			continue
+		}
+		pathToID[path] = id
+		idToPath[id] = path
+	}
+	rows.Close()
+
+	// Query refs only for paths we care about
+	deps := make(map[string][]string)
+	for storePath := range storePathToPURL {
+		if _, ok := pathToID[storePath]; !ok {
+			continue
+		}
+	}
+
+	// Get all relevant refs
+	rows, err = db.QueryContext(ctx, `SELECT referrer, reference FROM Refs`)
+	if err != nil {
+		return nil, fmt.Errorf("query Refs: %w", err)
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var referrer, reference int64
+		if err := rows.Scan(&referrer, &reference); err != nil {
+			continue
+		}
+		referrerPath := idToPath[referrer]
+		referencePath := idToPath[reference]
+		if referrerPath != "" && referencePath != "" {
+			if _, ok := storePathToPURL[referrerPath]; ok {
+				deps[referrerPath] = append(deps[referrerPath], referencePath)
+			}
+		}
+	}
+
+	return deps, rows.Err()
+}
+
+// Ensure NixDBResolver implements EdgeResolver.
+var _ EdgeResolver = (*NixDBResolver)(nil)

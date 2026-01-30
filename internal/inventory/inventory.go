@@ -24,8 +24,9 @@ import (
 	"github.com/picatz/deputy/internal/collections"
 	"github.com/picatz/deputy/internal/dependency/graph"
 	"github.com/picatz/deputy/internal/ecosystem"
-	dockerfilex "github.com/picatz/deputy/internal/inventory/plugins/docker/dockerfilex"
 	"github.com/picatz/deputy/internal/inventory/flakelock"
+	"github.com/picatz/deputy/internal/inventory/nixstore"
+	dockerfilex "github.com/picatz/deputy/internal/inventory/plugins/docker/dockerfilex"
 	ghactions "github.com/picatz/deputy/internal/inventory/plugins/github/actionsx"
 	gradlex "github.com/picatz/deputy/internal/inventory/plugins/java/gradlex"
 	rubygemspec "github.com/picatz/deputy/internal/inventory/plugins/ruby/gemspecx"
@@ -231,6 +232,8 @@ func resolvePlugins(opts ScanOptions, cap *plugin.Capabilities) ([]plugin.Plugin
 	}
 	if includeNix {
 		plugins = append(plugins, flakelock.New())
+		plugins = append(plugins, nixstore.New())
+		plugins = append(plugins, nixstore.NewDBExtractor(nixstore.DBExtractorOptions{}))
 	}
 
 	return plugins, nil
@@ -261,6 +264,8 @@ func filterInventoryPlugins(plugins []plugin.Plugin) []plugin.Plugin {
 		gradlex.BuildGradleName,
 		gradlex.VerificationMetadataName,
 		flakelock.Name,
+		nixstore.Name,
+		nixstore.DBName,
 	)
 	// Add discovered external plugins to the allowlist
 	for _, p := range registry.GetPlugins() {
