@@ -55,6 +55,12 @@ $ deputy list --format json | jq '.items[].purl'
 
 # Validate policies before use
 $ deputy policy lint policy/*.yaml
+
+# Scan cloud resources (AWS AMI)
+$ deputy scan aws://ami/ami-0123456789abcdef0 --region us-west-2
+
+# List and scan all your AMIs
+$ deputy list aws://amis?owner=self -f json | jq -r '.discovered_targets[].uri' | xargs deputy scan
 ```
 
 ## Pipelines

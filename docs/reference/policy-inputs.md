@@ -2,6 +2,8 @@
 
 This page defines the payloads Deputy sends to the policy engine and the entrypoints each command emits.
 
+**Jump to:** [Entrypoints by Command](#entrypoints-by-command) | [Package Metadata](#package-metadata-pkg) | [Target Metadata](#target-metadata) | [Vulnerability Layer Details](#vulnerability-layer-details) | [Dockerfile Inputs](#dockerfile-scanning-inputs) | [Container Diff](#container-diff-inputs) | [Cloud Scanning](#cloud-scanning-inputs)
+
 ## How Entrypoints Work
 
 ```mermaid
@@ -61,6 +63,8 @@ Each command emits one or more entrypoints when `--policy` is provided:
 | `deputy triage` | `triage_report`, `triage_cluster` |
 | `deputy proxy` | `go_artifact_request`, `npm_artifact_request`, `pypi_artifact_request`, `rubygems_artifact_request`, `oci_artifact_request` |
 | `deputy server` (API requests) | `service_scan_request`, `service_list_request`, `service_sbom_request`, `service_diff_request`, `service_secrets_request`, `service_graph_request` |
+| `deputy scan` (cloud resources) | `cloud_scan_report`, `cloud_scan_vulnerability` |
+| `deputy server` (cloud API) | `service_cloud_scan_request` |
 
 > [!NOTE]
 > `deputy diff` auto-detects whether you're comparing git refs or container images based on the reference format. Container image refs look like `image:tag` or contain registry paths (e.g., `ghcr.io/org/app:v1`).
@@ -85,13 +89,26 @@ Guard version-sensitive rules with `request.has_version`:
 request.has_version && pkg.name == "react" && pkg.version.startsWith("18.")
 ```
 
-## Standard variables
+## Standard Variables
 
 Deputy seeds these identifiers in every policy environment. Missing values are set to `null` so optional types and `has()` work consistently.
 
-`pkg`, `request`, `target`, `image`, `vulnerabilities`, `vulnerability`, `jwt`, `changes`, `packages`, `sbom`, `config`, `env`, `dependency`, `plan`, `step`, `repo`, `cluster`, `component`, `findings`, `change`
-
-`pkg` is a convenience view synthesized from `request` or `component` when present, so a single policy can target proxy and sbom payloads without duplicating logic.
+| Variable | Description |
+|----------|-------------|
+| `pkg` | Package info (synthesized from `request` or `component` for unified policies) |
+| `request` | Proxy request details |
+| `target` | Target being evaluated (repo, image, sbom, etc.) |
+| `image` | Container image metadata (when scanning images) |
+| `vulnerability` / `vulnerabilities` | Single or list of vulnerabilities |
+| `change` / `changes` | Diff change details |
+| `component` | SBOM component |
+| `env` | Environment context (`env.command`, `env.entrypoint`) |
+| `jwt` | JWT claims (server mode authentication) |
+| `repo`, `ref`, `commit` | Git context |
+| `sbom`, `packages`, `findings` | Scan results |
+| `plan`, `step` | Fix plan details |
+| `cluster` | Triage cluster |
+| `config` | Configuration context |
 
 ## Package metadata (`pkg`)
 
@@ -579,3 +596,175 @@ When comparing container images with `deputy diff image1 image2`, the policy eng
   "env": {"command": "diff", "entrypoint": "container_diff_report"}
 }
 ```
+
+## Cloud scanning inputs
+
+When scanning cloud resources (AWS AMIs, EBS snapshots, etc.) with `deputy scan aws://...`, the policy engine receives cloud-specific variables.
+
+### Entrypoints
+
+| Entrypoint | Trigger | Use Case |
+|------------|---------|----------|
+| `cloud_scan_report` | After scan completes | Aggregate analysis (vuln counts, baseline checks) |
+| `cloud_scan_vulnerability` | Per vulnerability | Per-vulnerability decisions with resource context |
+| `service_cloud_scan_request` | Before scan (server mode) | Authorization based on account/region/resource |
+
+### `resource` object
+
+Contains cloud resource metadata:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `resource.provider` | `string` | Cloud provider: `aws`, `azure`, `gcp`, `plugin:<name>` |
+| `resource.resource_type` | `string` | Resource type: `ami`, `ebs-snapshot`, `lambda`, etc. |
+| `resource.resource_id` | `string` | Provider-specific identifier |
+| `resource.region` | `string` | Cloud region (e.g., `us-east-1`) |
+| `resource.account_id` | `string` | Account/subscription/project ID |
+| `resource.tags` | `map(string)` | Resource tags/labels |
+| `resource.name` | `string` | Human-readable resource name |
+
+### Cloud scan report variables
+
+Available in `cloud_scan_report`:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `resource` | `object` | Cloud resource metadata (see above) |
+| `vulnerabilities` | `list(vulnerability)` | All vulnerabilities found |
+| `packages` | `list(package)` | All packages discovered |
+
+### Cloud scan vulnerability variables
+
+Available in `cloud_scan_vulnerability`:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `resource` | `object` | Cloud resource metadata |
+| `vulnerability` | `object` | The specific vulnerability |
+| `pkg` | `object` | The affected package |
+
+### Service authorization variables
+
+Available in `service_cloud_scan_request`:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `resource` | `object` | Requested resource metadata |
+| `jwt.claims` | `map` | JWT claims when authenticated |
+
+### Cloud scanning example payloads
+
+Cloud scan report:
+
+```json
+{
+  "resource": {
+    "provider": "aws",
+    "resource_type": "ami",
+    "resource_id": "ami-0123456789abcdef0",
+    "region": "us-east-1",
+    "account_id": "123456789012",
+    "tags": {
+      "Name": "my-app-v1.2.3",
+      "environment": "production",
+      "owner": "platform-team"
+    },
+    "name": "my-app-v1.2.3"
+  },
+  "vulnerabilities": [
+    {
+      "advisory": {
+        "id": "CVE-2024-1234",
+        "severity": {"level": "SEVERITY_LEVEL_HIGH"}
+      },
+      "package": {"name": "openssl", "version": "1.1.1k", "ecosystem": "deb"}
+    }
+  ],
+  "env": {"command": "scan", "entrypoint": "cloud_scan_report"}
+}
+```
+
+Cloud scan vulnerability (per-vuln):
+
+```json
+{
+  "resource": {
+    "provider": "aws",
+    "resource_type": "ami",
+    "resource_id": "ami-0123456789abcdef0",
+    "region": "us-east-1",
+    "account_id": "123456789012",
+    "tags": {"environment": "production"}
+  },
+  "vulnerability": {
+    "advisory": {
+      "id": "CVE-2024-1234",
+      "severity": {"level": "SEVERITY_LEVEL_CRITICAL"}
+    },
+    "package": {"name": "openssl", "version": "1.1.1k", "ecosystem": "deb"}
+  },
+  "pkg": {
+    "name": "openssl",
+    "version": "1.1.1k",
+    "ecosystem": "deb"
+  },
+  "env": {"command": "scan", "entrypoint": "cloud_scan_vulnerability"}
+}
+```
+
+Service cloud scan request (authorization):
+
+```json
+{
+  "resource": {
+    "provider": "aws",
+    "resource_type": "ami",
+    "resource_id": "ami-0123456789abcdef0",
+    "region": "us-east-1",
+    "account_id": "123456789012"
+  },
+  "jwt": {
+    "claims": {
+      "sub": "service-account-1",
+      "allowed_regions": ["us-east-1", "us-west-2"],
+      "allowed_accounts": ["123456789012"]
+    }
+  },
+  "env": {"command": "server", "entrypoint": "service_cloud_scan_request"}
+}
+```
+
+### Example cloud policies
+
+Tag-based production security:
+
+```yaml
+policies:
+  - name: production-critical-vulns
+    entrypoints: ["cloud_scan_vulnerability"]
+    rules:
+      - action: deny
+        when: |
+          resource.tags.exists(k, k.lowerAscii() == "environment") &&
+          resource.tags.filter(k, k.lowerAscii() == "environment")[0] in ["production", "prod"] &&
+          vulnerability.advisory.severity.level == severity.critical
+        reason: "Critical vulnerability in production resource"
+```
+
+Account authorization:
+
+```yaml
+policies:
+  - name: account-allowlist
+    entrypoints: ["service_cloud_scan_request"]
+    vars:
+      allowedAccounts: ["123456789012", "234567890123"]
+    rules:
+      - action: deny
+        when: |
+          resource.account_id != "" &&
+          !(resource.account_id in allowedAccounts)
+        reason: "Account not authorized for scanning"
+```
+
+See [Cloud security policy examples](../../policy/examples/cloud-security.yaml) for comprehensive examples.

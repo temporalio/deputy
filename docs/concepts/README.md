@@ -10,6 +10,8 @@ Understanding these core ideas makes Deputy's CLI output and flags feel predicta
 | **Inventory & SBOMs** | "How does Deputy discover packages? What's a PURL?" | [Inventory and SBOMs](inventory-and-sboms.md) |
 | **Vulnerabilities & Remediation** | "How does scanning work? What's a fix plan?" | [Vulnerabilities and remediation](vulnerabilities-and-remediation.md) |
 | **Policies (CEL)** | "How do I encode rules? What are entrypoints?" | [Policies](policies.md) |
+| **Cloud Scanning** | "How do I scan AWS AMIs and EBS snapshots?" | [Cloud scanning](cloud-scanning.md) |
+| **Terraform** | "How does Deputy handle Terraform requirements?" | [Terraform](terraform.md) |
 
 ## Quick Orientation
 

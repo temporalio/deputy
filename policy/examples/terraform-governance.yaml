@@ -1,0 +1,244 @@
+# Terraform Governance Policies
+#
+# Comprehensive policy suite for Terraform infrastructure-as-code governance.
+# Covers version requirements, provider restrictions, and security best practices.
+#
+# Usage:
+#   deputy diff --policy policy/examples/terraform-governance.yaml
+#   deputy scan --policy policy/examples/terraform-governance.yaml --ecosystems terraform
+#
+# These policies use the diff_dependency_change entrypoint which triggers for
+# any dependency change, including Terraform requirements. Filter by ecosystem
+# and metadata.kind to target specific Terraform components.
+
+policies:
+  # ============================================================================
+  # TERRAFORM CORE VERSION REQUIREMENTS
+  # ============================================================================
+
+  - name: terraform-minimum-version
+    description: Require Terraform >= 1.5.0 for all configurations
+    entrypoints: ["diff_dependency_change"]
+    vars:
+      minMajor: 1
+      minMinor: 5
+      isTerraformCore: |
+        pkg.ecosystem.lowerAscii() == "terraform" &&
+        pkg.metadata != null &&
+        pkg.metadata.kind == "terraform_core"
+      hasMinVersion: |
+        pkg.metadata != null &&
+        "min_major" in pkg.metadata &&
+        "min_minor" in pkg.metadata
+      belowMinimum: |
+        hasMinVersion && (
+          pkg.metadata.min_major < minMajor ||
+          (pkg.metadata.min_major == minMajor && pkg.metadata.min_minor < minMinor)
+        )
+    rules:
+      - action: deny
+        when: isTerraformCore && (!hasMinVersion || belowMinimum)
+        reason: "Terraform required_version must be >= 1.5.0"
+        remediation: 'Update terraform { required_version = ">= 1.5.0" }'
+
+  - name: terraform-version-upper-bound
+    description: Warn when Terraform version has no upper bound (risky for stability)
+    entrypoints: ["diff_dependency_change"]
+    vars:
+      isTerraformCore: |
+        pkg.ecosystem.lowerAscii() == "terraform" &&
+        pkg.metadata != null &&
+        pkg.metadata.kind == "terraform_core"
+      hasNoUpperBound: |
+        pkg.metadata != null &&
+        !("max_version" in pkg.metadata)
+    rules:
+      - action: warn
+        when: isTerraformCore && hasNoUpperBound
+        reason: "Terraform version constraint has no upper bound"
+        remediation: 'Consider using pessimistic constraint like "~> 1.5" to prevent unexpected major upgrades'
+
+  # ============================================================================
+  # PROVIDER SOURCE RESTRICTIONS
+  # ============================================================================
+
+  - name: provider-source-allowlist
+    description: Only allow providers from trusted sources
+    entrypoints: ["diff_dependency_change"]
+    vars:
+      allowedNamespaces:
+        - "hashicorp"
+        - "integrations"  # Common third-party namespace
+      isProvider: |
+        pkg.ecosystem.lowerAscii() == "terraform" &&
+        pkg.metadata != null &&
+        pkg.metadata.kind == "terraform_provider"
+      hasSource: 'pkg.metadata != null && "source" in pkg.metadata'
+      getNamespace: 'hasSource ? pkg.metadata.source.split("/")[0] : ""'
+      isAllowedNamespace: 'getNamespace in allowedNamespaces'
+    rules:
+      - action: deny
+        when: isProvider && hasSource && !isAllowedNamespace
+        reason: "Provider source namespace is not in the approved list"
+        remediation: "Use providers from approved namespaces: hashicorp, integrations"
+
+  - name: block-community-providers-in-production
+    description: Block non-HashiCorp providers in production modules
+    entrypoints: ["diff_dependency_change"]
+    vars:
+      isProvider: |
+        pkg.ecosystem.lowerAscii() == "terraform" &&
+        pkg.metadata != null &&
+        pkg.metadata.kind == "terraform_provider"
+      hasSource: 'pkg.metadata != null && "source" in pkg.metadata'
+      isHashiCorpProvider: 'hasSource && pkg.metadata.source.startsWith("hashicorp/")'
+      # Detect production modules by path pattern (customize as needed)
+      isProductionPath: |
+        pkg.locations.exists(loc,
+          loc.contains("/prod/") ||
+          loc.contains("/production/") ||
+          loc.contains("/live/")
+        )
+    rules:
+      - action: deny
+        when: isProvider && isProductionPath && !isHashiCorpProvider
+        reason: "Non-HashiCorp providers are not allowed in production configurations"
+        remediation: "Use official HashiCorp providers or get security approval for third-party providers"
+
+  # ============================================================================
+  # PROVIDER VERSION REQUIREMENTS
+  # ============================================================================
+
+  - name: aws-provider-minimum-version
+    description: Require AWS provider >= 5.0 (latest major version)
+    entrypoints: ["diff_dependency_change"]
+    vars:
+      minMajor: 5
+      isAWSProvider: |
+        pkg.ecosystem.lowerAscii() == "terraform" &&
+        pkg.metadata != null &&
+        pkg.metadata.kind == "terraform_provider" &&
+        pkg.metadata.source == "hashicorp/aws"
+      hasMinVersion: 'pkg.metadata != null && "min_major" in pkg.metadata'
+      belowMinimum: 'hasMinVersion && pkg.metadata.min_major < minMajor'
+    rules:
+      - action: deny
+        when: isAWSProvider && (!hasMinVersion || belowMinimum)
+        reason: "AWS provider must be >= 5.0"
+        remediation: 'Update to aws = { source = "hashicorp/aws", version = "~> 5.0" }'
+
+  - name: google-provider-minimum-version
+    description: Require Google provider >= 5.0
+    entrypoints: ["diff_dependency_change"]
+    vars:
+      minMajor: 5
+      isGoogleProvider: |
+        pkg.ecosystem.lowerAscii() == "terraform" &&
+        pkg.metadata != null &&
+        pkg.metadata.kind == "terraform_provider" &&
+        (pkg.metadata.source == "hashicorp/google" || pkg.metadata.source == "hashicorp/google-beta")
+      hasMinVersion: 'pkg.metadata != null && "min_major" in pkg.metadata'
+      belowMinimum: 'hasMinVersion && pkg.metadata.min_major < minMajor'
+    rules:
+      - action: deny
+        when: isGoogleProvider && (!hasMinVersion || belowMinimum)
+        reason: "Google provider must be >= 5.0"
+        remediation: 'Update to google = { source = "hashicorp/google", version = "~> 5.0" }'
+
+  - name: azurerm-provider-minimum-version
+    description: Require AzureRM provider >= 3.0
+    entrypoints: ["diff_dependency_change"]
+    vars:
+      minMajor: 3
+      isAzureProvider: |
+        pkg.ecosystem.lowerAscii() == "terraform" &&
+        pkg.metadata != null &&
+        pkg.metadata.kind == "terraform_provider" &&
+        pkg.metadata.source == "hashicorp/azurerm"
+      hasMinVersion: 'pkg.metadata != null && "min_major" in pkg.metadata'
+      belowMinimum: 'hasMinVersion && pkg.metadata.min_major < minMajor'
+    rules:
+      - action: deny
+        when: isAzureProvider && (!hasMinVersion || belowMinimum)
+        reason: "AzureRM provider must be >= 3.0"
+        remediation: 'Update to azurerm = { source = "hashicorp/azurerm", version = "~> 3.0" }'
+
+  # ============================================================================
+  # DEPRECATED PROVIDER WARNINGS
+  # ============================================================================
+
+  - name: block-deprecated-providers
+    description: Block known deprecated or problematic providers
+    entrypoints: ["diff_dependency_change"]
+    vars:
+      deprecatedProviders:
+        - source: "hashicorp/template"
+          reason: "Deprecated - use templatefile() function instead"
+        - source: "hashicorp/null"
+          reason: "Often indicates workaround - consider refactoring"
+        - source: "hashicorp/external"
+          reason: "Security risk - executes arbitrary commands"
+      isProvider: |
+        pkg.ecosystem.lowerAscii() == "terraform" &&
+        pkg.metadata != null &&
+        pkg.metadata.kind == "terraform_provider"
+      hasSource: 'pkg.metadata != null && "source" in pkg.metadata'
+      isDeprecated: |
+        hasSource && deprecatedProviders.exists(d, d.source == pkg.metadata.source)
+    rules:
+      - action: warn
+        when: isProvider && isDeprecated
+        reason: "Using deprecated or problematic provider"
+        remediation: "Migrate away from deprecated providers"
+
+  - name: block-external-provider
+    description: Block the external provider (arbitrary command execution)
+    entrypoints: ["diff_dependency_change"]
+    vars:
+      isExternalProvider: |
+        pkg.ecosystem.lowerAscii() == "terraform" &&
+        pkg.metadata != null &&
+        pkg.metadata.kind == "terraform_provider" &&
+        pkg.metadata.source == "hashicorp/external"
+    rules:
+      - action: deny
+        when: isExternalProvider
+        reason: "External provider is not allowed - it executes arbitrary commands"
+        remediation: "Use native Terraform resources or data sources instead"
+
+  # ============================================================================
+  # VERSION CONSTRAINT BEST PRACTICES
+  # ============================================================================
+
+  - name: require-version-constraints
+    description: Require explicit version constraints for all providers
+    entrypoints: ["diff_dependency_change"]
+    vars:
+      isProvider: |
+        pkg.ecosystem.lowerAscii() == "terraform" &&
+        pkg.metadata != null &&
+        pkg.metadata.kind == "terraform_provider"
+      hasNoConstraint: |
+        pkg.version == "" || pkg.version == "latest"
+    rules:
+      - action: deny
+        when: isProvider && hasNoConstraint
+        reason: "Provider must have an explicit version constraint"
+        remediation: "Add version constraint to prevent unexpected upgrades"
+
+  - name: prefer-pessimistic-constraints
+    description: Recommend pessimistic version constraints (~>) for stability
+    entrypoints: ["diff_dependency_change"]
+    vars:
+      isProvider: |
+        pkg.ecosystem.lowerAscii() == "terraform" &&
+        pkg.metadata != null &&
+        pkg.metadata.kind == "terraform_provider"
+      hasConstraint: 'pkg.metadata != null && "constraint" in pkg.metadata && pkg.metadata.constraint != ""'
+      isPessimistic: 'hasConstraint && pkg.metadata.constraint.contains("~>")'
+      hasUpperBound: 'pkg.metadata != null && "max_version" in pkg.metadata'
+    rules:
+      - action: warn
+        when: isProvider && hasConstraint && !isPessimistic && !hasUpperBound
+        reason: "Consider using pessimistic constraint (~>) for version stability"
+        remediation: 'Use "~> X.Y" to allow patch updates but prevent breaking changes'

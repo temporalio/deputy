@@ -244,9 +244,9 @@ Deputy supports 15 ecosystems for scanning:
 | Haskell | `haskell` | cabal.project.freeze, stack.yaml.lock |
 | R | `r` | renv.lock |
 | C++ | `cpp` | conan.lock |
+| Terraform | `terraform` | *.tf, *.tf.json (required_version, required_providers) |
 
-Detection is powered by [OSV-SCALIBR](https://github.com/google/osv-scalibr) with custom extensions for GitHub Actions.
-Binary analysis extracts dependencies from compiled Go and Rust executables
+Detection is powered by [OSV-SCALIBR](https://github.com/google/osv-scalibr) with custom extensions for GitHub Actions and Terraform. Binary analysis extracts dependencies from compiled Go and Rust executables.
 
 ### Historical Analysis
 
@@ -448,6 +448,57 @@ Detected filename patterns:
 - `*.dockerfile`, `*.containerfile` (suffixes)
 
 See [Dockerfile scanning guide](../guides/dockerfile.md) for policy examples and variables.
+
+### Cloud Resources
+
+Scan AWS AMIs and EBS snapshots for vulnerabilities:
+
+```console
+# Scan an AMI
+$ deputy scan aws://ami/ami-0123456789abcdef0
+
+# With region override
+$ deputy scan aws://ami/ami-xxx --region us-west-2
+
+# Using a specific AWS profile
+$ deputy scan aws://ami/ami-xxx --profile prod-account
+
+# Scan an EBS snapshot directly
+$ deputy scan aws://ebs/snap-0123456789abcdef0
+
+# Bare resource IDs also work
+$ deputy scan ami-0123456789abcdef0
+```
+
+Cloud-specific flags:
+
+| Flag | Description |
+|------|-------------|
+| `--region` | AWS region override |
+| `--profile` | AWS credential profile |
+| `--smart-download` | Enable/disable smart block downloading (default: true) |
+
+**Authentication:** Deputy uses standard AWS SDK credential chains (environment variables, `~/.aws/credentials`, IAM roles). See [Cloud scanning concepts](../concepts/cloud-scanning.md) for required IAM permissions.
+
+**Smart downloading:** For EBS-backed resources, Deputy downloads only the blocks containing package databases (~7% of snapshot size). Disable with `--smart-download=false` if needed.
+
+**With policies:**
+
+```console
+# Apply cloud security policies
+$ deputy scan aws://ami/ami-xxx --policy policy/examples/cloud-security.yaml
+
+# Policies can use resource metadata (tags, region, account)
+$ deputy scan aws://ami/ami-xxx --policy policy/examples/cloud-security.yaml
+```
+
+See [Cloud scanning concepts](../concepts/cloud-scanning.md) for policy entrypoints and variables.
+
+**Planned cloud support:**
+- AWS Lambda functions (`aws://lambda/function-name`)
+- AWS ECR images (`aws://ecr/...`)
+- Azure VM Images, Managed Disks
+- GCP Compute Images, Persistent Disks
 
 ### VM and Rootfs Images
 

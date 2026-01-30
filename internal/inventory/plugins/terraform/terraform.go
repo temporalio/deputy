@@ -41,6 +41,8 @@ type RequirementKind string
 const (
 	RequirementTerraformCore     RequirementKind = "terraform_core"
 	RequirementTerraformProvider RequirementKind = "terraform_provider"
+	RequirementLockedProvider    RequirementKind = "locked_provider"
+	RequirementModule            RequirementKind = "module"
 )
 
 // Requirement captures a Terraform requirement discovered in config.
@@ -49,6 +51,14 @@ type Requirement struct {
 	Name    string
 	Version string
 	Path    string
+
+	// Lock file fields (for RequirementLockedProvider)
+	Constraints string   // Original version constraints
+	Hashes      []string // Provider hashes (h1:, zh:)
+
+	// Module fields (for RequirementModule)
+	Source     string // Module source (registry, git, local)
+	ModuleType string // "registry", "git", "local"
 }
 
 // Extractor implements an OSV-Scalibr filesystem extractor for Terraform requirements.
@@ -117,13 +127,26 @@ func isTerraformConfigPath(p string) bool {
 	if clean == "." {
 		return false
 	}
-	// Skip Terraform state/config cache directory
+	// Skip Terraform state/config cache directory (but allow lock file)
+	base := path.Base(clean)
+	lower := strings.ToLower(base)
+
+	// Lock file is always processed
+	if lower == ".terraform.lock.hcl" {
+		return true
+	}
+
+	// Skip .terraform directory
 	if strings.Contains(clean, "/.terraform/") || strings.HasPrefix(clean, ".terraform/") {
 		return false
 	}
-	base := path.Base(clean)
-	lower := strings.ToLower(base)
+
 	return strings.HasSuffix(lower, ".tf") || strings.HasSuffix(lower, ".tf.json")
+}
+
+// isLockFile returns true if the path is a Terraform lock file.
+func isLockFile(p string) bool {
+	return strings.ToLower(path.Base(p)) == ".terraform.lock.hcl"
 }
 
 // ParseDir parses Terraform configuration files in dir and returns any requirements found.
@@ -155,6 +178,18 @@ func ParseDir(ctx context.Context, fsys fs.ReadDirFS, dir string) ([]Requirement
 			slog.WarnContext(ctx, "terraform: read file failed", "path", filePath, "error", err)
 			continue
 		}
+
+		// Handle lock file separately
+		if isLockFile(filePath) {
+			lockReqs, err := parseLockFile(ctx, parser, filePath, data)
+			if err != nil {
+				slog.WarnContext(ctx, "terraform: lock file parse failed", "path", filePath, "error", err)
+				continue
+			}
+			reqs = append(reqs, lockReqs...)
+			continue
+		}
+
 		file, diags := parseTerraformFile(parser, filePath, data)
 		if diags.HasErrors() {
 			slog.WarnContext(ctx, "terraform: parse error", "path", filePath, "diagnostics", diags.Error())
@@ -175,6 +210,97 @@ func parseTerraformFile(parser *hclparse.Parser, filename string, data []byte) (
 	return parser.ParseHCL(data, filename)
 }
 
+// parseLockFile parses a .terraform.lock.hcl file and returns locked provider requirements.
+func parseLockFile(ctx context.Context, parser *hclparse.Parser, filePath string, data []byte) ([]Requirement, error) {
+	file, diags := parser.ParseHCL(data, filePath)
+	if diags.HasErrors() {
+		return nil, diags
+	}
+	if file == nil || file.Body == nil {
+		return nil, nil
+	}
+
+	content, diags := file.Body.Content(lockFileSchema)
+	if diags.HasErrors() {
+		slog.WarnContext(ctx, "terraform: lock file schema error", "path", filePath, "diagnostics", diags.Error())
+	}
+
+	var reqs []Requirement
+	for _, block := range content.Blocks {
+		if block.Type != "provider" || len(block.Labels) == 0 {
+			continue
+		}
+
+		// Label is the full source like "registry.terraform.io/hashicorp/aws"
+		fullSource := block.Labels[0]
+
+		// Parse provider block attributes
+		attrs, _ := block.Body.JustAttributes()
+
+		var version, constraints string
+		var hashes []string
+
+		if attr, ok := attrs["version"]; ok {
+			version = stringValueOrEmpty(attr.Expr)
+		}
+		if attr, ok := attrs["constraints"]; ok {
+			constraints = stringValueOrEmpty(attr.Expr)
+		}
+		if attr, ok := attrs["hashes"]; ok {
+			hashes = stringListValue(attr.Expr)
+		}
+
+		// Convert full source to short source (e.g., "registry.terraform.io/hashicorp/aws" -> "hashicorp/aws")
+		source := normalizeProviderSource(fullSource)
+
+		reqs = append(reqs, Requirement{
+			Kind:        RequirementLockedProvider,
+			Name:        source,
+			Version:     version,
+			Path:        filePath,
+			Constraints: constraints,
+			Hashes:      hashes,
+		})
+	}
+
+	return reqs, nil
+}
+
+// normalizeProviderSource converts a full provider source to short form.
+// "registry.terraform.io/hashicorp/aws" -> "hashicorp/aws"
+func normalizeProviderSource(source string) string {
+	source = strings.TrimSpace(source)
+	if source == "" {
+		return source
+	}
+	// Remove registry prefix if present
+	if strings.HasPrefix(source, "registry.terraform.io/") {
+		return strings.TrimPrefix(source, "registry.terraform.io/")
+	}
+	return source
+}
+
+// stringListValue extracts a list of strings from an HCL expression.
+func stringListValue(expr hcl.Expression) []string {
+	if expr == nil {
+		return nil
+	}
+	val, diags := expr.Value(nil)
+	if diags.HasErrors() || !val.IsKnown() {
+		return nil
+	}
+	if !val.Type().IsTupleType() && !val.Type().IsListType() && !val.Type().IsSetType() {
+		return nil
+	}
+	var result []string
+	for _, elem := range val.AsValueSlice() {
+		if elem.IsKnown() && elem.Type() == cty.String {
+			result = append(result, elem.AsString())
+		}
+	}
+	return result
+}
+
 var rootSchema = &hcl.BodySchema{
 	Blocks: []hcl.BlockHeaderSchema{
 		{Type: "terraform"},
@@ -191,6 +317,29 @@ var terraformSchema = &hcl.BodySchema{
 	},
 }
 
+// Lock file schema for .terraform.lock.hcl
+var lockFileSchema = &hcl.BodySchema{
+	Blocks: []hcl.BlockHeaderSchema{
+		{Type: "provider", LabelNames: []string{"source"}},
+	},
+}
+
+var lockProviderSchema = &hcl.BodySchema{
+	Attributes: []hcl.AttributeSchema{
+		{Name: "version"},
+		{Name: "constraints"},
+		{Name: "hashes"},
+	},
+}
+
+// Module block schema
+var moduleSchema = &hcl.BodySchema{
+	Attributes: []hcl.AttributeSchema{
+		{Name: "source"},
+		{Name: "version"},
+	},
+}
+
 func extractRequirements(body hcl.Body, filePath string) []Requirement {
 	if body == nil {
 		return nil
@@ -201,9 +350,94 @@ func extractRequirements(body hcl.Body, filePath string) []Requirement {
 		switch block.Type {
 		case "terraform":
 			reqs = append(reqs, extractTerraformBlock(block, filePath)...)
+		case "module":
+			if req := extractModuleBlock(block, filePath); req != nil {
+				reqs = append(reqs, *req)
+			}
 		}
 	}
 	return reqs
+}
+
+func extractModuleBlock(block *hcl.Block, filePath string) *Requirement {
+	if block == nil || len(block.Labels) == 0 {
+		return nil
+	}
+	moduleName := block.Labels[0]
+
+	attrs, _ := block.Body.JustAttributes()
+	if len(attrs) == 0 {
+		return nil
+	}
+
+	var source, version string
+	if attr, ok := attrs["source"]; ok {
+		source = stringValueOrEmpty(attr.Expr)
+	}
+	if attr, ok := attrs["version"]; ok {
+		version = stringValueOrEmpty(attr.Expr)
+	}
+
+	// Skip modules without a source attribute
+	if source == "" {
+		return nil
+	}
+
+	modType := classifyModuleSource(source)
+
+	return &Requirement{
+		Kind:       RequirementModule,
+		Name:       moduleName,
+		Version:    version,
+		Path:       filePath,
+		Source:     source,
+		ModuleType: modType,
+	}
+}
+
+// classifyModuleSource determines the module type from its source string.
+func classifyModuleSource(source string) string {
+	source = strings.TrimSpace(source)
+	if source == "" {
+		return ""
+	}
+
+	// Local modules: start with ./ or ../
+	if strings.HasPrefix(source, "./") || strings.HasPrefix(source, "../") {
+		return "local"
+	}
+
+	// Git modules: git::, github.com/, bitbucket.org/, or contain .git
+	if strings.HasPrefix(source, "git::") ||
+		strings.HasPrefix(source, "github.com/") ||
+		strings.HasPrefix(source, "bitbucket.org/") ||
+		strings.Contains(source, ".git") {
+		return "git"
+	}
+
+	// HTTP/S modules
+	if strings.HasPrefix(source, "http://") || strings.HasPrefix(source, "https://") {
+		return "http"
+	}
+
+	// S3 modules
+	if strings.HasPrefix(source, "s3::") {
+		return "s3"
+	}
+
+	// GCS modules
+	if strings.HasPrefix(source, "gcs::") {
+		return "gcs"
+	}
+
+	// Mercurial modules
+	if strings.HasPrefix(source, "hg::") {
+		return "mercurial"
+	}
+
+	// Default to registry module (namespace/name/provider format)
+	// e.g., "terraform-aws-modules/vpc/aws"
+	return "registry"
 }
 
 func extractTerraformBlock(block *hcl.Block, filePath string) []Requirement {
@@ -363,14 +597,26 @@ func requirementsToPackages(reqs []Requirement) []*extractor.Package {
 	}
 	seen := make(map[pkgKey]*extractor.Package)
 	for _, req := range reqs {
-		if req.Name == "" {
-			continue
+		// Determine package name based on requirement kind
+		pkgName := req.Name
+		switch req.Kind {
+		case RequirementModule:
+			// For modules, use the source as the package name (not the module label)
+			pkgName = req.Source
+			if pkgName == "" {
+				continue
+			}
+		default:
+			if pkgName == "" {
+				continue
+			}
 		}
-		key := pkgKey{kind: req.Kind, name: req.Name, version: req.Version}
+
+		key := pkgKey{kind: req.Kind, name: pkgName, version: req.Version}
 		pkg := seen[key]
 		if pkg == nil {
 			pkg = &extractor.Package{
-				Name:      req.Name,
+				Name:      pkgName,
 				Version:   req.Version,
 				PURLType:  purlTypeForRequirement(req.Kind),
 				Locations: nil,
@@ -391,8 +637,10 @@ func requirementsToPackages(reqs []Requirement) []*extractor.Package {
 
 func purlTypeForRequirement(kind RequirementKind) string {
 	switch kind {
-	case RequirementTerraformProvider:
+	case RequirementTerraformProvider, RequirementLockedProvider:
 		return purlx.TypeTerraformProvider
+	case RequirementModule:
+		return purlx.TypeTerraformModule
 	default:
 		return purlx.TypeTerraform
 	}
@@ -400,12 +648,45 @@ func purlTypeForRequirement(kind RequirementKind) string {
 
 func requirementMetadata(req Requirement) map[string]any {
 	meta := map[string]any{
-		"kind":       string(req.Kind),
-		"constraint": strings.TrimSpace(req.Version),
+		"kind": string(req.Kind),
 	}
-	if req.Kind == RequirementTerraformProvider {
+
+	switch req.Kind {
+	case RequirementTerraformProvider:
 		meta["source"] = strings.TrimSpace(req.Name)
+		meta["constraint"] = strings.TrimSpace(req.Version)
+
+	case RequirementLockedProvider:
+		meta["source"] = strings.TrimSpace(req.Name)
+		meta["resolved"] = true
+		if req.Constraints != "" {
+			meta["constraint"] = strings.TrimSpace(req.Constraints)
+		}
+		if len(req.Hashes) > 0 {
+			meta["hashes"] = req.Hashes
+		}
+		// For locked providers, the version is exact, so we parse it directly
+		if req.Version != "" {
+			if major, minor, patch, ok := parseSemverParts(req.Version); ok {
+				meta["version_major"] = major
+				meta["version_minor"] = minor
+				meta["version_patch"] = patch
+			}
+		}
+		return meta // Skip constraint parsing for locked providers
+
+	case RequirementModule:
+		meta["source"] = strings.TrimSpace(req.Source)
+		meta["module_type"] = req.ModuleType
+		if req.Version != "" {
+			meta["constraint"] = strings.TrimSpace(req.Version)
+		}
+
+	case RequirementTerraformCore:
+		meta["constraint"] = strings.TrimSpace(req.Version)
 	}
+
+	// Parse version constraints for non-locked requirements
 	if req.Version == "" {
 		return meta
 	}

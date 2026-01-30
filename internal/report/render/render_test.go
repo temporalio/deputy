@@ -69,14 +69,16 @@ func TestVulnerabilityList(t *testing.T) {
 			{PrimaryID: "CVE-2", Package: "indirect-pkg", Version: "1.0.0", IsDirect: false},
 		}
 
+		opts := VulnerabilityDisplayOptions{ShowDirectIndirect: true}
+
 		var bufDirect bytes.Buffer
-		VulnerabilityList(&bufDirect, consDirect, VulnerabilityDisplayOptions{})
+		VulnerabilityList(&bufDirect, consDirect, opts)
 		if !strings.Contains(bufDirect.String(), "[direct]") {
 			t.Errorf("expected [direct] marker for direct dependency")
 		}
 
 		var bufIndirect bytes.Buffer
-		VulnerabilityList(&bufIndirect, consIndirect, VulnerabilityDisplayOptions{})
+		VulnerabilityList(&bufIndirect, consIndirect, opts)
 		if !strings.Contains(bufIndirect.String(), "[indirect]") {
 			t.Errorf("expected [indirect] marker for indirect dependency")
 		}

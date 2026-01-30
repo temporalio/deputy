@@ -17,6 +17,7 @@ import (
 	"github.com/picatz/deputy/internal/compare"
 	"github.com/picatz/deputy/internal/dependency"
 	"github.com/picatz/deputy/internal/inventory/manifests"
+	"github.com/picatz/deputy/internal/inventory/plugins/terraform"
 	"github.com/picatz/deputy/internal/purlx"
 )
 
@@ -54,7 +55,16 @@ func Convert(pkgs []*extractor.Package, opts Options) []osv.PkgInput {
 		if ecos == "" && pkg.PURLType != "" {
 			ecos = pkg.PURLType
 		}
+		// Handle Terraform packages by mapping to Go ecosystem for vulnerability scanning
 		if purlx.IsTerraformType(pkg.PURLType) || strings.HasPrefix(strings.ToLower(ecos), "terraform") {
+			goInput := convertTerraformToGo(pkg)
+			if goInput != nil {
+				key := fmt.Sprintf("go|%s|%s|%s", strings.ToLower(goInput.Name), goInput.Version, goInput.PURL)
+				if seen[key] == nil {
+					seen[key] = goInput
+				}
+				seen[key].Locations = appendUnique(seen[key].Locations, pkg.Locations...)
+			}
 			continue
 		}
 		if strings.EqualFold(ecos, "github") || strings.EqualFold(ecos, purlx.TypeGitHubActions) {
@@ -571,4 +581,70 @@ func parseCargoManifest(content []byte) (*cargoData, error) {
 
 func normalizeCrateName(name string) string {
 	return strings.ToLower(strings.TrimSpace(name))
+}
+
+// convertTerraformToGo converts a Terraform package to a Go ecosystem package for OSV queries.
+// Returns nil if the package cannot be mapped to a Go module.
+func convertTerraformToGo(pkg *extractor.Package) *osv.PkgInput {
+	if pkg == nil {
+		return nil
+	}
+
+	meta, ok := pkg.Metadata.(map[string]any)
+	if !ok || meta == nil {
+		return nil
+	}
+
+	kind, _ := meta["kind"].(string)
+	source, _ := meta["source"].(string)
+	moduleType, _ := meta["module_type"].(string)
+
+	var goModule, version string
+
+	switch kind {
+	case "locked_provider":
+		// Locked providers have exact versions - can query OSV
+		goModule = terraform.MapProviderToGoModule(source)
+		version = terraform.NormalizeGoVersion(pkg.Version)
+
+	case "module":
+		if moduleType == "git" {
+			// Git modules may have a Go module path
+			goModule = terraform.MapGitModuleToGoModule(source)
+			version = terraform.ExtractGitRef(source)
+			if version != "" && !strings.HasPrefix(version, "v") {
+				version = "v" + version
+			}
+		}
+		// Registry and local modules can't be mapped to Go modules
+
+	case "terraform_core":
+		// Terraform core could be mapped, but version constraints aren't exact
+		// Only map if we have a specific version (which we typically don't from required_version)
+		return nil
+
+	case "terraform_provider":
+		// Required providers have constraints, not exact versions
+		// Need lock file for accurate vulnerability scanning
+		return nil
+
+	default:
+		return nil
+	}
+
+	if goModule == "" {
+		return nil
+	}
+
+	// Create Go ecosystem input
+	return &osv.PkgInput{
+		QueryKey: osv.QueryKey{
+			Name:      goModule,
+			Version:   version,
+			Ecosystem: "Go",
+		},
+		PackageContext: osv.PackageContext{
+			Locations: pkg.Locations,
+		},
+	}
 }

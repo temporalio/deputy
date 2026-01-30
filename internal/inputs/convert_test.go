@@ -918,3 +918,123 @@ func TestConvert_LayerDetails(t *testing.T) {
 		}
 	})
 }
+
+func TestConvert_TerraformToGoMapping(t *testing.T) {
+	t.Run("locked provider maps to Go module", func(t *testing.T) {
+		pkgs := []*extractor.Package{
+			{
+				Name:     "hashicorp/aws",
+				Version:  "5.31.0",
+				PURLType: purlx.TypeTerraformProvider,
+				Metadata: map[string]any{
+					"kind":   "locked_provider",
+					"source": "hashicorp/aws",
+				},
+				Locations: []string{".terraform.lock.hcl"},
+			},
+		}
+		inputs := Convert(pkgs, Options{})
+		if len(inputs) != 1 {
+			t.Fatalf("expected 1 input, got %d", len(inputs))
+		}
+		in := inputs[0]
+		if in.Ecosystem != "Go" {
+			t.Errorf("Ecosystem = %q, want Go", in.Ecosystem)
+		}
+		if in.Name != "github.com/hashicorp/terraform-provider-aws" {
+			t.Errorf("Name = %q, want github.com/hashicorp/terraform-provider-aws", in.Name)
+		}
+		if in.Version != "v5.31.0" {
+			t.Errorf("Version = %q, want v5.31.0", in.Version)
+		}
+	})
+
+	t.Run("required provider is skipped (no exact version)", func(t *testing.T) {
+		pkgs := []*extractor.Package{
+			{
+				Name:     "hashicorp/aws",
+				Version:  "~> 5.0",
+				PURLType: purlx.TypeTerraformProvider,
+				Metadata: map[string]any{
+					"kind":       "terraform_provider",
+					"source":     "hashicorp/aws",
+					"constraint": "~> 5.0",
+				},
+				Locations: []string{"main.tf"},
+			},
+		}
+		inputs := Convert(pkgs, Options{})
+		if len(inputs) != 0 {
+			t.Errorf("expected 0 inputs for required_providers (constraint), got %d", len(inputs))
+		}
+	})
+
+	t.Run("git module maps to Go module", func(t *testing.T) {
+		pkgs := []*extractor.Package{
+			{
+				Name:     "git::https://github.com/terraform-aws-modules/terraform-aws-eks.git?ref=v19.0.0",
+				Version:  "",
+				PURLType: purlx.TypeTerraformModule,
+				Metadata: map[string]any{
+					"kind":        "module",
+					"source":      "git::https://github.com/terraform-aws-modules/terraform-aws-eks.git?ref=v19.0.0",
+					"module_type": "git",
+				},
+				Locations: []string{"main.tf"},
+			},
+		}
+		inputs := Convert(pkgs, Options{})
+		if len(inputs) != 1 {
+			t.Fatalf("expected 1 input, got %d", len(inputs))
+		}
+		in := inputs[0]
+		if in.Ecosystem != "Go" {
+			t.Errorf("Ecosystem = %q, want Go", in.Ecosystem)
+		}
+		if in.Name != "github.com/terraform-aws-modules/terraform-aws-eks" {
+			t.Errorf("Name = %q, want github.com/terraform-aws-modules/terraform-aws-eks", in.Name)
+		}
+		if in.Version != "v19.0.0" {
+			t.Errorf("Version = %q, want v19.0.0", in.Version)
+		}
+	})
+
+	t.Run("registry module is skipped", func(t *testing.T) {
+		pkgs := []*extractor.Package{
+			{
+				Name:     "terraform-aws-modules/vpc/aws",
+				Version:  "5.1.0",
+				PURLType: purlx.TypeTerraformModule,
+				Metadata: map[string]any{
+					"kind":        "module",
+					"source":      "terraform-aws-modules/vpc/aws",
+					"module_type": "registry",
+				},
+				Locations: []string{"main.tf"},
+			},
+		}
+		inputs := Convert(pkgs, Options{})
+		if len(inputs) != 0 {
+			t.Errorf("expected 0 inputs for registry module, got %d", len(inputs))
+		}
+	})
+
+	t.Run("terraform core is skipped (constraint)", func(t *testing.T) {
+		pkgs := []*extractor.Package{
+			{
+				Name:     "terraform",
+				Version:  ">= 1.5.0",
+				PURLType: purlx.TypeTerraform,
+				Metadata: map[string]any{
+					"kind":       "terraform_core",
+					"constraint": ">= 1.5.0",
+				},
+				Locations: []string{"versions.tf"},
+			},
+		}
+		inputs := Convert(pkgs, Options{})
+		if len(inputs) != 0 {
+			t.Errorf("expected 0 inputs for terraform core (constraint), got %d", len(inputs))
+		}
+	})
+}

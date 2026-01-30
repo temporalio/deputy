@@ -1,12 +1,25 @@
 # Terraform Required Version Guard (Diff)
 #
 # Enforce a minimum Terraform core version in required_version constraints.
-# Targets diff entrypoint and checks parsed constraint metadata:
+# Catches when someone:
+#   - Adds a new main.tf with an outdated required_version
+#   - Changes an existing required_version to something too old
+#   - Adds terraform config without specifying required_version
+#
+# The diff_dependency_change entrypoint fires for any added/changed/removed
+# dependency, including Terraform requirements. This policy filters to
+# terraform_core requirements and checks the parsed version constraint.
+#
+# Metadata available:
 #   pkg.metadata.kind == "terraform_core"
-#   pkg.metadata.min_* derived from the constraint expression.
+#   pkg.metadata.min_major, min_minor, min_patch (parsed from constraint)
+#   pkg.metadata.constraint (raw constraint string like ">= 1.5.0")
 #
 # Example:
-#   deputy diff --policy policy/examples/terraform-min-required-version.yaml
+#   deputy diff main feature-branch --policy policy/examples/terraform-min-required-version.yaml
+#
+# Scenario: PR adds infrastructure/main.tf with terraform { required_version = "~> 1.0" }
+# Result: DENIED - constraint allows versions below 1.5.0
 
 policies:
   - name: terraform-min-required-version
