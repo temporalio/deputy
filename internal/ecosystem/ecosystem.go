@@ -23,6 +23,7 @@ const (
 	Pub       Ecosystem = "pub"
 	CocoaPods Ecosystem = "cocoapods"
 	Packagist Ecosystem = "packagist"
+	Nix       Ecosystem = "nix"
 	Unknown   Ecosystem = "unknown"
 )
 
@@ -52,6 +53,8 @@ func Parse(s string) Ecosystem {
 		return CocoaPods
 	case "packagist", "composer", "php":
 		return Packagist
+	case "nix", "nixos", "nixpkgs", "flakes":
+		return Nix
 	default:
 		return Unknown
 	}
@@ -150,7 +153,7 @@ func (e Ecosystem) ProxyEntrypoint() policy.Entrypoint {
 // All returns all supported ecosystems.
 func All() []Ecosystem {
 	return []Ecosystem{
-		Go, NPM, PyPI, Maven, RubyGems, Cargo, NuGet, Hex, Pub, CocoaPods, Packagist,
+		Go, NPM, PyPI, Maven, RubyGems, Cargo, NuGet, Hex, Pub, CocoaPods, Packagist, Nix,
 	}
 }
 

@@ -25,6 +25,7 @@ import (
 	"github.com/picatz/deputy/internal/cache/disk"
 	"github.com/picatz/deputy/internal/cache/memory"
 	"github.com/picatz/deputy/internal/collections"
+	"github.com/picatz/deputy/internal/ecosystem"
 	"github.com/picatz/deputy/internal/httputil"
 	"github.com/picatz/deputy/internal/repository"
 	"github.com/picatz/deputy/internal/repository/workspace"
@@ -572,6 +573,8 @@ func resolveEcosystemLicenses(ctx context.Context, ecosystem, name, version stri
 		return LookupCocoaPodsLicense(ctx, name, version)
 	case "hex":
 		return LookupHexLicense(ctx, name, version)
+	case "nix", "nixpkgs", "nixos":
+		return resolveNixLicense(ctx, name, version)
 	default:
 		return RemoteModuleLicenseScan(ctx, name, version)
 	}
@@ -959,6 +962,47 @@ func LookupHexLicense(ctx context.Context, name, version string) []string {
 		return nil
 	}
 	return cleanLicenseList(payload.Meta.Licenses)
+}
+
+// resolveNixLicense detects the upstream ecosystem from a Nix package name
+// and delegates license lookup to the appropriate handler. Nix packages are
+// typically wrappers around upstream packages (PyPI, npm, Cargo, etc.).
+func resolveNixLicense(ctx context.Context, nixPkgName, version string) []string {
+	info := ecosystem.ParseNixPackageName(nixPkgName, version)
+
+	// If we detected an upstream ecosystem, delegate to that handler
+	if info.HasUpstreamEcosystem() {
+		switch info.Ecosystem {
+		case ecosystem.PyPI:
+			return LookupPyPILicense(ctx, info.Name, info.Version)
+		case ecosystem.NPM:
+			// npm packages often have GitHub sources, try remote scan
+			return RemoteModuleLicenseScan(ctx, info.Name, info.Version)
+		case ecosystem.Cargo:
+			return LookupCratesLicense(ctx, info.Name, info.Version)
+		case ecosystem.RubyGems:
+			// RubyGems packages often have GitHub sources
+			return RemoteModuleLicenseScan(ctx, info.Name, info.Version)
+		case ecosystem.Hex:
+			return LookupHexLicense(ctx, info.Name, info.Version)
+		case ecosystem.Packagist:
+			return LookupPackagistLicense(ctx, info.Name, info.Version)
+		case ecosystem.Pub:
+			return LookupPubLicense(ctx, info.Name, info.Version)
+		case ecosystem.CocoaPods:
+			return LookupCocoaPodsLicense(ctx, info.Name, info.Version)
+		case ecosystem.Go:
+			return mergeLicenseSets(
+				RemoteModuleLicenseScan(ctx, info.Name, info.Version),
+				GoProxyLicenseScan(ctx, info.Name, info.Version),
+			)
+		}
+	}
+
+	// For native packages with CPE but no upstream ecosystem,
+	// we can't look up licenses from a package registry.
+	// Fall back to generic remote scan if the package might be on GitHub.
+	return nil
 }
 
 func scanTarballForLicenses(ctx context.Context, url string) []string {

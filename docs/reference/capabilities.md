@@ -17,6 +17,9 @@ This page documents what Deputy can do across ecosystems, commands, and features
 | **Pub** | ✓ | ✓ | - | - | - | pubspec.lock |
 | **CocoaPods** | ✓ | ✓ | - | - | - | Podfile.lock |
 | **Packagist** | ✓ | ✓ | - | - | - | composer.lock |
+| **Nix** | ✓* | ✓ | - | - | - | flake.lock, /nix/store |
+
+\* **Nix ecosystem note:** Nix inventory and SBOM support uses OSV-SCALIBR's Nix extractor. Vulnerability data depends on OSV coverage—currently limited for NixOS packages. See [vulnix](https://github.com/nix-community/vulnix) for NVD-based Nix vuln scanning.
 
 **Additional extractors (via OSV-SCALIBR):**
 - GitHub Actions (.github/workflows/*.yml)

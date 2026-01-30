@@ -13,7 +13,7 @@ Deputy is a dependency management and security tool that:
 
 ### What ecosystems does Deputy support?
 
-Deputy supports 15 ecosystems for scanning via [OSV-SCALIBR](https://github.com/google/osv-scalibr) and custom extractors:
+Deputy supports 16 ecosystems for scanning via [OSV-SCALIBR](https://github.com/google/osv-scalibr) and custom extractors:
 
 | Ecosystem | Lockfiles / Manifests |
 |-----------|----------------------|
@@ -28,6 +28,7 @@ Deputy supports 15 ecosystems for scanning via [OSV-SCALIBR](https://github.com/
 | **Pub** | pubspec.lock |
 | **CocoaPods** | Podfile.lock, Package.resolved |
 | **Packagist** | composer.lock |
+| **Nix** | flake.lock, /nix/store packages |
 | **GitHub Actions** | .github/workflows/*.yml |
 | **Haskell** | cabal.project.freeze, stack.yaml.lock |
 | **R** | renv.lock |

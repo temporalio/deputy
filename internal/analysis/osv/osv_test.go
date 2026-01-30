@@ -301,3 +301,101 @@ func Test_QueryRaw_cache(t *testing.T) {
 		t.Fatalf("expected 1 GetVulnByID call, got %d", client.calls)
 	}
 }
+
+func Test_transformNixPackages(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    []PkgInput
+		wantLen  int
+		wantEco  string
+		wantName string
+		wantPURL string
+	}{
+		{
+			name: "python package transforms to pypi",
+			input: []PkgInput{{
+				QueryKey: QueryKey{
+					Name:      "python3Packages.requests",
+					Version:   "2.31.0",
+					Ecosystem: "nix",
+				},
+			}},
+			wantLen:  1,
+			wantEco:  "PyPI",
+			wantName: "requests",
+			wantPURL: "pkg:pypi/requests@2.31.0",
+		},
+		{
+			name: "node package transforms to npm",
+			input: []PkgInput{{
+				QueryKey: QueryKey{
+					Name:      "nodePackages.typescript",
+					Version:   "5.0.0",
+					Ecosystem: "nixpkgs",
+				},
+			}},
+			wantLen:  1,
+			wantEco:  "npm",
+			wantName: "typescript",
+			wantPURL: "pkg:npm/typescript@5.0.0",
+		},
+		{
+			name: "native package with CPE is skipped",
+			input: []PkgInput{{
+				QueryKey: QueryKey{
+					Name:      "openssl",
+					Version:   "3.0.10",
+					Ecosystem: "nix",
+				},
+			}},
+			wantLen: 0, // CPE packages are skipped (no OSV support)
+		},
+		{
+			name: "unknown nix package is skipped",
+			input: []PkgInput{{
+				QueryKey: QueryKey{
+					Name:      "my-custom-package",
+					Version:   "1.0.0",
+					Ecosystem: "nix",
+				},
+			}},
+			wantLen: 1, // Unknown packages pass through unchanged
+			wantEco: "nix",
+		},
+		{
+			name: "non-nix packages pass through unchanged",
+			input: []PkgInput{{
+				QueryKey: QueryKey{
+					Name:      "lodash",
+					Version:   "4.17.21",
+					Ecosystem: "npm",
+				},
+			}},
+			wantLen:  1,
+			wantEco:  "npm",
+			wantName: "lodash",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := transformNixPackages(tt.input)
+			if len(result) != tt.wantLen {
+				t.Fatalf("got %d packages, want %d", len(result), tt.wantLen)
+			}
+			if tt.wantLen == 0 {
+				return
+			}
+			pkg := result[0]
+			if tt.wantEco != "" && pkg.Ecosystem != tt.wantEco {
+				t.Errorf("ecosystem = %q, want %q", pkg.Ecosystem, tt.wantEco)
+			}
+			if tt.wantName != "" && pkg.Name != tt.wantName {
+				t.Errorf("name = %q, want %q", pkg.Name, tt.wantName)
+			}
+			if tt.wantPURL != "" && pkg.PURL != tt.wantPURL {
+				t.Errorf("purl = %q, want %q", pkg.PURL, tt.wantPURL)
+			}
+		})
+	}
+}

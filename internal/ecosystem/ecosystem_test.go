@@ -71,6 +71,12 @@ func TestParse(t *testing.T) {
 		{"composer", Packagist},
 		{"php", Packagist},
 
+		// Nix variants
+		{"nix", Nix},
+		{"nixos", Nix},
+		{"nixpkgs", Nix},
+		{"flakes", Nix},
+
 		// Unknown
 		{"unknown", Unknown},
 		{"", Unknown},
@@ -103,6 +109,7 @@ func TestOSVName(t *testing.T) {
 		{Pub, "Pub"},
 		{CocoaPods, "CocoaPods"},
 		{Packagist, "Packagist"},
+		{Nix, "NixOS"},
 	}
 
 	for _, tt := range tests {
@@ -337,14 +344,14 @@ func TestWithGraphResolution(t *testing.T) {
 
 func TestAll(t *testing.T) {
 	all := All()
-	if len(all) != 11 {
-		t.Errorf("All() returned %d ecosystems, want 11", len(all))
+	if len(all) != 12 {
+		t.Errorf("All() returned %d ecosystems, want 12", len(all))
 	}
 
 	// Verify specific ecosystems are present
 	expected := map[Ecosystem]bool{
 		Go: true, NPM: true, PyPI: true, Maven: true, RubyGems: true,
-		Cargo: true, NuGet: true, Hex: true, Pub: true, CocoaPods: true, Packagist: true,
+		Cargo: true, NuGet: true, Hex: true, Pub: true, CocoaPods: true, Packagist: true, Nix: true,
 	}
 	for _, eco := range all {
 		delete(expected, eco)

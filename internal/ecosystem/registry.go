@@ -1,7 +1,7 @@
 // Package ecosystem provides a single authoritative source for ecosystem
 // identification and normalization across the deputy codebase.
 //
-// Deputy supports 15 ecosystems for dependency scanning:
+// Deputy supports 16 ecosystems for dependency scanning:
 //
 // Core ecosystems with full support (scan, SBOM, policies):
 //   - Go, npm, PyPI, Maven, RubyGems, Cargo, NuGet, Hex, Pub, CocoaPods, Packagist
@@ -10,6 +10,7 @@
 //   - Haskell (cabal, stack)
 //   - R (renv)
 //   - C++ (conan)
+//   - Nix (flake.lock, /nix/store)
 //
 // Ecosystems supported via Deputy's custom extractors:
 //   - GitHub Actions (.github/workflows/*.yml)
@@ -390,6 +391,18 @@ func (r *Registry) registerDefaults() {
 		Lockfiles:       []string{"composer.lock"},
 		UpstreamURL:     "https://packagist.org",
 		OSVName:         "Packagist",
+	})
+
+	r.Register(Registration{
+		Ecosystem:       Nix,
+		DisplayName:     "Nix",
+		Description:     "NixOS/Nixpkgs packages (nixos.org)",
+		Capabilities:    CapInventory | CapSBOM | CapLicense,
+		Aliases:         []string{"nixos", "nixpkgs", "flakes"},
+		ScalibrPrefixes: []string{"os"},
+		Lockfiles:       []string{"flake.lock"},
+		UpstreamURL:     "https://nixos.org",
+		OSVName:         "NixOS",
 	})
 }
 

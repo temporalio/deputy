@@ -225,7 +225,7 @@ The `--show-unfixable-guidance` flag provides actionable recommendations for vul
 
 ## Supported Ecosystems
 
-Deputy supports 15 ecosystems for scanning:
+Deputy supports 16 ecosystems for scanning:
 
 | Ecosystem | Flag Value | Lockfiles / Manifests |
 |-----------|------------|----------------------|
@@ -240,6 +240,7 @@ Deputy supports 15 ecosystems for scanning:
 | Pub | `pub` | pubspec.lock |
 | CocoaPods | `cocoapods` | Podfile.lock, Package.resolved |
 | Packagist | `packagist` | composer.lock |
+| Nix | `nix` | flake.lock, /nix/store packages |
 | GitHub Actions | `github-actions` | .github/workflows/*.yml |
 | Haskell | `haskell` | cabal.project.freeze, stack.yaml.lock |
 | R | `r` | renv.lock |

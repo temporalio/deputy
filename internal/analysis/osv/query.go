@@ -335,6 +335,13 @@ func queryBatch(ctx context.Context, client Client, pkgs []PkgInput) ([]Vulnerab
 	if len(pkgs) == 0 {
 		return nil, nil
 	}
+
+	// Transform Nix packages to their upstream ecosystems before querying.
+	// This is necessary because OSV doesn't have a NixOS ecosystem, so we map
+	// Nix package names (e.g., python3Packages.requests) to their upstream
+	// ecosystems (e.g., PyPI/requests) for accurate vulnerability lookups.
+	pkgs = transformNixPackages(pkgs)
+
 	var ghaPkgs []PkgInput
 	var otherPkgs []PkgInput
 	for _, p := range pkgs {
@@ -367,6 +374,47 @@ func queryBatch(ctx context.Context, client Client, pkgs []PkgInput) ([]Vulnerab
 		return nil, nil
 	}
 	return out, nil
+}
+
+// transformNixPackages converts Nix packages to their upstream ecosystems for OSV queries.
+// Since OSV doesn't support the NixOS ecosystem, we detect the upstream package ecosystem
+// from Nix naming patterns (e.g., python3Packages.foo → PyPI/foo) and rewrite the query
+// to use the upstream ecosystem and PURL.
+func transformNixPackages(pkgs []PkgInput) []PkgInput {
+	out := make([]PkgInput, 0, len(pkgs))
+	for _, p := range pkgs {
+		eco := strings.ToLower(strings.TrimSpace(p.Ecosystem))
+		if eco == "nix" || eco == "nixpkgs" || eco == "nixos" {
+			// Parse the Nix package name to detect upstream ecosystem
+			info := ecosystem.ParseNixPackageName(p.Name, p.Version)
+			if info.HasUpstreamEcosystem() {
+				// Rewrite to upstream ecosystem
+				transformed := p
+				transformed.Ecosystem = info.Ecosystem.OSVName()
+				transformed.Name = info.Name
+				transformed.Version = info.Version
+				// Generate upstream PURL if possible
+				if upstreamPURL := info.NixUpstreamPURL(); upstreamPURL != "" {
+					transformed.PURL = upstreamPURL
+				}
+				out = append(out, transformed)
+				continue
+			}
+			// For native packages with CPE but no upstream ecosystem,
+			// we currently cannot query OSV (would need NVD/CVE integration).
+			// Skip these packages for now rather than sending invalid queries.
+			// TODO: Consider CPE-based vulnerability lookup via NVD API.
+			if info.HasCPE() {
+				logs.Debug(context.Background(), "deputy.osv.nix_cpe_skipped",
+					"package", p.Name,
+					"cpe", info.FullCPE(),
+				)
+				continue
+			}
+		}
+		out = append(out, p)
+	}
+	return out
 }
 
 // isGitHubActionsInput reports whether the given package should be queried against

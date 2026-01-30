@@ -163,6 +163,7 @@ func TestHasGraphSupport(t *testing.T) {
 		{Pub, true},
 		{CocoaPods, false},
 		{Packagist, false},
+		{Nix, false},
 		{Unknown, false},
 	}
 
@@ -187,6 +188,7 @@ func TestHasProxySupportFor(t *testing.T) {
 		{RubyGems, true},
 		{Cargo, false},
 		{Maven, false},
+		{Nix, false},
 		{Unknown, false},
 	}
 
@@ -210,6 +212,7 @@ func TestHasLicenseSupport(t *testing.T) {
 		{Cargo, true},
 		{PyPI, false},
 		{Maven, false},
+		{Nix, true}, // Nix has license support via upstream ecosystem mapping
 		{Unknown, false},
 	}
 
