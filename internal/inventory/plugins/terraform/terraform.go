@@ -13,6 +13,7 @@ import (
 	"log/slog"
 	"path"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -73,16 +74,16 @@ func New() filesystem.Extractor {
 }
 
 // Name returns the plugin name as understood by Deputy.
-func (Extractor) Name() string { return Name }
+func (*Extractor) Name() string { return Name }
 
 // Version returns the plugin version; Deputy uses 0 for internal plugins.
-func (Extractor) Version() int { return 0 }
+func (*Extractor) Version() int { return 0 }
 
 // Requirements declares required capabilities; Terraform scanning is filesystem-only.
-func (Extractor) Requirements() *plugin.Capabilities { return &plugin.Capabilities{} }
+func (*Extractor) Requirements() *plugin.Capabilities { return &plugin.Capabilities{} }
 
 // FileRequired limits extraction to Terraform config files.
-func (Extractor) FileRequired(api filesystem.FileAPI) bool {
+func (*Extractor) FileRequired(api filesystem.FileAPI) bool {
 	if api == nil {
 		return false
 	}
@@ -274,8 +275,8 @@ func normalizeProviderSource(source string) string {
 		return source
 	}
 	// Remove registry prefix if present
-	if strings.HasPrefix(source, "registry.terraform.io/") {
-		return strings.TrimPrefix(source, "registry.terraform.io/")
+	if short, found := strings.CutPrefix(source, "registry.terraform.io/"); found {
+		return short
 	}
 	return source
 }
@@ -321,22 +322,6 @@ var terraformSchema = &hcl.BodySchema{
 var lockFileSchema = &hcl.BodySchema{
 	Blocks: []hcl.BlockHeaderSchema{
 		{Type: "provider", LabelNames: []string{"source"}},
-	},
-}
-
-var lockProviderSchema = &hcl.BodySchema{
-	Attributes: []hcl.AttributeSchema{
-		{Name: "version"},
-		{Name: "constraints"},
-		{Name: "hashes"},
-	},
-}
-
-// Module block schema
-var moduleSchema = &hcl.BodySchema{
-	Attributes: []hcl.AttributeSchema{
-		{Name: "source"},
-		{Name: "version"},
 	},
 }
 
@@ -724,10 +709,8 @@ func requirementMetadata(req Requirement) map[string]any {
 }
 
 func appendUnique(list []string, val string) []string {
-	for _, item := range list {
-		if item == val {
-			return list
-		}
+	if slices.Contains(list, val) {
+		return list
 	}
 	return append(list, val)
 }
@@ -751,8 +734,7 @@ func summarizeConstraint(raw string) constraintSummary {
 		minMajor: -1, minMinor: -1, minPatch: -1,
 		maxMajor: -1, maxMinor: -1, maxPatch: -1,
 	}
-	parts := strings.Split(raw, ",")
-	for _, part := range parts {
+	for part := range strings.SplitSeq(raw, ",") {
 		part = strings.TrimSpace(part)
 		if part == "" {
 			continue
@@ -788,8 +770,8 @@ func summarizeConstraint(raw string) constraintSummary {
 
 func splitConstraint(part string) (string, string) {
 	for _, op := range []string{"~>", ">=", "<=", "!=", ">", "<", "="} {
-		if strings.HasPrefix(part, op) {
-			return op, strings.TrimSpace(strings.TrimPrefix(part, op))
+		if rest, found := strings.CutPrefix(part, op); found {
+			return op, strings.TrimSpace(rest)
 		}
 	}
 	return "", strings.TrimSpace(part)
@@ -900,7 +882,7 @@ func parseSemverParts(ver string) (int, int, int, bool) {
 		rawParts = append(rawParts, "0")
 	}
 	parts := make([]int, 3)
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		n, err := strconv.Atoi(rawParts[i])
 		if err != nil {
 			return 0, 0, 0, false
@@ -922,7 +904,7 @@ func pessimisticUpper(ver string) (string, bool) {
 		rawParts = append(rawParts, "0")
 	}
 	parts := make([]int, 3)
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		n, err := strconv.Atoi(rawParts[i])
 		if err != nil {
 			return "", false
