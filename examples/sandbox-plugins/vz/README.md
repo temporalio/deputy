@@ -90,11 +90,10 @@ Deputy discovers sandbox plugins by searching for executables named `deputy-sand
 flowchart LR
     subgraph Discovery["Plugin Discovery Order"]
         direction TB
-        D1["Current directory<br/><code>./deputy-sandbox-vz</code>"]
-        D2["GOPATH/bin<br/><code>$GOPATH/bin/deputy-sandbox-vz</code>"]
-        D3["Go default bin<br/><code>~/go/bin/deputy-sandbox-vz</code>"]
-        D4["PATH directories<br/><code>/usr/local/bin/deputy-sandbox-vz</code>"]
-        D1 --> D2 --> D3 --> D4
+        D1["GOPATH/bin<br/><code>$GOPATH/bin/deputy-sandbox-vz</code>"]
+        D2["Go default bin<br/><code>~/go/bin/deputy-sandbox-vz</code>"]
+        D3["PATH directories<br/><code>/usr/local/bin/deputy-sandbox-vz</code>"]
+        D1 --> D2 --> D3
     end
 
     subgraph Validation["Plugin Validation"]

@@ -396,11 +396,6 @@ func waitForCloudSocket(path string, timeout time.Duration) error {
 func cloudPluginSearchDirs() []string {
 	var dirs []string
 
-	// Current working directory (highest priority for development)
-	if cwd, err := os.Getwd(); err == nil {
-		dirs = append(dirs, cwd)
-	}
-
 	// $GOPATH/bin
 	if gopath := os.Getenv("GOPATH"); gopath != "" {
 		dirs = append(dirs, filepath.Join(gopath, "bin"))

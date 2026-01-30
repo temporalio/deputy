@@ -386,18 +386,9 @@ func waitForSocket(path string, timeout time.Duration) error {
 	return fmt.Errorf("timeout waiting for socket")
 }
 
-// pluginSearchDirs returns directories to search for plugins, in priority order:
-// 1. Current working directory
-// 2. $GOPATH/bin (if GOPATH is set)
-// 3. $HOME/go/bin (default Go bin location)
-// 4. All directories in PATH
+// pluginSearchDirs returns directories to search for plugins, in priority order.
 func pluginSearchDirs() []string {
 	var dirs []string
-
-	// Current working directory (highest priority for development)
-	if cwd, err := os.Getwd(); err == nil {
-		dirs = append(dirs, cwd)
-	}
 
 	// $GOPATH/bin
 	if gopath := os.Getenv("GOPATH"); gopath != "" {
