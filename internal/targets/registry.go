@@ -4,6 +4,7 @@ import (
 	"cmp"
 	"context"
 	"errors"
+	"io"
 	"slices"
 	"sync"
 )
@@ -32,6 +33,24 @@ func (r *registry) Register(p Provider) {
 	slices.SortStableFunc(r.providers, func(a, b Provider) int {
 		return cmp.Compare(providerPriority(b), providerPriority(a))
 	})
+}
+
+// Close releases resources held by all registered providers that implement
+// [CloseableProvider]. It is safe to call Close multiple times.
+// Close returns the first error encountered, but attempts to close all providers.
+func (r *registry) Close() error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	var firstErr error
+	for _, p := range r.providers {
+		if cp, ok := p.(CloseableProvider); ok {
+			if err := cp.Close(); err != nil && firstErr == nil {
+				firstErr = err
+			}
+		}
+	}
+	return firstErr
 }
 
 func (r *registry) Open(ctx context.Context, target string, opts *OpenOptions) (Materialized, error) {
@@ -73,6 +92,16 @@ func IsCollection(ctx context.Context, target string) bool {
 func List(ctx context.Context, target string, opts *ListOptions) (*ListResult, error) {
 	return defaultRegistry.List(ctx, target, opts)
 }
+
+// Close releases resources held by all providers in the default registry.
+// Call this during application shutdown to clean up external plugin processes
+// and other resources.
+func Close() error {
+	return defaultRegistry.Close()
+}
+
+// Ensure registry implements io.Closer for use in defer patterns.
+var _ io.Closer = (*registry)(nil)
 
 // IsCollection checks if the target URI represents a collection.
 // Returns true if a CollectionProvider detects the target and identifies it as a collection.

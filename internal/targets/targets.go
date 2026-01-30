@@ -63,6 +63,16 @@ type PriorityProvider interface {
 	Priority() int
 }
 
+// CloseableProvider is implemented by providers that hold resources requiring
+// explicit cleanup, such as external plugin processes or network connections.
+// The registry's Close method calls Close on all registered CloseableProviders.
+type CloseableProvider interface {
+	Provider
+	// Close releases any resources held by this provider.
+	// It should be safe to call Close multiple times.
+	Close() error
+}
+
 // Registry holds a set of providers used to discover and open targets.
 type Registry interface {
 	Register(p Provider)

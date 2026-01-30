@@ -329,6 +329,10 @@ func startCloudPlugin(ctx context.Context, name, execPath string) (*cloudPluginC
 	}, nil
 }
 
+// close gracefully shuts down the plugin process and cleans up resources.
+// It sends SIGINT first, waits up to 5 seconds for graceful shutdown,
+// then sends SIGKILL if the process hasn't exited. The temporary socket
+// directory is removed regardless of shutdown method.
 func (c *cloudPluginClient) close() error {
 	if c == nil {
 		return nil
@@ -350,6 +354,31 @@ func (c *cloudPluginClient) close() error {
 		_ = os.RemoveAll(c.socketDir)
 	}
 	return nil
+}
+
+// Close releases all plugin processes managed by this provider.
+// It gracefully shuts down each plugin by sending SIGINT and waiting
+// up to 5 seconds before forcefully terminating with SIGKILL.
+// Close is safe to call multiple times and satisfies [targets.CloseableProvider].
+//
+// This method should be called during application shutdown to prevent
+// orphaned plugin processes. The [targets.Close] function calls this
+// automatically for the default registry.
+func (p *cloudPluginProvider) Close() error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	var firstErr error
+	for name, plugin := range p.plugins {
+		if err := plugin.close(); err != nil && firstErr == nil {
+			firstErr = err
+		}
+		p.logger.Debug("closed cloud plugin", "name", name)
+	}
+
+	// Clear the map to allow re-initialization if needed
+	p.plugins = make(map[string]*cloudPluginClient)
+	return firstErr
 }
 
 func waitForCloudSocket(path string, timeout time.Duration) error {
@@ -598,3 +627,4 @@ func cloudResourcesToDiscoveredTargets(pluginName string, resources []*cloudv1.C
 var _ targets.Provider = (*cloudPluginProvider)(nil)
 var _ targets.PriorityProvider = (*cloudPluginProvider)(nil)
 var _ targets.CollectionProvider = (*cloudPluginProvider)(nil)
+var _ targets.CloseableProvider = (*cloudPluginProvider)(nil)
