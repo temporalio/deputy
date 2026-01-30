@@ -42,6 +42,40 @@
 //
 //	deperrors.SuggestFor("network")  // Returns network troubleshooting hint
 //
+// # Credential Sanitization
+//
+// The package provides systematic sanitization of sensitive data from error
+// messages. Use this at RPC boundaries and when logging errors that might
+// contain credentials:
+//
+//	// Sanitize an error before returning to client
+//	return deperrors.Sanitize(err)
+//
+//	// Wrap with context while sanitizing
+//	return deperrors.WrapSanitized(err, "failed to authenticate")
+//
+//	// Get fields safe for structured logging
+//	slog.Error("operation failed", deperrors.SanitizeFields(err)...)
+//
+// The [DefaultSanitizer] detects common credential patterns:
+//   - AWS credentials (access key ID, secret key, session token)
+//   - GitHub tokens (fine-grained and classic PATs)
+//   - Bearer tokens and JWTs
+//   - Basic auth in URLs
+//   - Private keys (PEM format)
+//   - Database connection strings
+//   - Azure and GCP credentials
+//
+// For authentication-specific errors, use [AuthenticationError] which
+// guarantees safe error messages:
+//
+//	return deperrors.NewAuthenticationError(
+//	    "AWS ECR",                    // service
+//	    "GetAuthorizationToken",       // operation
+//	    underlyingErr,                 // cause (may contain secrets)
+//	    "run 'aws configure'",         // user-friendly hint
+//	)
+//
 // # Silent Errors
 //
 // For errors that should exit non-zero but not print (because the command
@@ -59,4 +93,6 @@
 //   - [ScanError] - Dependency scanning failures
 //   - [TargetError] - Target resolution failures (repos, images)
 //   - [PluginError] - Plugin execution failures
+//   - [SanitizedError] - Error with sensitive data redacted
+//   - [AuthenticationError] - Authentication failures (safe by design)
 package errors

@@ -182,6 +182,11 @@ func IsLocalTarget(target string) bool {
 		return true
 	}
 
+	// Local cloud plugin scheme (requires filesystem access and plugin execution)
+	if strings.HasPrefix(target, "local://") {
+		return true
+	}
+
 	return false
 }
 
@@ -299,6 +304,15 @@ func ValidateRemoteTargetWithPolicy(target string, policy *RemoteTargetPolicy) e
 			Target:     target,
 			Reason:     "oci-layout:// not supported for remote server",
 			Suggestion: "use remote registry reference",
+		}
+	}
+
+	// Block local:// cloud plugin scheme - requires local filesystem and plugin execution
+	if strings.HasPrefix(target, "local://") {
+		return &ValidationError{
+			Target:     target,
+			Reason:     "local:// cloud plugin targets are not supported for remote server",
+			Suggestion: "use aws://, azure://, or gcp:// cloud resource URIs",
 		}
 	}
 

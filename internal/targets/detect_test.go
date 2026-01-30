@@ -266,6 +266,26 @@ func TestValidateRemoteTarget_SSRFProtection(t *testing.T) {
 			wantErr: true,
 			errMsg:  "docker-daemon",
 		},
+
+		// Local cloud plugin scheme
+		{
+			name:    "local cloud plugin AMI",
+			target:  "local://ami/./testdata/rootfs",
+			wantErr: true,
+			errMsg:  "local://",
+		},
+		{
+			name:    "local cloud plugin snapshot",
+			target:  "local://snapshot//tmp/test",
+			wantErr: true,
+			errMsg:  "local://",
+		},
+		{
+			name:    "local cloud plugin with absolute path",
+			target:  "local://ami//etc/passwd",
+			wantErr: true,
+			errMsg:  "local://",
+		},
 	}
 
 	for _, tt := range tests {
@@ -344,6 +364,54 @@ func containsIgnoreCase(s, substr string) bool {
 		}
 	}
 	return false
+}
+
+func TestIsLocalTarget(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name   string
+		target string
+		want   bool
+	}{
+		// Local targets - should return true
+		{"stdin", "-", true},
+		{"absolute path", "/etc/passwd", true},
+		{"relative path dot-slash", "./local/path", true},
+		{"relative path parent", "../parent/path", true},
+		{"home directory path", "~/documents", true},
+		{"current directory", ".", true},
+		{"docker-daemon scheme", "docker-daemon://myapp:latest", true},
+		{"tarball scheme", "tarball:///path/to/image.tar", true},
+		{"oci-archive scheme", "oci-archive:///tmp/image.tar", true},
+		{"oci-layout scheme", "oci-layout:///tmp/layout", true},
+		{"localhost with port", "localhost:5000/image", true},
+		{"localhost with path", "localhost/image", true},
+		{"local cloud plugin", "local://ami/./testdata/rootfs", true},
+		{"local cloud plugin snapshot", "local://snapshot//tmp/test", true},
+
+		// Remote targets - should return false
+		{"github repo", "github.com/owner/repo", false},
+		{"container image", "nginx:1.25", false},
+		{"ghcr image", "ghcr.io/owner/app:v1", false},
+		{"ecr image", "123456789012.dkr.ecr.us-east-1.amazonaws.com/repo:tag", false},
+		{"docker scheme remote", "docker://alpine:3.19", false},
+		{"oci scheme remote", "oci://gcr.io/project/image", false},
+		{"purl", "pkg:npm/lodash@4.17.21", false},
+		{"aws cloud resource", "aws://ami/ami-0123456789abcdef0", false},
+		{"azure cloud resource", "azure://disk/sub/rg/disk-name", false},
+		{"gcp cloud resource", "gcp://image/project/image-name", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			got := targets.IsLocalTarget(tt.target)
+			if got != tt.want {
+				t.Errorf("IsLocalTarget(%q) = %v, want %v", tt.target, got, tt.want)
+			}
+		})
+	}
 }
 
 func TestDetectKind(t *testing.T) {

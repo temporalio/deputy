@@ -88,7 +88,334 @@ Verify environment variables are set correctly:
 - npm: `npm_config_registry=http://localhost:8081`
 - PyPI: `PIP_INDEX_URL=http://localhost:8082/simple`
 
-## Rate Limits & Authentication
+## Authentication & Credentials
+
+Deputy uses standard credential chains for cloud providers and container registries. Most authentication issues can be diagnosed by understanding which credential source is being used.
+
+### CLI Error Messages
+
+**Deputy provides detailed, registry-specific error messages** with actionable remediation steps. When you encounter an authentication error, read the full message carefully - it typically includes:
+
+- The exact problem (authentication, not found, rate limit)
+- Multiple solution options appropriate for your registry
+- Required permissions or scopes
+- Links to create tokens or configure credentials
+
+Example ECR error output:
+```
+ECR authentication failed for 123456789012.dkr.ecr.us-east-1.amazonaws.com/app:latest
+
+Ensure AWS credentials are configured:
+
+  Option 1: Use environment variables
+    export AWS_ACCESS_KEY_ID=<your-access-key>
+    export AWS_SECRET_ACCESS_KEY=<your-secret-key>
+    export AWS_REGION=us-east-1
+
+  Option 2: Use AWS CLI to configure credentials
+    aws configure
+
+  Option 3: Use docker credential helper
+    Install: https://github.com/awslabs/amazon-ecr-credential-helper
+    Then run: aws ecr get-login-password --region us-east-1 | \
+      docker login --username AWS --password-stdin 123456789012.dkr.ecr.us-east-1.amazonaws.com
+```
+
+**Tip:** The CLI detects your specific registry type (ECR, GHCR, GCR, ACR, Docker Hub) and tailors the guidance accordingly. If you're seeing generic errors, ensure you're using the latest version of Deputy.
+
+### Credential Resolution Order
+
+Deputy resolves credentials in a layered manner, checking multiple sources in order:
+
+**Container Registries:**
+1. Docker config (`~/.docker/config.json`) and credential helpers
+2. Environment variables (registry-specific)
+3. Anonymous access (if allowed by registry)
+
+**AWS (for cloud resources and ECR):**
+1. Environment variables (`AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`)
+2. Shared credentials file (`~/.aws/credentials`)
+3. Shared config file (`~/.aws/config`) with `AWS_SDK_LOAD_CONFIG=true`
+4. IAM role for EC2 (instance metadata)
+5. IAM role for ECS (container credentials)
+6. Web Identity Token (EKS IRSA)
+
+### Container Registry Authentication
+
+#### Amazon ECR
+
+**Error:**
+```
+Error: GET https://123456789012.dkr.ecr.us-east-1.amazonaws.com/v2/.../manifests/latest: UNAUTHORIZED
+```
+
+**Solutions (in order of preference):**
+
+1. **Use AWS credentials directly** (Deputy handles ECR token exchange automatically):
+   ```console
+   # Environment variables
+   $ export AWS_ACCESS_KEY_ID=AKIA...
+   $ export AWS_SECRET_ACCESS_KEY=...
+   $ export AWS_REGION=us-east-1
+   $ deputy scan 123456789012.dkr.ecr.us-east-1.amazonaws.com/app:latest
+   ```
+
+2. **Use AWS CLI profile**:
+   ```console
+   $ export AWS_PROFILE=my-profile
+   $ deputy scan 123456789012.dkr.ecr.us-east-1.amazonaws.com/app:latest
+   ```
+
+3. **Use docker login** (traditional approach, credentials cached for 12 hours):
+   ```console
+   $ aws ecr get-login-password --region us-east-1 | \
+       docker login --username AWS --password-stdin \
+       123456789012.dkr.ecr.us-east-1.amazonaws.com
+   $ deputy scan 123456789012.dkr.ecr.us-east-1.amazonaws.com/app:latest
+   ```
+
+4. **For CI/CD (GitHub Actions with OIDC)**:
+   ```yaml
+   - uses: aws-actions/configure-aws-credentials@v4
+     with:
+       role-to-assume: arn:aws:iam::123456789012:role/GitHubActionsRole
+       aws-region: us-east-1
+   - run: deputy scan ${{ env.ECR_REGISTRY }}/app:${{ github.sha }}
+   ```
+
+**Required IAM permissions for ECR:**
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [{
+    "Effect": "Allow",
+    "Action": [
+      "ecr:GetAuthorizationToken",
+      "ecr:BatchGetImage",
+      "ecr:GetDownloadUrlForLayer"
+    ],
+    "Resource": "*"
+  }]
+}
+```
+
+#### GitHub Container Registry (GHCR)
+
+**Error:**
+```
+Error: GET https://ghcr.io/v2/.../manifests/latest: UNAUTHORIZED
+```
+
+**Solutions:**
+
+1. **Use GITHUB_TOKEN environment variable**:
+   ```console
+   $ export GITHUB_TOKEN=ghp_...
+   $ deputy scan ghcr.io/owner/app:v1.0.0
+   ```
+
+2. **Use docker login**:
+   ```console
+   $ echo $GITHUB_TOKEN | docker login ghcr.io -u USERNAME --password-stdin
+   $ deputy scan ghcr.io/owner/app:v1.0.0
+   ```
+
+**Token requirements:**
+- Fine-grained PAT: `read:packages` permission on the repository
+- Classic PAT: `read:packages` scope
+- GitHub Actions: `${{ secrets.GITHUB_TOKEN }}` works automatically for same-repo images
+
+#### Google Container Registry (GCR) / Artifact Registry
+
+**Error:**
+```
+Error: GET https://gcr.io/v2/.../manifests/latest: UNAUTHORIZED
+```
+
+**Solutions:**
+
+1. **Use gcloud CLI**:
+   ```console
+   $ gcloud auth configure-docker
+   $ deputy scan gcr.io/project/image:tag
+   ```
+
+2. **For Artifact Registry**:
+   ```console
+   $ gcloud auth configure-docker us-docker.pkg.dev
+   $ deputy scan us-docker.pkg.dev/project/repo/image:tag
+   ```
+
+3. **Use service account key**:
+   ```console
+   $ export GOOGLE_APPLICATION_CREDENTIALS=/path/to/key.json
+   $ deputy scan gcr.io/project/image:tag
+   ```
+
+4. **Use docker login with service account**:
+   ```console
+   $ cat key.json | docker login -u _json_key --password-stdin https://gcr.io
+   ```
+
+#### Azure Container Registry (ACR)
+
+**Error:**
+```
+Error: GET https://myregistry.azurecr.io/v2/.../manifests/latest: UNAUTHORIZED
+```
+
+**Solutions:**
+
+1. **Use Azure CLI**:
+   ```console
+   $ az acr login --name myregistry
+   $ deputy scan myregistry.azurecr.io/image:tag
+   ```
+
+2. **Use service principal**:
+   ```console
+   $ docker login myregistry.azurecr.io -u $SP_APP_ID -p $SP_PASSWORD
+   ```
+
+#### Docker Hub
+
+**Error:**
+```
+Error: toomanyrequests: You have reached your pull rate limit
+```
+
+**Solutions:**
+
+1. **Authenticate to increase limits**:
+   ```console
+   $ docker login
+   $ deputy scan nginx:1.25
+   ```
+   - Anonymous: 100 pulls/6 hours
+   - Authenticated: 200 pulls/6 hours
+   - Paid plans: Higher limits
+
+2. **Use local Docker daemon** (avoids rate limits):
+   ```console
+   $ docker pull nginx:1.25
+   $ deputy scan docker-daemon://nginx:1.25
+   ```
+
+### AWS Cloud Resource Authentication
+
+For scanning AWS resources like AMIs and EBS snapshots:
+
+**Error:**
+```
+Error: operation error EC2: DescribeImages, failed to sign request: failed to retrieve credentials
+```
+
+**Solutions:**
+
+1. **Environment variables**:
+   ```console
+   $ export AWS_ACCESS_KEY_ID=AKIA...
+   $ export AWS_SECRET_ACCESS_KEY=...
+   $ export AWS_REGION=us-east-1
+   $ deputy scan aws://ami/ami-0123456789abcdef0
+   ```
+
+2. **Named profile**:
+   ```console
+   $ deputy scan aws://ami/ami-0123456789abcdef0 --profile production
+   ```
+
+3. **EC2 instance role** (automatic when running on EC2):
+   ```console
+   # No explicit credentials needed - uses instance metadata
+   $ deputy scan aws://ami/ami-0123456789abcdef0
+   ```
+
+4. **EKS with IRSA** (automatic with properly configured service account):
+   ```yaml
+   # Kubernetes service account with IAM role annotation
+   apiVersion: v1
+   kind: ServiceAccount
+   metadata:
+     annotations:
+       eks.amazonaws.com/role-arn: arn:aws:iam::123456789012:role/DeputyRole
+   ```
+
+**Required IAM permissions for AMI/EBS scanning:**
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [{
+    "Effect": "Allow",
+    "Action": [
+      "ec2:DescribeImages",
+      "ec2:DescribeSnapshots",
+      "ebs:ListSnapshotBlocks",
+      "ebs:GetSnapshotBlock"
+    ],
+    "Resource": "*"
+  }]
+}
+```
+
+### Debugging Credential Issues
+
+**Enable debug logging to see credential resolution:**
+```console
+$ deputy scan --log-level debug ghcr.io/owner/app:v1
+```
+
+**Check Docker credential helpers:**
+```console
+$ cat ~/.docker/config.json
+{
+  "credHelpers": {
+    "gcr.io": "gcloud",
+    "us.gcr.io": "gcloud",
+    "123456789012.dkr.ecr.us-east-1.amazonaws.com": "ecr-login"
+  }
+}
+```
+
+**Verify AWS credentials:**
+```console
+$ aws sts get-caller-identity
+{
+    "UserId": "AIDAEXAMPLE",
+    "Account": "123456789012",
+    "Arn": "arn:aws:iam::123456789012:user/developer"
+}
+```
+
+**Test ECR authentication manually:**
+```console
+$ aws ecr get-authorization-token --region us-east-1
+```
+
+### Common Authentication Mistakes
+
+1. **Wrong region for ECR**: The region in the URL must match your AWS config
+   ```console
+   # Wrong: configured for us-west-2 but accessing us-east-1
+   $ export AWS_REGION=us-west-2
+   $ deputy scan 123456789012.dkr.ecr.us-east-1.amazonaws.com/app:latest
+
+   # Right: region matches
+   $ export AWS_REGION=us-east-1
+   $ deputy scan 123456789012.dkr.ecr.us-east-1.amazonaws.com/app:latest
+   ```
+
+2. **Expired credentials**: ECR tokens from `docker login` expire after 12 hours
+   ```console
+   # Re-authenticate
+   $ aws ecr get-login-password | docker login --username AWS --password-stdin ...
+   ```
+
+3. **Missing cross-account permissions**: Accessing ECR in a different account requires explicit permissions
+
+4. **GITHUB_TOKEN scope insufficient**: Ensure the token has `read:packages` permission
+
+## Rate Limits
 
 ### GitHub rate limits during enrichment
 
@@ -103,6 +430,10 @@ $ deputy sbom --enrich-licenses
 
 - deps.dev has its own rate limits; batch operations may hit them.
 - Use `--license-source scan` for local-only license detection.
+
+### Container registry rate limits
+
+See the Docker Hub section above for authentication to increase limits.
 
 ## Performance Issues
 
