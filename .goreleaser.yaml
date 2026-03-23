@@ -108,7 +108,7 @@ homebrew_casks:
           branch: main
     homepage: "https://github.com/picatz/deputy"
     description: "Software supply chain security CLI"
-    license: "MIT"
+    license: "Apache-2.0"
     binaries:
       - deputy
 

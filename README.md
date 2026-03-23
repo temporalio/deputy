@@ -244,4 +244,4 @@ See the [contributing guide](CONTRIBUTING.md).
 
 ## License
 
-MIT. See the [`LICENSE`](LICENSE).
+Apache-2.0. See the [`LICENSE`](LICENSE).
