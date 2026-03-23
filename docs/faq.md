@@ -41,7 +41,7 @@ Deputy queries the [OSV (Open Source Vulnerabilities)](https://osv.dev) database
 
 ### Is Deputy free?
 
-Yes. Deputy is open source under the MIT license.
+Yes. Deputy is open source under the Apache License 2.0.
 
 ---
 
