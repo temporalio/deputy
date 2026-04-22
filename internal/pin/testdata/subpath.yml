@@ -1,0 +1,8 @@
+name: CI
+on: push
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: github/codeql-action/init@v3
+      - uses: github/codeql-action/analyze@v3

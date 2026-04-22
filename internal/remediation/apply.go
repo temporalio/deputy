@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+
+	"github.com/picatz/deputy/internal/pin"
 )
 
 // IsDeputyInternalCommand checks if a command is a deputy-internal command
@@ -35,6 +37,20 @@ func ApplyDeputyCommand(repoDir, cmd string) error {
 		actionRef := parts[2]
 		newVersion := parts[3]
 		return applyActionUpdate(file, actionRef, newVersion)
+
+	case "deputy:action:pin":
+		// Format: deputy:action:pin <file> <owner/repo[/subpath]> <sha> <tag>
+		if len(parts) < 5 {
+			return fmt.Errorf("invalid action pin command: expected 5 parts, got %d", len(parts))
+		}
+		file, err := safeJoinPath(repoDir, parts[1])
+		if err != nil {
+			return fmt.Errorf("invalid file path: %w", err)
+		}
+		actionRef := parts[2]
+		sha := parts[3]
+		tag := parts[4]
+		return applyActionPin(repoDir, file, actionRef, sha, tag)
 
 	case "deputy:dockerfile:update":
 		// Format: deputy:dockerfile:update <file> <image> <new-version>
@@ -284,4 +300,28 @@ func applyDockerfileUpdate(filePath, image, newVersion string) error {
 	}
 
 	return nil
+}
+
+// applyActionPin rewrites a GitHub Action reference to a SHA-pinned format
+// with a Dependabot-compatible version comment:
+//
+//	uses: owner/repo@<sha> # <tag>
+//
+// Delegates to pin.RewriteWorkflow for a single source of truth on the
+// rewrite logic. The filePath must be under repoDir.
+func applyActionPin(repoDir, filePath, actionRef, sha, tag string) error {
+	root, err := os.OpenRoot(repoDir)
+	if err != nil {
+		return fmt.Errorf("opening repo root: %w", err)
+	}
+	defer root.Close()
+
+	relPath, err := filepath.Rel(repoDir, filePath)
+	if err != nil {
+		return fmt.Errorf("computing relative path: %w", err)
+	}
+
+	return pin.RewriteWorkflow(root, filepath.ToSlash(relPath), []pin.Update{
+		{Name: actionRef, PinnedValue: sha, VersionTag: tag},
+	})
 }

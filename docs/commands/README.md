@@ -18,6 +18,7 @@ Deputy is intentionally pipeline-friendly: commands compose well with each other
 | [`graph`](graph.md) | Visualize dependency graph | `--format`, `--depth`, `--focus`, subcommands: `why`, `needs` |
 | [`sbom`](sbom.md) | Generate CycloneDX/SPDX SBOMs | `--format`, `--ref`, `--enrich-licenses` |
 | [`list`](list.md) | Dump PURLs for scripting | `--format`, `--only-direct`, `--source`, `--platform` |
+| [`pin`](pin.md) | Pin dependencies to immutable refs | `--ecosystems`, `--exclude`, `--dry-run`, subcommands: `check`, `verify`, `update` |
 | [`exec`](exec.md) | Run a command in a sandboxed runtime | `--runtime`, `--mode`, `--network`, `--exec-allow` |
 | [`policy`](policy.md) | Lint, test, bundle, evaluate policies | subcommands: `lint`, `test`, `eval`, `bundle` |
 | [`proxy`](proxy.md) | Run policy-enforcing package proxy | subcommands: `serve`, `template` |
@@ -43,6 +44,9 @@ $ deputy diff main feature/upgrade
 
 # Generate an SBOM
 $ deputy sbom --format spdx-json --output sbom.spdx.json
+
+# Pin all dependencies to immutable refs
+$ deputy pin
 
 # Visualize dependency graph
 $ deputy graph --format dot | dot -Tpng -o deps.png
@@ -92,6 +96,7 @@ Use exit codes for CI gating.
 - [Graph](graph.md) — Dependency graph visualization
 - [SBOM](sbom.md) — SBOM generation
 - [List](list.md) — Dependency listing
+- [Pin](pin.md) — Dependency pinning for supply chain security
 - [Exec](exec.md) — Sandboxed command execution
 
 ### Enforcement & Platform

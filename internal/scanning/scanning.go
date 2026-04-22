@@ -444,7 +444,8 @@ func purlEcosystem(pu packageurl.PackageURL) string {
 	return strings.TrimSpace(pu.Type)
 }
 
-// queryVulnerabilities queries OSV for vulnerabilities.
+// queryVulnerabilities queries OSV for vulnerabilities and checks for
+// supply-chain risks (e.g., unpinned GitHub Actions references).
 func queryVulnerabilities(ctx context.Context, pkgs []*extractor.Package, direct map[string]bool) ([]vulnerability.Finding, map[string]*vulnerabilityv1.Advisory, error) {
 	ctx, span := otel.StartSpan(ctx, "deputy.scanning.query_vulnerabilities",
 		trace.WithAttributes(
@@ -461,6 +462,18 @@ func queryVulnerabilities(ctx context.Context, pkgs []*extractor.Package, direct
 	if err != nil {
 		otel.SetSpanError(span, err)
 		return nil, nil, err
+	}
+
+	// Check for supply-chain risks (unpinned actions, etc.)
+	scFindings, scAdvisories := checkSupplyChain(ctx, pkgs, direct)
+	if len(scFindings) > 0 {
+		findings = append(findings, scFindings...)
+		if advisories == nil {
+			advisories = make(map[string]*vulnerabilityv1.Advisory)
+		}
+		for id, adv := range scAdvisories {
+			advisories[id] = adv
+		}
 	}
 
 	span.SetAttributes(attribute.Int("deputy.finding.count", len(findings)))
