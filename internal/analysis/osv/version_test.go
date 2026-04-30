@@ -282,6 +282,113 @@ func TestIsVersionAffected_Go(t *testing.T) {
 			},
 			want: false, // v1.4.0 >= v1.3.0
 		},
+		{
+			name:         "Go pseudo-version affected - introduced 0 with fixed pseudo-version",
+			pkgName:      "github.com/gomarkdown/markdown",
+			pkgVersion:   "v0.0.0-20240729212818-a2a9c4f76ef5",
+			pkgEcosystem: "Go",
+			vuln: osvschema.Vulnerability{
+				ID: "GHSA-77fj-vx54-gvh7",
+				Affected: []osvschema.Affected{
+					{
+						Package: osvschema.Package{
+							Name:      "github.com/gomarkdown/markdown",
+							Ecosystem: "Go",
+						},
+						Ranges: []osvschema.Range{
+							{
+								Type: osvschema.RangeSemVer,
+								Events: []osvschema.Event{
+									{Introduced: "0"},
+									{Fixed: "0.0.0-20260411013819-759bbc3e3207"},
+								},
+							},
+						},
+					},
+				},
+			},
+			want: true, // pseudo-version is before the fix
+		},
+		{
+			name:         "Go pseudo-version not affected - above fixed pseudo-version",
+			pkgName:      "github.com/gomarkdown/markdown",
+			pkgVersion:   "v0.0.0-20260501000000-aaaaaaaaaaaa",
+			pkgEcosystem: "Go",
+			vuln: osvschema.Vulnerability{
+				ID: "GHSA-77fj-vx54-gvh7",
+				Affected: []osvschema.Affected{
+					{
+						Package: osvschema.Package{
+							Name:      "github.com/gomarkdown/markdown",
+							Ecosystem: "Go",
+						},
+						Ranges: []osvschema.Range{
+							{
+								Type: osvschema.RangeSemVer,
+								Events: []osvschema.Event{
+									{Introduced: "0"},
+									{Fixed: "0.0.0-20260411013819-759bbc3e3207"},
+								},
+							},
+						},
+					},
+				},
+			},
+			want: false, // pseudo-version is after the fix
+		},
+		{
+			name:         "Go pseudo-version affected - open-ended introduced 0 with no fix",
+			pkgName:      "github.com/gomarkdown/markdown",
+			pkgVersion:   "v0.0.0-20240729212818-a2a9c4f76ef5",
+			pkgEcosystem: "Go",
+			vuln: osvschema.Vulnerability{
+				ID: "GHSA-TEST-OPEN",
+				Affected: []osvschema.Affected{
+					{
+						Package: osvschema.Package{
+							Name:      "github.com/gomarkdown/markdown",
+							Ecosystem: "Go",
+						},
+						Ranges: []osvschema.Range{
+							{
+								Type: osvschema.RangeSemVer,
+								Events: []osvschema.Event{
+									{Introduced: "0"},
+								},
+							},
+						},
+					},
+				},
+			},
+			want: true, // all versions affected, no fix available
+		},
+		{
+			name:         "Go pseudo-version not affected - below non-zero introduced",
+			pkgName:      "github.com/gomarkdown/markdown",
+			pkgVersion:   "v0.0.0-20240729212818-a2a9c4f76ef5",
+			pkgEcosystem: "Go",
+			vuln: osvschema.Vulnerability{
+				ID: "GHSA-TEST-NONZERO",
+				Affected: []osvschema.Affected{
+					{
+						Package: osvschema.Package{
+							Name:      "github.com/gomarkdown/markdown",
+							Ecosystem: "Go",
+						},
+						Ranges: []osvschema.Range{
+							{
+								Type: osvschema.RangeSemVer,
+								Events: []osvschema.Event{
+									{Introduced: "0.0.0-20250101000000-bbbbbbbbbbbb"},
+									{Fixed: "0.0.0-20260411013819-759bbc3e3207"},
+								},
+							},
+						},
+					},
+				},
+			},
+			want: false, // pseudo-version is below introduced
+		},
 	}
 
 	for _, tt := range tests {

@@ -667,20 +667,24 @@ func versionInGoSemverRange(version string, r osvschema.Range) bool {
 	}
 
 	introduced := "v0.0.0"
+	introducedIsZero := true // default "v0.0.0" means all versions
 	for _, e := range r.Events {
 		if e.Introduced != "" {
 			introduced = normalizeGoVersion(e.Introduced)
+			introducedIsZero = (e.Introduced == "0")
 		}
 		if e.Fixed != "" {
 			fixed := normalizeGoVersion(e.Fixed)
-			if semver.Compare(cur, introduced) >= 0 && semver.Compare(cur, fixed) < 0 {
+			afterIntroduced := introducedIsZero || semver.Compare(cur, introduced) >= 0
+			if afterIntroduced && semver.Compare(cur, fixed) < 0 {
 				return true
 			}
 			introduced = "v0.0.0"
+			introducedIsZero = true
 		}
 	}
 	// Check if still in an open-ended "introduced" range
-	if introduced != "v0.0.0" && semver.Compare(cur, introduced) >= 0 {
+	if introduced != "v0.0.0" && (introducedIsZero || semver.Compare(cur, introduced) >= 0) {
 		return true
 	}
 	return false
