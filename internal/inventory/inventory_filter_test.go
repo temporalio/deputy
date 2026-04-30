@@ -8,6 +8,7 @@ import (
 
 	dockerfilex "github.com/picatz/deputy/internal/inventory/plugins/docker/dockerfilex"
 	ghactions "github.com/picatz/deputy/internal/inventory/plugins/github/actionsx"
+	rubygemspec "github.com/picatz/deputy/internal/inventory/plugins/ruby/gemspecx"
 )
 
 func TestFilterInventoryPluginsIncludesGoPlugin(t *testing.T) {
@@ -201,5 +202,30 @@ func TestResolvePluginsAllIncludesEverything(t *testing.T) {
 
 	if !found[ghactions.Name] {
 		t.Errorf("expected %s plugin not found when using 'all'", ghactions.Name)
+	}
+}
+
+func TestResolvePluginsReplacesUpstreamGemspec(t *testing.T) {
+	// The "all" case loads SCALIBR's upstream ruby/gemspec extractor.
+	// Deputy's custom implementation must replace it.
+	opts := ScanOptions{Ecosystems: []string{"all"}}
+	cap := &plugin.Capabilities{OS: plugin.OSLinux}
+
+	plugins, err := resolvePlugins(opts, cap)
+	if err != nil {
+		t.Fatalf("resolvePlugins: %v", err)
+	}
+
+	var count int
+	for _, p := range plugins {
+		if p.Name() == rubygemspec.Name {
+			count++
+			if _, ok := p.(*rubygemspec.Extractor); !ok {
+				t.Errorf("ruby/gemspec plugin should be Deputy's custom Extractor, got %T", p)
+			}
+		}
+	}
+	if count != 1 {
+		t.Errorf("expected exactly 1 ruby/gemspec plugin, found %d", count)
 	}
 }
