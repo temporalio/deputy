@@ -228,7 +228,23 @@ func resolvePlugins(opts ScanOptions, cap *plugin.Capabilities) ([]plugin.Plugin
 		plugins = append(plugins, gradlex.NewVerificationMetadataExtractor())
 	}
 
+	// Replace upstream SCALIBR gemspec extractor with Deputy's custom
+	// implementation that handles version constants and require_relative.
+	plugins = replacePlugin(plugins, rubygemspec.Name, rubygemspec.New())
+
 	return plugins, nil
+}
+
+// replacePlugin replaces an existing plugin with the given name. If no plugin
+// with that name is found, the list is returned unchanged.
+func replacePlugin(plugins []plugin.Plugin, name string, replacement plugin.Plugin) []plugin.Plugin {
+	for i, p := range plugins {
+		if p.Name() == name {
+			plugins[i] = replacement
+			return plugins
+		}
+	}
+	return plugins
 }
 
 // appendRegisteredPlugins adds SCALIBR-adapted plugins from the registry.
