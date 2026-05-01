@@ -620,3 +620,318 @@ func TestIsGitHubActionsInput_Table(t *testing.T) {
 		})
 	}
 }
+
+func TestIsCommitSHA_Table(t *testing.T) {
+	tests := []struct {
+		in   string
+		want bool
+	}{
+		// Full SHA-1 (exactly 40 hex chars)
+		{"3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c", true},
+		{"ABCDEF1234567890ABCDEF1234567890ABCDEF12", true},
+		{"abcdef1234567890abcdef1234567890abcdef12", true},
+		// Not full SHA-1
+		{"deadbeef", false},                                  // abbreviated — handled by isAbbreviatedSHA
+		{"a1b2c3d", false},                                   // abbreviated
+		{"", false},
+		{"v4.2.0", false},
+		{"v4", false},
+		{"main", false},
+		{"3e5f45b2cfb9172054b4087a40e8e0b5a5461e7", false},   // 39 chars
+		{"3e5f45b2cfb9172054b4087a40e8e0b5a5461e7cc", false},  // 41 chars
+		{"3e5f45b2cfb9172054b4087a40e8e0b5a5461eZZ", false},   // non-hex
+	}
+	for _, tc := range tests {
+		t.Run(tc.in, func(t *testing.T) {
+			if got := isCommitSHA(tc.in); got != tc.want {
+				t.Fatalf("isCommitSHA(%q) = %v, want %v", tc.in, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestIsAbbreviatedSHA_Table(t *testing.T) {
+	tests := []struct {
+		in   string
+		want bool
+	}{
+		{"a1b2c3d", true},           // 7 chars — Git's default abbreviation
+		{"deadbeef", true},          // 8 chars
+		{"abc1234567890", true},     // 13 chars
+		{"abcdef1", true},           // 7 chars
+		{"1234abc", true},           // 7 chars, mixed
+		{"abcdef1234567890abcdef1234567890abcdef1", true}, // 39 chars
+		// Not abbreviated SHAs
+		{"abcdef", false},           // 6 chars — too short
+		{"a1b2c", false},            // 5 chars — too short
+		{"", false},
+		{"v4.2.0", false},           // not hex
+		{"main", false},             // 4 chars, not hex
+		{"deadbez", false},          // non-hex char
+		// Full SHA-1 is not abbreviated
+		{"3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c", false}, // exactly 40
+	}
+	for _, tc := range tests {
+		t.Run(tc.in, func(t *testing.T) {
+			if got := isAbbreviatedSHA(tc.in); got != tc.want {
+				t.Fatalf("isAbbreviatedSHA(%q) = %v, want %v", tc.in, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestResolveGitHubActionsVersion_CommitSHA(t *testing.T) {
+	origListHash := ghaListRemoteRefsWithHash
+	t.Cleanup(func() { ghaListRemoteRefsWithHash = origListHash })
+
+	tests := []struct {
+		name       string
+		repo       string
+		version    string
+		refs       []remoteRefEntry
+		want       string
+		wantCalled bool
+	}{
+		{
+			name:    "full SHA resolves to tag via dereferenced annotated tag",
+			repo:    "actions/download-artifact",
+			version: "3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c",
+			refs: []remoteRefEntry{
+				{Name: "refs/tags/v8", Hash: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},
+				{Name: "refs/tags/v8.0.1", Hash: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"},
+				{Name: "refs/tags/v8.0.1^{}", Hash: "3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c"},
+			},
+			want:       "v8.0.1",
+			wantCalled: true,
+		},
+		{
+			name:    "full SHA resolves to lightweight tag directly",
+			repo:    "owner/repo",
+			version: "abcdef1234567890abcdef1234567890abcdef12",
+			refs: []remoteRefEntry{
+				{Name: "refs/tags/v2.0.0", Hash: "abcdef1234567890abcdef1234567890abcdef12"},
+			},
+			want:       "v2.0.0",
+			wantCalled: true,
+		},
+		{
+			name:    "full SHA matches multiple tags returns highest",
+			repo:    "owner/repo",
+			version: "abcdef1234567890abcdef1234567890abcdef12",
+			refs: []remoteRefEntry{
+				{Name: "refs/tags/v2.0.0", Hash: "abcdef1234567890abcdef1234567890abcdef12"},
+				{Name: "refs/tags/v2.1.0", Hash: "abcdef1234567890abcdef1234567890abcdef12"},
+			},
+			want:       "v2.1.0",
+			wantCalled: true,
+		},
+		{
+			name:    "full SHA with no matching tag returns empty",
+			repo:    "owner/repo",
+			version: "1234567890abcdef1234567890abcdef12345678",
+			refs: []remoteRefEntry{
+				{Name: "refs/tags/v1.0.0", Hash: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},
+			},
+			want:       "",
+			wantCalled: true,
+		},
+		// Abbreviated SHA tests
+		{
+			name:    "abbreviated SHA resolves via prefix match",
+			repo:    "owner/repo",
+			version: "3e5f45b",
+			refs: []remoteRefEntry{
+				{Name: "refs/tags/v8.0.1", Hash: "3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c"},
+			},
+			want:       "v8.0.1",
+			wantCalled: true,
+		},
+		{
+			name:    "abbreviated SHA matches dereferenced annotated tag",
+			repo:    "owner/repo",
+			version: "deadbeef",
+			refs: []remoteRefEntry{
+				{Name: "refs/tags/v3.0.0", Hash: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},
+				{Name: "refs/tags/v3.0.0^{}", Hash: "deadbeef01234567890abcdef1234567890abcd"},
+			},
+			want:       "v3.0.0",
+			wantCalled: true,
+		},
+		{
+			name:    "abbreviated SHA no prefix match returns empty",
+			repo:    "owner/repo",
+			version: "cafebabe",
+			refs: []remoteRefEntry{
+				{Name: "refs/tags/v1.0.0", Hash: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},
+			},
+			want:       "",
+			wantCalled: true,
+		},
+		// Non-SHA strings
+		{
+			name:       "6-char hex too short for resolution",
+			repo:       "owner/repo",
+			version:    "abcdef",
+			refs:       nil,
+			want:       "",
+			wantCalled: false,
+		},
+		{
+			name:       "branch name does not trigger lookup",
+			repo:       "owner/repo",
+			version:    "main",
+			refs:       nil,
+			want:       "",
+			wantCalled: false,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			called := false
+			ghaListRemoteRefsWithHash = func(_ context.Context, remoteURL string) ([]remoteRefEntry, error) {
+				called = true
+				return tc.refs, nil
+			}
+			got := resolveGitHubActionsVersion(context.Background(), &sync.Map{}, tc.repo, tc.version)
+			if got != tc.want {
+				t.Fatalf("resolveGitHubActionsVersion(%q, %q) = %q, want %q", tc.repo, tc.version, got, tc.want)
+			}
+			if called != tc.wantCalled {
+				t.Fatalf("called=%v want %v", called, tc.wantCalled)
+			}
+		})
+	}
+}
+
+func TestQueryOSVGHABucketBatch_CommitSHAResolutionAvoidsFalsePositive(t *testing.T) {
+	resetGHATestState()
+	tmp := t.TempDir()
+	restore := disk.SetBaseDirForTest(tmp)
+	t.Cleanup(restore)
+
+	zipPath := filepath.Join(tmp, ghaCacheSubdir, ghaZipFilename)
+	if err := os.MkdirAll(filepath.Dir(zipPath), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+
+	vuln := osvschema.Vulnerability{
+		ID: "GHSA-cxww-7g56-2vh6",
+		Affected: []osvschema.Affected{
+			{
+				Package: osvschema.Package{Name: "actions/download-artifact", Ecosystem: string(osvschema.EcosystemGitHubActions)},
+				Ranges: []osvschema.Range{
+					{
+						Type: osvschema.RangeEcosystem,
+						Events: []osvschema.Event{
+							{Introduced: "4.0.0"},
+							{Fixed: "4.1.3"},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	if err := writeGHATestZip(zipPath, map[string]osvschema.Vulnerability{
+		"GHSA-cxww-7g56-2vh6.json": vuln,
+	}); err != nil {
+		t.Fatalf("write zip: %v", err)
+	}
+	now := time.Now()
+	_ = os.Chtimes(zipPath, now, now)
+
+	// SHA maps to v8.0.1, which is outside the affected range (4.0.0–4.1.2).
+	origListHash := ghaListRemoteRefsWithHash
+	ghaListRemoteRefsWithHash = func(_ context.Context, remoteURL string) ([]remoteRefEntry, error) {
+		return []remoteRefEntry{
+			{Name: "refs/tags/v8", Hash: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},
+			{Name: "refs/tags/v8.0.1", Hash: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"},
+			{Name: "refs/tags/v8.0.1^{}", Hash: "3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c"},
+		}, nil
+	}
+	t.Cleanup(func() { ghaListRemoteRefsWithHash = origListHash })
+
+	origList := ghaListRemoteRefs
+	ghaListRemoteRefs = func(_ context.Context, remoteURL string) ([]string, error) {
+		t.Error("ghaListRemoteRefs should not be called for SHA resolution")
+		return nil, nil
+	}
+	t.Cleanup(func() { ghaListRemoteRefs = origList })
+
+	got, err := queryOSVGHABucketBatch(context.Background(), nil, []PkgInput{
+		{QueryKey: QueryKey{Name: "actions/download-artifact", Version: "3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c", Ecosystem: "GitHub Actions"}},
+	})
+	if err != nil {
+		t.Fatalf("queryOSVGHABucketBatch: %v", err)
+	}
+	if len(got) != 0 {
+		t.Fatalf("expected no vulnerabilities for SHA resolving to v8.0.1 (outside range 4.0.0–4.1.2), got %d: %#v", len(got), got)
+	}
+}
+
+func TestQueryOSVGHABucketBatch_CommitSHAInVulnerableRangeStillFlagged(t *testing.T) {
+	resetGHATestState()
+	tmp := t.TempDir()
+	restore := disk.SetBaseDirForTest(tmp)
+	t.Cleanup(restore)
+
+	zipPath := filepath.Join(tmp, ghaCacheSubdir, ghaZipFilename)
+	if err := os.MkdirAll(filepath.Dir(zipPath), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+
+	vuln := osvschema.Vulnerability{
+		ID: "GHSA-cxww-7g56-2vh6",
+		Affected: []osvschema.Affected{
+			{
+				Package: osvschema.Package{Name: "actions/download-artifact", Ecosystem: string(osvschema.EcosystemGitHubActions)},
+				Ranges: []osvschema.Range{
+					{
+						Type: osvschema.RangeEcosystem,
+						Events: []osvschema.Event{
+							{Introduced: "4.0.0"},
+							{Fixed: "4.1.3"},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	if err := writeGHATestZip(zipPath, map[string]osvschema.Vulnerability{
+		"GHSA-cxww-7g56-2vh6.json": vuln,
+	}); err != nil {
+		t.Fatalf("write zip: %v", err)
+	}
+	now := time.Now()
+	_ = os.Chtimes(zipPath, now, now)
+
+	// SHA maps to v4.1.1, which IS within the affected range (4.0.0–4.1.2).
+	vulnSHA := "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef"
+	origListHash := ghaListRemoteRefsWithHash
+	ghaListRemoteRefsWithHash = func(_ context.Context, remoteURL string) ([]remoteRefEntry, error) {
+		return []remoteRefEntry{
+			{Name: "refs/tags/v4.1.1", Hash: vulnSHA},
+			{Name: "refs/tags/v4.1.1^{}", Hash: vulnSHA},
+		}, nil
+	}
+	t.Cleanup(func() { ghaListRemoteRefsWithHash = origListHash })
+
+	origList := ghaListRemoteRefs
+	ghaListRemoteRefs = func(_ context.Context, remoteURL string) ([]string, error) {
+		t.Error("ghaListRemoteRefs should not be called for SHA resolution")
+		return nil, nil
+	}
+	t.Cleanup(func() { ghaListRemoteRefs = origList })
+
+	got, err := queryOSVGHABucketBatch(context.Background(), nil, []PkgInput{
+		{QueryKey: QueryKey{Name: "actions/download-artifact", Version: vulnSHA, Ecosystem: "GitHub Actions"}},
+	})
+	if err != nil {
+		t.Fatalf("queryOSVGHABucketBatch: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("expected 1 vulnerability for SHA resolving to v4.1.1 (in range 4.0.0–4.1.2), got %d", len(got))
+	}
+}

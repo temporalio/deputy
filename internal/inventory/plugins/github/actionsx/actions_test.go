@@ -76,6 +76,24 @@ jobs:
 			},
 		},
 		{
+			name: "action pinned by commit SHA",
+			files: map[string]string{
+				".github/workflows/ci.yml": `
+name: CI
+on: push
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@8f4b7f84864484a7bf31766abe9204da3cbe65b3
+`,
+			},
+			entry: ".github/workflows/ci.yml",
+			want: []string{
+				"githubactions|actions/checkout|8f4b7f84864484a7bf31766abe9204da3cbe65b3",
+			},
+		},
+		{
 			name: "job-level reusable workflow remote",
 			files: map[string]string{
 				".github/workflows/call.yml": `
@@ -128,6 +146,7 @@ func TestSplitUsesRef_Table(t *testing.T) {
 		ref string
 	}{
 		{"actions/checkout@v4", "actions/checkout", "v4"},
+		{"actions/checkout@8f4b7f84864484a7bf31766abe9204da3cbe65b3", "actions/checkout", "8f4b7f84864484a7bf31766abe9204da3cbe65b3"},
 		{"owner/repo/path/to/action@main", "owner/repo/path/to/action", "main"},
 		{"owner/repo", "owner/repo", ""},
 		{" owner/repo@ ", "owner/repo", ""},

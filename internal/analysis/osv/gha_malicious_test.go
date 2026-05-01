@@ -219,7 +219,10 @@ func TestGitHubActionsTyposquattingDetection(t *testing.T) {
 	}
 }
 
-// TestGitHubActionsSHAPinnedVersions tests that SHA-pinned actions are properly handled.
+// TestGitHubActionsSHAPinnedVersions tests that SHA-pinned actions are properly handled:
+//   - SHA resolving to a version in the affected range → flagged
+//   - SHA resolving to a version outside the affected range → not flagged
+//   - SHA that can't be resolved (no matching tag) → flagged conservatively
 func TestGitHubActionsSHAPinnedVersions(t *testing.T) {
 	resetGHATestState()
 	tmp := t.TempDir()
@@ -259,16 +262,62 @@ func TestGitHubActionsSHAPinnedVersions(t *testing.T) {
 	now := time.Now()
 	_ = os.Chtimes(zipPath, now, now)
 
+	safeSHA := "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+	vulnSHA := "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+	unknownSHA := "cccccccccccccccccccccccccccccccccccccccc"
+
+	origListHash := ghaListRemoteRefsWithHash
+	ghaListRemoteRefsWithHash = func(_ context.Context, remoteURL string) ([]remoteRefEntry, error) {
+		return []remoteRefEntry{
+			// safeSHA points to v2.0.0 (outside affected range 1.0.0–1.4.x)
+			{Name: "refs/tags/v2.0.0", Hash: safeSHA},
+			{Name: "refs/tags/v2.0.0^{}", Hash: safeSHA},
+			// vulnSHA points to v1.3.0 (inside affected range)
+			{Name: "refs/tags/v1.3.0", Hash: vulnSHA},
+			{Name: "refs/tags/v1.3.0^{}", Hash: vulnSHA},
+			// unknownSHA has no matching tag
+		}, nil
+	}
+	t.Cleanup(func() { ghaListRemoteRefsWithHash = origListHash })
+
 	tests := []struct {
 		name    string
 		version string
 		wantHit bool
 	}{
+		// Full SHAs
 		{
-			name:    "SHA commit hash",
-			version: "abc123def456789012345678901234567890abcd",
-			wantHit: true, // SHA without semver falls back to name/ecosystem match
+			name:    "full SHA resolving to safe version",
+			version: safeSHA,
+			wantHit: false, // v2.0.0 is outside the affected range
 		},
+		{
+			name:    "full SHA resolving to vulnerable version",
+			version: vulnSHA,
+			wantHit: true, // v1.3.0 is inside the affected range
+		},
+		{
+			name:    "full SHA with no matching tag (conservative)",
+			version: unknownSHA,
+			wantHit: true, // can't resolve → conservative fallback
+		},
+		// Abbreviated SHAs (prefix match)
+		{
+			name:    "abbreviated SHA resolving to safe version",
+			version: safeSHA[:7], // "aaaaaaa" prefix-matches safeSHA → v2.0.0
+			wantHit: false,
+		},
+		{
+			name:    "abbreviated SHA resolving to vulnerable version",
+			version: vulnSHA[:8], // "bbbbbbbb" prefix-matches vulnSHA → v1.3.0
+			wantHit: true,
+		},
+		{
+			name:    "abbreviated SHA with no prefix match (conservative)",
+			version: "deadbee",
+			wantHit: true, // no matching tag prefix → conservative fallback
+		},
+		// Semver (no resolution needed)
 		{
 			name:    "vulnerable semver",
 			version: "1.3.0",

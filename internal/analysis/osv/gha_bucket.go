@@ -119,7 +119,7 @@ func queryOSVGHABucketBatch(ctx context.Context, client Client, pkgs []PkgInput)
 		return nil, err
 	}
 	var aliasCache sync.Map
-	var majorTagCache sync.Map
+	var versionCache sync.Map
 	var out []Vulnerability
 	for _, p := range pkgs {
 		version := strings.TrimSpace(p.Version)
@@ -132,7 +132,7 @@ func queryOSVGHABucketBatch(ctx context.Context, client Client, pkgs []PkgInput)
 		}
 		effective := normalized
 		effectiveVersion := version
-		if resolved := resolveGitHubActionsVersion(ctx, &majorTagCache, normalized.Name, version); resolved != "" {
+		if resolved := resolveGitHubActionsVersion(ctx, &versionCache, normalized.Name, version); resolved != "" {
 			effectiveVersion = resolved
 			effective.Version = resolved
 		}
@@ -225,6 +225,19 @@ func queryOSVGHABucketBatch(ctx context.Context, client Client, pkgs []PkgInput)
 	return out, nil
 }
 
+// resolveGitHubActionsVersion resolves a GitHub Actions version ref to a
+// concrete semver string by querying remote tags. It handles:
+//
+//   - Rolling major tags ("v4") → highest matching v4.x.y tag
+//   - Commit SHAs (full 40-char or abbreviated 7–39 char) → version tag
+//     pointing at that commit, matched by hash or hash prefix
+//
+// Returns "" when no resolution is needed (the version is already a valid
+// semver string) or when resolution fails (unrecognized format, no matching
+// tag, network error). The caller falls back to the original version string
+// in these cases.
+//
+// Results are cached in cache to avoid redundant network calls within a scan.
 func resolveGitHubActionsVersion(ctx context.Context, cache *sync.Map, name, version string) string {
 	name = strings.TrimSpace(name)
 	version = strings.TrimSpace(version)
@@ -239,7 +252,24 @@ func resolveGitHubActionsVersion(ctx context.Context, cache *sync.Map, name, ver
 		return ""
 	}
 	if !ok {
-		return ""
+		// Not a major ref and not valid semver — try commit SHA resolution.
+		if !isCommitSHA(version) && !isAbbreviatedSHA(version) {
+			return ""
+		}
+		key := name + "@sha:" + strings.ToLower(version)
+		if cache != nil {
+			if v, loaded := cache.Load(key); loaded {
+				if s, ok := v.(string); ok {
+					return s
+				}
+				return ""
+			}
+		}
+		resolved := resolveGHACommitSHAToVersion(ctx, name, version)
+		if cache != nil {
+			cache.Store(key, resolved)
+		}
+		return resolved
 	}
 
 	key := name + "@v" + strconv.Itoa(major)
@@ -281,6 +311,126 @@ func parseGHAMajorRef(v string) (int, bool) {
 }
 
 var ghaListRemoteRefs = listRemoteRefs
+
+// isHexString reports whether s consists entirely of hexadecimal characters.
+func isHexString(s string) bool {
+	if len(s) == 0 {
+		return false
+	}
+	for _, c := range []byte(s) {
+		if !((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F')) {
+			return false
+		}
+	}
+	return true
+}
+
+// isCommitSHA reports whether s looks like a full 40-character SHA-1
+// commit hash. GitHub repositories use SHA-1; this does not attempt to
+// handle SHA-256 since GitHub does not support it.
+func isCommitSHA(s string) bool {
+	return len(s) == 40 && isHexString(s)
+}
+
+// isAbbreviatedSHA reports whether s looks like an abbreviated commit SHA:
+// a hex string of 7–39 characters. Git's default abbreviation length is 7;
+// shorter strings are too ambiguous to distinguish from branch names.
+func isAbbreviatedSHA(s string) bool {
+	n := len(s)
+	return n >= 7 && n < 40 && isHexString(s)
+}
+
+// remoteRefEntry pairs a Git reference name (e.g. "refs/tags/v1.0.0") with
+// its object hash. For annotated tags go-git returns both the tag object ref
+// and the dereferenced "^{}" ref pointing to the underlying commit.
+type remoteRefEntry struct {
+	Name string
+	Hash string
+}
+
+// ghaListRemoteRefsWithHash is the function used to list remote refs with
+// their hashes. It is a variable so tests can substitute a mock.
+var ghaListRemoteRefsWithHash = listRemoteRefsWithHash
+
+// listRemoteRefsWithHash lists remote Git refs with their object hashes,
+// similar to "git ls-remote". It requests peeled refs (AppendPeeled) so
+// that annotated tags include both the tag object entry and a "^{}" entry
+// whose hash is the underlying commit. This is necessary for SHA resolution:
+// users pin to commit hashes, and annotated tag refs alone only expose the
+// tag object hash, not the commit hash.
+func listRemoteRefsWithHash(ctx context.Context, remoteURL string) ([]remoteRefEntry, error) {
+	remoteURL = strings.TrimSpace(remoteURL)
+	if remoteURL == "" {
+		return nil, fmt.Errorf("empty remote URL")
+	}
+	r := git.NewRemote(memory.NewStorage(), &config.RemoteConfig{Name: "origin", URLs: []string{remoteURL}})
+	refs, err := r.ListContext(ctx, &git.ListOptions{
+		Auth:          gitHubAuthFromEnv(),
+		PeelingOption: git.AppendPeeled,
+	})
+	if err != nil {
+		return nil, err
+	}
+	out := make([]remoteRefEntry, 0, len(refs))
+	for _, ref := range refs {
+		if ref == nil {
+			continue
+		}
+		name := ref.Name()
+		if name == "" || name == plumbing.HEAD {
+			continue
+		}
+		out = append(out, remoteRefEntry{
+			Name: name.String(),
+			Hash: ref.Hash().String(),
+		})
+	}
+	return out, nil
+}
+
+// resolveGHACommitSHAToVersion resolves a full or abbreviated commit SHA to the
+// highest semver version tag that points to it in the given action repository.
+// For full SHAs this is an exact match; for abbreviated SHAs it uses prefix matching.
+func resolveGHACommitSHAToVersion(ctx context.Context, repo, sha string) string {
+	sha = strings.ToLower(strings.TrimSpace(sha))
+	if !isCommitSHA(sha) && !isAbbreviatedSHA(sha) {
+		return ""
+	}
+	repo = strings.TrimSpace(repo)
+	if repo == "" || !strings.Contains(repo, "/") {
+		return ""
+	}
+	remoteURL := fmt.Sprintf("https://github.com/%s.git", repo)
+	refs, err := ghaListRemoteRefsWithHash(ctx, remoteURL)
+	if err != nil || len(refs) == 0 {
+		return ""
+	}
+
+	best := ""
+	for _, entry := range refs {
+		if !strings.HasPrefix(entry.Name, "refs/tags/") {
+			continue
+		}
+		// Prefix match covers both full SHAs (exact) and abbreviated SHAs.
+		if !strings.HasPrefix(strings.ToLower(entry.Hash), sha) {
+			continue
+		}
+		tagName := strings.TrimPrefix(entry.Name, "refs/tags/")
+		tagName = strings.TrimSuffix(tagName, "^{}")
+		tagName = strings.TrimSpace(tagName)
+		if tagName == "" {
+			continue
+		}
+		sv := normalizeSemverVersion(tagName)
+		if sv == "" {
+			continue
+		}
+		if best == "" || semver.Compare(sv, best) > 0 {
+			best = sv
+		}
+	}
+	return best
+}
 
 // resolveGHAMajorTagToHighestSemver resolves a major tag (like "v4") by listing
 // remote tags and selecting the highest "v4.x.y" tag.
@@ -333,27 +483,17 @@ func gitHubAuthFromEnv() transport.AuthMethod {
 	return &githttp.BasicAuth{Username: "x-access-token", Password: tok}
 }
 
-// listRemoteRefs lists remote refs using go-git (similar to `git ls-remote`).
+// listRemoteRefs lists remote ref names using go-git (similar to
+// "git ls-remote"). It delegates to listRemoteRefsWithHash and
+// discards the hashes.
 func listRemoteRefs(ctx context.Context, remoteURL string) ([]string, error) {
-	remoteURL = strings.TrimSpace(remoteURL)
-	if remoteURL == "" {
-		return nil, fmt.Errorf("empty remote URL")
-	}
-	r := git.NewRemote(memory.NewStorage(), &config.RemoteConfig{Name: "origin", URLs: []string{remoteURL}})
-	refs, err := r.ListContext(ctx, &git.ListOptions{Auth: gitHubAuthFromEnv()})
+	entries, err := listRemoteRefsWithHash(ctx, remoteURL)
 	if err != nil {
 		return nil, err
 	}
-	out := make([]string, 0, len(refs))
-	for _, ref := range refs {
-		if ref == nil {
-			continue
-		}
-		name := ref.Name()
-		if name == "" || name == plumbing.HEAD {
-			continue
-		}
-		out = append(out, name.String())
+	out := make([]string, len(entries))
+	for i, e := range entries {
+		out[i] = e.Name
 	}
 	return out, nil
 }
