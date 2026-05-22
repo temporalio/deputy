@@ -230,6 +230,14 @@ func processRefs(ctx context.Context, refs []Ref, strategy Strategy, opts *Optio
 	var wg sync.WaitGroup
 
 	for i, ref := range refs {
+		if err := ctx.Err(); err != nil {
+			results[i] = Result{
+				Ref:    ref,
+				Status: StatusError,
+				Error:  err.Error(),
+			}
+			continue
+		}
 		wg.Add(1)
 		select {
 		case sem <- struct{}{}:
@@ -440,6 +448,14 @@ func processVerifyRefs(ctx context.Context, refs []Ref, strategy Strategy, opts 
 	var wg sync.WaitGroup
 
 	for i, ref := range refs {
+		if err := ctx.Err(); err != nil {
+			results[i] = Result{
+				Ref:    ref,
+				Status: StatusError,
+				Error:  err.Error(),
+			}
+			continue
+		}
 		wg.Add(1)
 		select {
 		case sem <- struct{}{}:
@@ -559,6 +575,14 @@ func processUpdateRefs(ctx context.Context, refs []Ref, strategy Strategy, opts 
 	var wg sync.WaitGroup
 
 	for i, ref := range refs {
+		if err := ctx.Err(); err != nil {
+			results[i] = Result{
+				Ref:    ref,
+				Status: StatusError,
+				Error:  err.Error(),
+			}
+			continue
+		}
 		wg.Add(1)
 		select {
 		case sem <- struct{}{}:
