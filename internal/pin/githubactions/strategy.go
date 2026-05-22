@@ -1,4 +1,4 @@
-package pin
+package githubactions
 
 import (
 	"context"
@@ -6,7 +6,6 @@ import (
 	"io/fs"
 	"log/slog"
 	"os"
-	"path"
 	"strings"
 
 	"github.com/goccy/go-yaml"
@@ -15,6 +14,7 @@ import (
 	"github.com/google/osv-scalibr/extractor/filesystem"
 	scalibrfs "github.com/google/osv-scalibr/fs"
 	"github.com/picatz/deputy/internal/inventory/plugins/github/actionsx"
+	"github.com/picatz/deputy/internal/pin"
 	"github.com/picatz/deputy/internal/purlx"
 	"golang.org/x/mod/semver"
 )
@@ -26,14 +26,14 @@ import (
 // on public repos; only verification needs API access.
 
 const (
-	// EcosystemGitHubActions is the ecosystem identifier for GitHub Actions.
-	EcosystemGitHubActions = "github-actions"
+	// Ecosystem is the ecosystem identifier for GitHub Actions.
+	Ecosystem = "github-actions"
 )
 
 // Compile-time interface check.
-var _ Strategy = (*GitHubActionsStrategy)(nil)
+var _ pin.Strategy = (*Strategy)(nil)
 
-// GitHubActionsStrategy implements the Strategy interface for GitHub Actions
+// Strategy implements the pin.Strategy interface for GitHub Actions
 // workflow dependencies. It discovers uses: references in:
 //
 //   - .github/workflows/*.yml — standard workflow files
@@ -44,50 +44,50 @@ var _ Strategy = (*GitHubActionsStrategy)(nil)
 // It resolves tags to commit SHAs via the git protocol, verifies commits for
 // fork/imposter provenance via the GitHub REST API, and rewrites files with
 // Dependabot-compatible SHA pins.
-type GitHubActionsStrategy struct {
+type Strategy struct {
 	resolver *Resolver
 	verifier *Verifier
 }
 
-// NewGitHubActionsStrategy creates a Strategy for GitHub Actions pinning.
+// NewStrategy creates a Strategy for GitHub Actions pinning.
 // The resolver uses the git protocol (no API client needed). The verifier
 // uses the GitHub REST API client for commit provenance checks — pass nil
 // to skip verification capabilities.
-func NewGitHubActionsStrategy(client *github.Client) *GitHubActionsStrategy {
+func NewStrategy(client *github.Client) *Strategy {
 	var v *Verifier
 	if client != nil {
 		v = NewVerifier(client)
 	}
-	return &GitHubActionsStrategy{
+	return &Strategy{
 		resolver: NewResolver(),
 		verifier: v,
 	}
 }
 
-// Ecosystem implements Strategy.
-func (s *GitHubActionsStrategy) Ecosystem() string { return EcosystemGitHubActions }
+// Ecosystem implements pin.Strategy.
+func (s *Strategy) Ecosystem() string { return Ecosystem }
 
-// IsPinned implements Strategy. A GitHub Actions ref is pinned when its
+// IsPinned implements pin.Strategy. A GitHub Actions ref is pinned when its
 // version is a 40-character hex commit SHA.
-func (s *GitHubActionsStrategy) IsPinned(ref Ref) bool {
+func (s *Strategy) IsPinned(ref pin.Ref) bool {
 	return ref.IsSHAPinned()
 }
 
-// ShouldSkip implements Strategy. GitHub Actions refs containing expression
+// ShouldSkip implements pin.Strategy. GitHub Actions refs containing expression
 // syntax (${{ ... }}) cannot be statically pinned and should be skipped.
-func (s *GitHubActionsStrategy) ShouldSkip(ref Ref) (bool, string) {
+func (s *Strategy) ShouldSkip(ref pin.Ref) (bool, string) {
 	if strings.Contains(ref.Version, "${{") {
 		return true, "expression ref"
 	}
 	return false, ""
 }
 
-// Discover implements Strategy. It finds all files containing GitHub Actions
+// Discover implements pin.Strategy. It finds all files containing GitHub Actions
 // uses: references — both workflow files and composite action manifests.
-func (s *GitHubActionsStrategy) Discover(ctx context.Context, fsys scalibrfs.FS) ([]Ref, error) {
+func (s *Strategy) Discover(ctx context.Context, fsys scalibrfs.FS) ([]pin.Ref, error) {
 	ext := actionsx.New()
 
-	var refs []Ref
+	var refs []pin.Ref
 	seen := map[string]bool{} // deduplicate across scanning phases
 
 	// Phase 1: Scan .github/workflows/*.yml — standard workflow files.
@@ -95,12 +95,12 @@ func (s *GitHubActionsStrategy) Discover(ctx context.Context, fsys scalibrfs.FS)
 	// so this also discovers deps of local composite actions that workflows
 	// reference. But it only finds deps *reachable from a workflow*.
 	if info, err := fs.Stat(fsys, ".github/workflows"); err == nil && info.IsDir() {
-		wfRefs, err := s.scanDir(ctx, ext, fsys, ".github/workflows", isWorkflowFile)
+		wfRefs, err := s.scanDir(ctx, ext, fsys, ".github/workflows", pin.IsWorkflowFile)
 		if err != nil {
 			return nil, fmt.Errorf("scanning workflows: %w", err)
 		}
 		for _, r := range wfRefs {
-			key := dedupeKey(r)
+			key := pin.DedupeKey(r)
 			if !seen[key] {
 				seen[key] = true
 				refs = append(refs, r)
@@ -117,12 +117,12 @@ func (s *GitHubActionsStrategy) Discover(ctx context.Context, fsys scalibrfs.FS)
 			return err
 		}
 		if d.IsDir() {
-			if shouldSkipDir(d.Name()) {
+			if pin.ShouldSkipDir(d.Name()) {
 				return fs.SkipDir
 			}
 			return nil
 		}
-		if isSymlink(d) {
+		if pin.IsSymlink(d) {
 			return nil
 		}
 
@@ -139,7 +139,7 @@ func (s *GitHubActionsStrategy) Discover(ctx context.Context, fsys scalibrfs.FS)
 		}
 
 		for _, r := range actionRefs {
-			key := dedupeKey(r)
+			key := pin.DedupeKey(r)
 			if !seen[key] {
 				seen[key] = true
 				refs = append(refs, r)
@@ -153,14 +153,14 @@ func (s *GitHubActionsStrategy) Discover(ctx context.Context, fsys scalibrfs.FS)
 }
 
 // scanDir extracts action refs from all matching files in a directory.
-func (s *GitHubActionsStrategy) scanDir(
+func (s *Strategy) scanDir(
 	ctx context.Context,
 	ext filesystem.Extractor,
 	fsys scalibrfs.FS,
 	walkDir string,
 	filter func(string) bool,
-) ([]Ref, error) {
-	var refs []Ref
+) ([]pin.Ref, error) {
+	var refs []pin.Ref
 
 	err := fs.WalkDir(fsys, walkDir, func(relPath string, d fs.DirEntry, err error) error {
 		if err != nil || d.IsDir() {
@@ -187,9 +187,9 @@ func (s *GitHubActionsStrategy) scanDir(
 // uses: references from its steps. This handles files that the workflow
 // extractor can't parse (action.yml has a different structure than workflow
 // files — it has runs.steps instead of jobs.*.steps).
-func (s *GitHubActionsStrategy) scanActionManifest(
+func (s *Strategy) scanActionManifest(
 	fsys scalibrfs.FS, relPath string,
-) ([]Ref, error) {
+) ([]pin.Ref, error) {
 	content, err := fs.ReadFile(fsys, relPath)
 	if err != nil {
 		return nil, err
@@ -223,7 +223,7 @@ func (s *GitHubActionsStrategy) scanActionManifest(
 		return nil, nil
 	}
 
-	var refs []Ref
+	var refs []pin.Ref
 	for _, stepRaw := range steps {
 		step, ok := stepRaw.(map[string]any)
 		if !ok {
@@ -239,7 +239,10 @@ func (s *GitHubActionsStrategy) scanActionManifest(
 		}
 
 		// Parse remote action reference: owner/repo[/subpath]@ref
-		pre, version, _ := strings.Cut(usesStr, "@")
+		pre, version, hasRef := strings.Cut(usesStr, "@")
+		if !hasRef || strings.TrimSpace(version) == "" {
+			continue // no @ref — skip (e.g., bare "uses: actions/checkout")
+		}
 		parts := strings.SplitN(strings.Trim(pre, "/"), "/", 3)
 		if len(parts) < 2 {
 			continue
@@ -250,8 +253,8 @@ func (s *GitHubActionsStrategy) scanActionManifest(
 			subpath = strings.Join(parts[2:], "/")
 		}
 
-		refs = append(refs, Ref{
-			Ecosystem: EcosystemGitHubActions,
+		refs = append(refs, pin.Ref{
+			Ecosystem: Ecosystem,
 			Name:      owner + "/" + repo,
 			Subpath:   subpath,
 			Version:   strings.TrimSpace(version),
@@ -265,12 +268,12 @@ func (s *GitHubActionsStrategy) scanActionManifest(
 
 // extractFromFile runs the actionsx extractor on a single file and converts
 // results to pin.Ref values.
-func (s *GitHubActionsStrategy) extractFromFile(
+func (s *Strategy) extractFromFile(
 	ctx context.Context,
 	ext filesystem.Extractor,
 	fsys scalibrfs.FS,
 	relPath string,
-) ([]Ref, error) {
+) ([]pin.Ref, error) {
 	f, err := fsys.Open(relPath)
 	if err != nil {
 		return nil, fmt.Errorf("opening %s: %w", relPath, err)
@@ -294,7 +297,7 @@ func (s *GitHubActionsStrategy) extractFromFile(
 		return nil, err
 	}
 
-	var refs []Ref
+	var refs []pin.Ref
 	for _, pkg := range inv.Packages {
 		if pkg == nil {
 			continue
@@ -306,9 +309,9 @@ func (s *GitHubActionsStrategy) extractFromFile(
 	return refs, nil
 }
 
-// Resolve implements Strategy. It resolves a mutable tag/branch to a commit
+// Resolve implements pin.Strategy. It resolves a mutable tag/branch to a commit
 // SHA and finds the most specific semver tag for the Dependabot comment.
-func (s *GitHubActionsStrategy) Resolve(ctx context.Context, ref Ref) (pinnedValue, versionTag string, err error) {
+func (s *Strategy) Resolve(ctx context.Context, ref pin.Ref) (pinnedValue, versionTag string, err error) {
 	owner, repo := splitOwnerRepo(ref.Name)
 	if owner == "" || repo == "" {
 		return "", "", fmt.Errorf("invalid action name: %s", ref.Name)
@@ -329,10 +332,10 @@ func (s *GitHubActionsStrategy) Resolve(ctx context.Context, ref Ref) (pinnedVal
 	return sha, tag, nil
 }
 
-// Verify implements Strategy. It checks commit provenance for fork/imposter
+// Verify implements pin.Strategy. It checks commit provenance for fork/imposter
 // detection and signature verification. Returns nil if no verifier is
 // configured (e.g., no GitHub API client available).
-func (s *GitHubActionsStrategy) Verify(ctx context.Context, ref Ref) (*Verification, error) {
+func (s *Strategy) Verify(ctx context.Context, ref pin.Ref) (*pin.Verification, error) {
 	if s.verifier == nil {
 		return nil, nil
 	}
@@ -343,16 +346,16 @@ func (s *GitHubActionsStrategy) Verify(ctx context.Context, ref Ref) (*Verificat
 	}
 
 	sha := ref.Version
-	if !commitSHARe.MatchString(sha) {
+	if !pin.IsCommitSHA(sha) {
 		return nil, fmt.Errorf("ref %q is not a SHA", sha)
 	}
 
 	return s.verifier.Verify(ctx, owner, repo, sha)
 }
 
-// ResolveUpdate implements Strategy. It re-resolves an already-pinned ref to
+// ResolveUpdate implements pin.Strategy. It re-resolves an already-pinned ref to
 // the latest SHA in its major version channel (e.g., v4 → latest v4.x.x).
-func (s *GitHubActionsStrategy) ResolveUpdate(ctx context.Context, ref Ref) (string, string, string, error) {
+func (s *Strategy) ResolveUpdate(ctx context.Context, ref pin.Ref) (string, string, string, error) {
 	owner, repo := splitOwnerRepo(ref.Name)
 	if owner == "" || repo == "" {
 		return "", "", "", fmt.Errorf("invalid action name: %s", ref.Name)
@@ -392,14 +395,14 @@ func (s *GitHubActionsStrategy) ResolveUpdate(ctx context.Context, ref Ref) (str
 	return latestSHA, newTag, currentTag, nil
 }
 
-// Rewrite implements Strategy. It rewrites workflow/action YAML files with SHA pins.
-func (s *GitHubActionsStrategy) Rewrite(root *os.Root, relPath string, updates []Update) error {
+// Rewrite implements pin.Strategy. It rewrites workflow/action YAML files with SHA pins.
+func (s *Strategy) Rewrite(root *os.Root, relPath string, updates []pin.Update) error {
 	return RewriteWorkflow(root, relPath, updates)
 }
 
 // packageToRef converts an extractor.Package from the actionsx extractor to
 // a pin.Ref. Returns nil for non-GitHub-Actions packages (docker, local).
-func packageToRef(pkg *extractor.Package, relPath string) *Ref {
+func packageToRef(pkg *extractor.Package, relPath string) *pin.Ref {
 	if !purlx.IsGitHubActionsType(pkg.PURLType) {
 		return nil // docker or other type
 	}
@@ -414,8 +417,8 @@ func packageToRef(pkg *extractor.Package, relPath string) *Ref {
 		subpath = md.Subpath
 	}
 
-	return &Ref{
-		Ecosystem: EcosystemGitHubActions,
+	return &pin.Ref{
+		Ecosystem: Ecosystem,
 		Name:      owner + "/" + repo,
 		Subpath:   subpath,
 		Version:   pkg.Version,
@@ -441,11 +444,3 @@ func splitOwnerRepo(name string) (owner, repo string) {
 	return parts[0], parts[1]
 }
 
-// isWorkflowFile checks if a relative path is a GitHub Actions workflow file.
-func isWorkflowFile(relPath string) bool {
-	if !strings.HasPrefix(relPath, ".github/workflows/") {
-		return false
-	}
-	ext := strings.ToLower(path.Ext(relPath))
-	return ext == ".yml" || ext == ".yaml"
-}

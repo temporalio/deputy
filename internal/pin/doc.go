@@ -7,23 +7,22 @@
 //
 // # Supported ecosystems
 //
-// GitHub Actions ([GitHubActionsStrategy]) — replaces mutable version tags
-// with commit SHAs. Includes fork/imposter commit detection via the GitHub
-// API. Resolution uses the git protocol (ls-remote), not the REST API.
+// Each ecosystem is implemented as a subpackage:
 //
-//	uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+//   - [github.com/picatz/deputy/internal/pin/githubactions] — replaces mutable
+//     version tags with commit SHAs. Includes fork/imposter commit detection
+//     via the GitHub API. Resolution uses the git protocol (ls-remote).
 //
-// Container images ([ContainerStrategy]) — appends sha256 digest pins to
-// Dockerfile FROM statements, workflow container/services fields, and
-// docker:// uses. Resolution uses OCI registry HEAD requests.
-//
-//	FROM alpine:3.19@sha256:a8560b36e8b8210634f77d9f7f9efd7ffa463e380b75e2e74aff4511df3ef88c
+//   - [github.com/picatz/deputy/internal/pin/container] — appends sha256 digest
+//     pins to Dockerfile FROM statements, workflow container/services fields,
+//     and docker:// uses. Resolution uses OCI registry HEAD requests.
 //
 // # Future ecosystems
 //
-// The Strategy interface is designed for these ecosystems to be added without
-// modifying the orchestrator. Each shares the same structural pattern: a
-// mutable reference that can be replaced with an immutable one.
+// The Strategy interface is designed for these ecosystems to be added as new
+// subpackages without modifying the orchestrator. Each shares the same
+// structural pattern: a mutable reference that can be replaced with an
+// immutable one.
 //
 // Terraform modules — git-sourced modules (git::https://...?ref=v1.0) use
 // mutable tags. Pin to commit SHA, same as GitHub Actions. HCL rewriting

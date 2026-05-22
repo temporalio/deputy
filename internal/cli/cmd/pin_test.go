@@ -5,7 +5,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/picatz/deputy/internal/pin"
+	"github.com/picatz/deputy/internal/pin/container"
+	"github.com/picatz/deputy/internal/pin/githubactions"
 )
 
 func TestBuildPinStrategies(t *testing.T) {
@@ -72,7 +73,7 @@ func TestBuildPinStrategies(t *testing.T) {
 			}
 			for _, s := range strategies {
 				eco := s.Ecosystem()
-				if eco != pin.EcosystemGitHubActions && eco != pin.EcosystemContainerImage {
+				if eco != githubactions.Ecosystem && eco != container.Ecosystem {
 					t.Errorf("unexpected ecosystem: %s", eco)
 				}
 			}

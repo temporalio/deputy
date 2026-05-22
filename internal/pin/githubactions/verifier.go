@@ -1,4 +1,4 @@
-package pin
+package githubactions
 
 import (
 	"context"
@@ -7,6 +7,7 @@ import (
 	"net/http"
 
 	"github.com/google/go-github/v63/github"
+	"github.com/picatz/deputy/internal/pin"
 )
 
 // Verifier checks commit provenance using the GitHub API to detect
@@ -26,8 +27,8 @@ func NewVerifier(client *github.Client) *Verifier {
 //  2. Whether the commit is reachable from the repository's default branch.
 //  3. Whether the commit might be a fork/imposter commit (fetchable from
 //     the shared object store but not belonging to any branch).
-func (v *Verifier) Verify(ctx context.Context, owner, repo, sha string) (*Verification, error) {
-	result := &Verification{}
+func (v *Verifier) Verify(ctx context.Context, owner, repo, sha string) (*pin.Verification, error) {
+	result := &pin.Verification{}
 
 	// Fetch commit details including signature verification
 	commit, resp, err := v.client.Git.GetCommit(ctx, owner, repo, sha)
@@ -117,11 +118,4 @@ func (v *Verifier) Verify(ctx context.Context, owner, repo, sha string) (*Verifi
 	}
 
 	return result, nil
-}
-
-func truncSHA(sha string) string {
-	if len(sha) > 12 {
-		return sha[:12]
-	}
-	return sha
 }

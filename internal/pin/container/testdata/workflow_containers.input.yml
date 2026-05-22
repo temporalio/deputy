@@ -1,0 +1,10 @@
+name: CI
+on: push
+jobs:
+  test:
+    container: postgres:16
+    services:
+      redis:
+        image: redis:7
+    steps:
+      - uses: docker://alpine:3.19

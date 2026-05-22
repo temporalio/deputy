@@ -1,4 +1,4 @@
-package pin
+package githubactions
 
 import (
 	"fmt"
@@ -6,6 +6,8 @@ import (
 	"os"
 	"regexp"
 	"strings"
+
+	"github.com/picatz/deputy/internal/pin"
 )
 
 // RewriteWorkflow applies pin updates to a single workflow file within the
@@ -15,7 +17,7 @@ import (
 // The output format is Dependabot-compatible:
 //
 //	uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
-func RewriteWorkflow(root *os.Root, relPath string, updates []Update) error {
+func RewriteWorkflow(root *os.Root, relPath string, updates []pin.Update) error {
 	if len(updates) == 0 {
 		return nil
 	}
@@ -75,15 +77,17 @@ func RewriteWorkflow(root *os.Root, relPath string, updates []Update) error {
 	if err != nil {
 		return fmt.Errorf("writing %s: %w", relPath, err)
 	}
-	defer f.Close()
 
-	_, err = f.Write([]byte(contentStr))
-	return err
+	_, writeErr := f.Write([]byte(contentStr))
+	if closeErr := f.Close(); writeErr == nil {
+		writeErr = closeErr
+	}
+	return writeErr
 }
 
 // validateUpdate checks that an Update has valid fields to prevent injection
 // via crafted version tags or pinned values.
-func validateUpdate(u Update) error {
+func validateUpdate(u pin.Update) error {
 	if u.Name == "" {
 		return fmt.Errorf("empty action name in update")
 	}
@@ -91,7 +95,7 @@ func validateUpdate(u Update) error {
 		return fmt.Errorf("empty pinned value for %s", u.Name)
 	}
 	// PinnedValue must be a valid 40-char hex SHA
-	if !commitSHARe.MatchString(u.PinnedValue) {
+	if !pin.IsCommitSHA(u.PinnedValue) {
 		return fmt.Errorf("pinned value %q for %s is not a valid SHA", u.PinnedValue, u.Name)
 	}
 	// VersionTag must not contain newlines (injection prevention)

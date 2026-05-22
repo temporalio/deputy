@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -98,6 +99,67 @@ func (m *mockStrategy) ResolveUpdate(_ context.Context, ref Ref) (string, string
 	}
 	// Default: no update available.
 	return ref.Version, "v1.0.0", "v1.0.0", nil
+}
+
+// containerMockStrategy mocks a container pinning strategy for orchestrator
+// tests. It does regex-based container rewriting (name:tag → name:tag@digest).
+type containerMockStrategy struct {
+	refs   []Ref
+	digest string
+}
+
+func (m *containerMockStrategy) Ecosystem() string { return "container" }
+func (m *containerMockStrategy) IsPinned(ref Ref) bool {
+	return strings.Contains(ref.Version, "sha256:")
+}
+func (m *containerMockStrategy) ShouldSkip(_ Ref) (bool, string) { return false, "" }
+func (m *containerMockStrategy) Discover(_ context.Context, _ scalibrfs.FS) ([]Ref, error) {
+	return m.refs, nil
+}
+func (m *containerMockStrategy) Resolve(_ context.Context, ref Ref) (string, string, error) {
+	return m.digest, ref.Version, nil
+}
+func (m *containerMockStrategy) Verify(_ context.Context, _ Ref) (*Verification, error) {
+	return nil, nil
+}
+func (m *containerMockStrategy) ResolveUpdate(_ context.Context, ref Ref) (string, string, string, error) {
+	return ref.Version, "", "", nil
+}
+func (m *containerMockStrategy) Rewrite(root *os.Root, relPath string, updates []Update) error {
+	if len(updates) == 0 {
+		return nil
+	}
+	rootFS := root.FS()
+	info, err := fs.Stat(rootFS, relPath)
+	if err != nil {
+		return err
+	}
+	content, err := fs.ReadFile(rootFS, relPath)
+	if err != nil {
+		return err
+	}
+	contentStr := string(content)
+	modified := false
+	for _, u := range updates {
+		pattern := fmt.Sprintf(`%s:%s(@sha256:[a-fA-F0-9]+)?`, regexp.QuoteMeta(u.Name), regexp.QuoteMeta(u.VersionTag))
+		re := regexp.MustCompile(pattern)
+		replacement := fmt.Sprintf("%s:%s@%s", u.Name, u.VersionTag, u.PinnedValue)
+		newContent := re.ReplaceAllString(contentStr, replacement)
+		if newContent != contentStr {
+			contentStr = newContent
+			modified = true
+		}
+	}
+	if !modified {
+		return nil
+	}
+	f, err := root.OpenFile(relPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, info.Mode().Perm())
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	_, err = f.Write([]byte(contentStr))
+	return err
 }
 
 func TestPin_BasicPinning(t *testing.T) {
@@ -871,13 +933,54 @@ func TestPin_WithExclude(t *testing.T) {
 }
 
 // writingMockStrategy wraps mockStrategy but actually writes files via
-// RewriteWorkflow, so multi-strategy tests see each other's changes on disk.
+// regex-based rewriting, so multi-strategy tests see each other's changes
+// on disk. This mirrors the real RewriteWorkflow logic without importing
+// the githubactions subpackage (which would create an import cycle).
 type writingMockStrategy struct {
 	mockStrategy
 }
 
 func (m *writingMockStrategy) Rewrite(root *os.Root, path string, updates []Update) error {
-	return RewriteWorkflow(root, path, updates)
+	return testRewriteWorkflow(root, path, updates)
+}
+
+// testRewriteWorkflow is a minimal reimplementation of the GHA rewrite logic
+// for use in orchestrator tests that need real file writes.
+func testRewriteWorkflow(root *os.Root, relPath string, updates []Update) error {
+	if len(updates) == 0 {
+		return nil
+	}
+	rootFS := root.FS()
+	info, err := fs.Stat(rootFS, relPath)
+	if err != nil {
+		return err
+	}
+	content, err := fs.ReadFile(rootFS, relPath)
+	if err != nil {
+		return err
+	}
+	contentStr := string(content)
+	modified := false
+	for _, u := range updates {
+		pattern := fmt.Sprintf(`(uses:\s*["']?)(%s)@([^\s"'#]+)(["']?)(\s*#[^\n]*)?`, regexp.QuoteMeta(u.Name))
+		re := regexp.MustCompile(pattern)
+		replacement := fmt.Sprintf("${1}${2}@%s${4} # %s", u.PinnedValue, u.VersionTag)
+		newContent := re.ReplaceAllString(contentStr, replacement)
+		if newContent != contentStr {
+			contentStr = newContent
+			modified = true
+		}
+	}
+	if !modified {
+		return nil
+	}
+	f, err := root.OpenFile(relPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, info.Mode().Perm())
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	_, err = f.Write([]byte(contentStr))
+	return err
 }
 
 // TestPin_MultiStrategySharedFile proves that GHA and Container strategies
@@ -913,19 +1016,17 @@ jobs:
 		},
 	}
 
-	container := &ContainerStrategy{
-		resolveDigestFunc: func(_ context.Context, imageRef string) (string, error) {
-			switch imageRef {
-			case "postgres:16":
-				return digest, nil
-			case "alpine:3.19":
-				return digest, nil
-			}
-			return "", fmt.Errorf("unknown: %s", imageRef)
+	ctr := &containerMockStrategy{
+		refs: []Ref{
+			{Ecosystem: "container", Name: "postgres", Version: "16",
+				FilePath: ".github/workflows/ci.yml"},
+			{Ecosystem: "container", Name: "alpine", Version: "3.19",
+				FilePath: ".github/workflows/ci.yml"},
 		},
+		digest: digest,
 	}
 
-	report, err := Pin(context.Background(), root, Options{SkipVerification: true}, gha, container)
+	report, err := Pin(context.Background(), root, Options{SkipVerification: true}, gha, ctr)
 	if err != nil {
 		t.Fatal(err)
 	}

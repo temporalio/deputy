@@ -191,6 +191,9 @@ type Verification struct {
 // Pin discovers pinnable references, resolves them to immutable pins,
 // optionally verifies them, and rewrites the files.
 func Pin(ctx context.Context, root *os.Root, opts Options, strategies ...Strategy) (*Report, error) {
+	if err := validateExcludePatterns(opts.Exclude); err != nil {
+		return nil, err
+	}
 	fsys, err := rootFS(root)
 	if err != nil {
 		return nil, err
@@ -228,22 +231,23 @@ func processRefs(ctx context.Context, refs []Ref, strategy Strategy, opts *Optio
 
 	for i, ref := range refs {
 		wg.Add(1)
-		sem <- struct{}{}
+		select {
+		case sem <- struct{}{}:
+		case <-ctx.Done():
+			results[i] = Result{
+				Ref:    ref,
+				Status: StatusError,
+				Error:  ctx.Err().Error(),
+			}
+			wg.Done()
+			continue
+		}
 		go func() {
 			defer func() {
 				<-sem
 				wg.Done()
 			}()
-			select {
-			case <-ctx.Done():
-				results[i] = Result{
-					Ref:    ref,
-					Status: StatusError,
-					Error:  ctx.Err().Error(),
-				}
-			default:
-				results[i] = processOneRef(ctx, ref, strategy, opts)
-			}
+			results[i] = processOneRef(ctx, ref, strategy, opts)
 		}()
 	}
 
@@ -354,6 +358,9 @@ func writeStrategyUpdates(strategy Strategy, root *os.Root, results []Result) er
 // Check discovers pinnable refs and reports which are pinned and which are not.
 // It makes no API calls and writes no files — purely local file scanning.
 func Check(ctx context.Context, root *os.Root, opts Options, strategies ...Strategy) (*Report, error) {
+	if err := validateExcludePatterns(opts.Exclude); err != nil {
+		return nil, err
+	}
 	fsys, err := rootFS(root)
 	if err != nil {
 		return nil, err
@@ -401,6 +408,9 @@ func Check(ctx context.Context, root *os.Root, opts Options, strategies ...Strat
 // commits, signature status). It makes API calls but writes no files.
 // Unpinned refs are skipped.
 func Verify(ctx context.Context, root *os.Root, opts Options, strategies ...Strategy) (*Report, error) {
+	if err := validateExcludePatterns(opts.Exclude); err != nil {
+		return nil, err
+	}
 	fsys, err := rootFS(root)
 	if err != nil {
 		return nil, err
@@ -431,22 +441,23 @@ func processVerifyRefs(ctx context.Context, refs []Ref, strategy Strategy, opts 
 
 	for i, ref := range refs {
 		wg.Add(1)
-		sem <- struct{}{}
+		select {
+		case sem <- struct{}{}:
+		case <-ctx.Done():
+			results[i] = Result{
+				Ref:    ref,
+				Status: StatusError,
+				Error:  ctx.Err().Error(),
+			}
+			wg.Done()
+			continue
+		}
 		go func() {
 			defer func() {
 				<-sem
 				wg.Done()
 			}()
-			select {
-			case <-ctx.Done():
-				results[i] = Result{
-					Ref:    ref,
-					Status: StatusError,
-					Error:  ctx.Err().Error(),
-				}
-			default:
-				results[i] = processOneVerifyRef(ctx, ref, strategy, opts)
-			}
+			results[i] = processOneVerifyRef(ctx, ref, strategy, opts)
 		}()
 	}
 
@@ -510,6 +521,9 @@ func processOneVerifyRef(ctx context.Context, ref Ref, strategy Strategy, opts *
 // PinUpdate re-pins already-pinned refs to the latest version in their major
 // version channel. Unpinned refs are skipped.
 func PinUpdate(ctx context.Context, root *os.Root, opts Options, strategies ...Strategy) (*Report, error) {
+	if err := validateExcludePatterns(opts.Exclude); err != nil {
+		return nil, err
+	}
 	fsys, err := rootFS(root)
 	if err != nil {
 		return nil, err
@@ -546,22 +560,23 @@ func processUpdateRefs(ctx context.Context, refs []Ref, strategy Strategy, opts 
 
 	for i, ref := range refs {
 		wg.Add(1)
-		sem <- struct{}{}
+		select {
+		case sem <- struct{}{}:
+		case <-ctx.Done():
+			results[i] = Result{
+				Ref:    ref,
+				Status: StatusError,
+				Error:  ctx.Err().Error(),
+			}
+			wg.Done()
+			continue
+		}
 		go func() {
 			defer func() {
 				<-sem
 				wg.Done()
 			}()
-			select {
-			case <-ctx.Done():
-				results[i] = Result{
-					Ref:    ref,
-					Status: StatusError,
-					Error:  ctx.Err().Error(),
-				}
-			default:
-				results[i] = processOneUpdateRef(ctx, ref, strategy, opts)
-			}
+			results[i] = processOneUpdateRef(ctx, ref, strategy, opts)
 		}()
 	}
 
@@ -645,6 +660,18 @@ func shouldExclude(ref Ref, excludes []string) bool {
 		}
 	}
 	return false
+}
+
+// validateExcludePatterns checks that all exclude patterns are valid
+// path.Match globs. Returns an error for malformed patterns rather than
+// silently ignoring them.
+func validateExcludePatterns(patterns []string) error {
+	for _, p := range patterns {
+		if _, err := path.Match(p, ""); err != nil {
+			return fmt.Errorf("invalid exclude pattern %q: %w", p, err)
+		}
+	}
+	return nil
 }
 
 // rootFS extracts a scalibrfs.FS from an os.Root.

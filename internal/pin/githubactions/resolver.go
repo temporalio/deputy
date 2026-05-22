@@ -1,9 +1,9 @@
-package pin
+package githubactions
 
 import (
 	"context"
 	"fmt"
-	"sort"
+	"slices"
 	"strings"
 	"sync"
 
@@ -11,7 +11,9 @@ import (
 	"github.com/go-git/go-git/v5/config"
 	"github.com/go-git/go-git/v5/storage/memory"
 	"github.com/picatz/deputy/internal/auth"
+	"github.com/picatz/deputy/internal/pin"
 	"golang.org/x/mod/semver"
+	"golang.org/x/sync/singleflight"
 )
 
 // refEntry is a tag name and its dereferenced commit SHA from git ls-remote.
@@ -36,6 +38,9 @@ type Resolver struct {
 	// ls-remote calls when multiple actions share the same repository.
 	refCacheMu sync.Mutex
 	refCache   map[string][]refEntry
+
+	// flight deduplicates concurrent ls-remote calls for the same remote URL.
+	flight singleflight.Group
 }
 
 // NewResolver creates a Resolver that uses the git protocol for ref resolution.
@@ -64,7 +69,7 @@ func (r *Resolver) ResolveSHA(ctx context.Context, owner, repo, ref string) (str
 	// provenance. The Verifier (separate step) checks whether a SHA is
 	// trustworthy. When verification is skipped, imposter SHAs won't be
 	// detected — this is an accepted trade-off documented in --skip-verification.
-	if commitSHARe.MatchString(ref) {
+	if pin.IsCommitSHA(ref) {
 		return ref, nil
 	}
 
@@ -116,6 +121,7 @@ func (r *Resolver) ResolveTag(ctx context.Context, owner, repo, sha string) (str
 }
 
 // listRefs returns cached refs or fetches them via listRefsFunc.
+// Uses singleflight to deduplicate concurrent requests for the same remote.
 func (r *Resolver) listRefs(ctx context.Context, remoteURL string) ([]refEntry, error) {
 	r.refCacheMu.Lock()
 	if cached, ok := r.refCache[remoteURL]; ok {
@@ -124,16 +130,20 @@ func (r *Resolver) listRefs(ctx context.Context, remoteURL string) ([]refEntry, 
 	}
 	r.refCacheMu.Unlock()
 
-	entries, err := r.listRefsFunc(ctx, remoteURL)
+	v, err, _ := r.flight.Do(remoteURL, func() (any, error) {
+		entries, err := r.listRefsFunc(ctx, remoteURL)
+		if err != nil {
+			return nil, err
+		}
+		r.refCacheMu.Lock()
+		r.refCache[remoteURL] = entries
+		r.refCacheMu.Unlock()
+		return entries, nil
+	})
 	if err != nil {
 		return nil, err
 	}
-
-	r.refCacheMu.Lock()
-	r.refCache[remoteURL] = entries
-	r.refCacheMu.Unlock()
-
-	return entries, nil
+	return v.([]refEntry), nil
 }
 
 // gitListRefs performs a single ls-remote against the remote URL and returns
@@ -231,14 +241,13 @@ func bestSemverTag(candidates []string) string {
 		return candidates[0]
 	}
 
-	// Sort by specificity (more segments first), then by version descending
-	sort.Slice(valid, func(i, j int) bool {
-		si := segmentCount(valid[i])
-		sj := segmentCount(valid[j])
-		if si != sj {
-			return si > sj
+	// Sort by specificity (more segments first), then by version descending.
+	slices.SortFunc(valid, func(a, b string) int {
+		sa, sb := segmentCount(a), segmentCount(b)
+		if sa != sb {
+			return sb - sa // more segments first
 		}
-		return semver.Compare(valid[i], valid[j]) > 0
+		return semver.Compare(b, a) // higher version first
 	})
 
 	return valid[0]
@@ -255,4 +264,13 @@ func segmentCount(v string) int {
 		v = v[:idx]
 	}
 	return strings.Count(v, ".") + 1
+}
+
+// truncSHA returns the first 12 characters of a SHA for use in log
+// messages and errors, or the full string if shorter.
+func truncSHA(sha string) string {
+	if len(sha) > 12 {
+		return sha[:12]
+	}
+	return sha
 }

@@ -1,9 +1,10 @@
-package pin
+package container
 
 import (
 	"context"
 	"fmt"
 	"io/fs"
+	"log/slog"
 	"os"
 	"regexp"
 	"strings"
@@ -13,20 +14,24 @@ import (
 	"github.com/google/go-containerregistry/pkg/name"
 	"github.com/google/go-containerregistry/pkg/v1/remote"
 	scalibrfs "github.com/google/osv-scalibr/fs"
+	"github.com/picatz/deputy/internal/pin"
 )
 
 const (
-	// EcosystemContainerImage is the ecosystem identifier for container image pinning.
-	EcosystemContainerImage = "container-image"
+	// Ecosystem is the ecosystem identifier for container image pinning.
+	Ecosystem = "container-image"
 )
 
 // Compile-time interface check.
-var _ Strategy = (*ContainerStrategy)(nil)
+var _ pin.Strategy = (*Strategy)(nil)
 
 // digestRe matches a sha256 container image digest.
 var digestRe = regexp.MustCompile(`sha256:[a-fA-F0-9]{64}`)
 
-// ContainerStrategy implements the Strategy interface for container image
+// fromRe matches Dockerfile FROM statements with optional --platform flag.
+var fromRe = regexp.MustCompile(`(?im)^\s*FROM\s+(?:--platform=[^\s]+\s+)?(\S+)`)
+
+// Strategy implements the pin.Strategy interface for container image
 // digest pinning. It discovers image references in:
 //
 //   - Dockerfiles (FROM statements)
@@ -36,30 +41,36 @@ var digestRe = regexp.MustCompile(`sha256:[a-fA-F0-9]{64}`)
 // It resolves tags to sha256 digests via OCI registry HEAD requests using
 // the Docker credential keychain for auth. No special token is needed for
 // public images; private registries use credentials from ~/.docker/config.json.
-type ContainerStrategy struct {
+type Strategy struct {
 	// resolveDigestFunc resolves an image reference to its digest.
 	// Defaults to ociResolveDigest. Tests can override this.
 	resolveDigestFunc func(ctx context.Context, imageRef string) (string, error)
 }
 
-// NewContainerStrategy creates a Strategy for container image digest pinning.
-func NewContainerStrategy() *ContainerStrategy {
-	s := &ContainerStrategy{}
+// NewStrategy creates a Strategy for container image digest pinning.
+func NewStrategy() *Strategy {
+	s := &Strategy{}
 	s.resolveDigestFunc = ociResolveDigest
 	return s
 }
 
-// Ecosystem implements Strategy.
-func (s *ContainerStrategy) Ecosystem() string { return EcosystemContainerImage }
+// NewStrategyWithResolver creates a Strategy with a custom digest resolver.
+// This is intended for testing; production callers should use [NewStrategy].
+func NewStrategyWithResolver(resolve func(ctx context.Context, imageRef string) (string, error)) *Strategy {
+	return &Strategy{resolveDigestFunc: resolve}
+}
 
-// IsPinned implements Strategy. A container image ref is pinned when its
+// Ecosystem implements pin.Strategy.
+func (s *Strategy) Ecosystem() string { return Ecosystem }
+
+// IsPinned implements pin.Strategy. A container image ref is pinned when its
 // version contains a sha256 digest.
-func (s *ContainerStrategy) IsPinned(ref Ref) bool {
+func (s *Strategy) IsPinned(ref pin.Ref) bool {
 	return strings.Contains(ref.Version, "sha256:")
 }
 
-// ShouldSkip implements Strategy.
-func (s *ContainerStrategy) ShouldSkip(ref Ref) (bool, string) {
+// ShouldSkip implements pin.Strategy.
+func (s *Strategy) ShouldSkip(ref pin.Ref) (bool, string) {
 	v := ref.Version
 	if v == "" {
 		return true, "untagged image (add explicit tag first)"
@@ -74,14 +85,14 @@ func (s *ContainerStrategy) ShouldSkip(ref Ref) (bool, string) {
 	return false, ""
 }
 
-// Discover implements Strategy. It finds container image references across
+// Discover implements pin.Strategy. It finds container image references across
 // Dockerfiles and GitHub Actions workflow files.
-func (s *ContainerStrategy) Discover(ctx context.Context, fsys scalibrfs.FS) ([]Ref, error) {
-	var refs []Ref
+func (s *Strategy) Discover(ctx context.Context, fsys scalibrfs.FS) ([]pin.Ref, error) {
+	var refs []pin.Ref
 	seen := map[string]bool{}
 
-	addRef := func(r Ref) {
-		key := dedupeKey(r)
+	addRef := func(r pin.Ref) {
+		key := pin.DedupeKey(r)
 		if !seen[key] {
 			seen[key] = true
 			refs = append(refs, r)
@@ -94,17 +105,18 @@ func (s *ContainerStrategy) Discover(ctx context.Context, fsys scalibrfs.FS) ([]
 			return err
 		}
 		if d.IsDir() {
-			if shouldSkipDir(d.Name()) {
+			if pin.ShouldSkipDir(d.Name()) {
 				return fs.SkipDir
 			}
 			return nil
 		}
-		if isSymlink(d) || !isDockerfile(d.Name()) {
+		if pin.IsSymlink(d) || !isDockerfile(d.Name()) {
 			return nil
 		}
 		found, err := discoverDockerfileRefs(fsys, relPath)
 		if err != nil {
-			return nil // skip unparseable files
+			slog.Debug("skipping unparseable Dockerfile", "path", relPath, "error", err)
+			return nil
 		}
 		for _, r := range found {
 			addRef(r)
@@ -121,11 +133,12 @@ func (s *ContainerStrategy) Discover(ctx context.Context, fsys scalibrfs.FS) ([]
 			if err != nil || d.IsDir() {
 				return err
 			}
-			if !isWorkflowFile(relPath) {
+			if !pin.IsWorkflowFile(relPath) {
 				return nil
 			}
 			found, err := discoverWorkflowContainerRefs(fsys, relPath)
 			if err != nil {
+				slog.Debug("skipping unparseable workflow", "path", relPath, "error", err)
 				return nil
 			}
 			for _, r := range found {
@@ -141,9 +154,9 @@ func (s *ContainerStrategy) Discover(ctx context.Context, fsys scalibrfs.FS) ([]
 	return refs, nil
 }
 
-// Resolve implements Strategy. It resolves an image tag to a sha256 digest
+// Resolve implements pin.Strategy. It resolves an image tag to a sha256 digest
 // via an OCI registry HEAD request.
-func (s *ContainerStrategy) Resolve(ctx context.Context, ref Ref) (pinnedValue, versionTag string, err error) {
+func (s *Strategy) Resolve(ctx context.Context, ref pin.Ref) (pinnedValue, versionTag string, err error) {
 	tag := ref.Version
 	imageRef := ref.Name + ":" + tag
 	digest, err := s.resolveDigestFunc(ctx, imageRef)
@@ -153,16 +166,16 @@ func (s *ContainerStrategy) Resolve(ctx context.Context, ref Ref) (pinnedValue, 
 	return digest, tag, nil
 }
 
-// Verify implements Strategy. Container image signature verification
+// Verify implements pin.Strategy. Container image signature verification
 // (e.g., cosign/sigstore) is not yet implemented.
-func (s *ContainerStrategy) Verify(_ context.Context, _ Ref) (*Verification, error) {
+func (s *Strategy) Verify(_ context.Context, _ pin.Ref) (*pin.Verification, error) {
 	return nil, nil
 }
 
-// ResolveUpdate implements Strategy. It re-resolves a pinned image tag to
+// ResolveUpdate implements pin.Strategy. It re-resolves a pinned image tag to
 // check if the digest has changed (e.g., a security patch was pushed to
 // the same tag).
-func (s *ContainerStrategy) ResolveUpdate(ctx context.Context, ref Ref) (pinnedValue, newVersionTag, currentVersionTag string, err error) {
+func (s *Strategy) ResolveUpdate(ctx context.Context, ref pin.Ref) (pinnedValue, newVersionTag, currentVersionTag string, err error) {
 	tag, currentDigest := splitTagDigest(ref.Version)
 	if tag == "" {
 		// Digest-only ref (no tag) — can't check for updates.
@@ -182,33 +195,30 @@ func (s *ContainerStrategy) ResolveUpdate(ctx context.Context, ref Ref) (pinnedV
 	return latestDigest, tag, tag, nil
 }
 
-// Rewrite implements Strategy. It rewrites container image references to
+// Rewrite implements pin.Strategy. It rewrites container image references to
 // include sha256 digest pins, preserving the original tag for readability.
-func (s *ContainerStrategy) Rewrite(root *os.Root, relPath string, updates []Update) error {
+func (s *Strategy) Rewrite(root *os.Root, relPath string, updates []pin.Update) error {
 	return rewriteContainerRefs(root, relPath, updates)
 }
 
 // --- Discovery helpers ---
 
 // discoverDockerfileRefs extracts container image refs from FROM statements.
-func discoverDockerfileRefs(fsys scalibrfs.FS, relPath string) ([]Ref, error) {
+func discoverDockerfileRefs(fsys scalibrfs.FS, relPath string) ([]pin.Ref, error) {
 	content, err := fs.ReadFile(fsys, relPath)
 	if err != nil {
 		return nil, err
 	}
 
-	var refs []Ref
-	// Match FROM with optional --platform, image:tag or image@digest, optional AS.
-	fromRe := regexp.MustCompile(`(?im)^\s*FROM\s+(?:--platform=[^\s]+\s+)?(\S+)`)
-
+	var refs []pin.Ref
 	for _, match := range fromRe.FindAllSubmatch(content, -1) {
 		raw := string(match[1])
 		imgName, version := splitImageRef(raw)
 		if imgName == "" || strings.ToLower(imgName) == "scratch" {
 			continue
 		}
-		refs = append(refs, Ref{
-			Ecosystem: EcosystemContainerImage,
+		refs = append(refs, pin.Ref{
+			Ecosystem: Ecosystem,
 			Name:      imgName,
 			Version:   version,
 			FilePath:  relPath,
@@ -220,7 +230,7 @@ func discoverDockerfileRefs(fsys scalibrfs.FS, relPath string) ([]Ref, error) {
 
 // discoverWorkflowContainerRefs extracts docker:// uses and container/services
 // image refs from a GitHub Actions workflow file.
-func discoverWorkflowContainerRefs(fsys scalibrfs.FS, relPath string) ([]Ref, error) {
+func discoverWorkflowContainerRefs(fsys scalibrfs.FS, relPath string) ([]pin.Ref, error) {
 	content, err := fs.ReadFile(fsys, relPath)
 	if err != nil {
 		return nil, err
@@ -231,7 +241,7 @@ func discoverWorkflowContainerRefs(fsys scalibrfs.FS, relPath string) ([]Ref, er
 		return nil, err
 	}
 
-	var refs []Ref
+	var refs []pin.Ref
 
 	jobs, _ := root["jobs"].(map[string]any)
 	for _, jobRaw := range jobs {
@@ -244,8 +254,8 @@ func discoverWorkflowContainerRefs(fsys scalibrfs.FS, relPath string) ([]Ref, er
 		if c := extractContainerImage(job, "container"); c != "" {
 			imgName, version := splitImageRef(c)
 			if imgName != "" && version != "" {
-				refs = append(refs, Ref{
-					Ecosystem: EcosystemContainerImage,
+				refs = append(refs, pin.Ref{
+					Ecosystem: Ecosystem,
 					Name:      imgName,
 					Version:   version,
 					FilePath:  relPath,
@@ -265,8 +275,8 @@ func discoverWorkflowContainerRefs(fsys scalibrfs.FS, relPath string) ([]Ref, er
 					img = strings.TrimSpace(img)
 					imgName, version := splitImageRef(img)
 					if imgName != "" && version != "" {
-						refs = append(refs, Ref{
-							Ecosystem: EcosystemContainerImage,
+						refs = append(refs, pin.Ref{
+							Ecosystem: Ecosystem,
 							Name:      imgName,
 							Version:   version,
 							FilePath:  relPath,
@@ -295,8 +305,8 @@ func discoverWorkflowContainerRefs(fsys scalibrfs.FS, relPath string) ([]Ref, er
 			raw := strings.TrimPrefix(usesStr, "docker://")
 			imgName, version := splitImageRef(raw)
 			if imgName != "" && version != "" {
-				refs = append(refs, Ref{
-					Ecosystem: EcosystemContainerImage,
+				refs = append(refs, pin.Ref{
+					Ecosystem: Ecosystem,
 					Name:      imgName,
 					Version:   version,
 					FilePath:  relPath,
@@ -329,8 +339,9 @@ func extractContainerImage(job map[string]any, key string) string {
 
 // --- Image reference parsing ---
 
-// splitImageRef splits an image reference into name and version (tag or
-// tag@digest or digest). Handles registry-qualified names.
+// SplitImageRef splits an image reference into name and version (tag or
+// tag@digest or digest). Handles registry-qualified names. Exported for
+// use by other packages that need to parse container image references.
 //
 //	"alpine:3.19"                      → ("alpine", "3.19")
 //	"alpine:3.19@sha256:abc..."        → ("alpine", "3.19@sha256:abc...")
@@ -382,69 +393,6 @@ func splitTagDigest(version string) (tag, digest string) {
 	return version, ""
 }
 
-// --- Rewrite ---
-
-// rewriteContainerRefs rewrites container image references in a file to
-// include sha256 digest pins.
-func rewriteContainerRefs(root *os.Root, relPath string, updates []Update) error {
-	if len(updates) == 0 {
-		return nil
-	}
-
-	rootFS := root.FS()
-	info, err := fs.Stat(rootFS, relPath)
-	if err != nil {
-		return fmt.Errorf("stat %s: %w", relPath, err)
-	}
-
-	content, err := fs.ReadFile(rootFS, relPath)
-	if err != nil {
-		return fmt.Errorf("reading %s: %w", relPath, err)
-	}
-
-	contentStr := string(content)
-	modified := false
-
-	for _, u := range updates {
-		if u.Name == "" || u.PinnedValue == "" || u.VersionTag == "" {
-			continue
-		}
-		if !digestRe.MatchString(u.PinnedValue) {
-			return fmt.Errorf("pinned value %q for %s is not a valid digest", u.PinnedValue, u.Name)
-		}
-
-		// Match NAME:TAG with optional existing @sha256:digest.
-		pattern := fmt.Sprintf(
-			`%s:%s(@sha256:[a-fA-F0-9]+)?`,
-			regexp.QuoteMeta(u.Name), regexp.QuoteMeta(u.VersionTag),
-		)
-		re, err := regexp.Compile(pattern)
-		if err != nil {
-			return fmt.Errorf("compiling regex for %s: %w", u.Name, err)
-		}
-
-		replacement := fmt.Sprintf("%s:%s@%s", u.Name, u.VersionTag, u.PinnedValue)
-		newContent := re.ReplaceAllString(contentStr, replacement)
-		if newContent != contentStr {
-			contentStr = newContent
-			modified = true
-		}
-	}
-
-	if !modified {
-		return nil
-	}
-
-	f, err := root.OpenFile(relPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, info.Mode().Perm())
-	if err != nil {
-		return fmt.Errorf("writing %s: %w", relPath, err)
-	}
-	defer f.Close()
-
-	_, err = f.Write([]byte(contentStr))
-	return err
-}
-
 // --- Digest resolution ---
 
 // ociResolveDigest resolves an image reference to its sha256 digest via
@@ -468,8 +416,8 @@ func ociResolveDigest(ctx context.Context, imageRef string) (string, error) {
 // --- File detection ---
 
 // isDockerfile returns true if the filename looks like a Dockerfile.
-func isDockerfile(name string) bool {
-	lower := strings.ToLower(name)
+func isDockerfile(n string) bool {
+	lower := strings.ToLower(n)
 	if lower == "dockerfile" {
 		return true
 	}
@@ -481,3 +429,4 @@ func isDockerfile(name string) bool {
 	}
 	return false
 }
+

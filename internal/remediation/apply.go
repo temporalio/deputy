@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/picatz/deputy/internal/pin"
+	"github.com/picatz/deputy/internal/pin/githubactions"
 )
 
 // IsDeputyInternalCommand checks if a command is a deputy-internal command
@@ -307,8 +308,8 @@ func applyDockerfileUpdate(filePath, image, newVersion string) error {
 //
 //	uses: owner/repo@<sha> # <tag>
 //
-// Delegates to pin.RewriteWorkflow for a single source of truth on the
-// rewrite logic. The filePath must be under repoDir.
+// Delegates to githubactions.RewriteWorkflow for a single source of truth
+// on the rewrite logic. The filePath must be under repoDir.
 func applyActionPin(repoDir, filePath, actionRef, sha, tag string) error {
 	root, err := os.OpenRoot(repoDir)
 	if err != nil {
@@ -321,7 +322,7 @@ func applyActionPin(repoDir, filePath, actionRef, sha, tag string) error {
 		return fmt.Errorf("computing relative path: %w", err)
 	}
 
-	return pin.RewriteWorkflow(root, filepath.ToSlash(relPath), []pin.Update{
+	return githubactions.RewriteWorkflow(root, filepath.ToSlash(relPath), []pin.Update{
 		{Name: actionRef, PinnedValue: sha, VersionTag: tag},
 	})
 }

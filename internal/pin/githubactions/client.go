@@ -1,4 +1,4 @@
-package pin
+package githubactions
 
 import (
 	"context"

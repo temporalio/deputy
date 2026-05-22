@@ -13,6 +13,8 @@ import (
 	deperrors "github.com/picatz/deputy/internal/errors"
 	"github.com/picatz/deputy/internal/otel"
 	"github.com/picatz/deputy/internal/pin"
+	"github.com/picatz/deputy/internal/pin/container"
+	"github.com/picatz/deputy/internal/pin/githubactions"
 	ui "github.com/picatz/deputy/internal/ui"
 	"github.com/spf13/cobra"
 	"go.opentelemetry.io/otel/attribute"
@@ -642,7 +644,7 @@ func shortenSHA(s string) string {
 }
 
 // supportedPinEcosystems lists ecosystems that have pinning support.
-var supportedPinEcosystems = []string{pin.EcosystemGitHubActions, pin.EcosystemContainerImage}
+var supportedPinEcosystems = []string{githubactions.Ecosystem, container.Ecosystem}
 
 // buildPinStrategies creates Strategy instances for the requested ecosystems.
 // "all" expands to all supported ecosystems. When needsVerification is true,
@@ -662,14 +664,14 @@ func buildPinStrategies(ctx context.Context, ecosystems []string, needsVerificat
 		}
 		seen[eco] = true
 		switch eco {
-		case pin.EcosystemGitHubActions:
+		case githubactions.Ecosystem:
 			var ghClient *github.Client
 			if needsVerification {
-				ghClient = pin.NewGitHubClient(ctx)
+				ghClient = githubactions.NewGitHubClient(ctx)
 			}
-			strategies = append(strategies, pin.NewGitHubActionsStrategy(ghClient))
-		case pin.EcosystemContainerImage:
-			strategies = append(strategies, pin.NewContainerStrategy())
+			strategies = append(strategies, githubactions.NewStrategy(ghClient))
+		case container.Ecosystem:
+			strategies = append(strategies, container.NewStrategy())
 		default:
 			return nil, fmt.Errorf("unsupported ecosystem for pinning: %q (supported: %s)",
 				eco, strings.Join(supportedPinEcosystems, ", "))

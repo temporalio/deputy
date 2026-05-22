@@ -3,13 +3,14 @@ package pin
 import (
 	"io/fs"
 	"os"
+	"path"
 	"strings"
 )
 
-// shouldSkipDir reports whether a directory should be excluded from
+// ShouldSkipDir reports whether a directory should be excluded from
 // dependency discovery walks. Skips version control, dependency caches,
 // and hidden directories (except .github which contains workflows).
-func shouldSkipDir(name string) bool {
+func ShouldSkipDir(name string) bool {
 	switch name {
 	case ".git", "node_modules", "vendor":
 		return true
@@ -21,14 +22,28 @@ func shouldSkipDir(name string) bool {
 	return false
 }
 
-// isSymlink reports whether a directory entry is a symbolic link.
-func isSymlink(d fs.DirEntry) bool {
+// IsSymlink reports whether a directory entry is a symbolic link.
+func IsSymlink(d fs.DirEntry) bool {
 	return d.Type()&os.ModeSymlink != 0
 }
 
-// dedupeKey returns a stable key for deduplicating discovered refs.
+// DedupeKey returns a stable key for deduplicating discovered refs.
 // Uses DisplayName (which includes subpath) to avoid colliding refs
 // like github/codeql-action/init and github/codeql-action/analyze.
-func dedupeKey(r Ref) string {
+func DedupeKey(r Ref) string {
 	return r.FilePath + "|" + r.DisplayName() + "@" + r.Version
+}
+
+// IsWorkflowFile checks if a relative path is a GitHub Actions workflow file.
+func IsWorkflowFile(relPath string) bool {
+	if !strings.HasPrefix(relPath, ".github/workflows/") {
+		return false
+	}
+	ext := strings.ToLower(path.Ext(relPath))
+	return ext == ".yml" || ext == ".yaml"
+}
+
+// IsCommitSHA reports whether s is a 40-character hexadecimal Git commit SHA.
+func IsCommitSHA(s string) bool {
+	return commitSHARe.MatchString(s)
 }
