@@ -67,14 +67,14 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
 
       - name: Setup Deputy
-        uses: picatz/deputy/actions/setup@main
+        uses: ./actions/setup
 
       - name: Generate SBOM
         id: sbom
-        uses: picatz/deputy/actions/sbom@main
+        uses: ./actions/sbom
         with:
           target: ${{ inputs.target }}
           format: ${{ inputs.format }}
