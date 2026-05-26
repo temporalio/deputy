@@ -79,6 +79,7 @@ func RegisterCommands(root *cobra.Command, deps Dependencies) {
 	// Supply chain commands
 	AddSBOMCommand(root, deps.Clients)
 	AddListCommand(root, deps.Clients)
+	AddPinCommand(root)
 
 	// Security scanning commands
 	AddSecretsCommand(root, deps.Clients)

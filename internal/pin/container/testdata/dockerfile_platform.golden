@@ -1,0 +1,2 @@
+FROM --platform=linux/amd64 node:22-slim@sha256:abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890
+RUN echo hello

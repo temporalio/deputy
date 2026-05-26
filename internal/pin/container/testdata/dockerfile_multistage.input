@@ -1,0 +1,5 @@
+FROM golang:1.23 AS builder
+COPY . .
+RUN go build -o /app .
+FROM alpine:3.19
+COPY --from=builder /app /app
