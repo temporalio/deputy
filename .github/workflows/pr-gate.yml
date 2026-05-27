@@ -75,6 +75,9 @@ jobs:
   scan:
     name: Security Scan
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
 
     outputs:
       findings-count: ${{ steps.scan.outputs.findings-count }}
@@ -101,6 +104,9 @@ jobs:
   diff:
     name: Dependency Diff
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
     if: github.event_name == 'pull_request'
 
     outputs:

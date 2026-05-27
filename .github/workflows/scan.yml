@@ -72,6 +72,10 @@ jobs:
   scan:
     name: Security Scan
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+      pull-requests: write
 
     outputs:
       findings-count: ${{ steps.scan.outputs.findings-count }}
