@@ -16,7 +16,6 @@ on:
   workflow_dispatch:
 
 permissions:
-  security-events: write
   contents: read
   pull-requests: write
 
@@ -27,8 +26,9 @@ jobs:
     uses: temporalio/deputy/.github/workflows/scan.yml@main
     with:
       policy: policy/ci/security-gate.yaml
-      upload-sarif: true
-      sarif-category: deputy-self-scan
+      upload-sarif: false
+      # upload-sarif: true        # requires GHAS (security-events: write)
+      # sarif-category: deputy-self-scan
 
   # PR-specific checks with dependency diff
   pr-gate:

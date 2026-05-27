@@ -12,7 +12,7 @@ on:
 
 permissions:
   contents: write        # Release creation and asset uploads
-  security-events: write # SARIF upload for security scan
+  # security-events: write # SARIF upload (requires GHAS)
   id-token: write        # Sigstore OIDC keyless signing
   pull-requests: write   # Homebrew cask PR creation
 
@@ -24,8 +24,9 @@ jobs:
     with:
       policy: policy/ci/release-gate.yaml
       fail-on-policy-violation: true
-      upload-sarif: true
-      sarif-category: deputy-release-scan
+      upload-sarif: false
+      # upload-sarif: true          # requires GHAS (security-events: write)
+      # sarif-category: deputy-release-scan
 
   # Build and release with GoReleaser
   release:

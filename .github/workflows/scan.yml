@@ -14,9 +14,9 @@
 #       with:
 #         policy: policy/ci/security-gate.yaml
 #       permissions:
-#         security-events: write  # For SARIF upload (optional, gracefully degrades)
+#         # security-events: write  # For SARIF upload (requires GHAS)
 #         contents: read
-#         pull-requests: write    # For PR comment fallback
+#         pull-requests: write      # For PR comment fallback
 
 name: Scan
 
@@ -44,10 +44,10 @@ on:
         required: false
         default: true
       upload-sarif:
-        description: 'Upload SARIF to GitHub Security tab'
+        description: 'Upload SARIF to GitHub Security tab (requires GHAS)'
         type: boolean
         required: false
-        default: true
+        default: false
       sarif-category:
         description: 'SARIF category for GitHub Security'
         type: string
@@ -74,7 +74,6 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      security-events: write
       pull-requests: write
 
     outputs:

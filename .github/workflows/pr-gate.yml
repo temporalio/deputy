@@ -15,9 +15,9 @@
 #         scan-policy: policy/ci/security-gate.yaml
 #         diff-policy: policy/ci/pr-review.yaml
 #       permissions:
-#         security-events: write  # For SARIF upload (optional, gracefully degrades)
+#         # security-events: write  # For SARIF upload (requires GHAS)
 #         contents: read
-#         pull-requests: write    # For PR comments
+#         pull-requests: write      # For PR comments
 
 name: PR Gate
 
@@ -50,10 +50,10 @@ on:
         required: false
         default: true
       upload-sarif:
-        description: 'Upload SARIF to GitHub Security tab'
+        description: 'Upload SARIF to GitHub Security tab (requires GHAS)'
         type: boolean
         required: false
-        default: true
+        default: false
       comment-on-pr:
         description: 'Post diff summary as PR comment'
         type: boolean
@@ -77,7 +77,6 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      security-events: write
 
     outputs:
       findings-count: ${{ steps.scan.outputs.findings-count }}
