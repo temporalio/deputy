@@ -1,6 +1,6 @@
 name: 'Setup Deputy'
 description: 'Install the Deputy CLI for supply chain security. Prerequisite for scan, diff, sbom, and proxy actions.'
-author: 'picatz'
+author: 'temporalio'
 
 branding:
   icon: 'shield'
@@ -40,7 +40,7 @@ runs:
   steps:
     - name: Setup Go
       id: setup-go
-      uses: actions/setup-go@v5
+      uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
       with:
         # go-version-file takes precedence if set, otherwise fall back to go-version or stable
         go-version: ${{ inputs.go-version-file == '' && (inputs.go-version || 'stable') || '' }}
@@ -61,15 +61,15 @@ runs:
         DEPUTY_PATH="$(go env GOPATH)/bin/deputy"
 
         # Check if we're in the deputy repository with source code available
-        if [ -f "go.mod" ] && grep -q "^module github.com/picatz/deputy$" go.mod 2>/dev/null; then
+        if [ -f "go.mod" ] && grep -q "^module github.com/temporalio/deputy$" go.mod 2>/dev/null; then
           echo "Building Deputy from source (detected deputy repository)..."
           go build -o "$DEPUTY_PATH" .
         elif [ "$INPUT_VERSION" = "latest" ]; then
           echo "Installing Deputy@latest..."
-          go install github.com/picatz/deputy@latest
+          go install github.com/temporalio/deputy@latest
         else
           echo "Installing Deputy@$INPUT_VERSION..."
-          go install "github.com/picatz/deputy@$INPUT_VERSION"
+          go install "github.com/temporalio/deputy@$INPUT_VERSION"
         fi
 
         if [ ! -f "$DEPUTY_PATH" ]; then

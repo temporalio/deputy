@@ -50,7 +50,7 @@ Yes. Deputy is open source under the Apache License 2.0.
 ### How do I install Deputy?
 
 ```bash
-go install github.com/picatz/deputy@latest
+go install github.com/temporalio/deputy@latest
 ```
 
 Requires Go 1.21+. See the [getting started guide](getting-started.md).
@@ -234,7 +234,7 @@ deputy diff main feature-branch
 ```yaml
 - name: Scan for vulnerabilities
   run: |
-    go install github.com/picatz/deputy@latest
+    go install github.com/temporalio/deputy@latest
     deputy scan --format json --output scan.json
 ```
 

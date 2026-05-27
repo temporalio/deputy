@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/picatz/deputy/internal/errors"
+	"github.com/temporalio/deputy/internal/errors"
 	"gopkg.in/yaml.v3"
 )
 

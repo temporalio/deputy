@@ -5,7 +5,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/picatz/deputy/internal/httputil"
+	"github.com/temporalio/deputy/internal/httputil"
 	"osv.dev/bindings/go/osvdev"
 )
 

@@ -11,7 +11,7 @@ import (
 
 const (
 	// MeterName is the default meter name for Deputy metrics.
-	MeterName = "github.com/picatz/deputy"
+	MeterName = "github.com/temporalio/deputy"
 )
 
 // Metrics holds all Deputy metric instruments.

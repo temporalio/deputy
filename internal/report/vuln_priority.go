@@ -3,8 +3,8 @@ package report
 import (
 	"strings"
 
-	"github.com/picatz/deputy/internal/vulnerability"
-	"github.com/picatz/deputy/internal/vulnerability/severity/cvss"
+	"github.com/temporalio/deputy/internal/vulnerability"
+	"github.com/temporalio/deputy/internal/vulnerability/severity/cvss"
 )
 
 // ConsolidatedSeverityPriority returns a priority tuple (int, float64) for sorting vulnerabilities.

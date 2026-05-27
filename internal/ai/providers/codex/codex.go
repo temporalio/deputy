@@ -10,7 +10,7 @@ import (
 	"iter"
 	"strings"
 
-	"github.com/picatz/deputy/internal/ai"
+	"github.com/temporalio/deputy/internal/ai"
 	"github.com/picatz/openai/codex"
 )
 

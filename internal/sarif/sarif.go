@@ -52,8 +52,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/picatz/deputy/internal/report"
-	"github.com/picatz/deputy/internal/vulnerability"
+	"github.com/temporalio/deputy/internal/report"
+	"github.com/temporalio/deputy/internal/vulnerability"
 )
 
 // SARIF version and schema constants.
@@ -782,8 +782,8 @@ func Convert(vulns []report.Vulnerability, policyFindings []report.PolicyFinding
 		Name:           "Deputy",
 		FullName:       fullName,
 		Version:        opts.ToolVersion,
-		InformationURI: "https://github.com/picatz/deputy",
-		Organization:   "picatz",
+		InformationURI: "https://github.com/temporalio/deputy",
+		Organization:   "temporalio",
 		Rules:          rules,
 		ShortDesc: &Message{
 			Text: "Software supply chain security scanner",

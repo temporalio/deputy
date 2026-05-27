@@ -236,7 +236,7 @@ type PackageResolved struct {
 Register the extractor in `internal/inventory/inventory.go`:
 
 ```go
-import "github.com/picatz/deputy/internal/inventory/plugins/swift/packageswift"
+import "github.com/temporalio/deputy/internal/inventory/plugins/swift/packageswift"
 
 func init() {
     RegisterExtractor(&packageswift.Extractor{})
@@ -258,7 +258,7 @@ import (
     "net/http/httputil"
     "net/url"
 
-    "github.com/picatz/deputy/internal/proxy"
+    "github.com/temporalio/deputy/internal/proxy"
 )
 
 // Handler proxies Swift Package Manager requests.
@@ -335,7 +335,7 @@ package graph
 import (
     "context"
 
-    "github.com/picatz/deputy/internal/dependency"
+    "github.com/temporalio/deputy/internal/dependency"
 )
 
 // SwiftResolver resolves Swift package dependencies.
@@ -428,8 +428,8 @@ Before submitting your PR:
 
 ## Example PRs
 
-- [Add RubyGems support](https://github.com/picatz/deputy/pull/XXX)
-- [Add Cargo proxy support](https://github.com/picatz/deputy/pull/XXX)
+- [Add RubyGems support](https://github.com/temporalio/deputy/pull/XXX)
+- [Add Cargo proxy support](https://github.com/temporalio/deputy/pull/XXX)
 
 ## See Also
 

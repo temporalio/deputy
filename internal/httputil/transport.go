@@ -11,7 +11,7 @@ import (
 
 	"github.com/hashicorp/go-cleanhttp"
 	"github.com/hashicorp/go-retryablehttp"
-	"github.com/picatz/deputy/internal/network"
+	"github.com/temporalio/deputy/internal/network"
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 )
 

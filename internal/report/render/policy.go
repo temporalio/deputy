@@ -5,8 +5,8 @@ import (
 	"io"
 	"strings"
 
-	"github.com/picatz/deputy/internal/report"
-	ui "github.com/picatz/deputy/internal/ui"
+	"github.com/temporalio/deputy/internal/report"
+	ui "github.com/temporalio/deputy/internal/ui"
 )
 
 // PolicyEvaluationSummary writes a summary of policy evaluation to w.

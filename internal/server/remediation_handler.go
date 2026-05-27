@@ -16,15 +16,15 @@ import (
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
-	agentv1 "github.com/picatz/deputy/gen/deputy/agent/v1"
-	"github.com/picatz/deputy/gen/deputy/agent/v1/agentv1connect"
-	remediationv1 "github.com/picatz/deputy/gen/deputy/remediation/v1"
-	"github.com/picatz/deputy/gen/deputy/remediation/v1/remediationv1connect"
-	"github.com/picatz/deputy/internal/agent"
-	"github.com/picatz/deputy/internal/logs"
-	internalproto "github.com/picatz/deputy/internal/proto"
-	"github.com/picatz/deputy/internal/remediation"
-	"github.com/picatz/deputy/internal/vulnerability"
+	agentv1 "github.com/temporalio/deputy/gen/deputy/agent/v1"
+	"github.com/temporalio/deputy/gen/deputy/agent/v1/agentv1connect"
+	remediationv1 "github.com/temporalio/deputy/gen/deputy/remediation/v1"
+	"github.com/temporalio/deputy/gen/deputy/remediation/v1/remediationv1connect"
+	"github.com/temporalio/deputy/internal/agent"
+	"github.com/temporalio/deputy/internal/logs"
+	internalproto "github.com/temporalio/deputy/internal/proto"
+	"github.com/temporalio/deputy/internal/remediation"
+	"github.com/temporalio/deputy/internal/vulnerability"
 )
 
 // validateRequest validates a proto message using protovalidate and returns a connect error if validation fails.

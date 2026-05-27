@@ -8,9 +8,9 @@ import (
 
 	"google.golang.org/protobuf/encoding/protojson"
 
-	sbomv1 "github.com/picatz/deputy/gen/deputy/sbom/v1"
-	sbomx "github.com/picatz/deputy/internal/sbom"
-	"github.com/picatz/deputy/internal/sbom/diff"
+	sbomv1 "github.com/temporalio/deputy/gen/deputy/sbom/v1"
+	sbomx "github.com/temporalio/deputy/internal/sbom"
+	"github.com/temporalio/deputy/internal/sbom/diff"
 )
 
 func TestCalculateSBOMDiff_Basic(t *testing.T) {

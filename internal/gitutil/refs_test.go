@@ -12,7 +12,7 @@ import (
 	"github.com/go-git/go-git/v5/config"
 	"github.com/go-git/go-git/v5/plumbing"
 	"github.com/go-git/go-git/v5/plumbing/object"
-	inv "github.com/picatz/deputy/internal/inventory"
+	inv "github.com/temporalio/deputy/internal/inventory"
 )
 
 func TestRefConstants(t *testing.T) {

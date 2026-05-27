@@ -5,11 +5,11 @@ import (
 
 	"google.golang.org/protobuf/types/known/timestamppb"
 
-	containerv1 "github.com/picatz/deputy/gen/deputy/container/v1"
-	dependencyv1 "github.com/picatz/deputy/gen/deputy/dependency/v1"
-	scanv1 "github.com/picatz/deputy/gen/deputy/scan/v1"
-	vulnerabilityv1 "github.com/picatz/deputy/gen/deputy/vulnerability/v1"
-	"github.com/picatz/deputy/internal/container/image"
+	containerv1 "github.com/temporalio/deputy/gen/deputy/container/v1"
+	dependencyv1 "github.com/temporalio/deputy/gen/deputy/dependency/v1"
+	scanv1 "github.com/temporalio/deputy/gen/deputy/scan/v1"
+	vulnerabilityv1 "github.com/temporalio/deputy/gen/deputy/vulnerability/v1"
+	"github.com/temporalio/deputy/internal/container/image"
 )
 
 // ManifestRefsToProto converts internal ManifestRefs to proto ManifestRefs.

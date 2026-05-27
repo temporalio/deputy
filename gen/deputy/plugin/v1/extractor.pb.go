@@ -7,7 +7,7 @@
 package pluginv1
 
 import (
-	v1 "github.com/picatz/deputy/gen/deputy/dependency/v1"
+	v1 "github.com/temporalio/deputy/gen/deputy/dependency/v1"
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 	reflect "reflect"
@@ -482,8 +482,8 @@ const file_deputy_plugin_v1_extractor_proto_rawDesc = "" +
 	"\x10ExtractorService\x12E\n" +
 	"\x04Info\x12\x1d.deputy.plugin.v1.InfoRequest\x1a\x1e.deputy.plugin.v1.InfoResponse\x12]\n" +
 	"\fFileRequired\x12%.deputy.plugin.v1.FileRequiredRequest\x1a&.deputy.plugin.v1.FileRequiredResponse\x12N\n" +
-	"\aExtract\x12 .deputy.plugin.v1.ExtractRequest\x1a!.deputy.plugin.v1.ExtractResponseB\xc0\x01\n" +
-	"\x14com.deputy.plugin.v1B\x0eExtractorProtoP\x01Z6github.com/picatz/deputy/gen/deputy/plugin/v1;pluginv1\xa2\x02\x03DPX\xaa\x02\x10Deputy.Plugin.V1\xca\x02\x10Deputy\\Plugin\\V1\xe2\x02\x1cDeputy\\Plugin\\V1\\GPBMetadata\xea\x02\x12Deputy::Plugin::V1b\x06proto3"
+	"\aExtract\x12 .deputy.plugin.v1.ExtractRequest\x1a!.deputy.plugin.v1.ExtractResponseB\xc4\x01\n" +
+	"\x14com.deputy.plugin.v1B\x0eExtractorProtoP\x01Z:github.com/temporalio/deputy/gen/deputy/plugin/v1;pluginv1\xa2\x02\x03DPX\xaa\x02\x10Deputy.Plugin.V1\xca\x02\x10Deputy\\Plugin\\V1\xe2\x02\x1cDeputy\\Plugin\\V1\\GPBMetadata\xea\x02\x12Deputy::Plugin::V1b\x06proto3"
 
 var (
 	file_deputy_plugin_v1_extractor_proto_rawDescOnce sync.Once

@@ -5,12 +5,12 @@ import (
 	"strings"
 	"testing"
 
-	containerv1 "github.com/picatz/deputy/gen/deputy/container/v1"
-	vulnerabilityv1 "github.com/picatz/deputy/gen/deputy/vulnerability/v1"
-	"github.com/picatz/deputy/internal/remediation"
-	"github.com/picatz/deputy/internal/report"
-	"github.com/picatz/deputy/internal/scanning"
-	"github.com/picatz/deputy/internal/vulnerability"
+	containerv1 "github.com/temporalio/deputy/gen/deputy/container/v1"
+	vulnerabilityv1 "github.com/temporalio/deputy/gen/deputy/vulnerability/v1"
+	"github.com/temporalio/deputy/internal/remediation"
+	"github.com/temporalio/deputy/internal/report"
+	"github.com/temporalio/deputy/internal/scanning"
+	"github.com/temporalio/deputy/internal/vulnerability"
 )
 
 func TestDisplayVulnerabilitiesWithHeader(t *testing.T) {

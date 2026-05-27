@@ -6,7 +6,7 @@ package otel
 import (
 	"time"
 
-	"github.com/picatz/deputy/internal/errors"
+	"github.com/temporalio/deputy/internal/errors"
 )
 
 // Config configures OpenTelemetry instrumentation.

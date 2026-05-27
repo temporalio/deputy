@@ -9,13 +9,13 @@ import (
 	"strings"
 	"time"
 
-	sandboxv1 "github.com/picatz/deputy/gen/deputy/sandbox/v1"
-	"github.com/picatz/deputy/internal/sandbox"
-	"github.com/picatz/deputy/internal/sandbox/runtimes/docker"
-	"github.com/picatz/deputy/internal/sandbox/runtimes/gvisor"
-	"github.com/picatz/deputy/internal/sandbox/runtimes/none"
-	"github.com/picatz/deputy/internal/sandbox/runtimes/plugin"
-	"github.com/picatz/deputy/internal/sandbox/runtimes/sandboxexec"
+	sandboxv1 "github.com/temporalio/deputy/gen/deputy/sandbox/v1"
+	"github.com/temporalio/deputy/internal/sandbox"
+	"github.com/temporalio/deputy/internal/sandbox/runtimes/docker"
+	"github.com/temporalio/deputy/internal/sandbox/runtimes/gvisor"
+	"github.com/temporalio/deputy/internal/sandbox/runtimes/none"
+	"github.com/temporalio/deputy/internal/sandbox/runtimes/plugin"
+	"github.com/temporalio/deputy/internal/sandbox/runtimes/sandboxexec"
 	"google.golang.org/protobuf/types/known/durationpb"
 )
 

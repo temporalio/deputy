@@ -7,14 +7,14 @@ import (
 
 	"connectrpc.com/connect"
 
-	dependencyv1 "github.com/picatz/deputy/gen/deputy/dependency/v1"
-	listv1 "github.com/picatz/deputy/gen/deputy/list/v1"
-	"github.com/picatz/deputy/gen/deputy/list/v1/listv1connect"
-	"github.com/picatz/deputy/internal/compare"
-	"github.com/picatz/deputy/internal/inventory"
-	"github.com/picatz/deputy/internal/otel"
-	protoconv "github.com/picatz/deputy/internal/proto"
-	"github.com/picatz/deputy/internal/targets"
+	dependencyv1 "github.com/temporalio/deputy/gen/deputy/dependency/v1"
+	listv1 "github.com/temporalio/deputy/gen/deputy/list/v1"
+	"github.com/temporalio/deputy/gen/deputy/list/v1/listv1connect"
+	"github.com/temporalio/deputy/internal/compare"
+	"github.com/temporalio/deputy/internal/inventory"
+	"github.com/temporalio/deputy/internal/otel"
+	protoconv "github.com/temporalio/deputy/internal/proto"
+	"github.com/temporalio/deputy/internal/targets"
 )
 
 // ListHandler implements the ListService gRPC handler.

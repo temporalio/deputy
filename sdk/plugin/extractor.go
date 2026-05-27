@@ -3,9 +3,9 @@ package plugin
 import (
 	"context"
 
-	dependencyv1 "github.com/picatz/deputy/gen/deputy/dependency/v1"
-	pluginv1 "github.com/picatz/deputy/gen/deputy/plugin/v1"
-	"github.com/picatz/deputy/gen/deputy/plugin/v1/pluginv1pluginrpc"
+	dependencyv1 "github.com/temporalio/deputy/gen/deputy/dependency/v1"
+	pluginv1 "github.com/temporalio/deputy/gen/deputy/plugin/v1"
+	"github.com/temporalio/deputy/gen/deputy/plugin/v1/pluginv1pluginrpc"
 	"go.opentelemetry.io/otel/attribute"
 	"pluginrpc.com/pluginrpc"
 )

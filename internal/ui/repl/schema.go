@@ -16,10 +16,10 @@ import (
 
 	"google.golang.org/protobuf/reflect/protoreflect"
 
-	containerv1 "github.com/picatz/deputy/gen/deputy/container/v1"
-	graphv1 "github.com/picatz/deputy/gen/deputy/graph/v1"
-	scanv1 "github.com/picatz/deputy/gen/deputy/scan/v1"
-	vulnerabilityv1 "github.com/picatz/deputy/gen/deputy/vulnerability/v1"
+	containerv1 "github.com/temporalio/deputy/gen/deputy/container/v1"
+	graphv1 "github.com/temporalio/deputy/gen/deputy/graph/v1"
+	scanv1 "github.com/temporalio/deputy/gen/deputy/scan/v1"
+	vulnerabilityv1 "github.com/temporalio/deputy/gen/deputy/vulnerability/v1"
 )
 
 // SchemaRegistry provides proto schema introspection for CEL hints.

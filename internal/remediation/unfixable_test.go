@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/picatz/deputy/internal/vulnerability"
+	"github.com/temporalio/deputy/internal/vulnerability"
 )
 
 func TestUnfixableCategory_String(t *testing.T) {

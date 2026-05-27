@@ -8,15 +8,15 @@ import (
 	"connectrpc.com/connect"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
-	diffv1 "github.com/picatz/deputy/gen/deputy/diff/v1"
-	"github.com/picatz/deputy/gen/deputy/diff/v1/diffv1connect"
-	targetv1 "github.com/picatz/deputy/gen/deputy/target/v1"
-	vulnerabilityv1 "github.com/picatz/deputy/gen/deputy/vulnerability/v1"
-	"github.com/picatz/deputy/internal/compare"
-	"github.com/picatz/deputy/internal/inventory"
-	internalproto "github.com/picatz/deputy/internal/proto"
-	"github.com/picatz/deputy/internal/scanning"
-	"github.com/picatz/deputy/internal/targets"
+	diffv1 "github.com/temporalio/deputy/gen/deputy/diff/v1"
+	"github.com/temporalio/deputy/gen/deputy/diff/v1/diffv1connect"
+	targetv1 "github.com/temporalio/deputy/gen/deputy/target/v1"
+	vulnerabilityv1 "github.com/temporalio/deputy/gen/deputy/vulnerability/v1"
+	"github.com/temporalio/deputy/internal/compare"
+	"github.com/temporalio/deputy/internal/inventory"
+	internalproto "github.com/temporalio/deputy/internal/proto"
+	"github.com/temporalio/deputy/internal/scanning"
+	"github.com/temporalio/deputy/internal/targets"
 )
 
 // DiffHandler implements the DiffService gRPC handler.

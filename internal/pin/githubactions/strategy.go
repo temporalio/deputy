@@ -13,9 +13,9 @@ import (
 	"github.com/google/osv-scalibr/extractor"
 	"github.com/google/osv-scalibr/extractor/filesystem"
 	scalibrfs "github.com/google/osv-scalibr/fs"
-	"github.com/picatz/deputy/internal/inventory/plugins/github/actionsx"
-	"github.com/picatz/deputy/internal/pin"
-	"github.com/picatz/deputy/internal/purlx"
+	"github.com/temporalio/deputy/internal/inventory/plugins/github/actionsx"
+	"github.com/temporalio/deputy/internal/pin"
+	"github.com/temporalio/deputy/internal/purlx"
 	"golang.org/x/mod/semver"
 )
 

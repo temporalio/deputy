@@ -8,7 +8,7 @@ import "deputy/target/v1/target.proto";
 import "deputy/container/v1/container.proto";
 import "google/protobuf/timestamp.proto";
 
-option go_package = "github.com/picatz/deputy/gen/deputy/inventory/v1;inventoryv1";
+option go_package = "github.com/temporalio/deputy/gen/deputy/inventory/v1;inventoryv1";
 
 // InventoryService provides package inventory extraction capabilities.
 //

@@ -6,7 +6,7 @@ import (
 	"github.com/google/cel-go/common"
 	"github.com/google/cel-go/common/ast"
 	"github.com/google/cel-go/parser"
-	"github.com/picatz/deputy/internal/policy"
+	"github.com/temporalio/deputy/internal/policy"
 	protocol "github.com/sourcegraph/go-lsp"
 )
 

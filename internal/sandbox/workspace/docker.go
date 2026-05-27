@@ -12,7 +12,7 @@ import (
 
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/api/types/mount"
-	sandboxv1 "github.com/picatz/deputy/gen/deputy/sandbox/v1"
+	sandboxv1 "github.com/temporalio/deputy/gen/deputy/sandbox/v1"
 )
 
 // DockerIsolator provides workspace isolation using Docker-native mechanisms.

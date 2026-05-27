@@ -7,11 +7,11 @@ import (
 	"net/http/httputil"
 	"net/url"
 
-	dependencyv1 "github.com/picatz/deputy/gen/deputy/dependency/v1"
-	policyv1 "github.com/picatz/deputy/gen/deputy/policy/v1"
-	vulnerabilityv1 "github.com/picatz/deputy/gen/deputy/vulnerability/v1"
-	"github.com/picatz/deputy/internal/analysis/osv"
-	"github.com/picatz/deputy/internal/policy"
+	dependencyv1 "github.com/temporalio/deputy/gen/deputy/dependency/v1"
+	policyv1 "github.com/temporalio/deputy/gen/deputy/policy/v1"
+	vulnerabilityv1 "github.com/temporalio/deputy/gen/deputy/vulnerability/v1"
+	"github.com/temporalio/deputy/internal/analysis/osv"
+	"github.com/temporalio/deputy/internal/policy"
 	"google.golang.org/protobuf/proto"
 )
 

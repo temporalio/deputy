@@ -8,8 +8,8 @@ import (
 
 	git "github.com/go-git/go-git/v5"
 	"github.com/go-git/go-git/v5/plumbing/object"
-	"github.com/picatz/deputy/internal/gitutil"
-	"github.com/picatz/deputy/internal/inventory"
+	"github.com/temporalio/deputy/internal/gitutil"
+	"github.com/temporalio/deputy/internal/inventory"
 )
 
 // TestParseReferencesDetectsWorkingChangesForNonGoManifests confirms that the

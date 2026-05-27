@@ -5,17 +5,17 @@ import (
 
 	"connectrpc.com/connect"
 
-	"github.com/picatz/deputy/gen/deputy/diff/v1/diffv1connect"
-	"github.com/picatz/deputy/gen/deputy/graph/v1/graphv1connect"
-	"github.com/picatz/deputy/gen/deputy/inventory/v1/inventoryv1connect"
-	"github.com/picatz/deputy/gen/deputy/list/v1/listv1connect"
-	"github.com/picatz/deputy/gen/deputy/policy/v1/policyv1connect"
-	"github.com/picatz/deputy/gen/deputy/remediation/v1/remediationv1connect"
-	"github.com/picatz/deputy/gen/deputy/sbom/v1/sbomv1connect"
-	"github.com/picatz/deputy/gen/deputy/scan/v1/scanv1connect"
-	"github.com/picatz/deputy/gen/deputy/secrets/v1/secretsv1connect"
-	"github.com/picatz/deputy/gen/deputy/vulnerability/v1/vulnerabilityv1connect"
-	"github.com/picatz/deputy/internal/server"
+	"github.com/temporalio/deputy/gen/deputy/diff/v1/diffv1connect"
+	"github.com/temporalio/deputy/gen/deputy/graph/v1/graphv1connect"
+	"github.com/temporalio/deputy/gen/deputy/inventory/v1/inventoryv1connect"
+	"github.com/temporalio/deputy/gen/deputy/list/v1/listv1connect"
+	"github.com/temporalio/deputy/gen/deputy/policy/v1/policyv1connect"
+	"github.com/temporalio/deputy/gen/deputy/remediation/v1/remediationv1connect"
+	"github.com/temporalio/deputy/gen/deputy/sbom/v1/sbomv1connect"
+	"github.com/temporalio/deputy/gen/deputy/scan/v1/scanv1connect"
+	"github.com/temporalio/deputy/gen/deputy/secrets/v1/secretsv1connect"
+	"github.com/temporalio/deputy/gen/deputy/vulnerability/v1/vulnerabilityv1connect"
+	"github.com/temporalio/deputy/internal/server"
 )
 
 // Services holds all Deputy service handlers.

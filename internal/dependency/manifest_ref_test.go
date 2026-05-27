@@ -3,7 +3,7 @@ package dependency
 import (
 	"testing"
 
-	dependencyv1 "github.com/picatz/deputy/gen/deputy/dependency/v1"
+	dependencyv1 "github.com/temporalio/deputy/gen/deputy/dependency/v1"
 )
 
 func TestMergeManifestRef(t *testing.T) {

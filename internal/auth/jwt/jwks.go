@@ -11,7 +11,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/picatz/deputy/internal/network"
+	"github.com/temporalio/deputy/internal/network"
 	"github.com/picatz/jose/pkg/jwk"
 )
 

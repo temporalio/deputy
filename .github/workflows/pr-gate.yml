@@ -10,7 +10,7 @@
 # Usage:
 #   jobs:
 #     pr-security:
-#       uses: picatz/deputy/.github/workflows/pr-gate.yml@main
+#       uses: temporalio/deputy/.github/workflows/pr-gate.yml@main
 #       with:
 #         scan-policy: policy/ci/security-gate.yaml
 #         diff-policy: policy/ci/pr-review.yaml
@@ -83,14 +83,14 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
 
       - name: Setup Deputy
-        uses: picatz/deputy/actions/setup@main
+        uses: temporalio/deputy/actions/setup@main
 
       - name: Run scan
         id: scan
-        uses: picatz/deputy/actions/scan@main
+        uses: temporalio/deputy/actions/scan@main
         with:
           target: ${{ inputs.target }}
           policy: ${{ inputs.scan-policy }}
@@ -110,16 +110,16 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
         with:
           fetch-depth: 0
 
       - name: Setup Deputy
-        uses: picatz/deputy/actions/setup@main
+        uses: temporalio/deputy/actions/setup@main
 
       - name: Run diff
         id: diff
-        uses: picatz/deputy/actions/diff@main
+        uses: temporalio/deputy/actions/diff@main
         with:
           base: ${{ github.base_ref }}
           target: ${{ github.head_ref }}

@@ -7,10 +7,10 @@ import (
 
 	"google.golang.org/protobuf/encoding/protojson"
 
-	dependencyv1 "github.com/picatz/deputy/gen/deputy/dependency/v1"
-	sbomv1 "github.com/picatz/deputy/gen/deputy/sbom/v1"
-	sbomx "github.com/picatz/deputy/internal/sbom"
-	"github.com/picatz/deputy/internal/sbom/diff"
+	dependencyv1 "github.com/temporalio/deputy/gen/deputy/dependency/v1"
+	sbomv1 "github.com/temporalio/deputy/gen/deputy/sbom/v1"
+	sbomx "github.com/temporalio/deputy/internal/sbom"
+	"github.com/temporalio/deputy/internal/sbom/diff"
 	"github.com/spf13/cobra"
 )
 

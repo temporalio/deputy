@@ -3,10 +3,10 @@ package filtering
 import (
 	"testing"
 
-	dependencyv1 "github.com/picatz/deputy/gen/deputy/dependency/v1"
-	scanv1 "github.com/picatz/deputy/gen/deputy/scan/v1"
-	vulnerabilityv1 "github.com/picatz/deputy/gen/deputy/vulnerability/v1"
-	"github.com/picatz/deputy/internal/ignore"
+	dependencyv1 "github.com/temporalio/deputy/gen/deputy/dependency/v1"
+	scanv1 "github.com/temporalio/deputy/gen/deputy/scan/v1"
+	vulnerabilityv1 "github.com/temporalio/deputy/gen/deputy/vulnerability/v1"
+	"github.com/temporalio/deputy/internal/ignore"
 )
 
 func TestFilterUnfixed(t *testing.T) {

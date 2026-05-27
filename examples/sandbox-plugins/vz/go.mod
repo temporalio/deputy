@@ -1,4 +1,4 @@
-module github.com/picatz/deputy/examples/sandbox-plugins/vz
+module github.com/temporalio/deputy/examples/sandbox-plugins/vz
 
 go 1.25.5
 
@@ -6,7 +6,7 @@ require (
 	connectrpc.com/connect v1.19.1
 	github.com/Code-Hex/vz/v3 v3.3.0
 	github.com/creack/pty v1.1.24
-	github.com/picatz/deputy v0.0.0
+	github.com/temporalio/deputy v0.0.0
 	go.opentelemetry.io/otel v1.39.0
 	go.opentelemetry.io/otel/trace v1.39.0
 	golang.org/x/net v0.47.0
@@ -48,4 +48,4 @@ require (
 	google.golang.org/grpc v1.77.0 // indirect
 )
 
-replace github.com/picatz/deputy => ../../..
+replace github.com/temporalio/deputy => ../../..

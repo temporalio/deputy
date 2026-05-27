@@ -7,10 +7,10 @@
 package policyv1
 
 import (
-	v13 "github.com/picatz/deputy/gen/deputy/container/v1"
-	v11 "github.com/picatz/deputy/gen/deputy/dependency/v1"
-	v12 "github.com/picatz/deputy/gen/deputy/target/v1"
-	v1 "github.com/picatz/deputy/gen/deputy/vulnerability/v1"
+	v13 "github.com/temporalio/deputy/gen/deputy/container/v1"
+	v11 "github.com/temporalio/deputy/gen/deputy/dependency/v1"
+	v12 "github.com/temporalio/deputy/gen/deputy/target/v1"
+	v1 "github.com/temporalio/deputy/gen/deputy/vulnerability/v1"
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 	reflect "reflect"
@@ -4788,8 +4788,8 @@ const file_deputy_policy_v1_policy_proto_rawDesc = "" +
 	"\x17ACTION_TYPE_UNSPECIFIED\x10\x00\x12\x15\n" +
 	"\x11ACTION_TYPE_ALLOW\x10\x01\x12\x14\n" +
 	"\x10ACTION_TYPE_DENY\x10\x02\x12\x14\n" +
-	"\x10ACTION_TYPE_WARN\x10\x03B\xbd\x01\n" +
-	"\x14com.deputy.policy.v1B\vPolicyProtoP\x01Z6github.com/picatz/deputy/gen/deputy/policy/v1;policyv1\xa2\x02\x03DPX\xaa\x02\x10Deputy.Policy.V1\xca\x02\x10Deputy\\Policy\\V1\xe2\x02\x1cDeputy\\Policy\\V1\\GPBMetadata\xea\x02\x12Deputy::Policy::V1b\x06proto3"
+	"\x10ACTION_TYPE_WARN\x10\x03B\xc1\x01\n" +
+	"\x14com.deputy.policy.v1B\vPolicyProtoP\x01Z:github.com/temporalio/deputy/gen/deputy/policy/v1;policyv1\xa2\x02\x03DPX\xaa\x02\x10Deputy.Policy.V1\xca\x02\x10Deputy\\Policy\\V1\xe2\x02\x1cDeputy\\Policy\\V1\\GPBMetadata\xea\x02\x12Deputy::Policy::V1b\x06proto3"
 
 var (
 	file_deputy_policy_v1_policy_proto_rawDescOnce sync.Once

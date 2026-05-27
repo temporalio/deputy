@@ -7,7 +7,7 @@ import (
 	"time"
 
 	pb "deps.dev/api/v3"
-	"github.com/picatz/deputy/internal/cache/memory"
+	"github.com/temporalio/deputy/internal/cache/memory"
 	"golang.org/x/mod/modfile"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"

@@ -11,15 +11,15 @@ import (
 	pathpkg "path"
 
 	"github.com/charmbracelet/lipgloss"
-	containerv1 "github.com/picatz/deputy/gen/deputy/container/v1"
-	vulnerabilityv1 "github.com/picatz/deputy/gen/deputy/vulnerability/v1"
-	"github.com/picatz/deputy/internal/dependency/graph"
-	"github.com/picatz/deputy/internal/output"
-	"github.com/picatz/deputy/internal/remediation"
-	"github.com/picatz/deputy/internal/report"
-	"github.com/picatz/deputy/internal/scanning"
-	ui "github.com/picatz/deputy/internal/ui"
-	"github.com/picatz/deputy/internal/vulnerability"
+	containerv1 "github.com/temporalio/deputy/gen/deputy/container/v1"
+	vulnerabilityv1 "github.com/temporalio/deputy/gen/deputy/vulnerability/v1"
+	"github.com/temporalio/deputy/internal/dependency/graph"
+	"github.com/temporalio/deputy/internal/output"
+	"github.com/temporalio/deputy/internal/remediation"
+	"github.com/temporalio/deputy/internal/report"
+	"github.com/temporalio/deputy/internal/scanning"
+	ui "github.com/temporalio/deputy/internal/ui"
+	"github.com/temporalio/deputy/internal/vulnerability"
 )
 
 // VulnerabilityDisplayOptions controls optional verbosity in vulnerability output.

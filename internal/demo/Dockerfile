@@ -2,7 +2,7 @@
 # without touching the host. Builds deputy in a separate stage, ships only the
 # binary and the policy, and runs as an unprivileged user.
 
-FROM golang:1.25-bookworm AS builder
+FROM golang:1.25-bookworm@sha256:154bd7001b6eb339e88c964442c0ad6ed5e53f09844cc818a41ce4ecb3ce3b43 AS builder
 WORKDIR /src
 
 # Pre-fetch modules
@@ -13,7 +13,7 @@ RUN go mod download
 COPY . .
 RUN CGO_ENABLED=0 go build -o /out/deputy ./main.go
 
-FROM node:20-bookworm
+FROM node:20-bookworm@sha256:8f693eaa7e0a8e71560c9a82b55fd54c2ae920a2ba5d2cde28bac7d1c01c9ba5
 # Create a non-root user for running tests
 RUN useradd -m tester
 WORKDIR /app

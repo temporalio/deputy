@@ -4,7 +4,7 @@ import (
 	"context"
 	"net/http"
 
-	"github.com/picatz/deputy/internal/auth/jwt"
+	"github.com/temporalio/deputy/internal/auth/jwt"
 )
 
 // Type aliases for backward compatibility.

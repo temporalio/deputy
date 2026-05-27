@@ -28,7 +28,7 @@ builds:
       - -trimpath
     ldflags:
       - -s -w
-      - -X github.com/picatz/deputy/internal/version.Value={{.Version}}
+      - -X github.com/temporalio/deputy/internal/version.Value={{.Version}}
     mod_timestamp: "{{ .CommitTimestamp }}"
 
 archives:
@@ -97,16 +97,16 @@ signs:
 homebrew_casks:
   - name: deputy
     repository:
-      owner: picatz
+      owner: temporalio
       name: deputy
       branch: main
       pull_request:
         enabled: true
         base:
-          owner: picatz
+          owner: temporalio
           name: deputy
           branch: main
-    homepage: "https://github.com/picatz/deputy"
+    homepage: "https://github.com/temporalio/deputy"
     description: "Software supply chain security CLI"
     license: "Apache-2.0"
     binaries:
@@ -114,7 +114,7 @@ homebrew_casks:
 
 release:
   github:
-    owner: picatz
+    owner: temporalio
     name: deputy
   draft: false
   prerelease: auto
@@ -128,16 +128,16 @@ release:
 
     ```bash
     # Homebrew
-    brew install --cask picatz/deputy/deputy
+    brew install --cask temporalio/deputy/deputy
 
     # Go
-    go install github.com/picatz/deputy@{{ .Tag }}
+    go install github.com/temporalio/deputy@{{ .Tag }}
 
     # Binary
     # Download from assets below
     ```
   footer: |
-    **Full Changelog**: https://github.com/picatz/deputy/compare/{{ .PreviousTag }}...{{ .Tag }}
+    **Full Changelog**: https://github.com/temporalio/deputy/compare/{{ .PreviousTag }}...{{ .Tag }}
 
     ---
     Released with [GoReleaser](https://goreleaser.com).

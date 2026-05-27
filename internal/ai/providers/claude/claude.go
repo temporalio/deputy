@@ -15,7 +15,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/picatz/deputy/internal/ai"
+	"github.com/temporalio/deputy/internal/ai"
 )
 
 func init() {

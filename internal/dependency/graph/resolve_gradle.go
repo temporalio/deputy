@@ -9,8 +9,8 @@ import (
 	"sync"
 
 	pb "deps.dev/api/v3"
-	"github.com/picatz/deputy/internal/inventory/plugins/java/gradlex"
-	"github.com/picatz/deputy/internal/logs"
+	"github.com/temporalio/deputy/internal/inventory/plugins/java/gradlex"
+	"github.com/temporalio/deputy/internal/logs"
 )
 
 func init() {

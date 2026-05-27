@@ -12,8 +12,8 @@ import (
 	"time"
 
 	"connectrpc.com/connect"
-	sandboxv1 "github.com/picatz/deputy/gen/deputy/sandbox/v1"
-	"github.com/picatz/deputy/gen/deputy/sandbox/v1/sandboxv1connect"
+	sandboxv1 "github.com/temporalio/deputy/gen/deputy/sandbox/v1"
+	"github.com/temporalio/deputy/gen/deputy/sandbox/v1/sandboxv1connect"
 )
 
 func main() {

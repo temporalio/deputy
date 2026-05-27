@@ -5,7 +5,7 @@ Install the Deputy CLI for software supply chain security scanning.
 ## Usage
 
 ```yaml
-- uses: picatz/deputy/actions/setup@main
+- uses: temporalio/deputy/actions/setup@main
 ```
 
 ## Inputs
@@ -30,13 +30,13 @@ Install the Deputy CLI for software supply chain security scanning.
 ### Basic
 
 ```yaml
-- uses: picatz/deputy/actions/setup@main
+- uses: temporalio/deputy/actions/setup@main
 ```
 
 ### Pin Deputy Version
 
 ```yaml
-- uses: picatz/deputy/actions/setup@main
+- uses: temporalio/deputy/actions/setup@main
   with:
     version: v1.0.0
 ```
@@ -46,7 +46,7 @@ Install the Deputy CLI for software supply chain security scanning.
 Recommended for consistency with your project's Go toolchain:
 
 ```yaml
-- uses: picatz/deputy/actions/setup@main
+- uses: temporalio/deputy/actions/setup@main
   with:
     go-version-file: go.mod
 ```
@@ -56,7 +56,7 @@ This respects the `toolchain` directive if present, falling back to the `go` dir
 ### Specific Go Version
 
 ```yaml
-- uses: picatz/deputy/actions/setup@main
+- uses: temporalio/deputy/actions/setup@main
   with:
     go-version: '1.23'
 ```
@@ -64,7 +64,7 @@ This respects the `toolchain` directive if present, falling back to the `go` dir
 ### With Token for Private Repos
 
 ```yaml
-- uses: picatz/deputy/actions/setup@main
+- uses: temporalio/deputy/actions/setup@main
   with:
     github-token: ${{ secrets.GITHUB_TOKEN }}
 ```

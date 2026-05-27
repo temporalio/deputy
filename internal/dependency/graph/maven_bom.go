@@ -7,7 +7,7 @@ import (
 	"sync"
 
 	pb "deps.dev/api/v3"
-	"github.com/picatz/deputy/internal/cache/memory"
+	"github.com/temporalio/deputy/internal/cache/memory"
 )
 
 // MavenBOMResolver resolves Maven BOM (Bill of Materials) dependency management

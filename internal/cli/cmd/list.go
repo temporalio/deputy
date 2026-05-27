@@ -12,11 +12,11 @@ import (
 	"connectrpc.com/connect"
 	"google.golang.org/protobuf/encoding/protojson"
 
-	dependencyv1 "github.com/picatz/deputy/gen/deputy/dependency/v1"
-	listv1 "github.com/picatz/deputy/gen/deputy/list/v1"
-	"github.com/picatz/deputy/internal/cli/flags"
-	"github.com/picatz/deputy/internal/services"
-	ui "github.com/picatz/deputy/internal/ui"
+	dependencyv1 "github.com/temporalio/deputy/gen/deputy/dependency/v1"
+	listv1 "github.com/temporalio/deputy/gen/deputy/list/v1"
+	"github.com/temporalio/deputy/internal/cli/flags"
+	"github.com/temporalio/deputy/internal/services"
+	ui "github.com/temporalio/deputy/internal/ui"
 	"github.com/spf13/cobra"
 )
 

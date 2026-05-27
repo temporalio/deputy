@@ -6,7 +6,7 @@ import (
 	"runtime/debug"
 	"strings"
 
-	"github.com/picatz/deputy/internal/version"
+	"github.com/temporalio/deputy/internal/version"
 	"github.com/spf13/cobra"
 )
 

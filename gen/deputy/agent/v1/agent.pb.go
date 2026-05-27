@@ -2323,9 +2323,9 @@ const file_deputy_agent_v1_agent_proto_rawDesc = "" +
 	"\aExecute\x12\x1f.deputy.agent.v1.ExecuteRequest\x1a\x1d.deputy.agent.v1.ExecuteEvent0\x01\x12I\n" +
 	"\x06Resume\x12\x1e.deputy.agent.v1.ResumeRequest\x1a\x1d.deputy.agent.v1.ExecuteEvent0\x01\x12L\n" +
 	"\aApprove\x12\x1f.deputy.agent.v1.ApproveRequest\x1a .deputy.agent.v1.ApproveResponse\x12I\n" +
-	"\x06Cancel\x12\x1e.deputy.agent.v1.CancelRequest\x1a\x1f.deputy.agent.v1.CancelResponseB\xb5\x01\n" +
+	"\x06Cancel\x12\x1e.deputy.agent.v1.CancelRequest\x1a\x1f.deputy.agent.v1.CancelResponseB\xb9\x01\n" +
 	"\x13com.deputy.agent.v1B\n" +
-	"AgentProtoP\x01Z4github.com/picatz/deputy/gen/deputy/agent/v1;agentv1\xa2\x02\x03DAX\xaa\x02\x0fDeputy.Agent.V1\xca\x02\x0fDeputy\\Agent\\V1\xe2\x02\x1bDeputy\\Agent\\V1\\GPBMetadata\xea\x02\x11Deputy::Agent::V1b\x06proto3"
+	"AgentProtoP\x01Z8github.com/temporalio/deputy/gen/deputy/agent/v1;agentv1\xa2\x02\x03DAX\xaa\x02\x0fDeputy.Agent.V1\xca\x02\x0fDeputy\\Agent\\V1\xe2\x02\x1bDeputy\\Agent\\V1\\GPBMetadata\xea\x02\x11Deputy::Agent::V1b\x06proto3"
 
 var (
 	file_deputy_agent_v1_agent_proto_rawDescOnce sync.Once

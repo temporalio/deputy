@@ -16,9 +16,9 @@ Configure package managers to use Deputy proxy for policy enforcement at downloa
 Start a local proxy with policy enforcement:
 
 ```yaml
-- uses: picatz/deputy/actions/setup@main
+- uses: temporalio/deputy/actions/setup@main
 
-- uses: picatz/deputy/actions/proxy@main
+- uses: temporalio/deputy/actions/proxy@main
   with:
     policy: policy/ci/security-gate.yaml
     ecosystems: go,npm
@@ -33,7 +33,7 @@ Start a local proxy with policy enforcement:
 Point to a centralized Deputy proxy:
 
 ```yaml
-- uses: picatz/deputy/actions/proxy@main
+- uses: temporalio/deputy/actions/proxy@main
   with:
     mode: remote
     proxy-url: https://deputy-proxy.internal.example.com
@@ -128,10 +128,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: picatz/deputy/actions/setup@main
+      - uses: temporalio/deputy/actions/setup@main
 
       # Start proxy with policy enforcement
-      - uses: picatz/deputy/actions/proxy@main
+      - uses: temporalio/deputy/actions/proxy@main
         with:
           policy: policy/ci/security-gate.yaml
 
@@ -157,7 +157,7 @@ jobs:
       - uses: actions/checkout@v4
 
       # Use organization's central proxy
-      - uses: picatz/deputy/actions/proxy@main
+      - uses: temporalio/deputy/actions/proxy@main
         with:
           mode: remote
           proxy-url: ${{ vars.DEPUTY_PROXY_URL }}
@@ -187,7 +187,7 @@ jobs:
       - uses: actions/checkout@v4
 
       # Authenticate using GitHub Actions OIDC token
-      - uses: picatz/deputy/actions/proxy@main
+      - uses: temporalio/deputy/actions/proxy@main
         with:
           mode: remote
           proxy-url: https://deputy-proxy.example.com
@@ -292,7 +292,7 @@ See [GitHub Actions OIDC Policy Examples](../../policy/examples/github-actions-o
 ### Custom Upstream Registries
 
 ```yaml
-- uses: picatz/deputy/actions/proxy@main
+- uses: temporalio/deputy/actions/proxy@main
   with:
     upstream-go: https://goproxy.mycorp.com
     upstream-npm: https://npm.mycorp.com
@@ -302,7 +302,7 @@ See [GitHub Actions OIDC Policy Examples](../../policy/examples/github-actions-o
 ### Go-Only Proxy
 
 ```yaml
-- uses: picatz/deputy/actions/proxy@main
+- uses: temporalio/deputy/actions/proxy@main
   with:
     ecosystems: go
     policy: policy/go-security.yaml
@@ -315,17 +315,17 @@ See [GitHub Actions OIDC Policy Examples](../../policy/examples/github-actions-o
 For maximum coverage, use both proxy (blocks at download) and scan (reports to GitHub Security):
 
 ```yaml
-- uses: picatz/deputy/actions/setup@main
+- uses: temporalio/deputy/actions/setup@main
 
 # Block vulnerable packages at download time
-- uses: picatz/deputy/actions/proxy@main
+- uses: temporalio/deputy/actions/proxy@main
   with:
     policy: policy/ci/security-gate.yaml
 
 - run: npm ci
 
 # Also scan and report to GitHub Security tab
-- uses: picatz/deputy/actions/scan@main
+- uses: temporalio/deputy/actions/scan@main
   with:
     policy: policy/ci/security-gate.yaml
     upload-sarif: true
@@ -398,7 +398,7 @@ policies:
 Check the proxy logs:
 
 ```yaml
-- uses: picatz/deputy/actions/proxy@main
+- uses: temporalio/deputy/actions/proxy@main
   with:
     log-level: debug
 ```

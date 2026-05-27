@@ -7,10 +7,10 @@ import (
 	"strings"
 	"testing"
 
-	vulnerabilityv1 "github.com/picatz/deputy/gen/deputy/vulnerability/v1"
-	"github.com/picatz/deputy/internal/output"
-	"github.com/picatz/deputy/internal/report"
-	"github.com/picatz/deputy/internal/report/render"
+	vulnerabilityv1 "github.com/temporalio/deputy/gen/deputy/vulnerability/v1"
+	"github.com/temporalio/deputy/internal/output"
+	"github.com/temporalio/deputy/internal/report"
+	"github.com/temporalio/deputy/internal/report/render"
 )
 
 func TestOutputDocs_Golden(t *testing.T) {

@@ -7,7 +7,7 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/picatz/deputy/internal/policy"
+	"github.com/temporalio/deputy/internal/policy"
 	"google.golang.org/protobuf/proto"
 )
 

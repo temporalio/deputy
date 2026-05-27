@@ -1,7 +1,7 @@
 package proxy
 
 import (
-	"github.com/picatz/deputy/internal/ecosystem"
+	"github.com/temporalio/deputy/internal/ecosystem"
 )
 
 // testableHandler provides access to internal handler fields for testing.

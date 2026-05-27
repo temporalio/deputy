@@ -5,9 +5,9 @@ import (
 	"fmt"
 	"time"
 
-	vulnerabilityv1 "github.com/picatz/deputy/gen/deputy/vulnerability/v1"
-	"github.com/picatz/deputy/internal/report"
-	"github.com/picatz/deputy/internal/sarif"
+	vulnerabilityv1 "github.com/temporalio/deputy/gen/deputy/vulnerability/v1"
+	"github.com/temporalio/deputy/internal/report"
+	"github.com/temporalio/deputy/internal/sarif"
 )
 
 // Example_basic demonstrates basic SARIF conversion from Deputy scan results.

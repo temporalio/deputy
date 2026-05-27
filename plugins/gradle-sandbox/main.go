@@ -19,7 +19,7 @@
 //
 // Installation:
 //
-//	go install github.com/picatz/deputy/plugins/gradle-sandbox@latest
+//	go install github.com/temporalio/deputy/plugins/gradle-sandbox@latest
 //
 // The binary will be named "deputy-extractor-gradle-sandbox" and discovered automatically
 // if it's in your PATH.
@@ -48,7 +48,7 @@ import (
 	"github.com/docker/docker/client"
 	"github.com/docker/docker/errdefs"
 	"github.com/docker/docker/pkg/stdcopy"
-	"github.com/picatz/deputy/sdk/plugin"
+	"github.com/temporalio/deputy/sdk/plugin"
 )
 
 const (

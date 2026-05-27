@@ -10,9 +10,9 @@ import (
 	"github.com/google/cel-go/common/types"
 	"github.com/google/cel-go/common/types/ref"
 	"github.com/google/cel-go/common/types/traits"
-	vulnerabilityv1 "github.com/picatz/deputy/gen/deputy/vulnerability/v1"
-	"github.com/picatz/deputy/internal/purlx"
-	"github.com/picatz/deputy/internal/vulnerability/ssvc"
+	vulnerabilityv1 "github.com/temporalio/deputy/gen/deputy/vulnerability/v1"
+	"github.com/temporalio/deputy/internal/purlx"
+	"github.com/temporalio/deputy/internal/vulnerability/ssvc"
 	"google.golang.org/protobuf/proto"
 )
 

@@ -12,9 +12,9 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/picatz/deputy/internal/config"
-	"github.com/picatz/deputy/internal/logs"
-	"github.com/picatz/deputy/internal/server"
+	"github.com/temporalio/deputy/internal/config"
+	"github.com/temporalio/deputy/internal/logs"
+	"github.com/temporalio/deputy/internal/server"
 )
 
 // serverFlags holds flags for the server command.

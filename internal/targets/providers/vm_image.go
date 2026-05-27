@@ -9,9 +9,9 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/picatz/deputy/internal/targets"
-	"github.com/picatz/deputy/internal/vmimage"
-	"github.com/picatz/deputy/internal/vmimage/fsys"
+	"github.com/temporalio/deputy/internal/targets"
+	"github.com/temporalio/deputy/internal/vmimage"
+	"github.com/temporalio/deputy/internal/vmimage/fsys"
 )
 
 // priorityVMImage determines detection order relative to other providers.

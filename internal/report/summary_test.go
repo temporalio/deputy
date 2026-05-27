@@ -3,8 +3,8 @@ package report
 import (
 	"testing"
 
-	vulnerabilityv1 "github.com/picatz/deputy/gen/deputy/vulnerability/v1"
-	"github.com/picatz/deputy/internal/vulnerability"
+	vulnerabilityv1 "github.com/temporalio/deputy/gen/deputy/vulnerability/v1"
+	"github.com/temporalio/deputy/internal/vulnerability"
 )
 
 func TestBuildSummary_NoVulns(t *testing.T) {

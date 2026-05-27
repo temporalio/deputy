@@ -10,7 +10,7 @@
 # Usage:
 #   jobs:
 #     security:
-#       uses: picatz/deputy/.github/workflows/scan.yml@main
+#       uses: temporalio/deputy/.github/workflows/scan.yml@main
 #       with:
 #         policy: policy/ci/security-gate.yaml
 #       permissions:
@@ -81,14 +81,14 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
 
       - name: Setup Deputy
-        uses: picatz/deputy/actions/setup@main
+        uses: temporalio/deputy/actions/setup@main
 
       - name: Run scan
         id: scan
-        uses: picatz/deputy/actions/scan@main
+        uses: temporalio/deputy/actions/scan@main
         with:
           target: ${{ inputs.target }}
           policy: ${{ inputs.policy }}

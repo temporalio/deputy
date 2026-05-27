@@ -7,7 +7,7 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/picatz/deputy/internal/ecosystem"
+	"github.com/temporalio/deputy/internal/ecosystem"
 	"github.com/spf13/cobra"
 )
 
@@ -143,7 +143,7 @@ func writeIfNotExists(path, content string, force bool) error {
 
 const configTemplate = `
 # Deputy Configuration
-# https://github.com/picatz/deputy
+# https://github.com/temporalio/deputy
 #
 # This file configures Deputy's behavior. All settings have sensible defaults,
 # so you only need to specify values you want to change.
@@ -192,7 +192,7 @@ policy:
 
 const policyTemplate = `
 # Deputy Security Policy
-# https://github.com/picatz/deputy/tree/main/policy/examples
+# https://github.com/temporalio/deputy/tree/main/policy/examples
 #
 # This policy defines rules for vulnerability management and dependency governance.
 # Customize these rules to match your organization's security requirements.

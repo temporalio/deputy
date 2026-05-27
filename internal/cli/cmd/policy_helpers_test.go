@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/picatz/deputy/internal/policy"
+	"github.com/temporalio/deputy/internal/policy"
 )
 
 // helper to locate the example policy from CLI package.

@@ -1,11 +1,11 @@
 package filtering
 
 import (
-	scanv1 "github.com/picatz/deputy/gen/deputy/scan/v1"
-	vulnerabilityv1 "github.com/picatz/deputy/gen/deputy/vulnerability/v1"
-	"github.com/picatz/deputy/internal/ignore"
-	internalproto "github.com/picatz/deputy/internal/proto"
-	"github.com/picatz/deputy/internal/vulnerability"
+	scanv1 "github.com/temporalio/deputy/gen/deputy/scan/v1"
+	vulnerabilityv1 "github.com/temporalio/deputy/gen/deputy/vulnerability/v1"
+	"github.com/temporalio/deputy/internal/ignore"
+	internalproto "github.com/temporalio/deputy/internal/proto"
+	"github.com/temporalio/deputy/internal/vulnerability"
 )
 
 // FilterUnfixed returns a new response with only findings that have available fixes.

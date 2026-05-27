@@ -12,7 +12,7 @@ import (
 	"strings"
 	"time"
 
-	sandboxv1 "github.com/picatz/deputy/gen/deputy/sandbox/v1"
+	sandboxv1 "github.com/temporalio/deputy/gen/deputy/sandbox/v1"
 )
 
 // workspaceConfig holds workspace configuration for the VM.

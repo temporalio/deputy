@@ -5,8 +5,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/picatz/deputy/internal/scanning"
-	"github.com/picatz/deputy/internal/vulnerability"
+	"github.com/temporalio/deputy/internal/scanning"
+	"github.com/temporalio/deputy/internal/vulnerability"
 )
 
 func TestDisplayVulnerabilities_NoVulns(t *testing.T) {

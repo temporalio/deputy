@@ -6,9 +6,9 @@ import (
 	"google.golang.org/protobuf/types/known/durationpb"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
-	remediationv1 "github.com/picatz/deputy/gen/deputy/remediation/v1"
-	"github.com/picatz/deputy/internal/ai"
-	"github.com/picatz/deputy/internal/remediation"
+	remediationv1 "github.com/temporalio/deputy/gen/deputy/remediation/v1"
+	"github.com/temporalio/deputy/internal/ai"
+	"github.com/temporalio/deputy/internal/remediation"
 )
 
 // RemediationCommandToStep converts internal remediation.Command to proto Step.

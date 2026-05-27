@@ -7,8 +7,8 @@ import (
 	"log/slog"
 	"time"
 
-	sandboxv1 "github.com/picatz/deputy/gen/deputy/sandbox/v1"
-	"github.com/picatz/deputy/internal/sandbox/workspace"
+	sandboxv1 "github.com/temporalio/deputy/gen/deputy/sandbox/v1"
+	"github.com/temporalio/deputy/internal/sandbox/workspace"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 

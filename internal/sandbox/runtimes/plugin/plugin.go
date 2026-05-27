@@ -23,9 +23,9 @@ import (
 	"time"
 
 	"connectrpc.com/connect"
-	sandboxv1 "github.com/picatz/deputy/gen/deputy/sandbox/v1"
-	"github.com/picatz/deputy/gen/deputy/sandbox/v1/sandboxv1connect"
-	"github.com/picatz/deputy/internal/sandbox"
+	sandboxv1 "github.com/temporalio/deputy/gen/deputy/sandbox/v1"
+	"github.com/temporalio/deputy/gen/deputy/sandbox/v1/sandboxv1connect"
+	"github.com/temporalio/deputy/internal/sandbox"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 

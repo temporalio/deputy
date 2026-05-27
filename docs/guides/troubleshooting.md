@@ -133,5 +133,5 @@ If these don't resolve your issue:
 
 1. Run with `--log-level debug` and check the output
 2. Enable OTel tracing to diagnose performance issues
-3. Check [GitHub Issues](https://github.com/picatz/deputy/issues) for similar reports
+3. Check [GitHub Issues](https://github.com/temporalio/deputy/issues) for similar reports
 4. Open a new issue with debug logs and reproduction steps

@@ -7,7 +7,7 @@ package diffv1pluginrpc
 import (
 	context "context"
 	fmt "fmt"
-	v1 "github.com/picatz/deputy/gen/deputy/diff/v1"
+	v1 "github.com/temporalio/deputy/gen/deputy/diff/v1"
 	pluginrpc "pluginrpc.com/pluginrpc"
 )
 

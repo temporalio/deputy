@@ -16,7 +16,7 @@
 #   deputy scan --policy policy/ci/release-gate.yaml
 #
 # Or in GitHub Actions (on release events):
-#   - uses: picatz/deputy/actions/scan@main
+#   - uses: temporalio/deputy/actions/scan@main
 #     with:
 #       policy: policy/ci/release-gate.yaml
 #       fail-on-policy-violation: true

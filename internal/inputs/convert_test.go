@@ -9,10 +9,10 @@ import (
 
 	"github.com/google/osv-scalibr/extractor"
 	scalpurl "github.com/google/osv-scalibr/purl"
-	"github.com/picatz/deputy/internal/analysis/osv"
-	"github.com/picatz/deputy/internal/compare"
-	"github.com/picatz/deputy/internal/inventory/manifests"
-	"github.com/picatz/deputy/internal/purlx"
+	"github.com/temporalio/deputy/internal/analysis/osv"
+	"github.com/temporalio/deputy/internal/compare"
+	"github.com/temporalio/deputy/internal/inventory/manifests"
+	"github.com/temporalio/deputy/internal/purlx"
 )
 
 // Test that Convert includes all packages and determines directness

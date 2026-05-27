@@ -7,8 +7,8 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/picatz/deputy/internal/cache"
-	"github.com/picatz/deputy/internal/cache/disk"
+	"github.com/temporalio/deputy/internal/cache"
+	"github.com/temporalio/deputy/internal/cache/disk"
 )
 
 const (

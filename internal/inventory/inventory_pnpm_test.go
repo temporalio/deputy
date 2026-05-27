@@ -9,7 +9,7 @@ import (
 	git "github.com/go-git/go-git/v5"
 	"github.com/go-git/go-git/v5/plumbing/object"
 	"github.com/google/osv-scalibr/purl"
-	"github.com/picatz/deputy/internal/repository/workspace"
+	"github.com/temporalio/deputy/internal/repository/workspace"
 )
 
 const pnpmLockFixture = `lockfileVersion: 5.3

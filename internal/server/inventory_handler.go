@@ -8,13 +8,13 @@ import (
 	"connectrpc.com/connect"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
-	inventoryv1 "github.com/picatz/deputy/gen/deputy/inventory/v1"
-	"github.com/picatz/deputy/gen/deputy/inventory/v1/inventoryv1connect"
-	"github.com/picatz/deputy/internal/inventory"
-	"github.com/picatz/deputy/internal/inventory/registry"
-	"github.com/picatz/deputy/internal/otel"
-	protoconv "github.com/picatz/deputy/internal/proto"
-	"github.com/picatz/deputy/internal/targets"
+	inventoryv1 "github.com/temporalio/deputy/gen/deputy/inventory/v1"
+	"github.com/temporalio/deputy/gen/deputy/inventory/v1/inventoryv1connect"
+	"github.com/temporalio/deputy/internal/inventory"
+	"github.com/temporalio/deputy/internal/inventory/registry"
+	"github.com/temporalio/deputy/internal/otel"
+	protoconv "github.com/temporalio/deputy/internal/proto"
+	"github.com/temporalio/deputy/internal/targets"
 )
 
 // InventoryHandler implements the InventoryService gRPC handler.

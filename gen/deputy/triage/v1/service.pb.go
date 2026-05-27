@@ -7,8 +7,8 @@
 package triagev1
 
 import (
-	v1 "github.com/picatz/deputy/gen/deputy/target/v1"
-	v11 "github.com/picatz/deputy/gen/deputy/vulnerability/v1"
+	v1 "github.com/temporalio/deputy/gen/deputy/target/v1"
+	v11 "github.com/temporalio/deputy/gen/deputy/vulnerability/v1"
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 	timestamppb "google.golang.org/protobuf/types/known/timestamppb"
@@ -453,8 +453,8 @@ const file_deputy_triage_v1_service_proto_rawDesc = "" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\x05R\x05value:\x028\x012\\\n" +
 	"\rTriageService\x12K\n" +
-	"\x06Triage\x12\x1f.deputy.triage.v1.TriageRequest\x1a .deputy.triage.v1.TriageResponseB\xbe\x01\n" +
-	"\x14com.deputy.triage.v1B\fServiceProtoP\x01Z6github.com/picatz/deputy/gen/deputy/triage/v1;triagev1\xa2\x02\x03DTX\xaa\x02\x10Deputy.Triage.V1\xca\x02\x10Deputy\\Triage\\V1\xe2\x02\x1cDeputy\\Triage\\V1\\GPBMetadata\xea\x02\x12Deputy::Triage::V1b\x06proto3"
+	"\x06Triage\x12\x1f.deputy.triage.v1.TriageRequest\x1a .deputy.triage.v1.TriageResponseB\xc2\x01\n" +
+	"\x14com.deputy.triage.v1B\fServiceProtoP\x01Z:github.com/temporalio/deputy/gen/deputy/triage/v1;triagev1\xa2\x02\x03DTX\xaa\x02\x10Deputy.Triage.V1\xca\x02\x10Deputy\\Triage\\V1\xe2\x02\x1cDeputy\\Triage\\V1\\GPBMetadata\xea\x02\x12Deputy::Triage::V1b\x06proto3"
 
 var (
 	file_deputy_triage_v1_service_proto_rawDescOnce sync.Once

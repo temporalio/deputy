@@ -1,7 +1,7 @@
 package dockerfile
 
 import (
-	"github.com/picatz/deputy/internal/security"
+	"github.com/temporalio/deputy/internal/security"
 )
 
 // Analyze performs static analysis on parsed Dockerfile info.

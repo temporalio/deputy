@@ -7,10 +7,10 @@ import (
 	"slices"
 	"strings"
 
-	dependencyv1 "github.com/picatz/deputy/gen/deputy/dependency/v1"
-	"github.com/picatz/deputy/internal/collections"
-	"github.com/picatz/deputy/internal/ecosystem"
-	"github.com/picatz/deputy/internal/vulnerability"
+	dependencyv1 "github.com/temporalio/deputy/gen/deputy/dependency/v1"
+	"github.com/temporalio/deputy/internal/collections"
+	"github.com/temporalio/deputy/internal/ecosystem"
+	"github.com/temporalio/deputy/internal/vulnerability"
 	"golang.org/x/mod/semver"
 )
 

@@ -6,13 +6,13 @@ import (
 	"github.com/google/osv-scalibr/extractor"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
-	containerv1 "github.com/picatz/deputy/gen/deputy/container/v1"
-	diffv1 "github.com/picatz/deputy/gen/deputy/diff/v1"
-	vulnerabilityv1 "github.com/picatz/deputy/gen/deputy/vulnerability/v1"
-	"github.com/picatz/deputy/internal/compare"
-	"github.com/picatz/deputy/internal/container/image"
-	"github.com/picatz/deputy/internal/scanning"
-	"github.com/picatz/deputy/internal/vulnerability"
+	containerv1 "github.com/temporalio/deputy/gen/deputy/container/v1"
+	diffv1 "github.com/temporalio/deputy/gen/deputy/diff/v1"
+	vulnerabilityv1 "github.com/temporalio/deputy/gen/deputy/vulnerability/v1"
+	"github.com/temporalio/deputy/internal/compare"
+	"github.com/temporalio/deputy/internal/container/image"
+	"github.com/temporalio/deputy/internal/scanning"
+	"github.com/temporalio/deputy/internal/vulnerability"
 )
 
 // BuildContainerDiffResponseFromScanning constructs the proto response from scanning.Result.

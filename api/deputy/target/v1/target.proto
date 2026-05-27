@@ -2,7 +2,7 @@ syntax = "proto3";
 
 package deputy.target.v1;
 
-option go_package = "github.com/picatz/deputy/gen/deputy/target/v1;targetv1";
+option go_package = "github.com/temporalio/deputy/gen/deputy/target/v1;targetv1";
 
 // TargetKind identifies the type of target being operated on.
 enum TargetKind {

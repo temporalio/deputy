@@ -18,10 +18,10 @@ import (
 	"github.com/picatz/jose/pkg/jwa"
 	josejwt "github.com/picatz/jose/pkg/jwt"
 
-	listv1 "github.com/picatz/deputy/gen/deputy/list/v1"
-	"github.com/picatz/deputy/gen/deputy/list/v1/listv1connect"
-	scanv1 "github.com/picatz/deputy/gen/deputy/scan/v1"
-	"github.com/picatz/deputy/gen/deputy/scan/v1/scanv1connect"
+	listv1 "github.com/temporalio/deputy/gen/deputy/list/v1"
+	"github.com/temporalio/deputy/gen/deputy/list/v1/listv1connect"
+	scanv1 "github.com/temporalio/deputy/gen/deputy/scan/v1"
+	"github.com/temporalio/deputy/gen/deputy/scan/v1/scanv1connect"
 )
 
 // Test helpers

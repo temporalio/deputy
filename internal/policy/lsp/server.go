@@ -10,7 +10,7 @@ import (
 	"os"
 	"strings"
 
-	"github.com/picatz/deputy/internal/logs"
+	"github.com/temporalio/deputy/internal/logs"
 	protocol "github.com/sourcegraph/go-lsp"
 	"github.com/sourcegraph/jsonrpc2"
 )

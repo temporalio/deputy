@@ -11,9 +11,9 @@ import (
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/ossf/osv-schema/bindings/go/osvschema"
-	"github.com/picatz/deputy/internal/vulnerability/intel"
-	"github.com/picatz/deputy/internal/vulnerability/severity/cvss"
-	"github.com/picatz/deputy/internal/vulnerability/weakness/cwe"
+	"github.com/temporalio/deputy/internal/vulnerability/intel"
+	"github.com/temporalio/deputy/internal/vulnerability/severity/cvss"
+	"github.com/temporalio/deputy/internal/vulnerability/weakness/cwe"
 )
 
 // Config configures the vulnerability renderer.

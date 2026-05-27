@@ -5,9 +5,9 @@ import (
 	"testing"
 
 	"github.com/google/osv-scalibr/extractor"
-	vulnerabilityv1 "github.com/picatz/deputy/gen/deputy/vulnerability/v1"
-	"github.com/picatz/deputy/internal/dependency"
-	"github.com/picatz/deputy/internal/vulnerability"
+	vulnerabilityv1 "github.com/temporalio/deputy/gen/deputy/vulnerability/v1"
+	"github.com/temporalio/deputy/internal/dependency"
+	"github.com/temporalio/deputy/internal/vulnerability"
 )
 
 func TestNew(t *testing.T) {

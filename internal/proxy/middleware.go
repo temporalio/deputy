@@ -10,7 +10,7 @@ import (
 	"sync"
 	"time"
 
-	deputyotel "github.com/picatz/deputy/internal/otel"
+	deputyotel "github.com/temporalio/deputy/internal/otel"
 )
 
 type requestIDKey struct{}

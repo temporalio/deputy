@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/picatz/deputy/internal/pin"
+	"github.com/temporalio/deputy/internal/pin"
 )
 
 func TestStrategy_DiscoverWorkflows(t *testing.T) {
@@ -283,7 +283,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: picatz/deputy/actions/setup@main
+      - uses: temporalio/deputy/actions/setup@main
       - uses: some-org/tool@dev-branch`,
 	})
 

@@ -21,16 +21,16 @@ import (
 	"github.com/google/osv-scalibr/plugin"
 	pl "github.com/google/osv-scalibr/plugin/list"
 
-	"github.com/picatz/deputy/internal/collections"
-	"github.com/picatz/deputy/internal/ecosystem"
-	dockerfilex "github.com/picatz/deputy/internal/inventory/plugins/docker/dockerfilex"
-	"github.com/picatz/deputy/internal/logs"
-	"github.com/picatz/deputy/internal/dependency/graph"
-	ghactions "github.com/picatz/deputy/internal/inventory/plugins/github/actionsx"
-	gradlex "github.com/picatz/deputy/internal/inventory/plugins/java/gradlex"
-	"github.com/picatz/deputy/internal/inventory/registry"
-	rubygemspec "github.com/picatz/deputy/internal/inventory/plugins/ruby/gemspecx"
-	"github.com/picatz/deputy/internal/repository/workspace"
+	"github.com/temporalio/deputy/internal/collections"
+	"github.com/temporalio/deputy/internal/ecosystem"
+	dockerfilex "github.com/temporalio/deputy/internal/inventory/plugins/docker/dockerfilex"
+	"github.com/temporalio/deputy/internal/logs"
+	"github.com/temporalio/deputy/internal/dependency/graph"
+	ghactions "github.com/temporalio/deputy/internal/inventory/plugins/github/actionsx"
+	gradlex "github.com/temporalio/deputy/internal/inventory/plugins/java/gradlex"
+	"github.com/temporalio/deputy/internal/inventory/registry"
+	rubygemspec "github.com/temporalio/deputy/internal/inventory/plugins/ruby/gemspecx"
+	"github.com/temporalio/deputy/internal/repository/workspace"
 )
 
 func init() {

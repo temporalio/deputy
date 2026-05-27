@@ -7,10 +7,10 @@ import (
 	"time"
 
 	"github.com/charmbracelet/lipgloss"
-	"github.com/picatz/deputy/internal/cache"
-	"github.com/picatz/deputy/internal/cache/disk"
-	"github.com/picatz/deputy/internal/cache/sources"
-	ui "github.com/picatz/deputy/internal/ui"
+	"github.com/temporalio/deputy/internal/cache"
+	"github.com/temporalio/deputy/internal/cache/disk"
+	"github.com/temporalio/deputy/internal/cache/sources"
+	ui "github.com/temporalio/deputy/internal/ui"
 	"github.com/spf13/cobra"
 )
 

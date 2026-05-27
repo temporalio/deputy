@@ -12,10 +12,10 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/picatz/deputy/internal/cache"
-	"github.com/picatz/deputy/internal/cache/disk"
-	"github.com/picatz/deputy/internal/httputil"
-	"github.com/picatz/deputy/internal/otel"
+	"github.com/temporalio/deputy/internal/cache"
+	"github.com/temporalio/deputy/internal/cache/disk"
+	"github.com/temporalio/deputy/internal/httputil"
+	"github.com/temporalio/deputy/internal/otel"
 )
 
 const (

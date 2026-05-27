@@ -5,12 +5,12 @@ import (
 	"google.golang.org/protobuf/types/known/durationpb"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
-	containerv1 "github.com/picatz/deputy/gen/deputy/container/v1"
-	inventoryv1 "github.com/picatz/deputy/gen/deputy/inventory/v1"
-	targetv1 "github.com/picatz/deputy/gen/deputy/target/v1"
-	"github.com/picatz/deputy/internal/container/image"
-	"github.com/picatz/deputy/internal/dockerfile"
-	"github.com/picatz/deputy/internal/inventory"
+	containerv1 "github.com/temporalio/deputy/gen/deputy/container/v1"
+	inventoryv1 "github.com/temporalio/deputy/gen/deputy/inventory/v1"
+	targetv1 "github.com/temporalio/deputy/gen/deputy/target/v1"
+	"github.com/temporalio/deputy/internal/container/image"
+	"github.com/temporalio/deputy/internal/dockerfile"
+	"github.com/temporalio/deputy/internal/inventory"
 )
 
 // InventoryResultToProto converts an inventory.Result to CollectInventoryResponse.

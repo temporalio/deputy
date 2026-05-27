@@ -4,7 +4,7 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
-	"github.com/picatz/deputy/internal/vulnerability/severity/cvss"
+	"github.com/temporalio/deputy/internal/vulnerability/severity/cvss"
 )
 
 // Predefined lipgloss style palette used by CLI presentation layers. Grouping

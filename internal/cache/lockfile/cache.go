@@ -11,7 +11,7 @@ import (
 	"encoding/hex"
 	"time"
 
-	"github.com/picatz/deputy/internal/cache/memory"
+	"github.com/temporalio/deputy/internal/cache/memory"
 )
 
 // ParsedLockfile holds cached parsing results for a lockfile.

@@ -4,8 +4,8 @@ import (
 	"context"
 	"errors"
 
-	"github.com/picatz/deputy/internal/ecosystem"
-	"github.com/picatz/deputy/internal/logs"
+	"github.com/temporalio/deputy/internal/ecosystem"
+	"github.com/temporalio/deputy/internal/logs"
 )
 
 // ResolverRegistry manages edge resolvers for multiple ecosystems.

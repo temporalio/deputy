@@ -74,7 +74,7 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: "stable"
-      - run: go install github.com/picatz/deputy@latest
+      - run: go install github.com/temporalio/deputy@latest
 
       # Scan for vulnerabilities
       - run: deputy scan --format json --output scan.json
@@ -102,7 +102,7 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: "stable"
-      - run: go install github.com/picatz/deputy@latest
+      - run: go install github.com/temporalio/deputy@latest
 
       # Fail if policy violations found
       - run: deputy scan --policy policy/severity-guardrail.yaml
@@ -127,7 +127,7 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: "stable"
-      - run: go install github.com/picatz/deputy@latest
+      - run: go install github.com/temporalio/deputy@latest
 
       # Compare PR branch against base
       - run: deputy diff ${{ github.event.pull_request.base.sha }} ${{ github.sha }}
@@ -143,7 +143,7 @@ deputy-scan:
   stage: security
   image: golang:latest
   before_script:
-    - go install github.com/picatz/deputy@latest
+    - go install github.com/temporalio/deputy@latest
   script:
     - deputy scan --format json --output scan.json
     - deputy sbom --format cyclonedx-json --output sbom.cdx.json
@@ -170,7 +170,7 @@ steps:
     inputs:
       version: '1.22'
 
-  - script: go install github.com/picatz/deputy@latest
+  - script: go install github.com/temporalio/deputy@latest
     displayName: 'Install Deputy'
 
   - script: |
@@ -197,7 +197,7 @@ jobs:
       - checkout
       - run:
           name: Install Deputy
-          command: go install github.com/picatz/deputy@latest
+          command: go install github.com/temporalio/deputy@latest
       - run:
           name: Scan
           command: |
@@ -305,7 +305,7 @@ Store scan results and SBOMs with your release artifacts:
 ### 4. Pin Deputy versions for reproducibility
 
 ```console
-$ go install github.com/picatz/deputy@v1.2.3
+$ go install github.com/temporalio/deputy@v1.2.3
 ```
 
 ### 5. Set exit codes appropriately

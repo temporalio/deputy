@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/picatz/deputy/internal/repository/workspace"
+	"github.com/temporalio/deputy/internal/repository/workspace"
 )
 
 // CollectDirectDependenciesFromWorkspace scans the workspace for manifest files

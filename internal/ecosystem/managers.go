@@ -1,6 +1,6 @@
 package ecosystem
 
-import "github.com/picatz/deputy/internal/collections"
+import "github.com/temporalio/deputy/internal/collections"
 
 // ManagerRank returns a ranking integer for package managers to enforce a
 // consistent display order across commands. Lower values indicate higher

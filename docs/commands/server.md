@@ -82,7 +82,7 @@ $ deputy scan github.com/owner/repo
 ### SDK Usage
 
 ```go
-import "github.com/picatz/deputy/sdk"
+import "github.com/temporalio/deputy/sdk"
 
 // Connect to a remote server
 client, err := sdk.ConnectToServer(ctx, "http://localhost:8090")

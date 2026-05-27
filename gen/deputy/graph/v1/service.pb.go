@@ -8,8 +8,8 @@ package graphv1
 
 import (
 	_ "buf.build/gen/go/bufbuild/protovalidate/protocolbuffers/go/buf/validate"
-	v1 "github.com/picatz/deputy/gen/deputy/target/v1"
-	v11 "github.com/picatz/deputy/gen/deputy/vulnerability/v1"
+	v1 "github.com/temporalio/deputy/gen/deputy/target/v1"
+	v11 "github.com/temporalio/deputy/gen/deputy/vulnerability/v1"
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 	timestamppb "google.golang.org/protobuf/types/known/timestamppb"
@@ -1735,8 +1735,8 @@ const file_deputy_graph_v1_service_proto_rawDesc = "" +
 	"BuildGraph\x12\".deputy.graph.v1.BuildGraphRequest\x1a#.deputy.graph.v1.BuildGraphResponse\x12^\n" +
 	"\rWhyDependency\x12%.deputy.graph.v1.WhyDependencyRequest\x1a&.deputy.graph.v1.WhyDependencyResponse\x12U\n" +
 	"\n" +
-	"QueryGraph\x12\".deputy.graph.v1.QueryGraphRequest\x1a#.deputy.graph.v1.QueryGraphResponseB\xb7\x01\n" +
-	"\x13com.deputy.graph.v1B\fServiceProtoP\x01Z4github.com/picatz/deputy/gen/deputy/graph/v1;graphv1\xa2\x02\x03DGX\xaa\x02\x0fDeputy.Graph.V1\xca\x02\x0fDeputy\\Graph\\V1\xe2\x02\x1bDeputy\\Graph\\V1\\GPBMetadata\xea\x02\x11Deputy::Graph::V1b\x06proto3"
+	"QueryGraph\x12\".deputy.graph.v1.QueryGraphRequest\x1a#.deputy.graph.v1.QueryGraphResponseB\xbb\x01\n" +
+	"\x13com.deputy.graph.v1B\fServiceProtoP\x01Z8github.com/temporalio/deputy/gen/deputy/graph/v1;graphv1\xa2\x02\x03DGX\xaa\x02\x0fDeputy.Graph.V1\xca\x02\x0fDeputy\\Graph\\V1\xe2\x02\x1bDeputy\\Graph\\V1\\GPBMetadata\xea\x02\x11Deputy::Graph::V1b\x06proto3"
 
 var (
 	file_deputy_graph_v1_service_proto_rawDescOnce sync.Once

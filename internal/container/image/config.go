@@ -36,8 +36,8 @@ import (
 
 	v1 "github.com/google/go-containerregistry/pkg/v1"
 
-	"github.com/picatz/deputy/internal/policy/celconv"
-	"github.com/picatz/deputy/internal/security"
+	"github.com/temporalio/deputy/internal/policy/celconv"
+	"github.com/temporalio/deputy/internal/security"
 )
 
 // Config represents the extracted configuration from a container image.

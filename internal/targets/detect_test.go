@@ -3,7 +3,7 @@ package targets_test
 import (
 	"testing"
 
-	"github.com/picatz/deputy/internal/targets"
+	"github.com/temporalio/deputy/internal/targets"
 )
 
 func TestLooksLikeContainerRef(t *testing.T) {

@@ -23,7 +23,7 @@ Plugins are standalone executables that Deputy invokes via subprocess using
 ```go
 package main
 
-import "github.com/picatz/deputy/sdk/plugin"
+import "github.com/temporalio/deputy/sdk/plugin"
 
 func main() {
     plugin.Main(&myExtractor{})
@@ -187,4 +187,4 @@ See [pluginrpc](https://github.com/pluginrpc/pluginrpc) for protocol details.
 
 ## API Reference
 
-See [pkg.go.dev](https://pkg.go.dev/github.com/picatz/deputy/sdk/plugin) for full documentation.
+See [pkg.go.dev](https://pkg.go.dev/github.com/temporalio/deputy/sdk/plugin) for full documentation.

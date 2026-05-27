@@ -4,7 +4,7 @@
 // time-to-live expiration. Entries are evicted when the cache exceeds its
 // maximum size (LRU order) or when their TTL expires.
 //
-// For persistent disk-based caching, see [github.com/picatz/deputy/internal/cache/disk].
+// For persistent disk-based caching, see [github.com/temporalio/deputy/internal/cache/disk].
 //
 // # Usage
 //

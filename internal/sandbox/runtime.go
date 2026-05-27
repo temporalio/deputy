@@ -4,7 +4,7 @@ import (
 	"context"
 	"iter"
 
-	sandboxv1 "github.com/picatz/deputy/gen/deputy/sandbox/v1"
+	sandboxv1 "github.com/temporalio/deputy/gen/deputy/sandbox/v1"
 )
 
 // Runtime is the interface that sandbox backends implement.

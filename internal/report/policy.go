@@ -3,7 +3,7 @@ package report
 import (
 	"strings"
 
-	"github.com/picatz/deputy/internal/policy"
+	"github.com/temporalio/deputy/internal/policy"
 )
 
 // PolicyFinding represents a policy action emitted during evaluation.

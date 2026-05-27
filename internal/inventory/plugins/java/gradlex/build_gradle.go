@@ -17,7 +17,7 @@ import (
 	"github.com/google/osv-scalibr/plugin"
 	"github.com/google/osv-scalibr/purl"
 
-	"github.com/picatz/deputy/internal/logs"
+	"github.com/temporalio/deputy/internal/logs"
 )
 
 // BOMVersionResolver resolves dependency versions from BOMs.

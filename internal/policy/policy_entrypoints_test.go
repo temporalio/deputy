@@ -7,9 +7,9 @@ import (
 	"strings"
 	"testing"
 
-	dependencyv1 "github.com/picatz/deputy/gen/deputy/dependency/v1"
-	policyv1 "github.com/picatz/deputy/gen/deputy/policy/v1"
-	vulnerabilityv1 "github.com/picatz/deputy/gen/deputy/vulnerability/v1"
+	dependencyv1 "github.com/temporalio/deputy/gen/deputy/dependency/v1"
+	policyv1 "github.com/temporalio/deputy/gen/deputy/policy/v1"
+	vulnerabilityv1 "github.com/temporalio/deputy/gen/deputy/vulnerability/v1"
 )
 
 // findExample returns the path to a named example policy in policy/examples.

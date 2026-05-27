@@ -94,8 +94,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: picatz/deputy/actions/setup@main
-      - uses: picatz/deputy/actions/scan@main
+      - uses: temporalio/deputy/actions/setup@main
+      - uses: temporalio/deputy/actions/scan@main
         with:
           upload-sarif: true
           policy: policy/ci/security-gate.yaml  # Optional: enforce policies
@@ -126,16 +126,16 @@ See the [GitHub Actions Guide](docs/guides/github-actions.md) for workflow recip
 ### Go install
 
 ```console
-$ go install github.com/picatz/deputy@latest
+$ go install github.com/temporalio/deputy@latest
 ```
 
-Pin a specific version for reproducibility: `go install github.com/picatz/deputy@vX.Y.Z`
+Pin a specific version for reproducibility: `go install github.com/temporalio/deputy@vX.Y.Z`
 <!-- TODO: Re-enable Homebrew and binary release installation docs once those distribution channels exist. -->
 
 ### Build from source
 
 ```console
-$ git clone https://github.com/picatz/deputy.git
+$ git clone https://github.com/temporalio/deputy.git
 $ cd deputy
 $ go build -o deputy .
 $ ./deputy --version

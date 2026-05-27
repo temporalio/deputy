@@ -6,7 +6,7 @@ import (
 
 	"google.golang.org/protobuf/encoding/protojson"
 
-	fixv1 "github.com/picatz/deputy/gen/deputy/fix/v1"
+	fixv1 "github.com/temporalio/deputy/gen/deputy/fix/v1"
 )
 
 // buildFixPromptProto constructs a prompt for an AI agent to execute a remediation plan.

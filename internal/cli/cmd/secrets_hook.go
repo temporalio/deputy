@@ -8,8 +8,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/picatz/deputy/internal/secrets"
-	ui "github.com/picatz/deputy/internal/ui"
+	"github.com/temporalio/deputy/internal/secrets"
+	ui "github.com/temporalio/deputy/internal/ui"
 	"github.com/spf13/cobra"
 )
 

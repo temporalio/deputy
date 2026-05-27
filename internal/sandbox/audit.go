@@ -5,7 +5,7 @@ import (
 	"log/slog"
 	"time"
 
-	sandboxv1 "github.com/picatz/deputy/gen/deputy/sandbox/v1"
+	sandboxv1 "github.com/temporalio/deputy/gen/deputy/sandbox/v1"
 )
 
 // AuditEvent represents a sandbox audit log entry.

@@ -4,7 +4,7 @@ package deputy.policy.v1;
 
 import "deputy/policy/v1/policy.proto";
 
-option go_package = "github.com/picatz/deputy/gen/deputy/policy/v1;policyv1";
+option go_package = "github.com/temporalio/deputy/gen/deputy/policy/v1;policyv1";
 
 // PolicyService provides policy evaluation and management capabilities.
 //

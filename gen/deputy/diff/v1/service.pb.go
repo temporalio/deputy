@@ -7,11 +7,11 @@
 package diffv1
 
 import (
-	v14 "github.com/picatz/deputy/gen/deputy/container/v1"
-	v11 "github.com/picatz/deputy/gen/deputy/dependency/v1"
-	v12 "github.com/picatz/deputy/gen/deputy/scan/v1"
-	v1 "github.com/picatz/deputy/gen/deputy/target/v1"
-	v13 "github.com/picatz/deputy/gen/deputy/vulnerability/v1"
+	v14 "github.com/temporalio/deputy/gen/deputy/container/v1"
+	v11 "github.com/temporalio/deputy/gen/deputy/dependency/v1"
+	v12 "github.com/temporalio/deputy/gen/deputy/scan/v1"
+	v1 "github.com/temporalio/deputy/gen/deputy/target/v1"
+	v13 "github.com/temporalio/deputy/gen/deputy/vulnerability/v1"
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 	timestamppb "google.golang.org/protobuf/types/known/timestamppb"
@@ -2520,8 +2520,8 @@ const file_deputy_diff_v1_service_proto_rawDesc = "" +
 	"\vDiffService\x12Y\n" +
 	"\fDiffPackages\x12#.deputy.diff.v1.DiffPackagesRequest\x1a$.deputy.diff.v1.DiffPackagesResponse\x12n\n" +
 	"\x13DiffVulnerabilities\x12*.deputy.diff.v1.DiffVulnerabilitiesRequest\x1a+.deputy.diff.v1.DiffVulnerabilitiesResponse\x12n\n" +
-	"\x13DiffContainerImages\x12*.deputy.diff.v1.DiffContainerImagesRequest\x1a+.deputy.diff.v1.DiffContainerImagesResponseB\xb0\x01\n" +
-	"\x12com.deputy.diff.v1B\fServiceProtoP\x01Z2github.com/picatz/deputy/gen/deputy/diff/v1;diffv1\xa2\x02\x03DDX\xaa\x02\x0eDeputy.Diff.V1\xca\x02\x0eDeputy\\Diff\\V1\xe2\x02\x1aDeputy\\Diff\\V1\\GPBMetadata\xea\x02\x10Deputy::Diff::V1b\x06proto3"
+	"\x13DiffContainerImages\x12*.deputy.diff.v1.DiffContainerImagesRequest\x1a+.deputy.diff.v1.DiffContainerImagesResponseB\xb4\x01\n" +
+	"\x12com.deputy.diff.v1B\fServiceProtoP\x01Z6github.com/temporalio/deputy/gen/deputy/diff/v1;diffv1\xa2\x02\x03DDX\xaa\x02\x0eDeputy.Diff.V1\xca\x02\x0eDeputy\\Diff\\V1\xe2\x02\x1aDeputy\\Diff\\V1\\GPBMetadata\xea\x02\x10Deputy::Diff::V1b\x06proto3"
 
 var (
 	file_deputy_diff_v1_service_proto_rawDescOnce sync.Once

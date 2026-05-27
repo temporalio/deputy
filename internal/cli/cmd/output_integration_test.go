@@ -9,10 +9,10 @@ import (
 
 	"google.golang.org/protobuf/encoding/protojson"
 
-	dependencyv1 "github.com/picatz/deputy/gen/deputy/dependency/v1"
-	scanv1 "github.com/picatz/deputy/gen/deputy/scan/v1"
-	targetv1 "github.com/picatz/deputy/gen/deputy/target/v1"
-	vulnerabilityv1 "github.com/picatz/deputy/gen/deputy/vulnerability/v1"
+	dependencyv1 "github.com/temporalio/deputy/gen/deputy/dependency/v1"
+	scanv1 "github.com/temporalio/deputy/gen/deputy/scan/v1"
+	targetv1 "github.com/temporalio/deputy/gen/deputy/target/v1"
+	vulnerabilityv1 "github.com/temporalio/deputy/gen/deputy/vulnerability/v1"
 	"github.com/spf13/cobra"
 )
 

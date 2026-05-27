@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/picatz/deputy/internal/container/image"
-	"github.com/picatz/deputy/internal/output"
+	"github.com/temporalio/deputy/internal/container/image"
+	"github.com/temporalio/deputy/internal/output"
 )
 
 // ScanResultsHeaderDoc builds the scan header block shown in text output.

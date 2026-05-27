@@ -3,7 +3,7 @@ package cmd
 import (
 	"fmt"
 
-	"github.com/picatz/deputy/internal/mcp"
+	"github.com/temporalio/deputy/internal/mcp"
 	"github.com/spf13/cobra"
 )
 
@@ -71,7 +71,7 @@ CODEX (~/.codex/config.toml):
   command = "deputy"
   args = ["mcp", "serve"]
 
-Full documentation: https://github.com/picatz/deputy/blob/main/docs/commands/mcp.md`,
+Full documentation: https://github.com/temporalio/deputy/blob/main/docs/commands/mcp.md`,
 		Example: `  # Start MCP server with stdio transport (default)
   deputy mcp serve
 

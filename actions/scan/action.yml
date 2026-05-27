@@ -1,6 +1,6 @@
 name: 'Deputy Scan'
 description: 'Detect vulnerabilities with CEL-powered policies. Uploads SARIF to GitHub Security tab. Supports Go, npm, Python, Maven, and more.'
-author: 'picatz'
+author: 'temporalio'
 
 branding:
   icon: 'shield'
@@ -191,7 +191,7 @@ runs:
     - name: Upload SARIF to GitHub Security
       id: sarif-upload
       if: inputs.upload-sarif == 'true' && inputs.format == 'sarif' && always()
-      uses: github/codeql-action/upload-sarif@v4
+      uses: github/codeql-action/upload-sarif@7211b7c8077ea37d8641b6271f6a365a22a5fbfa # v4.36.0
       with:
         sarif_file: ${{ inputs.output }}
         category: ${{ inputs.sarif-category }}
@@ -203,7 +203,7 @@ runs:
         steps.sarif-upload.outcome == 'failure' &&
         github.event_name == 'pull_request' &&
         always()
-      uses: actions/github-script@v7
+      uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7.1.0
       env:
         SARIF_PATH: ${{ inputs.output }}
         FINDINGS_COUNT: ${{ steps.scan.outputs.findings-count }}

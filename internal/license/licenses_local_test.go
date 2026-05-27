@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/picatz/deputy/internal/repository/workspace"
+	"github.com/temporalio/deputy/internal/repository/workspace"
 )
 
 func Test_LocalRepoLicenseScan_detectsMIT(t *testing.T) {

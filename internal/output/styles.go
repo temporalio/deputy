@@ -1,6 +1,6 @@
 package output
 
-import ui "github.com/picatz/deputy/internal/ui"
+import ui "github.com/temporalio/deputy/internal/ui"
 
 // Styles holds formatting functions for the text renderer.
 // Plain styles can be used in tests for stable golden output.

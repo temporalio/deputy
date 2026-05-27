@@ -7,8 +7,8 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/picatz/deputy/internal/pin"
-	"github.com/picatz/deputy/internal/pin/githubactions"
+	"github.com/temporalio/deputy/internal/pin"
+	"github.com/temporalio/deputy/internal/pin/githubactions"
 )
 
 // IsDeputyInternalCommand checks if a command is a deputy-internal command

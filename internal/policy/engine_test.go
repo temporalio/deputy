@@ -8,12 +8,12 @@ import (
 
 	"github.com/google/cel-go/cel"
 	"github.com/google/cel-go/common/types/ref"
-	"github.com/picatz/deputy/internal/collections"
+	"github.com/temporalio/deputy/internal/collections"
 
-	dependencyv1 "github.com/picatz/deputy/gen/deputy/dependency/v1"
-	policyv1 "github.com/picatz/deputy/gen/deputy/policy/v1"
-	targetv1 "github.com/picatz/deputy/gen/deputy/target/v1"
-	vulnerabilityv1 "github.com/picatz/deputy/gen/deputy/vulnerability/v1"
+	dependencyv1 "github.com/temporalio/deputy/gen/deputy/dependency/v1"
+	policyv1 "github.com/temporalio/deputy/gen/deputy/policy/v1"
+	targetv1 "github.com/temporalio/deputy/gen/deputy/target/v1"
+	vulnerabilityv1 "github.com/temporalio/deputy/gen/deputy/vulnerability/v1"
 )
 
 // deepCloneMap creates a deep copy of a map[string]any for testing.

@@ -51,8 +51,8 @@ import (
 	"sync"
 	"time"
 
-	sandboxv1 "github.com/picatz/deputy/gen/deputy/sandbox/v1"
-	"github.com/picatz/deputy/internal/sandbox"
+	sandboxv1 "github.com/temporalio/deputy/gen/deputy/sandbox/v1"
+	"github.com/temporalio/deputy/internal/sandbox"
 	"google.golang.org/protobuf/types/known/durationpb"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )

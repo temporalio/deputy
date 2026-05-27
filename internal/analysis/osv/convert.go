@@ -8,11 +8,11 @@ import (
 	"time"
 
 	"github.com/ossf/osv-schema/bindings/go/osvschema"
-	vulnerabilityv1 "github.com/picatz/deputy/gen/deputy/vulnerability/v1"
-	"github.com/picatz/deputy/internal/dependency"
-	"github.com/picatz/deputy/internal/vulnerability"
-	"github.com/picatz/deputy/internal/vulnerability/severity"
-	"github.com/picatz/deputy/internal/vulnerability/weakness/cwe"
+	vulnerabilityv1 "github.com/temporalio/deputy/gen/deputy/vulnerability/v1"
+	"github.com/temporalio/deputy/internal/dependency"
+	"github.com/temporalio/deputy/internal/vulnerability"
+	"github.com/temporalio/deputy/internal/vulnerability/severity"
+	"github.com/temporalio/deputy/internal/vulnerability/weakness/cwe"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 

@@ -13,8 +13,8 @@ import (
 	"time"
 
 	"connectrpc.com/connect"
-	agentv1 "github.com/picatz/deputy/gen/deputy/agent/v1"
-	"github.com/picatz/deputy/gen/deputy/agent/v1/agentv1connect"
+	agentv1 "github.com/temporalio/deputy/gen/deputy/agent/v1"
+	"github.com/temporalio/deputy/gen/deputy/agent/v1/agentv1connect"
 )
 
 // externalPluginHandler wraps an external agent plugin process as AgentPluginHandler.

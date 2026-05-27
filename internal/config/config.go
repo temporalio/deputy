@@ -14,8 +14,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/picatz/deputy/internal/errors"
-	"github.com/picatz/deputy/internal/otel"
+	"github.com/temporalio/deputy/internal/errors"
+	"github.com/temporalio/deputy/internal/otel"
 	"gopkg.in/yaml.v3"
 )
 

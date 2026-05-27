@@ -11,7 +11,7 @@ import (
 	"github.com/google/osv-scalibr/extractor"
 	"github.com/google/osv-scalibr/purl"
 
-	"github.com/picatz/deputy/internal/repository/workspace"
+	"github.com/temporalio/deputy/internal/repository/workspace"
 )
 
 var (

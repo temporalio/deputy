@@ -10,7 +10,7 @@ import (
 
 const (
 	// TracerName is the default tracer name for Deputy spans.
-	TracerName = "github.com/picatz/deputy"
+	TracerName = "github.com/temporalio/deputy"
 )
 
 // StartSpan starts a new span with the given name and options.

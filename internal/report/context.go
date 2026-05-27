@@ -7,10 +7,10 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/picatz/deputy/internal/collections"
-	"github.com/picatz/deputy/internal/ecosystem"
-	"github.com/picatz/deputy/internal/inventory/manifests"
-	"github.com/picatz/deputy/internal/vulnerability"
+	"github.com/temporalio/deputy/internal/collections"
+	"github.com/temporalio/deputy/internal/ecosystem"
+	"github.com/temporalio/deputy/internal/inventory/manifests"
+	"github.com/temporalio/deputy/internal/vulnerability"
 )
 
 // ManifestEntry represents a single manifest file in the display context.

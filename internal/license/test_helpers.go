@@ -4,8 +4,8 @@ import (
 	"net/http"
 	"testing"
 
-	"github.com/picatz/deputy/internal/cache/disk"
-	"github.com/picatz/deputy/internal/cache/memory"
+	"github.com/temporalio/deputy/internal/cache/disk"
+	"github.com/temporalio/deputy/internal/cache/memory"
 )
 
 // WithLicenseHTTPClient overrides the HTTP client used for remote license lookups during tests.

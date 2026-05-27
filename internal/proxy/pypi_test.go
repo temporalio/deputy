@@ -13,7 +13,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/picatz/deputy/internal/analysis/osv"
+	"github.com/temporalio/deputy/internal/analysis/osv"
 )
 
 func writePyPIBundle(t *testing.T, dir, name, when, reason, action string) string {

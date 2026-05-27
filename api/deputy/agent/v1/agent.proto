@@ -2,7 +2,7 @@ syntax = "proto3";
 
 package deputy.agent.v1;
 
-option go_package = "github.com/picatz/deputy/gen/deputy/agent/v1;agentv1";
+option go_package = "github.com/temporalio/deputy/gen/deputy/agent/v1;agentv1";
 
 import "buf/validate/validate.proto";
 import "google/protobuf/timestamp.proto";

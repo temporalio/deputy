@@ -22,8 +22,8 @@ import (
 	scalibrimage "github.com/google/osv-scalibr/artifact/image"
 	layerimage "github.com/google/osv-scalibr/artifact/image/layerscanning/image"
 	scalibrfs "github.com/google/osv-scalibr/fs"
-	"github.com/picatz/deputy/internal/network"
-	"github.com/picatz/deputy/internal/targets"
+	"github.com/temporalio/deputy/internal/network"
+	"github.com/temporalio/deputy/internal/targets"
 )
 
 // ContainerImageData wraps a SCALIBR image with its underlying v1.Image for config access.

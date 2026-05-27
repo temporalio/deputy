@@ -9,13 +9,13 @@ import (
 	"strings"
 
 	"github.com/ossf/osv-schema/bindings/go/osvschema"
-	"github.com/picatz/deputy/internal/ai"
-	_ "github.com/picatz/deputy/internal/ai/providers/claude" // Register claude provider
-	_ "github.com/picatz/deputy/internal/ai/providers/codex"  // Register codex provider
-	"github.com/picatz/deputy/internal/ai/render"
-	"github.com/picatz/deputy/internal/analysis/osv"
-	"github.com/picatz/deputy/internal/explain"
-	ui "github.com/picatz/deputy/internal/ui"
+	"github.com/temporalio/deputy/internal/ai"
+	_ "github.com/temporalio/deputy/internal/ai/providers/claude" // Register claude provider
+	_ "github.com/temporalio/deputy/internal/ai/providers/codex"  // Register codex provider
+	"github.com/temporalio/deputy/internal/ai/render"
+	"github.com/temporalio/deputy/internal/analysis/osv"
+	"github.com/temporalio/deputy/internal/explain"
+	ui "github.com/temporalio/deputy/internal/ui"
 	"github.com/spf13/cobra"
 )
 

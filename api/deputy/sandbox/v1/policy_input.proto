@@ -2,7 +2,7 @@ syntax = "proto3";
 
 package deputy.sandbox.v1;
 
-option go_package = "github.com/picatz/deputy/gen/deputy/sandbox/v1;sandboxv1";
+option go_package = "github.com/temporalio/deputy/gen/deputy/sandbox/v1;sandboxv1";
 
 import "deputy/sandbox/v1/sandbox.proto";
 

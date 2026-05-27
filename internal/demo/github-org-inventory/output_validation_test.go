@@ -15,7 +15,7 @@ import (
 	"time"
 
 	pb "deps.dev/api/v3"
-	"github.com/picatz/deputy/internal/license"
+	"github.com/temporalio/deputy/internal/license"
 )
 
 // TestInventoryOutput_NoUnknowns walks the generated inventory-output

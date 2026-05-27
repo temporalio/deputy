@@ -5,7 +5,7 @@ import (
 	"slices"
 	"time"
 
-	containerv1 "github.com/picatz/deputy/gen/deputy/container/v1"
+	containerv1 "github.com/temporalio/deputy/gen/deputy/container/v1"
 )
 
 // ImageRef identifies a container image for comparison.

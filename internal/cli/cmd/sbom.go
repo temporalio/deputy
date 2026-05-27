@@ -7,12 +7,12 @@ import (
 	"os"
 	"strings"
 
-	"github.com/picatz/deputy/internal/cli/flags"
-	"github.com/picatz/deputy/internal/services"
-	"github.com/picatz/deputy/internal/policy"
-	sbomx "github.com/picatz/deputy/internal/sbom"
-	"github.com/picatz/deputy/internal/targets"
-	ui "github.com/picatz/deputy/internal/ui"
+	"github.com/temporalio/deputy/internal/cli/flags"
+	"github.com/temporalio/deputy/internal/services"
+	"github.com/temporalio/deputy/internal/policy"
+	sbomx "github.com/temporalio/deputy/internal/sbom"
+	"github.com/temporalio/deputy/internal/targets"
+	ui "github.com/temporalio/deputy/internal/ui"
 	"github.com/spf13/cobra"
 )
 

@@ -37,7 +37,7 @@
 //	package main
 //
 //	import (
-//	    "github.com/picatz/deputy/sdk/plugin"
+//	    "github.com/temporalio/deputy/sdk/plugin"
 //	)
 //
 //	func main() {

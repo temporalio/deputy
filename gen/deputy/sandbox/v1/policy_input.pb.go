@@ -605,8 +605,8 @@ const file_deputy_sandbox_v1_policy_input_proto_rawDesc = "" +
 	"\acommand\x18\x01 \x01(\tR\acommand\x12\x1e\n" +
 	"\n" +
 	"entrypoint\x18\x02 \x01(\tR\n" +
-	"entrypointB\xc9\x01\n" +
-	"\x15com.deputy.sandbox.v1B\x10PolicyInputProtoP\x01Z8github.com/picatz/deputy/gen/deputy/sandbox/v1;sandboxv1\xa2\x02\x03DSX\xaa\x02\x11Deputy.Sandbox.V1\xca\x02\x11Deputy\\Sandbox\\V1\xe2\x02\x1dDeputy\\Sandbox\\V1\\GPBMetadata\xea\x02\x13Deputy::Sandbox::V1b\x06proto3"
+	"entrypointB\xcd\x01\n" +
+	"\x15com.deputy.sandbox.v1B\x10PolicyInputProtoP\x01Z<github.com/temporalio/deputy/gen/deputy/sandbox/v1;sandboxv1\xa2\x02\x03DSX\xaa\x02\x11Deputy.Sandbox.V1\xca\x02\x11Deputy\\Sandbox\\V1\xe2\x02\x1dDeputy\\Sandbox\\V1\\GPBMetadata\xea\x02\x13Deputy::Sandbox::V1b\x06proto3"
 
 var (
 	file_deputy_sandbox_v1_policy_input_proto_rawDescOnce sync.Once

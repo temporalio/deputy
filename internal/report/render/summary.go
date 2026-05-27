@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"strings"
 
-	vulnerabilityv1 "github.com/picatz/deputy/gen/deputy/vulnerability/v1"
-	"github.com/picatz/deputy/internal/output"
+	vulnerabilityv1 "github.com/temporalio/deputy/gen/deputy/vulnerability/v1"
+	"github.com/temporalio/deputy/internal/output"
 )
 
 // TargetSummary identifies the repository and reference for a summary.

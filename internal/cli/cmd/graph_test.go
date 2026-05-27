@@ -5,8 +5,8 @@ import (
 	"strings"
 	"testing"
 
-	graphv1 "github.com/picatz/deputy/gen/deputy/graph/v1"
-	"github.com/picatz/deputy/internal/dependency/graph"
+	graphv1 "github.com/temporalio/deputy/gen/deputy/graph/v1"
+	"github.com/temporalio/deputy/internal/dependency/graph"
 )
 
 func TestWriteGraphFlatList(t *testing.T) {

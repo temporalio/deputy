@@ -8,12 +8,12 @@ import (
 	"sort"
 	"strings"
 
-	dependencyv1 "github.com/picatz/deputy/gen/deputy/dependency/v1"
-	policyv1 "github.com/picatz/deputy/gen/deputy/policy/v1"
-	vulnerabilityv1 "github.com/picatz/deputy/gen/deputy/vulnerability/v1"
-	"github.com/picatz/deputy/internal/policy"
-	"github.com/picatz/deputy/internal/ui"
-	"github.com/picatz/deputy/internal/ui/repl"
+	dependencyv1 "github.com/temporalio/deputy/gen/deputy/dependency/v1"
+	policyv1 "github.com/temporalio/deputy/gen/deputy/policy/v1"
+	vulnerabilityv1 "github.com/temporalio/deputy/gen/deputy/vulnerability/v1"
+	"github.com/temporalio/deputy/internal/policy"
+	"github.com/temporalio/deputy/internal/ui"
+	"github.com/temporalio/deputy/internal/ui/repl"
 	"github.com/spf13/cobra"
 )
 

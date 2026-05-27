@@ -95,9 +95,9 @@ import (
 	"io"
 	"os"
 
-	dependencyv1 "github.com/picatz/deputy/gen/deputy/dependency/v1"
-	pluginv1 "github.com/picatz/deputy/gen/deputy/plugin/v1"
-	"github.com/picatz/deputy/gen/deputy/plugin/v1/pluginv1pluginrpc"
+	dependencyv1 "github.com/temporalio/deputy/gen/deputy/dependency/v1"
+	pluginv1 "github.com/temporalio/deputy/gen/deputy/plugin/v1"
+	"github.com/temporalio/deputy/gen/deputy/plugin/v1/pluginv1pluginrpc"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
@@ -108,7 +108,7 @@ import (
 
 const (
 	// TracerName is the tracer name for plugin client spans.
-	TracerName = "github.com/picatz/deputy/internal/inventory/plugin"
+	TracerName = "github.com/temporalio/deputy/internal/inventory/plugin"
 )
 
 // Client wraps a pluginrpc client for the ExtractorService.

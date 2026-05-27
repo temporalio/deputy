@@ -3,12 +3,12 @@ package proto
 import (
 	"google.golang.org/protobuf/types/known/timestamppb"
 
-	dependencyv1 "github.com/picatz/deputy/gen/deputy/dependency/v1"
-	diffv1 "github.com/picatz/deputy/gen/deputy/diff/v1"
-	targetv1 "github.com/picatz/deputy/gen/deputy/target/v1"
-	vulnerabilityv1 "github.com/picatz/deputy/gen/deputy/vulnerability/v1"
-	"github.com/picatz/deputy/internal/compare"
-	"github.com/picatz/deputy/internal/vulnerability"
+	dependencyv1 "github.com/temporalio/deputy/gen/deputy/dependency/v1"
+	diffv1 "github.com/temporalio/deputy/gen/deputy/diff/v1"
+	targetv1 "github.com/temporalio/deputy/gen/deputy/target/v1"
+	vulnerabilityv1 "github.com/temporalio/deputy/gen/deputy/vulnerability/v1"
+	"github.com/temporalio/deputy/internal/compare"
+	"github.com/temporalio/deputy/internal/vulnerability"
 )
 
 // ChangeKindToProto converts internal compare.ChangeType to proto diffv1.ChangeKind.

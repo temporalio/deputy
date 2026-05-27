@@ -5,7 +5,7 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/picatz/deputy/internal/policy"
+	"github.com/temporalio/deputy/internal/policy"
 	"go.opentelemetry.io/otel/trace"
 	"google.golang.org/protobuf/proto"
 )

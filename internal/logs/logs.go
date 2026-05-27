@@ -13,7 +13,7 @@ import (
 	"strings"
 	"sync/atomic"
 
-	deputyotel "github.com/picatz/deputy/internal/otel"
+	deputyotel "github.com/temporalio/deputy/internal/otel"
 )
 
 type contextKey struct{}

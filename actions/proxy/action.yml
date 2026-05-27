@@ -1,6 +1,6 @@
 name: 'Deputy Proxy'
 description: 'Block vulnerable packages at install time. Enforces CEL policies before go get, npm install, or pip install completes.'
-author: 'picatz'
+author: 'temporalio'
 
 branding:
   icon: 'shield'

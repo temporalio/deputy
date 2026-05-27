@@ -10,7 +10,7 @@
 
 ```bash
 # Clone the repository
-git clone https://github.com/picatz/deputy.git
+git clone https://github.com/temporalio/deputy.git
 cd deputy
 
 # Verify setup - run tests

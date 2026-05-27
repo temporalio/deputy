@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/picatz/deputy/internal/purlx"
+	"github.com/temporalio/deputy/internal/purlx"
 )
 
 // DetectManager identifies the package manager and manifest path for a given location.

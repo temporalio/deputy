@@ -8,7 +8,7 @@ package dependencyv1
 
 import (
 	_ "buf.build/gen/go/bufbuild/protovalidate/protocolbuffers/go/buf/validate"
-	v1 "github.com/picatz/deputy/gen/deputy/container/v1"
+	v1 "github.com/temporalio/deputy/gen/deputy/container/v1"
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 	reflect "reflect"
@@ -224,8 +224,8 @@ const file_deputy_dependency_v1_dependency_proto_rawDesc = "" +
 	"\vManifestRef\x12\x12\n" +
 	"\x04path\x18\x01 \x01(\tR\x04path\x12\x18\n" +
 	"\amanager\x18\x02 \x01(\tR\amanager\x12\x16\n" +
-	"\x06groups\x18\x03 \x03(\tR\x06groupsB\xdd\x01\n" +
-	"\x18com.deputy.dependency.v1B\x0fDependencyProtoP\x01Z>github.com/picatz/deputy/gen/deputy/dependency/v1;dependencyv1\xa2\x02\x03DDX\xaa\x02\x14Deputy.Dependency.V1\xca\x02\x14Deputy\\Dependency\\V1\xe2\x02 Deputy\\Dependency\\V1\\GPBMetadata\xea\x02\x16Deputy::Dependency::V1b\x06proto3"
+	"\x06groups\x18\x03 \x03(\tR\x06groupsB\xe1\x01\n" +
+	"\x18com.deputy.dependency.v1B\x0fDependencyProtoP\x01ZBgithub.com/temporalio/deputy/gen/deputy/dependency/v1;dependencyv1\xa2\x02\x03DDX\xaa\x02\x14Deputy.Dependency.V1\xca\x02\x14Deputy\\Dependency\\V1\xe2\x02 Deputy\\Dependency\\V1\\GPBMetadata\xea\x02\x16Deputy::Dependency::V1b\x06proto3"
 
 var (
 	file_deputy_dependency_v1_dependency_proto_rawDescOnce sync.Once

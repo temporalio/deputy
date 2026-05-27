@@ -691,7 +691,7 @@ Run Deputy MCP server in a container with HTTP transport:
 
 ```dockerfile
 FROM golang:1.22 AS builder
-RUN go install github.com/picatz/deputy@latest
+RUN go install github.com/temporalio/deputy@latest
 
 FROM gcr.io/distroless/base-debian12
 COPY --from=builder /go/bin/deputy /deputy
@@ -704,7 +704,7 @@ Or use docker-compose:
 ```yaml
 services:
   deputy-mcp:
-    image: ghcr.io/picatz/deputy:latest
+    image: ghcr.io/temporalio/deputy:latest
     command: ["mcp", "serve", "--transport", "http", "--address", ":8080"]
     ports:
       - "8080:8080"
@@ -791,7 +791,7 @@ For production HTTP deployments:
        spec:
          containers:
          - name: deputy
-           image: ghcr.io/picatz/deputy:latest
+           image: ghcr.io/temporalio/deputy:latest
            args: ["mcp", "serve", "--transport", "http", "--address", ":8080"]
            ports:
            - containerPort: 8080
@@ -832,7 +832,7 @@ The MCP HTTP server supports JWT-based authentication for production deployments
 
 ```go
 import (
-    "github.com/picatz/deputy/internal/mcp"
+    "github.com/temporalio/deputy/internal/mcp"
 )
 
 cfg := mcp.HTTPConfig{

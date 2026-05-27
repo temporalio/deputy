@@ -6,8 +6,8 @@ import (
 	"os/signal"
 	"syscall"
 
-	"github.com/picatz/deputy/internal/cli"
-	"github.com/picatz/deputy/internal/errors"
+	"github.com/temporalio/deputy/internal/cli"
+	"github.com/temporalio/deputy/internal/errors"
 )
 
 func main() {

@@ -47,8 +47,8 @@ import (
 	"github.com/google/osv-scalibr/extractor"
 	"github.com/hashicorp/go-cleanhttp"
 	"github.com/hashicorp/go-retryablehttp"
-	inv "github.com/picatz/deputy/internal/inventory"
-	"github.com/picatz/deputy/internal/repository"
+	inv "github.com/temporalio/deputy/internal/inventory"
+	"github.com/temporalio/deputy/internal/repository"
 	"golang.org/x/oauth2"
 	"golang.org/x/sync/errgroup"
 )

@@ -14,8 +14,8 @@ package dependency
 import (
 	"slices"
 
-	containerv1 "github.com/picatz/deputy/gen/deputy/container/v1"
-	dependencyv1 "github.com/picatz/deputy/gen/deputy/dependency/v1"
+	containerv1 "github.com/temporalio/deputy/gen/deputy/container/v1"
+	dependencyv1 "github.com/temporalio/deputy/gen/deputy/dependency/v1"
 )
 
 // ID captures the identity of a dependency independently of a scan.

@@ -4,11 +4,11 @@ import (
 	"context"
 	"testing"
 
-	sandboxv1 "github.com/picatz/deputy/gen/deputy/sandbox/v1"
-	"github.com/picatz/deputy/internal/sandbox"
-	"github.com/picatz/deputy/internal/sandbox/runtimes/docker"
-	"github.com/picatz/deputy/internal/sandbox/runtimes/gvisor"
-	"github.com/picatz/deputy/internal/sandbox/runtimes/none"
+	sandboxv1 "github.com/temporalio/deputy/gen/deputy/sandbox/v1"
+	"github.com/temporalio/deputy/internal/sandbox"
+	"github.com/temporalio/deputy/internal/sandbox/runtimes/docker"
+	"github.com/temporalio/deputy/internal/sandbox/runtimes/gvisor"
+	"github.com/temporalio/deputy/internal/sandbox/runtimes/none"
 )
 
 func TestNewRegistry(t *testing.T) {

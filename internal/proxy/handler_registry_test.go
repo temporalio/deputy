@@ -6,8 +6,8 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/picatz/deputy/internal/ecosystem"
-	"github.com/picatz/deputy/internal/policy"
+	"github.com/temporalio/deputy/internal/ecosystem"
+	"github.com/temporalio/deputy/internal/policy"
 	"google.golang.org/protobuf/proto"
 )
 

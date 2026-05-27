@@ -7,10 +7,10 @@ import (
 	"slices"
 	"strings"
 
-	vulnerabilityv1 "github.com/picatz/deputy/gen/deputy/vulnerability/v1"
-	"github.com/picatz/deputy/internal/output"
-	"github.com/picatz/deputy/internal/report"
-	ui "github.com/picatz/deputy/internal/ui"
+	vulnerabilityv1 "github.com/temporalio/deputy/gen/deputy/vulnerability/v1"
+	"github.com/temporalio/deputy/internal/output"
+	"github.com/temporalio/deputy/internal/report"
+	ui "github.com/temporalio/deputy/internal/ui"
 )
 
 // TriageSummary prints a human-readable summary of the triage report.

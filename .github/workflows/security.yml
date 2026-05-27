@@ -24,7 +24,7 @@ jobs:
   # Full security scan on all events
   scan:
     name: Scan
-    uses: picatz/deputy/.github/workflows/scan.yml@main
+    uses: temporalio/deputy/.github/workflows/scan.yml@main
     with:
       policy: policy/ci/security-gate.yaml
       upload-sarif: true
@@ -34,7 +34,7 @@ jobs:
   pr-gate:
     name: PR Gate
     if: github.event_name == 'pull_request'
-    uses: picatz/deputy/.github/workflows/pr-gate.yml@main
+    uses: temporalio/deputy/.github/workflows/pr-gate.yml@main
     with:
       scan-policy: policy/ci/security-gate.yaml
       diff-policy: policy/ci/pr-review.yaml

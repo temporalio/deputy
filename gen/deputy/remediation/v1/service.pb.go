@@ -8,10 +8,10 @@ package remediationv1
 
 import (
 	_ "buf.build/gen/go/bufbuild/protovalidate/protocolbuffers/go/buf/validate"
-	v1 "github.com/picatz/deputy/gen/deputy/sbom/v1"
-	v11 "github.com/picatz/deputy/gen/deputy/scan/v1"
-	v13 "github.com/picatz/deputy/gen/deputy/target/v1"
-	v12 "github.com/picatz/deputy/gen/deputy/vulnerability/v1"
+	v1 "github.com/temporalio/deputy/gen/deputy/sbom/v1"
+	v11 "github.com/temporalio/deputy/gen/deputy/scan/v1"
+	v13 "github.com/temporalio/deputy/gen/deputy/target/v1"
+	v12 "github.com/temporalio/deputy/gen/deputy/vulnerability/v1"
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 	durationpb "google.golang.org/protobuf/types/known/durationpb"
@@ -3812,8 +3812,8 @@ const file_deputy_remediation_v1_service_proto_rawDesc = "" +
 	"\vResumeAgent\x12).deputy.remediation.v1.ResumeAgentRequest\x1a!.deputy.remediation.v1.AgentEvent0\x01\x12a\n" +
 	"\n" +
 	"ListAgents\x12(.deputy.remediation.v1.ListAgentsRequest\x1a).deputy.remediation.v1.ListAgentsResponse\x12d\n" +
-	"\vApproveStep\x12).deputy.remediation.v1.ApproveStepRequest\x1a*.deputy.remediation.v1.ApproveStepResponseB\xe1\x01\n" +
-	"\x19com.deputy.remediation.v1B\fServiceProtoP\x01Z@github.com/picatz/deputy/gen/deputy/remediation/v1;remediationv1\xa2\x02\x03DRX\xaa\x02\x15Deputy.Remediation.V1\xca\x02\x15Deputy\\Remediation\\V1\xe2\x02!Deputy\\Remediation\\V1\\GPBMetadata\xea\x02\x17Deputy::Remediation::V1b\x06proto3"
+	"\vApproveStep\x12).deputy.remediation.v1.ApproveStepRequest\x1a*.deputy.remediation.v1.ApproveStepResponseB\xe5\x01\n" +
+	"\x19com.deputy.remediation.v1B\fServiceProtoP\x01ZDgithub.com/temporalio/deputy/gen/deputy/remediation/v1;remediationv1\xa2\x02\x03DRX\xaa\x02\x15Deputy.Remediation.V1\xca\x02\x15Deputy\\Remediation\\V1\xe2\x02!Deputy\\Remediation\\V1\\GPBMetadata\xea\x02\x17Deputy::Remediation::V1b\x06proto3"
 
 var (
 	file_deputy_remediation_v1_service_proto_rawDescOnce sync.Once

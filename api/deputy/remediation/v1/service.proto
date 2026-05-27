@@ -10,7 +10,7 @@ import "deputy/vulnerability/v1/vulnerability.proto";
 import "deputy/scan/v1/service.proto";
 import "deputy/sbom/v1/service.proto";
 
-option go_package = "github.com/picatz/deputy/gen/deputy/remediation/v1;remediationv1";
+option go_package = "github.com/temporalio/deputy/gen/deputy/remediation/v1;remediationv1";
 
 // RemediationService provides vulnerability remediation and AI-assisted fix capabilities.
 //

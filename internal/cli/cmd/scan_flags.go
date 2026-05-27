@@ -8,13 +8,13 @@ import (
 
 	"google.golang.org/protobuf/types/known/timestamppb"
 
-	scanv1 "github.com/picatz/deputy/gen/deputy/scan/v1"
-	targetv1 "github.com/picatz/deputy/gen/deputy/target/v1"
-	"github.com/picatz/deputy/internal/cli/flags"
-	"github.com/picatz/deputy/internal/ignore"
-	inv "github.com/picatz/deputy/internal/inventory"
-	"github.com/picatz/deputy/internal/report/render"
-	"github.com/picatz/deputy/internal/scanning"
+	scanv1 "github.com/temporalio/deputy/gen/deputy/scan/v1"
+	targetv1 "github.com/temporalio/deputy/gen/deputy/target/v1"
+	"github.com/temporalio/deputy/internal/cli/flags"
+	"github.com/temporalio/deputy/internal/ignore"
+	inv "github.com/temporalio/deputy/internal/inventory"
+	"github.com/temporalio/deputy/internal/report/render"
+	"github.com/temporalio/deputy/internal/scanning"
 	"github.com/spf13/cobra"
 )
 

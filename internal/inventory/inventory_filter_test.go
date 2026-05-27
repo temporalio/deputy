@@ -6,8 +6,8 @@ import (
 	"github.com/google/osv-scalibr/plugin"
 	pl "github.com/google/osv-scalibr/plugin/list"
 
-	dockerfilex "github.com/picatz/deputy/internal/inventory/plugins/docker/dockerfilex"
-	ghactions "github.com/picatz/deputy/internal/inventory/plugins/github/actionsx"
+	dockerfilex "github.com/temporalio/deputy/internal/inventory/plugins/docker/dockerfilex"
+	ghactions "github.com/temporalio/deputy/internal/inventory/plugins/github/actionsx"
 )
 
 func TestFilterInventoryPluginsIncludesGoPlugin(t *testing.T) {

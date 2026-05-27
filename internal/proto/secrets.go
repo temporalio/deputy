@@ -5,11 +5,11 @@ import (
 
 	"google.golang.org/protobuf/types/known/timestamppb"
 
-	policyv1 "github.com/picatz/deputy/gen/deputy/policy/v1"
-	secretsv1 "github.com/picatz/deputy/gen/deputy/secrets/v1"
-	targetv1 "github.com/picatz/deputy/gen/deputy/target/v1"
-	"github.com/picatz/deputy/internal/inventory"
-	"github.com/picatz/deputy/internal/secrets"
+	policyv1 "github.com/temporalio/deputy/gen/deputy/policy/v1"
+	secretsv1 "github.com/temporalio/deputy/gen/deputy/secrets/v1"
+	targetv1 "github.com/temporalio/deputy/gen/deputy/target/v1"
+	"github.com/temporalio/deputy/internal/inventory"
+	"github.com/temporalio/deputy/internal/secrets"
 )
 
 // SecretTypeToProto converts internal SecretType to proto SecretType.

@@ -2242,7 +2242,7 @@ With Go installed and virtiofs workspace mounting, you can run supply chain secu
 
 ```console
 $ deputy exec --runtime plugin --plugin vz --workspace . -- cat go.mod | head -n 3
-module github.com/picatz/deputy
+module github.com/temporalio/deputy
 
 go 1.25.5
 $ deputy exec --runtime plugin --plugin vz --workspace . -- uname -a

@@ -13,18 +13,18 @@ import (
 	"connectrpc.com/connect"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
-	secretsv1 "github.com/picatz/deputy/gen/deputy/secrets/v1"
-	"github.com/picatz/deputy/gen/deputy/secrets/v1/secretsv1connect"
-	targetv1 "github.com/picatz/deputy/gen/deputy/target/v1"
-	"github.com/picatz/deputy/internal/gitutil"
-	"github.com/picatz/deputy/internal/logs"
-	"github.com/picatz/deputy/internal/otel"
-	internalproto "github.com/picatz/deputy/internal/proto"
-	"github.com/picatz/deputy/internal/secrets"
-	"github.com/picatz/deputy/internal/targets"
+	secretsv1 "github.com/temporalio/deputy/gen/deputy/secrets/v1"
+	"github.com/temporalio/deputy/gen/deputy/secrets/v1/secretsv1connect"
+	targetv1 "github.com/temporalio/deputy/gen/deputy/target/v1"
+	"github.com/temporalio/deputy/internal/gitutil"
+	"github.com/temporalio/deputy/internal/logs"
+	"github.com/temporalio/deputy/internal/otel"
+	internalproto "github.com/temporalio/deputy/internal/proto"
+	"github.com/temporalio/deputy/internal/secrets"
+	"github.com/temporalio/deputy/internal/targets"
 
 	// Register target providers for remote Git, containers, etc.
-	_ "github.com/picatz/deputy/internal/targets/providers"
+	_ "github.com/temporalio/deputy/internal/targets/providers"
 )
 
 // SecretsHandler implements the SecretsService ConnectRPC service.

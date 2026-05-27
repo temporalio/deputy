@@ -3,8 +3,8 @@ package cmd
 import (
 	"testing"
 
-	"github.com/picatz/deputy/internal/compare"
-	"github.com/picatz/deputy/internal/report"
+	"github.com/temporalio/deputy/internal/compare"
+	"github.com/temporalio/deputy/internal/report"
 )
 
 func TestSplitVulnsByChange(t *testing.T) {

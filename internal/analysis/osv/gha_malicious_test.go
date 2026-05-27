@@ -16,7 +16,7 @@ import (
 	"time"
 
 	"github.com/ossf/osv-schema/bindings/go/osvschema"
-	"github.com/picatz/deputy/internal/cache/disk"
+	"github.com/temporalio/deputy/internal/cache/disk"
 )
 
 // TestGitHubActionsMALDetection verifies that Deputy detects malicious GitHub Actions

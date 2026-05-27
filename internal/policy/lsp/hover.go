@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/picatz/deputy/internal/policy"
+	"github.com/temporalio/deputy/internal/policy"
 )
 
 // hoverForLine returns hover text for YAML keys or CEL tokens on the line.

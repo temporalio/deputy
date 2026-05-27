@@ -8,8 +8,8 @@ package secretsv1
 
 import (
 	_ "buf.build/gen/go/bufbuild/protovalidate/protocolbuffers/go/buf/validate"
-	v11 "github.com/picatz/deputy/gen/deputy/policy/v1"
-	v1 "github.com/picatz/deputy/gen/deputy/target/v1"
+	v11 "github.com/temporalio/deputy/gen/deputy/policy/v1"
+	v1 "github.com/temporalio/deputy/gen/deputy/target/v1"
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 	timestamppb "google.golang.org/protobuf/types/known/timestamppb"
@@ -1509,8 +1509,8 @@ const file_deputy_secrets_v1_service_proto_rawDesc = "" +
 	"\bScanDiff\x12\".deputy.secrets.v1.ScanDiffRequest\x1a#.deputy.secrets.v1.ScanDiffResponse\x12M\n" +
 	"\x06Verify\x12 .deputy.secrets.v1.VerifyRequest\x1a!.deputy.secrets.v1.VerifyResponse\x12b\n" +
 	"\rListDetectors\x12'.deputy.secrets.v1.ListDetectorsRequest\x1a(.deputy.secrets.v1.ListDetectorsResponse\x12k\n" +
-	"\x10RegisterDetector\x12*.deputy.secrets.v1.RegisterDetectorRequest\x1a+.deputy.secrets.v1.RegisterDetectorResponseB\xc5\x01\n" +
-	"\x15com.deputy.secrets.v1B\fServiceProtoP\x01Z8github.com/picatz/deputy/gen/deputy/secrets/v1;secretsv1\xa2\x02\x03DSX\xaa\x02\x11Deputy.Secrets.V1\xca\x02\x11Deputy\\Secrets\\V1\xe2\x02\x1dDeputy\\Secrets\\V1\\GPBMetadata\xea\x02\x13Deputy::Secrets::V1b\x06proto3"
+	"\x10RegisterDetector\x12*.deputy.secrets.v1.RegisterDetectorRequest\x1a+.deputy.secrets.v1.RegisterDetectorResponseB\xc9\x01\n" +
+	"\x15com.deputy.secrets.v1B\fServiceProtoP\x01Z<github.com/temporalio/deputy/gen/deputy/secrets/v1;secretsv1\xa2\x02\x03DSX\xaa\x02\x11Deputy.Secrets.V1\xca\x02\x11Deputy\\Secrets\\V1\xe2\x02\x1dDeputy\\Secrets\\V1\\GPBMetadata\xea\x02\x13Deputy::Secrets::V1b\x06proto3"
 
 var (
 	file_deputy_secrets_v1_service_proto_rawDescOnce sync.Once

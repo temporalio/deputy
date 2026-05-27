@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	deperrors "github.com/picatz/deputy/internal/errors"
+	deperrors "github.com/temporalio/deputy/internal/errors"
 )
 
 func TestLoadConfig(t *testing.T) {

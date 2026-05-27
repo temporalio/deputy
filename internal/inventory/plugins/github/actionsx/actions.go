@@ -16,7 +16,7 @@ import (
 	"github.com/google/osv-scalibr/inventory"
 	"github.com/google/osv-scalibr/plugin"
 	"github.com/google/osv-scalibr/purl"
-	"github.com/picatz/deputy/internal/purlx"
+	"github.com/temporalio/deputy/internal/purlx"
 )
 
 const (
