@@ -7,7 +7,7 @@ import (
 	"net/http"
 
 	"github.com/google/go-github/v63/github"
-	"github.com/picatz/deputy/internal/pin"
+	"github.com/temporalio/deputy/internal/pin"
 )
 
 // Verifier checks commit provenance using the GitHub API to detect
@@ -30,15 +30,33 @@ func NewVerifier(client *github.Client) *Verifier {
 func (v *Verifier) Verify(ctx context.Context, owner, repo, sha string) (*pin.Verification, error) {
 	result := &pin.Verification{}
 
-	// Fetch commit details including signature verification
+	// Fetch commit details including signature verification.
 	commit, resp, err := v.client.Git.GetCommit(ctx, owner, repo, sha)
 	if err != nil {
 		if resp != nil && resp.StatusCode == http.StatusNotFound {
-			result.IsForkCommit = true
-			result.Warnings = append(result.Warnings, "commit not found in repository (possible imposter commit)")
-			return result, nil
+			// The SHA might be an annotated tag object rather than a commit.
+			// This happens when ls-remote returns the tag object SHA instead
+			// of the peeled commit SHA (e.g., git protocol v2 without peel).
+			// Try to dereference it as a tag object before flagging suspicious.
+			commitSHA, derefErr := v.dereferenceTagObject(ctx, owner, repo, sha)
+			if derefErr != nil {
+				result.IsForkCommit = true
+				result.Warnings = append(result.Warnings, "commit not found in repository (possible imposter commit)")
+				return result, nil
+			}
+			slog.Debug("dereferenced tag object to commit",
+				"owner", owner, "repo", repo,
+				"tag_object", truncSHA(sha), "commit", truncSHA(commitSHA))
+			sha = commitSHA
+			commit, _, err = v.client.Git.GetCommit(ctx, owner, repo, sha)
+			if err != nil {
+				result.IsForkCommit = true
+				result.Warnings = append(result.Warnings, "commit not found in repository (possible imposter commit)")
+				return result, nil
+			}
+		} else {
+			return nil, fmt.Errorf("fetching commit %s: %w", truncSHA(sha), err)
 		}
-		return nil, fmt.Errorf("fetching commit %s: %w", truncSHA(sha), err)
 	}
 
 	// Check signature
@@ -53,14 +71,46 @@ func (v *Verifier) Verify(ctx context.Context, owner, repo, sha string) (*pin.Ve
 		result.CommitAuthor = author.GetName()
 	}
 
-	// Check if commit is reachable from the default branch
-	repoInfo, _, err := v.client.Repositories.Get(ctx, owner, repo)
+	// Check if commit is reachable from the default branch.
+	// This may fail for renamed or inaccessible repositories — degrade
+	// gracefully for 404 (renamed repo) but treat 403 (rate limit) as
+	// unverifiable to avoid silently passing imposter commits.
+	repoInfo, repoResp, err := v.client.Repositories.Get(ctx, owner, repo)
 	if err != nil {
+		status := 0
+		if repoResp != nil {
+			status = repoResp.StatusCode
+		}
+		if status == http.StatusNotFound {
+			// Repo renamed or deleted — skip reachability, rely on signature.
+			slog.Warn("cannot fetch repo info, skipping branch reachability check",
+				"owner", owner, "repo", repo, "status", status, "error", err)
+			result.Warnings = append(result.Warnings,
+				fmt.Sprintf("could not verify branch reachability: repo %s/%s not found (renamed or deleted?)", owner, repo))
+			return result, nil
+		}
+		if status == http.StatusForbidden {
+			// Rate limited or auth required — can't verify, flag as suspicious
+			// to avoid silently passing imposter commits.
+			slog.Warn("rate limited or forbidden fetching repo info",
+				"owner", owner, "repo", repo, "status", status, "error", err)
+			result.Warnings = append(result.Warnings,
+				fmt.Sprintf("could not verify branch reachability: %s/%s returned %d (rate limited?)", owner, repo, status))
+			// If commit is also unsigned, flag as suspicious.
+			if !result.SignatureValid {
+				result.IsForkCommit = true
+				result.Warnings = append(result.Warnings,
+					"unsigned commit with unverifiable reachability (possible imposter)")
+			}
+			return result, nil
+		}
 		return nil, fmt.Errorf("fetching repo info for %s/%s: %w", owner, repo, err)
 	}
 	defaultBranch := repoInfo.GetDefaultBranch()
 	if defaultBranch == "" {
-		return nil, fmt.Errorf("could not determine default branch for %s/%s", owner, repo)
+		result.Warnings = append(result.Warnings,
+			fmt.Sprintf("could not determine default branch for %s/%s", owner, repo))
+		return result, nil
 	}
 
 	comparison, resp, err := v.client.Repositories.CompareCommits(ctx, owner, repo, defaultBranch, sha, nil)
@@ -118,4 +168,37 @@ func (v *Verifier) Verify(ctx context.Context, owner, repo, sha string) (*pin.Ve
 	}
 
 	return result, nil
+}
+
+// dereferenceTagObject attempts to resolve a SHA as a git tag object and
+// return the underlying commit SHA. This handles the case where ls-remote
+// returns an annotated tag object SHA instead of the peeled commit SHA.
+// Follows up to 5 levels of nested tags (tag → tag → ... → commit).
+// Returns an error if the SHA is not a tag object or cannot be dereferenced.
+func (v *Verifier) dereferenceTagObject(ctx context.Context, owner, repo, sha string) (string, error) {
+	const maxDepth = 5
+	current := sha
+	for range maxDepth {
+		tag, resp, err := v.client.Git.GetTag(ctx, owner, repo, current)
+		if err != nil {
+			status := 0
+			if resp != nil {
+				status = resp.StatusCode
+			}
+			return "", fmt.Errorf("not a tag object (status %d): %w", status, err)
+		}
+		obj := tag.GetObject()
+		if obj == nil {
+			return "", fmt.Errorf("tag has no target object")
+		}
+		if obj.GetType() == "commit" {
+			return obj.GetSHA(), nil
+		}
+		if obj.GetType() == "tag" {
+			current = obj.GetSHA()
+			continue
+		}
+		return "", fmt.Errorf("tag points to %s, not a commit or tag", obj.GetType())
+	}
+	return "", fmt.Errorf("exceeded %d levels of nested tag objects", maxDepth)
 }
