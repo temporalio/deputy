@@ -7,8 +7,8 @@ import (
 
 	"connectrpc.com/connect"
 
-	listv1 "github.com/picatz/deputy/gen/deputy/list/v1"
-	"github.com/picatz/deputy/gen/deputy/list/v1/listv1connect"
+	listv1 "github.com/temporalio/deputy/gen/deputy/list/v1"
+	"github.com/temporalio/deputy/gen/deputy/list/v1/listv1connect"
 )
 
 func TestInProcessTransport(t *testing.T) {

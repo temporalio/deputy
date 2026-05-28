@@ -31,18 +31,18 @@ flowchart LR
 ### Go install (recommended)
 
 ```console
-$ go install github.com/picatz/deputy@latest
+$ go install github.com/temporalio/deputy@latest
 $ deputy --version
 ```
 
 Notes:
 - Deputy’s `go.mod` uses the Go `toolchain` directive; use Go 1.21+ so `go` can fetch the pinned toolchain automatically.
-- If you prefer a deterministic install, pin a tag/commit: `go install github.com/picatz/deputy@vX.Y.Z`.
+- If you prefer a deterministic install, pin a tag/commit: `go install github.com/temporalio/deputy@vX.Y.Z`.
 
 ### Build from source
 
 ```console
-$ git clone https://github.com/picatz/deputy.git
+$ git clone https://github.com/temporalio/deputy.git
 $ cd deputy
 $ go build ./...
 $ go run . --help

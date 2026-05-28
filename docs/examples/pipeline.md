@@ -48,7 +48,7 @@ flowchart LR
 $ deputy scan
 
 Scanned /Users/yournamehere/Documents/GitHub/deputy @ WORKING (4b2eb48)
-  Origin: https://github.com/picatz/deputy.git
+  Origin: https://github.com/temporalio/deputy.git
 
 ∴ Vulnerabilities Found:
 

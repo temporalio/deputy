@@ -3,7 +3,7 @@ package manifests
 import (
 	"testing"
 
-	"github.com/picatz/deputy/internal/purlx"
+	"github.com/temporalio/deputy/internal/purlx"
 )
 
 func TestDetectManager(t *testing.T) {

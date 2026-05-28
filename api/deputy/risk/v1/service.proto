@@ -9,7 +9,7 @@ import "deputy/dependency/v1/dependency.proto";
 import "deputy/vulnerability/v1/vulnerability.proto";
 import "deputy/policy/v1/policy.proto";
 
-option go_package = "github.com/picatz/deputy/gen/deputy/risk/v1;riskv1";
+option go_package = "github.com/temporalio/deputy/gen/deputy/risk/v1;riskv1";
 
 // RiskService provides comprehensive supply chain risk analysis.
 //

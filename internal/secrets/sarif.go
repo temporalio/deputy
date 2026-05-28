@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/picatz/deputy/internal/sarif"
+	"github.com/temporalio/deputy/internal/sarif"
 )
 
 // SARIFReportOptions configures SARIF report generation for secrets.
@@ -124,8 +124,8 @@ func (r *SARIFReport) Generate(findings []Finding) *sarif.Log {
 		Name:           "Deputy",
 		FullName:       fmt.Sprintf("Deputy %s (secrets)", r.options.ToolVersion),
 		Version:        r.options.ToolVersion,
-		InformationURI: "https://github.com/picatz/deputy",
-		Organization:   "picatz",
+		InformationURI: "https://github.com/temporalio/deputy",
+		Organization:   "temporalio",
 		Rules:          rules,
 		ShortDesc: &sarif.Message{
 			Text: "Secret detection scanner",
@@ -252,7 +252,7 @@ func (r *SARIFReport) buildRule(secretType SecretType) sarif.ReportingDesc {
 			Text:     def.Description + ". Secrets in source code can be extracted by attackers with access to the repository.",
 			Markdown: fmt.Sprintf("**%s**\n\n%s. Secrets in source code can be extracted by attackers with access to the repository.", def.Name, def.Description),
 		},
-		HelpURI: "https://github.com/picatz/deputy/blob/main/docs/secrets.md",
+		HelpURI: "https://github.com/temporalio/deputy/blob/main/docs/secrets.md",
 		Help: &sarif.Message{
 			Text:     "Remove the secret from source code and rotate it immediately. Use environment variables or a secret management solution instead.",
 			Markdown: "## Remediation\n\n1. **Remove** the secret from source code\n2. **Rotate** the compromised credential immediately\n3. **Use** environment variables or a secret management solution\n4. **Review** git history for exposed secrets",

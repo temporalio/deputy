@@ -4,9 +4,9 @@ import (
 	"context"
 	"testing"
 
-	"github.com/picatz/deputy/internal/analysis/osv"
-	"github.com/picatz/deputy/internal/auth/jwt"
-	"github.com/picatz/deputy/internal/cache/memory"
+	"github.com/temporalio/deputy/internal/analysis/osv"
+	"github.com/temporalio/deputy/internal/auth/jwt"
+	"github.com/temporalio/deputy/internal/cache/memory"
 )
 
 func TestCacheScopeIsEmpty(t *testing.T) {

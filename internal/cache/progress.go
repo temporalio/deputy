@@ -5,7 +5,7 @@ import (
 	"io"
 	"os"
 
-	"github.com/picatz/deputy/internal/ui"
+	"github.com/temporalio/deputy/internal/ui"
 )
 
 // UIProgressWriter adapts ui.Progress to the cache.ProgressWriter interface.

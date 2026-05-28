@@ -6,11 +6,11 @@ import (
 
 	"github.com/google/cel-go/cel"
 	"github.com/google/osv-scalibr/extractor"
-	dependencyv1 "github.com/picatz/deputy/gen/deputy/dependency/v1"
-	vulnerabilityv1 "github.com/picatz/deputy/gen/deputy/vulnerability/v1"
-	"github.com/picatz/deputy/internal/ignore"
-	"github.com/picatz/deputy/internal/policy"
-	"github.com/picatz/deputy/internal/vulnerability"
+	dependencyv1 "github.com/temporalio/deputy/gen/deputy/dependency/v1"
+	vulnerabilityv1 "github.com/temporalio/deputy/gen/deputy/vulnerability/v1"
+	"github.com/temporalio/deputy/internal/ignore"
+	"github.com/temporalio/deputy/internal/policy"
+	"github.com/temporalio/deputy/internal/vulnerability"
 )
 
 // FilterUnfixed drops findings without applicable fixes and recomputes stats.

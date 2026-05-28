@@ -7,7 +7,7 @@ import "deputy/dependency/v1/dependency.proto";
 import "deputy/target/v1/target.proto";
 import "deputy/vulnerability/v1/vulnerability.proto";
 
-option go_package = "github.com/picatz/deputy/gen/deputy/policy/v1;policyv1";
+option go_package = "github.com/temporalio/deputy/gen/deputy/policy/v1;policyv1";
 
 // ActionType represents a policy evaluation outcome.
 enum ActionType {

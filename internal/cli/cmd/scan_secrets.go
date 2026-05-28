@@ -6,8 +6,8 @@ import (
 	"io"
 	"time"
 
-	"github.com/picatz/deputy/internal/secrets"
-	ui "github.com/picatz/deputy/internal/ui"
+	"github.com/temporalio/deputy/internal/secrets"
+	ui "github.com/temporalio/deputy/internal/ui"
 )
 
 // runSecretsScanner scans a directory for secrets and returns findings.

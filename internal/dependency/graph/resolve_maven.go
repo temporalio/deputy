@@ -11,7 +11,7 @@ import (
 	"strings"
 
 	pb "deps.dev/api/v3"
-	"github.com/picatz/deputy/internal/logs"
+	"github.com/temporalio/deputy/internal/logs"
 )
 
 // MavenResolver resolves dependency edges for Maven/Gradle packages.

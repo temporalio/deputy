@@ -24,19 +24,19 @@ import (
 	"github.com/go-git/go-git/v5/storage/memory"
 	"github.com/google/osv-scalibr/extractor"
 	"github.com/google/osv-scalibr/purl"
-	"github.com/picatz/deputy/internal/auth"
-	"github.com/picatz/deputy/internal/collections"
-	"github.com/picatz/deputy/internal/compare"
-	"github.com/picatz/deputy/internal/dockerfile"
-	gitx "github.com/picatz/deputy/internal/gitutil"
-	"github.com/picatz/deputy/internal/inventory"
-	"github.com/picatz/deputy/internal/license"
-	"github.com/picatz/deputy/internal/otel"
-	"github.com/picatz/deputy/internal/purlx"
-	"github.com/picatz/deputy/internal/repository"
-	"github.com/picatz/deputy/internal/repository/workspace"
-	"github.com/picatz/deputy/internal/targets"
-	"github.com/picatz/deputy/internal/version"
+	"github.com/temporalio/deputy/internal/auth"
+	"github.com/temporalio/deputy/internal/collections"
+	"github.com/temporalio/deputy/internal/compare"
+	"github.com/temporalio/deputy/internal/dockerfile"
+	gitx "github.com/temporalio/deputy/internal/gitutil"
+	"github.com/temporalio/deputy/internal/inventory"
+	"github.com/temporalio/deputy/internal/license"
+	"github.com/temporalio/deputy/internal/otel"
+	"github.com/temporalio/deputy/internal/purlx"
+	"github.com/temporalio/deputy/internal/repository"
+	"github.com/temporalio/deputy/internal/repository/workspace"
+	"github.com/temporalio/deputy/internal/targets"
+	"github.com/temporalio/deputy/internal/version"
 	"github.com/protobom/protobom/pkg/formats"
 	"github.com/protobom/protobom/pkg/sbom"
 	"github.com/protobom/protobom/pkg/writer"
@@ -349,7 +349,7 @@ func buildProtobomDocument(ctx context.Context, ws workspace.FS, repoRef, ref, n
 	d.Metadata.Tools = append(d.Metadata.Tools, &sbom.Tool{
 		Name:    "deputy",
 		Version: version.Value,
-		Vendor:  "github.com/picatz/deputy",
+		Vendor:  "github.com/temporalio/deputy",
 	})
 
 	app := sbom.NewNode()

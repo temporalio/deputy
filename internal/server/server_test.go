@@ -9,12 +9,12 @@ import (
 
 	"connectrpc.com/connect"
 
-	listv1 "github.com/picatz/deputy/gen/deputy/list/v1"
-	"github.com/picatz/deputy/gen/deputy/list/v1/listv1connect"
-	scanv1 "github.com/picatz/deputy/gen/deputy/scan/v1"
-	"github.com/picatz/deputy/gen/deputy/scan/v1/scanv1connect"
-	secretsv1 "github.com/picatz/deputy/gen/deputy/secrets/v1"
-	"github.com/picatz/deputy/gen/deputy/secrets/v1/secretsv1connect"
+	listv1 "github.com/temporalio/deputy/gen/deputy/list/v1"
+	"github.com/temporalio/deputy/gen/deputy/list/v1/listv1connect"
+	scanv1 "github.com/temporalio/deputy/gen/deputy/scan/v1"
+	"github.com/temporalio/deputy/gen/deputy/scan/v1/scanv1connect"
+	secretsv1 "github.com/temporalio/deputy/gen/deputy/secrets/v1"
+	"github.com/temporalio/deputy/gen/deputy/secrets/v1/secretsv1connect"
 )
 
 func TestHealthEndpoint(t *testing.T) {

@@ -5,8 +5,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/picatz/deputy/internal/pin/container"
-	"github.com/picatz/deputy/internal/pin/githubactions"
+	"github.com/temporalio/deputy/internal/pin/container"
+	"github.com/temporalio/deputy/internal/pin/githubactions"
 )
 
 func TestBuildPinStrategies(t *testing.T) {

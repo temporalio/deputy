@@ -15,7 +15,7 @@
 #   deputy diff main HEAD --policy policy/ci/pr-review.yaml
 #
 # Or in GitHub Actions:
-#   - uses: picatz/deputy/actions/diff@main
+#   - uses: temporalio/deputy/actions/diff@main
 #     with:
 #       policy: policy/ci/pr-review.yaml
 

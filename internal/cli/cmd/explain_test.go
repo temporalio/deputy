@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/ossf/osv-schema/bindings/go/osvschema"
-	"github.com/picatz/deputy/internal/explain"
+	"github.com/temporalio/deputy/internal/explain"
 )
 
 func TestExplainRenderer_Text(t *testing.T) {

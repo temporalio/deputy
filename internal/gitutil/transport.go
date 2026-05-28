@@ -8,7 +8,7 @@ import (
 	"github.com/go-git/go-git/v5/plumbing/transport/client"
 	githttp "github.com/go-git/go-git/v5/plumbing/transport/http"
 
-	"github.com/picatz/deputy/internal/network"
+	"github.com/temporalio/deputy/internal/network"
 )
 
 func init() {

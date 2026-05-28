@@ -7,7 +7,7 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/picatz/deputy/internal/pin"
+	"github.com/temporalio/deputy/internal/pin"
 )
 
 // rewriteContainerRefs rewrites container image references in a file to

@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/picatz/deputy/internal/errors"
+	"github.com/temporalio/deputy/internal/errors"
 )
 
 func TestDefaultConfig(t *testing.T) {

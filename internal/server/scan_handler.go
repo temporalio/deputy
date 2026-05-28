@@ -6,16 +6,16 @@ import (
 
 	"connectrpc.com/connect"
 
-	scanv1 "github.com/picatz/deputy/gen/deputy/scan/v1"
-	"github.com/picatz/deputy/gen/deputy/scan/v1/scanv1connect"
-	vulnerabilityv1 "github.com/picatz/deputy/gen/deputy/vulnerability/v1"
-	"github.com/picatz/deputy/internal/logs"
-	"github.com/picatz/deputy/internal/otel"
-	internalproto "github.com/picatz/deputy/internal/proto"
-	"github.com/picatz/deputy/internal/scanning"
-	"github.com/picatz/deputy/internal/targets"
-	"github.com/picatz/deputy/internal/vulnerability/id/cve"
-	"github.com/picatz/deputy/internal/vulnerability/intel"
+	scanv1 "github.com/temporalio/deputy/gen/deputy/scan/v1"
+	"github.com/temporalio/deputy/gen/deputy/scan/v1/scanv1connect"
+	vulnerabilityv1 "github.com/temporalio/deputy/gen/deputy/vulnerability/v1"
+	"github.com/temporalio/deputy/internal/logs"
+	"github.com/temporalio/deputy/internal/otel"
+	internalproto "github.com/temporalio/deputy/internal/proto"
+	"github.com/temporalio/deputy/internal/scanning"
+	"github.com/temporalio/deputy/internal/targets"
+	"github.com/temporalio/deputy/internal/vulnerability/id/cve"
+	"github.com/temporalio/deputy/internal/vulnerability/intel"
 )
 
 // ScanHandler implements the ScanService ConnectRPC service.

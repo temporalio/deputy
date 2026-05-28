@@ -8,10 +8,10 @@ import (
 	"slices"
 	"testing"
 
-	dependencyv1 "github.com/picatz/deputy/gen/deputy/dependency/v1"
-	policyv1 "github.com/picatz/deputy/gen/deputy/policy/v1"
-	vulnerabilityv1 "github.com/picatz/deputy/gen/deputy/vulnerability/v1"
-	"github.com/picatz/deputy/internal/policy"
+	dependencyv1 "github.com/temporalio/deputy/gen/deputy/dependency/v1"
+	policyv1 "github.com/temporalio/deputy/gen/deputy/policy/v1"
+	vulnerabilityv1 "github.com/temporalio/deputy/gen/deputy/vulnerability/v1"
+	"github.com/temporalio/deputy/internal/policy"
 )
 
 // End-to-end style check: load the composed example bundle and execute the sbom entrypoint payload path.

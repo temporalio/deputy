@@ -4,8 +4,8 @@ import (
 	"context"
 	"io"
 
-	"github.com/picatz/deputy/internal/report"
-	"github.com/picatz/deputy/internal/vulnerability/intel"
+	"github.com/temporalio/deputy/internal/report"
+	"github.com/temporalio/deputy/internal/vulnerability/intel"
 )
 
 // enrichVulnerabilities enriches vulnerabilities with EPSS scores and KEV status.

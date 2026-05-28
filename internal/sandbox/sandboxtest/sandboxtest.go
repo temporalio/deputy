@@ -32,8 +32,8 @@ import (
 	"testing"
 
 	"connectrpc.com/connect"
-	sandboxv1 "github.com/picatz/deputy/gen/deputy/sandbox/v1"
-	"github.com/picatz/deputy/gen/deputy/sandbox/v1/sandboxv1connect"
+	sandboxv1 "github.com/temporalio/deputy/gen/deputy/sandbox/v1"
+	"github.com/temporalio/deputy/gen/deputy/sandbox/v1/sandboxv1connect"
 )
 
 // Harness provides an in-memory test harness for sandbox runtime plugins.

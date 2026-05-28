@@ -5,7 +5,7 @@ import (
 	"time"
 
 	"github.com/ossf/osv-schema/bindings/go/osvschema"
-	containerv1 "github.com/picatz/deputy/gen/deputy/container/v1"
+	containerv1 "github.com/temporalio/deputy/gen/deputy/container/v1"
 )
 
 func tTime(tstr string) time.Time { tm, _ := time.Parse(time.RFC3339, tstr); return tm }

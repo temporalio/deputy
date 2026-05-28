@@ -3,9 +3,9 @@ package proto
 import (
 	"google.golang.org/protobuf/types/known/timestamppb"
 
-	fixv1 "github.com/picatz/deputy/gen/deputy/fix/v1"
-	targetv1 "github.com/picatz/deputy/gen/deputy/target/v1"
-	"github.com/picatz/deputy/internal/remediation"
+	fixv1 "github.com/temporalio/deputy/gen/deputy/fix/v1"
+	targetv1 "github.com/temporalio/deputy/gen/deputy/target/v1"
+	"github.com/temporalio/deputy/internal/remediation"
 )
 
 // BuildFixResponse creates a FixResponse from internal types.

@@ -16,7 +16,6 @@ on:
   workflow_dispatch:
 
 permissions:
-  security-events: write
   contents: read
   pull-requests: write
 
@@ -24,17 +23,18 @@ jobs:
   # Full security scan on all events
   scan:
     name: Scan
-    uses: picatz/deputy/.github/workflows/scan.yml@main
+    uses: temporalio/deputy/.github/workflows/scan.yml@main
     with:
       policy: policy/ci/security-gate.yaml
-      upload-sarif: true
-      sarif-category: deputy-self-scan
+      upload-sarif: false
+      # upload-sarif: true        # requires GHAS (security-events: write)
+      # sarif-category: deputy-self-scan
 
   # PR-specific checks with dependency diff
   pr-gate:
     name: PR Gate
     if: github.event_name == 'pull_request'
-    uses: picatz/deputy/.github/workflows/pr-gate.yml@main
+    uses: temporalio/deputy/.github/workflows/pr-gate.yml@main
     with:
       scan-policy: policy/ci/security-gate.yaml
       diff-policy: policy/ci/pr-review.yaml

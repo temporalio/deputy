@@ -5,7 +5,7 @@ import (
 	"path"
 	"strings"
 
-	"github.com/picatz/deputy/internal/ecosystem"
+	"github.com/temporalio/deputy/internal/ecosystem"
 )
 
 // NewPyPIHandler creates a PyPI proxy handler using the unified handler factory.

@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/picatz/deputy/internal/pin"
+	"github.com/temporalio/deputy/internal/pin"
 )
 
 // TestRewriteWorkflow_Golden runs golden file tests for the workflow rewriter.

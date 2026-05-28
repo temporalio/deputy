@@ -8,8 +8,8 @@ import (
 	"sync/atomic"
 	"testing"
 
-	policyv1 "github.com/picatz/deputy/gen/deputy/policy/v1"
-	"github.com/picatz/deputy/internal/policy"
+	policyv1 "github.com/temporalio/deputy/gen/deputy/policy/v1"
+	"github.com/temporalio/deputy/internal/policy"
 	"google.golang.org/protobuf/proto"
 )
 

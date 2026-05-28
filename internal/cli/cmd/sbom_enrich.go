@@ -6,7 +6,7 @@ import (
 	"os"
 	"strings"
 
-	sbomx "github.com/picatz/deputy/internal/sbom"
+	sbomx "github.com/temporalio/deputy/internal/sbom"
 	"github.com/protobom/protobom/pkg/sbom"
 	"github.com/spf13/cobra"
 	"google.golang.org/protobuf/encoding/protojson"

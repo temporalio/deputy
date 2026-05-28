@@ -4,7 +4,7 @@ import (
 	"strings"
 
 	pb "deps.dev/api/v3"
-	"github.com/picatz/deputy/internal/policy"
+	"github.com/temporalio/deputy/internal/policy"
 )
 
 // Ecosystem represents a supported package ecosystem.

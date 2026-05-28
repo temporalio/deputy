@@ -12,7 +12,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/picatz/deputy/internal/auth/jwt"
+	"github.com/temporalio/deputy/internal/auth/jwt"
 	"github.com/picatz/jose/pkg/header"
 	"github.com/picatz/jose/pkg/jwa"
 	josejwt "github.com/picatz/jose/pkg/jwt"

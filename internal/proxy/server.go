@@ -14,7 +14,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/picatz/deputy/internal/httputil"
+	"github.com/temporalio/deputy/internal/httputil"
 	"golang.org/x/sync/errgroup"
 )
 

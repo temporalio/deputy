@@ -1,9 +1,9 @@
 package filtering
 
 import (
-	scanv1 "github.com/picatz/deputy/gen/deputy/scan/v1"
-	vulnerabilityv1 "github.com/picatz/deputy/gen/deputy/vulnerability/v1"
-	"github.com/picatz/deputy/internal/vulnerability"
+	scanv1 "github.com/temporalio/deputy/gen/deputy/scan/v1"
+	vulnerabilityv1 "github.com/temporalio/deputy/gen/deputy/vulnerability/v1"
+	"github.com/temporalio/deputy/internal/vulnerability"
 )
 
 // Merge combines two scan responses into one aggregate response.

@@ -1,6 +1,6 @@
 package lsp
 
-import "github.com/picatz/deputy/internal/policy"
+import "github.com/temporalio/deputy/internal/policy"
 
 // celFunction describes a helper available in the CEL environment.
 type celFunction struct {

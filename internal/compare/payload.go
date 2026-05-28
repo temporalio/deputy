@@ -1,7 +1,7 @@
 package compare
 
 import (
-	containerv1 "github.com/picatz/deputy/gen/deputy/container/v1"
+	containerv1 "github.com/temporalio/deputy/gen/deputy/container/v1"
 )
 
 // BuildContainerDiffPayload converts an ImageDiffReport to a map suitable for policy evaluation.

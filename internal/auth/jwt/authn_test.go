@@ -7,7 +7,7 @@ import (
 	"testing"
 
 	"connectrpc.com/authn"
-	"github.com/picatz/deputy/internal/auth/jwt"
+	"github.com/temporalio/deputy/internal/auth/jwt"
 )
 
 // mockAuthenticator implements jwt.Authenticator for testing.

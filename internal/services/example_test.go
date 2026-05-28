@@ -7,9 +7,9 @@ import (
 
 	"connectrpc.com/connect"
 
-	listv1 "github.com/picatz/deputy/gen/deputy/list/v1"
-	scanv1 "github.com/picatz/deputy/gen/deputy/scan/v1"
-	"github.com/picatz/deputy/internal/services"
+	listv1 "github.com/temporalio/deputy/gen/deputy/list/v1"
+	scanv1 "github.com/temporalio/deputy/gen/deputy/scan/v1"
+	"github.com/temporalio/deputy/internal/services"
 )
 
 func Example_inProcess() {

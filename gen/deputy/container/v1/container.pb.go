@@ -714,8 +714,8 @@ const file_deputy_container_v1_container_proto_rawDesc = "" +
 	"\acreated\x18\x02 \x01(\v2\x1a.google.protobuf.TimestampR\acreated\x12\x18\n" +
 	"\acomment\x18\x03 \x01(\tR\acomment\x12\x1f\n" +
 	"\vempty_layer\x18\x04 \x01(\bR\n" +
-	"emptyLayerB\xd5\x01\n" +
-	"\x17com.deputy.container.v1B\x0eContainerProtoP\x01Z<github.com/picatz/deputy/gen/deputy/container/v1;containerv1\xa2\x02\x03DCX\xaa\x02\x13Deputy.Container.V1\xca\x02\x13Deputy\\Container\\V1\xe2\x02\x1fDeputy\\Container\\V1\\GPBMetadata\xea\x02\x15Deputy::Container::V1b\x06proto3"
+	"emptyLayerB\xd9\x01\n" +
+	"\x17com.deputy.container.v1B\x0eContainerProtoP\x01Z@github.com/temporalio/deputy/gen/deputy/container/v1;containerv1\xa2\x02\x03DCX\xaa\x02\x13Deputy.Container.V1\xca\x02\x13Deputy\\Container\\V1\xe2\x02\x1fDeputy\\Container\\V1\\GPBMetadata\xea\x02\x15Deputy::Container::V1b\x06proto3"
 
 var (
 	file_deputy_container_v1_container_proto_rawDescOnce sync.Once

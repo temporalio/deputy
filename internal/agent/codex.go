@@ -7,8 +7,8 @@ import (
 	"strings"
 
 	"connectrpc.com/connect"
-	agentv1 "github.com/picatz/deputy/gen/deputy/agent/v1"
-	"github.com/picatz/deputy/gen/deputy/agent/v1/agentv1connect"
+	agentv1 "github.com/temporalio/deputy/gen/deputy/agent/v1"
+	"github.com/temporalio/deputy/gen/deputy/agent/v1/agentv1connect"
 	"github.com/picatz/openai/codex"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )

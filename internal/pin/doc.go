@@ -9,11 +9,11 @@
 //
 // Each ecosystem is implemented as a subpackage:
 //
-//   - [github.com/picatz/deputy/internal/pin/githubactions] — replaces mutable
+//   - [github.com/temporalio/deputy/internal/pin/githubactions] — replaces mutable
 //     version tags with commit SHAs. Includes fork/imposter commit detection
 //     via the GitHub API. Resolution uses the git protocol (ls-remote).
 //
-//   - [github.com/picatz/deputy/internal/pin/container] — appends sha256 digest
+//   - [github.com/temporalio/deputy/internal/pin/container] — appends sha256 digest
 //     pins to Dockerfile FROM statements, workflow container/services fields,
 //     and docker:// uses. Resolution uses OCI registry HEAD requests.
 //

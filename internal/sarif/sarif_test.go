@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	vulnerabilityv1 "github.com/picatz/deputy/gen/deputy/vulnerability/v1"
-	"github.com/picatz/deputy/internal/report"
+	vulnerabilityv1 "github.com/temporalio/deputy/gen/deputy/vulnerability/v1"
+	"github.com/temporalio/deputy/internal/report"
 )
 
 func TestSchemaForVersion(t *testing.T) {

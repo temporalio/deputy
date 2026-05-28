@@ -40,13 +40,13 @@ import (
 
 	pl "github.com/google/osv-scalibr/plugin/list"
 
-	inventoryv1 "github.com/picatz/deputy/gen/deputy/inventory/v1"
-	"github.com/picatz/deputy/internal/ecosystem"
-	pluginclient "github.com/picatz/deputy/internal/inventory/plugin"
-	dockerfilex "github.com/picatz/deputy/internal/inventory/plugins/docker/dockerfilex"
-	ghactions "github.com/picatz/deputy/internal/inventory/plugins/github/actionsx"
-	gradlex "github.com/picatz/deputy/internal/inventory/plugins/java/gradlex"
-	rubygemspec "github.com/picatz/deputy/internal/inventory/plugins/ruby/gemspecx"
+	inventoryv1 "github.com/temporalio/deputy/gen/deputy/inventory/v1"
+	"github.com/temporalio/deputy/internal/ecosystem"
+	pluginclient "github.com/temporalio/deputy/internal/inventory/plugin"
+	dockerfilex "github.com/temporalio/deputy/internal/inventory/plugins/docker/dockerfilex"
+	ghactions "github.com/temporalio/deputy/internal/inventory/plugins/github/actionsx"
+	gradlex "github.com/temporalio/deputy/internal/inventory/plugins/java/gradlex"
+	rubygemspec "github.com/temporalio/deputy/internal/inventory/plugins/ruby/gemspecx"
 )
 
 // RegisteredPlugin represents an external plugin that was registered at runtime.

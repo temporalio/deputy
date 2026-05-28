@@ -42,7 +42,7 @@ import (
 	"context"
 	"time"
 
-	deputyotel "github.com/picatz/deputy/internal/otel"
+	deputyotel "github.com/temporalio/deputy/internal/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
 )

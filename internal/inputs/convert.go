@@ -10,14 +10,14 @@ import (
 
 	"github.com/BurntSushi/toml"
 	"github.com/google/osv-scalibr/extractor"
-	containerv1 "github.com/picatz/deputy/gen/deputy/container/v1"
-	dependencyv1 "github.com/picatz/deputy/gen/deputy/dependency/v1"
-	"github.com/picatz/deputy/internal/analysis/osv"
-	"github.com/picatz/deputy/internal/collections"
-	"github.com/picatz/deputy/internal/compare"
-	"github.com/picatz/deputy/internal/dependency"
-	"github.com/picatz/deputy/internal/inventory/manifests"
-	"github.com/picatz/deputy/internal/purlx"
+	containerv1 "github.com/temporalio/deputy/gen/deputy/container/v1"
+	dependencyv1 "github.com/temporalio/deputy/gen/deputy/dependency/v1"
+	"github.com/temporalio/deputy/internal/analysis/osv"
+	"github.com/temporalio/deputy/internal/collections"
+	"github.com/temporalio/deputy/internal/compare"
+	"github.com/temporalio/deputy/internal/dependency"
+	"github.com/temporalio/deputy/internal/inventory/manifests"
+	"github.com/temporalio/deputy/internal/purlx"
 )
 
 // Options configures how packages are converted to inputs.

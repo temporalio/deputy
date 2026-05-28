@@ -8,8 +8,8 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"google.golang.org/protobuf/encoding/protojson"
 
-	listv1 "github.com/picatz/deputy/gen/deputy/list/v1"
-	"github.com/picatz/deputy/internal/services"
+	listv1 "github.com/temporalio/deputy/gen/deputy/list/v1"
+	"github.com/temporalio/deputy/internal/services"
 	"github.com/spf13/cobra"
 )
 

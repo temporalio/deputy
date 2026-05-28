@@ -3,8 +3,8 @@ package cmd
 import (
 	"fmt"
 
-	deperrors "github.com/picatz/deputy/internal/errors"
-	"github.com/picatz/deputy/internal/proxy"
+	deperrors "github.com/temporalio/deputy/internal/errors"
+	"github.com/temporalio/deputy/internal/proxy"
 	"github.com/spf13/cobra"
 )
 

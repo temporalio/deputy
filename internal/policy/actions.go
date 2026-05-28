@@ -8,7 +8,7 @@ import (
 	"strings"
 
 	"github.com/google/cel-go/common/types/ref"
-	"github.com/picatz/deputy/internal/collections"
+	"github.com/temporalio/deputy/internal/collections"
 	"google.golang.org/protobuf/proto"
 )
 

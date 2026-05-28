@@ -6,10 +6,10 @@ import (
 
 	"google.golang.org/protobuf/encoding/protojson"
 
-	fixv1 "github.com/picatz/deputy/gen/deputy/fix/v1"
-	targetv1 "github.com/picatz/deputy/gen/deputy/target/v1"
-	internalproto "github.com/picatz/deputy/internal/proto"
-	remediation "github.com/picatz/deputy/internal/remediation"
+	fixv1 "github.com/temporalio/deputy/gen/deputy/fix/v1"
+	targetv1 "github.com/temporalio/deputy/gen/deputy/target/v1"
+	internalproto "github.com/temporalio/deputy/internal/proto"
+	remediation "github.com/temporalio/deputy/internal/remediation"
 )
 
 func TestBuildFixResponse(t *testing.T) {

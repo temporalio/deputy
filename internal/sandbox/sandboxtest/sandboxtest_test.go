@@ -6,9 +6,9 @@ import (
 	"testing"
 
 	"connectrpc.com/connect"
-	sandboxv1 "github.com/picatz/deputy/gen/deputy/sandbox/v1"
-	"github.com/picatz/deputy/gen/deputy/sandbox/v1/sandboxv1connect"
-	"github.com/picatz/deputy/internal/sandbox/sandboxtest"
+	sandboxv1 "github.com/temporalio/deputy/gen/deputy/sandbox/v1"
+	"github.com/temporalio/deputy/gen/deputy/sandbox/v1/sandboxv1connect"
+	"github.com/temporalio/deputy/internal/sandbox/sandboxtest"
 )
 
 func TestHarness_GetInfo(t *testing.T) {

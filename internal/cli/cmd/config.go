@@ -8,7 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/picatz/deputy/internal/config"
+	"github.com/temporalio/deputy/internal/config"
 	"github.com/spf13/cobra"
 	"gopkg.in/yaml.v3"
 )

@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"log/slog"
 
-	"github.com/picatz/deputy/internal/policy/lsp"
+	"github.com/temporalio/deputy/internal/policy/lsp"
 	"github.com/spf13/cobra"
 )
 

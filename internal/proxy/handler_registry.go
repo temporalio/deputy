@@ -6,7 +6,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/picatz/deputy/internal/ecosystem"
+	"github.com/temporalio/deputy/internal/ecosystem"
 )
 
 // PathParseResult holds the parsed components from an ecosystem-specific URL path.

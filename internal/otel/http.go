@@ -48,7 +48,7 @@ func WithPropagators(p propagation.TextMapPropagator) otelhttp.Option {
 // WithPublicEndpoint returns an option that marks the endpoint as public.
 // Public endpoints always start a new trace rather than continuing an existing one.
 func WithPublicEndpoint() otelhttp.Option {
-	return otelhttp.WithPublicEndpoint()
+	return otelhttp.WithPublicEndpointFn(func(*http.Request) bool { return true })
 }
 
 // WithPublicEndpointFn returns an option with a function to determine if an endpoint is public.

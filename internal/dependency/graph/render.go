@@ -8,7 +8,7 @@ import (
 
 	"google.golang.org/protobuf/encoding/protojson"
 
-	graphv1 "github.com/picatz/deputy/gen/deputy/graph/v1"
+	graphv1 "github.com/temporalio/deputy/gen/deputy/graph/v1"
 )
 
 // Format specifies the output format for graph rendering.

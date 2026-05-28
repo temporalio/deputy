@@ -12,7 +12,7 @@ import "deputy/secrets/v1/secrets.proto";
 import "deputy/graph/v1/service.proto";
 import "deputy/inventory/v1/service.proto";
 
-option go_package = "github.com/picatz/deputy/gen/deputy/scan/v1;scanv1";
+option go_package = "github.com/temporalio/deputy/gen/deputy/scan/v1;scanv1";
 
 // ScanService provides vulnerability scanning capabilities.
 //

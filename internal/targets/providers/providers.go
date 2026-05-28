@@ -9,11 +9,11 @@ import (
 	"strings"
 
 	git "github.com/go-git/go-git/v5"
-	"github.com/picatz/deputy/internal/auth"
-	"github.com/picatz/deputy/internal/gitutil"
-	"github.com/picatz/deputy/internal/repository"
-	"github.com/picatz/deputy/internal/repository/workspace"
-	"github.com/picatz/deputy/internal/targets"
+	"github.com/temporalio/deputy/internal/auth"
+	"github.com/temporalio/deputy/internal/gitutil"
+	"github.com/temporalio/deputy/internal/repository"
+	"github.com/temporalio/deputy/internal/repository/workspace"
+	"github.com/temporalio/deputy/internal/targets"
 )
 
 func init() {

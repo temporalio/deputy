@@ -1,10 +1,10 @@
 package osv
 
 import (
-	containerv1 "github.com/picatz/deputy/gen/deputy/container/v1"
-	dependencyv1 "github.com/picatz/deputy/gen/deputy/dependency/v1"
-	vulnerabilityv1 "github.com/picatz/deputy/gen/deputy/vulnerability/v1"
-	"github.com/picatz/deputy/internal/vulnerability/severity"
+	containerv1 "github.com/temporalio/deputy/gen/deputy/container/v1"
+	dependencyv1 "github.com/temporalio/deputy/gen/deputy/dependency/v1"
+	vulnerabilityv1 "github.com/temporalio/deputy/gen/deputy/vulnerability/v1"
+	"github.com/temporalio/deputy/internal/vulnerability/severity"
 )
 
 // NOTE: This package previously defined type aliases (ManifestReference, AffectedImport, LayerDetails)

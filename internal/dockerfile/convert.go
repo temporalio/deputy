@@ -1,6 +1,6 @@
 package dockerfile
 
-import "github.com/picatz/deputy/internal/policy/celconv"
+import "github.com/temporalio/deputy/internal/policy/celconv"
 
 // ToMap converts Info to a map for CEL policy evaluation.
 func (i *Info) ToMap() map[string]any {

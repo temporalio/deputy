@@ -10,14 +10,14 @@ import (
 	"connectrpc.com/connect"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
-	graphv1 "github.com/picatz/deputy/gen/deputy/graph/v1"
-	"github.com/picatz/deputy/gen/deputy/graph/v1/graphv1connect"
-	targetv1 "github.com/picatz/deputy/gen/deputy/target/v1"
-	"github.com/picatz/deputy/internal/dependency/graph"
-	"github.com/picatz/deputy/internal/inventory"
-	"github.com/picatz/deputy/internal/otel"
-	internalproto "github.com/picatz/deputy/internal/proto"
-	"github.com/picatz/deputy/internal/targets"
+	graphv1 "github.com/temporalio/deputy/gen/deputy/graph/v1"
+	"github.com/temporalio/deputy/gen/deputy/graph/v1/graphv1connect"
+	targetv1 "github.com/temporalio/deputy/gen/deputy/target/v1"
+	"github.com/temporalio/deputy/internal/dependency/graph"
+	"github.com/temporalio/deputy/internal/inventory"
+	"github.com/temporalio/deputy/internal/otel"
+	internalproto "github.com/temporalio/deputy/internal/proto"
+	"github.com/temporalio/deputy/internal/targets"
 )
 
 // GraphHandler implements the GraphService gRPC handler.

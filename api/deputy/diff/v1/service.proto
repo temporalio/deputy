@@ -9,7 +9,7 @@ import "deputy/vulnerability/v1/vulnerability.proto";
 import "deputy/container/v1/container.proto";
 import "deputy/scan/v1/service.proto";
 
-option go_package = "github.com/picatz/deputy/gen/deputy/diff/v1;diffv1";
+option go_package = "github.com/temporalio/deputy/gen/deputy/diff/v1;diffv1";
 
 // DiffService provides dependency and vulnerability diff capabilities.
 //

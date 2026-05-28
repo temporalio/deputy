@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/picatz/deputy/internal/vulnerability"
+	"github.com/temporalio/deputy/internal/vulnerability"
 )
 
 // UnfixableGuidance provides actionable advice for vulnerabilities that have no

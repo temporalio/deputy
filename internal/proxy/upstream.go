@@ -7,7 +7,7 @@ import (
 	"sync"
 	"time"
 
-	dephttputil "github.com/picatz/deputy/internal/httputil"
+	dephttputil "github.com/temporalio/deputy/internal/httputil"
 )
 
 // Proxy-specific timeouts that differ from the shared defaults.

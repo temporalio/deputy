@@ -1,5 +1,5 @@
 version: v2
-name: buf.build/picatz/deputy
+name: buf.build/temporalio/deputy
 deps:
   - buf.build/bufbuild/protovalidate
 lint:

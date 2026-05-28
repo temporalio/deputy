@@ -8,13 +8,13 @@ package scanv1
 
 import (
 	_ "buf.build/gen/go/bufbuild/protovalidate/protocolbuffers/go/buf/validate"
-	v11 "github.com/picatz/deputy/gen/deputy/dependency/v1"
-	v16 "github.com/picatz/deputy/gen/deputy/graph/v1"
-	v15 "github.com/picatz/deputy/gen/deputy/inventory/v1"
-	v13 "github.com/picatz/deputy/gen/deputy/policy/v1"
-	v14 "github.com/picatz/deputy/gen/deputy/secrets/v1"
-	v1 "github.com/picatz/deputy/gen/deputy/target/v1"
-	v12 "github.com/picatz/deputy/gen/deputy/vulnerability/v1"
+	v11 "github.com/temporalio/deputy/gen/deputy/dependency/v1"
+	v16 "github.com/temporalio/deputy/gen/deputy/graph/v1"
+	v15 "github.com/temporalio/deputy/gen/deputy/inventory/v1"
+	v13 "github.com/temporalio/deputy/gen/deputy/policy/v1"
+	v14 "github.com/temporalio/deputy/gen/deputy/secrets/v1"
+	v1 "github.com/temporalio/deputy/gen/deputy/target/v1"
+	v12 "github.com/temporalio/deputy/gen/deputy/vulnerability/v1"
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 	timestamppb "google.golang.org/protobuf/types/known/timestamppb"
@@ -1489,8 +1489,8 @@ const file_deputy_scan_v1_service_proto_rawDesc = "" +
 	"\vScanService\x12A\n" +
 	"\x04Scan\x12\x1b.deputy.scan.v1.ScanRequest\x1a\x1c.deputy.scan.v1.ScanResponse\x12O\n" +
 	"\n" +
-	"StreamScan\x12!.deputy.scan.v1.StreamScanRequest\x1a\x1c.deputy.scan.v1.ScanProgress0\x01B\xb0\x01\n" +
-	"\x12com.deputy.scan.v1B\fServiceProtoP\x01Z2github.com/picatz/deputy/gen/deputy/scan/v1;scanv1\xa2\x02\x03DSX\xaa\x02\x0eDeputy.Scan.V1\xca\x02\x0eDeputy\\Scan\\V1\xe2\x02\x1aDeputy\\Scan\\V1\\GPBMetadata\xea\x02\x10Deputy::Scan::V1b\x06proto3"
+	"StreamScan\x12!.deputy.scan.v1.StreamScanRequest\x1a\x1c.deputy.scan.v1.ScanProgress0\x01B\xb4\x01\n" +
+	"\x12com.deputy.scan.v1B\fServiceProtoP\x01Z6github.com/temporalio/deputy/gen/deputy/scan/v1;scanv1\xa2\x02\x03DSX\xaa\x02\x0eDeputy.Scan.V1\xca\x02\x0eDeputy\\Scan\\V1\xe2\x02\x1aDeputy\\Scan\\V1\\GPBMetadata\xea\x02\x10Deputy::Scan::V1b\x06proto3"
 
 var (
 	file_deputy_scan_v1_service_proto_rawDescOnce sync.Once

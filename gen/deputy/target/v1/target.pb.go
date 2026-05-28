@@ -276,8 +276,8 @@ const file_deputy_target_v1_target_proto_rawDesc = "" +
 	"\x10TARGET_KIND_SBOM\x10\t\x12\x14\n" +
 	"\x10TARGET_KIND_PURL\x10\n" +
 	"\x12\x1a\n" +
-	"\x16TARGET_KIND_DOCKERFILE\x10\vB\xbd\x01\n" +
-	"\x14com.deputy.target.v1B\vTargetProtoP\x01Z6github.com/picatz/deputy/gen/deputy/target/v1;targetv1\xa2\x02\x03DTX\xaa\x02\x10Deputy.Target.V1\xca\x02\x10Deputy\\Target\\V1\xe2\x02\x1cDeputy\\Target\\V1\\GPBMetadata\xea\x02\x12Deputy::Target::V1b\x06proto3"
+	"\x16TARGET_KIND_DOCKERFILE\x10\vB\xc1\x01\n" +
+	"\x14com.deputy.target.v1B\vTargetProtoP\x01Z:github.com/temporalio/deputy/gen/deputy/target/v1;targetv1\xa2\x02\x03DTX\xaa\x02\x10Deputy.Target.V1\xca\x02\x10Deputy\\Target\\V1\xe2\x02\x1cDeputy\\Target\\V1\\GPBMetadata\xea\x02\x12Deputy::Target::V1b\x06proto3"
 
 var (
 	file_deputy_target_v1_target_proto_rawDescOnce sync.Once

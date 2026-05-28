@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/picatz/deputy/internal/report"
+	"github.com/temporalio/deputy/internal/report"
 )
 
 func TestPolicyFindings(t *testing.T) {

@@ -3,8 +3,8 @@ package remediation
 import (
 	"testing"
 
-	dependencyv1 "github.com/picatz/deputy/gen/deputy/dependency/v1"
-	"github.com/picatz/deputy/internal/vulnerability"
+	dependencyv1 "github.com/temporalio/deputy/gen/deputy/dependency/v1"
+	"github.com/temporalio/deputy/internal/vulnerability"
 )
 
 func TestCommandsFromConsolidatedGeneratesPlan(t *testing.T) {

@@ -16,8 +16,8 @@ import (
 
 	"github.com/charmbracelet/glamour"
 	"github.com/charmbracelet/lipgloss"
-	"github.com/picatz/deputy/internal/ai"
-	"github.com/picatz/deputy/internal/ui"
+	"github.com/temporalio/deputy/internal/ai"
+	"github.com/temporalio/deputy/internal/ui"
 )
 
 // streamStats tracks statistics during AI streaming for the metadata footer.

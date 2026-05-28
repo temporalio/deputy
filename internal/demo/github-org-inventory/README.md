@@ -112,6 +112,6 @@ time=2025-12-08T16:15:13.614-05:00 level=INFO msg="package rows collected" repo=
 --- PASS: TestInventoryFromWorkspace (0.00s)
 FAIL
 exit status 1
-FAIL    github.com/picatz/deputy/internal/demo/github-org-inventory     0.373s
+FAIL    github.com/temporalio/deputy/internal/demo/github-org-inventory     0.373s
 GITHUB_TOKEN=$(gh auth token) STRICT_LICENSE_CHECK=1 go test -v  1.13s user 1.97s system 112% cpu 2.766 total
 ```

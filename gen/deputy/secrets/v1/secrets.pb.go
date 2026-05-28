@@ -1387,8 +1387,8 @@ const file_deputy_secrets_v1_secrets_proto_rawDesc = "" +
 	"\x15DETECTOR_SOURCE_VELES\x10\x02\x12\x1b\n" +
 	"\x17DETECTOR_SOURCE_PATTERN\x10\x03\x12\x1a\n" +
 	"\x16DETECTOR_SOURCE_PLUGIN\x10\x04\x12\x1a\n" +
-	"\x16DETECTOR_SOURCE_CUSTOM\x10\x05B\xc5\x01\n" +
-	"\x15com.deputy.secrets.v1B\fSecretsProtoP\x01Z8github.com/picatz/deputy/gen/deputy/secrets/v1;secretsv1\xa2\x02\x03DSX\xaa\x02\x11Deputy.Secrets.V1\xca\x02\x11Deputy\\Secrets\\V1\xe2\x02\x1dDeputy\\Secrets\\V1\\GPBMetadata\xea\x02\x13Deputy::Secrets::V1b\x06proto3"
+	"\x16DETECTOR_SOURCE_CUSTOM\x10\x05B\xc9\x01\n" +
+	"\x15com.deputy.secrets.v1B\fSecretsProtoP\x01Z<github.com/temporalio/deputy/gen/deputy/secrets/v1;secretsv1\xa2\x02\x03DSX\xaa\x02\x11Deputy.Secrets.V1\xca\x02\x11Deputy\\Secrets\\V1\xe2\x02\x1dDeputy\\Secrets\\V1\\GPBMetadata\xea\x02\x13Deputy::Secrets::V1b\x06proto3"
 
 var (
 	file_deputy_secrets_v1_secrets_proto_rawDescOnce sync.Once

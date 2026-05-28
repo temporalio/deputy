@@ -5,8 +5,8 @@ import (
 	"slices"
 	"strings"
 
-	dependencyv1 "github.com/picatz/deputy/gen/deputy/dependency/v1"
-	"github.com/picatz/deputy/internal/collections"
+	dependencyv1 "github.com/temporalio/deputy/gen/deputy/dependency/v1"
+	"github.com/temporalio/deputy/internal/collections"
 )
 
 type manifestRefKey struct {

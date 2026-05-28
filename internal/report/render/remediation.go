@@ -5,8 +5,8 @@ import (
 	"io"
 	"strings"
 
-	remediation "github.com/picatz/deputy/internal/remediation"
-	ui "github.com/picatz/deputy/internal/ui"
+	remediation "github.com/temporalio/deputy/internal/remediation"
+	ui "github.com/temporalio/deputy/internal/ui"
 )
 
 // RemediationCommands prints grouped remediation commands using the

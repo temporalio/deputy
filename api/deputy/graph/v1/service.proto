@@ -7,7 +7,7 @@ import "google/protobuf/timestamp.proto";
 import "deputy/target/v1/target.proto";
 import "deputy/vulnerability/v1/vulnerability.proto";
 
-option go_package = "github.com/picatz/deputy/gen/deputy/graph/v1;graphv1";
+option go_package = "github.com/temporalio/deputy/gen/deputy/graph/v1;graphv1";
 
 // GraphService provides dependency graph analysis capabilities.
 //

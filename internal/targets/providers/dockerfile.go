@@ -6,8 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/picatz/deputy/internal/dockerfile"
-	"github.com/picatz/deputy/internal/targets"
+	"github.com/temporalio/deputy/internal/dockerfile"
+	"github.com/temporalio/deputy/internal/targets"
 )
 
 func init() {

@@ -14,9 +14,9 @@ import (
 
 	"github.com/go-git/go-git/v5"
 	"github.com/go-git/go-git/v5/plumbing/object"
-	"github.com/picatz/deputy/internal/config"
-	"github.com/picatz/deputy/internal/gitutil"
-	"github.com/picatz/deputy/internal/network"
+	"github.com/temporalio/deputy/internal/config"
+	"github.com/temporalio/deputy/internal/gitutil"
+	"github.com/temporalio/deputy/internal/network"
 )
 
 func TestLocalEgressAllowlist_LoopbackGitHTTP(t *testing.T) {

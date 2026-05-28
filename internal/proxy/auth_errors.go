@@ -1,7 +1,7 @@
 package proxy
 
 import (
-	"github.com/picatz/deputy/internal/auth/jwt"
+	"github.com/temporalio/deputy/internal/auth/jwt"
 )
 
 // Authentication error codes - aliases to shared jwt package for backward compatibility.

@@ -6,10 +6,10 @@ import (
 	"slices"
 	"testing"
 
-	containerv1 "github.com/picatz/deputy/gen/deputy/container/v1"
-	dependencyv1 "github.com/picatz/deputy/gen/deputy/dependency/v1"
-	policyv1 "github.com/picatz/deputy/gen/deputy/policy/v1"
-	vulnerabilityv1 "github.com/picatz/deputy/gen/deputy/vulnerability/v1"
+	containerv1 "github.com/temporalio/deputy/gen/deputy/container/v1"
+	dependencyv1 "github.com/temporalio/deputy/gen/deputy/dependency/v1"
+	policyv1 "github.com/temporalio/deputy/gen/deputy/policy/v1"
+	vulnerabilityv1 "github.com/temporalio/deputy/gen/deputy/vulnerability/v1"
 )
 
 func TestCriticalTransitiveSpotlight(t *testing.T) {

@@ -275,7 +275,7 @@ jobs:
 vm-security-scan:
   image: golang:1.22
   script:
-    - go install github.com/picatz/deputy@latest
+    - go install github.com/temporalio/deputy@latest
     - deputy scan vm://$CI_PROJECT_DIR/images/disk.qcow2
         --format json
         --output scan-results.json

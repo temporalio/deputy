@@ -69,7 +69,7 @@ package main
 
 import (
     "strings"
-    "github.com/picatz/deputy/sdk/plugin"
+    "github.com/temporalio/deputy/sdk/plugin"
 )
 
 func main() {
@@ -137,7 +137,7 @@ sequenceDiagram
 
 ## The Extractor Interface
 
-Implement the `Extractor` interface from `github.com/picatz/deputy/sdk/plugin`:
+Implement the `Extractor` interface from `github.com/temporalio/deputy/sdk/plugin`:
 
 ```go
 type Extractor interface {
@@ -535,7 +535,7 @@ DEPUTY_LOG_LEVEL=debug deputy scan . 2>&1 | grep trace
 
 ## Reference
 
-- [Plugin SDK (pkg.go.dev)](https://pkg.go.dev/github.com/picatz/deputy/sdk/plugin)
+- [Plugin SDK (pkg.go.dev)](https://pkg.go.dev/github.com/temporalio/deputy/sdk/plugin)
 - [ExtractorService Proto](../../api/deputy/plugin/v1/extractor.proto)
 - [pluginrpc Documentation](https://github.com/pluginrpc/pluginrpc)
 - [Example: Dotenv Extractor](../../examples/plugins/dotenv-extractor/)

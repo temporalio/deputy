@@ -5,7 +5,7 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/picatz/deputy/internal/ecosystem"
+	"github.com/temporalio/deputy/internal/ecosystem"
 )
 
 // NewGoModuleHandler creates a Go module proxy handler using the unified handler factory.

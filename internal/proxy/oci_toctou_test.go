@@ -9,7 +9,7 @@ import (
 	"testing"
 
 	"github.com/google/go-containerregistry/pkg/name"
-	"github.com/picatz/deputy/internal/scanning"
+	"github.com/temporalio/deputy/internal/scanning"
 )
 
 func TestIsMutableTag(t *testing.T) {

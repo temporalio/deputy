@@ -6,7 +6,7 @@ import (
 
 	"connectrpc.com/connect"
 
-	secretsv1 "github.com/picatz/deputy/gen/deputy/secrets/v1"
+	secretsv1 "github.com/temporalio/deputy/gen/deputy/secrets/v1"
 )
 
 func TestSecretsHandler_New(t *testing.T) {

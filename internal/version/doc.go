@@ -2,7 +2,7 @@
 //
 // The version is set at build time using ldflags:
 //
-//	go build -ldflags "-X github.com/picatz/deputy/internal/version.Value=v1.0.0"
+//	go build -ldflags "-X github.com/temporalio/deputy/internal/version.Value=v1.0.0"
 //
 // # Usage
 //
@@ -19,7 +19,7 @@
 //
 //	# In .goreleaser.yaml
 //	ldflags:
-//	  - -X github.com/picatz/deputy/internal/version.Value={{.Version}}
+//	  - -X github.com/temporalio/deputy/internal/version.Value={{.Version}}
 //
 // # CLI Integration
 //

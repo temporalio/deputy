@@ -16,10 +16,10 @@ import (
 
 	"google.golang.org/protobuf/encoding/protojson"
 
-	dependencyv1 "github.com/picatz/deputy/gen/deputy/dependency/v1"
-	scanv1 "github.com/picatz/deputy/gen/deputy/scan/v1"
-	targetv1 "github.com/picatz/deputy/gen/deputy/target/v1"
-	vulnerabilityv1 "github.com/picatz/deputy/gen/deputy/vulnerability/v1"
+	dependencyv1 "github.com/temporalio/deputy/gen/deputy/dependency/v1"
+	scanv1 "github.com/temporalio/deputy/gen/deputy/scan/v1"
+	targetv1 "github.com/temporalio/deputy/gen/deputy/target/v1"
+	vulnerabilityv1 "github.com/temporalio/deputy/gen/deputy/vulnerability/v1"
 )
 
 func TestMain(m *testing.M) {
@@ -355,34 +355,37 @@ func TestBlackbox_Exec_NoneRuntime_Timeout(t *testing.T) {
 
 func TestBlackbox_Exec_MissingCommand(t *testing.T) {
 	// Test error handling for missing command
-	_, stderr, code := runDeputy(t, "exec", "--runtime", "none", "--")
+	stdout, stderr, code := runDeputy(t, "exec", "--runtime", "none", "--")
 	if code == 0 {
 		t.Fatalf("expected non-zero exit code for missing command")
 	}
-	if !strings.Contains(stderr, "provide the command") {
-		t.Fatalf("expected error about missing command, got %q", stderr)
+	combined := strings.ToLower(stdout + stderr)
+	if !strings.Contains(combined, "provide the command") {
+		t.Fatalf("expected error about missing command, got stdout=%q stderr=%q", stdout, stderr)
 	}
 }
 
 func TestBlackbox_Exec_InvalidRuntime(t *testing.T) {
 	// Test error handling for invalid runtime
-	_, stderr, code := runDeputy(t, "exec", "--runtime", "nonexistent-runtime-xyz", "--", "echo", "test")
+	stdout, stderr, code := runDeputy(t, "exec", "--runtime", "nonexistent-runtime-xyz", "--", "echo", "test")
 	if code == 0 {
 		t.Fatalf("expected non-zero exit code for invalid runtime")
 	}
-	if !strings.Contains(stderr, "unsupported runtime") {
-		t.Fatalf("expected error about unsupported runtime, got %q", stderr)
+	combined := strings.ToLower(stdout + stderr)
+	if !strings.Contains(combined, "unsupported runtime") {
+		t.Fatalf("expected error about unsupported runtime, got stdout=%q stderr=%q", stdout, stderr)
 	}
 }
 
 func TestBlackbox_Exec_PluginRuntime_MissingPluginName(t *testing.T) {
 	// Test that plugin runtime requires --plugin flag
-	_, stderr, code := runDeputy(t, "exec", "--runtime", "plugin", "--", "echo", "test")
+	stdout, stderr, code := runDeputy(t, "exec", "--runtime", "plugin", "--", "echo", "test")
 	if code == 0 {
 		t.Fatalf("expected non-zero exit code when --plugin is missing")
 	}
-	if !strings.Contains(stderr, "--plugin is required") {
-		t.Fatalf("expected error about missing --plugin, got %q", stderr)
+	combined := strings.ToLower(stdout + stderr)
+	if !strings.Contains(combined, "--plugin is required") {
+		t.Fatalf("expected error about missing --plugin, got stdout=%q stderr=%q", stdout, stderr)
 	}
 }
 

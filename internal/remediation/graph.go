@@ -4,8 +4,8 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/picatz/deputy/internal/dependency/graph"
-	"github.com/picatz/deputy/internal/vulnerability"
+	"github.com/temporalio/deputy/internal/dependency/graph"
+	"github.com/temporalio/deputy/internal/vulnerability"
 )
 
 // PathInfo contains dependency path information for a vulnerability.

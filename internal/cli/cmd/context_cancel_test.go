@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/picatz/deputy/internal/proxy"
+	"github.com/temporalio/deputy/internal/proxy"
 )
 
 func TestProxyServeHonorsContextCancellation(t *testing.T) {

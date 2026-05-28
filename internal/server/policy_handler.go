@@ -7,9 +7,9 @@ import (
 
 	"connectrpc.com/connect"
 
-	policyv1 "github.com/picatz/deputy/gen/deputy/policy/v1"
-	"github.com/picatz/deputy/gen/deputy/policy/v1/policyv1connect"
-	"github.com/picatz/deputy/internal/policy"
+	policyv1 "github.com/temporalio/deputy/gen/deputy/policy/v1"
+	"github.com/temporalio/deputy/gen/deputy/policy/v1/policyv1connect"
+	"github.com/temporalio/deputy/internal/policy"
 	"google.golang.org/protobuf/proto"
 )
 

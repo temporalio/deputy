@@ -7,7 +7,7 @@ package scanv1pluginrpc
 import (
 	context "context"
 	fmt "fmt"
-	v1 "github.com/picatz/deputy/gen/deputy/scan/v1"
+	v1 "github.com/temporalio/deputy/gen/deputy/scan/v1"
 	pluginrpc "pluginrpc.com/pluginrpc"
 )
 

@@ -2,7 +2,7 @@
 //
 // Set at build time via ldflags:
 //
-//	go build -ldflags "-X github.com/picatz/deputy/internal/version.Value=1.0.0"
+//	go build -ldflags "-X github.com/temporalio/deputy/internal/version.Value=1.0.0"
 package version
 
 // Value is the semantic version of Deputy.

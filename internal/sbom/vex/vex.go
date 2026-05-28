@@ -48,8 +48,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/picatz/deputy/internal/scanning"
-	"github.com/picatz/deputy/internal/vulnerability"
+	"github.com/temporalio/deputy/internal/scanning"
+	"github.com/temporalio/deputy/internal/vulnerability"
 )
 
 // toolVersion is the Deputy version used in VEX documents.

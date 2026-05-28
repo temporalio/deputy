@@ -9,7 +9,7 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
-	"github.com/picatz/deputy/internal/secrets"
+	"github.com/temporalio/deputy/internal/secrets"
 	"github.com/spf13/cobra"
 )
 

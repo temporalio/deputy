@@ -5,7 +5,7 @@ import (
 	"log/slog"
 	"net/http"
 
-	"github.com/picatz/deputy/internal/auth/jwt"
+	"github.com/temporalio/deputy/internal/auth/jwt"
 )
 
 // Type aliases for configuration types.

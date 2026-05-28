@@ -7,12 +7,12 @@ import (
 	"os"
 
 	"connectrpc.com/connect"
-	"github.com/picatz/deputy/internal/services"
+	"github.com/temporalio/deputy/internal/services"
 	"github.com/spf13/cobra"
 
 	// Import AI providers to register them via init()
-	_ "github.com/picatz/deputy/internal/ai/providers/claude"
-	_ "github.com/picatz/deputy/internal/ai/providers/codex"
+	_ "github.com/temporalio/deputy/internal/ai/providers/claude"
+	_ "github.com/temporalio/deputy/internal/ai/providers/codex"
 )
 
 // Dependencies bundles shared services for CLI commands.

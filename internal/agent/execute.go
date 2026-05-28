@@ -4,8 +4,8 @@ import (
 	"context"
 	"iter"
 
-	agentv1 "github.com/picatz/deputy/gen/deputy/agent/v1"
-	"github.com/picatz/deputy/gen/deputy/agent/v1/agentv1connect"
+	agentv1 "github.com/temporalio/deputy/gen/deputy/agent/v1"
+	"github.com/temporalio/deputy/gen/deputy/agent/v1/agentv1connect"
 )
 
 // Executor is an optional interface that agent handlers can implement

@@ -15,7 +15,7 @@ import (
 	"github.com/google/go-containerregistry/pkg/v1/mutate"
 	"github.com/google/go-containerregistry/pkg/v1/tarball"
 	"github.com/google/osv-scalibr/extractor"
-	sbomx "github.com/picatz/deputy/internal/sbom"
+	sbomx "github.com/temporalio/deputy/internal/sbom"
 )
 
 // TestSBOMImageRoundTrip verifies that generating an SBOM from an image

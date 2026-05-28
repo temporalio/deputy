@@ -7,7 +7,7 @@ import (
 	"os"
 	"strings"
 
-	"github.com/picatz/deputy/internal/policy"
+	"github.com/temporalio/deputy/internal/policy"
 )
 
 // evaluatePoliciesForCommand evaluates the given policies against a command and payload.

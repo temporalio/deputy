@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/picatz/deputy/internal/sarif"
+	"github.com/temporalio/deputy/internal/sarif"
 )
 
 func TestSARIFReport_Generate(t *testing.T) {

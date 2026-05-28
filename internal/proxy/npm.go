@@ -5,7 +5,7 @@ import (
 	"path"
 	"strings"
 
-	"github.com/picatz/deputy/internal/ecosystem"
+	"github.com/temporalio/deputy/internal/ecosystem"
 )
 
 // NewNPMHandler creates an npm proxy handler using the unified handler factory.

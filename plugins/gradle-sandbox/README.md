@@ -31,7 +31,7 @@ The plugin runs a custom Gradle task in a sandboxed Docker container with:
 
 ```bash
 # Clone the Deputy repository
-git clone https://github.com/picatz/deputy.git
+git clone https://github.com/temporalio/deputy.git
 cd deputy/plugins/gradle-sandbox
 
 # Build the plugin
@@ -47,7 +47,7 @@ which deputy-extractor-gradle-sandbox
 ### Option 2: Go install (when published)
 
 ```bash
-go install github.com/picatz/deputy/plugins/gradle-sandbox@latest
+go install github.com/temporalio/deputy/plugins/gradle-sandbox@latest
 ```
 
 The binary **must** be named `deputy-extractor-gradle-sandbox` (starting with `deputy-extractor-`) for automatic discovery.

@@ -10,7 +10,7 @@ import (
 
 	"github.com/google/go-github/v63/github"
 	scalibrfs "github.com/google/osv-scalibr/fs"
-	"github.com/picatz/deputy/internal/pin"
+	"github.com/temporalio/deputy/internal/pin"
 )
 
 // testGHClient creates a GitHub client pointing at a test server URL.

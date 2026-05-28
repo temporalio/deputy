@@ -8,9 +8,9 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
-	sandboxv1 "github.com/picatz/deputy/gen/deputy/sandbox/v1"
-	"github.com/picatz/deputy/internal/sandbox"
-	"github.com/picatz/deputy/internal/ui"
+	sandboxv1 "github.com/temporalio/deputy/gen/deputy/sandbox/v1"
+	"github.com/temporalio/deputy/internal/sandbox"
+	"github.com/temporalio/deputy/internal/ui"
 	"golang.org/x/term"
 )
 

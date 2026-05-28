@@ -12,9 +12,9 @@ import (
 	"github.com/go-git/go-git/v5/plumbing/transport"
 	"github.com/google/osv-scalibr/extractor"
 	"github.com/google/osv-scalibr/purl"
-	"github.com/picatz/deputy/internal/dockerfile"
-	"github.com/picatz/deputy/internal/purlx"
-	"github.com/picatz/deputy/internal/repository/workspace"
+	"github.com/temporalio/deputy/internal/dockerfile"
+	"github.com/temporalio/deputy/internal/purlx"
+	"github.com/temporalio/deputy/internal/repository/workspace"
 	"github.com/protobom/protobom/pkg/sbom"
 )
 
@@ -965,8 +965,8 @@ func Test_buildProtobomDocument_includesToolMetadata(t *testing.T) {
 	for _, tool := range doc.Metadata.Tools {
 		if tool.Name == "deputy" {
 			foundDeputy = true
-			if tool.Vendor != "github.com/picatz/deputy" {
-				t.Errorf("expected vendor 'github.com/picatz/deputy', got %q", tool.Vendor)
+			if tool.Vendor != "github.com/temporalio/deputy" {
+				t.Errorf("expected vendor 'github.com/temporalio/deputy', got %q", tool.Vendor)
 			}
 			// Version should be set (may be empty in test context)
 			break

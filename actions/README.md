@@ -43,11 +43,11 @@ flowchart LR
 
 | Action | Purpose | Usage |
 |--------|---------|-------|
-| [setup](setup/) | Install Deputy CLI | `picatz/deputy/actions/setup@main` |
-| [scan](scan/) | Vulnerability scanning + SARIF upload | `picatz/deputy/actions/scan@main` |
-| [sbom](sbom/) | SBOM generation (CycloneDX/SPDX) | `picatz/deputy/actions/sbom@main` |
-| [diff](diff/) | Dependency change analysis | `picatz/deputy/actions/diff@main` |
-| [proxy](proxy/) | Policy enforcement at download time | `picatz/deputy/actions/proxy@main` |
+| [setup](setup/) | Install Deputy CLI | `temporalio/deputy/actions/setup@main` |
+| [scan](scan/) | Vulnerability scanning + SARIF upload | `temporalio/deputy/actions/scan@main` |
+| [sbom](sbom/) | SBOM generation (CycloneDX/SPDX) | `temporalio/deputy/actions/sbom@main` |
+| [diff](diff/) | Dependency change analysis | `temporalio/deputy/actions/diff@main` |
+| [proxy](proxy/) | Policy enforcement at download time | `temporalio/deputy/actions/proxy@main` |
 
 ## Quick Start
 
@@ -64,8 +64,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: picatz/deputy/actions/setup@main
-      - uses: picatz/deputy/actions/scan@main
+      - uses: temporalio/deputy/actions/setup@main
+      - uses: temporalio/deputy/actions/scan@main
         with:
           upload-sarif: true
 ```
@@ -77,7 +77,7 @@ Results appear in **Security > Code scanning alerts**.
 Use policy files to define security gates:
 
 ```yaml
-- uses: picatz/deputy/actions/scan@main
+- uses: temporalio/deputy/actions/scan@main
   with:
     policy: policy/ci/security-gate.yaml
     fail-on-policy-violation: true

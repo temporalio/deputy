@@ -17,9 +17,9 @@ import (
 	"time"
 
 	"github.com/google/go-containerregistry/pkg/name"
-	deputyerrors "github.com/picatz/deputy/internal/errors"
-	"github.com/picatz/deputy/internal/proxy"
-	"github.com/picatz/deputy/internal/ui"
+	deputyerrors "github.com/temporalio/deputy/internal/errors"
+	"github.com/temporalio/deputy/internal/proxy"
+	"github.com/temporalio/deputy/internal/ui"
 	"github.com/spf13/cobra"
 )
 

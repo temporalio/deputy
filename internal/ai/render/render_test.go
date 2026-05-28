@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/picatz/deputy/internal/ai"
+	"github.com/temporalio/deputy/internal/ai"
 )
 
 func TestRenderMarkdown(t *testing.T) {

@@ -14,8 +14,8 @@ import (
 	git "github.com/go-git/go-git/v5"
 	"github.com/go-git/go-git/v5/plumbing"
 	gitmemory "github.com/go-git/go-git/v5/storage/memory"
-	"github.com/picatz/deputy/internal/cache/memory"
-	"github.com/picatz/deputy/internal/httputil"
+	"github.com/temporalio/deputy/internal/cache/memory"
+	"github.com/temporalio/deputy/internal/httputil"
 	"golang.org/x/mod/modfile"
 	"golang.org/x/mod/module"
 )

@@ -7,7 +7,7 @@ import (
 	"testing"
 
 	"github.com/docker/docker/api/types/container"
-	sandboxv1 "github.com/picatz/deputy/gen/deputy/sandbox/v1"
+	sandboxv1 "github.com/temporalio/deputy/gen/deputy/sandbox/v1"
 )
 
 func TestNewDockerIsolator(t *testing.T) {

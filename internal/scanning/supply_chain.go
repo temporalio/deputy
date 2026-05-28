@@ -6,11 +6,11 @@ import (
 
 	"github.com/google/osv-scalibr/extractor"
 	"github.com/google/osv-scalibr/purl"
-	vulnerabilityv1 "github.com/picatz/deputy/gen/deputy/vulnerability/v1"
-	"github.com/picatz/deputy/internal/dependency"
-	"github.com/picatz/deputy/internal/pin"
-	"github.com/picatz/deputy/internal/purlx"
-	"github.com/picatz/deputy/internal/vulnerability"
+	vulnerabilityv1 "github.com/temporalio/deputy/gen/deputy/vulnerability/v1"
+	"github.com/temporalio/deputy/internal/dependency"
+	"github.com/temporalio/deputy/internal/pin"
+	"github.com/temporalio/deputy/internal/purlx"
+	"github.com/temporalio/deputy/internal/vulnerability"
 )
 
 // Supply chain advisory IDs for non-CVE findings produced by Deputy.

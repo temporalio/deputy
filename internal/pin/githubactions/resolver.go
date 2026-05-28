@@ -10,8 +10,8 @@ import (
 	git "github.com/go-git/go-git/v5"
 	"github.com/go-git/go-git/v5/config"
 	"github.com/go-git/go-git/v5/storage/memory"
-	"github.com/picatz/deputy/internal/auth"
-	"github.com/picatz/deputy/internal/pin"
+	"github.com/temporalio/deputy/internal/auth"
+	"github.com/temporalio/deputy/internal/pin"
 	"golang.org/x/mod/semver"
 	"golang.org/x/sync/singleflight"
 )

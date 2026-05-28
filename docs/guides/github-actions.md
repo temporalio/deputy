@@ -33,9 +33,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: picatz/deputy/actions/setup@main
+      - uses: temporalio/deputy/actions/setup@main
 
-      - uses: picatz/deputy/actions/scan@main
+      - uses: temporalio/deputy/actions/scan@main
         with:
           upload-sarif: true
 ```
@@ -120,7 +120,7 @@ permissions:
 
 jobs:
   scan:
-    uses: picatz/deputy/.github/workflows/scan.yml@main
+    uses: temporalio/deputy/.github/workflows/scan.yml@main
     with:
       policy: policy/ci/security-gate.yaml
 ```
@@ -138,7 +138,7 @@ permissions:
 
 jobs:
   security:
-    uses: picatz/deputy/.github/workflows/pr-gate.yml@main
+    uses: temporalio/deputy/.github/workflows/pr-gate.yml@main
     with:
       scan-policy: policy/ci/security-gate.yaml
       diff-policy: policy/ci/pr-review.yaml
@@ -158,7 +158,7 @@ permissions:
 
 jobs:
   sbom:
-    uses: picatz/deputy/.github/workflows/release-sbom.yml@main
+    uses: temporalio/deputy/.github/workflows/release-sbom.yml@main
     with:
       format: cyclonedx-json
       upload-release-asset: true
@@ -182,8 +182,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: picatz/deputy/actions/setup@main
-      - uses: picatz/deputy/actions/scan@main
+      - uses: temporalio/deputy/actions/setup@main
+      - uses: temporalio/deputy/actions/scan@main
 ```
 
 ### PR Security Gate
@@ -205,15 +205,15 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: picatz/deputy/actions/setup@main
+      - uses: temporalio/deputy/actions/setup@main
 
       # Show what changed (auto-fetches base commit)
-      - uses: picatz/deputy/actions/diff@main
+      - uses: temporalio/deputy/actions/diff@main
         with:
           comment-on-pr: true
 
       # Enforce security policy
-      - uses: picatz/deputy/actions/scan@main
+      - uses: temporalio/deputy/actions/scan@main
         with:
           policy: policy/ci/security-gate.yaml
           fail-on-policy-violation: true
@@ -238,9 +238,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: picatz/deputy/actions/setup@main
+      - uses: temporalio/deputy/actions/setup@main
 
-      - uses: picatz/deputy/actions/sbom@main
+      - uses: temporalio/deputy/actions/sbom@main
         with:
           format: cyclonedx-json
           output: sbom.cdx.json
@@ -276,8 +276,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: picatz/deputy/actions/setup@main
-      - uses: picatz/deputy/actions/scan@main
+      - uses: temporalio/deputy/actions/setup@main
+      - uses: temporalio/deputy/actions/scan@main
         with:
           policy: policy/ci/security-gate.yaml
 
@@ -287,8 +287,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: picatz/deputy/actions/setup@main
-      - uses: picatz/deputy/actions/diff@main
+      - uses: temporalio/deputy/actions/setup@main
+      - uses: temporalio/deputy/actions/diff@main
         with:
           comment-on-pr: true
           policy: policy/ci/pr-review.yaml
@@ -299,14 +299,14 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: picatz/deputy/actions/setup@main
+      - uses: temporalio/deputy/actions/setup@main
 
-      - uses: picatz/deputy/actions/scan@main
+      - uses: temporalio/deputy/actions/scan@main
         with:
           policy: policy/ci/release-gate.yaml
           fail-on-policy-violation: true
 
-      - uses: picatz/deputy/actions/sbom@main
+      - uses: temporalio/deputy/actions/sbom@main
         with:
           format: cyclonedx-json
           output: sbom.json
@@ -331,8 +331,8 @@ jobs:
         path: [services/api, services/web, packages/shared]
     steps:
       - uses: actions/checkout@v4
-      - uses: picatz/deputy/actions/setup@main
-      - uses: picatz/deputy/actions/scan@main
+      - uses: temporalio/deputy/actions/setup@main
+      - uses: temporalio/deputy/actions/scan@main
         with:
           target: ${{ matrix.path }}
           sarif-category: deputy-${{ matrix.path }}
@@ -357,8 +357,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: picatz/deputy/actions/setup@main
-      - uses: picatz/deputy/actions/scan@main
+      - uses: temporalio/deputy/actions/setup@main
+      - uses: temporalio/deputy/actions/scan@main
         with:
           sarif-category: deputy-scheduled
 ```
@@ -385,12 +385,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: picatz/deputy/actions/setup@main
+      - uses: temporalio/deputy/actions/setup@main
 
       # Diff shows: added, removed, updated dependencies
       # Plus vulnerabilities in the changes
       # (auto-fetches base commit for comparison)
-      - uses: picatz/deputy/actions/diff@main
+      - uses: temporalio/deputy/actions/diff@main
         with:
           comment-on-pr: true
           # Apply PR-specific policy to the diff
@@ -449,7 +449,7 @@ policies:
 Use in CI:
 
 ```yaml
-- uses: picatz/deputy/actions/scan@main
+- uses: temporalio/deputy/actions/scan@main
   with:
     policy: policy/smart-gate.yaml
     fail-on-policy-violation: true
@@ -515,8 +515,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: picatz/deputy/actions/setup@main
-      - uses: picatz/deputy/actions/diff@main
+      - uses: temporalio/deputy/actions/setup@main
+      - uses: temporalio/deputy/actions/diff@main
         with:
           policy: policy/ci/pr-review.yaml
           comment-on-pr: true
@@ -527,8 +527,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: picatz/deputy/actions/setup@main
-      - uses: picatz/deputy/actions/scan@main
+      - uses: temporalio/deputy/actions/setup@main
+      - uses: temporalio/deputy/actions/scan@main
         with:
           policy: policy/ci/security-gate.yaml
           upload-sarif: true
@@ -540,8 +540,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: picatz/deputy/actions/setup@main
-      - uses: picatz/deputy/actions/scan@main
+      - uses: temporalio/deputy/actions/setup@main
+      - uses: temporalio/deputy/actions/scan@main
         with:
           policy: policy/ci/release-gate.yaml
           fail-on-policy-violation: true  # Hard block
@@ -570,7 +570,7 @@ policies:
 Combine with your main policy:
 
 ```yaml
-- uses: picatz/deputy/actions/scan@main
+- uses: temporalio/deputy/actions/scan@main
   with:
     policy: policy/exceptions.yaml,policy/ci/security-gate.yaml
 ```
@@ -620,16 +620,16 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: picatz/deputy/actions/setup@main
+      - uses: temporalio/deputy/actions/setup@main
 
       # Scan first - fail if release policy violated
-      - uses: picatz/deputy/actions/scan@main
+      - uses: temporalio/deputy/actions/scan@main
         with:
           policy: policy/ci/release-gate.yaml
           fail-on-policy-violation: true
 
       # Generate CycloneDX SBOM with license info
-      - uses: picatz/deputy/actions/sbom@main
+      - uses: temporalio/deputy/actions/sbom@main
         with:
           format: cyclonedx-json
           output: ${{ github.event.repository.name }}-${{ github.ref_name }}.cdx.json
@@ -637,7 +637,7 @@ jobs:
           upload-artifact: false
 
       # Also generate SPDX for compliance tools
-      - uses: picatz/deputy/actions/sbom@main
+      - uses: temporalio/deputy/actions/sbom@main
         with:
           format: spdx-json
           output: ${{ github.event.repository.name }}-${{ github.ref_name }}.spdx.json
@@ -668,9 +668,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: picatz/deputy/actions/setup@main
+      - uses: temporalio/deputy/actions/setup@main
 
-      - uses: picatz/deputy/actions/scan@main
+      - uses: temporalio/deputy/actions/scan@main
         id: scan
         with:
           fail-on-findings: false  # Don't fail, let us handle it
@@ -739,8 +739,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: picatz/deputy/actions/setup@main
-      - uses: picatz/deputy/actions/diff@main
+      - uses: temporalio/deputy/actions/setup@main
+      - uses: temporalio/deputy/actions/diff@main
         with:
           comment-on-pr: true
           policy: policy/ci/pr-review.yaml
@@ -884,7 +884,7 @@ jobs:
   audit:
     runs-on: ubuntu-latest
     steps:
-      - uses: picatz/deputy/actions/setup@main
+      - uses: temporalio/deputy/actions/setup@main
 
       - name: Scan upstream dependency
         run: |
@@ -910,7 +910,7 @@ jobs:
         with:
           fetch-depth: 0
 
-      - uses: picatz/deputy/actions/setup@main
+      - uses: temporalio/deputy/actions/setup@main
 
       # Compare current release to previous
       - name: Security diff vs previous release
@@ -933,11 +933,11 @@ Use unique categories for different scan types:
 
 ```yaml
 # Separate categories prevent result conflicts
-- uses: picatz/deputy/actions/scan@main
+- uses: temporalio/deputy/actions/scan@main
   with:
     sarif-category: deputy-main-scan
 
-- uses: picatz/deputy/actions/scan@main
+- uses: temporalio/deputy/actions/scan@main
   with:
     target: ./subproject
     sarif-category: deputy-subproject-scan
@@ -987,12 +987,12 @@ permissions:
 
 ```yaml
 # Correct - path from repo root
-- uses: picatz/deputy/actions/scan@main
+- uses: temporalio/deputy/actions/scan@main
   with:
     policy: policy/ci/security-gate.yaml
 
 # Wrong - path doesn't exist
-- uses: picatz/deputy/actions/scan@main
+- uses: temporalio/deputy/actions/scan@main
   with:
     policy: ./ci/security-gate.yaml  # Missing policy/ prefix
 ```
@@ -1023,7 +1023,7 @@ For PR diffs, the action auto-fetches the base commit - no extra configuration n
 **Solution**: Deputy exits with code 1 on policy violations. Use `fail-on-policy-violation: false` to continue without failing:
 
 ```yaml
-- uses: picatz/deputy/actions/scan@main
+- uses: temporalio/deputy/actions/scan@main
   with:
     fail-on-policy-violation: false  # Report but don't fail
 ```
@@ -1045,7 +1045,7 @@ For PR diffs, the action auto-fetches the base commit - no extra configuration n
 **Solution**: Verify the proxy is configured for the right ecosystem:
 
 ```yaml
-- uses: picatz/deputy/actions/proxy@main
+- uses: temporalio/deputy/actions/proxy@main
   with:
     ecosystems: go,npm  # Must match your package manager
     policy: policy/ci/security-gate.yaml
@@ -1081,7 +1081,7 @@ Also ensure the environment variables are set correctly - check the action outpu
 Enable debug logging to diagnose issues:
 
 ```yaml
-- uses: picatz/deputy/actions/scan@main
+- uses: temporalio/deputy/actions/scan@main
   env:
     DEPUTY_LOG_LEVEL: debug
 ```
@@ -1107,14 +1107,14 @@ If you're migrating from manual `go install` workflows:
 
 **Before:**
 ```yaml
-- run: go install github.com/picatz/deputy@latest
+- run: go install github.com/temporalio/deputy@latest
 - run: deputy scan --format json --output scan.json
 ```
 
 **After:**
 ```yaml
-- uses: picatz/deputy/actions/setup@main
-- uses: picatz/deputy/actions/scan@main
+- uses: temporalio/deputy/actions/setup@main
+- uses: temporalio/deputy/actions/scan@main
   with:
     format: sarif
     upload-sarif: true
@@ -1191,10 +1191,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: picatz/deputy/actions/setup@main
+      - uses: temporalio/deputy/actions/setup@main
 
       # Start proxy with policy enforcement
-      - uses: picatz/deputy/actions/proxy@main
+      - uses: temporalio/deputy/actions/proxy@main
         with:
           policy: policy/ci/security-gate.yaml
           ecosystems: go,npm
@@ -1223,7 +1223,7 @@ jobs:
       - uses: actions/checkout@v4
 
       # Use organization's central proxy
-      - uses: picatz/deputy/actions/proxy@main
+      - uses: temporalio/deputy/actions/proxy@main
         with:
           mode: remote
           proxy-url: ${{ vars.DEPUTY_PROXY_URL }}
@@ -1254,7 +1254,7 @@ jobs:
       - uses: actions/checkout@v4
 
       # Authenticate using GitHub Actions OIDC
-      - uses: picatz/deputy/actions/proxy@main
+      - uses: temporalio/deputy/actions/proxy@main
         with:
           mode: remote
           proxy-url: https://deputy-proxy.example.com
@@ -1284,17 +1284,17 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: picatz/deputy/actions/setup@main
+      - uses: temporalio/deputy/actions/setup@main
 
       # Block vulnerable packages at download time
-      - uses: picatz/deputy/actions/proxy@main
+      - uses: temporalio/deputy/actions/proxy@main
         with:
           policy: policy/ci/security-gate.yaml
 
       - run: npm ci
 
       # Also scan and report to GitHub Security tab
-      - uses: picatz/deputy/actions/scan@main
+      - uses: temporalio/deputy/actions/scan@main
         with:
           policy: policy/ci/security-gate.yaml
           upload-sarif: true

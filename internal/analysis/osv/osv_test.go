@@ -8,8 +8,8 @@ import (
 	"testing"
 
 	"github.com/ossf/osv-schema/bindings/go/osvschema"
-	"github.com/picatz/deputy/internal/cache/disk"
-	"github.com/picatz/deputy/internal/vulnerability"
+	"github.com/temporalio/deputy/internal/cache/disk"
+	"github.com/temporalio/deputy/internal/vulnerability"
 	"osv.dev/bindings/go/osvdev"
 )
 

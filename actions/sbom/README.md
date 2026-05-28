@@ -5,8 +5,8 @@ Generate Software Bill of Materials (SBOM) in CycloneDX or SPDX format.
 ## Usage
 
 ```yaml
-- uses: picatz/deputy/actions/setup@main
-- uses: picatz/deputy/actions/sbom@main
+- uses: temporalio/deputy/actions/setup@main
+- uses: temporalio/deputy/actions/sbom@main
 ```
 
 ## Inputs
@@ -41,14 +41,14 @@ Generate Software Bill of Materials (SBOM) in CycloneDX or SPDX format.
 ### Basic SBOM
 
 ```yaml
-- uses: picatz/deputy/actions/setup@main
-- uses: picatz/deputy/actions/sbom@main
+- uses: temporalio/deputy/actions/setup@main
+- uses: temporalio/deputy/actions/sbom@main
 ```
 
 ### CycloneDX with Licenses
 
 ```yaml
-- uses: picatz/deputy/actions/sbom@main
+- uses: temporalio/deputy/actions/sbom@main
   with:
     format: cyclonedx-json
     enrich-licenses: true
@@ -58,7 +58,7 @@ Generate Software Bill of Materials (SBOM) in CycloneDX or SPDX format.
 ### SPDX Format
 
 ```yaml
-- uses: picatz/deputy/actions/sbom@main
+- uses: temporalio/deputy/actions/sbom@main
   with:
     format: spdx-json
     output: sbom.spdx.json
@@ -79,8 +79,8 @@ jobs:
       contents: write
     steps:
       - uses: actions/checkout@v4
-      - uses: picatz/deputy/actions/setup@main
-      - uses: picatz/deputy/actions/sbom@main
+      - uses: temporalio/deputy/actions/setup@main
+      - uses: temporalio/deputy/actions/sbom@main
         id: sbom
         with:
           format: cyclonedx-json
@@ -104,8 +104,8 @@ jobs:
       artifact-name: ${{ steps.sbom.outputs.artifact-name }}
     steps:
       - uses: actions/checkout@v4
-      - uses: picatz/deputy/actions/setup@main
-      - uses: picatz/deputy/actions/sbom@main
+      - uses: temporalio/deputy/actions/setup@main
+      - uses: temporalio/deputy/actions/sbom@main
         id: sbom
         with:
           artifact-name: my-project-sbom

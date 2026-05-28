@@ -12,14 +12,14 @@ import (
 	"github.com/protobom/protobom/pkg/formats"
 	"github.com/protobom/protobom/pkg/writer"
 
-	dependencyv1 "github.com/picatz/deputy/gen/deputy/dependency/v1"
-	sbomv1 "github.com/picatz/deputy/gen/deputy/sbom/v1"
-	"github.com/picatz/deputy/gen/deputy/sbom/v1/sbomv1connect"
-	"github.com/picatz/deputy/internal/otel"
-	internalproto "github.com/picatz/deputy/internal/proto"
-	sbomx "github.com/picatz/deputy/internal/sbom"
-	sbomdiff "github.com/picatz/deputy/internal/sbom/diff"
-	"github.com/picatz/deputy/internal/targets"
+	dependencyv1 "github.com/temporalio/deputy/gen/deputy/dependency/v1"
+	sbomv1 "github.com/temporalio/deputy/gen/deputy/sbom/v1"
+	"github.com/temporalio/deputy/gen/deputy/sbom/v1/sbomv1connect"
+	"github.com/temporalio/deputy/internal/otel"
+	internalproto "github.com/temporalio/deputy/internal/proto"
+	sbomx "github.com/temporalio/deputy/internal/sbom"
+	sbomdiff "github.com/temporalio/deputy/internal/sbom/diff"
+	"github.com/temporalio/deputy/internal/targets"
 )
 
 // SBOMHandler implements the SBOMService gRPC handler.

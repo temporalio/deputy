@@ -5,8 +5,8 @@ Compare dependency changes between Git refs with vulnerability analysis.
 ## Usage
 
 ```yaml
-- uses: picatz/deputy/actions/setup@main
-- uses: picatz/deputy/actions/diff@main
+- uses: temporalio/deputy/actions/setup@main
+- uses: temporalio/deputy/actions/diff@main
 ```
 
 ## Inputs
@@ -50,8 +50,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: picatz/deputy/actions/setup@main
-      - uses: picatz/deputy/actions/diff@main
+      - uses: temporalio/deputy/actions/setup@main
+      - uses: temporalio/deputy/actions/diff@main
         with:
           comment-on-pr: true
 ```
@@ -61,7 +61,7 @@ The action automatically fetches the PR base commit if needed - no `fetch-depth:
 ### Compare Tags
 
 ```yaml
-- uses: picatz/deputy/actions/diff@main
+- uses: temporalio/deputy/actions/diff@main
   with:
     base: v1.0.0
     target: v2.0.0
@@ -71,7 +71,7 @@ The action automatically fetches the PR base commit if needed - no `fetch-depth:
 ### With Policy
 
 ```yaml
-- uses: picatz/deputy/actions/diff@main
+- uses: temporalio/deputy/actions/diff@main
   with:
     policy: policy/new-dependency-review.yaml
 ```
@@ -81,7 +81,7 @@ The action automatically fetches the PR base commit if needed - no `fetch-depth:
 For faster diff when you only need dependency changes:
 
 ```yaml
-- uses: picatz/deputy/actions/diff@main
+- uses: temporalio/deputy/actions/diff@main
   with:
     skip-vuln-scan: true
     licenses: false

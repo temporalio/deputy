@@ -13,11 +13,11 @@ import (
 	"unicode/utf8"
 
 	"github.com/charmbracelet/lipgloss"
-	sandboxv1 "github.com/picatz/deputy/gen/deputy/sandbox/v1"
-	"github.com/picatz/deputy/internal/compare"
-	"github.com/picatz/deputy/internal/inventory"
-	"github.com/picatz/deputy/internal/sandbox/workspace"
-	"github.com/picatz/deputy/internal/ui"
+	sandboxv1 "github.com/temporalio/deputy/gen/deputy/sandbox/v1"
+	"github.com/temporalio/deputy/internal/compare"
+	"github.com/temporalio/deputy/internal/inventory"
+	"github.com/temporalio/deputy/internal/sandbox/workspace"
+	"github.com/temporalio/deputy/internal/ui"
 	"golang.org/x/term"
 )
 

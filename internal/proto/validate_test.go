@@ -3,8 +3,8 @@ package proto
 import (
 	"testing"
 
-	remediationv1 "github.com/picatz/deputy/gen/deputy/remediation/v1"
-	scanv1 "github.com/picatz/deputy/gen/deputy/scan/v1"
+	remediationv1 "github.com/temporalio/deputy/gen/deputy/remediation/v1"
+	scanv1 "github.com/temporalio/deputy/gen/deputy/scan/v1"
 )
 
 func TestValidate_ExecuteWithAgentRequest(t *testing.T) {

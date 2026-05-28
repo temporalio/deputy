@@ -1,7 +1,7 @@
 package plugin
 
 import (
-	dependencyv1 "github.com/picatz/deputy/gen/deputy/dependency/v1"
+	dependencyv1 "github.com/temporalio/deputy/gen/deputy/dependency/v1"
 )
 
 // NewPackage creates a new Package with the given name, version, and ecosystem.

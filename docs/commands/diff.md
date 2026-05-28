@@ -13,7 +13,7 @@ deputy diff [base] [target] [flags]
 For PR reviews and CI pipelines, use the [`diff` action](../../actions/diff/):
 
 ```yaml
-- uses: picatz/deputy/actions/diff@main
+- uses: temporalio/deputy/actions/diff@main
   with:
     comment-on-pr: true
     policy: policy/ci/pr-review.yaml

@@ -3,10 +3,10 @@ package policy
 import (
 	"testing"
 
-	dependencyv1 "github.com/picatz/deputy/gen/deputy/dependency/v1"
-	policyv1 "github.com/picatz/deputy/gen/deputy/policy/v1"
-	scanv1 "github.com/picatz/deputy/gen/deputy/scan/v1"
-	targetv1 "github.com/picatz/deputy/gen/deputy/target/v1"
+	dependencyv1 "github.com/temporalio/deputy/gen/deputy/dependency/v1"
+	policyv1 "github.com/temporalio/deputy/gen/deputy/policy/v1"
+	scanv1 "github.com/temporalio/deputy/gen/deputy/scan/v1"
+	targetv1 "github.com/temporalio/deputy/gen/deputy/target/v1"
 )
 
 func TestEvaluateSimplePolicy(t *testing.T) {

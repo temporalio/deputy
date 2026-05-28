@@ -8,10 +8,10 @@ import (
 	"strings"
 	"time"
 
-	vulnerabilityv1 "github.com/picatz/deputy/gen/deputy/vulnerability/v1"
-	"github.com/picatz/deputy/internal/analysis/osv"
-	"github.com/picatz/deputy/internal/cache/memory"
-	"github.com/picatz/deputy/internal/license"
+	vulnerabilityv1 "github.com/temporalio/deputy/gen/deputy/vulnerability/v1"
+	"github.com/temporalio/deputy/internal/analysis/osv"
+	"github.com/temporalio/deputy/internal/cache/memory"
+	"github.com/temporalio/deputy/internal/license"
 	"go.opentelemetry.io/otel/trace"
 )
 

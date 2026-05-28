@@ -14,7 +14,7 @@ import (
 	"github.com/google/go-containerregistry/pkg/name"
 	"github.com/google/go-containerregistry/pkg/v1/remote"
 	scalibrfs "github.com/google/osv-scalibr/fs"
-	"github.com/picatz/deputy/internal/pin"
+	"github.com/temporalio/deputy/internal/pin"
 )
 
 const (

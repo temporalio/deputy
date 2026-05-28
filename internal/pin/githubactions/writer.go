@@ -7,7 +7,7 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/picatz/deputy/internal/pin"
+	"github.com/temporalio/deputy/internal/pin"
 )
 
 // RewriteWorkflow applies pin updates to a single workflow file within the

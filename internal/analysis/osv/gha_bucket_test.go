@@ -17,7 +17,7 @@ import (
 
 	"github.com/google/osv-scalibr/purl"
 	"github.com/ossf/osv-schema/bindings/go/osvschema"
-	"github.com/picatz/deputy/internal/cache/disk"
+	"github.com/temporalio/deputy/internal/cache/disk"
 	"golang.org/x/sync/singleflight"
 )
 

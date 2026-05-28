@@ -4,8 +4,8 @@ import (
 	"slices"
 	"testing"
 
-	dependencyv1 "github.com/picatz/deputy/gen/deputy/dependency/v1"
-	"github.com/picatz/deputy/internal/vulnerability"
+	dependencyv1 "github.com/temporalio/deputy/gen/deputy/dependency/v1"
+	"github.com/temporalio/deputy/internal/vulnerability"
 )
 
 func TestBuildManifestContext(t *testing.T) {

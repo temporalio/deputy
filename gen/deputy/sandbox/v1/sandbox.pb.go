@@ -3894,8 +3894,8 @@ const file_deputy_sandbox_v1_sandbox_proto_rawDesc = "" +
 	"\aCleanup\x12!.deputy.sandbox.v1.CleanupRequest\x1a\".deputy.sandbox.v1.CleanupResponse\x12\\\n" +
 	"\vSyncChanges\x12%.deputy.sandbox.v1.SyncChangesRequest\x1a&.deputy.sandbox.v1.SyncChangesResponse\x12Y\n" +
 	"\n" +
-	"GetChanges\x12$.deputy.sandbox.v1.GetChangesRequest\x1a%.deputy.sandbox.v1.GetChangesResponseB\xc5\x01\n" +
-	"\x15com.deputy.sandbox.v1B\fSandboxProtoP\x01Z8github.com/picatz/deputy/gen/deputy/sandbox/v1;sandboxv1\xa2\x02\x03DSX\xaa\x02\x11Deputy.Sandbox.V1\xca\x02\x11Deputy\\Sandbox\\V1\xe2\x02\x1dDeputy\\Sandbox\\V1\\GPBMetadata\xea\x02\x13Deputy::Sandbox::V1b\x06proto3"
+	"GetChanges\x12$.deputy.sandbox.v1.GetChangesRequest\x1a%.deputy.sandbox.v1.GetChangesResponseB\xc9\x01\n" +
+	"\x15com.deputy.sandbox.v1B\fSandboxProtoP\x01Z<github.com/temporalio/deputy/gen/deputy/sandbox/v1;sandboxv1\xa2\x02\x03DSX\xaa\x02\x11Deputy.Sandbox.V1\xca\x02\x11Deputy\\Sandbox\\V1\xe2\x02\x1dDeputy\\Sandbox\\V1\\GPBMetadata\xea\x02\x13Deputy::Sandbox::V1b\x06proto3"
 
 var (
 	file_deputy_sandbox_v1_sandbox_proto_rawDescOnce sync.Once

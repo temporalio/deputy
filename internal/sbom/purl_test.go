@@ -3,7 +3,7 @@ package sbomx
 import (
 	"testing"
 
-	"github.com/picatz/deputy/internal/repository/workspace"
+	"github.com/temporalio/deputy/internal/repository/workspace"
 )
 
 func Test_normalizeGolangPURLString_relpath(t *testing.T) {

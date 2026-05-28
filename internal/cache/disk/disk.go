@@ -3,7 +3,7 @@
 // This package is designed for CLI tools that need to cache data across invocations,
 // reducing API calls to external services like CISA KEV, EPSS, and OSV.
 //
-// For in-memory caching with LRU eviction, see [github.com/picatz/deputy/internal/cache/memory].
+// For in-memory caching with LRU eviction, see [github.com/temporalio/deputy/internal/cache/memory].
 //
 // # Cache Location
 //

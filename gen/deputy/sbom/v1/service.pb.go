@@ -8,8 +8,8 @@ package sbomv1
 
 import (
 	_ "buf.build/gen/go/bufbuild/protovalidate/protocolbuffers/go/buf/validate"
-	v11 "github.com/picatz/deputy/gen/deputy/dependency/v1"
-	v1 "github.com/picatz/deputy/gen/deputy/target/v1"
+	v11 "github.com/temporalio/deputy/gen/deputy/dependency/v1"
+	v1 "github.com/temporalio/deputy/gen/deputy/target/v1"
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 	timestamppb "google.golang.org/protobuf/types/known/timestamppb"
@@ -913,8 +913,8 @@ const file_deputy_sbom_v1_service_proto_rawDesc = "" +
 	"\x15CHANGE_KIND_DOWNGRADE\x10\x042\x9f\x01\n" +
 	"\vSBOMService\x12M\n" +
 	"\bGenerate\x12\x1f.deputy.sbom.v1.GenerateRequest\x1a .deputy.sbom.v1.GenerateResponse\x12A\n" +
-	"\x04Diff\x12\x1b.deputy.sbom.v1.DiffRequest\x1a\x1c.deputy.sbom.v1.DiffResponseB\xb0\x01\n" +
-	"\x12com.deputy.sbom.v1B\fServiceProtoP\x01Z2github.com/picatz/deputy/gen/deputy/sbom/v1;sbomv1\xa2\x02\x03DSX\xaa\x02\x0eDeputy.Sbom.V1\xca\x02\x0eDeputy\\Sbom\\V1\xe2\x02\x1aDeputy\\Sbom\\V1\\GPBMetadata\xea\x02\x10Deputy::Sbom::V1b\x06proto3"
+	"\x04Diff\x12\x1b.deputy.sbom.v1.DiffRequest\x1a\x1c.deputy.sbom.v1.DiffResponseB\xb4\x01\n" +
+	"\x12com.deputy.sbom.v1B\fServiceProtoP\x01Z6github.com/temporalio/deputy/gen/deputy/sbom/v1;sbomv1\xa2\x02\x03DSX\xaa\x02\x0eDeputy.Sbom.V1\xca\x02\x0eDeputy\\Sbom\\V1\xe2\x02\x1aDeputy\\Sbom\\V1\\GPBMetadata\xea\x02\x10Deputy::Sbom::V1b\x06proto3"
 
 var (
 	file_deputy_sbom_v1_service_proto_rawDescOnce sync.Once

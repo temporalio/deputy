@@ -12,11 +12,11 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"google.golang.org/protobuf/encoding/protojson"
 
-	graphv1 "github.com/picatz/deputy/gen/deputy/graph/v1"
-	"github.com/picatz/deputy/internal/cli/flags"
-	"github.com/picatz/deputy/internal/dependency/graph"
-	"github.com/picatz/deputy/internal/services"
-	ui "github.com/picatz/deputy/internal/ui"
+	graphv1 "github.com/temporalio/deputy/gen/deputy/graph/v1"
+	"github.com/temporalio/deputy/internal/cli/flags"
+	"github.com/temporalio/deputy/internal/dependency/graph"
+	"github.com/temporalio/deputy/internal/services"
+	ui "github.com/temporalio/deputy/internal/ui"
 	"github.com/spf13/cobra"
 )
 

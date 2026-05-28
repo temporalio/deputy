@@ -6,10 +6,10 @@ import (
 	"slices"
 	"strings"
 
-	vulnerabilityv1 "github.com/picatz/deputy/gen/deputy/vulnerability/v1"
-	"github.com/picatz/deputy/internal/collections"
-	"github.com/picatz/deputy/internal/vulnerability"
-	"github.com/picatz/deputy/internal/vulnerability/severity/cvss"
+	vulnerabilityv1 "github.com/temporalio/deputy/gen/deputy/vulnerability/v1"
+	"github.com/temporalio/deputy/internal/collections"
+	"github.com/temporalio/deputy/internal/vulnerability"
+	"github.com/temporalio/deputy/internal/vulnerability/severity/cvss"
 )
 
 // TriageReport represents the summary of a triage analysis.

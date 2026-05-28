@@ -8,9 +8,9 @@ package inventoryv1
 
 import (
 	_ "buf.build/gen/go/bufbuild/protovalidate/protocolbuffers/go/buf/validate"
-	v12 "github.com/picatz/deputy/gen/deputy/container/v1"
-	v11 "github.com/picatz/deputy/gen/deputy/dependency/v1"
-	v1 "github.com/picatz/deputy/gen/deputy/target/v1"
+	v12 "github.com/temporalio/deputy/gen/deputy/container/v1"
+	v11 "github.com/temporalio/deputy/gen/deputy/dependency/v1"
+	v1 "github.com/temporalio/deputy/gen/deputy/target/v1"
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 	timestamppb "google.golang.org/protobuf/types/known/timestamppb"
@@ -1812,8 +1812,8 @@ const file_deputy_inventory_v1_service_proto_rawDesc = "" +
 	"\x0fExtractorPlugin\x12c\n" +
 	"\fFileRequired\x12(.deputy.inventory.v1.FileRequiredRequest\x1a).deputy.inventory.v1.FileRequiredResponse\x12T\n" +
 	"\aExtract\x12#.deputy.inventory.v1.ExtractRequest\x1a$.deputy.inventory.v1.ExtractResponse\x12K\n" +
-	"\x04Info\x12 .deputy.inventory.v1.InfoRequest\x1a!.deputy.inventory.v1.InfoResponseB\xd3\x01\n" +
-	"\x17com.deputy.inventory.v1B\fServiceProtoP\x01Z<github.com/picatz/deputy/gen/deputy/inventory/v1;inventoryv1\xa2\x02\x03DIX\xaa\x02\x13Deputy.Inventory.V1\xca\x02\x13Deputy\\Inventory\\V1\xe2\x02\x1fDeputy\\Inventory\\V1\\GPBMetadata\xea\x02\x15Deputy::Inventory::V1b\x06proto3"
+	"\x04Info\x12 .deputy.inventory.v1.InfoRequest\x1a!.deputy.inventory.v1.InfoResponseB\xd7\x01\n" +
+	"\x17com.deputy.inventory.v1B\fServiceProtoP\x01Z@github.com/temporalio/deputy/gen/deputy/inventory/v1;inventoryv1\xa2\x02\x03DIX\xaa\x02\x13Deputy.Inventory.V1\xca\x02\x13Deputy\\Inventory\\V1\xe2\x02\x1fDeputy\\Inventory\\V1\\GPBMetadata\xea\x02\x15Deputy::Inventory::V1b\x06proto3"
 
 var (
 	file_deputy_inventory_v1_service_proto_rawDescOnce sync.Once

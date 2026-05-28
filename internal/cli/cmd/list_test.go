@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	dependencyv1 "github.com/picatz/deputy/gen/deputy/dependency/v1"
+	dependencyv1 "github.com/temporalio/deputy/gen/deputy/dependency/v1"
 )
 
 func TestProtoPackagesToListItems(t *testing.T) {

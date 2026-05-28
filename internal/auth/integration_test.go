@@ -6,7 +6,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/picatz/deputy/internal/auth"
+	"github.com/temporalio/deputy/internal/auth"
 )
 
 // TestIntegration_ConfusedDeputyPrevention verifies that credentials

@@ -7,9 +7,9 @@ import (
 	"os"
 	"strings"
 
-	"github.com/picatz/deputy/internal/ai"
-	"github.com/picatz/deputy/internal/ai/render"
-	ui "github.com/picatz/deputy/internal/ui"
+	"github.com/temporalio/deputy/internal/ai"
+	"github.com/temporalio/deputy/internal/ai/render"
+	ui "github.com/temporalio/deputy/internal/ui"
 	"github.com/spf13/cobra"
 )
 

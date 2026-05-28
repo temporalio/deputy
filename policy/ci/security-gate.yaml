@@ -15,7 +15,7 @@
 #   deputy scan --policy policy/ci/security-gate.yaml
 #
 # Or in GitHub Actions:
-#   - uses: picatz/deputy/actions/scan@main
+#   - uses: temporalio/deputy/actions/scan@main
 #     with:
 #       policy: policy/ci/security-gate.yaml
 

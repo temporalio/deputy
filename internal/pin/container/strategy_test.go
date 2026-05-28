@@ -11,7 +11,7 @@ import (
 	"testing/fstest"
 
 	scalibrfs "github.com/google/osv-scalibr/fs"
-	"github.com/picatz/deputy/internal/pin"
+	"github.com/temporalio/deputy/internal/pin"
 )
 
 // --- Test helpers ---

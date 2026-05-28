@@ -12,7 +12,7 @@
 //
 // Basic usage:
 //
-//	import "github.com/picatz/deputy/sdk"
+//	import "github.com/temporalio/deputy/sdk"
 //
 //	client, err := sdk.NewClient(ctx)
 //	if err != nil {
@@ -38,17 +38,17 @@ import (
 
 	"connectrpc.com/connect"
 
-	dependencyv1 "github.com/picatz/deputy/gen/deputy/dependency/v1"
-	diffv1 "github.com/picatz/deputy/gen/deputy/diff/v1"
-	graphv1 "github.com/picatz/deputy/gen/deputy/graph/v1"
-	listv1 "github.com/picatz/deputy/gen/deputy/list/v1"
-	policyv1 "github.com/picatz/deputy/gen/deputy/policy/v1"
-	remediationv1 "github.com/picatz/deputy/gen/deputy/remediation/v1"
-	sbomv1 "github.com/picatz/deputy/gen/deputy/sbom/v1"
-	scanv1 "github.com/picatz/deputy/gen/deputy/scan/v1"
-	secretsv1 "github.com/picatz/deputy/gen/deputy/secrets/v1"
-	vulnerabilityv1 "github.com/picatz/deputy/gen/deputy/vulnerability/v1"
-	"github.com/picatz/deputy/internal/services"
+	dependencyv1 "github.com/temporalio/deputy/gen/deputy/dependency/v1"
+	diffv1 "github.com/temporalio/deputy/gen/deputy/diff/v1"
+	graphv1 "github.com/temporalio/deputy/gen/deputy/graph/v1"
+	listv1 "github.com/temporalio/deputy/gen/deputy/list/v1"
+	policyv1 "github.com/temporalio/deputy/gen/deputy/policy/v1"
+	remediationv1 "github.com/temporalio/deputy/gen/deputy/remediation/v1"
+	sbomv1 "github.com/temporalio/deputy/gen/deputy/sbom/v1"
+	scanv1 "github.com/temporalio/deputy/gen/deputy/scan/v1"
+	secretsv1 "github.com/temporalio/deputy/gen/deputy/secrets/v1"
+	vulnerabilityv1 "github.com/temporalio/deputy/gen/deputy/vulnerability/v1"
+	"github.com/temporalio/deputy/internal/services"
 )
 
 // Re-export commonly used proto types for convenience.

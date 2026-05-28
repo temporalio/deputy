@@ -10,8 +10,8 @@ import (
 
 	"github.com/google/cel-go/cel"
 	"github.com/google/cel-go/common/types/ref"
-	"github.com/picatz/deputy/internal/collections"
-	"github.com/picatz/deputy/internal/otel"
+	"github.com/temporalio/deputy/internal/collections"
+	"github.com/temporalio/deputy/internal/otel"
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
 )

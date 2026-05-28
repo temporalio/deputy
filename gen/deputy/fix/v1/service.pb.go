@@ -7,7 +7,7 @@
 package fixv1
 
 import (
-	v1 "github.com/picatz/deputy/gen/deputy/target/v1"
+	v1 "github.com/temporalio/deputy/gen/deputy/target/v1"
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 	timestamppb "google.golang.org/protobuf/types/known/timestamppb"
@@ -466,8 +466,8 @@ const file_deputy_fix_v1_service_proto_rawDesc = "" +
 	"\x11runnable_commands\x18\x02 \x01(\x05R\x10runnableCommands2J\n" +
 	"\n" +
 	"FixService\x12<\n" +
-	"\x03Fix\x12\x19.deputy.fix.v1.FixRequest\x1a\x1a.deputy.fix.v1.FixResponseB\xa9\x01\n" +
-	"\x11com.deputy.fix.v1B\fServiceProtoP\x01Z0github.com/picatz/deputy/gen/deputy/fix/v1;fixv1\xa2\x02\x03DFX\xaa\x02\rDeputy.Fix.V1\xca\x02\rDeputy\\Fix\\V1\xe2\x02\x19Deputy\\Fix\\V1\\GPBMetadata\xea\x02\x0fDeputy::Fix::V1b\x06proto3"
+	"\x03Fix\x12\x19.deputy.fix.v1.FixRequest\x1a\x1a.deputy.fix.v1.FixResponseB\xad\x01\n" +
+	"\x11com.deputy.fix.v1B\fServiceProtoP\x01Z4github.com/temporalio/deputy/gen/deputy/fix/v1;fixv1\xa2\x02\x03DFX\xaa\x02\rDeputy.Fix.V1\xca\x02\rDeputy\\Fix\\V1\xe2\x02\x19Deputy\\Fix\\V1\\GPBMetadata\xea\x02\x0fDeputy::Fix::V1b\x06proto3"
 
 var (
 	file_deputy_fix_v1_service_proto_rawDescOnce sync.Once

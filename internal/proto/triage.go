@@ -5,10 +5,10 @@ import (
 	"slices"
 	"strings"
 
-	triagev1 "github.com/picatz/deputy/gen/deputy/triage/v1"
-	vulnerabilityv1 "github.com/picatz/deputy/gen/deputy/vulnerability/v1"
-	"github.com/picatz/deputy/internal/vulnerability"
-	"github.com/picatz/deputy/internal/vulnerability/severity/cvss"
+	triagev1 "github.com/temporalio/deputy/gen/deputy/triage/v1"
+	vulnerabilityv1 "github.com/temporalio/deputy/gen/deputy/vulnerability/v1"
+	"github.com/temporalio/deputy/internal/vulnerability"
+	"github.com/temporalio/deputy/internal/vulnerability/severity/cvss"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 

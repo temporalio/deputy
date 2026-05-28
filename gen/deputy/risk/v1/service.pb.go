@@ -8,10 +8,10 @@ package riskv1
 
 import (
 	_ "buf.build/gen/go/bufbuild/protovalidate/protocolbuffers/go/buf/validate"
-	v12 "github.com/picatz/deputy/gen/deputy/dependency/v1"
-	v11 "github.com/picatz/deputy/gen/deputy/policy/v1"
-	v1 "github.com/picatz/deputy/gen/deputy/target/v1"
-	v13 "github.com/picatz/deputy/gen/deputy/vulnerability/v1"
+	v12 "github.com/temporalio/deputy/gen/deputy/dependency/v1"
+	v11 "github.com/temporalio/deputy/gen/deputy/policy/v1"
+	v1 "github.com/temporalio/deputy/gen/deputy/target/v1"
+	v13 "github.com/temporalio/deputy/gen/deputy/vulnerability/v1"
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 	timestamppb "google.golang.org/protobuf/types/known/timestamppb"
@@ -3055,8 +3055,8 @@ const file_deputy_risk_v1_service_proto_rawDesc = "" +
 	"\vRiskService\x12V\n" +
 	"\vAnalyzeRisk\x12\".deputy.risk.v1.AnalyzeRiskRequest\x1a#.deputy.risk.v1.AnalyzeRiskResponse\x12k\n" +
 	"\x12InvestigatePackage\x12).deputy.risk.v1.InvestigatePackageRequest\x1a*.deputy.risk.v1.InvestigatePackageResponse\x12`\n" +
-	"\x12StreamRiskAnalysis\x12\".deputy.risk.v1.AnalyzeRiskRequest\x1a$.deputy.risk.v1.RiskAnalysisProgress0\x01B\xb0\x01\n" +
-	"\x12com.deputy.risk.v1B\fServiceProtoP\x01Z2github.com/picatz/deputy/gen/deputy/risk/v1;riskv1\xa2\x02\x03DRX\xaa\x02\x0eDeputy.Risk.V1\xca\x02\x0eDeputy\\Risk\\V1\xe2\x02\x1aDeputy\\Risk\\V1\\GPBMetadata\xea\x02\x10Deputy::Risk::V1b\x06proto3"
+	"\x12StreamRiskAnalysis\x12\".deputy.risk.v1.AnalyzeRiskRequest\x1a$.deputy.risk.v1.RiskAnalysisProgress0\x01B\xb4\x01\n" +
+	"\x12com.deputy.risk.v1B\fServiceProtoP\x01Z6github.com/temporalio/deputy/gen/deputy/risk/v1;riskv1\xa2\x02\x03DRX\xaa\x02\x0eDeputy.Risk.V1\xca\x02\x0eDeputy\\Risk\\V1\xe2\x02\x1aDeputy\\Risk\\V1\\GPBMetadata\xea\x02\x10Deputy::Risk::V1b\x06proto3"
 
 var (
 	file_deputy_risk_v1_service_proto_rawDescOnce sync.Once

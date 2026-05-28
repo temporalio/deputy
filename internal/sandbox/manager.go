@@ -10,9 +10,9 @@ import (
 	"sync"
 	"time"
 
-	sandboxv1 "github.com/picatz/deputy/gen/deputy/sandbox/v1"
-	"github.com/picatz/deputy/internal/otel"
-	"github.com/picatz/deputy/internal/policy"
+	sandboxv1 "github.com/temporalio/deputy/gen/deputy/sandbox/v1"
+	"github.com/temporalio/deputy/internal/otel"
+	"github.com/temporalio/deputy/internal/policy"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 

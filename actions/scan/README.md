@@ -9,8 +9,8 @@ Scan for vulnerabilities and upload results to GitHub Security tab via SARIF.
 ## Usage
 
 ```yaml
-- uses: picatz/deputy/actions/setup@main
-- uses: picatz/deputy/actions/scan@main
+- uses: temporalio/deputy/actions/setup@main
+- uses: temporalio/deputy/actions/scan@main
 ```
 
 ## Inputs
@@ -58,14 +58,14 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: picatz/deputy/actions/setup@main
-      - uses: picatz/deputy/actions/scan@main
+      - uses: temporalio/deputy/actions/setup@main
+      - uses: temporalio/deputy/actions/scan@main
 ```
 
 ### With Policy Enforcement
 
 ```yaml
-- uses: picatz/deputy/actions/scan@main
+- uses: temporalio/deputy/actions/scan@main
   with:
     policy: policy/ci/security-gate.yaml
     fail-on-policy-violation: true
@@ -74,7 +74,7 @@ jobs:
 ### Scan Specific Path
 
 ```yaml
-- uses: picatz/deputy/actions/scan@main
+- uses: temporalio/deputy/actions/scan@main
   with:
     target: ./backend
     sarif-category: deputy-backend
@@ -83,7 +83,7 @@ jobs:
 ### Multiple Policies
 
 ```yaml
-- uses: picatz/deputy/actions/scan@main
+- uses: temporalio/deputy/actions/scan@main
   with:
     policy: policy/security.yaml,policy/compliance.yaml
 ```

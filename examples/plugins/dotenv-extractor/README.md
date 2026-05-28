@@ -90,7 +90,7 @@ plugins:
 ```go
 package main
 
-import "github.com/picatz/deputy/sdk/plugin"
+import "github.com/temporalio/deputy/sdk/plugin"
 
 func main() {
     plugin.Main(&myExtractor{})

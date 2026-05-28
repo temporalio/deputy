@@ -456,7 +456,7 @@ jobs:
 container-scan:
   image: golang:1.22
   script:
-    - go install github.com/picatz/deputy@latest
+    - go install github.com/temporalio/deputy@latest
     - deputy scan $CI_REGISTRY_IMAGE:$CI_COMMIT_SHA
       --policy policy/container-security.yaml
       --format json

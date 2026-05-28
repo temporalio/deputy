@@ -7,7 +7,7 @@ import (
 	git "github.com/go-git/go-git/v5"
 	"github.com/go-git/go-git/v5/plumbing"
 	"github.com/google/osv-scalibr/extractor"
-	"github.com/picatz/deputy/internal/compare"
+	"github.com/temporalio/deputy/internal/compare"
 )
 
 func Test_Integration_CompareTags(t *testing.T) {

@@ -39,7 +39,7 @@ import (
 const (
 	// TracerName is the tracer name for plugin spans.
 	// All spans created by plugin SDK use this tracer for identification.
-	TracerName = "github.com/picatz/deputy/plugin"
+	TracerName = "github.com/temporalio/deputy/plugin"
 )
 
 // extractTraceContext extracts W3C trace context from a traceparent header value

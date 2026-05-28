@@ -5,10 +5,10 @@ import (
 
 	"github.com/google/osv-scalibr/extractor"
 
-	containerv1 "github.com/picatz/deputy/gen/deputy/container/v1"
-	dependencyv1 "github.com/picatz/deputy/gen/deputy/dependency/v1"
-	"github.com/picatz/deputy/internal/compare"
-	"github.com/picatz/deputy/internal/purlx"
+	containerv1 "github.com/temporalio/deputy/gen/deputy/container/v1"
+	dependencyv1 "github.com/temporalio/deputy/gen/deputy/dependency/v1"
+	"github.com/temporalio/deputy/internal/compare"
+	"github.com/temporalio/deputy/internal/purlx"
 )
 
 // ecosystemFromPURLType returns an OSV ecosystem name for PURL types that

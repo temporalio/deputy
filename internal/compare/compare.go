@@ -9,8 +9,8 @@ import (
 	"github.com/google/osv-scalibr/semantic"
 	"golang.org/x/mod/semver"
 
-	"github.com/picatz/deputy/internal/ecosystem"
-	"github.com/picatz/deputy/internal/repository/workspace"
+	"github.com/temporalio/deputy/internal/ecosystem"
+	"github.com/temporalio/deputy/internal/repository/workspace"
 )
 
 // ChangeType classifies the kind of dependency transition observed between two

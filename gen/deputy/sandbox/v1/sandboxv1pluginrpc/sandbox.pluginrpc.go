@@ -7,7 +7,7 @@ package sandboxv1pluginrpc
 import (
 	context "context"
 	fmt "fmt"
-	v1 "github.com/picatz/deputy/gen/deputy/sandbox/v1"
+	v1 "github.com/temporalio/deputy/gen/deputy/sandbox/v1"
 	pluginrpc "pluginrpc.com/pluginrpc"
 )
 

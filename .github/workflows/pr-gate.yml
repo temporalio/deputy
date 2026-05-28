@@ -10,14 +10,14 @@
 # Usage:
 #   jobs:
 #     pr-security:
-#       uses: picatz/deputy/.github/workflows/pr-gate.yml@main
+#       uses: temporalio/deputy/.github/workflows/pr-gate.yml@main
 #       with:
 #         scan-policy: policy/ci/security-gate.yaml
 #         diff-policy: policy/ci/pr-review.yaml
 #       permissions:
-#         security-events: write  # For SARIF upload (optional, gracefully degrades)
+#         # security-events: write  # For SARIF upload (requires GHAS)
 #         contents: read
-#         pull-requests: write    # For PR comments
+#         pull-requests: write      # For PR comments
 
 name: PR Gate
 
@@ -50,10 +50,10 @@ on:
         required: false
         default: true
       upload-sarif:
-        description: 'Upload SARIF to GitHub Security tab'
+        description: 'Upload SARIF to GitHub Security tab (requires GHAS)'
         type: boolean
         required: false
-        default: true
+        default: false
       comment-on-pr:
         description: 'Post diff summary as PR comment'
         type: boolean
@@ -75,6 +75,8 @@ jobs:
   scan:
     name: Security Scan
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
 
     outputs:
       findings-count: ${{ steps.scan.outputs.findings-count }}
@@ -83,14 +85,14 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
 
       - name: Setup Deputy
-        uses: picatz/deputy/actions/setup@main
+        uses: temporalio/deputy/actions/setup@main
 
       - name: Run scan
         id: scan
-        uses: picatz/deputy/actions/scan@main
+        uses: temporalio/deputy/actions/scan@main
         with:
           target: ${{ inputs.target }}
           policy: ${{ inputs.scan-policy }}
@@ -101,6 +103,9 @@ jobs:
   diff:
     name: Dependency Diff
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
     if: github.event_name == 'pull_request'
 
     outputs:
@@ -110,16 +115,16 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
         with:
           fetch-depth: 0
 
       - name: Setup Deputy
-        uses: picatz/deputy/actions/setup@main
+        uses: temporalio/deputy/actions/setup@main
 
       - name: Run diff
         id: diff
-        uses: picatz/deputy/actions/diff@main
+        uses: temporalio/deputy/actions/diff@main
         with:
           base: ${{ github.base_ref }}
           target: ${{ github.head_ref }}

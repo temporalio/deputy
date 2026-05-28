@@ -3,7 +3,7 @@ managed:
   enabled: true
   override:
     - file_option: go_package_prefix
-      value: github.com/picatz/deputy/gen
+      value: github.com/temporalio/deputy/gen
   disable:
     # Don't modify go_package for protovalidate - required for compilation
     - file_option: go_package

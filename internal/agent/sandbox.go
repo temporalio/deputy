@@ -8,9 +8,9 @@ import (
 	"time"
 
 	"connectrpc.com/connect"
-	agentv1 "github.com/picatz/deputy/gen/deputy/agent/v1"
-	"github.com/picatz/deputy/gen/deputy/agent/v1/agentv1connect"
-	"github.com/picatz/deputy/internal/sandbox"
+	agentv1 "github.com/temporalio/deputy/gen/deputy/agent/v1"
+	"github.com/temporalio/deputy/gen/deputy/agent/v1/agentv1connect"
+	"github.com/temporalio/deputy/internal/sandbox"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 

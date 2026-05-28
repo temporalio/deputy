@@ -2,8 +2,8 @@
 //
 // This package contains subpackages for different caching strategies:
 //
-//   - [github.com/picatz/deputy/internal/cache/memory] - In-memory TTL LRU cache
-//   - [github.com/picatz/deputy/internal/cache/disk] - Persistent JSON-on-disk cache
+//   - [github.com/temporalio/deputy/internal/cache/memory] - In-memory TTL LRU cache
+//   - [github.com/temporalio/deputy/internal/cache/disk] - Persistent JSON-on-disk cache
 //
 // # Memory Cache
 //

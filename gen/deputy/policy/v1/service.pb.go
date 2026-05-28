@@ -1044,8 +1044,8 @@ const file_deputy_policy_v1_service_proto_rawDesc = "" +
 	"\rPolicyService\x12Q\n" +
 	"\bEvaluate\x12!.deputy.policy.v1.EvaluateRequest\x1a\".deputy.policy.v1.EvaluateResponse\x12Q\n" +
 	"\bValidate\x12!.deputy.policy.v1.ValidateRequest\x1a\".deputy.policy.v1.ValidateResponse\x12f\n" +
-	"\x0fListEntrypoints\x12(.deputy.policy.v1.ListEntrypointsRequest\x1a).deputy.policy.v1.ListEntrypointsResponseB\xbe\x01\n" +
-	"\x14com.deputy.policy.v1B\fServiceProtoP\x01Z6github.com/picatz/deputy/gen/deputy/policy/v1;policyv1\xa2\x02\x03DPX\xaa\x02\x10Deputy.Policy.V1\xca\x02\x10Deputy\\Policy\\V1\xe2\x02\x1cDeputy\\Policy\\V1\\GPBMetadata\xea\x02\x12Deputy::Policy::V1b\x06proto3"
+	"\x0fListEntrypoints\x12(.deputy.policy.v1.ListEntrypointsRequest\x1a).deputy.policy.v1.ListEntrypointsResponseB\xc2\x01\n" +
+	"\x14com.deputy.policy.v1B\fServiceProtoP\x01Z:github.com/temporalio/deputy/gen/deputy/policy/v1;policyv1\xa2\x02\x03DPX\xaa\x02\x10Deputy.Policy.V1\xca\x02\x10Deputy\\Policy\\V1\xe2\x02\x1cDeputy\\Policy\\V1\\GPBMetadata\xea\x02\x12Deputy::Policy::V1b\x06proto3"
 
 var (
 	file_deputy_policy_v1_service_proto_rawDescOnce sync.Once

@@ -4,11 +4,11 @@ import (
 	"context"
 
 	"github.com/google/osv-scalibr/extractor"
-	vulnerabilityv1 "github.com/picatz/deputy/gen/deputy/vulnerability/v1"
-	"github.com/picatz/deputy/internal/logs"
-	"github.com/picatz/deputy/internal/otel"
-	"github.com/picatz/deputy/internal/repository/workspace"
-	"github.com/picatz/deputy/internal/vulnerability"
+	vulnerabilityv1 "github.com/temporalio/deputy/gen/deputy/vulnerability/v1"
+	"github.com/temporalio/deputy/internal/logs"
+	"github.com/temporalio/deputy/internal/otel"
+	"github.com/temporalio/deputy/internal/repository/workspace"
+	"github.com/temporalio/deputy/internal/vulnerability"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
 )

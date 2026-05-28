@@ -4,7 +4,7 @@ import (
 	"context"
 	"io/fs"
 
-	targetv1 "github.com/picatz/deputy/gen/deputy/target/v1"
+	targetv1 "github.com/temporalio/deputy/gen/deputy/target/v1"
 )
 
 // Kind is an alias for targetv1.TargetKind.

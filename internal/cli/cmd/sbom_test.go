@@ -11,7 +11,7 @@ import (
 
 	"github.com/go-git/go-git/v5"
 	"github.com/go-git/go-git/v5/plumbing/object"
-	"github.com/picatz/deputy/internal/services"
+	"github.com/temporalio/deputy/internal/services"
 	"github.com/spf13/cobra"
 )
 

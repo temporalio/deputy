@@ -6,7 +6,7 @@ import (
 	"os/exec"
 	"testing"
 
-	invplugin "github.com/picatz/deputy/internal/inventory/plugin"
+	invplugin "github.com/temporalio/deputy/internal/inventory/plugin"
 )
 
 func TestDotenvExtractor(t *testing.T) {

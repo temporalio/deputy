@@ -13,12 +13,12 @@ import (
 	"strings"
 
 	"github.com/google/osv-scalibr/extractor"
-	graphv1 "github.com/picatz/deputy/gen/deputy/graph/v1"
-	vulnerabilityv1 "github.com/picatz/deputy/gen/deputy/vulnerability/v1"
-	"github.com/picatz/deputy/internal/compare"
-	"github.com/picatz/deputy/internal/dependency"
-	"github.com/picatz/deputy/internal/purlx"
-	"github.com/picatz/deputy/internal/vulnerability"
+	graphv1 "github.com/temporalio/deputy/gen/deputy/graph/v1"
+	vulnerabilityv1 "github.com/temporalio/deputy/gen/deputy/vulnerability/v1"
+	"github.com/temporalio/deputy/internal/compare"
+	"github.com/temporalio/deputy/internal/dependency"
+	"github.com/temporalio/deputy/internal/purlx"
+	"github.com/temporalio/deputy/internal/vulnerability"
 )
 
 // Re-export proto types for convenience.

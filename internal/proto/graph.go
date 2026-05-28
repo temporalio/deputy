@@ -1,8 +1,8 @@
 package proto
 
 import (
-	scanv1 "github.com/picatz/deputy/gen/deputy/scan/v1"
-	"github.com/picatz/deputy/internal/dependency/graph"
+	scanv1 "github.com/temporalio/deputy/gen/deputy/scan/v1"
+	"github.com/temporalio/deputy/internal/dependency/graph"
 )
 
 // Note: graph.Node, graph.Edge, graph.VulnerabilityCount, and graph.Scope are now

@@ -10,7 +10,7 @@ import (
 
 	git "github.com/go-git/go-git/v5"
 	"github.com/go-git/go-git/v5/plumbing/object"
-	"github.com/picatz/deputy/internal/targets"
+	"github.com/temporalio/deputy/internal/targets"
 )
 
 func TestTargetsOpenLocalDirectory(t *testing.T) {

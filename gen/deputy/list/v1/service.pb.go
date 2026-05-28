@@ -8,8 +8,8 @@ package listv1
 
 import (
 	_ "buf.build/gen/go/bufbuild/protovalidate/protocolbuffers/go/buf/validate"
-	v11 "github.com/picatz/deputy/gen/deputy/dependency/v1"
-	v1 "github.com/picatz/deputy/gen/deputy/target/v1"
+	v11 "github.com/temporalio/deputy/gen/deputy/dependency/v1"
+	v1 "github.com/temporalio/deputy/gen/deputy/target/v1"
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 	reflect "reflect"
@@ -511,8 +511,8 @@ const file_deputy_list_v1_service_proto_rawDesc = "" +
 	"lock_files\x18\x05 \x03(\tB\x0f\xbaH\f\x92\x01\t\x102\"\x05r\x03\x18\x80\x02R\tlockFiles2\xc9\x01\n" +
 	"\vListService\x12Y\n" +
 	"\fListPackages\x12#.deputy.list.v1.ListPackagesRequest\x1a$.deputy.list.v1.ListPackagesResponse\x12_\n" +
-	"\x0eListEcosystems\x12%.deputy.list.v1.ListEcosystemsRequest\x1a&.deputy.list.v1.ListEcosystemsResponseB\xb2\x01\n" +
-	"\x12com.deputy.list.v1B\fServiceProtoP\x01Z2github.com/picatz/deputy/gen/deputy/list/v1;listv1\xa2\x02\x03DLX\xaa\x02\x0eDeputy.List.V1\xca\x02\x0fDeputy\\List_\\V1\xe2\x02\x1bDeputy\\List_\\V1\\GPBMetadata\xea\x02\x10Deputy::List::V1b\x06proto3"
+	"\x0eListEcosystems\x12%.deputy.list.v1.ListEcosystemsRequest\x1a&.deputy.list.v1.ListEcosystemsResponseB\xb6\x01\n" +
+	"\x12com.deputy.list.v1B\fServiceProtoP\x01Z6github.com/temporalio/deputy/gen/deputy/list/v1;listv1\xa2\x02\x03DLX\xaa\x02\x0eDeputy.List.V1\xca\x02\x0fDeputy\\List_\\V1\xe2\x02\x1bDeputy\\List_\\V1\\GPBMetadata\xea\x02\x10Deputy::List::V1b\x06proto3"
 
 var (
 	file_deputy_list_v1_service_proto_rawDescOnce sync.Once

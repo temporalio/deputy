@@ -3,7 +3,7 @@ package remediation
 import (
 	"testing"
 
-	"github.com/picatz/deputy/internal/vulnerability"
+	"github.com/temporalio/deputy/internal/vulnerability"
 )
 
 func TestExtractPackageName(t *testing.T) {

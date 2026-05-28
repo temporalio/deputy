@@ -8,8 +8,8 @@ import (
 	"github.com/go-git/go-billy/v5/memfs"
 	"github.com/go-git/go-git/v5"
 	"github.com/go-git/go-git/v5/storage/memory"
-	gitx "github.com/picatz/deputy/internal/gitutil"
-	"github.com/picatz/deputy/internal/repository/workspace"
+	gitx "github.com/temporalio/deputy/internal/gitutil"
+	"github.com/temporalio/deputy/internal/repository/workspace"
 )
 
 // Source pairs a go-git repository handle with the workspace containing its

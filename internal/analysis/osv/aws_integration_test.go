@@ -5,7 +5,7 @@ import (
 	"slices"
 	"testing"
 
-	"github.com/picatz/deputy/internal/vulnerability"
+	"github.com/temporalio/deputy/internal/vulnerability"
 	"osv.dev/bindings/go/osvdev"
 )
 

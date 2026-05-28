@@ -1,9 +1,9 @@
 package report
 
 import (
-	vulnerabilityv1 "github.com/picatz/deputy/gen/deputy/vulnerability/v1"
-	remediation "github.com/picatz/deputy/internal/remediation"
-	"github.com/picatz/deputy/internal/vulnerability"
+	vulnerabilityv1 "github.com/temporalio/deputy/gen/deputy/vulnerability/v1"
+	remediation "github.com/temporalio/deputy/internal/remediation"
+	"github.com/temporalio/deputy/internal/vulnerability"
 )
 
 // Summary captures counts and recommended actions derived from vulnerabilities.

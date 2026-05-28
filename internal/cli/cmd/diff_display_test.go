@@ -9,8 +9,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/picatz/deputy/internal/compare"
-	"github.com/picatz/deputy/internal/license"
+	"github.com/temporalio/deputy/internal/compare"
+	"github.com/temporalio/deputy/internal/license"
 )
 
 // Ensure scan-mode enrichment pulls licenses via best-effort sources (e.g., crates.io)

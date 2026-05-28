@@ -10,11 +10,11 @@ import (
 	"testing"
 
 	"github.com/google/go-containerregistry/pkg/name"
-	containerv1 "github.com/picatz/deputy/gen/deputy/container/v1"
-	dependencyv1 "github.com/picatz/deputy/gen/deputy/dependency/v1"
-	vulnerabilityv1 "github.com/picatz/deputy/gen/deputy/vulnerability/v1"
-	"github.com/picatz/deputy/internal/policy"
-	"github.com/picatz/deputy/internal/scanning"
+	containerv1 "github.com/temporalio/deputy/gen/deputy/container/v1"
+	dependencyv1 "github.com/temporalio/deputy/gen/deputy/dependency/v1"
+	vulnerabilityv1 "github.com/temporalio/deputy/gen/deputy/vulnerability/v1"
+	"github.com/temporalio/deputy/internal/policy"
+	"github.com/temporalio/deputy/internal/scanning"
 	"google.golang.org/protobuf/proto"
 )
 
