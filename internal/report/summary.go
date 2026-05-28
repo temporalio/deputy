@@ -16,6 +16,12 @@ type Summary struct {
 	StdlibRecommendation string
 	Commands             []remediation.Command
 	CommandsHeader       string
+
+	// CommandFixableCount counts findings resolved by an action (e.g. pinning)
+	// rather than a version upgrade. CommandRemediations lists the distinct
+	// commands, in first-seen order (e.g. "deputy pin").
+	CommandFixableCount int
+	CommandRemediations []string
 }
 
 // BuildSummaryFromResult computes summary stats from a ConsolidatedResult.
@@ -33,7 +39,25 @@ func BuildSummary(cons []vulnerability.Consolidated, stats vulnerabilityv1.Stats
 		stats = vulnerability.StatsFromConsolidated(cons, len(cons))
 	}
 	high := stats.Critical + stats.High
-	unfixed := stats.Unique - stats.FixAvailable
+
+	// Findings whose fix is an action (e.g. pinning) rather than a version
+	// upgrade. These are fixable, so they must not fall into "no fix available".
+	var cmdRemediations []string
+	seenCmd := map[string]bool{}
+	commandFixable := 0
+	for _, v := range cons {
+		cmd := v.CommandRemediation()
+		if cmd == "" {
+			continue
+		}
+		commandFixable++
+		if !seenCmd[cmd] {
+			seenCmd[cmd] = true
+			cmdRemediations = append(cmdRemediations, cmd)
+		}
+	}
+
+	unfixed := int(stats.Unique) - int(stats.FixAvailable) - commandFixable
 	if unfixed < 0 {
 		unfixed = 0
 	}
@@ -47,9 +71,11 @@ func BuildSummary(cons []vulnerability.Consolidated, stats vulnerabilityv1.Stats
 		Stats:                stats,
 		CriticalHighCount:    int(high),
 		FixAvailableCount:    int(stats.FixAvailable),
-		UnfixedCount:         int(unfixed),
+		UnfixedCount:         unfixed,
 		StdlibRecommendation: stdlibRec,
 		Commands:             commands,
 		CommandsHeader:       header,
+		CommandFixableCount:  commandFixable,
+		CommandRemediations:  cmdRemediations,
 	}
 }
