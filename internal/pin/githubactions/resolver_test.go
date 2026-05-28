@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+
+	"github.com/go-git/go-git/v5/plumbing"
 )
 
 func TestBestSemverTag(t *testing.T) {
@@ -160,6 +162,49 @@ func TestResolveTag(t *testing.T) {
 	}
 	if tag != "v4.2.2" {
 		t.Errorf("got %q, want v4.2.2", tag)
+	}
+}
+
+func TestMergeRefs_PrefersPeeledCommitOverTagObject(t *testing.T) {
+	// Regression for the annotated-tag pinning bug: when a tag is annotated,
+	// ls-remote (with AppendPeeled) advertises both the tag object ref and a
+	// peeled "^{}" ref. We must pin the peeled COMMIT, never the tag object.
+	const (
+		tagObjectSHA = "42dc69e1aa15d09112580998cf2ef0119e2e91ae" // annotated tag object
+		commitSHA    = "e18b497796c12c097a38f9edb9d0641fb99eee32" // underlying commit
+		lwTagSHA     = "de0fac2e4500dabe0009e67214ff5f5447ce83dd" // lightweight tag → commit
+		branchSHA    = "cccccccccccccccccccccccccccccccccccccccc"
+	)
+
+	raw := []*plumbing.Reference{
+		// Annotated tag: object ref + peeled ref.
+		plumbing.NewReferenceFromStrings("refs/tags/v2", tagObjectSHA),
+		plumbing.NewReferenceFromStrings("refs/tags/v2^{}", commitSHA),
+		// Lightweight tag: no peeled ref.
+		plumbing.NewReferenceFromStrings("refs/tags/v6", lwTagSHA),
+		// Branch.
+		plumbing.NewReferenceFromStrings("refs/heads/main", branchSHA),
+		// HEAD should be ignored.
+		plumbing.NewReferenceFromStrings("HEAD", branchSHA),
+	}
+
+	got := map[string]string{}
+	for _, e := range mergeRefs(raw) {
+		got[e.name] = e.sha
+	}
+
+	if got["refs/tags/v2"] != commitSHA {
+		t.Errorf("annotated tag v2: got %s, want peeled commit %s (not tag object %s)",
+			got["refs/tags/v2"], commitSHA, tagObjectSHA)
+	}
+	if got["refs/tags/v6"] != lwTagSHA {
+		t.Errorf("lightweight tag v6: got %s, want %s", got["refs/tags/v6"], lwTagSHA)
+	}
+	if got["refs/heads/main"] != branchSHA {
+		t.Errorf("branch main: got %s, want %s", got["refs/heads/main"], branchSHA)
+	}
+	if _, ok := got["HEAD"]; ok {
+		t.Error("HEAD should be excluded from merged refs")
 	}
 }
 

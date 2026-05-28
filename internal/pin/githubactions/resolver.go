@@ -9,6 +9,7 @@ import (
 
 	git "github.com/go-git/go-git/v5"
 	"github.com/go-git/go-git/v5/config"
+	"github.com/go-git/go-git/v5/plumbing"
 	"github.com/go-git/go-git/v5/storage/memory"
 	"github.com/temporalio/deputy/internal/auth"
 	"github.com/temporalio/deputy/internal/pin"
@@ -161,13 +162,30 @@ func (r *Resolver) gitListRefs(ctx context.Context, remoteURL string) ([]refEntr
 		URLs: []string{remoteURL},
 	})
 
-	rawRefs, err := remote.ListContext(ctx, &git.ListOptions{Auth: gitAuth})
+	// AppendPeeled is required so annotated tags advertise their peeled
+	// "^{}" refs (the underlying commit). go-git defaults to IgnorePeeled,
+	// which strips them — leaving only the tag-object SHA. Without this we
+	// would pin the tag object instead of the commit it points to, which is
+	// both semantically wrong for a "pin the reviewed commit" tool and
+	// degrades the version comment (e.g. "# v2" instead of "# v2.8.0").
+	rawRefs, err := remote.ListContext(ctx, &git.ListOptions{
+		Auth:          gitAuth,
+		PeelingOption: git.AppendPeeled,
+	})
 	if err != nil {
 		return nil, fmt.Errorf("ls-remote %s: %w", remoteURL, err)
 	}
 
-	// Build ref entries. For annotated tags, prefer the peeled "^{}" ref
-	// which gives us the underlying commit SHA directly.
+	return mergeRefs(rawRefs), nil
+}
+
+// mergeRefs converts raw advertised refs into tag-name → commit-SHA entries.
+//
+// For annotated tags, ls-remote (with AppendPeeled) advertises both the tag
+// object ref and a peeled "<name>^{}" ref pointing at the underlying commit.
+// We always prefer the peeled commit SHA so callers pin the commit, never the
+// tag object. Lightweight tags have no peeled ref and resolve to their own SHA.
+func mergeRefs(rawRefs []*plumbing.Reference) []refEntry {
 	peeled := make(map[string]string)   // "refs/tags/v4.2.2" → commit SHA (from ^{})
 	regular := make(map[string]string)  // "refs/tags/v4.2.2" → object SHA
 	branches := make(map[string]string) // "refs/heads/main" → commit SHA
@@ -206,7 +224,7 @@ func (r *Resolver) gitListRefs(ctx context.Context, remoteURL string) ([]refEntr
 		entries = append(entries, refEntry{name: name, sha: sha})
 	}
 
-	return entries, nil
+	return entries
 }
 
 // gitRemoteURL constructs the HTTPS git remote URL for a GitHub repository.
