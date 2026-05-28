@@ -118,10 +118,10 @@ func VulnerabilityList(w io.Writer, cons []vulnerability.Consolidated, opts Vuln
 		for _, v := range list {
 			sevDisp := ui.SeverityLabel(v.Severity, v.SeverityType)
 			parts := []string{ui.StyleSymbol.Render(v.PrimaryID), sevDisp}
-			if len(v.FixedVersions) > 0 {
-				if best := vulnerability.FindBestFixedVersion(v.FixedVersions, v.Version); best != "" {
-					parts = append(parts, ui.StyleUpgraded.Render(fmt.Sprintf("(↑ %s)", best)))
-				}
+			if best := vulnerability.FindBestFixedVersion(v.FixedVersions, v.Version); best != "" {
+				parts = append(parts, ui.StyleUpgraded.Render(fmt.Sprintf("(↑ %s)", best)))
+			} else if cmd := v.CommandRemediation(); cmd != "" {
+				parts = append(parts, ui.StyleUpgraded.Render(fmt.Sprintf("(fix: %s)", cmd)))
 			}
 			if v.RelatedCount > 1 {
 				parts = append(parts, ui.StyleVersion.Render(fmt.Sprintf("[%d related]", v.RelatedCount)))
@@ -213,11 +213,14 @@ func VulnerabilitySummaryAndActions(w io.Writer, cons []vulnerability.Consolidat
 	if summary.FixAvailableCount > 0 {
 		fmt.Fprintln(w, "  "+ui.StyleSymbol.Render(ui.StyleUpgraded.Render("↑"))+" "+ui.StyleSymbol.Render(fmt.Sprintf("%d can be fixed by upgrading", summary.FixAvailableCount)))
 	}
+	if summary.CommandFixableCount > 0 {
+		fmt.Fprintln(w, "  "+ui.StyleSymbol.Render(ui.StyleUpgraded.Render("↑"))+" "+ui.StyleSymbol.Render(fmt.Sprintf("%d can be fixed by pinning", summary.CommandFixableCount)))
+	}
 	if summary.UnfixedCount > 0 {
 		fmt.Fprintln(w, "  "+ui.StyleSymbol.Render(ui.StyleRemoved.Render("-"))+" "+ui.StyleSymbol.Render(fmt.Sprintf("%d have no fix available yet", summary.UnfixedCount)))
 	}
 
-	if len(summary.Commands) > 0 || summary.StdlibRecommendation != "" || summary.UnfixedCount > 0 {
+	if len(summary.Commands) > 0 || summary.StdlibRecommendation != "" || len(summary.CommandRemediations) > 0 || summary.UnfixedCount > 0 {
 		fmt.Fprintln(w)
 		fmt.Fprintln(w, ui.StyleHeader.Render("Recommended Actions:"))
 		step := 1
@@ -228,6 +231,11 @@ func VulnerabilitySummaryAndActions(w io.Writer, cons []vulnerability.Consolidat
 		if len(summary.Commands) > 0 {
 			fmt.Fprintf(w, "  %d. %s\n", step, ui.StyleBold.Render(summary.CommandsHeader))
 			RemediationCommands(w, summary.Commands, "       ", "         ")
+			step++
+		}
+		for _, cmd := range summary.CommandRemediations {
+			fmt.Fprintf(w, "  %d. %s\n", step, ui.StyleBold.Render("Pin mutable references to immutable revisions"))
+			fmt.Fprintf(w, "       %s\n", ui.StyleVersion.Render(cmd))
 			step++
 		}
 		if summary.UnfixedCount > 0 {

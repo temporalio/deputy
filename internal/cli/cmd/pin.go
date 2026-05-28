@@ -252,7 +252,7 @@ func runPin(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	if err := outputPinReport(cmd, report, format, outPath); err != nil {
+	if err := outputPinReport(cmd, report, format, outPath, dryRun); err != nil {
 		return err
 	}
 
@@ -296,7 +296,7 @@ func runPinCheck(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	if err := outputPinReport(cmd, report, format, outPath); err != nil {
+	if err := outputPinReport(cmd, report, format, outPath, false); err != nil {
 		return err
 	}
 
@@ -346,7 +346,7 @@ func runPinVerify(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	if err := outputPinReport(cmd, report, format, outPath); err != nil {
+	if err := outputPinReport(cmd, report, format, outPath, false); err != nil {
 		return err
 	}
 
@@ -396,7 +396,7 @@ func runPinUpdate(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	if err := outputPinReport(cmd, report, format, outPath); err != nil {
+	if err := outputPinReport(cmd, report, format, outPath, dryRun); err != nil {
 		return err
 	}
 
@@ -416,8 +416,9 @@ func resolveDir(args []string) (string, error) {
 	return absDir, nil
 }
 
-// outputPinReport writes the report in the requested format.
-func outputPinReport(_ *cobra.Command, report *pin.Report, format, outPath string) error {
+// outputPinReport writes the report in the requested format. dryRun adjusts the
+// human-readable wording so a preview never claims files were modified.
+func outputPinReport(_ *cobra.Command, report *pin.Report, format, outPath string, dryRun bool) error {
 	var w io.Writer = os.Stdout
 	if outPath != "" && outPath != "-" {
 		f, err := os.Create(outPath)
@@ -436,7 +437,7 @@ func outputPinReport(_ *cobra.Command, report *pin.Report, format, outPath strin
 			return fmt.Errorf("encoding JSON: %w", err)
 		}
 	default:
-		renderPinReport(w, report)
+		renderPinReport(w, report, dryRun)
 	}
 	return nil
 }
@@ -455,8 +456,9 @@ func pinExitCode(report *pin.Report) error {
 }
 
 // renderPinReport writes a human-readable summary of pin results to w,
-// grouped by file.
-func renderPinReport(w io.Writer, report *pin.Report) {
+// grouped by file. When dryRun is true, wording reflects a preview so the
+// output never implies files were modified.
+func renderPinReport(w io.Writer, report *pin.Report, dryRun bool) {
 	if len(report.Results) == 0 {
 		fmt.Fprintln(w)
 		fmt.Fprintln(w, ui.StyleAdded.Render("✓ No pinnable dependencies found"))
@@ -471,9 +473,17 @@ func renderPinReport(w io.Writer, report *pin.Report) {
 		heading = "Suspicious Pins Detected:"
 	case s.Unpinned > 0:
 		heading = "Unpinned Dependencies Found:"
-	case s.Pinned > 0 || s.Updated > 0:
-		heading = "Dependencies Pinned:"
-	case s.Verified > 0 && s.Pinned == 0:
+	case s.Updated > 0:
+		heading = "Dependencies to Update:"
+		if !dryRun {
+			heading = "Dependencies Updated:"
+		}
+	case s.Pinned > 0:
+		heading = "Dependencies to Pin:"
+		if !dryRun {
+			heading = "Dependencies Pinned:"
+		}
+	case s.Verified > 0:
 		heading = "Verification Results:"
 	}
 
@@ -504,7 +514,12 @@ func renderPinReport(w io.Writer, report *pin.Report) {
 	}
 
 	fmt.Fprintln(w)
-	renderPinSummary(w, report.Stats)
+	renderPinSummary(w, report.Stats, dryRun)
+
+	if dryRun && (report.Stats.Pinned > 0 || report.Stats.Updated > 0) {
+		fmt.Fprintln(w)
+		fmt.Fprintln(w, ui.StyleDim.Render("  Dry run — no files were modified. Re-run without --dry-run to apply."))
+	}
 }
 
 func renderPinResult(w io.Writer, r pin.Result, arrow string) {
@@ -549,6 +564,7 @@ func renderPinResult(w io.Writer, r pin.Result, arrow string) {
 
 	case pin.StatusVerified:
 		detail := "verified"
+		var caveats []string
 		if r.Verification != nil {
 			var parts []string
 			if r.Verification.SignatureValid {
@@ -560,8 +576,15 @@ func renderPinResult(w io.Writer, r pin.Result, arrow string) {
 			if len(parts) > 0 {
 				detail = strings.Join(parts, ", ")
 			}
+			caveats = r.Verification.Warnings
 		}
-		fmt.Fprintln(w, prefix+styledName+" "+ui.StyleAdded.Render(detail))
+		line := prefix + styledName + " " + ui.StyleAdded.Render(detail)
+		// Surface non-fatal caveats (unsigned, ahead of branch, unverifiable
+		// reachability) that don't rise to "suspicious" but are worth seeing.
+		if len(caveats) > 0 {
+			line += " " + ui.StyleDim.Render("("+strings.Join(caveats, "; ")+")")
+		}
+		fmt.Fprintln(w, line)
 
 	case pin.StatusSuspicious:
 		fmt.Fprintln(w, prefix+styledName+" "+
@@ -579,17 +602,25 @@ func renderPinResult(w io.Writer, r pin.Result, arrow string) {
 	}
 }
 
-func renderPinSummary(w io.Writer, s pin.Stats) {
+func renderPinSummary(w io.Writer, s pin.Stats, dryRun bool) {
 	fmt.Fprintln(w, ui.StyleHeader.Render("Summary:"))
 	if s.Pinned > 0 {
+		msg := fmt.Sprintf("%d pinned to immutable SHA", s.Pinned)
+		if dryRun {
+			msg = fmt.Sprintf("%d would be pinned to immutable SHA", s.Pinned)
+		}
 		fmt.Fprintf(w, "  %s %s\n",
 			ui.StyleSymbol.Render(ui.StyleAdded.Render("↑")),
-			ui.StyleSymbol.Render(fmt.Sprintf("%d pinned to immutable SHA", s.Pinned)))
+			ui.StyleSymbol.Render(msg))
 	}
 	if s.Updated > 0 {
+		msg := fmt.Sprintf("%d updated to latest version", s.Updated)
+		if dryRun {
+			msg = fmt.Sprintf("%d would be updated to latest version", s.Updated)
+		}
 		fmt.Fprintf(w, "  %s %s\n",
 			ui.StyleSymbol.Render(ui.StyleUpgraded.Render("↑")),
-			ui.StyleSymbol.Render(fmt.Sprintf("%d updated to latest version", s.Updated)))
+			ui.StyleSymbol.Render(msg))
 	}
 	if s.AlreadyPinned > 0 {
 		fmt.Fprintf(w, "  %s %s\n",

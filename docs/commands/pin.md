@@ -20,6 +20,39 @@ deputy pin update [directory] [flags]
 
 By default, both ecosystems are pinned. Use `--ecosystems` to narrow.
 
+## Resolution semantics
+
+`deputy pin` is **faithful**: it pins each reference to the exact immutable
+commit (or digest) that the reference resolves to *right now*. It never
+substitutes a different release. If `uses: actions/foo@v7` currently resolves
+to the `v7.6.0` commit, that is the commit you get — pinning never silently
+upgrades or downgrades the code that runs.
+
+This guarantee is why you sometimes see a less-specific version comment than you
+might expect:
+
+```yaml
+# Floating major tag with a precise patch on the same commit:
+uses: astral-sh/setup-uv@37802adc…  # v7.6.0   ← v7 and v7.6.0 are the same commit
+
+# Floating major moved ahead of any patch tag (no vX.Y.Z on this commit):
+uses: Swatinem/rust-cache@e18b497…  # v2       ← v2 is the most specific true tag
+
+# Branch ref (e.g. a rolling channel):
+uses: dtolnay/rust-toolchain@29eef33…  # stable ← pinned to the branch's commit
+```
+
+The comment always reflects the **most specific ref that genuinely points at the
+pinned commit**. Deputy will not fabricate a precise version (e.g. `# v2.9.1`)
+when that tag points at a *different* commit — doing so would misrepresent what
+is actually pinned. The comment is also what Dependabot and Renovate read to
+propose updates, so it is kept accurate to the pinned commit.
+
+To intentionally move pins forward to the latest release in their channel, use
+[`deputy pin update`](#subcommands) — that is the command that changes versions.
+Plain `deputy pin` only makes an existing reference immutable; it does not change
+which version you are on.
+
 ## Subcommands
 
 | Subcommand | Network | Writes | Purpose |
