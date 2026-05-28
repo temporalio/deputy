@@ -123,6 +123,50 @@ func TestResolveSHA(t *testing.T) {
 	}
 }
 
+// TestResolveSHA_FaithfulNoDowngrade locks in the no-silent-downgrade
+// guarantee. A floating major tag (v7) points at the LATEST release commit,
+// while an older patch tag (v7.1.6) points at a different, older commit.
+// Resolving @v7 must return the commit v7 currently points to — never the
+// older release. (Modeled on the real astral-sh/setup-uv layout, where a
+// substitution bug would pin v7.1.6 instead of the live v7.6.0.)
+func TestResolveSHA_FaithfulNoDowngrade(t *testing.T) {
+	const (
+		latestCommit = "37802adc94f370d6bfd71619e3f0bf239e1f3b78" // what v7 → v7.6.0 points to now
+		oldCommit    = "681c641aba71e4a1c380be3ab5e12ad51f415867" // older v7.1.6 release
+	)
+	fakeRefs := []refEntry{
+		{name: "refs/tags/v7", sha: latestCommit},      // floating major → latest
+		{name: "refs/tags/v7.6.0", sha: latestCommit},  // precise tag on same commit
+		{name: "refs/tags/v7.1.6", sha: oldCommit},     // older release, different commit
+		{name: "refs/heads/main", sha: latestCommit},
+	}
+
+	r := &Resolver{refCache: make(map[string][]refEntry)}
+	r.listRefsFunc = func(ctx context.Context, remoteURL string) ([]refEntry, error) {
+		return fakeRefs, nil
+	}
+
+	// @v7 must resolve to the commit v7 points to now, not the older v7.1.6.
+	sha, err := r.ResolveSHA(t.Context(), "astral-sh", "setup-uv", "v7")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sha != latestCommit {
+		t.Fatalf("resolving @v7 = %s, want current target %s (must NOT downgrade to %s)",
+			sha, latestCommit, oldCommit)
+	}
+
+	// And the annotation should be the precise tag on that exact commit (v7.6.0),
+	// never the older release tag.
+	tag, err := r.ResolveTag(t.Context(), "astral-sh", "setup-uv", sha)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if tag != "v7.6.0" {
+		t.Errorf("tag annotation = %q, want v7.6.0", tag)
+	}
+}
+
 func TestResolveSHA_NetworkError(t *testing.T) {
 	r := &Resolver{refCache: make(map[string][]refEntry)}
 	r.listRefsFunc = func(ctx context.Context, remoteURL string) ([]refEntry, error) {
