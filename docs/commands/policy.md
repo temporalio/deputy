@@ -131,20 +131,20 @@ $ deputy policy test tests/
 Package multiple policies into a single distributable file.
 
 ```
-deputy policy bundle --out bundle.json <policy.yaml> [policy2.yaml ...]
+deputy policy bundle --output bundle.json <policy.yaml> [policy2.yaml ...]
 ```
 
 ### Flags
 
 | Flag | Default | Description |
 | --- | --- | --- |
-| `--out` | *required* | Output bundle path (use `-` for stdout) |
+| `--output` | *required* | Output bundle path (use `-` for stdout) |
 
 ### Example
 
 ```console
 $ deputy policy bundle \
-    --out production.json \
+    --output production.json \
     policies/security.yaml \
     policies/compliance.yaml
 ```
@@ -394,7 +394,7 @@ flowchart LR
 2. Lint                →  deputy policy lint policy.yaml
 3. Test                →  deputy policy test tests/
 4. Try interactively   →  deputy policy repl
-5. Bundle              →  deputy policy bundle --out bundle.json policy.yaml
+5. Bundle              →  deputy policy bundle --output bundle.json policy.yaml
 6. Deploy              →  deputy proxy serve --policy bundle.json
 ```
 

@@ -590,13 +590,13 @@ func newPolicyTestCommand() *cobra.Command {
 func newPolicyBundleCommand() *cobra.Command {
 	var outPath string
 	cmd := &cobra.Command{
-		Use:           "bundle --out bundle.json <policy.yaml> [policy2.yaml ...]",
+		Use:           "bundle --output bundle.json <policy.yaml> [policy2.yaml ...]",
 		Short:         "Compile CEL policies into a reusable bundle",
 		SilenceErrors: true,
 		SilenceUsage:  true,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if strings.TrimSpace(outPath) == "" {
-				return errors.New("missing --out path for bundle")
+				return errors.New("missing --output path for bundle")
 			}
 			if len(args) == 0 {
 				return errors.New("provide at least one CEL policy file")
@@ -616,7 +616,7 @@ func newPolicyBundleCommand() *cobra.Command {
 			return os.WriteFile(outPath, append(data, '\n'), 0o644)
 		},
 	}
-	cmd.Flags().StringVar(&outPath, "out", "", "Destination bundle file (use '-' for stdout)")
+	cmd.Flags().StringVarP(&outPath, "output", "o", "", "Destination bundle file (use '-' for stdout)")
 	return cmd
 }
 
