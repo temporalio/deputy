@@ -255,3 +255,11 @@ require (
 	sigs.k8s.io/yaml v1.6.0 // indirect
 	www.velocidex.com/golang/regparser v0.0.0-20250203141505-31e704a67ef7 // indirect
 )
+
+// Pin runtime-spec to v1.2.1. Patched buildkit (>=0.28.1) and cgroups/v3 pull
+// runtime-spec v1.3.0, which changed LinuxPids.Limit to *int64. osv-scalibr's
+// containerd standalone extractor still uses containerd v1.7, whose oci package
+// assigns int64 to that field and fails to compile against v1.3.0 (Linux only).
+// Remove this once osv-scalibr's released containerd extractor moves to
+// containerd v2 (already done on osv-scalibr main, not yet released).
+replace github.com/opencontainers/runtime-spec => github.com/opencontainers/runtime-spec v1.2.1
