@@ -188,11 +188,13 @@ runs:
         echo "updated-count=${UPDATED}" >> "$GITHUB_OUTPUT"
         echo "new-vulnerabilities=${NEW_VULNS}" >> "$GITHUB_OUTPUT"
 
-        # Save summary for PR comment
+        # Save summary for PR comment. Use the ANSI-stripped output so the comment
+        # renders as clean text (the raw output may carry color escape codes via
+        # CLICOLOR_FORCE, which show up as garbage like ^[[1;94m in markdown).
         # Use base64 encoding to safely pass multiline output with special characters
         # through GitHub Actions outputs (avoids heredoc parsing issues with Unicode)
         # Note: Use tr -d '\n' for portability (GNU base64 uses -w 0, BSD uses -b 0)
-        SUMMARY_BASE64=$(printf '%s' "$OUTPUT" | base64 | tr -d '\n')
+        SUMMARY_BASE64=$(printf '%s' "$PLAIN_OUTPUT" | base64 | tr -d '\n')
         echo "summary_base64=${SUMMARY_BASE64}" >> "$GITHUB_OUTPUT"
 
         # Also save as environment variable for the comment step
