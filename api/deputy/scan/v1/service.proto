@@ -113,6 +113,13 @@ message ScanOptions {
   // populating layer_details.in_base_image in the response packages.
   // Only applies to container image targets. Requires network access and adds latency.
   bool detect_base_image = 11;
+
+  // DisableFixVerification turns off fix resolution. By default the scanner
+  // verifies each advisory's claimed fixed version against the Go module proxy
+  // and reports module migrations when no in-place fix is installable. Set this
+  // (via --no-verify-fixes) for offline scans, falling back to trusting
+  // advisory-reported fixed versions verbatim. Default false (verification on).
+  bool disable_fix_verification = 12;
 }
 
 // TargetHint disambiguates the target type when auto-detection is insufficient.

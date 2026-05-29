@@ -10,8 +10,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/docker/docker/api/types/container"
-	"github.com/docker/docker/api/types/mount"
+	"github.com/moby/moby/api/types/container"
+	"github.com/moby/moby/api/types/mount"
 	sandboxv1 "github.com/temporalio/deputy/gen/deputy/sandbox/v1"
 )
 

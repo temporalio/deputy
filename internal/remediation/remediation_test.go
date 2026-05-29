@@ -49,6 +49,44 @@ func TestCommandsFromConsolidatedGeneratesPlan(t *testing.T) {
 	assertCommand(t, commands, "Edit vagrant.gemspec to require rexml >= 3.3.9", false)
 }
 
+func TestCommandsFromConsolidatedMigration(t *testing.T) {
+	cons := []vulnerability.Consolidated{
+		{
+			PrimaryID:    "GO-DIRECT",
+			Package:      "github.com/example/widget",
+			Version:      "v1.4.0",
+			IsDirect:     true,
+			ManifestRefs: []dependencyv1.ManifestRef{{Manager: "go", Path: "go.mod"}},
+			Fix:          &vulnerability.FixVerdict{Status: vulnerability.FixStatusMigration, Version: "2.0.1", TargetModule: "github.com/example/widget/v2"},
+		},
+		{
+			PrimaryID:    "GO-INDIRECT",
+			Package:      "github.com/docker/docker",
+			Version:      "v28.5.2+incompatible",
+			IsDirect:     false,
+			ManifestRefs: []dependencyv1.ManifestRef{{Manager: "go", Path: "go.mod"}},
+			Fix:          &vulnerability.FixVerdict{Status: vulnerability.FixStatusMigration, Version: "2.0.0-beta.14", TargetModule: "github.com/moby/moby/v2"},
+		},
+	}
+	commands, _ := CommandsFromConsolidated(cons)
+
+	// Direct migration: a concrete (but non-executable) go get on the target.
+	assertCommand(t, commands, "go get github.com/example/widget/v2@v2.0.1", false)
+	// Indirect migration: advise upgrading the importer, not a local go get.
+	assertCommand(t, commands, "Upgrade the dependency that pulls this in (indirect — no in-place fix)", false)
+
+	// An indirect migration must NOT emit a runnable go get for the target —
+	// it would add an unused require that `go mod tidy` then drops.
+	for _, c := range commands {
+		if c.Command == "go get github.com/moby/moby/v2@v2.0.0-beta.14" {
+			t.Errorf("indirect migration should not emit a go get for the target: %q", c.Command)
+		}
+		if c.Command == "go mod tidy" {
+			t.Errorf("non-executable migrations should not trigger a go mod tidy follow-up")
+		}
+	}
+}
+
 func TestGoModuleVersionNormalization(t *testing.T) {
 	// Regression test: Go module versions from OSV may lack "v" prefix (e.g., "0.3.4")
 	// but `go get` requires them (e.g., "v0.3.4")

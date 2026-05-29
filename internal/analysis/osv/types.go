@@ -34,6 +34,7 @@ type Vulnerability struct {
 	Modified         string
 	References       []string
 	FixedVersions    []string
+	PackageFixes     []*vulnerabilityv1.PackageFix
 	Affected         bool
 	Locations        []string
 	ManifestRefs     []dependencyv1.ManifestRef

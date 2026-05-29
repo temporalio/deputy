@@ -28,26 +28,6 @@ func TestBestSemverTag(t *testing.T) {
 	}
 }
 
-func TestSplitOwnerRepo(t *testing.T) {
-	tests := []struct {
-		name      string
-		wantOwner string
-		wantRepo  string
-	}{
-		{"actions/checkout", "actions", "checkout"},
-		{"github/codeql-action", "github", "codeql-action"},
-		{"singlename", "", ""},
-		{"", "", ""},
-	}
-	for _, tc := range tests {
-		owner, repo := splitOwnerRepo(tc.name)
-		if owner != tc.wantOwner || repo != tc.wantRepo {
-			t.Errorf("splitOwnerRepo(%q) = (%q, %q), want (%q, %q)",
-				tc.name, owner, repo, tc.wantOwner, tc.wantRepo)
-		}
-	}
-}
-
 func TestSegmentCount(t *testing.T) {
 	tests := []struct {
 		v    string

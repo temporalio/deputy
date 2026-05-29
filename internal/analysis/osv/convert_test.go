@@ -10,6 +10,51 @@ import (
 
 func tTime(tstr string) time.Time { tm, _ := time.Parse(time.RFC3339, tstr); return tm }
 
+// Test_ProcessOSVVulnerability_PackageFixes verifies that fixes for sibling
+// modules (e.g., a Go major-version migration target) are captured in
+// PackageFixes even though the queried module's own path has no fix. This is
+// the data the fix resolver uses to recommend a migration.
+func Test_ProcessOSVVulnerability_PackageFixes(t *testing.T) {
+	vuln := osvschema.Vulnerability{
+		ID: "GHSA-test",
+		Affected: []osvschema.Affected{
+			{
+				Package: osvschema.Package{Name: "github.com/docker/docker", Ecosystem: "Go"},
+				Ranges:  []osvschema.Range{{Events: []osvschema.Event{{Introduced: "0"}, {LastAffected: "28.5.2"}}}},
+			},
+			{
+				Package: osvschema.Package{Name: "github.com/moby/moby/v2", Ecosystem: "Go"},
+				Ranges:  []osvschema.Range{{Events: []osvschema.Event{{Introduced: "0"}, {Fixed: "2.0.0-beta.8"}}}},
+			},
+		},
+	}
+	out := ProcessOSVVulnerability(vuln, PkgInput{QueryKey: QueryKey{Name: "github.com/docker/docker", Version: "v28.5.2+incompatible", Ecosystem: "Go"}})
+
+	// The queried module has no fix event, so FixedVersions is empty.
+	if len(out.FixedVersions) != 0 {
+		t.Errorf("expected no in-place fixed versions, got %v", out.FixedVersions)
+	}
+	// The sibling module's fix must be captured in PackageFixes.
+	var moby *struct {
+		mod      string
+		versions []string
+	}
+	for _, pf := range out.PackageFixes {
+		if pf.Module == "github.com/moby/moby/v2" {
+			moby = &struct {
+				mod      string
+				versions []string
+			}{pf.Module, pf.FixedVersions}
+		}
+	}
+	if moby == nil {
+		t.Fatalf("expected PackageFixes to include github.com/moby/moby/v2, got %+v", out.PackageFixes)
+	}
+	if len(moby.versions) != 1 || moby.versions[0] != "2.0.0-beta.8" {
+		t.Errorf("expected moby/v2 fix 2.0.0-beta.8, got %v", moby.versions)
+	}
+}
+
 func Test_ProcessOSVVulnerability_basic_fields(t *testing.T) {
 	vuln := osvschema.Vulnerability{
 		ID:               "GHSA-xxxx",

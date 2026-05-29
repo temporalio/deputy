@@ -6,6 +6,11 @@ Scan for vulnerabilities and upload results to GitHub Security tab via SARIF.
 - With GHAS: Uploads SARIF to GitHub Security tab for rich integration
 - Without GHAS: Automatically posts scan summary as PR comment
 
+Every run also writes a **job summary** to the workflow run page: a status
+banner, severity counts, and (when scanning to SARIF) a per-finding table
+showing each affected package, version, advisory, and the version that fixes
+it. No extra configuration is required.
+
 ## Usage
 
 ```yaml
