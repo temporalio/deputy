@@ -13,7 +13,7 @@
 //   - Read-only root filesystem
 //   - OCI runtime selection (runc, runsc/gVisor, etc.)
 //
-// This implementation uses the Docker SDK (github.com/docker/docker/client)
+// This implementation uses the Moby SDK (github.com/moby/moby/client)
 // for container management, providing type safety, better error handling,
 // and native streaming without CLI dependency.
 //
@@ -40,15 +40,13 @@ import (
 	"sync"
 	"time"
 
-	"github.com/docker/docker/api/types/container"
-	imagetypes "github.com/docker/docker/api/types/image"
-	"github.com/docker/docker/api/types/mount"
-	"github.com/docker/docker/api/types/network"
-	"github.com/docker/docker/client"
-	"github.com/docker/docker/errdefs"
-	"github.com/docker/docker/pkg/jsonmessage"
-	"github.com/docker/docker/pkg/stdcopy"
-	"github.com/docker/go-connections/nat"
+	"github.com/containerd/errdefs"
+	"github.com/moby/moby/api/pkg/stdcopy"
+	"github.com/moby/moby/api/types/container"
+	jsonstream "github.com/moby/moby/api/types/jsonstream"
+	"github.com/moby/moby/api/types/mount"
+	"github.com/moby/moby/api/types/network"
+	"github.com/moby/moby/client"
 	sandboxv1 "github.com/temporalio/deputy/gen/deputy/sandbox/v1"
 	"github.com/temporalio/deputy/internal/sandbox"
 	"github.com/temporalio/deputy/internal/sandbox/workspace"
@@ -227,7 +225,7 @@ func (r *Runtime) Available(ctx context.Context) bool {
 	}
 
 	// Check if daemon is responsive
-	_, err = cli.Ping(ctx)
+	_, err = cli.Ping(ctx, client.PingOptions{})
 	if err != nil {
 		return false
 	}
@@ -255,13 +253,13 @@ func (r *Runtime) OCIRuntimeAvailable(ctx context.Context) bool {
 	}
 
 	// Query Docker's runtime configuration
-	info, err := cli.Info(ctx)
+	info, err := cli.Info(ctx, client.InfoOptions{})
 	if err != nil {
 		return false
 	}
 
 	// Check if the runtime is in the list of available runtimes
-	for name := range info.Runtimes {
+	for name := range info.Info.Runtimes {
 		if name == r.OCIRuntime {
 			return true
 		}
@@ -280,7 +278,7 @@ func (r *Runtime) Version(ctx context.Context) string {
 		return ""
 	}
 
-	version, err := cli.ServerVersion(ctx)
+	version, err := cli.ServerVersion(ctx, client.ServerVersionOptions{})
 	if err != nil {
 		return ""
 	}
@@ -474,7 +472,11 @@ func (r *Runtime) Execute(ctx context.Context, req *sandboxv1.ExecuteRequest) it
 		)
 
 		// Create container
-		createResp, err := cli.ContainerCreate(ctx, containerConfig, hostConfig, nil, nil, executionID)
+		createResp, err := cli.ContainerCreate(ctx, client.ContainerCreateOptions{
+			Config:     containerConfig,
+			HostConfig: hostConfig,
+			Name:       executionID,
+		})
 		if err != nil {
 			yield(&sandboxv1.ExecuteEvent{
 				ExecutionId: executionID,
@@ -497,7 +499,7 @@ func (r *Runtime) Execute(ctx context.Context, req *sandboxv1.ExecuteRequest) it
 		defer func() {
 			cleanupCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 			defer cancel()
-			_ = cli.ContainerRemove(cleanupCtx, containerID, container.RemoveOptions{Force: true})
+			_, _ = cli.ContainerRemove(cleanupCtx, containerID, client.ContainerRemoveOptions{Force: true})
 			r.mu.Lock()
 			delete(r.containers, executionID)
 			r.mu.Unlock()
@@ -520,7 +522,7 @@ func (r *Runtime) Execute(ctx context.Context, req *sandboxv1.ExecuteRequest) it
 		}
 
 		// Attach to container for output streaming
-		attachResp, err := cli.ContainerAttach(ctx, containerID, container.AttachOptions{
+		attachResp, err := cli.ContainerAttach(ctx, containerID, client.ContainerAttachOptions{
 			Stream: true,
 			Stdout: true,
 			Stderr: true,
@@ -538,7 +540,7 @@ func (r *Runtime) Execute(ctx context.Context, req *sandboxv1.ExecuteRequest) it
 		defer attachResp.Close()
 
 		// Start container
-		if err := cli.ContainerStart(ctx, containerID, container.StartOptions{}); err != nil {
+		if _, err := cli.ContainerStart(ctx, containerID, client.ContainerStartOptions{}); err != nil {
 			yield(&sandboxv1.ExecuteEvent{
 				ExecutionId: executionID,
 				Timestamp:   timestamppb.Now(),
@@ -557,13 +559,14 @@ func (r *Runtime) Execute(ctx context.Context, req *sandboxv1.ExecuteRequest) it
 		for event := range outputCh {
 			if !yield(event, nil) {
 				// Caller stopped, kill container
-				_ = cli.ContainerKill(ctx, containerID, "SIGKILL")
+				_, _ = cli.ContainerKill(ctx, containerID, client.ContainerKillOptions{Signal: "SIGKILL"})
 				return
 			}
 		}
 
 		// Wait for container to finish
-		statusCh, errCh := cli.ContainerWait(ctx, containerID, container.WaitConditionNotRunning)
+		waitResult := cli.ContainerWait(ctx, containerID, client.ContainerWaitOptions{Condition: container.WaitConditionNotRunning})
+		statusCh, errCh := waitResult.Result, waitResult.Error
 
 		var exitCode int64
 		select {
@@ -663,7 +666,7 @@ func (r *Runtime) ensureImageWithProgress(ctx context.Context, cli *client.Clien
 		return fmt.Errorf("image is required")
 	}
 
-	if _, _, err := cli.ImageInspectWithRaw(ctx, image); err == nil {
+	if _, err := cli.ImageInspect(ctx, image); err == nil {
 		return nil
 	} else if !errdefs.IsNotFound(err) {
 		return fmt.Errorf("inspect image %q: %w", image, err)
@@ -688,7 +691,7 @@ func (r *Runtime) ensureImageWithProgress(ctx context.Context, cli *client.Clien
 		}
 	}
 
-	pullResp, err := cli.ImagePull(ctx, image, imagetypes.PullOptions{})
+	pullResp, err := cli.ImagePull(ctx, image, client.ImagePullOptions{})
 	if err != nil {
 		return fmt.Errorf("pull image %q: %w", image, err)
 	}
@@ -714,7 +717,7 @@ func (r *Runtime) ensureImageWithProgress(ctx context.Context, cli *client.Clien
 		}
 	}
 
-	if _, _, err := cli.ImageInspectWithRaw(ctx, image); err != nil {
+	if _, err := cli.ImageInspect(ctx, image); err != nil {
 		if errdefs.IsNotFound(err) {
 			return fmt.Errorf("image %q not found after pull: %w", image, err)
 		}
@@ -735,7 +738,7 @@ func processPullMessages(reader io.ReadCloser, yield progressYield, executionID,
 	var lastProgressTime time.Time
 
 	for {
-		var msg jsonmessage.JSONMessage
+		var msg jsonstream.Message
 		if err := dec.Decode(&msg); err != nil {
 			if errors.Is(err, io.EOF) {
 				return nil
@@ -744,9 +747,6 @@ func processPullMessages(reader io.ReadCloser, yield progressYield, executionID,
 		}
 		if msg.Error != nil {
 			return msg.Error
-		}
-		if msg.ErrorMessage != "" {
-			return fmt.Errorf("%s", msg.ErrorMessage)
 		}
 
 		// Stream progress if enabled
@@ -1223,7 +1223,8 @@ func (r *Runtime) Cleanup(ctx context.Context, executionID string) error {
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 
-	return cli.ContainerRemove(ctx, containerID, container.RemoveOptions{Force: true})
+	_, err = cli.ContainerRemove(ctx, containerID, client.ContainerRemoveOptions{Force: true})
+	return err
 }
 
 // parseMemory parses memory strings like "512m", "2g" to bytes.
@@ -1301,22 +1302,6 @@ func updateTmpfsSize(opts, newSize string) string {
 	}
 
 	return strings.Join(result, ",")
-}
-
-// Expose ExposedPorts helper for container config.
-func exposePorts(ports []string) (nat.PortSet, nat.PortMap, error) {
-	exposed := nat.PortSet{}
-	bindings := nat.PortMap{}
-
-	for _, p := range ports {
-		port, err := nat.NewPort("tcp", p)
-		if err != nil {
-			return nil, nil, err
-		}
-		exposed[port] = struct{}{}
-	}
-
-	return exposed, bindings, nil
 }
 
 // buildNetworkAllowlistRules generates iptables rules for the network allowlist.

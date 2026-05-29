@@ -41,13 +41,12 @@ import (
 	"strings"
 	"time"
 
-	"github.com/docker/docker/api/types/container"
-	imagetypes "github.com/docker/docker/api/types/image"
-	"github.com/docker/docker/api/types/mount"
-	"github.com/docker/docker/api/types/network"
-	"github.com/docker/docker/client"
-	"github.com/docker/docker/errdefs"
-	"github.com/docker/docker/pkg/stdcopy"
+	"github.com/containerd/errdefs"
+	"github.com/moby/moby/api/pkg/stdcopy"
+	"github.com/moby/moby/api/types/container"
+	"github.com/moby/moby/api/types/mount"
+	"github.com/moby/moby/api/types/network"
+	"github.com/moby/moby/client"
 	"github.com/temporalio/deputy/sdk/plugin"
 )
 
@@ -169,7 +168,7 @@ func (e *gradleSandboxExtractor) getDockerClient(ctx context.Context) (*client.C
 	pingCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 
-	_, err = cli.Ping(pingCtx)
+	_, err = cli.Ping(pingCtx, client.PingOptions{})
 	if err != nil {
 		return nil, fmt.Errorf("Docker daemon not responsive: %w", err)
 	}
@@ -276,7 +275,10 @@ allprojects {
 	}
 
 	// Create container
-	createResp, err := cli.ContainerCreate(ctx, containerConfig, hostConfig, nil, nil, "")
+	createResp, err := cli.ContainerCreate(ctx, client.ContainerCreateOptions{
+		Config:     containerConfig,
+		HostConfig: hostConfig,
+	})
 	if err != nil {
 		return nil, fmt.Errorf("creating container: %w", err)
 	}
@@ -286,11 +288,11 @@ allprojects {
 	defer func() {
 		cleanupCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
-		_ = cli.ContainerRemove(cleanupCtx, containerID, container.RemoveOptions{Force: true})
+		_, _ = cli.ContainerRemove(cleanupCtx, containerID, client.ContainerRemoveOptions{Force: true})
 	}()
 
 	// Attach to container for output
-	attachResp, err := cli.ContainerAttach(ctx, containerID, container.AttachOptions{
+	attachResp, err := cli.ContainerAttach(ctx, containerID, client.ContainerAttachOptions{
 		Stream: true,
 		Stdout: true,
 		Stderr: true,
@@ -301,7 +303,7 @@ allprojects {
 	defer attachResp.Close()
 
 	// Start container
-	if err := cli.ContainerStart(ctx, containerID, container.StartOptions{}); err != nil {
+	if _, err := cli.ContainerStart(ctx, containerID, client.ContainerStartOptions{}); err != nil {
 		return nil, fmt.Errorf("starting container: %w", err)
 	}
 
@@ -314,7 +316,8 @@ allprojects {
 	}()
 
 	// Wait for container to finish
-	statusCh, errCh := cli.ContainerWait(ctx, containerID, container.WaitConditionNotRunning)
+	waitResult := cli.ContainerWait(ctx, containerID, client.ContainerWaitOptions{Condition: container.WaitConditionNotRunning})
+	statusCh, errCh := waitResult.Result, waitResult.Error
 
 	select {
 	case err := <-errCh:
@@ -353,7 +356,7 @@ allprojects {
 // ensureImage ensures the image exists, pulling if needed.
 func (e *gradleSandboxExtractor) ensureImage(ctx context.Context, cli *client.Client) error {
 	// Check if image exists locally
-	_, _, err := cli.ImageInspectWithRaw(ctx, e.image)
+	_, err := cli.ImageInspect(ctx, e.image)
 	if err == nil {
 		return nil // Image exists
 	}
@@ -363,7 +366,7 @@ func (e *gradleSandboxExtractor) ensureImage(ctx context.Context, cli *client.Cl
 
 	// Pull the image
 	fmt.Fprintf(os.Stderr, "gradle-sandbox: pulling image %s\n", e.image)
-	pullResp, err := cli.ImagePull(ctx, e.image, imagetypes.PullOptions{})
+	pullResp, err := cli.ImagePull(ctx, e.image, client.ImagePullOptions{})
 	if err != nil {
 		return fmt.Errorf("pulling image: %w", err)
 	}
