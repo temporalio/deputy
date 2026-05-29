@@ -1,0 +1,29 @@
+# Deputy vulnerability suppressions (auto-discovered by `deputy scan`).
+#
+# Each rule documents WHY a finding is suppressed and WHEN to revisit it.
+# Keep this list small and justified — prefer fixing over ignoring.
+
+ignore:
+  # github.com/docker/docker (CVE-2026-34040, -41567, -42306, -33997, -41568)
+  #
+  # Deputy no longer imports github.com/docker/docker directly — it is pulled in
+  # transitively by github.com/google/osv-scalibr's container-image layer
+  # scanner (artifact/image/layerscanning/image), which Deputy uses to scan
+  # images. There is no fix on the github.com/docker/docker module path (it ends
+  # at v28.5.2+incompatible); the fix ships as github.com/moby/moby/v2, and
+  # osv-scalibr has not migrated (latest v0.4.5 still requires docker/docker).
+  #
+  # Reachability: Deputy links only the docker *client* to load images. All five
+  # advisories are docker *daemon*-side (AuthZ middleware, `docker cp`,
+  # PUT .../archive, plugin privilege validation) and are not in Deputy's
+  # execution path. Re-evaluate when osv-scalibr migrates off docker/docker.
+  - package: github.com/docker/docker
+    ecosystem: go
+    reason: >-
+      Transitive via osv-scalibr's image layer scanner; no fix on the
+      docker/docker module path (fixed under moby/moby/v2, not yet adopted
+      upstream). Deputy links only the docker client; the vulnerable daemon-side
+      code is not in its execution path.
+    until: "2026-12-01"
+    author: kent.gruber@temporal.io
+    created: "2026-05-28"
