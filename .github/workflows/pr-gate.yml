@@ -88,11 +88,11 @@ jobs:
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
 
       - name: Setup Deputy
-        uses: temporalio/deputy/actions/setup@fix-deputy-findings
+        uses: temporalio/deputy/actions/setup@main
 
       - name: Run scan
         id: scan
-        uses: temporalio/deputy/actions/scan@fix-deputy-findings
+        uses: temporalio/deputy/actions/scan@main
         with:
           target: ${{ inputs.target }}
           policy: ${{ inputs.scan-policy }}
@@ -120,11 +120,11 @@ jobs:
           fetch-depth: 0
 
       - name: Setup Deputy
-        uses: temporalio/deputy/actions/setup@fix-deputy-findings
+        uses: temporalio/deputy/actions/setup@main
 
       - name: Run diff
         id: diff
-        uses: temporalio/deputy/actions/diff@fix-deputy-findings
+        uses: temporalio/deputy/actions/diff@main
         with:
           base: ${{ github.base_ref }}
           target: ${{ github.head_ref }}
