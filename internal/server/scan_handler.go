@@ -88,11 +88,12 @@ func (h *ScanHandler) Scan(
 	logs.Info(ctx, "received scan request", "target", target)
 
 	// Build scanning options from proto
-	opts := scanning.Options{}
+	opts := scanning.Options{VerifyFixes: true}
 	if req.Msg.Options != nil {
 		opts.Ecosystems = req.Msg.Options.Ecosystems
 		opts.Platform = req.Msg.Options.Platform
 		opts.DetectBaseImage = req.Msg.Options.DetectBaseImage
+		opts.VerifyFixes = !req.Msg.Options.DisableFixVerification
 	}
 
 	// Extract ref from options if provided
@@ -242,11 +243,12 @@ func (h *ScanHandler) StreamScan(
 	}
 
 	// Build scanning options from proto
-	opts := scanning.Options{}
+	opts := scanning.Options{VerifyFixes: true}
 	if req.Msg.Options != nil {
 		opts.Ecosystems = req.Msg.Options.Ecosystems
 		opts.Platform = req.Msg.Options.Platform
 		opts.DetectBaseImage = req.Msg.Options.DetectBaseImage
+		opts.VerifyFixes = !req.Msg.Options.DisableFixVerification
 	}
 
 	// Send resolving target phase

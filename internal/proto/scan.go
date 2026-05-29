@@ -182,16 +182,19 @@ func ScanningResultFromProto(r *scanv1.ScanResponse) *scanning.Result {
 // StatsToProto converts domain Stats (vulnerabilityv1) to proto Stats.
 func StatsToProto(s vulnerabilityv1.Stats) *vulnerabilityv1.Stats {
 	return &vulnerabilityv1.Stats{
-		Total:        s.Total,
-		Unique:       s.Unique,
-		Critical:     s.Critical,
-		High:         s.High,
-		Medium:       s.Medium,
-		Low:          s.Low,
-		Unknown:      s.Unknown,
-		FixAvailable: s.FixAvailable,
-		DirectDeps:   s.DirectDeps,
-		IndirectDeps: s.IndirectDeps,
+		Total:           s.Total,
+		Unique:          s.Unique,
+		Critical:        s.Critical,
+		High:            s.High,
+		Medium:          s.Medium,
+		Low:             s.Low,
+		Unknown:         s.Unknown,
+		CveCount:        s.CveCount,
+		FixAvailable:    s.FixAvailable,
+		FixViaMigration: s.FixViaMigration,
+		DirectDeps:      s.DirectDeps,
+		IndirectDeps:    s.IndirectDeps,
+		Duplicates:      s.Duplicates,
 	}
 }
 

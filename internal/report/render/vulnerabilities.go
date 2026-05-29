@@ -47,7 +47,12 @@ func DisplayVulnerabilities(w io.Writer, result scanning.Result, opts ...Vulnera
 // DisplayVulnerabilitiesWithHeader writes a styled vulnerability report to w using the provided heading.
 func DisplayVulnerabilitiesWithHeader(w io.Writer, result scanning.Result, heading string, opts ...VulnerabilityDisplayOptions) {
 	displayOpts := resolveVulnerabilityDisplayOptions(opts)
-	cons := vulnerability.Consolidate(result.Findings, result.Advisories)
+	// Prefer the pre-consolidated records (which carry resolved fix verdicts)
+	// when the scan populated them; otherwise consolidate on demand.
+	cons := result.Consolidated
+	if len(cons) == 0 {
+		cons = vulnerability.Consolidate(result.Findings, result.Advisories)
+	}
 	if len(cons) == 0 {
 		fmt.Fprintln(w)
 		fmt.Fprintln(w, ui.StyleAdded.Render("✓ No vulnerabilities found"))
@@ -59,6 +64,29 @@ func DisplayVulnerabilitiesWithHeader(w io.Writer, result scanning.Result, headi
 	VulnerabilityList(w, cons, displayOpts)
 
 	VulnerabilitySummaryAndActions(w, cons, result.Stats, displayOpts)
+}
+
+// fixAnnotation renders the inline fix marker for a finding, preferring the
+// resolved verdict (installable in-place upgrade, module migration, or
+// unverified claim) and falling back to the advisory's best fixed version when
+// no verdict was computed. Returns "" when no upgrade applies.
+func fixAnnotation(v vulnerability.Consolidated) string {
+	if v.Fix != nil {
+		switch v.Fix.Status {
+		case vulnerability.FixStatusInPlace:
+			return ui.StyleUpgraded.Render(fmt.Sprintf("(↑ %s)", v.Fix.Version))
+		case vulnerability.FixStatusUnverified:
+			return ui.StyleUpgraded.Render(fmt.Sprintf("(↑ %s, unverified)", v.Fix.Version))
+		case vulnerability.FixStatusMigration:
+			return ui.StyleUpgraded.Render(fmt.Sprintf("(→ %s@%s)", v.Fix.TargetModule, v.Fix.Version))
+		default:
+			return ""
+		}
+	}
+	if best := vulnerability.FindBestFixedVersion(v.FixedVersions, v.Version); best != "" {
+		return ui.StyleUpgraded.Render(fmt.Sprintf("(↑ %s)", best))
+	}
+	return ""
 }
 
 // VulnerabilityList writes per-package vulnerability details to w without headings or summary.
@@ -118,8 +146,8 @@ func VulnerabilityList(w io.Writer, cons []vulnerability.Consolidated, opts Vuln
 		for _, v := range list {
 			sevDisp := ui.SeverityLabel(v.Severity, v.SeverityType)
 			parts := []string{ui.StyleSymbol.Render(v.PrimaryID), sevDisp}
-			if best := vulnerability.FindBestFixedVersion(v.FixedVersions, v.Version); best != "" {
-				parts = append(parts, ui.StyleUpgraded.Render(fmt.Sprintf("(↑ %s)", best)))
+			if ann := fixAnnotation(v); ann != "" {
+				parts = append(parts, ann)
 			} else if cmd := v.CommandRemediation(); cmd != "" {
 				parts = append(parts, ui.StyleUpgraded.Render(fmt.Sprintf("(fix: %s)", cmd)))
 			}
@@ -216,11 +244,14 @@ func VulnerabilitySummaryAndActions(w io.Writer, cons []vulnerability.Consolidat
 	if summary.CommandFixableCount > 0 {
 		fmt.Fprintln(w, "  "+ui.StyleSymbol.Render(ui.StyleUpgraded.Render("↑"))+" "+ui.StyleSymbol.Render(fmt.Sprintf("%d can be fixed by pinning", summary.CommandFixableCount)))
 	}
+	if summary.MigrationCount > 0 {
+		fmt.Fprintln(w, "  "+ui.StyleSymbol.Render(ui.StyleDowngraded.Render("→"))+" "+ui.StyleSymbol.Render(fmt.Sprintf("%d require a module migration (no in-place fix)", summary.MigrationCount)))
+	}
 	if summary.UnfixedCount > 0 {
 		fmt.Fprintln(w, "  "+ui.StyleSymbol.Render(ui.StyleRemoved.Render("-"))+" "+ui.StyleSymbol.Render(fmt.Sprintf("%d have no fix available yet", summary.UnfixedCount)))
 	}
 
-	if len(summary.Commands) > 0 || summary.StdlibRecommendation != "" || len(summary.CommandRemediations) > 0 || summary.UnfixedCount > 0 {
+	if len(summary.Commands) > 0 || summary.StdlibRecommendation != "" || len(summary.CommandRemediations) > 0 || summary.UnfixedCount > 0 || summary.MigrationCount > 0 {
 		fmt.Fprintln(w)
 		fmt.Fprintln(w, ui.StyleHeader.Render("Recommended Actions:"))
 		step := 1

@@ -21,11 +21,13 @@ import (
 	"github.com/temporalio/deputy/internal/dependency/graph"
 	"github.com/temporalio/deputy/internal/dockerfile"
 	"github.com/temporalio/deputy/internal/ecosystem"
+	"github.com/temporalio/deputy/internal/forge"
 	"github.com/temporalio/deputy/internal/inventory"
 	"github.com/temporalio/deputy/internal/inventory/manifests"
 	"github.com/temporalio/deputy/internal/otel"
 	"github.com/temporalio/deputy/internal/policy"
 	"github.com/temporalio/deputy/internal/purlx"
+	"github.com/temporalio/deputy/internal/remediation/fixresolve"
 	"github.com/temporalio/deputy/internal/targets"
 	"github.com/temporalio/deputy/internal/vulnerability"
 	"go.opentelemetry.io/otel/attribute"
@@ -50,6 +52,11 @@ type Result struct {
 
 	// Findings lists all vulnerability findings.
 	Findings []vulnerability.Finding
+
+	// Consolidated holds the deduplicated findings with resolved fix verdicts
+	// attached (when fix resolution ran). Renderers should prefer this over
+	// re-consolidating Findings, so fix verdicts are not recomputed.
+	Consolidated []vulnerability.Consolidated
 
 	// Advisories maps advisory IDs to their full details.
 	Advisories map[string]*vulnerabilityv1.Advisory
@@ -106,6 +113,17 @@ type Options struct {
 	// belong to known base images, populating LayerDetails.InBaseImage.
 	// This requires network access and adds latency to the scan.
 	DetectBaseImage bool
+
+	// VerifyFixes enables fix-resolution: each finding's claimed fixed version
+	// is verified for installability against the Go module proxy, and findings
+	// whose fix lives on a different module path are reported as migrations.
+	// Requires network access. Disable (via --no-verify-fixes) for offline scans
+	// to fall back to trusting advisory-reported fixed versions verbatim.
+	VerifyFixes bool
+
+	// GoProxyURL overrides the Go module proxy used for fix verification.
+	// Empty uses the default (proxy.golang.org).
+	GoProxyURL string
 }
 
 // ScanRepository scans a repository for vulnerabilities.
@@ -132,14 +150,14 @@ func ScanRepository(ctx context.Context, target, ref string, refProvided bool, o
 	}
 
 	// Query vulnerabilities
-	findings, advisories, err := queryVulnerabilities(ctx, invExec.Result.Packages, invExec.Result.Direct)
+	findings, advisories, err := queryVulnerabilities(ctx, invExec.Result.Packages, invExec.Result.Direct, invExec.Result.Target.OriginURL)
 	if err != nil {
 		cleanup()
 		otel.SetSpanError(span, err)
 		return nil, fmt.Errorf("query vulnerabilities: %w", err)
 	}
 
-	stats := vulnerability.ConsolidateAll(findings, advisories).Stats
+	cons, stats := consolidateAndResolve(ctx, findings, advisories, opts)
 
 	return &Execution{
 		Result: Result{
@@ -148,6 +166,7 @@ func ScanRepository(ctx context.Context, target, ref string, refProvided bool, o
 			PackagesScanned: len(invExec.Result.Packages),
 			Direct:          invExec.Result.Direct,
 			Findings:        findings,
+			Consolidated:    cons,
 			Advisories:      advisories,
 			Stats:           stats,
 			GeneratedAt:     time.Now().UTC(),
@@ -183,14 +202,14 @@ func ScanContainerImage(ctx context.Context, target string, targetOpts map[strin
 	}
 
 	// Query vulnerabilities
-	findings, advisories, err := queryVulnerabilities(ctx, invExec.Result.Packages, invExec.Result.Direct)
+	findings, advisories, err := queryVulnerabilities(ctx, invExec.Result.Packages, invExec.Result.Direct, invExec.Result.Target.OriginURL)
 	if err != nil {
 		cleanup()
 		otel.SetSpanError(span, err)
 		return nil, fmt.Errorf("query vulnerabilities: %w", err)
 	}
 
-	stats := vulnerability.ConsolidateAll(findings, advisories).Stats
+	cons, stats := consolidateAndResolve(ctx, findings, advisories, opts)
 
 	return &Execution{
 		Result: Result{
@@ -199,6 +218,7 @@ func ScanContainerImage(ctx context.Context, target string, targetOpts map[strin
 			PackagesScanned: len(invExec.Result.Packages),
 			Direct:          invExec.Result.Direct,
 			Findings:        findings,
+			Consolidated:    cons,
 			Advisories:      advisories,
 			Stats:           stats,
 			ImageInfo:       invExec.Result.ImageInfo,
@@ -231,14 +251,14 @@ func ScanDirectory(ctx context.Context, path string, opts Options) (*Execution, 
 	}
 
 	// Query vulnerabilities
-	findings, advisories, err := queryVulnerabilities(ctx, invExec.Result.Packages, invExec.Result.Direct)
+	findings, advisories, err := queryVulnerabilities(ctx, invExec.Result.Packages, invExec.Result.Direct, invExec.Result.Target.OriginURL)
 	if err != nil {
 		cleanup()
 		otel.SetSpanError(span, err)
 		return nil, fmt.Errorf("query vulnerabilities: %w", err)
 	}
 
-	stats := vulnerability.ConsolidateAll(findings, advisories).Stats
+	cons, stats := consolidateAndResolve(ctx, findings, advisories, opts)
 
 	return &Execution{
 		Result: Result{
@@ -247,6 +267,7 @@ func ScanDirectory(ctx context.Context, path string, opts Options) (*Execution, 
 			PackagesScanned: len(invExec.Result.Packages),
 			Direct:          invExec.Result.Direct,
 			Findings:        findings,
+			Consolidated:    cons,
 			Advisories:      advisories,
 			Stats:           stats,
 			GeneratedAt:     time.Now().UTC(),
@@ -279,14 +300,14 @@ func ScanVMImage(ctx context.Context, target string, targetOpts map[string]strin
 	}
 
 	// Query vulnerabilities
-	findings, advisories, err := queryVulnerabilities(ctx, invExec.Result.Packages, invExec.Result.Direct)
+	findings, advisories, err := queryVulnerabilities(ctx, invExec.Result.Packages, invExec.Result.Direct, invExec.Result.Target.OriginURL)
 	if err != nil {
 		cleanup()
 		otel.SetSpanError(span, err)
 		return nil, fmt.Errorf("query vulnerabilities: %w", err)
 	}
 
-	stats := vulnerability.ConsolidateAll(findings, advisories).Stats
+	cons, stats := consolidateAndResolve(ctx, findings, advisories, opts)
 
 	return &Execution{
 		Result: Result{
@@ -295,6 +316,7 @@ func ScanVMImage(ctx context.Context, target string, targetOpts map[string]strin
 			PackagesScanned: len(invExec.Result.Packages),
 			Direct:          invExec.Result.Direct,
 			Findings:        findings,
+			Consolidated:    cons,
 			Advisories:      advisories,
 			Stats:           stats,
 			GeneratedAt:     time.Now().UTC(),
@@ -401,7 +423,7 @@ func ScanPURL(ctx context.Context, purlStr string, opts Options) (*Execution, er
 
 	span.SetAttributes(attribute.Int("deputy.finding.count", len(findings)))
 
-	stats := vulnerability.ConsolidateAll(findings, advisories).Stats
+	cons, stats := consolidateAndResolve(ctx, findings, advisories, opts)
 
 	return &Execution{
 		Result: Result{
@@ -413,6 +435,7 @@ func ScanPURL(ctx context.Context, purlStr string, opts Options) (*Execution, er
 			PackagesScanned: len(pkgs),
 			Direct:          direct,
 			Findings:        findings,
+			Consolidated:    cons,
 			Advisories:      advisories,
 			Stats:           stats,
 			GeneratedAt:     time.Now().UTC(),
@@ -444,9 +467,42 @@ func purlEcosystem(pu packageurl.PackageURL) string {
 	return strings.TrimSpace(pu.Type)
 }
 
+// consolidateAndResolve deduplicates findings into consolidated records, then
+// (when opts.VerifyFixes is set) resolves each record's fix verdict against the
+// Go module proxy so downstream stats/rendering distinguish installable
+// in-place upgrades from module migrations and unreachable advisory versions.
+func consolidateAndResolve(ctx context.Context, findings []vulnerability.Finding, advisories map[string]*vulnerabilityv1.Advisory, opts Options) ([]vulnerability.Consolidated, vulnerabilityv1.Stats) {
+	cons := vulnerability.Consolidate(findings, advisories)
+	if opts.VerifyFixes {
+		resolver := fixresolve.NewGoProxyResolver(opts.GoProxyURL)
+		fixresolve.Annotate(ctx, cons, resolver, fixresolve.Options{Verify: true})
+		// Persist verdicts onto the advisories so they survive the proto round-trip
+		// to the CLI/renderers (Consolidated is not a proto type).
+		persistFixVerdicts(cons, advisories)
+	}
+	return cons, vulnerability.StatsFromConsolidated(cons, len(findings))
+}
+
+// persistFixVerdicts writes each consolidated finding's resolved fix verdict
+// back onto every advisory in its alias group, so the verdict crosses the
+// proto boundary and is recovered when renderers re-consolidate.
+func persistFixVerdicts(cons []vulnerability.Consolidated, advisories map[string]*vulnerabilityv1.Advisory) {
+	for i := range cons {
+		if cons[i].Fix == nil {
+			continue
+		}
+		proto := cons[i].Fix.ToProto()
+		for _, id := range cons[i].AllIDs {
+			if adv, ok := advisories[id]; ok && adv != nil {
+				adv.ResolvedFix = proto
+			}
+		}
+	}
+}
+
 // queryVulnerabilities queries OSV for vulnerabilities and checks for
 // supply-chain risks (e.g., unpinned GitHub Actions references).
-func queryVulnerabilities(ctx context.Context, pkgs []*extractor.Package, direct map[string]bool) ([]vulnerability.Finding, map[string]*vulnerabilityv1.Advisory, error) {
+func queryVulnerabilities(ctx context.Context, pkgs []*extractor.Package, direct map[string]bool, originURL string) ([]vulnerability.Finding, map[string]*vulnerabilityv1.Advisory, error) {
 	ctx, span := otel.StartSpan(ctx, "deputy.scanning.query_vulnerabilities",
 		trace.WithAttributes(
 			attribute.Int("deputy.package.count", len(pkgs)),
@@ -465,7 +521,7 @@ func queryVulnerabilities(ctx context.Context, pkgs []*extractor.Package, direct
 	}
 
 	// Check for supply-chain risks (unpinned actions, etc.)
-	scFindings, scAdvisories := checkSupplyChain(ctx, pkgs, direct)
+	scFindings, scAdvisories := checkSupplyChain(ctx, pkgs, direct, forge.RepoSlugFromURL(originURL))
 	if len(scFindings) > 0 {
 		findings = append(findings, scFindings...)
 		if advisories == nil {

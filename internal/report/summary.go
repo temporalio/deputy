@@ -8,10 +8,14 @@ import (
 
 // Summary captures counts and recommended actions derived from vulnerabilities.
 type Summary struct {
-	HasVulnerabilities   bool
-	Stats                vulnerabilityv1.Stats
-	CriticalHighCount    int
-	FixAvailableCount    int
+	HasVulnerabilities bool
+	Stats              vulnerabilityv1.Stats
+	CriticalHighCount  int
+	FixAvailableCount  int
+	// MigrationCount is the number of findings whose only fix requires moving to
+	// a different module path (e.g., a Go major-version migration), rather than
+	// an in-place version bump.
+	MigrationCount       int
 	UnfixedCount         int
 	StdlibRecommendation string
 	Commands             []remediation.Command
@@ -57,20 +61,31 @@ func BuildSummary(cons []vulnerability.Consolidated, stats vulnerabilityv1.Stats
 		}
 	}
 
-	unfixed := int(stats.Unique) - int(stats.FixAvailable) - commandFixable
+	migration := int(stats.FixViaMigration)
+	unfixed := int(stats.Unique) - int(stats.FixAvailable) - migration - commandFixable
 	if unfixed < 0 {
 		unfixed = 0
 	}
 	commands, stdlibRec := remediation.CommandsFromConsolidated(cons)
-	header := "Upgrade affected modules"
+	// Choose a header verb that matches the actions actually recommended.
+	// "Upgrade" fits when every fix is an in-place version bump; once any
+	// finding requires a module migration (which may resolve via a direct
+	// `go get`, a source import change, or upgrading a transitive importer),
+	// the neutral "Resolve" covers the whole list without overpromising.
+	verb := "Upgrade"
+	if migration > 0 {
+		verb = "Resolve"
+	}
+	header := verb + " affected modules"
 	if high > 0 {
-		header = "Upgrade critical/high modules first"
+		header = verb + " critical/high modules first"
 	}
 	return Summary{
 		HasVulnerabilities:   true,
 		Stats:                stats,
 		CriticalHighCount:    int(high),
 		FixAvailableCount:    int(stats.FixAvailable),
+		MigrationCount:       migration,
 		UnfixedCount:         unfixed,
 		StdlibRecommendation: stdlibRec,
 		Commands:             commands,

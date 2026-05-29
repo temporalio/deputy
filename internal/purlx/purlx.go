@@ -16,6 +16,7 @@ import (
 	"github.com/google/osv-scalibr/extractor"
 	scalpurl "github.com/google/osv-scalibr/purl"
 	packageurl "github.com/package-url/packageurl-go"
+	"github.com/temporalio/deputy/internal/forge"
 )
 
 const (
@@ -88,7 +89,7 @@ func GitHubActionsPURLFromPackage(pkg *extractor.Package) string {
 	if pkg == nil {
 		return ""
 	}
-	owner, repo, rest := splitOwnerRepoRest(pkg.Name)
+	owner, repo, rest := forge.SplitOwnerRepoRest(pkg.Name)
 	subpath := rest
 	if mdSub := subpathFromMetadata(pkg.Metadata); mdSub != "" {
 		subpath = mdSub
@@ -117,21 +118,6 @@ func subpathFromMetadata(md any) string {
 		return ""
 	}
 	return strings.TrimSpace(f.String())
-}
-
-func splitOwnerRepoRest(full string) (owner, repo, rest string) {
-	full = strings.TrimSpace(full)
-	full = strings.TrimPrefix(full, "github.com/")
-	full = strings.Trim(full, "/")
-	parts := strings.Split(full, "/")
-	if len(parts) < 2 {
-		return "", "", ""
-	}
-	owner, repo = parts[0], parts[1]
-	if len(parts) > 2 {
-		rest = strings.Join(parts[2:], "/")
-	}
-	return owner, repo, rest
 }
 
 func cleanSubpath(subpath string) string {

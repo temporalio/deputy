@@ -52,6 +52,10 @@ type packageUpgrade struct {
 	Ecosystem   string
 	References  []dependencyv1.ManifestRef
 	Locations   []string
+	// Migration marks an upgrade that requires moving to a different module
+	// path (TargetModule) rather than a simple in-place version bump.
+	Migration    bool
+	TargetModule string
 }
 
 // CommandsFromConsolidated derives recommended commands and stdlib upgrades.
@@ -86,18 +90,17 @@ func buildUpgradeRecommendations(cons []vulnerability.Consolidated) ([]packageUp
 	pkgBest := map[string]*packageUpgrade{}
 
 	for _, v := range cons {
-		if len(v.FixedVersions) == 0 {
-			continue
-		}
-		best := vulnerability.FindBestFixedVersion(v.FixedVersions, v.Version)
-		if best == "" {
+		// Prefer the resolved fix verdict (installability-verified) when present;
+		// otherwise fall back to the advisory's claimed fixed version.
+		best, targetModule, migration, ok := upgradeTargetFor(v)
+		if !ok {
 			continue
 		}
 		// Both "stdlib" (standard library) and "toolchain" (go command) vulnerabilities
 		// are fixed by upgrading the Go version. OSV uses these package names:
 		// - stdlib: vulnerabilities in standard library packages (crypto/tls, net/http, etc.)
 		// - toolchain: vulnerabilities in the go command itself
-		if strings.EqualFold(v.Package, "stdlib") || strings.EqualFold(v.Package, "toolchain") {
+		if !migration && (strings.EqualFold(v.Package, "stdlib") || strings.EqualFold(v.Package, "toolchain")) {
 			if stdlibRec == "" || compareVersions(best, stdlibRec) > 0 {
 				stdlibRec = best
 			}
@@ -107,18 +110,26 @@ func buildUpgradeRecommendations(cons []vulnerability.Consolidated) ([]packageUp
 		existing, ok := pkgBest[v.Package]
 		if !ok {
 			pkgBest[v.Package] = &packageUpgrade{
-				Name:        v.Package,
-				Current:     v.Version,
-				Recommended: best,
-				IsDirect:    v.IsDirect,
-				Ecosystem:   v.Ecosystem,
-				References:  v.ManifestRefs,
-				Locations:   v.Locations,
+				Name:         v.Package,
+				Current:      v.Version,
+				Recommended:  best,
+				IsDirect:     v.IsDirect,
+				Ecosystem:    v.Ecosystem,
+				References:   v.ManifestRefs,
+				Locations:    v.Locations,
+				Migration:    migration,
+				TargetModule: targetModule,
 			}
 		} else {
 			// Keep the higher recommended version
 			if compareVersions(best, existing.Recommended) > 0 {
 				existing.Recommended = best
+			}
+			// A migration requirement is "stickier" than an in-place bump: if any
+			// finding for this package needs a path migration, surface that.
+			if migration {
+				existing.Migration = true
+				existing.TargetModule = targetModule
 			}
 			// Merge references
 			existing.References = mergeManifestRefs(existing.References, v.ManifestRefs)
@@ -136,6 +147,30 @@ func buildUpgradeRecommendations(cons []vulnerability.Consolidated) ([]packageUp
 	}
 
 	return upgrades, stdlibRec
+}
+
+// upgradeTargetFor determines the remediation target for a consolidated
+// finding. When a resolved fix verdict is present it is authoritative
+// (distinguishing installable in-place upgrades from module migrations and
+// dropping unreachable/unavailable fixes); otherwise it falls back to the
+// advisory's best claimed fixed version. The bool reports whether any upgrade
+// applies.
+func upgradeTargetFor(v vulnerability.Consolidated) (best, targetModule string, migration, ok bool) {
+	if v.Fix != nil {
+		switch v.Fix.Status {
+		case vulnerability.FixStatusInPlace, vulnerability.FixStatusUnverified:
+			return v.Fix.Version, "", false, v.Fix.Version != ""
+		case vulnerability.FixStatusMigration:
+			return v.Fix.Version, v.Fix.TargetModule, true, v.Fix.Version != "" && v.Fix.TargetModule != ""
+		default: // FixStatusUnavailable / FixStatusUnknown
+			return "", "", false, false
+		}
+	}
+	if len(v.FixedVersions) == 0 {
+		return "", "", false, false
+	}
+	best = vulnerability.FindBestFixedVersion(v.FixedVersions, v.Version)
+	return best, "", false, best != ""
 }
 
 // compareVersions compares two version strings. Returns >0 if a > b, <0 if a < b, 0 if equal.
@@ -213,7 +248,12 @@ func dedupeCommands(upgrades []packageUpgrade) []Command {
 
 	for _, u := range upgrades {
 		for _, ref := range u.References {
-			rec := recommendCommand(ref.Manager, ref.Path, u.Name, u.Recommended, ref.Groups)
+			var rec commandResult
+			if u.Migration {
+				rec = migrationCommand(u.TargetModule, u.Recommended, u.IsDirect)
+			} else {
+				rec = recommendCommand(ref.Manager, ref.Path, u.Name, u.Recommended, ref.Groups)
+			}
 			if rec.command == "" {
 				continue
 			}
@@ -245,7 +285,9 @@ func dedupeCommands(upgrades []packageUpgrade) []Command {
 				IsDirect:     u.IsDirect,
 				Executable:   rec.executable,
 			})
-			if strings.EqualFold(manager, "go") {
+			// Only an executable `go get` warrants a follow-up `go mod tidy`;
+			// migration notes are manual and shouldn't imply tidy resolves them.
+			if strings.EqualFold(manager, "go") && rec.executable {
 				goManagerPresent = true
 				if pathStr != "" {
 					goPaths.Add(pathStr)
@@ -279,6 +321,33 @@ func dedupeCommands(upgrades []packageUpgrade) []Command {
 	}
 
 	return commands
+}
+
+// migrationCommand renders the remediation for a fix that lives on a different
+// module path (a Go major-version migration). It is always non-executable: a
+// migration requires source/import changes (direct deps) or an upstream change
+// (indirect deps) that no single command performs, so `deputy fix --apply` must
+// not run it blindly.
+//
+// For a direct dependency, it surfaces the concrete `go get` for the new module
+// plus the manual import-path step. For an indirect dependency there is no local
+// migration — the module that pulls it in must migrate or be upgraded — so it
+// points at that instead of an unrunnable `go get`.
+func migrationCommand(targetModule, version string, isDirect bool) commandResult {
+	v := ecosystem.Go.NormalizeVersion(version)
+	if !isDirect {
+		return commandResult{
+			command:    "Upgrade the dependency that pulls this in (indirect — no in-place fix)",
+			hint:       "run with --with-graph to find the importer",
+			executable: false,
+		}
+	}
+	return commandResult{
+		command:    fmt.Sprintf("go get %s@%s", targetModule, v),
+		args:       []string{"go", "get", fmt.Sprintf("%s@%s", targetModule, v)},
+		hint:       "update import paths, then go mod tidy",
+		executable: false,
+	}
 }
 
 func buildGoToolchainCommand(version string) (Command, bool) {

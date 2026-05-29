@@ -221,6 +221,7 @@ func splitVulnerabilityToProto(v Vulnerability) (*vulnerabilityv1.Advisory, *vul
 		Severity:         vulnerability.NewSeverity(v.Severity, v.SeverityType),
 		References:       slices.Clone(v.References),
 		FixedVersions:    slices.Clone(v.FixedVersions),
+		PackageFixes:     vulnerability.ClonePackageFixes(v.PackageFixes),
 		DatabaseSpecific: maps.Clone(v.DatabaseSpecific),
 	}
 	if t := vulnerability.ParseTimeRFC3339(v.Published); !t.IsZero() {
@@ -301,6 +302,7 @@ func splitVulnerability(v Vulnerability) (*vulnerabilityv1.Advisory, vulnerabili
 		Severity:         vulnerability.NewSeverity(v.Severity, v.SeverityType),
 		References:       slices.Clone(v.References),
 		FixedVersions:    slices.Clone(v.FixedVersions),
+		PackageFixes:     vulnerability.ClonePackageFixes(v.PackageFixes),
 		DatabaseSpecific: maps.Clone(v.DatabaseSpecific),
 	}
 	if t := vulnerability.ParseTimeRFC3339(v.Published); !t.IsZero() {
@@ -535,10 +537,14 @@ func queryOSVAPIBatch(ctx context.Context, client Client, pkgs []PkgInput) ([]Vu
 				if len(base.AffectedImports) > 0 {
 					importSets = append(importSets, base.AffectedImports)
 				}
+				var packageFixSets [][]*vulnerabilityv1.PackageFix
 				dbSpecific := maps.Clone(base.DatabaseSpecific)
 				for _, v := range all {
 					for _, f := range v.FixedVersions {
 						fixSet.Add(f)
+					}
+					if len(v.PackageFixes) > 0 {
+						packageFixSets = append(packageFixSets, v.PackageFixes)
 					}
 					base.Aliases = append(base.Aliases, v.Aliases...)
 					if len(v.AffectedImports) > 0 {
@@ -562,6 +568,7 @@ func queryOSVAPIBatch(ctx context.Context, client Client, pkgs []PkgInput) ([]Vu
 					base.FixedVersions = append(base.FixedVersions, f)
 				}
 				base.AffectedImports = vulnerability.MergeAffectedImports(importSets...)
+				base.PackageFixes = vulnerability.MergePackageFixes(packageFixSets...)
 				base.DatabaseSpecific = dbSpecific
 				local = append(local, base)
 			}

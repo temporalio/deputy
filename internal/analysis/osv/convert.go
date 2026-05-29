@@ -80,19 +80,45 @@ func ProcessOSVVulnerabilityDomain(vuln osvschema.Vulnerability, input PkgInput)
 		}
 	}
 
-	// Fixed versions applicable to this package
+	// Fixed versions applicable to this package, plus per-module fixes for every
+	// affected package. The latter preserves fixes that live on a sibling module
+	// (e.g., a Go major-version migration github.com/foo -> github.com/foo/v2)
+	// so remediation can recommend a migration instead of an impossible in-place
+	// upgrade. See [vulnerability.Consolidated.PackageFixes].
 	if vuln.Affected != nil {
+		byModule := map[string]*vulnerabilityv1.PackageFix{}
+		var moduleOrder []string
 		for _, a := range vuln.Affected {
-			if a.Package.Name != "" && !strings.EqualFold(a.Package.Name, input.Name) {
-				continue
-			}
+			var fixes []string
 			for _, r := range a.Ranges {
 				for _, e := range r.Events {
 					if e.Fixed != "" {
-						advisory.FixedVersions = append(advisory.FixedVersions, e.Fixed)
+						fixes = append(fixes, e.Fixed)
 					}
 				}
 			}
+			if len(fixes) == 0 {
+				continue
+			}
+			// Fixes on this dependency's own module path drive in-place upgrades.
+			if a.Package.Name == "" || strings.EqualFold(a.Package.Name, input.Name) {
+				advisory.FixedVersions = append(advisory.FixedVersions, fixes...)
+			}
+			// Record fixes per module path (including sibling modules) so the
+			// resolver can discover migration targets.
+			if a.Package.Name == "" {
+				continue
+			}
+			pf, ok := byModule[a.Package.Name]
+			if !ok {
+				pf = &vulnerabilityv1.PackageFix{Module: a.Package.Name, Ecosystem: string(a.Package.Ecosystem)}
+				byModule[a.Package.Name] = pf
+				moduleOrder = append(moduleOrder, a.Package.Name)
+			}
+			pf.FixedVersions = append(pf.FixedVersions, fixes...)
+		}
+		for _, m := range moduleOrder {
+			advisory.PackageFixes = append(advisory.PackageFixes, byModule[m])
 		}
 	}
 	if imports := extractGoImports(vuln.Affected, input); len(imports) > 0 {
@@ -310,6 +336,7 @@ func flattenAdvisoryFinding(advisory vulnerabilityv1.Advisory, finding vulnerabi
 		Modified:        modified,
 		References:      slices.Clone(advisory.References),
 		FixedVersions:   slices.Clone(advisory.FixedVersions),
+		PackageFixes:    vulnerability.ClonePackageFixes(advisory.PackageFixes),
 		Affected:        finding.Affected,
 		Locations:       slices.Clone(finding.Locations),
 		ManifestRefs:    dependency.CloneManifestRefs(finding.ManifestRefs),

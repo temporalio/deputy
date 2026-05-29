@@ -86,6 +86,7 @@ can plug into the same scan flow as providers are added.
 | `--source` | | auto | Target source override: `auto`, `git`, `dir`, `sbom`, `purl`, `dockerfile`, `remote`, `docker-daemon`, `tarball`, `vm`, `rootfs` |
 | `--platform` | | | Platform for remote images (`os/arch[/variant]`) |
 | `--detect-base-image` | | `false` | Detect base image layers in container scans (requires network, queries deps.dev) |
+| `--no-verify-fixes` | | `false` | Skip Go module proxy verification of fixed versions (offline; trusts advisory data verbatim) |
 
 ### Date Format
 

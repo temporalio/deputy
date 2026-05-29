@@ -81,6 +81,10 @@ type scanFlags struct {
 	// When enabled, queries deps.dev to determine if layers belong to known base images.
 	DetectBaseImage bool
 
+	// NoVerifyFixes disables fix resolution (Go module proxy installability
+	// probes and migration detection). Verification is on by default.
+	NoVerifyFixes bool
+
 	// Cached ignore rules (populated by loadIgnoreRules)
 	ignoreRules *ignore.Rules
 }
@@ -155,6 +159,11 @@ func extractScanFlags(cmd *cobra.Command) scanFlags {
 	// Base image detection option
 	f.DetectBaseImage, _ = cmd.Flags().GetBool("detect-base-image")
 
+	// Fix verification (on by default; --no-verify-fixes disables proxy probes).
+	// GetBool returns false when the flag isn't registered on a subcommand,
+	// leaving verification enabled.
+	f.NoVerifyFixes, _ = cmd.Flags().GetBool("no-verify-fixes")
+
 	return f
 }
 
@@ -223,11 +232,12 @@ func (f scanFlags) toScanRequest(target string, errW io.Writer) *scanv1.ScanRequ
 	beforeT, afterT := f.parsePublishedTimes(errW)
 
 	opts := &scanv1.ScanOptions{
-		Ecosystems:      f.Ecosystems,
-		Ref:             f.Ref,
-		PolicyPaths:     f.PolicyPaths,
-		IncludeSecrets:  f.Secrets,
-		DetectBaseImage: f.DetectBaseImage,
+		Ecosystems:             f.Ecosystems,
+		Ref:                    f.Ref,
+		PolicyPaths:            f.PolicyPaths,
+		IncludeSecrets:         f.Secrets,
+		DetectBaseImage:        f.DetectBaseImage,
+		DisableFixVerification: f.NoVerifyFixes,
 	}
 
 	// Set published time filters

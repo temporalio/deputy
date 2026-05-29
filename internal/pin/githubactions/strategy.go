@@ -13,6 +13,7 @@ import (
 	"github.com/google/osv-scalibr/extractor"
 	"github.com/google/osv-scalibr/extractor/filesystem"
 	scalibrfs "github.com/google/osv-scalibr/fs"
+	"github.com/temporalio/deputy/internal/forge"
 	"github.com/temporalio/deputy/internal/inventory/plugins/github/actionsx"
 	"github.com/temporalio/deputy/internal/pin"
 	"github.com/temporalio/deputy/internal/purlx"
@@ -312,7 +313,7 @@ func (s *Strategy) extractFromFile(
 // Resolve implements pin.Strategy. It resolves a mutable tag/branch to a commit
 // SHA and finds the most specific semver tag for the Dependabot comment.
 func (s *Strategy) Resolve(ctx context.Context, ref pin.Ref) (pinnedValue, versionTag string, err error) {
-	owner, repo := splitOwnerRepo(ref.Name)
+	owner, repo := forge.SplitOwnerRepo(ref.Name)
 	if owner == "" || repo == "" {
 		return "", "", fmt.Errorf("invalid action name: %s", ref.Name)
 	}
@@ -340,7 +341,7 @@ func (s *Strategy) Verify(ctx context.Context, ref pin.Ref) (*pin.Verification, 
 		return nil, nil
 	}
 
-	owner, repo := splitOwnerRepo(ref.Name)
+	owner, repo := forge.SplitOwnerRepo(ref.Name)
 	if owner == "" || repo == "" {
 		return nil, fmt.Errorf("invalid action name: %s", ref.Name)
 	}
@@ -356,7 +357,7 @@ func (s *Strategy) Verify(ctx context.Context, ref pin.Ref) (*pin.Verification, 
 // ResolveUpdate implements pin.Strategy. It re-resolves an already-pinned ref to
 // the latest SHA in its major version channel (e.g., v4 → latest v4.x.x).
 func (s *Strategy) ResolveUpdate(ctx context.Context, ref pin.Ref) (string, string, string, error) {
-	owner, repo := splitOwnerRepo(ref.Name)
+	owner, repo := forge.SplitOwnerRepo(ref.Name)
 	if owner == "" || repo == "" {
 		return "", "", "", fmt.Errorf("invalid action name: %s", ref.Name)
 	}
@@ -407,7 +408,7 @@ func packageToRef(pkg *extractor.Package, relPath string) *pin.Ref {
 		return nil // docker or other type
 	}
 
-	owner, repo := splitOwnerRepo(pkg.Name)
+	owner, repo := forge.SplitOwnerRepo(pkg.Name)
 	if owner == "" {
 		return nil // local action or malformed
 	}
@@ -433,14 +434,5 @@ func rawFromMetadata(pkg *extractor.Package) string {
 		return md.Raw
 	}
 	return ""
-}
-
-// splitOwnerRepo splits "owner/repo" into its parts.
-func splitOwnerRepo(name string) (owner, repo string) {
-	parts := strings.SplitN(name, "/", 3)
-	if len(parts) < 2 {
-		return "", ""
-	}
-	return parts[0], parts[1]
 }
 

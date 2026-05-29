@@ -2,6 +2,7 @@ package graph
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -39,6 +40,12 @@ const (
 	// goProxyTimeout is the timeout for individual proxy requests.
 	goProxyTimeout = 10 * time.Second
 )
+
+// ErrModuleNotFound indicates the proxy definitively reported that a module
+// path or version does not exist (HTTP 404/410). Callers can use errors.Is to
+// distinguish "does not exist" from transport or server errors where existence
+// is unknown.
+var ErrModuleNotFound = errors.New("module version not found on proxy")
 
 // GoProxyClient fetches module metadata from Go module proxies.
 // It provides access to go.mod files for any public Go module,
@@ -132,9 +139,11 @@ func (c *GoProxyClient) fetchModFile(ctx context.Context, modulePath, version st
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode == http.StatusNotFound {
-		// Module or version not found - this is expected for private modules
-		return nil, fmt.Errorf("module %s@%s not found on proxy", modulePath, version)
+	if resp.StatusCode == http.StatusNotFound || resp.StatusCode == http.StatusGone {
+		// Module or version definitively does not exist (also expected for
+		// private modules). Wrap a sentinel so callers can distinguish this
+		// from transport/server errors where existence is unknown.
+		return nil, fmt.Errorf("%s@%s: %w", modulePath, version, ErrModuleNotFound)
 	}
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("proxy returned status %d for %s", resp.StatusCode, u)

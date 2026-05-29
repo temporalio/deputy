@@ -8,6 +8,7 @@ import (
 	"github.com/google/osv-scalibr/purl"
 	vulnerabilityv1 "github.com/temporalio/deputy/gen/deputy/vulnerability/v1"
 	"github.com/temporalio/deputy/internal/dependency"
+	"github.com/temporalio/deputy/internal/forge"
 	"github.com/temporalio/deputy/internal/pin"
 	"github.com/temporalio/deputy/internal/purlx"
 	"github.com/temporalio/deputy/internal/vulnerability"
@@ -79,7 +80,7 @@ func supplyChainAdvisories() map[string]*vulnerabilityv1.Advisory {
 //   - Unpinned container images (mutable tag instead of sha256 digest)
 //
 // Returns additional findings and advisories to merge with vulnerability results.
-func checkSupplyChain(_ context.Context, pkgs []*extractor.Package, direct map[string]bool) ([]vulnerability.Finding, map[string]*vulnerabilityv1.Advisory) {
+func checkSupplyChain(_ context.Context, pkgs []*extractor.Package, direct map[string]bool, selfRepo string) ([]vulnerability.Finding, map[string]*vulnerabilityv1.Advisory) {
 	var findings []vulnerability.Finding
 	usedAdvisories := map[string]bool{}
 
@@ -95,6 +96,14 @@ func checkSupplyChain(_ context.Context, pkgs []*extractor.Package, direct map[s
 		case purlx.IsGitHubActionsType(pkg.PURLType):
 			// Unpinned GitHub Actions reference.
 			if (pin.Ref{Version: pkg.Version}).IsSHAPinned() {
+				continue
+			}
+			// Skip self-references: a repository invoking its own actions or
+			// reusable workflows (same owner/repo as the scan target) cannot be
+			// pinned to a commit SHA without a chicken-and-egg problem, and an
+			// attacker who can move the ref already controls the repository, so
+			// pinning adds no protection. Flagging these is noise.
+			if isSelfReference(pkg.Name, selfRepo) {
 				continue
 			}
 			advisoryID = AdvisoryUnpinnedAction
@@ -152,6 +161,20 @@ func checkSupplyChain(_ context.Context, pkgs []*extractor.Package, direct map[s
 		result[id] = allAdvisories[id]
 	}
 	return findings, result
+}
+
+// isSelfReference reports whether a GitHub Actions package name refers to the
+// same repository being scanned (selfRepo is an "owner/repo" slug). Matching is
+// case-insensitive to mirror GitHub's handling of owner/repo names.
+func isSelfReference(pkgName, selfRepo string) bool {
+	if selfRepo == "" {
+		return false
+	}
+	owner, repo := forge.SplitOwnerRepo(pkgName)
+	if owner == "" || repo == "" {
+		return false
+	}
+	return strings.EqualFold(owner+"/"+repo, selfRepo)
 }
 
 // isContainerImageType reports whether the PURL type represents a container image.
