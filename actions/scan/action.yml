@@ -445,18 +445,87 @@ runs:
         CRITICAL: ${{ steps.scan.outputs.critical-count }}
         HIGH: ${{ steps.scan.outputs.high-count }}
         VIOLATIONS: ${{ steps.scan.outputs.policy-violations }}
+        SARIF_PATH: ${{ inputs.output }}
+        FORMAT: ${{ inputs.format }}
+        TARGET: ${{ inputs.target }}
+        # Cap detailed rows so the summary stays within GitHub's size limit.
+        MAX_ROWS: '60'
       run: |
+        FINDINGS="${FINDINGS:-0}"
+        CRITICAL="${CRITICAL:-0}"
+        HIGH="${HIGH:-0}"
+        VIOLATIONS="${VIOLATIONS:-0}"
+
         {
-          echo "## Deputy Scan Results"
+          echo "## Deputy Security Scan"
           echo ""
-          echo "| Metric | Count |"
-          echo "|--------|-------|"
-          echo "| Total Vulnerabilities | ${FINDINGS:-0} |"
-          echo "| Critical | ${CRITICAL:-0} |"
-          echo "| High | ${HIGH:-0} |"
-          echo "| Policy Violations | ${VIOLATIONS:-0} |"
+          echo "Target: \`${TARGET}\`"
           echo ""
-          if [ "${FINDINGS:-0}" -eq 0 ]; then
-            echo "> No vulnerabilities found"
+
+          # One-line status banner using GitHub's alert syntax.
+          if [ "$VIOLATIONS" -gt 0 ] || [ "$CRITICAL" -gt 0 ]; then
+            echo "> [!CAUTION]"
+            echo "> ${CRITICAL} critical finding(s) and ${VIOLATIONS} policy violation(s) need immediate attention."
+          elif [ "$HIGH" -gt 0 ]; then
+            echo "> [!WARNING]"
+            echo "> ${HIGH} high-severity finding(s) need attention."
+          elif [ "$FINDINGS" -gt 0 ]; then
+            echo "> [!NOTE]"
+            echo "> ${FINDINGS} finding(s) detected; none critical or high severity."
+          else
+            echo "> [!TIP]"
+            echo "> No vulnerabilities found."
           fi
+          echo ""
+
+          echo "| Total | Critical | High | Policy Violations |"
+          echo "|------:|---------:|-----:|------------------:|"
+          echo "| ${FINDINGS} | ${CRITICAL} | ${HIGH} | ${VIOLATIONS} |"
+          echo ""
         } >> "$GITHUB_STEP_SUMMARY"
+
+        # Detailed, per-finding breakdown is only available from SARIF output.
+        if [ "$FINDINGS" -gt 0 ] && [ "$FORMAT" = "sarif" ] && [ -f "$SARIF_PATH" ] && command -v jq >/dev/null 2>&1; then
+          # Emit one markdown table row per finding, sorted by severity, using
+          # security-severity (CVSS) and fixedVersions from the rule metadata.
+          ROWS=$(jq -r --argjson max "${MAX_ROWS:-60}" '
+            (.runs[0].tool.driver.rules // []) as $rules
+            | ($rules | map({key: .id, value: .properties}) | from_entries) as $rp
+            | def slabel($s): if $s >= 9 then "Critical" elif $s >= 7 then "High" elif $s >= 4 then "Medium" elif $s > 0 then "Low" else "Unscored" end;
+              def srank($s):  if $s >= 9 then 0      elif $s >= 7 then 1    elif $s >= 4 then 2       elif $s > 0 then 3   else 4 end;
+            [ .runs[0].results[]
+              | . as $r
+              | ($rp[$r.ruleId] // {}) as $p
+              | (($p["security-severity"] // "0") | tonumber? // 0) as $sev
+              | { rank: srank($sev),
+                  label: slabel($sev),
+                  pkg: ($r.properties.package // $r.ruleId),
+                  ver: (($r.properties.version // "") | sub("^v"; "")),
+                  adv: ($r.properties.cve // $r.ruleId),
+                  fix: (($p.fixedVersions // []) | map(tostring) | if length > 0 then join(", ") else "—" end),
+                  scope: (if ($r.properties.isDirect // false) then "direct" else "indirect" end) }
+            ]
+            | unique_by([.pkg, .adv])
+            | sort_by(.rank, .pkg)
+            | .[:$max]
+            | .[]
+            | "| " + .label + " | `" + .pkg + "` | " + .ver + " | " + .scope + " | " + .adv + " | " + .fix + " |"
+          ' "$SARIF_PATH" 2>/dev/null || true)
+
+          if [ -n "$ROWS" ]; then
+            {
+              echo "### Findings"
+              echo ""
+              echo "| Severity | Package | Version | Scope | Advisory | Fixed in |"
+              echo "|----------|---------|---------|-------|----------|----------|"
+              echo "$ROWS"
+              echo ""
+              if [ "$FINDINGS" -gt "${MAX_ROWS:-60}" ]; then
+                echo "_Showing first ${MAX_ROWS:-60} of ${FINDINGS} findings. Download the SARIF artifact or run \`deputy scan\` for the full report._"
+              else
+                echo "_Run \`deputy scan\` locally or download the SARIF artifact for full details and remediation commands._"
+              fi
+              echo ""
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
+        fi
