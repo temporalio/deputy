@@ -26,6 +26,7 @@ import (
 	"github.com/temporalio/deputy/internal/cli/flags"
 	"github.com/temporalio/deputy/internal/compare"
 	gitx "github.com/temporalio/deputy/internal/gitutil"
+	"github.com/temporalio/deputy/internal/ignore"
 	"github.com/temporalio/deputy/internal/inputs"
 	inv "github.com/temporalio/deputy/internal/inventory"
 	"github.com/temporalio/deputy/internal/license"
@@ -578,6 +579,19 @@ func runDiffAnalysis(ctx context.Context, c *services.Clients, repoPath, baseRef
 		if ignoreUnfixed {
 			result = scanning.FilterUnfixed(result)
 			fmt.Fprintf(errW, "  %s\n", ui.StyleMeta.Render("Note: ignoring unfixed vulnerabilities (--ignore-unfixed)"))
+		}
+
+		// Apply project ignore rules (.deputyignore.yaml) so suppressions honored
+		// by `deputy scan` also apply to the diff gate. Without this, a documented
+		// suppression would be silently bypassed by PR diff policies.
+		if rules, rerr := ignore.LoadFromDirectory(repoPath); rerr != nil {
+			fmt.Fprintf(errW, "Warning: failed to load ignore rules: %v\n", rerr)
+		} else if rules != nil && rules.Count() > 0 {
+			var ignoredCount int
+			result, ignoredCount = scanning.FilterIgnored(result, rules)
+			if ignoredCount > 0 {
+				fmt.Fprintf(errW, "  %s\n", ui.StyleMeta.Render(fmt.Sprintf("Note: %d finding(s) ignored by rules", ignoredCount)))
+			}
 		}
 
 		reportVulns := report.FlattenScanningResult(result)
