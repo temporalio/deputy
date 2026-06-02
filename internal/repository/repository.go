@@ -8,6 +8,7 @@ import (
 	"github.com/go-git/go-billy/v5/memfs"
 	"github.com/go-git/go-git/v5"
 	"github.com/go-git/go-git/v5/storage/memory"
+
 	gitx "github.com/temporalio/deputy/internal/gitutil"
 	"github.com/temporalio/deputy/internal/repository/workspace"
 )
@@ -74,6 +75,22 @@ func Open(path string) (*Source, error) {
 		Repo: repo,
 		ws:   ws,
 	}
+	src.cleanup = func() error {
+		return ws.Close()
+	}
+	return src, nil
+}
+
+// OpenDir returns a Source backed by a plain directory on disk, without
+// requiring it to be a git repository. The resulting Source has a nil Repo, so
+// only working-tree operations (HEAD) are available — git ref/commit history is
+// not. Use this for SBOM/inventory of non-git source trees.
+func OpenDir(path string) (*Source, error) {
+	ws, err := workspace.NewDir(path)
+	if err != nil {
+		return nil, err
+	}
+	src := &Source{ws: ws}
 	src.cleanup = func() error {
 		return ws.Close()
 	}

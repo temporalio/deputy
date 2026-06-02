@@ -17,6 +17,7 @@ Practical "how do I use this in the real world?" documentation.
 | [Container Images](container-images.md) | Scanning container images for vulnerabilities |
 | [VM Images](vm-images.md) | Scanning VM disk images and rootfs images |
 | [Dockerfile](dockerfile.md) | Scanning Dockerfiles for security issues |
+| [mise toolchains](mise.md) | Inventory, scan, pin, and fix mise/asdf dev tools |
 
 ## Policies
 

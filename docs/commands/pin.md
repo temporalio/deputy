@@ -17,16 +17,50 @@ deputy pin update [directory] [flags]
 | --- | --- | --- | --- |
 | `github-actions` | `uses: actions/checkout@v4` | `uses: actions/checkout@SHA # v4.2.2` | git ls-remote |
 | `container-image` | `FROM alpine:3.19` | `FROM alpine:3.19@sha256:...` | OCI registry HEAD |
+| `mise` | `npm:prettier = "3"` (mise.toml) | `npm:prettier = "3.6.2"` | native metadata; optional host fallback allowlist |
+| `asdf` | `nodejs 22` (.tool-versions) | `nodejs 22.14.0` | native metadata; optional host fallback allowlist |
 
-By default, both ecosystems are pinned. Use `--ecosystems` to narrow.
+By default, `deputy pin` and `deputy pin update` include all supported
+ecosystems and do not execute host toolchain CLIs. For `mise` and `asdf`,
+Deputy resolves versions natively where it has package or release metadata. To
+allow host tools only as fallback for non-native backends, pass
+`--allowed-host-bins` with absolute executable paths such as
+`/opt/homebrew/bin/mise`. Deputy does not search `PATH`, and a host binary
+cannot override a native-supported backend.
+
+For `mise` and `asdf`, pinning rewrites fuzzy tool versions in `mise.toml` and
+`.tool-versions` (channels like `latest`/`lts`, partial versions like `20`, and
+Mise scopes like `prefix:` / `sub-`) to exact, reproducible versions. Native
+resolution currently covers registry-backed backends such as `npm:`, `cargo:`,
+`pipx:`, `pip:`, `gem:`, and `dotnet:`, core runtimes such as Go, Node.js,
+Python, Terraform, Google Cloud SDK, Java's default OpenJDK shorthand
+(`java = "21"`), Java Temurin selectors (`java = "temurin-21"`), and explicit
+Java vendor selectors from Mise's Java metadata, well-known asdf runtime plugins
+(`golang`, `nodejs`, `python`, `terraform`), `go:<import path>` tools
+including Go proxy branch/revision selectors, repo-shaped `aqua:`, `ubi:`, and
+`github:` tools, native CLI metadata sources such as 1Password CLI, and bare
+Mise registry tools whose published `registry/<tool>.toml` entry points at a
+native backend Deputy understands.
+`pin check` makes no network calls, so it only uses local source data and
+baked-in offline alias rules; `pin` and `pin update` can resolve additional
+registry entries dynamically.
+For `mise.toml`, plain `deputy pin` first preserves a compatible exact version
+from the sibling `mise.lock`, when present. If the lockfile is absent, ambiguous,
+or stale relative to the source selector, Deputy resolves from native upstream
+metadata instead. `deputy pin update` is the explicit bump path for already
+exact pins.
+`deputy pin check` still covers mise/asdf without network access or a `mise`
+binary and works as a CI gate. Array-valued tools are skipped (pin them
+manually). See the [mise guide](../guides/mise.md).
 
 ## Resolution semantics
 
 `deputy pin` is **faithful**: it pins each reference to the exact immutable
-commit (or digest) that the reference resolves to *right now*. It never
-substitutes a different release. If `uses: actions/foo@v7` currently resolves
-to the `v7.6.0` commit, that is the commit you get — pinning never silently
-upgrades or downgrades the code that runs.
+commit, digest, or tool version that the reference resolves to *right now*. For
+formats with committed lockfiles, that means preserving a compatible locked
+version before consulting upstream metadata. If `uses: actions/foo@v7` currently
+resolves to the `v7.6.0` commit, that is the commit you get — pinning never
+substitutes a different release.
 
 This guarantee is why you sometimes see a less-specific version comment than you
 might expect:
@@ -50,22 +84,22 @@ propose updates, so it is kept accurate to the pinned commit.
 
 To intentionally move pins forward to the latest release in their channel, use
 [`deputy pin update`](#subcommands) — that is the command that changes versions.
-Plain `deputy pin` only makes an existing reference immutable; it does not change
-which version you are on.
+Plain `deputy pin` makes an existing reference immutable; when a lockfile has
+already recorded the exact version, that exact version is what gets written.
 
 ## Subcommands
 
 | Subcommand | Network | Writes | Purpose |
 | --- | --- | --- | --- |
-| `pin` | yes | yes | Pin unpinned references |
+| `pin` | yes | yes | Pin unpinned references; optional host fallback allowlist |
 | `pin check` | no | no | CI gate: are all refs pinned? |
 | `pin verify` | yes | no | Provenance: are pins trustworthy? |
-| `pin update` | yes | yes | Re-resolve pins to latest |
+| `pin update` | yes | yes | Re-resolve pins to latest; optional host fallback allowlist |
 
 ## Examples
 
 ```console
-# Pin everything (actions + container images)
+# Pin all supported ecosystems
 $ deputy pin
 
 # Preview changes without modifying files
@@ -77,6 +111,9 @@ $ deputy pin --ecosystems github-actions
 # Pin only container images
 $ deputy pin --ecosystems container-image
 
+# Pin mise/asdf toolchains with an explicit host fallback allowlist
+$ deputy pin --ecosystems mise,asdf --allowed-host-bins /opt/homebrew/bin/mise
+
 # CI gate: fail if anything is unpinned
 $ deputy pin check
 
@@ -85,6 +122,9 @@ $ deputy pin verify
 
 # Update pins to latest versions
 $ deputy pin update --dry-run
+
+# Update mise/asdf toolchain pins with an explicit host fallback allowlist
+$ deputy pin update --ecosystems mise,asdf --allowed-host-bins /opt/homebrew/bin/mise
 ```
 
 ## Flags
@@ -93,7 +133,7 @@ $ deputy pin update --dry-run
 
 | Flag | Default | Description |
 | --- | --- | --- |
-| `-e, --ecosystems` | `all` | Ecosystems to pin: `github-actions`, `container-image`, `all` |
+| `-e, --ecosystems` | `all` | Ecosystems to pin: `github-actions`, `container-image`, `mise`, `asdf`, `all` |
 | `-x, --exclude` | | Skip dependencies matching glob patterns |
 | `-f, --format` | `text` | Output format: `text`, `json` |
 | `-o, --output` | stdout | Output file |
@@ -103,6 +143,7 @@ $ deputy pin update --dry-run
 | Flag | Default | Description |
 | --- | --- | --- |
 | `-n, --dry-run` | `false` | Show what would change without writing |
+| `--allowed-host-bins` | | Absolute paths to host binaries Deputy may execute for fallback resolution (repeatable or comma-separated) |
 | `--skip-verification` | `false` | Skip fork/imposter verification |
 | `--concurrency` | `4` | Max parallel network requests |
 

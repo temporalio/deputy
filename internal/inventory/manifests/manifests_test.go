@@ -314,6 +314,32 @@ func TestDetectManager(t *testing.T) {
 			wantManifest: "src/app/go.mod",
 			wantOK:       true,
 		},
+
+		// mise / asdf toolchains
+		{
+			name:         "mise.toml",
+			location:     "mise.toml",
+			purlType:     "mise",
+			wantManager:  "mise",
+			wantManifest: "mise.toml",
+			wantOK:       true,
+		},
+		{
+			name:         "nested .config/mise/config.toml",
+			location:     "sub/.config/mise/config.toml",
+			purlType:     "mise",
+			wantManager:  "mise",
+			wantManifest: "sub/.config/mise/config.toml",
+			wantOK:       true,
+		},
+		{
+			name:         ".tool-versions is asdf",
+			location:     ".tool-versions",
+			purlType:     "asdf",
+			wantManager:  "asdf",
+			wantManifest: ".tool-versions",
+			wantOK:       true,
+		},
 	}
 
 	for _, tt := range tests {

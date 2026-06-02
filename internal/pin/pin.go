@@ -3,6 +3,8 @@ package pin
 import (
 	"context"
 	"fmt"
+	"io"
+	"log/slog"
 	"os"
 	"path"
 	"regexp"
@@ -32,6 +34,11 @@ type Ref struct {
 
 	// Raw is the original reference string as it appears in the file.
 	Raw string `json:"raw"`
+
+	// LockedVersion is an optional exact version from a lockfile associated with
+	// the source reference. Strategies may prefer it when pinning would otherwise
+	// resolve a fuzzy request to a newer upstream version.
+	LockedVersion string `json:"-"`
 }
 
 // DisplayName returns the full dependency name including subpath.
@@ -188,6 +195,19 @@ type Verification struct {
 	Warnings        []string `json:"warnings,omitempty"`
 }
 
+// closeStrategy releases any resources a strategy lazily acquired during the
+// operation (e.g. a pooled API connection). Strategies that hold no resources
+// need not implement io.Closer; for them this is a no-op.
+func closeStrategy(ctx context.Context, s Strategy) {
+	c, ok := s.(io.Closer)
+	if !ok {
+		return
+	}
+	if err := c.Close(); err != nil {
+		slog.DebugContext(ctx, "pin: closing strategy", "ecosystem", s.Ecosystem(), "error", err)
+	}
+}
+
 // Pin discovers pinnable references, resolves them to immutable pins,
 // optionally verifies them, and rewrites the files.
 func Pin(ctx context.Context, root *os.Root, opts Options, strategies ...Strategy) (*Report, error) {
@@ -202,6 +222,7 @@ func Pin(ctx context.Context, root *os.Root, opts Options, strategies ...Strateg
 	report := &Report{}
 
 	for _, strategy := range strategies {
+		defer closeStrategy(ctx, strategy)
 		refs, err := strategy.Discover(ctx, fsys)
 		if err != nil {
 			return nil, fmt.Errorf("discovering %s dependencies: %w", strategy.Ecosystem(), err)
@@ -377,6 +398,7 @@ func Check(ctx context.Context, root *os.Root, opts Options, strategies ...Strat
 	report := &Report{}
 
 	for _, strategy := range strategies {
+		defer closeStrategy(ctx, strategy)
 		refs, err := strategy.Discover(ctx, fsys)
 		if err != nil {
 			return nil, fmt.Errorf("discovering %s dependencies: %w", strategy.Ecosystem(), err)
@@ -427,6 +449,7 @@ func Verify(ctx context.Context, root *os.Root, opts Options, strategies ...Stra
 	report := &Report{}
 
 	for _, strategy := range strategies {
+		defer closeStrategy(ctx, strategy)
 		refs, err := strategy.Discover(ctx, fsys)
 		if err != nil {
 			return nil, fmt.Errorf("discovering %s dependencies: %w", strategy.Ecosystem(), err)
@@ -514,12 +537,14 @@ func processOneVerifyRef(ctx context.Context, ref Ref, strategy Strategy, opts *
 		return result
 	}
 	if v == nil {
-		// Strategy returned no verification data — provenance checking is
-		// not available for this ecosystem or configuration. Report as
-		// already-pinned rather than verified to avoid implying that
-		// provenance was actually checked.
+		// Strategy returned no verification data — there is no pin-time
+		// provenance check for this ecosystem (e.g. mise verifies tool
+		// provenance at install time via cosign/SLSA/attestations; container
+		// digest signature checking is not yet supported). Report as
+		// already-pinned rather than verified so the output never implies
+		// provenance was actually checked, while still surfacing the reason.
 		result.Status = StatusAlreadyPinned
-		result.Reason = "pinned (verification not available)"
+		result.Reason = "no pin-time provenance check"
 		return result
 	}
 
@@ -548,6 +573,7 @@ func PinUpdate(ctx context.Context, root *os.Root, opts Options, strategies ...S
 	report := &Report{}
 
 	for _, strategy := range strategies {
+		defer closeStrategy(ctx, strategy)
 		refs, err := strategy.Discover(ctx, fsys)
 		if err != nil {
 			return nil, fmt.Errorf("discovering %s dependencies: %w", strategy.Ecosystem(), err)

@@ -10,6 +10,7 @@ import (
 	scanv1 "github.com/temporalio/deputy/gen/deputy/scan/v1"
 	vulnerabilityv1 "github.com/temporalio/deputy/gen/deputy/vulnerability/v1"
 	"github.com/temporalio/deputy/internal/container/image"
+	"github.com/temporalio/deputy/internal/dependency"
 )
 
 // ManifestRefsToProto converts internal ManifestRefs to proto ManifestRefs.
@@ -23,8 +24,9 @@ func ManifestRefsToProto(refs []dependencyv1.ManifestRef) []*dependencyv1.Manife
 		out[i] = &dependencyv1.ManifestRef{
 			Path:    refs[i].Path,
 			Manager: refs[i].Manager,
-			Groups:  refs[i].Groups,
+			Groups:  dependency.ManifestRefGroups(&refs[i]),
 		}
+		dependency.SetManifestRefComponentKey(out[i], dependency.ManifestRefComponentKey(&refs[i]))
 	}
 	return out
 }
@@ -37,11 +39,7 @@ func ManifestRefsFromProto(refs []*dependencyv1.ManifestRef) []dependencyv1.Mani
 	out := make([]dependencyv1.ManifestRef, len(refs))
 	for i, ref := range refs {
 		if ref != nil {
-			out[i] = dependencyv1.ManifestRef{
-				Path:    ref.Path,
-				Manager: ref.Manager,
-				Groups:  ref.Groups,
-			}
+			out[i] = dependency.NewManifestRef(ref.Path, ref.Manager, dependency.ManifestRefGroups(ref), dependency.ManifestRefComponentKey(ref))
 		}
 	}
 	return out

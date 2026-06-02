@@ -16,6 +16,7 @@ import (
 	"github.com/google/osv-scalibr/extractor"
 	scalpurl "github.com/google/osv-scalibr/purl"
 	packageurl "github.com/package-url/packageurl-go"
+
 	"github.com/temporalio/deputy/internal/forge"
 )
 
@@ -23,7 +24,51 @@ const (
 	// TypeGitHubActions is the emerging PURL type for GitHub Actions dependencies.
 	// This matches the package-url spec proposal and existing ecosystem usage.
 	TypeGitHubActions = "githubactions"
+
+	// TypeMise is the PURL type for tools managed by mise (mise-en-place):
+	// language runtimes and tools installed from mise's many backends (aqua,
+	// ubi, cargo, npm, pipx, go, gem, asdf). It matches the value OSV-SCALIBR's
+	// upstream runtime/mise extractor uses (purl.TypeMise), so Deputy's mise
+	// inventory stays forward-compatible with a future SCALIBR upgrade.
+	TypeMise = "mise"
+
+	// TypeAsdf is the PURL type for tools declared in the asdf .tool-versions
+	// format. mise also reads .tool-versions, but the format originates with
+	// asdf, and OSV-SCALIBR models it as a distinct ecosystem (purl.TypeAsdf)
+	// from mise.toml. Deputy emits pkg:asdf for .tool-versions content to stay
+	// congruent with that upstream split.
+	TypeAsdf = "asdf"
 )
+
+// AsdfPURL formats an asdf PURL (pkg:asdf/<name>@<version>) matching the form
+// emitted by OSV-SCALIBR's runtime/asdf extractor. Returns "" when name is empty.
+func AsdfPURL(name, version string) string {
+	return looseTypePURL(TypeAsdf, name, version)
+}
+
+// looseTypePURL builds a pkg:<type>/<name>@<version> string for an emerging
+// PURL type that SCALIBR's allowlist does not yet recognize. It uses SCALIBR's
+// purl formatter (whose String delegates to packageurl-go) for consistency with
+// the rest of Deputy's inventory pipeline. Returns "" when name is empty.
+func looseTypePURL(ptype, name, version string) string {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return ""
+	}
+	return scalpurl.PackageURL{
+		Type:    ptype,
+		Name:    name,
+		Version: strings.TrimSpace(version),
+	}.String()
+}
+
+// MisePURL formats a mise PURL for a tool name and version, matching the
+// pkg:mise/<name>@<version> form emitted by OSV-SCALIBR's runtime/mise
+// extractor. The backend, when present, is carried in package metadata rather
+// than the PURL so identity matches upstream. Returns "" when name is empty.
+func MisePURL(name, version string) string {
+	return looseTypePURL(TypeMise, name, version)
+}
 
 // ParseLoose parses a PURL string without validating the type against a
 // fixed allowlist. It is appropriate for tooling that needs to read PURLs

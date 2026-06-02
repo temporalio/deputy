@@ -11,6 +11,7 @@ import (
 	listv1 "github.com/temporalio/deputy/gen/deputy/list/v1"
 	"github.com/temporalio/deputy/gen/deputy/list/v1/listv1connect"
 	"github.com/temporalio/deputy/internal/compare"
+	"github.com/temporalio/deputy/internal/ecosystem"
 	"github.com/temporalio/deputy/internal/inventory"
 	"github.com/temporalio/deputy/internal/otel"
 	protoconv "github.com/temporalio/deputy/internal/proto"
@@ -178,6 +179,7 @@ func (h *ListHandler) ListPackages(
 	// Convert packages to proto
 	direct := exec.Result.Direct
 	protoPackages := protoconv.ExtractorPackagesToProto(packages, direct)
+	allProtoPackages := protoPackages
 
 	// Filter to only direct dependencies if requested
 	onlyDirect := req.Msg.GetOptions().GetOnlyDirect()
@@ -195,49 +197,18 @@ func (h *ListHandler) ListPackages(
 	directCount := int32(0)
 	transitiveCount := int32(0)
 
-	for _, pkg := range packages {
+	for _, pkg := range allProtoPackages {
+		if pkg == nil {
+			continue
+		}
 		// Count by ecosystem
-		eco := pkg.Ecosystem().String()
+		eco := pkg.Ecosystem
 		if eco != "" {
 			ecosystemCounts[eco]++
 		}
 
 		// Count direct vs transitive
-		// For Go packages, check both exact module path and module root.
-		// The direct map may contain:
-		//   - Exact module paths with true (direct) or false (indirect)
-		//   - Module roots with true (for subpackage matching)
-		//
-		// We first check the exact module path, then fall back to module root.
-		// This handles Go submodules correctly: if go.mod has "foo" as direct
-		// but "foo/loader" as indirect, "foo/loader" should be indirect.
-		purl := pkg.PURL()
-		isDirect := false
-		if purl != nil && direct != nil {
-			if purl.Type == "golang" {
-				// Reconstruct module path from PURL namespace + name
-				modulePath := pkg.Name
-				if modulePath == "" {
-					if purl.Namespace != "" {
-						modulePath = purl.Namespace + "/" + purl.Name
-					} else {
-						modulePath = purl.Name
-					}
-				}
-				// First check exact module path (handles submodules correctly)
-				if val, exists := direct[modulePath]; exists {
-					isDirect = val
-				} else {
-					// Fall back to module root for subpackage import paths
-					moduleRoot := compare.GetModuleRoot(modulePath)
-					isDirect = direct[moduleRoot]
-				}
-			} else {
-				// For non-Go ecosystems, use PURL string as key
-				isDirect = direct[purl.String()]
-			}
-		}
-		if isDirect {
+		if pkg.Direct {
 			directCount++
 		} else {
 			transitiveCount++
@@ -251,7 +222,7 @@ func (h *ListHandler) ListPackages(
 		Target:   protoconv.InventoryTargetToProto(exec.Result.Target),
 		Packages: protoPackages,
 		Stats: &listv1.ListStats{
-			TotalPackages:      int32(len(packages)),
+			TotalPackages:      int32(len(allProtoPackages)),
 			DirectPackages:     directCount,
 			TransitivePackages: transitiveCount,
 			Ecosystems:         ecosystemCounts,
@@ -274,56 +245,22 @@ func (h *ListHandler) ListEcosystems(
 		return nil, connect.NewError(connect.CodeInvalidArgument, err)
 	}
 
-	ecosystems := []*listv1.EcosystemInfo{
-		{
-			Name:          "go",
-			DisplayName:   "Go Modules",
-			Description:   "Go programming language module system",
-			ManifestFiles: []string{"go.mod"},
-			LockFiles:     []string{"go.sum"},
-		},
-		{
-			Name:          "npm",
-			DisplayName:   "npm",
-			Description:   "Node.js package manager",
-			ManifestFiles: []string{"package.json"},
-			LockFiles:     []string{"package-lock.json", "npm-shrinkwrap.json"},
-		},
-		{
-			Name:          "pypi",
-			DisplayName:   "PyPI",
-			Description:   "Python Package Index",
-			ManifestFiles: []string{"setup.py", "pyproject.toml"},
-			LockFiles:     []string{"requirements.txt", "Pipfile.lock", "poetry.lock"},
-		},
-		{
-			Name:          "maven",
-			DisplayName:   "Maven",
-			Description:   "Apache Maven for Java projects",
-			ManifestFiles: []string{"pom.xml"},
-			LockFiles:     []string{},
-		},
-		{
-			Name:          "cargo",
-			DisplayName:   "Cargo",
-			Description:   "Rust package manager",
-			ManifestFiles: []string{"Cargo.toml"},
-			LockFiles:     []string{"Cargo.lock"},
-		},
-		{
-			Name:          "nuget",
-			DisplayName:   "NuGet",
-			Description:   ".NET package manager",
-			ManifestFiles: []string{"*.csproj", "*.fsproj"},
-			LockFiles:     []string{"packages.lock.json"},
-		},
-		{
-			Name:          "rubygems",
-			DisplayName:   "RubyGems",
-			Description:   "Ruby package manager",
-			ManifestFiles: []string{"Gemfile"},
-			LockFiles:     []string{"Gemfile.lock"},
-		},
+	// Derive the list from the central ecosystem registry so this RPC stays in
+	// lockstep with Deputy's single source of truth for supported ecosystems
+	// (rather than drifting against a hand-maintained list).
+	regs := ecosystem.Default().All()
+	ecosystems := make([]*listv1.EcosystemInfo, 0, len(regs))
+	for _, reg := range regs {
+		if !reg.HasCapability(ecosystem.CapInventory) {
+			continue
+		}
+		ecosystems = append(ecosystems, &listv1.EcosystemInfo{
+			Name:          string(reg.Ecosystem),
+			DisplayName:   reg.DisplayName,
+			Description:   reg.Description,
+			ManifestFiles: reg.Manifests,
+			LockFiles:     reg.Lockfiles,
+		})
 	}
 
 	return connect.NewResponse(&listv1.ListEcosystemsResponse{

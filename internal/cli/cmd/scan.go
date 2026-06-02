@@ -22,13 +22,23 @@ import (
 	"github.com/google/go-containerregistry/pkg/name"
 	"github.com/google/osv-scalibr/extractor"
 	packageurl "github.com/package-url/packageurl-go"
+	"github.com/protobom/protobom/pkg/sbom"
+	spdxjson "github.com/spdx/tools-golang/json"
+	spdxdoc "github.com/spdx/tools-golang/spdx"
+	spdxcommon "github.com/spdx/tools-golang/spdx/v2/common"
+	"github.com/spf13/cobra"
+	"golang.org/x/sync/errgroup"
+	"google.golang.org/protobuf/encoding/protojson"
+	"google.golang.org/protobuf/proto"
+
+	dependencyv1 "github.com/temporalio/deputy/gen/deputy/dependency/v1"
 	policyv1 "github.com/temporalio/deputy/gen/deputy/policy/v1"
 	scanv1 "github.com/temporalio/deputy/gen/deputy/scan/v1"
 	targetv1 "github.com/temporalio/deputy/gen/deputy/target/v1"
-	"github.com/temporalio/deputy/internal/services"
 	cliflags "github.com/temporalio/deputy/internal/cli/flags"
 	"github.com/temporalio/deputy/internal/collections"
 	"github.com/temporalio/deputy/internal/container/image"
+	"github.com/temporalio/deputy/internal/dependency"
 	"github.com/temporalio/deputy/internal/dockerfile"
 	deperrors "github.com/temporalio/deputy/internal/errors"
 	gitx "github.com/temporalio/deputy/internal/gitutil"
@@ -41,16 +51,10 @@ import (
 	"github.com/temporalio/deputy/internal/report/render"
 	"github.com/temporalio/deputy/internal/sarif"
 	"github.com/temporalio/deputy/internal/scanning"
+	"github.com/temporalio/deputy/internal/services"
 	"github.com/temporalio/deputy/internal/targets"
 	ui "github.com/temporalio/deputy/internal/ui"
 	"github.com/temporalio/deputy/internal/version"
-	"github.com/protobom/protobom/pkg/sbom"
-	spdxjson "github.com/spdx/tools-golang/json"
-	spdxdoc "github.com/spdx/tools-golang/spdx"
-	spdxcommon "github.com/spdx/tools-golang/spdx/v2/common"
-	"github.com/spf13/cobra"
-	"golang.org/x/sync/errgroup"
-	"google.golang.org/protobuf/encoding/protojson"
 )
 
 // ModuleDeprecation captures information about a deprecated module and its
@@ -194,7 +198,7 @@ WORKFLOW EXAMPLES:
 	}
 
 	scanCmd.Flags().StringP("ref", "r", "HEAD", "Git reference to scan (branch, tag, or commit)")
-	scanCmd.PersistentFlags().StringSliceP("ecosystems", "e", []string{"all"}, "Ecosystems to scan: go, npm, pypi, maven, rubygems, cargo, nuget, hex, pub, cocoapods, packagist, github-actions, haskell, r, cpp (default: all)")
+	scanCmd.PersistentFlags().StringSliceP("ecosystems", "e", []string{"all"}, "Ecosystems to scan: go, npm, pypi, maven, rubygems, cargo, nuget, hex, pub, cocoapods, packagist, github-actions, mise, asdf, haskell, r, cpp (default: all)")
 	scanCmd.Flags().StringP("output", "o", "", "Output file (default: stdout)")
 	scanCmd.Flags().StringP("format", "f", "text", "Output format (text, json, sarif)")
 	scanCmd.Flags().Bool("ignore-unfixed", false, "Ignore vulnerabilities without fixes")
@@ -1435,11 +1439,42 @@ func outputTextContainer(w io.Writer, errW io.Writer, result scanning.Result, ig
 	return nil
 }
 
+// withoutInternalManifestMetadata returns a clone of resp with Deputy-internal
+// manifest-ref routing metadata (the "deputy:component-key=" group used for
+// source-aware remediation) stripped from every package, so user-facing JSON
+// does not leak internal state. The original response is left untouched because
+// in-process remediation and RPC round-trips rely on that metadata.
+func withoutInternalManifestMetadata(resp *scanv1.ScanResponse) *scanv1.ScanResponse {
+	if resp == nil {
+		return nil
+	}
+	clone := proto.Clone(resp).(*scanv1.ScanResponse)
+	for _, pkg := range clone.GetPackages() {
+		stripInternalManifestGroups(pkg)
+	}
+	for _, f := range clone.GetFindings() {
+		stripInternalManifestGroups(f.GetPackage())
+	}
+	return clone
+}
+
+// stripInternalManifestGroups replaces each manifest ref's Groups with the
+// public subset (dropping the internal component-key group).
+func stripInternalManifestGroups(pkg *dependencyv1.Package) {
+	if pkg == nil {
+		return
+	}
+	for _, ref := range pkg.GetManifestRefs() {
+		ref.Groups = dependency.ManifestRefGroups(ref)
+	}
+}
+
 // outputProtoJSON writes the scan results in JSON format using protojson for
 // consistent, type-safe serialization directly from the proto response.
 // This is the preferred method for JSON output as it avoids conversion bugs
 // and ensures the JSON structure matches the proto schema exactly.
 func outputProtoJSON(w io.Writer, resp *scanv1.ScanResponse) error {
+	resp = withoutInternalManifestMetadata(resp)
 	opts := protojson.MarshalOptions{
 		Multiline:       true,
 		Indent:          "  ",

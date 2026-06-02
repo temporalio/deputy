@@ -4,19 +4,32 @@ This page documents what Deputy can do across ecosystems, commands, and features
 
 ## Ecosystem Support Matrix
 
-| Ecosystem | Scan | SBOM | Proxy | Graph | License | Lockfiles |
-|-----------|:----:|:----:|:-----:|:-----:|:-------:|-----------|
-| **Go** | ✓ | ✓ | ✓ | ✓ | ✓ | go.mod, go.sum |
-| **npm** | ✓ | ✓ | ✓ | ✓ | - | package-lock.json, yarn.lock, pnpm-lock.yaml |
-| **PyPI** | ✓ | ✓ | ✓ | ✓ | - | requirements.txt, Pipfile.lock, poetry.lock |
-| **RubyGems** | ✓ | ✓ | ✓ | ✓ | - | Gemfile.lock, *.gemspec |
-| **Cargo** | ✓ | ✓ | - | ✓ | ✓ | Cargo.lock |
-| **Maven** | ✓ | ✓ | - | - | - | pom.xml |
-| **NuGet** | ✓ | ✓ | - | - | - | packages.lock.json, *.csproj |
-| **Hex** | ✓ | ✓ | - | - | - | mix.lock |
-| **Pub** | ✓ | ✓ | - | - | - | pubspec.lock |
-| **CocoaPods** | ✓ | ✓ | - | - | - | Podfile.lock |
-| **Packagist** | ✓ | ✓ | - | - | - | composer.lock |
+| Ecosystem | Scan | SBOM | Proxy | Graph | License | Manifest files | Lock/resolution files |
+|-----------|:----:|:----:|:-----:|:-----:|:-------:|----------------|-----------------------|
+| **Go** | ✓ | ✓ | ✓ | ✓ | ✓ | go.mod | - |
+| **npm** | ✓ | ✓ | ✓ | ✓ | - | package.json | package-lock.json, yarn.lock, pnpm-lock.yaml |
+| **PyPI** | ✓ | ✓ | ✓ | ✓ | - | pyproject.toml, setup.py, setup.cfg | requirements.txt, Pipfile.lock, poetry.lock, uv.lock |
+| **RubyGems** | ✓ | ✓ | ✓ | ✓ | - | Gemfile, *.gemspec | Gemfile.lock |
+| **Cargo** | ✓ | ✓ | - | ✓ | ✓ | Cargo.toml | Cargo.lock |
+| **Maven** | ✓ | ✓ | - | - | - | pom.xml, build.gradle, build.gradle.kts | gradle/verification-metadata.xml |
+| **NuGet** | ✓ | ✓ | - | - | - | *.csproj, *.fsproj | packages.lock.json |
+| **Hex** | ✓ | ✓ | - | - | - | mix.exs | mix.lock |
+| **Pub** | ✓ | ✓ | - | - | - | pubspec.yaml | pubspec.lock |
+| **CocoaPods** | ✓ | ✓ | - | - | - | Podfile, *.podspec | Podfile.lock |
+| **Packagist** | ✓ | ✓ | - | - | - | composer.json | composer.lock |
+| **mise** | ✓¹ | ✓ | - | - | - | mise.toml, .mise.toml, .config/mise/config.toml | mise.lock |
+| **asdf** | ✓¹ | ✓ | - | - | - | .tool-versions | - |
+
+`go.sum` is a checksum database/cache for module integrity, not a dependency
+lockfile, so it is intentionally not listed as a Go lock/resolution file.
+
+¹ mise/asdf tools are inventoried under `pkg:mise` / `pkg:asdf` (matching
+OSV-SCALIBR), which OSV does not index directly. For vulnerability scanning,
+Deputy resolves tools installed from a registry-mapped backend (`npm:`, `cargo:`,
+`pipx:`, `gem:`, `dotnet:`) to their canonical ecosystem, and the Go runtime to
+the Go vulnerability database (stdlib/toolchain). Language runtimes without an
+OSV ecosystem (e.g. node, python) are inventoried but not vuln-scanned. See the
+[mise guide](../guides/mise.md) and [pin](../commands/pin.md).
 
 **Additional extractors (via OSV-SCALIBR):**
 - GitHub Actions (.github/workflows/*.yml)

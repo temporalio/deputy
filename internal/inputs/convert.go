@@ -10,6 +10,7 @@ import (
 
 	"github.com/BurntSushi/toml"
 	"github.com/google/osv-scalibr/extractor"
+
 	containerv1 "github.com/temporalio/deputy/gen/deputy/container/v1"
 	dependencyv1 "github.com/temporalio/deputy/gen/deputy/dependency/v1"
 	"github.com/temporalio/deputy/internal/analysis/osv"
@@ -158,7 +159,7 @@ func Convert(pkgs []*extractor.Package, opts Options) []osv.PkgInput {
 					entry.IsDirect = true
 				}
 			}
-			entry.ManifestRefs = dependency.MergeManifestRef(entry.ManifestRefs, ref)
+			entry.ManifestRefs = dependency.MergeManifestRef(entry.ManifestRefs, &ref)
 		}
 	}
 	inputs := make([]osv.PkgInput, 0, len(seen))
@@ -223,7 +224,8 @@ func BuildSourcesMap(inputs []osv.PkgInput) map[string][]string {
 		if key == "" {
 			continue
 		}
-		for _, ref := range in.ManifestRefs {
+		for i := range in.ManifestRefs {
+			ref := &in.ManifestRefs[i]
 			pathStr := strings.TrimSpace(ref.Path)
 			if pathStr == "" {
 				continue

@@ -19,15 +19,17 @@ import (
 	scalibrimage "github.com/google/osv-scalibr/artifact/image"
 	"github.com/google/osv-scalibr/extractor"
 	scalibrfs "github.com/google/osv-scalibr/fs"
-	"github.com/temporalio/deputy/internal/compare"
-	"github.com/temporalio/deputy/internal/container/image"
-	"github.com/temporalio/deputy/internal/dockerfile"
-	"github.com/temporalio/deputy/internal/otel"
-	"github.com/temporalio/deputy/internal/repository/workspace"
-	"github.com/temporalio/deputy/internal/targets"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
 	"google.golang.org/protobuf/encoding/protojson"
+
+	"github.com/temporalio/deputy/internal/compare"
+	"github.com/temporalio/deputy/internal/container/image"
+	"github.com/temporalio/deputy/internal/dockerfile"
+	"github.com/temporalio/deputy/internal/mise"
+	"github.com/temporalio/deputy/internal/otel"
+	"github.com/temporalio/deputy/internal/repository/workspace"
+	"github.com/temporalio/deputy/internal/targets"
 )
 
 // workspaceProvider is implemented by types that provide a workspace.FS.
@@ -846,6 +848,30 @@ func sbomDocToPackages(doc *sbom.Document) []*extractor.Package {
 				if pu, err := packageurl.FromString(purl); err == nil {
 					pkg.PURLType = pu.Type
 				}
+			}
+		}
+
+		var requestedVersion string
+		var lockedVersion string
+		for _, prop := range node.Properties {
+			if prop == nil {
+				continue
+			}
+			switch prop.Name {
+			case "deputy:requestedVersion":
+				requestedVersion = strings.TrimSpace(prop.Data)
+			case "deputy:lockedVersion":
+				lockedVersion = strings.TrimSpace(prop.Data)
+			case "deputy:location":
+				if loc := strings.TrimSpace(prop.Data); loc != "" {
+					pkg.Locations = append(pkg.Locations, loc)
+				}
+			}
+		}
+		if (requestedVersion != "" || lockedVersion != "") && (pkg.PURLType == "mise" || pkg.PURLType == "asdf") {
+			pkg.Metadata = &mise.Metadata{
+				Version:       requestedVersion,
+				LockedVersion: lockedVersion,
 			}
 		}
 

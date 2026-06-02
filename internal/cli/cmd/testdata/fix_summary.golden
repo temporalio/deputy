@@ -1,5 +1,5 @@
 Remediation Plan:
   Target: github.com/acme/repo@main
   Commit: deadbeef
-  • Upgrade Go toolchain to v1.23.0 (update 'go' directive in go.mod)
+  • Upgrade Go toolchain to v1.23.0
   • Apply dependency upgrades (3 total, 2 runnable)

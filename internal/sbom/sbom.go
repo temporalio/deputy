@@ -7,8 +7,10 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"maps"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -24,19 +26,6 @@ import (
 	"github.com/go-git/go-git/v5/storage/memory"
 	"github.com/google/osv-scalibr/extractor"
 	"github.com/google/osv-scalibr/purl"
-	"github.com/temporalio/deputy/internal/auth"
-	"github.com/temporalio/deputy/internal/collections"
-	"github.com/temporalio/deputy/internal/compare"
-	"github.com/temporalio/deputy/internal/dockerfile"
-	gitx "github.com/temporalio/deputy/internal/gitutil"
-	"github.com/temporalio/deputy/internal/inventory"
-	"github.com/temporalio/deputy/internal/license"
-	"github.com/temporalio/deputy/internal/otel"
-	"github.com/temporalio/deputy/internal/purlx"
-	"github.com/temporalio/deputy/internal/repository"
-	"github.com/temporalio/deputy/internal/repository/workspace"
-	"github.com/temporalio/deputy/internal/targets"
-	"github.com/temporalio/deputy/internal/version"
 	"github.com/protobom/protobom/pkg/formats"
 	"github.com/protobom/protobom/pkg/sbom"
 	"github.com/protobom/protobom/pkg/writer"
@@ -48,6 +37,21 @@ import (
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/types/known/timestamppb"
+
+	"github.com/temporalio/deputy/internal/auth"
+	"github.com/temporalio/deputy/internal/collections"
+	"github.com/temporalio/deputy/internal/compare"
+	"github.com/temporalio/deputy/internal/dockerfile"
+	gitx "github.com/temporalio/deputy/internal/gitutil"
+	"github.com/temporalio/deputy/internal/inventory"
+	"github.com/temporalio/deputy/internal/license"
+	"github.com/temporalio/deputy/internal/mise"
+	"github.com/temporalio/deputy/internal/otel"
+	"github.com/temporalio/deputy/internal/purlx"
+	"github.com/temporalio/deputy/internal/repository"
+	"github.com/temporalio/deputy/internal/repository/workspace"
+	"github.com/temporalio/deputy/internal/targets"
+	"github.com/temporalio/deputy/internal/version"
 )
 
 // HTTP client timeout for remote license scanning during SBOM enrichment.
@@ -137,6 +141,7 @@ func Generate(ctx context.Context, repoRef string, opts Options) (Result, error)
 	result := Result{Ref: opts.Ref}
 	repoDisplay := repoRef
 	cloned := false
+	nonGit := false
 	if fi, statErr := os.Stat(repoRef); statErr == nil && fi.IsDir() {
 		if abs, absErr := filepath.Abs(repoRef); absErr == nil {
 			repoDisplay = abs
@@ -144,7 +149,17 @@ func Generate(ctx context.Context, repoRef string, opts Options) (Result, error)
 
 		src, err = repository.Open(repoRef)
 		if err != nil {
-			return Result{}, fmt.Errorf("open repository: %w", err)
+			// Not a git repository: fall back to a plain working-tree SBOM. This
+			// requires HEAD (the current files on disk); arbitrary git refs are
+			// unavailable without a repository.
+			if !strings.EqualFold(opts.Ref, "HEAD") {
+				return Result{}, fmt.Errorf("cannot resolve ref %q: %q is not a git repository", opts.Ref, repoDisplay)
+			}
+			src, err = repository.OpenDir(repoRef)
+			if err != nil {
+				return Result{}, fmt.Errorf("open directory: %w", err)
+			}
+			nonGit = true
 		}
 	}
 	if src == nil {
@@ -207,7 +222,7 @@ func Generate(ctx context.Context, repoRef string, opts Options) (Result, error)
 		}
 	}
 
-	doc, err := buildProtobomDocument(ctx, src.Workspace(), repoRef, opts.Ref, opts.Name, pkgs, directDeps)
+	doc, err := buildProtobomDocument(ctx, src.Workspace(), repoRef, opts.Ref, opts.Name, pkgs, directDeps, opts.Ecosystems)
 	if err != nil {
 		return Result{}, err
 	}
@@ -266,8 +281,12 @@ func Generate(ctx context.Context, repoRef string, opts Options) (Result, error)
 	result.Origin = origin
 	result.Document = doc
 	result.Packages = pkgs
+	targetKind := targets.KindGit
+	if nonGit {
+		targetKind = targets.KindDir
+	}
 	result.Target = inventory.Target{
-		Kind:         targets.KindGit,
+		Kind:         targetKind,
 		DisplayPath:  repoDisplay,
 		LocalPath:    localPath,
 		Ref:          opts.Ref,
@@ -336,7 +355,7 @@ func resolveRepoMetadata(repo *git.Repository, ref, fallbackOrigin string) (stri
 }
 
 // buildProtobomDocument converts the scalibr packages into a Protobom doc.
-func buildProtobomDocument(ctx context.Context, ws workspace.FS, repoRef, ref, name string, pkgs []*extractor.Package, directDeps map[string]bool) (*sbom.Document, error) {
+func buildProtobomDocument(ctx context.Context, ws workspace.FS, repoRef, ref, name string, pkgs []*extractor.Package, directDeps map[string]bool, ecosystems []string) (*sbom.Document, error) {
 	if name == "" {
 		name = fmt.Sprintf("%s@%s", repoRef, ref)
 	}
@@ -361,10 +380,11 @@ func buildProtobomDocument(ctx context.Context, ws workspace.FS, repoRef, ref, n
 
 	ghaCache := &githubActionsResolutionCache{}
 
-	// Discover and add Dockerfile base images to the SBOM
-	dockerfiles, _ := discoverAndParseDockerfiles(ws)
-	if len(dockerfiles) > 0 {
-		addDockerfileBaseImagesToSBOM(d, dockerfiles, app.Id)
+	if includeDockerfileBaseImages(ecosystems) {
+		dockerfiles, _ := discoverAndParseDockerfiles(ws)
+		if len(dockerfiles) > 0 {
+			addDockerfileBaseImagesToSBOM(d, dockerfiles, app.Id)
+		}
 	}
 
 	for _, p := range pkgs {
@@ -431,6 +451,12 @@ func buildProtobomDocument(ctx context.Context, ws workspace.FS, repoRef, ref, n
 			if res.ResolvedCommit != "" {
 				n.Properties = append(n.Properties, &sbom.Property{Name: "deputy:resolvedCommit", Data: res.ResolvedCommit})
 			}
+		}
+
+		// mise-managed tools: attach the exact locked version and per-platform
+		// integrity references from a sibling mise.lock, when present.
+		if md, ok := p.Metadata.(*mise.Metadata); ok {
+			addMiseLockReferences(n, md)
 		}
 
 		// Mark direct dependencies.
@@ -511,6 +537,21 @@ func buildProtobomDocument(ctx context.Context, ws workspace.FS, repoRef, ref, n
 		})
 	}
 	return d, nil
+}
+
+// includeDockerfileBaseImages reports whether repository Dockerfile base-image
+// discovery should contribute components for the requested ecosystem filter.
+func includeDockerfileBaseImages(ecosystems []string) bool {
+	if len(ecosystems) == 0 {
+		return true
+	}
+	for _, ecosystem := range ecosystems {
+		switch collections.NormalizeLower(ecosystem) {
+		case "", "all", "container", "containers", "container-image", "docker", "dockerfile", "containerfile", "oci":
+			return true
+		}
+	}
+	return false
 }
 
 type remoteFetcher struct{ Timeout time.Duration }
@@ -762,6 +803,82 @@ func rootNode(doc *sbom.Document) *sbom.Node {
 		}
 	}
 	return nil
+}
+
+// miseHashAlgorithms maps mise.lock checksum algorithm names to protobom hash
+// algorithm enum values.
+var miseHashAlgorithms = map[string]sbom.HashAlgorithm{
+	"sha256": sbom.HashAlgorithm_SHA256,
+	"sha512": sbom.HashAlgorithm_SHA512,
+	"sha1":   sbom.HashAlgorithm_SHA1,
+	"blake3": sbom.HashAlgorithm_BLAKE3,
+	"md5":    sbom.HashAlgorithm_MD5,
+}
+
+// addMiseLockReferences enriches a package node with the exact locked version
+// and per-platform integrity metadata from a sibling mise.lock. Each platform's
+// asset is modeled as a DOWNLOAD external reference carrying its URL and
+// checksum — a faithful, non-lossy representation, since mise installs a
+// distinct artifact per platform. When the lock pins exactly one platform, its
+// checksum is also set as the component-level hash for conventional consumers.
+func addMiseLockReferences(n *sbom.Node, md *mise.Metadata) {
+	if n == nil || md == nil {
+		return
+	}
+	if md.Version != "" && md.Version != n.Version {
+		n.Properties = append(n.Properties, &sbom.Property{
+			Name: "deputy:requestedVersion",
+			Data: md.Version,
+		})
+	}
+	if md.LockedVersion != "" && md.LockedVersion != n.Version {
+		n.Properties = append(n.Properties, &sbom.Property{
+			Name: "deputy:lockedVersion",
+			Data: md.LockedVersion,
+		})
+	}
+
+	// Deterministic platform order.
+	plats := slices.Sorted(maps.Keys(md.Platforms))
+
+	for _, plat := range plats {
+		p := md.Platforms[plat]
+		if p.Checksum == "" && p.URL == "" {
+			continue
+		}
+		ref := &sbom.ExternalReference{
+			Type:    sbom.ExternalReference_DOWNLOAD,
+			Url:     p.URL,
+			Comment: misePlatformComment(plat, p.Size),
+		}
+		if algoName, value := mise.ParseChecksum(p.Checksum); value != "" {
+			if algo, ok := miseHashAlgorithms[algoName]; ok {
+				ref.Hashes = map[int32]string{int32(algo): value}
+			}
+		}
+		n.ExternalReferences = append(n.ExternalReferences, ref)
+	}
+
+	// Single unambiguous platform: also expose a component-level hash.
+	if len(plats) == 1 {
+		if algoName, value := mise.ParseChecksum(md.Platforms[plats[0]].Checksum); value != "" {
+			if algo, ok := miseHashAlgorithms[algoName]; ok {
+				if n.Hashes == nil {
+					n.Hashes = map[int32]string{}
+				}
+				n.Hashes[int32(algo)] = value
+			}
+		}
+	}
+}
+
+// misePlatformComment builds an external-reference comment identifying the
+// platform and, when known, the asset size in bytes.
+func misePlatformComment(platform string, size int64) string {
+	if size > 0 {
+		return fmt.Sprintf("mise platform %s (%d bytes)", platform, size)
+	}
+	return "mise platform " + platform
 }
 
 func listRemoteRefs(ctx context.Context, remoteURL string, auth transport.AuthMethod) ([]*plumbing.Reference, error) {

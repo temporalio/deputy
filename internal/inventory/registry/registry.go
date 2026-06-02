@@ -43,9 +43,11 @@ import (
 	inventoryv1 "github.com/temporalio/deputy/gen/deputy/inventory/v1"
 	"github.com/temporalio/deputy/internal/ecosystem"
 	pluginclient "github.com/temporalio/deputy/internal/inventory/plugin"
+	asdfx "github.com/temporalio/deputy/internal/inventory/plugins/asdf/asdfx"
 	dockerfilex "github.com/temporalio/deputy/internal/inventory/plugins/docker/dockerfilex"
 	ghactions "github.com/temporalio/deputy/internal/inventory/plugins/github/actionsx"
 	gradlex "github.com/temporalio/deputy/internal/inventory/plugins/java/gradlex"
+	misex "github.com/temporalio/deputy/internal/inventory/plugins/mise/misex"
 	rubygemspec "github.com/temporalio/deputy/internal/inventory/plugins/ruby/gemspecx"
 )
 
@@ -241,6 +243,24 @@ func listDeputyExtractors() []*inventoryv1.ExtractorInfo {
 			Version:      1,
 			Description:  "Extracts dependencies from build.gradle and build.gradle.kts files",
 			FilePatterns: []string{"build.gradle", "build.gradle.kts"},
+			Source:       inventoryv1.ExtractorSource_EXTRACTOR_SOURCE_DEPUTY,
+		},
+		{
+			Name:         misex.Name,
+			DisplayName:  "mise",
+			Ecosystem:    "mise",
+			Version:      1,
+			Description:  "Extracts dev-toolchain dependencies from mise config (mise.toml)",
+			FilePatterns: []string{"mise.toml", ".mise.toml", "mise.local.toml", ".config/mise/config.toml"},
+			Source:       inventoryv1.ExtractorSource_EXTRACTOR_SOURCE_DEPUTY,
+		},
+		{
+			Name:         asdfx.Name,
+			DisplayName:  "asdf",
+			Ecosystem:    "asdf",
+			Version:      1,
+			Description:  "Extracts dev-toolchain dependencies from asdf .tool-versions files",
+			FilePatterns: []string{".tool-versions"},
 			Source:       inventoryv1.ExtractorSource_EXTRACTOR_SOURCE_DEPUTY,
 		},
 		{

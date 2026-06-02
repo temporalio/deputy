@@ -94,16 +94,19 @@ func buildInventoryStats(pkgs []*extractor.Package, direct map[string]bool) *inv
 		if pkg == nil {
 			continue
 		}
+		protoPkg := ExtractorPackageToProto(pkg, direct)
+		if protoPkg == nil {
+			continue
+		}
 
 		// Count by ecosystem
-		eco := pkg.Ecosystem().String()
+		eco := protoPkg.Ecosystem
 		if eco != "" {
 			stats.ByEcosystem[eco]++
 		}
 
 		// Count direct vs transitive
-		purl := pkg.PURL()
-		if purl != nil && direct[purl.String()] {
+		if protoPkg.Direct {
 			stats.DirectPackages++
 		} else {
 			stats.TransitivePackages++

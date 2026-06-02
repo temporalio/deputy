@@ -22,14 +22,16 @@ import (
 	pl "github.com/google/osv-scalibr/plugin/list"
 
 	"github.com/temporalio/deputy/internal/collections"
-	"github.com/temporalio/deputy/internal/ecosystem"
-	dockerfilex "github.com/temporalio/deputy/internal/inventory/plugins/docker/dockerfilex"
-	"github.com/temporalio/deputy/internal/logs"
 	"github.com/temporalio/deputy/internal/dependency/graph"
+	"github.com/temporalio/deputy/internal/ecosystem"
+	asdfx "github.com/temporalio/deputy/internal/inventory/plugins/asdf/asdfx"
+	dockerfilex "github.com/temporalio/deputy/internal/inventory/plugins/docker/dockerfilex"
 	ghactions "github.com/temporalio/deputy/internal/inventory/plugins/github/actionsx"
 	gradlex "github.com/temporalio/deputy/internal/inventory/plugins/java/gradlex"
-	"github.com/temporalio/deputy/internal/inventory/registry"
+	misex "github.com/temporalio/deputy/internal/inventory/plugins/mise/misex"
 	rubygemspec "github.com/temporalio/deputy/internal/inventory/plugins/ruby/gemspecx"
+	"github.com/temporalio/deputy/internal/inventory/registry"
+	"github.com/temporalio/deputy/internal/logs"
 	"github.com/temporalio/deputy/internal/repository/workspace"
 )
 
@@ -195,6 +197,8 @@ func resolvePlugins(opts ScanOptions, cap *plugin.Capabilities) ([]plugin.Plugin
 	includeActions := shouldIncludeGitHubActions(names)
 	includeDockerfile := shouldIncludeDockerfile(names)
 	includeGradle := shouldIncludeGradle(names)
+	includeMise := shouldIncludeMise(names)
+	includeAsdf := shouldIncludeAsdf(names)
 	scalibrNames := filterExternalEcosystems(names)
 
 	var plugins []plugin.Plugin
@@ -227,6 +231,12 @@ func resolvePlugins(opts ScanOptions, cap *plugin.Capabilities) ([]plugin.Plugin
 		plugins = append(plugins, gradlex.NewBuildGradleExtractor())
 		plugins = append(plugins, gradlex.NewVerificationMetadataExtractor())
 	}
+	if includeMise {
+		plugins = append(plugins, misex.New())
+	}
+	if includeAsdf {
+		plugins = append(plugins, asdfx.New())
+	}
 
 	return plugins, nil
 }
@@ -255,6 +265,8 @@ func filterInventoryPlugins(plugins []plugin.Plugin) []plugin.Plugin {
 		dockerfilex.Name,
 		gradlex.BuildGradleName,
 		gradlex.VerificationMetadataName,
+		misex.Name,
+		asdfx.Name,
 	)
 	// Add discovered external plugins to the allowlist
 	for _, p := range registry.GetPlugins() {
@@ -370,6 +382,47 @@ func shouldIncludeGradle(names []string) bool {
 	return slices.ContainsFunc(names, isGradleEcosystem)
 }
 
+// miseAliases contains all recognized aliases for the mise ecosystem
+// (mise.toml family). The asdf .tool-versions format is a separate ecosystem.
+var miseAliases = collections.NewSet(
+	"mise", "mise-en-place", "rtx",
+)
+
+// isMiseEcosystem checks if a name is an alias for mise scanning.
+func isMiseEcosystem(name string) bool {
+	return miseAliases.Has(name)
+}
+
+// shouldIncludeMise reports whether the internal mise plugin should run.
+// If names is nil (meaning all ecosystems), it returns true.
+func shouldIncludeMise(names []string) bool {
+	if names == nil {
+		return true
+	}
+	return slices.ContainsFunc(names, isMiseEcosystem)
+}
+
+// asdfAliases contains all recognized aliases for the asdf ecosystem
+// (.tool-versions format), kept distinct from mise to mirror OSV-SCALIBR's
+// runtime/asdf vs runtime/mise split.
+var asdfAliases = collections.NewSet(
+	"asdf", "tool-versions", ".tool-versions",
+)
+
+// isAsdfEcosystem checks if a name is an alias for asdf scanning.
+func isAsdfEcosystem(name string) bool {
+	return asdfAliases.Has(name)
+}
+
+// shouldIncludeAsdf reports whether the internal asdf plugin should run.
+// If names is nil (meaning all ecosystems), it returns true.
+func shouldIncludeAsdf(names []string) bool {
+	if names == nil {
+		return true
+	}
+	return slices.ContainsFunc(names, isAsdfEcosystem)
+}
+
 // filterExternalEcosystems removes internal ecosystem aliases so upstream scalibr
 // plugin resolution does not error on unknown names.
 func filterExternalEcosystems(names []string) []string {
@@ -378,7 +431,7 @@ func filterExternalEcosystems(names []string) []string {
 	}
 	out := make([]string, 0, len(names))
 	for _, n := range names {
-		if isGitHubActionsEcosystem(n) || isDockerfileEcosystem(n) {
+		if isGitHubActionsEcosystem(n) || isDockerfileEcosystem(n) || isMiseEcosystem(n) || isAsdfEcosystem(n) {
 			continue
 		}
 		out = append(out, n)

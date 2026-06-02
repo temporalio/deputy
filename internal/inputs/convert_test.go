@@ -9,6 +9,7 @@ import (
 
 	"github.com/google/osv-scalibr/extractor"
 	scalpurl "github.com/google/osv-scalibr/purl"
+
 	"github.com/temporalio/deputy/internal/analysis/osv"
 	"github.com/temporalio/deputy/internal/compare"
 	"github.com/temporalio/deputy/internal/inventory/manifests"
@@ -76,8 +77,9 @@ func TestConvert_GitHubActions_WorkflowUsesAreDirect(t *testing.T) {
 	if len(inputs[0].ManifestRefs) != 1 {
 		t.Fatalf("expected 1 manifest ref, got %+v", inputs[0].ManifestRefs)
 	}
-	if inputs[0].ManifestRefs[0].Manager != purlx.TypeGitHubActions || inputs[0].ManifestRefs[0].Path != ".github/workflows/build.yaml" {
-		t.Fatalf("unexpected manifest ref %+v", inputs[0].ManifestRefs[0])
+	ref := &inputs[0].ManifestRefs[0]
+	if ref.Manager != purlx.TypeGitHubActions || ref.Path != ".github/workflows/build.yaml" {
+		t.Fatalf("manifest ref = {Manager:%q Path:%q}, want {Manager:%q Path:%q}", ref.Manager, ref.Path, purlx.TypeGitHubActions, ".github/workflows/build.yaml")
 	}
 }
 
@@ -101,8 +103,9 @@ func TestConvert_GitHubActions_ActionManifestUsesAreDirect(t *testing.T) {
 	if len(inputs[0].ManifestRefs) != 1 {
 		t.Fatalf("expected 1 manifest ref, got %+v", inputs[0].ManifestRefs)
 	}
-	if inputs[0].ManifestRefs[0].Manager != purlx.TypeGitHubActions || inputs[0].ManifestRefs[0].Path != "tools/action/action.yml" {
-		t.Fatalf("unexpected manifest ref %+v", inputs[0].ManifestRefs[0])
+	ref := &inputs[0].ManifestRefs[0]
+	if ref.Manager != purlx.TypeGitHubActions || ref.Path != "tools/action/action.yml" {
+		t.Fatalf("manifest ref = {Manager:%q Path:%q}, want {Manager:%q Path:%q}", ref.Manager, ref.Path, purlx.TypeGitHubActions, "tools/action/action.yml")
 	}
 }
 

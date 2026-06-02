@@ -47,12 +47,9 @@ func CloneManifestRefs(refs []dependencyv1.ManifestRef) []dependencyv1.ManifestR
 		return nil
 	}
 	out := make([]dependencyv1.ManifestRef, len(refs))
-	for i, ref := range refs {
-		out[i] = dependencyv1.ManifestRef{
-			Path:    ref.Path,
-			Manager: ref.Manager,
-			Groups:  slices.Clone(ref.Groups),
-		}
+	for i := range refs {
+		ref := &refs[i]
+		out[i] = NewManifestRef(ref.Path, ref.Manager, slices.Clone(ManifestRefGroups(ref)), ManifestRefComponentKey(ref))
 	}
 	return out
 }

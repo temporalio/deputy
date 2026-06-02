@@ -10,15 +10,18 @@ import (
 	"strings"
 
 	"github.com/google/go-github/v63/github"
+	"github.com/spf13/cobra"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/trace"
+
 	deperrors "github.com/temporalio/deputy/internal/errors"
+	forgegithub "github.com/temporalio/deputy/internal/forge/github"
 	"github.com/temporalio/deputy/internal/otel"
 	"github.com/temporalio/deputy/internal/pin"
 	"github.com/temporalio/deputy/internal/pin/container"
 	"github.com/temporalio/deputy/internal/pin/githubactions"
+	"github.com/temporalio/deputy/internal/pin/mise"
 	ui "github.com/temporalio/deputy/internal/ui"
-	"github.com/spf13/cobra"
-	"go.opentelemetry.io/otel/attribute"
-	"go.opentelemetry.io/otel/trace"
 )
 
 // AddPinCommand registers the pin subcommand and its children with the root command.
@@ -31,7 +34,7 @@ func AddPinCommand(root *cobra.Command) {
 		Long: `Pin dependencies to immutable references for supply chain security.
 
 Scans for mutable dependency references and replaces them with immutable
-pins. By default, pins both GitHub Actions and container images.
+pins. By default, pins all supported ecosystems.
 
 GITHUB ACTIONS:
 Replaces mutable version tags like @v4 with commit SHA pins:
@@ -52,6 +55,19 @@ container/services fields, and docker:// action uses:
 
 The original tag is preserved for readability and automated update tooling.
 
+MISE / ASDF TOOLCHAINS:
+Pins fuzzy tool versions in mise.toml (mise) and .tool-versions (asdf) to exact,
+reproducible versions:
+
+    npm:prettier = "3.6.2"  # mise.toml, was "3" (native)
+    nodejs 22.14.0          # .tool-versions, was "22" (allowed host fallback)
+
+Resolution uses Deputy-native metadata sources by default. Pass
+--allowed-host-bins with absolute paths to host tools Deputy may execute for
+fallback resolution of non-native backends. Deputy does not search PATH.
+'deputy pin check' needs no mise binary and works as a CI gate. Array-valued
+tools are skipped (pin manually).
+
 AUTHENTICATION:
   GitHub Actions: Set GITHUB_TOKEN or GH_TOKEN for API verification.
   Container images: Uses Docker credential keychain (~/.docker/config.json).
@@ -61,7 +77,7 @@ SUBCOMMANDS:
   check    Check that all dependencies are pinned (CI gate)
   verify   Verify existing SHA pins for provenance (fork/imposter detection)
   update   Update existing pins to the latest version`,
-		Example: `  # Pin everything (actions + container images)
+		Example: `  # Pin all supported ecosystems
   deputy pin
 
   # Preview changes without modifying files
@@ -76,6 +92,9 @@ SUBCOMMANDS:
   # Pin only container images (Dockerfiles, workflow containers)
   deputy pin --ecosystems container-image
 
+  # Pin mise/asdf toolchains with an explicit host fallback allowlist
+  deputy pin --ecosystems mise,asdf --allowed-host-bins /opt/homebrew/bin/mise
+
   # Skip specific dependencies
   deputy pin --exclude actions/checkout --exclude 'myorg/*'
 
@@ -88,13 +107,14 @@ SUBCOMMANDS:
 	}
 
 	// Persistent flags inherited by subcommands.
-	cmd.PersistentFlags().StringSliceP("ecosystems", "e", []string{"all"}, "Ecosystems to pin (github-actions, container-image, all)")
+	cmd.PersistentFlags().StringSliceP("ecosystems", "e", []string{"all"}, "Ecosystems to pin (github-actions, container-image, mise, asdf, all)")
 	cmd.PersistentFlags().StringSliceP("exclude", "x", nil, "Skip dependencies matching glob patterns (e.g., 'actions/*', 'alpine')")
 	cmd.PersistentFlags().StringP("format", "f", "text", "Output format: text, json")
 	cmd.PersistentFlags().StringP("output", "o", "", "Output file (default: stdout)")
 
 	// Flags specific to the pin command.
 	cmd.Flags().BoolP("dry-run", "n", false, "Show what would change without modifying files")
+	cmd.Flags().StringSlice("allowed-host-bins", nil, "Absolute paths to host binaries Deputy may execute for fallback resolution (repeatable or comma-separated)")
 	cmd.Flags().Bool("skip-verification", false, "Skip fork/imposter commit verification")
 	cmd.Flags().Int("concurrency", 4, "Max parallel network requests")
 
@@ -179,9 +199,12 @@ func addPinUpdateCommand(parent *cobra.Command) {
 For GitHub Actions, re-resolves the major version tag (e.g., v4) to get the
 latest SHA. For container images, re-resolves the tag to get the current
 digest (detects when an image tag has been re-pushed with security patches).
+For mise/asdf toolchains, Deputy uses native resolution by default. Pass
+--allowed-host-bins with absolute paths to host tools Deputy may execute for
+fallback resolution of non-native backends.
 
 Unpinned references are skipped — use 'deputy pin' first to pin them.`,
-		Example: `  # Update all pinned dependencies to latest
+		Example: `  # Update all supported pins to latest
   deputy pin update
 
   # Preview updates without modifying files
@@ -190,12 +213,16 @@ Unpinned references are skipped — use 'deputy pin' first to pin them.`,
   # Update in a specific directory
   deputy pin update /path/to/repo
 
+  # Update mise/asdf toolchain pins with an explicit host fallback allowlist
+  deputy pin update --ecosystems mise,asdf --allowed-host-bins /opt/homebrew/bin/mise
+
   # Skip verification for faster updates
   deputy pin update --skip-verification`,
 		RunE: runPinUpdate,
 	}
 
 	cmd.Flags().BoolP("dry-run", "n", false, "Show what would change without modifying files")
+	cmd.Flags().StringSlice("allowed-host-bins", nil, "Absolute paths to host binaries Deputy may execute for fallback resolution (repeatable or comma-separated)")
 	cmd.Flags().Bool("skip-verification", false, "Skip fork/imposter commit verification")
 	cmd.Flags().Int("concurrency", 4, "Max parallel network requests")
 
@@ -223,6 +250,7 @@ func runPin(cmd *cobra.Command, args []string) error {
 	ecosystems, _ := cmd.Flags().GetStringSlice("ecosystems")
 	exclude, _ := cmd.Flags().GetStringSlice("exclude")
 	dryRun, _ := cmd.Flags().GetBool("dry-run")
+	allowedHostBins, _ := cmd.Flags().GetStringSlice("allowed-host-bins")
 	skipVerification, _ := cmd.Flags().GetBool("skip-verification")
 	format, _ := cmd.Flags().GetString("format")
 	outPath, _ := cmd.Flags().GetString("output")
@@ -242,7 +270,7 @@ func runPin(cmd *cobra.Command, args []string) error {
 		Exclude:          exclude,
 	}
 
-	strategies, err := buildPinStrategies(ctx, ecosystems, !skipVerification)
+	strategies, err := buildPinStrategies(ctx, ecosystems, !skipVerification, allowedHostBins)
 	if err != nil {
 		return err
 	}
@@ -286,7 +314,7 @@ func runPinCheck(cmd *cobra.Command, args []string) error {
 		Exclude: exclude,
 	}
 
-	strategies, err := buildPinStrategies(ctx, ecosystems, false)
+	strategies, err := buildPinStrategies(ctx, ecosystems, false, nil)
 	if err != nil {
 		return err
 	}
@@ -336,7 +364,7 @@ func runPinVerify(cmd *cobra.Command, args []string) error {
 		Exclude:     exclude,
 	}
 
-	strategies, err := buildPinStrategies(ctx, ecosystems, true)
+	strategies, err := buildPinStrategies(ctx, ecosystems, true, nil)
 	if err != nil {
 		return err
 	}
@@ -374,6 +402,7 @@ func runPinUpdate(cmd *cobra.Command, args []string) error {
 	ecosystems, _ := cmd.Flags().GetStringSlice("ecosystems")
 	exclude, _ := cmd.Flags().GetStringSlice("exclude")
 	dryRun, _ := cmd.Flags().GetBool("dry-run")
+	allowedHostBins, _ := cmd.Flags().GetStringSlice("allowed-host-bins")
 	skipVerification, _ := cmd.Flags().GetBool("skip-verification")
 	format, _ := cmd.Flags().GetString("format")
 	outPath, _ := cmd.Flags().GetString("output")
@@ -386,7 +415,7 @@ func runPinUpdate(cmd *cobra.Command, args []string) error {
 		Exclude:          exclude,
 	}
 
-	strategies, err := buildPinStrategies(ctx, ecosystems, !skipVerification)
+	strategies, err := buildPinStrategies(ctx, ecosystems, !skipVerification, allowedHostBins)
 	if err != nil {
 		return err
 	}
@@ -555,6 +584,13 @@ func renderPinResult(w io.Writer, r pin.Result, arrow string) {
 		if r.VersionTag != "" {
 			detail += " (" + r.VersionTag + ")"
 		}
+		// Surface a non-default reason (e.g. verify mode's "no pin-time
+		// provenance check", a verification-failure note, or update mode's
+		// "already at latest") so the line is distinguishable from a plain
+		// check and the user understands what did and did not happen.
+		if r.Reason != "" && r.Reason != "already pinned" {
+			detail += " — " + r.Reason
+		}
 		fmt.Fprintln(w, prefix+styledName+" "+ui.StyleDim.Render(detail))
 
 	case pin.StatusUnpinned:
@@ -605,9 +641,9 @@ func renderPinResult(w io.Writer, r pin.Result, arrow string) {
 func renderPinSummary(w io.Writer, s pin.Stats, dryRun bool) {
 	fmt.Fprintln(w, ui.StyleHeader.Render("Summary:"))
 	if s.Pinned > 0 {
-		msg := fmt.Sprintf("%d pinned to immutable SHA", s.Pinned)
+		msg := fmt.Sprintf("%d pinned to immutable reference", s.Pinned)
 		if dryRun {
-			msg = fmt.Sprintf("%d would be pinned to immutable SHA", s.Pinned)
+			msg = fmt.Sprintf("%d would be pinned to immutable reference", s.Pinned)
 		}
 		fmt.Fprintf(w, "  %s %s\n",
 			ui.StyleSymbol.Render(ui.StyleAdded.Render("↑")),
@@ -675,14 +711,18 @@ func shortenSHA(s string) string {
 }
 
 // supportedPinEcosystems lists ecosystems that have pinning support.
-var supportedPinEcosystems = []string{githubactions.Ecosystem, container.Ecosystem}
+var supportedPinEcosystems = []string{githubactions.Ecosystem, container.Ecosystem, mise.Ecosystem, mise.AsdfEcosystem}
 
 // buildPinStrategies creates Strategy instances for the requested ecosystems.
 // "all" expands to all supported ecosystems. When needsVerification is true,
-// a GitHub API client is created for commit provenance checks; otherwise
-// only the git protocol is used (no API token required).
-func buildPinStrategies(ctx context.Context, ecosystems []string, needsVerification bool) ([]pin.Strategy, error) {
-	// Expand "all" to every supported ecosystem.
+// a GitHub API client is created for commit provenance checks; otherwise only
+// the git protocol is used.
+func buildPinStrategies(ctx context.Context, ecosystems []string, needsVerification bool, allowedHostBins []string) ([]pin.Strategy, error) {
+	miseBin, err := allowedMiseBin(allowedHostBins)
+	if err != nil {
+		return nil, err
+	}
+
 	if len(ecosystems) == 1 && ecosystems[0] == "all" {
 		ecosystems = supportedPinEcosystems
 	}
@@ -698,11 +738,23 @@ func buildPinStrategies(ctx context.Context, ecosystems []string, needsVerificat
 		case githubactions.Ecosystem:
 			var ghClient *github.Client
 			if needsVerification {
-				ghClient = githubactions.NewGitHubClient(ctx)
+				ghClient = forgegithub.NewClient(ctx)
 			}
 			strategies = append(strategies, githubactions.NewStrategy(ghClient))
 		case container.Ecosystem:
 			strategies = append(strategies, container.NewStrategy())
+		case mise.Ecosystem:
+			strategy, err := newMiseStrategy(miseBin)
+			if err != nil {
+				return nil, err
+			}
+			strategies = append(strategies, strategy)
+		case mise.AsdfEcosystem:
+			strategy, err := newAsdfStrategy(miseBin)
+			if err != nil {
+				return nil, err
+			}
+			strategies = append(strategies, strategy)
 		default:
 			return nil, fmt.Errorf("unsupported ecosystem for pinning: %q (supported: %s)",
 				eco, strings.Join(supportedPinEcosystems, ", "))
@@ -712,4 +764,39 @@ func buildPinStrategies(ctx context.Context, ecosystems []string, needsVerificat
 		return nil, fmt.Errorf("no ecosystems selected for pinning")
 	}
 	return strategies, nil
+}
+
+func newMiseStrategy(miseBin string) (pin.Strategy, error) {
+	if strings.TrimSpace(miseBin) == "" {
+		return mise.NewStrategy(), nil
+	}
+	return mise.NewStrategyWithHostFallback(miseBin)
+}
+
+func newAsdfStrategy(miseBin string) (pin.Strategy, error) {
+	if strings.TrimSpace(miseBin) == "" {
+		return mise.NewAsdfStrategy(), nil
+	}
+	return mise.NewAsdfStrategyWithHostFallback(miseBin)
+}
+
+func allowedMiseBin(allowedHostBins []string) (string, error) {
+	var miseBin string
+	for _, raw := range allowedHostBins {
+		path := strings.TrimSpace(raw)
+		if path == "" {
+			continue
+		}
+		if !filepath.IsAbs(path) {
+			return "", fmt.Errorf("--allowed-host-bins entries must be absolute paths: %s", path)
+		}
+		switch strings.ToLower(filepath.Base(path)) {
+		case "mise", "mise.exe":
+			if miseBin != "" && miseBin != path {
+				return "", fmt.Errorf("multiple mise executables in --allowed-host-bins: %s and %s", miseBin, path)
+			}
+			miseBin = path
+		}
+	}
+	return miseBin, nil
 }

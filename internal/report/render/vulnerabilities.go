@@ -11,6 +11,7 @@ import (
 	pathpkg "path"
 
 	"github.com/charmbracelet/lipgloss"
+
 	containerv1 "github.com/temporalio/deputy/gen/deputy/container/v1"
 	vulnerabilityv1 "github.com/temporalio/deputy/gen/deputy/vulnerability/v1"
 	"github.com/temporalio/deputy/internal/dependency/graph"
@@ -256,7 +257,11 @@ func VulnerabilitySummaryAndActions(w io.Writer, cons []vulnerability.Consolidat
 		fmt.Fprintln(w, ui.StyleHeader.Render("Recommended Actions:"))
 		step := 1
 		if summary.StdlibRecommendation != "" {
-			fmt.Fprintf(w, "  %d. %s %s %s\n", step, ui.StyleBold.Render("Upgrade Go toolchain to"), ui.StyleUpgraded.Render(summary.StdlibRecommendation), ui.StyleVersion.Render("(update 'go' directive in go.mod)"))
+			// The per-source steps below specify exactly where to apply this
+			// (go.mod via `go get go@X` and/or mise.toml via `mise use go@X`), so
+			// we don't hardcode go.mod here — a Go runtime can be declared in
+			// mise.toml with no go.mod present.
+			fmt.Fprintf(w, "  %d. %s %s\n", step, ui.StyleBold.Render("Upgrade Go toolchain to"), ui.StyleUpgraded.Render(summary.StdlibRecommendation))
 			step++
 		}
 		if len(summary.Commands) > 0 {

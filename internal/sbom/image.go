@@ -8,12 +8,12 @@ import (
 
 	v1 "github.com/google/go-containerregistry/pkg/v1"
 	scalibrimage "github.com/google/osv-scalibr/artifact/image"
+	"github.com/protobom/protobom/pkg/sbom"
 	"github.com/temporalio/deputy/internal/inventory"
 	"github.com/temporalio/deputy/internal/otel"
 	"github.com/temporalio/deputy/internal/repository/workspace"
 	"github.com/temporalio/deputy/internal/targets"
 	"github.com/temporalio/deputy/internal/targets/providers"
-	"github.com/protobom/protobom/pkg/sbom"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
 )
@@ -74,7 +74,7 @@ func GenerateImage(ctx context.Context, target string, targetOpts map[string]str
 	if mat.FS != nil {
 		ws = workspace.NewReadOnlyFS(mat.FS)
 	}
-	doc, err := buildProtobomDocument(ctx, ws, display, "", docName, pkgs, nil)
+	doc, err := buildProtobomDocument(ctx, ws, display, "", docName, pkgs, nil, nil)
 	if err != nil {
 		otel.SetSpanError(span, err)
 		return Result{}, err

@@ -12,26 +12,29 @@ import (
 
 	"github.com/google/osv-scalibr/extractor"
 	packageurl "github.com/package-url/packageurl-go"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/trace"
+
 	containerv1 "github.com/temporalio/deputy/gen/deputy/container/v1"
 	dependencyv1 "github.com/temporalio/deputy/gen/deputy/dependency/v1"
 	vulnerabilityv1 "github.com/temporalio/deputy/gen/deputy/vulnerability/v1"
 	"github.com/temporalio/deputy/internal/analysis/osv"
 	"github.com/temporalio/deputy/internal/compare"
 	"github.com/temporalio/deputy/internal/container/image"
+	"github.com/temporalio/deputy/internal/dependency"
 	"github.com/temporalio/deputy/internal/dependency/graph"
 	"github.com/temporalio/deputy/internal/dockerfile"
 	"github.com/temporalio/deputy/internal/ecosystem"
 	"github.com/temporalio/deputy/internal/forge"
 	"github.com/temporalio/deputy/internal/inventory"
 	"github.com/temporalio/deputy/internal/inventory/manifests"
+	"github.com/temporalio/deputy/internal/mise"
 	"github.com/temporalio/deputy/internal/otel"
 	"github.com/temporalio/deputy/internal/policy"
 	"github.com/temporalio/deputy/internal/purlx"
 	"github.com/temporalio/deputy/internal/remediation/fixresolve"
 	"github.com/temporalio/deputy/internal/targets"
 	"github.com/temporalio/deputy/internal/vulnerability"
-	"go.opentelemetry.io/otel/attribute"
-	"go.opentelemetry.io/otel/trace"
 )
 
 // Result contains the output of a vulnerability scan.
@@ -549,7 +552,11 @@ func packagesToInputs(pkgs []*extractor.Package, direct map[string]bool) []osv.P
 		}
 
 		isDirect := false
-		if direct != nil {
+		if purl.Type == "mise" || purl.Type == "asdf" {
+			// Every mise/asdf tool is explicitly declared in its config, so it
+			// is a direct dependency.
+			isDirect = true
+		} else if direct != nil {
 			// For Go packages, check both exact module path and module root.
 			// The direct map may contain:
 			//   - Exact module paths with true (direct) or false (indirect)
@@ -594,10 +601,16 @@ func packagesToInputs(pkgs []*extractor.Package, direct map[string]bool) []osv.P
 			if !ok {
 				continue
 			}
-			manifestRefs = append(manifestRefs, dependencyv1.ManifestRef{
-				Path:    manifestPath,
-				Manager: manager,
-			})
+			manifestRefs = append(manifestRefs, dependencyv1.ManifestRef{})
+			ref := &manifestRefs[len(manifestRefs)-1]
+			ref.Path = manifestPath
+			ref.Manager = manager
+			// For mise/asdf, record the tool key as declared in the config so
+			// remediation targets the right entry even though the finding may be
+			// reported under a remapped canonical name (e.g. "stdlib", "lodash").
+			if manager == "mise" || manager == "asdf" {
+				dependency.SetManifestRefComponentKey(ref, pkg.Name)
+			}
 		}
 
 		// Convert layer details from SCALIBR for container image scans.
@@ -613,19 +626,61 @@ func packagesToInputs(pkgs []*extractor.Package, direct map[string]bool) []osv.P
 			}
 		}
 
+		// mise/asdf tools carry a manager-level identity (pkg:mise / pkg:asdf)
+		// that OSV does not index. For tools installed from a backend that maps
+		// to a real packaging ecosystem (npm, cargo, pypi, gem, nuget), scan
+		// against that canonical coordinate so OSV advisories are found, while
+		// the package's own identity and locations are preserved. The exact
+		// locked version (mise.lock) is preferred over a fuzzy declared one.
+		// Prefer the exact locked version (mise.lock) when available on live
+		// inventory; derivation otherwise works from the PURL alone so the same
+		// resolution applies to SBOM-round-tripped components.
+		scanVersion := pkg.Version
+		if md, ok := pkg.Metadata.(*mise.Metadata); ok && md.LockedVersion != "" {
+			scanVersion = md.LockedVersion
+		}
+
+		pkgCtx := osv.PackageContext{
+			IsDirect:     isDirect,
+			Locations:    locs,
+			ManifestRefs: manifestRefs,
+			LayerDetails: layerDetails,
+		}
+
+		// Known language runtimes (e.g. the Go runtime) map to dedicated OSV
+		// coordinates (Go stdlib/toolchain), which may be more than one query.
+		if coords := mise.RuntimeScanCoords(purl.Type, pkg.Name, scanVersion); len(coords) > 0 {
+			for _, c := range coords {
+				inputs = append(inputs, osv.NewPkgInput(
+					osv.QueryKey{Name: c.Name, Version: c.Version, Ecosystem: c.Ecosystem, PURL: c.PURL},
+					pkgCtx,
+				))
+			}
+			continue
+		}
+
+		qName := pkg.Name
+		qVersion := pkg.Version
+		qEcosystem := pkg.Ecosystem().String()
+		qPURL := purl.String()
+		// mise/asdf backend tools: scan against the backend's canonical ecosystem.
+		if bp := mise.ScanPURL(purl.Type, pkg.Name, scanVersion); bp != "" {
+			if pu, err := purlx.ParseLoose(bp); err == nil {
+				qName = purlDisplayName(pu)
+				qVersion = pu.Version
+				qEcosystem = purlEcosystem(pu)
+				qPURL = pu.String()
+			}
+		}
+
 		inputs = append(inputs, osv.NewPkgInput(
 			osv.QueryKey{
-				Name:      pkg.Name,
-				Version:   pkg.Version,
-				Ecosystem: pkg.Ecosystem().String(),
-				PURL:      purl.String(),
+				Name:      qName,
+				Version:   qVersion,
+				Ecosystem: qEcosystem,
+				PURL:      qPURL,
 			},
-			osv.PackageContext{
-				IsDirect:     isDirect,
-				Locations:    locs,
-				ManifestRefs: manifestRefs,
-				LayerDetails: layerDetails,
-			},
+			pkgCtx,
 		))
 	}
 	return inputs

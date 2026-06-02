@@ -337,14 +337,15 @@ func TestWithGraphResolution(t *testing.T) {
 
 func TestAll(t *testing.T) {
 	all := All()
-	if len(all) != 11 {
-		t.Errorf("All() returned %d ecosystems, want 11", len(all))
+	if len(all) != 13 {
+		t.Errorf("All() returned %d ecosystems, want 13", len(all))
 	}
 
 	// Verify specific ecosystems are present
 	expected := map[Ecosystem]bool{
 		Go: true, NPM: true, PyPI: true, Maven: true, RubyGems: true,
 		Cargo: true, NuGet: true, Hex: true, Pub: true, CocoaPods: true, Packagist: true,
+		Mise: true, Asdf: true,
 	}
 	for _, eco := range all {
 		delete(expected, eco)

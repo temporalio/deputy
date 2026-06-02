@@ -100,7 +100,12 @@ type Registration struct {
 	// SCALIBR plugins use names like "go/gomod", "javascript/packagejson".
 	ScalibrPrefixes []string
 
-	// Lockfiles lists the lockfile patterns this ecosystem recognizes.
+	// Manifests lists the human-edited manifest/declaration file patterns this
+	// ecosystem recognizes (e.g. go.mod, package.json, mise.toml).
+	Manifests []string
+
+	// Lockfiles lists generated lockfile patterns this ecosystem recognizes
+	// (e.g. package-lock.json, Cargo.lock, mise.lock).
 	Lockfiles []string
 
 	// UpstreamURL is the primary package registry URL.
@@ -247,7 +252,7 @@ func (r *Registry) AllScalibrPrefixes() []string {
 	// - github: GitHub Actions (Deputy's custom plugin)
 	// - haskell, r, cpp: Ecosystems supported by OSV-SCALIBR
 	// - os: OS-level package managers for container image scanning
-	extras := []string{"github", "haskell", "r", "cpp", "os"}
+	extras := []string{"github", "haskell", "r", "cpp", "os", "mise", "asdf"}
 	for _, extra := range extras {
 		if _, ok := seen[extra]; !ok {
 			seen[extra] = struct{}{}
@@ -267,7 +272,7 @@ func (r *Registry) registerDefaults() {
 		Capabilities:    CapInventory | CapGraph | CapProxy | CapLicense | CapFix | CapSBOM,
 		Aliases:         []string{"golang"},
 		ScalibrPrefixes: []string{"go"},
-		Lockfiles:       []string{"go.mod", "go.sum"},
+		Manifests:       []string{"go.mod"},
 		UpstreamURL:     "https://proxy.golang.org",
 		OSVName:         "Go",
 	})
@@ -279,6 +284,7 @@ func (r *Registry) registerDefaults() {
 		Capabilities:    CapInventory | CapGraph | CapProxy | CapLicense | CapSBOM,
 		Aliases:         []string{"javascript", "node", "nodejs"},
 		ScalibrPrefixes: []string{"javascript"},
+		Manifests:       []string{"package.json"},
 		Lockfiles:       []string{"package-lock.json", "yarn.lock", "pnpm-lock.yaml"},
 		UpstreamURL:     "https://registry.npmjs.org",
 		OSVName:         "npm",
@@ -291,6 +297,7 @@ func (r *Registry) registerDefaults() {
 		Capabilities:    CapInventory | CapGraph | CapProxy | CapSBOM,
 		Aliases:         []string{"python", "pip"},
 		ScalibrPrefixes: []string{"python"},
+		Manifests:       []string{"pyproject.toml", "setup.py", "setup.cfg"},
 		Lockfiles:       []string{"requirements.txt", "Pipfile.lock", "poetry.lock", "uv.lock"},
 		UpstreamURL:     "https://pypi.org",
 		OSVName:         "PyPI",
@@ -303,7 +310,8 @@ func (r *Registry) registerDefaults() {
 		Capabilities:    CapInventory | CapGraph | CapProxy | CapSBOM,
 		Aliases:         []string{"ruby", "gem", "gems"},
 		ScalibrPrefixes: []string{"ruby"},
-		Lockfiles:       []string{"Gemfile.lock", "*.gemspec"},
+		Manifests:       []string{"Gemfile", "*.gemspec"},
+		Lockfiles:       []string{"Gemfile.lock"},
 		UpstreamURL:     "https://rubygems.org",
 		OSVName:         "RubyGems",
 	})
@@ -315,6 +323,7 @@ func (r *Registry) registerDefaults() {
 		Capabilities:    CapInventory | CapGraph | CapLicense | CapSBOM,
 		Aliases:         []string{"rust", "crates", "crates.io"},
 		ScalibrPrefixes: []string{"rust"},
+		Manifests:       []string{"Cargo.toml"},
 		Lockfiles:       []string{"Cargo.lock"},
 		UpstreamURL:     "https://crates.io",
 		OSVName:         "crates.io",
@@ -327,7 +336,8 @@ func (r *Registry) registerDefaults() {
 		Capabilities:    CapInventory | CapGraph | CapSBOM,
 		Aliases:         []string{"java"},
 		ScalibrPrefixes: []string{"java"},
-		Lockfiles:       []string{"pom.xml", "build.gradle", "build.gradle.kts"},
+		Manifests:       []string{"pom.xml", "build.gradle", "build.gradle.kts"},
+		Lockfiles:       []string{"gradle/verification-metadata.xml"},
 		UpstreamURL:     "https://repo1.maven.org/maven2",
 		OSVName:         "Maven",
 	})
@@ -339,7 +349,8 @@ func (r *Registry) registerDefaults() {
 		Capabilities:    CapInventory | CapGraph | CapSBOM,
 		Aliases:         []string{"dotnet", ".net"},
 		ScalibrPrefixes: []string{"dotnet"},
-		Lockfiles:       []string{"packages.lock.json", "*.csproj", "*.fsproj"},
+		Manifests:       []string{"*.csproj", "*.fsproj"},
+		Lockfiles:       []string{"packages.lock.json"},
 		UpstreamURL:     "https://api.nuget.org/v3/index.json",
 		OSVName:         "NuGet",
 	})
@@ -351,6 +362,7 @@ func (r *Registry) registerDefaults() {
 		Capabilities:    CapInventory | CapGraph | CapSBOM,
 		Aliases:         []string{"hexpm", "elixir", "erlang"},
 		ScalibrPrefixes: []string{"elixir", "erlang"},
+		Manifests:       []string{"mix.exs"},
 		Lockfiles:       []string{"mix.lock"},
 		UpstreamURL:     "https://hex.pm",
 		OSVName:         "Hex",
@@ -363,6 +375,7 @@ func (r *Registry) registerDefaults() {
 		Capabilities:    CapInventory | CapGraph | CapSBOM,
 		Aliases:         []string{"dart", "flutter"},
 		ScalibrPrefixes: []string{"dart"},
+		Manifests:       []string{"pubspec.yaml"},
 		Lockfiles:       []string{"pubspec.lock"},
 		UpstreamURL:     "https://pub.dev",
 		OSVName:         "Pub",
@@ -375,6 +388,7 @@ func (r *Registry) registerDefaults() {
 		Capabilities:    CapInventory | CapSBOM,
 		Aliases:         []string{"pod", "pods", "swift", "ios"},
 		ScalibrPrefixes: []string{"swift"},
+		Manifests:       []string{"Podfile", "*.podspec"},
 		Lockfiles:       []string{"Podfile.lock"},
 		UpstreamURL:     "https://cocoapods.org",
 		OSVName:         "CocoaPods",
@@ -387,9 +401,36 @@ func (r *Registry) registerDefaults() {
 		Capabilities:    CapInventory | CapSBOM,
 		Aliases:         []string{"composer", "php"},
 		ScalibrPrefixes: []string{"php"},
+		Manifests:       []string{"composer.json"},
 		Lockfiles:       []string{"composer.lock"},
 		UpstreamURL:     "https://packagist.org",
 		OSVName:         "Packagist",
+	})
+
+	r.Register(Registration{
+		Ecosystem:       Mise,
+		DisplayName:     "mise",
+		Description:     "mise-en-place dev toolchains (mise.toml)",
+		Capabilities:    CapInventory | CapSBOM,
+		Aliases:         []string{"mise-en-place", "rtx"},
+		ScalibrPrefixes: []string{"mise"},
+		Manifests:       []string{"mise.toml", ".mise.toml", "mise.local.toml", ".config/mise/config.toml"},
+		Lockfiles:       []string{"mise.lock"},
+		UpstreamURL:     "https://mise.jdx.dev",
+		OSVName:         "",
+	})
+
+	r.Register(Registration{
+		Ecosystem:       Asdf,
+		DisplayName:     "asdf",
+		Description:     "asdf dev toolchains (.tool-versions)",
+		Capabilities:    CapInventory | CapSBOM,
+		Aliases:         []string{"tool-versions"},
+		ScalibrPrefixes: []string{"asdf"},
+		Manifests:       []string{".tool-versions"},
+		Lockfiles:       nil,
+		UpstreamURL:     "https://asdf-vm.com",
+		OSVName:         "",
 	})
 }
 

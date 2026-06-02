@@ -6,6 +6,7 @@ import (
 	dependencyv1 "github.com/temporalio/deputy/gen/deputy/dependency/v1"
 	targetv1 "github.com/temporalio/deputy/gen/deputy/target/v1"
 	vulnerabilityv1 "github.com/temporalio/deputy/gen/deputy/vulnerability/v1"
+	"github.com/temporalio/deputy/internal/dependency"
 	"github.com/temporalio/deputy/internal/targets"
 )
 
@@ -45,11 +46,11 @@ func TestAdvisoryFields(t *testing.T) {
 	// Advisory is already a proto type (vulnerabilityv1.Advisory).
 	// Test that the proto fields work correctly.
 	advisory := &vulnerabilityv1.Advisory{
-		Id:        "CVE-2021-44228",
-		Aliases:   []string{"GHSA-jfh8-c2jp-5v3q"},
-		Summary:   "Log4j RCE vulnerability",
-		Details:   "A remote code execution vulnerability in Apache Log4j",
-		Cve:       "CVE-2021-44228",
+		Id:      "CVE-2021-44228",
+		Aliases: []string{"GHSA-jfh8-c2jp-5v3q"},
+		Summary: "Log4j RCE vulnerability",
+		Details: "A remote code execution vulnerability in Apache Log4j",
+		Cve:     "CVE-2021-44228",
 		Severity: &vulnerabilityv1.Severity{
 			Type:  vulnerabilityv1.SeverityType_SEVERITY_TYPE_CVSS_V3,
 			Score: 10.0,
@@ -161,6 +162,31 @@ func TestProtoEnumValues(t *testing.T) {
 	}
 	if vulnerabilityv1.SeverityType_SEVERITY_TYPE_CVSS_V3 != 2 {
 		t.Error("SEVERITY_TYPE_CVSS_V3 should be 2")
+	}
+}
+
+func TestManifestRefComponentKeyRoundTrip(t *testing.T) {
+	// ComponentKey must survive the proto<->internal conversions; dropping it
+	// breaks source-aware mise/asdf fixes.
+	tests := []struct {
+		name string
+		ref  dependencyv1.ManifestRef
+	}{
+		{"mise backend tool", dependency.NewManifestRef("mise.toml", "mise", nil, "npm:lodash")},
+		{"mise go runtime", dependency.NewManifestRef("mise.toml", "mise", nil, "go")},
+		{"no component key", dependencyv1.ManifestRef{Path: "go.mod", Manager: "go"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			toProto := ManifestRefsToProto([]dependencyv1.ManifestRef{tt.ref})
+			if len(toProto) != 1 || dependency.ManifestRefComponentKey(toProto[0]) != dependency.ManifestRefComponentKey(&tt.ref) {
+				t.Fatalf("ToProto dropped ComponentKey: %+v", toProto)
+			}
+			back := ManifestRefsFromProto(toProto)
+			if len(back) != 1 || dependency.ManifestRefComponentKey(&back[0]) != dependency.ManifestRefComponentKey(&tt.ref) {
+				t.Fatalf("FromProto dropped ComponentKey: %+v", back)
+			}
+		})
 	}
 }
 
