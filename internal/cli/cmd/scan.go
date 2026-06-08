@@ -22,10 +22,17 @@ import (
 	"github.com/google/go-containerregistry/pkg/name"
 	"github.com/google/osv-scalibr/extractor"
 	packageurl "github.com/package-url/packageurl-go"
+	"github.com/protobom/protobom/pkg/sbom"
+	spdxjson "github.com/spdx/tools-golang/json"
+	spdxdoc "github.com/spdx/tools-golang/spdx"
+	spdxcommon "github.com/spdx/tools-golang/spdx/v2/common"
+	"github.com/spf13/cobra"
+	"golang.org/x/sync/errgroup"
+	"google.golang.org/protobuf/encoding/protojson"
+
 	policyv1 "github.com/temporalio/deputy/gen/deputy/policy/v1"
 	scanv1 "github.com/temporalio/deputy/gen/deputy/scan/v1"
 	targetv1 "github.com/temporalio/deputy/gen/deputy/target/v1"
-	"github.com/temporalio/deputy/internal/services"
 	cliflags "github.com/temporalio/deputy/internal/cli/flags"
 	"github.com/temporalio/deputy/internal/collections"
 	"github.com/temporalio/deputy/internal/container/image"
@@ -41,16 +48,10 @@ import (
 	"github.com/temporalio/deputy/internal/report/render"
 	"github.com/temporalio/deputy/internal/sarif"
 	"github.com/temporalio/deputy/internal/scanning"
+	"github.com/temporalio/deputy/internal/services"
 	"github.com/temporalio/deputy/internal/targets"
 	ui "github.com/temporalio/deputy/internal/ui"
 	"github.com/temporalio/deputy/internal/version"
-	"github.com/protobom/protobom/pkg/sbom"
-	spdxjson "github.com/spdx/tools-golang/json"
-	spdxdoc "github.com/spdx/tools-golang/spdx"
-	spdxcommon "github.com/spdx/tools-golang/spdx/v2/common"
-	"github.com/spf13/cobra"
-	"golang.org/x/sync/errgroup"
-	"google.golang.org/protobuf/encoding/protojson"
 )
 
 // ModuleDeprecation captures information about a deprecated module and its
@@ -194,7 +195,7 @@ WORKFLOW EXAMPLES:
 	}
 
 	scanCmd.Flags().StringP("ref", "r", "HEAD", "Git reference to scan (branch, tag, or commit)")
-	scanCmd.PersistentFlags().StringSliceP("ecosystems", "e", []string{"all"}, "Ecosystems to scan: go, npm, pypi, maven, rubygems, cargo, nuget, hex, pub, cocoapods, packagist, github-actions, haskell, r, cpp (default: all)")
+	scanCmd.PersistentFlags().StringSliceP("ecosystems", "e", []string{"all"}, "Ecosystems to scan: go, npm, pypi, maven, rubygems, cargo, nuget, hex, pub, cocoapods, packagist, github-actions, mise, asdf, haskell, r, cpp (default: all)")
 	scanCmd.Flags().StringP("output", "o", "", "Output file (default: stdout)")
 	scanCmd.Flags().StringP("format", "f", "text", "Output format (text, json, sarif)")
 	scanCmd.Flags().Bool("ignore-unfixed", false, "Ignore vulnerabilities without fixes")

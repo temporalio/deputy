@@ -3,12 +3,12 @@ package cmd
 import (
 	"bytes"
 	"context"
+	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
 	"github.com/temporalio/deputy/internal/pin"
-	"github.com/temporalio/deputy/internal/pin/container"
-	"github.com/temporalio/deputy/internal/pin/githubactions"
 )
 
 // pinnedReport builds a report with a single freshly-pinned result.
@@ -82,6 +82,39 @@ func TestRenderPinReport_VerifiedCaveatSurfaced(t *testing.T) {
 	}
 }
 
+func TestRenderPinReport_AlreadyPinnedReasonSurfaced(t *testing.T) {
+	report := &pin.Report{
+		Results: []pin.Result{
+			{
+				Ref:         pin.Ref{Name: "go", FilePath: "/repo/mise.toml"},
+				Status:      pin.StatusAlreadyPinned,
+				PinnedValue: "1.25.1",
+				Reason:      "no pin-time provenance check",
+			},
+			{
+				Ref:         pin.Ref{Name: "node", FilePath: "/repo/mise.toml"},
+				Status:      pin.StatusAlreadyPinned,
+				PinnedValue: "22.5.0",
+				Reason:      "already pinned", // the default; must not produce a dangling separator
+			},
+		},
+		Stats: pin.Stats{Total: 2, AlreadyPinned: 2},
+	}
+
+	var buf bytes.Buffer
+	renderPinReport(&buf, report, false)
+	out := stripANSI(buf.String())
+
+	// A non-default reason (verify mode) is surfaced so verify differs from check.
+	if !strings.Contains(out, "no pin-time provenance check") {
+		t.Errorf("expected verify reason to be surfaced, got:\n%s", out)
+	}
+	// The default "already pinned" reason must not be echoed as a redundant suffix.
+	if strings.Contains(out, "already pinned — already pinned") {
+		t.Errorf("default reason produced a redundant suffix, got:\n%s", out)
+	}
+}
+
 // stripANSI removes ANSI escape sequences so assertions match visible text.
 func stripANSI(s string) string {
 	var b strings.Builder
@@ -100,10 +133,11 @@ func stripANSI(s string) string {
 
 func TestBuildPinStrategies(t *testing.T) {
 	tests := []struct {
-		name       string
-		ecosystems []string
-		wantLen    int
-		wantErr    string
+		name            string
+		ecosystems      []string
+		allowedHostBins []string
+		wantLen         int
+		wantErr         string
 	}{
 		{
 			name:       "default github-actions",
@@ -113,7 +147,7 @@ func TestBuildPinStrategies(t *testing.T) {
 		{
 			name:       "all expands to supported",
 			ecosystems: []string{"all"},
-			wantLen:    len(supportedPinEcosystems), // github-actions + container-image
+			wantLen:    len(supportedPinEcosystems),
 		},
 		{
 			name:       "container-image",
@@ -131,6 +165,17 @@ func TestBuildPinStrategies(t *testing.T) {
 			wantErr:    "unsupported ecosystem for pinning",
 		},
 		{
+			name:       "mise uses native resolver by default",
+			ecosystems: []string{"mise"},
+			wantLen:    1,
+		},
+		{
+			name:            "host fallback allowlist requires absolute path",
+			ecosystems:      []string{"mise"},
+			allowedHostBins: []string{"mise"},
+			wantErr:         "absolute",
+		},
+		{
 			name:       "deduplicates",
 			ecosystems: []string{"github-actions", "github-actions"},
 			wantLen:    1,
@@ -144,7 +189,7 @@ func TestBuildPinStrategies(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			strategies, err := buildPinStrategies(context.Background(), tc.ecosystems, false)
+			strategies, err := buildPinStrategies(context.Background(), tc.ecosystems, false, tc.allowedHostBins)
 			if tc.wantErr != "" {
 				if err == nil {
 					t.Fatalf("expected error containing %q, got nil", tc.wantErr)
@@ -162,10 +207,33 @@ func TestBuildPinStrategies(t *testing.T) {
 			}
 			for _, s := range strategies {
 				eco := s.Ecosystem()
-				if eco != githubactions.Ecosystem && eco != container.Ecosystem {
+				if !slices.Contains(supportedPinEcosystems, eco) {
 					t.Errorf("unexpected ecosystem: %s", eco)
 				}
 			}
 		})
+	}
+}
+
+func TestAllowedMiseBin(t *testing.T) {
+	dir := t.TempDir()
+	misePath := filepath.Join(dir, "mise")
+	otherPath := filepath.Join(dir, "git")
+
+	got, err := allowedMiseBin([]string{otherPath, misePath})
+	if err != nil {
+		t.Fatalf("allowedMiseBin: %v", err)
+	}
+	if got != misePath {
+		t.Errorf("allowedMiseBin = %q, want %q", got, misePath)
+	}
+
+	if _, err := allowedMiseBin([]string{"mise"}); err == nil {
+		t.Fatal("allowedMiseBin returned nil error for relative path, want error")
+	}
+
+	otherMisePath := filepath.Join(t.TempDir(), "mise")
+	if _, err := allowedMiseBin([]string{misePath, otherMisePath}); err == nil {
+		t.Fatal("allowedMiseBin returned nil error for multiple mise paths, want error")
 	}
 }

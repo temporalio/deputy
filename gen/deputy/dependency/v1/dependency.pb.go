@@ -150,7 +150,20 @@ type ManifestRef struct {
 	// Manager is the package manager that owns this manifest.
 	Manager string `protobuf:"bytes,2,opt,name=manager,proto3" json:"manager,omitempty"`
 	// Groups are dependency groups (e.g., "dev", "test", "prod").
-	Groups        []string `protobuf:"bytes,3,rep,name=groups,proto3" json:"groups,omitempty"`
+	Groups []string `protobuf:"bytes,3,rep,name=groups,proto3" json:"groups,omitempty"`
+	// ComponentKey is the dependency's key exactly as written in the manifest
+	// (e.g. the mise.toml tool keys "npm:lodash" or "go"). It exists for
+	// source-aware remediation when a finding is reported under a different name
+	// than the manifest uses.
+	//
+	// mise/asdf tools have no OSV ecosystem of their own, so vulnerability
+	// scanning queries them under a remapped coordinate and the finding comes
+	// back under that name: a mise "go" runtime is queried against the Go vuln DB
+	// and reported as "stdlib"/"toolchain"; "npm:lodash" is reported as "lodash".
+	// ComponentKey preserves the original manifest key so a fix can target the
+	// right entry (e.g. `mise use go@<fixed>`). Empty when not applicable (most
+	// ecosystems report findings under the same name the manifest uses).
+	ComponentKey  string `protobuf:"bytes,4,opt,name=component_key,json=componentKey,proto3" json:"component_key,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -206,6 +219,13 @@ func (x *ManifestRef) GetGroups() []string {
 	return nil
 }
 
+func (x *ManifestRef) GetComponentKey() string {
+	if x != nil {
+		return x.ComponentKey
+	}
+	return ""
+}
+
 var File_deputy_dependency_v1_dependency_proto protoreflect.FileDescriptor
 
 const file_deputy_dependency_v1_dependency_proto_rawDesc = "" +
@@ -220,11 +240,12 @@ const file_deputy_dependency_v1_dependency_proto_rawDesc = "" +
 	"\x06direct\x18\x06 \x01(\bR\x06direct\x12\x1c\n" +
 	"\tlocations\x18\a \x03(\tR\tlocations\x12F\n" +
 	"\rmanifest_refs\x18\b \x03(\v2!.deputy.dependency.v1.ManifestRefR\fmanifestRefs\x12F\n" +
-	"\rlayer_details\x18\t \x01(\v2!.deputy.container.v1.LayerDetailsR\flayerDetails\"S\n" +
+	"\rlayer_details\x18\t \x01(\v2!.deputy.container.v1.LayerDetailsR\flayerDetails\"x\n" +
 	"\vManifestRef\x12\x12\n" +
 	"\x04path\x18\x01 \x01(\tR\x04path\x12\x18\n" +
 	"\amanager\x18\x02 \x01(\tR\amanager\x12\x16\n" +
-	"\x06groups\x18\x03 \x03(\tR\x06groupsB\xe1\x01\n" +
+	"\x06groups\x18\x03 \x03(\tR\x06groups\x12#\n" +
+	"\rcomponent_key\x18\x04 \x01(\tR\fcomponentKeyB\xe1\x01\n" +
 	"\x18com.deputy.dependency.v1B\x0fDependencyProtoP\x01ZBgithub.com/temporalio/deputy/gen/deputy/dependency/v1;dependencyv1\xa2\x02\x03DDX\xaa\x02\x14Deputy.Dependency.V1\xca\x02\x14Deputy\\Dependency\\V1\xe2\x02 Deputy\\Dependency\\V1\\GPBMetadata\xea\x02\x16Deputy::Dependency::V1b\x06proto3"
 
 var (

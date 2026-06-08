@@ -285,8 +285,8 @@ func TestVerify_NoVerifierAvailable(t *testing.T) {
 		t.Errorf("expected 1 already-pinned, got %d", report.Stats.AlreadyPinned)
 	}
 	r := report.Results[0]
-	if !strings.Contains(r.Reason, "verification not available") {
-		t.Errorf("expected reason about verification not available, got %q", r.Reason)
+	if !strings.Contains(r.Reason, "no pin-time provenance check") {
+		t.Errorf("expected reason about no pin-time provenance check, got %q", r.Reason)
 	}
 }
 

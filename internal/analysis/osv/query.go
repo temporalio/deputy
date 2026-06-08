@@ -12,6 +12,11 @@ import (
 	"github.com/google/osv-scalibr/purl"
 	"github.com/google/osv-scalibr/semantic"
 	"github.com/ossf/osv-schema/bindings/go/osvschema"
+	"golang.org/x/mod/semver"
+	"golang.org/x/sync/errgroup"
+	"golang.org/x/sync/singleflight"
+	"osv.dev/bindings/go/osvdev"
+
 	containerv1 "github.com/temporalio/deputy/gen/deputy/container/v1"
 	dependencyv1 "github.com/temporalio/deputy/gen/deputy/dependency/v1"
 	vulnerabilityv1 "github.com/temporalio/deputy/gen/deputy/vulnerability/v1"
@@ -23,10 +28,6 @@ import (
 	"github.com/temporalio/deputy/internal/otel"
 	"github.com/temporalio/deputy/internal/purlx"
 	"github.com/temporalio/deputy/internal/vulnerability"
-	"golang.org/x/mod/semver"
-	"golang.org/x/sync/errgroup"
-	"golang.org/x/sync/singleflight"
-	"osv.dev/bindings/go/osvdev"
 )
 
 // Client abstracts the subset of osv.dev client functionality required for
@@ -144,7 +145,12 @@ func QueryProto(ctx context.Context, client Client, pkgs []*dependencyv1.Package
 		var manifestRefs []dependencyv1.ManifestRef
 		for _, ref := range pkg.ManifestRefs {
 			if ref != nil {
-				manifestRefs = append(manifestRefs, *ref)
+				manifestRefs = append(manifestRefs, dependencyv1.ManifestRef{})
+				dst := &manifestRefs[len(manifestRefs)-1]
+				dst.Path = ref.Path
+				dst.Manager = ref.Manager
+				dst.Groups = slices.Clone(dependency.ManifestRefGroups(ref))
+				dependency.SetManifestRefComponentKey(dst, dependency.ManifestRefComponentKey(ref))
 			}
 		}
 
@@ -237,8 +243,9 @@ func splitVulnerabilityToProto(v Vulnerability) (*vulnerabilityv1.Advisory, *vul
 		manifestRefs[i] = &dependencyv1.ManifestRef{
 			Path:    v.ManifestRefs[i].Path,
 			Manager: v.ManifestRefs[i].Manager,
-			Groups:  v.ManifestRefs[i].Groups,
+			Groups:  dependency.ManifestRefGroups(&v.ManifestRefs[i]),
 		}
+		dependency.SetManifestRefComponentKey(manifestRefs[i], dependency.ManifestRefComponentKey(&v.ManifestRefs[i]))
 	}
 
 	// Convert affected imports to pointer slice

@@ -12,10 +12,10 @@ import (
 	"github.com/go-git/go-git/v5/plumbing/transport"
 	"github.com/google/osv-scalibr/extractor"
 	"github.com/google/osv-scalibr/purl"
+	"github.com/protobom/protobom/pkg/sbom"
 	"github.com/temporalio/deputy/internal/dockerfile"
 	"github.com/temporalio/deputy/internal/purlx"
 	"github.com/temporalio/deputy/internal/repository/workspace"
-	"github.com/protobom/protobom/pkg/sbom"
 )
 
 func Test_NormalizeGolangPURLString(t *testing.T) {
@@ -113,7 +113,7 @@ func TestBuildProtobomDocument_GitHubActionsResolutionProperties(t *testing.T) {
 
 	doc, err := buildProtobomDocument(t.Context(), ws, "https://example.invalid/repo.git", "HEAD", "test", []*extractor.Package{
 		{Name: "actions/checkout", Version: "v2", PURLType: purlx.TypeGitHubActions},
-	}, nil)
+	}, nil, nil)
 	if err != nil {
 		t.Fatalf("buildProtobomDocument: %v", err)
 	}
@@ -768,6 +768,81 @@ CMD ["/app"]
 	}
 }
 
+func Test_buildProtobomDocument_filtersDockerfileBaseImages(t *testing.T) {
+	ws := workspace.NewMemory()
+	defer ws.Close()
+
+	const dockerfileContent = `FROM golang:1.22 AS builder
+RUN go build -o app .
+
+FROM alpine:3.19
+COPY --from=builder /app /app
+`
+	if err := ws.WriteFile("Dockerfile", []byte(dockerfileContent), 0o644); err != nil {
+		t.Fatalf("write Dockerfile: %v", err)
+	}
+
+	doc, err := buildProtobomDocument(t.Context(), ws, "https://example.com/repo", "HEAD", "test", nil, nil, []string{"mise"})
+	if err != nil {
+		t.Fatalf("buildProtobomDocument: %v", err)
+	}
+	if got := countContainerBaseImageNodes(doc); got != 0 {
+		t.Fatalf("container base image nodes = %d, want 0", got)
+	}
+
+	doc, err = buildProtobomDocument(t.Context(), ws, "https://example.com/repo", "HEAD", "test", nil, nil, []string{"dockerfile"})
+	if err != nil {
+		t.Fatalf("buildProtobomDocument: %v", err)
+	}
+	if got := countContainerBaseImageNodes(doc); got != 2 {
+		t.Fatalf("container base image nodes = %d, want 2", got)
+	}
+}
+
+func Test_includeDockerfileBaseImages(t *testing.T) {
+	tests := []struct {
+		name       string
+		ecosystems []string
+		want       bool
+	}{
+		{name: "empty means all", want: true},
+		{name: "all", ecosystems: []string{"all"}, want: true},
+		{name: "dockerfile", ecosystems: []string{"dockerfile"}, want: true},
+		{name: "container image alias", ecosystems: []string{"container-image"}, want: true},
+		{name: "mixed includes container", ecosystems: []string{"mise", "container"}, want: true},
+		{name: "mise only", ecosystems: []string{"mise"}, want: false},
+		{name: "go only", ecosystems: []string{"go"}, want: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := includeDockerfileBaseImages(tt.ecosystems); got != tt.want {
+				t.Errorf("includeDockerfileBaseImages(%v) = %v, want %v", tt.ecosystems, got, tt.want)
+			}
+		})
+	}
+}
+
+// countContainerBaseImageNodes returns the number of SBOM nodes tagged as
+// Dockerfile-derived base image components.
+func countContainerBaseImageNodes(doc *sbom.Document) int {
+	if doc == nil || doc.NodeList == nil {
+		return 0
+	}
+	count := 0
+	for _, node := range doc.NodeList.Nodes {
+		if node == nil {
+			continue
+		}
+		for _, prop := range node.Properties {
+			if prop != nil && prop.Name == "deputy:type" && prop.Data == "container-base-image" {
+				count++
+				break
+			}
+		}
+	}
+	return count
+}
+
 func Test_resolveGitHubActionsRefFromRefs(t *testing.T) {
 	refs := []*plumbing.Reference{
 		plumbing.NewHashReference(plumbing.ReferenceName("refs/tags/v1.0.0"), plumbing.NewHash("1111111111111111111111111111111111111111")),
@@ -948,7 +1023,7 @@ func Test_buildProtobomDocument_includesToolMetadata(t *testing.T) {
 	ws := workspace.NewMemory()
 	defer ws.Close()
 
-	doc, err := buildProtobomDocument(context.Background(), ws, "https://example.com/repo", "HEAD", "test-doc", nil, nil)
+	doc, err := buildProtobomDocument(t.Context(), ws, "https://example.com/repo", "HEAD", "test-doc", nil, nil, nil)
 	if err != nil {
 		t.Fatalf("buildProtobomDocument: %v", err)
 	}
@@ -981,7 +1056,7 @@ func Test_buildProtobomDocument_setsDocumentName(t *testing.T) {
 	ws := workspace.NewMemory()
 	defer ws.Close()
 
-	doc, err := buildProtobomDocument(context.Background(), ws, "https://example.com/repo", "HEAD", "my-custom-name", nil, nil)
+	doc, err := buildProtobomDocument(t.Context(), ws, "https://example.com/repo", "HEAD", "my-custom-name", nil, nil, nil)
 	if err != nil {
 		t.Fatalf("buildProtobomDocument: %v", err)
 	}
@@ -996,7 +1071,7 @@ func Test_buildProtobomDocument_setsTimestamp(t *testing.T) {
 	defer ws.Close()
 
 	before := time.Now().Unix()
-	doc, err := buildProtobomDocument(context.Background(), ws, "https://example.com/repo", "HEAD", "test", nil, nil)
+	doc, err := buildProtobomDocument(t.Context(), ws, "https://example.com/repo", "HEAD", "test", nil, nil, nil)
 	if err != nil {
 		t.Fatalf("buildProtobomDocument: %v", err)
 	}

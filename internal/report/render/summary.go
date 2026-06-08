@@ -77,8 +77,6 @@ func FixSummaryDoc(target TargetSummary, stdlibUpgrade string, totalCommands, ru
 			output.Span{Text: "Upgrade Go toolchain to", Style: output.StyleBold},
 			output.Span{Text: " "},
 			output.Span{Text: stdlibUpgrade, Style: output.StyleUpgraded},
-			output.Span{Text: " "},
-			output.Span{Text: "(update 'go' directive in go.mod)", Style: output.StyleVersion},
 		)
 	}
 	if commandsCount == 0 {

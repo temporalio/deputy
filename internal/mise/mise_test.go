@@ -1,0 +1,323 @@
+package mise
+
+import (
+	"reflect"
+	"testing"
+)
+
+func TestIsConfigPath(t *testing.T) {
+	tests := []struct {
+		path   string
+		want   Format
+		wantOK bool
+	}{
+		{"mise.toml", FormatTOML, true},
+		{".mise.toml", FormatTOML, true},
+		{"mise.local.toml", FormatTOML, true},
+		{"mise.test.toml", FormatTOML, true},
+		{"mise.test.local.toml", FormatTOML, true},
+		{".mise.production.toml", FormatTOML, true},
+		{".mise.production.local.toml", FormatTOML, true},
+		{"sub/dir/mise.toml", FormatTOML, true},
+		{".tool-versions", FormatToolVersions, true},
+		{"repo/.tool-versions", FormatToolVersions, true},
+		{".config/mise/config.toml", FormatTOML, true},
+		{".config/mise/config.local.toml", FormatTOML, true},
+		{".config/mise/config.test.toml", FormatTOML, true},
+		{".config/mise/config.test.local.toml", FormatTOML, true},
+		{"a/b/.config/mise/config.toml", FormatTOML, true},
+		{"a/b/.config/mise/config.prod.toml", FormatTOML, true},
+		{".config/mise.toml", FormatTOML, true},
+		{"mise/config.toml", FormatTOML, true},
+		{"mise/config.local.toml", FormatTOML, true},
+		{"mise/config.dev.toml", FormatTOML, true},
+		{".mise/config.qa.local.toml", FormatTOML, true},
+		{".mise/config.toml", FormatTOML, true},
+		{".config/mise/conf.d/rust.toml", FormatTOML, true},
+		{"mise.foo.bar.toml", "", false},
+		{".config/mise/config.foo.bar.baz.toml", "", false},
+		{"go.mod", "", false},
+		{"config.toml", "", false},
+		{"random.toml", "", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.path, func(t *testing.T) {
+			got, ok := IsConfigPath(tt.path)
+			if ok != tt.wantOK || got != tt.want {
+				t.Fatalf("IsConfigPath(%q) = (%q, %v), want (%q, %v)", tt.path, got, ok, tt.want, tt.wantOK)
+			}
+		})
+	}
+}
+
+func TestLockfilePath(t *testing.T) {
+	tests := map[string]string{
+		"mise.toml":                "mise.lock",
+		"a/b/mise.toml":            "a/b/mise.lock",
+		".config/mise/config.toml": ".config/mise/config.lock",
+		".tool-versions":           "",
+	}
+	for in, want := range tests {
+		if got := LockfilePath(in); got != want {
+			t.Errorf("LockfilePath(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+func TestSplitBackend(t *testing.T) {
+	tests := []struct {
+		key, backend, name string
+	}{
+		{"node", "", "node"},
+		{"npm:prettier", "npm", "prettier"},
+		{"cargo:ripgrep", "cargo", "ripgrep"},
+		{"conda:python", "conda", "python"},
+		{"forgejo:owner/repo", "forgejo", "owner/repo"},
+		{"gitlab:owner/repo", "gitlab", "owner/repo"},
+		{"s3:bucket/key", "s3", "bucket/key"},
+		{"pipx:black", "pipx", "black"},
+		{"go:golang.org/x/tools/cmd/goimports", "go", "golang.org/x/tools/cmd/goimports"},
+		{"unknownbackend:thing", "", "unknownbackend:thing"},
+	}
+	for _, tt := range tests {
+		b, n := SplitBackend(tt.key)
+		if b != tt.backend || n != tt.name {
+			t.Errorf("SplitBackend(%q) = (%q,%q), want (%q,%q)", tt.key, b, n, tt.backend, tt.name)
+		}
+	}
+}
+
+func TestIsExactVersion(t *testing.T) {
+	exact := []string{"22.5.0", "v1.24.3", "1.9.5", "3.12.0-rc1", "20.11.0+build", "temurin-21.0.5+11.0.LTS", "2024.8.7"}
+	fuzzy := []string{"20", "1.7", "latest", "lts", "stable", "", "^1.2.3", "~2.0", ">=1.0", "1.x", "node", "ref:abc123", "prefix:20", "sub-2", "temurin-21", "33.1"}
+	for _, v := range exact {
+		if !IsExactVersion(v) {
+			t.Errorf("IsExactVersion(%q) = false, want true", v)
+		}
+	}
+	for _, v := range fuzzy {
+		if IsExactVersion(v) {
+			t.Errorf("IsExactVersion(%q) = true, want false", v)
+		}
+	}
+}
+
+func TestIsConcreteVersion(t *testing.T) {
+	// Concrete: a real resolved version (>= major.minor), including partial-but-
+	// final forms like protobuf "33.1" that IsExactVersion rejects.
+	concrete := []string{"22.5.0", "33.1", "3.12.13", "v1.2", "temurin-21.0.5+11.0.LTS", "2025.1.1"}
+	notConcrete := []string{"", "20", "latest", "lts", "system", "^1.2.3", ">=1.0", "ref:abc", "prefix:20", "node"}
+	for _, v := range concrete {
+		if !IsConcreteVersion(v) {
+			t.Errorf("IsConcreteVersion(%q) = false, want true", v)
+		}
+	}
+	for _, v := range notConcrete {
+		if IsConcreteVersion(v) {
+			t.Errorf("IsConcreteVersion(%q) = true, want false", v)
+		}
+	}
+}
+
+func TestBackendPURL(t *testing.T) {
+	tests := []struct {
+		backend, tool, version, want string
+	}{
+		{"npm", "lodash", "4.17.20", "pkg:npm/lodash@4.17.20"},
+		{"npm", "@vue/cli", "5.0.0", "pkg:npm/%40vue/cli@5.0.0"},
+		{"cargo", "ripgrep", "14.1.1", "pkg:cargo/ripgrep@14.1.1"},
+		{"pipx", "black", "24.3.0", "pkg:pypi/black@24.3.0"},
+		{"pipx", "Django", "5.0.0", "pkg:pypi/django@5.0.0"}, // PyPI case-insensitive -> lowercased
+		{"pip", "Ansible", "9.0.0", "pkg:pypi/ansible@9.0.0"},
+		{"gem", "rails", "7.1.0", "pkg:gem/rails@7.1.0"},
+		{"dotnet", "dotnet-ef", "8.0.0", "pkg:nuget/dotnet-ef@8.0.0"},
+		{"aqua", "BurntSushi/ripgrep", "14.1.1", ""}, // no registry mapping
+		{"", "node", "20.11.0", ""},                  // core runtime, no mapping
+		{"go", "x/tools", "1.0.0", ""},               // go module paths intentionally unmapped
+	}
+	for _, tt := range tests {
+		if got := BackendPURL(tt.backend, tt.tool, tt.version); got != tt.want {
+			t.Errorf("BackendPURL(%q,%q,%q) = %q, want %q", tt.backend, tt.tool, tt.version, got, tt.want)
+		}
+	}
+}
+
+func TestScanPURL(t *testing.T) {
+	// Round-trip case: derived purely from a pkg:mise PURL name (as it appears
+	// in an SBOM component), no metadata needed.
+	if got := ScanPURL("mise", "npm:lodash", "4.17.20"); got != "pkg:npm/lodash@4.17.20" {
+		t.Errorf("ScanPURL(mise, npm:lodash) = %q", got)
+	}
+	if got := ScanPURL("asdf", "nodejs", "20.11.0"); got != "" {
+		t.Errorf("ScanPURL(asdf runtime) = %q, want empty", got)
+	}
+	if got := ScanPURL("mise", "node", "20.11.0"); got != "" {
+		t.Errorf("ScanPURL(mise core runtime) = %q, want empty", got)
+	}
+	if got := ScanPURL("npm", "lodash", "4.17.20"); got != "" {
+		t.Errorf("ScanPURL(non-mise type) = %q, want empty", got)
+	}
+}
+
+func TestRuntimeScanCoords(t *testing.T) {
+	tests := []struct {
+		name                    string
+		purlType, tool, version string
+		want                    []ScanCoord
+	}{
+		{
+			name: "go runtime maps to stdlib+toolchain", purlType: "mise", tool: "go", version: "1.20.0",
+			want: []ScanCoord{
+				{Ecosystem: "Go", Name: "stdlib", Version: "1.20.0", PURL: "pkg:golang/stdlib@1.20.0"},
+				{Ecosystem: "Go", Name: "toolchain", Version: "1.20.0", PURL: "pkg:golang/toolchain@1.20.0"},
+			},
+		},
+		{
+			name: "asdf golang maps too", purlType: "asdf", tool: "golang", version: "1.21.0",
+			want: []ScanCoord{
+				{Ecosystem: "Go", Name: "stdlib", Version: "1.21.0", PURL: "pkg:golang/stdlib@1.21.0"},
+				{Ecosystem: "Go", Name: "toolchain", Version: "1.21.0", PURL: "pkg:golang/toolchain@1.21.0"},
+			},
+		},
+		{name: "fuzzy version not matchable", purlType: "mise", tool: "go", version: "1.20", want: nil},
+		{name: "other runtime has no OSV ecosystem", purlType: "mise", tool: "node", version: "20.0.0", want: nil},
+		{name: "backend tool is not a runtime", purlType: "mise", tool: "npm:lodash", version: "1.0.0", want: nil},
+		{name: "non-mise type", purlType: "npm", tool: "go", version: "1.20.0", want: nil},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := RuntimeScanCoords(tt.purlType, tt.tool, tt.version); !reflect.DeepEqual(got, tt.want) {
+				t.Errorf("RuntimeScanCoords(%q,%q,%q) = %+v, want %+v", tt.purlType, tt.tool, tt.version, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestLockfileLookup(t *testing.T) {
+	lf, err := ParseLock("mise.lock", []byte(sampleLock)) // node, ripgrep
+	if err != nil {
+		t.Fatal(err)
+	}
+	tests := []struct {
+		name        string
+		spec        ToolSpec
+		version     string
+		wantVersion string // "" => expect no match (nil)
+	}{
+		{"exact by short name", ToolSpec{Name: "node", Key: "node"}, "20.11.0", "20.11.0"},
+		{"fuzzy declared version falls back to sole entry", ToolSpec{Name: "node", Key: "node"}, "20", "20.11.0"},
+		{"backend-prefixed key resolves by short name", ToolSpec{Name: "ripgrep", Key: "aqua:BurntSushi/ripgrep"}, "14.1.1", "14.1.1"},
+		{"missing tool", ToolSpec{Name: "missing", Key: "missing"}, "1.0.0", ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			lt := lf.Lookup(tt.spec, tt.version)
+			switch {
+			case tt.wantVersion == "":
+				if lt != nil {
+					t.Errorf("Lookup = %+v, want nil", lt)
+				}
+			case lt == nil || lt.Version != tt.wantVersion:
+				t.Errorf("Lookup = %+v, want version %q", lt, tt.wantVersion)
+			}
+		})
+	}
+
+	var nilLF *Lockfile
+	if nilLF.Lookup(ToolSpec{Name: "node"}, "20.11.0") != nil {
+		t.Error("nil lockfile Lookup should return nil")
+	}
+}
+
+func TestParseTOML(t *testing.T) {
+	data := []byte(`
+[tools]
+node = "22.5.0"
+python = ["3.11", "3.12"]
+"npm:prettier" = "latest"
+ripgrep = { version = "14.1.0" }
+go = { version = "1.24", postinstall = "echo hi" }
+java = { version = ["21.0.5", "17.0.13"] }
+
+[settings]
+lockfile = true
+minimum_release_age = "14d"
+slsa = false
+
+[settings.aqua]
+cosign = true
+`)
+	cfg, err := Parse("mise.toml", data)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if cfg.Format != FormatTOML {
+		t.Errorf("format = %q", cfg.Format)
+	}
+
+	byKey := map[string]ToolSpec{}
+	for _, ts := range cfg.Tools {
+		byKey[ts.Key] = ts
+	}
+	if got := byKey["node"].Versions; !reflect.DeepEqual(got, []string{"22.5.0"}) {
+		t.Errorf("node versions = %v", got)
+	}
+	if got := byKey["python"].Versions; !reflect.DeepEqual(got, []string{"3.11", "3.12"}) {
+		t.Errorf("python versions = %v", got)
+	}
+	if ts := byKey["npm:prettier"]; ts.Backend != "npm" || ts.Name != "prettier" {
+		t.Errorf("npm:prettier backend/name = %q/%q", ts.Backend, ts.Name)
+	}
+	if got := byKey["ripgrep"].Versions; !reflect.DeepEqual(got, []string{"14.1.0"}) {
+		t.Errorf("ripgrep versions = %v", got)
+	}
+	if got := byKey["go"].Versions; !reflect.DeepEqual(got, []string{"1.24"}) {
+		t.Errorf("go versions = %v", got)
+	}
+	// An inline table whose version is an array surfaces every version, not
+	// just the first.
+	if got := byKey["java"].Versions; !reflect.DeepEqual(got, []string{"21.0.5", "17.0.13"}) {
+		t.Errorf("java versions = %v, want all entries from the inline-table array", got)
+	}
+
+	s := cfg.Settings
+	if s.Lockfile == nil || !*s.Lockfile {
+		t.Errorf("lockfile = %v, want true", s.Lockfile)
+	}
+	if s.MinimumReleaseAge != "14d" {
+		t.Errorf("minimum_release_age = %q", s.MinimumReleaseAge)
+	}
+	if s.SLSA == nil || *s.SLSA {
+		t.Errorf("slsa = %v, want explicit false", s.SLSA)
+	}
+	if s.AquaCosign == nil || !*s.AquaCosign {
+		t.Errorf("aqua.cosign = %v, want true", s.AquaCosign)
+	}
+	if s.GithubAttestations != nil {
+		t.Errorf("github_attestations = %v, want nil (unset)", s.GithubAttestations)
+	}
+}
+
+func TestParseToolVersions(t *testing.T) {
+	data := []byte("node 22.5.0\npython 3.11 3.12  # comment\n# full comment\nnpm:prettier latest\n")
+	cfg, err := Parse(".tool-versions", data)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if cfg.Format != FormatToolVersions {
+		t.Errorf("format = %q", cfg.Format)
+	}
+	if len(cfg.Tools) != 3 {
+		t.Fatalf("tools = %d, want 3: %+v", len(cfg.Tools), cfg.Tools)
+	}
+	byKey := map[string]ToolSpec{}
+	for _, ts := range cfg.Tools {
+		byKey[ts.Key] = ts
+	}
+	if got := byKey["python"].Versions; !reflect.DeepEqual(got, []string{"3.11", "3.12"}) {
+		t.Errorf("python versions = %v", got)
+	}
+	if byKey["npm:prettier"].Backend != "npm" {
+		t.Errorf("npm:prettier backend = %q", byKey["npm:prettier"].Backend)
+	}
+}

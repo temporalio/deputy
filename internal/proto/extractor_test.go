@@ -4,6 +4,8 @@ import (
 	"testing"
 
 	"github.com/google/osv-scalibr/extractor"
+
+	"github.com/temporalio/deputy/internal/purlx"
 )
 
 func TestNormalizePyPIName(t *testing.T) {
@@ -61,7 +63,7 @@ func TestExtractorPackageToProto_DirectDetection(t *testing.T) {
 			},
 			direct: map[string]bool{
 				"github.com/stretchr/testify": true,
-				"github.com/davecgh/go-spew": false,
+				"github.com/davecgh/go-spew":  false,
 			},
 			wantDirect: false,
 		},
@@ -172,6 +174,26 @@ func TestExtractorPackageToProto_DirectDetection(t *testing.T) {
 			wantDirect: false,
 		},
 		{
+			name: "mise tool direct without direct map",
+			pkg: &extractor.Package{
+				Name:     "node",
+				Version:  "20.11.0",
+				PURLType: purlx.TypeMise,
+			},
+			direct:     nil,
+			wantDirect: true,
+		},
+		{
+			name: "asdf tool direct without direct map",
+			pkg: &extractor.Package{
+				Name:     "golang",
+				Version:  "1.26.2",
+				PURLType: purlx.TypeAsdf,
+			},
+			direct:     nil,
+			wantDirect: true,
+		},
+		{
 			name:       "nil package",
 			pkg:        nil,
 			direct:     map[string]bool{"react": true},
@@ -190,6 +212,33 @@ func TestExtractorPackageToProto_DirectDetection(t *testing.T) {
 			}
 			if result.Direct != tt.wantDirect {
 				t.Errorf("Direct = %v, want %v", result.Direct, tt.wantDirect)
+			}
+		})
+	}
+}
+
+func TestExtractorPackageToProto_CustomEcosystems(t *testing.T) {
+	tests := []struct {
+		name    string
+		pkg     *extractor.Package
+		wantEco string
+	}{
+		{
+			name:    "mise",
+			pkg:     &extractor.Package{Name: "node", Version: "20.11.0", PURLType: purlx.TypeMise},
+			wantEco: "mise",
+		},
+		{
+			name:    "asdf",
+			pkg:     &extractor.Package{Name: "golang", Version: "1.26.2", PURLType: purlx.TypeAsdf},
+			wantEco: "asdf",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := ExtractorPackageToProto(tt.pkg, nil)
+			if got.Ecosystem != tt.wantEco {
+				t.Errorf("Ecosystem = %q, want %q", got.Ecosystem, tt.wantEco)
 			}
 		})
 	}

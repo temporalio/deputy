@@ -4,6 +4,7 @@ import (
 	"strings"
 
 	pb "deps.dev/api/v3"
+
 	"github.com/temporalio/deputy/internal/policy"
 )
 
@@ -23,6 +24,8 @@ const (
 	Pub       Ecosystem = "pub"
 	CocoaPods Ecosystem = "cocoapods"
 	Packagist Ecosystem = "packagist"
+	Mise      Ecosystem = "mise"
+	Asdf      Ecosystem = "asdf"
 	Unknown   Ecosystem = "unknown"
 )
 
@@ -52,6 +55,10 @@ func Parse(s string) Ecosystem {
 		return CocoaPods
 	case "packagist", "composer", "php":
 		return Packagist
+	case "mise", "mise-en-place", "rtx":
+		return Mise
+	case "asdf", "tool-versions":
+		return Asdf
 	default:
 		return Unknown
 	}
@@ -151,6 +158,7 @@ func (e Ecosystem) ProxyEntrypoint() policy.Entrypoint {
 func All() []Ecosystem {
 	return []Ecosystem{
 		Go, NPM, PyPI, Maven, RubyGems, Cargo, NuGet, Hex, Pub, CocoaPods, Packagist,
+		Mise, Asdf,
 	}
 }
 

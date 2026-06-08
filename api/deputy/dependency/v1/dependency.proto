@@ -38,4 +38,17 @@ message ManifestRef {
   string manager = 2;
   // Groups are dependency groups (e.g., "dev", "test", "prod").
   repeated string groups = 3;
+  // ComponentKey is the dependency's key exactly as written in the manifest
+  // (e.g. the mise.toml tool keys "npm:lodash" or "go"). It exists for
+  // source-aware remediation when a finding is reported under a different name
+  // than the manifest uses.
+  //
+  // mise/asdf tools have no OSV ecosystem of their own, so vulnerability
+  // scanning queries them under a remapped coordinate and the finding comes
+  // back under that name: a mise "go" runtime is queried against the Go vuln DB
+  // and reported as "stdlib"/"toolchain"; "npm:lodash" is reported as "lodash".
+  // ComponentKey preserves the original manifest key so a fix can target the
+  // right entry (e.g. `mise use go@<fixed>`). Empty when not applicable (most
+  // ecosystems report findings under the same name the manifest uses).
+  string component_key = 4;
 }

@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/temporalio/deputy/internal/mise"
 	"github.com/temporalio/deputy/internal/purlx"
 )
 
@@ -56,6 +57,14 @@ func DetectManager(location, purlType string) (string, string, bool) {
 		}
 		if isDockerfilePath(base) {
 			return "docker", loc, true
+		}
+		// mise / asdf toolchain configs. The config file is itself the manifest
+		// to edit, so fixes target it directly (mise.toml / .tool-versions).
+		if format, ok := mise.IsConfigPath(loc); ok {
+			if format == mise.FormatToolVersions {
+				return "asdf", loc, true
+			}
+			return "mise", loc, true
 		}
 	}
 	return "", "", false

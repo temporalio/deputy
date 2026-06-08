@@ -3,6 +3,7 @@ package dependency
 import (
 	"cmp"
 	"slices"
+	"sort"
 	"strings"
 
 	dependencyv1 "github.com/temporalio/deputy/gen/deputy/dependency/v1"
@@ -14,20 +15,69 @@ type manifestRefKey struct {
 	path    string
 }
 
+type manifestRefValue struct {
+	manager      string
+	path         string
+	componentKey string
+	groups       []string
+}
+
+// NewManifestRef constructs a ManifestRef.
+func NewManifestRef(path, manager string, groups []string, componentKey string) dependencyv1.ManifestRef {
+	return dependencyv1.ManifestRef{
+		Path:         path,
+		Manager:      manager,
+		Groups:       slices.Clone(groups),
+		ComponentKey: strings.TrimSpace(componentKey),
+	}
+}
+
+// ManifestRefComponentKey returns the dependency's key exactly as written in
+// the manifest (e.g. a mise.toml tool key like "npm:lodash" or "go"), or "" when
+// unset. It lets source-aware remediation target the right manifest entry even
+// when a finding is reported under a remapped name (mise/asdf tools are scanned
+// under another ecosystem's coordinate — e.g. a mise "go" runtime is reported as
+// "stdlib"/"toolchain"). See the ManifestRef.component_key proto field for the
+// full rationale. Nil-safe accessor for [dependencyv1.ManifestRef.ComponentKey].
+func ManifestRefComponentKey(ref *dependencyv1.ManifestRef) string {
+	return ref.GetComponentKey()
+}
+
+// SetManifestRefComponentKey sets ref's manifest-declared component key.
+func SetManifestRefComponentKey(ref *dependencyv1.ManifestRef, componentKey string) {
+	if ref == nil {
+		return
+	}
+	ref.ComponentKey = strings.TrimSpace(componentKey)
+}
+
+// ManifestRefGroups returns ref's dependency groups, or nil. It is a nil-safe
+// accessor retained for call-site convenience.
+func ManifestRefGroups(ref *dependencyv1.ManifestRef) []string {
+	return ref.GetGroups()
+}
+
 // MergeManifestRef adds a manifest reference to the list, merging groups if it already exists.
-func MergeManifestRef(existing []dependencyv1.ManifestRef, ref dependencyv1.ManifestRef) []dependencyv1.ManifestRef {
-	if ref.Path == "" || ref.Manager == "" {
+func MergeManifestRef(existing []dependencyv1.ManifestRef, ref *dependencyv1.ManifestRef) []dependencyv1.ManifestRef {
+	if ref == nil || ref.Path == "" || ref.Manager == "" {
 		return existing
 	}
-	for i, cur := range existing {
+	for i := range existing {
+		cur := &existing[i]
 		if cur.Manager == ref.Manager && cur.Path == ref.Path {
-			merged := mergeGroups(cur.Groups, ref.Groups)
-			existing[i].Groups = merged
+			cur.Groups = mergeGroups(cur.Groups, ref.Groups)
+			if cur.ComponentKey == "" {
+				cur.ComponentKey = ref.ComponentKey
+			}
 			return existing
 		}
 	}
-	ref.Groups = mergeGroups(nil, ref.Groups)
-	return append(existing, ref)
+	return append(existing, dependencyv1.ManifestRef{
+		Path:         ref.Path,
+		Manager:      ref.Manager,
+		Groups:       mergeGroups(nil, ref.Groups),
+		ComponentKey: ref.ComponentKey,
+	})
 }
 
 // SortAndUniqueManifestRefs deduplicates and sorts manifest references.
@@ -35,26 +85,36 @@ func SortAndUniqueManifestRefs(refs []dependencyv1.ManifestRef) []dependencyv1.M
 	if len(refs) == 0 {
 		return refs
 	}
-	merged := map[manifestRefKey]dependencyv1.ManifestRef{}
-	for _, ref := range refs {
+	merged := map[manifestRefKey]*manifestRefValue{}
+	for i := range refs {
+		ref := &refs[i]
 		key := manifestRefKey{manager: ref.Manager, path: ref.Path}
 		cur, ok := merged[key]
 		if !ok {
-			cur = dependencyv1.ManifestRef{Manager: ref.Manager, Path: ref.Path}
+			cur = &manifestRefValue{manager: ref.Manager, path: ref.Path}
+			merged[key] = cur
 		}
-		cur.Groups = mergeGroups(cur.Groups, ref.Groups)
-		merged[key] = cur
+		if cur.componentKey == "" {
+			cur.componentKey = ref.ComponentKey
+		}
+		cur.groups = mergeGroups(cur.groups, ref.Groups)
 	}
 	out := make([]dependencyv1.ManifestRef, 0, len(merged))
 	for _, ref := range merged {
-		ref.Groups = sortedUniqueStrings(ref.Groups)
-		out = append(out, ref)
+		out = append(out, dependencyv1.ManifestRef{
+			Manager:      ref.manager,
+			Path:         ref.path,
+			Groups:       sortedUniqueStrings(ref.groups),
+			ComponentKey: ref.componentKey,
+		})
 	}
-	slices.SortFunc(out, func(a, b dependencyv1.ManifestRef) int {
+	sort.Slice(out, func(i, j int) bool {
+		a := &out[i]
+		b := &out[j]
 		if c := cmp.Compare(a.Manager, b.Manager); c != 0 {
-			return c
+			return c < 0
 		}
-		return cmp.Compare(a.Path, b.Path)
+		return cmp.Compare(a.Path, b.Path) < 0
 	})
 	return out
 }

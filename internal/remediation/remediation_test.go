@@ -1,9 +1,11 @@
 package remediation
 
 import (
+	"slices"
 	"testing"
 
 	dependencyv1 "github.com/temporalio/deputy/gen/deputy/dependency/v1"
+	"github.com/temporalio/deputy/internal/dependency"
 	"github.com/temporalio/deputy/internal/vulnerability"
 )
 
@@ -275,6 +277,93 @@ func TestCommandsFromConsolidatedGoToolchain(t *testing.T) {
 	}
 	if !found {
 		t.Errorf("expected 'go get go@1.24.9' command for toolchain/stdlib upgrade")
+	}
+}
+
+func TestCommandsFromConsolidatedMiseBackendTool(t *testing.T) {
+	// A vulnerable mise-managed backend tool fixes via `mise use <key>@<version>`,
+	// using the exact config key (with backend prefix), not the canonical name.
+	tests := []struct {
+		name         string
+		componentKey string
+		wantCommand  string
+	}{
+		{"npm backend tool", "npm:lodash", "mise use npm:lodash@4.17.21"},
+		{"cargo backend tool", "cargo:ripgrep", "mise use cargo:ripgrep@4.17.21"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cons := []vulnerability.Consolidated{
+				{
+					PrimaryID:     "GHSA-x",
+					Package:       "lodash", // remapped canonical name
+					Version:       "4.17.20",
+					FixedVersions: []string{"4.17.21"},
+					IsDirect:      true,
+					ManifestRefs: []dependencyv1.ManifestRef{
+						dependency.NewManifestRef("mise.toml", "mise", nil, tt.componentKey),
+					},
+				},
+			}
+			commands, _ := CommandsFromConsolidated(cons)
+			if !slices.ContainsFunc(commands, func(c Command) bool { return c.Command == tt.wantCommand }) {
+				t.Errorf("expected %q; commands=%+v", tt.wantCommand, commands)
+			}
+		})
+	}
+}
+
+func TestCommandsFromConsolidatedStdlibSourceAware(t *testing.T) {
+	// A Go stdlib CVE declared in BOTH go.mod and mise.toml must yield two
+	// distinct fixes: bump the go directive AND bump the mise tool.
+	cons := []vulnerability.Consolidated{
+		{
+			PrimaryID:     "GO-2025-1234",
+			Package:       "stdlib",
+			Version:       "1.20.0",
+			FixedVersions: []string{"1.20.1"},
+			ManifestRefs: []dependencyv1.ManifestRef{
+				{Path: "go.mod", Manager: "go"},
+				dependency.NewManifestRef("mise.toml", "mise", nil, "go"),
+			},
+		},
+	}
+	commands, _ := CommandsFromConsolidated(cons)
+
+	hasCommand := func(want string) bool {
+		return slices.ContainsFunc(commands, func(c Command) bool { return c.Command == want })
+	}
+	if !hasCommand("go get go@1.20.1") {
+		t.Errorf("expected go.mod toolchain command 'go get go@1.20.1'; commands=%+v", commands)
+	}
+	if !hasCommand("mise use go@1.20.1") {
+		t.Errorf("expected mise command 'mise use go@1.20.1'; commands=%+v", commands)
+	}
+}
+
+func TestCommandsFromConsolidatedStdlibMiseOnly(t *testing.T) {
+	// A Go stdlib CVE declared ONLY in mise.toml must NOT emit a go.mod command.
+	cons := []vulnerability.Consolidated{
+		{
+			PrimaryID:     "GO-2025-1234",
+			Package:       "stdlib",
+			Version:       "1.20.0",
+			FixedVersions: []string{"1.20.1"},
+			ManifestRefs: []dependencyv1.ManifestRef{
+				dependency.NewManifestRef("mise.toml", "mise", nil, "go"),
+			},
+		},
+	}
+	commands, _ := CommandsFromConsolidated(cons)
+
+	hasCommand := func(want string) bool {
+		return slices.ContainsFunc(commands, func(c Command) bool { return c.Command == want })
+	}
+	if hasCommand("go get go@1.20.1") {
+		t.Errorf("did not expect a go.mod command for a mise-only stdlib finding; commands=%+v", commands)
+	}
+	if !hasCommand("mise use go@1.20.1") {
+		t.Errorf("expected 'mise use go@1.20.1'; commands=%+v", commands)
 	}
 }
 

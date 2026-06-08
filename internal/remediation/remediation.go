@@ -7,11 +7,13 @@ import (
 	"slices"
 	"strings"
 
+	"golang.org/x/mod/semver"
+
 	dependencyv1 "github.com/temporalio/deputy/gen/deputy/dependency/v1"
 	"github.com/temporalio/deputy/internal/collections"
+	"github.com/temporalio/deputy/internal/dependency"
 	"github.com/temporalio/deputy/internal/ecosystem"
 	"github.com/temporalio/deputy/internal/vulnerability"
-	"golang.org/x/mod/semver"
 )
 
 // Command represents an actionable remediation step for resolving a vulnerability.
@@ -60,12 +62,10 @@ type packageUpgrade struct {
 
 // CommandsFromConsolidated derives recommended commands and stdlib upgrades.
 func CommandsFromConsolidated(cons []vulnerability.Consolidated) ([]Command, string) {
-	upgrades, stdlib := buildUpgradeRecommendations(cons)
+	upgrades, stdlib, stdlibRefs := buildUpgradeRecommendations(cons)
 	cmds := dedupeCommands(upgrades)
 	if stdlib != "" {
-		if toolchainCmd, ok := buildGoToolchainCommand(stdlib); ok {
-			cmds = append(cmds, toolchainCmd)
-		}
+		cmds = append(cmds, stdlibCommands(stdlib, stdlibRefs)...)
 	}
 	slices.SortFunc(cmds, func(a, b Command) int {
 		if n := cmp.Compare(a.managerRank, b.managerRank); n != 0 {
@@ -83,8 +83,9 @@ func CommandsFromConsolidated(cons []vulnerability.Consolidated) ([]Command, str
 // the best fixed versions for each affected package. It separates standard library
 // upgrades from regular dependency upgrades. When multiple vulnerabilities affect
 // the same package, it recommends the highest required version to fix all issues.
-func buildUpgradeRecommendations(cons []vulnerability.Consolidated) ([]packageUpgrade, string) {
+func buildUpgradeRecommendations(cons []vulnerability.Consolidated) ([]packageUpgrade, string, []dependencyv1.ManifestRef) {
 	var stdlibRec string
+	var stdlibRefs []dependencyv1.ManifestRef
 
 	// Track the best (highest) recommended version per package
 	pkgBest := map[string]*packageUpgrade{}
@@ -104,6 +105,9 @@ func buildUpgradeRecommendations(cons []vulnerability.Consolidated) ([]packageUp
 			if stdlibRec == "" || compareVersions(best, stdlibRec) > 0 {
 				stdlibRec = best
 			}
+			// Retain the manifest sources so the fix can target each declarer of
+			// the Go version (go.mod vs mise.toml vs .tool-versions) distinctly.
+			stdlibRefs = mergeManifestRefs(stdlibRefs, v.ManifestRefs)
 			continue
 		}
 
@@ -146,7 +150,7 @@ func buildUpgradeRecommendations(cons []vulnerability.Consolidated) ([]packageUp
 		upgrades = append(upgrades, *u)
 	}
 
-	return upgrades, stdlibRec
+	return upgrades, stdlibRec, stdlibRefs
 }
 
 // upgradeTargetFor determines the remediation target for a consolidated
@@ -205,16 +209,28 @@ func normalizeVersion(v string) string {
 func mergeManifestRefs(a, b []dependencyv1.ManifestRef) []dependencyv1.ManifestRef {
 	seen := collections.NewSet[string]()
 	result := make([]dependencyv1.ManifestRef, 0, len(a)+len(b))
-	for _, ref := range a {
+	for i := range a {
+		ref := &a[i]
 		key := ref.Path + "|" + ref.Manager
 		if seen.Add(key) {
-			result = append(result, ref)
+			result = append(result, dependencyv1.ManifestRef{})
+			dst := &result[len(result)-1]
+			dst.Path = ref.Path
+			dst.Manager = ref.Manager
+			dst.Groups = slices.Clone(dependency.ManifestRefGroups(ref))
+			dependency.SetManifestRefComponentKey(dst, dependency.ManifestRefComponentKey(ref))
 		}
 	}
-	for _, ref := range b {
+	for i := range b {
+		ref := &b[i]
 		key := ref.Path + "|" + ref.Manager
 		if seen.Add(key) {
-			result = append(result, ref)
+			result = append(result, dependencyv1.ManifestRef{})
+			dst := &result[len(result)-1]
+			dst.Path = ref.Path
+			dst.Manager = ref.Manager
+			dst.Groups = slices.Clone(dependency.ManifestRefGroups(ref))
+			dependency.SetManifestRefComponentKey(dst, dependency.ManifestRefComponentKey(ref))
 		}
 	}
 	return result
@@ -247,18 +263,19 @@ func dedupeCommands(upgrades []packageUpgrade) []Command {
 	goPaths := collections.NewSet[string]()
 
 	for _, u := range upgrades {
-		for _, ref := range u.References {
+		for i := range u.References {
+			ref := &u.References[i]
 			var rec commandResult
 			if u.Migration {
 				rec = migrationCommand(u.TargetModule, u.Recommended, u.IsDirect)
 			} else {
-				rec = recommendCommand(ref.Manager, ref.Path, u.Name, u.Recommended, ref.Groups)
+				rec = recommendCommand(ref.Manager, ref.Path, u.Name, u.Recommended, dependency.ManifestRefGroups(ref), dependency.ManifestRefComponentKey(ref))
 			}
 			if rec.command == "" {
 				continue
 			}
 			pathStr := strings.TrimSpace(ref.Path)
-			groups := uniqueSortedStrings(ref.Groups)
+			groups := uniqueSortedStrings(dependency.ManifestRefGroups(ref))
 			groupsKey := strings.Join(groups, ",")
 			key := strings.Join([]string{
 				collections.NormalizeLower(ref.Manager),
@@ -372,6 +389,57 @@ func buildGoToolchainCommand(version string) (Command, bool) {
 	}, true
 }
 
+// stdlibCommands generates source-aware fix commands for a Go stdlib/toolchain
+// upgrade. The same Go version may be declared in more than one place (go.mod,
+// mise.toml, .tool-versions), each needing a distinct fix: a go.mod-sourced
+// finding bumps the go directive (`go get go@X`), while a mise/asdf-sourced one
+// bumps the tool in that config (`mise use go@X`). When both declare it, both
+// commands are emitted. With no attributable source, it falls back to the
+// go.mod command to preserve prior behavior.
+func stdlibCommands(version string, refs []dependencyv1.ManifestRef) []Command {
+	var cmds []Command
+	seen := collections.NewSet[string]()
+	sawManaged := false
+	sawGoMod := false
+
+	for i := range refs {
+		ref := &refs[i]
+		switch strings.ToLower(strings.TrimSpace(ref.Manager)) {
+		case "mise", "asdf":
+			sawManaged = true
+			rec := recommendCommand(ref.Manager, ref.Path, "stdlib", version, nil, dependency.ManifestRefComponentKey(ref))
+			if rec.command == "" {
+				continue
+			}
+			if !seen.Add(strings.TrimSpace(ref.Manager) + "|" + rec.command + "|" + ref.Path) {
+				continue
+			}
+			manager := strings.TrimSpace(ref.Manager)
+			cmds = append(cmds, Command{
+				Manager:      manager,
+				managerRank:  ecosystem.ManagerRank(manager),
+				Command:      rec.command,
+				Args:         rec.args,
+				Path:         ref.Path,
+				Hint:         rec.hint,
+				FollowUp:     rec.followUp,
+				FollowUpArgs: rec.followUpArgs,
+				IsDirect:     true,
+				Executable:   rec.executable,
+			})
+		case "go":
+			sawGoMod = true
+		}
+	}
+
+	if sawGoMod || !sawManaged {
+		if tc, ok := buildGoToolchainCommand(version); ok {
+			cmds = append(cmds, tc)
+		}
+	}
+	return cmds
+}
+
 // jsPackageManagerCommands maps JS package managers to their install command verbs.
 var jsPackageManagerCommands = map[string][]string{
 	"npm":  {"npm", "install"},
@@ -442,7 +510,19 @@ type commandResult struct {
 	executable   bool
 }
 
-func recommendCommand(manager, manifestPath, pkg, version string, groups []string) commandResult {
+// miseToolName resolves the tool key to use in a mise/asdf fix command. It
+// prefers the manifest-declared componentKey; otherwise it falls back to the
+// advisory's package name, translating the Go runtime's canonical
+// "stdlib"/"toolchain" names to the runtime tool (runtimeName).
+func miseToolName(componentKey, pkg, runtimeName string) string {
+	fallback := pkg
+	if strings.EqualFold(pkg, "stdlib") || strings.EqualFold(pkg, "toolchain") {
+		fallback = runtimeName
+	}
+	return cmp.Or(strings.TrimSpace(componentKey), fallback)
+}
+
+func recommendCommand(manager, manifestPath, pkg, version string, groups []string, componentKey string) commandResult {
 	m := strings.ToLower(manager)
 
 	// Handle JS package managers with a unified approach
@@ -484,6 +564,30 @@ func recommendCommand(manager, manifestPath, pkg, version string, groups []strin
 			command:    fmt.Sprintf("go get %s@%s", pkg, v),
 			args:       []string{"go", "get", fmt.Sprintf("%s@%s", pkg, v)},
 			executable: true,
+		}
+
+	// mise / asdf toolchains: bump the tool version in the committed config.
+	// componentKey is the tool exactly as declared (e.g. "npm:lodash", "go"),
+	// which may carry a backend prefix the advisory's canonical name lacks, so we
+	// prefer it. The Go runtime surfaces under the canonical names
+	// "stdlib"/"toolchain"; map those back to the declared runtime tool.
+	case "mise":
+		tool := miseToolName(componentKey, pkg, "go")
+		return commandResult{
+			command:      fmt.Sprintf("mise use %s@%s", tool, version),
+			args:         []string{"mise", "use", fmt.Sprintf("%s@%s", tool, version)},
+			followUp:     "mise install",
+			followUpArgs: []string{"mise", "install"},
+			executable:   true,
+		}
+	case "asdf":
+		tool := miseToolName(componentKey, pkg, "golang")
+		// asdf has no single "set version + install" verb that edits
+		// .tool-versions in one step, so surface a precise manual instruction.
+		return commandResult{
+			command:    fmt.Sprintf("Set %s %s in %s", tool, version, path.Base(manifestPath)),
+			hint:       fmt.Sprintf("run: asdf install %s %s && asdf local %s %s", tool, version, tool, version),
+			executable: false,
 		}
 
 	// Ruby/Bundler

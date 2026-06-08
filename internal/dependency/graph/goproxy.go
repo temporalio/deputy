@@ -2,6 +2,7 @@ package graph
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -39,6 +40,9 @@ const (
 
 	// goProxyTimeout is the timeout for individual proxy requests.
 	goProxyTimeout = 10 * time.Second
+
+	// goProxyMaxBytes bounds individual Go proxy metadata responses.
+	goProxyMaxBytes = 4 << 20
 )
 
 // ErrModuleNotFound indicates the proxy definitively reported that a module
@@ -62,6 +66,12 @@ type GoProxyClient struct {
 	cache *memory.TTLCache[string, *modfile.File]
 }
 
+// GoModuleInfo is the JSON metadata returned by the Go proxy .info endpoint.
+type GoModuleInfo struct {
+	Version string    `json:"Version"`
+	Time    time.Time `json:"Time"`
+}
+
 // NewGoProxyClient creates a client for fetching Go module metadata.
 // If proxyURL is empty, it defaults to proxy.golang.org.
 // Uses SafeDialer for SSRF protection against DNS rebinding attacks.
@@ -71,7 +81,7 @@ func NewGoProxyClient(proxyURL string) *GoProxyClient {
 	}
 	return &GoProxyClient{
 		proxyURL:   strings.TrimSuffix(proxyURL, "/"),
-		httpClient: httputil.NewSafeClient(goProxyTimeout),
+		httpClient: httputil.NewSafeRetryableClient(goProxyTimeout),
 		cache:      memory.NewTTLCache[string, *modfile.File](defaultGoModCacheSize, defaultGoModCacheTTL),
 	}
 }
@@ -113,6 +123,29 @@ func (c *GoProxyClient) FetchGoMod(ctx context.Context, modulePath, version stri
 
 // fetchModFile fetches the raw go.mod content from the proxy.
 func (c *GoProxyClient) fetchModFile(ctx context.Context, modulePath, version string) ([]byte, error) {
+	return c.fetchProxyFile(ctx, modulePath, version, ".mod")
+}
+
+// FetchInfo fetches the Go proxy .info metadata for modulePath@version.
+// The version argument may be a tag, branch, revision, or canonical module
+// version accepted by the proxy.
+func (c *GoProxyClient) FetchInfo(ctx context.Context, modulePath, version string) (GoModuleInfo, error) {
+	data, err := c.fetchProxyFile(ctx, modulePath, version, ".info")
+	if err != nil {
+		return GoModuleInfo{}, err
+	}
+	var info GoModuleInfo
+	if err := json.Unmarshal(data, &info); err != nil {
+		return GoModuleInfo{}, fmt.Errorf("decoding module info for %s@%s: %w", modulePath, version, err)
+	}
+	if strings.TrimSpace(info.Version) == "" {
+		return GoModuleInfo{}, fmt.Errorf("module info for %s@%s has empty version", modulePath, version)
+	}
+	return info, nil
+}
+
+// fetchProxyFile fetches a raw Go proxy file endpoint.
+func (c *GoProxyClient) fetchProxyFile(ctx context.Context, modulePath, version, suffix string) ([]byte, error) {
 	// Escape the module path for URL (required by GOPROXY protocol)
 	escapedPath, err := module.EscapePath(modulePath)
 	if err != nil {
@@ -125,8 +158,8 @@ func (c *GoProxyClient) fetchModFile(ctx context.Context, modulePath, version st
 		return nil, fmt.Errorf("escaping version %q: %w", version, err)
 	}
 
-	// Build the URL: /<module>/@v/<version>.mod
-	u := fmt.Sprintf("%s/%s/@v/%s.mod", c.proxyURL, escapedPath, escapedVersion)
+	// Build the URL: /<module>/@v/<version><suffix>
+	u := fmt.Sprintf("%s/%s/@v/%s%s", c.proxyURL, escapedPath, escapedVersion, suffix)
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
 	if err != nil {
@@ -149,7 +182,7 @@ func (c *GoProxyClient) fetchModFile(ctx context.Context, modulePath, version st
 		return nil, fmt.Errorf("proxy returned status %d for %s", resp.StatusCode, u)
 	}
 
-	data, err := io.ReadAll(resp.Body)
+	data, err := io.ReadAll(io.LimitReader(resp.Body, goProxyMaxBytes))
 	if err != nil {
 		return nil, fmt.Errorf("reading response: %w", err)
 	}

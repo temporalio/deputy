@@ -30,7 +30,7 @@ func Example_inProcess() {
 	}
 
 	fmt.Printf("Found %d ecosystems\n", len(resp.Msg.Ecosystems))
-	// Output: Found 7 ecosystems
+	// Output: Found 13 ecosystems
 }
 
 func Example_remote() {

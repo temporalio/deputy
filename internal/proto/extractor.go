@@ -18,8 +18,73 @@ func ecosystemFromPURLType(purlType string) string {
 	switch purlType {
 	case purlx.TypeGitHubActions:
 		return "GitHub Actions"
+	case purlx.TypeMise:
+		return "mise"
+	case purlx.TypeAsdf:
+		return "asdf"
 	default:
 		return ""
+	}
+}
+
+// ExtractorPackageIsDirect reports whether pkg should be treated as a direct
+// dependency using the same rules as ExtractorPackageToProto.
+func ExtractorPackageIsDirect(pkg *extractor.Package, direct map[string]bool) bool {
+	if pkg == nil {
+		return false
+	}
+	purl := pkg.PURL()
+	if purl == nil {
+		return false
+	}
+
+	switch {
+	case purl.Type == "docker" || purl.Type == "oci":
+		// Docker/OCI: base images from Dockerfile are always direct dependencies.
+		return true
+	case purlx.IsGitHubActionsType(purl.Type):
+		// GitHub Actions: workflow uses are always direct dependencies.
+		return true
+	case purl.Type == purlx.TypeMise || purl.Type == purlx.TypeAsdf:
+		// mise/asdf: every tool is explicitly declared in config.
+		return true
+	}
+
+	if direct == nil {
+		return false
+	}
+
+	switch purl.Type {
+	case "golang":
+		// Reconstruct module path from PURL namespace + name.
+		modulePath := pkg.Name
+		if modulePath == "" {
+			if purl.Namespace != "" {
+				modulePath = purl.Namespace + "/" + purl.Name
+			} else {
+				modulePath = purl.Name
+			}
+		}
+		// First check exact module path (handles submodules correctly), then
+		// fall back to module root for subpackage import paths.
+		if val, exists := direct[modulePath]; exists {
+			return val
+		}
+		moduleRoot := compare.GetModuleRoot(modulePath)
+		return direct[moduleRoot]
+	case "npm":
+		// npm: check package name (may include scope like @types/node).
+		pkgName := purl.Name
+		if purl.Namespace != "" {
+			pkgName = "@" + purl.Namespace + "/" + purl.Name
+		}
+		return direct[pkgName]
+	case "cargo":
+		return direct[purl.Name]
+	case "pypi":
+		return direct[normalizePyPIName(purl.Name)]
+	default:
+		return direct[purl.String()]
 	}
 }
 
@@ -38,64 +103,7 @@ func ExtractorPackageToProto(pkg *extractor.Package, direct map[string]bool) *de
 		purlStr = purl.String()
 	}
 
-	isDirect := false
-	if direct != nil && purl != nil {
-		// Direct dependency matching varies by ecosystem:
-		//
-		// Go: Use module paths (with module root fallback for subpackages)
-		// npm/Cargo/PyPI: Use package names directly
-		//
-		// The direct map contains:
-		//   - Go: module paths with true (direct) or false (indirect)
-		//   - npm: package names (e.g., "react", "@types/node")
-		//   - Cargo: crate names (e.g., "tokio", "serde")
-		//   - PyPI: normalized package names (e.g., "flask", "requests")
-		switch purl.Type {
-		case "golang":
-			// Reconstruct module path from PURL namespace + name
-			modulePath := pkg.Name
-			if modulePath == "" {
-				if purl.Namespace != "" {
-					modulePath = purl.Namespace + "/" + purl.Name
-				} else {
-					modulePath = purl.Name
-				}
-			}
-			// First check exact module path (handles submodules correctly)
-			if val, exists := direct[modulePath]; exists {
-				isDirect = val
-			} else {
-				// Fall back to module root for subpackage import paths
-				moduleRoot := compare.GetModuleRoot(modulePath)
-				isDirect = direct[moduleRoot]
-			}
-		case "npm":
-			// npm: check package name (may include scope like @types/node)
-			pkgName := purl.Name
-			if purl.Namespace != "" {
-				pkgName = "@" + purl.Namespace + "/" + purl.Name
-			}
-			isDirect = direct[pkgName]
-		case "cargo":
-			// Cargo: check crate name
-			isDirect = direct[purl.Name]
-		case "pypi":
-			// PyPI: normalize and check package name (PEP 503: lowercase, _ for -)
-			pkgName := normalizePyPIName(purl.Name)
-			isDirect = direct[pkgName]
-		case "docker", "oci":
-			// Docker/OCI: base images from Dockerfile are always direct dependencies
-			// They're explicitly declared in FROM instructions
-			isDirect = true
-		case "githubactions":
-			// GitHub Actions: workflow uses are always direct dependencies
-			// They're explicitly declared in workflow YAML files
-			isDirect = true
-		default:
-			// Fall back to PURL string for unknown ecosystems
-			isDirect = direct[purlStr]
-		}
-	}
+	isDirect := ExtractorPackageIsDirect(pkg, direct)
 
 	var layerDetails *containerv1.LayerDetails
 	if pkg.LayerDetails != nil {
