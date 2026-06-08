@@ -29,16 +29,13 @@ import (
 	"github.com/spf13/cobra"
 	"golang.org/x/sync/errgroup"
 	"google.golang.org/protobuf/encoding/protojson"
-	"google.golang.org/protobuf/proto"
 
-	dependencyv1 "github.com/temporalio/deputy/gen/deputy/dependency/v1"
 	policyv1 "github.com/temporalio/deputy/gen/deputy/policy/v1"
 	scanv1 "github.com/temporalio/deputy/gen/deputy/scan/v1"
 	targetv1 "github.com/temporalio/deputy/gen/deputy/target/v1"
 	cliflags "github.com/temporalio/deputy/internal/cli/flags"
 	"github.com/temporalio/deputy/internal/collections"
 	"github.com/temporalio/deputy/internal/container/image"
-	"github.com/temporalio/deputy/internal/dependency"
 	"github.com/temporalio/deputy/internal/dockerfile"
 	deperrors "github.com/temporalio/deputy/internal/errors"
 	gitx "github.com/temporalio/deputy/internal/gitutil"
@@ -1439,42 +1436,11 @@ func outputTextContainer(w io.Writer, errW io.Writer, result scanning.Result, ig
 	return nil
 }
 
-// withoutInternalManifestMetadata returns a clone of resp with Deputy-internal
-// manifest-ref routing metadata (the "deputy:component-key=" group used for
-// source-aware remediation) stripped from every package, so user-facing JSON
-// does not leak internal state. The original response is left untouched because
-// in-process remediation and RPC round-trips rely on that metadata.
-func withoutInternalManifestMetadata(resp *scanv1.ScanResponse) *scanv1.ScanResponse {
-	if resp == nil {
-		return nil
-	}
-	clone := proto.Clone(resp).(*scanv1.ScanResponse)
-	for _, pkg := range clone.GetPackages() {
-		stripInternalManifestGroups(pkg)
-	}
-	for _, f := range clone.GetFindings() {
-		stripInternalManifestGroups(f.GetPackage())
-	}
-	return clone
-}
-
-// stripInternalManifestGroups replaces each manifest ref's Groups with the
-// public subset (dropping the internal component-key group).
-func stripInternalManifestGroups(pkg *dependencyv1.Package) {
-	if pkg == nil {
-		return
-	}
-	for _, ref := range pkg.GetManifestRefs() {
-		ref.Groups = dependency.ManifestRefGroups(ref)
-	}
-}
-
 // outputProtoJSON writes the scan results in JSON format using protojson for
 // consistent, type-safe serialization directly from the proto response.
 // This is the preferred method for JSON output as it avoids conversion bugs
 // and ensures the JSON structure matches the proto schema exactly.
 func outputProtoJSON(w io.Writer, resp *scanv1.ScanResponse) error {
-	resp = withoutInternalManifestMetadata(resp)
 	opts := protojson.MarshalOptions{
 		Multiline:       true,
 		Indent:          "  ",
