@@ -494,7 +494,7 @@ func TestJWKSServer(t *testing.T) {
 	}
 
 	// Verify it's the same key
-	if ecdsaPub.X.Cmp(privateKey.PublicKey.X) != 0 || ecdsaPub.Y.Cmp(privateKey.PublicKey.Y) != 0 {
+	if !ecdsaPub.Equal(&privateKey.PublicKey) {
 		t.Error("retrieved key does not match original key")
 	}
 }
