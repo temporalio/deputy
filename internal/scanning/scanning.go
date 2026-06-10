@@ -66,7 +66,7 @@ type Result struct {
 	Advisories map[string]*vulnerabilityv1.Advisory
 
 	// Stats contains vulnerability severity counts.
-	Stats vulnerabilityv1.Stats
+	Stats *vulnerabilityv1.Stats
 
 	// Graph contains the resolved dependency graph (when graph resolution is enabled).
 	Graph *graph.Graph
@@ -480,7 +480,7 @@ func purlEcosystem(pu packageurl.PackageURL) string {
 // (when opts.VerifyFixes is set) resolves each record's fix verdict against the
 // Go module proxy so downstream stats/rendering distinguish installable
 // in-place upgrades from module migrations and unreachable advisory versions.
-func consolidateAndResolve(ctx context.Context, findings []vulnerability.Finding, advisories map[string]*vulnerabilityv1.Advisory, opts Options) ([]vulnerability.Consolidated, vulnerabilityv1.Stats) {
+func consolidateAndResolve(ctx context.Context, findings []vulnerability.Finding, advisories map[string]*vulnerabilityv1.Advisory, opts Options) ([]vulnerability.Consolidated, *vulnerabilityv1.Stats) {
 	cons := vulnerability.Consolidate(findings, advisories)
 	if opts.VerifyFixes {
 		resolver := fixresolve.NewGoProxyResolver(opts.GoProxyURL)

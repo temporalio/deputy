@@ -8,7 +8,7 @@ import (
 )
 
 func TestBuildSummary_NoVulns(t *testing.T) {
-	summary := BuildSummary(nil, vulnerabilityv1.Stats{})
+	summary := BuildSummary(nil, &vulnerabilityv1.Stats{})
 	if summary.HasVulnerabilities {
 		t.Fatalf("expected HasVulnerabilities=false")
 	}
@@ -19,7 +19,7 @@ func TestBuildSummary_WithVulns(t *testing.T) {
 		{PrimaryID: "V1", Severity: "9.8", SeverityType: "CVSS_V3", FixedVersions: []string{"v1.2.0"}, Version: "v1.0.0"},
 		{PrimaryID: "V2", Severity: "HIGH", SeverityType: "GHSA"},
 	}
-	summary := BuildSummary(cons, vulnerabilityv1.Stats{})
+	summary := BuildSummary(cons, &vulnerabilityv1.Stats{})
 	if !summary.HasVulnerabilities {
 		t.Fatalf("expected HasVulnerabilities=true")
 	}
@@ -49,7 +49,7 @@ func TestBuildSummary_CommandRemediation(t *testing.T) {
 		},
 	}
 	// stats.Unique=1, FixAvailable=0 (no semver fix).
-	summary := BuildSummary(cons, vulnerabilityv1.Stats{Unique: 1})
+	summary := BuildSummary(cons, &vulnerabilityv1.Stats{Unique: 1})
 
 	if summary.UnfixedCount != 0 {
 		t.Errorf("supply-chain finding should not be 'unfixed', got UnfixedCount=%d", summary.UnfixedCount)

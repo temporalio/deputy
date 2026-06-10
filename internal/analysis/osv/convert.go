@@ -30,8 +30,8 @@ func ProcessOSVVulnerability(vuln osvschema.Vulnerability, input PkgInput) Vulne
 // ProcessOSVVulnerabilityDomain converts a raw OSV vulnerability into the
 // domain Advisory + Finding pair, keeping the advisory metadata separate from
 // scan-time occurrence details.
-func ProcessOSVVulnerabilityDomain(vuln osvschema.Vulnerability, input PkgInput) (vulnerabilityv1.Advisory, vulnerability.Finding) {
-	advisory := vulnerabilityv1.Advisory{
+func ProcessOSVVulnerabilityDomain(vuln osvschema.Vulnerability, input PkgInput) (*vulnerabilityv1.Advisory, vulnerability.Finding) {
+	advisory := &vulnerabilityv1.Advisory{
 		Id:      vuln.ID,
 		Summary: vuln.Summary,
 		Details: vuln.Details,
@@ -129,7 +129,7 @@ func ProcessOSVVulnerabilityDomain(vuln osvschema.Vulnerability, input PkgInput)
 	}
 	// Extract CWEs from database_specific.cwe_ids (GHSA records)
 	if cwes := cwe.ExtractFromDatabaseSpecific(vuln.DatabaseSpecific); len(cwes) > 0 {
-		vulnerability.SetAdvisoryCWEs(&advisory, cwes)
+		vulnerability.SetAdvisoryCWEs(advisory, cwes)
 	}
 	return advisory, finding
 }
@@ -297,7 +297,7 @@ func extractDatabaseSpecificStrings(raw map[string]any) map[string]string {
 	return out
 }
 
-func flattenAdvisoryFinding(advisory vulnerabilityv1.Advisory, finding vulnerability.Finding) Vulnerability {
+func flattenAdvisoryFinding(advisory *vulnerabilityv1.Advisory, finding vulnerability.Finding) Vulnerability {
 	var sev, sevType string
 	if advisory.Severity != nil {
 		sev = advisory.Severity.Raw
@@ -311,11 +311,11 @@ func flattenAdvisoryFinding(advisory vulnerabilityv1.Advisory, finding vulnerabi
 	}
 
 	var published string
-	if pub := vulnerability.AdvisoryPublished(&advisory); !pub.IsZero() {
+	if pub := vulnerability.AdvisoryPublished(advisory); !pub.IsZero() {
 		published = pub.Format(time.RFC3339)
 	}
 	var modified string
-	if mod := vulnerability.AdvisoryModified(&advisory); !mod.IsZero() {
+	if mod := vulnerability.AdvisoryModified(advisory); !mod.IsZero() {
 		modified = mod.Format(time.RFC3339)
 	}
 

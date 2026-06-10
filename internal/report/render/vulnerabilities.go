@@ -225,7 +225,7 @@ func VulnerabilityList(w io.Writer, cons []vulnerability.Consolidated, opts Vuln
 
 // VulnerabilitySummaryAndActions writes the summary and recommended
 // actions for a set of vulnerabilities without reprinting the list header.
-func VulnerabilitySummaryAndActions(w io.Writer, cons []vulnerability.Consolidated, stats vulnerabilityv1.Stats, opts ...VulnerabilityDisplayOptions) {
+func VulnerabilitySummaryAndActions(w io.Writer, cons []vulnerability.Consolidated, stats *vulnerabilityv1.Stats, opts ...VulnerabilityDisplayOptions) {
 	displayOpts := resolveVulnerabilityDisplayOptions(opts)
 	summary := report.BuildSummary(cons, stats)
 	if !summary.HasVulnerabilities {

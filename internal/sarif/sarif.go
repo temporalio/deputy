@@ -1051,7 +1051,8 @@ func vulnerabilityToResult(v report.Vulnerability, ruleID string, ruleIdx int) R
 	// This provides additional context about which code paths use the vulnerable package.
 	// See: https://docs.oasis-open.org/sarif/sarif/v2.1.0/os/sarif-v2.1.0-os.html#_Toc34317669
 	var relatedLocations []Location
-	for _, imp := range v.AffectedImports {
+	for i := range v.AffectedImports {
+		imp := &v.AffectedImports[i]
 		loc := Location{
 			LogicalLocations: []LogicalLocation{
 				{
@@ -1096,7 +1097,8 @@ func vulnerabilityToResult(v report.Vulnerability, ruleID string, ruleIdx int) R
 		})
 
 		// Subsequent locations: each affected import path
-		for i, imp := range v.AffectedImports {
+		for i := range v.AffectedImports {
+			imp := &v.AffectedImports[i]
 			var msgText string
 			if len(imp.Symbols) > 0 {
 				msgText = fmt.Sprintf("Imports %s (vulnerable symbols: %s)", imp.Path, strings.Join(imp.Symbols, ", "))

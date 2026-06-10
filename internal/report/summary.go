@@ -9,7 +9,7 @@ import (
 // Summary captures counts and recommended actions derived from vulnerabilities.
 type Summary struct {
 	HasVulnerabilities bool
-	Stats              vulnerabilityv1.Stats
+	Stats              *vulnerabilityv1.Stats
 	CriticalHighCount  int
 	FixAvailableCount  int
 	// MigrationCount is the number of findings whose only fix requires moving to
@@ -35,11 +35,11 @@ func BuildSummaryFromResult(result vulnerability.ConsolidatedResult) Summary {
 }
 
 // BuildSummary computes summary stats and remediation suggestions for vulnerabilities.
-func BuildSummary(cons []vulnerability.Consolidated, stats vulnerabilityv1.Stats) Summary {
+func BuildSummary(cons []vulnerability.Consolidated, stats *vulnerabilityv1.Stats) Summary {
 	if len(cons) == 0 {
 		return Summary{HasVulnerabilities: false}
 	}
-	if stats.Unique == 0 {
+	if stats == nil || stats.Unique == 0 {
 		stats = vulnerability.StatsFromConsolidated(cons, len(cons))
 	}
 	high := stats.Critical + stats.High

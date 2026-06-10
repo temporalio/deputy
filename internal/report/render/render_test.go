@@ -298,7 +298,7 @@ func TestTriageSummary(t *testing.T) {
 		triageReport := report.TriageReport{
 			Target:            report.Target{Repo: "test/repo", Ref: "main"},
 			PackagesWithVulns: 2,
-			Stats:             vulnerabilityv1.Stats{Total: 3},
+			Stats:             &vulnerabilityv1.Stats{Total: 3},
 			TopPackages: []report.TriagePackageSummary{
 				{
 					Package:            "lodash",
@@ -520,7 +520,7 @@ func TestVulnerabilitySummaryAndActions(t *testing.T) {
 
 	t.Run("no vulnerabilities", func(t *testing.T) {
 		var buf bytes.Buffer
-		VulnerabilitySummaryAndActions(&buf, nil, vulnerabilityv1.Stats{})
+		VulnerabilitySummaryAndActions(&buf, nil, &vulnerabilityv1.Stats{})
 		out := buf.String()
 		if !strings.Contains(out, "No vulnerabilities found") {
 			t.Errorf("expected no vulns message, got: %s", out)
@@ -533,7 +533,7 @@ func TestVulnerabilitySummaryAndActions(t *testing.T) {
 			{PrimaryID: "CVE-2", Severity: "HIGH"},
 			{PrimaryID: "CVE-3", Severity: "HIGH"},
 		}
-		stats := vulnerabilityv1.Stats{Total: 3, Critical: 1, High: 2}
+		stats := &vulnerabilityv1.Stats{Total: 3, Critical: 1, High: 2}
 		var buf bytes.Buffer
 		VulnerabilitySummaryAndActions(&buf, cons, stats)
 		out := buf.String()
@@ -547,7 +547,7 @@ func TestVulnerabilitySummaryAndActions(t *testing.T) {
 			{PrimaryID: "CVE-1", FixedVersions: []string{"1.0.1"}},
 			{PrimaryID: "CVE-2", FixedVersions: []string{"2.0.0"}},
 		}
-		stats := vulnerabilityv1.Stats{Total: 2}
+		stats := &vulnerabilityv1.Stats{Total: 2}
 		var buf bytes.Buffer
 		VulnerabilitySummaryAndActions(&buf, cons, stats)
 		out := buf.String()

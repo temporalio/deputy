@@ -150,5 +150,5 @@ func computeStatsProto(findings []*vulnerabilityv1.Finding, advisories map[strin
 	}
 
 	consolidated := vulnerability.ConsolidateAll(internalFindings, advisories)
-	return &consolidated.Stats
+	return consolidated.Stats
 }

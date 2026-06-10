@@ -55,7 +55,7 @@ func TestOutputDocs_Golden(t *testing.T) {
 						Ref:    "main",
 						Commit: "deadbeef",
 					},
-					Stats: vulnerabilityv1.Stats{
+					Stats: &vulnerabilityv1.Stats{
 						Unique:       2,
 						Critical:     1,
 						High:         1,

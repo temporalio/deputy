@@ -588,17 +588,17 @@ func TestAdvisoriesFromProto(t *testing.T) {
 func TestStatsToProto(t *testing.T) {
 	tests := []struct {
 		name  string
-		stats vulnerabilityv1.Stats
+		stats *vulnerabilityv1.Stats
 		want  *vulnerabilityv1.Stats
 	}{
 		{
 			name:  "zero stats",
-			stats: vulnerabilityv1.Stats{},
+			stats: &vulnerabilityv1.Stats{},
 			want:  &vulnerabilityv1.Stats{},
 		},
 		{
 			name: "full stats",
-			stats: vulnerabilityv1.Stats{
+			stats: &vulnerabilityv1.Stats{
 				Total:        100,
 				Unique:       75,
 				Critical:     5,
@@ -639,17 +639,17 @@ func TestStatsFromProto(t *testing.T) {
 	tests := []struct {
 		name  string
 		stats *vulnerabilityv1.Stats
-		want  vulnerabilityv1.Stats
+		want  *vulnerabilityv1.Stats
 	}{
 		{
 			name:  "nil stats",
 			stats: nil,
-			want:  vulnerabilityv1.Stats{},
+			want:  &vulnerabilityv1.Stats{},
 		},
 		{
 			name:  "empty stats",
 			stats: &vulnerabilityv1.Stats{},
-			want:  vulnerabilityv1.Stats{},
+			want:  &vulnerabilityv1.Stats{},
 		},
 		{
 			name: "full stats",
@@ -665,7 +665,7 @@ func TestStatsFromProto(t *testing.T) {
 				DirectDeps:   25,
 				IndirectDeps: 50,
 			},
-			want: vulnerabilityv1.Stats{
+			want: &vulnerabilityv1.Stats{
 				Total:        100,
 				Unique:       75,
 				Critical:     5,
@@ -691,7 +691,7 @@ func TestStatsFromProto(t *testing.T) {
 }
 
 func TestStatsRoundTrip(t *testing.T) {
-	original := vulnerabilityv1.Stats{
+	original := &vulnerabilityv1.Stats{
 		Total:        100,
 		Unique:       75,
 		Critical:     5,

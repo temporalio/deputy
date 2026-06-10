@@ -4,6 +4,7 @@ import (
 	"strings"
 	"time"
 
+	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	dependencyv1 "github.com/temporalio/deputy/gen/deputy/dependency/v1"
@@ -180,30 +181,20 @@ func ScanningResultFromProto(r *scanv1.ScanResponse) *scanning.Result {
 }
 
 // StatsToProto converts domain Stats (vulnerabilityv1) to proto Stats.
-func StatsToProto(s vulnerabilityv1.Stats) *vulnerabilityv1.Stats {
-	return &vulnerabilityv1.Stats{
-		Total:           s.Total,
-		Unique:          s.Unique,
-		Critical:        s.Critical,
-		High:            s.High,
-		Medium:          s.Medium,
-		Low:             s.Low,
-		Unknown:         s.Unknown,
-		CveCount:        s.CveCount,
-		FixAvailable:    s.FixAvailable,
-		FixViaMigration: s.FixViaMigration,
-		DirectDeps:      s.DirectDeps,
-		IndirectDeps:    s.IndirectDeps,
-		Duplicates:      s.Duplicates,
+func StatsToProto(s *vulnerabilityv1.Stats) *vulnerabilityv1.Stats {
+	if s == nil {
+		return nil
 	}
+	return proto.Clone(s).(*vulnerabilityv1.Stats)
 }
 
-// StatsFromProto converts proto Stats to domain Stats.
-func StatsFromProto(s *vulnerabilityv1.Stats) vulnerabilityv1.Stats {
+// StatsFromProto converts proto Stats to domain Stats. To preserve the
+// never-nil invariant for renderers, a nil input yields an empty Stats.
+func StatsFromProto(s *vulnerabilityv1.Stats) *vulnerabilityv1.Stats {
 	if s == nil {
-		return vulnerabilityv1.Stats{}
+		return &vulnerabilityv1.Stats{}
 	}
-	return *s
+	return s
 }
 
 // PolicyActionsToProto converts internal policy.Action slice to proto Action slice.

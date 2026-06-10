@@ -170,20 +170,20 @@ func TestManifestRefComponentKeyRoundTrip(t *testing.T) {
 	// breaks source-aware mise/asdf fixes.
 	tests := []struct {
 		name string
-		ref  dependencyv1.ManifestRef
+		refs []dependencyv1.ManifestRef
 	}{
-		{"mise backend tool", dependency.NewManifestRef("mise.toml", "mise", nil, "npm:lodash")},
-		{"mise go runtime", dependency.NewManifestRef("mise.toml", "mise", nil, "go")},
-		{"no component key", dependencyv1.ManifestRef{Path: "go.mod", Manager: "go"}},
+		{"mise backend tool", []dependencyv1.ManifestRef{dependency.NewManifestRef("mise.toml", "mise", nil, "npm:lodash")}},
+		{"mise go runtime", []dependencyv1.ManifestRef{dependency.NewManifestRef("mise.toml", "mise", nil, "go")}},
+		{"no component key", []dependencyv1.ManifestRef{{Path: "go.mod", Manager: "go"}}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			toProto := ManifestRefsToProto([]dependencyv1.ManifestRef{tt.ref})
-			if len(toProto) != 1 || dependency.ManifestRefComponentKey(toProto[0]) != dependency.ManifestRefComponentKey(&tt.ref) {
+			toProto := ManifestRefsToProto(tt.refs)
+			if len(toProto) != 1 || dependency.ManifestRefComponentKey(toProto[0]) != dependency.ManifestRefComponentKey(&tt.refs[0]) {
 				t.Fatalf("ToProto dropped ComponentKey: %+v", toProto)
 			}
 			back := ManifestRefsFromProto(toProto)
-			if len(back) != 1 || dependency.ManifestRefComponentKey(&back[0]) != dependency.ManifestRefComponentKey(&tt.ref) {
+			if len(back) != 1 || dependency.ManifestRefComponentKey(&back[0]) != dependency.ManifestRefComponentKey(&tt.refs[0]) {
 				t.Fatalf("FromProto dropped ComponentKey: %+v", back)
 			}
 		})

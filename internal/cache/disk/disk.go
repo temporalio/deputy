@@ -129,12 +129,15 @@ func Write(subdir, key string, v any) {
 // preventing BaseDir() from re-initializing cacheDirPath during the test.
 func SetBaseDirForTest(dir string) func() {
 	prevPath := cacheDirPath
-	prevOnce := cacheDirOnce
 	cacheDirPath = dir
 	cacheDirOnce = sync.Once{}
 	cacheDirOnce.Do(func() {}) // Mark as completed so BaseDir() won't overwrite
 	return func() {
+		// Restore the previous path and re-mark the Once as completed so a later
+		// BaseDir() returns the restored value without re-initializing. A sync.Once
+		// cannot be copied, so we reset and re-fire rather than saving its value.
 		cacheDirPath = prevPath
-		cacheDirOnce = prevOnce
+		cacheDirOnce = sync.Once{}
+		cacheDirOnce.Do(func() {})
 	}
 }

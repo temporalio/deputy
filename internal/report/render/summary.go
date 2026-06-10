@@ -29,7 +29,10 @@ func DiffHeaderDoc(baseRef, targetRef string) output.Doc {
 }
 
 // TriageSummaryDoc builds the summary header for triage output.
-func TriageSummaryDoc(target TargetSummary, stats vulnerabilityv1.Stats, packagesWithVulns int) output.Doc {
+func TriageSummaryDoc(target TargetSummary, stats *vulnerabilityv1.Stats, packagesWithVulns int) output.Doc {
+	if stats == nil {
+		stats = &vulnerabilityv1.Stats{}
+	}
 	var doc output.Doc
 	doc.AddLine(output.Span{Text: "Triage Summary:", Style: output.StyleHeader})
 	if repo := strings.TrimSpace(target.Repo); repo != "" {

@@ -1027,7 +1027,7 @@ func resultFromReportVulnerabilities(vulns []report.Vulnerability) (scanning.Res
 	}, cons
 }
 
-func consolidateReportVulnerabilities(vulns []report.Vulnerability) ([]vulnerability.Consolidated, vulnerabilityv1.Stats) {
+func consolidateReportVulnerabilities(vulns []report.Vulnerability) ([]vulnerability.Consolidated, *vulnerabilityv1.Stats) {
 	result, cons := resultFromReportVulnerabilities(vulns)
 	return cons, result.Stats
 }

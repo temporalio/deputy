@@ -14,10 +14,10 @@ import (
 
 // TriageReport represents the summary of a triage analysis.
 type TriageReport struct {
-	Target            Target                       `json:"target"`
-	Stats             vulnerabilityv1.Stats        `json:"stats"`
-	TopPackages       []TriagePackageSummary       `json:"top_packages"`
-	PackagesWithVulns int                          `json:"packages_with_vulns"`
+	Target            Target                 `json:"target"`
+	Stats             *vulnerabilityv1.Stats `json:"stats"`
+	TopPackages       []TriagePackageSummary `json:"top_packages"`
+	PackagesWithVulns int                    `json:"packages_with_vulns"`
 }
 
 // TriagePackageSummary represents a summary of a single package's vulnerabilities.
@@ -37,7 +37,7 @@ type TriagePackageSummary struct {
 }
 
 // BuildTriageReport constructs a TriageReport from the target, stats, and consolidated vulnerabilities.
-func BuildTriageReport(target Target, stats vulnerabilityv1.Stats, cons []vulnerability.Consolidated) TriageReport {
+func BuildTriageReport(target Target, stats *vulnerabilityv1.Stats, cons []vulnerability.Consolidated) TriageReport {
 	report := TriageReport{Target: target, Stats: stats}
 	agg := aggregatePackages(cons)
 	report.PackagesWithVulns = len(agg)
@@ -219,7 +219,8 @@ func mergeAffectedImports(base []vulnerabilityv1.AffectedImport, extra []vulnera
 		return base
 	}
 	pathMap := make(map[string]collections.Set[string])
-	for _, imp := range base {
+	for i := range base {
+		imp := &base[i]
 		path := strings.TrimSpace(imp.Path)
 		if path == "" {
 			continue
@@ -235,7 +236,8 @@ func mergeAffectedImports(base []vulnerabilityv1.AffectedImport, extra []vulnera
 			}
 		}
 	}
-	for _, imp := range extra {
+	for i := range extra {
+		imp := &extra[i]
 		path := strings.TrimSpace(imp.Path)
 		if path == "" {
 			continue
