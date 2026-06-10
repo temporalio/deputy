@@ -13,6 +13,17 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+// celParser is a reusable CEL parser configured with the standard macros,
+// matching the behavior of the deprecated top-level parser.Parse. NewParser
+// only errors on invalid options, so a failure here is a programming error.
+var celParser = func() *parser.Parser {
+	p, err := parser.NewParser(parser.Macros(parser.AllMacros...))
+	if err != nil {
+		panic(fmt.Sprintf("policy/lsp: build CEL parser: %v", err))
+	}
+	return p
+}()
+
 // diagnosticEngine produces LSP diagnostics for a document.
 type diagnosticEngine struct{}
 
@@ -257,7 +268,7 @@ func celErrorDiagnostic(uri protocol.DocumentURI, node *yaml.Node, err error, kn
 // widenWithAST attempts to find the smallest AST node (ident/select/call target/arg) containing the offset and returns its length and adjusted column.
 func widenWithAST(expr string, yamlCol int, lineOffset, colOffset int) (length int, adjustedCol int) {
 	src := common.NewTextSource(expr)
-	parsed, parseErrs := parser.Parse(src)
+	parsed, parseErrs := celParser.Parse(src)
 	if len(parseErrs.GetErrors()) > 0 {
 		return 0, 0
 	}

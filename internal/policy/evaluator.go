@@ -9,7 +9,6 @@ import (
 	"strings"
 
 	"github.com/google/cel-go/cel"
-	"github.com/google/cel-go/checker/decls"
 	"github.com/google/cel-go/common/types/ref"
 	"github.com/google/cel-go/ext"
 	containerv1 "github.com/temporalio/deputy/gen/deputy/container/v1"
@@ -18,7 +17,6 @@ import (
 	scanv1 "github.com/temporalio/deputy/gen/deputy/scan/v1"
 	targetv1 "github.com/temporalio/deputy/gen/deputy/target/v1"
 	vulnerabilityv1 "github.com/temporalio/deputy/gen/deputy/vulnerability/v1"
-	exprpb "google.golang.org/genproto/googleapis/api/expr/v1alpha1"
 	"google.golang.org/protobuf/proto"
 )
 
@@ -227,18 +225,8 @@ func envWithNames(extra []string) (*cel.Env, error) {
 	slices.Sort(names)
 	names = slices.Compact(names)
 
-	// Filter out empty strings and create declarations
-	declSlice := make([]*exprpb.Decl, 0, len(names))
-	for _, name := range names {
-		name = strings.TrimSpace(name)
-		if name == "" {
-			continue
-		}
-		declSlice = append(declSlice, decls.NewVar(name, decls.Dyn))
-	}
 	opts := []cel.EnvOption{
 		cel.OptionalTypes(),
-		cel.Declarations(declSlice...),
 		// Register proto types for native proto support in CEL expressions.
 		// This enables policies to work directly with proto messages, providing:
 		// - Type-safe field access (e.g., finding.advisory.severity.level)
@@ -343,6 +331,12 @@ func envWithNames(extra []string) (*cel.Env, error) {
 		ext.Bindings(), // cel.bind() for local variables
 		ext.Encoders(), // base64.encode/decode
 		ext.Math(),     // math functions (abs, ceil, floor, etc.)
+	}
+	// Register each input variable as a dynamically-typed CEL variable.
+	for _, name := range names {
+		if name = strings.TrimSpace(name); name != "" {
+			opts = append(opts, cel.Variable(name, cel.DynType))
+		}
 	}
 	opts = append(opts, customHelperFunctions()...)
 	env, err := cel.NewEnv(opts...)
