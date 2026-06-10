@@ -17,6 +17,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/temporalio/deputy/internal/globmatch"
 )
 
 // BaselineVersion is the current baseline file format version.
@@ -535,16 +537,18 @@ func (a *Allowlist) AddType(secretType, reason string) {
 }
 
 // ShouldIgnoreFile checks if a file path should be skipped.
+//
+// Paths are matched with globmatch's gitignore-flavored semantics, so a bare
+// name matches at any depth and "dir/**" matches the whole subtree. The matcher
+// is compiled per call because the allowlist's Paths can change via AddPath; a
+// malformed pattern is treated as no-match (matching prior swallow-error
+// behavior).
 func (a *Allowlist) ShouldIgnoreFile(path string) bool {
-	for _, pattern := range a.Paths {
-		if matched, _ := filepath.Match(pattern, path); matched {
-			return true
-		}
-		if matched, _ := filepath.Match(pattern, filepath.Base(path)); matched {
-			return true
-		}
+	m, err := globmatch.Compile(a.Paths)
+	if err != nil {
+		return false
 	}
-	return false
+	return m.MatchPath(path)
 }
 
 // ShouldIgnoreFinding checks if a finding should be ignored.

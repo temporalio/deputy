@@ -9,11 +9,11 @@ import (
 	"io"
 	"io/fs"
 	"log/slog"
-	"path/filepath"
 	"strings"
 
 	v1 "github.com/google/go-containerregistry/pkg/v1"
 	scalibrimage "github.com/google/osv-scalibr/artifact/image"
+	"github.com/temporalio/deputy/internal/globmatch"
 )
 
 // ContainerFinding extends Finding with container layer context.
@@ -745,25 +745,16 @@ func looksRedacted(value string) bool {
 	return false
 }
 
-// matchesPathPatterns checks if a path matches any of the patterns.
+// matchesPathPatterns checks if a path matches any of the patterns. Patterns use
+// globmatch's gitignore-flavored semantics, whose bare-name-at-any-depth and
+// "dir/**" subtree matching supersede the previous ad-hoc substring fallback.
+// Compiled per call; a malformed pattern is treated as no-match.
 func matchesPathPatterns(path string, patterns []string) bool {
-	for _, pattern := range patterns {
-		// Try matching full path
-		if matched, _ := filepath.Match(pattern, path); matched {
-			return true
-		}
-		// Try matching basename
-		if matched, _ := filepath.Match(pattern, filepath.Base(path)); matched {
-			return true
-		}
-		// Try substring match for non-glob patterns
-		if !strings.ContainsAny(pattern, "*?[]") {
-			if strings.Contains(strings.ToLower(path), strings.ToLower(pattern)) {
-				return true
-			}
-		}
+	m, err := globmatch.Compile(patterns)
+	if err != nil {
+		return false
 	}
-	return false
+	return m.MatchPath(path)
 }
 
 // truncate shortens a string to max length.

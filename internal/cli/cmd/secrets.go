@@ -19,6 +19,7 @@ import (
 	secretsv1 "github.com/temporalio/deputy/gen/deputy/secrets/v1"
 	"github.com/temporalio/deputy/internal/container/image"
 	gitx "github.com/temporalio/deputy/internal/gitutil"
+	"github.com/temporalio/deputy/internal/globmatch"
 	internalproto "github.com/temporalio/deputy/internal/proto"
 	"github.com/temporalio/deputy/internal/secrets"
 	"github.com/temporalio/deputy/internal/services"
@@ -521,6 +522,23 @@ FILTERING:
 	AddSecretsBaselineCommand(secretsCmd)
 }
 
+// secretScanFilters compiles include and exclude path matchers for a secrets
+// scan walk. Patterns use globmatch's gitignore-flavored semantics, so a single
+// MatchPath call replaces the old full-path + basename filepath.Match loops and
+// recursive "dir/**" patterns match the whole subtree. It compiles once per
+// scan operation; callers reuse the returned matchers for the entire walk.
+func secretScanFilters(includePatterns, excludePatterns []string) (excl, incl *globmatch.Matcher, err error) {
+	excl, err = globmatch.Compile(excludePatterns)
+	if err != nil {
+		return nil, nil, fmt.Errorf("compiling exclude patterns: %w", err)
+	}
+	incl, err = globmatch.Compile(includePatterns)
+	if err != nil {
+		return nil, nil, fmt.Errorf("compiling include patterns: %w", err)
+	}
+	return excl, incl, nil
+}
+
 // scanDirectory recursively scans a directory for secrets.
 // This function works for any directory (git repos, plain directories, system paths).
 func scanDirectory(ctx context.Context, engine *secrets.Engine, dir, includeGlob, excludeGlob string) ([]secrets.Finding, int, error) {
@@ -622,6 +640,12 @@ func scanDirectory(ctx context.Context, engine *secrets.Engine, dir, includeGlob
 	}
 	excludePatterns = append(excludePatterns, defaultExcludes...)
 
+	// Compile path matchers once; reused across the whole walk.
+	excl, incl, err := secretScanFilters(includePatterns, excludePatterns)
+	if err != nil {
+		return nil, 0, err
+	}
+
 	root, err := os.OpenRoot(dir)
 	if err != nil {
 		return nil, 0, err
@@ -645,38 +669,21 @@ func scanDirectory(ctx context.Context, engine *secrets.Engine, dir, includeGlob
 
 		// Skip directories
 		if d.IsDir() {
-			// Skip excluded directories early
-			for _, pattern := range excludePatterns {
-				if matched, _ := filepath.Match(strings.TrimSuffix(pattern, "/**"), d.Name()); matched {
-					return fs.SkipDir
-				}
+			// Skip excluded directories early (whole subtree).
+			if excl.MatchPath(path) {
+				return fs.SkipDir
 			}
 			return nil
 		}
 
-		// Get relative path for pattern matching
 		// Check exclude patterns
-		for _, pattern := range excludePatterns {
-			if matched, _ := filepath.Match(pattern, relPath); matched {
-				return nil
-			}
-			if matched, _ := filepath.Match(pattern, filepath.Base(relPath)); matched {
-				return nil
-			}
+		if excl.MatchPath(path) {
+			return nil
 		}
 
 		// Check include patterns (if specified)
-		if len(includePatterns) > 0 {
-			included := false
-			for _, pattern := range includePatterns {
-				if matched, _ := filepath.Match(pattern, filepath.Base(relPath)); matched {
-					included = true
-					break
-				}
-			}
-			if !included {
-				return nil
-			}
+		if !incl.Empty() && !incl.MatchPath(path) {
+			return nil
 		}
 
 		// Skip large files (> 1MB)
@@ -1741,7 +1748,13 @@ func scanFilesystem(ctx context.Context, engine *secrets.Engine, fsys fs.FS, inc
 	}
 	excludePatterns = append(excludePatterns, defaultExcludes...)
 
-	err := fs.WalkDir(fsys, ".", func(path string, d fs.DirEntry, err error) error {
+	// Compile path matchers once; reused across the whole walk.
+	excl, incl, err := secretScanFilters(includePatterns, excludePatterns)
+	if err != nil {
+		return nil, 0, err
+	}
+
+	err = fs.WalkDir(fsys, ".", func(path string, d fs.DirEntry, err error) error {
 		// Check context cancellation
 		select {
 		case <-ctx.Done():
@@ -1755,33 +1768,23 @@ func scanFilesystem(ctx context.Context, engine *secrets.Engine, fsys fs.FS, inc
 
 		// Skip directories
 		if d.IsDir() {
+			// Skip excluded directories early (whole subtree).
+			if excl.MatchPath(path) {
+				return fs.SkipDir
+			}
 			return nil
 		}
 
 		relPath := filepath.FromSlash(path)
 
 		// Check exclude patterns
-		for _, pattern := range excludePatterns {
-			if matched, _ := filepath.Match(pattern, relPath); matched {
-				return nil
-			}
-			if matched, _ := filepath.Match(pattern, filepath.Base(relPath)); matched {
-				return nil
-			}
+		if excl.MatchPath(path) {
+			return nil
 		}
 
 		// Check include patterns (if specified)
-		if len(includePatterns) > 0 {
-			included := false
-			for _, pattern := range includePatterns {
-				if matched, _ := filepath.Match(pattern, filepath.Base(relPath)); matched {
-					included = true
-					break
-				}
-			}
-			if !included {
-				return nil
-			}
+		if !incl.Empty() && !incl.MatchPath(path) {
+			return nil
 		}
 
 		// Skip large files (> 1MB)

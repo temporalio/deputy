@@ -23,6 +23,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/temporalio/deputy/internal/globmatch"
 	"github.com/ulikunitz/xz"
 )
 
@@ -589,24 +590,16 @@ func (s *ArchiveScanner) scanContent(ctx context.Context, content []byte, entryP
 	return findings, nil
 }
 
-// matchesPathPatterns checks if a path matches any configured pattern.
+// matchesPathPatterns checks if a path matches any configured pattern. Patterns
+// use globmatch's gitignore-flavored semantics, whose bare-name-at-any-depth and
+// "dir/**" subtree matching supersede the previous ad-hoc substring fallback.
+// Compiled per call; a malformed pattern is treated as no-match.
 func (s *ArchiveScanner) matchesPathPatterns(path string) bool {
-	base := filepath.Base(path)
-	for _, pattern := range s.config.PathPatterns {
-		if matched, _ := filepath.Match(pattern, base); matched {
-			return true
-		}
-		if matched, _ := filepath.Match(pattern, path); matched {
-			return true
-		}
-		// Check substring match for non-glob patterns
-		if !strings.ContainsAny(pattern, "*?[]") {
-			if strings.Contains(strings.ToLower(path), strings.ToLower(pattern)) {
-				return true
-			}
-		}
+	m, err := globmatch.Compile(s.config.PathPatterns)
+	if err != nil {
+		return false
 	}
-	return false
+	return m.MatchPath(path)
 }
 
 // isUnsafePath checks if a path is potentially malicious (path traversal, absolute, etc.).

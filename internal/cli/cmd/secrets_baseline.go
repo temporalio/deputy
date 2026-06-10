@@ -9,8 +9,9 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
-	"github.com/temporalio/deputy/internal/secrets"
 	"github.com/spf13/cobra"
+	"github.com/temporalio/deputy/internal/globmatch"
+	"github.com/temporalio/deputy/internal/secrets"
 )
 
 // AddSecretsBaselineCommand adds the baseline subcommand to the secrets command.
@@ -343,6 +344,12 @@ Use --clean to automatically remove stale entries.`,
 func generateBaselineWithExcludes(ctx context.Context, scanner secrets.Scanner, dir, reason string, excludes []string) (*secrets.Baseline, error) {
 	baseline := secrets.NewBaseline()
 
+	// Compile exclude matcher once; reused across the whole walk.
+	excl, err := globmatch.Compile(excludes)
+	if err != nil {
+		return nil, fmt.Errorf("compiling exclude patterns: %w", err)
+	}
+
 	root, err := os.OpenRoot(dir)
 	if err != nil {
 		return nil, err
@@ -366,13 +373,8 @@ func generateBaselineWithExcludes(ctx context.Context, scanner secrets.Scanner, 
 		relPath := filepath.FromSlash(path)
 
 		// Check excludes
-		for _, pattern := range excludes {
-			if matched, _ := filepath.Match(pattern, relPath); matched {
-				return nil
-			}
-			if matched, _ := filepath.Match(pattern, filepath.Base(relPath)); matched {
-				return nil
-			}
+		if excl.MatchPath(path) {
+			return nil
 		}
 
 		// Skip binary files

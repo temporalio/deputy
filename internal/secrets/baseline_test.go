@@ -159,7 +159,7 @@ func TestAllowlist_ShouldIgnoreFile(t *testing.T) {
 	}{
 		{"main_test.go", true},
 		{"main.go", false},
-		{"vendor/lib/file.go", false}, // Full path doesn't match basename pattern
+		{"vendor/lib/file.go", true}, // "vendor/*" matches the whole vendor subtree
 		{".env.example", true},
 		{".env", false},
 	}
@@ -168,6 +168,42 @@ func TestAllowlist_ShouldIgnoreFile(t *testing.T) {
 		if got := allowlist.ShouldIgnoreFile(tc.path); got != tc.ignore {
 			t.Errorf("ShouldIgnoreFile(%q) = %v, want %v", tc.path, got, tc.ignore)
 		}
+	}
+}
+
+// TestAllowlist_ShouldIgnoreFile_RecursiveGlob proves the globmatch migration
+// fixes the segment-bounded filepath.Match bug: a "vendor/**" pattern now
+// excludes deeply nested files, which filepath.Match silently failed to match.
+func TestAllowlist_ShouldIgnoreFile_RecursiveGlob(t *testing.T) {
+	allowlist := NewAllowlist()
+	allowlist.AddPath("vendor/**", "vendor tree")
+	allowlist.AddPath("node_modules/**", "node deps")
+
+	tests := []struct {
+		path   string
+		ignore bool
+	}{
+		{"vendor/sub/secret.env", true}, // nested: the bug
+		{"vendor/x.go", true},           // direct child
+		{"a/node_modules/b/c.js", true}, // bare-name any depth
+		{"src/main.go", false},          // unrelated
+	}
+	for _, tc := range tests {
+		if got := allowlist.ShouldIgnoreFile(tc.path); got != tc.ignore {
+			t.Errorf("ShouldIgnoreFile(%q) = %v, want %v", tc.path, got, tc.ignore)
+		}
+	}
+}
+
+// TestMatchesPathFilter_RecursiveGlob proves matchesPathFilter matches nested
+// files under a "dir/**" pattern after the globmatch migration.
+func TestMatchesPathFilter_RecursiveGlob(t *testing.T) {
+	patterns := []string{"vendor/**"}
+	if !matchesPathFilter("vendor/sub/secret.env", patterns) {
+		t.Errorf("matchesPathFilter should match nested vendor file")
+	}
+	if matchesPathFilter("src/main.go", patterns) {
+		t.Errorf("matchesPathFilter should not match unrelated file")
 	}
 }
 

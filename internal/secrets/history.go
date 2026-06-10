@@ -12,6 +12,7 @@ import (
 	"github.com/go-git/go-git/v5"
 	"github.com/go-git/go-git/v5/plumbing"
 	"github.com/go-git/go-git/v5/plumbing/object"
+	"github.com/temporalio/deputy/internal/globmatch"
 )
 
 // HistoricalFinding extends Finding with git history context.
@@ -366,17 +367,16 @@ func firstLine(s string) string {
 	return s
 }
 
-// matchesPathFilter checks if a path matches any filter pattern.
+// matchesPathFilter checks if a path matches any filter pattern. Patterns use
+// globmatch's gitignore-flavored semantics (bare names match at any depth,
+// "dir/**" matches the whole subtree). Compiled per call; a malformed pattern
+// is treated as no-match.
 func matchesPathFilter(path string, patterns []string) bool {
-	for _, pattern := range patterns {
-		if matched, _ := filepath.Match(pattern, path); matched {
-			return true
-		}
-		if matched, _ := filepath.Match(pattern, filepath.Base(path)); matched {
-			return true
-		}
+	m, err := globmatch.Compile(patterns)
+	if err != nil {
+		return false
 	}
-	return false
+	return m.MatchPath(path)
 }
 
 // isBinaryFile checks if a file is likely binary based on extension.
