@@ -16,7 +16,7 @@ func TestNewSchemaRegistry(t *testing.T) {
 	// Should have vulnerability schema
 	vuln := r.GetVariable("vulnerability")
 	if vuln == nil {
-		t.Error("expected vulnerability schema")
+		t.Fatal("expected vulnerability schema")
 	}
 	if vuln.Description == "" {
 		t.Error("expected vulnerability description")

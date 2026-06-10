@@ -130,7 +130,7 @@ func (a *extractorHandlerAdapter) Info(ctx context.Context, req *pluginv1.InfoRe
 
 func (a *extractorHandlerAdapter) FileRequired(ctx context.Context, req *pluginv1.FileRequiredRequest) (*pluginv1.FileRequiredResponse, error) {
 	// Extract trace context and create child span
-	ctx, span := startSpan(ctx, req.TraceContext, "plugin.FileRequired",
+	_, span := startSpan(ctx, req.TraceContext, "plugin.FileRequired",
 		attribute.String("file.path", req.Path),
 		attribute.Bool("file.is_dir", req.IsDir),
 		attribute.Int64("file.size", req.Size),
@@ -145,7 +145,7 @@ func (a *extractorHandlerAdapter) FileRequired(ctx context.Context, req *pluginv
 
 func (a *extractorHandlerAdapter) Extract(ctx context.Context, req *pluginv1.ExtractRequest) (*pluginv1.ExtractResponse, error) {
 	// Extract trace context and create child span
-	ctx, span := startSpan(ctx, req.TraceContext, "plugin.Extract",
+	_, span := startSpan(ctx, req.TraceContext, "plugin.Extract",
 		attribute.String("file.path", req.Path),
 		attribute.Int("file.size", len(req.Contents)),
 		attribute.String("scan.root", req.Root),

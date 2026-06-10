@@ -716,7 +716,7 @@ func scanBinaryWithSCALIBR(ctx context.Context, path string, opts Options) ([]*e
 // CollectPURL extracts inventory for a single PURL.
 // This creates a minimal inventory with just the one package.
 func CollectPURL(ctx context.Context, purlStr string, opts Options) (*Execution, error) {
-	ctx, span := otel.StartSpan(ctx, "deputy.inventory.purl",
+	_, span := otel.StartSpan(ctx, "deputy.inventory.purl",
 		trace.WithAttributes(
 			attribute.String("deputy.target.purl", purlStr),
 		))
@@ -772,7 +772,7 @@ func purlDisplayName(pu packageurl.PackageURL) string {
 // CollectSBOM extracts inventory from an SBOM file or stdin.
 // Supports protobom-json, cyclonedx-json, and spdx-json formats.
 func CollectSBOM(ctx context.Context, target string, opts Options) (*Execution, error) {
-	ctx, span := otel.StartSpan(ctx, "deputy.inventory.sbom",
+	_, span := otel.StartSpan(ctx, "deputy.inventory.sbom",
 		trace.WithAttributes(
 			attribute.String("deputy.target.sbom", target),
 		))

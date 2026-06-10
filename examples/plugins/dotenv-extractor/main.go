@@ -35,6 +35,8 @@ package main
 import (
 	"bufio"
 	"bytes"
+	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 
@@ -117,6 +119,13 @@ func (e *dotenvExtractor) Extract(path string, contents []byte, root string) ([]
 				sensitiveVars = append(sensitiveVars, varName)
 			}
 		}
+	}
+
+	// Surface potential secrets to stderr (stdout carries the RPC response),
+	// demonstrating the secret-scanning use case this example advertises.
+	if len(sensitiveVars) > 0 {
+		fmt.Fprintf(os.Stderr, "dotenv: %s has %d variable(s), %d potentially sensitive: %s\n",
+			path, varCount, len(sensitiveVars), strings.Join(sensitiveVars, ", "))
 	}
 
 	// Create a "package" representing this env file

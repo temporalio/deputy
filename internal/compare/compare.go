@@ -562,6 +562,7 @@ func summarizePackage(p *extractor.Package) (string, pkgSummary) {
 		meta.key = "go|" + meta.canonical
 		return meta.key, meta
 	}
+	// npm names need no normalization beyond the lowercasing above.
 	name := strings.ToLower(p.Name)
 	// Apply ecosystem-specific name normalization
 	normalizedEcos := normalizeEcosystemForComparison(ecos)
@@ -570,9 +571,6 @@ func summarizePackage(p *extractor.Package) (string, pkgSummary) {
 		name = normalizePyPIName(name)
 	case isCargoEcosystem(normalizedEcos):
 		name = normalizeCargoName(name)
-	case isNpmEcosystem(normalizedEcos):
-		// npm names are already case-insensitive; ToLower above handles it
-		// No additional normalization needed beyond lowercasing
 	}
 	meta.canonical = name
 	if ecos == "" {
@@ -605,15 +603,6 @@ func isPyPIEcosystem(eco string) bool {
 func isCargoEcosystem(eco string) bool {
 	switch strings.ToLower(eco) {
 	case "cargo", "crates.io", "rust":
-		return true
-	}
-	return false
-}
-
-// isNpmEcosystem returns true if the ecosystem is an npm/Node.js ecosystem.
-func isNpmEcosystem(eco string) bool {
-	switch strings.ToLower(eco) {
-	case "npm", "yarn", "pnpm", "node":
 		return true
 	}
 	return false
