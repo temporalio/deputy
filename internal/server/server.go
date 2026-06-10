@@ -16,8 +16,6 @@ import (
 	"connectrpc.com/cors"
 	"connectrpc.com/otelconnect"
 	"connectrpc.com/validate"
-	"golang.org/x/net/http2"
-	"golang.org/x/net/http2/h2c"
 	"golang.org/x/time/rate"
 
 	"github.com/temporalio/deputy/gen/deputy/diff/v1/diffv1connect"
@@ -445,19 +443,9 @@ func New(cfg Config) (*Server, error) {
 	// Version endpoint
 	mux.HandleFunc("/version", versionHandler)
 
-	// Determine handler based on TLS config
-	var finalHandler http.Handler
-	if cfg.TLS != nil {
-		// With TLS, use standard handler (HTTP/2 is automatic)
-		finalHandler = handler
-	} else {
-		// Without TLS, use h2c for HTTP/2 cleartext support
-		finalHandler = h2c.NewHandler(handler, &http2.Server{})
-	}
-
 	httpServer := &http.Server{
 		Addr:         cfg.Addr,
-		Handler:      finalHandler,
+		Handler:      handler,
 		ReadTimeout:  cfg.ReadTimeout,
 		WriteTimeout: cfg.WriteTimeout,
 		IdleTimeout:  cfg.IdleTimeout,
@@ -470,6 +458,13 @@ func New(cfg Config) (*Server, error) {
 			return nil, err
 		}
 		httpServer.TLSConfig = tlsConfig
+	} else {
+		// Without TLS, enable HTTP/2 cleartext (h2c) natively via the
+		// Protocols field rather than wrapping the handler in h2c.NewHandler.
+		var protocols http.Protocols
+		protocols.SetHTTP1(true)
+		protocols.SetUnencryptedHTTP2(true)
+		httpServer.Protocols = &protocols
 	}
 
 	return &Server{
