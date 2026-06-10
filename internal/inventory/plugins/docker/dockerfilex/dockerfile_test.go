@@ -185,6 +185,52 @@ CMD ["/app"]
 	}
 }
 
+func TestExtract_BaseImageMetadata(t *testing.T) {
+	ext := New()
+
+	t.Run("build-arg expression preserved and flagged", func(t *testing.T) {
+		input := &filesystem.ScanInput{
+			Path:   "Dockerfile",
+			Reader: strings.NewReader("ARG ALPINE_TAG\nFROM alpine:${ALPINE_TAG}\n"),
+		}
+		inv, err := ext.Extract(context.Background(), input)
+		if err != nil {
+			t.Fatalf("Extract() error = %v", err)
+		}
+		if len(inv.Packages) != 1 {
+			t.Fatalf("expected 1 package, got %d", len(inv.Packages))
+		}
+		meta, ok := inv.Packages[0].Metadata.(*BaseImageMetadata)
+		if !ok {
+			t.Fatalf("expected *BaseImageMetadata, got %T", inv.Packages[0].Metadata)
+		}
+		if !meta.IsExpression {
+			t.Error("expected IsExpression=true for FROM alpine:${ALPINE_TAG}")
+		}
+		if meta.Raw != "alpine:${ALPINE_TAG}" {
+			t.Errorf("Raw = %q, want the original unresolved ref %q", meta.Raw, "alpine:${ALPINE_TAG}")
+		}
+	})
+
+	t.Run("concrete tag is not an expression", func(t *testing.T) {
+		input := &filesystem.ScanInput{
+			Path:   "Dockerfile",
+			Reader: strings.NewReader("FROM alpine:3.19\n"),
+		}
+		inv, err := ext.Extract(context.Background(), input)
+		if err != nil {
+			t.Fatalf("Extract() error = %v", err)
+		}
+		meta := inv.Packages[0].Metadata.(*BaseImageMetadata)
+		if meta.IsExpression {
+			t.Error("expected IsExpression=false for a concrete tag")
+		}
+		if meta.Raw != "alpine:3.19" {
+			t.Errorf("Raw = %q, want alpine:3.19", meta.Raw)
+		}
+	})
+}
+
 func TestSplitImageRef(t *testing.T) {
 	tests := []struct {
 		ref        string

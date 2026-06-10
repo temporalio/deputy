@@ -24,18 +24,31 @@ func FilterUnfixed(result Result) Result {
 		if !ok {
 			continue
 		}
-		if len(adv.FixedVersions) == 0 {
-			continue
+		if advisoryIsFixable(adv, f.Version) {
+			filtered = append(filtered, f)
 		}
-		if vulnerability.FindBestFixedVersion(adv.FixedVersions, f.Version) == "" {
-			continue
-		}
-		filtered = append(filtered, f)
 	}
 	result.Findings = filtered
 	result.Advisories = filterAdvisories(filtered, result.Advisories)
 	result.Stats = vulnerability.ConsolidateAll(result.Findings, result.Advisories).Stats
 	return result
+}
+
+// advisoryIsFixable reports whether an advisory has an applicable remediation
+// for the given version. A finding is fixable when it has an installable semver
+// upgrade target OR an action-based remediation command (e.g., supply-chain
+// hygiene findings resolved by `deputy pin`). The latter do not carry a
+// FixedVersions entry, so command remediations must be checked separately —
+// otherwise `--ignore-unfixed` would wrongly drop pinnable findings.
+func advisoryIsFixable(adv *vulnerabilityv1.Advisory, version string) bool {
+	if adv == nil {
+		return false
+	}
+	if adv.DatabaseSpecific["remediation"] != "" {
+		return true
+	}
+	return len(adv.FixedVersions) > 0 &&
+		vulnerability.FindBestFixedVersion(adv.FixedVersions, version) != ""
 }
 
 func filterAdvisories(findings []vulnerability.Finding, advisories map[string]*vulnerabilityv1.Advisory) map[string]*vulnerabilityv1.Advisory {
@@ -202,6 +215,7 @@ func buildFindingPayload(f vulnerability.Finding, adv *vulnerabilityv1.Advisory)
 		Purl:         f.Dependency.PURL,
 		Version:      f.Version,
 		Direct:       f.Direct,
+		Locations:    f.Locations,
 		LayerDetails: f.LayerDetails,
 	}
 
