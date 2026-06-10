@@ -775,7 +775,7 @@ func extractSeverityString(val ref.Val) string {
 	}
 	// Fall back to map extraction (for data that went through ProtoToMap)
 	vulnMap := extractVulnMap(val)
-	if vulnMap == nil || len(vulnMap) == 0 {
+	if len(vulnMap) == 0 {
 		return ""
 	}
 	// Navigate: vulnerability.advisory.severity.level

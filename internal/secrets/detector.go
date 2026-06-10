@@ -26,25 +26,25 @@ const (
 	TypeRubyGemsAPIKey       SecretType = "rubygems_api_key"
 
 	// Pattern-detected types
-	TypeAWSAccessKey     SecretType = "aws_access_key"
-	TypeAWSSecretKey     SecretType = "aws_secret_key"
-	TypeGitHubToken      SecretType = "github_token"
-	TypeGitHubFineGrain  SecretType = "github_fine_grained_token"
-	TypeGenericAPIKey    SecretType = "generic_api_key"
-	TypePrivateKey       SecretType = "private_key"
-	TypeJWT              SecretType = "jwt"
-	TypeSlackToken       SecretType = "slack_token"
-	TypeStripeKey        SecretType = "stripe_key"
-	TypeSendGridKey      SecretType = "sendgrid_key"
-	TypeNpmToken         SecretType = "npm_token"
-	TypePyPIToken        SecretType = "pypi_token"
-	TypeDiscordToken     SecretType = "discord_token"
-	TypeTelegramToken    SecretType = "telegram_token"
-	TypeHerokuAPIKey     SecretType = "heroku_api_key"
-	TypeMailgunKey       SecretType = "mailgun_key"
-	TypeTwilioKey        SecretType = "twilio_key"
-	TypeHighEntropy      SecretType = "high_entropy_string"
-	TypeSensitiveEnvVar  SecretType = "sensitive_env_var"
+	TypeAWSAccessKey    SecretType = "aws_access_key"
+	TypeAWSSecretKey    SecretType = "aws_secret_key"
+	TypeGitHubToken     SecretType = "github_token"
+	TypeGitHubFineGrain SecretType = "github_fine_grained_token"
+	TypeGenericAPIKey   SecretType = "generic_api_key"
+	TypePrivateKey      SecretType = "private_key"
+	TypeJWT             SecretType = "jwt"
+	TypeSlackToken      SecretType = "slack_token"
+	TypeStripeKey       SecretType = "stripe_key"
+	TypeSendGridKey     SecretType = "sendgrid_key"
+	TypeNpmToken        SecretType = "npm_token"
+	TypePyPIToken       SecretType = "pypi_token"
+	TypeDiscordToken    SecretType = "discord_token"
+	TypeTelegramToken   SecretType = "telegram_token"
+	TypeHerokuAPIKey    SecretType = "heroku_api_key"
+	TypeMailgunKey      SecretType = "mailgun_key"
+	TypeTwilioKey       SecretType = "twilio_key"
+	TypeHighEntropy     SecretType = "high_entropy_string"
+	TypeSensitiveEnvVar SecretType = "sensitive_env_var"
 
 	// Additional patterns
 	TypeSlackWebhook      SecretType = "slack_webhook"
@@ -419,12 +419,7 @@ func NewEngineWithConfig(config EngineConfig) (*Engine, error) {
 
 	// Add custom patterns from config
 	for _, cp := range config.CustomPatterns {
-		patterns = append(patterns, patternDetector{
-			Type:        cp.Type,
-			Pattern:     cp.Pattern,
-			Description: cp.Description,
-			Confidence:  cp.Confidence,
-		})
+		patterns = append(patterns, patternDetector(cp))
 	}
 
 	return &Engine{

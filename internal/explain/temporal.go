@@ -70,7 +70,7 @@ func (t TemporalInfo) KEVDaysRemaining() int {
 	if time.Now().After(t.KEVDueDate) {
 		return 0
 	}
-	return int(t.KEVDueDate.Sub(time.Now()).Hours() / 24)
+	return int(time.Until(t.KEVDueDate).Hours() / 24)
 }
 
 // IsRecentlyDiscovered returns true if published within the last 30 days.

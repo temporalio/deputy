@@ -594,9 +594,7 @@ func packagesToInputs(pkgs []*extractor.Package, direct map[string]bool) []osv.P
 		}
 
 		locs := make([]string, len(pkg.Locations))
-		for i, loc := range pkg.Locations {
-			locs[i] = loc
-		}
+		copy(locs, pkg.Locations)
 
 		// Build manifest references from locations
 		var manifestRefs []dependencyv1.ManifestRef

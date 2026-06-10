@@ -256,10 +256,7 @@ func wasVulnFixedByUpgradeFromScanning(finding vulnerability.Finding, targetResu
 
 	for _, pkg := range targetResult.Packages {
 		if pkg.Name == pkgName {
-			if pkg.Version != baseVersion {
-				return true
-			}
-			return false
+			return pkg.Version != baseVersion
 		}
 	}
 	return false
