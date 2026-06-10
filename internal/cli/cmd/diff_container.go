@@ -10,13 +10,11 @@ import (
 	"connectrpc.com/connect"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/go-git/go-git/v5"
-	"github.com/google/osv-scalibr/extractor"
 	"google.golang.org/protobuf/encoding/protojson"
 
 	containerv1 "github.com/temporalio/deputy/gen/deputy/container/v1"
 	diffv1 "github.com/temporalio/deputy/gen/deputy/diff/v1"
 	"github.com/temporalio/deputy/internal/compare"
-	gitx "github.com/temporalio/deputy/internal/gitutil"
 	"github.com/temporalio/deputy/internal/otel"
 	"github.com/temporalio/deputy/internal/output"
 	"github.com/temporalio/deputy/internal/policy"
@@ -100,22 +98,6 @@ func looksLikeExplicitContainerImage(ref string) bool {
 	}
 
 	// Simple names without tags or domains are ambiguous - prefer git ref interpretation
-	return false
-}
-
-// isValidGitRef checks if a reference is a valid Git ref (tag, branch, commit, or special ref).
-func isValidGitRef(repo *git.Repository, ref string) bool {
-	// Check for special working tree refs
-	upper := strings.ToUpper(strings.TrimSpace(ref))
-	if upper == "WORKING" || upper == "WORKTREE" || upper == "WT" || strings.TrimSpace(ref) == "." {
-		return true
-	}
-
-	// Try to resolve the ref using the enhanced resolver
-	if _, err := gitx.ResolveRevisionEnhanced(repo, ref); err == nil {
-		return true
-	}
-
 	return false
 }
 
@@ -255,52 +237,6 @@ type containerDiffContext struct {
 	TargetSize         int64
 	BaseArch           string
 	TargetArch         string
-}
-
-// extractDistroFromPackages extracts the OS distribution from package ecosystem info.
-// It looks for patterns like "Debian:11", "Alpine:3.18", etc.
-func extractDistroFromPackages(pkgs []*extractor.Package) string {
-	if len(pkgs) == 0 {
-		return ""
-	}
-
-	// Count ecosystems to find the most common one (for mixed images)
-	ecosystemCounts := make(map[string]int)
-	for _, pkg := range pkgs {
-		eco := pkg.Ecosystem()
-		if eco.IsEmpty() {
-			continue
-		}
-		ecoStr := eco.String()
-		// Only count OS-level ecosystems (those with version suffixes like "Debian:11")
-		if strings.Contains(ecoStr, ":") {
-			ecosystemCounts[ecoStr]++
-		}
-	}
-
-	if len(ecosystemCounts) == 0 {
-		return ""
-	}
-
-	// Find the most common ecosystem
-	var mostCommon string
-	var maxCount int
-	for eco, count := range ecosystemCounts {
-		if count > maxCount {
-			maxCount = count
-			mostCommon = eco
-		}
-	}
-
-	// Format nicely: "Debian:11" -> "Debian 11", "Alpine:3.18" -> "Alpine 3.18"
-	if mostCommon != "" {
-		parts := strings.SplitN(mostCommon, ":", 2)
-		if len(parts) == 2 {
-			return parts[0] + " " + parts[1]
-		}
-		return mostCommon
-	}
-	return ""
 }
 
 // normalizeImageReference ensures the image reference has the appropriate scheme.

@@ -1,30 +1,28 @@
 package cmd
 
 import (
-	"bytes"
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 	"strings"
 
+	"github.com/spf13/cobra"
 	"github.com/temporalio/deputy/internal/secrets"
 	ui "github.com/temporalio/deputy/internal/ui"
-	"github.com/spf13/cobra"
 )
 
 // AddSecretsHookCommand adds the 'secrets hook' subcommand.
 func AddSecretsHookCommand(secretsCmd *cobra.Command) {
 	var (
-		hookType    string
-		warn        bool
-		verify      bool
-		format      string
-		exclude     string
-		include     string
-		allowlist   string
-		deputyPath  string
-		repoPath    string
+		hookType   string
+		warn       bool
+		verify     bool
+		format     string
+		exclude    string
+		include    string
+		allowlist  string
+		deputyPath string
+		repoPath   string
 	)
 
 	hookCmd := &cobra.Command{
@@ -310,36 +308,4 @@ This is useful for:
 
 	hookCmd.AddCommand(installCmd, uninstallCmd, statusCmd, generateCmd)
 	secretsCmd.AddCommand(hookCmd)
-}
-
-// renderHookHelp renders help about hooks with examples.
-func renderHookHelp(out io.Writer) {
-	fmt.Fprintln(out, ui.StyleHeader.Render("Git Hooks for Secret Detection"))
-	fmt.Fprintln(out)
-	fmt.Fprintln(out, "Deputy can install git hooks to automatically scan for secrets before")
-	fmt.Fprintln(out, "commits or pushes reach your repository.")
-	fmt.Fprintln(out)
-
-	fmt.Fprintln(out, ui.StyleBold.Render("Quick Start:"))
-	fmt.Fprintln(out, "  deputy secrets hook install          # Install pre-commit hook")
-	fmt.Fprintln(out, "  deputy secrets hook install --type pre-push")
-	fmt.Fprintln(out)
-
-	fmt.Fprintln(out, ui.StyleBold.Render("Available Hook Types:"))
-	fmt.Fprintln(out, "  pre-commit  Scans staged files before each commit")
-	fmt.Fprintln(out, "  pre-push    Scans commits before pushing to remote")
-	fmt.Fprintln(out)
-
-	fmt.Fprintln(out, ui.StyleBold.Render("Why Use Git Hooks?"))
-	fmt.Fprintln(out, "  - Prevent secrets from entering git history")
-	fmt.Fprintln(out, "  - Catch mistakes before they become incidents")
-	fmt.Fprintln(out, "  - Defense in depth alongside CI/CD scanning")
-}
-
-// preCommitHookPreview returns a preview of the pre-commit hook.
-func preCommitHookPreview() string {
-	var buf bytes.Buffer
-	config := secrets.DefaultHookConfig(secrets.HookPreCommit)
-	secrets.GenerateHook(&buf, config)
-	return buf.String()
 }

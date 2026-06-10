@@ -603,11 +603,6 @@ func TestRetryEnabled(t *testing.T) {
 	}
 }
 
-//go:fix inline
-func boolPtr(b bool) *bool {
-	return new(b)
-}
-
 func TestLoadHTTPFromEnv(t *testing.T) {
 	envVars := map[string]string{
 		"DEPUTY_HTTP_TIMEOUT":                 "60s",

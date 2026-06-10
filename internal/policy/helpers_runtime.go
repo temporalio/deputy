@@ -915,23 +915,6 @@ func getBoolField(m map[string]any, key string) bool {
 	return false
 }
 
-// getFloatField safely extracts a float field from a map.
-func getFloatField(m map[string]any, key string) float64 {
-	if v, ok := m[key]; ok {
-		switch f := v.(type) {
-		case float64:
-			return f
-		case float32:
-			return float64(f)
-		case int64:
-			return float64(f)
-		case int:
-			return float64(f)
-		}
-	}
-	return 0.0
-}
-
 // extractCreatedBy extracts the created_by field from a history entry.
 // Works with both map[string]any (native) and traits.Mapper (CEL) types.
 func extractCreatedBy(entry ref.Val) string {

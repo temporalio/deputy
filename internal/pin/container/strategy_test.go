@@ -34,14 +34,6 @@ func testMapFSExact(files map[string]string) scalibrfs.FS {
 	return &mapFSAdapter{m}
 }
 
-func testMapFS(files map[string]string) scalibrfs.FS {
-	m := fstest.MapFS{}
-	for path, content := range files {
-		m[path] = &fstest.MapFile{Data: []byte(strings.TrimSpace(content) + "\n")}
-	}
-	return &mapFSAdapter{m}
-}
-
 func writerTestRoot(t *testing.T, relPath, content string) *os.Root {
 	t.Helper()
 	tmp := t.TempDir()
@@ -329,9 +321,9 @@ func TestStrategy_DiscoverWorkflowContainerShortForm(t *testing.T) {
 
 func TestStrategy_DiscoverSkipsNonDockerfiles(t *testing.T) {
 	fsys := testMapFSExact(map[string]string{
-		"main.go":        "package main\nfunc main() {}\n",
-		"README.md":      "# Project\n",
-		".dockerignore":  "node_modules\n",
+		"main.go":       "package main\nfunc main() {}\n",
+		"README.md":     "# Project\n",
+		".dockerignore": "node_modules\n",
 	})
 
 	s := NewStrategy()
@@ -346,7 +338,7 @@ func TestStrategy_DiscoverSkipsNonDockerfiles(t *testing.T) {
 
 func TestStrategy_DiscoverMixed(t *testing.T) {
 	fsys := testMapFSExact(map[string]string{
-		"Dockerfile": "FROM golang:1.23 AS builder\nFROM alpine:3.19\n",
+		"Dockerfile":               "FROM golang:1.23 AS builder\nFROM alpine:3.19\n",
 		".github/workflows/ci.yml": "name: CI\non: push\njobs:\n  test:\n    container: postgres:16\n    steps:\n      - uses: docker://redis:7\n",
 	})
 

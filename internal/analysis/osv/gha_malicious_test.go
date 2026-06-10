@@ -1,11 +1,7 @@
 package osv
 
 import (
-	"archive/zip"
-	"bytes"
 	"context"
-	"encoding/json"
-	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -348,9 +344,9 @@ func TestGitHubActionsMultipleVulnerabilities(t *testing.T) {
 	_ = os.Chtimes(zipPath, now, now)
 
 	tests := []struct {
-		version    string
-		wantVulns  []string
-		wantCount  int
+		version   string
+		wantVulns []string
+		wantCount int
 	}{
 		{"1.0.0", []string{"GHSA-vuln-001"}, 1},
 		{"1.8.0", []string{"GHSA-vuln-001", "GHSA-vuln-002"}, 2}, // Both vulnerabilities
@@ -822,31 +818,4 @@ func TestGitHubActionsIntroducedZeroOpenEnded(t *testing.T) {
 			}
 		})
 	}
-}
-
-func mustGHATestZipBytesForTest(t *testing.T, files map[string]osvschema.Vulnerability) []byte {
-	t.Helper()
-	var buf bytes.Buffer
-	zw := zip.NewWriter(&buf)
-	for name, vuln := range files {
-		w, err := zw.Create(name)
-		if err != nil {
-			t.Fatalf("zip create: %v", err)
-		}
-		b, err := json.Marshal(vuln)
-		if err != nil {
-			t.Fatalf("json marshal: %v", err)
-		}
-		if _, err := w.Write(b); err != nil {
-			t.Fatalf("zip write: %v", err)
-		}
-	}
-	if err := zw.Close(); err != nil {
-		t.Fatalf("zip close: %v", err)
-	}
-	out, err := io.ReadAll(&buf)
-	if err != nil {
-		t.Fatalf("read buf: %v", err)
-	}
-	return out
 }

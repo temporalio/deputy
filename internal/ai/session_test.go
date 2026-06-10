@@ -559,8 +559,3 @@ func TestStreamToWriter(t *testing.T) {
 		t.Error("error output should contain warning")
 	}
 }
-
-//go:fix inline
-func intPtr(i int) *int {
-	return new(i)
-}

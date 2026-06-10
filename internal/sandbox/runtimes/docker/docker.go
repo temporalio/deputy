@@ -651,10 +651,6 @@ func (r *Runtime) Execute(ctx context.Context, req *sandboxv1.ExecuteRequest) it
 	}
 }
 
-func (r *Runtime) ensureImage(ctx context.Context, cli *client.Client, image string) error {
-	return r.ensureImageWithProgress(ctx, cli, image, nil, "")
-}
-
 // progressYield is a function type for yielding progress events during image pull.
 type progressYield func(event *sandboxv1.ExecuteEvent, err error) bool
 
@@ -1252,13 +1248,6 @@ func parseMemory(s string) (int64, error) {
 	}
 
 	return val * multiplier, nil
-}
-
-// ptr returns a pointer to v.
-//
-//go:fix inline
-func ptr[T any](v T) *T {
-	return new(v)
 }
 
 // formatBytes converts bytes to a human-readable string for tmpfs size options.

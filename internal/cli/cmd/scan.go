@@ -2090,10 +2090,6 @@ func dedupeImageRefs(refs []imageSBOMRef) []imageSBOMRef {
 	return out
 }
 
-func buildScanTargetPayload(result scanning.Result) map[string]any {
-	return buildTargetPayload(result.Target)
-}
-
 func buildTargetPayload(target inventory.Target) map[string]any {
 	provenance := map[string]any{}
 	for k, v := range target.Provenance {
