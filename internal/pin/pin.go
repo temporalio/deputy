@@ -6,11 +6,11 @@ import (
 	"io"
 	"log/slog"
 	"os"
-	"path"
 	"regexp"
 	"strings"
 	"sync"
 
+	"github.com/gobwas/glob"
 	scalibrfs "github.com/google/osv-scalibr/fs"
 )
 
@@ -697,27 +697,38 @@ func processOneUpdateRef(ctx context.Context, ref Ref, strategy Strategy, opts *
 	return result
 }
 
-// shouldExclude checks if a ref matches any exclude pattern.
-// Patterns use Go path.Match glob syntax against the ref's DisplayName().
+// shouldExclude reports whether a ref matches any exclude pattern.
+//
+// Patterns are globs matched with '/' as the path separator: '*' matches
+// within a single path segment while '**' matches across segments
+// (recursive). Each pattern is tested against both the ref's full
+// DisplayName() (owner/repo/subpath) and its repo identity Name (owner/repo).
+// Matching the repo identity as well means an org- or repo-level pattern such
+// as "temporalio/*" or "temporalio/private-actions" excludes monorepo subpath
+// actions like "temporalio/private-actions/golang/setup" — not just top-level
+// ones — and "temporalio/**" excludes the whole org at any depth.
 func shouldExclude(ref Ref, excludes []string) bool {
 	if len(excludes) == 0 {
 		return false
 	}
-	name := ref.DisplayName()
+	display := ref.DisplayName()
 	for _, pattern := range excludes {
-		if matched, _ := path.Match(pattern, name); matched {
+		g, err := glob.Compile(pattern, '/')
+		if err != nil {
+			continue
+		}
+		if g.Match(display) || (ref.Name != display && g.Match(ref.Name)) {
 			return true
 		}
 	}
 	return false
 }
 
-// validateExcludePatterns checks that all exclude patterns are valid
-// path.Match globs. Returns an error for malformed patterns rather than
-// silently ignoring them.
+// validateExcludePatterns checks that all exclude patterns are valid globs.
+// Returns an error for malformed patterns rather than silently ignoring them.
 func validateExcludePatterns(patterns []string) error {
 	for _, p := range patterns {
-		if _, err := path.Match(p, ""); err != nil {
+		if _, err := glob.Compile(p, '/'); err != nil {
 			return fmt.Errorf("invalid exclude pattern %q: %w", p, err)
 		}
 	}

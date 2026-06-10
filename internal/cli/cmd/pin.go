@@ -108,7 +108,7 @@ SUBCOMMANDS:
 
 	// Persistent flags inherited by subcommands.
 	cmd.PersistentFlags().StringSliceP("ecosystems", "e", []string{"all"}, "Ecosystems to pin (github-actions, container-image, mise, asdf, all)")
-	cmd.PersistentFlags().StringSliceP("exclude", "x", nil, "Skip dependencies matching glob patterns (e.g., 'actions/*', 'alpine')")
+	cmd.PersistentFlags().StringSliceP("exclude", "x", nil, "Skip dependencies matching glob patterns ('/'-separated; '*' matches one segment, '**' is recursive). Matches owner/repo and owner/repo/subpath, so 'temporalio/*' or 'temporalio/**' skips a whole org including monorepo subpath actions (e.g., 'actions/*', 'temporalio/**', 'alpine')")
 	cmd.PersistentFlags().StringP("format", "f", "text", "Output format: text, json")
 	cmd.PersistentFlags().StringP("output", "o", "", "Output file (default: stdout)")
 

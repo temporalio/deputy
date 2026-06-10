@@ -134,7 +134,7 @@ $ deputy pin update --ecosystems mise,asdf --allowed-host-bins /opt/homebrew/bin
 | Flag | Default | Description |
 | --- | --- | --- |
 | `-e, --ecosystems` | `all` | Ecosystems to pin: `github-actions`, `container-image`, `mise`, `asdf`, `all` |
-| `-x, --exclude` | | Skip dependencies matching glob patterns |
+| `-x, --exclude` | | Skip dependencies matching glob patterns (see [Exclude patterns](#exclude-patterns)) |
 | `-f, --format` | `text` | Output format: `text`, `json` |
 | `-o, --output` | stdout | Output file |
 
@@ -146,6 +146,25 @@ $ deputy pin update --ecosystems mise,asdf --allowed-host-bins /opt/homebrew/bin
 | `--allowed-host-bins` | | Absolute paths to host binaries Deputy may execute for fallback resolution (repeatable or comma-separated) |
 | `--skip-verification` | `false` | Skip fork/imposter verification |
 | `--concurrency` | `4` | Max parallel network requests |
+
+## Exclude patterns
+
+`--exclude` (repeatable) skips dependencies whose identity matches a glob. Patterns are matched with `/` as the path separator:
+
+- `*` matches within a single path segment; `**` matches across segments (recursive).
+- Each pattern is matched against both the dependency's repo identity (`owner/repo`) and its full path including any subpath (`owner/repo/subpath`).
+
+Because the repo identity is matched too, an org- or repo-level pattern skips monorepo subpath actions, not just top-level ones:
+
+| Pattern | Skips `temporalio/simple-action` | Skips `temporalio/private-actions/golang/setup` |
+| --- | --- | --- |
+| `temporalio/*` | yes | yes (matches the `temporalio/private-actions` repo) |
+| `temporalio/**` | yes | yes (recursive) |
+| `temporalio/private-actions` | no | yes (matches the repo, all subpaths) |
+| `temporalio/private-actions/**` | no | yes |
+| `actions/checkout` | — | exact full-path match |
+
+Use `org/*` or `org/**` to skip a whole organization, e.g. to pin third-party actions while leaving your own org's actions untouched.
 
 ## Authentication
 

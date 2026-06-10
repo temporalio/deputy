@@ -898,6 +898,16 @@ func TestShouldExclude(t *testing.T) {
 		{"subpath match", Ref{Name: "github/codeql-action", Subpath: "init"}, []string{"github/codeql-action/init"}, true},
 		{"subpath no match", Ref{Name: "github/codeql-action", Subpath: "init"}, []string{"github/codeql-action/analyze"}, false},
 		{"multiple patterns", Ref{Name: "actions/cache"}, []string{"actions/checkout", "actions/cache"}, true},
+
+		// Monorepo / subpath actions: org- and repo-level patterns must exclude
+		// nested actions, not just top-level ones (the wildcard depth bug).
+		{"org star excludes top-level action", Ref{Name: "temporalio/simple-action"}, []string{"temporalio/*"}, true},
+		{"org star excludes subpath action", Ref{Name: "temporalio/private-actions", Subpath: "golang/setup"}, []string{"temporalio/*"}, true},
+		{"org doublestar excludes subpath action", Ref{Name: "temporalio/private-actions", Subpath: "golang/setup"}, []string{"temporalio/**"}, true},
+		{"repo identity excludes all subpaths", Ref{Name: "temporalio/private-actions", Subpath: "golang/setup"}, []string{"temporalio/private-actions"}, true},
+		{"repo doublestar excludes subpaths", Ref{Name: "temporalio/private-actions", Subpath: "golang/setup"}, []string{"temporalio/private-actions/**"}, true},
+		{"single star is not recursive across repos", Ref{Name: "otherorg/action"}, []string{"temporalio/*"}, false},
+		{"other org not excluded by doublestar", Ref{Name: "otherorg/private-actions", Subpath: "golang/setup"}, []string{"temporalio/**"}, false},
 	}
 
 	for _, tc := range tests {
