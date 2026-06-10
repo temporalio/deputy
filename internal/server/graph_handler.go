@@ -90,6 +90,7 @@ func (h *GraphHandler) BuildGraph(
 	if req.Msg.Options != nil {
 		opts.Ecosystems = req.Msg.Options.Ecosystems
 		opts.Platform = req.Msg.Options.Platform
+		opts.ExcludePaths = req.Msg.Options.GetExcludePaths()
 	}
 
 	// Collect inventory
@@ -224,6 +225,7 @@ func (h *GraphHandler) WhyDependency(
 	if req.Msg.Options != nil {
 		opts.Ecosystems = req.Msg.Options.Ecosystems
 		opts.Platform = req.Msg.Options.Platform
+		opts.ExcludePaths = req.Msg.Options.GetExcludePaths()
 	}
 
 	// Collect inventory
@@ -358,6 +360,7 @@ func (h *GraphHandler) QueryGraph(
 	if req.Msg.Options != nil {
 		opts.Ecosystems = req.Msg.Options.Ecosystems
 		opts.Platform = req.Msg.Options.Platform
+		opts.ExcludePaths = req.Msg.Options.GetExcludePaths()
 	}
 
 	// Collect inventory

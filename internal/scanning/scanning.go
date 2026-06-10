@@ -127,6 +127,11 @@ type Options struct {
 	// GoProxyURL overrides the Go module proxy used for fix verification.
 	// Empty uses the default (proxy.golang.org).
 	GoProxyURL string
+
+	// ExcludePaths lists glob patterns for directory paths to skip during the
+	// filesystem walk (e.g., ".bin/**"). Matching subtrees are never inventoried.
+	// See [inventory.CompileExcludePaths] for pattern semantics.
+	ExcludePaths []string
 }
 
 // ScanRepository scans a repository for vulnerabilities.
@@ -139,7 +144,7 @@ func ScanRepository(ctx context.Context, target, ref string, refProvided bool, o
 	defer span.End()
 
 	// Collect inventory
-	invOpts := inventory.Options{Ecosystems: opts.Ecosystems}
+	invOpts := inventory.Options{Ecosystems: opts.Ecosystems, ExcludePaths: opts.ExcludePaths}
 	invExec, err := inventory.CollectRepository(ctx, target, ref, refProvided, invOpts)
 	if err != nil {
 		otel.SetSpanError(span, err)
@@ -240,7 +245,7 @@ func ScanDirectory(ctx context.Context, path string, opts Options) (*Execution, 
 	defer span.End()
 
 	// Collect inventory
-	invOpts := inventory.Options{Ecosystems: opts.Ecosystems}
+	invOpts := inventory.Options{Ecosystems: opts.Ecosystems, ExcludePaths: opts.ExcludePaths}
 	invExec, err := inventory.CollectDirectory(ctx, path, invOpts)
 	if err != nil {
 		otel.SetSpanError(span, err)
@@ -289,7 +294,7 @@ func ScanVMImage(ctx context.Context, target string, targetOpts map[string]strin
 	defer span.End()
 
 	// Collect inventory
-	invOpts := inventory.Options{Ecosystems: opts.Ecosystems}
+	invOpts := inventory.Options{Ecosystems: opts.Ecosystems, ExcludePaths: opts.ExcludePaths}
 	invExec, err := inventory.CollectVMImage(ctx, target, targetOpts, invOpts)
 	if err != nil {
 		otel.SetSpanError(span, err)

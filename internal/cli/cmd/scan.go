@@ -205,6 +205,7 @@ WORKFLOW EXAMPLES:
 	scanCmd.Flags().String("published-after", "", "Only include vulnerabilities published on/after this date (YYYY, YYYY-MM, YYYY-MM-DD, or RFC3339)")
 	scanCmd.Flags().String("as-of", "", "Historical view: show vulnerabilities known up to and including this date (implies --published-before)")
 	scanCmd.Flags().String("filter", "", "CEL expression to filter vulnerabilities (e.g., 'vulnerability.advisory.severity.level == severity.critical')")
+	scanCmd.PersistentFlags().StringArray("exclude-path", nil, "Glob of directory paths to skip during the walk (repeatable; e.g. '.bin/**'). Unioned with scan.exclude_paths from config")
 	scanCmd.Flags().StringArray("policy", nil, "Path to a CEL policy file or bundle to evaluate against the scan report (repeatable)")
 	scanCmd.Flags().Bool("show-symbols", false, "Show symbol hints (OSV imports) in text output")
 	scanCmd.Flags().Bool("show-db-info", false, "Show database-specific metadata (e.g., review_status) in text output")

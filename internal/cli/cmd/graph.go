@@ -12,12 +12,12 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"google.golang.org/protobuf/encoding/protojson"
 
+	"github.com/spf13/cobra"
 	graphv1 "github.com/temporalio/deputy/gen/deputy/graph/v1"
 	"github.com/temporalio/deputy/internal/cli/flags"
 	"github.com/temporalio/deputy/internal/dependency/graph"
 	"github.com/temporalio/deputy/internal/services"
 	ui "github.com/temporalio/deputy/internal/ui"
-	"github.com/spf13/cobra"
 )
 
 // GraphFormat represents supported graph output formats.
@@ -154,11 +154,12 @@ OUTPUT FORMATS:
 			req := &graphv1.BuildGraphRequest{
 				Target: target,
 				Options: &graphv1.GraphOptions{
-					Ecosystems: normalizeEcosystems(ecos),
-					Ref:        ref,
-					UseProxy:   true,
-					UseGit:     true,
-					Extended:   extended,
+					Ecosystems:   normalizeEcosystems(ecos),
+					ExcludePaths: excludePathsFromCmd(cmd),
+					Ref:          ref,
+					UseProxy:     true,
+					UseGit:       true,
+					Extended:     extended,
 				},
 			}
 
@@ -249,6 +250,7 @@ OUTPUT FORMATS:
 
 	cmd.Flags().StringVar(&ref, "ref", "HEAD", "Git reference (commit, tag, branch)")
 	cmd.Flags().StringSliceVar(&ecos, "ecosystems", []string{"all"}, "Ecosystems to include")
+	addExcludePathFlag(cmd)
 	cmd.Flags().StringVarP(&format, "format", "f", "text", "Output format: text | json | dot | mermaid | d3")
 	cmd.Flags().StringVarP(&outPath, "output", "o", "-", "Output file path or '-' for stdout")
 	cmd.Flags().IntVarP(&maxDepth, "depth", "d", -1, "Maximum depth to display (-1 for unlimited)")
@@ -328,10 +330,11 @@ Similar to 'go mod why' but works across all ecosystems.`,
 			buildReq := &graphv1.BuildGraphRequest{
 				Target: target,
 				Options: &graphv1.GraphOptions{
-					Ecosystems: normalizeEcosystems(ecos),
-					Ref:        ref,
-					UseProxy:   true,
-					UseGit:     true,
+					Ecosystems:   normalizeEcosystems(ecos),
+					ExcludePaths: excludePathsFromCmd(cmd),
+					Ref:          ref,
+					UseProxy:     true,
+					UseGit:       true,
 				},
 			}
 
@@ -392,6 +395,7 @@ Similar to 'go mod why' but works across all ecosystems.`,
 
 	cmd.Flags().StringVar(&ref, "ref", "HEAD", "Git reference (commit, tag, branch)")
 	cmd.Flags().StringSliceVar(&ecos, "ecosystems", []string{"all"}, "Ecosystems to include")
+	addExcludePathFlag(cmd)
 	cmd.Flags().BoolVarP(&all, "all", "a", false, "Show all dependency paths (not just shortest)")
 	cmd.Flags().BoolVar(&jsonOut, "json", false, "Output as JSON")
 	cmd.Flags().BoolVarP(&listOnly, "list", "l", false, "List all matching packages (no path analysis)")
@@ -846,7 +850,6 @@ func renderChildren(w io.Writer, children []*pathTreeNode, prefix string) {
 	}
 }
 
-
 // Graph output styles - defined here for consistency across graph commands.
 // Designed for visual hierarchy: header stands out, tree fades into background,
 // target package highlighted at leaf nodes.
@@ -1280,10 +1283,11 @@ impact of upgrading or removing a package.`,
 			req := &graphv1.BuildGraphRequest{
 				Target: target,
 				Options: &graphv1.GraphOptions{
-					Ecosystems: normalizeEcosystems(ecos),
-					Ref:        ref,
-					UseProxy:   true,
-					UseGit:     true,
+					Ecosystems:   normalizeEcosystems(ecos),
+					ExcludePaths: excludePathsFromCmd(cmd),
+					Ref:          ref,
+					UseProxy:     true,
+					UseGit:       true,
 				},
 			}
 
@@ -1377,6 +1381,7 @@ impact of upgrading or removing a package.`,
 
 	cmd.Flags().StringVar(&ref, "ref", "HEAD", "Git reference (commit, tag, branch)")
 	cmd.Flags().StringSliceVar(&ecos, "ecosystems", []string{"all"}, "Ecosystems to include")
+	addExcludePathFlag(cmd)
 	cmd.Flags().BoolVar(&jsonOut, "json", false, "Output as JSON")
 
 	parent.AddCommand(cmd)

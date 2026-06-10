@@ -120,6 +120,11 @@ message ScanOptions {
   // (via --no-verify-fixes) for offline scans, falling back to trusting
   // advisory-reported fixed versions verbatim. Default false (verification on).
   bool disable_fix_verification = 12;
+
+  // ExcludePaths lists glob patterns for directory paths to skip during the
+  // filesystem walk (e.g., ".bin/**", "**/testdata"). Matching subtrees are
+  // never inventoried. Patterns use '/' separators; '**' matches across them.
+  repeated string exclude_paths = 13 [(buf.validate.field).repeated = {max_items: 100, items: {string: {max_len: 256}}}];
 }
 
 // TargetHint disambiguates the target type when auto-detection is insufficient.

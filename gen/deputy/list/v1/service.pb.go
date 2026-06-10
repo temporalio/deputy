@@ -94,7 +94,10 @@ type ListOptions struct {
 	// Maximum length accommodates SHA-256 commit hashes and long branch names.
 	Ref string `protobuf:"bytes,4,opt,name=ref,proto3" json:"ref,omitempty"`
 	// Platform specifies target platform for container images.
-	Platform      string `protobuf:"bytes,5,opt,name=platform,proto3" json:"platform,omitempty"`
+	Platform string `protobuf:"bytes,5,opt,name=platform,proto3" json:"platform,omitempty"`
+	// ExcludePaths lists glob patterns for directory paths to skip during the
+	// filesystem walk (e.g., ".bin/**"). Matching subtrees are never inventoried.
+	ExcludePaths  []string `protobuf:"bytes,6,rep,name=exclude_paths,json=excludePaths,proto3" json:"exclude_paths,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -162,6 +165,13 @@ func (x *ListOptions) GetPlatform() string {
 		return x.Platform
 	}
 	return ""
+}
+
+func (x *ListOptions) GetExcludePaths() []string {
+	if x != nil {
+		return x.ExcludePaths
+	}
+	return nil
 }
 
 // ListPackagesResponse contains enumerated packages.
@@ -473,7 +483,7 @@ const file_deputy_list_v1_service_proto_rawDesc = "" +
 	"\x1cdeputy/list/v1/service.proto\x12\x0edeputy.list.v1\x1a\x1bbuf/validate/validate.proto\x1a\x1ddeputy/target/v1/target.proto\x1a%deputy/dependency/v1/dependency.proto\"n\n" +
 	"\x13ListPackagesRequest\x12 \n" +
 	"\x06target\x18\x01 \x01(\tB\b\xbaH\x05r\x03\x18\x80 R\x06target\x125\n" +
-	"\aoptions\x18\x02 \x01(\v2\x1b.deputy.list.v1.ListOptionsR\aoptions\"\xca\x01\n" +
+	"\aoptions\x18\x02 \x01(\v2\x1b.deputy.list.v1.ListOptionsR\aoptions\"\x80\x02\n" +
 	"\vListOptions\x12\x1f\n" +
 	"\vonly_direct\x18\x01 \x01(\bR\n" +
 	"onlyDirect\x12.\n" +
@@ -482,7 +492,8 @@ const file_deputy_list_v1_service_proto_rawDesc = "" +
 	"ecosystems\x12)\n" +
 	"\x10include_licenses\x18\x03 \x01(\bR\x0fincludeLicenses\x12\x1a\n" +
 	"\x03ref\x18\x04 \x01(\tB\b\xbaH\x05r\x03\x18\x80\x02R\x03ref\x12#\n" +
-	"\bplatform\x18\x05 \x01(\tB\a\xbaH\x04r\x02\x18@R\bplatform\"\xb4\x01\n" +
+	"\bplatform\x18\x05 \x01(\tB\a\xbaH\x04r\x02\x18@R\bplatform\x124\n" +
+	"\rexclude_paths\x18\x06 \x03(\tB\x0f\xbaH\f\x92\x01\t\x10d\"\x05r\x03\x18\x80\x02R\fexcludePaths\"\xb4\x01\n" +
 	"\x14ListPackagesResponse\x120\n" +
 	"\x06target\x18\x01 \x01(\v2\x18.deputy.target.v1.TargetR\x06target\x129\n" +
 	"\bpackages\x18\x02 \x03(\v2\x1d.deputy.dependency.v1.PackageR\bpackages\x12/\n" +

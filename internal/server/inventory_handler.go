@@ -97,6 +97,7 @@ func (h *InventoryHandler) CollectInventory(
 	if req.Msg.GetOptions() != nil {
 		opts.Ecosystems = req.Msg.Options.GetEcosystems()
 		opts.Platform = req.Msg.Options.GetPlatform()
+		opts.ExcludePaths = req.Msg.Options.GetExcludePaths()
 	}
 
 	// Determine ref
@@ -224,6 +225,7 @@ func (h *InventoryHandler) StreamCollectInventory(
 	if req.Msg.GetOptions() != nil {
 		opts.Ecosystems = req.Msg.Options.GetEcosystems()
 		opts.Platform = req.Msg.Options.GetPlatform()
+		opts.ExcludePaths = req.Msg.Options.GetExcludePaths()
 	}
 
 	ref := ""
@@ -427,12 +429,12 @@ func (h *InventoryHandler) routeCollection(ctx context.Context, target, ref stri
 		if opts.Platform != "" {
 			targetOpts["platform"] = opts.Platform
 		}
-		return inventory.CollectContainerImage(ctx, target, targetOpts, inventory.Options{Ecosystems: opts.Ecosystems})
+		return inventory.CollectContainerImage(ctx, target, targetOpts, inventory.Options{Ecosystems: opts.Ecosystems, ExcludePaths: opts.ExcludePaths})
 
 	case targets.KindDockerfile:
-		return inventory.CollectDockerfile(ctx, target, inventory.Options{Ecosystems: opts.Ecosystems})
+		return inventory.CollectDockerfile(ctx, target, inventory.Options{Ecosystems: opts.Ecosystems, ExcludePaths: opts.ExcludePaths})
 
 	default:
-		return inventory.CollectRepository(ctx, target, ref, refProvided, inventory.Options{Ecosystems: opts.Ecosystems})
+		return inventory.CollectRepository(ctx, target, ref, refProvided, inventory.Options{Ecosystems: opts.Ecosystems, ExcludePaths: opts.ExcludePaths})
 	}
 }

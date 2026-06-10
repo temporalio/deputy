@@ -2,6 +2,7 @@ syntax = "proto3";
 
 package deputy.diff.v1;
 
+import "buf/validate/validate.proto";
 import "google/protobuf/timestamp.proto";
 import "deputy/target/v1/target.proto";
 import "deputy/dependency/v1/dependency.proto";
@@ -75,6 +76,10 @@ message DiffOptions {
 
   // TargetTargetHint provides disambiguation for the target target.
   deputy.target.v1.TargetKind target_target_hint = 5;
+
+  // ExcludePaths lists glob patterns for directory paths to skip during the
+  // filesystem walk (e.g., ".bin/**"). Matching subtrees are never inventoried.
+  repeated string exclude_paths = 6 [(buf.validate.field).repeated = {max_items: 100, items: {string: {max_len: 256}}}];
 }
 
 // DiffPackagesResponse contains the package differences.

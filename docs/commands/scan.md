@@ -76,6 +76,7 @@ can plug into the same scan flow as providers are added.
 | `--as-of` | | | Historical view up to this date (implies `--published-before`) |
 | `--policy` | | | CEL policy file(s) to evaluate (repeatable) |
 | `--ecosystems` | `-e` | all | Limit to specific ecosystems (see [supported ecosystems](#supported-ecosystems)) |
+| `--exclude-path` | | | Directory glob to skip during the walk (repeatable; e.g. `.bin/**`). Unioned with `scan.exclude_paths` from config. A slash-less name matches at any depth; a slashed path is anchored to the scan root |
 | `--enrich` | | `false` | Enrich with EPSS scores and KEV status (requires network) |
 | `--with-graph` | | `false` | Build dependency graph to show paths to vulnerable packages |
 | `--secrets` | | `false` | Scan for leaked secrets and credentials alongside vulnerabilities |
@@ -189,6 +190,19 @@ $ deputy scan --filter 'vulnerability.advisory.severity.level in [severity.criti
 | `vulnerability.package.version` | `string` | Package version |
 | `vulnerability.package.ecosystem` | `string` | Package ecosystem |
 | `vulnerability.package.direct` | `bool` | Whether it's a direct dependency |
+| `vulnerability.package.purl` | `string` | Package URL (PURL) |
+| `vulnerability.package.locations` | `list(string)` | File paths where the package was discovered |
+
+`package.locations` enables path-aware filtering without removing a path from the
+scan entirely. For example, keep a finding only when it is not *exclusively* under
+a vendored tool directory:
+
+```bash
+$ deputy scan --filter "!vulnerability.package.locations.all(p, p.startsWith('.bin/'))"
+```
+
+To drop such paths from the scan altogether (so they never appear), use
+`--exclude-path` / `scan.exclude_paths` instead.
 
 **Severity constants:**
 - `severity.critical`

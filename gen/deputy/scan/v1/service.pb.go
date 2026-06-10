@@ -275,8 +275,12 @@ type ScanOptions struct {
 	// (via --no-verify-fixes) for offline scans, falling back to trusting
 	// advisory-reported fixed versions verbatim. Default false (verification on).
 	DisableFixVerification bool `protobuf:"varint,12,opt,name=disable_fix_verification,json=disableFixVerification,proto3" json:"disable_fix_verification,omitempty"`
-	unknownFields          protoimpl.UnknownFields
-	sizeCache              protoimpl.SizeCache
+	// ExcludePaths lists glob patterns for directory paths to skip during the
+	// filesystem walk (e.g., ".bin/**", "**/testdata"). Matching subtrees are
+	// never inventoried. Patterns use '/' separators; '**' matches across them.
+	ExcludePaths  []string `protobuf:"bytes,13,rep,name=exclude_paths,json=excludePaths,proto3" json:"exclude_paths,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *ScanOptions) Reset() {
@@ -391,6 +395,13 @@ func (x *ScanOptions) GetDisableFixVerification() bool {
 		return x.DisableFixVerification
 	}
 	return false
+}
+
+func (x *ScanOptions) GetExcludePaths() []string {
+	if x != nil {
+		return x.ExcludePaths
+	}
+	return nil
 }
 
 // TargetHint disambiguates the target type when auto-detection is insufficient.
@@ -1376,7 +1387,7 @@ const file_deputy_scan_v1_service_proto_rawDesc = "" +
 	"\aoptions\x18\x02 \x01(\v2\x1b.deputy.scan.v1.ScanOptionsR\aoptions\"l\n" +
 	"\x11StreamScanRequest\x12 \n" +
 	"\x06target\x18\x01 \x01(\tB\b\xbaH\x05r\x03\x18\x80 R\x06target\x125\n" +
-	"\aoptions\x18\x02 \x01(\v2\x1b.deputy.scan.v1.ScanOptionsR\aoptions\"\x93\x05\n" +
+	"\aoptions\x18\x02 \x01(\v2\x1b.deputy.scan.v1.ScanOptionsR\aoptions\"\xc9\x05\n" +
 	"\vScanOptions\x12.\n" +
 	"\n" +
 	"ecosystems\x18\x01 \x03(\tB\x0e\xbaH\v\x92\x01\b\x102\"\x04r\x02\x18@R\n" +
@@ -1393,7 +1404,8 @@ const file_deputy_scan_v1_service_proto_rawDesc = "" +
 	" \x01(\v2\x1a.deputy.scan.v1.TargetHintR\n" +
 	"targetHint\x12*\n" +
 	"\x11detect_base_image\x18\v \x01(\bR\x0fdetectBaseImage\x128\n" +
-	"\x18disable_fix_verification\x18\f \x01(\bR\x16disableFixVerification\"\xa2\x01\n" +
+	"\x18disable_fix_verification\x18\f \x01(\bR\x16disableFixVerification\x124\n" +
+	"\rexclude_paths\x18\r \x03(\tB\x0f\xbaH\f\x92\x01\t\x10d\"\x05r\x03\x18\x80\x02R\fexcludePaths\"\xa2\x01\n" +
 	"\n" +
 	"TargetHint\x120\n" +
 	"\x04kind\x18\x01 \x01(\x0e2\x1c.deputy.target.v1.TargetKindR\x04kind\x12b\n" +

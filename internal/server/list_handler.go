@@ -139,6 +139,7 @@ func (h *ListHandler) ListPackages(
 	opts := inventory.Options{}
 	if req.Msg.GetOptions() != nil {
 		opts.Ecosystems = req.Msg.Options.GetEcosystems()
+		opts.ExcludePaths = req.Msg.Options.GetExcludePaths()
 	}
 
 	ref := ""

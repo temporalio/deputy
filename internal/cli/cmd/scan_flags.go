@@ -4,18 +4,20 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strings"
 	"time"
 
 	"google.golang.org/protobuf/types/known/timestamppb"
 
+	"github.com/spf13/cobra"
 	scanv1 "github.com/temporalio/deputy/gen/deputy/scan/v1"
 	targetv1 "github.com/temporalio/deputy/gen/deputy/target/v1"
 	"github.com/temporalio/deputy/internal/cli/flags"
+	"github.com/temporalio/deputy/internal/config"
 	"github.com/temporalio/deputy/internal/ignore"
 	inv "github.com/temporalio/deputy/internal/inventory"
 	"github.com/temporalio/deputy/internal/report/render"
 	"github.com/temporalio/deputy/internal/scanning"
-	"github.com/spf13/cobra"
 )
 
 // Output format constants used across CLI commands.
@@ -65,6 +67,11 @@ type scanFlags struct {
 	Ecosystems []string
 	Ref        string
 
+	// ExcludePaths are directory-path glob patterns to skip during the walk.
+	// Populated from the --exclude-path flag unioned with the config file's
+	// scan.exclude_paths.
+	ExcludePaths []string
+
 	// SBOM-specific
 	InputFormat string
 
@@ -107,7 +114,7 @@ func (f scanFlags) displayOptionsWithResult(result scanning.Result) render.Vulne
 
 // scanOptions returns the inventory scan options derived from scan flags.
 func (f scanFlags) scanOptions() inv.ScanOptions {
-	return inv.ScanOptions{Ecosystems: f.Ecosystems}
+	return inv.ScanOptions{Ecosystems: f.Ecosystems, ExcludePaths: f.ExcludePaths}
 }
 
 // parsePublishedTimes parses the published time filters and returns before/after times.
@@ -144,6 +151,10 @@ func extractScanFlags(cmd *cobra.Command) scanFlags {
 	f.Ecosystems, _ = cmd.Flags().GetStringSlice("ecosystems")
 	f.Ref, _ = cmd.Flags().GetString("ref")
 
+	// Path exclusions: config file's scan.exclude_paths unioned additively with
+	// any --exclude-path flags (a flag never silently drops the committed list).
+	f.ExcludePaths = excludePathsFromCmd(cmd)
+
 	// SBOM-specific
 	f.InputFormat, _ = cmd.Flags().GetString("input-format")
 
@@ -165,6 +176,56 @@ func extractScanFlags(cmd *cobra.Command) scanFlags {
 	f.NoVerifyFixes, _ = cmd.Flags().GetBool("no-verify-fixes")
 
 	return f
+}
+
+// addExcludePathFlag registers the shared --exclude-path flag on a command.
+// Used by scan-family and the other source-walking commands (diff, list,
+// inventory, graph) so the flag is spelled and documented identically everywhere.
+func addExcludePathFlag(cmd *cobra.Command) {
+	cmd.Flags().StringArray("exclude-path", nil,
+		"Glob of directory paths to skip during the walk (repeatable; e.g. '.bin/**'). Unioned with scan.exclude_paths from config")
+}
+
+// excludePathsFromCmd returns the effective path exclusions for a command: the
+// config file's scan.exclude_paths unioned with any --exclude-path flags.
+func excludePathsFromCmd(cmd *cobra.Command) []string {
+	flagExcludes, _ := cmd.Flags().GetStringArray("exclude-path")
+	return unionStrings(discoverConfigExcludePaths(), flagExcludes)
+}
+
+// discoverConfigExcludePaths returns scan.exclude_paths from an auto-discovered
+// .deputy.yaml (relative to the current working directory, then home). It is
+// best-effort: a missing or unparseable config yields no patterns rather than a
+// hard error, so a malformed config never blocks a scan.
+func discoverConfigExcludePaths() []string {
+	path := config.FindConfigFile()
+	if path == "" {
+		return nil
+	}
+	cfg, err := config.NewLoader(path).Load()
+	if err != nil {
+		return nil
+	}
+	return cfg.Scan.ExcludePaths
+}
+
+// unionStrings concatenates string slices, trimming whitespace and dropping
+// empties and duplicates while preserving first-seen order. Used to merge
+// config-file and CLI-flag exclusion patterns additively.
+func unionStrings(lists ...[]string) []string {
+	seen := map[string]bool{}
+	var out []string
+	for _, list := range lists {
+		for _, s := range list {
+			s = strings.TrimSpace(s)
+			if s == "" || seen[s] {
+				continue
+			}
+			seen[s] = true
+			out = append(out, s)
+		}
+	}
+	return out
 }
 
 // outputWriter represents a writer that may need to be closed.
@@ -238,6 +299,7 @@ func (f scanFlags) toScanRequest(target string, errW io.Writer) *scanv1.ScanRequ
 		IncludeSecrets:         f.Secrets,
 		DetectBaseImage:        f.DetectBaseImage,
 		DisableFixVerification: f.NoVerifyFixes,
+		ExcludePaths:           f.ExcludePaths,
 	}
 
 	// Set published time filters

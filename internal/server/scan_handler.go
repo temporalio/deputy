@@ -93,6 +93,7 @@ func (h *ScanHandler) Scan(
 		opts.Ecosystems = req.Msg.Options.Ecosystems
 		opts.Platform = req.Msg.Options.Platform
 		opts.DetectBaseImage = req.Msg.Options.DetectBaseImage
+		opts.ExcludePaths = req.Msg.Options.GetExcludePaths()
 		opts.VerifyFixes = !req.Msg.Options.DisableFixVerification
 	}
 
@@ -248,6 +249,7 @@ func (h *ScanHandler) StreamScan(
 		opts.Ecosystems = req.Msg.Options.Ecosystems
 		opts.Platform = req.Msg.Options.Platform
 		opts.DetectBaseImage = req.Msg.Options.DetectBaseImage
+		opts.ExcludePaths = req.Msg.Options.GetExcludePaths()
 		opts.VerifyFixes = !req.Msg.Options.DisableFixVerification
 	}
 

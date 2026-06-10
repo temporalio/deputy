@@ -264,6 +264,13 @@ type ScanConfig struct {
 
 	// SkipCache disables result caching.
 	SkipCache bool `yaml:"skip_cache" json:"skip_cache"`
+
+	// ExcludePaths lists glob patterns for directory paths to skip during the
+	// filesystem walk (e.g., ".bin/**", "**/testdata"). Matching subtrees are
+	// never inventoried, so they are absent from scan, diff, list, and SBOM
+	// output. Honored by all commands that walk the source tree; the
+	// --exclude-path flag is unioned with this list.
+	ExcludePaths []string `yaml:"exclude_paths,omitempty" json:"exclude_paths,omitempty"`
 }
 
 // PolicyConfig configures policy evaluation.

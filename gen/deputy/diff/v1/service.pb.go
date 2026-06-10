@@ -7,6 +7,7 @@
 package diffv1
 
 import (
+	_ "buf.build/gen/go/bufbuild/protovalidate/protocolbuffers/go/buf/validate"
 	v14 "github.com/temporalio/deputy/gen/deputy/container/v1"
 	v11 "github.com/temporalio/deputy/gen/deputy/dependency/v1"
 	v12 "github.com/temporalio/deputy/gen/deputy/scan/v1"
@@ -294,8 +295,11 @@ type DiffOptions struct {
 	BaseTargetHint v1.TargetKind `protobuf:"varint,4,opt,name=base_target_hint,json=baseTargetHint,proto3,enum=deputy.target.v1.TargetKind" json:"base_target_hint,omitempty"`
 	// TargetTargetHint provides disambiguation for the target target.
 	TargetTargetHint v1.TargetKind `protobuf:"varint,5,opt,name=target_target_hint,json=targetTargetHint,proto3,enum=deputy.target.v1.TargetKind" json:"target_target_hint,omitempty"`
-	unknownFields    protoimpl.UnknownFields
-	sizeCache        protoimpl.SizeCache
+	// ExcludePaths lists glob patterns for directory paths to skip during the
+	// filesystem walk (e.g., ".bin/**"). Matching subtrees are never inventoried.
+	ExcludePaths  []string `protobuf:"bytes,6,rep,name=exclude_paths,json=excludePaths,proto3" json:"exclude_paths,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *DiffOptions) Reset() {
@@ -361,6 +365,13 @@ func (x *DiffOptions) GetTargetTargetHint() v1.TargetKind {
 		return x.TargetTargetHint
 	}
 	return v1.TargetKind(0)
+}
+
+func (x *DiffOptions) GetExcludePaths() []string {
+	if x != nil {
+		return x.ExcludePaths
+	}
+	return nil
 }
 
 // DiffPackagesResponse contains the package differences.
@@ -2284,12 +2295,12 @@ var File_deputy_diff_v1_service_proto protoreflect.FileDescriptor
 
 const file_deputy_diff_v1_service_proto_rawDesc = "" +
 	"\n" +
-	"\x1cdeputy/diff/v1/service.proto\x12\x0edeputy.diff.v1\x1a\x1fgoogle/protobuf/timestamp.proto\x1a\x1ddeputy/target/v1/target.proto\x1a%deputy/dependency/v1/dependency.proto\x1a+deputy/vulnerability/v1/vulnerability.proto\x1a#deputy/container/v1/container.proto\x1a\x1cdeputy/scan/v1/service.proto\"\x92\x01\n" +
+	"\x1cdeputy/diff/v1/service.proto\x12\x0edeputy.diff.v1\x1a\x1bbuf/validate/validate.proto\x1a\x1fgoogle/protobuf/timestamp.proto\x1a\x1ddeputy/target/v1/target.proto\x1a%deputy/dependency/v1/dependency.proto\x1a+deputy/vulnerability/v1/vulnerability.proto\x1a#deputy/container/v1/container.proto\x1a\x1cdeputy/scan/v1/service.proto\"\x92\x01\n" +
 	"\x13DiffPackagesRequest\x12\x1f\n" +
 	"\vbase_target\x18\x01 \x01(\tR\n" +
 	"baseTarget\x12#\n" +
 	"\rtarget_target\x18\x02 \x01(\tR\ftargetTarget\x125\n" +
-	"\aoptions\x18\x03 \x01(\v2\x1b.deputy.diff.v1.DiffOptionsR\aoptions\"\x8c\x02\n" +
+	"\aoptions\x18\x03 \x01(\v2\x1b.deputy.diff.v1.DiffOptionsR\aoptions\"\xc2\x02\n" +
 	"\vDiffOptions\x12\x1e\n" +
 	"\n" +
 	"ecosystems\x18\x01 \x03(\tR\n" +
@@ -2297,7 +2308,8 @@ const file_deputy_diff_v1_service_proto_rawDesc = "" +
 	"\x12include_transitive\x18\x02 \x01(\bR\x11includeTransitive\x12\x1a\n" +
 	"\bplatform\x18\x03 \x01(\tR\bplatform\x12F\n" +
 	"\x10base_target_hint\x18\x04 \x01(\x0e2\x1c.deputy.target.v1.TargetKindR\x0ebaseTargetHint\x12J\n" +
-	"\x12target_target_hint\x18\x05 \x01(\x0e2\x1c.deputy.target.v1.TargetKindR\x10targetTargetHint\"\xd5\x02\n" +
+	"\x12target_target_hint\x18\x05 \x01(\x0e2\x1c.deputy.target.v1.TargetKindR\x10targetTargetHint\x124\n" +
+	"\rexclude_paths\x18\x06 \x03(\tB\x0f\xbaH\f\x92\x01\t\x10d\"\x05r\x03\x18\x80\x02R\fexcludePaths\"\xd5\x02\n" +
 	"\x14DiffPackagesResponse\x129\n" +
 	"\vbase_target\x18\x01 \x01(\v2\x18.deputy.target.v1.TargetR\n" +
 	"baseTarget\x12=\n" +

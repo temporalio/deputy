@@ -51,7 +51,7 @@ func GenerateImage(ctx context.Context, target string, targetOpts map[string]str
 		return Result{}, err
 	}
 
-	pkgs, err := inventory.ScanPackagesContainerImage(ctx, img, inventory.ScanOptions{Ecosystems: opts.Ecosystems})
+	pkgs, err := inventory.ScanPackagesContainerImage(ctx, img, inventory.ScanOptions{Ecosystems: opts.Ecosystems, ExcludePaths: opts.ExcludePaths})
 	if err != nil {
 		otel.SetSpanError(span, err)
 		return Result{}, err
