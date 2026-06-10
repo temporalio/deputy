@@ -10,6 +10,7 @@ import (
 	"sync"
 
 	"golang.org/x/mod/modfile"
+	"golang.org/x/mod/module"
 )
 
 // WorkspaceFileReader adapts a workspace.ReadableFS to the FileReader interface.
@@ -117,8 +118,9 @@ func WithConcurrency(n int) GoResolverOption {
 
 // WithPrivatePatterns sets glob patterns for private module paths.
 // Modules matching any pattern will skip proxy and use Git directly.
-// Patterns support path.Match syntax (e.g., "github.com/mycompany/*").
-// This is similar to the GOPRIVATE environment variable.
+// Patterns use GOPRIVATE matching (module.MatchPrefixPatterns): a pattern
+// matches the module path and all of its sub-paths, so "github.com/mycompany"
+// or "github.com/mycompany/*" also matches "github.com/mycompany/team/repo".
 func WithPrivatePatterns(patterns ...string) GoResolverOption {
 	return func(r *GoResolver) {
 		r.privatePatterns = append(r.privatePatterns, patterns...)
@@ -580,25 +582,29 @@ type filteredProxyFetcher struct {
 }
 
 func (f *filteredProxyFetcher) FetchGoMod(ctx context.Context, modulePath, version string) (*modfile.File, error) {
-	// Skip private modules
-	if !IsPublicModule(modulePath) {
-		return nil, nil
-	}
-	for _, pattern := range f.privatePatterns {
-		if strings.HasPrefix(modulePath, pattern) {
-			return nil, nil
-		}
-		if strings.Contains(pattern, "*") {
-			if matched, _ := path.Match(pattern, modulePath); matched {
-				return nil, nil
-			}
-			prefix := strings.TrimSuffix(pattern, "/*")
-			if prefix != pattern && strings.HasPrefix(modulePath, prefix+"/") {
-				return nil, nil
-			}
-		}
+	if f.isPrivate(modulePath) {
+		return nil, nil // private modules are fetched via Git, not the public proxy
 	}
 	return f.proxy.FetchGoMod(ctx, modulePath, version)
+}
+
+// isPrivate reports whether modulePath should bypass the public proxy because
+// it is not a public module or matches a configured private pattern.
+//
+// Patterns use GOPRIVATE matching (module.MatchPrefixPatterns): a pattern
+// matches the module path and all of its sub-paths, so "github.com/org/*" or
+// "github.com/org" skips deep private modules like "github.com/org/team/repo"
+// without misfiring on a different org such as "github.com/org-other".
+func (f *filteredProxyFetcher) isPrivate(modulePath string) bool {
+	if !IsPublicModule(modulePath) {
+		return true
+	}
+	for _, pattern := range f.privatePatterns {
+		if module.MatchPrefixPatterns(pattern, modulePath) {
+			return true
+		}
+	}
+	return false
 }
 
 // gitModuleFetcherAdapter wraps GitModuleFetcher to implement ModuleGoModFetcher.
