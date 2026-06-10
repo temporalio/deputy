@@ -23,7 +23,7 @@ import (
 )
 
 var (
-	anyType = reflect.TypeOf((*any)(nil)).Elem()
+	anyType = reflect.TypeFor[any]()
 
 	defaultVariableNames = []string{
 		"pkg",

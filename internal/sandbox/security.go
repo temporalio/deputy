@@ -4,7 +4,9 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
+	"maps"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 )
@@ -45,43 +47,43 @@ var DangerousEnvVars = map[string]bool{
 	// Credential leakage prevention
 	// These should never be passed to sandboxed processes to prevent
 	// untrusted code from exfiltrating credentials.
-	"AWS_SECRET_ACCESS_KEY":     true,
-	"AWS_ACCESS_KEY_ID":         true,
-	"AWS_SESSION_TOKEN":         true,
-	"GITHUB_TOKEN":              true,
-	"GH_TOKEN":                  true,
-	"GITLAB_TOKEN":              true,
-	"ANTHROPIC_API_KEY":         true,
-	"OPENAI_API_KEY":            true,
-	"GOOGLE_API_KEY":            true,
-	"AZURE_CLIENT_SECRET":       true,
-	"AZURE_TENANT_ID":           true,
-	"NPM_TOKEN":                 true,
-	"PYPI_TOKEN":                true,
-	"DOCKER_PASSWORD":           true,
-	"DOCKER_AUTH_CONFIG":        true,
-	"REGISTRY_AUTH":             true,
-	"SSH_AUTH_SOCK":             true,
-	"GPG_TTY":                   true,
-	"SLACK_TOKEN":               true,
-	"SLACK_WEBHOOK_URL":         true,
-	"TWILIO_AUTH_TOKEN":         true,
-	"SENDGRID_API_KEY":          true,
-	"STRIPE_SECRET_KEY":         true,
-	"DATABASE_URL":              true,
-	"DATABASE_PASSWORD":         true,
-	"DB_PASSWORD":               true,
-	"MYSQL_PASSWORD":            true,
-	"POSTGRES_PASSWORD":         true,
-	"REDIS_PASSWORD":            true,
-	"MONGODB_URI":               true,
-	"JWT_SECRET":                true,
-	"SECRET_KEY":                true,
-	"ENCRYPTION_KEY":            true,
-	"API_KEY":                   true,
-	"API_SECRET":                true,
-	"PRIVATE_KEY":               true,
-	"SERVICE_ACCOUNT_KEY":       true,
+	"AWS_SECRET_ACCESS_KEY":          true,
+	"AWS_ACCESS_KEY_ID":              true,
+	"AWS_SESSION_TOKEN":              true,
+	"GITHUB_TOKEN":                   true,
+	"GH_TOKEN":                       true,
+	"GITLAB_TOKEN":                   true,
+	"ANTHROPIC_API_KEY":              true,
+	"OPENAI_API_KEY":                 true,
+	"GOOGLE_API_KEY":                 true,
+	"AZURE_CLIENT_SECRET":            true,
+	"AZURE_TENANT_ID":                true,
+	"NPM_TOKEN":                      true,
+	"PYPI_TOKEN":                     true,
+	"DOCKER_PASSWORD":                true,
+	"DOCKER_AUTH_CONFIG":             true,
+	"REGISTRY_AUTH":                  true,
+	"SSH_AUTH_SOCK":                  true,
+	"GPG_TTY":                        true,
+	"SLACK_TOKEN":                    true,
+	"SLACK_WEBHOOK_URL":              true,
+	"TWILIO_AUTH_TOKEN":              true,
+	"SENDGRID_API_KEY":               true,
+	"STRIPE_SECRET_KEY":              true,
+	"DATABASE_URL":                   true,
+	"DATABASE_PASSWORD":              true,
+	"DB_PASSWORD":                    true,
+	"MYSQL_PASSWORD":                 true,
+	"POSTGRES_PASSWORD":              true,
+	"REDIS_PASSWORD":                 true,
+	"MONGODB_URI":                    true,
+	"JWT_SECRET":                     true,
+	"SECRET_KEY":                     true,
+	"ENCRYPTION_KEY":                 true,
+	"API_KEY":                        true,
+	"API_SECRET":                     true,
+	"PRIVATE_KEY":                    true,
+	"SERVICE_ACCOUNT_KEY":            true,
 	"GOOGLE_APPLICATION_CREDENTIALS": true,
 }
 
@@ -125,9 +127,7 @@ func SanitizeEnvironment(hostEnv []string, userEnv map[string]string) (finalEnv 
 	}
 
 	// 2. Apply user-provided variables (overriding host vars)
-	for k, v := range userEnv {
-		safeMap[k] = v
-	}
+	maps.Copy(safeMap, userEnv)
 
 	// 3. Filter out dangerous variables
 	// We do this last to ensure even user-provided vars are checked against the blocklist
@@ -215,18 +215,18 @@ func ValidatePath(path string) error {
 		"/etc/rc.local",
 
 		// Kernel and hardware access
-		"/proc/1",          // Host init process
-		"/proc/kcore",      // Kernel memory
-		"/proc/kmem",       // Kernel memory
-		"/proc/kallsyms",   // Kernel symbols
-		"/proc/modules",    // Kernel modules
-		"/sys/firmware",    // UEFI/BIOS
-		"/sys/kernel",      // Kernel configuration
-		"/sys/module",      // Kernel modules
-		"/dev/mem",         // Physical memory
-		"/dev/kmem",        // Kernel memory
-		"/dev/port",        // I/O ports
-		"/boot",            // Boot configuration
+		"/proc/1",        // Host init process
+		"/proc/kcore",    // Kernel memory
+		"/proc/kmem",     // Kernel memory
+		"/proc/kallsyms", // Kernel symbols
+		"/proc/modules",  // Kernel modules
+		"/sys/firmware",  // UEFI/BIOS
+		"/sys/kernel",    // Kernel configuration
+		"/sys/module",    // Kernel modules
+		"/dev/mem",       // Physical memory
+		"/dev/kmem",      // Kernel memory
+		"/dev/port",      // I/O ports
+		"/boot",          // Boot configuration
 
 		// Container/virtualization escape vectors
 		"/var/run/docker.sock",
@@ -283,10 +283,10 @@ var DangerousBinaries = map[string]bool{
 	"bpftrace": true,
 
 	// Kernel module manipulation
-	"insmod":  true,
-	"rmmod":   true,
+	"insmod":   true,
+	"rmmod":    true,
 	"modprobe": true,
-	"depmod":  true,
+	"depmod":   true,
 
 	// Direct hardware/memory access
 	"kexec":   true,
@@ -303,13 +303,13 @@ var DangerousBinaries = map[string]bool{
 	"runc":       true,
 
 	// System administration
-	"init":     true,
+	"init":      true,
 	"systemctl": true,
-	"service":  true,
-	"reboot":   true,
-	"shutdown": true,
-	"halt":     true,
-	"poweroff": true,
+	"service":   true,
+	"reboot":    true,
+	"shutdown":  true,
+	"halt":      true,
+	"poweroff":  true,
 }
 
 // ValidateCommand checks if a command is safe to execute.
@@ -346,10 +346,8 @@ func ValidateCommand(cmd []string) error {
 			"/usr/local/bin/docker",
 		}
 
-		for _, dangerous := range dangerousPaths {
-			if executable == dangerous {
-				return fmt.Errorf("execution of %s is not allowed in sandbox", executable)
-			}
+		if slices.Contains(dangerousPaths, executable) {
+			return fmt.Errorf("execution of %s is not allowed in sandbox", executable)
 		}
 	}
 

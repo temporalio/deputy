@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"fmt"
+	"maps"
 	"strings"
 
 	"connectrpc.com/connect"
@@ -254,12 +255,8 @@ func (h *DiffHandler) DiffVulnerabilities(
 
 	// Merge advisories from both scans
 	mergedAdvisories := make(map[string]*vulnerabilityv1.Advisory)
-	for id, adv := range baseExec.Result.Advisories {
-		mergedAdvisories[id] = adv
-	}
-	for id, adv := range targetExec.Result.Advisories {
-		mergedAdvisories[id] = adv
-	}
+	maps.Copy(mergedAdvisories, baseExec.Result.Advisories)
+	maps.Copy(mergedAdvisories, targetExec.Result.Advisories)
 
 	// Build response
 	response := &diffv1.DiffVulnerabilitiesResponse{

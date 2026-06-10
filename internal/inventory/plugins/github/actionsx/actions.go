@@ -197,8 +197,8 @@ func (s *parseState) parseActionManifest(ctx context.Context, filePath string, c
 	case "docker":
 		image, _ := asString(runsMap["image"])
 		image = strings.TrimSpace(image)
-		if strings.HasPrefix(image, "docker://") {
-			return []*extractor.Package{dockerPackageFromRef(strings.TrimPrefix(image, "docker://"), filePath)}, nil
+		if after, ok0 := strings.CutPrefix(image, "docker://"); ok0 {
+			return []*extractor.Package{dockerPackageFromRef(after, filePath)}, nil
 		}
 		// Local Dockerfile; no external dependency.
 		return nil, nil
@@ -214,8 +214,8 @@ func (s *parseState) handleUses(ctx context.Context, parentPath string, usesStr 
 	if usesStr == "" {
 		return nil, nil
 	}
-	if strings.HasPrefix(usesStr, "docker://") {
-		return []*extractor.Package{dockerPackageFromRef(strings.TrimPrefix(usesStr, "docker://"), parentPath)}, nil
+	if after, ok := strings.CutPrefix(usesStr, "docker://"); ok {
+		return []*extractor.Package{dockerPackageFromRef(after, parentPath)}, nil
 	}
 
 	// Local action or reusable workflow.
@@ -320,9 +320,9 @@ func splitDockerRef(ref string) (name, version string, hasDigest bool) {
 	if ref == "" {
 		return "", "", false
 	}
-	if at := strings.Index(ref, "@"); at >= 0 {
-		name = ref[:at]
-		version = ref[at+1:]
+	if before, after, ok := strings.Cut(ref, "@"); ok {
+		name = before
+		version = after
 		return strings.TrimSpace(name), strings.TrimSpace(version), true
 	}
 	// Find tag after last slash.

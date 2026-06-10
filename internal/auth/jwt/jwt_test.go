@@ -9,6 +9,7 @@ import (
 	"encoding/pem"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -526,13 +527,7 @@ func TestDefaultAllowedAlgorithms_NoSymmetricOrNone(t *testing.T) {
 	// Verify we have expected secure algorithms
 	expectedSecure := []string{"RS256", "ES256", "EdDSA", "PS256"}
 	for _, expected := range expectedSecure {
-		found := false
-		for _, allowed := range DefaultAllowedAlgorithms {
-			if allowed == expected {
-				found = true
-				break
-			}
-		}
+		found := slices.Contains(DefaultAllowedAlgorithms, expected)
 		if !found {
 			t.Errorf("expected secure algorithm %q not in DefaultAllowedAlgorithms", expected)
 		}

@@ -17,10 +17,10 @@ import (
 	"time"
 
 	"github.com/google/go-containerregistry/pkg/name"
+	"github.com/spf13/cobra"
 	deputyerrors "github.com/temporalio/deputy/internal/errors"
 	"github.com/temporalio/deputy/internal/proxy"
 	"github.com/temporalio/deputy/internal/ui"
-	"github.com/spf13/cobra"
 )
 
 // registerProxyExecCommands registers the proxy execution commands for supported ecosystems.
@@ -575,11 +575,12 @@ func wrapText(text string, width int) string {
 	}
 
 	// First line as-is, continuation lines indented to align after "→ " (4 spaces: 2 indent + 2 for arrow+space)
-	result := lines[0]
+	var result strings.Builder
+	result.WriteString(lines[0])
 	for i := 1; i < len(lines); i++ {
-		result += "\n    " + lines[i]
+		result.WriteString("\n    " + lines[i])
 	}
-	return result
+	return result.String()
 }
 
 // printSummaryReport emits a summary of blocked requests.

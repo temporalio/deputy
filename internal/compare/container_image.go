@@ -432,7 +432,7 @@ func AnalyzeLayerDiff(base, target *ImageInput) *LayerDiffAnalysis {
 
 	// Build layer changes
 	maxLayers := max(len(base.History), len(target.History))
-	for i := 0; i < maxLayers; i++ {
+	for i := range maxLayers {
 		lc := LayerChange{Index: i}
 
 		var baseCmd, targetCmd string

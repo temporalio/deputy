@@ -211,7 +211,7 @@ func FuzzGenerateExecutionID(f *testing.F) {
 
 		// IDs should be unique (generate multiple and check)
 		ids := make(map[string]bool)
-		for i := 0; i < 100; i++ {
+		for range 100 {
 			newID := GenerateExecutionID(prefix)
 			if ids[newID] {
 				t.Errorf("GenerateExecutionID produced duplicate ID: %q", newID)

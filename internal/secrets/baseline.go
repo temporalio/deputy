@@ -13,6 +13,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -73,7 +74,7 @@ type BaselineEntry struct {
 	// IsVerified indicates if the hash was verified against the file.
 	IsVerified bool `json:"is_verified,omitempty"`
 	// AddedAt is when this entry was added to the baseline.
-	AddedAt time.Time `json:"added_at,omitempty"`
+	AddedAt time.Time `json:"added_at"`
 }
 
 // NewBaseline creates a new empty baseline.
@@ -549,20 +550,16 @@ func (a *Allowlist) ShouldIgnoreFile(path string) bool {
 // ShouldIgnoreFinding checks if a finding should be ignored.
 func (a *Allowlist) ShouldIgnoreFinding(f Finding) bool {
 	// Check type
-	for _, t := range a.Types {
-		if string(f.Type) == t {
-			return true
-		}
+	if slices.Contains(a.Types, string(f.Type)) {
+		return true
 	}
 
 	// Check hash
 	if f.Value != "" {
 		h := sha256.Sum256([]byte(f.Value))
 		hash := hex.EncodeToString(h[:])
-		for _, allowedHash := range a.Hashes {
-			if hash == allowedHash {
-				return true
-			}
+		if slices.Contains(a.Hashes, hash) {
+			return true
 		}
 	}
 
@@ -701,13 +698,7 @@ func isBinaryFileCheck(fsys fs.FS, path string) bool {
 	}
 
 	// Check for null bytes (common in binary files)
-	for _, b := range buf[:n] {
-		if b == 0 {
-			return true
-		}
-	}
-
-	return false
+	return slices.Contains(buf[:n], 0)
 }
 
 // BaselineComment represents a special comment in source code that marks

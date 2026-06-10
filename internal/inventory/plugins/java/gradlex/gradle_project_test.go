@@ -4,6 +4,7 @@ import (
 	"context"
 	"io"
 	"io/fs"
+	"slices"
 	"testing"
 	"testing/fstest"
 
@@ -90,10 +91,10 @@ dependencies {
 	}
 
 	expected := map[string]string{
-		"io.grpc:grpc-api":                    "1.58.1",
-		"com.google.guava:guava":              "32.0.1-jre",
+		"io.grpc:grpc-api":                        "1.58.1",
+		"com.google.guava:guava":                  "32.0.1-jre",
 		"com.fasterxml.jackson.core:jackson-core": "2.15.4",
-		"junit:junit":                         "4.13.2",
+		"junit:junit":                             "4.13.2",
 	}
 
 	for name, version := range expected {
@@ -298,8 +299,8 @@ func TestParseSettingsGradle(t *testing.T) {
 		expectedModules []string
 	}{
 		{
-			name: "simple project",
-			content: `rootProject.name = 'my-project'`,
+			name:            "simple project",
+			content:         `rootProject.name = 'my-project'`,
 			expectedName:    "my-project",
 			expectedModules: nil,
 		},
@@ -342,13 +343,7 @@ include("module-b")
 					t.Error("expected IsMultiModule() to be true")
 				}
 				for _, mod := range tt.expectedModules {
-					found := false
-					for _, inc := range settings.Includes {
-						if inc == mod {
-							found = true
-							break
-						}
-					}
+					found := slices.Contains(settings.Includes, mod)
 					if !found {
 						t.Errorf("expected module %q in includes", mod)
 					}
@@ -363,8 +358,8 @@ type testFileAPI struct {
 	path string
 }
 
-func (f *testFileAPI) Path() string { return f.path }
-func (f *testFileAPI) Stat() (fs.FileInfo, error) { return nil, nil }
+func (f *testFileAPI) Path() string                 { return f.path }
+func (f *testFileAPI) Stat() (fs.FileInfo, error)   { return nil, nil }
 func (f *testFileAPI) Open() (io.ReadCloser, error) { return nil, nil }
 
 // mapFSAdapter wraps fstest.MapFS to implement scalibrfs.FS.

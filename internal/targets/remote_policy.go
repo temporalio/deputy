@@ -66,8 +66,8 @@ func (p *RemoteTargetPolicy) allowsHost(host string) bool {
 		if strings.HasPrefix(entry, "*.") {
 			entry = strings.TrimPrefix(entry, "*")
 		}
-		if strings.HasPrefix(entry, ".") {
-			if normalized == strings.TrimPrefix(entry, ".") {
+		if after, ok := strings.CutPrefix(entry, "."); ok {
+			if normalized == after {
 				return true
 			}
 			if strings.HasSuffix(normalized, entry) {

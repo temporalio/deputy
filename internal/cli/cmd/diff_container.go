@@ -91,8 +91,8 @@ func looksLikeExplicitContainerImage(ref string) bool {
 	}
 
 	// Has a registry domain (contains . before first /)
-	if slashIdx := strings.Index(ref, "/"); slashIdx != -1 {
-		host := ref[:slashIdx]
+	if before, _, ok := strings.Cut(ref, "/"); ok {
+		host := before
 		// Registry domains have dots (ghcr.io, gcr.io, docker.io) or ports (localhost:5000)
 		if strings.Contains(host, ".") || strings.Contains(host, ":") {
 			return true
@@ -735,10 +735,8 @@ func appendUniqueString(slice []string, s string) []string {
 	if s == "" {
 		return slice
 	}
-	for _, existing := range slice {
-		if existing == s {
-			return slice
-		}
+	if slices.Contains(slice, s) {
+		return slice
 	}
 	return append(slice, s)
 }
@@ -1018,10 +1016,7 @@ func compareVersionStrings(a, b string) int {
 	partsB := splitVersionParts(b)
 
 	// Compare each component
-	maxLen := len(partsA)
-	if len(partsB) > maxLen {
-		maxLen = len(partsB)
-	}
+	maxLen := max(len(partsB), len(partsA))
 
 	for i := 0; i < maxLen; i++ {
 		var numA, numB int
@@ -1594,9 +1589,9 @@ func formatLayerCommand(cmd string) string {
 		if len(parts) == 2 {
 			cmd = strings.TrimSpace(parts[1])
 		}
-	} else if strings.HasPrefix(cmd, "/bin/sh -c ") {
+	} else if after, ok := strings.CutPrefix(cmd, "/bin/sh -c "); ok {
 		// RUN command
-		cmd = "RUN " + strings.TrimPrefix(cmd, "/bin/sh -c ")
+		cmd = "RUN " + after
 	}
 
 	// Truncate long commands but show more context
@@ -1773,13 +1768,7 @@ func renderFixablePackages(w io.Writer, changes []compare.VulnerabilityChange) {
 			pf.count++
 			// Merge fix versions
 			for _, fv := range v.FixedVersions {
-				found := false
-				for _, existing := range pf.fixes {
-					if existing == fv {
-						found = true
-						break
-					}
-				}
+				found := slices.Contains(pf.fixes, fv)
 				if !found {
 					pf.fixes = append(pf.fixes, fv)
 				}

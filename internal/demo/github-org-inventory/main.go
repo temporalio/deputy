@@ -705,11 +705,11 @@ func lookupContainerLicense(name, version string) []string {
 	// Extract the base image name (without tag/registry path for matching)
 	// e.g., "gcr.io/distroless/static" -> check against "distroless/static"
 	baseName := name
-	if idx := strings.Index(name, "/"); idx != -1 {
+	if before, after, ok := strings.Cut(name, "/"); ok {
 		// Check if it looks like a registry prefix (contains dots)
-		prefix := name[:idx]
+		prefix := before
 		if strings.Contains(prefix, ".") {
-			baseName = name[idx+1:]
+			baseName = after
 		}
 	}
 
@@ -732,51 +732,51 @@ func lookupContainerLicense(name, version string) []string {
 	// - Grafana: https://github.com/grafana/grafana/blob/main/LICENSE (AGPL-3.0)
 	knownLicenses := map[string][]string{
 		// OS base images
-		"alpine":           {"MIT"},
-		"debian":           {"GPL-2.0"},
-		"ubuntu":           {"GPL-2.0"},
-		"centos":           {"GPL-2.0"},
-		"fedora":           {"MIT"},
-		"rockylinux":       {"BSD-3-Clause"},
-		"almalinux":        {"GPL-2.0"},
-		"amazonlinux":      {"GPL-2.0"},
-		"oraclelinux":      {"GPL-2.0"},
-		"busybox":          {"GPL-2.0"},
-		"scratch":          {}, // No license needed for scratch
-		"clearlinux":       {"Apache-2.0"},
+		"alpine":      {"MIT"},
+		"debian":      {"GPL-2.0"},
+		"ubuntu":      {"GPL-2.0"},
+		"centos":      {"GPL-2.0"},
+		"fedora":      {"MIT"},
+		"rockylinux":  {"BSD-3-Clause"},
+		"almalinux":   {"GPL-2.0"},
+		"amazonlinux": {"GPL-2.0"},
+		"oraclelinux": {"GPL-2.0"},
+		"busybox":     {"GPL-2.0"},
+		"scratch":     {}, // No license needed for scratch
+		"clearlinux":  {"Apache-2.0"},
 
 		// Language runtime images
-		"golang":           {"BSD-3-Clause"},
-		"python":           {"PSF-2.0"},
-		"node":             {"MIT"},
-		"ruby":             {"Ruby", "BSD-2-Clause"},
-		"rust":             {"MIT", "Apache-2.0"},
-		"openjdk":          {"GPL-2.0-with-classpath-exception"},
-		"eclipse-temurin":  {"GPL-2.0-with-classpath-exception"},
-		"amazoncorretto":   {"GPL-2.0-with-classpath-exception"},
-		"php":              {"PHP-3.01"},
-		"perl":             {"Artistic-1.0", "GPL-1.0"},
-		"gcc":              {"GPL-3.0"},
-		"clang":            {"Apache-2.0"},
-		"swift":            {"Apache-2.0"},
-		"dotnet/sdk":       {"MIT"},
-		"dotnet/runtime":   {"MIT"},
-		"dotnet/aspnet":    {"MIT"},
+		"golang":                           {"BSD-3-Clause"},
+		"python":                           {"PSF-2.0"},
+		"node":                             {"MIT"},
+		"ruby":                             {"Ruby", "BSD-2-Clause"},
+		"rust":                             {"MIT", "Apache-2.0"},
+		"openjdk":                          {"GPL-2.0-with-classpath-exception"},
+		"eclipse-temurin":                  {"GPL-2.0-with-classpath-exception"},
+		"amazoncorretto":                   {"GPL-2.0-with-classpath-exception"},
+		"php":                              {"PHP-3.01"},
+		"perl":                             {"Artistic-1.0", "GPL-1.0"},
+		"gcc":                              {"GPL-3.0"},
+		"clang":                            {"Apache-2.0"},
+		"swift":                            {"Apache-2.0"},
+		"dotnet/sdk":                       {"MIT"},
+		"dotnet/runtime":                   {"MIT"},
+		"dotnet/aspnet":                    {"MIT"},
 		"mcr.microsoft.com/dotnet/sdk":     {"MIT"},
 		"mcr.microsoft.com/dotnet/runtime": {"MIT"},
 		"mcr.microsoft.com/dotnet/aspnet":  {"MIT"},
 
 		// Distroless images (Google)
-		"distroless/static":           {"Apache-2.0"},
-		"distroless/base":             {"Apache-2.0"},
-		"distroless/cc":               {"Apache-2.0"},
-		"distroless/java":             {"Apache-2.0"},
-		"distroless/nodejs":           {"Apache-2.0"},
-		"distroless/python3":          {"Apache-2.0"},
-		"distroless/static-debian11":  {"Apache-2.0"},
-		"distroless/static-debian12":  {"Apache-2.0"},
-		"distroless/base-debian11":    {"Apache-2.0"},
-		"distroless/base-debian12":    {"Apache-2.0"},
+		"distroless/static":            {"Apache-2.0"},
+		"distroless/base":              {"Apache-2.0"},
+		"distroless/cc":                {"Apache-2.0"},
+		"distroless/java":              {"Apache-2.0"},
+		"distroless/nodejs":            {"Apache-2.0"},
+		"distroless/python3":           {"Apache-2.0"},
+		"distroless/static-debian11":   {"Apache-2.0"},
+		"distroless/static-debian12":   {"Apache-2.0"},
+		"distroless/base-debian11":     {"Apache-2.0"},
+		"distroless/base-debian12":     {"Apache-2.0"},
 		"distroless/nodejs20-debian11": {"Apache-2.0"},
 
 		// Chainguard images
@@ -787,46 +787,46 @@ func lookupContainerLicense(name, version string) []string {
 		"chainguard/glibc-dynamic": {"Apache-2.0"},
 
 		// Database images
-		"postgres":         {"PostgreSQL"},
-		"mysql":            {"GPL-2.0"},
-		"mariadb":          {"GPL-2.0"},
-		"mongo":            {"SSPL-1.0"},
-		"redis":            {"BSD-3-Clause"},
-		"memcached":        {"BSD-3-Clause"},
-		"elasticsearch":    {"Elastic-2.0"},
-		"cassandra":        {"Apache-2.0"},
+		"postgres":      {"PostgreSQL"},
+		"mysql":         {"GPL-2.0"},
+		"mariadb":       {"GPL-2.0"},
+		"mongo":         {"SSPL-1.0"},
+		"redis":         {"BSD-3-Clause"},
+		"memcached":     {"BSD-3-Clause"},
+		"elasticsearch": {"Elastic-2.0"},
+		"cassandra":     {"Apache-2.0"},
 
 		// Web servers / proxies
-		"nginx":            {"BSD-2-Clause"},
-		"httpd":            {"Apache-2.0"},
-		"traefik":          {"MIT"},
-		"haproxy":          {"GPL-2.0"},
-		"envoy":            {"Apache-2.0"},
-		"caddy":            {"Apache-2.0"},
+		"nginx":   {"BSD-2-Clause"},
+		"httpd":   {"Apache-2.0"},
+		"traefik": {"MIT"},
+		"haproxy": {"GPL-2.0"},
+		"envoy":   {"Apache-2.0"},
+		"caddy":   {"Apache-2.0"},
 
 		// Observability
-		"grafana/grafana":  {"AGPL-3.0"},
-		"prom/prometheus":  {"Apache-2.0"},
+		"grafana/grafana":          {"AGPL-3.0"},
+		"prom/prometheus":          {"Apache-2.0"},
 		"jaegertracing/all-in-one": {"Apache-2.0"},
 
 		// CI/CD tools
-		"docker":           {"Apache-2.0"},
-		"docker/compose":   {"Apache-2.0"},
-		"hashicorp/vault":  {"BUSL-1.1"},
-		"hashicorp/consul": {"BUSL-1.1"},
+		"docker":              {"Apache-2.0"},
+		"docker/compose":      {"Apache-2.0"},
+		"hashicorp/vault":     {"BUSL-1.1"},
+		"hashicorp/consul":    {"BUSL-1.1"},
 		"hashicorp/terraform": {"BUSL-1.1"},
 
 		// Message queues
-		"rabbitmq":         {"MPL-2.0"},
-		"nats":             {"Apache-2.0"},
-		"apache/kafka":     {"Apache-2.0"},
+		"rabbitmq":              {"MPL-2.0"},
+		"nats":                  {"Apache-2.0"},
+		"apache/kafka":          {"Apache-2.0"},
 		"confluentinc/cp-kafka": {"Apache-2.0"},
-		"zookeeper":        {"Apache-2.0"},
+		"zookeeper":             {"Apache-2.0"},
 
 		// Package tools
-		"maven":            {"Apache-2.0"},
-		"gradle":           {"Apache-2.0"},
-		"astral-sh/uv":     {"MIT", "Apache-2.0"},
+		"maven":        {"Apache-2.0"},
+		"gradle":       {"Apache-2.0"},
+		"astral-sh/uv": {"MIT", "Apache-2.0"},
 	}
 
 	// Try exact match first
@@ -877,9 +877,9 @@ func resolveContainerLicense(ctx context.Context, name, version string) []string
 	}
 
 	// 3. Try to resolve from GitHub for ghcr.io images
-	if strings.HasPrefix(name, "ghcr.io/") {
+	if after, ok := strings.CutPrefix(name, "ghcr.io/"); ok {
 		// ghcr.io/owner/repo -> github.com/owner/repo
-		parts := strings.SplitN(strings.TrimPrefix(name, "ghcr.io/"), "/", 3)
+		parts := strings.SplitN(after, "/", 3)
 		if len(parts) >= 2 {
 			owner, repo := parts[0], parts[1]
 			// Strip any tag/digest from repo name if present
@@ -900,8 +900,8 @@ func resolveContainerLicense(ctx context.Context, name, version string) []string
 	}
 
 	// 4. Try to resolve from GitHub for quay.io images that might have GitHub sources
-	if strings.HasPrefix(name, "quay.io/") {
-		parts := strings.SplitN(strings.TrimPrefix(name, "quay.io/"), "/", 3)
+	if after, ok := strings.CutPrefix(name, "quay.io/"); ok {
+		parts := strings.SplitN(after, "/", 3)
 		if len(parts) >= 2 {
 			owner, repo := parts[0], parts[1]
 			if idx := strings.Index(repo, ":"); idx != -1 {
@@ -1062,7 +1062,7 @@ func splitOnSPDXOperators(s string) []string {
 	s = strings.ReplaceAll(s, " AND ", "\x00")
 	s = strings.ReplaceAll(s, " or ", "\x00")
 	s = strings.ReplaceAll(s, " and ", "\x00")
-	for _, part := range strings.Split(s, "\x00") {
+	for part := range strings.SplitSeq(s, "\x00") {
 		if trimmed := strings.TrimSpace(part); trimmed != "" {
 			result = append(result, trimmed)
 		}
@@ -1535,8 +1535,8 @@ func lookupPackagistP2(ctx context.Context, name, version string) []string {
 		return nil
 	}
 	tryVersions := []string{version}
-	if strings.HasPrefix(version, "v") {
-		tryVersions = append(tryVersions, strings.TrimPrefix(version, "v"))
+	if after, ok0 := strings.CutPrefix(version, "v"); ok0 {
+		tryVersions = append(tryVersions, after)
 	} else {
 		tryVersions = append(tryVersions, "v"+version)
 	}
@@ -1595,8 +1595,8 @@ func lookupPackagistLegacy(ctx context.Context, name, version string) []string {
 		return nil
 	}
 	tryVersions := []string{version}
-	if strings.HasPrefix(version, "v") {
-		tryVersions = append(tryVersions, strings.TrimPrefix(version, "v"))
+	if after, ok := strings.CutPrefix(version, "v"); ok {
+		tryVersions = append(tryVersions, after)
 	} else {
 		tryVersions = append(tryVersions, "v"+version)
 	}
@@ -1656,8 +1656,8 @@ func crateVersionCandidates(v string) []string {
 		return nil
 	}
 	out := []string{v}
-	if strings.HasPrefix(v, "v") {
-		out = append(out, strings.TrimPrefix(v, "v"))
+	if after, ok := strings.CutPrefix(v, "v"); ok {
+		out = append(out, after)
 	} else {
 		out = append(out, "v"+v)
 	}

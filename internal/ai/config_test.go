@@ -117,21 +117,21 @@ func TestProviderConfig_Validate(t *testing.T) {
 		{
 			name: "valid temperature",
 			config: ProviderConfig{
-				Temperature: floatPtr(0.7),
+				Temperature: new(0.7),
 			},
 			wantErr: false,
 		},
 		{
 			name: "temperature too high",
 			config: ProviderConfig{
-				Temperature: floatPtr(2.5),
+				Temperature: new(2.5),
 			},
 			wantErr: true,
 		},
 		{
 			name: "temperature too low",
 			config: ProviderConfig{
-				Temperature: floatPtr(-0.1),
+				Temperature: new(-0.1),
 			},
 			wantErr: true,
 		},
@@ -185,6 +185,7 @@ func TestProviderConfig_GetSandbox(t *testing.T) {
 	}
 }
 
+//go:fix inline
 func floatPtr(f float64) *float64 {
-	return &f
+	return new(f)
 }

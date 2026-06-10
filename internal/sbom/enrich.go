@@ -5,6 +5,7 @@ import (
 	"crypto/x509"
 	"fmt"
 	"regexp"
+	"slices"
 	"strings"
 	"sync"
 
@@ -526,13 +527,7 @@ func CalculateCompleteness(doc *sbom.Document) CompletenessScore {
 	for _, node := range doc.NodeList.Nodes {
 		if node != nil && node.Type == sbom.Node_PACKAGE {
 			// Skip root elements
-			isRoot := false
-			for _, rootID := range doc.NodeList.RootElements {
-				if node.Id == rootID {
-					isRoot = true
-					break
-				}
-			}
+			isRoot := slices.Contains(doc.NodeList.RootElements, node.Id)
 			if !isRoot {
 				packages = append(packages, node)
 			}

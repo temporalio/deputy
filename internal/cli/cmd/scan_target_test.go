@@ -24,7 +24,6 @@ func TestLooksLikeContainerReference(t *testing.T) {
 		{input: "pkg:npm/lodash@4.17.21", want: false},
 	}
 	for _, tt := range tests {
-		tt := tt
 		t.Run(tt.input, func(t *testing.T) {
 			t.Parallel()
 			if got := looksLikeContainerReference(tt.input); got != tt.want {
@@ -52,7 +51,6 @@ func TestIsImageTargetScheme(t *testing.T) {
 		{input: "pkg:npm/lodash@4.17.21", want: false},
 	}
 	for _, tt := range tests {
-		tt := tt
 		t.Run(tt.input, func(t *testing.T) {
 			t.Parallel()
 			if got := isImageTargetScheme(tt.input); got != tt.want {
@@ -78,7 +76,6 @@ func TestIsAmbiguousDockerHubReference(t *testing.T) {
 		{input: "pkg:npm/lodash@4.17.21", want: false},
 	}
 	for _, tt := range tests {
-		tt := tt
 		t.Run(tt.input, func(t *testing.T) {
 			t.Parallel()
 			if got := isAmbiguousDockerHubReference(tt.input); got != tt.want {
@@ -123,7 +120,6 @@ func TestIsVMImageTarget(t *testing.T) {
 		{input: "", want: false},
 	}
 	for _, tt := range tests {
-		tt := tt
 		t.Run(tt.input, func(t *testing.T) {
 			t.Parallel()
 			if got := isVMImageTarget(tt.input); got != tt.want {
@@ -162,7 +158,6 @@ func TestResolveSourceOverride(t *testing.T) {
 		{input: "unknown", expectError: true},
 	}
 	for _, tt := range tests {
-		tt := tt
 		t.Run(tt.input, func(t *testing.T) {
 			t.Parallel()
 			gotKind, gotImgSrc, err := resolveSourceOverride(tt.input)

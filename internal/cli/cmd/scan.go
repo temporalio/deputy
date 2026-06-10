@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"maps"
 	neturl "net/url"
 	"os"
 	"path/filepath"
@@ -986,7 +987,6 @@ func runScanSBOM(c *services.Clients, cmd *cobra.Command, args []string) error {
 
 		group, groupCtx := errgroup.WithContext(ctx)
 		for _, ref := range imageRefs {
-			ref := ref
 			key := imageRefCacheKey(ref)
 			group.Go(func() error {
 				sem <- struct{}{}
@@ -2149,9 +2149,7 @@ func runScanPolicies(ctx context.Context, policyPaths []string, result scanning.
 	}
 
 	// Merge extra context
-	for key, val := range extra {
-		payload[key] = val
-	}
+	maps.Copy(payload, extra)
 
 	var out []policy.Action
 	actions, err := evaluatePoliciesForCommand(ctx, policyPaths, payload, "scan", policy.EntrypointScanReport, errW)
@@ -2291,11 +2289,11 @@ func shortGitRef(ref string) string {
 	if r == "" {
 		return r
 	}
-	if strings.HasPrefix(r, "refs/tags/") {
-		return strings.TrimPrefix(r, "refs/tags/")
+	if after, ok := strings.CutPrefix(r, "refs/tags/"); ok {
+		return after
 	}
-	if strings.HasPrefix(r, "refs/heads/") {
-		return strings.TrimPrefix(r, "refs/heads/")
+	if after, ok := strings.CutPrefix(r, "refs/heads/"); ok {
+		return after
 	}
 	if strings.HasPrefix(r, "refs/") {
 		if i := strings.LastIndex(r, "/"); i >= 0 && i < len(r)-1 {

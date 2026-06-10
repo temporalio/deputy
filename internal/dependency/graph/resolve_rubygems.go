@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io/fs"
 	"regexp"
+	"slices"
 	"strings"
 )
 
@@ -113,10 +114,8 @@ func (r *RubyGemsResolver) findLockFiles(files FileReader) ([]string, error) {
 			}
 			base := d.Name()
 			if base == "Gemfile.lock" || base == "gems.locked" {
-				for _, existing := range lockPaths {
-					if existing == filePath {
-						return nil
-					}
+				if slices.Contains(lockPaths, filePath) {
+					return nil
 				}
 				lockPaths = append(lockPaths, filePath)
 			}

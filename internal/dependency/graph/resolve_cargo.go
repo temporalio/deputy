@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io/fs"
 	"path"
+	"slices"
 	"strings"
 
 	"github.com/BurntSushi/toml"
@@ -102,10 +103,8 @@ func (r *CargoResolver) findLockFiles(files FileReader) ([]string, error) {
 				return nil
 			}
 			if d.Name() == "Cargo.lock" {
-				for _, existing := range lockPaths {
-					if existing == filePath {
-						return nil
-					}
+				if slices.Contains(lockPaths, filePath) {
+					return nil
 				}
 				lockPaths = append(lockPaths, filePath)
 			}
@@ -137,14 +136,14 @@ type cargoToml struct {
 		Name    string `toml:"name"`
 		Version string `toml:"version"`
 	} `toml:"package"`
-	Dependencies         map[string]interface{} `toml:"dependencies"`
-	DevDependencies      map[string]interface{} `toml:"dev-dependencies"`
-	BuildDependencies    map[string]interface{} `toml:"build-dependencies"`
-	Workspace            cargoWorkspace         `toml:"workspace"`
+	Dependencies      map[string]any `toml:"dependencies"`
+	DevDependencies   map[string]any `toml:"dev-dependencies"`
+	BuildDependencies map[string]any `toml:"build-dependencies"`
+	Workspace         cargoWorkspace `toml:"workspace"`
 }
 
 type cargoWorkspace struct {
-	Dependencies map[string]interface{} `toml:"dependencies"`
+	Dependencies map[string]any `toml:"dependencies"`
 }
 
 // processCargoLock parses a Cargo.lock and adds edges to the graph.

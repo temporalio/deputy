@@ -681,7 +681,7 @@ func isBinaryContent(content []byte) bool {
 	}
 	// Check first 512 bytes for null bytes (common indicator of binary)
 	checkLen := min(512, len(content))
-	for i := 0; i < checkLen; i++ {
+	for i := range checkLen {
 		if content[i] == 0 {
 			return true
 		}

@@ -996,10 +996,8 @@ func isGoStdlibPackage(query string) bool {
 		"image", "index", "math", "mime", "plugin",
 		"regexp", "text", "unsafe",
 	}
-	for _, pkg := range stdlibPkgs {
-		if query == pkg {
-			return true
-		}
+	if slices.Contains(stdlibPkgs, query) {
+		return true
 	}
 	// Also match paths that look like stdlib (no dots, single slash)
 	if !strings.Contains(query, ".") && strings.Count(query, "/") == 1 {

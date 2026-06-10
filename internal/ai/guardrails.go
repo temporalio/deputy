@@ -599,14 +599,14 @@ func extractCommandName(cmd string) string {
 	// These need to skip their own arguments too
 	prefixes := []string{"exec", "time", "nohup"}
 	for _, prefix := range prefixes {
-		if strings.HasPrefix(cmd, prefix+" ") {
-			cmd = strings.TrimSpace(strings.TrimPrefix(cmd, prefix+" "))
+		if after, ok := strings.CutPrefix(cmd, prefix+" "); ok {
+			cmd = strings.TrimSpace(after)
 		}
 	}
 
 	// Handle nice with its arguments (nice [-n N] command)
-	if strings.HasPrefix(cmd, "nice ") {
-		cmd = strings.TrimSpace(strings.TrimPrefix(cmd, "nice "))
+	if after, ok := strings.CutPrefix(cmd, "nice "); ok {
+		cmd = strings.TrimSpace(after)
 		parts := strings.Fields(cmd)
 		i := 0
 		for i < len(parts) {

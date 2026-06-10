@@ -746,10 +746,7 @@ func licenseScanConcurrency(total int) int {
 			return n
 		}
 	}
-	parallel := runtime.NumCPU() * 4
-	if parallel < 8 {
-		parallel = 8
-	}
+	parallel := max(runtime.NumCPU()*4, 8)
 	if parallel > total {
 		parallel = total
 	}
@@ -850,10 +847,7 @@ func displayDetailedDependencyChanges(ctx context.Context, ws workspace.FS, chan
 				remoteFetchers[pk] = ch
 				remoteTasks = append(remoteTasks, pk)
 			}
-			concurrency := licenseScanConcurrency(len(remoteTasks))
-			if concurrency < 1 {
-				concurrency = 1
-			}
+			concurrency := max(licenseScanConcurrency(len(remoteTasks)), 1)
 			sem := make(chan struct{}, concurrency)
 			for _, task := range remoteTasks {
 				t := task

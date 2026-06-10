@@ -541,7 +541,7 @@ func TestRequestScopedOSVCacheIsolation(t *testing.T) {
 	cache := NewRequestScopedOSVCache(baseScope, inner)
 
 	// Verify it implements ContextAwareOSVCache
-	if _, ok := interface{}(cache).(ContextAwareOSVCache); !ok {
+	if _, ok := any(cache).(ContextAwareOSVCache); !ok {
 		t.Fatal("RequestScopedOSVCache should implement ContextAwareOSVCache")
 	}
 
@@ -595,7 +595,7 @@ func TestRequestScopedImageScanCacheIsolation(t *testing.T) {
 	cache := NewRequestScopedImageScanCache(baseScope, inner)
 
 	// Verify it implements ContextAwareImageScanCache
-	if _, ok := interface{}(cache).(ContextAwareImageScanCache); !ok {
+	if _, ok := any(cache).(ContextAwareImageScanCache); !ok {
 		t.Fatal("RequestScopedImageScanCache should implement ContextAwareImageScanCache")
 	}
 
@@ -632,7 +632,7 @@ func TestRequestScopedLicenseCacheIsolation(t *testing.T) {
 	cache := NewRequestScopedLicenseCache(baseScope, inner)
 
 	// Verify it implements ContextAwareLicenseCache
-	if _, ok := interface{}(cache).(ContextAwareLicenseCache); !ok {
+	if _, ok := any(cache).(ContextAwareLicenseCache); !ok {
 		t.Fatal("RequestScopedLicenseCache should implement ContextAwareLicenseCache")
 	}
 
@@ -664,7 +664,7 @@ func TestRequestScopedDigestResolutionCacheIsolation(t *testing.T) {
 	cache := NewRequestScopedDigestResolutionCache(baseScope, inner)
 
 	// Verify it implements ContextAwareDigestResolutionCache
-	if _, ok := interface{}(cache).(ContextAwareDigestResolutionCache); !ok {
+	if _, ok := any(cache).(ContextAwareDigestResolutionCache); !ok {
 		t.Fatal("RequestScopedDigestResolutionCache should implement ContextAwareDigestResolutionCache")
 	}
 

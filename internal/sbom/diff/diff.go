@@ -97,7 +97,7 @@ type Change struct {
 	Kind ChangeKind `json:"kind"`
 
 	// Licenses tracks license changes.
-	Licenses LicenseChange `json:"licenses,omitempty"`
+	Licenses LicenseChange `json:"licenses"`
 }
 
 // String returns a human-readable representation of the change.

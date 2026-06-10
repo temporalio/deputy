@@ -119,8 +119,8 @@ func InferArtifactManager(pathStr string, manifestManagers map[string]string, di
 	if mgr := dirManagers[dir]; mgr != "" {
 		return mgr
 	}
-	if strings.HasSuffix(pathStr, "go.sum") {
-		candidate := strings.TrimSuffix(pathStr, "go.sum") + "go.mod"
+	if before, ok := strings.CutSuffix(pathStr, "go.sum"); ok {
+		candidate := before + "go.mod"
 		if mgr := manifestManagers[candidate]; mgr != "" {
 			return mgr
 		}

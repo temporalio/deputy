@@ -292,7 +292,6 @@ func TestLicenseVerificationSample(t *testing.T) {
 		{eco: "javascript", path: filepath.Join(base, "temporalio", "javascript.csv")},
 	}
 	for _, s := range samples {
-		s := s
 		t.Run(s.eco, func(t *testing.T) {
 			if _, err := os.Stat(s.path); errors.Is(err, os.ErrNotExist) {
 				t.Skipf("%s not present", s.path)

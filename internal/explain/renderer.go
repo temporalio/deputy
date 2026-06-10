@@ -188,7 +188,7 @@ func (r *Renderer) renderText(out io.Writer, data *VulnData) error {
 		fmt.Fprintln(out)
 		fmt.Fprintln(out, styleSection.Render("Description"))
 		// Indent description content by 2 spaces to match other sections
-		for _, line := range strings.Split(wrapText(vuln.Details, 76), "\n") {
+		for line := range strings.SplitSeq(wrapText(vuln.Details, 76), "\n") {
 			if line == "" {
 				fmt.Fprintln(out)
 			} else {
@@ -411,7 +411,7 @@ func (r *Renderer) renderWeaknesses(out io.Writer, data *VulnData) {
 			styleDim.Render(cweInfo.Name))
 		// Wrap description at 72 chars, indent continuation lines by 4 spaces
 		desc := wrapText(cweInfo.Description, 72)
-		for _, line := range strings.Split(desc, "\n") {
+		for line := range strings.SplitSeq(desc, "\n") {
 			fmt.Fprintf(out, "    %s\n", styleHint.Render(line))
 		}
 		fmt.Fprintf(out, "    %s\n", styleDim.Render(cweInfo.Category))
@@ -665,8 +665,8 @@ func (r *Renderer) renderJSON(out io.Writer, data *VulnData) error {
 				"category":    c.Category,
 			}
 			// Add link to CWE database
-			if strings.HasPrefix(c.ID, "CWE-") {
-				cweNum := strings.TrimPrefix(c.ID, "CWE-")
+			if after, ok := strings.CutPrefix(c.ID, "CWE-"); ok {
+				cweNum := after
 				cwe["url"] = "https://cwe.mitre.org/data/definitions/" + cweNum + ".html"
 			}
 			cwes = append(cwes, cwe)
@@ -1116,7 +1116,7 @@ func parseAttackCharacteristics(vector string) map[string]any {
 // parseCVSSComponents parses a CVSS vector string into a map of component values.
 func parseCVSSComponents(vector string) map[string]string {
 	components := make(map[string]string)
-	for _, part := range strings.Split(vector, "/") {
+	for part := range strings.SplitSeq(vector, "/") {
 		if idx := strings.Index(part, ":"); idx > 0 {
 			components[part[:idx]] = part[idx+1:]
 		}

@@ -177,12 +177,12 @@ func convertRunCommand(c *instructions.RunCommand) RunCommand {
 
 	// Extract flags used (mount, network, security are in FlagsUsed)
 	for _, flag := range c.FlagsUsed {
-		if strings.HasPrefix(flag, "mount=") {
-			rc.Mounts = append(rc.Mounts, strings.TrimPrefix(flag, "mount="))
-		} else if strings.HasPrefix(flag, "network=") {
-			rc.Network = strings.TrimPrefix(flag, "network=")
-		} else if strings.HasPrefix(flag, "security=") {
-			rc.Security = strings.TrimPrefix(flag, "security=")
+		if after, ok := strings.CutPrefix(flag, "mount="); ok {
+			rc.Mounts = append(rc.Mounts, after)
+		} else if after, ok := strings.CutPrefix(flag, "network="); ok {
+			rc.Network = after
+		} else if after, ok := strings.CutPrefix(flag, "security="); ok {
+			rc.Security = after
 		}
 	}
 

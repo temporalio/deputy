@@ -64,7 +64,7 @@ func TestNewRequestID(t *testing.T) {
 
 	// Verify uniqueness
 	seen := make(map[string]bool)
-	for i := 0; i < 100; i++ {
+	for range 100 {
 		id := newRequestID()
 		if seen[id] {
 			t.Errorf("duplicate request ID generated: %s", id)
@@ -300,7 +300,7 @@ func TestWithConcurrencyLimit(t *testing.T) {
 
 			// Launch more requests than the limit allows
 			var wg sync.WaitGroup
-			for i := 0; i < maxConcurrent+3; i++ {
+			for range maxConcurrent + 3 {
 				wg.Go(func() {
 					req := httptest.NewRequest("GET", "/test", nil)
 					rec := httptest.NewRecorder()
@@ -382,7 +382,7 @@ func TestStatusRecorderPool(t *testing.T) {
 	t.Parallel()
 
 	// Verify pool returns usable recorders
-	for i := 0; i < 10; i++ {
+	for range 10 {
 		rec := statusRecorderPool.Get().(*statusRecorder)
 		if rec == nil {
 			t.Fatal("pool returned nil")

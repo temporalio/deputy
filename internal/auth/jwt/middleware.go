@@ -101,8 +101,7 @@ func Middleware(auth Authenticator, cfg MiddlewareConfig) func(http.Handler) htt
 			claims, err := auth.Authenticate(ctx, r)
 
 			if err != nil {
-				var authErr *Error
-				if errors.As(err, &authErr) {
+				if authErr, ok := errors.AsType[*Error](err); ok {
 					metrics.RecordError(authErr.Code)
 					if cfg.OnRejected != nil {
 						cfg.OnRejected(ctx, authErr.Code)

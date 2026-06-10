@@ -3,6 +3,7 @@ package sandbox
 import (
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 )
 
@@ -356,18 +357,14 @@ func classifyConditional(cmd []string, rule conditionalRule) CommandSafety {
 			return CommandDangerous
 		}
 		// Also check if any arg matches (for flags like -exec)
-		for _, arg := range cmd[1:] {
-			if arg == dangerous {
-				return CommandDangerous
-			}
+		if slices.Contains(cmd[1:], dangerous) {
+			return CommandDangerous
 		}
 	}
 
 	// Check if subcommand is explicitly safe
-	for _, safe := range rule.SafeArgs {
-		if subcommand == safe {
-			return CommandSafe
-		}
+	if slices.Contains(rule.SafeArgs, subcommand) {
+		return CommandSafe
 	}
 
 	// If we have safe args defined but didn't match, be conservative

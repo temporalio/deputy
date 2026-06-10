@@ -21,13 +21,13 @@ func NewPyPIHandler(upstream string, policies PolicyEvaluator) (http.Handler, er
 //   - /project/<package>/<version>/ - project page
 //   - /packages/.../<package>-<version>.<ext> - distribution download
 func parsePyPIPath(p string) (pkg, version, filename, operation string) {
-	if strings.HasPrefix(p, "/simple/") {
-		pkg = strings.Trim(strings.TrimPrefix(p, "/simple/"), "/")
+	if after, ok := strings.CutPrefix(p, "/simple/"); ok {
+		pkg = strings.Trim(after, "/")
 		operation = "simple"
 		return
 	}
-	if strings.HasPrefix(p, "/project/") {
-		parts := strings.Split(strings.TrimPrefix(p, "/project/"), "/")
+	if after, ok := strings.CutPrefix(p, "/project/"); ok {
+		parts := strings.Split(after, "/")
 		if len(parts) > 0 {
 			pkg = parts[0]
 		}
@@ -53,8 +53,8 @@ func parsePyPIPath(p string) (pkg, version, filename, operation string) {
 func parsePyPIDistributionFilename(filename string) (string, string) {
 	base := filename
 	for _, ext := range []string{".tar.gz", ".tar.bz2", ".tar.xz", ".tgz", ".zip", ".whl"} {
-		if strings.HasSuffix(base, ext) {
-			base = strings.TrimSuffix(base, ext)
+		if before, ok := strings.CutSuffix(base, ext); ok {
+			base = before
 			break
 		}
 	}

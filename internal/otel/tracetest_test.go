@@ -426,7 +426,7 @@ func TestConcurrentSpans_ThreadSafe(t *testing.T) {
 	const numGoroutines = 100
 	done := make(chan bool, numGoroutines)
 
-	for i := 0; i < numGoroutines; i++ {
+	for i := range numGoroutines {
 		go func(id int) {
 			_, span := StartSpan(context.Background(), "concurrent.span")
 			span.SetAttributes(attribute.Int("goroutine.id", id))
@@ -436,7 +436,7 @@ func TestConcurrentSpans_ThreadSafe(t *testing.T) {
 	}
 
 	// Wait for all goroutines
-	for i := 0; i < numGoroutines; i++ {
+	for range numGoroutines {
 		<-done
 	}
 

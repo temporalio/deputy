@@ -690,7 +690,7 @@ func TestDowngradeAdvisory(t *testing.T) {
 		{
 			name: "status cleared on downgrade",
 			actions: []Action{
-				{Type: "deny", Status: intPtr(403)},
+				{Type: "deny", Status: new(403)},
 			},
 			expected: []Action{
 				{Type: "warn", Status: nil, Reason: "advisory policy (originally deny)"},
@@ -1054,6 +1054,7 @@ vulnerabilities.filter(v, v.isCritical()).size() > 0
 
 // Helper functions
 
+//go:fix inline
 func intPtr(i int) *int {
-	return &i
+	return new(i)
 }

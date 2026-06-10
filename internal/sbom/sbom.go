@@ -983,8 +983,8 @@ func resolveGitHubActionsRefFromRefs(refs []*plumbing.Reference, requested strin
 			continue
 		}
 		hash := r.Hash().String()
-		if strings.HasSuffix(name, "^{}") {
-			peeled[strings.TrimSuffix(name, "^{}")] = hash
+		if before, ok := strings.CutSuffix(name, "^{}"); ok {
+			peeled[before] = hash
 			continue
 		}
 		raw[name] = hash

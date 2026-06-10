@@ -261,7 +261,7 @@ func parseInlineDepsArray(line string, deps map[string]bool) {
 
 	content := line[start+1 : end]
 	// Split by comma and parse each entry
-	for _, entry := range strings.Split(content, ",") {
+	for entry := range strings.SplitSeq(content, ",") {
 		entry = strings.TrimSpace(entry)
 		entry = strings.Trim(entry, "\"'")
 
@@ -288,7 +288,7 @@ func parseInlineDepsArray(line string, deps map[string]bool) {
 func getRequirementsDirectDeps(data []byte) map[string]bool {
 	deps := make(map[string]bool)
 
-	for _, line := range strings.Split(string(data), "\n") {
+	for line := range strings.SplitSeq(string(data), "\n") {
 		line = strings.TrimSpace(line)
 
 		// Skip comments and empty lines

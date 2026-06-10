@@ -201,8 +201,8 @@ func mergeRefs(rawRefs []*plumbing.Reference) []refEntry {
 			continue
 		}
 
-		if strings.HasSuffix(name, "^{}") {
-			base := strings.TrimSuffix(name, "^{}")
+		if before, ok := strings.CutSuffix(name, "^{}"); ok {
+			base := before
 			peeled[base] = sha
 		} else if strings.HasPrefix(name, "refs/tags/") {
 			regular[name] = sha

@@ -98,10 +98,10 @@ var errorRemediation = map[string]string{
   2. Verify the working directory exists
   3. Check Docker daemon logs for details
   4. Ensure no port conflicts if exposing ports`,
-	"WAIT_ERROR":       "Failed to wait for container completion. The container may have terminated abnormally.",
-	"CONTAINER_ERROR":  "Container exited with an error. Check the command output above for details.",
-	"CANCELLED":        "Operation was cancelled. This typically occurs due to timeout or user interruption.",
-	"STREAM_ERROR":     "Failed to stream container output. The container may have terminated unexpectedly.",
+	"WAIT_ERROR":      "Failed to wait for container completion. The container may have terminated abnormally.",
+	"CONTAINER_ERROR": "Container exited with an error. Check the command output above for details.",
+	"CANCELLED":       "Operation was cancelled. This typically occurs due to timeout or user interruption.",
+	"STREAM_ERROR":    "Failed to stream container output. The container may have terminated unexpectedly.",
 }
 
 // Runtime implements sandbox.Runtime using Docker containers via the Docker SDK.
@@ -1033,7 +1033,7 @@ func (r *Runtime) buildContainerConfig(req *sandboxv1.ExecuteRequest, executionI
 			}
 		}
 		if limits.MaxPids > 0 {
-			resources.PidsLimit = ptr(int64(limits.MaxPids))
+			resources.PidsLimit = new(int64(limits.MaxPids))
 		}
 		// Max open files (ulimit -n)
 		if limits.MaxFiles > 0 {
@@ -1255,8 +1255,10 @@ func parseMemory(s string) (int64, error) {
 }
 
 // ptr returns a pointer to v.
+//
+//go:fix inline
 func ptr[T any](v T) *T {
-	return &v
+	return new(v)
 }
 
 // formatBytes converts bytes to a human-readable string for tmpfs size options.

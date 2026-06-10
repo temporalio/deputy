@@ -26,10 +26,10 @@ func parseNPMPath(p string) (pkg string, version string, operation string) {
 	if trimmed == "" {
 		return "", "", "metadata"
 	}
-	if strings.HasPrefix(trimmed, "-/package/") {
-		rem := strings.TrimPrefix(trimmed, "-/package/")
-		if strings.HasSuffix(rem, "/dist-tags") {
-			pkg = strings.TrimSuffix(rem, "/dist-tags")
+	if after, ok := strings.CutPrefix(trimmed, "-/package/"); ok {
+		rem := after
+		if before, ok := strings.CutSuffix(rem, "/dist-tags"); ok {
+			pkg = before
 			operation = "dist-tags"
 			return
 		}

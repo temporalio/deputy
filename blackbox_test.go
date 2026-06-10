@@ -105,11 +105,10 @@ func runDeputy(t *testing.T, args ...string) (stdout, stderr string, exitCode in
 	if err == nil {
 		return stdout, stderr, 0
 	}
-	var ee *exec.ExitError
 	if !strings.Contains(err.Error(), "exit status") {
 		t.Fatalf("run error: %v stderr=%q", err, stderr)
 	}
-	if errors.As(err, &ee) {
+	if ee, ok := errors.AsType[*exec.ExitError](err); ok {
 		return stdout, stderr, ee.ExitCode()
 	}
 	return stdout, stderr, 1

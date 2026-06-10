@@ -3,6 +3,7 @@ package scanning
 import (
 	"context"
 	"fmt"
+	"maps"
 
 	"github.com/google/cel-go/cel"
 	"github.com/google/osv-scalibr/extractor"
@@ -114,9 +115,7 @@ func mergeDirect(base, extra map[string]bool) map[string]bool {
 		return nil
 	}
 	out := make(map[string]bool, len(base)+len(extra))
-	for k, v := range base {
-		out[k] = v
-	}
+	maps.Copy(out, base)
 	for k, v := range extra {
 		if v {
 			out[k] = v
@@ -130,9 +129,7 @@ func mergeAdvisories(base, extra map[string]*vulnerabilityv1.Advisory) map[strin
 		return map[string]*vulnerabilityv1.Advisory{}
 	}
 	out := make(map[string]*vulnerabilityv1.Advisory, len(base)+len(extra))
-	for id, adv := range base {
-		out[id] = adv
-	}
+	maps.Copy(out, base)
 	for id, adv := range extra {
 		if existing, ok := out[id]; ok {
 			out[id] = vulnerability.MergeAdvisory(existing, adv)

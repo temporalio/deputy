@@ -111,7 +111,7 @@ func (e *dotenvExtractor) Extract(path string, contents []byte, root string) ([]
 			varCount++
 
 			// Check for potentially sensitive variable names
-			varName := strings.SplitN(line, "=", 2)[0]
+			varName, _, _ := strings.Cut(line, "=")
 			varName = strings.ToUpper(varName)
 			if isSensitiveVarName(varName) {
 				sensitiveVars = append(sensitiveVars, varName)

@@ -15,6 +15,7 @@ import (
 	git "github.com/go-git/go-git/v5"
 	"google.golang.org/protobuf/encoding/protojson"
 
+	"github.com/spf13/cobra"
 	secretsv1 "github.com/temporalio/deputy/gen/deputy/secrets/v1"
 	"github.com/temporalio/deputy/internal/container/image"
 	gitx "github.com/temporalio/deputy/internal/gitutil"
@@ -24,7 +25,6 @@ import (
 	"github.com/temporalio/deputy/internal/targets"
 	"github.com/temporalio/deputy/internal/targets/providers"
 	ui "github.com/temporalio/deputy/internal/ui"
-	"github.com/spf13/cobra"
 )
 
 // SecretsResult is the structured output of a secrets scan.
@@ -740,7 +740,7 @@ func isBinaryContent(content []byte) bool {
 	}
 	// Check first 512 bytes for null bytes (common indicator of binary)
 	checkLen := min(512, len(content))
-	for i := 0; i < checkLen; i++ {
+	for i := range checkLen {
 		if content[i] == 0 {
 			return true
 		}
@@ -989,7 +989,7 @@ func runHistoricalSecretsScan(ctx context.Context, out io.Writer, errW io.Writer
 	// Parse path filter patterns
 	var pathPatterns []string
 	if opts.pathFilter != "" {
-		for _, p := range strings.Split(opts.pathFilter, ",") {
+		for p := range strings.SplitSeq(opts.pathFilter, ",") {
 			p = strings.TrimSpace(p)
 			if p != "" {
 				pathPatterns = append(pathPatterns, p)
@@ -1074,7 +1074,7 @@ func runDiffSecretsScan(ctx context.Context, out io.Writer, errW io.Writer, repo
 	// Create history scanner for diff operation
 	config := secrets.HistoryScanConfig{}
 	if pathFilter != "" {
-		for _, p := range strings.Split(pathFilter, ",") {
+		for p := range strings.SplitSeq(pathFilter, ",") {
 			p = strings.TrimSpace(p)
 			if p != "" {
 				config.PathFilter = append(config.PathFilter, p)

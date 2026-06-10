@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io/fs"
 	"regexp"
+	"slices"
 	"strings"
 )
 
@@ -115,10 +116,8 @@ func (r *HexResolver) findLockFiles(files FileReader) ([]string, error) {
 				return nil
 			}
 			if d.Name() == "mix.lock" {
-				for _, existing := range lockPaths {
-					if existing == filePath {
-						return nil
-					}
+				if slices.Contains(lockPaths, filePath) {
+					return nil
 				}
 				lockPaths = append(lockPaths, filePath)
 			}

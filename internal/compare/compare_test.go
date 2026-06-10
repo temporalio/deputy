@@ -111,10 +111,10 @@ func TestIsRelativePathModule(t *testing.T) {
 func Test_summarizePackage_skipsRelativePaths(t *testing.T) {
 	// Relative path modules (from go.mod replace directives) should be skipped
 	cases := []struct {
-		name       string
-		pkgName    string
-		wantKey    string
-		wantSkip   bool
+		name     string
+		pkgName  string
+		wantKey  string
+		wantSkip bool
 	}{
 		{
 			name:     "relative parent path",
@@ -599,7 +599,6 @@ func TestSelectChangeType_SemverEcosystems(t *testing.T) {
 		{name: "go tagged to devel", ecosystem: "go", base: "1.2.3", target: "(devel)", wantChange: Updated},
 	}
 	for _, tc := range cases {
-		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			if got := selectChangeType(tc.ecosystem, tc.base, tc.target); got != tc.wantChange {
 				t.Fatalf("selectChangeType(%q,%q,%q)=%v want %v", tc.ecosystem, tc.base, tc.target, got, tc.wantChange)

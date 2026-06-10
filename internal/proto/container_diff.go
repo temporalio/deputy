@@ -572,10 +572,7 @@ func compareContainerLayers(baseInfo, targetInfo *image.Info) *diffv1.LayerDiffA
 	// Compare layers by history
 	baseLen := len(baseInfo.History)
 	targetLen := len(targetInfo.History)
-	maxLen := baseLen
-	if targetLen > maxLen {
-		maxLen = targetLen
-	}
+	maxLen := max(targetLen, baseLen)
 
 	for i := 0; i < maxLen; i++ {
 		var change diffv1.LayerChange
@@ -787,16 +784,16 @@ func ContainerDiffResponseToReport(resp *diffv1.DiffContainerImagesResponse) *co
 	if resp.Summary != nil {
 		s := resp.Summary
 		report.Summary = compare.ImageDiffSummary{
-			PackagesAdded:         int(s.PackagesAdded),
-			PackagesRemoved:       int(s.PackagesRemoved),
-			PackagesUpgraded:      int(s.PackagesUpgraded),
-			PackagesDowngraded:    int(s.PackagesDowngraded),
-			VulnerabilitiesAdded:  int(s.VulnerabilitiesAdded),
+			PackagesAdded:          int(s.PackagesAdded),
+			PackagesRemoved:        int(s.PackagesRemoved),
+			PackagesUpgraded:       int(s.PackagesUpgraded),
+			PackagesDowngraded:     int(s.PackagesDowngraded),
+			VulnerabilitiesAdded:   int(s.VulnerabilitiesAdded),
 			VulnerabilitiesRemoved: int(s.VulnerabilitiesRemoved),
-			VulnerabilitiesFixed:  int(s.VulnerabilitiesFixed),
-			LayersAdded:           int(s.LayersAdded),
-			LayersRemoved:         int(s.LayersRemoved),
-			ConfigChanged:         s.ConfigChanged,
+			VulnerabilitiesFixed:   int(s.VulnerabilitiesFixed),
+			LayersAdded:            int(s.LayersAdded),
+			LayersRemoved:          int(s.LayersRemoved),
+			ConfigChanged:          s.ConfigChanged,
 		}
 	}
 

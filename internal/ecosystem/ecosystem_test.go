@@ -1,6 +1,7 @@
 package ecosystem
 
 import (
+	"slices"
 	"testing"
 
 	pb "deps.dev/api/v3"
@@ -323,13 +324,7 @@ func TestWithGraphResolution(t *testing.T) {
 	}
 
 	// Should include ecosystems with graph support
-	hasGo := false
-	for _, eco := range graphed {
-		if eco == Go {
-			hasGo = true
-			break
-		}
-	}
+	hasGo := slices.Contains(graphed, Go)
 	if !hasGo {
 		t.Error("WithGraphResolution() should include Go")
 	}

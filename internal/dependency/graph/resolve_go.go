@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io/fs"
 	"path"
+	"slices"
 	"strings"
 	"sync"
 
@@ -211,10 +212,8 @@ func (r *GoResolver) findGoModFiles(files FileReader) ([]string, error) {
 			}
 			if path.Base(filePath) == "go.mod" {
 				// Avoid duplicates
-				for _, existing := range goModPaths {
-					if existing == filePath {
-						return nil
-					}
+				if slices.Contains(goModPaths, filePath) {
+					return nil
 				}
 				goModPaths = append(goModPaths, filePath)
 			}
@@ -749,10 +748,5 @@ func goStdlibToPURL(goVersion string) string {
 
 // containsRoot checks if a PURL is already in the roots slice.
 func containsRoot(roots []string, purl string) bool {
-	for _, r := range roots {
-		if r == purl {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(roots, purl)
 }

@@ -383,7 +383,7 @@ func TestArchiveScanner_SizeLimits(t *testing.T) {
 	zw := zip.NewWriter(&buf)
 
 	// Add many small files
-	for i := 0; i < 100; i++ {
+	for i := range 100 {
 		f, _ := zw.Create(filepath.Join("files", "file"+string(rune('0'+i%10))+".txt"))
 		f.Write([]byte("content"))
 	}
@@ -644,15 +644,15 @@ func TestArchiveScanner_ZipBombDetection(t *testing.T) {
 		uncompressedSize uint64
 		isBomb           bool
 	}{
-		{"normal file", 1000, 2000, false},           // 2:1 ratio
-		{"good compression", 1000, 50000, false},     // 50:1 ratio
-		{"at limit", 1000, 100000, false},            // 100:1 ratio
-		{"slight bomb", 1000, 150000, true},          // 150:1 ratio
-		{"major bomb", 100, 1000000000, true},        // 10000000:1 ratio
-		{"classic zip bomb", 42, 4500000000, true},   // ~107M:1 ratio (42.zip pattern)
-		{"zero compressed", 0, 1000000000, true},     // Infinite ratio (claims huge but empty)
-		{"empty file", 0, 0, false},                  // Both zero = OK
-		{"zero uncompressed", 100, 0, false},         // Actually zero bytes
+		{"normal file", 1000, 2000, false},         // 2:1 ratio
+		{"good compression", 1000, 50000, false},   // 50:1 ratio
+		{"at limit", 1000, 100000, false},          // 100:1 ratio
+		{"slight bomb", 1000, 150000, true},        // 150:1 ratio
+		{"major bomb", 100, 1000000000, true},      // 10000000:1 ratio
+		{"classic zip bomb", 42, 4500000000, true}, // ~107M:1 ratio (42.zip pattern)
+		{"zero compressed", 0, 1000000000, true},   // Infinite ratio (claims huge but empty)
+		{"empty file", 0, 0, false},                // Both zero = OK
+		{"zero uncompressed", 100, 0, false},       // Actually zero bytes
 	}
 
 	for _, tt := range tests {

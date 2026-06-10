@@ -516,7 +516,7 @@ type Replacement struct {
 	// DeletedRegion is the region to delete before insertion.
 	DeletedRegion Region `json:"deletedRegion"`
 	// InsertedContent contains the content to insert.
-	InsertedContent InsertedContent `json:"insertedContent,omitempty"`
+	InsertedContent InsertedContent `json:"insertedContent"`
 }
 
 // InsertedContent describes content to insert (artifactContent object).
@@ -1480,14 +1480,8 @@ func findPackageInManifest(manifestPath, packageName, version string) *snippetIn
 				}
 
 				// Extract context (2 lines before and after)
-				contextStart := i - 2
-				if contextStart < 0 {
-					contextStart = 0
-				}
-				contextEnd := i + 3
-				if contextEnd > len(lines) {
-					contextEnd = len(lines)
-				}
+				contextStart := max(i-2, 0)
+				contextEnd := min(i+3, len(lines))
 
 				info.ContextStart = contextStart + 1 // 1-based
 				info.ContextLines = lines[contextStart:contextEnd]

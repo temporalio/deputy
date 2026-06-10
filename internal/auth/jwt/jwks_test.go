@@ -207,15 +207,13 @@ func TestJWKSCache_ConcurrentAccess(t *testing.T) {
 	var wg sync.WaitGroup
 	errors := make(chan error, 100)
 
-	for i := 0; i < 100; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+	for range 100 {
+		wg.Go(func() {
 			_, err := cache.GetKey(context.Background(), "concurrent-key")
 			if err != nil {
 				errors <- err
 			}
-		}()
+		})
 	}
 
 	wg.Wait()
@@ -409,9 +407,9 @@ type testMetrics struct {
 	onKeyLookup func(found bool)
 }
 
-func (m *testMetrics) RecordSuccess()           {}
-func (m *testMetrics) RecordAnonymous()         {}
-func (m *testMetrics) RecordError(code string)  {}
+func (m *testMetrics) RecordSuccess()          {}
+func (m *testMetrics) RecordAnonymous()        {}
+func (m *testMetrics) RecordError(code string) {}
 func (m *testMetrics) RecordJWKSRefresh(success bool) {
 	if m.onRefresh != nil {
 		m.onRefresh(success)

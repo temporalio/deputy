@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 
 	"github.com/moby/moby/api/types/container"
@@ -300,13 +301,7 @@ func TestAgentDockerIsolation(t *testing.T) {
 	// Check that common dependency files are in sync patterns
 	expectedPatterns := []string{"package.json", "go.mod", "Cargo.toml"}
 	for _, expected := range expectedPatterns {
-		found := false
-		for _, pattern := range opts.SyncPatterns {
-			if pattern == expected {
-				found = true
-				break
-			}
-		}
+		found := slices.Contains(opts.SyncPatterns, expected)
 		if !found {
 			t.Errorf("expected %q in sync patterns", expected)
 		}

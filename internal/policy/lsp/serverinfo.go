@@ -7,7 +7,7 @@ import "github.com/sourcegraph/go-lsp"
 // ignore unknown fields, so we append a minimal ServerInfo struct inline.
 type initializeResultWithServerInfo struct {
 	lsp.InitializeResult
-	ServerInfo serverInfo `json:"serverInfo,omitempty"`
+	ServerInfo serverInfo `json:"serverInfo"`
 }
 
 type serverInfo struct {

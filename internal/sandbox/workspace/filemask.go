@@ -63,8 +63,8 @@ func (fm *FileMasker) ShouldMask(path string) (sandboxv1.FileMaskMode, string) {
 	}
 
 	// Check rules in reverse order (later rules have higher priority)
-	for i := len(fm.rules) - 1; i >= 0; i-- {
-		rule := fm.rules[i]
+	for _, rule := range slices.Backward(fm.rules) {
+
 		if matchPattern(path, rule.pattern) {
 			return rule.mode, rule.reason
 		}
@@ -395,7 +395,7 @@ func (fm *FileMasker) addSupplyChainPreset() {
 
 	// Additional supply chain specific rules
 	supplyChainPatterns := []string{
-		"**/.git/**",  // Hide all git data
+		"**/.git/**",   // Hide all git data
 		"**/vendor/**", // Go vendor
 		"**/node_modules/**",
 		"**/.cache/**",

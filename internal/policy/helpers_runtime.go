@@ -953,7 +953,7 @@ func extractCreatedBy(entry ref.Val) string {
 }
 
 // mapStringAnyType is used for type conversion
-var mapStringAnyType = reflect.TypeOf(map[string]any{})
+var mapStringAnyType = reflect.TypeFor[map[string]any]()
 
 // parseImageRef parses a container image reference into components.
 // Handles formats like:
@@ -1152,7 +1152,7 @@ func extractStringList(val ref.Val) []string {
 		return result
 	}
 	// Try native slice
-	if native, err := val.ConvertToNative(reflect.TypeOf([]any{})); err == nil {
+	if native, err := val.ConvertToNative(reflect.TypeFor[[]any]()); err == nil {
 		if slice, ok := native.([]any); ok {
 			result := make([]string, 0, len(slice))
 			for _, elem := range slice {

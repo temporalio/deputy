@@ -843,8 +843,8 @@ func rateLimitMiddleware(cfg *RateLimitConfig) func(http.Handler) http.Handler {
 			if cfg.TrustXFF || trustedChecker.isTrusted(r.RemoteAddr) {
 				if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
 					// Use first IP in X-Forwarded-For chain (original client)
-					if idx := strings.Index(xff, ","); idx != -1 {
-						clientIP = strings.TrimSpace(xff[:idx])
+					if before, _, ok := strings.Cut(xff, ","); ok {
+						clientIP = strings.TrimSpace(before)
 					} else {
 						clientIP = strings.TrimSpace(xff)
 					}

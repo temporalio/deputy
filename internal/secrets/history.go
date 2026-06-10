@@ -5,6 +5,7 @@ import (
 	"context"
 	"io"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
@@ -345,10 +346,8 @@ type secretHistory struct {
 }
 
 func (s *secretHistory) addAuthor(author string) {
-	for _, a := range s.authors {
-		if a == author {
-			return
-		}
+	if slices.Contains(s.authors, author) {
+		return
 	}
 	s.authors = append(s.authors, author)
 }
@@ -361,8 +360,8 @@ func secretKey(f Finding) string {
 
 // firstLine returns the first line of a string.
 func firstLine(s string) string {
-	if idx := strings.Index(s, "\n"); idx >= 0 {
-		return s[:idx]
+	if before, _, ok := strings.Cut(s, "\n"); ok {
+		return before
 	}
 	return s
 }
@@ -391,12 +390,7 @@ func isBinaryFile(name string) bool {
 		".wasm", ".pyc", ".class", ".o", ".a",
 	}
 	ext := strings.ToLower(filepath.Ext(name))
-	for _, be := range binaryExts {
-		if ext == be {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(binaryExts, ext)
 }
 
 // ScanDiff scans the diff between two git refs for new secrets.

@@ -20,6 +20,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"github.com/ulikunitz/xz"
@@ -911,13 +912,7 @@ func extractPESections(content []byte) ([]BinarySection, error) {
 	for _, section := range pf.Sections {
 		// Check if section name matches
 		sectionName := strings.TrimRight(section.Name, "\x00")
-		found := false
-		for _, interesting := range interestingSections {
-			if sectionName == interesting {
-				found = true
-				break
-			}
-		}
+		found := slices.Contains(interestingSections, sectionName)
 		if !found {
 			continue
 		}

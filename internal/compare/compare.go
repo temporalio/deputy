@@ -164,15 +164,16 @@ func NormalizeGopkgInURL(name string) string {
 		if base, ok := parseVersion(parts[i]); ok {
 			// Found versioned segment at i.
 			// Reconstruct: github.com/user/part1/.../base/...
-			res := "github.com/" + user
+			var res strings.Builder
+			res.WriteString("github.com/" + user)
 			for k := 1; k < i; k++ {
-				res += "/" + parts[k]
+				res.WriteString("/" + parts[k])
 			}
-			res += "/" + base
+			res.WriteString("/" + base)
 			if i+1 < len(parts) {
-				res += "/" + strings.Join(parts[i+1:], "/")
+				res.WriteString("/" + strings.Join(parts[i+1:], "/"))
 			}
-			return res
+			return res.String()
 		}
 	}
 
@@ -524,8 +525,8 @@ func normalizeEcosystemForComparison(ecos string) string {
 		return ""
 	}
 	// Strip version suffix from OS distributions (e.g., "debian:11" -> "debian")
-	if idx := strings.Index(ecos, ":"); idx != -1 {
-		base := ecos[:idx]
+	if before, _, ok := strings.Cut(ecos, ":"); ok {
+		base := before
 		// Only strip version for known OS distributions
 		switch base {
 		case "debian", "ubuntu", "alpine", "fedora", "centos", "rhel", "rocky", "alma", "opensuse", "sles":

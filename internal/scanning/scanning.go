@@ -6,6 +6,7 @@ package scanning
 import (
 	"context"
 	"fmt"
+	"maps"
 	"path"
 	"strings"
 	"time"
@@ -535,9 +536,7 @@ func queryVulnerabilities(ctx context.Context, pkgs []*extractor.Package, direct
 		if advisories == nil {
 			advisories = make(map[string]*vulnerabilityv1.Advisory)
 		}
-		for id, adv := range scAdvisories {
-			advisories[id] = adv
-		}
+		maps.Copy(advisories, scAdvisories)
 	}
 
 	span.SetAttributes(attribute.Int("deputy.finding.count", len(findings)))

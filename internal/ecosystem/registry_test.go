@@ -1,6 +1,7 @@
 package ecosystem
 
 import (
+	"slices"
 	"testing"
 )
 
@@ -230,13 +231,7 @@ func TestGraphSupportedEcosystems(t *testing.T) {
 	}
 
 	// Go should be in the list
-	found := false
-	for _, e := range ecos {
-		if e == Go {
-			found = true
-			break
-		}
-	}
+	found := slices.Contains(ecos, Go)
 	if !found {
 		t.Error("expected Go to be in graph-supported ecosystems")
 	}

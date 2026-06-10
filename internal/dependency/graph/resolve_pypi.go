@@ -123,11 +123,11 @@ type poetryLock struct {
 }
 
 type poetryPackage struct {
-	Name         string                 `toml:"name"`
-	Version      string                 `toml:"version"`
-	Category     string                 `toml:"category"` // "main" or "dev"
-	Optional     bool                   `toml:"optional"`
-	Dependencies map[string]interface{} `toml:"dependencies"`
+	Name         string         `toml:"name"`
+	Version      string         `toml:"version"`
+	Category     string         `toml:"category"` // "main" or "dev"
+	Optional     bool           `toml:"optional"`
+	Dependencies map[string]any `toml:"dependencies"`
 }
 
 // processPoetryLock parses poetry.lock and adds edges to the graph.
@@ -227,16 +227,16 @@ func (r *PyPIResolver) processPoetryLock(ctx context.Context, g *Graph, files Fi
 type pyprojectToml struct {
 	Tool struct {
 		Poetry struct {
-			Dependencies    map[string]interface{} `toml:"dependencies"`
-			DevDependencies map[string]interface{} `toml:"dev-dependencies"`
+			Dependencies    map[string]any `toml:"dependencies"`
+			DevDependencies map[string]any `toml:"dev-dependencies"`
 			Group           map[string]struct {
-				Dependencies map[string]interface{} `toml:"dependencies"`
+				Dependencies map[string]any `toml:"dependencies"`
 			} `toml:"group"`
 		} `toml:"poetry"`
 	} `toml:"tool"`
 	Project struct {
-		Dependencies         []string               `toml:"dependencies"`
-		OptionalDependencies map[string][]string    `toml:"optional-dependencies"`
+		Dependencies         []string            `toml:"dependencies"`
+		OptionalDependencies map[string][]string `toml:"optional-dependencies"`
 	} `toml:"project"`
 }
 
@@ -306,15 +306,15 @@ func (r *PyPIResolver) processPipfileLock(ctx context.Context, g *Graph, files F
 
 // uvLock represents the uv.lock format.
 type uvLock struct {
-	Version  int          `toml:"version"`
-	Packages []uvPackage  `toml:"package"`
+	Version  int         `toml:"version"`
+	Packages []uvPackage `toml:"package"`
 }
 
 type uvPackage struct {
-	Name         string       `toml:"name"`
-	Version      string       `toml:"version"`
-	Source       interface{}  `toml:"source"`
-	Dependencies []uvDep      `toml:"dependencies"`
+	Name         string  `toml:"name"`
+	Version      string  `toml:"version"`
+	Source       any     `toml:"source"`
+	Dependencies []uvDep `toml:"dependencies"`
 }
 
 type uvDep struct {

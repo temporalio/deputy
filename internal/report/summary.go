@@ -62,10 +62,7 @@ func BuildSummary(cons []vulnerability.Consolidated, stats vulnerabilityv1.Stats
 	}
 
 	migration := int(stats.FixViaMigration)
-	unfixed := int(stats.Unique) - int(stats.FixAvailable) - migration - commandFixable
-	if unfixed < 0 {
-		unfixed = 0
-	}
+	unfixed := max(int(stats.Unique)-int(stats.FixAvailable)-migration-commandFixable, 0)
 	commands, stdlibRec := remediation.CommandsFromConsolidated(cons)
 	// Choose a header verb that matches the actions actually recommended.
 	// "Upgrade" fits when every fix is an in-place version bump; once any

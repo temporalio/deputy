@@ -3,6 +3,7 @@ package output
 import (
 	"bytes"
 	"io"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -189,13 +190,7 @@ func TestAllFormats(t *testing.T) {
 	}
 
 	// Check that table format is included
-	found := false
-	for _, f := range formats {
-		if f == FormatTable {
-			found = true
-			break
-		}
-	}
+	found := slices.Contains(formats, FormatTable)
 	if !found {
 		t.Error("AllFormats() should include FormatTable")
 	}

@@ -61,11 +61,11 @@ func RepoSlugFromURL(gitURL string) string {
 	s = strings.Replace(s, ":", "/", 1)
 	s = strings.TrimSuffix(s, ".git")
 	// Drop the host component; keep the path.
-	slash := strings.Index(s, "/")
-	if slash < 0 {
+	_, after, ok := strings.Cut(s, "/")
+	if !ok {
 		return ""
 	}
-	owner, repo := SplitOwnerRepo(s[slash+1:])
+	owner, repo := SplitOwnerRepo(after)
 	if owner == "" || repo == "" {
 		return ""
 	}

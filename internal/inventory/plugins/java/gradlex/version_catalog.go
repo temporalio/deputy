@@ -93,8 +93,8 @@ func ParseVersionCatalog(content []byte) (*VersionCatalog, error) {
 
 	// Resolve version references in libraries
 	for alias, lib := range catalog.Libraries {
-		if strings.HasPrefix(lib.Version, "ref:") {
-			ref := strings.TrimPrefix(lib.Version, "ref:")
+		if after, ok := strings.CutPrefix(lib.Version, "ref:"); ok {
+			ref := after
 			if resolved, ok := catalog.Versions[ref]; ok {
 				lib.Version = resolved
 				catalog.Libraries[alias] = lib
@@ -104,8 +104,8 @@ func ParseVersionCatalog(content []byte) (*VersionCatalog, error) {
 
 	// Resolve version references in plugins
 	for alias, plugin := range catalog.Plugins {
-		if strings.HasPrefix(plugin.Version, "ref:") {
-			ref := strings.TrimPrefix(plugin.Version, "ref:")
+		if after, ok := strings.CutPrefix(plugin.Version, "ref:"); ok {
+			ref := after
 			if resolved, ok := catalog.Versions[ref]; ok {
 				plugin.Version = resolved
 				catalog.Plugins[alias] = plugin

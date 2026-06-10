@@ -155,8 +155,8 @@ func TestRewriteWorkflow_PreservesIndentation(t *testing.T) {
 	if !strings.Contains(string(got), "actions/setup-go@bbbb0000") {
 		t.Error("setup-go not pinned")
 	}
-	lines := strings.Split(string(got), "\n")
-	for _, line := range lines {
+	lines := strings.SplitSeq(string(got), "\n")
+	for line := range lines {
 		if strings.Contains(line, "uses:") && !strings.HasPrefix(line, "      ") {
 			t.Errorf("indentation changed: %q", line)
 		}
