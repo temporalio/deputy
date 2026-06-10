@@ -1755,12 +1755,9 @@ func newDepsDevClient() pb.InsightsClient {
 	if err != nil {
 		return nil
 	}
-	dctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-
-	conn, err := grpc.DialContext(dctx, "api.deps.dev:443", grpc.WithTransportCredentials(credentials.NewClientTLSFromCert(pool, "")), grpc.WithBlock())
+	conn, err := grpc.NewClient("api.deps.dev:443", grpc.WithTransportCredentials(credentials.NewClientTLSFromCert(pool, "")))
 	if err != nil {
-		logs.Debug(context.Background(), "deps.dev dial failed", "error", err)
+		logs.Debug(context.Background(), "deps.dev client creation failed", "error", err)
 		return nil
 	}
 	return pb.NewInsightsClient(conn)

@@ -33,7 +33,6 @@ import (
 	"io"
 	"net"
 	"net/http"
-	"net/http/httputil"
 	"os"
 
 	"connectrpc.com/connect"
@@ -138,7 +137,7 @@ func connectToDaemon(socket string) (*Client, error) {
 	// Unix socket uses http:// scheme with custom transport
 	return &Client{
 		clients: services.RemoteClients(
-			&http.Client{Transport: &unixSocketTransport{socket: socket}},
+			&http.Client{Transport: unixSocketHTTPTransport(socket)},
 			"http://localhost",
 		),
 		mode: ModeLocalDaemon,
@@ -753,23 +752,17 @@ const (
 	SBOMFormatProtobomJSON  = sbomv1.Format_FORMAT_PROTOBOM_JSON
 )
 
-// unixSocketTransport is an http.RoundTripper that connects via Unix socket.
-type unixSocketTransport struct {
-	socket string
-}
-
-func (t *unixSocketTransport) RoundTrip(req *http.Request) (*http.Response, error) {
-	// Dial Unix socket and use it for the HTTP connection
-	conn, err := net.Dial("unix", t.socket)
-	if err != nil {
-		return nil, err
+// unixSocketHTTPTransport returns an http.Transport that routes every request
+// over the given Unix socket, ignoring the request's host. This lets the daemon
+// client speak HTTP to a local socket while still benefiting from the standard
+// transport's connection pooling and lifecycle handling.
+func unixSocketHTTPTransport(socket string) *http.Transport {
+	return &http.Transport{
+		DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
+			var d net.Dialer
+			return d.DialContext(ctx, "unix", socket)
+		},
 	}
-
-	// Create HTTP client connection over the Unix socket
-	clientConn := httputil.NewClientConn(conn, nil)
-	defer clientConn.Close()
-
-	return clientConn.Do(req)
 }
 
 // authInterceptor returns a Connect interceptor that adds Bearer authentication.

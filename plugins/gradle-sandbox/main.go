@@ -159,7 +159,7 @@ func (e *gradleSandboxExtractor) getDockerClient(ctx context.Context) (*client.C
 		return e.client, nil
 	}
 
-	cli, err := client.NewClientWithOpts(client.FromEnv, client.WithAPIVersionNegotiation())
+	cli, err := client.New(client.FromEnv)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create Docker client: %w", err)
 	}

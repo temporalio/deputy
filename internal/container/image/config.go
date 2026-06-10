@@ -272,7 +272,7 @@ func extractMetadata(cf *v1.ConfigFile, img v1.Image) Metadata {
 		OSVersion:     cf.OSVersion,
 		Variant:       cf.Variant,
 		Author:        cf.Author,
-		DockerVersion: cf.DockerVersion,
+		DockerVersion: cf.DockerVersion, //nolint:staticcheck // deprecated upstream, but the only source for this image-metadata field
 	}
 
 	if !cf.Created.Time.IsZero() {

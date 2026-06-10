@@ -16,7 +16,7 @@ import (
 // testGHClient creates a GitHub client pointing at a test server URL.
 func testGHClient(t *testing.T, baseURL string) *github.Client {
 	t.Helper()
-	client, err := github.NewEnterpriseClient(baseURL+"/", baseURL+"/upload/", nil)
+	client, err := github.NewClient(nil).WithEnterpriseURLs(baseURL+"/", baseURL+"/upload/")
 	if err != nil {
 		t.Fatalf("creating test GitHub client: %v", err)
 	}
