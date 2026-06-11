@@ -26,6 +26,7 @@ import (
 	"time"
 
 	sandboxv1 "github.com/temporalio/deputy/gen/deputy/sandbox/v1"
+	"github.com/temporalio/deputy/internal/globmatch"
 )
 
 // Isolator manages workspace isolation for sandbox execution.
@@ -367,11 +368,11 @@ func (g *gitWorktreeIsolator) OriginalPath() string {
 
 // overlayIsolator uses overlayfs for copy-on-write isolation.
 type overlayIsolator struct {
-	cfg          Config
-	upperDir     string
-	workDir      string
-	mergedDir    string
-	setupDone    bool
+	cfg       Config
+	upperDir  string
+	workDir   string
+	mergedDir string
+	setupDone bool
 }
 
 func newOverlayIsolator(cfg Config) (*overlayIsolator, error) {
@@ -998,16 +999,12 @@ func copyFileWithRoots(srcRoot, dstRoot *os.Root, path string, mode os.FileMode)
 	return dstFile.Chmod(mode)
 }
 
-// matchesAnyPattern checks if path matches any glob pattern.
+// matchesAnyPattern checks if path matches any gitignore-flavored glob pattern
+// (recursive "**" supported via globmatch).
 func matchesAnyPattern(path string, patterns []string) bool {
-	for _, pattern := range patterns {
-		if matched, _ := filepath.Match(pattern, path); matched {
-			return true
-		}
-		// Also try matching against just the filename
-		if matched, _ := filepath.Match(pattern, filepath.Base(path)); matched {
-			return true
-		}
+	m, err := globmatch.Compile(patterns)
+	if err != nil {
+		return false
 	}
-	return false
+	return m.MatchPath(path)
 }

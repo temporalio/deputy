@@ -60,6 +60,40 @@ func TestMatcher_MatchPath(t *testing.T) {
 	}
 }
 
+func TestMatcher_AnyDepth(t *testing.T) {
+	tests := []struct {
+		name     string
+		patterns []string
+		path     string
+		want     bool
+	}{
+		// Without AnyDepth a slashed pattern is anchored (covered elsewhere);
+		// with AnyDepth it matches anywhere in the path.
+		{"slashed pattern matches at any depth", []string{"foo/bar"}, "x/y/foo/bar", true},
+		{"slashed pattern still matches at root", []string{"foo/bar"}, "foo/bar", true},
+		{"dir-anywhere via doublestar tail", []string{".git/**"}, "a/b/.git/config", true},
+		{"middle component match", []string{"node_modules/**"}, "pkg/node_modules/dep/index.js", true},
+		{"no false match on different name", []string{"foo/bar"}, "x/foo/baz", false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			m, err := Compile(tc.patterns, AnyDepth())
+			if err != nil {
+				t.Fatalf("Compile(%v): %v", tc.patterns, err)
+			}
+			if got := m.MatchPath(tc.path); got != tc.want {
+				t.Errorf("MatchPath(%q) with %v = %v, want %v", tc.path, tc.patterns, got, tc.want)
+			}
+		})
+	}
+
+	// Anchoring difference: a slashed pattern matches deep only with AnyDepth.
+	anchored, _ := Compile([]string{"foo/bar"})
+	if anchored.MatchPath("x/foo/bar") {
+		t.Error("without AnyDepth, slashed pattern must stay root-anchored")
+	}
+}
+
 func TestCompile_InvalidPattern(t *testing.T) {
 	if _, err := Compile([]string{"["}); err == nil {
 		t.Error("expected error for malformed pattern, got nil")

@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+
+	"github.com/temporalio/deputy/internal/globmatch"
 )
 
 // Guardrails defines safety constraints for AI agent operations.
@@ -650,102 +652,23 @@ func normalizePath(path string) string {
 	return filepath.Clean(path)
 }
 
-// matchPath checks if a path matches a glob-like pattern.
+// matchPath checks if a path matches a glob-like allow/deny pattern. Matching
+// is any-depth (a slashed pattern matches anywhere in the path) so a deny rule
+// is not bypassed by depth, and recursive "**" is handled by globmatch.
 func matchPath(path, pattern string) bool {
-	// Handle home directory patterns
+	// Handle home directory patterns: when the path is not expressed relative
+	// to home, treat a "~/..." deny/allow rule as matching at any depth.
 	if strings.HasPrefix(pattern, "~/") {
 		if !strings.HasPrefix(path, "~/") && !strings.Contains(path, "/.") {
-			// Try to match against common home directory patterns
 			pattern = strings.Replace(pattern, "~/", "**/", 1)
 		}
 	}
 
-	// Handle ** glob patterns (recursive)
-	if strings.Contains(pattern, "**") {
-		return matchDoubleStarGlob(path, pattern)
-	}
-
-	// Standard glob matching
-	matched, err := filepath.Match(pattern, path)
+	m, err := globmatch.Compile([]string{pattern}, globmatch.AnyDepth())
 	if err != nil {
 		return false
 	}
-	if matched {
-		return true
-	}
-
-	// Also try matching just the filename
-	base := filepath.Base(path)
-	matched, _ = filepath.Match(pattern, base)
-	return matched
-}
-
-// matchDoubleStarGlob handles ** glob patterns.
-// ** matches any sequence of directories (including zero).
-func matchDoubleStarGlob(path, pattern string) bool {
-	// Split pattern by **
-	parts := strings.Split(pattern, "**")
-	if len(parts) == 1 {
-		// No **, use standard matching
-		matched, _ := filepath.Match(pattern, path)
-		return matched
-	}
-
-	// Check prefix (part before **)
-	prefix := strings.TrimSuffix(parts[0], "/")
-	if prefix != "" {
-		if !strings.HasPrefix(path, prefix) {
-			return false
-		}
-		// Remove prefix from path for suffix matching
-		path = strings.TrimPrefix(path, prefix)
-		path = strings.TrimPrefix(path, "/")
-	}
-
-	// Check suffix (part after **)
-	if len(parts) > 1 && parts[len(parts)-1] != "" {
-		suffix := strings.TrimPrefix(parts[len(parts)-1], "/")
-
-		// For patterns like **/.github/workflows/*, we need to check if path contains the suffix pattern
-		if strings.Contains(suffix, "*") {
-			// Split suffix into directory parts and glob pattern
-			suffixParts := strings.Split(suffix, "/")
-			globPart := suffixParts[len(suffixParts)-1]
-			dirPart := strings.Join(suffixParts[:len(suffixParts)-1], "/")
-
-			if dirPart != "" {
-				// Path must contain the directory part
-				if !strings.Contains(path, dirPart) {
-					return false
-				}
-				// Get the part after dirPart for glob matching
-				idx := strings.Index(path, dirPart)
-				remainingPath := path[idx+len(dirPart):]
-				remainingPath = strings.TrimPrefix(remainingPath, "/")
-
-				// Match the glob against the remaining filename
-				if remainingPath != "" {
-					matched, _ := filepath.Match(globPart, remainingPath)
-					if !matched {
-						// Also try matching just the base name
-						matched, _ = filepath.Match(globPart, filepath.Base(path))
-					}
-					return matched
-				}
-			} else {
-				// Just a glob pattern like **/*.go
-				matched, _ := filepath.Match(globPart, filepath.Base(path))
-				return matched
-			}
-		} else {
-			// No glob in suffix, check exact match
-			if !strings.HasSuffix(path, suffix) && !strings.Contains(path, suffix) {
-				return false
-			}
-		}
-	}
-
-	return true
+	return m.MatchPath(path)
 }
 
 // Merge combines two Guardrails configurations, with the overlay taking precedence.

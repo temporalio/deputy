@@ -23,6 +23,23 @@ type Matcher struct {
 	globs []glob.Glob
 }
 
+// Option configures Compile.
+type Option func(*config)
+
+type config struct {
+	anyDepth bool
+}
+
+// AnyDepth makes slashed patterns match at any depth rather than being anchored
+// to the path root: with it, "foo/bar" matches "x/foo/bar" and "a/.git/**"
+// matches ".git" anywhere in the path. Without it (the default), a slashed
+// pattern is root-anchored per gitignore semantics. Use AnyDepth for masking /
+// allow-deny lists where a missed match could expose a secret; leave it off for
+// user-facing exclude lists where anchoring is the least-surprising behavior.
+func AnyDepth() Option {
+	return func(c *config) { c.anyDepth = true }
+}
+
 // Compile builds a Matcher from gitignore-flavored glob patterns.
 //
 // Patterns use "/" as the path separator; "*" matches within a single segment
@@ -39,7 +56,11 @@ type Matcher struct {
 //
 // Compile returns an error for malformed patterns rather than silently
 // ignoring them.
-func Compile(patterns []string) (*Matcher, error) {
+func Compile(patterns []string, opts ...Option) (*Matcher, error) {
+	var cfg config
+	for _, o := range opts {
+		o(&cfg)
+	}
 	m := &Matcher{}
 	seen := make(map[string]bool)
 	add := func(expr string) error {
@@ -60,7 +81,7 @@ func Compile(patterns []string) (*Matcher, error) {
 		if base == "" {
 			continue
 		}
-		for _, expr := range expand(base) {
+		for _, expr := range expand(base, cfg.anyDepth) {
 			if err := add(expr); err != nil {
 				return nil, fmt.Errorf("invalid exclude pattern %q: %w", raw, err)
 			}
@@ -109,8 +130,9 @@ func normalize(p string) string {
 }
 
 // expand turns a normalized base pattern into the set of glob expressions that
-// implement the gitignore-flavored semantics documented on Compile.
-func expand(base string) []string {
+// implement the gitignore-flavored semantics documented on Compile. When
+// anyDepth is set, slashed patterns also match at any depth (not just the root).
+func expand(base string, anyDepth bool) []string {
 	out := []string{base, base + "/**"}
 	switch {
 	case !strings.Contains(base, "/"):
@@ -120,6 +142,10 @@ func expand(base string) []string {
 		// Already any-depth; also allow a root-level match of the remainder.
 		rest := strings.TrimPrefix(base, "**/")
 		out = append(out, rest, rest+"/**")
+	case anyDepth:
+		// Slashed pattern, any-depth requested: also match it anywhere in the
+		// path, not just anchored at the root.
+		out = append(out, "**/"+base, "**/"+base+"/**")
 	}
 	return out
 }
