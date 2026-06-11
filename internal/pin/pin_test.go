@@ -208,7 +208,7 @@ func TestPin_VerificationModes(t *testing.T) {
 
 	t.Run("warn pins flagged ref and reports it", func(t *testing.T) {
 		s := newStrategy(flagged)
-		report, err := Pin(context.Background(), testRoot(t), Options{Verification: VerificationWarn}, s)
+		report, err := Pin(t.Context(), testRoot(t), Options{Verification: VerificationWarn}, s)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -223,7 +223,7 @@ func TestPin_VerificationModes(t *testing.T) {
 
 	t.Run("default mode is warn", func(t *testing.T) {
 		s := newStrategy(flagged)
-		report, err := Pin(context.Background(), testRoot(t), Options{}, s)
+		report, err := Pin(t.Context(), testRoot(t), Options{}, s)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -234,7 +234,7 @@ func TestPin_VerificationModes(t *testing.T) {
 
 	t.Run("error leaves flagged ref unpinned", func(t *testing.T) {
 		s := newStrategy(flagged)
-		report, err := Pin(context.Background(), testRoot(t), Options{Verification: VerificationError}, s)
+		report, err := Pin(t.Context(), testRoot(t), Options{Verification: VerificationError}, s)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -249,7 +249,7 @@ func TestPin_VerificationModes(t *testing.T) {
 	t.Run("unverifiable is never an imposter", func(t *testing.T) {
 		for _, mode := range []VerificationMode{VerificationWarn, VerificationError} {
 			s := newStrategy(unverifiable)
-			report, err := Pin(context.Background(), testRoot(t), Options{Verification: mode}, s)
+			report, err := Pin(t.Context(), testRoot(t), Options{Verification: mode}, s)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -264,7 +264,7 @@ func TestPin_VerificationModes(t *testing.T) {
 
 	t.Run("off skips verification entirely", func(t *testing.T) {
 		s := newStrategy(flagged)
-		report, err := Pin(context.Background(), testRoot(t), Options{Verification: VerificationOff}, s)
+		report, err := Pin(t.Context(), testRoot(t), Options{Verification: VerificationOff}, s)
 		if err != nil {
 			t.Fatal(err)
 		}
