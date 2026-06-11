@@ -101,14 +101,56 @@ type Stats struct {
 	Errors        int `json:"errors"`
 	Verified      int `json:"verified"`
 	Suspicious    int `json:"suspicious"`
+	// Flagged counts refs pinned despite a provenance concern (warn mode):
+	// likely-imposter findings that did not block the pin.
+	Flagged int `json:"flagged,omitempty"`
+	// Unverifiable counts refs whose provenance could not be checked (rate
+	// limit / network / missing token); these are pinned with a warning.
+	Unverifiable int `json:"unverifiable,omitempty"`
 }
+
+// VerificationMode controls how provenance findings affect the pin operation.
+type VerificationMode string
+
+const (
+	// VerificationWarn (the default) verifies and reports provenance concerns
+	// but still pins every ref and exits 0. A floating tag already resolves to
+	// the pinned SHA at runtime, so freezing it is no riskier than leaving it
+	// floating; warnings surface the findings for review.
+	VerificationWarn VerificationMode = "warn"
+	// VerificationError pins only refs that pass verification; a flagged
+	// (likely-imposter) ref is left unpinned and reported, and the operation
+	// exits non-zero. Intended for strict CI gates.
+	VerificationError VerificationMode = "error"
+	// VerificationOff disables provenance checks entirely.
+	VerificationOff VerificationMode = "off"
+)
 
 // Options configures the pin operation.
 type Options struct {
-	DryRun           bool
-	SkipVerification bool     // skip provenance checks during pinning
-	Concurrency      int      // parallel API requests (default: 4)
-	Exclude          []string // glob patterns for action names to skip
+	DryRun bool
+	// SkipVerification disables provenance checks. Equivalent to
+	// Verification == VerificationOff; retained for backward compatibility.
+	SkipVerification bool
+	// Verification selects how provenance findings are handled. Empty defaults
+	// to VerificationWarn.
+	Verification VerificationMode
+	Concurrency  int      // parallel API requests (default: 4)
+	Exclude      []string // glob patterns for action names to skip
+}
+
+// verificationMode resolves the effective mode, honoring SkipVerification and
+// defaulting to warn.
+func (o *Options) verificationMode() VerificationMode {
+	if o.SkipVerification {
+		return VerificationOff
+	}
+	switch o.Verification {
+	case VerificationOff, VerificationWarn, VerificationError:
+		return o.Verification
+	default:
+		return VerificationWarn
+	}
 }
 
 // concurrency returns the configured concurrency level, defaulting to 4.
@@ -185,14 +227,20 @@ type Update struct {
 
 // Verification captures the result of provenance checks on a pinned reference.
 type Verification struct {
-	Signed          bool     `json:"signed"`
-	SignatureValid  bool     `json:"signatureValid"`
-	SignatureReason string   `json:"signatureReason,omitempty"`
-	OnBranch        bool     `json:"onBranch"`
-	BranchName      string   `json:"branchName,omitempty"`
-	IsForkCommit    bool     `json:"isForkCommit"`
-	CommitAuthor    string   `json:"commitAuthor,omitempty"`
-	Warnings        []string `json:"warnings,omitempty"`
+	Signed          bool   `json:"signed"`
+	SignatureValid  bool   `json:"signatureValid"`
+	SignatureReason string `json:"signatureReason,omitempty"`
+	OnBranch        bool   `json:"onBranch"`
+	BranchName      string `json:"branchName,omitempty"`
+	// IsForkCommit indicates a likely imposter: the commit is unsigned and not
+	// reachable from the default branch (or absent from the repo entirely).
+	IsForkCommit bool `json:"isForkCommit"`
+	// Unverifiable indicates provenance could not be checked (rate limit,
+	// network error, missing token, renamed repo). This is NOT an imposter
+	// signal — it means "unknown", and must never be treated as fatal.
+	Unverifiable bool     `json:"unverifiable,omitempty"`
+	CommitAuthor string   `json:"commitAuthor,omitempty"`
+	Warnings     []string `json:"warnings,omitempty"`
 }
 
 // closeStrategy releases any resources a strategy lazily acquired during the
@@ -316,19 +364,9 @@ func pinRef(ctx context.Context, ref Ref, strategy Strategy, opts *Options, resu
 		result.PinnedValue = ref.Version
 		result.Reason = "already pinned"
 
-		// Still verify if not skipped
-		if !opts.SkipVerification {
-			v, err := strategy.Verify(ctx, ref)
-			if err != nil {
-				result.Reason = fmt.Sprintf("already pinned (verification failed: %v)", err)
-			} else if v != nil {
-				result.Verification = v
-				if v.IsForkCommit {
-					result.Status = StatusSuspicious
-					result.Reason = strings.Join(v.Warnings, "; ")
-				}
-			}
-		}
+		// Still verify unless disabled. In error mode a flagged ref becomes
+		// suspicious; in warn mode it stays already-pinned with a warning.
+		verifyForPin(ctx, strategy, ref, opts, &result)
 		return result
 	}
 
@@ -342,23 +380,60 @@ func pinRef(ctx context.Context, ref Ref, strategy Strategy, opts *Options, resu
 	result.PinnedValue = pinnedValue
 	result.VersionTag = versionTag
 
-	// Verify unless skipped
-	if !opts.SkipVerification {
-		pinnedRef := ref
-		pinnedRef.Version = pinnedValue
-		v, err := strategy.Verify(ctx, pinnedRef)
-		if err == nil && v != nil {
-			result.Verification = v
-			if v.IsForkCommit {
-				result.Status = StatusSuspicious
-				result.Reason = strings.Join(v.Warnings, "; ")
-				return result
-			}
-		}
+	// Verify unless disabled; in error mode a flagged ref is left unpinned.
+	pinnedRef := ref
+	pinnedRef.Version = pinnedValue
+	if !verifyForPin(ctx, strategy, pinnedRef, opts, &result) {
+		return result
 	}
 
 	result.Status = StatusPinned
 	return result
+}
+
+// verifyForPin runs provenance verification for verifyRef under the configured
+// verification mode and records the outcome on result. It reports whether the
+// ref should still be pinned: the caller sets the success status only when this
+// returns true.
+//
+// Only a flagged likely-imposter ref (Verification.IsForkCommit) under
+// VerificationError blocks pinning (returns false, setting StatusSuspicious).
+// Off mode, verification-call errors, and unverifiable results (rate limit /
+// network / missing token) never block — the ref is pinned with a warning,
+// since a floating tag already resolves to that SHA at runtime.
+func verifyForPin(ctx context.Context, strategy Strategy, verifyRef Ref, opts *Options, result *Result) bool {
+	if opts.verificationMode() == VerificationOff {
+		return true
+	}
+	v, err := strategy.Verify(ctx, verifyRef)
+	if err != nil {
+		result.Reason = appendReason(result.Reason, fmt.Sprintf("verification unavailable: %v", err))
+		return true
+	}
+	if v == nil {
+		return true
+	}
+	result.Verification = v
+	warn := strings.Join(v.Warnings, "; ")
+	if v.IsForkCommit && opts.verificationMode() == VerificationError {
+		result.Status = StatusSuspicious
+		result.Reason = appendReason(result.Reason, warn)
+		return false
+	}
+	result.Reason = appendReason(result.Reason, warn)
+	return true
+}
+
+// appendReason joins a detail onto an existing reason string with "; ".
+func appendReason(existing, add string) string {
+	switch {
+	case add == "":
+		return existing
+	case existing == "":
+		return add
+	default:
+		return existing + "; " + add
+	}
 }
 
 // writeStrategyUpdates groups pinned results by file and calls the strategy's
@@ -678,19 +753,11 @@ func processOneUpdateRef(ctx context.Context, ref Ref, strategy Strategy, opts *
 	result.PinnedValue = pinnedValue
 	result.VersionTag = newTag
 
-	// Verify unless skipped.
-	if !opts.SkipVerification {
-		pinnedRef := ref
-		pinnedRef.Version = pinnedValue
-		v, err := strategy.Verify(ctx, pinnedRef)
-		if err == nil && v != nil {
-			result.Verification = v
-			if v.IsForkCommit {
-				result.Status = StatusSuspicious
-				result.Reason = strings.Join(v.Warnings, "; ")
-				return result
-			}
-		}
+	// Verify unless disabled; in error mode a flagged ref is left unpinned.
+	pinnedRef := ref
+	pinnedRef.Version = pinnedValue
+	if !verifyForPin(ctx, strategy, pinnedRef, opts, &result) {
+		return result
 	}
 
 	result.Status = StatusUpdated
@@ -766,6 +833,16 @@ func computeStats(report *Report) {
 			report.Stats.Verified++
 		case StatusSuspicious:
 			report.Stats.Suspicious++
+		}
+
+		// Provenance concerns on refs that were still pinned (warn mode).
+		if r.Verification != nil && r.Status != StatusSuspicious {
+			if r.Verification.IsForkCommit {
+				report.Stats.Flagged++
+			}
+			if r.Verification.Unverifiable {
+				report.Stats.Unverifiable++
+			}
 		}
 	}
 }

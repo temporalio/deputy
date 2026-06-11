@@ -322,9 +322,10 @@ func TestVerifier_RenamedRepoGraceful(t *testing.T) {
 	}
 }
 
-func TestVerifier_RateLimited_UnsignedFlagsSuspicious(t *testing.T) {
-	// When the API returns 403 (rate limited) and the commit is unsigned,
-	// the verifier should flag it as suspicious because we can't verify reachability.
+func TestVerifier_RateLimited_Unverifiable(t *testing.T) {
+	// When the API returns 403 (rate limited), reachability is unknown. That is
+	// NOT evidence of an imposter, so the verifier marks the result unverifiable
+	// rather than a fork/imposter commit — even when the commit is unsigned.
 	const (
 		owner = "actions"
 		repo  = "checkout"
@@ -355,8 +356,11 @@ func TestVerifier_RateLimited_UnsignedFlagsSuspicious(t *testing.T) {
 		t.Fatalf("expected graceful handling, got error: %v", err)
 	}
 
-	if !result.IsForkCommit {
-		t.Error("expected unsigned commit with rate-limited verification to be flagged as suspicious")
+	if result.IsForkCommit {
+		t.Error("rate-limited (unverifiable) reachability must not be classified as an imposter")
+	}
+	if !result.Unverifiable {
+		t.Error("expected rate-limited verification to be marked unverifiable")
 	}
 }
 
@@ -408,11 +412,11 @@ func TestVerifier_RateLimited_SignedPasses(t *testing.T) {
 func TestVerifier_NestedAnnotatedTags(t *testing.T) {
 	// Tag object → tag object → commit (two levels of indirection)
 	const (
-		owner        = "example"
-		repo         = "nested-tags"
-		outerTagSHA  = "1111111111111111111111111111111111111111"
-		innerTagSHA  = "2222222222222222222222222222222222222222"
-		commitSHA    = "3333333333333333333333333333333333333333"
+		owner       = "example"
+		repo        = "nested-tags"
+		outerTagSHA = "1111111111111111111111111111111111111111"
+		innerTagSHA = "2222222222222222222222222222222222222222"
+		commitSHA   = "3333333333333333333333333333333333333333"
 	)
 
 	mux := http.NewServeMux()

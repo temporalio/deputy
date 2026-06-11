@@ -82,32 +82,30 @@ func (v *Verifier) Verify(ctx context.Context, owner, repo, sha string) (*pin.Ve
 			status = repoResp.StatusCode
 		}
 		if status == http.StatusNotFound {
-			// Repo renamed or deleted — skip reachability, rely on signature.
+			// Repo renamed or deleted — reachability is unknown, not an imposter.
 			slog.Warn("cannot fetch repo info, skipping branch reachability check",
 				"owner", owner, "repo", repo, "status", status, "error", err)
+			result.Unverifiable = true
 			result.Warnings = append(result.Warnings,
 				fmt.Sprintf("could not verify branch reachability: repo %s/%s not found (renamed or deleted?)", owner, repo))
 			return result, nil
 		}
 		if status == http.StatusForbidden {
-			// Rate limited or auth required — can't verify, flag as suspicious
-			// to avoid silently passing imposter commits.
+			// Rate limited or auth required — reachability is unknown. This is
+			// NOT evidence of an imposter, so mark it unverifiable rather than
+			// suspicious; the caller decides how to treat unverifiable refs.
 			slog.Warn("rate limited or forbidden fetching repo info",
 				"owner", owner, "repo", repo, "status", status, "error", err)
+			result.Unverifiable = true
 			result.Warnings = append(result.Warnings,
-				fmt.Sprintf("could not verify branch reachability: %s/%s returned %d (rate limited?)", owner, repo, status))
-			// If commit is also unsigned, flag as suspicious.
-			if !result.SignatureValid {
-				result.IsForkCommit = true
-				result.Warnings = append(result.Warnings,
-					"unsigned commit with unverifiable reachability (possible imposter)")
-			}
+				fmt.Sprintf("could not verify branch reachability: %s/%s returned %d (rate limited or token required?)", owner, repo, status))
 			return result, nil
 		}
 		return nil, fmt.Errorf("fetching repo info for %s/%s: %w", owner, repo, err)
 	}
 	defaultBranch := repoInfo.GetDefaultBranch()
 	if defaultBranch == "" {
+		result.Unverifiable = true
 		result.Warnings = append(result.Warnings,
 			fmt.Sprintf("could not determine default branch for %s/%s", owner, repo))
 		return result, nil
@@ -120,10 +118,11 @@ func (v *Verifier) Verify(ctx context.Context, owner, repo, sha string) (*pin.Ve
 			result.Warnings = append(result.Warnings,
 				fmt.Sprintf("commit not reachable from %s (possible imposter commit from fork)", defaultBranch))
 		} else {
-			// Non-404 errors (rate limit, auth, server): log and report as warning,
-			// but don't silently mark as verified.
+			// Non-404 errors (rate limit, auth, server): reachability is unknown,
+			// not evidence of an imposter. Mark unverifiable and report.
 			slog.Warn("branch comparison failed",
 				"owner", owner, "repo", repo, "sha", truncSHA(sha), "error", err)
+			result.Unverifiable = true
 			result.Warnings = append(result.Warnings,
 				fmt.Sprintf("could not verify branch reachability: %v", err))
 		}
@@ -161,7 +160,8 @@ func (v *Verifier) Verify(ctx context.Context, owner, repo, sha string) (*pin.Ve
 	//
 	// Legitimate unsigned commits on feature branches will also trigger
 	// this — the warning text says "possible" to reflect that uncertainty.
-	if !result.SignatureValid && !result.OnBranch && !result.IsForkCommit {
+	// Skip it when reachability was unverifiable: "unknown" is not "imposter".
+	if !result.SignatureValid && !result.OnBranch && !result.IsForkCommit && !result.Unverifiable {
 		result.IsForkCommit = true
 		result.Warnings = append(result.Warnings,
 			"possible imposter commit from fork (unsigned and not reachable from default branch)")

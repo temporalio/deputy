@@ -144,8 +144,24 @@ $ deputy pin update --ecosystems mise,asdf --allowed-host-bins /opt/homebrew/bin
 | --- | --- | --- |
 | `-n, --dry-run` | `false` | Show what would change without writing |
 | `--allowed-host-bins` | | Absolute paths to host binaries Deputy may execute for fallback resolution (repeatable or comma-separated) |
-| `--skip-verification` | `false` | Skip fork/imposter verification |
+| `--verification` | `warn` | Provenance verification mode: `error`, `warn`, or `off` (see [Verification modes](#verification-modes)) |
+| `--skip-verification` | `false` | Alias for `--verification=off` |
 | `--concurrency` | `4` | Max parallel network requests |
+
+## Verification modes
+
+When pinning GitHub Actions, each resolved commit SHA is checked against the GitHub API for fork/imposter provenance (signed? reachable from the default branch?). `--verification` controls how findings affect the run:
+
+| Mode | Flagged ref (likely imposter) | Exit code | Use case |
+| --- | --- | --- | --- |
+| `warn` (default) | Pinned anyway; reported as a warning | 0 | Automated pinning — a floating tag already resolves to that SHA at runtime, so freezing it is no riskier than leaving it floating |
+| `error` | Left unpinned and reported | non-zero | Strict CI gate that must fail on any suspicious ref |
+| `off` | Not checked | 0 | Offline or token-less runs (alias `--skip-verification`) |
+
+Notes:
+
+- A ref is flagged when its commit is unsigned **and** not reachable from the repository's default branch — common and legitimate for old major tags (`@v1`) and dist-bundled actions that tag releases off the default branch. `warn` pins these and surfaces the warning so a single such ref never aborts the whole repository's pinning.
+- **Unverifiable** refs (rate limited, network error, missing `GITHUB_TOKEN`, renamed repo) are reported as warnings and pinned — they are *never* treated as imposters, in any mode.
 
 ## Exclude patterns
 
