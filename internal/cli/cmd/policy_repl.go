@@ -8,13 +8,13 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/spf13/cobra"
 	dependencyv1 "github.com/temporalio/deputy/gen/deputy/dependency/v1"
 	policyv1 "github.com/temporalio/deputy/gen/deputy/policy/v1"
 	vulnerabilityv1 "github.com/temporalio/deputy/gen/deputy/vulnerability/v1"
 	"github.com/temporalio/deputy/internal/policy"
 	"github.com/temporalio/deputy/internal/ui"
 	"github.com/temporalio/deputy/internal/ui/repl"
-	"github.com/spf13/cobra"
 )
 
 // newPolicyREPLCommand creates the `repl` subcommand for interactive policy evaluation.
@@ -154,19 +154,19 @@ func handleREPLCommandV2(line string, request map[string]string, entrypoint *str
 	case ":help", ":h":
 		r.Section("Commands")
 		r.CommandHelpAligned([]ui.CommandHelpRow{
-			{":set key=value", "set request field"},
-			{":unset key", "remove request field"},
-			{":clear", "remove all request fields"},
-			{":show", "display current context"},
-			{":example", "load scan vulnerability example (lodash CVE-2021-23337)"},
-			{":proxy", "load proxy request example (npm lodash download)"},
-			{":vuln", "load Log4Shell example (CVE-2021-44228)"},
-			{":graph", "load graph example data"},
-			{":entrypoint NAME", "set entrypoint context"},
-			{":functions", "list available helper functions"},
-			{":vars", "list available variables"},
-			{":severity", "show severity constants"},
-			{":exit / :quit / :q", "exit the REPL"},
+			{Command: ":set key=value", Description: "set request field"},
+			{Command: ":unset key", Description: "remove request field"},
+			{Command: ":clear", Description: "remove all request fields"},
+			{Command: ":show", Description: "display current context"},
+			{Command: ":example", Description: "load scan vulnerability example (lodash CVE-2021-23337)"},
+			{Command: ":proxy", Description: "load proxy request example (npm lodash download)"},
+			{Command: ":vuln", Description: "load Log4Shell example (CVE-2021-44228)"},
+			{Command: ":graph", Description: "load graph example data"},
+			{Command: ":entrypoint NAME", Description: "set entrypoint context"},
+			{Command: ":functions", Description: "list available helper functions"},
+			{Command: ":vars", Description: "list available variables"},
+			{Command: ":severity", Description: "show severity constants"},
+			{Command: ":exit / :quit / :q", Description: "exit the REPL"},
 		})
 		r.Blank()
 		r.Section("Examples")
@@ -514,8 +514,8 @@ func buildREPLPayload(request map[string]string, entrypoint string) map[string]a
 	// Add graph context for graph entrypoints
 	if strings.Contains(entrypoint, "graph") {
 		payload["stats"] = &vulnerabilityv1.Stats{
-			Total:       int32(parseIntOrZero(request["node_count"])),
-			DirectDeps:  int32(parseIntOrZero(request["direct_count"])),
+			Total:        int32(parseIntOrZero(request["node_count"])),
+			DirectDeps:   int32(parseIntOrZero(request["direct_count"])),
 			IndirectDeps: int32(parseIntOrZero(request["node_count"]) - parseIntOrZero(request["direct_count"])),
 		}
 		payload["nodes"] = []*dependencyv1.Package{}
