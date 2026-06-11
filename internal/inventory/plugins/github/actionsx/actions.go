@@ -273,6 +273,15 @@ type UsesMetadata struct {
 	Subpath string
 }
 
+// usesSubpath returns the action subpath recorded in a package's metadata, or
+// "" when there is none. Used to keep same-repo subpath actions distinct.
+func usesSubpath(p *extractor.Package) string {
+	if md, ok := p.Metadata.(*UsesMetadata); ok {
+		return md.Subpath
+	}
+	return ""
+}
+
 // splitUsesRef splits a uses string into the pre-@ portion and ref (version/tag/SHA).
 // If no @ is present, ref is empty.
 func splitUsesRef(raw string) (pre, ref string) {
@@ -435,7 +444,10 @@ func asString(v any) (string, bool) {
 	}
 }
 
-// dedupPackages collapses identical packages (type+name+version) and merges locations.
+// dedupPackages collapses identical packages (type+name+subpath+version) and
+// merges locations. The subpath is part of the identity: actions/cache/restore
+// and actions/cache/save share an owner/repo (Name) but are distinct actions,
+// so keying on Name alone would silently drop one of them.
 func dedupPackages(in []*extractor.Package) []*extractor.Package {
 	if len(in) == 0 {
 		return nil
@@ -445,7 +457,7 @@ func dedupPackages(in []*extractor.Package) []*extractor.Package {
 		if p == nil {
 			continue
 		}
-		key := strings.ToLower(strings.TrimSpace(p.PURLType)) + "|" + strings.ToLower(strings.TrimSpace(p.Name)) + "|" + strings.TrimSpace(p.Version)
+		key := strings.ToLower(strings.TrimSpace(p.PURLType)) + "|" + strings.ToLower(strings.TrimSpace(p.Name)) + "|" + strings.ToLower(strings.TrimSpace(usesSubpath(p))) + "|" + strings.TrimSpace(p.Version)
 		existing := seen[key]
 		if existing == nil {
 			seen[key] = p
