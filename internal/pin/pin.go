@@ -218,6 +218,12 @@ type Update struct {
 	// "actions/checkout/subpath").
 	Name string
 
+	// FromVersion is the exact original ref this update applies to (e.g. "v4").
+	// Rewriters MUST match it so that multiple versions of the same dependency
+	// in one file (e.g. actions/checkout@v4 and @v6) each pin to their own SHA
+	// rather than all collapsing to one. Empty means "match any version".
+	FromVersion string
+
 	// PinnedValue is the immutable pin (e.g., 40-char commit SHA).
 	PinnedValue string
 
@@ -446,6 +452,7 @@ func writeStrategyUpdates(strategy Strategy, root *os.Root, results []Result) er
 		}
 		fileUpdates[r.Ref.FilePath] = append(fileUpdates[r.Ref.FilePath], Update{
 			Name:        r.Ref.DisplayName(),
+			FromVersion: r.Ref.Version,
 			PinnedValue: r.PinnedValue,
 			VersionTag:  r.VersionTag,
 		})

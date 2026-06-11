@@ -48,7 +48,7 @@ func RewriteWorkflow(root *os.Root, relPath string, updates []pin.Update) error 
 		// Captures:
 		//   1: prefix including "uses:" and optional quote
 		//   2: the action ref (owner/repo or owner/repo/subpath)
-		//   3: the old version/SHA ref
+		//   3: the old version/SHA ref (full token)
 		//   4: optional trailing quote
 		//   5: everything after the ref on the same line (comment, etc.)
 		pattern := fmt.Sprintf(
@@ -60,8 +60,22 @@ func RewriteWorkflow(root *os.Root, relPath string, updates []pin.Update) error 
 			return fmt.Errorf("compiling regex for %s: %w", u.Name, err)
 		}
 
-		replacement := fmt.Sprintf("${1}${2}@%s${4} # %s", u.PinnedValue, u.VersionTag)
-		newContent := re.ReplaceAllString(contentStr, replacement)
+		// Rewrite only occurrences whose original ref exactly equals this
+		// update's FromVersion, so multiple versions of the same action in one
+		// file (e.g. actions/checkout@v4 and @v6) each pin to their own SHA
+		// instead of all collapsing to one. An empty FromVersion matches any.
+		// The full-token capture (group 3) plus this equality check prevents a
+		// short version (e.g. "v4") from partially matching a longer one ("v44").
+		newContent := re.ReplaceAllStringFunc(contentStr, func(match string) string {
+			m := re.FindStringSubmatch(match)
+			if m == nil {
+				return match
+			}
+			if u.FromVersion != "" && m[3] != u.FromVersion {
+				return match
+			}
+			return m[1] + m[2] + "@" + u.PinnedValue + m[4] + " # " + u.VersionTag
+		})
 		if newContent != contentStr {
 			contentStr = newContent
 			modified = true
