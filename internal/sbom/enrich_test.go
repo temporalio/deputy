@@ -97,6 +97,34 @@ func TestGenerateCPE(t *testing.T) {
 			wantEmpty: true,
 		},
 		{
+			name:    "mise registry-backed tool delegates to underlying artifact",
+			purl:    &purl.PackageURL{Type: "mise", Name: "npm:prettier", Version: "3.0.0"},
+			pkgName: "npm:prettier",
+			version: "3.0.0",
+			wantCPE: "cpe:2.3:a:prettier:prettier:3.0.0:*:*:*:*:node.js:*:*",
+		},
+		{
+			name:      "mise ubi release tool emits no fabricated CPE",
+			purl:      &purl.PackageURL{Type: "mise", Name: "ubi:cli/cli", Version: "2.0.0"},
+			pkgName:   "ubi:cli/cli",
+			version:   "2.0.0",
+			wantEmpty: true,
+		},
+		{
+			name:      "mise github release tool emits no fabricated CPE",
+			purl:      &purl.PackageURL{Type: "mise", Name: "github:owner/repo", Version: "1.0.0"},
+			pkgName:   "github:owner/repo",
+			version:   "1.0.0",
+			wantEmpty: true,
+		},
+		{
+			name:      "mise core runtime emits no fabricated CPE",
+			purl:      &purl.PackageURL{Type: "mise", Name: "node", Version: "20.0.0"},
+			pkgName:   "node",
+			version:   "20.0.0",
+			wantEmpty: true,
+		},
+		{
 			name: "empty version uses wildcard",
 			purl: &purl.PackageURL{
 				Type:    "npm",

@@ -70,11 +70,17 @@ func ParseChecksum(s string) (algo, value string) {
 //     coverage needs either stored resolver metadata or online scan-time
 //     resolution so Deputy does not emit a wrong module root.
 //   - aqua:/ubi:/github: release-binary tools — pinning resolves repo-shaped
-//     specs through GitHub release/tag metadata, but scan/SBOM attribution still
-//     needs backend-specific asset identity plus GHSA-by-repo or CPE/NVD
-//     matching because there is no flat OSV package ecosystem.
-//   - node/python runtimes — no OSV ecosystem; would require CPE/NVD matching
-//     (Deputy already adds CPEs to SBOMs, so the data is half-present).
+//     specs through GitHub release/tag metadata, but there is no flat OSV
+//     package ecosystem for "a binary from a GitHub release". SBOM CPE
+//     attribution deliberately emits NO CPE for these rather than a fabricated
+//     owner/repo one (an owner/repo string is not a valid NVD CPE
+//     vendor:product); correct CPEs require an NVD CPE-dictionary lookup. See
+//     the mise/asdf case in [internal/sbom] generateCPE for the deferred model.
+//   - node/python runtimes — no OSV ecosystem; would likewise require an
+//     NVD CPE-dictionary lookup for accurate CPE/NVD matching.
+//
+// Registry-backed backends below DO get accurate CPEs, derived from their
+// underlying-artifact PURL (see [BackendArtifactPURL]).
 var backendPURLType = map[string]string{
 	"npm":    scalpurl.TypeNPM,
 	"cargo":  scalpurl.TypeCargo,
@@ -84,17 +90,19 @@ var backendPURLType = map[string]string{
 	"dotnet": scalpurl.TypeNuget,
 }
 
-// BackendPURL returns the canonical underlying-artifact PURL for a tool spec at
-// a specific version, or "" when the backend has no unambiguous registry
-// mapping. It handles npm scoped names (@scope/name -> namespace/name).
-func BackendPURL(backend, tool, version string) string {
+// BackendArtifactPURL returns the canonical underlying-artifact PackageURL for a
+// tool spec at a specific version, and whether the backend has an unambiguous
+// registry mapping. It handles npm scoped names (@scope/name -> namespace/name)
+// and PyPI case-folding. It is the typed form of [BackendPURL]; callers that
+// need the package's ecosystem identity (e.g. to derive a CPE) use this.
+func BackendArtifactPURL(backend, tool, version string) (scalpurl.PackageURL, bool) {
 	ptype, ok := backendPURLType[strings.ToLower(strings.TrimSpace(backend))]
 	if !ok {
-		return ""
+		return scalpurl.PackageURL{}, false
 	}
 	tool = strings.TrimSpace(tool)
 	if tool == "" {
-		return ""
+		return scalpurl.PackageURL{}, false
 	}
 	namespace, name := "", tool
 	switch {
@@ -113,7 +121,18 @@ func BackendPURL(backend, tool, version string) string {
 		Namespace: namespace,
 		Name:      name,
 		Version:   strings.TrimSpace(version),
-	}.String()
+	}, true
+}
+
+// BackendPURL returns the canonical underlying-artifact PURL for a tool spec at
+// a specific version, or "" when the backend has no unambiguous registry
+// mapping. It handles npm scoped names (@scope/name -> namespace/name).
+func BackendPURL(backend, tool, version string) string {
+	pu, ok := BackendArtifactPURL(backend, tool, version)
+	if !ok {
+		return ""
+	}
+	return pu.String()
 }
 
 // ScanPURL returns the canonical underlying-artifact PURL to use when scanning a

@@ -12,6 +12,8 @@ import (
 	pb "deps.dev/api/v3"
 	"github.com/google/osv-scalibr/purl"
 	"github.com/protobom/protobom/pkg/sbom"
+	"github.com/temporalio/deputy/internal/mise"
+	"github.com/temporalio/deputy/internal/purlx"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 )
@@ -379,6 +381,32 @@ func generateCPE(pu *purl.PackageURL, name, version string) string {
 		vendor = sanitizeCPEField(pu.Name)
 		product = sanitizeCPEField(pu.Name)
 		targetSW = ".net"
+
+	case purlx.TypeMise, purlx.TypeAsdf:
+		// A mise/asdf node names a tool by its backend key (e.g. "ubi:cli/cli",
+		// "npm:prettier"), not a CPE coordinate. Generate a CPE only when the
+		// backend maps to a real registry artifact, by delegating to that
+		// ecosystem's logic — identical to a first-class package of that type.
+		backend, tool := mise.SplitBackend(name)
+		if underlying, ok := mise.BackendArtifactPURL(backend, tool, version); ok {
+			return generateCPE(&underlying, underlying.Name, version)
+		}
+		// Release-binary and runtime tools (ubi:, github:, aqua:, core runtimes)
+		// have no registry coordinate. An owner/repo string is NOT a valid CPE
+		// vendor:product — NVD's CPE dictionary is curated and irregular (e.g.
+		// the gh CLI is cpe:2.3:a:github:cli, not cli:cli; many tools have no
+		// CPE at all). A fabricated CPE would fail to match or false-match, so
+		// emit none and let OSV remain the matching path.
+		//
+		// TODO(deputy): authoritative CPEs for these need an NVD CPE-dictionary
+		// lookup — the model Syft uses: dictionary-first, then ranked
+		// algorithmic candidates tagged with a source, surfaced as candidate
+		// SETS (a component can carry multiple CPEs) so a fuzzy matcher can try
+		// them. That requires (1) an embedded/queried NVD CPE dictionary, and
+		// (2) multi-CPE SBOM threading (protobom node Identifiers currently hold
+		// one CPE). Both are deferred; OSV stays the primary matcher. See the
+		// backend coverage notes in internal/mise/backend.go.
+		return ""
 
 	default:
 		// Generic: use name as both vendor and product
