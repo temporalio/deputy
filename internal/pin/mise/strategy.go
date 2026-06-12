@@ -20,6 +20,7 @@ import (
 
 	scalibrfs "github.com/google/osv-scalibr/fs"
 
+	"github.com/temporalio/deputy/internal/forge"
 	"github.com/temporalio/deputy/internal/mise"
 	"github.com/temporalio/deputy/internal/pin"
 )
@@ -131,9 +132,84 @@ func (s *Strategy) ShouldSkip(ref pin.Ref) (bool, string) {
 		return true, "system version"
 	case strings.HasPrefix(v, "file:"), strings.HasPrefix(v, "ref:"), strings.HasPrefix(v, "path:"):
 		return true, "non-resolvable reference"
-	default:
-		return false, ""
 	}
+	if forge, ok := nonGitHubForge(ref); ok {
+		return true, fmt.Sprintf("%s-hosted tool: native resolution supports GitHub releases only "+
+			"(pin manually or use --allowed-host-bins)", forge)
+	}
+	return false, ""
+}
+
+// nonGitHubForge reports whether a ubi:/github: tool targets a forge other than
+// GitHub — via a provider/forge tool option (e.g. "[provider=gitlab]") or a
+// host embedded in the spec (e.g. "ubi:gitlab.com/owner/repo"). Such tools are
+// resolved by mise against that forge's release API, which Deputy's native
+// resolver does not yet implement, so it must not silently resolve them against
+// GitHub. It returns the forge name (lowercased) for the skip message.
+//
+// TODO(deputy): add first-class non-GitHub forge resolution for ubi:/github:
+// tools, following the existing GitHub forge model in internal/forge: start
+// with public GitLab (release + tag listing, no auth), then authenticated
+// GitLab (token via the auth provider), then Gitea/Forgejo/Codeberg. Until
+// then these are reported as skipped rather than mis-resolved. See
+// [internal/forge] and [internal/releases] for the client shape to mirror.
+func nonGitHubForge(ref pin.Ref) (string, bool) {
+	backend, name := mise.SplitBackend(ref.Name)
+	if backend != "ubi" && backend != "github" {
+		return "", false
+	}
+	// Provider/forge tool option naming a non-GitHub host.
+	for _, key := range []string{"provider", "forge", "host", "api_url"} {
+		if val := strings.ToLower(strings.TrimSpace(ref.Options[key])); val != "" {
+			if forge, ok := nonGitHubForgeName(val); ok {
+				return forge, true
+			}
+		}
+	}
+	// A host embedded in the spec name (GitHub specs are bare owner/repo, so a
+	// dot in the first path segment indicates an explicit non-GitHub host).
+	if owner, _, _ := forge.SplitOwnerRepoRest(name); strings.Contains(owner, ".") {
+		if f, ok := nonGitHubForgeName(owner); ok {
+			return f, true
+		}
+		return "non-github", true
+	}
+	return "", false
+}
+
+// nonGitHubForgeName maps a provider/forge/host value to a forge label, or
+// reports false when it denotes GitHub (the natively supported forge).
+func nonGitHubForgeName(val string) (string, bool) {
+	switch {
+	case val == "", val == "github", strings.Contains(val, "github.com"):
+		return "", false
+	case strings.Contains(val, "gitlab"):
+		return "gitlab", true
+	case strings.Contains(val, "gitea"):
+		return "gitea", true
+	case strings.Contains(val, "forgejo"), strings.Contains(val, "codeberg"):
+		return "forgejo", true
+	default:
+		return val, true
+	}
+}
+
+// stringOptions narrows a parsed mise options map to its string-valued entries
+// (provider, exe, matching, …), which are the ones pin resolution cares about.
+func stringOptions(opts map[string]any) map[string]string {
+	if len(opts) == 0 {
+		return nil
+	}
+	out := make(map[string]string, len(opts))
+	for k, v := range opts {
+		if s, ok := v.(string); ok {
+			out[k] = s
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
 }
 
 // Discover implements pin.Strategy. It walks the filesystem for committed
@@ -189,6 +265,7 @@ func (s *Strategy) Discover(ctx context.Context, fsys scalibrfs.FS) ([]pin.Ref, 
 				Version:   version,
 				FilePath:  relPath,
 				Raw:       tool.Key + " " + version,
+				Options:   stringOptions(tool.Options),
 			}
 			ref.LockedVersion = lockedVersionForRef(lock, tool, version)
 			key := pin.DedupeKey(ref)

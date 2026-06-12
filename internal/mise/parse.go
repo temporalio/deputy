@@ -2,6 +2,7 @@ package mise
 
 import (
 	"fmt"
+	"maps"
 	"slices"
 	"strconv"
 	"strings"
@@ -105,11 +106,28 @@ func parseToolsTable(tools map[string]any) []ToolSpec {
 			Backend:  backend,
 			Name:     name,
 			Versions: versions,
-			Options:  opts,
+			Options:  mergeKeyOptions(key, opts),
 		})
 	}
 	slices.SortFunc(out, func(a, b ToolSpec) int { return strings.Compare(a.Key, b.Key) })
 	return out
+}
+
+// mergeKeyOptions folds any inline-key tool options ("ubi:cli/cli[exe=gh]")
+// into the inline-table options already parsed from the value. Table options
+// take precedence on key collision since they are the more explicit form.
+// Returns nil when there are no options of either kind.
+func mergeKeyOptions(key string, tableOpts map[string]any) map[string]any {
+	keyOpts := ToolOptions(key)
+	if len(keyOpts) == 0 {
+		return tableOpts
+	}
+	merged := make(map[string]any, len(keyOpts)+len(tableOpts))
+	for k, v := range keyOpts {
+		merged[k] = v
+	}
+	maps.Copy(merged, tableOpts)
+	return merged
 }
 
 // toolVersions extracts the requested version strings (and any inline options)
@@ -235,6 +253,7 @@ func parseToolVersions(path string, data []byte) *Config {
 			Backend:  backend,
 			Name:     name,
 			Versions: fields[1:],
+			Options:  mergeKeyOptions(key, nil),
 		})
 	}
 	slices.SortFunc(cfg.Tools, func(a, b ToolSpec) int { return strings.Compare(a.Key, b.Key) })

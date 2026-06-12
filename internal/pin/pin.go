@@ -39,6 +39,11 @@ type Ref struct {
 	// the source reference. Strategies may prefer it when pinning would otherwise
 	// resolve a fuzzy request to a newer upstream version.
 	LockedVersion string `json:"-"`
+
+	// Options carries ecosystem-specific tool options parsed from the source
+	// (e.g. mise tool options like provider/exe/matching). Strategies use it to
+	// decide resolvability; it is nil for ecosystems that have no such options.
+	Options map[string]string `json:"options,omitempty"`
 }
 
 // DisplayName returns the full dependency name including subpath.
