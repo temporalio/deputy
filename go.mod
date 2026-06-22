@@ -1,6 +1,6 @@
 module github.com/temporalio/deputy
 
-go 1.26.3
+go 1.26.4
 
 require (
 	buf.build/gen/go/bufbuild/protovalidate/protocolbuffers/go v1.36.10-20260415201107-50325440f8f2.1
