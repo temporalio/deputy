@@ -1015,7 +1015,10 @@ func splitVulnsByChange(vulns []report.Vulnerability, changes []compare.Change) 
 
 func resultFromReportVulnerabilities(vulns []report.Vulnerability) (scanning.Result, []vulnerability.Consolidated) {
 	if len(vulns) == 0 {
-		return scanning.Result{}, nil
+		// Stats must stay non-nil: callers dereference it (e.g. the diff
+		// unchanged-set threshold checks). Since Stats became a pointer, an
+		// empty result needs an explicit zero-value Stats, not a nil one.
+		return scanning.Result{Stats: &vulnerabilityv1.Stats{}}, nil
 	}
 	findings, advisories := report.SplitVulnerabilities(vulns)
 	cons := vulnerability.Consolidate(findings, advisories)
