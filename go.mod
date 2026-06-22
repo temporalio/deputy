@@ -67,7 +67,6 @@ require (
 	golang.org/x/sync v0.20.0
 	golang.org/x/term v0.43.0
 	golang.org/x/time v0.15.0
-	google.golang.org/genproto/googleapis/api v0.0.0-20260406210006-6f92a3bedf2d
 	google.golang.org/grpc v1.80.0
 	google.golang.org/protobuf v1.36.11
 	gopkg.in/yaml.v3 v3.0.1
@@ -92,7 +91,7 @@ require (
 	github.com/clipperhouse/displaywidth v0.11.0 // indirect
 	github.com/clipperhouse/uax29/v2 v2.7.0 // indirect
 	github.com/containerd/cgroups/v3 v3.1.3 // indirect
-	github.com/containerd/containerd v1.7.32 // indirect
+	github.com/containerd/containerd v1.7.33 // indirect
 	github.com/containerd/containerd/api v1.10.0 // indirect
 	github.com/containerd/continuity v0.5.0 // indirect
 	github.com/containerd/fifo v1.1.0 // indirect
@@ -127,6 +126,7 @@ require (
 	go.opencensus.io v0.24.0 // indirect
 	go.uber.org/zap v1.28.0 // indirect
 	google.golang.org/genproto v0.0.0-20260401024825-9d38bb4040a9 // indirect
+	google.golang.org/genproto/googleapis/api v0.0.0-20260406210006-6f92a3bedf2d // indirect
 	pgregory.net/rapid v1.3.0 // indirect
 )
 
@@ -137,7 +137,7 @@ require (
 	deps.dev/util/maven v0.0.0-20260422013440-90c27f84dd6f // indirect
 	deps.dev/util/pypi v0.0.0-20260422013440-90c27f84dd6f // indirect
 	deps.dev/util/resolve v0.0.0-20250903005441-604c45d5b44b // indirect
-	deps.dev/util/semver v0.0.0-20260422013440-90c27f84dd6f // indirect
+	deps.dev/util/semver v0.0.0-20260422013440-90c27f84dd6f
 	github.com/GehirnInc/crypt v0.0.0-20230320061759-8cc1b52080c5 // indirect
 	github.com/Microsoft/go-winio v0.6.2 // indirect
 	github.com/ProtonMail/go-crypto v1.4.1 // indirect
@@ -177,7 +177,7 @@ require (
 	github.com/go-logr/logr v1.4.3 // indirect
 	github.com/go-logr/stdr v1.2.2 // indirect
 	github.com/go-ole/go-ole v1.3.0 // indirect
-	github.com/gobwas/glob v0.2.3 // indirect
+	github.com/gobwas/glob v0.2.3
 	github.com/gogo/protobuf v1.3.2 // indirect
 	github.com/golang/groupcache v0.0.0-20241129210726-2c02b8208cf8 // indirect
 	github.com/google/go-containerregistry v0.21.6
