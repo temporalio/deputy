@@ -3,6 +3,7 @@ package graph
 import (
 	"context"
 	"fmt"
+	"maps"
 	"strings"
 	"sync"
 
@@ -214,7 +215,7 @@ func (r *MavenBOMResolver) interpolateProperties(value string, props map[string]
 
 	result := value
 	// Iterate multiple times to handle nested references
-	for i := 0; i < 10; i++ { // Max 10 iterations to prevent infinite loops
+	for range 10 { // Max 10 iterations to prevent infinite loops
 		changed := false
 		for name, propValue := range props {
 			placeholder := "${" + name + "}"
@@ -234,12 +235,10 @@ func (r *MavenBOMResolver) interpolateProperties(value string, props map[string]
 // resolvePropertyReferences resolves property references within properties.
 func (r *MavenBOMResolver) resolvePropertyReferences(props map[string]string) map[string]string {
 	result := make(map[string]string, len(props))
-	for k, v := range props {
-		result[k] = v
-	}
+	maps.Copy(result, props)
 
 	// Iterate to resolve nested references
-	for i := 0; i < 10; i++ {
+	for range 10 {
 		changed := false
 		for name, value := range result {
 			if strings.Contains(value, "${") {
@@ -358,9 +357,7 @@ func ResolveManagedVersions(ctx context.Context, boms []BOMCoordinate) map[strin
 		}
 
 		// Merge managed versions (later BOMs override earlier ones)
-		for name, version := range resolved.ManagedVersions {
-			managedVersions[name] = version
-		}
+		maps.Copy(managedVersions, resolved.ManagedVersions)
 	}
 
 	return managedVersions

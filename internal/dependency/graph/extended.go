@@ -8,6 +8,7 @@ import (
 	"iter"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 
@@ -148,10 +149,8 @@ func parseModuleVersion(s string) (string, string) {
 
 // addModuleVersion adds a version to the module's version list if not already present.
 func addModuleVersion(modules map[string][]string, mod, ver string) {
-	for _, existing := range modules[mod] {
-		if existing == ver {
-			return
-		}
+	if slices.Contains(modules[mod], ver) {
+		return
 	}
 	modules[mod] = append(modules[mod], ver)
 }
@@ -228,8 +227,8 @@ func ParseGoSum(content string) map[string]string {
 		version := parts[1]
 
 		// Skip /go.mod entries, we only want the actual module versions
-		if strings.HasSuffix(version, "/go.mod") {
-			version = strings.TrimSuffix(version, "/go.mod")
+		if before, ok := strings.CutSuffix(version, "/go.mod"); ok {
+			version = before
 		}
 
 		// If multiple versions exist, keep the highest (best approximation of MVS selection)

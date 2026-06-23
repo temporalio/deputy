@@ -9,6 +9,7 @@ import (
 	"cmp"
 	"context"
 	"iter"
+	"maps"
 	"slices"
 	"strings"
 
@@ -116,11 +117,12 @@ func (p Path) String() string {
 	if len(p) == 0 {
 		return ""
 	}
-	result := p[0].GetName()
+	var result strings.Builder
+	result.WriteString(p[0].GetName())
 	for _, n := range p[1:] {
-		result += " -> " + n.GetName()
+		result.WriteString(" -> " + n.GetName())
 	}
-	return result
+	return result.String()
 }
 
 // PURLs returns the PURLs of all nodes in the path.
@@ -309,10 +311,8 @@ func (g *Graph) AddNode(n *Node) {
 	g.nodes[n.GetPurl()] = n
 	if n.GetDirect() {
 		// Check if already in roots
-		for _, r := range g.roots {
-			if r == n.GetPurl() {
-				return
-			}
+		if slices.Contains(g.roots, n.GetPurl()) {
+			return
 		}
 		g.roots = append(g.roots, n.GetPurl())
 	}
@@ -864,9 +864,7 @@ func (g *Graph) Clone() *Graph {
 	}
 
 	// Copy package references (shallow)
-	for purl, pkg := range g.packages {
-		clone.packages[purl] = pkg
-	}
+	maps.Copy(clone.packages, g.packages)
 
 	for _, e := range g.edges {
 		clone.AddEdge(CloneEdge(e))

@@ -49,6 +49,10 @@ type ScanOptions struct {
 	// belong to known base images, populating LayerDetails.InBaseImage.
 	// This requires network access and adds latency to the scan.
 	DetectBaseImage bool
+	// ExcludePaths lists glob patterns for directory paths to skip during the
+	// filesystem walk (e.g., ".bin/**", "**/testdata"). Matching subtrees are
+	// never inventoried. See [CompileExcludePaths] for pattern semantics.
+	ExcludePaths []string
 }
 
 // ScanPackagesWorking scans the provided workspace and returns the discovered
@@ -105,6 +109,17 @@ func scanWorkspace(ctx context.Context, ws workspace.FS, opts ScanOptions) ([]*e
 	// Use the Scanner adapter to isolate scalibr dependencies
 	scanner := workspace.ToScanner(ws)
 	cfg := &scalibr.ScanConfig{ScanRoots: scanner.ScanRoots(), Plugins: plugins, Capabilities: cap}
+
+	// Prune excluded directory subtrees from the walk (e.g., vendored tool
+	// binaries under .bin). Patterns are compiled up front so a malformed glob
+	// surfaces as a scan error rather than silently scanning everything.
+	if len(opts.ExcludePaths) > 0 {
+		skip, err := CompileExcludePaths(opts.ExcludePaths)
+		if err != nil {
+			return nil, err
+		}
+		cfg.SkipDirGlob = skip
+	}
 
 	results := scalibr.New().Scan(ctx, cfg)
 	pkgs := results.Inventory.Packages

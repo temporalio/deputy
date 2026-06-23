@@ -253,9 +253,9 @@ func (p structuredPolicy) toCELSource() (string, error) {
 			seen[kv.Name] = struct{}{}
 		}
 		// expand vars in reverse author order so earlier vars are in scope for later ones
-		for i := len(p.Vars) - 1; i >= 0; i-- {
-			name := p.Vars[i].Name
-			expr := p.Vars[i].exprString()
+		for _, v := range slices.Backward(p.Vars) {
+			name := v.Name
+			expr := v.exprString()
 			body = fmt.Sprintf("([%s]).map(%s, %s)[0]", expr, name, body)
 		}
 	}

@@ -8,8 +8,62 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/spf13/cobra"
+
 	"github.com/temporalio/deputy/internal/pin"
 )
+
+func TestResolveVerificationMode(t *testing.T) {
+	newCmd := func() *cobra.Command {
+		c := &cobra.Command{}
+		c.Flags().String("verification", "warn", "")
+		c.Flags().Bool("skip-verification", false, "")
+		return c
+	}
+
+	t.Run("default is warn", func(t *testing.T) {
+		got, err := resolveVerificationMode(newCmd())
+		if err != nil || got != pin.VerificationWarn {
+			t.Fatalf("got (%q, %v), want (warn, nil)", got, err)
+		}
+	})
+
+	t.Run("explicit error", func(t *testing.T) {
+		c := newCmd()
+		_ = c.Flags().Set("verification", "error")
+		got, err := resolveVerificationMode(c)
+		if err != nil || got != pin.VerificationError {
+			t.Fatalf("got (%q, %v), want (error, nil)", got, err)
+		}
+	})
+
+	t.Run("skip-verification maps to off", func(t *testing.T) {
+		c := newCmd()
+		_ = c.Flags().Set("skip-verification", "true")
+		got, err := resolveVerificationMode(c)
+		if err != nil || got != pin.VerificationOff {
+			t.Fatalf("got (%q, %v), want (off, nil)", got, err)
+		}
+	})
+
+	t.Run("explicit --verification overrides --skip-verification", func(t *testing.T) {
+		c := newCmd()
+		_ = c.Flags().Set("verification", "error")
+		_ = c.Flags().Set("skip-verification", "true")
+		got, err := resolveVerificationMode(c)
+		if err != nil || got != pin.VerificationError {
+			t.Fatalf("got (%q, %v), want (error, nil)", got, err)
+		}
+	})
+
+	t.Run("invalid value errors", func(t *testing.T) {
+		c := newCmd()
+		_ = c.Flags().Set("verification", "bogus")
+		if _, err := resolveVerificationMode(c); err == nil {
+			t.Fatal("expected an error for an invalid --verification value")
+		}
+	})
+}
 
 // pinnedReport builds a report with a single freshly-pinned result.
 func pinnedReport() *pin.Report {

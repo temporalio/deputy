@@ -68,8 +68,8 @@ func TestEnvPreparers(t *testing.T) {
 				}
 				var gemrcPath string
 				for _, kv := range env {
-					if strings.HasPrefix(kv, "GEMRC=") {
-						gemrcPath = strings.TrimPrefix(kv, "GEMRC=")
+					if after, ok := strings.CutPrefix(kv, "GEMRC="); ok {
+						gemrcPath = after
 					}
 				}
 				if gemrcPath == "" {
@@ -211,8 +211,7 @@ func TestRunProxyExecSetsEnv(t *testing.T) {
 }
 
 func TestStartProxyInstance(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		io.WriteString(w, "ok")
 	})

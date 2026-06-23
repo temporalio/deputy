@@ -164,15 +164,16 @@ func NormalizeGopkgInURL(name string) string {
 		if base, ok := parseVersion(parts[i]); ok {
 			// Found versioned segment at i.
 			// Reconstruct: github.com/user/part1/.../base/...
-			res := "github.com/" + user
+			var res strings.Builder
+			res.WriteString("github.com/" + user)
 			for k := 1; k < i; k++ {
-				res += "/" + parts[k]
+				res.WriteString("/" + parts[k])
 			}
-			res += "/" + base
+			res.WriteString("/" + base)
 			if i+1 < len(parts) {
-				res += "/" + strings.Join(parts[i+1:], "/")
+				res.WriteString("/" + strings.Join(parts[i+1:], "/"))
 			}
-			return res
+			return res.String()
 		}
 	}
 
@@ -524,8 +525,8 @@ func normalizeEcosystemForComparison(ecos string) string {
 		return ""
 	}
 	// Strip version suffix from OS distributions (e.g., "debian:11" -> "debian")
-	if idx := strings.Index(ecos, ":"); idx != -1 {
-		base := ecos[:idx]
+	if before, _, ok := strings.Cut(ecos, ":"); ok {
+		base := before
 		// Only strip version for known OS distributions
 		switch base {
 		case "debian", "ubuntu", "alpine", "fedora", "centos", "rhel", "rocky", "alma", "opensuse", "sles":
@@ -561,6 +562,7 @@ func summarizePackage(p *extractor.Package) (string, pkgSummary) {
 		meta.key = "go|" + meta.canonical
 		return meta.key, meta
 	}
+	// npm names need no normalization beyond the lowercasing above.
 	name := strings.ToLower(p.Name)
 	// Apply ecosystem-specific name normalization
 	normalizedEcos := normalizeEcosystemForComparison(ecos)
@@ -569,9 +571,6 @@ func summarizePackage(p *extractor.Package) (string, pkgSummary) {
 		name = normalizePyPIName(name)
 	case isCargoEcosystem(normalizedEcos):
 		name = normalizeCargoName(name)
-	case isNpmEcosystem(normalizedEcos):
-		// npm names are already case-insensitive; ToLower above handles it
-		// No additional normalization needed beyond lowercasing
 	}
 	meta.canonical = name
 	if ecos == "" {
@@ -604,15 +603,6 @@ func isPyPIEcosystem(eco string) bool {
 func isCargoEcosystem(eco string) bool {
 	switch strings.ToLower(eco) {
 	case "cargo", "crates.io", "rust":
-		return true
-	}
-	return false
-}
-
-// isNpmEcosystem returns true if the ecosystem is an npm/Node.js ecosystem.
-func isNpmEcosystem(eco string) bool {
-	switch strings.ToLower(eco) {
-	case "npm", "yarn", "pnpm", "node":
 		return true
 	}
 	return false

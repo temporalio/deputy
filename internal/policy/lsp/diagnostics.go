@@ -8,10 +8,21 @@ import (
 	"github.com/google/cel-go/common"
 	"github.com/google/cel-go/common/ast"
 	"github.com/google/cel-go/parser"
-	"github.com/temporalio/deputy/internal/policy"
 	protocol "github.com/sourcegraph/go-lsp"
+	"github.com/temporalio/deputy/internal/policy"
 	"gopkg.in/yaml.v3"
 )
+
+// celParser is a reusable CEL parser configured with the standard macros,
+// matching the behavior of the deprecated top-level parser.Parse. NewParser
+// only errors on invalid options, so a failure here is a programming error.
+var celParser = func() *parser.Parser {
+	p, err := parser.NewParser(parser.Macros(parser.AllMacros...))
+	if err != nil {
+		panic(fmt.Sprintf("policy/lsp: build CEL parser: %v", err))
+	}
+	return p
+}()
 
 // diagnosticEngine produces LSP diagnostics for a document.
 type diagnosticEngine struct{}
@@ -257,7 +268,7 @@ func celErrorDiagnostic(uri protocol.DocumentURI, node *yaml.Node, err error, kn
 // widenWithAST attempts to find the smallest AST node (ident/select/call target/arg) containing the offset and returns its length and adjusted column.
 func widenWithAST(expr string, yamlCol int, lineOffset, colOffset int) (length int, adjustedCol int) {
 	src := common.NewTextSource(expr)
-	parsed, parseErrs := parser.Parse(src)
+	parsed, parseErrs := celParser.Parse(src)
 	if len(parseErrs.GetErrors()) > 0 {
 		return 0, 0
 	}
@@ -332,7 +343,7 @@ func offsetFromLineCol(text string, lineOffset, colOffset int) int {
 		return -1
 	}
 	offset := 0
-	for i := 0; i < lineOffset; i++ {
+	for i := range lineOffset {
 		offset += len(lines[i]) + 1 // include newline
 	}
 	return offset + colOffset
@@ -346,8 +357,8 @@ func isSpaceOrPunct(r rune) bool {
 
 // firstLine returns the first line of a string.
 func firstLine(s string) string {
-	if idx := strings.IndexByte(s, '\n'); idx >= 0 {
-		return s[:idx]
+	if before, _, ok := strings.Cut(s, "\n"); ok {
+		return before
 	}
 	return s
 }
@@ -355,8 +366,8 @@ func firstLine(s string) string {
 // stripCelContainer removes the trailing " (in container '...')" noise from cel-go errors.
 func stripCelContainer(s string) string {
 	const needle = " (in container"
-	if idx := strings.Index(s, needle); idx >= 0 {
-		return s[:idx]
+	if before, _, ok := strings.Cut(s, needle); ok {
+		return before
 	}
 	return s
 }
@@ -390,10 +401,7 @@ func snippetFromCelError(expr string, line, col int, hint string) snippetInfo {
 	if len(codeLine) == 0 {
 		return snippetInfo{}
 	}
-	target := col - 1
-	if target < 0 {
-		target = 0
-	}
+	target := max(col-1, 0)
 	if hint != "" {
 		if idx := strings.Index(codeLine, hint); idx >= 0 {
 			target = idx

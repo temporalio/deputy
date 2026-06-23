@@ -10,6 +10,8 @@ import (
 
 	"github.com/charmbracelet/fang"
 	"github.com/go-git/go-git/v5"
+	"github.com/spf13/cobra"
+	"github.com/spf13/pflag"
 	"github.com/temporalio/deputy/internal/cache"
 	"github.com/temporalio/deputy/internal/cli/cmd"
 	"github.com/temporalio/deputy/internal/config"
@@ -20,8 +22,6 @@ import (
 	"github.com/temporalio/deputy/internal/otel"
 	_ "github.com/temporalio/deputy/internal/targets/providers"
 	"github.com/temporalio/deputy/internal/version"
-	"github.com/spf13/cobra"
-	"github.com/spf13/pflag"
 )
 
 // Run constructs the root command hierarchy and executes it with all
@@ -121,8 +121,7 @@ func silentErrorHandler(w io.Writer, styles fang.Styles, err error) {
 	if errors.Is(err, pflag.ErrHelp) {
 		return
 	}
-	var silent *deputyerrors.SilentError
-	if errors.As(err, &silent) {
+	if _, ok := errors.AsType[*deputyerrors.SilentError](err); ok {
 		return
 	}
 	fang.DefaultErrorHandler(w, styles, err)

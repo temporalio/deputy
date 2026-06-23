@@ -9,6 +9,42 @@ import (
 	secretsv1 "github.com/temporalio/deputy/gen/deputy/secrets/v1"
 )
 
+// TestScanOptions_PathQualifiedAndRecursiveMatch proves the globmatch migration
+// fixes two bugs in matchesInclude/matchesExclude: they previously matched only
+// filepath.Base(path), so path-qualified patterns never matched, and recursive
+// "dir/**" patterns were segment-bounded.
+func TestScanOptions_PathQualifiedAndRecursiveMatch(t *testing.T) {
+	// Path-qualified exclude now matches the full relative path.
+	excl := scanOptions{excludePatterns: []string{"config/secrets.yaml"}}
+	if !excl.matchesExclude("config/secrets.yaml") {
+		t.Errorf("matchesExclude should match path-qualified pattern")
+	}
+	if excl.matchesExclude("other/secrets.yaml") {
+		t.Errorf("matchesExclude should not match a different directory")
+	}
+
+	// Recursive exclude matches nested files.
+	recur := scanOptions{excludePatterns: []string{"vendor/**"}}
+	if !recur.matchesExclude("vendor/sub/secret.env") {
+		t.Errorf("matchesExclude should match nested vendor file")
+	}
+
+	// Path-qualified include now matches the full relative path.
+	incl := scanOptions{includePatterns: []string{"src/**"}}
+	if !incl.matchesInclude("src/app/main.go") {
+		t.Errorf("matchesInclude should match nested src file")
+	}
+	if incl.matchesInclude("docs/readme.md") {
+		t.Errorf("matchesInclude should exclude non-matching file")
+	}
+
+	// Empty include matches everything.
+	empty := scanOptions{}
+	if !empty.matchesInclude("anything.go") {
+		t.Errorf("empty include patterns should match all")
+	}
+}
+
 func TestSecretsHandler_New(t *testing.T) {
 	handler, err := NewSecretsHandler()
 	if err != nil {

@@ -1,16 +1,17 @@
 package sandbox
 
 import (
+	"slices"
 	"strings"
 	"testing"
 )
 
 func TestFilterEnvVars(t *testing.T) {
 	tests := []struct {
-		name           string
-		env            map[string]string
-		wantFiltered   map[string]string
-		wantRemoved    []string
+		name         string
+		env          map[string]string
+		wantFiltered map[string]string
+		wantRemoved  []string
 	}{
 		{
 			name: "pass through safe vars",
@@ -40,7 +41,7 @@ func TestFilterEnvVars(t *testing.T) {
 		{
 			name: "filter DYLD_INSERT_LIBRARIES",
 			env: map[string]string{
-				"PATH":                    "/usr/bin",
+				"PATH":                  "/usr/bin",
 				"DYLD_INSERT_LIBRARIES": "/tmp/evil.dylib",
 			},
 			wantFiltered: map[string]string{
@@ -61,7 +62,7 @@ func TestFilterEnvVars(t *testing.T) {
 		{
 			name: "filter credentials",
 			env: map[string]string{
-				"PATH":                    "/usr/bin",
+				"PATH":                  "/usr/bin",
 				"AWS_SECRET_ACCESS_KEY": "secret",
 				"GITHUB_TOKEN":          "ghp_xxxx",
 				"ANTHROPIC_API_KEY":     "sk-ant-xxxx",
@@ -210,7 +211,7 @@ func TestGenerateExecutionID(t *testing.T) {
 
 	// Test uniqueness
 	ids := make(map[string]bool)
-	for i := 0; i < 1000; i++ {
+	for range 1000 {
 		id := GenerateExecutionID("prefix")
 		if ids[id] {
 			t.Errorf("Generated duplicate ID: %s", id)
@@ -316,13 +317,7 @@ func TestDangerousCapabilitiesCompleteness(t *testing.T) {
 	}
 
 	for _, required := range requiredDangerous {
-		found := false
-		for _, cap := range DangerousCapabilities {
-			if cap == required {
-				found = true
-				break
-			}
-		}
+		found := slices.Contains(DangerousCapabilities, required)
 		if !found {
 			t.Errorf("DangerousCapabilities should include %q", required)
 		}

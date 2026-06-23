@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"maps"
 	neturl "net/url"
 	"os"
 	"path/filepath"
@@ -205,6 +206,7 @@ WORKFLOW EXAMPLES:
 	scanCmd.Flags().String("published-after", "", "Only include vulnerabilities published on/after this date (YYYY, YYYY-MM, YYYY-MM-DD, or RFC3339)")
 	scanCmd.Flags().String("as-of", "", "Historical view: show vulnerabilities known up to and including this date (implies --published-before)")
 	scanCmd.Flags().String("filter", "", "CEL expression to filter vulnerabilities (e.g., 'vulnerability.advisory.severity.level == severity.critical')")
+	scanCmd.PersistentFlags().StringArray("exclude-path", nil, "Glob of directory paths to skip during the walk (repeatable; e.g. '.bin/**'). Unioned with scan.exclude_paths from config")
 	scanCmd.Flags().StringArray("policy", nil, "Path to a CEL policy file or bundle to evaluate against the scan report (repeatable)")
 	scanCmd.Flags().Bool("show-symbols", false, "Show symbol hints (OSV imports) in text output")
 	scanCmd.Flags().Bool("show-db-info", false, "Show database-specific metadata (e.g., review_status) in text output")
@@ -985,7 +987,6 @@ func runScanSBOM(c *services.Clients, cmd *cobra.Command, args []string) error {
 
 		group, groupCtx := errgroup.WithContext(ctx)
 		for _, ref := range imageRefs {
-			ref := ref
 			key := imageRefCacheKey(ref)
 			group.Go(func() error {
 				sem <- struct{}{}
@@ -2089,10 +2090,6 @@ func dedupeImageRefs(refs []imageSBOMRef) []imageSBOMRef {
 	return out
 }
 
-func buildScanTargetPayload(result scanning.Result) map[string]any {
-	return buildTargetPayload(result.Target)
-}
-
 func buildTargetPayload(target inventory.Target) map[string]any {
 	provenance := map[string]any{}
 	for k, v := range target.Provenance {
@@ -2148,9 +2145,7 @@ func runScanPolicies(ctx context.Context, policyPaths []string, result scanning.
 	}
 
 	// Merge extra context
-	for key, val := range extra {
-		payload[key] = val
-	}
+	maps.Copy(payload, extra)
 
 	var out []policy.Action
 	actions, err := evaluatePoliciesForCommand(ctx, policyPaths, payload, "scan", policy.EntrypointScanReport, errW)
@@ -2290,11 +2285,11 @@ func shortGitRef(ref string) string {
 	if r == "" {
 		return r
 	}
-	if strings.HasPrefix(r, "refs/tags/") {
-		return strings.TrimPrefix(r, "refs/tags/")
+	if after, ok := strings.CutPrefix(r, "refs/tags/"); ok {
+		return after
 	}
-	if strings.HasPrefix(r, "refs/heads/") {
-		return strings.TrimPrefix(r, "refs/heads/")
+	if after, ok := strings.CutPrefix(r, "refs/heads/"); ok {
+		return after
 	}
 	if strings.HasPrefix(r, "refs/") {
 		if i := strings.LastIndex(r, "/"); i >= 0 && i < len(r)-1 {

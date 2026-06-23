@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"fmt"
+	"maps"
 	"strings"
 
 	"connectrpc.com/connect"
@@ -88,6 +89,7 @@ func (h *DiffHandler) DiffPackages(
 	if req.Msg.Options != nil {
 		opts.Ecosystems = req.Msg.Options.Ecosystems
 		opts.Platform = req.Msg.Options.Platform
+		opts.ExcludePaths = req.Msg.Options.GetExcludePaths()
 	}
 
 	// Collect inventory from base target
@@ -191,6 +193,7 @@ func (h *DiffHandler) DiffVulnerabilities(
 	opts := scanning.Options{}
 	if req.Msg.ScanOptions != nil {
 		opts.Ecosystems = req.Msg.ScanOptions.Ecosystems
+		opts.ExcludePaths = req.Msg.ScanOptions.GetExcludePaths()
 	}
 
 	// Scan base target using scanning package
@@ -252,12 +255,8 @@ func (h *DiffHandler) DiffVulnerabilities(
 
 	// Merge advisories from both scans
 	mergedAdvisories := make(map[string]*vulnerabilityv1.Advisory)
-	for id, adv := range baseExec.Result.Advisories {
-		mergedAdvisories[id] = adv
-	}
-	for id, adv := range targetExec.Result.Advisories {
-		mergedAdvisories[id] = adv
-	}
+	maps.Copy(mergedAdvisories, baseExec.Result.Advisories)
+	maps.Copy(mergedAdvisories, targetExec.Result.Advisories)
 
 	// Build response
 	response := &diffv1.DiffVulnerabilitiesResponse{
@@ -328,6 +327,7 @@ func (h *DiffHandler) DiffContainerImages(ctx context.Context, req *connect.Requ
 	scanOpts := scanning.Options{}
 	if opts.ScanOptions != nil {
 		scanOpts.Ecosystems = opts.ScanOptions.Ecosystems
+		scanOpts.ExcludePaths = opts.ScanOptions.GetExcludePaths()
 	}
 
 	// Normalize image references based on transport

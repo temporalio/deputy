@@ -3,6 +3,7 @@ package remediation
 import (
 	"fmt"
 	"path/filepath"
+	"slices"
 	"strings"
 )
 
@@ -121,10 +122,8 @@ func ValidateExecutable(manager string, args []string) error {
 		return fmt.Errorf("unknown manager %q for executable %q", manager, executable)
 	}
 
-	for _, okExe := range allowed {
-		if executable == okExe {
-			return nil
-		}
+	if slices.Contains(allowed, executable) {
+		return nil
 	}
 
 	return fmt.Errorf("executable %q not allowed for manager %q", executable, manager)

@@ -189,8 +189,8 @@ func rewriteManifestPath(path, tag, digest string) string {
 
 	// Find the manifests segment and replace the tag with digest
 	suffix := "/manifests/" + tag
-	if strings.HasSuffix(path, suffix) {
-		return strings.TrimSuffix(path, suffix) + "/manifests/" + digest
+	if before, ok := strings.CutSuffix(path, suffix); ok {
+		return before + "/manifests/" + digest
 	}
 
 	return path

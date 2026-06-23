@@ -6,6 +6,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"maps"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -192,23 +193,17 @@ func (e *BuildGradleExtractor) loadProjectProperties(fs scalibrfs.FS, buildPath 
 	dir := filepath.Dir(buildPath)
 	propsFile := filepath.Join(dir, "gradle.properties")
 	if data, err := readFSFile(fs, propsFile); err == nil {
-		for k, v := range ParseGradleProperties(data) {
-			props[k] = v
-		}
+		maps.Copy(props, ParseGradleProperties(data))
 	}
 
 	// Also check root gradle.properties
 	if data, err := readFSFile(fs, "gradle.properties"); err == nil {
-		for k, v := range ParseGradleProperties(data) {
-			props[k] = v
-		}
+		maps.Copy(props, ParseGradleProperties(data))
 	}
 
 	// Try to extract ext {} block from root build.gradle
 	if data, err := readFSFile(fs, "build.gradle"); err == nil {
-		for k, v := range ParseExtBlock(data) {
-			props[k] = v
-		}
+		maps.Copy(props, ParseExtBlock(data))
 	}
 
 	return props
@@ -528,12 +523,12 @@ func ParseGradleProperties(content []byte) map[string]string {
 
 		// Parse key=value or key:value
 		var key, value string
-		if idx := strings.Index(line, "="); idx != -1 {
-			key = strings.TrimSpace(line[:idx])
-			value = strings.TrimSpace(line[idx+1:])
-		} else if idx := strings.Index(line, ":"); idx != -1 {
-			key = strings.TrimSpace(line[:idx])
-			value = strings.TrimSpace(line[idx+1:])
+		if before, after, ok := strings.Cut(line, "="); ok {
+			key = strings.TrimSpace(before)
+			value = strings.TrimSpace(after)
+		} else if before, after, ok := strings.Cut(line, ":"); ok {
+			key = strings.TrimSpace(before)
+			value = strings.TrimSpace(after)
 		} else {
 			continue
 		}

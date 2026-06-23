@@ -12,8 +12,8 @@ import (
 
 	git "github.com/go-git/go-git/v5"
 
-	"github.com/temporalio/deputy/internal/services"
 	"github.com/spf13/cobra"
+	"github.com/temporalio/deputy/internal/services"
 )
 
 // TestRunScanBasicExecution tests that a scan can run successfully on a test directory.
@@ -125,25 +125,6 @@ require github.com/acme/lib v1.2.3
 `
 	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte(mod), 0o600); err != nil {
 		t.Fatalf("write go.mod: %v", err)
-	}
-}
-
-func writePackageJSON(t *testing.T, dir string) {
-	t.Helper()
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		t.Fatalf("mkdir %s: %v", dir, err)
-	}
-	pkgJSON := `{
-  "name": "web",
-  "dependencies": {
-    "left-pad": "1.0.0"
-  }
-}`
-	if err := os.WriteFile(filepath.Join(dir, "package.json"), []byte(pkgJSON), 0o600); err != nil {
-		t.Fatalf("write package.json: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(dir, "package-lock.json"), []byte(`{}`), 0o600); err != nil {
-		t.Fatalf("write package-lock: %v", err)
 	}
 }
 

@@ -5,7 +5,66 @@ import (
 	"testing"
 
 	"github.com/google/osv-scalibr/extractor"
+	"github.com/temporalio/deputy/internal/inventory/plugins/docker/dockerfilex"
 )
+
+func TestCheckSupplyChain_SkipsExpressionImage(t *testing.T) {
+	// An image whose tag came from a build-arg expression (FROM alpine:${ALPINE_TAG})
+	// is reported by the extractor with a flattened "latest" tag but carries
+	// metadata marking it as an expression. It can't be pinned, so scan must not
+	// emit an (unactionable) finding for it.
+	tests := []struct {
+		name string
+		pkg  *extractor.Package
+	}{
+		{
+			name: "metadata flag",
+			pkg: &extractor.Package{
+				Name:     "alpine",
+				Version:  "latest",
+				PURLType: "docker",
+				Metadata: &dockerfilex.BaseImageMetadata{Raw: "alpine:${ALPINE_TAG}", IsExpression: true},
+			},
+		},
+		{
+			name: "raw metadata sniff",
+			pkg: &extractor.Package{
+				Name:     "alpine",
+				Version:  "latest",
+				PURLType: "docker",
+				Metadata: &dockerfilex.BaseImageMetadata{Raw: "alpine:${ALPINE_TAG}"},
+			},
+		},
+		{
+			name: "version sniff (no metadata)",
+			pkg: &extractor.Package{
+				Name:     "alpine",
+				Version:  "${ALPINE_TAG}",
+				PURLType: "docker",
+			},
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			findings, _ := checkSupplyChain(context.Background(), []*extractor.Package{tc.pkg}, nil, "")
+			if len(findings) != 0 {
+				t.Errorf("expected 0 findings for expression image, got %d", len(findings))
+			}
+		})
+	}
+}
+
+func TestCheckSupplyChain_SkipsExpressionAction(t *testing.T) {
+	// A GitHub Actions ref using workflow expression syntax can't be statically
+	// pinned, so it must not be reported.
+	pkgs := []*extractor.Package{
+		{Name: "foo/bar", Version: "${{ env.REF }}", PURLType: "githubactions"},
+	}
+	findings, _ := checkSupplyChain(context.Background(), pkgs, nil, "")
+	if len(findings) != 0 {
+		t.Errorf("expected 0 findings for expression action ref, got %d", len(findings))
+	}
+}
 
 func TestCheckSupplyChain_UnpinnedAction(t *testing.T) {
 	pkgs := []*extractor.Package{
@@ -203,9 +262,12 @@ func TestCheckSupplyChain_AdvisoryMetadata(t *testing.T) {
 		t.Fatal("expected advisory for DEPUTY-SC-UNPINNED-ACTION")
 	}
 
-	// FixedVersions should be set so --ignore-unfixed doesn't drop it.
-	if len(adv.FixedVersions) == 0 {
-		t.Error("expected FixedVersions to be set (for --ignore-unfixed compatibility)")
+	// The remediation is an action (a command), not a version upgrade, so it
+	// must NOT be stored in FixedVersions (which is reserved for semver upgrade
+	// targets). --ignore-unfixed compatibility is provided via the remediation
+	// field instead; see TestFilterUnfixed_KeepsCommandRemediated.
+	if len(adv.FixedVersions) != 0 {
+		t.Errorf("expected FixedVersions to be empty for command-remediated finding, got %v", adv.FixedVersions)
 	}
 
 	// CWEs should be set.

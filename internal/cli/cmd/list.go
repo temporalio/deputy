@@ -154,9 +154,10 @@ FILTERING & FORMATTING:
 
 			// Build request options
 			opts := &listv1.ListOptions{
-				OnlyDirect: onlyDirect,
-				Ref:        ref,
-				Platform:   platform,
+				OnlyDirect:   onlyDirect,
+				Ref:          ref,
+				Platform:     platform,
+				ExcludePaths: excludePathsFromCmd(cmd),
 			}
 			if len(ecos) > 0 && !(len(ecos) == 1 && ecos[0] == "all") {
 				opts.Ecosystems = ecos
@@ -228,6 +229,7 @@ FILTERING & FORMATTING:
 
 	cmd.Flags().StringVarP(&ref, "ref", "r", "HEAD", "Git reference (commit, tag, branch)")
 	cmd.Flags().StringSliceVarP(&ecos, "ecosystems", "e", []string{"all"}, "Ecosystems to include: go, npm, pypi, maven, rubygems, cargo, nuget, hex, pub, cocoapods, packagist, github-actions, mise, asdf, haskell, r, cpp (default: all)")
+	addExcludePathFlag(cmd)
 	cmd.Flags().StringVarP(&format, "format", "f", "text", "Output format: text | tsv | json")
 	cmd.Flags().StringVarP(&outPath, "output", "o", "-", "Output file path or '-' for stdout")
 	cmd.Flags().BoolVar(&noHeader, "no-header", false, "Omit header row for text/tsv formats")

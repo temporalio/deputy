@@ -837,6 +837,13 @@ func githubReleaseRepo(backend, name string) (owner, repo string, ok bool) {
 		return "", "", false
 	}
 	owner, repo = forge.SplitOwnerRepo(name)
+	// A dot in the owner segment means an explicit non-GitHub host
+	// (e.g. "gitlab.com/owner/repo"); GitHub owners never contain dots. Refuse
+	// rather than resolve a non-GitHub forge against GitHub. ShouldSkip reports
+	// these to the user; see [nonGitHubForge].
+	if strings.Contains(owner, ".") {
+		return "", "", false
+	}
 	return owner, repo, owner != "" && repo != ""
 }
 

@@ -54,6 +54,9 @@ scan:
   ecosystems:              # Limit to specific ecosystems
     - go
     - npm
+  exclude_paths:           # Directory globs to skip during the walk
+    - .bin/**              #   vendored tool binaries
+    - "**/testdata"        #   test fixtures (matches at any depth)
   ignore_unfixed: false    # Ignore vulns without fixes
   format: text             # Default output format
 
@@ -160,6 +163,7 @@ ai:
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
 | `scan.ecosystems` | []string | all | Ecosystems to scan (`go`, `npm`, `pypi`, `rubygems`) |
+| `scan.exclude_paths` | []string | (none) | Directory globs to skip during the walk (e.g. `.bin/**`). Unioned with `--exclude-path`. A slash-less name matches at any depth; a slashed path is anchored to the scan root. Honored by scan, diff, list, and graph. |
 | `scan.ignore_unfixed` | bool | `false` | Filter out vulns without available fixes |
 | `scan.format` | string | `text` | Default output format |
 

@@ -15,16 +15,17 @@ import (
 	git "github.com/go-git/go-git/v5"
 	"google.golang.org/protobuf/encoding/protojson"
 
+	"github.com/spf13/cobra"
 	secretsv1 "github.com/temporalio/deputy/gen/deputy/secrets/v1"
 	"github.com/temporalio/deputy/internal/container/image"
 	gitx "github.com/temporalio/deputy/internal/gitutil"
+	"github.com/temporalio/deputy/internal/globmatch"
 	internalproto "github.com/temporalio/deputy/internal/proto"
 	"github.com/temporalio/deputy/internal/secrets"
 	"github.com/temporalio/deputy/internal/services"
 	"github.com/temporalio/deputy/internal/targets"
 	"github.com/temporalio/deputy/internal/targets/providers"
 	ui "github.com/temporalio/deputy/internal/ui"
-	"github.com/spf13/cobra"
 )
 
 // SecretsResult is the structured output of a secrets scan.
@@ -521,19 +522,21 @@ FILTERING:
 	AddSecretsBaselineCommand(secretsCmd)
 }
 
-// scanFile scans a single file for secrets.
-func scanFile(ctx context.Context, engine *secrets.Engine, path string) ([]secrets.Finding, int, error) {
-	content, err := os.ReadFile(path)
+// secretScanFilters compiles include and exclude path matchers for a secrets
+// scan walk. Patterns use globmatch's gitignore-flavored semantics, so a single
+// MatchPath call replaces the old full-path + basename filepath.Match loops and
+// recursive "dir/**" patterns match the whole subtree. It compiles once per
+// scan operation; callers reuse the returned matchers for the entire walk.
+func secretScanFilters(includePatterns, excludePatterns []string) (excl, incl *globmatch.Matcher, err error) {
+	excl, err = globmatch.Compile(excludePatterns)
 	if err != nil {
-		return nil, 0, fmt.Errorf("reading file: %w", err)
+		return nil, nil, fmt.Errorf("compiling exclude patterns: %w", err)
 	}
-
-	findings, err := engine.ScanFile(ctx, path, content)
+	incl, err = globmatch.Compile(includePatterns)
 	if err != nil {
-		return nil, 0, fmt.Errorf("scanning file: %w", err)
+		return nil, nil, fmt.Errorf("compiling include patterns: %w", err)
 	}
-
-	return findings, 1, nil
+	return excl, incl, nil
 }
 
 // scanDirectory recursively scans a directory for secrets.
@@ -637,6 +640,12 @@ func scanDirectory(ctx context.Context, engine *secrets.Engine, dir, includeGlob
 	}
 	excludePatterns = append(excludePatterns, defaultExcludes...)
 
+	// Compile path matchers once; reused across the whole walk.
+	excl, incl, err := secretScanFilters(includePatterns, excludePatterns)
+	if err != nil {
+		return nil, 0, err
+	}
+
 	root, err := os.OpenRoot(dir)
 	if err != nil {
 		return nil, 0, err
@@ -660,38 +669,21 @@ func scanDirectory(ctx context.Context, engine *secrets.Engine, dir, includeGlob
 
 		// Skip directories
 		if d.IsDir() {
-			// Skip excluded directories early
-			for _, pattern := range excludePatterns {
-				if matched, _ := filepath.Match(strings.TrimSuffix(pattern, "/**"), d.Name()); matched {
-					return fs.SkipDir
-				}
+			// Skip excluded directories early (whole subtree).
+			if excl.MatchPath(path) {
+				return fs.SkipDir
 			}
 			return nil
 		}
 
-		// Get relative path for pattern matching
 		// Check exclude patterns
-		for _, pattern := range excludePatterns {
-			if matched, _ := filepath.Match(pattern, relPath); matched {
-				return nil
-			}
-			if matched, _ := filepath.Match(pattern, filepath.Base(relPath)); matched {
-				return nil
-			}
+		if excl.MatchPath(path) {
+			return nil
 		}
 
 		// Check include patterns (if specified)
-		if len(includePatterns) > 0 {
-			included := false
-			for _, pattern := range includePatterns {
-				if matched, _ := filepath.Match(pattern, filepath.Base(relPath)); matched {
-					included = true
-					break
-				}
-			}
-			if !included {
-				return nil
-			}
+		if !incl.Empty() && !incl.MatchPath(path) {
+			return nil
 		}
 
 		// Skip large files (> 1MB)
@@ -740,7 +732,7 @@ func isBinaryContent(content []byte) bool {
 	}
 	// Check first 512 bytes for null bytes (common indicator of binary)
 	checkLen := min(512, len(content))
-	for i := 0; i < checkLen; i++ {
+	for i := range checkLen {
 		if content[i] == 0 {
 			return true
 		}
@@ -773,136 +765,6 @@ func renderSecretsSARIF(out io.Writer, result SecretsResult, baseURI string) err
 	opts.BaseURI = baseURI
 	report := secrets.NewSARIFReport(opts)
 	return report.Write(out, result.Findings)
-}
-
-// renderSecretsText outputs the result as human-readable text.
-func renderSecretsText(out io.Writer, result SecretsResult, showValues bool) error {
-	// Header block (Deputy style)
-	fmt.Fprintln(out)
-	fmt.Fprintln(out, ui.StyleHeader.Render("Secrets Scan Results:"))
-	fmt.Fprintf(out, "  Target: %s\n", ui.StylePackageName.Render(result.Target))
-	fmt.Fprintf(out, "  Files scanned: %s\n", ui.StyleVersion.Render(fmt.Sprintf("%d", result.FilesScanned)))
-
-	// No secrets found - success case
-	if len(result.Findings) == 0 {
-		fmt.Fprintln(out)
-		fmt.Fprintln(out, ui.StyleAdded.Render("✓ No secrets detected"))
-		return nil
-	}
-
-	// Secrets found - show section header
-	fmt.Fprintln(out)
-	fmt.Fprintf(out, "%s %s\n",
-		ui.StyleDowngraded.Render("∴"),
-		ui.StyleHeader.Render(fmt.Sprintf("Secrets Detected (%d):", len(result.Findings))))
-
-	// Group findings by file, sorted for consistent output
-	byFile := make(map[string][]secrets.Finding)
-	var fileOrder []string
-	for _, f := range result.Findings {
-		file := f.File
-		if file == "" {
-			file = "(inline)"
-		}
-		if _, seen := byFile[file]; !seen {
-			fileOrder = append(fileOrder, file)
-		}
-		byFile[file] = append(byFile[file], f)
-	}
-
-	for _, file := range fileOrder {
-		fileFindings := byFile[file]
-		fmt.Fprintln(out)
-		fmt.Fprintf(out, "%s %s\n",
-			ui.StylePackageName.Render(file),
-			ui.StyleVersion.Render(fmt.Sprintf("[%d]", len(fileFindings))))
-
-		for _, f := range fileFindings {
-			// Build location string
-			location := ""
-			if f.Line > 0 {
-				location = fmt.Sprintf(":%d", f.Line)
-				if f.Column > 0 {
-					location += fmt.Sprintf(":%d", f.Column)
-				}
-			}
-
-			// Confidence indicator (styled like severity)
-			confLabel := confidenceLabel(f.Confidence)
-
-			// Secret type display
-			typeDisplay := secretTypeDisplay(f.Type)
-
-			fmt.Fprintf(out, "  %s %s %s%s\n",
-				ui.StyleVersion.Render("•"),
-				typeDisplay,
-				confLabel,
-				ui.StyleMeta.Render(location))
-
-			// Show redacted value (or actual value if --no-redact)
-			value := f.Redacted
-			if showValues && f.Value != "" {
-				value = f.Value
-			}
-			fmt.Fprintf(out, "    %s\n", ui.StyleDim.Render(value))
-
-			// Show description if available and different from type
-			if f.Description != "" && f.Description != string(f.Type) {
-				fmt.Fprintf(out, "    %s\n", ui.StyleMeta.Render(f.Description))
-			}
-		}
-	}
-
-	// Summary section
-	fmt.Fprintln(out)
-	fmt.Fprintln(out, ui.StyleHeader.Render("Summary:"))
-
-	// Count high confidence findings
-	highConfCount := 0
-	for _, f := range result.Findings {
-		if f.Confidence >= 0.9 {
-			highConfCount++
-		}
-	}
-
-	if highConfCount > 0 {
-		fmt.Fprintf(out, "  %s %s\n",
-			ui.StyleRemoved.Render("!"),
-			ui.StyleSymbol.Render(fmt.Sprintf("%d high-confidence secrets require attention", highConfCount)))
-	}
-
-	// Types breakdown (sorted)
-	var types []secrets.SecretType
-	for t := range result.Stats {
-		types = append(types, t)
-	}
-	// Sort by count descending, then by name
-	for i := 0; i < len(types)-1; i++ {
-		for j := i + 1; j < len(types); j++ {
-			if result.Stats[types[i]] < result.Stats[types[j]] ||
-				(result.Stats[types[i]] == result.Stats[types[j]] && string(types[i]) > string(types[j])) {
-				types[i], types[j] = types[j], types[i]
-			}
-		}
-	}
-
-	fmt.Fprintf(out, "  %s\n", ui.StyleMeta.Render("By type:"))
-	for _, secretType := range types {
-		count := result.Stats[secretType]
-		fmt.Fprintf(out, "    %s %s %s\n",
-			ui.StyleVersion.Render("•"),
-			secretTypeDisplay(secretType),
-			ui.StyleVersion.Render(fmt.Sprintf("(%d)", count)))
-	}
-
-	// Recommendations
-	fmt.Fprintln(out)
-	fmt.Fprintln(out, ui.StyleHeader.Render("Recommended Actions:"))
-	fmt.Fprintf(out, "  1. %s\n", ui.StyleSymbol.Render("Rotate any exposed credentials immediately"))
-	fmt.Fprintf(out, "  2. %s\n", ui.StyleSymbol.Render("Add secrets to .gitignore or use environment variables"))
-	fmt.Fprintf(out, "  3. %s\n", ui.StyleSymbol.Render("Consider using a secrets manager (Vault, AWS Secrets Manager, etc.)"))
-
-	return nil
 }
 
 // confidenceLabel returns a styled confidence indicator like severity labels.
@@ -989,7 +851,7 @@ func runHistoricalSecretsScan(ctx context.Context, out io.Writer, errW io.Writer
 	// Parse path filter patterns
 	var pathPatterns []string
 	if opts.pathFilter != "" {
-		for _, p := range strings.Split(opts.pathFilter, ",") {
+		for p := range strings.SplitSeq(opts.pathFilter, ",") {
 			p = strings.TrimSpace(p)
 			if p != "" {
 				pathPatterns = append(pathPatterns, p)
@@ -1074,7 +936,7 @@ func runDiffSecretsScan(ctx context.Context, out io.Writer, errW io.Writer, repo
 	// Create history scanner for diff operation
 	config := secrets.HistoryScanConfig{}
 	if pathFilter != "" {
-		for _, p := range strings.Split(pathFilter, ",") {
+		for p := range strings.SplitSeq(pathFilter, ",") {
 			p = strings.TrimSpace(p)
 			if p != "" {
 				config.PathFilter = append(config.PathFilter, p)
@@ -1886,7 +1748,13 @@ func scanFilesystem(ctx context.Context, engine *secrets.Engine, fsys fs.FS, inc
 	}
 	excludePatterns = append(excludePatterns, defaultExcludes...)
 
-	err := fs.WalkDir(fsys, ".", func(path string, d fs.DirEntry, err error) error {
+	// Compile path matchers once; reused across the whole walk.
+	excl, incl, err := secretScanFilters(includePatterns, excludePatterns)
+	if err != nil {
+		return nil, 0, err
+	}
+
+	err = fs.WalkDir(fsys, ".", func(path string, d fs.DirEntry, err error) error {
 		// Check context cancellation
 		select {
 		case <-ctx.Done():
@@ -1900,33 +1768,23 @@ func scanFilesystem(ctx context.Context, engine *secrets.Engine, fsys fs.FS, inc
 
 		// Skip directories
 		if d.IsDir() {
+			// Skip excluded directories early (whole subtree).
+			if excl.MatchPath(path) {
+				return fs.SkipDir
+			}
 			return nil
 		}
 
 		relPath := filepath.FromSlash(path)
 
 		// Check exclude patterns
-		for _, pattern := range excludePatterns {
-			if matched, _ := filepath.Match(pattern, relPath); matched {
-				return nil
-			}
-			if matched, _ := filepath.Match(pattern, filepath.Base(relPath)); matched {
-				return nil
-			}
+		if excl.MatchPath(path) {
+			return nil
 		}
 
 		// Check include patterns (if specified)
-		if len(includePatterns) > 0 {
-			included := false
-			for _, pattern := range includePatterns {
-				if matched, _ := filepath.Match(pattern, filepath.Base(relPath)); matched {
-					included = true
-					break
-				}
-			}
-			if !included {
-				return nil
-			}
+		if !incl.Empty() && !incl.MatchPath(path) {
+			return nil
 		}
 
 		// Skip large files (> 1MB)

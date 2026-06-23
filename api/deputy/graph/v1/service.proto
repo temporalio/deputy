@@ -93,6 +93,10 @@ message GraphOptions {
   //
   // Default is false (standard mode showing only packages in final build).
   bool extended = 9;
+
+  // ExcludePaths lists glob patterns for directory paths to skip during the
+  // filesystem walk (e.g., ".bin/**"). Matching subtrees are never inventoried.
+  repeated string exclude_paths = 10 [(buf.validate.field).repeated = {max_items: 100, items: {string: {max_len: 256}}}];
 }
 
 // BuildGraphResponse contains the constructed dependency graph.

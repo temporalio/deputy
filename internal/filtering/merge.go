@@ -1,6 +1,8 @@
 package filtering
 
 import (
+	"maps"
+
 	scanv1 "github.com/temporalio/deputy/gen/deputy/scan/v1"
 	vulnerabilityv1 "github.com/temporalio/deputy/gen/deputy/vulnerability/v1"
 	"github.com/temporalio/deputy/internal/vulnerability"
@@ -67,9 +69,7 @@ func mergeAdvisoriesProto(base, extra map[string]*vulnerabilityv1.Advisory) map[
 	}
 
 	out := make(map[string]*vulnerabilityv1.Advisory, len(base)+len(extra))
-	for id, adv := range base {
-		out[id] = adv
-	}
+	maps.Copy(out, base)
 	for id, adv := range extra {
 		if existing, ok := out[id]; ok {
 			out[id] = vulnerability.MergeAdvisory(existing, adv)

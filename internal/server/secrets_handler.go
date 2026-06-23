@@ -17,6 +17,7 @@ import (
 	"github.com/temporalio/deputy/gen/deputy/secrets/v1/secretsv1connect"
 	targetv1 "github.com/temporalio/deputy/gen/deputy/target/v1"
 	"github.com/temporalio/deputy/internal/gitutil"
+	"github.com/temporalio/deputy/internal/globmatch"
 	"github.com/temporalio/deputy/internal/logs"
 	"github.com/temporalio/deputy/internal/otel"
 	internalproto "github.com/temporalio/deputy/internal/proto"
@@ -729,27 +730,32 @@ func (h *SecretsHandler) buildScanOptions(opts *secretsv1.ScanOptions) scanOptio
 	}
 }
 
-// matchesInclude checks if path matches include patterns (empty = all).
+// matchesInclude checks if path matches include patterns (empty = all). The
+// path is matched in full with globmatch's gitignore-flavored semantics (bare
+// names match at any depth, "dir/**" matches the whole subtree), so
+// path-qualified patterns now match instead of only the basename. Compiled per
+// call; a malformed pattern is treated as no-match.
 func (opts scanOptions) matchesInclude(path string) bool {
 	if len(opts.includePatterns) == 0 {
 		return true
 	}
-	for _, pattern := range opts.includePatterns {
-		if matched, _ := filepath.Match(pattern, filepath.Base(path)); matched {
-			return true
-		}
+	m, err := globmatch.Compile(opts.includePatterns)
+	if err != nil {
+		return false
 	}
-	return false
+	return m.MatchPath(path)
 }
 
-// matchesExclude checks if path matches exclude patterns.
+// matchesExclude checks if path matches exclude patterns. The path is matched in
+// full with globmatch's gitignore-flavored semantics, so path-qualified patterns
+// now match instead of only the basename. Compiled per call; a malformed pattern
+// is treated as no-match.
 func (opts scanOptions) matchesExclude(path string) bool {
-	for _, pattern := range opts.excludePatterns {
-		if matched, _ := filepath.Match(pattern, filepath.Base(path)); matched {
-			return true
-		}
+	m, err := globmatch.Compile(opts.excludePatterns)
+	if err != nil {
+		return false
 	}
-	return false
+	return m.MatchPath(path)
 }
 
 // shouldSkipDir returns true for directories that should be skipped.

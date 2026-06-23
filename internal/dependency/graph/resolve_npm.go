@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io/fs"
+	"maps"
 	"path"
 	"regexp"
 	"strings"
@@ -182,14 +183,14 @@ type packageLockJSON struct {
 
 // packageLockEntry represents an entry in the "packages" field (v2/v3 format).
 type packageLockEntry struct {
-	Version         string            `json:"version"`
-	Resolved        string            `json:"resolved"`
-	Dev             bool              `json:"dev"`
-	Optional        bool              `json:"optional"`
-	Peer            bool              `json:"peer"`
-	Dependencies    map[string]string `json:"dependencies"`
-	DevDependencies map[string]string `json:"devDependencies"`
-	PeerDependencies map[string]string `json:"peerDependencies"`
+	Version              string            `json:"version"`
+	Resolved             string            `json:"resolved"`
+	Dev                  bool              `json:"dev"`
+	Optional             bool              `json:"optional"`
+	Peer                 bool              `json:"peer"`
+	Dependencies         map[string]string `json:"dependencies"`
+	DevDependencies      map[string]string `json:"devDependencies"`
+	PeerDependencies     map[string]string `json:"peerDependencies"`
 	OptionalDependencies map[string]string `json:"optionalDependencies"`
 }
 
@@ -240,7 +241,7 @@ func (r *NpmResolver) processPackageLock(ctx context.Context, g *Graph, files Fi
 		if g.Node(rootPURL) == nil {
 			g.AddNode(&Node{
 				Purl:      rootPURL,
-			Name:      rootName,
+				Name:      rootName,
 				Version:   lock.Version,
 				Ecosystem: "npm",
 				Direct:    true,
@@ -358,18 +359,10 @@ func (r *NpmResolver) resolveFromPackages(g *Graph, packages map[string]packageL
 
 		// Add edges for all dependency types
 		allDeps := make(map[string]string)
-		for name, version := range entry.Dependencies {
-			allDeps[name] = version
-		}
-		for name, version := range entry.DevDependencies {
-			allDeps[name] = version
-		}
-		for name, version := range entry.PeerDependencies {
-			allDeps[name] = version
-		}
-		for name, version := range entry.OptionalDependencies {
-			allDeps[name] = version
-		}
+		maps.Copy(allDeps, entry.Dependencies)
+		maps.Copy(allDeps, entry.DevDependencies)
+		maps.Copy(allDeps, entry.PeerDependencies)
+		maps.Copy(allDeps, entry.OptionalDependencies)
 
 		for depName, depVersion := range allDeps {
 			// Find the resolved version in node_modules
@@ -940,9 +933,9 @@ func (r *NpmResolver) parsePackageJSON(files FileReader, pkgJSONPath string) (st
 
 // pnpmLockfile represents the pnpm-lock.yaml structure.
 type pnpmLockfile struct {
-	LockfileVersion string                    `yaml:"lockfileVersion"`
-	Dependencies    map[string]string         `yaml:"dependencies"`
-	DevDependencies map[string]string         `yaml:"devDependencies"`
+	LockfileVersion string                     `yaml:"lockfileVersion"`
+	Dependencies    map[string]string          `yaml:"dependencies"`
+	DevDependencies map[string]string          `yaml:"devDependencies"`
 	Packages        map[string]pnpmLockPackage `yaml:"packages"`
 }
 

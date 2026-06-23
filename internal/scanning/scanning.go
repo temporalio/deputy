@@ -6,6 +6,7 @@ package scanning
 import (
 	"context"
 	"fmt"
+	"maps"
 	"path"
 	"strings"
 	"time"
@@ -65,7 +66,7 @@ type Result struct {
 	Advisories map[string]*vulnerabilityv1.Advisory
 
 	// Stats contains vulnerability severity counts.
-	Stats vulnerabilityv1.Stats
+	Stats *vulnerabilityv1.Stats
 
 	// Graph contains the resolved dependency graph (when graph resolution is enabled).
 	Graph *graph.Graph
@@ -127,6 +128,11 @@ type Options struct {
 	// GoProxyURL overrides the Go module proxy used for fix verification.
 	// Empty uses the default (proxy.golang.org).
 	GoProxyURL string
+
+	// ExcludePaths lists glob patterns for directory paths to skip during the
+	// filesystem walk (e.g., ".bin/**"). Matching subtrees are never inventoried.
+	// See [inventory.CompileExcludePaths] for pattern semantics.
+	ExcludePaths []string
 }
 
 // ScanRepository scans a repository for vulnerabilities.
@@ -139,7 +145,7 @@ func ScanRepository(ctx context.Context, target, ref string, refProvided bool, o
 	defer span.End()
 
 	// Collect inventory
-	invOpts := inventory.Options{Ecosystems: opts.Ecosystems}
+	invOpts := inventory.Options{Ecosystems: opts.Ecosystems, ExcludePaths: opts.ExcludePaths}
 	invExec, err := inventory.CollectRepository(ctx, target, ref, refProvided, invOpts)
 	if err != nil {
 		otel.SetSpanError(span, err)
@@ -240,7 +246,7 @@ func ScanDirectory(ctx context.Context, path string, opts Options) (*Execution, 
 	defer span.End()
 
 	// Collect inventory
-	invOpts := inventory.Options{Ecosystems: opts.Ecosystems}
+	invOpts := inventory.Options{Ecosystems: opts.Ecosystems, ExcludePaths: opts.ExcludePaths}
 	invExec, err := inventory.CollectDirectory(ctx, path, invOpts)
 	if err != nil {
 		otel.SetSpanError(span, err)
@@ -289,7 +295,7 @@ func ScanVMImage(ctx context.Context, target string, targetOpts map[string]strin
 	defer span.End()
 
 	// Collect inventory
-	invOpts := inventory.Options{Ecosystems: opts.Ecosystems}
+	invOpts := inventory.Options{Ecosystems: opts.Ecosystems, ExcludePaths: opts.ExcludePaths}
 	invExec, err := inventory.CollectVMImage(ctx, target, targetOpts, invOpts)
 	if err != nil {
 		otel.SetSpanError(span, err)
@@ -474,7 +480,7 @@ func purlEcosystem(pu packageurl.PackageURL) string {
 // (when opts.VerifyFixes is set) resolves each record's fix verdict against the
 // Go module proxy so downstream stats/rendering distinguish installable
 // in-place upgrades from module migrations and unreachable advisory versions.
-func consolidateAndResolve(ctx context.Context, findings []vulnerability.Finding, advisories map[string]*vulnerabilityv1.Advisory, opts Options) ([]vulnerability.Consolidated, vulnerabilityv1.Stats) {
+func consolidateAndResolve(ctx context.Context, findings []vulnerability.Finding, advisories map[string]*vulnerabilityv1.Advisory, opts Options) ([]vulnerability.Consolidated, *vulnerabilityv1.Stats) {
 	cons := vulnerability.Consolidate(findings, advisories)
 	if opts.VerifyFixes {
 		resolver := fixresolve.NewGoProxyResolver(opts.GoProxyURL)
@@ -530,9 +536,7 @@ func queryVulnerabilities(ctx context.Context, pkgs []*extractor.Package, direct
 		if advisories == nil {
 			advisories = make(map[string]*vulnerabilityv1.Advisory)
 		}
-		for id, adv := range scAdvisories {
-			advisories[id] = adv
-		}
+		maps.Copy(advisories, scAdvisories)
 	}
 
 	span.SetAttributes(attribute.Int("deputy.finding.count", len(findings)))
@@ -590,9 +594,7 @@ func packagesToInputs(pkgs []*extractor.Package, direct map[string]bool) []osv.P
 		}
 
 		locs := make([]string, len(pkg.Locations))
-		for i, loc := range pkg.Locations {
-			locs[i] = loc
-		}
+		copy(locs, pkg.Locations)
 
 		// Build manifest references from locations
 		var manifestRefs []dependencyv1.ManifestRef

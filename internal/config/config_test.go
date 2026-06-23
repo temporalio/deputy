@@ -581,14 +581,14 @@ func TestRetryEnabled(t *testing.T) {
 		{
 			name: "explicit true",
 			cfg: HTTPConfig{
-				Retry: RetryConfig{Enabled: boolPtr(true)},
+				Retry: RetryConfig{Enabled: new(true)},
 			},
 			expected: true,
 		},
 		{
 			name: "explicit false",
 			cfg: HTTPConfig{
-				Retry: RetryConfig{Enabled: boolPtr(false)},
+				Retry: RetryConfig{Enabled: new(false)},
 			},
 			expected: false,
 		},
@@ -601,10 +601,6 @@ func TestRetryEnabled(t *testing.T) {
 			}
 		})
 	}
-}
-
-func boolPtr(b bool) *bool {
-	return &b
 }
 
 func TestLoadHTTPFromEnv(t *testing.T) {

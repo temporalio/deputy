@@ -209,24 +209,39 @@ func baseImageToPackage(imageRef, dockerfilePath string, stage dockerfile.Stage)
 		purlType = purl.TypeOCI
 	}
 
+	// Preserve the original FROM reference (before ARG substitution) so callers
+	// can tell whether the tag came from a build-arg expression. ARG resolution
+	// flattens "alpine:${ALPINE_TAG}" to "alpine:latest", which would otherwise
+	// look like a normal mutable tag a consumer could pin.
+	rawRef := stage.BaseImage
+	if rawRef == "" {
+		rawRef = imageRef
+	}
+
 	return &extractor.Package{
 		Name:      imageName,
 		Version:   version,
 		PURLType:  purlType,
 		Locations: []string{dockerfilePath},
 		Metadata: &BaseImageMetadata{
-			Raw:       imageRef,
-			StageName: stage.Name,
-			Platform:  stage.Platform,
-			IsBuilder: stage.IsBuilderStage,
+			Raw:          rawRef,
+			IsExpression: strings.Contains(stage.BaseImage, "${"),
+			StageName:    stage.Name,
+			Platform:     stage.Platform,
+			IsBuilder:    stage.IsBuilderStage,
 		},
 	}
 }
 
 // BaseImageMetadata holds additional context about a Dockerfile base image.
 type BaseImageMetadata struct {
-	// Raw is the original image reference string from the Dockerfile.
+	// Raw is the original FROM image reference string from the Dockerfile,
+	// before ARG substitution (e.g., "alpine:${ALPINE_TAG}").
 	Raw string
+	// IsExpression reports whether the reference uses a build-arg expression
+	// (e.g., FROM alpine:${ALPINE_TAG}). Such references cannot be statically
+	// pinned to a digest, since the effective tag is only known at build time.
+	IsExpression bool
 	// StageName is the AS alias for this stage, if any.
 	StageName string
 	// Platform is the --platform flag value, if specified.

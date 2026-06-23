@@ -258,13 +258,7 @@ func TestGetReferenceSuggestions(t *testing.T) {
 	// Get suggestions for a typo
 	suggestions := GetReferenceSuggestions(repo, "feature-xy")
 	// Should suggest "feature-xyz" since it's similar
-	found := false
-	for _, s := range suggestions {
-		if s == "feature-xyz" {
-			found = true
-			break
-		}
-	}
+	found := slices.Contains(suggestions, "feature-xyz")
 	if !found {
 		t.Errorf("expected 'feature-xyz' in suggestions, got: %v", suggestions)
 	}

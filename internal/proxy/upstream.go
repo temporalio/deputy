@@ -62,23 +62,24 @@ func newUpstreamTransport() *http.Transport {
 // newUpstreamReverseProxy creates a reverse proxy that forwards requests to upstream.
 // It enforces correct Host header forwarding and uses the shared upstream error mapping.
 func newUpstreamReverseProxy(upstream *url.URL, ecosystem string, transport http.RoundTripper) *httputil.ReverseProxy {
-	proxy := httputil.NewSingleHostReverseProxy(upstream)
-	proxy.Director = nil
-	proxy.Rewrite = func(r *httputil.ProxyRequest) {
-		// Preserve the inbound X-Forwarded-For chain when present, matching the
-		// legacy Director behavior.
-		if r.Out.Header != nil && len(r.In.Header["X-Forwarded-For"]) > 0 {
-			r.Out.Header["X-Forwarded-For"] = r.In.Header["X-Forwarded-For"]
-		}
-		r.SetURL(upstream)
-		r.SetXForwarded()
+	// Build the proxy with Rewrite directly rather than via
+	// NewSingleHostReverseProxy, which would set the deprecated Director field.
+	// r.SetURL reproduces the single-host director's scheme/host/path-join
+	// behavior.
+	return &httputil.ReverseProxy{
+		Rewrite: func(r *httputil.ProxyRequest) {
+			// Preserve the inbound X-Forwarded-For chain when present, matching
+			// the legacy Director behavior.
+			if r.Out.Header != nil && len(r.In.Header["X-Forwarded-For"]) > 0 {
+				r.Out.Header["X-Forwarded-For"] = r.In.Header["X-Forwarded-For"]
+			}
+			r.SetURL(upstream)
+			r.SetXForwarded()
+		},
+		Transport:     transport,
+		FlushInterval: upstreamFlushInterval,
+		ErrorHandler: func(w http.ResponseWriter, r *http.Request, err error) {
+			onUpstreamError(w, r, ecosystem, err)
+		},
 	}
-
-	proxy.Transport = transport
-	proxy.FlushInterval = upstreamFlushInterval
-	proxy.ErrorHandler = func(w http.ResponseWriter, r *http.Request, err error) {
-		onUpstreamError(w, r, ecosystem, err)
-	}
-
-	return proxy
 }

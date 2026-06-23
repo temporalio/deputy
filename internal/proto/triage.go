@@ -250,7 +250,8 @@ func mergeAffectedImports(base []*vulnerabilityv1.AffectedImport, extra []vulner
 			}
 		}
 	}
-	for _, imp := range extra {
+	for i := range extra {
+		imp := &extra[i]
 		path := strings.TrimSpace(imp.Path)
 		if path == "" {
 			continue

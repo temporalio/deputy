@@ -8,6 +8,7 @@ package policy
 import (
 	"encoding/json"
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -350,9 +351,9 @@ func generateVulnerability(level ExampleLevel) map[string]any {
 		finding.Epss = &epss
 		finding.EpssPercentile = &epssPercentile
 		finding.InKev = &inKev
-		finding.KevDateAdded = proto.String("2024-01-20")
-		finding.KevDueDate = proto.String("2024-02-10")
-		finding.KevRequiredAction = proto.String("Apply updates per vendor instructions")
+		finding.KevDateAdded = new("2024-01-20")
+		finding.KevDueDate = new("2024-02-10")
+		finding.KevRequiredAction = new("Apply updates per vendor instructions")
 		// Add graph fields
 		finding.Path = []string{"my-app", "dependency-a", "example-pkg"}
 		depth := int32(2)
@@ -720,9 +721,9 @@ func generateDockerfileStage(level ExampleLevel) map[string]any {
 // generateDockerfileAnalysis creates Dockerfile analysis results.
 func generateDockerfileAnalysis(level ExampleLevel) map[string]any {
 	analysis := map[string]any{
-		"stage_count":           1,
-		"has_multi_stage":       false,
-		"final_stage_is_root":   false,
+		"stage_count":            1,
+		"has_multi_stage":        false,
+		"final_stage_is_root":    false,
 		"final_stage_is_scratch": false,
 	}
 
@@ -811,12 +812,12 @@ func generateVulnerabilityChanges(level ExampleLevel) map[string]any {
 // generateConfigChanges creates config change data.
 func generateConfigChanges(level ExampleLevel) map[string]any {
 	return map[string]any{
-		"user_changed":       true,
-		"old_user":           "root",
-		"new_user":           "nobody",
-		"env_added":          []string{"APP_VERSION=2.0"},
-		"ports_changed":      false,
-		"healthcheck_added":  true,
+		"user_changed":      true,
+		"old_user":          "root",
+		"new_user":          "nobody",
+		"env_added":         []string{"APP_VERSION=2.0"},
+		"ports_changed":     false,
+		"healthcheck_added": true,
 	}
 }
 
@@ -824,10 +825,10 @@ func generateConfigChanges(level ExampleLevel) map[string]any {
 func generateLayerAnalysis(level ExampleLevel) []map[string]any {
 	return []map[string]any{
 		{
-			"index":        0,
-			"diff_id":      "sha256:abc...",
-			"size":         10485760,
-			"command":      "ADD file:... /",
+			"index":         0,
+			"diff_id":       "sha256:abc...",
+			"size":          10485760,
+			"command":       "ADD file:... /",
 			"in_base_image": true,
 		},
 	}
@@ -836,18 +837,18 @@ func generateLayerAnalysis(level ExampleLevel) []map[string]any {
 // generateDiffSummary creates diff summary data.
 func generateDiffSummary(level ExampleLevel) map[string]any {
 	return map[string]any{
-		"packages_added":   5,
-		"packages_removed": 2,
+		"packages_added":    5,
+		"packages_removed":  2,
 		"packages_upgraded": 10,
-		"vulns_introduced": 1,
-		"vulns_resolved":   3,
+		"vulns_introduced":  1,
+		"vulns_resolved":    3,
 	}
 }
 
 // generateFixPlan creates a remediation plan.
 func generateFixPlan(level ExampleLevel) map[string]any {
 	return map[string]any{
-		"steps": []map[string]any{generateFixStep(level)},
+		"steps":       []map[string]any{generateFixStep(level)},
 		"total_fixes": 1,
 	}
 }
@@ -855,12 +856,12 @@ func generateFixPlan(level ExampleLevel) map[string]any {
 // generateFixStep creates a single remediation step.
 func generateFixStep(level ExampleLevel) map[string]any {
 	return map[string]any{
-		"package":     "example-pkg",
-		"ecosystem":   "npm",
+		"package":      "example-pkg",
+		"ecosystem":    "npm",
 		"from_version": "1.2.3",
-		"to_version":  "1.2.4",
-		"command":     "npm install example-pkg@1.2.4",
-		"fixes":       []string{"CVE-2024-1234"},
+		"to_version":   "1.2.4",
+		"command":      "npm install example-pkg@1.2.4",
+		"fixes":        []string{"CVE-2024-1234"},
 	}
 }
 
@@ -872,10 +873,10 @@ func generateTriageFindings(level ExampleLevel) []map[string]any {
 // generateTriageCluster creates a triage cluster.
 func generateTriageCluster(level ExampleLevel) map[string]any {
 	return map[string]any{
-		"severity":    "critical",
-		"count":       2,
-		"fixable":     true,
-		"findings":    generateVulnerabilities(ExampleLevelMinimal),
+		"severity": "critical",
+		"count":    2,
+		"fixable":  true,
+		"findings": generateVulnerabilities(ExampleLevelMinimal),
 	}
 }
 
@@ -922,10 +923,8 @@ func ListEntrypoints() []Entrypoint {
 // GetCategoryForEntrypoint returns the category containing this entrypoint.
 func GetCategoryForEntrypoint(ep Entrypoint) *ExampleCategory {
 	for i := range ExampleCategories {
-		for _, catEp := range ExampleCategories[i].Entrypoints {
-			if catEp == ep {
-				return &ExampleCategories[i]
-			}
+		if slices.Contains(ExampleCategories[i].Entrypoints, ep) {
+			return &ExampleCategories[i]
 		}
 	}
 	return nil

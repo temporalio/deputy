@@ -3,7 +3,6 @@ package main_test
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
 	"os"
 	"os/exec"
@@ -105,11 +104,10 @@ func runDeputy(t *testing.T, args ...string) (stdout, stderr string, exitCode in
 	if err == nil {
 		return stdout, stderr, 0
 	}
-	var ee *exec.ExitError
 	if !strings.Contains(err.Error(), "exit status") {
 		t.Fatalf("run error: %v stderr=%q", err, stderr)
 	}
-	if errors.As(err, &ee) {
+	if ee, ok := errors.AsType[*exec.ExitError](err); ok {
 		return stdout, stderr, ee.ExitCode()
 	}
 	return stdout, stderr, 1
@@ -232,20 +230,6 @@ func TestBlackbox_FixFromReport_StdoutOnly(t *testing.T) {
 	if !strings.Contains(stdout, "Remediation Plan:") {
 		t.Fatalf("missing fix output, got %q", stdout)
 	}
-}
-
-func writeScanReportJSON(t *testing.T, v any) string {
-	t.Helper()
-	dir := t.TempDir()
-	p := filepath.Join(dir, "scan-report.json")
-	b, err := json.MarshalIndent(v, "", "  ")
-	if err != nil {
-		t.Fatalf("marshal: %v", err)
-	}
-	if err := os.WriteFile(p, append(b, '\n'), 0o644); err != nil {
-		t.Fatalf("write: %v", err)
-	}
-	return p
 }
 
 // writeScanReportProtoJSON writes a scanv1.ScanResponse as proto JSON format.

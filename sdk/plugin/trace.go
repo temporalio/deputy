@@ -27,7 +27,6 @@ package plugin
 
 import (
 	"context"
-	"os"
 
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
@@ -83,9 +82,4 @@ func setSpanError(span trace.Span, err error) {
 // setSpanOK marks the span as successful.
 func setSpanOK(span trace.Span) {
 	span.SetStatus(codes.Ok, "")
-}
-
-// isOTelEnabled returns true if OpenTelemetry is configured.
-func isOTelEnabled() bool {
-	return os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT") != ""
 }

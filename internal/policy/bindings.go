@@ -5,6 +5,8 @@
 
 package policy
 
+import "slices"
+
 // BindingProfile describes the variables available at a specific entrypoint.
 // This enables compile-time documentation and runtime validation of policy contexts.
 type BindingProfile struct {
@@ -33,12 +35,7 @@ func (p BindingProfile) Variables() []string {
 
 // IsRequired reports whether the named variable is always available.
 func (p BindingProfile) IsRequired(name string) bool {
-	for _, v := range p.Required {
-		if v == name {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(p.Required, name)
 }
 
 // Common variable groups - reusable across entrypoints

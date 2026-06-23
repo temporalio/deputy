@@ -12,12 +12,12 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"google.golang.org/protobuf/encoding/protojson"
 
+	"github.com/spf13/cobra"
 	graphv1 "github.com/temporalio/deputy/gen/deputy/graph/v1"
 	"github.com/temporalio/deputy/internal/cli/flags"
 	"github.com/temporalio/deputy/internal/dependency/graph"
 	"github.com/temporalio/deputy/internal/services"
 	ui "github.com/temporalio/deputy/internal/ui"
-	"github.com/spf13/cobra"
 )
 
 // GraphFormat represents supported graph output formats.
@@ -154,11 +154,12 @@ OUTPUT FORMATS:
 			req := &graphv1.BuildGraphRequest{
 				Target: target,
 				Options: &graphv1.GraphOptions{
-					Ecosystems: normalizeEcosystems(ecos),
-					Ref:        ref,
-					UseProxy:   true,
-					UseGit:     true,
-					Extended:   extended,
+					Ecosystems:   normalizeEcosystems(ecos),
+					ExcludePaths: excludePathsFromCmd(cmd),
+					Ref:          ref,
+					UseProxy:     true,
+					UseGit:       true,
+					Extended:     extended,
 				},
 			}
 
@@ -249,6 +250,7 @@ OUTPUT FORMATS:
 
 	cmd.Flags().StringVar(&ref, "ref", "HEAD", "Git reference (commit, tag, branch)")
 	cmd.Flags().StringSliceVar(&ecos, "ecosystems", []string{"all"}, "Ecosystems to include")
+	addExcludePathFlag(cmd)
 	cmd.Flags().StringVarP(&format, "format", "f", "text", "Output format: text | json | dot | mermaid | d3")
 	cmd.Flags().StringVarP(&outPath, "output", "o", "-", "Output file path or '-' for stdout")
 	cmd.Flags().IntVarP(&maxDepth, "depth", "d", -1, "Maximum depth to display (-1 for unlimited)")
@@ -328,10 +330,11 @@ Similar to 'go mod why' but works across all ecosystems.`,
 			buildReq := &graphv1.BuildGraphRequest{
 				Target: target,
 				Options: &graphv1.GraphOptions{
-					Ecosystems: normalizeEcosystems(ecos),
-					Ref:        ref,
-					UseProxy:   true,
-					UseGit:     true,
+					Ecosystems:   normalizeEcosystems(ecos),
+					ExcludePaths: excludePathsFromCmd(cmd),
+					Ref:          ref,
+					UseProxy:     true,
+					UseGit:       true,
 				},
 			}
 
@@ -392,6 +395,7 @@ Similar to 'go mod why' but works across all ecosystems.`,
 
 	cmd.Flags().StringVar(&ref, "ref", "HEAD", "Git reference (commit, tag, branch)")
 	cmd.Flags().StringSliceVar(&ecos, "ecosystems", []string{"all"}, "Ecosystems to include")
+	addExcludePathFlag(cmd)
 	cmd.Flags().BoolVarP(&all, "all", "a", false, "Show all dependency paths (not just shortest)")
 	cmd.Flags().BoolVar(&jsonOut, "json", false, "Output as JSON")
 	cmd.Flags().BoolVarP(&listOnly, "list", "l", false, "List all matching packages (no path analysis)")
@@ -658,16 +662,6 @@ func shortName(name string) string {
 	return name
 }
 
-// lastNSegments returns the last n segments of a package path.
-// E.g., lastNSegments("github.com/go-git/go-git/v5", 2) returns "go-git/v5"
-func lastNSegments(name string, n int) string {
-	parts := strings.Split(name, "/")
-	if len(parts) <= n {
-		return name
-	}
-	return strings.Join(parts[len(parts)-n:], "/")
-}
-
 // renderCompactDirectDeps renders a compact list of direct dependencies with source info.
 func renderCompactDirectDeps(w io.Writer, deps []*graph.Node) {
 	for _, dep := range deps {
@@ -736,116 +730,6 @@ func renderPathAsTree(w io.Writer, path graph.Path) {
 		fmt.Fprintf(w, "%s%s%s\n", indent, graphStyleArrow.Render("└── "), label)
 	}
 }
-
-// renderPathGroup renders a group of paths that share the same root as a tree.
-func renderPathGroup(w io.Writer, paths []graph.Path) {
-	if len(paths) == 0 {
-		return
-	}
-
-	// Build a tree structure from paths
-	root := buildPathTree(paths)
-	renderPathTree(w, root, "", true)
-}
-
-// pathTreeNode represents a node in the merged path tree.
-type pathTreeNode struct {
-	node     *graph.Node
-	children []*pathTreeNode
-}
-
-// buildPathTree builds a tree structure from multiple paths.
-func buildPathTree(paths []graph.Path) *pathTreeNode {
-	if len(paths) == 0 || len(paths[0]) == 0 {
-		return nil
-	}
-
-	// Create root from first path's first node
-	root := &pathTreeNode{node: paths[0][0]}
-
-	// Add each path to the tree
-	for _, path := range paths {
-		addPathToTree(root, path[1:]) // skip root, already added
-	}
-
-	return root
-}
-
-// addPathToTree adds a path (excluding root) to a tree node.
-func addPathToTree(parent *pathTreeNode, path graph.Path) {
-	if len(path) == 0 {
-		return
-	}
-
-	// Find or create child for first node in remaining path
-	var child *pathTreeNode
-	for _, c := range parent.children {
-		if c.node.Purl == path[0].Purl {
-			child = c
-			break
-		}
-	}
-
-	if child == nil {
-		child = &pathTreeNode{node: path[0]}
-		parent.children = append(parent.children, child)
-	}
-
-	// Recurse for remaining path
-	addPathToTree(child, path[1:])
-}
-
-// renderPathTree renders a path tree with proper tree characters.
-// prefix is the indentation prefix for the current level (spaces and vertical bars).
-func renderPathTree(w io.Writer, node *pathTreeNode, prefix string, isRoot bool) {
-	if node == nil {
-		return
-	}
-
-	if isRoot {
-		// Root node - include source location
-		label := formatNodeLabelWithSource(node.node)
-		fmt.Fprintf(w, "%s\n", label)
-		// Render children from root
-		renderChildren(w, node.children, "")
-	} else {
-		label := formatNodeLabel(node.node)
-		fmt.Fprintf(w, "%s%s\n", prefix, label)
-	}
-}
-
-// renderChildren renders child nodes with proper tree structure.
-// Leaf nodes (no children) are highlighted as they represent the target package.
-func renderChildren(w io.Writer, children []*pathTreeNode, prefix string) {
-	for i, child := range children {
-		isLast := i == len(children)-1
-		isLeaf := len(child.children) == 0
-
-		var connector, nextPrefix string
-		if isLast {
-			connector = graphStyleArrow.Render("└── ")
-			nextPrefix = prefix + "    "
-		} else {
-			connector = graphStyleArrow.Render("├── ")
-			nextPrefix = prefix + graphStyleArrow.Render("│") + "   "
-		}
-
-		// Leaf nodes (target package) get highlighted
-		var label string
-		if isLeaf {
-			label = formatNodeLabelHighlighted(child.node)
-		} else {
-			label = formatNodeLabel(child.node)
-		}
-		fmt.Fprintf(w, "%s%s%s\n", prefix, connector, label)
-
-		// Recurse for grandchildren
-		if !isLeaf {
-			renderChildren(w, child.children, nextPrefix)
-		}
-	}
-}
-
 
 // Graph output styles - defined here for consistency across graph commands.
 // Designed for visual hierarchy: header stands out, tree fades into background,
@@ -993,10 +877,8 @@ func isGoStdlibPackage(query string) bool {
 		"image", "index", "math", "mime", "plugin",
 		"regexp", "text", "unsafe",
 	}
-	for _, pkg := range stdlibPkgs {
-		if query == pkg {
-			return true
-		}
+	if slices.Contains(stdlibPkgs, query) {
+		return true
 	}
 	// Also match paths that look like stdlib (no dots, single slash)
 	if !strings.Contains(query, ".") && strings.Count(query, "/") == 1 {
@@ -1118,69 +1000,6 @@ func deduplicatePaths(paths []graph.Path) []graph.Path {
 	return result
 }
 
-// describePackageSource analyzes location paths to describe where a package was found.
-// This helps users understand why a package appears in the inventory even without
-// a dependency path through source code (e.g., from compiled binaries or Dockerfiles).
-func describePackageSource(locations []string) string {
-	for _, loc := range locations {
-		locLower := strings.ToLower(loc)
-
-		// Check for Dockerfiles first (container base images)
-		if strings.HasSuffix(locLower, "dockerfile") ||
-			strings.HasSuffix(locLower, ".dockerfile") ||
-			strings.Contains(locLower, "dockerfile") {
-			return "Dockerfile"
-		}
-		// Check for known manifest/lockfile types
-		if strings.HasSuffix(loc, "go.mod") {
-			return "go.mod"
-		}
-		if strings.HasSuffix(loc, "go.sum") {
-			return "go.sum"
-		}
-		if strings.HasSuffix(loc, "package-lock.json") {
-			return "package-lock.json"
-		}
-		if strings.HasSuffix(loc, "yarn.lock") {
-			return "yarn.lock"
-		}
-		if strings.HasSuffix(loc, "pnpm-lock.yaml") {
-			return "pnpm-lock.yaml"
-		}
-		if strings.HasSuffix(loc, "Cargo.lock") {
-			return "Cargo.lock"
-		}
-		if strings.HasSuffix(loc, "Gemfile.lock") {
-			return "Gemfile.lock"
-		}
-		if strings.HasSuffix(loc, "requirements.txt") {
-			return "requirements.txt"
-		}
-		if strings.HasSuffix(loc, "pyproject.toml") {
-			return "pyproject.toml"
-		}
-		if strings.HasSuffix(loc, "poetry.lock") {
-			return "poetry.lock"
-		}
-		if strings.HasSuffix(loc, "uv.lock") {
-			return "uv.lock"
-		}
-		// Check for Go binary (executable files with no lockfile/manifest extension)
-		if !strings.HasSuffix(loc, ".mod") &&
-			!strings.HasSuffix(loc, ".sum") &&
-			!strings.HasSuffix(loc, ".lock") &&
-			!strings.HasSuffix(loc, ".json") &&
-			!strings.HasSuffix(loc, ".yaml") &&
-			!strings.HasSuffix(loc, ".yml") &&
-			!strings.HasSuffix(loc, ".toml") &&
-			!strings.HasSuffix(loc, ".txt") {
-			// Likely a binary file
-			return "compiled binary"
-		}
-	}
-	return "unknown source"
-}
-
 // writeWhyJSON outputs the why information as JSON using proto types.
 func writeWhyJSON(w io.Writer, g *graph.Graph, matches []*graph.Node) error {
 	// Build a list of WhyDependencyResponse protos for each match
@@ -1280,10 +1099,11 @@ impact of upgrading or removing a package.`,
 			req := &graphv1.BuildGraphRequest{
 				Target: target,
 				Options: &graphv1.GraphOptions{
-					Ecosystems: normalizeEcosystems(ecos),
-					Ref:        ref,
-					UseProxy:   true,
-					UseGit:     true,
+					Ecosystems:   normalizeEcosystems(ecos),
+					ExcludePaths: excludePathsFromCmd(cmd),
+					Ref:          ref,
+					UseProxy:     true,
+					UseGit:       true,
 				},
 			}
 
@@ -1377,6 +1197,7 @@ impact of upgrading or removing a package.`,
 
 	cmd.Flags().StringVar(&ref, "ref", "HEAD", "Git reference (commit, tag, branch)")
 	cmd.Flags().StringSliceVar(&ecos, "ecosystems", []string{"all"}, "Ecosystems to include")
+	addExcludePathFlag(cmd)
 	cmd.Flags().BoolVar(&jsonOut, "json", false, "Output as JSON")
 
 	parent.AddCommand(cmd)

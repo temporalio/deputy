@@ -34,7 +34,7 @@ const (
 type osvZipMeta struct {
 	ETag         string    `json:"etag,omitempty"`
 	LastModified string    `json:"last_modified,omitempty"`
-	DownloadedAt time.Time `json:"downloaded_at,omitempty"`
+	DownloadedAt time.Time `json:"downloaded_at"`
 }
 
 // OSVSource implements cache.Source for the OSV vulnerability database.

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io/fs"
+	"slices"
 	"strings"
 
 	"gopkg.in/yaml.v3"
@@ -98,10 +99,8 @@ func (r *PubResolver) findLockFiles(files FileReader) ([]string, error) {
 				return nil
 			}
 			if d.Name() == "pubspec.lock" {
-				for _, existing := range lockPaths {
-					if existing == filePath {
-						return nil
-					}
+				if slices.Contains(lockPaths, filePath) {
+					return nil
 				}
 				lockPaths = append(lockPaths, filePath)
 			}

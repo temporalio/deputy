@@ -111,12 +111,12 @@ func (r Rule) Matches(vulnID, pkgName, eco string) bool {
 // matchPattern matches a package name against a pattern.
 // Supports trailing wildcards (e.g., "github.com/user/*").
 func matchPattern(pattern, name string) bool {
-	if strings.HasSuffix(pattern, "/*") {
-		prefix := strings.TrimSuffix(pattern, "/*")
+	if before, ok := strings.CutSuffix(pattern, "/*"); ok {
+		prefix := before
 		return strings.HasPrefix(name, prefix+"/") || name == prefix
 	}
-	if strings.HasSuffix(pattern, "*") {
-		prefix := strings.TrimSuffix(pattern, "*")
+	if before, ok := strings.CutSuffix(pattern, "*"); ok {
+		prefix := before
 		return strings.HasPrefix(name, prefix)
 	}
 	return strings.EqualFold(pattern, name)
@@ -278,7 +278,7 @@ type BaselineFinding struct {
 	Severity string `yaml:"severity,omitempty" json:"severity,omitempty"`
 
 	// FirstSeen is when this vulnerability was first added to the baseline.
-	FirstSeen time.Time `yaml:"first_seen,omitempty" json:"first_seen,omitempty"`
+	FirstSeen time.Time `yaml:"first_seen,omitempty" json:"first_seen"`
 }
 
 // ToRules converts a baseline to ignore rules.

@@ -255,7 +255,10 @@ type GraphOptions struct {
 	//   - Understanding the full dependency surface area
 	//
 	// Default is false (standard mode showing only packages in final build).
-	Extended      bool `protobuf:"varint,9,opt,name=extended,proto3" json:"extended,omitempty"`
+	Extended bool `protobuf:"varint,9,opt,name=extended,proto3" json:"extended,omitempty"`
+	// ExcludePaths lists glob patterns for directory paths to skip during the
+	// filesystem walk (e.g., ".bin/**"). Matching subtrees are never inventoried.
+	ExcludePaths  []string `protobuf:"bytes,10,rep,name=exclude_paths,json=excludePaths,proto3" json:"exclude_paths,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -351,6 +354,13 @@ func (x *GraphOptions) GetExtended() bool {
 		return x.Extended
 	}
 	return false
+}
+
+func (x *GraphOptions) GetExcludePaths() []string {
+	if x != nil {
+		return x.ExcludePaths
+	}
+	return nil
 }
 
 // BuildGraphResponse contains the constructed dependency graph.
@@ -1596,7 +1606,7 @@ const file_deputy_graph_v1_service_proto_rawDesc = "" +
 	"\x1ddeputy/graph/v1/service.proto\x12\x0fdeputy.graph.v1\x1a\x1bbuf/validate/validate.proto\x1a\x1fgoogle/protobuf/timestamp.proto\x1a\x1ddeputy/target/v1/target.proto\x1a+deputy/vulnerability/v1/vulnerability.proto\"d\n" +
 	"\x11BuildGraphRequest\x12\x16\n" +
 	"\x06target\x18\x01 \x01(\tR\x06target\x127\n" +
-	"\aoptions\x18\x02 \x01(\v2\x1d.deputy.graph.v1.GraphOptionsR\aoptions\"\xd1\x02\n" +
+	"\aoptions\x18\x02 \x01(\v2\x1d.deputy.graph.v1.GraphOptionsR\aoptions\"\x87\x03\n" +
 	"\fGraphOptions\x12\x1e\n" +
 	"\n" +
 	"ecosystems\x18\x01 \x03(\tR\n" +
@@ -1609,7 +1619,9 @@ const file_deputy_graph_v1_service_proto_rawDesc = "" +
 	"\bplatform\x18\a \x01(\tR\bplatform\x12=\n" +
 	"\vtarget_hint\x18\b \x01(\x0e2\x1c.deputy.target.v1.TargetKindR\n" +
 	"targetHint\x12\x1a\n" +
-	"\bextended\x18\t \x01(\bR\bextended\"\xc4\x02\n" +
+	"\bextended\x18\t \x01(\bR\bextended\x124\n" +
+	"\rexclude_paths\x18\n" +
+	" \x03(\tB\x0f\xbaH\f\x92\x01\t\x10d\"\x05r\x03\x18\x80\x02R\fexcludePaths\"\xc4\x02\n" +
 	"\x12BuildGraphResponse\x120\n" +
 	"\x06target\x18\x01 \x01(\v2\x18.deputy.target.v1.TargetR\x06target\x12=\n" +
 	"\fgenerated_at\x18\x02 \x01(\v2\x1a.google.protobuf.TimestampR\vgeneratedAt\x12+\n" +

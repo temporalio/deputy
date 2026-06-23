@@ -51,7 +51,7 @@ func GenerateImage(ctx context.Context, target string, targetOpts map[string]str
 		return Result{}, err
 	}
 
-	pkgs, err := inventory.ScanPackagesContainerImage(ctx, img, inventory.ScanOptions{Ecosystems: opts.Ecosystems})
+	pkgs, err := inventory.ScanPackagesContainerImage(ctx, img, inventory.ScanOptions{Ecosystems: opts.Ecosystems, ExcludePaths: opts.ExcludePaths})
 	if err != nil {
 		otel.SetSpanError(span, err)
 		return Result{}, err
@@ -253,7 +253,7 @@ func splitOnOperators(s string) []string {
 	s = strings.ReplaceAll(s, " AND ", "\x00")
 	s = strings.ReplaceAll(s, " or ", "\x00")
 	s = strings.ReplaceAll(s, " and ", "\x00")
-	for _, part := range strings.Split(s, "\x00") {
+	for part := range strings.SplitSeq(s, "\x00") {
 		if trimmed := strings.TrimSpace(part); trimmed != "" {
 			result = append(result, trimmed)
 		}

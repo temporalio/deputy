@@ -9,6 +9,7 @@ import (
 	vulnerabilityv1 "github.com/temporalio/deputy/gen/deputy/vulnerability/v1"
 	"github.com/temporalio/deputy/internal/dependency"
 	"github.com/temporalio/deputy/internal/forge"
+	"github.com/temporalio/deputy/internal/inventory/plugins/docker/dockerfilex"
 	"github.com/temporalio/deputy/internal/pin"
 	"github.com/temporalio/deputy/internal/purlx"
 	"github.com/temporalio/deputy/internal/vulnerability"
@@ -44,8 +45,10 @@ func supplyChainAdvisories() map[string]*vulnerabilityv1.Advisory {
 				Type:  vulnerabilityv1.SeverityType_SEVERITY_TYPE_CUSTOM,
 				Raw:   "medium",
 			},
-			FixedVersions: []string{"deputy pin"},
-			Cwes:          []string{"CWE-829"},
+			// The remediation is an action (running a command), not a version
+			// upgrade, so it lives in DatabaseSpecific["remediation"] and not in
+			// FixedVersions (which is reserved for semver upgrade targets).
+			Cwes: []string{"CWE-829"},
 			DatabaseSpecific: map[string]string{
 				"type":        "supply-chain",
 				"remediation": "deputy pin",
@@ -63,8 +66,10 @@ func supplyChainAdvisories() map[string]*vulnerabilityv1.Advisory {
 				Type:  vulnerabilityv1.SeverityType_SEVERITY_TYPE_CUSTOM,
 				Raw:   "medium",
 			},
-			FixedVersions: []string{"deputy pin --ecosystems container-image"},
-			Cwes:          []string{"CWE-829"},
+			// The remediation is an action (running a command), not a version
+			// upgrade, so it lives in DatabaseSpecific["remediation"] and not in
+			// FixedVersions (which is reserved for semver upgrade targets).
+			Cwes: []string{"CWE-829"},
 			DatabaseSpecific: map[string]string{
 				"type":        "supply-chain",
 				"remediation": "deputy pin --ecosystems container-image",
@@ -98,6 +103,13 @@ func checkSupplyChain(_ context.Context, pkgs []*extractor.Package, direct map[s
 			if (pin.Ref{Version: pkg.Version}).IsSHAPinned() {
 				continue
 			}
+			// Skip references that use workflow expression syntax
+			// (e.g., uses: foo/bar@${{ env.REF }}). These cannot be statically
+			// pinned to a commit SHA, so `deputy pin` skips them too. Reporting
+			// them here would recommend a fix that provably can't be applied.
+			if strings.Contains(pkg.Version, "${{") {
+				continue
+			}
 			// Skip self-references: a repository invoking its own actions or
 			// reusable workflows (same owner/repo as the scan target) cannot be
 			// pinned to a commit SHA without a chicken-and-egg problem, and an
@@ -112,6 +124,14 @@ func checkSupplyChain(_ context.Context, pkgs []*extractor.Package, direct map[s
 		case isContainerImageType(pkg.PURLType):
 			// Unpinned container image.
 			if strings.Contains(pkg.Version, "sha256:") {
+				continue
+			}
+			// Skip images whose tag comes from a build-arg expression
+			// (e.g., FROM alpine:${ALPINE_TAG}). ARG substitution flattens the
+			// tag to "latest", but the FROM line can't be statically pinned to a
+			// digest, so `deputy pin` skips it. Reporting it here would loop the
+			// user back to a fix that can't be applied.
+			if isExpressionImageRef(pkg) {
 				continue
 			}
 			advisoryID = AdvisoryUnpinnedImage
@@ -175,6 +195,23 @@ func isSelfReference(pkgName, selfRepo string) bool {
 		return false
 	}
 	return strings.EqualFold(owner+"/"+repo, selfRepo)
+}
+
+// isExpressionImageRef reports whether a container image package's reference is
+// driven by a build-arg expression (e.g., FROM alpine:${ALPINE_TAG}). Such refs
+// can't be statically pinned to a digest, so they are not actionable supply-chain
+// findings. The dockerfilex extractor records this on the package metadata; we
+// fall back to sniffing the raw reference for robustness.
+func isExpressionImageRef(pkg *extractor.Package) bool {
+	if meta, ok := pkg.Metadata.(*dockerfilex.BaseImageMetadata); ok {
+		if meta.IsExpression {
+			return true
+		}
+		if strings.Contains(meta.Raw, "${") {
+			return true
+		}
+	}
+	return strings.Contains(pkg.Version, "${")
 }
 
 // isContainerImageType reports whether the PURL type represents a container image.

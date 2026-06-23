@@ -175,13 +175,7 @@ func listScalibrExtractors() []*inventoryv1.ExtractorInfo {
 		// Filter to only filesystem extractors we support
 		name := p.Name()
 		seg, _, _ := strings.Cut(name, "/")
-		found := false
-		for _, prefix := range allowedPrefixes {
-			if seg == prefix {
-				found = true
-				break
-			}
-		}
+		found := slices.Contains(allowedPrefixes, seg)
 		if !found {
 			continue
 		}

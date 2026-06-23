@@ -68,6 +68,31 @@ func TestShouldSkip(t *testing.T) {
 	}
 }
 
+func TestShouldSkip_NonGitHubForge(t *testing.T) {
+	s := NewStrategyWithResolver(fakeResolver{})
+	tests := []struct {
+		name     string
+		ref      pin.Ref
+		wantSkip bool
+	}{
+		{"plain ubi github", pin.Ref{Name: "ubi:cli/cli", Version: "2.0"}, false},
+		{"plain github backend", pin.Ref{Name: "github:cli/cli", Version: "2.0"}, false},
+		{"ubi provider gitlab", pin.Ref{Name: "ubi:owner/repo", Version: "1.0", Options: map[string]string{"provider": "gitlab"}}, true},
+		{"github provider gitlab", pin.Ref{Name: "github:owner/repo", Version: "1.0", Options: map[string]string{"provider": "gitlab"}}, true},
+		{"ubi host in name", pin.Ref{Name: "ubi:gitlab.com/owner/repo", Version: "1.0"}, true},
+		{"provider github is fine", pin.Ref{Name: "ubi:owner/repo", Version: "1.0", Options: map[string]string{"provider": "github"}}, false},
+		{"non-ubi backend ignored", pin.Ref{Name: "npm:prettier", Version: "3.0", Options: map[string]string{"provider": "gitlab"}}, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			skip, reason := s.ShouldSkip(tt.ref)
+			if skip != tt.wantSkip {
+				t.Errorf("ShouldSkip(%+v) = %v (%q), want %v", tt.ref, skip, reason, tt.wantSkip)
+			}
+		})
+	}
+}
+
 func TestResolve(t *testing.T) {
 	s := NewStrategyWithResolver(fakeResolver{versions: map[string]string{
 		"node@20": "20.11.0",

@@ -148,6 +148,10 @@ message CollectInventoryOptions {
   // EnabledExtractors limits which extractors run.
   // Empty means all available extractors.
   repeated string enabled_extractors = 5;
+
+  // ExcludePaths lists glob patterns for directory paths to skip during the
+  // filesystem walk (e.g., ".bin/**"). Matching subtrees are never inventoried.
+  repeated string exclude_paths = 6 [(buf.validate.field).repeated = {max_items: 100, items: {string: {max_len: 256}}}];
 }
 
 // CollectInventoryResponse contains the extracted inventory.

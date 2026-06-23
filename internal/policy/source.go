@@ -136,8 +136,8 @@ func extractPolicyName(source string) string {
 		line = strings.TrimPrefix(line, "//!")
 		line = strings.TrimSpace(line)
 		if strings.HasPrefix(line, "policy.name") {
-			if idx := strings.Index(line, "="); idx >= 0 {
-				value := strings.TrimSpace(line[idx+1:])
+			if _, after, ok := strings.Cut(line, "="); ok {
+				value := strings.TrimSpace(after)
 				value = strings.Trim(value, `"`)
 				return value
 			}

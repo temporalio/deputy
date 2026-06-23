@@ -5,9 +5,8 @@ import (
 
 	"github.com/google/cel-go/common"
 	"github.com/google/cel-go/common/ast"
-	"github.com/google/cel-go/parser"
-	"github.com/temporalio/deputy/internal/policy"
 	protocol "github.com/sourcegraph/go-lsp"
+	"github.com/temporalio/deputy/internal/policy"
 )
 
 var (
@@ -129,7 +128,7 @@ func celContextFromAST(expr string, offset int) (string, string) {
 		offset = len(expr)
 	}
 	src := common.NewTextSource(expr)
-	parsed, errors := parser.Parse(src)
+	parsed, errors := celParser.Parse(src)
 	if len(errors.GetErrors()) > 0 {
 		return "", ""
 	}

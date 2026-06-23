@@ -134,7 +134,7 @@ $ deputy pin update --ecosystems mise,asdf --allowed-host-bins /opt/homebrew/bin
 | Flag | Default | Description |
 | --- | --- | --- |
 | `-e, --ecosystems` | `all` | Ecosystems to pin: `github-actions`, `container-image`, `mise`, `asdf`, `all` |
-| `-x, --exclude` | | Skip dependencies matching glob patterns |
+| `-x, --exclude` | | Skip dependencies matching glob patterns (see [Exclude patterns](#exclude-patterns)) |
 | `-f, --format` | `text` | Output format: `text`, `json` |
 | `-o, --output` | stdout | Output file |
 
@@ -144,8 +144,43 @@ $ deputy pin update --ecosystems mise,asdf --allowed-host-bins /opt/homebrew/bin
 | --- | --- | --- |
 | `-n, --dry-run` | `false` | Show what would change without writing |
 | `--allowed-host-bins` | | Absolute paths to host binaries Deputy may execute for fallback resolution (repeatable or comma-separated) |
-| `--skip-verification` | `false` | Skip fork/imposter verification |
+| `--verification` | `warn` | Provenance verification mode: `error`, `warn`, or `off` (see [Verification modes](#verification-modes)) |
+| `--skip-verification` | `false` | Alias for `--verification=off` |
 | `--concurrency` | `4` | Max parallel network requests |
+
+## Verification modes
+
+When pinning GitHub Actions, each resolved commit SHA is checked against the GitHub API for fork/imposter provenance (signed? reachable from the default branch?). `--verification` controls how findings affect the run:
+
+| Mode | Flagged ref (likely imposter) | Exit code | Use case |
+| --- | --- | --- | --- |
+| `warn` (default) | Pinned anyway; reported as a warning | 0 | Automated pinning — a floating tag already resolves to that SHA at runtime, so freezing it is no riskier than leaving it floating |
+| `error` | Left unpinned and reported | non-zero | Strict CI gate that must fail on any suspicious ref |
+| `off` | Not checked | 0 | Offline or token-less runs (alias `--skip-verification`) |
+
+Notes:
+
+- A ref is flagged when its commit is unsigned **and** not reachable from the repository's default branch — common and legitimate for old major tags (`@v1`) and dist-bundled actions that tag releases off the default branch. `warn` pins these and surfaces the warning so a single such ref never aborts the whole repository's pinning.
+- **Unverifiable** refs (rate limited, network error, missing `GITHUB_TOKEN`, renamed repo) are reported as warnings and pinned — they are *never* treated as imposters, in any mode.
+
+## Exclude patterns
+
+`--exclude` (repeatable) skips dependencies whose identity matches a glob. Patterns are matched with `/` as the path separator:
+
+- `*` matches within a single path segment; `**` matches across segments (recursive).
+- Each pattern is matched against both the dependency's repo identity (`owner/repo`) and its full path including any subpath (`owner/repo/subpath`).
+
+Because the repo identity is matched too, an org- or repo-level pattern skips monorepo subpath actions, not just top-level ones:
+
+| Pattern | Skips `temporalio/simple-action` | Skips `temporalio/private-actions/golang/setup` |
+| --- | --- | --- |
+| `temporalio/*` | yes | yes (matches the `temporalio/private-actions` repo) |
+| `temporalio/**` | yes | yes (recursive) |
+| `temporalio/private-actions` | no | yes (matches the repo, all subpaths) |
+| `temporalio/private-actions/**` | no | yes |
+| `actions/checkout` | — | exact full-path match |
+
+Use `org/*` or `org/**` to skip a whole organization, e.g. to pin third-party actions while leaving your own org's actions untouched.
 
 ## Authentication
 

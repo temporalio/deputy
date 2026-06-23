@@ -159,7 +159,7 @@ func (e *gradleSandboxExtractor) getDockerClient(ctx context.Context) (*client.C
 		return e.client, nil
 	}
 
-	cli, err := client.NewClientWithOpts(client.FromEnv, client.WithAPIVersionNegotiation())
+	cli, err := client.New(client.FromEnv)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create Docker client: %w", err)
 	}
@@ -170,7 +170,7 @@ func (e *gradleSandboxExtractor) getDockerClient(ctx context.Context) (*client.C
 
 	_, err = cli.Ping(pingCtx, client.PingOptions{})
 	if err != nil {
-		return nil, fmt.Errorf("Docker daemon not responsive: %w", err)
+		return nil, fmt.Errorf("docker daemon not responsive: %w", err)
 	}
 
 	e.client = cli

@@ -755,8 +755,7 @@ func TestWrapDockerDaemonError(t *testing.T) {
 			"myapp:latest",
 		)
 		// Should not be a DockerDaemonError, just a wrapped error
-		var daemonErr *DockerDaemonError
-		if errors.As(err, &daemonErr) {
+		if _, ok := errors.AsType[*DockerDaemonError](err); ok {
 			t.Fatalf("generic error should not be DockerDaemonError")
 		}
 		if !strings.Contains(err.Error(), "myapp:latest") {

@@ -953,15 +953,15 @@ func (r *StreamingRenderer) RenderEvent(event ai.StreamEvent) {
 //
 // Format (success):
 //
-//	• go mod tidy                              [1.2s]
-//	│ upgraded golang.org/x/crypto v0.44.0 => v0.45.0
+//   - go mod tidy                              [1.2s]
+//     │ upgraded golang.org/x/crypto v0.44.0 => v0.45.0
 //
 // Format (failure):
 //
-//	• go test ./...                            [exit 1 · 3.4s · 150 lines]
-//	│ FAIL: TestFoo
-//	│ ... 140 more lines ...
-//	│ FAIL
+//   - go test ./...                            [exit 1 · 3.4s · 150 lines]
+//     │ FAIL: TestFoo
+//     │ ... 140 more lines ...
+//     │ FAIL
 func (r *StreamingRenderer) renderCommand(e ai.CommandEvent, duration time.Duration) {
 	// Clean up the command string
 	cmd := cleanCommandString(e.Command)
@@ -1035,8 +1035,8 @@ func (r *StreamingRenderer) renderCommand(e ai.CommandEvent, duration time.Durat
 //
 // Format:
 //
-//	• [write] go.mod
-//	• [read] internal/foo/bar.go
+//   - [write] go.mod
+//   - [read] internal/foo/bar.go
 func (r *StreamingRenderer) renderFileOp(e ai.FileEvent) {
 	// Shorten path for display (show last 2 components)
 	path := e.Path
@@ -1118,7 +1118,7 @@ func (r *StreamingRenderer) renderOutputLines(output string, isError bool, lineS
 	}
 
 	// Show head (first N lines)
-	for i := 0; i < headLines; i++ {
+	for i := range headLines {
 		line := nonEmpty[i]
 		textStyle := ui.StyleDim
 		if importantIdxs[i] && isError {

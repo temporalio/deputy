@@ -3,6 +3,7 @@ package cmd
 import (
 	"bytes"
 	"context"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -64,8 +65,8 @@ func TestSuggestCommand(t *testing.T) {
 		{":hep", ":help"},
 		{":clar", ":clear"},
 		{":exmaple", ":example"},
-		{":vuln", ":vuln"},    // exact match
-		{":vulm", ":vuln"},    // close typo
+		{":vuln", ":vuln"}, // exact match
+		{":vulm", ":vuln"}, // close typo
 		{":sevrity", ":severity"},
 		{":functons", ":functions"},
 		{":varss", ":vars"},
@@ -165,13 +166,7 @@ func TestCompleteREPLCommand(t *testing.T) {
 
 			// For specific prefix tests, verify expected completions are present
 			for _, exp := range tt.expected {
-				found := false
-				for _, g := range got {
-					if g == exp {
-						found = true
-						break
-					}
-				}
+				found := slices.Contains(got, exp)
 				if !found && len(tt.expected) > 0 {
 					t.Errorf("completeREPLCommand(%q, %d) missing expected %q\ngot: %v",
 						tt.line, tt.cursor, exp, got)

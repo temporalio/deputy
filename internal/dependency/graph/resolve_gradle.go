@@ -4,7 +4,9 @@ import (
 	"context"
 	"fmt"
 	"io/fs"
+	"maps"
 	"path"
+	"slices"
 	"strings"
 	"sync"
 
@@ -51,9 +53,7 @@ func (a *gradleBOMResolverAdapter) ResolveBOMVersions(ctx context.Context, deps 
 		)
 
 		// Merge managed versions (later BOMs override earlier ones)
-		for name, version := range resolved.ManagedVersions {
-			managedVersions[name] = version
-		}
+		maps.Copy(managedVersions, resolved.ManagedVersions)
 	}
 
 	if len(managedVersions) == 0 {
@@ -194,9 +194,7 @@ func (r *GradleResolver) loadProjectProperties(files FileReader) (map[string]str
 
 	// Load gradle.properties
 	if data, err := files.ReadFile("gradle.properties"); err == nil {
-		for k, v := range gradlex.ParseGradleProperties(data) {
-			props[k] = v
-		}
+		maps.Copy(props, gradlex.ParseGradleProperties(data))
 	}
 
 	// Load version catalog
@@ -240,9 +238,7 @@ func (r *GradleResolver) extractDependencies(files FileReader, props map[string]
 
 		// Create file-specific props with ext block
 		fileProps := make(map[string]string, len(props))
-		for k, v := range props {
-			fileProps[k] = v
-		}
+		maps.Copy(fileProps, props)
 		for k, v := range gradlex.ParseExtBlock(data) {
 			if _, exists := fileProps[k]; !exists {
 				fileProps[k] = v
@@ -294,10 +290,8 @@ func (r *GradleResolver) findBuildGradleFiles(files FileReader) []string {
 			base := path.Base(filePath)
 			if base == "build.gradle" || base == "build.gradle.kts" {
 				// Avoid duplicates
-				for _, existing := range buildFiles {
-					if existing == filePath {
-						return nil
-					}
+				if slices.Contains(buildFiles, filePath) {
+					return nil
 				}
 				buildFiles = append(buildFiles, filePath)
 			}

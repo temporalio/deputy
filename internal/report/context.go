@@ -49,7 +49,8 @@ func BuildManifestContext(list []vulnerability.Consolidated) ManifestContext {
 	manifestManagers := map[string]string{}
 	dirManagers := map[string]string{}
 	for _, v := range list {
-		for _, ref := range v.ManifestRefs {
+		for i := range v.ManifestRefs {
+			ref := &v.ManifestRefs[i]
 			pathStr := strings.TrimSpace(ref.Path)
 			manager := strings.TrimSpace(ref.Manager)
 			if pathStr == "" && manager == "" {

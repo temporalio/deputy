@@ -98,10 +98,10 @@ var errorRemediation = map[string]string{
   2. Verify the working directory exists
   3. Check Docker daemon logs for details
   4. Ensure no port conflicts if exposing ports`,
-	"WAIT_ERROR":       "Failed to wait for container completion. The container may have terminated abnormally.",
-	"CONTAINER_ERROR":  "Container exited with an error. Check the command output above for details.",
-	"CANCELLED":        "Operation was cancelled. This typically occurs due to timeout or user interruption.",
-	"STREAM_ERROR":     "Failed to stream container output. The container may have terminated unexpectedly.",
+	"WAIT_ERROR":      "Failed to wait for container completion. The container may have terminated abnormally.",
+	"CONTAINER_ERROR": "Container exited with an error. Check the command output above for details.",
+	"CANCELLED":       "Operation was cancelled. This typically occurs due to timeout or user interruption.",
+	"STREAM_ERROR":    "Failed to stream container output. The container may have terminated unexpectedly.",
 }
 
 // Runtime implements sandbox.Runtime using Docker containers via the Docker SDK.
@@ -174,7 +174,7 @@ func (r *Runtime) getClient(ctx context.Context) (*client.Client, error) {
 		return r.client, nil
 	}
 
-	cli, err := client.NewClientWithOpts(client.FromEnv, client.WithAPIVersionNegotiation())
+	cli, err := client.New(client.FromEnv)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create Docker client: %w", err)
 	}
@@ -651,10 +651,6 @@ func (r *Runtime) Execute(ctx context.Context, req *sandboxv1.ExecuteRequest) it
 	}
 }
 
-func (r *Runtime) ensureImage(ctx context.Context, cli *client.Client, image string) error {
-	return r.ensureImageWithProgress(ctx, cli, image, nil, "")
-}
-
 // progressYield is a function type for yielding progress events during image pull.
 type progressYield func(event *sandboxv1.ExecuteEvent, err error) bool
 
@@ -1033,7 +1029,7 @@ func (r *Runtime) buildContainerConfig(req *sandboxv1.ExecuteRequest, executionI
 			}
 		}
 		if limits.MaxPids > 0 {
-			resources.PidsLimit = ptr(int64(limits.MaxPids))
+			resources.PidsLimit = new(int64(limits.MaxPids))
 		}
 		// Max open files (ulimit -n)
 		if limits.MaxFiles > 0 {
@@ -1252,11 +1248,6 @@ func parseMemory(s string) (int64, error) {
 	}
 
 	return val * multiplier, nil
-}
-
-// ptr returns a pointer to v.
-func ptr[T any](v T) *T {
-	return &v
 }
 
 // formatBytes converts bytes to a human-readable string for tmpfs size options.

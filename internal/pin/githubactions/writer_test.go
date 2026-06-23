@@ -155,11 +155,55 @@ func TestRewriteWorkflow_PreservesIndentation(t *testing.T) {
 	if !strings.Contains(string(got), "actions/setup-go@bbbb0000") {
 		t.Error("setup-go not pinned")
 	}
-	lines := strings.Split(string(got), "\n")
-	for _, line := range lines {
+	lines := strings.SplitSeq(string(got), "\n")
+	for line := range lines {
 		if strings.Contains(line, "uses:") && !strings.HasPrefix(line, "      ") {
 			t.Errorf("indentation changed: %q", line)
 		}
+	}
+}
+
+// TestRewriteWorkflow_MultipleVersionsSameAction guards against the rewriter
+// collapsing two versions of the same action in one file to a single SHA. Each
+// uses: occurrence must be pinned to the SHA of its own resolved ref.
+func TestRewriteWorkflow_MultipleVersionsSameAction(t *testing.T) {
+	input := strings.Join([]string{
+		"on: push",
+		"jobs:",
+		"  a:",
+		"    steps:",
+		"      - uses: actions/checkout@v4",
+		"      - uses: actions/checkout@v6",
+		"",
+	}, "\n")
+
+	root := writerTestRoot(t, "workflow.yml", input)
+
+	sha4 := "34e114876b0b11c390a56381ad16ebd13914f8d5"
+	sha6 := "df4cb1c069e1874edd31b4311f1884172cec0e10"
+	err := RewriteWorkflow(root, "workflow.yml", []pin.Update{
+		{Name: "actions/checkout", FromVersion: "v4", PinnedValue: sha4, VersionTag: "v4.3.1"},
+		{Name: "actions/checkout", FromVersion: "v6", PinnedValue: sha6, VersionTag: "v6.0.3"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := fs.ReadFile(root.FS(), "workflow.yml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	out := string(got)
+
+	if !strings.Contains(out, "actions/checkout@"+sha4+" # v4.3.1") {
+		t.Errorf("v4 occurrence not pinned to its own SHA; got:\n%s", out)
+	}
+	if !strings.Contains(out, "actions/checkout@"+sha6+" # v6.0.3") {
+		t.Errorf("v6 occurrence not pinned to its own SHA (collapsed?); got:\n%s", out)
+	}
+	if strings.Count(out, sha4) != 1 || strings.Count(out, sha6) != 1 {
+		t.Errorf("expected each SHA exactly once; got sha4=%d sha6=%d\n%s",
+			strings.Count(out, sha4), strings.Count(out, sha6), out)
 	}
 }
 

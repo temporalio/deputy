@@ -121,6 +121,58 @@ jobs:
 	}
 }
 
+// TestExtractor_SameRepoSubpathsKeptDistinct guards against collapsing two
+// actions that share an owner/repo but differ by subpath (the common
+// actions/cache/restore + actions/cache/save pairing). Keying dedup on the
+// repo name alone silently dropped one, leaving it unpinned.
+func TestExtractor_SameRepoSubpathsKeptDistinct(t *testing.T) {
+	tmp := t.TempDir()
+	writeFile(t, tmp, ".github/workflows/c.yml", `
+on: push
+jobs:
+  j:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/cache/restore@v4
+      - uses: actions/cache/save@v4
+      - uses: actions/checkout@v4
+`)
+	fs := scalibrfs.DirFS(tmp)
+	f, err := os.Open(filepath.Join(tmp, ".github", "workflows", "c.yml"))
+	if err != nil {
+		t.Fatalf("open workflow: %v", err)
+	}
+	defer f.Close()
+
+	ext := &Extractor{}
+	inv, err := ext.Extract(context.Background(), &filesystem.ScanInput{
+		FS:     fs,
+		Path:   ".github/workflows/c.yml",
+		Reader: f,
+	})
+	if err != nil {
+		t.Fatalf("Extract: %v", err)
+	}
+
+	// Collect the subpaths discovered for actions/cache.
+	cacheSubpaths := map[string]bool{}
+	total := 0
+	for _, p := range inv.Packages {
+		total++
+		if p.Name == "actions/cache" {
+			cacheSubpaths[usesSubpath(p)] = true
+		}
+	}
+	if total != 3 {
+		t.Errorf("expected 3 packages (cache/restore, cache/save, checkout), got %d", total)
+	}
+	for _, want := range []string{"restore", "save"} {
+		if !cacheSubpaths[want] {
+			t.Errorf("missing actions/cache subpath %q (collapsed?); got subpaths %v", want, cacheSubpaths)
+		}
+	}
+}
+
 func TestSplitUsesRef_Table(t *testing.T) {
 	tests := []struct {
 		raw string

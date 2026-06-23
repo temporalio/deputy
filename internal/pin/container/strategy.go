@@ -355,9 +355,9 @@ func splitImageRef(raw string) (imgName, version string) {
 	}
 
 	// Handle digest: everything after @ is part of the version.
-	if idx := strings.Index(raw, "@"); idx >= 0 {
-		before := raw[:idx]
-		after := raw[idx+1:]
+	if before, after, ok := strings.Cut(raw, "@"); ok {
+		before := before
+		after := after
 		imgName, tag := splitNameTag(before)
 		if tag != "" {
 			return imgName, tag + "@" + after
@@ -383,8 +383,8 @@ func splitNameTag(s string) (imgName, tag string) {
 // splitTagDigest splits a pinned version "tag@sha256:abc..." into tag and digest.
 // Returns ("", version) if no @ separator is found.
 func splitTagDigest(version string) (tag, digest string) {
-	if idx := strings.Index(version, "@"); idx >= 0 {
-		return version[:idx], version[idx+1:]
+	if before, after, ok := strings.Cut(version, "@"); ok {
+		return before, after
 	}
 	// Digest-only (no tag).
 	if strings.HasPrefix(version, "sha256:") {
@@ -429,4 +429,3 @@ func isDockerfile(n string) bool {
 	}
 	return false
 }
-

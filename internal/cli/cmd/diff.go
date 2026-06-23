@@ -20,6 +20,7 @@ import (
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
+	"github.com/spf13/cobra"
 	diffv1 "github.com/temporalio/deputy/gen/deputy/diff/v1"
 	scanv1 "github.com/temporalio/deputy/gen/deputy/scan/v1"
 	vulnerabilityv1 "github.com/temporalio/deputy/gen/deputy/vulnerability/v1"
@@ -42,7 +43,6 @@ import (
 	"github.com/temporalio/deputy/internal/services"
 	ui "github.com/temporalio/deputy/internal/ui"
 	"github.com/temporalio/deputy/internal/vulnerability"
-	"github.com/spf13/cobra"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
 	"golang.org/x/sync/errgroup"
@@ -161,7 +161,7 @@ Can be disabled with --skip-vuln-scan for faster execution.`,
 				}
 				return runContainerDiff(cmd.Context(), c, args[0], args[1], opts, outW, cmd.ErrOrStderr())
 			}
-			scanOpts := inv.ScanOptions{Ecosystems: ecosystems}
+			scanOpts := inv.ScanOptions{Ecosystems: ecosystems, ExcludePaths: excludePathsFromCmd(cmd)}
 			matcher, matcherErr := inv.GetDependencyMatcher(scanOpts)
 			if matcherErr != nil {
 				fmt.Fprintf(cmd.ErrOrStderr(), "Warning: dependency matcher unavailable, falling back to full scans: %v\n", matcherErr)
@@ -306,6 +306,7 @@ PERFORMANCE TIPS:
 	cmd.Flags().BoolVar(&showUnchanged, "show-unchanged", false, "Always show vulnerabilities in unchanged dependencies (overrides quiet behavior)")
 	cmd.Flags().StringVar(&unchangedThreshold, "unchanged-threshold", "critical", "Auto-show unchanged vulns at or above this severity: none|low|med|high|critical|any")
 	cmd.Flags().StringSliceVarP(&ecosystems, "ecosystems", "e", []string{"all"}, "Ecosystems to include: go, npm, pypi, maven, rubygems, cargo, nuget, hex, pub, cocoapods, packagist, github-actions, haskell, r, cpp (default: all)")
+	addExcludePathFlag(cmd)
 	cmd.Flags().BoolVar(&debugMatcher, "debug-matcher", false, "Print which changed files were considered dependency manifests/lockfiles")
 	cmd.Flags().StringArrayVar(&policyPaths, "policy", nil, "Path to CEL policy files or bundles to evaluate against diff results (repeatable)")
 	cmd.Flags().BoolVar(&useLocalDaemon, "local-daemon", false, "Use local Docker daemon instead of pulling from remote registry (deprecated: use --source docker-daemon)")
@@ -546,7 +547,8 @@ func runDiffAnalysis(ctx context.Context, c *services.Clients, repoPath, baseRef
 			scanRef = "HEAD~0"
 		}
 		scanOpts := &scanv1.ScanOptions{
-			Ref: scanRef,
+			Ref:          scanRef,
+			ExcludePaths: scanOpts.ExcludePaths,
 		}
 		if !beforeT.IsZero() {
 			scanOpts.PublishedBefore = timestamppb.New(beforeT)
@@ -744,10 +746,7 @@ func licenseScanConcurrency(total int) int {
 			return n
 		}
 	}
-	parallel := runtime.NumCPU() * 4
-	if parallel < 8 {
-		parallel = 8
-	}
+	parallel := max(runtime.NumCPU()*4, 8)
 	if parallel > total {
 		parallel = total
 	}
@@ -848,10 +847,7 @@ func displayDetailedDependencyChanges(ctx context.Context, ws workspace.FS, chan
 				remoteFetchers[pk] = ch
 				remoteTasks = append(remoteTasks, pk)
 			}
-			concurrency := licenseScanConcurrency(len(remoteTasks))
-			if concurrency < 1 {
-				concurrency = 1
-			}
+			concurrency := max(licenseScanConcurrency(len(remoteTasks)), 1)
 			sem := make(chan struct{}, concurrency)
 			for _, task := range remoteTasks {
 				t := task
@@ -1019,7 +1015,10 @@ func splitVulnsByChange(vulns []report.Vulnerability, changes []compare.Change) 
 
 func resultFromReportVulnerabilities(vulns []report.Vulnerability) (scanning.Result, []vulnerability.Consolidated) {
 	if len(vulns) == 0 {
-		return scanning.Result{}, nil
+		// Stats must stay non-nil: callers dereference it (e.g. the diff
+		// unchanged-set threshold checks). Since Stats became a pointer, an
+		// empty result needs an explicit zero-value Stats, not a nil one.
+		return scanning.Result{Stats: &vulnerabilityv1.Stats{}}, nil
 	}
 	findings, advisories := report.SplitVulnerabilities(vulns)
 	cons := vulnerability.Consolidate(findings, advisories)
@@ -1031,7 +1030,7 @@ func resultFromReportVulnerabilities(vulns []report.Vulnerability) (scanning.Res
 	}, cons
 }
 
-func consolidateReportVulnerabilities(vulns []report.Vulnerability) ([]vulnerability.Consolidated, vulnerabilityv1.Stats) {
+func consolidateReportVulnerabilities(vulns []report.Vulnerability) ([]vulnerability.Consolidated, *vulnerabilityv1.Stats) {
 	result, cons := resultFromReportVulnerabilities(vulns)
 	return cons, result.Stats
 }

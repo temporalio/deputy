@@ -65,6 +65,9 @@ type Options struct {
 	// Ecosystems filters which package ecosystems to include (e.g., "go", "npm").
 	// An empty slice includes all detected ecosystems.
 	Ecosystems []string
+	// ExcludePaths lists glob patterns for directory paths to skip during the
+	// filesystem walk (e.g., ".bin/**"). Matching subtrees are never inventoried.
+	ExcludePaths []string
 	// Name overrides the SBOM document name. If empty, defaults to "repoRef@ref".
 	Name string
 	// EnrichLicenses enables license enrichment for packages in the SBOM.
@@ -206,7 +209,7 @@ func Generate(ctx context.Context, repoRef string, opts Options) (Result, error)
 		effRef = "HEAD~0"
 	}
 
-	pkgs, err := collectInventorySBOM(ctx, src.Repo, src.Workspace(), effRef, inventory.ScanOptions{Ecosystems: opts.Ecosystems})
+	pkgs, err := collectInventorySBOM(ctx, src.Repo, src.Workspace(), effRef, inventory.ScanOptions{Ecosystems: opts.Ecosystems, ExcludePaths: opts.ExcludePaths})
 	if err != nil {
 		otel.SetSpanError(span, err)
 		return Result{}, err
@@ -980,8 +983,8 @@ func resolveGitHubActionsRefFromRefs(refs []*plumbing.Reference, requested strin
 			continue
 		}
 		hash := r.Hash().String()
-		if strings.HasSuffix(name, "^{}") {
-			peeled[strings.TrimSuffix(name, "^{}")] = hash
+		if before, ok := strings.CutSuffix(name, "^{}"); ok {
+			peeled[before] = hash
 			continue
 		}
 		raw[name] = hash

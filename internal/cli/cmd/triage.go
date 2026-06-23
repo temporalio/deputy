@@ -5,15 +5,18 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"slices"
 	"strings"
 
 	"connectrpc.com/connect"
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
+	"github.com/spf13/cobra"
 	scanv1 "github.com/temporalio/deputy/gen/deputy/scan/v1"
 	targetv1 "github.com/temporalio/deputy/gen/deputy/target/v1"
 	triagev1 "github.com/temporalio/deputy/gen/deputy/triage/v1"
+	vulnerabilityv1 "github.com/temporalio/deputy/gen/deputy/vulnerability/v1"
 	"github.com/temporalio/deputy/internal/cli/flags"
 	"github.com/temporalio/deputy/internal/policy"
 	internalproto "github.com/temporalio/deputy/internal/proto"
@@ -23,7 +26,6 @@ import (
 	"github.com/temporalio/deputy/internal/services"
 	ui "github.com/temporalio/deputy/internal/ui"
 	"github.com/temporalio/deputy/internal/vulnerability"
-	"github.com/spf13/cobra"
 )
 
 // AddTriageCommand registers the triage subcommand.
@@ -146,7 +148,7 @@ func runTriage(c *services.Clients, cmd *cobra.Command, args []string) error {
 			displayPath = scanResp.Target.DisplayPath
 			commit = scanResp.Target.CommitHash
 		}
-		triageResp = internalproto.BuildTriageResponse(displayPath, &scanResult.Stats, cons, 10)
+		triageResp = internalproto.BuildTriageResponse(displayPath, scanResult.Stats, cons, 10)
 		triageResp.Target = &targetv1.Target{
 			DisplayPath: displayPath,
 			CommitHash:  commit,
@@ -208,7 +210,7 @@ func runTriage(c *services.Clients, cmd *cobra.Command, args []string) error {
 			resultOut = scanning.FilterUnfixed(resultOut)
 		}
 		cons := vulnerability.Consolidate(resultOut.Findings, resultOut.Advisories)
-		triageResp = internalproto.BuildTriageResponse(scanResult.Target.DisplayPath, &resultOut.Stats, cons, 10)
+		triageResp = internalproto.BuildTriageResponse(scanResult.Target.DisplayPath, resultOut.Stats, cons, 10)
 		triageResp.Target = &targetv1.Target{
 			DisplayPath: scanResult.Target.DisplayPath,
 			LocalPath:   scanResult.Target.LocalPath,
@@ -305,7 +307,7 @@ func outputTriageProtoJSON(w io.Writer, resp *triagev1.TriageResponse) error {
 func renderTriageText(w io.Writer, resp *triagev1.TriageResponse, showDBInfo bool) {
 	// Convert proto to the render format
 	triageReport := report.TriageReport{
-		Stats:             *resp.Stats,
+		Stats:             resp.Stats,
 		PackagesWithVulns: int(resp.PackagesWithVulns),
 	}
 	if resp.Target != nil {
@@ -329,7 +331,13 @@ func renderTriageText(w io.Writer, resp *triagev1.TriageResponse, showDBInfo boo
 		}
 		if len(pkg.AffectedImports) > 0 {
 			for _, imp := range pkg.AffectedImports {
-				summary.AffectedImports = append(summary.AffectedImports, *imp)
+				if imp == nil {
+					continue
+				}
+				summary.AffectedImports = append(summary.AffectedImports, vulnerabilityv1.AffectedImport{
+					Path:    imp.Path,
+					Symbols: slices.Clone(imp.Symbols),
+				})
 			}
 		}
 		if pkg.SeverityCounts != nil {

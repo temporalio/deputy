@@ -75,8 +75,7 @@ func ExitCode(err error) int {
 	if err == nil {
 		return 0
 	}
-	var exitErr *ExitError
-	if errors.As(err, &exitErr) {
+	if exitErr, ok := errors.AsType[*ExitError](err); ok {
 		return exitErr.Code
 	}
 	return 1
@@ -300,8 +299,7 @@ func Suggest(err error, suggestion string) error {
 // GetSuggestion extracts a suggestion from an error chain.
 // Returns empty string if no suggestion is found.
 func GetSuggestion(err error) string {
-	var s Suggestible
-	if errors.As(err, &s) {
+	if s, ok := errors.AsType[Suggestible](err); ok {
 		return s.Suggestion()
 	}
 	return ""

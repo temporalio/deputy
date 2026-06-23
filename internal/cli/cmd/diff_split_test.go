@@ -7,6 +7,20 @@ import (
 	"github.com/temporalio/deputy/internal/report"
 )
 
+// TestConsolidateReportVulnerabilities_EmptyStatsNonNil guards the never-nil
+// Stats invariant: an empty vuln set must still yield a usable Stats so the
+// diff threshold checks (unchangedStats.Critical, …) don't nil-panic. This
+// regressed when Stats became a pointer.
+func TestConsolidateReportVulnerabilities_EmptyStatsNonNil(t *testing.T) {
+	_, stats := consolidateReportVulnerabilities(nil)
+	if stats == nil {
+		t.Fatal("consolidateReportVulnerabilities(nil) returned nil Stats; callers dereference it")
+	}
+	if stats.Critical != 0 || stats.Unique != 0 {
+		t.Errorf("empty stats should be zero-valued, got %+v", stats)
+	}
+}
+
 func TestSplitVulnsByChange(t *testing.T) {
 	vulns := []report.Vulnerability{
 		{Package: "github.com/foo/bar", Version: "v1.0.0"},

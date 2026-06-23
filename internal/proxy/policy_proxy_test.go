@@ -82,7 +82,7 @@ func TestServeWithPolicy(t *testing.T) {
 				Type:   "deny",
 				Source: "policy.yaml",
 				Reason: "blocked",
-				Status: ptr(451),
+				Status: new(451),
 			}}},
 			wantStatus:      451,
 			wantUpstreamHit: false,
@@ -124,5 +124,3 @@ func TestServeWithPolicy(t *testing.T) {
 		})
 	}
 }
-
-func ptr[T any](v T) *T { return &v }

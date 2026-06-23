@@ -133,7 +133,6 @@ func TestExampleBundlesCompile(t *testing.T) {
 	}
 	extraVars := []string{"licenses"}
 	for _, path := range paths {
-		path := path
 		t.Run(filepath.Base(path), func(t *testing.T) {
 			sources, err := LoadSources([]string{path})
 			if err != nil {

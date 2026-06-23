@@ -5,12 +5,14 @@ import (
 	"context"
 	"io"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
 	"github.com/go-git/go-git/v5"
 	"github.com/go-git/go-git/v5/plumbing"
 	"github.com/go-git/go-git/v5/plumbing/object"
+	"github.com/temporalio/deputy/internal/globmatch"
 )
 
 // HistoricalFinding extends Finding with git history context.
@@ -345,10 +347,8 @@ type secretHistory struct {
 }
 
 func (s *secretHistory) addAuthor(author string) {
-	for _, a := range s.authors {
-		if a == author {
-			return
-		}
+	if slices.Contains(s.authors, author) {
+		return
 	}
 	s.authors = append(s.authors, author)
 }
@@ -361,23 +361,22 @@ func secretKey(f Finding) string {
 
 // firstLine returns the first line of a string.
 func firstLine(s string) string {
-	if idx := strings.Index(s, "\n"); idx >= 0 {
-		return s[:idx]
+	if before, _, ok := strings.Cut(s, "\n"); ok {
+		return before
 	}
 	return s
 }
 
-// matchesPathFilter checks if a path matches any filter pattern.
+// matchesPathFilter checks if a path matches any filter pattern. Patterns use
+// globmatch's gitignore-flavored semantics (bare names match at any depth,
+// "dir/**" matches the whole subtree). Compiled per call; a malformed pattern
+// is treated as no-match.
 func matchesPathFilter(path string, patterns []string) bool {
-	for _, pattern := range patterns {
-		if matched, _ := filepath.Match(pattern, path); matched {
-			return true
-		}
-		if matched, _ := filepath.Match(pattern, filepath.Base(path)); matched {
-			return true
-		}
+	m, err := globmatch.Compile(patterns)
+	if err != nil {
+		return false
 	}
-	return false
+	return m.MatchPath(path)
 }
 
 // isBinaryFile checks if a file is likely binary based on extension.
@@ -391,12 +390,7 @@ func isBinaryFile(name string) bool {
 		".wasm", ".pyc", ".class", ".o", ".a",
 	}
 	ext := strings.ToLower(filepath.Ext(name))
-	for _, be := range binaryExts {
-		if ext == be {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(binaryExts, ext)
 }
 
 // ScanDiff scans the diff between two git refs for new secrets.

@@ -16,33 +16,6 @@ import (
 	vulnerabilityv1 "github.com/temporalio/deputy/gen/deputy/vulnerability/v1"
 )
 
-// deepCloneMap creates a deep copy of a map[string]any for testing.
-func deepCloneMap(m map[string]any) map[string]any {
-	if m == nil {
-		return map[string]any{}
-	}
-	out := make(map[string]any, len(m))
-	for k, v := range m {
-		out[k] = deepCloneValue(v)
-	}
-	return out
-}
-
-func deepCloneValue(v any) any {
-	switch val := v.(type) {
-	case map[string]any:
-		return deepCloneMap(val)
-	case []any:
-		clone := make([]any, len(val))
-		for i, elem := range val {
-			clone[i] = deepCloneValue(elem)
-		}
-		return clone
-	default:
-		return v
-	}
-}
-
 func TestNewEngine_Empty(t *testing.T) {
 	eng, err := NewEngine(nil)
 	if err != nil {
@@ -690,7 +663,7 @@ func TestDowngradeAdvisory(t *testing.T) {
 		{
 			name: "status cleared on downgrade",
 			actions: []Action{
-				{Type: "deny", Status: intPtr(403)},
+				{Type: "deny", Status: new(403)},
 			},
 			expected: []Action{
 				{Type: "warn", Status: nil, Reason: "advisory policy (originally deny)"},
@@ -1050,10 +1023,4 @@ vulnerabilities.filter(v, v.isCritical()).size() > 0
 			}
 		})
 	}
-}
-
-// Helper functions
-
-func intPtr(i int) *int {
-	return &i
 }

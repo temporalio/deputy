@@ -113,14 +113,14 @@ func TestUTF8Remaining(t *testing.T) {
 		first    byte
 		expected int
 	}{
-		{0x00, 0},   // ASCII
-		{0x7F, 0},   // ASCII
-		{0xC0, 1},   // 2-byte sequence
-		{0xDF, 1},   // 2-byte sequence
-		{0xE0, 2},   // 3-byte sequence
-		{0xEF, 2},   // 3-byte sequence
-		{0xF0, 3},   // 4-byte sequence
-		{0xF7, 3},   // 4-byte sequence
+		{0x00, 0}, // ASCII
+		{0x7F, 0}, // ASCII
+		{0xC0, 1}, // 2-byte sequence
+		{0xDF, 1}, // 2-byte sequence
+		{0xE0, 2}, // 3-byte sequence
+		{0xEF, 2}, // 3-byte sequence
+		{0xF0, 3}, // 4-byte sequence
+		{0xF7, 3}, // 4-byte sequence
 	}
 
 	for _, tt := range tests {
@@ -384,13 +384,13 @@ func FuzzReadLine_HandleTab(f *testing.F) {
 		rl.cursor = cursor
 
 		// Should never panic regardless of input
-		for i := 0; i < 10; i++ {
+		for range 10 {
 			rl.handleTab()
 		}
 
 		// Reset and try again
 		rl.resetCompletion()
-		for i := 0; i < 5; i++ {
+		for range 5 {
 			rl.handleTab()
 		}
 	})
@@ -425,10 +425,7 @@ func TestReadLine_TabCompletion_EdgeCases(t *testing.T) {
 			})
 
 			// Clamp cursor to valid range
-			cursor := tt.cursor
-			if cursor < 0 {
-				cursor = 0
-			}
+			cursor := max(tt.cursor, 0)
 			if cursor > len(tt.line) {
 				cursor = len(tt.line)
 			}
@@ -443,7 +440,7 @@ func TestReadLine_TabCompletion_EdgeCases(t *testing.T) {
 				}
 			}()
 
-			for i := 0; i < 5; i++ {
+			for range 5 {
 				rl.handleTab()
 			}
 		})

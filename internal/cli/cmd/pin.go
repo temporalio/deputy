@@ -43,7 +43,11 @@ Replaces mutable version tags like @v4 with commit SHA pins:
 
 The version comment enables Dependabot and Renovate to propose update PRs.
 Each resolved SHA is verified against the GitHub API to detect fork/imposter
-commits unless --skip-verification is set.
+commits. By default (--verification=warn) refs are pinned regardless and any
+provenance concerns are reported as warnings; --verification=error leaves
+flagged refs unpinned and exits non-zero, while --verification=off (alias
+--skip-verification) disables checks. Unverifiable refs (rate limit, no token)
+are reported as warnings, never as imposters.
 
 CONTAINER IMAGES:
 Appends sha256 digest pins to Dockerfile FROM statements, workflow
@@ -108,14 +112,15 @@ SUBCOMMANDS:
 
 	// Persistent flags inherited by subcommands.
 	cmd.PersistentFlags().StringSliceP("ecosystems", "e", []string{"all"}, "Ecosystems to pin (github-actions, container-image, mise, asdf, all)")
-	cmd.PersistentFlags().StringSliceP("exclude", "x", nil, "Skip dependencies matching glob patterns (e.g., 'actions/*', 'alpine')")
+	cmd.PersistentFlags().StringSliceP("exclude", "x", nil, "Skip dependencies matching glob patterns ('/'-separated; '*' matches one segment, '**' is recursive). Matches owner/repo and owner/repo/subpath, so 'temporalio/*' or 'temporalio/**' skips a whole org including monorepo subpath actions (e.g., 'actions/*', 'temporalio/**', 'alpine')")
 	cmd.PersistentFlags().StringP("format", "f", "text", "Output format: text, json")
 	cmd.PersistentFlags().StringP("output", "o", "", "Output file (default: stdout)")
 
 	// Flags specific to the pin command.
 	cmd.Flags().BoolP("dry-run", "n", false, "Show what would change without modifying files")
 	cmd.Flags().StringSlice("allowed-host-bins", nil, "Absolute paths to host binaries Deputy may execute for fallback resolution (repeatable or comma-separated)")
-	cmd.Flags().Bool("skip-verification", false, "Skip fork/imposter commit verification")
+	cmd.Flags().String("verification", "warn", "Provenance verification mode: 'error' (leave suspicious refs unpinned and exit non-zero), 'warn' (pin all refs and report concerns, default), or 'off' (no checks)")
+	cmd.Flags().Bool("skip-verification", false, "Skip fork/imposter commit verification (alias for --verification=off)")
 	cmd.Flags().Int("concurrency", 4, "Max parallel network requests")
 
 	addPinCheckCommand(cmd)
@@ -223,7 +228,8 @@ Unpinned references are skipped — use 'deputy pin' first to pin them.`,
 
 	cmd.Flags().BoolP("dry-run", "n", false, "Show what would change without modifying files")
 	cmd.Flags().StringSlice("allowed-host-bins", nil, "Absolute paths to host binaries Deputy may execute for fallback resolution (repeatable or comma-separated)")
-	cmd.Flags().Bool("skip-verification", false, "Skip fork/imposter commit verification")
+	cmd.Flags().String("verification", "warn", "Provenance verification mode: 'error' (leave suspicious refs unpinned and exit non-zero), 'warn' (pin all refs and report concerns, default), or 'off' (no checks)")
+	cmd.Flags().Bool("skip-verification", false, "Skip fork/imposter commit verification (alias for --verification=off)")
 	cmd.Flags().Int("concurrency", 4, "Max parallel network requests")
 
 	parent.AddCommand(cmd)
@@ -251,7 +257,10 @@ func runPin(cmd *cobra.Command, args []string) error {
 	exclude, _ := cmd.Flags().GetStringSlice("exclude")
 	dryRun, _ := cmd.Flags().GetBool("dry-run")
 	allowedHostBins, _ := cmd.Flags().GetStringSlice("allowed-host-bins")
-	skipVerification, _ := cmd.Flags().GetBool("skip-verification")
+	verifyMode, err := resolveVerificationMode(cmd)
+	if err != nil {
+		return err
+	}
 	format, _ := cmd.Flags().GetString("format")
 	outPath, _ := cmd.Flags().GetString("output")
 	concurrency, _ := cmd.Flags().GetInt("concurrency")
@@ -259,18 +268,18 @@ func runPin(cmd *cobra.Command, args []string) error {
 	span.SetAttributes(
 		attribute.String("deputy.pin.dir", absDir),
 		attribute.Bool("deputy.pin.dry_run", dryRun),
-		attribute.Bool("deputy.pin.skip_verification", skipVerification),
+		attribute.String("deputy.pin.verification", string(verifyMode)),
 		attribute.Int("deputy.pin.concurrency", concurrency),
 	)
 
 	opts := pin.Options{
-		DryRun:           dryRun,
-		SkipVerification: skipVerification,
-		Concurrency:      concurrency,
-		Exclude:          exclude,
+		DryRun:       dryRun,
+		Verification: verifyMode,
+		Concurrency:  concurrency,
+		Exclude:      exclude,
 	}
 
-	strategies, err := buildPinStrategies(ctx, ecosystems, !skipVerification, allowedHostBins)
+	strategies, err := buildPinStrategies(ctx, ecosystems, verifyMode != pin.VerificationOff, allowedHostBins)
 	if err != nil {
 		return err
 	}
@@ -403,19 +412,22 @@ func runPinUpdate(cmd *cobra.Command, args []string) error {
 	exclude, _ := cmd.Flags().GetStringSlice("exclude")
 	dryRun, _ := cmd.Flags().GetBool("dry-run")
 	allowedHostBins, _ := cmd.Flags().GetStringSlice("allowed-host-bins")
-	skipVerification, _ := cmd.Flags().GetBool("skip-verification")
+	verifyMode, err := resolveVerificationMode(cmd)
+	if err != nil {
+		return err
+	}
 	format, _ := cmd.Flags().GetString("format")
 	outPath, _ := cmd.Flags().GetString("output")
 	concurrency, _ := cmd.Flags().GetInt("concurrency")
 
 	opts := pin.Options{
-		DryRun:           dryRun,
-		SkipVerification: skipVerification,
-		Concurrency:      concurrency,
-		Exclude:          exclude,
+		DryRun:       dryRun,
+		Verification: verifyMode,
+		Concurrency:  concurrency,
+		Exclude:      exclude,
 	}
 
-	strategies, err := buildPinStrategies(ctx, ecosystems, !skipVerification, allowedHostBins)
+	strategies, err := buildPinStrategies(ctx, ecosystems, verifyMode != pin.VerificationOff, allowedHostBins)
 	if err != nil {
 		return err
 	}
@@ -472,6 +484,26 @@ func outputPinReport(_ *cobra.Command, report *pin.Report, format, outPath strin
 }
 
 // pinExitCode returns an error with the appropriate exit code based on results.
+// resolveVerificationMode reads the --verification flag, falling back to the
+// deprecated --skip-verification bool (== off) when --verification is not set.
+// Defaults to warn.
+func resolveVerificationMode(cmd *cobra.Command) (pin.VerificationMode, error) {
+	if cmd.Flags().Changed("verification") {
+		v, _ := cmd.Flags().GetString("verification")
+		switch mode := pin.VerificationMode(v); mode {
+		case pin.VerificationError, pin.VerificationWarn, pin.VerificationOff:
+			return mode, nil
+		default:
+			return "", deperrors.WithExitCode(
+				fmt.Errorf("invalid --verification %q: must be one of error, warn, off", v), 2)
+		}
+	}
+	if skip, _ := cmd.Flags().GetBool("skip-verification"); skip {
+		return pin.VerificationOff, nil
+	}
+	return pin.VerificationWarn, nil
+}
+
 func pinExitCode(report *pin.Report) error {
 	if report.Stats.Suspicious > 0 {
 		return deperrors.WithExitCode(
@@ -551,6 +583,16 @@ func renderPinReport(w io.Writer, report *pin.Report, dryRun bool) {
 	}
 }
 
+// appendPinCaveat appends a dim parenthetical with any verification warnings to
+// a pinned/updated line, so warn-mode provenance concerns are visible even
+// though the ref was still pinned.
+func appendPinCaveat(line string, r pin.Result) string {
+	if r.Reason == "" {
+		return line
+	}
+	return line + " " + ui.StyleDim.Render("("+r.Reason+")")
+}
+
 func renderPinResult(w io.Writer, r pin.Result, arrow string) {
 	name := r.Ref.DisplayName()
 
@@ -561,20 +603,22 @@ func renderPinResult(w io.Writer, r pin.Result, arrow string) {
 
 	switch r.Status {
 	case pin.StatusPinned:
-		fmt.Fprintln(w, prefix+strings.Join([]string{
+		line := prefix + strings.Join([]string{
 			styledName,
 			ui.StyleVersion.Render(r.PreviousRef),
 			arrow,
 			ui.StyleAdded.Render(r.PinnedValue + " # " + r.VersionTag),
-		}, " "))
+		}, " ")
+		fmt.Fprintln(w, appendPinCaveat(line, r))
 
 	case pin.StatusUpdated:
-		fmt.Fprintln(w, prefix+strings.Join([]string{
+		line := prefix + strings.Join([]string{
 			styledName,
 			ui.StyleVersion.Render(shortenSHA(r.PreviousRef)),
 			arrow,
 			ui.StyleAdded.Render(r.PinnedValue + " # " + r.VersionTag),
-		}, " "))
+		}, " ")
+		fmt.Fprintln(w, appendPinCaveat(line, r))
 
 	case pin.StatusAlreadyPinned:
 		detail := "already pinned"
@@ -677,6 +721,16 @@ func renderPinSummary(w io.Writer, s pin.Stats, dryRun bool) {
 		fmt.Fprintf(w, "  %s %s\n",
 			ui.StyleSymbol.Render(ui.StyleRemoved.Render("!")),
 			ui.StyleSymbol.Render(fmt.Sprintf("%d suspicious ", s.Suspicious))+ui.StyleRemoved.Render("(possible supply chain risk)"))
+	}
+	if s.Flagged > 0 {
+		fmt.Fprintf(w, "  %s %s\n",
+			ui.StyleSymbol.Render(ui.StyleRemoved.Render("!")),
+			ui.StyleSymbol.Render(fmt.Sprintf("%d pinned with provenance warnings ", s.Flagged))+ui.StyleRemoved.Render("(review; use --verification=error to block)"))
+	}
+	if s.Unverifiable > 0 {
+		fmt.Fprintf(w, "  %s %s\n",
+			ui.StyleSymbol.Render("!"),
+			ui.StyleDim.Render(fmt.Sprintf("%d unverifiable (rate limit / network / missing token)", s.Unverifiable)))
 	}
 	if s.Errors > 0 {
 		fmt.Fprintf(w, "  %s %s\n",

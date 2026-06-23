@@ -157,16 +157,56 @@ var knownBackends = map[string]struct{}{
 // "npm:prettier" -> ("npm", "prettier"); "node" -> ("", "node"). Only the first
 // ":" is treated as a backend separator, and only when the prefix is a known
 // backend, so tool names that legitimately contain a colon are left intact.
+//
+// Any trailing mise tool-options group ("[exe=gh]", "[provider=gitlab]") is
+// stripped from the returned name so callers resolving an owner/repo or a
+// registry coordinate never see option syntax. Use [ToolOptions] to read the
+// options themselves.
 func SplitBackend(key string) (backend, name string) {
 	key = strings.TrimSpace(key)
-	pre, rest, found := strings.Cut(key, ":")
-	if !found {
-		return "", key
+	if pre, rest, found := strings.Cut(key, ":"); found {
+		if _, ok := knownBackends[strings.ToLower(pre)]; ok {
+			return strings.ToLower(pre), stripToolOptions(rest)
+		}
 	}
-	if _, ok := knownBackends[strings.ToLower(pre)]; ok {
-		return strings.ToLower(pre), rest
+	return "", stripToolOptions(key)
+}
+
+// stripToolOptions removes a trailing mise tool-options group ("[k=v,...]") from
+// a tool name. mise accepts options in both .tool-versions tokens and config
+// keys, e.g. "ubi:cli/cli[exe=gh]" or "ubi:owner/repo[provider=gitlab]".
+func stripToolOptions(name string) string {
+	if i := strings.IndexByte(name, '['); i >= 0 {
+		return strings.TrimSpace(name[:i])
 	}
-	return "", key
+	return strings.TrimSpace(name)
+}
+
+// ToolOptions parses a trailing mise tool-options group ("[k=v,k2=v2]") from a
+// tool key or name, returning the options with lowercased keys. A bare flag
+// ("[foo]") maps to an empty value. Returns nil when there are none. This is
+// the inline-key form; the inline-table form (`{ provider = "gitlab" }`) is
+// captured separately during parsing.
+func ToolOptions(key string) map[string]string {
+	i := strings.IndexByte(key, '[')
+	if i < 0 {
+		return nil
+	}
+	j := strings.LastIndexByte(key, ']')
+	if j <= i+1 {
+		return nil
+	}
+	opts := map[string]string{}
+	for _, kv := range strings.Split(key[i+1:j], ",") {
+		k, v, _ := strings.Cut(kv, "=")
+		if k = strings.ToLower(strings.TrimSpace(k)); k != "" {
+			opts[k] = strings.TrimSpace(v)
+		}
+	}
+	if len(opts) == 0 {
+		return nil
+	}
+	return opts
 }
 
 // exactVersionRe matches a fully specified version core: major.minor.patch

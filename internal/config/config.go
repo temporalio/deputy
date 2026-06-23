@@ -25,35 +25,35 @@ type Config struct {
 	Logging LogConfig `yaml:"logging" json:"logging"`
 
 	// HTTP configures HTTP client behavior across all subsystems.
-	HTTP HTTPConfig `yaml:"http,omitempty" json:"http,omitempty"`
+	HTTP HTTPConfig `yaml:"http,omitempty" json:"http"`
 
 	// Performance configures concurrency, caching, and resource limits.
-	Performance PerformanceConfig `yaml:"performance,omitempty" json:"performance,omitempty"`
+	Performance PerformanceConfig `yaml:"performance,omitempty" json:"performance"`
 
 	// Proxy configures the package proxy server.
-	Proxy ProxyConfig `yaml:"proxy,omitempty" json:"proxy,omitempty"`
+	Proxy ProxyConfig `yaml:"proxy,omitempty" json:"proxy"`
 
 	// Server configures the gRPC/Connect server.
-	Server ServerConfig `yaml:"server,omitempty" json:"server,omitempty"`
+	Server ServerConfig `yaml:"server,omitempty" json:"server"`
 
 	// Egress configures outbound allowlists for local CLI mode.
 	// These settings apply to in-process clients; use server.egress for remote servers.
 	Egress *EgressConfig `yaml:"egress,omitempty" json:"egress,omitempty"`
 
 	// Scan configures vulnerability scanning behavior.
-	Scan ScanConfig `yaml:"scan,omitempty" json:"scan,omitempty"`
+	Scan ScanConfig `yaml:"scan,omitempty" json:"scan"`
 
 	// Policy configures policy evaluation.
-	Policy PolicyConfig `yaml:"policy,omitempty" json:"policy,omitempty"`
+	Policy PolicyConfig `yaml:"policy,omitempty" json:"policy"`
 
 	// AI configures AI/LLM providers for agentic features.
-	AI AIConfig `yaml:"ai,omitempty" json:"ai,omitempty"`
+	AI AIConfig `yaml:"ai,omitempty" json:"ai"`
 
 	// Agents configures agent plugin discovery and behavior.
-	Agents AgentConfig `yaml:"agents,omitempty" json:"agents,omitempty"`
+	Agents AgentConfig `yaml:"agents,omitempty" json:"agents"`
 
 	// OTel configures OpenTelemetry instrumentation.
-	OTel otel.Config `yaml:"otel,omitempty" json:"otel,omitempty"`
+	OTel otel.Config `yaml:"otel,omitempty" json:"otel"`
 }
 
 // LogConfig configures logging behavior.
@@ -264,6 +264,13 @@ type ScanConfig struct {
 
 	// SkipCache disables result caching.
 	SkipCache bool `yaml:"skip_cache" json:"skip_cache"`
+
+	// ExcludePaths lists glob patterns for directory paths to skip during the
+	// filesystem walk (e.g., ".bin/**", "**/testdata"). Matching subtrees are
+	// never inventoried, so they are absent from scan, diff, list, and SBOM
+	// output. Honored by all commands that walk the source tree; the
+	// --exclude-path flag is unioned with this list.
+	ExcludePaths []string `yaml:"exclude_paths,omitempty" json:"exclude_paths,omitempty"`
 }
 
 // PolicyConfig configures policy evaluation.
@@ -285,12 +292,12 @@ type AIConfig struct {
 	Providers map[string]AIProviderConfig `yaml:"providers,omitempty" json:"providers,omitempty"`
 
 	// Approval configures when user approval is required.
-	Approval AIApprovalConfig `yaml:"approval,omitempty" json:"approval,omitempty"`
+	Approval AIApprovalConfig `yaml:"approval,omitempty" json:"approval"`
 
 	// Guardrails configures safety constraints for AI operations.
 	// These are evaluated before approval checks and can block operations
 	// outright or flag them as high-risk.
-	Guardrails AIGuardrailsConfig `yaml:"guardrails,omitempty" json:"guardrails,omitempty"`
+	Guardrails AIGuardrailsConfig `yaml:"guardrails,omitempty" json:"guardrails"`
 
 	// Disabled completely disables AI features.
 	Disabled bool `yaml:"disabled" json:"disabled"`
@@ -344,10 +351,10 @@ type AIGuardrailsConfig struct {
 	Preset string `yaml:"preset" json:"preset"`
 
 	// Commands configures command execution guardrails.
-	Commands AICommandGuardrails `yaml:"commands,omitempty" json:"commands,omitempty"`
+	Commands AICommandGuardrails `yaml:"commands,omitempty" json:"commands"`
 
 	// Files configures file operation guardrails.
-	Files AIFileGuardrails `yaml:"files,omitempty" json:"files,omitempty"`
+	Files AIFileGuardrails `yaml:"files,omitempty" json:"files"`
 
 	// WorkspaceOnly restricts all file operations to the workspace directory.
 	// Default: true
@@ -489,7 +496,7 @@ type HTTPConfig struct {
 	MaxIdleConnsPerHost int `yaml:"max_idle_conns_per_host" json:"max_idle_conns_per_host"`
 
 	// Retry configures automatic retry behavior for transient failures.
-	Retry RetryConfig `yaml:"retry,omitempty" json:"retry,omitempty"`
+	Retry RetryConfig `yaml:"retry,omitempty" json:"retry"`
 }
 
 // RetryConfig configures HTTP retry behavior.
@@ -530,7 +537,7 @@ type PerformanceConfig struct {
 	ImageScanConcurrency int `yaml:"image_scan_concurrency" json:"image_scan_concurrency"`
 
 	// Cache configures caching behavior.
-	Cache CacheConfig `yaml:"cache,omitempty" json:"cache,omitempty"`
+	Cache CacheConfig `yaml:"cache,omitempty" json:"cache"`
 }
 
 // CacheConfig configures caching behavior.

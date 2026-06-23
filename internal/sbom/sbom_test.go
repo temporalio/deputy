@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 	"time"
 
@@ -926,13 +927,7 @@ SOFTWARE.`
 		if len(root.Licenses) == 0 {
 			t.Error("expected licenses to be added to root node")
 		}
-		hasMIT := false
-		for _, l := range root.Licenses {
-			if l == "MIT" {
-				hasMIT = true
-				break
-			}
-		}
+		hasMIT := slices.Contains(root.Licenses, "MIT")
 		if !hasMIT {
 			t.Errorf("expected MIT license, got %v", root.Licenses)
 		}

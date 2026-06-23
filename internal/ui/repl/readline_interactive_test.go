@@ -466,7 +466,7 @@ func TestReadLine_SimulateMultipleBackspaces(t *testing.T) {
 	}
 
 	// Backspace everything
-	for i := 0; i < 10; i++ { // More than needed
+	for range 10 { // More than needed
 		rl.backspace()
 	}
 

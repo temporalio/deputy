@@ -420,3 +420,44 @@ func TestFilterByCEL_DocumentedExamples(t *testing.T) {
 		})
 	}
 }
+
+// TestFilterUnfixed_KeepsCommandRemediated verifies that --ignore-unfixed keeps
+// supply-chain findings whose remediation is a command (e.g., deputy pin) even
+// though they carry no FixedVersions, while still dropping findings with no fix.
+func TestFilterUnfixed_KeepsCommandRemediated(t *testing.T) {
+	result := Result{
+		Findings: []vulnerability.Finding{
+			{
+				AdvisoryID: "DEPUTY-SC-UNPINNED-ACTION",
+				Dependency: dependency.ID{Name: "actions/checkout", Ecosystem: "GitHub Actions"},
+				Version:    "v4",
+				Affected:   true,
+			},
+			{
+				AdvisoryID: "CVE-NOFIX",
+				Dependency: dependency.ID{Name: "no-fix-pkg", Ecosystem: "Go"},
+				Version:    "1.0.0",
+				Affected:   true,
+			},
+		},
+		Advisories: map[string]*vulnerabilityv1.Advisory{
+			"DEPUTY-SC-UNPINNED-ACTION": {
+				Id: "DEPUTY-SC-UNPINNED-ACTION",
+				DatabaseSpecific: map[string]string{
+					"type":        "supply-chain",
+					"remediation": "deputy pin",
+				},
+			},
+			"CVE-NOFIX": {Id: "CVE-NOFIX"}, // no fix available
+		},
+	}
+
+	got := FilterUnfixed(result)
+
+	if len(got.Findings) != 1 {
+		t.Fatalf("expected 1 finding kept, got %d", len(got.Findings))
+	}
+	if got.Findings[0].AdvisoryID != "DEPUTY-SC-UNPINNED-ACTION" {
+		t.Errorf("expected command-remediated finding to be kept, got %q", got.Findings[0].AdvisoryID)
+	}
+}

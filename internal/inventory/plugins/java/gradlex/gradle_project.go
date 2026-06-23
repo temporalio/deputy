@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io/fs"
+	"maps"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -75,9 +76,7 @@ func (e *GradleProjectExtractor) Extract(ctx context.Context, input *filesystem.
 
 	// 1. Load gradle.properties
 	if data, err := readFSFile(input.FS, filepath.Join(projectDir, "gradle.properties")); err == nil {
-		for k, v := range ParseGradleProperties(data) {
-			props[k] = v
-		}
+		maps.Copy(props, ParseGradleProperties(data))
 	}
 
 	// 2. Load version catalog (check standard location and project root)
@@ -170,9 +169,7 @@ func (e *GradleProjectExtractor) extractFromBuildScripts(ctx context.Context, fs
 
 		// Create a copy of props with any file-specific ext block values
 		fileProps := make(map[string]string, len(props))
-		for k, v := range props {
-			fileProps[k] = v
-		}
+		maps.Copy(fileProps, props)
 		for k, v := range ParseExtBlock(data) {
 			if _, exists := fileProps[k]; !exists {
 				fileProps[k] = v

@@ -50,6 +50,10 @@ message ListOptions {
 
   // Platform specifies target platform for container images.
   string platform = 5 [(buf.validate.field).string.max_len = 64];
+
+  // ExcludePaths lists glob patterns for directory paths to skip during the
+  // filesystem walk (e.g., ".bin/**"). Matching subtrees are never inventoried.
+  repeated string exclude_paths = 6 [(buf.validate.field).repeated = {max_items: 100, items: {string: {max_len: 256}}}];
 }
 
 // ListPackagesResponse contains enumerated packages.

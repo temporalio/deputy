@@ -197,8 +197,8 @@ func (s *parseState) parseActionManifest(ctx context.Context, filePath string, c
 	case "docker":
 		image, _ := asString(runsMap["image"])
 		image = strings.TrimSpace(image)
-		if strings.HasPrefix(image, "docker://") {
-			return []*extractor.Package{dockerPackageFromRef(strings.TrimPrefix(image, "docker://"), filePath)}, nil
+		if after, ok0 := strings.CutPrefix(image, "docker://"); ok0 {
+			return []*extractor.Package{dockerPackageFromRef(after, filePath)}, nil
 		}
 		// Local Dockerfile; no external dependency.
 		return nil, nil
@@ -214,8 +214,8 @@ func (s *parseState) handleUses(ctx context.Context, parentPath string, usesStr 
 	if usesStr == "" {
 		return nil, nil
 	}
-	if strings.HasPrefix(usesStr, "docker://") {
-		return []*extractor.Package{dockerPackageFromRef(strings.TrimPrefix(usesStr, "docker://"), parentPath)}, nil
+	if after, ok := strings.CutPrefix(usesStr, "docker://"); ok {
+		return []*extractor.Package{dockerPackageFromRef(after, parentPath)}, nil
 	}
 
 	// Local action or reusable workflow.
@@ -273,6 +273,15 @@ type UsesMetadata struct {
 	Subpath string
 }
 
+// usesSubpath returns the action subpath recorded in a package's metadata, or
+// "" when there is none. Used to keep same-repo subpath actions distinct.
+func usesSubpath(p *extractor.Package) string {
+	if md, ok := p.Metadata.(*UsesMetadata); ok {
+		return md.Subpath
+	}
+	return ""
+}
+
 // splitUsesRef splits a uses string into the pre-@ portion and ref (version/tag/SHA).
 // If no @ is present, ref is empty.
 func splitUsesRef(raw string) (pre, ref string) {
@@ -320,9 +329,9 @@ func splitDockerRef(ref string) (name, version string, hasDigest bool) {
 	if ref == "" {
 		return "", "", false
 	}
-	if at := strings.Index(ref, "@"); at >= 0 {
-		name = ref[:at]
-		version = ref[at+1:]
+	if before, after, ok := strings.Cut(ref, "@"); ok {
+		name = before
+		version = after
 		return strings.TrimSpace(name), strings.TrimSpace(version), true
 	}
 	// Find tag after last slash.
@@ -435,7 +444,10 @@ func asString(v any) (string, bool) {
 	}
 }
 
-// dedupPackages collapses identical packages (type+name+version) and merges locations.
+// dedupPackages collapses identical packages (type+name+subpath+version) and
+// merges locations. The subpath is part of the identity: actions/cache/restore
+// and actions/cache/save share an owner/repo (Name) but are distinct actions,
+// so keying on Name alone would silently drop one of them.
 func dedupPackages(in []*extractor.Package) []*extractor.Package {
 	if len(in) == 0 {
 		return nil
@@ -445,7 +457,7 @@ func dedupPackages(in []*extractor.Package) []*extractor.Package {
 		if p == nil {
 			continue
 		}
-		key := strings.ToLower(strings.TrimSpace(p.PURLType)) + "|" + strings.ToLower(strings.TrimSpace(p.Name)) + "|" + strings.TrimSpace(p.Version)
+		key := strings.ToLower(strings.TrimSpace(p.PURLType)) + "|" + strings.ToLower(strings.TrimSpace(p.Name)) + "|" + strings.ToLower(strings.TrimSpace(usesSubpath(p))) + "|" + strings.TrimSpace(p.Version)
 		existing := seen[key]
 		if existing == nil {
 			seen[key] = p

@@ -30,6 +30,7 @@
 package image
 
 import (
+	"maps"
 	"slices"
 	"strings"
 	"time"
@@ -105,7 +106,7 @@ type Metadata struct {
 	Variant string `json:"variant,omitempty"`
 
 	// Created is when the image was created.
-	Created time.Time `json:"created,omitempty"`
+	Created time.Time `json:"created"`
 
 	// Author is the image author if specified.
 	Author string `json:"author,omitempty"`
@@ -148,7 +149,7 @@ type BaseImageRef struct {
 // HistoryEntry represents a single layer's history/build command.
 type HistoryEntry struct {
 	CreatedBy  string    `json:"created_by,omitempty"`
-	Created    time.Time `json:"created,omitempty"`
+	Created    time.Time `json:"created"`
 	Comment    string    `json:"comment,omitempty"`
 	EmptyLayer bool      `json:"empty_layer,omitempty"`
 }
@@ -271,7 +272,7 @@ func extractMetadata(cf *v1.ConfigFile, img v1.Image) Metadata {
 		OSVersion:     cf.OSVersion,
 		Variant:       cf.Variant,
 		Author:        cf.Author,
-		DockerVersion: cf.DockerVersion,
+		DockerVersion: cf.DockerVersion, //nolint:staticcheck // deprecated upstream, but the only source for this image-metadata field
 	}
 
 	if !cf.Created.Time.IsZero() {
@@ -562,22 +563,16 @@ func (p *PolicyPayload) ToMap() map[string]any {
 
 	// Start with reference fields
 	if p.Ref != nil {
-		for k, v := range p.Ref.ToMap() {
-			result[k] = v
-		}
+		maps.Copy(result, p.Ref.ToMap())
 	} else {
 		// Provide empty defaults
-		for k, v := range (&Ref{}).ToMap() {
-			result[k] = v
-		}
+		maps.Copy(result, (&Ref{}).ToMap())
 	}
 
 	// Add info fields (config, metadata, history)
 	if p.Info != nil {
 		infoMap := p.Info.ToMap()
-		for k, v := range infoMap {
-			result[k] = v
-		}
+		maps.Copy(result, infoMap)
 	} else {
 		// Provide empty defaults
 		result["config"] = map[string]any{}

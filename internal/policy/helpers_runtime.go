@@ -775,7 +775,7 @@ func extractSeverityString(val ref.Val) string {
 	}
 	// Fall back to map extraction (for data that went through ProtoToMap)
 	vulnMap := extractVulnMap(val)
-	if vulnMap == nil || len(vulnMap) == 0 {
+	if len(vulnMap) == 0 {
 		return ""
 	}
 	// Navigate: vulnerability.advisory.severity.level
@@ -915,23 +915,6 @@ func getBoolField(m map[string]any, key string) bool {
 	return false
 }
 
-// getFloatField safely extracts a float field from a map.
-func getFloatField(m map[string]any, key string) float64 {
-	if v, ok := m[key]; ok {
-		switch f := v.(type) {
-		case float64:
-			return f
-		case float32:
-			return float64(f)
-		case int64:
-			return float64(f)
-		case int:
-			return float64(f)
-		}
-	}
-	return 0.0
-}
-
 // extractCreatedBy extracts the created_by field from a history entry.
 // Works with both map[string]any (native) and traits.Mapper (CEL) types.
 func extractCreatedBy(entry ref.Val) string {
@@ -953,7 +936,7 @@ func extractCreatedBy(entry ref.Val) string {
 }
 
 // mapStringAnyType is used for type conversion
-var mapStringAnyType = reflect.TypeOf(map[string]any{})
+var mapStringAnyType = reflect.TypeFor[map[string]any]()
 
 // parseImageRef parses a container image reference into components.
 // Handles formats like:
@@ -1152,7 +1135,7 @@ func extractStringList(val ref.Val) []string {
 		return result
 	}
 	// Try native slice
-	if native, err := val.ConvertToNative(reflect.TypeOf([]any{})); err == nil {
+	if native, err := val.ConvertToNative(reflect.TypeFor[[]any]()); err == nil {
 		if slice, ok := native.([]any); ok {
 			result := make([]string, 0, len(slice))
 			for _, elem := range slice {

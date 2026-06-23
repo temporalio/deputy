@@ -13,8 +13,7 @@ func TestProgress_BasicUsage(t *testing.T) {
 	p := NewProgress(&buf, "Loading")
 	p.WithStyle(SimpleProgressStyle())
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	p.Start(ctx)
 	time.Sleep(50 * time.Millisecond)
@@ -28,8 +27,7 @@ func TestProgress_WithTotal(t *testing.T) {
 	var buf bytes.Buffer
 	p := NewProgress(&buf, "Processing").WithTotal(100)
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	p.Start(ctx)
 	p.Update(50)
@@ -41,8 +39,7 @@ func TestProgress_Increment(t *testing.T) {
 	var buf bytes.Buffer
 	p := NewProgress(&buf, "Items")
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	p.Start(ctx)
 	p.Increment(1)
@@ -60,8 +57,7 @@ func TestProgress_SetSubMessage(t *testing.T) {
 	var buf bytes.Buffer
 	p := NewProgress(&buf, "Scanning")
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	p.Start(ctx)
 	p.SetSubMessage("package.json")
@@ -75,8 +71,7 @@ func TestProgress_Fail(t *testing.T) {
 	var buf bytes.Buffer
 	p := NewProgress(&buf, "Operation")
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	p.Start(ctx)
 	time.Sleep(50 * time.Millisecond)
@@ -87,8 +82,7 @@ func TestProgress_StopIdempotent(t *testing.T) {
 	var buf bytes.Buffer
 	p := NewProgress(&buf, "Test")
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	p.Start(ctx)
 	time.Sleep(50 * time.Millisecond)
@@ -103,8 +97,7 @@ func TestProgress_StartIdempotent(t *testing.T) {
 	var buf bytes.Buffer
 	p := NewProgress(&buf, "Test")
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	// Multiple starts should be safe
 	p.Start(ctx)
@@ -246,8 +239,7 @@ func TestProgress_Clear(t *testing.T) {
 	var buf bytes.Buffer
 	p := NewProgress(&buf, "Scanning")
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	p.Start(ctx)
 	time.Sleep(50 * time.Millisecond)
@@ -268,8 +260,7 @@ func TestProgress_ClearIdempotent(t *testing.T) {
 	var buf bytes.Buffer
 	p := NewProgress(&buf, "Test")
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	p.Start(ctx)
 	time.Sleep(50 * time.Millisecond)

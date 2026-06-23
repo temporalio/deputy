@@ -11,7 +11,7 @@ func buildTestGraph(directCount, depth int) *Graph {
 	g := New()
 
 	// Create direct dependencies
-	for i := 0; i < directCount; i++ {
+	for i := range directCount {
 		rootPURL := fmt.Sprintf("pkg:test/direct-%d@1.0.0", i)
 		g.AddNode(&Node{
 			Purl:   rootPURL,
@@ -48,7 +48,7 @@ func buildDiamondGraph(width, depth int) *Graph {
 	g.AddNode(&Node{Purl: rootPURL, Name: "root", Direct: true, Depth: 0})
 
 	// Create diamond pattern: root -> [a, b, c, ...] -> shared
-	for i := 0; i < width; i++ {
+	for i := range width {
 		midPURL := fmt.Sprintf("pkg:test/mid-%d@1.0.0", i)
 		g.AddNode(&Node{Purl: midPURL, Name: fmt.Sprintf("mid-%d", i), Depth: 1})
 		g.AddEdge(&Edge{From: rootPURL, To: midPURL})

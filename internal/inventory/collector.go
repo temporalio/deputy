@@ -136,6 +136,11 @@ type Options struct {
 	// belong to known base images, populating LayerDetails.InBaseImage.
 	// This requires network access and adds latency to the scan.
 	DetectBaseImage bool
+
+	// ExcludePaths lists glob patterns for directory paths to skip during the
+	// filesystem walk (e.g., ".bin/**"). Matching subtrees are never inventoried.
+	// See [CompileExcludePaths] for pattern semantics.
+	ExcludePaths []string
 }
 
 // Collect extracts package inventory from any supported target type.
@@ -207,7 +212,7 @@ func CollectRepository(ctx context.Context, target, ref string, refProvided bool
 	}
 
 	// Scan packages
-	pkgs, err := ScanPackagesWorking(ctx, resolved.workspace, ScanOptions{Ecosystems: opts.Ecosystems})
+	pkgs, err := ScanPackagesWorking(ctx, resolved.workspace, ScanOptions{Ecosystems: opts.Ecosystems, ExcludePaths: opts.ExcludePaths})
 	if err != nil {
 		resolved.cleanup()
 		otel.SetSpanError(span, err)
@@ -253,7 +258,7 @@ func CollectDirectory(ctx context.Context, path string, opts Options) (*Executio
 		return nil, fmt.Errorf("failed to open directory: %w", err)
 	}
 
-	pkgs, err := ScanPackagesWorking(ctx, ws, ScanOptions{Ecosystems: opts.Ecosystems})
+	pkgs, err := ScanPackagesWorking(ctx, ws, ScanOptions{Ecosystems: opts.Ecosystems, ExcludePaths: opts.ExcludePaths})
 	if err != nil {
 		_ = ws.Close()
 		otel.SetSpanError(span, err)
@@ -339,6 +344,7 @@ func CollectContainerImage(ctx context.Context, target string, targetOpts map[st
 	pkgs, err := ScanPackagesContainerImage(ctx, img, ScanOptions{
 		Ecosystems:      opts.Ecosystems,
 		DetectBaseImage: opts.DetectBaseImage,
+		ExcludePaths:    opts.ExcludePaths,
 	})
 	if err != nil {
 		cleanup()
@@ -406,7 +412,8 @@ func CollectVMImage(ctx context.Context, target string, targetOpts map[string]st
 	}
 
 	pkgs, scanErr := ScanPackagesVMImage(ctx, scalibrFS, ScanOptions{
-		Ecosystems: opts.Ecosystems,
+		Ecosystems:   opts.Ecosystems,
+		ExcludePaths: opts.ExcludePaths,
 	})
 	// Continue even if there were plugin failures, as long as we found packages
 	if scanErr != nil && len(pkgs) == 0 {
@@ -495,7 +502,7 @@ func CollectAtCommit(ctx context.Context, repo *git.Repository, commitHash plumb
 		))
 	defer span.End()
 
-	pkgs, err := ScanPackagesAtCommitSnapshot(ctx, repo, commitHash, ScanOptions{Ecosystems: opts.Ecosystems})
+	pkgs, err := ScanPackagesAtCommitSnapshot(ctx, repo, commitHash, ScanOptions{Ecosystems: opts.Ecosystems, ExcludePaths: opts.ExcludePaths})
 	if err != nil {
 		otel.SetSpanError(span, err)
 		return nil, err
@@ -555,7 +562,7 @@ func CollectRepositoryAtRef(ctx context.Context, target, ref string, opts Option
 	span.SetAttributes(attribute.String("deputy.target.commit", hash.String()))
 
 	// Scan at the specific commit
-	pkgs, err := ScanPackagesAtCommitSnapshot(ctx, repo, *hash, ScanOptions{Ecosystems: opts.Ecosystems})
+	pkgs, err := ScanPackagesAtCommitSnapshot(ctx, repo, *hash, ScanOptions{Ecosystems: opts.Ecosystems, ExcludePaths: opts.ExcludePaths})
 	if err != nil {
 		otel.SetSpanError(span, err)
 		return nil, fmt.Errorf("failed to scan packages at ref %q: %w", ref, err)
@@ -709,7 +716,7 @@ func scanBinaryWithSCALIBR(ctx context.Context, path string, opts Options) ([]*e
 // CollectPURL extracts inventory for a single PURL.
 // This creates a minimal inventory with just the one package.
 func CollectPURL(ctx context.Context, purlStr string, opts Options) (*Execution, error) {
-	ctx, span := otel.StartSpan(ctx, "deputy.inventory.purl",
+	_, span := otel.StartSpan(ctx, "deputy.inventory.purl",
 		trace.WithAttributes(
 			attribute.String("deputy.target.purl", purlStr),
 		))
@@ -765,7 +772,7 @@ func purlDisplayName(pu packageurl.PackageURL) string {
 // CollectSBOM extracts inventory from an SBOM file or stdin.
 // Supports protobom-json, cyclonedx-json, and spdx-json formats.
 func CollectSBOM(ctx context.Context, target string, opts Options) (*Execution, error) {
-	ctx, span := otel.StartSpan(ctx, "deputy.inventory.sbom",
+	_, span := otel.StartSpan(ctx, "deputy.inventory.sbom",
 		trace.WithAttributes(
 			attribute.String("deputy.target.sbom", target),
 		))

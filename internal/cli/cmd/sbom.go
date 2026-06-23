@@ -7,13 +7,13 @@ import (
 	"os"
 	"strings"
 
+	"github.com/spf13/cobra"
 	"github.com/temporalio/deputy/internal/cli/flags"
-	"github.com/temporalio/deputy/internal/services"
 	"github.com/temporalio/deputy/internal/policy"
 	sbomx "github.com/temporalio/deputy/internal/sbom"
+	"github.com/temporalio/deputy/internal/services"
 	"github.com/temporalio/deputy/internal/targets"
 	ui "github.com/temporalio/deputy/internal/ui"
-	"github.com/spf13/cobra"
 )
 
 // AddSBOMCommand registers the sbom subcommand
@@ -146,6 +146,7 @@ The --enrich flag adds comprehensive metadata from deps.dev:
 				}
 				result, err = sbomx.GenerateImage(ctx, target, targetOpts, sbomx.Options{
 					Ecosystems:        ecos,
+					ExcludePaths:      excludePathsFromCmd(cmd),
 					Name:              name,
 					EnrichLicenses:    enrichLicenses,
 					LicenseSource:     licenseSource,
@@ -162,6 +163,7 @@ The --enrich flag adds comprehensive metadata from deps.dev:
 				result, err = sbomx.Generate(ctx, repoPath, sbomx.Options{
 					Ref:               ref,
 					Ecosystems:        ecos,
+					ExcludePaths:      excludePathsFromCmd(cmd),
 					Name:              name,
 					EnrichLicenses:    enrichLicenses,
 					LicenseSource:     licenseSource,
@@ -328,6 +330,7 @@ PIPELINE INTEGRATION:
 	cmd.Flags().StringVarP(&format, "format", "f", "cyclonedx-json", "SBOM format: cyclonedx-json | spdx-json | protobom-json")
 	cmd.Flags().StringVarP(&outPath, "output", "o", "-", "Output file path or '-' for stdout")
 	cmd.Flags().StringSliceVar(&ecos, "ecosystems", nil, "Limit to specific ecosystems (e.g., go,npm,pip). Defaults to auto-detect.")
+	addExcludePathFlag(cmd)
 	cmd.Flags().StringVar(&name, "name", "", "Optional document name (defaults to repo@ref or image reference)")
 	cmd.Flags().BoolVar(&enrichLicenses, "enrich-licenses", false, "Enrich SBOM nodes with licenses (optional)")
 	cmd.Flags().StringVar(&licenseSource, "license-source", "depsdev", "License enrichment source: depsdev | scan | both")

@@ -11,6 +11,7 @@ import (
 	"encoding/pem"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -493,7 +494,7 @@ func TestJWKSServer(t *testing.T) {
 	}
 
 	// Verify it's the same key
-	if ecdsaPub.X.Cmp(privateKey.PublicKey.X) != 0 || ecdsaPub.Y.Cmp(privateKey.PublicKey.Y) != 0 {
+	if !ecdsaPub.Equal(&privateKey.PublicKey) {
 		t.Error("retrieved key does not match original key")
 	}
 }
@@ -846,13 +847,7 @@ func TestAuthenticator_DefaultAllowedAlgorithms(t *testing.T) {
 	// Verify that default allowed algorithms include common secure asymmetric algorithms
 	expected := []string{"RS256", "RS384", "RS512", "ES256", "ES384", "ES512", "EdDSA", "PS256", "PS384", "PS512"}
 	for _, alg := range expected {
-		found := false
-		for _, defaultAlg := range DefaultAllowedAlgorithms {
-			if alg == defaultAlg {
-				found = true
-				break
-			}
-		}
+		found := slices.Contains(DefaultAllowedAlgorithms, alg)
 		if !found {
 			t.Errorf("expected %q in DefaultAllowedAlgorithms", alg)
 		}
@@ -1048,9 +1043,9 @@ func TestJWKSCache_ConcurrentAccess(t *testing.T) {
 
 		var errorCount atomic.Int64
 
-		for i := 0; i < goroutines; i++ {
+		for range goroutines {
 			go func() {
-				for j := 0; j < iterations; j++ {
+				for range iterations {
 					// Access the already-cached key (no network I/O)
 					_, err := cache.GetKey(context.Background(), "test-key-1")
 					if err != nil {
@@ -1078,27 +1073,27 @@ func TestAuthMetrics_ConcurrentAccess(t *testing.T) {
 		const iterations = 100
 
 		// Concurrent success recording
-		for i := 0; i < goroutines; i++ {
+		for range goroutines {
 			go func() {
-				for j := 0; j < iterations; j++ {
+				for range iterations {
 					metrics.RecordSuccess()
 				}
 			}()
 		}
 
 		// Concurrent anonymous recording
-		for i := 0; i < goroutines; i++ {
+		for range goroutines {
 			go func() {
-				for j := 0; j < iterations; j++ {
+				for range iterations {
 					metrics.RecordAnonymous()
 				}
 			}()
 		}
 
 		// Concurrent error recording
-		for i := 0; i < goroutines; i++ {
+		for range goroutines {
 			go func() {
-				for j := 0; j < iterations; j++ {
+				for range iterations {
 					metrics.RecordError(AuthCodeInvalidToken)
 				}
 			}()

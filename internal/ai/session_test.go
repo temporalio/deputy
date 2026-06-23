@@ -16,8 +16,10 @@ type streamingMockProvider struct {
 	errs   []error
 }
 
-func (m *streamingMockProvider) Name() string                       { return m.name }
-func (m *streamingMockProvider) Capabilities() ProviderCapabilities { return ProviderCapabilities{Streaming: true} }
+func (m *streamingMockProvider) Name() string { return m.name }
+func (m *streamingMockProvider) Capabilities() ProviderCapabilities {
+	return ProviderCapabilities{Streaming: true}
+}
 
 func (m *streamingMockProvider) Complete(ctx context.Context, req *CompletionRequest) (*CompletionResponse, error) {
 	var text strings.Builder
@@ -515,7 +517,7 @@ func TestStreamToWriter(t *testing.T) {
 		name: "test",
 		events: []StreamEvent{
 			TextEvent{Text: "Hello\n"},
-			CommandEvent{Command: "ls", Status: "completed", ExitCode: intPtr(0), Output: "file.txt"},
+			CommandEvent{Command: "ls", Status: "completed", ExitCode: new(0), Output: "file.txt"},
 			FileEvent{Path: "/tmp/test.txt", Action: "create", Status: "completed"},
 			ErrorEvent{Message: "warning"},
 			DoneEvent{SessionID: "sess-out", FinishReason: FinishReasonStop},
@@ -556,8 +558,4 @@ func TestStreamToWriter(t *testing.T) {
 	if !strings.Contains(errOutput, "warning") {
 		t.Error("error output should contain warning")
 	}
-}
-
-func intPtr(i int) *int {
-	return &i
 }

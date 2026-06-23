@@ -81,7 +81,8 @@ func FormatImportSummaries(imps []vulnerabilityv1.AffectedImport, maxPaths, maxS
 		return nil
 	}
 	lines := make([]string, 0, len(imps))
-	for i, imp := range imps {
+	for i := range imps {
+		imp := &imps[i]
 		if maxPaths > 0 && i >= maxPaths {
 			lines = append(lines, fmt.Sprintf("... %d more import paths", len(imps)-maxPaths))
 			break

@@ -221,8 +221,11 @@ type CollectInventoryOptions struct {
 	// EnabledExtractors limits which extractors run.
 	// Empty means all available extractors.
 	EnabledExtractors []string `protobuf:"bytes,5,rep,name=enabled_extractors,json=enabledExtractors,proto3" json:"enabled_extractors,omitempty"`
-	unknownFields     protoimpl.UnknownFields
-	sizeCache         protoimpl.SizeCache
+	// ExcludePaths lists glob patterns for directory paths to skip during the
+	// filesystem walk (e.g., ".bin/**"). Matching subtrees are never inventoried.
+	ExcludePaths  []string `protobuf:"bytes,6,rep,name=exclude_paths,json=excludePaths,proto3" json:"exclude_paths,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *CollectInventoryOptions) Reset() {
@@ -286,6 +289,13 @@ func (x *CollectInventoryOptions) GetIncludeLicenses() bool {
 func (x *CollectInventoryOptions) GetEnabledExtractors() []string {
 	if x != nil {
 		return x.EnabledExtractors
+	}
+	return nil
+}
+
+func (x *CollectInventoryOptions) GetExcludePaths() []string {
+	if x != nil {
+		return x.ExcludePaths
 	}
 	return nil
 }
@@ -1666,7 +1676,7 @@ const file_deputy_inventory_v1_service_proto_rawDesc = "" +
 	"!deputy/inventory/v1/service.proto\x12\x13deputy.inventory.v1\x1a\x1bbuf/validate/validate.proto\x1a%deputy/dependency/v1/dependency.proto\x1a\x1ddeputy/target/v1/target.proto\x1a#deputy/container/v1/container.proto\x1a\x1fgoogle/protobuf/timestamp.proto\"\x82\x01\n" +
 	"\x17CollectInventoryRequest\x12\x1f\n" +
 	"\x06target\x18\x01 \x01(\tB\a\xbaH\x04r\x02\x10\x01R\x06target\x12F\n" +
-	"\aoptions\x18\x02 \x01(\v2,.deputy.inventory.v1.CollectInventoryOptionsR\aoptions\"\xc1\x01\n" +
+	"\aoptions\x18\x02 \x01(\v2,.deputy.inventory.v1.CollectInventoryOptionsR\aoptions\"\xf7\x01\n" +
 	"\x17CollectInventoryOptions\x12\x1e\n" +
 	"\n" +
 	"ecosystems\x18\x01 \x03(\tR\n" +
@@ -1674,7 +1684,8 @@ const file_deputy_inventory_v1_service_proto_rawDesc = "" +
 	"\x03ref\x18\x02 \x01(\tR\x03ref\x12\x1a\n" +
 	"\bplatform\x18\x03 \x01(\tR\bplatform\x12)\n" +
 	"\x10include_licenses\x18\x04 \x01(\bR\x0fincludeLicenses\x12-\n" +
-	"\x12enabled_extractors\x18\x05 \x03(\tR\x11enabledExtractors\"\xb7\x03\n" +
+	"\x12enabled_extractors\x18\x05 \x03(\tR\x11enabledExtractors\x124\n" +
+	"\rexclude_paths\x18\x06 \x03(\tB\x0f\xbaH\f\x92\x01\t\x10d\"\x05r\x03\x18\x80\x02R\fexcludePaths\"\xb7\x03\n" +
 	"\x18CollectInventoryResponse\x120\n" +
 	"\x06target\x18\x01 \x01(\v2\x18.deputy.target.v1.TargetR\x06target\x12=\n" +
 	"\fgenerated_at\x18\x02 \x01(\v2\x1a.google.protobuf.TimestampR\vgeneratedAt\x129\n" +

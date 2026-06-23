@@ -135,7 +135,7 @@ func TestDeduplicatePackagesDeterminism(t *testing.T) {
 
 	// Run deduplication multiple times to verify determinism
 	var firstResult []*extractor.Package
-	for i := 0; i < 100; i++ {
+	for i := range 100 {
 		// Shuffle input to simulate different iteration orders
 		shuffled := make([]*extractor.Package, len(pkgs))
 		copy(shuffled, pkgs)

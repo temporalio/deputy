@@ -8,9 +8,9 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
-	"strings"
 
 	sandboxv1 "github.com/temporalio/deputy/gen/deputy/sandbox/v1"
+	"github.com/temporalio/deputy/internal/globmatch"
 )
 
 // FileMasker handles file masking for sandboxed execution.
@@ -63,8 +63,8 @@ func (fm *FileMasker) ShouldMask(path string) (sandboxv1.FileMaskMode, string) {
 	}
 
 	// Check rules in reverse order (later rules have higher priority)
-	for i := len(fm.rules) - 1; i >= 0; i-- {
-		rule := fm.rules[i]
+	for _, rule := range slices.Backward(fm.rules) {
+
 		if matchPattern(path, rule.pattern) {
 			return rule.mode, rule.reason
 		}
@@ -395,7 +395,7 @@ func (fm *FileMasker) addSupplyChainPreset() {
 
 	// Additional supply chain specific rules
 	supplyChainPatterns := []string{
-		"**/.git/**",  // Hide all git data
+		"**/.git/**",   // Hide all git data
 		"**/vendor/**", // Go vendor
 		"**/node_modules/**",
 		"**/.cache/**",
@@ -441,140 +441,16 @@ func (fm *FileMasker) addSupplyChainPreset() {
 	fm.config.ExposePatterns = append(fm.config.ExposePatterns, lockfiles...)
 }
 
-// matchPattern checks if a path matches a glob pattern.
-// Supports ** for recursive matching and common glob patterns.
+// matchPattern checks if a path matches a single gitignore-flavored glob
+// pattern. Matching is any-depth (a slashed pattern matches anywhere in the
+// path, not just the root) so a mask/redact rule never silently misses a
+// nested file. Recursive "**" is handled by globmatch.
 func matchPattern(path, pattern string) bool {
-	// Normalize path separators
-	path = filepath.ToSlash(path)
-	pattern = filepath.ToSlash(pattern)
-
-	// Handle ** patterns (recursive match)
-	if strings.Contains(pattern, "**") {
-		return matchDoubleStarPattern(path, pattern)
-	}
-
-	// Try matching full path
-	if matched, _ := filepath.Match(pattern, path); matched {
-		return true
-	}
-
-	// Try matching just the filename
-	if matched, _ := filepath.Match(pattern, filepath.Base(path)); matched {
-		return true
-	}
-
-	// Try matching each path component for directory patterns
-	parts := strings.Split(path, "/")
-	for i := range parts {
-		subPath := strings.Join(parts[i:], "/")
-		if matched, _ := filepath.Match(pattern, subPath); matched {
-			return true
-		}
-	}
-
-	return false
-}
-
-// matchDoubleStarPattern handles patterns containing **.
-// ** matches any sequence of directories (including zero).
-func matchDoubleStarPattern(path, pattern string) bool {
-	// Split pattern by **
-	parts := strings.Split(pattern, "**")
-
-	if len(parts) == 1 {
-		// No ** found, shouldn't happen but handle gracefully
-		matched, _ := filepath.Match(pattern, path)
-		return matched
-	}
-
-	// Handle common cases: prefix/**/suffix, **/name, name/**
-	if len(parts) == 2 {
-		prefix := strings.Trim(parts[0], "/")
-		suffix := strings.Trim(parts[1], "/")
-
-		// Pattern like "**/.git/**" or "**/node_modules/**"
-		// Should match anything containing the middle part
-
-		// Check if we're looking for a specific directory anywhere in path
-		if prefix == "" && suffix != "" {
-			// Pattern like "**/.git/**" - match paths containing .git/
-			// or pattern like "**/package.json" - match any path ending with that
-			// Use CutSuffix (Go 1.20+) instead of HasSuffix + TrimSuffix
-			if dirName, found := strings.CutSuffix(suffix, "/**"); found {
-				// Pattern like "**/.git/**" - look for directory
-				return containsPathComponent(path, dirName)
-			}
-			// Pattern like "**/package.json" - match filename anywhere
-			if !strings.Contains(suffix, "/") {
-				return matchSimplePattern(filepath.Base(path), suffix)
-			}
-			// Pattern like "**/dir/file" - check if path ends with this
-			return strings.HasSuffix("/"+path, "/"+suffix) ||
-				strings.Contains("/"+path+"/", "/"+suffix+"/")
-		}
-
-		if prefix != "" && suffix == "" {
-			// Pattern like "dir/**" - match paths under dir
-			return strings.HasPrefix(path, prefix+"/") || path == prefix
-		}
-
-		if prefix != "" && suffix != "" {
-			// Pattern like "prefix/**/suffix"
-			if !strings.HasPrefix(path, prefix+"/") && path != prefix {
-				return false
-			}
-			// Check if path ends with suffix pattern
-			pathAfterPrefix := strings.TrimPrefix(path, prefix+"/")
-			return matchPattern(pathAfterPrefix, "**"+suffix)
-		}
-
-		// prefix == "" && suffix == "" means pattern is just "**"
-		return true
-	}
-
-	// Multiple ** in pattern (rare) - handle recursively
-	return matchMultipleDoubleStars(path, parts)
-}
-
-// containsPathComponent checks if path contains a specific directory component.
-// Uses slices.Contains (Go 1.21+) for cleaner code.
-func containsPathComponent(path, component string) bool {
-	return slices.Contains(strings.Split(path, "/"), component)
-}
-
-// matchMultipleDoubleStars handles patterns with multiple ** segments.
-func matchMultipleDoubleStars(path string, patternParts []string) bool {
-	// Reconstruct and match incrementally
-	if len(patternParts) == 0 {
-		return true
-	}
-
-	first := strings.Trim(patternParts[0], "/")
-	if first != "" && !strings.HasPrefix(path, first) {
+	m, err := globmatch.Compile([]string{pattern}, globmatch.AnyDepth())
+	if err != nil {
 		return false
 	}
-
-	rest := strings.Join(patternParts[1:], "**")
-	pathRest := strings.TrimPrefix(path, first)
-	pathRest = strings.TrimPrefix(pathRest, "/")
-
-	// Try matching rest of pattern at each position
-	// Use range-over-int (Go 1.22+) for cleaner iteration
-	parts := strings.Split(pathRest, "/")
-	for i := range len(parts) + 1 {
-		subPath := strings.Join(parts[i:], "/")
-		if matchPattern(subPath, rest) {
-			return true
-		}
-	}
-
-	return false
-}
-
-// matchSimplePattern matches simple glob patterns without **.
-func matchSimplePattern(path, pattern string) bool {
-	matched, _ := filepath.Match(pattern, path)
-	return matched
+	return m.MatchPath(path)
 }
 
 // createEmptyFile creates an empty file with the given permissions.

@@ -1,6 +1,7 @@
 package dockerfile
 
 import (
+	"slices"
 	"strings"
 	"testing"
 )
@@ -143,13 +144,7 @@ ENV PATH=/usr/local/bin:$PATH
 
 	// Check sensitive env detection
 	sensitive := stage.HasSensitiveEnv()
-	found := false
-	for _, s := range sensitive {
-		if s == "DB_PASSWORD" {
-			found = true
-			break
-		}
-	}
+	found := slices.Contains(sensitive, "DB_PASSWORD")
 	if !found {
 		t.Errorf("expected DB_PASSWORD to be detected as sensitive, got %v", sensitive)
 	}

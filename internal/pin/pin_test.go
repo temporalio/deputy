@@ -190,6 +190,90 @@ func TestPin_BasicPinning(t *testing.T) {
 	}
 }
 
+func TestPin_VerificationModes(t *testing.T) {
+	const sha = "aaa1111111111111111111111111111111111111"
+	newStrategy := func(v *Verification) *mockStrategy {
+		return &mockStrategy{
+			refs: []Ref{{Ecosystem: "mock", Name: "aws-actions/amazon-ecr-login", Version: "v1", FilePath: "/tmp/ci.yml"}},
+			resolved: map[string]struct{ sha, tag string }{
+				"aws-actions/amazon-ecr-login@v1": {sha, "v1.0.0"},
+			},
+			verified: map[string]*Verification{sha: v},
+		}
+	}
+	// flagged mirrors a legitimate old-major/off-default-branch release: unsigned
+	// and not reachable from the default branch, which the verifier flags.
+	flagged := &Verification{IsForkCommit: true, Warnings: []string{"possible imposter commit from fork"}}
+	unverifiable := &Verification{Unverifiable: true, Warnings: []string{"could not verify branch reachability: rate limited"}}
+
+	t.Run("warn pins flagged ref and reports it", func(t *testing.T) {
+		s := newStrategy(flagged)
+		report, err := Pin(t.Context(), testRoot(t), Options{Verification: VerificationWarn}, s)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if report.Stats.Pinned != 1 || report.Stats.Suspicious != 0 || report.Stats.Flagged != 1 {
+			t.Errorf("warn: pinned=%d suspicious=%d flagged=%d, want 1/0/1",
+				report.Stats.Pinned, report.Stats.Suspicious, report.Stats.Flagged)
+		}
+		if len(s.rewrites) != 1 {
+			t.Errorf("warn: flagged ref should still be written, rewrites=%d", len(s.rewrites))
+		}
+	})
+
+	t.Run("default mode is warn", func(t *testing.T) {
+		s := newStrategy(flagged)
+		report, err := Pin(t.Context(), testRoot(t), Options{}, s)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if report.Stats.Pinned != 1 || report.Stats.Suspicious != 0 {
+			t.Errorf("default: pinned=%d suspicious=%d, want 1/0 (warn)", report.Stats.Pinned, report.Stats.Suspicious)
+		}
+	})
+
+	t.Run("error leaves flagged ref unpinned", func(t *testing.T) {
+		s := newStrategy(flagged)
+		report, err := Pin(t.Context(), testRoot(t), Options{Verification: VerificationError}, s)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if report.Stats.Suspicious != 1 || report.Stats.Pinned != 0 {
+			t.Errorf("error: suspicious=%d pinned=%d, want 1/0", report.Stats.Suspicious, report.Stats.Pinned)
+		}
+		if len(s.rewrites) != 0 {
+			t.Errorf("error: flagged ref must not be written, rewrites=%d", len(s.rewrites))
+		}
+	})
+
+	t.Run("unverifiable is never an imposter", func(t *testing.T) {
+		for _, mode := range []VerificationMode{VerificationWarn, VerificationError} {
+			s := newStrategy(unverifiable)
+			report, err := Pin(t.Context(), testRoot(t), Options{Verification: mode}, s)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if report.Stats.Suspicious != 0 {
+				t.Errorf("mode %s: unverifiable must not be suspicious, got %d", mode, report.Stats.Suspicious)
+			}
+			if report.Stats.Pinned != 1 || report.Stats.Unverifiable != 1 {
+				t.Errorf("mode %s: pinned=%d unverifiable=%d, want 1/1", mode, report.Stats.Pinned, report.Stats.Unverifiable)
+			}
+		}
+	})
+
+	t.Run("off skips verification entirely", func(t *testing.T) {
+		s := newStrategy(flagged)
+		report, err := Pin(t.Context(), testRoot(t), Options{Verification: VerificationOff}, s)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if report.Stats.Pinned != 1 || report.Stats.Flagged != 0 {
+			t.Errorf("off: pinned=%d flagged=%d, want 1/0", report.Stats.Pinned, report.Stats.Flagged)
+		}
+	})
+}
+
 func TestPin_DryRun(t *testing.T) {
 	strategy := &mockStrategy{
 		refs: []Ref{
@@ -388,7 +472,8 @@ func TestPin_Suspicious(t *testing.T) {
 		},
 	}
 
-	report, err := Pin(context.Background(), testRoot(t), Options{}, strategy)
+	// In error mode a flagged ref is left unpinned and counted suspicious.
+	report, err := Pin(context.Background(), testRoot(t), Options{Verification: VerificationError}, strategy)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -489,13 +574,14 @@ func TestPin_VerificationErrorReported(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Should still be already-pinned but with a reason noting the verification failure
+	// Should still be already-pinned, with a reason noting verification was
+	// unavailable (a failed verify call is "unknown", not a confirmed imposter).
 	if report.Stats.AlreadyPinned != 1 {
 		t.Errorf("expected 1 already-pinned, got stats: %+v", report.Stats)
 	}
 	r := report.Results[0]
-	if !strings.Contains(r.Reason, "verification failed") {
-		t.Errorf("expected reason to mention verification failure, got %q", r.Reason)
+	if !strings.Contains(r.Reason, "verification unavailable") {
+		t.Errorf("expected reason to mention verification unavailable, got %q", r.Reason)
 	}
 }
 
@@ -872,7 +958,8 @@ func TestUpdate_Suspicious(t *testing.T) {
 		},
 	}
 
-	report, err := PinUpdate(context.Background(), testRoot(t), Options{}, strategy)
+	// In error mode a flagged update is left unpinned and counted suspicious.
+	report, err := PinUpdate(context.Background(), testRoot(t), Options{Verification: VerificationError}, strategy)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -898,6 +985,16 @@ func TestShouldExclude(t *testing.T) {
 		{"subpath match", Ref{Name: "github/codeql-action", Subpath: "init"}, []string{"github/codeql-action/init"}, true},
 		{"subpath no match", Ref{Name: "github/codeql-action", Subpath: "init"}, []string{"github/codeql-action/analyze"}, false},
 		{"multiple patterns", Ref{Name: "actions/cache"}, []string{"actions/checkout", "actions/cache"}, true},
+
+		// Monorepo / subpath actions: org- and repo-level patterns must exclude
+		// nested actions, not just top-level ones (the wildcard depth bug).
+		{"org star excludes top-level action", Ref{Name: "temporalio/simple-action"}, []string{"temporalio/*"}, true},
+		{"org star excludes subpath action", Ref{Name: "temporalio/private-actions", Subpath: "golang/setup"}, []string{"temporalio/*"}, true},
+		{"org doublestar excludes subpath action", Ref{Name: "temporalio/private-actions", Subpath: "golang/setup"}, []string{"temporalio/**"}, true},
+		{"repo identity excludes all subpaths", Ref{Name: "temporalio/private-actions", Subpath: "golang/setup"}, []string{"temporalio/private-actions"}, true},
+		{"repo doublestar excludes subpaths", Ref{Name: "temporalio/private-actions", Subpath: "golang/setup"}, []string{"temporalio/private-actions/**"}, true},
+		{"single star is not recursive across repos", Ref{Name: "otherorg/action"}, []string{"temporalio/*"}, false},
+		{"other org not excluded by doublestar", Ref{Name: "otherorg/private-actions", Subpath: "golang/setup"}, []string{"temporalio/**"}, false},
 	}
 
 	for _, tc := range tests {

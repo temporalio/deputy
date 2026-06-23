@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"testing"
 
 	"github.com/temporalio/deputy/internal/ecosystem"
@@ -129,13 +130,7 @@ func TestHandlerFactory_Register(t *testing.T) {
 	factory.Register(customConfig)
 
 	ecosystems := factory.SupportedEcosystems()
-	found := false
-	for _, eco := range ecosystems {
-		if eco == ecosystem.Cargo {
-			found = true
-			break
-		}
-	}
+	found := slices.Contains(ecosystems, ecosystem.Cargo)
 	if !found {
 		t.Error("registered ecosystem not found in supported list")
 	}

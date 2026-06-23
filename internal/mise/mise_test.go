@@ -1,6 +1,7 @@
 package mise
 
 import (
+	"maps"
 	"reflect"
 	"testing"
 )
@@ -78,11 +79,36 @@ func TestSplitBackend(t *testing.T) {
 		{"pipx:black", "pipx", "black"},
 		{"go:golang.org/x/tools/cmd/goimports", "go", "golang.org/x/tools/cmd/goimports"},
 		{"unknownbackend:thing", "", "unknownbackend:thing"},
+		// Trailing tool-option groups are stripped from the name.
+		{"ubi:cli/cli[exe=gh]", "ubi", "cli/cli"},
+		{"ubi:owner/repo[exe=foo,matching=musl]", "ubi", "owner/repo"},
+		{"github:cli/cli[provider=github]", "github", "cli/cli"},
+		{"node[arch=arm64]", "", "node"},
 	}
 	for _, tt := range tests {
 		b, n := SplitBackend(tt.key)
 		if b != tt.backend || n != tt.name {
 			t.Errorf("SplitBackend(%q) = (%q,%q), want (%q,%q)", tt.key, b, n, tt.backend, tt.name)
+		}
+	}
+}
+
+func TestToolOptions(t *testing.T) {
+	tests := []struct {
+		key  string
+		want map[string]string
+	}{
+		{"ubi:cli/cli", nil},
+		{"ubi:cli/cli[exe=gh]", map[string]string{"exe": "gh"}},
+		{"ubi:owner/repo[exe=foo,matching=musl]", map[string]string{"exe": "foo", "matching": "musl"}},
+		{"ubi:owner/repo[provider=gitlab]", map[string]string{"provider": "gitlab"}},
+		{"ubi:owner/repo[verbose]", map[string]string{"verbose": ""}},
+		{"ubi:owner/repo[]", nil},
+	}
+	for _, tt := range tests {
+		got := ToolOptions(tt.key)
+		if !maps.Equal(got, tt.want) {
+			t.Errorf("ToolOptions(%q) = %v, want %v", tt.key, got, tt.want)
 		}
 	}
 }

@@ -470,10 +470,10 @@ func listOrgRepos(ctx context.Context, client *github.Client, org string) ([]rep
 
 // listUserRepos lists all repositories for the given user.
 func listUserRepos(ctx context.Context, client *github.Client, user string) ([]repoTarget, error) {
-	opts := &github.RepositoryListOptions{Type: "owner", ListOptions: github.ListOptions{PerPage: 100}}
+	opts := &github.RepositoryListByUserOptions{Type: "owner", ListOptions: github.ListOptions{PerPage: 100}}
 	var out []repoTarget
 	for {
-		repos, resp, err := client.Repositories.List(ctx, user, opts)
+		repos, resp, err := client.Repositories.ListByUser(ctx, user, opts)
 		if err != nil {
 			if resp != nil && resp.StatusCode == http.StatusNotFound {
 				return nil, fmt.Errorf("user %s not found", user)

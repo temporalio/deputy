@@ -241,7 +241,7 @@ func identifyRiskFactors(v vulnerability.Consolidated) []string {
 	// CWE-based factors from DatabaseSpecific
 	if v.DatabaseSpecific != nil {
 		if cwes, ok := v.DatabaseSpecific["cwes"]; ok {
-			for _, cwe := range strings.Split(cwes, ",") {
+			for cwe := range strings.SplitSeq(cwes, ",") {
 				cwe = strings.TrimSpace(cwe)
 				if riskNote := cweRiskNote(cwe); riskNote != "" {
 					factors = append(factors, riskNote)
@@ -427,14 +427,14 @@ func suggestAlternatives(v vulnerability.Consolidated) []string {
 
 	// Known alternatives for common problematic packages
 	knownAlternatives := map[string][]string{
-		"request":      {"axios", "node-fetch", "got"},
-		"moment":       {"dayjs", "date-fns", "luxon"},
-		"lodash":       {"lodash-es (tree-shakeable)", "ramda", "native ES6+ methods"},
-		"underscore":   {"lodash", "ramda"},
-		"jquery":       {"vanilla JS", "alpinejs (for simple interactions)"},
-		"express":      {"fastify", "koa", "hono"},
-		"body-parser":  {"express built-in (4.16+)"},
-		"jade":         {"pug", "ejs", "handlebars"},
+		"request":       {"axios", "node-fetch", "got"},
+		"moment":        {"dayjs", "date-fns", "luxon"},
+		"lodash":        {"lodash-es (tree-shakeable)", "ramda", "native ES6+ methods"},
+		"underscore":    {"lodash", "ramda"},
+		"jquery":        {"vanilla JS", "alpinejs (for simple interactions)"},
+		"express":       {"fastify", "koa", "hono"},
+		"body-parser":   {"express built-in (4.16+)"},
+		"jade":          {"pug", "ejs", "handlebars"},
 		"coffee-script": {"TypeScript", "vanilla JS"},
 	}
 

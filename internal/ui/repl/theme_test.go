@@ -1,6 +1,7 @@
 package repl
 
 import (
+	"slices"
 	"testing"
 )
 
@@ -67,8 +68,8 @@ func TestThemeByName(t *testing.T) {
 		{"minimal", "minimal"},
 		{"monokai", "monokai"},
 		{"dracula", "dracula"},
-		{"unknown", "default"},   // Falls back to default
-		{"", "default"},          // Empty falls back to default
+		{"unknown", "default"}, // Falls back to default
+		{"", "default"},        // Empty falls back to default
 	}
 
 	for _, tt := range tests {
@@ -90,13 +91,7 @@ func TestAvailableThemes(t *testing.T) {
 	}
 
 	for _, name := range expected {
-		found := false
-		for _, theme := range themes {
-			if theme == name {
-				found = true
-				break
-			}
-		}
+		found := slices.Contains(themes, name)
 		if !found {
 			t.Errorf("expected theme %q in available themes", name)
 		}
@@ -158,11 +153,11 @@ func TestTheme_UniqueSymbols(t *testing.T) {
 
 	// Ensure symbols are visually distinct
 	symbols := map[string]string{
-		"PromptSymbol":    theme.PromptSymbol,
-		"ContinueSymbol":  theme.ContinueSymbol,
-		"ResultSymbol":    theme.ResultSymbol,
-		"ErrorSymbol":     theme.ErrorSymbol,
-		"HintSymbol":      theme.HintSymbol,
+		"PromptSymbol":   theme.PromptSymbol,
+		"ContinueSymbol": theme.ContinueSymbol,
+		"ResultSymbol":   theme.ResultSymbol,
+		"ErrorSymbol":    theme.ErrorSymbol,
+		"HintSymbol":     theme.HintSymbol,
 	}
 
 	// Check all symbols are non-empty

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"slices"
 	"strings"
 	"time"
 
@@ -608,13 +609,13 @@ type RemediationCommand struct {
 
 // GetRemediationResult is the output for the get_remediation tool.
 type GetRemediationResult struct {
-	Path                  string               `json:"path"`
-	VulnerabilitiesFound  int                  `json:"vulnerabilitiesFound"`
-	RemediableCount       int                  `json:"remediableCount"`
-	UnfixableCount        int                  `json:"unfixableCount"`
-	Commands              []RemediationCommand `json:"commands"`
-	StdlibUpgrade         string               `json:"stdlibUpgrade,omitempty"`
-	UnfixableVulnerabilities []string          `json:"unfixableVulnerabilities,omitempty"`
+	Path                     string               `json:"path"`
+	VulnerabilitiesFound     int                  `json:"vulnerabilitiesFound"`
+	RemediableCount          int                  `json:"remediableCount"`
+	UnfixableCount           int                  `json:"unfixableCount"`
+	Commands                 []RemediationCommand `json:"commands"`
+	StdlibUpgrade            string               `json:"stdlibUpgrade,omitempty"`
+	UnfixableVulnerabilities []string             `json:"unfixableVulnerabilities,omitempty"`
 }
 
 // AnalyzeGraphInput is the input for the analyze_dependency_graph tool.
@@ -658,14 +659,14 @@ type GraphWhyInput struct {
 
 // GraphWhyResult is the output for the graph_why tool.
 type GraphWhyResult struct {
-	Package    string      `json:"package"`
-	Version    string      `json:"version,omitempty"`
-	PURL       string      `json:"purl,omitempty"`
-	Direct     bool        `json:"direct"`
-	Found      bool        `json:"found"`
-	Paths      []GraphPath `json:"paths,omitempty"`
-	PathCount  int         `json:"pathCount"`
-	Message    string      `json:"message,omitempty"`
+	Package   string      `json:"package"`
+	Version   string      `json:"version,omitempty"`
+	PURL      string      `json:"purl,omitempty"`
+	Direct    bool        `json:"direct"`
+	Found     bool        `json:"found"`
+	Paths     []GraphPath `json:"paths,omitempty"`
+	PathCount int         `json:"pathCount"`
+	Message   string      `json:"message,omitempty"`
 }
 
 // GraphNeedsInput is the input for the graph_needs tool.
@@ -677,13 +678,13 @@ type GraphNeedsInput struct {
 
 // GraphNeedsResult is the output for the graph_needs tool.
 type GraphNeedsResult struct {
-	Package        string           `json:"package"`
-	Version        string           `json:"version,omitempty"`
-	PURL           string           `json:"purl,omitempty"`
-	Found          bool             `json:"found"`
-	Dependents     []DependencyInfo `json:"dependents"`
-	DirectCount    int              `json:"directCount"`
-	TransitiveCount int             `json:"transitiveCount"`
+	Package         string           `json:"package"`
+	Version         string           `json:"version,omitempty"`
+	PURL            string           `json:"purl,omitempty"`
+	Found           bool             `json:"found"`
+	Dependents      []DependencyInfo `json:"dependents"`
+	DirectCount     int              `json:"directCount"`
+	TransitiveCount int              `json:"transitiveCount"`
 }
 
 // TriageInput is the input for the triage_vulnerabilities tool.
@@ -694,16 +695,16 @@ type TriageInput struct {
 
 // TriagedVuln represents a prioritized vulnerability.
 type TriagedVuln struct {
-	ID            string   `json:"id"`
-	Severity      string   `json:"severity"`
-	Package       string   `json:"package"`
-	Version       string   `json:"version"`
-	IsDirect      bool     `json:"isDirect"`
-	HasFix        bool     `json:"hasFix"`
-	FixedVersions []string `json:"fixedVersions,omitempty"`
-	Summary       string   `json:"summary"`
-	Priority      string   `json:"priority"` // "critical", "high", "medium", "low"
-	PriorityReason string  `json:"priorityReason"`
+	ID             string   `json:"id"`
+	Severity       string   `json:"severity"`
+	Package        string   `json:"package"`
+	Version        string   `json:"version"`
+	IsDirect       bool     `json:"isDirect"`
+	HasFix         bool     `json:"hasFix"`
+	FixedVersions  []string `json:"fixedVersions,omitempty"`
+	Summary        string   `json:"summary"`
+	Priority       string   `json:"priority"` // "critical", "high", "medium", "low"
+	PriorityReason string   `json:"priorityReason"`
 }
 
 // TriageResult is the output for the triage_vulnerabilities tool.
@@ -1294,12 +1295,12 @@ func (s *Server) getRemediation(ctx context.Context, req *mcp.CallToolRequest, a
 	}
 
 	result := GetRemediationResult{
-		Path:                 args.Path,
-		VulnerabilitiesFound: int(scanResult.Stats.Unique),
-		RemediableCount:      remediableCount,
-		UnfixableCount:       len(unfixable),
-		Commands:             make([]RemediationCommand, 0, len(commands)),
-		StdlibUpgrade:        stdlibUpgrade,
+		Path:                     args.Path,
+		VulnerabilitiesFound:     int(scanResult.Stats.Unique),
+		RemediableCount:          remediableCount,
+		UnfixableCount:           len(unfixable),
+		Commands:                 make([]RemediationCommand, 0, len(commands)),
+		StdlibUpgrade:            stdlibUpgrade,
 		UnfixableVulnerabilities: unfixable,
 	}
 
@@ -1879,7 +1880,7 @@ func calculatePriority(severity string, hasFix, isDirect bool) (string, string) 
 // sortTriagedVulns sorts vulnerabilities by priority.
 func sortTriagedVulns(vulns []TriagedVuln) {
 	priorityOrder := map[string]int{"critical": 0, "high": 1, "medium": 2, "low": 3}
-	for i := 0; i < len(vulns); i++ {
+	for i := range vulns {
 		for j := i + 1; j < len(vulns); j++ {
 			if priorityOrder[vulns[j].Priority] < priorityOrder[vulns[i].Priority] {
 				vulns[i], vulns[j] = vulns[j], vulns[i]
@@ -2097,12 +2098,12 @@ func (s *Server) diffContainerImages(ctx context.Context, args DiffRefsInput) (*
 	targetScan := targetResp.Msg
 
 	result := DiffRefsResult{
-		Path:            args.BaseRef,
-		BaseRef:         args.BaseRef,
-		TargetRef:       args.TargetRef,
-		IsContainerDiff: true,
-		Changes:         make([]DependencyChange, 0),
-		VulnerabilitySummary:     make(map[string]int),
+		Path:                 args.BaseRef,
+		BaseRef:              args.BaseRef,
+		TargetRef:            args.TargetRef,
+		IsContainerDiff:      true,
+		Changes:              make([]DependencyChange, 0),
+		VulnerabilitySummary: make(map[string]int),
 	}
 
 	// Build package maps for comparison
@@ -2211,12 +2212,12 @@ func (s *Server) diffGitRefs(ctx context.Context, args DiffRefsInput) (*mcp.Call
 	targetScan := targetResp.Msg
 
 	result := DiffRefsResult{
-		Path:            args.Path,
-		BaseRef:         args.BaseRef,
-		TargetRef:       args.TargetRef,
-		IsContainerDiff: false,
-		Changes:         make([]DependencyChange, 0),
-		VulnerabilitySummary:     make(map[string]int),
+		Path:                 args.Path,
+		BaseRef:              args.BaseRef,
+		TargetRef:            args.TargetRef,
+		IsContainerDiff:      false,
+		Changes:              make([]DependencyChange, 0),
+		VulnerabilitySummary: make(map[string]int),
 	}
 
 	// Build package maps for comparison
@@ -2317,12 +2318,7 @@ func isContainerImageRef(ref string) bool {
 func isCommonBaseImage(name string) bool {
 	common := []string{"alpine", "nginx", "ubuntu", "debian", "centos", "fedora", "busybox", "python", "node", "golang", "rust", "redis", "postgres", "mysql", "mongo"}
 	nameLower := strings.ToLower(name)
-	for _, img := range common {
-		if nameLower == img {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(common, nameLower)
 }
 
 // compareVersions does a simple version comparison.

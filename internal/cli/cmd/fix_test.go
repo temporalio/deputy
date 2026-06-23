@@ -51,7 +51,7 @@ func TestOutputFixProtoJSON(t *testing.T) {
 		t.Fatalf("failed to unmarshal plan json: %v", err)
 	}
 	if roundTrip.StdlibUpgrade != resp.StdlibUpgrade || roundTrip.Stats.RunnableCommands != resp.Stats.RunnableCommands {
-		t.Fatalf("round-trip mismatch: %+v vs %+v", roundTrip, resp)
+		t.Fatalf("round-trip mismatch: %+v vs %+v", &roundTrip, resp)
 	}
 }
 
