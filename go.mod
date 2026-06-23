@@ -92,7 +92,7 @@ require (
 	github.com/clipperhouse/displaywidth v0.11.0 // indirect
 	github.com/clipperhouse/uax29/v2 v2.7.0 // indirect
 	github.com/containerd/cgroups/v3 v3.1.3 // indirect
-	github.com/containerd/containerd v1.7.32 // indirect
+	github.com/containerd/containerd v1.7.33 // indirect
 	github.com/containerd/containerd/api v1.10.0 // indirect
 	github.com/containerd/continuity v0.5.0 // indirect
 	github.com/containerd/fifo v1.1.0 // indirect
@@ -137,7 +137,7 @@ require (
 	deps.dev/util/maven v0.0.0-20260422013440-90c27f84dd6f // indirect
 	deps.dev/util/pypi v0.0.0-20260422013440-90c27f84dd6f // indirect
 	deps.dev/util/resolve v0.0.0-20250903005441-604c45d5b44b // indirect
-	deps.dev/util/semver v0.0.0-20260422013440-90c27f84dd6f // indirect
+	deps.dev/util/semver v0.0.0-20260422013440-90c27f84dd6f
 	github.com/GehirnInc/crypt v0.0.0-20230320061759-8cc1b52080c5 // indirect
 	github.com/Microsoft/go-winio v0.6.2 // indirect
 	github.com/ProtonMail/go-crypto v1.4.1 // indirect
