@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"connectrpc.com/connect"
 	pb "deps.dev/api/v3"
@@ -35,6 +36,7 @@ import (
 	"github.com/temporalio/deputy/internal/output"
 	"github.com/temporalio/deputy/internal/policy"
 	internalproto "github.com/temporalio/deputy/internal/proto"
+	"github.com/temporalio/deputy/internal/registry"
 	"github.com/temporalio/deputy/internal/report"
 	"github.com/temporalio/deputy/internal/report/render"
 	"github.com/temporalio/deputy/internal/repository"
@@ -56,6 +58,7 @@ func AddDiffCommand(root *cobra.Command, c *services.Clients) {
 		repoPath                                       string
 		skipVulnScan                                   bool
 		enrichLicenses                                 bool
+		enrichRegistryMetadata                         bool
 		licenseSource                                  string
 		publishedBeforeStr, publishedAfterStr, asOfStr string
 		ignoreUnfixed                                  bool
@@ -170,7 +173,7 @@ Can be disabled with --skip-vuln-scan for faster execution.`,
 			if err != nil {
 				return fmt.Errorf("failed to parse references: %w", err)
 			}
-			return runDiffAnalysis(cmd.Context(), c, repo, baseRef, targetRef, !skipVulnScan, enrichLicenses, licenseSource, publishedAfterStr, publishedBeforeStr, asOfStr, ignoreUnfixed, showUnchanged, unchangedThreshold, policyPaths, scanOpts, matcher, debugMatcher, outputFormat, outW, cmd.ErrOrStderr())
+			return runDiffAnalysis(cmd.Context(), c, repo, baseRef, targetRef, !skipVulnScan, enrichLicenses, enrichRegistryMetadata, licenseSource, publishedAfterStr, publishedBeforeStr, asOfStr, ignoreUnfixed, showUnchanged, unchangedThreshold, policyPaths, scanOpts, matcher, debugMatcher, outputFormat, outW, cmd.ErrOrStderr())
 		},
 		Example: `BASIC USAGE:
   # Compare current work with default branch (beginner-friendly)
@@ -298,6 +301,7 @@ PERFORMANCE TIPS:
 	cmd.Flags().StringVar(&repoPath, "repo", "", "Path to the repository (defaults to current directory)")
 	cmd.Flags().BoolVar(&skipVulnScan, "skip-vuln-scan", false, "Skip vulnerability scanning (faster execution)")
 	cmd.Flags().BoolVar(&enrichLicenses, "licenses", false, "Include license information for changed dependencies")
+	cmd.Flags().BoolVar(&enrichRegistryMetadata, "registry-metadata", false, "Fetch registry metadata (publish date) for changed dependencies from deps.dev and expose it to diff_dependency_change policies")
 	cmd.Flags().StringVar(&licenseSource, "license-source", "depsdev", "License information source: depsdev | scan | both")
 	cmd.Flags().StringVar(&publishedBeforeStr, "published-before", "", "Only include vulnerabilities published before this date (YYYY, YYYY-MM, YYYY-MM-DD, or RFC3339)")
 	cmd.Flags().StringVar(&publishedAfterStr, "published-after", "", "Only include vulnerabilities published on/after this date (YYYY, YYYY-MM, YYYY-MM-DD, or RFC3339)")
@@ -330,7 +334,7 @@ type DiffPolicyReport struct {
 // runDiffAnalysis orchestrates dependency inventory collection for the base and
 // target references, computes a dependency diff, and optionally queries OSV to
 // enrich added/updated modules with vulnerability data.
-func runDiffAnalysis(ctx context.Context, c *services.Clients, repoPath, baseRef, targetRef string, enableVulnScan bool, enrichLicenses bool, licenseSource string, publishedAfterStr, publishedBeforeStr, asOfStr string, ignoreUnfixed bool, showUnchanged bool, unchangedThreshold string, policyPaths []string, scanOpts inv.ScanOptions, matcher *inv.DependencyMatcher, debugMatcher bool, outputFormat string, outW io.Writer, errW io.Writer) error {
+func runDiffAnalysis(ctx context.Context, c *services.Clients, repoPath, baseRef, targetRef string, enableVulnScan bool, enrichLicenses bool, enrichRegistryMetadata bool, licenseSource string, publishedAfterStr, publishedBeforeStr, asOfStr string, ignoreUnfixed bool, showUnchanged bool, unchangedThreshold string, policyPaths []string, scanOpts inv.ScanOptions, matcher *inv.DependencyMatcher, debugMatcher bool, outputFormat string, outW io.Writer, errW io.Writer) error {
 	ctx, span := otel.StartSpan(ctx, "deputy.diff",
 		trace.WithAttributes(
 			attribute.String("deputy.target.path", repoPath),
@@ -605,7 +609,7 @@ func runDiffAnalysis(ctx context.Context, c *services.Clients, repoPath, baseRef
 			Changes:         changes,
 			Vulnerabilities: reportVulns,
 		}
-		if err := runDiffPolicies(ctx, policyPaths, policyReport, errW); err != nil {
+		if err := runDiffPolicies(ctx, policyPaths, policyReport, enrichRegistryMetadata, errW); err != nil {
 			otel.SetSpanError(span, err)
 			return err
 		}
@@ -1090,7 +1094,7 @@ func mergeGoDirectMaps(maps ...map[string]bool) map[string]bool {
 
 // runDiffPolicies evaluates the configured policies against the diff report.
 // Passes proto messages directly to CEL for type-safe evaluation.
-func runDiffPolicies(ctx context.Context, policyPaths []string, diffReport DiffPolicyReport, errW io.Writer) error {
+func runDiffPolicies(ctx context.Context, policyPaths []string, diffReport DiffPolicyReport, enrichRegistryMetadata bool, errW io.Writer) error {
 	if len(policyPaths) == 0 {
 		return nil
 	}
@@ -1098,6 +1102,15 @@ func runDiffPolicies(ctx context.Context, policyPaths []string, diffReport DiffP
 	// Convert to proto types for CEL evaluation
 	protoChanges := internalproto.PackageChangesToProto(diffReport.Changes)
 	protoFindings := report.VulnerabilitiesToFindings(diffReport.Vulnerabilities)
+
+	// Optionally enrich changes with registry metadata (publish date) so policies
+	// can reason about release freshness. Failures are non-fatal: policies guard
+	// the fields with has().
+	if enrichRegistryMetadata {
+		if err := enrichChangesWithRegistryMetadata(ctx, protoChanges, errW); err != nil {
+			fmt.Fprintf(errW, "warning: registry metadata enrichment unavailable: %v\n", err)
+		}
+	}
 
 	// Build report-level payload with proto messages
 	payload := map[string]any{
@@ -1140,6 +1153,71 @@ func runDiffPolicies(ctx context.Context, policyPaths []string, diffReport DiffP
 		}
 	}
 	return nil
+}
+
+// registryMetadataConcurrency bounds parallel deps.dev lookups during diff
+// enrichment, matching the default used by SBOM enrichment.
+const registryMetadataConcurrency = 10
+
+// metadataFetcher fetches registry metadata for a single package version. It is
+// the subset of *registry.Fetcher that enrichment needs, declared here so the
+// concurrent enrichment loop can be exercised with a fake in tests.
+type metadataFetcher interface {
+	Fetch(ctx context.Context, ecosystem, name, version string) (*registry.Metadata, error)
+}
+
+// enrichChangesWithRegistryMetadata populates each change's target_metadata
+// (publish date / age) from deps.dev. Per-package lookup failures are tolerated —
+// the field is simply left unset — so a flaky upstream never sinks policy
+// evaluation. An error is returned only if deps.dev cannot be reached at all.
+//
+// Only the target version is fetched: release freshness is a property of the new
+// version a bump introduces, so the base version's publish date is not needed.
+func enrichChangesWithRegistryMetadata(ctx context.Context, changes []*diffv1.PackageChange, errW io.Writer) error {
+	if len(changes) == 0 {
+		return nil
+	}
+
+	fetcher, err := registry.NewFetcher()
+	if err != nil {
+		return err
+	}
+	defer func() {
+		if cerr := fetcher.Close(); cerr != nil {
+			fmt.Fprintf(errW, "warning: closing registry metadata fetcher: %v\n", cerr)
+		}
+	}()
+
+	enrichChangesWith(ctx, fetcher, changes, time.Now())
+	return nil
+}
+
+// enrichChangesWith is the concurrent core of registry-metadata enrichment,
+// split out so it can be driven by any metadataFetcher. Each change is fetched
+// in its own goroutine (bounded by registryMetadataConcurrency); a fetch error
+// leaves that change's target_metadata unset rather than failing the batch.
+func enrichChangesWith(ctx context.Context, fetcher metadataFetcher, changes []*diffv1.PackageChange, now time.Time) {
+	sem := make(chan struct{}, registryMetadataConcurrency)
+	var wg sync.WaitGroup
+
+	for _, change := range changes {
+		if change == nil || change.Package == nil || change.TargetVersion == "" {
+			continue
+		}
+		wg.Add(1)
+		go func(c *diffv1.PackageChange) {
+			defer wg.Done()
+			sem <- struct{}{}
+			defer func() { <-sem }()
+
+			m, ferr := fetcher.Fetch(ctx, c.Package.Ecosystem, c.Package.Name, c.TargetVersion)
+			if ferr != nil {
+				return // non-fatal: leave target_metadata unset for this package
+			}
+			c.TargetMetadata = m.ToProto(now)
+		}(change)
+	}
+	wg.Wait()
 }
 
 // outputDiffProtoJSON writes a diff response as JSON using protojson.

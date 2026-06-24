@@ -147,6 +147,39 @@ Container images have three license sources:
 
 See [License enrichment concepts](../concepts/inventory-and-sboms.md#license-enrichment) for details.
 
+## Dependency change registry metadata
+
+The `diff_dependency_change` entrypoint can optionally carry registry-sourced
+metadata about the version a bump introduces, so policies can reason about
+supply-chain risk a known-vulnerability scan cannot see — most notably **release
+freshness**. A version published minutes or hours ago has had no time to be
+vetted, and malicious releases are typically live only briefly before they are
+caught and pulled.
+
+This metadata is fetched from deps.dev and is populated only when you pass
+`deputy diff --registry-metadata`. When the flag is absent — or deps.dev has no
+record for a package — the fields are unset, so always guard them with `has()`.
+
+`change.target_metadata` describes `change.target_version`:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `change.target_metadata.published_at` | `timestamp` | When the version was published, per deps.dev (RFC 3339). Unset when unknown. |
+| `change.target_metadata.age_days` | `double` | Age of the version in days at evaluation time (`now - published_at`). `-1` when `published_at` is unknown. Provided because CEL has no `now`. |
+| `change.target_metadata.registries` | `list(string)` | Registries deps.dev reports as hosting the version. |
+
+Example — warn on bumps to a version published less than a week ago:
+
+```cel
+env.entrypoint == "diff_dependency_change" &&
+  has(change.target_metadata) &&
+  change.target_metadata.age_days >= 0.0 &&
+  change.target_metadata.age_days < 7.0
+```
+
+See [`policy/examples/release-freshness.yaml`](../../policy/examples/release-freshness.yaml)
+for a complete policy.
+
 ## Target metadata
 
 `target` summarizes what Deputy is evaluating, regardless of command or entrypoint. It is always present but may be empty when a command does not provide target details. Common fields:

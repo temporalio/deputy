@@ -365,6 +365,7 @@ flowchart TB
 | `--repo` | cwd | Path to the repository |
 | `--licenses` | `false` | Include license information |
 | `--license-source` | `depsdev` | License source: `depsdev`, `scan`, `both` |
+| `--registry-metadata` | `false` | Fetch registry metadata (publish date) from deps.dev and expose it to `diff_dependency_change` policies as `change.target_metadata` |
 | `--published-before` | | Only show vulns published before this date |
 | `--published-after` | | Only show vulns published on/after this date |
 | `--as-of` | | Historical view (implies `--published-before`) |

@@ -479,9 +479,13 @@ type PackageChange struct {
 	// OldName is the previous package name if it changed (e.g., import path canonicalization).
 	OldName string `protobuf:"bytes,5,opt,name=old_name,json=oldName,proto3" json:"old_name,omitempty"`
 	// IsDirect indicates whether this is a direct dependency.
-	IsDirect      bool `protobuf:"varint,6,opt,name=is_direct,json=isDirect,proto3" json:"is_direct,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	IsDirect bool `protobuf:"varint,6,opt,name=is_direct,json=isDirect,proto3" json:"is_direct,omitempty"`
+	// TargetMetadata is registry metadata for target_version (e.g. when it was
+	// published). It is unset for Removed changes and when registry-metadata
+	// fetching is disabled (see the diff --registry-metadata flag).
+	TargetMetadata *RegistryMetadata `protobuf:"bytes,7,opt,name=target_metadata,json=targetMetadata,proto3" json:"target_metadata,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
 }
 
 func (x *PackageChange) Reset() {
@@ -556,6 +560,84 @@ func (x *PackageChange) GetIsDirect() bool {
 	return false
 }
 
+func (x *PackageChange) GetTargetMetadata() *RegistryMetadata {
+	if x != nil {
+		return x.TargetMetadata
+	}
+	return nil
+}
+
+// RegistryMetadata captures registry-sourced facts about a single package version,
+// fetched from deps.dev. It is exposed as a policy signal so policies can reason
+// about supply-chain risk that a known-vulnerability scan cannot see — most notably
+// release freshness, since a version published minutes or hours ago has had no time
+// to be vetted and is a common shape for a malicious release.
+type RegistryMetadata struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// PublishedAt is when this version was published to its registry, per deps.dev.
+	// Unset when deps.dev has no publish date for the version.
+	PublishedAt *timestamppb.Timestamp `protobuf:"bytes,1,opt,name=published_at,json=publishedAt,proto3" json:"published_at,omitempty"`
+	// AgeDays is the age of this version in days at evaluation time (now - published_at).
+	// It is -1 when published_at is unknown. Provided as a convenience because CEL has no
+	// notion of "now", so policies can gate on freshness with e.g. age_days < 7.0.
+	AgeDays float64 `protobuf:"fixed64,2,opt,name=age_days,json=ageDays,proto3" json:"age_days,omitempty"`
+	// Registries lists the registries deps.dev reports as hosting this version.
+	Registries    []string `protobuf:"bytes,3,rep,name=registries,proto3" json:"registries,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RegistryMetadata) Reset() {
+	*x = RegistryMetadata{}
+	mi := &file_deputy_diff_v1_service_proto_msgTypes[4]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RegistryMetadata) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RegistryMetadata) ProtoMessage() {}
+
+func (x *RegistryMetadata) ProtoReflect() protoreflect.Message {
+	mi := &file_deputy_diff_v1_service_proto_msgTypes[4]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RegistryMetadata.ProtoReflect.Descriptor instead.
+func (*RegistryMetadata) Descriptor() ([]byte, []int) {
+	return file_deputy_diff_v1_service_proto_rawDescGZIP(), []int{4}
+}
+
+func (x *RegistryMetadata) GetPublishedAt() *timestamppb.Timestamp {
+	if x != nil {
+		return x.PublishedAt
+	}
+	return nil
+}
+
+func (x *RegistryMetadata) GetAgeDays() float64 {
+	if x != nil {
+		return x.AgeDays
+	}
+	return 0
+}
+
+func (x *RegistryMetadata) GetRegistries() []string {
+	if x != nil {
+		return x.Registries
+	}
+	return nil
+}
+
 // DiffStats summarizes diff results.
 type DiffStats struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
@@ -577,7 +659,7 @@ type DiffStats struct {
 
 func (x *DiffStats) Reset() {
 	*x = DiffStats{}
-	mi := &file_deputy_diff_v1_service_proto_msgTypes[4]
+	mi := &file_deputy_diff_v1_service_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -589,7 +671,7 @@ func (x *DiffStats) String() string {
 func (*DiffStats) ProtoMessage() {}
 
 func (x *DiffStats) ProtoReflect() protoreflect.Message {
-	mi := &file_deputy_diff_v1_service_proto_msgTypes[4]
+	mi := &file_deputy_diff_v1_service_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -602,7 +684,7 @@ func (x *DiffStats) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DiffStats.ProtoReflect.Descriptor instead.
 func (*DiffStats) Descriptor() ([]byte, []int) {
-	return file_deputy_diff_v1_service_proto_rawDescGZIP(), []int{4}
+	return file_deputy_diff_v1_service_proto_rawDescGZIP(), []int{5}
 }
 
 func (x *DiffStats) GetAddedCount() int32 {
@@ -664,7 +746,7 @@ type DiffVulnerabilitiesRequest struct {
 
 func (x *DiffVulnerabilitiesRequest) Reset() {
 	*x = DiffVulnerabilitiesRequest{}
-	mi := &file_deputy_diff_v1_service_proto_msgTypes[5]
+	mi := &file_deputy_diff_v1_service_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -676,7 +758,7 @@ func (x *DiffVulnerabilitiesRequest) String() string {
 func (*DiffVulnerabilitiesRequest) ProtoMessage() {}
 
 func (x *DiffVulnerabilitiesRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_deputy_diff_v1_service_proto_msgTypes[5]
+	mi := &file_deputy_diff_v1_service_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -689,7 +771,7 @@ func (x *DiffVulnerabilitiesRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DiffVulnerabilitiesRequest.ProtoReflect.Descriptor instead.
 func (*DiffVulnerabilitiesRequest) Descriptor() ([]byte, []int) {
-	return file_deputy_diff_v1_service_proto_rawDescGZIP(), []int{5}
+	return file_deputy_diff_v1_service_proto_rawDescGZIP(), []int{6}
 }
 
 func (x *DiffVulnerabilitiesRequest) GetBaseTarget() string {
@@ -745,7 +827,7 @@ type DiffVulnerabilitiesResponse struct {
 
 func (x *DiffVulnerabilitiesResponse) Reset() {
 	*x = DiffVulnerabilitiesResponse{}
-	mi := &file_deputy_diff_v1_service_proto_msgTypes[6]
+	mi := &file_deputy_diff_v1_service_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -757,7 +839,7 @@ func (x *DiffVulnerabilitiesResponse) String() string {
 func (*DiffVulnerabilitiesResponse) ProtoMessage() {}
 
 func (x *DiffVulnerabilitiesResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_deputy_diff_v1_service_proto_msgTypes[6]
+	mi := &file_deputy_diff_v1_service_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -770,7 +852,7 @@ func (x *DiffVulnerabilitiesResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DiffVulnerabilitiesResponse.ProtoReflect.Descriptor instead.
 func (*DiffVulnerabilitiesResponse) Descriptor() ([]byte, []int) {
-	return file_deputy_diff_v1_service_proto_rawDescGZIP(), []int{6}
+	return file_deputy_diff_v1_service_proto_rawDescGZIP(), []int{7}
 }
 
 func (x *DiffVulnerabilitiesResponse) GetBaseTarget() *v1.Target {
@@ -846,7 +928,7 @@ type VulnerabilityDiffStats struct {
 
 func (x *VulnerabilityDiffStats) Reset() {
 	*x = VulnerabilityDiffStats{}
-	mi := &file_deputy_diff_v1_service_proto_msgTypes[7]
+	mi := &file_deputy_diff_v1_service_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -858,7 +940,7 @@ func (x *VulnerabilityDiffStats) String() string {
 func (*VulnerabilityDiffStats) ProtoMessage() {}
 
 func (x *VulnerabilityDiffStats) ProtoReflect() protoreflect.Message {
-	mi := &file_deputy_diff_v1_service_proto_msgTypes[7]
+	mi := &file_deputy_diff_v1_service_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -871,7 +953,7 @@ func (x *VulnerabilityDiffStats) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use VulnerabilityDiffStats.ProtoReflect.Descriptor instead.
 func (*VulnerabilityDiffStats) Descriptor() ([]byte, []int) {
-	return file_deputy_diff_v1_service_proto_rawDescGZIP(), []int{7}
+	return file_deputy_diff_v1_service_proto_rawDescGZIP(), []int{8}
 }
 
 func (x *VulnerabilityDiffStats) GetAddedCount() int32 {
@@ -917,7 +999,7 @@ type DiffContainerImagesRequest struct {
 
 func (x *DiffContainerImagesRequest) Reset() {
 	*x = DiffContainerImagesRequest{}
-	mi := &file_deputy_diff_v1_service_proto_msgTypes[8]
+	mi := &file_deputy_diff_v1_service_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -929,7 +1011,7 @@ func (x *DiffContainerImagesRequest) String() string {
 func (*DiffContainerImagesRequest) ProtoMessage() {}
 
 func (x *DiffContainerImagesRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_deputy_diff_v1_service_proto_msgTypes[8]
+	mi := &file_deputy_diff_v1_service_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -942,7 +1024,7 @@ func (x *DiffContainerImagesRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DiffContainerImagesRequest.ProtoReflect.Descriptor instead.
 func (*DiffContainerImagesRequest) Descriptor() ([]byte, []int) {
-	return file_deputy_diff_v1_service_proto_rawDescGZIP(), []int{8}
+	return file_deputy_diff_v1_service_proto_rawDescGZIP(), []int{9}
 }
 
 func (x *DiffContainerImagesRequest) GetBaseImage() string {
@@ -989,7 +1071,7 @@ type ContainerDiffOptions struct {
 
 func (x *ContainerDiffOptions) Reset() {
 	*x = ContainerDiffOptions{}
-	mi := &file_deputy_diff_v1_service_proto_msgTypes[9]
+	mi := &file_deputy_diff_v1_service_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1001,7 +1083,7 @@ func (x *ContainerDiffOptions) String() string {
 func (*ContainerDiffOptions) ProtoMessage() {}
 
 func (x *ContainerDiffOptions) ProtoReflect() protoreflect.Message {
-	mi := &file_deputy_diff_v1_service_proto_msgTypes[9]
+	mi := &file_deputy_diff_v1_service_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1014,7 +1096,7 @@ func (x *ContainerDiffOptions) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ContainerDiffOptions.ProtoReflect.Descriptor instead.
 func (*ContainerDiffOptions) Descriptor() ([]byte, []int) {
-	return file_deputy_diff_v1_service_proto_rawDescGZIP(), []int{9}
+	return file_deputy_diff_v1_service_proto_rawDescGZIP(), []int{10}
 }
 
 func (x *ContainerDiffOptions) GetScanVulnerabilities() bool {
@@ -1085,7 +1167,7 @@ type DiffContainerImagesResponse struct {
 
 func (x *DiffContainerImagesResponse) Reset() {
 	*x = DiffContainerImagesResponse{}
-	mi := &file_deputy_diff_v1_service_proto_msgTypes[10]
+	mi := &file_deputy_diff_v1_service_proto_msgTypes[11]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1097,7 +1179,7 @@ func (x *DiffContainerImagesResponse) String() string {
 func (*DiffContainerImagesResponse) ProtoMessage() {}
 
 func (x *DiffContainerImagesResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_deputy_diff_v1_service_proto_msgTypes[10]
+	mi := &file_deputy_diff_v1_service_proto_msgTypes[11]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1110,7 +1192,7 @@ func (x *DiffContainerImagesResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DiffContainerImagesResponse.ProtoReflect.Descriptor instead.
 func (*DiffContainerImagesResponse) Descriptor() ([]byte, []int) {
-	return file_deputy_diff_v1_service_proto_rawDescGZIP(), []int{10}
+	return file_deputy_diff_v1_service_proto_rawDescGZIP(), []int{11}
 }
 
 func (x *DiffContainerImagesResponse) GetBaseImage() *ContainerImageRef {
@@ -1216,7 +1298,7 @@ type ContainerImageRef struct {
 
 func (x *ContainerImageRef) Reset() {
 	*x = ContainerImageRef{}
-	mi := &file_deputy_diff_v1_service_proto_msgTypes[11]
+	mi := &file_deputy_diff_v1_service_proto_msgTypes[12]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1228,7 +1310,7 @@ func (x *ContainerImageRef) String() string {
 func (*ContainerImageRef) ProtoMessage() {}
 
 func (x *ContainerImageRef) ProtoReflect() protoreflect.Message {
-	mi := &file_deputy_diff_v1_service_proto_msgTypes[11]
+	mi := &file_deputy_diff_v1_service_proto_msgTypes[12]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1241,7 +1323,7 @@ func (x *ContainerImageRef) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ContainerImageRef.ProtoReflect.Descriptor instead.
 func (*ContainerImageRef) Descriptor() ([]byte, []int) {
-	return file_deputy_diff_v1_service_proto_rawDescGZIP(), []int{11}
+	return file_deputy_diff_v1_service_proto_rawDescGZIP(), []int{12}
 }
 
 func (x *ContainerImageRef) GetReference() string {
@@ -1296,7 +1378,7 @@ type ContainerImageContext struct {
 
 func (x *ContainerImageContext) Reset() {
 	*x = ContainerImageContext{}
-	mi := &file_deputy_diff_v1_service_proto_msgTypes[12]
+	mi := &file_deputy_diff_v1_service_proto_msgTypes[13]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1308,7 +1390,7 @@ func (x *ContainerImageContext) String() string {
 func (*ContainerImageContext) ProtoMessage() {}
 
 func (x *ContainerImageContext) ProtoReflect() protoreflect.Message {
-	mi := &file_deputy_diff_v1_service_proto_msgTypes[12]
+	mi := &file_deputy_diff_v1_service_proto_msgTypes[13]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1321,7 +1403,7 @@ func (x *ContainerImageContext) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ContainerImageContext.ProtoReflect.Descriptor instead.
 func (*ContainerImageContext) Descriptor() ([]byte, []int) {
-	return file_deputy_diff_v1_service_proto_rawDescGZIP(), []int{12}
+	return file_deputy_diff_v1_service_proto_rawDescGZIP(), []int{13}
 }
 
 func (x *ContainerImageContext) GetDistro() string {
@@ -1379,7 +1461,7 @@ type ContainerPackageChange struct {
 
 func (x *ContainerPackageChange) Reset() {
 	*x = ContainerPackageChange{}
-	mi := &file_deputy_diff_v1_service_proto_msgTypes[13]
+	mi := &file_deputy_diff_v1_service_proto_msgTypes[14]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1391,7 +1473,7 @@ func (x *ContainerPackageChange) String() string {
 func (*ContainerPackageChange) ProtoMessage() {}
 
 func (x *ContainerPackageChange) ProtoReflect() protoreflect.Message {
-	mi := &file_deputy_diff_v1_service_proto_msgTypes[13]
+	mi := &file_deputy_diff_v1_service_proto_msgTypes[14]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1404,7 +1486,7 @@ func (x *ContainerPackageChange) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ContainerPackageChange.ProtoReflect.Descriptor instead.
 func (*ContainerPackageChange) Descriptor() ([]byte, []int) {
-	return file_deputy_diff_v1_service_proto_rawDescGZIP(), []int{13}
+	return file_deputy_diff_v1_service_proto_rawDescGZIP(), []int{14}
 }
 
 func (x *ContainerPackageChange) GetName() string {
@@ -1507,7 +1589,7 @@ type ContainerVulnerabilityChange struct {
 
 func (x *ContainerVulnerabilityChange) Reset() {
 	*x = ContainerVulnerabilityChange{}
-	mi := &file_deputy_diff_v1_service_proto_msgTypes[14]
+	mi := &file_deputy_diff_v1_service_proto_msgTypes[15]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1519,7 +1601,7 @@ func (x *ContainerVulnerabilityChange) String() string {
 func (*ContainerVulnerabilityChange) ProtoMessage() {}
 
 func (x *ContainerVulnerabilityChange) ProtoReflect() protoreflect.Message {
-	mi := &file_deputy_diff_v1_service_proto_msgTypes[14]
+	mi := &file_deputy_diff_v1_service_proto_msgTypes[15]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1532,7 +1614,7 @@ func (x *ContainerVulnerabilityChange) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ContainerVulnerabilityChange.ProtoReflect.Descriptor instead.
 func (*ContainerVulnerabilityChange) Descriptor() ([]byte, []int) {
-	return file_deputy_diff_v1_service_proto_rawDescGZIP(), []int{14}
+	return file_deputy_diff_v1_service_proto_rawDescGZIP(), []int{15}
 }
 
 func (x *ContainerVulnerabilityChange) GetId() string {
@@ -1676,7 +1758,7 @@ type ContainerConfigDiff struct {
 
 func (x *ContainerConfigDiff) Reset() {
 	*x = ContainerConfigDiff{}
-	mi := &file_deputy_diff_v1_service_proto_msgTypes[15]
+	mi := &file_deputy_diff_v1_service_proto_msgTypes[16]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1688,7 +1770,7 @@ func (x *ContainerConfigDiff) String() string {
 func (*ContainerConfigDiff) ProtoMessage() {}
 
 func (x *ContainerConfigDiff) ProtoReflect() protoreflect.Message {
-	mi := &file_deputy_diff_v1_service_proto_msgTypes[15]
+	mi := &file_deputy_diff_v1_service_proto_msgTypes[16]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1701,7 +1783,7 @@ func (x *ContainerConfigDiff) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ContainerConfigDiff.ProtoReflect.Descriptor instead.
 func (*ContainerConfigDiff) Descriptor() ([]byte, []int) {
-	return file_deputy_diff_v1_service_proto_rawDescGZIP(), []int{15}
+	return file_deputy_diff_v1_service_proto_rawDescGZIP(), []int{16}
 }
 
 func (x *ContainerConfigDiff) GetUserChanged() bool {
@@ -1886,7 +1968,7 @@ type EnvChange struct {
 
 func (x *EnvChange) Reset() {
 	*x = EnvChange{}
-	mi := &file_deputy_diff_v1_service_proto_msgTypes[16]
+	mi := &file_deputy_diff_v1_service_proto_msgTypes[17]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1898,7 +1980,7 @@ func (x *EnvChange) String() string {
 func (*EnvChange) ProtoMessage() {}
 
 func (x *EnvChange) ProtoReflect() protoreflect.Message {
-	mi := &file_deputy_diff_v1_service_proto_msgTypes[16]
+	mi := &file_deputy_diff_v1_service_proto_msgTypes[17]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1911,7 +1993,7 @@ func (x *EnvChange) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use EnvChange.ProtoReflect.Descriptor instead.
 func (*EnvChange) Descriptor() ([]byte, []int) {
-	return file_deputy_diff_v1_service_proto_rawDescGZIP(), []int{16}
+	return file_deputy_diff_v1_service_proto_rawDescGZIP(), []int{17}
 }
 
 func (x *EnvChange) GetName() string {
@@ -1962,7 +2044,7 @@ type LabelChange struct {
 
 func (x *LabelChange) Reset() {
 	*x = LabelChange{}
-	mi := &file_deputy_diff_v1_service_proto_msgTypes[17]
+	mi := &file_deputy_diff_v1_service_proto_msgTypes[18]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1974,7 +2056,7 @@ func (x *LabelChange) String() string {
 func (*LabelChange) ProtoMessage() {}
 
 func (x *LabelChange) ProtoReflect() protoreflect.Message {
-	mi := &file_deputy_diff_v1_service_proto_msgTypes[17]
+	mi := &file_deputy_diff_v1_service_proto_msgTypes[18]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1987,7 +2069,7 @@ func (x *LabelChange) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use LabelChange.ProtoReflect.Descriptor instead.
 func (*LabelChange) Descriptor() ([]byte, []int) {
-	return file_deputy_diff_v1_service_proto_rawDescGZIP(), []int{17}
+	return file_deputy_diff_v1_service_proto_rawDescGZIP(), []int{18}
 }
 
 func (x *LabelChange) GetKey() string {
@@ -2035,7 +2117,7 @@ type LayerDiffAnalysis struct {
 
 func (x *LayerDiffAnalysis) Reset() {
 	*x = LayerDiffAnalysis{}
-	mi := &file_deputy_diff_v1_service_proto_msgTypes[18]
+	mi := &file_deputy_diff_v1_service_proto_msgTypes[19]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2047,7 +2129,7 @@ func (x *LayerDiffAnalysis) String() string {
 func (*LayerDiffAnalysis) ProtoMessage() {}
 
 func (x *LayerDiffAnalysis) ProtoReflect() protoreflect.Message {
-	mi := &file_deputy_diff_v1_service_proto_msgTypes[18]
+	mi := &file_deputy_diff_v1_service_proto_msgTypes[19]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2060,7 +2142,7 @@ func (x *LayerDiffAnalysis) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use LayerDiffAnalysis.ProtoReflect.Descriptor instead.
 func (*LayerDiffAnalysis) Descriptor() ([]byte, []int) {
-	return file_deputy_diff_v1_service_proto_rawDescGZIP(), []int{18}
+	return file_deputy_diff_v1_service_proto_rawDescGZIP(), []int{19}
 }
 
 func (x *LayerDiffAnalysis) GetBaseLayerCount() int32 {
@@ -2108,7 +2190,7 @@ type LayerChange struct {
 
 func (x *LayerChange) Reset() {
 	*x = LayerChange{}
-	mi := &file_deputy_diff_v1_service_proto_msgTypes[19]
+	mi := &file_deputy_diff_v1_service_proto_msgTypes[20]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2120,7 +2202,7 @@ func (x *LayerChange) String() string {
 func (*LayerChange) ProtoMessage() {}
 
 func (x *LayerChange) ProtoReflect() protoreflect.Message {
-	mi := &file_deputy_diff_v1_service_proto_msgTypes[19]
+	mi := &file_deputy_diff_v1_service_proto_msgTypes[20]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2133,7 +2215,7 @@ func (x *LayerChange) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use LayerChange.ProtoReflect.Descriptor instead.
 func (*LayerChange) Descriptor() ([]byte, []int) {
-	return file_deputy_diff_v1_service_proto_rawDescGZIP(), []int{19}
+	return file_deputy_diff_v1_service_proto_rawDescGZIP(), []int{20}
 }
 
 func (x *LayerChange) GetIndex() int32 {
@@ -2193,7 +2275,7 @@ type ContainerDiffSummary struct {
 
 func (x *ContainerDiffSummary) Reset() {
 	*x = ContainerDiffSummary{}
-	mi := &file_deputy_diff_v1_service_proto_msgTypes[20]
+	mi := &file_deputy_diff_v1_service_proto_msgTypes[21]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2205,7 +2287,7 @@ func (x *ContainerDiffSummary) String() string {
 func (*ContainerDiffSummary) ProtoMessage() {}
 
 func (x *ContainerDiffSummary) ProtoReflect() protoreflect.Message {
-	mi := &file_deputy_diff_v1_service_proto_msgTypes[20]
+	mi := &file_deputy_diff_v1_service_proto_msgTypes[21]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2218,7 +2300,7 @@ func (x *ContainerDiffSummary) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ContainerDiffSummary.ProtoReflect.Descriptor instead.
 func (*ContainerDiffSummary) Descriptor() ([]byte, []int) {
-	return file_deputy_diff_v1_service_proto_rawDescGZIP(), []int{20}
+	return file_deputy_diff_v1_service_proto_rawDescGZIP(), []int{21}
 }
 
 func (x *ContainerDiffSummary) GetPackagesAdded() int32 {
@@ -2317,7 +2399,7 @@ const file_deputy_diff_v1_service_proto_rawDesc = "" +
 	"\fgenerated_at\x18\x03 \x01(\v2\x1a.google.protobuf.TimestampR\vgeneratedAt\x127\n" +
 	"\achanges\x18\x04 \x03(\v2\x1d.deputy.diff.v1.PackageChangeR\achanges\x12/\n" +
 	"\x05stats\x18\x05 \x01(\v2\x19.deputy.diff.v1.DiffStatsR\x05stats\x12\x1a\n" +
-	"\bwarnings\x18\x06 \x03(\tR\bwarnings\"\x87\x02\n" +
+	"\bwarnings\x18\x06 \x03(\tR\bwarnings\"\xd2\x02\n" +
 	"\rPackageChange\x127\n" +
 	"\apackage\x18\x01 \x01(\v2\x1d.deputy.dependency.v1.PackageR\apackage\x12;\n" +
 	"\vchange_kind\x18\x02 \x01(\x0e2\x1a.deputy.diff.v1.ChangeKindR\n" +
@@ -2325,7 +2407,14 @@ const file_deputy_diff_v1_service_proto_rawDesc = "" +
 	"\fbase_version\x18\x03 \x01(\tR\vbaseVersion\x12%\n" +
 	"\x0etarget_version\x18\x04 \x01(\tR\rtargetVersion\x12\x19\n" +
 	"\bold_name\x18\x05 \x01(\tR\aoldName\x12\x1b\n" +
-	"\tis_direct\x18\x06 \x01(\bR\bisDirect\"\xed\x01\n" +
+	"\tis_direct\x18\x06 \x01(\bR\bisDirect\x12I\n" +
+	"\x0ftarget_metadata\x18\a \x01(\v2 .deputy.diff.v1.RegistryMetadataR\x0etargetMetadata\"\x8c\x01\n" +
+	"\x10RegistryMetadata\x12=\n" +
+	"\fpublished_at\x18\x01 \x01(\v2\x1a.google.protobuf.TimestampR\vpublishedAt\x12\x19\n" +
+	"\bage_days\x18\x02 \x01(\x01R\aageDays\x12\x1e\n" +
+	"\n" +
+	"registries\x18\x03 \x03(\tR\n" +
+	"registries\"\xed\x01\n" +
 	"\tDiffStats\x12\x1f\n" +
 	"\vadded_count\x18\x01 \x01(\x05R\n" +
 	"addedCount\x12#\n" +
@@ -2548,7 +2637,7 @@ func file_deputy_diff_v1_service_proto_rawDescGZIP() []byte {
 }
 
 var file_deputy_diff_v1_service_proto_enumTypes = make([]protoimpl.EnumInfo, 3)
-var file_deputy_diff_v1_service_proto_msgTypes = make([]protoimpl.MessageInfo, 25)
+var file_deputy_diff_v1_service_proto_msgTypes = make([]protoimpl.MessageInfo, 26)
 var file_deputy_diff_v1_service_proto_goTypes = []any{
 	(ChangeKind)(0),                      // 0: deputy.diff.v1.ChangeKind
 	(VulnerabilityChangeKind)(0),         // 1: deputy.diff.v1.VulnerabilityChangeKind
@@ -2557,96 +2646,99 @@ var file_deputy_diff_v1_service_proto_goTypes = []any{
 	(*DiffOptions)(nil),                  // 4: deputy.diff.v1.DiffOptions
 	(*DiffPackagesResponse)(nil),         // 5: deputy.diff.v1.DiffPackagesResponse
 	(*PackageChange)(nil),                // 6: deputy.diff.v1.PackageChange
-	(*DiffStats)(nil),                    // 7: deputy.diff.v1.DiffStats
-	(*DiffVulnerabilitiesRequest)(nil),   // 8: deputy.diff.v1.DiffVulnerabilitiesRequest
-	(*DiffVulnerabilitiesResponse)(nil),  // 9: deputy.diff.v1.DiffVulnerabilitiesResponse
-	(*VulnerabilityDiffStats)(nil),       // 10: deputy.diff.v1.VulnerabilityDiffStats
-	(*DiffContainerImagesRequest)(nil),   // 11: deputy.diff.v1.DiffContainerImagesRequest
-	(*ContainerDiffOptions)(nil),         // 12: deputy.diff.v1.ContainerDiffOptions
-	(*DiffContainerImagesResponse)(nil),  // 13: deputy.diff.v1.DiffContainerImagesResponse
-	(*ContainerImageRef)(nil),            // 14: deputy.diff.v1.ContainerImageRef
-	(*ContainerImageContext)(nil),        // 15: deputy.diff.v1.ContainerImageContext
-	(*ContainerPackageChange)(nil),       // 16: deputy.diff.v1.ContainerPackageChange
-	(*ContainerVulnerabilityChange)(nil), // 17: deputy.diff.v1.ContainerVulnerabilityChange
-	(*ContainerConfigDiff)(nil),          // 18: deputy.diff.v1.ContainerConfigDiff
-	(*EnvChange)(nil),                    // 19: deputy.diff.v1.EnvChange
-	(*LabelChange)(nil),                  // 20: deputy.diff.v1.LabelChange
-	(*LayerDiffAnalysis)(nil),            // 21: deputy.diff.v1.LayerDiffAnalysis
-	(*LayerChange)(nil),                  // 22: deputy.diff.v1.LayerChange
-	(*ContainerDiffSummary)(nil),         // 23: deputy.diff.v1.ContainerDiffSummary
-	nil,                                  // 24: deputy.diff.v1.DiffVulnerabilitiesResponse.AdvisoriesEntry
-	nil,                                  // 25: deputy.diff.v1.VulnerabilityDiffStats.AddedBySeverityEntry
-	nil,                                  // 26: deputy.diff.v1.VulnerabilityDiffStats.RemovedBySeverityEntry
-	nil,                                  // 27: deputy.diff.v1.DiffContainerImagesResponse.AdvisoriesEntry
-	(v1.TargetKind)(0),                   // 28: deputy.target.v1.TargetKind
-	(*v1.Target)(nil),                    // 29: deputy.target.v1.Target
-	(*timestamppb.Timestamp)(nil),        // 30: google.protobuf.Timestamp
-	(*v11.Package)(nil),                  // 31: deputy.dependency.v1.Package
-	(*v12.ScanOptions)(nil),              // 32: deputy.scan.v1.ScanOptions
-	(*v13.Finding)(nil),                  // 33: deputy.vulnerability.v1.Finding
-	(*v14.LayerDetails)(nil),             // 34: deputy.container.v1.LayerDetails
-	(*v13.Advisory)(nil),                 // 35: deputy.vulnerability.v1.Advisory
+	(*RegistryMetadata)(nil),             // 7: deputy.diff.v1.RegistryMetadata
+	(*DiffStats)(nil),                    // 8: deputy.diff.v1.DiffStats
+	(*DiffVulnerabilitiesRequest)(nil),   // 9: deputy.diff.v1.DiffVulnerabilitiesRequest
+	(*DiffVulnerabilitiesResponse)(nil),  // 10: deputy.diff.v1.DiffVulnerabilitiesResponse
+	(*VulnerabilityDiffStats)(nil),       // 11: deputy.diff.v1.VulnerabilityDiffStats
+	(*DiffContainerImagesRequest)(nil),   // 12: deputy.diff.v1.DiffContainerImagesRequest
+	(*ContainerDiffOptions)(nil),         // 13: deputy.diff.v1.ContainerDiffOptions
+	(*DiffContainerImagesResponse)(nil),  // 14: deputy.diff.v1.DiffContainerImagesResponse
+	(*ContainerImageRef)(nil),            // 15: deputy.diff.v1.ContainerImageRef
+	(*ContainerImageContext)(nil),        // 16: deputy.diff.v1.ContainerImageContext
+	(*ContainerPackageChange)(nil),       // 17: deputy.diff.v1.ContainerPackageChange
+	(*ContainerVulnerabilityChange)(nil), // 18: deputy.diff.v1.ContainerVulnerabilityChange
+	(*ContainerConfigDiff)(nil),          // 19: deputy.diff.v1.ContainerConfigDiff
+	(*EnvChange)(nil),                    // 20: deputy.diff.v1.EnvChange
+	(*LabelChange)(nil),                  // 21: deputy.diff.v1.LabelChange
+	(*LayerDiffAnalysis)(nil),            // 22: deputy.diff.v1.LayerDiffAnalysis
+	(*LayerChange)(nil),                  // 23: deputy.diff.v1.LayerChange
+	(*ContainerDiffSummary)(nil),         // 24: deputy.diff.v1.ContainerDiffSummary
+	nil,                                  // 25: deputy.diff.v1.DiffVulnerabilitiesResponse.AdvisoriesEntry
+	nil,                                  // 26: deputy.diff.v1.VulnerabilityDiffStats.AddedBySeverityEntry
+	nil,                                  // 27: deputy.diff.v1.VulnerabilityDiffStats.RemovedBySeverityEntry
+	nil,                                  // 28: deputy.diff.v1.DiffContainerImagesResponse.AdvisoriesEntry
+	(v1.TargetKind)(0),                   // 29: deputy.target.v1.TargetKind
+	(*v1.Target)(nil),                    // 30: deputy.target.v1.Target
+	(*timestamppb.Timestamp)(nil),        // 31: google.protobuf.Timestamp
+	(*v11.Package)(nil),                  // 32: deputy.dependency.v1.Package
+	(*v12.ScanOptions)(nil),              // 33: deputy.scan.v1.ScanOptions
+	(*v13.Finding)(nil),                  // 34: deputy.vulnerability.v1.Finding
+	(*v14.LayerDetails)(nil),             // 35: deputy.container.v1.LayerDetails
+	(*v13.Advisory)(nil),                 // 36: deputy.vulnerability.v1.Advisory
 }
 var file_deputy_diff_v1_service_proto_depIdxs = []int32{
 	4,  // 0: deputy.diff.v1.DiffPackagesRequest.options:type_name -> deputy.diff.v1.DiffOptions
-	28, // 1: deputy.diff.v1.DiffOptions.base_target_hint:type_name -> deputy.target.v1.TargetKind
-	28, // 2: deputy.diff.v1.DiffOptions.target_target_hint:type_name -> deputy.target.v1.TargetKind
-	29, // 3: deputy.diff.v1.DiffPackagesResponse.base_target:type_name -> deputy.target.v1.Target
-	29, // 4: deputy.diff.v1.DiffPackagesResponse.target_target:type_name -> deputy.target.v1.Target
-	30, // 5: deputy.diff.v1.DiffPackagesResponse.generated_at:type_name -> google.protobuf.Timestamp
+	29, // 1: deputy.diff.v1.DiffOptions.base_target_hint:type_name -> deputy.target.v1.TargetKind
+	29, // 2: deputy.diff.v1.DiffOptions.target_target_hint:type_name -> deputy.target.v1.TargetKind
+	30, // 3: deputy.diff.v1.DiffPackagesResponse.base_target:type_name -> deputy.target.v1.Target
+	30, // 4: deputy.diff.v1.DiffPackagesResponse.target_target:type_name -> deputy.target.v1.Target
+	31, // 5: deputy.diff.v1.DiffPackagesResponse.generated_at:type_name -> google.protobuf.Timestamp
 	6,  // 6: deputy.diff.v1.DiffPackagesResponse.changes:type_name -> deputy.diff.v1.PackageChange
-	7,  // 7: deputy.diff.v1.DiffPackagesResponse.stats:type_name -> deputy.diff.v1.DiffStats
-	31, // 8: deputy.diff.v1.PackageChange.package:type_name -> deputy.dependency.v1.Package
+	8,  // 7: deputy.diff.v1.DiffPackagesResponse.stats:type_name -> deputy.diff.v1.DiffStats
+	32, // 8: deputy.diff.v1.PackageChange.package:type_name -> deputy.dependency.v1.Package
 	0,  // 9: deputy.diff.v1.PackageChange.change_kind:type_name -> deputy.diff.v1.ChangeKind
-	4,  // 10: deputy.diff.v1.DiffVulnerabilitiesRequest.diff_options:type_name -> deputy.diff.v1.DiffOptions
-	32, // 11: deputy.diff.v1.DiffVulnerabilitiesRequest.scan_options:type_name -> deputy.scan.v1.ScanOptions
-	29, // 12: deputy.diff.v1.DiffVulnerabilitiesResponse.base_target:type_name -> deputy.target.v1.Target
-	29, // 13: deputy.diff.v1.DiffVulnerabilitiesResponse.target_target:type_name -> deputy.target.v1.Target
-	30, // 14: deputy.diff.v1.DiffVulnerabilitiesResponse.generated_at:type_name -> google.protobuf.Timestamp
-	33, // 15: deputy.diff.v1.DiffVulnerabilitiesResponse.added_vulnerabilities:type_name -> deputy.vulnerability.v1.Finding
-	33, // 16: deputy.diff.v1.DiffVulnerabilitiesResponse.removed_vulnerabilities:type_name -> deputy.vulnerability.v1.Finding
-	24, // 17: deputy.diff.v1.DiffVulnerabilitiesResponse.advisories:type_name -> deputy.diff.v1.DiffVulnerabilitiesResponse.AdvisoriesEntry
-	10, // 18: deputy.diff.v1.DiffVulnerabilitiesResponse.stats:type_name -> deputy.diff.v1.VulnerabilityDiffStats
-	25, // 19: deputy.diff.v1.VulnerabilityDiffStats.added_by_severity:type_name -> deputy.diff.v1.VulnerabilityDiffStats.AddedBySeverityEntry
-	26, // 20: deputy.diff.v1.VulnerabilityDiffStats.removed_by_severity:type_name -> deputy.diff.v1.VulnerabilityDiffStats.RemovedBySeverityEntry
-	12, // 21: deputy.diff.v1.DiffContainerImagesRequest.options:type_name -> deputy.diff.v1.ContainerDiffOptions
-	32, // 22: deputy.diff.v1.ContainerDiffOptions.scan_options:type_name -> deputy.scan.v1.ScanOptions
-	14, // 23: deputy.diff.v1.DiffContainerImagesResponse.base_image:type_name -> deputy.diff.v1.ContainerImageRef
-	14, // 24: deputy.diff.v1.DiffContainerImagesResponse.target_image:type_name -> deputy.diff.v1.ContainerImageRef
-	30, // 25: deputy.diff.v1.DiffContainerImagesResponse.generated_at:type_name -> google.protobuf.Timestamp
-	16, // 26: deputy.diff.v1.DiffContainerImagesResponse.package_changes:type_name -> deputy.diff.v1.ContainerPackageChange
-	17, // 27: deputy.diff.v1.DiffContainerImagesResponse.vulnerability_changes:type_name -> deputy.diff.v1.ContainerVulnerabilityChange
-	27, // 28: deputy.diff.v1.DiffContainerImagesResponse.advisories:type_name -> deputy.diff.v1.DiffContainerImagesResponse.AdvisoriesEntry
-	18, // 29: deputy.diff.v1.DiffContainerImagesResponse.config_changes:type_name -> deputy.diff.v1.ContainerConfigDiff
-	21, // 30: deputy.diff.v1.DiffContainerImagesResponse.layer_analysis:type_name -> deputy.diff.v1.LayerDiffAnalysis
-	23, // 31: deputy.diff.v1.DiffContainerImagesResponse.summary:type_name -> deputy.diff.v1.ContainerDiffSummary
-	15, // 32: deputy.diff.v1.DiffContainerImagesResponse.base_context:type_name -> deputy.diff.v1.ContainerImageContext
-	15, // 33: deputy.diff.v1.DiffContainerImagesResponse.target_context:type_name -> deputy.diff.v1.ContainerImageContext
-	0,  // 34: deputy.diff.v1.ContainerPackageChange.change_kind:type_name -> deputy.diff.v1.ChangeKind
-	34, // 35: deputy.diff.v1.ContainerPackageChange.base_layer_details:type_name -> deputy.container.v1.LayerDetails
-	34, // 36: deputy.diff.v1.ContainerPackageChange.target_layer_details:type_name -> deputy.container.v1.LayerDetails
-	1,  // 37: deputy.diff.v1.ContainerVulnerabilityChange.change_kind:type_name -> deputy.diff.v1.VulnerabilityChangeKind
-	34, // 38: deputy.diff.v1.ContainerVulnerabilityChange.base_layer_details:type_name -> deputy.container.v1.LayerDetails
-	34, // 39: deputy.diff.v1.ContainerVulnerabilityChange.target_layer_details:type_name -> deputy.container.v1.LayerDetails
-	19, // 40: deputy.diff.v1.ContainerConfigDiff.env_changes:type_name -> deputy.diff.v1.EnvChange
-	20, // 41: deputy.diff.v1.ContainerConfigDiff.label_changes:type_name -> deputy.diff.v1.LabelChange
-	0,  // 42: deputy.diff.v1.EnvChange.change_kind:type_name -> deputy.diff.v1.ChangeKind
-	0,  // 43: deputy.diff.v1.LabelChange.change_kind:type_name -> deputy.diff.v1.ChangeKind
-	22, // 44: deputy.diff.v1.LayerDiffAnalysis.layer_changes:type_name -> deputy.diff.v1.LayerChange
-	2,  // 45: deputy.diff.v1.LayerChange.change_kind:type_name -> deputy.diff.v1.LayerChangeKind
-	35, // 46: deputy.diff.v1.DiffVulnerabilitiesResponse.AdvisoriesEntry.value:type_name -> deputy.vulnerability.v1.Advisory
-	35, // 47: deputy.diff.v1.DiffContainerImagesResponse.AdvisoriesEntry.value:type_name -> deputy.vulnerability.v1.Advisory
-	3,  // 48: deputy.diff.v1.DiffService.DiffPackages:input_type -> deputy.diff.v1.DiffPackagesRequest
-	8,  // 49: deputy.diff.v1.DiffService.DiffVulnerabilities:input_type -> deputy.diff.v1.DiffVulnerabilitiesRequest
-	11, // 50: deputy.diff.v1.DiffService.DiffContainerImages:input_type -> deputy.diff.v1.DiffContainerImagesRequest
-	5,  // 51: deputy.diff.v1.DiffService.DiffPackages:output_type -> deputy.diff.v1.DiffPackagesResponse
-	9,  // 52: deputy.diff.v1.DiffService.DiffVulnerabilities:output_type -> deputy.diff.v1.DiffVulnerabilitiesResponse
-	13, // 53: deputy.diff.v1.DiffService.DiffContainerImages:output_type -> deputy.diff.v1.DiffContainerImagesResponse
-	51, // [51:54] is the sub-list for method output_type
-	48, // [48:51] is the sub-list for method input_type
-	48, // [48:48] is the sub-list for extension type_name
-	48, // [48:48] is the sub-list for extension extendee
-	0,  // [0:48] is the sub-list for field type_name
+	7,  // 10: deputy.diff.v1.PackageChange.target_metadata:type_name -> deputy.diff.v1.RegistryMetadata
+	31, // 11: deputy.diff.v1.RegistryMetadata.published_at:type_name -> google.protobuf.Timestamp
+	4,  // 12: deputy.diff.v1.DiffVulnerabilitiesRequest.diff_options:type_name -> deputy.diff.v1.DiffOptions
+	33, // 13: deputy.diff.v1.DiffVulnerabilitiesRequest.scan_options:type_name -> deputy.scan.v1.ScanOptions
+	30, // 14: deputy.diff.v1.DiffVulnerabilitiesResponse.base_target:type_name -> deputy.target.v1.Target
+	30, // 15: deputy.diff.v1.DiffVulnerabilitiesResponse.target_target:type_name -> deputy.target.v1.Target
+	31, // 16: deputy.diff.v1.DiffVulnerabilitiesResponse.generated_at:type_name -> google.protobuf.Timestamp
+	34, // 17: deputy.diff.v1.DiffVulnerabilitiesResponse.added_vulnerabilities:type_name -> deputy.vulnerability.v1.Finding
+	34, // 18: deputy.diff.v1.DiffVulnerabilitiesResponse.removed_vulnerabilities:type_name -> deputy.vulnerability.v1.Finding
+	25, // 19: deputy.diff.v1.DiffVulnerabilitiesResponse.advisories:type_name -> deputy.diff.v1.DiffVulnerabilitiesResponse.AdvisoriesEntry
+	11, // 20: deputy.diff.v1.DiffVulnerabilitiesResponse.stats:type_name -> deputy.diff.v1.VulnerabilityDiffStats
+	26, // 21: deputy.diff.v1.VulnerabilityDiffStats.added_by_severity:type_name -> deputy.diff.v1.VulnerabilityDiffStats.AddedBySeverityEntry
+	27, // 22: deputy.diff.v1.VulnerabilityDiffStats.removed_by_severity:type_name -> deputy.diff.v1.VulnerabilityDiffStats.RemovedBySeverityEntry
+	13, // 23: deputy.diff.v1.DiffContainerImagesRequest.options:type_name -> deputy.diff.v1.ContainerDiffOptions
+	33, // 24: deputy.diff.v1.ContainerDiffOptions.scan_options:type_name -> deputy.scan.v1.ScanOptions
+	15, // 25: deputy.diff.v1.DiffContainerImagesResponse.base_image:type_name -> deputy.diff.v1.ContainerImageRef
+	15, // 26: deputy.diff.v1.DiffContainerImagesResponse.target_image:type_name -> deputy.diff.v1.ContainerImageRef
+	31, // 27: deputy.diff.v1.DiffContainerImagesResponse.generated_at:type_name -> google.protobuf.Timestamp
+	17, // 28: deputy.diff.v1.DiffContainerImagesResponse.package_changes:type_name -> deputy.diff.v1.ContainerPackageChange
+	18, // 29: deputy.diff.v1.DiffContainerImagesResponse.vulnerability_changes:type_name -> deputy.diff.v1.ContainerVulnerabilityChange
+	28, // 30: deputy.diff.v1.DiffContainerImagesResponse.advisories:type_name -> deputy.diff.v1.DiffContainerImagesResponse.AdvisoriesEntry
+	19, // 31: deputy.diff.v1.DiffContainerImagesResponse.config_changes:type_name -> deputy.diff.v1.ContainerConfigDiff
+	22, // 32: deputy.diff.v1.DiffContainerImagesResponse.layer_analysis:type_name -> deputy.diff.v1.LayerDiffAnalysis
+	24, // 33: deputy.diff.v1.DiffContainerImagesResponse.summary:type_name -> deputy.diff.v1.ContainerDiffSummary
+	16, // 34: deputy.diff.v1.DiffContainerImagesResponse.base_context:type_name -> deputy.diff.v1.ContainerImageContext
+	16, // 35: deputy.diff.v1.DiffContainerImagesResponse.target_context:type_name -> deputy.diff.v1.ContainerImageContext
+	0,  // 36: deputy.diff.v1.ContainerPackageChange.change_kind:type_name -> deputy.diff.v1.ChangeKind
+	35, // 37: deputy.diff.v1.ContainerPackageChange.base_layer_details:type_name -> deputy.container.v1.LayerDetails
+	35, // 38: deputy.diff.v1.ContainerPackageChange.target_layer_details:type_name -> deputy.container.v1.LayerDetails
+	1,  // 39: deputy.diff.v1.ContainerVulnerabilityChange.change_kind:type_name -> deputy.diff.v1.VulnerabilityChangeKind
+	35, // 40: deputy.diff.v1.ContainerVulnerabilityChange.base_layer_details:type_name -> deputy.container.v1.LayerDetails
+	35, // 41: deputy.diff.v1.ContainerVulnerabilityChange.target_layer_details:type_name -> deputy.container.v1.LayerDetails
+	20, // 42: deputy.diff.v1.ContainerConfigDiff.env_changes:type_name -> deputy.diff.v1.EnvChange
+	21, // 43: deputy.diff.v1.ContainerConfigDiff.label_changes:type_name -> deputy.diff.v1.LabelChange
+	0,  // 44: deputy.diff.v1.EnvChange.change_kind:type_name -> deputy.diff.v1.ChangeKind
+	0,  // 45: deputy.diff.v1.LabelChange.change_kind:type_name -> deputy.diff.v1.ChangeKind
+	23, // 46: deputy.diff.v1.LayerDiffAnalysis.layer_changes:type_name -> deputy.diff.v1.LayerChange
+	2,  // 47: deputy.diff.v1.LayerChange.change_kind:type_name -> deputy.diff.v1.LayerChangeKind
+	36, // 48: deputy.diff.v1.DiffVulnerabilitiesResponse.AdvisoriesEntry.value:type_name -> deputy.vulnerability.v1.Advisory
+	36, // 49: deputy.diff.v1.DiffContainerImagesResponse.AdvisoriesEntry.value:type_name -> deputy.vulnerability.v1.Advisory
+	3,  // 50: deputy.diff.v1.DiffService.DiffPackages:input_type -> deputy.diff.v1.DiffPackagesRequest
+	9,  // 51: deputy.diff.v1.DiffService.DiffVulnerabilities:input_type -> deputy.diff.v1.DiffVulnerabilitiesRequest
+	12, // 52: deputy.diff.v1.DiffService.DiffContainerImages:input_type -> deputy.diff.v1.DiffContainerImagesRequest
+	5,  // 53: deputy.diff.v1.DiffService.DiffPackages:output_type -> deputy.diff.v1.DiffPackagesResponse
+	10, // 54: deputy.diff.v1.DiffService.DiffVulnerabilities:output_type -> deputy.diff.v1.DiffVulnerabilitiesResponse
+	14, // 55: deputy.diff.v1.DiffService.DiffContainerImages:output_type -> deputy.diff.v1.DiffContainerImagesResponse
+	53, // [53:56] is the sub-list for method output_type
+	50, // [50:53] is the sub-list for method input_type
+	50, // [50:50] is the sub-list for extension type_name
+	50, // [50:50] is the sub-list for extension extendee
+	0,  // [0:50] is the sub-list for field type_name
 }
 
 func init() { file_deputy_diff_v1_service_proto_init() }
@@ -2660,7 +2752,7 @@ func file_deputy_diff_v1_service_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_deputy_diff_v1_service_proto_rawDesc), len(file_deputy_diff_v1_service_proto_rawDesc)),
 			NumEnums:      3,
-			NumMessages:   25,
+			NumMessages:   26,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

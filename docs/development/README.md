@@ -9,6 +9,7 @@ This section is for contributors and maintainers.
 | [Contributing](contributing.md) | Local setup, development workflow, PR checklist |
 | [Architecture](architecture.md) | System design, package structure |
 | [Adding ecosystems](adding-ecosystems.md) | How to add support for a new package ecosystem |
+| [Registry metadata signals](registry-metadata.md) | Release-freshness policy signal and the deferred maintainer-change design |
 | [Docs style](docs-style.md) | Documentation conventions |
 
 ## Quick Commands

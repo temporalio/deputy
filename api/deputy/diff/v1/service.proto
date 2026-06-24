@@ -122,6 +122,30 @@ message PackageChange {
 
   // IsDirect indicates whether this is a direct dependency.
   bool is_direct = 6;
+
+  // TargetMetadata is registry metadata for target_version (e.g. when it was
+  // published). It is unset for Removed changes and when registry-metadata
+  // fetching is disabled (see the diff --registry-metadata flag).
+  RegistryMetadata target_metadata = 7;
+}
+
+// RegistryMetadata captures registry-sourced facts about a single package version,
+// fetched from deps.dev. It is exposed as a policy signal so policies can reason
+// about supply-chain risk that a known-vulnerability scan cannot see — most notably
+// release freshness, since a version published minutes or hours ago has had no time
+// to be vetted and is a common shape for a malicious release.
+message RegistryMetadata {
+  // PublishedAt is when this version was published to its registry, per deps.dev.
+  // Unset when deps.dev has no publish date for the version.
+  google.protobuf.Timestamp published_at = 1;
+
+  // AgeDays is the age of this version in days at evaluation time (now - published_at).
+  // It is -1 when published_at is unknown. Provided as a convenience because CEL has no
+  // notion of "now", so policies can gate on freshness with e.g. age_days < 7.0.
+  double age_days = 2;
+
+  // Registries lists the registries deps.dev reports as hosting this version.
+  repeated string registries = 3;
 }
 
 // ChangeKind classifies the type of dependency change.

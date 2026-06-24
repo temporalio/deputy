@@ -1,0 +1,26 @@
+policies:
+  - name: release-freshness
+    description: >-
+      Flag dependency bumps to versions that were published very recently.
+      A version that is only hours or a few days old has had no time to be
+      vetted, and malicious releases are typically live for only a short window
+      before they are caught and pulled. Requires `deputy diff --registry-metadata`,
+      which fetches publish dates from deps.dev and exposes them as
+      change.target_metadata.
+    vars:
+      # has() guards the field so the rules are inert when --registry-metadata is
+      # not set (target_metadata absent) or deps.dev had no publish date for the
+      # version (age_days == -1).
+      hasAge: 'has(change.target_metadata) && change.target_metadata.age_days >= 0.0'
+      ageDays: 'change.target_metadata.age_days'
+      isBump: 'env.entrypoint == "diff_dependency_change"'
+    rules:
+      # Block direct-dependency bumps to a version less than a day old.
+      - action: deny
+        when: isBump && change.is_direct && hasAge && ageDays < 1.0
+        reason: Direct dependency bumped to a version published less than 24h ago
+        remediation: Wait for the release to age, or pin to a previously vetted version
+      # Warn on any bump to a version less than a week old.
+      - action: warn
+        when: isBump && hasAge && ageDays < 7.0
+        reason: Dependency bumped to a version published less than 7 days ago
