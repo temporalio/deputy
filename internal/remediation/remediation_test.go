@@ -6,6 +6,7 @@ import (
 
 	dependencyv1 "github.com/temporalio/deputy/gen/deputy/dependency/v1"
 	"github.com/temporalio/deputy/internal/dependency"
+	"github.com/temporalio/deputy/internal/inventory"
 	"github.com/temporalio/deputy/internal/vulnerability"
 )
 
@@ -436,5 +437,67 @@ func TestIsContainerfilePath(t *testing.T) {
 				t.Errorf("isContainerfilePath(%q) = %v, want %v", tt.name, got, tt.want)
 			}
 		})
+	}
+}
+
+// TestCommandsFromConsolidatedSkipsInstallArtifactManifests is the regression
+// for temporalio/deputy#40: a vulnerable package whose manifest is vendored
+// inside an install-artifact tree (e.g. a Cargo.toml under .venv/site-packages)
+// must not produce a remediation command, since editing the installed copy
+// fixes nothing. The source-of-truth manifest at the repo root still does.
+func TestCommandsFromConsolidatedSkipsInstallArtifactManifests(t *testing.T) {
+	cons := []vulnerability.Consolidated{
+		{
+			PrimaryID:     "GHSA-test",
+			Package:       "somecrate",
+			Version:       "1.0.0",
+			Ecosystem:     "crates.io",
+			IsDirect:      true,
+			FixedVersions: []string{"1.0.1"},
+			ManifestRefs: []dependencyv1.ManifestRef{
+				{Manager: "cargo", Path: "Cargo.toml"},
+				{Manager: "cargo", Path: ".venv/lib/python3.12/site-packages/wheelpkg/Cargo.toml"},
+			},
+		},
+	}
+
+	commands, _ := CommandsFromConsolidated(cons)
+
+	var sawRoot bool
+	for _, c := range commands {
+		if inventory.IsDependencyInstallPath(c.Path) {
+			t.Errorf("emitted remediation targeting install-artifact manifest %q (command %q)", c.Path, c.Command)
+		}
+		if c.Path == "Cargo.toml" {
+			sawRoot = true
+		}
+	}
+	if !sawRoot {
+		t.Error("expected a remediation command for the source-of-truth Cargo.toml")
+	}
+}
+
+// TestStdlibCommandsSkipsVendoredGoMod covers the toolchain-fallback edge of
+// temporalio/deputy#40: a Go stdlib finding whose only source is a go.mod
+// vendored inside an installed tree must not produce a `go get go@X` command,
+// since the fallback would otherwise emit one against a synthetic go.mod path.
+func TestStdlibCommandsSkipsVendoredGoMod(t *testing.T) {
+	cons := []vulnerability.Consolidated{
+		{
+			PrimaryID:     "GO-2026-0001",
+			Package:       "stdlib",
+			Version:       "1.25.0",
+			Ecosystem:     "Go",
+			FixedVersions: []string{"1.25.11"},
+			ManifestRefs: []dependencyv1.ManifestRef{
+				{Manager: "go", Path: ".venv/lib/python3.10/site-packages/wheelpkg/sdk-core/go.mod"},
+			},
+		},
+	}
+
+	commands, _ := CommandsFromConsolidated(cons)
+
+	if len(commands) != 0 {
+		t.Errorf("expected no commands for a stdlib finding sourced only from a vendored go.mod, got %d: %+v", len(commands), commands)
 	}
 }

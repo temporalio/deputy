@@ -95,3 +95,37 @@ func TestCompileExcludePaths_InvalidPattern(t *testing.T) {
 		t.Fatal("expected error for malformed glob pattern, got nil")
 	}
 }
+
+func TestIsDependencyInstallPath(t *testing.T) {
+	tests := []struct {
+		path string
+		want bool
+	}{
+		// Matches: an unambiguous install-tree segment anywhere in the path.
+		{".venv/lib/python3.12/site-packages/pkg/Cargo.toml", true}, // via site-packages, not .venv
+		{".tox/py312/lib/python3.12/site-packages/req/METADATA", true},
+		{"node_modules/left-pad/package.json", true},
+		{"a/b/node_modules/c/package.json", true},
+		{"pdmproj/__pypackages__/3.12/lib/pkg/PKG-INFO", true},
+		{`api\node_modules\pkg\package.json`, true}, // backslash separators normalize
+		// Non-matches: the fuzzy venv root and build/cache dirs are NOT excluded
+		// on their own (only their unambiguous install children are).
+		{".venv/bin/activate", false},
+		{"venv/lib/foo", false},
+		{"src/__pycache__/mod.pyc", false},
+		{"build/out.js", false},
+		{"vendor/foo/bar.go", false},
+		{"Cargo.toml", false},
+		{"go.mod", false},
+		{"my-site-packages.txt", false}, // substring, not a path segment
+		{"node_modules_backup/x", false},
+		{"", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.path, func(t *testing.T) {
+			if got := IsDependencyInstallPath(tt.path); got != tt.want {
+				t.Errorf("IsDependencyInstallPath(%q) = %v, want %v", tt.path, got, tt.want)
+			}
+		})
+	}
+}
