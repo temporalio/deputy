@@ -224,11 +224,16 @@ func isLikelyDefaultBranch(branchName string) bool {
 
 // shouldTryOriginFallback reports whether the origin/<ref> CI fallback should be
 // attempted for ref. It is skipped only when ref is already remote-qualified
-// (origin/... or remotes/...), so ordinary slashed branch names like "fix/foo"
-// still resolve in CI checkouts where the local branch ref is absent. Guards
-// against producing "origin/origin/...".
+// (origin/..., remotes/...) or fully qualified (refs/...), so ordinary slashed
+// branch names like "fix/foo" still resolve in CI checkouts where the local
+// branch ref is absent. Guards against producing bogus prefixes like
+// "origin/origin/..." or "origin/refs/remotes/...". Input is trimmed so leading
+// or trailing whitespace doesn't change the decision.
 func shouldTryOriginFallback(ref string) bool {
-	return !strings.HasPrefix(ref, "origin/") && !strings.HasPrefix(ref, "remotes/")
+	ref = strings.TrimSpace(ref)
+	return !strings.HasPrefix(ref, "origin/") &&
+		!strings.HasPrefix(ref, "remotes/") &&
+		!strings.HasPrefix(ref, "refs/")
 }
 
 // validateReference checks if a Git reference is valid and provides helpful error messages.
@@ -245,7 +250,10 @@ func validateReference(repo *git.Repository, ref string) error {
 	// contain '/' (fix/x, feature/y), so this must run for slashed refs too; it
 	// is skipped only when the ref is already remote-qualified.
 	if shouldTryOriginFallback(ref) {
-		if _, err := ResolveRevisionEnhanced(repo, "origin/"+ref); err == nil {
+		// Trim before composing: ResolveRevisionEnhanced trims its argument, but
+		// only at the ends, so a leading space would otherwise survive inside
+		// "origin/ <ref>" and break resolution.
+		if _, err := ResolveRevisionEnhanced(repo, "origin/"+strings.TrimSpace(ref)); err == nil {
 			return nil
 		}
 	}

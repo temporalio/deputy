@@ -17,11 +17,15 @@ func TestShouldTryOriginFallback(t *testing.T) {
 		want bool
 	}{
 		{"main", true},
-		{"fix/foo", true},                 // slashed branch name: must still get the fallback
-		{"feature/a/b", true},             // multi-slash branch name
-		{"origin/main", false},            // already remote-qualified
-		{"origin/fix/foo", false},         // already remote-qualified, slashed
-		{"remotes/origin/fix/foo", false}, // fully-qualified remotes ref
+		{"fix/foo", true},                      // slashed branch name: must still get the fallback
+		{"feature/a/b", true},                  // multi-slash branch name
+		{"  fix/foo  ", true},                  // whitespace-padded slashed branch still gets the fallback
+		{"origin/main", false},                 // already remote-qualified
+		{"origin/fix/foo", false},              // already remote-qualified, slashed
+		{"remotes/origin/fix/foo", false},      // remotes-qualified
+		{"refs/remotes/origin/fix/foo", false}, // fully-qualified remote-tracking ref
+		{"refs/heads/main", false},             // fully-qualified local ref
+		{" origin/main ", false},               // whitespace + already remote-qualified
 	}
 	for _, tt := range tests {
 		t.Run(tt.ref, func(t *testing.T) {
