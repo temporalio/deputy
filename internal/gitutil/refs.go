@@ -222,6 +222,15 @@ func isLikelyDefaultBranch(branchName string) bool {
 	return slices.Contains(DefaultBranchPatterns, branchName)
 }
 
+// shouldTryOriginFallback reports whether the origin/<ref> CI fallback should be
+// attempted for ref. It is skipped only when ref is already remote-qualified
+// (origin/... or remotes/...), so ordinary slashed branch names like "fix/foo"
+// still resolve in CI checkouts where the local branch ref is absent. Guards
+// against producing "origin/origin/...".
+func shouldTryOriginFallback(ref string) bool {
+	return !strings.HasPrefix(ref, "origin/") && !strings.HasPrefix(ref, "remotes/")
+}
+
 // validateReference checks if a Git reference is valid and provides helpful error messages.
 func validateReference(repo *git.Repository, ref string) error {
 	upper := strings.ToUpper(strings.TrimSpace(ref))
@@ -231,8 +240,11 @@ func validateReference(repo *git.Repository, ref string) error {
 	if _, err := ResolveRevisionEnhanced(repo, ref); err == nil {
 		return nil
 	}
-	// Try with origin/ prefix for CI environments where branch names are remote refs
-	if !strings.Contains(ref, "/") {
+	// Try with origin/ prefix for CI environments where the local branch ref is
+	// absent and only the remote-tracking ref exists. Branch names commonly
+	// contain '/' (fix/x, feature/y), so this must run for slashed refs too; it
+	// is skipped only when the ref is already remote-qualified.
+	if shouldTryOriginFallback(ref) {
 		if _, err := ResolveRevisionEnhanced(repo, "origin/"+ref); err == nil {
 			return nil
 		}
