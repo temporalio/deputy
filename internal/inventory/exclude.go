@@ -7,6 +7,47 @@ import (
 	"github.com/gobwas/glob"
 )
 
+// DefaultDependencyInstallDirs are directory names that unambiguously denote an
+// installed or vendored third-party dependency tree, never a source-of-truth
+// manifest location. A name qualifies only if it is the canonical install
+// directory for an ecosystem and is not also a common source-directory name:
+// that admits "node_modules", "site-packages", and "__pypackages__" but excludes
+// ambiguous names that are frequently real source dirs ("vendor", "target",
+// "build") and the virtualenv root (".venv"/"venv"), whose vendored manifests
+// live under the unambiguous "site-packages" child matched here.
+//
+// This backs [IsDependencyInstallPath], used by the remediation guard to avoid
+// emitting a fix against a manifest vendored inside an installed tree (a derived
+// copy that cannot be edited in place). It is deliberately small and serves as a
+// version-control-independent backstop, notably for non-git directory scans.
+// Scoping a repository scan to its committed source of truth is handled
+// separately by honoring version control, not by this list.
+var DefaultDependencyInstallDirs = []string{
+	"node_modules",
+	"site-packages",
+	"__pypackages__",
+}
+
+// IsDependencyInstallPath reports whether p traverses a dependency-install
+// directory (see [DefaultDependencyInstallDirs]). Path separators may be "/" or
+// "\\"; matching is per path segment, so "a/b/site-packages/pkg/Cargo.toml"
+// matches while "my-site-packages.txt" does not. Used to keep remediation from
+// targeting a manifest vendored inside an installed dependency tree.
+func IsDependencyInstallPath(p string) bool {
+	p = strings.ReplaceAll(strings.TrimSpace(p), "\\", "/")
+	if p == "" {
+		return false
+	}
+	for _, seg := range strings.Split(p, "/") {
+		for _, dir := range DefaultDependencyInstallDirs {
+			if seg == dir {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 // CompileExcludePaths compiles a set of path-exclusion glob patterns into a
 // single matcher suitable for scalibr's SkipDirGlob. Patterns are matched
 // against directory paths (slash-separated, relative to the scan root) during

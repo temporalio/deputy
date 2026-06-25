@@ -22,6 +22,7 @@ deputy fix [repo] [flags]
 | `--plan` | | | Path to existing remediation plan JSON |
 | `--ref` | | `HEAD` | Git reference to scan |
 | `--ecosystems` | | all | Limit to specific ecosystems |
+| `--exclude-path` | | | Directory glob to skip during the walk (repeatable; e.g. `.bin/**`). Unioned with `scan.exclude_paths` from config |
 | `--ignore-unfixed` | | `false` | Skip vulns without fixes |
 | `--published-before` | | | Date filter for vulnerabilities |
 | `--published-after` | | | Date filter for vulnerabilities |

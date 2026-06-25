@@ -114,6 +114,7 @@ AI ASSISTANCE:
 	fixCmd.Flags().Bool("agent-verbose", false, "Show full command output instead of compact summaries")
 	fixCmd.Flags().Bool("apply", false, "Execute runnable remediation commands in-place (local scans only)")
 	fixCmd.Flags().StringArray("policy", nil, "Path to CEL policy files or bundles to evaluate against remediation plans (repeatable)")
+	addExcludePathFlag(fixCmd)
 	root.AddCommand(fixCmd)
 }
 
@@ -182,7 +183,8 @@ func runFixPlan(c *services.Clients, cmd *cobra.Command, args []string) error {
 
 		// Build scan request
 		scanOpts := &scanv1.ScanOptions{
-			Ecosystems: ecos,
+			Ecosystems:   ecos,
+			ExcludePaths: excludePathsFromCmd(cmd),
 		}
 		if !beforeT.IsZero() {
 			scanOpts.PublishedBefore = timestamppb.New(beforeT)

@@ -13,6 +13,7 @@ import (
 	"github.com/temporalio/deputy/internal/collections"
 	"github.com/temporalio/deputy/internal/dependency"
 	"github.com/temporalio/deputy/internal/ecosystem"
+	"github.com/temporalio/deputy/internal/inventory"
 	"github.com/temporalio/deputy/internal/vulnerability"
 )
 
@@ -265,6 +266,14 @@ func dedupeCommands(upgrades []packageUpgrade) []Command {
 	for _, u := range upgrades {
 		for i := range u.References {
 			ref := &u.References[i]
+			// Never remediate a manifest vendored inside a dependency-install tree
+			// (e.g. a Cargo.toml under site-packages): it is a derived copy, not
+			// the source of truth, so any edit is wiped on reinstall. The inventory
+			// walk excludes these by default, but a manifest can still reach here
+			// when that default is overridden, so guard remediation too.
+			if inventory.IsDependencyInstallPath(ref.Path) {
+				continue
+			}
 			var rec commandResult
 			if u.Migration {
 				rec = migrationCommand(u.TargetModule, u.Recommended, u.IsDirect)
@@ -401,9 +410,16 @@ func stdlibCommands(version string, refs []dependencyv1.ManifestRef) []Command {
 	seen := collections.NewSet[string]()
 	sawManaged := false
 	sawGoMod := false
+	survived := 0
 
 	for i := range refs {
 		ref := &refs[i]
+		// Skip Go-version declarations vendored inside a dependency-install tree;
+		// only a source-of-truth manifest should drive a toolchain bump.
+		if inventory.IsDependencyInstallPath(ref.Path) {
+			continue
+		}
+		survived++
 		switch strings.ToLower(strings.TrimSpace(ref.Manager)) {
 		case "mise", "asdf":
 			sawManaged = true
@@ -432,7 +448,12 @@ func stdlibCommands(version string, refs []dependencyv1.ManifestRef) []Command {
 		}
 	}
 
-	if sawGoMod || !sawManaged {
+	// With no attributable source, fall back to a go.mod toolchain bump (prior
+	// behavior). But when refs existed and were all vendored install copies
+	// (none survived the filter), the finding came purely from a derived
+	// manifest, so there is nothing actionable to bump and we emit nothing.
+	allRefsVendored := len(refs) > 0 && survived == 0
+	if !allRefsVendored && (sawGoMod || !sawManaged) {
 		if tc, ok := buildGoToolchainCommand(version); ok {
 			cmds = append(cmds, tc)
 		}
