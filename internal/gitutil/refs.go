@@ -222,6 +222,20 @@ func isLikelyDefaultBranch(branchName string) bool {
 	return slices.Contains(DefaultBranchPatterns, branchName)
 }
 
+// shouldTryOriginFallback reports whether the origin/<ref> CI fallback should be
+// attempted for ref. It is skipped only when ref is already remote-qualified
+// (origin/..., remotes/...) or fully qualified (refs/...), so ordinary slashed
+// branch names like "fix/foo" still resolve in CI checkouts where the local
+// branch ref is absent. Guards against producing bogus prefixes like
+// "origin/origin/..." or "origin/refs/remotes/...". Input is trimmed so leading
+// or trailing whitespace doesn't change the decision.
+func shouldTryOriginFallback(ref string) bool {
+	ref = strings.TrimSpace(ref)
+	return !strings.HasPrefix(ref, "origin/") &&
+		!strings.HasPrefix(ref, "remotes/") &&
+		!strings.HasPrefix(ref, "refs/")
+}
+
 // validateReference checks if a Git reference is valid and provides helpful error messages.
 func validateReference(repo *git.Repository, ref string) error {
 	upper := strings.ToUpper(strings.TrimSpace(ref))
@@ -231,9 +245,15 @@ func validateReference(repo *git.Repository, ref string) error {
 	if _, err := ResolveRevisionEnhanced(repo, ref); err == nil {
 		return nil
 	}
-	// Try with origin/ prefix for CI environments where branch names are remote refs
-	if !strings.Contains(ref, "/") {
-		if _, err := ResolveRevisionEnhanced(repo, "origin/"+ref); err == nil {
+	// Try with origin/ prefix for CI environments where the local branch ref is
+	// absent and only the remote-tracking ref exists. Branch names commonly
+	// contain '/' (fix/x, feature/y), so this must run for slashed refs too; it
+	// is skipped only when the ref is already remote-qualified.
+	if shouldTryOriginFallback(ref) {
+		// Trim before composing: ResolveRevisionEnhanced trims its argument, but
+		// only at the ends, so a leading space would otherwise survive inside
+		// "origin/ <ref>" and break resolution.
+		if _, err := ResolveRevisionEnhanced(repo, "origin/"+strings.TrimSpace(ref)); err == nil {
 			return nil
 		}
 	}

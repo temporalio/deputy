@@ -87,8 +87,10 @@ func ResolveRevisionEnhanced(repo *git.Repository, ref string) (*plumbing.Hash, 
 	if !found {
 		rn := NormalizeGitRefForGoGit(r)
 		hash, err := repo.ResolveRevision(plumbing.Revision(rn))
-		if err != nil && !strings.Contains(rn, "/") {
-			// Try with origin/ prefix for CI environments
+		if err != nil && shouldTryOriginFallback(rn) {
+			// Try with origin/ prefix for CI environments where the local branch
+			// ref is absent. Runs for slashed branch names (fix/x) too, skipping
+			// only already-remote-qualified refs.
 			if remoteHash, remoteErr := repo.ResolveRevision(plumbing.Revision("origin/" + rn)); remoteErr == nil {
 				return remoteHash, nil
 			}
