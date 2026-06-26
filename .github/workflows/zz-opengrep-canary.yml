@@ -1,0 +1,11 @@
+name: Opengrep canary (throwaway - do not merge)
+# Throwaway workflow to exercise the opengrep/scan gate (missing-permissions
+# rule + SEC-1975 stable-identity diff). Safe: workflow_dispatch only, never
+# auto-runs. Deleted along with the throwaway PR.
+on:
+  workflow_dispatch:
+jobs:
+  noop:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "opengrep canary"
