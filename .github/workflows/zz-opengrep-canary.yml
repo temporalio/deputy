@@ -4,6 +4,8 @@ name: Opengrep canary (throwaway - do not merge)
 # auto-runs. Deleted along with the throwaway PR.
 on:
   workflow_dispatch:
+permissions:
+  contents: read
 jobs:
   noop:
     runs-on: ubuntu-latest
