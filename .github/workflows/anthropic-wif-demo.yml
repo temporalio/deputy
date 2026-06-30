@@ -1,0 +1,57 @@
+name: anthropic-wif-demo
+on:
+  push:
+    branches: [anthropic-wif-test]
+permissions:
+  id-token: write
+  contents: read
+jobs:
+  call-claude:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Fetch GitHub OIDC token
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8
+        with:
+          script: |
+            const token = await core.getIDToken('https://api.anthropic.com');
+            core.setSecret(token);
+            core.exportVariable('JWT', token);
+
+      - name: Exchange OIDC token for a federated Anthropic access token
+        run: |
+          resp=$(curl -sS https://api.anthropic.com/v1/oauth/token \
+            -H "content-type: application/json" \
+            --data @- <<JSON
+          {
+            "grant_type": "urn:ietf:params:oauth:grant-type:jwt-bearer",
+            "assertion": "$JWT",
+            "federation_rule_id": "fdrl_01FRty5eQYMGP2xh1AK3R5rk",
+            "organization_id": "28abd3d1-8842-4f2b-b558-c5b9700e3caa",
+            "service_account_id": "svac_01D5VqGf1Xvw7BNtFkt1jsLT",
+            "workspace_id": "wrkspc_01BZ6jESnWXxTpRTs59XtnKf"
+          }
+          JSON
+          )
+          token=$(printf '%s' "$resp" | jq -r '.access_token // empty')
+          if [ -z "$token" ]; then echo "Exchange failed:"; printf '%s\n' "$resp" | jq .; exit 1; fi
+          echo "::add-mask::$token"
+          echo "ACCESS_TOKEN=$token" >> "$GITHUB_ENV"
+          echo "Exchange OK -> scope=$(printf '%s' "$resp" | jq -r '.scope') expires_in=$(printf '%s' "$resp" | jq -r '.expires_in')"
+
+      - name: Use the federated token against the real Anthropic API
+        run: |
+          echo "== GET /v1/models (proves the federated token authenticates) =="
+          models=$(curl -sS https://api.anthropic.com/v1/models \
+            -H "authorization: Bearer $ACCESS_TOKEN" \
+            -H "anthropic-version: 2023-06-01")
+          printf '%s\n' "$models" | jq '{count: (.data | length), first: .data[0].id, error}'
+          model=$(printf '%s' "$models" | jq -r '.data[0].id // empty')
+          [ -z "$model" ] && { echo "No model returned; auth likely failed."; exit 1; }
+
+          echo "== POST /v1/messages with model $model =="
+          curl -sS https://api.anthropic.com/v1/messages \
+            -H "authorization: Bearer $ACCESS_TOKEN" \
+            -H "anthropic-version: 2023-06-01" \
+            -H "content-type: application/json" \
+            -d "{\"model\":\"$model\",\"max_tokens\":32,\"messages\":[{\"role\":\"user\",\"content\":\"Reply with exactly: WIF end-to-end OK\"}]}" \
+            | jq '{model, stop_reason, reply: .content[0].text, error}'
