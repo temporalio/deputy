@@ -18,9 +18,12 @@ jobs:
           # GitHub App token exchange (App not installed on this repo). This
           # isolates the Anthropic-side WIF auth, which is what we're validating.
           github_token: ${{ github.token }}
-          # TEMPORARY diagnostic: surface the hidden Claude turn error. Revert
-          # once we understand why the WIF-authenticated turn fails.
+          # TEMPORARY diagnostic: surface the hidden Claude turn error.
           show_full_output: true
+          # Hypothesis test: the raw pilot (#49) requested the OIDC token with
+          # audience https://api.anthropic.com and the exchange succeeded; the
+          # action with an empty audience got 401. Set it explicitly to match.
+          anthropic_oidc_audience: https://api.anthropic.com
           prompt: "Reply with a single line confirming Claude authenticated via Workload Identity Federation. Do not read, modify, or create any files, and do not open any pull requests."
           anthropic_organization_id: 28abd3d1-8842-4f2b-b558-c5b9700e3caa
           anthropic_service_account_id: svac_01D5VqGf1Xvw7BNtFkt1jsLT
