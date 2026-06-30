@@ -14,6 +14,10 @@ jobs:
       - name: Run claude-code-action via WIF
         uses: anthropics/claude-code-action@fad22eb3fa582b7357fc0ea48af6645851b884fd # v1
         with:
+          # Use the workflow token for GitHub ops so the action skips the Claude
+          # GitHub App token exchange (App not installed on this repo). This
+          # isolates the Anthropic-side WIF auth, which is what we're validating.
+          github_token: ${{ github.token }}
           prompt: "Reply with a single line confirming Claude authenticated via Workload Identity Federation. Do not read, modify, or create any files, and do not open any pull requests."
           anthropic_organization_id: 28abd3d1-8842-4f2b-b558-c5b9700e3caa
           anthropic_service_account_id: svac_01D5VqGf1Xvw7BNtFkt1jsLT
