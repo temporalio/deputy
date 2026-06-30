@@ -1,0 +1,31 @@
+name: claude-wif-action-test
+on:
+  push:
+    branches: [claude-wif-action-test]
+  workflow_dispatch:
+permissions:
+  contents: read
+  id-token: write
+jobs:
+  claude:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - name: Run claude-code-action via WIF
+        uses: anthropics/claude-code-action@fad22eb3fa582b7357fc0ea48af6645851b884fd # v1
+        with:
+          # Use the workflow token for GitHub ops so the action skips the Claude
+          # GitHub App token exchange (App not installed on this repo). This
+          # isolates the Anthropic-side WIF auth, which is what we're validating.
+          github_token: ${{ github.token }}
+          # TEMPORARY diagnostic: surface the hidden Claude turn error.
+          show_full_output: true
+          # Hypothesis test: the raw pilot (#49) requested the OIDC token with
+          # audience https://api.anthropic.com and the exchange succeeded; the
+          # action with an empty audience got 401. Set it explicitly to match.
+          anthropic_oidc_audience: https://api.anthropic.com
+          prompt: "Reply with a single line confirming Claude authenticated via Workload Identity Federation. Do not read, modify, or create any files, and do not open any pull requests."
+          anthropic_organization_id: 28abd3d1-8842-4f2b-b558-c5b9700e3caa
+          anthropic_service_account_id: svac_01D5VqGf1Xvw7BNtFkt1jsLT
+          anthropic_workspace_id: wrkspc_01BZ6jESnWXxTpRTs59XtnKf
+          anthropic_federation_rule_id: fdrl_01FRty5eQYMGP2xh1AK3R5rk
