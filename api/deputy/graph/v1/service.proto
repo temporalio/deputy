@@ -325,6 +325,14 @@ message WhyDependencyResponse {
 
   // Warnings contains non-fatal issues.
   repeated string warnings = 5;
+
+  // DependencyNode is the matched dependency node when found.
+  // Present even when no dependency path could be resolved, so clients can
+  // inspect exact PURL, directness, depth, locations, and import status.
+  Node dependency_node = 6;
+
+  // Message provides human-readable context for empty or not-found results.
+  string message = 7;
 }
 
 // DependencyPath represents a path through the dependency graph.
@@ -369,6 +377,21 @@ message NeedsDependencyResponse {
 
   // Dependents are packages that depend on this package.
   repeated Node dependents = 4;
+
+  // Found indicates whether the queried package was found in the graph.
+  optional bool found = 5;
+
+  // Direct indicates whether the queried package is a direct/root dependency.
+  optional bool direct = 6;
+
+  // DirectCount is the number of direct dependencies in dependents.
+  optional int32 direct_count = 7;
+
+  // TransitiveCount is the number of transitive dependencies in dependents.
+  optional int32 transitive_count = 8;
+
+  // Message provides human-readable context for empty or not-found results.
+  string message = 9;
 }
 
 // QueryGraphRequest filters a dependency graph.

@@ -847,7 +847,11 @@ type VariableInfo struct {
 	// Description explains what the variable contains.
 	Description string `protobuf:"bytes,3,opt,name=description,proto3" json:"description,omitempty"`
 	// Fields lists notable sub-fields for complex types.
-	Fields        []*FieldInfo `protobuf:"bytes,4,rep,name=fields,proto3" json:"fields,omitempty"`
+	Fields []*FieldInfo `protobuf:"bytes,4,rep,name=fields,proto3" json:"fields,omitempty"`
+	// Required is true when the variable is always available at this entrypoint.
+	// Optional variables may be absent and should be guarded with CEL optional
+	// access or presence checks.
+	Required      bool `protobuf:"varint,5,opt,name=required,proto3" json:"required,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -908,6 +912,13 @@ func (x *VariableInfo) GetFields() []*FieldInfo {
 		return x.Fields
 	}
 	return nil
+}
+
+func (x *VariableInfo) GetRequired() bool {
+	if x != nil {
+		return x.Required
+	}
+	return false
 }
 
 // FieldInfo describes a field within a variable.
@@ -1031,12 +1042,13 @@ const file_deputy_policy_v1_service_proto_rawDesc = "" +
 	"\bcategory\x18\x02 \x01(\tR\bcategory\x12 \n" +
 	"\vdescription\x18\x03 \x01(\tR\vdescription\x12<\n" +
 	"\tvariables\x18\x04 \x03(\v2\x1e.deputy.policy.v1.VariableInfoR\tvariables\x12\x18\n" +
-	"\ahelpers\x18\x05 \x03(\tR\ahelpers\"\x8d\x01\n" +
+	"\ahelpers\x18\x05 \x03(\tR\ahelpers\"\xa9\x01\n" +
 	"\fVariableInfo\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x12\n" +
 	"\x04type\x18\x02 \x01(\tR\x04type\x12 \n" +
 	"\vdescription\x18\x03 \x01(\tR\vdescription\x123\n" +
-	"\x06fields\x18\x04 \x03(\v2\x1b.deputy.policy.v1.FieldInfoR\x06fields\"U\n" +
+	"\x06fields\x18\x04 \x03(\v2\x1b.deputy.policy.v1.FieldInfoR\x06fields\x12\x1a\n" +
+	"\brequired\x18\x05 \x01(\bR\brequired\"U\n" +
 	"\tFieldInfo\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x12\n" +
 	"\x04type\x18\x02 \x01(\tR\x04type\x12 \n" +

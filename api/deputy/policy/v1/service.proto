@@ -191,6 +191,11 @@ message VariableInfo {
 
   // Fields lists notable sub-fields for complex types.
   repeated FieldInfo fields = 4;
+
+  // Required is true when the variable is always available at this entrypoint.
+  // Optional variables may be absent and should be guarded with CEL optional
+  // access or presence checks.
+  bool required = 5;
 }
 
 // FieldInfo describes a field within a variable.

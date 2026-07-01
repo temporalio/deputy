@@ -34,7 +34,7 @@ message ListPackagesRequest {
 
 // ListOptions configure package listing.
 message ListOptions {
-  // OnlyDirect filters to only direct dependencies.
+  // OnlyDirect filters returned packages to direct dependencies.
   bool only_direct = 1;
 
   // Ecosystems filters to specific ecosystems.
@@ -61,22 +61,24 @@ message ListPackagesResponse {
   // Target describes what was enumerated.
   deputy.target.v1.Target target = 1;
 
-  // Packages lists all discovered packages.
+  // Packages lists discovered packages matching request filters.
+  // When only_direct is true, this list contains only direct dependencies.
   repeated deputy.dependency.v1.Package packages = 2;
 
-  // Stats summarizes the listing.
+  // Stats summarizes the discovered inventory after ecosystem and path filters.
+  // Stats are computed before only_direct filters the returned packages.
   ListStats stats = 3;
 }
 
 // ListStats provides statistics about the listing.
 message ListStats {
-  // TotalPackages is the total count of packages.
+  // TotalPackages is the total discovered package count before only_direct filtering.
   int32 total_packages = 1 [(buf.validate.field).int32.gte = 0];
 
-  // DirectPackages is the count of direct dependencies.
+  // DirectPackages is the count of discovered direct dependencies.
   int32 direct_packages = 2 [(buf.validate.field).int32.gte = 0];
 
-  // TransitivePackages is the count of transitive dependencies.
+  // TransitivePackages is the count of discovered transitive dependencies.
   int32 transitive_packages = 3 [(buf.validate.field).int32.gte = 0];
 
   // Ecosystems maps ecosystem names to package counts.
