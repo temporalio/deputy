@@ -157,11 +157,12 @@ func (h *PolicyHandler) ListEntrypoints(
 	req *connect.Request[policyv1.ListEntrypointsRequest],
 ) (*connect.Response[policyv1.ListEntrypointsResponse], error) {
 	msg := req.Msg
+	category := policy.NormalizeCategory(msg.Category)
 
 	var infos []*policyv1.EntrypointInfo
 	for _, ep := range policy.AllEntrypoints {
 		cat := ep.Category()
-		if msg.Category != "" && cat != msg.Category {
+		if category != "" && cat != category {
 			continue
 		}
 
@@ -327,103 +328,113 @@ func extractMetadataFromSource(body string) policyMeta {
 }
 
 func getEntrypointDescription(ep policy.Entrypoint) string {
-	descriptions := map[policy.Entrypoint]string{
-		policy.EntrypointScanReport:              "Evaluated after a vulnerability scan completes with the full report",
-		policy.EntrypointScanVulnerability:       "Evaluated for each vulnerability found during a scan",
-		policy.EntrypointGoArtifactRequest:       "Evaluated when the proxy handles a Go module request",
-		policy.EntrypointNpmArtifactRequest:      "Evaluated when the proxy handles an npm package request",
-		policy.EntrypointPypiArtifactRequest:     "Evaluated when the proxy handles a PyPI package request",
-		policy.EntrypointRubygemsArtifactRequest: "Evaluated when the proxy handles a RubyGems package request",
-		policy.EntrypointOCIArtifactRequest:      "Evaluated when the proxy handles an OCI artifact request",
-		policy.EntrypointGraphReport:             "Evaluated after dependency graph resolution",
-		policy.EntrypointGraphNode:               "Evaluated for each node in the dependency graph",
-		policy.EntrypointGraphEdge:               "Evaluated for each edge in the dependency graph",
-		policy.EntrypointDockerfileReport:        "Evaluated after Dockerfile analysis",
-		policy.EntrypointDockerfileStage:         "Evaluated for each stage in a Dockerfile",
-		policy.EntrypointSecretsReport:           "Evaluated after secrets scanning",
-		policy.EntrypointSecretsFinding:          "Evaluated for each secret found",
-		policy.EntrypointSBOMComponent:           "Evaluated for each component in an SBOM",
-		policy.EntrypointDiffDependencyChange:    "Evaluated for each dependency change in a diff",
-	}
-	if desc, ok := descriptions[ep]; ok {
-		return desc
+	if profile := policy.GetBindingProfile(ep); profile != nil && profile.Description != "" {
+		return profile.Description
 	}
 	return fmt.Sprintf("Policy entrypoint for %s", ep)
 }
 
 func getEntrypointVariables(ep policy.Entrypoint) []*policyv1.VariableInfo {
-	switch ep {
-	case policy.EntrypointScanVulnerability:
-		return []*policyv1.VariableInfo{
-			{Name: "vulnerability", Type: "vulnerabilityv1.Finding", Description: "The vulnerability being evaluated"},
-			{Name: "pkg", Type: "dependencyv1.Package", Description: "The affected package"},
-			{Name: "env", Type: "policyv1.Environment", Description: "Execution environment context"},
-			{Name: "target", Type: "targetv1.Target", Description: "What was scanned"},
-		}
-	case policy.EntrypointScanReport:
-		return []*policyv1.VariableInfo{
-			{Name: "vulnerabilities", Type: "list(vulnerabilityv1.Finding)", Description: "All vulnerabilities found"},
-			{Name: "packages", Type: "list(dependencyv1.Package)", Description: "All packages scanned"},
-			{Name: "stats", Type: "vulnerabilityv1.Stats", Description: "Vulnerability counts by severity"},
-			{Name: "env", Type: "policyv1.Environment", Description: "Execution environment context"},
-			{Name: "target", Type: "targetv1.Target", Description: "What was scanned"},
-		}
-	case policy.EntrypointGraphReport:
-		return []*policyv1.VariableInfo{
-			{Name: "nodes", Type: "list(graphv1.Node)", Description: "All dependency graph nodes"},
-			{Name: "edges", Type: "list(graphv1.Edge)", Description: "All dependency relationships"},
-			{Name: "stats", Type: "graphv1.GraphStats", Description: "Graph statistics"},
-			{Name: "roots", Type: "list(string)", Description: "Direct dependency PURLs"},
-		}
-	case policy.EntrypointGraphNode:
-		return []*policyv1.VariableInfo{
-			{Name: "node", Type: "graphv1.Node", Description: "The current graph node"},
-			{Name: "ancestors", Type: "list(graphv1.Node)", Description: "Ancestor nodes"},
-			{Name: "descendants", Type: "list(graphv1.Node)", Description: "Descendant nodes"},
-		}
-	case policy.EntrypointGraphEdge:
-		return []*policyv1.VariableInfo{
-			{Name: "edge", Type: "graphv1.Edge", Description: "The current graph edge"},
-			{Name: "from_node", Type: "graphv1.Node", Description: "Source node of the edge"},
-			{Name: "to_node", Type: "graphv1.Node", Description: "Target node of the edge"},
-		}
-	case policy.EntrypointGoArtifactRequest, policy.EntrypointNpmArtifactRequest,
-		policy.EntrypointPypiArtifactRequest, policy.EntrypointRubygemsArtifactRequest:
-		return []*policyv1.VariableInfo{
-			{Name: "request", Type: "policyv1.ProxyRequest", Description: "The package request being evaluated"},
-			{Name: "jwt", Type: "policyv1.JWTClaims", Description: "JWT claims from authenticated requests"},
-			{Name: "vulnerabilities", Type: "list(vulnerabilityv1.Finding)", Description: "Known vulnerabilities for the package"},
-			{Name: "env", Type: "policyv1.Environment", Description: "Execution environment context"},
-		}
-	case policy.EntrypointOCIArtifactRequest:
-		return []*policyv1.VariableInfo{
-			{Name: "request", Type: "policyv1.ProxyRequest", Description: "The OCI artifact request"},
-			{Name: "image", Type: "map", Description: "Container image metadata"},
-			{Name: "jwt", Type: "policyv1.JWTClaims", Description: "JWT claims from authenticated requests"},
-			{Name: "vulnerabilities", Type: "list(vulnerabilityv1.Finding)", Description: "Known vulnerabilities"},
-		}
-	case policy.EntrypointDockerfileReport:
-		return []*policyv1.VariableInfo{
-			{Name: "dockerfile", Type: "map", Description: "Parsed Dockerfile structure"},
-			{Name: "dockerfile_analysis", Type: "map", Description: "Dockerfile analysis results"},
-		}
-	case policy.EntrypointDockerfileStage:
-		return []*policyv1.VariableInfo{
-			{Name: "stage", Type: "map", Description: "Current Dockerfile stage"},
-			{Name: "dockerfile", Type: "map", Description: "Full Dockerfile structure"},
-		}
-	case policy.EntrypointSecretsReport:
-		return []*policyv1.VariableInfo{
-			{Name: "secrets", Type: "list(map)", Description: "All secrets found"},
-			{Name: "report", Type: "map", Description: "Secrets scan report"},
-		}
-	case policy.EntrypointSecretsFinding:
-		return []*policyv1.VariableInfo{
-			{Name: "secret", Type: "map", Description: "The current secret finding"},
-		}
-	default:
+	profile := policy.GetBindingProfile(ep)
+	if profile == nil {
 		return nil
 	}
+	vars := make([]*policyv1.VariableInfo, 0, len(profile.Required)+len(profile.Optional))
+	for _, name := range profile.Required {
+		vars = append(vars, variableInfoForPolicyBinding(name, true))
+	}
+	for _, name := range profile.Optional {
+		vars = append(vars, variableInfoForPolicyBinding(name, false))
+	}
+	return vars
+}
+
+// policyVariableMetadata describes a CEL binding in policy discovery output.
+// It intentionally stays small because binding availability and requiredness
+// come from policy.BindingProfile, not this display table.
+type policyVariableMetadata struct {
+	typ         string
+	description string
+}
+
+// policyVariableMetadataByName gives humans and agents stable type hints for
+// policy variables without requiring them to inspect protobuf descriptors.
+var policyVariableMetadataByName = map[string]policyVariableMetadata{
+	"ancestors":             {typ: "list(graphv1.Node)", description: "Ancestor nodes for the current graph node"},
+	"base_image":            {typ: "string", description: "Base image reference"},
+	"change":                {typ: "object", description: "Current dependency or package change"},
+	"changes":               {typ: "list(object)", description: "Dependency changes"},
+	"cluster":               {typ: "object", description: "Current triage cluster"},
+	"command":               {typ: "string", description: "Command being evaluated"},
+	"component":             {typ: "dependencyv1.Package", description: "SBOM component being evaluated"},
+	"config_changes":        {typ: "object", description: "Container image configuration changes"},
+	"context":               {typ: "object", description: "Additional policy execution context"},
+	"dependency":            {typ: "dependencyv1.Package", description: "Dependency associated with a change"},
+	"descendants":           {typ: "list(graphv1.Node)", description: "Descendant nodes for the current graph node"},
+	"dockerfile":            {typ: "object", description: "Parsed Dockerfile structure"},
+	"dockerfile_analysis":   {typ: "object", description: "Dockerfile analysis results"},
+	"edge":                  {typ: "graphv1.Edge", description: "Current dependency graph edge"},
+	"edges":                 {typ: "list(graphv1.Edge)", description: "Dependency graph edges"},
+	"env":                   {typ: "policyv1.Environment", description: "Execution environment context"},
+	"findings":              {typ: "list(object)", description: "Triage findings"},
+	"from_node":             {typ: "graphv1.Node", description: "Source node for the current graph edge"},
+	"graph":                 {typ: "graphv1.Graph", description: "Dependency graph data"},
+	"host":                  {typ: "string", description: "Requested network host"},
+	"image":                 {typ: "object", description: "Container image metadata"},
+	"image_info":            {typ: "object", description: "Container image metadata"},
+	"jwt":                   {typ: "policyv1.JWTClaims", description: "JWT claims from authenticated requests"},
+	"layer":                 {typ: "object", description: "Container image layer analysis"},
+	"layer_analysis":        {typ: "object", description: "Layer-by-layer container diff analysis"},
+	"licenses":              {typ: "list(string)", description: "SPDX license identifiers"},
+	"node":                  {typ: "graphv1.Node", description: "Current dependency graph node"},
+	"nodes":                 {typ: "list(graphv1.Node)", description: "Dependency graph nodes"},
+	"package_changes":       {typ: "list(object)", description: "Package changes between container images"},
+	"packages":              {typ: "list(dependencyv1.Package)", description: "Packages in the report"},
+	"pkg":                   {typ: "dependencyv1.Package", description: "Package associated with the current policy item"},
+	"plan":                  {typ: "object", description: "Remediation plan"},
+	"port":                  {typ: "int", description: "Requested network port"},
+	"protocol":              {typ: "string", description: "Requested network protocol"},
+	"report":                {typ: "object", description: "Scan report data"},
+	"request":               {typ: "object", description: "Request metadata for proxy or server authorization policies"},
+	"requested_config":      {typ: "object", description: "Requested sandbox configuration"},
+	"roots":                 {typ: "list(string)", description: "PURLs of direct (depth-0) dependencies"},
+	"sandbox_config":        {typ: "object", description: "Effective sandbox configuration"},
+	"sbom":                  {typ: "object", description: "SBOM document"},
+	"secret":                {typ: "object", description: "Current secret finding"},
+	"secrets":               {typ: "list(object)", description: "Secrets scan findings"},
+	"source":                {typ: "string", description: "Source of the sandbox execution request"},
+	"stage":                 {typ: "object", description: "Current Dockerfile stage"},
+	"stats":                 {typ: "object", description: "Summary statistics for the current report"},
+	"step":                  {typ: "object", description: "Current remediation plan step"},
+	"summary":               {typ: "object", description: "Container diff summary"},
+	"target":                {typ: "targetv1.Target", description: "Target or provenance metadata"},
+	"target_image":          {typ: "string", description: "Target image reference"},
+	"to_node":               {typ: "graphv1.Node", description: "Target node for the current graph edge"},
+	"vulnerability":         {typ: "vulnerabilityv1.Finding", description: "Current vulnerability finding"},
+	"vulnerability_changes": {typ: "list(object)", description: "Vulnerability changes between container images"},
+	"vulnerabilities":       {typ: "list(vulnerabilityv1.Finding)", description: "Vulnerability findings"},
+	"workspace_dir":         {typ: "string", description: "Workspace directory for sandbox execution"},
+}
+
+// variableInfoForPolicyBinding combines binding-profile requiredness with the
+// display metadata used by policy discovery APIs.
+func variableInfoForPolicyBinding(name string, required bool) *policyv1.VariableInfo {
+	meta := policyVariableMetadataForName(name)
+	return &policyv1.VariableInfo{
+		Name:        name,
+		Type:        meta.typ,
+		Description: meta.description,
+		Required:    required,
+	}
+}
+
+// policyVariableMetadataForName returns generic object metadata for newer
+// bindings that have not yet been added to the display table.
+func policyVariableMetadataForName(name string) policyVariableMetadata {
+	if meta, ok := policyVariableMetadataByName[name]; ok {
+		return meta
+	}
+	return policyVariableMetadata{typ: "object", description: "Policy variable"}
 }
 
 func getEntrypointHelpers(ep policy.Entrypoint) []string {

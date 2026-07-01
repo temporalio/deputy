@@ -144,6 +144,7 @@ func (h *RemediationHandler) GeneratePlan(
 
 	// Generate remediation commands
 	commands, stdlibVersion := remediation.CommandsFromConsolidated(consolidated)
+	commands = remediation.ApplyGuidance(commands, remediation.APIGuidance())
 
 	// Convert to proto steps
 	steps := internalproto.RemediationCommandsToSteps(commands)

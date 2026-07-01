@@ -12,8 +12,8 @@ import (
 
 	graphv1 "github.com/temporalio/deputy/gen/deputy/graph/v1"
 	"github.com/temporalio/deputy/gen/deputy/graph/v1/graphv1connect"
-	targetv1 "github.com/temporalio/deputy/gen/deputy/target/v1"
 	"github.com/temporalio/deputy/internal/dependency/graph"
+	"github.com/temporalio/deputy/internal/dependency/graphquery"
 	"github.com/temporalio/deputy/internal/inventory"
 	"github.com/temporalio/deputy/internal/otel"
 	internalproto "github.com/temporalio/deputy/internal/proto"
@@ -85,16 +85,10 @@ func (h *GraphHandler) BuildGraph(
 		}
 	}
 
-	// Build inventory options
-	opts := inventory.Options{}
-	if req.Msg.Options != nil {
-		opts.Ecosystems = req.Msg.Options.Ecosystems
-		opts.Platform = req.Msg.Options.Platform
-		opts.ExcludePaths = req.Msg.Options.GetExcludePaths()
-	}
+	opts, ref, refProvided, kind := graphInventoryOptions(req.Msg.Options)
 
 	// Collect inventory
-	exec, err := h.collectInventory(ctx, target, opts)
+	exec, err := h.collectInventory(ctx, target, ref, refProvided, kind, opts)
 	if err != nil {
 		otel.SetSpanError(span, err)
 		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to collect inventory: %w", err))
@@ -104,15 +98,7 @@ func (h *GraphHandler) BuildGraph(
 	}
 
 	// Build graph with edge resolution
-	builderOpts := graph.BuilderOptions{
-		// Enable deps.dev for transitive dependency resolution by default
-		UseDepsDevTransitives: true,
-	}
-	if req.Msg.Options != nil {
-		builderOpts.UseProxy = req.Msg.Options.UseProxy
-		builderOpts.UseGit = req.Msg.Options.UseGit
-	}
-	builder := graph.NewBuilder(builderOpts)
+	builder := graph.NewBuilder(graphBuilderOptions(req.Msg.Options))
 
 	// Use workspace for edge resolution if available
 	var g *graph.Graph
@@ -130,24 +116,14 @@ func (h *GraphHandler) BuildGraph(
 
 	// Extended mode: add declared-only dependencies from full module graph
 	if req.Msg.Options != nil && req.Msg.Options.Extended {
-		// Only works for local directories with Go modules currently
-		if exec.Workspace != nil && targets.DetectKind(target) == targets.KindDir {
-			extResult, extErr := graph.AnalyzeExtendedGraph(ctx, target)
-			if extErr == nil && extResult != nil {
-				graph.MergeExtendedIntoGraph(g, extResult)
-			}
-			// Non-fatal: if extended analysis fails, we still return the standard graph
-		}
+		h.mergeExtendedGraph(ctx, target, exec.Workspace != nil, g)
 	}
 
 	// Record graph stats on span
 	span.SetAttributes(otel.AttrPackageCount.Int(len(g.GetNodesSlice())))
 
 	response := &graphv1.BuildGraphResponse{
-		Target: &targetv1.Target{
-			Kind:        exec.Result.Target.Kind,
-			DisplayPath: exec.Result.Target.DisplayPath,
-		},
+		Target:      internalproto.InventoryTargetToProto(exec.Result.Target),
 		GeneratedAt: timestamppb.Now(),
 		Nodes:       g.GetNodesSlice(),
 		Edges:       g.GetEdgesSlice(),
@@ -158,10 +134,27 @@ func (h *GraphHandler) BuildGraph(
 	return connect.NewResponse(response), nil
 }
 
-// collectInventory collects inventory from a target.
-func (h *GraphHandler) collectInventory(ctx context.Context, target string, opts inventory.Options) (*inventory.Execution, error) {
-	kind := targets.DetectKind(target)
+func graphInventoryOptions(options *graphv1.GraphOptions) (inventory.Options, string, bool, targets.Kind) {
+	opts := inventory.Options{}
+	if options == nil {
+		return opts, "", false, targets.KindUnspecified
+	}
+	opts.Ecosystems = options.GetEcosystems()
+	opts.Platform = options.GetPlatform()
+	opts.ExcludePaths = options.GetExcludePaths()
 
+	ref := strings.TrimSpace(options.GetRef())
+	refProvided := ref != ""
+	return opts, ref, refProvided, targets.Kind(options.GetTargetHint())
+}
+
+// collectInventory collects inventory from target using the same ref semantics as
+// list and scan: explicit snapshot refs are materialized, while HEAD/WORKING
+// refs keep local working-tree behavior.
+func (h *GraphHandler) collectInventory(ctx context.Context, target, ref string, refProvided bool, kind targets.Kind, opts inventory.Options) (*inventory.Execution, error) {
+	if kind == targets.KindUnspecified {
+		kind = targets.DetectKind(target)
+	}
 	switch kind {
 	case targets.KindContainerImage:
 		targetOpts := map[string]string{}
@@ -171,14 +164,56 @@ func (h *GraphHandler) collectInventory(ctx context.Context, target string, opts
 		return inventory.CollectContainerImage(ctx, target, targetOpts, opts)
 
 	case targets.KindDir:
+		if refProvided && ref != "" && !isWorkingTreeRef(ref) {
+			return inventory.CollectRepositoryAtRef(ctx, target, ref, opts)
+		}
 		return inventory.CollectDirectory(ctx, target, opts)
 
 	case targets.KindGit:
-		return inventory.CollectRepository(ctx, target, "HEAD", false, opts)
+		if refProvided && ref != "" && !isWorkingTreeRef(ref) {
+			return inventory.CollectRepositoryAtRef(ctx, target, ref, opts)
+		}
+		return inventory.CollectRepository(ctx, target, graphRefOrHEAD(ref), refProvided, opts)
 
 	default:
-		return inventory.CollectRepository(ctx, target, "HEAD", false, opts)
+		if refProvided && ref != "" && !isWorkingTreeRef(ref) {
+			return inventory.CollectRepositoryAtRef(ctx, target, ref, opts)
+		}
+		return inventory.CollectRepository(ctx, target, graphRefOrHEAD(ref), refProvided, opts)
 	}
+}
+
+func graphRefOrHEAD(ref string) string {
+	ref = strings.TrimSpace(ref)
+	if ref == "" {
+		return "HEAD"
+	}
+	return ref
+}
+
+func graphBuilderOptions(opts *graphv1.GraphOptions) graph.BuilderOptions {
+	if opts == nil {
+		return graph.BuilderOptions{}
+	}
+	return graph.BuilderOptions{
+		UseProxy:              opts.GetUseProxy(),
+		UseGit:                opts.GetUseGit(),
+		PrivatePatterns:       slices.Clone(opts.GetPrivatePatterns()),
+		UseDepsDevTransitives: opts.GetUseProxy(),
+	}
+}
+
+func (h *GraphHandler) mergeExtendedGraph(ctx context.Context, target string, hasWorkspace bool, g *graph.Graph) {
+	// Only works for local directories with Go modules currently. Remote server
+	// mode rejects local targets before this point.
+	if g == nil || !hasWorkspace || !targets.IsLocalTarget(target) {
+		return
+	}
+	extResult, err := graph.AnalyzeExtendedGraph(ctx, target)
+	if err == nil && extResult != nil {
+		graph.MergeExtendedIntoGraph(g, extResult)
+	}
+	// Non-fatal: if extended analysis fails, callers still return the standard graph.
 }
 
 // WhyDependency finds paths explaining why a dependency exists.
@@ -220,16 +255,10 @@ func (h *GraphHandler) WhyDependency(
 		}
 	}
 
-	// Build inventory options
-	opts := inventory.Options{}
-	if req.Msg.Options != nil {
-		opts.Ecosystems = req.Msg.Options.Ecosystems
-		opts.Platform = req.Msg.Options.Platform
-		opts.ExcludePaths = req.Msg.Options.GetExcludePaths()
-	}
+	opts, ref, refProvided, kind := graphInventoryOptions(req.Msg.Options)
 
 	// Collect inventory
-	exec, err := h.collectInventory(ctx, target, opts)
+	exec, err := h.collectInventory(ctx, target, ref, refProvided, kind, opts)
 	if err != nil {
 		otel.SetSpanError(span, err)
 		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to collect inventory: %w", err))
@@ -239,15 +268,7 @@ func (h *GraphHandler) WhyDependency(
 	}
 
 	// Build graph with edge resolution
-	builderOpts := graph.BuilderOptions{
-		// Enable deps.dev for transitive dependency resolution by default
-		UseDepsDevTransitives: true,
-	}
-	if req.Msg.Options != nil {
-		builderOpts.UseProxy = req.Msg.Options.UseProxy
-		builderOpts.UseGit = req.Msg.Options.UseGit
-	}
-	builder := graph.NewBuilder(builderOpts)
+	builder := graph.NewBuilder(graphBuilderOptions(req.Msg.Options))
 
 	// Use workspace for edge resolution if available
 	var g *graph.Graph
@@ -262,6 +283,9 @@ func (h *GraphHandler) WhyDependency(
 		otel.SetSpanError(span, err)
 		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to build graph: %w", err))
 	}
+	if req.Msg.Options != nil && req.Msg.Options.Extended {
+		h.mergeExtendedGraph(ctx, target, exec.Workspace != nil, g)
+	}
 
 	// Find matching dependency nodes
 	matches := findMatchingNodes(g, dependency)
@@ -271,10 +295,7 @@ func (h *GraphHandler) WhyDependency(
 	}
 
 	response := &graphv1.WhyDependencyResponse{
-		Target: &targetv1.Target{
-			Kind:        exec.Result.Target.Kind,
-			DisplayPath: exec.Result.Target.DisplayPath,
-		},
+		Target:     internalproto.InventoryTargetToProto(exec.Result.Target),
 		Dependency: dependency,
 		Found:      targetNode != nil,
 	}
@@ -312,6 +333,14 @@ func (h *GraphHandler) WhyDependency(
 		paths := g.PathsTo(targetNode.Purl)
 		response.Paths = graph.PathsToProto(paths)
 		response.Dependency = targetNode.Purl
+		response.DependencyNode = targetNode
+		if len(paths) == 0 {
+			response.Message = graphquery.NoDependencyPathMessage(
+				targetNode,
+				req.Msg.GetOptions().GetUseProxy() || req.Msg.GetOptions().GetUseGit(),
+				req.Msg.GetOptions().GetExtended(),
+			)
+		}
 
 		// Record results on span
 		span.SetAttributes(
@@ -320,6 +349,7 @@ func (h *GraphHandler) WhyDependency(
 			otel.AttrMCPGraphPathCount.Int(len(paths)),
 		)
 	} else {
+		response.Message = fmt.Sprintf("Package %q not found in dependency graph", dependency)
 		span.SetAttributes(otel.AttrMCPGraphFound.Bool(false))
 	}
 
@@ -355,16 +385,10 @@ func (h *GraphHandler) QueryGraph(
 		}
 	}
 
-	// Build inventory options
-	opts := inventory.Options{}
-	if req.Msg.Options != nil {
-		opts.Ecosystems = req.Msg.Options.Ecosystems
-		opts.Platform = req.Msg.Options.Platform
-		opts.ExcludePaths = req.Msg.Options.GetExcludePaths()
-	}
+	opts, ref, refProvided, kind := graphInventoryOptions(req.Msg.Options)
 
 	// Collect inventory
-	exec, err := h.collectInventory(ctx, target, opts)
+	exec, err := h.collectInventory(ctx, target, ref, refProvided, kind, opts)
 	if err != nil {
 		otel.SetSpanError(span, err)
 		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to collect inventory: %w", err))
@@ -376,6 +400,9 @@ func (h *GraphHandler) QueryGraph(
 	// Build graph from inventory
 	g := graph.FromInventory(exec.Result.Packages, exec.Result.Direct)
 	g.UpdateDepths()
+	if req.Msg.Options != nil && req.Msg.Options.Extended {
+		h.mergeExtendedGraph(ctx, target, exec.Workspace != nil, g)
+	}
 
 	// Apply filters if specified
 	if req.Msg.Filter != nil {
@@ -439,13 +466,10 @@ func (h *GraphHandler) QueryGraph(
 	span.SetAttributes(otel.AttrPackageCount.Int(len(g.GetNodesSlice())))
 
 	response := &graphv1.QueryGraphResponse{
-		Target: &targetv1.Target{
-			Kind:        exec.Result.Target.Kind,
-			DisplayPath: exec.Result.Target.DisplayPath,
-		},
-		Nodes: g.GetNodesSlice(),
-		Edges: g.GetEdgesSlice(),
-		Stats: g.Stats(),
+		Target: internalproto.InventoryTargetToProto(exec.Result.Target),
+		Nodes:  g.GetNodesSlice(),
+		Edges:  g.GetEdgesSlice(),
+		Stats:  g.Stats(),
 	}
 
 	return connect.NewResponse(response), nil
@@ -461,38 +485,7 @@ func (h *GraphHandler) QueryGraph(
 //   - "*/cobra" matches packages ending with /cobra
 //   - "spf13/*" matches all packages under spf13
 func findMatchingNodes(g *graph.Graph, query string) []*graph.Node {
-	queryLower := strings.ToLower(query)
-	isGlob := strings.ContainsAny(query, "*?[")
-
-	var matches []*graph.Node
-
-	for node := range g.Nodes() {
-		nameLower := strings.ToLower(node.Name)
-
-		if isGlob {
-			// Use path.Match for glob patterns
-			if matched, _ := filepath.Match(queryLower, nameLower); matched {
-				matches = append(matches, node)
-			}
-		} else {
-			// Simple substring matching - case insensitive
-			if strings.Contains(nameLower, queryLower) {
-				matches = append(matches, node)
-			}
-		}
-	}
-
-	// Sort by match quality: exact > final segment > substring, then alphabetically
-	slices.SortFunc(matches, func(a, b *graph.Node) int {
-		scoreA := matchScore(a.Name, queryLower)
-		scoreB := matchScore(b.Name, queryLower)
-		if scoreA != scoreB {
-			return scoreB - scoreA // Higher score first
-		}
-		return strings.Compare(a.Name, b.Name)
-	})
-
-	return matches
+	return graphquery.FindMatchingNodes(g, query)
 }
 
 // lastNSegments returns the last n segments of a package path.
@@ -511,32 +504,5 @@ func lastNSegments(name string, n int) string {
 //   - 2: final segment match (query matches the last path component)
 //   - 1: substring match
 func matchScore(name, queryLower string) int {
-	nameLower := strings.ToLower(name)
-
-	// Exact match
-	if nameLower == queryLower {
-		return 3
-	}
-
-	// Final segment match (e.g., "cobra" matches "github.com/spf13/cobra")
-	// Also handles versioned paths like "go-git/v5" → match "go-git"
-	finalSegment := nameLower
-	if idx := strings.LastIndex(nameLower, "/"); idx >= 0 {
-		finalSegment = nameLower[idx+1:]
-	}
-	// Strip version suffix for comparison (v5, v2, etc.)
-	if strings.HasPrefix(finalSegment, "v") && len(finalSegment) <= 3 {
-		// This is a version segment like /v5, check the segment before it
-		if idx := strings.LastIndex(strings.TrimSuffix(nameLower, "/"+finalSegment), "/"); idx >= 0 {
-			finalSegment = strings.TrimSuffix(nameLower, "/"+finalSegment)[idx+1:]
-		} else {
-			finalSegment = strings.TrimSuffix(nameLower, "/"+finalSegment)
-		}
-	}
-	if finalSegment == queryLower {
-		return 2
-	}
-
-	// Substring match
-	return 1
+	return graphquery.NameMatchScore(name, queryLower)
 }
