@@ -20,6 +20,18 @@ import (
 // Command represents an actionable remediation step for resolving a vulnerability.
 // It can be either an executable shell command or a manual edit instruction.
 type Command struct {
+	// Package identifies the vulnerable package this command remediates.
+	Package string
+	// Version is the vulnerable package version when known.
+	Version string
+	// PURL is the vulnerable package URL when known.
+	PURL string
+	// TargetVersion is the recommended fixed version when known.
+	TargetVersion string
+	// TargetModule is the module/package path to migrate to for migration fixes.
+	TargetModule string
+	// Migration indicates the fix requires changing package/module identity.
+	Migration bool
 	// Manager identifies the package manager (e.g., "go", "npm", "pip", "gem").
 	Manager string
 	// Command is the shell command to execute or instruction to follow.
@@ -53,6 +65,7 @@ type packageUpgrade struct {
 	Recommended string
 	IsDirect    bool
 	Ecosystem   string
+	PURL        string
 	References  []dependencyv1.ManifestRef
 	Locations   []string
 	// Migration marks an upgrade that requires moving to a different module
@@ -120,6 +133,7 @@ func buildUpgradeRecommendations(cons []vulnerability.Consolidated) ([]packageUp
 				Recommended:  best,
 				IsDirect:     v.IsDirect,
 				Ecosystem:    v.Ecosystem,
+				PURL:         v.PURL,
 				References:   v.ManifestRefs,
 				Locations:    v.Locations,
 				Migration:    migration,
@@ -139,6 +153,9 @@ func buildUpgradeRecommendations(cons []vulnerability.Consolidated) ([]packageUp
 			// Merge references
 			existing.References = mergeManifestRefs(existing.References, v.ManifestRefs)
 			existing.Locations = mergeStrings(existing.Locations, v.Locations)
+			if existing.PURL == "" {
+				existing.PURL = v.PURL
+			}
 			// IsDirect if any vuln is direct
 			if v.IsDirect {
 				existing.IsDirect = true
@@ -286,8 +303,16 @@ func dedupeCommands(upgrades []packageUpgrade) []Command {
 			pathStr := strings.TrimSpace(ref.Path)
 			groups := uniqueSortedStrings(dependency.ManifestRefGroups(ref))
 			groupsKey := strings.Join(groups, ",")
+			manager := strings.TrimSpace(ref.Manager)
+			targetVersion := commandTargetVersion(manager, u.Recommended)
 			key := strings.Join([]string{
-				collections.NormalizeLower(ref.Manager),
+				collections.NormalizeLower(manager),
+				collections.NormalizeLower(u.Name),
+				strings.TrimSpace(u.Current),
+				strings.TrimSpace(u.PURL),
+				strings.TrimSpace(targetVersion),
+				strings.TrimSpace(u.TargetModule),
+				fmt.Sprintf("%t", u.Migration),
 				rec.command,
 				pathStr,
 				groupsKey,
@@ -297,19 +322,24 @@ func dedupeCommands(upgrades []packageUpgrade) []Command {
 			if !seen.Add(key) {
 				continue
 			}
-			manager := strings.TrimSpace(ref.Manager)
 			commands = append(commands, Command{
-				Manager:      manager,
-				managerRank:  ecosystem.ManagerRank(manager),
-				Command:      rec.command,
-				Args:         rec.args,
-				Path:         pathStr,
-				Groups:       groups,
-				Hint:         rec.hint,
-				FollowUp:     rec.followUp,
-				FollowUpArgs: rec.followUpArgs,
-				IsDirect:     u.IsDirect,
-				Executable:   rec.executable,
+				Package:       u.Name,
+				Version:       u.Current,
+				PURL:          u.PURL,
+				TargetVersion: targetVersion,
+				TargetModule:  u.TargetModule,
+				Migration:     u.Migration,
+				Manager:       manager,
+				managerRank:   ecosystem.ManagerRank(manager),
+				Command:       rec.command,
+				Args:          rec.args,
+				Path:          pathStr,
+				Groups:        groups,
+				Hint:          rec.hint,
+				FollowUp:      rec.followUp,
+				FollowUpArgs:  rec.followUpArgs,
+				IsDirect:      u.IsDirect,
+				Executable:    rec.executable,
 			})
 			// Only an executable `go get` warrants a follow-up `go mod tidy`;
 			// migration notes are manual and shouldn't imply tidy resolves them.
@@ -325,6 +355,7 @@ func dedupeCommands(upgrades []packageUpgrade) []Command {
 	switch {
 	case goManagerPresent && len(goPaths) == 0:
 		commands = append(commands, Command{
+			Package:     "go",
 			Manager:     "go",
 			managerRank: ecosystem.ManagerRank("go"),
 			Command:     "go mod tidy",
@@ -336,6 +367,7 @@ func dedupeCommands(upgrades []packageUpgrade) []Command {
 		slices.Sort(paths)
 		for _, path := range paths {
 			commands = append(commands, Command{
+				Package:     "go",
 				Manager:     "go",
 				managerRank: ecosystem.ManagerRank("go"),
 				Command:     "go mod tidy",
@@ -347,6 +379,13 @@ func dedupeCommands(upgrades []packageUpgrade) []Command {
 	}
 
 	return commands
+}
+
+func commandTargetVersion(manager, version string) string {
+	if strings.EqualFold(strings.TrimSpace(manager), "go") {
+		return ecosystem.Go.NormalizeVersion(version)
+	}
+	return version
 }
 
 // migrationCommand renders the remediation for a fix that lives on a different
@@ -364,7 +403,7 @@ func migrationCommand(targetModule, version string, isDirect bool) commandResult
 	if !isDirect {
 		return commandResult{
 			command:    "Upgrade the dependency that pulls this in (indirect — no in-place fix)",
-			hint:       "run with --with-graph to find the importer",
+			hint:       "use dependency graph context to find the direct dependency that pulls this in",
 			executable: false,
 		}
 	}
@@ -387,14 +426,16 @@ func buildGoToolchainCommand(version string) (Command, bool) {
 	}
 	cmd := fmt.Sprintf("go get go@%s", goVersion)
 	return Command{
-		Manager:     "go",
-		managerRank: ecosystem.ManagerRank("go"),
-		Command:     cmd,
-		Args:        []string{"go", "get", "go@" + goVersion},
-		Path:        "go.mod",
-		Hint:        "updates go directive",
-		IsDirect:    true, // Go toolchain is always a direct dependency (declared in go.mod)
-		Executable:  true,
+		Package:       "go",
+		TargetVersion: goVersion,
+		Manager:       "go",
+		managerRank:   ecosystem.ManagerRank("go"),
+		Command:       cmd,
+		Args:          []string{"go", "get", "go@" + goVersion},
+		Path:          "go.mod",
+		Hint:          "updates go directive",
+		IsDirect:      true, // Go toolchain is always a direct dependency (declared in go.mod)
+		Executable:    true,
 	}, true
 }
 
@@ -432,16 +473,18 @@ func stdlibCommands(version string, refs []dependencyv1.ManifestRef) []Command {
 			}
 			manager := strings.TrimSpace(ref.Manager)
 			cmds = append(cmds, Command{
-				Manager:      manager,
-				managerRank:  ecosystem.ManagerRank(manager),
-				Command:      rec.command,
-				Args:         rec.args,
-				Path:         ref.Path,
-				Hint:         rec.hint,
-				FollowUp:     rec.followUp,
-				FollowUpArgs: rec.followUpArgs,
-				IsDirect:     true,
-				Executable:   rec.executable,
+				Package:       "go",
+				TargetVersion: version,
+				Manager:       manager,
+				managerRank:   ecosystem.ManagerRank(manager),
+				Command:       rec.command,
+				Args:          rec.args,
+				Path:          ref.Path,
+				Hint:          rec.hint,
+				FollowUp:      rec.followUp,
+				FollowUpArgs:  rec.followUpArgs,
+				IsDirect:      true,
+				Executable:    rec.executable,
 			})
 		case "go":
 			sawGoMod = true

@@ -230,6 +230,7 @@ func runFixPlan(c *services.Clients, cmd *cobra.Command, args []string) error {
 		}
 		cons := vulnerability.Consolidate(resultOut.Findings, resultOut.Advisories)
 		commands, stdlib := remediation.CommandsFromConsolidated(cons)
+		commands = remediation.ApplyGuidance(commands, remediation.CLIGuidance())
 		fixResp = internalproto.BuildFixResponse(
 			scanResult.Target.DisplayPath,
 			"", // ref not stored in target
@@ -376,6 +377,7 @@ func buildFixFromReport(r io.Reader, reportPath string, ignoreUnfixed bool) (*fi
 	}
 	cons := vulnerability.Consolidate(resultOut.Findings, resultOut.Advisories)
 	commands, stdlib := remediation.CommandsFromConsolidated(cons)
+	commands = remediation.ApplyGuidance(commands, remediation.CLIGuidance())
 
 	displayPath := ""
 	commitHash := ""

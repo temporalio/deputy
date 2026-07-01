@@ -2,6 +2,7 @@ package remediation
 
 import (
 	"slices"
+	"strconv"
 	"strings"
 
 	"github.com/temporalio/deputy/internal/dependency/graph"
@@ -75,10 +76,16 @@ func EnrichWithGraph(cmds []Command, g *graph.Graph, cons []vulnerability.Consol
 			continue
 		}
 
-		// Find the consolidated vuln for this command's package
+		// Find the consolidated vulnerability for this command's package.
+		// Prefer structured command identity; fall back to command parsing for
+		// older callers that construct Command values by hand.
+		cmdPackage := strings.TrimSpace(cmd.Package)
+		if cmdPackage == "" {
+			cmdPackage = extractPackageName(cmd.Command)
+		}
 		var cv *vulnerability.Consolidated
 		for j := range cons {
-			if cons[j].Package == extractPackageName(cmd.Command) {
+			if cons[j].Package == cmdPackage {
 				cv = &cons[j]
 				break
 			}
@@ -202,12 +209,12 @@ func buildExplanation(info *PathInfo) string {
 	if info.PathCount == 1 {
 		sb.WriteString("1 path")
 	} else {
-		sb.WriteString(strings.Replace(string(rune(info.PathCount+'0')), "\x00", "", -1))
+		sb.WriteString(strconv.Itoa(info.PathCount))
 		sb.WriteString(" paths")
 	}
 
 	sb.WriteString(", depth ")
-	sb.WriteString(strings.Replace(string(rune(info.Depth+'0')), "\x00", "", -1))
+	sb.WriteString(strconv.Itoa(info.Depth))
 	sb.WriteString(")")
 
 	if len(info.DirectDependencies) == 1 {

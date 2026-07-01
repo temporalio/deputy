@@ -64,6 +64,20 @@ func TestBuildExplanation(t *testing.T) {
 			t.Errorf("expected empty explanation for nil, got %q", exp)
 		}
 	})
+
+	t.Run("multi digit counts", func(t *testing.T) {
+		info := &PathInfo{
+			VulnerablePackage:  "github.com/example/transitive",
+			PathCount:          12,
+			Depth:              10,
+			DirectDependencies: []string{"github.com/example/root"},
+		}
+		exp := buildExplanation(info)
+		want := "github.com/example/transitive is a transitive dependency (12 paths, depth 10). Update github.com/example/root to pull in the fix."
+		if exp != want {
+			t.Errorf("buildExplanation() = %q, want %q", exp, want)
+		}
+	})
 }
 
 func TestFindImpactedPackagesNil(t *testing.T) {
