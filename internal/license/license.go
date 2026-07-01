@@ -54,6 +54,7 @@ var (
 	hexpmBase     = "https://hex.pm"             // Erlang/Elixir Hex.pm
 	pypiBase      = "https://pypi.org"           // Python Package Index
 	githubAPIBase = "https://api.github.com"     // GitHub REST API
+	githubRawBase = "https://raw.githubusercontent.com"
 )
 
 const (
@@ -64,6 +65,11 @@ const (
 	// into memory when scanning for licenses. This prevents memory exhaustion
 	// from unexpectedly large packages.
 	maxModuleArchiveSize = 20 << 20 // 20 MB
+
+	// maxLicenseFileSize limits a single license file read into memory. License
+	// files are small; the cap guards against a misconfigured or adversarial
+	// host returning a huge body.
+	maxLicenseFileSize = 1 << 20 // 1 MB
 
 	// HTTP client timeout constants for license lookups.
 	licenseHTTPTimeout = 5 * time.Second  // general license fetches (short, best-effort)
@@ -434,28 +440,21 @@ func RemoteModuleLicenseScan(ctx context.Context, modulePath, version string) []
 		var ids []string
 		if strings.HasPrefix(modulePath, "github.com/") {
 			if parts := strings.Split(modulePath, "/"); len(parts) >= 3 {
-				// Try GitHub License API first (single fast request with SPDX ID)
-				if apiIDs := fetchLicenseFromGitHubAPI(ctx, parts[1], parts[2]); len(apiIDs) > 0 {
-					ids = apiIDs
-				} else if rawIDs, err := fetchLicensesFromGitHubRaw(ctx, parts[1], parts[2], version); err == nil && len(rawIDs) > 0 {
-					ids = rawIDs
-				} else {
+				if version == "" {
+					// The GitHub License API reports the repository default branch.
+					// It is only ref-accurate for unversioned/default-branch lookups.
+					if apiIDs := fetchLicenseFromGitHubAPI(ctx, parts[1], parts[2]); len(apiIDs) > 0 {
+						ids = apiIDs
+					}
+				}
+				if len(ids) == 0 && version != "" {
+					if rawIDs, err := fetchLicensesFromGitHubRaw(ctx, parts[1], parts[2], version); err == nil && len(rawIDs) > 0 {
+						ids = rawIDs
+					}
+				}
+				if len(ids) == 0 {
 					repoURL := fmt.Sprintf("https://github.com/%s/%s.git", parts[1], parts[2])
-					opts := &git.CloneOptions{URL: repoURL, Depth: 1, SingleBranch: true, Tags: git.NoTags}
-					if version != "" {
-						v := version
-						if !strings.HasPrefix(v, "v") {
-							v = "v" + v
-						}
-						opts.ReferenceName = plumbing.ReferenceName("refs/tags/" + v)
-					}
-					if tok := os.Getenv("GITHUB_TOKEN"); tok != "" {
-						opts.Auth = &githttp.BasicAuth{Username: "oauth2", Password: tok}
-					}
-					if src, err := repository.CloneInMemory(ctx, opts); err == nil {
-						defer src.Close()
-						ids = LocalRepoLicenseScan(src.Workspace())
-					}
+					ids = scanGitHubRepoLicensesByClone(ctx, repoURL, version)
 				}
 			}
 		}
@@ -474,6 +473,49 @@ func RemoteModuleLicenseScan(ctx context.Context, modulePath, version string) []
 		return slices.Clone(ids)
 	}
 	return nil
+}
+
+// scanGitHubRepoLicensesByClone clones a GitHub repository just far enough to
+// run local license detection. Versioned lookups only try tag refs so an
+// explicit tag miss cannot silently become a default-branch license result.
+func scanGitHubRepoLicensesByClone(ctx context.Context, repoURL, version string) []string {
+	if repoURL == "" || ctx.Err() != nil {
+		return nil
+	}
+	opts := &git.CloneOptions{URL: repoURL, Depth: 1, SingleBranch: true, Tags: git.NoTags}
+	if tok := os.Getenv("GITHUB_TOKEN"); tok != "" {
+		opts.Auth = &githttp.BasicAuth{Username: "oauth2", Password: tok}
+	}
+	if version == "" {
+		if src, err := repository.CloneInMemory(ctx, opts); err == nil {
+			defer src.Close()
+			return LocalRepoLicenseScan(src.Workspace())
+		}
+		return nil
+	}
+	for _, ref := range gitTagReferenceNames(version) {
+		opts.ReferenceName = ref
+		if src, err := repository.CloneInMemory(ctx, opts); err == nil {
+			defer src.Close()
+			return LocalRepoLicenseScan(src.Workspace())
+		}
+	}
+	return nil
+}
+
+// gitTagReferenceNames returns tag references worth trying for a GitHub clone
+// fallback. Commit SHAs are excluded because go-git's shallow clone path needs
+// a branch or tag reference; SHA-addressed license lookups are handled by the
+// raw-content path before clone fallback.
+func gitTagReferenceNames(version string) []plumbing.ReferenceName {
+	var refs []plumbing.ReferenceName
+	for _, ref := range githubLicenseRefCandidates(version) {
+		if isGitCommitSHARef(ref) {
+			continue
+		}
+		refs = append(refs, plumbing.ReferenceName("refs/tags/"+ref))
+	}
+	return refs
 }
 
 // LookupLicensesBestEffort queries ecosystem-specific registries or content to
@@ -611,14 +653,16 @@ func GoProxyLicenseScan(ctx context.Context, modulePath, version string) []strin
 	}
 	var ids []string
 	for _, f := range zr.File {
-		lower := strings.ToLower(f.Name)
+		// Match on the base name, not the full archive path: a path suffix
+		// match treats "github.com/foo/bar@v1/nolicense" as a LICENSE file.
+		lower := strings.ToLower(filepath.Base(f.Name))
 		for _, candidate := range defaultLicenseFilenames {
-			if strings.HasSuffix(lower, strings.ToLower(candidate)) {
+			if strings.ToLower(candidate) == lower || strings.HasSuffix(lower, strings.ToLower(candidate)) {
 				rc, err := f.Open()
 				if err != nil {
 					continue
 				}
-				content, _ := io.ReadAll(rc)
+				content, _ := io.ReadAll(io.LimitReader(rc, maxLicenseFileSize))
 				rc.Close()
 				ids = append(ids, DetectLicenseIDs(content)...)
 			}
@@ -1186,9 +1230,25 @@ func fetchLicenseFromGitHubAPI(ctx context.Context, owner, repo string) []string
 // License files are fetched in parallel with bounded concurrency to improve
 // performance while respecting GitHub rate limits.
 func fetchLicensesFromGitHubRaw(ctx context.Context, owner, repo, version string) ([]string, error) {
-	ref := deriveGitRef(version)
-	if ref == "" {
+	refs := githubLicenseRefCandidates(version)
+	if len(refs) == 0 {
 		return nil, fmt.Errorf("unable to derive git ref")
+	}
+	for _, ref := range refs {
+		ids, err := fetchLicensesFromGitHubRawRef(ctx, owner, repo, ref)
+		if err == nil && len(ids) > 0 {
+			return ids, nil
+		}
+	}
+	return nil, fmt.Errorf("no license files via raw")
+}
+
+// fetchLicensesFromGitHubRawRef scans common license filenames at one concrete
+// GitHub raw-content ref. It treats missing files and transient fetch failures
+// as non-fatal so callers can try the next candidate ref or fallback strategy.
+func fetchLicensesFromGitHubRawRef(ctx context.Context, owner, repo, ref string) ([]string, error) {
+	if owner == "" || repo == "" || ref == "" || ctx.Err() != nil {
+		return nil, fmt.Errorf("invalid github raw license request")
 	}
 	client := getGitHubHTTPClient()
 	token := strings.TrimSpace(os.Getenv("GITHUB_TOKEN"))
@@ -1206,7 +1266,7 @@ func fetchLicensesFromGitHubRaw(ctx context.Context, owner, repo, version string
 
 	for _, name := range defaultLicenseFilenames {
 		g.Go(func() error {
-			url := fmt.Sprintf("https://raw.githubusercontent.com/%s/%s/%s/%s", owner, repo, ref, name)
+			url := fmt.Sprintf("%s/%s/%s/%s/%s", strings.TrimRight(githubRawBase, "/"), owner, repo, ref, name)
 			req, err := nethttp.NewRequestWithContext(ctx, nethttp.MethodGet, url, nil)
 			if err != nil {
 				return nil // non-fatal, continue with other files
@@ -1227,7 +1287,7 @@ func fetchLicensesFromGitHubRaw(ctx context.Context, owner, repo, version string
 				drainAndClose(resp)
 				return nil
 			}
-			data, err := io.ReadAll(resp.Body)
+			data, err := io.ReadAll(io.LimitReader(resp.Body, maxLicenseFileSize))
 			resp.Body.Close()
 			if err != nil || len(data) == 0 {
 				return nil
@@ -1267,24 +1327,46 @@ func fetchLicensesFromGitHubRaw(ctx context.Context, owner, repo, version string
 	return out, nil
 }
 
-// deriveGitRef attempts to extract a usable git reference (commit hash or tag)
-// from a version string. It handles Go pseudo-versions and standard semantic
-// versions.
-func deriveGitRef(version string) string {
+// githubLicenseRefCandidates returns GitHub refs to probe for a repository
+// license lookup. It is intentionally scoped to GitHub-backed dependencies and
+// actions: other ecosystems should use their registry-specific version rules.
+//
+// Candidates are ordered from most precise to fallback. Commit SHAs and Go
+// pseudo-version commits are used verbatim; non-v-prefixed tag-like versions
+// try the common GitHub release tag form first, then the literal ref.
+func githubLicenseRefCandidates(version string) []string {
 	if version == "" {
-		return ""
+		return nil
 	}
-	v := version
+	v := strings.TrimSpace(version)
 	if idx := strings.Index(v, "+"); idx != -1 {
 		v = v[:idx]
 	}
 	if commit := pseudoVersionCommit(v); commit != "" {
-		return commit
+		return []string{commit}
+	}
+	if isGitCommitSHARef(v) {
+		return []string{strings.ToLower(v)}
 	}
 	if !strings.HasPrefix(v, "v") {
-		v = "v" + v
+		return []string{"v" + v, v}
 	}
-	return v
+	return []string{v}
+}
+
+// isGitCommitSHARef reports whether version is a short or full hexadecimal Git
+// commit SHA suitable for use as a GitHub raw-content ref.
+func isGitCommitSHARef(version string) bool {
+	v := strings.ToLower(strings.TrimSpace(version))
+	if len(v) < 7 || len(v) > 40 {
+		return false
+	}
+	for _, r := range v {
+		if (r < '0' || r > '9') && (r < 'a' || r > 'f') {
+			return false
+		}
+	}
+	return true
 }
 
 // pseudoVersionCommit extracts the commit hash from a Go pseudo-version string

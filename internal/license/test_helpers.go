@@ -6,6 +6,7 @@ import (
 
 	"github.com/temporalio/deputy/internal/cache/disk"
 	"github.com/temporalio/deputy/internal/cache/memory"
+	"golang.org/x/sync/singleflight"
 )
 
 // WithLicenseHTTPClient overrides the HTTP client used for remote license lookups during tests.
@@ -34,6 +35,10 @@ func ResetLicenseCachesForTest(t *testing.T) {
 	t.Cleanup(restore)
 	registryLicenseMemo = memory.NewTTLCache[string, []string](licenseMemoMaxItems, licenseMemoTTL)
 	remoteLicenseMemo = memory.NewTTLCache[string, []string](licenseMemoMaxItems, licenseMemoTTL)
+	// Reset the request-coalescing groups too, so an in-flight result from a
+	// prior test iteration can't be delivered into a freshly cleared cache.
+	remoteLicenseGroup = singleflight.Group{}
+	registryLicenseGroup = singleflight.Group{}
 }
 
 // getGitHubHTTPClientForTest returns the current GitHub HTTP client for testing.

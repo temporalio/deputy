@@ -12,6 +12,7 @@ import (
 	"net/http/httptest"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
 
 	pb "deps.dev/api/v3"
@@ -21,6 +22,26 @@ type countingDepsClientEcosystem struct {
 	calls int
 	sys   pb.System
 }
+
+const testMITLicenseText = `MIT License
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.`
 
 func (c *countingDepsClientEcosystem) GetVersion(ctx context.Context, req *pb.GetVersionRequest) (*pb.Version, error) {
 	c.calls++
@@ -356,6 +377,221 @@ func TestLookupLicensesBestEffort_GitHubWithoutVersion(t *testing.T) {
 	}
 }
 
+func TestRemoteModuleLicenseScan_GitHubVersionedUsesRequestedRef(t *testing.T) {
+	resetLicenseTestState(t)
+
+	const version = "fad22eb3fa582b7357fc0ea48af6645851b884fd"
+	var mu sync.Mutex
+	var sawRawRef bool
+	var sawAPI bool
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case strings.Contains(r.URL.Path, "/repos/owner/repo/license"):
+			mu.Lock()
+			sawAPI = true
+			mu.Unlock()
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"license": map[string]any{
+					"key":     "apache-2.0",
+					"spdx_id": "Apache-2.0",
+					"name":    "Apache License 2.0",
+				},
+			})
+		case r.URL.Path == "/owner/repo/"+version+"/LICENSE":
+			mu.Lock()
+			sawRawRef = true
+			mu.Unlock()
+			_, _ = w.Write([]byte(testMITLicenseText))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	restoreClient := swapGitHubHTTPClient(server)
+	defer restoreClient()
+	restoreHTTP := WithLicenseHTTPClient(server.Client())
+	defer restoreHTTP()
+	restoreBases := WithLicenseEndpoints(server.URL, cratesBase, packagistBase, pubBase, cocoapodsBase, hexpmBase)
+	defer restoreBases()
+
+	got := RemoteModuleLicenseScan(context.Background(), "github.com/owner/repo", version)
+	if want := []string{"MIT"}; !slices.Equal(got, want) {
+		t.Fatalf("expected requested-ref license %v, got %v", want, got)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if !sawRawRef {
+		t.Fatal("expected raw license lookup at the requested ref")
+	}
+	if sawAPI {
+		t.Fatal("versioned GitHub license lookup used default-branch License API")
+	}
+}
+
+func TestRemoteModuleLicenseScan_GitHubVersionedDoesNotFallBackToDefaultBranchLicense(t *testing.T) {
+	resetLicenseTestState(t)
+
+	const version = "fad22eb3fa582b7357fc0ea48af6645851b884fd"
+	var mu sync.Mutex
+	var sawAPI bool
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.Contains(r.URL.Path, "/repos/owner/repo/license") {
+			mu.Lock()
+			sawAPI = true
+			mu.Unlock()
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"license": map[string]any{
+					"key":     "mit",
+					"spdx_id": "MIT",
+					"name":    "MIT License",
+				},
+			})
+			return
+		}
+		http.NotFound(w, r)
+	}))
+	defer server.Close()
+
+	restoreClient := swapGitHubHTTPClient(server)
+	defer restoreClient()
+	restoreHTTP := WithLicenseHTTPClient(server.Client())
+	defer restoreHTTP()
+	restoreBases := WithLicenseEndpoints(server.URL, cratesBase, packagistBase, pubBase, cocoapodsBase, hexpmBase)
+	defer restoreBases()
+
+	got := RemoteModuleLicenseScan(context.Background(), "github.com/owner/repo", version)
+	if len(got) != 0 {
+		t.Fatalf("expected no license when requested ref has no license file, got %v", got)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if sawAPI {
+		t.Fatal("versioned GitHub license lookup used default-branch License API")
+	}
+}
+
+func TestFetchLicensesFromGitHubRawUsesSHAWithoutVPrefix(t *testing.T) {
+	resetLicenseTestState(t)
+
+	const sha = "fad22eb3fa582b7357fc0ea48af6645851b884fd"
+	var mu sync.Mutex
+	var paths []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		paths = append(paths, r.URL.Path)
+		mu.Unlock()
+		if r.URL.Path == "/owner/repo/"+sha+"/LICENSE" {
+			_, _ = w.Write([]byte(testMITLicenseText))
+			return
+		}
+		http.NotFound(w, r)
+	}))
+	defer server.Close()
+
+	restoreClient := swapGitHubHTTPClient(server)
+	defer restoreClient()
+
+	got, err := fetchLicensesFromGitHubRaw(context.Background(), "owner", "repo", sha)
+	if err != nil {
+		t.Fatalf("fetchLicensesFromGitHubRaw returned error: %v", err)
+	}
+	if want := []string{"MIT"}; !slices.Equal(got, want) {
+		t.Fatalf("expected %v, got %v", want, got)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	for _, path := range paths {
+		if strings.Contains(path, "/v"+sha+"/") {
+			t.Fatalf("raw lookup incorrectly prefixed SHA with v: %v", paths)
+		}
+	}
+}
+
+func TestGitHubLicenseRefCandidates(t *testing.T) {
+	tests := []struct {
+		name    string
+		version string
+		want    []string
+	}{
+		{
+			name:    "semver_without_v",
+			version: "1.2.3",
+			want:    []string{"v1.2.3", "1.2.3"},
+		},
+		{
+			name:    "semver_with_v",
+			version: "v1.2.3",
+			want:    []string{"v1.2.3"},
+		},
+		{
+			name:    "commit_sha",
+			version: "FAD22EB3FA582B7357FC0EA48AF6645851B884FD",
+			want:    []string{"fad22eb3fa582b7357fc0ea48af6645851b884fd"},
+		},
+		{
+			name:    "go_pseudo_version",
+			version: "v0.0.0-20200622213623-75b288015ac9",
+			want:    []string{"75b288015ac9"},
+		},
+		{
+			name:    "build_metadata_trimmed",
+			version: "v1.2.3+incompatible",
+			want:    []string{"v1.2.3"},
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := githubLicenseRefCandidates(tc.version); !slices.Equal(got, tc.want) {
+				t.Fatalf("githubLicenseRefCandidates(%q) = %v, want %v", tc.version, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestLookupLicensesBestEffort_GitHubRefCandidatesAreGitHubOnly(t *testing.T) {
+	resetLicenseTestState(t)
+
+	const shaLikeVersion = "fad22eb3fa582b7357fc0ea48af6645851b884fd"
+	var mu sync.Mutex
+	var sawGitHubLookup bool
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		if strings.HasPrefix(r.URL.Path, "/repos/") || strings.HasPrefix(r.URL.Path, "/owner/") {
+			sawGitHubLookup = true
+		}
+		mu.Unlock()
+		if r.URL.Path == "/pypi/requests/"+shaLikeVersion+"/json" {
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"info": map[string]any{
+					"license_expression": "Apache-2.0",
+				},
+			})
+			return
+		}
+		http.NotFound(w, r)
+	}))
+	defer server.Close()
+
+	restoreClient := swapGitHubHTTPClient(server)
+	defer restoreClient()
+	restoreHTTP := WithLicenseHTTPClient(server.Client())
+	defer restoreHTTP()
+	oldPyPIBase := pypiBase
+	pypiBase = server.URL
+	defer func() { pypiBase = oldPyPIBase }()
+
+	got := LookupLicensesBestEffort(context.Background(), "pypi", "requests", shaLikeVersion)
+	if want := []string{"Apache-2.0"}; !slices.Equal(got, want) {
+		t.Fatalf("expected PyPI license %v, got %v", want, got)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if sawGitHubLookup {
+		t.Fatal("non-GitHub ecosystem used GitHub ref-candidate lookup")
+	}
+}
+
 func TestLookupLicensesBestEffort_PyPI(t *testing.T) {
 	resetLicenseTestState(t)
 
@@ -453,7 +689,7 @@ func TestLooksLikeSPDX(t *testing.T) {
 		{"MIT AND Apache-2.0", true},
 		{"MIT OR Apache-2.0", true},
 		{"", false},
-		{"The MIT License", true},        // contains "MIT" - permissive heuristic
+		{"The MIT License", true},            // contains "MIT" - permissive heuristic
 		{"Apache License Version 2.0", true}, // contains "Apache"
 		{"See LICENSE file", false},
 		{"UNKNOWN", false},
@@ -566,10 +802,13 @@ func swapGitHubHTTPClient(server *httptest.Server) func() {
 	_ = getGitHubHTTPClient()
 	origClient := getGitHubHTTPClientForTest()
 	origBase := githubAPIBase
+	origRawBase := githubRawBase
 	setGitHubHTTPClientForTest(server.Client())
 	githubAPIBase = server.URL
+	githubRawBase = server.URL
 	return func() {
 		setGitHubHTTPClientForTest(origClient)
 		githubAPIBase = origBase
+		githubRawBase = origRawBase
 	}
 }
