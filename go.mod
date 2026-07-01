@@ -39,6 +39,7 @@ require (
 	github.com/picatz/jose v0.0.0-20250816152409-7521c7f65f1b
 	github.com/picatz/openai v0.0.0-20251126013453-02ace0a229c7
 	github.com/pjbgf/sha1cd v0.6.0
+	github.com/pmezard/go-difflib v1.0.1-0.20181226105442-5d4384ee4fb2
 	github.com/protobom/protobom v0.5.4
 	github.com/sourcegraph/go-lsp v0.0.0-20240223163137-f80c5dd31dfd
 	github.com/sourcegraph/jsonrpc2 v0.2.1
@@ -115,7 +116,6 @@ require (
 	github.com/muesli/reflow v0.3.0 // indirect
 	github.com/opencontainers/runtime-spec v1.3.0 // indirect
 	github.com/opencontainers/selinux v1.14.1 // indirect
-	github.com/pmezard/go-difflib v1.0.1-0.20181226105442-5d4384ee4fb2 // indirect
 	github.com/segmentio/asm v1.2.1 // indirect
 	github.com/segmentio/encoding v0.5.4 // indirect
 	github.com/stoewer/go-strcase v1.3.1 // indirect

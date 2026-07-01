@@ -4,6 +4,10 @@
 // preventing tag-repointing and version-substitution attacks. The package
 // provides a pluggable [Strategy] interface where ecosystem-specific
 // implementations handle discovery, resolution, verification, and rewriting.
+// Pin and PinUpdate reports include scoped changed-file metadata and a unified
+// patch generated from only the files that Deputy successfully pinned or
+// updated. Callers should use those fields instead of a repository-wide git
+// diff when applying or forwarding pin-mode changes.
 //
 // # Supported ecosystems
 //
@@ -16,6 +20,11 @@
 //   - [github.com/temporalio/deputy/internal/pin/container] — appends sha256 digest
 //     pins to Dockerfile FROM statements, workflow container/services fields,
 //     and docker:// uses. Resolution uses OCI registry HEAD requests.
+//
+//   - [github.com/temporalio/deputy/internal/pin/mise] — replaces fuzzy tool
+//     version selectors in mise.toml-family configs and asdf .tool-versions
+//     files with exact, reproducible versions where Deputy can resolve them
+//     natively or through an explicitly configured mise fallback.
 //
 // # Future ecosystems
 //

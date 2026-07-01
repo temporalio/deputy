@@ -1,17 +1,23 @@
 package pin
 
 import (
+	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"log/slog"
+	"maps"
 	"os"
 	"regexp"
+	"slices"
 	"strings"
 	"sync"
 
 	"github.com/gobwas/glob"
 	scalibrfs "github.com/google/osv-scalibr/fs"
+	"github.com/pmezard/go-difflib/difflib"
 )
 
 // Ref is a discovered dependency reference that may be pinnable.
@@ -91,8 +97,10 @@ type Result struct {
 
 // Report aggregates all pin results.
 type Report struct {
-	Results []Result `json:"results"`
-	Stats   Stats    `json:"stats"`
+	Results      []Result `json:"results"`
+	Stats        Stats    `json:"stats"`
+	ChangedFiles []string `json:"changedFiles,omitempty"`
+	Patch        string   `json:"patch,omitempty"`
 }
 
 // Stats summarizes the pin operation outcomes.
@@ -101,6 +109,7 @@ type Stats struct {
 	Pinned        int `json:"pinned"`
 	AlreadyPinned int `json:"alreadyPinned"`
 	Updated       int `json:"updated,omitempty"`
+	FilesChanged  int `json:"filesChanged,omitempty"`
 	Unpinned      int `json:"unpinned,omitempty"`
 	Skipped       int `json:"skipped"`
 	Errors        int `json:"errors"`
@@ -279,6 +288,7 @@ func Pin(ctx context.Context, root *os.Root, opts Options, strategies ...Strateg
 	}
 
 	report := &Report{}
+	tracker := newMutationTracker(root)
 
 	for _, strategy := range strategies {
 		defer closeStrategy(ctx, strategy)
@@ -292,12 +302,17 @@ func Pin(ctx context.Context, root *os.Root, opts Options, strategies ...Strateg
 
 		// Write updates unless dry-run.
 		if !opts.DryRun {
-			if err := writeStrategyUpdates(strategy, root, results); err != nil {
+			if err := writeStrategyUpdates(strategy, root, results, tracker); err != nil {
 				return report, fmt.Errorf("writing %s updates: %w", strategy.Ecosystem(), err)
 			}
 		}
 	}
 
+	if !opts.DryRun {
+		if err := tracker.finish(report); err != nil {
+			return report, fmt.Errorf("finalizing patch: %w", err)
+		}
+	}
 	computeStats(report)
 	return report, nil
 }
@@ -448,8 +463,10 @@ func appendReason(existing, add string) string {
 }
 
 // writeStrategyUpdates groups pinned results by file and calls the strategy's
-// Rewrite method.
-func writeStrategyUpdates(strategy Strategy, root *os.Root, results []Result) error {
+// Rewrite method. The tracker captures only the files Deputy intentionally
+// rewrites, so downstream patch consumers do not need to diff the whole
+// worktree and accidentally include unrelated checkout churn.
+func writeStrategyUpdates(strategy Strategy, root *os.Root, results []Result, tracker *mutationTracker) error {
 	fileUpdates := map[string][]Update{}
 	for _, r := range results {
 		if r.Status != StatusPinned && r.Status != StatusUpdated {
@@ -464,6 +481,9 @@ func writeStrategyUpdates(strategy Strategy, root *os.Root, results []Result) er
 	}
 
 	for file, updates := range fileUpdates {
+		if err := tracker.capture(file); err != nil {
+			return fmt.Errorf("capturing %s: %w", file, err)
+		}
 		if err := strategy.Rewrite(root, file, updates); err != nil {
 			return fmt.Errorf("rewriting %s: %w", file, err)
 		}
@@ -658,6 +678,7 @@ func PinUpdate(ctx context.Context, root *os.Root, opts Options, strategies ...S
 	}
 
 	report := &Report{}
+	tracker := newMutationTracker(root)
 
 	for _, strategy := range strategies {
 		defer closeStrategy(ctx, strategy)
@@ -670,14 +691,147 @@ func PinUpdate(ctx context.Context, root *os.Root, opts Options, strategies ...S
 		report.Results = append(report.Results, results...)
 
 		if !opts.DryRun {
-			if err := writeStrategyUpdates(strategy, root, results); err != nil {
+			if err := writeStrategyUpdates(strategy, root, results, tracker); err != nil {
 				return report, fmt.Errorf("writing %s updates: %w", strategy.Ecosystem(), err)
 			}
 		}
 	}
 
+	if !opts.DryRun {
+		if err := tracker.finish(report); err != nil {
+			return report, fmt.Errorf("finalizing patch: %w", err)
+		}
+	}
 	computeStats(report)
 	return report, nil
+}
+
+type fileSnapshot struct {
+	content []byte
+	exists  bool
+}
+
+type mutationTracker struct {
+	root   *os.Root
+	before map[string]fileSnapshot
+}
+
+func newMutationTracker(root *os.Root) *mutationTracker {
+	return &mutationTracker{
+		root:   root,
+		before: map[string]fileSnapshot{},
+	}
+}
+
+func (t *mutationTracker) capture(path string) error {
+	if _, ok := t.before[path]; ok {
+		return nil
+	}
+	snapshot, err := t.read(path)
+	if err != nil {
+		return err
+	}
+	t.before[path] = snapshot
+	return nil
+}
+
+func (t *mutationTracker) finish(report *Report) error {
+	if len(t.before) == 0 {
+		return nil
+	}
+
+	var patch strings.Builder
+	for _, path := range slices.Sorted(maps.Keys(t.before)) {
+		before := t.before[path]
+		after, err := t.read(path)
+		if err != nil {
+			return fmt.Errorf("reading rewritten %s: %w", path, err)
+		}
+		if before.exists == after.exists && bytes.Equal(before.content, after.content) {
+			continue
+		}
+
+		report.ChangedFiles = append(report.ChangedFiles, path)
+		filePatch, err := unifiedPatch(path, before, after)
+		if err != nil {
+			return fmt.Errorf("generating patch for %s: %w", path, err)
+		}
+		patch.WriteString(filePatch)
+	}
+	report.Patch = patch.String()
+	return nil
+}
+
+func (t *mutationTracker) read(path string) (fileSnapshot, error) {
+	content, err := fs.ReadFile(t.root.FS(), path)
+	if err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return fileSnapshot{}, nil
+		}
+		return fileSnapshot{}, err
+	}
+	return fileSnapshot{content: content, exists: true}, nil
+}
+
+func unifiedPatch(path string, before, after fileSnapshot) (string, error) {
+	// A traversal path must never reach the patch output. os.Root already
+	// blocks the underlying read, but refuse defensively so a malformed
+	// Strategy.Discover cannot emit a header referencing files outside the root.
+	if !fs.ValidPath(path) {
+		return "", fmt.Errorf("refusing to generate patch for unsafe path %q", path)
+	}
+
+	fromFile, toFile := "a/"+path, "b/"+path
+	if !before.exists {
+		fromFile = "/dev/null"
+	}
+	if !after.exists {
+		toFile = "/dev/null"
+	}
+
+	diff, err := difflib.GetUnifiedDiffString(difflib.UnifiedDiff{
+		A:        splitPatchLines(before.content),
+		B:        splitPatchLines(after.content),
+		FromFile: fromFile,
+		ToFile:   toFile,
+		Context:  3,
+	})
+	if err != nil {
+		return "", err
+	}
+	if diff == "" {
+		return "", nil
+	}
+
+	var header string
+	switch {
+	case !before.exists:
+		header = fmt.Sprintf("diff --git a/%[1]s b/%[1]s\nnew file mode 100644\n", path)
+	case !after.exists:
+		header = fmt.Sprintf("diff --git a/%[1]s b/%[1]s\ndeleted file mode 100644\n", path)
+	default:
+		header = fmt.Sprintf("diff --git a/%[1]s b/%[1]s\n", path)
+	}
+	return header + diff, nil
+}
+
+// splitPatchLines splits file content into the line slice difflib expects.
+// A final line lacking a trailing newline is annotated with git's
+// "\ No newline at end of file" marker; without it difflib concatenates the
+// last "before" line with the first "after" line, producing a patch that
+// git apply rejects as corrupt.
+func splitPatchLines(content []byte) []string {
+	if len(content) == 0 {
+		return nil
+	}
+	lines := strings.SplitAfter(string(content), "\n")
+	if lines[len(lines)-1] == "" {
+		lines = lines[:len(lines)-1]
+	}
+	if last := len(lines) - 1; last >= 0 && !strings.HasSuffix(lines[last], "\n") {
+		lines[last] += "\n\\ No newline at end of file\n"
+	}
+	return lines
 }
 
 // processUpdateRefs handles update resolution for a set of refs using
@@ -826,6 +980,7 @@ func rootFS(root *os.Root) (scalibrfs.FS, error) {
 // computeStats tallies result statuses into the report's Stats.
 func computeStats(report *Report) {
 	report.Stats = Stats{}
+	report.Stats.FilesChanged = len(report.ChangedFiles)
 	for _, r := range report.Results {
 		report.Stats.Total++
 		switch r.Status {
