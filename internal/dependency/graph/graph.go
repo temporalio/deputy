@@ -231,6 +231,9 @@ func FromInventory(pkgs []*extractor.Package, direct map[string]bool) *Graph {
 		if purlObj == nil {
 			continue
 		}
+		if purlObj.Type == "golang" && compare.IsRelativePathModule(goPackageModulePath(pkg, purlObj.Namespace, purlObj.Name)) {
+			continue
+		}
 		purl := purlObj.String()
 		if purl == "" {
 			continue
@@ -248,14 +251,7 @@ func FromInventory(pkgs []*extractor.Package, direct map[string]bool) *Graph {
 			// but "foo/loader" as indirect, "foo/loader" should be indirect.
 			if purlObj.Type == "golang" {
 				// Reconstruct module path from PURL namespace + name
-				modulePath := pkg.Name
-				if modulePath == "" {
-					if purlObj.Namespace != "" {
-						modulePath = purlObj.Namespace + "/" + purlObj.Name
-					} else {
-						modulePath = purlObj.Name
-					}
-				}
+				modulePath := goPackageModulePath(pkg, purlObj.Namespace, purlObj.Name)
 				// First check exact module path (handles submodules correctly)
 				if val, exists := direct[modulePath]; exists {
 					isDirect = val
@@ -301,6 +297,16 @@ func FromInventory(pkgs []*extractor.Package, direct map[string]bool) *Graph {
 	}
 
 	return g
+}
+
+func goPackageModulePath(pkg *extractor.Package, namespace, name string) string {
+	if pkg != nil && pkg.Name != "" {
+		return pkg.Name
+	}
+	if namespace != "" {
+		return namespace + "/" + name
+	}
+	return name
 }
 
 // AddNode adds a node to the graph. If a node with the same PURL exists, it is replaced.

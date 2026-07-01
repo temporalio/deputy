@@ -4,18 +4,19 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"path"
 	"slices"
 	"strings"
 
 	"connectrpc.com/connect"
 	"github.com/charmbracelet/lipgloss"
 	"google.golang.org/protobuf/encoding/protojson"
+	goproto "google.golang.org/protobuf/proto"
 
 	"github.com/spf13/cobra"
 	graphv1 "github.com/temporalio/deputy/gen/deputy/graph/v1"
 	"github.com/temporalio/deputy/internal/cli/flags"
 	"github.com/temporalio/deputy/internal/dependency/graph"
+	"github.com/temporalio/deputy/internal/dependency/graphquery"
 	"github.com/temporalio/deputy/internal/services"
 	ui "github.com/temporalio/deputy/internal/ui"
 )
@@ -47,6 +48,7 @@ func AddGraphCommand(root *cobra.Command, c *services.Clients) {
 		statsOnly            bool
 		extended             bool
 		onlyDeclared         bool
+		resolveTransitives   bool
 	)
 
 	cmd := &cobra.Command{
@@ -157,8 +159,8 @@ OUTPUT FORMATS:
 					Ecosystems:   normalizeEcosystems(ecos),
 					ExcludePaths: excludePathsFromCmd(cmd),
 					Ref:          ref,
-					UseProxy:     true,
-					UseGit:       true,
+					UseProxy:     resolveTransitives,
+					UseGit:       resolveTransitives,
 					Extended:     extended,
 				},
 			}
@@ -262,6 +264,7 @@ OUTPUT FORMATS:
 	cmd.Flags().StringVar(&focusPkg, "focus", "", "Focus on a specific package (shows its subgraph)")
 	cmd.Flags().BoolVar(&extended, "extended", false, "Include full module graph (declared but unused dependencies)")
 	cmd.Flags().BoolVar(&onlyDeclared, "declared", false, "Show only declared-but-unused dependencies (requires --extended)")
+	cmd.Flags().BoolVar(&resolveTransitives, "resolve-transitives", false, "Use package registry, deps.dev, and Git lookups for more precise transitive graph edges")
 	cmd.Flags().BoolVar(&statsOnly, "stats", false, "Show only graph statistics")
 
 	// Add subcommands
@@ -274,11 +277,13 @@ OUTPUT FORMATS:
 // addGraphWhyCommand adds the "graph why" subcommand.
 func addGraphWhyCommand(parent *cobra.Command, c *services.Clients) {
 	var (
-		ref      string
-		ecos     []string
-		all      bool
-		jsonOut  bool
-		listOnly bool
+		ref                string
+		ecos               []string
+		all                bool
+		jsonOut            bool
+		listOnly           bool
+		resolveTransitives bool
+		extended           bool
 	)
 
 	cmd := &cobra.Command{
@@ -289,7 +294,11 @@ func addGraphWhyCommand(parent *cobra.Command, c *services.Clients) {
 This command traces the dependency chain from your direct dependencies to
 the specified package, answering "why is X in my dependencies?"
 
-By default, shows only the shortest path. Use --all to see all paths.
+The package query accepts a package name, name@version, glob pattern, or PURL.
+Use PURLs from scan/list output for exact package identity.
+
+By default, text output shows up to five shortest path examples. Use --all to
+show every resolved path. JSON output includes every resolved path.
 Use --list to see all packages matching your query without path analysis.
 
 Similar to 'go mod why' but works across all ecosystems.`,
@@ -299,7 +308,10 @@ Similar to 'go mod why' but works across all ecosystems.`,
   # Why is a specific version included?
   deputy graph why lodash@4.17.21
 
-  # Show all dependency paths (not just shortest)
+  # Trace an exact PURL emitted by scan/list output
+  deputy graph why pkg:golang/github.com/docker/docker@28.5.2%2Bincompatible
+
+  # Show every resolved dependency path in text output
   deputy graph why lodash --all
 
   # List all packages matching a query (no path analysis)
@@ -333,8 +345,9 @@ Similar to 'go mod why' but works across all ecosystems.`,
 					Ecosystems:   normalizeEcosystems(ecos),
 					ExcludePaths: excludePathsFromCmd(cmd),
 					Ref:          ref,
-					UseProxy:     true,
-					UseGit:       true,
+					UseProxy:     resolveTransitives,
+					UseGit:       resolveTransitives,
+					Extended:     extended,
 				},
 			}
 
@@ -385,7 +398,7 @@ Similar to 'go mod why' but works across all ecosystems.`,
 
 			// JSON output mode
 			if jsonOut {
-				return writeWhyJSON(w, g, matches)
+				return writeWhyJSON(w, g, matches, resolveTransitives, extended)
 			}
 
 			// Text output - show paths for ALL matching packages (exploratory mode)
@@ -396,9 +409,11 @@ Similar to 'go mod why' but works across all ecosystems.`,
 	cmd.Flags().StringVar(&ref, "ref", "HEAD", "Git reference (commit, tag, branch)")
 	cmd.Flags().StringSliceVar(&ecos, "ecosystems", []string{"all"}, "Ecosystems to include")
 	addExcludePathFlag(cmd)
-	cmd.Flags().BoolVarP(&all, "all", "a", false, "Show all dependency paths (not just shortest)")
+	cmd.Flags().BoolVarP(&all, "all", "a", false, "Show every resolved dependency path in text output")
 	cmd.Flags().BoolVar(&jsonOut, "json", false, "Output as JSON")
 	cmd.Flags().BoolVarP(&listOnly, "list", "l", false, "List all matching packages (no path analysis)")
+	cmd.Flags().BoolVar(&resolveTransitives, "resolve-transitives", false, "Use package registry, deps.dev, and Git lookups for more precise transitive graph edges")
+	cmd.Flags().BoolVar(&extended, "extended", false, "Include extended graph metadata such as Go import status")
 
 	parent.AddCommand(cmd)
 }
@@ -888,47 +903,15 @@ func isGoStdlibPackage(query string) bool {
 }
 
 // findMatchingNodes finds nodes matching the query pattern.
-// Supports glob patterns via path.Match or simple substring matching.
-// Results are sorted with best matches first: exact matches, then final segment
-// matches, then substring matches, all sorted alphabetically within each tier.
+// Supports package names, name@version, glob patterns, and PURLs.
 //
 // Examples:
 //   - "cobra" matches any package containing "cobra", prefers github.com/spf13/cobra
 //   - "*/cobra" matches packages ending with /cobra
 //   - "spf13/*" matches all packages under spf13
+//   - "pkg:golang/github.com/spf13/cobra@1.10.0" matches by PURL identity
 func findMatchingNodes(g *graph.Graph, query string) []*graph.Node {
-	queryLower := strings.ToLower(query)
-	isGlob := strings.ContainsAny(query, "*?[")
-
-	var matches []*graph.Node
-
-	for node := range g.Nodes() {
-		nameLower := strings.ToLower(node.Name)
-
-		if isGlob {
-			// Use path.Match for glob patterns
-			if matched, _ := path.Match(queryLower, nameLower); matched {
-				matches = append(matches, node)
-			}
-		} else {
-			// Simple substring matching - case insensitive
-			if strings.Contains(nameLower, queryLower) {
-				matches = append(matches, node)
-			}
-		}
-	}
-
-	// Sort by match quality: exact > final segment > substring, then alphabetically
-	slices.SortFunc(matches, func(a, b *graph.Node) int {
-		scoreA := matchScore(a.Name, queryLower)
-		scoreB := matchScore(b.Name, queryLower)
-		if scoreA != scoreB {
-			return scoreB - scoreA // Higher score first
-		}
-		return strings.Compare(a.Name, b.Name)
-	})
-
-	return matches
+	return graphquery.FindMatchingNodes(g, query)
 }
 
 // matchScore returns a quality score for how well a package name matches a query.
@@ -937,44 +920,13 @@ func findMatchingNodes(g *graph.Graph, query string) []*graph.Node {
 //   - 2: final segment match (query matches the last path component)
 //   - 1: substring match
 func matchScore(name, queryLower string) int {
-	nameLower := strings.ToLower(name)
-
-	// Exact match
-	if nameLower == queryLower {
-		return 3
-	}
-
-	// Final segment match (e.g., "cobra" matches "github.com/spf13/cobra")
-	// Also handles versioned paths like "go-git/v5" → match "go-git"
-	finalSegment := nameLower
-	if idx := strings.LastIndex(nameLower, "/"); idx >= 0 {
-		finalSegment = nameLower[idx+1:]
-	}
-	// Strip version suffix for comparison (v5, v2, etc.)
-	if strings.HasPrefix(finalSegment, "v") && len(finalSegment) <= 3 {
-		// This is a version segment like /v5, check the segment before it
-		if idx := strings.LastIndex(strings.TrimSuffix(nameLower, "/"+finalSegment), "/"); idx >= 0 {
-			finalSegment = strings.TrimSuffix(nameLower, "/"+finalSegment)[idx+1:]
-		} else {
-			finalSegment = strings.TrimSuffix(nameLower, "/"+finalSegment)
-		}
-	}
-	if finalSegment == queryLower {
-		return 2
-	}
-
-	// Substring match
-	return 1
+	return graphquery.NameMatchScore(name, queryLower)
 }
 
 // findBestMatchingNode finds the single best matching node for a query.
 // Used by commands that expect a single result (like "needs").
 func findBestMatchingNode(g *graph.Graph, query string) *graph.Node {
-	matches := findMatchingNodes(g, query)
-	if len(matches) == 0 {
-		return nil
-	}
-	return matches[0]
+	return graphquery.FindBestMatchingNode(g, query)
 }
 
 // deduplicatePaths removes paths that are effectively duplicates
@@ -1001,13 +953,14 @@ func deduplicatePaths(paths []graph.Path) []graph.Path {
 }
 
 // writeWhyJSON outputs the why information as JSON using proto types.
-func writeWhyJSON(w io.Writer, g *graph.Graph, matches []*graph.Node) error {
+func writeWhyJSON(w io.Writer, g *graph.Graph, matches []*graph.Node, resolveTransitives, extended bool) error {
 	// Build a list of WhyDependencyResponse protos for each match
 	var results []*graphv1.WhyDependencyResponse
 	for _, match := range matches {
 		resp := &graphv1.WhyDependencyResponse{
-			Dependency: match.Purl,
-			Found:      true,
+			Dependency:     match.Purl,
+			Found:          true,
+			DependencyNode: match,
 		}
 
 		paths := g.PathsTo(match.Purl)
@@ -1023,6 +976,9 @@ func writeWhyJSON(w io.Writer, g *graph.Graph, matches []*graph.Node) error {
 				})
 			}
 			resp.Paths = append(resp.Paths, depPath)
+		}
+		if len(paths) == 0 {
+			resp.Message = graphquery.NoDependencyPathMessage(match, resolveTransitives, extended)
 		}
 		results = append(results, resp)
 	}
@@ -1057,9 +1013,11 @@ func writeWhyJSON(w io.Writer, g *graph.Graph, matches []*graph.Node) error {
 // addGraphNeedsCommand adds the "graph needs" subcommand.
 func addGraphNeedsCommand(parent *cobra.Command, c *services.Clients) {
 	var (
-		ref     string
-		ecos    []string
-		jsonOut bool
+		ref                string
+		ecos               []string
+		jsonOut            bool
+		resolveTransitives bool
+		extended           bool
 	)
 
 	cmd := &cobra.Command{
@@ -1102,8 +1060,9 @@ impact of upgrading or removing a package.`,
 					Ecosystems:   normalizeEcosystems(ecos),
 					ExcludePaths: excludePathsFromCmd(cmd),
 					Ref:          ref,
-					UseProxy:     true,
-					UseGit:       true,
+					UseProxy:     resolveTransitives,
+					UseGit:       resolveTransitives,
+					Extended:     extended,
 				},
 			}
 
@@ -1120,6 +1079,9 @@ impact of upgrading or removing a package.`,
 			// Find best matching node
 			match := findBestMatchingNode(g, pkg)
 			if match == nil {
+				if jsonOut {
+					return writeNeedsNotFoundJSON(cmd.OutOrStdout(), pkg)
+				}
 				fmt.Fprintf(cmd.OutOrStdout(), "Package %q not found in dependency graph.\n", pkg)
 				return nil
 			}
@@ -1140,7 +1102,7 @@ impact of upgrading or removing a package.`,
 
 			// JSON output
 			if jsonOut {
-				return writeNeedsJSON(w, match, ancestors, parents)
+				return writeNeedsJSON(w, match, ancestors, parents, resolveTransitives)
 			}
 
 			// Header
@@ -1199,16 +1161,28 @@ impact of upgrading or removing a package.`,
 	cmd.Flags().StringSliceVar(&ecos, "ecosystems", []string{"all"}, "Ecosystems to include")
 	addExcludePathFlag(cmd)
 	cmd.Flags().BoolVar(&jsonOut, "json", false, "Output as JSON")
+	cmd.Flags().BoolVar(&resolveTransitives, "resolve-transitives", false, "Use package registry, deps.dev, and Git lookups for more precise transitive graph edges")
+	cmd.Flags().BoolVar(&extended, "extended", false, "Include extended graph metadata such as Go import status")
 
 	parent.AddCommand(cmd)
 }
 
+func writeNeedsNotFoundJSON(w io.Writer, packageQuery string) error {
+	return writeNeedsResponseJSON(w, &graphv1.NeedsDependencyResponse{
+		Package: strings.TrimSpace(packageQuery),
+		Found:   goproto.Bool(false),
+		Message: graphquery.NoDependentsMessage(nil, false),
+	})
+}
+
 // writeNeedsJSON outputs the needs information as JSON using proto types.
-func writeNeedsJSON(w io.Writer, match *graph.Node, ancestors, parents []*graph.Node) error {
+func writeNeedsJSON(w io.Writer, match *graph.Node, ancestors, parents []*graph.Node, resolveTransitives bool) error {
 	resp := &graphv1.NeedsDependencyResponse{
 		Package: match.Name,
 		Version: match.Version,
 		Purl:    match.Purl,
+		Found:   goproto.Bool(true),
+		Direct:  goproto.Bool(match.Direct),
 	}
 
 	// Use ancestors if available, otherwise parents
@@ -1216,16 +1190,49 @@ func writeNeedsJSON(w io.Writer, match *graph.Node, ancestors, parents []*graph.
 	if len(deps) == 0 {
 		deps = parents
 	}
+	slices.SortFunc(deps, func(a, b *graph.Node) int {
+		if a.Direct != b.Direct {
+			if a.Direct {
+				return -1
+			}
+			return 1
+		}
+		if cmp := strings.Compare(a.Name, b.Name); cmp != 0 {
+			return cmp
+		}
+		return strings.Compare(a.Purl, b.Purl)
+	})
 
 	for _, d := range deps {
 		resp.Dependents = append(resp.Dependents, &graphv1.Node{
-			Name:    d.Name,
-			Version: d.Version,
-			Purl:    d.Purl,
-			Direct:  d.Direct,
+			Name:      d.Name,
+			Version:   d.Version,
+			Purl:      d.Purl,
+			Ecosystem: d.Ecosystem,
+			Direct:    d.Direct,
+			Depth:     d.Depth,
+			Locations: d.Locations,
 		})
+		if d.Direct {
+			resp.DirectCount = goproto.Int32(resp.GetDirectCount() + 1)
+		} else {
+			resp.TransitiveCount = goproto.Int32(resp.GetTransitiveCount() + 1)
+		}
+	}
+	if resp.DirectCount == nil {
+		resp.DirectCount = goproto.Int32(0)
+	}
+	if resp.TransitiveCount == nil {
+		resp.TransitiveCount = goproto.Int32(0)
+	}
+	if len(deps) == 0 {
+		resp.Message = graphquery.NoDependentsMessage(match, resolveTransitives)
 	}
 
+	return writeNeedsResponseJSON(w, resp)
+}
+
+func writeNeedsResponseJSON(w io.Writer, resp *graphv1.NeedsDependencyResponse) error {
 	opts := protojson.MarshalOptions{
 		Multiline:       true,
 		Indent:          "  ",
