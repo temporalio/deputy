@@ -119,20 +119,20 @@ func queryOSVGHABucketBatch(ctx context.Context, client Client, pkgs []PkgInput)
 		return nil, err
 	}
 	var aliasCache sync.Map
-	var majorTagCache sync.Map
+	var versionResolveCache sync.Map
 	var out []Vulnerability
 	for _, p := range pkgs {
-		version := strings.TrimSpace(p.Version)
+		normalized := normalizeGitHubActionsInput(p)
+		version := strings.TrimSpace(normalized.Version)
 		if version == "" {
 			continue
 		}
-		normalized := normalizeGitHubActionsInput(p)
 		if normalized.Name == "" {
 			continue
 		}
 		effective := normalized
 		effectiveVersion := version
-		if resolved := resolveGitHubActionsVersion(ctx, &majorTagCache, normalized.Name, version); resolved != "" {
+		if resolved := resolveGitHubActionsVersion(ctx, &versionResolveCache, normalized.Name, version); resolved != "" {
 			effectiveVersion = resolved
 			effective.Version = resolved
 		}
@@ -225,24 +225,32 @@ func queryOSVGHABucketBatch(ctx context.Context, client Client, pkgs []PkgInput)
 	return out, nil
 }
 
+// resolveGitHubActionsVersion returns a comparable semver when a GitHub Actions
+// ref is resolvable without changing its meaning. It resolves rolling major
+// tags such as "v4" or "v4.2" and commit SHA pins that point at release tags;
+// exact semver refs and unresolved refs return "" so callers can keep the
+// original version and avoid guessing.
 func resolveGitHubActionsVersion(ctx context.Context, cache *sync.Map, name, version string) string {
 	name = strings.TrimSpace(name)
 	version = strings.TrimSpace(version)
 	if name == "" || version == "" {
 		return ""
 	}
-	major, ok := parseGHAMajorRef(version)
+	if isGitCommitSHA(version) {
+		return resolveGitHubActionsCommitVersion(ctx, cache, name, version)
+	}
+	prefix, ok := parseGHAFloatingRefPrefix(version)
 	if !ok && normalizeSemverVersion(version) != "" {
 		// Fully specified semver doesn't need resolution.
-		// Note: x/mod/semver treats "v4" as valid ("v4.0.0"), but we still want to
-		// resolve the rolling major tag when the user requested "v4".
+		// Note: x/mod/semver treats "v4" as valid ("v4.0.0"), but we still want
+		// to resolve moving refs when the user requested "v4" or "v4.2".
 		return ""
 	}
 	if !ok {
 		return ""
 	}
 
-	key := name + "@v" + strconv.Itoa(major)
+	key := name + "@" + prefix
 	if cache != nil {
 		if v, ok := cache.Load(key); ok {
 			if s, ok := v.(string); ok {
@@ -252,43 +260,105 @@ func resolveGitHubActionsVersion(ctx context.Context, cache *sync.Map, name, ver
 		}
 	}
 
-	resolved := resolveGHAMajorTagToHighestSemver(ctx, name, major)
+	resolved := resolveGHAFloatingRefToHighestSemver(ctx, name, prefix)
 	if cache != nil {
 		cache.Store(key, resolved)
 	}
 	return resolved
 }
 
-// parseGHAMajorRef extracts the major version from a GitHub Actions "rolling major"
-// reference like "v4" or "4".
-//
-// It returns ok=false for non-major refs such as "v4.2.0", commit SHAs, or empty
-// strings.
-func parseGHAMajorRef(v string) (int, bool) {
+// resolveGitHubActionsCommitVersion resolves a SHA-pinned action to a release
+// semver when the commit maps unambiguously to one or more semver tags. The
+// result is cached per action and SHA because scans often encounter the same
+// action in multiple workflows.
+func resolveGitHubActionsCommitVersion(ctx context.Context, cache *sync.Map, name, sha string) string {
+	key := name + "@" + strings.ToLower(strings.TrimSpace(sha))
+	if cache != nil {
+		if v, ok := cache.Load(key); ok {
+			if s, ok := v.(string); ok {
+				return s
+			}
+			return ""
+		}
+	}
+
+	resolved := resolveGHACommitToHighestSemverTag(ctx, name, sha)
+	if cache != nil {
+		cache.Store(key, resolved)
+	}
+	return resolved
+}
+
+// isGitCommitSHA reports whether v is a short or full hexadecimal Git commit
+// SHA. It deliberately runs before rolling-major parsing so all-numeric commit
+// prefixes are not mistaken for large major version tags.
+func isGitCommitSHA(v string) bool {
 	v = strings.TrimSpace(v)
-	if v == "" {
-		return 0, false
+	if len(v) < 7 || len(v) > 40 {
+		return false
+	}
+	for _, r := range v {
+		if (r >= '0' && r <= '9') || (r >= 'a' && r <= 'f') || (r >= 'A' && r <= 'F') {
+			continue
+		}
+		return false
+	}
+	return true
+}
+
+// parseGHAFloatingRefPrefix returns the semver tag prefix for a moving GitHub
+// Actions ref such as "v4", "4", "v4.2", or "4.2". Fully specified versions,
+// commit SHAs, and non-numeric refs return ok=false.
+func parseGHAFloatingRefPrefix(v string) (string, bool) {
+	v = strings.TrimSpace(v)
+	if v == "" || isGitCommitSHA(v) {
+		return "", false
 	}
 	v = strings.TrimPrefix(v, "v")
-	if strings.Contains(v, ".") {
-		return 0, false
+	parts := strings.Split(v, ".")
+	if len(parts) != 1 && len(parts) != 2 {
+		return "", false
 	}
-	n, err := strconv.Atoi(v)
-	if err != nil || n <= 0 {
-		return 0, false
+	nums := make([]int, 0, len(parts))
+	for _, part := range parts {
+		if part == "" {
+			return "", false
+		}
+		n, err := strconv.Atoi(part)
+		if err != nil || n < 0 {
+			return "", false
+		}
+		nums = append(nums, n)
 	}
-	return n, true
+	if nums[0] <= 0 {
+		return "", false
+	}
+	if len(nums) == 1 {
+		return "v" + strconv.Itoa(nums[0]) + ".", true
+	}
+	return "v" + strconv.Itoa(nums[0]) + "." + strconv.Itoa(nums[1]) + ".", true
 }
 
 var ghaListRemoteRefs = listRemoteRefs
 
-// resolveGHAMajorTagToHighestSemver resolves a major tag (like "v4") by listing
-// remote tags and selecting the highest "v4.x.y" tag.
+// ghaRemoteRef captures the ref name and object hash returned by a remote Git
+// ref listing. Tests replace the listing function with deterministic refs so
+// SHA-to-tag resolution does not need network access.
+type ghaRemoteRef struct {
+	Name string
+	Hash string
+}
+
+var ghaListRemoteRefsWithHashes = listRemoteRefsWithHashes
+
+// resolveGHAFloatingRefToHighestSemver resolves a moving GitHub Actions tag
+// prefix by listing remote tags and selecting the highest matching semver tag.
 //
 // This is needed because GitHub Actions often recommend pinning to a major
 // (or major.minor) tag, which is a moving reference.
-func resolveGHAMajorTagToHighestSemver(ctx context.Context, repo string, major int) string {
-	if major <= 0 {
+func resolveGHAFloatingRefToHighestSemver(ctx context.Context, repo, wantPrefix string) string {
+	wantPrefix = strings.TrimSpace(wantPrefix)
+	if wantPrefix == "" {
 		return ""
 	}
 	repo = strings.TrimSpace(repo)
@@ -301,7 +371,6 @@ func resolveGHAMajorTagToHighestSemver(ctx context.Context, repo string, major i
 		return ""
 	}
 
-	wantPrefix := "v" + strconv.Itoa(major) + "."
 	best := ""
 	for _, refName := range refs {
 		if !strings.HasPrefix(refName, "refs/tags/") {
@@ -320,6 +389,56 @@ func resolveGHAMajorTagToHighestSemver(ctx context.Context, repo string, major i
 		if best == "" || semver.Compare(sv, best) > 0 {
 			best = sv
 		}
+	}
+	return best
+}
+
+// resolveGHACommitToHighestSemverTag maps a pinned commit SHA to the highest
+// semver tag that points at that commit. It handles both lightweight tags and
+// annotated tags via the peeled refs/tags/<tag>^{} ref exposed by ls-remote.
+//
+// If a short SHA prefix matches multiple distinct commits, the ref is treated as
+// unresolved. That is safer than applying an arbitrary release version to an
+// advisory range.
+func resolveGHACommitToHighestSemverTag(ctx context.Context, repo, sha string) string {
+	repo = strings.TrimSpace(repo)
+	sha = strings.ToLower(strings.TrimSpace(sha))
+	if repo == "" || !strings.Contains(repo, "/") || !isGitCommitSHA(sha) {
+		return ""
+	}
+	remoteURL := fmt.Sprintf("https://github.com/%s.git", repo)
+	refs, err := ghaListRemoteRefsWithHashes(ctx, remoteURL)
+	if err != nil || len(refs) == 0 {
+		return ""
+	}
+
+	best := ""
+	matchedHashes := map[string]struct{}{}
+	for _, ref := range refs {
+		if !strings.HasPrefix(ref.Name, "refs/tags/") {
+			continue
+		}
+		hash := strings.ToLower(ref.Hash)
+		if !strings.HasPrefix(hash, sha) {
+			continue
+		}
+		matchedHashes[hash] = struct{}{}
+		tag := strings.TrimPrefix(ref.Name, "refs/tags/")
+		tag = strings.TrimSuffix(tag, "^{}")
+		tag = strings.TrimSpace(tag)
+		if tag == "" {
+			continue
+		}
+		sv := normalizeSemverVersion(tag)
+		if sv == "" {
+			continue
+		}
+		if best == "" || semver.Compare(sv, best) > 0 {
+			best = sv
+		}
+	}
+	if len(matchedHashes) > 1 {
+		return ""
 	}
 	return best
 }
@@ -358,10 +477,41 @@ func listRemoteRefs(ctx context.Context, remoteURL string) ([]string, error) {
 	return out, nil
 }
 
+// listRemoteRefsWithHashes lists remote refs and their object hashes using
+// go-git. Annotated tags usually appear twice: the tag object itself and a
+// peeled refs/tags/<tag>^{} ref pointing at the target commit.
+func listRemoteRefsWithHashes(ctx context.Context, remoteURL string) ([]ghaRemoteRef, error) {
+	remoteURL = strings.TrimSpace(remoteURL)
+	if remoteURL == "" {
+		return nil, fmt.Errorf("empty remote URL")
+	}
+	r := git.NewRemote(memory.NewStorage(), &config.RemoteConfig{Name: "origin", URLs: []string{remoteURL}})
+	refs, err := r.ListContext(ctx, &git.ListOptions{Auth: gitHubAuthFromEnv()})
+	if err != nil {
+		return nil, err
+	}
+	out := make([]ghaRemoteRef, 0, len(refs))
+	for _, ref := range refs {
+		if ref == nil {
+			continue
+		}
+		name := ref.Name()
+		if name == "" || name == plumbing.HEAD {
+			continue
+		}
+		hash := ref.Hash().String()
+		if hash == "" {
+			continue
+		}
+		out = append(out, ghaRemoteRef{Name: name.String(), Hash: hash})
+	}
+	return out, nil
+}
+
 // normalizeGitHubActionsInput canonicalizes a GitHub Actions PkgInput for matching:
-// - Ecosystem is set to "GitHub Actions"
-// - github.com/ prefix is stripped from names
-// - If Name is empty but PURL is github, Name is derived from PURL.
+//   - Ecosystem is set to "GitHub Actions".
+//   - github.com/ is stripped from action names.
+//   - Name and Version are derived from GitHub Actions PURLs when present.
 func normalizeGitHubActionsInput(in PkgInput) PkgInput {
 	out := in
 	out.Ecosystem = string(osvschema.EcosystemGitHubActions)
@@ -373,6 +523,9 @@ func normalizeGitHubActionsInput(in PkgInput) PkgInput {
 			} else {
 				name = pu.Name
 			}
+			if strings.TrimSpace(out.Version) == "" {
+				out.Version = strings.TrimSpace(pu.Version)
+			}
 		}
 	}
 	name = strings.TrimPrefix(name, "github.com/")
@@ -380,17 +533,31 @@ func normalizeGitHubActionsInput(in PkgInput) PkgInput {
 	return out
 }
 
-// versionAffectedByGHARanges evaluates whether pkg.Version falls within any
-// SEMVER or ECOSYSTEM ranges for GitHub Actions vulnerabilities.
+// versionAffectedByGHARanges evaluates whether version falls within a GitHub
+// Actions advisory range for pkg. Non-semver refs only match advisories that do
+// not publish ranges, or open-ended ranges introduced at "0" with no fix. A
+// bounded range requires a comparable version so an unresolved SHA or moving tag
+// is not reported as vulnerable by default.
 func versionAffectedByGHARanges(v osvschema.Vulnerability, pkg PkgInput, version string) bool {
 	if strings.TrimSpace(version) == "" {
 		version = pkg.Version
 	}
-	cur := normalizeSemverVersion(version)
+	cur := ""
+	if _, floating := parseGHAFloatingRefPrefix(version); !floating {
+		cur = normalizeSemverVersion(version)
+	}
 	if cur == "" {
 		for _, a := range v.Affected {
-			if matchesPackage(a.Package, pkg) {
+			if !matchesPackage(a.Package, pkg) {
+				continue
+			}
+			if len(a.Ranges) == 0 {
 				return true
+			}
+			for _, r := range a.Ranges {
+				if ghaRangeAppliesToUnresolvedRef(r) {
+					return true
+				}
 			}
 		}
 		return false
@@ -429,6 +596,18 @@ func versionAffectedByGHARanges(v osvschema.Vulnerability, pkg PkgInput, version
 					introduced = "v0.0.0"
 					introducedSet = false
 				}
+				if e.LastAffected != "" {
+					// Some advisories bound a range with last_affected instead of
+					// fixed. Without this branch the range collapses to the
+					// open-ended check below and reports every version above
+					// introduced as affected. Mirror versionInGoSemverRange.
+					lastAffected := normalizeSemverVersion(e.LastAffected)
+					if lastAffected != "" && semver.Compare(cur, introduced) >= 0 && semver.Compare(cur, lastAffected) <= 0 {
+						return true
+					}
+					introduced = "v0.0.0"
+					introducedSet = false
+				}
 			}
 			// Check if we're still in an open-ended "introduced" range (no fixed event)
 			if introducedSet && semver.Compare(cur, introduced) >= 0 {
@@ -440,6 +619,30 @@ func versionAffectedByGHARanges(v osvschema.Vulnerability, pkg PkgInput, version
 		}
 	}
 	return false
+}
+
+// ghaRangeAppliesToUnresolvedRef reports whether an advisory range applies to
+// a ref that Deputy could not resolve to a comparable semver. Only open-ended
+// ranges introduced at "0" qualify; bounded ranges need a resolved version.
+func ghaRangeAppliesToUnresolvedRef(r osvschema.Range) bool {
+	rt := strings.ToUpper(string(r.Type))
+	if rt != "SEMVER" && rt != "ECOSYSTEM" {
+		return false
+	}
+	introducedAtZero := false
+	for _, e := range r.Events {
+		if e.Fixed != "" || e.LastAffected != "" || e.Limit != "" {
+			return false
+		}
+		if e.Introduced == "0" {
+			introducedAtZero = true
+			continue
+		}
+		if e.Introduced != "" {
+			return false
+		}
+	}
+	return introducedAtZero
 }
 
 // normalizeSemverVersion converts a potentially non-canonical version into a
@@ -621,6 +824,14 @@ func ensureGHACacheZip(ctx context.Context) (string, error) {
 		_ = f.Close()      // best-effort cleanup
 		_ = os.Remove(tmp) // best-effort cleanup
 		return "", err
+	}
+	if limited.N == 0 {
+		// The response hit the safety cap and was truncated; a partial zip has
+		// no valid central directory, so fail loudly instead of caching a file
+		// that zip.OpenReader would silently reject.
+		_ = f.Close()
+		_ = os.Remove(tmp)
+		return "", fmt.Errorf("GHA all.zip exceeds %d byte safety cap; increase ghaDownloadLimit", ghaDownloadLimit)
 	}
 	if err := f.Close(); err != nil {
 		_ = os.Remove(tmp) // best-effort cleanup

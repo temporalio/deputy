@@ -282,6 +282,112 @@ func TestIsVersionAffected_Go(t *testing.T) {
 			},
 			want: false, // v1.4.0 >= v1.3.0
 		},
+		{
+			name:         "Go pseudo-version vulnerable from zero introduced range",
+			pkgName:      "golang.org/x/crypto",
+			pkgVersion:   "v0.0.0-20200622213623-75b288015ac9",
+			pkgEcosystem: "Go",
+			vuln: osvschema.Vulnerability{
+				ID: "GO-2021-0227",
+				Affected: []osvschema.Affected{
+					{
+						Package: osvschema.Package{
+							Name:      "golang.org/x/crypto",
+							Ecosystem: "Go",
+							Purl:      "pkg:golang/golang.org/x/crypto",
+						},
+						Ranges: []osvschema.Range{
+							{
+								Type: osvschema.RangeSemVer,
+								Events: []osvschema.Event{
+									{Introduced: "0"},
+									{Fixed: "0.0.0-20201216223049-8b5274cf687f"},
+								},
+							},
+						},
+					},
+				},
+			},
+			want: true,
+		},
+		{
+			name:         "Go open-ended zero introduced range",
+			pkgName:      "golang.org/x/crypto",
+			pkgVersion:   "v0.1.0",
+			pkgEcosystem: "Go",
+			vuln: osvschema.Vulnerability{
+				ID: "GO-open",
+				Affected: []osvschema.Affected{
+					{
+						Package: osvschema.Package{
+							Name:      "golang.org/x/crypto",
+							Ecosystem: "Go",
+						},
+						Ranges: []osvschema.Range{
+							{
+								Type:   osvschema.RangeSemVer,
+								Events: []osvschema.Event{{Introduced: "0"}},
+							},
+						},
+					},
+				},
+			},
+			want: true,
+		},
+		{
+			name:         "Go last_affected range includes current version",
+			pkgName:      "github.com/docker/docker",
+			pkgVersion:   "v28.5.2+incompatible",
+			pkgEcosystem: "Go",
+			vuln: osvschema.Vulnerability{
+				ID: "GHSA-last-affected",
+				Affected: []osvschema.Affected{
+					{
+						Package: osvschema.Package{
+							Name:      "github.com/docker/docker",
+							Ecosystem: "Go",
+						},
+						Ranges: []osvschema.Range{
+							{
+								Type: osvschema.RangeSemVer,
+								Events: []osvschema.Event{
+									{Introduced: "0"},
+									{LastAffected: "28.5.2"},
+								},
+							},
+						},
+					},
+				},
+			},
+			want: true,
+		},
+		{
+			name:         "Go last_affected range excludes newer version",
+			pkgName:      "github.com/docker/docker",
+			pkgVersion:   "v28.5.3+incompatible",
+			pkgEcosystem: "Go",
+			vuln: osvschema.Vulnerability{
+				ID: "GHSA-last-affected",
+				Affected: []osvschema.Affected{
+					{
+						Package: osvschema.Package{
+							Name:      "github.com/docker/docker",
+							Ecosystem: "Go",
+						},
+						Ranges: []osvschema.Range{
+							{
+								Type: osvschema.RangeSemVer,
+								Events: []osvschema.Event{
+									{Introduced: "0"},
+									{LastAffected: "28.5.2"},
+								},
+							},
+						},
+					},
+				},
+			},
+			want: false,
+		},
 	}
 
 	for _, tt := range tests {

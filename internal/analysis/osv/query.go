@@ -404,34 +404,16 @@ func queryOSVAPIBatch(ctx context.Context, client Client, pkgs []PkgInput) ([]Vu
 	meta := make([]PkgInput, 0, len(pkgs))
 	var droppedNoVersion, droppedNoIdentifier int
 	for _, p := range pkgs {
-		version := strings.TrimSpace(p.Version)
+		normalized := normalizeQueryInput(p)
+		version := strings.TrimSpace(normalized.Version)
 		if version == "" {
 			droppedNoVersion++
 			continue
 		}
-		normalized := p
-		normalized.Name = strings.TrimSpace(normalized.Name)
-		normalized.Ecosystem = strings.TrimSpace(normalized.Ecosystem)
-		normalized.PURL = strings.TrimSpace(normalized.PURL)
-		normalized.Version = version
-		if strings.EqualFold(normalized.Ecosystem, "go") {
+		if strings.EqualFold(normalized.Ecosystem, "go") || strings.EqualFold(normalized.Ecosystem, "golang") {
 			normalized.Version = normalizeGoVersion(normalized.Version)
 		}
-		pkgQuery := osvdev.Package{}
-		var queryVersion string
-		if normalized.PURL != "" {
-			pkgQuery.PURL = normalized.PURL
-			if pu, err := purl.FromString(normalized.PURL); err == nil {
-				queryVersion = pu.Version
-				pu.Version = ""
-				pkgQuery.PURL = pu.String()
-			}
-		}
-		if pkgQuery.PURL == "" {
-			pkgQuery.Name = normalized.Name
-			pkgQuery.Ecosystem = normalized.Ecosystem
-			queryVersion = normalized.Version
-		}
+		pkgQuery, queryVersion := osvQueryPackage(normalized)
 		if pkgQuery.Name == "" && pkgQuery.PURL == "" {
 			droppedNoIdentifier++
 			continue
@@ -595,6 +577,87 @@ func queryOSVAPIBatch(ctx context.Context, client Client, pkgs []PkgInput) ([]Vu
 	return out, nil
 }
 
+func normalizeQueryInput(p PkgInput) PkgInput {
+	normalized := p
+	normalized.Name = strings.TrimSpace(normalized.Name)
+	normalized.Ecosystem = strings.TrimSpace(normalized.Ecosystem)
+	normalized.PURL = strings.TrimSpace(normalized.PURL)
+	normalized.Version = strings.TrimSpace(normalized.Version)
+
+	if normalized.PURL == "" {
+		return normalized
+	}
+	pu, err := purl.FromString(normalized.PURL)
+	if err != nil {
+		return normalized
+	}
+	normalized.PURL = pu.String()
+	if normalized.Version == "" {
+		normalized.Version = strings.TrimSpace(pu.Version)
+	}
+	if normalized.Name == "" {
+		normalized.Name = purlPackageName(pu)
+	}
+	if normalized.Ecosystem == "" {
+		normalized.Ecosystem = purlOSVEcosystem(pu)
+	}
+	return normalized
+}
+
+func osvQueryPackage(p PkgInput) (osvdev.Package, string) {
+	version := p.Version
+	if p.Name != "" && p.Ecosystem != "" {
+		return osvdev.Package{
+			Name:      p.Name,
+			Ecosystem: normalizeOSVEcosystem(p.Ecosystem),
+		}, version
+	}
+
+	pkgQuery := osvdev.Package{}
+	if p.PURL != "" {
+		pkgQuery.PURL = p.PURL
+		if pu, err := purl.FromString(p.PURL); err == nil {
+			if version == "" {
+				version = pu.Version
+			}
+			pu.Version = ""
+			pkgQuery.PURL = pu.String()
+		}
+	}
+	return pkgQuery, version
+}
+
+func normalizeOSVEcosystem(name string) string {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return ""
+	}
+	if eco := ecosystem.Parse(name); eco != ecosystem.Unknown {
+		return eco.OSVName()
+	}
+	return name
+}
+
+func purlOSVEcosystem(pu purl.PackageURL) string {
+	if eco := ecosystem.Parse(pu.Type); eco != ecosystem.Unknown {
+		return eco.OSVName()
+	}
+	return strings.TrimSpace(pu.Type)
+}
+
+func purlPackageName(pu purl.PackageURL) string {
+	if pu.Name == "" {
+		return ""
+	}
+	if pu.Namespace == "" {
+		return pu.Name
+	}
+	if strings.EqualFold(pu.Type, "maven") {
+		return pu.Namespace + ":" + pu.Name
+	}
+	return pu.Namespace + "/" + pu.Name
+}
+
 // normalizeGoVersion ensures Go module versions use the canonical v-prefix.
 func normalizeGoVersion(v string) string {
 	return ecosystem.Go.NormalizeVersion(v)
@@ -680,24 +743,61 @@ func versionInGoSemverRange(version string, r osvschema.Range) bool {
 		return true // Can't compare, assume affected for safety
 	}
 
-	introduced := "v0.0.0"
+	var introduced string
+	introducedSet := false
+	introducedFromZero := false
 	for _, e := range r.Events {
 		if e.Introduced != "" {
-			introduced = normalizeGoVersion(e.Introduced)
+			introducedSet = true
+			introducedFromZero = strings.TrimSpace(e.Introduced) == "0"
+			if introducedFromZero {
+				introduced = ""
+			} else {
+				introduced = normalizeGoRangeVersion(e.Introduced)
+			}
 		}
 		if e.Fixed != "" {
-			fixed := normalizeGoVersion(e.Fixed)
-			if semver.Compare(cur, introduced) >= 0 && semver.Compare(cur, fixed) < 0 {
+			fixed := normalizeGoRangeVersion(e.Fixed)
+			if semver.IsValid(fixed) && goVersionAfterIntroduced(cur, introduced, introducedSet, introducedFromZero) && semver.Compare(cur, fixed) < 0 {
 				return true
 			}
-			introduced = "v0.0.0"
+			introduced = ""
+			introducedSet = false
+			introducedFromZero = false
+		}
+		if e.LastAffected != "" {
+			lastAffected := normalizeGoRangeVersion(e.LastAffected)
+			if semver.IsValid(lastAffected) && goVersionAfterIntroduced(cur, introduced, introducedSet, introducedFromZero) && semver.Compare(cur, lastAffected) <= 0 {
+				return true
+			}
+			introduced = ""
+			introducedSet = false
+			introducedFromZero = false
 		}
 	}
 	// Check if still in an open-ended "introduced" range
-	if introduced != "v0.0.0" && semver.Compare(cur, introduced) >= 0 {
+	if introducedSet && goVersionAfterIntroduced(cur, introduced, introducedSet, introducedFromZero) {
 		return true
 	}
 	return false
+}
+
+func goVersionAfterIntroduced(cur, introduced string, introducedSet, introducedFromZero bool) bool {
+	if !introducedSet || introducedFromZero {
+		return true
+	}
+	if !semver.IsValid(introduced) {
+		return true
+	}
+	return semver.Compare(cur, introduced) >= 0
+}
+
+func normalizeGoRangeVersion(v string) string {
+	v = strings.TrimSpace(v)
+	if v == "0" {
+		return "v0.0.0"
+	}
+	return normalizeGoVersion(v)
 }
 
 // versionInEcosystemRange checks if a version falls within an ECOSYSTEM or SEMVER range
