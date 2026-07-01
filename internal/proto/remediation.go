@@ -14,17 +14,19 @@ import (
 // RemediationCommandToStep converts internal remediation.Command to proto Step.
 func RemediationCommandToStep(c remediation.Command, id string) *remediationv1.Step {
 	step := &remediationv1.Step{
-		Id:           id,
-		Kind:         detectStepKind(c),
-		Title:        buildStepTitle(c),
-		Description:  buildStepDescription(c),
-		PackageName:  extractPackageName(c),
-		Manager:      c.Manager,
-		ManifestPath: c.Path,
-		Command:      c.Command,
-		Hint:         c.Hint,
-		Executable:   c.Executable,
-		RiskLevel:    detectRiskLevel(c),
+		Id:             id,
+		Kind:           detectStepKind(c),
+		Title:          buildStepTitle(c),
+		Description:    buildStepDescription(c),
+		PackageName:    extractPackageName(c),
+		CurrentVersion: c.Version,
+		TargetVersion:  c.TargetVersion,
+		Manager:        c.Manager,
+		ManifestPath:   c.Path,
+		Command:        c.Command,
+		Hint:           c.Hint,
+		Executable:     c.Executable,
+		RiskLevel:      detectRiskLevel(c),
 	}
 	return step
 }
@@ -36,11 +38,14 @@ func RemediationStepFromProto(s *remediationv1.Step) remediation.Command {
 		return remediation.Command{}
 	}
 	return remediation.Command{
-		Manager:    s.Manager,
-		Command:    s.Command,
-		Path:       s.ManifestPath,
-		Hint:       s.Hint,
-		Executable: s.Executable,
+		Package:       s.PackageName,
+		Version:       s.CurrentVersion,
+		TargetVersion: s.TargetVersion,
+		Manager:       s.Manager,
+		Command:       s.Command,
+		Path:          s.ManifestPath,
+		Hint:          s.Hint,
+		Executable:    s.Executable,
 	}
 }
 
@@ -110,8 +115,7 @@ func buildStepDescription(c remediation.Command) string {
 
 // extractPackageName attempts to extract the package name from the command.
 func extractPackageName(c remediation.Command) string {
-	// This is a simplified extraction; real implementation would parse the command
-	return ""
+	return c.Package
 }
 
 // detectRiskLevel determines the risk level based on command characteristics.

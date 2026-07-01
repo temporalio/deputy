@@ -179,22 +179,82 @@ func ExtractorPackagesFromProto(pkgs []*dependencyv1.Package) ([]*extractor.Pack
 			}
 		}
 
+		purlType := ""
+		if pkg.Purl != "" {
+			if parsed, err := purlx.ParseLoose(pkg.Purl); err == nil {
+				purlType = parsed.Type
+			}
+		}
+
 		out[i] = &extractor.Package{
 			Name:         pkg.Name,
 			Version:      pkg.Version,
 			Locations:    pkg.Locations,
+			PURLType:     purlType,
 			Licenses:     pkg.Licenses,
 			LayerDetails: layerDetails,
-			// Note: PURLType and other fields cannot be reliably reconstructed
-			// from the proto representation. The Ecosystem() method won't work
-			// on these reconstructed packages without PURLType.
+			// Note: PURL metadata and other fields cannot be reliably reconstructed
+			// from the proto representation. Type-specific PURL formatting may still
+			// be lossy for ecosystems whose identity depends on metadata.
 		}
 
-		if pkg.Direct && pkg.Purl != "" {
-			direct[pkg.Purl] = true
-		}
+		recordProtoPackageDirectness(direct, pkg)
 	}
 	return out, direct
+}
+
+func recordProtoPackageDirectness(direct map[string]bool, pkg *dependencyv1.Package) {
+	if pkg == nil {
+		return
+	}
+	isDirect := pkg.Direct
+
+	recordDirectKey(direct, pkg.Purl, isDirect)
+	recordDirectKey(direct, pkg.Name, isDirect)
+
+	parsed, err := purlx.ParseLoose(pkg.Purl)
+	if err != nil {
+		return
+	}
+	recordDirectKey(direct, parsed.String(), isDirect)
+
+	packageName := parsed.Name
+	if parsed.Namespace != "" {
+		packageName = parsed.Namespace + "/" + parsed.Name
+	}
+
+	switch parsed.Type {
+	case "golang":
+		if packageName != "" {
+			recordDirectKey(direct, packageName, isDirect)
+			if isDirect {
+				recordDirectKey(direct, compare.GetModuleRoot(packageName), true)
+			}
+		}
+	case "npm":
+		if parsed.Namespace != "" {
+			recordDirectKey(direct, "@"+parsed.Namespace+"/"+parsed.Name, isDirect)
+		} else {
+			recordDirectKey(direct, parsed.Name, isDirect)
+		}
+	case "cargo":
+		recordDirectKey(direct, parsed.Name, isDirect)
+	case "pypi":
+		recordDirectKey(direct, normalizePyPIName(parsed.Name), isDirect)
+	default:
+		recordDirectKey(direct, packageName, isDirect)
+	}
+}
+
+func recordDirectKey(direct map[string]bool, key string, isDirect bool) {
+	key = strings.TrimSpace(key)
+	if key == "" {
+		return
+	}
+	if direct[key] {
+		return
+	}
+	direct[key] = isDirect
 }
 
 // normalizePyPIName normalizes a PyPI package name per PEP 503:

@@ -191,75 +191,91 @@ func compareContainerVulnerabilitiesFromScanning(baseResult, targetResult *scann
 		return nil, nil
 	}
 
-	// Build map of findings by advisory ID
-	baseFindings := make(map[string]vulnerability.Finding)
-	targetFindings := make(map[string]vulnerability.Finding)
-
-	for _, f := range baseResult.Findings {
-		baseFindings[f.AdvisoryID] = f
-	}
-	for _, f := range targetResult.Findings {
-		targetFindings[f.AdvisoryID] = f
-	}
+	baseVulns := vulnerability.ConsolidateAll(baseResult.Findings, baseResult.Advisories).Vulnerabilities
+	targetVulns := vulnerability.ConsolidateAll(targetResult.Findings, targetResult.Advisories).Vulnerabilities
+	targetByID := indexConsolidatedVulnerabilities(targetVulns)
+	matchedTargets := make(map[int]bool, len(targetVulns))
 
 	var changes []*diffv1.ContainerVulnerabilityChange
 	advisories := make(map[string]*vulnerabilityv1.Advisory)
 
 	// Find removed/fixed vulnerabilities
-	for advisoryID, baseFinding := range baseFindings {
-		baseAdvisory := baseResult.Advisories[advisoryID]
-		_, exists := targetFindings[advisoryID]
+	for _, baseVuln := range baseVulns {
+		targetIdx, targetVuln, exists := findMatchingConsolidatedVulnerability(baseVuln, targetVulns, targetByID)
 		if !exists {
 			changeKind := diffv1.VulnerabilityChangeKind_VULNERABILITY_CHANGE_KIND_REMOVED
+			targetVersion := ""
 			// Check if it was fixed by an upgrade
-			if wasVulnFixedByUpgradeFromScanning(baseFinding, targetResult) {
+			if version, ok := targetVersionForPackage(baseVuln.Package, targetResult); ok && version != baseVuln.Version {
 				changeKind = diffv1.VulnerabilityChangeKind_VULNERABILITY_CHANGE_KIND_FIXED
+				targetVersion = version
 			}
-			change := buildVulnChangeProto(advisoryID, changeKind, baseAdvisory,
-				baseFinding.Dependency.Name, baseFinding.Dependency.Ecosystem,
-				baseFinding.Version, "",
-				baseFinding.LayerDetails, nil)
+			change := buildVulnChangeProtoFromConsolidated(baseVuln, changeKind, baseVuln.Version, targetVersion, baseVuln.LayerDetails, nil)
 			changes = append(changes, change)
-			advisories[advisoryID] = baseAdvisory
+			addConsolidatedAdvisory(advisories, baseResult.Advisories, baseVuln)
 		} else {
+			matchedTargets[targetIdx] = true
 			// Vulnerability persists
-			targetFinding := targetFindings[advisoryID]
-			targetAdvisory := targetResult.Advisories[advisoryID]
-			change := buildVulnChangeProto(advisoryID, diffv1.VulnerabilityChangeKind_VULNERABILITY_CHANGE_KIND_PERSISTED, targetAdvisory,
-				targetFinding.Dependency.Name, targetFinding.Dependency.Ecosystem,
-				baseFinding.Version, targetFinding.Version,
-				baseFinding.LayerDetails, targetFinding.LayerDetails)
+			change := buildVulnChangeProtoFromConsolidated(targetVuln, diffv1.VulnerabilityChangeKind_VULNERABILITY_CHANGE_KIND_PERSISTED, baseVuln.Version, targetVuln.Version, baseVuln.LayerDetails, targetVuln.LayerDetails)
 			changes = append(changes, change)
-			advisories[advisoryID] = targetAdvisory
+			addConsolidatedAdvisory(advisories, targetResult.Advisories, targetVuln)
 		}
 	}
 
 	// Find added vulnerabilities
-	for advisoryID, targetFinding := range targetFindings {
-		if _, exists := baseFindings[advisoryID]; !exists {
-			targetAdvisory := targetResult.Advisories[advisoryID]
-			change := buildVulnChangeProto(advisoryID, diffv1.VulnerabilityChangeKind_VULNERABILITY_CHANGE_KIND_ADDED, targetAdvisory,
-				targetFinding.Dependency.Name, targetFinding.Dependency.Ecosystem,
-				"", targetFinding.Version,
-				nil, targetFinding.LayerDetails)
+	for i, targetVuln := range targetVulns {
+		if !matchedTargets[i] {
+			change := buildVulnChangeProtoFromConsolidated(targetVuln, diffv1.VulnerabilityChangeKind_VULNERABILITY_CHANGE_KIND_ADDED, "", targetVuln.Version, nil, targetVuln.LayerDetails)
 			changes = append(changes, change)
-			advisories[advisoryID] = targetAdvisory
+			addConsolidatedAdvisory(advisories, targetResult.Advisories, targetVuln)
 		}
 	}
 
 	return changes, advisories
 }
 
-func wasVulnFixedByUpgradeFromScanning(finding vulnerability.Finding, targetResult *scanning.Result) bool {
-	pkgName := finding.Dependency.Name
-	baseVersion := finding.Version
-
-	for _, pkg := range targetResult.Packages {
-		if pkg.Name == pkgName {
-			return pkg.Version != baseVersion
+func indexConsolidatedVulnerabilities(vulns []vulnerability.Consolidated) map[string]int {
+	index := make(map[string]int)
+	for i, vuln := range vulns {
+		for _, id := range consolidatedVulnerabilityIDs(vuln) {
+			if _, exists := index[id]; !exists {
+				index[id] = i
+			}
 		}
 	}
-	return false
+	return index
+}
+
+func findMatchingConsolidatedVulnerability(vuln vulnerability.Consolidated, candidates []vulnerability.Consolidated, index map[string]int) (int, vulnerability.Consolidated, bool) {
+	for _, id := range consolidatedVulnerabilityIDs(vuln) {
+		if i, ok := index[id]; ok {
+			return i, candidates[i], true
+		}
+	}
+	return 0, vulnerability.Consolidated{}, false
+}
+
+func consolidatedVulnerabilityIDs(vuln vulnerability.Consolidated) []string {
+	seen := make(map[string]bool, len(vuln.AllIDs)+len(vuln.SecondaryIDs)+1)
+	ids := make([]string, 0, len(vuln.AllIDs)+len(vuln.SecondaryIDs)+1)
+	for _, id := range append(append([]string{vuln.PrimaryID}, vuln.AllIDs...), vuln.SecondaryIDs...) {
+		id = strings.TrimSpace(id)
+		if id == "" || seen[id] {
+			continue
+		}
+		seen[id] = true
+		ids = append(ids, id)
+	}
+	return ids
+}
+
+func targetVersionForPackage(pkgName string, targetResult *scanning.Result) (string, bool) {
+	for _, pkg := range targetResult.Packages {
+		if pkg.Name == pkgName {
+			return pkg.Version, true
+		}
+	}
+	return "", false
 }
 
 func convertChangeKind(ct compare.ChangeType) diffv1.ChangeKind {
@@ -279,67 +295,59 @@ func convertChangeKind(ct compare.ChangeType) diffv1.ChangeKind {
 	}
 }
 
-func buildVulnChangeProto(
-	advisoryID string,
+func buildVulnChangeProtoFromConsolidated(
+	vuln vulnerability.Consolidated,
 	changeKind diffv1.VulnerabilityChangeKind,
-	advisory *vulnerabilityv1.Advisory,
-	pkgName, ecosystem, baseVersion, targetVersion string,
+	baseVersion, targetVersion string,
 	baseLayerDetails, targetLayerDetails *containerv1.LayerDetails,
 ) *diffv1.ContainerVulnerabilityChange {
-	var sevLevel, sevType string
-	var fixedVersions []string
-	var summary string
-	var aliases []string
-	if advisory != nil {
-		if advisory.Severity != nil {
-			sevLevel = advisory.Severity.Level.String()
-			sevType = advisory.Severity.Type.String()
-		}
-		fixedVersions = advisory.FixedVersions
-		summary = advisory.Summary
-		aliases = advisory.Aliases
-	}
-
 	change := &diffv1.ContainerVulnerabilityChange{
-		Id:            advisoryID,
-		ChangeKind:    changeKind,
-		Severity:      sevLevel,
-		SeverityType:  sevType,
-		PackageName:   pkgName,
-		Ecosystem:     ecosystem,
-		BaseVersion:   baseVersion,
-		TargetVersion: targetVersion,
-		FixedVersions: fixedVersions,
-		Summary:       summary,
-		Aliases:       aliases,
-	}
-
-	// Format published date if available
-	if pub := vulnerability.AdvisoryPublished(advisory); !pub.IsZero() {
-		change.Published = pub.Format("2006-01-02")
-	}
-
-	// Copy layer details
-	if baseLayerDetails != nil {
-		change.BaseLayerDetails = &containerv1.LayerDetails{
-			Index:       baseLayerDetails.Index,
-			DiffId:      baseLayerDetails.DiffId,
-			ChainId:     baseLayerDetails.ChainId,
-			Command:     baseLayerDetails.Command,
-			InBaseImage: baseLayerDetails.InBaseImage,
-		}
-	}
-	if targetLayerDetails != nil {
-		change.TargetLayerDetails = &containerv1.LayerDetails{
-			Index:       targetLayerDetails.Index,
-			DiffId:      targetLayerDetails.DiffId,
-			ChainId:     targetLayerDetails.ChainId,
-			Command:     targetLayerDetails.Command,
-			InBaseImage: targetLayerDetails.InBaseImage,
-		}
+		Id:                 vuln.PrimaryID,
+		ChangeKind:         changeKind,
+		Severity:           vuln.Severity,
+		SeverityType:       vuln.SeverityType,
+		PackageName:        vuln.Package,
+		Ecosystem:          vuln.Ecosystem,
+		BaseVersion:        baseVersion,
+		TargetVersion:      targetVersion,
+		FixedVersions:      vuln.FixedVersions,
+		Summary:            vuln.Summary,
+		Aliases:            vuln.SecondaryIDs,
+		Published:          dateOnly(vuln.Published),
+		BaseLayerDetails:   cloneContainerLayerDetails(baseLayerDetails),
+		TargetLayerDetails: cloneContainerLayerDetails(targetLayerDetails),
 	}
 
 	return change
+}
+
+func addConsolidatedAdvisory(dst map[string]*vulnerabilityv1.Advisory, src map[string]*vulnerabilityv1.Advisory, vuln vulnerability.Consolidated) {
+	for _, id := range consolidatedVulnerabilityIDs(vuln) {
+		if adv := src[id]; adv != nil {
+			dst[vuln.PrimaryID] = adv
+			return
+		}
+	}
+}
+
+func cloneContainerLayerDetails(src *containerv1.LayerDetails) *containerv1.LayerDetails {
+	if src == nil {
+		return nil
+	}
+	return &containerv1.LayerDetails{
+		Index:       src.Index,
+		DiffId:      src.DiffId,
+		ChainId:     src.ChainId,
+		Command:     src.Command,
+		InBaseImage: src.InBaseImage,
+	}
+}
+
+func dateOnly(ts string) string {
+	if len(ts) >= len("2006-01-02") {
+		return ts[:len("2006-01-02")]
+	}
+	return ts
 }
 
 func compareContainerConfigs(baseInfo, targetInfo *image.Info) *diffv1.ContainerConfigDiff {

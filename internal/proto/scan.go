@@ -139,9 +139,11 @@ func ScanningResultToProto(r *scanning.Result) *scanv1.ScanResponse {
 		Target:          InventoryTargetToProto(r.Target),
 		GeneratedAt:     timestamppb.New(r.GeneratedAt),
 		PackagesScanned: int32(pkgCount),
+		Packages:        ExtractorPackagesToProto(r.Packages, r.Direct),
 		Findings:        FindingsToProto(r.Findings, r.Advisories),
 		Advisories:      AdvisoriesToProto(r.Advisories),
 		Stats:           StatsToProto(stats),
+		Graph:           DependencyGraphToScanProto(r.Graph),
 		ImageInfo:       ImageInfoToScanProto(r.ImageInfo),
 		DockerfileInfo:  DockerfileInfoWithAnalysisToProto(r.DockerfileInfo, r.DockerfileAnalysis),
 		Warnings:        r.Warnings,
@@ -163,15 +165,17 @@ func ScanningResultFromProto(r *scanv1.ScanResponse) *scanning.Result {
 	findings := FindingsFromProto(r.Findings)
 	advisories := AdvisoriesFromProto(r.Advisories)
 	stats := StatsFromProto(r.Stats)
+	packages, direct := ExtractorPackagesFromProto(r.Packages)
 
 	return &scanning.Result{
 		Target:             InventoryTargetFromProto(r.Target),
-		Packages:           nil, // Not in proto response
+		Packages:           packages,
 		PackagesScanned:    int(r.PackagesScanned),
-		Direct:             nil, // Not in proto response
+		Direct:             direct,
 		Findings:           findings,
 		Advisories:         advisories,
 		Stats:              stats,
+		Graph:              DependencyGraphFromScanProto(r.Graph),
 		ImageInfo:          ImageInfoFromScanProto(r.ImageInfo),
 		DockerfileInfo:     DockerfileInfoFromProto(r.DockerfileInfo),
 		DockerfileAnalysis: DockerfileAnalysisFromProtoNested(r.DockerfileInfo),
