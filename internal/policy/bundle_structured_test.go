@@ -79,3 +79,21 @@ func TestOrderedVarsRejectDuplicateNames(t *testing.T) {
 		t.Fatalf("expected error for duplicate var names, got nil")
 	}
 }
+
+func TestStructuredPolicyNormalizesCommandAliases(t *testing.T) {
+	p := structuredPolicy{
+		Name:     "sandbox-command",
+		Commands: []string{"exec", "sandbox"},
+		Rules:    []structuredRule{{Action: "deny", When: "true"}},
+	}
+	src, err := p.toCELSource()
+	if err != nil {
+		t.Fatalf("toCELSource: %v", err)
+	}
+	if !strings.Contains(src, `//! policy.commands = "sandbox"`) {
+		t.Fatalf("compiled source did not use canonical sandbox command: %s", src)
+	}
+	if strings.Contains(src, "exec") {
+		t.Fatalf("compiled source retained legacy exec alias: %s", src)
+	}
+}

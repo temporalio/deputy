@@ -9,7 +9,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"slices"
-	"sort"
 	"strings"
 	"time"
 
@@ -45,81 +44,62 @@ var ExampleCategories = []ExampleCategory{
 	{
 		Name:        "scan",
 		Description: "Vulnerability scanning policies",
-		Entrypoints: []Entrypoint{
-			EntrypointScanVulnerability,
-			EntrypointScanReport,
-		},
+		Entrypoints: slices.Clone(EntrypointsScan),
 	},
 	{
 		Name:        "proxy",
 		Description: "Package proxy request policies",
-		Entrypoints: []Entrypoint{
-			EntrypointGoArtifactRequest,
-			EntrypointNpmArtifactRequest,
-			EntrypointPypiArtifactRequest,
-			EntrypointRubygemsArtifactRequest,
-			EntrypointOCIArtifactRequest,
-		},
+		Entrypoints: slices.Clone(EntrypointsProxy),
 	},
 	{
 		Name:        "diff",
 		Description: "Dependency diff policies",
-		Entrypoints: []Entrypoint{
-			EntrypointDiffReport,
-			EntrypointDiffVulnerability,
-			EntrypointDiffDependencyChange,
-		},
+		Entrypoints: slices.Clone(EntrypointsDiff),
 	},
 	{
-		Name:        "container",
+		Name:        "container_diff",
 		Description: "Container image policies",
-		Entrypoints: []Entrypoint{
-			EntrypointContainerDiffReport,
-			EntrypointContainerDiffChange,
-			EntrypointContainerDiffVulnerability,
-		},
+		Entrypoints: slices.Clone(EntrypointsContainerDiff),
 	},
 	{
 		Name:        "dockerfile",
 		Description: "Dockerfile analysis policies",
-		Entrypoints: []Entrypoint{
-			EntrypointDockerfileReport,
-			EntrypointDockerfileStage,
-		},
+		Entrypoints: slices.Clone(EntrypointsDockerfile),
 	},
 	{
 		Name:        "sbom",
 		Description: "SBOM generation policies",
-		Entrypoints: []Entrypoint{
-			EntrypointSBOMReport,
-			EntrypointSBOMComponent,
-		},
+		Entrypoints: slices.Clone(EntrypointsSBOM),
 	},
 	{
 		Name:        "graph",
 		Description: "Dependency graph policies",
-		Entrypoints: []Entrypoint{
-			EntrypointGraphReport,
-			EntrypointGraphNode,
-			EntrypointGraphEdge,
-		},
+		Entrypoints: slices.Clone(EntrypointsGraph),
+	},
+	{
+		Name:        "fix",
+		Description: "Remediation planning policies",
+		Entrypoints: slices.Clone(EntrypointsFix),
+	},
+	{
+		Name:        "triage",
+		Description: "Vulnerability triage policies",
+		Entrypoints: slices.Clone(EntrypointsTriage),
 	},
 	{
 		Name:        "secrets",
 		Description: "Secret scanning policies",
-		Entrypoints: []Entrypoint{
-			EntrypointSecretsReport,
-			EntrypointSecretsFinding,
-		},
+		Entrypoints: slices.Clone(EntrypointsSecrets),
 	},
 	{
-		Name:        "service",
+		Name:        "server",
 		Description: "API authorization policies",
-		Entrypoints: []Entrypoint{
-			EntrypointServiceScanRequest,
-			EntrypointServiceListRequest,
-			EntrypointServiceSBOMRequest,
-		},
+		Entrypoints: slices.Clone(EntrypointsService),
+	},
+	{
+		Name:        "sandbox",
+		Description: "Sandbox execution control policies",
+		Entrypoints: slices.Clone(EntrypointsSandbox),
 	},
 }
 
@@ -221,7 +201,7 @@ func generateVariableValue(ep Entrypoint, varName string, level ExampleLevel, re
 	case "to_node":
 		return generateGraphNode(level), "target node of edge"
 	case "roots":
-		return generateGraphNodes(level)[:1], "direct dependency nodes"
+		return []any{"pkg:npm/example-pkg@1.2.3"}, "PURLs of direct dependencies"
 	case "stats":
 		return generateGraphStats(level), "graph statistics"
 	case "dockerfile":
@@ -299,6 +279,8 @@ func generateEnv(ep Entrypoint) map[string]any {
 		command = "secrets"
 	case strings.HasPrefix(string(ep), "service_"):
 		command = "server"
+	case strings.HasPrefix(string(ep), "sandbox_"):
+		command = "sandbox"
 	case strings.HasPrefix(string(ep), "fix_"):
 		command = "fix"
 	case strings.HasPrefix(string(ep), "triage_"):
@@ -348,12 +330,15 @@ func generateVulnerability(level ExampleLevel) map[string]any {
 		epss := 0.85
 		epssPercentile := 0.97
 		inKev := true
+		kevDateAdded := "2024-01-20"
+		kevDueDate := "2024-02-10"
+		kevRequiredAction := "Apply updates per vendor instructions"
 		finding.Epss = &epss
 		finding.EpssPercentile = &epssPercentile
 		finding.InKev = &inKev
-		finding.KevDateAdded = new("2024-01-20")
-		finding.KevDueDate = new("2024-02-10")
-		finding.KevRequiredAction = new("Apply updates per vendor instructions")
+		finding.KevDateAdded = &kevDateAdded
+		finding.KevDueDate = &kevDueDate
+		finding.KevRequiredAction = &kevRequiredAction
 		// Add graph fields
 		finding.Path = []string{"my-app", "dependency-a", "example-pkg"}
 		depth := int32(2)
@@ -914,8 +899,8 @@ func ListEntrypoints() []Entrypoint {
 	for ep := range BindingProfiles {
 		eps = append(eps, ep)
 	}
-	sort.Slice(eps, func(i, j int) bool {
-		return string(eps[i]) < string(eps[j])
+	slices.SortFunc(eps, func(a, b Entrypoint) int {
+		return strings.Compare(string(a), string(b))
 	})
 	return eps
 }

@@ -218,11 +218,20 @@ func (p structuredPolicy) toCELSource() (string, error) {
 			return "", fmt.Errorf("invalid entrypoint %q", ep)
 		}
 	}
+	normalizedCommands := make([]string, 0, len(p.Commands))
+	seenCommands := map[string]struct{}{}
 	for _, cmd := range p.Commands {
 		if !IsAllowedCommand(cmd) {
 			return "", fmt.Errorf("invalid command %q", cmd)
 		}
+		normalized := NormalizeCommand(cmd)
+		if _, ok := seenCommands[normalized]; ok {
+			continue
+		}
+		seenCommands[normalized] = struct{}{}
+		normalizedCommands = append(normalizedCommands, normalized)
 	}
+	p.Commands = normalizedCommands
 	if p.Mode != "" {
 		mode := strings.ToLower(strings.TrimSpace(p.Mode))
 		if mode != "advisory" && mode != "enforce" {

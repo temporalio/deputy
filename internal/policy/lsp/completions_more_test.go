@@ -1,6 +1,7 @@
 package lsp
 
 import (
+	"strings"
 	"testing"
 
 	protocol "github.com/sourcegraph/go-lsp"
@@ -46,4 +47,24 @@ func TestCompletionPartialPrefix(t *testing.T) {
 	line := "when: pkg.v"
 	items := completionItems(line, len(line))
 	assertHasLabel(t, items, "version")
+}
+
+func TestCompletionProvidesPolicyCommands(t *testing.T) {
+	line := "commands: ["
+	items := completionItems(line, len(line))
+	assertHasLabel(t, items, "scan")
+	assertHasLabel(t, items, "sandbox")
+	assertHasLabel(t, items, "exec")
+	for _, item := range items {
+		if item.Label == "exec" && !strings.Contains(item.Detail, "alias") {
+			t.Fatalf("exec completion detail = %q, want alias guidance", item.Detail)
+		}
+	}
+}
+
+func TestCompletionProvidesPolicyEntrypoints(t *testing.T) {
+	line := "entrypoints: ["
+	items := completionItems(line, len(line))
+	assertHasLabel(t, items, "scan_vulnerability")
+	assertHasLabel(t, items, "sandbox_execution")
 }

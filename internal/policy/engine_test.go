@@ -176,6 +176,20 @@ func TestEvaluateAll_CommandFiltering(t *testing.T) {
 			command:  "scan",
 			wantSkip: true,
 		},
+		{
+			name: "legacy exec restriction matches sandbox command",
+			policyBody: `//! policy.commands = exec
+[{"action": "allow"}]`,
+			command:  "sandbox",
+			wantSkip: false,
+		},
+		{
+			name: "legacy exec request matches sandbox restriction",
+			policyBody: `//! policy.commands = sandbox
+[{"action": "allow"}]`,
+			command:  "exec",
+			wantSkip: false,
+		},
 	}
 
 	for _, tc := range tests {
@@ -198,6 +212,29 @@ func TestEvaluateAll_CommandFiltering(t *testing.T) {
 				t.Error("expected policy to run, but got no actions")
 			}
 		})
+	}
+}
+
+func TestEvaluateAllMap_NormalizesCommandInEnv(t *testing.T) {
+	eng, err := NewEngine([]Source{{
+		Name: "sandbox-env",
+		Body: `env.command == "sandbox"
+  ? [{"action": "allow"}]
+  : [{"action": "deny", "reason": env.command}]`,
+	}})
+	if err != nil {
+		t.Fatalf("NewEngine() error: %v", err)
+	}
+
+	actions, err := eng.EvaluateAllMap(t.Context(), nil, "exec", EntrypointSandboxExecution.String())
+	if err != nil {
+		t.Fatalf("EvaluateAllMap() error: %v", err)
+	}
+	if len(actions) != 1 {
+		t.Fatalf("expected 1 action, got %d", len(actions))
+	}
+	if got := actions[0].Type; got != ActionAllow {
+		t.Fatalf("action type = %q, want %q", got, ActionAllow)
 	}
 }
 
@@ -490,6 +527,14 @@ func TestShouldSkip(t *testing.T) {
 			wantSkip: true,
 		},
 		{
+			name: "legacy exec request matches sandbox filter",
+			pol: compiledPolicy{
+				commands: map[string]struct{}{"sandbox": {}},
+			},
+			command:  "exec",
+			wantSkip: false,
+		},
+		{
 			name: "entrypoint matches, no skip",
 			pol: compiledPolicy{
 				entrypoints: map[string]struct{}{"go_request": {}},
@@ -600,6 +645,7 @@ func TestNewSetFunc(t *testing.T) {
 }
 
 func TestDowngradeAdvisory(t *testing.T) {
+	statusForbidden := 403
 	tests := []struct {
 		name     string
 		actions  []Action
@@ -663,7 +709,7 @@ func TestDowngradeAdvisory(t *testing.T) {
 		{
 			name: "status cleared on downgrade",
 			actions: []Action{
-				{Type: "deny", Status: new(403)},
+				{Type: "deny", Status: &statusForbidden},
 			},
 			expected: []Action{
 				{Type: "warn", Status: nil, Reason: "advisory policy (originally deny)"},

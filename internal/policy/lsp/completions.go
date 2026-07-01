@@ -59,6 +59,34 @@ func completionItems(line string, cursor int) []protocol.CompletionItem {
 		}
 		return items
 	}
+	if strings.Contains(linePrefix, "commands") {
+		commands := policy.CanonicalCommands()
+		items := make([]protocol.CompletionItem, 0, len(commands)+1)
+		for _, command := range commands {
+			items = append(items, protocol.CompletionItem{
+				Label:  command,
+				Kind:   protocol.CIKEnum,
+				Detail: "Canonical Deputy policy command",
+			})
+		}
+		items = append(items, protocol.CompletionItem{
+			Label:  "exec",
+			Kind:   protocol.CIKEnum,
+			Detail: "Legacy alias for sandbox",
+		})
+		return items
+	}
+	if strings.Contains(linePrefix, "entrypoints") {
+		items := make([]protocol.CompletionItem, 0, len(policy.AllEntrypoints))
+		for _, entrypoint := range policy.AllEntrypoints {
+			items = append(items, protocol.CompletionItem{
+				Label:  entrypoint.String(),
+				Kind:   protocol.CIKEnum,
+				Detail: entrypoint.Category(),
+			})
+		}
+		return items
+	}
 	return nil
 }
 

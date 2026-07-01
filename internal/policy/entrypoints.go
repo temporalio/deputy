@@ -1,6 +1,9 @@
 package policy
 
-import "slices"
+import (
+	"slices"
+	"strings"
+)
 
 // Entrypoint represents a canonical policy evaluation entrypoint.
 // Using a distinct type provides compile-time safety and makes entrypoint
@@ -51,6 +54,23 @@ func (e Entrypoint) Category() string {
 		return "sandbox"
 	default:
 		return ""
+	}
+}
+
+// NormalizeCategory returns Deputy's canonical policy category for category.
+// It accepts legacy aliases kept for CLI/API compatibility, such as
+// "container" for "container_diff", "service" for "server", and "exec" for
+// "sandbox".
+func NormalizeCategory(category string) string {
+	switch strings.ToLower(strings.TrimSpace(category)) {
+	case "container":
+		return "container_diff"
+	case "service":
+		return "server"
+	case "exec":
+		return "sandbox"
+	default:
+		return strings.ToLower(strings.TrimSpace(category))
 	}
 }
 
@@ -244,7 +264,7 @@ var (
 	AllEntrypoints = slices.Concat(EntrypointsProxy, EntrypointsScan, EntrypointsDiff, EntrypointsContainerDiff, EntrypointsSBOM, EntrypointsFix, EntrypointsTriage, EntrypointsDockerfile, EntrypointsSecrets, EntrypointsGraph, EntrypointsService, EntrypointsSandbox)
 
 	allowedEntrypointsSet = buildEntrypointSet(AllEntrypoints)
-	allowedCommands       = []string{"proxy", "scan", "diff", "sbom", "fix", "triage", "secrets", "graph", "server", "sandbox", "exec"}
+	allowedCommands       = []string{"proxy", "scan", "diff", "sbom", "fix", "triage", "secrets", "graph", "server", "sandbox"}
 	allowedCommandsSet    = buildSet(allowedCommands)
 )
 
@@ -270,8 +290,25 @@ func IsAllowedEntrypoint(name string) bool {
 	return ok
 }
 
-// IsAllowedCommand reports whether the command is one of the known CLI/proxy commands.
+// NormalizeCommand returns Deputy's canonical policy command for command.
+// It accepts legacy aliases kept for policy bundle compatibility, such as
+// "exec" for the sandbox execution command.
+func NormalizeCommand(command string) string {
+	switch strings.ToLower(strings.TrimSpace(command)) {
+	case "exec":
+		return "sandbox"
+	default:
+		return strings.ToLower(strings.TrimSpace(command))
+	}
+}
+
+// IsAllowedCommand reports whether the command is one of the known policy commands.
 func IsAllowedCommand(cmd string) bool {
-	_, ok := allowedCommandsSet[cmd]
+	_, ok := allowedCommandsSet[NormalizeCommand(cmd)]
 	return ok
+}
+
+// CanonicalCommands returns the canonical policy command names.
+func CanonicalCommands() []string {
+	return slices.Clone(allowedCommands)
 }
