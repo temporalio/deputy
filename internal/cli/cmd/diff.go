@@ -147,8 +147,11 @@ Can be disabled with --skip-vuln-scan for faster execution.`,
 				outW = f
 			}
 
-			// Check if both arguments are container image references
-			// BUT only if they don't look like Git refs in the current repo context
+			// Check if both arguments are container image references.
+			// BUT only if they don't look like Git refs in the current repo context.
+			if len(args) == 2 && isMixedContainerDiffInContext(args[0], args[1], repo) {
+				return fmt.Errorf("base and target must both be Git refs or both be container image refs")
+			}
 			if len(args) == 2 && isContainerDiffInContext(args[0], args[1], repo) {
 				// Determine if using local daemon (--source docker-daemon or deprecated --local-daemon)
 				useDaemon := useLocalDaemon || source == "docker-daemon" || source == "daemon" || source == "local"

@@ -5,6 +5,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/spf13/cobra"
+
 	dependencyv1 "github.com/temporalio/deputy/gen/deputy/dependency/v1"
 )
 
@@ -66,6 +68,29 @@ func TestProtoPackagesToListItems(t *testing.T) {
 	}
 }
 
+func TestListDirectAliasRegistered(t *testing.T) {
+	root := &cobra.Command{Use: "deputy"}
+	AddListCommand(root, nil)
+
+	listCmd, _, err := root.Find([]string{"list"})
+	if err != nil {
+		t.Fatalf("find list command: %v", err)
+	}
+	if listCmd == nil {
+		t.Fatal("expected list command to be registered")
+	}
+
+	for _, name := range []string{"direct", "only-direct"} {
+		flag := listCmd.Flags().Lookup(name)
+		if flag == nil {
+			t.Fatalf("expected --%s flag to be registered", name)
+		}
+		if flag.DefValue != "false" {
+			t.Fatalf("expected --%s default false, got %q", name, flag.DefValue)
+		}
+	}
+}
+
 func TestProtoPackagesToListItems_NilPackage(t *testing.T) {
 	pkgs := []*dependencyv1.Package{
 		{Name: "foo", Version: "1.0", Ecosystem: "npm", Purl: "pkg:npm/foo@1.0", Direct: true},
@@ -88,6 +113,31 @@ func TestProtoPackagesToListItems_Empty(t *testing.T) {
 	items = protoPackagesToListItems([]*dependencyv1.Package{})
 	if len(items) != 0 {
 		t.Fatalf("expected 0 items for empty input, got %d", len(items))
+	}
+}
+
+func TestSortListItemsUsesStableIdentityOrder(t *testing.T) {
+	items := []ListItem{
+		{Name: "zeta", Version: "1.0.0", Ecosystem: "npm", PURL: "pkg:npm/zeta@1.0.0", IsDirect: false},
+		{Name: "alpha", Version: "2.0.0", Ecosystem: "npm", PURL: "pkg:npm/alpha@2.0.0", IsDirect: false},
+		{Name: "empty-transitive", Version: "1.0.0", Ecosystem: "npm", IsDirect: false},
+		{Name: "empty-direct", Version: "1.0.0", Ecosystem: "npm", IsDirect: true},
+		{Name: "alpha", Version: "1.0.0", Ecosystem: "npm", PURL: "pkg:npm/alpha@1.0.0", IsDirect: true},
+	}
+
+	sortListItems(items)
+
+	want := []string{
+		"empty-direct",
+		"empty-transitive",
+		"alpha",
+		"alpha",
+		"zeta",
+	}
+	for i := range want {
+		if items[i].Name != want[i] {
+			t.Fatalf("sorted item %d = %q, want %q; full order: %+v", i, items[i].Name, want[i], items)
+		}
 	}
 }
 

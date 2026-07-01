@@ -31,11 +31,6 @@ import (
 // unless we have explicit container schemes (docker://, oci://, etc.) or refs that clearly look
 // like container images (contain : with a tag, or registry domain with /).
 func isContainerDiffInContext(base, target, repoPath string) bool {
-	// If either ref has an explicit image scheme, it's definitely a container diff
-	if isImageTargetScheme(base) || isImageTargetScheme(target) {
-		return true
-	}
-
 	// Check if we're in a Git repository
 	if repoPath != "" {
 		if _, err := git.PlainOpen(repoPath); err == nil {
@@ -63,6 +58,25 @@ func isContainerDiffInContext(base, target, repoPath string) bool {
 	return isContainerDiff(base, target)
 }
 
+// isMixedContainerDiffInContext returns true when exactly one ref is clearly a
+// container image and the other should be treated as a Git ref or invalid image
+// ref. Callers use this to fail fast instead of routing a mixed pair to either
+// Git or container diff.
+func isMixedContainerDiffInContext(base, target, repoPath string) bool {
+	if repoPath != "" {
+		if _, err := git.PlainOpen(repoPath); err == nil {
+			return isExplicitContainerSignal(base) != isExplicitContainerSignal(target)
+		}
+	}
+	baseImage := isContainerImageRef(base)
+	targetImage := isContainerImageRef(target)
+	return baseImage != targetImage
+}
+
+func isExplicitContainerSignal(ref string) bool {
+	return isImageTargetScheme(ref) || looksLikeExplicitContainerImage(ref)
+}
+
 // looksLikeExplicitContainerImage returns true if the ref looks unambiguously like a container
 // image reference (has a tag with :, has a registry domain, etc.) rather than something that
 // might be a git ref.
@@ -74,7 +88,7 @@ func looksLikeExplicitContainerImage(ref string) bool {
 
 	// Explicit schemes are definitely container images (handled by isImageTargetScheme earlier)
 	if strings.Contains(ref, "://") {
-		return true
+		return isImageTargetScheme(ref)
 	}
 
 	// Has a tag separator - likely a container image (nginx:1.25, alpine:latest)
