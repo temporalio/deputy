@@ -202,7 +202,9 @@ $ deputy scan --filter "!vulnerability.package.locations.all(p, p.startsWith('.b
 ```
 
 To drop such paths from the scan altogether (so they never appear), use
-`--exclude-path` / `scan.exclude_paths` instead.
+`--exclude-path` / `scan.exclude_paths` instead. Local source scans also prune
+directories ignored by `.gitignore`; explicit exclude paths are for
+Deputy-specific pruning beyond normal working-tree ignores.
 
 **Severity constants:**
 - `severity.critical`
@@ -530,6 +532,10 @@ $ deputy scan --policy policy/severity.yaml --policy policy/licenses.yaml
 ## Output
 
 ### Text Format
+
+Vulnerability findings are displayed in a stable priority order: higher
+severity first, then direct dependencies, fixable findings, and package/ID
+tie-breakers.
 
 ```
 Scanned /path/to/repo @ HEAD (abc123d)

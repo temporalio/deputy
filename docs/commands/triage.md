@@ -19,7 +19,7 @@ deputy triage [repo] [flags]
 | Flag | Short | Default | Description |
 | --- | --- | --- | --- |
 | `--report` | | | Path to JSON scan report (use `-` for stdin) |
-| `--ref` | | `HEAD` | Git reference to scan |
+| `--ref` | | auto | Git reference to scan; omitted lets Deputy choose `HEAD` or the working tree |
 | `--ecosystems` | | all | Limit to specific ecosystems |
 | `--ignore-unfixed` | | `false` | Hide vulns without fixes |
 | `--published-before` | | | Date filter for vulnerabilities |

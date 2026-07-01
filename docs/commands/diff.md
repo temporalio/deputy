@@ -30,7 +30,7 @@ Deputy diff operates in two modes depending on the arguments:
 | **Git diff** | Arguments look like Git refs | `deputy diff main develop` |
 | **Container diff** | Arguments look like image refs | `deputy diff nginx:1.24 nginx:1.25` |
 
-Deputy auto-detects the mode based on whether references contain `/` with `:` (image pattern) or look like Git refs.
+Deputy auto-detects the mode based on whether references contain `/` with `:` (image pattern) or look like Git refs. The base and target must be the same kind of reference; mixed Git/container inputs such as `docker://nginx:1.24 main` are rejected instead of being guessed.
 
 ---
 

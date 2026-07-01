@@ -148,6 +148,19 @@ $ deputy pin update --ecosystems mise,asdf --allowed-host-bins /opt/homebrew/bin
 | `--skip-verification` | `false` | Alias for `--verification=off` |
 | `--concurrency` | `4` | Max parallel network requests |
 
+## JSON patch metadata
+
+When `--format json` is used after a non-dry-run `pin` or `pin update`, the
+report includes `changedFiles`, `stats.filesChanged`, and `patch`. These fields
+are derived only from files Deputy intentionally rewrote for successful
+`pinned` or `updated` results.
+
+Deputy captures before/after content for those files and builds the patch from
+that scoped set. It does not build the JSON patch from a repository-wide
+`git diff`, so unrelated checkout state such as case-collision churn, submodule
+gitlinks, filemode noise, or other pre-existing worktree changes is not included
+unless it is in a file Deputy actually rewrote.
+
 ## Verification modes
 
 When pinning GitHub Actions, each resolved commit SHA is checked against the GitHub API for fork/imposter provenance (signed? reachable from the default branch?). `--verification` controls how findings affect the run:

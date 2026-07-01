@@ -17,7 +17,7 @@ Deputy is intentionally pipeline-friendly: commands compose well with each other
 | [`diff`](diff.md) | Compare dependency changes between refs | `--skip-vuln-scan`, `--licenses` |
 | [`graph`](graph.md) | Visualize dependency graph | `--format`, `--depth`, `--focus`, subcommands: `why`, `needs` |
 | [`sbom`](sbom.md) | Generate CycloneDX/SPDX SBOMs | `--format`, `--ref`, `--enrich-licenses` |
-| [`list`](list.md) | Dump PURLs for scripting | `--format`, `--only-direct`, `--source`, `--platform` |
+| [`list`](list.md) | Dump PURLs for scripting | `--format`, `--direct`, `--source`, `--platform` |
 | [`pin`](pin.md) | Pin dependencies to immutable refs | `--ecosystems`, `--exclude`, `--dry-run`, subcommands: `check`, `verify`, `update` |
 | [`exec`](exec.md) | Run a command in a sandboxed runtime | `--runtime`, `--mode`, `--network`, `--exec-allow` |
 | [`policy`](policy.md) | Lint, test, bundle, evaluate policies | subcommands: `lint`, `test`, `eval`, `bundle` |
@@ -55,7 +55,7 @@ $ deputy graph --format dot | dot -Tpng -o deps.png
 $ deputy graph why lodash
 
 # List all dependencies as PURLs
-$ deputy list --format json | jq '.items[].purl'
+$ deputy list --format json | jq '.packages[].purl'
 
 # Validate policies before use
 $ deputy policy lint policy/*.yaml
@@ -73,7 +73,7 @@ $ deputy sbom --format protobom-json | deputy scan sbom -
 $ deputy scan --format json | deputy fix --report -
 
 # List deps, filter with jq
-$ deputy list --format json | jq '.items[] | select(.isDirect) | .purl'
+$ deputy list --format json | jq '.packages[] | select(.direct) | .purl'
 ```
 
 ## Exit Codes

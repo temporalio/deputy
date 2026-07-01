@@ -680,7 +680,7 @@ $ deputy scan --policy production-bundle.json
 | `vulnerability.package.direct` | bool | Whether the affected package is a direct dependency |
 | `vulnerability.advisory.fixed_versions` | []string | Available fix versions |
 | `vulnerabilities` | []object | List of vulnerabilities (in `scan_report` entrypoint) |
-| `env.command` | string | `scan`, `diff`, `proxy`, etc. |
+| `env.command` | string | Canonical command, such as `scan`, `diff`, `proxy`, `server`, or `sandbox` |
 | `env.entrypoint` | string | Current entrypoint (e.g., `scan_vulnerability`) |
 
 ### CEL Functions and Extensions

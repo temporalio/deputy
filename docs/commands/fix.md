@@ -20,7 +20,7 @@ deputy fix [repo] [flags]
 | --- | --- | --- | --- |
 | `--report` | | | Path to JSON scan report (use `-` for stdin) |
 | `--plan` | | | Path to existing remediation plan JSON |
-| `--ref` | | `HEAD` | Git reference to scan |
+| `--ref` | | auto | Git reference to scan; omitted lets Deputy choose `HEAD` or the working tree |
 | `--ecosystems` | | all | Limit to specific ecosystems |
 | `--exclude-path` | | | Directory glob to skip during the walk (repeatable; e.g. `.bin/**`). Unioned with `scan.exclude_paths` from config |
 | `--ignore-unfixed` | | `false` | Skip vulns without fixes |
@@ -70,6 +70,9 @@ $ deputy fix
 
 # Scan and immediately apply fixes
 $ deputy fix --apply .
+
+# Generate a plan for a remote repository at a specific ref
+$ deputy fix github.com/hashicorp/vagrant --ref main
 ```
 
 ### Plan Management

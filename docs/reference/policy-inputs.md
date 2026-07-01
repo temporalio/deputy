@@ -12,6 +12,7 @@ flowchart TB
         SBOM["deputy sbom"]
         Fix["deputy fix"]
         Proxy["deputy proxy"]
+        Exec["deputy exec"]
     end
 
     subgraph Entrypoints["Entrypoints"]
@@ -20,6 +21,7 @@ flowchart TB
         SBOMEP["sbom_report<br/>sbom_component"]
         FixEP["fix_plan<br/>fix_plan_step"]
         ProxyEP["go_artifact_request<br/>npm_artifact_request<br/>..."]
+        ExecEP["sandbox_execution"]
     end
 
     subgraph Policy["Policy Engine"]
@@ -33,16 +35,17 @@ flowchart TB
     SBOM --> SBOMEP
     Fix --> FixEP
     Proxy --> ProxyEP
+    Exec --> ExecEP
 
-    ScanEP & DiffEP & SBOMEP & FixEP & ProxyEP --> Match
+    ScanEP & DiffEP & SBOMEP & FixEP & ProxyEP & ExecEP --> Match
     Match --> Eval --> Action
 
     classDef cmd fill:#e3f2fd,stroke:#1565c0
     classDef ep fill:#e8f5e9,stroke:#2e7d32
     classDef policy fill:#fff3e0,stroke:#e65100
 
-    class Scan,Diff,SBOM,Fix,Proxy cmd
-    class ScanEP,DiffEP,SBOMEP,FixEP,ProxyEP ep
+    class Scan,Diff,SBOM,Fix,Proxy,Exec cmd
+    class ScanEP,DiffEP,SBOMEP,FixEP,ProxyEP,ExecEP ep
     class Match,Eval,Action policy
 ```
 
@@ -61,11 +64,26 @@ Each command emits one or more entrypoints when `--policy` is provided:
 | `deputy triage` | `triage_report`, `triage_cluster` |
 | `deputy proxy` | `go_artifact_request`, `npm_artifact_request`, `pypi_artifact_request`, `rubygems_artifact_request`, `oci_artifact_request` |
 | `deputy server` (API requests) | `service_scan_request`, `service_list_request`, `service_sbom_request`, `service_diff_request`, `service_secrets_request`, `service_graph_request` |
+| `deputy exec` | `sandbox_execution` |
 
 > [!NOTE]
 > `deputy diff` auto-detects whether you're comparing git refs or container images based on the reference format. Container image refs look like `image:tag` or contain registry paths (e.g., `ghcr.io/org/app:v1`).
 
 Every evaluation includes `env.command` and `env.entrypoint`, so a single policy can branch by context. Policies can also prefilter with `entrypoints`, `commands`, and `ecosystems`.
+
+For sandbox policies, `env.command` is `sandbox` even when the operation is started by `deputy exec`. `commands: ["exec"]` is accepted as a legacy alias in policy bundles, but new policies should use `commands: ["sandbox"]`.
+
+## Sandbox Entrypoints
+
+`deputy exec --policy` evaluates `sandbox_execution` before a sandboxed command starts. Deputy also defines `sandbox_command` and `sandbox_network` as canonical sandbox policy entrypoints for runtime/plugin integrations that evaluate individual commands or network requests.
+
+Sandbox entrypoint variables:
+
+| Entrypoint | Required variables | Optional variables |
+| --- | --- | --- |
+| `sandbox_execution` | `command`, `workspace_dir`, `requested_config`, `env` | `context`, `source` |
+| `sandbox_command` | `command`, `sandbox_config`, `env` | `context` |
+| `sandbox_network` | `host`, `port`, `protocol`, `sandbox_config`, `env` | `context` |
 
 ## Canonical ecosystems
 

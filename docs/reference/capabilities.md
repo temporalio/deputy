@@ -49,11 +49,15 @@ OSV ecosystem (e.g. node, python) are inventoried but not vuln-scanned. See the
 | **Graph resolution** | ✓ | - | - | ✓ | - | ✓ | - | - |
 | **JSON output** | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | - |
 | **SARIF output** | ✓ | - | - | - | - | - | - | - |
-| **Remote repos** | ✓ | - | ✓ | ✓ | ✓ | ✓ | - | - |
+| **Remote repos** | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | - |
 | **Container images** | ✓ | - | ✓ | - | ✓ | - | - | ✓ |
-| **Git ref targeting** | ✓ | - | ✓ | ✓ | ✓ | ✓ | - | - |
+| **Git ref targeting** | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | - |
 | **Time-travel (--as-of)** | ✓ | - | ✓ | - | - | - | - | - |
 | **AI agent support** | - | ✓ | - | - | - | - | ✓ | - |
+
+`deputy fix` supports remote repositories and Git refs when generating a
+remediation plan. Applying commands or running an agent still requires a local
+repository checkout.
 
 ## Output Format Matrix
 
@@ -83,24 +87,47 @@ OSV ecosystem (e.g. node, python) are inventoried but not vuln-scanned. See the
 
 ## Policy Entrypoint Matrix
 
-Policies can be evaluated at different points depending on the command:
+Policies can be evaluated at different points depending on the canonical policy category:
 
-| Entrypoint | scan | diff | sbom | proxy | Description |
-|------------|:----:|:----:|:----:|:-----:|-------------|
-| `scan_report` | ✓ | - | - | - | Full scan results |
-| `scan_vulnerability` | ✓ | - | - | - | Per-vulnerability |
-| `diff_report` | - | ✓ | - | - | Full diff results |
-| `diff_dependency_change` | - | ✓ | - | - | Per-package change |
-| `diff_vulnerability` | - | ✓ | - | - | Vuln in changed deps |
-| `container_diff_report` | - | ✓ | - | - | Container image diff |
-| `sbom_report` | - | - | ✓ | - | SBOM generation |
-| `go_artifact_request` | - | - | - | ✓ | Go module download |
-| `npm_artifact_request` | - | - | - | ✓ | npm package download |
-| `pypi_artifact_request` | - | - | - | ✓ | PyPI package download |
-| `rubygems_artifact_request` | - | - | - | ✓ | RubyGems download |
-| `oci_artifact_request` | - | - | - | ✓ | Container image pull |
-| `dockerfile_report` | ✓ | - | - | - | Dockerfile analysis |
-| `dockerfile_stage` | ✓ | - | - | - | Per-stage analysis |
+| Entrypoint | Category | Description |
+|------------|---------|-------------|
+| `scan_report` | scan | Full scan results |
+| `scan_vulnerability` | scan | Per-vulnerability |
+| `dockerfile_report` | dockerfile | Dockerfile analysis |
+| `dockerfile_stage` | dockerfile | Per-stage analysis |
+| `diff_report` | diff | Full git diff results |
+| `diff_dependency_change` | diff | Per-package change |
+| `diff_vulnerability` | diff | Vulnerability in changed dependencies |
+| `container_diff_report` | container_diff | Full container image diff |
+| `container_diff_change` | container_diff | Container package change |
+| `container_diff_vulnerability` | container_diff | Container vulnerability difference |
+| `container_diff_layer` | container_diff | Container layer difference |
+| `container_diff_config` | container_diff | Container configuration difference |
+| `sbom_report` | sbom | SBOM generation |
+| `sbom_component` | sbom | SBOM component |
+| `fix_plan` | fix | Remediation plan |
+| `fix_plan_step` | fix | Remediation plan step |
+| `triage_report` | triage | Vulnerability triage report |
+| `triage_cluster` | triage | Vulnerability triage cluster |
+| `secrets_report` | secrets | Secret scan report |
+| `secrets_finding` | secrets | Individual secret finding |
+| `graph_report` | graph | Dependency graph report |
+| `graph_node` | graph | Dependency graph node |
+| `graph_edge` | graph | Dependency graph edge |
+| `go_artifact_request` | proxy | Go module request |
+| `npm_artifact_request` | proxy | npm package request |
+| `pypi_artifact_request` | proxy | PyPI package request |
+| `rubygems_artifact_request` | proxy | RubyGems package request |
+| `oci_artifact_request` | proxy | OCI artifact request |
+| `service_scan_request` | server | API scan authorization |
+| `service_list_request` | server | API list authorization |
+| `service_sbom_request` | server | API SBOM authorization |
+| `service_diff_request` | server | API diff authorization |
+| `service_secrets_request` | server | API secrets authorization |
+| `service_graph_request` | server | API graph authorization |
+| `sandbox_execution` | sandbox | Sandbox execution authorization |
+| `sandbox_command` | sandbox | Runtime/plugin command authorization |
+| `sandbox_network` | sandbox | Runtime/plugin network authorization |
 
 ## Enrichment Options
 
