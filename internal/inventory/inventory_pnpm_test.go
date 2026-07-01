@@ -85,6 +85,70 @@ func TestScanPackagesWorking_PnpmLock(t *testing.T) {
 	}
 }
 
+func TestScanPackagesWorking_UseGitignoreSkipsIgnoredLocalPackages(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, ".gitignore"), []byte(".bin\n"), 0o644); err != nil {
+		t.Fatalf("write .gitignore: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Join(dir, ".bin"), 0o755); err != nil {
+		t.Fatalf("mkdir .bin: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, ".bin", "package.json"), []byte("{\n  \"name\": \"tool-cache\",\n  \"version\": \"1.0.0\"\n}\n"), 0o644); err != nil {
+		t.Fatalf("write package.json: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, ".bin", "pnpm-lock.yaml"), []byte(pnpmLockFixture), 0o644); err != nil {
+		t.Fatalf("write pnpm-lock.yaml: %v", err)
+	}
+
+	ws, err := workspace.NewDir(dir)
+	if err != nil {
+		t.Fatalf("workspace: %v", err)
+	}
+	defer ws.Close()
+
+	pkgs, err := ScanPackagesWorking(t.Context(), ws, ScanOptions{})
+	if err != nil {
+		t.Fatalf("ScanPackagesWorking without gitignore: %v", err)
+	}
+	if len(pkgs) == 0 {
+		t.Fatalf("expected ignored package to be visible when UseGitignore is false")
+	}
+
+	pkgs, err = ScanPackagesWorking(t.Context(), ws, ScanOptions{UseGitignore: true})
+	if err != nil {
+		t.Fatalf("ScanPackagesWorking with gitignore: %v", err)
+	}
+	if len(pkgs) != 0 {
+		t.Fatalf("expected ignored package to be skipped, got %d packages", len(pkgs))
+	}
+}
+
+func TestScanPackagesWorking_UseGitignoreIgnoredForVirtualWorkspaces(t *testing.T) {
+	ws := workspace.NewMemory()
+	defer ws.Close()
+
+	if err := ws.WriteFile(".gitignore", []byte(".bin\n"), 0o644); err != nil {
+		t.Fatalf("write .gitignore: %v", err)
+	}
+	if err := ws.MkdirAll(".bin", 0o755); err != nil {
+		t.Fatalf("mkdir .bin: %v", err)
+	}
+	if err := ws.WriteFile(".bin/package.json", []byte("{\n  \"name\": \"tool-cache\",\n  \"version\": \"1.0.0\"\n}\n"), 0o644); err != nil {
+		t.Fatalf("write package.json: %v", err)
+	}
+	if err := ws.WriteFile(".bin/pnpm-lock.yaml", []byte(pnpmLockFixture), 0o644); err != nil {
+		t.Fatalf("write pnpm-lock.yaml: %v", err)
+	}
+
+	pkgs, err := ScanPackagesWorking(t.Context(), ws, ScanOptions{UseGitignore: true})
+	if err != nil {
+		t.Fatalf("ScanPackagesWorking: %v", err)
+	}
+	if len(pkgs) == 0 {
+		t.Fatalf("expected virtual workspace packages to remain visible")
+	}
+}
+
 func TestScanPackagesAtCommitSnapshot_PnpmLock(t *testing.T) {
 	_, repo := writePnpmRepo(t, pnpmLockFixture)
 	head, err := repo.Head()

@@ -211,8 +211,15 @@ func CollectRepository(ctx context.Context, target, ref string, refProvided bool
 		effectiveRef = "HEAD~0"
 	}
 
-	// Scan packages
-	pkgs, err := ScanPackagesWorking(ctx, resolved.workspace, ScanOptions{Ecosystems: opts.Ecosystems, ExcludePaths: opts.ExcludePaths})
+	// Scan packages. For local working trees, honor .gitignore directory
+	// rules so generated artifacts and local tool caches do not pollute source
+	// inventory. Remote clones contain tracked contents only, so .gitignore is
+	// left out there.
+	pkgs, err := ScanPackagesWorking(ctx, resolved.workspace, ScanOptions{
+		Ecosystems:   opts.Ecosystems,
+		ExcludePaths: opts.ExcludePaths,
+		UseGitignore: !resolved.cloned,
+	})
 	if err != nil {
 		resolved.cleanup()
 		otel.SetSpanError(span, err)
@@ -258,7 +265,11 @@ func CollectDirectory(ctx context.Context, path string, opts Options) (*Executio
 		return nil, fmt.Errorf("failed to open directory: %w", err)
 	}
 
-	pkgs, err := ScanPackagesWorking(ctx, ws, ScanOptions{Ecosystems: opts.Ecosystems, ExcludePaths: opts.ExcludePaths})
+	pkgs, err := ScanPackagesWorking(ctx, ws, ScanOptions{
+		Ecosystems:   opts.Ecosystems,
+		ExcludePaths: opts.ExcludePaths,
+		UseGitignore: true,
+	})
 	if err != nil {
 		_ = ws.Close()
 		otel.SetSpanError(span, err)

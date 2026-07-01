@@ -14,6 +14,7 @@ import (
 	git "github.com/go-git/go-git/v5"
 	"github.com/go-git/go-git/v5/plumbing"
 	"github.com/go-git/go-git/v5/plumbing/filemode"
+	"github.com/go-git/go-git/v5/plumbing/format/gitignore"
 	"github.com/go-git/go-git/v5/plumbing/object"
 	scalibr "github.com/google/osv-scalibr"
 	"github.com/google/osv-scalibr/extractor"
@@ -44,6 +45,11 @@ func init() {
 // ScanOptions configures how scalibr scans a workspace.
 type ScanOptions struct {
 	Ecosystems []string
+	// UseGitignore applies .gitignore handling for real local source workspaces.
+	// Directory ignores are enforced before scanning; SCALIBR handles file-level
+	// ignores best-effort. The option is ignored for virtual workspaces because
+	// commit snapshots already represent exact tracked contents.
+	UseGitignore bool
 	// DetectBaseImage enables base image detection for container image scans.
 	// When true, the baseimage enricher queries deps.dev to determine if layers
 	// belong to known base images, populating LayerDetails.InBaseImage.
@@ -109,15 +115,28 @@ func scanWorkspace(ctx context.Context, ws workspace.FS, opts ScanOptions) ([]*e
 	// Use the Scanner adapter to isolate scalibr dependencies
 	scanner := workspace.ToScanner(ws)
 	cfg := &scalibr.ScanConfig{ScanRoots: scanner.ScanRoots(), Plugins: plugins, Capabilities: cap}
+	if opts.UseGitignore && !ws.IsVirtual() {
+		cfg.UseGitignore = true
+	}
+
+	// Compile .gitignore once and reuse it for both directory pruning and
+	// post-scan package-location filtering, avoiding a second workspace walk.
+	var ignoredDirs gitignore.Matcher
+	if opts.UseGitignore && !ws.IsVirtual() {
+		ignoredDirs, err = compileWorkspaceGitignore(ws)
+		if err != nil {
+			return nil, err
+		}
+	}
 
 	// Prune excluded directory subtrees from the walk (e.g., vendored tool
 	// binaries under .bin). Patterns are compiled up front so a malformed glob
 	// surfaces as a scan error rather than silently scanning everything.
-	if len(opts.ExcludePaths) > 0 {
-		skip, err := CompileExcludePaths(opts.ExcludePaths)
-		if err != nil {
-			return nil, err
-		}
+	skip, err := compileScanSkipDirGlob(ws, opts, ignoredDirs)
+	if err != nil {
+		return nil, err
+	}
+	if skip != nil {
 		cfg.SkipDirGlob = skip
 	}
 
@@ -129,6 +148,9 @@ func scanWorkspace(ctx context.Context, ws workspace.FS, opts ScanOptions) ([]*e
 	}
 	if len(extras) > 0 {
 		pkgs = append(pkgs, extras...)
+	}
+	if ignoredDirs != nil {
+		pkgs = filterGitignoredPackageLocations(ws, pkgs, ignoredDirs)
 	}
 	if scanErr := summarizeScanFailures(results); scanErr != nil {
 		if len(pkgs) > 0 {
