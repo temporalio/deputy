@@ -45,13 +45,25 @@ func TestConfig_GetMode(t *testing.T) {
 
 func TestConfig_Validate(t *testing.T) {
 	tests := []struct {
-		name    string
-		config  *Config
-		wantErr bool
+		name            string
+		config          *Config
+		wantErr         bool
+		wantErrContains string
 	}{
-		{"nil config", nil, false},
-		{"disabled mode without keys", &Config{Mode: "disabled"}, false},
-		{"clock skew too large", &Config{ClockSkew: 10 * time.Minute}, true},
+		{name: "nil config", config: nil, wantErr: false},
+		{name: "disabled mode without keys", config: &Config{Mode: "disabled"}, wantErr: false},
+		{
+			name:            "clock skew negative",
+			config:          &Config{ClockSkew: -time.Second},
+			wantErr:         true,
+			wantErrContains: "non-negative",
+		},
+		{
+			name:            "clock skew too large",
+			config:          &Config{ClockSkew: 10 * time.Minute},
+			wantErr:         true,
+			wantErrContains: "maximum",
+		},
 	}
 
 	for _, tt := range tests {
@@ -59,6 +71,9 @@ func TestConfig_Validate(t *testing.T) {
 			err := tt.config.Validate()
 			if (err != nil) != tt.wantErr {
 				t.Errorf("Validate() error = %v, wantErr %v", err, tt.wantErr)
+			}
+			if tt.wantErrContains != "" && (err == nil || !strings.Contains(err.Error(), tt.wantErrContains)) {
+				t.Errorf("Validate() error = %v, want %q", err, tt.wantErrContains)
 			}
 		})
 	}
