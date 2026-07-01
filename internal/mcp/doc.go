@@ -79,15 +79,59 @@
 //
 // # Tool Details
 //
+// ## get_server_info
+//
+// Returns build and process metadata for the running Deputy MCP server. Agents
+// should call this when verifying that a restarted MCP process picked up a new
+// local build. The response includes the Deputy version, process ID, start time,
+// registered tools, and configured default exclude paths.
+//
+// ## explain_vulnerability
+//
+// Retrieves full advisory details for one vulnerability ID. referenceLimit
+// optionally caps the returned reference list; omit it or pass a negative value
+// for all references, or pass 0 to omit references while keeping
+// referenceCount/referencesTruncated metadata.
+//
+// ## explain_vulnerabilities
+//
+// Retrieves full advisory details for multiple IDs with partial-success
+// semantics. Found advisories are returned in input order. Missing IDs are
+// reported as stable per-ID not-found strings instead of raw upstream OSV HTTP
+// response bodies. referenceLimit has the same per-vulnerability semantics as
+// explain_vulnerability.
+//
+// ## scan_package
+//
+// Checks one package version for known vulnerabilities. Prefer purl when the
+// package came from another Deputy MCP result; split name/version/ecosystem
+// fields are supported for manually entered packages. The result contains
+// compact vulnerability summaries; call explain_vulnerability with an ID when
+// the full advisory details or complete reference list are needed. Severity is
+// a canonical CRITICAL/HIGH/MEDIUM/LOW/UNKNOWN label, and timestamps are RFC3339
+// when present. Vulnerability arrays are ordered by severity, directness,
+// fixability, and stable package/ID tie-breakers.
+//
+// Input:
+//   - purl: Optional Package URL, e.g. "pkg:npm/lodash@4.17.21"
+//   - name: Package name, or a pkg: PURL when purl is not set
+//   - version: Package version, required unless purl or name includes @version
+//   - ecosystem: Package ecosystem, required unless purl is provided
+//
 // ## scan_directory
 //
 // Scans a local directory for vulnerabilities by analyzing dependency manifests
 // (go.mod, package.json, requirements.txt, etc.). Returns vulnerability counts
-// by severity and detailed information about each finding.
+// by severity and compact information about each finding.
 //
 // Input:
 //   - path: Path to the directory to scan (required)
+//   - ref: Optional Git reference, branch, tag, or commit for repository paths
 //   - ecosystems: Optional list of ecosystems to scan (e.g., ["go", "npm"])
+//   - excludePaths: Optional directory globs to skip during filesystem walks
+//
+// For Git repository snapshots, output echoes ref, effectiveRef, and commit
+// when Deputy's target resolver provides that metadata.
 //
 // ## scan_container
 //
@@ -105,29 +149,55 @@
 //
 // Input:
 //   - path: Path to the directory (required)
-//   - direct_only: If true, only return direct dependencies
+//   - directOnly: If true, only return direct dependencies
+//   - ref: Optional Git reference, branch, tag, or commit for repository paths
 //   - ecosystems: Optional ecosystem filter
+//   - excludePaths: Optional directory globs to skip during filesystem walks
+//
+// Output counts:
+//   - total/direct/transitive count returned dependencies after filters
+//   - totalDiscovered/directDiscovered/transitiveDiscovered count the full
+//     discovered inventory before the directOnly display filter
+//   - dependencies[].manifestRefs preserves structured source identity,
+//     including package manager, dependency groups, and the original manifest
+//     component key when it differs from the vulnerability package name
+//   - dependencies are sorted by PURL, then directness, name, version, and
+//     ecosystem for stable repeated agent calls
+//   - ref/effectiveRef/commit echo Git snapshot identity when available
 //
 // ## generate_sbom
 //
-// Generates a Software Bill of Materials for a directory or repository.
+// Generates a Software Bill of Materials for a local directory or repository
+// checkout.
 // Supports CycloneDX, SPDX, and Protobom JSON formats.
 //
 // Input:
-//   - path: Path to the directory or repository (required)
+//   - path: Local directory or local repository checkout (required)
 //   - ref: Git reference (branch, tag, commit). Defaults to HEAD.
 //   - format: Output format (cyclonedx-json, spdx-json, protobom-json)
-//   - enrich_licenses: Enable license enrichment from deps.dev
+//   - enrichLicenses: Enable license enrichment from deps.dev
+//   - excludePaths: Optional directory globs to skip during filesystem walks
 //
 // ## get_remediation
 //
 // Analyzes vulnerabilities and provides remediation commands. For each
 // vulnerable dependency with a known fix, returns the appropriate package
-// manager command to upgrade.
+// manager command to upgrade. Commands include package identity fields when
+// available so agents can follow up with graph_why using a PURL or package
+// name instead of parsing command text. Indirect migration hints tell agents
+// when graph_why needs resolveTransitives enabled for precise transitive edges.
+// Hints are adapted for MCP tools rather than CLI-only flags. Vulnerability
+// counts are reported separately from command counts because multiple
+// vulnerabilities can share one deduplicated remediation command.
 //
 // Input:
 //   - path: Path to the directory (required)
+//   - ref: Optional Git reference, branch, tag, or commit for repository paths
 //   - ecosystems: Optional ecosystem filter
+//   - excludePaths: Optional directory globs to skip during filesystem walks
+//
+// For Git repository snapshots, output echoes ref, effectiveRef, and commit
+// when Deputy's target resolver provides that metadata.
 //
 // ## analyze_dependency_graph
 //
@@ -137,8 +207,23 @@
 //
 // Input:
 //   - path: Path to the directory (required)
-//   - target_purl: Optional PURL to find paths to
+//   - targetPurl: Optional PURL to find paths to
+//   - ref: Optional Git reference, branch, tag, or commit for repository paths
 //   - ecosystems: Optional ecosystem filter
+//   - excludePaths: Optional directory globs to skip during filesystem walks
+//   - resolveTransitives: If true, use package registry, deps.dev, and Git
+//     lookups for more precise transitive edges; default false uses local
+//     files only
+//   - extended: If true, include extended graph metadata where supported, such
+//     as Go import status for required and declared modules
+//
+// When targetPurl is provided, output includes target.found, target.pathCount,
+// matched target PURLs and nodes, and a message so agents can distinguish
+// absent packages from packages that are present but disconnected/pathless.
+// vulnerablePaths is capped at 50 returned examples; use vulnerablePathCount
+// and vulnerablePathsTruncated to detect sampling. pathsToTarget is capped at
+// 20 returned examples; use target.pathCount and pathsToTargetTruncated for the
+// full target-path count.
 //
 // ## graph_why
 //
@@ -148,9 +233,22 @@
 //
 // Input:
 //   - path: Path to the directory (required)
-//   - package: Package name to trace (e.g., "lodash", "golang.org/x/crypto")
-//   - show_all: Show all paths, not just shortest (default: false)
+//   - package: Package name, name@version, or PURL to trace
+//   - ref: Optional Git reference, branch, tag, or commit for repository paths
+//   - showAll: Return up to 100 path examples instead of the default 10
 //   - ecosystems: Optional ecosystem filter
+//   - excludePaths: Optional directory globs to skip during filesystem walks
+//   - resolveTransitives: If true, use package registry, deps.dev, and Git
+//     lookups for more precise transitive edges; default false uses local
+//     files only
+//   - extended: If true, include extended graph metadata where supported, such
+//     as Go import status for required and declared modules
+//
+// Output includes matchedNode even when no dependency path is found, so agents
+// can inspect the matched package's PURL, directness, depth, disconnected
+// status, and import status before choosing the next remediation step.
+// paths is capped at 10 returned examples by default or 100 when showAll=true;
+// use pathCount and pathsTruncated to detect sampling.
 //
 // ## graph_needs
 //
@@ -159,18 +257,39 @@
 //
 // Input:
 //   - path: Path to the directory (required)
-//   - package: Package name to find dependents of
+//   - package: Package name, name@version, or PURL to find dependents of
+//   - ref: Optional Git reference, branch, tag, or commit for repository paths
 //   - ecosystems: Optional ecosystem filter
+//   - excludePaths: Optional directory globs to skip during filesystem walks
+//   - resolveTransitives: If true, use package registry, deps.dev, and Git
+//     lookups for more precise transitive edges; default false uses local
+//     files only
+//   - extended: If true, include extended graph metadata where supported, such
+//     as Go import status for required and declared modules
+//
+// Output includes matchedNode (as in graph_why) so agents can inspect the
+// matched package's PURL, directness, depth, and import status even when the
+// dependents list is empty (for example a direct/root dependency).
 //
 // ## triage_vulnerabilities
 //
 // Prioritizes and summarizes vulnerabilities by severity, exploitability, and
 // fixability to help focus remediation efforts. Returns recommendations for
-// addressing the most critical issues.
+// addressing the most critical issues. Direct/transitive fixable counts are
+// reported separately so agents do not confuse a direct unfixable finding with
+// a transitive fixable one. Unknown severity findings are counted explicitly so
+// severity totals add up to the overall vulnerability count.
 //
 // Input:
 //   - path: Path to the directory (required)
+//   - ref: Optional Git reference, branch, tag, or commit for repository paths
 //   - ecosystems: Optional ecosystem filter
+//   - excludePaths: Optional directory globs to skip during filesystem walks
+//
+// Output:
+//   - vulnerabilities[].purl: Package URL for exact follow-up with graph_why,
+//     graph_needs, or scan_package when available
+//   - ref/effectiveRef/commit echo Git snapshot identity when available
 //
 // ## diff_refs
 //
@@ -179,8 +298,16 @@
 // vulnerability analysis.
 //
 // Input:
-//   - path: Path to repository (required for Git refs, optional for container diff)
-//   - base_ref: Base Git reference or container image
-//   - target_ref: Target Git reference or container image to compare against
+//   - path: Path to repository (required for Git refs; omit for container diff)
+//   - baseRef: Base Git reference or container image
+//   - targetRef: Target Git reference or container image to compare against
+//   - platform: Optional platform for container image diffs
 //   - ecosystems: Optional ecosystem filter (for Git diffs)
+//   - excludePaths: Optional directory globs to skip during Git ref scans
+//
+// baseRef and targetRef must be the same kind: either both Git refs or both
+// container image refs. Common branch names such as main and HEAD are treated
+// as Git refs and require path. Dependency changes are sorted with direct
+// packages first, then by change type, ecosystem, package name, PURL, and
+// versions for stable repeated agent calls.
 package mcp
