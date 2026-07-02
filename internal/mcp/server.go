@@ -142,6 +142,7 @@ const serverInstructions = "Deputy is a supply-chain security engine. Its tools 
 	"- List-like outputs are capped and set a `*Truncated` flag alongside a full count (e.g. `pathCount` with `pathsTruncated`); check them before assuming a result is complete. Ordering is deterministic across calls.\n" +
 	"- A clean target reports `clean: true` with an empty findings list — this is success, not an error.\n" +
 	"- A package absent from the graph is a normal `found: false` result (with a `matchedNode` when the package is present but has no paths), not an error.\n" +
+	"- Scan results include a `coverage` block: `covered` lists (ecosystem, artifact) combinations an advisory source answered for, `uncovered` lists those none could (e.g. container base images). Uncovered means not-checked, not safe. Findings carry `sources` (provenance, e.g. `[\"osv\"]`) and `kind` (`malware` vs vulnerability).\n" +
 	"\n" +
 	"Typical workflow\n" +
 	"- Assess: `scan_directory` then `triage_vulnerabilities` to rank findings by severity and fixability.\n" +
@@ -1325,8 +1326,10 @@ type VulnExplanation struct {
 	Aliases             []string         `json:"aliases"`
 	Summary             string           `json:"summary"`
 	Details             string           `json:"details,omitempty"`
+	Kind                string           `json:"kind,omitempty"`
 	Severity            string           `json:"severity"`
 	SeverityType        string           `json:"severityType,omitempty"`
+	Sources             []string         `json:"sources,omitempty"`
 	FixedVersions       []string         `json:"fixedVersions"`
 	PackageFixes        []VulnPackageFix `json:"packageFixes"`
 	ResolvedFix         *VulnFixVerdict  `json:"resolvedFix,omitempty"`
@@ -1400,8 +1403,25 @@ type DirectoryScanResult struct {
 	VulnerabilitiesBySeverity map[string]int    `json:"vulnerabilitiesBySeverity"`
 	Vulnerabilities           []VulnExplanation `json:"vulnerabilities"`
 	Clean                     bool              `json:"clean"`
+	Coverage                  *MCPCoverage      `json:"coverage,omitempty"`
 	ScanTime                  string            `json:"scanTime"`
 	ScanTimeMs                int64             `json:"scanTimeMs"`
+}
+
+// MCPCoverage reports which (ecosystem, artifact) combinations advisory sources
+// answered for, and which had none. Uncovered entries are informational, not
+// errors: they tell an agent what a clean result did and did not check.
+type MCPCoverage struct {
+	Covered   []MCPCoverageEntry `json:"covered,omitempty"`
+	Uncovered []MCPCoverageEntry `json:"uncovered,omitempty"`
+}
+
+// MCPCoverageEntry is one (ecosystem, artifact) coverage record.
+type MCPCoverageEntry struct {
+	Ecosystem    string   `json:"ecosystem"`
+	Artifact     string   `json:"artifact"`
+	Sources      []string `json:"sources,omitempty"`
+	PackageCount int      `json:"packageCount"`
 }
 
 // ListDependenciesInput is the input for the list_dependencies tool.
@@ -1654,8 +1674,10 @@ type TriageInput struct {
 // TriagedVuln represents a prioritized vulnerability.
 type TriagedVuln struct {
 	ID             string           `json:"id"`
+	Kind           string           `json:"kind,omitempty"`
 	Severity       string           `json:"severity"`
 	SeverityType   string           `json:"severityType,omitempty"`
+	Sources        []string         `json:"sources,omitempty"`
 	Package        string           `json:"package"`
 	Version        string           `json:"version"`
 	PURL           string           `json:"purl,omitempty"`
@@ -1706,6 +1728,7 @@ type ContainerScanResult struct {
 	VulnerabilitiesBySeverity map[string]int    `json:"vulnerabilitiesBySeverity"`
 	Vulnerabilities           []VulnExplanation `json:"vulnerabilities"`
 	Clean                     bool              `json:"clean"`
+	Coverage                  *MCPCoverage      `json:"coverage,omitempty"`
 	ScanTime                  string            `json:"scanTime"`
 	ScanTimeMs                int64             `json:"scanTimeMs"`
 }
@@ -2210,6 +2233,7 @@ func (s *Server) scanDirectory(ctx context.Context, req *mcp.CallToolRequest, ar
 		},
 		Vulnerabilities: make([]VulnExplanation, 0),
 		Clean:           consolidated.Stats.GetUnique() == 0,
+		Coverage:        mcpCoverageFromProto(scanResult.GetCoverage()),
 		ScanTime:        time.Since(startTime).String(),
 		ScanTimeMs:      time.Since(startTime).Milliseconds(),
 	}
@@ -3102,8 +3126,10 @@ func (s *Server) triageVulnerabilities(ctx context.Context, req *mcp.CallToolReq
 
 		triaged := TriagedVuln{
 			ID:             v.PrimaryID,
+			Kind:           mcpFindingKind(v.Kind),
 			Severity:       severity,
 			SeverityType:   strings.TrimSpace(v.SeverityType),
+			Sources:        stringsForMCP(v.Sources),
 			Package:        v.Package,
 			Version:        v.Version,
 			PURL:           v.PURL,
@@ -3321,6 +3347,7 @@ func (s *Server) scanContainer(ctx context.Context, req *mcp.CallToolRequest, ar
 		},
 		Vulnerabilities: make([]VulnExplanation, 0),
 		Clean:           consolidated.Stats.GetUnique() == 0,
+		Coverage:        mcpCoverageFromProto(scanResult.GetCoverage()),
 		ScanTime:        time.Since(startTime).String(),
 		ScanTimeMs:      time.Since(startTime).Milliseconds(),
 	}
@@ -4074,8 +4101,10 @@ func vulnExplanationFromConsolidated(v vulnerability.Consolidated, opts vulnExpl
 		ID:            v.PrimaryID,
 		Aliases:       stringsForMCP(v.SecondaryIDs),
 		Summary:       v.Summary,
+		Kind:          mcpFindingKind(v.Kind),
 		Severity:      severityStringForMCP(v.Severity, v.SeverityType),
 		SeverityType:  strings.TrimSpace(v.SeverityType),
+		Sources:       stringsForMCP(v.Sources),
 		FixedVersions: stringsForMCP(v.FixedVersions),
 		PackageFixes:  packageFixesToMCP(v.PackageFixes),
 		ResolvedFix:   fixVerdictToMCP(v.Fix),
@@ -4091,6 +4120,57 @@ func vulnExplanationFromConsolidated(v vulnerability.Consolidated, opts vulnExpl
 		explanation.ReferencesTruncated = true
 	}
 	return explanation
+}
+
+// mcpFindingKind renders a FindingKind for agent output. The default
+// (unspecified) is treated as a vulnerability and rendered as empty so results
+// stay compact for the common case.
+func mcpFindingKind(k vulnerabilityv1.FindingKind) string {
+	switch k {
+	case vulnerabilityv1.FindingKind_FINDING_KIND_MALWARE:
+		return "malware"
+	case vulnerabilityv1.FindingKind_FINDING_KIND_VULNERABILITY:
+		return "vulnerability"
+	default:
+		return ""
+	}
+}
+
+// mcpArtifactKind renders an ArtifactKind as a stable lowercase token.
+func mcpArtifactKind(a vulnerabilityv1.ArtifactKind) string {
+	switch a {
+	case vulnerabilityv1.ArtifactKind_ARTIFACT_KIND_PACKAGE:
+		return "package"
+	case vulnerabilityv1.ArtifactKind_ARTIFACT_KIND_OS_PACKAGE:
+		return "os_package"
+	case vulnerabilityv1.ArtifactKind_ARTIFACT_KIND_CONTAINER_IMAGE_REF:
+		return "container_image_ref"
+	case vulnerabilityv1.ArtifactKind_ARTIFACT_KIND_GITHUB_ACTION:
+		return "github_action"
+	default:
+		return "unspecified"
+	}
+}
+
+// mcpCoverageFromProto converts proto scan coverage into the MCP result shape.
+// Returns nil when there is nothing to report.
+func mcpCoverageFromProto(c *vulnerabilityv1.ScanCoverage) *MCPCoverage {
+	if c == nil || (len(c.GetCovered()) == 0 && len(c.GetUncovered()) == 0) {
+		return nil
+	}
+	conv := func(entries []*vulnerabilityv1.CoverageEntry) []MCPCoverageEntry {
+		out := make([]MCPCoverageEntry, 0, len(entries))
+		for _, e := range entries {
+			out = append(out, MCPCoverageEntry{
+				Ecosystem:    e.GetEcosystem(),
+				Artifact:     mcpArtifactKind(e.GetArtifact()),
+				Sources:      e.GetSources(),
+				PackageCount: int(e.GetPackageCount()),
+			})
+		}
+		return out
+	}
+	return &MCPCoverage{Covered: conv(c.GetCovered()), Uncovered: conv(c.GetUncovered())}
 }
 
 func referencesForMCP(values []string, limit int) ([]string, bool) {

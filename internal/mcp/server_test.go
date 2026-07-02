@@ -619,6 +619,31 @@ func TestDiffChangeTypeVocabularyMatchesCompare(t *testing.T) {
 	}
 }
 
+func TestMCPCoverageAndKindConversion(t *testing.T) {
+	if got := mcpFindingKind(vulnerabilityv1.FindingKind_FINDING_KIND_MALWARE); got != "malware" {
+		t.Errorf("mcpFindingKind(MALWARE) = %q, want malware", got)
+	}
+	if got := mcpFindingKind(vulnerabilityv1.FindingKind_FINDING_KIND_UNSPECIFIED); got != "" {
+		t.Errorf("mcpFindingKind(UNSPECIFIED) = %q, want empty", got)
+	}
+	if mcpCoverageFromProto(nil) != nil {
+		t.Error("mcpCoverageFromProto(nil) should be nil")
+	}
+	cov := mcpCoverageFromProto(&vulnerabilityv1.ScanCoverage{
+		Covered:   []*vulnerabilityv1.CoverageEntry{{Ecosystem: "go", Artifact: vulnerabilityv1.ArtifactKind_ARTIFACT_KIND_PACKAGE, Sources: []string{"osv"}, PackageCount: 5}},
+		Uncovered: []*vulnerabilityv1.CoverageEntry{{Ecosystem: "docker", Artifact: vulnerabilityv1.ArtifactKind_ARTIFACT_KIND_CONTAINER_IMAGE_REF, PackageCount: 2}},
+	})
+	if cov == nil || len(cov.Covered) != 1 || len(cov.Uncovered) != 1 {
+		t.Fatalf("coverage = %+v, want 1 covered + 1 uncovered", cov)
+	}
+	if cov.Covered[0].Artifact != "package" || cov.Covered[0].Ecosystem != "go" {
+		t.Errorf("covered[0] = %+v, want go/package", cov.Covered[0])
+	}
+	if cov.Uncovered[0].Artifact != "container_image_ref" {
+		t.Errorf("uncovered[0].Artifact = %q, want container_image_ref", cov.Uncovered[0].Artifact)
+	}
+}
+
 func TestMCPEcosystemAliasesAreConsistent(t *testing.T) {
 	// Every github-actions spelling must canonicalize identically and map to
 	// the same purl type, including "gha" which a previous duplicate table missed.

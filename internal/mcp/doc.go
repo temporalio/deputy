@@ -125,7 +125,11 @@
 // by severity and compact information about each finding. The severity map
 // includes an unknown bucket so counts sum to the total; scanTime is a human
 // string and scanTimeMs the machine-readable elapsed milliseconds; each finding
-// carries severityType (the scoring system, e.g. CVSS_V3) when known.
+// carries severityType (the scoring system, e.g. CVSS_V3), sources (advisory
+// provenance), and kind (malware vs vulnerability) when known. A coverage block
+// reports which (ecosystem, artifact) combinations an advisory source answered
+// for and which had none (e.g. container base images) — uncovered means
+// not-checked, not safe.
 //
 // Input:
 //   - path: Path to the directory to scan (required)

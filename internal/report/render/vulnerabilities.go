@@ -57,6 +57,7 @@ func DisplayVulnerabilitiesWithHeader(w io.Writer, result scanning.Result, headi
 	if len(cons) == 0 {
 		fmt.Fprintln(w)
 		fmt.Fprintln(w, ui.StyleAdded.Render("✓ No vulnerabilities found"))
+		displayCoverageNote(w, result.Coverage)
 		return
 	}
 	fmt.Fprintln(w)
@@ -65,6 +66,26 @@ func DisplayVulnerabilitiesWithHeader(w io.Writer, result scanning.Result, headi
 	VulnerabilityList(w, cons, displayOpts)
 
 	VulnerabilitySummaryAndActions(w, cons, result.Stats, displayOpts)
+	displayCoverageNote(w, result.Coverage)
+}
+
+// displayCoverageNote prints a subtle note about inventory that no advisory
+// source could check (e.g. container base images), so a clean result is not
+// mistaken for "everything was checked". Silent when nothing is uncovered.
+func displayCoverageNote(w io.Writer, cov *vulnerabilityv1.ScanCoverage) {
+	if cov == nil || len(cov.GetUncovered()) == 0 {
+		return
+	}
+	parts := make([]string, 0, len(cov.GetUncovered()))
+	for _, e := range cov.GetUncovered() {
+		label := e.GetEcosystem()
+		if label == "" {
+			label = "unknown"
+		}
+		parts = append(parts, fmt.Sprintf("%d %s", e.GetPackageCount(), label))
+	}
+	fmt.Fprintln(w)
+	fmt.Fprintln(w, ui.StyleDim.Render("Not checked for advisories (no source covers): "+strings.Join(parts, ", ")))
 }
 
 // fixAnnotation renders the inline fix marker for a finding, preferring the
