@@ -17,3 +17,17 @@ func CLIJSONMarshalOptions() protojson.MarshalOptions {
 		UseProtoNames:   true,
 	}
 }
+
+// MCPJSONMarshalOptions is the canonical protojson configuration for MCP tool
+// results (deputy.mcp.v1): camelCase JSON names — the MCP wire dialect agents
+// already consume — compact (the SDK embeds the payload in structuredContent),
+// and zero values omitted so results stay small for agent context windows.
+// One proto, two documented dialects: the CLI speaks snake_case
+// (CLIJSONMarshalOptions), MCP speaks camelCase; both derive from the same
+// messages so they can never disagree on content.
+func MCPJSONMarshalOptions() protojson.MarshalOptions {
+	return protojson.MarshalOptions{
+		EmitUnpopulated: false,
+		UseProtoNames:   false,
+	}
+}
