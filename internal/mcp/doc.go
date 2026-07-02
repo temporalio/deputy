@@ -177,7 +177,8 @@
 // Input:
 //   - path: Local directory or local repository checkout (required)
 //   - ref: Git reference (branch, tag, commit). Defaults to HEAD.
-//   - format: Output format (cyclonedx-json, spdx-json, protobom-json)
+//   - format: Output format (cyclonedx-json, spdx-json, protobom-json; the
+//     short aliases cyclonedx, spdx, protobom are equivalent)
 //   - enrichLicenses: Enable license enrichment from deps.dev
 //   - excludePaths: Optional directory globs to skip during filesystem walks
 //

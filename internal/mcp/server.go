@@ -617,20 +617,6 @@ func scanPackageInputSchema() *jsonschema.Schema {
 			"version":   mcpStringProperty("Package version. Required unless purl or name includes a pkg: PURL with @version."),
 			"ecosystem": mcpStringProperty("Package ecosystem (e.g., npm, go, pypi, maven, cargo, github-actions). Required with split name/version input."),
 		},
-		AnyOf: []*jsonschema.Schema{
-			{Required: []string{"purl"}},
-			{Required: []string{"name", "version", "ecosystem"}},
-			{
-				Required: []string{"name"},
-				Properties: map[string]*jsonschema.Schema{
-					"name": {
-						Type:      "string",
-						Pattern:   "^[Pp][Kk][Gg]:",
-						MinLength: jsonschema.Ptr(1),
-					},
-				},
-			},
-		},
 		AdditionalProperties: falseJSONSchema(),
 	}
 }
@@ -752,11 +738,16 @@ func generateSBOMInputSchema() *jsonschema.Schema {
 }
 
 func mcpSBOMFormatProperty() *jsonschema.Schema {
+	// The enum must list every value the server accepts, because MCP clients
+	// enforce it before the call reaches Deputy. Include the short aliases so
+	// they are usable over MCP, not just on the CLI. Case-insensitivity is a
+	// server-side convenience that an enum cannot express, so it is not
+	// advertised here.
 	return &jsonschema.Schema{
 		Type:        "string",
-		Description: "Output format. Defaults to cyclonedx-json. Short aliases (cyclonedx, spdx, protobom) and mixed case are also accepted.",
+		Description: "Output format. Defaults to cyclonedx-json. Canonical forms are cyclonedx-json, spdx-json, protobom-json; the short aliases cyclonedx, spdx, protobom are equivalent.",
 		Default:     jsonDefault("cyclonedx-json"),
-		Enum:        []any{"cyclonedx-json", "spdx-json", "protobom-json"},
+		Enum:        []any{"cyclonedx-json", "spdx-json", "protobom-json", "cyclonedx", "spdx", "protobom"},
 	}
 }
 

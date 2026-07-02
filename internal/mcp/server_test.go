@@ -755,6 +755,26 @@ func TestListPolicyEntrypointsTool(t *testing.T) {
 	}
 }
 
+func TestMCPToolInputSchemasAvoidTopLevelComposition(t *testing.T) {
+	s := NewServer(WithClients(newMockClients(mockClientsConfig{})))
+	ctx := t.Context()
+	clientSession := connectMCPClientSession(t, ctx, s)
+
+	tools, err := clientSession.ListTools(ctx, nil)
+	if err != nil {
+		t.Fatalf("ListTools failed: %v", err)
+	}
+
+	for _, tool := range tools.Tools {
+		schema := toolInputSchema(t, tool)
+		for _, keyword := range []string{"oneOf", "allOf", "anyOf"} {
+			if _, ok := schema[keyword]; ok {
+				t.Fatalf("tool %q input schema has top-level %s: %#v", tool.Name, keyword, schema[keyword])
+			}
+		}
+	}
+}
+
 func TestExplainVulnerabilityToolSchemas(t *testing.T) {
 	s := NewServer()
 	ctx := context.Background()
@@ -909,7 +929,12 @@ func TestScanPackageToolSchema(t *testing.T) {
 		t.Fatalf("scan_package schema type = %v, want object", got)
 	}
 	if _, ok := schema["required"]; ok {
-		t.Fatalf("scan_package schema has top-level required %v, want anyOf alternatives", schema["required"])
+		t.Fatalf("scan_package schema has top-level required %v, want runtime validation alternatives", schema["required"])
+	}
+	for _, keyword := range []string{"oneOf", "allOf", "anyOf"} {
+		if _, ok := schema[keyword]; ok {
+			t.Fatalf("scan_package schema has top-level %s: %#v", keyword, schema[keyword])
+		}
 	}
 
 	properties := schemaObject(t, schema, "properties")
@@ -937,10 +962,6 @@ func TestScanPackageToolSchema(t *testing.T) {
 			t.Fatalf("scan_package ecosystem description = %q, want %q mentioned", ecosystemDescription, wantExample)
 		}
 	}
-
-	anyOf := schemaArray(t, schema, "anyOf")
-	assertAnyOfRequires(t, anyOf, "purl")
-	assertAnyOfRequires(t, anyOf, "name", "version", "ecosystem")
 
 	invalidCalls := []struct {
 		name      string
@@ -1736,7 +1757,8 @@ func TestGenerateSBOMToolContractRequiresLocalPath(t *testing.T) {
 		formats = append(formats, format)
 	}
 	slices.Sort(formats)
-	wantFormats := []string{"cyclonedx-json", "protobom-json", "spdx-json"}
+	// Canonical forms plus the short aliases, so strict MCP clients accept both.
+	wantFormats := []string{"cyclonedx", "cyclonedx-json", "protobom", "protobom-json", "spdx", "spdx-json"}
 	if !slices.Equal(formats, wantFormats) {
 		t.Fatalf("generate_sbom format enum = %v, want %v", formats, wantFormats)
 	}
@@ -1904,36 +1926,6 @@ func requireSchemaRequiredContains(t *testing.T, schema map[string]any, fields .
 			t.Fatalf("schema required fields = %v, want %q", required, field)
 		}
 	}
-}
-
-func assertAnyOfRequires(t *testing.T, anyOf []any, required ...string) {
-	t.Helper()
-
-	want := append([]string(nil), required...)
-	slices.Sort(want)
-	for _, branch := range anyOf {
-		branchSchema, ok := branch.(map[string]any)
-		if !ok {
-			t.Fatalf("anyOf branch has type %T, want map[string]any", branch)
-		}
-		rawRequired, ok := branchSchema["required"].([]any)
-		if !ok {
-			continue
-		}
-		got := make([]string, 0, len(rawRequired))
-		for _, field := range rawRequired {
-			fieldName, ok := field.(string)
-			if !ok {
-				t.Fatalf("required field has type %T, want string", field)
-			}
-			got = append(got, fieldName)
-		}
-		slices.Sort(got)
-		if slices.Equal(got, want) {
-			return
-		}
-	}
-	t.Fatalf("anyOf is missing required alternative %v: %#v", required, anyOf)
 }
 
 func TestExplainVulnerability(t *testing.T) {
@@ -3076,6 +3068,33 @@ func TestGenerateSBOMFormatMatchesCLI(t *testing.T) {
 				t.Fatalf("NormalizeSBOMOutputFormat(%q) = %q, want %q", tt.in, got, tt.want)
 			}
 		})
+	}
+}
+
+// TestGenerateSBOMFormatEnumIsServerAccepted guards the invariant that broke in
+// practice: MCP clients enforce the input-schema enum before the call reaches
+// Deputy, so every advertised enum value must be one the server accepts, and the
+// short aliases must be advertised (not just accepted server-side).
+func TestGenerateSBOMFormatEnumIsServerAccepted(t *testing.T) {
+	enum := mcpSBOMFormatProperty().Enum
+	if len(enum) == 0 {
+		t.Fatal("sbom format enum is empty")
+	}
+	advertised := make(map[string]bool, len(enum))
+	for _, v := range enum {
+		s, ok := v.(string)
+		if !ok {
+			t.Fatalf("enum value %v is not a string", v)
+		}
+		advertised[s] = true
+		if _, err := flags.NormalizeSBOMOutputFormat(s); err != nil {
+			t.Errorf("enum advertises %q but the server rejects it: %v", s, err)
+		}
+	}
+	for _, alias := range []string{"cyclonedx", "spdx", "protobom"} {
+		if !advertised[alias] {
+			t.Errorf("sbom format enum should advertise short alias %q so strict MCP clients accept it", alias)
+		}
 	}
 }
 
