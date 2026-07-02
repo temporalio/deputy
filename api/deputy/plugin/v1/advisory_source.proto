@@ -1,0 +1,76 @@
+syntax = "proto3";
+
+package deputy.plugin.v1;
+
+import "buf/validate/validate.proto";
+import "deputy/dependency/v1/dependency.proto";
+import "deputy/vulnerability/v1/vulnerability.proto";
+
+option go_package = "github.com/temporalio/deputy/gen/deputy/plugin/v1;pluginv1";
+
+// AdvisorySourceService defines the interface for advisory sources: components
+// that, given a set of packages, return known advisories (vulnerabilities and
+// malware) affecting them.
+//
+// The built-in OSV source implements this same contract in-process; external
+// sources (threat-feed APIs, vendor databases) implement it as pluginrpc
+// subprocesses. Deputy aggregates results from all configured sources with
+// union-with-provenance semantics, so a package's findings may be corroborated
+// by more than one source.
+service AdvisorySourceService {
+  // Info returns the source's identity and declared coverage. Deputy calls it
+  // once at startup to route queries only to sources that cover a package's
+  // ecosystem and artifact kind.
+  rpc Info(AdvisorySourceInfoRequest) returns (AdvisorySourceInfoResponse);
+  // Query returns advisories affecting the supplied packages. A source must
+  // ignore packages outside its declared coverage rather than erroring.
+  rpc Query(AdvisoryQueryRequest) returns (AdvisoryQueryResponse);
+}
+
+// AdvisorySourceInfoRequest is the (empty) request for Info.
+message AdvisorySourceInfoRequest {}
+
+// AdvisorySourceInfoResponse carries the source's metadata.
+message AdvisorySourceInfoResponse {
+  // Info describes the source.
+  AdvisorySourceInfo info = 1;
+}
+
+// AdvisorySourceInfo describes an advisory source and what it can answer for.
+message AdvisorySourceInfo {
+  // Name is the stable identifier recorded as finding provenance (e.g. "osv").
+  string name = 1 [(buf.validate.field).string.min_len = 1];
+  // DisplayName is a human-friendly name.
+  string display_name = 2;
+  // Description explains the source's coverage and provenance.
+  string description = 3;
+  // Version is incremented when the source's behavior changes.
+  int32 version = 4;
+  // Capabilities declares what this source can answer for.
+  SourceCapabilities capabilities = 5;
+}
+
+// SourceCapabilities declares the coverage a source advertises so Deputy can
+// route only relevant packages to it and report gaps for the rest.
+message SourceCapabilities {
+  // Ecosystems are the canonical ecosystem names this source covers.
+  repeated string ecosystems = 1;
+  // Artifacts are the artifact kinds this source can answer for.
+  repeated deputy.vulnerability.v1.ArtifactKind artifacts = 2;
+  // FindingKinds are the classes of finding this source produces.
+  repeated deputy.vulnerability.v1.FindingKind finding_kinds = 3;
+}
+
+// AdvisoryQueryRequest asks a source about a set of packages.
+message AdvisoryQueryRequest {
+  // Packages are the dependencies to look up.
+  repeated deputy.dependency.v1.Package packages = 1;
+}
+
+// AdvisoryQueryResponse returns the advisories a source found.
+message AdvisoryQueryResponse {
+  // Findings are the per-package advisory occurrences.
+  repeated deputy.vulnerability.v1.Finding findings = 1;
+  // Advisories are the full advisory records keyed by advisory ID.
+  map<string, deputy.vulnerability.v1.Advisory> advisories = 2;
+}

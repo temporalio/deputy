@@ -220,6 +220,11 @@ message ScanResponse {
 
   // DockerfileInfo contains parsed Dockerfile data when scanning Dockerfiles.
   deputy.inventory.v1.DockerfileInfo dockerfile_info = 14;
+
+  // Coverage reports which (ecosystem, artifact) combinations were checked for
+  // advisories and which had no source coverage. Lets consumers distinguish a
+  // genuinely clean result from one where nothing could be queried.
+  deputy.vulnerability.v1.ScanCoverage coverage = 15;
 }
 
 // ScanProgress provides streaming updates during a scan.

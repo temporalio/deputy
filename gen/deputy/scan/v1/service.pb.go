@@ -642,8 +642,12 @@ type ScanResponse struct {
 	Graph *DependencyGraph `protobuf:"bytes,13,opt,name=graph,proto3" json:"graph,omitempty"`
 	// DockerfileInfo contains parsed Dockerfile data when scanning Dockerfiles.
 	DockerfileInfo *v15.DockerfileInfo `protobuf:"bytes,14,opt,name=dockerfile_info,json=dockerfileInfo,proto3" json:"dockerfile_info,omitempty"`
-	unknownFields  protoimpl.UnknownFields
-	sizeCache      protoimpl.SizeCache
+	// Coverage reports which (ecosystem, artifact) combinations were checked for
+	// advisories and which had no source coverage. Lets consumers distinguish a
+	// genuinely clean result from one where nothing could be queried.
+	Coverage      *v12.ScanCoverage `protobuf:"bytes,15,opt,name=coverage,proto3" json:"coverage,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *ScanResponse) Reset() {
@@ -770,6 +774,13 @@ func (x *ScanResponse) GetGraph() *DependencyGraph {
 func (x *ScanResponse) GetDockerfileInfo() *v15.DockerfileInfo {
 	if x != nil {
 		return x.DockerfileInfo
+	}
+	return nil
+}
+
+func (x *ScanResponse) GetCoverage() *v12.ScanCoverage {
+	if x != nil {
+		return x.Coverage
 	}
 	return nil
 }
@@ -1420,7 +1431,7 @@ const file_deputy_scan_v1_service_proto_rawDesc = "" +
 	"\aenabled\x18\x01 \x01(\bR\aenabled\x12!\n" +
 	"\finclude_epss\x18\x02 \x01(\bR\vincludeEpss\x12\x1f\n" +
 	"\vinclude_kev\x18\x03 \x01(\bR\n" +
-	"includeKev\"\xb0\a\n" +
+	"includeKev\"\xf3\a\n" +
 	"\fScanResponse\x120\n" +
 	"\x06target\x18\x01 \x01(\v2\x18.deputy.target.v1.TargetR\x06target\x12=\n" +
 	"\fgenerated_at\x18\x02 \x01(\v2\x1a.google.protobuf.TimestampR\vgeneratedAt\x122\n" +
@@ -1439,7 +1450,8 @@ const file_deputy_scan_v1_service_proto_rawDesc = "" +
 	"\x0fsecret_findings\x18\v \x03(\v2\x1a.deputy.secrets.v1.FindingR\x0esecretFindings\x12;\n" +
 	"\fsecret_stats\x18\f \x01(\v2\x18.deputy.secrets.v1.StatsR\vsecretStats\x125\n" +
 	"\x05graph\x18\r \x01(\v2\x1f.deputy.scan.v1.DependencyGraphR\x05graph\x12L\n" +
-	"\x0fdockerfile_info\x18\x0e \x01(\v2#.deputy.inventory.v1.DockerfileInfoR\x0edockerfileInfo\x1a`\n" +
+	"\x0fdockerfile_info\x18\x0e \x01(\v2#.deputy.inventory.v1.DockerfileInfoR\x0edockerfileInfo\x12A\n" +
+	"\bcoverage\x18\x0f \x01(\v2%.deputy.vulnerability.v1.ScanCoverageR\bcoverage\x1a`\n" +
 	"\x0fAdvisoriesEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x127\n" +
 	"\x05value\x18\x02 \x01(\v2!.deputy.vulnerability.v1.AdvisoryR\x05value:\x028\x01\"\xce\x02\n" +
@@ -1560,10 +1572,11 @@ var file_deputy_scan_v1_service_proto_goTypes = []any{
 	(*v14.Finding)(nil),           // 24: deputy.secrets.v1.Finding
 	(*v14.Stats)(nil),             // 25: deputy.secrets.v1.Stats
 	(*v15.DockerfileInfo)(nil),    // 26: deputy.inventory.v1.DockerfileInfo
-	(*v16.Node)(nil),              // 27: deputy.graph.v1.Node
-	(*v16.Edge)(nil),              // 28: deputy.graph.v1.Edge
-	(*v16.GraphStats)(nil),        // 29: deputy.graph.v1.GraphStats
-	(*v12.Advisory)(nil),          // 30: deputy.vulnerability.v1.Advisory
+	(*v12.ScanCoverage)(nil),      // 27: deputy.vulnerability.v1.ScanCoverage
+	(*v16.Node)(nil),              // 28: deputy.graph.v1.Node
+	(*v16.Edge)(nil),              // 29: deputy.graph.v1.Edge
+	(*v16.GraphStats)(nil),        // 30: deputy.graph.v1.GraphStats
+	(*v12.Advisory)(nil),          // 31: deputy.vulnerability.v1.Advisory
 }
 var file_deputy_scan_v1_service_proto_depIdxs = []int32{
 	3,  // 0: deputy.scan.v1.ScanRequest.options:type_name -> deputy.scan.v1.ScanOptions
@@ -1586,28 +1599,29 @@ var file_deputy_scan_v1_service_proto_depIdxs = []int32{
 	25, // 17: deputy.scan.v1.ScanResponse.secret_stats:type_name -> deputy.secrets.v1.Stats
 	14, // 18: deputy.scan.v1.ScanResponse.graph:type_name -> deputy.scan.v1.DependencyGraph
 	26, // 19: deputy.scan.v1.ScanResponse.dockerfile_info:type_name -> deputy.inventory.v1.DockerfileInfo
-	0,  // 20: deputy.scan.v1.ScanProgress.phase:type_name -> deputy.scan.v1.ScanPhase
-	7,  // 21: deputy.scan.v1.ScanProgress.result:type_name -> deputy.scan.v1.ScanResponse
-	10, // 22: deputy.scan.v1.ImageInfo.config:type_name -> deputy.scan.v1.ImageConfig
-	12, // 23: deputy.scan.v1.ImageInfo.metadata:type_name -> deputy.scan.v1.ImageMetadata
-	13, // 24: deputy.scan.v1.ImageInfo.history:type_name -> deputy.scan.v1.HistoryEntry
-	16, // 25: deputy.scan.v1.ImageConfig.labels:type_name -> deputy.scan.v1.ImageConfig.LabelsEntry
-	11, // 26: deputy.scan.v1.ImageConfig.healthcheck:type_name -> deputy.scan.v1.Healthcheck
-	17, // 27: deputy.scan.v1.ImageMetadata.created:type_name -> google.protobuf.Timestamp
-	17, // 28: deputy.scan.v1.HistoryEntry.created:type_name -> google.protobuf.Timestamp
-	27, // 29: deputy.scan.v1.DependencyGraph.nodes:type_name -> deputy.graph.v1.Node
-	28, // 30: deputy.scan.v1.DependencyGraph.edges:type_name -> deputy.graph.v1.Edge
-	29, // 31: deputy.scan.v1.DependencyGraph.stats:type_name -> deputy.graph.v1.GraphStats
-	30, // 32: deputy.scan.v1.ScanResponse.AdvisoriesEntry.value:type_name -> deputy.vulnerability.v1.Advisory
-	1,  // 33: deputy.scan.v1.ScanService.Scan:input_type -> deputy.scan.v1.ScanRequest
-	2,  // 34: deputy.scan.v1.ScanService.StreamScan:input_type -> deputy.scan.v1.StreamScanRequest
-	7,  // 35: deputy.scan.v1.ScanService.Scan:output_type -> deputy.scan.v1.ScanResponse
-	8,  // 36: deputy.scan.v1.ScanService.StreamScan:output_type -> deputy.scan.v1.ScanProgress
-	35, // [35:37] is the sub-list for method output_type
-	33, // [33:35] is the sub-list for method input_type
-	33, // [33:33] is the sub-list for extension type_name
-	33, // [33:33] is the sub-list for extension extendee
-	0,  // [0:33] is the sub-list for field type_name
+	27, // 20: deputy.scan.v1.ScanResponse.coverage:type_name -> deputy.vulnerability.v1.ScanCoverage
+	0,  // 21: deputy.scan.v1.ScanProgress.phase:type_name -> deputy.scan.v1.ScanPhase
+	7,  // 22: deputy.scan.v1.ScanProgress.result:type_name -> deputy.scan.v1.ScanResponse
+	10, // 23: deputy.scan.v1.ImageInfo.config:type_name -> deputy.scan.v1.ImageConfig
+	12, // 24: deputy.scan.v1.ImageInfo.metadata:type_name -> deputy.scan.v1.ImageMetadata
+	13, // 25: deputy.scan.v1.ImageInfo.history:type_name -> deputy.scan.v1.HistoryEntry
+	16, // 26: deputy.scan.v1.ImageConfig.labels:type_name -> deputy.scan.v1.ImageConfig.LabelsEntry
+	11, // 27: deputy.scan.v1.ImageConfig.healthcheck:type_name -> deputy.scan.v1.Healthcheck
+	17, // 28: deputy.scan.v1.ImageMetadata.created:type_name -> google.protobuf.Timestamp
+	17, // 29: deputy.scan.v1.HistoryEntry.created:type_name -> google.protobuf.Timestamp
+	28, // 30: deputy.scan.v1.DependencyGraph.nodes:type_name -> deputy.graph.v1.Node
+	29, // 31: deputy.scan.v1.DependencyGraph.edges:type_name -> deputy.graph.v1.Edge
+	30, // 32: deputy.scan.v1.DependencyGraph.stats:type_name -> deputy.graph.v1.GraphStats
+	31, // 33: deputy.scan.v1.ScanResponse.AdvisoriesEntry.value:type_name -> deputy.vulnerability.v1.Advisory
+	1,  // 34: deputy.scan.v1.ScanService.Scan:input_type -> deputy.scan.v1.ScanRequest
+	2,  // 35: deputy.scan.v1.ScanService.StreamScan:input_type -> deputy.scan.v1.StreamScanRequest
+	7,  // 36: deputy.scan.v1.ScanService.Scan:output_type -> deputy.scan.v1.ScanResponse
+	8,  // 37: deputy.scan.v1.ScanService.StreamScan:output_type -> deputy.scan.v1.ScanProgress
+	36, // [36:38] is the sub-list for method output_type
+	34, // [34:36] is the sub-list for method input_type
+	34, // [34:34] is the sub-list for extension type_name
+	34, // [34:34] is the sub-list for extension extendee
+	0,  // [0:34] is the sub-list for field type_name
 }
 
 func init() { file_deputy_scan_v1_service_proto_init() }
