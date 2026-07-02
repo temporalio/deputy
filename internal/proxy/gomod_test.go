@@ -68,7 +68,7 @@ func TestGoModuleHandlerPassThrough(t *testing.T) {
 	if err != nil {
 		t.Fatalf("handler error: %v", err)
 	}
-	handler.lookups.osvClient = nil
+	handler.lookups.advisorySources = nil
 
 	rr := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/github.com/foo/bar/@v/v1.2.3.zip", nil)
@@ -108,7 +108,7 @@ func TestGoModuleHandlerForwardsRequestDetails(t *testing.T) {
 	if err != nil {
 		t.Fatalf("handler error: %v", err)
 	}
-	handler.lookups.osvClient = nil
+	handler.lookups.advisorySources = nil
 	resp := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/github.com/foo/bar/@v/v1.2.3.info", strings.NewReader(body))
 	req.Header.Set("Go-Get", "1")
@@ -132,7 +132,7 @@ func TestGoModuleHandlerPolicyDeny(t *testing.T) {
 	if err != nil {
 		t.Fatalf("handler error: %v", err)
 	}
-	handler.lookups.osvClient = nil
+	handler.lookups.advisorySources = nil
 	rr := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/github.com/foo/bar/@v/v1.2.3.zip", nil)
 	handler.ServeHTTP(rr, req)
@@ -158,7 +158,7 @@ func TestGoModuleHandlerBlocksCriticalVulnerability(t *testing.T) {
 	if err != nil {
 		t.Fatalf("handler: %v", err)
 	}
-	handler.lookups.osvClient = nil
+	handler.lookups.advisorySources = nil
 	blockedModule := "github.com/example/vuln"
 	handler.lookups.vulnLookup = func(ctx context.Context, module, version string) ([]osv.Vulnerability, error) {
 		if module == blockedModule {
@@ -185,7 +185,7 @@ func TestGoModuleHandlerLicensePolicy(t *testing.T) {
 	if err != nil {
 		t.Fatalf("handler: %v", err)
 	}
-	handler.lookups.osvClient = nil
+	handler.lookups.advisorySources = nil
 	handler.lookups.licenseLookup = func(ctx context.Context, module, version string) ([]string, error) {
 		if strings.Contains(module, "blocked") {
 			return []string{"GPL-3.0"}, nil
@@ -216,7 +216,7 @@ func TestGoModuleHandlerLicenseAllowlistExample(t *testing.T) {
 	if err != nil {
 		t.Fatalf("handler: %v", err)
 	}
-	handler.lookups.osvClient = nil
+	handler.lookups.advisorySources = nil
 	handler.lookups.licenseLookup = func(ctx context.Context, module, version string) ([]string, error) {
 		return []string{"GPL-3.0"}, nil
 	}
@@ -246,7 +246,7 @@ func TestGoModuleHandlerIgnoresMissingVersionForVersionPolicies(t *testing.T) {
 	if err != nil {
 		t.Fatalf("handler: %v", err)
 	}
-	handler.lookups.osvClient = nil
+	handler.lookups.advisorySources = nil
 	handler.lookups.licenseLookup = nil
 
 	// list (no version) should pass
@@ -299,7 +299,7 @@ func TestGoModuleHandlerEndToEndPolicies(t *testing.T) {
 	if err != nil {
 		t.Fatalf("newGoModuleHandler() error = %v", err)
 	}
-	handler.lookups.osvClient = nil
+	handler.lookups.advisorySources = nil
 	ts := httptest.NewServer(handler)
 	defer ts.Close()
 

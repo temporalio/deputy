@@ -24,7 +24,7 @@ func TestGoHandler_ComposedBundleIntegration(t *testing.T) {
 	if err != nil {
 		t.Fatalf("newGoModuleHandler: %v", err)
 	}
-	handler.lookups.osvClient = nil
+	handler.lookups.advisorySources = nil
 	handler.lookups.licenseLookup = func(ctx context.Context, module, version string) ([]string, error) {
 		return []string{"GPL-3.0"}, nil
 	}
@@ -52,7 +52,7 @@ func TestGoHandler_ComposedBundleIntegration_AllowsPermissive(t *testing.T) {
 	if err != nil {
 		t.Fatalf("newGoModuleHandler: %v", err)
 	}
-	handler.lookups.osvClient = nil
+	handler.lookups.advisorySources = nil
 	handler.lookups.licenseLookup = func(ctx context.Context, module, version string) ([]string, error) {
 		return []string{"MIT"}, nil
 	}

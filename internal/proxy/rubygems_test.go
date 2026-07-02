@@ -69,7 +69,7 @@ func TestRubyGemsHandlerBlocksVulnerability(t *testing.T) {
 	if err != nil {
 		t.Fatalf("handler: %v", err)
 	}
-	handler.lookups.osvClient = nil
+	handler.lookups.advisorySources = nil
 	handler.lookups.vulnLookup = func(ctx context.Context, name, version string) ([]osv.Vulnerability, error) {
 		return []osv.Vulnerability{{ID: "OSV-crit", Severity: "CRITICAL", Package: name, Version: version}}, nil
 	}
@@ -97,7 +97,7 @@ func TestRubyGemsHandlerBlocksLicense(t *testing.T) {
 	if err != nil {
 		t.Fatalf("handler: %v", err)
 	}
-	handler.lookups.osvClient = nil
+	handler.lookups.advisorySources = nil
 	handler.lookups.licenseLookup = func(ctx context.Context, name, version string) ([]string, error) {
 		return []string{"AGPL-3.0"}, nil
 	}
@@ -125,7 +125,7 @@ func TestRubyGemsHandlerIgnoresMissingVersionForVersionPolicies(t *testing.T) {
 	if err != nil {
 		t.Fatalf("handler: %v", err)
 	}
-	handler.lookups.osvClient = nil
+	handler.lookups.advisorySources = nil
 	handler.lookups.licenseLookup = nil
 
 	// metadata (no version) should pass
@@ -187,7 +187,7 @@ func TestRubyGemsHandlerForwardsRequestBodyAndHeaders(t *testing.T) {
 	if err != nil {
 		t.Fatalf("handler: %v", err)
 	}
-	handler.lookups.osvClient = nil
+	handler.lookups.advisorySources = nil
 	resp := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/gems/search.json?q=rack", strings.NewReader(body))
 	req.Header.Set("Authorization", "Bearer secret")
@@ -237,7 +237,7 @@ func TestRubyGemsHandlerEndToEndGemCLI(t *testing.T) {
 	if err != nil {
 		t.Fatalf("handler: %v", err)
 	}
-	handler.lookups.osvClient = nil
+	handler.lookups.advisorySources = nil
 	ts := httptest.NewServer(handler)
 	defer ts.Close()
 

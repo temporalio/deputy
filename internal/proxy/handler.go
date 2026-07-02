@@ -10,6 +10,7 @@ import (
 	dependencyv1 "github.com/temporalio/deputy/gen/deputy/dependency/v1"
 	policyv1 "github.com/temporalio/deputy/gen/deputy/policy/v1"
 	vulnerabilityv1 "github.com/temporalio/deputy/gen/deputy/vulnerability/v1"
+	"github.com/temporalio/deputy/internal/analysis/advisorysource"
 	"github.com/temporalio/deputy/internal/analysis/osv"
 	"github.com/temporalio/deputy/internal/policy"
 	"google.golang.org/protobuf/proto"
@@ -66,7 +67,12 @@ func newBaseHandler(cfg handlerConfig) (*baseHandler, error) {
 		return nil, fmt.Errorf("parse upstream %q: %w", cfg.upstream, err)
 	}
 	client := newUpstreamHTTPClient()
-	osvClient := osv.NewClient()
+
+	// The proxy is long-lived, so build the advisory-source registry once at
+	// handler construction: built-in OSV plus any configured plugin/service
+	// sources. The per-package cache sits in front, so external sources are
+	// consulted only on cache misses.
+	sources := advisorysource.NewDefaultRegistry(context.Background(), osv.NewClient())
 
 	// Use provided caches or fall back to defaults
 	osvCache := getOSVCache(cfg.osvCache)
@@ -76,9 +82,9 @@ func newBaseHandler(cfg handlerConfig) (*baseHandler, error) {
 		policies: cfg.policies,
 		proxy:    newUpstreamReverseProxy(u, cfg.ecosystem, client.Transport),
 		lookups: handlerLookups{
-			osvClient: osvClient,
+			advisorySources: sources,
 			vulnLookup: func(ctx context.Context, name, version string) ([]osv.Vulnerability, error) {
-				return cachedOSVLookupWithCache(ctx, osvClient, osvCache, cfg.osvEcosystem, name, version)
+				return cachedOSVLookupWithCache(ctx, sources, osvCache, cfg.osvEcosystem, name, version)
 			},
 		},
 	}
