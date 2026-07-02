@@ -28,6 +28,7 @@ import (
 	vulnerabilityv1 "github.com/temporalio/deputy/gen/deputy/vulnerability/v1"
 	"github.com/temporalio/deputy/gen/deputy/vulnerability/v1/vulnerabilityv1connect"
 	"github.com/temporalio/deputy/internal/cli/flags"
+	"github.com/temporalio/deputy/internal/compare"
 	"github.com/temporalio/deputy/internal/dependency/graph"
 	"github.com/temporalio/deputy/internal/policy"
 	deputyserver "github.com/temporalio/deputy/internal/server"
@@ -601,6 +602,19 @@ func TestListPolicyEntrypointsCategoryEnumIsGenerated(t *testing.T) {
 	for alias := range policy.CategoryAliases() {
 		if !got[alias] {
 			t.Errorf("category enum missing legacy alias %q", alias)
+		}
+	}
+}
+
+func TestDiffChangeTypeVocabularyMatchesCompare(t *testing.T) {
+	// MCP diff output must speak the same change-type vocabulary as the canonical
+	// compare package. changeTypeRank returns 5 for anything it does not know, so
+	// every compare.ChangeType string must rank below that.
+	for _, ct := range []compare.ChangeType{
+		compare.Added, compare.Removed, compare.Updated, compare.Upgraded, compare.Downgraded,
+	} {
+		if rank := changeTypeRank(ct.String()); rank >= 5 {
+			t.Errorf("compare change type %q is unknown to MCP changeTypeRank (vocabulary drift)", ct.String())
 		}
 	}
 }
