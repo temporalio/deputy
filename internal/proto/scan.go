@@ -11,7 +11,6 @@ import (
 	policyv1 "github.com/temporalio/deputy/gen/deputy/policy/v1"
 	scanv1 "github.com/temporalio/deputy/gen/deputy/scan/v1"
 	vulnerabilityv1 "github.com/temporalio/deputy/gen/deputy/vulnerability/v1"
-	"github.com/temporalio/deputy/internal/dependency"
 	"github.com/temporalio/deputy/internal/policy"
 	"github.com/temporalio/deputy/internal/scanning"
 	"github.com/temporalio/deputy/internal/vulnerability"
@@ -53,36 +52,10 @@ func FindingToProto(f vulnerability.Finding, advisory *vulnerabilityv1.Advisory)
 }
 
 // FindingFromProto converts proto Finding to internal vulnerability.Finding.
+// The conversion lives in internal/vulnerability (with the Finding type) so it
+// is reusable without importing this package; this is a thin re-export.
 func FindingFromProto(f *vulnerabilityv1.Finding) vulnerability.Finding {
-	if f == nil {
-		return vulnerability.Finding{}
-	}
-
-	finding := vulnerability.Finding{
-		AdvisoryID:      f.AdvisoryId,
-		Affected:        f.Affected,
-		AffectedImports: AffectedImportsFromProto(f.AffectedImports),
-		Sources:         f.Sources,
-		// Enrichment fields
-		EPSS:           f.Epss,
-		EPSSPercentile: f.EpssPercentile,
-		InKEV:          f.InKev,
-	}
-
-	if f.Package != nil {
-		finding.Dependency = dependency.ID{
-			Name:      f.Package.Name,
-			Ecosystem: f.Package.Ecosystem,
-			PURL:      f.Package.Purl,
-		}
-		finding.Version = f.Package.Version
-		finding.Direct = f.Package.Direct
-		finding.Locations = f.Package.Locations
-		finding.ManifestRefs = ManifestRefsFromProto(f.Package.ManifestRefs)
-		finding.LayerDetails = LayerDetailsFromProto(f.Package.LayerDetails)
-	}
-
-	return finding
+	return vulnerability.FindingFromProto(f)
 }
 
 // FindingsToProto converts a slice of internal Findings to proto.
@@ -97,16 +70,10 @@ func FindingsToProto(findings []vulnerability.Finding, advisories map[string]*vu
 	return out
 }
 
-// FindingsFromProto converts a slice of proto Finding to internal.
+// FindingsFromProto converts a slice of proto Finding to internal. Thin
+// re-export of vulnerability.FindingsFromProto (the single source of truth).
 func FindingsFromProto(findings []*vulnerabilityv1.Finding) []vulnerability.Finding {
-	if len(findings) == 0 {
-		return nil
-	}
-	out := make([]vulnerability.Finding, len(findings))
-	for i, f := range findings {
-		out[i] = FindingFromProto(f)
-	}
-	return out
+	return vulnerability.FindingsFromProto(findings)
 }
 
 // AdvisoriesToProto converts a map of internal advisories to proto.

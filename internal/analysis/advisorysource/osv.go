@@ -5,6 +5,7 @@ import (
 	"slices"
 	"strings"
 
+	dependencyv1 "github.com/temporalio/deputy/gen/deputy/dependency/v1"
 	pluginv1 "github.com/temporalio/deputy/gen/deputy/plugin/v1"
 	vulnerabilityv1 "github.com/temporalio/deputy/gen/deputy/vulnerability/v1"
 	"github.com/temporalio/deputy/internal/analysis/osv"
@@ -65,14 +66,17 @@ func (s *osvSource) Info() *pluginv1.AdvisorySourceInfo {
 }
 
 // Query runs the OSV lookup and tags each result with OSV provenance and the
-// advisory's finding kind (malware vs vulnerability).
-func (s *osvSource) Query(ctx context.Context, pkgs []osv.PkgInput) (*Result, error) {
-	findings, advisories, err := osv.Query(ctx, s.client, pkgs)
+// advisory's finding kind (malware vs vulnerability). It consumes and returns
+// proto types directly (osv.QueryProto), so there is no conversion at this seam.
+func (s *osvSource) Query(ctx context.Context, pkgs []*dependencyv1.Package) (*Result, error) {
+	findings, advisories, err := osv.QueryProto(ctx, s.client, pkgs)
 	if err != nil {
 		return nil, err
 	}
-	for i := range findings {
-		findings[i].Sources = []string{SourceNameOSV}
+	for _, f := range findings {
+		if f != nil {
+			f.Sources = []string{SourceNameOSV}
+		}
 	}
 	for _, adv := range advisories {
 		if adv == nil {

@@ -405,18 +405,14 @@ func ScanPURL(ctx context.Context, purlStr string, opts Options) (*Execution, er
 	name := purlDisplayName(pu)
 	ecos := purlEcosystem(pu)
 
-	inputs := []osv.PkgInput{
-		osv.NewPkgInput(
-			osv.QueryKey{
-				Name:      name,
-				Version:   pu.Version,
-				Ecosystem: ecos,
-				PURL:      canonical,
-			},
-			osv.PackageContext{
-				IsDirect: true,
-			},
-		),
+	inputs := []*dependencyv1.Package{
+		{
+			Name:      name,
+			Version:   pu.Version,
+			Ecosystem: ecos,
+			Purl:      canonical,
+			Direct:    true,
+		},
 	}
 
 	pkgs := []*extractor.Package{
@@ -438,7 +434,9 @@ func ScanPURL(ctx context.Context, purlStr string, opts Options) (*Execution, er
 		otel.SetSpanError(span, err)
 		return nil, fmt.Errorf("query vulnerabilities: %w", err)
 	}
-	findings, advisories, coverage := agg.Findings, agg.Advisories, agg.Coverage
+	// Convert proto findings to domain once, at the boundary where consolidation
+	// (a domain projection) begins. Everything upstream is proto.
+	findings, advisories, coverage := vulnerability.FindingsFromProto(agg.Findings), agg.Advisories, agg.Coverage
 
 	span.SetAttributes(attribute.Int("deputy.finding.count", len(findings)))
 
@@ -530,7 +528,7 @@ func queryVulnerabilities(ctx context.Context, pkgs []*extractor.Package, direct
 	defer span.End()
 
 	// Convert packages to OSV input format
-	inputs := packagesToInputs(pkgs, direct)
+	inputs := packagesToProto(pkgs, direct)
 
 	// Query advisory sources (OSV today; more via the registry in future).
 	// The registry routes each package only to sources that cover its ecosystem
@@ -541,7 +539,9 @@ func queryVulnerabilities(ctx context.Context, pkgs []*extractor.Package, direct
 		otel.SetSpanError(span, err)
 		return nil, nil, nil, err
 	}
-	findings, advisories := agg.Findings, agg.Advisories
+	// Convert proto findings to domain at the consolidation boundary; supply-chain
+	// findings below are already domain and append cleanly.
+	findings, advisories := vulnerability.FindingsFromProto(agg.Findings), agg.Advisories
 
 	// Check for supply-chain risks (unpinned actions, etc.)
 	scFindings, scAdvisories := checkSupplyChain(ctx, pkgs, direct, forge.RepoSlugFromURL(originURL))
@@ -557,9 +557,13 @@ func queryVulnerabilities(ctx context.Context, pkgs []*extractor.Package, direct
 	return findings, advisories, agg.Coverage, nil
 }
 
-// packagesToInputs converts extractor packages to OSV query inputs.
-func packagesToInputs(pkgs []*extractor.Package, direct map[string]bool) []osv.PkgInput {
-	inputs := make([]osv.PkgInput, 0, len(pkgs))
+// packagesToProto converts extractor packages to the proto packages the
+// advisory-source registry queries. A proto Package carries both the query
+// coordinates (name/version/ecosystem/purl, possibly remapped for mise/asdf and
+// language runtimes) and the scan context (direct/locations/manifest refs/layer
+// details), so no separate query-input type is needed.
+func packagesToProto(pkgs []*extractor.Package, direct map[string]bool) []*dependencyv1.Package {
+	inputs := make([]*dependencyv1.Package, 0, len(pkgs))
 	for _, pkg := range pkgs {
 		if pkg == nil {
 			continue
@@ -611,22 +615,20 @@ func packagesToInputs(pkgs []*extractor.Package, direct map[string]bool) []osv.P
 		copy(locs, pkg.Locations)
 
 		// Build manifest references from locations
-		var manifestRefs []dependencyv1.ManifestRef
+		var manifestRefs []*dependencyv1.ManifestRef
 		for _, loc := range pkg.Locations {
 			manager, manifestPath, ok := manifests.DetectManager(loc, pkg.PURLType)
 			if !ok {
 				continue
 			}
-			manifestRefs = append(manifestRefs, dependencyv1.ManifestRef{})
-			ref := &manifestRefs[len(manifestRefs)-1]
-			ref.Path = manifestPath
-			ref.Manager = manager
+			ref := &dependencyv1.ManifestRef{Path: manifestPath, Manager: manager}
 			// For mise/asdf, record the tool key as declared in the config so
 			// remediation targets the right entry even though the finding may be
 			// reported under a remapped canonical name (e.g. "stdlib", "lodash").
 			if manager == "mise" || manager == "asdf" {
 				dependency.SetManifestRefComponentKey(ref, pkg.Name)
 			}
+			manifestRefs = append(manifestRefs, ref)
 		}
 
 		// Convert layer details from SCALIBR for container image scans.
@@ -656,21 +658,26 @@ func packagesToInputs(pkgs []*extractor.Package, direct map[string]bool) []osv.P
 			scanVersion = md.LockedVersion
 		}
 
-		pkgCtx := osv.PackageContext{
-			IsDirect:     isDirect,
-			Locations:    locs,
-			ManifestRefs: manifestRefs,
-			LayerDetails: layerDetails,
+		// mk builds a proto package for a query coordinate, carrying the shared
+		// scan context (direct/locations/manifests/layer) for this inventory item.
+		mk := func(name, version, eco, purlStr string) *dependencyv1.Package {
+			return &dependencyv1.Package{
+				Name:         name,
+				Version:      version,
+				Ecosystem:    eco,
+				Purl:         purlStr,
+				Direct:       isDirect,
+				Locations:    locs,
+				ManifestRefs: manifestRefs,
+				LayerDetails: layerDetails,
+			}
 		}
 
 		// Known language runtimes (e.g. the Go runtime) map to dedicated OSV
 		// coordinates (Go stdlib/toolchain), which may be more than one query.
 		if coords := mise.RuntimeScanCoords(purl.Type, pkg.Name, scanVersion); len(coords) > 0 {
 			for _, c := range coords {
-				inputs = append(inputs, osv.NewPkgInput(
-					osv.QueryKey{Name: c.Name, Version: c.Version, Ecosystem: c.Ecosystem, PURL: c.PURL},
-					pkgCtx,
-				))
+				inputs = append(inputs, mk(c.Name, c.Version, c.Ecosystem, c.PURL))
 			}
 			continue
 		}
@@ -689,15 +696,7 @@ func packagesToInputs(pkgs []*extractor.Package, direct map[string]bool) []osv.P
 			}
 		}
 
-		inputs = append(inputs, osv.NewPkgInput(
-			osv.QueryKey{
-				Name:      qName,
-				Version:   qVersion,
-				Ecosystem: qEcosystem,
-				PURL:      qPURL,
-			},
-			pkgCtx,
-		))
+		inputs = append(inputs, mk(qName, qVersion, qEcosystem, qPURL))
 	}
 	return inputs
 }
