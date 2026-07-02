@@ -497,6 +497,38 @@ Computed analysis results:
 }
 ```
 
+## Dependency graph inputs
+
+When Deputy builds a dependency graph (`deputy graph`, the graph API, or the
+`analyze_dependency_graph` MCP tool), the policy engine can evaluate graph
+entrypoints. The same variables are exposed identically across CLI, API, and MCP.
+
+### `graph_report` variables
+
+Evaluated once after the graph is built, with the whole graph in scope.
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `graph` | `graphv1.Graph` | Dependency graph data |
+| `nodes` | `list(graphv1.Node)` | Dependency graph nodes |
+| `edges` | `list(graphv1.Edge)` | Dependency graph edges |
+| `roots` | `list(string)` | PURLs of direct (depth-0) dependencies |
+| `stats` | `object` | Summary statistics for the graph |
+
+### `graph_node` variables (per-node)
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `node` | `graphv1.Node` | Current dependency graph node |
+
+### `graph_edge` variables (per-edge)
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `edge` | `graphv1.Edge` | Current dependency graph edge |
+| `from_node` | `graphv1.Node` | Source node for the current edge |
+| `to_node` | `graphv1.Node` | Target node for the current edge |
+
 ## Container diff inputs
 
 When comparing container images with `deputy diff image1 image2`, the policy engine receives container-diff-specific variables.
