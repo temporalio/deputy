@@ -288,6 +288,13 @@ type PackageSummary struct {
 	VulnerabilityCount int32 `protobuf:"varint,11,opt,name=vulnerability_count,json=vulnerabilityCount,proto3" json:"vulnerability_count,omitempty"`
 	// SeverityCounts maps severity level to count (CRITICAL, HIGH, MED, LOW).
 	SeverityCounts map[string]int32 `protobuf:"bytes,12,rep,name=severity_counts,json=severityCounts,proto3" json:"severity_counts,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"varint,2,opt,name=value"`
+	// Priority ranks the package for remediation using the canonical triage
+	// ladder (severity + fixability + directness), shared with the MCP
+	// triage_vulnerabilities tool: "critical", "high", "medium", or "low".
+	// A critical finding with no available fix ranks below a fixable one.
+	Priority string `protobuf:"bytes,13,opt,name=priority,proto3" json:"priority,omitempty"`
+	// PriorityReason explains the priority verdict in one sentence.
+	PriorityReason string `protobuf:"bytes,14,opt,name=priority_reason,json=priorityReason,proto3" json:"priority_reason,omitempty"`
 	unknownFields  protoimpl.UnknownFields
 	sizeCache      protoimpl.SizeCache
 }
@@ -406,6 +413,20 @@ func (x *PackageSummary) GetSeverityCounts() map[string]int32 {
 	return nil
 }
 
+func (x *PackageSummary) GetPriority() string {
+	if x != nil {
+		return x.Priority
+	}
+	return ""
+}
+
+func (x *PackageSummary) GetPriorityReason() string {
+	if x != nil {
+		return x.PriorityReason
+	}
+	return ""
+}
+
 var File_deputy_triage_v1_service_proto protoreflect.FileDescriptor
 
 const file_deputy_triage_v1_service_proto_rawDesc = "" +
@@ -429,7 +450,7 @@ const file_deputy_triage_v1_service_proto_rawDesc = "" +
 	"\ftop_packages\x18\x03 \x03(\v2 .deputy.triage.v1.PackageSummaryR\vtopPackages\x12.\n" +
 	"\x13packages_with_vulns\x18\x04 \x01(\x05R\x11packagesWithVulns\x12=\n" +
 	"\fgenerated_at\x18\x05 \x01(\v2\x1a.google.protobuf.TimestampR\vgeneratedAt\x12\x1a\n" +
-	"\bwarnings\x18\x06 \x03(\tR\bwarnings\"\xcd\x05\n" +
+	"\bwarnings\x18\x06 \x03(\tR\bwarnings\"\x92\x06\n" +
 	"\x0ePackageSummary\x12\x18\n" +
 	"\apackage\x18\x01 \x01(\tR\apackage\x12\x18\n" +
 	"\aversion\x18\x02 \x01(\tR\aversion\x12\x1a\n" +
@@ -445,7 +466,9 @@ const file_deputy_triage_v1_service_proto_rawDesc = "" +
 	"\x11database_specific\x18\n" +
 	" \x03(\v26.deputy.triage.v1.PackageSummary.DatabaseSpecificEntryR\x10databaseSpecific\x12/\n" +
 	"\x13vulnerability_count\x18\v \x01(\x05R\x12vulnerabilityCount\x12]\n" +
-	"\x0fseverity_counts\x18\f \x03(\v24.deputy.triage.v1.PackageSummary.SeverityCountsEntryR\x0eseverityCounts\x1aC\n" +
+	"\x0fseverity_counts\x18\f \x03(\v24.deputy.triage.v1.PackageSummary.SeverityCountsEntryR\x0eseverityCounts\x12\x1a\n" +
+	"\bpriority\x18\r \x01(\tR\bpriority\x12'\n" +
+	"\x0fpriority_reason\x18\x0e \x01(\tR\x0epriorityReason\x1aC\n" +
 	"\x15DatabaseSpecificEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\x1aA\n" +

@@ -44,19 +44,21 @@ func BuildTriageResponse(
 // aggregatePackages aggregates consolidated vulnerabilities into package summaries.
 func aggregatePackages(cons []vulnerability.Consolidated) []*triagev1.PackageSummary {
 	type aggInfo struct {
-		pkg        string
-		version    string
-		severity   string
-		severityT  string
-		priority   int
-		fix        string
-		summary    string
-		ids        []string
-		isDirect   bool
-		imports    []*vulnerabilityv1.AffectedImport
-		dbSpecific map[string]string
-		counts     map[string]int32
-		total      int32
+		pkg            string
+		version        string
+		severity       string
+		severityT      string
+		priority       int
+		triagePriority string
+		triageReason   string
+		fix            string
+		summary        string
+		ids            []string
+		isDirect       bool
+		imports        []*vulnerabilityv1.AffectedImport
+		dbSpecific     map[string]string
+		counts         map[string]int32
+		total          int32
 	}
 
 	pkgMap := map[string]*aggInfo{}
@@ -66,17 +68,20 @@ func aggregatePackages(cons []vulnerability.Consolidated) []*triagev1.PackageSum
 			continue
 		}
 		priority := severityPriority(v.Severity, v.SeverityType)
+		triagePriority, triageReason := vulnerability.ConsolidatedTriagePriority(v)
 		info, ok := pkgMap[key]
 		if !ok {
 			info = &aggInfo{
-				pkg:       v.Package,
-				version:   v.Version,
-				severity:  v.Severity,
-				severityT: v.SeverityType,
-				priority:  priority,
-				fix:       bestFix(v),
-				summary:   v.Summary,
-				isDirect:  v.IsDirect,
+				pkg:            v.Package,
+				version:        v.Version,
+				severity:       v.Severity,
+				severityT:      v.SeverityType,
+				priority:       priority,
+				triagePriority: triagePriority,
+				triageReason:   triageReason,
+				fix:            bestFix(v),
+				summary:        v.Summary,
+				isDirect:       v.IsDirect,
 			}
 			pkgMap[key] = info
 		}
@@ -96,6 +101,8 @@ func aggregatePackages(cons []vulnerability.Consolidated) []*triagev1.PackageSum
 			info.priority = priority
 			info.severity = v.Severity
 			info.severityT = v.SeverityType
+			info.triagePriority = triagePriority
+			info.triageReason = triageReason
 			info.fix = bestFix(v)
 			if v.Summary != "" {
 				info.summary = v.Summary
@@ -115,6 +122,8 @@ func aggregatePackages(cons []vulnerability.Consolidated) []*triagev1.PackageSum
 			Version:            info.version,
 			Severity:           info.severity,
 			SeverityType:       info.severityT,
+			Priority:           info.triagePriority,
+			PriorityReason:     info.triageReason,
 			FixVersion:         info.fix,
 			IsDirect:           info.isDirect,
 			Summary:            info.summary,

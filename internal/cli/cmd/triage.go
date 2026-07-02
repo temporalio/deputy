@@ -322,6 +322,8 @@ func renderTriageText(w io.Writer, resp *triagev1.TriageResponse, showDBInfo boo
 			Version:            pkg.Version,
 			Severity:           pkg.Severity,
 			SeverityType:       pkg.SeverityType,
+			Priority:           pkg.Priority,
+			PriorityReason:     pkg.PriorityReason,
 			FixVersion:         pkg.FixVersion,
 			IsDirect:           pkg.IsDirect,
 			Summary:            pkg.Summary,

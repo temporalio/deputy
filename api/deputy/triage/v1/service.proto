@@ -105,4 +105,13 @@ message PackageSummary {
 
   // SeverityCounts maps severity level to count (CRITICAL, HIGH, MED, LOW).
   map<string, int32> severity_counts = 12;
+
+  // Priority ranks the package for remediation using the canonical triage
+  // ladder (severity + fixability + directness), shared with the MCP
+  // triage_vulnerabilities tool: "critical", "high", "medium", or "low".
+  // A critical finding with no available fix ranks below a fixable one.
+  string priority = 13;
+
+  // PriorityReason explains the priority verdict in one sentence.
+  string priority_reason = 14;
 }
