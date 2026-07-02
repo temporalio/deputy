@@ -27,6 +27,7 @@ import (
 	scanv1 "github.com/temporalio/deputy/gen/deputy/scan/v1"
 	targetv1 "github.com/temporalio/deputy/gen/deputy/target/v1"
 	vulnerabilityv1 "github.com/temporalio/deputy/gen/deputy/vulnerability/v1"
+	"github.com/temporalio/deputy/internal/cli/flags"
 	"github.com/temporalio/deputy/internal/dependency/graph"
 	"github.com/temporalio/deputy/internal/dependency/graphquery"
 	"github.com/temporalio/deputy/internal/ecosystem"
@@ -713,7 +714,7 @@ func generateSBOMInputSchema() *jsonschema.Schema {
 func mcpSBOMFormatProperty() *jsonschema.Schema {
 	return &jsonschema.Schema{
 		Type:        "string",
-		Description: "Output format. Defaults to cyclonedx-json.",
+		Description: "Output format. Defaults to cyclonedx-json. Short aliases (cyclonedx, spdx, protobom) and mixed case are also accepted.",
 		Default:     jsonDefault("cyclonedx-json"),
 		Enum:        []any{"cyclonedx-json", "spdx-json", "protobom-json"},
 	}
@@ -2285,7 +2286,7 @@ func (s *Server) generateSBOM(ctx context.Context, req *mcp.CallToolRequest, arg
 		return nil, SBOMResult{}, err
 	}
 
-	format, err := normalizeMCPGenerateSBOMFormat(args.Format)
+	format, err := flags.NormalizeSBOMOutputFormat(args.Format)
 	if err != nil {
 		otel.SetSpanError(span, err)
 		otel.RecordMCPToolCall(ctx, "generate_sbom", time.Since(startTime).Seconds(), false)
@@ -2358,19 +2359,6 @@ func (s *Server) generateSBOM(ctx context.Context, req *mcp.CallToolRequest, arg
 		Components: components,
 		SBOM:       sb.String(),
 	}, nil
-}
-
-func normalizeMCPGenerateSBOMFormat(format string) (string, error) {
-	format = strings.TrimSpace(format)
-	if format == "" {
-		return "cyclonedx-json", nil
-	}
-	switch format {
-	case "cyclonedx-json", "spdx-json", "protobom-json":
-		return format, nil
-	default:
-		return "", fmt.Errorf("unsupported format %q: must be cyclonedx-json, spdx-json, or protobom-json", format)
-	}
 }
 
 func (s *Server) getRemediation(ctx context.Context, req *mcp.CallToolRequest, args GetRemediationInput) (*mcp.CallToolResult, GetRemediationResult, error) {

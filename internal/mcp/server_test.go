@@ -27,6 +27,7 @@ import (
 	targetv1 "github.com/temporalio/deputy/gen/deputy/target/v1"
 	vulnerabilityv1 "github.com/temporalio/deputy/gen/deputy/vulnerability/v1"
 	"github.com/temporalio/deputy/gen/deputy/vulnerability/v1/vulnerabilityv1connect"
+	"github.com/temporalio/deputy/internal/cli/flags"
 	"github.com/temporalio/deputy/internal/dependency/graph"
 	"github.com/temporalio/deputy/internal/policy"
 	deputyserver "github.com/temporalio/deputy/internal/server"
@@ -2953,7 +2954,10 @@ func TestGenerateSBOM(t *testing.T) {
 	})
 }
 
-func TestNormalizeMCPGenerateSBOMFormat(t *testing.T) {
+// TestGenerateSBOMFormatMatchesCLI pins the MCP generate_sbom format handling to
+// the same shared normalizer the CLI uses, so the two surfaces accept the same
+// spellings (short aliases and mixed case), not just the canonical *-json forms.
+func TestGenerateSBOMFormatMatchesCLI(t *testing.T) {
 	tests := []struct {
 		name    string
 		in      string
@@ -2962,25 +2966,28 @@ func TestNormalizeMCPGenerateSBOMFormat(t *testing.T) {
 	}{
 		{name: "default", want: "cyclonedx-json"},
 		{name: "trim cyclonedx", in: " cyclonedx-json ", want: "cyclonedx-json"},
+		{name: "short cyclonedx alias", in: "cyclonedx", want: "cyclonedx-json"},
 		{name: "trim spdx", in: "\tspdx-json\n", want: "spdx-json"},
-		{name: "protobom", in: "protobom-json", want: "protobom-json"},
-		{name: "invalid", in: " CycloneDX-JSON ", wantErr: true},
+		{name: "short spdx alias", in: "spdx", want: "spdx-json"},
+		{name: "short protobom alias", in: "protobom", want: "protobom-json"},
+		{name: "mixed case", in: " CycloneDX-JSON ", want: "cyclonedx-json"},
+		{name: "invalid", in: "nonsense", wantErr: true},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := normalizeMCPGenerateSBOMFormat(tt.in)
+			got, err := flags.NormalizeSBOMOutputFormat(tt.in)
 			if tt.wantErr {
 				if err == nil {
-					t.Fatalf("normalizeMCPGenerateSBOMFormat(%q) = nil error, want error", tt.in)
+					t.Fatalf("NormalizeSBOMOutputFormat(%q) = nil error, want error", tt.in)
 				}
 				return
 			}
 			if err != nil {
-				t.Fatalf("normalizeMCPGenerateSBOMFormat(%q) unexpected error: %v", tt.in, err)
+				t.Fatalf("NormalizeSBOMOutputFormat(%q) unexpected error: %v", tt.in, err)
 			}
 			if got != tt.want {
-				t.Fatalf("normalizeMCPGenerateSBOMFormat(%q) = %q, want %q", tt.in, got, tt.want)
+				t.Fatalf("NormalizeSBOMOutputFormat(%q) = %q, want %q", tt.in, got, tt.want)
 			}
 		})
 	}
