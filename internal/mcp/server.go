@@ -581,13 +581,27 @@ func explainVulnerabilitiesInputSchema() *jsonschema.Schema {
 }
 
 func listPolicyEntrypointsInputSchema() *jsonschema.Schema {
+	// Derive the accepted categories and legacy aliases from the policy package
+	// so this schema can never drift from the canonical entrypoint registry.
+	categories := policy.Categories()
+	aliasKeys := slices.Sorted(maps.Keys(policy.CategoryAliases()))
+
+	enum := make([]any, 0, len(categories)+len(aliasKeys))
+	for _, c := range categories {
+		enum = append(enum, c)
+	}
+	for _, a := range aliasKeys {
+		enum = append(enum, a)
+	}
+
 	return &jsonschema.Schema{
 		Type: "object",
 		Properties: map[string]*jsonschema.Schema{
 			"category": {
-				Type:        "string",
-				Description: "Optional category filter: scan, proxy, diff, container_diff, sbom, fix, triage, dockerfile, secrets, graph, server, or sandbox. Legacy aliases container, service, and exec are accepted.",
-				Enum:        []any{"scan", "proxy", "diff", "container_diff", "container", "sbom", "fix", "triage", "dockerfile", "secrets", "graph", "server", "service", "sandbox", "exec"},
+				Type: "string",
+				Description: fmt.Sprintf("Optional category filter: %s. Legacy aliases accepted: %s.",
+					strings.Join(categories, ", "), strings.Join(aliasKeys, ", ")),
+				Enum: enum,
 			},
 		},
 		AdditionalProperties: falseJSONSchema(),

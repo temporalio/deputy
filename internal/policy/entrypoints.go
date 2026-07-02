@@ -1,6 +1,7 @@
 package policy
 
 import (
+	"maps"
 	"slices"
 	"strings"
 )
@@ -57,21 +58,51 @@ func (e Entrypoint) Category() string {
 	}
 }
 
-// NormalizeCategory returns Deputy's canonical policy category for category.
-// It accepts legacy aliases kept for CLI/API compatibility, such as
-// "container" for "container_diff", "service" for "server", and "exec" for
-// "sandbox".
+// categoryAliases maps legacy category inputs, kept for CLI/API/MCP
+// compatibility, to their canonical category. It is the single source of truth
+// for both NormalizeCategory and CategoryAliases.
+var categoryAliases = map[string]string{
+	"container": "container_diff",
+	"service":   "server",
+	"exec":      "sandbox",
+}
+
+// NormalizeCategory returns Deputy's canonical policy category for category,
+// resolving legacy aliases such as "container" -> "container_diff",
+// "service" -> "server", and "exec" -> "sandbox".
 func NormalizeCategory(category string) string {
-	switch strings.ToLower(strings.TrimSpace(category)) {
-	case "container":
-		return "container_diff"
-	case "service":
-		return "server"
-	case "exec":
-		return "sandbox"
-	default:
-		return strings.ToLower(strings.TrimSpace(category))
+	c := strings.ToLower(strings.TrimSpace(category))
+	if canonical, ok := categoryAliases[c]; ok {
+		return canonical
 	}
+	return c
+}
+
+// Categories returns the sorted set of canonical policy categories, derived
+// from the registered entrypoints so callers (CLI/API/MCP) never hand-maintain
+// a parallel list.
+func Categories() []string {
+	seen := make(map[string]struct{})
+	out := make([]string, 0, len(AllEntrypoints))
+	for _, ep := range AllEntrypoints {
+		c := ep.Category()
+		if c == "" {
+			continue
+		}
+		if _, ok := seen[c]; ok {
+			continue
+		}
+		seen[c] = struct{}{}
+		out = append(out, c)
+	}
+	slices.Sort(out)
+	return out
+}
+
+// CategoryAliases returns a copy of the legacy category aliases mapped to their
+// canonical category, so surfaces can advertise the accepted inputs.
+func CategoryAliases() map[string]string {
+	return maps.Clone(categoryAliases)
 }
 
 // Canonical entrypoint constants. Use these typed values instead of raw strings.

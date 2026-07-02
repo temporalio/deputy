@@ -580,6 +580,31 @@ func TestServerInstructionsReferenceRealTools(t *testing.T) {
 	}
 }
 
+func TestListPolicyEntrypointsCategoryEnumIsGenerated(t *testing.T) {
+	schema := listPolicyEntrypointsInputSchema()
+	enum := schema.Properties["category"].Enum
+	got := make(map[string]bool, len(enum))
+	for _, v := range enum {
+		s, ok := v.(string)
+		if !ok {
+			t.Fatalf("category enum value %v is not a string", v)
+		}
+		got[s] = true
+	}
+	// Every canonical category and legacy alias from the policy package must be
+	// advertised, so the schema stays generated rather than a stale literal.
+	for _, c := range policy.Categories() {
+		if !got[c] {
+			t.Errorf("category enum missing canonical category %q", c)
+		}
+	}
+	for alias := range policy.CategoryAliases() {
+		if !got[alias] {
+			t.Errorf("category enum missing legacy alias %q", alias)
+		}
+	}
+}
+
 func TestMCPEcosystemAliasesAreConsistent(t *testing.T) {
 	// Every github-actions spelling must canonicalize identically and map to
 	// the same purl type, including "gha" which a previous duplicate table missed.
