@@ -70,12 +70,25 @@ func (e Ecosystem) String() string {
 }
 
 // OSVName returns the ecosystem name as used by the OSV database.
-// OSV uses title-cased names for some ecosystems.
+// OSV uses title-cased names for some ecosystems. When the ecosystem has no
+// registered OSV name it falls back to the ecosystem string; use OSVQueryable
+// to distinguish real OSV coverage from that fallback.
 func (e Ecosystem) OSVName() string {
 	if reg := Default().Get(e); reg != nil && reg.OSVName != "" {
 		return reg.OSVName
 	}
 	return string(e)
+}
+
+// OSVQueryable reports whether the OSV vulnerability database covers this
+// ecosystem, i.e. the registry defines a real OSV name for it. This is the
+// authoritative signal for whether a package can be sent to OSV's querybatch
+// API: ecosystems without OSV coverage (e.g. tool managers like mise/asdf, or
+// Dockerfile base images) are inventory-only and must not be queried, since OSV
+// rejects an entire batch that names an ecosystem it does not recognize.
+func (e Ecosystem) OSVQueryable() bool {
+	reg := Default().Get(e)
+	return reg != nil && reg.OSVName != ""
 }
 
 // DepsDevSystem returns the deps.dev API system enum for this ecosystem.

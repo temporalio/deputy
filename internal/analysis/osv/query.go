@@ -346,12 +346,28 @@ func queryBatch(ctx context.Context, client Client, pkgs []PkgInput) ([]Vulnerab
 	}
 	var ghaPkgs []PkgInput
 	var otherPkgs []PkgInput
+	var skippedEcosystem int
 	for _, p := range pkgs {
 		if isGitHubActionsInput(p) {
 			ghaPkgs = append(ghaPkgs, p)
 			continue
 		}
+		if !osvAPIQueryable(p) {
+			// OSV's querybatch rejects the entire batch if any query names an
+			// ecosystem it does not recognize (e.g. Dockerfile base images,
+			// mise/asdf tools). Skip those rather than aborting the whole scan;
+			// OSV simply has no data for them.
+			skippedEcosystem++
+			continue
+		}
 		otherPkgs = append(otherPkgs, p)
+	}
+	if skippedEcosystem > 0 {
+		logs.Debug(ctx, "deputy.osv.skipped_unsupported_ecosystem",
+			"skipped", skippedEcosystem,
+			"queryable", len(otherPkgs)+len(ghaPkgs),
+			"total_input", len(pkgs),
+		)
 	}
 
 	var out []Vulnerability
@@ -376,6 +392,23 @@ func queryBatch(ctx context.Context, client Client, pkgs []PkgInput) ([]Vulnerab
 		return nil, nil
 	}
 	return out, nil
+}
+
+// osvAPIQueryable reports whether OSV's querybatch API can resolve this
+// package's ecosystem. OSV only recognizes a fixed set of ecosystems; Deputy
+// records that set as a non-empty OSVName in its ecosystem registry. Packages in
+// ecosystems OSV does not cover (Dockerfile base images, mise/asdf tools, and
+// anything unrecognized) must be excluded from the batch, because OSV rejects
+// the whole request if a single query names an unknown ecosystem. GitHub Actions
+// is queryable via the separate bucket path and is partitioned out before here.
+func osvAPIQueryable(p PkgInput) bool {
+	eco := strings.TrimSpace(p.Ecosystem)
+	if eco == "" && p.PURL != "" {
+		if pu, err := purlx.ParseLoose(p.PURL); err == nil {
+			eco = pu.Type
+		}
+	}
+	return ecosystem.Parse(eco).OSVQueryable()
 }
 
 // isGitHubActionsInput reports whether the given package should be queried against
