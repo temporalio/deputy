@@ -9,14 +9,15 @@ import (
 
 	"connectrpc.com/connect"
 	"github.com/charmbracelet/lipgloss"
-	"google.golang.org/protobuf/encoding/protojson"
 	goproto "google.golang.org/protobuf/proto"
 
 	"github.com/spf13/cobra"
+
 	graphv1 "github.com/temporalio/deputy/gen/deputy/graph/v1"
 	"github.com/temporalio/deputy/internal/cli/flags"
 	"github.com/temporalio/deputy/internal/dependency/graph"
 	"github.com/temporalio/deputy/internal/dependency/graphquery"
+	internalproto "github.com/temporalio/deputy/internal/proto"
 	"github.com/temporalio/deputy/internal/services"
 	ui "github.com/temporalio/deputy/internal/ui"
 )
@@ -984,12 +985,7 @@ func writeWhyJSON(w io.Writer, g *graph.Graph, matches []*graph.Node, resolveTra
 	}
 
 	// Use protojson for consistent formatting
-	opts := protojson.MarshalOptions{
-		Multiline:       true,
-		Indent:          "  ",
-		EmitUnpopulated: false,
-		UseProtoNames:   true,
-	}
+	opts := internalproto.CLIJSONMarshalOptions()
 
 	// Marshal as a list wrapper since proto doesn't have a native list type
 	// Create a wrapper response for multiple matches
@@ -1233,12 +1229,7 @@ func writeNeedsJSON(w io.Writer, match *graph.Node, ancestors, parents []*graph.
 }
 
 func writeNeedsResponseJSON(w io.Writer, resp *graphv1.NeedsDependencyResponse) error {
-	opts := protojson.MarshalOptions{
-		Multiline:       true,
-		Indent:          "  ",
-		EmitUnpopulated: false,
-		UseProtoNames:   true,
-	}
+	opts := internalproto.CLIJSONMarshalOptions()
 
 	data, err := opts.Marshal(resp)
 	if err != nil {
@@ -1312,12 +1303,7 @@ func writeGraphFlatList(w io.Writer, g *graph.Graph, showVersions, showVulnCount
 func writeGraphStats(w io.Writer, stats *graphv1.GraphStats, format string) error {
 	switch GraphFormat(strings.ToLower(format)) {
 	case GraphFormatJSON:
-		opts := protojson.MarshalOptions{
-			Multiline:       true,
-			Indent:          "  ",
-			EmitUnpopulated: false,
-			UseProtoNames:   true,
-		}
+		opts := internalproto.CLIJSONMarshalOptions()
 		data, err := opts.Marshal(stats)
 		if err != nil {
 			return err

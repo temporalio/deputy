@@ -5,13 +5,13 @@ import (
 	"io"
 	"strings"
 
-	"google.golang.org/protobuf/encoding/protojson"
+	"github.com/spf13/cobra"
 
 	dependencyv1 "github.com/temporalio/deputy/gen/deputy/dependency/v1"
 	sbomv1 "github.com/temporalio/deputy/gen/deputy/sbom/v1"
+	internalproto "github.com/temporalio/deputy/internal/proto"
 	sbomx "github.com/temporalio/deputy/internal/sbom"
 	"github.com/temporalio/deputy/internal/sbom/diff"
-	"github.com/spf13/cobra"
 )
 
 // addSBOMDiffCommand adds the 'sbom diff' subcommand.
@@ -85,12 +85,7 @@ USAGE:
 // outputDiffJSON outputs the diff as JSON using proto types.
 func outputDiffJSON(w io.Writer, d *diff.Diff) error {
 	resp := diffToProto(d)
-	opts := protojson.MarshalOptions{
-		Multiline:       true,
-		Indent:          "  ",
-		EmitUnpopulated: false,
-		UseProtoNames:   true,
-	}
+	opts := internalproto.CLIJSONMarshalOptions()
 	data, err := opts.Marshal(resp)
 	if err != nil {
 		return fmt.Errorf("marshal proto to JSON: %w", err)

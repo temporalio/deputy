@@ -12,6 +12,7 @@ import (
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	"github.com/spf13/cobra"
+
 	scanv1 "github.com/temporalio/deputy/gen/deputy/scan/v1"
 	targetv1 "github.com/temporalio/deputy/gen/deputy/target/v1"
 	triagev1 "github.com/temporalio/deputy/gen/deputy/triage/v1"
@@ -283,12 +284,7 @@ func runTriagePoliciesProto(ctx context.Context, policyPaths []string, triageRes
 
 // outputTriageProtoJSON writes the triage response as JSON using protojson.
 func outputTriageProtoJSON(w io.Writer, resp *triagev1.TriageResponse) error {
-	opts := protojson.MarshalOptions{
-		Multiline:       true,
-		Indent:          "  ",
-		EmitUnpopulated: false,
-		UseProtoNames:   true,
-	}
+	opts := internalproto.CLIJSONMarshalOptions()
 	data, err := opts.Marshal(resp)
 	if err != nil {
 		return fmt.Errorf("marshal proto to JSON: %w", err)
@@ -310,12 +306,7 @@ func renderTriageText(w io.Writer, resp *triagev1.TriageResponse, showDBInfo boo
 // buildTriagePromptProto creates a prompt for the AI agent from the proto triage response.
 func buildTriagePromptProto(resp *triagev1.TriageResponse) (string, error) {
 	// Use protojson for consistent formatting
-	opts := protojson.MarshalOptions{
-		Multiline:       true,
-		Indent:          "  ",
-		EmitUnpopulated: false,
-		UseProtoNames:   true,
-	}
+	opts := internalproto.CLIJSONMarshalOptions()
 	data, err := opts.Marshal(resp)
 	if err != nil {
 		return "", err

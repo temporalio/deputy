@@ -1442,12 +1442,7 @@ func outputTextContainer(w io.Writer, errW io.Writer, result scanning.Result, ig
 // This is the preferred method for JSON output as it avoids conversion bugs
 // and ensures the JSON structure matches the proto schema exactly.
 func outputProtoJSON(w io.Writer, resp *scanv1.ScanResponse) error {
-	opts := protojson.MarshalOptions{
-		Multiline:       true,
-		Indent:          "  ",
-		EmitUnpopulated: false, // Don't emit zero values
-		UseProtoNames:   true,  // Use snake_case field names from proto
-	}
+	opts := internalproto.CLIJSONMarshalOptions()
 	data, err := opts.Marshal(resp)
 	if err != nil {
 		return fmt.Errorf("marshal proto to JSON: %w", err)
@@ -2389,12 +2384,7 @@ func runScanDockerfile(c *services.Clients, cmd *cobra.Command, target string) e
 
 // outputDockerfileJSON outputs Dockerfile scan results as JSON using protojson.
 func outputDockerfileJSON(w io.Writer, resp *scanv1.ScanResponse) error {
-	opts := protojson.MarshalOptions{
-		Multiline:       true,
-		Indent:          "  ",
-		EmitUnpopulated: false,
-		UseProtoNames:   true,
-	}
+	opts := internalproto.CLIJSONMarshalOptions()
 	data, err := opts.Marshal(resp)
 	if err != nil {
 		return fmt.Errorf("marshal proto to JSON: %w", err)

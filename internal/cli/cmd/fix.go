@@ -416,12 +416,7 @@ func renderFixText(w io.Writer, resp *fixv1.FixResponse) {
 
 // outputFixProtoJSON writes the fix response as JSON using protojson.
 func outputFixProtoJSON(w io.Writer, resp *fixv1.FixResponse) error {
-	opts := protojson.MarshalOptions{
-		Multiline:       true,
-		Indent:          "  ",
-		EmitUnpopulated: false,
-		UseProtoNames:   true,
-	}
+	opts := internalproto.CLIJSONMarshalOptions()
 	data, err := opts.Marshal(resp)
 	if err != nil {
 		return fmt.Errorf("marshal proto to JSON: %w", err)

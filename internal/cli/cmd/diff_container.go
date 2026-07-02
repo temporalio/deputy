@@ -10,7 +10,9 @@ import (
 	"connectrpc.com/connect"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/go-git/go-git/v5"
-	"google.golang.org/protobuf/encoding/protojson"
+
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/trace"
 
 	containerv1 "github.com/temporalio/deputy/gen/deputy/container/v1"
 	diffv1 "github.com/temporalio/deputy/gen/deputy/diff/v1"
@@ -22,8 +24,6 @@ import (
 	"github.com/temporalio/deputy/internal/report/render"
 	"github.com/temporalio/deputy/internal/services"
 	ui "github.com/temporalio/deputy/internal/ui"
-	"go.opentelemetry.io/otel/attribute"
-	"go.opentelemetry.io/otel/trace"
 )
 
 // isContainerDiffInContext returns true if both arguments appear to be container image references,
@@ -275,12 +275,7 @@ func normalizeImageReference(ref string, useLocalDaemon bool) string {
 // renderContainerDiffProtoJSON outputs the container diff as JSON using protojson.
 // This uses the proto response directly for consistent, type-safe JSON output.
 func renderContainerDiffProtoJSON(w io.Writer, resp *diffv1.DiffContainerImagesResponse) error {
-	opts := protojson.MarshalOptions{
-		Multiline:       true,
-		Indent:          "  ",
-		EmitUnpopulated: false,
-		UseProtoNames:   true,
-	}
+	opts := internalproto.CLIJSONMarshalOptions()
 	data, err := opts.Marshal(resp)
 	if err != nil {
 		return fmt.Errorf("marshal proto to JSON: %w", err)

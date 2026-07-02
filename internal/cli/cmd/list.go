@@ -10,13 +10,13 @@ import (
 	"strings"
 
 	"connectrpc.com/connect"
-	"google.golang.org/protobuf/encoding/protojson"
 
 	"github.com/spf13/cobra"
 
 	dependencyv1 "github.com/temporalio/deputy/gen/deputy/dependency/v1"
 	listv1 "github.com/temporalio/deputy/gen/deputy/list/v1"
 	"github.com/temporalio/deputy/internal/cli/flags"
+	internalproto "github.com/temporalio/deputy/internal/proto"
 	"github.com/temporalio/deputy/internal/services"
 	ui "github.com/temporalio/deputy/internal/ui"
 )
@@ -194,12 +194,7 @@ FILTERING & FORMATTING:
 				return writeListTSV(w, items, !noHeader, false)
 			case FormatJSON:
 				// Use protojson for consistent JSON output from proto response
-				opts := protojson.MarshalOptions{
-					Multiline:       true,
-					Indent:          "  ",
-					EmitUnpopulated: false,
-					UseProtoNames:   true,
-				}
+				opts := internalproto.CLIJSONMarshalOptions()
 				data, err := opts.Marshal(resp.Msg)
 				if err != nil {
 					return fmt.Errorf("marshal proto to JSON: %w", err)

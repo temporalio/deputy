@@ -6,11 +6,12 @@ import (
 
 	"connectrpc.com/connect"
 	"github.com/charmbracelet/lipgloss"
-	"google.golang.org/protobuf/encoding/protojson"
+
+	"github.com/spf13/cobra"
 
 	listv1 "github.com/temporalio/deputy/gen/deputy/list/v1"
+	internalproto "github.com/temporalio/deputy/internal/proto"
 	"github.com/temporalio/deputy/internal/services"
-	"github.com/spf13/cobra"
 )
 
 // AddEcosystemsCommand adds the ecosystems command to the root.
@@ -116,12 +117,7 @@ func printEcosystemsJSON(cmd *cobra.Command, ecosystems []*listv1.EcosystemInfo)
 		Ecosystems: ecosystems,
 	}
 
-	opts := protojson.MarshalOptions{
-		Multiline:       true,
-		Indent:          "  ",
-		EmitUnpopulated: false,
-		UseProtoNames:   true,
-	}
+	opts := internalproto.CLIJSONMarshalOptions()
 
 	data, err := opts.Marshal(resp)
 	if err != nil {
