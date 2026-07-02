@@ -349,92 +349,17 @@ func getEntrypointVariables(ep policy.Entrypoint) []*policyv1.VariableInfo {
 	return vars
 }
 
-// policyVariableMetadata describes a CEL binding in policy discovery output.
-// It intentionally stays small because binding availability and requiredness
-// come from policy.BindingProfile, not this display table.
-type policyVariableMetadata struct {
-	typ         string
-	description string
-}
-
-// policyVariableMetadataByName gives humans and agents stable type hints for
-// policy variables without requiring them to inspect protobuf descriptors.
-var policyVariableMetadataByName = map[string]policyVariableMetadata{
-	"ancestors":             {typ: "list(graphv1.Node)", description: "Ancestor nodes for the current graph node"},
-	"base_image":            {typ: "string", description: "Base image reference"},
-	"change":                {typ: "object", description: "Current dependency or package change"},
-	"changes":               {typ: "list(object)", description: "Dependency changes"},
-	"cluster":               {typ: "object", description: "Current triage cluster"},
-	"command":               {typ: "string", description: "Command being evaluated"},
-	"component":             {typ: "dependencyv1.Package", description: "SBOM component being evaluated"},
-	"config_changes":        {typ: "object", description: "Container image configuration changes"},
-	"context":               {typ: "object", description: "Additional policy execution context"},
-	"dependency":            {typ: "dependencyv1.Package", description: "Dependency associated with a change"},
-	"descendants":           {typ: "list(graphv1.Node)", description: "Descendant nodes for the current graph node"},
-	"dockerfile":            {typ: "object", description: "Parsed Dockerfile structure"},
-	"dockerfile_analysis":   {typ: "object", description: "Dockerfile analysis results"},
-	"edge":                  {typ: "graphv1.Edge", description: "Current dependency graph edge"},
-	"edges":                 {typ: "list(graphv1.Edge)", description: "Dependency graph edges"},
-	"env":                   {typ: "policyv1.Environment", description: "Execution environment context"},
-	"findings":              {typ: "list(object)", description: "Triage findings"},
-	"from_node":             {typ: "graphv1.Node", description: "Source node for the current graph edge"},
-	"graph":                 {typ: "graphv1.Graph", description: "Dependency graph data"},
-	"host":                  {typ: "string", description: "Requested network host"},
-	"image":                 {typ: "object", description: "Container image metadata"},
-	"image_info":            {typ: "object", description: "Container image metadata"},
-	"jwt":                   {typ: "policyv1.JWTClaims", description: "JWT claims from authenticated requests"},
-	"layer":                 {typ: "object", description: "Container image layer analysis"},
-	"layer_analysis":        {typ: "object", description: "Layer-by-layer container diff analysis"},
-	"licenses":              {typ: "list(string)", description: "SPDX license identifiers"},
-	"node":                  {typ: "graphv1.Node", description: "Current dependency graph node"},
-	"nodes":                 {typ: "list(graphv1.Node)", description: "Dependency graph nodes"},
-	"package_changes":       {typ: "list(object)", description: "Package changes between container images"},
-	"packages":              {typ: "list(dependencyv1.Package)", description: "Packages in the report"},
-	"pkg":                   {typ: "dependencyv1.Package", description: "Package associated with the current policy item"},
-	"plan":                  {typ: "object", description: "Remediation plan"},
-	"port":                  {typ: "int", description: "Requested network port"},
-	"protocol":              {typ: "string", description: "Requested network protocol"},
-	"report":                {typ: "object", description: "Scan report data"},
-	"request":               {typ: "object", description: "Request metadata for proxy or server authorization policies"},
-	"requested_config":      {typ: "object", description: "Requested sandbox configuration"},
-	"roots":                 {typ: "list(string)", description: "PURLs of direct (depth-0) dependencies"},
-	"sandbox_config":        {typ: "object", description: "Effective sandbox configuration"},
-	"sbom":                  {typ: "object", description: "SBOM document"},
-	"secret":                {typ: "object", description: "Current secret finding"},
-	"secrets":               {typ: "list(object)", description: "Secrets scan findings"},
-	"source":                {typ: "string", description: "Source of the sandbox execution request"},
-	"stage":                 {typ: "object", description: "Current Dockerfile stage"},
-	"stats":                 {typ: "object", description: "Summary statistics for the current report"},
-	"step":                  {typ: "object", description: "Current remediation plan step"},
-	"summary":               {typ: "object", description: "Container diff summary"},
-	"target":                {typ: "targetv1.Target", description: "Target or provenance metadata"},
-	"target_image":          {typ: "string", description: "Target image reference"},
-	"to_node":               {typ: "graphv1.Node", description: "Target node for the current graph edge"},
-	"vulnerability":         {typ: "vulnerabilityv1.Finding", description: "Current vulnerability finding"},
-	"vulnerability_changes": {typ: "list(object)", description: "Vulnerability changes between container images"},
-	"vulnerabilities":       {typ: "list(vulnerabilityv1.Finding)", description: "Vulnerability findings"},
-	"workspace_dir":         {typ: "string", description: "Workspace directory for sandbox execution"},
-}
-
 // variableInfoForPolicyBinding combines binding-profile requiredness with the
-// display metadata used by policy discovery APIs.
+// display metadata owned by the policy package (the single source of truth
+// shared with the MCP tool and the LSP).
 func variableInfoForPolicyBinding(name string, required bool) *policyv1.VariableInfo {
-	meta := policyVariableMetadataForName(name)
+	meta := policy.VariableInfoOrDefault(name)
 	return &policyv1.VariableInfo{
 		Name:        name,
-		Type:        meta.typ,
-		Description: meta.description,
+		Type:        meta.Type,
+		Description: meta.Description,
 		Required:    required,
 	}
-}
-
-// policyVariableMetadataForName returns generic object metadata for newer
-// bindings that have not yet been added to the display table.
-func policyVariableMetadataForName(name string) policyVariableMetadata {
-	if meta, ok := policyVariableMetadataByName[name]; ok {
-		return meta
-	}
-	return policyVariableMetadata{typ: "object", description: "Policy variable"}
 }
 
 func getEntrypointHelpers(ep policy.Entrypoint) []string {

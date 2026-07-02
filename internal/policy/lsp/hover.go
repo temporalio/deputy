@@ -43,6 +43,9 @@ func celHover(exprLine string) string {
 	}
 	for _, v := range policy.DefaultVariableNames() {
 		if token == v {
+			if meta, ok := policy.VariableInfo(v); ok {
+				return fmt.Sprintf("`%s` (%s) — %s", v, meta.Type, meta.Description)
+			}
 			return fmt.Sprintf("`%s` — standard policy variable available in CEL", v)
 		}
 	}
