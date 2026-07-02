@@ -122,7 +122,10 @@
 //
 // Scans a local directory for vulnerabilities by analyzing dependency manifests
 // (go.mod, package.json, requirements.txt, etc.). Returns vulnerability counts
-// by severity and compact information about each finding.
+// by severity and compact information about each finding. The severity map
+// includes an unknown bucket so counts sum to the total; scanTime is a human
+// string and scanTimeMs the machine-readable elapsed milliseconds; each finding
+// carries severityType (the scoring system, e.g. CVSS_V3) when known.
 //
 // Input:
 //   - path: Path to the directory to scan (required)
@@ -223,7 +226,9 @@
 // vulnerablePaths is capped at 50 returned examples; use vulnerablePathCount
 // and vulnerablePathsTruncated to detect sampling. pathsToTarget is capped at
 // 20 returned examples; use target.pathCount and pathsToTargetTruncated for the
-// full target-path count.
+// full target-path count. For Git repository snapshots, output echoes ref,
+// effectiveRef, and commit so results can be correlated with scans of the same
+// snapshot.
 //
 // ## graph_why
 //
@@ -248,7 +253,8 @@
 // can inspect the matched package's PURL, directness, depth, disconnected
 // status, and import status before choosing the next remediation step.
 // paths is capped at 10 returned examples by default or 100 when showAll=true;
-// use pathCount and pathsTruncated to detect sampling.
+// use pathCount and pathsTruncated to detect sampling. For Git repository
+// snapshots, output echoes ref, effectiveRef, and commit.
 //
 // ## graph_needs
 //
@@ -269,7 +275,8 @@
 //
 // Output includes matchedNode (as in graph_why) so agents can inspect the
 // matched package's PURL, directness, depth, and import status even when the
-// dependents list is empty (for example a direct/root dependency).
+// dependents list is empty (for example a direct/root dependency). For Git
+// repository snapshots, output echoes ref, effectiveRef, and commit.
 //
 // ## triage_vulnerabilities
 //

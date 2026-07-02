@@ -1320,6 +1320,7 @@ type VulnExplanation struct {
 	Summary             string           `json:"summary"`
 	Details             string           `json:"details,omitempty"`
 	Severity            string           `json:"severity"`
+	SeverityType        string           `json:"severityType,omitempty"`
 	FixedVersions       []string         `json:"fixedVersions"`
 	PackageFixes        []VulnPackageFix `json:"packageFixes"`
 	ResolvedFix         *VulnFixVerdict  `json:"resolvedFix,omitempty"`
@@ -1394,6 +1395,7 @@ type DirectoryScanResult struct {
 	Vulnerabilities           []VulnExplanation `json:"vulnerabilities"`
 	Clean                     bool              `json:"clean"`
 	ScanTime                  string            `json:"scanTime"`
+	ScanTimeMs                int64             `json:"scanTimeMs"`
 }
 
 // ListDependenciesInput is the input for the list_dependencies tool.
@@ -1463,12 +1465,13 @@ type GenerateSBOMInput struct {
 
 // SBOMResult is the output for the generate_sbom tool.
 type SBOMResult struct {
-	Path       string `json:"path"`
-	Ref        string `json:"ref,omitempty"`
-	Commit     string `json:"commit,omitempty"`
-	Format     string `json:"format"`
-	Components int    `json:"components"`
-	SBOM       string `json:"sbom"`
+	Path         string `json:"path"`
+	Ref          string `json:"ref,omitempty"`
+	EffectiveRef string `json:"effectiveRef,omitempty"`
+	Commit       string `json:"commit,omitempty"`
+	Format       string `json:"format"`
+	Components   int    `json:"components"`
+	SBOM         string `json:"sbom"`
 }
 
 // GetRemediationInput is the input for the get_remediation tool.
@@ -1555,6 +1558,9 @@ type GraphImportStatusCounts struct {
 // AnalyzeGraphResult is the output for the analyze_dependency_graph tool.
 type AnalyzeGraphResult struct {
 	Path                     string             `json:"path"`
+	Ref                      string             `json:"ref,omitempty"`
+	EffectiveRef             string             `json:"effectiveRef,omitempty"`
+	Commit                   string             `json:"commit,omitempty"`
 	Stats                    GraphStats         `json:"stats"`
 	VulnerablePaths          []GraphPath        `json:"vulnerablePaths"`
 	VulnerablePathCount      int                `json:"vulnerablePathCount"`
@@ -1591,6 +1597,9 @@ type GraphWhyResult struct {
 	Package        string         `json:"package"`
 	Version        string         `json:"version,omitempty"`
 	PURL           string         `json:"purl,omitempty"`
+	Ref            string         `json:"ref,omitempty"`
+	EffectiveRef   string         `json:"effectiveRef,omitempty"`
+	Commit         string         `json:"commit,omitempty"`
 	Direct         bool           `json:"direct"`
 	Found          bool           `json:"found"`
 	MatchedNode    *GraphPathNode `json:"matchedNode,omitempty"`
@@ -1616,6 +1625,9 @@ type GraphNeedsResult struct {
 	Package         string           `json:"package"`
 	Version         string           `json:"version,omitempty"`
 	PURL            string           `json:"purl,omitempty"`
+	Ref             string           `json:"ref,omitempty"`
+	EffectiveRef    string           `json:"effectiveRef,omitempty"`
+	Commit          string           `json:"commit,omitempty"`
 	Direct          bool             `json:"direct"`
 	Found           bool             `json:"found"`
 	MatchedNode     *GraphPathNode   `json:"matchedNode,omitempty"`
@@ -1637,6 +1649,7 @@ type TriageInput struct {
 type TriagedVuln struct {
 	ID             string           `json:"id"`
 	Severity       string           `json:"severity"`
+	SeverityType   string           `json:"severityType,omitempty"`
 	Package        string           `json:"package"`
 	Version        string           `json:"version"`
 	PURL           string           `json:"purl,omitempty"`
@@ -1688,6 +1701,7 @@ type ContainerScanResult struct {
 	Vulnerabilities           []VulnExplanation `json:"vulnerabilities"`
 	Clean                     bool              `json:"clean"`
 	ScanTime                  string            `json:"scanTime"`
+	ScanTimeMs                int64             `json:"scanTimeMs"`
 }
 
 // DiffRefsInput is the input for the diff_refs tool.
@@ -1716,6 +1730,8 @@ type DiffRefsResult struct {
 	Path                 string             `json:"path,omitempty"`
 	BaseRef              string             `json:"baseRef"`
 	TargetRef            string             `json:"targetRef"`
+	BaseCommit           string             `json:"baseCommit,omitempty"`
+	TargetCommit         string             `json:"targetCommit,omitempty"`
 	Platform             string             `json:"platform,omitempty"`
 	IsContainerDiff      bool               `json:"isContainerDiff"`
 	Changes              []DependencyChange `json:"changes"`
@@ -2189,6 +2205,7 @@ func (s *Server) scanDirectory(ctx context.Context, req *mcp.CallToolRequest, ar
 		Vulnerabilities: make([]VulnExplanation, 0),
 		Clean:           consolidated.Stats.GetUnique() == 0,
 		ScanTime:        time.Since(startTime).String(),
+		ScanTimeMs:      time.Since(startTime).Milliseconds(),
 	}
 
 	for _, vuln := range consolidated.Vulnerabilities {
@@ -2378,12 +2395,13 @@ func (s *Server) generateSBOM(ctx context.Context, req *mcp.CallToolRequest, arg
 	logs.Debug(ctx, "MCP tool completed", "tool", "generate_sbom", "path", targetPath, "format", format, "components", components)
 
 	return nil, SBOMResult{
-		Path:       targetPath,
-		Ref:        sbomResult.Ref,
-		Commit:     sbomResult.Commit,
-		Format:     format,
-		Components: components,
-		SBOM:       sb.String(),
+		Path:         targetPath,
+		Ref:          sbomResult.Ref,
+		EffectiveRef: sbomResult.Target.EffectiveRef,
+		Commit:       sbomResult.Commit,
+		Format:       format,
+		Components:   components,
+		SBOM:         sb.String(),
 	}, nil
 }
 
@@ -2553,7 +2571,7 @@ func (s *Server) analyzeDependencyGraph(ctx context.Context, req *mcp.CallToolRe
 
 	span.SetAttributes(otel.AttrTargetPath.String(targetPath))
 
-	depGraph, err := s.buildDependencyGraph(ctx, targetPath, args.Ref, args.Ecosystems, args.ExcludePaths, args.ResolveTransitives, args.Extended)
+	depGraph, target, err := s.buildDependencyGraph(ctx, targetPath, args.Ref, args.Ecosystems, args.ExcludePaths, args.ResolveTransitives, args.Extended)
 	if err != nil {
 		otel.SetSpanError(span, err)
 		otel.RecordMCPToolCall(ctx, "analyze_dependency_graph", time.Since(startTime).Seconds(), false)
@@ -2568,8 +2586,12 @@ func (s *Server) analyzeDependencyGraph(ctx context.Context, req *mcp.CallToolRe
 		return nil, AnalyzeGraphResult{}, err
 	}
 
+	ref, effectiveRef, commit := mcpTargetRef(target)
 	result := AnalyzeGraphResult{
 		Path:            targetPath,
+		Ref:             ref,
+		EffectiveRef:    effectiveRef,
+		Commit:          commit,
 		VulnerablePaths: make([]GraphPath, 0),
 		PathsToTarget:   make([]GraphPath, 0),
 	}
@@ -2641,9 +2663,12 @@ func graphTargetMessage(target *GraphTargetResult) string {
 	}
 }
 
-func (s *Server) buildDependencyGraph(ctx context.Context, targetPath, ref string, ecosystems, excludePaths []string, resolveTransitives, extended bool) (*graph.Graph, error) {
+// buildDependencyGraph builds the dependency graph for a target and returns it
+// along with the resolved target metadata (ref/effectiveRef/commit) so callers
+// can echo which Git snapshot answered the query.
+func (s *Server) buildDependencyGraph(ctx context.Context, targetPath, ref string, ecosystems, excludePaths []string, resolveTransitives, extended bool) (*graph.Graph, *targetv1.Target, error) {
 	if s.clients == nil || s.clients.Graph == nil {
-		return nil, fmt.Errorf("graph service is not configured")
+		return nil, nil, fmt.Errorf("graph service is not configured")
 	}
 
 	resp, err := s.clients.Graph.BuildGraph(ctx, connect.NewRequest(&graphv1.BuildGraphRequest{
@@ -2658,13 +2683,13 @@ func (s *Server) buildDependencyGraph(ctx context.Context, targetPath, ref strin
 		},
 	}))
 	if err != nil {
-		return nil, fmt.Errorf("build graph: %w", err)
+		return nil, nil, fmt.Errorf("build graph: %w", err)
 	}
 	depGraph := graph.FromProto(resp.Msg.GetNodes(), resp.Msg.GetEdges(), resp.Msg.GetRoots())
 	if depGraph == nil {
-		return nil, fmt.Errorf("build graph returned no graph")
+		return nil, nil, fmt.Errorf("build graph returned no graph")
 	}
-	return depGraph, nil
+	return depGraph, resp.Msg.GetTarget(), nil
 }
 
 func (s *Server) annotateGraphVulnerabilities(ctx context.Context, targetPath, ref string, ecosystems, excludePaths []string, depGraph *graph.Graph) error {
@@ -2756,13 +2781,14 @@ func (s *Server) graphWhy(ctx context.Context, req *mcp.CallToolRequest, args Gr
 		otel.AttrMCPGraphPackage.String(packageQuery),
 	)
 
-	depGraph, err := s.buildDependencyGraph(ctx, targetPath, args.Ref, args.Ecosystems, args.ExcludePaths, args.ResolveTransitives, args.Extended)
+	depGraph, target, err := s.buildDependencyGraph(ctx, targetPath, args.Ref, args.Ecosystems, args.ExcludePaths, args.ResolveTransitives, args.Extended)
 	if err != nil {
 		otel.SetSpanError(span, err)
 		otel.RecordMCPToolCall(ctx, "graph_why", time.Since(startTime).Seconds(), false)
 		logs.Warn(ctx, "Graph why failed", "path", targetPath, "package", packageQuery, "error", err)
 		return nil, GraphWhyResult{}, err
 	}
+	ref, effectiveRef, commit := mcpTargetRef(target)
 
 	// Find matching nodes using ranked matching
 	matches := findMatchingNodes(depGraph, packageQuery)
@@ -2772,23 +2798,29 @@ func (s *Server) graphWhy(ctx context.Context, req *mcp.CallToolRequest, args Gr
 		otel.RecordMCPToolCall(ctx, "graph_why", time.Since(startTime).Seconds(), true)
 		logs.Debug(ctx, "MCP tool completed", "tool", "graph_why", "package", packageQuery, "found", false)
 		return nil, GraphWhyResult{
-			Package: packageQuery,
-			Found:   false,
-			Paths:   []GraphPath{},
-			Message: fmt.Sprintf("Package %q not found in dependency graph", packageQuery),
+			Package:      packageQuery,
+			Ref:          ref,
+			EffectiveRef: effectiveRef,
+			Commit:       commit,
+			Found:        false,
+			Paths:        []GraphPath{},
+			Message:      fmt.Sprintf("Package %q not found in dependency graph", packageQuery),
 		}, nil
 	}
 
 	// Use the best match
 	match := matches[0]
 	result := GraphWhyResult{
-		Package:     match.Name,
-		Version:     match.Version,
-		PURL:        match.Purl,
-		Direct:      match.Direct,
-		Found:       true,
-		MatchedNode: graphPathNodePtr(match),
-		Paths:       make([]GraphPath, 0),
+		Package:      match.Name,
+		Version:      match.Version,
+		PURL:         match.Purl,
+		Ref:          ref,
+		EffectiveRef: effectiveRef,
+		Commit:       commit,
+		Direct:       match.Direct,
+		Found:        true,
+		MatchedNode:  graphPathNodePtr(match),
+		Paths:        make([]GraphPath, 0),
 	}
 
 	// Return direct dependencies as a one-node path so agents can consume
@@ -2895,13 +2927,14 @@ func (s *Server) graphNeeds(ctx context.Context, req *mcp.CallToolRequest, args 
 		otel.AttrMCPGraphPackage.String(packageQuery),
 	)
 
-	depGraph, err := s.buildDependencyGraph(ctx, targetPath, args.Ref, args.Ecosystems, args.ExcludePaths, args.ResolveTransitives, args.Extended)
+	depGraph, target, err := s.buildDependencyGraph(ctx, targetPath, args.Ref, args.Ecosystems, args.ExcludePaths, args.ResolveTransitives, args.Extended)
 	if err != nil {
 		otel.SetSpanError(span, err)
 		otel.RecordMCPToolCall(ctx, "graph_needs", time.Since(startTime).Seconds(), false)
 		logs.Warn(ctx, "Graph needs failed", "path", targetPath, "package", packageQuery, "error", err)
 		return nil, GraphNeedsResult{}, err
 	}
+	ref, effectiveRef, commit := mcpTargetRef(target)
 
 	// Find best matching node
 	match := findBestMatchingNode(depGraph, packageQuery)
@@ -2911,21 +2944,27 @@ func (s *Server) graphNeeds(ctx context.Context, req *mcp.CallToolRequest, args 
 		otel.RecordMCPToolCall(ctx, "graph_needs", time.Since(startTime).Seconds(), true)
 		logs.Debug(ctx, "MCP tool completed", "tool", "graph_needs", "package", packageQuery, "found", false)
 		return nil, GraphNeedsResult{
-			Package:    packageQuery,
-			Found:      false,
-			Dependents: []DependencyInfo{},
-			Message:    fmt.Sprintf("Package %q not found in dependency graph", packageQuery),
+			Package:      packageQuery,
+			Ref:          ref,
+			EffectiveRef: effectiveRef,
+			Commit:       commit,
+			Found:        false,
+			Dependents:   []DependencyInfo{},
+			Message:      fmt.Sprintf("Package %q not found in dependency graph", packageQuery),
 		}, nil
 	}
 
 	result := GraphNeedsResult{
-		Package:     match.Name,
-		Version:     match.Version,
-		PURL:        match.Purl,
-		Direct:      match.Direct,
-		Found:       true,
-		MatchedNode: graphPathNodePtr(match),
-		Dependents:  []DependencyInfo{},
+		Package:      match.Name,
+		Version:      match.Version,
+		PURL:         match.Purl,
+		Ref:          ref,
+		EffectiveRef: effectiveRef,
+		Commit:       commit,
+		Direct:       match.Direct,
+		Found:        true,
+		MatchedNode:  graphPathNodePtr(match),
+		Dependents:   []DependencyInfo{},
 	}
 
 	// Collect ancestors (packages that depend on this one). Ancestors is a BFS
@@ -3058,6 +3097,7 @@ func (s *Server) triageVulnerabilities(ctx context.Context, req *mcp.CallToolReq
 		triaged := TriagedVuln{
 			ID:             v.PrimaryID,
 			Severity:       severity,
+			SeverityType:   strings.TrimSpace(v.SeverityType),
 			Package:        v.Package,
 			Version:        v.Version,
 			PURL:           v.PURL,
@@ -3276,6 +3316,7 @@ func (s *Server) scanContainer(ctx context.Context, req *mcp.CallToolRequest, ar
 		Vulnerabilities: make([]VulnExplanation, 0),
 		Clean:           consolidated.Stats.GetUnique() == 0,
 		ScanTime:        time.Since(startTime).String(),
+		ScanTimeMs:      time.Since(startTime).Milliseconds(),
 	}
 
 	for _, vuln := range consolidated.Vulnerabilities {
@@ -3552,6 +3593,8 @@ func (s *Server) diffGitRefs(ctx context.Context, args DiffRefsInput) (*mcp.Call
 		Path:                 targetPath,
 		BaseRef:              baseRef,
 		TargetRef:            targetRef,
+		BaseCommit:           strings.TrimSpace(baseScan.GetTarget().GetCommitHash()),
+		TargetCommit:         strings.TrimSpace(targetScan.GetTarget().GetCommitHash()),
 		IsContainerDiff:      false,
 		Changes:              make([]DependencyChange, 0),
 		VulnerabilitySummary: make(map[string]int),
@@ -4026,6 +4069,7 @@ func vulnExplanationFromConsolidated(v vulnerability.Consolidated, opts vulnExpl
 		Aliases:       stringsForMCP(v.SecondaryIDs),
 		Summary:       v.Summary,
 		Severity:      severityStringForMCP(v.Severity, v.SeverityType),
+		SeverityType:  strings.TrimSpace(v.SeverityType),
 		FixedVersions: stringsForMCP(v.FixedVersions),
 		PackageFixes:  packageFixesToMCP(v.PackageFixes),
 		ResolvedFix:   fixVerdictToMCP(v.Fix),
