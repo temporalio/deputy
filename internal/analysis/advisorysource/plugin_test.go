@@ -117,9 +117,9 @@ func TestPluginSourceEndToEnd(t *testing.T) {
 	// The scan wiring: DEPUTY_ADVISORY_SOURCES loads the plugin into the
 	// default registry alongside the built-in OSV source.
 	t.Setenv(EnvAdvisorySources, bin)
-	configured, err := ConfiguredPluginSources(ctx)
+	configured, err := materializeSources(ctx, allSourceConfigs())
 	if err != nil {
-		t.Fatalf("ConfiguredPluginSources: %v", err)
+		t.Fatalf("materializeSources: %v", err)
 	}
 	if len(configured) != 1 || configured[0].Info().GetName() != "static-example" {
 		t.Fatalf("configured sources = %+v, want the static example plugin", configured)

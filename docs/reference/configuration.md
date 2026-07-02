@@ -174,7 +174,25 @@ ai:
 - `DEPUTY_ADVISORY_SOURCES` (comma-separated advisory-source plugin programs to
   load alongside the built-in OSV source, as PATH-resolved names or paths.
   Explicit opt-in: Deputy never auto-executes plugins it merely finds on PATH.
-  See the [plugins guide](../guides/plugins.md#advisory-source-plugins).)
+  Unioned with the `advisory_sources` config section below. See the
+  [plugins guide](../guides/plugins.md#advisory-source-plugins).)
+
+### Advisory Sources
+
+External advisory sources (threat feeds, vendor databases) aggregate with the
+built-in OSV source during scans, with union-with-provenance merging. Each entry
+sets exactly one of `program` (a pluginrpc plugin executable, run per query) or
+`url` (a persistent ConnectRPC `AdvisorySourceService` — lower latency, and the
+right binding for shared or remote feeds):
+
+```yaml
+advisory_sources:
+  - program: deputy-advisory-source-myfeed   # pluginrpc subprocess plugin
+  - url: https://feeds.corp.example          # ConnectRPC service
+```
+
+A source that fails to load is skipped with a warning rather than failing the
+scan; the scan's `coverage` block shows which sources actually answered.
 
 ### SBOM
 

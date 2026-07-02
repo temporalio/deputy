@@ -43,6 +43,12 @@ type Config struct {
 	// Scan configures vulnerability scanning behavior.
 	Scan ScanConfig `yaml:"scan,omitempty" json:"scan"`
 
+	// AdvisorySources lists external advisory sources (threat feeds, vendor
+	// databases) to aggregate with the built-in OSV source during vulnerability
+	// scans. Loading is explicit opt-in; sources that fail to load are skipped
+	// with a warning and the scan's coverage report shows which answered.
+	AdvisorySources []AdvisorySourceConfig `yaml:"advisory_sources,omitempty" json:"advisory_sources,omitempty"`
+
 	// Policy configures policy evaluation.
 	Policy PolicyConfig `yaml:"policy,omitempty" json:"policy"`
 
@@ -54,6 +60,18 @@ type Config struct {
 
 	// OTel configures OpenTelemetry instrumentation.
 	OTel otel.Config `yaml:"otel,omitempty" json:"otel"`
+}
+
+// AdvisorySourceConfig declares one external advisory source. Exactly one of
+// Program or URL must be set.
+type AdvisorySourceConfig struct {
+	// Program is a pluginrpc advisory-source plugin executable, as a
+	// PATH-resolved name or a path. Deputy executes it per query; it never
+	// auto-executes binaries it merely finds on PATH.
+	Program string `yaml:"program,omitempty" json:"program,omitempty"`
+	// URL is the base URL of a ConnectRPC AdvisorySourceService — a persistent
+	// local sidecar or shared remote service (e.g. an org-wide threat feed).
+	URL string `yaml:"url,omitempty" json:"url,omitempty"`
 }
 
 // LogConfig configures logging behavior.

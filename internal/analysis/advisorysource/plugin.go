@@ -107,18 +107,11 @@ func LoadPluginSources(ctx context.Context, programNames []string, opts ...Plugi
 
 // EnvAdvisorySources names the environment variable listing advisory-source
 // plugin programs to load, comma-separated (program names resolved via PATH, or
-// absolute/relative paths). Loading is explicit opt-in: an advisory source can
-// see and shape security findings, so Deputy never auto-executes binaries it
-// merely finds on PATH.
+// absolute/relative paths). It is unioned with the config file's
+// advisory_sources entries (see SetConfiguredSources). Loading is explicit
+// opt-in: an advisory source can see and shape security findings, so Deputy
+// never auto-executes binaries it merely finds on PATH.
 const EnvAdvisorySources = "DEPUTY_ADVISORY_SOURCES"
-
-// ConfiguredPluginSources loads the advisory-source plugins named by
-// EnvAdvisorySources. Sources that fail to load are skipped and reported in the
-// joined error so callers can warn without failing the scan; the coverage
-// report then reflects which sources actually answered.
-func ConfiguredPluginSources(ctx context.Context, opts ...PluginOption) ([]Source, error) {
-	return LoadPluginSources(ctx, parseProgramList(os.Getenv(EnvAdvisorySources)), opts...)
-}
 
 // parseProgramList splits a comma-separated program list, trimming whitespace
 // and dropping empties.

@@ -587,15 +587,38 @@ erroring.
 ### Registration (explicit opt-in)
 
 Advisory sources can see and shape security findings, so Deputy **never
-auto-executes** binaries it merely finds on PATH. Name the plugins you trust
-explicitly, comma-separated (PATH-resolved names or paths):
+auto-executes** binaries it merely finds on PATH. Name the sources you trust
+explicitly — via the environment:
 
 ```bash
 DEPUTY_ADVISORY_SOURCES=deputy-advisory-source-myfeed deputy scan .
 ```
 
-A plugin that fails to load is skipped with a warning rather than failing the
+or in `.deputy.yaml`:
+
+```yaml
+advisory_sources:
+  - program: deputy-advisory-source-myfeed   # pluginrpc subprocess plugin
+  - url: https://feeds.corp.example          # ConnectRPC service
+```
+
+A source that fails to load is skipped with a warning rather than failing the
 scan; the scan's `coverage` block shows which sources actually answered.
+
+### Transport Bindings
+
+The `AdvisorySourceService` proto contract has three interchangeable bindings —
+pick per source, the aggregation is identical:
+
+| Binding | Config | Cost per query | Right for |
+|---------|--------|----------------|-----------|
+| In-process | (built-in OSV) | none | core sources |
+| pluginrpc | `program:` | subprocess exec | scans, any-language plugins, no daemon |
+| ConnectRPC | `url:` | one HTTP call | latency-sensitive callers, shared/remote feeds |
+
+To serve the ConnectRPC binding, implement `AdvisorySourceService` with the
+generated `pluginv1connect.NewAdvisorySourceServiceHandler` and run it as a
+sidecar or shared service.
 
 See [Example: Static Advisory Source](../../examples/advisory-source-plugins/static/)
 for a complete working plugin.

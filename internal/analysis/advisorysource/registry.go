@@ -38,17 +38,17 @@ func NewRegistry(sources ...Source) *Registry {
 }
 
 // NewDefaultRegistry returns the registry scans use: the built-in OSV source
-// plus any advisory-source plugins explicitly configured via
-// DEPUTY_ADVISORY_SOURCES. A plugin that fails to load is skipped with a
-// warning rather than failing the scan; the coverage report shows which
-// sources actually answered.
+// plus any external sources explicitly configured via the config file
+// (SetConfiguredSources) or DEPUTY_ADVISORY_SOURCES. A source that fails to
+// load is skipped with a warning rather than failing the scan; the coverage
+// report shows which sources actually answered.
 func NewDefaultRegistry(ctx context.Context, client osv.Client) *Registry {
 	sources := []Source{NewOSVSource(client)}
-	plugins, err := ConfiguredPluginSources(ctx)
+	external, err := materializeSources(ctx, allSourceConfigs())
 	if err != nil {
-		logs.Warn(ctx, "deputy.advisorysource.plugin_load_failed", "error", err)
+		logs.Warn(ctx, "deputy.advisorysource.source_load_failed", "error", err)
 	}
-	return NewRegistry(append(sources, plugins...)...)
+	return NewRegistry(append(sources, external...)...)
 }
 
 // AggregateResult is the merged answer across all sources plus a coverage report.
