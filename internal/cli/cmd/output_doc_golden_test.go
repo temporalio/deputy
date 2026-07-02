@@ -9,7 +9,6 @@ import (
 
 	vulnerabilityv1 "github.com/temporalio/deputy/gen/deputy/vulnerability/v1"
 	"github.com/temporalio/deputy/internal/output"
-	"github.com/temporalio/deputy/internal/report"
 	"github.com/temporalio/deputy/internal/report/render"
 )
 
@@ -49,36 +48,25 @@ func TestOutputDocs_Golden(t *testing.T) {
 			name:   "TriageSummary",
 			golden: "triage_summary.golden",
 			render: func() (string, error) {
-				triageReport := report.TriageReport{
-					Target: report.Target{
-						Repo:   "github.com/acme/repo",
-						Ref:    "main",
-						Commit: "deadbeef",
-					},
-					Stats: &vulnerabilityv1.Stats{
-						Unique:       2,
-						Critical:     1,
-						High:         1,
-						Medium:       0,
-						Low:          1,
-						FixAvailable: 2,
-						DirectDeps:   1,
-						IndirectDeps: 4,
-						Duplicates:   0,
-					},
-					TopPackages: []report.TriagePackageSummary{
-						{Package: "a", Version: "1", Severity: "HIGH", SeverityType: "GHSA"},
-						{Package: "b", Version: "2", Severity: "MED", SeverityType: "GHSA"},
-					},
-					PackagesWithVulns: 5,
+				stats := &vulnerabilityv1.Stats{
+					Unique:       2,
+					Critical:     1,
+					High:         1,
+					Medium:       0,
+					Low:          1,
+					FixAvailable: 2,
+					DirectDeps:   1,
+					IndirectDeps: 4,
+					Duplicates:   0,
 				}
+				const packagesWithVulns, topPackages = 5, 2
 				doc := render.TriageSummaryDoc(render.TargetSummary{
-					Repo:   triageReport.Target.Repo,
-					Ref:    triageReport.Target.Ref,
-					Commit: triageReport.Target.Commit,
-				}, triageReport.Stats, triageReport.PackagesWithVulns)
+					Repo:   "github.com/acme/repo",
+					Ref:    "main",
+					Commit: "deadbeef",
+				}, stats, packagesWithVulns)
 				doc.AddBlank()
-				doc.AddLine(output.Span{Text: render.TopImpactedTitle(triageReport.PackagesWithVulns, len(triageReport.TopPackages))})
+				doc.AddLine(output.Span{Text: render.TopImpactedTitle(packagesWithVulns, topPackages)})
 				doc.AddLine(output.Span{Text: "  Severity shown per package = highest vuln severity in that package.", Style: output.StyleMeta})
 
 				var buf bytes.Buffer

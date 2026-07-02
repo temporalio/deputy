@@ -6,9 +6,10 @@ import (
 	"testing"
 
 	containerv1 "github.com/temporalio/deputy/gen/deputy/container/v1"
+	targetv1 "github.com/temporalio/deputy/gen/deputy/target/v1"
+	triagev1 "github.com/temporalio/deputy/gen/deputy/triage/v1"
 	vulnerabilityv1 "github.com/temporalio/deputy/gen/deputy/vulnerability/v1"
 	"github.com/temporalio/deputy/internal/remediation"
-	"github.com/temporalio/deputy/internal/report"
 	"github.com/temporalio/deputy/internal/scanning"
 	"github.com/temporalio/deputy/internal/vulnerability"
 )
@@ -282,8 +283,8 @@ func TestTriageSummary(t *testing.T) {
 	t.Parallel()
 
 	t.Run("no vulnerabilities", func(t *testing.T) {
-		triageReport := report.TriageReport{
-			Target:      report.Target{Repo: "test/repo"},
+		triageReport := &triagev1.TriageResponse{
+			Target:      &targetv1.Target{DisplayPath: "test/repo"},
 			TopPackages: nil,
 		}
 		var buf bytes.Buffer
@@ -295,11 +296,11 @@ func TestTriageSummary(t *testing.T) {
 	})
 
 	t.Run("with packages", func(t *testing.T) {
-		triageReport := report.TriageReport{
-			Target:            report.Target{Repo: "test/repo", Ref: "main"},
+		triageReport := &triagev1.TriageResponse{
+			Target:            &targetv1.Target{DisplayPath: "test/repo", Ref: "main"},
 			PackagesWithVulns: 2,
 			Stats:             &vulnerabilityv1.Stats{Total: 3},
-			TopPackages: []report.TriagePackageSummary{
+			TopPackages: []*triagev1.PackageSummary{
 				{
 					Package:            "lodash",
 					Version:            "4.17.20",
@@ -307,7 +308,7 @@ func TestTriageSummary(t *testing.T) {
 					VulnerabilityCount: 2,
 					FixVersion:         "4.17.21",
 					Summary:            "Prototype pollution vulnerability",
-					SeverityCounts:     map[string]int{"HIGH": 2},
+					SeverityCounts:     map[string]int32{"HIGH": 2},
 				},
 			},
 		}
@@ -326,10 +327,10 @@ func TestTriageSummary(t *testing.T) {
 	})
 
 	t.Run("shows db info when enabled", func(t *testing.T) {
-		triageReport := report.TriageReport{
-			Target:            report.Target{Repo: "test/repo"},
+		triageReport := &triagev1.TriageResponse{
+			Target:            &targetv1.Target{DisplayPath: "test/repo"},
 			PackagesWithVulns: 1,
-			TopPackages: []report.TriagePackageSummary{
+			TopPackages: []*triagev1.PackageSummary{
 				{
 					Package:          "pkg",
 					Version:          "1.0.0",
@@ -438,18 +439,18 @@ func TestFormatSeverityCounts(t *testing.T) {
 
 	tests := []struct {
 		name   string
-		counts map[string]int
+		counts map[string]int32
 		expect string
 	}{
 		{"empty", nil, ""},
-		{"empty map", map[string]int{}, ""},
-		{"critical only", map[string]int{"CRITICAL": 2}, "2 CRIT"},
-		{"high only", map[string]int{"HIGH": 3}, "3 HIGH"},
-		{"medium only", map[string]int{"MED": 1}, "1 MED"},
-		{"low only", map[string]int{"LOW": 5}, "5 LOW"},
-		{"multiple", map[string]int{"HIGH": 2, "MED": 3}, "2 HIGH, 3 MED"},
-		{"ordering", map[string]int{"LOW": 1, "CRITICAL": 1, "HIGH": 1}, "1 CRIT, 1 HIGH, 1 LOW"},
-		{"unknown", map[string]int{"UNKNOWN": 2}, "2 ?"},
+		{"empty map", map[string]int32{}, ""},
+		{"critical only", map[string]int32{"CRITICAL": 2}, "2 CRIT"},
+		{"high only", map[string]int32{"HIGH": 3}, "3 HIGH"},
+		{"medium only", map[string]int32{"MED": 1}, "1 MED"},
+		{"low only", map[string]int32{"LOW": 5}, "5 LOW"},
+		{"multiple", map[string]int32{"HIGH": 2, "MED": 3}, "2 HIGH, 3 MED"},
+		{"ordering", map[string]int32{"LOW": 1, "CRITICAL": 1, "HIGH": 1}, "1 CRIT, 1 HIGH, 1 LOW"},
+		{"unknown", map[string]int32{"UNKNOWN": 2}, "2 ?"},
 	}
 
 	for _, tt := range tests {

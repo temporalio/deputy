@@ -7,56 +7,66 @@ import (
 	"slices"
 	"strings"
 
+	triagev1 "github.com/temporalio/deputy/gen/deputy/triage/v1"
 	vulnerabilityv1 "github.com/temporalio/deputy/gen/deputy/vulnerability/v1"
 	"github.com/temporalio/deputy/internal/output"
-	"github.com/temporalio/deputy/internal/report"
-	ui "github.com/temporalio/deputy/internal/ui"
+	"github.com/temporalio/deputy/internal/ui"
 )
 
-// TriageSummary prints a human-readable summary of the triage report.
-func TriageSummary(w io.Writer, triageReport report.TriageReport, showDBInfo bool) {
+// TriageSummary prints a human-readable summary of a triage response. It
+// renders the deputy.triage.v1 proto directly — the same message the JSON
+// output marshals and the API returns — so text and machine output can never
+// disagree about what the triage found.
+func TriageSummary(w io.Writer, resp *triagev1.TriageResponse, showDBInfo bool) {
+	if resp == nil {
+		return
+	}
+	target := resp.GetTarget()
 	doc := TriageSummaryDoc(TargetSummary{
-		Repo:   triageReport.Target.Repo,
-		Ref:    triageReport.Target.Ref,
-		Commit: triageReport.Target.Commit,
-	}, triageReport.Stats, triageReport.PackagesWithVulns)
-	if len(triageReport.TopPackages) == 0 {
+		Repo:   target.GetDisplayPath(),
+		Ref:    target.GetRef(),
+		Commit: target.GetCommitHash(),
+	}, resp.GetStats(), int(resp.GetPackagesWithVulns()))
+	if len(resp.GetTopPackages()) == 0 {
 		doc.AddBlank()
 		doc.AddLine(output.Span{Text: "No fixable vulnerabilities after filtering.", Style: output.StyleAdded})
 		_ = doc.Render(w, output.UIStyles())
 		return
 	}
 	doc.AddBlank()
-	title := TopImpactedTitle(triageReport.PackagesWithVulns, len(triageReport.TopPackages))
+	title := TopImpactedTitle(int(resp.GetPackagesWithVulns()), len(resp.GetTopPackages()))
 	doc.AddLine(output.Span{Text: title})
 	doc.AddLine(output.Span{Text: "  Severity shown per package = highest vuln severity in that package.", Style: output.StyleMeta})
 	_ = doc.Render(w, output.UIStyles())
 
-	for idx, pkg := range triageReport.TopPackages {
+	for idx, pkg := range resp.GetTopPackages() {
+		if pkg == nil {
+			continue
+		}
 		marker := fmt.Sprintf("%d.", idx+1)
-		sev := ui.SeverityLabel(pkg.Severity, pkg.SeverityType)
-		sevInline := formatSeverityCounts(pkg.SeverityCounts)
+		sev := ui.SeverityLabel(pkg.GetSeverity(), pkg.GetSeverityType())
+		sevInline := formatSeverityCounts(pkg.GetSeverityCounts())
 		countInline := ""
-		if pkg.VulnerabilityCount > 0 {
+		if pkg.GetVulnerabilityCount() > 0 {
 			if sevInline != "" {
-				countInline = ui.StyleMeta.Render(fmt.Sprintf("— %d vulns (%s)", pkg.VulnerabilityCount, sevInline))
+				countInline = ui.StyleMeta.Render(fmt.Sprintf("— %d vulns (%s)", pkg.GetVulnerabilityCount(), sevInline))
 			} else {
-				countInline = ui.StyleMeta.Render(fmt.Sprintf("— %d vulns", pkg.VulnerabilityCount))
+				countInline = ui.StyleMeta.Render(fmt.Sprintf("— %d vulns", pkg.GetVulnerabilityCount()))
 			}
 		}
 		fix := ""
-		if pkg.FixVersion != "" {
-			fix = ui.StyleUpgraded.Render("↑ " + pkg.FixVersion)
+		if pkg.GetFixVersion() != "" {
+			fix = ui.StyleUpgraded.Render("↑ " + pkg.GetFixVersion())
 		}
-		fmt.Fprintf(w, "  %s %s %s %s %s\n", marker, ui.StylePackageName.Render(pkg.Package), ui.StyleVersion.Render(pkg.Version), sev, countInline)
-		if pkg.Summary != "" {
-			fmt.Fprintln(w, "     ", ui.StyleDim.Render(pkg.Summary))
+		fmt.Fprintf(w, "  %s %s %s %s %s\n", marker, ui.StylePackageName.Render(pkg.GetPackage()), ui.StyleVersion.Render(pkg.GetVersion()), sev, countInline)
+		if pkg.GetSummary() != "" {
+			fmt.Fprintln(w, "     ", ui.StyleDim.Render(pkg.GetSummary()))
 		}
 		if fix != "" {
 			fmt.Fprintln(w, "     ", fix)
 		}
-		if len(pkg.AffectedImports) > 0 {
-			lines := FormatImportSummaries(pkg.AffectedImports, 2, 3)
+		if imports := affectedImportValues(pkg.GetAffectedImports()); len(imports) > 0 {
+			lines := FormatImportSummaries(imports, 2, 3)
 			if len(lines) > 0 {
 				fmt.Fprintln(w, "     ", ui.StyleMeta.Render("Symbol hints (Go/OSV):"))
 				for _, line := range lines {
@@ -65,7 +75,7 @@ func TriageSummary(w io.Writer, triageReport report.TriageReport, showDBInfo boo
 			}
 		}
 		if showDBInfo {
-			if dbLines := FormatDatabaseSpecificInfo(pkg.DatabaseSpecific, 2); len(dbLines) > 0 {
+			if dbLines := FormatDatabaseSpecificInfo(pkg.GetDatabaseSpecific(), 2); len(dbLines) > 0 {
 				fmt.Fprintln(w, "     ", ui.StyleMeta.Render("Database info:"))
 				for _, line := range dbLines {
 					fmt.Fprintln(w, "       ", ui.StyleMeta.Render(line))
@@ -111,7 +121,7 @@ func FormatImportSummaries(imps []vulnerabilityv1.AffectedImport, maxPaths, maxS
 }
 
 // formatSeverityCounts renders a short severity breakdown like "2 HIGH, 1 MED".
-func formatSeverityCounts(counts map[string]int) string {
+func formatSeverityCounts(counts map[string]int32) string {
 	if len(counts) == 0 {
 		return ""
 	}
@@ -148,4 +158,19 @@ func FormatDatabaseSpecificInfo(db map[string]string, maxEntries int) []string {
 		lines = append(lines, fmt.Sprintf("%s: %s", k, db[k]))
 	}
 	return lines
+}
+
+// affectedImportValues adapts proto import pointers to the value slice the
+// shared import formatter consumes.
+func affectedImportValues(imports []*vulnerabilityv1.AffectedImport) []vulnerabilityv1.AffectedImport {
+	if len(imports) == 0 {
+		return nil
+	}
+	out := make([]vulnerabilityv1.AffectedImport, 0, len(imports))
+	for _, imp := range imports {
+		if imp != nil {
+			out = append(out, vulnerabilityv1.AffectedImport{Path: imp.Path, Symbols: imp.Symbols})
+		}
+	}
+	return out
 }

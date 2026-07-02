@@ -3,7 +3,6 @@ package cmd
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -13,20 +12,20 @@ import (
 	"connectrpc.com/connect"
 	"google.golang.org/protobuf/encoding/protojson"
 
+	"github.com/spf13/cobra"
 	dependencyv1 "github.com/temporalio/deputy/gen/deputy/dependency/v1"
 	scanv1 "github.com/temporalio/deputy/gen/deputy/scan/v1"
 	"github.com/temporalio/deputy/gen/deputy/scan/v1/scanv1connect"
 	targetv1 "github.com/temporalio/deputy/gen/deputy/target/v1"
+	triagev1 "github.com/temporalio/deputy/gen/deputy/triage/v1"
 	vulnerabilityv1 "github.com/temporalio/deputy/gen/deputy/vulnerability/v1"
 	"github.com/temporalio/deputy/internal/dependency"
 	"github.com/temporalio/deputy/internal/inventory"
 	internalproto "github.com/temporalio/deputy/internal/proto"
-	"github.com/temporalio/deputy/internal/report"
 	"github.com/temporalio/deputy/internal/scanning"
 	"github.com/temporalio/deputy/internal/services"
 	"github.com/temporalio/deputy/internal/targets"
 	"github.com/temporalio/deputy/internal/vulnerability"
-	"github.com/spf13/cobra"
 )
 
 func TestTriageCommandTextOutput(t *testing.T) {
@@ -103,8 +102,8 @@ func TestTriageCommandJSONOutput(t *testing.T) {
 		t.Fatalf("runTriage: %v", err)
 	}
 
-	var triageReport report.TriageReport
-	if err := json.Unmarshal(stdout.Bytes(), &triageReport); err != nil {
+	var triageReport triagev1.TriageResponse
+	if err := protojson.Unmarshal(stdout.Bytes(), &triageReport); err != nil {
 		t.Fatalf("failed to parse JSON output: %v", err)
 	}
 
@@ -161,8 +160,8 @@ func TestTriageCommandIgnoreUnfixed(t *testing.T) {
 		t.Fatalf("runTriage: %v", err)
 	}
 
-	var triageReport report.TriageReport
-	if err := json.Unmarshal(stdout.Bytes(), &triageReport); err != nil {
+	var triageReport triagev1.TriageResponse
+	if err := protojson.Unmarshal(stdout.Bytes(), &triageReport); err != nil {
 		t.Fatalf("failed to parse JSON output: %v", err)
 	}
 
@@ -238,8 +237,8 @@ func TestTriageCommandFromReport(t *testing.T) {
 		t.Fatalf("runTriage from report: %v", err)
 	}
 
-	var triageReport report.TriageReport
-	if err := json.Unmarshal(stdout.Bytes(), &triageReport); err != nil {
+	var triageReport triagev1.TriageResponse
+	if err := protojson.Unmarshal(stdout.Bytes(), &triageReport); err != nil {
 		t.Fatalf("failed to parse JSON output: %v", err)
 	}
 
@@ -266,8 +265,8 @@ func TestTriageCommandNoVulnerabilities(t *testing.T) {
 		t.Fatalf("runTriage: %v", err)
 	}
 
-	var triageReport report.TriageReport
-	if err := json.Unmarshal(stdout.Bytes(), &triageReport); err != nil {
+	var triageReport triagev1.TriageResponse
+	if err := protojson.Unmarshal(stdout.Bytes(), &triageReport); err != nil {
 		t.Fatalf("failed to parse JSON output: %v", err)
 	}
 

@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"slices"
 	"strings"
 
 	"connectrpc.com/connect"
@@ -16,11 +15,9 @@ import (
 	scanv1 "github.com/temporalio/deputy/gen/deputy/scan/v1"
 	targetv1 "github.com/temporalio/deputy/gen/deputy/target/v1"
 	triagev1 "github.com/temporalio/deputy/gen/deputy/triage/v1"
-	vulnerabilityv1 "github.com/temporalio/deputy/gen/deputy/vulnerability/v1"
 	"github.com/temporalio/deputy/internal/cli/flags"
 	"github.com/temporalio/deputy/internal/policy"
 	internalproto "github.com/temporalio/deputy/internal/proto"
-	"github.com/temporalio/deputy/internal/report"
 	"github.com/temporalio/deputy/internal/report/render"
 	"github.com/temporalio/deputy/internal/scanning"
 	"github.com/temporalio/deputy/internal/services"
@@ -303,54 +300,11 @@ func outputTriageProtoJSON(w io.Writer, resp *triagev1.TriageResponse) error {
 	return err
 }
 
-// renderTriageText outputs the triage response as human-readable text.
+// renderTriageText outputs the triage response as human-readable text. The
+// renderer consumes the deputy.triage.v1 proto directly — the same message the
+// JSON output marshals — so no view-model conversion is needed.
 func renderTriageText(w io.Writer, resp *triagev1.TriageResponse, showDBInfo bool) {
-	// Convert proto to the render format
-	triageReport := report.TriageReport{
-		Stats:             resp.Stats,
-		PackagesWithVulns: int(resp.PackagesWithVulns),
-	}
-	if resp.Target != nil {
-		triageReport.Target = report.Target{
-			Repo:   resp.Target.DisplayPath,
-			Commit: resp.Target.CommitHash,
-		}
-	}
-	for _, pkg := range resp.TopPackages {
-		summary := report.TriagePackageSummary{
-			Package:            pkg.Package,
-			Version:            pkg.Version,
-			Severity:           pkg.Severity,
-			SeverityType:       pkg.SeverityType,
-			Priority:           pkg.Priority,
-			PriorityReason:     pkg.PriorityReason,
-			FixVersion:         pkg.FixVersion,
-			IsDirect:           pkg.IsDirect,
-			Summary:            pkg.Summary,
-			SampleIDs:          pkg.SampleIds,
-			DatabaseSpecific:   pkg.DatabaseSpecific,
-			VulnerabilityCount: int(pkg.VulnerabilityCount),
-		}
-		if len(pkg.AffectedImports) > 0 {
-			for _, imp := range pkg.AffectedImports {
-				if imp == nil {
-					continue
-				}
-				summary.AffectedImports = append(summary.AffectedImports, vulnerabilityv1.AffectedImport{
-					Path:    imp.Path,
-					Symbols: slices.Clone(imp.Symbols),
-				})
-			}
-		}
-		if pkg.SeverityCounts != nil {
-			summary.SeverityCounts = make(map[string]int)
-			for k, v := range pkg.SeverityCounts {
-				summary.SeverityCounts[k] = int(v)
-			}
-		}
-		triageReport.TopPackages = append(triageReport.TopPackages, summary)
-	}
-	render.TriageSummary(w, triageReport, showDBInfo)
+	render.TriageSummary(w, resp, showDBInfo)
 }
 
 // buildTriagePromptProto creates a prompt for the AI agent from the proto triage response.
