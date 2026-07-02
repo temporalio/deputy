@@ -3,29 +3,33 @@ package advisorysource
 import (
 	"context"
 
-	dependencyv1 "github.com/temporalio/deputy/gen/deputy/dependency/v1"
 	pluginv1 "github.com/temporalio/deputy/gen/deputy/plugin/v1"
 	vulnerabilityv1 "github.com/temporalio/deputy/gen/deputy/vulnerability/v1"
+	"github.com/temporalio/deputy/internal/analysis/osv"
+	"github.com/temporalio/deputy/internal/vulnerability"
 )
 
-// Source is an advisory provider: given packages, it returns the advisories
-// (vulnerabilities and malware) affecting them. The built-in OSV source and
-// future plugin sources both satisfy this interface and exchange the same proto
-// types, so they are interchangeable to a [Registry].
+// Source is an advisory provider: given package query inputs, it returns the
+// advisories (vulnerabilities and malware) affecting them.
 //
-// Implementations must ignore packages outside their declared Capabilities
-// rather than erroring; the Registry only routes covered packages to them, but
-// a defensive skip keeps a misconfigured source from failing an aggregate scan.
+// The interface is domain-typed (osv.PkgInput in, vulnerability.Finding out) so
+// the in-process scan path stays lossless — proto findings cannot carry
+// direct/indirect classification, which stats and remediation depend on. The
+// proto AdvisorySourceService is the plugin wire contract; a plugin adapter
+// bridges proto<->domain, exactly as inventory extractor plugins are adapted to
+// the in-process extractor interface. Info() returns the proto capability
+// descriptor shared by built-in and plugin sources.
 type Source interface {
 	// Info returns the source's identity and declared coverage.
 	Info() *pluginv1.AdvisorySourceInfo
-	// Query returns the advisories affecting pkgs.
-	Query(ctx context.Context, pkgs []*dependencyv1.Package) (*Result, error)
+	// Query returns the advisories affecting pkgs. Implementations must ignore
+	// inputs outside their declared Capabilities rather than erroring.
+	Query(ctx context.Context, pkgs []osv.PkgInput) (*Result, error)
 }
 
 // Result is a single source's answer: findings plus the full advisory records
 // they reference, keyed by advisory ID.
 type Result struct {
-	Findings   []*vulnerabilityv1.Finding
+	Findings   []vulnerability.Finding
 	Advisories map[string]*vulnerabilityv1.Advisory
 }

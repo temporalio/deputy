@@ -8,11 +8,12 @@ import (
 
 	"golang.org/x/sync/errgroup"
 
-	dependencyv1 "github.com/temporalio/deputy/gen/deputy/dependency/v1"
 	pluginv1 "github.com/temporalio/deputy/gen/deputy/plugin/v1"
 	vulnerabilityv1 "github.com/temporalio/deputy/gen/deputy/vulnerability/v1"
+	"github.com/temporalio/deputy/internal/analysis/osv"
 	"github.com/temporalio/deputy/internal/ecosystem"
 	"github.com/temporalio/deputy/internal/purlx"
+	"github.com/temporalio/deputy/internal/vulnerability"
 )
 
 // EcosystemGitHubActions is the canonical ecosystem label for GitHub Actions.
@@ -36,44 +37,31 @@ func NewRegistry(sources ...Source) *Registry {
 }
 
 // NewDefaultRegistry returns a registry containing only the built-in OSV source.
-func NewDefaultRegistry() *Registry {
-	return NewRegistry(NewOSVSource(nil))
+func NewDefaultRegistry(client osv.Client) *Registry {
+	return NewRegistry(NewOSVSource(client))
 }
 
 // AggregateResult is the merged answer across all sources plus a coverage report.
 type AggregateResult struct {
-	Findings   []*vulnerabilityv1.Finding
+	Findings   []vulnerability.Finding
 	Advisories map[string]*vulnerabilityv1.Advisory
 	Coverage   *vulnerabilityv1.ScanCoverage
 }
 
 // Query routes pkgs to covering sources, runs them concurrently, and merges.
 // A package no source covers is not an error: it is recorded in Coverage.Uncovered.
-func (r *Registry) Query(ctx context.Context, pkgs []*dependencyv1.Package) (*AggregateResult, error) {
-	// Classify each package once.
-	type classified struct {
-		pkg *dependencyv1.Package
-		eco string
-		art vulnerabilityv1.ArtifactKind
-	}
-	items := make([]classified, 0, len(pkgs))
-	for _, p := range pkgs {
-		if p == nil {
-			continue
-		}
-		eco, art := classify(p)
-		items = append(items, classified{pkg: p, eco: eco, art: art})
-	}
-
-	// Route: for each source, the subset of packages it covers.
-	subsets := make([][]*dependencyv1.Package, len(r.sources))
+func (r *Registry) Query(ctx context.Context, pkgs []osv.PkgInput) (*AggregateResult, error) {
 	sourceCaps := make([]capSet, len(r.sources))
 	for i, src := range r.sources {
 		sourceCaps[i] = newCapSet(src.Info().GetCapabilities())
 	}
+
+	// Route each package to covering sources; accumulate coverage per (eco, artifact).
+	subsets := make([][]osv.PkgInput, len(r.sources))
 	coverageAcc := map[coverageKey]*coverageAgg{}
-	for _, it := range items {
-		key := coverageKey{eco: it.eco, art: it.art}
+	for _, p := range pkgs {
+		eco, art := classify(p)
+		key := coverageKey{eco: eco, art: art}
 		agg := coverageAcc[key]
 		if agg == nil {
 			agg = &coverageAgg{}
@@ -81,8 +69,8 @@ func (r *Registry) Query(ctx context.Context, pkgs []*dependencyv1.Package) (*Ag
 		}
 		agg.count++
 		for i := range r.sources {
-			if sourceCaps[i].covers(it.eco, it.art) {
-				subsets[i] = append(subsets[i], it.pkg)
+			if sourceCaps[i].covers(eco, art) {
+				subsets[i] = append(subsets[i], p)
 				name := r.sources[i].Info().GetName()
 				if !slices.Contains(agg.sources, name) {
 					agg.sources = append(agg.sources, name)
@@ -122,11 +110,11 @@ func (r *Registry) Query(ctx context.Context, pkgs []*dependencyv1.Package) (*Ag
 }
 
 // mergeResults unions findings across sources, accumulating provenance in
-// Finding.sources, and merges advisory records by ID.
-func mergeResults(results []*Result) ([]*vulnerabilityv1.Finding, map[string]*vulnerabilityv1.Advisory) {
+// Finding.Sources, and merges advisory records by ID.
+func mergeResults(results []*Result) ([]vulnerability.Finding, map[string]*vulnerabilityv1.Advisory) {
 	advisories := map[string]*vulnerabilityv1.Advisory{}
-	order := make([]string, 0)
-	byKey := map[string]*vulnerabilityv1.Finding{}
+	byKey := map[string]int{} // key -> index into findings
+	findings := make([]vulnerability.Finding, 0)
 
 	for _, res := range results {
 		if res == nil {
@@ -138,34 +126,25 @@ func mergeResults(results []*Result) ([]*vulnerabilityv1.Finding, map[string]*vu
 			}
 		}
 		for _, f := range res.Findings {
-			if f == nil {
-				continue
-			}
 			key := findingKey(f)
-			if existing, ok := byKey[key]; ok {
-				existing.Sources = unionStrings(existing.GetSources(), f.GetSources())
+			if idx, ok := byKey[key]; ok {
+				findings[idx].Sources = unionStrings(findings[idx].Sources, f.Sources)
 				continue
 			}
-			byKey[key] = f
-			order = append(order, key)
+			byKey[key] = len(findings)
+			findings = append(findings, f)
 		}
-	}
-
-	findings := make([]*vulnerabilityv1.Finding, 0, len(order))
-	for _, key := range order {
-		findings = append(findings, byKey[key])
 	}
 	return findings, advisories
 }
 
 // findingKey identifies a finding for dedup: advisory ID + package identity.
-func findingKey(f *vulnerabilityv1.Finding) string {
-	pkg := f.GetPackage()
-	pkgKey := pkg.GetPurl()
+func findingKey(f vulnerability.Finding) string {
+	pkgKey := f.Dependency.PURL
 	if pkgKey == "" {
-		pkgKey = pkg.GetEcosystem() + "/" + pkg.GetName() + "@" + pkg.GetVersion()
+		pkgKey = f.Dependency.Ecosystem + "/" + f.Dependency.Name + "@" + f.Version
 	}
-	return f.GetAdvisoryId() + "|" + pkgKey
+	return f.AdvisoryID + "|" + pkgKey
 }
 
 func unionStrings(a, b []string) []string {
@@ -179,24 +158,24 @@ func unionStrings(a, b []string) []string {
 }
 
 // classify derives the coverage-routing ecosystem label and artifact kind for a
-// package from its ecosystem/PURL.
-func classify(p *dependencyv1.Package) (string, vulnerabilityv1.ArtifactKind) {
-	ecoRaw := strings.TrimSpace(p.GetEcosystem())
+// query input from its ecosystem/PURL.
+func classify(p osv.PkgInput) (string, vulnerabilityv1.ArtifactKind) {
+	ecoRaw := strings.TrimSpace(p.Ecosystem)
 	purlType := ""
-	if pu, err := purlx.ParseLoose(p.GetPurl()); err == nil {
+	if pu, err := purlx.ParseLoose(p.PURL); err == nil {
 		purlType = pu.Type
 	}
 
-	if isGitHubActions(ecoRaw, purlType) {
+	switch {
+	case isGitHubActions(ecoRaw, purlType):
 		return EcosystemGitHubActions, vulnerabilityv1.ArtifactKind_ARTIFACT_KIND_GITHUB_ACTION
-	}
-	if isContainerImage(ecoRaw, purlType) {
+	case isContainerImage(ecoRaw, purlType):
 		return canonicalEco(ecoRaw, purlType), vulnerabilityv1.ArtifactKind_ARTIFACT_KIND_CONTAINER_IMAGE_REF
-	}
-	if isOSPackage(ecoRaw, purlType) {
+	case isOSPackage(ecoRaw, purlType):
 		return canonicalEco(ecoRaw, purlType), vulnerabilityv1.ArtifactKind_ARTIFACT_KIND_OS_PACKAGE
+	default:
+		return canonicalEco(ecoRaw, purlType), vulnerabilityv1.ArtifactKind_ARTIFACT_KIND_PACKAGE
 	}
-	return canonicalEco(ecoRaw, purlType), vulnerabilityv1.ArtifactKind_ARTIFACT_KIND_PACKAGE
 }
 
 // canonicalEco returns the canonical ecosystem name, preferring the registry's
@@ -271,10 +250,15 @@ type coverageKey struct {
 	art vulnerabilityv1.ArtifactKind
 }
 
+type coverageAgg struct {
+	sources []string
+	count   int
+}
+
 // buildCoverage turns per-combination source lists + counts into a ScanCoverage.
-func buildCoverage(covered map[coverageKey]*coverageAgg) *vulnerabilityv1.ScanCoverage {
-	keys := make([]coverageKey, 0, len(covered))
-	for k := range covered {
+func buildCoverage(acc map[coverageKey]*coverageAgg) *vulnerabilityv1.ScanCoverage {
+	keys := make([]coverageKey, 0, len(acc))
+	for k := range acc {
 		keys = append(keys, k)
 	}
 	slices.SortFunc(keys, func(a, b coverageKey) int {
@@ -286,7 +270,7 @@ func buildCoverage(covered map[coverageKey]*coverageAgg) *vulnerabilityv1.ScanCo
 
 	cov := &vulnerabilityv1.ScanCoverage{}
 	for _, k := range keys {
-		agg := covered[k]
+		agg := acc[k]
 		entry := &vulnerabilityv1.CoverageEntry{
 			Ecosystem:    k.eco,
 			Artifact:     k.art,
@@ -300,9 +284,4 @@ func buildCoverage(covered map[coverageKey]*coverageAgg) *vulnerabilityv1.ScanCo
 		}
 	}
 	return cov
-}
-
-type coverageAgg struct {
-	sources []string
-	count   int
 }

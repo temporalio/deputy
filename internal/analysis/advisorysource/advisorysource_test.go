@@ -5,9 +5,11 @@ import (
 	"slices"
 	"testing"
 
-	dependencyv1 "github.com/temporalio/deputy/gen/deputy/dependency/v1"
 	pluginv1 "github.com/temporalio/deputy/gen/deputy/plugin/v1"
 	vulnerabilityv1 "github.com/temporalio/deputy/gen/deputy/vulnerability/v1"
+	"github.com/temporalio/deputy/internal/analysis/osv"
+	"github.com/temporalio/deputy/internal/dependency"
+	"github.com/temporalio/deputy/internal/vulnerability"
 )
 
 // fakeSource is a configurable Source for exercising registry behavior without
@@ -16,7 +18,7 @@ type fakeSource struct {
 	name       string
 	ecosystems []string
 	artifacts  []vulnerabilityv1.ArtifactKind
-	findings   []*vulnerabilityv1.Finding
+	findings   []vulnerability.Finding
 	advisories map[string]*vulnerabilityv1.Advisory
 }
 
@@ -30,38 +32,46 @@ func (f *fakeSource) Info() *pluginv1.AdvisorySourceInfo {
 	}
 }
 
-func (f *fakeSource) Query(_ context.Context, _ []*dependencyv1.Package) (*Result, error) {
+func (f *fakeSource) Query(_ context.Context, _ []osv.PkgInput) (*Result, error) {
 	return &Result{Findings: f.findings, Advisories: f.advisories}, nil
 }
 
-func goPkg(name, version string) *dependencyv1.Package {
-	return &dependencyv1.Package{Name: name, Version: version, Ecosystem: "go", Purl: "pkg:golang/" + name + "@" + version}
+func goInput(name, version string) osv.PkgInput {
+	return osv.PkgInput{QueryKey: osv.QueryKey{Name: name, Version: version, Ecosystem: "go", PURL: "pkg:golang/" + name + "@" + version}}
 }
 
-func finding(advID, source string, pkg *dependencyv1.Package) *vulnerabilityv1.Finding {
-	return &vulnerabilityv1.Finding{AdvisoryId: advID, Package: pkg, Sources: []string{source}, Affected: true}
+func goFinding(advID, source, name, version string) vulnerability.Finding {
+	return vulnerability.Finding{
+		AdvisoryID: advID,
+		Dependency: dependency.ID{Name: name, Ecosystem: "go", PURL: "pkg:golang/" + name + "@" + version},
+		Version:    version,
+		Sources:    []string{source},
+		Affected:   true,
+	}
+}
+
+func onlyPackage(art vulnerabilityv1.ArtifactKind) []vulnerabilityv1.ArtifactKind {
+	return []vulnerabilityv1.ArtifactKind{art}
 }
 
 func TestRegistryRoutesAndReportsCoverage(t *testing.T) {
-	pkg := goPkg("github.com/foo/bar", "1.0.0")
 	src := &fakeSource{
 		name:       "osv",
 		ecosystems: []string{"go"},
-		artifacts:  []vulnerabilityv1.ArtifactKind{vulnerabilityv1.ArtifactKind_ARTIFACT_KIND_PACKAGE},
-		findings:   []*vulnerabilityv1.Finding{finding("CVE-1", "osv", pkg)},
+		artifacts:  onlyPackage(vulnerabilityv1.ArtifactKind_ARTIFACT_KIND_PACKAGE),
+		findings:   []vulnerability.Finding{goFinding("CVE-1", "osv", "github.com/foo/bar", "1.0.0")},
 		advisories: map[string]*vulnerabilityv1.Advisory{"CVE-1": {Id: "CVE-1"}},
 	}
 	reg := NewRegistry(src)
 
-	dockerPkg := &dependencyv1.Package{Name: "alpine", Version: "3.19", Ecosystem: "docker", Purl: "pkg:docker/library/alpine@3.19"}
-	got, err := reg.Query(context.Background(), []*dependencyv1.Package{pkg, dockerPkg})
+	dockerPkg := osv.PkgInput{QueryKey: osv.QueryKey{Name: "alpine", Version: "3.19", Ecosystem: "docker", PURL: "pkg:docker/library/alpine@3.19"}}
+	got, err := reg.Query(context.Background(), []osv.PkgInput{goInput("github.com/foo/bar", "1.0.0"), dockerPkg})
 	if err != nil {
 		t.Fatalf("Query error = %v, want nil (uncovered package must not fail the scan)", err)
 	}
-	if len(got.Findings) != 1 || got.Findings[0].GetAdvisoryId() != "CVE-1" {
+	if len(got.Findings) != 1 || got.Findings[0].AdvisoryID != "CVE-1" {
 		t.Fatalf("findings = %+v, want the single go finding", got.Findings)
 	}
-	// go/PACKAGE is covered by osv; docker/CONTAINER_IMAGE_REF is not.
 	if !hasCoverage(got.Coverage.GetCovered(), "go", vulnerabilityv1.ArtifactKind_ARTIFACT_KIND_PACKAGE, "osv") {
 		t.Errorf("covered missing go/PACKAGE by osv: %+v", got.Coverage.GetCovered())
 	}
@@ -71,58 +81,58 @@ func TestRegistryRoutesAndReportsCoverage(t *testing.T) {
 }
 
 func TestRegistryUnionWithProvenance(t *testing.T) {
-	pkg := goPkg("github.com/foo/bar", "1.0.0")
 	shared := "CVE-SHARED"
 	a := &fakeSource{
-		name: "a", ecosystems: []string{"go"},
-		artifacts: []vulnerabilityv1.ArtifactKind{vulnerabilityv1.ArtifactKind_ARTIFACT_KIND_PACKAGE},
-		findings:  []*vulnerabilityv1.Finding{finding(shared, "a", pkg)},
+		name: "a", ecosystems: []string{"go"}, artifacts: onlyPackage(vulnerabilityv1.ArtifactKind_ARTIFACT_KIND_PACKAGE),
+		findings: []vulnerability.Finding{goFinding(shared, "a", "github.com/foo/bar", "1.0.0")},
 	}
 	b := &fakeSource{
-		name: "b", ecosystems: []string{"go"},
-		artifacts: []vulnerabilityv1.ArtifactKind{vulnerabilityv1.ArtifactKind_ARTIFACT_KIND_PACKAGE},
-		findings:  []*vulnerabilityv1.Finding{finding(shared, "b", pkg), finding("CVE-ONLY-B", "b", pkg)},
+		name: "b", ecosystems: []string{"go"}, artifacts: onlyPackage(vulnerabilityv1.ArtifactKind_ARTIFACT_KIND_PACKAGE),
+		findings: []vulnerability.Finding{
+			goFinding(shared, "b", "github.com/foo/bar", "1.0.0"),
+			goFinding("CVE-ONLY-B", "b", "github.com/foo/bar", "1.0.0"),
+		},
 	}
 	reg := NewRegistry(a, b)
 
-	got, err := reg.Query(context.Background(), []*dependencyv1.Package{pkg})
+	got, err := reg.Query(context.Background(), []osv.PkgInput{goInput("github.com/foo/bar", "1.0.0")})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(got.Findings) != 2 {
 		t.Fatalf("findings = %d, want 2 (shared merged + b-only)", len(got.Findings))
 	}
-	var merged *vulnerabilityv1.Finding
-	for _, f := range got.Findings {
-		if f.GetAdvisoryId() == shared {
-			merged = f
+	var merged *vulnerability.Finding
+	for i := range got.Findings {
+		if got.Findings[i].AdvisoryID == shared {
+			merged = &got.Findings[i]
 		}
 	}
 	if merged == nil {
 		t.Fatalf("shared finding missing")
 	}
-	if !slices.Equal(merged.GetSources(), []string{"a", "b"}) {
-		t.Fatalf("shared finding sources = %v, want [a b] (union-with-provenance)", merged.GetSources())
+	if !slices.Equal(merged.Sources, []string{"a", "b"}) {
+		t.Fatalf("shared finding sources = %v, want [a b] (union-with-provenance)", merged.Sources)
 	}
 }
 
 func TestClassify(t *testing.T) {
 	tests := []struct {
 		name    string
-		pkg     *dependencyv1.Package
+		in      osv.PkgInput
 		wantEco string
 		wantArt vulnerabilityv1.ArtifactKind
 	}{
-		{"go", goPkg("x", "1"), "go", vulnerabilityv1.ArtifactKind_ARTIFACT_KIND_PACKAGE},
-		{"docker eco", &dependencyv1.Package{Ecosystem: "docker"}, "docker", vulnerabilityv1.ArtifactKind_ARTIFACT_KIND_CONTAINER_IMAGE_REF},
-		{"docker purl", &dependencyv1.Package{Purl: "pkg:docker/library/alpine@3.19"}, "docker", vulnerabilityv1.ArtifactKind_ARTIFACT_KIND_CONTAINER_IMAGE_REF},
-		{"deb os pkg", &dependencyv1.Package{Ecosystem: "deb"}, "deb", vulnerabilityv1.ArtifactKind_ARTIFACT_KIND_OS_PACKAGE},
-		{"github actions eco", &dependencyv1.Package{Ecosystem: "github-actions"}, EcosystemGitHubActions, vulnerabilityv1.ArtifactKind_ARTIFACT_KIND_GITHUB_ACTION},
-		{"gha alias", &dependencyv1.Package{Ecosystem: "gha"}, EcosystemGitHubActions, vulnerabilityv1.ArtifactKind_ARTIFACT_KIND_GITHUB_ACTION},
+		{"go", goInput("x", "1"), "go", vulnerabilityv1.ArtifactKind_ARTIFACT_KIND_PACKAGE},
+		{"docker eco", osv.PkgInput{QueryKey: osv.QueryKey{Ecosystem: "docker"}}, "docker", vulnerabilityv1.ArtifactKind_ARTIFACT_KIND_CONTAINER_IMAGE_REF},
+		{"docker purl", osv.PkgInput{QueryKey: osv.QueryKey{PURL: "pkg:docker/library/alpine@3.19"}}, "docker", vulnerabilityv1.ArtifactKind_ARTIFACT_KIND_CONTAINER_IMAGE_REF},
+		{"deb os pkg", osv.PkgInput{QueryKey: osv.QueryKey{Ecosystem: "deb"}}, "deb", vulnerabilityv1.ArtifactKind_ARTIFACT_KIND_OS_PACKAGE},
+		{"github actions eco", osv.PkgInput{QueryKey: osv.QueryKey{Ecosystem: "github-actions"}}, EcosystemGitHubActions, vulnerabilityv1.ArtifactKind_ARTIFACT_KIND_GITHUB_ACTION},
+		{"gha alias", osv.PkgInput{QueryKey: osv.QueryKey{Ecosystem: "gha"}}, EcosystemGitHubActions, vulnerabilityv1.ArtifactKind_ARTIFACT_KIND_GITHUB_ACTION},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			eco, art := classify(tt.pkg)
+			eco, art := classify(tt.in)
 			if eco != tt.wantEco || art != tt.wantArt {
 				t.Fatalf("classify = (%q, %v), want (%q, %v)", eco, art, tt.wantEco, tt.wantArt)
 			}

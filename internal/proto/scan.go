@@ -38,6 +38,7 @@ func FindingToProto(f vulnerability.Finding, advisory *vulnerabilityv1.Advisory)
 		Package:         PackageToProto(f),
 		Affected:        f.Affected,
 		AffectedImports: AffectedImportsToProto(f.AffectedImports),
+		Sources:         f.Sources,
 		// Enrichment fields
 		Epss:           f.EPSS,
 		EpssPercentile: f.EPSSPercentile,
@@ -61,6 +62,7 @@ func FindingFromProto(f *vulnerabilityv1.Finding) vulnerability.Finding {
 		AdvisoryID:      f.AdvisoryId,
 		Affected:        f.Affected,
 		AffectedImports: AffectedImportsFromProto(f.AffectedImports),
+		Sources:         f.Sources,
 		// Enrichment fields
 		EPSS:           f.Epss,
 		EPSSPercentile: f.EpssPercentile,
@@ -143,6 +145,7 @@ func ScanningResultToProto(r *scanning.Result) *scanv1.ScanResponse {
 		Findings:        FindingsToProto(r.Findings, r.Advisories),
 		Advisories:      AdvisoriesToProto(r.Advisories),
 		Stats:           StatsToProto(stats),
+		Coverage:        r.Coverage,
 		Graph:           DependencyGraphToScanProto(r.Graph),
 		ImageInfo:       ImageInfoToScanProto(r.ImageInfo),
 		DockerfileInfo:  DockerfileInfoWithAnalysisToProto(r.DockerfileInfo, r.DockerfileAnalysis),
@@ -175,6 +178,7 @@ func ScanningResultFromProto(r *scanv1.ScanResponse) *scanning.Result {
 		Findings:           findings,
 		Advisories:         advisories,
 		Stats:              stats,
+		Coverage:           r.Coverage,
 		Graph:              DependencyGraphFromScanProto(r.Graph),
 		ImageInfo:          ImageInfoFromScanProto(r.ImageInfo),
 		DockerfileInfo:     DockerfileInfoFromProto(r.DockerfileInfo),

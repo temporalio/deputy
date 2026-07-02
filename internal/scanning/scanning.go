@@ -19,6 +19,7 @@ import (
 	containerv1 "github.com/temporalio/deputy/gen/deputy/container/v1"
 	dependencyv1 "github.com/temporalio/deputy/gen/deputy/dependency/v1"
 	vulnerabilityv1 "github.com/temporalio/deputy/gen/deputy/vulnerability/v1"
+	"github.com/temporalio/deputy/internal/analysis/advisorysource"
 	"github.com/temporalio/deputy/internal/analysis/osv"
 	"github.com/temporalio/deputy/internal/compare"
 	"github.com/temporalio/deputy/internal/container/image"
@@ -67,6 +68,11 @@ type Result struct {
 
 	// Stats contains vulnerability severity counts.
 	Stats *vulnerabilityv1.Stats
+
+	// Coverage reports which (ecosystem, artifact) combinations advisory sources
+	// answered for, and which had no coverage (e.g. container base images).
+	// Uncovered combinations are informational, not errors.
+	Coverage *vulnerabilityv1.ScanCoverage
 
 	// Graph contains the resolved dependency graph (when graph resolution is enabled).
 	Graph *graph.Graph
@@ -159,7 +165,7 @@ func ScanRepository(ctx context.Context, target, ref string, refProvided bool, o
 	}
 
 	// Query vulnerabilities
-	findings, advisories, err := queryVulnerabilities(ctx, invExec.Result.Packages, invExec.Result.Direct, invExec.Result.Target.OriginURL)
+	findings, advisories, coverage, err := queryVulnerabilities(ctx, invExec.Result.Packages, invExec.Result.Direct, invExec.Result.Target.OriginURL)
 	if err != nil {
 		cleanup()
 		otel.SetSpanError(span, err)
@@ -178,6 +184,7 @@ func ScanRepository(ctx context.Context, target, ref string, refProvided bool, o
 			Consolidated:    cons,
 			Advisories:      advisories,
 			Stats:           stats,
+			Coverage:        coverage,
 			GeneratedAt:     time.Now().UTC(),
 		},
 		cleanup: cleanup,
@@ -211,7 +218,7 @@ func ScanContainerImage(ctx context.Context, target string, targetOpts map[strin
 	}
 
 	// Query vulnerabilities
-	findings, advisories, err := queryVulnerabilities(ctx, invExec.Result.Packages, invExec.Result.Direct, invExec.Result.Target.OriginURL)
+	findings, advisories, coverage, err := queryVulnerabilities(ctx, invExec.Result.Packages, invExec.Result.Direct, invExec.Result.Target.OriginURL)
 	if err != nil {
 		cleanup()
 		otel.SetSpanError(span, err)
@@ -230,6 +237,7 @@ func ScanContainerImage(ctx context.Context, target string, targetOpts map[strin
 			Consolidated:    cons,
 			Advisories:      advisories,
 			Stats:           stats,
+			Coverage:        coverage,
 			ImageInfo:       invExec.Result.ImageInfo,
 			GeneratedAt:     time.Now().UTC(),
 		},
@@ -260,7 +268,7 @@ func ScanDirectory(ctx context.Context, path string, opts Options) (*Execution, 
 	}
 
 	// Query vulnerabilities
-	findings, advisories, err := queryVulnerabilities(ctx, invExec.Result.Packages, invExec.Result.Direct, invExec.Result.Target.OriginURL)
+	findings, advisories, coverage, err := queryVulnerabilities(ctx, invExec.Result.Packages, invExec.Result.Direct, invExec.Result.Target.OriginURL)
 	if err != nil {
 		cleanup()
 		otel.SetSpanError(span, err)
@@ -279,6 +287,7 @@ func ScanDirectory(ctx context.Context, path string, opts Options) (*Execution, 
 			Consolidated:    cons,
 			Advisories:      advisories,
 			Stats:           stats,
+			Coverage:        coverage,
 			GeneratedAt:     time.Now().UTC(),
 		},
 		cleanup: cleanup,
@@ -309,7 +318,7 @@ func ScanVMImage(ctx context.Context, target string, targetOpts map[string]strin
 	}
 
 	// Query vulnerabilities
-	findings, advisories, err := queryVulnerabilities(ctx, invExec.Result.Packages, invExec.Result.Direct, invExec.Result.Target.OriginURL)
+	findings, advisories, coverage, err := queryVulnerabilities(ctx, invExec.Result.Packages, invExec.Result.Direct, invExec.Result.Target.OriginURL)
 	if err != nil {
 		cleanup()
 		otel.SetSpanError(span, err)
@@ -328,6 +337,7 @@ func ScanVMImage(ctx context.Context, target string, targetOpts map[string]strin
 			Consolidated:    cons,
 			Advisories:      advisories,
 			Stats:           stats,
+			Coverage:        coverage,
 			GeneratedAt:     time.Now().UTC(),
 		},
 		cleanup: cleanup,
@@ -422,13 +432,13 @@ func ScanPURL(ctx context.Context, purlStr string, opts Options) (*Execution, er
 		direct[canonical] = true
 	}
 
-	// Query OSV
-	client := osv.NewClient()
-	findings, advisories, err := osv.Query(ctx, client, inputs)
+	// Query advisory sources via the registry (OSV today).
+	agg, err := advisorysource.NewDefaultRegistry(osv.NewClient()).Query(ctx, inputs)
 	if err != nil {
 		otel.SetSpanError(span, err)
 		return nil, fmt.Errorf("query vulnerabilities: %w", err)
 	}
+	findings, advisories, coverage := agg.Findings, agg.Advisories, agg.Coverage
 
 	span.SetAttributes(attribute.Int("deputy.finding.count", len(findings)))
 
@@ -447,6 +457,7 @@ func ScanPURL(ctx context.Context, purlStr string, opts Options) (*Execution, er
 			Consolidated:    cons,
 			Advisories:      advisories,
 			Stats:           stats,
+			Coverage:        coverage,
 			GeneratedAt:     time.Now().UTC(),
 		},
 	}, nil
@@ -511,7 +522,7 @@ func persistFixVerdicts(cons []vulnerability.Consolidated, advisories map[string
 
 // queryVulnerabilities queries OSV for vulnerabilities and checks for
 // supply-chain risks (e.g., unpinned GitHub Actions references).
-func queryVulnerabilities(ctx context.Context, pkgs []*extractor.Package, direct map[string]bool, originURL string) ([]vulnerability.Finding, map[string]*vulnerabilityv1.Advisory, error) {
+func queryVulnerabilities(ctx context.Context, pkgs []*extractor.Package, direct map[string]bool, originURL string) ([]vulnerability.Finding, map[string]*vulnerabilityv1.Advisory, *vulnerabilityv1.ScanCoverage, error) {
 	ctx, span := otel.StartSpan(ctx, "deputy.scanning.query_vulnerabilities",
 		trace.WithAttributes(
 			attribute.Int("deputy.package.count", len(pkgs)),
@@ -521,13 +532,16 @@ func queryVulnerabilities(ctx context.Context, pkgs []*extractor.Package, direct
 	// Convert packages to OSV input format
 	inputs := packagesToInputs(pkgs, direct)
 
-	// Query OSV
-	client := osv.NewClient()
-	findings, advisories, err := osv.Query(ctx, client, inputs)
+	// Query advisory sources (OSV today; more via the registry in future).
+	// The registry routes each package only to sources that cover its ecosystem
+	// and artifact kind, so an ecosystem no source covers is reported in
+	// coverage rather than failing the scan.
+	agg, err := advisorysource.NewDefaultRegistry(osv.NewClient()).Query(ctx, inputs)
 	if err != nil {
 		otel.SetSpanError(span, err)
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
+	findings, advisories := agg.Findings, agg.Advisories
 
 	// Check for supply-chain risks (unpinned actions, etc.)
 	scFindings, scAdvisories := checkSupplyChain(ctx, pkgs, direct, forge.RepoSlugFromURL(originURL))
@@ -540,7 +554,7 @@ func queryVulnerabilities(ctx context.Context, pkgs []*extractor.Package, direct
 	}
 
 	span.SetAttributes(attribute.Int("deputy.finding.count", len(findings)))
-	return findings, advisories, nil
+	return findings, advisories, agg.Coverage, nil
 }
 
 // packagesToInputs converts extractor packages to OSV query inputs.
