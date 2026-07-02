@@ -43,7 +43,7 @@ func Parse(s string) Ecosystem {
 		return Maven
 	case "rubygems", "ruby", "gem", "gems":
 		return RubyGems
-	case "cargo", "rust", "crates", "crates.io":
+	case "cargo", "rust", "crates", "crates.io", "cargo (crates.io)":
 		return Cargo
 	case "nuget", "dotnet", ".net":
 		return NuGet

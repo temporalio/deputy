@@ -1038,9 +1038,9 @@ func canonicalMCPEcosystem(name string) (canonical string, ok bool) {
 	name = strings.TrimSpace(name)
 	switch strings.ToLower(strings.ReplaceAll(name, "_", "-")) {
 	case "github", "github action", "github actions", "github-action", "github-actions", "githubaction", "githubactions", "gha":
+		// GitHub Actions is not a core SCA ecosystem, so ecosystem.Parse does
+		// not recognize it; keep the alias set here.
 		return "github-actions", true
-	case "cargo (crates.io)":
-		return "cargo", true
 	}
 	if eco := ecosystem.Parse(name); eco != ecosystem.Unknown {
 		return eco.String(), true
@@ -1065,7 +1065,13 @@ func mcpOutputEcosystem(name string) string {
 }
 
 func mcpPURLType(ecosystemName string) string {
-	switch ecosystem.Parse(ecosystemName) {
+	// Canonicalize first so every ecosystem alias (including github-actions
+	// spellings like "gha") maps consistently to a purl type.
+	canonical, _ := canonicalMCPEcosystem(ecosystemName)
+	if canonical == "github-actions" {
+		return purlx.TypeGitHubActions
+	}
+	switch ecosystem.Parse(canonical) {
 	case ecosystem.Go:
 		return "golang"
 	case ecosystem.RubyGems:
@@ -1073,12 +1079,7 @@ func mcpPURLType(ecosystemName string) string {
 	case ecosystem.Packagist:
 		return "composer"
 	default:
-	}
-	switch strings.ToLower(strings.TrimSpace(ecosystemName)) {
-	case "github actions", "github-actions", "githubactions", "github":
-		return purlx.TypeGitHubActions
-	default:
-		return strings.ToLower(strings.TrimSpace(ecosystemName))
+		return strings.ToLower(strings.TrimSpace(canonical))
 	}
 }
 

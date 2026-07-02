@@ -580,6 +580,23 @@ func TestServerInstructionsReferenceRealTools(t *testing.T) {
 	}
 }
 
+func TestMCPEcosystemAliasesAreConsistent(t *testing.T) {
+	// Every github-actions spelling must canonicalize identically and map to
+	// the same purl type, including "gha" which a previous duplicate table missed.
+	for _, alias := range []string{"github-actions", "github", "gha", "GitHub Actions", "github_actions", "githubactions"} {
+		if got := mcpOutputEcosystem(alias); got != "github-actions" {
+			t.Errorf("mcpOutputEcosystem(%q) = %q, want github-actions", alias, got)
+		}
+		if got, want := mcpPURLType(alias), mcpPURLType("github-actions"); got != want {
+			t.Errorf("mcpPURLType(%q) = %q, want %q (github-actions)", alias, got, want)
+		}
+	}
+	// The OSV display form for cargo now resolves via the canonical ecosystem table.
+	if got := mcpOutputEcosystem("cargo (crates.io)"); got != "cargo" {
+		t.Errorf("mcpOutputEcosystem(\"cargo (crates.io)\") = %q, want cargo", got)
+	}
+}
+
 func TestListPolicyEntrypointsTool(t *testing.T) {
 	s := NewServer()
 	ctx := t.Context()
