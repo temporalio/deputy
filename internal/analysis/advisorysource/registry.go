@@ -13,6 +13,7 @@ import (
 	vulnerabilityv1 "github.com/temporalio/deputy/gen/deputy/vulnerability/v1"
 	"github.com/temporalio/deputy/internal/analysis/osv"
 	"github.com/temporalio/deputy/internal/ecosystem"
+	"github.com/temporalio/deputy/internal/logs"
 	"github.com/temporalio/deputy/internal/purlx"
 )
 
@@ -36,9 +37,18 @@ func NewRegistry(sources ...Source) *Registry {
 	return &Registry{sources: slices.Clone(sources)}
 }
 
-// NewDefaultRegistry returns a registry containing only the built-in OSV source.
-func NewDefaultRegistry(client osv.Client) *Registry {
-	return NewRegistry(NewOSVSource(client))
+// NewDefaultRegistry returns the registry scans use: the built-in OSV source
+// plus any advisory-source plugins explicitly configured via
+// DEPUTY_ADVISORY_SOURCES. A plugin that fails to load is skipped with a
+// warning rather than failing the scan; the coverage report shows which
+// sources actually answered.
+func NewDefaultRegistry(ctx context.Context, client osv.Client) *Registry {
+	sources := []Source{NewOSVSource(client)}
+	plugins, err := ConfiguredPluginSources(ctx)
+	if err != nil {
+		logs.Warn(ctx, "deputy.advisorysource.plugin_load_failed", "error", err)
+	}
+	return NewRegistry(append(sources, plugins...)...)
 }
 
 // AggregateResult is the merged answer across all sources plus a coverage report.

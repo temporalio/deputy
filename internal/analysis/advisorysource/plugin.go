@@ -105,9 +105,39 @@ func LoadPluginSources(ctx context.Context, programNames []string, opts ...Plugi
 	return sources, errors.Join(errs...)
 }
 
+// EnvAdvisorySources names the environment variable listing advisory-source
+// plugin programs to load, comma-separated (program names resolved via PATH, or
+// absolute/relative paths). Loading is explicit opt-in: an advisory source can
+// see and shape security findings, so Deputy never auto-executes binaries it
+// merely finds on PATH.
+const EnvAdvisorySources = "DEPUTY_ADVISORY_SOURCES"
+
+// ConfiguredPluginSources loads the advisory-source plugins named by
+// EnvAdvisorySources. Sources that fail to load are skipped and reported in the
+// joined error so callers can warn without failing the scan; the coverage
+// report then reflects which sources actually answered.
+func ConfiguredPluginSources(ctx context.Context, opts ...PluginOption) ([]Source, error) {
+	return LoadPluginSources(ctx, parseProgramList(os.Getenv(EnvAdvisorySources)), opts...)
+}
+
+// parseProgramList splits a comma-separated program list, trimming whitespace
+// and dropping empties.
+func parseProgramList(v string) []string {
+	var out []string
+	for _, part := range strings.Split(v, ",") {
+		if p := strings.TrimSpace(part); p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
 // DiscoverPluginPrograms returns advisory-source plugin program names found on
-// PATH (executables named deputy-advisory-source-*). Discovery is best-effort;
-// callers pass the results to NewPluginSource and add them to a Registry.
+// PATH (executables named deputy-advisory-source-*). Discovery only *lists*
+// candidates — for example for a future "deputy plugins list" UX — it never
+// executes them. To actually load a source, name it explicitly in
+// DEPUTY_ADVISORY_SOURCES; auto-running discovered binaries would let a dropped
+// executable forge or suppress findings.
 func DiscoverPluginPrograms() ([]string, error) {
 	dirs := strings.Split(os.Getenv("PATH"), string(os.PathListSeparator))
 	seen := map[string]bool{}

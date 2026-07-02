@@ -171,6 +171,10 @@ ai:
 - `DEPUTY_SCAN_ECOSYSTEMS` (comma-separated)
 - `DEPUTY_SCAN_SKIP_CACHE`
 - `DEPUTY_OSV_BASE_URL` (override OSV API base URL; useful for tests or mirrors)
+- `DEPUTY_ADVISORY_SOURCES` (comma-separated advisory-source plugin programs to
+  load alongside the built-in OSV source, as PATH-resolved names or paths.
+  Explicit opt-in: Deputy never auto-executes plugins it merely finds on PATH.
+  See the [plugins guide](../guides/plugins.md#advisory-source-plugins).)
 
 ### SBOM
 

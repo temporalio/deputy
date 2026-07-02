@@ -533,9 +533,78 @@ deputy scan .
 DEPUTY_LOG_LEVEL=debug deputy scan . 2>&1 | grep trace
 ```
 
+## Advisory Source Plugins
+
+Beyond extractors, Deputy supports **advisory source** plugins: components that,
+given a set of packages, return the advisories (vulnerabilities and malware)
+affecting them. The built-in OSV source implements the same contract in-process;
+plugins let you add threat feeds, vendor databases, or internal allow/deny
+intelligence. Deputy aggregates all sources with union-with-provenance
+semantics — each finding records which source(s) reported it in `sources`, and
+the scan's `coverage` block shows which (ecosystem, artifact) combinations each
+source answered for.
+
+### Quick Start (Go)
+
+```go
+package main
+
+import (
+    "context"
+
+    plugin "github.com/temporalio/deputy/sdk/plugin"
+)
+
+type mySource struct{}
+
+func (s *mySource) Info() *plugin.AdvisorySourceInfo {
+    return &plugin.AdvisorySourceInfo{
+        Name:        "my-feed",
+        DisplayName: "My Threat Feed",
+        Version:     1,
+        Capabilities: &plugin.SourceCapabilities{
+            Ecosystems:   []string{"npm", "pypi"},
+            Artifacts:    []plugin.ArtifactKind{plugin.ArtifactKindPackage},
+            FindingKinds: []plugin.FindingKind{plugin.FindingKindMalware},
+        },
+    }
+}
+
+func (s *mySource) Query(ctx context.Context, packages []*plugin.Package) ([]*plugin.Finding, map[string]*plugin.Advisory, error) {
+    // Look up packages against your feed and return findings + advisories.
+    return nil, nil, nil
+}
+
+func main() {
+    plugin.MainAdvisorySource(&mySource{})
+}
+```
+
+Declare accurate capabilities: Deputy routes only packages a source covers, and
+a source must ignore anything outside its declared coverage rather than
+erroring.
+
+### Registration (explicit opt-in)
+
+Advisory sources can see and shape security findings, so Deputy **never
+auto-executes** binaries it merely finds on PATH. Name the plugins you trust
+explicitly, comma-separated (PATH-resolved names or paths):
+
+```bash
+DEPUTY_ADVISORY_SOURCES=deputy-advisory-source-myfeed deputy scan .
+```
+
+A plugin that fails to load is skipped with a warning rather than failing the
+scan; the scan's `coverage` block shows which sources actually answered.
+
+See [Example: Static Advisory Source](../../examples/advisory-source-plugins/static/)
+for a complete working plugin.
+
 ## Reference
 
 - [Plugin SDK (pkg.go.dev)](https://pkg.go.dev/github.com/temporalio/deputy/sdk/plugin)
 - [ExtractorService Proto](../../api/deputy/plugin/v1/extractor.proto)
+- [AdvisorySourceService Proto](../../api/deputy/plugin/v1/advisory_source.proto)
 - [pluginrpc Documentation](https://github.com/pluginrpc/pluginrpc)
 - [Example: Dotenv Extractor](../../examples/plugins/dotenv-extractor/)
+- [Example: Static Advisory Source](../../examples/advisory-source-plugins/static/)

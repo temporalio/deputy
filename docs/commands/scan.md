@@ -144,6 +144,29 @@ $ deputy scan --format json --output scan.json
 $ deputy scan --format json | jq '.vulnerabilities[] | {id: .id, severity: .severity}'
 ```
 
+### Advisory Coverage and Provenance
+
+Scan results report what was — and was not — checked for advisories, so a clean
+result is never mistaken for complete coverage:
+
+- **`coverage`** (JSON/API/MCP): `covered` lists (ecosystem, artifact)
+  combinations at least one advisory source answered for, with the source
+  names; `uncovered` lists combinations no configured source could answer for
+  (for example container base images from Dockerfiles). Uncovered means
+  *not checked*, not safe. Text output prints a matching
+  `Not checked for advisories` note.
+- **`findings[].sources`**: which advisory source(s) reported each finding
+  (e.g. `["osv"]`). Multiple entries mean independent corroboration.
+- **`advisories[].kind`**: distinguishes `FINDING_KIND_MALWARE` (e.g. OSV
+  `MAL-` records) from ordinary vulnerabilities.
+
+```console
+$ deputy scan --format json | jq '.coverage'
+```
+
+Additional advisory sources (threat feeds, vendor databases) can be added via
+plugins — see the [plugins guide](../guides/plugins.md#advisory-source-plugins).
+
 ### Filtering
 
 ```console

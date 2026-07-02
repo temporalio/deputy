@@ -429,7 +429,7 @@ func ScanPURL(ctx context.Context, purlStr string, opts Options) (*Execution, er
 	}
 
 	// Query advisory sources via the registry (OSV today).
-	agg, err := advisorysource.NewDefaultRegistry(osv.NewClient()).Query(ctx, inputs)
+	agg, err := advisorysource.NewDefaultRegistry(ctx, osv.NewClient()).Query(ctx, inputs)
 	if err != nil {
 		otel.SetSpanError(span, err)
 		return nil, fmt.Errorf("query vulnerabilities: %w", err)
@@ -534,7 +534,7 @@ func queryVulnerabilities(ctx context.Context, pkgs []*extractor.Package, direct
 	// The registry routes each package only to sources that cover its ecosystem
 	// and artifact kind, so an ecosystem no source covers is reported in
 	// coverage rather than failing the scan.
-	agg, err := advisorysource.NewDefaultRegistry(osv.NewClient()).Query(ctx, inputs)
+	agg, err := advisorysource.NewDefaultRegistry(ctx, osv.NewClient()).Query(ctx, inputs)
 	if err != nil {
 		otel.SetSpanError(span, err)
 		return nil, nil, nil, err

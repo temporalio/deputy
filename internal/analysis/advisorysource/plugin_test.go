@@ -113,4 +113,43 @@ func TestPluginSourceEndToEnd(t *testing.T) {
 	if adv := res.Advisories["MAL-EXAMPLE-0001"]; adv == nil || adv.GetKind() != vulnerabilityv1.FindingKind_FINDING_KIND_MALWARE {
 		t.Errorf("advisory kind = %v, want MALWARE", adv.GetKind())
 	}
+
+	// The scan wiring: DEPUTY_ADVISORY_SOURCES loads the plugin into the
+	// default registry alongside the built-in OSV source.
+	t.Setenv(EnvAdvisorySources, bin)
+	configured, err := ConfiguredPluginSources(ctx)
+	if err != nil {
+		t.Fatalf("ConfiguredPluginSources: %v", err)
+	}
+	if len(configured) != 1 || configured[0].Info().GetName() != "static-example" {
+		t.Fatalf("configured sources = %+v, want the static example plugin", configured)
+	}
+	reg := NewDefaultRegistry(ctx, nil)
+	names := make([]string, 0, len(reg.sources))
+	for _, s := range reg.sources {
+		names = append(names, s.Info().GetName())
+	}
+	if !slices.Contains(names, SourceNameOSV) || !slices.Contains(names, "static-example") {
+		t.Fatalf("default registry sources = %v, want osv + static-example", names)
+	}
+}
+
+func TestParseProgramList(t *testing.T) {
+	tests := []struct {
+		name string
+		in   string
+		want []string
+	}{
+		{"empty", "", nil},
+		{"single", "deputy-advisory-source-x", []string{"deputy-advisory-source-x"}},
+		{"comma separated with whitespace", " a , b ,, c ", []string{"a", "b", "c"}},
+		{"paths", "/usr/local/bin/deputy-advisory-source-x,./rel/plugin", []string{"/usr/local/bin/deputy-advisory-source-x", "./rel/plugin"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := parseProgramList(tt.in); !slices.Equal(got, tt.want) {
+				t.Fatalf("parseProgramList(%q) = %v, want %v", tt.in, got, tt.want)
+			}
+		})
+	}
 }
