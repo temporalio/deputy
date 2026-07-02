@@ -209,29 +209,29 @@ func celContextFromAST(expr string, offset int) (string, string) {
 }
 
 // celFieldCompletions lists known fields for common CEL base identifiers.
+// Proto-typed variables (pkg, vulnerability, target, env, …) are derived from
+// their proto descriptors via policy.VariableFieldCompletions, so completions
+// use the proto field names (snake_case, the CEL contract) and can never drift
+// from the messages. The hand-maintained lists below cover only object-typed
+// variables and helper constants that have no proto shape.
 func celFieldCompletions(base string) []string {
+	if fields, ok := policy.VariableFieldCompletions(base); ok {
+		return fields
+	}
 	switch base {
-	case "env":
-		return []string{"command", "entrypoint", "listener", "hostname", "time", "offline", "quota"}
 	case "request":
 		return []string{"ecosystem", "module", "package", "version", "raw_version", "has_version", "fileType", "operation", "client", "licenses", "registry", "repository", "reference", "tag", "digest", "image", "path"}
 	case "request.client":
 		return []string{"ip", "userAgent", "principal"}
-	case "pkg":
-		return []string{"name", "version", "ecosystem", "licenses"}
-	case "vulnerability", "vulnerabilities":
-		return []string{"id", "severity", "summary", "aliases", "fixedVersions", "epss", "epssPercentile", "inKEV", "layerDetails", "path", "depth"}
 	case "severity":
 		return []string{"CRITICAL", "HIGH", "MEDIUM", "LOW", "UNSPECIFIED"}
 	case "scope":
 		return []string{"RUNTIME", "DEV", "TEST", "BUILD", "OPTIONAL", "UNSPECIFIED"}
-	case "component":
-		return []string{"name", "version", "ecosystem", "licenses"}
 	case "repo":
 		return []string{"name", "ref", "commit", "path"}
-	case "target":
-		return []string{"kind", "display", "ref", "effective_ref", "commit", "origin", "local", "cloned", "provenance"}
 	case "target.provenance":
+		// target resolves via proto, but provenance is a map<string,string>;
+		// these are its conventional keys, not proto fields.
 		return []string{"registry", "repository", "tag", "digest", "reference", "image", "image_input", "transport", "platform", "path"}
 	case "image", "image_info":
 		return []string{"registry", "repository", "tag", "digest", "reference", "image", "config", "metadata", "history"}
@@ -241,8 +241,6 @@ func celFieldCompletions(base string) []string {
 		return []string{"test", "interval", "timeout", "retries"}
 	case "image.metadata", "image_info.metadata":
 		return []string{"architecture", "os", "os_version", "variant", "layer_count", "size", "created", "author", "docker_version", "digest"}
-	case "vulnerability.layerDetails":
-		return []string{"index", "diffId", "chainId", "command", "inBaseImage"}
 	default:
 		return nil
 	}
