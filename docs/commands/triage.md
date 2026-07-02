@@ -142,6 +142,12 @@ Recommendations:
 }
 ```
 
+Each package summary also carries `priority` and `priority_reason`, computed by
+the canonical triage ladder (severity + fixability + directness) shared with
+the MCP `triage_vulnerabilities` tool — a critical finding with no available
+fix ranks below a fixable one, and the reason says why. CLI, API, and MCP
+triage therefore give the same remediation verdict for the same finding.
+
 ## Exit Codes
 
 | Code | Meaning |
