@@ -22,10 +22,16 @@ type TriageReport struct {
 
 // TriagePackageSummary represents a summary of a single package's vulnerabilities.
 type TriagePackageSummary struct {
-	Package            string                           `json:"package"`
-	Version            string                           `json:"version"`
-	Severity           string                           `json:"severity"`
-	SeverityType       string                           `json:"severity_type"`
+	Package      string `json:"package"`
+	Version      string `json:"version"`
+	Severity     string `json:"severity"`
+	SeverityType string `json:"severity_type"`
+	// Priority ranks the package for remediation using the canonical triage
+	// ladder (severity + fixability + directness) shared with the MCP
+	// triage_vulnerabilities tool, so CLI, API, and MCP triage agree.
+	Priority string `json:"priority,omitempty"`
+	// PriorityReason explains the priority verdict in one sentence.
+	PriorityReason     string                           `json:"priority_reason,omitempty"`
 	FixVersion         string                           `json:"fix_version,omitempty"`
 	IsDirect           bool                             `json:"is_direct"`
 	Summary            string                           `json:"summary,omitempty"`
@@ -51,19 +57,21 @@ func BuildTriageReport(target Target, stats *vulnerabilityv1.Stats, cons []vulne
 // aggregatePackages aggregates consolidated vulnerabilities into package summaries.
 func aggregatePackages(cons []vulnerability.Consolidated) []TriagePackageSummary {
 	type aggInfo struct {
-		pkg        string
-		version    string
-		severity   string
-		severityT  string
-		priority   int
-		fix        string
-		summary    string
-		ids        []string
-		isDirect   bool
-		imports    []vulnerabilityv1.AffectedImport
-		dbSpecific map[string]string
-		counts     map[string]int
-		total      int
+		pkg            string
+		version        string
+		severity       string
+		severityT      string
+		priority       int
+		triagePriority string
+		triageReason   string
+		fix            string
+		summary        string
+		ids            []string
+		isDirect       bool
+		imports        []vulnerabilityv1.AffectedImport
+		dbSpecific     map[string]string
+		counts         map[string]int
+		total          int
 	}
 	pkgMap := map[string]*aggInfo{}
 	for _, v := range cons {
@@ -72,9 +80,10 @@ func aggregatePackages(cons []vulnerability.Consolidated) []TriagePackageSummary
 			continue
 		}
 		priority, _ := ConsolidatedSeverityPriority(v)
+		triagePriority, triageReason := vulnerability.ConsolidatedTriagePriority(v)
 		info, ok := pkgMap[key]
 		if !ok {
-			info = &aggInfo{pkg: v.Package, version: v.Version, severity: v.Severity, severityT: v.SeverityType, priority: priority, fix: bestFix(v), summary: v.Summary, isDirect: v.IsDirect}
+			info = &aggInfo{pkg: v.Package, version: v.Version, severity: v.Severity, severityT: v.SeverityType, priority: priority, triagePriority: triagePriority, triageReason: triageReason, fix: bestFix(v), summary: v.Summary, isDirect: v.IsDirect}
 			pkgMap[key] = info
 		}
 		if len(v.AffectedImports) > 0 {
@@ -93,6 +102,8 @@ func aggregatePackages(cons []vulnerability.Consolidated) []TriagePackageSummary
 			info.priority = priority
 			info.severity = v.Severity
 			info.severityT = v.SeverityType
+			info.triagePriority = triagePriority
+			info.triageReason = triageReason
 			info.fix = bestFix(v)
 			if v.Summary != "" {
 				info.summary = v.Summary
@@ -111,6 +122,8 @@ func aggregatePackages(cons []vulnerability.Consolidated) []TriagePackageSummary
 			Version:            info.version,
 			Severity:           info.severity,
 			SeverityType:       info.severityT,
+			Priority:           info.triagePriority,
+			PriorityReason:     info.triageReason,
 			FixVersion:         info.fix,
 			IsDirect:           info.isDirect,
 			Summary:            info.summary,

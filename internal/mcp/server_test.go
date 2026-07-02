@@ -3558,7 +3558,7 @@ func TestCalculatePriorityReasonsKeepFixContext(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			gotLevel, gotReason := calculatePriority(tt.severity, tt.hasFix, tt.isDirect)
+			gotLevel, gotReason := vulnerability.TriagePriority(tt.severity, tt.hasFix, tt.isDirect)
 			if gotLevel != tt.wantLevel {
 				t.Errorf("priority level = %q, want %q", gotLevel, tt.wantLevel)
 			}

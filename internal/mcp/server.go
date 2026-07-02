@@ -2496,7 +2496,7 @@ func (s *Server) getRemediation(ctx context.Context, req *mcp.CallToolRequest, a
 	remediableCount := 0
 	migrationCount := 0
 	for _, v := range consolidated.Vulnerabilities {
-		remediable, migration := remediationDisposition(v)
+		remediable, migration := vulnerability.RemediationDisposition(v)
 		if remediable {
 			remediableCount++
 			if migration {
@@ -3118,11 +3118,11 @@ func (s *Server) triageVulnerabilities(ctx context.Context, req *mcp.CallToolReq
 
 	// Process each vulnerability
 	for _, v := range consolidated.Vulnerabilities {
-		hasFix, migration := remediationDisposition(v)
+		hasFix, migration := vulnerability.RemediationDisposition(v)
 		severity := severityStringForMCP(v.Severity, v.SeverityType)
 
 		// Determine priority based on severity, fixability, and direct dependency
-		priority, reason := calculatePriority(severity, hasFix, v.IsDirect)
+		priority, reason := vulnerability.TriagePriority(severity, hasFix, v.IsDirect)
 
 		triaged := TriagedVuln{
 			ID:             v.PrimaryID,
@@ -3202,59 +3202,11 @@ func (s *Server) triageVulnerabilities(ctx context.Context, req *mcp.CallToolReq
 	return nil, result, nil
 }
 
-// calculatePriority determines the priority of a vulnerability.
-func calculatePriority(severity string, hasFix, isDirect bool) (string, string) {
-	if severity == "CRITICAL" && hasFix && isDirect {
-		return "critical", "Critical severity, fixable, in direct dependency"
-	}
-	if severity == "CRITICAL" && hasFix {
-		return "critical", "Critical severity with fix available in transitive dependency"
-	}
-	if severity == "CRITICAL" {
-		return "high", "Critical severity but no fix available"
-	}
-	if severity == "HIGH" && hasFix && isDirect {
-		return "high", "High severity, fixable, in direct dependency"
-	}
-	if severity == "HIGH" && hasFix {
-		return "high", "High severity with fix available in transitive dependency"
-	}
-	if severity == "HIGH" {
-		return "medium", "High severity but no fix available"
-	}
-	if severity == "MEDIUM" && hasFix && isDirect {
-		return "medium", "Medium severity, fixable, in direct dependency"
-	}
-	if severity == "MEDIUM" && hasFix {
-		return "low", "Medium severity with fix available in transitive dependency"
-	}
-	if severity == "MEDIUM" {
-		return "low", "Medium severity"
-	}
-	if severity == "LOW" && hasFix && isDirect {
-		return "low", "Low severity, fixable, in direct dependency"
-	}
-	if severity == "LOW" && hasFix {
-		return "low", "Low severity with fix available in transitive dependency"
-	}
-	if severity == "LOW" {
-		return "low", "Low severity"
-	}
-	if hasFix && isDirect {
-		return "low", "Unknown severity, fixable, in direct dependency"
-	}
-	if hasFix {
-		return "low", "Unknown severity with fix available in transitive dependency"
-	}
-	return "low", "Unknown severity"
-}
-
 // sortTriagedVulns sorts vulnerabilities by priority, breaking ties on ID so
 // the ordering is deterministic for agents diffing successive triage results.
 func sortTriagedVulns(vulns []TriagedVuln) {
-	priorityOrder := map[string]int{"critical": 0, "high": 1, "medium": 2, "low": 3}
 	slices.SortFunc(vulns, func(a, b TriagedVuln) int {
-		if c := cmp.Compare(priorityOrder[a.Priority], priorityOrder[b.Priority]); c != 0 {
+		if c := cmp.Compare(vulnerability.TriagePriorityRank(a.Priority), vulnerability.TriagePriorityRank(b.Priority)); c != 0 {
 			return c
 		}
 		return strings.Compare(a.ID, b.ID)
