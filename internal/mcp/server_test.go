@@ -550,6 +550,36 @@ func TestNewServer_WithOptions(t *testing.T) {
 	}
 }
 
+func TestServerInstructionsReferenceRealTools(t *testing.T) {
+	if strings.TrimSpace(serverInstructions) == "" {
+		t.Fatal("serverInstructions is empty")
+	}
+	registered := make(map[string]bool)
+	for _, name := range NewServer().toolNames {
+		registered[name] = true
+	}
+	// Tools named in the instructions must exist, so guidance can't reference a
+	// renamed or removed tool.
+	for _, name := range []string{
+		"scan_directory", "triage_vulnerabilities", "graph_why", "graph_needs",
+		"get_remediation", "diff_refs", "scan_container", "scan_package",
+		"list_policy_entrypoints",
+	} {
+		if !strings.Contains(serverInstructions, name) {
+			t.Errorf("serverInstructions does not mention %q", name)
+		}
+		if !registered[name] {
+			t.Errorf("serverInstructions references %q which is not a registered tool", name)
+		}
+	}
+	// Key output conventions agents rely on must stay documented.
+	for _, phrase := range []string{"unknown", "Truncated", "clean: true", "found: false", "PURL"} {
+		if !strings.Contains(serverInstructions, phrase) {
+			t.Errorf("serverInstructions should describe %q", phrase)
+		}
+	}
+}
+
 func TestListPolicyEntrypointsTool(t *testing.T) {
 	s := NewServer()
 	ctx := t.Context()

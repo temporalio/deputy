@@ -124,6 +124,32 @@ func WithServices(svc *services.Services) ServerOption {
 	}
 }
 
+// serverInstructions is sent to clients in the MCP initialize response. It
+// orients an agent to Deputy's model and how the tools compose; it deliberately
+// does not restate per-tool inputs (the tool schemas cover those). Keep it
+// concise — it is injected into the client's context once per session.
+const serverInstructions = "Deputy is a supply-chain security engine. Its tools scan dependencies and container images against known-vulnerability data (OSV: CVE/GHSA/Go vuln DB), explain and prioritize findings, trace dependency graphs, generate SBOMs, and propose remediation. Every tool is read-only and safe to call repeatedly; tools that reach the network are annotated with openWorldHint.\n" +
+	"\n" +
+	"Targets\n" +
+	"- Directory tools take a local `path` plus an optional `ref` (branch, tag, or commit) to analyze a specific Git snapshot. Results echo the resolved `effectiveRef`/`commit` so you can confirm exactly what was analyzed.\n" +
+	"- `scan_container` takes an image reference; `scan_package` checks a single package.\n" +
+	"\n" +
+	"Package identity\n" +
+	"- Prefer a PURL (e.g. `pkg:npm/lodash@4.17.21`) for exact matches. Tools also accept `name`, `name@version`, or `name` + `ecosystem`. Ecosystem names are lenient (e.g. `gha` resolves to `github-actions`, `golang` to `go`).\n" +
+	"\n" +
+	"Reading results\n" +
+	"- Severity totals include an `unknown` bucket, so per-severity counts always sum to the total.\n" +
+	"- List-like outputs are capped and set a `*Truncated` flag alongside a full count (e.g. `pathCount` with `pathsTruncated`); check them before assuming a result is complete. Ordering is deterministic across calls.\n" +
+	"- A clean target reports `clean: true` with an empty findings list — this is success, not an error.\n" +
+	"- A package absent from the graph is a normal `found: false` result (with a `matchedNode` when the package is present but has no paths), not an error.\n" +
+	"\n" +
+	"Typical workflow\n" +
+	"- Assess: `scan_directory` then `triage_vulnerabilities` to rank findings by severity and fixability.\n" +
+	"- Investigate: `graph_why` (why a package is present) and `graph_needs` (what depends on it). Set `resolveTransitives` for precise transitive edges (slower, may use the network).\n" +
+	"- Remediate: `get_remediation` for upgrade/migration commands; hints reference these MCP tools by name.\n" +
+	"- Compare: `diff_refs` for two Git refs or two container images.\n" +
+	"- Author policies: `list_policy_entrypoints` returns entrypoints, categories, CEL variables, and helpers."
+
 // NewServer creates a new Deputy MCP server with vulnerability analysis tools.
 func NewServer(opts ...ServerOption) *Server {
 	impl := &mcp.Implementation{
@@ -131,7 +157,7 @@ func NewServer(opts ...ServerOption) *Server {
 		Version: version.Value,
 	}
 
-	server := mcp.NewServer(impl, nil)
+	server := mcp.NewServer(impl, &mcp.ServerOptions{Instructions: serverInstructions})
 	s := &Server{
 		server:       server,
 		toolTimeouts: DefaultToolTimeouts(),
