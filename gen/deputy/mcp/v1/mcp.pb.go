@@ -580,7 +580,7 @@ type ScanDirectoryResult struct {
 	VulnerabilitiesBySeverity map[string]int32 `protobuf:"bytes,6,rep,name=vulnerabilities_by_severity,json=vulnerabilitiesBySeverity,proto3" json:"vulnerabilities_by_severity,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"varint,2,opt,name=value"`
 	// Vulnerabilities are the consolidated findings.
 	Vulnerabilities []*VulnExplanation `protobuf:"bytes,7,rep,name=vulnerabilities,proto3" json:"vulnerabilities,omitempty"`
-	// Clean reports whether no vulnerabilities were found — success, not an
+	// Clean reports whether no vulnerabilities were found; success, not an
 	// error. Check coverage to see what was and was not checked.
 	Clean bool `protobuf:"varint,8,opt,name=clean,proto3" json:"clean,omitempty"`
 	// Coverage reports advisory-source coverage for the scanned inventory.
@@ -771,7 +771,7 @@ type ScanContainerResult struct {
 	VulnerabilitiesBySeverity map[string]int32 `protobuf:"bytes,4,rep,name=vulnerabilities_by_severity,json=vulnerabilitiesBySeverity,proto3" json:"vulnerabilities_by_severity,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"varint,2,opt,name=value"`
 	// Vulnerabilities are the consolidated findings.
 	Vulnerabilities []*VulnExplanation `protobuf:"bytes,5,rep,name=vulnerabilities,proto3" json:"vulnerabilities,omitempty"`
-	// Clean reports whether no vulnerabilities were found — success, not an
+	// Clean reports whether no vulnerabilities were found; success, not an
 	// error. Check coverage to see what was and was not checked.
 	Clean bool `protobuf:"varint,6,opt,name=clean,proto3" json:"clean,omitempty"`
 	// Coverage reports advisory-source coverage for the scanned inventory.
@@ -1994,7 +1994,7 @@ type GraphPath struct {
 	Nodes []string `protobuf:"bytes,1,rep,name=nodes,proto3" json:"nodes,omitempty"`
 	// NodeDetails are the structured nodes along the path, root first.
 	NodeDetails []*GraphPathNode `protobuf:"bytes,2,rep,name=node_details,json=nodeDetails,proto3" json:"node_details,omitempty"`
-	// Depth is the number of edges in the path — hops from the root, so a
+	// Depth is the number of edges in the path (hops from the root), so a
 	// direct dependency's single-node path has depth 0 (absent). Not to be
 	// confused with each node's own depth.
 	Depth         int32 `protobuf:"varint,3,opt,name=depth,proto3" json:"depth,omitempty"`

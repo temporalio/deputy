@@ -22,7 +22,7 @@ import (
 // json.RawMessage (the SDK embeds them in structuredContent verbatim and
 // validates them against the descriptor-derived output schema), and inputs are
 // unmarshaled from the raw arguments into the request protos. Absent fields
-// mean empty/zero — the protojson dialect omits zero values.
+// mean empty/zero because the protojson dialect omits zero values.
 
 // marshalMCPResult marshals an mcp.v1 result with the canonical MCP dialect.
 func marshalMCPResult(m proto.Message) (json.RawMessage, error) {
@@ -34,7 +34,7 @@ func marshalMCPResult(m proto.Message) (json.RawMessage, error) {
 }
 
 // unmarshalMCPRequest parses raw tool arguments into an mcp.v1 request proto
-// and enforces the request's buf.validate rules with protovalidate — the same
+// and enforces the request's buf.validate rules with protovalidate, the same
 // rules the derived input schema advertises. In production the MCP SDK has
 // already validated the arguments against that schema, so this is defense in
 // depth: it makes the handlers self-contained (direct invocations get the

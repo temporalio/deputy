@@ -10,7 +10,7 @@ option go_package = "github.com/temporalio/deputy/gen/deputy/mcp/v1;mcpv1";
 
 // deputy.mcp.v1 defines the input and output contracts of Deputy's MCP tools.
 // These messages ARE the tool contracts: handlers marshal results with
-// protojson (camelCase, zero values omitted — absent means empty/zero), and
+// protojson (camelCase, zero values omitted, so absent means empty/zero), and
 // the tools' JSON Schemas are derived from these descriptors, so the
 // advertised schema, the wire, and the server can never drift apart.
 //
@@ -152,7 +152,7 @@ message ScanDirectoryResult {
   map<string, int32> vulnerabilities_by_severity = 6;
   // Vulnerabilities are the consolidated findings.
   repeated VulnExplanation vulnerabilities = 7;
-  // Clean reports whether no vulnerabilities were found — success, not an
+  // Clean reports whether no vulnerabilities were found; success, not an
   // error. Check coverage to see what was and was not checked.
   bool clean = 8;
   // Coverage reports advisory-source coverage for the scanned inventory.
@@ -186,7 +186,7 @@ message ScanContainerResult {
   map<string, int32> vulnerabilities_by_severity = 4;
   // Vulnerabilities are the consolidated findings.
   repeated VulnExplanation vulnerabilities = 5;
-  // Clean reports whether no vulnerabilities were found — success, not an
+  // Clean reports whether no vulnerabilities were found; success, not an
   // error. Check coverage to see what was and was not checked.
   bool clean = 6;
   // Coverage reports advisory-source coverage for the scanned inventory.
@@ -435,7 +435,7 @@ message GraphPath {
   repeated string nodes = 1;
   // NodeDetails are the structured nodes along the path, root first.
   repeated GraphPathNode node_details = 2;
-  // Depth is the number of edges in the path — hops from the root, so a
+  // Depth is the number of edges in the path (hops from the root), so a
   // direct dependency's single-node path has depth 0 (absent). Not to be
   // confused with each node's own depth.
   int32 depth = 3;

@@ -1,6 +1,6 @@
 // Package descriptorset embeds Deputy's compiled proto descriptors with source
 // info, so tooling can read the comments written in the .proto files at
-// runtime — the generated Go descriptors strip SourceCodeInfo. This makes the
+// runtime, because the generated Go descriptors strip SourceCodeInfo. This makes the
 // proto comments the single authored source for human- and agent-facing
 // descriptions: MCP tool schemas derive field descriptions from it today, and
 // docs generation can reuse it.

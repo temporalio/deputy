@@ -6,11 +6,11 @@
 // The output deliberately targets what MCP clients accept, which is narrower
 // than JSON Schema (see the mcp-schema constraints learned in production):
 //
-//   - no $ref and no oneOf/anyOf/allOf anywhere — nested messages are inlined,
+//   - no $ref and no oneOf/anyOf/allOf anywhere: nested messages are inlined,
 //     and messages containing proto oneofs are rejected;
 //   - enum-like values appear as string enums: proto enum fields use the
 //     declared value names, and string fields constrained with
-//     (buf.validate.field).string.in use that list — the same list
+//     (buf.validate.field).string.in use that list, the same list
 //     protovalidate enforces server-side, so the advertised schema can never
 //     promise more than the server accepts;
 //   - int64/uint64 map to JSON strings (the protojson wire form); prefer int32
@@ -56,7 +56,7 @@ func messageSchema(md protoreflect.MessageDescriptor, opts Options, visiting map
 	defer delete(visiting, md.FullName())
 
 	if md.Oneofs().Len() > 0 && realOneofCount(md) > 0 {
-		return nil, fmt.Errorf("message %s uses a proto oneof; MCP clients reject oneOf/anyOf schemas — model alternatives as optional fields validated by the handler", md.FullName())
+		return nil, fmt.Errorf("message %s uses a proto oneof; MCP clients reject oneOf/anyOf schemas; model alternatives as optional fields validated by the handler", md.FullName())
 	}
 
 	schema := &jsonschema.Schema{
@@ -177,7 +177,7 @@ func stringSchema(rules *validate.StringRules) *jsonschema.Schema {
 }
 
 // enumSchema renders a proto enum field as a string enum of the declared value
-// names — exactly what protojson emits on the wire.
+// names, exactly what protojson emits on the wire.
 func enumSchema(ed protoreflect.EnumDescriptor) *jsonschema.Schema {
 	values := ed.Values()
 	s := &jsonschema.Schema{Type: "string", Enum: make([]any, 0, values.Len())}

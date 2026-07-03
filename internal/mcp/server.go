@@ -127,7 +127,7 @@ func WithServices(svc *services.Services) ServerOption {
 // serverInstructions is sent to clients in the MCP initialize response. It
 // orients an agent to Deputy's model and how the tools compose; it deliberately
 // does not restate per-tool inputs (the tool schemas cover those). Keep it
-// concise — it is injected into the client's context once per session.
+// concise: it is injected into the client's context once per session.
 const serverInstructions = "Deputy is a supply-chain security engine. Its tools scan dependencies and container images against known-vulnerability data (OSV: CVE/GHSA/Go vuln DB), explain and prioritize findings, trace dependency graphs, generate SBOMs, and propose remediation. Every tool is read-only and safe to call repeatedly; tools that reach the network are annotated with openWorldHint.\n" +
 	"\n" +
 	"Targets\n" +
@@ -140,7 +140,7 @@ const serverInstructions = "Deputy is a supply-chain security engine. Its tools 
 	"Reading results\n" +
 	"- Severity totals include an `unknown` bucket, so per-severity counts always sum to the total.\n" +
 	"- List-like outputs are capped and set a `*Truncated` flag alongside a full count (e.g. `pathCount` with `pathsTruncated`); check them before assuming a result is complete. Ordering is deterministic across calls.\n" +
-	"- A clean target reports `clean: true` — this is success, not an error.\n" +
+	"- A clean target reports `clean: true`; this is success, not an error.\n" +
 	"- Absent fields mean empty or zero: results omit empty lists, zero counts, and false booleans (no `vulnerabilities` key = none found; no `kind` = ordinary vulnerability).\n" +
 	"- A package absent from the graph is a normal `found: false` result (with a `matchedNode` when the package is present but has no paths), not an error.\n" +
 	"- Scan results include a `coverage` block: `covered` lists (ecosystem, artifact) combinations an advisory source answered for, `uncovered` lists those none could (e.g. container base images). Uncovered means not-checked, not safe. Findings carry `sources` (provenance, e.g. `[\"osv\"]`) and `kind` (`malware` vs vulnerability).\n" +

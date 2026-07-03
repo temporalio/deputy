@@ -4,7 +4,7 @@ import "google.golang.org/protobuf/encoding/protojson"
 
 // CLIJSONMarshalOptions is the canonical protojson configuration for Deputy's
 // machine-readable output (--format json and agent prompts): proto field names
-// (snake_case — the documented CLI JSON contract, congruent with CEL policy
+// (snake_case, the documented CLI JSON contract, congruent with CEL policy
 // inputs), two-space multiline indentation, and zero values omitted. Every
 // proto-marshaling output path should use this so all commands emit the same
 // JSON dialect; deliberate deviations (e.g. policy inputs emit zero values so
@@ -19,8 +19,8 @@ func CLIJSONMarshalOptions() protojson.MarshalOptions {
 }
 
 // MCPJSONMarshalOptions is the canonical protojson configuration for MCP tool
-// results (deputy.mcp.v1): camelCase JSON names — the MCP wire dialect agents
-// already consume — compact (the SDK embeds the payload in structuredContent),
+// results (deputy.mcp.v1): camelCase JSON names (the MCP wire dialect agents
+// already consume), compact (the SDK embeds the payload in structuredContent),
 // and zero values omitted so results stay small for agent context windows.
 // One proto, two documented dialects: the CLI speaks snake_case
 // (CLIJSONMarshalOptions), MCP speaks camelCase; both derive from the same
