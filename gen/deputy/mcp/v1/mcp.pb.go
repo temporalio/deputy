@@ -1994,8 +1994,9 @@ type GraphPath struct {
 	Nodes []string `protobuf:"bytes,1,rep,name=nodes,proto3" json:"nodes,omitempty"`
 	// NodeDetails are the structured nodes along the path, root first.
 	NodeDetails []*GraphPathNode `protobuf:"bytes,2,rep,name=node_details,json=nodeDetails,proto3" json:"node_details,omitempty"`
-	// Depth is the number of nodes in the path (a direct dependency is a
-	// one-node path), not to be confused with each node's own depth.
+	// Depth is the number of edges in the path — hops from the root, so a
+	// direct dependency's single-node path has depth 0 (absent). Not to be
+	// confused with each node's own depth.
 	Depth         int32 `protobuf:"varint,3,opt,name=depth,proto3" json:"depth,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache

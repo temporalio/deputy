@@ -435,8 +435,9 @@ message GraphPath {
   repeated string nodes = 1;
   // NodeDetails are the structured nodes along the path, root first.
   repeated GraphPathNode node_details = 2;
-  // Depth is the number of nodes in the path (a direct dependency is a
-  // one-node path), not to be confused with each node's own depth.
+  // Depth is the number of edges in the path — hops from the root, so a
+  // direct dependency's single-node path has depth 0 (absent). Not to be
+  // confused with each node's own depth.
   int32 depth = 3;
 }
 
