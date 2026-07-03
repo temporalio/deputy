@@ -9,6 +9,7 @@ import (
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/reflect/protoreflect"
 
+	dependencyv1 "github.com/temporalio/deputy/gen/deputy/dependency/v1"
 	mcpv1 "github.com/temporalio/deputy/gen/deputy/mcp/v1"
 	vulnerabilityv1 "github.com/temporalio/deputy/gen/deputy/vulnerability/v1"
 	"github.com/temporalio/deputy/internal/mcp/protoschema"
@@ -121,6 +122,35 @@ func fixVerdictProto(v *vulnerability.FixVerdict) *mcpv1.FixVerdict {
 		TargetModule: v.TargetModule,
 		Claimed:      v.Claimed,
 	}
+}
+
+// manifestRefsProto normalizes manifest declarations for the mcp.v1 wire:
+// values are whitespace-trimmed and entries with nothing to report are
+// dropped, matching the previous omit-empty behavior.
+func manifestRefsProto(refs []*dependencyv1.ManifestRef) []*dependencyv1.ManifestRef {
+	if len(refs) == 0 {
+		return nil
+	}
+	out := make([]*dependencyv1.ManifestRef, 0, len(refs))
+	for _, ref := range refs {
+		if ref == nil {
+			continue
+		}
+		path := strings.TrimSpace(ref.GetPath())
+		manager := strings.TrimSpace(ref.GetManager())
+		componentKey := strings.TrimSpace(ref.GetComponentKey())
+		groups := stringsForMCP(ref.GetGroups())
+		if path == "" && manager == "" && componentKey == "" && len(groups) == 0 {
+			continue
+		}
+		out = append(out, &dependencyv1.ManifestRef{
+			Path:         path,
+			Manager:      manager,
+			Groups:       groups,
+			ComponentKey: componentKey,
+		})
+	}
+	return out
 }
 
 // coverageProto converts scan coverage to the mcp.v1 shape. Returns nil when

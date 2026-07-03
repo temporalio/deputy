@@ -8,6 +8,8 @@ package mcpv1
 
 import (
 	_ "buf.build/gen/go/bufbuild/protovalidate/protocolbuffers/go/buf/validate"
+	v1 "github.com/temporalio/deputy/gen/deputy/dependency/v1"
+	v11 "github.com/temporalio/deputy/gen/deputy/graph/v1"
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 	reflect "reflect"
@@ -1345,11 +1347,1593 @@ func (x *TriageResult) GetRecommendations() []string {
 	return nil
 }
 
+// ListDependenciesRequest asks for the resolved dependency inventory of a
+// local directory.
+type ListDependenciesRequest struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Path to the local directory to analyze.
+	Path string `protobuf:"bytes,1,opt,name=path,proto3" json:"path,omitempty"`
+	// If true, only return direct dependencies.
+	DirectOnly bool `protobuf:"varint,2,opt,name=direct_only,json=directOnly,proto3" json:"direct_only,omitempty"`
+	// Git reference, branch, tag, or commit for repository paths. Defaults to
+	// the current working tree/HEAD.
+	Ref string `protobuf:"bytes,3,opt,name=ref,proto3" json:"ref,omitempty"`
+	// Optional ecosystems to include, e.g. go, npm, pypi.
+	Ecosystems []string `protobuf:"bytes,4,rep,name=ecosystems,proto3" json:"ecosystems,omitempty"`
+	// Optional directory globs to skip during the walk, e.g. .bin/** or
+	// **/testdata.
+	ExcludePaths  []string `protobuf:"bytes,5,rep,name=exclude_paths,json=excludePaths,proto3" json:"exclude_paths,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ListDependenciesRequest) Reset() {
+	*x = ListDependenciesRequest{}
+	mi := &file_deputy_mcp_v1_mcp_proto_msgTypes[12]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ListDependenciesRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ListDependenciesRequest) ProtoMessage() {}
+
+func (x *ListDependenciesRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_deputy_mcp_v1_mcp_proto_msgTypes[12]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ListDependenciesRequest.ProtoReflect.Descriptor instead.
+func (*ListDependenciesRequest) Descriptor() ([]byte, []int) {
+	return file_deputy_mcp_v1_mcp_proto_rawDescGZIP(), []int{12}
+}
+
+func (x *ListDependenciesRequest) GetPath() string {
+	if x != nil {
+		return x.Path
+	}
+	return ""
+}
+
+func (x *ListDependenciesRequest) GetDirectOnly() bool {
+	if x != nil {
+		return x.DirectOnly
+	}
+	return false
+}
+
+func (x *ListDependenciesRequest) GetRef() string {
+	if x != nil {
+		return x.Ref
+	}
+	return ""
+}
+
+func (x *ListDependenciesRequest) GetEcosystems() []string {
+	if x != nil {
+		return x.Ecosystems
+	}
+	return nil
+}
+
+func (x *ListDependenciesRequest) GetExcludePaths() []string {
+	if x != nil {
+		return x.ExcludePaths
+	}
+	return nil
+}
+
+// DependencyInfo is the agent-facing projection of one resolved dependency.
+// It deliberately omits deputy.dependency.v1.Package's licenses and
+// layer_details: neither is populated on the local-directory paths these
+// tools serve (licenses require the list service's include_licenses
+// enrichment, which no MCP tool requests; layer details only exist for
+// container-image packages), and advertising always-absent fields would
+// mislead agents. Both can be added later if a tool starts populating them.
+type DependencyInfo struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Name is the package name within its ecosystem.
+	Name string `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
+	// Version is the resolved version string.
+	Version string `protobuf:"bytes,2,opt,name=version,proto3" json:"version,omitempty"`
+	// Ecosystem is the canonical package ecosystem (e.g. "go", "npm").
+	Ecosystem string `protobuf:"bytes,3,opt,name=ecosystem,proto3" json:"ecosystem,omitempty"`
+	// Purl is the package URL for exact follow-up with graph_why, graph_needs,
+	// or scan_package.
+	Purl string `protobuf:"bytes,4,opt,name=purl,proto3" json:"purl,omitempty"`
+	// Direct reports whether this is a direct dependency.
+	Direct bool `protobuf:"varint,5,opt,name=direct,proto3" json:"direct,omitempty"`
+	// Locations lists file paths where this package was referenced.
+	Locations []string `protobuf:"bytes,6,rep,name=locations,proto3" json:"locations,omitempty"`
+	// ManifestRefs are the structured manifest declarations for this dependency,
+	// including manager, groups, and original component key where available.
+	ManifestRefs  []*v1.ManifestRef `protobuf:"bytes,7,rep,name=manifest_refs,json=manifestRefs,proto3" json:"manifest_refs,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *DependencyInfo) Reset() {
+	*x = DependencyInfo{}
+	mi := &file_deputy_mcp_v1_mcp_proto_msgTypes[13]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *DependencyInfo) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*DependencyInfo) ProtoMessage() {}
+
+func (x *DependencyInfo) ProtoReflect() protoreflect.Message {
+	mi := &file_deputy_mcp_v1_mcp_proto_msgTypes[13]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use DependencyInfo.ProtoReflect.Descriptor instead.
+func (*DependencyInfo) Descriptor() ([]byte, []int) {
+	return file_deputy_mcp_v1_mcp_proto_rawDescGZIP(), []int{13}
+}
+
+func (x *DependencyInfo) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+func (x *DependencyInfo) GetVersion() string {
+	if x != nil {
+		return x.Version
+	}
+	return ""
+}
+
+func (x *DependencyInfo) GetEcosystem() string {
+	if x != nil {
+		return x.Ecosystem
+	}
+	return ""
+}
+
+func (x *DependencyInfo) GetPurl() string {
+	if x != nil {
+		return x.Purl
+	}
+	return ""
+}
+
+func (x *DependencyInfo) GetDirect() bool {
+	if x != nil {
+		return x.Direct
+	}
+	return false
+}
+
+func (x *DependencyInfo) GetLocations() []string {
+	if x != nil {
+		return x.Locations
+	}
+	return nil
+}
+
+func (x *DependencyInfo) GetManifestRefs() []*v1.ManifestRef {
+	if x != nil {
+		return x.ManifestRefs
+	}
+	return nil
+}
+
+// ListDependenciesResult is the dependency inventory of a directory. The
+// *Discovered counts always describe the full inventory; the other counts
+// describe what was returned, which only differs under the directOnly filter.
+type ListDependenciesResult struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Path is the analyzed directory.
+	Path string `protobuf:"bytes,1,opt,name=path,proto3" json:"path,omitempty"`
+	// Ref is the requested Git reference when the path is a repository.
+	Ref string `protobuf:"bytes,2,opt,name=ref,proto3" json:"ref,omitempty"`
+	// EffectiveRef is the resolved reference that was actually analyzed.
+	EffectiveRef string `protobuf:"bytes,3,opt,name=effective_ref,json=effectiveRef,proto3" json:"effective_ref,omitempty"`
+	// Commit is the resolved commit hash of the analyzed snapshot.
+	Commit string `protobuf:"bytes,4,opt,name=commit,proto3" json:"commit,omitempty"`
+	// Total is the number of dependencies returned.
+	Total int32 `protobuf:"varint,5,opt,name=total,proto3" json:"total,omitempty"`
+	// Direct counts returned direct dependencies.
+	Direct int32 `protobuf:"varint,6,opt,name=direct,proto3" json:"direct,omitempty"`
+	// Transitive counts returned transitive dependencies.
+	Transitive int32 `protobuf:"varint,7,opt,name=transitive,proto3" json:"transitive,omitempty"`
+	// TotalDiscovered is the number of dependencies discovered before filtering.
+	TotalDiscovered int32 `protobuf:"varint,8,opt,name=total_discovered,json=totalDiscovered,proto3" json:"total_discovered,omitempty"`
+	// DirectDiscovered counts discovered direct dependencies.
+	DirectDiscovered int32 `protobuf:"varint,9,opt,name=direct_discovered,json=directDiscovered,proto3" json:"direct_discovered,omitempty"`
+	// TransitiveDiscovered counts discovered transitive dependencies.
+	TransitiveDiscovered int32 `protobuf:"varint,10,opt,name=transitive_discovered,json=transitiveDiscovered,proto3" json:"transitive_discovered,omitempty"`
+	// Dependencies are the returned dependencies.
+	Dependencies  []*DependencyInfo `protobuf:"bytes,11,rep,name=dependencies,proto3" json:"dependencies,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ListDependenciesResult) Reset() {
+	*x = ListDependenciesResult{}
+	mi := &file_deputy_mcp_v1_mcp_proto_msgTypes[14]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ListDependenciesResult) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ListDependenciesResult) ProtoMessage() {}
+
+func (x *ListDependenciesResult) ProtoReflect() protoreflect.Message {
+	mi := &file_deputy_mcp_v1_mcp_proto_msgTypes[14]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ListDependenciesResult.ProtoReflect.Descriptor instead.
+func (*ListDependenciesResult) Descriptor() ([]byte, []int) {
+	return file_deputy_mcp_v1_mcp_proto_rawDescGZIP(), []int{14}
+}
+
+func (x *ListDependenciesResult) GetPath() string {
+	if x != nil {
+		return x.Path
+	}
+	return ""
+}
+
+func (x *ListDependenciesResult) GetRef() string {
+	if x != nil {
+		return x.Ref
+	}
+	return ""
+}
+
+func (x *ListDependenciesResult) GetEffectiveRef() string {
+	if x != nil {
+		return x.EffectiveRef
+	}
+	return ""
+}
+
+func (x *ListDependenciesResult) GetCommit() string {
+	if x != nil {
+		return x.Commit
+	}
+	return ""
+}
+
+func (x *ListDependenciesResult) GetTotal() int32 {
+	if x != nil {
+		return x.Total
+	}
+	return 0
+}
+
+func (x *ListDependenciesResult) GetDirect() int32 {
+	if x != nil {
+		return x.Direct
+	}
+	return 0
+}
+
+func (x *ListDependenciesResult) GetTransitive() int32 {
+	if x != nil {
+		return x.Transitive
+	}
+	return 0
+}
+
+func (x *ListDependenciesResult) GetTotalDiscovered() int32 {
+	if x != nil {
+		return x.TotalDiscovered
+	}
+	return 0
+}
+
+func (x *ListDependenciesResult) GetDirectDiscovered() int32 {
+	if x != nil {
+		return x.DirectDiscovered
+	}
+	return 0
+}
+
+func (x *ListDependenciesResult) GetTransitiveDiscovered() int32 {
+	if x != nil {
+		return x.TransitiveDiscovered
+	}
+	return 0
+}
+
+func (x *ListDependenciesResult) GetDependencies() []*DependencyInfo {
+	if x != nil {
+		return x.Dependencies
+	}
+	return nil
+}
+
+// GenerateSBOMRequest asks for a Software Bill of Materials of a local
+// directory or repository checkout.
+type GenerateSBOMRequest struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Path to the local directory or repository checkout to analyze.
+	Path string `protobuf:"bytes,1,opt,name=path,proto3" json:"path,omitempty"`
+	// Git reference, branch, tag, or commit. Defaults to HEAD.
+	Ref string `protobuf:"bytes,2,opt,name=ref,proto3" json:"ref,omitempty"`
+	// Output format. Defaults to cyclonedx-json. Canonical forms are
+	// cyclonedx-json, spdx-json, protobom-json; the short aliases cyclonedx,
+	// spdx, protobom are equivalent.
+	Format string `protobuf:"bytes,3,opt,name=format,proto3" json:"format,omitempty"`
+	// Enrich the SBOM with license information from deps.dev.
+	EnrichLicenses bool `protobuf:"varint,4,opt,name=enrich_licenses,json=enrichLicenses,proto3" json:"enrich_licenses,omitempty"`
+	// Optional ecosystems to include, e.g. go, npm, pypi.
+	Ecosystems []string `protobuf:"bytes,5,rep,name=ecosystems,proto3" json:"ecosystems,omitempty"`
+	// Optional directory globs to skip during the walk, e.g. .bin/** or
+	// **/testdata.
+	ExcludePaths  []string `protobuf:"bytes,6,rep,name=exclude_paths,json=excludePaths,proto3" json:"exclude_paths,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GenerateSBOMRequest) Reset() {
+	*x = GenerateSBOMRequest{}
+	mi := &file_deputy_mcp_v1_mcp_proto_msgTypes[15]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GenerateSBOMRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GenerateSBOMRequest) ProtoMessage() {}
+
+func (x *GenerateSBOMRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_deputy_mcp_v1_mcp_proto_msgTypes[15]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GenerateSBOMRequest.ProtoReflect.Descriptor instead.
+func (*GenerateSBOMRequest) Descriptor() ([]byte, []int) {
+	return file_deputy_mcp_v1_mcp_proto_rawDescGZIP(), []int{15}
+}
+
+func (x *GenerateSBOMRequest) GetPath() string {
+	if x != nil {
+		return x.Path
+	}
+	return ""
+}
+
+func (x *GenerateSBOMRequest) GetRef() string {
+	if x != nil {
+		return x.Ref
+	}
+	return ""
+}
+
+func (x *GenerateSBOMRequest) GetFormat() string {
+	if x != nil {
+		return x.Format
+	}
+	return ""
+}
+
+func (x *GenerateSBOMRequest) GetEnrichLicenses() bool {
+	if x != nil {
+		return x.EnrichLicenses
+	}
+	return false
+}
+
+func (x *GenerateSBOMRequest) GetEcosystems() []string {
+	if x != nil {
+		return x.Ecosystems
+	}
+	return nil
+}
+
+func (x *GenerateSBOMRequest) GetExcludePaths() []string {
+	if x != nil {
+		return x.ExcludePaths
+	}
+	return nil
+}
+
+// GenerateSBOMResult carries the serialized SBOM document.
+type GenerateSBOMResult struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Path is the analyzed directory.
+	Path string `protobuf:"bytes,1,opt,name=path,proto3" json:"path,omitempty"`
+	// Ref is the requested Git reference when the path is a repository.
+	Ref string `protobuf:"bytes,2,opt,name=ref,proto3" json:"ref,omitempty"`
+	// EffectiveRef is the resolved reference that was actually analyzed.
+	EffectiveRef string `protobuf:"bytes,3,opt,name=effective_ref,json=effectiveRef,proto3" json:"effective_ref,omitempty"`
+	// Commit is the resolved commit hash of the analyzed snapshot.
+	Commit string `protobuf:"bytes,4,opt,name=commit,proto3" json:"commit,omitempty"`
+	// Format is the canonical serialization format of the document.
+	Format string `protobuf:"bytes,5,opt,name=format,proto3" json:"format,omitempty"`
+	// Components is the number of components in the document.
+	Components int32 `protobuf:"varint,6,opt,name=components,proto3" json:"components,omitempty"`
+	// Sbom is the serialized SBOM document in the requested format.
+	Sbom          string `protobuf:"bytes,7,opt,name=sbom,proto3" json:"sbom,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GenerateSBOMResult) Reset() {
+	*x = GenerateSBOMResult{}
+	mi := &file_deputy_mcp_v1_mcp_proto_msgTypes[16]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GenerateSBOMResult) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GenerateSBOMResult) ProtoMessage() {}
+
+func (x *GenerateSBOMResult) ProtoReflect() protoreflect.Message {
+	mi := &file_deputy_mcp_v1_mcp_proto_msgTypes[16]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GenerateSBOMResult.ProtoReflect.Descriptor instead.
+func (*GenerateSBOMResult) Descriptor() ([]byte, []int) {
+	return file_deputy_mcp_v1_mcp_proto_rawDescGZIP(), []int{16}
+}
+
+func (x *GenerateSBOMResult) GetPath() string {
+	if x != nil {
+		return x.Path
+	}
+	return ""
+}
+
+func (x *GenerateSBOMResult) GetRef() string {
+	if x != nil {
+		return x.Ref
+	}
+	return ""
+}
+
+func (x *GenerateSBOMResult) GetEffectiveRef() string {
+	if x != nil {
+		return x.EffectiveRef
+	}
+	return ""
+}
+
+func (x *GenerateSBOMResult) GetCommit() string {
+	if x != nil {
+		return x.Commit
+	}
+	return ""
+}
+
+func (x *GenerateSBOMResult) GetFormat() string {
+	if x != nil {
+		return x.Format
+	}
+	return ""
+}
+
+func (x *GenerateSBOMResult) GetComponents() int32 {
+	if x != nil {
+		return x.Components
+	}
+	return 0
+}
+
+func (x *GenerateSBOMResult) GetSbom() string {
+	if x != nil {
+		return x.Sbom
+	}
+	return ""
+}
+
+// GraphPathNode is one package in a dependency graph answer, with stable
+// identity for follow-up queries.
+type GraphPathNode struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Name is the package name within its ecosystem.
+	Name string `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
+	// Version is the resolved version string.
+	Version string `protobuf:"bytes,2,opt,name=version,proto3" json:"version,omitempty"`
+	// Ecosystem is the canonical package ecosystem (e.g. "go", "npm").
+	Ecosystem string `protobuf:"bytes,3,opt,name=ecosystem,proto3" json:"ecosystem,omitempty"`
+	// Purl is the package URL for exact follow-up queries.
+	Purl string `protobuf:"bytes,4,opt,name=purl,proto3" json:"purl,omitempty"`
+	// Direct reports whether this is a direct dependency.
+	Direct bool `protobuf:"varint,5,opt,name=direct,proto3" json:"direct,omitempty"`
+	// Depth is the node's distance from the nearest root; absent means 0, a
+	// root/direct dependency.
+	Depth int32 `protobuf:"varint,6,opt,name=depth,proto3" json:"depth,omitempty"`
+	// Disconnected reports that the node has no path from any root (e.g. GitHub
+	// Actions or Dockerfile base images).
+	Disconnected bool `protobuf:"varint,7,opt,name=disconnected,proto3" json:"disconnected,omitempty"`
+	// ImportStatus is the extended-mode Go module status: imported (compiled
+	// into the binary), required (selected by MVS but not imported), or
+	// declared (in the module graph but not selected).
+	ImportStatus  string `protobuf:"bytes,8,opt,name=import_status,json=importStatus,proto3" json:"import_status,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GraphPathNode) Reset() {
+	*x = GraphPathNode{}
+	mi := &file_deputy_mcp_v1_mcp_proto_msgTypes[17]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GraphPathNode) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GraphPathNode) ProtoMessage() {}
+
+func (x *GraphPathNode) ProtoReflect() protoreflect.Message {
+	mi := &file_deputy_mcp_v1_mcp_proto_msgTypes[17]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GraphPathNode.ProtoReflect.Descriptor instead.
+func (*GraphPathNode) Descriptor() ([]byte, []int) {
+	return file_deputy_mcp_v1_mcp_proto_rawDescGZIP(), []int{17}
+}
+
+func (x *GraphPathNode) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+func (x *GraphPathNode) GetVersion() string {
+	if x != nil {
+		return x.Version
+	}
+	return ""
+}
+
+func (x *GraphPathNode) GetEcosystem() string {
+	if x != nil {
+		return x.Ecosystem
+	}
+	return ""
+}
+
+func (x *GraphPathNode) GetPurl() string {
+	if x != nil {
+		return x.Purl
+	}
+	return ""
+}
+
+func (x *GraphPathNode) GetDirect() bool {
+	if x != nil {
+		return x.Direct
+	}
+	return false
+}
+
+func (x *GraphPathNode) GetDepth() int32 {
+	if x != nil {
+		return x.Depth
+	}
+	return 0
+}
+
+func (x *GraphPathNode) GetDisconnected() bool {
+	if x != nil {
+		return x.Disconnected
+	}
+	return false
+}
+
+func (x *GraphPathNode) GetImportStatus() string {
+	if x != nil {
+		return x.ImportStatus
+	}
+	return ""
+}
+
+// GraphPath is one dependency path from a root to a package.
+type GraphPath struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Nodes are display names (name@version) along the path, root first.
+	Nodes []string `protobuf:"bytes,1,rep,name=nodes,proto3" json:"nodes,omitempty"`
+	// NodeDetails are the structured nodes along the path, root first.
+	NodeDetails []*GraphPathNode `protobuf:"bytes,2,rep,name=node_details,json=nodeDetails,proto3" json:"node_details,omitempty"`
+	// Depth is the number of nodes in the path (a direct dependency is a
+	// one-node path), not to be confused with each node's own depth.
+	Depth         int32 `protobuf:"varint,3,opt,name=depth,proto3" json:"depth,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GraphPath) Reset() {
+	*x = GraphPath{}
+	mi := &file_deputy_mcp_v1_mcp_proto_msgTypes[18]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GraphPath) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GraphPath) ProtoMessage() {}
+
+func (x *GraphPath) ProtoReflect() protoreflect.Message {
+	mi := &file_deputy_mcp_v1_mcp_proto_msgTypes[18]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GraphPath.ProtoReflect.Descriptor instead.
+func (*GraphPath) Descriptor() ([]byte, []int) {
+	return file_deputy_mcp_v1_mcp_proto_rawDescGZIP(), []int{18}
+}
+
+func (x *GraphPath) GetNodes() []string {
+	if x != nil {
+		return x.Nodes
+	}
+	return nil
+}
+
+func (x *GraphPath) GetNodeDetails() []*GraphPathNode {
+	if x != nil {
+		return x.NodeDetails
+	}
+	return nil
+}
+
+func (x *GraphPath) GetDepth() int32 {
+	if x != nil {
+		return x.Depth
+	}
+	return 0
+}
+
+// AnalyzeGraphRequest asks for dependency graph statistics and vulnerable
+// paths, optionally resolving paths to a target PURL.
+type AnalyzeGraphRequest struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Path to the local directory to analyze.
+	Path string `protobuf:"bytes,1,opt,name=path,proto3" json:"path,omitempty"`
+	// Git reference, branch, tag, or commit for repository paths. Defaults to
+	// the current working tree/HEAD.
+	Ref string `protobuf:"bytes,2,opt,name=ref,proto3" json:"ref,omitempty"`
+	// Optional package URL to find paths to, e.g. pkg:npm/lodash@4.17.21 or
+	// pkg:golang/golang.org/x/net.
+	TargetPurl string `protobuf:"bytes,3,opt,name=target_purl,json=targetPurl,proto3" json:"target_purl,omitempty"`
+	// Optional ecosystems to include, e.g. go, npm, pypi.
+	Ecosystems []string `protobuf:"bytes,4,rep,name=ecosystems,proto3" json:"ecosystems,omitempty"`
+	// Optional directory globs to skip during the walk, e.g. .bin/** or
+	// **/testdata.
+	ExcludePaths []string `protobuf:"bytes,5,rep,name=exclude_paths,json=excludePaths,proto3" json:"exclude_paths,omitempty"`
+	// If true, use package registry, deps.dev, and Git lookups to resolve more
+	// precise transitive graph edges. Slower and may require network access.
+	ResolveTransitives bool `protobuf:"varint,6,opt,name=resolve_transitives,json=resolveTransitives,proto3" json:"resolve_transitives,omitempty"`
+	// If true, include extended graph metadata where supported, such as Go
+	// import status for required and declared modules.
+	Extended      bool `protobuf:"varint,7,opt,name=extended,proto3" json:"extended,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *AnalyzeGraphRequest) Reset() {
+	*x = AnalyzeGraphRequest{}
+	mi := &file_deputy_mcp_v1_mcp_proto_msgTypes[19]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *AnalyzeGraphRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*AnalyzeGraphRequest) ProtoMessage() {}
+
+func (x *AnalyzeGraphRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_deputy_mcp_v1_mcp_proto_msgTypes[19]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use AnalyzeGraphRequest.ProtoReflect.Descriptor instead.
+func (*AnalyzeGraphRequest) Descriptor() ([]byte, []int) {
+	return file_deputy_mcp_v1_mcp_proto_rawDescGZIP(), []int{19}
+}
+
+func (x *AnalyzeGraphRequest) GetPath() string {
+	if x != nil {
+		return x.Path
+	}
+	return ""
+}
+
+func (x *AnalyzeGraphRequest) GetRef() string {
+	if x != nil {
+		return x.Ref
+	}
+	return ""
+}
+
+func (x *AnalyzeGraphRequest) GetTargetPurl() string {
+	if x != nil {
+		return x.TargetPurl
+	}
+	return ""
+}
+
+func (x *AnalyzeGraphRequest) GetEcosystems() []string {
+	if x != nil {
+		return x.Ecosystems
+	}
+	return nil
+}
+
+func (x *AnalyzeGraphRequest) GetExcludePaths() []string {
+	if x != nil {
+		return x.ExcludePaths
+	}
+	return nil
+}
+
+func (x *AnalyzeGraphRequest) GetResolveTransitives() bool {
+	if x != nil {
+		return x.ResolveTransitives
+	}
+	return false
+}
+
+func (x *AnalyzeGraphRequest) GetExtended() bool {
+	if x != nil {
+		return x.Extended
+	}
+	return false
+}
+
+// GraphTargetResult summarizes targetPurl matching and path resolution.
+type GraphTargetResult struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Query is the targetPurl as requested.
+	Query string `protobuf:"bytes,1,opt,name=query,proto3" json:"query,omitempty"`
+	// Found reports whether the target matched any graph node.
+	Found bool `protobuf:"varint,2,opt,name=found,proto3" json:"found,omitempty"`
+	// PathCount is the total number of dependency paths to the target before
+	// truncation.
+	PathCount int32 `protobuf:"varint,3,opt,name=path_count,json=pathCount,proto3" json:"path_count,omitempty"`
+	// MatchedPurls are the graph node PURLs the target resolved to.
+	MatchedPurls []string `protobuf:"bytes,4,rep,name=matched_purls,json=matchedPurls,proto3" json:"matched_purls,omitempty"`
+	// MatchedNodes are the structured nodes the target resolved to.
+	MatchedNodes []*GraphPathNode `protobuf:"bytes,5,rep,name=matched_nodes,json=matchedNodes,proto3" json:"matched_nodes,omitempty"`
+	// Message explains the outcome in one sentence.
+	Message       string `protobuf:"bytes,6,opt,name=message,proto3" json:"message,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GraphTargetResult) Reset() {
+	*x = GraphTargetResult{}
+	mi := &file_deputy_mcp_v1_mcp_proto_msgTypes[20]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GraphTargetResult) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GraphTargetResult) ProtoMessage() {}
+
+func (x *GraphTargetResult) ProtoReflect() protoreflect.Message {
+	mi := &file_deputy_mcp_v1_mcp_proto_msgTypes[20]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GraphTargetResult.ProtoReflect.Descriptor instead.
+func (*GraphTargetResult) Descriptor() ([]byte, []int) {
+	return file_deputy_mcp_v1_mcp_proto_rawDescGZIP(), []int{20}
+}
+
+func (x *GraphTargetResult) GetQuery() string {
+	if x != nil {
+		return x.Query
+	}
+	return ""
+}
+
+func (x *GraphTargetResult) GetFound() bool {
+	if x != nil {
+		return x.Found
+	}
+	return false
+}
+
+func (x *GraphTargetResult) GetPathCount() int32 {
+	if x != nil {
+		return x.PathCount
+	}
+	return 0
+}
+
+func (x *GraphTargetResult) GetMatchedPurls() []string {
+	if x != nil {
+		return x.MatchedPurls
+	}
+	return nil
+}
+
+func (x *GraphTargetResult) GetMatchedNodes() []*GraphPathNode {
+	if x != nil {
+		return x.MatchedNodes
+	}
+	return nil
+}
+
+func (x *GraphTargetResult) GetMessage() string {
+	if x != nil {
+		return x.Message
+	}
+	return ""
+}
+
+// AnalyzeGraphResult carries dependency graph statistics, vulnerable paths,
+// and target path resolution.
+type AnalyzeGraphResult struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Path is the analyzed directory.
+	Path string `protobuf:"bytes,1,opt,name=path,proto3" json:"path,omitempty"`
+	// Ref is the requested Git reference when the path is a repository.
+	Ref string `protobuf:"bytes,2,opt,name=ref,proto3" json:"ref,omitempty"`
+	// EffectiveRef is the resolved reference that was actually analyzed.
+	EffectiveRef string `protobuf:"bytes,3,opt,name=effective_ref,json=effectiveRef,proto3" json:"effective_ref,omitempty"`
+	// Commit is the resolved commit hash of the analyzed snapshot.
+	Commit string `protobuf:"bytes,4,opt,name=commit,proto3" json:"commit,omitempty"`
+	// Stats summarize the dependency graph. Ecosystem keys use canonical names.
+	Stats *v11.GraphStats `protobuf:"bytes,5,opt,name=stats,proto3" json:"stats,omitempty"`
+	// VulnerablePaths are dependency paths ending at a vulnerable package,
+	// truncated to a compact sample; use vulnerablePathCount and
+	// vulnerablePathsTruncated to detect sampling.
+	VulnerablePaths []*GraphPath `protobuf:"bytes,6,rep,name=vulnerable_paths,json=vulnerablePaths,proto3" json:"vulnerable_paths,omitempty"`
+	// VulnerablePathCount is the total number of vulnerable paths before
+	// truncation.
+	VulnerablePathCount int32 `protobuf:"varint,7,opt,name=vulnerable_path_count,json=vulnerablePathCount,proto3" json:"vulnerable_path_count,omitempty"`
+	// VulnerablePathsTruncated reports whether vulnerablePaths was truncated.
+	VulnerablePathsTruncated bool `protobuf:"varint,8,opt,name=vulnerable_paths_truncated,json=vulnerablePathsTruncated,proto3" json:"vulnerable_paths_truncated,omitempty"`
+	// PathsToTarget are dependency paths to the requested targetPurl, truncated
+	// to a compact sample; use target.pathCount and pathsToTargetTruncated to
+	// detect sampling.
+	PathsToTarget []*GraphPath `protobuf:"bytes,9,rep,name=paths_to_target,json=pathsToTarget,proto3" json:"paths_to_target,omitempty"`
+	// PathsToTargetTruncated reports whether pathsToTarget was truncated.
+	PathsToTargetTruncated bool `protobuf:"varint,10,opt,name=paths_to_target_truncated,json=pathsToTargetTruncated,proto3" json:"paths_to_target_truncated,omitempty"`
+	// Target summarizes targetPurl matching; absent when no targetPurl was
+	// requested.
+	Target        *GraphTargetResult `protobuf:"bytes,11,opt,name=target,proto3" json:"target,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *AnalyzeGraphResult) Reset() {
+	*x = AnalyzeGraphResult{}
+	mi := &file_deputy_mcp_v1_mcp_proto_msgTypes[21]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *AnalyzeGraphResult) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*AnalyzeGraphResult) ProtoMessage() {}
+
+func (x *AnalyzeGraphResult) ProtoReflect() protoreflect.Message {
+	mi := &file_deputy_mcp_v1_mcp_proto_msgTypes[21]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use AnalyzeGraphResult.ProtoReflect.Descriptor instead.
+func (*AnalyzeGraphResult) Descriptor() ([]byte, []int) {
+	return file_deputy_mcp_v1_mcp_proto_rawDescGZIP(), []int{21}
+}
+
+func (x *AnalyzeGraphResult) GetPath() string {
+	if x != nil {
+		return x.Path
+	}
+	return ""
+}
+
+func (x *AnalyzeGraphResult) GetRef() string {
+	if x != nil {
+		return x.Ref
+	}
+	return ""
+}
+
+func (x *AnalyzeGraphResult) GetEffectiveRef() string {
+	if x != nil {
+		return x.EffectiveRef
+	}
+	return ""
+}
+
+func (x *AnalyzeGraphResult) GetCommit() string {
+	if x != nil {
+		return x.Commit
+	}
+	return ""
+}
+
+func (x *AnalyzeGraphResult) GetStats() *v11.GraphStats {
+	if x != nil {
+		return x.Stats
+	}
+	return nil
+}
+
+func (x *AnalyzeGraphResult) GetVulnerablePaths() []*GraphPath {
+	if x != nil {
+		return x.VulnerablePaths
+	}
+	return nil
+}
+
+func (x *AnalyzeGraphResult) GetVulnerablePathCount() int32 {
+	if x != nil {
+		return x.VulnerablePathCount
+	}
+	return 0
+}
+
+func (x *AnalyzeGraphResult) GetVulnerablePathsTruncated() bool {
+	if x != nil {
+		return x.VulnerablePathsTruncated
+	}
+	return false
+}
+
+func (x *AnalyzeGraphResult) GetPathsToTarget() []*GraphPath {
+	if x != nil {
+		return x.PathsToTarget
+	}
+	return nil
+}
+
+func (x *AnalyzeGraphResult) GetPathsToTargetTruncated() bool {
+	if x != nil {
+		return x.PathsToTargetTruncated
+	}
+	return false
+}
+
+func (x *AnalyzeGraphResult) GetTarget() *GraphTargetResult {
+	if x != nil {
+		return x.Target
+	}
+	return nil
+}
+
+// GraphWhyRequest asks why a package is present in the dependency graph.
+type GraphWhyRequest struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Path to the local directory to analyze.
+	Path string `protobuf:"bytes,1,opt,name=path,proto3" json:"path,omitempty"`
+	// Package name, name@version, or PURL to trace, e.g. lodash,
+	// golang.org/x/crypto@v0.17.0, or pkg:npm/lodash@4.17.21.
+	Package string `protobuf:"bytes,2,opt,name=package,proto3" json:"package,omitempty"`
+	// Git reference, branch, tag, or commit for repository paths. Defaults to
+	// the current working tree/HEAD.
+	Ref string `protobuf:"bytes,3,opt,name=ref,proto3" json:"ref,omitempty"`
+	// Return up to 100 dependency path examples instead of the default 10. Use
+	// pathCount and pathsTruncated to detect sampling.
+	ShowAll bool `protobuf:"varint,4,opt,name=show_all,json=showAll,proto3" json:"show_all,omitempty"`
+	// Optional ecosystems to include, e.g. go, npm, pypi.
+	Ecosystems []string `protobuf:"bytes,5,rep,name=ecosystems,proto3" json:"ecosystems,omitempty"`
+	// Optional directory globs to skip during the walk, e.g. .bin/** or
+	// **/testdata.
+	ExcludePaths []string `protobuf:"bytes,6,rep,name=exclude_paths,json=excludePaths,proto3" json:"exclude_paths,omitempty"`
+	// If true, use package registry, deps.dev, and Git lookups to resolve more
+	// precise transitive graph edges. Slower and may require network access.
+	ResolveTransitives bool `protobuf:"varint,7,opt,name=resolve_transitives,json=resolveTransitives,proto3" json:"resolve_transitives,omitempty"`
+	// If true, include extended graph metadata where supported, such as Go
+	// import status for required and declared modules.
+	Extended      bool `protobuf:"varint,8,opt,name=extended,proto3" json:"extended,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GraphWhyRequest) Reset() {
+	*x = GraphWhyRequest{}
+	mi := &file_deputy_mcp_v1_mcp_proto_msgTypes[22]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GraphWhyRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GraphWhyRequest) ProtoMessage() {}
+
+func (x *GraphWhyRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_deputy_mcp_v1_mcp_proto_msgTypes[22]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GraphWhyRequest.ProtoReflect.Descriptor instead.
+func (*GraphWhyRequest) Descriptor() ([]byte, []int) {
+	return file_deputy_mcp_v1_mcp_proto_rawDescGZIP(), []int{22}
+}
+
+func (x *GraphWhyRequest) GetPath() string {
+	if x != nil {
+		return x.Path
+	}
+	return ""
+}
+
+func (x *GraphWhyRequest) GetPackage() string {
+	if x != nil {
+		return x.Package
+	}
+	return ""
+}
+
+func (x *GraphWhyRequest) GetRef() string {
+	if x != nil {
+		return x.Ref
+	}
+	return ""
+}
+
+func (x *GraphWhyRequest) GetShowAll() bool {
+	if x != nil {
+		return x.ShowAll
+	}
+	return false
+}
+
+func (x *GraphWhyRequest) GetEcosystems() []string {
+	if x != nil {
+		return x.Ecosystems
+	}
+	return nil
+}
+
+func (x *GraphWhyRequest) GetExcludePaths() []string {
+	if x != nil {
+		return x.ExcludePaths
+	}
+	return nil
+}
+
+func (x *GraphWhyRequest) GetResolveTransitives() bool {
+	if x != nil {
+		return x.ResolveTransitives
+	}
+	return false
+}
+
+func (x *GraphWhyRequest) GetExtended() bool {
+	if x != nil {
+		return x.Extended
+	}
+	return false
+}
+
+// GraphWhyResult explains why a package is in the dependency graph. A package
+// absent from the graph is a normal result, not an error: found is absent
+// (false) and message explains the outcome.
+type GraphWhyResult struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Package is the matched package name, or the query when nothing matched.
+	Package string `protobuf:"bytes,1,opt,name=package,proto3" json:"package,omitempty"`
+	// Version is the matched package version.
+	Version string `protobuf:"bytes,2,opt,name=version,proto3" json:"version,omitempty"`
+	// Purl is the matched package URL.
+	Purl string `protobuf:"bytes,3,opt,name=purl,proto3" json:"purl,omitempty"`
+	// Ref is the requested Git reference when the path is a repository.
+	Ref string `protobuf:"bytes,4,opt,name=ref,proto3" json:"ref,omitempty"`
+	// EffectiveRef is the resolved reference that was actually analyzed.
+	EffectiveRef string `protobuf:"bytes,5,opt,name=effective_ref,json=effectiveRef,proto3" json:"effective_ref,omitempty"`
+	// Commit is the resolved commit hash of the analyzed snapshot.
+	Commit string `protobuf:"bytes,6,opt,name=commit,proto3" json:"commit,omitempty"`
+	// Direct reports whether the matched package is a direct dependency.
+	Direct bool `protobuf:"varint,7,opt,name=direct,proto3" json:"direct,omitempty"`
+	// Found reports whether the package matched any graph node; absent means
+	// not found.
+	Found bool `protobuf:"varint,8,opt,name=found,proto3" json:"found,omitempty"`
+	// MatchedNode is the structured node the query resolved to.
+	MatchedNode *GraphPathNode `protobuf:"bytes,9,opt,name=matched_node,json=matchedNode,proto3" json:"matched_node,omitempty"`
+	// Paths are dependency path examples, truncated to a compact sample; use
+	// pathCount and pathsTruncated to detect sampling. A direct dependency
+	// reports one single-node path.
+	Paths []*GraphPath `protobuf:"bytes,10,rep,name=paths,proto3" json:"paths,omitempty"`
+	// PathCount is the total number of dependency paths before truncation.
+	PathCount int32 `protobuf:"varint,11,opt,name=path_count,json=pathCount,proto3" json:"path_count,omitempty"`
+	// PathsTruncated reports whether paths was truncated.
+	PathsTruncated bool `protobuf:"varint,12,opt,name=paths_truncated,json=pathsTruncated,proto3" json:"paths_truncated,omitempty"`
+	// Message explains the outcome in one sentence.
+	Message       string `protobuf:"bytes,13,opt,name=message,proto3" json:"message,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GraphWhyResult) Reset() {
+	*x = GraphWhyResult{}
+	mi := &file_deputy_mcp_v1_mcp_proto_msgTypes[23]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GraphWhyResult) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GraphWhyResult) ProtoMessage() {}
+
+func (x *GraphWhyResult) ProtoReflect() protoreflect.Message {
+	mi := &file_deputy_mcp_v1_mcp_proto_msgTypes[23]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GraphWhyResult.ProtoReflect.Descriptor instead.
+func (*GraphWhyResult) Descriptor() ([]byte, []int) {
+	return file_deputy_mcp_v1_mcp_proto_rawDescGZIP(), []int{23}
+}
+
+func (x *GraphWhyResult) GetPackage() string {
+	if x != nil {
+		return x.Package
+	}
+	return ""
+}
+
+func (x *GraphWhyResult) GetVersion() string {
+	if x != nil {
+		return x.Version
+	}
+	return ""
+}
+
+func (x *GraphWhyResult) GetPurl() string {
+	if x != nil {
+		return x.Purl
+	}
+	return ""
+}
+
+func (x *GraphWhyResult) GetRef() string {
+	if x != nil {
+		return x.Ref
+	}
+	return ""
+}
+
+func (x *GraphWhyResult) GetEffectiveRef() string {
+	if x != nil {
+		return x.EffectiveRef
+	}
+	return ""
+}
+
+func (x *GraphWhyResult) GetCommit() string {
+	if x != nil {
+		return x.Commit
+	}
+	return ""
+}
+
+func (x *GraphWhyResult) GetDirect() bool {
+	if x != nil {
+		return x.Direct
+	}
+	return false
+}
+
+func (x *GraphWhyResult) GetFound() bool {
+	if x != nil {
+		return x.Found
+	}
+	return false
+}
+
+func (x *GraphWhyResult) GetMatchedNode() *GraphPathNode {
+	if x != nil {
+		return x.MatchedNode
+	}
+	return nil
+}
+
+func (x *GraphWhyResult) GetPaths() []*GraphPath {
+	if x != nil {
+		return x.Paths
+	}
+	return nil
+}
+
+func (x *GraphWhyResult) GetPathCount() int32 {
+	if x != nil {
+		return x.PathCount
+	}
+	return 0
+}
+
+func (x *GraphWhyResult) GetPathsTruncated() bool {
+	if x != nil {
+		return x.PathsTruncated
+	}
+	return false
+}
+
+func (x *GraphWhyResult) GetMessage() string {
+	if x != nil {
+		return x.Message
+	}
+	return ""
+}
+
+// GraphNeedsRequest asks what packages depend on a package.
+type GraphNeedsRequest struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Path to the local directory to analyze.
+	Path string `protobuf:"bytes,1,opt,name=path,proto3" json:"path,omitempty"`
+	// Package name, name@version, or PURL to find dependents of.
+	Package string `protobuf:"bytes,2,opt,name=package,proto3" json:"package,omitempty"`
+	// Git reference, branch, tag, or commit for repository paths. Defaults to
+	// the current working tree/HEAD.
+	Ref string `protobuf:"bytes,3,opt,name=ref,proto3" json:"ref,omitempty"`
+	// Optional ecosystems to include, e.g. go, npm, pypi.
+	Ecosystems []string `protobuf:"bytes,4,rep,name=ecosystems,proto3" json:"ecosystems,omitempty"`
+	// Optional directory globs to skip during the walk, e.g. .bin/** or
+	// **/testdata.
+	ExcludePaths []string `protobuf:"bytes,5,rep,name=exclude_paths,json=excludePaths,proto3" json:"exclude_paths,omitempty"`
+	// If true, use package registry, deps.dev, and Git lookups to resolve more
+	// precise transitive graph edges. Slower and may require network access.
+	ResolveTransitives bool `protobuf:"varint,6,opt,name=resolve_transitives,json=resolveTransitives,proto3" json:"resolve_transitives,omitempty"`
+	// If true, include extended graph metadata where supported, such as Go
+	// import status for required and declared modules.
+	Extended      bool `protobuf:"varint,7,opt,name=extended,proto3" json:"extended,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GraphNeedsRequest) Reset() {
+	*x = GraphNeedsRequest{}
+	mi := &file_deputy_mcp_v1_mcp_proto_msgTypes[24]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GraphNeedsRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GraphNeedsRequest) ProtoMessage() {}
+
+func (x *GraphNeedsRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_deputy_mcp_v1_mcp_proto_msgTypes[24]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GraphNeedsRequest.ProtoReflect.Descriptor instead.
+func (*GraphNeedsRequest) Descriptor() ([]byte, []int) {
+	return file_deputy_mcp_v1_mcp_proto_rawDescGZIP(), []int{24}
+}
+
+func (x *GraphNeedsRequest) GetPath() string {
+	if x != nil {
+		return x.Path
+	}
+	return ""
+}
+
+func (x *GraphNeedsRequest) GetPackage() string {
+	if x != nil {
+		return x.Package
+	}
+	return ""
+}
+
+func (x *GraphNeedsRequest) GetRef() string {
+	if x != nil {
+		return x.Ref
+	}
+	return ""
+}
+
+func (x *GraphNeedsRequest) GetEcosystems() []string {
+	if x != nil {
+		return x.Ecosystems
+	}
+	return nil
+}
+
+func (x *GraphNeedsRequest) GetExcludePaths() []string {
+	if x != nil {
+		return x.ExcludePaths
+	}
+	return nil
+}
+
+func (x *GraphNeedsRequest) GetResolveTransitives() bool {
+	if x != nil {
+		return x.ResolveTransitives
+	}
+	return false
+}
+
+func (x *GraphNeedsRequest) GetExtended() bool {
+	if x != nil {
+		return x.Extended
+	}
+	return false
+}
+
+// GraphNeedsResult lists the packages that depend on a package. A package
+// absent from the graph is a normal result, not an error: found is absent
+// (false) and message explains the outcome.
+type GraphNeedsResult struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Package is the matched package name, or the query when nothing matched.
+	Package string `protobuf:"bytes,1,opt,name=package,proto3" json:"package,omitempty"`
+	// Version is the matched package version.
+	Version string `protobuf:"bytes,2,opt,name=version,proto3" json:"version,omitempty"`
+	// Purl is the matched package URL.
+	Purl string `protobuf:"bytes,3,opt,name=purl,proto3" json:"purl,omitempty"`
+	// Ref is the requested Git reference when the path is a repository.
+	Ref string `protobuf:"bytes,4,opt,name=ref,proto3" json:"ref,omitempty"`
+	// EffectiveRef is the resolved reference that was actually analyzed.
+	EffectiveRef string `protobuf:"bytes,5,opt,name=effective_ref,json=effectiveRef,proto3" json:"effective_ref,omitempty"`
+	// Commit is the resolved commit hash of the analyzed snapshot.
+	Commit string `protobuf:"bytes,6,opt,name=commit,proto3" json:"commit,omitempty"`
+	// Direct reports whether the matched package is a direct dependency.
+	Direct bool `protobuf:"varint,7,opt,name=direct,proto3" json:"direct,omitempty"`
+	// Found reports whether the package matched any graph node; absent means
+	// not found.
+	Found bool `protobuf:"varint,8,opt,name=found,proto3" json:"found,omitempty"`
+	// MatchedNode is the structured node the query resolved to.
+	MatchedNode *GraphPathNode `protobuf:"bytes,9,opt,name=matched_node,json=matchedNode,proto3" json:"matched_node,omitempty"`
+	// Dependents are the packages that depend on the matched package, direct
+	// dependents first.
+	Dependents []*DependencyInfo `protobuf:"bytes,10,rep,name=dependents,proto3" json:"dependents,omitempty"`
+	// DirectCount counts dependents that are direct dependencies.
+	DirectCount int32 `protobuf:"varint,11,opt,name=direct_count,json=directCount,proto3" json:"direct_count,omitempty"`
+	// TransitiveCount counts dependents that are transitive dependencies.
+	TransitiveCount int32 `protobuf:"varint,12,opt,name=transitive_count,json=transitiveCount,proto3" json:"transitive_count,omitempty"`
+	// Message explains the outcome in one sentence.
+	Message       string `protobuf:"bytes,13,opt,name=message,proto3" json:"message,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GraphNeedsResult) Reset() {
+	*x = GraphNeedsResult{}
+	mi := &file_deputy_mcp_v1_mcp_proto_msgTypes[25]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GraphNeedsResult) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GraphNeedsResult) ProtoMessage() {}
+
+func (x *GraphNeedsResult) ProtoReflect() protoreflect.Message {
+	mi := &file_deputy_mcp_v1_mcp_proto_msgTypes[25]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GraphNeedsResult.ProtoReflect.Descriptor instead.
+func (*GraphNeedsResult) Descriptor() ([]byte, []int) {
+	return file_deputy_mcp_v1_mcp_proto_rawDescGZIP(), []int{25}
+}
+
+func (x *GraphNeedsResult) GetPackage() string {
+	if x != nil {
+		return x.Package
+	}
+	return ""
+}
+
+func (x *GraphNeedsResult) GetVersion() string {
+	if x != nil {
+		return x.Version
+	}
+	return ""
+}
+
+func (x *GraphNeedsResult) GetPurl() string {
+	if x != nil {
+		return x.Purl
+	}
+	return ""
+}
+
+func (x *GraphNeedsResult) GetRef() string {
+	if x != nil {
+		return x.Ref
+	}
+	return ""
+}
+
+func (x *GraphNeedsResult) GetEffectiveRef() string {
+	if x != nil {
+		return x.EffectiveRef
+	}
+	return ""
+}
+
+func (x *GraphNeedsResult) GetCommit() string {
+	if x != nil {
+		return x.Commit
+	}
+	return ""
+}
+
+func (x *GraphNeedsResult) GetDirect() bool {
+	if x != nil {
+		return x.Direct
+	}
+	return false
+}
+
+func (x *GraphNeedsResult) GetFound() bool {
+	if x != nil {
+		return x.Found
+	}
+	return false
+}
+
+func (x *GraphNeedsResult) GetMatchedNode() *GraphPathNode {
+	if x != nil {
+		return x.MatchedNode
+	}
+	return nil
+}
+
+func (x *GraphNeedsResult) GetDependents() []*DependencyInfo {
+	if x != nil {
+		return x.Dependents
+	}
+	return nil
+}
+
+func (x *GraphNeedsResult) GetDirectCount() int32 {
+	if x != nil {
+		return x.DirectCount
+	}
+	return 0
+}
+
+func (x *GraphNeedsResult) GetTransitiveCount() int32 {
+	if x != nil {
+		return x.TransitiveCount
+	}
+	return 0
+}
+
+func (x *GraphNeedsResult) GetMessage() string {
+	if x != nil {
+		return x.Message
+	}
+	return ""
+}
+
 var File_deputy_mcp_v1_mcp_proto protoreflect.FileDescriptor
 
 const file_deputy_mcp_v1_mcp_proto_rawDesc = "" +
 	"\n" +
-	"\x17deputy/mcp/v1/mcp.proto\x12\rdeputy.mcp.v1\x1a\x1bbuf/validate/validate.proto\"\x8b\x05\n" +
+	"\x17deputy/mcp/v1/mcp.proto\x12\rdeputy.mcp.v1\x1a\x1bbuf/validate/validate.proto\x1a%deputy/dependency/v1/dependency.proto\x1a\x1ddeputy/graph/v1/service.proto\"\x8b\x05\n" +
 	"\x0fVulnExplanation\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x18\n" +
 	"\aaliases\x18\x02 \x03(\tR\aaliases\x12\x18\n" +
@@ -1482,7 +3066,167 @@ const file_deputy_mcp_v1_mcp_proto_rawDesc = "" +
 	"\x14direct_fixable_count\x18\x10 \x01(\x05R\x12directFixableCount\x128\n" +
 	"\x18transitive_fixable_count\x18\x11 \x01(\x05R\x16transitiveFixableCount\x12D\n" +
 	"\x0fvulnerabilities\x18\x12 \x03(\v2\x1a.deputy.mcp.v1.TriagedVulnR\x0fvulnerabilities\x12(\n" +
-	"\x0frecommendations\x18\x13 \x03(\tR\x0frecommendationsB\xa9\x01\n" +
+	"\x0frecommendations\x18\x13 \x03(\tR\x0frecommendations\"\xd9\x01\n" +
+	"\x17ListDependenciesRequest\x12\"\n" +
+	"\x04path\x18\x01 \x01(\tB\x0e\xbaH\v\xc8\x01\x01r\x06\x10\x012\x02\\SR\x04path\x12\x1f\n" +
+	"\vdirect_only\x18\x02 \x01(\bR\n" +
+	"directOnly\x12\x10\n" +
+	"\x03ref\x18\x03 \x01(\tR\x03ref\x120\n" +
+	"\n" +
+	"ecosystems\x18\x04 \x03(\tB\x10\xbaH\r\x92\x01\n" +
+	"\"\br\x06\x10\x012\x02\\SR\n" +
+	"ecosystems\x125\n" +
+	"\rexclude_paths\x18\x05 \x03(\tB\x10\xbaH\r\x92\x01\n" +
+	"\"\br\x06\x10\x012\x02\\SR\fexcludePaths\"\xee\x01\n" +
+	"\x0eDependencyInfo\x12\x12\n" +
+	"\x04name\x18\x01 \x01(\tR\x04name\x12\x18\n" +
+	"\aversion\x18\x02 \x01(\tR\aversion\x12\x1c\n" +
+	"\tecosystem\x18\x03 \x01(\tR\tecosystem\x12\x12\n" +
+	"\x04purl\x18\x04 \x01(\tR\x04purl\x12\x16\n" +
+	"\x06direct\x18\x05 \x01(\bR\x06direct\x12\x1c\n" +
+	"\tlocations\x18\x06 \x03(\tR\tlocations\x12F\n" +
+	"\rmanifest_refs\x18\a \x03(\v2!.deputy.dependency.v1.ManifestRefR\fmanifestRefs\"\x99\x03\n" +
+	"\x16ListDependenciesResult\x12\x12\n" +
+	"\x04path\x18\x01 \x01(\tR\x04path\x12\x10\n" +
+	"\x03ref\x18\x02 \x01(\tR\x03ref\x12#\n" +
+	"\reffective_ref\x18\x03 \x01(\tR\feffectiveRef\x12\x16\n" +
+	"\x06commit\x18\x04 \x01(\tR\x06commit\x12\x14\n" +
+	"\x05total\x18\x05 \x01(\x05R\x05total\x12\x16\n" +
+	"\x06direct\x18\x06 \x01(\x05R\x06direct\x12\x1e\n" +
+	"\n" +
+	"transitive\x18\a \x01(\x05R\n" +
+	"transitive\x12)\n" +
+	"\x10total_discovered\x18\b \x01(\x05R\x0ftotalDiscovered\x12+\n" +
+	"\x11direct_discovered\x18\t \x01(\x05R\x10directDiscovered\x123\n" +
+	"\x15transitive_discovered\x18\n" +
+	" \x01(\x05R\x14transitiveDiscovered\x12A\n" +
+	"\fdependencies\x18\v \x03(\v2\x1d.deputy.mcp.v1.DependencyInfoR\fdependencies\"\xc4\x02\n" +
+	"\x13GenerateSBOMRequest\x12\"\n" +
+	"\x04path\x18\x01 \x01(\tB\x0e\xbaH\v\xc8\x01\x01r\x06\x10\x012\x02\\SR\x04path\x12\x10\n" +
+	"\x03ref\x18\x02 \x01(\tR\x03ref\x12e\n" +
+	"\x06format\x18\x03 \x01(\tBM\xbaHJ\xd8\x01\x01rER\x0ecyclonedx-jsonR\tspdx-jsonR\rprotobom-jsonR\tcyclonedxR\x04spdxR\bprotobomR\x06format\x12'\n" +
+	"\x0fenrich_licenses\x18\x04 \x01(\bR\x0eenrichLicenses\x120\n" +
+	"\n" +
+	"ecosystems\x18\x05 \x03(\tB\x10\xbaH\r\x92\x01\n" +
+	"\"\br\x06\x10\x012\x02\\SR\n" +
+	"ecosystems\x125\n" +
+	"\rexclude_paths\x18\x06 \x03(\tB\x10\xbaH\r\x92\x01\n" +
+	"\"\br\x06\x10\x012\x02\\SR\fexcludePaths\"\xf7\x01\n" +
+	"\x12GenerateSBOMResult\x12\x12\n" +
+	"\x04path\x18\x01 \x01(\tR\x04path\x12\x10\n" +
+	"\x03ref\x18\x02 \x01(\tR\x03ref\x12#\n" +
+	"\reffective_ref\x18\x03 \x01(\tR\feffectiveRef\x12\x16\n" +
+	"\x06commit\x18\x04 \x01(\tR\x06commit\x12J\n" +
+	"\x06format\x18\x05 \x01(\tB2\xbaH/\xd8\x01\x01r*R\x0ecyclonedx-jsonR\tspdx-jsonR\rprotobom-jsonR\x06format\x12\x1e\n" +
+	"\n" +
+	"components\x18\x06 \x01(\x05R\n" +
+	"components\x12\x12\n" +
+	"\x04sbom\x18\a \x01(\tR\x04sbom\"\x8e\x02\n" +
+	"\rGraphPathNode\x12\x12\n" +
+	"\x04name\x18\x01 \x01(\tR\x04name\x12\x18\n" +
+	"\aversion\x18\x02 \x01(\tR\aversion\x12\x1c\n" +
+	"\tecosystem\x18\x03 \x01(\tR\tecosystem\x12\x12\n" +
+	"\x04purl\x18\x04 \x01(\tR\x04purl\x12\x16\n" +
+	"\x06direct\x18\x05 \x01(\bR\x06direct\x12\x14\n" +
+	"\x05depth\x18\x06 \x01(\x05R\x05depth\x12\"\n" +
+	"\fdisconnected\x18\a \x01(\bR\fdisconnected\x12K\n" +
+	"\rimport_status\x18\b \x01(\tB&\xbaH#\xd8\x01\x01r\x1eR\bimportedR\brequiredR\bdeclaredR\fimportStatus\"x\n" +
+	"\tGraphPath\x12\x14\n" +
+	"\x05nodes\x18\x01 \x03(\tR\x05nodes\x12?\n" +
+	"\fnode_details\x18\x02 \x03(\v2\x1c.deputy.mcp.v1.GraphPathNodeR\vnodeDetails\x12\x14\n" +
+	"\x05depth\x18\x03 \x01(\x05R\x05depth\"\xbf\x02\n" +
+	"\x13AnalyzeGraphRequest\x12\"\n" +
+	"\x04path\x18\x01 \x01(\tB\x0e\xbaH\v\xc8\x01\x01r\x06\x10\x012\x02\\SR\x04path\x12\x10\n" +
+	"\x03ref\x18\x02 \x01(\tR\x03ref\x12<\n" +
+	"\vtarget_purl\x18\x03 \x01(\tB\x1b\xbaH\x18\xd8\x01\x01r\x132\x11^[Pp][Kk][Gg]:\\S+R\n" +
+	"targetPurl\x120\n" +
+	"\n" +
+	"ecosystems\x18\x04 \x03(\tB\x10\xbaH\r\x92\x01\n" +
+	"\"\br\x06\x10\x012\x02\\SR\n" +
+	"ecosystems\x125\n" +
+	"\rexclude_paths\x18\x05 \x03(\tB\x10\xbaH\r\x92\x01\n" +
+	"\"\br\x06\x10\x012\x02\\SR\fexcludePaths\x12/\n" +
+	"\x13resolve_transitives\x18\x06 \x01(\bR\x12resolveTransitives\x12\x1a\n" +
+	"\bextended\x18\a \x01(\bR\bextended\"\xe0\x01\n" +
+	"\x11GraphTargetResult\x12\x14\n" +
+	"\x05query\x18\x01 \x01(\tR\x05query\x12\x14\n" +
+	"\x05found\x18\x02 \x01(\bR\x05found\x12\x1d\n" +
+	"\n" +
+	"path_count\x18\x03 \x01(\x05R\tpathCount\x12#\n" +
+	"\rmatched_purls\x18\x04 \x03(\tR\fmatchedPurls\x12A\n" +
+	"\rmatched_nodes\x18\x05 \x03(\v2\x1c.deputy.mcp.v1.GraphPathNodeR\fmatchedNodes\x12\x18\n" +
+	"\amessage\x18\x06 \x01(\tR\amessage\"\x98\x04\n" +
+	"\x12AnalyzeGraphResult\x12\x12\n" +
+	"\x04path\x18\x01 \x01(\tR\x04path\x12\x10\n" +
+	"\x03ref\x18\x02 \x01(\tR\x03ref\x12#\n" +
+	"\reffective_ref\x18\x03 \x01(\tR\feffectiveRef\x12\x16\n" +
+	"\x06commit\x18\x04 \x01(\tR\x06commit\x121\n" +
+	"\x05stats\x18\x05 \x01(\v2\x1b.deputy.graph.v1.GraphStatsR\x05stats\x12C\n" +
+	"\x10vulnerable_paths\x18\x06 \x03(\v2\x18.deputy.mcp.v1.GraphPathR\x0fvulnerablePaths\x122\n" +
+	"\x15vulnerable_path_count\x18\a \x01(\x05R\x13vulnerablePathCount\x12<\n" +
+	"\x1avulnerable_paths_truncated\x18\b \x01(\bR\x18vulnerablePathsTruncated\x12@\n" +
+	"\x0fpaths_to_target\x18\t \x03(\v2\x18.deputy.mcp.v1.GraphPathR\rpathsToTarget\x129\n" +
+	"\x19paths_to_target_truncated\x18\n" +
+	" \x01(\bR\x16pathsToTargetTruncated\x128\n" +
+	"\x06target\x18\v \x01(\v2 .deputy.mcp.v1.GraphTargetResultR\x06target\"\xc2\x02\n" +
+	"\x0fGraphWhyRequest\x12\"\n" +
+	"\x04path\x18\x01 \x01(\tB\x0e\xbaH\v\xc8\x01\x01r\x06\x10\x012\x02\\SR\x04path\x12(\n" +
+	"\apackage\x18\x02 \x01(\tB\x0e\xbaH\v\xc8\x01\x01r\x06\x10\x012\x02\\SR\apackage\x12\x10\n" +
+	"\x03ref\x18\x03 \x01(\tR\x03ref\x12\x19\n" +
+	"\bshow_all\x18\x04 \x01(\bR\ashowAll\x120\n" +
+	"\n" +
+	"ecosystems\x18\x05 \x03(\tB\x10\xbaH\r\x92\x01\n" +
+	"\"\br\x06\x10\x012\x02\\SR\n" +
+	"ecosystems\x125\n" +
+	"\rexclude_paths\x18\x06 \x03(\tB\x10\xbaH\r\x92\x01\n" +
+	"\"\br\x06\x10\x012\x02\\SR\fexcludePaths\x12/\n" +
+	"\x13resolve_transitives\x18\a \x01(\bR\x12resolveTransitives\x12\x1a\n" +
+	"\bextended\x18\b \x01(\bR\bextended\"\xa8\x03\n" +
+	"\x0eGraphWhyResult\x12\x18\n" +
+	"\apackage\x18\x01 \x01(\tR\apackage\x12\x18\n" +
+	"\aversion\x18\x02 \x01(\tR\aversion\x12\x12\n" +
+	"\x04purl\x18\x03 \x01(\tR\x04purl\x12\x10\n" +
+	"\x03ref\x18\x04 \x01(\tR\x03ref\x12#\n" +
+	"\reffective_ref\x18\x05 \x01(\tR\feffectiveRef\x12\x16\n" +
+	"\x06commit\x18\x06 \x01(\tR\x06commit\x12\x16\n" +
+	"\x06direct\x18\a \x01(\bR\x06direct\x12\x14\n" +
+	"\x05found\x18\b \x01(\bR\x05found\x12?\n" +
+	"\fmatched_node\x18\t \x01(\v2\x1c.deputy.mcp.v1.GraphPathNodeR\vmatchedNode\x12.\n" +
+	"\x05paths\x18\n" +
+	" \x03(\v2\x18.deputy.mcp.v1.GraphPathR\x05paths\x12\x1d\n" +
+	"\n" +
+	"path_count\x18\v \x01(\x05R\tpathCount\x12'\n" +
+	"\x0fpaths_truncated\x18\f \x01(\bR\x0epathsTruncated\x12\x18\n" +
+	"\amessage\x18\r \x01(\tR\amessage\"\xa9\x02\n" +
+	"\x11GraphNeedsRequest\x12\"\n" +
+	"\x04path\x18\x01 \x01(\tB\x0e\xbaH\v\xc8\x01\x01r\x06\x10\x012\x02\\SR\x04path\x12(\n" +
+	"\apackage\x18\x02 \x01(\tB\x0e\xbaH\v\xc8\x01\x01r\x06\x10\x012\x02\\SR\apackage\x12\x10\n" +
+	"\x03ref\x18\x03 \x01(\tR\x03ref\x120\n" +
+	"\n" +
+	"ecosystems\x18\x04 \x03(\tB\x10\xbaH\r\x92\x01\n" +
+	"\"\br\x06\x10\x012\x02\\SR\n" +
+	"ecosystems\x125\n" +
+	"\rexclude_paths\x18\x05 \x03(\tB\x10\xbaH\r\x92\x01\n" +
+	"\"\br\x06\x10\x012\x02\\SR\fexcludePaths\x12/\n" +
+	"\x13resolve_transitives\x18\x06 \x01(\bR\x12resolveTransitives\x12\x1a\n" +
+	"\bextended\x18\a \x01(\bR\bextended\"\xbf\x03\n" +
+	"\x10GraphNeedsResult\x12\x18\n" +
+	"\apackage\x18\x01 \x01(\tR\apackage\x12\x18\n" +
+	"\aversion\x18\x02 \x01(\tR\aversion\x12\x12\n" +
+	"\x04purl\x18\x03 \x01(\tR\x04purl\x12\x10\n" +
+	"\x03ref\x18\x04 \x01(\tR\x03ref\x12#\n" +
+	"\reffective_ref\x18\x05 \x01(\tR\feffectiveRef\x12\x16\n" +
+	"\x06commit\x18\x06 \x01(\tR\x06commit\x12\x16\n" +
+	"\x06direct\x18\a \x01(\bR\x06direct\x12\x14\n" +
+	"\x05found\x18\b \x01(\bR\x05found\x12?\n" +
+	"\fmatched_node\x18\t \x01(\v2\x1c.deputy.mcp.v1.GraphPathNodeR\vmatchedNode\x12=\n" +
+	"\n" +
+	"dependents\x18\n" +
+	" \x03(\v2\x1d.deputy.mcp.v1.DependencyInfoR\n" +
+	"dependents\x12!\n" +
+	"\fdirect_count\x18\v \x01(\x05R\vdirectCount\x12)\n" +
+	"\x10transitive_count\x18\f \x01(\x05R\x0ftransitiveCount\x12\x18\n" +
+	"\amessage\x18\r \x01(\tR\amessageB\xa9\x01\n" +
 	"\x11com.deputy.mcp.v1B\bMcpProtoP\x01Z4github.com/temporalio/deputy/gen/deputy/mcp/v1;mcpv1\xa2\x02\x03DMX\xaa\x02\rDeputy.Mcp.V1\xca\x02\rDeputy\\Mcp\\V1\xe2\x02\x19Deputy\\Mcp\\V1\\GPBMetadata\xea\x02\x0fDeputy::Mcp::V1b\x06proto3"
 
 var (
@@ -1497,42 +3241,70 @@ func file_deputy_mcp_v1_mcp_proto_rawDescGZIP() []byte {
 	return file_deputy_mcp_v1_mcp_proto_rawDescData
 }
 
-var file_deputy_mcp_v1_mcp_proto_msgTypes = make([]protoimpl.MessageInfo, 14)
+var file_deputy_mcp_v1_mcp_proto_msgTypes = make([]protoimpl.MessageInfo, 28)
 var file_deputy_mcp_v1_mcp_proto_goTypes = []any{
-	(*VulnExplanation)(nil),      // 0: deputy.mcp.v1.VulnExplanation
-	(*PackageFix)(nil),           // 1: deputy.mcp.v1.PackageFix
-	(*FixVerdict)(nil),           // 2: deputy.mcp.v1.FixVerdict
-	(*Coverage)(nil),             // 3: deputy.mcp.v1.Coverage
-	(*CoverageEntry)(nil),        // 4: deputy.mcp.v1.CoverageEntry
-	(*ScanDirectoryRequest)(nil), // 5: deputy.mcp.v1.ScanDirectoryRequest
-	(*ScanDirectoryResult)(nil),  // 6: deputy.mcp.v1.ScanDirectoryResult
-	(*ScanContainerRequest)(nil), // 7: deputy.mcp.v1.ScanContainerRequest
-	(*ScanContainerResult)(nil),  // 8: deputy.mcp.v1.ScanContainerResult
-	(*TriageRequest)(nil),        // 9: deputy.mcp.v1.TriageRequest
-	(*TriagedVuln)(nil),          // 10: deputy.mcp.v1.TriagedVuln
-	(*TriageResult)(nil),         // 11: deputy.mcp.v1.TriageResult
-	nil,                          // 12: deputy.mcp.v1.ScanDirectoryResult.VulnerabilitiesBySeverityEntry
-	nil,                          // 13: deputy.mcp.v1.ScanContainerResult.VulnerabilitiesBySeverityEntry
+	(*VulnExplanation)(nil),         // 0: deputy.mcp.v1.VulnExplanation
+	(*PackageFix)(nil),              // 1: deputy.mcp.v1.PackageFix
+	(*FixVerdict)(nil),              // 2: deputy.mcp.v1.FixVerdict
+	(*Coverage)(nil),                // 3: deputy.mcp.v1.Coverage
+	(*CoverageEntry)(nil),           // 4: deputy.mcp.v1.CoverageEntry
+	(*ScanDirectoryRequest)(nil),    // 5: deputy.mcp.v1.ScanDirectoryRequest
+	(*ScanDirectoryResult)(nil),     // 6: deputy.mcp.v1.ScanDirectoryResult
+	(*ScanContainerRequest)(nil),    // 7: deputy.mcp.v1.ScanContainerRequest
+	(*ScanContainerResult)(nil),     // 8: deputy.mcp.v1.ScanContainerResult
+	(*TriageRequest)(nil),           // 9: deputy.mcp.v1.TriageRequest
+	(*TriagedVuln)(nil),             // 10: deputy.mcp.v1.TriagedVuln
+	(*TriageResult)(nil),            // 11: deputy.mcp.v1.TriageResult
+	(*ListDependenciesRequest)(nil), // 12: deputy.mcp.v1.ListDependenciesRequest
+	(*DependencyInfo)(nil),          // 13: deputy.mcp.v1.DependencyInfo
+	(*ListDependenciesResult)(nil),  // 14: deputy.mcp.v1.ListDependenciesResult
+	(*GenerateSBOMRequest)(nil),     // 15: deputy.mcp.v1.GenerateSBOMRequest
+	(*GenerateSBOMResult)(nil),      // 16: deputy.mcp.v1.GenerateSBOMResult
+	(*GraphPathNode)(nil),           // 17: deputy.mcp.v1.GraphPathNode
+	(*GraphPath)(nil),               // 18: deputy.mcp.v1.GraphPath
+	(*AnalyzeGraphRequest)(nil),     // 19: deputy.mcp.v1.AnalyzeGraphRequest
+	(*GraphTargetResult)(nil),       // 20: deputy.mcp.v1.GraphTargetResult
+	(*AnalyzeGraphResult)(nil),      // 21: deputy.mcp.v1.AnalyzeGraphResult
+	(*GraphWhyRequest)(nil),         // 22: deputy.mcp.v1.GraphWhyRequest
+	(*GraphWhyResult)(nil),          // 23: deputy.mcp.v1.GraphWhyResult
+	(*GraphNeedsRequest)(nil),       // 24: deputy.mcp.v1.GraphNeedsRequest
+	(*GraphNeedsResult)(nil),        // 25: deputy.mcp.v1.GraphNeedsResult
+	nil,                             // 26: deputy.mcp.v1.ScanDirectoryResult.VulnerabilitiesBySeverityEntry
+	nil,                             // 27: deputy.mcp.v1.ScanContainerResult.VulnerabilitiesBySeverityEntry
+	(*v1.ManifestRef)(nil),          // 28: deputy.dependency.v1.ManifestRef
+	(*v11.GraphStats)(nil),          // 29: deputy.graph.v1.GraphStats
 }
 var file_deputy_mcp_v1_mcp_proto_depIdxs = []int32{
 	1,  // 0: deputy.mcp.v1.VulnExplanation.package_fixes:type_name -> deputy.mcp.v1.PackageFix
 	2,  // 1: deputy.mcp.v1.VulnExplanation.resolved_fix:type_name -> deputy.mcp.v1.FixVerdict
 	4,  // 2: deputy.mcp.v1.Coverage.covered:type_name -> deputy.mcp.v1.CoverageEntry
 	4,  // 3: deputy.mcp.v1.Coverage.uncovered:type_name -> deputy.mcp.v1.CoverageEntry
-	12, // 4: deputy.mcp.v1.ScanDirectoryResult.vulnerabilities_by_severity:type_name -> deputy.mcp.v1.ScanDirectoryResult.VulnerabilitiesBySeverityEntry
+	26, // 4: deputy.mcp.v1.ScanDirectoryResult.vulnerabilities_by_severity:type_name -> deputy.mcp.v1.ScanDirectoryResult.VulnerabilitiesBySeverityEntry
 	0,  // 5: deputy.mcp.v1.ScanDirectoryResult.vulnerabilities:type_name -> deputy.mcp.v1.VulnExplanation
 	3,  // 6: deputy.mcp.v1.ScanDirectoryResult.coverage:type_name -> deputy.mcp.v1.Coverage
-	13, // 7: deputy.mcp.v1.ScanContainerResult.vulnerabilities_by_severity:type_name -> deputy.mcp.v1.ScanContainerResult.VulnerabilitiesBySeverityEntry
+	27, // 7: deputy.mcp.v1.ScanContainerResult.vulnerabilities_by_severity:type_name -> deputy.mcp.v1.ScanContainerResult.VulnerabilitiesBySeverityEntry
 	0,  // 8: deputy.mcp.v1.ScanContainerResult.vulnerabilities:type_name -> deputy.mcp.v1.VulnExplanation
 	3,  // 9: deputy.mcp.v1.ScanContainerResult.coverage:type_name -> deputy.mcp.v1.Coverage
 	1,  // 10: deputy.mcp.v1.TriagedVuln.package_fixes:type_name -> deputy.mcp.v1.PackageFix
 	2,  // 11: deputy.mcp.v1.TriagedVuln.resolved_fix:type_name -> deputy.mcp.v1.FixVerdict
 	10, // 12: deputy.mcp.v1.TriageResult.vulnerabilities:type_name -> deputy.mcp.v1.TriagedVuln
-	13, // [13:13] is the sub-list for method output_type
-	13, // [13:13] is the sub-list for method input_type
-	13, // [13:13] is the sub-list for extension type_name
-	13, // [13:13] is the sub-list for extension extendee
-	0,  // [0:13] is the sub-list for field type_name
+	28, // 13: deputy.mcp.v1.DependencyInfo.manifest_refs:type_name -> deputy.dependency.v1.ManifestRef
+	13, // 14: deputy.mcp.v1.ListDependenciesResult.dependencies:type_name -> deputy.mcp.v1.DependencyInfo
+	17, // 15: deputy.mcp.v1.GraphPath.node_details:type_name -> deputy.mcp.v1.GraphPathNode
+	17, // 16: deputy.mcp.v1.GraphTargetResult.matched_nodes:type_name -> deputy.mcp.v1.GraphPathNode
+	29, // 17: deputy.mcp.v1.AnalyzeGraphResult.stats:type_name -> deputy.graph.v1.GraphStats
+	18, // 18: deputy.mcp.v1.AnalyzeGraphResult.vulnerable_paths:type_name -> deputy.mcp.v1.GraphPath
+	18, // 19: deputy.mcp.v1.AnalyzeGraphResult.paths_to_target:type_name -> deputy.mcp.v1.GraphPath
+	20, // 20: deputy.mcp.v1.AnalyzeGraphResult.target:type_name -> deputy.mcp.v1.GraphTargetResult
+	17, // 21: deputy.mcp.v1.GraphWhyResult.matched_node:type_name -> deputy.mcp.v1.GraphPathNode
+	18, // 22: deputy.mcp.v1.GraphWhyResult.paths:type_name -> deputy.mcp.v1.GraphPath
+	17, // 23: deputy.mcp.v1.GraphNeedsResult.matched_node:type_name -> deputy.mcp.v1.GraphPathNode
+	13, // 24: deputy.mcp.v1.GraphNeedsResult.dependents:type_name -> deputy.mcp.v1.DependencyInfo
+	25, // [25:25] is the sub-list for method output_type
+	25, // [25:25] is the sub-list for method input_type
+	25, // [25:25] is the sub-list for extension type_name
+	25, // [25:25] is the sub-list for extension extendee
+	0,  // [0:25] is the sub-list for field type_name
 }
 
 func init() { file_deputy_mcp_v1_mcp_proto_init() }
@@ -1546,7 +3318,7 @@ func file_deputy_mcp_v1_mcp_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_deputy_mcp_v1_mcp_proto_rawDesc), len(file_deputy_mcp_v1_mcp_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   14,
+			NumMessages:   28,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

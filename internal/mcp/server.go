@@ -19,7 +19,6 @@ import (
 	"github.com/google/jsonschema-go/jsonschema"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	packageurl "github.com/package-url/packageurl-go"
-	dependencyv1 "github.com/temporalio/deputy/gen/deputy/dependency/v1"
 	diffv1 "github.com/temporalio/deputy/gen/deputy/diff/v1"
 	graphv1 "github.com/temporalio/deputy/gen/deputy/graph/v1"
 	listv1 "github.com/temporalio/deputy/gen/deputy/list/v1"
@@ -461,17 +460,27 @@ func (s *Server) registerTools() {
 	}, openWorld, s.scanDirectory)
 
 	// Dependency tools
+	listDepsIn, listDepsOut := mustToolSchemas(
+		(&mcpv1.ListDependenciesRequest{}).ProtoReflect().Descriptor(),
+		(&mcpv1.ListDependenciesResult{}).ProtoReflect().Descriptor(),
+	)
 	addReadOnlyTool(s, &mcp.Tool{
-		Name:        "list_dependencies",
-		Description: "List all dependencies in a directory, optionally filtering to direct dependencies only",
-		InputSchema: listDependenciesInputSchema(),
+		Name:         "list_dependencies",
+		Description:  "List all dependencies in a directory, optionally filtering to direct dependencies only",
+		InputSchema:  listDepsIn,
+		OutputSchema: listDepsOut,
 	}, closedWorld, s.listDependencies)
 
 	// SBOM tools
+	sbomIn, sbomOut := mustToolSchemas(
+		(&mcpv1.GenerateSBOMRequest{}).ProtoReflect().Descriptor(),
+		(&mcpv1.GenerateSBOMResult{}).ProtoReflect().Descriptor(),
+	)
 	addReadOnlyTool(s, &mcp.Tool{
-		Name:        "generate_sbom",
-		Description: "Generate a Software Bill of Materials (SBOM) for a local directory or repository checkout",
-		InputSchema: generateSBOMInputSchema(),
+		Name:         "generate_sbom",
+		Description:  "Generate a Software Bill of Materials (SBOM) for a local directory or repository checkout",
+		InputSchema:  sbomIn,
+		OutputSchema: sbomOut,
 	}, openWorld, s.generateSBOM)
 
 	// Remediation tools
@@ -482,22 +491,37 @@ func (s *Server) registerTools() {
 	}, openWorld, s.getRemediation)
 
 	// Graph analysis tools
+	analyzeGraphIn, analyzeGraphOut := mustToolSchemas(
+		(&mcpv1.AnalyzeGraphRequest{}).ProtoReflect().Descriptor(),
+		(&mcpv1.AnalyzeGraphResult{}).ProtoReflect().Descriptor(),
+	)
 	addReadOnlyTool(s, &mcp.Tool{
-		Name:        "analyze_dependency_graph",
-		Description: "Build dependency graph stats and optionally find paths to a package PURL",
-		InputSchema: analyzeGraphInputSchema(),
+		Name:         "analyze_dependency_graph",
+		Description:  "Build dependency graph stats and optionally find paths to a package PURL",
+		InputSchema:  analyzeGraphIn,
+		OutputSchema: analyzeGraphOut,
 	}, openWorld, s.analyzeDependencyGraph)
 
+	graphWhyIn, graphWhyOut := mustToolSchemas(
+		(&mcpv1.GraphWhyRequest{}).ProtoReflect().Descriptor(),
+		(&mcpv1.GraphWhyResult{}).ProtoReflect().Descriptor(),
+	)
 	addReadOnlyTool(s, &mcp.Tool{
-		Name:        "graph_why",
-		Description: "Show why a package name, name@version, or PURL is in the dependency graph",
-		InputSchema: graphWhyInputSchema(),
+		Name:         "graph_why",
+		Description:  "Show why a package name, name@version, or PURL is in the dependency graph",
+		InputSchema:  graphWhyIn,
+		OutputSchema: graphWhyOut,
 	}, openWorld, s.graphWhy)
 
+	graphNeedsIn, graphNeedsOut := mustToolSchemas(
+		(&mcpv1.GraphNeedsRequest{}).ProtoReflect().Descriptor(),
+		(&mcpv1.GraphNeedsResult{}).ProtoReflect().Descriptor(),
+	)
 	addReadOnlyTool(s, &mcp.Tool{
-		Name:        "graph_needs",
-		Description: "Show what packages depend on a package name, name@version, or PURL",
-		InputSchema: graphNeedsInputSchema(),
+		Name:         "graph_needs",
+		Description:  "Show what packages depend on a package name, name@version, or PURL",
+		InputSchema:  graphNeedsIn,
+		OutputSchema: graphNeedsOut,
 	}, openWorld, s.graphNeeds)
 
 	// Triage tools
@@ -639,40 +663,12 @@ func scanPackageInputSchema() *jsonschema.Schema {
 	}
 }
 
-func listDependenciesInputSchema() *jsonschema.Schema {
-	return localPathToolInputSchema("Path to the local directory to analyze.", map[string]*jsonschema.Schema{
-		"directOnly":   {Type: "boolean", Description: "If true, only return direct dependencies."},
-		"ref":          mcpOptionalStringProperty("Git reference, branch, tag, or commit for repository paths. Defaults to the current working tree/HEAD."),
-		"ecosystems":   mcpStringArrayProperty("Optional ecosystems to include, e.g. go, npm, pypi."),
-		"excludePaths": mcpStringArrayProperty("Optional directory globs to skip during the walk, e.g. .bin/** or **/testdata."),
-	})
-}
-
 func getRemediationInputSchema() *jsonschema.Schema {
 	return localPathToolInputSchema("Path to the local directory to analyze for remediation.", map[string]*jsonschema.Schema{
 		"ref":          mcpOptionalStringProperty("Git reference, branch, tag, or commit for repository paths. Defaults to the current working tree/HEAD."),
 		"ecosystems":   mcpStringArrayProperty("Optional ecosystems to include, e.g. go, npm, pypi."),
 		"excludePaths": mcpStringArrayProperty("Optional directory globs to skip during the walk, e.g. .bin/** or **/testdata."),
 	})
-}
-
-func analyzeGraphInputSchema() *jsonschema.Schema {
-	return localPathToolInputSchema("Path to the local directory to analyze.", graphToolProperties(map[string]*jsonschema.Schema{
-		"targetPurl": mcpOptionalPURLProperty("Optional package URL to find paths to, e.g. pkg:npm/lodash@4.17.21 or pkg:golang/golang.org/x/net."),
-	}))
-}
-
-func graphWhyInputSchema() *jsonschema.Schema {
-	return localPathToolInputSchema("Path to the local directory to analyze.", graphToolProperties(map[string]*jsonschema.Schema{
-		"package": mcpStringProperty("Package name, name@version, or PURL to trace, e.g. lodash, golang.org/x/crypto@v0.17.0, or pkg:npm/lodash@4.17.21."),
-		"showAll": {Type: "boolean", Description: "Return up to 100 dependency path examples instead of the default 10. Use pathCount and pathsTruncated to detect sampling."},
-	}), "package")
-}
-
-func graphNeedsInputSchema() *jsonschema.Schema {
-	return localPathToolInputSchema("Path to the local directory to analyze.", graphToolProperties(map[string]*jsonschema.Schema{
-		"package": mcpStringProperty("Package name, name@version, or PURL to find dependents of."),
-	}), "package")
 }
 
 func localPathToolInputSchema(pathDescription string, properties map[string]*jsonschema.Schema, required ...string) *jsonschema.Schema {
@@ -688,64 +684,6 @@ func localPathToolInputSchema(pathDescription string, properties map[string]*jso
 	}
 }
 
-func graphToolProperties(properties map[string]*jsonschema.Schema) map[string]*jsonschema.Schema {
-	properties["ref"] = mcpOptionalStringProperty("Git reference, branch, tag, or commit for repository paths. Defaults to the current working tree/HEAD.")
-	properties["ecosystems"] = mcpStringArrayProperty("Optional ecosystems to include, e.g. go, npm, pypi.")
-	properties["excludePaths"] = mcpStringArrayProperty("Optional directory globs to skip during the walk, e.g. .bin/** or **/testdata.")
-	properties["resolveTransitives"] = &jsonschema.Schema{
-		Type:        "boolean",
-		Description: "If true, use package registry, deps.dev, and Git lookups to resolve more precise transitive graph edges. Slower and may require network access.",
-	}
-	properties["extended"] = &jsonschema.Schema{
-		Type:        "boolean",
-		Description: "If true, include extended graph metadata where supported, such as Go import status for required and declared modules.",
-	}
-	return properties
-}
-
-func mcpOptionalPURLProperty(description string) *jsonschema.Schema {
-	return &jsonschema.Schema{
-		Type:        "string",
-		Description: description,
-		Pattern:     "^[Pp][Kk][Gg]:\\S+",
-	}
-}
-
-func generateSBOMInputSchema() *jsonschema.Schema {
-	return &jsonschema.Schema{
-		Type:     "object",
-		Required: []string{"path"},
-		Properties: map[string]*jsonschema.Schema{
-			"path":           mcpStringProperty("Local directory or local repository checkout to analyze."),
-			"ref":            mcpOptionalStringProperty("Git reference, branch, tag, or commit. Defaults to HEAD."),
-			"format":         mcpSBOMFormatProperty(),
-			"enrichLicenses": {Type: "boolean", Description: "Enrich SBOM with license information from deps.dev."},
-			"ecosystems":     mcpStringArrayProperty("Optional ecosystems to include, e.g. go, npm, pypi."),
-			"excludePaths":   mcpStringArrayProperty("Optional directory globs to skip during the walk, e.g. .bin/** or **/testdata."),
-		},
-		AdditionalProperties: falseJSONSchema(),
-	}
-}
-
-func mcpSBOMFormatProperty() *jsonschema.Schema {
-	// The enum must list every value the server accepts, because MCP clients
-	// enforce it before the call reaches Deputy. Include the short aliases so
-	// they are usable over MCP, not just on the CLI. Case-insensitivity is a
-	// server-side convenience that an enum cannot express, so it is not
-	// advertised here.
-	return &jsonschema.Schema{
-		Type:        "string",
-		Description: "Output format. Defaults to cyclonedx-json. Canonical forms are cyclonedx-json, spdx-json, protobom-json; the short aliases cyclonedx, spdx, protobom are equivalent.",
-		Default:     jsonDefault("cyclonedx-json"),
-		Enum:        []any{"cyclonedx-json", "spdx-json", "protobom-json", "cyclonedx", "spdx", "protobom"},
-	}
-}
-
-func jsonDefault(v any) json.RawMessage {
-	b, _ := json.Marshal(v)
-	return b
-}
-
 // mcpTargetRef extracts the requested ref, resolved effective ref, and commit
 // hash from a resolved target so tool results can echo Git snapshot identity.
 // All values are empty when target is nil or carries no Git metadata.
@@ -754,32 +692,6 @@ func mcpTargetRef(target *targetv1.Target) (ref, effectiveRef, commit string) {
 		return "", "", ""
 	}
 	return strings.TrimSpace(target.GetRef()), strings.TrimSpace(target.GetEffectiveRef()), strings.TrimSpace(target.GetCommitHash())
-}
-
-func manifestRefsForMCP(refs []*dependencyv1.ManifestRef) []ManifestRefInfo {
-	if len(refs) == 0 {
-		return nil
-	}
-	out := make([]ManifestRefInfo, 0, len(refs))
-	for _, ref := range refs {
-		if ref == nil {
-			continue
-		}
-		path := strings.TrimSpace(ref.GetPath())
-		manager := strings.TrimSpace(ref.GetManager())
-		componentKey := strings.TrimSpace(ref.GetComponentKey())
-		groups := stringsForMCP(ref.GetGroups())
-		if path == "" && manager == "" && componentKey == "" && len(groups) == 0 {
-			continue
-		}
-		out = append(out, ManifestRefInfo{
-			Path:         path,
-			Manager:      manager,
-			Groups:       groups,
-			ComponentKey: componentKey,
-		})
-	}
-	return out
 }
 
 func diffRefsInputSchema() *jsonschema.Schema {
@@ -1378,81 +1290,10 @@ type ScanResult struct {
 // (ScanDirectoryRequest/ScanDirectoryResult): the tool schema derives from the
 // proto descriptors and the wire is protojson.
 
-// ListDependenciesInput is the input for the list_dependencies tool.
-type ListDependenciesInput struct {
-	Path         string   `json:"path" jsonschema:"Path to the directory to analyze"`
-	DirectOnly   bool     `json:"directOnly,omitempty" jsonschema:"If true, only list direct dependencies"`
-	Ref          string   `json:"ref,omitempty" jsonschema:"Git reference, branch, tag, or commit for repository paths. Defaults to the current working tree/HEAD."`
-	Ecosystems   []string `json:"ecosystems,omitempty" jsonschema:"Optional list of ecosystems to include"`
-	ExcludePaths []string `json:"excludePaths,omitempty" jsonschema:"Optional directory globs to skip during the walk (e.g., .bin/**, **/testdata)."`
-}
-
-// DependencyInfo represents a single dependency.
-type DependencyInfo struct {
-	Name         string            `json:"name"`
-	Version      string            `json:"version"`
-	Ecosystem    string            `json:"ecosystem"`
-	PURL         string            `json:"purl,omitempty"`
-	Direct       bool              `json:"direct"`
-	Locations    []string          `json:"locations,omitempty"`
-	ManifestRefs []ManifestRefInfo `json:"manifestRefs,omitempty" jsonschema:"Structured manifest declarations for this dependency, including manager, groups, and original component key where available."`
-}
-
-// ManifestRefInfo describes where a dependency was declared.
-type ManifestRefInfo struct {
-	Path         string   `json:"path" jsonschema:"Manifest file path containing this dependency declaration."`
-	Manager      string   `json:"manager,omitempty" jsonschema:"Dependency manager or extractor that produced this declaration."`
-	Groups       []string `json:"groups,omitempty" jsonschema:"Dependency groups associated with this declaration, such as direct, dev, or tools."`
-	ComponentKey string   `json:"componentKey,omitempty" jsonschema:"Original manager-specific component key when it differs from the normalized dependency identity."`
-}
-
-// GraphPathNode represents a package in a dependency path with stable identity.
-type GraphPathNode struct {
-	Name         string `json:"name"`
-	Version      string `json:"version,omitempty"`
-	Ecosystem    string `json:"ecosystem,omitempty"`
-	PURL         string `json:"purl,omitempty"`
-	Direct       bool   `json:"direct"`
-	Depth        int    `json:"depth"`
-	Disconnected bool   `json:"disconnected,omitempty"`
-	ImportStatus string `json:"importStatus,omitempty"`
-}
-
-// ListDependenciesResult is the output for the list_dependencies tool.
-type ListDependenciesResult struct {
-	Path                 string           `json:"path"`
-	Ref                  string           `json:"ref,omitempty"`
-	EffectiveRef         string           `json:"effectiveRef,omitempty"`
-	Commit               string           `json:"commit,omitempty"`
-	Total                int              `json:"total"`
-	Direct               int              `json:"direct"`
-	Transitive           int              `json:"transitive"`
-	TotalDiscovered      int              `json:"totalDiscovered"`
-	DirectDiscovered     int              `json:"directDiscovered"`
-	TransitiveDiscovered int              `json:"transitiveDiscovered"`
-	Dependencies         []DependencyInfo `json:"dependencies"`
-}
-
-// GenerateSBOMInput is the input for the generate_sbom tool.
-type GenerateSBOMInput struct {
-	Path           string   `json:"path" jsonschema:"Local directory or local repository checkout to analyze"`
-	Ref            string   `json:"ref,omitempty" jsonschema:"Git reference (branch, tag, commit). Defaults to HEAD."`
-	Format         string   `json:"format,omitempty" jsonschema:"Output format: cyclonedx-json, spdx-json, or protobom-json. Defaults to cyclonedx-json."`
-	EnrichLicenses bool     `json:"enrichLicenses,omitempty" jsonschema:"Enrich SBOM with license information from deps.dev"`
-	Ecosystems     []string `json:"ecosystems,omitempty" jsonschema:"Optional list of ecosystems to include"`
-	ExcludePaths   []string `json:"excludePaths,omitempty" jsonschema:"Optional directory globs to skip during the walk (e.g., .bin/**, **/testdata)."`
-}
-
-// SBOMResult is the output for the generate_sbom tool.
-type SBOMResult struct {
-	Path         string `json:"path"`
-	Ref          string `json:"ref,omitempty"`
-	EffectiveRef string `json:"effectiveRef,omitempty"`
-	Commit       string `json:"commit,omitempty"`
-	Format       string `json:"format"`
-	Components   int    `json:"components"`
-	SBOM         string `json:"sbom"`
-}
+// list_dependencies' and generate_sbom's input/output contracts live in
+// deputy.mcp.v1 (ListDependenciesRequest/ListDependenciesResult,
+// GenerateSBOMRequest/GenerateSBOMResult): the tool schemas derive from the
+// proto descriptors and the wire is protojson.
 
 // GetRemediationInput is the input for the get_remediation tool.
 type GetRemediationInput struct {
@@ -1497,125 +1338,10 @@ type GetRemediationResult struct {
 	UnfixableVulnerabilities []string             `json:"unfixableVulnerabilities,omitempty"`
 }
 
-// AnalyzeGraphInput is the input for the analyze_dependency_graph tool.
-type AnalyzeGraphInput struct {
-	Path               string   `json:"path" jsonschema:"Path to the directory to analyze"`
-	Ref                string   `json:"ref,omitempty" jsonschema:"Git reference, branch, tag, or commit for repository paths. Defaults to the current working tree/HEAD."`
-	TargetPURL         string   `json:"targetPurl,omitempty" jsonschema:"Optional PURL to find paths to (e.g., pkg:npm/lodash@4.17.15)"`
-	Ecosystems         []string `json:"ecosystems,omitempty" jsonschema:"Optional list of ecosystems to include"`
-	ExcludePaths       []string `json:"excludePaths,omitempty" jsonschema:"Optional directory globs to skip during the walk (e.g., .bin/**, **/testdata)."`
-	ResolveTransitives bool     `json:"resolveTransitives,omitempty" jsonschema:"If true, use package registry, deps.dev, and Git lookups to resolve more precise transitive graph edges. Slower and may require network access."`
-	Extended           bool     `json:"extended,omitempty" jsonschema:"If true, include extended graph metadata where supported, such as Go import status for required and declared modules."`
-}
-
-// GraphPath represents a dependency path.
-type GraphPath struct {
-	Nodes       []string        `json:"nodes"`
-	NodeDetails []GraphPathNode `json:"nodeDetails"`
-	Depth       int             `json:"depth"`
-}
-
-// GraphStats contains statistics about the dependency graph.
-type GraphStats struct {
-	TotalNodes         int                      `json:"totalNodes"`
-	DirectNodes        int                      `json:"directNodes"`
-	TransitiveNodes    int                      `json:"transitiveNodes"`
-	MaxDepth           int                      `json:"maxDepth"`
-	MaxConnectedDepth  int                      `json:"maxConnectedDepth"`
-	DisconnectedNodes  int                      `json:"disconnectedNodes"`
-	VulnerableNodes    int                      `json:"vulnerableNodes"`
-	Ecosystems         map[string]int           `json:"ecosystems"`
-	ImportStatusCounts *GraphImportStatusCounts `json:"importStatusCounts,omitempty"`
-}
-
-// GraphImportStatusCounts summarizes extended-mode graph node status.
-type GraphImportStatusCounts struct {
-	Imported int `json:"imported"`
-	Required int `json:"required"`
-	Declared int `json:"declared"`
-}
-
-// AnalyzeGraphResult is the output for the analyze_dependency_graph tool.
-type AnalyzeGraphResult struct {
-	Path                     string             `json:"path"`
-	Ref                      string             `json:"ref,omitempty"`
-	EffectiveRef             string             `json:"effectiveRef,omitempty"`
-	Commit                   string             `json:"commit,omitempty"`
-	Stats                    GraphStats         `json:"stats"`
-	VulnerablePaths          []GraphPath        `json:"vulnerablePaths"`
-	VulnerablePathCount      int                `json:"vulnerablePathCount"`
-	VulnerablePathsTruncated bool               `json:"vulnerablePathsTruncated"`
-	PathsToTarget            []GraphPath        `json:"pathsToTarget"`
-	PathsToTargetTruncated   bool               `json:"pathsToTargetTruncated"`
-	Target                   *GraphTargetResult `json:"target,omitempty"`
-}
-
-// GraphTargetResult summarizes targetPurl matching and path resolution.
-type GraphTargetResult struct {
-	Query        string          `json:"query"`
-	Found        bool            `json:"found"`
-	PathCount    int             `json:"pathCount"`
-	MatchedPURLs []string        `json:"matchedPurls"`
-	MatchedNodes []GraphPathNode `json:"matchedNodes,omitempty"`
-	Message      string          `json:"message,omitempty"`
-}
-
-// GraphWhyInput is the input for the graph_why tool.
-type GraphWhyInput struct {
-	Path               string   `json:"path" jsonschema:"Path to the directory to analyze"`
-	Package            string   `json:"package" jsonschema:"Package name, name@version, or PURL to trace (e.g., lodash, golang.org/x/crypto@v0.17.0, pkg:npm/lodash@4.17.21)"`
-	Ref                string   `json:"ref,omitempty" jsonschema:"Git reference, branch, tag, or commit for repository paths. Defaults to the current working tree/HEAD."`
-	ShowAll            bool     `json:"showAll,omitempty" jsonschema:"Return up to 100 dependency path examples instead of the default 10; use pathCount and pathsTruncated to detect sampling."`
-	Ecosystems         []string `json:"ecosystems,omitempty" jsonschema:"Optional list of ecosystems to include"`
-	ExcludePaths       []string `json:"excludePaths,omitempty" jsonschema:"Optional directory globs to skip during the walk (e.g., .bin/**, **/testdata)."`
-	ResolveTransitives bool     `json:"resolveTransitives,omitempty" jsonschema:"If true, use package registry, deps.dev, and Git lookups to resolve more precise transitive graph edges. Slower and may require network access."`
-	Extended           bool     `json:"extended,omitempty" jsonschema:"If true, include extended graph metadata where supported, such as Go import status for required and declared modules."`
-}
-
-// GraphWhyResult is the output for the graph_why tool.
-type GraphWhyResult struct {
-	Package        string         `json:"package"`
-	Version        string         `json:"version,omitempty"`
-	PURL           string         `json:"purl,omitempty"`
-	Ref            string         `json:"ref,omitempty"`
-	EffectiveRef   string         `json:"effectiveRef,omitempty"`
-	Commit         string         `json:"commit,omitempty"`
-	Direct         bool           `json:"direct"`
-	Found          bool           `json:"found"`
-	MatchedNode    *GraphPathNode `json:"matchedNode,omitempty"`
-	Paths          []GraphPath    `json:"paths"`
-	PathCount      int            `json:"pathCount"`
-	PathsTruncated bool           `json:"pathsTruncated"`
-	Message        string         `json:"message,omitempty"`
-}
-
-// GraphNeedsInput is the input for the graph_needs tool.
-type GraphNeedsInput struct {
-	Path               string   `json:"path" jsonschema:"Path to the directory to analyze"`
-	Package            string   `json:"package" jsonschema:"Package name, name@version, or PURL to find dependents of"`
-	Ref                string   `json:"ref,omitempty" jsonschema:"Git reference, branch, tag, or commit for repository paths. Defaults to the current working tree/HEAD."`
-	Ecosystems         []string `json:"ecosystems,omitempty" jsonschema:"Optional list of ecosystems to include"`
-	ExcludePaths       []string `json:"excludePaths,omitempty" jsonschema:"Optional directory globs to skip during the walk (e.g., .bin/**, **/testdata)."`
-	ResolveTransitives bool     `json:"resolveTransitives,omitempty" jsonschema:"If true, use package registry, deps.dev, and Git lookups to resolve more precise transitive graph edges. Slower and may require network access."`
-	Extended           bool     `json:"extended,omitempty" jsonschema:"If true, include extended graph metadata where supported, such as Go import status for required and declared modules."`
-}
-
-// GraphNeedsResult is the output for the graph_needs tool.
-type GraphNeedsResult struct {
-	Package         string           `json:"package"`
-	Version         string           `json:"version,omitempty"`
-	PURL            string           `json:"purl,omitempty"`
-	Ref             string           `json:"ref,omitempty"`
-	EffectiveRef    string           `json:"effectiveRef,omitempty"`
-	Commit          string           `json:"commit,omitempty"`
-	Direct          bool             `json:"direct"`
-	Found           bool             `json:"found"`
-	MatchedNode     *GraphPathNode   `json:"matchedNode,omitempty"`
-	Dependents      []DependencyInfo `json:"dependents"`
-	DirectCount     int              `json:"directCount"`
-	TransitiveCount int              `json:"transitiveCount"`
-	Message         string           `json:"message,omitempty"`
-}
+// analyze_dependency_graph's, graph_why's, and graph_needs' input/output
+// contracts live in deputy.mcp.v1 (AnalyzeGraphRequest/AnalyzeGraphResult,
+// GraphWhyRequest/GraphWhyResult, GraphNeedsRequest/GraphNeedsResult): the
+// tool schemas derive from the proto descriptors and the wire is protojson.
 
 // triage_vulnerabilities' and scan_container's input/output contracts live in
 // deputy.mcp.v1 (TriageRequest/TriageResult, ScanContainerRequest/
@@ -2153,7 +1879,7 @@ func (s *Server) scanDirectory(ctx context.Context, req *mcp.CallToolRequest, ra
 	return nil, out, nil
 }
 
-func (s *Server) listDependencies(ctx context.Context, req *mcp.CallToolRequest, args ListDependenciesInput) (*mcp.CallToolResult, ListDependenciesResult, error) {
+func (s *Server) listDependencies(ctx context.Context, req *mcp.CallToolRequest, raw json.RawMessage) (*mcp.CallToolResult, json.RawMessage, error) {
 	startTime := time.Now()
 
 	// Apply timeout for scan operations (listing requires scanning)
@@ -2164,15 +1890,22 @@ func (s *Server) listDependencies(ctx context.Context, req *mcp.CallToolRequest,
 		trace.WithAttributes(otel.AttrMCPTool.String("list_dependencies")))
 	defer span.End()
 
-	logs.Debug(ctx, "MCP tool invoked", "tool", "list_dependencies", "path", args.Path, "direct_only", args.DirectOnly)
+	args := &mcpv1.ListDependenciesRequest{}
+	if err := unmarshalMCPRequest(raw, args); err != nil {
+		otel.SetSpanError(span, err)
+		otel.RecordMCPToolCall(ctx, "list_dependencies", time.Since(startTime).Seconds(), false)
+		return nil, nil, err
+	}
+
+	logs.Debug(ctx, "MCP tool invoked", "tool", "list_dependencies", "path", args.GetPath(), "direct_only", args.GetDirectOnly())
 
 	// Validate path to prevent path traversal and access to sensitive directories.
-	targetPath, err := normalizeLocalPath(args.Path)
+	targetPath, err := normalizeLocalPath(args.GetPath())
 	if err != nil {
 		otel.SetSpanError(span, err)
 		otel.RecordMCPToolCall(ctx, "list_dependencies", time.Since(startTime).Seconds(), false)
-		logs.Warn(ctx, "Invalid path in list_dependencies", "path", args.Path, "error", err)
-		return nil, ListDependenciesResult{}, err
+		logs.Warn(ctx, "Invalid path in list_dependencies", "path", args.GetPath(), "error", err)
+		return nil, nil, err
 	}
 
 	span.SetAttributes(otel.AttrTargetPath.String(targetPath))
@@ -2181,10 +1914,10 @@ func (s *Server) listDependencies(ctx context.Context, req *mcp.CallToolRequest,
 	listReq := connect.NewRequest(&listv1.ListPackagesRequest{
 		Target: targetPath,
 		Options: &listv1.ListOptions{
-			Ref:          strings.TrimSpace(args.Ref),
-			Ecosystems:   normalizeMCPEcosystems(args.Ecosystems),
-			ExcludePaths: s.excludePaths(args.ExcludePaths),
-			OnlyDirect:   args.DirectOnly,
+			Ref:          strings.TrimSpace(args.GetRef()),
+			Ecosystems:   normalizeMCPEcosystems(args.GetEcosystems()),
+			ExcludePaths: s.excludePaths(args.GetExcludePaths()),
+			OnlyDirect:   args.GetDirectOnly(),
 		},
 	})
 
@@ -2194,33 +1927,32 @@ func (s *Server) listDependencies(ctx context.Context, req *mcp.CallToolRequest,
 		otel.SetSpanError(span, err)
 		otel.RecordMCPToolCall(ctx, "list_dependencies", time.Since(startTime).Seconds(), false)
 		logs.Warn(ctx, "List dependencies failed", "path", targetPath, "error", err)
-		return nil, ListDependenciesResult{}, err
+		return nil, nil, err
 	}
 
 	listResult := resp.Msg
 	ref, effectiveRef, commit := mcpTargetRef(listResult.GetTarget())
-	result := ListDependenciesResult{
+	result := &mcpv1.ListDependenciesResult{
 		Path:                 targetPath,
 		Ref:                  ref,
 		EffectiveRef:         effectiveRef,
 		Commit:               commit,
-		Dependencies:         make([]DependencyInfo, 0, len(listResult.Packages)),
-		TotalDiscovered:      int(listResult.Stats.GetTotalPackages()),
-		DirectDiscovered:     int(listResult.Stats.GetDirectPackages()),
-		TransitiveDiscovered: int(listResult.Stats.GetTransitivePackages()),
+		Dependencies:         make([]*mcpv1.DependencyInfo, 0, len(listResult.Packages)),
+		TotalDiscovered:      listResult.Stats.GetTotalPackages(),
+		DirectDiscovered:     listResult.Stats.GetDirectPackages(),
+		TransitiveDiscovered: listResult.Stats.GetTransitivePackages(),
 	}
 
 	for _, pkg := range listResult.Packages {
-		dep := DependencyInfo{
+		result.Dependencies = append(result.Dependencies, &mcpv1.DependencyInfo{
 			Name:         pkg.Name,
 			Version:      pkg.Version,
 			Ecosystem:    mcpOutputEcosystem(pkg.Ecosystem),
 			Direct:       pkg.Direct,
 			Locations:    pkg.Locations,
-			PURL:         pkg.Purl,
-			ManifestRefs: manifestRefsForMCP(pkg.GetManifestRefs()),
-		}
-		result.Dependencies = append(result.Dependencies, dep)
+			Purl:         pkg.Purl,
+			ManifestRefs: manifestRefsProto(pkg.GetManifestRefs()),
+		})
 		result.Total++
 		if pkg.Direct {
 			result.Direct++
@@ -2229,15 +1961,20 @@ func (s *Server) listDependencies(ctx context.Context, req *mcp.CallToolRequest,
 		}
 	}
 
-	span.SetAttributes(otel.AttrMCPPackageCount.Int(result.TotalDiscovered))
+	span.SetAttributes(otel.AttrMCPPackageCount.Int(int(result.GetTotalDiscovered())))
 	otel.SetSpanOK(span)
 	otel.RecordMCPToolCall(ctx, "list_dependencies", time.Since(startTime).Seconds(), true)
-	logs.Debug(ctx, "MCP tool completed", "tool", "list_dependencies", "path", targetPath, "returned", result.Total, "total_discovered", result.TotalDiscovered, "direct", result.Direct, "transitive", result.Transitive)
+	logs.Debug(ctx, "MCP tool completed", "tool", "list_dependencies", "path", targetPath, "returned", result.GetTotal(), "total_discovered", result.GetTotalDiscovered(), "direct", result.GetDirect(), "transitive", result.GetTransitive())
 
-	return nil, result, nil
+	out, err := marshalMCPResult(result)
+	if err != nil {
+		otel.SetSpanError(span, err)
+		return nil, nil, err
+	}
+	return nil, out, nil
 }
 
-func (s *Server) generateSBOM(ctx context.Context, req *mcp.CallToolRequest, args GenerateSBOMInput) (*mcp.CallToolResult, SBOMResult, error) {
+func (s *Server) generateSBOM(ctx context.Context, req *mcp.CallToolRequest, raw json.RawMessage) (*mcp.CallToolResult, json.RawMessage, error) {
 	startTime := time.Now()
 
 	// Apply timeout for SBOM generation
@@ -2248,22 +1985,29 @@ func (s *Server) generateSBOM(ctx context.Context, req *mcp.CallToolRequest, arg
 		trace.WithAttributes(otel.AttrMCPTool.String("generate_sbom")))
 	defer span.End()
 
-	logs.Debug(ctx, "MCP tool invoked", "tool", "generate_sbom", "path", args.Path, "format", args.Format)
-
-	// Validate path to prevent path traversal and access to sensitive directories.
-	targetPath, err := normalizeLocalPath(args.Path)
-	if err != nil {
+	args := &mcpv1.GenerateSBOMRequest{}
+	if err := unmarshalMCPRequest(raw, args); err != nil {
 		otel.SetSpanError(span, err)
 		otel.RecordMCPToolCall(ctx, "generate_sbom", time.Since(startTime).Seconds(), false)
-		logs.Warn(ctx, "Invalid path in generate_sbom", "path", args.Path, "error", err)
-		return nil, SBOMResult{}, err
+		return nil, nil, err
 	}
 
-	format, err := flags.NormalizeSBOMOutputFormat(args.Format)
+	logs.Debug(ctx, "MCP tool invoked", "tool", "generate_sbom", "path", args.GetPath(), "format", args.GetFormat())
+
+	// Validate path to prevent path traversal and access to sensitive directories.
+	targetPath, err := normalizeLocalPath(args.GetPath())
 	if err != nil {
 		otel.SetSpanError(span, err)
 		otel.RecordMCPToolCall(ctx, "generate_sbom", time.Since(startTime).Seconds(), false)
-		return nil, SBOMResult{}, err
+		logs.Warn(ctx, "Invalid path in generate_sbom", "path", args.GetPath(), "error", err)
+		return nil, nil, err
+	}
+
+	format, err := flags.NormalizeSBOMOutputFormat(args.GetFormat())
+	if err != nil {
+		otel.SetSpanError(span, err)
+		otel.RecordMCPToolCall(ctx, "generate_sbom", time.Since(startTime).Seconds(), false)
+		return nil, nil, err
 	}
 
 	span.SetAttributes(
@@ -2272,10 +2016,10 @@ func (s *Server) generateSBOM(ctx context.Context, req *mcp.CallToolRequest, arg
 	)
 
 	opts := sbomx.Options{
-		Ref:            strings.TrimSpace(args.Ref),
-		Ecosystems:     normalizeMCPEcosystems(args.Ecosystems),
-		ExcludePaths:   s.excludePaths(args.ExcludePaths),
-		EnrichLicenses: args.EnrichLicenses,
+		Ref:            strings.TrimSpace(args.GetRef()),
+		Ecosystems:     normalizeMCPEcosystems(args.GetEcosystems()),
+		ExcludePaths:   s.excludePaths(args.GetExcludePaths()),
+		EnrichLicenses: args.GetEnrichLicenses(),
 		LicenseSource:  "depsdev",
 	}
 
@@ -2285,7 +2029,7 @@ func (s *Server) generateSBOM(ctx context.Context, req *mcp.CallToolRequest, arg
 		otel.SetSpanError(span, err)
 		otel.RecordMCPToolCall(ctx, "generate_sbom", time.Since(startTime).Seconds(), false)
 		logs.Warn(ctx, "SBOM generation failed", "path", targetPath, "error", err)
-		return nil, SBOMResult{}, err
+		return nil, nil, err
 	}
 
 	// Serialize to requested format
@@ -2296,21 +2040,21 @@ func (s *Server) generateSBOM(ctx context.Context, req *mcp.CallToolRequest, arg
 			err = fmt.Errorf("failed to serialize SBOM: %w", err)
 			otel.SetSpanError(span, err)
 			otel.RecordMCPToolCall(ctx, "generate_sbom", time.Since(startTime).Seconds(), false)
-			return nil, SBOMResult{}, err
+			return nil, nil, err
 		}
 	case "spdx-json":
 		if err := sbomx.WriteSPDXJSON(sbomResult.Document, &sb); err != nil {
 			err = fmt.Errorf("failed to serialize SBOM: %w", err)
 			otel.SetSpanError(span, err)
 			otel.RecordMCPToolCall(ctx, "generate_sbom", time.Since(startTime).Seconds(), false)
-			return nil, SBOMResult{}, err
+			return nil, nil, err
 		}
 	case "protobom-json":
 		if err := sbomx.WriteProtobomJSON(sbomResult.Document, &sb); err != nil {
 			err = fmt.Errorf("failed to serialize SBOM: %w", err)
 			otel.SetSpanError(span, err)
 			otel.RecordMCPToolCall(ctx, "generate_sbom", time.Since(startTime).Seconds(), false)
-			return nil, SBOMResult{}, err
+			return nil, nil, err
 		}
 	}
 
@@ -2324,15 +2068,20 @@ func (s *Server) generateSBOM(ctx context.Context, req *mcp.CallToolRequest, arg
 	otel.RecordMCPToolCall(ctx, "generate_sbom", time.Since(startTime).Seconds(), true)
 	logs.Debug(ctx, "MCP tool completed", "tool", "generate_sbom", "path", targetPath, "format", format, "components", components)
 
-	return nil, SBOMResult{
+	out, err := marshalMCPResult(&mcpv1.GenerateSBOMResult{
 		Path:         targetPath,
-		Ref:          sbomResult.Ref,
-		EffectiveRef: sbomResult.Target.EffectiveRef,
-		Commit:       sbomResult.Commit,
+		Ref:          strings.TrimSpace(sbomResult.Ref),
+		EffectiveRef: strings.TrimSpace(sbomResult.Target.EffectiveRef),
+		Commit:       strings.TrimSpace(sbomResult.Commit),
 		Format:       format,
-		Components:   components,
-		SBOM:         sb.String(),
-	}, nil
+		Components:   int32(components),
+		Sbom:         sb.String(),
+	})
+	if err != nil {
+		otel.SetSpanError(span, err)
+		return nil, nil, err
+	}
+	return nil, out, nil
 }
 
 func (s *Server) getRemediation(ctx context.Context, req *mcp.CallToolRequest, args GetRemediationInput) (*mcp.CallToolResult, GetRemediationResult, error) {
@@ -2458,7 +2207,7 @@ func (s *Server) getRemediation(ctx context.Context, req *mcp.CallToolRequest, a
 	return nil, result, nil
 }
 
-func (s *Server) analyzeDependencyGraph(ctx context.Context, req *mcp.CallToolRequest, args AnalyzeGraphInput) (*mcp.CallToolResult, AnalyzeGraphResult, error) {
+func (s *Server) analyzeDependencyGraph(ctx context.Context, req *mcp.CallToolRequest, raw json.RawMessage) (*mcp.CallToolResult, json.RawMessage, error) {
 	startTime := time.Now()
 
 	// Apply timeout for graph analysis
@@ -2469,22 +2218,29 @@ func (s *Server) analyzeDependencyGraph(ctx context.Context, req *mcp.CallToolRe
 		trace.WithAttributes(otel.AttrMCPTool.String("analyze_dependency_graph")))
 	defer span.End()
 
-	logs.Debug(ctx, "MCP tool invoked", "tool", "analyze_dependency_graph", "path", args.Path, "target_purl", args.TargetPURL)
+	args := &mcpv1.AnalyzeGraphRequest{}
+	if err := unmarshalMCPRequest(raw, args); err != nil {
+		otel.SetSpanError(span, err)
+		otel.RecordMCPToolCall(ctx, "analyze_dependency_graph", time.Since(startTime).Seconds(), false)
+		return nil, nil, err
+	}
 
-	if args.Path == "" {
+	logs.Debug(ctx, "MCP tool invoked", "tool", "analyze_dependency_graph", "path", args.GetPath(), "target_purl", args.GetTargetPurl())
+
+	if args.GetPath() == "" {
 		err := fmt.Errorf("path is required")
 		otel.SetSpanError(span, err)
 		otel.RecordMCPToolCall(ctx, "analyze_dependency_graph", time.Since(startTime).Seconds(), false)
-		return nil, AnalyzeGraphResult{}, err
+		return nil, nil, err
 	}
-	targetPath, err := normalizeLocalPath(args.Path)
+	targetPath, err := normalizeLocalPath(args.GetPath())
 	if err != nil {
 		otel.SetSpanError(span, err)
 		otel.RecordMCPToolCall(ctx, "analyze_dependency_graph", time.Since(startTime).Seconds(), false)
-		logs.Warn(ctx, "Invalid path in analyze_dependency_graph", "path", args.Path, "error", err)
-		return nil, AnalyzeGraphResult{}, err
+		logs.Warn(ctx, "Invalid path in analyze_dependency_graph", "path", args.GetPath(), "error", err)
+		return nil, nil, err
 	}
-	targetPURL := strings.TrimSpace(args.TargetPURL)
+	targetPURL := strings.TrimSpace(args.GetTargetPurl())
 	var parsedTargetPURL packageurl.PackageURL
 	hasTargetPURL := false
 	if targetPURL != "" {
@@ -2493,7 +2249,7 @@ func (s *Server) analyzeDependencyGraph(ctx context.Context, req *mcp.CallToolRe
 			err = fmt.Errorf("targetPurl must be a valid PURL: %w", err)
 			otel.SetSpanError(span, err)
 			otel.RecordMCPToolCall(ctx, "analyze_dependency_graph", time.Since(startTime).Seconds(), false)
-			return nil, AnalyzeGraphResult{}, err
+			return nil, nil, err
 		}
 		parsedTargetPURL = parsed
 		hasTargetPURL = true
@@ -2501,29 +2257,27 @@ func (s *Server) analyzeDependencyGraph(ctx context.Context, req *mcp.CallToolRe
 
 	span.SetAttributes(otel.AttrTargetPath.String(targetPath))
 
-	depGraph, target, err := s.buildDependencyGraph(ctx, targetPath, args.Ref, args.Ecosystems, args.ExcludePaths, args.ResolveTransitives, args.Extended)
+	depGraph, target, err := s.buildDependencyGraph(ctx, targetPath, args.GetRef(), args.GetEcosystems(), args.GetExcludePaths(), args.GetResolveTransitives(), args.GetExtended())
 	if err != nil {
 		otel.SetSpanError(span, err)
 		otel.RecordMCPToolCall(ctx, "analyze_dependency_graph", time.Since(startTime).Seconds(), false)
 		logs.Warn(ctx, "Graph analysis failed", "path", targetPath, "error", err)
-		return nil, AnalyzeGraphResult{}, err
+		return nil, nil, err
 	}
-	if err := s.annotateGraphVulnerabilities(ctx, targetPath, args.Ref, args.Ecosystems, args.ExcludePaths, depGraph); err != nil {
+	if err := s.annotateGraphVulnerabilities(ctx, targetPath, args.GetRef(), args.GetEcosystems(), args.GetExcludePaths(), depGraph); err != nil {
 		err = fmt.Errorf("scan failed: %w", err)
 		otel.SetSpanError(span, err)
 		otel.RecordMCPToolCall(ctx, "analyze_dependency_graph", time.Since(startTime).Seconds(), false)
 		logs.Warn(ctx, "Graph vulnerability annotation failed", "path", targetPath, "error", err)
-		return nil, AnalyzeGraphResult{}, err
+		return nil, nil, err
 	}
 
 	ref, effectiveRef, commit := mcpTargetRef(target)
-	result := AnalyzeGraphResult{
-		Path:            targetPath,
-		Ref:             ref,
-		EffectiveRef:    effectiveRef,
-		Commit:          commit,
-		VulnerablePaths: make([]GraphPath, 0),
-		PathsToTarget:   make([]GraphPath, 0),
+	result := &mcpv1.AnalyzeGraphResult{
+		Path:         targetPath,
+		Ref:          ref,
+		EffectiveRef: effectiveRef,
+		Commit:       commit,
 	}
 
 	// Get stats
@@ -2531,65 +2285,73 @@ func (s *Server) analyzeDependencyGraph(ctx context.Context, req *mcp.CallToolRe
 
 	// Find vulnerable paths
 	vulnPaths := depGraph.VulnerablePaths()
-	result.VulnerablePathCount = len(vulnPaths)
+	result.VulnerablePathCount = int32(len(vulnPaths))
 	result.VulnerablePathsTruncated = len(vulnPaths) > maxMCPVulnerablePaths
-	result.VulnerablePaths = make([]GraphPath, 0, min(len(vulnPaths), maxMCPVulnerablePaths))
+	result.VulnerablePaths = make([]*mcpv1.GraphPath, 0, min(len(vulnPaths), maxMCPVulnerablePaths))
 	for _, path := range vulnPaths {
 		if len(result.VulnerablePaths) >= maxMCPVulnerablePaths {
 			break
 		}
-		result.VulnerablePaths = append(result.VulnerablePaths, graphPathToMCP(path))
+		result.VulnerablePaths = append(result.VulnerablePaths, graphPathProto(path))
 	}
 
 	// If a target PURL is specified, find paths to matching graph nodes.
 	if hasTargetPURL {
 		resolvedPURLs := resolveGraphTargetPURLs(depGraph, parsedTargetPURL)
-		result.Target = &GraphTargetResult{
+		result.Target = &mcpv1.GraphTargetResult{
 			Query:        targetPURL,
 			Found:        len(resolvedPURLs) > 0,
-			MatchedPURLs: append([]string{}, resolvedPURLs...),
+			MatchedPurls: append([]string{}, resolvedPURLs...),
 		}
 		for _, resolvedPURL := range resolvedPURLs {
 			if node := depGraph.Node(resolvedPURL); node != nil {
-				result.Target.MatchedNodes = append(result.Target.MatchedNodes, graphNodeToMCP(node))
+				result.Target.MatchedNodes = append(result.Target.MatchedNodes, graphNodeProto(node))
 			}
 			paths := depGraph.PathsTo(resolvedPURL)
-			result.Target.PathCount += len(paths)
+			result.Target.PathCount += int32(len(paths))
 			for _, path := range paths {
 				if len(result.PathsToTarget) >= maxMCPPathsToTarget {
 					break
 				}
-				result.PathsToTarget = append(result.PathsToTarget, graphPathToMCP(path))
+				result.PathsToTarget = append(result.PathsToTarget, graphPathProto(path))
 			}
 		}
-		result.PathsToTargetTruncated = result.Target.PathCount > len(result.PathsToTarget)
+		result.PathsToTargetTruncated = int(result.Target.GetPathCount()) > len(result.PathsToTarget)
 		result.Target.Message = graphTargetMessage(result.Target)
 	}
 
 	span.SetAttributes(
-		otel.AttrMCPPackageCount.Int(result.Stats.TotalNodes),
-		attribute.Int("deputy.mcp.vulnerable_nodes", result.Stats.VulnerableNodes),
-		otel.AttrMCPGraphPathCount.Int(len(result.VulnerablePaths)),
+		otel.AttrMCPPackageCount.Int(int(result.GetStats().GetTotalNodes())),
+		attribute.Int("deputy.mcp.vulnerable_nodes", int(result.GetStats().GetVulnerableNodes())),
+		otel.AttrMCPGraphPathCount.Int(len(result.GetVulnerablePaths())),
 	)
 	otel.SetSpanOK(span)
 	otel.RecordMCPToolCall(ctx, "analyze_dependency_graph", time.Since(startTime).Seconds(), true)
-	logs.Debug(ctx, "MCP tool completed", "tool", "analyze_dependency_graph", "path", targetPath, "nodes", result.Stats.TotalNodes, "vulnerable_nodes", result.Stats.VulnerableNodes)
+	logs.Debug(ctx, "MCP tool completed", "tool", "analyze_dependency_graph", "path", targetPath, "nodes", result.GetStats().GetTotalNodes(), "vulnerable_nodes", result.GetStats().GetVulnerableNodes())
 
-	return nil, result, nil
+	out, err := marshalMCPResult(result)
+	if err != nil {
+		otel.SetSpanError(span, err)
+		return nil, nil, err
+	}
+	return nil, out, nil
 }
 
-func graphTargetMessage(target *GraphTargetResult) string {
+// graphTargetMessage summarizes a targetPurl query outcome in one sentence,
+// distinguishing not-found from present-but-pathless. Returns "" for a nil
+// target so the message field is omitted when no targetPurl was requested.
+func graphTargetMessage(target *mcpv1.GraphTargetResult) string {
 	switch {
 	case target == nil:
 		return ""
-	case !target.Found:
+	case !target.GetFound():
 		return "Target PURL was not found in the dependency graph"
-	case target.PathCount == 0:
+	case target.GetPathCount() == 0:
 		return "Target PURL is present in the dependency graph, but no dependency path from a direct/root dependency was resolved"
-	case target.PathCount == 1:
+	case target.GetPathCount() == 1:
 		return "1 dependency path to target found"
 	default:
-		return fmt.Sprintf("%d dependency paths to target found", target.PathCount)
+		return fmt.Sprintf("%d dependency paths to target found", target.GetPathCount())
 	}
 }
 
@@ -2649,34 +2411,30 @@ func (s *Server) annotateGraphVulnerabilities(ctx context.Context, targetPath, r
 	return nil
 }
 
-func mcpGraphStats(stats *graphv1.GraphStats) GraphStats {
-	ecosystems := make(map[string]int)
+// mcpGraphStats rebuilds graph stats for the MCP result: ecosystem keys are
+// normalized to their canonical output names (merging counts that collapse to
+// the same name); everything else carries over unchanged.
+func mcpGraphStats(stats *graphv1.GraphStats) *graphv1.GraphStats {
+	ecosystems := make(map[string]int32, len(stats.GetEcosystems()))
 	for k, v := range stats.GetEcosystems() {
-		ecosystems[mcpOutputEcosystem(k)] += int(v)
+		ecosystems[mcpOutputEcosystem(k)] += v
 	}
-	result := GraphStats{
-		TotalNodes:        int(stats.GetTotalNodes()),
-		DirectNodes:       int(stats.GetDirectNodes()),
-		TransitiveNodes:   int(stats.GetTransitiveNodes()),
-		MaxDepth:          int(stats.GetMaxDepth()),
-		MaxConnectedDepth: int(stats.GetMaxConnectedDepth()),
-		DisconnectedNodes: int(stats.GetDisconnectedNodes()),
-		VulnerableNodes:   int(stats.GetVulnerableNodes()),
-		Ecosystems:        ecosystems,
+	return &graphv1.GraphStats{
+		TotalNodes:         stats.GetTotalNodes(),
+		DirectNodes:        stats.GetDirectNodes(),
+		TransitiveNodes:    stats.GetTransitiveNodes(),
+		MaxDepth:           stats.GetMaxDepth(),
+		MaxConnectedDepth:  stats.GetMaxConnectedDepth(),
+		DisconnectedNodes:  stats.GetDisconnectedNodes(),
+		VulnerableNodes:    stats.GetVulnerableNodes(),
+		Ecosystems:         ecosystems,
+		ImportStatusCounts: stats.GetImportStatusCounts(),
 	}
-	if counts := stats.GetImportStatusCounts(); counts != nil {
-		result.ImportStatusCounts = &GraphImportStatusCounts{
-			Imported: int(counts.GetImported()),
-			Required: int(counts.GetRequired()),
-			Declared: int(counts.GetDeclared()),
-		}
-	}
-	return result
 }
 
 // === Graph, Triage, and Container Tool Implementations ===
 
-func (s *Server) graphWhy(ctx context.Context, req *mcp.CallToolRequest, args GraphWhyInput) (*mcp.CallToolResult, GraphWhyResult, error) {
+func (s *Server) graphWhy(ctx context.Context, req *mcp.CallToolRequest, raw json.RawMessage) (*mcp.CallToolResult, json.RawMessage, error) {
 	startTime := time.Now()
 
 	// Apply timeout for graph analysis
@@ -2687,23 +2445,30 @@ func (s *Server) graphWhy(ctx context.Context, req *mcp.CallToolRequest, args Gr
 		trace.WithAttributes(otel.AttrMCPTool.String("graph_why")))
 	defer span.End()
 
-	logs.Debug(ctx, "MCP tool invoked", "tool", "graph_why", "path", args.Path, "package", args.Package)
+	args := &mcpv1.GraphWhyRequest{}
+	if err := unmarshalMCPRequest(raw, args); err != nil {
+		otel.SetSpanError(span, err)
+		otel.RecordMCPToolCall(ctx, "graph_why", time.Since(startTime).Seconds(), false)
+		return nil, nil, err
+	}
 
-	packageQuery := strings.TrimSpace(args.Package)
+	logs.Debug(ctx, "MCP tool invoked", "tool", "graph_why", "path", args.GetPath(), "package", args.GetPackage())
+
+	packageQuery := strings.TrimSpace(args.GetPackage())
 
 	// Validate path to prevent path traversal and access to sensitive directories.
-	targetPath, err := normalizeLocalPath(args.Path)
+	targetPath, err := normalizeLocalPath(args.GetPath())
 	if err != nil {
 		otel.SetSpanError(span, err)
 		otel.RecordMCPToolCall(ctx, "graph_why", time.Since(startTime).Seconds(), false)
-		logs.Warn(ctx, "Invalid path in graph_why", "path", args.Path, "error", err)
-		return nil, GraphWhyResult{}, err
+		logs.Warn(ctx, "Invalid path in graph_why", "path", args.GetPath(), "error", err)
+		return nil, nil, err
 	}
 	if packageQuery == "" {
 		err := fmt.Errorf("package name is required")
 		otel.SetSpanError(span, err)
 		otel.RecordMCPToolCall(ctx, "graph_why", time.Since(startTime).Seconds(), false)
-		return nil, GraphWhyResult{}, err
+		return nil, nil, err
 	}
 
 	span.SetAttributes(
@@ -2711,12 +2476,12 @@ func (s *Server) graphWhy(ctx context.Context, req *mcp.CallToolRequest, args Gr
 		otel.AttrMCPGraphPackage.String(packageQuery),
 	)
 
-	depGraph, target, err := s.buildDependencyGraph(ctx, targetPath, args.Ref, args.Ecosystems, args.ExcludePaths, args.ResolveTransitives, args.Extended)
+	depGraph, target, err := s.buildDependencyGraph(ctx, targetPath, args.GetRef(), args.GetEcosystems(), args.GetExcludePaths(), args.GetResolveTransitives(), args.GetExtended())
 	if err != nil {
 		otel.SetSpanError(span, err)
 		otel.RecordMCPToolCall(ctx, "graph_why", time.Since(startTime).Seconds(), false)
 		logs.Warn(ctx, "Graph why failed", "path", targetPath, "package", packageQuery, "error", err)
-		return nil, GraphWhyResult{}, err
+		return nil, nil, err
 	}
 	ref, effectiveRef, commit := mcpTargetRef(target)
 
@@ -2727,53 +2492,60 @@ func (s *Server) graphWhy(ctx context.Context, req *mcp.CallToolRequest, args Gr
 		otel.SetSpanOK(span)
 		otel.RecordMCPToolCall(ctx, "graph_why", time.Since(startTime).Seconds(), true)
 		logs.Debug(ctx, "MCP tool completed", "tool", "graph_why", "package", packageQuery, "found", false)
-		return nil, GraphWhyResult{
+		out, err := marshalMCPResult(&mcpv1.GraphWhyResult{
 			Package:      packageQuery,
 			Ref:          ref,
 			EffectiveRef: effectiveRef,
 			Commit:       commit,
-			Found:        false,
-			Paths:        []GraphPath{},
 			Message:      fmt.Sprintf("Package %q not found in dependency graph", packageQuery),
-		}, nil
+		})
+		if err != nil {
+			otel.SetSpanError(span, err)
+			return nil, nil, err
+		}
+		return nil, out, nil
 	}
 
 	// Use the best match
 	match := matches[0]
-	result := GraphWhyResult{
+	result := &mcpv1.GraphWhyResult{
 		Package:      match.Name,
 		Version:      match.Version,
-		PURL:         match.Purl,
+		Purl:         match.Purl,
 		Ref:          ref,
 		EffectiveRef: effectiveRef,
 		Commit:       commit,
 		Direct:       match.Direct,
 		Found:        true,
-		MatchedNode:  graphPathNodePtr(match),
-		Paths:        make([]GraphPath, 0),
+		MatchedNode:  graphNodeProto(match),
 	}
 
 	// Return direct dependencies as a one-node path so agents can consume
 	// direct and transitive graph answers with the same structured shape.
 	if match.Direct {
-		result.Paths = []GraphPath{graphPathToMCP(graph.Path{match})}
+		result.Paths = []*mcpv1.GraphPath{graphPathProto(graph.Path{match})}
 		result.PathCount = 1
 		result.Message = "Direct dependency"
 		span.SetAttributes(
 			otel.AttrMCPGraphFound.Bool(true),
 			otel.AttrMCPGraphDirect.Bool(true),
-			otel.AttrMCPGraphPathCount.Int(result.PathCount),
+			otel.AttrMCPGraphPathCount.Int(int(result.GetPathCount())),
 		)
 		otel.SetSpanOK(span)
 		otel.RecordMCPToolCall(ctx, "graph_why", time.Since(startTime).Seconds(), true)
-		logs.Debug(ctx, "MCP tool completed", "tool", "graph_why", "package", packageQuery, "found", true, "direct", true, "paths", result.PathCount)
-		return nil, result, nil
+		logs.Debug(ctx, "MCP tool completed", "tool", "graph_why", "package", packageQuery, "found", true, "direct", true, "paths", result.GetPathCount())
+		out, err := marshalMCPResult(result)
+		if err != nil {
+			otel.SetSpanError(span, err)
+			return nil, nil, err
+		}
+		return nil, out, nil
 	}
 
 	// Find paths to the package
 	paths := depGraph.PathsTo(match.Purl)
 	if len(paths) == 0 {
-		result.Message = graphquery.NoDependencyPathMessage(match, args.ResolveTransitives, args.Extended)
+		result.Message = graphquery.NoDependencyPathMessage(match, args.GetResolveTransitives(), args.GetExtended())
 		span.SetAttributes(
 			otel.AttrMCPGraphFound.Bool(true),
 			otel.AttrMCPGraphPathCount.Int(0),
@@ -2781,22 +2553,27 @@ func (s *Server) graphWhy(ctx context.Context, req *mcp.CallToolRequest, args Gr
 		otel.SetSpanOK(span)
 		otel.RecordMCPToolCall(ctx, "graph_why", time.Since(startTime).Seconds(), true)
 		logs.Debug(ctx, "MCP tool completed", "tool", "graph_why", "package", packageQuery, "found", true, "paths", 0)
-		return nil, result, nil
+		out, err := marshalMCPResult(result)
+		if err != nil {
+			otel.SetSpanError(span, err)
+			return nil, nil, err
+		}
+		return nil, out, nil
 	}
 
 	// Convert paths
 	limit := maxMCPGraphWhyPaths
-	if args.ShowAll {
+	if args.GetShowAll() {
 		limit = maxMCPGraphWhyShowAllPaths
 	}
-	result.Paths = make([]GraphPath, 0, min(len(paths), limit))
+	result.Paths = make([]*mcpv1.GraphPath, 0, min(len(paths), limit))
 	for i, path := range paths {
 		if i >= limit {
 			break
 		}
-		result.Paths = append(result.Paths, graphPathToMCP(path))
+		result.Paths = append(result.Paths, graphPathProto(path))
 	}
-	result.PathCount = len(paths)
+	result.PathCount = int32(len(paths))
 	result.PathsTruncated = len(paths) > limit
 
 	if len(paths) == 1 {
@@ -2808,21 +2585,21 @@ func (s *Server) graphWhy(ctx context.Context, req *mcp.CallToolRequest, args Gr
 	span.SetAttributes(
 		otel.AttrMCPGraphFound.Bool(true),
 		otel.AttrMCPGraphDirect.Bool(false),
-		otel.AttrMCPGraphPathCount.Int(result.PathCount),
+		otel.AttrMCPGraphPathCount.Int(int(result.GetPathCount())),
 	)
 	otel.SetSpanOK(span)
 	otel.RecordMCPToolCall(ctx, "graph_why", time.Since(startTime).Seconds(), true)
-	logs.Debug(ctx, "MCP tool completed", "tool", "graph_why", "package", packageQuery, "found", true, "paths", result.PathCount)
+	logs.Debug(ctx, "MCP tool completed", "tool", "graph_why", "package", packageQuery, "found", true, "paths", result.GetPathCount())
 
-	return nil, result, nil
+	out, err := marshalMCPResult(result)
+	if err != nil {
+		otel.SetSpanError(span, err)
+		return nil, nil, err
+	}
+	return nil, out, nil
 }
 
-func graphPathNodePtr(node *graph.Node) *GraphPathNode {
-	out := graphNodeToMCP(node)
-	return &out
-}
-
-func (s *Server) graphNeeds(ctx context.Context, req *mcp.CallToolRequest, args GraphNeedsInput) (*mcp.CallToolResult, GraphNeedsResult, error) {
+func (s *Server) graphNeeds(ctx context.Context, req *mcp.CallToolRequest, raw json.RawMessage) (*mcp.CallToolResult, json.RawMessage, error) {
 	startTime := time.Now()
 
 	// Apply timeout for graph analysis
@@ -2833,23 +2610,30 @@ func (s *Server) graphNeeds(ctx context.Context, req *mcp.CallToolRequest, args 
 		trace.WithAttributes(otel.AttrMCPTool.String("graph_needs")))
 	defer span.End()
 
-	logs.Debug(ctx, "MCP tool invoked", "tool", "graph_needs", "path", args.Path, "package", args.Package)
+	args := &mcpv1.GraphNeedsRequest{}
+	if err := unmarshalMCPRequest(raw, args); err != nil {
+		otel.SetSpanError(span, err)
+		otel.RecordMCPToolCall(ctx, "graph_needs", time.Since(startTime).Seconds(), false)
+		return nil, nil, err
+	}
 
-	packageQuery := strings.TrimSpace(args.Package)
+	logs.Debug(ctx, "MCP tool invoked", "tool", "graph_needs", "path", args.GetPath(), "package", args.GetPackage())
+
+	packageQuery := strings.TrimSpace(args.GetPackage())
 
 	// Validate path to prevent path traversal and access to sensitive directories.
-	targetPath, err := normalizeLocalPath(args.Path)
+	targetPath, err := normalizeLocalPath(args.GetPath())
 	if err != nil {
 		otel.SetSpanError(span, err)
 		otel.RecordMCPToolCall(ctx, "graph_needs", time.Since(startTime).Seconds(), false)
-		logs.Warn(ctx, "Invalid path in graph_needs", "path", args.Path, "error", err)
-		return nil, GraphNeedsResult{}, err
+		logs.Warn(ctx, "Invalid path in graph_needs", "path", args.GetPath(), "error", err)
+		return nil, nil, err
 	}
 	if packageQuery == "" {
 		err := fmt.Errorf("package name is required")
 		otel.SetSpanError(span, err)
 		otel.RecordMCPToolCall(ctx, "graph_needs", time.Since(startTime).Seconds(), false)
-		return nil, GraphNeedsResult{}, err
+		return nil, nil, err
 	}
 
 	span.SetAttributes(
@@ -2857,12 +2641,12 @@ func (s *Server) graphNeeds(ctx context.Context, req *mcp.CallToolRequest, args 
 		otel.AttrMCPGraphPackage.String(packageQuery),
 	)
 
-	depGraph, target, err := s.buildDependencyGraph(ctx, targetPath, args.Ref, args.Ecosystems, args.ExcludePaths, args.ResolveTransitives, args.Extended)
+	depGraph, target, err := s.buildDependencyGraph(ctx, targetPath, args.GetRef(), args.GetEcosystems(), args.GetExcludePaths(), args.GetResolveTransitives(), args.GetExtended())
 	if err != nil {
 		otel.SetSpanError(span, err)
 		otel.RecordMCPToolCall(ctx, "graph_needs", time.Since(startTime).Seconds(), false)
 		logs.Warn(ctx, "Graph needs failed", "path", targetPath, "package", packageQuery, "error", err)
-		return nil, GraphNeedsResult{}, err
+		return nil, nil, err
 	}
 	ref, effectiveRef, commit := mcpTargetRef(target)
 
@@ -2873,28 +2657,30 @@ func (s *Server) graphNeeds(ctx context.Context, req *mcp.CallToolRequest, args 
 		otel.SetSpanOK(span)
 		otel.RecordMCPToolCall(ctx, "graph_needs", time.Since(startTime).Seconds(), true)
 		logs.Debug(ctx, "MCP tool completed", "tool", "graph_needs", "package", packageQuery, "found", false)
-		return nil, GraphNeedsResult{
+		out, err := marshalMCPResult(&mcpv1.GraphNeedsResult{
 			Package:      packageQuery,
 			Ref:          ref,
 			EffectiveRef: effectiveRef,
 			Commit:       commit,
-			Found:        false,
-			Dependents:   []DependencyInfo{},
 			Message:      fmt.Sprintf("Package %q not found in dependency graph", packageQuery),
-		}, nil
+		})
+		if err != nil {
+			otel.SetSpanError(span, err)
+			return nil, nil, err
+		}
+		return nil, out, nil
 	}
 
-	result := GraphNeedsResult{
+	result := &mcpv1.GraphNeedsResult{
 		Package:      match.Name,
 		Version:      match.Version,
-		PURL:         match.Purl,
+		Purl:         match.Purl,
 		Ref:          ref,
 		EffectiveRef: effectiveRef,
 		Commit:       commit,
 		Direct:       match.Direct,
 		Found:        true,
-		MatchedNode:  graphPathNodePtr(match),
-		Dependents:   []DependencyInfo{},
+		MatchedNode:  graphNodeProto(match),
 	}
 
 	// Collect ancestors (packages that depend on this one). Ancestors is a BFS
@@ -2902,15 +2688,14 @@ func (s *Server) graphNeeds(ctx context.Context, req *mcp.CallToolRequest, args 
 	// result here means the node genuinely has no dependents (e.g. a root/direct
 	// dependency); NoDependentsMessage explains that case below.
 	for ancestor := range depGraph.Ancestors(match.Purl) {
-		dep := DependencyInfo{
+		result.Dependents = append(result.Dependents, &mcpv1.DependencyInfo{
 			Name:      ancestor.Name,
 			Version:   ancestor.Version,
 			Ecosystem: mcpOutputEcosystem(ancestor.Ecosystem),
-			PURL:      ancestor.Purl,
+			Purl:      ancestor.Purl,
 			Direct:    ancestor.Direct,
 			Locations: ancestor.Locations,
-		}
-		result.Dependents = append(result.Dependents, dep)
+		})
 		if ancestor.Direct {
 			result.DirectCount++
 		} else {
@@ -2919,7 +2704,7 @@ func (s *Server) graphNeeds(ctx context.Context, req *mcp.CallToolRequest, args 
 	}
 
 	if len(result.Dependents) == 0 {
-		result.Message = graphquery.NoDependentsMessage(match, args.ResolveTransitives)
+		result.Message = graphquery.NoDependentsMessage(match, args.GetResolveTransitives())
 	}
 	sortDependencyInfos(result.Dependents)
 
@@ -2931,21 +2716,28 @@ func (s *Server) graphNeeds(ctx context.Context, req *mcp.CallToolRequest, args 
 	otel.RecordMCPToolCall(ctx, "graph_needs", time.Since(startTime).Seconds(), true)
 	logs.Debug(ctx, "MCP tool completed", "tool", "graph_needs", "package", packageQuery, "found", true, "dependents", len(result.Dependents))
 
-	return nil, result, nil
+	out, err := marshalMCPResult(result)
+	if err != nil {
+		otel.SetSpanError(span, err)
+		return nil, nil, err
+	}
+	return nil, out, nil
 }
 
-func sortDependencyInfos(deps []DependencyInfo) {
-	slices.SortFunc(deps, func(a, b DependencyInfo) int {
-		if a.Direct != b.Direct {
-			if a.Direct {
+// sortDependencyInfos orders dependents deterministically: direct dependencies
+// first, then by name, then by PURL.
+func sortDependencyInfos(deps []*mcpv1.DependencyInfo) {
+	slices.SortFunc(deps, func(a, b *mcpv1.DependencyInfo) int {
+		if a.GetDirect() != b.GetDirect() {
+			if a.GetDirect() {
 				return -1
 			}
 			return 1
 		}
-		if c := strings.Compare(a.Name, b.Name); c != 0 {
+		if c := strings.Compare(a.GetName(), b.GetName()); c != 0 {
 			return c
 		}
-		return strings.Compare(a.PURL, b.PURL)
+		return strings.Compare(a.GetPurl(), b.GetPurl())
 	})
 }
 
@@ -4184,11 +3976,13 @@ func advisoryToExplanation(advisory *vulnerabilityv1.Advisory, referenceLimit in
 	return explanation
 }
 
-func graphPathToMCP(path graph.Path) GraphPath {
-	return GraphPath{
+// graphPathProto converts a graph path to its mcp.v1 shape: display names,
+// structured node details, and the node count as depth.
+func graphPathProto(path graph.Path) *mcpv1.GraphPath {
+	return &mcpv1.GraphPath{
 		Nodes:       pathToStrings(path),
 		NodeDetails: pathToNodeDetails(path),
-		Depth:       path.Len(),
+		Depth:       int32(path.Len()),
 	}
 }
 
@@ -4201,28 +3995,27 @@ func pathToStrings(path graph.Path) []string {
 	return result
 }
 
-func pathToNodeDetails(path graph.Path) []GraphPathNode {
-	if len(path) == 0 {
-		return []GraphPathNode{}
-	}
-	result := make([]GraphPathNode, len(path))
+func pathToNodeDetails(path graph.Path) []*mcpv1.GraphPathNode {
+	result := make([]*mcpv1.GraphPathNode, len(path))
 	for i, node := range path {
-		result[i] = graphNodeToMCP(node)
+		result[i] = graphNodeProto(node)
 	}
 	return result
 }
 
-func graphNodeToMCP(node *graph.Node) GraphPathNode {
+// graphNodeProto converts a graph node to its mcp.v1 shape with the canonical
+// output ecosystem name.
+func graphNodeProto(node *graph.Node) *mcpv1.GraphPathNode {
 	if node == nil {
-		return GraphPathNode{}
+		return &mcpv1.GraphPathNode{}
 	}
-	return GraphPathNode{
+	return &mcpv1.GraphPathNode{
 		Name:         node.GetName(),
 		Version:      node.GetVersion(),
 		Ecosystem:    mcpOutputEcosystem(node.GetEcosystem()),
-		PURL:         node.GetPurl(),
+		Purl:         node.GetPurl(),
 		Direct:       node.GetDirect(),
-		Depth:        int(node.GetDepth()),
+		Depth:        node.GetDepth(),
 		Disconnected: node.GetDepth() == graph.DepthDisconnected,
 		ImportStatus: graphImportStatusString(node.GetImportStatus()),
 	}

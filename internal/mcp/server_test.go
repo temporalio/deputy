@@ -1294,6 +1294,7 @@ func TestLocalPathToolSchemasExposeAgentControls(t *testing.T) {
 		name       string
 		properties []string
 		required   []string
+		booleans   []string
 	}{
 		{
 			name:       "scan_directory",
@@ -1304,11 +1305,13 @@ func TestLocalPathToolSchemasExposeAgentControls(t *testing.T) {
 			name:       "list_dependencies",
 			properties: []string{"path", "directOnly", "ref", "ecosystems", "excludePaths"},
 			required:   []string{"path"},
+			booleans:   []string{"directOnly"},
 		},
 		{
 			name:       "generate_sbom",
 			properties: []string{"path", "ref", "format", "enrichLicenses", "ecosystems", "excludePaths"},
 			required:   []string{"path"},
+			booleans:   []string{"enrichLicenses"},
 		},
 		{
 			name:       "get_remediation",
@@ -1319,16 +1322,19 @@ func TestLocalPathToolSchemasExposeAgentControls(t *testing.T) {
 			name:       "analyze_dependency_graph",
 			properties: []string{"path", "targetPurl", "ref", "ecosystems", "excludePaths", "resolveTransitives", "extended"},
 			required:   []string{"path"},
+			booleans:   []string{"resolveTransitives", "extended"},
 		},
 		{
 			name:       "graph_why",
 			properties: []string{"path", "package", "ref", "showAll", "ecosystems", "excludePaths", "resolveTransitives", "extended"},
 			required:   []string{"package", "path"},
+			booleans:   []string{"showAll", "resolveTransitives", "extended"},
 		},
 		{
 			name:       "graph_needs",
 			properties: []string{"path", "package", "ref", "ecosystems", "excludePaths", "resolveTransitives", "extended"},
 			required:   []string{"package", "path"},
+			booleans:   []string{"resolveTransitives", "extended"},
 		},
 		{
 			name:       "triage_vulnerabilities",
@@ -1348,6 +1354,19 @@ func TestLocalPathToolSchemasExposeAgentControls(t *testing.T) {
 			for _, property := range tt.properties {
 				if _, ok := properties[property]; !ok {
 					t.Fatalf("%s schema is missing %s property", tt.name, property)
+				}
+			}
+			pathProperty := schemaObject(t, properties, "path")
+			if got := pathProperty["minLength"]; got != float64(1) {
+				t.Fatalf("%s path minLength = %v, want 1", tt.name, got)
+			}
+			if got := pathProperty["pattern"]; got != "\\S" {
+				t.Fatalf("%s path pattern = %v, want non-whitespace guard", tt.name, got)
+			}
+			for _, property := range tt.booleans {
+				boolProperty := schemaObject(t, properties, property)
+				if got := boolProperty["type"]; got != "boolean" {
+					t.Fatalf("%s %s type = %v, want boolean", tt.name, property, got)
 				}
 			}
 			for _, property := range []string{"ecosystems", "excludePaths"} {
@@ -1393,6 +1412,14 @@ func TestLocalPathToolSchemasExposeAgentControls(t *testing.T) {
 				}
 				if !strings.Contains(description, "import status") {
 					t.Fatalf("%s extended description = %q, want import status mentioned", tt.name, description)
+				}
+			}
+			if tt.name == "analyze_dependency_graph" {
+				// The targetPurl guard is enforced client-side by strict MCP
+				// clients, so the advertised pattern must stay in the schema.
+				targetPurl := schemaObject(t, properties, "targetPurl")
+				if got := targetPurl["pattern"]; got != "^[Pp][Kk][Gg]:\\S+" {
+					t.Fatalf("%s targetPurl pattern = %v, want PURL prefix guard", tt.name, got)
 				}
 			}
 			if tt.name == "get_remediation" {
@@ -1508,10 +1535,13 @@ func TestGraphToolsReturnStableEmptyCollections(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListTools failed: %v", err)
 	}
+	// The output schemas are derived from the deputy.mcp.v1 descriptors;
+	// protojson omits zero values on the wire, so nothing is "required".
+	// Guard that the collections stay in the advertised contract instead.
 	analyzeSchema := toolOutputSchema(t, findMCPTool(t, tools.Tools, "analyze_dependency_graph"))
-	requireSchemaRequiredContains(t, analyzeSchema, "vulnerablePaths", "pathsToTarget")
+	requireSchemaProperties(t, analyzeSchema, "vulnerablePaths", "pathsToTarget")
 	graphWhySchema := toolOutputSchema(t, findMCPTool(t, tools.Tools, "graph_why"))
-	requireSchemaRequiredContains(t, graphWhySchema, "paths")
+	requireSchemaProperties(t, graphWhySchema, "paths")
 
 	result, err := clientSession.CallTool(ctx, &mcpsdk.CallToolParams{
 		Name: "analyze_dependency_graph",
@@ -1527,13 +1557,13 @@ func TestGraphToolsReturnStableEmptyCollections(t *testing.T) {
 		t.Fatalf("analyze_dependency_graph returned error result: %#v", result)
 	}
 	structured := structuredContentObject(t, result)
-	requireStructuredEmptyArray(t, structured, "vulnerablePaths")
-	requireStructuredEmptyArray(t, structured, "pathsToTarget")
+	requireStructuredEmptyCollection(t, structured, "vulnerablePaths")
+	requireStructuredEmptyCollection(t, structured, "pathsToTarget")
 	target, ok := structured["target"].(map[string]any)
 	if !ok {
 		t.Fatalf("target structured content has type %T, want object", structured["target"])
 	}
-	requireStructuredEmptyArray(t, target, "matchedPurls")
+	requireStructuredEmptyCollection(t, target, "matchedPurls")
 
 	result, err = clientSession.CallTool(ctx, &mcpsdk.CallToolParams{
 		Name: "graph_why",
@@ -1549,7 +1579,7 @@ func TestGraphToolsReturnStableEmptyCollections(t *testing.T) {
 		t.Fatalf("graph_why returned error result: %#v", result)
 	}
 	structured = structuredContentObject(t, result)
-	requireStructuredEmptyArray(t, structured, "paths")
+	requireStructuredEmptyCollection(t, structured, "paths")
 }
 
 func TestGraphWhyCallToolReturnsMatchedNodeForPathlessPackage(t *testing.T) {
@@ -1589,7 +1619,7 @@ func TestGraphWhyCallToolReturnsMatchedNodeForPathlessPackage(t *testing.T) {
 	}
 
 	structured := structuredContentObject(t, result)
-	requireStructuredEmptyArray(t, structured, "paths")
+	requireStructuredEmptyCollection(t, structured, "paths")
 	matchedNode, ok := structured["matchedNode"].(map[string]any)
 	if !ok {
 		t.Fatalf("matchedNode structured content has type %T, want object", structured["matchedNode"])
@@ -1795,7 +1825,7 @@ func TestGenerateSBOMToolContractRequiresLocalPath(t *testing.T) {
 	if !ok {
 		t.Fatalf("generate_sbom path description has type %T, want string", pathProperty["description"])
 	}
-	if !strings.Contains(description, "Local directory") {
+	if !strings.Contains(strings.ToLower(description), "local directory") {
 		t.Fatalf("generate_sbom path description = %q, want local directory wording", description)
 	}
 
@@ -1821,8 +1851,14 @@ func TestGenerateSBOMToolContractRequiresLocalPath(t *testing.T) {
 	if !slices.Equal(formats, wantFormats) {
 		t.Fatalf("generate_sbom format enum = %v, want %v", formats, wantFormats)
 	}
-	if got, want := formatProperty["default"], "cyclonedx-json"; got != want {
-		t.Fatalf("generate_sbom format default = %v, want %q", got, want)
+	// The descriptor-derived schema no longer advertises a JSON Schema
+	// "default"; the default lives in the proto comment so agents still see it.
+	formatDescription, ok := formatProperty["description"].(string)
+	if !ok {
+		t.Fatalf("generate_sbom format description has type %T, want string", formatProperty["description"])
+	}
+	if !strings.Contains(formatDescription, "cyclonedx-json") {
+		t.Fatalf("generate_sbom format description = %q, want default cyclonedx-json mentioned", formatDescription)
 	}
 }
 
@@ -1908,6 +1944,39 @@ func requireStructuredEmptyArray(t *testing.T, object map[string]any, field stri
 	array := structuredArray(t, object, field)
 	if len(array) != 0 {
 		t.Fatalf("structured content %q has length %d, want 0", field, len(array))
+	}
+}
+
+// requireStructuredEmptyCollection asserts a proto-contract collection field
+// carries no elements. The MCP protojson dialect omits empty repeated fields,
+// so on the wire absence and an explicit empty array both mean empty.
+func requireStructuredEmptyCollection(t *testing.T, object map[string]any, field string) {
+	t.Helper()
+
+	value, ok := object[field]
+	if !ok {
+		return
+	}
+	array, ok := value.([]any)
+	if !ok {
+		t.Fatalf("structured content %q has type %T, want array", field, value)
+	}
+	if len(array) != 0 {
+		t.Fatalf("structured content %q has length %d, want 0", field, len(array))
+	}
+}
+
+// requireSchemaProperties asserts the schema advertises each property.
+// Descriptor-derived result schemas carry no required list (protojson omits
+// zero values on the wire), so property presence is the advertised contract.
+func requireSchemaProperties(t *testing.T, schema map[string]any, fields ...string) {
+	t.Helper()
+
+	properties := schemaObject(t, schema, "properties")
+	for _, field := range fields {
+		if _, ok := properties[field]; !ok {
+			t.Fatalf("schema is missing %q property", field)
+		}
 	}
 }
 
@@ -2960,14 +3029,14 @@ func TestListDependencies(t *testing.T) {
 	ctx := context.Background()
 
 	t.Run("missing path", func(t *testing.T) {
-		_, _, err := s.listDependencies(ctx, nil, ListDependenciesInput{})
+		_, err := callProtoTool(t, ctx, s.listDependencies, &mcpv1.ListDependenciesRequest{}, &mcpv1.ListDependenciesResult{})
 		if err == nil {
 			t.Error("expected error for missing path")
 		}
 	})
 
 	t.Run("list all", func(t *testing.T) {
-		_, result, err := s.listDependencies(ctx, nil, ListDependenciesInput{Path: "/test/path"})
+		result, err := callProtoTool(t, ctx, s.listDependencies, &mcpv1.ListDependenciesRequest{Path: "/test/path"}, &mcpv1.ListDependenciesResult{})
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -3008,10 +3077,10 @@ func TestListDependencies(t *testing.T) {
 		}
 		filteredServer := NewServer(WithClients(newMockClients(mockClientsConfig{listHandler: mockFilteredList})))
 
-		_, result, err := filteredServer.listDependencies(ctx, nil, ListDependenciesInput{
+		result, err := callProtoTool(t, ctx, filteredServer.listDependencies, &mcpv1.ListDependenciesRequest{
 			Path:       "/test/path",
 			DirectOnly: true,
-		})
+		}, &mcpv1.ListDependenciesResult{})
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -3028,10 +3097,10 @@ func TestListDependencies(t *testing.T) {
 
 	t.Run("forwards exclude paths", func(t *testing.T) {
 		mockList.requests = nil
-		_, _, err := s.listDependencies(ctx, nil, ListDependenciesInput{
+		_, err := callProtoTool(t, ctx, s.listDependencies, &mcpv1.ListDependenciesRequest{
 			Path:         "/test/path",
 			ExcludePaths: []string{".bin/**"},
-		})
+		}, &mcpv1.ListDependenciesResult{})
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -3050,10 +3119,10 @@ func TestListDependencies(t *testing.T) {
 			CommitHash:   "def456",
 		}
 		mockList.requests = nil
-		_, result, err := s.listDependencies(ctx, nil, ListDependenciesInput{
+		result, err := callProtoTool(t, ctx, s.listDependencies, &mcpv1.ListDependenciesRequest{
 			Path: "/test/path",
 			Ref:  " feature/deps ",
-		})
+		}, &mcpv1.ListDependenciesResult{})
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -3074,17 +3143,17 @@ func TestGenerateSBOM(t *testing.T) {
 	ctx := context.Background()
 
 	t.Run("missing path", func(t *testing.T) {
-		_, _, err := s.generateSBOM(ctx, nil, GenerateSBOMInput{})
+		_, err := callProtoTool(t, ctx, s.generateSBOM, &mcpv1.GenerateSBOMRequest{}, &mcpv1.GenerateSBOMResult{})
 		if err == nil {
 			t.Error("expected error for missing path")
 		}
 	})
 
 	t.Run("invalid format", func(t *testing.T) {
-		_, _, err := s.generateSBOM(ctx, nil, GenerateSBOMInput{
+		_, err := callProtoTool(t, ctx, s.generateSBOM, &mcpv1.GenerateSBOMRequest{
 			Path:   "/test/path",
 			Format: "invalid-format",
-		})
+		}, &mcpv1.GenerateSBOMResult{})
 		if err == nil {
 			t.Error("expected error for invalid format")
 		}
@@ -3133,9 +3202,19 @@ func TestGenerateSBOMFormatMatchesCLI(t *testing.T) {
 // TestGenerateSBOMFormatEnumIsServerAccepted guards the invariant that broke in
 // practice: MCP clients enforce the input-schema enum before the call reaches
 // Deputy, so every advertised enum value must be one the server accepts, and the
-// short aliases must be advertised (not just accepted server-side).
+// short aliases must be advertised (not just accepted server-side). The enum is
+// derived from the deputy.mcp.v1 GenerateSBOMRequest descriptor, the same way
+// the registered tool schema is.
 func TestGenerateSBOMFormatEnumIsServerAccepted(t *testing.T) {
-	enum := mcpSBOMFormatProperty().Enum
+	inputSchema, _ := mustToolSchemas(
+		(&mcpv1.GenerateSBOMRequest{}).ProtoReflect().Descriptor(),
+		(&mcpv1.GenerateSBOMResult{}).ProtoReflect().Descriptor(),
+	)
+	formatProperty, ok := inputSchema.Properties["format"]
+	if !ok || formatProperty == nil {
+		t.Fatal("generate_sbom input schema is missing the format property")
+	}
+	enum := formatProperty.Enum
 	if len(enum) == 0 {
 		t.Fatal("sbom format enum is empty")
 	}
@@ -3615,7 +3694,7 @@ func TestAnalyzeDependencyGraph(t *testing.T) {
 	ctx := context.Background()
 
 	t.Run("missing path", func(t *testing.T) {
-		_, _, err := s.analyzeDependencyGraph(ctx, nil, AnalyzeGraphInput{})
+		_, err := callProtoTool(t, ctx, s.analyzeDependencyGraph, &mcpv1.AnalyzeGraphRequest{}, &mcpv1.AnalyzeGraphResult{})
 		if err == nil {
 			t.Error("expected error for missing path")
 		}
@@ -3624,11 +3703,11 @@ func TestAnalyzeDependencyGraph(t *testing.T) {
 	t.Run("basic graph analysis", func(t *testing.T) {
 		mockScan.requests = nil
 		mockGraph.requests = nil
-		_, result, err := s.analyzeDependencyGraph(ctx, nil, AnalyzeGraphInput{
+		result, err := callProtoTool(t, ctx, s.analyzeDependencyGraph, &mcpv1.AnalyzeGraphRequest{
 			Path:         "/test/path",
-			TargetPURL:   testChildPURL,
+			TargetPurl:   testChildPURL,
 			ExcludePaths: []string{".bin/**"},
-		})
+		}, &mcpv1.AnalyzeGraphResult{})
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -3656,10 +3735,10 @@ func TestAnalyzeDependencyGraph(t *testing.T) {
 		if !result.Target.Found {
 			t.Fatal("expected target summary to report found")
 		}
-		if got, want := result.Target.PathCount, 1; got != want {
+		if got, want := int(result.Target.PathCount), 1; got != want {
 			t.Fatalf("target path count = %d, want %d", got, want)
 		}
-		if got, want := result.Target.MatchedPURLs, []string{testChildPURL}; !slicesEqual(got, want) {
+		if got, want := result.Target.MatchedPurls, []string{testChildPURL}; !slicesEqual(got, want) {
 			t.Fatalf("target matched PURLs = %v, want %v", got, want)
 		}
 		if !strings.Contains(result.Target.Message, "1 dependency path") {
@@ -3673,8 +3752,8 @@ func TestAnalyzeDependencyGraph(t *testing.T) {
 			t.Fatalf("expected 2 structured path nodes, got %d", len(result.PathsToTarget[0].NodeDetails))
 		}
 		child := result.PathsToTarget[0].NodeDetails[1]
-		if child.PURL != testChildPURL {
-			t.Errorf("structured child PURL = %q, want %q", child.PURL, testChildPURL)
+		if child.Purl != testChildPURL {
+			t.Errorf("structured child PURL = %q, want %q", child.Purl, testChildPURL)
 		}
 		if child.Ecosystem != "go" {
 			t.Errorf("structured child ecosystem = %q, want go", child.Ecosystem)
@@ -3702,10 +3781,10 @@ func TestAnalyzeDependencyGraph(t *testing.T) {
 	t.Run("resolve transitives opts into proxy and git resolution", func(t *testing.T) {
 		mockScan.requests = nil
 		mockGraph.requests = nil
-		_, _, err := s.analyzeDependencyGraph(ctx, nil, AnalyzeGraphInput{
+		_, err := callProtoTool(t, ctx, s.analyzeDependencyGraph, &mcpv1.AnalyzeGraphRequest{
 			Path:               "/test/path",
 			ResolveTransitives: true,
-		})
+		}, &mcpv1.AnalyzeGraphResult{})
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -3720,10 +3799,10 @@ func TestAnalyzeDependencyGraph(t *testing.T) {
 	t.Run("extended opts into import status graph metadata", func(t *testing.T) {
 		mockScan.requests = nil
 		mockGraph.requests = nil
-		_, _, err := s.analyzeDependencyGraph(ctx, nil, AnalyzeGraphInput{
+		_, err := callProtoTool(t, ctx, s.analyzeDependencyGraph, &mcpv1.AnalyzeGraphRequest{
 			Path:     "/test/path",
 			Extended: true,
-		})
+		}, &mcpv1.AnalyzeGraphResult{})
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -3739,10 +3818,10 @@ func TestAnalyzeDependencyGraph(t *testing.T) {
 		mockScan.requests = nil
 		mockGraph.requests = nil
 		mockGraph.buildResponse = testBuildGraphResponse()
-		_, _, err := s.analyzeDependencyGraph(ctx, nil, AnalyzeGraphInput{
+		_, err := callProtoTool(t, ctx, s.analyzeDependencyGraph, &mcpv1.AnalyzeGraphRequest{
 			Path: "/test/path",
 			Ref:  " v1.2.3 ",
-		})
+		}, &mcpv1.AnalyzeGraphResult{})
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -3763,9 +3842,9 @@ func TestAnalyzeDependencyGraph(t *testing.T) {
 	t.Run("trims path before graph and scan annotation", func(t *testing.T) {
 		mockScan.requests = nil
 		mockGraph.requests = nil
-		_, result, err := s.analyzeDependencyGraph(ctx, nil, AnalyzeGraphInput{
+		result, err := callProtoTool(t, ctx, s.analyzeDependencyGraph, &mcpv1.AnalyzeGraphRequest{
 			Path: " /test/path ",
-		})
+		}, &mcpv1.AnalyzeGraphResult{})
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -3789,10 +3868,10 @@ func TestAnalyzeDependencyGraph(t *testing.T) {
 	t.Run("target purl can omit version", func(t *testing.T) {
 		mockScan.requests = nil
 		mockGraph.requests = nil
-		_, result, err := s.analyzeDependencyGraph(ctx, nil, AnalyzeGraphInput{
+		result, err := callProtoTool(t, ctx, s.analyzeDependencyGraph, &mcpv1.AnalyzeGraphRequest{
 			Path:       "/test/path",
-			TargetPURL: "pkg:golang/github.com/example/child",
-		})
+			TargetPurl: "pkg:golang/github.com/example/child",
+		}, &mcpv1.AnalyzeGraphResult{})
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -3804,10 +3883,10 @@ func TestAnalyzeDependencyGraph(t *testing.T) {
 	t.Run("target purl accepts semver equivalent version", func(t *testing.T) {
 		mockScan.requests = nil
 		mockGraph.requests = nil
-		_, result, err := s.analyzeDependencyGraph(ctx, nil, AnalyzeGraphInput{
+		result, err := callProtoTool(t, ctx, s.analyzeDependencyGraph, &mcpv1.AnalyzeGraphRequest{
 			Path:       "/test/path",
-			TargetPURL: "pkg:golang/github.com/example/child@2.0.0",
-		})
+			TargetPurl: "pkg:golang/github.com/example/child@2.0.0",
+		}, &mcpv1.AnalyzeGraphResult{})
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -3821,10 +3900,10 @@ func TestAnalyzeDependencyGraph(t *testing.T) {
 		mockGraph.requests = nil
 		mockGraph.buildResponse = testEscapedVersionGraphResponse()
 		const dockerPURL = "pkg:golang/github.com/docker/docker@28.5.2%2Bincompatible"
-		_, result, err := s.analyzeDependencyGraph(ctx, nil, AnalyzeGraphInput{
+		result, err := callProtoTool(t, ctx, s.analyzeDependencyGraph, &mcpv1.AnalyzeGraphRequest{
 			Path:       "/test/path",
-			TargetPURL: "pkg:golang/github.com/docker/docker@v28.5.2+incompatible",
-		})
+			TargetPurl: "pkg:golang/github.com/docker/docker@v28.5.2+incompatible",
+		}, &mcpv1.AnalyzeGraphResult{})
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -3834,10 +3913,10 @@ func TestAnalyzeDependencyGraph(t *testing.T) {
 		if !result.Target.Found {
 			t.Fatal("expected target summary to report found")
 		}
-		if got, want := result.Target.MatchedPURLs, []string{dockerPURL}; !slices.Equal(got, want) {
+		if got, want := result.Target.MatchedPurls, []string{dockerPURL}; !slices.Equal(got, want) {
 			t.Fatalf("target matched PURLs = %v, want %v", got, want)
 		}
-		if got, want := result.Target.PathCount, 1; got != want {
+		if got, want := int(result.Target.PathCount), 1; got != want {
 			t.Fatalf("target path count = %d, want %d", got, want)
 		}
 		if len(result.PathsToTarget) != 1 {
@@ -3847,7 +3926,7 @@ func TestAnalyzeDependencyGraph(t *testing.T) {
 		if len(nodes) != 2 {
 			t.Fatalf("target path node details = %d, want 2", len(nodes))
 		}
-		if got := nodes[1].PURL; got != dockerPURL {
+		if got := nodes[1].Purl; got != dockerPURL {
 			t.Fatalf("target path leaf PURL = %q, want %q", got, dockerPURL)
 		}
 	})
@@ -3856,14 +3935,14 @@ func TestAnalyzeDependencyGraph(t *testing.T) {
 		mockScan.requests = nil
 		mockGraph.requests = nil
 		mockGraph.buildResponse = testWideTargetGraphResponse(55)
-		_, result, err := s.analyzeDependencyGraph(ctx, nil, AnalyzeGraphInput{
+		result, err := callProtoTool(t, ctx, s.analyzeDependencyGraph, &mcpv1.AnalyzeGraphRequest{
 			Path:       "/test/path",
-			TargetPURL: "pkg:npm/shared-target",
-		})
+			TargetPurl: "pkg:npm/shared-target",
+		}, &mcpv1.AnalyzeGraphResult{})
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		if got, want := result.VulnerablePathCount, 55; got != want {
+		if got, want := int(result.VulnerablePathCount), 55; got != want {
 			t.Fatalf("vulnerable path count = %d, want %d", got, want)
 		}
 		if got, want := len(result.VulnerablePaths), maxMCPVulnerablePaths; got != want {
@@ -3875,7 +3954,7 @@ func TestAnalyzeDependencyGraph(t *testing.T) {
 		if result.Target == nil {
 			t.Fatal("expected target summary")
 		}
-		if got, want := result.Target.PathCount, 55; got != want {
+		if got, want := int(result.Target.PathCount), 55; got != want {
 			t.Fatalf("target path count = %d, want %d", got, want)
 		}
 		if got, want := len(result.PathsToTarget), maxMCPPathsToTarget; got != want {
@@ -3890,10 +3969,10 @@ func TestAnalyzeDependencyGraph(t *testing.T) {
 		mockScan.requests = nil
 		mockGraph.requests = nil
 		mockGraph.buildResponse = testBuildGraphResponse()
-		_, result, err := s.analyzeDependencyGraph(ctx, nil, AnalyzeGraphInput{
+		result, err := callProtoTool(t, ctx, s.analyzeDependencyGraph, &mcpv1.AnalyzeGraphRequest{
 			Path:       "/test/path",
-			TargetPURL: "pkg:golang/github.com/example/missing@v1.0.0",
-		})
+			TargetPurl: "pkg:golang/github.com/example/missing@v1.0.0",
+		}, &mcpv1.AnalyzeGraphResult{})
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -3930,10 +4009,10 @@ func TestAnalyzeDependencyGraph(t *testing.T) {
 				},
 			},
 		}
-		_, result, err := s.analyzeDependencyGraph(ctx, nil, AnalyzeGraphInput{
+		result, err := callProtoTool(t, ctx, s.analyzeDependencyGraph, &mcpv1.AnalyzeGraphRequest{
 			Path:       "/test/path",
-			TargetPURL: disconnectedPURL,
-		})
+			TargetPurl: disconnectedPURL,
+		}, &mcpv1.AnalyzeGraphResult{})
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -3949,7 +4028,7 @@ func TestAnalyzeDependencyGraph(t *testing.T) {
 		if got := result.Target.PathCount; got != 0 {
 			t.Fatalf("target path count = %d, want 0", got)
 		}
-		if got, want := result.Target.MatchedPURLs, []string{disconnectedPURL}; !slicesEqual(got, want) {
+		if got, want := result.Target.MatchedPurls, []string{disconnectedPURL}; !slicesEqual(got, want) {
 			t.Fatalf("target matched PURLs = %v, want %v", got, want)
 		}
 		if len(result.Target.MatchedNodes) != 1 {
@@ -3966,10 +4045,10 @@ func TestAnalyzeDependencyGraph(t *testing.T) {
 	t.Run("rejects invalid target purl", func(t *testing.T) {
 		mockScan.requests = nil
 		mockGraph.requests = nil
-		_, _, err := s.analyzeDependencyGraph(ctx, nil, AnalyzeGraphInput{
+		_, err := callProtoTool(t, ctx, s.analyzeDependencyGraph, &mcpv1.AnalyzeGraphRequest{
 			Path:       "/test/path",
-			TargetPURL: "not-a-purl",
-		})
+			TargetPurl: "not-a-purl",
+		}, &mcpv1.AnalyzeGraphResult{})
 		if err == nil {
 			t.Fatal("expected error")
 		}
@@ -3984,12 +4063,12 @@ func TestGraphWhyUsesGraphService(t *testing.T) {
 	s := NewServer(WithClients(newMockClients(mockClientsConfig{graphHandler: mockGraph})))
 	ctx := context.Background()
 
-	_, result, err := s.graphWhy(ctx, nil, GraphWhyInput{
+	result, err := callProtoTool(t, ctx, s.graphWhy, &mcpv1.GraphWhyRequest{
 		Path:         "/test/path",
 		Package:      "github.com/example/child",
 		Ref:          " refs/tags/v1.2.3 ",
 		ExcludePaths: []string{".bin/**"},
-	})
+	}, &mcpv1.GraphWhyResult{})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -4010,7 +4089,7 @@ func TestGraphWhyUsesGraphService(t *testing.T) {
 	if len(result.Paths[0].NodeDetails) != 2 {
 		t.Fatalf("expected 2 structured path nodes, got %d", len(result.Paths[0].NodeDetails))
 	}
-	if got := result.Paths[0].NodeDetails[1].PURL; got != testChildPURL {
+	if got := result.Paths[0].NodeDetails[1].Purl; got != testChildPURL {
 		t.Errorf("structured path target PURL = %q, want %q", got, testChildPURL)
 	}
 	if result.Paths[0].NodeDetails[1].Direct {
@@ -4054,15 +4133,15 @@ func TestGraphWhyReportsPathTruncation(t *testing.T) {
 			mockGraph := &mockGraphHandler{buildResponse: testWideTargetGraphResponse(15)}
 			s := NewServer(WithClients(newMockClients(mockClientsConfig{graphHandler: mockGraph})))
 
-			_, result, err := s.graphWhy(t.Context(), nil, GraphWhyInput{
+			result, err := callProtoTool(t, t.Context(), s.graphWhy, &mcpv1.GraphWhyRequest{
 				Path:    "/test/path",
 				Package: "shared-target",
 				ShowAll: tt.showAll,
-			})
+			}, &mcpv1.GraphWhyResult{})
 			if err != nil {
 				t.Fatalf("unexpected error: %v", err)
 			}
-			if got, want := result.PathCount, 15; got != want {
+			if got, want := int(result.PathCount), 15; got != want {
 				t.Fatalf("PathCount = %d, want %d", got, want)
 			}
 			if got := len(result.Paths); got != tt.wantReturned {
@@ -4079,10 +4158,10 @@ func TestGraphWhyReturnsDirectPath(t *testing.T) {
 	mockGraph := &mockGraphHandler{buildResponse: testBuildGraphResponse()}
 	s := NewServer(WithClients(newMockClients(mockClientsConfig{graphHandler: mockGraph})))
 
-	_, result, err := s.graphWhy(context.Background(), nil, GraphWhyInput{
+	result, err := callProtoTool(t, context.Background(), s.graphWhy, &mcpv1.GraphWhyRequest{
 		Path:    "/test/path",
 		Package: "github.com/example/root",
-	})
+	}, &mcpv1.GraphWhyResult{})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -4109,8 +4188,8 @@ func TestGraphWhyReturnsDirectPath(t *testing.T) {
 		t.Fatalf("expected 1 structured path node, got %d", len(result.Paths[0].NodeDetails))
 	}
 	root := result.Paths[0].NodeDetails[0]
-	if root.PURL != testRootPURL {
-		t.Errorf("structured path PURL = %q, want %q", root.PURL, testRootPURL)
+	if root.Purl != testRootPURL {
+		t.Errorf("structured path PURL = %q, want %q", root.Purl, testRootPURL)
 	}
 	if !root.Direct {
 		t.Error("structured path root should be direct")
@@ -4144,11 +4223,11 @@ require github.com/pkg/errors v0.9.1
 	}
 	s := NewServer(WithClients(clients))
 
-	_, result, err := s.graphWhy(context.Background(), nil, GraphWhyInput{
+	result, err := callProtoTool(t, context.Background(), s.graphWhy, &mcpv1.GraphWhyRequest{
 		Path:       tmpDir,
 		Package:    "github.com/pkg/errors",
 		Ecosystems: []string{"go"},
-	})
+	}, &mcpv1.GraphWhyResult{})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -4158,16 +4237,16 @@ require github.com/pkg/errors v0.9.1
 	if !result.Direct {
 		t.Fatal("expected dependency to be direct")
 	}
-	if got, want := result.PURL, "pkg:golang/github.com/pkg/errors@0.9.1"; got != want {
+	if got, want := result.Purl, "pkg:golang/github.com/pkg/errors@0.9.1"; got != want {
 		t.Fatalf("PURL = %q, want %q", got, want)
 	}
-	if got, want := result.PathCount, 1; got != want {
+	if got, want := int(result.PathCount), 1; got != want {
 		t.Fatalf("PathCount = %d, want %d", got, want)
 	}
 	if got, want := len(result.Paths), 1; got != want {
 		t.Fatalf("returned paths = %d, want %d", got, want)
 	}
-	if got, want := result.Paths[0].Depth, 0; got != want {
+	if got, want := int(result.Paths[0].Depth), 0; got != want {
 		t.Fatalf("path depth = %d, want %d", got, want)
 	}
 }
@@ -4176,18 +4255,18 @@ func TestGraphWhyAcceptsPURLQuery(t *testing.T) {
 	mockGraph := &mockGraphHandler{buildResponse: testBuildGraphResponse()}
 	s := NewServer(WithClients(newMockClients(mockClientsConfig{graphHandler: mockGraph})))
 
-	_, result, err := s.graphWhy(context.Background(), nil, GraphWhyInput{
+	result, err := callProtoTool(t, context.Background(), s.graphWhy, &mcpv1.GraphWhyRequest{
 		Path:    "/test/path",
 		Package: " " + testChildPURL + " ",
-	})
+	}, &mcpv1.GraphWhyResult{})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if !result.Found {
 		t.Fatal("expected package to be found")
 	}
-	if result.PURL != testChildPURL {
-		t.Fatalf("PURL = %q, want %q", result.PURL, testChildPURL)
+	if result.Purl != testChildPURL {
+		t.Fatalf("PURL = %q, want %q", result.Purl, testChildPURL)
 	}
 	if result.PathCount != 1 {
 		t.Fatalf("expected 1 dependency path, got %d", result.PathCount)
@@ -4211,18 +4290,18 @@ func TestGraphWhyAcceptsScanEmittedPURLWithEscapedVersion(t *testing.T) {
 	}}
 	s := NewServer(WithClients(newMockClients(mockClientsConfig{graphHandler: mockGraph})))
 
-	_, result, err := s.graphWhy(context.Background(), nil, GraphWhyInput{
+	result, err := callProtoTool(t, context.Background(), s.graphWhy, &mcpv1.GraphWhyRequest{
 		Path:    "/test/path",
 		Package: dockerPURL,
-	})
+	}, &mcpv1.GraphWhyResult{})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if !result.Found {
 		t.Fatal("expected package to be found")
 	}
-	if result.PURL != dockerPURL {
-		t.Fatalf("PURL = %q, want %q", result.PURL, dockerPURL)
+	if result.Purl != dockerPURL {
+		t.Fatalf("PURL = %q, want %q", result.Purl, dockerPURL)
 	}
 	if result.PathCount != 1 {
 		t.Fatalf("PathCount = %d, want 1", result.PathCount)
@@ -4247,12 +4326,12 @@ func TestGraphWhyExplainsDisconnectedMatchedNode(t *testing.T) {
 	}}
 	s := NewServer(WithClients(newMockClients(mockClientsConfig{graphHandler: mockGraph})))
 
-	_, result, err := s.graphWhy(context.Background(), nil, GraphWhyInput{
+	result, err := callProtoTool(t, context.Background(), s.graphWhy, &mcpv1.GraphWhyRequest{
 		Path:               "/test/path",
 		Package:            dockerPURL,
 		ResolveTransitives: true,
 		Extended:           true,
-	})
+	}, &mcpv1.GraphWhyResult{})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -4287,12 +4366,12 @@ func TestGraphNeedsUsesGraphService(t *testing.T) {
 	s := NewServer(WithClients(newMockClients(mockClientsConfig{graphHandler: mockGraph})))
 	ctx := context.Background()
 
-	_, result, err := s.graphNeeds(ctx, nil, GraphNeedsInput{
+	result, err := callProtoTool(t, ctx, s.graphNeeds, &mcpv1.GraphNeedsRequest{
 		Path:         "/test/path",
 		Package:      "github.com/example/child",
 		Ref:          " refs/tags/v1.2.3 ",
 		ExcludePaths: []string{".bin/**"},
-	})
+	}, &mcpv1.GraphNeedsResult{})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -4346,10 +4425,10 @@ func TestGraphNeedsSortsDependentsDeterministically(t *testing.T) {
 	}}
 	s := NewServer(WithClients(newMockClients(mockClientsConfig{graphHandler: mockGraph})))
 
-	_, result, err := s.graphNeeds(context.Background(), nil, GraphNeedsInput{
+	result, err := callProtoTool(t, context.Background(), s.graphNeeds, &mcpv1.GraphNeedsRequest{
 		Path:    "/test/path",
 		Package: targetPURL,
-	})
+	}, &mcpv1.GraphNeedsResult{})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -4370,11 +4449,11 @@ func TestGraphNeedsPassesExtendedGraphOption(t *testing.T) {
 	mockGraph := &mockGraphHandler{buildResponse: testBuildGraphResponse()}
 	s := NewServer(WithClients(newMockClients(mockClientsConfig{graphHandler: mockGraph})))
 
-	_, _, err := s.graphNeeds(context.Background(), nil, GraphNeedsInput{
+	_, err := callProtoTool(t, context.Background(), s.graphNeeds, &mcpv1.GraphNeedsRequest{
 		Path:     "/test/path",
 		Package:  "github.com/example/child",
 		Extended: true,
-	})
+	}, &mcpv1.GraphNeedsResult{})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -4430,10 +4509,10 @@ func TestGraphNeedsExplainsEmptyDependents(t *testing.T) {
 			}}
 			s := NewServer(WithClients(newMockClients(mockClientsConfig{graphHandler: mockGraph})))
 
-			_, result, err := s.graphNeeds(context.Background(), nil, GraphNeedsInput{
+			result, err := callProtoTool(t, context.Background(), s.graphNeeds, &mcpv1.GraphNeedsRequest{
 				Path:    "/test/path",
 				Package: tt.node.Purl,
-			})
+			}, &mcpv1.GraphNeedsResult{})
 			if err != nil {
 				t.Fatalf("unexpected error: %v", err)
 			}
@@ -4443,11 +4522,10 @@ func TestGraphNeedsExplainsEmptyDependents(t *testing.T) {
 			if result.Direct != tt.wantDirect {
 				t.Fatalf("Direct = %v, want %v", result.Direct, tt.wantDirect)
 			}
+			// The protojson wire omits empty collections, so an empty
+			// dependents list round-trips as nil: absent means zero.
 			if len(result.Dependents) != 0 {
 				t.Fatalf("expected no dependents, got %d", len(result.Dependents))
-			}
-			if result.Dependents == nil {
-				t.Fatal("Dependents is nil, want empty slice for stable MCP JSON output")
 			}
 			if !strings.Contains(result.Message, tt.wantMessage) {
 				t.Fatalf("Message = %q, want substring %q", result.Message, tt.wantMessage)
@@ -4460,35 +4538,36 @@ func TestGraphNeedsAcceptsVersionedPackageQuery(t *testing.T) {
 	mockGraph := &mockGraphHandler{buildResponse: testBuildGraphResponse()}
 	s := NewServer(WithClients(newMockClients(mockClientsConfig{graphHandler: mockGraph})))
 
-	_, result, err := s.graphNeeds(context.Background(), nil, GraphNeedsInput{
+	result, err := callProtoTool(t, context.Background(), s.graphNeeds, &mcpv1.GraphNeedsRequest{
 		Path:    "/test/path",
 		Package: "child@v2.0.0",
-	})
+	}, &mcpv1.GraphNeedsResult{})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if !result.Found {
 		t.Fatal("expected package to be found")
 	}
-	if result.PURL != testChildPURL {
-		t.Fatalf("PURL = %q, want %q", result.PURL, testChildPURL)
+	if result.Purl != testChildPURL {
+		t.Fatalf("PURL = %q, want %q", result.Purl, testChildPURL)
 	}
 	if result.DirectCount != 1 {
 		t.Fatalf("expected 1 direct dependent, got %d", result.DirectCount)
 	}
 
-	_, result, err = s.graphNeeds(context.Background(), nil, GraphNeedsInput{
+	result, err = callProtoTool(t, context.Background(), s.graphNeeds, &mcpv1.GraphNeedsRequest{
 		Path:    "/test/path",
 		Package: "child@v9.0.0",
-	})
+	}, &mcpv1.GraphNeedsResult{})
 	if err != nil {
 		t.Fatalf("unexpected error for version mismatch: %v", err)
 	}
 	if result.Found {
 		t.Fatal("expected version mismatch not to match")
 	}
-	if result.Dependents == nil {
-		t.Fatal("Dependents is nil, want empty slice for stable MCP JSON output")
+	// The protojson wire omits empty collections: absent means zero.
+	if len(result.Dependents) != 0 {
+		t.Fatalf("expected no dependents for version mismatch, got %d", len(result.Dependents))
 	}
 	if !strings.Contains(result.Message, `Package "child@v9.0.0" not found`) {
 		t.Fatalf("Message = %q, want not-found guidance", result.Message)
@@ -4503,18 +4582,18 @@ func TestGraphNeedsAcceptsScanEmittedPURLWithEscapedVersionEquivalent(t *testing
 	mockGraph := &mockGraphHandler{buildResponse: testEscapedVersionGraphResponse()}
 	s := NewServer(WithClients(newMockClients(mockClientsConfig{graphHandler: mockGraph})))
 
-	_, result, err := s.graphNeeds(t.Context(), nil, GraphNeedsInput{
+	result, err := callProtoTool(t, t.Context(), s.graphNeeds, &mcpv1.GraphNeedsRequest{
 		Path:    "/test/path",
 		Package: "pkg:golang/github.com/docker/docker@v28.5.2+incompatible",
-	})
+	}, &mcpv1.GraphNeedsResult{})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if !result.Found {
 		t.Fatal("expected package to be found")
 	}
-	if result.PURL != dockerPURL {
-		t.Fatalf("PURL = %q, want %q", result.PURL, dockerPURL)
+	if result.Purl != dockerPURL {
+		t.Fatalf("PURL = %q, want %q", result.Purl, dockerPURL)
 	}
 	if result.Direct {
 		t.Fatal("Direct = true, want false")
@@ -4525,7 +4604,7 @@ func TestGraphNeedsAcceptsScanEmittedPURLWithEscapedVersionEquivalent(t *testing
 	if len(result.Dependents) != 1 {
 		t.Fatalf("expected 1 dependent, got %d", len(result.Dependents))
 	}
-	if got := result.Dependents[0].PURL; got != rootPURL {
+	if got := result.Dependents[0].Purl; got != rootPURL {
 		t.Fatalf("dependent PURL = %q, want %q", got, rootPURL)
 	}
 }
@@ -5459,7 +5538,7 @@ require golang.org/x/text v0.3.0
 	s := NewServer()
 	ctx := context.Background()
 
-	_, result, err := s.listDependencies(ctx, nil, ListDependenciesInput{Path: tmpDir})
+	result, err := callProtoTool(t, ctx, s.listDependencies, &mcpv1.ListDependenciesRequest{Path: tmpDir}, &mcpv1.ListDependenciesResult{})
 	if err != nil {
 		t.Fatalf("list dependencies failed: %v", err)
 	}
