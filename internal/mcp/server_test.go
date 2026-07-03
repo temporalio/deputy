@@ -2780,11 +2780,11 @@ func TestScanDirectory(t *testing.T) {
 		}
 	})
 
-	t.Run("forwards exclude paths", func(t *testing.T) {
+	t.Run("forwards exclude paths trimmed", func(t *testing.T) {
 		mockScan.requests = nil
 		_, err := callProtoTool(t, ctx, s.scanDirectory, &mcpv1.ScanDirectoryRequest{
 			Path:         "/test/path",
-			ExcludePaths: []string{" .bin/** ", "", "**/testdata"},
+			ExcludePaths: []string{" .bin/** ", "**/testdata"},
 		}, &mcpv1.ScanDirectoryResult{})
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
@@ -2796,6 +2796,23 @@ func TestScanDirectory(t *testing.T) {
 		want := []string{".bin/**", "**/testdata"}
 		if !slicesEqual(got, want) {
 			t.Fatalf("exclude paths = %v, want %v", got, want)
+		}
+	})
+
+	t.Run("rejects blank exclude path items", func(t *testing.T) {
+		// The advertised schema gives excludePaths items minLength 1, so a
+		// blank item is a contract violation: the SDK rejects it at the server
+		// boundary and protovalidate rejects it on direct handler invocations.
+		mockScan.requests = nil
+		_, err := callProtoTool(t, ctx, s.scanDirectory, &mcpv1.ScanDirectoryRequest{
+			Path:         "/test/path",
+			ExcludePaths: []string{".bin/**", ""},
+		}, &mcpv1.ScanDirectoryResult{})
+		if err == nil {
+			t.Fatal("expected validation error for blank exclude path item")
+		}
+		if len(mockScan.requests) != 0 {
+			t.Fatalf("expected no scan requests, got %d", len(mockScan.requests))
 		}
 	})
 

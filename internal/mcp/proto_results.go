@@ -33,15 +33,21 @@ func marshalMCPResult(m proto.Message) (json.RawMessage, error) {
 	return data, nil
 }
 
-// unmarshalMCPRequest parses the SDK-validated raw arguments into an mcp.v1
-// request proto. Unknown fields are rejected: the input schema already
-// advertises additionalProperties: false, so this is defense in depth.
+// unmarshalMCPRequest parses raw tool arguments into an mcp.v1 request proto
+// and enforces the request's buf.validate rules with protovalidate — the same
+// rules the derived input schema advertises. In production the MCP SDK has
+// already validated the arguments against that schema, so this is defense in
+// depth: it makes the handlers self-contained (direct invocations get the
+// same contract) and rejects unknown fields, mirroring the schema's
+// additionalProperties: false.
 func unmarshalMCPRequest(raw json.RawMessage, m proto.Message) error {
-	if len(raw) == 0 {
-		return nil
+	if len(raw) > 0 {
+		if err := (internalproto.MCPJSONUnmarshalOptions()).Unmarshal(raw, m); err != nil {
+			return fmt.Errorf("parse arguments: %w", err)
+		}
 	}
-	if err := (internalproto.MCPJSONUnmarshalOptions()).Unmarshal(raw, m); err != nil {
-		return fmt.Errorf("parse arguments: %w", err)
+	if err := internalproto.Validate(m); err != nil {
+		return fmt.Errorf("invalid arguments: %w", err)
 	}
 	return nil
 }
