@@ -22,6 +22,7 @@ import (
 	"github.com/temporalio/deputy/gen/deputy/graph/v1/graphv1connect"
 	listv1 "github.com/temporalio/deputy/gen/deputy/list/v1"
 	"github.com/temporalio/deputy/gen/deputy/list/v1/listv1connect"
+	mcpv1 "github.com/temporalio/deputy/gen/deputy/mcp/v1"
 	scanv1 "github.com/temporalio/deputy/gen/deputy/scan/v1"
 	"github.com/temporalio/deputy/gen/deputy/scan/v1/scanv1connect"
 	targetv1 "github.com/temporalio/deputy/gen/deputy/target/v1"
@@ -34,8 +35,31 @@ import (
 	deputyserver "github.com/temporalio/deputy/internal/server"
 	"github.com/temporalio/deputy/internal/services"
 	"github.com/temporalio/deputy/internal/vulnerability"
+	"google.golang.org/protobuf/encoding/protojson"
+	"google.golang.org/protobuf/proto"
 	"osv.dev/bindings/go/osvdev"
 )
+
+// callProtoTool invokes a proto-contract tool handler with a protojson-encoded
+// request and decodes the protojson result, mirroring the SDK's raw-message
+// flow.
+func callProtoTool[Res proto.Message](t *testing.T, ctx context.Context,
+	handler func(context.Context, *mcpsdk.CallToolRequest, json.RawMessage) (*mcpsdk.CallToolResult, json.RawMessage, error),
+	req proto.Message, res Res) (Res, error) {
+	t.Helper()
+	raw, err := protojson.Marshal(req)
+	if err != nil {
+		t.Fatalf("marshal request: %v", err)
+	}
+	_, out, err := handler(ctx, nil, raw)
+	if err != nil {
+		return res, err
+	}
+	if err := protojson.Unmarshal(out, res); err != nil {
+		t.Fatalf("unmarshal result: %v", err)
+	}
+	return res, nil
+}
 
 // mockOSVClient is a mock implementation of osv.Client for testing.
 type mockOSVClient struct {
@@ -626,21 +650,21 @@ func TestMCPCoverageAndKindConversion(t *testing.T) {
 	if got := mcpFindingKind(vulnerabilityv1.FindingKind_FINDING_KIND_UNSPECIFIED); got != "" {
 		t.Errorf("mcpFindingKind(UNSPECIFIED) = %q, want empty", got)
 	}
-	if mcpCoverageFromProto(nil) != nil {
-		t.Error("mcpCoverageFromProto(nil) should be nil")
+	if coverageProto(nil) != nil {
+		t.Error("coverageProto(nil) should be nil")
 	}
-	cov := mcpCoverageFromProto(&vulnerabilityv1.ScanCoverage{
+	cov := coverageProto(&vulnerabilityv1.ScanCoverage{
 		Covered:   []*vulnerabilityv1.CoverageEntry{{Ecosystem: "go", Artifact: vulnerabilityv1.ArtifactKind_ARTIFACT_KIND_PACKAGE, Sources: []string{"osv"}, PackageCount: 5}},
 		Uncovered: []*vulnerabilityv1.CoverageEntry{{Ecosystem: "docker", Artifact: vulnerabilityv1.ArtifactKind_ARTIFACT_KIND_CONTAINER_IMAGE_REF, PackageCount: 2}},
 	})
-	if cov == nil || len(cov.Covered) != 1 || len(cov.Uncovered) != 1 {
+	if cov == nil || len(cov.GetCovered()) != 1 || len(cov.GetUncovered()) != 1 {
 		t.Fatalf("coverage = %+v, want 1 covered + 1 uncovered", cov)
 	}
-	if cov.Covered[0].Artifact != "package" || cov.Covered[0].Ecosystem != "go" {
-		t.Errorf("covered[0] = %+v, want go/package", cov.Covered[0])
+	if cov.GetCovered()[0].GetArtifact() != "package" || cov.GetCovered()[0].GetEcosystem() != "go" {
+		t.Errorf("covered[0] = %+v, want go/package", cov.GetCovered()[0])
 	}
-	if cov.Uncovered[0].Artifact != "container_image_ref" {
-		t.Errorf("uncovered[0].Artifact = %q, want container_image_ref", cov.Uncovered[0].Artifact)
+	if cov.GetUncovered()[0].GetArtifact() != "container_image_ref" {
+		t.Errorf("uncovered[0].Artifact = %q, want container_image_ref", cov.GetUncovered()[0].GetArtifact())
 	}
 }
 
@@ -1383,15 +1407,25 @@ func TestLocalPathToolSchemasExposeAgentControls(t *testing.T) {
 				)
 			}
 			if tt.name == "triage_vulnerabilities" {
+				// The triage output schema is derived from the
+				// deputy.mcp.v1 TriageResult descriptor; protojson omits
+				// zero values, so no field is "required" on the wire.
+				// Guard that the fixability/directness counts stay in the
+				// advertised contract instead.
 				outputSchema := toolOutputSchema(t, tool)
-				requireSchemaRequiredContains(t, outputSchema,
+				outputProperties := schemaObject(t, outputSchema, "properties")
+				for _, property := range []string{
 					"directFixableCount",
 					"transitiveFixableCount",
 					"fixableCount",
 					"directVulnerabilities",
 					"transitiveVulnerabilities",
 					"unknownCount",
-				)
+				} {
+					if _, ok := outputProperties[property]; !ok {
+						t.Fatalf("%s output schema is missing %s property", tt.name, property)
+					}
+				}
 			}
 			if tt.name == "graph_why" {
 				showAll, ok := properties["showAll"].(map[string]any)
@@ -2641,14 +2675,14 @@ func TestScanDirectory(t *testing.T) {
 	ctx := context.Background()
 
 	t.Run("missing path", func(t *testing.T) {
-		_, _, err := s.scanDirectory(ctx, nil, ScanDirectoryInput{})
+		_, err := callProtoTool(t, ctx, s.scanDirectory, &mcpv1.ScanDirectoryRequest{}, &mcpv1.ScanDirectoryResult{})
 		if err == nil {
 			t.Error("expected error for missing path")
 		}
 	})
 
 	t.Run("valid scan", func(t *testing.T) {
-		_, result, err := s.scanDirectory(ctx, nil, ScanDirectoryInput{Path: "/test/path"})
+		result, err := callProtoTool(t, ctx, s.scanDirectory, &mcpv1.ScanDirectoryRequest{Path: "/test/path"}, &mcpv1.ScanDirectoryResult{})
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -2662,7 +2696,7 @@ func TestScanDirectory(t *testing.T) {
 
 	t.Run("trims path before scan", func(t *testing.T) {
 		mockScan.requests = nil
-		_, result, err := s.scanDirectory(ctx, nil, ScanDirectoryInput{Path: " /test/path "})
+		result, err := callProtoTool(t, ctx, s.scanDirectory, &mcpv1.ScanDirectoryRequest{Path: " /test/path "}, &mcpv1.ScanDirectoryResult{})
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -2679,10 +2713,10 @@ func TestScanDirectory(t *testing.T) {
 
 	t.Run("forwards exclude paths", func(t *testing.T) {
 		mockScan.requests = nil
-		_, _, err := s.scanDirectory(ctx, nil, ScanDirectoryInput{
+		_, err := callProtoTool(t, ctx, s.scanDirectory, &mcpv1.ScanDirectoryRequest{
 			Path:         "/test/path",
 			ExcludePaths: []string{" .bin/** ", "", "**/testdata"},
-		})
+		}, &mcpv1.ScanDirectoryResult{})
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -2704,10 +2738,10 @@ func TestScanDirectory(t *testing.T) {
 			CommitHash:   "abc123",
 		}
 		mockScan.requests = nil
-		_, result, err := s.scanDirectory(ctx, nil, ScanDirectoryInput{
+		result, err := callProtoTool(t, ctx, s.scanDirectory, &mcpv1.ScanDirectoryRequest{
 			Path: "/test/path",
 			Ref:  " refs/tags/v1.2.3 ",
-		})
+		}, &mcpv1.ScanDirectoryResult{})
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -2752,7 +2786,7 @@ func TestScanDirectory(t *testing.T) {
 			Packages: []*dependencyv1.Package{},
 		}
 
-		_, result, err := s.scanDirectory(ctx, nil, ScanDirectoryInput{Path: "/test/path"})
+		result, err := callProtoTool(t, ctx, s.scanDirectory, &mcpv1.ScanDirectoryRequest{Path: "/test/path"}, &mcpv1.ScanDirectoryResult{})
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -2799,14 +2833,14 @@ func TestScanDirectory(t *testing.T) {
 			Packages: []*dependencyv1.Package{},
 		}
 
-		_, result, err := s.scanDirectory(ctx, nil, ScanDirectoryInput{Path: "/test/path"})
+		result, err := callProtoTool(t, ctx, s.scanDirectory, &mcpv1.ScanDirectoryRequest{Path: "/test/path"}, &mcpv1.ScanDirectoryResult{})
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
 		if len(result.Vulnerabilities) != 1 {
 			t.Fatalf("expected 1 consolidated vulnerability, got %d", len(result.Vulnerabilities))
 		}
-		if got := result.Vulnerabilities[0].ID; got != "CVE-2024-1234" {
+		if got := result.Vulnerabilities[0].Id; got != "CVE-2024-1234" {
 			t.Errorf("expected CVE primary ID, got %q", got)
 		}
 		if result.VulnerabilitiesBySeverity["critical"] != 1 {
@@ -2849,7 +2883,7 @@ func TestScanContainerDeduplicatesAdvisoryAliases(t *testing.T) {
 	}
 
 	s := NewServer(WithClients(newMockClients(mockClientsConfig{scanHandler: mockScan})))
-	_, result, err := s.scanContainer(context.Background(), nil, ScanContainerInput{Image: "debian:bookworm"})
+	result, err := callProtoTool(t, context.Background(), s.scanContainer, &mcpv1.ScanContainerRequest{Image: "debian:bookworm"}, &mcpv1.ScanContainerResult{})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -2860,7 +2894,7 @@ func TestScanContainerDeduplicatesAdvisoryAliases(t *testing.T) {
 	if len(result.Vulnerabilities) != 1 {
 		t.Fatalf("expected 1 consolidated vulnerability, got %d", len(result.Vulnerabilities))
 	}
-	if got := result.Vulnerabilities[0].ID; got != "CVE-2024-1234" {
+	if got := result.Vulnerabilities[0].Id; got != "CVE-2024-1234" {
 		t.Errorf("expected CVE primary ID, got %q", got)
 	}
 	if result.VulnerabilitiesBySeverity["critical"] != 1 {
@@ -2872,10 +2906,10 @@ func TestScanContainerNormalizesImageAndPlatform(t *testing.T) {
 	mockScan := &mockScanHandler{scanResponse: emptyScanResponse()}
 	s := NewServer(WithClients(newMockClients(mockClientsConfig{scanHandler: mockScan})))
 
-	_, result, err := s.scanContainer(context.Background(), nil, ScanContainerInput{
+	result, err := callProtoTool(t, context.Background(), s.scanContainer, &mcpv1.ScanContainerRequest{
 		Image:    " debian:bookworm ",
 		Platform: " linux/amd64\t",
-	})
+	}, &mcpv1.ScanContainerResult{})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -3369,7 +3403,7 @@ func TestTriageVulnerabilitiesMigrationFix(t *testing.T) {
 	s := NewServer(WithClients(newMockClients(mockClientsConfig{scanHandler: mockScan})))
 	ctx := context.Background()
 
-	_, result, err := s.triageVulnerabilities(ctx, nil, TriageInput{Path: "/test/path"})
+	result, err := callProtoTool(t, ctx, s.triageVulnerabilities, &mcpv1.TriageRequest{Path: "/test/path"}, &mcpv1.TriageResult{})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -3398,8 +3432,8 @@ func TestTriageVulnerabilitiesMigrationFix(t *testing.T) {
 	if vuln.ResolvedFix.TargetModule != "github.com/example/widget/v2" {
 		t.Errorf("resolved fix target = %q, want github.com/example/widget/v2", vuln.ResolvedFix.TargetModule)
 	}
-	if vuln.PURL != "pkg:golang/github.com/example/widget@v1.4.0" {
-		t.Errorf("purl = %q, want pkg:golang/github.com/example/widget@v1.4.0", vuln.PURL)
+	if vuln.Purl != "pkg:golang/github.com/example/widget@v1.4.0" {
+		t.Errorf("purl = %q, want pkg:golang/github.com/example/widget@v1.4.0", vuln.Purl)
 	}
 	if len(vuln.PackageFixes) != 1 {
 		t.Fatalf("expected 1 package fix, got %d", len(vuln.PackageFixes))
@@ -3422,10 +3456,10 @@ func TestTriageVulnerabilitiesForwardsRef(t *testing.T) {
 	mockScan := &mockScanHandler{scanResponse: resp}
 	s := NewServer(WithClients(newMockClients(mockClientsConfig{scanHandler: mockScan})))
 
-	_, result, err := s.triageVulnerabilities(t.Context(), nil, TriageInput{
+	result, err := callProtoTool(t, t.Context(), s.triageVulnerabilities, &mcpv1.TriageRequest{
 		Path: "/test/path",
 		Ref:  " refs/heads/security ",
-	})
+	}, &mcpv1.TriageResult{})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -3444,7 +3478,7 @@ func TestTriageVulnerabilitiesDoesNotRecommendDirectUpdateForTransitiveFix(t *te
 	mockScan := &mockScanHandler{scanResponse: directUnfixableTransitiveFixableScanResponse()}
 	s := NewServer(WithClients(newMockClients(mockClientsConfig{scanHandler: mockScan})))
 
-	_, result, err := s.triageVulnerabilities(t.Context(), nil, TriageInput{Path: "/test/path"})
+	result, err := callProtoTool(t, t.Context(), s.triageVulnerabilities, &mcpv1.TriageRequest{Path: "/test/path"}, &mcpv1.TriageResult{})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -3477,7 +3511,7 @@ func TestTriageVulnerabilitiesCountsUnknownSeverity(t *testing.T) {
 	mockScan := &mockScanHandler{scanResponse: unknownSeverityScanResponse()}
 	s := NewServer(WithClients(newMockClients(mockClientsConfig{scanHandler: mockScan})))
 
-	_, result, err := s.triageVulnerabilities(t.Context(), nil, TriageInput{Path: "/test/path"})
+	result, err := callProtoTool(t, t.Context(), s.triageVulnerabilities, &mcpv1.TriageRequest{Path: "/test/path"}, &mcpv1.TriageResult{})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -3498,7 +3532,7 @@ func TestTriageVulnerabilitiesCountsUnknownSeverity(t *testing.T) {
 	}
 	var foundFixableUnknown bool
 	for _, vuln := range result.Vulnerabilities {
-		if vuln.ID == "GO-2026-2001" {
+		if vuln.Id == "GO-2026-2001" {
 			foundFixableUnknown = true
 			if vuln.PriorityReason != "Unknown severity with fix available in transitive dependency" {
 				t.Errorf("priority reason = %q, want unknown severity fix guidance", vuln.PriorityReason)
@@ -4749,10 +4783,10 @@ func TestDefaultExcludePathsApplyToMCPScans(t *testing.T) {
 		WithDefaultExcludePaths([]string{" .bin/** ", "", "**/testdata"}),
 	)
 
-	_, _, err := s.scanDirectory(context.Background(), nil, ScanDirectoryInput{
+	_, err := callProtoTool(t, context.Background(), s.scanDirectory, &mcpv1.ScanDirectoryRequest{
 		Path:         "/test/path",
 		ExcludePaths: []string{"**/testdata", "node_modules"},
-	})
+	}, &mcpv1.ScanDirectoryResult{})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -5394,7 +5428,7 @@ require golang.org/x/text v0.3.0
 	s := NewServer()
 	ctx := context.Background()
 
-	_, result, err := s.scanDirectory(ctx, nil, ScanDirectoryInput{Path: tmpDir})
+	result, err := callProtoTool(t, ctx, s.scanDirectory, &mcpv1.ScanDirectoryRequest{Path: tmpDir}, &mcpv1.ScanDirectoryResult{})
 	if err != nil {
 		t.Fatalf("scan failed: %v", err)
 	}

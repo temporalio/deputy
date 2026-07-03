@@ -125,10 +125,10 @@ message ScanDirectoryRequest {
   // the current working tree/HEAD.
   string ref = 2;
   // Optional ecosystems to scan, e.g. go, npm, pypi. Scans all if empty.
-  repeated string ecosystems = 3;
+  repeated string ecosystems = 3 [(buf.validate.field).repeated = {items: {string: {min_len: 1, pattern: "\\S"}}}];
   // Optional directory globs to skip during the walk, e.g. .bin/** or
   // **/testdata.
-  repeated string exclude_paths = 4;
+  repeated string exclude_paths = 4 [(buf.validate.field).repeated = {items: {string: {min_len: 1, pattern: "\\S"}}}];
 }
 
 // ScanDirectoryResult summarizes a directory scan: severity totals that always
@@ -203,10 +203,10 @@ message TriageRequest {
   // the current working tree/HEAD.
   string ref = 2;
   // Optional ecosystems to include, e.g. go, npm, pypi.
-  repeated string ecosystems = 3;
+  repeated string ecosystems = 3 [(buf.validate.field).repeated = {items: {string: {min_len: 1, pattern: "\\S"}}}];
   // Optional directory globs to skip during the walk, e.g. .bin/** or
   // **/testdata.
-  repeated string exclude_paths = 4;
+  repeated string exclude_paths = 4 [(buf.validate.field).repeated = {items: {string: {min_len: 1, pattern: "\\S"}}}];
 }
 
 // TriagedVuln is one prioritized finding: identity plus the canonical triage

@@ -31,3 +31,13 @@ func MCPJSONMarshalOptions() protojson.MarshalOptions {
 		UseProtoNames:   false,
 	}
 }
+
+// MCPJSONUnmarshalOptions is the canonical protojson configuration for parsing
+// MCP tool arguments into deputy.mcp.v1 request messages. Unknown fields are
+// rejected (DiscardUnknown: false) as defense in depth behind the generated
+// input schemas' additionalProperties: false.
+func MCPJSONUnmarshalOptions() protojson.UnmarshalOptions {
+	return protojson.UnmarshalOptions{
+		DiscardUnknown: false,
+	}
+}

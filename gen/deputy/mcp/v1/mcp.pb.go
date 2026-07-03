@@ -1390,14 +1390,16 @@ const file_deputy_mcp_v1_mcp_proto_rawDesc = "" +
 	"\bartifact\x18\x02 \x01(\tBN\xbaHK\xd8\x01\x01rFR\apackageR\n" +
 	"os_packageR\x13container_image_refR\rgithub_actionR\vunspecifiedR\bartifact\x12\x18\n" +
 	"\asources\x18\x03 \x03(\tR\asources\x12#\n" +
-	"\rpackage_count\x18\x04 \x01(\x05R\fpackageCount\"\x91\x01\n" +
+	"\rpackage_count\x18\x04 \x01(\x05R\fpackageCount\"\xb5\x01\n" +
 	"\x14ScanDirectoryRequest\x12\"\n" +
 	"\x04path\x18\x01 \x01(\tB\x0e\xbaH\v\xc8\x01\x01r\x06\x10\x012\x02\\SR\x04path\x12\x10\n" +
-	"\x03ref\x18\x02 \x01(\tR\x03ref\x12\x1e\n" +
+	"\x03ref\x18\x02 \x01(\tR\x03ref\x120\n" +
 	"\n" +
-	"ecosystems\x18\x03 \x03(\tR\n" +
-	"ecosystems\x12#\n" +
-	"\rexclude_paths\x18\x04 \x03(\tR\fexcludePaths\"\xc9\x04\n" +
+	"ecosystems\x18\x03 \x03(\tB\x10\xbaH\r\x92\x01\n" +
+	"\"\br\x06\x10\x012\x02\\SR\n" +
+	"ecosystems\x125\n" +
+	"\rexclude_paths\x18\x04 \x03(\tB\x10\xbaH\r\x92\x01\n" +
+	"\"\br\x06\x10\x012\x02\\SR\fexcludePaths\"\xc9\x04\n" +
 	"\x13ScanDirectoryResult\x12\x12\n" +
 	"\x04path\x18\x01 \x01(\tR\x04path\x12\x10\n" +
 	"\x03ref\x18\x02 \x01(\tR\x03ref\x12#\n" +
@@ -1431,14 +1433,16 @@ const file_deputy_mcp_v1_mcp_proto_rawDesc = "" +
 	"scanTimeMs\x1aL\n" +
 	"\x1eVulnerabilitiesBySeverityEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
-	"\x05value\x18\x02 \x01(\x05R\x05value:\x028\x01\"\x8a\x01\n" +
+	"\x05value\x18\x02 \x01(\x05R\x05value:\x028\x01\"\xae\x01\n" +
 	"\rTriageRequest\x12\"\n" +
 	"\x04path\x18\x01 \x01(\tB\x0e\xbaH\v\xc8\x01\x01r\x06\x10\x012\x02\\SR\x04path\x12\x10\n" +
-	"\x03ref\x18\x02 \x01(\tR\x03ref\x12\x1e\n" +
+	"\x03ref\x18\x02 \x01(\tR\x03ref\x120\n" +
 	"\n" +
-	"ecosystems\x18\x03 \x03(\tR\n" +
-	"ecosystems\x12#\n" +
-	"\rexclude_paths\x18\x04 \x03(\tR\fexcludePaths\"\x87\x05\n" +
+	"ecosystems\x18\x03 \x03(\tB\x10\xbaH\r\x92\x01\n" +
+	"\"\br\x06\x10\x012\x02\\SR\n" +
+	"ecosystems\x125\n" +
+	"\rexclude_paths\x18\x04 \x03(\tB\x10\xbaH\r\x92\x01\n" +
+	"\"\br\x06\x10\x012\x02\\SR\fexcludePaths\"\x87\x05\n" +
 	"\vTriagedVuln\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x124\n" +
 	"\x04kind\x18\x02 \x01(\tB \xbaH\x1d\xd8\x01\x01r\x18R\rvulnerabilityR\amalwareR\x04kind\x12J\n" +

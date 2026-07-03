@@ -105,26 +105,28 @@ func realOneofCount(md protoreflect.MessageDescriptor) int {
 
 func fieldSchema(fd protoreflect.FieldDescriptor, opts Options, visiting map[protoreflect.FullName]bool) (*jsonschema.Schema, error) {
 	if fd.IsMap() {
-		valueSchema, err := scalarOrMessageSchema(fd.MapValue(), opts, visiting)
+		// Map value constraints live under map.values in buf.validate.
+		valueSchema, err := scalarOrMessageSchema(fd.MapValue(), fieldRules(fd).GetMap().GetValues(), opts, visiting)
 		if err != nil {
 			return nil, fmt.Errorf("map field %s: %w", fd.FullName(), err)
 		}
 		return &jsonschema.Schema{Type: "object", AdditionalProperties: valueSchema}, nil
 	}
 	if fd.IsList() {
-		item, err := scalarOrMessageSchema(fd, opts, visiting)
+		// Per-item constraints live under repeated.items in buf.validate.
+		item, err := scalarOrMessageSchema(fd, fieldRules(fd).GetRepeated().GetItems(), opts, visiting)
 		if err != nil {
 			return nil, fmt.Errorf("repeated field %s: %w", fd.FullName(), err)
 		}
 		return &jsonschema.Schema{Type: "array", Items: item}, nil
 	}
-	return scalarOrMessageSchema(fd, opts, visiting)
+	return scalarOrMessageSchema(fd, fieldRules(fd), opts, visiting)
 }
 
-func scalarOrMessageSchema(fd protoreflect.FieldDescriptor, opts Options, visiting map[protoreflect.FullName]bool) (*jsonschema.Schema, error) {
+func scalarOrMessageSchema(fd protoreflect.FieldDescriptor, rules *validate.FieldRules, opts Options, visiting map[protoreflect.FullName]bool) (*jsonschema.Schema, error) {
 	switch fd.Kind() {
 	case protoreflect.StringKind:
-		return stringSchema(fd), nil
+		return stringSchema(rules.GetString_()), nil
 	case protoreflect.BoolKind:
 		return &jsonschema.Schema{Type: "boolean"}, nil
 	case protoreflect.Int32Kind, protoreflect.Sint32Kind, protoreflect.Sfixed32Kind,
@@ -151,10 +153,11 @@ func scalarOrMessageSchema(fd protoreflect.FieldDescriptor, opts Options, visiti
 
 // stringSchema maps buf.validate string rules onto the schema: in → enum,
 // min_len → minLength, pattern → pattern. The rules are the same ones
-// protovalidate enforces, so schema and server can't disagree.
-func stringSchema(fd protoreflect.FieldDescriptor) *jsonschema.Schema {
+// protovalidate enforces, so schema and server can't disagree. Callers pass
+// the rules from the right buf.validate location (the field itself,
+// repeated.items, or map.values).
+func stringSchema(rules *validate.StringRules) *jsonschema.Schema {
 	s := &jsonschema.Schema{Type: "string"}
-	rules := fieldRules(fd).GetString_()
 	if rules == nil {
 		return s
 	}
