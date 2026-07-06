@@ -160,7 +160,12 @@ field names:
       "path": "go.mod",
       "follow_up": "go mod tidy",
       "is_direct": true,
-      "executable": true
+      "executable": true,
+      "package": "github.com/example/pkg",
+      "version": "v1.2.3",
+      "purl": "pkg:golang/github.com/example/pkg@v1.2.3",
+      "target_version": "v1.2.4",
+      "vulnerabilities": ["CVE-2026-1234"]
     }
   ],
   "stats": {

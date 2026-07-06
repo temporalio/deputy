@@ -278,9 +278,27 @@ type RemediationCommand struct {
 	// IsDirect indicates if the vulnerable package is a direct dependency.
 	IsDirect bool `protobuf:"varint,7,opt,name=is_direct,json=isDirect,proto3" json:"is_direct,omitempty"`
 	// Executable indicates if Command can be run directly (true) or requires manual action (false).
-	Executable    bool `protobuf:"varint,8,opt,name=executable,proto3" json:"executable,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	Executable bool `protobuf:"varint,8,opt,name=executable,proto3" json:"executable,omitempty"`
+	// Package is the vulnerable package this command remediates.
+	Package string `protobuf:"bytes,9,opt,name=package,proto3" json:"package,omitempty"`
+	// Version is the vulnerable package version when known.
+	Version string `protobuf:"bytes,10,opt,name=version,proto3" json:"version,omitempty"`
+	// Purl is the vulnerable package's Package URL when known.
+	Purl string `protobuf:"bytes,11,opt,name=purl,proto3" json:"purl,omitempty"`
+	// TargetVersion is the version to upgrade or migrate to.
+	TargetVersion string `protobuf:"bytes,12,opt,name=target_version,json=targetVersion,proto3" json:"target_version,omitempty"`
+	// TargetModule is the module/package path to migrate to when the fix
+	// requires changing package identity.
+	TargetModule string `protobuf:"bytes,13,opt,name=target_module,json=targetModule,proto3" json:"target_module,omitempty"`
+	// Migration indicates the fix moves to a different module/package path
+	// rather than an in-place version bump.
+	Migration bool `protobuf:"varint,14,opt,name=migration,proto3" json:"migration,omitempty"`
+	// Vulnerabilities are the finding IDs this command remediates, sorted and
+	// unique; one command can address several findings because commands are
+	// deduplicated per package and manifest.
+	Vulnerabilities []string `protobuf:"bytes,15,rep,name=vulnerabilities,proto3" json:"vulnerabilities,omitempty"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
 }
 
 func (x *RemediationCommand) Reset() {
@@ -369,6 +387,55 @@ func (x *RemediationCommand) GetExecutable() bool {
 	return false
 }
 
+func (x *RemediationCommand) GetPackage() string {
+	if x != nil {
+		return x.Package
+	}
+	return ""
+}
+
+func (x *RemediationCommand) GetVersion() string {
+	if x != nil {
+		return x.Version
+	}
+	return ""
+}
+
+func (x *RemediationCommand) GetPurl() string {
+	if x != nil {
+		return x.Purl
+	}
+	return ""
+}
+
+func (x *RemediationCommand) GetTargetVersion() string {
+	if x != nil {
+		return x.TargetVersion
+	}
+	return ""
+}
+
+func (x *RemediationCommand) GetTargetModule() string {
+	if x != nil {
+		return x.TargetModule
+	}
+	return ""
+}
+
+func (x *RemediationCommand) GetMigration() bool {
+	if x != nil {
+		return x.Migration
+	}
+	return false
+}
+
+func (x *RemediationCommand) GetVulnerabilities() []string {
+	if x != nil {
+		return x.Vulnerabilities
+	}
+	return nil
+}
+
 // RemediationStats provides statistics about the remediation plan.
 type RemediationStats struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
@@ -449,7 +516,7 @@ const file_deputy_fix_v1_service_proto_rawDesc = "" +
 	"\bcommands\x18\x03 \x03(\v2!.deputy.fix.v1.RemediationCommandR\bcommands\x125\n" +
 	"\x05stats\x18\x04 \x01(\v2\x1f.deputy.fix.v1.RemediationStatsR\x05stats\x12=\n" +
 	"\fgenerated_at\x18\x05 \x01(\v2\x1a.google.protobuf.TimestampR\vgeneratedAt\x12\x1a\n" +
-	"\bwarnings\x18\x06 \x03(\tR\bwarnings\"\xe2\x01\n" +
+	"\bwarnings\x18\x06 \x03(\tR\bwarnings\"\xbe\x03\n" +
 	"\x12RemediationCommand\x12\x18\n" +
 	"\amanager\x18\x01 \x01(\tR\amanager\x12\x18\n" +
 	"\acommand\x18\x02 \x01(\tR\acommand\x12\x12\n" +
@@ -460,7 +527,15 @@ const file_deputy_fix_v1_service_proto_rawDesc = "" +
 	"\tis_direct\x18\a \x01(\bR\bisDirect\x12\x1e\n" +
 	"\n" +
 	"executable\x18\b \x01(\bR\n" +
-	"executable\"f\n" +
+	"executable\x12\x18\n" +
+	"\apackage\x18\t \x01(\tR\apackage\x12\x18\n" +
+	"\aversion\x18\n" +
+	" \x01(\tR\aversion\x12\x12\n" +
+	"\x04purl\x18\v \x01(\tR\x04purl\x12%\n" +
+	"\x0etarget_version\x18\f \x01(\tR\rtargetVersion\x12#\n" +
+	"\rtarget_module\x18\r \x01(\tR\ftargetModule\x12\x1c\n" +
+	"\tmigration\x18\x0e \x01(\bR\tmigration\x12(\n" +
+	"\x0fvulnerabilities\x18\x0f \x03(\tR\x0fvulnerabilities\"f\n" +
 	"\x10RemediationStats\x12%\n" +
 	"\x0etotal_commands\x18\x01 \x01(\x05R\rtotalCommands\x12+\n" +
 	"\x11runnable_commands\x18\x02 \x01(\x05R\x10runnableCommands2J\n" +
