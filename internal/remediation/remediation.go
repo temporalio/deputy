@@ -396,13 +396,13 @@ func commandTargetVersion(manager, version string) string {
 //
 // For a direct dependency, it surfaces the concrete `go get` for the new module
 // plus the manual import-path step. For an indirect dependency there is no local
-// migration — the module that pulls it in must migrate or be upgraded — so it
+// migration (the module that pulls it in must migrate or be upgraded), so it
 // points at that instead of an unrunnable `go get`.
 func migrationCommand(targetModule, version string, isDirect bool) commandResult {
 	v := ecosystem.Go.NormalizeVersion(version)
 	if !isDirect {
 		return commandResult{
-			command:    "Upgrade the dependency that pulls this in (indirect — no in-place fix)",
+			command:    "Upgrade the dependency that pulls this in (indirect; no in-place fix)",
 			hint:       "use dependency graph context to find the direct dependency that pulls this in",
 			executable: false,
 		}

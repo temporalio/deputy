@@ -3457,7 +3457,7 @@ func TestGetRemediation(t *testing.T) {
 
 		indirectMigrations := map[string]*mcpv1.RemediationCommand{}
 		for _, cmd := range result.Commands {
-			if cmd.Command == "Upgrade the dependency that pulls this in (indirect — no in-place fix)" {
+			if cmd.Command == "Upgrade the dependency that pulls this in (indirect; no in-place fix)" {
 				indirectMigrations[cmd.Package] = cmd
 			}
 		}

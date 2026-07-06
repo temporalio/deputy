@@ -88,7 +88,7 @@ func TestCommandsFromConsolidatedMigration(t *testing.T) {
 	assertCommand(t, commands, "go get github.com/example/widget/v2@v2.0.1", false)
 	assertCommandTarget(t, commands, "go get github.com/example/widget/v2@v2.0.1", "v2.0.1")
 	// Indirect migration: advise upgrading the importer, not a local go get.
-	assertCommand(t, commands, "Upgrade the dependency that pulls this in (indirect — no in-place fix)", false)
+	assertCommand(t, commands, "Upgrade the dependency that pulls this in (indirect; no in-place fix)", false)
 
 	indirectMigrations := map[string]Command{}
 	// An indirect migration must NOT emit a runnable go get for the target —
@@ -100,7 +100,7 @@ func TestCommandsFromConsolidatedMigration(t *testing.T) {
 		if c.Command == "go mod tidy" {
 			t.Errorf("non-executable migrations should not trigger a go mod tidy follow-up")
 		}
-		if c.Command == "Upgrade the dependency that pulls this in (indirect — no in-place fix)" {
+		if c.Command == "Upgrade the dependency that pulls this in (indirect; no in-place fix)" {
 			indirectMigrations[c.Package] = c
 		}
 	}

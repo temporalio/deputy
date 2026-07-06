@@ -62,7 +62,7 @@ func Resolve(ctx context.Context, c vulnerability.Consolidated, r Resolver, opts
 			// either. Surface as unverified with the claimed version.
 			return &vulnerability.FixVerdict{Status: vulnerability.FixStatusUnverified, Version: inPlace, Claimed: inPlace}
 		case ExistsNo:
-			// Definitively absent on this path — fall through to migration search.
+			// Definitively absent on this path; fall through to migration search.
 		}
 	}
 
