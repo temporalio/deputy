@@ -1,6 +1,8 @@
 package proto
 
 import (
+	"strconv"
+	"strings"
 	"time"
 
 	"google.golang.org/protobuf/types/known/durationpb"
@@ -30,7 +32,7 @@ func RemediationCommandToStep(c remediation.Command, id string) *remediationv1.S
 		Purl:                    c.PURL,
 		TargetModule:            c.TargetModule,
 		Migration:               c.Migration,
-		IsDirect:                c.IsDirect,
+		Direct:                  c.IsDirect,
 		Groups:                  c.Groups,
 		AffectedVulnerabilities: c.Vulnerabilities,
 	}
@@ -55,7 +57,7 @@ func RemediationStepFromProto(s *remediationv1.Step) remediation.Command {
 		PURL:            s.Purl,
 		TargetModule:    s.TargetModule,
 		Migration:       s.Migration,
-		IsDirect:        s.IsDirect,
+		IsDirect:        s.GetDirect(),
 		Groups:          s.Groups,
 		Vulnerabilities: s.AffectedVulnerabilities,
 	}
@@ -89,17 +91,11 @@ func RemediationStepsFromProto(steps []*remediationv1.Step) []remediation.Comman
 // with a target version is a version upgrade regardless of executability:
 // kind describes the remediation, executable describes actionability.
 func detectStepKind(c remediation.Command) remediationv1.StepKind {
-	cmd := c.Command
-	if len(cmd) > 0 {
-		// Deputy internal commands
-		if len(cmd) > 7 && cmd[:7] == "deputy:" {
-			if len(cmd) > 21 && cmd[:21] == "deputy:action:update " {
-				return remediationv1.StepKind_STEP_KIND_ACTION_UPDATE
-			}
-			if len(cmd) > 25 && cmd[:25] == "deputy:dockerfile:update " {
-				return remediationv1.StepKind_STEP_KIND_DOCKERFILE_UPDATE
-			}
-		}
+	if strings.HasPrefix(c.Command, "deputy:action:update ") {
+		return remediationv1.StepKind_STEP_KIND_ACTION_UPDATE
+	}
+	if strings.HasPrefix(c.Command, "deputy:dockerfile:update ") {
+		return remediationv1.StepKind_STEP_KIND_DOCKERFILE_UPDATE
 	}
 
 	if c.TargetVersion != "" || c.TargetModule != "" {
@@ -175,30 +171,7 @@ func detectRiskLevel(c remediation.Command) remediationv1.RiskLevel {
 
 // stepID generates a step ID from an index.
 func stepID(i int) string {
-	return "step-" + itoa(i+1)
-}
-
-// itoa converts an integer to a string without importing strconv.
-func itoa(i int) string {
-	if i == 0 {
-		return "0"
-	}
-	var b [20]byte
-	pos := len(b)
-	neg := i < 0
-	if neg {
-		i = -i
-	}
-	for i > 0 {
-		pos--
-		b[pos] = byte('0' + i%10)
-		i /= 10
-	}
-	if neg {
-		pos--
-		b[pos] = '-'
-	}
-	return string(b[pos:])
+	return "step-" + strconv.Itoa(i+1)
 }
 
 // AgentInfoToProto converts internal ai.Provider to proto AgentInfo.

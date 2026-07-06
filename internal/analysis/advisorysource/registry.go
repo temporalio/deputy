@@ -46,7 +46,7 @@ func NewDefaultRegistry(ctx context.Context, client osv.Client) *Registry {
 	sources := []Source{NewOSVSource(client)}
 	external, err := materializeSources(ctx, allSourceConfigs())
 	if err != nil {
-		logs.Warn(ctx, "deputy.advisorysource.source_load_failed", "error", err)
+		logs.Warn(ctx, "deputy.advisorysource.source_load_failed", "load_errors", err)
 	}
 	return NewRegistry(append(sources, external...)...)
 }
@@ -100,7 +100,6 @@ func (r *Registry) Query(ctx context.Context, pkgs []*dependencyv1.Package) (*Ag
 		if len(subsets[i]) == 0 {
 			continue
 		}
-		i, src := i, src
 		g.Go(func() error {
 			res, err := src.Query(gctx, subsets[i])
 			if err != nil {
@@ -267,6 +266,9 @@ type coverageKey struct {
 	art vulnerabilityv1.ArtifactKind
 }
 
+// coverageAgg accumulates one (ecosystem, artifact) coverage record: sources
+// lists the source names that claimed the combination (routing, not whether
+// they returned findings), and count is how many packages were routed.
 type coverageAgg struct {
 	sources []string
 	count   int

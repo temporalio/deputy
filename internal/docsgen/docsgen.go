@@ -125,7 +125,7 @@ func writeFieldTable(b *strings.Builder, md protoreflect.MessageDescriptor) {
 	fields := md.Fields()
 	names := make([]string, 0, fields.Len())
 	byName := make(map[string]protoreflect.FieldDescriptor, fields.Len())
-	for i := 0; i < fields.Len(); i++ {
+	for i := range fields.Len() {
 		fd := fields.Get(i)
 		names = append(names, string(fd.Name()))
 		byName[string(fd.Name())] = fd
@@ -170,22 +170,36 @@ func scalarTypeString(fd protoreflect.FieldDescriptor) string {
 }
 
 // firstSentence trims a proto comment to its first sentence so it fits a
-// table cell without losing the contract statement.
+// table cell without losing the contract statement. A period only ends the
+// sentence when an uppercase letter follows, so abbreviations, URLs, and
+// version strings mid-sentence do not truncate it.
 func firstSentence(comment string) string {
 	comment = strings.TrimSpace(comment)
 	if comment == "" {
 		return ""
 	}
 	line := strings.ReplaceAll(comment, "\n", " ")
-	if idx := strings.Index(line, ". "); idx != -1 {
-		return line[:idx+1]
+	for idx := 0; ; {
+		next := strings.Index(line[idx:], ". ")
+		if next == -1 {
+			return line
+		}
+		idx += next
+		rest := strings.TrimLeft(line[idx+1:], " ")
+		if rest != "" {
+			if r := rune(rest[0]); r >= 'A' && r <= 'Z' {
+				return line[:idx+1]
+			}
+		}
+		idx += 2
 	}
-	return line
 }
 
-// tableCell escapes a string for use in a markdown table cell.
+// tableCell escapes a string for use in a markdown table cell: pipes are
+// escaped and newlines flattened so a cell can never break the table.
 func tableCell(s string) string {
-	return strings.ReplaceAll(strings.TrimSpace(s), "|", "\\|")
+	s = strings.ReplaceAll(strings.TrimSpace(s), "\n", " ")
+	return strings.ReplaceAll(s, "|", "\\|")
 }
 
 // UpdateSection replaces the named generated section of a file in place. The

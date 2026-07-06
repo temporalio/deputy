@@ -26,7 +26,15 @@ var raw []byte
 
 // comment index keyed by the element's proto full name (messages, fields,
 // enums, enum values), holding the cleaned leading comment.
-var load = sync.OnceValues(func() (map[protoreflect.FullName]string, error) {
+var load = sync.OnceValues(func() (_ map[protoreflect.FullName]string, retErr error) {
+	// Indexing walks source-info paths with direct slice indexing; a
+	// malformed or tampered descriptor set must degrade to "no comments",
+	// not crash the process.
+	defer func() {
+		if r := recover(); r != nil {
+			retErr = fmt.Errorf("index embedded descriptor set: %v", r)
+		}
+	}()
 	var fds descriptorpb.FileDescriptorSet
 	if err := proto.Unmarshal(raw, &fds); err != nil {
 		return nil, fmt.Errorf("parse embedded descriptor set: %w", err)

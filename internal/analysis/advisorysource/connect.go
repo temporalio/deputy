@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"time"
 
 	"connectrpc.com/connect"
 
@@ -49,7 +50,10 @@ func WithConnectClientOptions(opts ...connect.ClientOption) ConnectOption {
 // routing, so a service that is down at startup fails loudly here rather than
 // silently covering nothing.
 func NewConnectSource(ctx context.Context, baseURL string, opts ...ConnectOption) (Source, error) {
-	options := &connectOptions{httpClient: http.DefaultClient}
+	// Advisory queries sit on the scan critical path, so the default client
+	// carries a timeout; a hung remote source must not stall the whole scan.
+	// Callers with different needs supply their own via WithConnectHTTPClient.
+	options := &connectOptions{httpClient: &http.Client{Timeout: 30 * time.Second}}
 	for _, opt := range opts {
 		opt(options)
 	}

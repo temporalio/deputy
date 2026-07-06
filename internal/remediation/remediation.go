@@ -363,6 +363,9 @@ func dedupeCommands(upgrades []packageUpgrade) []Command {
 		}
 	}
 
+	// The go mod tidy follow-ups are hygiene steps, not fixes: they carry no
+	// vulnerability IDs on purpose, so plan consumers do not credit them with
+	// remediating anything.
 	switch {
 	case goManagerPresent && len(goPaths) == 0:
 		commands = append(commands, Command{
@@ -599,6 +602,11 @@ func miseToolName(componentKey, pkg, runtimeName string) string {
 	return cmp.Or(strings.TrimSpace(componentKey), fallback)
 }
 
+// recommendCommand builds the package-manager command for one upgrade at one
+// manifest: executable command text and args when the manager supports a safe
+// direct invocation, or manual guidance text with a hint otherwise. The
+// componentKey targets the manifest's own name for a dependency when it
+// differs from the reported package (e.g. mise tool keys).
 func recommendCommand(manager, manifestPath, pkg, version string, groups []string, componentKey string) commandResult {
 	m := strings.ToLower(manager)
 

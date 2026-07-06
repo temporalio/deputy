@@ -76,6 +76,9 @@ func ApplyGuidance(commands []Command, guidance GuidanceContext) []Command {
 	return out
 }
 
+// guidanceHint returns a surface-specific hint for cmd when the caller can
+// run graph queries, replacing the generic importer guidance. Returns "" when
+// cmd does not need importer guidance, leaving the existing hint untouched.
 func guidanceHint(cmd Command, guidance GuidanceContext) string {
 	if !needsImporterGuidance(cmd) {
 		return ""
@@ -100,10 +103,14 @@ func guidanceHint(cmd Command, guidance GuidanceContext) string {
 	}
 }
 
+// needsImporterGuidance reports whether cmd is an indirect migration fix that
+// cannot be acted on without first finding the direct importer.
 func needsImporterGuidance(cmd Command) bool {
 	return cmd.Migration && !cmd.IsDirect && !cmd.Executable
 }
 
+// commandQuery returns the best graph query token for cmd: its PURL when
+// known, otherwise the package name.
 func commandQuery(cmd Command) string {
 	if purl := strings.TrimSpace(cmd.PURL); purl != "" {
 		return purl

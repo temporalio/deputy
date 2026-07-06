@@ -105,6 +105,10 @@ func (h *RemediationHandler) GeneratePlan(
 	ctx context.Context,
 	req *connect.Request[remediationv1.GeneratePlanRequest],
 ) (*connect.Response[remediationv1.GeneratePlanResponse], error) {
+	if err := validateRequest(req.Msg); err != nil {
+		return nil, err
+	}
+
 	// Get scan result from the oneof source
 	scanResult := req.Msg.GetScanResult()
 	if scanResult == nil {
@@ -138,12 +142,21 @@ func (h *RemediationHandler) GeneratePlan(
 	commands, stdlibVersion := remediation.CommandsFromConsolidated(consolidated.Vulnerabilities)
 	commands = remediation.ApplyGuidance(commands, guidanceContextFor(req.Msg.GetOptions().GetGuidanceProfile()))
 
-	// Identify findings the plan cannot address.
-	var unaddressed []string
+	// Identify findings the plan actually addresses: a finding counts only
+	// when at least one generated command carries its ID. A finding can be
+	// remediable in principle yet produce no command (for example when every
+	// declaring manifest is a vendored install-tree copy), and counting it as
+	// addressed would let a consumer mark it resolved after zero steps.
+	coveredByPlan := make(map[string]struct{})
+	for _, cmd := range commands {
+		for _, id := range cmd.Vulnerabilities {
+			coveredByPlan[id] = struct{}{}
+		}
+	}
 	addressed := 0
+	var unaddressed []string
 	for _, v := range consolidated.Vulnerabilities {
-		remediable, _ := vulnerability.RemediationDisposition(v)
-		if remediable {
+		if _, ok := coveredByPlan[v.PrimaryID]; ok {
 			addressed++
 		} else {
 			unaddressed = append(unaddressed, v.PrimaryID)
@@ -397,12 +410,19 @@ func executeStep(ctx context.Context, workDir string, step *remediationv1.Step) 
 		return fmt.Sprintf("Applied: %s", cmd), nil
 	}
 
-	// Determine execution directory
+	// Determine execution directory. The manifest path is plan data, so
+	// confine the resolved directory to the work directory: a crafted
+	// ../ path must not steer command execution outside it.
 	execDir := workDir
 	if manifestPath := step.GetManifestPath(); manifestPath != "" {
 		relDir := filepath.Dir(manifestPath)
 		if relDir != "." && relDir != "" {
-			execDir = filepath.Join(workDir, relDir)
+			candidate := filepath.Join(workDir, relDir)
+			rel, err := filepath.Rel(workDir, candidate)
+			if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+				return "", fmt.Errorf("manifest path %q escapes the work directory", manifestPath)
+			}
+			execDir = candidate
 		}
 	}
 
@@ -536,8 +556,9 @@ func (h *RemediationHandler) ExecuteWithAgent(
 			select {
 			case approval := <-session.approvals:
 				if _, err := handler.Approve(execCtx, connect.NewRequest(approval)); err != nil {
-					// Log but don't fail
-					_ = err
+					// The agent keeps running; surface the undelivered
+					// approval instead of failing the stream.
+					logs.Warn(execCtx, "agent approval delivery failed", "error", err)
 				}
 			case <-execCtx.Done():
 				return execCtx.Err()
@@ -733,9 +754,15 @@ func (h *RemediationHandler) ApproveStep(
 
 // Helper functions
 
-// generatePlanID creates a unique plan identifier.
+// generatePlanID creates a unique plan identifier. It uses random bytes so
+// concurrent plans can never collide; the time-based form only remains as a
+// fallback if crypto/rand fails.
 func generatePlanID() string {
-	return fmt.Sprintf("plan-%d", time.Now().UnixNano())
+	b := make([]byte, 8)
+	if _, err := crypto_rand.Read(b); err != nil {
+		return fmt.Sprintf("plan-%d", time.Now().UnixNano())
+	}
+	return "plan-" + hex.EncodeToString(b)
 }
 
 // generateSessionID creates a unique session identifier using cryptographically secure random bytes.
