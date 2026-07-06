@@ -1,12 +1,15 @@
 package mcp
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
 
 	"github.com/google/jsonschema-go/jsonschema"
+	"github.com/modelcontextprotocol/go-sdk/mcp"
+	"go.opentelemetry.io/otel/trace"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/reflect/protoreflect"
 
@@ -15,6 +18,7 @@ import (
 	remediationv1 "github.com/temporalio/deputy/gen/deputy/remediation/v1"
 	vulnerabilityv1 "github.com/temporalio/deputy/gen/deputy/vulnerability/v1"
 	"github.com/temporalio/deputy/internal/mcp/protoschema"
+	"github.com/temporalio/deputy/internal/otel"
 	internalproto "github.com/temporalio/deputy/internal/proto"
 	"github.com/temporalio/deputy/internal/vulnerability"
 )
@@ -71,6 +75,55 @@ func mustToolSchemas(request, result protoreflect.MessageDescriptor) (in, out *j
 		panic(fmt.Sprintf("mcp: output schema for %s: %v", result.FullName(), err))
 	}
 	return in, out
+}
+
+// runTool executes one MCP tool call with the lifecycle every tool shares:
+// the category timeout, the tool span, request parsing and protovalidate
+// enforcement, result marshaling, and a call metric recorded on every exit
+// path. Owning the lifecycle in one place makes the per-tool observability
+// impossible to get wrong per handler: a tool cannot forget its failure
+// metric or skip its span. impl returns the result message to put on the
+// wire and reads the span from ctx (otel.SpanFromContext) for tool-specific
+// attributes.
+func runTool[Req proto.Message](
+	ctx context.Context,
+	s *Server,
+	tool string,
+	timeout time.Duration,
+	req Req,
+	raw json.RawMessage,
+	impl func(context.Context, Req) (proto.Message, error),
+) (*mcp.CallToolResult, json.RawMessage, error) {
+	startTime := time.Now()
+	ctx, cancel := s.withTimeout(ctx, timeout)
+	defer cancel()
+
+	ctx, span := otel.StartSpan(ctx, "deputy.mcp."+tool,
+		trace.WithAttributes(otel.AttrMCPTool.String(tool)))
+	defer span.End()
+
+	success := false
+	defer func() {
+		otel.RecordMCPToolCall(ctx, tool, time.Since(startTime).Seconds(), success)
+	}()
+
+	if err := unmarshalMCPRequest(raw, req); err != nil {
+		otel.SetSpanError(span, err)
+		return nil, nil, err
+	}
+	result, err := impl(ctx, req)
+	if err != nil {
+		otel.SetSpanError(span, err)
+		return nil, nil, err
+	}
+	out, err := marshalMCPResult(result)
+	if err != nil {
+		otel.SetSpanError(span, err)
+		return nil, nil, err
+	}
+	otel.SetSpanOK(span)
+	success = true
+	return nil, out, nil
 }
 
 // vulnExplanationProto builds the mcp.v1 projection of a consolidated finding.

@@ -41,7 +41,6 @@ import (
 	"github.com/temporalio/deputy/internal/vulnerability"
 	vulnseverity "github.com/temporalio/deputy/internal/vulnerability/severity"
 	"go.opentelemetry.io/otel/attribute"
-	"go.opentelemetry.io/otel/trace"
 	"golang.org/x/mod/semver"
 	"google.golang.org/protobuf/proto"
 )
@@ -1074,14 +1073,13 @@ func splitLastSlash(name string) (string, string) {
 // === Tool Implementations ===
 
 func (s *Server) getServerInfo(ctx context.Context, req *mcp.CallToolRequest, raw json.RawMessage) (*mcp.CallToolResult, json.RawMessage, error) {
-	if err := unmarshalMCPRequest(raw, &mcpv1.GetServerInfoRequest{}); err != nil {
-		return nil, nil, err
-	}
-	out, err := marshalMCPResult(s.serverInfo())
-	if err != nil {
-		return nil, nil, err
-	}
-	return nil, out, nil
+	return runTool(ctx, s, "get_server_info", s.toolTimeouts.Default, &mcpv1.GetServerInfoRequest{}, raw, s.getServerInfoTool)
+}
+
+// getServerInfoTool reports the running server's build, process, and tool
+// metadata.
+func (s *Server) getServerInfoTool(context.Context, *mcpv1.GetServerInfoRequest) (proto.Message, error) {
+	return s.serverInfo(), nil
 }
 
 // serverInfo describes the running server for the get_server_info tool and
@@ -1103,29 +1101,19 @@ func (s *Server) serverInfo() *mcpv1.GetServerInfoResult {
 }
 
 func (s *Server) listPolicyEntrypoints(ctx context.Context, req *mcp.CallToolRequest, raw json.RawMessage) (*mcp.CallToolResult, json.RawMessage, error) {
-	startTime := time.Now()
-	ctx, cancel := s.withTimeout(ctx, s.toolTimeouts.Default)
-	defer cancel()
+	return runTool(ctx, s, "list_policy_entrypoints", s.toolTimeouts.Default, &mcpv1.ListPolicyEntrypointsRequest{}, raw, s.listPolicyEntrypointsTool)
+}
 
-	ctx, span := otel.StartSpan(ctx, "deputy.mcp.list_policy_entrypoints",
-		trace.WithAttributes(otel.AttrMCPTool.String("list_policy_entrypoints")))
-	defer span.End()
-
-	args := &mcpv1.ListPolicyEntrypointsRequest{}
-	if err := unmarshalMCPRequest(raw, args); err != nil {
-		otel.SetSpanError(span, err)
-		otel.RecordMCPToolCall(ctx, "list_policy_entrypoints", time.Since(startTime).Seconds(), false)
-		return nil, nil, err
-	}
+// listPolicyEntrypointsTool lists CEL policy entrypoints from the policy service, a thin envelope over deputy.policy.v1.
+func (s *Server) listPolicyEntrypointsTool(ctx context.Context, args *mcpv1.ListPolicyEntrypointsRequest) (proto.Message, error) {
+	span := otel.SpanFromContext(ctx)
 
 	category := policy.NormalizeCategory(args.GetCategory())
 	logs.Debug(ctx, "MCP tool invoked", "tool", "list_policy_entrypoints", "category", category)
 
 	if s.clients.Policy == nil {
 		err := fmt.Errorf("policy service client is not configured")
-		otel.SetSpanError(span, err)
-		otel.RecordMCPToolCall(ctx, "list_policy_entrypoints", time.Since(startTime).Seconds(), false)
-		return nil, nil, err
+		return nil, err
 	}
 
 	resp, err := s.clients.Policy.ListEntrypoints(ctx, connect.NewRequest(&policyv1.ListEntrypointsRequest{
@@ -1133,9 +1121,7 @@ func (s *Server) listPolicyEntrypoints(ctx context.Context, req *mcp.CallToolReq
 	}))
 	if err != nil {
 		err = fmt.Errorf("list policy entrypoints: %w", err)
-		otel.SetSpanError(span, err)
-		otel.RecordMCPToolCall(ctx, "list_policy_entrypoints", time.Since(startTime).Seconds(), false)
-		return nil, nil, err
+		return nil, err
 	}
 
 	// The result embeds the policy service's entrypoint metadata directly: the
@@ -1147,44 +1133,25 @@ func (s *Server) listPolicyEntrypoints(ctx context.Context, req *mcp.CallToolReq
 	}
 
 	span.SetAttributes(attribute.Int("deputy.mcp.policy_entrypoint_count", int(result.GetEntrypointCount())))
-	otel.SetSpanOK(span)
-	otel.RecordMCPToolCall(ctx, "list_policy_entrypoints", time.Since(startTime).Seconds(), true)
 	logs.Debug(ctx, "MCP tool completed", "tool", "list_policy_entrypoints", "category", category, "entrypoints", result.GetEntrypointCount())
 
-	out, err := marshalMCPResult(result)
-	if err != nil {
-		otel.SetSpanError(span, err)
-		return nil, nil, err
-	}
-	return nil, out, nil
+	return result, nil
 }
 
 func (s *Server) explainVulnerability(ctx context.Context, req *mcp.CallToolRequest, raw json.RawMessage) (*mcp.CallToolResult, json.RawMessage, error) {
-	startTime := time.Now()
+	return runTool(ctx, s, "explain_vulnerability", s.toolTimeouts.Default, &mcpv1.ExplainVulnerabilityRequest{}, raw, s.explainVulnerabilityTool)
+}
 
-	// Apply timeout for quick operations
-	ctx, cancel := s.withTimeout(ctx, s.toolTimeouts.Default)
-	defer cancel()
-
-	ctx, span := otel.StartSpan(ctx, "deputy.mcp.explain_vulnerability",
-		trace.WithAttributes(otel.AttrMCPTool.String("explain_vulnerability")))
-	defer span.End()
-
-	args := &mcpv1.ExplainVulnerabilityRequest{}
-	if err := unmarshalMCPRequest(raw, args); err != nil {
-		otel.SetSpanError(span, err)
-		otel.RecordMCPToolCall(ctx, "explain_vulnerability", time.Since(startTime).Seconds(), false)
-		return nil, nil, err
-	}
+// explainVulnerabilityTool fetches one advisory and returns its full explanation.
+func (s *Server) explainVulnerabilityTool(ctx context.Context, args *mcpv1.ExplainVulnerabilityRequest) (proto.Message, error) {
+	span := otel.SpanFromContext(ctx)
 
 	logs.Debug(ctx, "MCP tool invoked", "tool", "explain_vulnerability", "vuln_id", args.GetId())
 
 	vulnID := strings.TrimSpace(args.GetId())
 	if vulnID == "" {
 		err := fmt.Errorf("vulnerability ID is required")
-		otel.SetSpanError(span, err)
-		otel.RecordMCPToolCall(ctx, "explain_vulnerability", time.Since(startTime).Seconds(), false)
-		return nil, nil, err
+		return nil, err
 	}
 
 	span.SetAttributes(otel.AttrMCPVulnerabilityID.String(vulnID))
@@ -1197,58 +1164,35 @@ func (s *Server) explainVulnerability(ctx context.Context, req *mcp.CallToolRequ
 	resp, err := s.clients.Advisory.GetAdvisory(ctx, advisoryReq)
 	if err != nil {
 		err = fmt.Errorf("failed to fetch vulnerability %s: %w", vulnID, err)
-		otel.SetSpanError(span, err)
-		otel.RecordMCPToolCall(ctx, "explain_vulnerability", time.Since(startTime).Seconds(), false)
 		logs.Warn(ctx, "Failed to fetch vulnerability", "vuln_id", vulnID, "error", err)
-		return nil, nil, err
+		return nil, err
 	}
 
 	if !resp.Msg.GetFound() {
 		err = fmt.Errorf("vulnerability %s not found", vulnID)
-		otel.SetSpanError(span, err)
-		otel.RecordMCPToolCall(ctx, "explain_vulnerability", time.Since(startTime).Seconds(), false)
-		return nil, nil, err
+		return nil, err
 	}
 
 	explanation := advisoryExplanationProto(resp.Msg.GetAdvisory(), referenceLimitForMCP(args.ReferenceLimit))
 
-	otel.SetSpanOK(span)
-	otel.RecordMCPToolCall(ctx, "explain_vulnerability", time.Since(startTime).Seconds(), true)
 	logs.Debug(ctx, "MCP tool completed", "tool", "explain_vulnerability", "vuln_id", vulnID)
 
-	out, err := marshalMCPResult(explanation)
-	if err != nil {
-		otel.SetSpanError(span, err)
-		return nil, nil, err
-	}
-	return nil, out, nil
+	return explanation, nil
 }
 
 func (s *Server) explainVulnerabilities(ctx context.Context, req *mcp.CallToolRequest, raw json.RawMessage) (*mcp.CallToolResult, json.RawMessage, error) {
-	startTime := time.Now()
+	return runTool(ctx, s, "explain_vulnerabilities", s.toolTimeouts.Default, &mcpv1.ExplainVulnerabilitiesRequest{}, raw, s.explainVulnerabilitiesTool)
+}
 
-	// Apply timeout for quick operations (scaled by count)
-	ctx, cancel := s.withTimeout(ctx, s.toolTimeouts.Default)
-	defer cancel()
-
-	ctx, span := otel.StartSpan(ctx, "deputy.mcp.explain_vulnerabilities",
-		trace.WithAttributes(otel.AttrMCPTool.String("explain_vulnerabilities")))
-	defer span.End()
-
-	args := &mcpv1.ExplainVulnerabilitiesRequest{}
-	if err := unmarshalMCPRequest(raw, args); err != nil {
-		otel.SetSpanError(span, err)
-		otel.RecordMCPToolCall(ctx, "explain_vulnerabilities", time.Since(startTime).Seconds(), false)
-		return nil, nil, err
-	}
+// explainVulnerabilitiesTool fetches several advisories with partial-success semantics: failures are reported per ID in errors.
+func (s *Server) explainVulnerabilitiesTool(ctx context.Context, args *mcpv1.ExplainVulnerabilitiesRequest) (proto.Message, error) {
+	span := otel.SpanFromContext(ctx)
 
 	logs.Debug(ctx, "MCP tool invoked", "tool", "explain_vulnerabilities", "count", len(args.GetIds()))
 
 	ids, err := normalizeMCPVulnerabilityIDs(args.GetIds())
 	if err != nil {
-		otel.SetSpanError(span, err)
-		otel.RecordMCPToolCall(ctx, "explain_vulnerabilities", time.Since(startTime).Seconds(), false)
-		return nil, nil, err
+		return nil, err
 	}
 
 	span.SetAttributes(otel.AttrMCPVulnerabilityCount.Int(len(ids)))
@@ -1260,10 +1204,8 @@ func (s *Server) explainVulnerabilities(ctx context.Context, req *mcp.CallToolRe
 	resp, err := s.clients.Advisory.GetAdvisories(ctx, advisoryReq)
 	if err != nil {
 		err = fmt.Errorf("failed to fetch vulnerabilities: %w", err)
-		otel.SetSpanError(span, err)
-		otel.RecordMCPToolCall(ctx, "explain_vulnerabilities", time.Since(startTime).Seconds(), false)
 		logs.Warn(ctx, "Failed to fetch vulnerabilities", "count", len(uniqueIDs), "error", err)
-		return nil, nil, err
+		return nil, err
 	}
 
 	result := &mcpv1.ExplainVulnerabilitiesResult{}
@@ -1289,16 +1231,9 @@ func (s *Server) explainVulnerabilities(ctx context.Context, req *mcp.CallToolRe
 		result.Errors = append(result.Errors, fmt.Sprintf("%s: advisory response missing this ID", id))
 	}
 
-	otel.SetSpanOK(span)
-	otel.RecordMCPToolCall(ctx, "explain_vulnerabilities", time.Since(startTime).Seconds(), true)
 	logs.Debug(ctx, "MCP tool completed", "tool", "explain_vulnerabilities", "found", len(result.Vulnerabilities), "errors", len(result.Errors))
 
-	out, err := marshalMCPResult(result)
-	if err != nil {
-		otel.SetSpanError(span, err)
-		return nil, nil, err
-	}
-	return nil, out, nil
+	return result, nil
 }
 
 func normalizeMCPVulnerabilityIDs(ids []string) ([]string, error) {
@@ -1359,30 +1294,18 @@ func advisoryForMCPVulnerabilityID(advisories map[string]*vulnerabilityv1.Adviso
 }
 
 func (s *Server) scanPackage(ctx context.Context, req *mcp.CallToolRequest, raw json.RawMessage) (*mcp.CallToolResult, json.RawMessage, error) {
-	startTime := time.Now()
+	return runTool(ctx, s, "scan_package", s.toolTimeouts.Default, &mcpv1.ScanPackageRequest{}, raw, s.scanPackageTool)
+}
 
-	// Apply timeout for quick operations
-	ctx, cancel := s.withTimeout(ctx, s.toolTimeouts.Default)
-	defer cancel()
-
-	ctx, span := otel.StartSpan(ctx, "deputy.mcp.scan_package",
-		trace.WithAttributes(otel.AttrMCPTool.String("scan_package")))
-	defer span.End()
-
-	args := &mcpv1.ScanPackageRequest{}
-	if err := unmarshalMCPRequest(raw, args); err != nil {
-		otel.SetSpanError(span, err)
-		otel.RecordMCPToolCall(ctx, "scan_package", time.Since(startTime).Seconds(), false)
-		return nil, nil, err
-	}
+// scanPackageTool checks one resolved package version for known vulnerabilities.
+func (s *Server) scanPackageTool(ctx context.Context, args *mcpv1.ScanPackageRequest) (proto.Message, error) {
+	span := otel.SpanFromContext(ctx)
 
 	logs.Debug(ctx, "MCP tool invoked", "tool", "scan_package", "package", args.GetName(), "version", args.GetVersion(), "ecosystem", args.GetEcosystem())
 
 	target, err := resolveMCPScanPackageTarget(args)
 	if err != nil {
-		otel.SetSpanError(span, err)
-		otel.RecordMCPToolCall(ctx, "scan_package", time.Since(startTime).Seconds(), false)
-		return nil, nil, err
+		return nil, err
 	}
 
 	span.SetAttributes(
@@ -1404,10 +1327,8 @@ func (s *Server) scanPackage(ctx context.Context, req *mcp.CallToolRequest, raw 
 	resp, err := s.clients.Vulns.Scan(ctx, scanReq)
 	if err != nil {
 		err = fmt.Errorf("failed to scan package: %w", err)
-		otel.SetSpanError(span, err)
-		otel.RecordMCPToolCall(ctx, "scan_package", time.Since(startTime).Seconds(), false)
 		logs.Warn(ctx, "Package scan failed", "package", target.packageName, "error", err)
-		return nil, nil, err
+		return nil, err
 	}
 
 	result := &mcpv1.ScanPackageResult{
@@ -1426,45 +1347,27 @@ func (s *Server) scanPackage(ctx context.Context, req *mcp.CallToolRequest, raw 
 	result.Clean = proto.Bool(len(result.Vulnerabilities) == 0)
 
 	span.SetAttributes(otel.AttrMCPVulnerabilityCount.Int(len(result.Vulnerabilities)))
-	otel.SetSpanOK(span)
-	otel.RecordMCPToolCall(ctx, "scan_package", time.Since(startTime).Seconds(), true)
 	logs.Debug(ctx, "MCP tool completed", "tool", "scan_package", "package", target.packageName, "vulns", len(result.Vulnerabilities), "clean", result.GetClean())
 
-	out, err := marshalMCPResult(result)
-	if err != nil {
-		otel.SetSpanError(span, err)
-		return nil, nil, err
-	}
-	return nil, out, nil
+	return result, nil
 }
 
 func (s *Server) scanDirectory(ctx context.Context, req *mcp.CallToolRequest, raw json.RawMessage) (*mcp.CallToolResult, json.RawMessage, error) {
+	return runTool(ctx, s, "scan_directory", s.toolTimeouts.Scan, &mcpv1.ScanDirectoryRequest{}, raw, s.scanDirectoryTool)
+}
+
+// scanDirectoryTool scans a local directory and summarizes consolidated findings with advisory-source coverage.
+func (s *Server) scanDirectoryTool(ctx context.Context, args *mcpv1.ScanDirectoryRequest) (proto.Message, error) {
+	span := otel.SpanFromContext(ctx)
 	startTime := time.Now()
-
-	// Apply timeout for scan operations
-	ctx, cancel := s.withTimeout(ctx, s.toolTimeouts.Scan)
-	defer cancel()
-
-	ctx, span := otel.StartSpan(ctx, "deputy.mcp.scan_directory",
-		trace.WithAttributes(otel.AttrMCPTool.String("scan_directory")))
-	defer span.End()
-
-	args := &mcpv1.ScanDirectoryRequest{}
-	if err := unmarshalMCPRequest(raw, args); err != nil {
-		otel.SetSpanError(span, err)
-		otel.RecordMCPToolCall(ctx, "scan_directory", time.Since(startTime).Seconds(), false)
-		return nil, nil, err
-	}
 
 	logs.Debug(ctx, "MCP tool invoked", "tool", "scan_directory", "path", args.GetPath())
 
 	// Validate path to prevent path traversal and access to sensitive directories.
 	targetPath, err := normalizeLocalPath(args.GetPath())
 	if err != nil {
-		otel.SetSpanError(span, err)
-		otel.RecordMCPToolCall(ctx, "scan_directory", time.Since(startTime).Seconds(), false)
 		logs.Warn(ctx, "Invalid path in scan_directory", "path", args.GetPath(), "error", err)
-		return nil, nil, err
+		return nil, err
 	}
 
 	span.SetAttributes(otel.AttrTargetPath.String(targetPath))
@@ -1485,10 +1388,8 @@ func (s *Server) scanDirectory(ctx context.Context, req *mcp.CallToolRequest, ra
 	resp, err := s.clients.Vulns.Scan(ctx, scanReq)
 	if err != nil {
 		err = fmt.Errorf("scan failed: %w", err)
-		otel.SetSpanError(span, err)
-		otel.RecordMCPToolCall(ctx, "scan_directory", time.Since(startTime).Seconds(), false)
 		logs.Warn(ctx, "Directory scan failed", "path", targetPath, "error", err)
-		return nil, nil, err
+		return nil, err
 	}
 
 	scanResult := resp.Msg
@@ -1523,45 +1424,26 @@ func (s *Server) scanDirectory(ctx context.Context, req *mcp.CallToolRequest, ra
 		otel.AttrMCPPackageCount.Int(int(scanResult.GetPackagesScanned())),
 		otel.AttrMCPVulnerabilityCount.Int(int(consolidated.Stats.GetUnique())),
 	)
-	otel.SetSpanOK(span)
-	otel.RecordMCPToolCall(ctx, "scan_directory", time.Since(startTime).Seconds(), true)
 	logs.Debug(ctx, "MCP tool completed", "tool", "scan_directory", "path", targetPath, "packages", result.GetPackagesScanned(), "vulns", consolidated.Stats.GetUnique(), "clean", result.GetClean())
 
-	out, err := marshalMCPResult(result)
-	if err != nil {
-		otel.SetSpanError(span, err)
-		return nil, nil, err
-	}
-	return nil, out, nil
+	return result, nil
 }
 
 func (s *Server) listDependencies(ctx context.Context, req *mcp.CallToolRequest, raw json.RawMessage) (*mcp.CallToolResult, json.RawMessage, error) {
-	startTime := time.Now()
+	return runTool(ctx, s, "list_dependencies", s.toolTimeouts.Scan, &mcpv1.ListDependenciesRequest{}, raw, s.listDependenciesTool)
+}
 
-	// Apply timeout for scan operations (listing requires scanning)
-	ctx, cancel := s.withTimeout(ctx, s.toolTimeouts.Scan)
-	defer cancel()
-
-	ctx, span := otel.StartSpan(ctx, "deputy.mcp.list_dependencies",
-		trace.WithAttributes(otel.AttrMCPTool.String("list_dependencies")))
-	defer span.End()
-
-	args := &mcpv1.ListDependenciesRequest{}
-	if err := unmarshalMCPRequest(raw, args); err != nil {
-		otel.SetSpanError(span, err)
-		otel.RecordMCPToolCall(ctx, "list_dependencies", time.Since(startTime).Seconds(), false)
-		return nil, nil, err
-	}
+// listDependenciesTool returns the resolved dependency inventory of a directory.
+func (s *Server) listDependenciesTool(ctx context.Context, args *mcpv1.ListDependenciesRequest) (proto.Message, error) {
+	span := otel.SpanFromContext(ctx)
 
 	logs.Debug(ctx, "MCP tool invoked", "tool", "list_dependencies", "path", args.GetPath(), "direct_only", args.GetDirectOnly())
 
 	// Validate path to prevent path traversal and access to sensitive directories.
 	targetPath, err := normalizeLocalPath(args.GetPath())
 	if err != nil {
-		otel.SetSpanError(span, err)
-		otel.RecordMCPToolCall(ctx, "list_dependencies", time.Since(startTime).Seconds(), false)
 		logs.Warn(ctx, "Invalid path in list_dependencies", "path", args.GetPath(), "error", err)
-		return nil, nil, err
+		return nil, err
 	}
 
 	span.SetAttributes(otel.AttrTargetPath.String(targetPath))
@@ -1580,10 +1462,8 @@ func (s *Server) listDependencies(ctx context.Context, req *mcp.CallToolRequest,
 	resp, err := s.clients.Packages.ListPackages(ctx, listReq)
 	if err != nil {
 		err = fmt.Errorf("failed to analyze dependencies: %w", err)
-		otel.SetSpanError(span, err)
-		otel.RecordMCPToolCall(ctx, "list_dependencies", time.Since(startTime).Seconds(), false)
 		logs.Warn(ctx, "List dependencies failed", "path", targetPath, "error", err)
-		return nil, nil, err
+		return nil, err
 	}
 
 	listResult := resp.Msg
@@ -1618,52 +1498,31 @@ func (s *Server) listDependencies(ctx context.Context, req *mcp.CallToolRequest,
 	}
 
 	span.SetAttributes(otel.AttrMCPPackageCount.Int(int(result.GetTotalDiscovered())))
-	otel.SetSpanOK(span)
-	otel.RecordMCPToolCall(ctx, "list_dependencies", time.Since(startTime).Seconds(), true)
 	logs.Debug(ctx, "MCP tool completed", "tool", "list_dependencies", "path", targetPath, "returned", result.GetTotal(), "total_discovered", result.GetTotalDiscovered(), "direct", result.GetDirect(), "transitive", result.GetTransitive())
 
-	out, err := marshalMCPResult(result)
-	if err != nil {
-		otel.SetSpanError(span, err)
-		return nil, nil, err
-	}
-	return nil, out, nil
+	return result, nil
 }
 
 func (s *Server) generateSBOM(ctx context.Context, req *mcp.CallToolRequest, raw json.RawMessage) (*mcp.CallToolResult, json.RawMessage, error) {
-	startTime := time.Now()
+	return runTool(ctx, s, "generate_sbom", s.toolTimeouts.SBOM, &mcpv1.GenerateSBOMRequest{}, raw, s.generateSBOMTool)
+}
 
-	// Apply timeout for SBOM generation
-	ctx, cancel := s.withTimeout(ctx, s.toolTimeouts.SBOM)
-	defer cancel()
-
-	ctx, span := otel.StartSpan(ctx, "deputy.mcp.generate_sbom",
-		trace.WithAttributes(otel.AttrMCPTool.String("generate_sbom")))
-	defer span.End()
-
-	args := &mcpv1.GenerateSBOMRequest{}
-	if err := unmarshalMCPRequest(raw, args); err != nil {
-		otel.SetSpanError(span, err)
-		otel.RecordMCPToolCall(ctx, "generate_sbom", time.Since(startTime).Seconds(), false)
-		return nil, nil, err
-	}
+// generateSBOMTool generates and serializes an SBOM for a directory.
+func (s *Server) generateSBOMTool(ctx context.Context, args *mcpv1.GenerateSBOMRequest) (proto.Message, error) {
+	span := otel.SpanFromContext(ctx)
 
 	logs.Debug(ctx, "MCP tool invoked", "tool", "generate_sbom", "path", args.GetPath(), "format", args.GetFormat())
 
 	// Validate path to prevent path traversal and access to sensitive directories.
 	targetPath, err := normalizeLocalPath(args.GetPath())
 	if err != nil {
-		otel.SetSpanError(span, err)
-		otel.RecordMCPToolCall(ctx, "generate_sbom", time.Since(startTime).Seconds(), false)
 		logs.Warn(ctx, "Invalid path in generate_sbom", "path", args.GetPath(), "error", err)
-		return nil, nil, err
+		return nil, err
 	}
 
 	format, err := flags.NormalizeSBOMOutputFormat(args.GetFormat())
 	if err != nil {
-		otel.SetSpanError(span, err)
-		otel.RecordMCPToolCall(ctx, "generate_sbom", time.Since(startTime).Seconds(), false)
-		return nil, nil, err
+		return nil, err
 	}
 
 	span.SetAttributes(
@@ -1682,10 +1541,8 @@ func (s *Server) generateSBOM(ctx context.Context, req *mcp.CallToolRequest, raw
 	sbomResult, err := sbomx.Generate(ctx, targetPath, opts)
 	if err != nil {
 		err = fmt.Errorf("failed to generate SBOM: %w", err)
-		otel.SetSpanError(span, err)
-		otel.RecordMCPToolCall(ctx, "generate_sbom", time.Since(startTime).Seconds(), false)
 		logs.Warn(ctx, "SBOM generation failed", "path", targetPath, "error", err)
-		return nil, nil, err
+		return nil, err
 	}
 
 	// Serialize to requested format
@@ -1694,23 +1551,17 @@ func (s *Server) generateSBOM(ctx context.Context, req *mcp.CallToolRequest, raw
 	case "cyclonedx-json":
 		if err := sbomx.WriteCycloneDXJSON(sbomResult.Document, &sb); err != nil {
 			err = fmt.Errorf("failed to serialize SBOM: %w", err)
-			otel.SetSpanError(span, err)
-			otel.RecordMCPToolCall(ctx, "generate_sbom", time.Since(startTime).Seconds(), false)
-			return nil, nil, err
+			return nil, err
 		}
 	case "spdx-json":
 		if err := sbomx.WriteSPDXJSON(sbomResult.Document, &sb); err != nil {
 			err = fmt.Errorf("failed to serialize SBOM: %w", err)
-			otel.SetSpanError(span, err)
-			otel.RecordMCPToolCall(ctx, "generate_sbom", time.Since(startTime).Seconds(), false)
-			return nil, nil, err
+			return nil, err
 		}
 	case "protobom-json":
 		if err := sbomx.WriteProtobomJSON(sbomResult.Document, &sb); err != nil {
 			err = fmt.Errorf("failed to serialize SBOM: %w", err)
-			otel.SetSpanError(span, err)
-			otel.RecordMCPToolCall(ctx, "generate_sbom", time.Since(startTime).Seconds(), false)
-			return nil, nil, err
+			return nil, err
 		}
 	}
 
@@ -1720,11 +1571,9 @@ func (s *Server) generateSBOM(ctx context.Context, req *mcp.CallToolRequest, raw
 	}
 
 	span.SetAttributes(otel.AttrMCPPackageCount.Int(components))
-	otel.SetSpanOK(span)
-	otel.RecordMCPToolCall(ctx, "generate_sbom", time.Since(startTime).Seconds(), true)
 	logs.Debug(ctx, "MCP tool completed", "tool", "generate_sbom", "path", targetPath, "format", format, "components", components)
 
-	out, err := marshalMCPResult(&mcpv1.GenerateSBOMResult{
+	return &mcpv1.GenerateSBOMResult{
 		Path:         targetPath,
 		Ref:          strings.TrimSpace(sbomResult.Ref),
 		EffectiveRef: strings.TrimSpace(sbomResult.Target.EffectiveRef),
@@ -1732,50 +1581,31 @@ func (s *Server) generateSBOM(ctx context.Context, req *mcp.CallToolRequest, raw
 		Format:       format,
 		Components:   int32(components),
 		Sbom:         sb.String(),
-	})
-	if err != nil {
-		otel.SetSpanError(span, err)
-		return nil, nil, err
-	}
-	return nil, out, nil
+	}, nil
 }
 
 func (s *Server) getRemediation(ctx context.Context, req *mcp.CallToolRequest, raw json.RawMessage) (*mcp.CallToolResult, json.RawMessage, error) {
-	startTime := time.Now()
+	return runTool(ctx, s, "get_remediation", s.toolTimeouts.Scan, &mcpv1.GetRemediationRequest{}, raw, s.getRemediationTool)
+}
 
-	// Apply timeout for scan operations (remediation requires scanning)
-	ctx, cancel := s.withTimeout(ctx, s.toolTimeouts.Scan)
-	defer cancel()
-
-	ctx, span := otel.StartSpan(ctx, "deputy.mcp.get_remediation",
-		trace.WithAttributes(otel.AttrMCPTool.String("get_remediation")))
-	defer span.End()
-
-	args := &mcpv1.GetRemediationRequest{}
-	if err := unmarshalMCPRequest(raw, args); err != nil {
-		otel.SetSpanError(span, err)
-		otel.RecordMCPToolCall(ctx, "get_remediation", time.Since(startTime).Seconds(), false)
-		return nil, nil, err
-	}
+// getRemediationTool scans a directory and projects the remediation service's plan for its findings.
+func (s *Server) getRemediationTool(ctx context.Context, args *mcpv1.GetRemediationRequest) (proto.Message, error) {
+	span := otel.SpanFromContext(ctx)
 
 	logs.Debug(ctx, "MCP tool invoked", "tool", "get_remediation", "path", args.GetPath())
 
 	// Validate path to prevent path traversal and access to sensitive directories.
 	targetPath, err := normalizeLocalPath(args.GetPath())
 	if err != nil {
-		otel.SetSpanError(span, err)
-		otel.RecordMCPToolCall(ctx, "get_remediation", time.Since(startTime).Seconds(), false)
 		logs.Warn(ctx, "Invalid path in get_remediation", "path", args.GetPath(), "error", err)
-		return nil, nil, err
+		return nil, err
 	}
 
 	span.SetAttributes(otel.AttrTargetPath.String(targetPath))
 
 	if s.clients.Remediation == nil {
 		err := fmt.Errorf("remediation service client is not configured")
-		otel.SetSpanError(span, err)
-		otel.RecordMCPToolCall(ctx, "get_remediation", time.Since(startTime).Seconds(), false)
-		return nil, nil, err
+		return nil, err
 	}
 
 	// Build proto request
@@ -1794,10 +1624,8 @@ func (s *Server) getRemediation(ctx context.Context, req *mcp.CallToolRequest, r
 	resp, err := s.clients.Vulns.Scan(ctx, scanReq)
 	if err != nil {
 		err = fmt.Errorf("scan failed: %w", err)
-		otel.SetSpanError(span, err)
-		otel.RecordMCPToolCall(ctx, "get_remediation", time.Since(startTime).Seconds(), false)
 		logs.Warn(ctx, "Remediation scan failed", "path", targetPath, "error", err)
-		return nil, nil, err
+		return nil, err
 	}
 
 	// Generate the plan through the remediation service, the same producer
@@ -1810,10 +1638,8 @@ func (s *Server) getRemediation(ctx context.Context, req *mcp.CallToolRequest, r
 	}))
 	if err != nil {
 		err = fmt.Errorf("generate remediation plan: %w", err)
-		otel.SetSpanError(span, err)
-		otel.RecordMCPToolCall(ctx, "get_remediation", time.Since(startTime).Seconds(), false)
 		logs.Warn(ctx, "Remediation plan generation failed", "path", targetPath, "error", err)
-		return nil, nil, err
+		return nil, err
 	}
 
 	plan := planResp.Msg.GetPlan()
@@ -1841,50 +1667,29 @@ func (s *Server) getRemediation(ctx context.Context, req *mcp.CallToolRequest, r
 		attribute.Int("deputy.mcp.remediable_count", int(result.GetStats().GetVulnerabilitiesAddressed())),
 		attribute.Int("deputy.mcp.command_count", len(result.GetSteps())),
 	)
-	otel.SetSpanOK(span)
-	otel.RecordMCPToolCall(ctx, "get_remediation", time.Since(startTime).Seconds(), true)
 	logs.Debug(ctx, "MCP tool completed", "tool", "get_remediation", "path", targetPath, "vulns", result.GetVulnerabilitiesFound(), "steps", len(result.GetSteps()), "unfixable", len(result.GetUnfixableVulnerabilities()))
 
-	out, err := marshalMCPResult(result)
-	if err != nil {
-		otel.SetSpanError(span, err)
-		return nil, nil, err
-	}
-	return nil, out, nil
+	return result, nil
 }
 
 func (s *Server) analyzeDependencyGraph(ctx context.Context, req *mcp.CallToolRequest, raw json.RawMessage) (*mcp.CallToolResult, json.RawMessage, error) {
-	startTime := time.Now()
+	return runTool(ctx, s, "analyze_dependency_graph", s.toolTimeouts.Graph, &mcpv1.AnalyzeGraphRequest{}, raw, s.analyzeDependencyGraphTool)
+}
 
-	// Apply timeout for graph analysis
-	ctx, cancel := s.withTimeout(ctx, s.toolTimeouts.Graph)
-	defer cancel()
-
-	ctx, span := otel.StartSpan(ctx, "deputy.mcp.analyze_dependency_graph",
-		trace.WithAttributes(otel.AttrMCPTool.String("analyze_dependency_graph")))
-	defer span.End()
-
-	args := &mcpv1.AnalyzeGraphRequest{}
-	if err := unmarshalMCPRequest(raw, args); err != nil {
-		otel.SetSpanError(span, err)
-		otel.RecordMCPToolCall(ctx, "analyze_dependency_graph", time.Since(startTime).Seconds(), false)
-		return nil, nil, err
-	}
+// analyzeDependencyGraphTool reports graph statistics, vulnerable paths, and optional target path resolution.
+func (s *Server) analyzeDependencyGraphTool(ctx context.Context, args *mcpv1.AnalyzeGraphRequest) (proto.Message, error) {
+	span := otel.SpanFromContext(ctx)
 
 	logs.Debug(ctx, "MCP tool invoked", "tool", "analyze_dependency_graph", "path", args.GetPath(), "target_purl", args.GetTargetPurl())
 
 	if args.GetPath() == "" {
 		err := fmt.Errorf("path is required")
-		otel.SetSpanError(span, err)
-		otel.RecordMCPToolCall(ctx, "analyze_dependency_graph", time.Since(startTime).Seconds(), false)
-		return nil, nil, err
+		return nil, err
 	}
 	targetPath, err := normalizeLocalPath(args.GetPath())
 	if err != nil {
-		otel.SetSpanError(span, err)
-		otel.RecordMCPToolCall(ctx, "analyze_dependency_graph", time.Since(startTime).Seconds(), false)
 		logs.Warn(ctx, "Invalid path in analyze_dependency_graph", "path", args.GetPath(), "error", err)
-		return nil, nil, err
+		return nil, err
 	}
 	targetPURL := strings.TrimSpace(args.GetTargetPurl())
 	var parsedTargetPURL packageurl.PackageURL
@@ -1893,9 +1698,7 @@ func (s *Server) analyzeDependencyGraph(ctx context.Context, req *mcp.CallToolRe
 		parsed, err := purlx.ParseLoose(targetPURL)
 		if err != nil {
 			err = fmt.Errorf("targetPurl must be a valid PURL: %w", err)
-			otel.SetSpanError(span, err)
-			otel.RecordMCPToolCall(ctx, "analyze_dependency_graph", time.Since(startTime).Seconds(), false)
-			return nil, nil, err
+			return nil, err
 		}
 		parsedTargetPURL = parsed
 		hasTargetPURL = true
@@ -1905,17 +1708,13 @@ func (s *Server) analyzeDependencyGraph(ctx context.Context, req *mcp.CallToolRe
 
 	depGraph, target, err := s.buildDependencyGraph(ctx, targetPath, args.GetRef(), args.GetEcosystems(), args.GetExcludePaths(), args.GetResolveTransitives(), args.GetExtended())
 	if err != nil {
-		otel.SetSpanError(span, err)
-		otel.RecordMCPToolCall(ctx, "analyze_dependency_graph", time.Since(startTime).Seconds(), false)
 		logs.Warn(ctx, "Graph analysis failed", "path", targetPath, "error", err)
-		return nil, nil, err
+		return nil, err
 	}
 	if err := s.annotateGraphVulnerabilities(ctx, targetPath, args.GetRef(), args.GetEcosystems(), args.GetExcludePaths(), depGraph); err != nil {
 		err = fmt.Errorf("scan failed: %w", err)
-		otel.SetSpanError(span, err)
-		otel.RecordMCPToolCall(ctx, "analyze_dependency_graph", time.Since(startTime).Seconds(), false)
 		logs.Warn(ctx, "Graph vulnerability annotation failed", "path", targetPath, "error", err)
-		return nil, nil, err
+		return nil, err
 	}
 
 	ref, effectiveRef, commit := mcpTargetRef(target)
@@ -1971,16 +1770,9 @@ func (s *Server) analyzeDependencyGraph(ctx context.Context, req *mcp.CallToolRe
 		attribute.Int("deputy.mcp.vulnerable_nodes", int(result.GetStats().GetVulnerableNodes())),
 		otel.AttrMCPGraphPathCount.Int(len(result.GetVulnerablePaths())),
 	)
-	otel.SetSpanOK(span)
-	otel.RecordMCPToolCall(ctx, "analyze_dependency_graph", time.Since(startTime).Seconds(), true)
 	logs.Debug(ctx, "MCP tool completed", "tool", "analyze_dependency_graph", "path", targetPath, "nodes", result.GetStats().GetTotalNodes(), "vulnerable_nodes", result.GetStats().GetVulnerableNodes())
 
-	out, err := marshalMCPResult(result)
-	if err != nil {
-		otel.SetSpanError(span, err)
-		return nil, nil, err
-	}
-	return nil, out, nil
+	return result, nil
 }
 
 // graphTargetMessage summarizes a targetPurl query outcome in one sentence,
@@ -2081,22 +1873,12 @@ func mcpGraphStats(stats *graphv1.GraphStats) *graphv1.GraphStats {
 // === Graph, Triage, and Container Tool Implementations ===
 
 func (s *Server) graphWhy(ctx context.Context, req *mcp.CallToolRequest, raw json.RawMessage) (*mcp.CallToolResult, json.RawMessage, error) {
-	startTime := time.Now()
+	return runTool(ctx, s, "graph_why", s.toolTimeouts.Graph, &mcpv1.GraphWhyRequest{}, raw, s.graphWhyTool)
+}
 
-	// Apply timeout for graph analysis
-	ctx, cancel := s.withTimeout(ctx, s.toolTimeouts.Graph)
-	defer cancel()
-
-	ctx, span := otel.StartSpan(ctx, "deputy.mcp.graph_why",
-		trace.WithAttributes(otel.AttrMCPTool.String("graph_why")))
-	defer span.End()
-
-	args := &mcpv1.GraphWhyRequest{}
-	if err := unmarshalMCPRequest(raw, args); err != nil {
-		otel.SetSpanError(span, err)
-		otel.RecordMCPToolCall(ctx, "graph_why", time.Since(startTime).Seconds(), false)
-		return nil, nil, err
-	}
+// graphWhyTool traces why a package is present in the dependency graph.
+func (s *Server) graphWhyTool(ctx context.Context, args *mcpv1.GraphWhyRequest) (proto.Message, error) {
+	span := otel.SpanFromContext(ctx)
 
 	logs.Debug(ctx, "MCP tool invoked", "tool", "graph_why", "path", args.GetPath(), "package", args.GetPackage())
 
@@ -2105,16 +1887,12 @@ func (s *Server) graphWhy(ctx context.Context, req *mcp.CallToolRequest, raw jso
 	// Validate path to prevent path traversal and access to sensitive directories.
 	targetPath, err := normalizeLocalPath(args.GetPath())
 	if err != nil {
-		otel.SetSpanError(span, err)
-		otel.RecordMCPToolCall(ctx, "graph_why", time.Since(startTime).Seconds(), false)
 		logs.Warn(ctx, "Invalid path in graph_why", "path", args.GetPath(), "error", err)
-		return nil, nil, err
+		return nil, err
 	}
 	if packageQuery == "" {
 		err := fmt.Errorf("package name is required")
-		otel.SetSpanError(span, err)
-		otel.RecordMCPToolCall(ctx, "graph_why", time.Since(startTime).Seconds(), false)
-		return nil, nil, err
+		return nil, err
 	}
 
 	span.SetAttributes(
@@ -2124,10 +1902,8 @@ func (s *Server) graphWhy(ctx context.Context, req *mcp.CallToolRequest, raw jso
 
 	depGraph, target, err := s.buildDependencyGraph(ctx, targetPath, args.GetRef(), args.GetEcosystems(), args.GetExcludePaths(), args.GetResolveTransitives(), args.GetExtended())
 	if err != nil {
-		otel.SetSpanError(span, err)
-		otel.RecordMCPToolCall(ctx, "graph_why", time.Since(startTime).Seconds(), false)
 		logs.Warn(ctx, "Graph why failed", "path", targetPath, "package", packageQuery, "error", err)
-		return nil, nil, err
+		return nil, err
 	}
 	ref, effectiveRef, commit := mcpTargetRef(target)
 
@@ -2135,10 +1911,8 @@ func (s *Server) graphWhy(ctx context.Context, req *mcp.CallToolRequest, raw jso
 	matches := findMatchingNodes(depGraph, packageQuery)
 	if len(matches) == 0 {
 		span.SetAttributes(otel.AttrMCPGraphFound.Bool(false))
-		otel.SetSpanOK(span)
-		otel.RecordMCPToolCall(ctx, "graph_why", time.Since(startTime).Seconds(), true)
 		logs.Debug(ctx, "MCP tool completed", "tool", "graph_why", "package", packageQuery, "found", false)
-		out, err := marshalMCPResult(&mcpv1.GraphWhyResult{
+		return &mcpv1.GraphWhyResult{
 			Package:      packageQuery,
 			Path:         targetPath,
 			Ref:          ref,
@@ -2146,12 +1920,7 @@ func (s *Server) graphWhy(ctx context.Context, req *mcp.CallToolRequest, raw jso
 			Commit:       commit,
 			Found:        proto.Bool(false),
 			Message:      fmt.Sprintf("Package %q not found in dependency graph", packageQuery),
-		})
-		if err != nil {
-			otel.SetSpanError(span, err)
-			return nil, nil, err
-		}
-		return nil, out, nil
+		}, nil
 	}
 
 	// Use the best match
@@ -2180,15 +1949,8 @@ func (s *Server) graphWhy(ctx context.Context, req *mcp.CallToolRequest, raw jso
 			otel.AttrMCPGraphDirect.Bool(true),
 			otel.AttrMCPGraphPathCount.Int(int(result.GetPathCount())),
 		)
-		otel.SetSpanOK(span)
-		otel.RecordMCPToolCall(ctx, "graph_why", time.Since(startTime).Seconds(), true)
 		logs.Debug(ctx, "MCP tool completed", "tool", "graph_why", "package", packageQuery, "found", true, "direct", true, "paths", result.GetPathCount())
-		out, err := marshalMCPResult(result)
-		if err != nil {
-			otel.SetSpanError(span, err)
-			return nil, nil, err
-		}
-		return nil, out, nil
+		return result, nil
 	}
 
 	// Find paths to the package
@@ -2199,15 +1961,8 @@ func (s *Server) graphWhy(ctx context.Context, req *mcp.CallToolRequest, raw jso
 			otel.AttrMCPGraphFound.Bool(true),
 			otel.AttrMCPGraphPathCount.Int(0),
 		)
-		otel.SetSpanOK(span)
-		otel.RecordMCPToolCall(ctx, "graph_why", time.Since(startTime).Seconds(), true)
 		logs.Debug(ctx, "MCP tool completed", "tool", "graph_why", "package", packageQuery, "found", true, "paths", 0)
-		out, err := marshalMCPResult(result)
-		if err != nil {
-			otel.SetSpanError(span, err)
-			return nil, nil, err
-		}
-		return nil, out, nil
+		return result, nil
 	}
 
 	// Convert paths
@@ -2236,35 +1991,18 @@ func (s *Server) graphWhy(ctx context.Context, req *mcp.CallToolRequest, raw jso
 		otel.AttrMCPGraphDirect.Bool(false),
 		otel.AttrMCPGraphPathCount.Int(int(result.GetPathCount())),
 	)
-	otel.SetSpanOK(span)
-	otel.RecordMCPToolCall(ctx, "graph_why", time.Since(startTime).Seconds(), true)
 	logs.Debug(ctx, "MCP tool completed", "tool", "graph_why", "package", packageQuery, "found", true, "paths", result.GetPathCount())
 
-	out, err := marshalMCPResult(result)
-	if err != nil {
-		otel.SetSpanError(span, err)
-		return nil, nil, err
-	}
-	return nil, out, nil
+	return result, nil
 }
 
 func (s *Server) graphNeeds(ctx context.Context, req *mcp.CallToolRequest, raw json.RawMessage) (*mcp.CallToolResult, json.RawMessage, error) {
-	startTime := time.Now()
+	return runTool(ctx, s, "graph_needs", s.toolTimeouts.Graph, &mcpv1.GraphNeedsRequest{}, raw, s.graphNeedsTool)
+}
 
-	// Apply timeout for graph analysis
-	ctx, cancel := s.withTimeout(ctx, s.toolTimeouts.Graph)
-	defer cancel()
-
-	ctx, span := otel.StartSpan(ctx, "deputy.mcp.graph_needs",
-		trace.WithAttributes(otel.AttrMCPTool.String("graph_needs")))
-	defer span.End()
-
-	args := &mcpv1.GraphNeedsRequest{}
-	if err := unmarshalMCPRequest(raw, args); err != nil {
-		otel.SetSpanError(span, err)
-		otel.RecordMCPToolCall(ctx, "graph_needs", time.Since(startTime).Seconds(), false)
-		return nil, nil, err
-	}
+// graphNeedsTool lists the packages that depend on a package.
+func (s *Server) graphNeedsTool(ctx context.Context, args *mcpv1.GraphNeedsRequest) (proto.Message, error) {
+	span := otel.SpanFromContext(ctx)
 
 	logs.Debug(ctx, "MCP tool invoked", "tool", "graph_needs", "path", args.GetPath(), "package", args.GetPackage())
 
@@ -2273,16 +2011,12 @@ func (s *Server) graphNeeds(ctx context.Context, req *mcp.CallToolRequest, raw j
 	// Validate path to prevent path traversal and access to sensitive directories.
 	targetPath, err := normalizeLocalPath(args.GetPath())
 	if err != nil {
-		otel.SetSpanError(span, err)
-		otel.RecordMCPToolCall(ctx, "graph_needs", time.Since(startTime).Seconds(), false)
 		logs.Warn(ctx, "Invalid path in graph_needs", "path", args.GetPath(), "error", err)
-		return nil, nil, err
+		return nil, err
 	}
 	if packageQuery == "" {
 		err := fmt.Errorf("package name is required")
-		otel.SetSpanError(span, err)
-		otel.RecordMCPToolCall(ctx, "graph_needs", time.Since(startTime).Seconds(), false)
-		return nil, nil, err
+		return nil, err
 	}
 
 	span.SetAttributes(
@@ -2292,10 +2026,8 @@ func (s *Server) graphNeeds(ctx context.Context, req *mcp.CallToolRequest, raw j
 
 	depGraph, target, err := s.buildDependencyGraph(ctx, targetPath, args.GetRef(), args.GetEcosystems(), args.GetExcludePaths(), args.GetResolveTransitives(), args.GetExtended())
 	if err != nil {
-		otel.SetSpanError(span, err)
-		otel.RecordMCPToolCall(ctx, "graph_needs", time.Since(startTime).Seconds(), false)
 		logs.Warn(ctx, "Graph needs failed", "path", targetPath, "package", packageQuery, "error", err)
-		return nil, nil, err
+		return nil, err
 	}
 	ref, effectiveRef, commit := mcpTargetRef(target)
 
@@ -2303,10 +2035,8 @@ func (s *Server) graphNeeds(ctx context.Context, req *mcp.CallToolRequest, raw j
 	match := findBestMatchingNode(depGraph, packageQuery)
 	if match == nil {
 		span.SetAttributes(otel.AttrMCPGraphFound.Bool(false))
-		otel.SetSpanOK(span)
-		otel.RecordMCPToolCall(ctx, "graph_needs", time.Since(startTime).Seconds(), true)
 		logs.Debug(ctx, "MCP tool completed", "tool", "graph_needs", "package", packageQuery, "found", false)
-		out, err := marshalMCPResult(&mcpv1.GraphNeedsResult{
+		return &mcpv1.GraphNeedsResult{
 			Package:      packageQuery,
 			Path:         targetPath,
 			Ref:          ref,
@@ -2314,12 +2044,7 @@ func (s *Server) graphNeeds(ctx context.Context, req *mcp.CallToolRequest, raw j
 			Commit:       commit,
 			Found:        proto.Bool(false),
 			Message:      fmt.Sprintf("Package %q not found in dependency graph", packageQuery),
-		})
-		if err != nil {
-			otel.SetSpanError(span, err)
-			return nil, nil, err
-		}
-		return nil, out, nil
+		}, nil
 	}
 
 	result := &mcpv1.GraphNeedsResult{
@@ -2367,16 +2092,9 @@ func (s *Server) graphNeeds(ctx context.Context, req *mcp.CallToolRequest, raw j
 		otel.AttrMCPGraphFound.Bool(true),
 		attribute.Int("deputy.mcp.dependent_count", len(result.Dependents)),
 	)
-	otel.SetSpanOK(span)
-	otel.RecordMCPToolCall(ctx, "graph_needs", time.Since(startTime).Seconds(), true)
 	logs.Debug(ctx, "MCP tool completed", "tool", "graph_needs", "package", packageQuery, "found", true, "dependents", len(result.Dependents))
 
-	out, err := marshalMCPResult(result)
-	if err != nil {
-		otel.SetSpanError(span, err)
-		return nil, nil, err
-	}
-	return nil, out, nil
+	return result, nil
 }
 
 // sortDependencyInfos orders dependents deterministically: direct dependencies
@@ -2397,37 +2115,23 @@ func sortDependencyInfos(deps []*mcpv1.DependencyInfo) {
 }
 
 func (s *Server) triageVulnerabilities(ctx context.Context, req *mcp.CallToolRequest, raw json.RawMessage) (*mcp.CallToolResult, json.RawMessage, error) {
-	startTime := time.Now()
+	return runTool(ctx, s, "triage_vulnerabilities", s.toolTimeouts.Scan, &mcpv1.TriageRequest{}, raw, s.triageVulnerabilitiesTool)
+}
 
-	// Apply timeout for scan operations (triage requires scanning)
-	ctx, cancel := s.withTimeout(ctx, s.toolTimeouts.Scan)
-	defer cancel()
-
-	ctx, span := otel.StartSpan(ctx, "deputy.mcp.triage_vulnerabilities",
-		trace.WithAttributes(otel.AttrMCPTool.String("triage_vulnerabilities")))
-	defer span.End()
-
-	args := &mcpv1.TriageRequest{}
-	if err := unmarshalMCPRequest(raw, args); err != nil {
-		otel.SetSpanError(span, err)
-		otel.RecordMCPToolCall(ctx, "triage_vulnerabilities", time.Since(startTime).Seconds(), false)
-		return nil, nil, err
-	}
+// triageVulnerabilitiesTool scans a directory and ranks findings by the canonical triage ladder.
+func (s *Server) triageVulnerabilitiesTool(ctx context.Context, args *mcpv1.TriageRequest) (proto.Message, error) {
+	span := otel.SpanFromContext(ctx)
 
 	logs.Debug(ctx, "MCP tool invoked", "tool", "triage_vulnerabilities", "path", args.GetPath())
 
 	if args.GetPath() == "" {
 		err := fmt.Errorf("path is required")
-		otel.SetSpanError(span, err)
-		otel.RecordMCPToolCall(ctx, "triage_vulnerabilities", time.Since(startTime).Seconds(), false)
-		return nil, nil, err
+		return nil, err
 	}
 	targetPath, err := normalizeLocalPath(args.GetPath())
 	if err != nil {
-		otel.SetSpanError(span, err)
-		otel.RecordMCPToolCall(ctx, "triage_vulnerabilities", time.Since(startTime).Seconds(), false)
 		logs.Warn(ctx, "Invalid path in triage_vulnerabilities", "path", args.GetPath(), "error", err)
-		return nil, nil, err
+		return nil, err
 	}
 
 	span.SetAttributes(otel.AttrTargetPath.String(targetPath))
@@ -2448,10 +2152,8 @@ func (s *Server) triageVulnerabilities(ctx context.Context, req *mcp.CallToolReq
 	resp, err := s.clients.Vulns.Scan(ctx, scanReq)
 	if err != nil {
 		err = fmt.Errorf("scan failed: %w", err)
-		otel.SetSpanError(span, err)
-		otel.RecordMCPToolCall(ctx, "triage_vulnerabilities", time.Since(startTime).Seconds(), false)
 		logs.Warn(ctx, "Triage scan failed", "path", targetPath, "error", err)
-		return nil, nil, err
+		return nil, err
 	}
 
 	// Convert proto response to internal types
@@ -2545,16 +2247,9 @@ func (s *Server) triageVulnerabilities(ctx context.Context, req *mcp.CallToolReq
 		attribute.Int("deputy.mcp.critical_count", int(result.GetCriticalCount())),
 		attribute.Int("deputy.mcp.fixable_count", int(result.GetFixableCount())),
 	)
-	otel.SetSpanOK(span)
-	otel.RecordMCPToolCall(ctx, "triage_vulnerabilities", time.Since(startTime).Seconds(), true)
 	logs.Debug(ctx, "MCP tool completed", "tool", "triage_vulnerabilities", "path", targetPath, "total", result.GetTotalVulnerabilities(), "critical", result.GetCriticalCount(), "fixable", result.GetFixableCount())
 
-	out, err := marshalMCPResult(result)
-	if err != nil {
-		otel.SetSpanError(span, err)
-		return nil, nil, err
-	}
-	return nil, out, nil
+	return result, nil
 }
 
 // sortTriagedVulns sorts vulnerabilities by priority, breaking ties on ID so
@@ -2595,31 +2290,20 @@ func generateRecommendations(result *mcpv1.TriageResult) []string {
 }
 
 func (s *Server) scanContainer(ctx context.Context, req *mcp.CallToolRequest, raw json.RawMessage) (*mcp.CallToolResult, json.RawMessage, error) {
+	return runTool(ctx, s, "scan_container", s.toolTimeouts.Scan, &mcpv1.ScanContainerRequest{}, raw, s.scanContainerTool)
+}
+
+// scanContainerTool scans a container image and summarizes consolidated findings with coverage.
+func (s *Server) scanContainerTool(ctx context.Context, args *mcpv1.ScanContainerRequest) (proto.Message, error) {
+	span := otel.SpanFromContext(ctx)
 	startTime := time.Now()
-
-	// Apply timeout for scan operations
-	ctx, cancel := s.withTimeout(ctx, s.toolTimeouts.Scan)
-	defer cancel()
-
-	ctx, span := otel.StartSpan(ctx, "deputy.mcp.scan_container",
-		trace.WithAttributes(otel.AttrMCPTool.String("scan_container")))
-	defer span.End()
-
-	args := &mcpv1.ScanContainerRequest{}
-	if err := unmarshalMCPRequest(raw, args); err != nil {
-		otel.SetSpanError(span, err)
-		otel.RecordMCPToolCall(ctx, "scan_container", time.Since(startTime).Seconds(), false)
-		return nil, nil, err
-	}
 
 	logs.Debug(ctx, "MCP tool invoked", "tool", "scan_container", "image", args.GetImage(), "platform", args.GetPlatform())
 
 	imageRef := strings.TrimSpace(args.GetImage())
 	if imageRef == "" {
 		err := fmt.Errorf("image is required")
-		otel.SetSpanError(span, err)
-		otel.RecordMCPToolCall(ctx, "scan_container", time.Since(startTime).Seconds(), false)
-		return nil, nil, err
+		return nil, err
 	}
 	platform := strings.TrimSpace(args.GetPlatform())
 
@@ -2639,10 +2323,8 @@ func (s *Server) scanContainer(ctx context.Context, req *mcp.CallToolRequest, ra
 	resp, err := s.clients.Vulns.Scan(ctx, scanReq)
 	if err != nil {
 		err = fmt.Errorf("container scan failed: %w", err)
-		otel.SetSpanError(span, err)
-		otel.RecordMCPToolCall(ctx, "scan_container", time.Since(startTime).Seconds(), false)
 		logs.Warn(ctx, "Container scan failed", "image", imageRef, "error", err)
-		return nil, nil, err
+		return nil, err
 	}
 
 	scanResult := resp.Msg
@@ -2674,35 +2356,18 @@ func (s *Server) scanContainer(ctx context.Context, req *mcp.CallToolRequest, ra
 		otel.AttrMCPPackageCount.Int(int(scanResult.GetPackagesScanned())),
 		otel.AttrMCPVulnerabilityCount.Int(int(consolidated.Stats.GetUnique())),
 	)
-	otel.SetSpanOK(span)
-	otel.RecordMCPToolCall(ctx, "scan_container", time.Since(startTime).Seconds(), true)
 	logs.Debug(ctx, "MCP tool completed", "tool", "scan_container", "image", imageRef, "packages", result.GetPackagesScanned(), "vulns", consolidated.Stats.GetUnique(), "clean", result.GetClean())
 
-	out, err := marshalMCPResult(result)
-	if err != nil {
-		otel.SetSpanError(span, err)
-		return nil, nil, err
-	}
-	return nil, out, nil
+	return result, nil
 }
 
 func (s *Server) diffRefs(ctx context.Context, req *mcp.CallToolRequest, raw json.RawMessage) (*mcp.CallToolResult, json.RawMessage, error) {
-	startTime := time.Now()
+	return runTool(ctx, s, "diff_refs", s.toolTimeouts.Scan, &mcpv1.DiffRefsRequest{}, raw, s.diffRefsTool)
+}
 
-	// Apply timeout for scan operations (diff involves scanning both refs)
-	ctx, cancel := s.withTimeout(ctx, s.toolTimeouts.Scan)
-	defer cancel()
-
-	ctx, span := otel.StartSpan(ctx, "deputy.mcp.diff_refs",
-		trace.WithAttributes(otel.AttrMCPTool.String("diff_refs")))
-	defer span.End()
-
-	args := &mcpv1.DiffRefsRequest{}
-	if err := unmarshalMCPRequest(raw, args); err != nil {
-		otel.SetSpanError(span, err)
-		otel.RecordMCPToolCall(ctx, "diff_refs", time.Since(startTime).Seconds(), false)
-		return nil, nil, err
-	}
+// diffRefsTool compares dependencies between two Git refs or two container images.
+func (s *Server) diffRefsTool(ctx context.Context, args *mcpv1.DiffRefsRequest) (proto.Message, error) {
+	span := otel.SpanFromContext(ctx)
 
 	logs.Debug(ctx, "MCP tool invoked", "tool", "diff_refs", "base_ref", args.GetBaseRef(), "target_ref", args.GetTargetRef())
 
@@ -2728,17 +2393,13 @@ func (s *Server) diffRefs(ctx context.Context, req *mcp.CallToolRequest, raw jso
 	if args.GetPath() != "" {
 		if _, err := normalizeLocalPath(args.GetPath()); err != nil {
 			err = fmt.Errorf("invalid path: %w", err)
-			otel.SetSpanError(span, err)
-			otel.RecordMCPToolCall(ctx, "diff_refs", time.Since(startTime).Seconds(), false)
-			return nil, nil, err
+			return nil, err
 		}
 	}
 
 	if isMixedContainerRefInput(args) {
 		err := fmt.Errorf("baseRef and targetRef must both be Git refs or both be container image refs")
-		otel.SetSpanError(span, err)
-		otel.RecordMCPToolCall(ctx, "diff_refs", time.Since(startTime).Seconds(), false)
-		return nil, nil, err
+		return nil, err
 	}
 
 	// Check if this looks like a container image diff.
@@ -2753,26 +2414,17 @@ func (s *Server) diffRefs(ctx context.Context, req *mcp.CallToolRequest, raw jso
 	}
 
 	if err != nil {
-		otel.SetSpanError(span, err)
-		otel.RecordMCPToolCall(ctx, "diff_refs", time.Since(startTime).Seconds(), false)
 		logs.Warn(ctx, "Diff refs failed", "base_ref", args.GetBaseRef(), "target_ref", args.GetTargetRef(), "error", err)
-		return nil, nil, err
+		return nil, err
 	}
 
 	span.SetAttributes(
 		otel.AttrMCPChangeCount.Int(len(result.GetChanges())),
 		attribute.Bool("deputy.mcp.is_container_diff", isContainerDiff),
 	)
-	otel.SetSpanOK(span)
-	otel.RecordMCPToolCall(ctx, "diff_refs", time.Since(startTime).Seconds(), true)
 	logs.Debug(ctx, "MCP tool completed", "tool", "diff_refs", "base_ref", args.GetBaseRef(), "target_ref", args.GetTargetRef(), "changes", len(result.GetChanges()), "is_container", isContainerDiff)
 
-	out, err := marshalMCPResult(result)
-	if err != nil {
-		otel.SetSpanError(span, err)
-		return nil, nil, err
-	}
-	return nil, out, nil
+	return result, nil
 }
 
 // diffContainerImages compares two container images.
