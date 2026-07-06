@@ -22,6 +22,7 @@ import (
 	listv1 "github.com/temporalio/deputy/gen/deputy/list/v1"
 	mcpv1 "github.com/temporalio/deputy/gen/deputy/mcp/v1"
 	policyv1 "github.com/temporalio/deputy/gen/deputy/policy/v1"
+	remediationv1 "github.com/temporalio/deputy/gen/deputy/remediation/v1"
 	scanv1 "github.com/temporalio/deputy/gen/deputy/scan/v1"
 	targetv1 "github.com/temporalio/deputy/gen/deputy/target/v1"
 	vulnerabilityv1 "github.com/temporalio/deputy/gen/deputy/vulnerability/v1"
@@ -34,7 +35,6 @@ import (
 	"github.com/temporalio/deputy/internal/policy"
 	internalproto "github.com/temporalio/deputy/internal/proto"
 	"github.com/temporalio/deputy/internal/purlx"
-	"github.com/temporalio/deputy/internal/remediation"
 	sbomx "github.com/temporalio/deputy/internal/sbom"
 	"github.com/temporalio/deputy/internal/services"
 	"github.com/temporalio/deputy/internal/version"
@@ -1790,79 +1790,57 @@ func (s *Server) getRemediation(ctx context.Context, req *mcp.CallToolRequest, r
 		return nil, nil, err
 	}
 
-	// Convert proto response to internal types for remediation analysis
-	scanResult := internalproto.ScanningResultFromProto(resp.Msg)
-
-	// Consolidate vulnerabilities for remediation analysis
-	consolidated := vulnerability.ConsolidateAll(scanResult.Findings, scanResult.Advisories)
-
-	// Get remediation commands
-	commands, stdlibUpgrade := remediation.CommandsFromConsolidated(consolidated.Vulnerabilities)
-	commands = remediation.ApplyGuidance(commands, remediation.MCPGuidance())
-
-	// Identify unfixable vulnerabilities
-	var unfixable []string
-	remediableCount := 0
-	migrationCount := 0
-	for _, v := range consolidated.Vulnerabilities {
-		remediable, migration := vulnerability.RemediationDisposition(v)
-		if remediable {
-			remediableCount++
-			if migration {
-				migrationCount++
-			}
-		} else {
-			unfixable = append(unfixable, v.PrimaryID)
-		}
+	if s.clients.Remediation == nil {
+		err := fmt.Errorf("remediation service client is not configured")
+		otel.SetSpanError(span, err)
+		otel.RecordMCPToolCall(ctx, "get_remediation", time.Since(startTime).Seconds(), false)
+		return nil, nil, err
 	}
 
+	// Generate the plan through the remediation service, the same producer
+	// the API and agent flows use, with hints adapted to MCP tooling.
+	planResp, err := s.clients.Remediation.GeneratePlan(ctx, connect.NewRequest(&remediationv1.GeneratePlanRequest{
+		Source: &remediationv1.GeneratePlanRequest_ScanResult{ScanResult: resp.Msg},
+		Options: &remediationv1.PlanOptions{
+			GuidanceProfile: remediationv1.GuidanceProfile_GUIDANCE_PROFILE_MCP,
+		},
+	}))
+	if err != nil {
+		err = fmt.Errorf("generate remediation plan: %w", err)
+		otel.SetSpanError(span, err)
+		otel.RecordMCPToolCall(ctx, "get_remediation", time.Since(startTime).Seconds(), false)
+		logs.Warn(ctx, "Remediation plan generation failed", "path", targetPath, "error", err)
+		return nil, nil, err
+	}
+
+	plan := planResp.Msg.GetPlan()
 	ref, effectiveRef, commit := mcpTargetRef(resp.Msg.GetTarget())
 	result := &mcpv1.GetRemediationResult{
 		Path:                     targetPath,
 		Ref:                      ref,
 		EffectiveRef:             effectiveRef,
 		Commit:                   commit,
-		VulnerabilitiesFound:     int32(scanResult.Stats.Unique),
-		RemediableCount:          int32(remediableCount),
-		MigrationCount:           int32(migrationCount),
-		UnfixableCount:           int32(len(unfixable)),
-		CommandCount:             int32(len(commands)),
-		Commands:                 make([]*mcpv1.RemediationCommand, 0, len(commands)),
-		StdlibUpgrade:            stdlibUpgrade,
-		UnfixableVulnerabilities: unfixable,
+		PlanId:                   plan.GetId(),
+		VulnerabilitiesFound:     resp.Msg.GetStats().GetUnique(),
+		Stats:                    planResp.Msg.GetStats(),
+		StdlibUpgrade:            plan.GetStdlibUpgrade(),
+		UnfixableVulnerabilities: planResp.Msg.GetUnaddressedVulnerabilities(),
 	}
-
-	for _, cmd := range commands {
-		if cmd.Executable {
-			result.ExecutableCommandCount++
-		} else {
-			result.ManualCommandCount++
-		}
-		result.Commands = append(result.Commands, &mcpv1.RemediationCommand{
-			Package:       cmd.Package,
-			Version:       cmd.Version,
-			Purl:          cmd.PURL,
-			TargetVersion: cmd.TargetVersion,
-			TargetModule:  cmd.TargetModule,
-			Migration:     cmd.Migration,
-			Manager:       cmd.Manager,
-			Command:       cmd.Command,
-			Path:          cmd.Path,
-			Hint:          cmd.Hint,
-			IsDirect:      proto.Bool(cmd.IsDirect),
-			Executable:    proto.Bool(cmd.Executable),
-			Groups:        cmd.Groups,
-		})
+	if generated := plan.GetGeneratedAt(); generated != nil {
+		result.GeneratedAt = generated.AsTime().Format(time.RFC3339)
+	}
+	for _, step := range plan.GetSteps() {
+		result.Steps = append(result.Steps, remediationStepProto(step))
 	}
 
 	span.SetAttributes(
 		otel.AttrMCPVulnerabilityCount.Int(int(result.GetVulnerabilitiesFound())),
-		attribute.Int("deputy.mcp.remediable_count", int(result.GetRemediableCount())),
-		attribute.Int("deputy.mcp.command_count", int(result.GetCommandCount())),
+		attribute.Int("deputy.mcp.remediable_count", int(result.GetStats().GetVulnerabilitiesAddressed())),
+		attribute.Int("deputy.mcp.command_count", len(result.GetSteps())),
 	)
 	otel.SetSpanOK(span)
 	otel.RecordMCPToolCall(ctx, "get_remediation", time.Since(startTime).Seconds(), true)
-	logs.Debug(ctx, "MCP tool completed", "tool", "get_remediation", "path", targetPath, "vulns", result.GetVulnerabilitiesFound(), "remediable", result.GetRemediableCount(), "unfixable", result.GetUnfixableCount())
+	logs.Debug(ctx, "MCP tool completed", "tool", "get_remediation", "path", targetPath, "vulns", result.GetVulnerabilitiesFound(), "steps", len(result.GetSteps()), "unfixable", len(result.GetUnfixableVulnerabilities()))
 
 	out, err := marshalMCPResult(result)
 	if err != nil {

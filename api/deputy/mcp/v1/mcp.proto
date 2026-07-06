@@ -6,6 +6,7 @@ import "buf/validate/validate.proto";
 import "deputy/dependency/v1/dependency.proto";
 import "deputy/graph/v1/service.proto";
 import "deputy/policy/v1/service.proto";
+import "deputy/remediation/v1/service.proto";
 
 option go_package = "github.com/temporalio/deputy/gen/deputy/mcp/v1;mcpv1";
 
@@ -776,44 +777,61 @@ message GetRemediationRequest {
   repeated string exclude_paths = 4 [(buf.validate.field).repeated = {items: {string: {min_len: 1, pattern: "\\S"}}}];
 }
 
-// RemediationCommand is one remediation action: an executable package-manager
-// command, or manual guidance when no safe command exists.
-message RemediationCommand {
+// RemediationStep is the agent-facing projection of a deputy.remediation.v1
+// plan step: kind and risk use the lowercase wire convention, and fields the
+// planner does not populate yet (dependsOn, requiresApproval) are omitted
+// until they carry signal.
+message RemediationStep {
+  // Id uniquely identifies this step within the plan.
+  string id = 1;
+  // Kind classifies the remediation. A version_upgrade with executable false
+  // is upgrade guidance that needs a manual change.
+  string kind = 2 [(buf.validate.field).string = {in: ["version_upgrade", "file_edit", "shell_command", "dockerfile_update", "action_update", "config_change", "custom_agent", "unspecified"]}, (buf.validate.field).ignore = IGNORE_IF_ZERO_VALUE];
+  // Title is a short human-readable summary of the step.
+  string title = 3;
+  // Description explains what the step does.
+  string description = 4;
   // Package is the affected package name.
-  string package = 1;
+  string package = 5;
+  // Purl is the affected package's package URL for exact follow-up with
+  // graph_why, graph_needs, or scan_package.
+  string purl = 6;
   // Version is the currently installed version.
-  string version = 2;
-  // Purl is the package URL of the affected package.
-  string purl = 3;
+  string version = 7;
   // TargetVersion is the version to upgrade or migrate to.
-  string target_version = 4;
+  string target_version = 8;
   // TargetModule is the module path to migrate to when the fix lives on a
   // different module path.
-  string target_module = 5;
+  string target_module = 9;
   // Migration reports whether the fix moves to a different module path.
-  bool migration = 6;
+  // Always present.
+  optional bool migration = 10;
   // Manager is the package manager that runs the command.
-  string manager = 7;
-  // Command is the command line to run.
-  string command = 8;
-  // Path is the manifest path the command applies to.
-  string path = 9;
-  // Hint gives extra guidance for applying the command.
-  string hint = 10;
+  string manager = 11;
+  // ManifestPath is the manifest or lockfile path the step applies to.
+  string manifest_path = 12;
+  // Command is the command line to run, or the manual instruction to follow.
+  string command = 13;
+  // Hint gives extra guidance for applying the step.
+  string hint = 14;
   // IsDirect reports whether the affected package is a direct dependency.
   // Always present.
-  optional bool is_direct = 11;
-  // Executable reports whether the command can be run as-is; manual commands
-  // are guidance only. Always present.
-  optional bool executable = 12;
+  optional bool is_direct = 15;
+  // Executable reports whether the command can be run as-is; manual steps are
+  // guidance only. Always present.
+  optional bool executable = 16;
   // Groups are the dependency groups the package belongs to.
-  repeated string groups = 13;
+  repeated string groups = 17;
+  // RiskLevel indicates the risk of applying this step.
+  string risk_level = 18 [(buf.validate.field).string = {in: ["low", "medium", "high", "critical"]}, (buf.validate.field).ignore = IGNORE_IF_ZERO_VALUE];
+  // AffectedVulnerabilities are the finding IDs this step remediates; one
+  // step can address several findings because steps are deduplicated per
+  // package and manifest.
+  repeated string affected_vulnerabilities = 19;
 }
 
-// GetRemediationResult summarizes how a directory's findings can be fixed.
-// This formalizes the tool's established command-list shape; promoting the
-// MCP surface to the richer deputy.remediation.v1 plan model is a separate
-// behavior decision, deliberately not bundled into the contract migration.
+// GetRemediationResult is the agent-facing projection of a
+// deputy.remediation.v1 remediation plan for a directory's findings.
 message GetRemediationResult {
   // Path is the analyzed directory.
   string path = 1;
@@ -823,27 +841,24 @@ message GetRemediationResult {
   string effective_ref = 3;
   // Commit is the resolved commit hash of the analyzed snapshot.
   string commit = 4;
-  // VulnerabilitiesFound is the number of unique findings.
-  int32 vulnerabilities_found = 5;
-  // RemediableCount counts findings with an actionable fix.
-  int32 remediable_count = 6;
-  // MigrationCount counts findings whose fix is a module migration.
-  int32 migration_count = 7;
-  // UnfixableCount counts findings with no known fix.
-  int32 unfixable_count = 8;
-  // CommandCount is the number of remediation commands returned.
-  int32 command_count = 9;
-  // ExecutableCommandCount counts commands that can be run as-is.
-  int32 executable_command_count = 10;
-  // ManualCommandCount counts commands that are guidance only.
-  int32 manual_command_count = 11;
-  // Commands are the remediation actions, one per fixable package.
-  repeated RemediationCommand commands = 12;
+  // PlanId identifies the generated plan.
+  string plan_id = 5;
+  // GeneratedAt is when the plan was created (RFC 3339).
+  string generated_at = 6;
+  // VulnerabilitiesFound is the number of unique findings in the scan.
+  int32 vulnerabilities_found = 7;
+  // Stats summarizes the plan: step counts by actionability and risk,
+  // migration steps, and how many findings the plan addresses versus leaves
+  // unaddressed.
+  deputy.remediation.v1.PlanStats stats = 8;
+  // Steps are the remediation actions, most actionable ecosystems first.
+  repeated RemediationStep steps = 9;
   // StdlibUpgrade recommends a Go toolchain upgrade when stdlib findings are
   // present.
-  string stdlib_upgrade = 13;
-  // UnfixableVulnerabilities lists the IDs of findings with no known fix.
-  repeated string unfixable_vulnerabilities = 14;
+  string stdlib_upgrade = 10;
+  // UnfixableVulnerabilities lists the finding IDs with no known remediation.
+  // Unfixable means still vulnerable, not safe.
+  repeated string unfixable_vulnerabilities = 11;
 }
 
 // DiffRefsRequest compares dependencies between two Git references or two

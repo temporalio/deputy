@@ -23,6 +23,7 @@ import (
 	listv1 "github.com/temporalio/deputy/gen/deputy/list/v1"
 	"github.com/temporalio/deputy/gen/deputy/list/v1/listv1connect"
 	mcpv1 "github.com/temporalio/deputy/gen/deputy/mcp/v1"
+	"github.com/temporalio/deputy/gen/deputy/remediation/v1/remediationv1connect"
 	scanv1 "github.com/temporalio/deputy/gen/deputy/scan/v1"
 	"github.com/temporalio/deputy/gen/deputy/scan/v1/scanv1connect"
 	targetv1 "github.com/temporalio/deputy/gen/deputy/target/v1"
@@ -188,15 +189,21 @@ func newMockClients(cfg mockClientsConfig) *services.Clients {
 		path, handler := vulnerabilityv1connect.NewVulnerabilityServiceHandler(cfg.vulnerabilityHandler)
 		mux.Handle(path, handler)
 	}
+	// Plan generation is pure computation, so tests always get the real
+	// remediation handler: get_remediation tests exercise the same plan
+	// producer production uses.
+	remediationPath, remediationHandler := remediationv1connect.NewRemediationServiceHandler(deputyserver.NewRemediationHandler())
+	mux.Handle(remediationPath, remediationHandler)
 
 	transport := services.NewInProcessTransport(mux)
 	httpClient := transport.HTTPClient()
 
 	return &services.Clients{
-		Vulns:    scanv1connect.NewScanServiceClient(httpClient, ""),
-		Packages: listv1connect.NewListServiceClient(httpClient, ""),
-		Graph:    graphv1connect.NewGraphServiceClient(httpClient, ""),
-		Advisory: vulnerabilityv1connect.NewVulnerabilityServiceClient(httpClient, ""),
+		Vulns:       scanv1connect.NewScanServiceClient(httpClient, ""),
+		Packages:    listv1connect.NewListServiceClient(httpClient, ""),
+		Graph:       graphv1connect.NewGraphServiceClient(httpClient, ""),
+		Advisory:    vulnerabilityv1connect.NewVulnerabilityServiceClient(httpClient, ""),
+		Remediation: remediationv1connect.NewRemediationServiceClient(httpClient, ""),
 	}
 }
 
@@ -1412,16 +1419,15 @@ func TestLocalPathToolSchemasExposeAgentControls(t *testing.T) {
 			if tt.name == "get_remediation" {
 				// The output schema is derived from the deputy.mcp.v1
 				// descriptor; protojson omits zero values on the wire, so no
-				// field is "required". Guard that the command/remediation
-				// counts stay in the advertised contract instead.
+				// field is "required". Guard that the plan projection stays
+				// in the advertised contract instead.
 				outputSchema := toolOutputSchema(t, tool)
 				requireSchemaProperties(t, outputSchema,
-					"commandCount",
-					"executableCommandCount",
-					"manualCommandCount",
-					"commands",
-					"remediableCount",
+					"planId",
+					"stats",
+					"steps",
 					"vulnerabilitiesFound",
+					"unfixableVulnerabilities",
 				)
 			}
 			if tt.name == "triage_vulnerabilities" {
@@ -3281,14 +3287,11 @@ func TestGetRemediation(t *testing.T) {
 		if result.VulnerabilitiesFound != 0 {
 			t.Errorf("expected 0 vulnerabilities, got %d", result.VulnerabilitiesFound)
 		}
-		if result.CommandCount != 0 {
-			t.Errorf("expected 0 remediation commands, got %d", result.CommandCount)
+		if result.GetStats().GetTotalSteps() != 0 {
+			t.Errorf("expected 0 remediation steps, got %d", result.GetStats().GetTotalSteps())
 		}
-		if result.ExecutableCommandCount != 0 {
-			t.Errorf("expected 0 executable commands, got %d", result.ExecutableCommandCount)
-		}
-		if result.ManualCommandCount != 0 {
-			t.Errorf("expected 0 manual commands, got %d", result.ManualCommandCount)
+		if len(result.Steps) != 0 {
+			t.Errorf("expected no steps, got %d", len(result.Steps))
 		}
 	})
 
@@ -3325,36 +3328,45 @@ func TestGetRemediation(t *testing.T) {
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		if result.RemediableCount != 1 {
-			t.Errorf("expected 1 remediable vulnerability, got %d", result.RemediableCount)
+		if result.PlanId == "" {
+			t.Error("expected a plan id")
 		}
-		if result.MigrationCount != 1 {
-			t.Errorf("expected 1 migration fix, got %d", result.MigrationCount)
+		if result.GeneratedAt == "" {
+			t.Error("expected a generatedAt timestamp")
 		}
-		if result.UnfixableCount != 0 {
-			t.Errorf("expected 0 unfixable vulnerabilities, got %d", result.UnfixableCount)
+		if result.GetStats().GetVulnerabilitiesAddressed() != 1 {
+			t.Errorf("expected 1 addressed vulnerability, got %d", result.GetStats().GetVulnerabilitiesAddressed())
 		}
-		if result.CommandCount != 1 {
-			t.Errorf("expected 1 remediation command, got %d", result.CommandCount)
+		if result.GetStats().GetMigrationSteps() != 1 {
+			t.Errorf("expected 1 migration step, got %d", result.GetStats().GetMigrationSteps())
 		}
-		if result.ExecutableCommandCount != 0 {
-			t.Errorf("expected 0 executable commands, got %d", result.ExecutableCommandCount)
+		if result.GetStats().GetVulnerabilitiesUnaddressed() != 0 {
+			t.Errorf("expected 0 unaddressed vulnerabilities, got %d", result.GetStats().GetVulnerabilitiesUnaddressed())
 		}
-		if result.ManualCommandCount != 1 {
-			t.Errorf("expected 1 manual command, got %d", result.ManualCommandCount)
+		if result.GetStats().GetTotalSteps() != 1 {
+			t.Errorf("expected 1 remediation step, got %d", result.GetStats().GetTotalSteps())
+		}
+		if result.GetStats().GetExecutableSteps() != 0 {
+			t.Errorf("expected 0 executable steps, got %d", result.GetStats().GetExecutableSteps())
+		}
+		if result.GetStats().GetManualSteps() != 1 {
+			t.Errorf("expected 1 manual step, got %d", result.GetStats().GetManualSteps())
 		}
 
-		var foundMigrationCommand bool
-		for _, cmd := range result.Commands {
-			if cmd.Command == "go get github.com/example/widget/v2@v2.0.1" {
-				foundMigrationCommand = true
-				if cmd.GetExecutable() {
-					t.Error("expected migration command to be non-executable")
+		var foundMigrationStep bool
+		for _, step := range result.Steps {
+			if step.Command == "go get github.com/example/widget/v2@v2.0.1" {
+				foundMigrationStep = true
+				if step.GetExecutable() {
+					t.Error("expected migration step to be non-executable")
+				}
+				if step.Kind != "version_upgrade" {
+					t.Errorf("step kind = %q, want version_upgrade", step.Kind)
 				}
 			}
 		}
-		if !foundMigrationCommand {
-			t.Fatalf("expected migration command, got %+v", result.Commands)
+		if !foundMigrationStep {
+			t.Fatalf("expected migration step, got %+v", result.Steps)
 		}
 	})
 
@@ -3368,23 +3380,25 @@ func TestGetRemediation(t *testing.T) {
 		if result.VulnerabilitiesFound != 2 {
 			t.Errorf("expected 2 vulnerabilities, got %d", result.VulnerabilitiesFound)
 		}
-		if result.RemediableCount != 2 {
-			t.Errorf("expected 2 remediable vulnerabilities, got %d", result.RemediableCount)
+		if result.GetStats().GetVulnerabilitiesAddressed() != 2 {
+			t.Errorf("expected 2 addressed vulnerabilities, got %d", result.GetStats().GetVulnerabilitiesAddressed())
 		}
-		if result.MigrationCount != 2 {
-			t.Errorf("expected 2 migration fixes, got %d", result.MigrationCount)
+		// Two findings share one grouped migration step, so the step counts
+		// stay deduplicated while the addressed count reflects both findings.
+		if result.GetStats().GetMigrationSteps() != 1 {
+			t.Errorf("expected 1 grouped migration step, got %d", result.GetStats().GetMigrationSteps())
 		}
-		if result.CommandCount != 1 {
-			t.Errorf("expected 1 grouped remediation command, got %d", result.CommandCount)
+		if result.GetStats().GetTotalSteps() != 1 {
+			t.Errorf("expected 1 grouped remediation step, got %d", result.GetStats().GetTotalSteps())
 		}
-		if result.ExecutableCommandCount != 0 {
-			t.Errorf("expected 0 executable commands, got %d", result.ExecutableCommandCount)
+		if result.GetStats().GetManualSteps() != 1 {
+			t.Errorf("expected 1 manual step, got %d", result.GetStats().GetManualSteps())
 		}
-		if result.ManualCommandCount != 1 {
-			t.Errorf("expected 1 manual command, got %d", result.ManualCommandCount)
+		if len(result.Steps) != int(result.GetStats().GetTotalSteps()) {
+			t.Errorf("steps length = %d, want totalSteps %d", len(result.Steps), result.GetStats().GetTotalSteps())
 		}
-		if len(result.Commands) != int(result.CommandCount) {
-			t.Errorf("commands length = %d, want commandCount %d", len(result.Commands), result.CommandCount)
+		if len(result.Steps) == 1 && len(result.Steps[0].AffectedVulnerabilities) != 2 {
+			t.Errorf("grouped step affectedVulnerabilities = %v, want both finding IDs", result.Steps[0].AffectedVulnerabilities)
 		}
 	})
 
@@ -3395,12 +3409,12 @@ func TestGetRemediation(t *testing.T) {
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		if result.MigrationCount != 1 {
-			t.Errorf("expected 1 migration fix, got %d", result.MigrationCount)
+		if result.GetStats().GetMigrationSteps() != 1 {
+			t.Errorf("expected 1 migration step, got %d", result.GetStats().GetMigrationSteps())
 		}
 
 		var foundIndirectMigration bool
-		for _, cmd := range result.Commands {
+		for _, cmd := range result.Steps {
 			if cmd.Package != "github.com/example/widget" {
 				continue
 			}
@@ -3408,8 +3422,8 @@ func TestGetRemediation(t *testing.T) {
 			if cmd.Purl != "pkg:golang/github.com/example/widget@v1.4.0" {
 				t.Errorf("purl = %q, want pkg:golang/github.com/example/widget@v1.4.0", cmd.Purl)
 			}
-			if !cmd.Migration {
-				t.Error("expected migration command")
+			if !cmd.GetMigration() {
+				t.Error("expected migration step")
 			}
 			if cmd.TargetModule != "github.com/example/widget/v2" {
 				t.Errorf("target module = %q, want github.com/example/widget/v2", cmd.TargetModule)
@@ -3434,7 +3448,7 @@ func TestGetRemediation(t *testing.T) {
 			}
 		}
 		if !foundIndirectMigration {
-			t.Fatalf("expected indirect migration command, got %+v", result.Commands)
+			t.Fatalf("expected indirect migration step, got %+v", result.Steps)
 		}
 	})
 
@@ -3445,18 +3459,18 @@ func TestGetRemediation(t *testing.T) {
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		if result.MigrationCount != 2 {
-			t.Errorf("expected 2 migration fixes, got %d", result.MigrationCount)
+		if result.GetStats().GetMigrationSteps() != 2 {
+			t.Errorf("expected 2 migration steps, got %d", result.GetStats().GetMigrationSteps())
 		}
-		if result.CommandCount != 2 {
-			t.Errorf("expected 2 remediation commands, got %d", result.CommandCount)
+		if result.GetStats().GetTotalSteps() != 2 {
+			t.Errorf("expected 2 remediation steps, got %d", result.GetStats().GetTotalSteps())
 		}
-		if result.ManualCommandCount != 2 {
-			t.Errorf("expected 2 manual commands, got %d", result.ManualCommandCount)
+		if result.GetStats().GetManualSteps() != 2 {
+			t.Errorf("expected 2 manual steps, got %d", result.GetStats().GetManualSteps())
 		}
 
-		indirectMigrations := map[string]*mcpv1.RemediationCommand{}
-		for _, cmd := range result.Commands {
+		indirectMigrations := map[string]*mcpv1.RemediationStep{}
+		for _, cmd := range result.Steps {
 			if cmd.Command == "Upgrade the dependency that pulls this in (indirect; no in-place fix)" {
 				indirectMigrations[cmd.Package] = cmd
 			}
@@ -3466,12 +3480,12 @@ func TestGetRemediation(t *testing.T) {
 			"github.com/containerd/containerd": "pkg:golang/github.com/containerd/containerd@1.7.33",
 		}
 		if len(indirectMigrations) != len(wantPURLs) {
-			t.Fatalf("indirect migration command count = %d, want %d: %+v", len(indirectMigrations), len(wantPURLs), result.Commands)
+			t.Fatalf("indirect migration step count = %d, want %d: %+v", len(indirectMigrations), len(wantPURLs), result.Steps)
 		}
 		for pkgName, wantPURL := range wantPURLs {
 			cmd, ok := indirectMigrations[pkgName]
 			if !ok {
-				t.Fatalf("missing indirect migration command for %s: %+v", pkgName, result.Commands)
+				t.Fatalf("missing indirect migration step for %s: %+v", pkgName, result.Steps)
 			}
 			if cmd.Purl != wantPURL {
 				t.Errorf("%s purl = %q, want %q", pkgName, cmd.Purl, wantPURL)

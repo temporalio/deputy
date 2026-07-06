@@ -5,9 +5,11 @@ import (
 	crypto_rand "crypto/rand"
 	"encoding/hex"
 	"fmt"
+	"maps"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -118,33 +120,35 @@ func (h *RemediationHandler) GeneratePlan(
 				Steps:       nil,
 				GeneratedAt: timestamppb.Now(),
 			},
+			Target:      scanResult.GetTarget(),
+			GeneratedAt: timestamppb.Now(),
+			Stats:       &remediationv1.PlanStats{},
 		}), nil
 	}
 
 	logs.Info(ctx, "generating remediation plan", "findings", len(findings))
 
-	// Convert proto findings to internal vulnerability.Consolidated
-	consolidated := make([]vulnerability.Consolidated, 0, len(findings))
-	for _, f := range findings {
-		pkg := f.GetPackage()
-		advisory := f.GetAdvisory()
-		if pkg == nil || advisory == nil {
-			continue
-		}
-		c := vulnerability.Consolidated{
-			PrimaryID:     advisory.GetId(),
-			Package:       pkg.GetName(),
-			Version:       pkg.GetVersion(),
-			Ecosystem:     pkg.GetEcosystem(),
-			IsDirect:      pkg.GetDirect(),
-			FixedVersions: advisory.GetFixedVersions(),
-		}
-		consolidated = append(consolidated, c)
-	}
+	// Consolidate findings the same way scan surfaces do: alias dedup, fix
+	// verdict resolution, and severity normalization. Planning from raw
+	// findings would lose migration targets and duplicate aliased advisories.
+	internalScan := internalproto.ScanningResultFromProto(scanResult)
+	consolidated := vulnerability.ConsolidateAll(internalScan.Findings, internalScan.Advisories)
 
-	// Generate remediation commands
-	commands, stdlibVersion := remediation.CommandsFromConsolidated(consolidated)
-	commands = remediation.ApplyGuidance(commands, remediation.APIGuidance())
+	// Generate remediation commands with hints adapted to the caller surface.
+	commands, stdlibVersion := remediation.CommandsFromConsolidated(consolidated.Vulnerabilities)
+	commands = remediation.ApplyGuidance(commands, guidanceContextFor(req.Msg.GetOptions().GetGuidanceProfile()))
+
+	// Identify findings the plan cannot address.
+	var unaddressed []string
+	addressed := 0
+	for _, v := range consolidated.Vulnerabilities {
+		remediable, _ := vulnerability.RemediationDisposition(v)
+		if remediable {
+			addressed++
+		} else {
+			unaddressed = append(unaddressed, v.PrimaryID)
+		}
+	}
 
 	// Convert to proto steps
 	steps := internalproto.RemediationCommandsToSteps(commands)
@@ -153,22 +157,78 @@ func (h *RemediationHandler) GeneratePlan(
 	plan := &remediationv1.Plan{
 		Id:            generatePlanID(),
 		Steps:         steps,
+		Target:        scanResult.GetTarget(),
 		StdlibUpgrade: stdlibVersion,
 		GeneratedAt:   timestamppb.Now(),
 	}
 
 	// Build response
 	response := &remediationv1.GeneratePlanResponse{
-		Plan:        plan,
-		GeneratedAt: timestamppb.Now(),
+		Plan:                       plan,
+		Target:                     scanResult.GetTarget(),
+		GeneratedAt:                timestamppb.Now(),
+		Stats:                      planStats(steps, addressed, len(unaddressed)),
+		UnaddressedVulnerabilities: unaddressed,
 	}
 
 	logs.Info(ctx, "remediation plan generated",
 		"plan_id", plan.Id,
 		"steps", len(steps),
+		"addressed", addressed,
+		"unaddressed", len(unaddressed),
 	)
 
 	return connect.NewResponse(response), nil
+}
+
+// guidanceContextFor maps the requested guidance profile onto the internal
+// guidance context. Unspecified keeps the API profile, the handler's
+// historical default.
+func guidanceContextFor(profile remediationv1.GuidanceProfile) remediation.GuidanceContext {
+	switch profile {
+	case remediationv1.GuidanceProfile_GUIDANCE_PROFILE_CLI:
+		return remediation.CLIGuidance()
+	case remediationv1.GuidanceProfile_GUIDANCE_PROFILE_MCP:
+		return remediation.MCPGuidance()
+	case remediationv1.GuidanceProfile_GUIDANCE_PROFILE_GENERIC:
+		return remediation.GuidanceContext{Profile: remediation.GuidanceProfileGeneric}
+	default:
+		return remediation.APIGuidance()
+	}
+}
+
+// planStats summarizes a plan's steps together with the finding disposition
+// counts computed during planning.
+func planStats(steps []*remediationv1.Step, addressed, unaddressed int) *remediationv1.PlanStats {
+	stats := &remediationv1.PlanStats{
+		TotalSteps:                 int32(len(steps)),
+		VulnerabilitiesAddressed:   int32(addressed),
+		VulnerabilitiesUnaddressed: int32(unaddressed),
+	}
+	packages := make(map[string]struct{})
+	managers := make(map[string]struct{})
+	for _, step := range steps {
+		if step.GetExecutable() {
+			stats.ExecutableSteps++
+		} else {
+			stats.ManualSteps++
+		}
+		if step.GetMigration() {
+			stats.MigrationSteps++
+		}
+		if step.GetRiskLevel() >= remediationv1.RiskLevel_RISK_LEVEL_HIGH {
+			stats.HighRiskSteps++
+		}
+		if name := step.GetPackageName(); name != "" {
+			packages[name] = struct{}{}
+		}
+		if manager := step.GetManager(); manager != "" {
+			managers[manager] = struct{}{}
+		}
+	}
+	stats.AffectedPackages = int32(len(packages))
+	stats.AffectedManagers = slices.Sorted(maps.Keys(managers))
+	return stats
 }
 
 // ExecutePlan applies a previously generated remediation plan.

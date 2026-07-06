@@ -14,19 +14,25 @@ import (
 // RemediationCommandToStep converts internal remediation.Command to proto Step.
 func RemediationCommandToStep(c remediation.Command, id string) *remediationv1.Step {
 	step := &remediationv1.Step{
-		Id:             id,
-		Kind:           detectStepKind(c),
-		Title:          buildStepTitle(c),
-		Description:    buildStepDescription(c),
-		PackageName:    extractPackageName(c),
-		CurrentVersion: c.Version,
-		TargetVersion:  c.TargetVersion,
-		Manager:        c.Manager,
-		ManifestPath:   c.Path,
-		Command:        c.Command,
-		Hint:           c.Hint,
-		Executable:     c.Executable,
-		RiskLevel:      detectRiskLevel(c),
+		Id:                      id,
+		Kind:                    detectStepKind(c),
+		Title:                   buildStepTitle(c),
+		Description:             buildStepDescription(c),
+		PackageName:             extractPackageName(c),
+		CurrentVersion:          c.Version,
+		TargetVersion:           c.TargetVersion,
+		Manager:                 c.Manager,
+		ManifestPath:            c.Path,
+		Command:                 c.Command,
+		Hint:                    c.Hint,
+		Executable:              c.Executable,
+		RiskLevel:               detectRiskLevel(c),
+		Purl:                    c.PURL,
+		TargetModule:            c.TargetModule,
+		Migration:               c.Migration,
+		IsDirect:                c.IsDirect,
+		Groups:                  c.Groups,
+		AffectedVulnerabilities: c.Vulnerabilities,
 	}
 	return step
 }
@@ -38,14 +44,20 @@ func RemediationStepFromProto(s *remediationv1.Step) remediation.Command {
 		return remediation.Command{}
 	}
 	return remediation.Command{
-		Package:       s.PackageName,
-		Version:       s.CurrentVersion,
-		TargetVersion: s.TargetVersion,
-		Manager:       s.Manager,
-		Command:       s.Command,
-		Path:          s.ManifestPath,
-		Hint:          s.Hint,
-		Executable:    s.Executable,
+		Package:         s.PackageName,
+		Version:         s.CurrentVersion,
+		TargetVersion:   s.TargetVersion,
+		Manager:         s.Manager,
+		Command:         s.Command,
+		Path:            s.ManifestPath,
+		Hint:            s.Hint,
+		Executable:      s.Executable,
+		PURL:            s.Purl,
+		TargetModule:    s.TargetModule,
+		Migration:       s.Migration,
+		IsDirect:        s.IsDirect,
+		Groups:          s.Groups,
+		Vulnerabilities: s.AffectedVulnerabilities,
 	}
 }
 
@@ -73,7 +85,9 @@ func RemediationStepsFromProto(steps []*remediationv1.Step) []remediation.Comman
 	return commands
 }
 
-// detectStepKind determines the StepKind based on command content.
+// detectStepKind determines the StepKind based on command content. A step
+// with a target version is a version upgrade regardless of executability:
+// kind describes the remediation, executable describes actionability.
 func detectStepKind(c remediation.Command) remediationv1.StepKind {
 	cmd := c.Command
 	if len(cmd) > 0 {
@@ -86,6 +100,10 @@ func detectStepKind(c remediation.Command) remediationv1.StepKind {
 				return remediationv1.StepKind_STEP_KIND_DOCKERFILE_UPDATE
 			}
 		}
+	}
+
+	if c.TargetVersion != "" || c.TargetModule != "" {
+		return remediationv1.StepKind_STEP_KIND_VERSION_UPGRADE
 	}
 
 	// Default to shell command for executable commands

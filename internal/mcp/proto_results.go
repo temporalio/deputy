@@ -12,6 +12,7 @@ import (
 
 	dependencyv1 "github.com/temporalio/deputy/gen/deputy/dependency/v1"
 	mcpv1 "github.com/temporalio/deputy/gen/deputy/mcp/v1"
+	remediationv1 "github.com/temporalio/deputy/gen/deputy/remediation/v1"
 	vulnerabilityv1 "github.com/temporalio/deputy/gen/deputy/vulnerability/v1"
 	"github.com/temporalio/deputy/internal/mcp/protoschema"
 	internalproto "github.com/temporalio/deputy/internal/proto"
@@ -178,6 +179,59 @@ func fixVerdictProto(v *vulnerability.FixVerdict) *mcpv1.FixVerdict {
 		Version:      v.Version,
 		TargetModule: v.TargetModule,
 		Claimed:      v.Claimed,
+	}
+}
+
+// remediationStepProto projects a deputy.remediation.v1 plan step onto the
+// mcp.v1 wire: kind and risk become lowercase strings, and the affirmative
+// migration/isDirect/executable answers get explicit presence.
+func remediationStepProto(step *remediationv1.Step) *mcpv1.RemediationStep {
+	if step == nil {
+		return nil
+	}
+	return &mcpv1.RemediationStep{
+		Id:                      step.GetId(),
+		Kind:                    stepKindString(step.GetKind()),
+		Title:                   step.GetTitle(),
+		Description:             step.GetDescription(),
+		Package:                 step.GetPackageName(),
+		Purl:                    step.GetPurl(),
+		Version:                 step.GetCurrentVersion(),
+		TargetVersion:           step.GetTargetVersion(),
+		TargetModule:            step.GetTargetModule(),
+		Migration:               proto.Bool(step.GetMigration()),
+		Manager:                 step.GetManager(),
+		ManifestPath:            step.GetManifestPath(),
+		Command:                 step.GetCommand(),
+		Hint:                    step.GetHint(),
+		IsDirect:                proto.Bool(step.GetIsDirect()),
+		Executable:              proto.Bool(step.GetExecutable()),
+		Groups:                  step.GetGroups(),
+		RiskLevel:               internalproto.RiskLevelFromProto(step.GetRiskLevel()),
+		AffectedVulnerabilities: step.GetAffectedVulnerabilities(),
+	}
+}
+
+// stepKindString maps plan step kinds onto the lowercase mcp.v1 wire values;
+// unspecified maps to empty and is omitted.
+func stepKindString(kind remediationv1.StepKind) string {
+	switch kind {
+	case remediationv1.StepKind_STEP_KIND_VERSION_UPGRADE:
+		return "version_upgrade"
+	case remediationv1.StepKind_STEP_KIND_FILE_EDIT:
+		return "file_edit"
+	case remediationv1.StepKind_STEP_KIND_SHELL_COMMAND:
+		return "shell_command"
+	case remediationv1.StepKind_STEP_KIND_DOCKERFILE_UPDATE:
+		return "dockerfile_update"
+	case remediationv1.StepKind_STEP_KIND_ACTION_UPDATE:
+		return "action_update"
+	case remediationv1.StepKind_STEP_KIND_CONFIG_CHANGE:
+		return "config_change"
+	case remediationv1.StepKind_STEP_KIND_CUSTOM_AGENT:
+		return "custom_agent"
+	default:
+		return ""
 	}
 }
 

@@ -28,6 +28,63 @@ const (
 	_ = protoimpl.EnforceVersion(protoimpl.MaxVersion - 20)
 )
 
+// GuidanceProfile identifies the caller surface that will present remediation
+// steps, so hints can point at capabilities available on that surface.
+type GuidanceProfile int32
+
+const (
+	GuidanceProfile_GUIDANCE_PROFILE_UNSPECIFIED GuidanceProfile = 0
+	GuidanceProfile_GUIDANCE_PROFILE_GENERIC     GuidanceProfile = 1
+	GuidanceProfile_GUIDANCE_PROFILE_CLI         GuidanceProfile = 2
+	GuidanceProfile_GUIDANCE_PROFILE_API         GuidanceProfile = 3
+	GuidanceProfile_GUIDANCE_PROFILE_MCP         GuidanceProfile = 4
+)
+
+// Enum value maps for GuidanceProfile.
+var (
+	GuidanceProfile_name = map[int32]string{
+		0: "GUIDANCE_PROFILE_UNSPECIFIED",
+		1: "GUIDANCE_PROFILE_GENERIC",
+		2: "GUIDANCE_PROFILE_CLI",
+		3: "GUIDANCE_PROFILE_API",
+		4: "GUIDANCE_PROFILE_MCP",
+	}
+	GuidanceProfile_value = map[string]int32{
+		"GUIDANCE_PROFILE_UNSPECIFIED": 0,
+		"GUIDANCE_PROFILE_GENERIC":     1,
+		"GUIDANCE_PROFILE_CLI":         2,
+		"GUIDANCE_PROFILE_API":         3,
+		"GUIDANCE_PROFILE_MCP":         4,
+	}
+)
+
+func (x GuidanceProfile) Enum() *GuidanceProfile {
+	p := new(GuidanceProfile)
+	*p = x
+	return p
+}
+
+func (x GuidanceProfile) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (GuidanceProfile) Descriptor() protoreflect.EnumDescriptor {
+	return file_deputy_remediation_v1_service_proto_enumTypes[0].Descriptor()
+}
+
+func (GuidanceProfile) Type() protoreflect.EnumType {
+	return &file_deputy_remediation_v1_service_proto_enumTypes[0]
+}
+
+func (x GuidanceProfile) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use GuidanceProfile.Descriptor instead.
+func (GuidanceProfile) EnumDescriptor() ([]byte, []int) {
+	return file_deputy_remediation_v1_service_proto_rawDescGZIP(), []int{0}
+}
+
 // StepKind identifies the type of remediation step.
 type StepKind int32
 
@@ -77,11 +134,11 @@ func (x StepKind) String() string {
 }
 
 func (StepKind) Descriptor() protoreflect.EnumDescriptor {
-	return file_deputy_remediation_v1_service_proto_enumTypes[0].Descriptor()
+	return file_deputy_remediation_v1_service_proto_enumTypes[1].Descriptor()
 }
 
 func (StepKind) Type() protoreflect.EnumType {
-	return &file_deputy_remediation_v1_service_proto_enumTypes[0]
+	return &file_deputy_remediation_v1_service_proto_enumTypes[1]
 }
 
 func (x StepKind) Number() protoreflect.EnumNumber {
@@ -90,7 +147,7 @@ func (x StepKind) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use StepKind.Descriptor instead.
 func (StepKind) EnumDescriptor() ([]byte, []int) {
-	return file_deputy_remediation_v1_service_proto_rawDescGZIP(), []int{0}
+	return file_deputy_remediation_v1_service_proto_rawDescGZIP(), []int{1}
 }
 
 // RiskLevel indicates the risk of a remediation step.
@@ -133,11 +190,11 @@ func (x RiskLevel) String() string {
 }
 
 func (RiskLevel) Descriptor() protoreflect.EnumDescriptor {
-	return file_deputy_remediation_v1_service_proto_enumTypes[1].Descriptor()
+	return file_deputy_remediation_v1_service_proto_enumTypes[2].Descriptor()
 }
 
 func (RiskLevel) Type() protoreflect.EnumType {
-	return &file_deputy_remediation_v1_service_proto_enumTypes[1]
+	return &file_deputy_remediation_v1_service_proto_enumTypes[2]
 }
 
 func (x RiskLevel) Number() protoreflect.EnumNumber {
@@ -146,7 +203,7 @@ func (x RiskLevel) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use RiskLevel.Descriptor instead.
 func (RiskLevel) EnumDescriptor() ([]byte, []int) {
-	return file_deputy_remediation_v1_service_proto_rawDescGZIP(), []int{1}
+	return file_deputy_remediation_v1_service_proto_rawDescGZIP(), []int{2}
 }
 
 // ApprovalMode specifies how high-risk operations are handled.
@@ -189,11 +246,11 @@ func (x ApprovalMode) String() string {
 }
 
 func (ApprovalMode) Descriptor() protoreflect.EnumDescriptor {
-	return file_deputy_remediation_v1_service_proto_enumTypes[2].Descriptor()
+	return file_deputy_remediation_v1_service_proto_enumTypes[3].Descriptor()
 }
 
 func (ApprovalMode) Type() protoreflect.EnumType {
-	return &file_deputy_remediation_v1_service_proto_enumTypes[2]
+	return &file_deputy_remediation_v1_service_proto_enumTypes[3]
 }
 
 func (x ApprovalMode) Number() protoreflect.EnumNumber {
@@ -202,7 +259,7 @@ func (x ApprovalMode) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use ApprovalMode.Descriptor instead.
 func (ApprovalMode) EnumDescriptor() ([]byte, []int) {
-	return file_deputy_remediation_v1_service_proto_rawDescGZIP(), []int{2}
+	return file_deputy_remediation_v1_service_proto_rawDescGZIP(), []int{3}
 }
 
 // ExecutionPhase indicates the current phase of plan execution.
@@ -248,11 +305,11 @@ func (x ExecutionPhase) String() string {
 }
 
 func (ExecutionPhase) Descriptor() protoreflect.EnumDescriptor {
-	return file_deputy_remediation_v1_service_proto_enumTypes[3].Descriptor()
+	return file_deputy_remediation_v1_service_proto_enumTypes[4].Descriptor()
 }
 
 func (ExecutionPhase) Type() protoreflect.EnumType {
-	return &file_deputy_remediation_v1_service_proto_enumTypes[3]
+	return &file_deputy_remediation_v1_service_proto_enumTypes[4]
 }
 
 func (x ExecutionPhase) Number() protoreflect.EnumNumber {
@@ -261,7 +318,7 @@ func (x ExecutionPhase) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use ExecutionPhase.Descriptor instead.
 func (ExecutionPhase) EnumDescriptor() ([]byte, []int) {
-	return file_deputy_remediation_v1_service_proto_rawDescGZIP(), []int{3}
+	return file_deputy_remediation_v1_service_proto_rawDescGZIP(), []int{4}
 }
 
 // AgentPhase indicates the current phase of agent execution.
@@ -316,11 +373,11 @@ func (x AgentPhase) String() string {
 }
 
 func (AgentPhase) Descriptor() protoreflect.EnumDescriptor {
-	return file_deputy_remediation_v1_service_proto_enumTypes[4].Descriptor()
+	return file_deputy_remediation_v1_service_proto_enumTypes[5].Descriptor()
 }
 
 func (AgentPhase) Type() protoreflect.EnumType {
-	return &file_deputy_remediation_v1_service_proto_enumTypes[4]
+	return &file_deputy_remediation_v1_service_proto_enumTypes[5]
 }
 
 func (x AgentPhase) Number() protoreflect.EnumNumber {
@@ -329,7 +386,7 @@ func (x AgentPhase) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use AgentPhase.Descriptor instead.
 func (AgentPhase) EnumDescriptor() ([]byte, []int) {
-	return file_deputy_remediation_v1_service_proto_rawDescGZIP(), []int{4}
+	return file_deputy_remediation_v1_service_proto_rawDescGZIP(), []int{5}
 }
 
 // GeneratePlanRequest specifies how to generate a remediation plan.
@@ -452,8 +509,13 @@ type PlanOptions struct {
 	TargetEcosystems []string `protobuf:"bytes,5,rep,name=target_ecosystems,json=targetEcosystems,proto3" json:"target_ecosystems,omitempty"`
 	// SeverityThreshold omits vulnerabilities below this severity level.
 	SeverityThreshold v12.SeverityLevel `protobuf:"varint,6,opt,name=severity_threshold,json=severityThreshold,proto3,enum=deputy.vulnerability.v1.SeverityLevel" json:"severity_threshold,omitempty"`
-	unknownFields     protoimpl.UnknownFields
-	sizeCache         protoimpl.SizeCache
+	// GuidanceProfile adapts step hints to the calling surface's capabilities:
+	// MCP hints reference the graph_why tool, API hints reference
+	// GraphService.WhyDependency, CLI hints reference deputy commands.
+	// Unspecified defaults to the API profile.
+	GuidanceProfile GuidanceProfile `protobuf:"varint,7,opt,name=guidance_profile,json=guidanceProfile,proto3,enum=deputy.remediation.v1.GuidanceProfile" json:"guidance_profile,omitempty"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
 }
 
 func (x *PlanOptions) Reset() {
@@ -528,6 +590,13 @@ func (x *PlanOptions) GetSeverityThreshold() v12.SeverityLevel {
 	return v12.SeverityLevel(0)
 }
 
+func (x *PlanOptions) GetGuidanceProfile() GuidanceProfile {
+	if x != nil {
+		return x.GuidanceProfile
+	}
+	return GuidanceProfile_GUIDANCE_PROFILE_UNSPECIFIED
+}
+
 // GeneratePlanResponse contains the generated remediation plan.
 type GeneratePlanResponse struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
@@ -540,9 +609,13 @@ type GeneratePlanResponse struct {
 	// Stats summarizes the plan contents.
 	Stats *PlanStats `protobuf:"bytes,4,opt,name=stats,proto3" json:"stats,omitempty"`
 	// Warnings contains non-fatal issues encountered during planning.
-	Warnings      []string `protobuf:"bytes,5,rep,name=warnings,proto3" json:"warnings,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	Warnings []string `protobuf:"bytes,5,rep,name=warnings,proto3" json:"warnings,omitempty"`
+	// UnaddressedVulnerabilities lists finding IDs the plan does not fix
+	// because no remediation is known. Unaddressed means still vulnerable, not
+	// safe.
+	UnaddressedVulnerabilities []string `protobuf:"bytes,6,rep,name=unaddressed_vulnerabilities,json=unaddressedVulnerabilities,proto3" json:"unaddressed_vulnerabilities,omitempty"`
+	unknownFields              protoimpl.UnknownFields
+	sizeCache                  protoimpl.SizeCache
 }
 
 func (x *GeneratePlanResponse) Reset() {
@@ -606,6 +679,13 @@ func (x *GeneratePlanResponse) GetStats() *PlanStats {
 func (x *GeneratePlanResponse) GetWarnings() []string {
 	if x != nil {
 		return x.Warnings
+	}
+	return nil
+}
+
+func (x *GeneratePlanResponse) GetUnaddressedVulnerabilities() []string {
+	if x != nil {
+		return x.UnaddressedVulnerabilities
 	}
 	return nil
 }
@@ -735,7 +815,19 @@ type Step struct {
 	// Hint provides additional context for manual steps.
 	Hint string `protobuf:"bytes,15,opt,name=hint,proto3" json:"hint,omitempty"`
 	// DependsOn lists IDs of steps that must execute before this one.
-	DependsOn     []string `protobuf:"bytes,16,rep,name=depends_on,json=dependsOn,proto3" json:"depends_on,omitempty"`
+	DependsOn []string `protobuf:"bytes,16,rep,name=depends_on,json=dependsOn,proto3" json:"depends_on,omitempty"`
+	// Purl is the vulnerable package's Package URL when known.
+	Purl string `protobuf:"bytes,17,opt,name=purl,proto3" json:"purl,omitempty"`
+	// TargetModule is the module/package path to migrate to when the fix
+	// requires changing package identity.
+	TargetModule string `protobuf:"bytes,18,opt,name=target_module,json=targetModule,proto3" json:"target_module,omitempty"`
+	// Migration indicates the fix moves to a different module/package path
+	// rather than an in-place version bump.
+	Migration bool `protobuf:"varint,19,opt,name=migration,proto3" json:"migration,omitempty"`
+	// IsDirect indicates whether the vulnerable package is a direct dependency.
+	IsDirect bool `protobuf:"varint,20,opt,name=is_direct,json=isDirect,proto3" json:"is_direct,omitempty"`
+	// Groups are the dependency groups the package belongs to (e.g., "dev").
+	Groups        []string `protobuf:"bytes,21,rep,name=groups,proto3" json:"groups,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -882,6 +974,41 @@ func (x *Step) GetDependsOn() []string {
 	return nil
 }
 
+func (x *Step) GetPurl() string {
+	if x != nil {
+		return x.Purl
+	}
+	return ""
+}
+
+func (x *Step) GetTargetModule() string {
+	if x != nil {
+		return x.TargetModule
+	}
+	return ""
+}
+
+func (x *Step) GetMigration() bool {
+	if x != nil {
+		return x.Migration
+	}
+	return false
+}
+
+func (x *Step) GetIsDirect() bool {
+	if x != nil {
+		return x.IsDirect
+	}
+	return false
+}
+
+func (x *Step) GetGroups() []string {
+	if x != nil {
+		return x.Groups
+	}
+	return nil
+}
+
 // PlanStats summarizes plan statistics.
 type PlanStats struct {
 	state                    protoimpl.MessageState `protogen:"open.v1"`
@@ -892,8 +1019,12 @@ type PlanStats struct {
 	VulnerabilitiesAddressed int32                  `protobuf:"varint,5,opt,name=vulnerabilities_addressed,json=vulnerabilitiesAddressed,proto3" json:"vulnerabilities_addressed,omitempty"`
 	AffectedPackages         int32                  `protobuf:"varint,6,opt,name=affected_packages,json=affectedPackages,proto3" json:"affected_packages,omitempty"`
 	AffectedManagers         []string               `protobuf:"bytes,7,rep,name=affected_managers,json=affectedManagers,proto3" json:"affected_managers,omitempty"`
-	unknownFields            protoimpl.UnknownFields
-	sizeCache                protoimpl.SizeCache
+	// VulnerabilitiesUnaddressed counts findings with no known remediation.
+	VulnerabilitiesUnaddressed int32 `protobuf:"varint,8,opt,name=vulnerabilities_unaddressed,json=vulnerabilitiesUnaddressed,proto3" json:"vulnerabilities_unaddressed,omitempty"`
+	// MigrationSteps counts steps that move to a different module path.
+	MigrationSteps int32 `protobuf:"varint,9,opt,name=migration_steps,json=migrationSteps,proto3" json:"migration_steps,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
 }
 
 func (x *PlanStats) Reset() {
@@ -973,6 +1104,20 @@ func (x *PlanStats) GetAffectedManagers() []string {
 		return x.AffectedManagers
 	}
 	return nil
+}
+
+func (x *PlanStats) GetVulnerabilitiesUnaddressed() int32 {
+	if x != nil {
+		return x.VulnerabilitiesUnaddressed
+	}
+	return 0
+}
+
+func (x *PlanStats) GetMigrationSteps() int32 {
+	if x != nil {
+		return x.MigrationSteps
+	}
+	return 0
 }
 
 // ExecutePlanRequest specifies how to apply a remediation plan.
@@ -3498,20 +3643,22 @@ const file_deputy_remediation_v1_service_proto_rawDesc = "" +
 	"\vsbom_format\x18\x03 \x01(\x0e2\x16.deputy.sbom.v1.FormatR\n" +
 	"sbomFormat\x12<\n" +
 	"\aoptions\x18\x04 \x01(\v2\".deputy.remediation.v1.PlanOptionsR\aoptionsB\b\n" +
-	"\x06source\"\xcb\x02\n" +
+	"\x06source\"\x9e\x03\n" +
 	"\vPlanOptions\x12%\n" +
 	"\x0eignore_unfixed\x18\x01 \x01(\bR\rignoreUnfixed\x12!\n" +
 	"\fmax_upgrades\x18\x02 \x01(\x05R\vmaxUpgrades\x124\n" +
 	"\x16prefer_minimal_changes\x18\x03 \x01(\bR\x14preferMinimalChanges\x128\n" +
 	"\x18include_transitive_fixes\x18\x04 \x01(\bR\x16includeTransitiveFixes\x12+\n" +
 	"\x11target_ecosystems\x18\x05 \x03(\tR\x10targetEcosystems\x12U\n" +
-	"\x12severity_threshold\x18\x06 \x01(\x0e2&.deputy.vulnerability.v1.SeverityLevelR\x11severityThreshold\"\x8c\x02\n" +
+	"\x12severity_threshold\x18\x06 \x01(\x0e2&.deputy.vulnerability.v1.SeverityLevelR\x11severityThreshold\x12Q\n" +
+	"\x10guidance_profile\x18\a \x01(\x0e2&.deputy.remediation.v1.GuidanceProfileR\x0fguidanceProfile\"\xcd\x02\n" +
 	"\x14GeneratePlanResponse\x12/\n" +
 	"\x04plan\x18\x01 \x01(\v2\x1b.deputy.remediation.v1.PlanR\x04plan\x120\n" +
 	"\x06target\x18\x02 \x01(\v2\x18.deputy.target.v1.TargetR\x06target\x12=\n" +
 	"\fgenerated_at\x18\x03 \x01(\v2\x1a.google.protobuf.TimestampR\vgeneratedAt\x126\n" +
 	"\x05stats\x18\x04 \x01(\v2 .deputy.remediation.v1.PlanStatsR\x05stats\x12\x1a\n" +
-	"\bwarnings\x18\x05 \x03(\tR\bwarnings\"\xe5\x02\n" +
+	"\bwarnings\x18\x05 \x03(\tR\bwarnings\x12?\n" +
+	"\x1bunaddressed_vulnerabilities\x18\x06 \x03(\tR\x1aunaddressedVulnerabilities\"\xe5\x02\n" +
 	"\x04Plan\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x121\n" +
 	"\x05steps\x18\x02 \x03(\v2\x1b.deputy.remediation.v1.StepR\x05steps\x120\n" +
@@ -3521,7 +3668,7 @@ const file_deputy_remediation_v1_service_proto_rawDesc = "" +
 	"\bmetadata\x18\x06 \x03(\v2).deputy.remediation.v1.Plan.MetadataEntryR\bmetadata\x1a;\n" +
 	"\rMetadataEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
-	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\xcb\x04\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\xd7\x05\n" +
 	"\x04Step\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x123\n" +
 	"\x04kind\x18\x02 \x01(\x0e2\x1f.deputy.remediation.v1.StepKindR\x04kind\x12\x14\n" +
@@ -3543,7 +3690,12 @@ const file_deputy_remediation_v1_service_proto_rawDesc = "" +
 	"\x11requires_approval\x18\x0e \x01(\bR\x10requiresApproval\x12\x12\n" +
 	"\x04hint\x18\x0f \x01(\tR\x04hint\x12\x1d\n" +
 	"\n" +
-	"depends_on\x18\x10 \x03(\tR\tdependsOn\"\xb9\x02\n" +
+	"depends_on\x18\x10 \x03(\tR\tdependsOn\x12\x12\n" +
+	"\x04purl\x18\x11 \x01(\tR\x04purl\x12#\n" +
+	"\rtarget_module\x18\x12 \x01(\tR\ftargetModule\x12\x1c\n" +
+	"\tmigration\x18\x13 \x01(\bR\tmigration\x12\x1b\n" +
+	"\tis_direct\x18\x14 \x01(\bR\bisDirect\x12\x16\n" +
+	"\x06groups\x18\x15 \x03(\tR\x06groups\"\xa3\x03\n" +
 	"\tPlanStats\x12\x1f\n" +
 	"\vtotal_steps\x18\x01 \x01(\x05R\n" +
 	"totalSteps\x12)\n" +
@@ -3552,7 +3704,9 @@ const file_deputy_remediation_v1_service_proto_rawDesc = "" +
 	"\x0fhigh_risk_steps\x18\x04 \x01(\x05R\rhighRiskSteps\x12;\n" +
 	"\x19vulnerabilities_addressed\x18\x05 \x01(\x05R\x18vulnerabilitiesAddressed\x12+\n" +
 	"\x11affected_packages\x18\x06 \x01(\x05R\x10affectedPackages\x12+\n" +
-	"\x11affected_managers\x18\a \x03(\tR\x10affectedManagers\"\xd6\x01\n" +
+	"\x11affected_managers\x18\a \x03(\tR\x10affectedManagers\x12?\n" +
+	"\x1bvulnerabilities_unaddressed\x18\b \x01(\x05R\x1avulnerabilitiesUnaddressed\x12'\n" +
+	"\x0fmigration_steps\x18\t \x01(\x05R\x0emigrationSteps\"\xd6\x01\n" +
 	"\x12ExecutePlanRequest\x12\x1f\n" +
 	"\n" +
 	"plan_bytes\x18\x01 \x01(\fH\x00R\tplanBytes\x121\n" +
@@ -3765,7 +3919,13 @@ const file_deputy_remediation_v1_service_proto_rawDesc = "" +
 	"\baccepted\x18\x01 \x01(\bR\baccepted\x12\x18\n" +
 	"\amessage\x18\x02 \x01(\tR\amessage\x12\x1f\n" +
 	"\vcan_proceed\x18\x03 \x01(\bR\n" +
-	"canProceed*\xf1\x01\n" +
+	"canProceed*\x9f\x01\n" +
+	"\x0fGuidanceProfile\x12 \n" +
+	"\x1cGUIDANCE_PROFILE_UNSPECIFIED\x10\x00\x12\x1c\n" +
+	"\x18GUIDANCE_PROFILE_GENERIC\x10\x01\x12\x18\n" +
+	"\x14GUIDANCE_PROFILE_CLI\x10\x02\x12\x18\n" +
+	"\x14GUIDANCE_PROFILE_API\x10\x03\x12\x18\n" +
+	"\x14GUIDANCE_PROFILE_MCP\x10\x04*\xf1\x01\n" +
 	"\bStepKind\x12\x19\n" +
 	"\x15STEP_KIND_UNSPECIFIED\x10\x00\x12\x1d\n" +
 	"\x19STEP_KIND_VERSION_UPGRADE\x10\x01\x12\x17\n" +
@@ -3827,130 +3987,132 @@ func file_deputy_remediation_v1_service_proto_rawDescGZIP() []byte {
 	return file_deputy_remediation_v1_service_proto_rawDescData
 }
 
-var file_deputy_remediation_v1_service_proto_enumTypes = make([]protoimpl.EnumInfo, 5)
+var file_deputy_remediation_v1_service_proto_enumTypes = make([]protoimpl.EnumInfo, 6)
 var file_deputy_remediation_v1_service_proto_msgTypes = make([]protoimpl.MessageInfo, 35)
 var file_deputy_remediation_v1_service_proto_goTypes = []any{
-	(StepKind)(0),                   // 0: deputy.remediation.v1.StepKind
-	(RiskLevel)(0),                  // 1: deputy.remediation.v1.RiskLevel
-	(ApprovalMode)(0),               // 2: deputy.remediation.v1.ApprovalMode
-	(ExecutionPhase)(0),             // 3: deputy.remediation.v1.ExecutionPhase
-	(AgentPhase)(0),                 // 4: deputy.remediation.v1.AgentPhase
-	(*GeneratePlanRequest)(nil),     // 5: deputy.remediation.v1.GeneratePlanRequest
-	(*PlanOptions)(nil),             // 6: deputy.remediation.v1.PlanOptions
-	(*GeneratePlanResponse)(nil),    // 7: deputy.remediation.v1.GeneratePlanResponse
-	(*Plan)(nil),                    // 8: deputy.remediation.v1.Plan
-	(*Step)(nil),                    // 9: deputy.remediation.v1.Step
-	(*PlanStats)(nil),               // 10: deputy.remediation.v1.PlanStats
-	(*ExecutePlanRequest)(nil),      // 11: deputy.remediation.v1.ExecutePlanRequest
-	(*ExecutionOptions)(nil),        // 12: deputy.remediation.v1.ExecutionOptions
-	(*ExecutionEvent)(nil),          // 13: deputy.remediation.v1.ExecutionEvent
-	(*CommandStartedEvent)(nil),     // 14: deputy.remediation.v1.CommandStartedEvent
-	(*CommandCompletedEvent)(nil),   // 15: deputy.remediation.v1.CommandCompletedEvent
-	(*StepCompletedEvent)(nil),      // 16: deputy.remediation.v1.StepCompletedEvent
-	(*ApprovalNeededEvent)(nil),     // 17: deputy.remediation.v1.ApprovalNeededEvent
-	(*ExecutionErrorEvent)(nil),     // 18: deputy.remediation.v1.ExecutionErrorEvent
-	(*ExecutionSummaryEvent)(nil),   // 19: deputy.remediation.v1.ExecutionSummaryEvent
-	(*ExecuteWithAgentRequest)(nil), // 20: deputy.remediation.v1.ExecuteWithAgentRequest
-	(*AgentOptions)(nil),            // 21: deputy.remediation.v1.AgentOptions
-	(*AgentEvent)(nil),              // 22: deputy.remediation.v1.AgentEvent
-	(*AgentTextEvent)(nil),          // 23: deputy.remediation.v1.AgentTextEvent
-	(*AgentCommandEvent)(nil),       // 24: deputy.remediation.v1.AgentCommandEvent
-	(*AgentFileEvent)(nil),          // 25: deputy.remediation.v1.AgentFileEvent
-	(*AgentStatusEvent)(nil),        // 26: deputy.remediation.v1.AgentStatusEvent
-	(*AgentApprovalEvent)(nil),      // 27: deputy.remediation.v1.AgentApprovalEvent
-	(*AgentErrorEvent)(nil),         // 28: deputy.remediation.v1.AgentErrorEvent
-	(*AgentSummaryEvent)(nil),       // 29: deputy.remediation.v1.AgentSummaryEvent
-	(*AgentTokensEvent)(nil),        // 30: deputy.remediation.v1.AgentTokensEvent
-	(*ResumeAgentRequest)(nil),      // 31: deputy.remediation.v1.ResumeAgentRequest
-	(*AgentApprovalResponse)(nil),   // 32: deputy.remediation.v1.AgentApprovalResponse
-	(*ListAgentsRequest)(nil),       // 33: deputy.remediation.v1.ListAgentsRequest
-	(*ListAgentsResponse)(nil),      // 34: deputy.remediation.v1.ListAgentsResponse
-	(*AgentInfo)(nil),               // 35: deputy.remediation.v1.AgentInfo
-	(*AgentCapabilities)(nil),       // 36: deputy.remediation.v1.AgentCapabilities
-	(*ApproveStepRequest)(nil),      // 37: deputy.remediation.v1.ApproveStepRequest
-	(*ApproveStepResponse)(nil),     // 38: deputy.remediation.v1.ApproveStepResponse
-	nil,                             // 39: deputy.remediation.v1.Plan.MetadataEntry
-	(*v11.ScanResponse)(nil),        // 40: deputy.scan.v1.ScanResponse
-	(v1.Format)(0),                  // 41: deputy.sbom.v1.Format
-	(v12.SeverityLevel)(0),          // 42: deputy.vulnerability.v1.SeverityLevel
-	(*v13.Target)(nil),              // 43: deputy.target.v1.Target
-	(*timestamppb.Timestamp)(nil),   // 44: google.protobuf.Timestamp
-	(*durationpb.Duration)(nil),     // 45: google.protobuf.Duration
+	(GuidanceProfile)(0),            // 0: deputy.remediation.v1.GuidanceProfile
+	(StepKind)(0),                   // 1: deputy.remediation.v1.StepKind
+	(RiskLevel)(0),                  // 2: deputy.remediation.v1.RiskLevel
+	(ApprovalMode)(0),               // 3: deputy.remediation.v1.ApprovalMode
+	(ExecutionPhase)(0),             // 4: deputy.remediation.v1.ExecutionPhase
+	(AgentPhase)(0),                 // 5: deputy.remediation.v1.AgentPhase
+	(*GeneratePlanRequest)(nil),     // 6: deputy.remediation.v1.GeneratePlanRequest
+	(*PlanOptions)(nil),             // 7: deputy.remediation.v1.PlanOptions
+	(*GeneratePlanResponse)(nil),    // 8: deputy.remediation.v1.GeneratePlanResponse
+	(*Plan)(nil),                    // 9: deputy.remediation.v1.Plan
+	(*Step)(nil),                    // 10: deputy.remediation.v1.Step
+	(*PlanStats)(nil),               // 11: deputy.remediation.v1.PlanStats
+	(*ExecutePlanRequest)(nil),      // 12: deputy.remediation.v1.ExecutePlanRequest
+	(*ExecutionOptions)(nil),        // 13: deputy.remediation.v1.ExecutionOptions
+	(*ExecutionEvent)(nil),          // 14: deputy.remediation.v1.ExecutionEvent
+	(*CommandStartedEvent)(nil),     // 15: deputy.remediation.v1.CommandStartedEvent
+	(*CommandCompletedEvent)(nil),   // 16: deputy.remediation.v1.CommandCompletedEvent
+	(*StepCompletedEvent)(nil),      // 17: deputy.remediation.v1.StepCompletedEvent
+	(*ApprovalNeededEvent)(nil),     // 18: deputy.remediation.v1.ApprovalNeededEvent
+	(*ExecutionErrorEvent)(nil),     // 19: deputy.remediation.v1.ExecutionErrorEvent
+	(*ExecutionSummaryEvent)(nil),   // 20: deputy.remediation.v1.ExecutionSummaryEvent
+	(*ExecuteWithAgentRequest)(nil), // 21: deputy.remediation.v1.ExecuteWithAgentRequest
+	(*AgentOptions)(nil),            // 22: deputy.remediation.v1.AgentOptions
+	(*AgentEvent)(nil),              // 23: deputy.remediation.v1.AgentEvent
+	(*AgentTextEvent)(nil),          // 24: deputy.remediation.v1.AgentTextEvent
+	(*AgentCommandEvent)(nil),       // 25: deputy.remediation.v1.AgentCommandEvent
+	(*AgentFileEvent)(nil),          // 26: deputy.remediation.v1.AgentFileEvent
+	(*AgentStatusEvent)(nil),        // 27: deputy.remediation.v1.AgentStatusEvent
+	(*AgentApprovalEvent)(nil),      // 28: deputy.remediation.v1.AgentApprovalEvent
+	(*AgentErrorEvent)(nil),         // 29: deputy.remediation.v1.AgentErrorEvent
+	(*AgentSummaryEvent)(nil),       // 30: deputy.remediation.v1.AgentSummaryEvent
+	(*AgentTokensEvent)(nil),        // 31: deputy.remediation.v1.AgentTokensEvent
+	(*ResumeAgentRequest)(nil),      // 32: deputy.remediation.v1.ResumeAgentRequest
+	(*AgentApprovalResponse)(nil),   // 33: deputy.remediation.v1.AgentApprovalResponse
+	(*ListAgentsRequest)(nil),       // 34: deputy.remediation.v1.ListAgentsRequest
+	(*ListAgentsResponse)(nil),      // 35: deputy.remediation.v1.ListAgentsResponse
+	(*AgentInfo)(nil),               // 36: deputy.remediation.v1.AgentInfo
+	(*AgentCapabilities)(nil),       // 37: deputy.remediation.v1.AgentCapabilities
+	(*ApproveStepRequest)(nil),      // 38: deputy.remediation.v1.ApproveStepRequest
+	(*ApproveStepResponse)(nil),     // 39: deputy.remediation.v1.ApproveStepResponse
+	nil,                             // 40: deputy.remediation.v1.Plan.MetadataEntry
+	(*v11.ScanResponse)(nil),        // 41: deputy.scan.v1.ScanResponse
+	(v1.Format)(0),                  // 42: deputy.sbom.v1.Format
+	(v12.SeverityLevel)(0),          // 43: deputy.vulnerability.v1.SeverityLevel
+	(*v13.Target)(nil),              // 44: deputy.target.v1.Target
+	(*timestamppb.Timestamp)(nil),   // 45: google.protobuf.Timestamp
+	(*durationpb.Duration)(nil),     // 46: google.protobuf.Duration
 }
 var file_deputy_remediation_v1_service_proto_depIdxs = []int32{
-	40, // 0: deputy.remediation.v1.GeneratePlanRequest.scan_result:type_name -> deputy.scan.v1.ScanResponse
-	41, // 1: deputy.remediation.v1.GeneratePlanRequest.sbom_format:type_name -> deputy.sbom.v1.Format
-	6,  // 2: deputy.remediation.v1.GeneratePlanRequest.options:type_name -> deputy.remediation.v1.PlanOptions
-	42, // 3: deputy.remediation.v1.PlanOptions.severity_threshold:type_name -> deputy.vulnerability.v1.SeverityLevel
-	8,  // 4: deputy.remediation.v1.GeneratePlanResponse.plan:type_name -> deputy.remediation.v1.Plan
-	43, // 5: deputy.remediation.v1.GeneratePlanResponse.target:type_name -> deputy.target.v1.Target
-	44, // 6: deputy.remediation.v1.GeneratePlanResponse.generated_at:type_name -> google.protobuf.Timestamp
-	10, // 7: deputy.remediation.v1.GeneratePlanResponse.stats:type_name -> deputy.remediation.v1.PlanStats
-	9,  // 8: deputy.remediation.v1.Plan.steps:type_name -> deputy.remediation.v1.Step
-	43, // 9: deputy.remediation.v1.Plan.target:type_name -> deputy.target.v1.Target
-	44, // 10: deputy.remediation.v1.Plan.generated_at:type_name -> google.protobuf.Timestamp
-	39, // 11: deputy.remediation.v1.Plan.metadata:type_name -> deputy.remediation.v1.Plan.MetadataEntry
-	0,  // 12: deputy.remediation.v1.Step.kind:type_name -> deputy.remediation.v1.StepKind
-	1,  // 13: deputy.remediation.v1.Step.risk_level:type_name -> deputy.remediation.v1.RiskLevel
-	8,  // 14: deputy.remediation.v1.ExecutePlanRequest.plan:type_name -> deputy.remediation.v1.Plan
-	12, // 15: deputy.remediation.v1.ExecutePlanRequest.options:type_name -> deputy.remediation.v1.ExecutionOptions
-	2,  // 16: deputy.remediation.v1.ExecutionOptions.approval_mode:type_name -> deputy.remediation.v1.ApprovalMode
-	45, // 17: deputy.remediation.v1.ExecutionOptions.timeout:type_name -> google.protobuf.Duration
-	3,  // 18: deputy.remediation.v1.ExecutionEvent.phase:type_name -> deputy.remediation.v1.ExecutionPhase
-	44, // 19: deputy.remediation.v1.ExecutionEvent.timestamp:type_name -> google.protobuf.Timestamp
-	14, // 20: deputy.remediation.v1.ExecutionEvent.command_started:type_name -> deputy.remediation.v1.CommandStartedEvent
-	15, // 21: deputy.remediation.v1.ExecutionEvent.command_completed:type_name -> deputy.remediation.v1.CommandCompletedEvent
-	16, // 22: deputy.remediation.v1.ExecutionEvent.step_completed:type_name -> deputy.remediation.v1.StepCompletedEvent
-	17, // 23: deputy.remediation.v1.ExecutionEvent.approval_needed:type_name -> deputy.remediation.v1.ApprovalNeededEvent
-	18, // 24: deputy.remediation.v1.ExecutionEvent.error:type_name -> deputy.remediation.v1.ExecutionErrorEvent
-	19, // 25: deputy.remediation.v1.ExecutionEvent.summary:type_name -> deputy.remediation.v1.ExecutionSummaryEvent
-	45, // 26: deputy.remediation.v1.CommandCompletedEvent.duration:type_name -> google.protobuf.Duration
-	45, // 27: deputy.remediation.v1.StepCompletedEvent.duration:type_name -> google.protobuf.Duration
-	1,  // 28: deputy.remediation.v1.ApprovalNeededEvent.risk_level:type_name -> deputy.remediation.v1.RiskLevel
-	44, // 29: deputy.remediation.v1.ExecutionSummaryEvent.started_at:type_name -> google.protobuf.Timestamp
-	44, // 30: deputy.remediation.v1.ExecutionSummaryEvent.completed_at:type_name -> google.protobuf.Timestamp
-	45, // 31: deputy.remediation.v1.ExecutionSummaryEvent.total_duration:type_name -> google.protobuf.Duration
-	40, // 32: deputy.remediation.v1.ExecuteWithAgentRequest.scan_result:type_name -> deputy.scan.v1.ScanResponse
-	41, // 33: deputy.remediation.v1.ExecuteWithAgentRequest.sbom_format:type_name -> deputy.sbom.v1.Format
-	21, // 34: deputy.remediation.v1.ExecuteWithAgentRequest.options:type_name -> deputy.remediation.v1.AgentOptions
-	45, // 35: deputy.remediation.v1.AgentOptions.timeout:type_name -> google.protobuf.Duration
-	4,  // 36: deputy.remediation.v1.AgentEvent.phase:type_name -> deputy.remediation.v1.AgentPhase
-	44, // 37: deputy.remediation.v1.AgentEvent.timestamp:type_name -> google.protobuf.Timestamp
-	23, // 38: deputy.remediation.v1.AgentEvent.text:type_name -> deputy.remediation.v1.AgentTextEvent
-	24, // 39: deputy.remediation.v1.AgentEvent.command:type_name -> deputy.remediation.v1.AgentCommandEvent
-	25, // 40: deputy.remediation.v1.AgentEvent.file:type_name -> deputy.remediation.v1.AgentFileEvent
-	26, // 41: deputy.remediation.v1.AgentEvent.status:type_name -> deputy.remediation.v1.AgentStatusEvent
-	27, // 42: deputy.remediation.v1.AgentEvent.approval:type_name -> deputy.remediation.v1.AgentApprovalEvent
-	28, // 43: deputy.remediation.v1.AgentEvent.error:type_name -> deputy.remediation.v1.AgentErrorEvent
-	29, // 44: deputy.remediation.v1.AgentEvent.summary:type_name -> deputy.remediation.v1.AgentSummaryEvent
-	30, // 45: deputy.remediation.v1.AgentEvent.tokens:type_name -> deputy.remediation.v1.AgentTokensEvent
-	45, // 46: deputy.remediation.v1.AgentCommandEvent.duration:type_name -> google.protobuf.Duration
-	1,  // 47: deputy.remediation.v1.AgentApprovalEvent.risk_level:type_name -> deputy.remediation.v1.RiskLevel
-	44, // 48: deputy.remediation.v1.AgentSummaryEvent.started_at:type_name -> google.protobuf.Timestamp
-	44, // 49: deputy.remediation.v1.AgentSummaryEvent.completed_at:type_name -> google.protobuf.Timestamp
-	45, // 50: deputy.remediation.v1.AgentSummaryEvent.total_duration:type_name -> google.protobuf.Duration
-	8,  // 51: deputy.remediation.v1.AgentSummaryEvent.final_plan:type_name -> deputy.remediation.v1.Plan
-	32, // 52: deputy.remediation.v1.ResumeAgentRequest.approval_response:type_name -> deputy.remediation.v1.AgentApprovalResponse
-	45, // 53: deputy.remediation.v1.ResumeAgentRequest.timeout:type_name -> google.protobuf.Duration
-	35, // 54: deputy.remediation.v1.ListAgentsResponse.agents:type_name -> deputy.remediation.v1.AgentInfo
-	36, // 55: deputy.remediation.v1.AgentInfo.capabilities:type_name -> deputy.remediation.v1.AgentCapabilities
-	5,  // 56: deputy.remediation.v1.RemediationService.GeneratePlan:input_type -> deputy.remediation.v1.GeneratePlanRequest
-	11, // 57: deputy.remediation.v1.RemediationService.ExecutePlan:input_type -> deputy.remediation.v1.ExecutePlanRequest
-	20, // 58: deputy.remediation.v1.RemediationService.ExecuteWithAgent:input_type -> deputy.remediation.v1.ExecuteWithAgentRequest
-	31, // 59: deputy.remediation.v1.RemediationService.ResumeAgent:input_type -> deputy.remediation.v1.ResumeAgentRequest
-	33, // 60: deputy.remediation.v1.RemediationService.ListAgents:input_type -> deputy.remediation.v1.ListAgentsRequest
-	37, // 61: deputy.remediation.v1.RemediationService.ApproveStep:input_type -> deputy.remediation.v1.ApproveStepRequest
-	7,  // 62: deputy.remediation.v1.RemediationService.GeneratePlan:output_type -> deputy.remediation.v1.GeneratePlanResponse
-	13, // 63: deputy.remediation.v1.RemediationService.ExecutePlan:output_type -> deputy.remediation.v1.ExecutionEvent
-	22, // 64: deputy.remediation.v1.RemediationService.ExecuteWithAgent:output_type -> deputy.remediation.v1.AgentEvent
-	22, // 65: deputy.remediation.v1.RemediationService.ResumeAgent:output_type -> deputy.remediation.v1.AgentEvent
-	34, // 66: deputy.remediation.v1.RemediationService.ListAgents:output_type -> deputy.remediation.v1.ListAgentsResponse
-	38, // 67: deputy.remediation.v1.RemediationService.ApproveStep:output_type -> deputy.remediation.v1.ApproveStepResponse
-	62, // [62:68] is the sub-list for method output_type
-	56, // [56:62] is the sub-list for method input_type
-	56, // [56:56] is the sub-list for extension type_name
-	56, // [56:56] is the sub-list for extension extendee
-	0,  // [0:56] is the sub-list for field type_name
+	41, // 0: deputy.remediation.v1.GeneratePlanRequest.scan_result:type_name -> deputy.scan.v1.ScanResponse
+	42, // 1: deputy.remediation.v1.GeneratePlanRequest.sbom_format:type_name -> deputy.sbom.v1.Format
+	7,  // 2: deputy.remediation.v1.GeneratePlanRequest.options:type_name -> deputy.remediation.v1.PlanOptions
+	43, // 3: deputy.remediation.v1.PlanOptions.severity_threshold:type_name -> deputy.vulnerability.v1.SeverityLevel
+	0,  // 4: deputy.remediation.v1.PlanOptions.guidance_profile:type_name -> deputy.remediation.v1.GuidanceProfile
+	9,  // 5: deputy.remediation.v1.GeneratePlanResponse.plan:type_name -> deputy.remediation.v1.Plan
+	44, // 6: deputy.remediation.v1.GeneratePlanResponse.target:type_name -> deputy.target.v1.Target
+	45, // 7: deputy.remediation.v1.GeneratePlanResponse.generated_at:type_name -> google.protobuf.Timestamp
+	11, // 8: deputy.remediation.v1.GeneratePlanResponse.stats:type_name -> deputy.remediation.v1.PlanStats
+	10, // 9: deputy.remediation.v1.Plan.steps:type_name -> deputy.remediation.v1.Step
+	44, // 10: deputy.remediation.v1.Plan.target:type_name -> deputy.target.v1.Target
+	45, // 11: deputy.remediation.v1.Plan.generated_at:type_name -> google.protobuf.Timestamp
+	40, // 12: deputy.remediation.v1.Plan.metadata:type_name -> deputy.remediation.v1.Plan.MetadataEntry
+	1,  // 13: deputy.remediation.v1.Step.kind:type_name -> deputy.remediation.v1.StepKind
+	2,  // 14: deputy.remediation.v1.Step.risk_level:type_name -> deputy.remediation.v1.RiskLevel
+	9,  // 15: deputy.remediation.v1.ExecutePlanRequest.plan:type_name -> deputy.remediation.v1.Plan
+	13, // 16: deputy.remediation.v1.ExecutePlanRequest.options:type_name -> deputy.remediation.v1.ExecutionOptions
+	3,  // 17: deputy.remediation.v1.ExecutionOptions.approval_mode:type_name -> deputy.remediation.v1.ApprovalMode
+	46, // 18: deputy.remediation.v1.ExecutionOptions.timeout:type_name -> google.protobuf.Duration
+	4,  // 19: deputy.remediation.v1.ExecutionEvent.phase:type_name -> deputy.remediation.v1.ExecutionPhase
+	45, // 20: deputy.remediation.v1.ExecutionEvent.timestamp:type_name -> google.protobuf.Timestamp
+	15, // 21: deputy.remediation.v1.ExecutionEvent.command_started:type_name -> deputy.remediation.v1.CommandStartedEvent
+	16, // 22: deputy.remediation.v1.ExecutionEvent.command_completed:type_name -> deputy.remediation.v1.CommandCompletedEvent
+	17, // 23: deputy.remediation.v1.ExecutionEvent.step_completed:type_name -> deputy.remediation.v1.StepCompletedEvent
+	18, // 24: deputy.remediation.v1.ExecutionEvent.approval_needed:type_name -> deputy.remediation.v1.ApprovalNeededEvent
+	19, // 25: deputy.remediation.v1.ExecutionEvent.error:type_name -> deputy.remediation.v1.ExecutionErrorEvent
+	20, // 26: deputy.remediation.v1.ExecutionEvent.summary:type_name -> deputy.remediation.v1.ExecutionSummaryEvent
+	46, // 27: deputy.remediation.v1.CommandCompletedEvent.duration:type_name -> google.protobuf.Duration
+	46, // 28: deputy.remediation.v1.StepCompletedEvent.duration:type_name -> google.protobuf.Duration
+	2,  // 29: deputy.remediation.v1.ApprovalNeededEvent.risk_level:type_name -> deputy.remediation.v1.RiskLevel
+	45, // 30: deputy.remediation.v1.ExecutionSummaryEvent.started_at:type_name -> google.protobuf.Timestamp
+	45, // 31: deputy.remediation.v1.ExecutionSummaryEvent.completed_at:type_name -> google.protobuf.Timestamp
+	46, // 32: deputy.remediation.v1.ExecutionSummaryEvent.total_duration:type_name -> google.protobuf.Duration
+	41, // 33: deputy.remediation.v1.ExecuteWithAgentRequest.scan_result:type_name -> deputy.scan.v1.ScanResponse
+	42, // 34: deputy.remediation.v1.ExecuteWithAgentRequest.sbom_format:type_name -> deputy.sbom.v1.Format
+	22, // 35: deputy.remediation.v1.ExecuteWithAgentRequest.options:type_name -> deputy.remediation.v1.AgentOptions
+	46, // 36: deputy.remediation.v1.AgentOptions.timeout:type_name -> google.protobuf.Duration
+	5,  // 37: deputy.remediation.v1.AgentEvent.phase:type_name -> deputy.remediation.v1.AgentPhase
+	45, // 38: deputy.remediation.v1.AgentEvent.timestamp:type_name -> google.protobuf.Timestamp
+	24, // 39: deputy.remediation.v1.AgentEvent.text:type_name -> deputy.remediation.v1.AgentTextEvent
+	25, // 40: deputy.remediation.v1.AgentEvent.command:type_name -> deputy.remediation.v1.AgentCommandEvent
+	26, // 41: deputy.remediation.v1.AgentEvent.file:type_name -> deputy.remediation.v1.AgentFileEvent
+	27, // 42: deputy.remediation.v1.AgentEvent.status:type_name -> deputy.remediation.v1.AgentStatusEvent
+	28, // 43: deputy.remediation.v1.AgentEvent.approval:type_name -> deputy.remediation.v1.AgentApprovalEvent
+	29, // 44: deputy.remediation.v1.AgentEvent.error:type_name -> deputy.remediation.v1.AgentErrorEvent
+	30, // 45: deputy.remediation.v1.AgentEvent.summary:type_name -> deputy.remediation.v1.AgentSummaryEvent
+	31, // 46: deputy.remediation.v1.AgentEvent.tokens:type_name -> deputy.remediation.v1.AgentTokensEvent
+	46, // 47: deputy.remediation.v1.AgentCommandEvent.duration:type_name -> google.protobuf.Duration
+	2,  // 48: deputy.remediation.v1.AgentApprovalEvent.risk_level:type_name -> deputy.remediation.v1.RiskLevel
+	45, // 49: deputy.remediation.v1.AgentSummaryEvent.started_at:type_name -> google.protobuf.Timestamp
+	45, // 50: deputy.remediation.v1.AgentSummaryEvent.completed_at:type_name -> google.protobuf.Timestamp
+	46, // 51: deputy.remediation.v1.AgentSummaryEvent.total_duration:type_name -> google.protobuf.Duration
+	9,  // 52: deputy.remediation.v1.AgentSummaryEvent.final_plan:type_name -> deputy.remediation.v1.Plan
+	33, // 53: deputy.remediation.v1.ResumeAgentRequest.approval_response:type_name -> deputy.remediation.v1.AgentApprovalResponse
+	46, // 54: deputy.remediation.v1.ResumeAgentRequest.timeout:type_name -> google.protobuf.Duration
+	36, // 55: deputy.remediation.v1.ListAgentsResponse.agents:type_name -> deputy.remediation.v1.AgentInfo
+	37, // 56: deputy.remediation.v1.AgentInfo.capabilities:type_name -> deputy.remediation.v1.AgentCapabilities
+	6,  // 57: deputy.remediation.v1.RemediationService.GeneratePlan:input_type -> deputy.remediation.v1.GeneratePlanRequest
+	12, // 58: deputy.remediation.v1.RemediationService.ExecutePlan:input_type -> deputy.remediation.v1.ExecutePlanRequest
+	21, // 59: deputy.remediation.v1.RemediationService.ExecuteWithAgent:input_type -> deputy.remediation.v1.ExecuteWithAgentRequest
+	32, // 60: deputy.remediation.v1.RemediationService.ResumeAgent:input_type -> deputy.remediation.v1.ResumeAgentRequest
+	34, // 61: deputy.remediation.v1.RemediationService.ListAgents:input_type -> deputy.remediation.v1.ListAgentsRequest
+	38, // 62: deputy.remediation.v1.RemediationService.ApproveStep:input_type -> deputy.remediation.v1.ApproveStepRequest
+	8,  // 63: deputy.remediation.v1.RemediationService.GeneratePlan:output_type -> deputy.remediation.v1.GeneratePlanResponse
+	14, // 64: deputy.remediation.v1.RemediationService.ExecutePlan:output_type -> deputy.remediation.v1.ExecutionEvent
+	23, // 65: deputy.remediation.v1.RemediationService.ExecuteWithAgent:output_type -> deputy.remediation.v1.AgentEvent
+	23, // 66: deputy.remediation.v1.RemediationService.ResumeAgent:output_type -> deputy.remediation.v1.AgentEvent
+	35, // 67: deputy.remediation.v1.RemediationService.ListAgents:output_type -> deputy.remediation.v1.ListAgentsResponse
+	39, // 68: deputy.remediation.v1.RemediationService.ApproveStep:output_type -> deputy.remediation.v1.ApproveStepResponse
+	63, // [63:69] is the sub-list for method output_type
+	57, // [57:63] is the sub-list for method input_type
+	57, // [57:57] is the sub-list for extension type_name
+	57, // [57:57] is the sub-list for extension extendee
+	0,  // [0:57] is the sub-list for field type_name
 }
 
 func init() { file_deputy_remediation_v1_service_proto_init() }
@@ -3994,7 +4156,7 @@ func file_deputy_remediation_v1_service_proto_init() {
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_deputy_remediation_v1_service_proto_rawDesc), len(file_deputy_remediation_v1_service_proto_rawDesc)),
-			NumEnums:      5,
+			NumEnums:      6,
 			NumMessages:   35,
 			NumExtensions: 0,
 			NumServices:   1,

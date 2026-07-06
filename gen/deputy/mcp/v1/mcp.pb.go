@@ -11,6 +11,7 @@ import (
 	v1 "github.com/temporalio/deputy/gen/deputy/dependency/v1"
 	v11 "github.com/temporalio/deputy/gen/deputy/graph/v1"
 	v12 "github.com/temporalio/deputy/gen/deputy/policy/v1"
+	v13 "github.com/temporalio/deputy/gen/deputy/remediation/v1"
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 	reflect "reflect"
@@ -3637,57 +3638,76 @@ func (x *GetRemediationRequest) GetExcludePaths() []string {
 	return nil
 }
 
-// RemediationCommand is one remediation action: an executable package-manager
-// command, or manual guidance when no safe command exists.
-type RemediationCommand struct {
+// RemediationStep is the agent-facing projection of a deputy.remediation.v1
+// plan step: kind and risk use the lowercase wire convention, and fields the
+// planner does not populate yet (dependsOn, requiresApproval) are omitted
+// until they carry signal.
+type RemediationStep struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
+	// Id uniquely identifies this step within the plan.
+	Id string `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	// Kind classifies the remediation. A version_upgrade with executable false
+	// is upgrade guidance that needs a manual change.
+	Kind string `protobuf:"bytes,2,opt,name=kind,proto3" json:"kind,omitempty"`
+	// Title is a short human-readable summary of the step.
+	Title string `protobuf:"bytes,3,opt,name=title,proto3" json:"title,omitempty"`
+	// Description explains what the step does.
+	Description string `protobuf:"bytes,4,opt,name=description,proto3" json:"description,omitempty"`
 	// Package is the affected package name.
-	Package string `protobuf:"bytes,1,opt,name=package,proto3" json:"package,omitempty"`
+	Package string `protobuf:"bytes,5,opt,name=package,proto3" json:"package,omitempty"`
+	// Purl is the affected package's package URL for exact follow-up with
+	// graph_why, graph_needs, or scan_package.
+	Purl string `protobuf:"bytes,6,opt,name=purl,proto3" json:"purl,omitempty"`
 	// Version is the currently installed version.
-	Version string `protobuf:"bytes,2,opt,name=version,proto3" json:"version,omitempty"`
-	// Purl is the package URL of the affected package.
-	Purl string `protobuf:"bytes,3,opt,name=purl,proto3" json:"purl,omitempty"`
+	Version string `protobuf:"bytes,7,opt,name=version,proto3" json:"version,omitempty"`
 	// TargetVersion is the version to upgrade or migrate to.
-	TargetVersion string `protobuf:"bytes,4,opt,name=target_version,json=targetVersion,proto3" json:"target_version,omitempty"`
+	TargetVersion string `protobuf:"bytes,8,opt,name=target_version,json=targetVersion,proto3" json:"target_version,omitempty"`
 	// TargetModule is the module path to migrate to when the fix lives on a
 	// different module path.
-	TargetModule string `protobuf:"bytes,5,opt,name=target_module,json=targetModule,proto3" json:"target_module,omitempty"`
+	TargetModule string `protobuf:"bytes,9,opt,name=target_module,json=targetModule,proto3" json:"target_module,omitempty"`
 	// Migration reports whether the fix moves to a different module path.
-	Migration bool `protobuf:"varint,6,opt,name=migration,proto3" json:"migration,omitempty"`
+	// Always present.
+	Migration *bool `protobuf:"varint,10,opt,name=migration,proto3,oneof" json:"migration,omitempty"`
 	// Manager is the package manager that runs the command.
-	Manager string `protobuf:"bytes,7,opt,name=manager,proto3" json:"manager,omitempty"`
-	// Command is the command line to run.
-	Command string `protobuf:"bytes,8,opt,name=command,proto3" json:"command,omitempty"`
-	// Path is the manifest path the command applies to.
-	Path string `protobuf:"bytes,9,opt,name=path,proto3" json:"path,omitempty"`
-	// Hint gives extra guidance for applying the command.
-	Hint string `protobuf:"bytes,10,opt,name=hint,proto3" json:"hint,omitempty"`
+	Manager string `protobuf:"bytes,11,opt,name=manager,proto3" json:"manager,omitempty"`
+	// ManifestPath is the manifest or lockfile path the step applies to.
+	ManifestPath string `protobuf:"bytes,12,opt,name=manifest_path,json=manifestPath,proto3" json:"manifest_path,omitempty"`
+	// Command is the command line to run, or the manual instruction to follow.
+	Command string `protobuf:"bytes,13,opt,name=command,proto3" json:"command,omitempty"`
+	// Hint gives extra guidance for applying the step.
+	Hint string `protobuf:"bytes,14,opt,name=hint,proto3" json:"hint,omitempty"`
 	// IsDirect reports whether the affected package is a direct dependency.
 	// Always present.
-	IsDirect *bool `protobuf:"varint,11,opt,name=is_direct,json=isDirect,proto3,oneof" json:"is_direct,omitempty"`
-	// Executable reports whether the command can be run as-is; manual commands
-	// are guidance only. Always present.
-	Executable *bool `protobuf:"varint,12,opt,name=executable,proto3,oneof" json:"executable,omitempty"`
+	IsDirect *bool `protobuf:"varint,15,opt,name=is_direct,json=isDirect,proto3,oneof" json:"is_direct,omitempty"`
+	// Executable reports whether the command can be run as-is; manual steps are
+	// guidance only. Always present.
+	Executable *bool `protobuf:"varint,16,opt,name=executable,proto3,oneof" json:"executable,omitempty"`
 	// Groups are the dependency groups the package belongs to.
-	Groups        []string `protobuf:"bytes,13,rep,name=groups,proto3" json:"groups,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	Groups []string `protobuf:"bytes,17,rep,name=groups,proto3" json:"groups,omitempty"`
+	// RiskLevel indicates the risk of applying this step.
+	RiskLevel string `protobuf:"bytes,18,opt,name=risk_level,json=riskLevel,proto3" json:"risk_level,omitempty"`
+	// AffectedVulnerabilities are the finding IDs this step remediates; one
+	// step can address several findings because steps are deduplicated per
+	// package and manifest.
+	AffectedVulnerabilities []string `protobuf:"bytes,19,rep,name=affected_vulnerabilities,json=affectedVulnerabilities,proto3" json:"affected_vulnerabilities,omitempty"`
+	unknownFields           protoimpl.UnknownFields
+	sizeCache               protoimpl.SizeCache
 }
 
-func (x *RemediationCommand) Reset() {
-	*x = RemediationCommand{}
+func (x *RemediationStep) Reset() {
+	*x = RemediationStep{}
 	mi := &file_deputy_mcp_v1_mcp_proto_msgTypes[36]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *RemediationCommand) String() string {
+func (x *RemediationStep) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*RemediationCommand) ProtoMessage() {}
+func (*RemediationStep) ProtoMessage() {}
 
-func (x *RemediationCommand) ProtoReflect() protoreflect.Message {
+func (x *RemediationStep) ProtoReflect() protoreflect.Message {
 	mi := &file_deputy_mcp_v1_mcp_proto_msgTypes[36]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -3699,106 +3719,146 @@ func (x *RemediationCommand) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use RemediationCommand.ProtoReflect.Descriptor instead.
-func (*RemediationCommand) Descriptor() ([]byte, []int) {
+// Deprecated: Use RemediationStep.ProtoReflect.Descriptor instead.
+func (*RemediationStep) Descriptor() ([]byte, []int) {
 	return file_deputy_mcp_v1_mcp_proto_rawDescGZIP(), []int{36}
 }
 
-func (x *RemediationCommand) GetPackage() string {
+func (x *RemediationStep) GetId() string {
+	if x != nil {
+		return x.Id
+	}
+	return ""
+}
+
+func (x *RemediationStep) GetKind() string {
+	if x != nil {
+		return x.Kind
+	}
+	return ""
+}
+
+func (x *RemediationStep) GetTitle() string {
+	if x != nil {
+		return x.Title
+	}
+	return ""
+}
+
+func (x *RemediationStep) GetDescription() string {
+	if x != nil {
+		return x.Description
+	}
+	return ""
+}
+
+func (x *RemediationStep) GetPackage() string {
 	if x != nil {
 		return x.Package
 	}
 	return ""
 }
 
-func (x *RemediationCommand) GetVersion() string {
-	if x != nil {
-		return x.Version
-	}
-	return ""
-}
-
-func (x *RemediationCommand) GetPurl() string {
+func (x *RemediationStep) GetPurl() string {
 	if x != nil {
 		return x.Purl
 	}
 	return ""
 }
 
-func (x *RemediationCommand) GetTargetVersion() string {
+func (x *RemediationStep) GetVersion() string {
+	if x != nil {
+		return x.Version
+	}
+	return ""
+}
+
+func (x *RemediationStep) GetTargetVersion() string {
 	if x != nil {
 		return x.TargetVersion
 	}
 	return ""
 }
 
-func (x *RemediationCommand) GetTargetModule() string {
+func (x *RemediationStep) GetTargetModule() string {
 	if x != nil {
 		return x.TargetModule
 	}
 	return ""
 }
 
-func (x *RemediationCommand) GetMigration() bool {
-	if x != nil {
-		return x.Migration
+func (x *RemediationStep) GetMigration() bool {
+	if x != nil && x.Migration != nil {
+		return *x.Migration
 	}
 	return false
 }
 
-func (x *RemediationCommand) GetManager() string {
+func (x *RemediationStep) GetManager() string {
 	if x != nil {
 		return x.Manager
 	}
 	return ""
 }
 
-func (x *RemediationCommand) GetCommand() string {
+func (x *RemediationStep) GetManifestPath() string {
+	if x != nil {
+		return x.ManifestPath
+	}
+	return ""
+}
+
+func (x *RemediationStep) GetCommand() string {
 	if x != nil {
 		return x.Command
 	}
 	return ""
 }
 
-func (x *RemediationCommand) GetPath() string {
-	if x != nil {
-		return x.Path
-	}
-	return ""
-}
-
-func (x *RemediationCommand) GetHint() string {
+func (x *RemediationStep) GetHint() string {
 	if x != nil {
 		return x.Hint
 	}
 	return ""
 }
 
-func (x *RemediationCommand) GetIsDirect() bool {
+func (x *RemediationStep) GetIsDirect() bool {
 	if x != nil && x.IsDirect != nil {
 		return *x.IsDirect
 	}
 	return false
 }
 
-func (x *RemediationCommand) GetExecutable() bool {
+func (x *RemediationStep) GetExecutable() bool {
 	if x != nil && x.Executable != nil {
 		return *x.Executable
 	}
 	return false
 }
 
-func (x *RemediationCommand) GetGroups() []string {
+func (x *RemediationStep) GetGroups() []string {
 	if x != nil {
 		return x.Groups
 	}
 	return nil
 }
 
-// GetRemediationResult summarizes how a directory's findings can be fixed.
-// This formalizes the tool's established command-list shape; promoting the
-// MCP surface to the richer deputy.remediation.v1 plan model is a separate
-// behavior decision, deliberately not bundled into the contract migration.
+func (x *RemediationStep) GetRiskLevel() string {
+	if x != nil {
+		return x.RiskLevel
+	}
+	return ""
+}
+
+func (x *RemediationStep) GetAffectedVulnerabilities() []string {
+	if x != nil {
+		return x.AffectedVulnerabilities
+	}
+	return nil
+}
+
+// GetRemediationResult is the agent-facing projection of a
+// deputy.remediation.v1 remediation plan for a directory's findings.
 type GetRemediationResult struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Path is the analyzed directory.
@@ -3809,27 +3869,24 @@ type GetRemediationResult struct {
 	EffectiveRef string `protobuf:"bytes,3,opt,name=effective_ref,json=effectiveRef,proto3" json:"effective_ref,omitempty"`
 	// Commit is the resolved commit hash of the analyzed snapshot.
 	Commit string `protobuf:"bytes,4,opt,name=commit,proto3" json:"commit,omitempty"`
-	// VulnerabilitiesFound is the number of unique findings.
-	VulnerabilitiesFound int32 `protobuf:"varint,5,opt,name=vulnerabilities_found,json=vulnerabilitiesFound,proto3" json:"vulnerabilities_found,omitempty"`
-	// RemediableCount counts findings with an actionable fix.
-	RemediableCount int32 `protobuf:"varint,6,opt,name=remediable_count,json=remediableCount,proto3" json:"remediable_count,omitempty"`
-	// MigrationCount counts findings whose fix is a module migration.
-	MigrationCount int32 `protobuf:"varint,7,opt,name=migration_count,json=migrationCount,proto3" json:"migration_count,omitempty"`
-	// UnfixableCount counts findings with no known fix.
-	UnfixableCount int32 `protobuf:"varint,8,opt,name=unfixable_count,json=unfixableCount,proto3" json:"unfixable_count,omitempty"`
-	// CommandCount is the number of remediation commands returned.
-	CommandCount int32 `protobuf:"varint,9,opt,name=command_count,json=commandCount,proto3" json:"command_count,omitempty"`
-	// ExecutableCommandCount counts commands that can be run as-is.
-	ExecutableCommandCount int32 `protobuf:"varint,10,opt,name=executable_command_count,json=executableCommandCount,proto3" json:"executable_command_count,omitempty"`
-	// ManualCommandCount counts commands that are guidance only.
-	ManualCommandCount int32 `protobuf:"varint,11,opt,name=manual_command_count,json=manualCommandCount,proto3" json:"manual_command_count,omitempty"`
-	// Commands are the remediation actions, one per fixable package.
-	Commands []*RemediationCommand `protobuf:"bytes,12,rep,name=commands,proto3" json:"commands,omitempty"`
+	// PlanId identifies the generated plan.
+	PlanId string `protobuf:"bytes,5,opt,name=plan_id,json=planId,proto3" json:"plan_id,omitempty"`
+	// GeneratedAt is when the plan was created (RFC 3339).
+	GeneratedAt string `protobuf:"bytes,6,opt,name=generated_at,json=generatedAt,proto3" json:"generated_at,omitempty"`
+	// VulnerabilitiesFound is the number of unique findings in the scan.
+	VulnerabilitiesFound int32 `protobuf:"varint,7,opt,name=vulnerabilities_found,json=vulnerabilitiesFound,proto3" json:"vulnerabilities_found,omitempty"`
+	// Stats summarizes the plan: step counts by actionability and risk,
+	// migration steps, and how many findings the plan addresses versus leaves
+	// unaddressed.
+	Stats *v13.PlanStats `protobuf:"bytes,8,opt,name=stats,proto3" json:"stats,omitempty"`
+	// Steps are the remediation actions, most actionable ecosystems first.
+	Steps []*RemediationStep `protobuf:"bytes,9,rep,name=steps,proto3" json:"steps,omitempty"`
 	// StdlibUpgrade recommends a Go toolchain upgrade when stdlib findings are
 	// present.
-	StdlibUpgrade string `protobuf:"bytes,13,opt,name=stdlib_upgrade,json=stdlibUpgrade,proto3" json:"stdlib_upgrade,omitempty"`
-	// UnfixableVulnerabilities lists the IDs of findings with no known fix.
-	UnfixableVulnerabilities []string `protobuf:"bytes,14,rep,name=unfixable_vulnerabilities,json=unfixableVulnerabilities,proto3" json:"unfixable_vulnerabilities,omitempty"`
+	StdlibUpgrade string `protobuf:"bytes,10,opt,name=stdlib_upgrade,json=stdlibUpgrade,proto3" json:"stdlib_upgrade,omitempty"`
+	// UnfixableVulnerabilities lists the finding IDs with no known remediation.
+	// Unfixable means still vulnerable, not safe.
+	UnfixableVulnerabilities []string `protobuf:"bytes,11,rep,name=unfixable_vulnerabilities,json=unfixableVulnerabilities,proto3" json:"unfixable_vulnerabilities,omitempty"`
 	unknownFields            protoimpl.UnknownFields
 	sizeCache                protoimpl.SizeCache
 }
@@ -3892,6 +3949,20 @@ func (x *GetRemediationResult) GetCommit() string {
 	return ""
 }
 
+func (x *GetRemediationResult) GetPlanId() string {
+	if x != nil {
+		return x.PlanId
+	}
+	return ""
+}
+
+func (x *GetRemediationResult) GetGeneratedAt() string {
+	if x != nil {
+		return x.GeneratedAt
+	}
+	return ""
+}
+
 func (x *GetRemediationResult) GetVulnerabilitiesFound() int32 {
 	if x != nil {
 		return x.VulnerabilitiesFound
@@ -3899,51 +3970,16 @@ func (x *GetRemediationResult) GetVulnerabilitiesFound() int32 {
 	return 0
 }
 
-func (x *GetRemediationResult) GetRemediableCount() int32 {
+func (x *GetRemediationResult) GetStats() *v13.PlanStats {
 	if x != nil {
-		return x.RemediableCount
+		return x.Stats
 	}
-	return 0
+	return nil
 }
 
-func (x *GetRemediationResult) GetMigrationCount() int32 {
+func (x *GetRemediationResult) GetSteps() []*RemediationStep {
 	if x != nil {
-		return x.MigrationCount
-	}
-	return 0
-}
-
-func (x *GetRemediationResult) GetUnfixableCount() int32 {
-	if x != nil {
-		return x.UnfixableCount
-	}
-	return 0
-}
-
-func (x *GetRemediationResult) GetCommandCount() int32 {
-	if x != nil {
-		return x.CommandCount
-	}
-	return 0
-}
-
-func (x *GetRemediationResult) GetExecutableCommandCount() int32 {
-	if x != nil {
-		return x.ExecutableCommandCount
-	}
-	return 0
-}
-
-func (x *GetRemediationResult) GetManualCommandCount() int32 {
-	if x != nil {
-		return x.ManualCommandCount
-	}
-	return 0
-}
-
-func (x *GetRemediationResult) GetCommands() []*RemediationCommand {
-	if x != nil {
-		return x.Commands
+		return x.Steps
 	}
 	return nil
 }
@@ -4607,7 +4643,7 @@ var File_deputy_mcp_v1_mcp_proto protoreflect.FileDescriptor
 
 const file_deputy_mcp_v1_mcp_proto_rawDesc = "" +
 	"\n" +
-	"\x17deputy/mcp/v1/mcp.proto\x12\rdeputy.mcp.v1\x1a\x1bbuf/validate/validate.proto\x1a%deputy/dependency/v1/dependency.proto\x1a\x1ddeputy/graph/v1/service.proto\x1a\x1edeputy/policy/v1/service.proto\"\x8b\x05\n" +
+	"\x17deputy/mcp/v1/mcp.proto\x12\rdeputy.mcp.v1\x1a\x1bbuf/validate/validate.proto\x1a%deputy/dependency/v1/dependency.proto\x1a\x1ddeputy/graph/v1/service.proto\x1a\x1edeputy/policy/v1/service.proto\x1a#deputy/remediation/v1/service.proto\"\x8b\x05\n" +
 	"\x0fVulnExplanation\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x18\n" +
 	"\aaliases\x18\x02 \x03(\tR\aaliases\x12\x18\n" +
@@ -4973,43 +5009,49 @@ const file_deputy_mcp_v1_mcp_proto_rawDesc = "" +
 	"\"\br\x06\x10\x012\x02\\SR\n" +
 	"ecosystems\x125\n" +
 	"\rexclude_paths\x18\x04 \x03(\tB\x10\xbaH\r\x92\x01\n" +
-	"\"\br\x06\x10\x012\x02\\SR\fexcludePaths\"\x9e\x03\n" +
-	"\x12RemediationCommand\x12\x18\n" +
-	"\apackage\x18\x01 \x01(\tR\apackage\x12\x18\n" +
-	"\aversion\x18\x02 \x01(\tR\aversion\x12\x12\n" +
-	"\x04purl\x18\x03 \x01(\tR\x04purl\x12%\n" +
-	"\x0etarget_version\x18\x04 \x01(\tR\rtargetVersion\x12#\n" +
-	"\rtarget_module\x18\x05 \x01(\tR\ftargetModule\x12\x1c\n" +
-	"\tmigration\x18\x06 \x01(\bR\tmigration\x12\x18\n" +
-	"\amanager\x18\a \x01(\tR\amanager\x12\x18\n" +
-	"\acommand\x18\b \x01(\tR\acommand\x12\x12\n" +
-	"\x04path\x18\t \x01(\tR\x04path\x12\x12\n" +
-	"\x04hint\x18\n" +
-	" \x01(\tR\x04hint\x12 \n" +
-	"\tis_direct\x18\v \x01(\bH\x00R\bisDirect\x88\x01\x01\x12#\n" +
+	"\"\br\x06\x10\x012\x02\\SR\fexcludePaths\"\x9e\x06\n" +
+	"\x0fRemediationStep\x12\x0e\n" +
+	"\x02id\x18\x01 \x01(\tR\x02id\x12\x93\x01\n" +
+	"\x04kind\x18\x02 \x01(\tB\x7f\xbaH|\xd8\x01\x01rwR\x0fversion_upgradeR\tfile_editR\rshell_commandR\x11dockerfile_updateR\raction_updateR\rconfig_changeR\fcustom_agentR\vunspecifiedR\x04kind\x12\x14\n" +
+	"\x05title\x18\x03 \x01(\tR\x05title\x12 \n" +
+	"\vdescription\x18\x04 \x01(\tR\vdescription\x12\x18\n" +
+	"\apackage\x18\x05 \x01(\tR\apackage\x12\x12\n" +
+	"\x04purl\x18\x06 \x01(\tR\x04purl\x12\x18\n" +
+	"\aversion\x18\a \x01(\tR\aversion\x12%\n" +
+	"\x0etarget_version\x18\b \x01(\tR\rtargetVersion\x12#\n" +
+	"\rtarget_module\x18\t \x01(\tR\ftargetModule\x12!\n" +
+	"\tmigration\x18\n" +
+	" \x01(\bH\x00R\tmigration\x88\x01\x01\x12\x18\n" +
+	"\amanager\x18\v \x01(\tR\amanager\x12#\n" +
+	"\rmanifest_path\x18\f \x01(\tR\fmanifestPath\x12\x18\n" +
+	"\acommand\x18\r \x01(\tR\acommand\x12\x12\n" +
+	"\x04hint\x18\x0e \x01(\tR\x04hint\x12 \n" +
+	"\tis_direct\x18\x0f \x01(\bH\x01R\bisDirect\x88\x01\x01\x12#\n" +
 	"\n" +
-	"executable\x18\f \x01(\bH\x01R\n" +
+	"executable\x18\x10 \x01(\bH\x02R\n" +
 	"executable\x88\x01\x01\x12\x16\n" +
-	"\x06groups\x18\r \x03(\tR\x06groupsB\f\n" +
+	"\x06groups\x18\x11 \x03(\tR\x06groups\x12D\n" +
+	"\n" +
+	"risk_level\x18\x12 \x01(\tB%\xbaH\"\xd8\x01\x01r\x1dR\x03lowR\x06mediumR\x04highR\bcriticalR\triskLevel\x129\n" +
+	"\x18affected_vulnerabilities\x18\x13 \x03(\tR\x17affectedVulnerabilitiesB\f\n" +
+	"\n" +
+	"_migrationB\f\n" +
 	"\n" +
 	"_is_directB\r\n" +
-	"\v_executable\"\xdf\x04\n" +
+	"\v_executable\"\xbc\x03\n" +
 	"\x14GetRemediationResult\x12\x12\n" +
 	"\x04path\x18\x01 \x01(\tR\x04path\x12\x10\n" +
 	"\x03ref\x18\x02 \x01(\tR\x03ref\x12#\n" +
 	"\reffective_ref\x18\x03 \x01(\tR\feffectiveRef\x12\x16\n" +
-	"\x06commit\x18\x04 \x01(\tR\x06commit\x123\n" +
-	"\x15vulnerabilities_found\x18\x05 \x01(\x05R\x14vulnerabilitiesFound\x12)\n" +
-	"\x10remediable_count\x18\x06 \x01(\x05R\x0fremediableCount\x12'\n" +
-	"\x0fmigration_count\x18\a \x01(\x05R\x0emigrationCount\x12'\n" +
-	"\x0funfixable_count\x18\b \x01(\x05R\x0eunfixableCount\x12#\n" +
-	"\rcommand_count\x18\t \x01(\x05R\fcommandCount\x128\n" +
-	"\x18executable_command_count\x18\n" +
-	" \x01(\x05R\x16executableCommandCount\x120\n" +
-	"\x14manual_command_count\x18\v \x01(\x05R\x12manualCommandCount\x12=\n" +
-	"\bcommands\x18\f \x03(\v2!.deputy.mcp.v1.RemediationCommandR\bcommands\x12%\n" +
-	"\x0estdlib_upgrade\x18\r \x01(\tR\rstdlibUpgrade\x12;\n" +
-	"\x19unfixable_vulnerabilities\x18\x0e \x03(\tR\x18unfixableVulnerabilities\"\x84\x02\n" +
+	"\x06commit\x18\x04 \x01(\tR\x06commit\x12\x17\n" +
+	"\aplan_id\x18\x05 \x01(\tR\x06planId\x12!\n" +
+	"\fgenerated_at\x18\x06 \x01(\tR\vgeneratedAt\x123\n" +
+	"\x15vulnerabilities_found\x18\a \x01(\x05R\x14vulnerabilitiesFound\x126\n" +
+	"\x05stats\x18\b \x01(\v2 .deputy.remediation.v1.PlanStatsR\x05stats\x124\n" +
+	"\x05steps\x18\t \x03(\v2\x1e.deputy.mcp.v1.RemediationStepR\x05steps\x12%\n" +
+	"\x0estdlib_upgrade\x18\n" +
+	" \x01(\tR\rstdlibUpgrade\x12;\n" +
+	"\x19unfixable_vulnerabilities\x18\v \x03(\tR\x18unfixableVulnerabilities\"\x84\x02\n" +
 	"\x0fDiffRefsRequest\x12\x12\n" +
 	"\x04path\x18\x01 \x01(\tR\x04path\x12)\n" +
 	"\bbase_ref\x18\x02 \x01(\tB\x0e\xbaH\v\xc8\x01\x01r\x06\x10\x012\x02\\SR\abaseRef\x12-\n" +
@@ -5136,7 +5178,7 @@ var file_deputy_mcp_v1_mcp_proto_goTypes = []any{
 	(*ListPolicyEntrypointsRequest)(nil),  // 33: deputy.mcp.v1.ListPolicyEntrypointsRequest
 	(*ListPolicyEntrypointsResult)(nil),   // 34: deputy.mcp.v1.ListPolicyEntrypointsResult
 	(*GetRemediationRequest)(nil),         // 35: deputy.mcp.v1.GetRemediationRequest
-	(*RemediationCommand)(nil),            // 36: deputy.mcp.v1.RemediationCommand
+	(*RemediationStep)(nil),               // 36: deputy.mcp.v1.RemediationStep
 	(*GetRemediationResult)(nil),          // 37: deputy.mcp.v1.GetRemediationResult
 	(*DiffRefsRequest)(nil),               // 38: deputy.mcp.v1.DiffRefsRequest
 	(*DependencyChange)(nil),              // 39: deputy.mcp.v1.DependencyChange
@@ -5149,6 +5191,7 @@ var file_deputy_mcp_v1_mcp_proto_goTypes = []any{
 	(*v1.ManifestRef)(nil),                // 46: deputy.dependency.v1.ManifestRef
 	(*v11.GraphStats)(nil),                // 47: deputy.graph.v1.GraphStats
 	(*v12.EntrypointInfo)(nil),            // 48: deputy.policy.v1.EntrypointInfo
+	(*v13.PlanStats)(nil),                 // 49: deputy.remediation.v1.PlanStats
 }
 var file_deputy_mcp_v1_mcp_proto_depIdxs = []int32{
 	1,  // 0: deputy.mcp.v1.VulnExplanation.package_fixes:type_name -> deputy.mcp.v1.PackageFix
@@ -5179,17 +5222,18 @@ var file_deputy_mcp_v1_mcp_proto_depIdxs = []int32{
 	0,  // 25: deputy.mcp.v1.ExplainVulnerabilitiesResult.vulnerabilities:type_name -> deputy.mcp.v1.VulnExplanation
 	0,  // 26: deputy.mcp.v1.ScanPackageResult.vulnerabilities:type_name -> deputy.mcp.v1.VulnExplanation
 	48, // 27: deputy.mcp.v1.ListPolicyEntrypointsResult.entrypoints:type_name -> deputy.policy.v1.EntrypointInfo
-	36, // 28: deputy.mcp.v1.GetRemediationResult.commands:type_name -> deputy.mcp.v1.RemediationCommand
-	39, // 29: deputy.mcp.v1.DiffRefsResult.changes:type_name -> deputy.mcp.v1.DependencyChange
-	0,  // 30: deputy.mcp.v1.DiffRefsResult.vulnerabilities:type_name -> deputy.mcp.v1.VulnExplanation
-	45, // 31: deputy.mcp.v1.DiffRefsResult.vulnerability_summary:type_name -> deputy.mcp.v1.DiffRefsResult.VulnerabilitySummaryEntry
-	40, // 32: deputy.mcp.v1.DiffRefsResult.vulnerability_changes:type_name -> deputy.mcp.v1.DiffVulnChange
-	41, // 33: deputy.mcp.v1.DiffRefsResult.container_summary:type_name -> deputy.mcp.v1.ContainerSummary
-	34, // [34:34] is the sub-list for method output_type
-	34, // [34:34] is the sub-list for method input_type
-	34, // [34:34] is the sub-list for extension type_name
-	34, // [34:34] is the sub-list for extension extendee
-	0,  // [0:34] is the sub-list for field type_name
+	49, // 28: deputy.mcp.v1.GetRemediationResult.stats:type_name -> deputy.remediation.v1.PlanStats
+	36, // 29: deputy.mcp.v1.GetRemediationResult.steps:type_name -> deputy.mcp.v1.RemediationStep
+	39, // 30: deputy.mcp.v1.DiffRefsResult.changes:type_name -> deputy.mcp.v1.DependencyChange
+	0,  // 31: deputy.mcp.v1.DiffRefsResult.vulnerabilities:type_name -> deputy.mcp.v1.VulnExplanation
+	45, // 32: deputy.mcp.v1.DiffRefsResult.vulnerability_summary:type_name -> deputy.mcp.v1.DiffRefsResult.VulnerabilitySummaryEntry
+	40, // 33: deputy.mcp.v1.DiffRefsResult.vulnerability_changes:type_name -> deputy.mcp.v1.DiffVulnChange
+	41, // 34: deputy.mcp.v1.DiffRefsResult.container_summary:type_name -> deputy.mcp.v1.ContainerSummary
+	35, // [35:35] is the sub-list for method output_type
+	35, // [35:35] is the sub-list for method input_type
+	35, // [35:35] is the sub-list for extension type_name
+	35, // [35:35] is the sub-list for extension extendee
+	0,  // [0:35] is the sub-list for field type_name
 }
 
 func init() { file_deputy_mcp_v1_mcp_proto_init() }
