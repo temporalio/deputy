@@ -22,8 +22,10 @@ import (
 // are proto messages marshaled with the MCP protojson dialect and returned as
 // json.RawMessage (the SDK embeds them in structuredContent verbatim and
 // validates them against the descriptor-derived output schema), and inputs are
-// unmarshaled from the raw arguments into the request protos. Absent fields
-// mean empty/zero because the protojson dialect omits zero values.
+// unmarshaled from the raw arguments into the request protos. The protojson
+// dialect omits zero values of plain fields (absent means empty or not
+// applicable); affirmative answers use proto3 optional and are always set,
+// so they are always on the wire.
 
 // marshalMCPResult marshals an mcp.v1 result with the canonical MCP dialect.
 func marshalMCPResult(m proto.Message) (json.RawMessage, error) {

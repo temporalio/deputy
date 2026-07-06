@@ -31,9 +31,11 @@ Every tool's input and output contract is defined in proto
 ([`deputy.mcp.v1`](../../api/deputy/mcp/v1/mcp.proto)): the advertised JSON
 Schemas are derived from the proto descriptors, requests are validated against
 the same rules the schemas advertise, and every result is validated against
-its output schema before it is returned. Results omit zero values: an absent
-field means empty, zero, or false (for example, no `vulnerabilities` key means
-none were found, and an absent `found` means not found).
+its output schema before it is returned. Results omit zero values of plain
+fields, so an absent field means empty, none, or not applicable (no
+`vulnerabilities` key means none were found). Affirmative answers (`clean`,
+`found`, `direct`, `hasFix`, `executable`, `depth`, `isContainerDiff`) are
+always present, even when false or zero.
 
 ```mermaid
 flowchart LR
@@ -467,6 +469,7 @@ direct dependencies, fixable findings, and stable package/ID tie-breakers.
   "version": "v0.17.0",
   "ecosystem": "go",
   "purl": "pkg:golang/golang.org/x/net@v0.17.0",
+  "clean": false,
   "vulnerabilities": [
     {
       "id": "CVE-2024-1234",
@@ -535,6 +538,7 @@ When a tool scans a Git repository snapshot, results echo `ref`,
   "effectiveRef": "HEAD~0",
   "commit": "abc123def456",
   "packagesScanned": 142,
+  "clean": false,
   "vulnerabilitiesBySeverity": {
     "critical": 1,
     "high": 3,
@@ -812,6 +816,7 @@ broader module graph.
         "version": "4.17.21",
         "ecosystem": "npm",
         "purl": "pkg:npm/lodash@4.17.21",
+        "direct": false,
         "depth": 2
       }
     ],
@@ -826,13 +831,15 @@ broader module graph.
           "version": "4.18.2",
           "ecosystem": "npm",
           "purl": "pkg:npm/express@4.18.2",
-          "direct": true
+          "direct": true,
+          "depth": 0
         },
         {
           "name": "body-parser",
           "version": "1.20.2",
           "ecosystem": "npm",
           "purl": "pkg:npm/body-parser@1.20.2",
+          "direct": false,
           "depth": 1
         },
         {
@@ -840,6 +847,7 @@ broader module graph.
           "version": "4.17.21",
           "ecosystem": "npm",
           "purl": "pkg:npm/lodash@4.17.21",
+          "direct": false,
           "depth": 2
         }
       ],
@@ -862,9 +870,9 @@ is complete. `pathsToTarget` is capped at 20 returned examples; use
 `target.pathCount` and `pathsToTargetTruncated` for the full target-path count.
 When `targetPurl` is provided, the `target` object reports whether the package
 identity was found and how many paths were resolved. A missing `pathsToTarget`
-with `target.found` absent (false) means the package was absent from the
-graph; a missing `pathsToTarget` with `target.found=true` means the package
-was present but no path from a direct/root dependency was resolved. In that case, inspect
+with `target.found=false` means the package was absent from the graph; a
+missing `pathsToTarget` with `target.found=true` means the package was
+present but no path from a direct/root dependency was resolved. In that case, inspect
 `target.matchedNodes[]` for exact PURL, graph depth, disconnected status, and
 extended-mode import status.
 
@@ -894,11 +902,13 @@ share a short name.
 {
   "package": "lodash",
   "found": true,
+  "direct": false,
   "matchedNode": {
     "name": "lodash",
     "version": "4.17.21",
     "ecosystem": "npm",
     "purl": "pkg:npm/lodash@4.17.21",
+    "direct": false,
     "depth": 2
   },
   "paths": [
@@ -910,13 +920,15 @@ share a short name.
           "version": "4.18.2",
           "ecosystem": "npm",
           "purl": "pkg:npm/express@4.18.2",
-          "direct": true
+          "direct": true,
+          "depth": 0
         },
         {
           "name": "body-parser",
           "version": "1.20.2",
           "ecosystem": "npm",
           "purl": "pkg:npm/body-parser@1.20.2",
+          "direct": false,
           "depth": 1
         },
         {
@@ -924,6 +936,7 @@ share a short name.
           "version": "4.17.21",
           "ecosystem": "npm",
           "purl": "pkg:npm/lodash@4.17.21",
+          "direct": false,
           "depth": 2
         }
       ],
@@ -970,12 +983,14 @@ Find packages that depend on a given package (reverse lookup).
 {
   "package": "lodash",
   "found": true,
+  "direct": false,
   "dependents": [
     {
       "name": "body-parser",
       "version": "1.20.2",
       "ecosystem": "npm",
-      "purl": "pkg:npm/body-parser@1.20.2"
+      "purl": "pkg:npm/body-parser@1.20.2",
+      "direct": false
     },
     {
       "name": "express",

@@ -43,6 +43,7 @@ import (
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
 	"golang.org/x/mod/semver"
+	"google.golang.org/protobuf/proto"
 )
 
 // ToolTimeouts configures timeouts for different categories of tool operations.
@@ -139,7 +140,7 @@ const serverInstructions = "Deputy is a supply-chain security engine. Its tools 
 	"- Severity totals include an `unknown` bucket, so per-severity counts always sum to the total.\n" +
 	"- List-like outputs are capped and set a `*Truncated` flag alongside a full count (e.g. `pathCount` with `pathsTruncated`); check them before assuming a result is complete. Ordering is deterministic across calls.\n" +
 	"- A clean target reports `clean: true`; this is success, not an error.\n" +
-	"- Absent fields mean empty or zero: results omit empty lists, zero counts, and false booleans (no `vulnerabilities` key = none found; no `kind` = ordinary vulnerability).\n" +
+	"- Absent fields mean empty, zero, or not applicable: results omit empty lists, zero counts, and optional attributes (no `vulnerabilities` key = none found; no `kind` = ordinary vulnerability). Affirmative answers (`clean`, `found`, `direct`, `hasFix`, `executable`, `depth`, `isContainerDiff`) are always present.\n" +
 	"- A package absent from the graph is a normal `found: false` result (with a `matchedNode` when the package is present but has no paths), not an error.\n" +
 	"- Scan results include a `coverage` block: `covered` lists (ecosystem, artifact) combinations an advisory source answered for, `uncovered` lists those none could (e.g. container base images). Uncovered means not-checked, not safe. Findings carry `sources` (provenance, e.g. `[\"osv\"]`) and `kind` (`malware` vs vulnerability).\n" +
 	"\n" +
@@ -1420,7 +1421,7 @@ func (s *Server) scanPackage(ctx context.Context, req *mcp.CallToolRequest, raw 
 		result.Vulnerabilities = append(result.Vulnerabilities, vulnExplanationProto(vuln, vulnExplanationOptions{referenceLimit: compactVulnReferenceLimit}))
 	}
 
-	result.Clean = len(result.Vulnerabilities) == 0
+	result.Clean = proto.Bool(len(result.Vulnerabilities) == 0)
 
 	span.SetAttributes(otel.AttrMCPVulnerabilityCount.Int(len(result.Vulnerabilities)))
 	otel.SetSpanOK(span)
@@ -1505,7 +1506,7 @@ func (s *Server) scanDirectory(ctx context.Context, req *mcp.CallToolRequest, ra
 			"low":      consolidated.Stats.GetLow(),
 			"unknown":  consolidated.Stats.GetUnknown(),
 		},
-		Clean:      consolidated.Stats.GetUnique() == 0,
+		Clean:      proto.Bool(consolidated.Stats.GetUnique() == 0),
 		Coverage:   coverageProto(scanResult.GetCoverage()),
 		ScanTime:   time.Since(startTime).String(),
 		ScanTimeMs: int32(time.Since(startTime).Milliseconds()),
@@ -1600,7 +1601,7 @@ func (s *Server) listDependencies(ctx context.Context, req *mcp.CallToolRequest,
 			Name:         pkg.Name,
 			Version:      pkg.Version,
 			Ecosystem:    mcpOutputEcosystem(pkg.Ecosystem),
-			Direct:       pkg.Direct,
+			Direct:       proto.Bool(pkg.Direct),
 			Locations:    pkg.Locations,
 			Purl:         pkg.Purl,
 			ManifestRefs: manifestRefsProto(pkg.GetManifestRefs()),
@@ -1848,8 +1849,8 @@ func (s *Server) getRemediation(ctx context.Context, req *mcp.CallToolRequest, r
 			Command:       cmd.Command,
 			Path:          cmd.Path,
 			Hint:          cmd.Hint,
-			IsDirect:      cmd.IsDirect,
-			Executable:    cmd.Executable,
+			IsDirect:      proto.Bool(cmd.IsDirect),
+			Executable:    proto.Bool(cmd.Executable),
 			Groups:        cmd.Groups,
 		})
 	}
@@ -1964,7 +1965,7 @@ func (s *Server) analyzeDependencyGraph(ctx context.Context, req *mcp.CallToolRe
 		resolvedPURLs := resolveGraphTargetPURLs(depGraph, parsedTargetPURL)
 		result.Target = &mcpv1.GraphTargetResult{
 			Query:        targetPURL,
-			Found:        len(resolvedPURLs) > 0,
+			Found:        proto.Bool(len(resolvedPURLs) > 0),
 			MatchedPurls: append([]string{}, resolvedPURLs...),
 		}
 		for _, resolvedPURL := range resolvedPURLs {
@@ -2161,6 +2162,7 @@ func (s *Server) graphWhy(ctx context.Context, req *mcp.CallToolRequest, raw jso
 			Ref:          ref,
 			EffectiveRef: effectiveRef,
 			Commit:       commit,
+			Found:        proto.Bool(false),
 			Message:      fmt.Sprintf("Package %q not found in dependency graph", packageQuery),
 		})
 		if err != nil {
@@ -2179,8 +2181,8 @@ func (s *Server) graphWhy(ctx context.Context, req *mcp.CallToolRequest, raw jso
 		Ref:          ref,
 		EffectiveRef: effectiveRef,
 		Commit:       commit,
-		Direct:       match.Direct,
-		Found:        true,
+		Direct:       proto.Bool(match.Direct),
+		Found:        proto.Bool(true),
 		MatchedNode:  graphNodeProto(match),
 	}
 
@@ -2326,6 +2328,7 @@ func (s *Server) graphNeeds(ctx context.Context, req *mcp.CallToolRequest, raw j
 			Ref:          ref,
 			EffectiveRef: effectiveRef,
 			Commit:       commit,
+			Found:        proto.Bool(false),
 			Message:      fmt.Sprintf("Package %q not found in dependency graph", packageQuery),
 		})
 		if err != nil {
@@ -2342,8 +2345,8 @@ func (s *Server) graphNeeds(ctx context.Context, req *mcp.CallToolRequest, raw j
 		Ref:          ref,
 		EffectiveRef: effectiveRef,
 		Commit:       commit,
-		Direct:       match.Direct,
-		Found:        true,
+		Direct:       proto.Bool(match.Direct),
+		Found:        proto.Bool(true),
 		MatchedNode:  graphNodeProto(match),
 	}
 
@@ -2351,21 +2354,24 @@ func (s *Server) graphNeeds(ctx context.Context, req *mcp.CallToolRequest, raw j
 	// over the same parent index a direct Parents() call would use, so an empty
 	// result here means the node genuinely has no dependents (e.g. a root/direct
 	// dependency); NoDependentsMessage explains that case below.
+	var directCount, transitiveCount int32
 	for ancestor := range depGraph.Ancestors(match.Purl) {
 		result.Dependents = append(result.Dependents, &mcpv1.DependencyInfo{
 			Name:      ancestor.Name,
 			Version:   ancestor.Version,
 			Ecosystem: mcpOutputEcosystem(ancestor.Ecosystem),
 			Purl:      ancestor.Purl,
-			Direct:    ancestor.Direct,
+			Direct:    proto.Bool(ancestor.Direct),
 			Locations: ancestor.Locations,
 		})
 		if ancestor.Direct {
-			result.DirectCount++
+			directCount++
 		} else {
-			result.TransitiveCount++
+			transitiveCount++
 		}
 	}
+	result.DirectCount = proto.Int32(directCount)
+	result.TransitiveCount = proto.Int32(transitiveCount)
 
 	if len(result.Dependents) == 0 {
 		result.Message = graphquery.NoDependentsMessage(match, args.GetResolveTransitives())
@@ -2494,8 +2500,8 @@ func (s *Server) triageVulnerabilities(ctx context.Context, req *mcp.CallToolReq
 			Package:        v.Package,
 			Version:        v.Version,
 			Purl:           v.PURL,
-			IsDirect:       v.IsDirect,
-			HasFix:         hasFix,
+			IsDirect:       proto.Bool(v.IsDirect),
+			HasFix:         proto.Bool(hasFix),
 			FixedVersions:  stringsForMCP(v.FixedVersions),
 			PackageFixes:   packageFixesProto(v.PackageFixes),
 			ResolvedFix:    fixVerdictProto(v.Fix),
@@ -2668,7 +2674,7 @@ func (s *Server) scanContainer(ctx context.Context, req *mcp.CallToolRequest, ra
 			"low":      consolidated.Stats.GetLow(),
 			"unknown":  consolidated.Stats.GetUnknown(),
 		},
-		Clean:      consolidated.Stats.GetUnique() == 0,
+		Clean:      proto.Bool(consolidated.Stats.GetUnique() == 0),
 		Coverage:   coverageProto(scanResult.GetCoverage()),
 		ScanTime:   time.Since(startTime).String(),
 		ScanTimeMs: int32(time.Since(startTime).Milliseconds()),
@@ -2820,7 +2826,7 @@ func (s *Server) diffContainerImages(ctx context.Context, args *mcpv1.DiffRefsRe
 		BaseRef:         baseRef,
 		TargetRef:       targetRef,
 		Platform:        platform,
-		IsContainerDiff: true,
+		IsContainerDiff: proto.Bool(true),
 	}
 
 	// Build package maps for comparison
@@ -2845,7 +2851,7 @@ func (s *Server) diffContainerImages(ctx context.Context, args *mcpv1.DiffRefsRe
 				TargetVersion: targetPkg.Version,
 				Purl:          targetPkg.PURL,
 				ChangeType:    "added",
-				IsDirect:      targetPkg.Direct,
+				IsDirect:      proto.Bool(targetPkg.Direct),
 				Ecosystem:     targetPkg.Ecosystem,
 			})
 			result.AddedCount++
@@ -2862,7 +2868,7 @@ func (s *Server) diffContainerImages(ctx context.Context, args *mcpv1.DiffRefsRe
 				TargetVersion: targetPkg.Version,
 				Purl:          targetPkg.PURL,
 				ChangeType:    changeType,
-				IsDirect:      targetPkg.Direct,
+				IsDirect:      proto.Bool(targetPkg.Direct),
 				Ecosystem:     targetPkg.Ecosystem,
 			})
 			result.UpdatedCount++
@@ -2877,7 +2883,7 @@ func (s *Server) diffContainerImages(ctx context.Context, args *mcpv1.DiffRefsRe
 				BaseVersion: basePkg.Version,
 				Purl:        basePkg.PURL,
 				ChangeType:  "removed",
-				IsDirect:    basePkg.Direct,
+				IsDirect:    proto.Bool(basePkg.Direct),
 				Ecosystem:   basePkg.Ecosystem,
 			})
 			result.RemovedCount++
@@ -2947,11 +2953,12 @@ func (s *Server) diffGitRefs(ctx context.Context, args *mcpv1.DiffRefsRequest) (
 	targetScan := targetResp.Msg
 
 	result := &mcpv1.DiffRefsResult{
-		Path:         targetPath,
-		BaseRef:      baseRef,
-		TargetRef:    targetRef,
-		BaseCommit:   strings.TrimSpace(baseScan.GetTarget().GetCommitHash()),
-		TargetCommit: strings.TrimSpace(targetScan.GetTarget().GetCommitHash()),
+		Path:            targetPath,
+		BaseRef:         baseRef,
+		TargetRef:       targetRef,
+		BaseCommit:      strings.TrimSpace(baseScan.GetTarget().GetCommitHash()),
+		TargetCommit:    strings.TrimSpace(targetScan.GetTarget().GetCommitHash()),
+		IsContainerDiff: proto.Bool(false),
 	}
 
 	// Build package maps for comparison
@@ -2976,7 +2983,7 @@ func (s *Server) diffGitRefs(ctx context.Context, args *mcpv1.DiffRefsRequest) (
 				TargetVersion: targetPkg.Version,
 				Purl:          targetPkg.PURL,
 				ChangeType:    "added",
-				IsDirect:      targetPkg.Direct,
+				IsDirect:      proto.Bool(targetPkg.Direct),
 				Ecosystem:     targetPkg.Ecosystem,
 			})
 			result.AddedCount++
@@ -2993,7 +3000,7 @@ func (s *Server) diffGitRefs(ctx context.Context, args *mcpv1.DiffRefsRequest) (
 				TargetVersion: targetPkg.Version,
 				Purl:          targetPkg.PURL,
 				ChangeType:    changeType,
-				IsDirect:      targetPkg.Direct,
+				IsDirect:      proto.Bool(targetPkg.Direct),
 				Ecosystem:     targetPkg.Ecosystem,
 			})
 			result.UpdatedCount++
@@ -3008,7 +3015,7 @@ func (s *Server) diffGitRefs(ctx context.Context, args *mcpv1.DiffRefsRequest) (
 				BaseVersion: basePkg.Version,
 				Purl:        basePkg.PURL,
 				ChangeType:  "removed",
-				IsDirect:    basePkg.Direct,
+				IsDirect:    proto.Bool(basePkg.Direct),
 				Ecosystem:   basePkg.Ecosystem,
 			})
 			result.RemovedCount++
@@ -3523,7 +3530,7 @@ func graphPathProto(path graph.Path) *mcpv1.GraphPath {
 	return &mcpv1.GraphPath{
 		Nodes:       pathToStrings(path),
 		NodeDetails: pathToNodeDetails(path),
-		Depth:       int32(path.Len()),
+		Depth:       proto.Int32(int32(path.Len())),
 	}
 }
 
@@ -3555,8 +3562,8 @@ func graphNodeProto(node *graph.Node) *mcpv1.GraphPathNode {
 		Version:      node.GetVersion(),
 		Ecosystem:    mcpOutputEcosystem(node.GetEcosystem()),
 		Purl:         node.GetPurl(),
-		Direct:       node.GetDirect(),
-		Depth:        node.GetDepth(),
+		Direct:       proto.Bool(node.GetDirect()),
+		Depth:        proto.Int32(node.GetDepth()),
 		Disconnected: node.GetDepth() == graph.DepthDisconnected,
 		ImportStatus: graphImportStatusString(node.GetImportStatus()),
 	}

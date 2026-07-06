@@ -582,8 +582,9 @@ type ScanDirectoryResult struct {
 	// Vulnerabilities are the consolidated findings.
 	Vulnerabilities []*VulnExplanation `protobuf:"bytes,7,rep,name=vulnerabilities,proto3" json:"vulnerabilities,omitempty"`
 	// Clean reports whether no vulnerabilities were found; success, not an
-	// error. Check coverage to see what was and was not checked.
-	Clean bool `protobuf:"varint,8,opt,name=clean,proto3" json:"clean,omitempty"`
+	// error. Always present. Check coverage to see what was and was not
+	// checked.
+	Clean *bool `protobuf:"varint,8,opt,name=clean,proto3,oneof" json:"clean,omitempty"`
 	// Coverage reports advisory-source coverage for the scanned inventory.
 	Coverage *Coverage `protobuf:"bytes,9,opt,name=coverage,proto3" json:"coverage,omitempty"`
 	// ScanTime is the elapsed scan time as a human-readable duration.
@@ -674,8 +675,8 @@ func (x *ScanDirectoryResult) GetVulnerabilities() []*VulnExplanation {
 }
 
 func (x *ScanDirectoryResult) GetClean() bool {
-	if x != nil {
-		return x.Clean
+	if x != nil && x.Clean != nil {
+		return *x.Clean
 	}
 	return false
 }
@@ -773,8 +774,9 @@ type ScanContainerResult struct {
 	// Vulnerabilities are the consolidated findings.
 	Vulnerabilities []*VulnExplanation `protobuf:"bytes,5,rep,name=vulnerabilities,proto3" json:"vulnerabilities,omitempty"`
 	// Clean reports whether no vulnerabilities were found; success, not an
-	// error. Check coverage to see what was and was not checked.
-	Clean bool `protobuf:"varint,6,opt,name=clean,proto3" json:"clean,omitempty"`
+	// error. Always present. Check coverage to see what was and was not
+	// checked.
+	Clean *bool `protobuf:"varint,6,opt,name=clean,proto3,oneof" json:"clean,omitempty"`
 	// Coverage reports advisory-source coverage for the scanned inventory.
 	Coverage *Coverage `protobuf:"bytes,7,opt,name=coverage,proto3" json:"coverage,omitempty"`
 	// ScanTime is the elapsed scan time as a human-readable duration.
@@ -851,8 +853,8 @@ func (x *ScanContainerResult) GetVulnerabilities() []*VulnExplanation {
 }
 
 func (x *ScanContainerResult) GetClean() bool {
-	if x != nil {
-		return x.Clean
+	if x != nil && x.Clean != nil {
+		return *x.Clean
 	}
 	return false
 }
@@ -975,10 +977,11 @@ type TriagedVuln struct {
 	// Purl is the package URL for exact follow-up with graph_why, graph_needs,
 	// or scan_package.
 	Purl string `protobuf:"bytes,8,opt,name=purl,proto3" json:"purl,omitempty"`
-	// IsDirect reports whether the package is a direct dependency.
-	IsDirect bool `protobuf:"varint,9,opt,name=is_direct,json=isDirect,proto3" json:"is_direct,omitempty"`
-	// HasFix reports whether an actionable fix exists.
-	HasFix bool `protobuf:"varint,10,opt,name=has_fix,json=hasFix,proto3" json:"has_fix,omitempty"`
+	// IsDirect reports whether the package is a direct dependency. Always
+	// present.
+	IsDirect *bool `protobuf:"varint,9,opt,name=is_direct,json=isDirect,proto3,oneof" json:"is_direct,omitempty"`
+	// HasFix reports whether an actionable fix exists. Always present.
+	HasFix *bool `protobuf:"varint,10,opt,name=has_fix,json=hasFix,proto3,oneof" json:"has_fix,omitempty"`
 	// FixedVersions are versions containing a fix on the package's own module
 	// path.
 	FixedVersions []string `protobuf:"bytes,11,rep,name=fixed_versions,json=fixedVersions,proto3" json:"fixed_versions,omitempty"`
@@ -1084,15 +1087,15 @@ func (x *TriagedVuln) GetPurl() string {
 }
 
 func (x *TriagedVuln) GetIsDirect() bool {
-	if x != nil {
-		return x.IsDirect
+	if x != nil && x.IsDirect != nil {
+		return *x.IsDirect
 	}
 	return false
 }
 
 func (x *TriagedVuln) GetHasFix() bool {
-	if x != nil {
-		return x.HasFix
+	if x != nil && x.HasFix != nil {
+		return *x.HasFix
 	}
 	return false
 }
@@ -1451,8 +1454,8 @@ type DependencyInfo struct {
 	// Purl is the package URL for exact follow-up with graph_why, graph_needs,
 	// or scan_package.
 	Purl string `protobuf:"bytes,4,opt,name=purl,proto3" json:"purl,omitempty"`
-	// Direct reports whether this is a direct dependency.
-	Direct bool `protobuf:"varint,5,opt,name=direct,proto3" json:"direct,omitempty"`
+	// Direct reports whether this is a direct dependency. Always present.
+	Direct *bool `protobuf:"varint,5,opt,name=direct,proto3,oneof" json:"direct,omitempty"`
 	// Locations lists file paths where this package was referenced.
 	Locations []string `protobuf:"bytes,6,rep,name=locations,proto3" json:"locations,omitempty"`
 	// ManifestRefs are the structured manifest declarations for this dependency,
@@ -1521,8 +1524,8 @@ func (x *DependencyInfo) GetPurl() string {
 }
 
 func (x *DependencyInfo) GetDirect() bool {
-	if x != nil {
-		return x.Direct
+	if x != nil && x.Direct != nil {
+		return *x.Direct
 	}
 	return false
 }
@@ -1886,11 +1889,11 @@ type GraphPathNode struct {
 	Ecosystem string `protobuf:"bytes,3,opt,name=ecosystem,proto3" json:"ecosystem,omitempty"`
 	// Purl is the package URL for exact follow-up queries.
 	Purl string `protobuf:"bytes,4,opt,name=purl,proto3" json:"purl,omitempty"`
-	// Direct reports whether this is a direct dependency.
-	Direct bool `protobuf:"varint,5,opt,name=direct,proto3" json:"direct,omitempty"`
-	// Depth is the node's distance from the nearest root; absent means 0, a
-	// root/direct dependency.
-	Depth int32 `protobuf:"varint,6,opt,name=depth,proto3" json:"depth,omitempty"`
+	// Direct reports whether this is a direct dependency. Always present.
+	Direct *bool `protobuf:"varint,5,opt,name=direct,proto3,oneof" json:"direct,omitempty"`
+	// Depth is the node's distance from the nearest root (0 for roots). Always
+	// present.
+	Depth *int32 `protobuf:"varint,6,opt,name=depth,proto3,oneof" json:"depth,omitempty"`
 	// Disconnected reports that the node has no path from any root (e.g. GitHub
 	// Actions or Dockerfile base images).
 	Disconnected bool `protobuf:"varint,7,opt,name=disconnected,proto3" json:"disconnected,omitempty"`
@@ -1961,15 +1964,15 @@ func (x *GraphPathNode) GetPurl() string {
 }
 
 func (x *GraphPathNode) GetDirect() bool {
-	if x != nil {
-		return x.Direct
+	if x != nil && x.Direct != nil {
+		return *x.Direct
 	}
 	return false
 }
 
 func (x *GraphPathNode) GetDepth() int32 {
-	if x != nil {
-		return x.Depth
+	if x != nil && x.Depth != nil {
+		return *x.Depth
 	}
 	return 0
 }
@@ -1996,9 +1999,9 @@ type GraphPath struct {
 	// NodeDetails are the structured nodes along the path, root first.
 	NodeDetails []*GraphPathNode `protobuf:"bytes,2,rep,name=node_details,json=nodeDetails,proto3" json:"node_details,omitempty"`
 	// Depth is the number of edges in the path (hops from the root), so a
-	// direct dependency's single-node path has depth 0 (absent). Not to be
-	// confused with each node's own depth.
-	Depth         int32 `protobuf:"varint,3,opt,name=depth,proto3" json:"depth,omitempty"`
+	// direct dependency's single-node path has depth 0. Always present; not to
+	// be confused with each node's own depth.
+	Depth         *int32 `protobuf:"varint,3,opt,name=depth,proto3,oneof" json:"depth,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -2048,8 +2051,8 @@ func (x *GraphPath) GetNodeDetails() []*GraphPathNode {
 }
 
 func (x *GraphPath) GetDepth() int32 {
-	if x != nil {
-		return x.Depth
+	if x != nil && x.Depth != nil {
+		return *x.Depth
 	}
 	return 0
 }
@@ -2165,8 +2168,8 @@ type GraphTargetResult struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Query is the targetPurl as requested.
 	Query string `protobuf:"bytes,1,opt,name=query,proto3" json:"query,omitempty"`
-	// Found reports whether the target matched any graph node.
-	Found bool `protobuf:"varint,2,opt,name=found,proto3" json:"found,omitempty"`
+	// Found reports whether the target matched any graph node. Always present.
+	Found *bool `protobuf:"varint,2,opt,name=found,proto3,oneof" json:"found,omitempty"`
 	// PathCount is the total number of dependency paths to the target before
 	// truncation.
 	PathCount int32 `protobuf:"varint,3,opt,name=path_count,json=pathCount,proto3" json:"path_count,omitempty"`
@@ -2218,8 +2221,8 @@ func (x *GraphTargetResult) GetQuery() string {
 }
 
 func (x *GraphTargetResult) GetFound() bool {
-	if x != nil {
-		return x.Found
+	if x != nil && x.Found != nil {
+		return *x.Found
 	}
 	return false
 }
@@ -2511,8 +2514,8 @@ func (x *GraphWhyRequest) GetExtended() bool {
 }
 
 // GraphWhyResult explains why a package is in the dependency graph. A package
-// absent from the graph is a normal result, not an error: found is absent
-// (false) and message explains the outcome.
+// absent from the graph is a normal found: false result, not an error;
+// message explains the outcome.
 type GraphWhyResult struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Package is the matched package name, or the query when nothing matched.
@@ -2527,11 +2530,11 @@ type GraphWhyResult struct {
 	EffectiveRef string `protobuf:"bytes,5,opt,name=effective_ref,json=effectiveRef,proto3" json:"effective_ref,omitempty"`
 	// Commit is the resolved commit hash of the analyzed snapshot.
 	Commit string `protobuf:"bytes,6,opt,name=commit,proto3" json:"commit,omitempty"`
-	// Direct reports whether the matched package is a direct dependency.
-	Direct bool `protobuf:"varint,7,opt,name=direct,proto3" json:"direct,omitempty"`
-	// Found reports whether the package matched any graph node; absent means
-	// not found.
-	Found bool `protobuf:"varint,8,opt,name=found,proto3" json:"found,omitempty"`
+	// Direct reports whether the matched package is a direct dependency;
+	// absent when the package was not found.
+	Direct *bool `protobuf:"varint,7,opt,name=direct,proto3,oneof" json:"direct,omitempty"`
+	// Found reports whether the package matched any graph node. Always present.
+	Found *bool `protobuf:"varint,8,opt,name=found,proto3,oneof" json:"found,omitempty"`
 	// MatchedNode is the structured node the query resolved to.
 	MatchedNode *GraphPathNode `protobuf:"bytes,9,opt,name=matched_node,json=matchedNode,proto3" json:"matched_node,omitempty"`
 	// Paths are dependency path examples, truncated to a compact sample; use
@@ -2621,15 +2624,15 @@ func (x *GraphWhyResult) GetCommit() string {
 }
 
 func (x *GraphWhyResult) GetDirect() bool {
-	if x != nil {
-		return x.Direct
+	if x != nil && x.Direct != nil {
+		return *x.Direct
 	}
 	return false
 }
 
 func (x *GraphWhyResult) GetFound() bool {
-	if x != nil {
-		return x.Found
+	if x != nil && x.Found != nil {
+		return *x.Found
 	}
 	return false
 }
@@ -2774,8 +2777,8 @@ func (x *GraphNeedsRequest) GetExtended() bool {
 }
 
 // GraphNeedsResult lists the packages that depend on a package. A package
-// absent from the graph is a normal result, not an error: found is absent
-// (false) and message explains the outcome.
+// absent from the graph is a normal found: false result, not an error;
+// message explains the outcome.
 type GraphNeedsResult struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Package is the matched package name, or the query when nothing matched.
@@ -2790,20 +2793,22 @@ type GraphNeedsResult struct {
 	EffectiveRef string `protobuf:"bytes,5,opt,name=effective_ref,json=effectiveRef,proto3" json:"effective_ref,omitempty"`
 	// Commit is the resolved commit hash of the analyzed snapshot.
 	Commit string `protobuf:"bytes,6,opt,name=commit,proto3" json:"commit,omitempty"`
-	// Direct reports whether the matched package is a direct dependency.
-	Direct bool `protobuf:"varint,7,opt,name=direct,proto3" json:"direct,omitempty"`
-	// Found reports whether the package matched any graph node; absent means
-	// not found.
-	Found bool `protobuf:"varint,8,opt,name=found,proto3" json:"found,omitempty"`
+	// Direct reports whether the matched package is a direct dependency;
+	// absent when the package was not found.
+	Direct *bool `protobuf:"varint,7,opt,name=direct,proto3,oneof" json:"direct,omitempty"`
+	// Found reports whether the package matched any graph node. Always present.
+	Found *bool `protobuf:"varint,8,opt,name=found,proto3,oneof" json:"found,omitempty"`
 	// MatchedNode is the structured node the query resolved to.
 	MatchedNode *GraphPathNode `protobuf:"bytes,9,opt,name=matched_node,json=matchedNode,proto3" json:"matched_node,omitempty"`
 	// Dependents are the packages that depend on the matched package, direct
 	// dependents first.
 	Dependents []*DependencyInfo `protobuf:"bytes,10,rep,name=dependents,proto3" json:"dependents,omitempty"`
-	// DirectCount counts dependents that are direct dependencies.
-	DirectCount int32 `protobuf:"varint,11,opt,name=direct_count,json=directCount,proto3" json:"direct_count,omitempty"`
-	// TransitiveCount counts dependents that are transitive dependencies.
-	TransitiveCount int32 `protobuf:"varint,12,opt,name=transitive_count,json=transitiveCount,proto3" json:"transitive_count,omitempty"`
+	// DirectCount counts dependents that are direct dependencies; absent when
+	// the package was not found.
+	DirectCount *int32 `protobuf:"varint,11,opt,name=direct_count,json=directCount,proto3,oneof" json:"direct_count,omitempty"`
+	// TransitiveCount counts dependents that are transitive dependencies;
+	// absent when the package was not found.
+	TransitiveCount *int32 `protobuf:"varint,12,opt,name=transitive_count,json=transitiveCount,proto3,oneof" json:"transitive_count,omitempty"`
 	// Message explains the outcome in one sentence.
 	Message       string `protobuf:"bytes,13,opt,name=message,proto3" json:"message,omitempty"`
 	unknownFields protoimpl.UnknownFields
@@ -2883,15 +2888,15 @@ func (x *GraphNeedsResult) GetCommit() string {
 }
 
 func (x *GraphNeedsResult) GetDirect() bool {
-	if x != nil {
-		return x.Direct
+	if x != nil && x.Direct != nil {
+		return *x.Direct
 	}
 	return false
 }
 
 func (x *GraphNeedsResult) GetFound() bool {
-	if x != nil {
-		return x.Found
+	if x != nil && x.Found != nil {
+		return *x.Found
 	}
 	return false
 }
@@ -2911,15 +2916,15 @@ func (x *GraphNeedsResult) GetDependents() []*DependencyInfo {
 }
 
 func (x *GraphNeedsResult) GetDirectCount() int32 {
-	if x != nil {
-		return x.DirectCount
+	if x != nil && x.DirectCount != nil {
+		return *x.DirectCount
 	}
 	return 0
 }
 
 func (x *GraphNeedsResult) GetTransitiveCount() int32 {
-	if x != nil {
-		return x.TransitiveCount
+	if x != nil && x.TransitiveCount != nil {
+		return *x.TransitiveCount
 	}
 	return 0
 }
@@ -3199,8 +3204,8 @@ type ScanPackageResult struct {
 	// compact sample.
 	Vulnerabilities []*VulnExplanation `protobuf:"bytes,5,rep,name=vulnerabilities,proto3" json:"vulnerabilities,omitempty"`
 	// Clean reports whether no vulnerabilities were found; success, not an
-	// error.
-	Clean         bool `protobuf:"varint,6,opt,name=clean,proto3" json:"clean,omitempty"`
+	// error. Always present.
+	Clean         *bool `protobuf:"varint,6,opt,name=clean,proto3,oneof" json:"clean,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -3271,8 +3276,8 @@ func (x *ScanPackageResult) GetVulnerabilities() []*VulnExplanation {
 }
 
 func (x *ScanPackageResult) GetClean() bool {
-	if x != nil {
-		return x.Clean
+	if x != nil && x.Clean != nil {
+		return *x.Clean
 	}
 	return false
 }
@@ -3658,10 +3663,11 @@ type RemediationCommand struct {
 	// Hint gives extra guidance for applying the command.
 	Hint string `protobuf:"bytes,10,opt,name=hint,proto3" json:"hint,omitempty"`
 	// IsDirect reports whether the affected package is a direct dependency.
-	IsDirect bool `protobuf:"varint,11,opt,name=is_direct,json=isDirect,proto3" json:"is_direct,omitempty"`
+	// Always present.
+	IsDirect *bool `protobuf:"varint,11,opt,name=is_direct,json=isDirect,proto3,oneof" json:"is_direct,omitempty"`
 	// Executable reports whether the command can be run as-is; manual commands
-	// are guidance only.
-	Executable bool `protobuf:"varint,12,opt,name=executable,proto3" json:"executable,omitempty"`
+	// are guidance only. Always present.
+	Executable *bool `protobuf:"varint,12,opt,name=executable,proto3,oneof" json:"executable,omitempty"`
 	// Groups are the dependency groups the package belongs to.
 	Groups        []string `protobuf:"bytes,13,rep,name=groups,proto3" json:"groups,omitempty"`
 	unknownFields protoimpl.UnknownFields
@@ -3769,15 +3775,15 @@ func (x *RemediationCommand) GetHint() string {
 }
 
 func (x *RemediationCommand) GetIsDirect() bool {
-	if x != nil {
-		return x.IsDirect
+	if x != nil && x.IsDirect != nil {
+		return *x.IsDirect
 	}
 	return false
 }
 
 func (x *RemediationCommand) GetExecutable() bool {
-	if x != nil {
-		return x.Executable
+	if x != nil && x.Executable != nil {
+		return *x.Executable
 	}
 	return false
 }
@@ -4066,8 +4072,9 @@ type DependencyChange struct {
 	// ChangeType classifies the difference. Version changes are upgraded or
 	// downgraded when the versions compare, updated otherwise.
 	ChangeType string `protobuf:"bytes,5,opt,name=change_type,json=changeType,proto3" json:"change_type,omitempty"`
-	// IsDirect reports whether the package is a direct dependency.
-	IsDirect bool `protobuf:"varint,6,opt,name=is_direct,json=isDirect,proto3" json:"is_direct,omitempty"`
+	// IsDirect reports whether the package is a direct dependency. Always
+	// present.
+	IsDirect *bool `protobuf:"varint,6,opt,name=is_direct,json=isDirect,proto3,oneof" json:"is_direct,omitempty"`
 	// Ecosystem is the canonical package ecosystem.
 	Ecosystem     string `protobuf:"bytes,7,opt,name=ecosystem,proto3" json:"ecosystem,omitempty"`
 	unknownFields protoimpl.UnknownFields
@@ -4140,8 +4147,8 @@ func (x *DependencyChange) GetChangeType() string {
 }
 
 func (x *DependencyChange) GetIsDirect() bool {
-	if x != nil {
-		return x.IsDirect
+	if x != nil && x.IsDirect != nil {
+		return *x.IsDirect
 	}
 	return false
 }
@@ -4436,9 +4443,9 @@ type DiffRefsResult struct {
 	TargetCommit string `protobuf:"bytes,5,opt,name=target_commit,json=targetCommit,proto3" json:"target_commit,omitempty"`
 	// Platform is the compared platform for container image diffs.
 	Platform string `protobuf:"bytes,6,opt,name=platform,proto3" json:"platform,omitempty"`
-	// IsContainerDiff reports whether container images were compared; absent
-	// means a Git ref diff.
-	IsContainerDiff bool `protobuf:"varint,7,opt,name=is_container_diff,json=isContainerDiff,proto3" json:"is_container_diff,omitempty"`
+	// IsContainerDiff reports whether container images were compared (false
+	// means a Git ref diff). Always present.
+	IsContainerDiff *bool `protobuf:"varint,7,opt,name=is_container_diff,json=isContainerDiff,proto3,oneof" json:"is_container_diff,omitempty"`
 	// Changes are the package-level differences, direct dependencies first.
 	Changes []*DependencyChange `protobuf:"bytes,8,rep,name=changes,proto3" json:"changes,omitempty"`
 	// AddedCount counts added packages.
@@ -4534,8 +4541,8 @@ func (x *DiffRefsResult) GetPlatform() string {
 }
 
 func (x *DiffRefsResult) GetIsContainerDiff() bool {
-	if x != nil {
-		return x.IsContainerDiff
+	if x != nil && x.IsContainerDiff != nil {
+		return *x.IsContainerDiff
 	}
 	return false
 }
@@ -4650,7 +4657,7 @@ const file_deputy_mcp_v1_mcp_proto_rawDesc = "" +
 	"\"\br\x06\x10\x012\x02\\SR\n" +
 	"ecosystems\x125\n" +
 	"\rexclude_paths\x18\x04 \x03(\tB\x10\xbaH\r\x92\x01\n" +
-	"\"\br\x06\x10\x012\x02\\SR\fexcludePaths\"\xc9\x04\n" +
+	"\"\br\x06\x10\x012\x02\\SR\fexcludePaths\"\xd8\x04\n" +
 	"\x13ScanDirectoryResult\x12\x12\n" +
 	"\x04path\x18\x01 \x01(\tR\x04path\x12\x10\n" +
 	"\x03ref\x18\x02 \x01(\tR\x03ref\x12#\n" +
@@ -4658,8 +4665,8 @@ const file_deputy_mcp_v1_mcp_proto_rawDesc = "" +
 	"\x06commit\x18\x04 \x01(\tR\x06commit\x12)\n" +
 	"\x10packages_scanned\x18\x05 \x01(\x05R\x0fpackagesScanned\x12\x81\x01\n" +
 	"\x1bvulnerabilities_by_severity\x18\x06 \x03(\v2A.deputy.mcp.v1.ScanDirectoryResult.VulnerabilitiesBySeverityEntryR\x19vulnerabilitiesBySeverity\x12H\n" +
-	"\x0fvulnerabilities\x18\a \x03(\v2\x1e.deputy.mcp.v1.VulnExplanationR\x0fvulnerabilities\x12\x14\n" +
-	"\x05clean\x18\b \x01(\bR\x05clean\x123\n" +
+	"\x0fvulnerabilities\x18\a \x03(\v2\x1e.deputy.mcp.v1.VulnExplanationR\x0fvulnerabilities\x12\x19\n" +
+	"\x05clean\x18\b \x01(\bH\x00R\x05clean\x88\x01\x01\x123\n" +
 	"\bcoverage\x18\t \x01(\v2\x17.deputy.mcp.v1.CoverageR\bcoverage\x12\x1b\n" +
 	"\tscan_time\x18\n" +
 	" \x01(\tR\bscanTime\x12 \n" +
@@ -4667,24 +4674,26 @@ const file_deputy_mcp_v1_mcp_proto_rawDesc = "" +
 	"scanTimeMs\x1aL\n" +
 	"\x1eVulnerabilitiesBySeverityEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
-	"\x05value\x18\x02 \x01(\x05R\x05value:\x028\x01\"X\n" +
+	"\x05value\x18\x02 \x01(\x05R\x05value:\x028\x01B\b\n" +
+	"\x06_clean\"X\n" +
 	"\x14ScanContainerRequest\x12$\n" +
 	"\x05image\x18\x01 \x01(\tB\x0e\xbaH\v\xc8\x01\x01r\x06\x10\x012\x02\\SR\x05image\x12\x1a\n" +
-	"\bplatform\x18\x02 \x01(\tR\bplatform\"\x98\x04\n" +
+	"\bplatform\x18\x02 \x01(\tR\bplatform\"\xa7\x04\n" +
 	"\x13ScanContainerResult\x12\x14\n" +
 	"\x05image\x18\x01 \x01(\tR\x05image\x12\x1a\n" +
 	"\bplatform\x18\x02 \x01(\tR\bplatform\x12)\n" +
 	"\x10packages_scanned\x18\x03 \x01(\x05R\x0fpackagesScanned\x12\x81\x01\n" +
 	"\x1bvulnerabilities_by_severity\x18\x04 \x03(\v2A.deputy.mcp.v1.ScanContainerResult.VulnerabilitiesBySeverityEntryR\x19vulnerabilitiesBySeverity\x12H\n" +
-	"\x0fvulnerabilities\x18\x05 \x03(\v2\x1e.deputy.mcp.v1.VulnExplanationR\x0fvulnerabilities\x12\x14\n" +
-	"\x05clean\x18\x06 \x01(\bR\x05clean\x123\n" +
+	"\x0fvulnerabilities\x18\x05 \x03(\v2\x1e.deputy.mcp.v1.VulnExplanationR\x0fvulnerabilities\x12\x19\n" +
+	"\x05clean\x18\x06 \x01(\bH\x00R\x05clean\x88\x01\x01\x123\n" +
 	"\bcoverage\x18\a \x01(\v2\x17.deputy.mcp.v1.CoverageR\bcoverage\x12\x1b\n" +
 	"\tscan_time\x18\b \x01(\tR\bscanTime\x12 \n" +
 	"\fscan_time_ms\x18\t \x01(\x05R\n" +
 	"scanTimeMs\x1aL\n" +
 	"\x1eVulnerabilitiesBySeverityEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
-	"\x05value\x18\x02 \x01(\x05R\x05value:\x028\x01\"\xae\x01\n" +
+	"\x05value\x18\x02 \x01(\x05R\x05value:\x028\x01B\b\n" +
+	"\x06_clean\"\xae\x01\n" +
 	"\rTriageRequest\x12\"\n" +
 	"\x04path\x18\x01 \x01(\tB\x0e\xbaH\v\xc8\x01\x01r\x06\x10\x012\x02\\SR\x04path\x12\x10\n" +
 	"\x03ref\x18\x02 \x01(\tR\x03ref\x120\n" +
@@ -4693,7 +4702,7 @@ const file_deputy_mcp_v1_mcp_proto_rawDesc = "" +
 	"\"\br\x06\x10\x012\x02\\SR\n" +
 	"ecosystems\x125\n" +
 	"\rexclude_paths\x18\x04 \x03(\tB\x10\xbaH\r\x92\x01\n" +
-	"\"\br\x06\x10\x012\x02\\SR\fexcludePaths\"\x87\x05\n" +
+	"\"\br\x06\x10\x012\x02\\SR\fexcludePaths\"\xab\x05\n" +
 	"\vTriagedVuln\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x124\n" +
 	"\x04kind\x18\x02 \x01(\tB \xbaH\x1d\xd8\x01\x01r\x18R\rvulnerabilityR\amalwareR\x04kind\x12J\n" +
@@ -4702,16 +4711,20 @@ const file_deputy_mcp_v1_mcp_proto_rawDesc = "" +
 	"\asources\x18\x05 \x03(\tR\asources\x12\x18\n" +
 	"\apackage\x18\x06 \x01(\tR\apackage\x12\x18\n" +
 	"\aversion\x18\a \x01(\tR\aversion\x12\x12\n" +
-	"\x04purl\x18\b \x01(\tR\x04purl\x12\x1b\n" +
-	"\tis_direct\x18\t \x01(\bR\bisDirect\x12\x17\n" +
+	"\x04purl\x18\b \x01(\tR\x04purl\x12 \n" +
+	"\tis_direct\x18\t \x01(\bH\x00R\bisDirect\x88\x01\x01\x12\x1c\n" +
 	"\ahas_fix\x18\n" +
-	" \x01(\bR\x06hasFix\x12%\n" +
+	" \x01(\bH\x01R\x06hasFix\x88\x01\x01\x12%\n" +
 	"\x0efixed_versions\x18\v \x03(\tR\rfixedVersions\x12>\n" +
 	"\rpackage_fixes\x18\f \x03(\v2\x19.deputy.mcp.v1.PackageFixR\fpackageFixes\x12<\n" +
 	"\fresolved_fix\x18\r \x01(\v2\x19.deputy.mcp.v1.FixVerdictR\vresolvedFix\x12\x18\n" +
 	"\asummary\x18\x0e \x01(\tR\asummary\x12A\n" +
 	"\bpriority\x18\x0f \x01(\tB%\xbaH\"\xd8\x01\x01r\x1dR\bcriticalR\x04highR\x06mediumR\x03lowR\bpriority\x12'\n" +
-	"\x0fpriority_reason\x18\x10 \x01(\tR\x0epriorityReason\"\x9a\x06\n" +
+	"\x0fpriority_reason\x18\x10 \x01(\tR\x0epriorityReasonB\f\n" +
+	"\n" +
+	"_is_directB\n" +
+	"\n" +
+	"\b_has_fix\"\x9a\x06\n" +
 	"\fTriageResult\x12\x12\n" +
 	"\x04path\x18\x01 \x01(\tR\x04path\x12\x10\n" +
 	"\x03ref\x18\x02 \x01(\tR\x03ref\x12#\n" +
@@ -4744,15 +4757,16 @@ const file_deputy_mcp_v1_mcp_proto_rawDesc = "" +
 	"\"\br\x06\x10\x012\x02\\SR\n" +
 	"ecosystems\x125\n" +
 	"\rexclude_paths\x18\x05 \x03(\tB\x10\xbaH\r\x92\x01\n" +
-	"\"\br\x06\x10\x012\x02\\SR\fexcludePaths\"\xee\x01\n" +
+	"\"\br\x06\x10\x012\x02\\SR\fexcludePaths\"\xfe\x01\n" +
 	"\x0eDependencyInfo\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x18\n" +
 	"\aversion\x18\x02 \x01(\tR\aversion\x12\x1c\n" +
 	"\tecosystem\x18\x03 \x01(\tR\tecosystem\x12\x12\n" +
-	"\x04purl\x18\x04 \x01(\tR\x04purl\x12\x16\n" +
-	"\x06direct\x18\x05 \x01(\bR\x06direct\x12\x1c\n" +
+	"\x04purl\x18\x04 \x01(\tR\x04purl\x12\x1b\n" +
+	"\x06direct\x18\x05 \x01(\bH\x00R\x06direct\x88\x01\x01\x12\x1c\n" +
 	"\tlocations\x18\x06 \x03(\tR\tlocations\x12F\n" +
-	"\rmanifest_refs\x18\a \x03(\v2!.deputy.dependency.v1.ManifestRefR\fmanifestRefs\"\x99\x03\n" +
+	"\rmanifest_refs\x18\a \x03(\v2!.deputy.dependency.v1.ManifestRefR\fmanifestRefsB\t\n" +
+	"\a_direct\"\x99\x03\n" +
 	"\x16ListDependenciesResult\x12\x12\n" +
 	"\x04path\x18\x01 \x01(\tR\x04path\x12\x10\n" +
 	"\x03ref\x18\x02 \x01(\tR\x03ref\x12#\n" +
@@ -4788,20 +4802,23 @@ const file_deputy_mcp_v1_mcp_proto_rawDesc = "" +
 	"\n" +
 	"components\x18\x06 \x01(\x05R\n" +
 	"components\x12\x12\n" +
-	"\x04sbom\x18\a \x01(\tR\x04sbom\"\x8e\x02\n" +
+	"\x04sbom\x18\a \x01(\tR\x04sbom\"\xad\x02\n" +
 	"\rGraphPathNode\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x18\n" +
 	"\aversion\x18\x02 \x01(\tR\aversion\x12\x1c\n" +
 	"\tecosystem\x18\x03 \x01(\tR\tecosystem\x12\x12\n" +
-	"\x04purl\x18\x04 \x01(\tR\x04purl\x12\x16\n" +
-	"\x06direct\x18\x05 \x01(\bR\x06direct\x12\x14\n" +
-	"\x05depth\x18\x06 \x01(\x05R\x05depth\x12\"\n" +
+	"\x04purl\x18\x04 \x01(\tR\x04purl\x12\x1b\n" +
+	"\x06direct\x18\x05 \x01(\bH\x00R\x06direct\x88\x01\x01\x12\x19\n" +
+	"\x05depth\x18\x06 \x01(\x05H\x01R\x05depth\x88\x01\x01\x12\"\n" +
 	"\fdisconnected\x18\a \x01(\bR\fdisconnected\x12K\n" +
-	"\rimport_status\x18\b \x01(\tB&\xbaH#\xd8\x01\x01r\x1eR\bimportedR\brequiredR\bdeclaredR\fimportStatus\"x\n" +
+	"\rimport_status\x18\b \x01(\tB&\xbaH#\xd8\x01\x01r\x1eR\bimportedR\brequiredR\bdeclaredR\fimportStatusB\t\n" +
+	"\a_directB\b\n" +
+	"\x06_depth\"\x87\x01\n" +
 	"\tGraphPath\x12\x14\n" +
 	"\x05nodes\x18\x01 \x03(\tR\x05nodes\x12?\n" +
-	"\fnode_details\x18\x02 \x03(\v2\x1c.deputy.mcp.v1.GraphPathNodeR\vnodeDetails\x12\x14\n" +
-	"\x05depth\x18\x03 \x01(\x05R\x05depth\"\xbf\x02\n" +
+	"\fnode_details\x18\x02 \x03(\v2\x1c.deputy.mcp.v1.GraphPathNodeR\vnodeDetails\x12\x19\n" +
+	"\x05depth\x18\x03 \x01(\x05H\x00R\x05depth\x88\x01\x01B\b\n" +
+	"\x06_depth\"\xbf\x02\n" +
 	"\x13AnalyzeGraphRequest\x12\"\n" +
 	"\x04path\x18\x01 \x01(\tB\x0e\xbaH\v\xc8\x01\x01r\x06\x10\x012\x02\\SR\x04path\x12\x10\n" +
 	"\x03ref\x18\x02 \x01(\tR\x03ref\x12<\n" +
@@ -4814,15 +4831,16 @@ const file_deputy_mcp_v1_mcp_proto_rawDesc = "" +
 	"\rexclude_paths\x18\x05 \x03(\tB\x10\xbaH\r\x92\x01\n" +
 	"\"\br\x06\x10\x012\x02\\SR\fexcludePaths\x12/\n" +
 	"\x13resolve_transitives\x18\x06 \x01(\bR\x12resolveTransitives\x12\x1a\n" +
-	"\bextended\x18\a \x01(\bR\bextended\"\xe0\x01\n" +
+	"\bextended\x18\a \x01(\bR\bextended\"\xef\x01\n" +
 	"\x11GraphTargetResult\x12\x14\n" +
-	"\x05query\x18\x01 \x01(\tR\x05query\x12\x14\n" +
-	"\x05found\x18\x02 \x01(\bR\x05found\x12\x1d\n" +
+	"\x05query\x18\x01 \x01(\tR\x05query\x12\x19\n" +
+	"\x05found\x18\x02 \x01(\bH\x00R\x05found\x88\x01\x01\x12\x1d\n" +
 	"\n" +
 	"path_count\x18\x03 \x01(\x05R\tpathCount\x12#\n" +
 	"\rmatched_purls\x18\x04 \x03(\tR\fmatchedPurls\x12A\n" +
 	"\rmatched_nodes\x18\x05 \x03(\v2\x1c.deputy.mcp.v1.GraphPathNodeR\fmatchedNodes\x12\x18\n" +
-	"\amessage\x18\x06 \x01(\tR\amessage\"\x98\x04\n" +
+	"\amessage\x18\x06 \x01(\tR\amessageB\b\n" +
+	"\x06_found\"\x98\x04\n" +
 	"\x12AnalyzeGraphResult\x12\x12\n" +
 	"\x04path\x18\x01 \x01(\tR\x04path\x12\x10\n" +
 	"\x03ref\x18\x02 \x01(\tR\x03ref\x12#\n" +
@@ -4848,23 +4866,25 @@ const file_deputy_mcp_v1_mcp_proto_rawDesc = "" +
 	"\rexclude_paths\x18\x06 \x03(\tB\x10\xbaH\r\x92\x01\n" +
 	"\"\br\x06\x10\x012\x02\\SR\fexcludePaths\x12/\n" +
 	"\x13resolve_transitives\x18\a \x01(\bR\x12resolveTransitives\x12\x1a\n" +
-	"\bextended\x18\b \x01(\bR\bextended\"\xa8\x03\n" +
+	"\bextended\x18\b \x01(\bR\bextended\"\xc7\x03\n" +
 	"\x0eGraphWhyResult\x12\x18\n" +
 	"\apackage\x18\x01 \x01(\tR\apackage\x12\x18\n" +
 	"\aversion\x18\x02 \x01(\tR\aversion\x12\x12\n" +
 	"\x04purl\x18\x03 \x01(\tR\x04purl\x12\x10\n" +
 	"\x03ref\x18\x04 \x01(\tR\x03ref\x12#\n" +
 	"\reffective_ref\x18\x05 \x01(\tR\feffectiveRef\x12\x16\n" +
-	"\x06commit\x18\x06 \x01(\tR\x06commit\x12\x16\n" +
-	"\x06direct\x18\a \x01(\bR\x06direct\x12\x14\n" +
-	"\x05found\x18\b \x01(\bR\x05found\x12?\n" +
+	"\x06commit\x18\x06 \x01(\tR\x06commit\x12\x1b\n" +
+	"\x06direct\x18\a \x01(\bH\x00R\x06direct\x88\x01\x01\x12\x19\n" +
+	"\x05found\x18\b \x01(\bH\x01R\x05found\x88\x01\x01\x12?\n" +
 	"\fmatched_node\x18\t \x01(\v2\x1c.deputy.mcp.v1.GraphPathNodeR\vmatchedNode\x12.\n" +
 	"\x05paths\x18\n" +
 	" \x03(\v2\x18.deputy.mcp.v1.GraphPathR\x05paths\x12\x1d\n" +
 	"\n" +
 	"path_count\x18\v \x01(\x05R\tpathCount\x12'\n" +
 	"\x0fpaths_truncated\x18\f \x01(\bR\x0epathsTruncated\x12\x18\n" +
-	"\amessage\x18\r \x01(\tR\amessage\"\xa9\x02\n" +
+	"\amessage\x18\r \x01(\tR\amessageB\t\n" +
+	"\a_directB\b\n" +
+	"\x06_found\"\xa9\x02\n" +
 	"\x11GraphNeedsRequest\x12\"\n" +
 	"\x04path\x18\x01 \x01(\tB\x0e\xbaH\v\xc8\x01\x01r\x06\x10\x012\x02\\SR\x04path\x12(\n" +
 	"\apackage\x18\x02 \x01(\tB\x0e\xbaH\v\xc8\x01\x01r\x06\x10\x012\x02\\SR\apackage\x12\x10\n" +
@@ -4876,24 +4896,28 @@ const file_deputy_mcp_v1_mcp_proto_rawDesc = "" +
 	"\rexclude_paths\x18\x05 \x03(\tB\x10\xbaH\r\x92\x01\n" +
 	"\"\br\x06\x10\x012\x02\\SR\fexcludePaths\x12/\n" +
 	"\x13resolve_transitives\x18\x06 \x01(\bR\x12resolveTransitives\x12\x1a\n" +
-	"\bextended\x18\a \x01(\bR\bextended\"\xbf\x03\n" +
+	"\bextended\x18\a \x01(\bR\bextended\"\x8e\x04\n" +
 	"\x10GraphNeedsResult\x12\x18\n" +
 	"\apackage\x18\x01 \x01(\tR\apackage\x12\x18\n" +
 	"\aversion\x18\x02 \x01(\tR\aversion\x12\x12\n" +
 	"\x04purl\x18\x03 \x01(\tR\x04purl\x12\x10\n" +
 	"\x03ref\x18\x04 \x01(\tR\x03ref\x12#\n" +
 	"\reffective_ref\x18\x05 \x01(\tR\feffectiveRef\x12\x16\n" +
-	"\x06commit\x18\x06 \x01(\tR\x06commit\x12\x16\n" +
-	"\x06direct\x18\a \x01(\bR\x06direct\x12\x14\n" +
-	"\x05found\x18\b \x01(\bR\x05found\x12?\n" +
+	"\x06commit\x18\x06 \x01(\tR\x06commit\x12\x1b\n" +
+	"\x06direct\x18\a \x01(\bH\x00R\x06direct\x88\x01\x01\x12\x19\n" +
+	"\x05found\x18\b \x01(\bH\x01R\x05found\x88\x01\x01\x12?\n" +
 	"\fmatched_node\x18\t \x01(\v2\x1c.deputy.mcp.v1.GraphPathNodeR\vmatchedNode\x12=\n" +
 	"\n" +
 	"dependents\x18\n" +
 	" \x03(\v2\x1d.deputy.mcp.v1.DependencyInfoR\n" +
-	"dependents\x12!\n" +
-	"\fdirect_count\x18\v \x01(\x05R\vdirectCount\x12)\n" +
-	"\x10transitive_count\x18\f \x01(\x05R\x0ftransitiveCount\x12\x18\n" +
-	"\amessage\x18\r \x01(\tR\amessage\"\x7f\n" +
+	"dependents\x12&\n" +
+	"\fdirect_count\x18\v \x01(\x05H\x02R\vdirectCount\x88\x01\x01\x12.\n" +
+	"\x10transitive_count\x18\f \x01(\x05H\x03R\x0ftransitiveCount\x88\x01\x01\x12\x18\n" +
+	"\amessage\x18\r \x01(\tR\amessageB\t\n" +
+	"\a_directB\b\n" +
+	"\x06_foundB\x0f\n" +
+	"\r_direct_countB\x13\n" +
+	"\x11_transitive_count\"\x7f\n" +
 	"\x1bExplainVulnerabilityRequest\x12\x1e\n" +
 	"\x02id\x18\x01 \x01(\tB\x0e\xbaH\v\xc8\x01\x01r\x06\x10\x012\x02\\SR\x02id\x12,\n" +
 	"\x0freference_limit\x18\x02 \x01(\x05H\x00R\x0ereferenceLimit\x88\x01\x01B\x12\n" +
@@ -4909,14 +4933,15 @@ const file_deputy_mcp_v1_mcp_proto_rawDesc = "" +
 	"\x04purl\x18\x01 \x01(\tR\x04purl\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12\x18\n" +
 	"\aversion\x18\x03 \x01(\tR\aversion\x12\x1c\n" +
-	"\tecosystem\x18\x04 \x01(\tR\tecosystem\"\xd9\x01\n" +
+	"\tecosystem\x18\x04 \x01(\tR\tecosystem\"\xe8\x01\n" +
 	"\x11ScanPackageResult\x12\x18\n" +
 	"\apackage\x18\x01 \x01(\tR\apackage\x12\x18\n" +
 	"\aversion\x18\x02 \x01(\tR\aversion\x12\x1c\n" +
 	"\tecosystem\x18\x03 \x01(\tR\tecosystem\x12\x12\n" +
 	"\x04purl\x18\x04 \x01(\tR\x04purl\x12H\n" +
-	"\x0fvulnerabilities\x18\x05 \x03(\v2\x1e.deputy.mcp.v1.VulnExplanationR\x0fvulnerabilities\x12\x14\n" +
-	"\x05clean\x18\x06 \x01(\bR\x05clean\"\x16\n" +
+	"\x0fvulnerabilities\x18\x05 \x03(\v2\x1e.deputy.mcp.v1.VulnExplanationR\x0fvulnerabilities\x12\x19\n" +
+	"\x05clean\x18\x06 \x01(\bH\x00R\x05clean\x88\x01\x01B\b\n" +
+	"\x06_clean\"\x16\n" +
 	"\x14GetServerInfoRequest\"\xc6\x02\n" +
 	"\x13GetServerInfoResult\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x18\n" +
@@ -4948,7 +4973,7 @@ const file_deputy_mcp_v1_mcp_proto_rawDesc = "" +
 	"\"\br\x06\x10\x012\x02\\SR\n" +
 	"ecosystems\x125\n" +
 	"\rexclude_paths\x18\x04 \x03(\tB\x10\xbaH\r\x92\x01\n" +
-	"\"\br\x06\x10\x012\x02\\SR\fexcludePaths\"\xf7\x02\n" +
+	"\"\br\x06\x10\x012\x02\\SR\fexcludePaths\"\x9e\x03\n" +
 	"\x12RemediationCommand\x12\x18\n" +
 	"\apackage\x18\x01 \x01(\tR\apackage\x12\x18\n" +
 	"\aversion\x18\x02 \x01(\tR\aversion\x12\x12\n" +
@@ -4960,12 +4985,15 @@ const file_deputy_mcp_v1_mcp_proto_rawDesc = "" +
 	"\acommand\x18\b \x01(\tR\acommand\x12\x12\n" +
 	"\x04path\x18\t \x01(\tR\x04path\x12\x12\n" +
 	"\x04hint\x18\n" +
-	" \x01(\tR\x04hint\x12\x1b\n" +
-	"\tis_direct\x18\v \x01(\bR\bisDirect\x12\x1e\n" +
+	" \x01(\tR\x04hint\x12 \n" +
+	"\tis_direct\x18\v \x01(\bH\x00R\bisDirect\x88\x01\x01\x12#\n" +
 	"\n" +
-	"executable\x18\f \x01(\bR\n" +
-	"executable\x12\x16\n" +
-	"\x06groups\x18\r \x03(\tR\x06groups\"\xdf\x04\n" +
+	"executable\x18\f \x01(\bH\x01R\n" +
+	"executable\x88\x01\x01\x12\x16\n" +
+	"\x06groups\x18\r \x03(\tR\x06groupsB\f\n" +
+	"\n" +
+	"_is_directB\r\n" +
+	"\v_executable\"\xdf\x04\n" +
 	"\x14GetRemediationResult\x12\x12\n" +
 	"\x04path\x18\x01 \x01(\tR\x04path\x12\x10\n" +
 	"\x03ref\x18\x02 \x01(\tR\x03ref\x12#\n" +
@@ -4993,7 +5021,7 @@ const file_deputy_mcp_v1_mcp_proto_rawDesc = "" +
 	"\"\br\x06\x10\x012\x02\\SR\n" +
 	"ecosystems\x125\n" +
 	"\rexclude_paths\x18\x06 \x03(\tB\x10\xbaH\r\x92\x01\n" +
-	"\"\br\x06\x10\x012\x02\\SR\fexcludePaths\"\x99\x02\n" +
+	"\"\br\x06\x10\x012\x02\\SR\fexcludePaths\"\xac\x02\n" +
 	"\x10DependencyChange\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12!\n" +
 	"\fbase_version\x18\x02 \x01(\tR\vbaseVersion\x12%\n" +
@@ -5001,9 +5029,11 @@ const file_deputy_mcp_v1_mcp_proto_rawDesc = "" +
 	"\x04purl\x18\x04 \x01(\tR\x04purl\x12X\n" +
 	"\vchange_type\x18\x05 \x01(\tB7\xbaH4\xd8\x01\x01r/R\x05addedR\aremovedR\bupgradedR\n" +
 	"downgradedR\aupdatedR\n" +
-	"changeType\x12\x1b\n" +
-	"\tis_direct\x18\x06 \x01(\bR\bisDirect\x12\x1c\n" +
-	"\tecosystem\x18\a \x01(\tR\tecosystem\"\xc1\x03\n" +
+	"changeType\x12 \n" +
+	"\tis_direct\x18\x06 \x01(\bH\x00R\bisDirect\x88\x01\x01\x12\x1c\n" +
+	"\tecosystem\x18\a \x01(\tR\tecosystemB\f\n" +
+	"\n" +
+	"_is_direct\"\xc1\x03\n" +
 	"\x0eDiffVulnChange\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x18\n" +
 	"\aaliases\x18\x02 \x03(\tR\aaliases\x12X\n" +
@@ -5029,7 +5059,7 @@ const file_deputy_mcp_v1_mcp_proto_rawDesc = "" +
 	"\flayers_added\x18\b \x01(\x05R\vlayersAdded\x12%\n" +
 	"\x0elayers_removed\x18\t \x01(\x05R\rlayersRemoved\x12%\n" +
 	"\x0econfig_changed\x18\n" +
-	" \x01(\bR\rconfigChanged\"\xb5\x06\n" +
+	" \x01(\bR\rconfigChanged\"\xd0\x06\n" +
 	"\x0eDiffRefsResult\x12\x12\n" +
 	"\x04path\x18\x01 \x01(\tR\x04path\x12\x19\n" +
 	"\bbase_ref\x18\x02 \x01(\tR\abaseRef\x12\x1d\n" +
@@ -5038,8 +5068,8 @@ const file_deputy_mcp_v1_mcp_proto_rawDesc = "" +
 	"\vbase_commit\x18\x04 \x01(\tR\n" +
 	"baseCommit\x12#\n" +
 	"\rtarget_commit\x18\x05 \x01(\tR\ftargetCommit\x12\x1a\n" +
-	"\bplatform\x18\x06 \x01(\tR\bplatform\x12*\n" +
-	"\x11is_container_diff\x18\a \x01(\bR\x0fisContainerDiff\x129\n" +
+	"\bplatform\x18\x06 \x01(\tR\bplatform\x12/\n" +
+	"\x11is_container_diff\x18\a \x01(\bH\x00R\x0fisContainerDiff\x88\x01\x01\x129\n" +
 	"\achanges\x18\b \x03(\v2\x1f.deputy.mcp.v1.DependencyChangeR\achanges\x12\x1f\n" +
 	"\vadded_count\x18\t \x01(\x05R\n" +
 	"addedCount\x12#\n" +
@@ -5052,7 +5082,8 @@ const file_deputy_mcp_v1_mcp_proto_rawDesc = "" +
 	"\x11container_summary\x18\x0f \x01(\v2\x1f.deputy.mcp.v1.ContainerSummaryR\x10containerSummary\x1aG\n" +
 	"\x19VulnerabilitySummaryEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
-	"\x05value\x18\x02 \x01(\x05R\x05value:\x028\x01B\xa9\x01\n" +
+	"\x05value\x18\x02 \x01(\x05R\x05value:\x028\x01B\x14\n" +
+	"\x12_is_container_diffB\xa9\x01\n" +
 	"\x11com.deputy.mcp.v1B\bMcpProtoP\x01Z4github.com/temporalio/deputy/gen/deputy/mcp/v1;mcpv1\xa2\x02\x03DMX\xaa\x02\rDeputy.Mcp.V1\xca\x02\rDeputy\\Mcp\\V1\xe2\x02\x19Deputy\\Mcp\\V1\\GPBMetadata\xea\x02\x0fDeputy::Mcp::V1b\x06proto3"
 
 var (
@@ -5166,8 +5197,21 @@ func file_deputy_mcp_v1_mcp_proto_init() {
 	if File_deputy_mcp_v1_mcp_proto != nil {
 		return
 	}
+	file_deputy_mcp_v1_mcp_proto_msgTypes[6].OneofWrappers = []any{}
+	file_deputy_mcp_v1_mcp_proto_msgTypes[8].OneofWrappers = []any{}
+	file_deputy_mcp_v1_mcp_proto_msgTypes[10].OneofWrappers = []any{}
+	file_deputy_mcp_v1_mcp_proto_msgTypes[13].OneofWrappers = []any{}
+	file_deputy_mcp_v1_mcp_proto_msgTypes[17].OneofWrappers = []any{}
+	file_deputy_mcp_v1_mcp_proto_msgTypes[18].OneofWrappers = []any{}
+	file_deputy_mcp_v1_mcp_proto_msgTypes[20].OneofWrappers = []any{}
+	file_deputy_mcp_v1_mcp_proto_msgTypes[23].OneofWrappers = []any{}
+	file_deputy_mcp_v1_mcp_proto_msgTypes[25].OneofWrappers = []any{}
 	file_deputy_mcp_v1_mcp_proto_msgTypes[26].OneofWrappers = []any{}
 	file_deputy_mcp_v1_mcp_proto_msgTypes[27].OneofWrappers = []any{}
+	file_deputy_mcp_v1_mcp_proto_msgTypes[30].OneofWrappers = []any{}
+	file_deputy_mcp_v1_mcp_proto_msgTypes[36].OneofWrappers = []any{}
+	file_deputy_mcp_v1_mcp_proto_msgTypes[39].OneofWrappers = []any{}
+	file_deputy_mcp_v1_mcp_proto_msgTypes[42].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{

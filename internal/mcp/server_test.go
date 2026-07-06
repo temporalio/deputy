@@ -2573,7 +2573,7 @@ func TestScanPackage(t *testing.T) {
 				if result.Package == "" {
 					t.Error("result package is empty")
 				}
-				if !result.Clean {
+				if !result.GetClean() {
 					t.Error("expected clean result")
 				}
 			})
@@ -2648,7 +2648,7 @@ func TestScanPackage(t *testing.T) {
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		if result.Clean {
+		if result.GetClean() {
 			t.Error("expected non-clean result")
 		}
 		if len(result.Vulnerabilities) != 1 {
@@ -2756,7 +2756,7 @@ func TestScanDirectory(t *testing.T) {
 		if result.PackagesScanned != 10 {
 			t.Errorf("expected 10 packages scanned, got %d", result.PackagesScanned)
 		}
-		if !result.Clean {
+		if !result.GetClean() {
 			t.Error("expected clean result")
 		}
 	})
@@ -2874,7 +2874,7 @@ func TestScanDirectory(t *testing.T) {
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		if result.Clean {
+		if result.GetClean() {
 			t.Error("expected non-clean result")
 		}
 		if len(result.Vulnerabilities) != 1 {
@@ -2972,7 +2972,7 @@ func TestScanContainerDeduplicatesAdvisoryAliases(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	if result.Clean {
+	if result.GetClean() {
 		t.Fatal("expected non-clean container scan")
 	}
 	if len(result.Vulnerabilities) != 1 {
@@ -3102,8 +3102,8 @@ func TestListDependencies(t *testing.T) {
 		if len(result.Dependencies) != 1 {
 			t.Fatalf("expected 1 returned dependency, got %d", len(result.Dependencies))
 		}
-		if result.Total != 1 || result.Direct != 1 || result.Transitive != 0 {
-			t.Fatalf("returned counts = total %d, direct %d, transitive %d; want 1, 1, 0", result.Total, result.Direct, result.Transitive)
+		if result.Total != 1 || result.GetDirect() != 1 || result.Transitive != 0 {
+			t.Fatalf("returned counts = total %d, direct %d, transitive %d; want 1, 1, 0", result.Total, result.GetDirect(), result.Transitive)
 		}
 		if result.TotalDiscovered != 3 || result.DirectDiscovered != 1 || result.TransitiveDiscovered != 2 {
 			t.Fatalf("discovered counts = total %d, direct %d, transitive %d; want 3, 1, 2", result.TotalDiscovered, result.DirectDiscovered, result.TransitiveDiscovered)
@@ -3348,7 +3348,7 @@ func TestGetRemediation(t *testing.T) {
 		for _, cmd := range result.Commands {
 			if cmd.Command == "go get github.com/example/widget/v2@v2.0.1" {
 				foundMigrationCommand = true
-				if cmd.Executable {
+				if cmd.GetExecutable() {
 					t.Error("expected migration command to be non-executable")
 				}
 			}
@@ -3417,7 +3417,7 @@ func TestGetRemediation(t *testing.T) {
 			if cmd.TargetVersion != "v2.0.1" {
 				t.Errorf("target version = %q, want v2.0.1", cmd.TargetVersion)
 			}
-			if cmd.Executable {
+			if cmd.GetExecutable() {
 				t.Error("expected indirect migration command to be non-executable")
 			}
 			if !strings.Contains(cmd.Hint, "graph_why") {
@@ -3485,7 +3485,7 @@ func TestGetRemediation(t *testing.T) {
 			if !strings.Contains(cmd.Hint, "resolveTransitives true") {
 				t.Errorf("%s hint = %q, want resolveTransitives guidance", pkgName, cmd.Hint)
 			}
-			if cmd.Executable {
+			if cmd.GetExecutable() {
 				t.Errorf("%s indirect migration command should not be executable", pkgName)
 			}
 		}
@@ -3514,7 +3514,7 @@ func TestTriageVulnerabilitiesMigrationFix(t *testing.T) {
 		t.Fatalf("expected 1 vulnerability, got %d", len(result.Vulnerabilities))
 	}
 	vuln := result.Vulnerabilities[0]
-	if !vuln.HasFix {
+	if !vuln.GetHasFix() {
 		t.Error("expected migration-only vulnerability to have a fix")
 	}
 	if vuln.ResolvedFix == nil {
@@ -3747,7 +3747,7 @@ func TestAnalyzeDependencyGraph(t *testing.T) {
 		if result.Target == nil {
 			t.Fatal("expected target summary")
 		}
-		if !result.Target.Found {
+		if !result.Target.GetFound() {
 			t.Fatal("expected target summary to report found")
 		}
 		if got, want := int(result.Target.PathCount), 1; got != want {
@@ -3773,8 +3773,8 @@ func TestAnalyzeDependencyGraph(t *testing.T) {
 		if child.Ecosystem != "go" {
 			t.Errorf("structured child ecosystem = %q, want go", child.Ecosystem)
 		}
-		if child.Depth != 1 {
-			t.Errorf("structured child depth = %d, want 1", child.Depth)
+		if child.GetDepth() != 1 {
+			t.Errorf("structured child depth = %d, want 1", child.GetDepth())
 		}
 		if len(mockGraph.requests) != 1 {
 			t.Fatalf("expected 1 graph request, got %d", len(mockGraph.requests))
@@ -3925,7 +3925,7 @@ func TestAnalyzeDependencyGraph(t *testing.T) {
 		if result.Target == nil {
 			t.Fatal("expected target summary")
 		}
-		if !result.Target.Found {
+		if !result.Target.GetFound() {
 			t.Fatal("expected target summary to report found")
 		}
 		if got, want := result.Target.MatchedPurls, []string{dockerPURL}; !slices.Equal(got, want) {
@@ -3997,7 +3997,7 @@ func TestAnalyzeDependencyGraph(t *testing.T) {
 		if result.Target == nil {
 			t.Fatal("expected target summary")
 		}
-		if result.Target.Found {
+		if result.Target.GetFound() {
 			t.Fatal("expected target summary to report not found")
 		}
 		if got := result.Target.PathCount; got != 0 {
@@ -4037,7 +4037,7 @@ func TestAnalyzeDependencyGraph(t *testing.T) {
 		if result.Target == nil {
 			t.Fatal("expected target summary")
 		}
-		if !result.Target.Found {
+		if !result.Target.GetFound() {
 			t.Fatal("expected target summary to report found")
 		}
 		if got := result.Target.PathCount; got != 0 {
@@ -4087,10 +4087,10 @@ func TestGraphWhyUsesGraphService(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if !result.Found {
+	if !result.GetFound() {
 		t.Fatal("expected package to be found")
 	}
-	if result.Direct {
+	if result.GetDirect() {
 		t.Fatal("expected child package to be transitive")
 	}
 	if result.PathCount != 1 {
@@ -4107,7 +4107,7 @@ func TestGraphWhyUsesGraphService(t *testing.T) {
 	if got := result.Paths[0].NodeDetails[1].Purl; got != testChildPURL {
 		t.Errorf("structured path target PURL = %q, want %q", got, testChildPURL)
 	}
-	if result.Paths[0].NodeDetails[1].Direct {
+	if result.Paths[0].NodeDetails[1].GetDirect() {
 		t.Error("structured path target should be transitive")
 	}
 	if len(mockGraph.requests) != 1 {
@@ -4180,10 +4180,10 @@ func TestGraphWhyReturnsDirectPath(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if !result.Found {
+	if !result.GetFound() {
 		t.Fatal("expected package to be found")
 	}
-	if !result.Direct {
+	if !result.GetDirect() {
 		t.Fatal("expected root package to be direct")
 	}
 	if result.PathCount != 1 {
@@ -4192,7 +4192,7 @@ func TestGraphWhyReturnsDirectPath(t *testing.T) {
 	if len(result.Paths) != 1 {
 		t.Fatalf("expected 1 returned path, got %d", len(result.Paths))
 	}
-	if result.Paths[0].Depth != 0 {
+	if result.Paths[0].GetDepth() != 0 {
 		t.Fatalf("expected zero-hop direct path, got depth %d", result.Paths[0].Depth)
 	}
 	wantPath := []string{"github.com/example/root@v1.0.0"}
@@ -4206,11 +4206,11 @@ func TestGraphWhyReturnsDirectPath(t *testing.T) {
 	if root.Purl != testRootPURL {
 		t.Errorf("structured path PURL = %q, want %q", root.Purl, testRootPURL)
 	}
-	if !root.Direct {
+	if !root.GetDirect() {
 		t.Error("structured path root should be direct")
 	}
-	if root.Depth != 0 {
-		t.Errorf("structured path root depth = %d, want 0", root.Depth)
+	if root.GetDepth() != 0 {
+		t.Errorf("structured path root depth = %d, want 0", root.GetDepth())
 	}
 	if root.Ecosystem != "go" {
 		t.Errorf("structured path root ecosystem = %q, want go", root.Ecosystem)
@@ -4246,10 +4246,10 @@ require github.com/pkg/errors v0.9.1
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if !result.Found {
+	if !result.GetFound() {
 		t.Fatal("expected direct dependency to be found")
 	}
-	if !result.Direct {
+	if !result.GetDirect() {
 		t.Fatal("expected dependency to be direct")
 	}
 	if got, want := result.Purl, "pkg:golang/github.com/pkg/errors@0.9.1"; got != want {
@@ -4261,7 +4261,7 @@ require github.com/pkg/errors v0.9.1
 	if got, want := len(result.Paths), 1; got != want {
 		t.Fatalf("returned paths = %d, want %d", got, want)
 	}
-	if got, want := int(result.Paths[0].Depth), 0; got != want {
+	if got, want := int(result.Paths[0].GetDepth()), 0; got != want {
 		t.Fatalf("path depth = %d, want %d", got, want)
 	}
 }
@@ -4277,7 +4277,7 @@ func TestGraphWhyAcceptsPURLQuery(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if !result.Found {
+	if !result.GetFound() {
 		t.Fatal("expected package to be found")
 	}
 	if result.Purl != testChildPURL {
@@ -4312,7 +4312,7 @@ func TestGraphWhyAcceptsScanEmittedPURLWithEscapedVersion(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if !result.Found {
+	if !result.GetFound() {
 		t.Fatal("expected package to be found")
 	}
 	if result.Purl != dockerPURL {
@@ -4350,7 +4350,7 @@ func TestGraphWhyExplainsDisconnectedMatchedNode(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if !result.Found {
+	if !result.GetFound() {
 		t.Fatal("expected package to be found")
 	}
 	if result.PathCount != 0 {
@@ -4390,11 +4390,11 @@ func TestGraphNeedsUsesGraphService(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if !result.Found {
+	if !result.GetFound() {
 		t.Fatal("expected package to be found")
 	}
-	if result.DirectCount != 1 {
-		t.Fatalf("expected 1 direct dependent, got %d", result.DirectCount)
+	if result.GetDirectCount() != 1 {
+		t.Fatalf("expected 1 direct dependent, got %d", result.GetDirectCount())
 	}
 	if len(result.Dependents) != 1 {
 		t.Fatalf("expected 1 dependent, got %d", len(result.Dependents))
@@ -4455,8 +4455,8 @@ func TestGraphNeedsSortsDependentsDeterministically(t *testing.T) {
 	if !slices.Equal(got, want) {
 		t.Fatalf("dependents = %v, want %v", got, want)
 	}
-	if result.DirectCount != 2 || result.TransitiveCount != 1 {
-		t.Fatalf("counts = direct %d transitive %d, want 2 and 1", result.DirectCount, result.TransitiveCount)
+	if result.GetDirectCount() != 2 || result.GetTransitiveCount() != 1 {
+		t.Fatalf("counts = direct %d transitive %d, want 2 and 1", result.GetDirectCount(), result.GetTransitiveCount())
 	}
 }
 
@@ -4531,11 +4531,11 @@ func TestGraphNeedsExplainsEmptyDependents(t *testing.T) {
 			if err != nil {
 				t.Fatalf("unexpected error: %v", err)
 			}
-			if !result.Found {
+			if !result.GetFound() {
 				t.Fatal("expected package to be found")
 			}
-			if result.Direct != tt.wantDirect {
-				t.Fatalf("Direct = %v, want %v", result.Direct, tt.wantDirect)
+			if result.GetDirect() != tt.wantDirect {
+				t.Fatalf("Direct = %v, want %v", result.GetDirect(), tt.wantDirect)
 			}
 			// The protojson wire omits empty collections, so an empty
 			// dependents list round-trips as nil: absent means zero.
@@ -4560,14 +4560,14 @@ func TestGraphNeedsAcceptsVersionedPackageQuery(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if !result.Found {
+	if !result.GetFound() {
 		t.Fatal("expected package to be found")
 	}
 	if result.Purl != testChildPURL {
 		t.Fatalf("PURL = %q, want %q", result.Purl, testChildPURL)
 	}
-	if result.DirectCount != 1 {
-		t.Fatalf("expected 1 direct dependent, got %d", result.DirectCount)
+	if result.GetDirectCount() != 1 {
+		t.Fatalf("expected 1 direct dependent, got %d", result.GetDirectCount())
 	}
 
 	result, err = callProtoTool(t, context.Background(), s.graphNeeds, &mcpv1.GraphNeedsRequest{
@@ -4577,7 +4577,7 @@ func TestGraphNeedsAcceptsVersionedPackageQuery(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error for version mismatch: %v", err)
 	}
-	if result.Found {
+	if result.GetFound() {
 		t.Fatal("expected version mismatch not to match")
 	}
 	// The protojson wire omits empty collections: absent means zero.
@@ -4604,17 +4604,17 @@ func TestGraphNeedsAcceptsScanEmittedPURLWithEscapedVersionEquivalent(t *testing
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if !result.Found {
+	if !result.GetFound() {
 		t.Fatal("expected package to be found")
 	}
 	if result.Purl != dockerPURL {
 		t.Fatalf("PURL = %q, want %q", result.Purl, dockerPURL)
 	}
-	if result.Direct {
+	if result.GetDirect() {
 		t.Fatal("Direct = true, want false")
 	}
-	if result.DirectCount != 1 {
-		t.Fatalf("expected 1 direct dependent, got %d", result.DirectCount)
+	if result.GetDirectCount() != 1 {
+		t.Fatalf("expected 1 direct dependent, got %d", result.GetDirectCount())
 	}
 	if len(result.Dependents) != 1 {
 		t.Fatalf("expected 1 dependent, got %d", len(result.Dependents))
@@ -4938,7 +4938,7 @@ func TestDiffGitRefsPreservesDirectness(t *testing.T) {
 		if !ok {
 			t.Fatalf("unexpected change %q", change.Name)
 		}
-		if change.IsDirect != want {
+		if change.GetIsDirect() != want {
 			t.Errorf("%s isDirect = %v, want %v", change.Name, change.IsDirect, want)
 		}
 	}
@@ -5112,7 +5112,7 @@ func TestDiffRefsRoutesLocalhostRegistryAsContainer(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if !result.IsContainerDiff {
+	if !result.GetIsContainerDiff() {
 		t.Fatalf("expected container diff")
 	}
 	if got, want := result.BaseRef, "localhost:5000/app:v1"; got != want {
@@ -5350,7 +5350,7 @@ func TestDiffRefsPrefersGitRefsInRepositoryContext(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if result.IsContainerDiff {
+	if result.GetIsContainerDiff() {
 		t.Fatalf("expected Git ref diff")
 	}
 	if got, want := len(mockScan.requests), 2; got != want {
@@ -5370,10 +5370,10 @@ func TestDiffRefsPrefersGitRefsInRepositoryContext(t *testing.T) {
 func TestSortDependencyChangesStableAgentOrder(t *testing.T) {
 	changes := []*mcpv1.DependencyChange{
 		{Name: "zeta", Ecosystem: "npm", Purl: "pkg:npm/zeta@1.0.0", ChangeType: "added"},
-		{Name: "bravo", Ecosystem: "go", Purl: "pkg:golang/example.com/bravo@v1.0.0", ChangeType: "removed", IsDirect: true},
+		{Name: "bravo", Ecosystem: "go", Purl: "pkg:golang/example.com/bravo@v1.0.0", ChangeType: "removed", IsDirect: proto.Bool(true)},
 		{Name: "alpha", Ecosystem: "go", Purl: "pkg:golang/example.com/alpha@v1.1.0", ChangeType: "upgraded"},
-		{Name: "alpha", Ecosystem: "go", Purl: "pkg:golang/example.com/alpha@v1.0.0", ChangeType: "added", IsDirect: true},
-		{Name: "charlie", Ecosystem: "go", Purl: "pkg:golang/example.com/charlie@v1.0.0", ChangeType: "downgraded", IsDirect: true},
+		{Name: "alpha", Ecosystem: "go", Purl: "pkg:golang/example.com/alpha@v1.0.0", ChangeType: "added", IsDirect: proto.Bool(true)},
+		{Name: "charlie", Ecosystem: "go", Purl: "pkg:golang/example.com/charlie@v1.0.0", ChangeType: "downgraded", IsDirect: proto.Bool(true)},
 	}
 
 	sortDependencyChanges(changes)
@@ -5386,7 +5386,7 @@ func TestSortDependencyChangesStableAgentOrder(t *testing.T) {
 		"alpha:upgraded:false",
 	}
 	for i, want := range want {
-		got := fmt.Sprintf("%s:%s:%t", changes[i].Name, changes[i].ChangeType, changes[i].IsDirect)
+		got := fmt.Sprintf("%s:%s:%t", changes[i].Name, changes[i].ChangeType, changes[i].GetIsDirect())
 		if got != want {
 			t.Fatalf("change %d = %s, want %s; full order: %+v", i, got, want, changes)
 		}

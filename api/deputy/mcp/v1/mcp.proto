@@ -23,6 +23,12 @@ option go_package = "github.com/temporalio/deputy/gen/deputy/mcp/v1;mcpv1";
 //     enums from the same lists.
 //   - Counts and durations use int32 so protojson emits JSON numbers
 //     (protojson serializes 64-bit integers as strings).
+//   - Affirmative answers use proto3 optional (explicit presence): fields
+//     whose zero value is a statement an agent acts on (found, clean, direct,
+//     hasFix, executable, depth, isContainerDiff) are always set by handlers
+//     and therefore always on the wire, matching the deputy.graph.v1 and
+//     deputy.vulnerability.v1 convention. Plain fields omit zero values:
+//     absence means empty, none, or not applicable.
 //   - These are agent-curated projections; the full normalized data lives in
 //     the service protos (deputy.scan.v1, deputy.triage.v1, …) that the CLI
 //     and API emit.
@@ -154,8 +160,9 @@ message ScanDirectoryResult {
   // Vulnerabilities are the consolidated findings.
   repeated VulnExplanation vulnerabilities = 7;
   // Clean reports whether no vulnerabilities were found; success, not an
-  // error. Check coverage to see what was and was not checked.
-  bool clean = 8;
+  // error. Always present. Check coverage to see what was and was not
+  // checked.
+  optional bool clean = 8;
   // Coverage reports advisory-source coverage for the scanned inventory.
   Coverage coverage = 9;
   // ScanTime is the elapsed scan time as a human-readable duration.
@@ -188,8 +195,9 @@ message ScanContainerResult {
   // Vulnerabilities are the consolidated findings.
   repeated VulnExplanation vulnerabilities = 5;
   // Clean reports whether no vulnerabilities were found; success, not an
-  // error. Check coverage to see what was and was not checked.
-  bool clean = 6;
+  // error. Always present. Check coverage to see what was and was not
+  // checked.
+  optional bool clean = 6;
   // Coverage reports advisory-source coverage for the scanned inventory.
   Coverage coverage = 7;
   // ScanTime is the elapsed scan time as a human-readable duration.
@@ -233,10 +241,11 @@ message TriagedVuln {
   // Purl is the package URL for exact follow-up with graph_why, graph_needs,
   // or scan_package.
   string purl = 8;
-  // IsDirect reports whether the package is a direct dependency.
-  bool is_direct = 9;
-  // HasFix reports whether an actionable fix exists.
-  bool has_fix = 10;
+  // IsDirect reports whether the package is a direct dependency. Always
+  // present.
+  optional bool is_direct = 9;
+  // HasFix reports whether an actionable fix exists. Always present.
+  optional bool has_fix = 10;
   // FixedVersions are versions containing a fix on the package's own module
   // path.
   repeated string fixed_versions = 11;
@@ -330,8 +339,8 @@ message DependencyInfo {
   // Purl is the package URL for exact follow-up with graph_why, graph_needs,
   // or scan_package.
   string purl = 4;
-  // Direct reports whether this is a direct dependency.
-  bool direct = 5;
+  // Direct reports whether this is a direct dependency. Always present.
+  optional bool direct = 5;
   // Locations lists file paths where this package was referenced.
   repeated string locations = 6;
   // ManifestRefs are the structured manifest declarations for this dependency,
@@ -416,11 +425,11 @@ message GraphPathNode {
   string ecosystem = 3;
   // Purl is the package URL for exact follow-up queries.
   string purl = 4;
-  // Direct reports whether this is a direct dependency.
-  bool direct = 5;
-  // Depth is the node's distance from the nearest root; absent means 0, a
-  // root/direct dependency.
-  int32 depth = 6;
+  // Direct reports whether this is a direct dependency. Always present.
+  optional bool direct = 5;
+  // Depth is the node's distance from the nearest root (0 for roots). Always
+  // present.
+  optional int32 depth = 6;
   // Disconnected reports that the node has no path from any root (e.g. GitHub
   // Actions or Dockerfile base images).
   bool disconnected = 7;
@@ -437,9 +446,9 @@ message GraphPath {
   // NodeDetails are the structured nodes along the path, root first.
   repeated GraphPathNode node_details = 2;
   // Depth is the number of edges in the path (hops from the root), so a
-  // direct dependency's single-node path has depth 0 (absent). Not to be
-  // confused with each node's own depth.
-  int32 depth = 3;
+  // direct dependency's single-node path has depth 0. Always present; not to
+  // be confused with each node's own depth.
+  optional int32 depth = 3;
 }
 
 // AnalyzeGraphRequest asks for dependency graph statistics and vulnerable
@@ -470,8 +479,8 @@ message AnalyzeGraphRequest {
 message GraphTargetResult {
   // Query is the targetPurl as requested.
   string query = 1;
-  // Found reports whether the target matched any graph node.
-  bool found = 2;
+  // Found reports whether the target matched any graph node. Always present.
+  optional bool found = 2;
   // PathCount is the total number of dependency paths to the target before
   // truncation.
   int32 path_count = 3;
@@ -543,8 +552,8 @@ message GraphWhyRequest {
 }
 
 // GraphWhyResult explains why a package is in the dependency graph. A package
-// absent from the graph is a normal result, not an error: found is absent
-// (false) and message explains the outcome.
+// absent from the graph is a normal found: false result, not an error;
+// message explains the outcome.
 message GraphWhyResult {
   // Package is the matched package name, or the query when nothing matched.
   string package = 1;
@@ -558,11 +567,11 @@ message GraphWhyResult {
   string effective_ref = 5;
   // Commit is the resolved commit hash of the analyzed snapshot.
   string commit = 6;
-  // Direct reports whether the matched package is a direct dependency.
-  bool direct = 7;
-  // Found reports whether the package matched any graph node; absent means
-  // not found.
-  bool found = 8;
+  // Direct reports whether the matched package is a direct dependency;
+  // absent when the package was not found.
+  optional bool direct = 7;
+  // Found reports whether the package matched any graph node. Always present.
+  optional bool found = 8;
   // MatchedNode is the structured node the query resolved to.
   GraphPathNode matched_node = 9;
   // Paths are dependency path examples, truncated to a compact sample; use
@@ -600,8 +609,8 @@ message GraphNeedsRequest {
 }
 
 // GraphNeedsResult lists the packages that depend on a package. A package
-// absent from the graph is a normal result, not an error: found is absent
-// (false) and message explains the outcome.
+// absent from the graph is a normal found: false result, not an error;
+// message explains the outcome.
 message GraphNeedsResult {
   // Package is the matched package name, or the query when nothing matched.
   string package = 1;
@@ -615,20 +624,22 @@ message GraphNeedsResult {
   string effective_ref = 5;
   // Commit is the resolved commit hash of the analyzed snapshot.
   string commit = 6;
-  // Direct reports whether the matched package is a direct dependency.
-  bool direct = 7;
-  // Found reports whether the package matched any graph node; absent means
-  // not found.
-  bool found = 8;
+  // Direct reports whether the matched package is a direct dependency;
+  // absent when the package was not found.
+  optional bool direct = 7;
+  // Found reports whether the package matched any graph node. Always present.
+  optional bool found = 8;
   // MatchedNode is the structured node the query resolved to.
   GraphPathNode matched_node = 9;
   // Dependents are the packages that depend on the matched package, direct
   // dependents first.
   repeated DependencyInfo dependents = 10;
-  // DirectCount counts dependents that are direct dependencies.
-  int32 direct_count = 11;
-  // TransitiveCount counts dependents that are transitive dependencies.
-  int32 transitive_count = 12;
+  // DirectCount counts dependents that are direct dependencies; absent when
+  // the package was not found.
+  optional int32 direct_count = 11;
+  // TransitiveCount counts dependents that are transitive dependencies;
+  // absent when the package was not found.
+  optional int32 transitive_count = 12;
   // Message explains the outcome in one sentence.
   string message = 13;
 }
@@ -698,8 +709,8 @@ message ScanPackageResult {
   // compact sample.
   repeated VulnExplanation vulnerabilities = 5;
   // Clean reports whether no vulnerabilities were found; success, not an
-  // error.
-  bool clean = 6;
+  // error. Always present.
+  optional bool clean = 6;
 }
 
 // GetServerInfoRequest has no parameters.
@@ -790,10 +801,11 @@ message RemediationCommand {
   // Hint gives extra guidance for applying the command.
   string hint = 10;
   // IsDirect reports whether the affected package is a direct dependency.
-  bool is_direct = 11;
+  // Always present.
+  optional bool is_direct = 11;
   // Executable reports whether the command can be run as-is; manual commands
-  // are guidance only.
-  bool executable = 12;
+  // are guidance only. Always present.
+  optional bool executable = 12;
   // Groups are the dependency groups the package belongs to.
   repeated string groups = 13;
 }
@@ -868,8 +880,9 @@ message DependencyChange {
   // ChangeType classifies the difference. Version changes are upgraded or
   // downgraded when the versions compare, updated otherwise.
   string change_type = 5 [(buf.validate.field).string = {in: ["added", "removed", "upgraded", "downgraded", "updated"]}, (buf.validate.field).ignore = IGNORE_IF_ZERO_VALUE];
-  // IsDirect reports whether the package is a direct dependency.
-  bool is_direct = 6;
+  // IsDirect reports whether the package is a direct dependency. Always
+  // present.
+  optional bool is_direct = 6;
   // Ecosystem is the canonical package ecosystem.
   string ecosystem = 7;
 }
@@ -943,9 +956,9 @@ message DiffRefsResult {
   string target_commit = 5;
   // Platform is the compared platform for container image diffs.
   string platform = 6;
-  // IsContainerDiff reports whether container images were compared; absent
-  // means a Git ref diff.
-  bool is_container_diff = 7;
+  // IsContainerDiff reports whether container images were compared (false
+  // means a Git ref diff). Always present.
+  optional bool is_container_diff = 7;
   // Changes are the package-level differences, direct dependencies first.
   repeated DependencyChange changes = 8;
   // AddedCount counts added packages.

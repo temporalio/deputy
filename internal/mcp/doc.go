@@ -43,8 +43,11 @@
 // requests are enforced against the same buf.validate rules the schemas
 // advertise, and the SDK validates every result against its output schema, so
 // the schema, the wire, and the server cannot drift apart. Results are
-// protojson with camelCase names; zero values are omitted, so an absent field
-// means empty, zero, or false.
+// protojson with camelCase names. Zero values of plain fields are omitted, so
+// an absent field means empty, none, or not applicable; affirmative answers
+// (found, clean, direct, hasFix, executable, depth, isContainerDiff) use
+// proto3 optional, are always set by handlers, and are therefore always on
+// the wire.
 //
 // # Running the Server
 //
