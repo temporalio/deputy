@@ -1112,8 +1112,7 @@ func (s *Server) listPolicyEntrypointsTool(ctx context.Context, args *mcpv1.List
 	logs.Debug(ctx, "MCP tool invoked", "tool", "list_policy_entrypoints", "category", category)
 
 	if s.clients.Policy == nil {
-		err := fmt.Errorf("policy service client is not configured")
-		return nil, err
+		return nil, fmt.Errorf("policy service client is not configured")
 	}
 
 	resp, err := s.clients.Policy.ListEntrypoints(ctx, connect.NewRequest(&policyv1.ListEntrypointsRequest{
@@ -1150,8 +1149,7 @@ func (s *Server) explainVulnerabilityTool(ctx context.Context, args *mcpv1.Expla
 
 	vulnID := strings.TrimSpace(args.GetId())
 	if vulnID == "" {
-		err := fmt.Errorf("vulnerability ID is required")
-		return nil, err
+		return nil, fmt.Errorf("vulnerability ID is required")
 	}
 
 	span.SetAttributes(otel.AttrMCPVulnerabilityID.String(vulnID))
@@ -1604,8 +1602,7 @@ func (s *Server) getRemediationTool(ctx context.Context, args *mcpv1.GetRemediat
 	span.SetAttributes(otel.AttrTargetPath.String(targetPath))
 
 	if s.clients.Remediation == nil {
-		err := fmt.Errorf("remediation service client is not configured")
-		return nil, err
+		return nil, fmt.Errorf("remediation service client is not configured")
 	}
 
 	// Build proto request
@@ -1683,8 +1680,7 @@ func (s *Server) analyzeDependencyGraphTool(ctx context.Context, args *mcpv1.Ana
 	logs.Debug(ctx, "MCP tool invoked", "tool", "analyze_dependency_graph", "path", args.GetPath(), "target_purl", args.GetTargetPurl())
 
 	if args.GetPath() == "" {
-		err := fmt.Errorf("path is required")
-		return nil, err
+		return nil, fmt.Errorf("path is required")
 	}
 	targetPath, err := normalizeLocalPath(args.GetPath())
 	if err != nil {
@@ -1891,8 +1887,7 @@ func (s *Server) graphWhyTool(ctx context.Context, args *mcpv1.GraphWhyRequest) 
 		return nil, err
 	}
 	if packageQuery == "" {
-		err := fmt.Errorf("package name is required")
-		return nil, err
+		return nil, fmt.Errorf("package name is required")
 	}
 
 	span.SetAttributes(
@@ -2015,8 +2010,7 @@ func (s *Server) graphNeedsTool(ctx context.Context, args *mcpv1.GraphNeedsReque
 		return nil, err
 	}
 	if packageQuery == "" {
-		err := fmt.Errorf("package name is required")
-		return nil, err
+		return nil, fmt.Errorf("package name is required")
 	}
 
 	span.SetAttributes(
@@ -2125,8 +2119,7 @@ func (s *Server) triageVulnerabilitiesTool(ctx context.Context, args *mcpv1.Tria
 	logs.Debug(ctx, "MCP tool invoked", "tool", "triage_vulnerabilities", "path", args.GetPath())
 
 	if args.GetPath() == "" {
-		err := fmt.Errorf("path is required")
-		return nil, err
+		return nil, fmt.Errorf("path is required")
 	}
 	targetPath, err := normalizeLocalPath(args.GetPath())
 	if err != nil {
@@ -2302,8 +2295,7 @@ func (s *Server) scanContainerTool(ctx context.Context, args *mcpv1.ScanContaine
 
 	imageRef := strings.TrimSpace(args.GetImage())
 	if imageRef == "" {
-		err := fmt.Errorf("image is required")
-		return nil, err
+		return nil, fmt.Errorf("image is required")
 	}
 	platform := strings.TrimSpace(args.GetPlatform())
 
@@ -2398,8 +2390,7 @@ func (s *Server) diffRefsTool(ctx context.Context, args *mcpv1.DiffRefsRequest) 
 	}
 
 	if isMixedContainerRefInput(args) {
-		err := fmt.Errorf("baseRef and targetRef must both be Git refs or both be container image refs")
-		return nil, err
+		return nil, fmt.Errorf("baseRef and targetRef must both be Git refs or both be container image refs")
 	}
 
 	// Check if this looks like a container image diff.
