@@ -125,7 +125,7 @@ var BindingProfiles = map[Entrypoint]BindingProfile{
 	EntrypointDiffDependencyChange: {
 		Entrypoint:  EntrypointDiffDependencyChange,
 		Required:    append([]string{"change", "dependency", "pkg"}, envVars...),
-		Optional:    targetVars,
+		Optional:    []string{"repo", "base_ref", "target_ref"},
 		Description: "Triggers for each dependency change in a diff",
 	},
 	EntrypointDiffVulnerability: {
@@ -218,8 +218,8 @@ var BindingProfiles = map[Entrypoint]BindingProfile{
 	// Triage entrypoints
 	EntrypointTriageReport: {
 		Entrypoint:  EntrypointTriageReport,
-		Required:    append([]string{"findings", "vulnerabilities"}, envVars...),
-		Optional:    []string{"repo"},
+		Required:    append([]string{"report", "target", "stats", "top_packages"}, envVars...),
+		Optional:    nil,
 		Description: "Triggers after a triage report is generated",
 	},
 	EntrypointTriageCluster: {

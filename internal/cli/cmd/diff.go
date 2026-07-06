@@ -1118,11 +1118,12 @@ func runDiffPolicies(ctx context.Context, policyPaths []string, diffReport DiffP
 	// Evaluate per-change policies
 	for _, protoChange := range protoChanges {
 		changePayload := map[string]any{
-			"repo":      diffReport.Repo,
-			"baseRef":   diffReport.BaseRef,
-			"targetRef": diffReport.TargetRef,
-			"change":    protoChange,
-			"pkg":       protoChange.Package, // Alias for consistency with scan entrypoints
+			"repo":       diffReport.Repo,
+			"base_ref":   diffReport.BaseRef,
+			"target_ref": diffReport.TargetRef,
+			"change":     protoChange,
+			"pkg":        protoChange.Package, // Alias for consistency with scan entrypoints
+			"dependency": protoChange.Package, // Alias for consistency with fix entrypoints
 		}
 		if _, err := evaluatePoliciesForCommand(ctx, policyPaths, changePayload, "diff", policy.EntrypointDiffDependencyChange, errW); err != nil {
 			return err

@@ -184,7 +184,9 @@ Helpers: `now()`, `age()`, `levenshtein()`, `levenshteinWithin()`
 | `dependency` | `dependencyv1.Package` | yes | Dependency associated with a change |
 | `pkg` | `dependencyv1.Package` | yes | Package associated with the current policy item |
 | `env` | `policyv1.Environment` | yes | Execution environment context |
-| `target` | `targetv1.Target` | no | Target or provenance metadata |
+| `repo` | `string` | no | Repository path |
+| `base_ref` | `string` | no | Diff base reference |
+| `target_ref` | `string` | no | Diff target reference |
 
 #### `diff_vulnerability`
 
@@ -601,10 +603,11 @@ Helpers: `now()`, `age()`, `levenshtein()`, `levenshteinWithin()`
 
 | Variable | Type | Required | Description |
 | --- | --- | --- | --- |
-| `findings` | `list(object)` | yes | Triage findings |
-| `vulnerabilities` | `list(vulnerabilityv1.Finding)` | yes | Vulnerability findings |
+| `report` | `object` | yes | Scan report data |
+| `target` | `targetv1.Target` | yes | Target or provenance metadata |
+| `stats` | `object` | yes | Summary statistics for the current report |
+| `top_packages` | `list(object)` | yes | Triage package summaries, most urgent first |
 | `env` | `policyv1.Environment` | yes | Execution environment context |
-| `repo` | `string` | no | Repository path |
 
 #### `triage_cluster`
 
@@ -729,7 +732,7 @@ Finding represents a scan-time occurrence of an advisory in a dependency.
 | `kev_required_action` | `string` | KevRequiredAction is CISA's required remediation action. |
 | `package` | `Package` | Package contains the affected dependency information. |
 | `path` | `list(string)` | Path is the dependency chain from root to vulnerable package. |
-| `sources` | `list(string)` | Sources names the advisory source(s) that reported this finding (e.g. |
+| `sources` | `list(string)` | Sources names the advisory source(s) that reported this finding (e.g. "osv"). |
 <!-- END GENERATED: policy-entrypoints -->
 
 ## Canonical ecosystems

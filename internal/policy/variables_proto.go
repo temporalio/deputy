@@ -79,7 +79,7 @@ func VariableFieldCompletions(path string) (fields []string, ok bool) {
 
 	fds := md.Fields()
 	fields = make([]string, 0, fds.Len())
-	for i := 0; i < fds.Len(); i++ {
+	for i := range fds.Len() {
 		fields = append(fields, string(fds.Get(i).Name()))
 	}
 	slices.Sort(fields)
