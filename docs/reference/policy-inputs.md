@@ -75,15 +75,662 @@ For sandbox policies, `env.command` is `sandbox` even when the operation is star
 
 ## Sandbox Entrypoints
 
-`deputy exec --policy` evaluates `sandbox_execution` before a sandboxed command starts. Deputy also defines `sandbox_command` and `sandbox_network` as canonical sandbox policy entrypoints for runtime/plugin integrations that evaluate individual commands or network requests.
+`deputy exec --policy` evaluates `sandbox_execution` before a sandboxed command starts. Deputy also defines `sandbox_command` and `sandbox_network` as canonical sandbox policy entrypoints for runtime/plugin integrations that evaluate individual commands or network requests. Their variables are listed in the [entrypoint reference](#entrypoint-reference) below.
 
-Sandbox entrypoint variables:
+<!-- BEGIN GENERATED: policy-entrypoints -->
+## Entrypoint reference
 
-| Entrypoint | Required variables | Optional variables |
+Each entrypoint's variables come from the policy binding registry, the
+same source the `deputy policy` API, the MCP `list_policy_entrypoints`
+tool, and the policy LSP serve. Required variables are always bound;
+guard optional variables with CEL optional syntax (`?.field.orValue()`).
+
+### Category: `container_diff`
+
+#### `container_diff_report`
+
+Triggers after a container image diff completes
+
+Helpers: `now()`, `age()`, `levenshtein()`, `levenshteinWithin()`
+
+| Variable | Type | Required | Description |
+| --- | --- | --- | --- |
+| `base_image` | `string` | yes | Base image reference |
+| `target_image` | `string` | yes | Target image reference |
+| `package_changes` | `list(object)` | yes | Package changes between container images |
+| `vulnerability_changes` | `list(object)` | yes | Vulnerability changes between container images |
+| `config_changes` | `object` | yes | Container image configuration changes |
+| `layer_analysis` | `object` | yes | Layer-by-layer container diff analysis |
+| `summary` | `object` | yes | Container diff summary |
+| `env` | `policyv1.Environment` | yes | Execution environment context |
+
+#### `container_diff_change`
+
+Triggers for each package change between container images
+
+Helpers: `now()`, `age()`, `levenshtein()`, `levenshteinWithin()`
+
+| Variable | Type | Required | Description |
+| --- | --- | --- | --- |
+| `change` | `object` | yes | Current dependency or package change |
+| `env` | `policyv1.Environment` | yes | Execution environment context |
+| `base_image` | `string` | no | Base image reference |
+| `target_image` | `string` | no | Target image reference |
+
+#### `container_diff_vulnerability`
+
+Triggers for each vulnerability difference between images
+
+Helpers: `now()`, `age()`, `levenshtein()`, `levenshteinWithin()`
+
+| Variable | Type | Required | Description |
+| --- | --- | --- | --- |
+| `vulnerability` | `vulnerabilityv1.Finding` | yes | Current vulnerability finding |
+| `pkg` | `dependencyv1.Package` | yes | Package associated with the current policy item |
+| `env` | `policyv1.Environment` | yes | Execution environment context |
+| `base_image` | `string` | no | Base image reference |
+| `target_image` | `string` | no | Target image reference |
+
+#### `container_diff_layer`
+
+Triggers for each layer difference analysis
+
+Helpers: `now()`, `age()`, `levenshtein()`, `levenshteinWithin()`
+
+| Variable | Type | Required | Description |
+| --- | --- | --- | --- |
+| `layer` | `object` | yes | Container image layer analysis |
+| `env` | `policyv1.Environment` | yes | Execution environment context |
+| `base_image` | `string` | no | Base image reference |
+| `target_image` | `string` | no | Target image reference |
+
+#### `container_diff_config`
+
+Triggers for configuration changes between images
+
+Helpers: `now()`, `age()`, `levenshtein()`, `levenshteinWithin()`
+
+| Variable | Type | Required | Description |
+| --- | --- | --- | --- |
+| `config_changes` | `object` | yes | Container image configuration changes |
+| `env` | `policyv1.Environment` | yes | Execution environment context |
+| `base_image` | `string` | no | Base image reference |
+| `target_image` | `string` | no | Target image reference |
+
+### Category: `diff`
+
+#### `diff_report`
+
+Triggers after a dependency diff completes
+
+Helpers: `now()`, `age()`, `levenshtein()`, `levenshteinWithin()`
+
+| Variable | Type | Required | Description |
+| --- | --- | --- | --- |
+| `changes` | `list(object)` | yes | Dependency changes |
+| `vulnerabilities` | `list(vulnerabilityv1.Finding)` | yes | Vulnerability findings |
+| `env` | `policyv1.Environment` | yes | Execution environment context |
+| `target` | `targetv1.Target` | no | Target or provenance metadata |
+
+#### `diff_dependency_change`
+
+Triggers for each dependency change in a diff
+
+Helpers: `now()`, `age()`, `levenshtein()`, `levenshteinWithin()`
+
+| Variable | Type | Required | Description |
+| --- | --- | --- | --- |
+| `change` | `object` | yes | Current dependency or package change |
+| `dependency` | `dependencyv1.Package` | yes | Dependency associated with a change |
+| `pkg` | `dependencyv1.Package` | yes | Package associated with the current policy item |
+| `env` | `policyv1.Environment` | yes | Execution environment context |
+| `target` | `targetv1.Target` | no | Target or provenance metadata |
+
+#### `diff_vulnerability`
+
+Triggers for each vulnerability found in a diff
+
+Helpers: `now()`, `age()`, `levenshtein()`, `levenshteinWithin()`
+
+| Variable | Type | Required | Description |
+| --- | --- | --- | --- |
+| `vulnerability` | `vulnerabilityv1.Finding` | yes | Current vulnerability finding |
+| `pkg` | `dependencyv1.Package` | yes | Package associated with the current policy item |
+| `env` | `policyv1.Environment` | yes | Execution environment context |
+| `target` | `targetv1.Target` | no | Target or provenance metadata |
+
+### Category: `dockerfile`
+
+#### `dockerfile_report`
+
+Triggers after a Dockerfile is parsed
+
+Helpers: `now()`, `age()`, `levenshtein()`, `levenshteinWithin()`
+
+| Variable | Type | Required | Description |
+| --- | --- | --- | --- |
+| `dockerfile` | `object` | yes | Parsed Dockerfile structure |
+| `dockerfile_analysis` | `object` | yes | Dockerfile analysis results |
+| `env` | `policyv1.Environment` | yes | Execution environment context |
+| `target` | `targetv1.Target` | no | Target or provenance metadata |
+
+#### `dockerfile_stage`
+
+Triggers for each stage in a multi-stage Dockerfile
+
+Helpers: `now()`, `age()`, `levenshtein()`, `levenshteinWithin()`
+
+| Variable | Type | Required | Description |
+| --- | --- | --- | --- |
+| `stage` | `object` | yes | Current Dockerfile stage |
+| `env` | `policyv1.Environment` | yes | Execution environment context |
+| `dockerfile` | `object` | no | Parsed Dockerfile structure |
+| `dockerfile_analysis` | `object` | no | Dockerfile analysis results |
+
+### Category: `fix`
+
+#### `fix_plan`
+
+Triggers after a remediation plan is generated
+
+Helpers: `now()`, `age()`, `levenshtein()`, `levenshteinWithin()`
+
+| Variable | Type | Required | Description |
+| --- | --- | --- | --- |
+| `plan` | `object` | yes | Remediation plan |
+| `env` | `policyv1.Environment` | yes | Execution environment context |
+| `vulnerabilities` | `list(vulnerabilityv1.Finding)` | no | Vulnerability findings |
+| `repo` | `string` | no | Repository path |
+
+#### `fix_plan_step`
+
+Triggers for each step in a remediation plan
+
+Helpers: `now()`, `age()`, `levenshtein()`, `levenshteinWithin()`
+
+| Variable | Type | Required | Description |
+| --- | --- | --- | --- |
+| `step` | `object` | yes | Current remediation plan step |
+| `env` | `policyv1.Environment` | yes | Execution environment context |
+| `plan` | `object` | no | Remediation plan |
+
+### Category: `graph`
+
+#### `graph_report`
+
+Triggers after a dependency graph is built with full graph data
+
+Helpers: `now()`, `age()`, `levenshtein()`, `levenshteinWithin()`, `graphMatch()`, `isDirectDep()`, `nodeDepth()`, `nodeEcosystem()`, `hasVulnerabilities()`, `vulnerabilityCount()`, `pathLength()`, `pathContains()`
+
+| Variable | Type | Required | Description |
+| --- | --- | --- | --- |
+| `graph` | `graphv1.Graph` | yes | Dependency graph data |
+| `nodes` | `list(graphv1.Node)` | yes | Dependency graph nodes |
+| `edges` | `list(graphv1.Edge)` | yes | Dependency graph edges |
+| `stats` | `object` | yes | Summary statistics for the current report |
+| `roots` | `list(string)` | yes | PURLs of direct (depth-0) dependencies |
+| `env` | `policyv1.Environment` | yes | Execution environment context |
+| `target` | `targetv1.Target` | no | Target or provenance metadata |
+
+#### `graph_node`
+
+Triggers for each node in the dependency graph
+
+Helpers: `now()`, `age()`, `levenshtein()`, `levenshteinWithin()`, `graphMatch()`, `isDirectDep()`, `nodeDepth()`, `nodeEcosystem()`, `hasVulnerabilities()`, `vulnerabilityCount()`, `pathLength()`, `pathContains()`
+
+| Variable | Type | Required | Description |
+| --- | --- | --- | --- |
+| `node` | `graphv1.Node` | yes | Current dependency graph node |
+| `env` | `policyv1.Environment` | yes | Execution environment context |
+| `nodes` | `list(graphv1.Node)` | no | Dependency graph nodes |
+| `edges` | `list(graphv1.Edge)` | no | Dependency graph edges |
+| `stats` | `object` | no | Summary statistics for the current report |
+| `ancestors` | `list(graphv1.Node)` | no | Ancestor nodes for the current graph node |
+| `descendants` | `list(graphv1.Node)` | no | Descendant nodes for the current graph node |
+| `target` | `targetv1.Target` | no | Target or provenance metadata |
+
+#### `graph_edge`
+
+Triggers for each edge in the dependency graph
+
+Helpers: `now()`, `age()`, `levenshtein()`, `levenshteinWithin()`, `graphMatch()`, `isDirectDep()`, `nodeDepth()`, `nodeEcosystem()`, `hasVulnerabilities()`, `vulnerabilityCount()`, `pathLength()`, `pathContains()`
+
+| Variable | Type | Required | Description |
+| --- | --- | --- | --- |
+| `edge` | `graphv1.Edge` | yes | Current dependency graph edge |
+| `from_node` | `graphv1.Node` | yes | Source node for the current graph edge |
+| `to_node` | `graphv1.Node` | yes | Target node for the current graph edge |
+| `env` | `policyv1.Environment` | yes | Execution environment context |
+| `nodes` | `list(graphv1.Node)` | no | Dependency graph nodes |
+| `edges` | `list(graphv1.Edge)` | no | Dependency graph edges |
+| `stats` | `object` | no | Summary statistics for the current report |
+| `target` | `targetv1.Target` | no | Target or provenance metadata |
+
+### Category: `proxy`
+
+#### `go_artifact_request`
+
+Triggers when the proxy handles a Go module request
+
+Helpers: `now()`, `age()`, `levenshtein()`, `levenshteinWithin()`, `imageRef()`, `baseImage()`
+
+| Variable | Type | Required | Description |
+| --- | --- | --- | --- |
+| `request` | `object` | yes | Request metadata for proxy or server authorization policies |
+| `env` | `policyv1.Environment` | yes | Execution environment context |
+| `vulnerabilities` | `list(vulnerabilityv1.Finding)` | no | Vulnerability findings |
+| `licenses` | `list(string)` | no | SPDX license identifiers |
+| `jwt` | `policyv1.JWTClaims` | no | JWT claims from authenticated requests |
+
+#### `npm_artifact_request`
+
+Triggers when the proxy handles an NPM package request
+
+Helpers: `now()`, `age()`, `levenshtein()`, `levenshteinWithin()`, `imageRef()`, `baseImage()`
+
+| Variable | Type | Required | Description |
+| --- | --- | --- | --- |
+| `request` | `object` | yes | Request metadata for proxy or server authorization policies |
+| `env` | `policyv1.Environment` | yes | Execution environment context |
+| `vulnerabilities` | `list(vulnerabilityv1.Finding)` | no | Vulnerability findings |
+| `licenses` | `list(string)` | no | SPDX license identifiers |
+| `jwt` | `policyv1.JWTClaims` | no | JWT claims from authenticated requests |
+
+#### `pypi_artifact_request`
+
+Triggers when the proxy handles a PyPI package request
+
+Helpers: `now()`, `age()`, `levenshtein()`, `levenshteinWithin()`, `imageRef()`, `baseImage()`
+
+| Variable | Type | Required | Description |
+| --- | --- | --- | --- |
+| `request` | `object` | yes | Request metadata for proxy or server authorization policies |
+| `env` | `policyv1.Environment` | yes | Execution environment context |
+| `vulnerabilities` | `list(vulnerabilityv1.Finding)` | no | Vulnerability findings |
+| `licenses` | `list(string)` | no | SPDX license identifiers |
+| `jwt` | `policyv1.JWTClaims` | no | JWT claims from authenticated requests |
+
+#### `rubygems_artifact_request`
+
+Triggers when the proxy handles a RubyGems package request
+
+Helpers: `now()`, `age()`, `levenshtein()`, `levenshteinWithin()`, `imageRef()`, `baseImage()`
+
+| Variable | Type | Required | Description |
+| --- | --- | --- | --- |
+| `request` | `object` | yes | Request metadata for proxy or server authorization policies |
+| `env` | `policyv1.Environment` | yes | Execution environment context |
+| `vulnerabilities` | `list(vulnerabilityv1.Finding)` | no | Vulnerability findings |
+| `licenses` | `list(string)` | no | SPDX license identifiers |
+| `jwt` | `policyv1.JWTClaims` | no | JWT claims from authenticated requests |
+
+#### `oci_artifact_request`
+
+Triggers when the proxy handles an OCI image request
+
+Helpers: `now()`, `age()`, `levenshtein()`, `levenshteinWithin()`, `imageRef()`, `baseImage()`
+
+| Variable | Type | Required | Description |
+| --- | --- | --- | --- |
+| `request` | `object` | yes | Request metadata for proxy or server authorization policies |
+| `env` | `policyv1.Environment` | yes | Execution environment context |
+| `vulnerabilities` | `list(vulnerabilityv1.Finding)` | no | Vulnerability findings |
+| `image` | `object` | no | Container image metadata |
+| `image_info` | `object` | no | Container image metadata |
+| `jwt` | `policyv1.JWTClaims` | no | JWT claims from authenticated requests |
+
+### Category: `sandbox`
+
+#### `sandbox_execution`
+
+Triggers before any sandbox execution begins
+
+Helpers: `now()`, `age()`, `levenshtein()`, `levenshteinWithin()`
+
+| Variable | Type | Required | Description |
+| --- | --- | --- | --- |
+| `command` | `string` | yes | Command being evaluated |
+| `workspace_dir` | `string` | yes | Workspace directory for sandbox execution |
+| `requested_config` | `object` | yes | Requested sandbox configuration |
+| `env` | `policyv1.Environment` | yes | Execution environment context |
+| `context` | `object` | no | Additional policy execution context |
+| `source` | `string` | no | Source of the sandbox execution request |
+
+#### `sandbox_command`
+
+Triggers for each command executed within a sandbox session
+
+Helpers: `now()`, `age()`, `levenshtein()`, `levenshteinWithin()`
+
+| Variable | Type | Required | Description |
+| --- | --- | --- | --- |
+| `command` | `string` | yes | Command being evaluated |
+| `sandbox_config` | `object` | yes | Effective sandbox configuration |
+| `env` | `policyv1.Environment` | yes | Execution environment context |
+| `context` | `object` | no | Additional policy execution context |
+
+#### `sandbox_network`
+
+Triggers when a sandbox requests network access
+
+Helpers: `now()`, `age()`, `levenshtein()`, `levenshteinWithin()`
+
+| Variable | Type | Required | Description |
+| --- | --- | --- | --- |
+| `host` | `string` | yes | Requested network host |
+| `port` | `int` | yes | Requested network port |
+| `protocol` | `string` | yes | Requested network protocol |
+| `sandbox_config` | `object` | yes | Effective sandbox configuration |
+| `env` | `policyv1.Environment` | yes | Execution environment context |
+| `context` | `object` | no | Additional policy execution context |
+
+### Category: `sbom`
+
+#### `sbom_report`
+
+Triggers after an SBOM is generated
+
+Helpers: `now()`, `age()`, `levenshtein()`, `levenshteinWithin()`
+
+| Variable | Type | Required | Description |
+| --- | --- | --- | --- |
+| `sbom` | `object` | yes | SBOM document |
+| `packages` | `list(dependencyv1.Package)` | yes | Packages in the report |
+| `env` | `policyv1.Environment` | yes | Execution environment context |
+| `target` | `targetv1.Target` | no | Target or provenance metadata |
+
+#### `sbom_component`
+
+Triggers for each component in an SBOM
+
+Helpers: `now()`, `age()`, `levenshtein()`, `levenshteinWithin()`
+
+| Variable | Type | Required | Description |
+| --- | --- | --- | --- |
+| `component` | `dependencyv1.Package` | yes | SBOM component being evaluated |
+| `pkg` | `dependencyv1.Package` | yes | Package associated with the current policy item |
+| `env` | `policyv1.Environment` | yes | Execution environment context |
+
+### Category: `scan`
+
+#### `scan_report`
+
+Triggers after a scan completes with the full report
+
+Helpers: `now()`, `age()`, `levenshtein()`, `levenshteinWithin()`, `ssvc()`, `hasFix()`, `inKEV()`, `epssScore()`
+
+| Variable | Type | Required | Description |
+| --- | --- | --- | --- |
+| `vulnerabilities` | `list(vulnerabilityv1.Finding)` | yes | Vulnerability findings |
+| `packages` | `list(dependencyv1.Package)` | yes | Packages in the report |
+| `env` | `policyv1.Environment` | yes | Execution environment context |
+| `target` | `targetv1.Target` | no | Target or provenance metadata |
+| `image` | `object` | no | Container image metadata |
+| `image_info` | `object` | no | Container image metadata |
+
+#### `scan_vulnerability`
+
+Triggers for each vulnerability found during a scan
+
+Helpers: `now()`, `age()`, `levenshtein()`, `levenshteinWithin()`, `ssvc()`, `hasFix()`, `inKEV()`, `epssScore()`
+
+| Variable | Type | Required | Description |
+| --- | --- | --- | --- |
+| `vulnerability` | `vulnerabilityv1.Finding` | yes | Current vulnerability finding |
+| `pkg` | `dependencyv1.Package` | yes | Package associated with the current policy item |
+| `env` | `policyv1.Environment` | yes | Execution environment context |
+| `target` | `targetv1.Target` | no | Target or provenance metadata |
+| `image` | `object` | no | Container image metadata |
+| `image_info` | `object` | no | Container image metadata |
+
+### Category: `secrets`
+
+#### `secrets_report`
+
+Triggers after a secrets scan completes with all findings
+
+Helpers: `now()`, `age()`, `levenshtein()`, `levenshteinWithin()`
+
+| Variable | Type | Required | Description |
+| --- | --- | --- | --- |
+| `secrets` | `list(object)` | yes | Secrets scan findings |
+| `report` | `object` | yes | Scan report data |
+| `env` | `policyv1.Environment` | yes | Execution environment context |
+| `target` | `targetv1.Target` | no | Target or provenance metadata |
+
+#### `secrets_finding`
+
+Triggers for each secret found during a scan
+
+Helpers: `now()`, `age()`, `levenshtein()`, `levenshteinWithin()`
+
+| Variable | Type | Required | Description |
+| --- | --- | --- | --- |
+| `secret` | `object` | yes | Current secret finding |
+| `env` | `policyv1.Environment` | yes | Execution environment context |
+| `report` | `object` | no | Scan report data |
+| `target` | `targetv1.Target` | no | Target or provenance metadata |
+
+### Category: `server`
+
+#### `service_scan_request`
+
+Triggers before a scan is executed via the API
+
+Helpers: `now()`, `age()`, `levenshtein()`, `levenshteinWithin()`
+
+| Variable | Type | Required | Description |
+| --- | --- | --- | --- |
+| `request` | `object` | yes | Request metadata for proxy or server authorization policies |
+| `env` | `policyv1.Environment` | yes | Execution environment context |
+| `target` | `targetv1.Target` | no | Target or provenance metadata |
+| `jwt` | `policyv1.JWTClaims` | no | JWT claims from authenticated requests |
+
+#### `service_list_request`
+
+Triggers before a list operation via the API
+
+Helpers: `now()`, `age()`, `levenshtein()`, `levenshteinWithin()`
+
+| Variable | Type | Required | Description |
+| --- | --- | --- | --- |
+| `request` | `object` | yes | Request metadata for proxy or server authorization policies |
+| `env` | `policyv1.Environment` | yes | Execution environment context |
+| `target` | `targetv1.Target` | no | Target or provenance metadata |
+| `jwt` | `policyv1.JWTClaims` | no | JWT claims from authenticated requests |
+
+#### `service_sbom_request`
+
+Triggers before SBOM generation via the API
+
+Helpers: `now()`, `age()`, `levenshtein()`, `levenshteinWithin()`
+
+| Variable | Type | Required | Description |
+| --- | --- | --- | --- |
+| `request` | `object` | yes | Request metadata for proxy or server authorization policies |
+| `env` | `policyv1.Environment` | yes | Execution environment context |
+| `target` | `targetv1.Target` | no | Target or provenance metadata |
+| `jwt` | `policyv1.JWTClaims` | no | JWT claims from authenticated requests |
+
+#### `service_diff_request`
+
+Triggers before a diff operation via the API
+
+Helpers: `now()`, `age()`, `levenshtein()`, `levenshteinWithin()`
+
+| Variable | Type | Required | Description |
+| --- | --- | --- | --- |
+| `request` | `object` | yes | Request metadata for proxy or server authorization policies |
+| `env` | `policyv1.Environment` | yes | Execution environment context |
+| `target` | `targetv1.Target` | no | Target or provenance metadata |
+| `jwt` | `policyv1.JWTClaims` | no | JWT claims from authenticated requests |
+
+#### `service_secrets_request`
+
+Triggers before a secrets scan via the API
+
+Helpers: `now()`, `age()`, `levenshtein()`, `levenshteinWithin()`
+
+| Variable | Type | Required | Description |
+| --- | --- | --- | --- |
+| `request` | `object` | yes | Request metadata for proxy or server authorization policies |
+| `env` | `policyv1.Environment` | yes | Execution environment context |
+| `target` | `targetv1.Target` | no | Target or provenance metadata |
+| `jwt` | `policyv1.JWTClaims` | no | JWT claims from authenticated requests |
+
+#### `service_graph_request`
+
+Triggers before a graph operation via the API
+
+Helpers: `now()`, `age()`, `levenshtein()`, `levenshteinWithin()`
+
+| Variable | Type | Required | Description |
+| --- | --- | --- | --- |
+| `request` | `object` | yes | Request metadata for proxy or server authorization policies |
+| `env` | `policyv1.Environment` | yes | Execution environment context |
+| `target` | `targetv1.Target` | no | Target or provenance metadata |
+| `jwt` | `policyv1.JWTClaims` | no | JWT claims from authenticated requests |
+
+### Category: `triage`
+
+#### `triage_report`
+
+Triggers after a triage report is generated
+
+Helpers: `now()`, `age()`, `levenshtein()`, `levenshteinWithin()`
+
+| Variable | Type | Required | Description |
+| --- | --- | --- | --- |
+| `findings` | `list(object)` | yes | Triage findings |
+| `vulnerabilities` | `list(vulnerabilityv1.Finding)` | yes | Vulnerability findings |
+| `env` | `policyv1.Environment` | yes | Execution environment context |
+| `repo` | `string` | no | Repository path |
+
+#### `triage_cluster`
+
+Triggers for each cluster in a triage report
+
+Helpers: `now()`, `age()`, `levenshtein()`, `levenshteinWithin()`
+
+| Variable | Type | Required | Description |
+| --- | --- | --- | --- |
+| `cluster` | `object` | yes | Current triage cluster |
+| `env` | `policyv1.Environment` | yes | Execution environment context |
+
+## Variable types
+
+Proto-backed variable types expose the fields below; CEL uses the
+snake_case proto field names. Field descriptions come from the proto
+comments in [`api/deputy`](../../api/deputy).
+
+### `dependencyv1.Package`
+
+Package represents a dependency identified during scanning.
+
+| Field | Type | Description |
 | --- | --- | --- |
-| `sandbox_execution` | `command`, `workspace_dir`, `requested_config`, `env` | `context`, `source` |
-| `sandbox_command` | `command`, `sandbox_config`, `env` | `context` |
-| `sandbox_network` | `host`, `port`, `protocol`, `sandbox_config`, `env` | `context` |
+| `direct` | `bool` | Direct indicates whether this is a direct dependency. |
+| `ecosystem` | `string` | Ecosystem identifies the package ecosystem (e.g., "go", "npm", "pypi"). |
+| `layer_details` | `LayerDetails` | LayerDetails contains container image layer information when applicable. |
+| `licenses` | `list(string)` | Licenses contains SPDX license identifiers for this package. |
+| `locations` | `list(string)` | Locations lists file paths where this package was referenced. |
+| `manifest_refs` | `list(ManifestRef)` | ManifestRefs describes where the dependency is declared. |
+| `name` | `string` | Name is the package name within its ecosystem. |
+| `purl` | `string` | Purl is the Package URL (PURL) for this dependency. |
+| `version` | `string` | Version is the resolved version string. |
+
+### `graphv1.Edge`
+
+Edge represents a dependency relationship.
+
+| Field | Type | Description |
+| --- | --- | --- |
+| `constraint` | `string` | Constraint is the version constraint if known (e.g., "^1.0.0"). |
+| `from` | `string` | From is the PURL of the dependent package (parent). |
+| `scope` | `Scope` | Scope indicates dependency context. |
+| `to` | `string` | To is the PURL of the dependency (child). |
+
+### `graphv1.Node`
+
+Node represents a package in the dependency graph.
+
+| Field | Type | Description |
+| --- | --- | --- |
+| `depth` | `int` | Depth is the shortest path length from any root. |
+| `direct` | `bool` | Direct indicates whether this is a direct dependency. |
+| `ecosystem` | `string` | Ecosystem is the package ecosystem (e.g., "go", "npm"). |
+| `import_status` | `ImportStatus` | ImportStatus indicates how this dependency is included. |
+| `locations` | `list(string)` | Locations lists file paths where this dependency was declared. |
+| `name` | `string` | Name is the package name. |
+| `purl` | `string` | Purl is the Package URL identifier. |
+| `version` | `string` | Version is the package version. |
+| `vulnerabilities` | `list(Finding)` | Vulnerabilities contains full findings when include_vulnerabilities is set. |
+| `vulnerability_count` | `VulnerabilityCount` | VulnerabilityCount summarizes vulnerabilities affecting this package. |
+
+### `policyv1.Environment`
+
+Environment provides context about the execution environment.
+
+| Field | Type | Description |
+| --- | --- | --- |
+| `command` | `string` | Command is the deputy command being executed (e.g., "scan", "proxy"). |
+| `entrypoint` | `string` | Entrypoint is the policy entrypoint being evaluated. |
+
+### `policyv1.JWTClaims`
+
+JWTClaims contains verified JWT claims from authenticated requests.
+
+| Field | Type | Description |
+| --- | --- | --- |
+| `anonymous` | `bool` | Anonymous is true if no token was provided. |
+| `aud` | `list(string)` | Aud contains the audiences. |
+| `custom_claims` | `map(string, string)` | CustomClaims contains any additional claims from the token. |
+| `exp` | `int` | Exp is the expiration timestamp (Unix). |
+| `iat` | `int` | Iat is the issued-at timestamp (Unix). |
+| `iss` | `string` | Iss is the token issuer. |
+| `jti` | `string` | Jti is the JWT ID. |
+| `nbf` | `int` | Nbf is the not-before timestamp (Unix). |
+| `sub` | `string` | Sub is the subject (user/service ID). |
+
+### `targetv1.Target`
+
+Target describes what Deputy is operating on and how it was resolved.
+
+| Field | Type | Description |
+| --- | --- | --- |
+| `cloned` | `bool` | Cloned indicates whether the target was cloned from a remote source. |
+| `commit_hash` | `string` | CommitHash is the resolved Git commit SHA when applicable. |
+| `display_path` | `string` | DisplayPath is the user-facing representation of the target. |
+| `effective_ref` | `string` | EffectiveRef is the resolved reference after normalization. |
+| `kind` | `TargetKind` | Kind identifies the input type. |
+| `local_path` | `string` | LocalPath is the filesystem path where the target was materialized. |
+| `origin_url` | `string` | OriginURL is the source URL (e.g., repository URL). |
+| `provenance` | `map(string, string)` | Provenance contains additional metadata about target resolution. |
+| `ref` | `string` | Ref is the user-specified reference (e.g., branch name, tag). |
+| `reference` | `string` | Reference is the container image reference when kind is TARGET_KIND_CONTAINER_IMAGE. |
+
+### `vulnerabilityv1.Finding`
+
+Finding represents a scan-time occurrence of an advisory in a dependency.
+
+| Field | Type | Description |
+| --- | --- | --- |
+| `advisory` | `Advisory` | Advisory contains the full advisory details. |
+| `advisory_id` | `string` | AdvisoryId is the vulnerability identifier. |
+| `affected` | `bool` | Affected indicates whether the package is actually affected. |
+| `affected_imports` | `list(AffectedImport)` | AffectedImports captures import-level vulnerability details. |
+| `depth` | `int` | Depth is the distance from root (0 = direct, 1+ = transitive). |
+| `epss` | `double` | Epss is the EPSS score (0.0-1.0): probability of exploitation in next 30 days. |
+| `epss_percentile` | `double` | EpssPercentile is the EPSS percentile (0.0-1.0). |
+| `in_kev` | `bool` | InKev indicates whether this CVE is in CISA's Known Exploited Vulnerabilities catalog. |
+| `kev_date_added` | `string` | KevDateAdded is when the CVE was added to the KEV catalog. |
+| `kev_due_date` | `string` | KevDueDate is the federal agency compliance deadline. |
+| `kev_known_ransomware_campaign_use` | `string` | KevKnownRansomwareCampaignUse indicates ransomware involvement. |
+| `kev_required_action` | `string` | KevRequiredAction is CISA's required remediation action. |
+| `package` | `Package` | Package contains the affected dependency information. |
+| `path` | `list(string)` | Path is the dependency chain from root to vulnerable package. |
+| `sources` | `list(string)` | Sources names the advisory source(s) that reported this finding (e.g. |
+<!-- END GENERATED: policy-entrypoints -->
 
 ## Canonical ecosystems
 

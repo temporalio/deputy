@@ -363,22 +363,5 @@ func variableInfoForPolicyBinding(name string, required bool) *policyv1.Variable
 }
 
 func getEntrypointHelpers(ep policy.Entrypoint) []string {
-	// Common helpers available at all entrypoints
-	common := []string{"now()", "age()", "levenshtein()", "levenshteinWithin()"}
-
-	switch ep.Category() {
-	case "scan":
-		return append(common, "ssvc()", "hasFix()", "inKEV()", "epssScore()")
-	case "graph":
-		return append(common, "graphMatch()", "isDirectDep()", "nodeDepth()", "nodeEcosystem()",
-			"hasVulnerabilities()", "vulnerabilityCount()", "pathLength()", "pathContains()")
-	case "proxy":
-		return append(common, "imageRef()", "baseImage()")
-	case "dockerfile":
-		return common
-	case "secrets":
-		return common
-	default:
-		return common
-	}
+	return policy.EntrypointHelpers(ep)
 }

@@ -1,6 +1,7 @@
 package policy
 
 import (
+	"maps"
 	"slices"
 	"strings"
 
@@ -25,6 +26,20 @@ var variableMessageTypes = map[string]protoreflect.MessageDescriptor{
 	"targetv1.Target":         (&targetv1.Target{}).ProtoReflect().Descriptor(),
 	"policyv1.JWTClaims":      (&policyv1.JWTClaims{}).ProtoReflect().Descriptor(),
 	"policyv1.Environment":    (&policyv1.Environment{}).ProtoReflect().Descriptor(),
+}
+
+// ProtoVariableTypeNames returns the proto-backed variable type names used in
+// variable metadata (e.g. "vulnerabilityv1.Finding"), sorted, so tooling can
+// enumerate the types whose fields derive from proto descriptors.
+func ProtoVariableTypeNames() []string {
+	return slices.Sorted(maps.Keys(variableMessageTypes))
+}
+
+// VariableMessageDescriptor resolves a proto-backed variable type name to its
+// message descriptor. ok is false for non-proto types such as "object".
+func VariableMessageDescriptor(typeName string) (protoreflect.MessageDescriptor, bool) {
+	md, ok := variableMessageTypes[typeName]
+	return md, ok
 }
 
 // VariableFieldCompletions returns the CEL field names (proto field names,
