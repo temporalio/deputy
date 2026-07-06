@@ -117,18 +117,44 @@ func detectStepKind(c remediation.Command) remediationv1.StepKind {
 
 // buildStepTitle creates a human-readable title for the step.
 func buildStepTitle(c remediation.Command) string {
-	if c.Manager != "" {
+	switch {
+	case c.Migration && c.Package != "" && c.TargetModule != "":
+		return "Migrate " + c.Package + " to " + c.TargetModule
+	case c.Package != "" && c.TargetVersion != "":
+		return "Upgrade " + c.Package + " to " + c.TargetVersion
+	case c.Manager != "":
 		return "Update " + c.Manager + " dependency"
+	default:
+		return "Apply remediation"
 	}
-	return "Apply remediation"
 }
 
-// buildStepDescription creates a description for the step.
+// buildStepDescription creates a description for the step: what the change is,
+// composed from the fix shape. The hint stays in its own field, so the two do
+// not duplicate each other.
 func buildStepDescription(c remediation.Command) string {
-	if c.Hint != "" {
+	switch {
+	case c.Migration && c.Package != "" && c.TargetModule != "":
+		desc := c.Package
+		if c.Version != "" {
+			desc += " " + c.Version
+		}
+		desc = "Migrate " + desc + " to " + c.TargetModule
+		if c.TargetVersion != "" {
+			desc += " " + c.TargetVersion
+		}
+		return desc
+	case c.Package != "" && c.TargetVersion != "":
+		desc := "Upgrade " + c.Package
+		if c.Version != "" {
+			desc += " from " + c.Version
+		}
+		return desc + " to " + c.TargetVersion
+	case c.Hint != "":
 		return c.Hint
+	default:
+		return c.Command
 	}
-	return c.Command
 }
 
 // extractPackageName attempts to extract the package name from the command.
