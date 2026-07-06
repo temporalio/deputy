@@ -22,6 +22,11 @@ func ecosystemFromPURLType(purlType string) string {
 		return "mise"
 	case purlx.TypeAsdf:
 		return "asdf"
+	case "docker":
+		// Dockerfile base images; matches the coverage report's vocabulary.
+		return "docker"
+	case "oci":
+		return "oci"
 	default:
 		return ""
 	}

@@ -14,7 +14,9 @@ message Package {
   // Version is the resolved version string.
   string version = 2;
   // Ecosystem identifies the package ecosystem (e.g., "go", "npm", "pypi").
-  string ecosystem = 3 [(buf.validate.field).string.min_len = 1];
+  // Empty when the artifact carries no recognizable package ecosystem, such
+  // as unrecognized SBOM components.
+  string ecosystem = 3;
   // Purl is the Package URL (PURL) for this dependency.
   // See: https://github.com/package-url/purl-spec
   string purl = 4;
