@@ -65,6 +65,7 @@ message EvaluateRequest {
 
 // PolicySource specifies where to load a policy from.
 message PolicySource {
+  // Source carries the policy content by value or by reference.
   oneof source {
     // Inline YAML policy content.
     string inline = 1;

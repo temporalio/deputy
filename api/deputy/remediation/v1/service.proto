@@ -106,10 +106,17 @@ message PlanOptions {
 // GuidanceProfile identifies the caller surface that will present remediation
 // steps, so hints can point at capabilities available on that surface.
 enum GuidanceProfile {
+  // Unspecified defaults to the API profile, the handler's historical
+  // behavior.
   GUIDANCE_PROFILE_UNSPECIFIED = 0;
+  // Generic hints name no surface-specific tooling; for embedders whose
+  // capabilities Deputy does not know.
   GUIDANCE_PROFILE_GENERIC = 1;
+  // CLI hints reference deputy commands (e.g. deputy graph why).
   GUIDANCE_PROFILE_CLI = 2;
+  // API hints reference ConnectRPC services (e.g. GraphService.WhyDependency).
   GUIDANCE_PROFILE_API = 3;
+  // MCP hints reference MCP tools (e.g. graph_why).
   GUIDANCE_PROFILE_MCP = 4;
 }
 
@@ -130,9 +137,9 @@ message GeneratePlanResponse {
   // Warnings contains non-fatal issues encountered during planning.
   repeated string warnings = 5;
 
-  // UnaddressedVulnerabilities lists finding IDs the plan does not fix
-  // because no remediation is known. Unaddressed means still vulnerable, not
-  // safe.
+  // UnaddressedVulnerabilities lists finding IDs no step remediates, whether
+  // because no fix is known or because no actionable manifest declares the
+  // package. Unaddressed means still vulnerable, not safe.
   repeated string unaddressed_vulnerabilities = 6;
 }
 
@@ -218,8 +225,8 @@ message Step {
   // rather than an in-place version bump.
   bool migration = 19;
 
-  // IsDirect indicates whether the vulnerable package is a direct dependency.
-  bool is_direct = 20;
+  // Direct indicates whether the vulnerable package is a direct dependency.
+  bool direct = 20;
 
   // Groups are the dependency groups the package belongs to (e.g., "dev").
   repeated string groups = 21;
@@ -248,12 +255,26 @@ enum RiskLevel {
 
 // PlanStats summarizes plan statistics.
 message PlanStats {
+  // TotalSteps is the number of steps in the plan.
   int32 total_steps = 1;
+
+  // ExecutableSteps counts steps that can be run as-is.
   int32 executable_steps = 2;
+
+  // ManualSteps counts steps that are guidance requiring a manual change.
   int32 manual_steps = 3;
+
+  // HighRiskSteps counts steps with risk level high or critical.
   int32 high_risk_steps = 4;
+
+  // VulnerabilitiesAddressed counts findings that at least one step
+  // remediates.
   int32 vulnerabilities_addressed = 5;
+
+  // AffectedPackages counts distinct packages the steps change.
   int32 affected_packages = 6;
+
+  // AffectedManagers lists the package managers involved, sorted.
   repeated string affected_managers = 7;
 
   // VulnerabilitiesUnaddressed counts findings with no known remediation.

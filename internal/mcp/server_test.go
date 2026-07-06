@@ -1935,15 +1935,6 @@ func structuredContentObject(t *testing.T, result *mcpsdk.CallToolResult) map[st
 	return object
 }
 
-func requireStructuredEmptyArray(t *testing.T, object map[string]any, field string) {
-	t.Helper()
-
-	array := structuredArray(t, object, field)
-	if len(array) != 0 {
-		t.Fatalf("structured content %q has length %d, want 0", field, len(array))
-	}
-}
-
 // requireStructuredEmptyCollection asserts a proto-contract collection field
 // carries no elements. The MCP protojson dialect omits empty repeated fields,
 // so on the wire absence and an explicit empty array both mean empty.
@@ -2040,17 +2031,6 @@ func schemaRequired(t *testing.T, schema map[string]any) []string {
 	}
 	slices.Sort(got)
 	return got
-}
-
-func requireSchemaRequiredContains(t *testing.T, schema map[string]any, fields ...string) {
-	t.Helper()
-
-	required := schemaRequired(t, schema)
-	for _, field := range fields {
-		if !slices.Contains(required, field) {
-			t.Fatalf("schema required fields = %v, want %q", required, field)
-		}
-	}
 }
 
 func TestExplainVulnerability(t *testing.T) {
@@ -4952,8 +4932,8 @@ func TestDiffGitRefsPreservesDirectness(t *testing.T) {
 		if !ok {
 			t.Fatalf("unexpected change %q", change.Name)
 		}
-		if change.GetIsDirect() != want {
-			t.Errorf("%s isDirect = %v, want %v", change.Name, change.IsDirect, want)
+		if change.GetDirect() != want {
+			t.Errorf("%s isDirect = %v, want %v", change.Name, change.GetDirect(), want)
 		}
 	}
 	if len(mockScan.requests) != 2 {
@@ -5099,8 +5079,8 @@ func TestDiffGitRefsDeduplicatesTargetVulnerabilities(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if result.VulnerabilitySummary["critical"] != 1 {
-		t.Fatalf("expected 1 consolidated critical vulnerability, got %d", result.VulnerabilitySummary["critical"])
+	if result.VulnerabilitiesBySeverity["critical"] != 1 {
+		t.Fatalf("expected 1 consolidated critical vulnerability, got %d", result.VulnerabilitiesBySeverity["critical"])
 	}
 	if len(result.Vulnerabilities) != 1 {
 		t.Fatalf("expected 1 consolidated vulnerability, got %d", len(result.Vulnerabilities))
@@ -5384,10 +5364,10 @@ func TestDiffRefsPrefersGitRefsInRepositoryContext(t *testing.T) {
 func TestSortDependencyChangesStableAgentOrder(t *testing.T) {
 	changes := []*mcpv1.DependencyChange{
 		{Name: "zeta", Ecosystem: "npm", Purl: "pkg:npm/zeta@1.0.0", ChangeType: "added"},
-		{Name: "bravo", Ecosystem: "go", Purl: "pkg:golang/example.com/bravo@v1.0.0", ChangeType: "removed", IsDirect: proto.Bool(true)},
+		{Name: "bravo", Ecosystem: "go", Purl: "pkg:golang/example.com/bravo@v1.0.0", ChangeType: "removed", Direct: proto.Bool(true)},
 		{Name: "alpha", Ecosystem: "go", Purl: "pkg:golang/example.com/alpha@v1.1.0", ChangeType: "upgraded"},
-		{Name: "alpha", Ecosystem: "go", Purl: "pkg:golang/example.com/alpha@v1.0.0", ChangeType: "added", IsDirect: proto.Bool(true)},
-		{Name: "charlie", Ecosystem: "go", Purl: "pkg:golang/example.com/charlie@v1.0.0", ChangeType: "downgraded", IsDirect: proto.Bool(true)},
+		{Name: "alpha", Ecosystem: "go", Purl: "pkg:golang/example.com/alpha@v1.0.0", ChangeType: "added", Direct: proto.Bool(true)},
+		{Name: "charlie", Ecosystem: "go", Purl: "pkg:golang/example.com/charlie@v1.0.0", ChangeType: "downgraded", Direct: proto.Bool(true)},
 	}
 
 	sortDependencyChanges(changes)
@@ -5400,7 +5380,7 @@ func TestSortDependencyChangesStableAgentOrder(t *testing.T) {
 		"alpha:upgraded:false",
 	}
 	for i, want := range want {
-		got := fmt.Sprintf("%s:%s:%t", changes[i].Name, changes[i].ChangeType, changes[i].GetIsDirect())
+		got := fmt.Sprintf("%s:%s:%t", changes[i].Name, changes[i].ChangeType, changes[i].GetDirect())
 		if got != want {
 			t.Fatalf("change %d = %s, want %s; full order: %+v", i, got, want, changes)
 		}

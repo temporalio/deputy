@@ -38,13 +38,16 @@ message AdvisorySourceInfoResponse {
 
 // AdvisorySourceInfo describes an advisory source and what it can answer for.
 message AdvisorySourceInfo {
-  // Name is the stable identifier recorded as finding provenance (e.g. "osv").
-  string name = 1 [(buf.validate.field).string.min_len = 1];
+  // Name is the stable identifier recorded as finding provenance (e.g.
+  // "osv"). It must stay comparable across releases: lowercase letters,
+  // digits, and separators only.
+  string name = 1 [(buf.validate.field).string = {min_len: 1, pattern: "^[a-z0-9][a-z0-9._-]*$"}];
   // DisplayName is a human-friendly name.
   string display_name = 2;
   // Description explains the source's coverage and provenance.
   string description = 3;
-  // Version is incremented when the source's behavior changes.
+  // Version starts at 1 and must increase whenever the source's query
+  // behavior changes, so cached results can be invalidated.
   int32 version = 4;
   // Capabilities declares what this source can answer for.
   SourceCapabilities capabilities = 5;
@@ -53,11 +56,15 @@ message AdvisorySourceInfo {
 // SourceCapabilities declares the coverage a source advertises so Deputy can
 // route only relevant packages to it and report gaps for the rest.
 message SourceCapabilities {
-  // Ecosystems are the canonical ecosystem names this source covers.
+  // Ecosystems are the canonical ecosystem names this source covers;
+  // matching is case-insensitive. A source that declares no ecosystems
+  // receives no queries.
   repeated string ecosystems = 1;
-  // Artifacts are the artifact kinds this source can answer for.
+  // Artifacts are the artifact kinds this source can answer for. Empty means
+  // all artifact kinds within the declared ecosystems.
   repeated deputy.vulnerability.v1.ArtifactKind artifacts = 2;
-  // FindingKinds are the classes of finding this source produces.
+  // FindingKinds are the classes of finding this source produces. It is
+  // informational and does not affect routing.
   repeated deputy.vulnerability.v1.FindingKind finding_kinds = 3;
 }
 
@@ -69,8 +76,11 @@ message AdvisoryQueryRequest {
 
 // AdvisoryQueryResponse returns the advisories a source found.
 message AdvisoryQueryResponse {
-  // Findings are the per-package advisory occurrences.
+  // Findings are the per-package advisory occurrences, referencing advisories
+  // by advisory ID.
   repeated deputy.vulnerability.v1.Finding findings = 1;
-  // Advisories are the full advisory records keyed by advisory ID.
+  // Advisories are the authoritative advisory records keyed by advisory ID.
+  // When several sources return the same ID, the first registered source's
+  // record wins.
   map<string, deputy.vulnerability.v1.Advisory> advisories = 2;
 }

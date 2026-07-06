@@ -84,6 +84,7 @@ AI ASSISTANCE:
 	triageCmd.Flags().String("published-after", "", "Only include vulnerabilities published on/after this date (YYYY, YYYY-MM, YYYY-MM-DD, or RFC3339)")
 	triageCmd.Flags().String("as-of", "", "Historical view: show vulnerabilities known up to and including this date (implies --published-before)")
 	triageCmd.Flags().StringP("format", "f", "text", "Output format (text, json)")
+	addExcludePathFlag(triageCmd)
 	triageCmd.Flags().String("agent", "", "Use an AI agent to analyze the triage summary (e.g. 'codex')")
 	triageCmd.Flags().String("agent-model", "", "Model identifier to use when --agent is set")
 	triageCmd.Flags().String("agent-sandbox", "read-only", "Sandbox policy for AI agent (read-only|workspace-write|danger-full-access)")
@@ -147,9 +148,11 @@ func runTriage(c *services.Clients, cmd *cobra.Command, args []string) error {
 			commit = scanResp.Target.CommitHash
 		}
 		triageResp = internalproto.BuildTriageResponse(displayPath, scanResult.Stats, cons, 10)
-		triageResp.Target = &targetv1.Target{
-			DisplayPath: displayPath,
-			CommitHash:  commit,
+		// Echo the scan's resolved target as-is so ref, effectiveRef, and
+		// commit survive into triage output, matching the MCP tool.
+		triageResp.Target = scanResp.Target
+		if triageResp.Target == nil {
+			triageResp.Target = &targetv1.Target{DisplayPath: displayPath, CommitHash: commit}
 		}
 	} else {
 		ref, _ := cmd.Flags().GetString("ref")
@@ -161,7 +164,8 @@ func runTriage(c *services.Clients, cmd *cobra.Command, args []string) error {
 
 		// Build scan request
 		scanOpts := &scanv1.ScanOptions{
-			Ecosystems: ecos,
+			Ecosystems:   ecos,
+			ExcludePaths: excludePathsFromCmd(cmd),
 		}
 		if !beforeT.IsZero() {
 			scanOpts.PublishedBefore = timestamppb.New(beforeT)
@@ -209,11 +213,9 @@ func runTriage(c *services.Clients, cmd *cobra.Command, args []string) error {
 		}
 		cons := vulnerability.Consolidate(resultOut.Findings, resultOut.Advisories)
 		triageResp = internalproto.BuildTriageResponse(scanResult.Target.DisplayPath, resultOut.Stats, cons, 10)
-		triageResp.Target = &targetv1.Target{
-			DisplayPath: scanResult.Target.DisplayPath,
-			LocalPath:   scanResult.Target.LocalPath,
-			CommitHash:  scanResult.Target.CommitHash,
-		}
+		// Echo the scan's resolved target so ref, effectiveRef, and commit
+		// survive into triage output, matching the MCP tool.
+		triageResp.Target = internalproto.InventoryTargetToProto(scanResult.Target)
 	}
 
 	if err := runTriagePoliciesProto(ctx, policyPaths, triageResp, cmd.ErrOrStderr()); err != nil {

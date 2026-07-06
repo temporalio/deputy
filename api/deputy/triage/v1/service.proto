@@ -2,6 +2,8 @@ syntax = "proto3";
 
 package deputy.triage.v1;
 
+import "buf/validate/validate.proto";
+
 import "google/protobuf/timestamp.proto";
 import "deputy/target/v1/target.proto";
 import "deputy/vulnerability/v1/vulnerability.proto";
@@ -103,14 +105,16 @@ message PackageSummary {
   // VulnerabilityCount is the total number of vulnerabilities in this package.
   int32 vulnerability_count = 11;
 
-  // SeverityCounts maps severity level to count (CRITICAL, HIGH, MED, LOW).
+  // SeverityCounts counts this package's findings per severity level. Keys
+  // are critical, high, medium, low, and unknown, matching the MCP severity
+  // maps.
   map<string, int32> severity_counts = 12;
 
   // Priority ranks the package for remediation using the canonical triage
   // ladder (severity + fixability + directness), shared with the MCP
-  // triage_vulnerabilities tool: "critical", "high", "medium", or "low".
-  // A critical finding with no available fix ranks below a fixable one.
-  string priority = 13;
+  // triage_vulnerabilities tool. A critical finding with no available fix
+  // ranks below a fixable one.
+  string priority = 13 [(buf.validate.field).string = {in: ["critical", "high", "medium", "low"]}, (buf.validate.field).ignore = IGNORE_IF_ZERO_VALUE];
 
   // PriorityReason explains the priority verdict in one sentence.
   string priority_reason = 14;

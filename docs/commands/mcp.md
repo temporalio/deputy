@@ -34,8 +34,10 @@ the same rules the schemas advertise, and every result is validated against
 its output schema before it is returned. Results omit zero values of plain
 fields, so an absent field means empty, none, or not applicable (no
 `vulnerabilities` key means none were found). Affirmative answers (`clean`,
-`found`, `direct`, `hasFix`, `executable`, `depth`, `isContainerDiff`) are
-always present, even when false or zero.
+`found`, `direct`, `hasFix`, `migration`, `executable`, `depth`,
+`isContainerDiff`) are present whenever they apply, even when false or zero,
+and severity count maps always carry all their keys so per-severity counts
+sum to the total.
 
 ```mermaid
 flowchart LR
@@ -543,7 +545,8 @@ When a tool scans a Git repository snapshot, results echo `ref`,
     "critical": 1,
     "high": 3,
     "medium": 5,
-    "low": 2
+    "low": 2,
+    "unknown": 0
   },
   "vulnerabilities": [
     {
@@ -1001,7 +1004,7 @@ Find packages that depend on a given package (reverse lookup).
     }
   ],
   "directCount": 1,
-  "transitiveCount": 5
+  "transitiveCount": 1
 }
 ```
 
@@ -1126,11 +1129,15 @@ repository `path`.
 }
 ```
 
-**Output:**
+**Output (Git ref diff):**
 ```json
 {
+  "path": "/path/to/repo",
   "baseRef": "v1.0.0",
   "targetRef": "v2.0.0",
+  "baseCommit": "abc123def456",
+  "targetCommit": "789abc012def",
+  "isContainerDiff": false,
   "changes": [
     {
       "name": "lodash",
@@ -1138,11 +1145,28 @@ repository `path`.
       "targetVersion": "4.17.21",
       "purl": "pkg:npm/lodash@4.17.21",
       "changeType": "upgraded",
-      "isDirect": true,
+      "direct": true,
       "ecosystem": "npm"
     }
   ],
+  "updatedCount": 1,
   "vulnerabilities": [...],
+  "vulnerabilitiesBySeverity": {
+    "critical": 0,
+    "high": 1,
+    "medium": 0,
+    "low": 0,
+    "unknown": 0
+  }
+}
+```
+
+Container image diffs additionally report `vulnerabilityChanges` with delta
+semantics (`added`, `removed`, `fixed`, `persisted`) and a `containerSummary`
+of image-specific package, vulnerability, layer, and config changes:
+
+```json
+{
   "vulnerabilityChanges": [
     {
       "id": "CVE-2024-1234",
@@ -1155,12 +1179,6 @@ repository `path`.
       "fixedVersions": ["3.0.2"]
     }
   ],
-  "vulnerabilitySummary": {
-    "critical": 0,
-    "high": 1,
-    "medium": 0,
-    "low": 0
-  },
   "containerSummary": {
     "packagesAdded": 2,
     "packagesRemoved": 1,
@@ -1173,10 +1191,8 @@ repository `path`.
 
 `changes[].purl` is included when Deputy has a Package URL so agents can
 distinguish packages that share the same display name. `vulnerabilities` and
-`vulnerabilitySummary` describe the target ref or image after advisory alias
-consolidation. For container image diffs, `vulnerabilityChanges` reports delta
-semantics (`added`, `removed`, `fixed`, `persisted`) and `containerSummary`
-summarizes image-specific package, vulnerability, layer, and config changes.
+`vulnerabilitiesBySeverity` describe the target ref or image after advisory
+alias consolidation.
 `platform` applies only to container image diffs and is forwarded to both image
 scans so multi-architecture tags compare the intended image variant.
 Dependency changes are sorted with direct packages first, then by change type,
@@ -1230,7 +1246,7 @@ use.
       "manifestPath": "go.mod",
       "command": "go get github.com/example/pkg@v1.2.4",
       "hint": "run go mod tidy after updating",
-      "isDirect": true,
+      "direct": true,
       "executable": true,
       "riskLevel": "medium",
       "affectedVulnerabilities": ["CVE-2026-1234", "GHSA-xxxx-xxxx-xxxx"]

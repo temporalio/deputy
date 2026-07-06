@@ -131,7 +131,7 @@ func fieldSchema(fd protoreflect.FieldDescriptor, opts Options, visiting map[pro
 func scalarOrMessageSchema(fd protoreflect.FieldDescriptor, rules *validate.FieldRules, opts Options, visiting map[protoreflect.FullName]bool) (*jsonschema.Schema, error) {
 	switch fd.Kind() {
 	case protoreflect.StringKind:
-		return stringSchema(rules.GetString_()), nil
+		return stringSchema(rules.GetString()), nil
 	case protoreflect.BoolKind:
 		return &jsonschema.Schema{Type: "boolean"}, nil
 	case protoreflect.Int32Kind, protoreflect.Sint32Kind, protoreflect.Sfixed32Kind,

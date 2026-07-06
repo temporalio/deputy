@@ -7,6 +7,11 @@
 //
 // The server provides the following tools:
 //
+// ## Server and Policy Metadata
+//
+//   - get_server_info: Get server build, process, and tool metadata
+//   - list_policy_entrypoints: List CEL policy entrypoints, variables, and helpers
+//
 // ## Vulnerability Analysis
 //
 //   - explain_vulnerability: Get detailed information about a CVE/GHSA by ID
@@ -45,9 +50,10 @@
 // the schema, the wire, and the server cannot drift apart. Results are
 // protojson with camelCase names. Zero values of plain fields are omitted, so
 // an absent field means empty, none, or not applicable; affirmative answers
-// (found, clean, direct, hasFix, executable, depth, isContainerDiff) use
-// proto3 optional, are always set by handlers, and are therefore always on
-// the wire.
+// (found, clean, direct, hasFix, migration, executable, depth,
+// isContainerDiff) use proto3 optional and are on the wire whenever they
+// apply, even when false or zero. When an answer does not apply it stays
+// absent: a graph result's direct is absent when the package was not found.
 //
 // # Running the Server
 //
@@ -99,6 +105,14 @@
 // should call this when verifying that a restarted MCP process picked up a new
 // local build. The response includes the Deputy version, process ID, start time,
 // registered tools, and configured default exclude paths.
+//
+// ## list_policy_entrypoints
+//
+// Lists Deputy's CEL policy entrypoints with their categories, bound
+// variables, and helper functions, for authoring policies. Accepts an
+// optional category filter (legacy aliases container, service, and exec are
+// normalized). The entrypoint metadata comes from the same registry that
+// powers the policy API and the generated policy-inputs reference.
 //
 // ## explain_vulnerability
 //

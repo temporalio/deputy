@@ -1303,6 +1303,8 @@ type NeedsDependencyResponse struct {
 	// Dependents are packages that depend on this package.
 	Dependents []*Node `protobuf:"bytes,4,rep,name=dependents,proto3" json:"dependents,omitempty"`
 	// Found indicates whether the queried package was found in the graph.
+	// Always present (unlike WhyDependencyResponse.found, which predates
+	// explicit presence and stays a plain bool for wire compatibility).
 	Found *bool `protobuf:"varint,5,opt,name=found,proto3,oneof" json:"found,omitempty"`
 	// Direct indicates whether the queried package is a direct/root dependency.
 	Direct *bool `protobuf:"varint,6,opt,name=direct,proto3,oneof" json:"direct,omitempty"`

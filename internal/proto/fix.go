@@ -8,17 +8,16 @@ import (
 	"github.com/temporalio/deputy/internal/remediation"
 )
 
-// BuildFixResponse creates a FixResponse from internal types.
+// BuildFixResponse creates a FixResponse from internal types. The resolved
+// target is echoed as-is so ref, effectiveRef, and commit survive into fix
+// output, matching the other surfaces.
 func BuildFixResponse(
-	displayPath, ref, commit string,
+	target *targetv1.Target,
 	stdlibUpgrade string,
 	commands []remediation.Command,
 ) *fixv1.FixResponse {
 	resp := &fixv1.FixResponse{
-		Target: &targetv1.Target{
-			DisplayPath: displayPath,
-			CommitHash:  commit,
-		},
+		Target:        target,
 		StdlibUpgrade: stdlibUpgrade,
 		Commands:      RemediationCommandsToProto(commands),
 		GeneratedAt:   timestamppb.Now(),

@@ -184,7 +184,7 @@ func fixVerdictProto(v *vulnerability.FixVerdict) *mcpv1.FixVerdict {
 
 // remediationStepProto projects a deputy.remediation.v1 plan step onto the
 // mcp.v1 wire: kind and risk become lowercase strings, and the affirmative
-// migration/isDirect/executable answers get explicit presence.
+// migration/direct/executable answers get explicit presence.
 func remediationStepProto(step *remediationv1.Step) *mcpv1.RemediationStep {
 	if step == nil {
 		return nil
@@ -204,7 +204,7 @@ func remediationStepProto(step *remediationv1.Step) *mcpv1.RemediationStep {
 		ManifestPath:            step.GetManifestPath(),
 		Command:                 step.GetCommand(),
 		Hint:                    step.GetHint(),
-		IsDirect:                proto.Bool(step.GetIsDirect()),
+		Direct:                  proto.Bool(step.GetDirect()),
 		Executable:              proto.Bool(step.GetExecutable()),
 		Groups:                  step.GetGroups(),
 		RiskLevel:               internalproto.RiskLevelFromProto(step.GetRiskLevel()),

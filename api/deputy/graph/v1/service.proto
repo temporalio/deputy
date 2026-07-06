@@ -379,6 +379,8 @@ message NeedsDependencyResponse {
   repeated Node dependents = 4;
 
   // Found indicates whether the queried package was found in the graph.
+  // Always present (unlike WhyDependencyResponse.found, which predates
+  // explicit presence and stays a plain bool for wire compatibility).
   optional bool found = 5;
 
   // Direct indicates whether the queried package is a direct/root dependency.

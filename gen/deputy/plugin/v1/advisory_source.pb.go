@@ -110,13 +110,16 @@ func (x *AdvisorySourceInfoResponse) GetInfo() *AdvisorySourceInfo {
 // AdvisorySourceInfo describes an advisory source and what it can answer for.
 type AdvisorySourceInfo struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// Name is the stable identifier recorded as finding provenance (e.g. "osv").
+	// Name is the stable identifier recorded as finding provenance (e.g.
+	// "osv"). It must stay comparable across releases: lowercase letters,
+	// digits, and separators only.
 	Name string `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
 	// DisplayName is a human-friendly name.
 	DisplayName string `protobuf:"bytes,2,opt,name=display_name,json=displayName,proto3" json:"display_name,omitempty"`
 	// Description explains the source's coverage and provenance.
 	Description string `protobuf:"bytes,3,opt,name=description,proto3" json:"description,omitempty"`
-	// Version is incremented when the source's behavior changes.
+	// Version starts at 1 and must increase whenever the source's query
+	// behavior changes, so cached results can be invalidated.
 	Version int32 `protobuf:"varint,4,opt,name=version,proto3" json:"version,omitempty"`
 	// Capabilities declares what this source can answer for.
 	Capabilities  *SourceCapabilities `protobuf:"bytes,5,opt,name=capabilities,proto3" json:"capabilities,omitempty"`
@@ -193,11 +196,15 @@ func (x *AdvisorySourceInfo) GetCapabilities() *SourceCapabilities {
 // route only relevant packages to it and report gaps for the rest.
 type SourceCapabilities struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// Ecosystems are the canonical ecosystem names this source covers.
+	// Ecosystems are the canonical ecosystem names this source covers;
+	// matching is case-insensitive. A source that declares no ecosystems
+	// receives no queries.
 	Ecosystems []string `protobuf:"bytes,1,rep,name=ecosystems,proto3" json:"ecosystems,omitempty"`
-	// Artifacts are the artifact kinds this source can answer for.
+	// Artifacts are the artifact kinds this source can answer for. Empty means
+	// all artifact kinds within the declared ecosystems.
 	Artifacts []v1.ArtifactKind `protobuf:"varint,2,rep,packed,name=artifacts,proto3,enum=deputy.vulnerability.v1.ArtifactKind" json:"artifacts,omitempty"`
-	// FindingKinds are the classes of finding this source produces.
+	// FindingKinds are the classes of finding this source produces. It is
+	// informational and does not affect routing.
 	FindingKinds  []v1.FindingKind `protobuf:"varint,3,rep,packed,name=finding_kinds,json=findingKinds,proto3,enum=deputy.vulnerability.v1.FindingKind" json:"finding_kinds,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -303,9 +310,12 @@ func (x *AdvisoryQueryRequest) GetPackages() []*v11.Package {
 // AdvisoryQueryResponse returns the advisories a source found.
 type AdvisoryQueryResponse struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// Findings are the per-package advisory occurrences.
+	// Findings are the per-package advisory occurrences, referencing advisories
+	// by advisory ID.
 	Findings []*v1.Finding `protobuf:"bytes,1,rep,name=findings,proto3" json:"findings,omitempty"`
-	// Advisories are the full advisory records keyed by advisory ID.
+	// Advisories are the authoritative advisory records keyed by advisory ID.
+	// When several sources return the same ID, the first registered source's
+	// record wins.
 	Advisories    map[string]*v1.Advisory `protobuf:"bytes,2,rep,name=advisories,proto3" json:"advisories,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -362,9 +372,9 @@ const file_deputy_plugin_v1_advisory_source_proto_rawDesc = "" +
 	"&deputy/plugin/v1/advisory_source.proto\x12\x10deputy.plugin.v1\x1a\x1bbuf/validate/validate.proto\x1a%deputy/dependency/v1/dependency.proto\x1a+deputy/vulnerability/v1/vulnerability.proto\"\x1b\n" +
 	"\x19AdvisorySourceInfoRequest\"V\n" +
 	"\x1aAdvisorySourceInfoResponse\x128\n" +
-	"\x04info\x18\x01 \x01(\v2$.deputy.plugin.v1.AdvisorySourceInfoR\x04info\"\xda\x01\n" +
-	"\x12AdvisorySourceInfo\x12\x1b\n" +
-	"\x04name\x18\x01 \x01(\tB\a\xbaH\x04r\x02\x10\x01R\x04name\x12!\n" +
+	"\x04info\x18\x01 \x01(\v2$.deputy.plugin.v1.AdvisorySourceInfoR\x04info\"\xf2\x01\n" +
+	"\x12AdvisorySourceInfo\x123\n" +
+	"\x04name\x18\x01 \x01(\tB\x1f\xbaH\x1cr\x1a\x10\x012\x16^[a-z0-9][a-z0-9._-]*$R\x04name\x12!\n" +
 	"\fdisplay_name\x18\x02 \x01(\tR\vdisplayName\x12 \n" +
 	"\vdescription\x18\x03 \x01(\tR\vdescription\x12\x18\n" +
 	"\aversion\x18\x04 \x01(\x05R\aversion\x12H\n" +

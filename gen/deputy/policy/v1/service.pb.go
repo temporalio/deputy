@@ -215,6 +215,8 @@ func (*EvaluateRequest_CustomPayload) isEvaluateRequest_Input() {}
 // PolicySource specifies where to load a policy from.
 type PolicySource struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
+	// Source carries the policy content by value or by reference.
+	//
 	// Types that are valid to be assigned to Source:
 	//
 	//	*PolicySource_Inline

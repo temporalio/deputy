@@ -14,8 +14,8 @@ import (
 )
 
 // TriageSummary prints a human-readable summary of a triage response. It
-// renders the deputy.triage.v1 proto directly — the same message the JSON
-// output marshals and the API returns — so text and machine output can never
+// renders the deputy.triage.v1 proto directly (the same message the JSON
+// output marshals and the API returns), so text and machine output can never
 // disagree about what the triage found.
 func TriageSummary(w io.Writer, resp *triagev1.TriageResponse, showDBInfo bool) {
 	if resp == nil {
@@ -49,9 +49,9 @@ func TriageSummary(w io.Writer, resp *triagev1.TriageResponse, showDBInfo bool) 
 		countInline := ""
 		if pkg.GetVulnerabilityCount() > 0 {
 			if sevInline != "" {
-				countInline = ui.StyleMeta.Render(fmt.Sprintf("— %d vulns (%s)", pkg.GetVulnerabilityCount(), sevInline))
+				countInline = ui.StyleMeta.Render(fmt.Sprintf("(%d vulns: %s)", pkg.GetVulnerabilityCount(), sevInline))
 			} else {
-				countInline = ui.StyleMeta.Render(fmt.Sprintf("— %d vulns", pkg.GetVulnerabilityCount()))
+				countInline = ui.StyleMeta.Render(fmt.Sprintf("(%d vulns)", pkg.GetVulnerabilityCount()))
 			}
 		}
 		fix := ""
@@ -121,17 +121,19 @@ func FormatImportSummaries(imps []vulnerabilityv1.AffectedImport, maxPaths, maxS
 }
 
 // formatSeverityCounts renders a short severity breakdown like "2 HIGH, 1 MED".
+// formatSeverityCounts renders a severity_counts map (lowercase keys per the
+// deputy.triage.v1 contract) as a compact inline summary.
 func formatSeverityCounts(counts map[string]int32) string {
 	if len(counts) == 0 {
 		return ""
 	}
-	order := []string{"CRITICAL", "HIGH", "MED", "LOW", "UNKNOWN"}
+	order := []string{"critical", "high", "medium", "low", "unknown"}
 	labels := map[string]string{
-		"CRITICAL": "CRIT",
-		"HIGH":     "HIGH",
-		"MED":      "MED",
-		"LOW":      "LOW",
-		"UNKNOWN":  "?",
+		"critical": "CRIT",
+		"high":     "HIGH",
+		"medium":   "MED",
+		"low":      "LOW",
+		"unknown":  "?",
 	}
 	var parts []string
 	for _, key := range order {

@@ -444,13 +444,13 @@ func TestFormatSeverityCounts(t *testing.T) {
 	}{
 		{"empty", nil, ""},
 		{"empty map", map[string]int32{}, ""},
-		{"critical only", map[string]int32{"CRITICAL": 2}, "2 CRIT"},
-		{"high only", map[string]int32{"HIGH": 3}, "3 HIGH"},
-		{"medium only", map[string]int32{"MED": 1}, "1 MED"},
-		{"low only", map[string]int32{"LOW": 5}, "5 LOW"},
-		{"multiple", map[string]int32{"HIGH": 2, "MED": 3}, "2 HIGH, 3 MED"},
-		{"ordering", map[string]int32{"LOW": 1, "CRITICAL": 1, "HIGH": 1}, "1 CRIT, 1 HIGH, 1 LOW"},
-		{"unknown", map[string]int32{"UNKNOWN": 2}, "2 ?"},
+		{"critical only", map[string]int32{"critical": 2}, "2 CRIT"},
+		{"high only", map[string]int32{"high": 3}, "3 HIGH"},
+		{"medium only", map[string]int32{"medium": 1}, "1 MED"},
+		{"low only", map[string]int32{"low": 5}, "5 LOW"},
+		{"multiple", map[string]int32{"high": 2, "medium": 3}, "2 HIGH, 3 MED"},
+		{"ordering", map[string]int32{"low": 1, "critical": 1, "high": 1}, "1 CRIT, 1 HIGH, 1 LOW"},
+		{"unknown", map[string]int32{"unknown": 2}, "2 ?"},
 	}
 
 	for _, tt := range tests {

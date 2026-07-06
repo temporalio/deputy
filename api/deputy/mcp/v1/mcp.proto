@@ -24,12 +24,21 @@ option go_package = "github.com/temporalio/deputy/gen/deputy/mcp/v1;mcpv1";
 //     enums from the same lists.
 //   - Counts and durations use int32 so protojson emits JSON numbers
 //     (protojson serializes 64-bit integers as strings).
+//   - Severity keeps the canonical UPPERCASE labels (CRITICAL, HIGH, ...)
+//     shared with the CLI and API surfaces and the advisory ecosystem;
+//     lowercase values are reserved for verdicts Deputy itself mints
+//     (priority, kind, status, riskLevel).
+//   - Timestamps are RFC 3339 strings rather than google.protobuf.Timestamp;
+//     the wire is identical under protojson and the schema stays a plain
+//     string for MCP clients.
 //   - Affirmative answers use proto3 optional (explicit presence): fields
 //     whose zero value is a statement an agent acts on (found, clean, direct,
-//     hasFix, executable, depth, isContainerDiff) are always set by handlers
-//     and therefore always on the wire, matching the deputy.graph.v1 and
-//     deputy.vulnerability.v1 convention. Plain fields omit zero values:
-//     absence means empty, none, or not applicable.
+//     hasFix, migration, executable, depth, isContainerDiff) are set whenever
+//     the answer exists and are therefore on the wire even when false or
+//     zero, matching the deputy.graph.v1 and deputy.vulnerability.v1
+//     convention. When the answer does not apply they stay absent (a graph
+//     result's direct is absent when the package was not found). Plain
+//     fields omit zero values: absence means empty, none, or not applicable.
 //   - These are agent-curated projections; the full normalized data lives in
 //     the service protos (deputy.scan.v1, deputy.triage.v1, …) that the CLI
 //     and API emit.
@@ -44,8 +53,8 @@ message VulnExplanation {
   repeated string aliases = 2;
   // Summary is a brief description of the vulnerability.
   string summary = 3;
-  // Details is the full vulnerability description, included only when the
-  // caller asked for details.
+  // Details is the full advisory description; the explain tools populate it,
+  // and scan and diff summaries omit it for context-window economy.
   string details = 4;
   // Kind distinguishes malware from ordinary vulnerabilities. Absent means
   // vulnerability.
@@ -79,7 +88,9 @@ message VulnExplanation {
   string modified = 16;
 }
 
-// PackageFix records fixed versions for one affected module path.
+// PackageFix records fixed versions for one affected module path. It mirrors
+// deputy.vulnerability.v1.PackageFix rather than embedding it so the
+// ecosystem field carries the canonical lowercase output name.
 message PackageFix {
   // Module is the module path the fix applies to.
   string module = 1;
@@ -94,7 +105,7 @@ message FixVerdict {
   // Status is the verdict: in_place (upgrade on the same module path),
   // migration (fix lives on a different module path), unavailable, or
   // unverified (advisory claim not checked).
-  string status = 1 [(buf.validate.field).string = {in: ["in_place", "migration", "unavailable", "unverified", "unknown"]}, (buf.validate.field).ignore = IGNORE_IF_ZERO_VALUE];
+  string status = 1 [(buf.validate.field).string = {in: ["in_place", "migration", "unavailable", "unverified"]}, (buf.validate.field).ignore = IGNORE_IF_ZERO_VALUE];
   // Version is the version to install.
   string version = 2;
   // TargetModule is the module path to migrate to when status is migration.
@@ -119,7 +130,7 @@ message CoverageEntry {
   // Ecosystem is the package ecosystem (canonical name, e.g. "go", "npm").
   string ecosystem = 1;
   // Artifact is the artifact kind these packages represent.
-  string artifact = 2 [(buf.validate.field).string = {in: ["package", "os_package", "container_image_ref", "github_action", "unspecified"]}, (buf.validate.field).ignore = IGNORE_IF_ZERO_VALUE];
+  string artifact = 2 [(buf.validate.field).string = {in: ["package", "os_package", "container_image_ref", "github_action"]}, (buf.validate.field).ignore = IGNORE_IF_ZERO_VALUE];
   // Sources names the advisory sources that answered for this combination;
   // empty in an uncovered entry.
   repeated string sources = 3;
@@ -135,10 +146,10 @@ message ScanDirectoryRequest {
   // the current working tree/HEAD.
   string ref = 2;
   // Optional ecosystems to scan, e.g. go, npm, pypi. Scans all if empty.
-  repeated string ecosystems = 3 [(buf.validate.field).repeated = {items: {string: {min_len: 1, pattern: "\\S"}}}];
+  repeated string ecosystems = 3 [(buf.validate.field).repeated = {max_items: 100, items: {string: {min_len: 1, max_len: 256, pattern: "\\S"}}}];
   // Optional directory globs to skip during the walk, e.g. .bin/** or
   // **/testdata.
-  repeated string exclude_paths = 4 [(buf.validate.field).repeated = {items: {string: {min_len: 1, pattern: "\\S"}}}];
+  repeated string exclude_paths = 4 [(buf.validate.field).repeated = {max_items: 100, items: {string: {min_len: 1, max_len: 256, pattern: "\\S"}}}];
 }
 
 // ScanDirectoryResult summarizes a directory scan: severity totals that always
@@ -155,8 +166,9 @@ message ScanDirectoryResult {
   string commit = 4;
   // PackagesScanned is the number of packages analyzed.
   int32 packages_scanned = 5;
-  // VulnerabilitiesBySeverity counts unique findings per severity level,
-  // including an "unknown" bucket so the counts sum to the total.
+  // VulnerabilitiesBySeverity counts unique findings per severity level.
+  // Keys are always critical, high, medium, low, and unknown, zero-valued
+  // entries included, so the counts sum to the total.
   map<string, int32> vulnerabilities_by_severity = 6;
   // Vulnerabilities are the consolidated findings.
   repeated VulnExplanation vulnerabilities = 7;
@@ -190,8 +202,9 @@ message ScanContainerResult {
   string platform = 2;
   // PackagesScanned is the number of packages analyzed.
   int32 packages_scanned = 3;
-  // VulnerabilitiesBySeverity counts unique findings per severity level,
-  // including an "unknown" bucket so the counts sum to the total.
+  // VulnerabilitiesBySeverity counts unique findings per severity level.
+  // Keys are always critical, high, medium, low, and unknown, zero-valued
+  // entries included, so the counts sum to the total.
   map<string, int32> vulnerabilities_by_severity = 4;
   // Vulnerabilities are the consolidated findings.
   repeated VulnExplanation vulnerabilities = 5;
@@ -215,10 +228,10 @@ message TriageRequest {
   // the current working tree/HEAD.
   string ref = 2;
   // Optional ecosystems to include, e.g. go, npm, pypi.
-  repeated string ecosystems = 3 [(buf.validate.field).repeated = {items: {string: {min_len: 1, pattern: "\\S"}}}];
+  repeated string ecosystems = 3 [(buf.validate.field).repeated = {max_items: 100, items: {string: {min_len: 1, max_len: 256, pattern: "\\S"}}}];
   // Optional directory globs to skip during the walk, e.g. .bin/** or
   // **/testdata.
-  repeated string exclude_paths = 4 [(buf.validate.field).repeated = {items: {string: {min_len: 1, pattern: "\\S"}}}];
+  repeated string exclude_paths = 4 [(buf.validate.field).repeated = {max_items: 100, items: {string: {min_len: 1, max_len: 256, pattern: "\\S"}}}];
 }
 
 // TriagedVuln is one prioritized finding: identity plus the canonical triage
@@ -242,9 +255,9 @@ message TriagedVuln {
   // Purl is the package URL for exact follow-up with graph_why, graph_needs,
   // or scan_package.
   string purl = 8;
-  // IsDirect reports whether the package is a direct dependency. Always
+  // Direct reports whether the package is a direct dependency. Always
   // present.
-  optional bool is_direct = 9;
+  optional bool direct = 9;
   // HasFix reports whether an actionable fix exists. Always present.
   optional bool has_fix = 10;
   // FixedVersions are versions containing a fix on the package's own module
@@ -264,6 +277,9 @@ message TriagedVuln {
 }
 
 // TriageResult is the prioritized summary of a directory's vulnerabilities.
+// Severity totals are deliberately discrete fields rather than a map: the
+// triage summary is the surface agents read first, and named counts keep it
+// self-describing.
 message TriageResult {
   // Path is the analyzed directory.
   string path = 1;
@@ -317,10 +333,10 @@ message ListDependenciesRequest {
   // the current working tree/HEAD.
   string ref = 3;
   // Optional ecosystems to include, e.g. go, npm, pypi.
-  repeated string ecosystems = 4 [(buf.validate.field).repeated = {items: {string: {min_len: 1, pattern: "\\S"}}}];
+  repeated string ecosystems = 4 [(buf.validate.field).repeated = {max_items: 100, items: {string: {min_len: 1, max_len: 256, pattern: "\\S"}}}];
   // Optional directory globs to skip during the walk, e.g. .bin/** or
   // **/testdata.
-  repeated string exclude_paths = 5 [(buf.validate.field).repeated = {items: {string: {min_len: 1, pattern: "\\S"}}}];
+  repeated string exclude_paths = 5 [(buf.validate.field).repeated = {max_items: 100, items: {string: {min_len: 1, max_len: 256, pattern: "\\S"}}}];
 }
 
 // DependencyInfo is the agent-facing projection of one resolved dependency.
@@ -391,10 +407,10 @@ message GenerateSBOMRequest {
   // Enrich the SBOM with license information from deps.dev.
   bool enrich_licenses = 4;
   // Optional ecosystems to include, e.g. go, npm, pypi.
-  repeated string ecosystems = 5 [(buf.validate.field).repeated = {items: {string: {min_len: 1, pattern: "\\S"}}}];
+  repeated string ecosystems = 5 [(buf.validate.field).repeated = {max_items: 100, items: {string: {min_len: 1, max_len: 256, pattern: "\\S"}}}];
   // Optional directory globs to skip during the walk, e.g. .bin/** or
   // **/testdata.
-  repeated string exclude_paths = 6 [(buf.validate.field).repeated = {items: {string: {min_len: 1, pattern: "\\S"}}}];
+  repeated string exclude_paths = 6 [(buf.validate.field).repeated = {max_items: 100, items: {string: {min_len: 1, max_len: 256, pattern: "\\S"}}}];
 }
 
 // GenerateSBOMResult carries the serialized SBOM document.
@@ -464,10 +480,10 @@ message AnalyzeGraphRequest {
   // pkg:golang/golang.org/x/net.
   string target_purl = 3 [(buf.validate.field).string = {pattern: "^[Pp][Kk][Gg]:\\S+"}, (buf.validate.field).ignore = IGNORE_IF_ZERO_VALUE];
   // Optional ecosystems to include, e.g. go, npm, pypi.
-  repeated string ecosystems = 4 [(buf.validate.field).repeated = {items: {string: {min_len: 1, pattern: "\\S"}}}];
+  repeated string ecosystems = 4 [(buf.validate.field).repeated = {max_items: 100, items: {string: {min_len: 1, max_len: 256, pattern: "\\S"}}}];
   // Optional directory globs to skip during the walk, e.g. .bin/** or
   // **/testdata.
-  repeated string exclude_paths = 5 [(buf.validate.field).repeated = {items: {string: {min_len: 1, pattern: "\\S"}}}];
+  repeated string exclude_paths = 5 [(buf.validate.field).repeated = {max_items: 100, items: {string: {min_len: 1, max_len: 256, pattern: "\\S"}}}];
   // If true, use package registry, deps.dev, and Git lookups to resolve more
   // precise transitive graph edges. Slower and may require network access.
   bool resolve_transitives = 6;
@@ -540,10 +556,10 @@ message GraphWhyRequest {
   // pathCount and pathsTruncated to detect sampling.
   bool show_all = 4;
   // Optional ecosystems to include, e.g. go, npm, pypi.
-  repeated string ecosystems = 5 [(buf.validate.field).repeated = {items: {string: {min_len: 1, pattern: "\\S"}}}];
+  repeated string ecosystems = 5 [(buf.validate.field).repeated = {max_items: 100, items: {string: {min_len: 1, max_len: 256, pattern: "\\S"}}}];
   // Optional directory globs to skip during the walk, e.g. .bin/** or
   // **/testdata.
-  repeated string exclude_paths = 6 [(buf.validate.field).repeated = {items: {string: {min_len: 1, pattern: "\\S"}}}];
+  repeated string exclude_paths = 6 [(buf.validate.field).repeated = {max_items: 100, items: {string: {min_len: 1, max_len: 256, pattern: "\\S"}}}];
   // If true, use package registry, deps.dev, and Git lookups to resolve more
   // precise transitive graph edges. Slower and may require network access.
   bool resolve_transitives = 7;
@@ -585,6 +601,8 @@ message GraphWhyResult {
   bool paths_truncated = 12;
   // Message explains the outcome in one sentence.
   string message = 13;
+  // Path is the analyzed directory.
+  string path = 14;
 }
 
 // GraphNeedsRequest asks what packages depend on a package.
@@ -597,10 +615,10 @@ message GraphNeedsRequest {
   // the current working tree/HEAD.
   string ref = 3;
   // Optional ecosystems to include, e.g. go, npm, pypi.
-  repeated string ecosystems = 4 [(buf.validate.field).repeated = {items: {string: {min_len: 1, pattern: "\\S"}}}];
+  repeated string ecosystems = 4 [(buf.validate.field).repeated = {max_items: 100, items: {string: {min_len: 1, max_len: 256, pattern: "\\S"}}}];
   // Optional directory globs to skip during the walk, e.g. .bin/** or
   // **/testdata.
-  repeated string exclude_paths = 5 [(buf.validate.field).repeated = {items: {string: {min_len: 1, pattern: "\\S"}}}];
+  repeated string exclude_paths = 5 [(buf.validate.field).repeated = {max_items: 100, items: {string: {min_len: 1, max_len: 256, pattern: "\\S"}}}];
   // If true, use package registry, deps.dev, and Git lookups to resolve more
   // precise transitive graph edges. Slower and may require network access.
   bool resolve_transitives = 6;
@@ -643,6 +661,8 @@ message GraphNeedsResult {
   optional int32 transitive_count = 12;
   // Message explains the outcome in one sentence.
   string message = 13;
+  // Path is the analyzed directory.
+  string path = 14;
 }
 
 // ExplainVulnerabilityRequest asks for the full advisory text for one
@@ -659,7 +679,7 @@ message ExplainVulnerabilityRequest {
 // vulnerabilities in one call.
 message ExplainVulnerabilitiesRequest {
   // Vulnerability IDs to explain.
-  repeated string ids = 1 [(buf.validate.field).required = true, (buf.validate.field).repeated = {min_items: 1, items: {string: {min_len: 1, pattern: "\\S"}}}];
+  repeated string ids = 1 [(buf.validate.field).required = true, (buf.validate.field).repeated = {min_items: 1, max_items: 100, items: {string: {min_len: 1, max_len: 256, pattern: "\\S"}}}];
   // Optional maximum number of advisory references to return per
   // vulnerability. Omit or pass a negative value for all references; 0
   // returns none.
@@ -682,9 +702,15 @@ message ExplainVulnerabilitiesResult {
 // ecosystem; the handler rejects combinations that do not resolve to an
 // exact package version.
 message ScanPackageRequest {
+  option (buf.validate.message).cel = {
+    id: "scan_package.identity"
+    message: "provide purl or name to identify the package"
+    expression: "this.purl != '' || this.name != ''"
+  };
+
   // Package URL, e.g. pkg:npm/lodash@4.17.21. Include @version in the PURL or
   // provide version separately.
-  string purl = 1;
+  string purl = 1 [(buf.validate.field).string = {pattern: "^[Pp][Kk][Gg]:\\S+"}, (buf.validate.field).ignore = IGNORE_IF_ZERO_VALUE];
   // Package name (e.g. lodash, github.com/foo/bar), Maven coordinates
   // (group:artifact), or a pkg: PURL.
   string name = 2;
@@ -771,22 +797,23 @@ message GetRemediationRequest {
   // the current working tree/HEAD.
   string ref = 2;
   // Optional ecosystems to include, e.g. go, npm, pypi.
-  repeated string ecosystems = 3 [(buf.validate.field).repeated = {items: {string: {min_len: 1, pattern: "\\S"}}}];
+  repeated string ecosystems = 3 [(buf.validate.field).repeated = {max_items: 100, items: {string: {min_len: 1, max_len: 256, pattern: "\\S"}}}];
   // Optional directory globs to skip during the walk, e.g. .bin/** or
   // **/testdata.
-  repeated string exclude_paths = 4 [(buf.validate.field).repeated = {items: {string: {min_len: 1, pattern: "\\S"}}}];
+  repeated string exclude_paths = 4 [(buf.validate.field).repeated = {max_items: 100, items: {string: {min_len: 1, max_len: 256, pattern: "\\S"}}}];
 }
 
 // RemediationStep is the agent-facing projection of a deputy.remediation.v1
-// plan step: kind and risk use the lowercase wire convention, and fields the
-// planner does not populate yet (dependsOn, requiresApproval) are omitted
-// until they carry signal.
+// plan step: kind and risk use the lowercase wire convention, packageName and
+// currentVersion shorten to package and version for intra-package congruence,
+// and fields the planner does not populate yet (dependsOn, requiresApproval)
+// are omitted until they carry signal.
 message RemediationStep {
   // Id uniquely identifies this step within the plan.
   string id = 1;
   // Kind classifies the remediation. A version_upgrade with executable false
   // is upgrade guidance that needs a manual change.
-  string kind = 2 [(buf.validate.field).string = {in: ["version_upgrade", "file_edit", "shell_command", "dockerfile_update", "action_update", "config_change", "custom_agent", "unspecified"]}, (buf.validate.field).ignore = IGNORE_IF_ZERO_VALUE];
+  string kind = 2 [(buf.validate.field).string = {in: ["version_upgrade", "file_edit", "shell_command", "dockerfile_update", "action_update", "config_change", "custom_agent"]}, (buf.validate.field).ignore = IGNORE_IF_ZERO_VALUE];
   // Title is a short human-readable summary of the step.
   string title = 3;
   // Description explains what the step does.
@@ -814,9 +841,9 @@ message RemediationStep {
   string command = 13;
   // Hint gives extra guidance for applying the step.
   string hint = 14;
-  // IsDirect reports whether the affected package is a direct dependency.
+  // Direct reports whether the affected package is a direct dependency.
   // Always present.
-  optional bool is_direct = 15;
+  optional bool direct = 15;
   // Executable reports whether the command can be run as-is; manual steps are
   // guidance only. Always present.
   optional bool executable = 16;
@@ -856,7 +883,8 @@ message GetRemediationResult {
   // StdlibUpgrade recommends a Go toolchain upgrade when stdlib findings are
   // present.
   string stdlib_upgrade = 10;
-  // UnfixableVulnerabilities lists the finding IDs with no known remediation.
+  // UnfixableVulnerabilities lists the finding IDs the plan does not address
+  // (deputy.remediation.v1 GeneratePlanResponse.unaddressed_vulnerabilities).
   // Unfixable means still vulnerable, not safe.
   repeated string unfixable_vulnerabilities = 11;
 }
@@ -875,10 +903,10 @@ message DiffRefsRequest {
   // linux/arm64. Ignored for Git ref diffs.
   string platform = 4;
   // Optional ecosystems to include for Git ref diffs, e.g. go, npm, pypi.
-  repeated string ecosystems = 5 [(buf.validate.field).repeated = {items: {string: {min_len: 1, pattern: "\\S"}}}];
+  repeated string ecosystems = 5 [(buf.validate.field).repeated = {max_items: 100, items: {string: {min_len: 1, max_len: 256, pattern: "\\S"}}}];
   // Optional directory globs to skip during Git ref scans, e.g. .bin/** or
   // **/testdata.
-  repeated string exclude_paths = 6 [(buf.validate.field).repeated = {items: {string: {min_len: 1, pattern: "\\S"}}}];
+  repeated string exclude_paths = 6 [(buf.validate.field).repeated = {max_items: 100, items: {string: {min_len: 1, max_len: 256, pattern: "\\S"}}}];
 }
 
 // DependencyChange is one package-level difference between base and target.
@@ -893,11 +921,13 @@ message DependencyChange {
   // Purl is the package URL.
   string purl = 4;
   // ChangeType classifies the difference. Version changes are upgraded or
-  // downgraded when the versions compare, updated otherwise.
+  // downgraded when the versions compare, and updated when only the version
+  // string changed (e.g. 1.2.3 to v1.2.3).
   string change_type = 5 [(buf.validate.field).string = {in: ["added", "removed", "upgraded", "downgraded", "updated"]}, (buf.validate.field).ignore = IGNORE_IF_ZERO_VALUE];
-  // IsDirect reports whether the package is a direct dependency. Always
-  // present.
-  optional bool is_direct = 6;
+  // Direct reports whether the package is a direct dependency: of the target
+  // ref for added and changed packages, of the base ref for removed ones.
+  // Always present.
+  optional bool direct = 6;
   // Ecosystem is the canonical package ecosystem.
   string ecosystem = 7;
 }
@@ -911,7 +941,7 @@ message DiffVulnChange {
   // ChangeType classifies the delta: added (new in target), removed (affected
   // package gone), fixed (package upgraded past it), or persisted (present in
   // both).
-  string change_type = 3 [(buf.validate.field).string = {in: ["added", "removed", "fixed", "persisted", "unspecified"]}, (buf.validate.field).ignore = IGNORE_IF_ZERO_VALUE];
+  string change_type = 3 [(buf.validate.field).string = {in: ["added", "removed", "fixed", "persisted"]}, (buf.validate.field).ignore = IGNORE_IF_ZERO_VALUE];
   // Severity is the normalized severity level.
   string severity = 4 [(buf.validate.field).string = {in: ["CRITICAL", "HIGH", "MEDIUM", "LOW", "UNKNOWN"]}, (buf.validate.field).ignore = IGNORE_IF_ZERO_VALUE];
   // Package is the affected package name.
@@ -985,9 +1015,10 @@ message DiffRefsResult {
   // Vulnerabilities are the target's findings, with reference lists truncated
   // to a compact sample.
   repeated VulnExplanation vulnerabilities = 12;
-  // VulnerabilitySummary counts the target's findings per severity level,
-  // including an "unknown" bucket.
-  map<string, int32> vulnerability_summary = 13;
+  // VulnerabilitiesBySeverity counts the target's findings per severity
+  // level. Keys are always critical, high, medium, low, and unknown,
+  // zero-valued entries included, so the counts sum to the total.
+  map<string, int32> vulnerabilities_by_severity = 13;
   // VulnerabilityChanges are per-vulnerability deltas for container diffs.
   repeated DiffVulnChange vulnerability_changes = 14;
   // ContainerSummary totals the container diff; absent for Git ref diffs.

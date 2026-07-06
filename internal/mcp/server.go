@@ -138,9 +138,9 @@ const serverInstructions = "Deputy is a supply-chain security engine. Its tools 
 	"\n" +
 	"Reading results\n" +
 	"- Severity totals include an `unknown` bucket, so per-severity counts always sum to the total.\n" +
-	"- List-like outputs are capped and set a `*Truncated` flag alongside a full count (e.g. `pathCount` with `pathsTruncated`); check them before assuming a result is complete. Ordering is deterministic across calls.\n" +
+	"- Sampled outputs (advisory references, graph paths) are capped and set a `*Truncated` flag alongside a full count (e.g. `pathCount` with `pathsTruncated`); check them before assuming a result is complete. Other lists are returned whole. Ordering is deterministic across calls.\n" +
 	"- A clean target reports `clean: true`; this is success, not an error.\n" +
-	"- Absent fields mean empty, zero, or not applicable: results omit empty lists, zero counts, and optional attributes (no `vulnerabilities` key = none found; no `kind` = ordinary vulnerability). Affirmative answers (`clean`, `found`, `direct`, `hasFix`, `executable`, `depth`, `isContainerDiff`) are always present.\n" +
+	"- Absent fields mean empty, zero, or not applicable: results omit empty lists, zero counts, and optional attributes (no `vulnerabilities` key = none found; no `kind` = ordinary vulnerability). Affirmative answers (`clean`, `found`, `direct`, `hasFix`, `migration`, `executable`, `depth`, `isContainerDiff`) are present whenever they apply, even when false or zero; severity count maps always carry all their keys.\n" +
 	"- A package absent from the graph is a normal `found: false` result (with a `matchedNode` when the package is present but has no paths), not an error.\n" +
 	"- Scan results include a `coverage` block: `covered` lists (ecosystem, artifact) combinations an advisory source answered for, `uncovered` lists those none could (e.g. container base images). Uncovered means not-checked, not safe. Findings carry `sources` (provenance, e.g. `[\"osv\"]`) and `kind` (`malware` vs vulnerability).\n" +
 	"\n" +
@@ -1284,7 +1284,9 @@ func (s *Server) explainVulnerabilities(ctx context.Context, req *mcp.CallToolRe
 			result.Errors = append(result.Errors, fmt.Sprintf("%s: vulnerability %s not found", id, id))
 			continue
 		}
-		result.Errors = append(result.Errors, fmt.Sprintf("%s: vulnerability %s not found", id, id))
+		// The advisory service answered without listing this ID anywhere; treat
+		// it as not found but name the inconsistency for debuggability.
+		result.Errors = append(result.Errors, fmt.Sprintf("%s: advisory response missing this ID", id))
 	}
 
 	otel.SetSpanOK(span)
@@ -1493,6 +1495,7 @@ func (s *Server) scanDirectory(ctx context.Context, req *mcp.CallToolRequest, ra
 	internalScanResult := internalproto.ScanningResultFromProto(scanResult)
 	consolidated := vulnerability.ConsolidateAll(internalScanResult.Findings, internalScanResult.Advisories)
 	ref, effectiveRef, commit := mcpTargetRef(scanResult.GetTarget())
+	elapsed := time.Since(startTime)
 	result := &mcpv1.ScanDirectoryResult{
 		Path:            targetPath,
 		Ref:             ref,
@@ -1508,8 +1511,8 @@ func (s *Server) scanDirectory(ctx context.Context, req *mcp.CallToolRequest, ra
 		},
 		Clean:      proto.Bool(consolidated.Stats.GetUnique() == 0),
 		Coverage:   coverageProto(scanResult.GetCoverage()),
-		ScanTime:   time.Since(startTime).String(),
-		ScanTimeMs: int32(time.Since(startTime).Milliseconds()),
+		ScanTime:   elapsed.String(),
+		ScanTimeMs: int32(elapsed.Milliseconds()),
 	}
 
 	for _, vuln := range consolidated.Vulnerabilities {
@@ -1768,6 +1771,13 @@ func (s *Server) getRemediation(ctx context.Context, req *mcp.CallToolRequest, r
 
 	span.SetAttributes(otel.AttrTargetPath.String(targetPath))
 
+	if s.clients.Remediation == nil {
+		err := fmt.Errorf("remediation service client is not configured")
+		otel.SetSpanError(span, err)
+		otel.RecordMCPToolCall(ctx, "get_remediation", time.Since(startTime).Seconds(), false)
+		return nil, nil, err
+	}
+
 	// Build proto request
 	scanReq := connect.NewRequest(&scanv1.ScanRequest{
 		Target: targetPath,
@@ -1787,13 +1797,6 @@ func (s *Server) getRemediation(ctx context.Context, req *mcp.CallToolRequest, r
 		otel.SetSpanError(span, err)
 		otel.RecordMCPToolCall(ctx, "get_remediation", time.Since(startTime).Seconds(), false)
 		logs.Warn(ctx, "Remediation scan failed", "path", targetPath, "error", err)
-		return nil, nil, err
-	}
-
-	if s.clients.Remediation == nil {
-		err := fmt.Errorf("remediation service client is not configured")
-		otel.SetSpanError(span, err)
-		otel.RecordMCPToolCall(ctx, "get_remediation", time.Since(startTime).Seconds(), false)
 		return nil, nil, err
 	}
 
@@ -2137,6 +2140,7 @@ func (s *Server) graphWhy(ctx context.Context, req *mcp.CallToolRequest, raw jso
 		logs.Debug(ctx, "MCP tool completed", "tool", "graph_why", "package", packageQuery, "found", false)
 		out, err := marshalMCPResult(&mcpv1.GraphWhyResult{
 			Package:      packageQuery,
+			Path:         targetPath,
 			Ref:          ref,
 			EffectiveRef: effectiveRef,
 			Commit:       commit,
@@ -2154,6 +2158,7 @@ func (s *Server) graphWhy(ctx context.Context, req *mcp.CallToolRequest, raw jso
 	match := matches[0]
 	result := &mcpv1.GraphWhyResult{
 		Package:      match.Name,
+		Path:         targetPath,
 		Version:      match.Version,
 		Purl:         match.Purl,
 		Ref:          ref,
@@ -2303,6 +2308,7 @@ func (s *Server) graphNeeds(ctx context.Context, req *mcp.CallToolRequest, raw j
 		logs.Debug(ctx, "MCP tool completed", "tool", "graph_needs", "package", packageQuery, "found", false)
 		out, err := marshalMCPResult(&mcpv1.GraphNeedsResult{
 			Package:      packageQuery,
+			Path:         targetPath,
 			Ref:          ref,
 			EffectiveRef: effectiveRef,
 			Commit:       commit,
@@ -2318,6 +2324,7 @@ func (s *Server) graphNeeds(ctx context.Context, req *mcp.CallToolRequest, raw j
 
 	result := &mcpv1.GraphNeedsResult{
 		Package:      match.Name,
+		Path:         targetPath,
 		Version:      match.Version,
 		Purl:         match.Purl,
 		Ref:          ref,
@@ -2478,7 +2485,7 @@ func (s *Server) triageVulnerabilities(ctx context.Context, req *mcp.CallToolReq
 			Package:        v.Package,
 			Version:        v.Version,
 			Purl:           v.PURL,
-			IsDirect:       proto.Bool(v.IsDirect),
+			Direct:         proto.Bool(v.IsDirect),
 			HasFix:         proto.Bool(hasFix),
 			FixedVersions:  stringsForMCP(v.FixedVersions),
 			PackageFixes:   packageFixesProto(v.PackageFixes),
@@ -2641,6 +2648,7 @@ func (s *Server) scanContainer(ctx context.Context, req *mcp.CallToolRequest, ra
 	scanResult := resp.Msg
 	internalScanResult := internalproto.ScanningResultFromProto(scanResult)
 	consolidated := vulnerability.ConsolidateAll(internalScanResult.Findings, internalScanResult.Advisories)
+	elapsed := time.Since(startTime)
 	result := &mcpv1.ScanContainerResult{
 		Image:           imageRef,
 		Platform:        platform,
@@ -2654,8 +2662,8 @@ func (s *Server) scanContainer(ctx context.Context, req *mcp.CallToolRequest, ra
 		},
 		Clean:      proto.Bool(consolidated.Stats.GetUnique() == 0),
 		Coverage:   coverageProto(scanResult.GetCoverage()),
-		ScanTime:   time.Since(startTime).String(),
-		ScanTimeMs: int32(time.Since(startTime).Milliseconds()),
+		ScanTime:   elapsed.String(),
+		ScanTimeMs: int32(elapsed.Milliseconds()),
 	}
 
 	for _, vuln := range consolidated.Vulnerabilities {
@@ -2698,10 +2706,16 @@ func (s *Server) diffRefs(ctx context.Context, req *mcp.CallToolRequest, raw jso
 
 	logs.Debug(ctx, "MCP tool invoked", "tool", "diff_refs", "base_ref", args.GetBaseRef(), "target_ref", args.GetTargetRef())
 
-	args.Path = strings.TrimSpace(args.GetPath())
-	args.BaseRef = strings.TrimSpace(args.GetBaseRef())
-	args.TargetRef = strings.TrimSpace(args.GetTargetRef())
-	args.Platform = strings.TrimSpace(args.GetPlatform())
+	// Normalize into a fresh request rather than mutating the parsed message:
+	// the routing helpers and both diff paths read the trimmed values.
+	args = &mcpv1.DiffRefsRequest{
+		Path:         strings.TrimSpace(args.GetPath()),
+		BaseRef:      strings.TrimSpace(args.GetBaseRef()),
+		TargetRef:    strings.TrimSpace(args.GetTargetRef()),
+		Platform:     strings.TrimSpace(args.GetPlatform()),
+		Ecosystems:   args.GetEcosystems(),
+		ExcludePaths: args.GetExcludePaths(),
+	}
 
 	span.SetAttributes(
 		otel.AttrMCPBaseRef.String(args.GetBaseRef()),
@@ -2808,16 +2822,16 @@ func (s *Server) diffContainerImages(ctx context.Context, args *mcpv1.DiffRefsRe
 	}
 
 	// Build package maps for comparison
-	basePackages := make(map[string]*PackageInfo)
+	basePackages := make(map[string]*packageInfo)
 	for _, pkg := range baseScan.Packages {
 		key := diffPackageKey(pkg.Purl, pkg.Ecosystem, pkg.Name)
-		basePackages[key] = &PackageInfo{Name: pkg.Name, Version: pkg.Version, Ecosystem: mcpOutputEcosystem(pkg.Ecosystem), PURL: pkg.Purl, Direct: pkg.Direct}
+		basePackages[key] = &packageInfo{Name: pkg.Name, Version: pkg.Version, Ecosystem: mcpOutputEcosystem(pkg.Ecosystem), PURL: pkg.Purl, Direct: pkg.Direct}
 	}
 
-	targetPackages := make(map[string]*PackageInfo)
+	targetPackages := make(map[string]*packageInfo)
 	for _, pkg := range targetScan.Packages {
 		key := diffPackageKey(pkg.Purl, pkg.Ecosystem, pkg.Name)
-		targetPackages[key] = &PackageInfo{Name: pkg.Name, Version: pkg.Version, Ecosystem: mcpOutputEcosystem(pkg.Ecosystem), PURL: pkg.Purl, Direct: pkg.Direct}
+		targetPackages[key] = &packageInfo{Name: pkg.Name, Version: pkg.Version, Ecosystem: mcpOutputEcosystem(pkg.Ecosystem), PURL: pkg.Purl, Direct: pkg.Direct}
 	}
 
 	// Find added and updated packages
@@ -2829,15 +2843,18 @@ func (s *Server) diffContainerImages(ctx context.Context, args *mcpv1.DiffRefsRe
 				TargetVersion: targetPkg.Version,
 				Purl:          targetPkg.PURL,
 				ChangeType:    "added",
-				IsDirect:      proto.Bool(targetPkg.Direct),
+				Direct:        proto.Bool(targetPkg.Direct),
 				Ecosystem:     targetPkg.Ecosystem,
 			})
 			result.AddedCount++
 		} else if basePkg.Version != targetPkg.Version {
+			// Equal comparisons with different strings (1.2.3 vs v1.2.3) are
+			// updated: the version did not move, only its spelling.
 			changeType := "updated"
-			if compareVersions(basePkg.Version, targetPkg.Version) < 0 {
+			switch cmp := compareVersions(basePkg.Version, targetPkg.Version); {
+			case cmp < 0:
 				changeType = "upgraded"
-			} else {
+			case cmp > 0:
 				changeType = "downgraded"
 			}
 			result.Changes = append(result.Changes, &mcpv1.DependencyChange{
@@ -2846,7 +2863,7 @@ func (s *Server) diffContainerImages(ctx context.Context, args *mcpv1.DiffRefsRe
 				TargetVersion: targetPkg.Version,
 				Purl:          targetPkg.PURL,
 				ChangeType:    changeType,
-				IsDirect:      proto.Bool(targetPkg.Direct),
+				Direct:        proto.Bool(targetPkg.Direct),
 				Ecosystem:     targetPkg.Ecosystem,
 			})
 			result.UpdatedCount++
@@ -2861,14 +2878,14 @@ func (s *Server) diffContainerImages(ctx context.Context, args *mcpv1.DiffRefsRe
 				BaseVersion: basePkg.Version,
 				Purl:        basePkg.PURL,
 				ChangeType:  "removed",
-				IsDirect:    proto.Bool(basePkg.Direct),
+				Direct:      proto.Bool(basePkg.Direct),
 				Ecosystem:   basePkg.Ecosystem,
 			})
 			result.RemovedCount++
 		}
 	}
 
-	result.VulnerabilitySummary, result.Vulnerabilities = diffTargetVulnerabilities(targetScan)
+	result.VulnerabilitiesBySeverity, result.Vulnerabilities = diffTargetVulnerabilities(targetScan)
 	sortDependencyChanges(result.Changes)
 	baseInternal := internalproto.ScanningResultFromProto(baseScan)
 	targetInternal := internalproto.ScanningResultFromProto(targetScan)
@@ -2940,16 +2957,16 @@ func (s *Server) diffGitRefs(ctx context.Context, args *mcpv1.DiffRefsRequest) (
 	}
 
 	// Build package maps for comparison
-	basePackages := make(map[string]*PackageInfo)
+	basePackages := make(map[string]*packageInfo)
 	for _, pkg := range baseScan.Packages {
 		key := diffPackageKey(pkg.Purl, pkg.Ecosystem, pkg.Name)
-		basePackages[key] = &PackageInfo{Name: pkg.Name, Version: pkg.Version, Ecosystem: mcpOutputEcosystem(pkg.Ecosystem), PURL: pkg.Purl, Direct: pkg.Direct}
+		basePackages[key] = &packageInfo{Name: pkg.Name, Version: pkg.Version, Ecosystem: mcpOutputEcosystem(pkg.Ecosystem), PURL: pkg.Purl, Direct: pkg.Direct}
 	}
 
-	targetPackages := make(map[string]*PackageInfo)
+	targetPackages := make(map[string]*packageInfo)
 	for _, pkg := range targetScan.Packages {
 		key := diffPackageKey(pkg.Purl, pkg.Ecosystem, pkg.Name)
-		targetPackages[key] = &PackageInfo{Name: pkg.Name, Version: pkg.Version, Ecosystem: mcpOutputEcosystem(pkg.Ecosystem), PURL: pkg.Purl, Direct: pkg.Direct}
+		targetPackages[key] = &packageInfo{Name: pkg.Name, Version: pkg.Version, Ecosystem: mcpOutputEcosystem(pkg.Ecosystem), PURL: pkg.Purl, Direct: pkg.Direct}
 	}
 
 	// Find added and updated packages
@@ -2961,15 +2978,18 @@ func (s *Server) diffGitRefs(ctx context.Context, args *mcpv1.DiffRefsRequest) (
 				TargetVersion: targetPkg.Version,
 				Purl:          targetPkg.PURL,
 				ChangeType:    "added",
-				IsDirect:      proto.Bool(targetPkg.Direct),
+				Direct:        proto.Bool(targetPkg.Direct),
 				Ecosystem:     targetPkg.Ecosystem,
 			})
 			result.AddedCount++
 		} else if basePkg.Version != targetPkg.Version {
+			// Equal comparisons with different strings (1.2.3 vs v1.2.3) are
+			// updated: the version did not move, only its spelling.
 			changeType := "updated"
-			if compareVersions(basePkg.Version, targetPkg.Version) < 0 {
+			switch cmp := compareVersions(basePkg.Version, targetPkg.Version); {
+			case cmp < 0:
 				changeType = "upgraded"
-			} else {
+			case cmp > 0:
 				changeType = "downgraded"
 			}
 			result.Changes = append(result.Changes, &mcpv1.DependencyChange{
@@ -2978,7 +2998,7 @@ func (s *Server) diffGitRefs(ctx context.Context, args *mcpv1.DiffRefsRequest) (
 				TargetVersion: targetPkg.Version,
 				Purl:          targetPkg.PURL,
 				ChangeType:    changeType,
-				IsDirect:      proto.Bool(targetPkg.Direct),
+				Direct:        proto.Bool(targetPkg.Direct),
 				Ecosystem:     targetPkg.Ecosystem,
 			})
 			result.UpdatedCount++
@@ -2993,14 +3013,14 @@ func (s *Server) diffGitRefs(ctx context.Context, args *mcpv1.DiffRefsRequest) (
 				BaseVersion: basePkg.Version,
 				Purl:        basePkg.PURL,
 				ChangeType:  "removed",
-				IsDirect:    proto.Bool(basePkg.Direct),
+				Direct:      proto.Bool(basePkg.Direct),
 				Ecosystem:   basePkg.Ecosystem,
 			})
 			result.RemovedCount++
 		}
 	}
 
-	result.VulnerabilitySummary, result.Vulnerabilities = diffTargetVulnerabilities(targetScan)
+	result.VulnerabilitiesBySeverity, result.Vulnerabilities = diffTargetVulnerabilities(targetScan)
 	sortDependencyChanges(result.Changes)
 
 	return result, nil
@@ -3211,8 +3231,8 @@ func semverComparable(v string) string {
 	return "v" + v
 }
 
-// PackageInfo holds package information for diff comparison.
-type PackageInfo struct {
+// packageInfo holds package identity for diff comparison.
+type packageInfo struct {
 	Name      string
 	Version   string
 	Ecosystem string
@@ -3227,8 +3247,8 @@ func sortDependencyChanges(changes []*mcpv1.DependencyChange) {
 }
 
 func compareDependencyChanges(a, b *mcpv1.DependencyChange) int {
-	if a.GetIsDirect() != b.GetIsDirect() {
-		if a.GetIsDirect() {
+	if a.GetDirect() != b.GetDirect() {
+		if a.GetDirect() {
 			return -1
 		}
 		return 1
@@ -3285,6 +3305,7 @@ func diffTargetVulnerabilities(scanResult *scanv1.ScanResponse) (map[string]int3
 		"high":     0,
 		"medium":   0,
 		"low":      0,
+		"unknown":  0,
 	}
 
 	internalScanResult := internalproto.ScanningResultFromProto(scanResult)
@@ -3368,7 +3389,8 @@ func vulnerabilityChangeKindString(kind diffv1.VulnerabilityChangeKind) string {
 	case diffv1.VulnerabilityChangeKind_VULNERABILITY_CHANGE_KIND_PERSISTED:
 		return "persisted"
 	default:
-		return "unspecified"
+		// Unspecified kinds stay absent on the wire per the package rule.
+		return ""
 	}
 }
 
@@ -3390,12 +3412,16 @@ func findBestMatchingNode(g *graph.Graph, query string) *graph.Node {
 
 // === Helper Functions ===
 
-const compactVulnReferenceLimit = 5
-const allVulnReferences = -1
-const maxMCPVulnerablePaths = 50
-const maxMCPPathsToTarget = 20
-const maxMCPGraphWhyPaths = 10
-const maxMCPGraphWhyShowAllPaths = 100
+// Truncation limits keep tool results compact for agent context windows;
+// results carry counts and *Truncated flags so sampling is always detectable.
+const (
+	compactVulnReferenceLimit  = 5
+	allVulnReferences          = -1
+	maxMCPVulnerablePaths      = 50
+	maxMCPPathsToTarget        = 20
+	maxMCPGraphWhyPaths        = 10
+	maxMCPGraphWhyShowAllPaths = 100
+)
 
 type vulnExplanationOptions struct {
 	includeDetails bool
@@ -3428,7 +3454,8 @@ func mcpArtifactKind(a vulnerabilityv1.ArtifactKind) string {
 	case vulnerabilityv1.ArtifactKind_ARTIFACT_KIND_GITHUB_ACTION:
 		return "github_action"
 	default:
-		return "unspecified"
+		// Unspecified kinds stay absent on the wire per the package rule.
+		return ""
 	}
 }
 

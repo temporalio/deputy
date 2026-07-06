@@ -37,8 +37,8 @@ type VulnExplanation struct {
 	Aliases []string `protobuf:"bytes,2,rep,name=aliases,proto3" json:"aliases,omitempty"`
 	// Summary is a brief description of the vulnerability.
 	Summary string `protobuf:"bytes,3,opt,name=summary,proto3" json:"summary,omitempty"`
-	// Details is the full vulnerability description, included only when the
-	// caller asked for details.
+	// Details is the full advisory description; the explain tools populate it,
+	// and scan and diff summaries omit it for context-window economy.
 	Details string `protobuf:"bytes,4,opt,name=details,proto3" json:"details,omitempty"`
 	// Kind distinguishes malware from ordinary vulnerabilities. Absent means
 	// vulnerability.
@@ -216,7 +216,9 @@ func (x *VulnExplanation) GetModified() string {
 	return ""
 }
 
-// PackageFix records fixed versions for one affected module path.
+// PackageFix records fixed versions for one affected module path. It mirrors
+// deputy.vulnerability.v1.PackageFix rather than embedding it so the
+// ecosystem field carries the canonical lowercase output name.
 type PackageFix struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Module is the module path the fix applies to.
@@ -577,8 +579,9 @@ type ScanDirectoryResult struct {
 	Commit string `protobuf:"bytes,4,opt,name=commit,proto3" json:"commit,omitempty"`
 	// PackagesScanned is the number of packages analyzed.
 	PackagesScanned int32 `protobuf:"varint,5,opt,name=packages_scanned,json=packagesScanned,proto3" json:"packages_scanned,omitempty"`
-	// VulnerabilitiesBySeverity counts unique findings per severity level,
-	// including an "unknown" bucket so the counts sum to the total.
+	// VulnerabilitiesBySeverity counts unique findings per severity level.
+	// Keys are always critical, high, medium, low, and unknown, zero-valued
+	// entries included, so the counts sum to the total.
 	VulnerabilitiesBySeverity map[string]int32 `protobuf:"bytes,6,rep,name=vulnerabilities_by_severity,json=vulnerabilitiesBySeverity,proto3" json:"vulnerabilities_by_severity,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"varint,2,opt,name=value"`
 	// Vulnerabilities are the consolidated findings.
 	Vulnerabilities []*VulnExplanation `protobuf:"bytes,7,rep,name=vulnerabilities,proto3" json:"vulnerabilities,omitempty"`
@@ -769,8 +772,9 @@ type ScanContainerResult struct {
 	Platform string `protobuf:"bytes,2,opt,name=platform,proto3" json:"platform,omitempty"`
 	// PackagesScanned is the number of packages analyzed.
 	PackagesScanned int32 `protobuf:"varint,3,opt,name=packages_scanned,json=packagesScanned,proto3" json:"packages_scanned,omitempty"`
-	// VulnerabilitiesBySeverity counts unique findings per severity level,
-	// including an "unknown" bucket so the counts sum to the total.
+	// VulnerabilitiesBySeverity counts unique findings per severity level.
+	// Keys are always critical, high, medium, low, and unknown, zero-valued
+	// entries included, so the counts sum to the total.
 	VulnerabilitiesBySeverity map[string]int32 `protobuf:"bytes,4,rep,name=vulnerabilities_by_severity,json=vulnerabilitiesBySeverity,proto3" json:"vulnerabilities_by_severity,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"varint,2,opt,name=value"`
 	// Vulnerabilities are the consolidated findings.
 	Vulnerabilities []*VulnExplanation `protobuf:"bytes,5,rep,name=vulnerabilities,proto3" json:"vulnerabilities,omitempty"`
@@ -978,9 +982,9 @@ type TriagedVuln struct {
 	// Purl is the package URL for exact follow-up with graph_why, graph_needs,
 	// or scan_package.
 	Purl string `protobuf:"bytes,8,opt,name=purl,proto3" json:"purl,omitempty"`
-	// IsDirect reports whether the package is a direct dependency. Always
+	// Direct reports whether the package is a direct dependency. Always
 	// present.
-	IsDirect *bool `protobuf:"varint,9,opt,name=is_direct,json=isDirect,proto3,oneof" json:"is_direct,omitempty"`
+	Direct *bool `protobuf:"varint,9,opt,name=direct,proto3,oneof" json:"direct,omitempty"`
 	// HasFix reports whether an actionable fix exists. Always present.
 	HasFix *bool `protobuf:"varint,10,opt,name=has_fix,json=hasFix,proto3,oneof" json:"has_fix,omitempty"`
 	// FixedVersions are versions containing a fix on the package's own module
@@ -1087,9 +1091,9 @@ func (x *TriagedVuln) GetPurl() string {
 	return ""
 }
 
-func (x *TriagedVuln) GetIsDirect() bool {
-	if x != nil && x.IsDirect != nil {
-		return *x.IsDirect
+func (x *TriagedVuln) GetDirect() bool {
+	if x != nil && x.Direct != nil {
+		return *x.Direct
 	}
 	return false
 }
@@ -1144,6 +1148,9 @@ func (x *TriagedVuln) GetPriorityReason() string {
 }
 
 // TriageResult is the prioritized summary of a directory's vulnerabilities.
+// Severity totals are deliberately discrete fields rather than a map: the
+// triage summary is the surface agents read first, and named counts keep it
+// self-describing.
 type TriageResult struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Path is the analyzed directory.
@@ -2547,7 +2554,9 @@ type GraphWhyResult struct {
 	// PathsTruncated reports whether paths was truncated.
 	PathsTruncated bool `protobuf:"varint,12,opt,name=paths_truncated,json=pathsTruncated,proto3" json:"paths_truncated,omitempty"`
 	// Message explains the outcome in one sentence.
-	Message       string `protobuf:"bytes,13,opt,name=message,proto3" json:"message,omitempty"`
+	Message string `protobuf:"bytes,13,opt,name=message,proto3" json:"message,omitempty"`
+	// Path is the analyzed directory.
+	Path          string `protobuf:"bytes,14,opt,name=path,proto3" json:"path,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -2669,6 +2678,13 @@ func (x *GraphWhyResult) GetPathsTruncated() bool {
 func (x *GraphWhyResult) GetMessage() string {
 	if x != nil {
 		return x.Message
+	}
+	return ""
+}
+
+func (x *GraphWhyResult) GetPath() string {
+	if x != nil {
+		return x.Path
 	}
 	return ""
 }
@@ -2811,7 +2827,9 @@ type GraphNeedsResult struct {
 	// absent when the package was not found.
 	TransitiveCount *int32 `protobuf:"varint,12,opt,name=transitive_count,json=transitiveCount,proto3,oneof" json:"transitive_count,omitempty"`
 	// Message explains the outcome in one sentence.
-	Message       string `protobuf:"bytes,13,opt,name=message,proto3" json:"message,omitempty"`
+	Message string `protobuf:"bytes,13,opt,name=message,proto3" json:"message,omitempty"`
+	// Path is the analyzed directory.
+	Path          string `protobuf:"bytes,14,opt,name=path,proto3" json:"path,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -2933,6 +2951,13 @@ func (x *GraphNeedsResult) GetTransitiveCount() int32 {
 func (x *GraphNeedsResult) GetMessage() string {
 	if x != nil {
 		return x.Message
+	}
+	return ""
+}
+
+func (x *GraphNeedsResult) GetPath() string {
+	if x != nil {
+		return x.Path
 	}
 	return ""
 }
@@ -3639,9 +3664,10 @@ func (x *GetRemediationRequest) GetExcludePaths() []string {
 }
 
 // RemediationStep is the agent-facing projection of a deputy.remediation.v1
-// plan step: kind and risk use the lowercase wire convention, and fields the
-// planner does not populate yet (dependsOn, requiresApproval) are omitted
-// until they carry signal.
+// plan step: kind and risk use the lowercase wire convention, packageName and
+// currentVersion shorten to package and version for intra-package congruence,
+// and fields the planner does not populate yet (dependsOn, requiresApproval)
+// are omitted until they carry signal.
 type RemediationStep struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Id uniquely identifies this step within the plan.
@@ -3676,9 +3702,9 @@ type RemediationStep struct {
 	Command string `protobuf:"bytes,13,opt,name=command,proto3" json:"command,omitempty"`
 	// Hint gives extra guidance for applying the step.
 	Hint string `protobuf:"bytes,14,opt,name=hint,proto3" json:"hint,omitempty"`
-	// IsDirect reports whether the affected package is a direct dependency.
+	// Direct reports whether the affected package is a direct dependency.
 	// Always present.
-	IsDirect *bool `protobuf:"varint,15,opt,name=is_direct,json=isDirect,proto3,oneof" json:"is_direct,omitempty"`
+	Direct *bool `protobuf:"varint,15,opt,name=direct,proto3,oneof" json:"direct,omitempty"`
 	// Executable reports whether the command can be run as-is; manual steps are
 	// guidance only. Always present.
 	Executable *bool `protobuf:"varint,16,opt,name=executable,proto3,oneof" json:"executable,omitempty"`
@@ -3822,9 +3848,9 @@ func (x *RemediationStep) GetHint() string {
 	return ""
 }
 
-func (x *RemediationStep) GetIsDirect() bool {
-	if x != nil && x.IsDirect != nil {
-		return *x.IsDirect
+func (x *RemediationStep) GetDirect() bool {
+	if x != nil && x.Direct != nil {
+		return *x.Direct
 	}
 	return false
 }
@@ -3884,7 +3910,8 @@ type GetRemediationResult struct {
 	// StdlibUpgrade recommends a Go toolchain upgrade when stdlib findings are
 	// present.
 	StdlibUpgrade string `protobuf:"bytes,10,opt,name=stdlib_upgrade,json=stdlibUpgrade,proto3" json:"stdlib_upgrade,omitempty"`
-	// UnfixableVulnerabilities lists the finding IDs with no known remediation.
+	// UnfixableVulnerabilities lists the finding IDs the plan does not address
+	// (deputy.remediation.v1 GeneratePlanResponse.unaddressed_vulnerabilities).
 	// Unfixable means still vulnerable, not safe.
 	UnfixableVulnerabilities []string `protobuf:"bytes,11,rep,name=unfixable_vulnerabilities,json=unfixableVulnerabilities,proto3" json:"unfixable_vulnerabilities,omitempty"`
 	unknownFields            protoimpl.UnknownFields
@@ -4106,11 +4133,13 @@ type DependencyChange struct {
 	// Purl is the package URL.
 	Purl string `protobuf:"bytes,4,opt,name=purl,proto3" json:"purl,omitempty"`
 	// ChangeType classifies the difference. Version changes are upgraded or
-	// downgraded when the versions compare, updated otherwise.
+	// downgraded when the versions compare, and updated when only the version
+	// string changed (e.g. 1.2.3 to v1.2.3).
 	ChangeType string `protobuf:"bytes,5,opt,name=change_type,json=changeType,proto3" json:"change_type,omitempty"`
-	// IsDirect reports whether the package is a direct dependency. Always
-	// present.
-	IsDirect *bool `protobuf:"varint,6,opt,name=is_direct,json=isDirect,proto3,oneof" json:"is_direct,omitempty"`
+	// Direct reports whether the package is a direct dependency: of the target
+	// ref for added and changed packages, of the base ref for removed ones.
+	// Always present.
+	Direct *bool `protobuf:"varint,6,opt,name=direct,proto3,oneof" json:"direct,omitempty"`
 	// Ecosystem is the canonical package ecosystem.
 	Ecosystem     string `protobuf:"bytes,7,opt,name=ecosystem,proto3" json:"ecosystem,omitempty"`
 	unknownFields protoimpl.UnknownFields
@@ -4182,9 +4211,9 @@ func (x *DependencyChange) GetChangeType() string {
 	return ""
 }
 
-func (x *DependencyChange) GetIsDirect() bool {
-	if x != nil && x.IsDirect != nil {
-		return *x.IsDirect
+func (x *DependencyChange) GetDirect() bool {
+	if x != nil && x.Direct != nil {
+		return *x.Direct
 	}
 	return false
 }
@@ -4493,9 +4522,10 @@ type DiffRefsResult struct {
 	// Vulnerabilities are the target's findings, with reference lists truncated
 	// to a compact sample.
 	Vulnerabilities []*VulnExplanation `protobuf:"bytes,12,rep,name=vulnerabilities,proto3" json:"vulnerabilities,omitempty"`
-	// VulnerabilitySummary counts the target's findings per severity level,
-	// including an "unknown" bucket.
-	VulnerabilitySummary map[string]int32 `protobuf:"bytes,13,rep,name=vulnerability_summary,json=vulnerabilitySummary,proto3" json:"vulnerability_summary,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"varint,2,opt,name=value"`
+	// VulnerabilitiesBySeverity counts the target's findings per severity
+	// level. Keys are always critical, high, medium, low, and unknown,
+	// zero-valued entries included, so the counts sum to the total.
+	VulnerabilitiesBySeverity map[string]int32 `protobuf:"bytes,13,rep,name=vulnerabilities_by_severity,json=vulnerabilitiesBySeverity,proto3" json:"vulnerabilities_by_severity,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"varint,2,opt,name=value"`
 	// VulnerabilityChanges are per-vulnerability deltas for container diffs.
 	VulnerabilityChanges []*DiffVulnChange `protobuf:"bytes,14,rep,name=vulnerability_changes,json=vulnerabilityChanges,proto3" json:"vulnerability_changes,omitempty"`
 	// ContainerSummary totals the container diff; absent for Git ref diffs.
@@ -4618,9 +4648,9 @@ func (x *DiffRefsResult) GetVulnerabilities() []*VulnExplanation {
 	return nil
 }
 
-func (x *DiffRefsResult) GetVulnerabilitySummary() map[string]int32 {
+func (x *DiffRefsResult) GetVulnerabilitiesBySeverity() map[string]int32 {
 	if x != nil {
-		return x.VulnerabilitySummary
+		return x.VulnerabilitiesBySeverity
 	}
 	return nil
 }
@@ -4668,32 +4698,30 @@ const file_deputy_mcp_v1_mcp_proto_rawDesc = "" +
 	"PackageFix\x12\x16\n" +
 	"\x06module\x18\x01 \x01(\tR\x06module\x12\x1c\n" +
 	"\tecosystem\x18\x02 \x01(\tR\tecosystem\x12%\n" +
-	"\x0efixed_versions\x18\x03 \x03(\tR\rfixedVersions\"\xbe\x01\n" +
+	"\x0efixed_versions\x18\x03 \x03(\tR\rfixedVersions\"\xb5\x01\n" +
 	"\n" +
-	"FixVerdict\x12W\n" +
-	"\x06status\x18\x01 \x01(\tB?\xbaH<\xd8\x01\x01r7R\bin_placeR\tmigrationR\vunavailableR\n" +
-	"unverifiedR\aunknownR\x06status\x12\x18\n" +
+	"FixVerdict\x12N\n" +
+	"\x06status\x18\x01 \x01(\tB6\xbaH3\xd8\x01\x01r.R\bin_placeR\tmigrationR\vunavailableR\n" +
+	"unverifiedR\x06status\x12\x18\n" +
 	"\aversion\x18\x02 \x01(\tR\aversion\x12#\n" +
 	"\rtarget_module\x18\x03 \x01(\tR\ftargetModule\x12\x18\n" +
 	"\aclaimed\x18\x04 \x01(\tR\aclaimed\"~\n" +
 	"\bCoverage\x126\n" +
 	"\acovered\x18\x01 \x03(\v2\x1c.deputy.mcp.v1.CoverageEntryR\acovered\x12:\n" +
-	"\tuncovered\x18\x02 \x03(\v2\x1c.deputy.mcp.v1.CoverageEntryR\tuncovered\"\xd8\x01\n" +
+	"\tuncovered\x18\x02 \x03(\v2\x1c.deputy.mcp.v1.CoverageEntryR\tuncovered\"\xcb\x01\n" +
 	"\rCoverageEntry\x12\x1c\n" +
-	"\tecosystem\x18\x01 \x01(\tR\tecosystem\x12j\n" +
-	"\bartifact\x18\x02 \x01(\tBN\xbaHK\xd8\x01\x01rFR\apackageR\n" +
-	"os_packageR\x13container_image_refR\rgithub_actionR\vunspecifiedR\bartifact\x12\x18\n" +
+	"\tecosystem\x18\x01 \x01(\tR\tecosystem\x12]\n" +
+	"\bartifact\x18\x02 \x01(\tBA\xbaH>\xd8\x01\x01r9R\apackageR\n" +
+	"os_packageR\x13container_image_refR\rgithub_actionR\bartifact\x12\x18\n" +
 	"\asources\x18\x03 \x03(\tR\asources\x12#\n" +
-	"\rpackage_count\x18\x04 \x01(\x05R\fpackageCount\"\xb5\x01\n" +
+	"\rpackage_count\x18\x04 \x01(\x05R\fpackageCount\"\xbf\x01\n" +
 	"\x14ScanDirectoryRequest\x12\"\n" +
 	"\x04path\x18\x01 \x01(\tB\x0e\xbaH\v\xc8\x01\x01r\x06\x10\x012\x02\\SR\x04path\x12\x10\n" +
-	"\x03ref\x18\x02 \x01(\tR\x03ref\x120\n" +
+	"\x03ref\x18\x02 \x01(\tR\x03ref\x125\n" +
 	"\n" +
-	"ecosystems\x18\x03 \x03(\tB\x10\xbaH\r\x92\x01\n" +
-	"\"\br\x06\x10\x012\x02\\SR\n" +
-	"ecosystems\x125\n" +
-	"\rexclude_paths\x18\x04 \x03(\tB\x10\xbaH\r\x92\x01\n" +
-	"\"\br\x06\x10\x012\x02\\SR\fexcludePaths\"\xd8\x04\n" +
+	"ecosystems\x18\x03 \x03(\tB\x15\xbaH\x12\x92\x01\x0f\x10d\"\vr\t\x10\x01\x18\x80\x022\x02\\SR\n" +
+	"ecosystems\x12:\n" +
+	"\rexclude_paths\x18\x04 \x03(\tB\x15\xbaH\x12\x92\x01\x0f\x10d\"\vr\t\x10\x01\x18\x80\x022\x02\\SR\fexcludePaths\"\xd8\x04\n" +
 	"\x13ScanDirectoryResult\x12\x12\n" +
 	"\x04path\x18\x01 \x01(\tR\x04path\x12\x10\n" +
 	"\x03ref\x18\x02 \x01(\tR\x03ref\x12#\n" +
@@ -4729,16 +4757,14 @@ const file_deputy_mcp_v1_mcp_proto_rawDesc = "" +
 	"\x1eVulnerabilitiesBySeverityEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\x05R\x05value:\x028\x01B\b\n" +
-	"\x06_clean\"\xae\x01\n" +
+	"\x06_clean\"\xb8\x01\n" +
 	"\rTriageRequest\x12\"\n" +
 	"\x04path\x18\x01 \x01(\tB\x0e\xbaH\v\xc8\x01\x01r\x06\x10\x012\x02\\SR\x04path\x12\x10\n" +
-	"\x03ref\x18\x02 \x01(\tR\x03ref\x120\n" +
+	"\x03ref\x18\x02 \x01(\tR\x03ref\x125\n" +
 	"\n" +
-	"ecosystems\x18\x03 \x03(\tB\x10\xbaH\r\x92\x01\n" +
-	"\"\br\x06\x10\x012\x02\\SR\n" +
-	"ecosystems\x125\n" +
-	"\rexclude_paths\x18\x04 \x03(\tB\x10\xbaH\r\x92\x01\n" +
-	"\"\br\x06\x10\x012\x02\\SR\fexcludePaths\"\xab\x05\n" +
+	"ecosystems\x18\x03 \x03(\tB\x15\xbaH\x12\x92\x01\x0f\x10d\"\vr\t\x10\x01\x18\x80\x022\x02\\SR\n" +
+	"ecosystems\x12:\n" +
+	"\rexclude_paths\x18\x04 \x03(\tB\x15\xbaH\x12\x92\x01\x0f\x10d\"\vr\t\x10\x01\x18\x80\x022\x02\\SR\fexcludePaths\"\xa3\x05\n" +
 	"\vTriagedVuln\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x124\n" +
 	"\x04kind\x18\x02 \x01(\tB \xbaH\x1d\xd8\x01\x01r\x18R\rvulnerabilityR\amalwareR\x04kind\x12J\n" +
@@ -4747,8 +4773,8 @@ const file_deputy_mcp_v1_mcp_proto_rawDesc = "" +
 	"\asources\x18\x05 \x03(\tR\asources\x12\x18\n" +
 	"\apackage\x18\x06 \x01(\tR\apackage\x12\x18\n" +
 	"\aversion\x18\a \x01(\tR\aversion\x12\x12\n" +
-	"\x04purl\x18\b \x01(\tR\x04purl\x12 \n" +
-	"\tis_direct\x18\t \x01(\bH\x00R\bisDirect\x88\x01\x01\x12\x1c\n" +
+	"\x04purl\x18\b \x01(\tR\x04purl\x12\x1b\n" +
+	"\x06direct\x18\t \x01(\bH\x00R\x06direct\x88\x01\x01\x12\x1c\n" +
 	"\ahas_fix\x18\n" +
 	" \x01(\bH\x01R\x06hasFix\x88\x01\x01\x12%\n" +
 	"\x0efixed_versions\x18\v \x03(\tR\rfixedVersions\x12>\n" +
@@ -4756,9 +4782,8 @@ const file_deputy_mcp_v1_mcp_proto_rawDesc = "" +
 	"\fresolved_fix\x18\r \x01(\v2\x19.deputy.mcp.v1.FixVerdictR\vresolvedFix\x12\x18\n" +
 	"\asummary\x18\x0e \x01(\tR\asummary\x12A\n" +
 	"\bpriority\x18\x0f \x01(\tB%\xbaH\"\xd8\x01\x01r\x1dR\bcriticalR\x04highR\x06mediumR\x03lowR\bpriority\x12'\n" +
-	"\x0fpriority_reason\x18\x10 \x01(\tR\x0epriorityReasonB\f\n" +
-	"\n" +
-	"_is_directB\n" +
+	"\x0fpriority_reason\x18\x10 \x01(\tR\x0epriorityReasonB\t\n" +
+	"\a_directB\n" +
 	"\n" +
 	"\b_has_fix\"\x9a\x06\n" +
 	"\fTriageResult\x12\x12\n" +
@@ -4782,18 +4807,16 @@ const file_deputy_mcp_v1_mcp_proto_rawDesc = "" +
 	"\x14direct_fixable_count\x18\x10 \x01(\x05R\x12directFixableCount\x128\n" +
 	"\x18transitive_fixable_count\x18\x11 \x01(\x05R\x16transitiveFixableCount\x12D\n" +
 	"\x0fvulnerabilities\x18\x12 \x03(\v2\x1a.deputy.mcp.v1.TriagedVulnR\x0fvulnerabilities\x12(\n" +
-	"\x0frecommendations\x18\x13 \x03(\tR\x0frecommendations\"\xd9\x01\n" +
+	"\x0frecommendations\x18\x13 \x03(\tR\x0frecommendations\"\xe3\x01\n" +
 	"\x17ListDependenciesRequest\x12\"\n" +
 	"\x04path\x18\x01 \x01(\tB\x0e\xbaH\v\xc8\x01\x01r\x06\x10\x012\x02\\SR\x04path\x12\x1f\n" +
 	"\vdirect_only\x18\x02 \x01(\bR\n" +
 	"directOnly\x12\x10\n" +
-	"\x03ref\x18\x03 \x01(\tR\x03ref\x120\n" +
+	"\x03ref\x18\x03 \x01(\tR\x03ref\x125\n" +
 	"\n" +
-	"ecosystems\x18\x04 \x03(\tB\x10\xbaH\r\x92\x01\n" +
-	"\"\br\x06\x10\x012\x02\\SR\n" +
-	"ecosystems\x125\n" +
-	"\rexclude_paths\x18\x05 \x03(\tB\x10\xbaH\r\x92\x01\n" +
-	"\"\br\x06\x10\x012\x02\\SR\fexcludePaths\"\xfe\x01\n" +
+	"ecosystems\x18\x04 \x03(\tB\x15\xbaH\x12\x92\x01\x0f\x10d\"\vr\t\x10\x01\x18\x80\x022\x02\\SR\n" +
+	"ecosystems\x12:\n" +
+	"\rexclude_paths\x18\x05 \x03(\tB\x15\xbaH\x12\x92\x01\x0f\x10d\"\vr\t\x10\x01\x18\x80\x022\x02\\SR\fexcludePaths\"\xfe\x01\n" +
 	"\x0eDependencyInfo\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x18\n" +
 	"\aversion\x18\x02 \x01(\tR\aversion\x12\x1c\n" +
@@ -4817,18 +4840,16 @@ const file_deputy_mcp_v1_mcp_proto_rawDesc = "" +
 	"\x11direct_discovered\x18\t \x01(\x05R\x10directDiscovered\x123\n" +
 	"\x15transitive_discovered\x18\n" +
 	" \x01(\x05R\x14transitiveDiscovered\x12A\n" +
-	"\fdependencies\x18\v \x03(\v2\x1d.deputy.mcp.v1.DependencyInfoR\fdependencies\"\xc4\x02\n" +
+	"\fdependencies\x18\v \x03(\v2\x1d.deputy.mcp.v1.DependencyInfoR\fdependencies\"\xce\x02\n" +
 	"\x13GenerateSBOMRequest\x12\"\n" +
 	"\x04path\x18\x01 \x01(\tB\x0e\xbaH\v\xc8\x01\x01r\x06\x10\x012\x02\\SR\x04path\x12\x10\n" +
 	"\x03ref\x18\x02 \x01(\tR\x03ref\x12e\n" +
 	"\x06format\x18\x03 \x01(\tBM\xbaHJ\xd8\x01\x01rER\x0ecyclonedx-jsonR\tspdx-jsonR\rprotobom-jsonR\tcyclonedxR\x04spdxR\bprotobomR\x06format\x12'\n" +
-	"\x0fenrich_licenses\x18\x04 \x01(\bR\x0eenrichLicenses\x120\n" +
+	"\x0fenrich_licenses\x18\x04 \x01(\bR\x0eenrichLicenses\x125\n" +
 	"\n" +
-	"ecosystems\x18\x05 \x03(\tB\x10\xbaH\r\x92\x01\n" +
-	"\"\br\x06\x10\x012\x02\\SR\n" +
-	"ecosystems\x125\n" +
-	"\rexclude_paths\x18\x06 \x03(\tB\x10\xbaH\r\x92\x01\n" +
-	"\"\br\x06\x10\x012\x02\\SR\fexcludePaths\"\xf7\x01\n" +
+	"ecosystems\x18\x05 \x03(\tB\x15\xbaH\x12\x92\x01\x0f\x10d\"\vr\t\x10\x01\x18\x80\x022\x02\\SR\n" +
+	"ecosystems\x12:\n" +
+	"\rexclude_paths\x18\x06 \x03(\tB\x15\xbaH\x12\x92\x01\x0f\x10d\"\vr\t\x10\x01\x18\x80\x022\x02\\SR\fexcludePaths\"\xf7\x01\n" +
 	"\x12GenerateSBOMResult\x12\x12\n" +
 	"\x04path\x18\x01 \x01(\tR\x04path\x12\x10\n" +
 	"\x03ref\x18\x02 \x01(\tR\x03ref\x12#\n" +
@@ -4854,18 +4875,16 @@ const file_deputy_mcp_v1_mcp_proto_rawDesc = "" +
 	"\x05nodes\x18\x01 \x03(\tR\x05nodes\x12?\n" +
 	"\fnode_details\x18\x02 \x03(\v2\x1c.deputy.mcp.v1.GraphPathNodeR\vnodeDetails\x12\x19\n" +
 	"\x05depth\x18\x03 \x01(\x05H\x00R\x05depth\x88\x01\x01B\b\n" +
-	"\x06_depth\"\xbf\x02\n" +
+	"\x06_depth\"\xc9\x02\n" +
 	"\x13AnalyzeGraphRequest\x12\"\n" +
 	"\x04path\x18\x01 \x01(\tB\x0e\xbaH\v\xc8\x01\x01r\x06\x10\x012\x02\\SR\x04path\x12\x10\n" +
 	"\x03ref\x18\x02 \x01(\tR\x03ref\x12<\n" +
 	"\vtarget_purl\x18\x03 \x01(\tB\x1b\xbaH\x18\xd8\x01\x01r\x132\x11^[Pp][Kk][Gg]:\\S+R\n" +
-	"targetPurl\x120\n" +
+	"targetPurl\x125\n" +
 	"\n" +
-	"ecosystems\x18\x04 \x03(\tB\x10\xbaH\r\x92\x01\n" +
-	"\"\br\x06\x10\x012\x02\\SR\n" +
-	"ecosystems\x125\n" +
-	"\rexclude_paths\x18\x05 \x03(\tB\x10\xbaH\r\x92\x01\n" +
-	"\"\br\x06\x10\x012\x02\\SR\fexcludePaths\x12/\n" +
+	"ecosystems\x18\x04 \x03(\tB\x15\xbaH\x12\x92\x01\x0f\x10d\"\vr\t\x10\x01\x18\x80\x022\x02\\SR\n" +
+	"ecosystems\x12:\n" +
+	"\rexclude_paths\x18\x05 \x03(\tB\x15\xbaH\x12\x92\x01\x0f\x10d\"\vr\t\x10\x01\x18\x80\x022\x02\\SR\fexcludePaths\x12/\n" +
 	"\x13resolve_transitives\x18\x06 \x01(\bR\x12resolveTransitives\x12\x1a\n" +
 	"\bextended\x18\a \x01(\bR\bextended\"\xef\x01\n" +
 	"\x11GraphTargetResult\x12\x14\n" +
@@ -4889,20 +4908,18 @@ const file_deputy_mcp_v1_mcp_proto_rawDesc = "" +
 	"\x0fpaths_to_target\x18\t \x03(\v2\x18.deputy.mcp.v1.GraphPathR\rpathsToTarget\x129\n" +
 	"\x19paths_to_target_truncated\x18\n" +
 	" \x01(\bR\x16pathsToTargetTruncated\x128\n" +
-	"\x06target\x18\v \x01(\v2 .deputy.mcp.v1.GraphTargetResultR\x06target\"\xc2\x02\n" +
+	"\x06target\x18\v \x01(\v2 .deputy.mcp.v1.GraphTargetResultR\x06target\"\xcc\x02\n" +
 	"\x0fGraphWhyRequest\x12\"\n" +
 	"\x04path\x18\x01 \x01(\tB\x0e\xbaH\v\xc8\x01\x01r\x06\x10\x012\x02\\SR\x04path\x12(\n" +
 	"\apackage\x18\x02 \x01(\tB\x0e\xbaH\v\xc8\x01\x01r\x06\x10\x012\x02\\SR\apackage\x12\x10\n" +
 	"\x03ref\x18\x03 \x01(\tR\x03ref\x12\x19\n" +
-	"\bshow_all\x18\x04 \x01(\bR\ashowAll\x120\n" +
+	"\bshow_all\x18\x04 \x01(\bR\ashowAll\x125\n" +
 	"\n" +
-	"ecosystems\x18\x05 \x03(\tB\x10\xbaH\r\x92\x01\n" +
-	"\"\br\x06\x10\x012\x02\\SR\n" +
-	"ecosystems\x125\n" +
-	"\rexclude_paths\x18\x06 \x03(\tB\x10\xbaH\r\x92\x01\n" +
-	"\"\br\x06\x10\x012\x02\\SR\fexcludePaths\x12/\n" +
+	"ecosystems\x18\x05 \x03(\tB\x15\xbaH\x12\x92\x01\x0f\x10d\"\vr\t\x10\x01\x18\x80\x022\x02\\SR\n" +
+	"ecosystems\x12:\n" +
+	"\rexclude_paths\x18\x06 \x03(\tB\x15\xbaH\x12\x92\x01\x0f\x10d\"\vr\t\x10\x01\x18\x80\x022\x02\\SR\fexcludePaths\x12/\n" +
 	"\x13resolve_transitives\x18\a \x01(\bR\x12resolveTransitives\x12\x1a\n" +
-	"\bextended\x18\b \x01(\bR\bextended\"\xc7\x03\n" +
+	"\bextended\x18\b \x01(\bR\bextended\"\xdb\x03\n" +
 	"\x0eGraphWhyResult\x12\x18\n" +
 	"\apackage\x18\x01 \x01(\tR\apackage\x12\x18\n" +
 	"\aversion\x18\x02 \x01(\tR\aversion\x12\x12\n" +
@@ -4918,21 +4935,20 @@ const file_deputy_mcp_v1_mcp_proto_rawDesc = "" +
 	"\n" +
 	"path_count\x18\v \x01(\x05R\tpathCount\x12'\n" +
 	"\x0fpaths_truncated\x18\f \x01(\bR\x0epathsTruncated\x12\x18\n" +
-	"\amessage\x18\r \x01(\tR\amessageB\t\n" +
+	"\amessage\x18\r \x01(\tR\amessage\x12\x12\n" +
+	"\x04path\x18\x0e \x01(\tR\x04pathB\t\n" +
 	"\a_directB\b\n" +
-	"\x06_found\"\xa9\x02\n" +
+	"\x06_found\"\xb3\x02\n" +
 	"\x11GraphNeedsRequest\x12\"\n" +
 	"\x04path\x18\x01 \x01(\tB\x0e\xbaH\v\xc8\x01\x01r\x06\x10\x012\x02\\SR\x04path\x12(\n" +
 	"\apackage\x18\x02 \x01(\tB\x0e\xbaH\v\xc8\x01\x01r\x06\x10\x012\x02\\SR\apackage\x12\x10\n" +
-	"\x03ref\x18\x03 \x01(\tR\x03ref\x120\n" +
+	"\x03ref\x18\x03 \x01(\tR\x03ref\x125\n" +
 	"\n" +
-	"ecosystems\x18\x04 \x03(\tB\x10\xbaH\r\x92\x01\n" +
-	"\"\br\x06\x10\x012\x02\\SR\n" +
-	"ecosystems\x125\n" +
-	"\rexclude_paths\x18\x05 \x03(\tB\x10\xbaH\r\x92\x01\n" +
-	"\"\br\x06\x10\x012\x02\\SR\fexcludePaths\x12/\n" +
+	"ecosystems\x18\x04 \x03(\tB\x15\xbaH\x12\x92\x01\x0f\x10d\"\vr\t\x10\x01\x18\x80\x022\x02\\SR\n" +
+	"ecosystems\x12:\n" +
+	"\rexclude_paths\x18\x05 \x03(\tB\x15\xbaH\x12\x92\x01\x0f\x10d\"\vr\t\x10\x01\x18\x80\x022\x02\\SR\fexcludePaths\x12/\n" +
 	"\x13resolve_transitives\x18\x06 \x01(\bR\x12resolveTransitives\x12\x1a\n" +
-	"\bextended\x18\a \x01(\bR\bextended\"\x8e\x04\n" +
+	"\bextended\x18\a \x01(\bR\bextended\"\xa2\x04\n" +
 	"\x10GraphNeedsResult\x12\x18\n" +
 	"\apackage\x18\x01 \x01(\tR\apackage\x12\x18\n" +
 	"\aversion\x18\x02 \x01(\tR\aversion\x12\x12\n" +
@@ -4949,7 +4965,8 @@ const file_deputy_mcp_v1_mcp_proto_rawDesc = "" +
 	"dependents\x12&\n" +
 	"\fdirect_count\x18\v \x01(\x05H\x02R\vdirectCount\x88\x01\x01\x12.\n" +
 	"\x10transitive_count\x18\f \x01(\x05H\x03R\x0ftransitiveCount\x88\x01\x01\x12\x18\n" +
-	"\amessage\x18\r \x01(\tR\amessageB\t\n" +
+	"\amessage\x18\r \x01(\tR\amessage\x12\x12\n" +
+	"\x04path\x18\x0e \x01(\tR\x04pathB\t\n" +
 	"\a_directB\b\n" +
 	"\x06_foundB\x0f\n" +
 	"\r_direct_countB\x13\n" +
@@ -4957,19 +4974,20 @@ const file_deputy_mcp_v1_mcp_proto_rawDesc = "" +
 	"\x1bExplainVulnerabilityRequest\x12\x1e\n" +
 	"\x02id\x18\x01 \x01(\tB\x0e\xbaH\v\xc8\x01\x01r\x06\x10\x012\x02\\SR\x02id\x12,\n" +
 	"\x0freference_limit\x18\x02 \x01(\x05H\x00R\x0ereferenceLimit\x88\x01\x01B\x12\n" +
-	"\x10_reference_limit\"\x8a\x01\n" +
-	"\x1dExplainVulnerabilitiesRequest\x12'\n" +
-	"\x03ids\x18\x01 \x03(\tB\x15\xbaH\x12\xc8\x01\x01\x92\x01\f\b\x01\"\br\x06\x10\x012\x02\\SR\x03ids\x12,\n" +
+	"\x10_reference_limit\"\x8f\x01\n" +
+	"\x1dExplainVulnerabilitiesRequest\x12,\n" +
+	"\x03ids\x18\x01 \x03(\tB\x1a\xbaH\x17\xc8\x01\x01\x92\x01\x11\b\x01\x10d\"\vr\t\x10\x01\x18\x80\x022\x02\\SR\x03ids\x12,\n" +
 	"\x0freference_limit\x18\x02 \x01(\x05H\x00R\x0ereferenceLimit\x88\x01\x01B\x12\n" +
 	"\x10_reference_limit\"\x80\x01\n" +
 	"\x1cExplainVulnerabilitiesResult\x12H\n" +
 	"\x0fvulnerabilities\x18\x01 \x03(\v2\x1e.deputy.mcp.v1.VulnExplanationR\x0fvulnerabilities\x12\x16\n" +
-	"\x06errors\x18\x02 \x03(\tR\x06errors\"t\n" +
-	"\x12ScanPackageRequest\x12\x12\n" +
-	"\x04purl\x18\x01 \x01(\tR\x04purl\x12\x12\n" +
+	"\x06errors\x18\x02 \x03(\tR\x06errors\"\x81\x02\n" +
+	"\x12ScanPackageRequest\x12/\n" +
+	"\x04purl\x18\x01 \x01(\tB\x1b\xbaH\x18\xd8\x01\x01r\x132\x11^[Pp][Kk][Gg]:\\S+R\x04purl\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12\x18\n" +
 	"\aversion\x18\x03 \x01(\tR\aversion\x12\x1c\n" +
-	"\tecosystem\x18\x04 \x01(\tR\tecosystem\"\xe8\x01\n" +
+	"\tecosystem\x18\x04 \x01(\tR\tecosystem:n\xbaHk\x1ai\n" +
+	"\x15scan_package.identity\x12,provide purl or name to identify the package\x1a\"this.purl != '' || this.name != ''\"\xe8\x01\n" +
 	"\x11ScanPackageResult\x12\x18\n" +
 	"\apackage\x18\x01 \x01(\tR\apackage\x12\x18\n" +
 	"\aversion\x18\x02 \x01(\tR\aversion\x12\x1c\n" +
@@ -5000,19 +5018,17 @@ const file_deputy_mcp_v1_mcp_proto_rawDesc = "" +
 	"\x1bListPolicyEntrypointsResult\x12\x1a\n" +
 	"\bcategory\x18\x01 \x01(\tR\bcategory\x12)\n" +
 	"\x10entrypoint_count\x18\x02 \x01(\x05R\x0fentrypointCount\x12B\n" +
-	"\ventrypoints\x18\x03 \x03(\v2 .deputy.policy.v1.EntrypointInfoR\ventrypoints\"\xb6\x01\n" +
+	"\ventrypoints\x18\x03 \x03(\v2 .deputy.policy.v1.EntrypointInfoR\ventrypoints\"\xc0\x01\n" +
 	"\x15GetRemediationRequest\x12\"\n" +
 	"\x04path\x18\x01 \x01(\tB\x0e\xbaH\v\xc8\x01\x01r\x06\x10\x012\x02\\SR\x04path\x12\x10\n" +
-	"\x03ref\x18\x02 \x01(\tR\x03ref\x120\n" +
+	"\x03ref\x18\x02 \x01(\tR\x03ref\x125\n" +
 	"\n" +
-	"ecosystems\x18\x03 \x03(\tB\x10\xbaH\r\x92\x01\n" +
-	"\"\br\x06\x10\x012\x02\\SR\n" +
-	"ecosystems\x125\n" +
-	"\rexclude_paths\x18\x04 \x03(\tB\x10\xbaH\r\x92\x01\n" +
-	"\"\br\x06\x10\x012\x02\\SR\fexcludePaths\"\x9e\x06\n" +
+	"ecosystems\x18\x03 \x03(\tB\x15\xbaH\x12\x92\x01\x0f\x10d\"\vr\t\x10\x01\x18\x80\x022\x02\\SR\n" +
+	"ecosystems\x12:\n" +
+	"\rexclude_paths\x18\x04 \x03(\tB\x15\xbaH\x12\x92\x01\x0f\x10d\"\vr\t\x10\x01\x18\x80\x022\x02\\SR\fexcludePaths\"\x89\x06\n" +
 	"\x0fRemediationStep\x12\x0e\n" +
-	"\x02id\x18\x01 \x01(\tR\x02id\x12\x93\x01\n" +
-	"\x04kind\x18\x02 \x01(\tB\x7f\xbaH|\xd8\x01\x01rwR\x0fversion_upgradeR\tfile_editR\rshell_commandR\x11dockerfile_updateR\raction_updateR\rconfig_changeR\fcustom_agentR\vunspecifiedR\x04kind\x12\x14\n" +
+	"\x02id\x18\x01 \x01(\tR\x02id\x12\x86\x01\n" +
+	"\x04kind\x18\x02 \x01(\tBr\xbaHo\xd8\x01\x01rjR\x0fversion_upgradeR\tfile_editR\rshell_commandR\x11dockerfile_updateR\raction_updateR\rconfig_changeR\fcustom_agentR\x04kind\x12\x14\n" +
 	"\x05title\x18\x03 \x01(\tR\x05title\x12 \n" +
 	"\vdescription\x18\x04 \x01(\tR\vdescription\x12\x18\n" +
 	"\apackage\x18\x05 \x01(\tR\apackage\x12\x12\n" +
@@ -5025,8 +5041,8 @@ const file_deputy_mcp_v1_mcp_proto_rawDesc = "" +
 	"\amanager\x18\v \x01(\tR\amanager\x12#\n" +
 	"\rmanifest_path\x18\f \x01(\tR\fmanifestPath\x12\x18\n" +
 	"\acommand\x18\r \x01(\tR\acommand\x12\x12\n" +
-	"\x04hint\x18\x0e \x01(\tR\x04hint\x12 \n" +
-	"\tis_direct\x18\x0f \x01(\bH\x01R\bisDirect\x88\x01\x01\x12#\n" +
+	"\x04hint\x18\x0e \x01(\tR\x04hint\x12\x1b\n" +
+	"\x06direct\x18\x0f \x01(\bH\x01R\x06direct\x88\x01\x01\x12#\n" +
 	"\n" +
 	"executable\x18\x10 \x01(\bH\x02R\n" +
 	"executable\x88\x01\x01\x12\x16\n" +
@@ -5035,9 +5051,8 @@ const file_deputy_mcp_v1_mcp_proto_rawDesc = "" +
 	"risk_level\x18\x12 \x01(\tB%\xbaH\"\xd8\x01\x01r\x1dR\x03lowR\x06mediumR\x04highR\bcriticalR\triskLevel\x129\n" +
 	"\x18affected_vulnerabilities\x18\x13 \x03(\tR\x17affectedVulnerabilitiesB\f\n" +
 	"\n" +
-	"_migrationB\f\n" +
-	"\n" +
-	"_is_directB\r\n" +
+	"_migrationB\t\n" +
+	"\a_directB\r\n" +
 	"\v_executable\"\xbc\x03\n" +
 	"\x14GetRemediationResult\x12\x12\n" +
 	"\x04path\x18\x01 \x01(\tR\x04path\x12\x10\n" +
@@ -5051,19 +5066,17 @@ const file_deputy_mcp_v1_mcp_proto_rawDesc = "" +
 	"\x05steps\x18\t \x03(\v2\x1e.deputy.mcp.v1.RemediationStepR\x05steps\x12%\n" +
 	"\x0estdlib_upgrade\x18\n" +
 	" \x01(\tR\rstdlibUpgrade\x12;\n" +
-	"\x19unfixable_vulnerabilities\x18\v \x03(\tR\x18unfixableVulnerabilities\"\x84\x02\n" +
+	"\x19unfixable_vulnerabilities\x18\v \x03(\tR\x18unfixableVulnerabilities\"\x8e\x02\n" +
 	"\x0fDiffRefsRequest\x12\x12\n" +
 	"\x04path\x18\x01 \x01(\tR\x04path\x12)\n" +
 	"\bbase_ref\x18\x02 \x01(\tB\x0e\xbaH\v\xc8\x01\x01r\x06\x10\x012\x02\\SR\abaseRef\x12-\n" +
 	"\n" +
 	"target_ref\x18\x03 \x01(\tB\x0e\xbaH\v\xc8\x01\x01r\x06\x10\x012\x02\\SR\ttargetRef\x12\x1a\n" +
-	"\bplatform\x18\x04 \x01(\tR\bplatform\x120\n" +
+	"\bplatform\x18\x04 \x01(\tR\bplatform\x125\n" +
 	"\n" +
-	"ecosystems\x18\x05 \x03(\tB\x10\xbaH\r\x92\x01\n" +
-	"\"\br\x06\x10\x012\x02\\SR\n" +
-	"ecosystems\x125\n" +
-	"\rexclude_paths\x18\x06 \x03(\tB\x10\xbaH\r\x92\x01\n" +
-	"\"\br\x06\x10\x012\x02\\SR\fexcludePaths\"\xac\x02\n" +
+	"ecosystems\x18\x05 \x03(\tB\x15\xbaH\x12\x92\x01\x0f\x10d\"\vr\t\x10\x01\x18\x80\x022\x02\\SR\n" +
+	"ecosystems\x12:\n" +
+	"\rexclude_paths\x18\x06 \x03(\tB\x15\xbaH\x12\x92\x01\x0f\x10d\"\vr\t\x10\x01\x18\x80\x022\x02\\SR\fexcludePaths\"\xa4\x02\n" +
 	"\x10DependencyChange\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12!\n" +
 	"\fbase_version\x18\x02 \x01(\tR\vbaseVersion\x12%\n" +
@@ -5071,15 +5084,14 @@ const file_deputy_mcp_v1_mcp_proto_rawDesc = "" +
 	"\x04purl\x18\x04 \x01(\tR\x04purl\x12X\n" +
 	"\vchange_type\x18\x05 \x01(\tB7\xbaH4\xd8\x01\x01r/R\x05addedR\aremovedR\bupgradedR\n" +
 	"downgradedR\aupdatedR\n" +
-	"changeType\x12 \n" +
-	"\tis_direct\x18\x06 \x01(\bH\x00R\bisDirect\x88\x01\x01\x12\x1c\n" +
-	"\tecosystem\x18\a \x01(\tR\tecosystemB\f\n" +
-	"\n" +
-	"_is_direct\"\xc1\x03\n" +
+	"changeType\x12\x1b\n" +
+	"\x06direct\x18\x06 \x01(\bH\x00R\x06direct\x88\x01\x01\x12\x1c\n" +
+	"\tecosystem\x18\a \x01(\tR\tecosystemB\t\n" +
+	"\a_direct\"\xb4\x03\n" +
 	"\x0eDiffVulnChange\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x18\n" +
-	"\aaliases\x18\x02 \x03(\tR\aaliases\x12X\n" +
-	"\vchange_type\x18\x03 \x01(\tB7\xbaH4\xd8\x01\x01r/R\x05addedR\aremovedR\x05fixedR\tpersistedR\vunspecifiedR\n" +
+	"\aaliases\x18\x02 \x03(\tR\aaliases\x12K\n" +
+	"\vchange_type\x18\x03 \x01(\tB*\xbaH'\xd8\x01\x01r\"R\x05addedR\aremovedR\x05fixedR\tpersistedR\n" +
 	"changeType\x12J\n" +
 	"\bseverity\x18\x04 \x01(\tB.\xbaH+\xd8\x01\x01r&R\bCRITICALR\x04HIGHR\x06MEDIUMR\x03LOWR\aUNKNOWNR\bseverity\x12\x18\n" +
 	"\apackage\x18\x05 \x01(\tR\apackage\x12\x1c\n" +
@@ -5101,7 +5113,7 @@ const file_deputy_mcp_v1_mcp_proto_rawDesc = "" +
 	"\flayers_added\x18\b \x01(\x05R\vlayersAdded\x12%\n" +
 	"\x0elayers_removed\x18\t \x01(\x05R\rlayersRemoved\x12%\n" +
 	"\x0econfig_changed\x18\n" +
-	" \x01(\bR\rconfigChanged\"\xd0\x06\n" +
+	" \x01(\bR\rconfigChanged\"\xe5\x06\n" +
 	"\x0eDiffRefsResult\x12\x12\n" +
 	"\x04path\x18\x01 \x01(\tR\x04path\x12\x19\n" +
 	"\bbase_ref\x18\x02 \x01(\tR\abaseRef\x12\x1d\n" +
@@ -5118,11 +5130,11 @@ const file_deputy_mcp_v1_mcp_proto_rawDesc = "" +
 	"\rremoved_count\x18\n" +
 	" \x01(\x05R\fremovedCount\x12#\n" +
 	"\rupdated_count\x18\v \x01(\x05R\fupdatedCount\x12H\n" +
-	"\x0fvulnerabilities\x18\f \x03(\v2\x1e.deputy.mcp.v1.VulnExplanationR\x0fvulnerabilities\x12l\n" +
-	"\x15vulnerability_summary\x18\r \x03(\v27.deputy.mcp.v1.DiffRefsResult.VulnerabilitySummaryEntryR\x14vulnerabilitySummary\x12R\n" +
+	"\x0fvulnerabilities\x18\f \x03(\v2\x1e.deputy.mcp.v1.VulnExplanationR\x0fvulnerabilities\x12|\n" +
+	"\x1bvulnerabilities_by_severity\x18\r \x03(\v2<.deputy.mcp.v1.DiffRefsResult.VulnerabilitiesBySeverityEntryR\x19vulnerabilitiesBySeverity\x12R\n" +
 	"\x15vulnerability_changes\x18\x0e \x03(\v2\x1d.deputy.mcp.v1.DiffVulnChangeR\x14vulnerabilityChanges\x12L\n" +
-	"\x11container_summary\x18\x0f \x01(\v2\x1f.deputy.mcp.v1.ContainerSummaryR\x10containerSummary\x1aG\n" +
-	"\x19VulnerabilitySummaryEntry\x12\x10\n" +
+	"\x11container_summary\x18\x0f \x01(\v2\x1f.deputy.mcp.v1.ContainerSummaryR\x10containerSummary\x1aL\n" +
+	"\x1eVulnerabilitiesBySeverityEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\x05R\x05value:\x028\x01B\x14\n" +
 	"\x12_is_container_diffB\xa9\x01\n" +
@@ -5187,7 +5199,7 @@ var file_deputy_mcp_v1_mcp_proto_goTypes = []any{
 	(*DiffRefsResult)(nil),                // 42: deputy.mcp.v1.DiffRefsResult
 	nil,                                   // 43: deputy.mcp.v1.ScanDirectoryResult.VulnerabilitiesBySeverityEntry
 	nil,                                   // 44: deputy.mcp.v1.ScanContainerResult.VulnerabilitiesBySeverityEntry
-	nil,                                   // 45: deputy.mcp.v1.DiffRefsResult.VulnerabilitySummaryEntry
+	nil,                                   // 45: deputy.mcp.v1.DiffRefsResult.VulnerabilitiesBySeverityEntry
 	(*v1.ManifestRef)(nil),                // 46: deputy.dependency.v1.ManifestRef
 	(*v11.GraphStats)(nil),                // 47: deputy.graph.v1.GraphStats
 	(*v12.EntrypointInfo)(nil),            // 48: deputy.policy.v1.EntrypointInfo
@@ -5226,7 +5238,7 @@ var file_deputy_mcp_v1_mcp_proto_depIdxs = []int32{
 	36, // 29: deputy.mcp.v1.GetRemediationResult.steps:type_name -> deputy.mcp.v1.RemediationStep
 	39, // 30: deputy.mcp.v1.DiffRefsResult.changes:type_name -> deputy.mcp.v1.DependencyChange
 	0,  // 31: deputy.mcp.v1.DiffRefsResult.vulnerabilities:type_name -> deputy.mcp.v1.VulnExplanation
-	45, // 32: deputy.mcp.v1.DiffRefsResult.vulnerability_summary:type_name -> deputy.mcp.v1.DiffRefsResult.VulnerabilitySummaryEntry
+	45, // 32: deputy.mcp.v1.DiffRefsResult.vulnerabilities_by_severity:type_name -> deputy.mcp.v1.DiffRefsResult.VulnerabilitiesBySeverityEntry
 	40, // 33: deputy.mcp.v1.DiffRefsResult.vulnerability_changes:type_name -> deputy.mcp.v1.DiffVulnChange
 	41, // 34: deputy.mcp.v1.DiffRefsResult.container_summary:type_name -> deputy.mcp.v1.ContainerSummary
 	35, // [35:35] is the sub-list for method output_type

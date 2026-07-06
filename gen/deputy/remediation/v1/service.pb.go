@@ -33,11 +33,18 @@ const (
 type GuidanceProfile int32
 
 const (
+	// Unspecified defaults to the API profile, the handler's historical
+	// behavior.
 	GuidanceProfile_GUIDANCE_PROFILE_UNSPECIFIED GuidanceProfile = 0
-	GuidanceProfile_GUIDANCE_PROFILE_GENERIC     GuidanceProfile = 1
-	GuidanceProfile_GUIDANCE_PROFILE_CLI         GuidanceProfile = 2
-	GuidanceProfile_GUIDANCE_PROFILE_API         GuidanceProfile = 3
-	GuidanceProfile_GUIDANCE_PROFILE_MCP         GuidanceProfile = 4
+	// Generic hints name no surface-specific tooling; for embedders whose
+	// capabilities Deputy does not know.
+	GuidanceProfile_GUIDANCE_PROFILE_GENERIC GuidanceProfile = 1
+	// CLI hints reference deputy commands (e.g. deputy graph why).
+	GuidanceProfile_GUIDANCE_PROFILE_CLI GuidanceProfile = 2
+	// API hints reference ConnectRPC services (e.g. GraphService.WhyDependency).
+	GuidanceProfile_GUIDANCE_PROFILE_API GuidanceProfile = 3
+	// MCP hints reference MCP tools (e.g. graph_why).
+	GuidanceProfile_GUIDANCE_PROFILE_MCP GuidanceProfile = 4
 )
 
 // Enum value maps for GuidanceProfile.
@@ -610,9 +617,9 @@ type GeneratePlanResponse struct {
 	Stats *PlanStats `protobuf:"bytes,4,opt,name=stats,proto3" json:"stats,omitempty"`
 	// Warnings contains non-fatal issues encountered during planning.
 	Warnings []string `protobuf:"bytes,5,rep,name=warnings,proto3" json:"warnings,omitempty"`
-	// UnaddressedVulnerabilities lists finding IDs the plan does not fix
-	// because no remediation is known. Unaddressed means still vulnerable, not
-	// safe.
+	// UnaddressedVulnerabilities lists finding IDs no step remediates, whether
+	// because no fix is known or because no actionable manifest declares the
+	// package. Unaddressed means still vulnerable, not safe.
 	UnaddressedVulnerabilities []string `protobuf:"bytes,6,rep,name=unaddressed_vulnerabilities,json=unaddressedVulnerabilities,proto3" json:"unaddressed_vulnerabilities,omitempty"`
 	unknownFields              protoimpl.UnknownFields
 	sizeCache                  protoimpl.SizeCache
@@ -824,8 +831,8 @@ type Step struct {
 	// Migration indicates the fix moves to a different module/package path
 	// rather than an in-place version bump.
 	Migration bool `protobuf:"varint,19,opt,name=migration,proto3" json:"migration,omitempty"`
-	// IsDirect indicates whether the vulnerable package is a direct dependency.
-	IsDirect bool `protobuf:"varint,20,opt,name=is_direct,json=isDirect,proto3" json:"is_direct,omitempty"`
+	// Direct indicates whether the vulnerable package is a direct dependency.
+	Direct bool `protobuf:"varint,20,opt,name=direct,proto3" json:"direct,omitempty"`
 	// Groups are the dependency groups the package belongs to (e.g., "dev").
 	Groups        []string `protobuf:"bytes,21,rep,name=groups,proto3" json:"groups,omitempty"`
 	unknownFields protoimpl.UnknownFields
@@ -995,9 +1002,9 @@ func (x *Step) GetMigration() bool {
 	return false
 }
 
-func (x *Step) GetIsDirect() bool {
+func (x *Step) GetDirect() bool {
 	if x != nil {
-		return x.IsDirect
+		return x.Direct
 	}
 	return false
 }
@@ -1011,14 +1018,22 @@ func (x *Step) GetGroups() []string {
 
 // PlanStats summarizes plan statistics.
 type PlanStats struct {
-	state                    protoimpl.MessageState `protogen:"open.v1"`
-	TotalSteps               int32                  `protobuf:"varint,1,opt,name=total_steps,json=totalSteps,proto3" json:"total_steps,omitempty"`
-	ExecutableSteps          int32                  `protobuf:"varint,2,opt,name=executable_steps,json=executableSteps,proto3" json:"executable_steps,omitempty"`
-	ManualSteps              int32                  `protobuf:"varint,3,opt,name=manual_steps,json=manualSteps,proto3" json:"manual_steps,omitempty"`
-	HighRiskSteps            int32                  `protobuf:"varint,4,opt,name=high_risk_steps,json=highRiskSteps,proto3" json:"high_risk_steps,omitempty"`
-	VulnerabilitiesAddressed int32                  `protobuf:"varint,5,opt,name=vulnerabilities_addressed,json=vulnerabilitiesAddressed,proto3" json:"vulnerabilities_addressed,omitempty"`
-	AffectedPackages         int32                  `protobuf:"varint,6,opt,name=affected_packages,json=affectedPackages,proto3" json:"affected_packages,omitempty"`
-	AffectedManagers         []string               `protobuf:"bytes,7,rep,name=affected_managers,json=affectedManagers,proto3" json:"affected_managers,omitempty"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// TotalSteps is the number of steps in the plan.
+	TotalSteps int32 `protobuf:"varint,1,opt,name=total_steps,json=totalSteps,proto3" json:"total_steps,omitempty"`
+	// ExecutableSteps counts steps that can be run as-is.
+	ExecutableSteps int32 `protobuf:"varint,2,opt,name=executable_steps,json=executableSteps,proto3" json:"executable_steps,omitempty"`
+	// ManualSteps counts steps that are guidance requiring a manual change.
+	ManualSteps int32 `protobuf:"varint,3,opt,name=manual_steps,json=manualSteps,proto3" json:"manual_steps,omitempty"`
+	// HighRiskSteps counts steps with risk level high or critical.
+	HighRiskSteps int32 `protobuf:"varint,4,opt,name=high_risk_steps,json=highRiskSteps,proto3" json:"high_risk_steps,omitempty"`
+	// VulnerabilitiesAddressed counts findings that at least one step
+	// remediates.
+	VulnerabilitiesAddressed int32 `protobuf:"varint,5,opt,name=vulnerabilities_addressed,json=vulnerabilitiesAddressed,proto3" json:"vulnerabilities_addressed,omitempty"`
+	// AffectedPackages counts distinct packages the steps change.
+	AffectedPackages int32 `protobuf:"varint,6,opt,name=affected_packages,json=affectedPackages,proto3" json:"affected_packages,omitempty"`
+	// AffectedManagers lists the package managers involved, sorted.
+	AffectedManagers []string `protobuf:"bytes,7,rep,name=affected_managers,json=affectedManagers,proto3" json:"affected_managers,omitempty"`
 	// VulnerabilitiesUnaddressed counts findings with no known remediation.
 	VulnerabilitiesUnaddressed int32 `protobuf:"varint,8,opt,name=vulnerabilities_unaddressed,json=vulnerabilitiesUnaddressed,proto3" json:"vulnerabilities_unaddressed,omitempty"`
 	// MigrationSteps counts steps that move to a different module path.
@@ -3668,7 +3683,7 @@ const file_deputy_remediation_v1_service_proto_rawDesc = "" +
 	"\bmetadata\x18\x06 \x03(\v2).deputy.remediation.v1.Plan.MetadataEntryR\bmetadata\x1a;\n" +
 	"\rMetadataEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
-	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\xd7\x05\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\xd2\x05\n" +
 	"\x04Step\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x123\n" +
 	"\x04kind\x18\x02 \x01(\x0e2\x1f.deputy.remediation.v1.StepKindR\x04kind\x12\x14\n" +
@@ -3693,8 +3708,8 @@ const file_deputy_remediation_v1_service_proto_rawDesc = "" +
 	"depends_on\x18\x10 \x03(\tR\tdependsOn\x12\x12\n" +
 	"\x04purl\x18\x11 \x01(\tR\x04purl\x12#\n" +
 	"\rtarget_module\x18\x12 \x01(\tR\ftargetModule\x12\x1c\n" +
-	"\tmigration\x18\x13 \x01(\bR\tmigration\x12\x1b\n" +
-	"\tis_direct\x18\x14 \x01(\bR\bisDirect\x12\x16\n" +
+	"\tmigration\x18\x13 \x01(\bR\tmigration\x12\x16\n" +
+	"\x06direct\x18\x14 \x01(\bR\x06direct\x12\x16\n" +
 	"\x06groups\x18\x15 \x03(\tR\x06groups\"\xa3\x03\n" +
 	"\tPlanStats\x12\x1f\n" +
 	"\vtotal_steps\x18\x01 \x01(\x05R\n" +

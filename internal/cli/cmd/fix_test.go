@@ -18,7 +18,12 @@ func TestBuildFixResponse(t *testing.T) {
 		{Command: "Edit Gemfile to require foo >= 2.0.0", Executable: false},
 		{Command: "go get go@1.22.3", Executable: true},
 	}
-	resp := internalproto.BuildFixResponse("github.com/example/project", "main", "abcdef0", "v1.22.3", commands)
+	resp := internalproto.BuildFixResponse(&targetv1.Target{
+		DisplayPath:  "github.com/example/project",
+		Ref:          "main",
+		EffectiveRef: "main",
+		CommitHash:   "abcdef0",
+	}, "v1.22.3", commands)
 	if resp.Target.DisplayPath != "github.com/example/project" {
 		t.Fatalf("plan target mismatch: %+v", resp.Target)
 	}
