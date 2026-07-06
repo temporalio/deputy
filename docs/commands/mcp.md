@@ -27,6 +27,14 @@ deputy mcp serve [flags]
 
 The [Model Context Protocol](https://modelcontextprotocol.io/) (MCP) is an open standard that enables AI assistants to interact with external tools and data sources. Deputy's MCP server exposes vulnerability scanning, dependency analysis, and remediation capabilities as tools that AI assistants can invoke.
 
+Every tool's input and output contract is defined in proto
+([`deputy.mcp.v1`](../../api/deputy/mcp/v1/mcp.proto)): the advertised JSON
+Schemas are derived from the proto descriptors, requests are validated against
+the same rules the schemas advertise, and every result is validated against
+its output schema before it is returned. Results omit zero values: an absent
+field means empty, zero, or false (for example, no `vulnerabilities` key means
+none were found, and an absent `found` means not found).
+
 ```mermaid
 flowchart LR
     subgraph AI["AI Assistant"]
@@ -37,7 +45,7 @@ flowchart LR
         direction TB
         Stdio["stdio transport"]
         HTTP["HTTP/SSE transport"]
-        Tools["13 Security Tools"]
+        Tools["15 Security Tools"]
         Stdio --> Tools
         HTTP --> Tools
     end
@@ -459,7 +467,6 @@ direct dependencies, fixable findings, and stable package/ID tie-breakers.
   "version": "v0.17.0",
   "ecosystem": "go",
   "purl": "pkg:golang/golang.org/x/net@v0.17.0",
-  "clean": false,
   "vulnerabilities": [
     {
       "id": "CVE-2024-1234",
@@ -528,7 +535,6 @@ When a tool scans a Git repository snapshot, results echo `ref`,
   "effectiveRef": "HEAD~0",
   "commit": "abc123def456",
   "packagesScanned": 142,
-  "clean": false,
   "vulnerabilitiesBySeverity": {
     "critical": 1,
     "high": 3,
@@ -574,7 +580,6 @@ calling graph, remediation, or vulnerability tools.
   "commit": "abc123def456",
   "total": 2,
   "direct": 2,
-  "transitive": 0,
   "totalDiscovered": 142,
   "directDiscovered": 24,
   "transitiveDiscovered": 118,
@@ -796,8 +801,6 @@ broader module graph.
     "maxConnectedDepth": 4,
     "disconnectedNodes": 3
   },
-  "vulnerablePathCount": 0,
-  "vulnerablePathsTruncated": false,
   "target": {
     "query": "pkg:npm/lodash",
     "found": true,
@@ -809,13 +812,11 @@ broader module graph.
         "version": "4.17.21",
         "ecosystem": "npm",
         "purl": "pkg:npm/lodash@4.17.21",
-        "direct": false,
         "depth": 2
       }
     ],
     "message": "1 dependency path to target found"
   },
-  "pathsToTargetTruncated": false,
   "pathsToTarget": [
     {
       "nodes": ["express@4.18.2", "body-parser@1.20.2", "lodash@4.17.21"],
@@ -825,15 +826,13 @@ broader module graph.
           "version": "4.18.2",
           "ecosystem": "npm",
           "purl": "pkg:npm/express@4.18.2",
-          "direct": true,
-          "depth": 0
+          "direct": true
         },
         {
           "name": "body-parser",
           "version": "1.20.2",
           "ecosystem": "npm",
           "purl": "pkg:npm/body-parser@1.20.2",
-          "direct": false,
           "depth": 1
         },
         {
@@ -841,7 +840,6 @@ broader module graph.
           "version": "4.17.21",
           "ecosystem": "npm",
           "purl": "pkg:npm/lodash@4.17.21",
-          "direct": false,
           "depth": 2
         }
       ],
@@ -863,10 +861,10 @@ Direct dependencies are returned as one-node, zero-hop paths. This keeps the
 is complete. `pathsToTarget` is capped at 20 returned examples; use
 `target.pathCount` and `pathsToTargetTruncated` for the full target-path count.
 When `targetPurl` is provided, the `target` object reports whether the package
-identity was found and how many paths were resolved. An empty `pathsToTarget`
-with `target.found=false` means the package was absent from the graph; an empty
-`pathsToTarget` with `target.found=true` means the package was present but no
-path from a direct/root dependency was resolved. In that case, inspect
+identity was found and how many paths were resolved. A missing `pathsToTarget`
+with `target.found` absent (false) means the package was absent from the
+graph; a missing `pathsToTarget` with `target.found=true` means the package
+was present but no path from a direct/root dependency was resolved. In that case, inspect
 `target.matchedNodes[]` for exact PURL, graph depth, disconnected status, and
 extended-mode import status.
 
@@ -896,13 +894,11 @@ share a short name.
 {
   "package": "lodash",
   "found": true,
-  "direct": false,
   "matchedNode": {
     "name": "lodash",
     "version": "4.17.21",
     "ecosystem": "npm",
     "purl": "pkg:npm/lodash@4.17.21",
-    "direct": false,
     "depth": 2
   },
   "paths": [
@@ -914,15 +910,13 @@ share a short name.
           "version": "4.18.2",
           "ecosystem": "npm",
           "purl": "pkg:npm/express@4.18.2",
-          "direct": true,
-          "depth": 0
+          "direct": true
         },
         {
           "name": "body-parser",
           "version": "1.20.2",
           "ecosystem": "npm",
           "purl": "pkg:npm/body-parser@1.20.2",
-          "direct": false,
           "depth": 1
         },
         {
@@ -930,7 +924,6 @@ share a short name.
           "version": "4.17.21",
           "ecosystem": "npm",
           "purl": "pkg:npm/lodash@4.17.21",
-          "direct": false,
           "depth": 2
         }
       ],
@@ -938,7 +931,6 @@ share a short name.
     }
   ],
   "pathCount": 1,
-  "pathsTruncated": false,
   "message": "1 dependency path found"
 }
 ```
@@ -977,15 +969,13 @@ Find packages that depend on a given package (reverse lookup).
 ```json
 {
   "package": "lodash",
-  "direct": false,
   "found": true,
   "dependents": [
     {
       "name": "body-parser",
       "version": "1.20.2",
       "ecosystem": "npm",
-      "purl": "pkg:npm/body-parser@1.20.2",
-      "direct": false
+      "purl": "pkg:npm/body-parser@1.20.2"
     },
     {
       "name": "express",
@@ -1160,8 +1150,6 @@ repository `path`.
     "packagesAdded": 2,
     "packagesRemoved": 1,
     "packagesUpgraded": 8,
-    "packagesDowngraded": 0,
-    "vulnerabilitiesAdded": 0,
     "vulnerabilitiesRemoved": 1,
     "vulnerabilitiesFixed": 3
   }
@@ -1205,7 +1193,6 @@ Get commands to fix vulnerabilities.
   "unfixableCount": 1,
   "commandCount": 1,
   "executableCommandCount": 1,
-  "manualCommandCount": 0,
   "commands": [
     {
       "package": "github.com/example/pkg",

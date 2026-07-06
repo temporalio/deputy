@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"maps"
 	"net/http"
 	"os"
 	pathpkg "path"
@@ -16,7 +15,6 @@ import (
 
 	"connectrpc.com/connect"
 	"github.com/google/go-containerregistry/pkg/name"
-	"github.com/google/jsonschema-go/jsonschema"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	packageurl "github.com/package-url/packageurl-go"
 	diffv1 "github.com/temporalio/deputy/gen/deputy/diff/v1"
@@ -373,13 +371,19 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// handleInfo serves server information.
+// handleInfo serves server information with the same protojson dialect the
+// get_server_info tool uses, so both surfaces share one wire shape.
 func (s *Server) handleInfo(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
 	info := s.serverInfo()
 	info.Transport = "sse"
-	json.NewEncoder(w).Encode(info)
+	out, err := marshalMCPResult(info)
+	if err != nil {
+		http.Error(w, "failed to encode server info", http.StatusInternalServerError)
+		return
+	}
+	w.WriteHeader(http.StatusOK)
+	w.Write(out)
 }
 
 // addTool is a helper that registers a tool and tracks its name for /info endpoint.
@@ -415,37 +419,62 @@ func (s *Server) registerTools() {
 	)
 
 	// Server metadata
+	serverInfoIn, serverInfoOut := mustToolSchemas(
+		(&mcpv1.GetServerInfoRequest{}).ProtoReflect().Descriptor(),
+		(&mcpv1.GetServerInfoResult{}).ProtoReflect().Descriptor(),
+	)
 	addReadOnlyTool(s, &mcp.Tool{
-		Name:        "get_server_info",
-		Description: "Get Deputy MCP server build, process, and tool metadata",
-		InputSchema: emptyObjectInputSchema(),
+		Name:         "get_server_info",
+		Description:  "Get Deputy MCP server build, process, and tool metadata",
+		InputSchema:  serverInfoIn,
+		OutputSchema: serverInfoOut,
 	}, closedWorld, s.getServerInfo)
 
 	// Policy discovery tools
+	policyIn, policyOut := mustToolSchemas(
+		(&mcpv1.ListPolicyEntrypointsRequest{}).ProtoReflect().Descriptor(),
+		(&mcpv1.ListPolicyEntrypointsResult{}).ProtoReflect().Descriptor(),
+	)
 	addReadOnlyTool(s, &mcp.Tool{
-		Name:        "list_policy_entrypoints",
-		Description: "List Deputy policy entrypoints, categories, variables, and helpers for authoring CEL policies",
-		InputSchema: listPolicyEntrypointsInputSchema(),
+		Name:         "list_policy_entrypoints",
+		Description:  "List Deputy policy entrypoints, categories, variables, and helpers for authoring CEL policies",
+		InputSchema:  policyIn,
+		OutputSchema: policyOut,
 	}, closedWorld, s.listPolicyEntrypoints)
 
 	// Vulnerability explanation tools
+	explainIn, explainOut := mustToolSchemas(
+		(&mcpv1.ExplainVulnerabilityRequest{}).ProtoReflect().Descriptor(),
+		(&mcpv1.VulnExplanation{}).ProtoReflect().Descriptor(),
+	)
 	addReadOnlyTool(s, &mcp.Tool{
-		Name:        "explain_vulnerability",
-		Description: "Get detailed information about a vulnerability by its ID (CVE, GHSA, etc.)",
-		InputSchema: explainVulnerabilityInputSchema(),
+		Name:         "explain_vulnerability",
+		Description:  "Get detailed information about a vulnerability by its ID (CVE, GHSA, etc.)",
+		InputSchema:  explainIn,
+		OutputSchema: explainOut,
 	}, openWorld, s.explainVulnerability)
 
+	explainBatchIn, explainBatchOut := mustToolSchemas(
+		(&mcpv1.ExplainVulnerabilitiesRequest{}).ProtoReflect().Descriptor(),
+		(&mcpv1.ExplainVulnerabilitiesResult{}).ProtoReflect().Descriptor(),
+	)
 	addReadOnlyTool(s, &mcp.Tool{
-		Name:        "explain_vulnerabilities",
-		Description: "Get detailed information about multiple vulnerabilities by their IDs",
-		InputSchema: explainVulnerabilitiesInputSchema(),
+		Name:         "explain_vulnerabilities",
+		Description:  "Get detailed information about multiple vulnerabilities by their IDs",
+		InputSchema:  explainBatchIn,
+		OutputSchema: explainBatchOut,
 	}, openWorld, s.explainVulnerabilities)
 
 	// Package scanning tools
+	scanPkgIn, scanPkgOut := mustToolSchemas(
+		(&mcpv1.ScanPackageRequest{}).ProtoReflect().Descriptor(),
+		(&mcpv1.ScanPackageResult{}).ProtoReflect().Descriptor(),
+	)
 	addReadOnlyTool(s, &mcp.Tool{
-		Name:        "scan_package",
-		Description: "Check a single package for known vulnerabilities by PURL or by name, version, and ecosystem",
-		InputSchema: scanPackageInputSchema(),
+		Name:         "scan_package",
+		Description:  "Check a single package for known vulnerabilities by PURL or by name, version, and ecosystem",
+		InputSchema:  scanPkgIn,
+		OutputSchema: scanPkgOut,
 	}, openWorld, s.scanPackage)
 
 	scanDirIn, scanDirOut := mustToolSchemas(
@@ -484,10 +513,15 @@ func (s *Server) registerTools() {
 	}, openWorld, s.generateSBOM)
 
 	// Remediation tools
+	remediationIn, remediationOut := mustToolSchemas(
+		(&mcpv1.GetRemediationRequest{}).ProtoReflect().Descriptor(),
+		(&mcpv1.GetRemediationResult{}).ProtoReflect().Descriptor(),
+	)
 	addReadOnlyTool(s, &mcp.Tool{
-		Name:        "get_remediation",
-		Description: "Get remediation commands for fixing vulnerabilities in a scanned directory",
-		InputSchema: getRemediationInputSchema(),
+		Name:         "get_remediation",
+		Description:  "Get remediation commands for fixing vulnerabilities in a scanned directory",
+		InputSchema:  remediationIn,
+		OutputSchema: remediationOut,
 	}, openWorld, s.getRemediation)
 
 	// Graph analysis tools
@@ -549,139 +583,16 @@ func (s *Server) registerTools() {
 	}, openWorld, s.scanContainer)
 
 	// Diff tools
+	diffIn, diffOut := mustToolSchemas(
+		(&mcpv1.DiffRefsRequest{}).ProtoReflect().Descriptor(),
+		(&mcpv1.DiffRefsResult{}).ProtoReflect().Descriptor(),
+	)
 	addReadOnlyTool(s, &mcp.Tool{
-		Name:        "diff_refs",
-		Description: "Compare dependencies between Git references (branches, tags, commits) or container images. Shows added, removed, and updated packages with vulnerability analysis.",
-		InputSchema: diffRefsInputSchema(),
+		Name:         "diff_refs",
+		Description:  "Compare dependencies between Git references (branches, tags, commits) or container images. Shows added, removed, and updated packages with vulnerability analysis.",
+		InputSchema:  diffIn,
+		OutputSchema: diffOut,
 	}, openWorld, s.diffRefs)
-}
-
-func mcpStringProperty(description string) *jsonschema.Schema {
-	return &jsonschema.Schema{
-		Type:        "string",
-		Description: description,
-		MinLength:   jsonschema.Ptr(1),
-		Pattern:     "\\S",
-	}
-}
-
-func mcpOptionalStringProperty(description string) *jsonschema.Schema {
-	return &jsonschema.Schema{
-		Type:        "string",
-		Description: description,
-	}
-}
-
-func mcpStringArrayProperty(description string) *jsonschema.Schema {
-	return &jsonschema.Schema{
-		Type:        "array",
-		Description: description,
-		Items:       mcpStringProperty("Non-empty string value."),
-	}
-}
-
-func explainVulnerabilityInputSchema() *jsonschema.Schema {
-	return &jsonschema.Schema{
-		Type:     "object",
-		Required: []string{"id"},
-		Properties: map[string]*jsonschema.Schema{
-			"id": mcpStringProperty("Vulnerability ID, e.g. CVE-2021-44228 or GHSA-xxxx-xxxx-xxxx."),
-			"referenceLimit": {
-				Type:        "integer",
-				Description: "Optional maximum number of advisory references to return. Omit or pass a negative value for all references; 0 returns none.",
-			},
-		},
-		AdditionalProperties: falseJSONSchema(),
-	}
-}
-
-func emptyObjectInputSchema() *jsonschema.Schema {
-	return &jsonschema.Schema{
-		Type:                 "object",
-		AdditionalProperties: falseJSONSchema(),
-	}
-}
-
-func explainVulnerabilitiesInputSchema() *jsonschema.Schema {
-	return &jsonschema.Schema{
-		Type:     "object",
-		Required: []string{"ids"},
-		Properties: map[string]*jsonschema.Schema{
-			"ids": {
-				Type:        "array",
-				Description: "Vulnerability IDs to explain, e.g. CVE-2021-44228 or GHSA-xxxx-xxxx-xxxx.",
-				Items:       mcpStringProperty("Vulnerability ID."),
-				MinItems:    jsonschema.Ptr(1),
-			},
-			"referenceLimit": {
-				Type:        "integer",
-				Description: "Optional maximum number of advisory references to return per vulnerability. Omit or pass a negative value for all references; 0 returns none.",
-			},
-		},
-		AdditionalProperties: falseJSONSchema(),
-	}
-}
-
-func listPolicyEntrypointsInputSchema() *jsonschema.Schema {
-	// Derive the accepted categories and legacy aliases from the policy package
-	// so this schema can never drift from the canonical entrypoint registry.
-	categories := policy.Categories()
-	aliasKeys := slices.Sorted(maps.Keys(policy.CategoryAliases()))
-
-	enum := make([]any, 0, len(categories)+len(aliasKeys))
-	for _, c := range categories {
-		enum = append(enum, c)
-	}
-	for _, a := range aliasKeys {
-		enum = append(enum, a)
-	}
-
-	return &jsonschema.Schema{
-		Type: "object",
-		Properties: map[string]*jsonschema.Schema{
-			"category": {
-				Type: "string",
-				Description: fmt.Sprintf("Optional category filter: %s. Legacy aliases accepted: %s.",
-					strings.Join(categories, ", "), strings.Join(aliasKeys, ", ")),
-				Enum: enum,
-			},
-		},
-		AdditionalProperties: falseJSONSchema(),
-	}
-}
-
-func scanPackageInputSchema() *jsonschema.Schema {
-	return &jsonschema.Schema{
-		Type: "object",
-		Properties: map[string]*jsonschema.Schema{
-			"purl":      mcpStringProperty("Package URL, e.g. pkg:npm/lodash@4.17.21. Include @version in the PURL or provide version separately."),
-			"name":      mcpStringProperty("Package name (e.g., lodash, github.com/foo/bar), Maven coordinates (group:artifact), or a pkg: PURL."),
-			"version":   mcpStringProperty("Package version. Required unless purl or name includes a pkg: PURL with @version."),
-			"ecosystem": mcpStringProperty("Package ecosystem (e.g., npm, go, pypi, maven, cargo, github-actions). Required with split name/version input."),
-		},
-		AdditionalProperties: falseJSONSchema(),
-	}
-}
-
-func getRemediationInputSchema() *jsonschema.Schema {
-	return localPathToolInputSchema("Path to the local directory to analyze for remediation.", map[string]*jsonschema.Schema{
-		"ref":          mcpOptionalStringProperty("Git reference, branch, tag, or commit for repository paths. Defaults to the current working tree/HEAD."),
-		"ecosystems":   mcpStringArrayProperty("Optional ecosystems to include, e.g. go, npm, pypi."),
-		"excludePaths": mcpStringArrayProperty("Optional directory globs to skip during the walk, e.g. .bin/** or **/testdata."),
-	})
-}
-
-func localPathToolInputSchema(pathDescription string, properties map[string]*jsonschema.Schema, required ...string) *jsonschema.Schema {
-	props := map[string]*jsonschema.Schema{
-		"path": mcpStringProperty(pathDescription),
-	}
-	maps.Copy(props, properties)
-	return &jsonschema.Schema{
-		Type:                 "object",
-		Required:             append([]string{"path"}, required...),
-		Properties:           props,
-		AdditionalProperties: falseJSONSchema(),
-	}
 }
 
 // mcpTargetRef extracts the requested ref, resolved effective ref, and commit
@@ -692,26 +603,6 @@ func mcpTargetRef(target *targetv1.Target) (ref, effectiveRef, commit string) {
 		return "", "", ""
 	}
 	return strings.TrimSpace(target.GetRef()), strings.TrimSpace(target.GetEffectiveRef()), strings.TrimSpace(target.GetCommitHash())
-}
-
-func diffRefsInputSchema() *jsonschema.Schema {
-	return &jsonschema.Schema{
-		Type:     "object",
-		Required: []string{"baseRef", "targetRef"},
-		Properties: map[string]*jsonschema.Schema{
-			"path":         mcpOptionalStringProperty("Repository path for Git ref diffs. Optional for container image diffs."),
-			"baseRef":      mcpStringProperty("Base Git reference (branch, tag, commit) or container image reference."),
-			"targetRef":    mcpStringProperty("Target Git reference or container image reference to compare against."),
-			"platform":     mcpOptionalStringProperty("Target platform for container image diffs, e.g. linux/amd64 or linux/arm64. Ignored for Git ref diffs."),
-			"ecosystems":   mcpStringArrayProperty("Optional ecosystems to include for Git ref diffs, e.g. go, npm, pypi."),
-			"excludePaths": mcpStringArrayProperty("Optional directory globs to skip during Git ref scans, e.g. .bin/** or **/testdata."),
-		},
-		AdditionalProperties: falseJSONSchema(),
-	}
-}
-
-func falseJSONSchema() *jsonschema.Schema {
-	return &jsonschema.Schema{Not: &jsonschema.Schema{}}
 }
 
 // withTimeout wraps a context with the specified timeout duration.
@@ -1039,11 +930,11 @@ type mcpScanPackageTarget struct {
 	purl          string
 }
 
-func resolveMCPScanPackageTarget(args ScanPackageInput) (mcpScanPackageTarget, error) {
-	packageName := strings.TrimSpace(args.Name)
-	versionInput := strings.TrimSpace(args.Version)
-	ecosystemInput := strings.TrimSpace(args.Ecosystem)
-	purlInput := strings.TrimSpace(args.PURL)
+func resolveMCPScanPackageTarget(args *mcpv1.ScanPackageRequest) (mcpScanPackageTarget, error) {
+	packageName := strings.TrimSpace(args.GetName())
+	versionInput := strings.TrimSpace(args.GetVersion())
+	ecosystemInput := strings.TrimSpace(args.GetEcosystem())
+	purlInput := strings.TrimSpace(args.GetPurl())
 
 	if purlInput == "" && strings.HasPrefix(strings.ToLower(packageName), "pkg:") {
 		purlInput = packageName
@@ -1160,132 +1051,6 @@ func splitLastSlash(name string) (string, string) {
 
 // === Input/Output Types ===
 
-// ServerInfoInput is the input for the get_server_info tool.
-type ServerInfoInput struct{}
-
-// ServerInfoResult describes the running Deputy MCP server.
-type ServerInfoResult struct {
-	Name                string   `json:"name"`
-	Version             string   `json:"version"`
-	Protocol            string   `json:"protocol"`
-	Transport           string   `json:"transport,omitempty"`
-	Description         string   `json:"description"`
-	ProcessID           int      `json:"processId"`
-	StartedAt           string   `json:"startedAt"`
-	ToolCount           int      `json:"toolCount"`
-	Tools               []string `json:"tools"`
-	DefaultExcludePaths []string `json:"defaultExcludePaths,omitempty"`
-}
-
-// PolicyEntrypointsInput is the input for the list_policy_entrypoints tool.
-type PolicyEntrypointsInput struct {
-	Category string `json:"category,omitempty" jsonschema:"Optional category filter (scan, proxy, diff, container_diff, sbom, fix, triage, dockerfile, secrets, graph, server, sandbox). Legacy aliases container, service, and exec are accepted."`
-}
-
-// PolicyEntrypointsResult is the output for the list_policy_entrypoints tool.
-type PolicyEntrypointsResult struct {
-	Category        string                 `json:"category,omitempty"`
-	EntrypointCount int                    `json:"entrypointCount"`
-	Entrypoints     []PolicyEntrypointInfo `json:"entrypoints"`
-}
-
-// PolicyEntrypointInfo describes a Deputy policy entrypoint.
-type PolicyEntrypointInfo struct {
-	Name        string               `json:"name"`
-	Category    string               `json:"category"`
-	Description string               `json:"description"`
-	Variables   []PolicyVariableInfo `json:"variables"`
-	Helpers     []string             `json:"helpers"`
-}
-
-// PolicyVariableInfo describes a CEL variable available at a policy entrypoint.
-type PolicyVariableInfo struct {
-	Name        string            `json:"name"`
-	Type        string            `json:"type"`
-	Description string            `json:"description,omitempty"`
-	Required    bool              `json:"required"`
-	Fields      []PolicyFieldInfo `json:"fields,omitempty"`
-}
-
-// PolicyFieldInfo describes a notable field within a policy variable.
-type PolicyFieldInfo struct {
-	Name        string `json:"name"`
-	Type        string `json:"type"`
-	Description string `json:"description,omitempty"`
-}
-
-// ExplainVulnInput is the input for the explain_vulnerability tool.
-type ExplainVulnInput struct {
-	ID             string `json:"id" jsonschema:"Vulnerability ID (e.g., CVE-2021-44228, GHSA-xxxx-xxxx-xxxx)"`
-	ReferenceLimit *int   `json:"referenceLimit,omitempty" jsonschema:"Optional maximum number of advisory references to return. Omit or pass a negative value for all references; 0 returns none."`
-}
-
-// VulnExplanation describes a vulnerability advisory. Explanation tools return
-// full advisory text; scan-like tools may omit details and truncate references.
-type VulnExplanation struct {
-	ID                  string           `json:"id"`
-	Aliases             []string         `json:"aliases"`
-	Summary             string           `json:"summary"`
-	Details             string           `json:"details,omitempty"`
-	Kind                string           `json:"kind,omitempty"`
-	Severity            string           `json:"severity"`
-	SeverityType        string           `json:"severityType,omitempty"`
-	Sources             []string         `json:"sources,omitempty"`
-	FixedVersions       []string         `json:"fixedVersions"`
-	PackageFixes        []VulnPackageFix `json:"packageFixes"`
-	ResolvedFix         *VulnFixVerdict  `json:"resolvedFix,omitempty"`
-	References          []string         `json:"references"`
-	ReferenceCount      int              `json:"referenceCount,omitempty"`
-	ReferencesTruncated bool             `json:"referencesTruncated,omitempty"`
-	Published           string           `json:"published,omitempty"`
-	Modified            string           `json:"modified,omitempty"`
-}
-
-// VulnPackageFix records fixed versions for a specific affected module path.
-type VulnPackageFix struct {
-	Module        string   `json:"module"`
-	Ecosystem     string   `json:"ecosystem,omitempty"`
-	FixedVersions []string `json:"fixedVersions"`
-}
-
-// VulnFixVerdict describes Deputy's resolved remediation outcome.
-type VulnFixVerdict struct {
-	Status       string `json:"status"`
-	Version      string `json:"version,omitempty"`
-	TargetModule string `json:"targetModule,omitempty"`
-	Claimed      string `json:"claimed,omitempty"`
-}
-
-// ExplainVulnsInput is the input for the explain_vulnerabilities tool.
-type ExplainVulnsInput struct {
-	IDs            []string `json:"ids" jsonschema:"List of vulnerability IDs to explain"`
-	ReferenceLimit *int     `json:"referenceLimit,omitempty" jsonschema:"Optional maximum number of advisory references to return per vulnerability. Omit or pass a negative value for all references; 0 returns none."`
-}
-
-// VulnsExplanation is the output for batch vulnerability explanation.
-type VulnsExplanation struct {
-	Vulnerabilities []VulnExplanation `json:"vulnerabilities"`
-	Errors          []string          `json:"errors"`
-}
-
-// ScanPackageInput is the input for the scan_package tool.
-type ScanPackageInput struct {
-	PURL      string `json:"purl,omitempty" jsonschema:"Package URL, e.g. pkg:npm/lodash@4.17.21. Include @version in the PURL or provide version separately."`
-	Name      string `json:"name,omitempty" jsonschema:"Package name (e.g., lodash, github.com/foo/bar), Maven coordinates (group:artifact), or a pkg: PURL."`
-	Version   string `json:"version,omitempty" jsonschema:"Package version. Required unless purl or name includes a pkg: PURL with @version."`
-	Ecosystem string `json:"ecosystem,omitempty" jsonschema:"Package ecosystem (e.g., npm, go, pypi, maven, cargo, github-actions). Required with split name/version input."`
-}
-
-// ScanResult is the output for package scanning.
-type ScanResult struct {
-	Package         string            `json:"package"`
-	Version         string            `json:"version"`
-	Ecosystem       string            `json:"ecosystem"`
-	PURL            string            `json:"purl"`
-	Vulnerabilities []VulnExplanation `json:"vulnerabilities"`
-	Clean           bool              `json:"clean"`
-}
-
 // scan_directory's input/output contracts live in deputy.mcp.v1
 // (ScanDirectoryRequest/ScanDirectoryResult): the tool schema derives from the
 // proto descriptors and the wire is protojson.
@@ -1294,49 +1059,6 @@ type ScanResult struct {
 // deputy.mcp.v1 (ListDependenciesRequest/ListDependenciesResult,
 // GenerateSBOMRequest/GenerateSBOMResult): the tool schemas derive from the
 // proto descriptors and the wire is protojson.
-
-// GetRemediationInput is the input for the get_remediation tool.
-type GetRemediationInput struct {
-	Path         string   `json:"path" jsonschema:"Path to the directory to analyze for remediation"`
-	Ref          string   `json:"ref,omitempty" jsonschema:"Git reference, branch, tag, or commit for repository paths. Defaults to the current working tree/HEAD."`
-	Ecosystems   []string `json:"ecosystems,omitempty" jsonschema:"Optional list of ecosystems to include"`
-	ExcludePaths []string `json:"excludePaths,omitempty" jsonschema:"Optional directory globs to skip during the walk (e.g., .bin/**, **/testdata)."`
-}
-
-// RemediationCommand represents a remediation action.
-type RemediationCommand struct {
-	Package       string   `json:"package,omitempty"`
-	Version       string   `json:"version,omitempty"`
-	PURL          string   `json:"purl,omitempty"`
-	TargetVersion string   `json:"targetVersion,omitempty"`
-	TargetModule  string   `json:"targetModule,omitempty"`
-	Migration     bool     `json:"migration,omitempty"`
-	Manager       string   `json:"manager"`
-	Command       string   `json:"command"`
-	Path          string   `json:"path,omitempty"`
-	Hint          string   `json:"hint,omitempty"`
-	IsDirect      bool     `json:"isDirect"`
-	Executable    bool     `json:"executable"`
-	Groups        []string `json:"groups,omitempty"`
-}
-
-// GetRemediationResult is the output for the get_remediation tool.
-type GetRemediationResult struct {
-	Path                     string               `json:"path"`
-	Ref                      string               `json:"ref,omitempty"`
-	EffectiveRef             string               `json:"effectiveRef,omitempty"`
-	Commit                   string               `json:"commit,omitempty"`
-	VulnerabilitiesFound     int                  `json:"vulnerabilitiesFound"`
-	RemediableCount          int                  `json:"remediableCount"`
-	MigrationCount           int                  `json:"migrationCount"`
-	UnfixableCount           int                  `json:"unfixableCount"`
-	CommandCount             int                  `json:"commandCount"`
-	ExecutableCommandCount   int                  `json:"executableCommandCount"`
-	ManualCommandCount       int                  `json:"manualCommandCount"`
-	Commands                 []RemediationCommand `json:"commands"`
-	StdlibUpgrade            string               `json:"stdlibUpgrade,omitempty"`
-	UnfixableVulnerabilities []string             `json:"unfixableVulnerabilities,omitempty"`
-}
 
 // analyze_dependency_graph's, graph_why's, and graph_needs' input/output
 // contracts live in deputy.mcp.v1 (AnalyzeGraphRequest/AnalyzeGraphResult,
@@ -1348,98 +1070,38 @@ type GetRemediationResult struct {
 // ScanContainerResult): the tool schemas derive from the proto descriptors and
 // the wire is protojson.
 
-// DiffRefsInput is the input for the diff_refs tool.
-type DiffRefsInput struct {
-	Path         string   `json:"path" jsonschema:"Path to the repository for Git refs. Leave empty for container image diffs."`
-	BaseRef      string   `json:"baseRef" jsonschema:"Base Git reference (branch, tag, commit) or container image reference"`
-	TargetRef    string   `json:"targetRef" jsonschema:"Target Git reference or container image reference to compare against"`
-	Platform     string   `json:"platform,omitempty" jsonschema:"Target platform for container image diffs (e.g., linux/amd64, linux/arm64). Ignored for Git ref diffs."`
-	Ecosystems   []string `json:"ecosystems,omitempty" jsonschema:"Optional list of ecosystems to include (for Git diffs)"`
-	ExcludePaths []string `json:"excludePaths,omitempty" jsonschema:"Optional directory globs to skip during Git ref scans (e.g., .bin/**, **/testdata)."`
-}
-
-// DependencyChange represents a change to a dependency.
-type DependencyChange struct {
-	Name          string `json:"name"`
-	BaseVersion   string `json:"baseVersion,omitempty"`
-	TargetVersion string `json:"targetVersion,omitempty"`
-	PURL          string `json:"purl,omitempty"`
-	ChangeType    string `json:"changeType"` // "added", "removed", "upgraded", "downgraded", "updated"
-	IsDirect      bool   `json:"isDirect"`
-	Ecosystem     string `json:"ecosystem"`
-}
-
-// DiffRefsResult is the output for the diff_refs tool.
-type DiffRefsResult struct {
-	Path                 string             `json:"path,omitempty"`
-	BaseRef              string             `json:"baseRef"`
-	TargetRef            string             `json:"targetRef"`
-	BaseCommit           string             `json:"baseCommit,omitempty"`
-	TargetCommit         string             `json:"targetCommit,omitempty"`
-	Platform             string             `json:"platform,omitempty"`
-	IsContainerDiff      bool               `json:"isContainerDiff"`
-	Changes              []DependencyChange `json:"changes"`
-	AddedCount           int                `json:"addedCount"`
-	RemovedCount         int                `json:"removedCount"`
-	UpdatedCount         int                `json:"updatedCount"`
-	Vulnerabilities      []VulnExplanation  `json:"vulnerabilities,omitempty"`
-	VulnerabilitySummary map[string]int     `json:"vulnerabilitySummary,omitempty"`
-	VulnerabilityChanges []DiffVulnChange   `json:"vulnerabilityChanges,omitempty"`
-	ContainerSummary     *ContainerSummary  `json:"containerSummary,omitempty"`
-}
-
-// DiffVulnChange represents a vulnerability delta between container images.
-type DiffVulnChange struct {
-	ID            string   `json:"id"`
-	Aliases       []string `json:"aliases,omitempty"`
-	ChangeType    string   `json:"changeType"`
-	Severity      string   `json:"severity,omitempty"`
-	Package       string   `json:"package,omitempty"`
-	Ecosystem     string   `json:"ecosystem,omitempty"`
-	BaseVersion   string   `json:"baseVersion,omitempty"`
-	TargetVersion string   `json:"targetVersion,omitempty"`
-	FixedVersions []string `json:"fixedVersions,omitempty"`
-	Summary       string   `json:"summary,omitempty"`
-	Published     string   `json:"published,omitempty"`
-}
-
-// ContainerSummary provides container-specific diff totals.
-type ContainerSummary struct {
-	PackagesAdded          int  `json:"packagesAdded"`
-	PackagesRemoved        int  `json:"packagesRemoved"`
-	PackagesUpgraded       int  `json:"packagesUpgraded"`
-	PackagesDowngraded     int  `json:"packagesDowngraded"`
-	VulnerabilitiesAdded   int  `json:"vulnerabilitiesAdded"`
-	VulnerabilitiesRemoved int  `json:"vulnerabilitiesRemoved"`
-	VulnerabilitiesFixed   int  `json:"vulnerabilitiesFixed"`
-	LayersAdded            int  `json:"layersAdded"`
-	LayersRemoved          int  `json:"layersRemoved"`
-	ConfigChanged          bool `json:"configChanged"`
-}
-
 // === Tool Implementations ===
 
-func (s *Server) getServerInfo(ctx context.Context, req *mcp.CallToolRequest, args ServerInfoInput) (*mcp.CallToolResult, ServerInfoResult, error) {
-	return nil, s.serverInfo(), nil
+func (s *Server) getServerInfo(ctx context.Context, req *mcp.CallToolRequest, raw json.RawMessage) (*mcp.CallToolResult, json.RawMessage, error) {
+	if err := unmarshalMCPRequest(raw, &mcpv1.GetServerInfoRequest{}); err != nil {
+		return nil, nil, err
+	}
+	out, err := marshalMCPResult(s.serverInfo())
+	if err != nil {
+		return nil, nil, err
+	}
+	return nil, out, nil
 }
 
-func (s *Server) serverInfo() ServerInfoResult {
+// serverInfo describes the running server for the get_server_info tool and
+// the HTTP /info endpoint.
+func (s *Server) serverInfo() *mcpv1.GetServerInfoResult {
 	tools := slices.Clone(s.toolNames)
 	excludePaths := slices.Clone(s.defaultExcludePaths)
-	return ServerInfoResult{
+	return &mcpv1.GetServerInfoResult{
 		Name:                "deputy",
 		Version:             version.Value,
 		Protocol:            "mcp",
 		Description:         "Deputy MCP server for software supply chain security",
-		ProcessID:           os.Getpid(),
+		ProcessId:           int32(os.Getpid()),
 		StartedAt:           s.startedAt.Format(time.RFC3339),
-		ToolCount:           len(tools),
+		ToolCount:           int32(len(tools)),
 		Tools:               tools,
 		DefaultExcludePaths: excludePaths,
 	}
 }
 
-func (s *Server) listPolicyEntrypoints(ctx context.Context, req *mcp.CallToolRequest, args PolicyEntrypointsInput) (*mcp.CallToolResult, PolicyEntrypointsResult, error) {
+func (s *Server) listPolicyEntrypoints(ctx context.Context, req *mcp.CallToolRequest, raw json.RawMessage) (*mcp.CallToolResult, json.RawMessage, error) {
 	startTime := time.Now()
 	ctx, cancel := s.withTimeout(ctx, s.toolTimeouts.Default)
 	defer cancel()
@@ -1448,14 +1110,21 @@ func (s *Server) listPolicyEntrypoints(ctx context.Context, req *mcp.CallToolReq
 		trace.WithAttributes(otel.AttrMCPTool.String("list_policy_entrypoints")))
 	defer span.End()
 
-	category := policy.NormalizeCategory(args.Category)
+	args := &mcpv1.ListPolicyEntrypointsRequest{}
+	if err := unmarshalMCPRequest(raw, args); err != nil {
+		otel.SetSpanError(span, err)
+		otel.RecordMCPToolCall(ctx, "list_policy_entrypoints", time.Since(startTime).Seconds(), false)
+		return nil, nil, err
+	}
+
+	category := policy.NormalizeCategory(args.GetCategory())
 	logs.Debug(ctx, "MCP tool invoked", "tool", "list_policy_entrypoints", "category", category)
 
 	if s.clients.Policy == nil {
 		err := fmt.Errorf("policy service client is not configured")
 		otel.SetSpanError(span, err)
 		otel.RecordMCPToolCall(ctx, "list_policy_entrypoints", time.Since(startTime).Seconds(), false)
-		return nil, PolicyEntrypointsResult{}, err
+		return nil, nil, err
 	}
 
 	resp, err := s.clients.Policy.ListEntrypoints(ctx, connect.NewRequest(&policyv1.ListEntrypointsRequest{
@@ -1465,78 +1134,31 @@ func (s *Server) listPolicyEntrypoints(ctx context.Context, req *mcp.CallToolReq
 		err = fmt.Errorf("list policy entrypoints: %w", err)
 		otel.SetSpanError(span, err)
 		otel.RecordMCPToolCall(ctx, "list_policy_entrypoints", time.Since(startTime).Seconds(), false)
-		return nil, PolicyEntrypointsResult{}, err
+		return nil, nil, err
 	}
 
-	result := PolicyEntrypointsResult{
-		Category:    category,
-		Entrypoints: make([]PolicyEntrypointInfo, 0, len(resp.Msg.GetEntrypoints())),
+	// The result embeds the policy service's entrypoint metadata directly: the
+	// MCP wire is a thin envelope over deputy.policy.v1, not a projection.
+	result := &mcpv1.ListPolicyEntrypointsResult{
+		Category:        category,
+		Entrypoints:     resp.Msg.GetEntrypoints(),
+		EntrypointCount: int32(len(resp.Msg.GetEntrypoints())),
 	}
-	for _, entrypoint := range resp.Msg.GetEntrypoints() {
-		result.Entrypoints = append(result.Entrypoints, policyEntrypointToMCP(entrypoint))
-	}
-	result.EntrypointCount = len(result.Entrypoints)
 
-	span.SetAttributes(attribute.Int("deputy.mcp.policy_entrypoint_count", result.EntrypointCount))
+	span.SetAttributes(attribute.Int("deputy.mcp.policy_entrypoint_count", int(result.GetEntrypointCount())))
 	otel.SetSpanOK(span)
 	otel.RecordMCPToolCall(ctx, "list_policy_entrypoints", time.Since(startTime).Seconds(), true)
-	logs.Debug(ctx, "MCP tool completed", "tool", "list_policy_entrypoints", "category", category, "entrypoints", result.EntrypointCount)
+	logs.Debug(ctx, "MCP tool completed", "tool", "list_policy_entrypoints", "category", category, "entrypoints", result.GetEntrypointCount())
 
-	return nil, result, nil
+	out, err := marshalMCPResult(result)
+	if err != nil {
+		otel.SetSpanError(span, err)
+		return nil, nil, err
+	}
+	return nil, out, nil
 }
 
-// policyEntrypointToMCP converts the API policy metadata shape into the compact
-// JSON object returned by the MCP tool.
-func policyEntrypointToMCP(info *policyv1.EntrypointInfo) PolicyEntrypointInfo {
-	if info == nil {
-		return PolicyEntrypointInfo{}
-	}
-	return PolicyEntrypointInfo{
-		Name:        info.GetName(),
-		Category:    info.GetCategory(),
-		Description: info.GetDescription(),
-		Variables:   policyVariablesToMCP(info.GetVariables()),
-		Helpers:     slices.Clone(info.GetHelpers()),
-	}
-}
-
-// policyVariablesToMCP preserves variable order from the policy service so
-// required bindings appear before optional bindings in MCP responses.
-func policyVariablesToMCP(vars []*policyv1.VariableInfo) []PolicyVariableInfo {
-	out := make([]PolicyVariableInfo, 0, len(vars))
-	for _, variable := range vars {
-		if variable == nil {
-			continue
-		}
-		out = append(out, PolicyVariableInfo{
-			Name:        variable.GetName(),
-			Type:        variable.GetType(),
-			Description: variable.GetDescription(),
-			Required:    variable.GetRequired(),
-			Fields:      policyFieldsToMCP(variable.GetFields()),
-		})
-	}
-	return out
-}
-
-// policyFieldsToMCP converts notable nested variable fields for MCP clients
-// that want to guide CEL authoring without loading proto descriptors.
-func policyFieldsToMCP(fields []*policyv1.FieldInfo) []PolicyFieldInfo {
-	out := make([]PolicyFieldInfo, 0, len(fields))
-	for _, field := range fields {
-		if field == nil {
-			continue
-		}
-		out = append(out, PolicyFieldInfo{
-			Name:        field.GetName(),
-			Type:        field.GetType(),
-			Description: field.GetDescription(),
-		})
-	}
-	return out
-}
-
-func (s *Server) explainVulnerability(ctx context.Context, req *mcp.CallToolRequest, args ExplainVulnInput) (*mcp.CallToolResult, VulnExplanation, error) {
+func (s *Server) explainVulnerability(ctx context.Context, req *mcp.CallToolRequest, raw json.RawMessage) (*mcp.CallToolResult, json.RawMessage, error) {
 	startTime := time.Now()
 
 	// Apply timeout for quick operations
@@ -1547,14 +1169,21 @@ func (s *Server) explainVulnerability(ctx context.Context, req *mcp.CallToolRequ
 		trace.WithAttributes(otel.AttrMCPTool.String("explain_vulnerability")))
 	defer span.End()
 
-	logs.Debug(ctx, "MCP tool invoked", "tool", "explain_vulnerability", "vuln_id", args.ID)
+	args := &mcpv1.ExplainVulnerabilityRequest{}
+	if err := unmarshalMCPRequest(raw, args); err != nil {
+		otel.SetSpanError(span, err)
+		otel.RecordMCPToolCall(ctx, "explain_vulnerability", time.Since(startTime).Seconds(), false)
+		return nil, nil, err
+	}
 
-	vulnID := strings.TrimSpace(args.ID)
+	logs.Debug(ctx, "MCP tool invoked", "tool", "explain_vulnerability", "vuln_id", args.GetId())
+
+	vulnID := strings.TrimSpace(args.GetId())
 	if vulnID == "" {
 		err := fmt.Errorf("vulnerability ID is required")
 		otel.SetSpanError(span, err)
 		otel.RecordMCPToolCall(ctx, "explain_vulnerability", time.Since(startTime).Seconds(), false)
-		return nil, VulnExplanation{}, err
+		return nil, nil, err
 	}
 
 	span.SetAttributes(otel.AttrMCPVulnerabilityID.String(vulnID))
@@ -1570,28 +1199,31 @@ func (s *Server) explainVulnerability(ctx context.Context, req *mcp.CallToolRequ
 		otel.SetSpanError(span, err)
 		otel.RecordMCPToolCall(ctx, "explain_vulnerability", time.Since(startTime).Seconds(), false)
 		logs.Warn(ctx, "Failed to fetch vulnerability", "vuln_id", vulnID, "error", err)
-		return nil, VulnExplanation{}, err
+		return nil, nil, err
 	}
 
 	if !resp.Msg.GetFound() {
 		err = fmt.Errorf("vulnerability %s not found", vulnID)
 		otel.SetSpanError(span, err)
 		otel.RecordMCPToolCall(ctx, "explain_vulnerability", time.Since(startTime).Seconds(), false)
-		return nil, VulnExplanation{}, err
+		return nil, nil, err
 	}
 
-	// Convert proto Advisory to MCP VulnExplanation
-	advisory := resp.Msg.GetAdvisory()
-	explanation := advisoryToExplanation(advisory, referenceLimitForMCP(args.ReferenceLimit))
+	explanation := advisoryExplanationProto(resp.Msg.GetAdvisory(), referenceLimitForMCP(args.ReferenceLimit))
 
 	otel.SetSpanOK(span)
 	otel.RecordMCPToolCall(ctx, "explain_vulnerability", time.Since(startTime).Seconds(), true)
 	logs.Debug(ctx, "MCP tool completed", "tool", "explain_vulnerability", "vuln_id", vulnID)
 
-	return nil, explanation, nil
+	out, err := marshalMCPResult(explanation)
+	if err != nil {
+		otel.SetSpanError(span, err)
+		return nil, nil, err
+	}
+	return nil, out, nil
 }
 
-func (s *Server) explainVulnerabilities(ctx context.Context, req *mcp.CallToolRequest, args ExplainVulnsInput) (*mcp.CallToolResult, VulnsExplanation, error) {
+func (s *Server) explainVulnerabilities(ctx context.Context, req *mcp.CallToolRequest, raw json.RawMessage) (*mcp.CallToolResult, json.RawMessage, error) {
 	startTime := time.Now()
 
 	// Apply timeout for quick operations (scaled by count)
@@ -1602,13 +1234,20 @@ func (s *Server) explainVulnerabilities(ctx context.Context, req *mcp.CallToolRe
 		trace.WithAttributes(otel.AttrMCPTool.String("explain_vulnerabilities")))
 	defer span.End()
 
-	logs.Debug(ctx, "MCP tool invoked", "tool", "explain_vulnerabilities", "count", len(args.IDs))
+	args := &mcpv1.ExplainVulnerabilitiesRequest{}
+	if err := unmarshalMCPRequest(raw, args); err != nil {
+		otel.SetSpanError(span, err)
+		otel.RecordMCPToolCall(ctx, "explain_vulnerabilities", time.Since(startTime).Seconds(), false)
+		return nil, nil, err
+	}
 
-	ids, err := normalizeMCPVulnerabilityIDs(args.IDs)
+	logs.Debug(ctx, "MCP tool invoked", "tool", "explain_vulnerabilities", "count", len(args.GetIds()))
+
+	ids, err := normalizeMCPVulnerabilityIDs(args.GetIds())
 	if err != nil {
 		otel.SetSpanError(span, err)
 		otel.RecordMCPToolCall(ctx, "explain_vulnerabilities", time.Since(startTime).Seconds(), false)
-		return nil, VulnsExplanation{}, err
+		return nil, nil, err
 	}
 
 	span.SetAttributes(otel.AttrMCPVulnerabilityCount.Int(len(ids)))
@@ -1623,20 +1262,17 @@ func (s *Server) explainVulnerabilities(ctx context.Context, req *mcp.CallToolRe
 		otel.SetSpanError(span, err)
 		otel.RecordMCPToolCall(ctx, "explain_vulnerabilities", time.Since(startTime).Seconds(), false)
 		logs.Warn(ctx, "Failed to fetch vulnerabilities", "count", len(uniqueIDs), "error", err)
-		return nil, VulnsExplanation{}, err
+		return nil, nil, err
 	}
 
-	result := VulnsExplanation{
-		Vulnerabilities: make([]VulnExplanation, 0, len(ids)),
-		Errors:          make([]string, 0),
-	}
+	result := &mcpv1.ExplainVulnerabilitiesResult{}
 
 	advisories := resp.Msg.GetAdvisories()
 	notFound := stringSet(resp.Msg.GetNotFound())
 	errorsByID := resp.Msg.GetErrors()
 	for _, id := range ids {
 		if advisory := advisoryForMCPVulnerabilityID(advisories, id); advisory != nil {
-			result.Vulnerabilities = append(result.Vulnerabilities, advisoryToExplanation(advisory, referenceLimitForMCP(args.ReferenceLimit)))
+			result.Vulnerabilities = append(result.Vulnerabilities, advisoryExplanationProto(advisory, referenceLimitForMCP(args.ReferenceLimit)))
 			continue
 		}
 		if message, ok := errorsByID[id]; ok {
@@ -1654,7 +1290,12 @@ func (s *Server) explainVulnerabilities(ctx context.Context, req *mcp.CallToolRe
 	otel.RecordMCPToolCall(ctx, "explain_vulnerabilities", time.Since(startTime).Seconds(), true)
 	logs.Debug(ctx, "MCP tool completed", "tool", "explain_vulnerabilities", "found", len(result.Vulnerabilities), "errors", len(result.Errors))
 
-	return nil, result, nil
+	out, err := marshalMCPResult(result)
+	if err != nil {
+		otel.SetSpanError(span, err)
+		return nil, nil, err
+	}
+	return nil, out, nil
 }
 
 func normalizeMCPVulnerabilityIDs(ids []string) ([]string, error) {
@@ -1714,7 +1355,7 @@ func advisoryForMCPVulnerabilityID(advisories map[string]*vulnerabilityv1.Adviso
 	return nil
 }
 
-func (s *Server) scanPackage(ctx context.Context, req *mcp.CallToolRequest, args ScanPackageInput) (*mcp.CallToolResult, ScanResult, error) {
+func (s *Server) scanPackage(ctx context.Context, req *mcp.CallToolRequest, raw json.RawMessage) (*mcp.CallToolResult, json.RawMessage, error) {
 	startTime := time.Now()
 
 	// Apply timeout for quick operations
@@ -1725,13 +1366,20 @@ func (s *Server) scanPackage(ctx context.Context, req *mcp.CallToolRequest, args
 		trace.WithAttributes(otel.AttrMCPTool.String("scan_package")))
 	defer span.End()
 
-	logs.Debug(ctx, "MCP tool invoked", "tool", "scan_package", "package", args.Name, "version", args.Version, "ecosystem", args.Ecosystem)
+	args := &mcpv1.ScanPackageRequest{}
+	if err := unmarshalMCPRequest(raw, args); err != nil {
+		otel.SetSpanError(span, err)
+		otel.RecordMCPToolCall(ctx, "scan_package", time.Since(startTime).Seconds(), false)
+		return nil, nil, err
+	}
+
+	logs.Debug(ctx, "MCP tool invoked", "tool", "scan_package", "package", args.GetName(), "version", args.GetVersion(), "ecosystem", args.GetEcosystem())
 
 	target, err := resolveMCPScanPackageTarget(args)
 	if err != nil {
 		otel.SetSpanError(span, err)
 		otel.RecordMCPToolCall(ctx, "scan_package", time.Since(startTime).Seconds(), false)
-		return nil, ScanResult{}, err
+		return nil, nil, err
 	}
 
 	span.SetAttributes(
@@ -1756,21 +1404,20 @@ func (s *Server) scanPackage(ctx context.Context, req *mcp.CallToolRequest, args
 		otel.SetSpanError(span, err)
 		otel.RecordMCPToolCall(ctx, "scan_package", time.Since(startTime).Seconds(), false)
 		logs.Warn(ctx, "Package scan failed", "package", target.packageName, "error", err)
-		return nil, ScanResult{}, err
+		return nil, nil, err
 	}
 
-	result := ScanResult{
-		Package:         target.packageName,
-		Version:         target.version,
-		Ecosystem:       target.ecosystemName,
-		PURL:            target.purl,
-		Vulnerabilities: make([]VulnExplanation, 0),
+	result := &mcpv1.ScanPackageResult{
+		Package:   target.packageName,
+		Version:   target.version,
+		Ecosystem: target.ecosystemName,
+		Purl:      target.purl,
 	}
 
 	scanResult := internalproto.ScanningResultFromProto(resp.Msg)
 	consolidated := vulnerability.ConsolidateAll(scanResult.Findings, scanResult.Advisories)
 	for _, vuln := range consolidated.Vulnerabilities {
-		result.Vulnerabilities = append(result.Vulnerabilities, compactVulnExplanationFromConsolidated(vuln))
+		result.Vulnerabilities = append(result.Vulnerabilities, vulnExplanationProto(vuln, vulnExplanationOptions{referenceLimit: compactVulnReferenceLimit}))
 	}
 
 	result.Clean = len(result.Vulnerabilities) == 0
@@ -1778,9 +1425,14 @@ func (s *Server) scanPackage(ctx context.Context, req *mcp.CallToolRequest, args
 	span.SetAttributes(otel.AttrMCPVulnerabilityCount.Int(len(result.Vulnerabilities)))
 	otel.SetSpanOK(span)
 	otel.RecordMCPToolCall(ctx, "scan_package", time.Since(startTime).Seconds(), true)
-	logs.Debug(ctx, "MCP tool completed", "tool", "scan_package", "package", target.packageName, "vulns", len(result.Vulnerabilities), "clean", result.Clean)
+	logs.Debug(ctx, "MCP tool completed", "tool", "scan_package", "package", target.packageName, "vulns", len(result.Vulnerabilities), "clean", result.GetClean())
 
-	return nil, result, nil
+	out, err := marshalMCPResult(result)
+	if err != nil {
+		otel.SetSpanError(span, err)
+		return nil, nil, err
+	}
+	return nil, out, nil
 }
 
 func (s *Server) scanDirectory(ctx context.Context, req *mcp.CallToolRequest, raw json.RawMessage) (*mcp.CallToolResult, json.RawMessage, error) {
@@ -2084,7 +1736,7 @@ func (s *Server) generateSBOM(ctx context.Context, req *mcp.CallToolRequest, raw
 	return nil, out, nil
 }
 
-func (s *Server) getRemediation(ctx context.Context, req *mcp.CallToolRequest, args GetRemediationInput) (*mcp.CallToolResult, GetRemediationResult, error) {
+func (s *Server) getRemediation(ctx context.Context, req *mcp.CallToolRequest, raw json.RawMessage) (*mcp.CallToolResult, json.RawMessage, error) {
 	startTime := time.Now()
 
 	// Apply timeout for scan operations (remediation requires scanning)
@@ -2095,15 +1747,22 @@ func (s *Server) getRemediation(ctx context.Context, req *mcp.CallToolRequest, a
 		trace.WithAttributes(otel.AttrMCPTool.String("get_remediation")))
 	defer span.End()
 
-	logs.Debug(ctx, "MCP tool invoked", "tool", "get_remediation", "path", args.Path)
+	args := &mcpv1.GetRemediationRequest{}
+	if err := unmarshalMCPRequest(raw, args); err != nil {
+		otel.SetSpanError(span, err)
+		otel.RecordMCPToolCall(ctx, "get_remediation", time.Since(startTime).Seconds(), false)
+		return nil, nil, err
+	}
+
+	logs.Debug(ctx, "MCP tool invoked", "tool", "get_remediation", "path", args.GetPath())
 
 	// Validate path to prevent path traversal and access to sensitive directories.
-	targetPath, err := normalizeLocalPath(args.Path)
+	targetPath, err := normalizeLocalPath(args.GetPath())
 	if err != nil {
 		otel.SetSpanError(span, err)
 		otel.RecordMCPToolCall(ctx, "get_remediation", time.Since(startTime).Seconds(), false)
-		logs.Warn(ctx, "Invalid path in get_remediation", "path", args.Path, "error", err)
-		return nil, GetRemediationResult{}, err
+		logs.Warn(ctx, "Invalid path in get_remediation", "path", args.GetPath(), "error", err)
+		return nil, nil, err
 	}
 
 	span.SetAttributes(otel.AttrTargetPath.String(targetPath))
@@ -2112,9 +1771,9 @@ func (s *Server) getRemediation(ctx context.Context, req *mcp.CallToolRequest, a
 	scanReq := connect.NewRequest(&scanv1.ScanRequest{
 		Target: targetPath,
 		Options: &scanv1.ScanOptions{
-			Ref:          strings.TrimSpace(args.Ref),
-			Ecosystems:   normalizeMCPEcosystems(args.Ecosystems),
-			ExcludePaths: s.excludePaths(args.ExcludePaths),
+			Ref:          strings.TrimSpace(args.GetRef()),
+			Ecosystems:   normalizeMCPEcosystems(args.GetEcosystems()),
+			ExcludePaths: s.excludePaths(args.GetExcludePaths()),
 			TargetHint: &scanv1.TargetHint{
 				Kind: targetv1.TargetKind_TARGET_KIND_DIR,
 			},
@@ -2127,7 +1786,7 @@ func (s *Server) getRemediation(ctx context.Context, req *mcp.CallToolRequest, a
 		otel.SetSpanError(span, err)
 		otel.RecordMCPToolCall(ctx, "get_remediation", time.Since(startTime).Seconds(), false)
 		logs.Warn(ctx, "Remediation scan failed", "path", targetPath, "error", err)
-		return nil, GetRemediationResult{}, err
+		return nil, nil, err
 	}
 
 	// Convert proto response to internal types for remediation analysis
@@ -2157,17 +1816,17 @@ func (s *Server) getRemediation(ctx context.Context, req *mcp.CallToolRequest, a
 	}
 
 	ref, effectiveRef, commit := mcpTargetRef(resp.Msg.GetTarget())
-	result := GetRemediationResult{
+	result := &mcpv1.GetRemediationResult{
 		Path:                     targetPath,
 		Ref:                      ref,
 		EffectiveRef:             effectiveRef,
 		Commit:                   commit,
-		VulnerabilitiesFound:     int(scanResult.Stats.Unique),
-		RemediableCount:          remediableCount,
-		MigrationCount:           migrationCount,
-		UnfixableCount:           len(unfixable),
-		CommandCount:             len(commands),
-		Commands:                 make([]RemediationCommand, 0, len(commands)),
+		VulnerabilitiesFound:     int32(scanResult.Stats.Unique),
+		RemediableCount:          int32(remediableCount),
+		MigrationCount:           int32(migrationCount),
+		UnfixableCount:           int32(len(unfixable)),
+		CommandCount:             int32(len(commands)),
+		Commands:                 make([]*mcpv1.RemediationCommand, 0, len(commands)),
 		StdlibUpgrade:            stdlibUpgrade,
 		UnfixableVulnerabilities: unfixable,
 	}
@@ -2178,10 +1837,10 @@ func (s *Server) getRemediation(ctx context.Context, req *mcp.CallToolRequest, a
 		} else {
 			result.ManualCommandCount++
 		}
-		result.Commands = append(result.Commands, RemediationCommand{
+		result.Commands = append(result.Commands, &mcpv1.RemediationCommand{
 			Package:       cmd.Package,
 			Version:       cmd.Version,
-			PURL:          cmd.PURL,
+			Purl:          cmd.PURL,
 			TargetVersion: cmd.TargetVersion,
 			TargetModule:  cmd.TargetModule,
 			Migration:     cmd.Migration,
@@ -2196,15 +1855,20 @@ func (s *Server) getRemediation(ctx context.Context, req *mcp.CallToolRequest, a
 	}
 
 	span.SetAttributes(
-		otel.AttrMCPVulnerabilityCount.Int(result.VulnerabilitiesFound),
-		attribute.Int("deputy.mcp.remediable_count", result.RemediableCount),
-		attribute.Int("deputy.mcp.command_count", result.CommandCount),
+		otel.AttrMCPVulnerabilityCount.Int(int(result.GetVulnerabilitiesFound())),
+		attribute.Int("deputy.mcp.remediable_count", int(result.GetRemediableCount())),
+		attribute.Int("deputy.mcp.command_count", int(result.GetCommandCount())),
 	)
 	otel.SetSpanOK(span)
 	otel.RecordMCPToolCall(ctx, "get_remediation", time.Since(startTime).Seconds(), true)
-	logs.Debug(ctx, "MCP tool completed", "tool", "get_remediation", "path", targetPath, "vulns", result.VulnerabilitiesFound, "remediable", result.RemediableCount, "unfixable", result.UnfixableCount)
+	logs.Debug(ctx, "MCP tool completed", "tool", "get_remediation", "path", targetPath, "vulns", result.GetVulnerabilitiesFound(), "remediable", result.GetRemediableCount(), "unfixable", result.GetUnfixableCount())
 
-	return nil, result, nil
+	out, err := marshalMCPResult(result)
+	if err != nil {
+		otel.SetSpanError(span, err)
+		return nil, nil, err
+	}
+	return nil, out, nil
 }
 
 func (s *Server) analyzeDependencyGraph(ctx context.Context, req *mcp.CallToolRequest, raw json.RawMessage) (*mcp.CallToolResult, json.RawMessage, error) {
@@ -3030,7 +2694,7 @@ func (s *Server) scanContainer(ctx context.Context, req *mcp.CallToolRequest, ra
 	return nil, out, nil
 }
 
-func (s *Server) diffRefs(ctx context.Context, req *mcp.CallToolRequest, args DiffRefsInput) (*mcp.CallToolResult, DiffRefsResult, error) {
+func (s *Server) diffRefs(ctx context.Context, req *mcp.CallToolRequest, raw json.RawMessage) (*mcp.CallToolResult, json.RawMessage, error) {
 	startTime := time.Now()
 
 	// Apply timeout for scan operations (diff involves scanning both refs)
@@ -3041,40 +2705,34 @@ func (s *Server) diffRefs(ctx context.Context, req *mcp.CallToolRequest, args Di
 		trace.WithAttributes(otel.AttrMCPTool.String("diff_refs")))
 	defer span.End()
 
-	logs.Debug(ctx, "MCP tool invoked", "tool", "diff_refs", "base_ref", args.BaseRef, "target_ref", args.TargetRef)
-
-	args.Path = strings.TrimSpace(args.Path)
-	args.BaseRef = strings.TrimSpace(args.BaseRef)
-	args.TargetRef = strings.TrimSpace(args.TargetRef)
-	args.Platform = strings.TrimSpace(args.Platform)
-
-	if args.BaseRef == "" {
-		err := fmt.Errorf("baseRef is required")
+	args := &mcpv1.DiffRefsRequest{}
+	if err := unmarshalMCPRequest(raw, args); err != nil {
 		otel.SetSpanError(span, err)
 		otel.RecordMCPToolCall(ctx, "diff_refs", time.Since(startTime).Seconds(), false)
-		return nil, DiffRefsResult{}, err
+		return nil, nil, err
 	}
-	if args.TargetRef == "" {
-		err := fmt.Errorf("targetRef is required")
-		otel.SetSpanError(span, err)
-		otel.RecordMCPToolCall(ctx, "diff_refs", time.Since(startTime).Seconds(), false)
-		return nil, DiffRefsResult{}, err
-	}
+
+	logs.Debug(ctx, "MCP tool invoked", "tool", "diff_refs", "base_ref", args.GetBaseRef(), "target_ref", args.GetTargetRef())
+
+	args.Path = strings.TrimSpace(args.GetPath())
+	args.BaseRef = strings.TrimSpace(args.GetBaseRef())
+	args.TargetRef = strings.TrimSpace(args.GetTargetRef())
+	args.Platform = strings.TrimSpace(args.GetPlatform())
 
 	span.SetAttributes(
-		otel.AttrMCPBaseRef.String(args.BaseRef),
-		otel.AttrMCPTargetRef.String(args.TargetRef),
+		otel.AttrMCPBaseRef.String(args.GetBaseRef()),
+		otel.AttrMCPTargetRef.String(args.GetTargetRef()),
 	)
 
-	// Validate the path before routing. Routing calls os.Stat on args.Path to
+	// Validate the path before routing. Routing calls os.Stat on the path to
 	// detect a Git working tree, so validate first to avoid probing the
 	// filesystem with an unvalidated (e.g. traversal) path.
-	if strings.TrimSpace(args.Path) != "" {
-		if _, err := normalizeLocalPath(args.Path); err != nil {
+	if args.GetPath() != "" {
+		if _, err := normalizeLocalPath(args.GetPath()); err != nil {
 			err = fmt.Errorf("invalid path: %w", err)
 			otel.SetSpanError(span, err)
 			otel.RecordMCPToolCall(ctx, "diff_refs", time.Since(startTime).Seconds(), false)
-			return nil, DiffRefsResult{}, err
+			return nil, nil, err
 		}
 	}
 
@@ -3082,43 +2740,48 @@ func (s *Server) diffRefs(ctx context.Context, req *mcp.CallToolRequest, args Di
 		err := fmt.Errorf("baseRef and targetRef must both be Git refs or both be container image refs")
 		otel.SetSpanError(span, err)
 		otel.RecordMCPToolCall(ctx, "diff_refs", time.Since(startTime).Seconds(), false)
-		return nil, DiffRefsResult{}, err
+		return nil, nil, err
 	}
 
 	// Check if this looks like a container image diff.
 	isContainerDiff := isContainerDiffInput(args)
 
-	var result DiffRefsResult
+	var result *mcpv1.DiffRefsResult
 	var err error
 	if isContainerDiff {
-		_, result, err = s.diffContainerImages(ctx, args)
+		result, err = s.diffContainerImages(ctx, args)
 	} else {
-		_, result, err = s.diffGitRefs(ctx, args)
+		result, err = s.diffGitRefs(ctx, args)
 	}
 
 	if err != nil {
 		otel.SetSpanError(span, err)
 		otel.RecordMCPToolCall(ctx, "diff_refs", time.Since(startTime).Seconds(), false)
-		logs.Warn(ctx, "Diff refs failed", "base_ref", args.BaseRef, "target_ref", args.TargetRef, "error", err)
-		return nil, DiffRefsResult{}, err
+		logs.Warn(ctx, "Diff refs failed", "base_ref", args.GetBaseRef(), "target_ref", args.GetTargetRef(), "error", err)
+		return nil, nil, err
 	}
 
 	span.SetAttributes(
-		otel.AttrMCPChangeCount.Int(len(result.Changes)),
+		otel.AttrMCPChangeCount.Int(len(result.GetChanges())),
 		attribute.Bool("deputy.mcp.is_container_diff", isContainerDiff),
 	)
 	otel.SetSpanOK(span)
 	otel.RecordMCPToolCall(ctx, "diff_refs", time.Since(startTime).Seconds(), true)
-	logs.Debug(ctx, "MCP tool completed", "tool", "diff_refs", "base_ref", args.BaseRef, "target_ref", args.TargetRef, "changes", len(result.Changes), "is_container", isContainerDiff)
+	logs.Debug(ctx, "MCP tool completed", "tool", "diff_refs", "base_ref", args.GetBaseRef(), "target_ref", args.GetTargetRef(), "changes", len(result.GetChanges()), "is_container", isContainerDiff)
 
-	return nil, result, nil
+	out, err := marshalMCPResult(result)
+	if err != nil {
+		otel.SetSpanError(span, err)
+		return nil, nil, err
+	}
+	return nil, out, nil
 }
 
 // diffContainerImages compares two container images.
-func (s *Server) diffContainerImages(ctx context.Context, args DiffRefsInput) (*mcp.CallToolResult, DiffRefsResult, error) {
-	baseRef := strings.TrimSpace(args.BaseRef)
-	targetRef := strings.TrimSpace(args.TargetRef)
-	platform := strings.TrimSpace(args.Platform)
+func (s *Server) diffContainerImages(ctx context.Context, args *mcpv1.DiffRefsRequest) (*mcpv1.DiffRefsResult, error) {
+	baseRef := strings.TrimSpace(args.GetBaseRef())
+	targetRef := strings.TrimSpace(args.GetTargetRef())
+	platform := strings.TrimSpace(args.GetPlatform())
 
 	// Scan base image
 	baseReq := connect.NewRequest(&scanv1.ScanRequest{
@@ -3132,7 +2795,7 @@ func (s *Server) diffContainerImages(ctx context.Context, args DiffRefsInput) (*
 	})
 	baseResp, err := s.clients.Vulns.Scan(ctx, baseReq)
 	if err != nil {
-		return nil, DiffRefsResult{}, fmt.Errorf("failed to scan base image %s: %w", baseRef, err)
+		return nil, fmt.Errorf("failed to scan base image %s: %w", baseRef, err)
 	}
 
 	// Scan target image
@@ -3147,19 +2810,17 @@ func (s *Server) diffContainerImages(ctx context.Context, args DiffRefsInput) (*
 	})
 	targetResp, err := s.clients.Vulns.Scan(ctx, targetReq)
 	if err != nil {
-		return nil, DiffRefsResult{}, fmt.Errorf("failed to scan target image %s: %w", targetRef, err)
+		return nil, fmt.Errorf("failed to scan target image %s: %w", targetRef, err)
 	}
 
 	baseScan := baseResp.Msg
 	targetScan := targetResp.Msg
 
-	result := DiffRefsResult{
-		BaseRef:              baseRef,
-		TargetRef:            targetRef,
-		Platform:             platform,
-		IsContainerDiff:      true,
-		Changes:              make([]DependencyChange, 0),
-		VulnerabilitySummary: make(map[string]int),
+	result := &mcpv1.DiffRefsResult{
+		BaseRef:         baseRef,
+		TargetRef:       targetRef,
+		Platform:        platform,
+		IsContainerDiff: true,
 	}
 
 	// Build package maps for comparison
@@ -3179,10 +2840,10 @@ func (s *Server) diffContainerImages(ctx context.Context, args DiffRefsInput) (*
 	for key, targetPkg := range targetPackages {
 		basePkg, exists := basePackages[key]
 		if !exists {
-			result.Changes = append(result.Changes, DependencyChange{
+			result.Changes = append(result.Changes, &mcpv1.DependencyChange{
 				Name:          targetPkg.Name,
 				TargetVersion: targetPkg.Version,
-				PURL:          targetPkg.PURL,
+				Purl:          targetPkg.PURL,
 				ChangeType:    "added",
 				IsDirect:      targetPkg.Direct,
 				Ecosystem:     targetPkg.Ecosystem,
@@ -3195,11 +2856,11 @@ func (s *Server) diffContainerImages(ctx context.Context, args DiffRefsInput) (*
 			} else {
 				changeType = "downgraded"
 			}
-			result.Changes = append(result.Changes, DependencyChange{
+			result.Changes = append(result.Changes, &mcpv1.DependencyChange{
 				Name:          targetPkg.Name,
 				BaseVersion:   basePkg.Version,
 				TargetVersion: targetPkg.Version,
-				PURL:          targetPkg.PURL,
+				Purl:          targetPkg.PURL,
 				ChangeType:    changeType,
 				IsDirect:      targetPkg.Direct,
 				Ecosystem:     targetPkg.Ecosystem,
@@ -3211,10 +2872,10 @@ func (s *Server) diffContainerImages(ctx context.Context, args DiffRefsInput) (*
 	// Find removed packages
 	for key, basePkg := range basePackages {
 		if _, exists := targetPackages[key]; !exists {
-			result.Changes = append(result.Changes, DependencyChange{
+			result.Changes = append(result.Changes, &mcpv1.DependencyChange{
 				Name:        basePkg.Name,
 				BaseVersion: basePkg.Version,
-				PURL:        basePkg.PURL,
+				Purl:        basePkg.PURL,
 				ChangeType:  "removed",
 				IsDirect:    basePkg.Direct,
 				Ecosystem:   basePkg.Ecosystem,
@@ -3229,31 +2890,31 @@ func (s *Server) diffContainerImages(ctx context.Context, args DiffRefsInput) (*
 	targetInternal := internalproto.ScanningResultFromProto(targetScan)
 	if baseInternal != nil && targetInternal != nil {
 		containerDiff := internalproto.BuildContainerDiffResponseFromScanning(baseInternal, targetInternal)
-		result.VulnerabilityChanges = containerVulnerabilityChangesToMCP(containerDiff.GetVulnerabilityChanges())
-		result.ContainerSummary = containerSummaryToMCP(containerDiff.GetSummary())
+		result.VulnerabilityChanges = containerVulnerabilityChangesProto(containerDiff.GetVulnerabilityChanges())
+		result.ContainerSummary = containerSummaryProto(containerDiff.GetSummary())
 	}
 
-	return nil, result, nil
+	return result, nil
 }
 
 // diffGitRefs compares dependencies between Git references.
-func (s *Server) diffGitRefs(ctx context.Context, args DiffRefsInput) (*mcp.CallToolResult, DiffRefsResult, error) {
-	if args.Path == "" {
-		return nil, DiffRefsResult{}, fmt.Errorf("path is required for Git ref comparison")
+func (s *Server) diffGitRefs(ctx context.Context, args *mcpv1.DiffRefsRequest) (*mcpv1.DiffRefsResult, error) {
+	if args.GetPath() == "" {
+		return nil, fmt.Errorf("path is required for Git ref comparison")
 	}
-	targetPath, err := normalizeLocalPath(args.Path)
+	targetPath, err := normalizeLocalPath(args.GetPath())
 	if err != nil {
-		return nil, DiffRefsResult{}, err
+		return nil, err
 	}
-	baseRef := strings.TrimSpace(args.BaseRef)
-	targetRef := strings.TrimSpace(args.TargetRef)
+	baseRef := strings.TrimSpace(args.GetBaseRef())
+	targetRef := strings.TrimSpace(args.GetTargetRef())
 
 	// Scan base ref
 	baseReq := connect.NewRequest(&scanv1.ScanRequest{
 		Target: targetPath,
 		Options: &scanv1.ScanOptions{
-			Ecosystems:   normalizeMCPEcosystems(args.Ecosystems),
-			ExcludePaths: s.excludePaths(args.ExcludePaths),
+			Ecosystems:   normalizeMCPEcosystems(args.GetEcosystems()),
+			ExcludePaths: s.excludePaths(args.GetExcludePaths()),
 			Ref:          baseRef,
 			TargetHint: &scanv1.TargetHint{
 				Kind: targetv1.TargetKind_TARGET_KIND_GIT,
@@ -3262,15 +2923,15 @@ func (s *Server) diffGitRefs(ctx context.Context, args DiffRefsInput) (*mcp.Call
 	})
 	baseResp, err := s.clients.Vulns.Scan(ctx, baseReq)
 	if err != nil {
-		return nil, DiffRefsResult{}, fmt.Errorf("failed to scan base ref %s: %w", baseRef, err)
+		return nil, fmt.Errorf("failed to scan base ref %s: %w", baseRef, err)
 	}
 
 	// Scan target ref
 	targetReq := connect.NewRequest(&scanv1.ScanRequest{
 		Target: targetPath,
 		Options: &scanv1.ScanOptions{
-			Ecosystems:   normalizeMCPEcosystems(args.Ecosystems),
-			ExcludePaths: s.excludePaths(args.ExcludePaths),
+			Ecosystems:   normalizeMCPEcosystems(args.GetEcosystems()),
+			ExcludePaths: s.excludePaths(args.GetExcludePaths()),
 			Ref:          targetRef,
 			TargetHint: &scanv1.TargetHint{
 				Kind: targetv1.TargetKind_TARGET_KIND_GIT,
@@ -3279,21 +2940,18 @@ func (s *Server) diffGitRefs(ctx context.Context, args DiffRefsInput) (*mcp.Call
 	})
 	targetResp, err := s.clients.Vulns.Scan(ctx, targetReq)
 	if err != nil {
-		return nil, DiffRefsResult{}, fmt.Errorf("failed to scan target ref %s: %w", targetRef, err)
+		return nil, fmt.Errorf("failed to scan target ref %s: %w", targetRef, err)
 	}
 
 	baseScan := baseResp.Msg
 	targetScan := targetResp.Msg
 
-	result := DiffRefsResult{
-		Path:                 targetPath,
-		BaseRef:              baseRef,
-		TargetRef:            targetRef,
-		BaseCommit:           strings.TrimSpace(baseScan.GetTarget().GetCommitHash()),
-		TargetCommit:         strings.TrimSpace(targetScan.GetTarget().GetCommitHash()),
-		IsContainerDiff:      false,
-		Changes:              make([]DependencyChange, 0),
-		VulnerabilitySummary: make(map[string]int),
+	result := &mcpv1.DiffRefsResult{
+		Path:         targetPath,
+		BaseRef:      baseRef,
+		TargetRef:    targetRef,
+		BaseCommit:   strings.TrimSpace(baseScan.GetTarget().GetCommitHash()),
+		TargetCommit: strings.TrimSpace(targetScan.GetTarget().GetCommitHash()),
 	}
 
 	// Build package maps for comparison
@@ -3313,10 +2971,10 @@ func (s *Server) diffGitRefs(ctx context.Context, args DiffRefsInput) (*mcp.Call
 	for key, targetPkg := range targetPackages {
 		basePkg, exists := basePackages[key]
 		if !exists {
-			result.Changes = append(result.Changes, DependencyChange{
+			result.Changes = append(result.Changes, &mcpv1.DependencyChange{
 				Name:          targetPkg.Name,
 				TargetVersion: targetPkg.Version,
-				PURL:          targetPkg.PURL,
+				Purl:          targetPkg.PURL,
 				ChangeType:    "added",
 				IsDirect:      targetPkg.Direct,
 				Ecosystem:     targetPkg.Ecosystem,
@@ -3329,11 +2987,11 @@ func (s *Server) diffGitRefs(ctx context.Context, args DiffRefsInput) (*mcp.Call
 			} else {
 				changeType = "downgraded"
 			}
-			result.Changes = append(result.Changes, DependencyChange{
+			result.Changes = append(result.Changes, &mcpv1.DependencyChange{
 				Name:          targetPkg.Name,
 				BaseVersion:   basePkg.Version,
 				TargetVersion: targetPkg.Version,
-				PURL:          targetPkg.PURL,
+				Purl:          targetPkg.PURL,
 				ChangeType:    changeType,
 				IsDirect:      targetPkg.Direct,
 				Ecosystem:     targetPkg.Ecosystem,
@@ -3345,10 +3003,10 @@ func (s *Server) diffGitRefs(ctx context.Context, args DiffRefsInput) (*mcp.Call
 	// Find removed packages
 	for key, basePkg := range basePackages {
 		if _, exists := targetPackages[key]; !exists {
-			result.Changes = append(result.Changes, DependencyChange{
+			result.Changes = append(result.Changes, &mcpv1.DependencyChange{
 				Name:        basePkg.Name,
 				BaseVersion: basePkg.Version,
-				PURL:        basePkg.PURL,
+				Purl:        basePkg.PURL,
 				ChangeType:  "removed",
 				IsDirect:    basePkg.Direct,
 				Ecosystem:   basePkg.Ecosystem,
@@ -3360,7 +3018,7 @@ func (s *Server) diffGitRefs(ctx context.Context, args DiffRefsInput) (*mcp.Call
 	result.VulnerabilitySummary, result.Vulnerabilities = diffTargetVulnerabilities(targetScan)
 	sortDependencyChanges(result.Changes)
 
-	return nil, result, nil
+	return result, nil
 }
 
 var mcpImageSchemes = map[string]struct{}{
@@ -3390,25 +3048,25 @@ var mcpCommonGitRefNames = map[string]struct{}{
 }
 
 // isContainerDiffInput returns true when diff_refs should compare container images.
-func isContainerDiffInput(args DiffRefsInput) bool {
-	if isGitRepoPath(args.Path) {
-		return looksLikeExplicitContainerImage(args.BaseRef) && looksLikeExplicitContainerImage(args.TargetRef)
+func isContainerDiffInput(args *mcpv1.DiffRefsRequest) bool {
+	if isGitRepoPath(args.GetPath()) {
+		return looksLikeExplicitContainerImage(args.GetBaseRef()) && looksLikeExplicitContainerImage(args.GetTargetRef())
 	}
-	return isContainerImageRef(args.BaseRef) && isContainerImageRef(args.TargetRef)
+	return isContainerImageRef(args.GetBaseRef()) && isContainerImageRef(args.GetTargetRef())
 }
 
 // isMixedContainerRefInput reports whether diff_refs was given one container
 // image ref and one Git ref, an unsupported combination the caller rejects.
-func isMixedContainerRefInput(args DiffRefsInput) bool {
-	baseImage := isContainerImageRef(args.BaseRef)
-	targetImage := isContainerImageRef(args.TargetRef)
+func isMixedContainerRefInput(args *mcpv1.DiffRefsRequest) bool {
+	baseImage := isContainerImageRef(args.GetBaseRef())
+	targetImage := isContainerImageRef(args.GetTargetRef())
 	if baseImage == targetImage {
 		return false
 	}
-	if strings.TrimSpace(args.Path) == "" {
+	if strings.TrimSpace(args.GetPath()) == "" {
 		return true
 	}
-	return isExplicitContainerSignal(args.BaseRef) || isExplicitContainerSignal(args.TargetRef)
+	return isExplicitContainerSignal(args.GetBaseRef()) || isExplicitContainerSignal(args.GetTargetRef())
 }
 
 // isGitRepoPath reports whether path is a Git working tree (contains a .git
@@ -3577,33 +3235,35 @@ type PackageInfo struct {
 	Direct    bool
 }
 
-func sortDependencyChanges(changes []DependencyChange) {
+// sortDependencyChanges orders diff changes deterministically: direct
+// dependencies first, then by change kind, ecosystem, name, and version.
+func sortDependencyChanges(changes []*mcpv1.DependencyChange) {
 	slices.SortFunc(changes, compareDependencyChanges)
 }
 
-func compareDependencyChanges(a, b DependencyChange) int {
-	if a.IsDirect != b.IsDirect {
-		if a.IsDirect {
+func compareDependencyChanges(a, b *mcpv1.DependencyChange) int {
+	if a.GetIsDirect() != b.GetIsDirect() {
+		if a.GetIsDirect() {
 			return -1
 		}
 		return 1
 	}
-	if c := cmp.Compare(changeTypeRank(a.ChangeType), changeTypeRank(b.ChangeType)); c != 0 {
+	if c := cmp.Compare(changeTypeRank(a.GetChangeType()), changeTypeRank(b.GetChangeType())); c != 0 {
 		return c
 	}
-	if c := cmp.Compare(a.Ecosystem, b.Ecosystem); c != 0 {
+	if c := cmp.Compare(a.GetEcosystem(), b.GetEcosystem()); c != 0 {
 		return c
 	}
-	if c := cmp.Compare(a.Name, b.Name); c != 0 {
+	if c := cmp.Compare(a.GetName(), b.GetName()); c != 0 {
 		return c
 	}
-	if c := cmp.Compare(a.PURL, b.PURL); c != 0 {
+	if c := cmp.Compare(a.GetPurl(), b.GetPurl()); c != 0 {
 		return c
 	}
-	if c := cmp.Compare(a.BaseVersion, b.BaseVersion); c != 0 {
+	if c := cmp.Compare(a.GetBaseVersion(), b.GetBaseVersion()); c != 0 {
 		return c
 	}
-	return cmp.Compare(a.TargetVersion, b.TargetVersion)
+	return cmp.Compare(a.GetTargetVersion(), b.GetTargetVersion())
 }
 
 func changeTypeRank(changeType string) int {
@@ -3632,8 +3292,10 @@ func diffPackageKey(purl, ecosystemName, packageName string) string {
 	return fmt.Sprintf("package:%s/%s", normalizeMCPPackageEcosystem(ecosystemName), strings.TrimSpace(packageName))
 }
 
-func diffTargetVulnerabilities(scanResult *scanv1.ScanResponse) (map[string]int, []VulnExplanation) {
-	summary := map[string]int{
+// diffTargetVulnerabilities summarizes the target ref's findings per severity
+// level and projects each finding into its compact mcp.v1 explanation.
+func diffTargetVulnerabilities(scanResult *scanv1.ScanResponse) (map[string]int32, []*mcpv1.VulnExplanation) {
+	summary := map[string]int32{
 		"critical": 0,
 		"high":     0,
 		"medium":   0,
@@ -3646,31 +3308,33 @@ func diffTargetVulnerabilities(scanResult *scanv1.ScanResponse) (map[string]int,
 	}
 
 	consolidated := vulnerability.ConsolidateAll(internalScanResult.Findings, internalScanResult.Advisories)
-	summary["critical"] = int(consolidated.Stats.GetCritical())
-	summary["high"] = int(consolidated.Stats.GetHigh())
-	summary["medium"] = int(consolidated.Stats.GetMedium())
-	summary["low"] = int(consolidated.Stats.GetLow())
-	summary["unknown"] = int(consolidated.Stats.GetUnknown())
+	summary["critical"] = consolidated.Stats.GetCritical()
+	summary["high"] = consolidated.Stats.GetHigh()
+	summary["medium"] = consolidated.Stats.GetMedium()
+	summary["low"] = consolidated.Stats.GetLow()
+	summary["unknown"] = consolidated.Stats.GetUnknown()
 
-	vulns := make([]VulnExplanation, 0, len(consolidated.Vulnerabilities))
+	vulns := make([]*mcpv1.VulnExplanation, 0, len(consolidated.Vulnerabilities))
 	for _, vuln := range consolidated.Vulnerabilities {
-		vulns = append(vulns, compactVulnExplanationFromConsolidated(vuln))
+		vulns = append(vulns, vulnExplanationProto(vuln, vulnExplanationOptions{referenceLimit: compactVulnReferenceLimit}))
 	}
 
 	return summary, vulns
 }
 
-func containerVulnerabilityChangesToMCP(changes []*diffv1.ContainerVulnerabilityChange) []DiffVulnChange {
+// containerVulnerabilityChangesProto converts container diff vulnerability
+// deltas to the mcp.v1 shape.
+func containerVulnerabilityChangesProto(changes []*diffv1.ContainerVulnerabilityChange) []*mcpv1.DiffVulnChange {
 	if len(changes) == 0 {
 		return nil
 	}
-	out := make([]DiffVulnChange, 0, len(changes))
+	out := make([]*mcpv1.DiffVulnChange, 0, len(changes))
 	for _, change := range changes {
 		if change == nil {
 			continue
 		}
-		out = append(out, DiffVulnChange{
-			ID:            change.GetId(),
+		out = append(out, &mcpv1.DiffVulnChange{
+			Id:            change.GetId(),
 			Aliases:       slices.Clone(change.GetAliases()),
 			ChangeType:    vulnerabilityChangeKindString(change.GetChangeKind()),
 			Severity:      severityStringForMCP(change.GetSeverity(), change.GetSeverityType()),
@@ -3689,20 +3353,21 @@ func containerVulnerabilityChangesToMCP(changes []*diffv1.ContainerVulnerability
 	return out
 }
 
-func containerSummaryToMCP(summary *diffv1.ContainerDiffSummary) *ContainerSummary {
+// containerSummaryProto converts container diff totals to the mcp.v1 shape.
+func containerSummaryProto(summary *diffv1.ContainerDiffSummary) *mcpv1.ContainerSummary {
 	if summary == nil {
 		return nil
 	}
-	return &ContainerSummary{
-		PackagesAdded:          int(summary.GetPackagesAdded()),
-		PackagesRemoved:        int(summary.GetPackagesRemoved()),
-		PackagesUpgraded:       int(summary.GetPackagesUpgraded()),
-		PackagesDowngraded:     int(summary.GetPackagesDowngraded()),
-		VulnerabilitiesAdded:   int(summary.GetVulnerabilitiesAdded()),
-		VulnerabilitiesRemoved: int(summary.GetVulnerabilitiesRemoved()),
-		VulnerabilitiesFixed:   int(summary.GetVulnerabilitiesFixed()),
-		LayersAdded:            int(summary.GetLayersAdded()),
-		LayersRemoved:          int(summary.GetLayersRemoved()),
+	return &mcpv1.ContainerSummary{
+		PackagesAdded:          summary.GetPackagesAdded(),
+		PackagesRemoved:        summary.GetPackagesRemoved(),
+		PackagesUpgraded:       summary.GetPackagesUpgraded(),
+		PackagesDowngraded:     summary.GetPackagesDowngraded(),
+		VulnerabilitiesAdded:   summary.GetVulnerabilitiesAdded(),
+		VulnerabilitiesRemoved: summary.GetVulnerabilitiesRemoved(),
+		VulnerabilitiesFixed:   summary.GetVulnerabilitiesFixed(),
+		LayersAdded:            summary.GetLayersAdded(),
+		LayersRemoved:          summary.GetLayersRemoved(),
 		ConfigChanged:          summary.GetConfigChanged(),
 	}
 }
@@ -3752,39 +3417,6 @@ type vulnExplanationOptions struct {
 	referenceLimit int
 }
 
-func compactVulnExplanationFromConsolidated(v vulnerability.Consolidated) VulnExplanation {
-	return vulnExplanationFromConsolidated(v, vulnExplanationOptions{
-		referenceLimit: compactVulnReferenceLimit,
-	})
-}
-
-func vulnExplanationFromConsolidated(v vulnerability.Consolidated, opts vulnExplanationOptions) VulnExplanation {
-	refs, truncated := referencesForMCP(v.References, opts.referenceLimit)
-	explanation := VulnExplanation{
-		ID:            v.PrimaryID,
-		Aliases:       stringsForMCP(v.SecondaryIDs),
-		Summary:       v.Summary,
-		Kind:          mcpFindingKind(v.Kind),
-		Severity:      severityStringForMCP(v.Severity, v.SeverityType),
-		SeverityType:  strings.TrimSpace(v.SeverityType),
-		Sources:       stringsForMCP(v.Sources),
-		FixedVersions: stringsForMCP(v.FixedVersions),
-		PackageFixes:  packageFixesToMCP(v.PackageFixes),
-		ResolvedFix:   fixVerdictToMCP(v.Fix),
-		References:    refs,
-		Published:     v.Published,
-		Modified:      v.Modified,
-	}
-	if opts.includeDetails {
-		explanation.Details = v.Details
-	}
-	if truncated {
-		explanation.ReferenceCount = len(v.References)
-		explanation.ReferencesTruncated = true
-	}
-	return explanation
-}
-
 // mcpFindingKind renders a FindingKind for agent output. The default
 // (unspecified) is treated as a vulnerability and rendered as empty so results
 // stay compact for the common case.
@@ -3823,21 +3455,6 @@ func referencesForMCP(values []string, limit int) ([]string, bool) {
 	return refs[:limit], true
 }
 
-func packageFixesToMCP(fixes []*vulnerabilityv1.PackageFix) []VulnPackageFix {
-	out := make([]VulnPackageFix, 0, len(fixes))
-	for _, fix := range fixes {
-		if fix == nil {
-			continue
-		}
-		out = append(out, VulnPackageFix{
-			Module:        fix.GetModule(),
-			Ecosystem:     mcpOutputEcosystem(fix.GetEcosystem()),
-			FixedVersions: stringsForMCP(fix.GetFixedVersions()),
-		})
-	}
-	return out
-}
-
 func stringsForMCP(values []string) []string {
 	if len(values) == 0 {
 		return []string{}
@@ -3845,11 +3462,13 @@ func stringsForMCP(values []string) []string {
 	return slices.Clone(values)
 }
 
-func referenceLimitForMCP(limit *int) int {
+// referenceLimitForMCP resolves the optional referenceLimit input: absent
+// means all references, mirroring the field's documented semantics.
+func referenceLimitForMCP(limit *int32) int {
 	if limit == nil {
 		return allVulnReferences
 	}
-	return *limit
+	return int(*limit)
 }
 
 func protoSeverityStringForMCP(sev *vulnerabilityv1.Severity) string {
@@ -3865,44 +3484,6 @@ func protoSeverityStringForMCP(sev *vulnerabilityv1.Severity) string {
 func severityStringForMCP(raw, rawType string) string {
 	sev := vulnseverity.FromRaw(raw, rawType)
 	return internalproto.SeverityLevelString(sev.GetLevel())
-}
-
-func fixVerdictToMCP(v *vulnerability.FixVerdict) *VulnFixVerdict {
-	if v == nil || v.Status == vulnerability.FixStatusUnknown {
-		return nil
-	}
-	return &VulnFixVerdict{
-		Status:       fixStatusString(v.Status),
-		Version:      v.Version,
-		TargetModule: v.TargetModule,
-		Claimed:      v.Claimed,
-	}
-}
-
-func protoFixVerdictToMCP(v *vulnerabilityv1.FixVerdict) *VulnFixVerdict {
-	if v == nil || v.GetStatus() == vulnerabilityv1.FixVerdict_STATUS_UNSPECIFIED {
-		return nil
-	}
-	return &VulnFixVerdict{
-		Status:       protoFixStatusString(v.GetStatus()),
-		Version:      v.GetVersion(),
-		TargetModule: v.GetTargetModule(),
-		Claimed:      v.GetClaimed(),
-	}
-}
-
-func remediationDisposition(v vulnerability.Consolidated) (remediable, migration bool) {
-	if v.Fix != nil {
-		switch v.Fix.Status {
-		case vulnerability.FixStatusInPlace, vulnerability.FixStatusUnverified:
-			return v.Fix.Version != "", false
-		case vulnerability.FixStatusMigration:
-			return v.Fix.Version != "" && v.Fix.TargetModule != "", true
-		default:
-			return false, false
-		}
-	}
-	return vulnerability.FindBestFixedVersion(v.FixedVersions, v.Version) != "", false
 }
 
 func fixStatusString(status vulnerability.FixStatus) string {
@@ -3935,49 +3516,9 @@ func protoFixStatusString(status vulnerabilityv1.FixVerdict_Status) string {
 	}
 }
 
-// advisoryToExplanation converts a proto Advisory to the MCP VulnExplanation type.
-func advisoryToExplanation(advisory *vulnerabilityv1.Advisory, referenceLimit int) VulnExplanation {
-	if advisory == nil {
-		return VulnExplanation{
-			Aliases:       []string{},
-			Severity:      "UNKNOWN",
-			FixedVersions: []string{},
-			PackageFixes:  []VulnPackageFix{},
-			References:    []string{},
-		}
-	}
-
-	refs, truncated := referencesForMCP(advisory.GetReferences(), referenceLimit)
-	explanation := VulnExplanation{
-		ID:            advisory.GetId(),
-		Aliases:       stringsForMCP(advisory.GetAliases()),
-		Summary:       advisory.GetSummary(),
-		Details:       advisory.GetDetails(),
-		FixedVersions: stringsForMCP(advisory.GetFixedVersions()),
-		PackageFixes:  packageFixesToMCP(advisory.GetPackageFixes()),
-		ResolvedFix:   protoFixVerdictToMCP(advisory.GetResolvedFix()),
-		References:    refs,
-	}
-	if truncated {
-		explanation.ReferenceCount = len(advisory.GetReferences())
-		explanation.ReferencesTruncated = true
-	}
-
-	explanation.Severity = protoSeverityStringForMCP(advisory.GetSeverity())
-
-	// Format timestamps
-	if advisory.GetPublished() != nil {
-		explanation.Published = advisory.GetPublished().AsTime().Format(time.RFC3339)
-	}
-	if advisory.GetModified() != nil {
-		explanation.Modified = advisory.GetModified().AsTime().Format(time.RFC3339)
-	}
-
-	return explanation
-}
-
 // graphPathProto converts a graph path to its mcp.v1 shape: display names,
-// structured node details, and the node count as depth.
+// structured node details, and the edge count as depth (a single-node path
+// has depth 0).
 func graphPathProto(path graph.Path) *mcpv1.GraphPath {
 	return &mcpv1.GraphPath{
 		Nodes:       pathToStrings(path),

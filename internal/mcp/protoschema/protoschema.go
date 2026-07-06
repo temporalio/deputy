@@ -114,11 +114,16 @@ func fieldSchema(fd protoreflect.FieldDescriptor, opts Options, visiting map[pro
 	}
 	if fd.IsList() {
 		// Per-item constraints live under repeated.items in buf.validate.
-		item, err := scalarOrMessageSchema(fd, fieldRules(fd).GetRepeated().GetItems(), opts, visiting)
+		repeated := fieldRules(fd).GetRepeated()
+		item, err := scalarOrMessageSchema(fd, repeated.GetItems(), opts, visiting)
 		if err != nil {
 			return nil, fmt.Errorf("repeated field %s: %w", fd.FullName(), err)
 		}
-		return &jsonschema.Schema{Type: "array", Items: item}, nil
+		s := &jsonschema.Schema{Type: "array", Items: item}
+		if min := repeated.GetMinItems(); min > 0 {
+			s.MinItems = jsonschema.Ptr(int(min))
+		}
+		return s, nil
 	}
 	return scalarOrMessageSchema(fd, fieldRules(fd), opts, visiting)
 }

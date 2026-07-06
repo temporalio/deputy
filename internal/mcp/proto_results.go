@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/google/jsonschema-go/jsonschema"
 	"google.golang.org/protobuf/proto"
@@ -95,6 +96,54 @@ func vulnExplanationProto(v vulnerability.Consolidated, opts vulnExplanationOpti
 		out.ReferencesTruncated = true
 	}
 	return out
+}
+
+// advisoryExplanationProto builds the mcp.v1 explanation of a raw advisory for
+// the explain tools: full details are always included, and reference lists are
+// truncated only when the caller asked for a limit. Advisory lookups have no
+// finding context, so kind, sources, and severityType stay absent.
+func advisoryExplanationProto(advisory *vulnerabilityv1.Advisory, referenceLimit int) *mcpv1.VulnExplanation {
+	if advisory == nil {
+		return &mcpv1.VulnExplanation{Severity: "UNKNOWN"}
+	}
+
+	refs, truncated := referencesForMCP(advisory.GetReferences(), referenceLimit)
+	out := &mcpv1.VulnExplanation{
+		Id:            advisory.GetId(),
+		Aliases:       stringsForMCP(advisory.GetAliases()),
+		Summary:       advisory.GetSummary(),
+		Details:       advisory.GetDetails(),
+		Severity:      protoSeverityStringForMCP(advisory.GetSeverity()),
+		FixedVersions: stringsForMCP(advisory.GetFixedVersions()),
+		PackageFixes:  packageFixesProto(advisory.GetPackageFixes()),
+		ResolvedFix:   protoFixVerdictProto(advisory.GetResolvedFix()),
+		References:    refs,
+	}
+	if truncated {
+		out.ReferenceCount = int32(len(advisory.GetReferences()))
+		out.ReferencesTruncated = true
+	}
+	if advisory.GetPublished() != nil {
+		out.Published = advisory.GetPublished().AsTime().Format(time.RFC3339)
+	}
+	if advisory.GetModified() != nil {
+		out.Modified = advisory.GetModified().AsTime().Format(time.RFC3339)
+	}
+	return out
+}
+
+// protoFixVerdictProto converts an advisory's resolved fix verdict to the
+// mcp.v1 shape. Nil or unspecified verdicts are omitted.
+func protoFixVerdictProto(v *vulnerabilityv1.FixVerdict) *mcpv1.FixVerdict {
+	if v == nil || v.GetStatus() == vulnerabilityv1.FixVerdict_STATUS_UNSPECIFIED {
+		return nil
+	}
+	return &mcpv1.FixVerdict{
+		Status:       protoFixStatusString(v.GetStatus()),
+		Version:      v.GetVersion(),
+		TargetModule: v.GetTargetModule(),
+		Claimed:      v.GetClaimed(),
+	}
 }
 
 // packageFixesProto converts advisory package fixes to the mcp.v1 shape.

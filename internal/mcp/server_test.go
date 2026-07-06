@@ -332,14 +332,14 @@ func TestVulnExplanationSeverityIsCanonical(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := compactVulnExplanationFromConsolidated(tt.in)
+			got := vulnExplanationProto(tt.in, vulnExplanationOptions{referenceLimit: compactVulnReferenceLimit})
 			if got.Severity != tt.want {
 				t.Errorf("severity = %q, want %q", got.Severity, tt.want)
 			}
 		})
 	}
 
-	rawAdvisory := advisoryToExplanation(&vulnerabilityv1.Advisory{
+	rawAdvisory := advisoryExplanationProto(&vulnerabilityv1.Advisory{
 		Id:       "CVE-2024-0004",
 		Severity: &vulnerabilityv1.Severity{Raw: "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:C/C:H/I:H/A:H", RawType: "CVSS_V3"},
 	}, allVulnReferences)
@@ -347,7 +347,7 @@ func TestVulnExplanationSeverityIsCanonical(t *testing.T) {
 		t.Errorf("raw advisory severity = %q, want CRITICAL", rawAdvisory.Severity)
 	}
 
-	nilAdvisory := advisoryToExplanation(nil, allVulnReferences)
+	nilAdvisory := advisoryExplanationProto(nil, allVulnReferences)
 	if nilAdvisory.Severity != "UNKNOWN" {
 		t.Errorf("nil advisory severity = %q, want UNKNOWN", nilAdvisory.Severity)
 	}
@@ -605,31 +605,6 @@ func TestServerInstructionsReferenceRealTools(t *testing.T) {
 	}
 }
 
-func TestListPolicyEntrypointsCategoryEnumIsGenerated(t *testing.T) {
-	schema := listPolicyEntrypointsInputSchema()
-	enum := schema.Properties["category"].Enum
-	got := make(map[string]bool, len(enum))
-	for _, v := range enum {
-		s, ok := v.(string)
-		if !ok {
-			t.Fatalf("category enum value %v is not a string", v)
-		}
-		got[s] = true
-	}
-	// Every canonical category and legacy alias from the policy package must be
-	// advertised, so the schema stays generated rather than a stale literal.
-	for _, c := range policy.Categories() {
-		if !got[c] {
-			t.Errorf("category enum missing canonical category %q", c)
-		}
-	}
-	for alias := range policy.CategoryAliases() {
-		if !got[alias] {
-			t.Errorf("category enum missing legacy alias %q", alias)
-		}
-	}
-}
-
 func TestDiffChangeTypeVocabularyMatchesCompare(t *testing.T) {
 	// MCP diff output must speak the same change-type vocabulary as the canonical
 	// compare package. changeTypeRank returns 5 for anything it does not know, so
@@ -768,10 +743,9 @@ func TestListPolicyEntrypointsTool(t *testing.T) {
 		if !ok {
 			t.Fatalf("variable name has type %T, want string", variable["name"])
 		}
-		required, ok := variable["required"].(bool)
-		if !ok {
-			t.Fatalf("variable required has type %T, want bool", variable["required"])
-		}
+		// The protojson wire omits false booleans, so an absent required key
+		// means the variable is optional.
+		required, _ := variable["required"].(bool)
 		requiredByName[name] = required
 	}
 	if !requiredByName["vulnerability"] {
@@ -781,25 +755,27 @@ func TestListPolicyEntrypointsTool(t *testing.T) {
 		t.Fatalf("target required = true, want false")
 	}
 
-	_, direct, err := s.listPolicyEntrypoints(ctx, nil, PolicyEntrypointsInput{Category: "service"})
+	direct, err := callProtoTool(t, ctx, s.listPolicyEntrypoints,
+		&mcpv1.ListPolicyEntrypointsRequest{Category: "service"}, &mcpv1.ListPolicyEntrypointsResult{})
 	if err != nil {
 		t.Fatalf("listPolicyEntrypoints service alias failed: %v", err)
 	}
 	if got, want := direct.Category, "server"; got != want {
 		t.Fatalf("service alias category = %q, want %q", got, want)
 	}
-	if got, want := direct.EntrypointCount, len(policy.EntrypointsService); got != want {
+	if got, want := int(direct.EntrypointCount), len(policy.EntrypointsService); got != want {
 		t.Fatalf("service alias entrypointCount = %d, want %d", got, want)
 	}
 
-	_, direct, err = s.listPolicyEntrypoints(ctx, nil, PolicyEntrypointsInput{Category: "exec"})
+	direct, err = callProtoTool(t, ctx, s.listPolicyEntrypoints,
+		&mcpv1.ListPolicyEntrypointsRequest{Category: "exec"}, &mcpv1.ListPolicyEntrypointsResult{})
 	if err != nil {
 		t.Fatalf("listPolicyEntrypoints exec alias failed: %v", err)
 	}
 	if got, want := direct.Category, "sandbox"; got != want {
 		t.Fatalf("exec alias category = %q, want %q", got, want)
 	}
-	if got, want := direct.EntrypointCount, len(policy.EntrypointsSandbox); got != want {
+	if got, want := int(direct.EntrypointCount), len(policy.EntrypointsSandbox); got != want {
 		t.Fatalf("exec alias entrypointCount = %d, want %d", got, want)
 	}
 }
@@ -851,8 +827,11 @@ func TestExplainVulnerabilityToolSchemas(t *testing.T) {
 	if got := singleReferenceLimit["type"]; got != "integer" {
 		t.Fatalf("explain_vulnerability referenceLimit type = %v, want integer", got)
 	}
+	// The output schema is derived from the deputy.mcp.v1 descriptor; protojson
+	// omits zero values on the wire, so no field is "required". Guard that the
+	// collection fields stay in the advertised contract instead.
 	singleOutputSchema := toolOutputSchema(t, single)
-	requireSchemaRequiredContains(t, singleOutputSchema, "aliases", "fixedVersions", "packageFixes", "references")
+	requireSchemaProperties(t, singleOutputSchema, "aliases", "fixedVersions", "packageFixes", "references")
 
 	batch := findMCPTool(t, tools.Tools, "explain_vulnerabilities")
 	batchSchema := toolInputSchema(t, batch)
@@ -879,7 +858,7 @@ func TestExplainVulnerabilityToolSchemas(t *testing.T) {
 		t.Fatalf("explain_vulnerabilities ids item minLength = %v, want 1", got)
 	}
 	batchOutputSchema := toolOutputSchema(t, batch)
-	requireSchemaRequiredContains(t, batchOutputSchema, "errors", "vulnerabilities")
+	requireSchemaProperties(t, batchOutputSchema, "errors", "vulnerabilities")
 
 	invalidCalls := []struct {
 		name      string
@@ -908,7 +887,11 @@ func TestExplainVulnerabilityToolSchemas(t *testing.T) {
 	}
 }
 
-func TestExplainVulnerabilitiesReturnsStableErrorArray(t *testing.T) {
+// TestExplainVulnerabilitiesOmitsEmptyCollections pins the proto-contract
+// wire shape: the protojson dialect omits empty collections (errors, aliases,
+// fixedVersions, packageFixes, references), so absence means empty, while
+// severity is always set and therefore always present.
+func TestExplainVulnerabilitiesOmitsEmptyCollections(t *testing.T) {
 	mockOSV := &mockOSVClient{
 		vulns: map[string]*osvschema.Vulnerability{
 			"CVE-2021-44228": {
@@ -942,7 +925,7 @@ func TestExplainVulnerabilitiesReturnsStableErrorArray(t *testing.T) {
 		t.Fatalf("explain_vulnerabilities returned error result: %#v", result)
 	}
 	structured := structuredContentObject(t, result)
-	requireStructuredEmptyArray(t, structured, "errors")
+	requireStructuredEmptyCollection(t, structured, "errors")
 	vulnerabilities := structuredArray(t, structured, "vulnerabilities")
 	if len(vulnerabilities) != 1 {
 		t.Fatalf("structured vulnerabilities has length %d, want 1", len(vulnerabilities))
@@ -951,10 +934,14 @@ func TestExplainVulnerabilitiesReturnsStableErrorArray(t *testing.T) {
 	if !ok {
 		t.Fatalf("structured vulnerability has type %T, want object", vulnerabilities[0])
 	}
-	requireStructuredEmptyArray(t, vulnerability, "aliases")
-	requireStructuredEmptyArray(t, vulnerability, "fixedVersions")
-	requireStructuredEmptyArray(t, vulnerability, "packageFixes")
-	requireStructuredEmptyArray(t, vulnerability, "references")
+	requireStructuredEmptyCollection(t, vulnerability, "aliases")
+	requireStructuredEmptyCollection(t, vulnerability, "fixedVersions")
+	requireStructuredEmptyCollection(t, vulnerability, "packageFixes")
+	requireStructuredEmptyCollection(t, vulnerability, "references")
+	severity, ok := vulnerability["severity"].(string)
+	if !ok || severity == "" {
+		t.Fatalf("structured severity = %v, want always-present non-empty string", vulnerability["severity"])
+	}
 }
 
 func TestScanPackageToolSchema(t *testing.T) {
@@ -1213,13 +1200,13 @@ func TestDiffRefsToolSchema(t *testing.T) {
 	if got := outputSchema["type"]; got != "object" {
 		t.Fatalf("diff_refs output schema type = %v, want object", got)
 	}
-	if got, want := schemaRequired(t, outputSchema), []string{"addedCount", "baseRef", "changes", "isContainerDiff", "removedCount", "targetRef", "updatedCount"}; !slices.Equal(got, want) {
-		t.Fatalf("diff_refs output required fields = %v, want %v", got, want)
-	}
-	outputProperties := schemaObject(t, outputSchema, "properties")
-	if _, ok := outputProperties["path"]; !ok {
-		t.Fatal("diff_refs output schema is missing optional path property")
-	}
+	// The output schema is derived from the deputy.mcp.v1 descriptor; protojson
+	// omits zero values on the wire, so no field is "required". Guard that the
+	// advertised contract keeps the diff counts and collections instead.
+	requireSchemaProperties(t, outputSchema,
+		"path", "baseRef", "targetRef", "changes", "isContainerDiff",
+		"addedCount", "removedCount", "updatedCount",
+	)
 
 	result, err := clientSession.CallTool(ctx, &mcpsdk.CallToolParams{
 		Name: "diff_refs",
@@ -1423,8 +1410,12 @@ func TestLocalPathToolSchemasExposeAgentControls(t *testing.T) {
 				}
 			}
 			if tt.name == "get_remediation" {
+				// The output schema is derived from the deputy.mcp.v1
+				// descriptor; protojson omits zero values on the wire, so no
+				// field is "required". Guard that the command/remediation
+				// counts stay in the advertised contract instead.
 				outputSchema := toolOutputSchema(t, tool)
-				requireSchemaRequiredContains(t, outputSchema,
+				requireSchemaProperties(t, outputSchema,
 					"commandCount",
 					"executableCommandCount",
 					"manualCommandCount",
@@ -2108,12 +2099,13 @@ func TestExplainVulnerability(t *testing.T) {
 	ctx := context.Background()
 
 	t.Run("valid vulnerability", func(t *testing.T) {
-		_, result, err := s.explainVulnerability(ctx, nil, ExplainVulnInput{ID: "CVE-2021-44228"})
+		result, err := callProtoTool(t, ctx, s.explainVulnerability,
+			&mcpv1.ExplainVulnerabilityRequest{Id: "CVE-2021-44228"}, &mcpv1.VulnExplanation{})
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		if result.ID != "CVE-2021-44228" {
-			t.Errorf("expected ID CVE-2021-44228, got %s", result.ID)
+		if result.Id != "CVE-2021-44228" {
+			t.Errorf("expected ID CVE-2021-44228, got %s", result.Id)
 		}
 		if result.Summary != "Log4Shell vulnerability" {
 			t.Errorf("expected summary 'Log4Shell vulnerability', got %s", result.Summary)
@@ -2162,8 +2154,8 @@ func TestExplainVulnerability(t *testing.T) {
 	})
 
 	t.Run("limits references", func(t *testing.T) {
-		limit := 2
-		_, result, err := s.explainVulnerability(ctx, nil, ExplainVulnInput{ID: "CVE-2021-44228", ReferenceLimit: &limit})
+		result, err := callProtoTool(t, ctx, s.explainVulnerability,
+			&mcpv1.ExplainVulnerabilityRequest{Id: "CVE-2021-44228", ReferenceLimit: proto.Int32(2)}, &mcpv1.VulnExplanation{})
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -2183,8 +2175,8 @@ func TestExplainVulnerability(t *testing.T) {
 	})
 
 	t.Run("zero references", func(t *testing.T) {
-		limit := 0
-		_, result, err := s.explainVulnerability(ctx, nil, ExplainVulnInput{ID: "CVE-2021-44228", ReferenceLimit: &limit})
+		result, err := callProtoTool(t, ctx, s.explainVulnerability,
+			&mcpv1.ExplainVulnerabilityRequest{Id: "CVE-2021-44228", ReferenceLimit: proto.Int32(0)}, &mcpv1.VulnExplanation{})
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -2200,24 +2192,27 @@ func TestExplainVulnerability(t *testing.T) {
 	})
 
 	t.Run("trims ID", func(t *testing.T) {
-		_, result, err := s.explainVulnerability(ctx, nil, ExplainVulnInput{ID: " CVE-2021-44228\t"})
+		result, err := callProtoTool(t, ctx, s.explainVulnerability,
+			&mcpv1.ExplainVulnerabilityRequest{Id: " CVE-2021-44228\t"}, &mcpv1.VulnExplanation{})
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		if result.ID != "CVE-2021-44228" {
-			t.Errorf("expected ID CVE-2021-44228, got %s", result.ID)
+		if result.Id != "CVE-2021-44228" {
+			t.Errorf("expected ID CVE-2021-44228, got %s", result.Id)
 		}
 	})
 
 	t.Run("empty ID", func(t *testing.T) {
-		_, _, err := s.explainVulnerability(ctx, nil, ExplainVulnInput{ID: ""})
+		_, err := callProtoTool(t, ctx, s.explainVulnerability,
+			&mcpv1.ExplainVulnerabilityRequest{Id: ""}, &mcpv1.VulnExplanation{})
 		if err == nil {
 			t.Error("expected error for empty ID")
 		}
 	})
 
 	t.Run("not found", func(t *testing.T) {
-		_, _, err := s.explainVulnerability(ctx, nil, ExplainVulnInput{ID: "CVE-9999-9999"})
+		_, err := callProtoTool(t, ctx, s.explainVulnerability,
+			&mcpv1.ExplainVulnerabilityRequest{Id: "CVE-9999-9999"}, &mcpv1.VulnExplanation{})
 		if err == nil {
 			t.Error("expected error for non-existent vulnerability")
 		}
@@ -2250,11 +2245,10 @@ func TestExplainVulnerabilities(t *testing.T) {
 	ctx := context.Background()
 
 	t.Run("multiple vulnerabilities", func(t *testing.T) {
-		limit := 1
-		_, result, err := s.explainVulnerabilities(ctx, nil, ExplainVulnsInput{
-			IDs:            []string{"CVE-2021-44228", "CVE-2022-22965"},
-			ReferenceLimit: &limit,
-		})
+		result, err := callProtoTool(t, ctx, s.explainVulnerabilities, &mcpv1.ExplainVulnerabilitiesRequest{
+			Ids:            []string{"CVE-2021-44228", "CVE-2022-22965"},
+			ReferenceLimit: proto.Int32(1),
+		}, &mcpv1.ExplainVulnerabilitiesResult{})
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -2273,9 +2267,9 @@ func TestExplainVulnerabilities(t *testing.T) {
 	})
 
 	t.Run("trims IDs", func(t *testing.T) {
-		_, result, err := s.explainVulnerabilities(ctx, nil, ExplainVulnsInput{
-			IDs: []string{" CVE-2021-44228 ", "\tCVE-2022-22965"},
-		})
+		result, err := callProtoTool(t, ctx, s.explainVulnerabilities, &mcpv1.ExplainVulnerabilitiesRequest{
+			Ids: []string{" CVE-2021-44228 ", "\tCVE-2022-22965"},
+		}, &mcpv1.ExplainVulnerabilitiesResult{})
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -2288,9 +2282,9 @@ func TestExplainVulnerabilities(t *testing.T) {
 	})
 
 	t.Run("partial success", func(t *testing.T) {
-		_, result, err := s.explainVulnerabilities(ctx, nil, ExplainVulnsInput{
-			IDs: []string{"CVE-2021-44228", "CVE-NONEXISTENT"},
-		})
+		result, err := callProtoTool(t, ctx, s.explainVulnerabilities, &mcpv1.ExplainVulnerabilitiesRequest{
+			Ids: []string{"CVE-2021-44228", "CVE-NONEXISTENT"},
+		}, &mcpv1.ExplainVulnerabilitiesResult{})
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -2318,9 +2312,9 @@ func TestExplainVulnerabilities(t *testing.T) {
 			vulnerabilityHandler: &mockVulnerabilityHandler{osvClient: mockOSV},
 		})))
 
-		_, result, err := s.explainVulnerabilities(t.Context(), nil, ExplainVulnsInput{
-			IDs: []string{"CVE-2021-44228", "CVE-NONEXISTENT"},
-		})
+		result, err := callProtoTool(t, t.Context(), s.explainVulnerabilities, &mcpv1.ExplainVulnerabilitiesRequest{
+			Ids: []string{"CVE-2021-44228", "CVE-NONEXISTENT"},
+		}, &mcpv1.ExplainVulnerabilitiesResult{})
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -2334,20 +2328,23 @@ func TestExplainVulnerabilities(t *testing.T) {
 	})
 
 	t.Run("empty IDs", func(t *testing.T) {
-		_, _, err := s.explainVulnerabilities(ctx, nil, ExplainVulnsInput{IDs: nil})
+		_, err := callProtoTool(t, ctx, s.explainVulnerabilities,
+			&mcpv1.ExplainVulnerabilitiesRequest{Ids: nil}, &mcpv1.ExplainVulnerabilitiesResult{})
 		if err == nil {
 			t.Error("expected error for empty IDs")
 		}
 	})
 
 	t.Run("blank ID", func(t *testing.T) {
-		_, _, err := s.explainVulnerabilities(ctx, nil, ExplainVulnsInput{
-			IDs: []string{"CVE-2021-44228", " \t"},
-		})
+		// Blank items violate the ids items pattern (\S); protovalidate rejects
+		// the request and its message names the offending index.
+		_, err := callProtoTool(t, ctx, s.explainVulnerabilities, &mcpv1.ExplainVulnerabilitiesRequest{
+			Ids: []string{"CVE-2021-44228", " \t"},
+		}, &mcpv1.ExplainVulnerabilitiesResult{})
 		if err == nil {
 			t.Fatal("expected error for blank ID")
 		}
-		if !strings.Contains(err.Error(), "ids[1] is required") {
+		if !strings.Contains(err.Error(), "ids[1]") {
 			t.Fatalf("error = %q, want indexed blank ID guidance", err)
 		}
 	})
@@ -2373,9 +2370,9 @@ func TestExplainVulnerabilitiesUsesBatchAdvisoryLookup(t *testing.T) {
 	}
 	s := NewServer(WithClients(newMockClients(mockClientsConfig{vulnerabilityHandler: mockVuln})))
 
-	_, result, err := s.explainVulnerabilities(t.Context(), nil, ExplainVulnsInput{
-		IDs: []string{"CVE-2024-0001", "cve-2024-0001", "CVE-2024-0002"},
-	})
+	result, err := callProtoTool(t, t.Context(), s.explainVulnerabilities, &mcpv1.ExplainVulnerabilitiesRequest{
+		Ids: []string{"CVE-2024-0001", "cve-2024-0001", "CVE-2024-0002"},
+	}, &mcpv1.ExplainVulnerabilitiesResult{})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -2393,7 +2390,7 @@ func TestExplainVulnerabilitiesUsesBatchAdvisoryLookup(t *testing.T) {
 	}
 	gotIDs := make([]string, 0, len(result.Vulnerabilities))
 	for _, vuln := range result.Vulnerabilities {
-		gotIDs = append(gotIDs, vuln.ID)
+		gotIDs = append(gotIDs, vuln.Id)
 	}
 	wantIDs := []string{"CVE-2024-0001", "CVE-2024-0001", "GO-2024-0002"}
 	if !slices.Equal(gotIDs, wantIDs) {
@@ -2407,30 +2404,30 @@ func TestScanPackage(t *testing.T) {
 	ctx := context.Background()
 
 	t.Run("missing name", func(t *testing.T) {
-		_, _, err := s.scanPackage(ctx, nil, ScanPackageInput{
+		_, err := callProtoTool(t, ctx, s.scanPackage, &mcpv1.ScanPackageRequest{
 			Version:   "1.0.0",
 			Ecosystem: "npm",
-		})
+		}, &mcpv1.ScanPackageResult{})
 		if err == nil {
 			t.Error("expected error for missing name")
 		}
 	})
 
 	t.Run("missing version", func(t *testing.T) {
-		_, _, err := s.scanPackage(ctx, nil, ScanPackageInput{
+		_, err := callProtoTool(t, ctx, s.scanPackage, &mcpv1.ScanPackageRequest{
 			Name:      "lodash",
 			Ecosystem: "npm",
-		})
+		}, &mcpv1.ScanPackageResult{})
 		if err == nil {
 			t.Error("expected error for missing version")
 		}
 	})
 
 	t.Run("missing ecosystem", func(t *testing.T) {
-		_, _, err := s.scanPackage(ctx, nil, ScanPackageInput{
+		_, err := callProtoTool(t, ctx, s.scanPackage, &mcpv1.ScanPackageRequest{
 			Name:    "lodash",
 			Version: "4.17.15",
-		})
+		}, &mcpv1.ScanPackageResult{})
 		if err == nil {
 			t.Error("expected error for missing ecosystem")
 		}
@@ -2439,14 +2436,14 @@ func TestScanPackage(t *testing.T) {
 	t.Run("canonical package purls", func(t *testing.T) {
 		tests := []struct {
 			name          string
-			in            ScanPackageInput
+			in            *mcpv1.ScanPackageRequest
 			wantPURL      string
 			wantVersion   string
 			wantEcosystem string
 		}{
 			{
 				name: "go alias normalizes version",
-				in: ScanPackageInput{
+				in: &mcpv1.ScanPackageRequest{
 					Name:      " golang.org/x/net ",
 					Version:   " 0.17.0 ",
 					Ecosystem: " Golang ",
@@ -2457,7 +2454,7 @@ func TestScanPackage(t *testing.T) {
 			},
 			{
 				name: "ruby alias uses gem purl type",
-				in: ScanPackageInput{
+				in: &mcpv1.ScanPackageRequest{
 					Name:      "rails",
 					Version:   "7.0.4",
 					Ecosystem: "ruby",
@@ -2468,7 +2465,7 @@ func TestScanPackage(t *testing.T) {
 			},
 			{
 				name: "maven coordinates split group and artifact",
-				in: ScanPackageInput{
+				in: &mcpv1.ScanPackageRequest{
 					Name:      "org.apache.logging.log4j:log4j-core",
 					Version:   "2.14.0",
 					Ecosystem: "java",
@@ -2479,7 +2476,7 @@ func TestScanPackage(t *testing.T) {
 			},
 			{
 				name: "npm scoped package uses encoded scope namespace",
-				in: ScanPackageInput{
+				in: &mcpv1.ScanPackageRequest{
 					Name:      "@temporalio/worker",
 					Version:   "1.10.0",
 					Ecosystem: "npm",
@@ -2490,7 +2487,7 @@ func TestScanPackage(t *testing.T) {
 			},
 			{
 				name: "github actions package keeps owner namespace",
-				in: ScanPackageInput{
+				in: &mcpv1.ScanPackageRequest{
 					Name:      "actions/checkout",
 					Version:   "v4",
 					Ecosystem: "github-actions",
@@ -2501,7 +2498,7 @@ func TestScanPackage(t *testing.T) {
 			},
 			{
 				name: "github actions spaced alias uses githubactions purl type",
-				in: ScanPackageInput{
+				in: &mcpv1.ScanPackageRequest{
 					Name:      "actions/checkout",
 					Version:   "v4",
 					Ecosystem: "GitHub Actions",
@@ -2512,8 +2509,8 @@ func TestScanPackage(t *testing.T) {
 			},
 			{
 				name: "purl input normalizes go version",
-				in: ScanPackageInput{
-					PURL: "pkg:golang/golang.org/x/net@0.17.0",
+				in: &mcpv1.ScanPackageRequest{
+					Purl: "pkg:golang/golang.org/x/net@0.17.0",
 				},
 				wantPURL:      "pkg:golang/golang.org/x/net@v0.17.0",
 				wantVersion:   "v0.17.0",
@@ -2521,7 +2518,7 @@ func TestScanPackage(t *testing.T) {
 			},
 			{
 				name: "name accepts purl input",
-				in: ScanPackageInput{
+				in: &mcpv1.ScanPackageRequest{
 					Name: "pkg:npm/lodash@4.17.21",
 				},
 				wantPURL:      "pkg:npm/lodash@4.17.21",
@@ -2530,8 +2527,8 @@ func TestScanPackage(t *testing.T) {
 			},
 			{
 				name: "purl input accepts separate version",
-				in: ScanPackageInput{
-					PURL:    "pkg:npm/lodash",
+				in: &mcpv1.ScanPackageRequest{
+					Purl:    "pkg:npm/lodash",
 					Version: "4.17.21",
 				},
 				wantPURL:      "pkg:npm/lodash@4.17.21",
@@ -2540,8 +2537,8 @@ func TestScanPackage(t *testing.T) {
 			},
 			{
 				name: "maven purl uses coordinate display name",
-				in: ScanPackageInput{
-					PURL: "pkg:maven/org.apache.logging.log4j/log4j-core@2.14.0",
+				in: &mcpv1.ScanPackageRequest{
+					Purl: "pkg:maven/org.apache.logging.log4j/log4j-core@2.14.0",
 				},
 				wantPURL:      "pkg:maven/org.apache.logging.log4j/log4j-core@2.14.0",
 				wantVersion:   "2.14.0",
@@ -2554,7 +2551,7 @@ func TestScanPackage(t *testing.T) {
 				mockScan.requests = nil
 				mockScan.scanResponse = emptyScanResponse()
 
-				_, result, err := s.scanPackage(ctx, nil, tt.in)
+				result, err := callProtoTool(t, ctx, s.scanPackage, tt.in, &mcpv1.ScanPackageResult{})
 				if err != nil {
 					t.Fatalf("unexpected error: %v", err)
 				}
@@ -2564,8 +2561,8 @@ func TestScanPackage(t *testing.T) {
 				if got := mockScan.requests[0].Target; got != tt.wantPURL {
 					t.Errorf("scan target = %q, want %q", got, tt.wantPURL)
 				}
-				if result.PURL != tt.wantPURL {
-					t.Errorf("result PURL = %q, want %q", result.PURL, tt.wantPURL)
+				if result.Purl != tt.wantPURL {
+					t.Errorf("result PURL = %q, want %q", result.Purl, tt.wantPURL)
 				}
 				if result.Version != tt.wantVersion {
 					t.Errorf("result version = %q, want %q", result.Version, tt.wantVersion)
@@ -2584,27 +2581,28 @@ func TestScanPackage(t *testing.T) {
 	})
 
 	t.Run("purl missing version", func(t *testing.T) {
-		_, _, err := s.scanPackage(ctx, nil, ScanPackageInput{PURL: "pkg:npm/lodash"})
+		_, err := callProtoTool(t, ctx, s.scanPackage,
+			&mcpv1.ScanPackageRequest{Purl: "pkg:npm/lodash"}, &mcpv1.ScanPackageResult{})
 		if err == nil {
 			t.Error("expected error for purl without version")
 		}
 	})
 
 	t.Run("purl conflicting version", func(t *testing.T) {
-		_, _, err := s.scanPackage(ctx, nil, ScanPackageInput{
-			PURL:    "pkg:npm/lodash@4.17.21",
+		_, err := callProtoTool(t, ctx, s.scanPackage, &mcpv1.ScanPackageRequest{
+			Purl:    "pkg:npm/lodash@4.17.21",
 			Version: "4.17.20",
-		})
+		}, &mcpv1.ScanPackageResult{})
 		if err == nil {
 			t.Error("expected error for conflicting purl version")
 		}
 	})
 
 	t.Run("purl conflicting ecosystem", func(t *testing.T) {
-		_, _, err := s.scanPackage(ctx, nil, ScanPackageInput{
-			PURL:      "pkg:npm/lodash@4.17.21",
+		_, err := callProtoTool(t, ctx, s.scanPackage, &mcpv1.ScanPackageRequest{
+			Purl:      "pkg:npm/lodash@4.17.21",
 			Ecosystem: "pypi",
-		})
+		}, &mcpv1.ScanPackageResult{})
 		if err == nil {
 			t.Error("expected error for conflicting purl ecosystem")
 		}
@@ -2642,11 +2640,11 @@ func TestScanPackage(t *testing.T) {
 			Stats: &vulnerabilityv1.Stats{Unique: 2, Critical: 2},
 		}
 
-		_, result, err := s.scanPackage(ctx, nil, ScanPackageInput{
+		result, err := callProtoTool(t, ctx, s.scanPackage, &mcpv1.ScanPackageRequest{
 			Name:      "golang.org/x/net",
 			Version:   "v0.17.0",
 			Ecosystem: "go",
-		})
+		}, &mcpv1.ScanPackageResult{})
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -2656,7 +2654,7 @@ func TestScanPackage(t *testing.T) {
 		if len(result.Vulnerabilities) != 1 {
 			t.Fatalf("expected 1 consolidated vulnerability, got %d", len(result.Vulnerabilities))
 		}
-		if got := result.Vulnerabilities[0].ID; got != "CVE-2024-1234" {
+		if got := result.Vulnerabilities[0].Id; got != "CVE-2024-1234" {
 			t.Errorf("expected CVE primary ID, got %q", got)
 		}
 	})
@@ -2697,11 +2695,11 @@ func TestScanPackage(t *testing.T) {
 			Stats: &vulnerabilityv1.Stats{Unique: 1, Critical: 1},
 		}
 
-		_, result, err := s.scanPackage(ctx, nil, ScanPackageInput{
+		result, err := callProtoTool(t, ctx, s.scanPackage, &mcpv1.ScanPackageRequest{
 			Name:      "golang.org/x/crypto",
 			Version:   "v0.17.0",
 			Ecosystem: "go",
-		})
+		}, &mcpv1.ScanPackageResult{})
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -2718,7 +2716,7 @@ func TestScanPackage(t *testing.T) {
 		if !slices.Equal(vuln.References, refs[:compactVulnReferenceLimit]) {
 			t.Errorf("scan_package references = %v, want %v", vuln.References, refs[:compactVulnReferenceLimit])
 		}
-		if vuln.ReferenceCount != len(refs) {
+		if int(vuln.ReferenceCount) != len(refs) {
 			t.Errorf("scan_package referenceCount = %d, want %d", vuln.ReferenceCount, len(refs))
 		}
 		if !vuln.ReferencesTruncated {
@@ -3269,14 +3267,14 @@ func TestGetRemediation(t *testing.T) {
 	ctx := context.Background()
 
 	t.Run("missing path", func(t *testing.T) {
-		_, _, err := s.getRemediation(ctx, nil, GetRemediationInput{})
+		_, err := callProtoTool(t, ctx, s.getRemediation, &mcpv1.GetRemediationRequest{}, &mcpv1.GetRemediationResult{})
 		if err == nil {
 			t.Error("expected error for missing path")
 		}
 	})
 
 	t.Run("no vulnerabilities", func(t *testing.T) {
-		_, result, err := s.getRemediation(ctx, nil, GetRemediationInput{Path: "/test/path"})
+		result, err := callProtoTool(t, ctx, s.getRemediation, &mcpv1.GetRemediationRequest{Path: "/test/path"}, &mcpv1.GetRemediationResult{})
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -3302,10 +3300,10 @@ func TestGetRemediation(t *testing.T) {
 			CommitHash:   "789abc",
 		}
 		mockScan.requests = nil
-		_, result, err := s.getRemediation(ctx, nil, GetRemediationInput{
+		result, err := callProtoTool(t, ctx, s.getRemediation, &mcpv1.GetRemediationRequest{
 			Path: "/test/path",
 			Ref:  " origin/main ",
-		})
+		}, &mcpv1.GetRemediationResult{})
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -3323,7 +3321,7 @@ func TestGetRemediation(t *testing.T) {
 	t.Run("migration-only fix counts as remediable", func(t *testing.T) {
 		mockScan.scanResponse = migrationOnlyScanResponse()
 
-		_, result, err := s.getRemediation(ctx, nil, GetRemediationInput{Path: "/test/path"})
+		result, err := callProtoTool(t, ctx, s.getRemediation, &mcpv1.GetRemediationRequest{Path: "/test/path"}, &mcpv1.GetRemediationResult{})
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -3363,7 +3361,7 @@ func TestGetRemediation(t *testing.T) {
 	t.Run("counts commands separately from grouped vulnerabilities", func(t *testing.T) {
 		mockScan.scanResponse = groupedMigrationScanResponse()
 
-		_, result, err := s.getRemediation(ctx, nil, GetRemediationInput{Path: "/test/path"})
+		result, err := callProtoTool(t, ctx, s.getRemediation, &mcpv1.GetRemediationRequest{Path: "/test/path"}, &mcpv1.GetRemediationResult{})
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -3385,7 +3383,7 @@ func TestGetRemediation(t *testing.T) {
 		if result.ManualCommandCount != 1 {
 			t.Errorf("expected 1 manual command, got %d", result.ManualCommandCount)
 		}
-		if len(result.Commands) != result.CommandCount {
+		if len(result.Commands) != int(result.CommandCount) {
 			t.Errorf("commands length = %d, want commandCount %d", len(result.Commands), result.CommandCount)
 		}
 	})
@@ -3393,7 +3391,7 @@ func TestGetRemediation(t *testing.T) {
 	t.Run("indirect migration hint uses MCP graph tool", func(t *testing.T) {
 		mockScan.scanResponse = indirectMigrationOnlyScanResponse()
 
-		_, result, err := s.getRemediation(ctx, nil, GetRemediationInput{Path: "/test/path"})
+		result, err := callProtoTool(t, ctx, s.getRemediation, &mcpv1.GetRemediationRequest{Path: "/test/path"}, &mcpv1.GetRemediationResult{})
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -3407,8 +3405,8 @@ func TestGetRemediation(t *testing.T) {
 				continue
 			}
 			foundIndirectMigration = true
-			if cmd.PURL != "pkg:golang/github.com/example/widget@v1.4.0" {
-				t.Errorf("purl = %q, want pkg:golang/github.com/example/widget@v1.4.0", cmd.PURL)
+			if cmd.Purl != "pkg:golang/github.com/example/widget@v1.4.0" {
+				t.Errorf("purl = %q, want pkg:golang/github.com/example/widget@v1.4.0", cmd.Purl)
 			}
 			if !cmd.Migration {
 				t.Error("expected migration command")
@@ -3428,7 +3426,7 @@ func TestGetRemediation(t *testing.T) {
 			if !strings.Contains(cmd.Hint, "resolveTransitives true") {
 				t.Errorf("hint = %q, want resolveTransitives guidance", cmd.Hint)
 			}
-			if !strings.Contains(cmd.Hint, cmd.PURL) {
+			if !strings.Contains(cmd.Hint, cmd.Purl) {
 				t.Errorf("hint = %q, want vulnerable package PURL", cmd.Hint)
 			}
 			if strings.Contains(cmd.Hint, "--with-graph") {
@@ -3443,7 +3441,7 @@ func TestGetRemediation(t *testing.T) {
 	t.Run("distinct indirect migrations stay distinct", func(t *testing.T) {
 		mockScan.scanResponse = multiIndirectMigrationScanResponse()
 
-		_, result, err := s.getRemediation(ctx, nil, GetRemediationInput{Path: "/test/path"})
+		result, err := callProtoTool(t, ctx, s.getRemediation, &mcpv1.GetRemediationRequest{Path: "/test/path"}, &mcpv1.GetRemediationResult{})
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -3457,7 +3455,7 @@ func TestGetRemediation(t *testing.T) {
 			t.Errorf("expected 2 manual commands, got %d", result.ManualCommandCount)
 		}
 
-		indirectMigrations := map[string]RemediationCommand{}
+		indirectMigrations := map[string]*mcpv1.RemediationCommand{}
 		for _, cmd := range result.Commands {
 			if cmd.Command == "Upgrade the dependency that pulls this in (indirect — no in-place fix)" {
 				indirectMigrations[cmd.Package] = cmd
@@ -3475,10 +3473,10 @@ func TestGetRemediation(t *testing.T) {
 			if !ok {
 				t.Fatalf("missing indirect migration command for %s: %+v", pkgName, result.Commands)
 			}
-			if cmd.PURL != wantPURL {
-				t.Errorf("%s purl = %q, want %q", pkgName, cmd.PURL, wantPURL)
+			if cmd.Purl != wantPURL {
+				t.Errorf("%s purl = %q, want %q", pkgName, cmd.Purl, wantPURL)
 			}
-			if !strings.Contains(cmd.Hint, cmd.PURL) {
+			if !strings.Contains(cmd.Hint, cmd.Purl) {
 				t.Errorf("%s hint = %q, want vulnerable package PURL", pkgName, cmd.Hint)
 			}
 			if !strings.Contains(cmd.Hint, "graph_why") {
@@ -4917,7 +4915,7 @@ func TestDiffGitRefsPreservesDirectness(t *testing.T) {
 	}
 	s := NewServer(WithClients(newMockClients(mockClientsConfig{scanHandler: mockScan})))
 
-	_, result, err := s.diffGitRefs(context.Background(), DiffRefsInput{
+	result, err := s.diffGitRefs(context.Background(), &mcpv1.DiffRefsRequest{
 		Path:         "/test/path",
 		BaseRef:      "base",
 		TargetRef:    "target",
@@ -4963,7 +4961,7 @@ func TestDiffGitRefsNormalizesPath(t *testing.T) {
 	}
 	s := NewServer(WithClients(newMockClients(mockClientsConfig{scanHandler: mockScan})))
 
-	_, result, err := s.diffGitRefs(context.Background(), DiffRefsInput{
+	result, err := s.diffGitRefs(context.Background(), &mcpv1.DiffRefsRequest{
 		Path:      " /test/path ",
 		BaseRef:   " base ",
 		TargetRef: "\ttarget ",
@@ -5017,7 +5015,7 @@ func TestDiffGitRefsUsesPURLIdentity(t *testing.T) {
 	}
 	s := NewServer(WithClients(newMockClients(mockClientsConfig{scanHandler: mockScan})))
 
-	_, result, err := s.diffGitRefs(context.Background(), DiffRefsInput{
+	result, err := s.diffGitRefs(context.Background(), &mcpv1.DiffRefsRequest{
 		Path:      "/test/path",
 		BaseRef:   "base",
 		TargetRef: "target",
@@ -5033,8 +5031,8 @@ func TestDiffGitRefsUsesPURLIdentity(t *testing.T) {
 	if change.ChangeType != "upgraded" {
 		t.Fatalf("expected upgraded change, got %q", change.ChangeType)
 	}
-	if change.PURL != "pkg:npm/%40scope-b/core@2.0.0" {
-		t.Fatalf("unexpected changed PURL: got %q", change.PURL)
+	if change.Purl != "pkg:npm/%40scope-b/core@2.0.0" {
+		t.Fatalf("unexpected changed PURL: got %q", change.Purl)
 	}
 }
 
@@ -5079,7 +5077,7 @@ func TestDiffGitRefsDeduplicatesTargetVulnerabilities(t *testing.T) {
 	}
 	s := NewServer(WithClients(newMockClients(mockClientsConfig{scanHandler: mockScan})))
 
-	_, result, err := s.diffGitRefs(context.Background(), DiffRefsInput{
+	result, err := s.diffGitRefs(context.Background(), &mcpv1.DiffRefsRequest{
 		Path:      "/test/path",
 		BaseRef:   "base",
 		TargetRef: "target",
@@ -5093,7 +5091,7 @@ func TestDiffGitRefsDeduplicatesTargetVulnerabilities(t *testing.T) {
 	if len(result.Vulnerabilities) != 1 {
 		t.Fatalf("expected 1 consolidated vulnerability, got %d", len(result.Vulnerabilities))
 	}
-	if got := result.Vulnerabilities[0].ID; got != "CVE-2024-1234" {
+	if got := result.Vulnerabilities[0].Id; got != "CVE-2024-1234" {
 		t.Fatalf("expected CVE primary ID, got %q", got)
 	}
 }
@@ -5107,10 +5105,10 @@ func TestDiffRefsRoutesLocalhostRegistryAsContainer(t *testing.T) {
 	}
 	s := NewServer(WithClients(newMockClients(mockClientsConfig{scanHandler: mockScan})))
 
-	_, result, err := s.diffRefs(context.Background(), nil, DiffRefsInput{
+	result, err := callProtoTool(t, context.Background(), s.diffRefs, &mcpv1.DiffRefsRequest{
 		BaseRef:   " localhost:5000/app:v1 ",
 		TargetRef: "\tlocalhost:5000/app:v2",
-	})
+	}, &mcpv1.DiffRefsResult{})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -5134,26 +5132,29 @@ func TestDiffRefsRoutesLocalhostRegistryAsContainer(t *testing.T) {
 	}
 }
 
-func TestDiffRefsValidationUsesJSONFieldNames(t *testing.T) {
+func TestDiffRefsValidationRequiresRefs(t *testing.T) {
 	s := NewServer(WithClients(newMockClients(mockClientsConfig{})))
 
-	_, _, err := s.diffRefs(context.Background(), nil, DiffRefsInput{
+	// In production the SDK rejects these against the input schema using JSON
+	// property names; protovalidate guards direct invocations and names the
+	// proto fields.
+	_, err := callProtoTool(t, context.Background(), s.diffRefs, &mcpv1.DiffRefsRequest{
 		TargetRef: "main",
-	})
+	}, &mcpv1.DiffRefsResult{})
 	if err == nil {
 		t.Fatal("expected missing baseRef error")
 	}
-	if !strings.Contains(err.Error(), "baseRef is required") {
+	if !strings.Contains(err.Error(), "base_ref") {
 		t.Fatalf("missing baseRef error = %q", err)
 	}
 
-	_, _, err = s.diffRefs(context.Background(), nil, DiffRefsInput{
+	_, err = callProtoTool(t, context.Background(), s.diffRefs, &mcpv1.DiffRefsRequest{
 		BaseRef: "main",
-	})
+	}, &mcpv1.DiffRefsResult{})
 	if err == nil {
 		t.Fatal("expected missing targetRef error")
 	}
-	if !strings.Contains(err.Error(), "targetRef is required") {
+	if !strings.Contains(err.Error(), "target_ref") {
 		t.Fatalf("missing targetRef error = %q", err)
 	}
 }
@@ -5167,10 +5168,10 @@ func TestDiffRefsPathlessCommonGitRefsRequirePath(t *testing.T) {
 	}
 	s := NewServer(WithClients(newMockClients(mockClientsConfig{scanHandler: mockScan})))
 
-	_, _, err := s.diffRefs(context.Background(), nil, DiffRefsInput{
+	_, err := callProtoTool(t, context.Background(), s.diffRefs, &mcpv1.DiffRefsRequest{
 		BaseRef:   "main",
 		TargetRef: "develop",
-	})
+	}, &mcpv1.DiffRefsResult{})
 	if err == nil {
 		t.Fatal("expected missing path error")
 	}
@@ -5191,14 +5192,14 @@ func TestDiffRefsRejectsMixedContainerAndGitRefs(t *testing.T) {
 	}
 	s := NewServer(WithClients(newMockClients(mockClientsConfig{scanHandler: mockScan})))
 
-	tests := []DiffRefsInput{
+	tests := []*mcpv1.DiffRefsRequest{
 		{BaseRef: "docker://nginx:1.25", TargetRef: "main"},
 		{BaseRef: "nginx:1.25", TargetRef: "main"},
 		{Path: "/repo", BaseRef: "ghcr.io/owner/app:v1", TargetRef: "main"},
 	}
 	for _, tt := range tests {
-		t.Run(tt.BaseRef+" to "+tt.TargetRef, func(t *testing.T) {
-			_, _, err := s.diffRefs(context.Background(), nil, tt)
+		t.Run(tt.GetBaseRef()+" to "+tt.GetTargetRef(), func(t *testing.T) {
+			_, err := callProtoTool(t, context.Background(), s.diffRefs, tt, &mcpv1.DiffRefsResult{})
 			if err == nil {
 				t.Fatal("expected mixed ref error")
 			}
@@ -5255,7 +5256,7 @@ func TestDiffContainerImagesReportsDeduplicatedVulnerabilityChanges(t *testing.T
 	}
 	s := NewServer(WithClients(newMockClients(mockClientsConfig{scanHandler: mockScan})))
 
-	_, result, err := s.diffContainerImages(context.Background(), DiffRefsInput{
+	result, err := s.diffContainerImages(context.Background(), &mcpv1.DiffRefsRequest{
 		BaseRef:   "example/app:v1",
 		TargetRef: "example/app:v2",
 	})
@@ -5269,7 +5270,7 @@ func TestDiffContainerImagesReportsDeduplicatedVulnerabilityChanges(t *testing.T
 		t.Fatalf("vulnerability changes = %d, want %d: %#v", got, want, result.VulnerabilityChanges)
 	}
 	change := result.VulnerabilityChanges[0]
-	if got, want := change.ID, "CVE-2024-1234"; got != want {
+	if got, want := change.GetId(), "CVE-2024-1234"; got != want {
 		t.Fatalf("change ID = %q, want %q", got, want)
 	}
 	if got, want := change.ChangeType, "fixed"; got != want {
@@ -5287,7 +5288,7 @@ func TestDiffContainerImagesReportsDeduplicatedVulnerabilityChanges(t *testing.T
 	if result.ContainerSummary == nil {
 		t.Fatal("expected container summary")
 	}
-	if got, want := result.ContainerSummary.VulnerabilitiesFixed, 1; got != want {
+	if got, want := int(result.ContainerSummary.GetVulnerabilitiesFixed()), 1; got != want {
 		t.Fatalf("vulnerabilities fixed = %d, want %d", got, want)
 	}
 }
@@ -5301,7 +5302,7 @@ func TestDiffContainerImagesNormalizesAndForwardsPlatform(t *testing.T) {
 	}
 	s := NewServer(WithClients(newMockClients(mockClientsConfig{scanHandler: mockScan})))
 
-	_, result, err := s.diffContainerImages(context.Background(), DiffRefsInput{
+	result, err := s.diffContainerImages(context.Background(), &mcpv1.DiffRefsRequest{
 		BaseRef:   " example/app:v1 ",
 		TargetRef: " example/app:v2 ",
 		Platform:  " linux/amd64\t",
@@ -5341,11 +5342,11 @@ func TestDiffRefsPrefersGitRefsInRepositoryContext(t *testing.T) {
 	}
 	s := NewServer(WithClients(newMockClients(mockClientsConfig{scanHandler: mockScan})))
 
-	_, result, err := s.diffRefs(context.Background(), nil, DiffRefsInput{
+	result, err := callProtoTool(t, context.Background(), s.diffRefs, &mcpv1.DiffRefsRequest{
 		Path:      repo,
 		BaseRef:   "main",
 		TargetRef: "develop",
-	})
+	}, &mcpv1.DiffRefsResult{})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -5367,12 +5368,12 @@ func TestDiffRefsPrefersGitRefsInRepositoryContext(t *testing.T) {
 }
 
 func TestSortDependencyChangesStableAgentOrder(t *testing.T) {
-	changes := []DependencyChange{
-		{Name: "zeta", Ecosystem: "npm", PURL: "pkg:npm/zeta@1.0.0", ChangeType: "added"},
-		{Name: "bravo", Ecosystem: "go", PURL: "pkg:golang/example.com/bravo@v1.0.0", ChangeType: "removed", IsDirect: true},
-		{Name: "alpha", Ecosystem: "go", PURL: "pkg:golang/example.com/alpha@v1.1.0", ChangeType: "upgraded"},
-		{Name: "alpha", Ecosystem: "go", PURL: "pkg:golang/example.com/alpha@v1.0.0", ChangeType: "added", IsDirect: true},
-		{Name: "charlie", Ecosystem: "go", PURL: "pkg:golang/example.com/charlie@v1.0.0", ChangeType: "downgraded", IsDirect: true},
+	changes := []*mcpv1.DependencyChange{
+		{Name: "zeta", Ecosystem: "npm", Purl: "pkg:npm/zeta@1.0.0", ChangeType: "added"},
+		{Name: "bravo", Ecosystem: "go", Purl: "pkg:golang/example.com/bravo@v1.0.0", ChangeType: "removed", IsDirect: true},
+		{Name: "alpha", Ecosystem: "go", Purl: "pkg:golang/example.com/alpha@v1.1.0", ChangeType: "upgraded"},
+		{Name: "alpha", Ecosystem: "go", Purl: "pkg:golang/example.com/alpha@v1.0.0", ChangeType: "added", IsDirect: true},
+		{Name: "charlie", Ecosystem: "go", Purl: "pkg:golang/example.com/charlie@v1.0.0", ChangeType: "downgraded", IsDirect: true},
 	}
 
 	sortDependencyChanges(changes)
@@ -5766,35 +5767,35 @@ func TestToolNamesRegistration(t *testing.T) {
 func TestGetServerInfo(t *testing.T) {
 	s := NewServer(WithDefaultExcludePaths([]string{".bin/**"}))
 
-	_, info, err := s.getServerInfo(t.Context(), nil, ServerInfoInput{})
+	info, err := callProtoTool(t, t.Context(), s.getServerInfo, &mcpv1.GetServerInfoRequest{}, &mcpv1.GetServerInfoResult{})
 	if err != nil {
 		t.Fatalf("getServerInfo failed: %v", err)
 	}
-	if info.Name != "deputy" {
-		t.Fatalf("Name = %q, want deputy", info.Name)
+	if info.GetName() != "deputy" {
+		t.Fatalf("Name = %q, want deputy", info.GetName())
 	}
-	if info.Version == "" {
+	if info.GetVersion() == "" {
 		t.Fatal("expected Version")
 	}
-	if info.Protocol != "mcp" {
-		t.Fatalf("Protocol = %q, want mcp", info.Protocol)
+	if info.GetProtocol() != "mcp" {
+		t.Fatalf("Protocol = %q, want mcp", info.GetProtocol())
 	}
-	if info.Transport != "" {
-		t.Fatalf("Transport = %q, want empty for transport-neutral tool response", info.Transport)
+	if info.GetTransport() != "" {
+		t.Fatalf("Transport = %q, want empty for transport-neutral tool response", info.GetTransport())
 	}
-	if info.ProcessID != os.Getpid() {
-		t.Fatalf("ProcessID = %d, want %d", info.ProcessID, os.Getpid())
+	if int(info.GetProcessId()) != os.Getpid() {
+		t.Fatalf("ProcessId = %d, want %d", info.GetProcessId(), os.Getpid())
 	}
-	if info.StartedAt == "" {
+	if info.GetStartedAt() == "" {
 		t.Fatal("expected StartedAt")
 	}
-	if info.ToolCount != len(info.Tools) {
-		t.Fatalf("ToolCount = %d, len(Tools) = %d", info.ToolCount, len(info.Tools))
+	if int(info.GetToolCount()) != len(info.GetTools()) {
+		t.Fatalf("ToolCount = %d, len(Tools) = %d", info.GetToolCount(), len(info.GetTools()))
 	}
-	if !slices.Contains(info.Tools, "get_server_info") {
-		t.Fatalf("tools = %v, want get_server_info", info.Tools)
+	if !slices.Contains(info.GetTools(), "get_server_info") {
+		t.Fatalf("tools = %v, want get_server_info", info.GetTools())
 	}
-	if !slices.Equal(info.DefaultExcludePaths, []string{".bin/**"}) {
-		t.Fatalf("DefaultExcludePaths = %v, want .bin/**", info.DefaultExcludePaths)
+	if !slices.Equal(info.GetDefaultExcludePaths(), []string{".bin/**"}) {
+		t.Fatalf("DefaultExcludePaths = %v, want .bin/**", info.GetDefaultExcludePaths())
 	}
 }

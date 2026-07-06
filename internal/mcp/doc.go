@@ -35,6 +35,17 @@
 //
 //   - get_remediation: Get actionable commands to fix vulnerabilities
 //
+// # Tool Contracts
+//
+// Every tool's input and output contract is a deputy.mcp.v1 proto message
+// (api/deputy/mcp/v1/mcp.proto). The advertised JSON Schemas are derived from
+// the proto descriptors at registration time (see internal/mcp/protoschema),
+// requests are enforced against the same buf.validate rules the schemas
+// advertise, and the SDK validates every result against its output schema, so
+// the schema, the wire, and the server cannot drift apart. Results are
+// protojson with camelCase names; zero values are omitted, so an absent field
+// means empty, zero, or false.
+//
 // # Running the Server
 //
 // The MCP server can be started via the CLI:

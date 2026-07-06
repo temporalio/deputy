@@ -5,6 +5,7 @@ package deputy.mcp.v1;
 import "buf/validate/validate.proto";
 import "deputy/dependency/v1/dependency.proto";
 import "deputy/graph/v1/service.proto";
+import "deputy/policy/v1/service.proto";
 
 option go_package = "github.com/temporalio/deputy/gen/deputy/mcp/v1;mcpv1";
 
@@ -630,4 +631,337 @@ message GraphNeedsResult {
   int32 transitive_count = 12;
   // Message explains the outcome in one sentence.
   string message = 13;
+}
+
+// ExplainVulnerabilityRequest asks for the full advisory text for one
+// vulnerability.
+message ExplainVulnerabilityRequest {
+  // Vulnerability ID, e.g. CVE-2021-44228 or GHSA-xxxx-xxxx-xxxx.
+  string id = 1 [(buf.validate.field).required = true, (buf.validate.field).string = {min_len: 1, pattern: "\\S"}];
+  // Optional maximum number of advisory references to return. Omit or pass a
+  // negative value for all references; 0 returns none.
+  optional int32 reference_limit = 2;
+}
+
+// ExplainVulnerabilitiesRequest asks for the full advisory text for several
+// vulnerabilities in one call.
+message ExplainVulnerabilitiesRequest {
+  // Vulnerability IDs to explain.
+  repeated string ids = 1 [(buf.validate.field).required = true, (buf.validate.field).repeated = {min_items: 1, items: {string: {min_len: 1, pattern: "\\S"}}}];
+  // Optional maximum number of advisory references to return per
+  // vulnerability. Omit or pass a negative value for all references; 0
+  // returns none.
+  optional int32 reference_limit = 2;
+}
+
+// ExplainVulnerabilitiesResult carries the resolved advisories in request
+// order, with per-ID failures reported in errors rather than failing the
+// whole call.
+message ExplainVulnerabilitiesResult {
+  // Vulnerabilities are the resolved advisories in request order.
+  repeated VulnExplanation vulnerabilities = 1;
+  // Errors report the IDs that could not be resolved, as "ID: message"
+  // strings, so partial batches remain useful.
+  repeated string errors = 2;
+}
+
+// ScanPackageRequest identifies one package to check. Provide a purl, or a
+// name that is itself a PURL or name@version, or name plus version plus
+// ecosystem; the handler rejects combinations that do not resolve to an
+// exact package version.
+message ScanPackageRequest {
+  // Package URL, e.g. pkg:npm/lodash@4.17.21. Include @version in the PURL or
+  // provide version separately.
+  string purl = 1;
+  // Package name (e.g. lodash, github.com/foo/bar), Maven coordinates
+  // (group:artifact), or a pkg: PURL.
+  string name = 2;
+  // Package version. Required unless purl or name includes a pkg: PURL with
+  // @version.
+  string version = 3;
+  // Package ecosystem (e.g. npm, go, pypi, maven, cargo, github-actions).
+  // Required with split name/version input.
+  string ecosystem = 4;
+}
+
+// ScanPackageResult reports the known vulnerabilities of one package version.
+message ScanPackageResult {
+  // Package is the resolved package name.
+  string package = 1;
+  // Version is the resolved package version.
+  string version = 2;
+  // Ecosystem is the resolved canonical package ecosystem.
+  string ecosystem = 3;
+  // Purl is the resolved package URL that was checked.
+  string purl = 4;
+  // Vulnerabilities are the findings, with reference lists truncated to a
+  // compact sample.
+  repeated VulnExplanation vulnerabilities = 5;
+  // Clean reports whether no vulnerabilities were found; success, not an
+  // error.
+  bool clean = 6;
+}
+
+// GetServerInfoRequest has no parameters.
+message GetServerInfoRequest {}
+
+// GetServerInfoResult describes the running Deputy MCP server.
+message GetServerInfoResult {
+  // Name is the server name.
+  string name = 1;
+  // Version is the Deputy build version.
+  string version = 2;
+  // Protocol is the serving protocol, always "mcp".
+  string protocol = 3;
+  // Transport is the active transport when serving over HTTP.
+  string transport = 4;
+  // Description summarizes what the server does.
+  string description = 5;
+  // ProcessId is the server's operating system process ID.
+  int32 process_id = 6;
+  // StartedAt is when the server started (RFC 3339).
+  string started_at = 7;
+  // ToolCount is the number of registered tools.
+  int32 tool_count = 8;
+  // Tools lists the registered tool names.
+  repeated string tools = 9;
+  // DefaultExcludePaths lists directory globs the server excludes from walks
+  // by default.
+  repeated string default_exclude_paths = 10;
+}
+
+// ListPolicyEntrypointsRequest optionally filters policy entrypoints by
+// category. The accepted values mirror the canonical policy category
+// registry; a drift test keeps this list and the registry in lockstep.
+message ListPolicyEntrypointsRequest {
+  // Optional category filter. Legacy aliases container, service, and exec are
+  // accepted and normalized.
+  string category = 1 [(buf.validate.field).string = {in: ["container_diff", "diff", "dockerfile", "fix", "graph", "proxy", "sandbox", "sbom", "scan", "secrets", "server", "triage", "container", "exec", "service"]}, (buf.validate.field).ignore = IGNORE_IF_ZERO_VALUE];
+}
+
+// ListPolicyEntrypointsResult lists CEL policy entrypoints with their
+// variables and helper functions, for authoring Deputy policies.
+message ListPolicyEntrypointsResult {
+  // Category echoes the normalized category filter; absent when unfiltered.
+  string category = 1;
+  // EntrypointCount is the number of entrypoints returned.
+  int32 entrypoint_count = 2;
+  // Entrypoints are the matching policy entrypoints.
+  repeated deputy.policy.v1.EntrypointInfo entrypoints = 3;
+}
+
+// GetRemediationRequest asks for remediation commands for a directory's
+// vulnerability findings.
+message GetRemediationRequest {
+  // Path to the local directory to analyze for remediation.
+  string path = 1 [(buf.validate.field).required = true, (buf.validate.field).string = {min_len: 1, pattern: "\\S"}];
+  // Git reference, branch, tag, or commit for repository paths. Defaults to
+  // the current working tree/HEAD.
+  string ref = 2;
+  // Optional ecosystems to include, e.g. go, npm, pypi.
+  repeated string ecosystems = 3 [(buf.validate.field).repeated = {items: {string: {min_len: 1, pattern: "\\S"}}}];
+  // Optional directory globs to skip during the walk, e.g. .bin/** or
+  // **/testdata.
+  repeated string exclude_paths = 4 [(buf.validate.field).repeated = {items: {string: {min_len: 1, pattern: "\\S"}}}];
+}
+
+// RemediationCommand is one remediation action: an executable package-manager
+// command, or manual guidance when no safe command exists.
+message RemediationCommand {
+  // Package is the affected package name.
+  string package = 1;
+  // Version is the currently installed version.
+  string version = 2;
+  // Purl is the package URL of the affected package.
+  string purl = 3;
+  // TargetVersion is the version to upgrade or migrate to.
+  string target_version = 4;
+  // TargetModule is the module path to migrate to when the fix lives on a
+  // different module path.
+  string target_module = 5;
+  // Migration reports whether the fix moves to a different module path.
+  bool migration = 6;
+  // Manager is the package manager that runs the command.
+  string manager = 7;
+  // Command is the command line to run.
+  string command = 8;
+  // Path is the manifest path the command applies to.
+  string path = 9;
+  // Hint gives extra guidance for applying the command.
+  string hint = 10;
+  // IsDirect reports whether the affected package is a direct dependency.
+  bool is_direct = 11;
+  // Executable reports whether the command can be run as-is; manual commands
+  // are guidance only.
+  bool executable = 12;
+  // Groups are the dependency groups the package belongs to.
+  repeated string groups = 13;
+}
+
+// GetRemediationResult summarizes how a directory's findings can be fixed.
+// This formalizes the tool's established command-list shape; promoting the
+// MCP surface to the richer deputy.remediation.v1 plan model is a separate
+// behavior decision, deliberately not bundled into the contract migration.
+message GetRemediationResult {
+  // Path is the analyzed directory.
+  string path = 1;
+  // Ref is the requested Git reference when the path is a repository.
+  string ref = 2;
+  // EffectiveRef is the resolved reference that was actually analyzed.
+  string effective_ref = 3;
+  // Commit is the resolved commit hash of the analyzed snapshot.
+  string commit = 4;
+  // VulnerabilitiesFound is the number of unique findings.
+  int32 vulnerabilities_found = 5;
+  // RemediableCount counts findings with an actionable fix.
+  int32 remediable_count = 6;
+  // MigrationCount counts findings whose fix is a module migration.
+  int32 migration_count = 7;
+  // UnfixableCount counts findings with no known fix.
+  int32 unfixable_count = 8;
+  // CommandCount is the number of remediation commands returned.
+  int32 command_count = 9;
+  // ExecutableCommandCount counts commands that can be run as-is.
+  int32 executable_command_count = 10;
+  // ManualCommandCount counts commands that are guidance only.
+  int32 manual_command_count = 11;
+  // Commands are the remediation actions, one per fixable package.
+  repeated RemediationCommand commands = 12;
+  // StdlibUpgrade recommends a Go toolchain upgrade when stdlib findings are
+  // present.
+  string stdlib_upgrade = 13;
+  // UnfixableVulnerabilities lists the IDs of findings with no known fix.
+  repeated string unfixable_vulnerabilities = 14;
+}
+
+// DiffRefsRequest compares dependencies between two Git references or two
+// container images. Both refs must be the same kind.
+message DiffRefsRequest {
+  // Path to the repository for Git ref diffs. Leave empty for container image
+  // diffs.
+  string path = 1;
+  // Base Git reference (branch, tag, commit) or container image reference.
+  string base_ref = 2 [(buf.validate.field).required = true, (buf.validate.field).string = {min_len: 1, pattern: "\\S"}];
+  // Target Git reference or container image reference to compare against.
+  string target_ref = 3 [(buf.validate.field).required = true, (buf.validate.field).string = {min_len: 1, pattern: "\\S"}];
+  // Target platform for container image diffs, e.g. linux/amd64 or
+  // linux/arm64. Ignored for Git ref diffs.
+  string platform = 4;
+  // Optional ecosystems to include for Git ref diffs, e.g. go, npm, pypi.
+  repeated string ecosystems = 5 [(buf.validate.field).repeated = {items: {string: {min_len: 1, pattern: "\\S"}}}];
+  // Optional directory globs to skip during Git ref scans, e.g. .bin/** or
+  // **/testdata.
+  repeated string exclude_paths = 6 [(buf.validate.field).repeated = {items: {string: {min_len: 1, pattern: "\\S"}}}];
+}
+
+// DependencyChange is one package-level difference between base and target.
+message DependencyChange {
+  // Name is the package name.
+  string name = 1;
+  // BaseVersion is the version at the base ref; absent for added packages.
+  string base_version = 2;
+  // TargetVersion is the version at the target ref; absent for removed
+  // packages.
+  string target_version = 3;
+  // Purl is the package URL.
+  string purl = 4;
+  // ChangeType classifies the difference. Version changes are upgraded or
+  // downgraded when the versions compare, updated otherwise.
+  string change_type = 5 [(buf.validate.field).string = {in: ["added", "removed", "upgraded", "downgraded", "updated"]}, (buf.validate.field).ignore = IGNORE_IF_ZERO_VALUE];
+  // IsDirect reports whether the package is a direct dependency.
+  bool is_direct = 6;
+  // Ecosystem is the canonical package ecosystem.
+  string ecosystem = 7;
+}
+
+// DiffVulnChange is one vulnerability delta between two container images.
+message DiffVulnChange {
+  // Id is the primary vulnerability identifier.
+  string id = 1;
+  // Aliases are alternative identifiers for the same vulnerability.
+  repeated string aliases = 2;
+  // ChangeType classifies the delta: added (new in target), removed (affected
+  // package gone), fixed (package upgraded past it), or persisted (present in
+  // both).
+  string change_type = 3 [(buf.validate.field).string = {in: ["added", "removed", "fixed", "persisted", "unspecified"]}, (buf.validate.field).ignore = IGNORE_IF_ZERO_VALUE];
+  // Severity is the normalized severity level.
+  string severity = 4 [(buf.validate.field).string = {in: ["CRITICAL", "HIGH", "MEDIUM", "LOW", "UNKNOWN"]}, (buf.validate.field).ignore = IGNORE_IF_ZERO_VALUE];
+  // Package is the affected package name.
+  string package = 5;
+  // Ecosystem is the canonical package ecosystem.
+  string ecosystem = 6;
+  // BaseVersion is the affected package's version in the base image.
+  string base_version = 7;
+  // TargetVersion is the affected package's version in the target image.
+  string target_version = 8;
+  // FixedVersions are versions containing a fix.
+  repeated string fixed_versions = 9;
+  // Summary is a brief description of the vulnerability.
+  string summary = 10;
+  // Published is when the advisory was first published (RFC 3339).
+  string published = 11;
+}
+
+// ContainerSummary totals a container image diff.
+message ContainerSummary {
+  // PackagesAdded counts packages only in the target image.
+  int32 packages_added = 1;
+  // PackagesRemoved counts packages only in the base image.
+  int32 packages_removed = 2;
+  // PackagesUpgraded counts packages with a higher version in the target.
+  int32 packages_upgraded = 3;
+  // PackagesDowngraded counts packages with a lower version in the target.
+  int32 packages_downgraded = 4;
+  // VulnerabilitiesAdded counts findings only in the target image.
+  int32 vulnerabilities_added = 5;
+  // VulnerabilitiesRemoved counts findings gone because the affected package
+  // was removed.
+  int32 vulnerabilities_removed = 6;
+  // VulnerabilitiesFixed counts findings gone because the affected package
+  // was upgraded past them.
+  int32 vulnerabilities_fixed = 7;
+  // LayersAdded counts image layers only in the target.
+  int32 layers_added = 8;
+  // LayersRemoved counts image layers only in the base.
+  int32 layers_removed = 9;
+  // ConfigChanged reports whether the image configurations differ.
+  bool config_changed = 10;
+}
+
+// DiffRefsResult reports dependency and vulnerability differences between two
+// Git references or two container images.
+message DiffRefsResult {
+  // Path is the analyzed repository for Git ref diffs.
+  string path = 1;
+  // BaseRef is the compared base reference.
+  string base_ref = 2;
+  // TargetRef is the compared target reference.
+  string target_ref = 3;
+  // BaseCommit is the resolved commit hash of the base ref for Git diffs.
+  string base_commit = 4;
+  // TargetCommit is the resolved commit hash of the target ref for Git diffs.
+  string target_commit = 5;
+  // Platform is the compared platform for container image diffs.
+  string platform = 6;
+  // IsContainerDiff reports whether container images were compared; absent
+  // means a Git ref diff.
+  bool is_container_diff = 7;
+  // Changes are the package-level differences, direct dependencies first.
+  repeated DependencyChange changes = 8;
+  // AddedCount counts added packages.
+  int32 added_count = 9;
+  // RemovedCount counts removed packages.
+  int32 removed_count = 10;
+  // UpdatedCount counts version changes, including upgrades and downgrades.
+  int32 updated_count = 11;
+  // Vulnerabilities are the target's findings, with reference lists truncated
+  // to a compact sample.
+  repeated VulnExplanation vulnerabilities = 12;
+  // VulnerabilitySummary counts the target's findings per severity level,
+  // including an "unknown" bucket.
+  map<string, int32> vulnerability_summary = 13;
+  // VulnerabilityChanges are per-vulnerability deltas for container diffs.
+  repeated DiffVulnChange vulnerability_changes = 14;
+  // ContainerSummary totals the container diff; absent for Git ref diffs.
+  ContainerSummary container_summary = 15;
 }

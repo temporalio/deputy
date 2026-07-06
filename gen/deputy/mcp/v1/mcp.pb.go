@@ -10,6 +10,7 @@ import (
 	_ "buf.build/gen/go/bufbuild/protovalidate/protocolbuffers/go/buf/validate"
 	v1 "github.com/temporalio/deputy/gen/deputy/dependency/v1"
 	v11 "github.com/temporalio/deputy/gen/deputy/graph/v1"
+	v12 "github.com/temporalio/deputy/gen/deputy/policy/v1"
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 	reflect "reflect"
@@ -2930,11 +2931,1676 @@ func (x *GraphNeedsResult) GetMessage() string {
 	return ""
 }
 
+// ExplainVulnerabilityRequest asks for the full advisory text for one
+// vulnerability.
+type ExplainVulnerabilityRequest struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Vulnerability ID, e.g. CVE-2021-44228 or GHSA-xxxx-xxxx-xxxx.
+	Id string `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	// Optional maximum number of advisory references to return. Omit or pass a
+	// negative value for all references; 0 returns none.
+	ReferenceLimit *int32 `protobuf:"varint,2,opt,name=reference_limit,json=referenceLimit,proto3,oneof" json:"reference_limit,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
+}
+
+func (x *ExplainVulnerabilityRequest) Reset() {
+	*x = ExplainVulnerabilityRequest{}
+	mi := &file_deputy_mcp_v1_mcp_proto_msgTypes[26]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ExplainVulnerabilityRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ExplainVulnerabilityRequest) ProtoMessage() {}
+
+func (x *ExplainVulnerabilityRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_deputy_mcp_v1_mcp_proto_msgTypes[26]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ExplainVulnerabilityRequest.ProtoReflect.Descriptor instead.
+func (*ExplainVulnerabilityRequest) Descriptor() ([]byte, []int) {
+	return file_deputy_mcp_v1_mcp_proto_rawDescGZIP(), []int{26}
+}
+
+func (x *ExplainVulnerabilityRequest) GetId() string {
+	if x != nil {
+		return x.Id
+	}
+	return ""
+}
+
+func (x *ExplainVulnerabilityRequest) GetReferenceLimit() int32 {
+	if x != nil && x.ReferenceLimit != nil {
+		return *x.ReferenceLimit
+	}
+	return 0
+}
+
+// ExplainVulnerabilitiesRequest asks for the full advisory text for several
+// vulnerabilities in one call.
+type ExplainVulnerabilitiesRequest struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Vulnerability IDs to explain.
+	Ids []string `protobuf:"bytes,1,rep,name=ids,proto3" json:"ids,omitempty"`
+	// Optional maximum number of advisory references to return per
+	// vulnerability. Omit or pass a negative value for all references; 0
+	// returns none.
+	ReferenceLimit *int32 `protobuf:"varint,2,opt,name=reference_limit,json=referenceLimit,proto3,oneof" json:"reference_limit,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
+}
+
+func (x *ExplainVulnerabilitiesRequest) Reset() {
+	*x = ExplainVulnerabilitiesRequest{}
+	mi := &file_deputy_mcp_v1_mcp_proto_msgTypes[27]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ExplainVulnerabilitiesRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ExplainVulnerabilitiesRequest) ProtoMessage() {}
+
+func (x *ExplainVulnerabilitiesRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_deputy_mcp_v1_mcp_proto_msgTypes[27]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ExplainVulnerabilitiesRequest.ProtoReflect.Descriptor instead.
+func (*ExplainVulnerabilitiesRequest) Descriptor() ([]byte, []int) {
+	return file_deputy_mcp_v1_mcp_proto_rawDescGZIP(), []int{27}
+}
+
+func (x *ExplainVulnerabilitiesRequest) GetIds() []string {
+	if x != nil {
+		return x.Ids
+	}
+	return nil
+}
+
+func (x *ExplainVulnerabilitiesRequest) GetReferenceLimit() int32 {
+	if x != nil && x.ReferenceLimit != nil {
+		return *x.ReferenceLimit
+	}
+	return 0
+}
+
+// ExplainVulnerabilitiesResult carries the resolved advisories in request
+// order, with per-ID failures reported in errors rather than failing the
+// whole call.
+type ExplainVulnerabilitiesResult struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Vulnerabilities are the resolved advisories in request order.
+	Vulnerabilities []*VulnExplanation `protobuf:"bytes,1,rep,name=vulnerabilities,proto3" json:"vulnerabilities,omitempty"`
+	// Errors report the IDs that could not be resolved, as "ID: message"
+	// strings, so partial batches remain useful.
+	Errors        []string `protobuf:"bytes,2,rep,name=errors,proto3" json:"errors,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ExplainVulnerabilitiesResult) Reset() {
+	*x = ExplainVulnerabilitiesResult{}
+	mi := &file_deputy_mcp_v1_mcp_proto_msgTypes[28]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ExplainVulnerabilitiesResult) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ExplainVulnerabilitiesResult) ProtoMessage() {}
+
+func (x *ExplainVulnerabilitiesResult) ProtoReflect() protoreflect.Message {
+	mi := &file_deputy_mcp_v1_mcp_proto_msgTypes[28]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ExplainVulnerabilitiesResult.ProtoReflect.Descriptor instead.
+func (*ExplainVulnerabilitiesResult) Descriptor() ([]byte, []int) {
+	return file_deputy_mcp_v1_mcp_proto_rawDescGZIP(), []int{28}
+}
+
+func (x *ExplainVulnerabilitiesResult) GetVulnerabilities() []*VulnExplanation {
+	if x != nil {
+		return x.Vulnerabilities
+	}
+	return nil
+}
+
+func (x *ExplainVulnerabilitiesResult) GetErrors() []string {
+	if x != nil {
+		return x.Errors
+	}
+	return nil
+}
+
+// ScanPackageRequest identifies one package to check. Provide a purl, or a
+// name that is itself a PURL or name@version, or name plus version plus
+// ecosystem; the handler rejects combinations that do not resolve to an
+// exact package version.
+type ScanPackageRequest struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Package URL, e.g. pkg:npm/lodash@4.17.21. Include @version in the PURL or
+	// provide version separately.
+	Purl string `protobuf:"bytes,1,opt,name=purl,proto3" json:"purl,omitempty"`
+	// Package name (e.g. lodash, github.com/foo/bar), Maven coordinates
+	// (group:artifact), or a pkg: PURL.
+	Name string `protobuf:"bytes,2,opt,name=name,proto3" json:"name,omitempty"`
+	// Package version. Required unless purl or name includes a pkg: PURL with
+	// @version.
+	Version string `protobuf:"bytes,3,opt,name=version,proto3" json:"version,omitempty"`
+	// Package ecosystem (e.g. npm, go, pypi, maven, cargo, github-actions).
+	// Required with split name/version input.
+	Ecosystem     string `protobuf:"bytes,4,opt,name=ecosystem,proto3" json:"ecosystem,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ScanPackageRequest) Reset() {
+	*x = ScanPackageRequest{}
+	mi := &file_deputy_mcp_v1_mcp_proto_msgTypes[29]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ScanPackageRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ScanPackageRequest) ProtoMessage() {}
+
+func (x *ScanPackageRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_deputy_mcp_v1_mcp_proto_msgTypes[29]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ScanPackageRequest.ProtoReflect.Descriptor instead.
+func (*ScanPackageRequest) Descriptor() ([]byte, []int) {
+	return file_deputy_mcp_v1_mcp_proto_rawDescGZIP(), []int{29}
+}
+
+func (x *ScanPackageRequest) GetPurl() string {
+	if x != nil {
+		return x.Purl
+	}
+	return ""
+}
+
+func (x *ScanPackageRequest) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+func (x *ScanPackageRequest) GetVersion() string {
+	if x != nil {
+		return x.Version
+	}
+	return ""
+}
+
+func (x *ScanPackageRequest) GetEcosystem() string {
+	if x != nil {
+		return x.Ecosystem
+	}
+	return ""
+}
+
+// ScanPackageResult reports the known vulnerabilities of one package version.
+type ScanPackageResult struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Package is the resolved package name.
+	Package string `protobuf:"bytes,1,opt,name=package,proto3" json:"package,omitempty"`
+	// Version is the resolved package version.
+	Version string `protobuf:"bytes,2,opt,name=version,proto3" json:"version,omitempty"`
+	// Ecosystem is the resolved canonical package ecosystem.
+	Ecosystem string `protobuf:"bytes,3,opt,name=ecosystem,proto3" json:"ecosystem,omitempty"`
+	// Purl is the resolved package URL that was checked.
+	Purl string `protobuf:"bytes,4,opt,name=purl,proto3" json:"purl,omitempty"`
+	// Vulnerabilities are the findings, with reference lists truncated to a
+	// compact sample.
+	Vulnerabilities []*VulnExplanation `protobuf:"bytes,5,rep,name=vulnerabilities,proto3" json:"vulnerabilities,omitempty"`
+	// Clean reports whether no vulnerabilities were found; success, not an
+	// error.
+	Clean         bool `protobuf:"varint,6,opt,name=clean,proto3" json:"clean,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ScanPackageResult) Reset() {
+	*x = ScanPackageResult{}
+	mi := &file_deputy_mcp_v1_mcp_proto_msgTypes[30]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ScanPackageResult) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ScanPackageResult) ProtoMessage() {}
+
+func (x *ScanPackageResult) ProtoReflect() protoreflect.Message {
+	mi := &file_deputy_mcp_v1_mcp_proto_msgTypes[30]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ScanPackageResult.ProtoReflect.Descriptor instead.
+func (*ScanPackageResult) Descriptor() ([]byte, []int) {
+	return file_deputy_mcp_v1_mcp_proto_rawDescGZIP(), []int{30}
+}
+
+func (x *ScanPackageResult) GetPackage() string {
+	if x != nil {
+		return x.Package
+	}
+	return ""
+}
+
+func (x *ScanPackageResult) GetVersion() string {
+	if x != nil {
+		return x.Version
+	}
+	return ""
+}
+
+func (x *ScanPackageResult) GetEcosystem() string {
+	if x != nil {
+		return x.Ecosystem
+	}
+	return ""
+}
+
+func (x *ScanPackageResult) GetPurl() string {
+	if x != nil {
+		return x.Purl
+	}
+	return ""
+}
+
+func (x *ScanPackageResult) GetVulnerabilities() []*VulnExplanation {
+	if x != nil {
+		return x.Vulnerabilities
+	}
+	return nil
+}
+
+func (x *ScanPackageResult) GetClean() bool {
+	if x != nil {
+		return x.Clean
+	}
+	return false
+}
+
+// GetServerInfoRequest has no parameters.
+type GetServerInfoRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GetServerInfoRequest) Reset() {
+	*x = GetServerInfoRequest{}
+	mi := &file_deputy_mcp_v1_mcp_proto_msgTypes[31]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetServerInfoRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetServerInfoRequest) ProtoMessage() {}
+
+func (x *GetServerInfoRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_deputy_mcp_v1_mcp_proto_msgTypes[31]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetServerInfoRequest.ProtoReflect.Descriptor instead.
+func (*GetServerInfoRequest) Descriptor() ([]byte, []int) {
+	return file_deputy_mcp_v1_mcp_proto_rawDescGZIP(), []int{31}
+}
+
+// GetServerInfoResult describes the running Deputy MCP server.
+type GetServerInfoResult struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Name is the server name.
+	Name string `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
+	// Version is the Deputy build version.
+	Version string `protobuf:"bytes,2,opt,name=version,proto3" json:"version,omitempty"`
+	// Protocol is the serving protocol, always "mcp".
+	Protocol string `protobuf:"bytes,3,opt,name=protocol,proto3" json:"protocol,omitempty"`
+	// Transport is the active transport when serving over HTTP.
+	Transport string `protobuf:"bytes,4,opt,name=transport,proto3" json:"transport,omitempty"`
+	// Description summarizes what the server does.
+	Description string `protobuf:"bytes,5,opt,name=description,proto3" json:"description,omitempty"`
+	// ProcessId is the server's operating system process ID.
+	ProcessId int32 `protobuf:"varint,6,opt,name=process_id,json=processId,proto3" json:"process_id,omitempty"`
+	// StartedAt is when the server started (RFC 3339).
+	StartedAt string `protobuf:"bytes,7,opt,name=started_at,json=startedAt,proto3" json:"started_at,omitempty"`
+	// ToolCount is the number of registered tools.
+	ToolCount int32 `protobuf:"varint,8,opt,name=tool_count,json=toolCount,proto3" json:"tool_count,omitempty"`
+	// Tools lists the registered tool names.
+	Tools []string `protobuf:"bytes,9,rep,name=tools,proto3" json:"tools,omitempty"`
+	// DefaultExcludePaths lists directory globs the server excludes from walks
+	// by default.
+	DefaultExcludePaths []string `protobuf:"bytes,10,rep,name=default_exclude_paths,json=defaultExcludePaths,proto3" json:"default_exclude_paths,omitempty"`
+	unknownFields       protoimpl.UnknownFields
+	sizeCache           protoimpl.SizeCache
+}
+
+func (x *GetServerInfoResult) Reset() {
+	*x = GetServerInfoResult{}
+	mi := &file_deputy_mcp_v1_mcp_proto_msgTypes[32]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetServerInfoResult) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetServerInfoResult) ProtoMessage() {}
+
+func (x *GetServerInfoResult) ProtoReflect() protoreflect.Message {
+	mi := &file_deputy_mcp_v1_mcp_proto_msgTypes[32]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetServerInfoResult.ProtoReflect.Descriptor instead.
+func (*GetServerInfoResult) Descriptor() ([]byte, []int) {
+	return file_deputy_mcp_v1_mcp_proto_rawDescGZIP(), []int{32}
+}
+
+func (x *GetServerInfoResult) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+func (x *GetServerInfoResult) GetVersion() string {
+	if x != nil {
+		return x.Version
+	}
+	return ""
+}
+
+func (x *GetServerInfoResult) GetProtocol() string {
+	if x != nil {
+		return x.Protocol
+	}
+	return ""
+}
+
+func (x *GetServerInfoResult) GetTransport() string {
+	if x != nil {
+		return x.Transport
+	}
+	return ""
+}
+
+func (x *GetServerInfoResult) GetDescription() string {
+	if x != nil {
+		return x.Description
+	}
+	return ""
+}
+
+func (x *GetServerInfoResult) GetProcessId() int32 {
+	if x != nil {
+		return x.ProcessId
+	}
+	return 0
+}
+
+func (x *GetServerInfoResult) GetStartedAt() string {
+	if x != nil {
+		return x.StartedAt
+	}
+	return ""
+}
+
+func (x *GetServerInfoResult) GetToolCount() int32 {
+	if x != nil {
+		return x.ToolCount
+	}
+	return 0
+}
+
+func (x *GetServerInfoResult) GetTools() []string {
+	if x != nil {
+		return x.Tools
+	}
+	return nil
+}
+
+func (x *GetServerInfoResult) GetDefaultExcludePaths() []string {
+	if x != nil {
+		return x.DefaultExcludePaths
+	}
+	return nil
+}
+
+// ListPolicyEntrypointsRequest optionally filters policy entrypoints by
+// category. The accepted values mirror the canonical policy category
+// registry; a drift test keeps this list and the registry in lockstep.
+type ListPolicyEntrypointsRequest struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Optional category filter. Legacy aliases container, service, and exec are
+	// accepted and normalized.
+	Category      string `protobuf:"bytes,1,opt,name=category,proto3" json:"category,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ListPolicyEntrypointsRequest) Reset() {
+	*x = ListPolicyEntrypointsRequest{}
+	mi := &file_deputy_mcp_v1_mcp_proto_msgTypes[33]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ListPolicyEntrypointsRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ListPolicyEntrypointsRequest) ProtoMessage() {}
+
+func (x *ListPolicyEntrypointsRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_deputy_mcp_v1_mcp_proto_msgTypes[33]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ListPolicyEntrypointsRequest.ProtoReflect.Descriptor instead.
+func (*ListPolicyEntrypointsRequest) Descriptor() ([]byte, []int) {
+	return file_deputy_mcp_v1_mcp_proto_rawDescGZIP(), []int{33}
+}
+
+func (x *ListPolicyEntrypointsRequest) GetCategory() string {
+	if x != nil {
+		return x.Category
+	}
+	return ""
+}
+
+// ListPolicyEntrypointsResult lists CEL policy entrypoints with their
+// variables and helper functions, for authoring Deputy policies.
+type ListPolicyEntrypointsResult struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Category echoes the normalized category filter; absent when unfiltered.
+	Category string `protobuf:"bytes,1,opt,name=category,proto3" json:"category,omitempty"`
+	// EntrypointCount is the number of entrypoints returned.
+	EntrypointCount int32 `protobuf:"varint,2,opt,name=entrypoint_count,json=entrypointCount,proto3" json:"entrypoint_count,omitempty"`
+	// Entrypoints are the matching policy entrypoints.
+	Entrypoints   []*v12.EntrypointInfo `protobuf:"bytes,3,rep,name=entrypoints,proto3" json:"entrypoints,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ListPolicyEntrypointsResult) Reset() {
+	*x = ListPolicyEntrypointsResult{}
+	mi := &file_deputy_mcp_v1_mcp_proto_msgTypes[34]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ListPolicyEntrypointsResult) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ListPolicyEntrypointsResult) ProtoMessage() {}
+
+func (x *ListPolicyEntrypointsResult) ProtoReflect() protoreflect.Message {
+	mi := &file_deputy_mcp_v1_mcp_proto_msgTypes[34]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ListPolicyEntrypointsResult.ProtoReflect.Descriptor instead.
+func (*ListPolicyEntrypointsResult) Descriptor() ([]byte, []int) {
+	return file_deputy_mcp_v1_mcp_proto_rawDescGZIP(), []int{34}
+}
+
+func (x *ListPolicyEntrypointsResult) GetCategory() string {
+	if x != nil {
+		return x.Category
+	}
+	return ""
+}
+
+func (x *ListPolicyEntrypointsResult) GetEntrypointCount() int32 {
+	if x != nil {
+		return x.EntrypointCount
+	}
+	return 0
+}
+
+func (x *ListPolicyEntrypointsResult) GetEntrypoints() []*v12.EntrypointInfo {
+	if x != nil {
+		return x.Entrypoints
+	}
+	return nil
+}
+
+// GetRemediationRequest asks for remediation commands for a directory's
+// vulnerability findings.
+type GetRemediationRequest struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Path to the local directory to analyze for remediation.
+	Path string `protobuf:"bytes,1,opt,name=path,proto3" json:"path,omitempty"`
+	// Git reference, branch, tag, or commit for repository paths. Defaults to
+	// the current working tree/HEAD.
+	Ref string `protobuf:"bytes,2,opt,name=ref,proto3" json:"ref,omitempty"`
+	// Optional ecosystems to include, e.g. go, npm, pypi.
+	Ecosystems []string `protobuf:"bytes,3,rep,name=ecosystems,proto3" json:"ecosystems,omitempty"`
+	// Optional directory globs to skip during the walk, e.g. .bin/** or
+	// **/testdata.
+	ExcludePaths  []string `protobuf:"bytes,4,rep,name=exclude_paths,json=excludePaths,proto3" json:"exclude_paths,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GetRemediationRequest) Reset() {
+	*x = GetRemediationRequest{}
+	mi := &file_deputy_mcp_v1_mcp_proto_msgTypes[35]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetRemediationRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetRemediationRequest) ProtoMessage() {}
+
+func (x *GetRemediationRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_deputy_mcp_v1_mcp_proto_msgTypes[35]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetRemediationRequest.ProtoReflect.Descriptor instead.
+func (*GetRemediationRequest) Descriptor() ([]byte, []int) {
+	return file_deputy_mcp_v1_mcp_proto_rawDescGZIP(), []int{35}
+}
+
+func (x *GetRemediationRequest) GetPath() string {
+	if x != nil {
+		return x.Path
+	}
+	return ""
+}
+
+func (x *GetRemediationRequest) GetRef() string {
+	if x != nil {
+		return x.Ref
+	}
+	return ""
+}
+
+func (x *GetRemediationRequest) GetEcosystems() []string {
+	if x != nil {
+		return x.Ecosystems
+	}
+	return nil
+}
+
+func (x *GetRemediationRequest) GetExcludePaths() []string {
+	if x != nil {
+		return x.ExcludePaths
+	}
+	return nil
+}
+
+// RemediationCommand is one remediation action: an executable package-manager
+// command, or manual guidance when no safe command exists.
+type RemediationCommand struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Package is the affected package name.
+	Package string `protobuf:"bytes,1,opt,name=package,proto3" json:"package,omitempty"`
+	// Version is the currently installed version.
+	Version string `protobuf:"bytes,2,opt,name=version,proto3" json:"version,omitempty"`
+	// Purl is the package URL of the affected package.
+	Purl string `protobuf:"bytes,3,opt,name=purl,proto3" json:"purl,omitempty"`
+	// TargetVersion is the version to upgrade or migrate to.
+	TargetVersion string `protobuf:"bytes,4,opt,name=target_version,json=targetVersion,proto3" json:"target_version,omitempty"`
+	// TargetModule is the module path to migrate to when the fix lives on a
+	// different module path.
+	TargetModule string `protobuf:"bytes,5,opt,name=target_module,json=targetModule,proto3" json:"target_module,omitempty"`
+	// Migration reports whether the fix moves to a different module path.
+	Migration bool `protobuf:"varint,6,opt,name=migration,proto3" json:"migration,omitempty"`
+	// Manager is the package manager that runs the command.
+	Manager string `protobuf:"bytes,7,opt,name=manager,proto3" json:"manager,omitempty"`
+	// Command is the command line to run.
+	Command string `protobuf:"bytes,8,opt,name=command,proto3" json:"command,omitempty"`
+	// Path is the manifest path the command applies to.
+	Path string `protobuf:"bytes,9,opt,name=path,proto3" json:"path,omitempty"`
+	// Hint gives extra guidance for applying the command.
+	Hint string `protobuf:"bytes,10,opt,name=hint,proto3" json:"hint,omitempty"`
+	// IsDirect reports whether the affected package is a direct dependency.
+	IsDirect bool `protobuf:"varint,11,opt,name=is_direct,json=isDirect,proto3" json:"is_direct,omitempty"`
+	// Executable reports whether the command can be run as-is; manual commands
+	// are guidance only.
+	Executable bool `protobuf:"varint,12,opt,name=executable,proto3" json:"executable,omitempty"`
+	// Groups are the dependency groups the package belongs to.
+	Groups        []string `protobuf:"bytes,13,rep,name=groups,proto3" json:"groups,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RemediationCommand) Reset() {
+	*x = RemediationCommand{}
+	mi := &file_deputy_mcp_v1_mcp_proto_msgTypes[36]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RemediationCommand) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RemediationCommand) ProtoMessage() {}
+
+func (x *RemediationCommand) ProtoReflect() protoreflect.Message {
+	mi := &file_deputy_mcp_v1_mcp_proto_msgTypes[36]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RemediationCommand.ProtoReflect.Descriptor instead.
+func (*RemediationCommand) Descriptor() ([]byte, []int) {
+	return file_deputy_mcp_v1_mcp_proto_rawDescGZIP(), []int{36}
+}
+
+func (x *RemediationCommand) GetPackage() string {
+	if x != nil {
+		return x.Package
+	}
+	return ""
+}
+
+func (x *RemediationCommand) GetVersion() string {
+	if x != nil {
+		return x.Version
+	}
+	return ""
+}
+
+func (x *RemediationCommand) GetPurl() string {
+	if x != nil {
+		return x.Purl
+	}
+	return ""
+}
+
+func (x *RemediationCommand) GetTargetVersion() string {
+	if x != nil {
+		return x.TargetVersion
+	}
+	return ""
+}
+
+func (x *RemediationCommand) GetTargetModule() string {
+	if x != nil {
+		return x.TargetModule
+	}
+	return ""
+}
+
+func (x *RemediationCommand) GetMigration() bool {
+	if x != nil {
+		return x.Migration
+	}
+	return false
+}
+
+func (x *RemediationCommand) GetManager() string {
+	if x != nil {
+		return x.Manager
+	}
+	return ""
+}
+
+func (x *RemediationCommand) GetCommand() string {
+	if x != nil {
+		return x.Command
+	}
+	return ""
+}
+
+func (x *RemediationCommand) GetPath() string {
+	if x != nil {
+		return x.Path
+	}
+	return ""
+}
+
+func (x *RemediationCommand) GetHint() string {
+	if x != nil {
+		return x.Hint
+	}
+	return ""
+}
+
+func (x *RemediationCommand) GetIsDirect() bool {
+	if x != nil {
+		return x.IsDirect
+	}
+	return false
+}
+
+func (x *RemediationCommand) GetExecutable() bool {
+	if x != nil {
+		return x.Executable
+	}
+	return false
+}
+
+func (x *RemediationCommand) GetGroups() []string {
+	if x != nil {
+		return x.Groups
+	}
+	return nil
+}
+
+// GetRemediationResult summarizes how a directory's findings can be fixed.
+// This formalizes the tool's established command-list shape; promoting the
+// MCP surface to the richer deputy.remediation.v1 plan model is a separate
+// behavior decision, deliberately not bundled into the contract migration.
+type GetRemediationResult struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Path is the analyzed directory.
+	Path string `protobuf:"bytes,1,opt,name=path,proto3" json:"path,omitempty"`
+	// Ref is the requested Git reference when the path is a repository.
+	Ref string `protobuf:"bytes,2,opt,name=ref,proto3" json:"ref,omitempty"`
+	// EffectiveRef is the resolved reference that was actually analyzed.
+	EffectiveRef string `protobuf:"bytes,3,opt,name=effective_ref,json=effectiveRef,proto3" json:"effective_ref,omitempty"`
+	// Commit is the resolved commit hash of the analyzed snapshot.
+	Commit string `protobuf:"bytes,4,opt,name=commit,proto3" json:"commit,omitempty"`
+	// VulnerabilitiesFound is the number of unique findings.
+	VulnerabilitiesFound int32 `protobuf:"varint,5,opt,name=vulnerabilities_found,json=vulnerabilitiesFound,proto3" json:"vulnerabilities_found,omitempty"`
+	// RemediableCount counts findings with an actionable fix.
+	RemediableCount int32 `protobuf:"varint,6,opt,name=remediable_count,json=remediableCount,proto3" json:"remediable_count,omitempty"`
+	// MigrationCount counts findings whose fix is a module migration.
+	MigrationCount int32 `protobuf:"varint,7,opt,name=migration_count,json=migrationCount,proto3" json:"migration_count,omitempty"`
+	// UnfixableCount counts findings with no known fix.
+	UnfixableCount int32 `protobuf:"varint,8,opt,name=unfixable_count,json=unfixableCount,proto3" json:"unfixable_count,omitempty"`
+	// CommandCount is the number of remediation commands returned.
+	CommandCount int32 `protobuf:"varint,9,opt,name=command_count,json=commandCount,proto3" json:"command_count,omitempty"`
+	// ExecutableCommandCount counts commands that can be run as-is.
+	ExecutableCommandCount int32 `protobuf:"varint,10,opt,name=executable_command_count,json=executableCommandCount,proto3" json:"executable_command_count,omitempty"`
+	// ManualCommandCount counts commands that are guidance only.
+	ManualCommandCount int32 `protobuf:"varint,11,opt,name=manual_command_count,json=manualCommandCount,proto3" json:"manual_command_count,omitempty"`
+	// Commands are the remediation actions, one per fixable package.
+	Commands []*RemediationCommand `protobuf:"bytes,12,rep,name=commands,proto3" json:"commands,omitempty"`
+	// StdlibUpgrade recommends a Go toolchain upgrade when stdlib findings are
+	// present.
+	StdlibUpgrade string `protobuf:"bytes,13,opt,name=stdlib_upgrade,json=stdlibUpgrade,proto3" json:"stdlib_upgrade,omitempty"`
+	// UnfixableVulnerabilities lists the IDs of findings with no known fix.
+	UnfixableVulnerabilities []string `protobuf:"bytes,14,rep,name=unfixable_vulnerabilities,json=unfixableVulnerabilities,proto3" json:"unfixable_vulnerabilities,omitempty"`
+	unknownFields            protoimpl.UnknownFields
+	sizeCache                protoimpl.SizeCache
+}
+
+func (x *GetRemediationResult) Reset() {
+	*x = GetRemediationResult{}
+	mi := &file_deputy_mcp_v1_mcp_proto_msgTypes[37]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetRemediationResult) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetRemediationResult) ProtoMessage() {}
+
+func (x *GetRemediationResult) ProtoReflect() protoreflect.Message {
+	mi := &file_deputy_mcp_v1_mcp_proto_msgTypes[37]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetRemediationResult.ProtoReflect.Descriptor instead.
+func (*GetRemediationResult) Descriptor() ([]byte, []int) {
+	return file_deputy_mcp_v1_mcp_proto_rawDescGZIP(), []int{37}
+}
+
+func (x *GetRemediationResult) GetPath() string {
+	if x != nil {
+		return x.Path
+	}
+	return ""
+}
+
+func (x *GetRemediationResult) GetRef() string {
+	if x != nil {
+		return x.Ref
+	}
+	return ""
+}
+
+func (x *GetRemediationResult) GetEffectiveRef() string {
+	if x != nil {
+		return x.EffectiveRef
+	}
+	return ""
+}
+
+func (x *GetRemediationResult) GetCommit() string {
+	if x != nil {
+		return x.Commit
+	}
+	return ""
+}
+
+func (x *GetRemediationResult) GetVulnerabilitiesFound() int32 {
+	if x != nil {
+		return x.VulnerabilitiesFound
+	}
+	return 0
+}
+
+func (x *GetRemediationResult) GetRemediableCount() int32 {
+	if x != nil {
+		return x.RemediableCount
+	}
+	return 0
+}
+
+func (x *GetRemediationResult) GetMigrationCount() int32 {
+	if x != nil {
+		return x.MigrationCount
+	}
+	return 0
+}
+
+func (x *GetRemediationResult) GetUnfixableCount() int32 {
+	if x != nil {
+		return x.UnfixableCount
+	}
+	return 0
+}
+
+func (x *GetRemediationResult) GetCommandCount() int32 {
+	if x != nil {
+		return x.CommandCount
+	}
+	return 0
+}
+
+func (x *GetRemediationResult) GetExecutableCommandCount() int32 {
+	if x != nil {
+		return x.ExecutableCommandCount
+	}
+	return 0
+}
+
+func (x *GetRemediationResult) GetManualCommandCount() int32 {
+	if x != nil {
+		return x.ManualCommandCount
+	}
+	return 0
+}
+
+func (x *GetRemediationResult) GetCommands() []*RemediationCommand {
+	if x != nil {
+		return x.Commands
+	}
+	return nil
+}
+
+func (x *GetRemediationResult) GetStdlibUpgrade() string {
+	if x != nil {
+		return x.StdlibUpgrade
+	}
+	return ""
+}
+
+func (x *GetRemediationResult) GetUnfixableVulnerabilities() []string {
+	if x != nil {
+		return x.UnfixableVulnerabilities
+	}
+	return nil
+}
+
+// DiffRefsRequest compares dependencies between two Git references or two
+// container images. Both refs must be the same kind.
+type DiffRefsRequest struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Path to the repository for Git ref diffs. Leave empty for container image
+	// diffs.
+	Path string `protobuf:"bytes,1,opt,name=path,proto3" json:"path,omitempty"`
+	// Base Git reference (branch, tag, commit) or container image reference.
+	BaseRef string `protobuf:"bytes,2,opt,name=base_ref,json=baseRef,proto3" json:"base_ref,omitempty"`
+	// Target Git reference or container image reference to compare against.
+	TargetRef string `protobuf:"bytes,3,opt,name=target_ref,json=targetRef,proto3" json:"target_ref,omitempty"`
+	// Target platform for container image diffs, e.g. linux/amd64 or
+	// linux/arm64. Ignored for Git ref diffs.
+	Platform string `protobuf:"bytes,4,opt,name=platform,proto3" json:"platform,omitempty"`
+	// Optional ecosystems to include for Git ref diffs, e.g. go, npm, pypi.
+	Ecosystems []string `protobuf:"bytes,5,rep,name=ecosystems,proto3" json:"ecosystems,omitempty"`
+	// Optional directory globs to skip during Git ref scans, e.g. .bin/** or
+	// **/testdata.
+	ExcludePaths  []string `protobuf:"bytes,6,rep,name=exclude_paths,json=excludePaths,proto3" json:"exclude_paths,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *DiffRefsRequest) Reset() {
+	*x = DiffRefsRequest{}
+	mi := &file_deputy_mcp_v1_mcp_proto_msgTypes[38]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *DiffRefsRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*DiffRefsRequest) ProtoMessage() {}
+
+func (x *DiffRefsRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_deputy_mcp_v1_mcp_proto_msgTypes[38]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use DiffRefsRequest.ProtoReflect.Descriptor instead.
+func (*DiffRefsRequest) Descriptor() ([]byte, []int) {
+	return file_deputy_mcp_v1_mcp_proto_rawDescGZIP(), []int{38}
+}
+
+func (x *DiffRefsRequest) GetPath() string {
+	if x != nil {
+		return x.Path
+	}
+	return ""
+}
+
+func (x *DiffRefsRequest) GetBaseRef() string {
+	if x != nil {
+		return x.BaseRef
+	}
+	return ""
+}
+
+func (x *DiffRefsRequest) GetTargetRef() string {
+	if x != nil {
+		return x.TargetRef
+	}
+	return ""
+}
+
+func (x *DiffRefsRequest) GetPlatform() string {
+	if x != nil {
+		return x.Platform
+	}
+	return ""
+}
+
+func (x *DiffRefsRequest) GetEcosystems() []string {
+	if x != nil {
+		return x.Ecosystems
+	}
+	return nil
+}
+
+func (x *DiffRefsRequest) GetExcludePaths() []string {
+	if x != nil {
+		return x.ExcludePaths
+	}
+	return nil
+}
+
+// DependencyChange is one package-level difference between base and target.
+type DependencyChange struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Name is the package name.
+	Name string `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
+	// BaseVersion is the version at the base ref; absent for added packages.
+	BaseVersion string `protobuf:"bytes,2,opt,name=base_version,json=baseVersion,proto3" json:"base_version,omitempty"`
+	// TargetVersion is the version at the target ref; absent for removed
+	// packages.
+	TargetVersion string `protobuf:"bytes,3,opt,name=target_version,json=targetVersion,proto3" json:"target_version,omitempty"`
+	// Purl is the package URL.
+	Purl string `protobuf:"bytes,4,opt,name=purl,proto3" json:"purl,omitempty"`
+	// ChangeType classifies the difference. Version changes are upgraded or
+	// downgraded when the versions compare, updated otherwise.
+	ChangeType string `protobuf:"bytes,5,opt,name=change_type,json=changeType,proto3" json:"change_type,omitempty"`
+	// IsDirect reports whether the package is a direct dependency.
+	IsDirect bool `protobuf:"varint,6,opt,name=is_direct,json=isDirect,proto3" json:"is_direct,omitempty"`
+	// Ecosystem is the canonical package ecosystem.
+	Ecosystem     string `protobuf:"bytes,7,opt,name=ecosystem,proto3" json:"ecosystem,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *DependencyChange) Reset() {
+	*x = DependencyChange{}
+	mi := &file_deputy_mcp_v1_mcp_proto_msgTypes[39]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *DependencyChange) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*DependencyChange) ProtoMessage() {}
+
+func (x *DependencyChange) ProtoReflect() protoreflect.Message {
+	mi := &file_deputy_mcp_v1_mcp_proto_msgTypes[39]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use DependencyChange.ProtoReflect.Descriptor instead.
+func (*DependencyChange) Descriptor() ([]byte, []int) {
+	return file_deputy_mcp_v1_mcp_proto_rawDescGZIP(), []int{39}
+}
+
+func (x *DependencyChange) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+func (x *DependencyChange) GetBaseVersion() string {
+	if x != nil {
+		return x.BaseVersion
+	}
+	return ""
+}
+
+func (x *DependencyChange) GetTargetVersion() string {
+	if x != nil {
+		return x.TargetVersion
+	}
+	return ""
+}
+
+func (x *DependencyChange) GetPurl() string {
+	if x != nil {
+		return x.Purl
+	}
+	return ""
+}
+
+func (x *DependencyChange) GetChangeType() string {
+	if x != nil {
+		return x.ChangeType
+	}
+	return ""
+}
+
+func (x *DependencyChange) GetIsDirect() bool {
+	if x != nil {
+		return x.IsDirect
+	}
+	return false
+}
+
+func (x *DependencyChange) GetEcosystem() string {
+	if x != nil {
+		return x.Ecosystem
+	}
+	return ""
+}
+
+// DiffVulnChange is one vulnerability delta between two container images.
+type DiffVulnChange struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Id is the primary vulnerability identifier.
+	Id string `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	// Aliases are alternative identifiers for the same vulnerability.
+	Aliases []string `protobuf:"bytes,2,rep,name=aliases,proto3" json:"aliases,omitempty"`
+	// ChangeType classifies the delta: added (new in target), removed (affected
+	// package gone), fixed (package upgraded past it), or persisted (present in
+	// both).
+	ChangeType string `protobuf:"bytes,3,opt,name=change_type,json=changeType,proto3" json:"change_type,omitempty"`
+	// Severity is the normalized severity level.
+	Severity string `protobuf:"bytes,4,opt,name=severity,proto3" json:"severity,omitempty"`
+	// Package is the affected package name.
+	Package string `protobuf:"bytes,5,opt,name=package,proto3" json:"package,omitempty"`
+	// Ecosystem is the canonical package ecosystem.
+	Ecosystem string `protobuf:"bytes,6,opt,name=ecosystem,proto3" json:"ecosystem,omitempty"`
+	// BaseVersion is the affected package's version in the base image.
+	BaseVersion string `protobuf:"bytes,7,opt,name=base_version,json=baseVersion,proto3" json:"base_version,omitempty"`
+	// TargetVersion is the affected package's version in the target image.
+	TargetVersion string `protobuf:"bytes,8,opt,name=target_version,json=targetVersion,proto3" json:"target_version,omitempty"`
+	// FixedVersions are versions containing a fix.
+	FixedVersions []string `protobuf:"bytes,9,rep,name=fixed_versions,json=fixedVersions,proto3" json:"fixed_versions,omitempty"`
+	// Summary is a brief description of the vulnerability.
+	Summary string `protobuf:"bytes,10,opt,name=summary,proto3" json:"summary,omitempty"`
+	// Published is when the advisory was first published (RFC 3339).
+	Published     string `protobuf:"bytes,11,opt,name=published,proto3" json:"published,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *DiffVulnChange) Reset() {
+	*x = DiffVulnChange{}
+	mi := &file_deputy_mcp_v1_mcp_proto_msgTypes[40]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *DiffVulnChange) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*DiffVulnChange) ProtoMessage() {}
+
+func (x *DiffVulnChange) ProtoReflect() protoreflect.Message {
+	mi := &file_deputy_mcp_v1_mcp_proto_msgTypes[40]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use DiffVulnChange.ProtoReflect.Descriptor instead.
+func (*DiffVulnChange) Descriptor() ([]byte, []int) {
+	return file_deputy_mcp_v1_mcp_proto_rawDescGZIP(), []int{40}
+}
+
+func (x *DiffVulnChange) GetId() string {
+	if x != nil {
+		return x.Id
+	}
+	return ""
+}
+
+func (x *DiffVulnChange) GetAliases() []string {
+	if x != nil {
+		return x.Aliases
+	}
+	return nil
+}
+
+func (x *DiffVulnChange) GetChangeType() string {
+	if x != nil {
+		return x.ChangeType
+	}
+	return ""
+}
+
+func (x *DiffVulnChange) GetSeverity() string {
+	if x != nil {
+		return x.Severity
+	}
+	return ""
+}
+
+func (x *DiffVulnChange) GetPackage() string {
+	if x != nil {
+		return x.Package
+	}
+	return ""
+}
+
+func (x *DiffVulnChange) GetEcosystem() string {
+	if x != nil {
+		return x.Ecosystem
+	}
+	return ""
+}
+
+func (x *DiffVulnChange) GetBaseVersion() string {
+	if x != nil {
+		return x.BaseVersion
+	}
+	return ""
+}
+
+func (x *DiffVulnChange) GetTargetVersion() string {
+	if x != nil {
+		return x.TargetVersion
+	}
+	return ""
+}
+
+func (x *DiffVulnChange) GetFixedVersions() []string {
+	if x != nil {
+		return x.FixedVersions
+	}
+	return nil
+}
+
+func (x *DiffVulnChange) GetSummary() string {
+	if x != nil {
+		return x.Summary
+	}
+	return ""
+}
+
+func (x *DiffVulnChange) GetPublished() string {
+	if x != nil {
+		return x.Published
+	}
+	return ""
+}
+
+// ContainerSummary totals a container image diff.
+type ContainerSummary struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// PackagesAdded counts packages only in the target image.
+	PackagesAdded int32 `protobuf:"varint,1,opt,name=packages_added,json=packagesAdded,proto3" json:"packages_added,omitempty"`
+	// PackagesRemoved counts packages only in the base image.
+	PackagesRemoved int32 `protobuf:"varint,2,opt,name=packages_removed,json=packagesRemoved,proto3" json:"packages_removed,omitempty"`
+	// PackagesUpgraded counts packages with a higher version in the target.
+	PackagesUpgraded int32 `protobuf:"varint,3,opt,name=packages_upgraded,json=packagesUpgraded,proto3" json:"packages_upgraded,omitempty"`
+	// PackagesDowngraded counts packages with a lower version in the target.
+	PackagesDowngraded int32 `protobuf:"varint,4,opt,name=packages_downgraded,json=packagesDowngraded,proto3" json:"packages_downgraded,omitempty"`
+	// VulnerabilitiesAdded counts findings only in the target image.
+	VulnerabilitiesAdded int32 `protobuf:"varint,5,opt,name=vulnerabilities_added,json=vulnerabilitiesAdded,proto3" json:"vulnerabilities_added,omitempty"`
+	// VulnerabilitiesRemoved counts findings gone because the affected package
+	// was removed.
+	VulnerabilitiesRemoved int32 `protobuf:"varint,6,opt,name=vulnerabilities_removed,json=vulnerabilitiesRemoved,proto3" json:"vulnerabilities_removed,omitempty"`
+	// VulnerabilitiesFixed counts findings gone because the affected package
+	// was upgraded past them.
+	VulnerabilitiesFixed int32 `protobuf:"varint,7,opt,name=vulnerabilities_fixed,json=vulnerabilitiesFixed,proto3" json:"vulnerabilities_fixed,omitempty"`
+	// LayersAdded counts image layers only in the target.
+	LayersAdded int32 `protobuf:"varint,8,opt,name=layers_added,json=layersAdded,proto3" json:"layers_added,omitempty"`
+	// LayersRemoved counts image layers only in the base.
+	LayersRemoved int32 `protobuf:"varint,9,opt,name=layers_removed,json=layersRemoved,proto3" json:"layers_removed,omitempty"`
+	// ConfigChanged reports whether the image configurations differ.
+	ConfigChanged bool `protobuf:"varint,10,opt,name=config_changed,json=configChanged,proto3" json:"config_changed,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ContainerSummary) Reset() {
+	*x = ContainerSummary{}
+	mi := &file_deputy_mcp_v1_mcp_proto_msgTypes[41]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ContainerSummary) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ContainerSummary) ProtoMessage() {}
+
+func (x *ContainerSummary) ProtoReflect() protoreflect.Message {
+	mi := &file_deputy_mcp_v1_mcp_proto_msgTypes[41]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ContainerSummary.ProtoReflect.Descriptor instead.
+func (*ContainerSummary) Descriptor() ([]byte, []int) {
+	return file_deputy_mcp_v1_mcp_proto_rawDescGZIP(), []int{41}
+}
+
+func (x *ContainerSummary) GetPackagesAdded() int32 {
+	if x != nil {
+		return x.PackagesAdded
+	}
+	return 0
+}
+
+func (x *ContainerSummary) GetPackagesRemoved() int32 {
+	if x != nil {
+		return x.PackagesRemoved
+	}
+	return 0
+}
+
+func (x *ContainerSummary) GetPackagesUpgraded() int32 {
+	if x != nil {
+		return x.PackagesUpgraded
+	}
+	return 0
+}
+
+func (x *ContainerSummary) GetPackagesDowngraded() int32 {
+	if x != nil {
+		return x.PackagesDowngraded
+	}
+	return 0
+}
+
+func (x *ContainerSummary) GetVulnerabilitiesAdded() int32 {
+	if x != nil {
+		return x.VulnerabilitiesAdded
+	}
+	return 0
+}
+
+func (x *ContainerSummary) GetVulnerabilitiesRemoved() int32 {
+	if x != nil {
+		return x.VulnerabilitiesRemoved
+	}
+	return 0
+}
+
+func (x *ContainerSummary) GetVulnerabilitiesFixed() int32 {
+	if x != nil {
+		return x.VulnerabilitiesFixed
+	}
+	return 0
+}
+
+func (x *ContainerSummary) GetLayersAdded() int32 {
+	if x != nil {
+		return x.LayersAdded
+	}
+	return 0
+}
+
+func (x *ContainerSummary) GetLayersRemoved() int32 {
+	if x != nil {
+		return x.LayersRemoved
+	}
+	return 0
+}
+
+func (x *ContainerSummary) GetConfigChanged() bool {
+	if x != nil {
+		return x.ConfigChanged
+	}
+	return false
+}
+
+// DiffRefsResult reports dependency and vulnerability differences between two
+// Git references or two container images.
+type DiffRefsResult struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Path is the analyzed repository for Git ref diffs.
+	Path string `protobuf:"bytes,1,opt,name=path,proto3" json:"path,omitempty"`
+	// BaseRef is the compared base reference.
+	BaseRef string `protobuf:"bytes,2,opt,name=base_ref,json=baseRef,proto3" json:"base_ref,omitempty"`
+	// TargetRef is the compared target reference.
+	TargetRef string `protobuf:"bytes,3,opt,name=target_ref,json=targetRef,proto3" json:"target_ref,omitempty"`
+	// BaseCommit is the resolved commit hash of the base ref for Git diffs.
+	BaseCommit string `protobuf:"bytes,4,opt,name=base_commit,json=baseCommit,proto3" json:"base_commit,omitempty"`
+	// TargetCommit is the resolved commit hash of the target ref for Git diffs.
+	TargetCommit string `protobuf:"bytes,5,opt,name=target_commit,json=targetCommit,proto3" json:"target_commit,omitempty"`
+	// Platform is the compared platform for container image diffs.
+	Platform string `protobuf:"bytes,6,opt,name=platform,proto3" json:"platform,omitempty"`
+	// IsContainerDiff reports whether container images were compared; absent
+	// means a Git ref diff.
+	IsContainerDiff bool `protobuf:"varint,7,opt,name=is_container_diff,json=isContainerDiff,proto3" json:"is_container_diff,omitempty"`
+	// Changes are the package-level differences, direct dependencies first.
+	Changes []*DependencyChange `protobuf:"bytes,8,rep,name=changes,proto3" json:"changes,omitempty"`
+	// AddedCount counts added packages.
+	AddedCount int32 `protobuf:"varint,9,opt,name=added_count,json=addedCount,proto3" json:"added_count,omitempty"`
+	// RemovedCount counts removed packages.
+	RemovedCount int32 `protobuf:"varint,10,opt,name=removed_count,json=removedCount,proto3" json:"removed_count,omitempty"`
+	// UpdatedCount counts version changes, including upgrades and downgrades.
+	UpdatedCount int32 `protobuf:"varint,11,opt,name=updated_count,json=updatedCount,proto3" json:"updated_count,omitempty"`
+	// Vulnerabilities are the target's findings, with reference lists truncated
+	// to a compact sample.
+	Vulnerabilities []*VulnExplanation `protobuf:"bytes,12,rep,name=vulnerabilities,proto3" json:"vulnerabilities,omitempty"`
+	// VulnerabilitySummary counts the target's findings per severity level,
+	// including an "unknown" bucket.
+	VulnerabilitySummary map[string]int32 `protobuf:"bytes,13,rep,name=vulnerability_summary,json=vulnerabilitySummary,proto3" json:"vulnerability_summary,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"varint,2,opt,name=value"`
+	// VulnerabilityChanges are per-vulnerability deltas for container diffs.
+	VulnerabilityChanges []*DiffVulnChange `protobuf:"bytes,14,rep,name=vulnerability_changes,json=vulnerabilityChanges,proto3" json:"vulnerability_changes,omitempty"`
+	// ContainerSummary totals the container diff; absent for Git ref diffs.
+	ContainerSummary *ContainerSummary `protobuf:"bytes,15,opt,name=container_summary,json=containerSummary,proto3" json:"container_summary,omitempty"`
+	unknownFields    protoimpl.UnknownFields
+	sizeCache        protoimpl.SizeCache
+}
+
+func (x *DiffRefsResult) Reset() {
+	*x = DiffRefsResult{}
+	mi := &file_deputy_mcp_v1_mcp_proto_msgTypes[42]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *DiffRefsResult) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*DiffRefsResult) ProtoMessage() {}
+
+func (x *DiffRefsResult) ProtoReflect() protoreflect.Message {
+	mi := &file_deputy_mcp_v1_mcp_proto_msgTypes[42]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use DiffRefsResult.ProtoReflect.Descriptor instead.
+func (*DiffRefsResult) Descriptor() ([]byte, []int) {
+	return file_deputy_mcp_v1_mcp_proto_rawDescGZIP(), []int{42}
+}
+
+func (x *DiffRefsResult) GetPath() string {
+	if x != nil {
+		return x.Path
+	}
+	return ""
+}
+
+func (x *DiffRefsResult) GetBaseRef() string {
+	if x != nil {
+		return x.BaseRef
+	}
+	return ""
+}
+
+func (x *DiffRefsResult) GetTargetRef() string {
+	if x != nil {
+		return x.TargetRef
+	}
+	return ""
+}
+
+func (x *DiffRefsResult) GetBaseCommit() string {
+	if x != nil {
+		return x.BaseCommit
+	}
+	return ""
+}
+
+func (x *DiffRefsResult) GetTargetCommit() string {
+	if x != nil {
+		return x.TargetCommit
+	}
+	return ""
+}
+
+func (x *DiffRefsResult) GetPlatform() string {
+	if x != nil {
+		return x.Platform
+	}
+	return ""
+}
+
+func (x *DiffRefsResult) GetIsContainerDiff() bool {
+	if x != nil {
+		return x.IsContainerDiff
+	}
+	return false
+}
+
+func (x *DiffRefsResult) GetChanges() []*DependencyChange {
+	if x != nil {
+		return x.Changes
+	}
+	return nil
+}
+
+func (x *DiffRefsResult) GetAddedCount() int32 {
+	if x != nil {
+		return x.AddedCount
+	}
+	return 0
+}
+
+func (x *DiffRefsResult) GetRemovedCount() int32 {
+	if x != nil {
+		return x.RemovedCount
+	}
+	return 0
+}
+
+func (x *DiffRefsResult) GetUpdatedCount() int32 {
+	if x != nil {
+		return x.UpdatedCount
+	}
+	return 0
+}
+
+func (x *DiffRefsResult) GetVulnerabilities() []*VulnExplanation {
+	if x != nil {
+		return x.Vulnerabilities
+	}
+	return nil
+}
+
+func (x *DiffRefsResult) GetVulnerabilitySummary() map[string]int32 {
+	if x != nil {
+		return x.VulnerabilitySummary
+	}
+	return nil
+}
+
+func (x *DiffRefsResult) GetVulnerabilityChanges() []*DiffVulnChange {
+	if x != nil {
+		return x.VulnerabilityChanges
+	}
+	return nil
+}
+
+func (x *DiffRefsResult) GetContainerSummary() *ContainerSummary {
+	if x != nil {
+		return x.ContainerSummary
+	}
+	return nil
+}
+
 var File_deputy_mcp_v1_mcp_proto protoreflect.FileDescriptor
 
 const file_deputy_mcp_v1_mcp_proto_rawDesc = "" +
 	"\n" +
-	"\x17deputy/mcp/v1/mcp.proto\x12\rdeputy.mcp.v1\x1a\x1bbuf/validate/validate.proto\x1a%deputy/dependency/v1/dependency.proto\x1a\x1ddeputy/graph/v1/service.proto\"\x8b\x05\n" +
+	"\x17deputy/mcp/v1/mcp.proto\x12\rdeputy.mcp.v1\x1a\x1bbuf/validate/validate.proto\x1a%deputy/dependency/v1/dependency.proto\x1a\x1ddeputy/graph/v1/service.proto\x1a\x1edeputy/policy/v1/service.proto\"\x8b\x05\n" +
 	"\x0fVulnExplanation\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x18\n" +
 	"\aaliases\x18\x02 \x03(\tR\aaliases\x12\x18\n" +
@@ -3227,7 +4893,166 @@ const file_deputy_mcp_v1_mcp_proto_rawDesc = "" +
 	"dependents\x12!\n" +
 	"\fdirect_count\x18\v \x01(\x05R\vdirectCount\x12)\n" +
 	"\x10transitive_count\x18\f \x01(\x05R\x0ftransitiveCount\x12\x18\n" +
-	"\amessage\x18\r \x01(\tR\amessageB\xa9\x01\n" +
+	"\amessage\x18\r \x01(\tR\amessage\"\x7f\n" +
+	"\x1bExplainVulnerabilityRequest\x12\x1e\n" +
+	"\x02id\x18\x01 \x01(\tB\x0e\xbaH\v\xc8\x01\x01r\x06\x10\x012\x02\\SR\x02id\x12,\n" +
+	"\x0freference_limit\x18\x02 \x01(\x05H\x00R\x0ereferenceLimit\x88\x01\x01B\x12\n" +
+	"\x10_reference_limit\"\x8a\x01\n" +
+	"\x1dExplainVulnerabilitiesRequest\x12'\n" +
+	"\x03ids\x18\x01 \x03(\tB\x15\xbaH\x12\xc8\x01\x01\x92\x01\f\b\x01\"\br\x06\x10\x012\x02\\SR\x03ids\x12,\n" +
+	"\x0freference_limit\x18\x02 \x01(\x05H\x00R\x0ereferenceLimit\x88\x01\x01B\x12\n" +
+	"\x10_reference_limit\"\x80\x01\n" +
+	"\x1cExplainVulnerabilitiesResult\x12H\n" +
+	"\x0fvulnerabilities\x18\x01 \x03(\v2\x1e.deputy.mcp.v1.VulnExplanationR\x0fvulnerabilities\x12\x16\n" +
+	"\x06errors\x18\x02 \x03(\tR\x06errors\"t\n" +
+	"\x12ScanPackageRequest\x12\x12\n" +
+	"\x04purl\x18\x01 \x01(\tR\x04purl\x12\x12\n" +
+	"\x04name\x18\x02 \x01(\tR\x04name\x12\x18\n" +
+	"\aversion\x18\x03 \x01(\tR\aversion\x12\x1c\n" +
+	"\tecosystem\x18\x04 \x01(\tR\tecosystem\"\xd9\x01\n" +
+	"\x11ScanPackageResult\x12\x18\n" +
+	"\apackage\x18\x01 \x01(\tR\apackage\x12\x18\n" +
+	"\aversion\x18\x02 \x01(\tR\aversion\x12\x1c\n" +
+	"\tecosystem\x18\x03 \x01(\tR\tecosystem\x12\x12\n" +
+	"\x04purl\x18\x04 \x01(\tR\x04purl\x12H\n" +
+	"\x0fvulnerabilities\x18\x05 \x03(\v2\x1e.deputy.mcp.v1.VulnExplanationR\x0fvulnerabilities\x12\x14\n" +
+	"\x05clean\x18\x06 \x01(\bR\x05clean\"\x16\n" +
+	"\x14GetServerInfoRequest\"\xc6\x02\n" +
+	"\x13GetServerInfoResult\x12\x12\n" +
+	"\x04name\x18\x01 \x01(\tR\x04name\x12\x18\n" +
+	"\aversion\x18\x02 \x01(\tR\aversion\x12\x1a\n" +
+	"\bprotocol\x18\x03 \x01(\tR\bprotocol\x12\x1c\n" +
+	"\ttransport\x18\x04 \x01(\tR\ttransport\x12 \n" +
+	"\vdescription\x18\x05 \x01(\tR\vdescription\x12\x1d\n" +
+	"\n" +
+	"process_id\x18\x06 \x01(\x05R\tprocessId\x12\x1d\n" +
+	"\n" +
+	"started_at\x18\a \x01(\tR\tstartedAt\x12\x1d\n" +
+	"\n" +
+	"tool_count\x18\b \x01(\x05R\ttoolCount\x12\x14\n" +
+	"\x05tools\x18\t \x03(\tR\x05tools\x122\n" +
+	"\x15default_exclude_paths\x18\n" +
+	" \x03(\tR\x13defaultExcludePaths\"\xc4\x01\n" +
+	"\x1cListPolicyEntrypointsRequest\x12\xa3\x01\n" +
+	"\bcategory\x18\x01 \x01(\tB\x86\x01\xbaH\x82\x01\xd8\x01\x01r}R\x0econtainer_diffR\x04diffR\n" +
+	"dockerfileR\x03fixR\x05graphR\x05proxyR\asandboxR\x04sbomR\x04scanR\asecretsR\x06serverR\x06triageR\tcontainerR\x04execR\aserviceR\bcategory\"\xa8\x01\n" +
+	"\x1bListPolicyEntrypointsResult\x12\x1a\n" +
+	"\bcategory\x18\x01 \x01(\tR\bcategory\x12)\n" +
+	"\x10entrypoint_count\x18\x02 \x01(\x05R\x0fentrypointCount\x12B\n" +
+	"\ventrypoints\x18\x03 \x03(\v2 .deputy.policy.v1.EntrypointInfoR\ventrypoints\"\xb6\x01\n" +
+	"\x15GetRemediationRequest\x12\"\n" +
+	"\x04path\x18\x01 \x01(\tB\x0e\xbaH\v\xc8\x01\x01r\x06\x10\x012\x02\\SR\x04path\x12\x10\n" +
+	"\x03ref\x18\x02 \x01(\tR\x03ref\x120\n" +
+	"\n" +
+	"ecosystems\x18\x03 \x03(\tB\x10\xbaH\r\x92\x01\n" +
+	"\"\br\x06\x10\x012\x02\\SR\n" +
+	"ecosystems\x125\n" +
+	"\rexclude_paths\x18\x04 \x03(\tB\x10\xbaH\r\x92\x01\n" +
+	"\"\br\x06\x10\x012\x02\\SR\fexcludePaths\"\xf7\x02\n" +
+	"\x12RemediationCommand\x12\x18\n" +
+	"\apackage\x18\x01 \x01(\tR\apackage\x12\x18\n" +
+	"\aversion\x18\x02 \x01(\tR\aversion\x12\x12\n" +
+	"\x04purl\x18\x03 \x01(\tR\x04purl\x12%\n" +
+	"\x0etarget_version\x18\x04 \x01(\tR\rtargetVersion\x12#\n" +
+	"\rtarget_module\x18\x05 \x01(\tR\ftargetModule\x12\x1c\n" +
+	"\tmigration\x18\x06 \x01(\bR\tmigration\x12\x18\n" +
+	"\amanager\x18\a \x01(\tR\amanager\x12\x18\n" +
+	"\acommand\x18\b \x01(\tR\acommand\x12\x12\n" +
+	"\x04path\x18\t \x01(\tR\x04path\x12\x12\n" +
+	"\x04hint\x18\n" +
+	" \x01(\tR\x04hint\x12\x1b\n" +
+	"\tis_direct\x18\v \x01(\bR\bisDirect\x12\x1e\n" +
+	"\n" +
+	"executable\x18\f \x01(\bR\n" +
+	"executable\x12\x16\n" +
+	"\x06groups\x18\r \x03(\tR\x06groups\"\xdf\x04\n" +
+	"\x14GetRemediationResult\x12\x12\n" +
+	"\x04path\x18\x01 \x01(\tR\x04path\x12\x10\n" +
+	"\x03ref\x18\x02 \x01(\tR\x03ref\x12#\n" +
+	"\reffective_ref\x18\x03 \x01(\tR\feffectiveRef\x12\x16\n" +
+	"\x06commit\x18\x04 \x01(\tR\x06commit\x123\n" +
+	"\x15vulnerabilities_found\x18\x05 \x01(\x05R\x14vulnerabilitiesFound\x12)\n" +
+	"\x10remediable_count\x18\x06 \x01(\x05R\x0fremediableCount\x12'\n" +
+	"\x0fmigration_count\x18\a \x01(\x05R\x0emigrationCount\x12'\n" +
+	"\x0funfixable_count\x18\b \x01(\x05R\x0eunfixableCount\x12#\n" +
+	"\rcommand_count\x18\t \x01(\x05R\fcommandCount\x128\n" +
+	"\x18executable_command_count\x18\n" +
+	" \x01(\x05R\x16executableCommandCount\x120\n" +
+	"\x14manual_command_count\x18\v \x01(\x05R\x12manualCommandCount\x12=\n" +
+	"\bcommands\x18\f \x03(\v2!.deputy.mcp.v1.RemediationCommandR\bcommands\x12%\n" +
+	"\x0estdlib_upgrade\x18\r \x01(\tR\rstdlibUpgrade\x12;\n" +
+	"\x19unfixable_vulnerabilities\x18\x0e \x03(\tR\x18unfixableVulnerabilities\"\x84\x02\n" +
+	"\x0fDiffRefsRequest\x12\x12\n" +
+	"\x04path\x18\x01 \x01(\tR\x04path\x12)\n" +
+	"\bbase_ref\x18\x02 \x01(\tB\x0e\xbaH\v\xc8\x01\x01r\x06\x10\x012\x02\\SR\abaseRef\x12-\n" +
+	"\n" +
+	"target_ref\x18\x03 \x01(\tB\x0e\xbaH\v\xc8\x01\x01r\x06\x10\x012\x02\\SR\ttargetRef\x12\x1a\n" +
+	"\bplatform\x18\x04 \x01(\tR\bplatform\x120\n" +
+	"\n" +
+	"ecosystems\x18\x05 \x03(\tB\x10\xbaH\r\x92\x01\n" +
+	"\"\br\x06\x10\x012\x02\\SR\n" +
+	"ecosystems\x125\n" +
+	"\rexclude_paths\x18\x06 \x03(\tB\x10\xbaH\r\x92\x01\n" +
+	"\"\br\x06\x10\x012\x02\\SR\fexcludePaths\"\x99\x02\n" +
+	"\x10DependencyChange\x12\x12\n" +
+	"\x04name\x18\x01 \x01(\tR\x04name\x12!\n" +
+	"\fbase_version\x18\x02 \x01(\tR\vbaseVersion\x12%\n" +
+	"\x0etarget_version\x18\x03 \x01(\tR\rtargetVersion\x12\x12\n" +
+	"\x04purl\x18\x04 \x01(\tR\x04purl\x12X\n" +
+	"\vchange_type\x18\x05 \x01(\tB7\xbaH4\xd8\x01\x01r/R\x05addedR\aremovedR\bupgradedR\n" +
+	"downgradedR\aupdatedR\n" +
+	"changeType\x12\x1b\n" +
+	"\tis_direct\x18\x06 \x01(\bR\bisDirect\x12\x1c\n" +
+	"\tecosystem\x18\a \x01(\tR\tecosystem\"\xc1\x03\n" +
+	"\x0eDiffVulnChange\x12\x0e\n" +
+	"\x02id\x18\x01 \x01(\tR\x02id\x12\x18\n" +
+	"\aaliases\x18\x02 \x03(\tR\aaliases\x12X\n" +
+	"\vchange_type\x18\x03 \x01(\tB7\xbaH4\xd8\x01\x01r/R\x05addedR\aremovedR\x05fixedR\tpersistedR\vunspecifiedR\n" +
+	"changeType\x12J\n" +
+	"\bseverity\x18\x04 \x01(\tB.\xbaH+\xd8\x01\x01r&R\bCRITICALR\x04HIGHR\x06MEDIUMR\x03LOWR\aUNKNOWNR\bseverity\x12\x18\n" +
+	"\apackage\x18\x05 \x01(\tR\apackage\x12\x1c\n" +
+	"\tecosystem\x18\x06 \x01(\tR\tecosystem\x12!\n" +
+	"\fbase_version\x18\a \x01(\tR\vbaseVersion\x12%\n" +
+	"\x0etarget_version\x18\b \x01(\tR\rtargetVersion\x12%\n" +
+	"\x0efixed_versions\x18\t \x03(\tR\rfixedVersions\x12\x18\n" +
+	"\asummary\x18\n" +
+	" \x01(\tR\asummary\x12\x1c\n" +
+	"\tpublished\x18\v \x01(\tR\tpublished\"\xd6\x03\n" +
+	"\x10ContainerSummary\x12%\n" +
+	"\x0epackages_added\x18\x01 \x01(\x05R\rpackagesAdded\x12)\n" +
+	"\x10packages_removed\x18\x02 \x01(\x05R\x0fpackagesRemoved\x12+\n" +
+	"\x11packages_upgraded\x18\x03 \x01(\x05R\x10packagesUpgraded\x12/\n" +
+	"\x13packages_downgraded\x18\x04 \x01(\x05R\x12packagesDowngraded\x123\n" +
+	"\x15vulnerabilities_added\x18\x05 \x01(\x05R\x14vulnerabilitiesAdded\x127\n" +
+	"\x17vulnerabilities_removed\x18\x06 \x01(\x05R\x16vulnerabilitiesRemoved\x123\n" +
+	"\x15vulnerabilities_fixed\x18\a \x01(\x05R\x14vulnerabilitiesFixed\x12!\n" +
+	"\flayers_added\x18\b \x01(\x05R\vlayersAdded\x12%\n" +
+	"\x0elayers_removed\x18\t \x01(\x05R\rlayersRemoved\x12%\n" +
+	"\x0econfig_changed\x18\n" +
+	" \x01(\bR\rconfigChanged\"\xb5\x06\n" +
+	"\x0eDiffRefsResult\x12\x12\n" +
+	"\x04path\x18\x01 \x01(\tR\x04path\x12\x19\n" +
+	"\bbase_ref\x18\x02 \x01(\tR\abaseRef\x12\x1d\n" +
+	"\n" +
+	"target_ref\x18\x03 \x01(\tR\ttargetRef\x12\x1f\n" +
+	"\vbase_commit\x18\x04 \x01(\tR\n" +
+	"baseCommit\x12#\n" +
+	"\rtarget_commit\x18\x05 \x01(\tR\ftargetCommit\x12\x1a\n" +
+	"\bplatform\x18\x06 \x01(\tR\bplatform\x12*\n" +
+	"\x11is_container_diff\x18\a \x01(\bR\x0fisContainerDiff\x129\n" +
+	"\achanges\x18\b \x03(\v2\x1f.deputy.mcp.v1.DependencyChangeR\achanges\x12\x1f\n" +
+	"\vadded_count\x18\t \x01(\x05R\n" +
+	"addedCount\x12#\n" +
+	"\rremoved_count\x18\n" +
+	" \x01(\x05R\fremovedCount\x12#\n" +
+	"\rupdated_count\x18\v \x01(\x05R\fupdatedCount\x12H\n" +
+	"\x0fvulnerabilities\x18\f \x03(\v2\x1e.deputy.mcp.v1.VulnExplanationR\x0fvulnerabilities\x12l\n" +
+	"\x15vulnerability_summary\x18\r \x03(\v27.deputy.mcp.v1.DiffRefsResult.VulnerabilitySummaryEntryR\x14vulnerabilitySummary\x12R\n" +
+	"\x15vulnerability_changes\x18\x0e \x03(\v2\x1d.deputy.mcp.v1.DiffVulnChangeR\x14vulnerabilityChanges\x12L\n" +
+	"\x11container_summary\x18\x0f \x01(\v2\x1f.deputy.mcp.v1.ContainerSummaryR\x10containerSummary\x1aG\n" +
+	"\x19VulnerabilitySummaryEntry\x12\x10\n" +
+	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
+	"\x05value\x18\x02 \x01(\x05R\x05value:\x028\x01B\xa9\x01\n" +
 	"\x11com.deputy.mcp.v1B\bMcpProtoP\x01Z4github.com/temporalio/deputy/gen/deputy/mcp/v1;mcpv1\xa2\x02\x03DMX\xaa\x02\rDeputy.Mcp.V1\xca\x02\rDeputy\\Mcp\\V1\xe2\x02\x19Deputy\\Mcp\\V1\\GPBMetadata\xea\x02\x0fDeputy::Mcp::V1b\x06proto3"
 
 var (
@@ -3242,58 +5067,77 @@ func file_deputy_mcp_v1_mcp_proto_rawDescGZIP() []byte {
 	return file_deputy_mcp_v1_mcp_proto_rawDescData
 }
 
-var file_deputy_mcp_v1_mcp_proto_msgTypes = make([]protoimpl.MessageInfo, 28)
+var file_deputy_mcp_v1_mcp_proto_msgTypes = make([]protoimpl.MessageInfo, 46)
 var file_deputy_mcp_v1_mcp_proto_goTypes = []any{
-	(*VulnExplanation)(nil),         // 0: deputy.mcp.v1.VulnExplanation
-	(*PackageFix)(nil),              // 1: deputy.mcp.v1.PackageFix
-	(*FixVerdict)(nil),              // 2: deputy.mcp.v1.FixVerdict
-	(*Coverage)(nil),                // 3: deputy.mcp.v1.Coverage
-	(*CoverageEntry)(nil),           // 4: deputy.mcp.v1.CoverageEntry
-	(*ScanDirectoryRequest)(nil),    // 5: deputy.mcp.v1.ScanDirectoryRequest
-	(*ScanDirectoryResult)(nil),     // 6: deputy.mcp.v1.ScanDirectoryResult
-	(*ScanContainerRequest)(nil),    // 7: deputy.mcp.v1.ScanContainerRequest
-	(*ScanContainerResult)(nil),     // 8: deputy.mcp.v1.ScanContainerResult
-	(*TriageRequest)(nil),           // 9: deputy.mcp.v1.TriageRequest
-	(*TriagedVuln)(nil),             // 10: deputy.mcp.v1.TriagedVuln
-	(*TriageResult)(nil),            // 11: deputy.mcp.v1.TriageResult
-	(*ListDependenciesRequest)(nil), // 12: deputy.mcp.v1.ListDependenciesRequest
-	(*DependencyInfo)(nil),          // 13: deputy.mcp.v1.DependencyInfo
-	(*ListDependenciesResult)(nil),  // 14: deputy.mcp.v1.ListDependenciesResult
-	(*GenerateSBOMRequest)(nil),     // 15: deputy.mcp.v1.GenerateSBOMRequest
-	(*GenerateSBOMResult)(nil),      // 16: deputy.mcp.v1.GenerateSBOMResult
-	(*GraphPathNode)(nil),           // 17: deputy.mcp.v1.GraphPathNode
-	(*GraphPath)(nil),               // 18: deputy.mcp.v1.GraphPath
-	(*AnalyzeGraphRequest)(nil),     // 19: deputy.mcp.v1.AnalyzeGraphRequest
-	(*GraphTargetResult)(nil),       // 20: deputy.mcp.v1.GraphTargetResult
-	(*AnalyzeGraphResult)(nil),      // 21: deputy.mcp.v1.AnalyzeGraphResult
-	(*GraphWhyRequest)(nil),         // 22: deputy.mcp.v1.GraphWhyRequest
-	(*GraphWhyResult)(nil),          // 23: deputy.mcp.v1.GraphWhyResult
-	(*GraphNeedsRequest)(nil),       // 24: deputy.mcp.v1.GraphNeedsRequest
-	(*GraphNeedsResult)(nil),        // 25: deputy.mcp.v1.GraphNeedsResult
-	nil,                             // 26: deputy.mcp.v1.ScanDirectoryResult.VulnerabilitiesBySeverityEntry
-	nil,                             // 27: deputy.mcp.v1.ScanContainerResult.VulnerabilitiesBySeverityEntry
-	(*v1.ManifestRef)(nil),          // 28: deputy.dependency.v1.ManifestRef
-	(*v11.GraphStats)(nil),          // 29: deputy.graph.v1.GraphStats
+	(*VulnExplanation)(nil),               // 0: deputy.mcp.v1.VulnExplanation
+	(*PackageFix)(nil),                    // 1: deputy.mcp.v1.PackageFix
+	(*FixVerdict)(nil),                    // 2: deputy.mcp.v1.FixVerdict
+	(*Coverage)(nil),                      // 3: deputy.mcp.v1.Coverage
+	(*CoverageEntry)(nil),                 // 4: deputy.mcp.v1.CoverageEntry
+	(*ScanDirectoryRequest)(nil),          // 5: deputy.mcp.v1.ScanDirectoryRequest
+	(*ScanDirectoryResult)(nil),           // 6: deputy.mcp.v1.ScanDirectoryResult
+	(*ScanContainerRequest)(nil),          // 7: deputy.mcp.v1.ScanContainerRequest
+	(*ScanContainerResult)(nil),           // 8: deputy.mcp.v1.ScanContainerResult
+	(*TriageRequest)(nil),                 // 9: deputy.mcp.v1.TriageRequest
+	(*TriagedVuln)(nil),                   // 10: deputy.mcp.v1.TriagedVuln
+	(*TriageResult)(nil),                  // 11: deputy.mcp.v1.TriageResult
+	(*ListDependenciesRequest)(nil),       // 12: deputy.mcp.v1.ListDependenciesRequest
+	(*DependencyInfo)(nil),                // 13: deputy.mcp.v1.DependencyInfo
+	(*ListDependenciesResult)(nil),        // 14: deputy.mcp.v1.ListDependenciesResult
+	(*GenerateSBOMRequest)(nil),           // 15: deputy.mcp.v1.GenerateSBOMRequest
+	(*GenerateSBOMResult)(nil),            // 16: deputy.mcp.v1.GenerateSBOMResult
+	(*GraphPathNode)(nil),                 // 17: deputy.mcp.v1.GraphPathNode
+	(*GraphPath)(nil),                     // 18: deputy.mcp.v1.GraphPath
+	(*AnalyzeGraphRequest)(nil),           // 19: deputy.mcp.v1.AnalyzeGraphRequest
+	(*GraphTargetResult)(nil),             // 20: deputy.mcp.v1.GraphTargetResult
+	(*AnalyzeGraphResult)(nil),            // 21: deputy.mcp.v1.AnalyzeGraphResult
+	(*GraphWhyRequest)(nil),               // 22: deputy.mcp.v1.GraphWhyRequest
+	(*GraphWhyResult)(nil),                // 23: deputy.mcp.v1.GraphWhyResult
+	(*GraphNeedsRequest)(nil),             // 24: deputy.mcp.v1.GraphNeedsRequest
+	(*GraphNeedsResult)(nil),              // 25: deputy.mcp.v1.GraphNeedsResult
+	(*ExplainVulnerabilityRequest)(nil),   // 26: deputy.mcp.v1.ExplainVulnerabilityRequest
+	(*ExplainVulnerabilitiesRequest)(nil), // 27: deputy.mcp.v1.ExplainVulnerabilitiesRequest
+	(*ExplainVulnerabilitiesResult)(nil),  // 28: deputy.mcp.v1.ExplainVulnerabilitiesResult
+	(*ScanPackageRequest)(nil),            // 29: deputy.mcp.v1.ScanPackageRequest
+	(*ScanPackageResult)(nil),             // 30: deputy.mcp.v1.ScanPackageResult
+	(*GetServerInfoRequest)(nil),          // 31: deputy.mcp.v1.GetServerInfoRequest
+	(*GetServerInfoResult)(nil),           // 32: deputy.mcp.v1.GetServerInfoResult
+	(*ListPolicyEntrypointsRequest)(nil),  // 33: deputy.mcp.v1.ListPolicyEntrypointsRequest
+	(*ListPolicyEntrypointsResult)(nil),   // 34: deputy.mcp.v1.ListPolicyEntrypointsResult
+	(*GetRemediationRequest)(nil),         // 35: deputy.mcp.v1.GetRemediationRequest
+	(*RemediationCommand)(nil),            // 36: deputy.mcp.v1.RemediationCommand
+	(*GetRemediationResult)(nil),          // 37: deputy.mcp.v1.GetRemediationResult
+	(*DiffRefsRequest)(nil),               // 38: deputy.mcp.v1.DiffRefsRequest
+	(*DependencyChange)(nil),              // 39: deputy.mcp.v1.DependencyChange
+	(*DiffVulnChange)(nil),                // 40: deputy.mcp.v1.DiffVulnChange
+	(*ContainerSummary)(nil),              // 41: deputy.mcp.v1.ContainerSummary
+	(*DiffRefsResult)(nil),                // 42: deputy.mcp.v1.DiffRefsResult
+	nil,                                   // 43: deputy.mcp.v1.ScanDirectoryResult.VulnerabilitiesBySeverityEntry
+	nil,                                   // 44: deputy.mcp.v1.ScanContainerResult.VulnerabilitiesBySeverityEntry
+	nil,                                   // 45: deputy.mcp.v1.DiffRefsResult.VulnerabilitySummaryEntry
+	(*v1.ManifestRef)(nil),                // 46: deputy.dependency.v1.ManifestRef
+	(*v11.GraphStats)(nil),                // 47: deputy.graph.v1.GraphStats
+	(*v12.EntrypointInfo)(nil),            // 48: deputy.policy.v1.EntrypointInfo
 }
 var file_deputy_mcp_v1_mcp_proto_depIdxs = []int32{
 	1,  // 0: deputy.mcp.v1.VulnExplanation.package_fixes:type_name -> deputy.mcp.v1.PackageFix
 	2,  // 1: deputy.mcp.v1.VulnExplanation.resolved_fix:type_name -> deputy.mcp.v1.FixVerdict
 	4,  // 2: deputy.mcp.v1.Coverage.covered:type_name -> deputy.mcp.v1.CoverageEntry
 	4,  // 3: deputy.mcp.v1.Coverage.uncovered:type_name -> deputy.mcp.v1.CoverageEntry
-	26, // 4: deputy.mcp.v1.ScanDirectoryResult.vulnerabilities_by_severity:type_name -> deputy.mcp.v1.ScanDirectoryResult.VulnerabilitiesBySeverityEntry
+	43, // 4: deputy.mcp.v1.ScanDirectoryResult.vulnerabilities_by_severity:type_name -> deputy.mcp.v1.ScanDirectoryResult.VulnerabilitiesBySeverityEntry
 	0,  // 5: deputy.mcp.v1.ScanDirectoryResult.vulnerabilities:type_name -> deputy.mcp.v1.VulnExplanation
 	3,  // 6: deputy.mcp.v1.ScanDirectoryResult.coverage:type_name -> deputy.mcp.v1.Coverage
-	27, // 7: deputy.mcp.v1.ScanContainerResult.vulnerabilities_by_severity:type_name -> deputy.mcp.v1.ScanContainerResult.VulnerabilitiesBySeverityEntry
+	44, // 7: deputy.mcp.v1.ScanContainerResult.vulnerabilities_by_severity:type_name -> deputy.mcp.v1.ScanContainerResult.VulnerabilitiesBySeverityEntry
 	0,  // 8: deputy.mcp.v1.ScanContainerResult.vulnerabilities:type_name -> deputy.mcp.v1.VulnExplanation
 	3,  // 9: deputy.mcp.v1.ScanContainerResult.coverage:type_name -> deputy.mcp.v1.Coverage
 	1,  // 10: deputy.mcp.v1.TriagedVuln.package_fixes:type_name -> deputy.mcp.v1.PackageFix
 	2,  // 11: deputy.mcp.v1.TriagedVuln.resolved_fix:type_name -> deputy.mcp.v1.FixVerdict
 	10, // 12: deputy.mcp.v1.TriageResult.vulnerabilities:type_name -> deputy.mcp.v1.TriagedVuln
-	28, // 13: deputy.mcp.v1.DependencyInfo.manifest_refs:type_name -> deputy.dependency.v1.ManifestRef
+	46, // 13: deputy.mcp.v1.DependencyInfo.manifest_refs:type_name -> deputy.dependency.v1.ManifestRef
 	13, // 14: deputy.mcp.v1.ListDependenciesResult.dependencies:type_name -> deputy.mcp.v1.DependencyInfo
 	17, // 15: deputy.mcp.v1.GraphPath.node_details:type_name -> deputy.mcp.v1.GraphPathNode
 	17, // 16: deputy.mcp.v1.GraphTargetResult.matched_nodes:type_name -> deputy.mcp.v1.GraphPathNode
-	29, // 17: deputy.mcp.v1.AnalyzeGraphResult.stats:type_name -> deputy.graph.v1.GraphStats
+	47, // 17: deputy.mcp.v1.AnalyzeGraphResult.stats:type_name -> deputy.graph.v1.GraphStats
 	18, // 18: deputy.mcp.v1.AnalyzeGraphResult.vulnerable_paths:type_name -> deputy.mcp.v1.GraphPath
 	18, // 19: deputy.mcp.v1.AnalyzeGraphResult.paths_to_target:type_name -> deputy.mcp.v1.GraphPath
 	20, // 20: deputy.mcp.v1.AnalyzeGraphResult.target:type_name -> deputy.mcp.v1.GraphTargetResult
@@ -3301,11 +5145,20 @@ var file_deputy_mcp_v1_mcp_proto_depIdxs = []int32{
 	18, // 22: deputy.mcp.v1.GraphWhyResult.paths:type_name -> deputy.mcp.v1.GraphPath
 	17, // 23: deputy.mcp.v1.GraphNeedsResult.matched_node:type_name -> deputy.mcp.v1.GraphPathNode
 	13, // 24: deputy.mcp.v1.GraphNeedsResult.dependents:type_name -> deputy.mcp.v1.DependencyInfo
-	25, // [25:25] is the sub-list for method output_type
-	25, // [25:25] is the sub-list for method input_type
-	25, // [25:25] is the sub-list for extension type_name
-	25, // [25:25] is the sub-list for extension extendee
-	0,  // [0:25] is the sub-list for field type_name
+	0,  // 25: deputy.mcp.v1.ExplainVulnerabilitiesResult.vulnerabilities:type_name -> deputy.mcp.v1.VulnExplanation
+	0,  // 26: deputy.mcp.v1.ScanPackageResult.vulnerabilities:type_name -> deputy.mcp.v1.VulnExplanation
+	48, // 27: deputy.mcp.v1.ListPolicyEntrypointsResult.entrypoints:type_name -> deputy.policy.v1.EntrypointInfo
+	36, // 28: deputy.mcp.v1.GetRemediationResult.commands:type_name -> deputy.mcp.v1.RemediationCommand
+	39, // 29: deputy.mcp.v1.DiffRefsResult.changes:type_name -> deputy.mcp.v1.DependencyChange
+	0,  // 30: deputy.mcp.v1.DiffRefsResult.vulnerabilities:type_name -> deputy.mcp.v1.VulnExplanation
+	45, // 31: deputy.mcp.v1.DiffRefsResult.vulnerability_summary:type_name -> deputy.mcp.v1.DiffRefsResult.VulnerabilitySummaryEntry
+	40, // 32: deputy.mcp.v1.DiffRefsResult.vulnerability_changes:type_name -> deputy.mcp.v1.DiffVulnChange
+	41, // 33: deputy.mcp.v1.DiffRefsResult.container_summary:type_name -> deputy.mcp.v1.ContainerSummary
+	34, // [34:34] is the sub-list for method output_type
+	34, // [34:34] is the sub-list for method input_type
+	34, // [34:34] is the sub-list for extension type_name
+	34, // [34:34] is the sub-list for extension extendee
+	0,  // [0:34] is the sub-list for field type_name
 }
 
 func init() { file_deputy_mcp_v1_mcp_proto_init() }
@@ -3313,13 +5166,15 @@ func file_deputy_mcp_v1_mcp_proto_init() {
 	if File_deputy_mcp_v1_mcp_proto != nil {
 		return
 	}
+	file_deputy_mcp_v1_mcp_proto_msgTypes[26].OneofWrappers = []any{}
+	file_deputy_mcp_v1_mcp_proto_msgTypes[27].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_deputy_mcp_v1_mcp_proto_rawDesc), len(file_deputy_mcp_v1_mcp_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   28,
+			NumMessages:   46,
 			NumExtensions: 0,
 			NumServices:   0,
 		},
